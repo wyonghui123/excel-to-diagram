@@ -252,3 +252,7 @@ test_helpers/scripts/_probe_*.py
 test_helpers/scripts/_ck*.txt
 # cookie 导出 (含 auth token, 敏感, 严禁入仓)
 test_helpers/_ck*.txt
+# ===== v3.29: test_helpers/ 根下一次性诊断/运维脚本 (2026-08-21) =====
+# 与 v3.28(scripts/ 子目录) 平行; 均为 _ 前缀临时脚本, 不进版本历史
+test_helpers/_*.py
+test_helpers/_*.txt

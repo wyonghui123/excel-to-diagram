@@ -1,0 +1,4192 @@
+version: v20260818_scale_guard
+deploy_id: 20260819_075123_no-git_c07df7
+git:
+  head: no-git
+  branch: feat/annotation-category-filter
+  base_commit: ''
+deployment_type: delta
+prev_version: staging-v20260713_baseline
+files:
+  count: 1045
+  total_size: 54442010
+  entries:
+  - path: frontend_dist_files/index.html
+    sha256: eb8131b784b5a2a1333ca4b321a9ccf628801e9f2724a690a9db453d2ec6fa57
+    size: 1100
+    mode: 0o666
+  - path: meta/check_audit.py
+    sha256: 09a4c2ea313f8ce62892ddc92aba8bcaa60ffd8552bcd3ef12e547daf1b93042
+    size: 602
+    mode: 0o666
+  - path: meta/check_field.py
+    sha256: 96474bc2fec34480a18e0495a76c2fbe1fb1561dac3a47a852e210d4fd0246a9
+    size: 596
+    mode: 0o666
+  - path: meta/error.png
+    sha256: 38a0ad9c39bab36b24c1a2a29e1aa439030c4beae7778859b1fb81b5b9aab4b1
+    size: 57218
+    mode: 0o666
+  - path: meta/fix_timestamp.py
+    sha256: 90f177da3fc7fb966c3cbd07c5c1fc91f4001e16f40a986f0f7714c12eb989c9
+    size: 634
+    mode: 0o666
+  - path: meta/ops_server.py
+    sha256: bbafeb565920fe10a42e926303d1abca17e8af4daa6acbcbeee87aa80e54a3b3
+    size: 20164
+    mode: 0o666
+  - path: meta/requirements.txt
+    sha256: f4aad8b8763ce9cee79096a8a8d1e4f6a5ca295e6a392efc89817ad3a0dec46f
+    size: 112
+    mode: 0o666
+  - path: meta/server.py
+    sha256: 78ebd827f929b1f6c30a0d039d73bb75b39c050593c8654bf90cbdd2a165fd2e
+    size: 38881
+    mode: 0o666
+  - path: meta/test_login.py
+    sha256: e7d90e7ee8aa08ff16cfd6ea584d65fb6341281bbd8c42818ac2dcf8bed9ed5b
+    size: 371
+    mode: 0o666
+  - path: meta/test_output.txt
+    sha256: 43b32a332f09a60a10a92c4a0ccebeb7079dff67013ab090c78f9b52120193e6
+    size: 27872
+    mode: 0o666
+  - path: meta/test_output2.txt
+    sha256: 0d56d45f31126660ecd6dbe79766e28ba90dd78a565d49a68010fd7b703347cd
+    size: 27596
+    mode: 0o666
+  - path: meta/test_semantics.py
+    sha256: 9b8e4dcfe00d7674ae902a14b060c8b3b8244d00abe23ca97127af10f30bf766
+    size: 420
+    mode: 0o666
+  - path: meta/test_view_config.py
+    sha256: dd634eacadf79891bc02dc2787465e922856a5f5782fbf45dfbc5033bb127553
+    size: 892
+    mode: 0o666
+  - path: meta/verify_annotation_filter.js
+    sha256: 131e8f2a8f4f49287d0dbc3e28f6b87b61f4b4751aec0b44774a1971cb4fbb78
+    size: 7455
+    mode: 0o666
+  - path: meta/__init__.py
+    sha256: 84a4c8e0b9d65f08df9d746157e3bcb95a6bafd356f847997f3cec51c0302ddf
+    size: 312
+    mode: 0o666
+  - path: tools/test_lint.py
+    sha256: ea95b0c319423168c0def94fc4a60ddbd923433252ae3cbba1bbb39f4047f55a
+    size: 11124
+    mode: 0o666
+  - path: tools/_build_delta.py
+    sha256: e4d609322d0299a2e172d64ab4ae69122ab7e1e2a8db9f479611ed64ca1b45c3
+    size: 16234
+    mode: 0o666
+  - path: tools/_deploy_delta_staging.py
+    sha256: 479609efb8053771ac65c7ce77afa48e80c00666e2f9df2ec0cf289a74b775a6
+    size: 10345
+    mode: 0o666
+  - path: meta/api/agent_api.py
+    sha256: 635c95fe9b5ba0ec67c4d48f8fd0ea07a18bd0d3a11082bdb395bc03dda4c8ef
+    size: 9121
+    mode: 0o666
+  - path: meta/api/annotation_routes_api.py
+    sha256: a78730ea371917d227100f248026d617dda36412b9eb01590e08112affd9a04d
+    size: 11832
+    mode: 0o666
+  - path: meta/api/API_TEMPLATE.py
+    sha256: ae765a4a06764689a8e167c111a0a6feb9a5d3ea21d35ee44b386219ccfd447b
+    size: 2422
+    mode: 0o666
+  - path: meta/api/association_api.py
+    sha256: a15809e494bbf5d5644cca688d2c580dfd606840286a99e89448a88ae03c3c1d
+    size: 8784
+    mode: 0o666
+  - path: meta/api/audit_api.py
+    sha256: b204ae754edae94c6dfa34df796e25672f8f079ef03a2a9ad658628ca280901d
+    size: 31533
+    mode: 0o666
+  - path: meta/api/audit_management_api.py
+    sha256: cb40408931e43a29441d1f9529ccede2ad00ccc53e93894ad2567442c878d198
+    size: 2067
+    mode: 0o666
+  - path: meta/api/audit_operation_api.py
+    sha256: 319fa3c55381c29f6bd2185af5e0b777ebd6cbc4753344743b3eb29eda4b1eec
+    size: 6591
+    mode: 0o666
+  - path: meta/api/bo_action_api.py
+    sha256: e42624be355caacfbcc6a26165c18457d9b5a482e5d38f540f133bb770e56bb5
+    size: 29659
+    mode: 0o666
+  - path: meta/api/bo_api.py
+    sha256: 1fce8965878cceb440f9bc743e7b189a29aa90f880a26aa6fe8386a8fe8949f5
+    size: 144011
+    mode: 0o666
+  - path: meta/api/bo_api_preview.py
+    sha256: 95bfabf950c65e8b9a5866df8805b6a1f48a091e46fddc916ecdd3ee7fe85ee4
+    size: 17252
+    mode: 0o666
+  - path: meta/api/database_api.py
+    sha256: 1c77192961fa9aca16010a8c29aa2e15129495e5a1196cf32427e2f8a8ef1507
+    size: 7445
+    mode: 0o666
+  - path: meta/api/db_admin_api.py
+    sha256: 121fc64a69bcf5c02dcf1f1245be061bf37e43af8a5dfaed3c02b341260ecb20
+    size: 14635
+    mode: 0o666
+  - path: meta/api/debug_api.py
+    sha256: c056c2a6bc4a3d9da00f24944ebca89029d3a62a3100d94ed3b8caa4268b66a7
+    size: 837
+    mode: 0o666
+  - path: meta/api/decorators.py
+    sha256: 1b8670859bc3c2913bc2910081ae3fa419a76fb096912104d4c9469d4b1c8441
+    size: 1798
+    mode: 0o666
+  - path: meta/api/diagnostics_api.py
+    sha256: 35a95026ffadf75d16a8f394fe70395b942270e075b980d7d0fa734a000936f8
+    size: 7461
+    mode: 0o666
+  - path: meta/api/enum_api.py
+    sha256: 6e1d88077fb96fdb47ceb006edb97c2ee5b4c27543021819ad94c6db4128d1e2
+    size: 42264
+    mode: 0o666
+  - path: meta/api/export_import_api.py
+    sha256: 0946836804b139896bc92c27f5ad5368526971ddabd0e3027a38eb669bf2d0d1
+    size: 34348
+    mode: 0o666
+  - path: meta/api/filter_variant_api.py
+    sha256: 894e3fc1add8970375b2909ab8040e9fd6420d8cf0876e4c1c2b429641cfb9fd
+    size: 9214
+    mode: 0o666
+  - path: meta/api/intent_api.py
+    sha256: c1b9811e16e2e97fbc85fbcbb5e558ff928162e419b1eea69d6c3c78b648af61
+    size: 9796
+    mode: 0o666
+  - path: meta/api/key_template_api.py
+    sha256: bb7d8d7067e98106e66fb3d30eb7ac1c1344f8dc64385db1a375054ca5f2bc30
+    size: 11295
+    mode: 0o666
+  - path: meta/api/m8_api.py
+    sha256: 4cfd17e2e96d239751e99e7246740c60d7b2c2bd3b324954a28a77ae0e5aa0ff
+    size: 13273
+    mode: 0o666
+  - path: meta/api/management_dimension_api.py
+    sha256: 9633e2deb81229d1b8895d8de22ea8cbd530c7d958d1d26fcfa826bdcec37df5
+    size: 29059
+    mode: 0o666
+  - path: meta/api/manage_api.py
+    sha256: 5beb7a874dbf89e49e1b1df69e99581ea74cd3444dc4d5208efd2d0441dccbfe
+    size: 56083
+    mode: 0o666
+  - path: meta/api/meta_api.py
+    sha256: a45643390d2aed7c72131f0a151cbca9807f386c8259f8981f45156af59aa1e5
+    size: 35858
+    mode: 0o666
+  - path: meta/api/meta_utility_routes_api.py
+    sha256: 69578154ead3019c9770bfb33e6ba56492151fc95da39ee11c1b971552a72728
+    size: 5131
+    mode: 0o666
+  - path: meta/api/metrics_api.py
+    sha256: 3c1bd363db0a54297ada8ce97cd607bde4c197287714495e59b92099ca02f354
+    size: 3591
+    mode: 0o666
+  - path: meta/api/notification_api.py
+    sha256: 844abbfd36bfd4c422d349b9fb70e32f7d19fbb492d09c16fcf635e0d67645c0
+    size: 15889
+    mode: 0o666
+  - path: meta/api/object_identity_api.py
+    sha256: 23f690c85c54953bdfb461895a4792fba5b35ed34eb9fccc843a120edd5465fd
+    size: 7846
+    mode: 0o666
+  - path: meta/api/overlap_api.py
+    sha256: 7516c0e16f3b3631fbb36cffe3197c0d577f60bd175b2960a3cac08dc6d6c8c1
+    size: 3138
+    mode: 0o666
+  - path: meta/api/owner_transfer_api.py
+    sha256: 8b5addf7cf192c3128f46ef05c89b74cc3795b88e93c9356521d7a403c4387d1
+    size: 7155
+    mode: 0o666
+  - path: meta/api/query_api.py
+    sha256: 7a53667ec48c01d723f2372442f926d01cbe40bf91b0e16b7342d521db95bb6f
+    size: 3961
+    mode: 0o666
+  - path: meta/api/role_api.py
+    sha256: e958b0a5e707b40ae12d9823b93e5e4501579ad03ef06779601dac62a86938ef
+    size: 21709
+    mode: 0o666
+  - path: meta/api/schema_api.py
+    sha256: 1fbbf0998c43804d0d0a628b66753944bbd192945a23ca7771bffefb01e7ecfe
+    size: 16201
+    mode: 0o666
+  - path: meta/api/SCHEMA_API_README.md
+    sha256: 715c4e7bb0249c37c2cd177a8d002b1cc4e7cb133a3092360b617bdcc419fd3a
+    size: 2760
+    mode: 0o666
+  - path: meta/api/special_routes_api.py
+    sha256: 308f8d9f4b45b19a91b71ade927820d7cc4ef87508b1a1822c8c8ae5c1f4aaef
+    size: 31500
+    mode: 0o666
+  - path: meta/api/stats_api.py
+    sha256: f7d993c739e9ca877d15268905d3858ed80e5a37c47ed5a41a3a94995245c198
+    size: 18474
+    mode: 0o666
+  - path: meta/api/task_api.py
+    sha256: 04b7a8f74ea6613746cdd88b7c15bec702f08c15176262181e49d575b7381107
+    size: 4375
+    mode: 0o666
+  - path: meta/api/test_api.py
+    sha256: a13271fc63a6868f4a7c5c880375b116e2770790a99cbd7dedae9cee83f9096a
+    size: 744
+    mode: 0o666
+  - path: meta/api/v2_API_README.md
+    sha256: dad425a08ffcff232099a5d02558631f432a56f4d01c7447d44276952187cd27
+    size: 9564
+    mode: 0o666
+  - path: meta/api/value_help_api.py
+    sha256: 4038b14cdc7bff094bfb5966e1fe0ea059d1209445a8c9f1895d7aaf1d7dfff0
+    size: 11428
+    mode: 0o666
+  - path: meta/api/_audit_helper.py
+    sha256: 0b3e1532da42df1117a30c019e1574de6cea4ea1303ab5087106ca402beebe4d
+    size: 10068
+    mode: 0o666
+  - path: meta/api/_dual_route.py
+    sha256: 7fc006597618be1be96cb675e6a27c3a2ac5ba5d388d1e5f34ccf5b5009315a4
+    size: 1171
+    mode: 0o666
+  - path: meta/api/_messages.py
+    sha256: 71bc3ea97259019bbd547d1535ffa303ff623caa9a91020a455cdc013fcc13a5
+    size: 5046
+    mode: 0o666
+  - path: meta/api/_problem_details.py
+    sha256: b8f46ce5988912640614ef123530258abcccf7731081e0c76f1a5085f1441bb4
+    size: 9069
+    mode: 0o666
+  - path: meta/core/action_constants.py
+    sha256: 59832ddec1966d3b46fc7a6529509760d03fd14f5de942c9393a73582e6eb482
+    size: 680
+    mode: 0o666
+  - path: meta/core/action_context.py
+    sha256: 9ae10dbd1aa9f1ad11fc8afa63f9f7c4a609629d64e8867bee91024be3478d00
+    size: 5717
+    mode: 0o666
+  - path: meta/core/action_dispatcher.py
+    sha256: 769d982ed52bc4c633fd0f09ee0108744913451dd870114cc89973f9c089b4c7
+    size: 8425
+    mode: 0o666
+  - path: meta/core/action_executor.py
+    sha256: 2f3a2c1626cb9a02771cd2efa7acbe8d3fb64093e7fd8b4fbd2976e985b3b269
+    size: 130453
+    mode: 0o666
+  - path: meta/core/action_models.py
+    sha256: adac868d11cce996def800cdce230800cb56cdf2bad820c3a098011a6c68ee66
+    size: 3002
+    mode: 0o666
+  - path: meta/core/aggregate_manager.py
+    sha256: 96b8a1fdacc5f332bb5894fb02d59e9028638c60c8ee06569bd0197de868a9c8
+    size: 15702
+    mode: 0o666
+  - path: meta/core/aggregate_refresh_handler.py
+    sha256: 144fdf831839ba2f17c4e68f3a9d5156443e95484de77e9b26cec7b80ab638df
+    size: 2687
+    mode: 0o666
+  - path: meta/core/analytical_engine.py
+    sha256: 00a201e44f345712b482f00c75626cfe4bb43a4b9881d3d8a7b556f0e58397ea
+    size: 25079
+    mode: 0o666
+  - path: meta/core/analytics_query_builder.py
+    sha256: d3eacce83706329b8ba656a8087b85d5b70bf20f61231d8e289b6112ddbb8f7b
+    size: 11372
+    mode: 0o666
+  - path: meta/core/aspect_loader.py
+    sha256: cf24c5390d2fe2f49a59948d7f8ad272717b20a46a5020cbe6122b8e5b428a49
+    size: 3898
+    mode: 0o666
+  - path: meta/core/association_audit.py
+    sha256: 0d5d1fc0bcb631f90d5101f7d6832e29600f10fe165597e5bf683d99b40f5839
+    size: 1258
+    mode: 0o666
+  - path: meta/core/association_engine.py
+    sha256: d641e54506411b6ca83a2878414c207cbed66428abf3b8c6fc0f7b2a86ad63d6
+    size: 77530
+    mode: 0o666
+  - path: meta/core/association_expander.py
+    sha256: 12dd49a670a89f4aadc696e95eb63c29d02a683e9035e29720337d2d6ffa3e36
+    size: 9748
+    mode: 0o666
+  - path: meta/core/async_interceptor_engine.py
+    sha256: de8b10f7f42f2686b941c9dc3c1ab03086f592cacaf4a7b95cad55cf622bbdee
+    size: 8480
+    mode: 0o666
+  - path: meta/core/audit_constants.py
+    sha256: 7fe88e5b10ad3a3da8bbab4f85a6e4e2334245b3ce431ebd15c4265fcc3d6971
+    size: 8081
+    mode: 0o666
+  - path: meta/core/audit_derived_fields.py
+    sha256: 78585cce3b25b115b971b19ece042f4279250ad78616a62a5f54043124ed3280
+    size: 7529
+    mode: 0o666
+  - path: meta/core/bo_action_registry.py
+    sha256: d9e96a97229d0c61ad9c6937495540e79cfd8a43d147f63e1f81ae99e24e3440
+    size: 8658
+    mode: 0o666
+  - path: meta/core/bo_engine.py
+    sha256: f3933ae3dcf81f107dfe0c1d18d3fd1c34c9329e9de3c0b69d280b4e4a778f22
+    size: 3176
+    mode: 0o666
+  - path: meta/core/bo_framework.py
+    sha256: 915e40d8b139f0ad11c47953b587764c388c86c0e848f676648253f9e7893ecc
+    size: 26254
+    mode: 0o666
+  - path: meta/core/bo_schema_loader.py
+    sha256: 937c0f2837a5070edfc77dbfc93a4d6fe9aa4bde041ac543d37358ff9f9abe8d
+    size: 7595
+    mode: 0o666
+  - path: meta/core/bo_yaml_cache.py
+    sha256: a71452f4ce11c0d612569a219fff1e55e2e64eaa00528308d8f338c7c02926e1
+    size: 5571
+    mode: 0o666
+  - path: meta/core/cache.py
+    sha256: 25688dce41f2bc47c043339c13d7b20d28f6d7c0a219a959b6be7fdf18787cf1
+    size: 3110
+    mode: 0o666
+  - path: meta/core/cdc_bus.py
+    sha256: 40405ee40bc43ae3b079a56c6e896dd262a04cc85fe9cec0f78fb980079d8eb5
+    size: 5762
+    mode: 0o666
+  - path: meta/core/computed_field_query.py
+    sha256: 105a97edf982c6d9fb40aaefbb4d8cae5184bb82121274a162e642a69e3fb420
+    size: 14524
+    mode: 0o666
+  - path: meta/core/condition_evaluator.py
+    sha256: 8734b4832d80edc1191654b93dc46c5082ebfb84d079a53602b1b740786c02e3
+    size: 3765
+    mode: 0o666
+  - path: meta/core/consistency_guard.py
+    sha256: 5e537a9a28de41882992326667cc3a2a35769978b6c90715f0f64bd8593c98b4
+    size: 16635
+    mode: 0o666
+  - path: meta/core/constraint_engine.py
+    sha256: b914ae977a0ee8c9312567b5f42139f5a131faab973037f732b2eaa484c56212
+    size: 10317
+    mode: 0o666
+  - path: meta/core/cron_parser.py
+    sha256: d28dbff12379fcba7ccaa8a22a01377a33772137d212325db7c68dd58fc7265d
+    size: 3242
+    mode: 0o666
+  - path: meta/core/cross_object_chain.py
+    sha256: 81b777cba6c84ffc17a3facfc7b3aeff5b99224afde144efc381634721dbe477
+    size: 11657
+    mode: 0o666
+  - path: meta/core/cross_object_resolver.py
+    sha256: 0750e314752495128c32ee9f53a8b3be33f581eb86ff826548db2a073eda6348
+    size: 7863
+    mode: 0o666
+  - path: meta/core/datasource.py
+    sha256: a7a3af837c880c4f1b15c2b56e4f5cc391df230f258e646e86ef576abc67f7f1
+    size: 12824
+    mode: 0o666
+  - path: meta/core/db_health_monitor.py
+    sha256: 1f4e47a1d44e063fd719c23b77de0fb8f0ba65c4408233c43d6be90ce842b9a5
+    size: 8788
+    mode: 0o666
+  - path: meta/core/deep_insert_engine.py
+    sha256: ba251924c82243cc8a90c93a5de1ed2efc1c181139d1b64f14bc40f6c25fb30a
+    size: 13286
+    mode: 0o666
+  - path: meta/core/deep_mutation_engine.py
+    sha256: caba280fd841fb925e03dfe88419e19bf91b5e7dcc40f5e345e5501fba1d04cb
+    size: 16496
+    mode: 0o666
+  - path: meta/core/derivation_executor.py
+    sha256: 6672f499a471aba9974f4f50b2ea483be23c4c95610cf6996fe7d178da0ed82b
+    size: 23209
+    mode: 0o666
+  - path: meta/core/diagnostics.py
+    sha256: c374df1e170eae64b52d184ed641d03f2a58b329cbe1839c78e322180fba7540
+    size: 1365
+    mode: 0o666
+  - path: meta/core/dimension_object_mapping_loader.py
+    sha256: a6983d152243db53fc951a326ef61d12dcb552b01e729dc8226d6af6808f9dcf
+    size: 8716
+    mode: 0o666
+  - path: meta/core/dim_scope_overlap_detector.py
+    sha256: 924dddf2543789bd6834275ee240ab826a3c1049bb69f04f60559aa92ee5e7b6
+    size: 10147
+    mode: 0o666
+  - path: meta/core/enrichment_engine.py
+    sha256: 6c96fe46e3daa8eb28dcb1f60684c6c8f9fd9da7a85863ad6b68e512fe85501a
+    size: 23561
+    mode: 0o666
+  - path: meta/core/enrich_utils.py
+    sha256: 83ec38a6577f676cca3bb411cdc3a905ac43e13753717c7fc5828a56ed7f9dcd
+    size: 1325
+    mode: 0o666
+  - path: meta/core/enum_resolver.py
+    sha256: 3acb68119abd79d52db4f6d99789248e76c197a4e08fdd4eea52512d46200a77
+    size: 5767
+    mode: 0o666
+  - path: meta/core/error_codes.py
+    sha256: 949fccb939d49b89a672f88b0bbd40e0bbd07e90edbf62bfd83947db02881dd3
+    size: 6574
+    mode: 0o666
+  - path: meta/core/error_fix_hints.py
+    sha256: 446e645e7d082136b344a53e054ae769300bc177cfb18c57a869d4e068fa2c7f
+    size: 6211
+    mode: 0o666
+  - path: meta/core/etag_middleware.py
+    sha256: d102415096731244ffe935c9fd37aee6df95cb71437c1a81ccd76a3adf941fed
+    size: 2185
+    mode: 0o666
+  - path: meta/core/exceptions.py
+    sha256: d85a1c913d0f228e6e57439c9013e83b72ff50320bfecacfd4995f244e4ed0a0
+    size: 590
+    mode: 0o666
+  - path: meta/core/feature_flags.py
+    sha256: 4999f44ff95b42efb2db63a43311f312004dbb4a00b9f3ed1473d391c0016259
+    size: 2573
+    mode: 0o666
+  - path: meta/core/formula_functions.py
+    sha256: 6a0c77f1572b9dfe4e6264da0ccea221c3a18e386e4353ec6a6f7412fd574a42
+    size: 14563
+    mode: 0o666
+  - path: meta/core/incremental_index_strategy.py
+    sha256: 4dcd28d490e0f42c10c9bbc028a6c741465545e7a976551a604751a548f0353b
+    size: 12128
+    mode: 0o666
+  - path: meta/core/index_management_service.py
+    sha256: 21302b6a7dea00e6d3c3841922d2fda64209133688be227c99bf7c0769cfd178
+    size: 14723
+    mode: 0o666
+  - path: meta/core/index_monitor.py
+    sha256: 216f06c6df0fda732c4a3fbc8e37dd62c002bdf889fd5996c0aa39bae904fd98
+    size: 11787
+    mode: 0o666
+  - path: meta/core/index_rule_engine.py
+    sha256: 647b36b4a699425a6a93a6f4fc05a2533fae2dfc512587330d25b2f8e4e8a504
+    size: 25561
+    mode: 0o666
+  - path: meta/core/intent_resolver.py
+    sha256: f9ba06ebbad1e7554f2394abf10410de8ec0ee54cd6d342e6542eb60923be759
+    size: 17604
+    mode: 0o666
+  - path: meta/core/key_template_engine.py
+    sha256: d5dcafca1cdfe1bf8f5802984aa55c9c45da50284139f6df84d45fb74c57515a
+    size: 26986
+    mode: 0o666
+  - path: meta/core/m8_utils.py
+    sha256: 8c794f6841cb302a5da02e4fe0e033bce83fc42fe64eff0f32c9f3b850d17b56
+    size: 6099
+    mode: 0o666
+  - path: meta/core/menu_bo_linker.py
+    sha256: 3478dec8c805afa14fa694a407c67a6c89b9f702610b2d66d5620f6ed6dcb64d
+    size: 4502
+    mode: 0o666
+  - path: meta/core/metadata_driven_validator.py
+    sha256: bbc3ccf96c300a479cefceb93c7156416fc874f7d3154da26e103bd5b5460e65
+    size: 26131
+    mode: 0o666
+  - path: meta/core/metadata_resolver.py
+    sha256: 6c45aa06fcda56c5fd24170a44ffbbf6c1ed1adcd228dc14848b6bd22e12a9a5
+    size: 9198
+    mode: 0o666
+  - path: meta/core/metadata_validator.py
+    sha256: c4d6354b536a73e20ff50ab02f5e9f1c134ac1ddcf0f7d4c03ba664352665327
+    size: 23267
+    mode: 0o666
+  - path: meta/core/metrics_store.py
+    sha256: 83bc6968c030672223257201fc99ea07acd46bfeec19f290b49a164a635389f7
+    size: 3281
+    mode: 0o666
+  - path: meta/core/migration_runner.py
+    sha256: 73a2f285da268c841f0325bbc635fcbf3c9622b8b67a538faddb2a486fbcd852
+    size: 7367
+    mode: 0o666
+  - path: meta/core/models.py
+    sha256: 802b533eb49840bc9c72d10e062f409198db2e1f817a9138cae8c5d54ecae26b
+    size: 48834
+    mode: 0o666
+  - path: meta/core/models_annotations.py
+    sha256: f0147c53a672722261ba4cd57b57ad8947a5f2dd1c50c0e33bf42f94597377a1
+    size: 11355
+    mode: 0o666
+  - path: meta/core/models_enums.py
+    sha256: 5e4b70cadae32d7511ef2610e8829316647a7877865cbbac8c42a6388726eccc
+    size: 6048
+    mode: 0o666
+  - path: meta/core/models_ui_config.py
+    sha256: 2e59b0d3a23146b0a29eadd9d8c804ee321fd2bca2c620b1fc932c41949adf79
+    size: 6321
+    mode: 0o666
+  - path: meta/core/models_value_help.py
+    sha256: 30373bd42054c37d7727f9e28d63f32e3cc0c7a575cdabd669c055163b3d38ef
+    size: 4006
+    mode: 0o666
+  - path: meta/core/model_utils.py
+    sha256: 228e74905694e06b5d241361affc33d090144effdcb67daefbd765191c67b2ea
+    size: 4648
+    mode: 0o666
+  - path: meta/core/nested_where_dsl.py
+    sha256: 49e7a781fce16d2daedab5fa50643409bd84ca6cc4e684714a593f3ef530577c
+    size: 10311
+    mode: 0o666
+  - path: meta/core/query_allow_list.py
+    sha256: 0d0cfb393e7002418280dd5953c6517af8a4ab1f3676239fe4131ee2bd21496f
+    size: 7415
+    mode: 0o666
+  - path: meta/core/query_builder.py
+    sha256: d648085bc3528cd4fcc84f1fbd56842e99e1a0c27c465ac20c32508fe0811318
+    size: 24950
+    mode: 0o666
+  - path: meta/core/query_field_providers.py
+    sha256: 6efc4ecd6ce956308584be05fcf3a32d8f1175c3f6662f828c7d5ad37fe691f0
+    size: 7610
+    mode: 0o666
+  - path: meta/core/query_plan_cache.py
+    sha256: eca729beb980ef6b18124d6b3b12bc248449c49fe0a367faab6894b3903fd727
+    size: 4081
+    mode: 0o666
+  - path: meta/core/redundancy_registry.py
+    sha256: aa9289fc23298d8db0e7b336a1794ccc917b692a8d3d00bb259d5225537c427d
+    size: 15293
+    mode: 0o666
+  - path: meta/core/rule_chain.py
+    sha256: 74540ce448d9b2e5dc355293652f372d34504a9f67aeff371ecdd80537423d72
+    size: 32685
+    mode: 0o666
+  - path: meta/core/rule_executor.py
+    sha256: edaba0cef827d283a7da0afe0c493305c4a88ad8851a61ef750e80fc20a998aa
+    size: 46570
+    mode: 0o666
+  - path: meta/core/runtime_dimension_resolver.py
+    sha256: 4ef974bbc97e8d754ab8f3312ce0dafabd8cf8219f728feb5004958456d17d20
+    size: 20350
+    mode: 0o666
+  - path: meta/core/safe_expr_evaluator.py
+    sha256: 922090cb69b26b7f680b280f41187b27a6b5c9b8034c832ae3d598c602ca9869
+    size: 8846
+    mode: 0o666
+  - path: meta/core/schema_generator.py
+    sha256: 8485694cb6e7ff6338a29b9de48a6e864256e11075734c43f08518ed6e34ab15
+    size: 18061
+    mode: 0o666
+  - path: meta/core/schema_introspector.py
+    sha256: 6b3262e6f2a34abfc2382ba0ad5dd8a6ac53d350bfe45b675a9637114a800d59
+    size: 7317
+    mode: 0o666
+  - path: meta/core/scope_evaluator.py
+    sha256: 7ed314635b870c7aa385fb20aaa172b71ea460cc18c5f73a6939a19d518e8c52
+    size: 6032
+    mode: 0o666
+  - path: meta/core/service_executor.py
+    sha256: 26064d15ac33aa3cdca757446cb203ee7e3557153959cf0bcd0209532ffb1ba2
+    size: 6411
+    mode: 0o666
+  - path: meta/core/sql_adapters.py
+    sha256: 0e1b0c7bce7afbf3e39b4e73def6d3ab3c09a57d12e59f51a98ff88502c93604
+    size: 50755
+    mode: 0o666
+  - path: meta/core/sql_adapters.py.bak.begin-fix
+    sha256: 6c898a5d07cc155be5683478b9341cdb88e7563731d351e7a1a8719848fee1ca
+    size: 48833
+    mode: 0o666
+  - path: meta/core/sql_checkpoint_manager.py
+    sha256: c3f865b72c993da157fb1c8e62242c59429ff781da1604194dcab9f530ca561b
+    size: 7957
+    mode: 0o666
+  - path: meta/core/sql_config.py
+    sha256: 3c003236748bb4425410381c3c7edf5d6f12f64632bda8b18a1ca18e933dda87
+    size: 3779
+    mode: 0o666
+  - path: meta/core/sql_maintenance_scheduler.py
+    sha256: 49fdb3ce28f96fd78b2340954d06b183c7dff7614231fd7f979450a43339cdab
+    size: 5912
+    mode: 0o666
+  - path: meta/core/sql_monitor.py
+    sha256: da9b3578356451725eba9a7a6e4ffcfa89d5019a4485bd743258dc9159f9e3b9
+    size: 8185
+    mode: 0o666
+  - path: meta/core/sql_prometheus_exporter.py
+    sha256: 961b8a3a8094f91a4e4d98806d5600aad54487ea51684efcca39349e45a78c7b
+    size: 8862
+    mode: 0o666
+  - path: meta/core/sql_slow_query_logger.py
+    sha256: b8f073ac18f4a8dbd12790bff3f2349531467b810332be3fa9c141e6018a91bd
+    size: 5667
+    mode: 0o666
+  - path: meta/core/sql_utils.py
+    sha256: 7e7de0541b10fa9fe56d9ef210b9ed25f2f19e61ade9367643596cd80feb4569
+    size: 1219
+    mode: 0o666
+  - path: meta/core/sql_write_queue.py
+    sha256: b1bc88ee6790bf2614433cd851890dfed8b2f8d2b0d8b03bdedf3365d0d07838
+    size: 14641
+    mode: 0o666
+  - path: meta/core/standard_action_loader.py
+    sha256: 87359f904aaa231ffebd0f62fe02ab73e0255fc92007080994724b8484264249
+    size: 2079
+    mode: 0o666
+  - path: meta/core/startup_checks.py
+    sha256: beb8e635364a77c8e8d0648c9831e4a3280997fa95da9d8d4a5ba14274be9ab1
+    size: 4646
+    mode: 0o666
+  - path: meta/core/structured_logger.py
+    sha256: 85ecb2537a50fc0ba1e12db2b307135c3ede91d8bcd5ff21c6f01cdcfb6586cc
+    size: 2488
+    mode: 0o666
+  - path: meta/core/table_name_validator.py
+    sha256: be485afb59fce40cdc0db32ddadb002be0720346e4637e6d5759bb1985cc1e77
+    size: 2437
+    mode: 0o666
+  - path: meta/core/task_handler.py
+    sha256: e055040dd76e1c940a1d8ba41eb01efe5f3f3ccaab95dcb421dc6cbdae84ad79
+    size: 1147
+    mode: 0o666
+  - path: meta/core/task_queue_manager.py
+    sha256: 066909ef7ccd233c6d70825d90d654cbf6de83f5ac46382bcb091d5fd3b88500
+    size: 4947
+    mode: 0o666
+  - path: meta/core/task_scheduler.py
+    sha256: 7693dddc3fb0deaf249f5fc7ff5bd2d6d75c6dc8c96c9a175f17802f119b6b57
+    size: 11643
+    mode: 0o666
+  - path: meta/core/trace_id.py
+    sha256: 0cace31e5d841979afbb0b2753ea3f01ae27c538bfb40defefcca542f275f0b3
+    size: 1217
+    mode: 0o666
+  - path: meta/core/transaction_verifier.py
+    sha256: 0c87eb1be61f232bdc68efebf7014d83e88da13e6e7dd2ad511a1d2ff1196123
+    size: 5145
+    mode: 0o666
+  - path: meta/core/unified_mutation_facade.py
+    sha256: bfebc40571ab4990cf70c000513ef4fe0c40ddcfe36a5702159df96c380a9923
+    size: 9676
+    mode: 0o666
+  - path: meta/core/unified_query_facade.py
+    sha256: 156e41e6bb759cfa62a890c136f695d9d0a6c0958c4aa55f28a5f82a4a324aaa
+    size: 25267
+    mode: 0o666
+  - path: meta/core/unified_query_protocol.py
+    sha256: 036ed1a1d3f3c1f364cf9acdb5dd5883a752400022fe5fffc0c5e610bbe3ca7e
+    size: 12347
+    mode: 0o666
+  - path: meta/core/unit_of_work.py
+    sha256: 231c10f0abd6048afa4e1e0e16cbe67ea3ad714d194d7b2e6390da40d8a8f4a7
+    size: 8069
+    mode: 0o666
+  - path: meta/core/validation_messages.py
+    sha256: 86db0d8f9df4308fabcd97fb06a5dfefb27e46c7b47bd2ba16da8e85c55ec419
+    size: 4561
+    mode: 0o666
+  - path: meta/core/value_help_accessor.py
+    sha256: f24dc58e47200df456a8880ef855ab21b4f7e52fe8740b7dd1ba7f642cafba03
+    size: 1095
+    mode: 0o666
+  - path: meta/core/value_help_providers.py
+    sha256: f7dc13157d4d6131dbe5b0e0f26cdc97a8afaf0ca88a576af5e1e040b15e3b21
+    size: 13592
+    mode: 0o666
+  - path: meta/core/virtual_field_transform.py
+    sha256: ee4a64ba0ea06a2cef1402cf65ea0fe1bc7a1d7a9b4db4416c2a8170f1e1b0a1
+    size: 13360
+    mode: 0o666
+  - path: meta/core/yaml_loader.py
+    sha256: 9a38d5a976d3fb59d5fbcdd1afa0b1f3f49ea425b4341935b642563a2022d7ca
+    size: 87248
+    mode: 0o666
+  - path: meta/core/_computed_count_clause.py
+    sha256: 6b4df428e3b8c32578903dc43deddce47eb7337454c7a19ea143a315a976cfd0
+    size: 13825
+    mode: 0o666
+  - path: meta/core/_descendant_subquery.py
+    sha256: d415c83afc964644e8d0586c98329d71300f9ba49ba75e34b5c4eb7b092a874a
+    size: 4371
+    mode: 0o666
+  - path: meta/core/__init__.py
+    sha256: f07601e44dcdc771e2d1f358f6e54db90b021e8d10c3644b4030f04354659e2b
+    size: 555
+    mode: 0o666
+  - path: meta/database/migration_ssot_updated_at.sql
+    sha256: 517779ff42128e3639412469d9f1f5c62663e68f9bb888cfb5f9919799a7426c
+    size: 1454
+    mode: 0o666
+  - path: meta/database/run_ssot_migration.py
+    sha256: a0ca3d50f5917c92aeca3fc106e3c2c7914278faab199005d685e96f13d70fec
+    size: 5826
+    mode: 0o666
+  - path: meta/dev/add_missing_data.py
+    sha256: 90f0485a1bbc832998a891ac74e977e5962628176accfe50bbdaaa15489656c6
+    size: 1113
+    mode: 0o666
+  - path: meta/dev/add_product1.py
+    sha256: d0bf8ea712d21623ba04bf930ddf9f1f140ff098b87487073b84f71791b836a0
+    size: 756
+    mode: 0o666
+  - path: meta/dev/add_test_data_v2.py
+    sha256: 16b0eeb985a8a50b0f07a30ef3ea453d9b37dfbb35c734690342a36084180e74
+    size: 1143
+    mode: 0o666
+  - path: meta/dev/add_v1_data.py
+    sha256: 9c98a839a4d29b4cc010918c35dcdf680dfac84b3dcfe4b801dc426899a9887f
+    size: 2051
+    mode: 0o666
+  - path: meta/dev/add_version1.py
+    sha256: cf6bba979e338bb5f4cc0f7ba2ee60664bd9856e7c930243af596893a4f225b7
+    size: 1067
+    mode: 0o666
+  - path: meta/dev/analyze_tests.py
+    sha256: 64785a0cce0120507806991309a4964c82e68cb420c24555f9b8d2895bc45ad2
+    size: 7509
+    mode: 0o666
+  - path: meta/dev/batch_update_db_path.py
+    sha256: 480d9095ad4c2d9531142c3ff627bd35d13d58e6381458240d6474dbd514ca24
+    size: 5219
+    mode: 0o666
+  - path: meta/dev/check_products.py
+    sha256: c9516fdac18e4dd3376f1ec5ba44873ccd8fa157b69dd0f875be27165aefebea
+    size: 417
+    mode: 0o666
+  - path: meta/dev/debug_condition.py
+    sha256: b63d9374e573d8e3141520665516ec416d44b4707bfc455ccfde48c3fd57a154
+    size: 1250
+    mode: 0o666
+  - path: meta/dev/debug_field.py
+    sha256: f22edfc45108ca2f81da76c5f3d20231ff4ae2bdf130e3e0f10f79fd80cd0c40
+    size: 1954
+    mode: 0o666
+  - path: meta/dev/debug_resolve.py
+    sha256: c54f27fc2f660910b212bdd4700781df5eb1be4fb43b3b95eaad65841bc5af35
+    size: 1691
+    mode: 0o666
+  - path: meta/dev/debug_resolve2.py
+    sha256: 7bbad1c593fb887a395fca981dbd262cb79517aae1e518e84af9e7d4069b2fe1
+    size: 1488
+    mode: 0o666
+  - path: meta/dev/debug_semantics.py
+    sha256: c6d0aa496e98a22105e1ec94c7523872e6cf5d96b71fcedd09c011e646b60660
+    size: 1290
+    mode: 0o666
+  - path: meta/dev/fix_test_paths.py
+    sha256: be3ab3bf35d79f39673caffa6fcd73b74cb83c3605988def4634bc92b16c364e
+    size: 809
+    mode: 0o666
+  - path: meta/dev/init_test_data.py
+    sha256: 6d8368115f3db95712ef5356272ac4aa0abb9c3f3f0ab9166f6bb92e4335b3ee
+    size: 4024
+    mode: 0o666
+  - path: meta/dev/pinpoint_root_cause.py
+    sha256: ae44b9007d1eb34c171751ccf62f37cfd011435cd01f111c970be31cc405014c
+    size: 2761
+    mode: 0o666
+  - path: meta/dev/quick_replace.py
+    sha256: 2af3a23db37a58dec69c906b1d47924b72a9a787e44ec5323b4b30a718d9bd17
+    size: 1764
+    mode: 0o666
+  - path: meta/dev/quick_replace_debug.py
+    sha256: 08187bedd2c2e064fd1651d50c131e12b85801b2d29328e3e1fc636f9527fd5e
+    size: 1775
+    mode: 0o666
+  - path: meta/dev/run_all_tests.py
+    sha256: f519be5b6a88ede5fd8e58e2c21ae2dff1d721f72ff8114492df377340cd44dd
+    size: 2614
+    mode: 0o666
+  - path: meta/dev/show_db_structure.py
+    sha256: 84edc657a6bee6b9baddc826dc6b6c77e1c5f8d28151268c176e82bac732f298
+    size: 2612
+    mode: 0o666
+  - path: meta/docs/BUG_FIX_RECORD_20260630.md
+    sha256: bd33988e534b8b1e5ad815d663d35b48fdb115ec2389a868ea548f3c26763aed
+    size: 4917
+    mode: 0o666
+  - path: meta/docs/CHANGE_EVENT_RETENTION.md
+    sha256: 0d047f9fecee07f9a576a0c6cfd073708f8a9ca7f98769cf6550efee1a5cd3db
+    size: 6088
+    mode: 0o666
+  - path: meta/docs/DATA_PERMISSION_INHERITANCE.md
+    sha256: 25b2f979673692864ae9866257248ecec602b094b2c6fa35c9109885a920a8a8
+    size: 6274
+    mode: 0o666
+  - path: meta/docs/DIMENSION_RULES.md
+    sha256: dd0c2cf1797cfe361cdaa78cd37eeb78d8530a92423841a5174f55fd00b19e82
+    size: 6358
+    mode: 0o666
+  - path: meta/docs/README.md
+    sha256: 16a6ced9bbdd87b9f872d64667290e1fd516d58e931cd243d0b71a6fc97dfe53
+    size: 3995
+    mode: 0o666
+  - path: meta/docs/SCHED_CRONTAB_RULES.md
+    sha256: a089849ac67a7498a7e1ee0158342d6249b957a40db590668b839e6ffed21d62
+    size: 6385
+    mode: 0o666
+  - path: meta/docs/SCHEMA_VERSION_RULES.md
+    sha256: 9838a7bcc39aa03b689a3f7d4f258a00fc2d9c8f302cd5bbe59f33bbaa1474ed
+    size: 7646
+    mode: 0o666
+  - path: meta/docs/WORKFLOW_STATE_MACHINE.md
+    sha256: 19285a4d74a61b3e94e842aa5485b232ef4e3286778ab89d8aa0fb19d1b751ef
+    size: 8057
+    mode: 0o666
+  - path: meta/enums/log_category.py
+    sha256: 632ff8f01f71d4ac3f44559c791fb659fafb45abcd62ec3d66e9e2fef0e9f16c
+    size: 2922
+    mode: 0o666
+  - path: meta/enums/log_level.py
+    sha256: 8c74ad68f0220258a252b4cf8a84e90dc5db381fa8ea1999a481e3c5dc3eb4c9
+    size: 3933
+    mode: 0o666
+  - path: meta/enums/__init__.py
+    sha256: 76a6c0c7c0c7b5ea1639c6f238a599c7f85c41225cffd5c24f08c3f4ada8677c
+    size: 349
+    mode: 0o666
+  - path: meta/graphql/schema.graphql
+    sha256: 703320d257f483e2b0f78ac367262566e172ea495eb5d925880f9d9e9ccb6ecb
+    size: 4977
+    mode: 0o666
+  - path: meta/graphql/__init__.py
+    sha256: 122973bf8c4043768605ed2b320048c5cb2831c1badd023465ddad61b3ccb1cc
+    size: 18377
+    mode: 0o666
+  - path: meta/handlers/audit_handlers.py
+    sha256: 53676da97d4197cf24080722aaada3bbb33f61b56d0874181b7d14b06dcf043a
+    size: 3224
+    mode: 0o666
+  - path: meta/handlers/import_handlers.py
+    sha256: 1faf5b8901f0750ed759b149a04b54a0eba9265d2e822c26180eefcd7f9daab8
+    size: 1002
+    mode: 0o666
+  - path: meta/handlers/system_handlers.py
+    sha256: 5f28785e539ad1283058d310626eec84b1ed6bd8b69f42d3f1e57d3b4789c359
+    size: 1750
+    mode: 0o666
+  - path: meta/handlers/__init__.py
+    sha256: ce469a75403b71c2f55c31f38496832df567cb29c4a50708ff09ff98f9bf6c9c
+    size: 104
+    mode: 0o666
+  - path: meta/migrations/2026_06_28_bug_v031_sm_domain_id_trigger.sql
+    sha256: 790139ef45c6a55e70705e69824b081cf073aa2c5c41ec280ac8ba269ac7879a
+    size: 8314
+    mode: 0o666
+  - path: meta/migrations/add_change_notification_tables.sql
+    sha256: 4a7272e05190a4f8353bbc697d7c56a374ed28c90cff3b220d2f35e5bc55b5c3
+    size: 4788
+    mode: 0o666
+  - path: meta/migrations/add_log_category_and_level.py
+    sha256: e85056aa7f204c0d2c21b5ac0d942ca28307b21749693281d07b993b71b7b8f9
+    size: 4542
+    mode: 0o666
+  - path: meta/migrations/add_password_enhancement_fields.py
+    sha256: e589c2bf162dc6c105c7d0d375ade80d3af0d8ac247ab7557c00dab2324fdf21
+    size: 1430
+    mode: 0o666
+  - path: meta/migrations/add_performance_indexes.py
+    sha256: 610c591d200d8c9df909f889c73a69b0c8cb0d82c3a5d80ec1ae09dc29b033e8
+    size: 10279
+    mode: 0o666
+  - path: meta/migrations/add_performance_indexes_v2.py
+    sha256: 7d819beaf4e7e6a4d7fb1ff7c1535e7c41c23bd9449a9be23cdfe8be1ecb58e2
+    size: 3604
+    mode: 0o666
+  - path: meta/migrations/add_performance_indexes_v3.py
+    sha256: afaca4ed119ffac793bb48c57ef729bef937ceaeabb9510a229caec2fc4d5e6a
+    size: 3743
+    mode: 0o666
+  - path: meta/migrations/add_relationship_columns.py
+    sha256: f575bbf5612084feeb22a7fa709b64bba51e88699ca3e2dc86059958786e3d17
+    size: 7567
+    mode: 0o666
+  - path: meta/migrations/add_token_version.py
+    sha256: a9830305ea002130beaeb640189a5e8d1d05b1b5b7157a57eb71a1fb3badc05d
+    size: 824
+    mode: 0o666
+  - path: meta/migrations/add_version_column.py
+    sha256: 79a114c4da171d38cfe8a03a183311f94f4b8e151255c864892918a589691e3a
+    size: 2510
+    mode: 0o666
+  - path: meta/migrations/compensate_association_audit.py
+    sha256: ec453d1483d2feb1b1e62618619803f0f15c8a0f98aaef5e89d3da95bfc17b56
+    size: 6411
+    mode: 0o666
+  - path: meta/migrations/drop_user_group_member_count.py
+    sha256: 88233bdc0b03519a74ca4daa14c7b56a6212ae58fe32e1063eeee7970c9e7149
+    size: 2208
+    mode: 0o666
+  - path: meta/migrations/enhance_audit_log_v2.py
+    sha256: 5f0ef75217d7b89da5729c2b9508db5b98c10eeb16afed13fda2f26290352bda
+    size: 3623
+    mode: 0o666
+  - path: meta/migrations/fix_and_migrate.py
+    sha256: 25f26a5212db40465f7a2e733113d979969a72497a35f015d77d82b14ec2cb7a
+    size: 1165
+    mode: 0o666
+  - path: meta/migrations/fix_version_consistency.py
+    sha256: 43fb5b25a6564e6a74d657455b452e2a8da4ba98c49da8707930d0963b718933
+    size: 4371
+    mode: 0o666
+  - path: meta/migrations/recover_db.py
+    sha256: 49d3023b3f4b9844976bb467d8cdd9cf0627edd3700c051316215a2fa883e6b2
+    size: 1581
+    mode: 0o666
+  - path: meta/migrations/remove_aa_diagram_menu_2026.py
+    sha256: 769fc4077ec89c1c25d352e44cb364d6b39097f11e2f698af4c8e817bf5dbc32
+    size: 2996
+    mode: 0o666
+  - path: meta/migrations/rename_product_management_menu_2026.py
+    sha256: 353b136c744b580103b0d72ca6172526bb11f3493f511b7ba914be487e12d72e
+    size: 3195
+    mode: 0o666
+  - path: meta/migrations/v2_001_audit_log_v2.sql
+    sha256: 80977612a2adbc96a577d256cf867e6f18c0ea78bc0e73c403d3e6cf4fe6512f
+    size: 2720
+    mode: 0o666
+  - path: meta/migrations/_check_dbs.py
+    sha256: f20d07460860d607c1f13d45cc030e03eea41f1915022fdc2647de8a740c1386
+    size: 893
+    mode: 0o666
+  - path: meta/schemas/.schema_version.json
+    sha256: e71a9c57b432df9f0d56441d7d49878d024e3e901fc619ada2a087c1e8ca83d8
+    size: 16229
+    mode: 0o666
+  - path: meta/schemas/ai_async_task.yaml
+    sha256: 1e1d4bfa67cdf9ce0295a444a61975efe0b080459672f27e4cc8f1c6549516b7
+    size: 6337
+    mode: 0o666
+  - path: meta/schemas/annotation.yaml
+    sha256: e59de2cdc8e0a95723c8b01cc2453856371c78189de763254494f44e13e12123
+    size: 11567
+    mode: 0o666
+  - path: meta/schemas/aspects.yaml
+    sha256: 05647e4cee2aed5a87ce167a47004325d7ead881bc714685648237a30e49721d
+    size: 10637
+    mode: 0o666
+  - path: meta/schemas/audit_log.yaml
+    sha256: 2c4516f0fa3d1497cae8e837d3dd209ee9267289d010a6470afa210369a7e5ff
+    size: 24396
+    mode: 0o666
+  - path: meta/schemas/audit_log_expectations.yaml
+    sha256: fc43299e272afa00ccfc8fcb7fb61a95c8fef386776ee15020422c11e67cbbc4
+    size: 15645
+    mode: 0o666
+  - path: meta/schemas/business_object.yaml
+    sha256: 59df1322217b94be601e5e7b79d103ec09b6aab3be2bcba272b4dd0db418b436
+    size: 25775
+    mode: 0o666
+  - path: meta/schemas/change_event.yaml
+    sha256: 8630915c344de369734aaea16148e46b1fbaea0cd4b13bb398bc1428b1c1b981
+    size: 8757
+    mode: 0o666
+  - path: meta/schemas/change_subscription.yaml
+    sha256: c0560720f39e955c51ed41283b9a390325e6ef695af10fec0bab79b10c61e203
+    size: 6531
+    mode: 0o666
+  - path: meta/schemas/data_permission.yaml
+    sha256: 07dba1142d6335ba6c5538ab8a167783ec379d31b6212dff54abe8de6e062ee9
+    size: 2081
+    mode: 0o666
+  - path: meta/schemas/dimension_object_mapping.yaml
+    sha256: b872af50a07f736a486d339e53a09ec29646f281282fb74d4b27320d1fa943fe
+    size: 6650
+    mode: 0o666
+  - path: meta/schemas/domain.yaml
+    sha256: 8e4d25120c6f454b2c0bf4d94e2d08d7e75ae2163474a87bc7a0c2aa4cd6faf0
+    size: 13702
+    mode: 0o666
+  - path: meta/schemas/employee_data_scope.yaml
+    sha256: b67c9c52c90b0f3616d6534e7f40bf9e7b80bd69ec5fa9e5ac1fe7811c29eaca
+    size: 1946
+    mode: 0o666
+  - path: meta/schemas/enum_type.yaml
+    sha256: 7bc13710e28b5891df079e9e20f7eb6bf3c999c17df6faaba95ad30b2d6951d9
+    size: 14552
+    mode: 0o666
+  - path: meta/schemas/enum_value.yaml
+    sha256: fd5bb47427ff85cfd42eda6e9ce80bc6b8a5e98ae3e5cd6111483f60f3c960e9
+    size: 14882
+    mode: 0o666
+  - path: meta/schemas/filter_variant.yaml
+    sha256: 66c86d17276726e044ab0a77a6ed279551cdb19d69342349e3d4828c9574b459
+    size: 4162
+    mode: 0o666
+  - path: meta/schemas/generated_schema.sql
+    sha256: 9854aa6c7b25c8fbee9afaeeeac1997a2febdcd6efff4bb26a0d0774307c75cd
+    size: 28461
+    mode: 0o666
+  - path: meta/schemas/group_data_permission.yaml
+    sha256: 3ba592f222a63025bd7d6d94c43b85b70b9f8cdb117a2e025ac7455b0d75ba2b
+    size: 1980
+    mode: 0o666
+  - path: meta/schemas/hierarchies.yaml
+    sha256: 2a1654f553b03f57c9a8ec83d469ca798406046449808c155e3eaed674128cd1
+    size: 16251
+    mode: 0o666
+  - path: meta/schemas/index_generator.py
+    sha256: 8a8181632bb713fa4e8e2fc22bbf6aaf06a4e3801977ab87493d64aad9c2f5d6
+    size: 94
+    mode: 0o666
+  - path: meta/schemas/menu.yaml
+    sha256: 2c17e635695a90062c1e72b48eaddcccf5684da7338176b6292c897d71374cea
+    size: 7955
+    mode: 0o666
+  - path: meta/schemas/menu_permission.yaml
+    sha256: 31691fc070976583f06f60a4d9202bf1609223806c39ac267c89572c3b285f97
+    size: 3261
+    mode: 0o666
+  - path: meta/schemas/model_registry.py
+    sha256: 8fb450b86219ee6846c9c174de3de503a7b93dc6c04eb0f5b65829c61cc40d41
+    size: 642
+    mode: 0o666
+  - path: meta/schemas/permission.yaml
+    sha256: 7950c556e57213b38ea2dda983230b829456176b0bd438db5b84cc72c3d63e4b
+    size: 3063
+    mode: 0o666
+  - path: meta/schemas/permission_bundle.yaml
+    sha256: 1a7fdd6a72ea8cc212f35ef5900a18e29025422cbe4b28672c948ab5baf040e5
+    size: 2908
+    mode: 0o666
+  - path: meta/schemas/permission_rule.yaml
+    sha256: a4cbbf86f2f8ca3c9d6f2ff7eca2fd751bad9135b14b1437f060dc72e74beb93
+    size: 3052
+    mode: 0o666
+  - path: meta/schemas/product.yaml
+    sha256: 388e4d392edb7d0bfc4d76b4235d1540a5b41209bfe21531fcad461c1e466005
+    size: 17757
+    mode: 0o666
+  - path: meta/schemas/README.md
+    sha256: 84b590868ff45a3237c6b23128ecb90ad9f80f77ffe817e9e54dbd63717c75a4
+    size: 2235
+    mode: 0o666
+  - path: meta/schemas/relationship.yaml
+    sha256: 82cd0712bee59af0d41b6844f8e12e255d13c7e7af96ce6d0068baf47ee9a046
+    size: 58180
+    mode: 0o666
+  - path: meta/schemas/role_data_permission.yaml
+    sha256: 466baee123e9e3f510c7c2f3fb0fd6dc368a7ba04dfeb6f05ed35bd5e2c5a0e9
+    size: 1615
+    mode: 0o666
+  - path: meta/schemas/role_dimension_scope.yaml
+    sha256: a76dda05ab4a97138d590da5cac0d805c4dceaabbe18e7574e06a83ec12b8ee5
+    size: 1571
+    mode: 0o666
+  - path: meta/schemas/role_permission.yaml
+    sha256: 28ddf6449fc4e3e6af3cf5627d7ac78b07bf664f85b025ebc0d1cafbbf9239ec
+    size: 2046
+    mode: 0o666
+  - path: meta/schemas/scheduled_task.yaml
+    sha256: a126dfb6a373e77a6f18f7c224567ab37ef072eca75e98a62a9fb005831b458e
+    size: 6615
+    mode: 0o666
+  - path: meta/schemas/schema_loader.py
+    sha256: e47a00d4c95fbc28f354fa8e660d5e7526546512a09322e173b2d5b599abc89c
+    size: 1650
+    mode: 0o666
+  - path: meta/schemas/service_module.yaml
+    sha256: e4d798e8bd33a90114eee3ea3e5ab2124c0b06846bf46f67b5f2f21947954259
+    size: 19366
+    mode: 0o666
+  - path: meta/schemas/shared_properties.yaml
+    sha256: 9cce978d6ea773528be230211c4fee68978919dd44e83d29ceb98652d4a9959f
+    size: 4136
+    mode: 0o666
+  - path: meta/schemas/sub_domain.yaml
+    sha256: e3bbbd30519b0a5ab7b32cbeb6dfa0681e835fa894b501b1b9143a9a27fff025
+    size: 17104
+    mode: 0o666
+  - path: meta/schemas/task_execution.yaml
+    sha256: aa1774c8b20baa0ee8a021f86316372a15106e23fd9d017d10c17d8ddd94c31d
+    size: 6519
+    mode: 0o666
+  - path: meta/schemas/task_queue.yaml
+    sha256: e36290907c7e2bdf2dcb338295b258359354a99e50b155d711e11b5370db81cd
+    size: 3968
+    mode: 0o666
+  - path: meta/schemas/test_objects.yaml
+    sha256: 736b453746a831e21fd10b9f868666de5411b701567188483c5cee43efa50774
+    size: 2805
+    mode: 0o666
+  - path: meta/schemas/test_table.yaml
+    sha256: 2244b68621dad305fcf301918b9e3ed0c29a13f271acaf7f4fc6cf5f266028b3
+    size: 1288
+    mode: 0o666
+  - path: meta/schemas/user.yaml
+    sha256: 2c414ba4b57e24560ea098ac00754c02c3238bb1f1fb92ca2b254569ac1164e2
+    size: 17332
+    mode: 0o666
+  - path: meta/schemas/user_group_member.yaml
+    sha256: 1207991b79878974d63c7a3d1a3b720c791b50778c1dfa89a72858e087958b56
+    size: 2173
+    mode: 0o666
+  - path: meta/schemas/version.yaml
+    sha256: 0ddd43362dafc15b917044ade683a8e3553bd0bfcc563caa24b9e068bebc31b0
+    size: 19603
+    mode: 0o666
+  - path: meta/schemas/_action_groups.yaml
+    sha256: 6dc449f3832fe800a78816ec22d4dc997c67a04ab8618ec7328643b9a3ba2fa5
+    size: 1737
+    mode: 0o666
+  - path: meta/schemas/_standard_actions.yaml
+    sha256: 14064057c0d1378443c1850b3b2bcda8539c19f61924984608b0f1cfa592c64f
+    size: 1894
+    mode: 0o666
+  - path: meta/schemas/_template.yaml
+    sha256: 6cec7a07ea37b1c503507320a4f6df9922f949995eb2e78bdf0dbb287b43e42a
+    size: 5509
+    mode: 0o666
+  - path: meta/schemas/__init__.py
+    sha256: 48320862d85ca18f3eac1383b91fcb45715315a20c553ff30806dd12c7a82403
+    size: 22
+    mode: 0o666
+  - path: meta/scripts/archive_audit_logs.py
+    sha256: 3e58c279ea948a2daef2ec12359daf353c9a1600910aa95b6b2b3132733d0556
+    size: 7537
+    mode: 0o666
+  - path: meta/scripts/audit_user_name_backfill.py
+    sha256: d97388adf0f003343bb6b909a5d203a7713e16e45142c765052f8a43513ef7d2
+    size: 3016
+    mode: 0o666
+  - path: meta/scripts/check_tables.py
+    sha256: 8a50a5973af0b4b72a705a7a35cbd196ef0bcf6e5e1b2218f250ff7e9538cdaf
+    size: 796
+    mode: 0o666
+  - path: meta/scripts/check_view_config.py
+    sha256: a10b4c398cc73657be57ad79d8b0999c6ebf70fd6b2bb688f31556dc3056af8c
+    size: 3271
+    mode: 0o666
+  - path: meta/scripts/check_yaml_config.py
+    sha256: bf0d55b6ce0636361034f39448be71ed6240ed62a98b2d1de26f986f023f32a1
+    size: 2753
+    mode: 0o666
+  - path: meta/scripts/cleanup_test_audit.py
+    sha256: bf9cf9a3df875f536d6d0e1cfde841fbfa3eb364abfcf2432494217bd5e223a8
+    size: 5870
+    mode: 0o666
+  - path: meta/scripts/fix_owner_id_columns.py
+    sha256: 0cabefc7d029271ef69d3cc54d87b2c75b2d2fe5c8a40571c3d5f91a7ca2613e
+    size: 5715
+    mode: 0o666
+  - path: meta/scripts/fix_v112_drop_visibility.py
+    sha256: 55952c955c4c0d45e31077b49cb81cf0ffb2d2e5acf3c808d0bada1b881ac795
+    size: 3188
+    mode: 0o666
+  - path: meta/scripts/fix_v114_owner_cleanup.py
+    sha256: b12fe20b0eb2cd9b3991c7874018f4e89711f509072e42795f54783e526c96ac
+    size: 7789
+    mode: 0o666
+  - path: meta/scripts/fix_v115_drop_owner_id.py
+    sha256: d1a06136e2b59e49c655b512174b451b835f0f18b29b88af45fab6727b3046b3
+    size: 3702
+    mode: 0o666
+  - path: meta/scripts/generate_test_data.py
+    sha256: f70e3af20ba4ab5445e82434f07e92ce71d4b7febd2d384614a82d3150e8152b
+    size: 15404
+    mode: 0o666
+  - path: meta/scripts/init_and_seed.py
+    sha256: 087abb74b469c793fc2ac50f62f5f95a96b2f502249e4f8bcbfbedb4342118ca
+    size: 24176
+    mode: 0o666
+  - path: meta/scripts/init_database.py
+    sha256: a835a5bcd3fb64a031903dbc8075a1ecaf210a40c7c3130adbeb093fb0e895f2
+    size: 9672
+    mode: 0o666
+  - path: meta/scripts/init_menu_permissions.py
+    sha256: e2ca31b486317f89c9adf72f336b7e208991637b070d2a8670a3f9ff10f305c0
+    size: 28247
+    mode: 0o666
+  - path: meta/scripts/init_task_menus.py
+    sha256: 2ea1e62e1c8ff3466df4dc37c2c6530dc66717c693e4c6255ec02e4a2678272d
+    size: 11598
+    mode: 0o666
+  - path: meta/scripts/init_task_seed.py
+    sha256: f5b6240ab88069a6d24aacea64947367380e94a9afa00a6590e87ac3207316ee
+    size: 10991
+    mode: 0o666
+  - path: meta/scripts/migrate_bo_categories.py
+    sha256: 1d3d84532d77d0bf4354efe1d3823de72fbedc0811c7a6abd5aad5198fa9680a
+    size: 9689
+    mode: 0o666
+  - path: meta/scripts/migrate_enums.py
+    sha256: eb2177dab91fc3b6af0d78ada4bc8ba293398f46e89b07a89c7f4db5cc0e652b
+    size: 16999
+    mode: 0o666
+  - path: meta/scripts/migrate_enum_mutability.py
+    sha256: 3d0e6ba0c59ca2709f350b1b40e7bec2b34a8e7ec568cca39424919cc925c899
+    size: 6443
+    mode: 0o666
+  - path: meta/scripts/migrate_system_admin.py
+    sha256: b317f15aea6e2218337c099c03e943dfaebd1454f6847415b76ebb6b426de85a
+    size: 7278
+    mode: 0o666
+  - path: meta/scripts/migrate_v1_1_owner_refactor.py
+    sha256: 4cce2813a5a8e46b419ca11345360f73cba4923f71a780d390d02110f5e91946
+    size: 15287
+    mode: 0o666
+  - path: meta/scripts/migrate_v1_cleanup.py
+    sha256: d89792b583fd30a37bf480835a9abce31d63e75bbee2e3c9fe920bb744198177
+    size: 12793
+    mode: 0o666
+  - path: meta/scripts/migrate_v318_audit.py
+    sha256: c27d2105a5a6cd0a5dcf6c4d5ed68606eaf0b376d22617ac39c8e53a447a1edd
+    size: 6772
+    mode: 0o666
+  - path: meta/scripts/migration_add_updated_at.py
+    sha256: 31724a3664b6f41d1314a05dd3a7d5c5a268df7a2ee58111ca31e5bb9e9553fa
+    size: 4535
+    mode: 0o666
+  - path: meta/scripts/migration_remove_updated_at.py
+    sha256: 91b0fe825cbcb6c7be0fd7b59e8057ff6f9921f174e6ee37253db35385693dea
+    size: 6101
+    mode: 0o666
+  - path: meta/scripts/migration_ssot_stage1.py
+    sha256: af6d52c6381583751d57e4fea9b34c4bb5f3d1d170cc14733ecb05c134777f18
+    size: 3424
+    mode: 0o666
+  - path: meta/scripts/permission_audit.sql
+    sha256: 642d014d2f8df65e16bff20f70f52e35eb680dc4d7fbe5bf4f99a1b506b2b688
+    size: 11058
+    mode: 0o666
+  - path: meta/scripts/test_condition_evaluator.py
+    sha256: 3da4e3c48cbf543423a89d726f4cd89ad1071fc2bc8db6f5119065eb1029cebd
+    size: 1169
+    mode: 0o666
+  - path: meta/scripts/test_parent_visibility.py
+    sha256: 84f0565159bcb3784ea8c64bb78143e0f397d17ae060c59fb0f9eee255bf708f
+    size: 3627
+    mode: 0o666
+  - path: meta/scripts/test_parent_visibility_simple.py
+    sha256: f6bdb1313ff2b243535dce5ebbae70a4960838b6e347eeaeaaea5ae7739dc767
+    size: 3796
+    mode: 0o666
+  - path: meta/scripts/test_view_config_chinese.py
+    sha256: e90dc025c4024f0c559e533f54eed161e8010f9790b8259198fd36c1a03b8fc4
+    size: 2886
+    mode: 0o666
+  - path: meta/services/action_handlers.py
+    sha256: b8607ce549c7c47f5471b3ecce635a19252ca50f26eb92b43e4aca4368f1acd9
+    size: 11725
+    mode: 0o666
+  - path: meta/services/action_policy.py
+    sha256: 4699af5bc28e6756bfd556f61182a8e0d929408a16b08b1aac9aa00a9d669e87
+    size: 9185
+    mode: 0o666
+  - path: meta/services/association_service.py
+    sha256: dbf89bb8c503b68ff514ad6efb1f70a7cacf08a09d0909b4eb1bfa892772790a
+    size: 13620
+    mode: 0o666
+  - path: meta/services/assoc_query_service.py
+    sha256: 954b3e2d25a10493c6a2eaa5dff190da09d1003cf467d2d0566f1de638697a97
+    size: 5492
+    mode: 0o666
+  - path: meta/services/async_audit_writer.py
+    sha256: 881c87532480ced4e90c966d099be9c6710bac237d76f2b7adad07f738dc5292
+    size: 28527
+    mode: 0o666
+  - path: meta/services/async_import_service.py
+    sha256: 13864f81ccb2e8836898d513d4a5fa69d645445a5100806d77df45a19d785294
+    size: 7372
+    mode: 0o666
+  - path: meta/services/audit_export.py
+    sha256: da59c885821f7d5349ea8215fd3535de899f1a392dd1a4717d01489f63e0ef0d
+    size: 7014
+    mode: 0o666
+  - path: meta/services/audit_hash_chain.py
+    sha256: fc2db7bb8a23068c00d38ca829580bc8b079824cecedebdb3547ef339fe3c7b1
+    size: 7617
+    mode: 0o666
+  - path: meta/services/audit_interceptor.py
+    sha256: 7a97cfb5b897f0423f9b2cc18cdd5d759be7384f4970adf281c5635221352fda
+    size: 24884
+    mode: 0o666
+  - path: meta/services/audit_retry.py
+    sha256: b70077f3d9ac55f6267d967c720c668e4a295617894d0f3086330965dba48e42
+    size: 1762
+    mode: 0o666
+  - path: meta/services/audit_retry_worker.py
+    sha256: 995918b6193a36568f7fdcb74ba573038445e6f9863fbc0396a91356cd2ba83a
+    size: 7818
+    mode: 0o666
+  - path: meta/services/audit_service.py
+    sha256: 0edc2478a9c0c3a40e4deb2223b183a197b026bc9a17f162544630aab708fba5
+    size: 43266
+    mode: 0o666
+  - path: meta/services/batch_delete.py
+    sha256: 7946a19ab70b1236f74bc044edaf538991ea07307aed482266b9262c47ab178f
+    size: 3491
+    mode: 0o666
+  - path: meta/services/bo_action_registrations.py
+    sha256: 28bfe7e170c117b6e8dedc93b3cc3fe61fa42d25d08ea321b07549fa4ff0a377
+    size: 15948
+    mode: 0o666
+  - path: meta/services/bo_pick_service.py
+    sha256: 8e81db59d6cd29e9cebaa0e03b1b97f6327653999ba1d110a68c6cad5fbb22eb
+    size: 6316
+    mode: 0o666
+  - path: meta/services/business_key_service.py
+    sha256: 83609e87e392dcbbc3bc1c31cb7364fe36acfd04945edbebbb4490fd12f7e24a
+    size: 13526
+    mode: 0o666
+  - path: meta/services/cache_monitor.py
+    sha256: 7b9df096792ae28c7242c772650339ba85705c5549a338a484f69e519723e526
+    size: 18070
+    mode: 0o666
+  - path: meta/services/cascade_service.py
+    sha256: 0e9dff5d937b73a1e67ff247edb377bba1998528cce800646ce5c2437d98c757
+    size: 31571
+    mode: 0o666
+  - path: meta/services/chain_owner_resolver.py
+    sha256: d998cf08903eb410d9acf04fd155cf495bf76d3e1cab07bc491fa539efcf9b4c
+    size: 8309
+    mode: 0o666
+  - path: meta/services/change_notification_service.py
+    sha256: 4bbdaad94ee80c71d52a8139edfa7713ff75ac42d3b38d798279375f58268f19
+    size: 16337
+    mode: 0o666
+  - path: meta/services/computation_service.py
+    sha256: e8d568af94d6136a0f496d435c92c90788f11cbb00514c3317607b874f281a8f
+    size: 26116
+    mode: 0o666
+  - path: meta/services/condition_evaluator.py
+    sha256: b599d7469bbfb99c850ef58b5e2af4c6088608b714758c4cc2e91bc463c7cdec
+    size: 9864
+    mode: 0o666
+  - path: meta/services/config_driven_hierarchy_filter.py
+    sha256: f6e56e70520f2d2da750fc2b4e645d19a478587cd8fd47a21d0e38280762a07d
+    size: 16359
+    mode: 0o666
+  - path: meta/services/consistency_service.py
+    sha256: fcfcc310df38482ad0afc64a2afaa2bfeb84dfbf3946105845eabd53e57ba09e
+    size: 14786
+    mode: 0o666
+  - path: meta/services/date_format_service.py
+    sha256: eaee1ea3640bafe2825fee3158dfbc46585fab4e06ba783ee6d3f644f3e30f52
+    size: 2331
+    mode: 0o666
+  - path: meta/services/deletion_service.py
+    sha256: 786e0c532b9ccb1fdceb0221f7015c7a9dc9826f1a7b971ae8ad7fea0e02cd88
+    size: 14659
+    mode: 0o666
+  - path: meta/services/dimension_scope_engine.py
+    sha256: e91e98aa924254912ac459be53570d3b32f9eae59b10f35028480f88aee98c9c
+    size: 40604
+    mode: 0o666
+  - path: meta/services/dim_scope_relationship_includer.py
+    sha256: b67e06af60923b6cc31b7937a1f82c3c46bba415869c7d61c05d3cbadb738a4b
+    size: 8446
+    mode: 0o666
+  - path: meta/services/display_name_service.py
+    sha256: 4e87b1ba07fc0c6cc3ca1668a8b33e1bc0b8ad8eb53d8139309974610017c367
+    size: 5990
+    mode: 0o666
+  - path: meta/services/draft_batch_save.py
+    sha256: d0ab180138bcdb07374e8db4a5105af42a8856d1572803fbcb468ce20964bcb8
+    size: 14960
+    mode: 0o666
+  - path: meta/services/enum_type_crud.py
+    sha256: 0d3943208f62eb803bd68ff5bb33fd7513523d396a202b3288e334200a4fb270
+    size: 11272
+    mode: 0o666
+  - path: meta/services/excel_design_system.py
+    sha256: 47b5b5b8deff651157bfa16b71ee8cb3e82fec879e8fcb3797a22ec7e2456fb4
+    size: 6704
+    mode: 0o666
+  - path: meta/services/field_policy_engine.py
+    sha256: 8d88ad3e3efff38119e3c537e358cd672915a96f47fdd08d299220d3ecd42bf6
+    size: 15626
+    mode: 0o666
+  - path: meta/services/field_policy_validation.py
+    sha256: d6d01b74e7cca1410ef4ad18dc4b404c712bf2d291aa5c3c139f4b72ce3aecb6
+    size: 11265
+    mode: 0o666
+  - path: meta/services/filter_service.py
+    sha256: 0a87018a3fb418ab98200f10b1734fbcb4256ccdef9adddf9244b6c9b63e27a0
+    size: 8233
+    mode: 0o666
+  - path: meta/services/function_aggregate.py
+    sha256: de21cb67aad34aac91cd558dc8cb39db719a305ac00cfb7af4486c00b506d25a
+    size: 2842
+    mode: 0o666
+  - path: meta/services/function_subscription_list.py
+    sha256: 51caccdb861ebaff8ec6b5879c8425e4862d49f7e006160c56f10b6cc9c965d5
+    size: 2247
+    mode: 0o666
+  - path: meta/services/function_value_help_resolve.py
+    sha256: ee5f27b98cef4a19c4046b9a37cd033ebd595f7dd75572a047cfb443e08911c3
+    size: 2698
+    mode: 0o666
+  - path: meta/services/hierarchy_filter_service.py
+    sha256: fb433180eea57cbaf248a08f319d6c35a823341620d2d2ae005d1f7a427657bf
+    size: 17210
+    mode: 0o666
+  - path: meta/services/hierarchy_path_service.py
+    sha256: fdfac6db2c52651d5a3557904fa83f9bb31cb660a96a91e0caa67fcbdf7f5971
+    size: 12327
+    mode: 0o666
+  - path: meta/services/hierarchy_service.py
+    sha256: b13e5c47c5c138212ac4bd1ec0a3b35339df5e521e4bec64a06c9e9534453f17
+    size: 8082
+    mode: 0o666
+  - path: meta/services/hierarchy_validation_service.py
+    sha256: 46b42e73f944c0bd00900b88f9d38ed1157220275d4d110754b7887c8e5de60b
+    size: 8284
+    mode: 0o666
+  - path: meta/services/i18n_service.py
+    sha256: 7bf968feee76509d5da7dd76e31d598feda56bf7652070cd23e8ca47b88f78b1
+    size: 5920
+    mode: 0o666
+  - path: meta/services/import_export_service.py
+    sha256: d6f15a149147a3d2ee3abd82a9a04f2b0f454a565b47baa7492551198f958147
+    size: 371283
+    mode: 0o666
+  - path: meta/services/import_export_types.py
+    sha256: 9f3942f28b470d12cce9c9b95a5226c539efdad1b1c76e1542968389142e59b4
+    size: 5096
+    mode: 0o666
+  - path: meta/services/index_generator.py
+    sha256: 7a2c6d7953f86d5daab207ce6430680761e8ab8a4cdaf30e6197a38233f5b5c5
+    size: 99
+    mode: 0o666
+  - path: meta/services/list_service.py
+    sha256: 6604d1eda1897f8fcff9f417c8fc7a1047f93beb52c1d89e59aacdf4d5c4c3d0
+    size: 3612
+    mode: 0o666
+  - path: meta/services/log_filter_service.py
+    sha256: 1fa48edcc2af2f739dcc9081f921b1264a945b244faf6ce908d945a26ea3a1c3
+    size: 2725
+    mode: 0o666
+  - path: meta/services/management_dimension_engine.py
+    sha256: ce0251d12d365c5d60ec81ff29e044e0424d4092f65dca1d0db893f2cc079b32
+    size: 26375
+    mode: 0o666
+  - path: meta/services/manage_service.py
+    sha256: d0e892a8defbdebe3337b642f02f5273c11fff122303fcd1e8b141eb1f6a83f2
+    size: 30541
+    mode: 0o666
+  - path: meta/services/menu_auto_generator.py
+    sha256: 7b195e5523ea61b9de84a03c0f31503de6277c8f3db5eb3a0d05e591b2d4e5d1
+    size: 15935
+    mode: 0o666
+  - path: meta/services/object_identity_service.py
+    sha256: c8a4eac4f130502ffca8f52567d54240256db28bc6aed5d370c71010d736c7a5
+    size: 13084
+    mode: 0o666
+  - path: meta/services/owner_transfer_service.py
+    sha256: 280e41705214bb1099c195767db3977fbfb590159e784d26366b443fefae5b10
+    size: 15273
+    mode: 0o666
+  - path: meta/services/preview_service.py
+    sha256: 5c31dfd991cda736942a05a4eef5e0af807b39a808787fb13e29d792576bee71
+    size: 2242
+    mode: 0o666
+  - path: meta/services/query_models.py
+    sha256: 96898a5a31c773b8e328a106e828c521612c51ee79113d27f53ec09ff7277255
+    size: 3011
+    mode: 0o666
+  - path: meta/services/query_service.py
+    sha256: a187c2f16da5582bfd87a400c3cf0c4bdf3094687c3b76ec60c415c32d3684bc
+    size: 87238
+    mode: 0o666
+  - path: meta/services/rate_limiter.py
+    sha256: cd30164b4b841675d581c833f2ad9bd9ad69076f045ddcbdc7ca560619b891b4
+    size: 4945
+    mode: 0o666
+  - path: meta/services/structured_logger.py
+    sha256: cdc950a5cfae3fa669296884733eef5154c6ee840a6c38df630e16e56f54535a
+    size: 26468
+    mode: 0o666
+  - path: meta/services/subflow_engine.py
+    sha256: eb9c4148995ec853b2728c0a20b13334af5998a5e05c01bd5015abefe605f167
+    size: 27054
+    mode: 0o666
+  - path: meta/services/subflow_metrics.py
+    sha256: 2ee56f5360addb1be2d2351b1cb8b84275dcc54b2e48e93fd00fa91bc930c8f5
+    size: 4568
+    mode: 0o666
+  - path: meta/services/subflow_template_store.py
+    sha256: ea09778d9ebdce9b13e4a4b756a33c26a9fb6d976473652c4bcfd9580d3ff16a
+    size: 7072
+    mode: 0o666
+  - path: meta/services/subscription_create.py
+    sha256: 72581c2e57cdbfc586c5e58695d1dd72f63d74e4b3bdb5299bccfe0258cc2b62
+    size: 3494
+    mode: 0o666
+  - path: meta/services/subscription_filter_service.py
+    sha256: d5c60ddd965ecc502202ce3cd1c62c2b2f2b6614707a1ce852af8c9f18595d60
+    size: 12587
+    mode: 0o666
+  - path: meta/services/token_blacklist_service.py
+    sha256: 1623a3326b0cfce3795453fb53f2567eaaab5e6492384ab5d0cab2f629ded6be
+    size: 3127
+    mode: 0o666
+  - path: meta/services/token_service.py
+    sha256: e9ab61c1e460e822b1fdee73568781d731d545bdd96e7225165bd9f91da3e96c
+    size: 5546
+    mode: 0o666
+  - path: meta/services/token_version_service.py
+    sha256: dae592f4356af525d844aba65531b9c98fb317867002261e5a099738114aed64
+    size: 2508
+    mode: 0o666
+  - path: meta/services/trace_service.py
+    sha256: 6f5458cbf39b86ef0136fef831d3b2ee25c566fc8f03e7110d9c3e9348ad29f5
+    size: 1332
+    mode: 0o666
+  - path: meta/services/user_group_service.py
+    sha256: d3270f7d6083cf5cb27333ad02092f675e0ef5442eb6e68b7f89a0bf266214e1
+    size: 15460
+    mode: 0o666
+  - path: meta/services/view_config_service.py
+    sha256: bb5f97f98e0cb980dbaabf6c3af4cbebee17de5487db5f2a7717e01d7875bca3
+    size: 46141
+    mode: 0o666
+  - path: meta/services/webhook_service.py
+    sha256: 6995ef2fd61962da70c522d091b63da08c6a14a2b84d008daa3be7745f91be28
+    size: 11295
+    mode: 0o666
+  - path: meta/services/websocket_manager.py
+    sha256: b9e981bb148c087c2f613e5af930a4915e5e0d6d2d76aad517d86d2f51803384
+    size: 6992
+    mode: 0o666
+  - path: meta/services/__init__.py
+    sha256: 228bba5b87f6cc27971cef3d62fbb1684b7fa42b85c4036c8b7121fe6edff9f3
+    size: 98
+    mode: 0o666
+  - path: meta/tests/closed_loop_test.py
+    sha256: b6e308e217973b69a848278b7d326769121e31251931fce82a1e306b5bd414d3
+    size: 7439
+    mode: 0o666
+  - path: meta/tests/conftest.py
+    sha256: 78f68cd5a6778715d3778be1584ecf7dc8264bdfe92d85052360c4b0bf4be07c
+    size: 66117
+    mode: 0o666
+  - path: meta/tests/conftest_common.py
+    sha256: 16cd481179c0c458e5f96b39c47c69ede6dd65aabd6ccd255688c3fa20f96a44
+    size: 5405
+    mode: 0o666
+  - path: meta/tests/hypothesis_strategies.py
+    sha256: 168d2931f2d6ae0dc03b4d2bec47021193081c3cb0fb4ad9b3cc07ec2d67bc01
+    size: 3081
+    mode: 0o666
+  - path: meta/tests/TESTING_TOOLS_GUIDE.md
+    sha256: 72ce1c5bee181a6c98c89a28331b2002ad29d322b1f2bb5c1cda078936321fe6
+    size: 8357
+    mode: 0o666
+  - path: meta/tests/test_action_api.py
+    sha256: f9187acab46d7817e0c9ac223720254e08e3f77da35822d6a732d80fcb4b3c75
+    size: 6820
+    mode: 0o666
+  - path: meta/tests/test_action_dispatcher.py
+    sha256: 04aa8dbe3e8654679fa0d1b7e6d6f7314b25cca36a27b123a4e33549b704889b
+    size: 4505
+    mode: 0o666
+  - path: meta/tests/test_action_executor.py
+    sha256: d120dfaddd615781d7408cb5ec9fd61e2b38e59894b2fb2960569025df8815b9
+    size: 16958
+    mode: 0o666
+  - path: meta/tests/test_action_executor_error_translation.py
+    sha256: bc1bc3f4607ff96869892f8f0682c2d8e8923752f1fc8e5050e2719acae08791
+    size: 2899
+    mode: 0o666
+  - path: meta/tests/test_action_executor_validation_integration.py
+    sha256: e3c77f0dfb0096e6a8371b9c1da45ddad181277cbc8d0ecfeb80911559502cb2
+    size: 7244
+    mode: 0o666
+  - path: meta/tests/test_action_models.py
+    sha256: b55f528e5a300e24c9f15989656440f82f2ae0dbba7728cc86a82f2d841ae723
+    size: 3403
+    mode: 0o666
+  - path: meta/tests/test_action_policy.py
+    sha256: d223ba02d06827d998fc8fcc3b2057d295b22467a946f33fa94ef99c87c826d8
+    size: 15600
+    mode: 0o666
+  - path: meta/tests/test_agent_api.py
+    sha256: 28dc2a761e982096167b8f29eeb95d4661378c4259462e7be0dfee23fbe4a9ed
+    size: 2044
+    mode: 0o666
+  - path: meta/tests/test_aggregate_manager.py
+    sha256: a82ea69eda4e05574e9f8c81b31c17ef9444991df816b16f4b6ef7e7164f0fbe
+    size: 14832
+    mode: 0o666
+  - path: meta/tests/test_aggregate_refresh_integration.py
+    sha256: 76b3070847ca3450ecdba4c66d262f9ae1c408e8abf49168048b760376111aeb
+    size: 15930
+    mode: 0o666
+  - path: meta/tests/test_analytical_engine.py
+    sha256: 8028201f7af58aa222caf05f6425812a6b12d4536681ecd6def3afc51ab0c4d2
+    size: 14312
+    mode: 0o666
+  - path: meta/tests/test_analytical_engine_v2.py
+    sha256: 609b4814e7121f9057766d7ced73c21f525ed3a7b9e974905497228805a93027
+    size: 16564
+    mode: 0o666
+  - path: meta/tests/test_analytics_aggregation.py
+    sha256: b6bc30df695a4779ba41517fd2f3c0d68d7d1caa6216a5afddf001f62248c793
+    size: 6636
+    mode: 0o666
+  - path: meta/tests/test_analytics_p0_adaptation.py
+    sha256: 4a90d0a58bc0c91ad273c6804d26adf77148b3281bfa80db6084337a02d50c60
+    size: 19211
+    mode: 0o666
+  - path: meta/tests/test_analytics_p1_adaptation.py
+    sha256: 365ad1372c1757730101a2cf532c19984e561b44d064be813cdc92cccbaafaff
+    size: 13714
+    mode: 0o666
+  - path: meta/tests/test_annotation_api.py
+    sha256: 4ef4f73e7f334dd15a5504d8374fe306486e679ec07d082e8fa162fc5f34e1f7
+    size: 18315
+    mode: 0o666
+  - path: meta/tests/test_annotation_category_filter_regression.py
+    sha256: d061cee612b0bdd91d44c44612dfbfb3f591cfc42c0fc71a383c39eceb532bb6
+    size: 18344
+    mode: 0o666
+  - path: meta/tests/test_annotation_import.py
+    sha256: 0c69b7816ea5de6efe35dfb75a65a0fe470dd59027f9094c2818994c82b74efd
+    size: 17446
+    mode: 0o666
+  - path: meta/tests/test_annotation_metadata_driven.py
+    sha256: fb8e704e1b7288e91cc7fd2739e1748c050f0fdd100521abfb1e9cd32b52eb46
+    size: 18329
+    mode: 0o666
+  - path: meta/tests/test_annotation_routes_api.py
+    sha256: 9425a97d30be82acd309e7413eb8e7e49d301e369334ee3cbc22cf81e58a2204
+    size: 2728
+    mode: 0o666
+  - path: meta/tests/test_api.py
+    sha256: f11cb88c0092dcf33c46cb0d06d9c0a7b1d2d373e04e69d1fb156d72ee7b1145
+    size: 15096
+    mode: 0o666
+  - path: meta/tests/test_api_smoke_tests.py
+    sha256: 6f78d0ba9adf5a6533cd51587f79334b1f4a6ef5e89f1cb0c92f4fbde39fb572
+    size: 15625
+    mode: 0o666
+  - path: meta/tests/test_api_v2_association_endpoints.py
+    sha256: 8c33927702d6ff92575328edf074a4261617bc8cf63559c92c63752a7fc8b832
+    size: 22271
+    mode: 0o666
+  - path: meta/tests/test_api_v2_consumer_scenarios.py
+    sha256: ab3a7a7ce8ab8bb4e2588959b9cf24f7f3118d78c0de82f5ce3aec31fcf3ffab
+    size: 15288
+    mode: 0o666
+  - path: meta/tests/test_app_builder.py
+    sha256: 119b59c9fa26a0349f3053bbdbf5547389677d0ad888c68cf2a1c39970d51c5f
+    size: 14711
+    mode: 0o666
+  - path: meta/tests/test_app_builder_fr5_extras.py
+    sha256: 5d1f037f6daa32ce60bb17af690f310161f45e684b25a9c927b031e1b18714f3
+    size: 2079
+    mode: 0o666
+  - path: meta/tests/test_architecture_preview_optimization.py
+    sha256: b4148d0175119429b6ae7fc29a6ae5bf6b18e14af512d210cba9e99c1a4768ef
+    size: 7765
+    mode: 0o666
+  - path: meta/tests/test_archive_audit_logs.py
+    sha256: 468177ad22f2c275fc86c68f9262962bf898b006216ca8b4baf6d80b4f6f6385
+    size: 5894
+    mode: 0o666
+  - path: meta/tests/test_arch_data_converter_regression_v033.py
+    sha256: cddc4c3d188e06763f254dc384721553c44b1b5d5808f4de6a2c78d5647d1e47
+    size: 18643
+    mode: 0o666
+  - path: meta/tests/test_aspect_resolution.py
+    sha256: f51c8894297d44a4cc8cad7a52351776d38e068c71c9a225e92d98df1d31868c
+    size: 12396
+    mode: 0o666
+  - path: meta/tests/test_association_audit_e2e.py
+    sha256: de8b8049abb7f6f756619cfb5d7c984f11f6a3b45b7de04de1bb4370589be30d
+    size: 10578
+    mode: 0o666
+  - path: meta/tests/test_association_crud_operations.py
+    sha256: 8ce95dcd540ef304378951b1ec5e4e7c529d85c329b1c18b00c5805900f21c05
+    size: 21529
+    mode: 0o666
+  - path: meta/tests/test_association_engine.py
+    sha256: 0e6aefad4b8d719fcd5781dcf83993d479ea54a0a2b3191cd922200d9adfd12d
+    size: 14807
+    mode: 0o666
+  - path: meta/tests/test_association_interceptor.py
+    sha256: ed948c23fc9149a372a259b3c798e80abf995b1a1dfdecfb5df66d2881c8bd94
+    size: 8778
+    mode: 0o666
+  - path: meta/tests/test_association_multi_hop.py
+    sha256: 9b4f96effae690f54a8dfc3d11e7f47efcd78d622b4760d724686fba3e69cf69
+    size: 27258
+    mode: 0o666
+  - path: meta/tests/test_association_service.py
+    sha256: 4703bbd85aedf0e4610ff52444b531e1f99f46f5b827be58696a019166a4a831
+    size: 7289
+    mode: 0o666
+  - path: meta/tests/test_association_validators.py
+    sha256: 5619208a6e8b268d5cd778b4ad7eca777652ec431640de4ffab942c91ceb9b29
+    size: 7872
+    mode: 0o666
+  - path: meta/tests/test_async_audit_writer.py
+    sha256: 0d6484eaafb5b8a95448202978f8ea35392541e252b8304256d946f05f0af19e
+    size: 14158
+    mode: 0o666
+  - path: meta/tests/test_async_audit_writer_comprehensive.py
+    sha256: 15aaacaabcde2ca2bd60f01ebe186f0607a5aa129f899602fe65c600dd1a2f82
+    size: 20125
+    mode: 0o666
+  - path: meta/tests/test_audit_api.py
+    sha256: a0e29e59892771bc226c8a24208190c3357e198b227621a3fd0412f3eee9f7e8
+    size: 41181
+    mode: 0o666
+  - path: meta/tests/test_audit_api_endpoints.py
+    sha256: dd9c3e3c711eea5869b587756cf0ee5f0ddc72592dda5ecae10d33cfca901e49
+    size: 10276
+    mode: 0o666
+  - path: meta/tests/test_audit_category_level.py
+    sha256: bb810e9432e75fea4bb2f18c63d010f43d8f3ac241491cc1d686c98ac0c0017f
+    size: 7132
+    mode: 0o666
+  - path: meta/tests/test_audit_handlers_comprehensive.py
+    sha256: d6e33cce34c7e20db484a8974172cca0f3e8965d2993e0a2cec174af426f9f7a
+    size: 24134
+    mode: 0o666
+  - path: meta/tests/test_audit_integration.py
+    sha256: c6bbef4060058a0d51a22b1f2b853bc7b2bbfad127886cc3b2295c86a1c1cdf7
+    size: 37492
+    mode: 0o666
+  - path: meta/tests/test_audit_interceptor_comprehensive.py
+    sha256: 3799b91065e1c58259f67e4d6f002e0a004ba454798fb5360fb0624972cfbd9d
+    size: 16271
+    mode: 0o666
+  - path: meta/tests/test_audit_interceptor_unified.py
+    sha256: c050e77e8036faf2730dbc6966b7df6d24d35a4ed95325bbe97332089f7768c6
+    size: 20546
+    mode: 0o666
+  - path: meta/tests/test_audit_interceptor_whitelist.py
+    sha256: ae7cbe43356d8a24e5fb947731b5bc49d3a77f1fb70d848286d31ece26fe3ee4
+    size: 6241
+    mode: 0o666
+  - path: meta/tests/test_audit_labels.py
+    sha256: 17c4b703e085a6da933dbea64f17440cc00b669d504bc8e97dbd43054b4d0c52
+    size: 9958
+    mode: 0o666
+  - path: meta/tests/test_audit_logger.py
+    sha256: ae215614771b047f46f02857b6bd32ac9bf15c93fb59df81b377cd5bd1ed8789
+    size: 14702
+    mode: 0o666
+  - path: meta/tests/test_audit_log_3bugs_fix.py
+    sha256: 442208b0063c5473f7555e9db0eb3bff8c38e251775e2b9df1ba4e63aad40ee2
+    size: 12300
+    mode: 0o666
+  - path: meta/tests/test_audit_log_create_batch.py
+    sha256: 8d3c2f972bf06f2c0bf9fa2ffc161f473e95326c8d867decb3fb0d62cb637e11
+    size: 4179
+    mode: 0o666
+  - path: meta/tests/test_audit_management_api.py
+    sha256: 1bae36afdff30892d320c0dd94b6238dd7a55e6d0181d3f3977e1a535f932d4c
+    size: 2032
+    mode: 0o666
+  - path: meta/tests/test_audit_p1_p2_fix.py
+    sha256: 248dc42cd2a23666544e4cf6657aa67a5c35ac058f1d9526419b1c6d5857074d
+    size: 5904
+    mode: 0o666
+  - path: meta/tests/test_audit_parent_object_and_extract.py
+    sha256: 24c4738c52a7f5d02848f8d5f9ca38244a91a23278d09e8982a25baef6bb167e
+    size: 16882
+    mode: 0o666
+  - path: meta/tests/test_audit_role_parent_query_e2e.py
+    sha256: d32b41bab336813b6352c130e08fa3bb95aed3b0f56d46a020c59f1c59f79bd7
+    size: 21080
+    mode: 0o666
+  - path: meta/tests/test_audit_service_comprehensive.py
+    sha256: bcb2a7085d685bfd2f21198819e9054846d82cb217992e17486f1b14390f1795
+    size: 37873
+    mode: 0o666
+  - path: meta/tests/test_auth_api_optimized.py
+    sha256: 732d3754d50237a0be91e01010a4fbcb7dfc3edde5fe87c6279a88c4fed41ab7
+    size: 19364
+    mode: 0o666
+  - path: meta/tests/test_auth_middleware.py
+    sha256: 70b404dcdafd6e8b537bdc08e1e69984536ad8eee73f6c47fbbb85dfdaeca507
+    size: 7485
+    mode: 0o666
+  - path: meta/tests/test_auth_permission.py
+    sha256: 41f873ca65d11eba60e0b6ad2a85a78b07dc6fab461187bd7c2176fa4859013a
+    size: 21747
+    mode: 0o666
+  - path: meta/tests/test_base_api_demo.py
+    sha256: ae267cef32afd10efc23dc81c6a532b1985a590cbcbec32edf7cd675417789a5
+    size: 4741
+    mode: 0o666
+  - path: meta/tests/test_batch_audit_context.py
+    sha256: 89ced7ea2995ac0c939019cc38d0b8531ab1026a5cb039605e0f0b18e3545a2b
+    size: 6085
+    mode: 0o666
+  - path: meta/tests/test_batch_navigation.py
+    sha256: cd2c329da767ff6bd73a43fcf6b86592e0baa5690d8eaa945f55ec4a69f27aeb
+    size: 13652
+    mode: 0o666
+  - path: meta/tests/test_behavior_control.py
+    sha256: 819f56e003f4211f312e6085a2bd85bf938148e81789c56601d68890038491b1
+    size: 10938
+    mode: 0o666
+  - path: meta/tests/test_boundary_conditions.py
+    sha256: cf0e04126e6a0d688eb07fa7cfb95dc28799852b5c4b729053ba0c1129d916e0
+    size: 17527
+    mode: 0o666
+  - path: meta/tests/test_bo_action_api_openapi.py
+    sha256: cfefa472434c5260d0896f6e858bfba1bd4d05ad93b3eda8c5787b7b493a1506
+    size: 7760
+    mode: 0o666
+  - path: meta/tests/test_bo_api.py
+    sha256: b547df2dec0e201f88962eb26fda7e1e243d6757b83b65e67c8e5e2d50f5cce4
+    size: 55731
+    mode: 0o666
+  - path: meta/tests/test_bo_api_granular.py
+    sha256: 11922b3807d6e2c2d0520fb3cae56df1689fe3088f0c3f9bb2645a2705a7f69c
+    size: 18746
+    mode: 0o666
+  - path: meta/tests/test_bo_api_openapi.py
+    sha256: cda4199cacf2ffde5443912d5640d8573090708d6a8704887237e913e683c7d8
+    size: 6745
+    mode: 0o666
+  - path: meta/tests/test_bo_audit_log_enrich.py
+    sha256: 358bab2015ce350e28193702e32cc10801e380dfc03b94bad61a94bd37e5a5e5
+    size: 13783
+    mode: 0o666
+  - path: meta/tests/test_bo_categories.py
+    sha256: 54487121095a6fb6b24e4f4de02eb2f4bd312234ca4240633d5ccb93d9d98f96
+    size: 9746
+    mode: 0o666
+  - path: meta/tests/test_bo_framework.py
+    sha256: abc230996aa7c9200d538507ff1f105593c9668044a850401f0e7e11dcd04770
+    size: 18440
+    mode: 0o666
+  - path: meta/tests/test_bo_framework_display_name.py
+    sha256: 04736e038b6564fbe7b9034029c6b643809d8a40acc7715ca1dc3ad7a3bc263b
+    size: 11404
+    mode: 0o666
+  - path: meta/tests/test_bo_framework_display_name_api.py
+    sha256: 08347f782105b4eea258c6f3e8ac399e1c5fc82c5436de67150e9bdfba0929d9
+    size: 6684
+    mode: 0o666
+  - path: meta/tests/test_bo_transaction_lock.py
+    sha256: 0444e59cf8e6bea98add724297279188374e07617e0fb2c14eefed770ba8284f
+    size: 12144
+    mode: 0o666
+  - path: meta/tests/test_browser_e2e.py
+    sha256: aed06a2057ec4eec6c1a35985ccd53893f0e59c18b42f018ea6da066dd6b507b
+    size: 10228
+    mode: 0o666
+  - path: meta/tests/test_bug_v008_fk_sections.py
+    sha256: e8e53cf2cb4c6bdae5b96327b23c7d85d078810b449994190a6f4a06f6a2ad2d
+    size: 8422
+    mode: 0o666
+  - path: meta/tests/test_bug_v020.py
+    sha256: 8b9a8e906cc5c0671dc4a059c8cb595c8aac544a3afadec8f323c7374c14570f
+    size: 9107
+    mode: 0o666
+  - path: meta/tests/test_bug_v021.py
+    sha256: fa69575a1681cfc9e019a37c5c8c67fb7a43e73d1b37dd6965949cd56644bb78
+    size: 7742
+    mode: 0o666
+  - path: meta/tests/test_bug_v022.py
+    sha256: a6bd9c912de5644e6833dea40e8cd02c550f6696b66e16a7d82a73c5ddfb1c48
+    size: 3752
+    mode: 0o666
+  - path: meta/tests/test_bug_v023_v024.py
+    sha256: 25b8132a542c1e363d45bf8addbd39d08730fd5fdabce46342ed7b0802922f64
+    size: 10762
+    mode: 0o666
+  - path: meta/tests/test_bug_v026.py
+    sha256: 3f8708833e55ea0ba212b0c7074f52c8071c7c6f8759b6a10e60ca3b08210cad
+    size: 8091
+    mode: 0o666
+  - path: meta/tests/test_bug_v027.py
+    sha256: fe4222960350dc402e4f4d45da812928a1d2a48f3830c5840b8a0aa0c5b848f5
+    size: 4020
+    mode: 0o666
+  - path: meta/tests/test_business_key_service.py
+    sha256: c1abc5e4400d309d42b4aed7078d5c59e1d9b608d18b78d62f0fdd86b7de952f
+    size: 5145
+    mode: 0o666
+  - path: meta/tests/test_cache_monitor.py
+    sha256: 2e4d57b4a81aaed08781b0445bc44dba19f1cceb153e29f6c0645eaef6f4290d
+    size: 3874
+    mode: 0o666
+  - path: meta/tests/test_cascade_service.py
+    sha256: 79e5b56bae2ee8e1f8a3b97306cf53edc634a91d092cf63038139cd4e7ff1e43
+    size: 16413
+    mode: 0o666
+  - path: meta/tests/test_chain_owner_resolver.py
+    sha256: 87e35c189ce1020b067d3239498279b3e5c3f7e11df303334d91d213637a664d
+    size: 11791
+    mode: 0o666
+  - path: meta/tests/test_change_notification_config.py
+    sha256: 6db6bd83dd5c4c685d51b68edf4011e2661f6998908240927db118116c329a6f
+    size: 7889
+    mode: 0o666
+  - path: meta/tests/test_change_notification_integration.py
+    sha256: a5d5ddbaec0ea4bf1731dd67c785451c4f88444143281dfc3f6bc3369110be9a
+    size: 11566
+    mode: 0o666
+  - path: meta/tests/test_change_notification_service.py
+    sha256: aa12443899b025d3faa1f286f83eabd867943c2b27e398091531c1564d5bf75e
+    size: 15676
+    mode: 0o666
+  - path: meta/tests/test_cleanup_integrity.py
+    sha256: 078da3eef04a96246375b9939e40c94f07a8bfb6446974db43a411d592b58813
+    size: 8263
+    mode: 0o666
+  - path: meta/tests/test_computation_aggregation.py
+    sha256: a1f63d2b3a55e3b1fa6a150c92dacab108895071c45a2e9bb5e4c62eea668c57
+    size: 6083
+    mode: 0o666
+  - path: meta/tests/test_computation_by_semantics.py
+    sha256: fe4e6c2acd5878a89131156ddbd35f1ca9e7dbcab3c62ed6a838bfd635bda8dc
+    size: 6714
+    mode: 0o666
+  - path: meta/tests/test_computation_service_unit.py
+    sha256: 341875bca4346adbfecec7f9a98f5ee4444de0ac4c5e13934d3a7a7076e604d0
+    size: 16867
+    mode: 0o666
+  - path: meta/tests/test_computed_field_robustness.py
+    sha256: cd42d794365155812f24414e281a753dd14d126715f4624e99c860c044ef509f
+    size: 20399
+    mode: 0o666
+  - path: meta/tests/test_computed_subqueries_matrix.py
+    sha256: 1cf72f2019b0e43ce793f2a2ad2ad170c04fc31056213606fb2dfccb33758fb1
+    size: 10389
+    mode: 0o666
+  - path: meta/tests/test_concurrency_safety.py
+    sha256: 34a7eeece797227299ffd9cb7548a5583c5ad95703b9577239508594286940b0
+    size: 9822
+    mode: 0o666
+  - path: meta/tests/test_concurrent_operations.py
+    sha256: 7110486ed1571721a449eb418649ea1a5325fe039032fc6e8bf4896e4b571cbc
+    size: 12020
+    mode: 0o666
+  - path: meta/tests/test_condition_evaluator.py
+    sha256: 3d5b4c99c5ac6d818563bfd05062e357fe585bd3ba8b14297c9393b8ebf1ff70
+    size: 10190
+    mode: 0o666
+  - path: meta/tests/test_condition_evaluator_eng.py
+    sha256: 71214df8731fa71e9b5f1a42e03302124a46074afe286c6935508f1b44faa471
+    size: 5661
+    mode: 0o666
+  - path: meta/tests/test_condition_permission_service.py
+    sha256: aa1f709851e7f714a3e4294d16fea181b8cfb64b4450862866800650b859f599
+    size: 28455
+    mode: 0o666
+  - path: meta/tests/test_condition_tree_architecture.py
+    sha256: 352f7876cf0f24b7cd6616166d3ba846881e7cd78cd196788a2906143b697c2b
+    size: 9385
+    mode: 0o666
+  - path: meta/tests/test_config_integration.py
+    sha256: c5d422ab6da5dade5d20a61693b46f88ead8dc0e2b11b179778e59071d5c4bce
+    size: 6302
+    mode: 0o666
+  - path: meta/tests/test_connection_pool.py
+    sha256: 699ad566c01eb015c0542839dc89310d5f8b24989d636293b03425d021358d95
+    size: 25978
+    mode: 0o666
+  - path: meta/tests/test_consistency_guard.py
+    sha256: 2d1580c84e7563eedb43bc32db800d6d7062ab50497bcce8d3e619fea2ee228d
+    size: 19089
+    mode: 0o666
+  - path: meta/tests/test_constraint_validation_interceptor.py
+    sha256: 7dc7bf43f882f8e2ea1ace4d3da2ea28e8b8b925a41afd893a909ac28ddd6127
+    size: 13664
+    mode: 0o666
+  - path: meta/tests/test_core_models.py
+    sha256: de87ca8212a8340b8bce44e25ee3bd18223b5d708da8d17af8d6f7e70d22e544
+    size: 18108
+    mode: 0o666
+  - path: meta/tests/test_cron_parser.py
+    sha256: 708f1e8cbed9476f43f5efd9d965af067a2362c8dbbdf90c0e4f83165ed69c04
+    size: 6513
+    mode: 0o666
+  - path: meta/tests/test_cron_parser_eng.py
+    sha256: 067454453046505e7349108e6171d38a22fec7f8ed651e42d20cb6b0b1cf1cc1
+    size: 3052
+    mode: 0o666
+  - path: meta/tests/test_cross_domain_relation_perm.py
+    sha256: b813ceacdf5c10bd934ea8d1edd95101d9da6a7e2f16a5af0bb02394c499f1c7
+    size: 21608
+    mode: 0o666
+  - path: meta/tests/test_database_api.py
+    sha256: 333294935d2f6cf97f62ae2a452da408058dd031528cdac59a6ca9600e14d30f
+    size: 6520
+    mode: 0o666
+  - path: meta/tests/test_data_permission_api.py
+    sha256: be6785e5d9e3b110ec0e928b5b89b9ab17e45446d5149c58f7f0ad8576ed6980
+    size: 4002
+    mode: 0o666
+  - path: meta/tests/test_data_permission_api_negative.py
+    sha256: ff8958514c7a377495b46b90e554a85bfbe1feabdd8966b7c67af69307b7f0f1
+    size: 13401
+    mode: 0o666
+  - path: meta/tests/test_data_permission_generator.py
+    sha256: e48e13ae174891afc049157ca2d7183ef40937c9fe124fe49aa9b2bd11aef2ec
+    size: 7068
+    mode: 0o666
+  - path: meta/tests/test_data_permission_interceptor.py
+    sha256: 99917f99c3e3ef68b566be32512aef97207cb238ad3899ee00050e2c41866ce5
+    size: 14496
+    mode: 0o666
+  - path: meta/tests/test_date_format_api.py
+    sha256: 4579f4056422ef89ea221563161e5ced23f9e292323b78c3b6021a448d4a9d09
+    size: 41768
+    mode: 0o666
+  - path: meta/tests/test_date_format_service.py
+    sha256: 533c8ca3a78fffdd2f81bebe4979b480c6f4ebc19ba54abe679f0e9a8087edf9
+    size: 7537
+    mode: 0o666
+  - path: meta/tests/test_db_admin_api.py
+    sha256: c5d5596ddb5cc07568030b68d34b179f648bd5b82affbbdc860641096b9e0ce6
+    size: 3319
+    mode: 0o666
+  - path: meta/tests/test_db_integrity_check.py
+    sha256: 98e067c5b707ea9f76c2b353dc67bc461d06e140b2ef298f0ddb2100c81193ba
+    size: 9118
+    mode: 0o666
+  - path: meta/tests/test_delete_operation.py
+    sha256: bbb96f8c2c4edaa668be5c027af5da2862fbe593cbef3a2106ccae06310c442e
+    size: 5538
+    mode: 0o666
+  - path: meta/tests/test_delete_validation_e2e_regression.py
+    sha256: 6e34cd3472ad5121233a819a33a70f278144dae90b3f929bf15dde38bc846afd
+    size: 16930
+    mode: 0o666
+  - path: meta/tests/test_deletion_blocked_audit.py
+    sha256: 2238d025fce358b7896d8c6d181a6b3213c0ec7ea0ba05c028604e28643c179f
+    size: 24936
+    mode: 0o666
+  - path: meta/tests/test_deletion_policy_restrict_on.py
+    sha256: f96ae986a7e43d91af7bcd757fe15b7584419ac566805b04ab32dcdf393c5cf7
+    size: 18717
+    mode: 0o666
+  - path: meta/tests/test_deletion_service.py
+    sha256: 6483fbb5360590ee799c490e94a6c62f9db70b7355eec608699781bb0736ec90
+    size: 10804
+    mode: 0o666
+  - path: meta/tests/test_derivation.py
+    sha256: 8b598d8b5f649f0316ee84ba86847473b385578d2cc6022314fcd46479f2b2cb
+    size: 9183
+    mode: 0o666
+  - path: meta/tests/test_derivation_executor.py
+    sha256: d3eb0a30bfa7fd81573d722f185e20a877c0776b34c3aacaaef77c9b25d3ef16
+    size: 11404
+    mode: 0o666
+  - path: meta/tests/test_description_search_filter.py
+    sha256: af69dcd5dd919fe230ee63c0cd90581a10f0b3c3dc9362534da958445431e08a
+    size: 12054
+    mode: 0o666
+  - path: meta/tests/test_detail_and_batch.py
+    sha256: 13b960f0e3daebb230485e939bc297f6f97e670dde60d8778bddb1d3869aa2ce
+    size: 11106
+    mode: 0o666
+  - path: meta/tests/test_dev_login_prod.py
+    sha256: d96c29830545e7b38b25e50d4c02eb3851f4aff1768cac36ed5ddfaa3dfad9a4
+    size: 5143
+    mode: 0o666
+  - path: meta/tests/test_diagnose_domain_list.py
+    sha256: b40f47cbfb7c0eed61f1b9d9eed55890d5c7195eadaa287e0ab2f0a7ef1ea785
+    size: 11581
+    mode: 0o666
+  - path: meta/tests/test_diagnostics_api.py
+    sha256: eebf440997f9bd55a32e6561cc0515fa8c6ed90bc347741d6ccee0930ebf8d9a
+    size: 3968
+    mode: 0o666
+  - path: meta/tests/test_dimension_aware_filtering.py
+    sha256: 6dd98292bc63a24985100346e4c7303b635cc2b92b85e3cd24ce177f7e2b61e2
+    size: 11203
+    mode: 0o666
+  - path: meta/tests/test_dimension_scope_and_visibility_v105.py
+    sha256: 48e1456af9a247fa96e1031090c07ef07feb2db89091a81e0e742a8d9f32c71b
+    size: 22429
+    mode: 0o666
+  - path: meta/tests/test_dimension_scope_engine.py
+    sha256: 9c819de0669cbe45c803ebb264afff1148e30126e1553b1bc2565d2f97346119
+    size: 5373
+    mode: 0o666
+  - path: meta/tests/test_dimension_scope_v101.py
+    sha256: 63eb06881381d091694b988612b29576238c7d5165ee766ce7ff847150d8b4ea
+    size: 3653
+    mode: 0o666
+  - path: meta/tests/test_display_name_service.py
+    sha256: 63402cf5eab724ee07f08944af14ede9dc11425df3cb9fc89d75f13a1869959e
+    size: 12067
+    mode: 0o666
+  - path: meta/tests/test_e2e_lifecycle.py
+    sha256: b733628b497bceebdb8b1726b3cb1414e4aa7a38b942b4f89d31872e33c0d6ca
+    size: 24868
+    mode: 0o666
+  - path: meta/tests/test_e2e_test60_v101.py
+    sha256: 25a9a855f8208cc7761f5650f0f8c908b8f21add98e0e0aaacf9b4f24cbf067f
+    size: 4958
+    mode: 0o666
+  - path: meta/tests/test_e2e_tree_to_list.py
+    sha256: 711c2319a49915d56f5a8ad98b356d207b8321b48eb4977b4d14bda842691d66
+    size: 8872
+    mode: 0o666
+  - path: meta/tests/test_edge_cases.py
+    sha256: fbe480b585f086fcadaa1fef9d5e3b3949d69f5c1ef9eee8aae04a7d17b2a206
+    size: 17832
+    mode: 0o666
+  - path: meta/tests/test_enrichment_and_search.py
+    sha256: da4692538ba8aa31ee390f4b6c0143871ef55777fdebc5b20e77ce005977d61c
+    size: 7215
+    mode: 0o666
+  - path: meta/tests/test_enrichment_engine.py
+    sha256: ced8fb683f0a1fe65e73566c4ac537c9a417f542a1b3d38c2629bc861f323980
+    size: 32531
+    mode: 0o666
+  - path: meta/tests/test_enrichment_engine_cache.py
+    sha256: 27d1222a06197ca97163b9a4c50f010a49fc6887d73a50882b16edf6c3020264
+    size: 6102
+    mode: 0o666
+  - path: meta/tests/test_enrichment_engine_enum.py
+    sha256: b3694e21ccc06faeca8f79a7aedab657861774ab191e3d15dad536ba11c14be6
+    size: 5513
+    mode: 0o666
+  - path: meta/tests/test_enum_api.py
+    sha256: b03d6828be36149dc04f3771d958590c7a7e8e92af73b672804a82e640d1f13e
+    size: 34667
+    mode: 0o666
+  - path: meta/tests/test_enum_protection_interceptor.py
+    sha256: 40996497f987baecdd95e742a104854e49bef531dc16af2aaabcee383ae516f1
+    size: 18146
+    mode: 0o666
+  - path: meta/tests/test_enum_protection_matrix.py
+    sha256: a2b956dfed197c7599118a50092881da03fd684040afb78ebfb7f15b9335a357
+    size: 27104
+    mode: 0o666
+  - path: meta/tests/test_error_fix_hints_eng.py
+    sha256: 540913c7e403ba7810a2ccf8c50f8b2d4ab3f5faccd8fa67eb6274d9b579e72c
+    size: 2581
+    mode: 0o666
+  - path: meta/tests/test_excel_design_system.py
+    sha256: fbe482af447f79d54160072c495418125d40d2efe76d798c7099675128c738ef
+    size: 5307
+    mode: 0o666
+  - path: meta/tests/test_excel_field_control_visual.py
+    sha256: 8a27a15959acda9110c8f56228d7e2afe357bd90edff4f0776af4811aa03cbf5
+    size: 23167
+    mode: 0o666
+  - path: meta/tests/test_excel_format.py
+    sha256: a9834c4c22999ad06b0fe92fd51a84709441290c98c4cca3ab423dc03ebbb69e
+    size: 100476
+    mode: 0o666
+  - path: meta/tests/test_export_column_fixes.py
+    sha256: 6b22ebdb4dd3e93340a2f7e9c1ca3b52d53a84bfe8a6d3a4551efbfca3722c62
+    size: 28167
+    mode: 0o666
+  - path: meta/tests/test_export_import_api.py
+    sha256: a33e7d5b3eeb73ff4b9f30d626c9fa14948b4fe600710ca3010dcc7d9090ab2f
+    size: 3407
+    mode: 0o666
+  - path: meta/tests/test_feature_flags_eng.py
+    sha256: 976ae80a73cb7cebbbf5b21470f089f9b66257fdfbb82ba3bb0d947c156843d0
+    size: 5133
+    mode: 0o666
+  - path: meta/tests/test_feature_flags_extended_eng.py
+    sha256: 8e8c2e5191c94e02447acd8195b319d611bd87840e3e57f611e1f6943ea5e669
+    size: 3210
+    mode: 0o666
+  - path: meta/tests/test_field_controls.py
+    sha256: 247f28c2b4dadccc0b9b23fccdc1148bc6cb9998d7f240848e75951d54a08a46
+    size: 16833
+    mode: 0o666
+  - path: meta/tests/test_field_policies_api.py
+    sha256: 9f24754f53f18e851f6453e7f2b1f69f284bfda531491c58b0d0ae2004a1b5e2
+    size: 4487
+    mode: 0o666
+  - path: meta/tests/test_field_policy.py
+    sha256: fa41a55bc05db398c82bff391a6c9485b6c288eed9ab312f06e49bb61b9efc35
+    size: 28439
+    mode: 0o666
+  - path: meta/tests/test_field_policy_interceptor.py
+    sha256: b7f1da7d289d37ae9244fa11bf5a3c79cf2a52695192eb16d9569d78b07a30c3
+    size: 9670
+    mode: 0o666
+  - path: meta/tests/test_filter_e2e.py
+    sha256: ca4f6323aa75c5820d613ea197e0ece25614101464e878d1235b03fec0818b1c
+    size: 11196
+    mode: 0o666
+  - path: meta/tests/test_filter_field_semantics.py
+    sha256: 22ab0a584f13551fac83778145662de9d9eddb2790df1a17361436a47abd417c
+    size: 8395
+    mode: 0o666
+  - path: meta/tests/test_filter_service.py
+    sha256: 2b8f050736de169cee839fad40083bc385189f1e54de81be528f88b52611499b
+    size: 12866
+    mode: 0o666
+  - path: meta/tests/test_filter_variant_api.py
+    sha256: 7ef48d566992366441e3104472679f7cd8973f535096feb83c0f0fdcca67fc0f
+    size: 2277
+    mode: 0o666
+  - path: meta/tests/test_foreign_key_resolution.py
+    sha256: 5924b347a1de7f66f57e1b887908e3776d26d02a10e9bdc46563bd2a4bbdb497
+    size: 15519
+    mode: 0o666
+  - path: meta/tests/test_formula_adaptation.py
+    sha256: 1338b335684edd101556cab72bcc688ad223a3d1a5db13868938d1f1827801ba
+    size: 5984
+    mode: 0o666
+  - path: meta/tests/test_formula_calculation.py
+    sha256: 61bf993e30c02b1de557ec5e4f612c111fd5aef46374a6aab8525a58a71863d7
+    size: 7171
+    mode: 0o666
+  - path: meta/tests/test_formula_integration.py
+    sha256: 49101b4715267b855c6564c1d759dd00dc88ab88ac0055d72767f5a9f7ffb248
+    size: 6443
+    mode: 0o666
+  - path: meta/tests/test_friendly_condition.py
+    sha256: e2c16939bbf8a1614a363fbd865287692ef9fa738ed901cd2fd50374809b4cd8
+    size: 9540
+    mode: 0o666
+  - path: meta/tests/test_frontend_e2e_test111.py
+    sha256: dc0a112ee5cb9a06775736653cac71efd989bdb088c2dcfb15fb7c6321f07a04
+    size: 7328
+    mode: 0o666
+  - path: meta/tests/test_graphql_poc.py
+    sha256: d1d257ca1ba59452bd765ad1b6416d0771928048313b5412529cb28535763459
+    size: 13282
+    mode: 0o666
+  - path: meta/tests/test_graphql_sdl_consistency.py
+    sha256: 065ca26724f6b3e462b7ba2a09a02db150271cbea1285fa0abaa5665db9211a8
+    size: 3903
+    mode: 0o666
+  - path: meta/tests/test_hierarchy_filter_api.py
+    sha256: 483ca0210a454092ac8e085a9cbfbf60088d1ec61d46eb922064fae9bd7fd9d8
+    size: 23042
+    mode: 0o666
+  - path: meta/tests/test_hierarchy_filter_service.py
+    sha256: 621fc8b205fef95a7bd4a42928a96c5186f7cccb6b4dac921412a49106c07118
+    size: 18071
+    mode: 0o666
+  - path: meta/tests/test_hierarchy_path_service.py
+    sha256: f68e1c3eabfde8a42a67bcfa5cc80cb33836bae9e12d2d5e8eb7be48562ab5b9
+    size: 7150
+    mode: 0o666
+  - path: meta/tests/test_i18n_service.py
+    sha256: 6b618fc3d82966066c41b5091a7e8a500a63d30a8b779a981220ab120d416176
+    size: 4073
+    mode: 0o666
+  - path: meta/tests/test_import_export_api.py
+    sha256: 69daf71368dbde7bb33c195bb5aa8a02d866a816b9597ea4c33ebd23576b7b37
+    size: 192343
+    mode: 0o666
+  - path: meta/tests/test_import_export_n1_optimization.py
+    sha256: a4af89572f846fb46c3739752015f0a49e574bf53df26c4e49ede186d067a720
+    size: 10868
+    mode: 0o666
+  - path: meta/tests/test_import_with_parent_resolution.py
+    sha256: 282e06d3825ab2fd7ecb38255f460184c9d0d67ab89a214d9aae0f266a16ff5e
+    size: 13348
+    mode: 0o666
+  - path: meta/tests/test_intent_api.py
+    sha256: 7236a80355a81ae3bc9ca81b07384d684f29feae59f3f4a4ca0506b5ebabbefd
+    size: 4804
+    mode: 0o666
+  - path: meta/tests/test_interceptors_unit.py
+    sha256: e99b38d68b8301cca54620e8dc77cd82aafcbf86623ffe6ffb4e74073d859014
+    size: 40434
+    mode: 0o666
+  - path: meta/tests/test_is_admin_v1.py
+    sha256: 599529fd53f2020095c287d67a448d06aec415db86996eae1f1d748dc40e5b48
+    size: 3533
+    mode: 0o666
+  - path: meta/tests/test_key_template_api.py
+    sha256: c45b8fe8f9b46744cb3dd056927d0efddfc1466f706ef1e6cfedca0e67c9ae93
+    size: 22485
+    mode: 0o666
+  - path: meta/tests/test_key_template_engine.py
+    sha256: f46088d7465870ade1ac6cb76b1e638b058d1f996ada92d2c1f93808cd2f2af6
+    size: 15576
+    mode: 0o666
+  - path: meta/tests/test_key_template_interceptor.py
+    sha256: eac317215d9f43d2946d6a636c969f3e08b5c2757ea2cea2cd18b7b5dfcc8106
+    size: 6659
+    mode: 0o666
+  - path: meta/tests/test_key_template_interceptor_rel.py
+    sha256: a822433e32aebba545e1f77593c1fd073a3d805841b55fa396e8d0c51b5602f4
+    size: 9179
+    mode: 0o666
+  - path: meta/tests/test_key_template_user_editable_v1_1.py
+    sha256: c3a65ff632bb7ebb4fef45ca16f2d1a512d9943d6c4049f9a4d700828d83cab9
+    size: 9065
+    mode: 0o666
+  - path: meta/tests/test_key_template_user_editable_v1_1_e2e.py
+    sha256: 36f647972141af1a5805140c4fab5110a6f554c205104432f885935ad18b6fe0
+    size: 16883
+    mode: 0o666
+  - path: meta/tests/test_leaf_domain_issue.py
+    sha256: 0873253aac4bcdcbaace3e784d6f442d6160aa9e2fedfa3cde0ae8cf377674c1
+    size: 7916
+    mode: 0o666
+  - path: meta/tests/test_lock_interceptor.py
+    sha256: 149a23c8ea37edaef3d259c1976510262c88635958431c656bf23fb600e9403e
+    size: 6552
+    mode: 0o666
+  - path: meta/tests/test_log_business_interceptor.py
+    sha256: a64997ab42430424bef5c79e9a4a595a7ba0dfcee6de6a68e82554d9f4e49a51
+    size: 18001
+    mode: 0o666
+  - path: meta/tests/test_log_e2e.py
+    sha256: e02dae6c5787601578f4733290ecb687d22c3aae64151607a9d0f69dda11414e
+    size: 12165
+    mode: 0o666
+  - path: meta/tests/test_log_entry.py
+    sha256: 5a2f385f934ff43dfb227aabb5e63cc588087b572a856610db5b8f8b4917cb02
+    size: 9166
+    mode: 0o666
+  - path: meta/tests/test_log_enums.py
+    sha256: 6584f7829bbf810a47223d955cfc645514bf901eae00bea6aa2a394ea56ef7f8
+    size: 7596
+    mode: 0o666
+  - path: meta/tests/test_log_filter_service.py
+    sha256: 4a9e6a22270e4947c5a96d32ada29171115d382dcf344a7d6acf9e6fda1d8524
+    size: 4213
+    mode: 0o666
+  - path: meta/tests/test_log_operation_interceptor.py
+    sha256: b8bbf3155d6ccc3b4f20a1c49bc6e17766c617ab30931d2bd7d58d25785ffb54
+    size: 19186
+    mode: 0o666
+  - path: meta/tests/test_log_security_interceptor.py
+    sha256: bec7a9b776ac407142601ddd0e731a45de2f76bd877d345a7b4b78f3b945cb9c
+    size: 13463
+    mode: 0o666
+  - path: meta/tests/test_m8_api.py
+    sha256: de20665f7a0f1da519f2d84e55013dcd7f61082d4d7d464c76d74ec785fc4ef6
+    size: 4255
+    mode: 0o666
+  - path: meta/tests/test_management_dimension_api.py
+    sha256: 6a70094530990db44782c7174fea8dd11a6fe705f577cec12dbe0f542bf9ab83
+    size: 19227
+    mode: 0o666
+  - path: meta/tests/test_manage_api.py
+    sha256: ef3bb7a39ead185e20e40684d174af58a3d8d111735d6cc833ef06b955a982a8
+    size: 10925
+    mode: 0o666
+  - path: meta/tests/test_menu_auto_generator.py
+    sha256: f4f0cd6a1ac089bb1fc108241be70aece9fee7ed36efdb34faf282db955f5654
+    size: 5068
+    mode: 0o666
+  - path: meta/tests/test_menu_permission_api.py
+    sha256: 89eaeff42b475e49cc0e88f8838e3b6d97942b93f0a8dfb286d3630563613055
+    size: 7094
+    mode: 0o666
+  - path: meta/tests/test_menu_visibility_h2_h3.py
+    sha256: def8895a25939e846c1685a817f7ee05f1d885bf1e77fc8a0489e6082cac011e
+    size: 10546
+    mode: 0o666
+  - path: meta/tests/test_metadata_completeness.py
+    sha256: 2397bc0841673de8f9364cfffc403e242a79dc77fcb814602472c92f49eea121
+    size: 9967
+    mode: 0o666
+  - path: meta/tests/test_metadata_driven_validator.py
+    sha256: 52f080e2d9898924e6703f45ee3afbd26455597cce466f0162f9bcf9dd7823ac
+    size: 22584
+    mode: 0o666
+  - path: meta/tests/test_metadata_resolver.py
+    sha256: 3e5691e2845df03c9b4c4c2d4fa14564f0f90e53f51b3c251376bef07988ff05
+    size: 9195
+    mode: 0o666
+  - path: meta/tests/test_meta_api.py
+    sha256: f83e29a403c2338c707ee0024ccc418403b041a0bd95e71ed33846fd2e5d4e1a
+    size: 12916
+    mode: 0o666
+  - path: meta/tests/test_meta_utility_routes_api.py
+    sha256: f9518916d57bccb29af4a524997bf2aa1102802b5b00e9ccb533b1662f1546b6
+    size: 4593
+    mode: 0o666
+  - path: meta/tests/test_metrics_api.py
+    sha256: d39985f07206bd31413da02d03589a3f860613fab353fc0804aabad448800fe0
+    size: 3479
+    mode: 0o666
+  - path: meta/tests/test_metrics_store_eng.py
+    sha256: 701ff5a63dc3b826cff3a3e31b698e501fa094361986b4f4c975995daf98b5c2
+    size: 4126
+    mode: 0o666
+  - path: meta/tests/test_migration_runner.py
+    sha256: 074c91b2f40f7f8f2255a5d8ef305fd4a2b86c940c9e29ba9b1ac37b4c3c90e2
+    size: 6811
+    mode: 0o666
+  - path: meta/tests/test_navigation.py
+    sha256: aa558b4a40053fbe9387446bd45b057baec37059bf7eadc6767dc2ab21bce741
+    size: 11360
+    mode: 0o666
+  - path: meta/tests/test_nested_where_dsl_eng.py
+    sha256: 7d141e1022d1d95716d1b89d35eb7866b60b973d536c1ebd6ec31be41fe8dea6
+    size: 5618
+    mode: 0o666
+  - path: meta/tests/test_notification_api.py
+    sha256: f4f5c0c5cfe8959c32829369cd996d19bf675c2e7eb4a46fb940fc112282d8d8
+    size: 4317
+    mode: 0o666
+  - path: meta/tests/test_n_plus_one_optimization.py
+    sha256: b5c6702de431efe0692d92d5b4c59e513a626c2682799fe0f4e942137ce1aa0b
+    size: 16011
+    mode: 0o666
+  - path: meta/tests/test_object_adaptation_user_group.py
+    sha256: ec2b7105792915da5468816272e25e4cf745fe1a9614f170b4a6fa9c5841d689
+    size: 16054
+    mode: 0o666
+  - path: meta/tests/test_object_identity_api.py
+    sha256: bf10ad21bff92ac6953442e9bfe5e211e5d7eb458cc0a19e6dbe6469a19363c4
+    size: 2644
+    mode: 0o666
+  - path: meta/tests/test_object_identity_comprehensive.py
+    sha256: 90e143d3af21388f4d1e2428b2f4540dd1ff24b5f334dc3a345354a4d026861d
+    size: 18109
+    mode: 0o666
+  - path: meta/tests/test_object_identity_service.py
+    sha256: e56f2cc0ef12208b638d9a613858991bb36fc47a7c54b82f64bab69a890c8e18
+    size: 7786
+    mode: 0o666
+  - path: meta/tests/test_operation_log_interceptor.py
+    sha256: a144a7a2e3e4a057aa7e14d8ba749d06aecbfe6f6bfccbf6a6fde0f72d116d3c
+    size: 5919
+    mode: 0o666
+  - path: meta/tests/test_ops_server.py
+    sha256: f00f012ddde890337b455d0c71b5f4d6bbbcf00a91ac938e0c3bd96b8a4ab3d5
+    size: 14787
+    mode: 0o666
+  - path: meta/tests/test_optimizer.py
+    sha256: 443135061a8e5367ed5c2753acae7b16324e1ecabe77f4bb853a7626a73c563a
+    size: 9713
+    mode: 0o666
+  - path: meta/tests/test_overlap_api.py
+    sha256: bc6945bb14b83132a226f997cb1fbcee11befe5e7c9404eafb320939fd24acf3
+    size: 3215
+    mode: 0o666
+  - path: meta/tests/test_owner_field_protection_v109.py
+    sha256: 73b0dd3627c8cf13aa105256fbde24727a1cece2a383d948c8b0d819b21406be
+    size: 8475
+    mode: 0o666
+  - path: meta/tests/test_owner_scenarios_comprehensive.py
+    sha256: 332fcec2ac8985e52fe49ab42220ca11d92c6964937e09504bbeb881bcb22eb4
+    size: 28311
+    mode: 0o666
+  - path: meta/tests/test_owner_transfer_api.py
+    sha256: 0aea3ab09279b1b6fd08db7282abbf5903e83e638bf1cc42a94c4ba85f2c212b
+    size: 2571
+    mode: 0o666
+  - path: meta/tests/test_p0_meta_enhancement.py
+    sha256: f5b4d0278f8df620361986f4809a87aac6e73e8f1908f8c5cbc0ba8ec5de2676
+    size: 18926
+    mode: 0o666
+  - path: meta/tests/test_p13_e2e_service_guard.py
+    sha256: 2edf7044b1cf65b5aec32d1dd71f4250f60ce75e125cee3e78fa0ff88b941402
+    size: 14434
+    mode: 0o666
+  - path: meta/tests/test_parametrized_crud.py
+    sha256: 4d8280e6999dabe14b2271d5602a5fec3a40d3f80057cdc3839dfb9c8148441c
+    size: 6509
+    mode: 0o666
+  - path: meta/tests/test_performance.py
+    sha256: 51fc0af69836639d5ec83aefc7586bb2cc1a15f7da1c7488a563fd4d4551156c
+    size: 27336
+    mode: 0o666
+  - path: meta/tests/test_permission_bundle_api.py
+    sha256: 036a91064fb4c3ab7f119938d984a53615afb574bea044c9a9554d1831d4143c
+    size: 8539
+    mode: 0o666
+  - path: meta/tests/test_permission_rule_api.py
+    sha256: 937a241dd5e21ef1232a729c3311ca9f999d04ed80f2888c1b33f3e0601f6dab
+    size: 4741
+    mode: 0o666
+  - path: meta/tests/test_permission_rule_api_extended.py
+    sha256: 3e3dea46e6bf984333ac797af85232c75472f925cf569a940d3bc8334eb62337
+    size: 5706
+    mode: 0o666
+  - path: meta/tests/test_permission_rule_api_negative.py
+    sha256: 23f0a942583c9e959ff9d64a940a0815512fac54c9911bb165f6b7f515c9b2cd
+    size: 9989
+    mode: 0o666
+  - path: meta/tests/test_phase3_final_verification.py
+    sha256: 0cbacc5a89db318cc3a4852a982a3e61dd10d31d0cce6fbfbc7026704ddc8b92
+    size: 18810
+    mode: 0o666
+  - path: meta/tests/test_phase3_integration.py
+    sha256: c0a312c9bab8f1633d67b08545bc2c17712c03a6a65f991341960dfbac139a02
+    size: 21772
+    mode: 0o666
+  - path: meta/tests/test_preview_service_init.py
+    sha256: 4c33d3593b45b094a01789350edb4aa8f8ff52a04756ee7bd97eccce24838f47
+    size: 504
+    mode: 0o666
+  - path: meta/tests/test_pseudo_variables.py
+    sha256: c925da98446bf029b3605660df371389a93694224f2defc388e1862a4473538d
+    size: 11333
+    mode: 0o666
+  - path: meta/tests/test_queryservice_dataperm.py
+    sha256: cc7fd32a17141d10b573afeefbc7a3a812efa061527690527c2076c6f51d75e4
+    size: 27858
+    mode: 0o666
+  - path: meta/tests/test_query_allow_list_eng.py
+    sha256: 09c35a1dc845b7f43a58d672f0ece52d1c25fe6133f791173d96dee4d58114f2
+    size: 5899
+    mode: 0o666
+  - path: meta/tests/test_query_api.py
+    sha256: 01598465978c9508b71f9b20c51da782445133776a1c4bd0baaee507174c580d
+    size: 2742
+    mode: 0o666
+  - path: meta/tests/test_query_builder.py
+    sha256: a91c6267a106cda087390519ea4f40019e56bdcafbdde8c3582be15a1a5d8631
+    size: 11324
+    mode: 0o666
+  - path: meta/tests/test_query_interceptor.py
+    sha256: cc3eabfa9ffd1054e2d1561675d43d19b27ed8c484a4b00c94ee68250ce90c2c
+    size: 13953
+    mode: 0o666
+  - path: meta/tests/test_query_service.py
+    sha256: a6ad6949d38252fdffdf9344fb1eb1946712eabd12fcd1b288a2cd958db0b59a
+    size: 9701
+    mode: 0o666
+  - path: meta/tests/test_query_service_computed_unit.py
+    sha256: ae5eb9327d7203d543f54915ac0fd22efa44ac074fd0dc1907741fb535a3c726
+    size: 13271
+    mode: 0o666
+  - path: meta/tests/test_rate_limiter.py
+    sha256: cd5d272d25b7b20b97256197d954293a0d00e1943d7969aec715536506911767
+    size: 3624
+    mode: 0o666
+  - path: meta/tests/test_real_data_scenario.py
+    sha256: e7152d7d9ded539b25f52f21484a09181dceb8541c07d73f55313555f81bc1f6
+    size: 10883
+    mode: 0o666
+  - path: meta/tests/test_redundancy_registry.py
+    sha256: ecff1294dd170013e1d04e33aa2354efe3459d9a1d2dbd3ebcaecb03f2d8b568
+    size: 20750
+    mode: 0o666
+  - path: meta/tests/test_redundancy_registry_enum.py
+    sha256: 3c189f0675a07d74c554552b0950133bbe5265cdf18e2bda22923f0c55828a9e
+    size: 8429
+    mode: 0o666
+  - path: meta/tests/test_relationship_crud.py
+    sha256: 0056444b3a262f585cc2842a1ddb87c35a57818cba40d585eaf34cba96c9404b
+    size: 11707
+    mode: 0o666
+  - path: meta/tests/test_relationship_scope_type.py
+    sha256: c9fe62fbbfd825c759dc628f3818567986c41d92eb0b388f0e6f68a7240cccb9
+    size: 22533
+    mode: 0o666
+  - path: meta/tests/test_relation_api.py
+    sha256: 267b379490c3205bbb8009a6b029515de667dc09c460a568561f1edf091d680f
+    size: 5749
+    mode: 0o666
+  - path: meta/tests/test_relation_endpoints.py
+    sha256: 5f0c7506a961d788ed0a88788e5cf465bc3c9909642599faca0915ab36f51569
+    size: 8675
+    mode: 0o666
+  - path: meta/tests/test_role_api_negative.py
+    sha256: 7a4ef4a9a6fb5ab9aa1230cf8bacb07f43a7cf724f51e94539fefa7c92433b9d
+    size: 10272
+    mode: 0o666
+  - path: meta/tests/test_role_menu_dim_api.py
+    sha256: b689bad6b3823fb0afb91d9a19ced84456eccb1167f641cd1e04721f4cbfe6c4
+    size: 6703
+    mode: 0o666
+  - path: meta/tests/test_rule_chain.py
+    sha256: cd3074303f75e31f305e63e464c42a1196fbd07746fb3e32ae1738781f88113e
+    size: 10355
+    mode: 0o666
+  - path: meta/tests/test_rule_engine.py
+    sha256: 5362c8f0998ffae73eec0e7bc00b5c506a63c87f7a06cc65eb275783c46e9f68
+    size: 18379
+    mode: 0o666
+  - path: meta/tests/test_runtime_resolver_v101.py
+    sha256: b2690a2593a53e4dfb0b5d92fb6cbed718047df8917498a7030cb10cd9572edc
+    size: 3401
+    mode: 0o666
+  - path: meta/tests/test_runtime_view_config_engine.py
+    sha256: 0b1561b6e5525dec73fc89c40e1185fa8a9aaed2f5336cc0e16780f8eb90c434
+    size: 7473
+    mode: 0o666
+  - path: meta/tests/test_safe_expr_evaluator.py
+    sha256: f153bc2f9819602105c90b85fb071c0cf20b0d1da46acf1808246c257a66a127
+    size: 8197
+    mode: 0o666
+  - path: meta/tests/test_scheduled_tasks_comprehensive.py
+    sha256: 53248cf3f3bffbf19df90b37a77c0f4059dc28a9242bc51e707b7054a8ec2a6c
+    size: 33674
+    mode: 0o666
+  - path: meta/tests/test_scheduled_tasks_e2e.py
+    sha256: 9c350717232fa941d6479e78bb99c18cb076fbce2aa47c03242b4e3066aba151
+    size: 33171
+    mode: 0o666
+  - path: meta/tests/test_schema_api.py
+    sha256: 6d5298aab3c32e564af7db997bcbef298773fb30d70dd00439046e781f6abc25
+    size: 9189
+    mode: 0o666
+  - path: meta/tests/test_schema_generator.py
+    sha256: c8d4999270a4b3b1f87ce2886ecf0cabac97210af38f759f65a520a86a438d7e
+    size: 10128
+    mode: 0o666
+  - path: meta/tests/test_scope_evaluator_eng.py
+    sha256: fc464142878608b9a53a6aa88782180af1ff4baae9a5d1e73b8298ba05d8e4a9
+    size: 5021
+    mode: 0o666
+  - path: meta/tests/test_scope_tree_regression_v034.py
+    sha256: 85a69113b2bc017ecd477f16713d4d22a716266e6d205788f85699f5b422fe36
+    size: 26138
+    mode: 0o666
+  - path: meta/tests/test_security_improvements.py
+    sha256: 8ed9c00b2ea5dd72e1d7cf9ede4d3c95750c33eab461958ceb3c9aaebd408b17
+    size: 17542
+    mode: 0o666
+  - path: meta/tests/test_security_log_interceptor.py
+    sha256: 6817c9e7880835085f417b96c20e7ae23b38cb2e822eec946654f9a9173cda80
+    size: 6456
+    mode: 0o666
+  - path: meta/tests/test_security_pentest.py
+    sha256: 39ccf0fb0e4c0a492b23e4e2b1ea60a057930db1a9a22b7757b4b58c78c5667d
+    size: 14689
+    mode: 0o666
+  - path: meta/tests/test_services_integration.py
+    sha256: f62fb589860a6f8850ffb525bc308f6fda244782660f51b9b6d162b4f60f827b
+    size: 7139
+    mode: 0o666
+  - path: meta/tests/test_sorting_capabilities.py
+    sha256: 425cd39ee9eba637f9003540c0ae11df18bc0527bd8a5b8bda08a84eec8ce1cc
+    size: 61993
+    mode: 0o666
+  - path: meta/tests/test_sql_adapters_filters.py
+    sha256: dbb28a8af6bb1ff3e7f4f203d08c7493582e5e3216a690fe34d2484e3cad19dd
+    size: 2865
+    mode: 0o666
+  - path: meta/tests/test_sql_config.py
+    sha256: 8d46c045829b887ab1df7124472db04f70d8da7afec764bb8183ea07d8cd516a
+    size: 5009
+    mode: 0o666
+  - path: meta/tests/test_standard_action_loader.py
+    sha256: 1ad7e1413b31264e179d456a5e1e6b78367a725d44c9eb95ddbd4bbcf7180a65
+    size: 7590
+    mode: 0o666
+  - path: meta/tests/test_startup_checks.py
+    sha256: 402386596e46fa019bffc642cd94557e29a402bda5f10a121e48211c8b32cdb6
+    size: 10611
+    mode: 0o666
+  - path: meta/tests/test_state_adoption_verification.py
+    sha256: 101552d495025973c04d31c2ca8c8f6f974d22505f9b97c47d8a05669cb1310f
+    size: 12094
+    mode: 0o666
+  - path: meta/tests/test_state_api_and_formula.py
+    sha256: 4d6c462ee460f1251ebeba1c3d0914a7b62f97bdc5a7df8e11a8d8a45ce810d5
+    size: 14373
+    mode: 0o666
+  - path: meta/tests/test_stats_api.py
+    sha256: fdc7bf0d0c058e0d058e51112c892f69e050052ca417decee78f37595bcdadd8
+    size: 5025
+    mode: 0o666
+  - path: meta/tests/test_storage_filtering.py
+    sha256: 3b058b79b954e56bfbbf2569755551618a04dc95f105c10f9d4215cdc277d351
+    size: 9335
+    mode: 0o666
+  - path: meta/tests/test_structured_logger.py
+    sha256: 8f8d24378735e8b2c7886a8576ab0f59a02730db114c93a37ce5a57b2c00708c
+    size: 11417
+    mode: 0o666
+  - path: meta/tests/test_structured_logger_integration.py
+    sha256: c1493a1211da22f805123988b3d3b571c0bcbf63975adcbf8d58cb3f4d3ab033
+    size: 7755
+    mode: 0o666
+  - path: meta/tests/test_subscription_filter_service.py
+    sha256: ff9ba66b4236aed3325914d60adcf3aec2ff61a27e13198a9cda50cac6cb1dea
+    size: 13505
+    mode: 0o666
+  - path: meta/tests/test_table_name_validator.py
+    sha256: 8c07c9c1b48cd2be2b0e27b612d576bd4ec10d167bf37f7e3d013be9825c2095
+    size: 7619
+    mode: 0o666
+  - path: meta/tests/test_table_name_validator_eng.py
+    sha256: 0bca5f2e27206cfb04dce95d73d508e0ff5b121249425e39e53e9a4e05a6a18a
+    size: 2683
+    mode: 0o666
+  - path: meta/tests/test_task_api.py
+    sha256: dd45783bccf57195256083d9a8f2b29f83ec2f79f5778c194a003ae8f4d6986e
+    size: 1653
+    mode: 0o666
+  - path: meta/tests/test_task_handlers.py
+    sha256: 67282079a8fefd45509e5e735eaae1965eb58f50528330f888f9e3d569a986e8
+    size: 9779
+    mode: 0o666
+  - path: meta/tests/test_task_scheduler.py
+    sha256: 4d3e9b1c7313ab49f08c24c62abf6fecb2f0761cbfddb892cfd7697c70036b59
+    size: 21505
+    mode: 0o666
+  - path: meta/tests/test_token_blacklist_service.py
+    sha256: 2ce8625ef6685d7ed32fb05c506aaf1581e2a9c276d073f65872659495af8872
+    size: 2782
+    mode: 0o666
+  - path: meta/tests/test_token_version_service.py
+    sha256: 96397b5fc02b50ee3e02b043efa51f40b9207ae0f7982821c2b8bc6cc7a4eb7c
+    size: 11639
+    mode: 0o666
+  - path: meta/tests/test_trace_id_eng.py
+    sha256: 6d17cb486d82238a8e5ec62920c54b21c0d758b942bbdf62596a0092b08afd0e
+    size: 1845
+    mode: 0o666
+  - path: meta/tests/test_transaction_advanced.py
+    sha256: 799ead593b69c8759b527505942541cc7c9441669483a6353f0db29aa8ba2697
+    size: 7952
+    mode: 0o666
+  - path: meta/tests/test_transaction_basic.py
+    sha256: f850430adb8f04ea41d71ec38f62ff76472e61204d4bdeecb1402cbaccfa61cf
+    size: 8593
+    mode: 0o666
+  - path: meta/tests/test_transaction_consistency.py
+    sha256: abd165731450f436ce7299749ad47f89be40a64bb93f246beb1ee58d53f18254
+    size: 19752
+    mode: 0o666
+  - path: meta/tests/test_ui_actions.py
+    sha256: 23518a7dd0df88ffee30147649688bed44384ad27ade1ba9790da07a66e73511
+    size: 14691
+    mode: 0o666
+  - path: meta/tests/test_ui_config_enhanced.py
+    sha256: 48c2eb32aea0c4b6bd600302d978b56bc1516140acf25abbc53b95d14ceecb41
+    size: 5203
+    mode: 0o666
+  - path: meta/tests/test_unified_meta_model.py
+    sha256: fcdd153625e4162955c6edd351649ed40711d1e4bcabd4f77c4172d481a16824
+    size: 10876
+    mode: 0o666
+  - path: meta/tests/test_user_api_extended.py
+    sha256: 5c59401845f7a805e75f27c6ca7172259f47e05279834978481258e13fa2bb88
+    size: 8752
+    mode: 0o666
+  - path: meta/tests/test_user_create_must_change_password_regression.py
+    sha256: a4db105715df0d8e201ff6c5bf1ef5b2e535ff2f43c67cab78dfafd95dfd3261
+    size: 28753
+    mode: 0o666
+  - path: meta/tests/test_user_group_api.py
+    sha256: f3a7faf9d2263ba0f38f9abc804a84aaf5b789fd764b893d5256357207de9bed
+    size: 4519
+    mode: 0o666
+  - path: meta/tests/test_user_group_api_extended.py
+    sha256: 8b9773ae21c2c48dccf8ebf0f3c793bdeb929ea2c6fd48cfd6c66d82cc67506d
+    size: 7050
+    mode: 0o666
+  - path: meta/tests/test_user_group_associate_audit.py
+    sha256: 4c3da693b2535ab8fdcf218ee20d1205ca7486f9ed2f50a6a6123495b885178d
+    size: 8727
+    mode: 0o666
+  - path: meta/tests/test_user_group_associate_audit_negative.py
+    sha256: bc596a30221a3393426a3bb8b89d7a0d9ec38c6c01209ca1f8ed88417305aa17
+    size: 9241
+    mode: 0o666
+  - path: meta/tests/test_user_group_service.py
+    sha256: cdc7d69d0f238a32c1daaf10b4e0a046cc2f63b1ad9417a8bc2cdb6c770e3d18
+    size: 15793
+    mode: 0o666
+  - path: meta/tests/test_user_group_service_edge.py
+    sha256: 6bb883758ac64a51a8255e213dc2ba72d75580f2dd0e4bdb1d41407ff6003d9f
+    size: 22548
+    mode: 0o666
+  - path: meta/tests/test_user_scenario_exact.py
+    sha256: 6c414b97fdc9c0d6a93d216208945a3e36457c66a68c14943822e42e925b14e1
+    size: 9335
+    mode: 0o666
+  - path: meta/tests/test_utils.py
+    sha256: 6a3152adc542eb880cad0916f75c96233cfc8abc8f60e34381b05a33f2a2b50f
+    size: 4894
+    mode: 0o666
+  - path: meta/tests/test_v020_v027_regression.py
+    sha256: 632db4bf8d876cf0db816628d7e1070fa2b85bae71191fb82fd49ddb2a285450
+    size: 30376
+    mode: 0o666
+  - path: meta/tests/test_v038_regression.py
+    sha256: f85eb3817d118192a8ae72814a65818f4cbd7bb1f490c64b2ee604e7d4ef73d6
+    size: 13595
+    mode: 0o666
+  - path: meta/tests/test_v10_verify.py
+    sha256: 8f38168b259a09ea88c0ed0c52ff8d12ea912580d22246c1a680b60cf5d44e94
+    size: 1590
+    mode: 0o666
+  - path: meta/tests/test_validation_messages_eng.py
+    sha256: 33d24423273d4e43c6577173bc4adaf01e0e5ba98589e5728615019d4681a49f
+    size: 3388
+    mode: 0o666
+  - path: meta/tests/test_validation_message_registry.py
+    sha256: 1120b63ce222ed9c3311502a9891152917dfb00f56f6972cbee733f48c1c840b
+    size: 14637
+    mode: 0o666
+  - path: meta/tests/test_value_help_api.py
+    sha256: d106c8240abdcb3ce9e0745e51b5f712bb49be9242ad373dec6a83edb3b5959c
+    size: 1736
+    mode: 0o666
+  - path: meta/tests/test_value_help_pick_by_code.py
+    sha256: 5ce4b78173540fedadc4e9eb4f4113ef3006b3074ec5049081acf599ca69c5c5
+    size: 10479
+    mode: 0o666
+  - path: meta/tests/test_value_help_validation.py
+    sha256: 66c9dbc3cf8662956e79bd5425e962f1801979d2bdb52cfb794b07ba7b084576
+    size: 15239
+    mode: 0o666
+  - path: meta/tests/test_version_cascade_delete.py
+    sha256: c391f39ea2a640f97ea663588a39b1c32b49b8b2f284db2dbf802a079b8f6fc9
+    size: 16479
+    mode: 0o666
+  - path: meta/tests/test_version_context_interceptor.py
+    sha256: 9dab5aef56bc79ab305f26f32a21ac2489b555227f1e728af9281579a039a455
+    size: 5007
+    mode: 0o666
+  - path: meta/tests/test_version_visibility_unit.py
+    sha256: e7d40002fad53ec28d9926c7e71770e150a96b27ba0a264a88094c7d56e44345
+    size: 12939
+    mode: 0o666
+  - path: meta/tests/test_view_config.py
+    sha256: 3eb7373b4b929ff281ba94bf16993bfbaa9e2e1b009c9865eb31e92a4aa17c99
+    size: 10047
+    mode: 0o666
+  - path: meta/tests/test_webhook_service.py
+    sha256: 80c04e6bb0b235f1d655eddbbb1051b148f265d11d5d115a23c026da562769c5
+    size: 6526
+    mode: 0o666
+  - path: meta/tests/test_websocket_manager.py
+    sha256: b256cfa032863b534882711026bfe40d953de48d1cc1c92692d07a688f87b22e
+    size: 7377
+    mode: 0o666
+  - path: meta/tests/test_write_scope_e2e.py
+    sha256: bc6a7fd7afe7638c1fa95e6b45a79d3d4614842e3376ce260fd1feb740e5b11a
+    size: 8391
+    mode: 0o666
+  - path: meta/tests/test_write_scope_interceptor.py
+    sha256: 20253cc3179b6b94aa3421615a43b2a2057cef907ee11307cd98cdf4fc180906
+    size: 19819
+    mode: 0o666
+  - path: meta/tests/test_write_scope_v2_1.py
+    sha256: d88a08672273ebab1d8e86c6e14711e121f58402873631d3b7caccd47b2cf50e
+    size: 43892
+    mode: 0o666
+  - path: meta/tests/test_write_scope_v2_1_2.py
+    sha256: 3de0af35a74c82e13c8cf2776ea30315fe5d8dc25106d27470f56e1c55d89393
+    size: 30424
+    mode: 0o666
+  - path: meta/tests/test_yaml_loader.py
+    sha256: a7c666e440038b6de1c42e1a80a6745186a2d1171bc64ca40eed9cfb8445c1bb
+    size: 14633
+    mode: 0o666
+  - path: meta/tests/test_yaml_single_source_of_truth.py
+    sha256: dd1e7d85f6b7a44b116b7de1506a8e4058cc51bc564626690b9506bbc35827c6
+    size: 15273
+    mode: 0o666
+  - path: meta/tools/sync_schema.py
+    sha256: 29f264f65d8d8b0f71386320933ec5166d4bc12d31319bd04136c61a9204809d
+    size: 11959
+    mode: 0o666
+  - path: meta/tests/api/test_enum_extended.py
+    sha256: 896569601ef42856ffeb12566c31b4e4674e0314383e4bea1e781b45126fa0e1
+    size: 5545
+    mode: 0o666
+  - path: meta/tests/api/test_extended_apis.py
+    sha256: a8c0c0bc538f32d01acd93c90a3957486222a0edb0e1a27264cd4b382117f636
+    size: 11118
+    mode: 0o666
+  - path: meta/tests/api/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/audit/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/auth/test_token_service.py
+    sha256: 5c5074c55c703b783fa8e04108938545af727cc9efc2284da095abd3f1a5033a
+    size: 4238
+    mode: 0o666
+  - path: meta/tests/auth/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/bo/test_formula_bo.py
+    sha256: fa8963761ff114510319acfb30efd28993975c1b44b13fd7296c660eceef3524
+    size: 5130
+    mode: 0o666
+  - path: meta/tests/bo/test_hierarchy_bo.py
+    sha256: 3b596aa45ba2f0058ff6d0f4d80e080963e6aa1ac546d70782c87af27f9208a3
+    size: 16420
+    mode: 0o666
+  - path: meta/tests/bo/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/core/test_core_utilities.py
+    sha256: bee722232638d2953ae1956c9325dc5414129c559bfc1ae756173259aab578cc
+    size: 4691
+    mode: 0o666
+  - path: meta/tests/docs/v3.10-gevent-socket-issue.md
+    sha256: 83d70e2c32c5686d9d90914fa4c48cff6cc3be2dd94db4936cf3c6ad3e941eb5
+    size: 1010
+    mode: 0o666
+  - path: meta/tests/exports/role_template.xlsx
+    sha256: e8e9586ec43196afc9ea1fff52937cd01f52a1138345b4ef5094c57954b64b34
+    size: 9269
+    mode: 0o666
+  - path: meta/tests/factories/ai_async_task.py
+    sha256: 692e4270f111a7213535861d1b719e1a988fb572983bceffbff34c706d353f25
+    size: 3165
+    mode: 0o666
+  - path: meta/tests/factories/annotation.py
+    sha256: 90c69f845e3cc5cf2e13fb508336d02b3cae7c3912030e0c74401d948c8e7ff0
+    size: 1566
+    mode: 0o666
+  - path: meta/tests/factories/audit.py
+    sha256: a0fe7d1c7949b9c99cea573ff9729143627187a8c66334c601c37cc86f7fb6b8
+    size: 1623
+    mode: 0o666
+  - path: meta/tests/factories/bo.py
+    sha256: 7178713fd2151ffe4ed344981ee12ee63441eb98aa2c063d86d0eb40dfdb46bf
+    size: 1703
+    mode: 0o666
+  - path: meta/tests/factories/change_event.py
+    sha256: 81b85b1bf1f494a072569672f47d8d8c06378eab3c8981ece74af08b804dd52f
+    size: 3022
+    mode: 0o666
+  - path: meta/tests/factories/change_subscription.py
+    sha256: 2d56b3121f0e467dad7863afdd49a3954ff1974a33baccdbdb8ba49e22bb66ed
+    size: 2589
+    mode: 0o666
+  - path: meta/tests/factories/data_permission.py
+    sha256: bd17e2df2b4dbb6eed8b7f7c1aec0b5e94fd94006cd0e2b6e88460b068a2e7e0
+    size: 2422
+    mode: 0o666
+  - path: meta/tests/factories/domain.py
+    sha256: 4739d25cc110a6367eba8734947d7cfe4851a93acd25f5b5e7c1376b295b2ef4
+    size: 1156
+    mode: 0o666
+  - path: meta/tests/factories/employee_data_scope.py
+    sha256: 209594906dd0048a0ff732fc27e720b85ab51d4d878902d8174ae5e066068223
+    size: 2645
+    mode: 0o666
+  - path: meta/tests/factories/enum_type.py
+    sha256: 3d64aff81d065fdadec8bfdd74f16961f98f23c97411691e08360ed46b44345d
+    size: 3019
+    mode: 0o666
+  - path: meta/tests/factories/enum_value.py
+    sha256: eac06b5e9a2261535d268784c1396d87c020b33ac0176d559d03585179f6ff41
+    size: 2903
+    mode: 0o666
+  - path: meta/tests/factories/filter_variant.py
+    sha256: 0c2f94a7f13c914cefe80f89252bee7bf60e6a683155c989c7d63ba8430eb2f0
+    size: 1754
+    mode: 0o666
+  - path: meta/tests/factories/group_data_permission.py
+    sha256: ae8b1c2ed56520267a47dfbce9311bd9aed55141af69d5bbc830fde7f1341f18
+    size: 2703
+    mode: 0o666
+  - path: meta/tests/factories/import_export.py
+    sha256: 5365117ba638f14dabcc35f463dc5e0c1105c840c953e88e8d75b1d085f03ab4
+    size: 921
+    mode: 0o666
+  - path: meta/tests/factories/menu.py
+    sha256: e495473f50ecc6906090f9bb583411085dbbd552605fa4b61b84a5a4831894c4
+    size: 3443
+    mode: 0o666
+  - path: meta/tests/factories/menu_permission.py
+    sha256: f4b8051e8bb605ad00f4abf62e78e6df1e733eef370a00b0ee0de3c6ed718263
+    size: 2691
+    mode: 0o666
+  - path: meta/tests/factories/permission_bundle.py
+    sha256: 8734cfe60af2ba343e82b506cc51429a74ee419e477b13cac5dd480753ed9d54
+    size: 2053
+    mode: 0o666
+  - path: meta/tests/factories/permission_rule.py
+    sha256: 0fe5e6e3c18e2b0415499873d739b8ea658655c627d7590cb23b96f3d3470f3d
+    size: 2622
+    mode: 0o666
+  - path: meta/tests/factories/product.py
+    sha256: 17e44955cace24d9270f8fea4e198d4d4fe83b9b57fc10b662808b0bba8d4a28
+    size: 1219
+    mode: 0o666
+  - path: meta/tests/factories/relationship.py
+    sha256: 7526312edab781112b881213b71bd4e1150cacd6be8103edf91a3143cc0d427d
+    size: 1660
+    mode: 0o666
+  - path: meta/tests/factories/role_data_permission.py
+    sha256: 7ea220769b5fd1268b44169104b9475b4f6bcb48264f7f77c64dfcac4b881c2e
+    size: 2465
+    mode: 0o666
+  - path: meta/tests/factories/role_dimension_scope.py
+    sha256: 7929c593401466e6a5b22706868ac80f1230c5311651dd1a557cd827c0362540
+    size: 2345
+    mode: 0o666
+  - path: meta/tests/factories/role_permission.py
+    sha256: aa0e3e92acc277659521d0162262621b7bf7767b140956459cdee9870957c238
+    size: 1825
+    mode: 0o666
+  - path: meta/tests/factories/scheduled_task.py
+    sha256: 6bbf0ab0d6f7f554677a77056cdf92aeee3ce446ba083abc03fb84356817a1c9
+    size: 3493
+    mode: 0o666
+  - path: meta/tests/factories/subscription.py
+    sha256: deb409679767de6088fa3a90010b51d5c8419faf54ccf6622e9e36ff1c8ffdc6
+    size: 1626
+    mode: 0o666
+  - path: meta/tests/factories/task_execution.py
+    sha256: 42bd34ece18672b7cc209f02710d6558cedcfbffcc4bef6b1d1720e0f29418ca
+    size: 3373
+    mode: 0o666
+  - path: meta/tests/factories/task_queue.py
+    sha256: d84db351e644511d746b99a222d3b77c803189f5caa3f8096f142a044c86c160
+    size: 1442
+    mode: 0o666
+  - path: meta/tests/factories/test_objects.py
+    sha256: fc4f04bafba5c6934a5643565706b0e386ca8b02626560cfa568decff58d94b4
+    size: 1362
+    mode: 0o666
+  - path: meta/tests/factories/test_table.py
+    sha256: 08916900735de5c31ae90dd42d93702d99c43cf552d423fdc76ce07d38d31f43
+    size: 1151
+    mode: 0o666
+  - path: meta/tests/factories/user_group_member.py
+    sha256: d9852619df0ed47aa3e5bf05539e5b2b1db7e89621b27ea437cd61a5073bbc3d
+    size: 1936
+    mode: 0o666
+  - path: meta/tests/factories/version.py
+    sha256: b1efe145d60ba2b58cba538fdb66cc98efc4260a16ec55efa12537d296d70eec
+    size: 1430
+    mode: 0o666
+  - path: meta/tests/factories/webhook.py
+    sha256: 54708fd1ca398277bb2b569b8f34cd6026f2f8347a3a91c1b6819332fecbb0bc
+    size: 854
+    mode: 0o666
+  - path: meta/tests/factories/_base.py
+    sha256: b0a1b4896065e23651ab4cc50ab7a81d75198ccbd0b8b79fa9cc5b8fa3ac60f2
+    size: 9463
+    mode: 0o666
+  - path: meta/tests/factories/_trace_id.py
+    sha256: 8e8079be6165d1b10f512874654d485ed8645f538602a2a27143effa5940f785
+    size: 2458
+    mode: 0o666
+  - path: meta/tests/factories/__init__.py
+    sha256: 0e26502b48cac08ce790e973ebe1ee1747df6246ab7cc05e1e67705796c8176a
+    size: 4195
+    mode: 0o666
+  - path: meta/tests/import_export/test_export_filename_v320.py
+    sha256: f0e87152aaa4b849dfa006400e86c6b1317703ce784969c1456d78afc7c6d32f
+    size: 8799
+    mode: 0o666
+  - path: meta/tests/import_export/test_export_pagination_and_options.py
+    sha256: 3c688cf6be4c05462d26417864f49d038b0333b5e33e9fc1b5820ac4d0ece799
+    size: 17051
+    mode: 0o666
+  - path: meta/tests/import_export/test_import_export_apis.py
+    sha256: b7d251213442853acbfa4969362bc1a17a3000cfbf0092a77da8bc5b6585ddd0
+    size: 5888
+    mode: 0o666
+  - path: meta/tests/import_export/test_import_template.py
+    sha256: 9e6514d16570e5e41942a0e6f39fd0f5c2c3679d996b8de4e49cfdf21c8ce45e
+    size: 10537
+    mode: 0o666
+  - path: meta/tests/integration/test_integration_scenarios.py
+    sha256: 2b9a48a363abd19b3e1a3739edc984c6b32341c8de64498adb1aed273d6a98da
+    size: 4486
+    mode: 0o666
+  - path: meta/tests/integration/__init__.py
+    sha256: daa91a50434077b3d648021dc56745f4fa129b33106e6ca31f6872ec9a458fa2
+    size: 558
+    mode: 0o666
+  - path: meta/tests/interceptors/test_cascade_interceptor_detailed.py
+    sha256: e0019de4f024b3d5d72fde0ce970ef091f4fde0fbc0b1094484b4302c18c4f85
+    size: 16694
+    mode: 0o666
+  - path: meta/tests/interceptors/test_persistence_interceptor_detailed.py
+    sha256: 4bf5ac0ca580948aecef4bd6892e6691c4213dcc072fb8d1d9b0c6124c6b31bd
+    size: 23216
+    mode: 0o666
+  - path: meta/tests/interceptors/test_validation_interceptors.py
+    sha256: 8c865b0955bc8b8751da4b5d36ff96d96be4772a5a56a83f108272b43330bac4
+    size: 12249
+    mode: 0o666
+  - path: meta/tests/interceptors/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/m8/test_m81_valuehelp.py
+    sha256: 7cd7d4e63fc4be973dd120b01d775391ec7a7409a880d3ee6bb1dd82946e4173
+    size: 6205
+    mode: 0o666
+  - path: meta/tests/m8/test_m82_nested_dsl.py
+    sha256: d474c723f8a520bf248b8d21bfeb5b92bb1e3761df82b9badff75b47f3aea044
+    size: 10866
+    mode: 0o666
+  - path: meta/tests/m8/test_m83_aggregate.py
+    sha256: 804a401b5a41c49be3f438c250847086640930a449ba3e2d63eb7312aeb5f6e6
+    size: 5197
+    mode: 0o666
+  - path: meta/tests/m8/test_m84_reverse_expand.py
+    sha256: e5df6448176489d8ec83eb312671ad14e46c86d3d7bdd4488528c3acb9643b90
+    size: 4660
+    mode: 0o666
+  - path: meta/tests/m8/test_m85_etag.py
+    sha256: cfd8b4429e996d10342041c6369682e0f4fce19b657546fdbc30162024eac422
+    size: 4319
+    mode: 0o666
+  - path: meta/tests/m8/test_m86_custom_order.py
+    sha256: a60e495b6861e1f088ee473e2f3920e479ebfcbda5bb3f63687c53ec5603d203
+    size: 4355
+    mode: 0o666
+  - path: meta/tests/m8/test_m8_e2e.py
+    sha256: 4f8856b1b2c19384d955126356e7ed3995ebe444ba1c1ce68b174781aab7fcc5
+    size: 4649
+    mode: 0o666
+  - path: meta/tests/metadata/test_metadata_validators.py
+    sha256: 1d79c22223bcc2ffe7638a5b2ebb948e755cb6cbbb9537ba2b45e6903e288cfe
+    size: 4704
+    mode: 0o666
+  - path: meta/tests/performance/check_tables.py
+    sha256: bcbf985ddc38afb3144dab7f2cbd463dcb9c59bf1044696d8c7ae360b6d8a105
+    size: 2156
+    mode: 0o666
+  - path: meta/tests/performance/conftest.py
+    sha256: 28f57a911513144c68c973ae41d9da887b5a76aa4c54a54cd9ff7da6f5821ed7
+    size: 16059
+    mode: 0o666
+  - path: meta/tests/performance/locustfile.py
+    sha256: 40a5ab45ab623ea11c57c9e4f602bc7c4bb76cdb87bce8e7d36a93a3036f30a6
+    size: 12715
+    mode: 0o666
+  - path: meta/tests/performance/performance_base.py
+    sha256: e3e01c5e93cb6508a200dfa5ba784b502dc628a53de6f3b9828bd976bb36bbc4
+    size: 14337
+    mode: 0o666
+  - path: meta/tests/performance/performance_reporter.py
+    sha256: 77c818ac96039246f2cc166e2526625702c4fe813bba47ae8d60849a25374451
+    size: 23244
+    mode: 0o666
+  - path: meta/tests/performance/run_performance_test.py
+    sha256: 5659bc9d9eb7c69e9f1d1cd185bd904215cd21b5df9b90a3f2f9bc970f8f574a
+    size: 10014
+    mode: 0o666
+  - path: meta/tests/performance/schema_cache.py
+    sha256: c490e8b8536da75fa5316e20d185f033062cbeb330f335cfbb84532982d28bba
+    size: 3536
+    mode: 0o666
+  - path: meta/tests/performance/test_api_performance.py
+    sha256: 0cfbd1fb0345d2c407e8d766086bfe0fe26feaee0ab069037367306dc55472d6
+    size: 14344
+    mode: 0o666
+  - path: meta/tests/performance/test_concurrent_load.py
+    sha256: 586785de49db748b95a7a0d1245de96ad16ba7752067121689077b1e139288e4
+    size: 13621
+    mode: 0o666
+  - path: meta/tests/performance/test_database_performance.py
+    sha256: c6f2c70eef312583e1c8c441aabbf2c660c239be247df4ff71763259db202222
+    size: 14316
+    mode: 0o666
+  - path: meta/tests/performance/test_index_effectiveness.py
+    sha256: beb9666698024ce4a792e55040538da4288e6e1affcb4f981942198e4b3239ac
+    size: 16707
+    mode: 0o666
+  - path: meta/tests/performance/test_large_data_scenario.py
+    sha256: f8f474c31748ae9d875e01e5d52532edf31a2b846d90a879ece7018aa2644274
+    size: 922
+    mode: 0o666
+  - path: meta/tests/performance/__init__.py
+    sha256: 2f1866a020d043053f7c0a8734eeb50402a30415da7c3c6e92a30790432281d0
+    size: 944
+    mode: 0o666
+  - path: meta/tests/permission/test_permission_services.py
+    sha256: 34814b536d4c5242768caa37d5ee8c4a98574e10bd3b3e7ee68a42a44a1d9ad3
+    size: 10867
+    mode: 0o666
+  - path: meta/tests/permission/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/post_v2_1/conftest.py
+    sha256: 674440f350e2374293708395a18645c741eaf837b65347cfe8a40c0b23aed0df
+    size: 5033
+    mode: 0o666
+  - path: meta/tests/post_v2_1/README.md
+    sha256: b856785141122653ca9c1c7a2c34edcbd0ca4e2875e2814cb937fcce0456b58d
+    size: 2688
+    mode: 0o666
+  - path: meta/tests/post_v2_1/__init__.py
+    sha256: d5e1e1541cf6802813acd2c31dc8433cc14acb57ff19a20a1a9be5265d1df258
+    size: 478
+    mode: 0o666
+  - path: meta/tests/query/test_query_filters.py
+    sha256: dc06630f003232eca13710a8145113d5413d8233d6a936d279c889e12ccf6a77
+    size: 1929
+    mode: 0o666
+  - path: meta/tests/services/test_user_services.py
+    sha256: 90f04969d6b716f386ed180218100566f8b6c9ce1a6a002617d5034ce9442a39
+    size: 4940
+    mode: 0o666
+  - path: meta/tests/services/__init__.py
+    sha256: 17a72f2cd381a858c2055c961616cb746f2fd36001ca3301b552266ee5f35684
+    size: 754
+    mode: 0o666
+  - path: meta/tests/shared/app_fixtures.py
+    sha256: 78cae3eb96ad043e11f8813f6b91372d53b6da7bf29caaa780d43acbfd8f84ee
+    size: 9862
+    mode: 0o666
+  - path: meta/tests/shared/assertions.py
+    sha256: 4347969c0ac2d0d1a75ca029caf37b01929824f6be55f34cb1380bff9e77f2ba
+    size: 20411
+    mode: 0o666
+  - path: meta/tests/shared/base.py
+    sha256: ac8ce234eb741b7942b519b3ded3be98bd4b234d8b7848aa860a684cfd53d93c
+    size: 10012
+    mode: 0o666
+  - path: meta/tests/shared/base_crud.py
+    sha256: c359d22cd0b800e6706e4390a4caa9ef7d389a0da0db505a46e56d1135ad791c
+    size: 9833
+    mode: 0o666
+  - path: meta/tests/shared/cleanup_fixtures.py
+    sha256: 3698d1e5a29819c09c185a25921cb462509db5a413c63998bc565dbfa25ba3c0
+    size: 3601
+    mode: 0o666
+  - path: meta/tests/shared/crud_helpers.py
+    sha256: 932891a029892d42b4e7e12cab899be87e029645f4f549be2a0b5ec1248df9b3
+    size: 3354
+    mode: 0o666
+  - path: meta/tests/shared/error_handlers.py
+    sha256: fe86a2504ff3dfd1c7b09c42fee53e015a7b617b4b74eacdba05fae3f52831f8
+    size: 12794
+    mode: 0o666
+  - path: meta/tests/shared/fixtures.py
+    sha256: d5768186dd0578a18f4457c57b6e90ed2812cecf36f57800308cf74d6abc9cb5
+    size: 39444
+    mode: 0o666
+  - path: meta/tests/shared/fixtures_api.py
+    sha256: 6208f6ab43446e96276bbe8a028401317390bc1f80ce9d17ea1be9d8c696a8bf
+    size: 2588
+    mode: 0o666
+  - path: meta/tests/shared/fixtures_v2.py
+    sha256: b6892d3c3978d661904a55a4133a1d9441cc46a43daf5bb12af17efee5333a38
+    size: 8915
+    mode: 0o666
+  - path: meta/tests/shared/mocks.py
+    sha256: 4e153839c91e30880f978b358dad4d85382d5eb42309645b6e692610573f2f76
+    size: 11739
+    mode: 0o666
+  - path: meta/tests/shared/parametrize_crud.py
+    sha256: f4b7f4793d1e19089aef3d0d02a8607c5594069de1f0f208003ce1b5483e13b0
+    size: 13857
+    mode: 0o666
+  - path: meta/tests/shared/__init__.py
+    sha256: 5a9da6fa35a18e4954de5b4394e34dc008f2e7150b63796bdc50137a013e5f11
+    size: 3229
+    mode: 0o666
+  - path: meta/tests/test_helpers/assert_helpers.py
+    sha256: 8dea035f0ddb207a3d1477093060c0e7f9df27907c794ec8640194a3e994e2fa
+    size: 2921
+    mode: 0o666
+  - path: meta/tests/test_helpers/base_api.py
+    sha256: e5ba1816eda7d96c9929c32c512577fb99c46403d84152ae588ee8ad1a2a1ee0
+    size: 4304
+    mode: 0o666
+  - path: meta/tests/test_helpers/base_crud.py
+    sha256: 6f95d71d96b7c0ef3343e93e4c0e9184a6f16bcc1434bd01732e34a93c9695e9
+    size: 4817
+    mode: 0o666
+  - path: meta/tests/test_helpers/base_regression.py
+    sha256: 4ce36fa324f5485abdd4d428da9731d70a90e3773d245365ef96a6bc4f5e2263
+    size: 1600
+    mode: 0o666
+  - path: meta/tests/test_helpers/cookie_helpers.py
+    sha256: f3c52c33c310145ffebcf45736934bbc0abda1f996cb55f281397f5ade4af7c9
+    size: 2344
+    mode: 0o666
+  - path: meta/tests/test_helpers/README.md
+    sha256: 6286e3240bd43a4e7efca0963e0f10aea58129f6473949bc9b0382807c3d851b
+    size: 3452
+    mode: 0o666
+  - path: meta/tests/test_helpers/__init__.py
+    sha256: b0c69f22aa40b494635a448a55e6d2d37e031878cca1e8643c3c036149a41522
+    size: 1603
+    mode: 0o666
+  - path: meta/tests/tools/gen_test_template.py
+    sha256: 16adbdba020e6ac1296e85781e30c639664add5c2737455911e75709c552150e
+    size: 4364
+    mode: 0o666
+  - path: meta/tests/tools/mutation_report.py
+    sha256: 7ab0bcc77f2122ffa8677acdedf21348f2030cb95a5f7d60b9e336d08f879a2d
+    size: 4337
+    mode: 0o666
+  - path: meta/tests/user_role/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/_consolidated/test_p0_other_domains.py
+    sha256: 9a1ef938f2101f8933109b3e296c7ac55eb941060e290d5c1f996cf47e86b5b7
+    size: 13895
+    mode: 0o666
+  - path: meta/tests/_consolidated/test_p1_api_domains.py
+    sha256: b567ea4e227784b20fe5dedde6ef9bab871f7c6e7d54d38d61fde991cf8e41b4
+    size: 7413
+    mode: 0o666
+  - path: meta/tests/_consolidated/test_p1_custom_domains.py
+    sha256: 1765bfddc3622ff610592051587f376295342732d1f1a42cf72ee1caff2efa2a
+    size: 10398
+    mode: 0o666
+  - path: meta/tests/_consolidated/test_p1_unit_domains.py
+    sha256: 7d5170c0d9e18fc959261f85c4e98f078f0acf28dd02c50657da3ec09276eddf
+    size: 13210
+    mode: 0o666
+  - path: meta/tests/_consolidated/test_p2_enhancements.py
+    sha256: e7f3bcba79116c2dbc43bb13a9145de836b92baf1801115dad2293df1da4c75d
+    size: 6918
+    mode: 0o666
+  - path: meta/tests/_consolidated/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/_tools/COVERAGE_BASELINE.md
+    sha256: 1320607d3a1f49d33ce3f18a3e1270049d5729806e6bb826070516d18eedb997
+    size: 2080
+    mode: 0o666
+  - path: meta/tests/_tools/SUGGESTED_TEST_CASES.py
+    sha256: 54bdccef1f614b6a29a0f7cccc54e6325f0b3813b31a3302fc36ad93dba5491d
+    size: 25061
+    mode: 0o666
+  - path: meta/tests/_tools/TESTING_GUIDE.md
+    sha256: c5f596ba16db7bfe5fd6dcc6e7d06a88647012629e37d75940b905a8cdcb41e7
+    size: 15561
+    mode: 0o666
+  - path: meta/tests/_tools/verify_audit_unification.py
+    sha256: 0cd3ad4e5e9468965bdd25f0e229aecf0521164ef4635bfc35f7ca1601c4f894
+    size: 3658
+    mode: 0o666
+  - path: meta/tests/_tools/verify_phase4.py
+    sha256: b11b0f1e540758113a1eba0e3fed18e8eb2c772cea58cd15824e3d878e385368
+    size: 10536
+    mode: 0o666
+  - path: meta/tests/_tools/_debug_dataperm.py
+    sha256: 3b99015a0052480a1253dd72065911facef3400abd8502f71ef3099c629c9bfc
+    size: 3403
+    mode: 0o666
+  - path: meta/tests/_tools/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/conftest.py
+    sha256: ce7840e64a3ac736aff2f68b56980060c9e11430a87748e425c3af7b9df427ed
+    size: 1677
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/deep_coverage_analysis.py
+    sha256: 95fb9a8d9c439a48f84a362a86ab63f3296f7ab26de1f9b3ef499784a2f169f0
+    size: 17064
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/discoverer.py
+    sha256: 99f49cff15fc33fafcb0e90f668240e23276763d1dc07115cddd60c5ae37c07e
+    size: 29805
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/discover_test_coverage.py
+    sha256: b58edf4e35ad99c5ee792a15c22dc01cc1286ade827e2d1a44bded1bfb93ec98
+    size: 16992
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/loader.py
+    sha256: 18d58c7995f1614dca862ae976b74a2a26d5df57e300c1b6123cc3519ef6aab3
+    size: 8400
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/pytest_plugin.py
+    sha256: c0cea06562f54e40b0b9334e57033e3d61f441b4da5885a0df77b94d32b59b54
+    size: 4646
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/README.md
+    sha256: 8cd3fef1be9b8c670d59f4699b5547c533e30f4a3e2b2f85080d4f558696a485
+    size: 13294
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/test_yaml_driven_constraints.py
+    sha256: 45ed62a8b26087753487cf9b399d41af9fe68dae27431870b922b57f775212ae
+    size: 16620
+    mode: 0o666
+  - path: meta/tests/_yaml_driver/__init__.py
+    sha256: b3c02e0c121bf83b40dc148d39d5d6269be41d745ff065f94dfe057d7a792a94
+    size: 773
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_audit_translation.py
+    sha256: 963c5ad9d58fd693aec9d3a83c9560cd1d971347592a9137ed2a7bbcb57d53e5
+    size: 7496
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_audit_tx_trace_v2_1.py
+    sha256: ed93e07b7cc74df797bfe9c367180ff2d2e858087012328f3aafc530a47ba1b0
+    size: 6637
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_debug_hooks_v4.py
+    sha256: b51c14234561e4a582ad5325bee5bf817e28fc64cdd02c83b0ced5c42ac13ce2
+    size: 5243
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_help_drawer_iframe.py
+    sha256: 3df7fadcc87ee0f84d86e23516fac82a3113bd12f7644a8319ed31a5ae0b9f2f
+    size: 6255
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_help_drawer_shortcut.py
+    sha256: 79946f37b2ddfc1dbe99299fad68f5df43e55349d4e65e0e0783c90bba8f91f2
+    size: 5003
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_help_user_menu.py
+    sha256: 64aba4fe59a74d7a7f191a65f1e4e661b7224ba14f4aab635913bb24cd108ff9
+    size: 5807
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/test_owner_chain_v2_1.py
+    sha256: be93355f8a62842ad5d5c57270e27e02262a7d1365768918ef1038b3d795e3a6
+    size: 8059
+    mode: 0o666
+  - path: meta/tests/post_v2_1/audit_help/__init__.py
+    sha256: 577bcc0fac4373d282cee97469833951cf048a28bc22a61803ebe6774fa25ad2
+    size: 85
+    mode: 0o666
+  - path: meta/tests/post_v2_1/cascade/test_cascade_bug_v013.py
+    sha256: f291ae6a6756dde2660e9e5ceb985e36e236f1b6a42848cc677953d3c360aa21
+    size: 3540
+    mode: 0o666
+  - path: meta/tests/post_v2_1/cascade/test_cascade_bug_v014.py
+    sha256: 97e107f9fee243dfcbad3fad6ccc77c6fa7a4d71f7a249c2aed786f1b4c546b4
+    size: 3092
+    mode: 0o666
+  - path: meta/tests/post_v2_1/cascade/test_cascade_e2e.py
+    sha256: 6377ca2cec8248c7849b5acada1ca3563d7f8da9dcea0366dc5f5dc6c669c65c
+    size: 1119
+    mode: 0o666
+  - path: meta/tests/post_v2_1/cascade/__init__.py
+    sha256: 78bb335e5b368ed97775d7afb9beed60e16a982dcc710a4a1ad261edc3c40a2b
+    size: 102
+    mode: 0o666
+  - path: meta/tests/post_v2_1/frontend/test_frontend_bug_v015_detail.py
+    sha256: dbf7eb9301fabce36e12d6eac465fbfc57f34f1f6a1fe8a5b0fdfa15e5165611
+    size: 1589
+    mode: 0o666
+  - path: meta/tests/post_v2_1/frontend/test_frontend_bug_v015_list.py
+    sha256: a8f375229716d9e8b1b6b5dba09aaf3125cafdf7ba868a7acb42fadcc05e1eca
+    size: 2376
+    mode: 0o666
+  - path: meta/tests/post_v2_1/frontend/_helpers.py
+    sha256: 3114cbe278180f84055f2b378fd951172cd198a529c8bc1456cc56ac3b5acf33
+    size: 240
+    mode: 0o666
+  - path: meta/tests/post_v2_1/frontend/__init__.py
+    sha256: c9239120572db6a92a9ab6809dad79668b879b25e14a4aa8526de5557732b469
+    size: 100
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_annotation_cascade_v2_1.py
+    sha256: aa9810cef2420e19c5f72aec42d14c8d15c17c7145684359b7e2906f7dbc0e19
+    size: 10772
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_cascade_v2_1.py
+    sha256: ee617249b3bfcea4052831d3d2c638442d8aef4cf94ec6ef37aa6175fdce0378
+    size: 9118
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_export_column_order_v2_1.py
+    sha256: 1c98d9ff66d527d34b90c6146f8e97f6e9053eebe607ac8e85246d0f323f43b3
+    size: 12999
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_export_filename_v3_24.py
+    sha256: cea0d7e2b25c7349470fc542f1d5a3841b3720f667ef32c8561dad891d251b5a
+    size: 7059
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_export_operation_mode_v2_1.py
+    sha256: fff1b4b58c5ff26f84ffc27fb3cda6c7cb6e18965a8466870c39acd1a8682b48
+    size: 11564
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_export_owner_id_v2_1.py
+    sha256: dd4dd91ae2536464b84b9dcc36cb507c66f6eb98d6a94f8ac8eb539a311bea12
+    size: 5917
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_import_deep_delete_order.py
+    sha256: a88e64acf25781c424e6b74bf3cddb7475ca789e74b0e7ba4a0aeb0141a9a17b
+    size: 9251
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_import_force_cascade_v2_1.py
+    sha256: f168755edc508854a3e1a101fdf8e501cc083a6ee77e0d91a07f8b9d7beb707b
+    size: 18137
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/test_import_force_override_v2_1.py
+    sha256: 42cd578e4c24b400914852b2dd914efd2c3c1291c3ee6d8a4266d1eb8fb62f42
+    size: 15223
+    mode: 0o666
+  - path: meta/tests/post_v2_1/import_export/__init__.py
+    sha256: 6d6f8e7c9e62d43a66956872ce62650d5c211036f6c54145208910c8c27c7f1d
+    size: 78
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/test_e2e_v2_1_browser_bug_v015.py
+    sha256: e9c052a494d7f867b4b4dc8940b2f1873e568ffb1cf5a3f75011f2bcc11c6fb6
+    size: 1594
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/test_e2e_v2_1_integration_async.py
+    sha256: 01757b81baf0a8173a54dda611c7827097023c77e9ce3c1b044081d9f3376b57
+    size: 2948
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/test_e2e_v2_1_integration_audit.py
+    sha256: bd9da8d552bc0d3670d318bf0d2f0e909b654fd57890d949e991d050be764678
+    size: 1522
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/test_e2e_v2_1_integration_force.py
+    sha256: 637b277fe6a59f0b4aa8c62f14a1a57abdad6218c23fbae2c9e2ac682eaecb36
+    size: 1277
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/test_e2e_v2_1_integration_rbac.py
+    sha256: 53616b2731fa50ded73eb28ec985528102b7d6a2bdfc224723dba2d81160ddb4
+    size: 1763
+    mode: 0o666
+  - path: meta/tests/post_v2_1/integration/__init__.py
+    sha256: eac58fe0b467f6ffaa8b8011785aba3e817fd8292206856fccf52f4b874e7917
+    size: 80
+    mode: 0o666
+  - path: meta/tests/performance/baselines/api_benchmark_baseline.json
+    sha256: 026f6c5642165e3702da3797a66d469d1d4341c5e5d533b93cd6548b843f80a9
+    size: 1006
+    mode: 0o666
+  - path: meta/tests/performance/baselines/db_query_benchmark_baseline.json
+    sha256: 22bcc15bf453cbb14250102bdf76b55785336281e26898b13fc31eaf5cff682a
+    size: 1961
+    mode: 0o666
+  - path: meta/tests/performance/baselines/db_write_benchmark_baseline.json
+    sha256: 45ed6920f3db5e394ad6d11c2dee1d19d47b0d1f53a917b5d179c7b784faf602
+    size: 1050
+    mode: 0o666
+  - path: meta/tests/performance/baselines/index_benchmark_baseline.json
+    sha256: ce595d0c10de95eb60a462e0bd93eb5ad0d8e9cb5b65938c35755544118898db
+    size: 1963
+    mode: 0o666
+  - path: meta/tests/performance/baselines/thread_pool_benchmark_baseline.json
+    sha256: 7e78710e3f5855b271dfd13088f554f1e63b31a72f175e4e411d343fbb7885d5
+    size: 1298
+    mode: 0o666
+  - path: meta/tests/performance/reports/performance_report.md
+    sha256: bfb20f841020169edbb20dde143f880f2098ee6f1612d8661cd32c144a1b7118
+    size: 886
+    mode: 0o666
+  - path: meta/tests/performance/reports/performance_report_20260503_091637.json
+    sha256: 995796a9322bd6fc8a1d68fa0a3eb6965cb18e96fe71c9d16ba50d27d581196e
+    size: 1766
+    mode: 0o666
+  - path: meta/tests/performance/reports/performance_report_20260503_092215.json
+    sha256: 314542f89e0cecdba65f878b75eaebc2d5e1d9371909cf6beffa2aacc371cc9e
+    size: 1768
+    mode: 0o666
+  - path: meta/tests/performance/reports/performance_report_20260503_102617.json
+    sha256: 1aa1f1fa2985b8233ba5d45f1ae6d35d09fd19d8e30db14742c97b56c99735cf
+    size: 1993
+    mode: 0o666
+  - path: meta/tests/performance/reports/performance_report_20260503_102655.json
+    sha256: f7c01dcff6f295b1ac3574d2946cd2bad8b15f693ad2f4b90d47d3ac0dce68b5
+    size: 1983
+    mode: 0o666
+  - path: meta/tests/factories/docs/HARDCODED_ID_FIX_TEMPLATES.py
+    sha256: 5ea65b41487d9d74d41b35c6e59967969059564521ea1d95dfea8fcb83f6ad64
+    size: 5887
+    mode: 0o666
+  - path: meta/tests/factories/tests/conftest.py
+    sha256: 280970b7f64fc027fa9542c360a54bd0c14b3ca670b273bbd246642a411735f5
+    size: 2198
+    mode: 0o666
+  - path: meta/tests/factories/tests/test_factories_phase1.py
+    sha256: d430d73cd599fad260bece58d84bc6abb812e01ff91b6daff9d3f93a5c05633b
+    size: 8139
+    mode: 0o666
+  - path: meta/tests/factories/tests/test_unique_id_robustness.py
+    sha256: 0db4a4fbf9a6c510225a9fc91963e6dc0c625369c201cf426c0b1527d39758ca
+    size: 6566
+    mode: 0o666
+  - path: meta/tests/factories/tests/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    size: 0
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/conftest.py
+    sha256: 5df2235623a8497622bf6aa09efb31ab4680ab58fbfbc978b45bae1308532dc1
+    size: 4831
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_6_10_agents.py
+    sha256: d5335f1a16325df4ae47aefb821d764215e771ff6fd1394e45500ae789594c79
+    size: 2658
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_all_19_actions.py
+    sha256: 970c458735f0414f69ab12f696519e8197478612bafabcf68361c818229ac560
+    size: 7389
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_bug_v007_regression.py
+    sha256: b7b63d5bfe7b7df23a79a1970d8e6026faf870a7d2c1b4e3ff20e0a8638b00f8
+    size: 14647
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_bug_v007_regression_v2.py
+    sha256: 8e516b0f0f40714e9401cb25203e47395a3f53e3f444a95372d030e93a6a4550
+    size: 15622
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_db_admin_v316.py
+    sha256: 30f1a6b31046517d1c50bad9159df410173946e9524b6c07e3b18a9ad050092f
+    size: 5860
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_db_integrity.py
+    sha256: 7171c0bd221f5cfeed3ab9434b236b99f0232a32bbdc297f35f9c5be9e89b978
+    size: 2725
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_gevent_experimental.py
+    sha256: b7def244f705c9c08ac278211e77fc8eae4abd75b5a6dcf0d78203fb6674b788
+    size: 2091
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_hypothesis_v318.py
+    sha256: 2e74eb56cac2d41b60d7c4ab4bdc994d93d4d80e974cfbc8b48183f087bdcc73
+    size: 3563
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_observability.py
+    sha256: 58f1819623900392e5ce6f8d52327e194db6be6e9e20dd4bf918a9d431c8eae9
+    size: 3353
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_observability_v318.py
+    sha256: ac3f95ec94b6cbae0d77690eb0f61923864c095ca845db8663265b38b7104b75
+    size: 3772
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_sse_long.py
+    sha256: c23275bd70ada2802a9a76b48b8f21f25f177a99737aa026f0e980cb3f4f649f
+    size: 3772
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_sse_streaming.py
+    sha256: b15c7ade330188513c3d4235307ea9689026fda40df16229f8a6348c4b4daf17
+    size: 2745
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_subflow_templates_v37.py
+    sha256: 0f2ff79b13881812f24f442524e70fb2db9fb77a6f23355e1ef2cc8453302643
+    size: 11818
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_subflow_v36.py
+    sha256: 552d640469d4130e38041d549191be2e53608c3e46f438ca12af59fdcd52ede8
+    size: 9064
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_template_demo.py
+    sha256: a6f7912abd9571e8a8a8019fc148a93c277a2b526f6187811fd43e80dbb59e1d
+    size: 1820
+    mode: 0o666
+  - path: meta/tests/e2e/bo_action/test_unlock_admin_v314.py
+    sha256: a3fbf1004cdf747af3e1f5c586f8cc5303989b38f8f64c140d63eb929cbbcf5d
+    size: 7259
+    mode: 0o666
+  - path: meta/services/query/computed_subqueries.py
+    sha256: 262fc5c6eb2fbd72d50d463b81b1a2af5f277f81e50fdf5e4dd5109b14942b2f
+    size: 7696
+    mode: 0o666
+  - path: meta/services/query/computed_utils.py
+    sha256: ae8ae585d0308da72ba0c9aff7598fe26901794f0bf9b80e6770ed5828ca6d24
+    size: 5224
+    mode: 0o666
+  - path: meta/services/query/filter_utils.py
+    sha256: 144888c956a8ce5dcbec750f58355a8cceff93128a165a957a95c3a460509ed1
+    size: 7606
+    mode: 0o666
+  - path: meta/services/query/hierarchy_utils.py
+    sha256: d5202a304070b57e4b9653e86b2af89771761844430b8c482f1edeb660d7916e
+    size: 5919
+    mode: 0o666
+  - path: meta/services/query/virtual_sort.py
+    sha256: e75ed5eafb9d9cdfc4b7728a8174586a3cdcde3377aa04c7b5ad02351240a2ea
+    size: 12267
+    mode: 0o666
+  - path: meta/schemas/examples/sales_order_enhanced.yaml
+    sha256: decade741d50fb4f0abb153bcba7fd085e2c995c2639c9b3d02802d3d52a9b51
+    size: 16722
+    mode: 0o666
+  - path: meta/core/association/fallback.py
+    sha256: 6050a04a7c1c30200209322b4b3ea805a9cb9582d687e2f99c05ea2415d98cc1
+    size: 10666
+    mode: 0o666
+  - path: meta/core/association/resolvers.py
+    sha256: 766beac0680cd35319fbbdcbb6d5c821f01a707c04d5540c053dabe18446c7b8
+    size: 2102
+    mode: 0o666
+  - path: meta/core/association/validators.py
+    sha256: e939600dfaae2b8042644cac6a83fc6f5aada2bfbbb51e4fcbb7daaa5b9afd0c
+    size: 8200
+    mode: 0o666
+  - path: meta/core/association/__init__.py
+    sha256: 9eb2d92cb8393c448516776cce5543151599e75c1f95902f7b9d87ff19454df4
+    size: 175
+    mode: 0o666
+  - path: meta/core/enums/cached_provider.py
+    sha256: 9bc2639e5528c768a05b0cf60f8be2863d4d016f4a4ef3480a5804302c5f132e
+    size: 10933
+    mode: 0o666
+  - path: meta/core/enums/cache_manager.py
+    sha256: 470e99181ccd8890e17ee39609df996e8170fac897554efc677017fd5ccd0511
+    size: 11396
+    mode: 0o666
+  - path: meta/core/enums/dto.py
+    sha256: 5a0aaa30a5bb699a69334f00382f6223bf396d7c193d6ca1edb2a91bbfcc8a8d
+    size: 6252
+    mode: 0o666
+  - path: meta/core/enums/factory.py
+    sha256: 3f261fafb1b28efa26271a2d822145f29db9aa012bed1c625d8cd4d6caa8725e
+    size: 5208
+    mode: 0o666
+  - path: meta/core/enums/interfaces.py
+    sha256: 1dc270bd07bdad0ca3835fedb927bd46836a754e6ad0c231eb83945eed847a89
+    size: 9731
+    mode: 0o666
+  - path: meta/core/enums/repository.py
+    sha256: 52356a2adf8de3da2cde07cb798aa5976d8acdf5cf5f5eff960873bb7e60f7a7
+    size: 24458
+    mode: 0o666
+  - path: meta/core/enums/secure_admin.py
+    sha256: 4d136cfae7a5546a3ec4917821dfa5dbf584134424a6d0f633063e22716e426d
+    size: 17578
+    mode: 0o666
+  - path: meta/core/enums/__init__.py
+    sha256: 3e7b2432d44e77be3a439f0372157819e4f282bf3669a799811f7062279f02c9
+    size: 617
+    mode: 0o666
+  - path: meta/core/interceptors/association_interceptor.py
+    sha256: 293ce5c4a71636597552f68d36120da9dee0ade130c0bf6e7da033511e099a92
+    size: 7619
+    mode: 0o666
+  - path: meta/core/interceptors/audit_interceptor.py
+    sha256: 9d69d48e8147b3819b9adf3ec34b4913a4ce32a896492534159839bafd270614
+    size: 23932
+    mode: 0o666
+  - path: meta/core/interceptors/base.py
+    sha256: c3cac8196dbaed1553eaa7624db8f4fc9181c12aa5cce2dfc07cb43565b29441
+    size: 2336
+    mode: 0o666
+  - path: meta/core/interceptors/business_log_interceptor.py
+    sha256: fe349ba9eabbde7eb31c9ef2959b1995ff1aee06fc6acb8f5a06fe23d015fadb
+    size: 2780
+    mode: 0o666
+  - path: meta/core/interceptors/cascade_interceptor.py
+    sha256: 4d0967ac32e34d1497921904cc4c8c5826061c1195ddbaa67dca0d005c093e8f
+    size: 17202
+    mode: 0o666
+  - path: meta/core/interceptors/constraint_validation_interceptor.py
+    sha256: 8646d82214744294fe2838a08b2ac0ed53f2af413afd0243df8592bbc04aad93
+    size: 2045
+    mode: 0o666
+  - path: meta/core/interceptors/context_interceptor.py
+    sha256: 34c7120ec12966768c4f12e98a67be9092cdbda49843cf96697c8601cdceaa85
+    size: 1241
+    mode: 0o666
+  - path: meta/core/interceptors/enum_protection_interceptor.py
+    sha256: 8d5fb20ce24c31d88f0c430bb6acd56caf049e38762e67b68dc532dc64f7757d
+    size: 14711
+    mode: 0o666
+  - path: meta/core/interceptors/field_policy_interceptor.py
+    sha256: def82e30e9b03d416fb492eea971079525d5956c5ff5b6e9e2444b41d53607d1
+    size: 1650
+    mode: 0o666
+  - path: meta/core/interceptors/hierarchy_validation_interceptor.py
+    sha256: 95ded86ebb3c7d889e764d47efd8492d804fec7e6ab36287c2c13487b6c6176f
+    size: 5072
+    mode: 0o666
+  - path: meta/core/interceptors/key_template_interceptor.py
+    sha256: 9903f3ab904a42a782e72bf56df57b8ec7874a0d239d54ab83342f5af922b549
+    size: 9536
+    mode: 0o666
+  - path: meta/core/interceptors/lock_interceptor.py
+    sha256: aafc96f4ef85614873eb07d121ecf3cb7d6b3ce3fd2016ca764f405a9c2f2ddd
+    size: 7581
+    mode: 0o666
+  - path: meta/core/interceptors/operation_log_interceptor.py
+    sha256: f51790b2b5ac343a2ed06417752e4a7591ce2703c2b0322f078e202f7411f8f5
+    size: 2955
+    mode: 0o666
+  - path: meta/core/interceptors/owner_chain_interceptor.py
+    sha256: 6bfd0ff1fded0cf0748b199c5f84808a772072708c6c99bd3da9a482e4ba8418
+    size: 12502
+    mode: 0o666
+  - path: meta/core/interceptors/persistence_interceptor.py
+    sha256: 5366054534e446cffd875bee2312f4d0221cd5e2edb3c88fab618b0ad5bae408
+    size: 74779
+    mode: 0o666
+  - path: meta/core/interceptors/query_interceptor.py
+    sha256: e25982f6ed4ad9b24381c6f1a481017cc1df5205c6920ff5b54ef29572c35749
+    size: 11317
+    mode: 0o666
+  - path: meta/core/interceptors/security_log_interceptor.py
+    sha256: cbd47ab09f65d66b334714fe84dfe5a1f7f277297a5bdc76e9ff66a80283e111
+    size: 2847
+    mode: 0o666
+  - path: meta/core/interceptors/version_context_interceptor.py
+    sha256: 6a7aede08a70ad7fbc1132afb33a69eeb95567de6a78b8ff419ae8091c990e49
+    size: 2600
+    mode: 0o666
+  - path: meta/core/interceptors/write_scope_interceptor.py
+    sha256: 996f7c329520f4043bf54762de071915df8dd6f059fec2091174381cfc015fc6
+    size: 116197
+    mode: 0o666
+  - path: meta/core/interceptors/__init__.py
+    sha256: d8ff54e6901da1b25c7c727d2b8256376ad20e648c56df6edb330709d9476873
+    size: 1992
+    mode: 0o666
+  - path: meta/core/ui_config/association_extractor.py
+    sha256: e6dad43c3109f5e6bf3b9c946810b167c6315ca8d79b7225bb2606351059bb95
+    size: 1612
+    mode: 0o666
+  - path: meta/core/ui_config/config_builder.py
+    sha256: ef3f6046b167f1662ac9cf75d96dafc47697152c40e31c2cfff2ab50120888d2
+    size: 10370
+    mode: 0o666
+  - path: meta/core/ui_config/config_constants.py
+    sha256: 2ab40d13d9fb057e3ec07d86f2a95946cc2d30a69c077cf866a86b05a1bd72a3
+    size: 772
+    mode: 0o666
+  - path: meta/core/ui_config/field_extractor.py
+    sha256: f9cfe5a9a7d54842bc5f765a817e61cafe523e092022c4328e12742f9c3fd842
+    size: 4822
+    mode: 0o666
+  - path: meta/core/ui_config/value_help_formatter.py
+    sha256: 54222081d80fc3d64515f10f877e8c458fadd4d73b7369a2fc17a345f3e2f3b6
+    size: 4639
+    mode: 0o666
+  - path: meta/core/ui_config/__init__.py
+    sha256: 82e9641179665482dce6497d431c83f975ac62fa8ce1007468bc1ae56606b986
+    size: 189
+    mode: 0o666
+  - path: meta/.trae/rules/backend-standards.md
+    sha256: cf7dc765327f0188a25842114b1f5612c401afe4ca286e4ffc7ceef288263419
+    size: 1260
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppAlert-B1tJcplc.js
+    sha256: f551d6f09bfba704247aaee9da8c56bf1e0039ba6e102da9d831e1355174675a
+    size: 6451
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppAlert-B1tJcplc.js.map
+    sha256: 1c5f24115a499ed551f0355946ac36121dbac56c945b52b68d3b218c1fe7958a
+    size: 21972
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppAlert-oUA4LHwA.css
+    sha256: 2b68bb3f29e4b05633ccbf672b5099976cf082970f7e086f9e13f6fa7e7d2231
+    size: 1103
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppCard-BE96nzI6.js
+    sha256: bccce9615be2d4299efe8453c0b829478ee8008dbca782865a11ceb8186f8ffd
+    size: 1917
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppCard-BE96nzI6.js.map
+    sha256: f06e52063f152e233712dfe0f172819786a3e18a254cd3f4c7ab8e45ddc86d73
+    size: 8998
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppCard-CJogh6Dm.css
+    sha256: 26ef699944fb460744f3ba47b68b3d284212c641d0dd7bf85523cbc6ab90fba8
+    size: 3839
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppSelect-BOAUfqVX.js
+    sha256: 627d2053349a740e7cba7ad92fbb2fed044f95f7b2be88f64c12e77c147be871
+    size: 2528
+    mode: 0o666
+  - path: frontend_dist_files/assets/AppSelect-BOAUfqVX.js.map
+    sha256: 1799b15f33f9f4a500c6ef853a01ae01197f4c2f216e157fb49b7a251fc0596f
+    size: 5948
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchDataManagement-CUhcmRqy.css
+    sha256: ceb439079ce7bb7e1d5835e8330c6f7edb687d642c6ef8436015f195e34b0235
+    size: 17811
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchDataManagement-DkBgs2Zn.js
+    sha256: e3d3275fc3211ece7b0e076198bdeb067fb3ea3805927bfc3f9f868b68ee56ed
+    size: 107130
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchDataManagement-DkBgs2Zn.js.map
+    sha256: d7b4faf21f83b936c7891e7e5bc160fe1ddc6d47d3ff8709ba7e5105e36c3c23
+    size: 438979
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchWorkspaceNew-CXuBN6ZC.css
+    sha256: f335ae6e9e979f44656cb050cf68e73f216915dcfcc185404601531d54aba4db
+    size: 10134
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchWorkspaceNew-DcOIBbMo.js
+    sha256: 4ccd280d7d4ae60704ae4d0a2e11977220866c248fe803878233264c672d3fdf
+    size: 9243
+    mode: 0o666
+  - path: frontend_dist_files/assets/ArchWorkspaceNew-DcOIBbMo.js.map
+    sha256: d35f6aa91aa418947d7846c17a840206b481c53a3dee1da14e2c57baa115b51f
+    size: 33558
+    mode: 0o666
+  - path: frontend_dist_files/assets/AuditLogManagement-adkj6vvb.js
+    sha256: fab2804ca05b598e37cb34a1d6a77aae82b0d761da211bdece105e731a60e477
+    size: 10999
+    mode: 0o666
+  - path: frontend_dist_files/assets/AuditLogManagement-adkj6vvb.js.map
+    sha256: a78865d261e36ae700953ab1c20d4b924506212acd96791e252a6bb6e0ad8a2f
+    size: 39550
+    mode: 0o666
+  - path: frontend_dist_files/assets/AuditLogManagement-C3q7s23j.css
+    sha256: aaa93bdbbb0f5549462cd2c4ae59bc17752d8bc3fd7cdf628e7178d64e5f4046
+    size: 4856
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentComparison-CwB8HOKM.js
+    sha256: 572e82b705ad5561b7974bad56e73d331dd69bbf512ea657512d7a99c1676dba
+    size: 263129
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentComparison-CwB8HOKM.js.map
+    sha256: 633e45240516d71f3724d5b874edca404bf06c6757808ad3a98af44a8d05d257
+    size: 716091
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentComparison-sIAPfU80.css
+    sha256: 2bf72ada31c81a7f26ca98a190dc01121bcc249236618035ef15ed14cf734bb5
+    size: 80150
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentTest-BHE0FC_O.js
+    sha256: d2d2f0ee03cb55c1737b06736068da8ddf3411f7f3c484abe7f0a9c7bf2eadde
+    size: 11258
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentTest-BHE0FC_O.js.map
+    sha256: c733f9cf3b931d71b468e32c3c6dd37e1f769be3c4c3758a7da5223bf9517d7e
+    size: 21019
+    mode: 0o666
+  - path: frontend_dist_files/assets/ComponentTest-D5BntAIP.css
+    sha256: c848df19d7fb8afb43368d125e01aa54086efb220eca25ccf159a21381452690
+    size: 2427
+    mode: 0o666
+  - path: frontend_dist_files/assets/ConfigApp-DUiK8bBZ.css
+    sha256: dd137a6b8430de7b4697fb6e9559e29b50c6b1e5f5dc1d7b16689540b009f07c
+    size: 10734
+    mode: 0o666
+  - path: frontend_dist_files/assets/ConfigApp-ZizW5zeS.js
+    sha256: 1423e045d79cf9d439994d3fdb5d610d1bab20b5518445faf26337810f341af1
+    size: 16078
+    mode: 0o666
+  - path: frontend_dist_files/assets/ConfigApp-ZizW5zeS.js.map
+    sha256: 5f0ebce3cee4fc56a471e73941a36eac2a5d23972b7446a36638872b27990bb4
+    size: 52238
+    mode: 0o666
+  - path: frontend_dist_files/assets/EmbeddedChartView-Cecctgdv.css
+    sha256: 99574837e39401c48179f35b7eca120984d6f899ebfad12fdb0152429f021d29
+    size: 1126
+    mode: 0o666
+  - path: frontend_dist_files/assets/EmbeddedChartView-hHNJ1IP0.js
+    sha256: b71ed0a20d714cac7337f0bc2b911ebecbc180ec489339fb4cf63293683587e4
+    size: 29451
+    mode: 0o666
+  - path: frontend_dist_files/assets/EmbeddedChartView-hHNJ1IP0.js.map
+    sha256: 608bc880dfcca67631bb9cb30a53a7411618104b8dda43f963f788c12978f07b
+    size: 166254
+    mode: 0o666
+  - path: frontend_dist_files/assets/enumService-BIcU8fs7.js
+    sha256: e1257a33ae8b2a1a406b4d4811c0caa1116c660e3a80d54479ad4bb8d55aa693
+    size: 5346
+    mode: 0o666
+  - path: frontend_dist_files/assets/enumService-BIcU8fs7.js.map
+    sha256: 0972f271c31ded23e5de2a53b18006cc966b6d5256818a50e2473fbd84ad1ccf
+    size: 25011
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericObjectList-CkOrOnq7.css
+    sha256: 4e00ec96213f7cc2553ae3c8756d1a6cb02ad4bbf81e96c3435e23c67f8b137b
+    size: 51
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericObjectList-CqYfbpal.js
+    sha256: d5ffd3f782db61ab8ca65d003a1955942903a3766f5e5d7b6be3ebe8daed2861
+    size: 1437
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericObjectList-CqYfbpal.js.map
+    sha256: 4819020bcbf951a2857e96e112cb416c0b3fdad239e38cf7511fcf3b62e9b6c1
+    size: 3053
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericTabContainer-DAb74R7o.js
+    sha256: cbd45044d8a15e3802654a1ecbbd35b3d5347142797eb67ba4a52aee4efe23d4
+    size: 5358
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericTabContainer-DAb74R7o.js.map
+    sha256: 5d07b634d35648e1b9cbe5cfabdabd7bb44da35a14646f783f90105a7a848ecd
+    size: 19468
+    mode: 0o666
+  - path: frontend_dist_files/assets/GenericTabContainer-QyoX941j.css
+    sha256: 2e284f8c2a7861e31fc309bd3eb264adfe8802254a40f351270d502332252c80
+    size: 2508
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-BtKHVZO8.css
+    sha256: 69da6d372c21d2c76aee4ad028e3f7f6f08c3e9d0385e1542f08ac7c455a6119
+    size: 7094
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-Cx1vM3T4.css
+    sha256: ffa463ff69e9ca5d217a3745f8d601c368d8f2cf243ec9e85d9ccbc4a6b6355f
+    size: 37544
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-CxkSHrYd.css
+    sha256: 9ca2bae89e79e56e1c4a15e46fae707363f3c596de83e68f99e378be7c4b0ddd
+    size: 130217
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-DEZ9L9Kf.js
+    sha256: cb1b9cb11ffdfed4d408dc44da013b7c849f4e37c28420bcdc63cc37fa3ba621
+    size: 14847
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-DEZ9L9Kf.js.map
+    sha256: 3b20d0db0f14278ee53762c940376abf2ad796dd3c505f1f8bb39ca976adad69
+    size: 49039
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-EET_8nt5.js
+    sha256: 0ec266817e90b833ee8a43896eaf621353b92e3ee0e32cf031d74bd2c4e9c6b0
+    size: 153821
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-EET_8nt5.js.map
+    sha256: 767140b0ec543247649018dfd90525b38dc9d42d6a4e648f6cf2cd8f97a739db
+    size: 485299
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-vt-RJY4V.js
+    sha256: 030ca3ec065bd1f4c3a8ee6dc29dd3fc492bed6581a191284357040deaace78e
+    size: 78605
+    mode: 0o666
+  - path: frontend_dist_files/assets/index-vt-RJY4V.js.map
+    sha256: 8a223698bca9652faefd212f59e8d26fad6a4a237935cd0443fdb8f53ca85835
+    size: 254688
+    mode: 0o666
+  - path: frontend_dist_files/assets/LayoutControlPanel-DE2uSWL7.css
+    sha256: 233fff098b3b3c5fa0336466eefc20b503938f8647c7f9d36c0a0c757418292b
+    size: 8454
+    mode: 0o666
+  - path: frontend_dist_files/assets/LayoutControlPanel-DegmLGSU.js
+    sha256: 7c94a8f613554489a4d31539dc758feb76a2e7298138b287bee24b30d98be0de
+    size: 71036
+    mode: 0o666
+  - path: frontend_dist_files/assets/LayoutControlPanel-DegmLGSU.js.map
+    sha256: c69ad48aceed25f23aace1254f97359e3cb314e296944a3c01af9bb71dcc5db7
+    size: 307241
+    mode: 0o666
+  - path: frontend_dist_files/assets/MasterDetailLayout-Cdf3B3UQ.css
+    sha256: a76403170dd769a57023749a05a82a6bb764c3814d495caaba9eca3126a41e5b
+    size: 3186
+    mode: 0o666
+  - path: frontend_dist_files/assets/MasterDetailLayout-D1ta_Ggp.js
+    sha256: 6aaba356df0f1b455b164f589a982148affaa9cc7d38adf48441e8987f695312
+    size: 3478
+    mode: 0o666
+  - path: frontend_dist_files/assets/MasterDetailLayout-D1ta_Ggp.js.map
+    sha256: 5dcc57f5b2b2e8b789c6e4c12b738c83e7c2ccd6df0450f9595fd250976a853a
+    size: 13599
+    mode: 0o666
+  - path: frontend_dist_files/assets/MermaidComponent-B1lDbIKU.js
+    sha256: 4aeadbfbd27cdde67aa819fb6dbcf6726aaf4aef61ae41eec7ebcb75dbf223b2
+    size: 397704
+    mode: 0o666
+  - path: frontend_dist_files/assets/MermaidComponent-B1lDbIKU.js.map
+    sha256: ad6bdb80f7d68be07fc20fbc97120ece5fdc154f3531830c9102cf5ff7459167
+    size: 1576104
+    mode: 0o666
+  - path: frontend_dist_files/assets/MermaidComponent-Cr9oa8FJ.css
+    sha256: 572f9fa7a3910be32ca015edcd00b0d2829dba30b4a61cc6fed9dcb42843bcff
+    size: 29654
+    mode: 0o666
+  - path: frontend_dist_files/assets/MetaForm-C6pCZ33o.css
+    sha256: 85dbb8b5aaf67900601184169e6e530f7a08a9ad891bc47cfd3cfc96d122bcaa
+    size: 59100
+    mode: 0o666
+  - path: frontend_dist_files/assets/MetaForm-CYUxLy_4.js
+    sha256: 145fb9d524b92b30983835e00b7dbfeb03c981368a0001df9c234f6e6a9e3d88
+    size: 374505
+    mode: 0o666
+  - path: frontend_dist_files/assets/MetaForm-CYUxLy_4.js.map
+    sha256: 50bbd12980e2fecd253c22f58b185fb21df21ebe1370b6ea29ace2e5d98931c1
+    size: 1354566
+    mode: 0o666
+  - path: frontend_dist_files/assets/NavigationTest-Lqva966K.css
+    sha256: fc0f0f8f942e89eccb2b9d69070b59bc94a6d3d85a29ccedb77625509a2799dd
+    size: 2340
+    mode: 0o666
+  - path: frontend_dist_files/assets/NavigationTest-MJkwH9bX.js
+    sha256: 10ca4cb7e8aa42aa47f9797ba3b9ab2b42a3df9b6b954292c4e71fbc7ba51db1
+    size: 12911
+    mode: 0o666
+  - path: frontend_dist_files/assets/NavigationTest-MJkwH9bX.js.map
+    sha256: d9f04d53bb198e561fe74ad10d9630e481c2ae44fa953f89ab34e2f4cd3a19a0
+    size: 38633
+    mode: 0o666
+  - path: frontend_dist_files/assets/ObjectDetailPage-CwZTR2Ez.js
+    sha256: e5b45fa48bd0b730bb78719d972fb82112dc7d465cc9448c68294036708345f6
+    size: 7952
+    mode: 0o666
+  - path: frontend_dist_files/assets/ObjectDetailPage-CwZTR2Ez.js.map
+    sha256: a7cb438ef4954ef34ce3b616cfdbc3f413385a3c5df37e213fd43329868d21ea
+    size: 35221
+    mode: 0o666
+  - path: frontend_dist_files/assets/ObjectDetailPage-DYl5tPpS.css
+    sha256: 0a3408be03e7902af81f1a2b8679e9942db53fb39b600dced58592605730b7af
+    size: 3092
+    mode: 0o666
+  - path: frontend_dist_files/assets/RoleDetail-G79y7SAz.css
+    sha256: 95bb015e0cd1ab6e4f416aa6b645c481613af6dc8278dcdb49a6a33a2d2f435f
+    size: 2661
+    mode: 0o666
+  - path: frontend_dist_files/assets/RoleDetail-v1DQCDmQ.js
+    sha256: 240f5aec6b0a95a65b304d999bccd051b6ca03362fc31640a350cfba711c4795
+    size: 7308
+    mode: 0o666
+  - path: frontend_dist_files/assets/RoleDetail-v1DQCDmQ.js.map
+    sha256: 610f424ffbb58fcc569eced21e53d5600d2a867197d970f5dafede174769655c
+    size: 24636
+    mode: 0o666
+  - path: frontend_dist_files/assets/RolePermissionCenter-Bm6FHiQ_.css
+    sha256: 7d86f58801bfb871b1c5a629a2b360f7401357c0ada1064035c82b3859cdb775
+    size: 23468
+    mode: 0o666
+  - path: frontend_dist_files/assets/RolePermissionCenter-CwjWs3fk.js
+    sha256: 437b350b054b0c97da29ccc04b95175a0c649a86e19ccb7fd6dc49f6ad6ce1ec
+    size: 37735
+    mode: 0o666
+  - path: frontend_dist_files/assets/RolePermissionCenter-CwjWs3fk.js.map
+    sha256: fe22f2e120c20c06c7704682206c1a0c132c485a558160f02310086ab4bd4c45
+    size: 134903
+    mode: 0o666
+  - path: frontend_dist_files/assets/ThemePreview-Cj49p_aC.css
+    sha256: a9085c9c1c7e9acbd8b118e70a056fd58c0b0727f6829f06b4a502ed24a5f735
+    size: 1012
+    mode: 0o666
+  - path: frontend_dist_files/assets/ThemePreview-OLpFzXgq.js
+    sha256: 9b2ba7adbbfaa7272994a752d1ffffa7614db483f048b39a0aa0149f9911bfbc
+    size: 12402
+    mode: 0o666
+  - path: frontend_dist_files/assets/ThemePreview-OLpFzXgq.js.map
+    sha256: f0d180b5dcac13c703a32dfa6955487066ac0768995326f8430cae5f5494314d
+    size: 24793
+    mode: 0o666
+  - path: frontend_dist_files/assets/useVersionContext-BAsaKukW.js
+    sha256: 31b4fb88974212ecc07ae79670f10871d4601bbefec11aa4a3cfe335c6398aef
+    size: 5738
+    mode: 0o666
+  - path: frontend_dist_files/assets/useVersionContext-BAsaKukW.js.map
+    sha256: 248d4b19576e97a435d5d873b6d2aad09a504209fc11479e2512349c9924e07b
+    size: 26980
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-echarts-CDEQFRvo.js
+    sha256: 772c38d337c3391e7b3f4a15e8ececbd095f6be4622c7154489313cdb746d6f5
+    size: 502723
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-echarts-CDEQFRvo.js.map
+    sha256: 6cb05121eecf3a73b0a4fd4e4d3d8e36ee6df6f78a32e6dfd2c7ca497868b48f
+    size: 2850978
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-mermaid-OzQCc335.js
+    sha256: 8c0443722b48c0dda11abd483020b15177404381d27d9f20f5d6b986d829e592
+    size: 5326329
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-mermaid-OzQCc335.js.map
+    sha256: c859d0a2a2b2557e224efbc56e685c5297db36a853236b08240efb98dc1fbd22
+    size: 19034406
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-vue-ep-BLN_Y6-T.css
+    sha256: 16e2c2f110f3adcde3c29e033d6aae772db74fd18e2956ae96f649b7a05e5cf5
+    size: 311966
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-vue-ep-DcEk7uEl.js
+    sha256: e3e38cfd5267522d16d609e49c9f9f554caa7f6950485330f74631a80a7c1a05
+    size: 881196
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-vue-ep-DcEk7uEl.js.map
+    sha256: 89b504856e3177a60d02c6c4bce9afa6ecb15f1dab0110bd459b5f8edf330448
+    size: 4647803
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-xlsx-BBWTpfDg.js
+    sha256: ffc8e29501816eaf483c2b44adc85dbfd15ecb9178db6179baafdd588d2d03c1
+    size: 424727
+    mode: 0o666
+  - path: frontend_dist_files/assets/vendor-xlsx-BBWTpfDg.js.map
+    sha256: e718986abde16bfacc8a65e2b12e41ea588f5866d2deeb226ed13b2b8535cdae
+    size: 1666305
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter1.html
+    sha256: 62139129283687b1501fe9e80c077561398ee1780ba2402688d1078b65f3ebfd
+    size: 7222
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter2.html
+    sha256: 1d7f3d048747e991fbd8d9ce1bf2434b78b58907ad0834fac76baf7392e17f12
+    size: 7079
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter3.html
+    sha256: af235d1ae1f087bd92ffa51967772b8812a47a7b41847cd8bd5b789a7f414094
+    size: 6982
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter4.html
+    sha256: 2f96323506d9e604c82223bf52209b4cc65b2767b2f39b2f275db621c4984636
+    size: 6868
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter5.html
+    sha256: 1312208f0869fc40e82707c918666d71b0b9bdbd868f075e48f0d03f10eb3738
+    size: 6738
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/chapter6.html
+    sha256: b26eba10b2d92cea590bf288056a74e099fa8715c302b3a42daa86ddb54d6033
+    size: 7223
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/index.html
+    sha256: 650a91e22a7b0757ad699d9664c80fb5a584185183ab1f76fc41fea1f51f8af8
+    size: 6852
+    mode: 0o666
+  - path: frontend_dist_files/docs/user-guide/styles.css
+    sha256: 3ca4b2876a02342262f46d6a445ea4f44cdde1ca5907aaa2cae1e45ccb8cc021
+    size: 11561
+    mode: 0o666
