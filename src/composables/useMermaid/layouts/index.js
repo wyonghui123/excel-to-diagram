@@ -139,8 +139,16 @@ export function routeLayout(containers, config) {
   } = config || {}
 
   if (!containers || containers.length === 0) {
-    console.log('[routeLayout] No containers, returning null')
-    return null
+    // [UPLIFT 2026-08-05] "仅服务模块"模板: BO 叶全禁用 → allContainers 为空, 但
+    //   groups 仍含启用的服务模块分组. 若 groups enabled 且非空, 仍调用 generateGroupedLayout,
+    //   使服务模块 (enabled 且无可见子孙) 按 uplift 上提为彩色节点, 而非落入 SG 空容器兜底
+    //   (只显示标题, 无节点). 仅当 groups 也不可用时才返回 null.
+    if (layoutControlConfig?.enabled && layoutControlConfig?.groups?.length > 0) {
+      console.log('[routeLayout] No containers but groups enabled, continue for uplift rendering')
+    } else {
+      console.log('[routeLayout] No containers, returning null')
+      return null
+    }
   }
 
   if (isDeprecatedLayout(layoutType)) {

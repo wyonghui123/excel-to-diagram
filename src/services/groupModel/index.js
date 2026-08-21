@@ -14,7 +14,16 @@ export {
   buildGroupModelFromArchitecture,
   buildNodeIdMap,
   filterGroupModelByScope,
-  extractTerminalGroups
+  extractTerminalGroups,
+  // [FIX 2026-07-30] 新增 flatten → groups 转换函数
+  //   buildGroupsFromFlatten 是 useReactiveRenderer / useMermaidWorker 的入口，
+  //   previewDataToFlatten 是 useChartPreview 的反推函数。
+  //   之前未导出导致 ESM import 报错，整个 chart view 渲染失败。
+  buildGroupsFromFlatten,
+  previewDataToFlatten,
+  // [FIX 2026-07-30] extractLinks 是 useReactiveRenderer / useMermaidWorker
+  //   从 relationships 提取 Link 的入口；之前未导出导致整个 chart view 渲染失败。
+  extractLinks
 } from './architectureProcessor.js'
 
 // 重新导出类型定义

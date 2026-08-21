@@ -1,6 +1,14 @@
 /**
  * serviceModuleDiagramBuilder - 服务模块图数据构建服务
  *
+ * @deprecated 服务模块图（serviceModule）已废弃（2026-08-08）
+ *   - 业务层面已不再区分「业务对象图 / 服务模块图」两种图表模式
+ *   - 唯一业务入口为 /system/archdata 嵌入式 Mermaid 图表（EmbeddedChartView → MermaidComponent）
+ *   - 原「图表类型」下拉已被「展开层级」（expandLevel）取代；
+ *     serviceModule 仅作为图表内的「展开层级 / 颜色分组维度」，不再是独立图表模式
+ *   - chartType 配置固定为 'businessObject' 且 UI 无法切换，本文件渲染路径已无业务入口
+ *   - 保留仅作历史参考，禁止作为新功能入口
+ *
  * 所属模块：图表渲染
  * 主要功能：
  *   - 构建服务模块图的节点和连线数据
@@ -16,9 +24,17 @@
  */
 
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
-import { sanitizeMermaidLabel } from '../composables/useMermaid/syntax/_shared/arrowHelper.js'
+import { createHierarchyPipeline, GLOBAL_TERMINALS, sharedHierarchyPipeline } from './hierarchyTree/index.js'
+import { colorize } from './hierarchyTree/colorize.js'
+import { deriveLayoutGroups } from './hierarchyTree/layoutGroupsDeriver.js'
 
 export { LAYOUT_TEMPLATES }
+
+// [FIX 2026-08-02] 管道单例: L1 树 / L2 投影缓存跨 generateDiagram 调用生效 (spec 4.4)。
+// [Task 10 2026-08-02] 改用 sharedHierarchyPipeline — BO/SM 图共享同一 L1 树缓存,
+// 切换图表类型不重建架构树, 仅重算 L2 投影 (terminal 不同 → 缓存 key 不同, 无串扰)。
+// 仅在传入 versionId/scopeHash 时启用缓存; 测试/旧路径不传时新建实例避免跨用例缓存串扰。
+const hierarchyPipeline = sharedHierarchyPipeline
 
 /**
  * 从分组配置中递归提取所有服务模块代码
@@ -103,6 +119,10 @@ function extractServiceModuleCodesFromGroups(groups, collectedCodes = new Set())
  * @param {String} params.colorScheme - 配色方案
  * @param {String} params.nodeTextColor - 服务模块标题文字颜色
  * @param {Array} params.centerServiceModuleCodes - 中心范围服务模块编码数组
+ * @param {Object} params.preview - 架构 preview 数据（统一管道分支: 传入则走 buildHierarchyTree→projectTree 管道）
+ * @param {String} params.chartType - 图表类型（'serviceModule' 时启用统一管道分支）
+ * @param {Number} params.versionId - 版本 ID（L1 树缓存 key 组成部分）
+ * @param {String} params.scopeHash - scope 哈希（L1 树缓存 key 组成部分）
  * @returns {Object} 图表数据
  */
 export function buildServiceModuleDiagramData({
@@ -121,7 +141,11 @@ export function buildServiceModuleDiagramData({
   layoutControlConfig = null,
   groupControlTitleMap = {},
   centerServiceModuleCodes = null,
-  centerScopeHighlight = true
+  centerScopeHighlight = true,
+  preview = null,
+  chartType = '',
+  versionId = 0,
+  scopeHash = ''
 }) {
   // 获取颜色方案
   const colors = COLOR_SCHEMES[colorScheme] || COLOR_SCHEMES.default;
@@ -143,6 +167,70 @@ export function buildServiceModuleDiagramData({
       filteredRelationships = serviceModuleRelationships.filter(rel =>
         groupSmCodes.has(rel.sourceServiceModuleCode) && groupSmCodes.has(rel.targetServiceModuleCode)
       )
+    }
+  }
+
+  // [FIX 2026-08-02] 统一管道分支（spec 4.2）：preview 传入且 chartType=serviceModule 时走管道。
+  // 消除双数据源: nodes/containers/links 全部派生自同一棵架构树（L1 树 → L2 投影 → L3 着色），
+  // 容器层级由树固定派生, 同一 SM 只出现一次（作为显示节点; 归属于子领域容器为正常层级, 不再作为 subgraph 容器重复出现）。
+  if (preview && chartType === 'serviceModule') {
+    // 缓存生效条件: 调用方提供了 versionId/scopeHash (真实链路); 否则新建实例避免串扰
+    const pipeline = (versionId || scopeHash) ? hierarchyPipeline : createHierarchyPipeline()
+    const treeData = pipeline.getTree({ preview, versionId, scopeHash })
+    const projection = pipeline.project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
+
+    // L3 着色（投影节点自带 domain/subDomain, 由树上下文派生）
+    const { nodes: coloredNodes, groupColorMap } = colorize(projection.nodes, projection.containers, {
+      colorGroupBy, colorScheme, centerSubDomain, centerSubDomainColor, customColors,
+      centerServiceModuleCodes, centerScopeHighlight, nodeTextColor,
+    })
+
+    // links: 投影器已把 BO 级关系折叠重映射为 SM code 级; 补充关系元数据 + 过滤悬空边
+    const relMap = new Map((filteredRelationships || []).map(r =>
+      [`${r.sourceServiceModuleCode}->${r.targetServiceModuleCode}`, r]))
+    const links = projection.links
+      .map(l => {
+        const rel = relMap.get(`${l.source}->${l.target}`)
+        return {
+          source: l.source, target: l.target,
+          label: l.label || rel?.serviceRelationshipCode || '',
+          tooltip: rel ? `关系编码: ${rel.serviceRelationshipCode}\n业务对象关系: ${rel.businessObjectRelationshipCodes?.join(', ')}` : '',
+          annotationContents: rel?.annotationContents || [],
+          annotationCategories: rel?.annotationCategories || [],
+          relationType: rel?.relationType || '',
+          relationDirection: rel?.relationDirection || null,
+          // [FIX 2026-08-03] 透传完整子关系数组, 供 useTooltip 展示"所有子关系 BO 对列表"
+          childRelations: rel?.businessObjectRelationships || [],
+        }
+      })
+      .filter(l => coloredNodes.some(n => n.id === l.source) && coloredNodes.some(n => n.id === l.target))
+
+    // groups 由同一容器树派生 (spec 4.2.4): 取代 GroupModel 独立生成 + resolveGroupContainers 名称匹配。
+    // enabled 恒为 true: 容器层级由树固定派生, 不再受用户自定义分组开关影响
+    const unifiedLayoutConfig = {
+      enabled: true,
+      overallDirection: layoutControlConfig?.overallDirection || 'TB',
+      groups: deriveLayoutGroups(projection.containers),
+    }
+
+    // [FIX 2026-08-02] 顶层补齐 centerScopeHighlight/centerScope 契约字段 (与 BO 图 builder 一致):
+    //   - MermaidComponent watch 用 diagramData.centerScopeHighlight 变化判定增量路径,
+    //     缺它 → 切换"区分中心范围"时 centerScopeHighlightChanged=false → 全量 renderMermaid() (用户感知"刷新图表区域")
+    //   - updateColorsOnly.updateNodeColors 用 centerScope 集合判定中心节点 fill,
+    //     缺它 → centerScopeSet 空 → 增量路径下中心节点不涂 centerScopeColor
+    //   centerScope 取自 colorize 已烘焙的 isCenter 节点 (与 useServiceModuleSyntax 语法层判定严格一致)
+    return {
+      nodes: coloredNodes,
+      links,
+      containers: projection.containers,
+      centerSubDomain: centerSubDomain || projection.nodes[0]?.subDomain || '',
+      centerSubDomainColor, centerScopeColor, colorGroupBy, colorScheme,
+      nodeTextColor, layoutTemplate, customColors, hideLinkLabelTails,
+      layoutControlConfig: unifiedLayoutConfig,
+      groupControlTitleMap,
+      centerScopeHighlight: centerScopeHighlight !== false,
+      centerScope: coloredNodes.filter(n => n.isCenter).map(n => n.code),
+      groupColorMap,                    // [FIX 2026-08-05] 与图表同源的分组色映射
     }
   }
 
@@ -194,13 +282,9 @@ export function buildServiceModuleDiagramData({
     // 重要：只有当子领域本身就是中心子领域时才使用 centerSubDomainColor
     // 而不是根据 actualCenterSubDomain 来判断（这会导致整个子领域都变成中心颜色）
     filteredServiceModules.forEach(sm => {
-      // 只有当这个服务模块是中心服务模块时，才使用 centerScopeColor
-      // 否则使用领域颜色
-      if (finalCenterServiceModuleCodes.has(sm.code)) {
-        subDomainColors[sm.subDomain] = centerScopeColor;
-      } else {
-        subDomainColors[sm.subDomain] = domainColors[sm.domain];
-      }
+      // [FIX 2026-08-02] 中心模块的子领域不再用 centerScopeColor 覆盖 (与 BO 图"分组色+特殊边框"一致)
+      //   之前: 中心模块的子领域 subDomainColors = centerScopeColor → 按子领域分组时中心模块整片灰
+      subDomainColors[sm.subDomain] = domainColors[sm.domain];
     });
   }
 
@@ -222,7 +306,11 @@ export function buildServiceModuleDiagramData({
       baseColor = domainColors[sm.domain] || colors[0]
     }
 
-    const finalColor = isCenter ? centerScopeColor : baseColor
+    // [FIX 2026-08-02] 中心模块 fill 不再用 centerScopeColor 覆盖 (与 BO 图"分组色+特殊边框"一致)
+    //   之前: isCenter 模块 fill=centerScopeColor (#808080 灰) → 中心模块占大比时整图灰蒙蒙,
+    //   且切换配色/分组时语法层每次重建都重新赋灰 → 用户反馈"节点还是灰色的"。
+    //   现在: 中心模块 fill 用分组色 (联动变色), 由 useServiceModuleSyntax 根据 isCenter 加粗虚线边框区分。
+    const finalColor = baseColor
 
     return {
       id: sm.code,
@@ -252,7 +340,9 @@ export function buildServiceModuleDiagramData({
     annotationCategories: rel.annotationCategories || [],
     // [v34 双向支持] 透传 relationType + relationDirection
     relationType: rel.relationType || '',
-    relationDirection: rel.relationDirection || null
+    relationDirection: rel.relationDirection || null,
+    // [FIX 2026-08-03] 透传完整子关系数组, 供 useTooltip 展示"所有子关系 BO 对列表"
+    childRelations: rel.businessObjectRelationships || []
   }));
 
   // 构建容器（子领域）- 容器默认白色背景
@@ -301,7 +391,10 @@ export function buildServiceModuleDiagramData({
     customColors,
     hideLinkLabelTails,
     layoutControlConfig,
-    groupControlTitleMap
+    groupControlTitleMap,
+    // [FIX 2026-08-02] 与统一管道分支一致: 补齐顶层契约字段 (watch 增量路径 + updateNodeColors 依赖)
+    centerScopeHighlight: centerScopeHighlight !== false,
+    centerScope: [...finalCenterServiceModuleCodes]
   };
 }
 
@@ -440,18 +533,14 @@ export function generateServiceModuleMermaidCode(diagramData) {
   // 生成子图（容器）
   containers.forEach(container => {
     const containerId = container.id.replace(/[^a-zA-Z0-9]/g, '_');
-    // [V007.52 P0] 转义 container.fullTitle / node.name / node.code 防 mermaid 11.13 syntax error
-    const safeContainerTitle = sanitizeMermaidLabel(container.fullTitle || '')
-    code += `    subgraph ${containerId}["${safeContainerTitle}"]\n`;
+    code += `    subgraph ${containerId}["${container.fullTitle}"]\n`;
 
     // 容器内的节点
     container.nodes.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
       if (node) {
-        const safeNodeName = sanitizeMermaidLabel(node.name || '')
-        const safeNodeCode = sanitizeMermaidLabel(node.code || '')
-        const nodeLabel = `${safeNodeName}<br/>${safeNodeCode}`;
-        code += `        ${safeNodeCode}["${nodeLabel}"]\n`;
+        const nodeLabel = `${node.name}<br/>${node.code}`;
+        code += `        ${node.code}["${nodeLabel}"]\n`;
       }
     });
 

@@ -98,50 +98,6 @@
 </template>
 
 <script>
-import { ElNotification } from 'element-plus'
-
-/**
- * [V007.50 P0 2026-07-09] 业务对象图 关系数量告警 - 提前到步骤 1
- *
- * 用户诉求: V007.49 告警在 BO 图渲染时 (步骤 2 展示页) 弹, 但用户希望
- *   在步骤 1 (StepChartType 内 StepScopeSummary 卡片) 就看到提示
- *   避免用户已经做完所有配置进 step 2 才看到警告
- *
- * 实现:
- *   - 在 StepScopeSummary 组件内 watch 监听 total.objectRelations
- *   - 超过阈值 (100) 立即弹 ElNotification (右下角)
- *   - 用 module-level _lastWarnedStep1Key 防止重复弹 (用户调整范围时)
- *   - 仅在 BO 图触发 (chartType prop, 默认 'businessObject')
- */
-const RELATIONSHIP_WARN_THRESHOLD = 100
-let _lastWarnedStep1Key = null  // 'above:N' or null
-
-function warnTooManyRelationshipsStep1(count, chartType) {
-  if (chartType !== 'businessObject') return
-  const isAbove = count > RELATIONSHIP_WARN_THRESHOLD
-  const wasAbove = _lastWarnedStep1Key !== null
-  if (wasAbove && isAbove) {
-    // 已在 above 状态, 数量变化不重复
-    return
-  }
-  if (!isAbove) {
-    if (wasAbove) {
-      _lastWarnedStep1Key = null
-    }
-    return
-  }
-  // 第一次越过阈值 (≤100 → >100), 告警
-  _lastWarnedStep1Key = `above:${count}`
-  ElNotification({
-    title: '业务对象图关系数量过多',
-    message: `当前关系数量 ${count} 条, 超过推荐阈值 ${RELATIONSHIP_WARN_THRESHOLD} 条, 可能影响图表加载和渲染性能。建议缩小对象和关系范围, 或采用服务模块图查看整体结构。`,
-    type: 'warning',
-    duration: 8000,
-    position: 'bottom-right',
-    showClose: true,
-  })
-}
-
 export default {
   name: 'StepScopeSummary',
   props: {
@@ -156,11 +112,6 @@ export default {
     total: {
       type: Object,
       default: null
-    },
-    // [V007.50 P0] 图表类型 - 决定是否告警 (只 BO 图告警)
-    chartType: {
-      type: String,
-      default: 'businessObject'
     }
   },
   computed: {
@@ -180,16 +131,6 @@ export default {
     },
     hasTotal() {
       return this.total && this.total.businessObjects > 0
-    }
-  },
-  watch: {
-    // [V007.50 P0] 监听 total.objectRelations 变化, 超阈值弹通知
-    'total.objectRelations': {
-      handler(newCount) {
-        if (typeof newCount !== 'number') return
-        warnTooManyRelationshipsStep1(newCount, this.chartType)
-      },
-      immediate: true
     }
   }
 }

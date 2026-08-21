@@ -3,16 +3,25 @@ import { DEFAULT_LINK_COLOR } from '../color/useMermaidColors.js'
 import { useBlockDiagramStyle } from '../style/useBlockDiagramStyle.js'
 import { useDynamicSizeConfig } from '../config/useDynamicSizeConfig.js'
 import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
+import { businessObjectLabel } from './nodeLabelTemplate.js'
 
 export const DIAGRAM_TYPES = {
   BUSINESS_OBJECT: 'businessObject',
+  /**
+   * @deprecated 服务模块图（serviceModule）已废弃（2026-08-08）。
+   *   业务层面不再区分「业务对象图 / 服务模块图」，唯一业务入口为嵌入式 Mermaid 图表，
+   *   且「图表类型」下拉已被「展开层级」取代，chartType 固定为 'businessObject'。
+   *   保留仅作历史兼容，禁止作为新功能入口。
+   */
   SERVICE_MODULE: 'serviceModule'
 }
 
 export const NODE_TEXT_FORMATS = {
   [DIAGRAM_TYPES.BUSINESS_OBJECT]: (node) => {
-    return node.nodeCode ? `${node.originalName || node.name}\n(${node.nodeCode})` : (node.originalName || node.name)
+    // [TEMPLATE 2026-08-11] 委托统一模板 (名称\n编码 两行)
+    return businessObjectLabel(node)
   },
+  // @deprecated 服务模块图（serviceModule）已废弃（2026-08-08），与 DIAGRAM_TYPES.SERVICE_MODULE 一同保留仅作历史参考
   [DIAGRAM_TYPES.SERVICE_MODULE]: (node) => {
     return node.code ? `${node.name}\n(${node.code})` : node.name
   }
@@ -89,7 +98,7 @@ export function useBlockDiagramSyntax() {
     return container.subDomain || container.name
   }
 
-  const calculateLinkColor = (sourceNode, targetNode, containers, centerSubDomain, colorScheme) => {
+  const calculateLinkColor = (sourceNode, targetNode, containers, centerSubDomain, colorScheme, centerScopeColor = '#808080') => {
     const sourceColor = sourceNode.color
     const targetColor = targetNode.color
 
@@ -119,25 +128,23 @@ export function useBlockDiagramSyntax() {
       })
     }
 
-    console.log('[calculateLinkColor] source:', sourceNode.id, 'target:', targetNode.id, 'isSourceCenter:', isSourceCenter, 'isTargetCenter:', isTargetCenter)
-
+    // [FIX 2026-08-02 v6] 连线颜色规则 (与 BO 图对齐):
+    //   1. 双中心 -> centerScopeColor 灰 (与中心模块灰色一致)
+    //   2. 一中心一非中心 -> 非中心节点的颜色
+    //   3. 双非中心 -> 黑色
     let linkColor = DEFAULT_LINK_COLOR
-    // 新的颜色规则：
-    // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
-    // 2. 如果两个都是非中心范围则采用黑色
-    // 3. 如果两个都是中心范围则采用该节点颜色
-    if (!isSourceCenter && !isTargetCenter) {
-      // 两个都是非中心范围 -> 黑色
+    if (isSourceCenter && isTargetCenter) {
+      linkColor = centerScopeColor
+      console.log('[calculateLinkColor] -> 中心范围色:', linkColor)
+    } else if (isSourceCenter) {
+      linkColor = targetColor || sourceColor || DEFAULT_LINK_COLOR
+      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
+    } else if (isTargetCenter) {
+      linkColor = sourceColor || targetColor || DEFAULT_LINK_COLOR
+      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
+    } else {
       linkColor = '#000000'
       console.log('[calculateLinkColor] -> 黑色（两个都是非中心）')
-    } else if (isSourceCenter && isTargetCenter) {
-      // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
-      linkColor = sourceColor || targetColor || DEFAULT_LINK_COLOR
-      console.log('[calculateLinkColor] -> 中心颜色:', linkColor)
-    } else {
-      // 一个中心，一个非中心 -> 采用非中心节点的颜色
-      linkColor = isSourceCenter ? targetColor : sourceColor
-      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
     }
 
     return linkColor
@@ -201,7 +208,14 @@ export function useBlockDiagramSyntax() {
             annotationContents: link.annotationContents || [],
             annotationCategories: link.annotationCategories || [],
             sourceCode: sourceNode.code,
-            targetCode: targetNode.code
+            targetCode: targetNode.code,
+            // [FIX 2026-08-03] 透传 SM 子关系数组, 供 useTooltip 展示所有子关系 BO 对.
+            //   BO 图 link 无此字段 → 空数组 → useTooltip 走单关系老逻辑 (单测兼容).
+            childRelations: link.childRelations || [],
+            // [FIX 2026-08-03] 透传方向/类型, 供 snapshot.links.relations 暴露给 e2e 断言双向渲染.
+            //   之前缺失 → snapshot relations 的 relationDirection 恒空 → e2e 无法验证 SM 双向.
+            relationDirection: link.relationDirection || '',
+            relationType: link.relationType || ''
           })
         }
 

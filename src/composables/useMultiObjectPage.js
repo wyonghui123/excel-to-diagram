@@ -89,6 +89,7 @@ import { useContextFilterSource } from './filterSources/useContextFilterSource'
 import { useScopeFilterSource } from './filterSources/useScopeFilterSource'
 import { useHierarchyTypes } from './useHierarchyTypes'
 import * as hierarchyService from '@/services/hierarchyService'
+import { stripIdPrefix } from '@/services/archDataConverter'
 import { useAuthStore } from '@/stores/authStore'
 
 /**
@@ -430,11 +431,20 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    *   关系过滤: scope.relationCodes/categoryTypes/filterRelationCodes → scopeIds.relationExtra
    */
   function handleScopeChange(scope) {
+    // [FIX 2026-08-07] 添加短字段名映射, 兼容 treeNodesToScope 返回的 { boIds, domainIds, ... } 格式
+    //   RelationScopeTree 的 scope-change 事件使用短字段名, 而 URL scope 参数使用 selected*Ids 格式
+    const typeToShortField = {
+      domain: 'domainIds',
+      sub_domain: 'subDomainIds',
+      service_module: 'serviceModuleIds',
+      business_object: 'boIds'
+    }
     objectTypes.forEach(type => {
       if (hierarchyService.isHierarchyType(levels.value, type)) {
         const selectedKey = `selected${_pascalCase(type)}Ids`
         const effectiveKey = `effective${_pascalCase(type)}Ids`
-        scopeIds[type].selected = scope[selectedKey] || []
+        const shortKey = typeToShortField[type]
+        scopeIds[type].selected = scope[selectedKey] || scope[shortKey] || []
         scopeIds[type].effective = scope[effectiveKey] || []
       }
     })
@@ -569,84 +579,48 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   const exportFilters = computed(() => {
     const f = { ...baseFilters.value }
 
-    // [FIX 2026-07-02] 层级过滤: 复用 buildHierarchyFilterParams, 与 combinedFilters 同源
-    //   之前 exportFilters 直接拼 ${type}_id (数组), 漏掉父级 FK 回退逻辑, 与 UI 表格不一致.
-    //   现在对每个层级 type 调用 buildHierarchyFilterParams, 让 UI 表格与导出共用同一份语义.
-    //
-    //   [FIX 2026-07-02 v3] 命名空间隔离: exportFilters 把 buildHierarchyFilterParams 输出
-    //     的 id__in 重命名为 ${objectType}_id__in, 因为多 sheet 导出共用一个 filter,
-    //     不同实体类型的 id__in 会互相覆盖 (后一个 type 覆盖前一个).
-    //     例如选 PUM(SM)+SP(SD), 最后 buildHierarchyFilterParams(service_module) 写的
-    //     id__in='564' (SM ID) 覆盖了 sub_domain 的 id__in='332,339' (SD ID),
-    //     导致 business_object sheet 查询时用 id__in='564' → 0 行.
-    //   后端 _query_with_hierarchy 在循环到具体 sheet 时, 把对应类型的 ${type}_id__in
-    //   映射回 id__in, 让 resolve_conditions 正确解析.
     for (const type of objectTypes) {
       if (!hierarchyService.isHierarchyType(levels.value, type)) continue
-      const hierarchyResult = hierarchyService.buildHierarchyFilterParams({
-        levels: levels.value,
-        scopeIds,
-        objectType: type
-      })
-      // 重映射: id__in → ${type}_id__in (保留 type 命名空间, 不互相覆盖)
-      //   FK 回退字段 (如 sub_domain_id__in) 保留原 key, 因为它在所有 sheet 共用
-      if (hierarchyResult.id__in) {
-        hierarchyResult[`${type}_id__in`] = hierarchyResult.id__in
-        delete hierarchyResult.id__in
+      const scope = scopeIds[type]
+      if (!scope) continue
+      const ids = scope.selected.length > 0
+        ? [...scope.selected]
+        : scope.effective.length > 0
+          ? [...scope.effective]
+          : []
+      if (ids.length > 0) {
+        f[`${type}_id`] = ids
       }
-      Object.assign(f, hierarchyResult)
     }
 
-    // [FIX 2026-07-02 v2] 合并 scopeSource 的关键 filter 维度
-    //   之前的实现直接 Object.assign(scopeSource.value.value), 把关系 IDs 写到 id__in 里.
-    //   但 export 是多 sheet 导出 (领域/子领域/服务模块/业务对象/业务关系 共用同一份 filters):
-    //     - 实体 sheet 用 id__in = 实体 ID 是对的
-    //     - 关系 sheet 用 id__in = 关系 ID 是对的
-    //   但 Object.assign 之后, 后续实体的 buildHierarchyFilterParams 也会覆盖 id__in,
-    //   而且 scopeSource.id__in (关系 ID) 会污染所有实体 sheet 的 id__in (被理解成实体 ID).
-    //
-    //   修复: 只合并 source_bo_ids / target_bo_ids (与实体类型无关), 不合并 id__in.
-    //   id__in 的合并由下面的 buildRelationshipFilterParams 通过 relationIds 派生,
-    //   该函数已经在 _query_association_with_hierarchy_filters 路径中只对 relationship sheet 生效.
-    if (scopeSource?.value?.value) {
-      const scopeValue = scopeSource.value.value
-      if (scopeValue.source_bo_ids) f.source_bo_ids = scopeValue.source_bo_ids
-      if (scopeValue.target_bo_ids) f.target_bo_ids = scopeValue.target_bo_ids
-      // 注意: 不再合并 id__in (因为它对实体 sheet 是污染, 对关系 sheet 已由下面 buildRelationshipFilterParams 覆盖)
-    }
-
-    // 全局过滤 (annotation_category 等): 与 combinedFilters 一致, 用 __in 后缀逗号串
     Object.keys(scopeIds.globalFilters).forEach(key => {
       const val = scopeIds.globalFilters[key]
       if (Array.isArray(val) && val.length > 0) {
-        f[`${key}__in`] = val.join(',')
+        f[key] = val
       }
     })
 
-    // [FIX 2026-07-02] 关系过滤: 复用 buildRelationshipFilterParams, 与 UI 表格共用同一份逻辑
-    //   关键修复: 之前 exportFilters 自定义 relation_codes (后端别名), UI 表格走 id__in (精确ID).
-    //   两条路径语义不同: 168 (UI精确) vs 216 (导出别名反查).
-    //   现在统一调用 buildRelationshipFilterParams, 优先 relationIds → id__in 精确匹配.
-    //
-    //   [FIX 2026-07-02 v2] 命名空间隔离: buildRelationshipFilterParams 输出的 id__in 含义是"关系 ID",
-    //     而 buildHierarchyFilterParams 输出的 id__in 含义是"实体 ID" (随 sheet 类型变化).
-    //     exportFilters 被多 sheet 共享, 不能用同一个 key.
-    //     重命名输出键为 relation_id__in, 让后端 association 路径 (relationship sheet) 单独识别.
-    //     实体 sheet 的 id__in (来自 buildHierarchyFilterParams) 不被关系 ID 污染.
-    const relResult = hierarchyService.buildRelationshipFilterParams({
-      relationIds: scopeIds.relationExtra.relationIds || [],
-      relationCodes: scopeIds.relationExtra.relationCodes || [],
-      categoryTypes: scopeIds.relationExtra.categoryTypes || [],
-      filterRelationCodes: scopeIds.relationExtra.filterRelationCodes || []
-    })
-    // 重映射: buildRelationshipFilterParams 的 id__in → relation_id__in
-    //   保留原 id__in 给实体 sheet (来自 buildHierarchyFilterParams)
-    //   后端 _query_association_by_id 走 'relation_id__in' 优先 (后端 fix 配套)
-    if (relResult.id__in) {
-      f.relation_id__in = relResult.id__in
-      delete relResult.id__in
+    const extra = scopeIds.relationExtra
+    // [FIX] 优先使用 relationIds（精确 ID 过滤）：当 relationIds 已设置时，跳过 relation_codes
+    // 避免后端 AND 语义（id__in AND relation_code__in）把 relation_code 为空的跨域记录（id=29）错误排除。
+    // relationIds 已是精确的 ID 列表（包含 INTERNAL + CROSS_BOUNDARY），无需再用 code 二次过滤。
+    const hasRelationIds = (extra.relationIds?.length || 0) > 0
+    if (!hasRelationIds) {
+      let relationCodes = [...(extra.relationCodes || [])]
+      if (extra.filterRelationCodes?.length > 0) {
+        if (relationCodes.length > 0) {
+          relationCodes = relationCodes.filter(r => extra.filterRelationCodes.includes(r))
+        } else {
+          relationCodes = [...extra.filterRelationCodes]
+        }
+      }
+      if (relationCodes.length > 0) {
+        f.relation_codes = relationCodes
+      }
     }
-    Object.assign(f, relResult)
+    if (extra.categoryTypes?.length > 0) {
+      f.category_types = [...extra.categoryTypes]
+    }
 
     return f
   })
@@ -658,7 +632,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   }))
 
   // [任务B 2026-06-29] 导出对话框可选类型: 在原 objectTypes 基础上额外暴露 annotation
-  //   - annotation 不作为页面 Tab (RelationshipManagement.vue objectTypes 不含 annotation)
+  //   - annotation 不作为页面 Tab (ArchDataManagement.vue objectTypes 不含 annotation)
   //   - 仅在导出对话框作为可勾选类型, 默认不勾选 (ExportDialog defaultUnselectedTypes)
   //   - relationship 也出现在导出对话框, 默认不勾选
   //   - 后端 manage_api.py 已种入 annotation:export 权限, export_import_api.py 走 selected_types 路径
@@ -731,10 +705,12 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       if (!scope) return
 
       // 优先使用 selected（用户在树上直接勾选），其次 effective（树计算的可见范围）
+      // [FIX 2026-08-14] 剥离树节点 ID 前缀 (d_/s_/sm_/bo_) 归一化为纯数字,
+      //   防止 prefixed ID 进入 chartData.hierarchyFilter → preview 请求 → 后端 500
       const ids = scope.selected.length > 0
-        ? [...scope.selected]
+        ? [...scope.selected].map(stripIdPrefix)
         : scope.effective.length > 0
-          ? [...scope.effective]
+          ? [...scope.effective].map(stripIdPrefix)
           : []
 
       if (ids.length > 0) {
@@ -928,7 +904,18 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // [E2E] dev 环境暴露给 e2e 测试
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, exportFilters, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart }
+    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart,
+      // [E2E 2026-08-08] 直接设置 scope (替代 enableChartButton 的 10 次轮询)
+      setScope: (domainId, versionId) => {
+        if (scopeIds?.domain) {
+          scopeIds.domain.selected = [domainId]
+          scopeIds.domain.effective = [domainId]
+        }
+        if (versionContext?.selectedVersionId) {
+          versionContext.selectedVersionId.value = versionId
+        }
+      }
+    }
   }
 
   return {
@@ -977,15 +964,3 @@ function _pascalCase(str) {
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join('')
 }
-
-
-// [VITE POLLING TEST 2026-07-02-114840] Watch test
-
-
-// [VITE POLLING TEST 2026-07-02-114900] Watch test 2
-
-
-
-// [POLLING TEST 2026-07-02-115200] Final test
-
-

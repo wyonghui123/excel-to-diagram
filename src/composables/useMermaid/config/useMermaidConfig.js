@@ -76,8 +76,9 @@ export function getElkConfig(data = null, layoutType = 'default', preserveModelO
     'elk.spacing.nodeNode': 100,
     'elk.layered.spacing.nodeNodeBetweenLayers': 150,
 
-    // 图表整体 padding（增加 left/right 以改善嵌套容器内边距）
-    'elk.padding': '[top=40,left=80,right=80,bottom=40]',
+    // 图表整体 padding（增加 top 以避免容器标题与首个子节点重叠：
+    // 标题区域 = subGraphTitleMargin.top(15) + labelH(24) = 39px，需额外间隙）
+    'elk.padding': '[top=60,left=80,right=80,bottom=40]',
 
     // 关键：支持嵌套结构
     'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
@@ -140,9 +141,11 @@ export function useMermaidConfig() {
       startOnLoad: false,
       securityLevel: 'loose',
       maxTextSize: maxTextSize,
-      // [V007.61] maxEdges 是 top-level secure config, 不能放在 flowchart 内
-      //   mermaid 11.13.0 报 "Edge limit exceeded. 500 edges found, but the limit is 500"
-      //   放在 flowchart.maxEdges 无效 (被忽略), 必须在顶层
+      // [FIX 2026-07-30] maxEdges 必须为 TOP-LEVEL 配置（不是 flowchart.maxEdges）
+      //   根因：mermaid 11 的 maxEdges 是顶层 secure 配置项，flowDiagram 读取 this.config.maxEdges
+      //   之前误放在 flowchart 下，导致 mermaid.run() 用默认 500，供应链云 BO 图 (>500边) 被阻断
+      //   错误: "Edge limit exceeded. 500 edges found, but the limit is 500"
+      //   项目规范：Mermaid 配置必须设置 maxEdges: 10000 (顶层)
       maxEdges: 10000,
       theme: 'base',
       themeVariables: {
@@ -164,10 +167,6 @@ export function useMermaidConfig() {
         useMaxWidth: false,
         htmlLabels: true,
         diagramPadding: 20,
-        // [V007.59] mermaid 11.13.0 默认 maxEdges=500, 超过就报
-        //   "Edge limit exceeded" 错误 (用户场景 3299 关系会触发).
-        //   显式提升到 10000, 留足 headroom. 大图会自动切 elk (MermaidComponent.vue V007.59)
-        maxEdges: 10000,
         // 关键修复 v32：wrappingWidth 决定 mermaid 给 foreignObject 内 div 设的 max-width
         //   之前 200 太窄，对中文 edge label（如 "供应链云>采购订单"）会右边截断
         //   提升到 500 后能容纳 ~25 个中文字符
@@ -183,7 +182,13 @@ export function useMermaidConfig() {
         arrowHeadWidth: 6,
         arrowHeadHeight: 6,
         rankdir: rankdir,
-        subGraphTitleMargin: { top: 15, bottom: 15 }
+        // [FIX] title top=5 (非 15): 嵌套容器首个子节点在 rect_top+labelH,
+        //   标题 labelH=24, 若 top=15 则标题底=rect_top+29 与子节点贴合 (0px 间隙 → 重叠).
+        //   top=5 → 标题底=rect_top+29, 留 10px 间隙.
+        //   [FIX 2026-08-06g] 容器标题已改回单行 (disabled 父名称改悬停 tooltip 展示),
+        //   不再需要为两行标题预留超大 bottom 边距。回退到单行合理值 total=30,
+        //   避免 dagre 下容器标题与内容之间出现过大空白。
+        subGraphTitleMargin: { top: 5, bottom: 25 }
       }
     }
 

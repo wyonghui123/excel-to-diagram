@@ -2,7 +2,14 @@ const CONTAINER_TITLE_KEYWORDS = [
   '采购', '寻源', '合同', '价格', '任务', '供应商', '销售', '其他'
 ]
 
+// [STAT-TOOLTIP 2026-08-14] 容器统计纯函数 (业务对象数量 + 内部关系数量), 便于单元测试
+import { computeContainerStats } from '../tooltip/containerStats.js'
+
 export function useSvgStyle() {
+  // [CLEANUP 2026-08-19] 记录当前实例创建的所有 MutationObserver, 供 cleanup() 统一 disconnect.
+  //   修复: fixArrowMarkers 在 serviceModule 下每次渲染都 new 一个 observer 且从不 disconnect,
+  //   组件卸载后 observer 仍长期存活 → 内存/资源泄漏. 归入 useSvgProcessor.unmount 卸载链释放.
+  const activeObservers = []
   const validateContainerTitles = (svg) => {
     if (!svg) return
 
@@ -49,8 +56,13 @@ export function useSvgStyle() {
       // 获取文本内容
       const textContent = innerDiv.textContent || ''
       
-      // 检查是否包含换行符（由 formatContainerTitle 添加）
-      const hasNewLine = textContent.includes('\n')
+      // [FIX 2026-08-06] 换行检测: 同时识别文本中的 \n 与 DOM 中的 <br> 元素.
+      //   根因: formatContainerTitle 生成的标题经 mermaid JS-label 渲染后,
+      //   换行实际落到 <br> 元素 (如 "供应链计划<br>（供应链云）"),
+      //   innerDiv.textContent 返回 "供应链计划（供应链云）" 不含 \n,
+      //   导致 hasNewLine=true 检测失效 → 下方 height 修正与行高压缩不触发,
+      //   foreignObject 高度停留在单行 24px, 第二行下探到内容区被遮挡.
+      const hasNewLine = textContent.includes('\n') || !!innerDiv.querySelector('br')
       
       // 设置 foreignObject 样式
       fo.style.overflow = 'visible'
@@ -58,43 +70,81 @@ export function useSvgStyle() {
       // 设置内部 div 样式
       innerDiv.style.marginLeft = '0'
       innerDiv.style.transformOrigin = 'center center'
-      innerDiv.style.whiteSpace = hasNewLine ? 'pre-line' : 'nowrap'
+      // [FIX 2026-08-06] 用 nowrap + <br> 控制换行 (而非 pre-line):
+      //   标题经 formatContainerTitle 拆两行后换行落在 <br> 上, nowrap 保证 <br> 是唯一换行点,
+      //   避免窄 foreignObject 下父名(如 "（供应链云/供应链计划）")发生自动换行被拆成 3+ 行,
+      //   把标签撑高进一步侵入内容区。
+      innerDiv.style.whiteSpace = 'nowrap'
       innerDiv.style.textAlign = 'center'
-      innerDiv.style.lineHeight = hasNewLine ? '1.3' : '1.2'
+      // [FIX 2026-08-06] 多行容器标题: 行高压缩到 1.1 (原 1.3).
+      //   根因: mermaid 对 subgraph 标签按单行高度布局, 内容节点从标签下方即可开始排列,
+      //   但两行标签实际更高, 导致父名称第二行(subgraph "供应链计划\n（供应链云）")被子内容遮挡.
+      //   压缩行高+内边距让两行标签文字足迹收敛进 mermaid 预留的单行空间, 避免第二行下探到内容区.
+      innerDiv.style.lineHeight = hasNewLine ? '1.1' : '1.2'
       
-      // 多行标题时增加一些内边距
+      // 多行标题时增加一些内边距 (上下 2px, 尽量收敛垂直足迹)
       if (hasNewLine) {
-        innerDiv.style.padding = '4px 8px'
+        innerDiv.style.padding = '2px 8px'
+      }
+
+      // 多行标题: 按内容宽度放宽 foreignObject, 避免父名被自动换行撑高.
+      //   nowrap 下 scrollWidth 即最长一行宽度, 不足则补齐, 使两行各占一行.
+      if (hasNewLine) {
+        const contentW = innerDiv.scrollWidth
+        const curW = parseFloat(fo.getAttribute('width')) || 0
+        if (contentW > curW) {
+          fo.setAttribute('width', String(Math.ceil(contentW)))
+        }
+      }
+
+      // [OPT 2026-08-06] 多行容器标题最小高度修复 (解决换行后被节点/边框遮挡).
+      //   根因: Mermaid 依据单行高度计算 foreignObject height, 当标题被 formatContainerTitle
+      //   拆成多行 (如上提容器 "需求计划 DP\n（供应链云/供应链计划）") 时, 第二行超出高度被裁剪,
+      //   或文字溢出与下方节点重叠.
+      //
+      // [FIX 2026-08-06] 行高修正: 原算法用 24 * 1.3 = 31.2px/行, 2 行得 62+8=70px,
+      //   远超 Mermaid 原生为多行容器标题预留的高度 (每行 24px, 2 行 = 48px).
+      //   过高的 height 会让 label 向下越界, 压到容器顶部下方的内容 (节点/子容器),
+      //   正是"第二行父名称被内容遮挡"的根因.
+      //   修正: 行高对齐 Mermaid 实际 24px/行, 仅按需补齐到原生预留高度, 不再过度下探.
+      if (hasNewLine) {
+        // [FIX 2026-08-06] 行数计算同步感知 <br>: 换行经 mermaid 渲染多为 <br>,
+        //   textContent 不含 \n, 原 split('\n') 恒为 1 行 → 高度不足导致第二行被裁/遮挡.
+        const brCount = innerDiv.querySelectorAll('br').length
+        const lineCount = Math.max(1, textContent.split('\n').length, brCount + 1)
+        const lineHeightPx = 24        // Mermaid label 实际行高 (单行 fo height = 24)
+        const paddingPx = 4            // 2px top + 2px bottom, 轻微缓冲
+        const requiredHeight = Math.ceil(lineCount * lineHeightPx + paddingPx)
+        const currentHeight = parseFloat(fo.getAttribute('height')) || 0
+        if (requiredHeight > currentHeight) {
+          // 顶部对齐、向下扩展: 保持 y 不变, 仅增加 height 即可容纳更多行.
+          // 行高对齐 Mermaid 实际 24px/行 (非 31.2px), 避免过度拉伸 label 压到容器内容.
+          fo.setAttribute('height', String(requiredHeight))
+        }
       }
     })
   }
 
-  const fixArrowMarkers = (svg, diagramType, mermaidContainerRef, textColor) => {
+  const syncArrowMarkers = (svg, diagramType = 'businessObject') => {
     let defs = svg.querySelector('defs')
     if (!defs) {
       defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs')
       svg.insertBefore(defs, svg.firstChild)
     }
 
-    // [v43 修复"刺猬"] 强制所有 mermaid 生成的 marker 用 userSpaceOnUse
-    //   markerUnits 默认是 strokeWidth, 会让 marker 随 stroke 宽度缩放,
-    //   在缩放/不同 stroke 宽度下显示为多个尖刺 (用户反馈"刺猬")
-    defs.querySelectorAll('marker').forEach((m) => {
-      m.setAttribute('markerUnits', 'userSpaceOnUse')
-      // 限制 marker 绝对尺寸, 防止过大造成视觉上的"刺猬"
-      const w = parseFloat(m.getAttribute('markerWidth')) || 10
-      const h = parseFloat(m.getAttribute('markerHeight')) || 10
-      m.setAttribute('markerWidth', String(Math.min(w, 8)))
-      m.setAttribute('markerHeight', String(Math.min(h, 8)))
-      // refX 调整到 marker tip 位置
-      if (!m.getAttribute('refX')) m.setAttribute('refX', '7')
-      if (!m.getAttribute('refY')) m.setAttribute('refY', '4')
-    })
-
-    validateContainerTitles(svg)
-
-    const paths = svg.querySelectorAll('.flowchart-link path, .edgePath path, path[class*="edge"]')
+    // [2026-08-05] 从 fixArrowMarkers 抽取: 按 path 当前 stroke 同步箭头 marker 颜色.
+    //   供全量渲染 (fixArrowMarkers) 与增量变色 (updateColorsOnly → syncArrowMarkers) 复用,
+    //   修复"改线色后箭头色不跟随线色"的问题.
+    const paths = svg.querySelectorAll('.flowchart-link path, .edgePath path, .edgePaths > path, path[class*="edge"]')
     const colorMap = new Map()
+
+    // [FIX 2026-08-03] Mermaid dagre 布局在 path 终点和节点 rect 间留约 2px 间隙,
+    //   导致箭头 tip 离节点边有"一点点距离".
+    //   修复: markerUnits='strokeWidth' (SM stroke-width=2), refX 从 8 减到 7
+    //   → tip 超出 path 终点 1 个 marker 单位 = 2px, 正好补偿间隙.
+    //   仅对 SM 图生效 (BO 图间隙情况未测, 保持原 refX=8 避免回归).
+    const isServiceModule = diagramType === 'serviceModule'
+    const targetRefX = isServiceModule ? '7' : '8'
 
     paths.forEach((path) => {
       const strokeColor = path.getAttribute('stroke') || path.style.stroke || '#333'
@@ -110,13 +160,12 @@ export function useSvgStyle() {
 
         const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker')
         marker.setAttribute('id', markerId)
-        marker.setAttribute('markerWidth', '10')
-        marker.setAttribute('markerHeight', '10')
-        marker.setAttribute('refX', '9')
-        marker.setAttribute('refY', '5')
+        marker.setAttribute('markerWidth', '8')
+        marker.setAttribute('markerHeight', '6')
+        marker.setAttribute('refX', targetRefX)
+        marker.setAttribute('refY', '3')
         marker.setAttribute('orient', 'auto')
-        // [v43 修复] markerUnits=userSpaceOnUse 防止箭头随 strokeWidth 缩放成"刺猬"
-        marker.setAttribute('markerUnits', 'userSpaceOnUse')
+        marker.setAttribute('markerUnits', 'strokeWidth')
 
         const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
         polygon.setAttribute('points', '0 0, 8 3, 0 6')
@@ -139,13 +188,12 @@ export function useSvgStyle() {
         }
         const sourceMarker = document.createElementNS('http://www.w3.org/2000/svg', 'marker')
         sourceMarker.setAttribute('id', sourceMarkerId)
-        sourceMarker.setAttribute('markerWidth', '10')
-        sourceMarker.setAttribute('markerHeight', '10')
-        sourceMarker.setAttribute('refX', '1')           // source 端 refX=0
-        sourceMarker.setAttribute('refY', '5')
+        sourceMarker.setAttribute('markerWidth', '8')
+        sourceMarker.setAttribute('markerHeight', '6')
+        sourceMarker.setAttribute('refX', '0')           // source 端 refX=0
+        sourceMarker.setAttribute('refY', '3')
         sourceMarker.setAttribute('orient', 'auto')      // [V1.7] 不用 auto-start-reverse
-        // [v43 修复] userSpaceOnUse 防止箭头随 strokeWidth 缩放
-        sourceMarker.setAttribute('markerUnits', 'userSpaceOnUse')
+        sourceMarker.setAttribute('markerUnits', 'strokeWidth')
         const sourcePolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
         // [V1.7 fix] 保持 V1.6 的 polygon '8 0, 0 3, 8 6' (tip 在 refX 0,3, base 在 marker x+ 方向 8,0/8,6)
         //   配合 'auto' 旋转后, base 在 source 节点外, tip 在 source 节点边
@@ -178,6 +226,12 @@ export function useSvgStyle() {
       path.removeAttribute('marker-start')
     }
   })
+  }
+
+  const fixArrowMarkers = (svg, diagramType, mermaidContainerRef, textColor) => {
+    validateContainerTitles(svg)
+    // 同步箭头 marker 颜色 (marker 颜色跟随 path stroke)
+    syncArrowMarkers(svg, diagramType)
 
     // 只清除样式，不设置新样式（样式已移至 CSS）
     const textElements = svg.querySelectorAll('text, tspan')
@@ -229,6 +283,7 @@ export function useSvgStyle() {
         attributes: true,
         attributeFilter: ['style', 'class']
       })
+      activeObservers.push(observer)
     }
   }
 
@@ -665,15 +720,169 @@ export function useSvgStyle() {
     console.log('[v40.2 诊断] forceEdgeLabelToMidpoint DONE: success=%d, fail=%d', successCount, failCount)
   }
 
+  /**
+   * [FIX 2026-08-06g] 为"上提自禁用父容器"的子分组挂悬停 tooltip 展示父(disabled)名称。
+   *   方案背景: 原方案把父名称拼进标题两行并后处理下移内容, 导致节点/子容器跑出容器盒, 已废弃。
+   *   本函数改为: 标题保持单行, 仅对 registry 中标记的容器 (g.cluster#<subgraphId>) 设置
+   *   data-parent-path 属性, 并绑定 mouseenter/move/leave 事件, 悬停时弹出 "父级：<父名>" tooltip。
+   * @param {SVGElement} svgEl - Mermaid 渲染出的 SVG
+   * @param {Object} parentPathMap - { subgraphId: parentPath } (来自 groupedLayout registry)
+   */
+  const attachLiftedParentTooltips = (svgEl, parentPathMap) => {
+    if (!svgEl || !parentPathMap) return
+    let tooltip = null
+    const ensureTooltip = () => {
+      if (tooltip) return tooltip
+      tooltip = document.getElementById('mermaid-tooltip')
+      if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = 'mermaid-tooltip'
+        tooltip.style.position = 'fixed'
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.85)'
+        tooltip.style.color = 'white'
+        tooltip.style.padding = '8px 12px'
+        tooltip.style.borderRadius = '6px'
+        tooltip.style.fontSize = '12px'
+        tooltip.style.zIndex = '100000'
+        tooltip.style.pointerEvents = 'none'
+        tooltip.style.visibility = 'hidden'
+        tooltip.style.whiteSpace = 'pre-line'
+        tooltip.style.lineHeight = '1.5'
+        tooltip.style.maxWidth = '300px'
+        tooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)'
+        document.body.appendChild(tooltip)
+      }
+      return tooltip
+    }
+    const show = (text, x, y) => {
+      const t = ensureTooltip()
+      t.textContent = text
+      t.style.visibility = 'visible'
+      t.style.left = `${x + 12}px`
+      t.style.top = `${y + 12}px`
+    }
+    const hide = () => {
+      if (tooltip) tooltip.style.visibility = 'hidden'
+    }
+
+    Object.entries(parentPathMap).forEach(([subgraphId, parentPath]) => {
+      const cluster = svgEl.getElementById(subgraphId)
+      if (!cluster) return
+      // 幂等: 同一 cluster 重复 processSvg 时不重复绑定监听
+      if (cluster.getAttribute('data-parent-tooltip-attached') === 'true') return
+      cluster.setAttribute('data-parent-tooltip-attached', 'true')
+      cluster.setAttribute('data-parent-path', parentPath)
+
+      const titleEl = cluster.querySelector('.cluster-label, foreignObject') || cluster
+      const text = `父级：${parentPath}`
+      titleEl.addEventListener('mouseenter', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mousemove', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mouseleave', hide)
+    })
+  }
+
+  /**
+   * [STAT-TOOLTIP 2026-08-14] 为 领域/子领域/服务模块 容器 (含折叠聚合节点 COLLAPSE)
+   *   挂悬停 tooltip, 展示: 业务对象数量 + 内部关系数量.
+   *   复用共享的 #mermaid-tooltip 元素 (与 useTooltip 边 tooltip / attachLiftedParentTooltips 同源).
+   *
+   * 数据来源:
+   *   - diagramData.containers  (统一管道容器树, 叶子 nodeIds = BO code)
+   *   - 兜底 layoutGroups        (deriveLayoutGroups 产物, 叶子 directNodes = BO code)
+   * 计数口径: 基于"当前图表实际展示的 BO / 关系" (与 diagramData.nodes/links 对齐),
+   *   保证 tooltip 数字与所见图表一致 (而非全量对象)。
+   *
+   * 内部关系定义: source 与 target 均落在该容器子树内的关系 (两端都在内部)。
+   * @param {SVGElement} svgEl - Mermaid 渲染出的 SVG
+   * @param {Object} diagramData - 图表数据 (含 nodes/links/containers)
+   * @param {Array} layoutGroups - 兜底分组树 (layoutControlConfig.groups)
+   */
+  const attachContainerStatTooltips = (svgEl, diagramData, layoutGroups = null) => {
+    if (!svgEl || !diagramData) return
+
+    // [REFACTOR 2026-08-14] 统计逻辑抽到纯函数 containerStats.js (可单元测试)
+    const statByCode = computeContainerStats(diagramData, layoutGroups)
+    if (statByCode.size === 0) return
+
+    // 4) 挂 tooltip (容器 g.cluster / 折叠聚合节点 COLLAPSE 均带 data-container-code)
+    let tooltip = null
+    const ensureTooltip = () => {
+      if (tooltip) return tooltip
+      tooltip = document.getElementById('mermaid-tooltip')
+      if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = 'mermaid-tooltip'
+        tooltip.style.position = 'fixed'
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.85)'
+        tooltip.style.color = 'white'
+        tooltip.style.padding = '8px 12px'
+        tooltip.style.borderRadius = '6px'
+        tooltip.style.fontSize = '12px'
+        tooltip.style.zIndex = '100000'
+        tooltip.style.pointerEvents = 'none'
+        tooltip.style.visibility = 'hidden'
+        tooltip.style.whiteSpace = 'pre-line'
+        tooltip.style.lineHeight = '1.5'
+        tooltip.style.maxWidth = '300px'
+        tooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)'
+        document.body.appendChild(tooltip)
+      }
+      return tooltip
+    }
+    const show = (text, x, y) => {
+      const t = ensureTooltip()
+      t.textContent = text
+      t.style.visibility = 'visible'
+      t.style.left = `${x + 12}px`
+      t.style.top = `${y + 12}px`
+    }
+    const hide = () => {
+      if (tooltip) tooltip.style.visibility = 'hidden'
+    }
+
+    svgEl.querySelectorAll('[data-container-code]').forEach((el) => {
+      const code = el.getAttribute('data-container-code')
+      const stat = statByCode.get(code)
+      if (!stat) return
+      // 幂等: 同一元素重复 processSvg 时不重复绑定
+      if (el.getAttribute('data-stat-tooltip-attached') === 'true') return
+      el.setAttribute('data-stat-tooltip-attached', 'true')
+      const titleEl = el.querySelector('.cluster-label, .nodeLabel, foreignObject, text') || el
+      const text = `业务对象：${stat.boCount}\n内部关系：${stat.relCount}`
+      titleEl.addEventListener('mouseenter', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mousemove', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mouseleave', hide)
+    })
+  }
+
+  // [CLEANUP 2026-08-19] 释放本实例创建的 MutationObserver。幂等。
+  const cleanup = () => {
+    activeObservers.forEach((observer) => {
+      try {
+        observer.disconnect()
+      } catch (e) {
+        // ignore: observer 已失效
+      }
+    })
+    activeObservers.length = 0
+  }
+
   return {
     validateContainerTitles,
     fixArrowMarkers,
+    syncArrowMarkers,
     updateNodeStyles,
     updateClusterStyles,
     fixLabelBackground,
     fixEdgeLabelOverflow,
     // [v40 新增] 强制 edgeLabel 到连线中点
     forceEdgeLabelToMidpoint,
+    // [FIX 2026-08-06g] 上提自禁用父容器的子分组: 悬停 tooltip 展示父名称
+    attachLiftedParentTooltips,
+    // [STAT-TOOLTIP 2026-08-14] 容器统计 tooltip: 业务对象数量 + 内部关系数量
+    attachContainerStatTooltips,
+    // [CLEANUP 2026-08-19] 释放实例内 MutationObserver
+    cleanup,
     // 向后兼容别名
     applyContainerTitleItalic: validateContainerTitles
   }

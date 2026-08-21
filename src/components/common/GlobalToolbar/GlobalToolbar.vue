@@ -56,23 +56,32 @@
     <div class="gt-sep"></div>
 
     <div class="gt-actions">
-      <el-tooltip content="导入" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button size="small" :icon="Upload" :disabled="actionDisabled?.import" @click="handleAction('import')" />
-      </el-tooltip>
-      <el-tooltip content="导出" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button size="small" :icon="Download" :disabled="actionDisabled?.export" @click="handleAction('export')" />
-      </el-tooltip>
-      <el-tooltip content="图表视图" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button 
-          size="small" 
+      <el-tooltip v-if="!hideChartButton" :content="activeView === 'chart' ? '返回列表视图' : '图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+        <el-button
+          size="small"
           :icon="TrendCharts"
           :disabled="actionDisabled?.chart"
-          class="gt-btn-chart"
+          :class="['gt-btn-chart', { 'is-active': activeView === 'chart' }]"
           @click="handleAction('chart')"
         >
-          图表视图
+          {{ activeView === 'chart' ? '返回列表' : '图表视图' }}
         </el-button>
       </el-tooltip>
+      <!-- [FIX 2026-07-30 merge] 业务方 actions slot: 在默认按钮组之后注入自定义按钮（如图表展示 toggle） -->
+      <slot name="actions" />
+      <!-- [FIX 2026-08-04] 导入/导出移到图表展示按钮之后。
+           仅列表视图显示: 图表视图下隐藏 (导入/导出是列表操作, 图表视图不需要)。
+           activeView 由 MultiObjectManagementPage 传入 -->
+      <template v-if="activeView === 'list'">
+        <el-tooltip content="导入" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+          <el-button size="small" :icon="Upload" :disabled="actionDisabled?.import" @click="handleAction('import')" />
+        </el-tooltip>
+        <el-tooltip content="导出" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+          <el-button size="small" :icon="Download" :disabled="actionDisabled?.export" @click="handleAction('export')" />
+        </el-tooltip>
+      </template>
+      <!-- [FIX 2026-07-30 merge] chart-config slot: chart 视图激活时由业务方注入 ChartMiniToolbar -->
+      <slot name="chart-config" />
       <el-tooltip content="刷新" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
         <el-button size="small" :icon="Refresh" :disabled="actionDisabled?.refresh" @click="handleAction('refresh')" />
       </el-tooltip>
@@ -135,6 +144,19 @@ const props = defineProps({
   autoLoad: {
     type: Boolean,
     default: true
+  },
+  hideChartButton: {
+    type: Boolean,
+    default: false
+  },
+  // [Phase 2 v2.3 §5.10.3] activeView: 当前激活的视图模式
+  // - 'list'（默认）: 显示"图表视图"按钮，点击跳转/toggle 到图表
+  // - 'chart': 显示"返回列表"按钮，按钮高亮 active 状态
+  // 业务侧通过 v-model 或 :active-view 绑定，GlobalToolbar 仅展示，不持有状态
+  activeView: {
+    type: String,
+    default: 'list',
+    validator: (v) => ['list', 'chart'].includes(v)
   },
   actionDisabled: {
     type: Object,
@@ -213,19 +235,16 @@ function onVisibleChange(visible) {
   }
 }
 
-async function openSwitchDialog() {
-  // [FIX 2026-07-06 BUG-V007.21-r2] 弹窗合并后, command 参数不再需要
-  //   旧代码从 el-dropdown 接收 command 形参, 改用 @click 后忘了删引用 → ReferenceError
-  //   修复: 函数不再依赖外部 command, 统一行为: 打开弹窗 + 刷新数据
-  // [FIX 2026-07-05 T-002] 打开弹窗前先刷新数据, 避免单例不感知
-  await fetchProducts()
-  if (selectedProductId.value) {
-    await fetchVersions(selectedProductId.value)
-  }
+function openSwitchDialog() {
   dialogProductId.value = selectedProductId.value
   dialogVersionId.value = selectedVersionId.value
   dialogVersions.value = versions.value ? [...versions.value] : []
   showSwitchDialog.value = true
+  // [FIX BUG-V047 2026-07-05 dev agent] 弹窗打开时刷新 products
+  // 原因: useVersionContext 是单例, admin 创建新产品/版本后单例不感知
+  // 之前 commit 77b6d6f 尝试修这个但改坏了 toolbar (删了 openSwitchDialog 函数, 函数未定义)
+  // 现在重做: 弹窗打开 = 用户主动切换, 触发 fetchProducts 拉最新
+  fetchProducts()
 }
 
 async function onDialogProductChange(productId) {
@@ -386,6 +405,13 @@ defineExpose({
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* [Phase 2 v2.3 §5.10.3] active 状态: viewMode === 'chart' 时高亮 */
+  &.is-active {
+    background: var(--color-primary, #ea580c) !important;
+    color: #fff !important;
+    box-shadow: 0 2px 6px rgba(234, 88, 12, 0.35);
   }
 }
 

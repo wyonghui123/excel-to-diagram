@@ -120,7 +120,13 @@ export class GroupModel {
     }
 
     if (!group) {
+      console.warn(`[DIAG mergeUserGroup] NOT FOUND: userGroup.id=${userGroup.id}, elementCode=${userGroup.elementCode}, title=${userGroup.title}, enabled=${userGroup.enabled}`)
       return
+    }
+
+    // [DIAG] 诊断：匹配成功
+    if (userGroup.enabled !== undefined || userGroup.layout?.enabled !== undefined) {
+      console.log(`[DIAG mergeUserGroup] MATCH: userGroup.id=${userGroup.id}, title=${userGroup.title}, userEnabled=${userGroup.enabled}, userLayoutEnabled=${userGroup.layout?.enabled} → group.id=${group.id}, group.title=${group.title}`)
     }
 
     if (userGroup.layout) {
@@ -166,8 +172,14 @@ export class GroupModel {
 
   isEnabled(groupId) {
     const group = this.groups.get(groupId)
-    const result = group ? group.layout?.enabled !== false : true
-    return result
+    if (!group) return true
+    // [FIX 2026-07-30 v11] 同时检查 layout.enabled（旧结构）和 group.enabled（新结构）
+    //   根因：buildServiceModuleGroupsFromDomainProducts 创建的 group 没有 layout 属性，
+    //   只有 enabled 属性。applyGroupStates 也只设置 item.enabled，不设置 item.layout.enabled。
+    //   旧代码只检查 group.layout?.enabled，导致新结构的 disabled 状态被忽略。
+    if (group.layout?.enabled === false) return false
+    if (group.enabled === false) return false
+    return true
   }
 
   getDisabledAncestorPath(groupId) {
@@ -244,6 +256,11 @@ export class GroupModel {
 
     const isEnabled = this.isEnabled(groupId)
     const isTerminal = isTerminalGroup(group, this.options.chartType)
+
+    // [DIAG] 诊断：processGroup 入口
+    if (group.title && (group.title.includes('供应链') || !isEnabled)) {
+      console.log(`[DIAG processGroup] id=${groupId}, title=${group.title}, isEnabled=${isEnabled}, isTerminal=${isTerminal}, group.enabled=${group.enabled}, group.layout?.enabled=${group.layout?.enabled}, disabledAncestorPath=${JSON.stringify(disabledAncestorPath)}`)
+    }
     
     const indent = '  '.repeat(depth)
 
@@ -407,15 +424,13 @@ export class GroupModel {
         : []
       
       // 使用扁平化分组中的 _disabledAncestorPath（如果存在）
-      // 但只对有 disabled 祖先但本身启用的分组使用，对被禁用的分组不使用
       const flattenedGroup = flattenedMap.get(group.id)
-      // effectiveDisabledPath 只在以下情况使用：
-      // 1. 分组本身被禁用 (isEnabled=false)
-      // 2. 分组有 disabled 祖先但本身启用 (hasDisabledAncestor=true && isEnabled=true)
-      // 这种情况不应该显示路径，所以 effectiveDisabledPath 应该为空
-      const effectiveDisabledPath = (hasDisabledAncestor && isEnabled)
-        ? []  // 有 disabled 祖先但本身启用，不显示路径
-        : (isEnabled ? [] : (flattenedGroup?._disabledAncestorPath || disabledAncestorPath))
+      // 被提升到根级的分组（本身 enabled 但父级 disabled）需在标题中显示父级名称，
+      // 否则子容器标题看不到被禁用父容器的名称（如禁用供应链云后，供应链计划应显示
+      // "供应链计划（供应链云）"）。路径取扁平化分组保留的 _disabledAncestorPath。
+      const effectiveDisabledPath = isEnabled
+        ? (hasDisabledAncestor ? (flattenedGroup?._disabledAncestorPath || disabledAncestorPath) : [])
+        : (flattenedGroup?._disabledAncestorPath || disabledAncestorPath)
       
       const displayTitle = effectiveDisabledPath.length > 0
         ? `${group.title}（${effectiveDisabledPath.join(' / ')}）`

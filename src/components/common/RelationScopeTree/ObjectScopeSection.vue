@@ -234,14 +234,25 @@ function handleToggleExpandAll() {
   isAllExpanded.value = !isAllExpanded.value
 }
 
-function handleSelectAll() {
+async function handleSelectAll() {
+  if (!treeRef.value) return
+  // [shortcut dev] 等待 treeData 加载完成（最多 20s），避免 shortcut 模式在数据未加载时调用
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (treeData.value.length > 0) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (treeData.value.length === 0) {
+    console.warn('[handleSelectAll] treeData 为空, 跳过全选')
+    return
+  }
+
   if (USE_FILTERSOURCE) {
     const scope = collectAllScope(treeData.value)
     emit('scope-change', scope)
     return
   }
 
-  if (!treeRef.value) return
   const allKeys = collectAllKeys(treeData.value)
   treeRef.value.setCheckedKeys(allKeys)
   emitTypedScopeChange()
@@ -778,10 +789,117 @@ watch(() => props.initialBoIds, async (newBoIds) => {
   guard.exit()
 }, { deep: true })
 
+// [shortcut dev] 递归查找树节点中 code 匹配的节点
+function findNodeByCode(nodes, code) {
+  if (!Array.isArray(nodes)) return null
+  for (const node of nodes) {
+    if (!node) continue
+    if (node.code === code) return node
+    if (node.children?.length) {
+      const found = findNodeByCode(node.children, code)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// [shortcut dev] 收集节点及其所有子孙的叶子 key
+function collectDescendantLeafKeys(node) {
+  const keys = []
+  function walk(n) {
+    if (!n.children || n.children.length === 0) {
+      keys.push(n.id)
+    } else {
+      n.children.forEach(c => walk(c))
+    }
+  }
+  walk(node)
+  return keys
+}
+
+// [shortcut dev] 根据编码选择特定节点及其所有子孙
+//   用于 URL scopeCode 参数, 例如 scopeCode=SCP 选择"供应链计划"子领域的所有对象
+async function selectByCode(code) {
+  if (!code || !treeRef.value) return
+  console.log('[selectByCode] 等待 treeData 加载, code=' + code)
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (treeData.value.length > 0) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (treeData.value.length === 0) {
+    console.warn('[selectByCode] treeData 为空, 跳过')
+    return false
+  }
+  const node = findNodeByCode(treeData.value, code)
+  if (!node) {
+    console.warn('[selectByCode] 未找到 code=' + code + ' 的节点')
+    return false
+  }
+  console.log('[selectByCode] 找到节点:', node.name || node.code, 'type=' + node.type)
+  const leafKeys = collectDescendantLeafKeys(node)
+  if (leafKeys.length === 0) {
+    console.warn('[selectByCode] 节点无叶子 key, 跳过')
+    return false
+  }
+  treeRef.value.setCheckedKeys(leafKeys)
+  emitTypedScopeChange()
+  console.log('[selectByCode] 已选择 ' + leafKeys.length + ' 个叶子节点')
+  return true
+}
+
+// [shortcut dev] 根据多个编码选择多个节点及其所有子孙
+//   用于 URL scopeCodes 参数, 例如 scopeCodes=SCP,SCM 选择多个子领域
+//   合并所有编码的叶子节点后统一 setCheckedKeys + emit 一次
+async function selectByCodes(codes) {
+  if (!codes?.length || !treeRef.value) return false
+  console.log('[selectByCodes] 等待 treeData 加载, codes=' + codes.join(','))
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (treeData.value.length > 0) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (treeData.value.length === 0) {
+    console.warn('[selectByCodes] treeData 为空, 跳过')
+    return false
+  }
+
+  const allLeafKeys = new Set()
+  let foundAny = false
+  for (const code of codes) {
+    const node = findNodeByCode(treeData.value, code.trim())
+    if (!node) {
+      console.warn('[selectByCodes] 未找到 code=' + code + ' 的节点, 跳过')
+      continue
+    }
+    foundAny = true
+    console.log('[selectByCodes] 找到节点:', node.name || node.code, 'type=' + node.type)
+    const leafKeys = collectDescendantLeafKeys(node)
+    leafKeys.forEach(k => allLeafKeys.add(k))
+  }
+
+  if (!foundAny) {
+    console.warn('[selectByCodes] 所有编码均未匹配到节点')
+    return false
+  }
+
+  const keys = [...allLeafKeys]
+  treeRef.value.setCheckedKeys(keys)
+  emitTypedScopeChange()
+  console.log('[selectByCodes] 已选择 ' + keys.length + ' 个叶子节点, codes:', codes)
+  return true
+}
+
 defineExpose({
   getCheckedBoIds,
   clear: handleClear,
   loadTreeData,
+  // [shortcut dev] 全选所有业务对象
+  handleSelectAll,
+  // [shortcut dev] 按编码选择特定节点范围
+  selectByCode,
+  // [shortcut dev] 按多个编码选择多个节点范围
+  selectByCodes,
   // [TEST-ONLY] 暴露内部状态供 Playwright 测试诊断
   _test: {
     get treeData() { return treeData.value },

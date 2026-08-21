@@ -1,5 +1,13 @@
 <template>
-  <div class="relation-scope-tree">
+  <div
+    class="relation-scope-tree"
+    :class="{
+      'rst-active-object': objectExpanded,
+      'rst-active-relation': relationExpanded,
+      'rst-active-filter': filterExpanded,
+      'rst-active-layout': layoutExpanded
+    }"
+  >
     <CollapsiblePanel
       title="对象范围"
       :badge="selectedBoCount"
@@ -47,6 +55,7 @@
     </CollapsiblePanel>
 
     <CollapsiblePanel
+      v-if="injectedViewMode !== 'chart'"
       title="过滤条件"
       :default-expanded="filterExpanded"
       :height-full="false"
@@ -65,6 +74,26 @@
         @filter-change="handleFilterChange"
       />
     </CollapsiblePanel>
+
+    <CollapsiblePanel
+      v-if="hasChartData"
+      title="图表设置"
+      :default-expanded="layoutExpanded"
+      :height-full="false"
+      class="rst-panel-layout"
+      @toggle="handleLayoutToggle"
+    >
+      <LayoutControlPanel
+        v-if="injectedChartConfig"
+        :containers="diagramConfigStore.chartDataSnapshot.containers"
+        :domain-products="diagramConfigStore.chartDataSnapshot.domainProducts"
+        :links="diagramConfigStore.chartDataSnapshot.links"
+        :chart-type="injectedChartConfig.chartType"
+        :model-value="injectedChartConfig.layoutControl"
+        :color-mapping="diagramConfigStore.chartDataSnapshot.groupColorMap"
+        @update:model-value="handleLayoutControlUpdate"
+      />
+    </CollapsiblePanel>
   </div>
 </template>
 
@@ -77,6 +106,8 @@ import ObjectScopeSection from './ObjectScopeSection.vue'
 import RelationScopeSection from './RelationScopeSection.vue'
 import RelationFilterSection from './RelationFilterSection.vue'
 import CollapsiblePanel from '@/components/common/CollapsiblePanel/CollapsiblePanel.vue'
+import LayoutControlPanel from '@/views/AADiagramApp/components/LayoutControlPanel.vue'
+import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { createTrace } from '@/utils/trace'
 
 const props = defineProps({
@@ -117,6 +148,28 @@ const objectScopeRef = ref(null)
 const relationScopeRef = ref(null)
 const filterSectionRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
+// [布局设置 sidebar 整合] inject chartConfig (由 ArchDataManagement provide)
+//   用于 LayoutControlPanel 的 :model-value 和 @update:model-value
+//   组件树: ArchDataManagement → MultiObjectManagementPage → RelationScopeTree
+const injectedChartConfig = inject('chartConfig', null)
+// [布局设置 sidebar 整合] inject viewMode (由 MultiObjectManagementPage provide)
+//   用于 hasChartData 判断 (仅 chart 视图显示布局 panel)
+const injectedViewMode = inject('mompViewMode', ref('chart'))
+
+// [布局设置 sidebar 整合] diagramConfigStore — 读取 chartDataSnapshot + 同步 layoutPanelExpanded
+const diagramConfigStore = useDiagramConfigStore()
+
+// [LAYOUT-SYNC 2026-08-20] 图表设置面板(LayoutControlPanel)发出 update:model-value 时的处理.
+//   根因: 之前只 Object.assign 改 injectedChartConfig.layoutControl, 而图表渲染 watch 的是
+//   configStore.layoutControlConfig → store 感知不到折叠/展开变更 → 面板展开分组图表无反应.
+//   修复: 写回 chartConfig.layoutControl 后, 同步调用 updateLayoutControlConfig 触发图表重渲染
+//   (与 EmbeddedChartView.syncLayoutControlFromDiagramData 的 store 同步一致).
+function handleLayoutControlUpdate(v) {
+  if (injectedChartConfig && injectedChartConfig.layoutControl) {
+    Object.assign(injectedChartConfig.layoutControl, v)
+    diagramConfigStore.updateLayoutControlConfig(injectedChartConfig.layoutControl)
+  }
+}
 // [FIX] 从图表返回时 (initialRelationCodes 或 scopeIds.relationExtra.relationCodes 非空)
 //       自动展开关系范围面板, 让用户能直观看到已恢复的勾选
 const _hasInitialRelCodes = () => {
@@ -124,19 +177,57 @@ const _hasInitialRelCodes = () => {
   if (Array.isArray(props.scopeIds?.relationExtra?.relationCodes) && props.scopeIds.relationExtra.relationCodes.length > 0) return true
   return false
 }
-const objectExpanded = ref(true)
+// [FIX 2026-08-15] 互斥初始化: 4 面板同一时刻只展开一个 (handleXxxToggle 都做互斥).
+//   之前 objectExpanded 恒为 true, 若关系范围从 chart 恢复 (relationCodes 非空) 时关系面板
+//   自动展开但对象面板未收起 → 根容器同时带 rst-active-object + rst-active-relation →
+//   两面板 flex:1 1 0 平分侧栏 → 关系面板只占一半高度、横条落在侧栏中间, 视觉上像"半展开态".
+//   现按 _hasInitialRelCodes() 决定默认展开对象面板还是关系面板, 保证互斥.
+const objectExpanded = ref(!_hasInitialRelCodes())
 const relationExpanded = ref(_hasInitialRelCodes())
 const filterExpanded = ref(false)
+// [布局设置 sidebar 整合] 第 4 panel: 布局设置
+const layoutExpanded = ref(false)
+// [布局设置 sidebar 整合] 仅 chart 视图且有渲染数据时显示布局 panel
+const hasChartData = computed(() => {
+  return injectedViewMode.value === 'chart' &&
+    diagramConfigStore.chartDataSnapshot.containers.length > 0
+})
+
+// [布局设置 sidebar 整合] chart → list 切换时自动收起布局 panel
+watch(hasChartData, (val) => {
+  if (!val && layoutExpanded.value) {
+    layoutExpanded.value = false
+    diagramConfigStore.setLayoutPanelExpanded(false)
+  }
+})
+
+// [布局设置 sidebar 整合] 外部修改 store.layoutPanelExpanded 时同步本地状态
+watch(() => diagramConfigStore.layoutPanelExpanded, (val) => {
+  if (val !== layoutExpanded.value) {
+    layoutExpanded.value = val
+  }
+})
 
 // [FIX] 监听 initialRelationCodes / scopeIds.relationExtra 变化, 动态展开关系范围面板
 // 场景: chart app 返回时, 父级 restore 流程异步更新 props, 初始 _hasInitialRelCodes() 是 false
 //       后续 props 同步进来时, 需要重新判断并展开
+// [FIX 2026-08-15] 展开关系面板时同步收起其他面板 (互斥), 避免双面板平分侧栏的"半展开"观感.
+// [FIX 2026-08-16] 用户主动交互后不再自动展开关系面板:
+//   场景: 在对象范围选择数据时, loadRelationships/勾选回写会临时写入 relationCodes,
+//   触发本 watch 自动展开关系面板 (用户投诉"选择对象后关系范围自动展开").
+//   一旦用户手动切换面板或修改范围, 面板状态完全交给用户, 不再自动跳转.
+//   restore 路径不受影响: ObjectScopeSection 在 setCheckedKeys 时 guard 抑制 emit,
+//   restore 不触发 handleObjectScopeChange, flag 保持 false, 自动展开仍生效.
+let userToggledPanel = false
 watch(
   () => [props.initialRelationCodes, props.scopeIds?.relationExtra?.relationCodes],
   ([codes1, codes2]) => {
     const has = (Array.isArray(codes1) && codes1.length > 0) ||
                 (Array.isArray(codes2) && codes2.length > 0)
-    if (has && !relationExpanded.value) {
+    if (has && !relationExpanded.value && !userToggledPanel) {
+      objectExpanded.value = false
+      filterExpanded.value = false
+      layoutExpanded.value = false
       relationExpanded.value = true
       trace.log('autoExpand→relPanel', { codes1: codes1?.length, codes2: codes2?.length })
     }
@@ -149,18 +240,22 @@ const selectedFilterRelationCodes = ref([])
 const localSelectedBoCount = ref(0)
 
 function handleObjectToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户手动切换面板 → 停止自动展开
   objectExpanded.value = expanded
   if (expanded) {
     relationExpanded.value = false
     filterExpanded.value = false
+    layoutExpanded.value = false
   }
 }
 
 function handleRelationToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
   relationExpanded.value = expanded
   if (expanded) {
     objectExpanded.value = false
     filterExpanded.value = false
+    layoutExpanded.value = false
     if (relationStale.value) {
       scheduleAutoLoad()
     }
@@ -168,11 +263,25 @@ function handleRelationToggle(expanded) {
 }
 
 function handleFilterToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
   filterExpanded.value = expanded
   if (expanded) {
     objectExpanded.value = false
     relationExpanded.value = false
+    layoutExpanded.value = false
   }
+}
+
+// [布局设置 sidebar 整合] 第 4 panel toggle — 参与 4-panel 互斥, 同步 store
+function handleLayoutToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
+  layoutExpanded.value = expanded
+  if (expanded) {
+    objectExpanded.value = false
+    relationExpanded.value = false
+    filterExpanded.value = false
+  }
+  diagramConfigStore.setLayoutPanelExpanded(expanded)
 }
 
 const metaObject = inject('metaObject', ref(null))
@@ -196,42 +305,6 @@ const relationCodesClearTrigger = ref(0)  // OSS 变更时切换，触发 Relati
 const _restoreProtectionConsumed = ref(false)
 const treeData = shallowRef([])
 
-// [BUG-V048d 修复 2026-07-09] SD/SM 独立 parent 映射，避免 hierarchyMap ID 碰撞
-//   根因: hierarchyMap 中 SD 条目被不同 domain 的 SM 覆盖 (51 个碰撞)
-//   例: SD 299 (供应链云 2200) 被 SM 299 (协同云 2202) 覆盖 → domainId=2202 ≠ 2200
-//   导致 SD loop 的 selectedDomainSet.has(info.domainId) 失败 → 双重计数 141+141=282
-//   修复: 直接从 treeData 构建 sdDomainMap / smParentMap，不走 hierarchyMap
-const sdDomainMap = computed(() => {
-  const map = {}
-  if (!treeData.value || treeData.value.length === 0) return map
-  for (const domain of treeData.value) {
-    if (domain.type !== 'domain') continue
-    for (const sd of (domain.children || [])) {
-      if (sd.type === 'sub_domain' && sd.originalId != null) {
-        map[sd.originalId] = domain.originalId
-      }
-    }
-  }
-  return map
-})
-
-const smParentMap = computed(() => {
-  const map = {}
-  if (!treeData.value || treeData.value.length === 0) return map
-  for (const domain of treeData.value) {
-    if (domain.type !== 'domain') continue
-    for (const sd of (domain.children || [])) {
-      if (sd.type !== 'sub_domain') continue
-      for (const sm of (sd.children || [])) {
-        if (sm.type === 'service_module' && sm.originalId != null) {
-          map[sm.originalId] = { domainId: domain.originalId, subDomainId: sd.originalId }
-        }
-      }
-    }
-  }
-  return map
-})
-
 const hierarchyMap = computed(() => {
   if (!treeData.value || treeData.value.length === 0) return {}
 
@@ -243,16 +316,11 @@ const hierarchyMap = computed(() => {
       //   之前用 node.id (字符串如 'd_1'), 导致 effective ids 推导永远查不到
       const oid = node.originalId
       if (oid == null) continue
-      // [FIX 2026-06-30] ID 冲突处理:
-      //   sub_domain 和 service_module 可能共享同一 originalId (如 347 既是
-      //   "项目过程"子域 又是 "现金流预测"SM), 先到的 sub_domain 会阻止后到的 SM
-      //   写入正确的 domainId, 导致 SM→domain 推导错误。
-      //   规则: domain/sub_domain → 先到先得; SM/BO → 始终覆盖
       if (node.type === 'domain') {
-        if (!map[oid]) map[oid] = { domainId: oid }
+        map[oid] = { domainId: oid }
         walk(node.children, oid, null)
       } else if (node.type === 'sub_domain') {
-        if (!map[oid]) map[oid] = { domainId, subDomainId: oid }
+        map[oid] = { domainId, subDomainId: oid }
         walk(node.children, domainId, oid)
       } else if (node.type === 'service_module') {
         map[oid] = { domainId, subDomainId, serviceModuleId: oid }
@@ -269,13 +337,11 @@ const hierarchyMap = computed(() => {
 
 const effectiveDomainIds = computed(() => {
   const ids = new Set([...selectedDomainIds.value])
-  // [FIX 2026-06-30] 去掉从 sub_domain 推导 domain 的逻辑
-  //   根因: check-strictly=false 会级联选中父级 domain 下所有子域,
-  //   hierarchyMap 对这些子域的 domainId 映射可能发散(非单一 domain),
-  //   导致 effective 膨胀(如 1→6 个 domain)。
-  //   SM 推导仍需保留：选「采购管理」SM 可跨 domain 推导出「供应链云」。
-  const sm_ids = selectedServiceModuleIds.value
-  for (const id of sm_ids) {
+  for (const id of selectedSubDomainIds.value) {
+    const info = hierarchyMap.value[id]
+    if (info?.domainId != null) ids.add(info.domainId)
+  }
+  for (const id of selectedServiceModuleIds.value) {
     const info = hierarchyMap.value[id]
     if (info?.domainId != null) ids.add(info.domainId)
   }
@@ -312,23 +378,8 @@ const allBusinessObjects = shallowRef([])
 //       原 boIdsBySm 永远为空, 选 1 SM (58 BO) → flattenSelectedBoIds 空 → 兜底返回 1
 // 修复: 从 treeData 提取每个 SM 节点的 child_count, 实现"SM id → BO 数"映射
 //       flattenSelectedBoIds 返回 SM id (不展开为具体 bo id, 因为没有 id 列表; 但 chip 关心的是 count)
-// [perf-2026-06-29] 显式引用缓存: Vue computed 已基于 reactive 依赖缓存,
-//   但每次依赖变化都需 reactive 系统追踪 + dirty check + 重新执行 getter.
-//   加引用短路可在 treeData 引用未变时立即返回, 避免 walk() 整棵树 (971 domain 场景 ~5ms).
-//   注意: _smCachedTreeData/_smCachedMap 是 setup() 闭包变量, 组件实例独立, 不会跨实例污染.
-let _smCachedTreeData = null
-let _smCachedMap = null
 const smChildCount = computed(() => {
-  // 引用相等短路: treeData 未变时直接返回缓存
-  if (treeData.value === _smCachedTreeData && _smCachedMap) {
-    return _smCachedMap
-  }
-
-  if (!treeData.value || treeData.value.length === 0) {
-    _smCachedTreeData = treeData.value
-    _smCachedMap = new Map()
-    return _smCachedMap
-  }
+  if (!treeData.value || treeData.value.length === 0) return new Map()
   const map = new Map()
   function walk(nodes) {
     if (!nodes) return
@@ -342,48 +393,59 @@ const smChildCount = computed(() => {
     }
   }
   walk(treeData.value)
-  _smCachedTreeData = treeData.value
-  _smCachedMap = map
   return map
 })
 
-// [BUG-V048 修复 2026-07-08] sub_domain / domain 节点的 BO count
-//   smChildCount 只覆盖 service_module 节点. 但 el-tree 在用户选 domain/SD 时,
-//     node.count 字段也累加了 BO 总数 (见 ObjectScopeSection.buildHierarchyTree),
-//     用 SD/domain 的 count 直接 chip 累加可避免双重计数.
-//   例: 选财务云 domain → 树节点 domainBoCount = 1610 → chip = 1610 (直接用 node.count)
-const sdChildCount = computed(() => {
-  const map = new Map()
-  if (!treeData.value || treeData.value.length === 0) return map
-  function walk(nodes) {
-    if (!nodes) return
-    for (const n of nodes) {
-      if (n.type === 'sub_domain') {
-        const cnt = n.count || 0
-        if (cnt > 0) map.set(n.originalId || n.id, cnt)
-      }
-      if (n.children) walk(n.children)
+// 扁平展开所有受影响的 BO id (实际返回 Set of SM id + bo id, chip 只关心 size)
+// [BUG-V033 修复] 选 SM 时, 累加 child_count 作为该 SM 的"等效 BO 数"贡献
+const flattenSelectedBoIds = computed(() => {
+  const result = new Set()
+  // 直接选的 BO
+  for (const id of selectedBoIds.value) result.add(id)
+  // 选的 service_module
+  for (const smId of selectedServiceModuleIds.value) {
+    const cnt = smChildCount.value.get(smId) || 0
+    if (cnt > 0) {
+      // 用 SM id + 虚拟 placeholder 模拟 BO 数 (chip 只关心 size)
+      for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
     }
   }
-  walk(treeData.value)
-  return map
-})
+  // 选的 sub_domain
+  for (const sdId of selectedSubDomainIds.value) {
+    const info = hierarchyMap.value[sdId]
+    if (!info) continue
+    walkSubDomain(info)
+  }
+  // 选的 domain
+  for (const dId of selectedDomainIds.value) {
+    walkDomain(hierarchyMap.value[dId])
+  }
+  return [...result]
 
-const domainChildCount = computed(() => {
-  const map = new Map()
-  if (!treeData.value || treeData.value.length === 0) return map
-  function walk(nodes) {
-    if (!nodes) return
-    for (const n of nodes) {
-      if (n.type === 'domain') {
-        const cnt = n.count || 0
-        if (cnt > 0) map.set(n.originalId || n.id, cnt)
+  function walkSubDomain(info) {
+    if (!info) return
+    for (const smId of (smChildCount.value.keys())) {
+      const smInfo = hierarchyMap.value[smId]
+      if (smInfo?.subDomainId === info.subDomainId) {
+        const cnt = smChildCount.value.get(smId) || 0
+        if (cnt > 0) {
+          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+        }
       }
-      if (n.children) walk(n.children)
     }
   }
-  walk(treeData.value)
-  return map
+  function walkDomain(info) {
+    if (!info) return
+    for (const smId of (smChildCount.value.keys())) {
+      const smInfo = hierarchyMap.value[smId]
+      if (smInfo?.domainId === info.domainId) {
+        const cnt = smChildCount.value.get(smId) || 0
+        if (cnt > 0) {
+          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+        }
+      }
+    }
+  }
 })
 
 // 关键修复 v39: chip 数字从"4 源 id 总数"改为"扁平去重 BO 总数"
@@ -394,79 +456,17 @@ const domainChildCount = computed(() => {
 // 关键修复 v39.1: 始终使用扁平去重 BO 总数, 不再依赖 localSelectedBoCount
 //   之前逻辑: localSelectedBoCount > 0 时直接返回, 导致显示 4 源 id 总数而非 BO 数
 //   现在逻辑: 始终使用 flattenSelectedBoIds 计算扁平去重 BO 总数
-// 关键修复 V048: 用 SD/domain 节点 count 精确累加, 避免双重计数
-//   之前 bug (v39.1): flattenSelectedBoIds 用 placeholder `__sm_${id}_${i}__`
-//     → 真实 BO id 与 placeholder 命名空间不同 → Set 去重失效
-//     → 例: 已选 422 BO + 选财务云 domain (1610 BO) → chip = 422 + 1610 = 2032
-//   修复: 改用树节点本身的 count (smChildCount / sdChildCount / domainChildCount),
-//     按"未被祖先覆盖"原则累加: 选 SM 时加 child_count, 但 SM 所属 SD/domain 被选则跳过;
-//     选 SD 时加 SD count, 但 SD 所属 domain 被选则跳过; 选 domain 时直接累加.
-//   精确公式: chip = Σ(sm.cnt where sm.selected && sm.sd ∉ sel && sm.domain ∉ sel)
-//                  + Σ(sd.cnt where sd.selected && sd.domain ∉ sel)
-//                  + Σ(domain.cnt where domain.selected)
-//                  + (selectedBoIds 不在任何祖先下时的 fallback)
-// [BUG-V048b 修复 2026-07-08] ID 类型规范化: 兼容数字/字符串/带前缀 id
-//   之前 bug: emit 链路上 node.data?.originalId 是数字, 但 fallback 到 node.id 时
-//     是 prefixed 字符串 ('d_5'), 与 hierarchyMap 的数字 key 5 不匹配
-//     → Set.has(5) 返回 false (因为 Set 里是 'd_5') → 跳过逻辑失效
-//     → SD 累加 + domain 累加 → 双重计数 (用户报告 141→282)
-//   修复: 用 normalizeId 把所有 id 转成数字, Set.has 比较统一
-function normalizeId(v) {
-  if (v == null) return v
-  if (typeof v === 'number') return v
-  // 字符串可能是 'd_5' / '5' / 'sm_5' / 's_5'
-  const s = String(v)
-  // 去前缀
-  const numStr = s.replace(/^(d|s|sm)_/, '')
-  const n = Number(numStr)
-  return Number.isNaN(n) ? s : n
-}
-
 const selectedBoCount = computed(() => {
-  const selectedDomainSet = new Set(selectedDomainIds.value.map(normalizeId))
-  const selectedSubDomainSet = new Set(selectedSubDomainIds.value.map(normalizeId))
-
-  let total = 0
-
-  // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
-  // [BUG-V048d] 用 smParentMap 替代 hierarchyMap，避免 ID 碰撞
-  for (const smId of selectedServiceModuleIds.value) {
-    const nId = normalizeId(smId)
-    const info = smParentMap.value[nId] || smParentMap.value[smId]
-    if (!info) continue
-    // 祖先被勾时, 该 SM 已被覆盖, 跳过
-    if (selectedSubDomainSet.has(info.subDomainId)) continue
-    if (selectedDomainSet.has(info.domainId)) continue
-    total += smChildCount.value.get(nId) || smChildCount.value.get(smId) || 0
+  // 始终使用扁平去重 BO 总数
+  const flatBoIds = flattenSelectedBoIds.value
+  if (flatBoIds && flatBoIds.length > 0) {
+    return new Set(flatBoIds).size
   }
-
-  // 2. 选中的 SD (只在所属 domain 未被选中时累加)
-  // [BUG-V048d] 用 sdDomainMap 替代 hierarchyMap，避免 ID 碰撞
-  for (const sdId of selectedSubDomainIds.value) {
-    const nId = normalizeId(sdId)
-    const domainId = sdDomainMap.value[nId] ?? sdDomainMap.value[sdId]
-    if (domainId != null && selectedDomainSet.has(domainId)) continue
-    total += sdChildCount.value.get(nId) || sdChildCount.value.get(sdId) || 0
-  }
-
-  // 3. 选中的 domain (直接累加)
-  for (const dId of selectedDomainIds.value) {
-    const nId = normalizeId(dId)
-    total += domainChildCount.value.get(nId) || domainChildCount.value.get(dId) || 0
-  }
-
-  // 4. 兜底: 只选了 BO (无任何祖先), 用 selectedBoIds.length
-  if (
-    total === 0 &&
-    selectedBoIds.value.length > 0 &&
-    selectedDomainIds.value.length === 0 &&
-    selectedSubDomainIds.value.length === 0 &&
-    selectedServiceModuleIds.value.length === 0
-  ) {
-    total = selectedBoIds.value.length
-  }
-
-  return total
+  // 兜底: 4 源 id 总数 (旧行为, 兼容性)
+  return (selectedBoIds.value?.length || 0) +
+    (selectedDomainIds.value?.length || 0) +
+    (selectedSubDomainIds.value?.length || 0) +
+    (selectedServiceModuleIds.value?.length || 0)
 })
 
 // 关键修复 v40: 关系范围 chip 从 "selectedRelationCodes 数(节点数/关系类型编码数)" 改为
@@ -513,13 +513,11 @@ const computedCategories = computed(() => {
 })
 
 function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModuleIds }) {
-  // [BUG-V048c 修复 2026-07-09] 去重 domain/subDomain/SM/BO ids，避免重复累加
-  //   之前: treeNodesToScope 返回的数组可能含重复 id (el-tree 在某些情况下返回重复节点)
-  //   修复: 用 Set 去重后再赋值
-  selectedBoIds.value = [...new Set((boIds || []).map(normalizeId))]
-  selectedDomainIds.value = [...new Set((domainIds || []).map(normalizeId))]
-  selectedSubDomainIds.value = [...new Set((subDomainIds || []).map(normalizeId))]
-  selectedServiceModuleIds.value = [...new Set((serviceModuleIds || []).map(normalizeId))]
+  userToggledPanel = true  // [FIX 2026-08-16] 用户修改对象范围 → 停止自动展开关系面板
+  selectedBoIds.value = boIds || []
+  selectedDomainIds.value = domainIds || []
+  selectedSubDomainIds.value = subDomainIds || []
+  selectedServiceModuleIds.value = serviceModuleIds || []
   localSelectedBoCount.value = (boIds || []).length + (domainIds || []).length + (subDomainIds || []).length + (serviceModuleIds || []).length
 
   // OSS 变更时清空 relationCodes。
@@ -538,6 +536,11 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
     // 后续：正常清空 RSS
     _restoreProtectionConsumed.value = true  // 标志已消费
     selectedRelationCodes.value = []
+    // [FIX 2026-08-15] 同步清空 selectedRelationIds。
+    //   之前只清 relationCodes 不清 relationIds，导致 emitScopeChange 发出
+    //   { relationCodes: [], relationIds: [旧值] }，父级 relationExtra.relationIds 保留旧值，
+    //   EmbeddedChartView 对象范围变更并行刷新时读到旧 relationIds → 旧关系连线残留。
+    selectedRelationIds.value = []
     emitScopeChange()
   }
   // emitScopeChange 同步执行 parent 的 handleScopeChange，scopeIds.relationExtra 现在是 []
@@ -560,6 +563,7 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
 }
 
 function handleRelationScopeChange({ relationCodes, relationIds }) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户手动勾选关系 → 停止自动展开
   selectedRelationCodes.value = relationCodes || []
   // [FIX] 传递 relationIds 用于精确过滤
   selectedRelationIds.value = relationIds || []
@@ -567,6 +571,7 @@ function handleRelationScopeChange({ relationCodes, relationIds }) {
 }
 
 function handleFilterChange({ annotationCategories, relationCodes }) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户修改过滤条件 → 停止自动展开
   selectedAnnotationCategories.value = annotationCategories || []
   selectedFilterRelationCodes.value = relationCodes || []
   emitScopeChange()
@@ -621,6 +626,7 @@ function clearObjectScope() {
 function clearRelationScope() {
   relationScopeRef.value?.clear()
   selectedRelationCodes.value = []
+  selectedRelationIds.value = []
   emitScopeChange()
 }
 
@@ -661,6 +667,7 @@ function clear() {
   selectedSubDomainIds.value = []
   selectedServiceModuleIds.value = []
   selectedRelationCodes.value = []
+  selectedRelationIds.value = []
   localSelectedBoCount.value = 0
   relationStale.value = false
   emitScopeChange()
@@ -668,6 +675,41 @@ function clear() {
 
 function loadTreeData() {
   objectScopeRef.value?.loadTreeData()
+}
+
+// [shortcut dev] 全选所有业务对象，用于 shortcut 模式自动全选
+async function selectAll() {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.handleSelectAll) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.handleSelectAll()
+}
+
+// [shortcut dev] 按编码选择特定节点范围，用于 scopeCode 参数
+//   例如 selectByCode('SCP') 选择"供应链计划"子领域及其所有子孙
+async function selectByCode(code) {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.selectByCode) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.selectByCode(code)
+}
+
+// [shortcut dev] 按多个编码选择多个节点范围，用于 scopeCodes 参数
+//   例如 selectByCodes(['SCP', 'SCM']) 选择多个子领域
+async function selectByCodes(codes) {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.selectByCodes) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.selectByCodes(codes)
 }
 
 async function refresh() {
@@ -767,6 +809,12 @@ defineExpose({
   clearAnnotationFilter,
   clearRelationFilter,
   loadTreeData,
+  // [shortcut dev] 全选所有业务对象
+  selectAll,
+  // [shortcut dev] 按编码选择特定节点范围
+  selectByCode,
+  // [shortcut dev] 按多个编码选择多个节点范围
+  selectByCodes,
   refresh,
   loadRelationTypes,
   selectedAnnotationCategories,
@@ -775,7 +823,13 @@ defineExpose({
   relationCodesCount,
   filterCount,
   annotationCount,
-  relationCount
+  relationCount,
+  // [TEST-ONLY] 暴露内部状态供 debug 模式诊断
+  _test: {
+    get treeData() { return objectScopeRef.value?._test?.treeData || [] },
+    get loading() { return objectScopeRef.value?._test?.loading ?? false },
+    get checkedKeys() { return objectScopeRef.value?._test?.checkedKeys || [] }
+  }
 })
 </script>
 
@@ -830,8 +884,14 @@ defineExpose({
 }
 
 .rst-panel-filter {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 48px;
+}
+
+/* [布局设置 sidebar 整合] 第 4 panel: 布局设置 — 展开时占满剩余空间 */
+.rst-panel-layout:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
 }
 
 /* v39: 过滤条件 badge 样式 */
@@ -851,8 +911,28 @@ defineExpose({
   white-space: nowrap;
 }
 
-.relation-scope-tree:has(.rst-panel-relation.is-collapsed) .rst-panel-object {
-  flex: 1;
+/* [FIX 2026-08-15] 面板互斥布局: 展开的面板占满剩余空间, 折叠面板始终压成标题条.
+   替代原 :has() 方案 — 旧实现 `.relation-scope-tree:has(.rst-panel-relation.is-collapsed)
+   .rst-panel-object { flex: 1 }` 依赖 :has() 支持 + 只处理关系折叠一种情况,
+   浏览器不支持或对象树较短时折叠面板可能悬浮出现"半展开"空隙.
+   现按根容器上的 rst-active-* 类显式选择"当前展开面板", 折叠面板一律 flex: 0 0 auto
+   (48px 标题条), 保证任何情况下都无半折叠空隙. */
+.rst-panel-object:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+.rst-panel-filter:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+.relation-scope-tree.rst-active-object .rst-panel-object,
+.relation-scope-tree.rst-active-relation .rst-panel-relation,
+.relation-scope-tree.rst-active-filter .rst-panel-filter,
+.relation-scope-tree.rst-active-layout .rst-panel-layout {
+  flex: 1 1 0;
+  min-height: 200px;
 }
 
 /* [FIX] 关系范围面板展开时, 给 .collapsible-panel 一个明确的高度

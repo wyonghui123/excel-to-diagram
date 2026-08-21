@@ -11,7 +11,6 @@
 
 import { GroupType, isTerminalGroup, traverseGroups } from './types.js'
 import { ChartType, getChartTypeConfig } from './chartTypeConfig.js'
-import { sanitizeMermaidLabel } from '../../composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 /**
  * 渲染分组模型为 Mermaid 代码
@@ -75,9 +74,7 @@ export function renderGroupModelToMermaid(groups, options = {}) {
     const groupId = sanitizeId(group.id)
     const groupTitle = group.title
 
-    // [V007.52 P0] 转义 groupTitle 防 mermaid 11.13 syntax error
-    const safeGroupTitle = sanitizeMermaidLabel(groupTitle)
-    code += `${indent}subgraph ${groupId}["${safeGroupTitle}"]\n`
+    code += `${indent}subgraph ${groupId}["${groupTitle}"]\n`
     
     const subDirection = group.layout.direction || actualDirection
     code += `${indent}  direction ${subDirection}\n`
@@ -86,10 +83,7 @@ export function renderGroupModelToMermaid(groups, options = {}) {
       group._assignedNodes.forEach(nodeId => {
         if (!definedNodes.has(nodeId)) {
           const nodeCode = nodeIdMap.idToCodeMap.get(nodeId) || nodeId
-          // [V007.52 P0] 转义 nodeId (作为 label) / nodeCode 防 mermaid 11.13 syntax error
-          const safeNodeId = sanitizeMermaidLabel(nodeId)
-          const safeNodeCode = sanitizeMermaidLabel(nodeCode)
-          const displayText = safeNodeCode !== nodeId ? `${safeNodeId}\\n(${safeNodeCode})` : safeNodeId
+          const displayText = nodeCode !== nodeId ? `${nodeId}\\n(${nodeCode})` : nodeId
           code += `${indent}  ${nodeId}["${displayText}"]\n`
           definedNodes.add(nodeId)
         }
@@ -140,12 +134,9 @@ function renderTerminalNode(group, indent, definedNodes, nodeColorMappings, colo
   }
 
   let code = ''
-  // [V007.52 P0] 转义 terminal node title / code 防 mermaid 11.13 syntax error
-  const safeTitle = sanitizeMermaidLabel(group.title || '')
-  const safeElementCode = sanitizeMermaidLabel(group.elementRef?.code || '')
-  const displayText = safeElementCode
-    ? `${safeTitle}\\n(${safeElementCode})`
-    : safeTitle
+  const displayText = group.elementRef?.code 
+    ? `${group.title}\\n(${group.elementRef.code})`
+    : group.title
 
   code += `${indent}${group.id}["${displayText}"]\n`
   definedNodes.add(group.id)

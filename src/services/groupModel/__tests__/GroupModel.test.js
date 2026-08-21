@@ -243,6 +243,21 @@ describe('GroupModel', () => {
       expect(displayTitle).toContain('供应链计划')
       expect(displayTitle).toContain('供应链云')
     })
+
+    it('父容器 disabled 后被提升的子容器标题应显示父名称', () => {
+      const groups = JSON.parse(JSON.stringify(mockArchitectureGroups))
+      groups[1].layout.enabled = false // 禁用供应链云
+      
+      const model = new GroupModel(groups)
+      const config = model.toMermaidConfig()
+      
+      // 供应链计划 被提升到根级，其 title/fullTitle 应包含被禁用的父名称
+      const lifted = config.groups.find(g => g.id === 'subdomain_2')
+      expect(lifted).toBeDefined()
+      expect(lifted.title).toBe('供应链计划（供应链云）')
+      expect(lifted.fullTitle).toBe('供应链计划（供应链云）')
+      expect(lifted._disabledAncestorPath).toEqual(['供应链云'])
+    })
   })
 
   describe('缓存机制', () => {

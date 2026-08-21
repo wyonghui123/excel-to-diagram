@@ -26,7 +26,7 @@
           <template v-if="!isEditingTitle">
             <span v-if="sortOrder" class="sort-order-badge" title="整体排序序号">{{ sortOrder }}</span>
             <span v-if="layerSortOrder" class="layer-sort-order-badge" title="层内排序序号">L{{ layerSortOrder }}</span>
-            <span v-if="group.isCenter" class="center-marker" title="中心范围">◆ </span>{{ group.title }}
+            <span v-if="group.isCenter" class="center-marker" title="对象范围">◆ </span>{{ group.title }}
             <span
               v-if="group.groupType"
               class="group-type-badge"
@@ -34,7 +34,7 @@
               {{ getGroupTypeLabel(group.groupType) }}
             </span>
             <span
-              v-if="group.title === '无外部关系' || group.title === '有外部关系'"
+              v-if="group.title === '无关系' || group.title === '有关系'"
               class="elk-hint"
               :title="getElkGroupHint(group._elkGroup)"
             >
@@ -503,36 +503,78 @@ function handleAllDrop(event) {
 }
 
 function getContainerName(container) {
+  // 解析容器对象，返回 "名称 (编码)" 格式（编码与名称不同时追加编码）
+  const resolveNameAndCode = (obj) => {
+    const name = obj.name || obj.title || obj.elementRef?.name
+    const code = obj.elementCode || obj.elementRef?.code || obj.code
+    if (!name) return null
+    if (code && code !== name) {
+      return `${name} (${code})`
+    }
+    return name
+  }
+
   if (typeof container === 'object') {
-    // 优先使用 name，其次使用 title（服务模块图）
-    if (container.name) return container.name
-    if (container.title) return container.title
-    if (container.elementRef?.name) return container.elementRef.name
+    const result = resolveNameAndCode(container)
+    if (result) return result
   }
   if (typeof container === 'string') {
     const found = containers.value.find(c => c.id === container)
     if (found) {
-      return found.name || found.title || container
+      const result = resolveNameAndCode(found)
+      if (result) return result
     }
     return container
   }
   return '未知容器'
 }
 
-function getNodeName(nodeId) {
+// 在所有 containers 的 nodes 中根据编码/ID 查找节点名称
+function lookupNodeNameByCode(code) {
   for (const container of containers.value) {
+    // [FIX 2026-08-04] BO 图: container.nodeNames 是 { BO编码: BO名称 } 映射
+    if (container.nodeNames && container.nodeNames[code]) {
+      return container.nodeNames[code]
+    }
+    if (container.elementCode === code && container.name) {
+      return container.name
+    }
     if (container.nodes) {
       for (const node of container.nodes) {
-        if (typeof node === 'string' && node === nodeId) {
-          return nodeId
-        }
-        if (typeof node === 'object' && node.id === nodeId) {
-          return node.name || node.id
+        if (typeof node === 'object' && (node.code === code || node.id === code)) {
+          return node.name || node.code || node.id
         }
       }
     }
   }
-  return nodeId
+  return null
+}
+
+function getNodeName(nodeId) {
+  // 1. 在所有 containers 中查找匹配的节点对象
+  for (const container of containers.value) {
+    if (container.nodes) {
+      for (const node of container.nodes) {
+        // 字符串节点：nodeId 即为编码，需查找其名称以展示 "名称 (编码)"
+        if (typeof node === 'string' && node === nodeId) {
+          const name = lookupNodeNameByCode(nodeId)
+          return name && name !== nodeId ? `${name} (${nodeId})` : nodeId
+        }
+        // 对象节点：使用 name 与 code 组合展示
+        if (typeof node === 'object' && node.id === nodeId) {
+          const name = node.name || node.id
+          const code = node.code
+          if (code && code !== name) {
+            return `${name} (${code})`
+          }
+          return name
+        }
+      }
+    }
+  }
+  // 2. 未在 containers 中匹配到对象，nodeId 可能是纯编码，尝试查找名称
+  const name = lookupNodeNameByCode(nodeId)
+  return name && name !== nodeId ? `${name} (${nodeId})` : nodeId
 }
 
 function getNodeColor(nodeId) {
@@ -766,8 +808,8 @@ function getGroupTypeLabel(type) {
 
 function getElkGroupHint(elkGroup) {
   const hints = {
-    inner: '无外部关系：此分组中的节点没有连接外部节点的边，需要与有外部关系的区分开，否则这些节点无法均匀布局',
-    boundary: '有外部关系：此分组中的节点有连接外部节点的边，需要与无外部关系的区分开，否则这些节点无法均匀布局'
+    inner: '无关系：此分组中的节点在所选关系范围内没有任何关联关系（含服务模块内），需要与有关系的区分开，否则这些节点无法均匀布局',
+    boundary: '有关系：此分组中的节点在所选关系范围内有关联关系（含服务模块内），需要与无关系的区分开，否则这些节点无法均匀布局'
   }
   return hints[elkGroup] || ''
 }
