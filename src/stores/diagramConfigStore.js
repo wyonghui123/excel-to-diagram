@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
+import { applyViewTemplate as applyViewTemplateToGroups } from '../composables/useViewTemplates.js'
 
 export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 图表类型
@@ -24,10 +25,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const centerScope = ref([])
   // [M2 PR-2.1] centerScopeMarkers 包含 3 个 Map，整体替换模式 (updateCenterScopeMarkers 整体赋值)
   //   改 shallowRef 避免对内部 Map 创建 Proxy
+  //   [PARTIAL-CENTER 2026-08-15] 新增 fullyXxx 标记: 分组是否"完全包含对象范围" (所有 BO 都在
+  //   centerScope), 与 hasCenter 标记配合区分折叠节点着色 (完全包含→centerScopeColor / 部分包含→中性灰).
   const centerScopeMarkers = shallowRef({
     domains: new Map(),
     subDomains: new Map(),
-    serviceModules: new Map()
+    serviceModules: new Map(),
+    fullyDomains: new Map(),
+    fullySubDomains: new Map(),
+    fullyServiceModules: new Map()
   })
 
   // 布局配置
@@ -35,6 +41,18 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const layoutEngine = ref('elk')
   const layoutType = ref('grouped')
   const assignmentMode = ref('auto')
+
+  // [SCALE-GUARD 2026-08-18] 图表规模防护配置。
+  //   阈值以"可见渲染数"计: 关系数为主指标, 节点数为辅。校准依据见
+  //   docs/superpowers/specs/2026-08-18-chart-scale-guard-design.md。
+  //   按引擎双阈值: ELK 为主(实际生效), dagre 备用独立调参。
+  //   enabled=false 一键关闭所有拦截(退化为现状)。
+  const scopeGuard = ref({
+    enabled: true,
+    elk:  { softRels: 300, softNodes: 250, hardRels: 600, hardNodes: 400 },
+    dagre:{ softRels: 300, softNodes: 250, hardRels: 600, hardNodes: 400 },
+    renderCheck: true
+  })
 
   // 其他配置
   const customColors = ref({})
@@ -48,6 +66,16 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // [V_NEW 2026-06-29] annotation category 过滤 - 备注文本是辅助信息, 不影响主线
   // 默认 [] = 不过滤 (向后兼容)
   const annotationCategoryFilter = ref([])
+  // [布局设置 sidebar 整合] 图表渲染数据快照 — EmbeddedChartView 写入, RelationScopeTree 读取
+  //   shallowRef 避免对 1000+ 节点的 containers/domainProducts/links 创建深 Proxy (同 positions/centerScopeMarkers 模式)
+  const chartDataSnapshot = shallowRef({
+    containers: [],
+    domainProducts: [],
+    links: [],
+    groupColorMap: {}                 // [FIX 2026-08-05] 与图表同源的分组色映射
+  })
+  // [布局设置 sidebar 整合] 布局 panel 展开状态 — 跨组件共享 (RelationScopeTree 写, 外部可读)
+  const layoutPanelExpanded = ref(false)
   const useUnifiedRenderer = ref(true)
 
   // 分组控制配置
@@ -59,8 +87,29 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     preserveOrder: true
   })
 
+  // [FOLD 2026-08-05] FR-005 视图模板: 当前生效模板 ('allEnabled' | 'onlyServiceModules' | '')
+  const viewTemplate = ref('')
+  // [LEVEL 2026-08-07] 展开层级: 工具栏(ChartMiniToolbar)与图表设置(LayoutControlPanel)共享,
+  //   值取 services/expandLevel.js EXPAND_LEVELS 的 key, 默认'businessObject'=全部展开
+  const expandLevel = ref('businessObject')
+  // [SCOPE-DEFAULT 2026-08-08] 是否由用户显式选择过展开层级.
+  //   false=仍处于默认态 → EmbeddedChartView 会按对象范围应用默认展开(范围内折叠到服务模块);
+  //   true=用户已主动选择(含选择"展开到业务对象") → 尊重用户选择, 不再套用范围默认折叠.
+  //   解决: 加载 SCP 范围时系统仍显示业务对象(applyDefaultExpandByScope 受异步时序漏折叠).
+  const expandLevelUserSet = ref(false)
+  // [CTX-FIX 2026-08-09] 用户是否手动调整过分组折叠/展开 (双击 / 右键菜单).
+  //   false=未手动干预 → 渲染层可按对象范围套用默认展开;
+  //   true=已手动干预 → 尊重用户 per-group collapsed (经 sharedApplyGroupStates 应用),
+  //   渲染层不得再用 applyDefaultExpandByScope / expandGroupsToLevel 覆盖用户操作.
+  //   解决: 双击折叠容器 / 右键"折叠/展开"后图表无任何变化.
+  const groupManualSet = ref(false)
+
   // 渲染限制配置
   const mermaidMaxTextSize = ref(500000)
+
+  // [FOCUS 2026-08-05] 图表聚焦请求 — 布局设置面板 → 图表组件单向联动
+  //   seq 每次自增, 确保即使连续聚焦同一目标 (type/id 相同) 也能被 watcher 捕获
+  const chartFocusRequest = ref({ seq: 0, type: null, id: null })
 
   // Getters
   const centerBoCodes = computed(() => new Set(centerScope.value || []))
@@ -75,6 +124,12 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   const isBusinessObjectChart = computed(() => chartType.value === 'businessObject')
   const isServiceModuleChart = computed(() => chartType.value === 'serviceModule')
+
+  // [SCALE-GUARD 2026-08-18] 当前生效阈值 (按 layoutEngine 取对应引擎配置)
+  const activeScopeGuard = computed(() => {
+    const eng = (layoutEngine.value === 'dagre' ? 'dagre' : 'elk')
+    return scopeGuard.value[eng] || scopeGuard.value.elk
+  })
 
   // Actions
   function updateColorScheme(value) {
@@ -106,11 +161,26 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   }
 
   function updateCenterScope(codes) {
-    centerScope.value = Array.isArray(codes) ? codes : (codes?.value || [])
+    const next = Array.isArray(codes) ? codes : (codes?.value || [])
+    const prev = centerScope.value || []
+    const changed = next.length !== prev.length || next.some((c, i) => c !== prev[i])
+    centerScope.value = next
+    // [SCOPE-SWITCH 2026-08-13] 对象范围切换 = 新的初始展示: 重置用户展开层级/手动分组标记,
+    //   使渲染层按自适应默认展开层级(computeDefaultExpandByCount)重新计算初始层级.
+    //   根因: 同一会话内切换范围(如 SCP → 采购供应)时 expandLevelUserSet 残留上一次用户选择
+    //   (如"展开到业务对象"), 导致切换后仍沿用旧层级而非自适应默认 → 用户看到"默认展开到服务模块".
+    //   仅当范围实际变化才重置, 避免重复设置同一范围误清用户选择.
+    if (changed) {
+      expandLevelUserSet.value = false
+      groupManualSet.value = false
+    }
   }
 
   function updateCenterScopeMarkers(markers) {
-    centerScopeMarkers.value = markers || { domains: new Map(), subDomains: new Map(), serviceModules: new Map() }
+    centerScopeMarkers.value = markers || {
+      domains: new Map(), subDomains: new Map(), serviceModules: new Map(),
+      fullyDomains: new Map(), fullySubDomains: new Map(), fullyServiceModules: new Map()
+    }
   }
 
   function updateChartType(type) {
@@ -172,6 +242,66 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     layoutControlConfig.value = config?.value || config
   }
 
+  // [LEVEL 2026-08-07] 设置当前展开层级 (工具栏/图表设置共享)
+  function setExpandLevel(key) {
+    expandLevel.value = key || 'businessObject'
+    // [SCOPE-DEFAULT 2026-08-08] 用户显式选择过展开层级, 后续不再套用范围默认折叠.
+    //   注意: 默认态(businessObject)不调用本函数, 由 store 初始值承载, 故此处置 true 安全.
+    expandLevelUserSet.value = true
+  }
+
+  // [SCALE-GUARD 2026-08-18] 覆盖 scaleGuard 配置 (整体/局部合并)
+  function setScopeGuard(patch) {
+    scopeGuard.value = { ...scopeGuard.value, ...patch }
+  }
+
+  // [DEFAULT-LEVEL 2026-08-12] 系统自动默认展开层级 (按分组数量自适应).
+  //   仅更新 expandLevel 值, 不设置 expandLevelUserSet: 这是系统初始默认,
+  //   用户后续显式选择(setExpandLevel)仍可覆盖, 且渲染层会继续套用自适应默认.
+  function setDefaultExpandLevel(key) {
+    expandLevel.value = key || 'businessObject'
+  }
+
+  // [CTX-FIX 2026-08-09] 标记用户已手动调整过分组折叠/展开 (双击/右键菜单触发).
+  //   设置后渲染层不再套用范围默认展开/全局展开, 尊重用户 per-group collapsed.
+  function markGroupManualSet() {
+    groupManualSet.value = true
+  }
+
+  // [PERF 2026-08-13] 重置展开层级/手动分组标记, 使渲染层按自适应默认展开层级重新计算.
+  //   触发场景: 关系范围变更引入新的领域/子领域层级 (数据范围结构变化) 时,
+  //   应重新自适应默认展开 (如从"1 个领域"变为"多个领域"→ 展开到领域),
+  //   而非沿用用户之前的展开层级/手动折叠状态.
+  function resetExpandState() {
+    expandLevelUserSet.value = false
+    groupManualSet.value = false
+    // [LOG 2026-08-13] 关键日志: 数据范围结构变化时重置展开层级/手动分组标记.
+    console.log('[resetExpandState] 重置展开状态: expandLevelUserSet=false, groupManualSet=false (当前 expandLevel=' + expandLevel.value + ')')
+  }
+
+  // [DEFAULT-COLOR 2026-08-13] 数据范围变化时应用默认颜色配置:
+  //   - centerScopeHighlight: 无外部 BO (只对象范围) 时 false, 有外部 BO 时 true
+  //   - colorGroupBy: 跟随初始展开层级 (domain/subDomain/serviceModule)
+  function applyDefaultColorConfig(groupBy, highlight) {
+    const prevGroupBy = colorGroupBy.value
+    const prevHighlight = centerScopeHighlight.value
+    colorGroupBy.value = groupBy || 'domain'
+    centerScopeHighlight.value = highlight ?? true
+    // [LOG 2026-08-13] 关键日志: 数据范围结构变化时重置默认颜色配置.
+    console.log('[applyDefaultColorConfig] colorGroupBy: ' + prevGroupBy + ' → ' + colorGroupBy.value + ' | centerScopeHighlight: ' + prevHighlight + ' → ' + centerScopeHighlight.value)
+  }
+
+  // [FOLD 2026-08-05] FR-005 应用视图模板到 layoutControlConfig.groups
+  //   allEnabled: 全部启用 (无折叠/无禁用)
+  //   onlyServiceModules: 仅服务模块 (BO 叶节点隐藏)
+  function applyViewTemplate(template) {
+    const config = layoutControlConfig.value
+    if (!config || !Array.isArray(config.groups)) return 0
+    const applied = applyViewTemplateToGroups(config.groups, template)
+    viewTemplate.value = template || ''
+    return applied
+  }
+
   function updateMermaidMaxTextSize(value) {
     mermaidMaxTextSize.value = typeof value === 'number' ? value : (parseInt(value) || 500000)
   }
@@ -193,8 +323,28 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     annotationCategoryFilter.value = []
   }
 
+  // [布局设置 sidebar 整合] 更新图表渲染数据快照 (整体替换引用, 触发 shallowRef 依赖)
+  function updateChartDataSnapshot(snapshot) {
+    chartDataSnapshot.value = {
+      containers: snapshot?.containers ?? [],
+      domainProducts: snapshot?.domainProducts ?? [],
+      links: snapshot?.links ?? [],
+      groupColorMap: snapshot?.groupColorMap ?? {}
+    }
+  }
+
+  // [布局设置 sidebar 整合] 设置布局 panel 展开状态
+  function setLayoutPanelExpanded(expanded) {
+    layoutPanelExpanded.value = expanded
+  }
+
   function updateAssignmentMode(value) {
     assignmentMode.value = value?.value ?? value ?? 'auto'
+  }
+
+  // [FOCUS 2026-08-05] 请求图表聚焦 (布局设置面板触发), seq 自增确保 watcher 每次都响应
+  function requestChartFocus({ type, id }) {
+    chartFocusRequest.value = { seq: chartFocusRequest.value.seq + 1, type, id }
   }
 
   function fallbackToLegacyRenderer() {
@@ -217,7 +367,10 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     centerScopeMarkers.value = {
       domains: new Map(),
       subDomains: new Map(),
-      serviceModules: new Map()
+      serviceModules: new Map(),
+      fullyDomains: new Map(),
+      fullySubDomains: new Map(),
+      fullyServiceModules: new Map()
     }
     layoutTemplate.value = 'default'
     layoutEngine.value = 'elk'
@@ -238,7 +391,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
       engine: 'elk',
       preserveOrder: true
     }
+    viewTemplate.value = ''
+    expandLevel.value = 'businessObject'
+    expandLevelUserSet.value = false
+    groupManualSet.value = false
+    // [布局设置 sidebar 整合] 重置 snapshot 和 panel 状态
+    chartDataSnapshot.value = { containers: [], domainProducts: [], links: [], groupColorMap: {} }
+    layoutPanelExpanded.value = false
     mermaidMaxTextSize.value = 500000
+    chartFocusRequest.value = { seq: 0, type: null, id: null }
   }
 
   return {
@@ -268,13 +429,27 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     annotationCategoryFilter,
     useUnifiedRenderer,
     layoutControlConfig,
+    viewTemplate,
+    expandLevel,
+    // [SCOPE-DEFAULT 2026-08-08] 用户是否显式选择过展开层级 (必须暴露, 否则组件读到 undefined).
+    //   之前漏在 return 里 → EmbeddedChartView/useDiagramData 读 undefined → !undefined=true
+    //   → 用户显式选过展开层级后仍被默认折叠覆盖 (功能失效). 见 diagramConfigStore.spec.js.
+    expandLevelUserSet,
+    // [CTX-FIX 2026-08-09] 用户是否手动调整过分组折叠/展开 (必须暴露, 否则组件读到 undefined).
+    groupManualSet,
+    chartDataSnapshot,
+    layoutPanelExpanded,
     mermaidMaxTextSize,
+    chartFocusRequest,
+    // [SCALE-GUARD 2026-08-18] 图表规模防护配置
+    scopeGuard,
 
     // Getters
     centerBoCodes,
     resolvedColorConfig,
     isBusinessObjectChart,
     isServiceModuleChart,
+    activeScopeGuard,
 
     // Actions
     updateColorScheme,
@@ -297,12 +472,22 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updatePositions,
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
+    setExpandLevel,
+    setScopeGuard,
+    setDefaultExpandLevel,
+    markGroupManualSet,
+    resetExpandState,
+    applyDefaultColorConfig,
+    applyViewTemplate,
+    updateChartDataSnapshot,
+    setLayoutPanelExpanded,
     updateMermaidMaxTextSize,
     updateAnnotationPanelPosition,
     updateShowAnnotationIcons,
     setAnnotationCategoryFilter,
     clearAnnotationCategoryFilter,
     updateAssignmentMode,
+    requestChartFocus,
     fallbackToLegacyRenderer,
     resetConfig
   }
