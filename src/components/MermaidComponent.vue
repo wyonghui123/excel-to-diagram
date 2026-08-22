@@ -3001,7 +3001,7 @@ export default {
         //   的 visible 决定是否渲染"有标题盒"(enabled+visible → subgraph[title]), 属结构变化,
         //   必须参与签名触发全量重排. 否则 visible 变化走 updateVisibilityOnly 只 toggle display,
         //   无法新增/移除标题盒 → 面板"显示/隐藏"切换无效果 (用户反馈的 bug).
-        const isElkSystemAuto = (g) => !!g && (g._elkGroup === 'inner' || g._elkGroup === 'boundary')
+        const isElkSystemAuto = (g) => !!g && g.groupType === 'custom' && (g._elkGroup === 'inner' || g._elkGroup === 'boundary')
         const sigGroup = (g) => ({
           id: g.elementCode || g.id,
           title: g.title,

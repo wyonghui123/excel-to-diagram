@@ -12,12 +12,15 @@
  * [关键语义]
  *   - ELK 系统自动分组 (_elkGroup=inner/boundary) 的 visible=false 是"无边框盒但节点渲染"
  *     语义, **不是用户隐藏**, 不得收集其 BO 后代 (否则隐藏任意分组会把其下 BO 全隐藏且无法恢复).
+ *   - [HIDE 2026-08-22] 用户隐藏分组 (visible=false, 且非 ELK 系统分组) 时, 除隐藏容器框外,
+ *     还**递归收集其子孙叶节点编码** → 末端节点整体隐藏. 背景: mermaid SVG 中叶节点 g.node
+ *     与容器 g.cluster 是 DOM 兄弟 (非父子), display/visibility 作用于容器不会连带隐藏叶节点.
  *   - isScopeProtected(g): 对象范围内要素及其祖先链不因父分组隐藏而被隐藏 (组件注入).
  */
 import { upliftNodeId } from '../layouts/upliftDerivation.js'
 
 export function isElkSystemAuto(g) {
-  return !!g && (g._elkGroup === 'inner' || g._elkGroup === 'boundary')
+  return !!g && g.groupType === 'custom' && (g._elkGroup === 'inner' || g._elkGroup === 'boundary')
 }
 
 function collectLeafNodes(leaf, set) {
@@ -36,6 +39,30 @@ function collectLeafNodes(leaf, set) {
   ;(leaf.directNodes || []).forEach((n) => {
     if (typeof n === 'string') set.add(n)
     else if (n && typeof n === 'object') set.add(n.code || n.name)
+  })
+}
+
+/**
+ * [HIDE 2026-08-22] 递归收集分组的**子孙叶节点**编码到 set.
+ *   用于"用户隐藏分组 → 末端节点一并隐藏": mermaid SVG 中叶节点 g.node 与容器 g.cluster
+ *   是 DOM 兄弟 (非父子), display/visibility 作用于容器不会连带隐藏叶节点, 必须逐个收集.
+ *   尊重对象范围保护: isScopeProtected 命中的子树 (范围内服务模块/祖先分组) 整棵跳过,
+ *   不收集其下 BO (保证"范围内要素不因父分组隐藏而隐藏").
+ */
+function collectDescendantNodeCodes(g, set, isScopeProtected) {
+  if (!g || typeof g !== 'object') return
+  ;(g.directNodes || []).forEach((n) => {
+    if (!isScopeProtected(n)) collectLeafNodes(n, set)
+  })
+  ;(g.containers || []).forEach((c) => {
+    if (!c || typeof c !== 'object' || isScopeProtected(c)) return
+    const hasNested = (c.children && c.children.length > 0) || (c.containers && c.containers.length > 0)
+    if (hasNested) collectDescendantNodeCodes(c, set, isScopeProtected)
+    else collectLeafNodes(c, set)
+  })
+  ;(g.children || []).forEach((ch) => {
+    if (!ch || typeof ch !== 'object' || isScopeProtected(ch)) return
+    collectDescendantNodeCodes(ch, set, isScopeProtected)
   })
 }
 
@@ -83,19 +110,20 @@ export function collectHiddenState(groups, { isScopeProtected = () => false } = 
   const walk = (list) => {
     ;(list || []).forEach((g) => {
       if (!g || typeof g !== 'object') return
-      // [HIDE 2026-08-19] 分组隐藏新语义: visible=false 只隐藏该分组**容器框**,
-      //   子节点 (directNodes/containers/children) 继续展示 (是"隐藏", 非"禁用").
-      //   因此: ① 不再收集子孙 (原 collectGroupNodes/collectDescendantGroupIds 移除);
-      //       ② 不再向子孙传播 inheritedHidden (每个分组独立判断自身 visible);
-      //       ③ 不再受对象范围保护阻断 (隐藏容器框不隐藏任何范围内元素);
-      //       ④ 不再排除 _elkGroup 标记分组: 服务模块等真实分组可能被 ELK 渲染
-      //          产物污染 _elkGroup 标记, 旧逻辑把它们当"系统自动分组"跳过 → 隐藏无效.
-      //          新语义无级联, 原"防止级联隐藏 ELK 分组 BO"的目的已不存在, 故移除.
+      // [HIDE 2026-08-19][HIDE 2026-08-22] 分组隐藏语义: 隐藏该分组**容器框** + **子孙叶节点**
+      //   (末端节点整体隐藏, 保留空位不重排). 非"禁用" (禁用是整棵子树打平上浮到父级).
+      //   因此: ① 对用户隐藏分组, 除容器编码外, 再递归收集其子孙叶节点编码 (见 collectDescendantNodeCodes);
+      //       ② 排除 ELK 系统分组 (isElkSystemAuto): 其 visible=false 是"无边框盒但节点渲染"
+      //          语义, 非用户隐藏, 不得收集其 BO (回归 2026-08-14: 否则隐藏任意分组会把其下 BO 全隐藏);
+      //       ③ 仍受对象范围保护: 范围内要素 (isScopeProtected 子树) 不因父分组隐藏而隐藏.
       const shouldHide = (g.visible === false)
       if (shouldHide) {
         const code = g.elementCode || g.id
         if (code) hiddenContainerCodes.add(code)
         if (g.id) hiddenCollapseIds.add(upliftNodeId(g))
+        if (!isElkSystemAuto(g)) {
+          collectDescendantNodeCodes(g, hiddenNodeCodes, isScopeProtected)
+        }
       }
       // 叶子容器单独隐藏 (BO 叶 visible=false → 隐藏该节点); 范围内叶子容器受保护
       if (Array.isArray(g.containers)) {
