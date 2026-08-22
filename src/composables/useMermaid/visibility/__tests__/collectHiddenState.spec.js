@@ -57,7 +57,7 @@ describe('isElkSystemAuto / hasVisibleContent', () => {
   it('识别 ELK 系统分组', () => {
     expect(isElkSystemAuto(invElkChildren[0])).toBe(true)   // inner
     expect(isElkSystemAuto(invElkChildren[1])).toBe(true)   // boundary
-    expect(isElkSystemAuto({ _elkGroup: 'inner' })).toBe(true)
+    expect(isElkSystemAuto({ groupType: 'custom', _elkGroup: 'inner' })).toBe(true)
     expect(isElkSystemAuto({ _elkGroup: 'custom' })).toBe(false)
     expect(isElkSystemAuto(null)).toBe(false)
   })
@@ -74,12 +74,21 @@ describe('isElkSystemAuto / hasVisibleContent', () => {
 })
 
 describe('collectHiddenState - ELK 系统分组回归 (THE bug)', () => {
-  it('隐藏项目云: 只隐藏其容器框, 子节点 (含 ELK 分组 BO) 保留', () => {
+  it('[回归 2026-08-14] ELK 系统分组自身的 visible=false 不被当作用户隐藏 → 其 BO 不收集', () => {
+    // 所有真实分组可见, 仅 ELK 系统分组 (inner/boundary) visible=false ("无边框盒"语义)
+    const cfg = JSON.parse(JSON.stringify(groups))
+    const { hiddenNodeCodes } = collectHiddenState(cfg, { isScopeProtected: noProtect })
+    for (const code of ['INV01', 'INV02', 'INV03']) {
+      expect(hiddenNodeCodes.has(code), `${code} 不应被收集为隐藏`).toBe(false)
+    }
+  })
+
+  it('[HIDE 2026-08-22] 隐藏项目云: 容器框 + 其子孙叶节点整体隐藏, 其他子树不受影响', () => {
     const cfg = JSON.parse(JSON.stringify(groups))
     cfg[1].visible = false   // 隐藏 PM
     const { hiddenNodeCodes, hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: noProtect })
 
-    // 采购供应 BO 必须保持可见 (核心回归断言)
+    // 采购供应 (SCM 子树) BO 必须保持可见 (与 PM 无关)
     for (const code of ['INV01', 'INV02', 'INV03', 'PR01', 'PR02']) {
       expect(hiddenNodeCodes.has(code), `${code} 不应被隐藏`).toBe(false)
     }
@@ -88,26 +97,28 @@ describe('collectHiddenState - ELK 系统分组回归 (THE bug)', () => {
       expect(hiddenContainerCodes.has(c), `容器 ${c} 不应被隐藏`).toBe(false)
     }
 
-    // [HIDE 2026-08-19] 新语义: 只隐藏 PM 容器框, 子容器/子节点保留
+    // [HIDE 2026-08-22] 新语义: PM 容器框 + 其下 PMCCP 的 BO 一并隐藏
     expect(hiddenContainerCodes.has('PM')).toBe(true)
-    expect(hiddenContainerCodes.has('PROJ')).toBe(false)   // 子容器保留
-    expect(hiddenNodeCodes.has('PMCCP015')).toBe(false)    // 子节点保留
-    expect(hiddenNodeCodes.has('PMCCP016')).toBe(false)
+    expect(hiddenContainerCodes.has('PROJ')).toBe(false)   // 中间容器保留 (仅隐藏叶节点)
+    expect(hiddenNodeCodes.has('PMCCP015')).toBe(true)     // 末端节点整体隐藏
+    expect(hiddenNodeCodes.has('PMCCP016')).toBe(true)
   })
 
-  it('隐藏采购供应自身: 只隐藏容器框, BO 保留', () => {
+  it('[HIDE 2026-08-22] 隐藏采购供应: 容器框 + 其下 BO 整体隐藏 (含 ELK 分组内的 BO)', () => {
     const cfg = JSON.parse(JSON.stringify(groups))
     cfg[0].children[0].visible = false   // 隐藏 MM
     const { hiddenNodeCodes, hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: noProtect })
-    for (const code of ['INV01', 'INV02', 'INV03', 'PR01', 'PR02']) {
-      expect(hiddenNodeCodes.has(code), `${code} 应保留可见`).toBe(false)
-    }
+    // 采购供应容器框隐藏
     expect(hiddenContainerCodes.has('MM')).toBe(true)
+    // 其下 BO 全部隐藏 (含 ELK 系统分组 inner/boundary 内的 BO)
+    for (const code of ['INV01', 'INV02', 'INV03', 'PR01', 'PR02']) {
+      expect(hiddenNodeCodes.has(code), `${code} 应被隐藏`).toBe(true)
+    }
   })
 })
 
-describe('collectHiddenState - 隐藏与对象范围保护 [HIDE 2026-08-19]', () => {
-  it('隐藏分组只作用于容器框: SCP 容器框隐藏, 其 BO 保留', () => {
+describe('collectHiddenState - 隐藏与对象范围保护 [HIDE 2026-08-22]', () => {
+  it('[HIDE 2026-08-22] 隐藏 SCP: 容器框 + 其下 BO 整体隐藏 (BO 非范围内)', () => {
     const cfg = JSON.parse(JSON.stringify(groups))
     cfg[0].children.push({
       id: 'G_SD_SCP', elementCode: 'SCP', groupType: 'subDomain', visible: false,
@@ -117,18 +128,22 @@ describe('collectHiddenState - 隐藏与对象范围保护 [HIDE 2026-08-19]', (
     const { hiddenNodeCodes, hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: protect })
 
     expect(hiddenContainerCodes.has('SCP')).toBe(true)   // SCP 容器框隐藏
-    expect(hiddenNodeCodes.has('SCP01')).toBe(false)     // 子节点保留 (新语义)
+    expect(hiddenNodeCodes.has('SCP01')).toBe(true)      // [HIDE 2026-08-22] 其下 BO 一并隐藏
     expect(hiddenContainerCodes.has('MM')).toBe(false)   // 未隐藏的分组不受影响
-    expect(hiddenNodeCodes.has('INV01')).toBe(false)     // BO 保留
+    expect(hiddenNodeCodes.has('INV01')).toBe(false)     // 其他子树 BO 保留
   })
 
-  it('范围内分组 (SCM) 容器框也可隐藏: 隐藏不再被范围保护阻断', () => {
-    // 隐藏仅作用于容器框, 不隐藏任何范围内元素 (子节点保留), 故无需范围保护.
+  it('[HIDE 2026-08-22] 隐藏 SCM: 容器框隐藏, 但范围内 MM 子树 (及祖先) 的 BO 保留', () => {
+    // 隐藏范围祖先 SCM, 范围内服务模块 MM 的 BO 受保护不隐藏 (仅容器框隐藏)
     const cfg = JSON.parse(JSON.stringify(groups))
-    cfg[0].visible = false   // 隐藏 SCM (范围内祖先)
+    cfg[0].visible = false   // 隐藏 SCM
     const protect = (g) => g.elementCode === 'MM' || g.elementCode === 'SCM' || g.elementCode === 'G_SD_MM'
-    const { hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: protect })
+    const { hiddenNodeCodes, hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: protect })
     expect(hiddenContainerCodes.has('SCM')).toBe(true)   // 容器框可隐藏
+    // 范围内 MM 子树整棵跳过收集 → 其 BO 全部保留
+    for (const code of ['INV01', 'INV02', 'INV03', 'PR01', 'PR02']) {
+      expect(hiddenNodeCodes.has(code), `${code} 应受范围保护保留`).toBe(false)
+    }
   })
 })
 
@@ -175,12 +190,12 @@ describe('collectHiddenState - BO 虚拟叶容器 (nodes 数组) 隐藏 [FIX 202
     expect(hiddenNodeCodes.has('DP01')).toBe(false)   // 未隐藏的 BO 保持可见
   })
 
-  it('分组隐藏只隐藏容器框, BO 叶容器不被级联隐藏 [HIDE 2026-08-19]', () => {
+  it('分组隐藏: BO 虚拟叶容器内的节点被级联收集隐藏 [HIDE 2026-08-22]', () => {
     const cfg = JSON.parse(JSON.stringify(boLeafCfg))
-    cfg[0].children[0].visible = false   // 隐藏 SCP → 只隐藏 SCP 容器框
+    cfg[0].children[0].visible = false   // 隐藏 SCP → 容器框 + 其下 BO 一并隐藏
     const { hiddenNodeCodes, hiddenContainerCodes } = collectHiddenState(cfg, { isScopeProtected: noProtect })
     expect(hiddenContainerCodes.has('SCP')).toBe(true)   // SCP 容器框隐藏
-    expect(hiddenNodeCodes.has('DP10')).toBe(false)      // BO 保留 (新语义: 隐藏≠禁用)
-    expect(hiddenNodeCodes.has('DP01')).toBe(false)
+    expect(hiddenNodeCodes.has('DP10')).toBe(true)       // [HIDE 2026-08-22] 叶容器 nodes 被级联收集
+    expect(hiddenNodeCodes.has('DP01')).toBe(true)
   })
 })
