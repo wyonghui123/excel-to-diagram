@@ -113,6 +113,12 @@ export function useAnnotationOverlay() {
   const findAnnotationTargetEl = (svg, ann) => {
     if (!svg || !ann || !ann.targetId) return null
     const targetId = ann.targetId
+    // [FIX 2026-08-22] 无效占位 targetId 视为无目标, 直接返回 null:
+    //   现象: 关系备注 targetId 被填充为占位符 "-" 时, 精确 [data-relation-code="-"] 查不到,
+    //   退到 edgeLabel 文本 includes(targetId) 全表误命中 (targetId="-" → 所有带连字符的 label
+    //   如 "SCM-FIN" 都命中), 导致本不在图表中的 "采购发票受预算控制" 等外部关系备注被错误显示.
+    const tidStr = String(targetId)
+    if (!tidStr.trim() || /^[-_./、\s]+$/.test(tidStr)) return null
     let el = null
     if (ann.targetType === 'relation') {
       el = svg.querySelector(`[data-relation-code="${targetId}"]`)
