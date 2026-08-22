@@ -633,7 +633,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         })
 
         // 用外层 wrapper 包装
-        // [2026-08-21] SubDomain 嵌套容器标题进入 ["..."] 前做 mermaid 原生 #XX; 转义 (经 escapeMermaidLabelText→sanitizeMermaidLabel)
+        // [SEC 2026-08-19] SubDomain 嵌套容器标题进入 ["..."] 前做 HTML 实体转义 (防 XSS + 防语法破坏)
         let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${escapeMermaidLabelText(formatContainerTitle(containerData.title || containerData.name))}"]\n${subIndent}  direction ${subDirection}\n`
         wrappedSubCode += innerCode
         wrappedSubCode += `${subIndent}end\n`
@@ -812,7 +812,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
   // 如果容器有 fullTitle（包含完整路径，如 "财务云 / 费控服务"），说明它是 disabled 域的容器
   // 使用 fullTitle 而不是 name，这样会显示完整路径
   const rawContainerName = container.fullTitle || container.name || container.title || 'Container'
-  // [2026-08-21] 容器标题进入 ["..."] 前做 mermaid 原生 #XX; 转义 (经 escapeMermaidLabelText→sanitizeMermaidLabel)
+  // [SEC 2026-08-19] 容器标题进入 ["..."] 前做 HTML 实体转义 (防 XSS + 防语法破坏, 显示不变)
   const containerName = escapeMermaidLabelText(formatContainerTitle(rawContainerName))
   
   code += `${indent}  subgraph ${actualContainerId}["${containerName}"]\n`

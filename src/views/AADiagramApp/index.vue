@@ -8,8 +8,6 @@
       :has-next="canNavNext"
       :next-label="navNextLabel"
       :show-back-to-arch="currentStep === 0"
-      :chart-type="chartType"
-      :chart-type-text="chartTypeText"
       @change="handleStepChange"
       @prev="onNavPrev"
       @next="onNavNext"
@@ -103,14 +101,6 @@ export default {
     } = useDiagramData()
 
     // 步骤组件的 props (3 步骤模式: 0=类型, 1=配置, 2=展示)
-    // [v54] chartTypeText: 用于 StepNavigator "类型"步骤旁的中文标签
-    //  直接读 configStore.chartType, 避免 computed 链路过长导致响应式丢失
-    const chartTypeText = computed(() => {
-      const t = configStore.chartType
-      if (t === 'businessObject') return '业务对象图'
-      if (t === 'serviceModule') return '服务模块图'
-      return ''
-    })
     const stepProps = computed(() => {
       const propsMap = {
         0: {
@@ -374,7 +364,6 @@ export default {
           generateDiagram,
           previewData,
           chartType,
-          chartTypeText,
           centerScope,
           router,
           chartArchStore,

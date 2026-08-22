@@ -6,6 +6,7 @@ import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
 import { useDiagnostics } from '../core/useDiagnostics.js'
 import { getLiftedParentPathMap } from '../layouts/groupedLayout.js'
 import { isFeatureEnabled } from '@/utils/featureFlags.js'
+import { COLOR_SCHEMES } from '@/constants/diagram'
 
 /**
  * SVG 后处理逻辑
@@ -523,6 +524,14 @@ export function useSvgProcessor(options) {
     const groupTotalNodes = new Map()
     const groupCenterNodes = new Map()
     const colorMap = new Map()
+    // [FIX 2026-08-21 legend 首渲落灰] 与增量路径 buildColorMapFromNodes 同规则的回退色:
+    //   当 groupColorMap / nodeColorMappings / node.color 全缺色时(首页渲染即走 renderAnnotationOverlay,
+    //   未触发 updateColorsOnly), 按 colorGroupBy 分组用默认调色板按位置索引分色, 而非固定 #e0e0e0.
+    //   保证首渲图例与增量/主仓一致彩色. customColors 与 colorScheme 都取自 diagramData.
+    const customColors = diagramData.customColors || {}
+    const schemeColors = COLOR_SCHEMES[diagramData.colorScheme || 'default'] || COLOR_SCHEMES.default
+    let groupIdx = 0
+    const fallbackColorByGroup = new Map()
     let hasCenterNodes = false
 
     nodes.forEach(node => {
@@ -544,6 +553,11 @@ export function useSvgProcessor(options) {
       }
 
       if (!colorMap.has(groupKey)) {
+        // [FIX 2026-08-21] 预登记回退色: 与 buildColorMapByIndex 同规则(位置索引 + 自定义色优先)
+        if (!fallbackColorByGroup.has(groupKey)) {
+          fallbackColorByGroup.set(groupKey, customColors[groupKey] || schemeColors[groupIdx % schemeColors.length])
+          groupIdx += 1
+        }
         let color = null
         // [FOLD 2026-08-09] 优先用增量路径传入的 groupColorMap (与折叠/展开节点取色同源).
         //   折叠视图 nodeColorMappings 为空时, 若不传 groupColorMap, 回退 node.color 是
@@ -558,7 +572,7 @@ export function useSvgProcessor(options) {
           }
         }
         if (!color) {
-          color = node.color || '#e0e0e0'
+          color = fallbackColorByGroup.get(groupKey) || node.color || '#e0e0e0'
         }
 
         colorMap.set(groupKey, color)

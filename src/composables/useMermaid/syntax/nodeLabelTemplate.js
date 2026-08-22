@@ -11,15 +11,7 @@
  * - 所有返回值中的 `\\n` 是"反斜杠 n"两个字面字符（Mermaid 节点标签的换行转义），
  *   不是真实换行符。调用方直接拼进 mermaid `["..."]` 内即可。
  * - BO 叶子节点统一为「名称\n编码」两行显示（2026-08-11 决策，与 groupedLayout 主流一致）。
- *
- * [2026-08-21 图表专项移植] 转义统一为 release 原生 #XX; 方案：
- *   escapeMermaidLabelText / 依赖它的 collapseFormatMarker / businessObjectLabel
- *   全部委托给 release 基底的 sanitizeMermaidLabel（_shared/arrowHelper.js）。
- *   不再使用 HTML 实体（&amp; &lt; &gt; &quot;）：因为 MermaidComponent.vue 用
- *   innerHTML 注入 mermaid 代码会解码实体，导致转义失效；而 #38; #60; #62; #quot;
- *   等 mermaid 原生语法 innerHTML 不解码，视觉与注入防护均正确。
  */
-import { sanitizeMermaidLabel } from './_shared/arrowHelper.js'
 
 // 名称去尾随父路径后缀：兼容半角 () 与全角 （），仅去掉末尾单个括号组（内容不再含括号）。
 //   如 "销售（供应链云）" → "销售"。避免父分组名称出现在子容器标题。
@@ -46,8 +38,8 @@ export function getContainerMarkers(type) {
 //   - 子领域:   {供应链计划}\n子领域 SCP
 //   - 服务模块: [需求计划]\n服务模块 DP
 //   无编码或名称或无法识别类型时返回空串（调用方回退原格式）。业务对象不经过此路径。
-//   [2026-08-21] 容器标记 < > { } [ ] 是 mermaid 语法, 不能整体转义; 仅对内部 name/code 做
-//   mermaid 原生 #XX; 转义（经 escapeMermaidLabelText→sanitizeMermaidLabel）, 防业务数据注入 + 防语法破坏。
+//   [SEC 2026-08-19] 容器标记 < > { } [ ] 是 mermaid 语法, 不能整体转义; 仅对内部 name/code 做
+//   HTML 实体转义, 防业务数据注入 + 防语法破坏, 显示不变 (浏览器解码实体回原字符)。
 export function collapseFormatMarker(type, code, name) {
   if (!code || !name) return ''
   const t = String(type || '').toLowerCase().replace(/_/g, '')
@@ -59,16 +51,19 @@ export function collapseFormatMarker(type, code, name) {
   return ''
 }
 
-// [2026-08-21 图表专项移植] 对进入 mermaid 节点标签 ["..."] 的文本做原生 #XX; 转义。
-//   统一委托给 release 基底的 sanitizeMermaidLabel（_shared/arrowHelper.js），与
-//   release 其它 subgraph/node label 转义点语义完全一致。
-//   背景: 渲染用 securityLevel:'loose' + htmlLabels:true; 且 MermaidComponent.vue 用
-//   innerHTML 注入 mermaid 代码。若用 HTML 实体(&amp; &lt; &gt;)会被 innerHTML 解码回
-//   原字符→转义失效; 改用 mermaid 原生 #38; #60; #62; #quot; #apos; #91; #93; 等语法，
-//   innerHTML 不解码 → 视觉不变且阻断业务数据注入/语法破坏。
-//   注意: \n (两字符字面, mermaid 节点标签换行) 不受影响; 保留函数名以便各调用点沿用。
+// [SEC 2026-08-19] 对进入 mermaid 节点标签 ["..."] 的文本做 HTML 实体转义。
+//   背景: 渲染用 securityLevel:'loose' + htmlLabels:true, 节点标签经 foreignObject HTML 渲染。
+//   - & < > 若不转义会被当作 HTML 标签/实体解析 → 业务数据(名称/编码)可注入 DOM (XSS)
+//   - " 若不转义会提前结束 mermaid 的 ["..."] 字符串 → 非法语法
+//   改用 HTML 实体后浏览器解码显示为原字符 → 视觉不变, 且阻断注入。
+//   注意: \n (两字符字面, mermaid 节点标签换行) 不受影响; 顺序先 & 避免二次转义。
 export function escapeMermaidLabelText(value) {
-  return sanitizeMermaidLabel(value)
+  if (value == null) return value
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 // BO 叶子节点标签：统一「名称\n编码」两行显示。
@@ -80,7 +75,7 @@ export function businessObjectLabel(node, opts = {}) {
   const separator = opts.separator !== undefined ? opts.separator : '\\n'
   const code = node.code || node.nodeCode
   if (!name) return ''
-  // [2026-08-21] 名称/编码进入 ["..."] 前做 mermaid 原生 #XX; 转义（经 escapeMermaidLabelText→sanitizeMermaidLabel），防 XSS + 防语法破坏
+  // [SEC 2026-08-19] 名称/编码进入 ["..."] 前做 HTML 实体转义, 防 XSS + 防语法破坏
   const safeName = escapeMermaidLabelText(name)
   if (!code) return `${centerMark}${safeName}`
   return `${centerMark}${safeName}${separator}${escapeMermaidLabelText(code)}`

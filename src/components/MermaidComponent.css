@@ -144,7 +144,8 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: #F0F0F0;
+  /* 画布背景: 白色 (用户偏好, 与 mermaid-container/wrapper/content 多层透明背景一致显示为白) */
+  background-color: #FFFFFF;
   border-radius: 8px;
   box-sizing: border-box;
   z-index: 2;
@@ -183,6 +184,152 @@
   box-sizing: border-box;
 }
 
+/* [UX 2026-08-05] 渲染期隐藏未完成 SVG (元素堆叠在中心), 渲染完成后淡入 */
+.mermaid-content.is-rendering svg {
+  opacity: 0 !important;
+}
+/* [FOLD-OVERLAP 2026-08-12] 折叠渲染期同样隐藏新 SVG (与 is-rendering 同等效果),
+   但不触发 loading 遮罩. 根因: 折叠渲染跳过遮罩后, 新 SVG 在 mermaid.run() 布局完成前
+   全部堆叠在中心且完全可见, 用户透过缓冲层看到底层元素重叠. */
+.mermaid-content.is-fold-rendering svg {
+  opacity: 0 !important;
+}
+.mermaid-content svg {
+  transition: opacity 0.3s ease;
+}
+
+/* [UX 2026-08-05] 渲染覆盖层: 转圈 + "图表渲染中...", 遮盖未完成 SVG */
+.mermaid-rendering-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  color: #909399;
+  font-size: 14px;
+  background-color: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+}
+.rendering-fade-enter-active,
+.rendering-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.rendering-fade-enter-from,
+.rendering-fade-leave-to {
+  opacity: 0;
+}
+
+/* [A1 2026-08-10] 折叠缓冲层: 折叠/展开渲染期间克隆的旧图占位.
+   与 mermaid-rendering-overlay 同层定位 (absolute, 覆盖内容区), 但不显示转圈,
+   用于"不闪整屏 loading + 新图就绪后交叉淡出"的平滑过渡. */
+.mermaid-fold-buffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  z-index: 2; /* 内容之上, overlay 之下 */
+  pointer-events: none;
+  user-select: none;
+  background-color: transparent;
+  transition: opacity 0.3s ease;
+}
+.mermaid-fold-buffer svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+.mermaid-fold-buffer--leaving {
+  opacity: 0 !important;
+}
+
+/* [UX 2026-08-13] 折叠/展开渲染的轻量等待反馈: 延迟 500ms 显示的右上角小指示器.
+   不遮罩整图 (旧图缓冲层持续可见), 长耗时渲染时给用户"正在渲染"信号, 避免误以为没点上. */
+.mermaid-fold-loading {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background-color: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e7ed;
+  border-radius: 16px;
+  color: #606266;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+}
+.mermaid-fold-loading-icon {
+  animation: mermaid-loading-spin 1s linear infinite;
+}
+.mermaid-fold-loading-text {
+  white-space: nowrap;
+}
+.fold-loading-fade-enter-active,
+.fold-loading-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fold-loading-fade-enter-from,
+.fold-loading-fade-leave-to {
+  opacity: 0;
+}
+
+/* 动态转圈: 强制旋转动画 (不依赖 Element Plus 的 is-loading) */
+.mermaid-loading-icon {
+  animation: mermaid-loading-spin 1s linear infinite;
+}
+@keyframes mermaid-loading-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 循环递增的 loading dots: 三个圆点依次亮起/放大, 循环往复 */
+.mermaid-loading-text {
+  display: inline-flex;
+  align-items: baseline;
+}
+.mermaid-loading-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 3px;
+}
+.mermaid-loading-dots i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #909399;
+  animation: mermaid-dot-bounce 1.2s infinite ease-in-out;
+}
+.mermaid-loading-dots i:nth-child(1) { animation-delay: 0s; }
+.mermaid-loading-dots i:nth-child(2) { animation-delay: 0.2s; }
+.mermaid-loading-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes mermaid-dot-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.4);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 .mermaid-content pre.mermaid {
   margin: 0 !important;
   padding: 0 !important;  /* 移除 padding，让 SVG 完全按 viewBox 缩放 */
@@ -218,9 +365,10 @@
      （两个 cluster 之间的空隙）显示为白色小块，跟 draggable 灰色背景不一致 */
   background: transparent !important;
   box-sizing: border-box;
-  /* 关键修复 v5：xMidYMid slice 让 SVG fill 容器（裁切超出）
-     viewBox 比例 ≠ 容器比例时不会出现 letterbox 留白 */
-  preserveAspectRatio: xMidYMid slice;
+  /* [FIX 2026-08-03] preserveAspectRatio: slice -> meet
+     原 v5 用 slice (fill 容器裁切超出), 对窄高 viewBox + 宽扁容器会按宽度缩放
+     → 上下严重裁剪 → SM/BO 图初始偏大. meet 按比例完整显示, 不裁剪. */
+  preserveAspectRatio: xMidYMid meet;
   /* viewBox 保持原样，浏览器自动按比例缩放 */
 }
 
@@ -630,6 +778,18 @@
   dominant-baseline: middle !important;
 }
 
+/* [TITLE 2026-08-09] 折叠聚合节点 (COLLAPSE_*) 文字放大 50% (mermaid 默认 16px → 24px).
+   折叠节点(领域/子领域/服务模块聚合)为 g.node 且 id 以 flowchart-COLLAPSE_ 开头;
+   业务对象节点(非 COLLAPSE)不受影响, 保持原字号. 注意: 本文件为普通 CSS(非 scoped),
+   不能用 :deep(), 直接写普通后代选择器. */
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel p,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel span,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel div {
+  font-size: 24px !important;
+  line-height: 1.3 !important;
+}
+
 .mermaid-content.businessObject :deep(.node .label) {
   text-align: center !important;
 }
@@ -683,6 +843,177 @@
 .mermaid-content.serviceModule :deep(.subgraphLabel text) {
   font-size: 24px !important;
   font-style: italic !important;
+}
+
+/* [CTX 2026-08-07] 右键上下文菜单 */
+.mermaid-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
+.mermaid-ctx-menu .ctx-menu-header {
+  padding: 6px 12px;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.mermaid-ctx-menu .ctx-menu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 2px 0;
+}
+.mermaid-ctx-menu .ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: #333;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-item:hover {
+  background: #f0f5ff;
+  color: #1a73e8;
+}
+/* [CTX-COLOR 2026-08-11] 颜色设置子菜单项样式: 小标题 / 当前值勾选 / 返回 / 子菜单箭头 */
+.mermaid-ctx-menu .ctx-menu-header-sm {
+  padding: 6px 16px 2px;
+  color: #b0b0b0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-check {
+  flex: 0 0 14px;
+  color: #1a73e8;
+  font-size: 13px;
+  font-weight: bold;
+}
+.mermaid-ctx-menu .ctx-menu-check-placeholder {
+  flex: 0 0 14px;
+}
+.mermaid-ctx-menu .ctx-menu-label {
+  flex: 1;
+}
+.mermaid-ctx-menu .ctx-menu-submenu-arrow {
+  color: #bbb;
+  font-size: 16px;
+  line-height: 1;
+}
+.mermaid-ctx-menu .ctx-menu-item--back {
+  color: #1a73e8;
+}
+.mermaid-ctx-menu .ctx-menu-item--submenu {
+  font-weight: 500;
+}
+/* [UX 2026-08-11] 悬停展开的子菜单面板: 独立滑出面板, 与父菜单同级浮层 */
+.mermaid-ctx-menu .ctx-submenu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 160px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* [DBG 2026-08-08] 浮动调试面板 */
+.mermaid-debug-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9998;
+  width: 240px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  font-size: 13px;
+  user-select: none;
+  overflow: hidden;
+}
+.mermaid-debug-panel .debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #1a73e8;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mermaid-debug-panel .debug-panel-close {
+  cursor: pointer;
+  opacity: 0.8;
+  font-size: 14px;
+  line-height: 1;
+}
+.mermaid-debug-panel .debug-panel-close:hover {
+  opacity: 1;
+}
+.mermaid-debug-panel .debug-panel-body {
+  padding: 8px;
+}
+.mermaid-debug-panel .debug-section {
+  margin-bottom: 8px;
+}
+.mermaid-debug-panel .debug-section-title {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+.mermaid-debug-panel .debug-btn {
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 2px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #f8f8f8;
+  cursor: pointer;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.mermaid-debug-panel .debug-btn:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+.mermaid-debug-panel .debug-panel-hint {
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  padding-top: 4px;
+  border-top: 1px solid #f0f0f0;
+  margin-top: 4px;
+}
+
+/* 调试面板按钮样式 */
+.toolbar-btn--debug {
+  color: #8e8cd8 !important;
+  border-color: #8e8cd8 !important;
+}
+.toolbar-btn--debug:hover {
+  background: #8e8cd8 !important;
+  color: #fff !important;
 }
 
 .mermaid-content.serviceModule :deep(.cluster-label),

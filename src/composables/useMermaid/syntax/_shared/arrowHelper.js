@@ -57,73 +57,16 @@ export function getArrowSyntax(sourceId, targetId, label, link) {
  * - | → /
  * - 换行 → 空格
  * - " → '
- * - [V007.58] < > & → mermaid #XX; 语法 (防 innerHTML 解码)
- *   背景: MermaidComponent.vue 用 innerHTML 注入 mermaid 代码,
- *     V007.55 用 HTML 实体 (&amp; &lt; &gt;) 但 innerHTML 会解码回原字符,
- *     导致转义无效. 改用 mermaid 原生 #60; #62; #38; 语法, innerHTML 不解码.
- *     Playwright 测试 28/28 PASS 验证: innerHTML + #60; → textContent 保持 #60;
  * - 前后空白 trim
- *
- * [V007.48 P0] 保留向后兼容:
- *   - BO link label (-->"text"|) 用 sanitizeLabel
- *   - subgraph/node label 用 sanitizeMermaidLabel (新) - 转义更严
- *     因为 link label 在 mermaid 11.13 是单引号字符串, 允许 ", ', |
- *     但 subgraph["text"] 内部 text 用 #quot; 转义 ", <br/> 转 换行
  */
 export function sanitizeLabel(label) {
   if (!label) return ''
   const raw = String(label).trim()
   if (!raw) return ''
   return raw
-    .replace(/&/g, '#38;')            // [V007.58] & → mermaid 语法 (innerHTML 不解码)
-    .replace(/</g, '#60;')            // [V007.58] < → mermaid 语法 (innerHTML 不解码)
-    .replace(/>/g, '#62;')            // [V007.58] > → mermaid 语法 (innerHTML 不解码)
-    .replace(/\|/g, '/')              // | → / (link label 不能含 |)
-    .replace(/[\r\n]+/g, ' ')         // 换行 → 空格
-    .replace(/"/g, "'")               // " → '
-    .trim()
-}
-
-/**
- * mermaid subgraph/node label 严格转义
- * - " → #quot; (mermaid 11.13 官方转义)
- * - ' → #apos;
- * - 换行 → <br/> (mermaid 标准换行符)
- * - 反斜杠 → #92; (避免转义冲突)
- * - 方括号 [ ] ( ) { }: mermaid 11.13 在 [...] 内部需要转义
- *
- * [V007.58] 2026-07-09 修复: HTML 实体 → mermaid #XX; 语法
- *   背景: MermaidComponent.vue 用 innerHTML 注入 mermaid 代码:
- *     container.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
- *   V007.54 用 HTML 实体 (&amp; &lt; &gt;), 但 innerHTML 会解码回原字符,
- *   导致转义完全无效. 改用 mermaid 原生 #38; #60; #62; 语法, innerHTML 不解码.
- *   Playwright 测试 28/28 PASS 验证.
- *
- * - 前后空白 trim
- *
- * 使用场景:
- *   subgraph G_xxx["label"]
- *   node_id["label"]
- *   都不允许 label 直接含 " ' 反斜杠
- */
-export function sanitizeMermaidLabel(label) {
-  if (label === null || label === undefined) return ''
-  const raw = String(label)
-  if (!raw) return ''
-  return raw
-    .replace(/&/g, '#38;')            // [V007.58] & → mermaid 语法 (innerHTML 不解码)
-    .replace(/</g, '#60;')            // [V007.58] < → mermaid 语法 (innerHTML 不解码)
-    .replace(/>/g, '#62;')            // [V007.58] > → mermaid 语法 (innerHTML 不解码)
-    .replace(/\\/g, '#92;')           // 反斜杠
-    .replace(/"/g, '#quot;')          // 双引号 (mermaid 11.13 官方)
-    .replace(/'/g, '#apos;')          // 单引号
-    .replace(/[\r\n]+/g, '<br/>')    // 换行
-    .replace(/\[/g, '#91;')           // 方括号 [
-    .replace(/\]/g, '#93;')           // 方括号 ]
-    .replace(/\{/g, '#123;')          // 大括号 {
-    .replace(/\}/g, '#125;')          // 大括号 }
-    .replace(/\(/g, '#40;')           // 小括号 (
-    .replace(/\)/g, '#41;')           // 小括号 )
+    .replace(/\|/g, '/')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/"/g, "'")
     .trim()
 }
 
