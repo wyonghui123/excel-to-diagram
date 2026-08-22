@@ -271,6 +271,33 @@ describe('useSvgProcessor - buildColorLegendData 整组都在对象范围不单�
     expect(legend.some(i => i.isSection)).toBe(false)
     expect(legend.some(i => i.name === '对象范围')).toBe(false)
   })
+
+  // [LEGEND-COLOR 2026-08-22] 首渲缺色回退：groupColorMap / nodeColorMappings / node.color
+  //   全缺时按 colorGroupBy 用默认调色板 + 位置索引分色，不再固定 #e0e0e0 全灰。
+  it('首渲无任何颜色源时, 分组用默认调色板按位置索引分色而非灰色', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'domain',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      // 无 colorScheme → 默认调色板; nodes 无 color 字段; 传空 nodeColorMappings / groupColorMap
+      nodes: [
+        { code: 'A1', name: 'A1', serviceModuleName: 'M1', subDomain: 'S1', domain: '计划' },
+        { code: 'B1', name: 'B1', serviceModuleName: 'M2', subDomain: 'S2', domain: '采购' },
+        { code: 'C1', name: 'C1', serviceModuleName: 'M3', subDomain: 'S3', domain: '制造' }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], false, null, new Map())
+    const groups = legend.filter(i => !i.isCenter && !i.isSection && i.name)
+    expect(groups).toHaveLength(3)
+    // 三个分组应获得三个不同的调色板色（默认方案 '#1890FF' / '#52C41A' / '#FAAD14'），而非灰色
+    const colors = groups.map(g => g.color)
+    expect(groups[0].color).toBe('#1890FF')
+    expect(groups[1].color).toBe('#52C41A')
+    expect(groups[2].color).toBe('#FAAD14')
+    expect(new Set(colors).size).toBe(3)
+    expect(colors).not.toContain('#e0e0e0')
+  })
 })
 
 describe('useSvgProcessor - addNodeCodeAttributes 同名前缀 BO 编码匹配 (2026-08-09)', () => {

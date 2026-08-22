@@ -6,6 +6,7 @@ import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
 import { useDiagnostics } from '../core/useDiagnostics.js'
 import { getLiftedParentPathMap } from '../layouts/groupedLayout.js'
 import { isFeatureEnabled } from '@/utils/featureFlags.js'
+import { COLOR_SCHEMES } from '@/constants/diagram'
 
 /**
  * SVG 后处理逻辑
@@ -524,6 +525,12 @@ export function useSvgProcessor(options) {
     const groupCenterNodes = new Map()
     const colorMap = new Map()
     let hasCenterNodes = false
+    // [LEGEND-COLOR 2026-08-22] 首渲默认调色板回退：当 groupColorMap / nodeColorMappings /
+    //   node.color 全缺色时，按 colorGroupBy 分组用默认调色板 + 位置索引分色，而非固定 #e0e0e0 全灰。
+    //   位置索引 = 分组键首次出现的顺序（图例行展示顺序），保证每组一个稳定调色板色。
+    //   与 useMermaidColors.buildColorMapByIndex / useGroupDisplay.hashColor 的默认着色口径一致。
+    const legendPalette = COLOR_SCHEMES[diagramData?.colorScheme] || COLOR_SCHEMES.default
+    let paletteIdx = 0
 
     nodes.forEach(node => {
       let groupKey = null
@@ -558,9 +565,11 @@ export function useSvgProcessor(options) {
           }
         }
         if (!color) {
-          color = node.color || '#e0e0e0'
+          // [LEGEND-COLOR 2026-08-22] 缺色回退：优先 node.color（有效分组色），否则默认调色板按位置索引分色。
+          color = node.color || legendPalette[paletteIdx % legendPalette.length]
         }
 
+        paletteIdx += 1
         colorMap.set(groupKey, color)
       }
     })
