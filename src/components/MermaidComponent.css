@@ -761,3 +761,95 @@
   fill-opacity: 0 !important;
   stroke: none !important;
 }
+
+/* ============================================================
+   [CTX 2026-08-07] 右键上下文菜单 —— [FIX 2026-08-22] 缺失样式从 feat/worktree 补回
+   merge 时丢失该块, 导致 .mermaid-ctx-menu position:static、被容器 overflow 裁剪、
+   被图例面板盖住, 右键菜单"弹出但看不见". 见 probe_menu_vis.py 诊断.
+   ============================================================ */
+.mermaid-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
+.mermaid-ctx-menu .ctx-menu-header {
+  padding: 6px 12px;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.mermaid-ctx-menu .ctx-menu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 2px 0;
+}
+.mermaid-ctx-menu .ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: #333;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-item:hover {
+  background: #f0f5ff;
+  color: #1a73e8;
+}
+/* [CTX-COLOR 2026-08-11] 颜色设置子菜单项样式: 小标题 / 当前值勾选 / 返回 / 子菜单箭头 */
+.mermaid-ctx-menu .ctx-menu-header-sm {
+  padding: 6px 16px 2px;
+  color: #b0b0b0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-check {
+  flex: 0 0 14px;
+  color: #1a73e8;
+  font-size: 13px;
+  font-weight: bold;
+}
+.mermaid-ctx-menu .ctx-menu-check-placeholder {
+  flex: 0 0 14px;
+}
+.mermaid-ctx-menu .ctx-menu-label {
+  flex: 1;
+}
+.mermaid-ctx-menu .ctx-menu-submenu-arrow {
+  color: #bbb;
+  font-size: 16px;
+  line-height: 1;
+}
+.mermaid-ctx-menu .ctx-menu-item--back {
+  color: #1a73e8;
+}
+.mermaid-ctx-menu .ctx-menu-item--submenu {
+  font-weight: 500;
+}
+/* [UX 2026-08-11] 悬停展开的子菜单面板: 独立滑出面板, 与父菜单同级浮层 */
+.mermaid-ctx-menu .ctx-submenu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 160px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
