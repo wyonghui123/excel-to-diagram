@@ -65,14 +65,24 @@
             <!-- [FIX 2026-07-30] chart 视图下隐藏 tabs/list，只显示 detailContent slot -->
             <template v-if="viewMode === 'list'">
               <div class="momp-tabs-row">
-                <el-tabs v-if="page.tabs && page.tabs.length" v-model="page.activeTab" class="momp-tabs" @tab-change="$emit('tabChange', $event)">
-                  <el-tab-pane
-                    v-for="tab in page.tabs"
+                <!-- [FIX 2026-08-21] 弃用 <el-tabs>: Element Plus 2.14 在 el-tab-pane v-for 随
+                     objectTypes 动态重建 / 父级 v-if 整块移除时, pane beforeUnmount 的
+                     parentNode 已为 null → useOrderedChildren.removeChild 读 undefined.indexOf 崩溃
+                     ("Cannot read properties of undefined (reading 'indexOf')" at unregisterPane).
+                     本页 tabs 仅作标签导航(label + 切换 activeTab), 内容在下方 v-for+v-show 的
+                     MetaListPage, 不依赖 EP tabs 的 pane 注入 → 改按钮式 nav 彻底规避 EP 缺陷. -->
+                <div v-if="tabsForNav.length" class="momp-tabs momp-tabs--simple" role="tablist">
+                  <button
+                    v-for="tab in tabsForNav"
                     :key="tab?.name"
-                    :label="tab?.label"
-                    :name="tab?.name"
-                  />
-                </el-tabs>
+                    type="button"
+                    class="momp-tab-btn"
+                    :class="{ 'is-active': page.activeTab === tab?.name }"
+                    @click="onNavTabChange(tab?.name)"
+                  >
+                    {{ tab?.label }}
+                  </button>
+                </div>
                 <slot name="tabsExtra" :context="tabsExtraContext" />
               </div>
 
@@ -824,6 +834,16 @@ function onGlobalAction(action) {
   }
 }
 
+// [FIX 2026-08-21] 按钮式 nav 的 tab 列表: 与 page.tabs 同源（name/label），避免依赖 el-tabs/pane 注入
+const tabsForNav = computed(() => (page.tabs || []).map(tab => ({ name: tab?.name, label: tab?.label })))
+
+// [FIX 2026-08-21] 弃用 el-tabs 后改为手动切换 activeTab + 保持原 tab-change 语义
+function onNavTabChange(name) {
+  if (page.activeTab === name) return
+  page.activeTab = name
+  emit('tabChange', name)
+}
+
 const tabsExtraContext = computed(() => {
   const tree = scopeTreeRef.value
   const objectCount = tree?.selectedBoCount ?? 0
@@ -994,6 +1014,35 @@ watch(() => page.combinedFilters, (newFilters) => {
 .momp-tabs {
   flex: 1;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0 var(--spacing-sm);
+  height: 40px;
+  overflow-x: auto;
+}
+
+/* [FIX 2026-08-21] 按钮式 nav tab (替代 el-tabs, 规避 EP unregisterPane parentNode=null 崩溃) */
+.momp-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.momp-tab-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.momp-tab-btn.is-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
 }
 
 .momp-tabs :deep(.el-tabs__header) {
