@@ -193,7 +193,8 @@ export default {
   name: 'MermaidComponent',
   components: {
     AppIcon,
-    TruthPanel
+    TruthPanel,
+    Loading
   },
   props: {
     diagramData: {
@@ -493,7 +494,7 @@ export default {
     /**
      * 关键修复 v5：全屏切换后必须重新计算画布布局
      * 否则 .mermaid-wrapper / .draggable-area 的 inline style 仍是切换前基于 600px
-     * 容器算的尺寸，mermaid-container 100vw×100vh 之后 draggle 仍占旧尺寸，
+     * 容器算的尺寸，mermaid-container 100vw * 100vh 之后 draggle 仍占旧尺寸，
      * 视口下方/右侧是 mermaid-container 的白色背景，视觉上"挡住图表"
      */
     const relayoutAfterSizeChange = () => {
