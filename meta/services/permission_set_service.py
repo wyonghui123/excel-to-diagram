@@ -13,6 +13,11 @@
 
 [SPEC] spec-permission-system-unification-2026-07-19 §4.13 / §8.13
 [FR] FR-030 (Profile 瘦化)
+
+[Plan B Task 2] 合并 role_service.py 逻辑
+    - 历史: role_service.py 已在 Plan A (commit 68e0872) 重命名/合并阶段被消除
+    - 当前: permission_set_service.py 已是单一真相源 (P13 模块)
+    - 角色(role)→权限集(permission_set) 表名重命名见 Plan A (rename_roles_to_permission_sets.py)
 """
 import logging
 from datetime import datetime
@@ -139,6 +144,10 @@ class PermissionSetService:
             logger.error(f'[P13-T1] list_all failed: {e}')
             return []
 
+    def get_all_permission_sets(self) -> List[Dict[str, Any]]:
+        """[Plan B] 别名方法, 兼容 role_service.get_all_roles() 调用方"""
+        return self.list_all()
+
     def update(self, ps_id: int, data: Dict[str, Any]) -> bool:
         """[P13-T1] 更新 Permission Set
 
@@ -254,9 +263,9 @@ class PermissionSetService:
 
         流程:
           1. 创建新 Permission Set (code=set_code, name=set_name)
-          2. 查询角色所有权限 (role_permissions JOIN permissions)
+          2. 查询角色所有权限 (从 permission_set_permissions JOIN permissions)
           3. 把权限复制到 permission_set_permissions
-          4. (可选) 关联到角色对应的所有用户 (通过 user_roles 表, 若存在)
+          4. (可选) 关联到角色对应的所有用户
 
         Args:
             role_id: 角色 ID
@@ -276,11 +285,12 @@ class PermissionSetService:
             if ps_id is None:
                 return None
 
-            # 2. 查询角色权限
+            # 2. 查询角色权限 (注: 表已重命名为 permission_set_*)
+            # role_permissions 已重命名为 permission_set_permissions
             cursor = self._ds.execute(
                 """SELECT p.code FROM permissions p
-                   JOIN role_permissions rp ON rp.permission_id = p.id
-                   WHERE rp.role_id = ?""",
+                   JOIN permission_set_permissions psp ON psp.permission_id = p.id
+                   WHERE psp.permission_set_id = ?""",
                 [role_id]
             )
             rows = cursor.fetchall()
@@ -288,16 +298,16 @@ class PermissionSetService:
             for row in rows:
                 perm_code = row[0] if isinstance(row, (tuple, list)) else row['code']
                 self._ds.execute(
-                    """INSERT INTO permission_set_permissions
+                    """INSERT OR IGNORE INTO permission_set_permissions
                        (permission_set_id, permission_code, created_at)
                        VALUES (?, ?, ?)""",
                     [ps_id, perm_code, now]
                 )
 
-            # 3. 关联到角色对应的所有用户 (若有 user_roles 表)
+            # 3. 关联到角色对应的所有用户
             try:
                 cursor = self._ds.execute(
-                    "SELECT user_id FROM user_roles WHERE role_id = ?",
+                    "SELECT user_id FROM user_permission_sets WHERE permission_set_id = ?",
                     [role_id]
                 )
                 user_rows = cursor.fetchall()
@@ -305,7 +315,6 @@ class PermissionSetService:
                     uid = urow[0] if isinstance(urow, (tuple, list)) else urow['user_id']
                     self.assign_to_user(uid, ps_id)
             except Exception:
-                # user_roles 表可能不存在, 跳过
                 pass
 
             logger.info(
@@ -318,18 +327,7 @@ class PermissionSetService:
             return None
 
     def user_has_permission_via_set(self, user_id: int, permission: str) -> bool:
-        """[P13-T3] 通过 Permission Set 检查用户是否有指定权限
-
-        用于验证迁移一致性: 迁移后 user_has_permission_via_set(user_id, perm)
-        应与迁移前 user_has_permission_via_role(user_id, perm) 结果一致.
-
-        Args:
-            user_id: 用户 ID
-            permission: 权限 code (如 'product.read')
-
-        Returns:
-            bool: True 表示用户通过 Permission Set 拥有该权限
-        """
+        """[P13-T3] 通过 Permission Set 检查用户是否有指定权限"""
         try:
             cursor = self._ds.execute(
                 """SELECT COUNT(*) FROM permission_set_permissions psp
