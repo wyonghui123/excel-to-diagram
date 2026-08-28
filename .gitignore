@@ -232,3 +232,102 @@ meta/architecture.db.bak.*
 # 匹配 ASCII 字符 + 3 字节 mojibake 序列
 "*[0xef][0xbf][0xbd]*"
 
+# ===== v2026.08.28: 二次 git 检查遗漏后清理 =====
+# 临时诊断探针 / 截图 / 缓存 (除 lessons-learned 文档硬链接保留的 2 个)
+# 探针 _probe_real_repro.py 和 _probe_save_full.py 已被 commit (7511f1e)，
+# 用否定规则显式保留避免被下面的通配符误伤
+!/test_helpers/_probe_real_repro.py
+!/test_helpers/_probe_save_full.py
+
+# 一次性探针脚本 (下划线开头)
+test_helpers/_*.py
+test_helpers/_*.txt
+test_helpers/_*.json
+test_helpers/_*.png
+test_helpers/_*.js
+
+# 截图 / 缓存 / 输出目录
+test_helpers/_shot_*.png
+test_helpers/_capture_*.png
+test_helpers/_v*.png
+test_helpers/.cache_*.json
+test_helpers/out/
+test_helpers/scripts/
+test_helpers/cj.txt
+
+# 探针辅助文件
+test_helpers/diag_*.py
+test_helpers/fix_*.png
+test_helpers/occlude_*.png
+test_helpers/probe_*.js
+test_helpers/probe_*.txt
+test_helpers/probe_*.json
+test_helpers/shots_*.png
+test_helpers/verify_*.py
+test_helpers/verify_staging_*.py
+test_helpers/test_output/
+
+# 部署产物 (manifest_utils 生成的 delta 包)
+deploy-v*.zip
+
+# 调试残留 (日常开发产生, 不入仓)
+cookies_*.txt
+chip_debug_*.png
+original_dialog
+watchdog.err
+watchdog.out
+
+# 临时脚本 (root 调试 / 多版本探针)
+test_dimension_scope.py
+test_v19_picker_multi.py
+test_rename_out.txt
+verify_*.py
+verify_filter.py
+
+# 测试数据 (业务上传/导出)
+products_*.json
+
+# 性能分析 dump
+tmp_pyspy/
+
+# Engine 运行时生成的 yaml 漂移基线报告 (启动时自动重新生成)
+meta/services/loaded_schema_report.json
+
+# 中文业务文件 (影响范围 / 影響範圍 xlsx 等, 不应入仓)
+# 文件名包含乱码中文 (UTF-16 LE 在 git 输出是 octal escape)
+# 用通配符匹配任意非 ASCII 中文 + _YYYY-MM-DD.xlsx
+?*_2026-??-??.xlsx
+
+# v35/v37 重构一次性脚本 (已执行过, 留工作树供追溯, 不入仓)
+.scripts/
+
+# Root 调试截图 (dialog_v* / full_page_v* / matrix_v* / picker_v* / source_chip_v*)
+dialog_v*.png
+full_page_v*.png
+full_page_debug*.png
+matrix_v*.png
+picker_*.png
+source_chip_v*.png
+repro_link_code_fail.png
+
+# Root 调试脚本 / 输出 (dump_menus_tree / probe_*/restart_out 等)
+dump_menus_tree.py
+dump_output.txt
+kill_flask.ps1
+restart_3011.py
+restart_out.txt
+original_dialog
+original_dialog.vue
+probe_*_out.txt
+probe_layout_out.txt
+probe_diag_rel_out.txt
+probe_visual2_out.txt
+probe_rename_out.txt
+probe_out.txt
+
+# Root 环境变量 (.env.*.local 已忽略, 这里覆盖不带 local 后缀的)
+.env.development
+
+# Playwright 测试日志 (注意是 hyphen 不是下划线)
+test-results/
+
