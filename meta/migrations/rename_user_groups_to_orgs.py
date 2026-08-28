@@ -87,6 +87,7 @@ def _classify_org_type(conn: sqlite3.Connection) -> None:
 
 def _guess_org_type(code: str, name: str) -> str:
     text = f'{code or ""} {name or ""}'.lower()
+    # personal 必须最先判断 (含"组"字的个人组)
     if code and code.startswith('personal_group_user_'):
         return 'personal'
     if any(kw in text for kw in ['部门', '部', '处', '科']):
