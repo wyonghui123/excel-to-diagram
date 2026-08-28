@@ -262,7 +262,7 @@ class OrgService:
             """SELECT gr.id, gr.permission_set_id, r.code, r.name, r.description, r.priority, r.is_system,
                       gr.created_at
                FROM org_permission_sets gr
-               INNER JOIN roles r ON gr.permission_set_id = r.id
+               INNER JOIN permission_sets r ON gr.permission_set_id = r.id
                WHERE gr.org_id = ?
                ORDER BY r.priority DESC, r.name""",
             [org_id]
