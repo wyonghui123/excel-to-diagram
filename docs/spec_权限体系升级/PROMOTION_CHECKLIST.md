@@ -18,7 +18,7 @@
 | 2 | `meta/core/interceptors/write_scope_interceptor.py` | 49 | 适配新结构 |
 | 3 | `meta/api/bo_api.py` | - | (适配) |
 | 4 | `meta/api/manage_api.py` | - | (适配) |
-| 5 | `meta/api/management_dimension_api.py` | - | (适配) |
+| 5 | `meta/api/permission_dimension_api.py` | - | (适配) |
 | 6 | `meta/api/special_routes_api.py` | - | (适配) |
 | 7 | `meta/api/diagnostics_api.py` | 27 | FR-006/008 |
 | 8 | `meta/api/role_dimension_scope_api.py` | 37 | FR-005/007/009/010 |
@@ -73,7 +73,7 @@ git add \
   meta/core/interceptors/write_scope_interceptor.py \
   meta/api/bo_api.py \
   meta/api/manage_api.py \
-  meta/api/management_dimension_api.py \
+  meta/api/permission_dimension_api.py \
   meta/api/special_routes_api.py \
   meta/api/diagnostics_api.py \
   meta/api/role_dimension_scope_api.py \

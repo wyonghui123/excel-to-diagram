@@ -253,15 +253,15 @@ SELECT * FROM role_dimension_scope WHERE role_id = 111;
 ### 3.2 配置 UI 0 变化
 
 - `/permission/dimension-config` 页面继续可用
-- 维度下拉框从 `management_dimension` 元数据表读
-- 维度链 (product→version→domain→sub_domain) 从 `management_dimension.yaml` 读
+- 维度下拉框从 `permission_dimension` 元数据表读
+- 维度链 (product→version→domain→sub_domain) 从 `permission_dimension.yaml` 读
 - **所有现有 role 的配置继续工作**
 
 ### 3.3 后端实现变化（仅运维人员感知）
 
 | 变化 | 谁感知 |
 |------|--------|
-| HIERARCHY_CHAIN 从硬编码 → `management_dimension.yaml` | **开发** (无业务影响) |
+| HIERARCHY_CHAIN 从硬编码 → `permission_dimension.yaml` | **开发** (无业务影响) |
 | `DimensionScopeEngine` 改读 YAML 而非 Python 常量 | **开发** |
 | `data_permission_dimensions` 字段从 `dimension_object_mapping.yaml` 移到 BO.yaml | **开发** (业务可读性 ↑) |
 | 3 套拦截器 → 1 个 PermissionResolver | **开发** |
@@ -322,7 +322,7 @@ field_permissions:
 ```
 
 ```yaml
-# management_dimension.yaml  (维度元数据, 可扩展)
+# permission_dimension.yaml  (维度元数据, 可扩展)
 dimensions:
   - code: product
     name: 产品
@@ -376,7 +376,7 @@ def resolve(user, action, bo, record):
 - **数据库数据完全不变** (`role_dimension_scope` 数据继续有效)
 - **管理维度本身就是数据权限的"配置载体"** —— 不是"映射成"数据权限，**它就是**数据权限的"WHERE 值"输入
 - **后端实现更优雅** (YAML 驱动, 拦截器统一, 无硬编码)
-- **可扩展性提升** (新增维度 = 新增 1 个 management_dimension.yaml entry, 0 代码改动)
+- **可扩展性提升** (新增维度 = 新增 1 个 permission_dimension.yaml entry, 0 代码改动)
 
 ### Q2: "数据 + 功能权限模型, 功能权限基于数据颗粒度, 是否合理？"
 

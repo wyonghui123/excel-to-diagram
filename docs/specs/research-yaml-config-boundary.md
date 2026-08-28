@@ -1568,7 +1568,7 @@ YAML 可以声明式地表达结构，但无法表达**动态行为契约**（�
 | 13 | filter_variant.yaml | filter_variant | — |
 | 14 | group_data_permission.yaml | group_data_permission | — |
 | 15 | hierarchies.yaml | hierarchies | — |
-| 16 | management_dimension.yaml | management_dimension | — |
+| 16 | permission_dimension.yaml | permission_dimension | — |
 | 17 | menu.yaml | menu | configuration |
 | 18 | menu_permission.yaml | menu_permission | — |
 | 19 | meta_action.yaml | meta_action | — |

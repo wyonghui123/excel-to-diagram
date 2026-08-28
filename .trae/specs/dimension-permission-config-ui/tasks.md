@@ -2,8 +2,8 @@
 
 ## Phase 1: 核心引擎开发 (Week 1)
 
-- [x] Task 1: 实现 ManagementDimensionEngine 核心引擎
-  - [x] SubTask 1.1: 创建 `meta/services/management_dimension_engine.py`
+- [x] Task 1: 实现 PermissionDimensionEngine 核心引擎
+  - [x] SubTask 1.1: 创建 `meta/services/permission_dimension_engine.py`
   - [x] SubTask 1.2: 实现 `_load_dimension_metadata()` - 从 hierarchies.yaml 和 permission_rule.yaml 加载维度定义
   - [x] SubTask 1.3: 实现 `get_available_dimensions()` - 获取可用管理维度列表
   - [x] SubTask 1.4: 实现 `calculate_impact()` - 计算权限影响范围（核心方法）
@@ -23,8 +23,8 @@
 
 ## Phase 2: 前端组件开发 (Week 2)
 
-- [x] Task 3: 创建 ManagementDimensionSelector 组件
-  - [x] SubTask 3.1: 创建 `src/components/common/ManagementDimensionSelector.vue`
+- [x] Task 3: 创建 PermissionDimensionSelector 组件
+  - [x] SubTask 3.1: 创建 `src/components/common/PermissionDimensionSelector.vue`
   - [x] SubTask 3.2: 实现维度列表/卡片视图切换
   - [x] SubTask 3.3: 实现维度搜索、过滤功能
   - [x] SubTask 3.4: 实现维度规则数量显示
@@ -53,7 +53,7 @@
 
 - [x] Task 6: 重构 RolePermissionCenter 组件
   - [x] SubTask 6.1: 重构为 4 区域布局
-  - [x] SubTask 6.2: 区域 1 - 管理维度选择器（集成 ManagementDimensionSelector）
+  - [x] SubTask 6.2: 区域 1 - 管理维度选择器（集成 PermissionDimensionSelector）
   - [x] SubTask 6.3: 区域 2 - 条件规则编辑器（集成 ConditionRuleEditor）
   - [x] SubTask 6.4: 区域 3 - 影响范围预览（集成 ImpactPreview）
   - [x] SubTask 6.5: 区域 4 - 已配置规则列表（表格展示）
@@ -95,7 +95,7 @@
 # Task Dependencies
 
 - Task 2 (API 端点) depends on Task 1 (核心引擎)
-- Task 3 (ManagementDimensionSelector) depends on Task 2.1 (维度列表 API)
+- Task 3 (PermissionDimensionSelector) depends on Task 2.1 (维度列表 API)
 - Task 4 (ConditionRuleEditor) depends on Task 2.2 (实例列表 API)
 - Task 5 (ImpactPreview) depends on Task 2.5 (影响计算 API)
 - Task 6 (RolePermissionCenter 重构) depends on Task 3, Task 4, Task 5
@@ -106,5 +106,5 @@
 # Parallelizable Work
 
 以下任务可并行执行：
-- Task 3 (ManagementDimensionSelector), Task 4 (ConditionRuleEditor), Task 5 (ImpactPreview) 可并行开发
+- Task 3 (PermissionDimensionSelector), Task 4 (ConditionRuleEditor), Task 5 (ImpactPreview) 可并行开发
 - Task 8 (文档) 可在 Task 6 完成后并行进行

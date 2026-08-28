@@ -367,7 +367,7 @@ CREATE TABLE permission_rules (
 
 | 概念 | 数据源 | 业务感知 |
 |------|--------|---------|
-| **1. management_dimension (元数据表)** | 业务层级定义 (hierarchies.yaml) | 元数据 |
+| **1. permission_dimension (元数据表)** | 业务层级定义 (hierarchies.yaml) | 元数据 |
 | **2. role_dimension_scopes (运行时)** | UI 配置 | **真正的"管理维度配置"** |
 | **3. dimension_object_mapping (YAML)** | 维度→BO 字段映射 | 配置 |
 | **4. permission_rules (条件规则)** | UI 配置 | 条件权限 |
@@ -613,7 +613,7 @@ def resolve(user, action, bo, record) -> (bool, masked, scope_filter, reason):
 | rls.dsl | rls/dsl.py | 1-100+ |
 | rls.hot_reload | rls/hot_reload.py | - |
 | dimension_object_mapping_loader | meta/core/dimension_object_mapping_loader.py | 1-150+ |
-| management_dimension_engine | meta/services/management_dimension_engine.py | 1-500+ |
+| permission_dimension_engine | meta/services/permission_dimension_engine.py | 1-500+ |
 | condition_evaluator | meta/services/condition_evaluator.py | 1-100+ |
 
 ### 关键配置/Schema

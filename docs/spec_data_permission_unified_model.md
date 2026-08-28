@@ -145,7 +145,7 @@
 - **Acceptance Criteria**:
   - Section 1 的维度值是"predefined 公共维度"的值
   - Section 3 的"维度1"可以是任意 BO 字段
-  - 当 Section 3 选的是 management_dimension 字段时，与 Section 1 等价
+  - 当 Section 3 选的是 permission_dimension 字段时，与 Section 1 等价
   - 同一字段在两个 Section 都配时：Section 3 覆盖（更具体优先）
 - **Priority**: Should
 - **Source**: 用户洞察
@@ -685,7 +685,7 @@
 
 ### 7.3 Assumptions
 - **A1**: 同一 BO 的同一字段不会被多个维度重复绑定
-- **A2**: Section 3 选 management_dimension 字段时，与 Section 1 等价
+- **A2**: Section 3 选 permission_dimension 字段时，与 Section 1 等价
 - **A3**: 维度值 ID 跨表唯一
 - **A4**: 当前 HIERARCHY_CHAIN 中的 4 层是合理的初始结构
 - **A5**: 运行时动态展开的 3 源 JOIN 性能可接受

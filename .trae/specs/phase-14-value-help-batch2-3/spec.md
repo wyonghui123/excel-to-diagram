@@ -63,7 +63,7 @@
 | 6 | [version.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/version.yaml) | `product_id` | bo | product | dropdown | - |
 | 7 | [role.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/role.yaml) | `parent_id` (如有) | bo | role | dialog(tree) | - |
 | 8 | [relationship.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/relationship.yaml) | `target_bo_id` | bo | business_object | dropdown | - |
-| 9 | [management_dimension.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/management_dimension.yaml) | 关联字段 | bo | TBD | dropdown | - |
+| 9 | [permission_dimension.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/permission_dimension.yaml) | 关联字段 | bo | TBD | dropdown | - |
 
 ### 3.2 配置模板
 
@@ -185,11 +185,11 @@ fields:
 
 **验证**: version 管理页面 product_id 下拉正常
 
-#### M2.4: role.yaml + relationship.yaml + management_dimension.yaml（3 对象）
+#### M2.4: role.yaml + relationship.yaml + permission_dimension.yaml（3 对象）
 
 - role.yaml: 检查并配置 `parent_id` (如有)
 - relationship.yaml: 补充 `target_bo_id` value_help
-- management_dimension.yaml: 确认并配置关联字段
+- permission_dimension.yaml: 确认并配置关联字段
 
 **验证**: 3 个对象的关联字段 value_help 正常
 
@@ -314,14 +314,14 @@ async function loadTreeNode(node, resolve) {
 
 **验证**: 架构数据管理 4 个对象的表单中，关联字段显示为 ValueHelpField 下拉
 
-### M2: Batch 2 — product/version + role/relationship/management_dimension YAML
+### M2: Batch 2 — product/version + role/relationship/permission_dimension YAML
 
 **产出**:
 - `product.yaml` 新增 `owner_id` value_help 配置
 - `version.yaml` 新增 `product_id` value_help 配置
 - `role.yaml` 补充关联字段
 - `relationship.yaml` 补充 `target_bo_id`
-- `management_dimension.yaml` 补充关联字段
+- `permission_dimension.yaml` 补充关联字段
 
 **验证**: 产品/版本/角色/关系管理页面各关联字段 value_help 正常
 
@@ -363,7 +363,7 @@ async function loadTreeNode(node, resolve) {
 | `meta/schemas/version.yaml` | 修改 | + product_id value_help |
 | `meta/schemas/role.yaml` | 修改 | + parent_id value_help (如有) |
 | `meta/schemas/relationship.yaml` | 修改 | + target_bo_id value_help |
-| `meta/schemas/management_dimension.yaml` | 修改 | 关联字段 value_help |
+| `meta/schemas/permission_dimension.yaml` | 修改 | 关联字段 value_help |
 | `src/components/common/TableHeaderFilter/TableHeaderFilter.vue` | 修改 | + value_help filterType |
 | `src/composables/useMetaList.js` | 修改 | _backfillColumnFilterType 增加 value_help 识别 |
 | `src/components/common/SearchHelpDialog.vue` | 修改 | loadTreeNode 完整实现 |

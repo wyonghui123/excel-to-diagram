@@ -32,7 +32,7 @@
 ### Bug 5: `role_api.py:add_role_data_permission` 没写 audit log ✓ FIXED
 ### Bug 6: `bo_api.py:update_role_menu_permissions` (v2) 没写 audit log ✓ FIXED
 ### Bug 7: `role_menu_api.py:update_role_menu_permissions` (PFCG) 没写 audit log ✓ FIXED
-### Bug 8: `management_dimension_api.py:save_permission_rule` 没写 audit log ✓ FIXED
+### Bug 8: `permission_dimension_api.py:save_permission_rule` 没写 audit log ✓ FIXED
 ### Bug 9: `permission_rule_api.py:create_rule` 没写 audit log ✓ FIXED
 
 ## Files Modified
@@ -42,7 +42,7 @@
 3. `meta/api/role_api.py` - 调 write_permission_config_audit (Bug 4+5)
 4. `meta/api/bo_api.py` - 调 write_permission_config_audit (Bug 6)
 5. `meta/api/role_menu_api.py` - 调 write_permission_config_audit (Bug 7)
-6. `meta/api/management_dimension_api.py` - 调 write_permission_config_audit (Bug 8)
+6. `meta/api/permission_dimension_api.py` - 调 write_permission_config_audit (Bug 8)
 7. `meta/api/permission_rule_api.py` - 调 write_permission_config_audit (Bug 9)
 
 ## Verification Conclusion (修复后)

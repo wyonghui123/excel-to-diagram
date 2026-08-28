@@ -13,7 +13,7 @@
 |------|------|
 | **核心** | SearchHelpDialog 新增 `display_mode: "tree"` 模式，复用弹窗骨架，主体改为 `el-tree` |
 | **复用** | 新组件 `HierarchicalTreePicker.vue` 独立存在，**不改 `ObjectScopeSection.vue`** |
-| **数据源** | 新增后端 `GET /api/v2/bo/management_dimension/<dim>/tree` 端点 |
+| **数据源** | 新增后端 `GET /api/v2/bo/permission_dimension/<dim>/tree` 端点 |
 | **元数据** | 6 个 dimension BO YAML 顶层加 `hierarchies: [...]` 声明层级结构 |
 | **模式** | 支持**单选 / 多选**两种模式（prop `multiple` 控制） |
 | **首批范围** | product / version / domain / sub_domain（4 个层级，sub_domain 是叶子） |
@@ -88,7 +88,7 @@ src/components/common/HierarchicalTreePicker/
 └── index.js                            # 导出
 
 meta/api/
-└── management_dimension_api.py         # +新增 tree 路由 (在 _query_child_ids 后面)
+└── permission_dimension_api.py         # +新增 tree 路由 (在 _query_child_ids 后面)
 
 meta/core/
 ├── yaml_loader.py                      # +读 hierarchies 字段
@@ -141,7 +141,7 @@ meta/schemas/
 #### URL & 路由
 
 ```python
-@management_dimension_bp.route("/<dim>/tree", methods=["GET"])
+@permission_dimension_bp.route("/<dim>/tree", methods=["GET"])
 @jwt_required
 def list_dimension_tree(dim: str):
     """返回 dim 维度的层级树 (扁平数组, 每节点带 parent_id)"""
@@ -846,7 +846,7 @@ describe('HierarchicalTreePicker', () => {
 - `src/components/common/HierarchicalTreePicker/index.js`
 
 修改：
-- `meta/api/management_dimension_api.py`（+新增 tree 路由）
+- `meta/api/permission_dimension_api.py`（+新增 tree 路由）
 - `meta/core/yaml_loader.py`（+读 hierarchies 字段，如未支持）
 - `meta/schemas/product.yaml`、`version.yaml`、`domain.yaml`、`sub_domain.yaml`（+hierarchies）
 - `src/components/common/SearchHelpDialog.vue`（+tree 分支）

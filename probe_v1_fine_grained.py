@@ -119,7 +119,7 @@ v2_paths = [
     '/api/v2/bo/permission_bundle',
     '/api/v2/bo/permission_rule',
     '/api/v2/bo/data_permission',
-    '/api/v2/bo/management_dimension',
+    '/api/v2/bo/permission_dimension',
     '/api/v2/bo/filter_variant',
     '/api/v2/bo/menu_permission',
     '/api/v2/bo/identity',

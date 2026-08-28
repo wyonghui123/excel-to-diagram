@@ -271,8 +271,8 @@ def deep_insert(object_type):
 |---|------|------|
 | **后端实现** | ✅ 完整 | 45 个文件含 dimension 逻辑 |
 | **v1 端点** | ✅ 已实现 | `management-dimensions`, `dimension/{id}/instances`, `role/{id}/permission-rules` |
-| **v1 迁移** | ✅ 已做 | 410 → `/api/v2/bo/management_dimension` (sunset 2026-06-05) |
-| **v2 端点** | ❌ 不工作 | `/api/v2/bo/management_dimension` 400 (Unknown object type) |
+| **v1 迁移** | ✅ 已做 | 410 → `/api/v2/bo/permission_dimension` (sunset 2026-06-05) |
+| **v2 端点** | ❌ 不工作 | `/api/v2/bo/permission_dimension` 400 (Unknown object type) |
 | **v2 顶层** | ❌ NotFound | `/api/v2/management-dimensions` 500 |
 | **业务规则文档** | ❌ 无 | 没有 DIMENSION_RULES.md |
 
@@ -322,9 +322,9 @@ def deep_insert(object_type):
 **Step 2: 修复 v2 路由** (1-2 天)
 
 ```python
-# meta/api/management_dimension_api.py 修改 url_prefix
+# meta/api/permission_dimension_api.py 修改 url_prefix
 - url_prefix='/api/v1/management-dimensions'
-+ url_prefix='/api/v2/bo/management_dimension'
++ url_prefix='/api/v2/bo/permission_dimension'
 # 同时加 /instances 等子路径
 ```
 

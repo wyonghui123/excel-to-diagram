@@ -90,7 +90,7 @@ V1_CRUD_MIGRATION = {
     'permission-bundles': 'permission_bundle',
     'permission-rules': 'permission_rule',
     'data-permissions': 'data_permission',
-    'management-dimensions': 'management_dimension',
+    'management-dimensions': 'permission_dimension',
     'filter-variants': 'filter_variant',
     'menu-permission': 'menu_permission',
     'associations': 'association',

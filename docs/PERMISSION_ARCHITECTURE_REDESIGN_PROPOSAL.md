@@ -183,7 +183,7 @@
 
 | 概念 | 旧定位 | 新定位 |
 |------|--------|--------|
-| `management_dimension` (元数据表) | 独立概念 | **维度元数据** (描述维度的结构: code, type, hierarchy_chain) |
+| `permission_dimension` (元数据表) | 独立概念 | **维度元数据** (描述维度的结构: code, type, hierarchy_chain) |
 | `role_dimension_scope` (运行时表) | 独立概念 | **角色在维度上的取值范围** (数据权限的"WHERE 值"来源) |
 | `data_permissions` (旧表) | 独立概念 | **DEPRECATED** (改为 yaml + role_dimension_scope) |
 | `DimensionScopeEngine` | 独立服务 | **退化为 DimValueResolver** (只负责展开 inherit_children) |
@@ -226,7 +226,7 @@ association_derivation:
 
 | 配置 BO | 现状 | 用途 |
 |---------|------|------|
-| `management_dimension` | ✅ 已实现 | 维度元数据 (code, name, hierarchy_chain) |
+| `permission_dimension` | ✅ 已实现 | 维度元数据 (code, name, hierarchy_chain) |
 | `role_dimension_scope` | ✅ 已实现 | 角色在维度上的取值 + inherit_children |
 | `dimension_object_mapping` | ✅ YAML 配置 (loader 已实现) | BO → dim 映射 (硬编码 → 配置) |
 | `permission` / `role_permission` | ✅ 已实现 | Action 权限定义 + 角色绑定 |
@@ -250,11 +250,11 @@ association_derivation:
 
 | 旧"管理维度"概念 | 新"数据权限维度"概念 |
 |----------------|-------------------|
-| `management_dimension` (表) | **= BO.yaml.data_permission_dimensions[].dimension** (YAML SSOT) |
+| `permission_dimension` (表) | **= BO.yaml.data_permission_dimensions[].dimension** (YAML SSOT) |
 | `dimension_object_mapping` (loader 派生) | **= BO.yaml.data_permission_dimensions[].field** (YAML SSOT, **不再需要 loader**) |
 | `role_dimension_scope.dimension_values` (JSON) | **= 角色在维度上的"WHERE 值"** (不变, 仍是配置 BO) |
 | `role_dimension_scope.inherit_children` (boolean) | **= 是否沿 hierarchy_chain 自动展开** (不变) |
-| `HIERARCHY_CHAIN = ['company', 'product', 'version', 'domain', 'sub_domain', 'service_module', 'business_object']` (硬编码) | **= management_dimension.yaml.hierarchy_chain** (YAML 化) |
+| `HIERARCHY_CHAIN = ['company', 'product', 'version', 'domain', 'sub_domain', 'service_module', 'business_object']` (硬编码) | **= permission_dimension.yaml.hierarchy_chain** (YAML 化) |
 | `PARENT_FIELD_MAP` (硬编码 FK 关系) | **= BO.yaml.data_permission_dimensions[].field** (YAML SSOT) |
 
 ### 4.3 关键简化点
@@ -275,7 +275,7 @@ association_derivation:
 
 **目标**: 把 HIERARCHY_CHAIN / PARENT_FIELD_MAP / RESOURCE_TABLE_MAP 全部 YAML 化
 
-**Task 1.1: 创建 management_dimension.yaml** (新增)
+**Task 1.1: 创建 permission_dimension.yaml** (新增)
 - 7 个内置维度的元数据
 - `hierarchy_chain` 字段
 - 关联 BO 的 `parent_field` 信息
@@ -285,7 +285,7 @@ association_derivation:
 - 不再依赖 dimension_object_mapping loader
 
 **Task 1.3: DimValueResolver 重构**
-- 读 management_dimension.yaml 拿 hierarchy_chain
+- 读 permission_dimension.yaml 拿 hierarchy_chain
 - 读 BO.yaml.data_permission_dimensions 拿 FK 映射
 - 移除硬编码 HIERARCHY_CHAIN / PARENT_FIELD_MAP
 
@@ -351,7 +351,7 @@ association_derivation:
 
 **Task 4.5: 用户文档 + 培训**
 - 权限体系 v2.0 白皮书
-- 配置指南 (management_dimension.yaml + role_dimension_scope)
+- 配置指南 (permission_dimension.yaml + role_dimension_scope)
 - 迁移指南 (data_permissions → role_dimension_scope)
 
 **测试**: E2E 端到端回归 (5 业务场景 x 4 角色) = 20 PASS
@@ -373,7 +373,7 @@ association_derivation:
 | 风险 | 缓解 |
 |------|------|
 | 3 层 → 1 层切换可能引入权限泄漏 | 灰度发布 (Phase 2 Task 2.4 保留旧表 3 个月) |
-| HIERARCHY_CHAIN 硬编码删除后,旧 dim 范围数据无法解析 | 写迁移脚本: 旧 dim code → 新 management_dimension.yaml 引用 |
+| HIERARCHY_CHAIN 硬编码删除后,旧 dim 范围数据无法解析 | 写迁移脚本: 旧 dim code → 新 permission_dimension.yaml 引用 |
 | 关联权限派生 (5 类型) 实现复杂度高 | 按 MASTER-PLAN Phase C 6 天预估, 5 关联独立测试 |
 | 字段级权限与 M11 field_masks 可能冲突 | PermissionResolver 先 M11 后 BO.yaml, M11 优先 |
 | 权限决策埋点完整化 (P4) | 已有 FR-005 audit hook, 直接进 audit_log |

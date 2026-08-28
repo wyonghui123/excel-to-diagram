@@ -3,7 +3,7 @@
 > **目标**: 跑全部 v2 E2E 套件 (270+ 测试), 验证 E21 脏数据机制修复 + DIM 路由代码改动无回归
 > **背景**: 2026-06-14 主 Agent 做了 2 个关键代码改动:
 >   1. E21 脏数据修复 (ObjectPageShell + ObjectDetailPage 共 12 行)
->   2. DIM 路由迁移 (management_dimension_api.py url_prefix 改动)
+>   2. DIM 路由迁移 (permission_dimension_api.py url_prefix 改动)
 > **期望**: 跑全部 E2E 确认无回归, 如有失败详细分析根因
 
 ## 关键改动详情 (必须知道的)
@@ -23,8 +23,8 @@
 - 保存后重置 dirty → E2E 中保存后立即关闭的流程可能改变行为
 
 ### 2. DIM 路由迁移
-- **文件**: `meta/api/management_dimension_api.py`
-  - line 37: `url_prefix` 从 `/api/v1/management-dimensions` → `/api/v2/bo/management_dimension`
+- **文件**: `meta/api/permission_dimension_api.py`
+  - line 37: `url_prefix` 从 `/api/v1/management-dimensions` → `/api/v2/bo/permission_dimension`
   - 作用: 旧 v1 端点继续返回 410 (migrated_to), v2 端点现在 200 OK (需重启 dev server)
 
 **潜在风险**:
@@ -52,7 +52,7 @@ import urllib.request, http.cookiejar
 cj = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 opener.open('http://localhost:3010/api/v1/auth/dev-login?username=admin')
-r = opener.open('http://localhost:3010/api/v2/bo/management_dimension?page_size=3')
+r = opener.open('http://localhost:3010/api/v2/bo/permission_dimension?page_size=3')
 print('v2 dim:', r.status, r.read().decode()[:200])
 "
 # 期望: 200 + 实际数据

@@ -10,9 +10,9 @@
 
 - **复用现有数据模型**：`permission_rule` 表（resource_type + condition + inherit_to_children + propagate_to_parents）
 - **新增默认管理维度**：产品（product）作为默认管理维度
-- **新增核心引擎**：`ManagementDimensionEngine`（基于 permission_rule 计算影响范围）
+- **新增核心引擎**：`PermissionDimensionEngine`（基于 permission_rule 计算影响范围）
 - **新增前端组件**：
-  - `ManagementDimensionSelector.vue` - 管理维度选择器（列表/卡片形式）
+  - `PermissionDimensionSelector.vue` - 管理维度选择器（列表/卡片形式）
   - `ConditionRuleEditor.vue` - 条件规则编辑器（支持 value help）
   - `ImpactPreview.vue` - 影响范围实时预览（向上父关联 + 向下级联）
 - **新增 API 端点**：5 个核心端点（管理维度元数据 + 影响计算）
@@ -27,7 +27,7 @@
 
 - **Affected code**:
   - `src/views/SystemManagement/RolePermissionCenter.vue` - 重构为管理维度配置界面
-  - `meta/services/` - 新增 `management_dimension_engine.py`
+  - `meta/services/` - 新增 `permission_dimension_engine.py`
   - `meta/schemas/permission_rule.yaml` - 复用现有模型（resource_type 包含 product）
   - `meta/core/enums/cache_manager.py` - 复用缓存能力
 

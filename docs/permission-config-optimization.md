@@ -170,7 +170,7 @@ SAP 的权限配置遵循严格的组织优先原则：
    - 选择权限级别：read              
    - 配置继承/传播                   
                                     → permission_rules 表记录
-8. 查看影响范围预览                  → ManagementDimensionEngine
+8. 查看影响范围预览                  → PermissionDimensionEngine
                                        .calculate_impact()
 ```
 
@@ -215,7 +215,7 @@ menu_permissions:            仅关联功能权限，不关联维度
 
 ```
 当前：management_dimensions 表定义了维度
-     ManagementDimensionEngine 计算影响范围
+     PermissionDimensionEngine 计算影响范围
      ConditionRuleDialog 提供维度条件编辑
 
 但：这些维度的作用仅限于 condition 表达式内部

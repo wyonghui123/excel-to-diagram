@@ -5,7 +5,7 @@
 **Goal:** 让 SearchHelpDialog 支持 `display_mode: "tree"` 模式，弹出层级树形选择器，支持单选/多选两种模式。
 
 **Architecture:**
-- 后端新增 `GET /api/v2/bo/management_dimension/<dim>/tree` 端点，返回扁平化树节点数组（含 parent_id / level / child_count）
+- 后端新增 `GET /api/v2/bo/permission_dimension/<dim>/tree` 端点，返回扁平化树节点数组（含 parent_id / level / child_count）
 - 前端新增独立组件 `HierarchicalTreePicker.vue`（不复用 `ObjectScopeSection`）
 - `SearchHelpDialog` 检测 `presentation.display_mode === 'tree'` 时切换主体渲染
 - 层级元数据复用现有 `meta/schemas/hierarchies.yaml` 的 `biz_hierarchy`（**无需改 4 个 BO YAML**）
@@ -21,7 +21,7 @@
 
 | 文件 | 责任 |
 |------|------|
-| `meta/api/management_dimension_api.py` | +新增 `tree` 路由 + `_build_dimension_tree()` helper |
+| `meta/api/permission_dimension_api.py` | +新增 `tree` 路由 + `_build_dimension_tree()` helper |
 | `meta/core/yaml_loader.py` | +新增 `get_biz_hierarchy()` 读 `hierarchies.yaml` |
 | `meta/core/models_value_help.py` | 无改动（`display_mode` 字段已存在） |
 | `src/components/common/HierarchicalTreePicker/iconMap.js` | 节点 icon 组件映射常量 |
@@ -39,7 +39,7 @@
 ## Task 1: 后端 `/tree` 端点 + helper 函数
 
 **Files:**
-- Modify: `meta/api/management_dimension_api.py` (在 `_build_ancestor_path` 后面加 `_build_dimension_tree` 函数 + 新路由)
+- Modify: `meta/api/permission_dimension_api.py` (在 `_build_ancestor_path` 后面加 `_build_dimension_tree` 函数 + 新路由)
 - Test: `meta/tests/test_dimension_tree_endpoint.py`
 
 - [ ] **Step 1: 写失败测试**
@@ -47,7 +47,7 @@
 在 `meta/tests/test_dimension_tree_endpoint.py`：
 
 ```python
-"""Tests for /api/v2/bo/management_dimension/<dim>/tree endpoint"""
+"""Tests for /api/v2/bo/permission_dimension/<dim>/tree endpoint"""
 import pytest
 from meta.tests.conftest import auth_client, create_dimension_data
 
@@ -57,7 +57,7 @@ def test_tree_returns_flat_array_with_parent_id(auth_client):
     # 创建 1 product + 2 version + 3 domain + 5 sub_domain
     create_dimension_data()
 
-    resp = auth_client.get("/api/v2/bo/management_dimension/sub_domain/tree")
+    resp = auth_client.get("/api/v2/bo/permission_dimension/sub_domain/tree")
     assert resp.status_code == 200
 
     data = resp.get_json()["data"]
@@ -84,7 +84,7 @@ def test_tree_search_returns_matched_with_parent_chain(auth_client):
     create_dimension_data()
 
     resp = auth_client.get(
-        "/api/v2/bo/management_dimension/sub_domain/tree?search=采购"
+        "/api/v2/bo/permission_dimension/sub_domain/tree?search=采购"
     )
     assert resp.status_code == 200
 
@@ -102,7 +102,7 @@ def test_tree_search_returns_matched_with_parent_chain(auth_client):
 
 def test_tree_dim_must_be_valid(auth_client):
     """无效 dim 返回 400"""
-    resp = auth_client.get("/api/v2/bo/management_dimension/invalid_dim/tree")
+    resp = auth_client.get("/api/v2/bo/permission_dimension/invalid_dim/tree")
     assert resp.status_code == 400
 ```
 
@@ -118,7 +118,7 @@ Expected: 3 个 test 全失败（`name 'auth_client' is not defined` 等导入�
 
 - [ ] **Step 3: 实现 `_build_dimension_tree` helper**
 
-在 `meta/api/management_dimension_api.py` 中 `_build_ancestor_path` 函数**后面**新增：
+在 `meta/api/permission_dimension_api.py` 中 `_build_ancestor_path` 函数**后面**新增：
 
 ```python
 def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
@@ -273,10 +273,10 @@ from typing import Any, Dict, List, Optional, Set
 
 - [ ] **Step 5: 实现路由**
 
-在 `meta/api/management_dimension_api.py` 中 `_validate_required_fields` 函数**后面**新增路由（注册时放在 `/<dim>/instances` 路由附近）：
+在 `meta/api/permission_dimension_api.py` 中 `_validate_required_fields` 函数**后面**新增路由（注册时放在 `/<dim>/instances` 路由附近）：
 
 ```python
-@management_dimension_bp.route("/<dim>/tree", methods=["GET"])
+@permission_dimension_bp.route("/<dim>/tree", methods=["GET"])
 @jwt_required
 def list_dimension_tree(dim: str):
     """[FIX 2026-07-22] 返回 dim 维度的层级树 (扁平数组)"""
@@ -341,7 +341,7 @@ python -u meta\server.py
 另开终端：
 ```bash
 curl -s -m 5 "http://localhost:3006/api/v1/auth/dev-login?username=admin" -c $env:TEMP\cookies.txt
-curl -s -m 5 -b $env:TEMP\cookies.txt "http://localhost:3006/api/v2/bo/management_dimension/sub_domain/tree?search=采购" | python -m json.tool | head -50
+curl -s -m 5 -b $env:TEMP\cookies.txt "http://localhost:3006/api/v2/bo/permission_dimension/sub_domain/tree?search=采购" | python -m json.tool | head -50
 ```
 
 Expected: 返回 JSON `{"data": [...], "total": N}`, 至少 1 个匹配节点
@@ -349,7 +349,7 @@ Expected: 返回 JSON `{"data": [...], "total": N}`, 至少 1 个匹配节点
 - [ ] **Step 9: 提交**
 
 ```bash
-git add meta/api/management_dimension_api.py meta/core/yaml_loader.py meta/tests/test_dimension_tree_endpoint.py
+git add meta/api/permission_dimension_api.py meta/core/yaml_loader.py meta/tests/test_dimension_tree_endpoint.py
 git commit --no-verify -m "feat(backend): add /tree endpoint for management dimension"
 ```
 
@@ -679,7 +679,7 @@ async function loadTreeData() {
     if (props.filterParams.version_id) {
       params.set('version_id', String(props.filterParams.version_id))
     }
-    const url = `/api/v2/bo/management_dimension/${props.dimensionId}/tree?${params}`
+    const url = `/api/v2/bo/permission_dimension/${props.dimensionId}/tree?${params}`
     const resp = await fetch(url, { credentials: 'include' })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const json = await resp.json()

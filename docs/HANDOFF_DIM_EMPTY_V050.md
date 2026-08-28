@@ -23,18 +23,18 @@ PM 在 `http://localhost:3004/system/role` (yonaa 8081) 角色权限页 → 管�
 ### 2.1 排除项
 
 - [X] 不是 migration 问题（DB 表正常，hierarchies.yaml 4 个维度定义都在）
-- [X] 不是后端 blueprint 未注册（`management_dimension_bp` 在 server.py:709 注册）
-- [X] 不是前端 `loadDimensions()` 调用问题（`apiV2.get('/bo/management_dimension')` 正确）
+- [X] 不是后端 blueprint 未注册（`permission_dimension_bp` 在 server.py:709 注册）
+- [X] 不是前端 `loadDimensions()` 调用问题（`apiV2.get('/bo/permission_dimension')` 正确）
 
 ### 2.2 调用链
 
 ```
 RolePermissionCenter.vue
   → DimensionScopePanel.vue:266  loadDimensions()
-  → permissionService.js:153      apiV2.get('/bo/management_dimension')
-  → management_dimension_api.py:357  get_dimensions()
+  → permissionService.js:153      apiV2.get('/bo/permission_dimension')
+  → permission_dimension_api.py:357  get_dimensions()
   → engine.get_available_dimensions()
-  → management_dimension_engine.py:210
+  → permission_dimension_engine.py:210
   → self._load_dimension_metadata()                       ← 失败在这里
   → loop.run_until_complete(self.cache.get_or_load(...))   ← 异步执行
   → cache_manager.py:176    await self.set(key, data)
@@ -106,9 +106,9 @@ Did you mean to use 'with'?
 python -c "
 import sys; sys.path.insert(0, '.')
 from meta.core.datasource import get_data_source
-from meta.services.management_dimension_engine import ManagementDimensionEngine
+from meta.services.permission_dimension_engine import PermissionDimensionEngine
 ds = get_data_source('sqlite', database='meta/architecture.db')
-engine = ManagementDimensionEngine(ds, ttl_seconds=300)
+engine = PermissionDimensionEngine(ds, ttl_seconds=300)
 dims = engine.get_available_dimensions()
 print(len(dims))  # 抛 TypeError, 不打印
 "
@@ -129,7 +129,7 @@ TOKEN=$(curl -s "http://localhost:3011/api/v1/auth/dev-login?username=admin" | p
 
 # 调管理维度 API
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:3011/api/v2/bo/management_dimension" | python -m json.tool
+  "http://localhost:3011/api/v2/bo/permission_dimension" | python -m json.tool
 
 # 期望：data.dimensions 是 4 个元素的数组
 ```
@@ -145,7 +145,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 - **修复范围**：仅 `cache_manager.py`，2 行
 - **依赖**：无
 - **风险**：低（`set` / `invalidate` 改 `with` 不会引入死锁，因为都是短临界区）
-- **回归测试**：建议跑 `meta/tests/test_management_dimension_api.py` + `meta/tests/test_p0_other_domains.py`
+- **回归测试**：建议跑 `meta/tests/test_permission_dimension_api.py` + `meta/tests/test_p0_other_domains.py`
 
 ---
 
@@ -165,8 +165,8 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 - V007.20 部署确认：`busy_timeout=30000` + `skip_audit=True` 已在 yonaa 生效
 - 角色权限页代码：`src/views/SystemManagement/components/DimensionScopePanel.vue`
-- 后端 API：`meta/api/management_dimension_api.py:357-391`
-- 引擎：`meta/services/management_dimension_engine.py:210-234`
+- 后端 API：`meta/api/permission_dimension_api.py:357-391`
+- 引擎：`meta/services/permission_dimension_engine.py:210-234`
 - 缓存：`meta/core/enums/cache_manager.py:120-124`（lock 声明）, 196 + 238（需修复）
 - hierarchies.yaml：`meta/schemas/hierarchies.yaml:385-442`（维度定义正确）
 

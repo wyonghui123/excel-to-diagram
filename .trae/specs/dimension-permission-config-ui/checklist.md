@@ -2,7 +2,7 @@
 
 ## 核心引擎验收
 
-- [ ] ManagementDimensionEngine 成功加载 hierarchies.yaml 和 permission_rule.yaml 元数据
+- [ ] PermissionDimensionEngine 成功加载 hierarchies.yaml 和 permission_rule.yaml 元数据
 - [ ] `get_available_dimensions()` 返回正确的管理维度列表（产品、版本、领域、子领域等）
 - [ ] `calculate_impact()` 正确计算受影响的对象及其父子关联
 - [ ] `_build_impact_query()` 基于 condition 正确构建 SQL 查询
@@ -22,7 +22,7 @@
 
 ## 前端组件验收
 
-### ManagementDimensionSelector 组件
+### PermissionDimensionSelector 组件
 
 - [ ] 维度列表/卡片视图切换正常
 - [ ] 维度搜索、过滤功能正常
@@ -53,7 +53,7 @@
 ### RolePermissionCenter 组件
 
 - [ ] 4 区域布局正确显示
-- [ ] 区域 1（管理维度选择器）集成 ManagementDimensionSelector 正常
+- [ ] 区域 1（管理维度选择器）集成 PermissionDimensionSelector 正常
 - [ ] 区域 2（条件规则编辑器）集成 ConditionRuleEditor 正常
 - [ ] 区域 3（影响范围预览）集成 ImpactPreview 正常
 - [ ] 区域 4（已配置规则列表）表格展示正常

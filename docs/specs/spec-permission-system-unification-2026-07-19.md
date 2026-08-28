@@ -122,7 +122,7 @@ spec v1 未详细描述 UI 改造。
 
 #### 问题 11: 管理维度映射链未明确（v2 补充）
 
-`management_dimension_engine.py` L28-46 体现了映射链：
+`permission_dimension_engine.py` L28-46 体现了映射链：
 
 ```
 管理维度（组织、部门） → role dimension → 数据权限（condition）
@@ -343,7 +343,7 @@ _WRITE_SCOPE_V2_1_PERM_CHECK = True  # v2.1: 功能权限是 dim scope 派生的
 
 ### 2.10 管理维度映射链现状（v2 补充）
 
-`management_dimension_engine.py` L28-46：
+`permission_dimension_engine.py` L28-46：
 
 ```python
 RESOURCE_TABLE_MAP = {
@@ -1752,7 +1752,7 @@ GET /api/v1/audit/permission-decisions?start=2026-07-19&end=2026-07-20
 | `test_v2_1_write_path.py` (v2)              | V2.1 写路径联动                         |
 | `test_ui_3_panel.py` (v2)                   | UI 3 Panel 改造                      |
 | `test_3_stage_rollout.py` (v2)              | 3 阶段灰度发布                           |
-| `test_management_dimension_mapping.py` (v2) | 管理维度映射链                            |
+| `test_permission_dimension_mapping.py` (v2) | 管理维度映射链                            |
 | `test_profile_thinning.py` (v2)             | Profile 瘦化                         |
 | `test_audit_field_cleaning.py` (v2)         | 审计字段清洗规则                           |
 
@@ -2059,7 +2059,7 @@ Then 应不返回记录
 | ------- | ---------------------- | -------------------------------- | --------------------------------------- | ---------------- |
 | P7-T1   | BO.yaml permission 块设计 | `schemas/*.yaml`                 | `permission:` 块 schema                  | 校验通过；示例可解析       |
 | P7-T2   | 配置加载器实现                | `permission_config_loader.py`（新） | `load_from_yaml()` → upsert             | 幂等；启动后表与 YAML 一致 |
-| P7-T3   | 管理维度映射链明确化             | `management_dimension_engine.py` | 管理维度链定义和解析                              | 链可正确解析到叶子节点      |
+| P7-T3   | 管理维度映射链明确化             | `permission_dimension_engine.py` | 管理维度链定义和解析                              | 链可正确解析到叶子节点      |
 | P7-T4   | 配置校验                   | `permission_config_loader.py`    | 启动校验：rule\_type / dimension / condition | 非法配置报错；合法正常加载    |
 | P7-T5   | 单元测试                   | `test_declarative_config.py`     | YAML 解析 + upsert 幂等 + 校验                | 全部通过             |
 
@@ -2405,7 +2405,7 @@ Then 应不返回记录
 - `meta/services/dimension_scope_engine.py` — Dimension Scope Engine
 - `meta/services/condition_evaluator.py` — Condition Evaluator
 - `meta/services/chain_owner_resolver.py` — Chain Owner 解析器
-- `meta/services/management_dimension_engine.py` — 管理维度引擎（v2）
+- `meta/services/permission_dimension_engine.py` — 管理维度引擎（v2）
 - `meta/core/interceptors/permission_interceptor.py` — 功能权限拦截器
 - `meta/core/interceptors/data_permission_interceptor.py` — 数据权限拦截器
 - `meta/core/interceptors/write_scope_interceptor.py` — 写路径拦截器（V2.1）

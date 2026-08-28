@@ -800,7 +800,7 @@ owner_policy:
 │                                                                │
 │  RolePermissionCenter (独立管理维度+条件规则管理页)              │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │ ManagementDimensionSelector → ConditionRuleEditor        │ │
+│  │ PermissionDimensionSelector → ConditionRuleEditor        │ │
 │  │ → ImpactPreview (影响范围预览)                            │ │
 │  └──────────────────────────────────────────────────────────┘ │
 │                                                                │
@@ -834,7 +834,7 @@ cursor = self._ds.execute(
 | **PermissionConfigPanel.vue** | `src/views/SystemManagement/components/PermissionConfigPanel.vue` | 整合 维度→菜单→条件 三组件 | ✅ 无需修改 |
 | **RoleDetail.vue** | `src/views/SystemManagement/RoleDetail.vue` | 角色详情页，通过 slot 注入 PermissionConfigPanel | ✅ 无需修改 |
 | **RolePermissionCenter.vue** | `src/views/SystemManagement/RolePermissionCenter.vue` | 独立管理维度+条件规则管理 | ✅ 无需修改 |
-| **ManagementDimensionEngine** | `meta/services/management_dimension_engine.py` | 层级维度加载、影响范围计算 | ✅ 无需修改 |
+| **PermissionDimensionEngine** | `meta/services/permission_dimension_engine.py` | 层级维度加载、影响范围计算 | ✅ 无需修改 |
 | **DimensionScopeEngine** | `meta/services/dimension_scope_engine.py` | 自动推导菜单/权限/数据条件 | ✅ 受益于增强字段 |
 | **role_dimension_scope_api.py** | `meta/api/role_dimension_scope_api.py` | 维度范围 CRUD + `auto_sync_all` | ✅ 无需修改 |
 

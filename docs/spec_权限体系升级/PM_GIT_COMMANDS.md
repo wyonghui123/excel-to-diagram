@@ -17,7 +17,7 @@ git add \
   meta/core/interceptors/write_scope_interceptor.py \
   meta/api/bo_api.py \
   meta/api/manage_api.py \
-  meta/api/management_dimension_api.py \
+  meta/api/permission_dimension_api.py \
   meta/api/special_routes_api.py \
   meta/api/diagnostics_api.py \
   meta/api/role_dimension_scope_api.py \

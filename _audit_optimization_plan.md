@@ -96,7 +96,7 @@ def _audit_user_name() -> str:
     return _display or _username or ''
 ```
 
-**调用方**：6 个 role/permission API（[bo_api.py:2767](file:///d:/filework/excel-to-diagram/meta/api/bo_api.py#L2767), role_api.py:394/519, role_menu_api.py:714, role_dimension_scope_api.py:129/150, permission_rule_api.py:96, management_dimension_api.py:684）→ 每次角色/权限编辑都会写入错误的 user_name
+**调用方**：6 个 role/permission API（[bo_api.py:2767](file:///d:/filework/excel-to-diagram/meta/api/bo_api.py#L2767), role_api.py:394/519, role_menu_api.py:714, role_dimension_scope_api.py:129/150, permission_rule_api.py:96, permission_dimension_api.py:684）→ 每次角色/权限编辑都会写入错误的 user_name
 
 ### 1.2 修复方案
 

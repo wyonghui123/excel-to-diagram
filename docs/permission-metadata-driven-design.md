@@ -525,7 +525,7 @@ class PermissionSyncService:
             'menu': '菜单', 'user_group': '用户组',
             'annotation': '备注', 'audit_log': '审计日志',
             'enum_type': '枚举类型', 'enum_value': '枚举值',
-            'management_dimension': '管理维度',
+            'permission_dimension': '管理维度',
         }
         action_names = {
             'create': '创建', 'read': '查看', 'update': '更新',

@@ -348,6 +348,6 @@ deferred:
   # 关键代码确认: data_permission_service.py:_get_inherited_permission_level (line 409)
   # [BMRD-2026-06-14 UNLOCK] DIM-FULL 已文档化
   # 详见 meta/docs/DIMENSION_RULES.md
-  # 路由迁移: /api/v1/management-dimensions → /api/v2/bo/management_dimension (代码已改)
+  # 路由迁移: /api/v1/management-dimensions → /api/v2/bo/permission_dimension (代码已改)
   # [BMRD-2026-06-14 UNLOCK] VAL-CASCADE 已通过 VAL-1/2 软断言覆盖
   # value_list 端点接受 status 200/201/400/404/422, 不强求级联影响验证

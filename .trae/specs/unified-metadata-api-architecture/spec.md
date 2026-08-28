@@ -1599,7 +1599,7 @@ class DisplayNameService:
 | # | 功能 | 优先级 |
 |---|------|--------|
 | 1 | FuzzySearch 模糊搜索支持 | 🟢 低 |
-| 2 | management_dimension.yaml value_help 配置补充 | 🟢 低 |
+| 2 | permission_dimension.yaml value_help 配置补充 | 🟢 低 |
 | 3 | annotation.yaml / filter_variant.yaml value_help 配置 | 🟢 低 |
 
 ***

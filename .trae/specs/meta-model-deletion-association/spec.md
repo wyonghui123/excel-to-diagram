@@ -12,11 +12,11 @@
 
 * **新增默认管理维度**：产品（product）作为默认管理维度
 
-* **新增核心引擎**：`ManagementDimensionEngine`（基于 permission\_rule 计算影响范围）
+* **新增核心引擎**：`PermissionDimensionEngine`（基于 permission\_rule 计算影响范围）
 
 * **新增前端组件**：
 
-  * `ManagementDimensionSelector.vue` - 管理维度选择器（列表/卡片形式）
+  * `PermissionDimensionSelector.vue` - 管理维度选择器（列表/卡片形式）
 
   * `ConditionRuleEditor.vue` - 条件规则编辑器（支持 value help）
 
@@ -40,7 +40,7 @@
 
   * `src/views/SystemManagement/RolePermissionCenter.vue` - 重构为管理维度配置界面
 
-  * `meta/services/` - 新增 `management_dimension_engine.py`
+  * `meta/services/` - 新增 `permission_dimension_engine.py`
 
   * `meta/schemas/permission_rule.yaml` - 复用现有模型（resource\_type 包含 product）
 

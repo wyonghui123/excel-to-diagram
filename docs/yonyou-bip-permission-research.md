@@ -3,7 +3,7 @@
 1. [1. 用友BIP权限模型全景](#1-用友bip权限模型全景)
 2. [2. 主隔离维度 — 与我们"维度驱动"方案的直接验证](#2-主隔离维度-—-与我们"维度驱动"方案的直接验证)
 3. [3. 按钮级权限（Business Activity）— 粒度下沉的参考](#3-按钮级权限（business-activity）—-粒度下沉的参考)
-4. [4. 多维组织树 — 对我们 ManagementDimension 的深化](#4-多维组织树-—-对我们-managementdimension-的深化)
+4. [4. 多维组织树 — 对我们 PermissionDimension 的深化](#4-多维组织树-—-对我们-managementdimension-的深化)
 5. [5. 用友BIP的元数据驱动架构与我们的对比](#5-用友bip的元数据驱动架构与我们的对比)
 6. [6. 权限分析中心 — 运维能力参考](#6-权限分析中心-—-运维能力参考)
 7. [7. 关键洞察与对现有方案的新补充](#7-关键洞察与对现有方案的新补充)
@@ -64,7 +64,7 @@
 |------|------|----------------|
 | **主隔离维度** | 多组织模式下，所有操作必须在指定组织范围内，组织是权限的第一前提 | ⭐⭐⭐⭐⭐ 与我们"维度驱动"理念完全一致 |
 | **按钮级授权** | "管到指尖"——从菜单级下沉到按钮级，可控制单个按钮的可见性 | ⭐⭐⭐⭐ 我们的 actions 可以下沉到这个粒度 |
-| **多维组织树** | 同一实体下多套组织树共存：行政+销售+财务+人力+审批 | ⭐⭐⭐⭐⭐ 我们的 ManagementDimension 可以借鉴多树模型 |
+| **多维组织树** | 同一实体下多套组织树共存：行政+销售+财务+人力+审批 | ⭐⭐⭐⭐⭐ 我们的 PermissionDimension 可以借鉴多树模型 |
 
 ---
 
@@ -104,7 +104,7 @@
 
 | 用友BIP概念 | 我们的对应 | 状态 |
 |------------|-----------|------|
-| 主隔离维度（组织） | ManagementDimension（planned: role_dimension_scopes） | 🟡 我们已有 management_dimensions 表和 ConditionRuleDialog，但尚未成为角色配置的入口 |
+| 主隔离维度（组织） | ManagementDimension（planned: role_dimension_scopes） | 🟡 我们已有 permission_dimensions 表和 ConditionRuleDialog，但尚未成为角色配置的入口 |
 | 角色 + 组织范围 | role + role_dimension_scopes | 🔴 我们方案中设计了这个表，尚未实现 |
 | 功能权限+组织权限 | BO actions + dimension_scopes | 🟡 actions 已有，维度范围待实现 |
 | 派生角色 | 同一角色 × 不同 dimension 值 | 🔴 我们方案中提到了这个设计 |
@@ -180,7 +180,7 @@ actions:
 
 ---
 
-## 4. 多维组织树 — 对我们 ManagementDimension 的深化
+## 4. 多维组织树 — 对我们 PermissionDimension 的深化
 
 ### 4.1 用友BIP的多维组织模型
 
@@ -211,11 +211,11 @@ actions:
 - 审批流可以按特定的组织树进行逐级审批
 - 数据上报/下发可以沿组织树传递
 
-### 4.2 与我们 ManagementDimension 的对照
+### 4.2 与我们 PermissionDimension 的对照
 
 | 用友BIP | 我们的架构 | 差距 |
 |---------|-----------|------|
-| 多维组织树 | ManagementDimension（单维度） | 🟡 我们目前是"一个维度一条记录"，没有组织树的概念 |
+| 多维组织树 | PermissionDimension（单维度） | 🟡 我们目前是"一个维度一条记录"，没有组织树的概念 |
 | 组织树下的父子关系 | cascade_parent（简单父子） | 🟡 我们的 cascade_parent 是一条线，不是一棵树 |
 | 按组织树分配权限 | role_dimension_scopes（待实现） | 🔴 尚未实现 |
 | 组织树作为审批路径 | 无 | 🔴 新需求 |
@@ -223,7 +223,7 @@ actions:
 **可借鉴的设计**：我们的 ManagementDimension 可以升级为"维度树"模型：
 
 ```yaml
-# management_dimension.yaml 新增字段
+# permission_dimension.yaml 新增字段
 fields:
   - id: tree_code
     name: 所属维度树
@@ -242,7 +242,7 @@ fields:
     description: 在维度树中的层级深度
 ```
 
-这样 product → version → domain → sub_domain → service_module → business_object 就不再是硬编码的 hierarchy_chain，而是可以从 management_dimensions 表动态读取的**可配置的维度树**。
+这样 product → version → domain → sub_domain → service_module → business_object 就不再是硬编码的 hierarchy_chain，而是可以从 permission_dimensions 表动态读取的**可配置的维度树**。
 
 ---
 
@@ -339,7 +339,7 @@ entity: 采购订单
 
 | 序号 | 新发现 | 对我们的补充建议 |
 |------|--------|----------------|
-| 1 | **多维组织树** | ManagementDimension 升级为"维度树"，支持同一实体属于多棵树 |
+| 1 | **多维组织树** | PermissionDimension 升级为"维度树"，支持同一实体属于多棵树 |
 | 2 | **业务活动（action group）** | actions 增加 `action_group` 字段，支持按组分配权限 |
 | 3 | **按钮级权限** | 前端 ObjectPage/MetaListPage 的按钮可见性应与 action 权限联动 |
 | 4 | **元数据标签化权限** | 在字段YAML中增加 `permission_tag` 作为数据权限标记的快捷方式 |
@@ -365,7 +365,7 @@ entity: 采购订单
 
 | 阶段 | 新增任务 | 说明 |
 |------|---------|------|
-| **Phase 0** | ManagementDimension 支持树结构 | 增加 tree_code、tree_level 字段 |
+| **Phase 0** | PermissionDimension 支持树结构 | 增加 tree_code、tree_level 字段 |
 | **Phase 0** | actions 增加 action_group 字段 | 支持"标准组/只读组/维护组"分组授权 |
 | **Phase 2** | 前端按钮与 action 权限联动 | ObjectPage/MetaListPage 按钮根据权限显示/隐藏 |
 | **Phase 3** | 权限分析中心 | 用户权限总览 + 智能诊断 + 建议生成 |
@@ -378,7 +378,7 @@ entity: 采购订单
 
 1. **"组织是权限隔离的基本维度"** — 用友BIP的核心设计原则，与我们"维度驱动"方案完全一致
 2. **"主隔离维度"** — 与我们 `role_dimension_scopes` 的设计理念一致，且用友已在大规模企业客户中验证
-3. **"多维组织树"** — 超越了我们当前的线性 hierarchy，为我们 ManagementDimension 的深化提供了方向
+3. **"多维组织树"** — 超越了我们当前的线性 hierarchy，为我们 PermissionDimension 的深化提供了方向
 4. **"业务活动(按钮级权限)"** — 为我们 actions 的 `action_group` 设计提供了参考
 5. **"权限分析中心"** — 我们独有的 ImpactPreview 可以扩展为用户权限总览 + 智能诊断
 6. **"元数据标签化"** — 用友BIP在低代码平台的字段级"数据权限控制"标签，与我们 `data_permission_dimensions` 的 YAML 声明方式殊途同归

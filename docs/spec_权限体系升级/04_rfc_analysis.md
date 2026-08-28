@@ -35,8 +35,8 @@ YAML Schema → MetaRegistry → BOFramework → REST API → 前端Dynamic UI
 - `meta/scripts/init_auth.py` — seed_permissions()
 - `meta/scripts/init_menu_permissions.py` — 菜单初始化
 - `meta/api/role_menu_api.py` — 角色菜单API, PERMISSION_LABELS
-- `meta/schemas/management_dimension.yaml` — 管理维度定义
-- `meta/services/management_dimension_engine.py` — ImpactPreview
+- `meta/schemas/permission_dimension.yaml` — 管理维度定义
+- `meta/services/permission_dimension_engine.py` — ImpactPreview
 - `src/config/menuConfig.js` — 静态菜单
 - `src/composables/useMenuPermissions.js` — menuIconMap, getDefaultMenus
 - `src/stores/authStore.js` — isAdmin 判断

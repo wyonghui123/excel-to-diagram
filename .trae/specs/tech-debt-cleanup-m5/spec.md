@@ -330,7 +330,7 @@
 ### 记录技术债务（需后续专项处理）
 
 13. `meta/schemas/employee_data_scope.yaml` — 实验性功能，需决定去留
-14. `meta/api/management_dimension_api.py` 中 `roles_bp` / `meta_bp` — 悬空蓝图
+14. `meta/api/permission_dimension_api.py` 中 `roles_bp` / `meta_bp` — 悬空蓝图
 15. SystemSettings.vue 迁移 — 本 Spec FR-001
 16. change_event / change_subscription 架构对齐 — 本 Spec FR-002
 

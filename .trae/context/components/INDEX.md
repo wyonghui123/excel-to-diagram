@@ -169,7 +169,7 @@
 > - Pagination, AppTabs(已加), AppDatePicker(已加), AppInput(已加), TableHeaderFilter(已加)
 > - AccountSettingsDialog, ChangePasswordDialog
 > - ObjectChildSection, ObjectPageWithChildren
-> - DateTimePicker, ImpactPreview, ManagementDimensionSelector
+> - DateTimePicker, ImpactPreview, PermissionDimensionSelector
 > - MasterDetailLayout
 > - NotificationContainer(已加), SubNavTabs
 
