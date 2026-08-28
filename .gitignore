@@ -331,3 +331,7 @@ probe_out.txt
 # Playwright 测试日志 (注意是 hyphen 不是下划线)
 test-results/
 
+# ===== v2026.08.28: Phase 0 快照文件 (Plan A 权限集重构) =====
+meta/architecture.db.snapshot_20260828
+meta/architecture.db.snapshot_*
+
