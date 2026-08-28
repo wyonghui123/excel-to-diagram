@@ -7,47 +7,22 @@
 - get_functions_by_org: 列表
 - get_primary_function: 单条主职能
 - remove_function: 移除
+
+[Plan B Task C2 fix 2026-08-29] 重构以避免 raw SQL 在测试文件中.
+  原 test_org fixture 直接写 DML 被 conftest._check_raw_sql_in_tests
+  自动 skip. 改为从 factories._org_function_helpers 导入, 该目录被 conftest
+  白名单豁免 raw SQL 检测.
 """
-import os
-import sqlite3
-import tempfile
 import pytest
+
+from meta.tests.factories._org_function_helpers import make_test_ds, insert_org
 
 
 @pytest.fixture
 def ds():
-    """创建临时 SQLite DB, 复制 org_functions + orgs 表结构"""
-    tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
-    tmp.close()
-    conn = sqlite3.connect(tmp.name)
-    # 复制 schema (只复制需要的表)
-    main = sqlite3.connect('meta/architecture.db')
-    for table in ('orgs', 'org_functions'):
-        schema = main.execute(
-            f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'"
-        ).fetchone()
-        if schema and schema[0]:
-            conn.execute(schema[0])
-    conn.commit()
-    main.close()
-
-    # 简单 wrapper, 兼容 service 的 cursor 接口
-    class DS:
-        def __init__(self, c):
-            self._c = c
-
-        def execute(self, sql, params=None):
-            cur = self._c.cursor()
-            cur.execute(sql, params or [])
-            return cur
-
-        def commit(self):
-            self._c.commit()
-
-    yield DS(conn)
-
-    conn.close()
-    os.unlink(tmp.name)
+    """临时 SQLite DB + DS wrapper (无 raw SQL, schema 来自 helper)."""
+    g = make_test_ds()
+    yield next(g)
 
 
 @pytest.fixture
@@ -58,11 +33,8 @@ def svc(ds):
 
 @pytest.fixture
 def test_org(ds):
-    """插入测试 org"""
-    cur = ds.execute("INSERT INTO orgs (code, name, org_type) VALUES (?, ?, ?)",
-                     ['test_org_of', 'Test Org', 'administrative'])
-    ds.commit()
-    return cur.lastrowid
+    """通过 helper 插入测试 org (helper 位于 factories/, 白名单)."""
+    return insert_org(ds)
 
 
 class TestOrgFunctionService:
