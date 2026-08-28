@@ -19,12 +19,20 @@ import pytest
 
 @pytest.fixture
 def fresh_db():
-    """用临时 DB 跑 migration, 不污染主 DB"""
+    """用临时 DB 跑 migration, 不污染主 DB
+
+    修复 (Critical-3): 优先使用 snapshot_20260828 作为 pre-migration 源,
+    因为当前 architecture.db 已被迁移过 (已是终态).
+    若 snapshot 不存在则 fallback 到 architecture.db (post-migration, 部分测试会 skip).
+    """
     tmp_dir = tempfile.mkdtemp()
     db_path = Path(tmp_dir) / 'test.db'
 
-    # 1. 从主 DB dump schema + data
-    main_db = sqlite3.connect('meta/architecture.db')
+    # 优先用 pre-migration snapshot (包含旧表名), 否则用当前 DB (已是 post-migration)
+    snapshot = Path('meta/architecture.db.snapshot_20260828')
+    src = snapshot if snapshot.exists() else Path('meta/architecture.db')
+
+    main_db = sqlite3.connect(str(src))
     main_db.backup(sqlite3.connect(str(db_path)))
     main_db.close()
 
@@ -51,9 +59,11 @@ def test_rename_roles_to_permission_sets(fresh_db):
     """7 张 role 表 RENAME 成功 (+ DROP test residue)"""
     conn = sqlite3.connect(str(fresh_db))
 
-    # 执行 migration
-    from meta.migrations.rename_roles_to_permission_sets import upgrade
-    upgrade(conn)
+    # 执行 v071 (DROP residue) + v070 (RENAME)
+    from meta.migrations.v071__drop_p13_t3_residue_tables import migrate as v071_migrate
+    from meta.migrations.v070__rename_roles_to_permission_sets import migrate as v070_migrate
+    v071_migrate(fresh_db)
+    v070_migrate(fresh_db)
 
     # 验证新表存在
     cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -88,9 +98,11 @@ def test_data_preserved_after_rename(fresh_db):
     old_users_count = conn.execute("SELECT COUNT(*) FROM user_roles").fetchone()[0]
     old_perm_count = conn.execute("SELECT COUNT(*) FROM role_permissions").fetchone()[0]
 
-    # 2. 执行 migration
-    from meta.migrations.rename_roles_to_permission_sets import upgrade
-    upgrade(conn)
+    # 2. 执行 v071 (DROP residue) + v070 (RENAME)
+    from meta.migrations.v071__drop_p13_t3_residue_tables import migrate as v071_migrate
+    from meta.migrations.v070__rename_roles_to_permission_sets import migrate as v070_migrate
+    v071_migrate(fresh_db)
+    v070_migrate(fresh_db)
 
     # 3. 验证数据
     new_count = conn.execute("SELECT COUNT(*) FROM permission_sets").fetchone()[0]
@@ -114,8 +126,8 @@ def test_rename_user_groups_to_orgs(fresh_db):
     """user_groups 系列 RENAME + 新增 org_type 列"""
     conn = sqlite3.connect(str(fresh_db))
 
-    from meta.migrations.rename_user_groups_to_orgs import upgrade
-    upgrade(conn)
+    from meta.migrations.v072__rename_user_groups_to_orgs import migrate as v072_migrate
+    v072_migrate(fresh_db)
 
     cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = {r[0] for r in cur.fetchall()}
@@ -136,11 +148,21 @@ def test_rename_user_groups_to_orgs(fresh_db):
 
 
 def test_org_functions_table_created(fresh_db):
-    """org_functions 表存在 + 7 种职能类型"""
+    """org_functions 表存在 + 7 种职能类型
+
+    修复 (Critical-1): create_org_functions 依赖 orgs 表 (FK + INSERT),
+    但 fresh_db 起始状态是旧表名, 必须先跑 rename_user_groups_to_orgs.upgrade
+    创建 orgs 表, 才能让 create_org_functions.upgrade 正常工作.
+    """
     conn = sqlite3.connect(str(fresh_db))
 
-    from meta.migrations.create_org_functions import upgrade
-    upgrade(conn)
+    # Step 1: 先建 orgs 表 (满足 FK 依赖 + 提供 org_id 列表用于回填)
+    from meta.migrations.v072__rename_user_groups_to_orgs import migrate as v072_migrate
+    v072_migrate(fresh_db)
+
+    # Step 2: 再建 org_functions 表
+    from meta.migrations.v073__create_org_functions import migrate as v073_migrate
+    v073_migrate(fresh_db)
 
     # 表存在
     tables = {r[0] for r in conn.execute(
@@ -157,12 +179,20 @@ def test_org_functions_table_created(fresh_db):
 
 def test_down_migration_reversible(fresh_db):
     """down() 可逆 (回滚到原名)"""
+    from meta.migrations.v070__rename_roles_to_permission_sets import (
+        migrate as v070_migrate,
+        downgrade as v070_downgrade,
+    )
+
+    # 先跑 v071 (DROP residue) + v070 (RENAME) → 终态
+    from meta.migrations.v071__drop_p13_t3_residue_tables import migrate as v071_migrate
+    v071_migrate(fresh_db)
+    v070_migrate(fresh_db)
+
+    # 再走 v070 downgrade → 回到原名
+    v070_downgrade(fresh_db)
+
     conn = sqlite3.connect(str(fresh_db))
-
-    from meta.migrations.rename_roles_to_permission_sets import upgrade, downgrade
-    upgrade(conn)
-    downgrade(conn)
-
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()}
