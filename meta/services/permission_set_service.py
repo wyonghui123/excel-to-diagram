@@ -36,44 +36,28 @@ class PermissionSetService:
             data_source: DB 数据源 (需支持 execute(sql, params) 接口)
         """
         self._ds = data_source
+        # 注意: 表结构由 migration v070 (rename_roles_to_permission_sets.py)
+        # 统一创建, 列名遵循生产 schema (permission_set_id / role_id / permission_id / granted).
+        # 本类方法的 SQL (INSERT/SELECT) 已使用生产列名, 无需运行时建表.
         self._ensure_tables()
 
     # ========================================================================
-    # 表初始化 (lazy, 幂等)
+    # 表初始化 (lazy, 幂等) - DEPRECATED
     # ========================================================================
     def _ensure_tables(self):
-        """[P13-T1/T2] 确保 permission_sets 和 user_permission_sets 表存在"""
-        try:
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS permission_sets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code VARCHAR(200) NOT NULL UNIQUE,
-                    name VARCHAR(200) NOT NULL,
-                    description TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at VARCHAR(200),
-                    updated_at VARCHAR(200)
-                )
-            """)
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS user_permission_sets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    permission_set_id INTEGER NOT NULL,
-                    created_at VARCHAR(200),
-                    UNIQUE(user_id, permission_set_id)
-                )
-            """)
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS permission_set_permissions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    permission_set_id INTEGER NOT NULL,
-                    permission_code VARCHAR(200) NOT NULL,
-                    created_at VARCHAR(200)
-                )
-            """)
-        except Exception as e:
-            logger.debug(f'[P13] _ensure_tables (ignore if exists): {e}')
+        """[DEPRECATED] 表结构已由 migration v070 创建, 此方法保留仅为兼容.
+
+        历史: 早期 P13 实现期望通过 IF NOT EXISTS 自动建表.
+        问题: schema 与生产 DB 不匹配 (列名错位: permission_set_id vs role_id /
+              permission_code vs permission_id), 会导致 CREATE 创建出"伪表",
+              后续 INSERT 会写入错误列. 因此禁用在生产路径.
+        后续: 若未来需要在测试/fresh DB 中初始化 schema, 请调用迁移脚本
+              `python -m meta.migrations.v070__rename_roles_to_permission_sets` +
+              `python -m meta.migrations.v071__drop_p13_t3_residue_tables`,
+              而非在本类中建表.
+        """
+        # No-op: 表已由 migration v070/v071 创建
+        return
 
     # ========================================================================
     # P13-T1: permission_sets CRUD
