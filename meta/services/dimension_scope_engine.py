@@ -967,9 +967,9 @@ class DimensionScopeEngine:
             'data_conditions': conditions,
         }
 
-    def _load_scopes(self, role_id: int):
+    def _load_scopes(self, permission_set_id: int):
         cursor = self._ds.execute(
-            "SELECT * FROM role_dimension_scopes WHERE role_id = ?", [role_id]
+            "SELECT * FROM permission_set_dimension_scopes WHERE permission_set_id = ?", [permission_set_id]
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
