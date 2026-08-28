@@ -12,7 +12,7 @@
  *
  *   // 获取标签
  *   const label = objectTypeService.getLabel('user')  // '用户'
- *   const label = objectTypeService.getLabel('user_group')  // '用户组'
+ *   const label = objectTypeService.getLabel('org')  // '组织'
  */
 
 import { apiV1 } from '@/utils/httpClient'
@@ -81,8 +81,8 @@ class ObjectTypeService {
         'business_object': '业务对象',
         'relationship': '关系',
         'user': '用户',
-        'user_group': '用户组',
-        'role': '角色',
+        'org': '组织',
+        'permission_set': '权限集',
         'permission': '权限',
         'enum_type': '枚举类型',
         'enum_value': '枚举值',
