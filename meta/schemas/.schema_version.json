@@ -713,5 +713,17 @@
       "table": "new_objects"
     }
   },
-  "last_sync": "2026-05-24T12:44:06.472505"
+  "last_sync": "2026-05-24T12:44:06.472505",
+  "phase_migrations": [
+    {
+      "phase": "phase1-db-schema-refactor",
+      "date": "2026-08-28",
+      "migrations": [
+        "rename_roles_to_permission_sets",
+        "rename_user_groups_to_orgs",
+        "create_org_functions"
+      ],
+      "note": "Physical schema rename: roles→permission_sets, user_groups→orgs. Created org_functions table. YAML metadata rename deferred to Plan B."
+    }
+  ]
 }
