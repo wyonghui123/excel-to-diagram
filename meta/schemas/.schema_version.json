@@ -719,11 +719,12 @@
       "phase": "phase1-db-schema-refactor",
       "date": "2026-08-28",
       "migrations": [
-        "rename_roles_to_permission_sets",
-        "rename_user_groups_to_orgs",
-        "create_org_functions"
+        "v070__rename_roles_to_permission_sets",
+        "v071__drop_p13_t3_residue_tables",
+        "v072__rename_user_groups_to_orgs",
+        "v073__create_org_functions"
       ],
-      "note": "Physical schema rename: roles→permission_sets, user_groups→orgs. Created org_functions table. YAML metadata rename deferred to Plan B."
+      "note": "Physical schema rename: roles→permission_sets, user_groups→orgs. Created org_functions table. YAML metadata rename deferred to Plan B. Follows meta/migrations/README.md naming: v<NNN>__<desc>.py + migrate(db_path, skip_backup=False) -> bool."
     }
   ]
 }
