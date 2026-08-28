@@ -12,10 +12,41 @@ Permission Feature Flags
   condition_structured           — Phase 2: 结构化条件 (替代自由文本)
   action_independent             — Phase 2: action 独立性 (废弃 LEVEL_ORDER)
 
-[Plan B Phase 2 — role→permission_set, user_group→org]
+[Plan B Phase 2 — role→permission_set, user_group→org]  (2026-08-28)
   permission_set_refactor_enabled       — 主开关 (灰度新 SQL 路径)
   permission_set_refactor_write_enabled — 写路径开关 (更保守, 默认 false)
   org_function_panel_enabled            — 组织多职能面板
+
+[Plan B Phase 2 灰度策略 — Conservative]
+  默认所有 Plan B flag = False. 显式开启需设置环境变量:
+    PERMISSION_SET_REFACTOR_ENABLED=true       — 启用双轨对账装饰器
+    PERMISSION_SET_REFACTOR_WRITE_ENABLED=true — 启用双轨对账的写路径
+    ORG_FUNCTION_PANEL_ENABLED=true            — 启用组织多职能面板 UI
+
+  设计意图 (vs Plan B 原始方案):
+    - 原方案: 默认开启, 灰度收回. 风险: 业务代码可能依赖旧表名时立即崩溃
+    - 现方案: 默认关闭, 显式 opt-in. 业务代码已迁移完成, 但保留旧表(_v1_backup) + 旧 SQL 路径
+      作为兜底; 在新路径未充分验证前不会自动启用
+
+  后续路径:
+    - Plan C (前端) 完成后: 在 staging 环境验证新 API + 前端联动
+    - Plan D (测试) 完成后: 启用 PERMISSION_SET_REFACTOR_ENABLED=true 灰度
+    - Plan E (灰度发布) 完成后: 100% 启用 + 删除旧表
+
+[Use Case Examples]
+  # 全量灰度 (推荐):
+  export PERMISSION_SET_REFACTOR_ENABLED=true
+  export PERMISSION_SET_REFACTOR_WRITE_ENABLED=true
+  python -m meta.server
+
+  # 仅验证读路径:
+  export PERMISSION_SET_REFACTOR_ENABLED=true
+  # 写路径仍走旧 SQL (PermissionService.assign_permission_set 等)
+
+  # 完全关闭 (默认, 推荐生产):
+  unset PERMISSION_SET_REFACTOR_ENABLED
+  unset PERMISSION_SET_REFACTOR_WRITE_ENABLED
+  python -m meta.server
 """
 import os
 from typing import Dict
@@ -27,7 +58,7 @@ _FLAGS: Dict[str, bool] = {
     'unified_permission_ui': False,
     'condition_structured': False,
     'action_independent': False,
-    # Plan B Phase 2 — 默认 false, 需显式设环境变量开启
+    # Plan B Phase 2 — 默认 false, 需显式设环境变量开启 (保守)
     'permission_set_refactor_enabled': False,
     'permission_set_refactor_write_enabled': False,
     'org_function_panel_enabled': False,
