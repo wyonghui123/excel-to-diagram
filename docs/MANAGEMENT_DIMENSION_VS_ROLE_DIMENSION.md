@@ -91,7 +91,7 @@
 
 #### 1.3 当前实际：管理维度 = 4 个业务维度
 
-[ManagementDimensionEngine._load_dimension_metadata](file:///d:/filework/excel-to-diagram/meta/services/management_dimension_engine.py#L108-L155) L128-134 实际从 hierarchies.yaml 加载：
+[PermissionDimensionEngine._load_dimension_metadata](file:///d:/filework/excel-to-diagram/meta/services/permission_dimension_engine.py#L108-L155) L128-134 实际从 hierarchies.yaml 加载：
 
 ```python
 hierarchies_path = os.path.join(self._schema_dir, 'hierarchies.yaml')
@@ -170,11 +170,11 @@ UI 渲染的维度来自 [loadDimensions()](file:///d:/filework/excel-to-diagram
 
 ```js
 export async function loadDimensions(params = {}) {
-  return await apiV2.get('/bo/management_dimension', { params })
+  return await apiV2.get('/bo/permission_dimension', { params })
 }
 ```
 
-后端 [management_dimension_api.py](file:///d:/filework/excel-to-diagram/meta/api/management_dimension_api.py) 返回 4 个维度 (product/version/domain/sub_domain), 全部对应 `role_dimension_scopes.dimension_code`。
+后端 [permission_dimension_api.py](file:///d:/filework/excel-to-diagram/meta/api/permission_dimension_api.py) 返回 4 个维度 (product/version/domain/sub_domain), 全部对应 `role_dimension_scopes.dimension_code`。
 
 #### 2.3 4 个 UI 维度全部是 role_dimension
 
@@ -376,7 +376,7 @@ CREATE TABLE departments (
 |---------|------|
 | "管理维度 (DimensionScope 机制)" = 9 机制中 1 个 | ✅ 但太简化 — 实际 "管理维度" = 4 层 (元数据 / 运行时 / 映射 / 实例) |
 | 没有明确区分管理维度 vs role_dimension | ✅ 实际是 metadata (hierarchies.yaml) vs data (role_dimension_scopes 表) |
-| 误以为 [ManagementDimensionEngine](file:///d:/filework/excel-to-diagram/meta/services/management_dimension_engine.py) 是 "管理维度" 全部 | ❌ 实际只是元数据加载器 + 影响范围计算, 真正的"管理维度配置"走 DimensionScopeEngine |
+| 误以为 [PermissionDimensionEngine](file:///d:/filework/excel-to-diagram/meta/services/permission_dimension_engine.py) 是 "管理维度" 全部 | ❌ 实际只是元数据加载器 + 影响范围计算, 真正的"管理维度配置"走 DimensionScopeEngine |
 
 **修正为**:
 
@@ -421,7 +421,7 @@ CREATE TABLE departments (
 - [dimension_object_mapping.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/dimension_object_mapping.yaml) — generic 维度预留
 - [hierarchies.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/hierarchies.yaml) — 业务维度定义
 - [role_dimension_scope.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/role_dimension_scope.yaml) — role_dimension 表 schema
-- [ManagementDimensionEngine.py](file:///d:/filework/excel-to-diagram/meta/services/management_dimension_engine.py) — 元数据加载 + 影响范围计算
+- [PermissionDimensionEngine.py](file:///d:/filework/excel-to-diagram/meta/services/permission_dimension_engine.py) — 元数据加载 + 影响范围计算
 - [DimensionScopeEngine.py](file:///d:/filework/excel-to-diagram/meta/services/dimension_scope_engine.py) — 运行时派生 SQL
 - [DimensionScopePanel.vue](file:///d:/filework/excel-to-diagram/src/views/SystemManagement/components/DimensionScopePanel.vue) — UI 配置面板
 - [role_dimension_scope_api.py](file:///d:/filework/excel-to-diagram/meta/api/role_dimension_scope_api.py) — 后端 API
