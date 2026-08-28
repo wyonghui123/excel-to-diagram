@@ -282,12 +282,12 @@ fields:
 # P7-T3: 管理维度映射链明确化 — 链可正确解析到叶子节点
 # ============================================================================
 
-class TestP7T3ManagementDimensionChain:
+class TestP7T3PermissionDimensionChain:
     """P7-T3: 管理维度映射链定义和解析"""
 
-    def test_management_dimension_chain_definition(self):
+    def test_permission_dimension_chain_definition(self):
         """[P7-T3] 管理维度链 HIERARCHY_CHAIN 已定义"""
-        from meta.services.management_dimension_engine import (
+        from meta.services.permission_dimension_engine import (
             MANAGEMENT_DIMENSION_CHAIN,
             resolve_dimension_chain,
         )
@@ -296,21 +296,21 @@ class TestP7T3ManagementDimensionChain:
 
     def test_resolve_dimension_chain_to_leaf(self):
         """[P7-T3] 链可正确解析到叶子节点"""
-        from meta.services.management_dimension_engine import resolve_dimension_chain
+        from meta.services.permission_dimension_engine import resolve_dimension_chain
         # 从 product 解析到 sub_domain
         chain = resolve_dimension_chain('product', 'sub_domain')
         assert chain == ['product', 'version', 'domain', 'sub_domain']
 
     def test_resolve_dimension_chain_partial(self):
         """[P7-T3] 部分链解析正确"""
-        from meta.services.management_dimension_engine import resolve_dimension_chain
+        from meta.services.permission_dimension_engine import resolve_dimension_chain
         # 从 version 解析到 domain
         chain = resolve_dimension_chain('version', 'domain')
         assert chain == ['version', 'domain']
 
     def test_resolve_dimension_chain_invalid(self):
         """[P7-T3] 无效链返回 None 或空"""
-        from meta.services.management_dimension_engine import resolve_dimension_chain
+        from meta.services.permission_dimension_engine import resolve_dimension_chain
         # product 不能解析到不存在的 dimension
         chain = resolve_dimension_chain('product', 'nonexistent')
         assert chain is None or chain == []
@@ -477,7 +477,7 @@ class TestP7T5Acceptance:
             PERMITTED_RULE_TYPES,
             PERMITTED_SCOPE_MODES,
         )
-        from meta.services.management_dimension_engine import (
+        from meta.services.permission_dimension_engine import (
             MANAGEMENT_DIMENSION_CHAIN,
             resolve_dimension_chain,
         )

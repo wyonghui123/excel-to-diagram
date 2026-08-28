@@ -2887,7 +2887,7 @@ class ImportExportService:
             return cache
 
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
 
             # === 1. annotation target 收集 ===
             if object_type == 'annotation':
@@ -3144,7 +3144,7 @@ class ImportExportService:
                 return
 
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
             table_name = RESOURCE_TABLE_MAP.get(target_type)
             if not table_name:
                 return

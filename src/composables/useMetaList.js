@@ -702,11 +702,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    */
   function handleSelectionChange(rows) {
     selectedRows.value = rows
-    
+
     const rowKey = config.rowKey || 'id'
     const currentPageIds = new Set(data.value.map(row => row[rowKey]))
     const newSet = new Set([...selectedIds.value].filter(id => !currentPageIds.has(id)))
-    
+
     rows.forEach(row => {
       if (row[rowKey]) {
         newSet.add(row[rowKey])

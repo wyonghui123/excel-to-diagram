@@ -262,13 +262,13 @@ def list_dimension_values_for_rule(dimension_code):
         { success, data: [{id, code, name, parent_name}, ...] }
     """
     try:
-        # 复用 management_dimension_api 的引擎, 保持单一事实
-        from meta.api.management_dimension_api import (
+        # 复用 permission_dimension_api 的引擎, 保持单一事实
+        from meta.api.permission_dimension_api import (
             _data_source,
             _PARENT_INFO_MAP,
             _get_engine,
         )
-        from meta.services.management_dimension_engine import (
+        from meta.services.permission_dimension_engine import (
             CODE_FIELD_MAP,
             DISPLAY_FIELD_MAP,
             RESOURCE_TABLE_MAP,
@@ -371,7 +371,7 @@ def list_dimensions_for_rule():
     真实端点是 /management-dimensions. 这里转发, 保持前端不动。
     """
     try:
-        from meta.api.management_dimension_api import _get_engine
+        from meta.api.permission_dimension_api import _get_engine
         engine = _get_engine()
         dimensions = engine.get_available_dimensions()
         result = []
@@ -393,7 +393,7 @@ def list_dimensions_for_rule():
 
 
 def _guess_cascade_parent(dim_id):
-    """粗略级联父维度（与 management_dimension.yaml 顺序保持一致）。"""
+    """粗略级联父维度（与 permission_dimension.yaml 顺序保持一致）。"""
     cascade = {
         'sub_domain': 'domain',
         'service_module': 'sub_domain',

@@ -132,6 +132,14 @@
       </div>
     </div>
   </div>
+
+  <!-- [v70 2026-08-28] 权限体检弹窗：体检是角色 object 的 validation action，
+       入口在 ObjectPage/标题栏标准 action 区（objectType==='role' 时显示） -->
+  <PermissionAuditDialog
+    v-if="showAuditDialog"
+    :role-id="id"
+    @close="showAuditDialog = false"
+  />
 </template>
 
 <script setup>
@@ -146,6 +154,7 @@ import { objectTypeService } from '@/services/objectTypeService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
+import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -522,7 +531,7 @@ const computedActions = computed(() => {
   const yamlActions = detailConfig?.actions || []
 
   if (yamlActions.length > 0) {
-    return yamlActions.map(a => {
+    const actions = yamlActions.map(a => {
       if (typeof a === 'string') {
         return buildAction(a)
       }
@@ -535,6 +544,8 @@ const computedActions = computed(() => {
         container: a.container
       }
     })
+    appendRoleAuditAction(actions)
+    return actions
   }
 
   const actions = [buildAction('edit')]
@@ -545,15 +556,27 @@ const computedActions = computed(() => {
   if (props.showDelete && !internalEditing.value) {
     actions.push(buildAction('delete'))
   }
+  appendRoleAuditAction(actions)
   return actions
 })
+
+// [v70 2026-08-28] 角色 object 的 validation action：权限体检。
+//   仅浏览态显示（编辑中数据未落库，体检结果会误导）；新建模式无 roleId 不显示。
+function appendRoleAuditAction(actions) {
+  if (props.objectType === 'role' && !internalEditing.value && props.id !== 'new') {
+    actions.push(buildAction('audit'))
+  }
+}
 
 function buildAction(key) {
   const map = {
     edit: { id: 'edit', key: 'edit', label: '编辑', icon: 'edit', variant: 'primary' },
     save: { id: 'save', key: 'save', label: '保存', icon: 'save', variant: 'primary' },
     cancel: { id: 'cancel', key: 'cancel', label: '取消', icon: 'close', variant: 'secondary' },
-    delete: { id: 'delete', key: 'delete', label: '删除', icon: 'delete', variant: 'danger' }
+    delete: { id: 'delete', key: 'delete', label: '删除', icon: 'delete', variant: 'danger' },
+    // [v71 2026-08-28] 权限体检用 primary 变体：与标题栏 编辑/删除 视觉一致
+    //   （该标题栏 danger 也渲染为品牌色填充，secondary 灰白会显得突兀）
+    audit: { id: 'audit', key: 'audit', label: '权限体检', icon: 'search', variant: 'primary' }
   }
   return map[key] || { id: key, key, label: key, icon: key, variant: '' }
 }
@@ -1432,6 +1455,11 @@ async function handleObjectPageAction({ action }) {
       await handleDelete()
       break
 
+    case 'audit':
+      // [v70 2026-08-28] 角色 validation action：打开权限体检弹窗
+      showAuditDialog.value = true
+      break
+
     default:
   }
 }
@@ -1585,6 +1613,9 @@ defineExpose({
   handleObjectPageAction,
   handleRefresh
 })
+
+// [v70 2026-08-28] 权限体检弹窗状态（角色 object validation action）
+const showAuditDialog = ref(false)
 </script>
 
 <style scoped lang="scss">

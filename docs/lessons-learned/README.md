@@ -1,6 +1,6 @@
 # 💡 经验记录索引
 
-> **最后更新**: 2026-04-08  
+> **最后更新**: 2026-08-28  
 > **维护者**: 开发团队
 
 ---
@@ -56,6 +56,7 @@ Element Plus UI 组件库的踩坑与解决方案
 | Mermaid 渲染异常 | [debugging/mermaid-debugging.md](./debugging/mermaid-debugging.md) |
 | 弹窗内下拉被遮罩看不到 | [element-plus/dropdown-modal-occlusion.md](./element-plus/dropdown-modal-occlusion.md) |
 | 测试"通过"但实际 UI 不可见 | [testing/testability-iron-rules.md](./testing/testability-iron-rules.md) |
+| 反勾选保存 bug 探针假阳性 / Vue 响应式状态依赖 | [testing/permission-save-false-positive.md](./testing/permission-save-false-positive.md) |
 
 ---
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Tests for GET /api/v2/bo/management_dimension/<dim>/tree endpoint
+Tests for GET /api/v2/bo/permission_dimension/<dim>/tree endpoint
 [FIX 2026-07-22] 层级值帮助 picker 后端
 """
 import json
@@ -16,7 +16,7 @@ sys.path.insert(0, _PROJECT_ROOT)
 
 from flask import Flask, g
 
-from meta.api.management_dimension_api import register_management_dimension_apis
+from meta.api.permission_dimension_api import register_permission_dimension_apis
 
 pytestmark = pytest.mark.integration
 
@@ -96,14 +96,14 @@ def app_with_data():
 
     # Monkey-patch module-level _data_source AND _engine 让 _build_dimension_tree
     # 直接用我们的临时 DB (跳过 _get_engine 内的 production DB 初始化)
-    import meta.api.management_dimension_api as api_mod
+    import meta.api.permission_dimension_api as api_mod
     original_ds = api_mod._data_source
     original_engine = api_mod._engine
     api_mod._data_source = ds
     api_mod._engine = object()  # 非 None, 让 _get_engine 不再初始化
 
     try:
-        from meta.api.management_dimension_api import _build_dimension_tree
+        from meta.api.permission_dimension_api import _build_dimension_tree
         yield {
             'ds': ds,
             'tmpfile': tmpfile.name,

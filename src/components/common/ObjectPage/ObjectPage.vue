@@ -1,5 +1,26 @@
 <template>
-  <ObjectPageShell ref="shellRef" v-bind="$props" @back="$emit('back')" @navigate="$emit('navigate', $event)" @tab-change="$emit('tab-change', $event)" @field-update="$emit('field-update', $event)" @field-display-update="$emit('field-display-update', $event)" @update:editing="$emit('update:editing', $event)" @save="$emit('save')" @cancel="$emit('cancel')" @delete="$emit('delete')" @action="$emit('action', $event)" @refresh="$emit('refresh')" />
+  <!-- [v44 2026-08-27] 转发父组件提供的 slots（#section-*、#breadcrumb 等）
+       之前 ObjectPage.vue 没有转发，导致父组件的 #section-permissions 完全失效，
+       权限配置 panel 无法渲染（tab 显示空白）-->
+  <ObjectPageShell
+    ref="shellRef"
+    v-bind="$props"
+    @back="$emit('back')"
+    @navigate="$emit('navigate', $event)"
+    @tab-change="$emit('tab-change', $event)"
+    @field-update="$emit('field-update', $event)"
+    @field-display-update="$emit('field-display-update', $event)"
+    @update:editing="$emit('update:editing', $event)"
+    @save="$emit('save')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
+    @action="$emit('action', $event)"
+    @refresh="$emit('refresh')"
+  >
+    <template v-for="(_, name) in $slots" :key="name" #[name]="slotData">
+      <slot :name="name" v-bind="slotData || {}" />
+    </template>
+  </ObjectPageShell>
 </template>
 
 <script setup>

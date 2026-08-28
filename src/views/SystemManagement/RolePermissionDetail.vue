@@ -25,15 +25,20 @@
         :object-id="roleId"
         size="lg"
         @tab-change="handleTabChange"
+        @action="handleDetailAction"
         @update:editing="isEditing = $event"
         @save="handleSave"
         @cancel="handleCancel"
       >
         <!-- Custom Slot: 权限配置面板 -->
         <template #section-permissions>
+          <!-- [v40 2026-08-27] 一体化编辑：editing 由 ObjectPage 统一下发；
+               保存通过 ref.save() 在顶层「保存」动作中一并提交 -->
           <PermissionConfigPanel
+            ref="permPanelRef"
             :role-id="roleId"
             :role="role"
+            :editing="isEditing"
             @saved="handlePermissionSaved"
             @reset="handlePermissionReset"
           />
@@ -56,6 +61,14 @@
           </div>
         </template>
       </ObjectPage>
+
+      <!-- [v70 2026-08-28] 权限体检弹窗：体检是角色 object 的 validation action，
+           入口在 ObjectPage 头部标准 action 区（原 PermissionConfigPanel 底部按钮已移除） -->
+      <PermissionAuditDialog
+        v-if="showAuditDialog"
+        :role-id="roleId"
+        @close="showAuditDialog = false"
+      />
     </PageShell>
   </div>
 </template>
@@ -69,6 +82,7 @@ import { useMessage } from '@/composables/useMessage'
 import { PageShell } from '@/components/common/PageShell'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionConfigPanel from './components/PermissionConfigPanel.vue'
+import PermissionAuditDialog from './components/PermissionAuditDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -81,6 +95,8 @@ const role = ref<any>(null)
 const loading = ref(false)
 const isEditing = ref(false)
 const isSaving = ref(false)
+/** [v40 2026-08-27] 权限面板引用：顶层「保存」时联动提交权限 */
+const permPanelRef = ref<any>(null)
 
 const isNewMode = computed(() => {
   return !roleId.value || roleId.value === 'new'
@@ -117,11 +133,29 @@ const fieldDefs = computed(() => ({
 
 const roleData = computed(() => role.value || {})
 
-const detailActions = [
-  { id: 'edit', label: '编辑', icon: 'edit', type: 'primary' },
-  { id: 'save', label: '保存', icon: 'check', type: 'primary' },
-  { id: 'cancel', label: '取消', icon: 'close', type: 'default' }
-]
+// [v70 2026-08-28] 权限体检是角色 object 的 validation action，放入标准 action 区。
+//   浏览态可见（编辑中数据未落库，体检结果会误导）；新建模式无 roleId，不显示。
+const detailActions = computed(() => {
+  const actions = [
+    { id: 'edit', label: '编辑', icon: 'edit', type: 'primary' },
+    { id: 'save', label: '保存', icon: 'check', type: 'primary' },
+    { id: 'cancel', label: '取消', icon: 'close', type: 'default' }
+  ]
+  if (!isNewMode.value) {
+    // [v71 2026-08-28] primary 变体：与 编辑/删除 填充风格保持一致
+    actions.push({ id: 'audit', label: '权限体检', icon: 'search', type: 'primary' })
+  }
+  return actions
+})
+
+const showAuditDialog = ref(false)
+
+function handleDetailAction(payload: any) {
+  const key = payload?.action?.key
+  if (key === 'audit') {
+    showAuditDialog.value = true
+  }
+}
 
 const permissionSections = [
   {
@@ -226,6 +260,19 @@ async function handleSave() {
     }
 
     if (result.success) {
+      // [v59 2026-08-27] 时序修复：必须「先保存权限 → 再退出编辑态」。
+      //   此前 isEditing=false 先执行，PermissionConfigPanel 的 watch(isEditing)
+      //   退出分支会立即 menus.value=editSnapshot 恢复快照 + 清空 matrixChanges/范围快照，
+      //   随后的 panel.save() 存的全是编辑前的旧状态 → 菜单勾选/矩阵/范围全部"保存无效"。
+      if (!isNewMode.value && permPanelRef.value?.save) {
+        try {
+          await permPanelRef.value.save()
+        } catch (permError) {
+          // 保存失败 → 保持编辑态让用户修正重试（角色元数据已落库，不回滚）
+          message.error('角色已保存，但权限设置保存失败，请在权限配置区检查后重试', permError)
+          return
+        }
+      }
       message.success(isNewMode.value ? '创建成功' : '保存成功')
       isEditing.value = false
       if (isNewMode.value && result.data?.id) {
@@ -284,10 +331,6 @@ function handleTabChange(tabKey: string) {
 }
 
 function handlePermissionSaved() {
-  loadRole()
-}
-
-function handlePermissionReset() {
   loadRole()
 }
 

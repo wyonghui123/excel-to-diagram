@@ -45,6 +45,13 @@ PARENT_FIELD_MAP = {
 
 LEVEL_ORDER = {'none': 0, 'read': 1, 'write': 2, 'admin': 3}
 
+# [2026-08-27] 系统基线字段（隐式安全基线，不暴露为逐条业务条件）
+#   - owner_id (FK→user): 数据归属，由系统层保证（product chain 追溯 owner）
+#   - visibility (string 枚举): 按角色可见等级放行，映射维护在角色模板层
+#   语义跨所有资源一致，不适合重复配置（防重复配置/语义漂移/越权校验）。
+#   命中即静默跳过，不出现在条件字段下拉与高级模式字段参考。
+BASELINE_FIELDS_EXCLUDED = {'owner_id', 'visibility'}
+
 
 class ConditionPermissionService:
     """条件型权限服务"""
@@ -290,6 +297,7 @@ class ConditionPermissionService:
                     resource_type VARCHAR(200),
                     dimension_code VARCHAR(200),
                     condition TEXT,
+                    condition_display TEXT,
                     scope_mode VARCHAR(50) DEFAULT 'include',
                     permission_level VARCHAR(50) DEFAULT 'read',
                     is_denied INTEGER DEFAULT 0,
@@ -301,6 +309,13 @@ class ConditionPermissionService:
                     updated_at VARCHAR(200)
                 )
             """)
+            # [v56 2026-08-27] 已存在的表补列（幂等）：人类可读条件描述
+            try:
+                self.ds.execute(
+                    "ALTER TABLE data_permission_rules ADD COLUMN condition_display TEXT"
+                )
+            except Exception:
+                pass  # 列已存在
         except Exception as e:
             print(f"[P11] _ensure_unified_table (ignore if exists): {e}")
 
@@ -318,15 +333,17 @@ class ConditionPermissionService:
             cursor = self.ds.execute(
                 """INSERT INTO data_permission_rules
                    (role_id, rule_type, resource_type, dimension_code, condition,
+                    condition_display,
                     scope_mode, permission_level, is_denied,
                     inherit_to_children, propagate_to_parents, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
                 [
                     data['role_id'],
                     rule_type,
                     data.get('resource_type'),
                     data.get('dimension_code'),
                     data.get('condition'),
+                    data.get('condition_display'),
                     data.get('scope_mode', 'include'),
                     data.get('permission_level', 'read'),
                     1 if data.get('is_denied') else 0,
@@ -397,6 +414,51 @@ class ConditionPermissionService:
                 rule.get('condition', '') or ''
             )
         return rules
+
+    def update_unified_rule(self, rule_id: int, data: Dict[str, Any]) -> bool:
+        """[v48 2026-08-27] 更新统一权限规则 (写 data_permission_rules 表)
+
+        背景：v2 PUT 端点此前调用 update_rule()，其 SQL 指向 legacy 表
+        permission_rules，而列表查询读 data_permission_rules —— 导致
+        "变更配置条件保存后刷新仍是旧值"（更新根本没落到统一表）。
+
+        安全限定：data 中若带 role_id / resource_type / rule_type，
+        会作为 WHERE 条件二次校验，防止 id 跨表误更新。
+        """
+        self._ensure_unified_table()
+        try:
+            sets = []
+            params = []
+            for field in ['condition', 'condition_display', 'permission_level', 'is_denied',
+                            'inherit_to_children', 'propagate_to_parents', 'scope_mode']:
+                if field in data:
+                    val = data[field]
+                    if field in ('is_denied', 'inherit_to_children', 'propagate_to_parents'):
+                        val = 1 if val else 0
+                    sets.append(f"{field} = ?")
+                    params.append(val)
+            if not sets:
+                return True
+            sets.append("updated_at = CURRENT_TIMESTAMP")
+            where = ["id = ?"]
+            params.append(rule_id)
+            # 安全限定条件（调用方传了才校验）
+            for wf in ['role_id', 'resource_type', 'rule_type']:
+                if data.get(wf) not in (None, ''):
+                    where.append(f"{wf} = ?")
+                    params.append(data[wf])
+            cursor = self.ds.execute(
+                f"UPDATE data_permission_rules SET {', '.join(sets)} WHERE {' AND '.join(where)}",
+                params
+            )
+            # [v48] rowcount=0 表示该 id 不在统一表（legacy 数据）→ 返回 False 让调用方回退
+            try:
+                return (cursor.rowcount or 0) > 0
+            except Exception:
+                return True
+        except Exception as e:
+            print(f"[v48] Error updating unified permission rule: {e}")
+            return False
 
     def delete_unified_rule(self, rule_id: int) -> bool:
         """[P11] 删除统一权限规则"""
@@ -565,25 +627,33 @@ class ConditionPermissionService:
         return rows[0] if rows else None
 
     def preview_matching_resources(self, condition: str, resource_type: str) -> Dict[str, Any]:
-        """预览条件匹配的资源"""
+        """预览条件匹配的资源
+
+        [2026-08-28 v61] 返回结构增加 total（全表数量）用于对比视角；
+        错误显性化：条件解析 / SQL 失败必须通过 error 字段传给前端，
+        不能伪装成「匹配 0 个资源」误导用户。
+        """
         table_name = RESOURCE_TABLE_MAP.get(resource_type)
         if not table_name:
-            return {'count': 0, 'resources': []}
+            return {'count': 0, 'total': 0, 'resources': [], 'error': f'未知的资源类型: {resource_type}'}
 
         sql_where = self.evaluator.predicate_to_sql_where(condition)
         if not sql_where:
-            return {'count': 0, 'resources': []}
+            return {'count': 0, 'total': 0, 'resources': [], 'error': '条件表达式无法解析为有效的查询'}
 
         try:
+            total_cursor = self.ds.execute(f"SELECT COUNT(*) FROM {table_name}")
+            total = total_cursor.fetchone()[0]
+
             cursor = self.ds.execute(f"SELECT id, name, code FROM {table_name} WHERE {sql_where} LIMIT 100")
             resources = [{'id': r[0], 'name': r[1], 'code': r[2]} for r in cursor.fetchall()]
 
             count_cursor = self.ds.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {sql_where}")
             count = count_cursor.fetchone()[0]
 
-            return {'count': count, 'resources': resources}
+            return {'count': count, 'total': total, 'resources': resources}
         except Exception as e:
-            return {'count': 0, 'resources': [], 'error': str(e)}
+            return {'count': 0, 'total': 0, 'resources': [], 'error': str(e)}
 
     def get_resource_field_metadata(self, resource_type: str) -> List[Dict]:
         """
@@ -610,6 +680,11 @@ class ConditionPermissionService:
                 if field.storage == FieldStorage.VIRTUAL:
                     continue
 
+                # [2026-08-27] 跳过系统基线字段（owner_id / visibility）
+                #   隐式安全基线由系统层保证，不暴露为逐条业务条件
+                if field.db_column in BASELINE_FIELDS_EXCLUDED:
+                    continue
+
                 field_info = {
                     'id': field.id,
                     'name': field.name or field.id,
@@ -619,6 +694,19 @@ class ConditionPermissionService:
                     'relation_object': field.ui.relation if field.ui else '',
                     'display_field': field.ui.display_field if field.ui else '',
                     'is_foreign_key': False,
+                    # [v18 2026-08-26] 业务主键标志：标识「资源自身的 ID / 编码」字段
+                    #   - 用于在 Rule Builder 中触发 self-reference picker
+                    #   - 数据源：YAML field.semantics.business_key == true
+                    #   - 头部产品对照：
+                    #   - SAP: Authorization Object 的「自身字段」也支持 F4 Search Help（按 Object 自身取候选）
+                    #   - Salesforce: Lookup Dialog 返回 Id，default field 是 Id (业务键)
+                    'is_business_key': False,
+                    # [v21 2026-08-26] 枚举标志：标识「枚举 / boolean 字段」走枚举 picker
+                    #   - 数据源：YAML field.enum_values（固定枚举）或 field.semantics.enum_ref（引用枚举类型）
+                    #   - 头部产品对照：SAP Authorization Field 单值域（Fixed Value）也支持 F4
+                    'is_enum': False,
+                    'enum_values': None,  # list[{value, label, color}], 或 None
+                    'enum_ref': None,      # str: enum_type_id（引用枚举类型）, 或 None
                 }
 
                 # 判断是否为外键
@@ -631,6 +719,40 @@ class ConditionPermissionService:
                             field_info['is_foreign_key'] = True
                             if analytics.get('display_name') and not field_info.get('name'):
                                 field_info['name'] = analytics['display_name']
+
+                # [v18 2026-08-26] 检测业务主键字段：
+                #   优先从 semantics.business_key 读取（YAML 显式声明）
+                #   兜底：db_column == 'code'（多数资源的业务编码字段）
+                #   不强制要求 id 字段必为业务主键（id 是技术主键，由 ui.visible=false 隐藏）
+                semantics = field.semantics
+                if semantics and getattr(semantics, 'business_key', False):
+                    field_info['is_business_key'] = True
+                elif field.db_column == 'code' and not field_info['is_business_key']:
+                    # 兜底：YAML 未声明 business_key 时，code 字段默认视为业务主键
+                    field_info['is_business_key'] = True
+
+                # [v21 2026-08-26] 检测枚举字段：
+                #   - 固定枚举：YAML field.enum_values 列出所有选项（如 boolean「是/否」、status「启用/禁用」）
+                #     实际是 List[Dict]，每个 dict 含 value/label/color 键
+                #   - 引用枚举：YAML field.semantics.enum_ref 指向一个枚举类型（如 visibility、priority）
+                #   - 检测到任一来源 → is_enum=true，前端 Rule Builder 用 picker（不是 el-input 文本）
+                enum_values_raw = getattr(field, 'enum_values', None)
+                if enum_values_raw:
+                    field_info['is_enum'] = True
+                    # [v21 FIX 2026-08-26] enum_values 是 List[Dict]（不是对象列表），统一转为 {value, label, color}
+                    normalized = []
+                    for ev in enum_values_raw:
+                        if isinstance(ev, dict):
+                            normalized.append({
+                                'value': str(ev.get('value', ev.get('label', ''))),
+                                'label': ev.get('label', str(ev.get('value', ''))),
+                                'color': ev.get('color'),
+                            })
+                    if normalized:
+                        field_info['enum_values'] = normalized
+                elif semantics and getattr(semantics, 'enum_ref', None):
+                    field_info['is_enum'] = True
+                    field_info['enum_ref'] = semantics.enum_ref
 
                 fields.append(field_info)
 

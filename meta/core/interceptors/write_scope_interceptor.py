@@ -1577,7 +1577,7 @@ class WriteScopeInterceptor(Interceptor):
             return self._check_ancestor_dim_scope(context, target_type, parent_record, expanded)
 
         from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_ANCHOR, EXTENDED_CHAIN_PARENT
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
         current_id = record.get('id')
         if not current_id:
@@ -2055,7 +2055,7 @@ class WriteScopeInterceptor(Interceptor):
         Returns: True 如果 parent 下有用户 scope 内的 child
         """
         from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_PARENT
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
         # [FIX v1.2.32] EXTENDED_CHAIN 类型: 先步进到 HIERARCHY_CHAIN
         current_id = record.get('id')
@@ -2264,7 +2264,7 @@ class WriteScopeInterceptor(Interceptor):
         if not record.get('id'):
             return False
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
             table = RESOURCE_TABLE_MAP.get(object_type)
             if not table:
                 return False
@@ -2405,7 +2405,7 @@ class WriteScopeInterceptor(Interceptor):
         性能: 单次 SELECT * (含必需字段), 不做 N+1
         """
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
             table = RESOURCE_TABLE_MAP.get(object_type)
             if not table:
                 return None
@@ -2843,7 +2843,7 @@ class WriteScopeInterceptor(Interceptor):
 
     def _get_table_name_for_bo(self, object_type: str) -> Optional[str]:
         """获取 BO 对象类型对应的数据库表名"""
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
         return RESOURCE_TABLE_MAP.get(object_type)
 
     def _get_user_role_ids_direct(self, user_id: int, data_source) -> Tuple[int, ...]:

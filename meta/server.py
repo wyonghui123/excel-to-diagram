@@ -132,7 +132,7 @@ from meta.api.permission_bundle_api import permission_bundle_bp
 from meta.api.permission_audit_api import permission_audit_bp
 from meta.api.role_menu_api import role_menu_bp
 from meta.api.role_dimension_scope_api import role_dim_bp
-from meta.api.management_dimension_api import management_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
+from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
 from meta.api.permission_rule_api import permission_rule_bp
 from meta.api.permission_sync_api import permission_sync_bp
 from meta.api.owner_transfer_api import owner_transfer_bp
@@ -666,7 +666,7 @@ def create_app(db_path=None):
     # app.register_blueprint(role_data_permission_bp)  # 模块不存在，已废弃
     app.register_blueprint(role_menu_bp)
     app.register_blueprint(role_dim_bp)
-    app.register_blueprint(management_dimension_bp)
+    app.register_blueprint(permission_dimension_bp)
     app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
     app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
     app.register_blueprint(user_group_bp)
@@ -770,7 +770,7 @@ def create_app(db_path=None):
         'permission-bundles': 'permission_bundle',
         'permission-rules': 'permission_rule',
         'data-permissions': 'data_permission',
-        'management-dimensions': 'management_dimension',
+        'management-dimensions': 'permission_dimension',
         'filter-variants': 'filter_variant',
         'menu-permission': 'menu_permission',
         'identity': 'identity',

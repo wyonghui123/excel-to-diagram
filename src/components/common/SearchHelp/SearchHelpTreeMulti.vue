@@ -2,7 +2,7 @@
   SearchHelpTreeMulti - Tree 多选语义化封装
   ===========================================
   元数据驱动的 SearchHelp 组件库: Tree 多选
-  适用于 management_dimension 类型 (product/version/domain/sub_domain)
+  适用于 permission_dimension 类型 (product/version/domain/sub_domain)
 
   Props:
     - visible (Boolean): 弹窗可见性

@@ -45,7 +45,7 @@
         <div v-if="activeTab === 'permissions'">
           <div v-if="loadingUnified" class="loading-state"><span class="spinner"></span>加载权限配置...</div>
           <template v-else>
-          <!-- 管理维度范围 -->
+          <!-- 数据权限·范围 -->
           <DimensionScopePanel
             :role-id="String(role?.id || '')"
             @dimension-scopes-saved="handleDimensionScopesSaved"

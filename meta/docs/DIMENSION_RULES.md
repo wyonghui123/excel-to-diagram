@@ -69,7 +69,7 @@
 | `/api/v1/role/{id}/permission-rules` | POST | 保存 role 的权限规则 |
 | `/api/v1/role/{id}/calculate-impact` | POST | 计算权限变更影响 |
 
-> **注意**: 上述端点 v1 已迁移到 v2 (`/api/v2/bo/management_dimension`),
+> **注意**: 上述端点 v1 已迁移到 v2 (`/api/v2/bo/permission_dimension`),
 > 但 v2 路由尚未完整实现, 当前仍走 v1 (Agent 路径修正后).
 
 ## 5. 范围继承 (Inheritance)
@@ -96,7 +96,7 @@ dimension:org (root)
 
 ### 6.1 引擎组成
 - `dimension_scope_engine.py` - 范围计算
-- `management_dimension_engine.py` - 维度操作
+- `permission_dimension_engine.py` - 维度操作
 - `runtime_dimension_resolver.py` - 运行时解析
 - `data_permission_interceptor.py` - 拦截器集成
 
@@ -126,7 +126,7 @@ dimension:org (root)
 ### 8.1 后端测试
 - `meta/tests/test_dimension_scope_engine.py` - 引擎
 - `meta/tests/test_dimension_scope_v101.py` - v1.01 范围
-- `meta/tests/test_management_dimension_api.py` - API
+- `meta/tests/test_permission_dimension_api.py` - API
 - `meta/tests/test_role_menu_dim_api.py` - 角色-菜单-维度
 - `meta/tests/test_dimension_aware_filtering.py` - 维度过滤
 
@@ -171,6 +171,6 @@ dimension:org (root)
 ## 13. 参考
 
 - 后端文件: `meta/services/dimension_scope_engine.py` (入口)
-- 后端文件: `meta/api/management_dimension_api.py` (API 端点)
+- 后端文件: `meta/api/permission_dimension_api.py` (API 端点)
 - 迁移历史: `migrated_at: 2026-05-14`, `sunset_at: 2026-06-05`
 - BMRD 框架: `.trae/specs/_business_rules/_data_permission_dimension_rules.yaml`

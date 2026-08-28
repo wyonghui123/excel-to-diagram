@@ -99,7 +99,7 @@ describe('HierarchicalTreePicker', () => {
 
       expect(fetchMock).toHaveBeenCalled()
       const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1][0]
-      expect(lastCall).toContain('/api/v2/bo/management_dimension/sub_domain/tree')
+      expect(lastCall).toContain('/api/v2/bo/permission_dimension/sub_domain/tree')
     })
 
     it('从 API 响应读 hierarchy_meta, 写入 hierarchyMeta state', async () => {
@@ -131,8 +131,9 @@ describe('HierarchicalTreePicker', () => {
       // 直接设置内部状态模拟勾选
       wrapper.vm.checkedIds = [31]
       await wrapper.vm.$nextTick()
-      // 触发确定
-      await wrapper.find('.htp-actions .el-button--primary').trigger('click')
+      // 触发确定 (footer 按钮由父组件持有, 组件内直接调 confirm)
+      wrapper.vm.confirm()
+      await flushPromises()
 
       const events = wrapper.emitted('confirm')
       expect(events).toBeTruthy()
@@ -145,18 +146,19 @@ describe('HierarchicalTreePicker', () => {
       })
     })
 
-    it('空选择时确定按钮 disabled', async () => {
+    it('空选择时 canConfirm=false (确认按钮由父组件持有)', async () => {
       const wrapper = mount(HierarchicalTreePicker, {
         props: {
           dimensionId: 'sub_domain',
-          
           multiple: true,
         },
       })
       await flushPromises()
 
-      const btn = wrapper.find('.htp-actions .el-button--primary')
-      expect(btn.attributes('disabled')).toBeDefined()
+      expect(wrapper.vm.canConfirm).toBe(false)
+      wrapper.vm.checkedIds = [31]
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.canConfirm).toBe(true)
     })
   })
 
@@ -172,14 +174,15 @@ describe('HierarchicalTreePicker', () => {
 
       wrapper.vm.currentId = 31
       await wrapper.vm.$nextTick()
-      await wrapper.find('.htp-actions .el-button--primary').trigger('click')
+      wrapper.vm.confirm()
+      await flushPromises()
 
       const events = wrapper.emitted('confirm')
       expect(events[0][0]).toMatchObject({ type: 'single', id: 31 })
       expect(events[0][0].node.name).toBe('询价单')
     })
 
-    it('无选中时确定按钮 disabled', async () => {
+    it('无选中时 canConfirm=false', async () => {
       const wrapper = mount(HierarchicalTreePicker, {
         props: {
           dimensionId: 'sub_domain',
@@ -188,8 +191,10 @@ describe('HierarchicalTreePicker', () => {
       })
       await flushPromises()
 
-      const btn = wrapper.find('.htp-actions .el-button--primary')
-      expect(btn.attributes('disabled')).toBeDefined()
+      expect(wrapper.vm.canConfirm).toBe(false)
+      wrapper.vm.currentId = 31
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.canConfirm).toBe(true)
     })
   })
 
@@ -234,7 +239,8 @@ describe('HierarchicalTreePicker', () => {
 
       wrapper.vm.checkedIds = [32]  // 采购订单
       await wrapper.vm.$nextTick()
-      await wrapper.find('.htp-actions .el-button--primary').trigger('click')
+      wrapper.vm.confirm()
+      await flushPromises()
 
       const events = wrapper.emitted('confirm')
       const ancestor = events[0][0].nodes[0].ancestorPath
@@ -311,13 +317,11 @@ describe('HierarchicalTreePicker', () => {
       await flushPromises()
       await flushPromises()
 
-      // 模拟 el-tree 的 check 事件: 传 __tk (因为 node-key 改了)
+      // 模拟 el-tree 的 check 事件: jsdom 中真实 el-tree 未勾选,
+      // 需 mock getCheckedKeys 返回 sub_domain_1 的 __tk (实现优先读官方 API)
       const subNode = wrapper.vm.treeData[0].children[0].children[0].children[0]
-      wrapper.vm.onCheckMultiple({
-        checkedKeys: [subNode.__tk],
-        halfCheckedKeys: [],
-        checkedNodes: [subNode],
-      })
+      wrapper.vm.treeRef = { getCheckedKeys: () => [subNode.__tk] }
+      wrapper.vm.onCheckMultiple()
       await flushPromises()
 
       // checkedIds 应是业务 id=1 (number), 不是 __tk 字符串
@@ -335,8 +339,8 @@ describe('HierarchicalTreePicker', () => {
       await flushPromises()
       await flushPromises()
 
-      // buildAncestorPath 用业务 id
-      const path = wrapper.vm.buildAncestorPath(1)  // id=1, 4 层都有
+      // id=1 在 4 层都有歧义, 必须用 unique_key 精确命中 (FIX 2026-08-24)
+      const path = wrapper.vm.buildAncestorPath('sub_domain_1')
       // 应包含 4 层 (sub_domain_1 在 product_1 下, 走链 product_1 -> version_1 -> domain_1 -> sub_domain_1)
       expect(path).toContain('产品A')
       expect(path).toContain('V1.0')
@@ -355,10 +359,10 @@ describe('HierarchicalTreePicker', () => {
       await flushPromises()
       await flushPromises()
 
-      // 直接调内部 handleConfirm (走完 checkedIds 后)
+      // 直接调内部 confirm (走完 checkedIds 后)
       // 模拟选中 sub_domain_31
       wrapper.vm.checkedIds = [31]
-      wrapper.vm.handleConfirm()
+      wrapper.vm.confirm()
       await flushPromises()
 
       const events = wrapper.emitted('confirm')
@@ -376,7 +380,7 @@ describe('HierarchicalTreePicker', () => {
 
       // 模拟选中 sub_domain_31
       wrapper.vm.currentId = 31
-      wrapper.vm.handleConfirm()
+      wrapper.vm.confirm()
       await flushPromises()
 
       const events = wrapper.emitted('confirm')
@@ -385,7 +389,8 @@ describe('HierarchicalTreePicker', () => {
       expect(payload.type).toBe('single')
       expect(payload.id).toBe(31)
       expect(payload.node).toBeDefined()
-      expect(payload.ancestorPath).toContain('产品A')
+      // ancestorPath 在 node 内部 (confirm 单数 payload 无顶层 ancestorPath)
+      expect(payload.node.ancestorPath).toContain('产品A')
     })
 
     it('同一组件可在不同 dimension 上复用 (dimensionId 是 prop)', async () => {
@@ -400,7 +405,7 @@ describe('HierarchicalTreePicker', () => {
 
       const calls = fetchMock.mock.calls
       const url = calls[calls.length - 1][0]
-      expect(url).toContain('/api/v2/bo/management_dimension/product/tree')
+      expect(url).toContain('/api/v2/bo/permission_dimension/product/tree')
     })
 
     it('从 hierarchy_meta 自动取 icon, 不依赖 prop hierarchyConfig', async () => {
@@ -436,15 +441,18 @@ describe('HierarchicalTreePicker', () => {
       expect(wrapper.vm.isDisabledNode(leafNode)).toBe(false)
     })
 
-    it('onlyLeafSelectable=false: 所有节点都可选', async () => {
+    it('onlyLeafSelectable=false: 目标维度叶子可选, 父节点仍禁用 (R22)', async () => {
       const wrapper = mount(HierarchicalTreePicker, {
         props: { dimensionId: 'sub_domain', onlyLeafSelectable: false },
       })
       await flushPromises()
       await flushPromises()
 
+      // [R22 2026-07-24] 父节点统一禁用 (与 onlyLeafSelectable 无关); onlyLeafSelectable=false 仅放行目标维度非叶子
+      const subLeafNode = { id: 31, type: 'sub_domain', children: [] }
+      expect(wrapper.vm.isDisabledNode(subLeafNode)).toBe(false)
       const productNode = { id: 1, type: 'product', children: [{ id: 11 }] }
-      expect(wrapper.vm.isDisabledNode(productNode)).toBe(false)
+      expect(wrapper.vm.isDisabledNode(productNode)).toBe(true)
     })
 
     it('excludeIds + checkedIds: 命中节点 isExcludedNode=true', async () => {
@@ -484,7 +492,7 @@ describe('HierarchicalTreePicker', () => {
       expect(events[0][0].type).toBe('multiple')
       expect(events[0][0].ids).toEqual([31])
       expect(events[0][0].nodes[0].id).toBe(31)
-      expect(events[0][0].nodes[0].ancestorPath).toContain('采购订单')
+      expect(events[0][0].nodes[0].ancestorPath).toContain('询价单')
     })
 
     it('cancel() emit cancel event', async () => {
@@ -507,17 +515,15 @@ describe('HierarchicalTreePicker', () => {
       await flushPromises()
       await flushPromises()
 
-      // 模拟外部直接触发 onCheckMultiple, 试图绕过 UI disabled
-      // (实际 el-tree 不会这样, 但 API 层必须防御)
-      wrapper.vm.onCheckMultiple({
-        checkedKeys: ['tk_1', 'tk_4'],  // tk_1=product, tk_4=sub_domain_31
-        halfCheckedKeys: [],
-        checkedNodes: [
-          { id: 1, __tk: 'tk_1', type: 'product' },
-          { id: 31, __tk: 'tk_4', type: 'sub_domain' },
-        ],
-      })
-      expect(wrapper.vm.checkedIds).toEqual([31])  // product_1 被过滤 (非叶子)
+      // 从当前挂载的树读取真实 __tk (模块级 __tkCounter 跨测试累加, 不能硬编码 tk_1)
+      const product1 = wrapper.vm.findNodeById(1)
+      const sub31 = wrapper.vm.findNodeById(31)
+      const sub32 = wrapper.vm.findNodeById(32)
+      // jsdom 中真实 el-tree 未勾选, 直接 mock getCheckedKeys 验证过滤逻辑:
+      //   product_1(非目标) + sub_domain_31(已排除) + sub_domain_32(合法)
+      wrapper.vm.treeRef = { getCheckedKeys: () => [product1.__tk, sub31.__tk, sub32.__tk] }
+      wrapper.vm.onCheckMultiple()
+      expect(wrapper.vm.checkedIds).toEqual([32])  // 仅 sub_domain_32 合法保留
     })
 
     // [UX-FIX 2026-07-23-R2]
@@ -568,20 +574,17 @@ describe('HierarchicalTreePicker', () => {
       await flushPromises()
       await flushPromises()
 
-      // 模拟 search 命中 1 个叶子, 其他 1682 个被后端过滤掉 (返回的 data 数组只有匹配项)
-      // 直接测试 pruneToLeavesOnly 对 mixed 数据
-      const mixed = [
-        { id: 1, name: 'product_1', children: [
-          { id: 11, name: 'version_11', children: [] },  // 无叶子子节点 -> 整枝剪掉
-        ] },
-        { id: 2, name: 'product_2', children: [
-          { id: 22, name: 'version_22', children: [
-            { id: 222, name: 'domain_222', children: [] },  // 无叶子
+      // 模拟 search 命中 0 个叶子: 后端只返回无目标叶子的枝 → displayTreeData 全剪
+      // (pruneToLeavesOnly 已内联为 displayTreeData computed 的 pruneToTargetLeaves)
+      wrapper.vm.treeData = [
+        { id: 1, unique_key: 'product_1', type: 'product', name: 'product_1', children: [
+          { id: 11, unique_key: 'version_11', type: 'version', name: 'version_11', children: [
+            { id: 111, unique_key: 'domain_111', type: 'domain', name: 'domain_111', children: [] },  // 无 sub_domain 叶子
           ] },
         ] },
       ]
-      const pruned = wrapper.vm.pruneToLeavesOnly(mixed)
-      expect(pruned).toEqual([])  // 没有叶子 -> 全部剪掉
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.displayTreeData).toEqual([])  // 没有目标叶子 -> 整枝剪掉
     })
   })
 })

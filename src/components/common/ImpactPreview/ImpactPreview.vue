@@ -5,7 +5,7 @@
     </div>
 
     <div v-if="loading" class="impact-preview__loading">
-      <el-icon class="is-loading"><Loading /></el-icon>
+      <AppIcon name="refresh" class="ip-loading-icon" />
       <span>加载中...</span>
     </div>
 
@@ -20,7 +20,7 @@
             :class="`summary-card--${stat.type}`"
           >
             <div class="summary-card__icon">
-              <component :is="stat.icon" />
+              <AppIcon :name="stat.icon" />
             </div>
             <div class="summary-card__content">
               <span class="summary-card__value">{{ stat.count }}</span>
@@ -33,18 +33,20 @@
       <div class="impact-preview__detail">
         <div class="detail-header" @click="toggleDetail">
           <div class="detail-header__left">
-            <el-icon class="detail-header__icon" :class="{ expanded: detailExpanded }">
-              <ArrowRight />
-            </el-icon>
+            <AppIcon
+              name="arrow-right"
+              class="detail-header__icon"
+              :class="{ expanded: detailExpanded }"
+            />
             <span class="detail-header__title">详细对象清单</span>
             <span class="detail-header__count">({{ filteredTableData.length }} 项)</span>
           </div>
           <div class="detail-header__actions">
             <el-dropdown trigger="click" @command="handleFilterCommand">
-              <el-button type="default" size="small">
-                <el-icon><Filter /></el-icon>
+              <AppButton variant="secondary" size="sm">
+                <AppIcon name="filter" />
                 过滤
-              </el-button>
+              </AppButton>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="all">全部</el-dropdown-item>
@@ -54,10 +56,10 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <el-button type="primary" size="small" @click="handleExport">
-              <el-icon><Download /></el-icon>
+            <AppButton variant="primary" size="sm" @click="handleExport">
+              <AppIcon name="download" />
               导出 Excel
-            </el-button>
+            </AppButton>
           </div>
         </div>
 
@@ -142,8 +144,9 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { Loading, ArrowRight, Filter, Download } from '@element-plus/icons-vue'
 import * as XLSX from 'xlsx'
+import AppButton from '../AppButton/AppButton.vue'
+import AppIcon from '../AppIcon/AppIcon.vue'
 
 const props = defineProps({
   impactData: {
@@ -191,25 +194,25 @@ const summaryStats = computed(() => {
       type: 'domain',
       label: '领域',
       count: data.domainCount || 0,
-      icon: 'div'
+      icon: 'building'
     },
     {
       type: 'subDomain',
       label: '子领域',
       count: data.subDomainCount || 0,
-      icon: 'div'
+      icon: 'folder'
     },
     {
       type: 'serviceModule',
       label: '服务模块',
       count: data.serviceModuleCount || 0,
-      icon: 'div'
+      icon: 'layers'
     },
     {
       type: 'businessObject',
       label: '业务对象',
       count: data.businessObjectCount || 0,
-      icon: 'div'
+      icon: 'file'
     }
   ]
 })
@@ -340,9 +343,20 @@ watch(() => props.impactData, () => {
   gap: var(--spacing-sm);
 }
 
-.impact-preview__loading .el-icon {
-  font-size: 32px;
+.impact-preview__loading .ip-loading-icon {
+  width: 32px;
+  height: 32px;
   color: var(--color-primary);
+  animation: ip-rotating 1.2s linear infinite;
+}
+
+@keyframes ip-rotating {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .impact-preview__summary {

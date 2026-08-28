@@ -3,7 +3,7 @@
     <div class="perm-header">
       <h4>
         <AppIcon name="layers" :size="14" />
-        管理维度范围
+        数据权限·范围
       </h4>
       <span v-if="dimensionsLoading" class="summary-item">加载中...</span>
       <span v-else class="summary-item assigned">
@@ -12,11 +12,11 @@
     </div>
 
     <p class="perm-guide">
-      配置角色的管理维度范围。系统将基于此自动推导菜单、功能权限和数据权限规则。
+      配置角色的数据权限范围（维度声明）。系统将基于此自动推导菜单、功能权限和数据权限规则。
     </p>
 
     <div v-if="dimensions.length === 0" class="empty-hint">
-      暂无可用的管理维度，请先确认元数据正确加载。
+      暂无可用的权限维度，请先确认元数据正确加载。
     </div>
 
     <div
@@ -55,23 +55,24 @@
           >
             {{ val.name || val.code || val.id }}
           </el-tag>
-          <el-button
-            size="small"
-            :icon="Plus"
+          <AppButton
+            size="sm"
+            variant="secondary"
             @click="openValuePicker(dim)"
           >
+            <AppIcon name="plus" :size="12" />
             添加{{ dim.name }}
-          </el-button>
+          </AppButton>
         </template>
-        <el-button
+        <AppButton
           v-if="!scopeAllFlags[dim.id]"
-          size="small"
-          plain
-          type="success"
+          size="sm"
+          variant="success"
+          ghost
           @click="toggleScopeAll(dim.id, true)"
         >
           全部
-        </el-button>
+        </AppButton>
         <span v-if="getParentDim(dim.id) && !hasParentValues(dim.id)" class="cascade-disabled-hint">
           上级未选，所有选项可用
         </span>
@@ -117,8 +118,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
-import { AppIcon } from '@/components/common/AppIcon'
+import { AppButton, AppIcon } from '@/components/common'
 import SearchHelpDialog from '@/components/common/SearchHelpDialog.vue'
 import * as permService from '@/services/permissionService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
@@ -137,7 +137,7 @@ const emit = defineEmits({
 
 const message = useCrudMessage()
 
-// [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
+// [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
 // 新的层级链: product → version → domain → sub_domain (4层)
 
 const DIMENSION_PARENT_LABEL = {
@@ -412,7 +412,7 @@ async function loadDimensions() {
     }
   } catch (e) {
     console.error('Failed to load dimensions:', e)
-    message.error('加载管理维度失败')
+    message.error('加载权限维度失败')
   } finally {
     dimensionsLoading.value = false
   }

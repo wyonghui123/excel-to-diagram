@@ -89,8 +89,11 @@ return {
     proxy: {
       // [v3.3] 动态代理: 支持多 Agent worktree 自验证
       // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
+      // [FIX BUG-V031 2026-08-28] localhost → 127.0.0.1
+      //   原因: Node.js 24 默认把 `localhost` 解析为 IPv6 `::1`,
+      //         后端 waitress 只绑 IPv4, proxy 连 `::1:3010` 被拒后 vite 包装为 500
       '/api': {
-        target: `http://localhost:${backendPort}`,
+        target: `http://127.0.0.1:${backendPort}`,
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -109,7 +112,7 @@ return {
         }
       },
       '/socket.io': {
-        target: `http://localhost:${backendPort}`,
+        target: `http://127.0.0.1:${backendPort}`,
         changeOrigin: true,
         ws: true,
       }

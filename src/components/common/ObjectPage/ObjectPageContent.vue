@@ -92,12 +92,14 @@
             />
           </template>
           <template v-else-if="section.type === 'custom' && section.key === 'permissions'">
-            <!-- Special handling for role permission config -->
-            <PermissionConfigPanel
-              v-if="objectType === 'role'"
-              :role-id="objectId"
-            />
-            <slot v-else :name="`section-${section.key}`" />
+            <!-- [v44 2026-08-27] Special handling for role permission config
+                 - 之前硬编码渲染 PermissionConfigPanel（无 :editing 绑定），
+                   会导致双渲染 + 永远 readonly。
+                 - 现统一交给外部 slot（RolePermissionDetail.vue 的 #section-permissions）
+                   渲染完整组件并传 :editing
+                 - 历史兼容：如果没传 slot，role 页面回退到硬编码版本（但这次已无此场景）
+              -->
+            <slot :name="`section-${section.key}`" />
           </template>
 
           <template v-else-if="section.type === 'custom'">
@@ -146,7 +148,9 @@
             @out-mapping="$emit('out-mapping', $event)"
           />
 
-          <slot :name="`section-${section.key}`" />
+          <!-- [v44 2026-08-27] permissions section 的 slot 已在 line 94 v-else-if 内显式渲染，
+               此处跳过避免双渲染。其他 custom section 仍依赖兜底 -->
+        <slot v-if="!(section.type === 'custom' && section.key === 'permissions')" :name="`section-${section.key}`" />
         </section>
       </div>
     </template>

@@ -9,46 +9,60 @@
 #   association  — 关联资源 (relationship) — 不继承, 取两端并集
 #   subordinate  — 附属资源 (annotation, audit_log) — 自动继承 parent.owner
 #   hierarchy    — 层级资源 (version, domain, sub_domain) — 向下展开, 不自动继承
+#
+# actions（[P2-Matrix-01 / A5]）: 每个资源类型「可授权动作清单」。
+# 前端矩阵视图据此动态生成动作列，不支持的列灰化禁选（audit_log 无 create/update/delete 等）。
+# 动作须在 permission_dimension_api._ACTION_LABELS 中有中文标签（缺则自动用 code 兜底）。
+#
+# [v36 2026-08-27] 删 'list'（统一守卫 read, 详见 api/permission_dimension_api._ACTION_LABELS）
+# [v36 2026-08-27] 加 'import'（_standard_actions.yaml 早已定义, 后端 export_import_api 已校验守卫）
 
 product:
   type: independent
   table: products
+  actions: [read, create, update, delete, export, import]
 
 version:
   type: hierarchy
   parent: product
   parent_field: product_id
   table: versions
+  actions: [read, create, update, delete, export, import]
 
 domain:
   type: hierarchy
   parent: version
   parent_field: version_id
   table: domains
+  actions: [read, create, update, delete, export, import]
 
 sub_domain:
   type: hierarchy
   parent: domain
   parent_field: domain_id
   table: sub_domains
+  actions: [read, create, update, delete, export, import]
 
 service_module:
   type: hierarchy
   parent: sub_domain
   parent_field: sub_domain_id
   table: service_modules
+  actions: [read, create, update, delete, export, import]
 
 business_object:
   type: hierarchy
   parent: service_module
   parent_field: service_module_id
   table: business_objects
+  actions: [read, create, update, delete, export, import]
 
 relationship:
   type: association
   source_field: source_bo_id
   target_field: target_bo_id
   table: relationships
+  actions: [read, export, import]
 
 annotation:
   type: subordinate
@@ -56,6 +70,7 @@ annotation:
   parent_id_field: parent_id
   inherit_owner: true
   table: annotations
+  actions: [read, create, update, delete]
 
 audit_log:
   type: subordinate
@@ -63,11 +78,14 @@ audit_log:
   parent_id_field: object_id
   inherit_owner: true
   table: audit_logs
+  actions: [read, export]
 
 user:
   type: independent
   table: users
+  actions: [read, create, update, delete, export]
 
 role:
   type: independent
   table: roles
+  actions: [read, create, update, delete, export]

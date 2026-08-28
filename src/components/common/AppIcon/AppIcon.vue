@@ -209,9 +209,68 @@
     <template v-else-if="name === 'filter'">
       <polygon points="6 2 10 2 14 14 2 14 6 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </template>
+    <!-- [Phase 3.8c 2026-08-25] M3 Material Symbols filter_alt
+         头部产品对照：fonts.google.com/icons/filter_alt
+         形状：漏斗 + 3 条横线（区别于 filter 的纯漏斗）-->
+    <template v-else-if="name === 'filter-alt'">
+      <path d="M3 5h10M5 9h6M7 13h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M13 5l3 4-3 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </template>
+    <!-- [Phase 3.8c 2026-08-25] M3 Material Symbols tune
+         头部产品对照：fonts.google.com/icons/tune
+         形状：3 条横线 + 2 个可调节点（代表"调节条件"）-->
+    <template v-else-if="name === 'tune'">
+      <path d="M3 6h6M11 6h6M3 12h3M8 12h9M3 18h9M14 18h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="10" cy="6" r="1.5" fill="currentColor"/>
+      <circle cx="7" cy="12" r="1.5" fill="currentColor"/>
+      <circle cx="13" cy="18" r="1.5" fill="currentColor"/>
+    </template>
+    <template v-else-if="name === 'list'">
+      <rect x="2" y="3" width="12" height="1.5" rx="0.75" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="2" y="7.25" width="12" height="1.5" rx="0.75" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="2" y="11.5" width="12" height="1.5" rx="0.75" stroke="currentColor" stroke-width="1.5"/>
+    </template>
+    <template v-else-if="name === 'grid'">
+      <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+    </template>
     <template v-else-if="name === 'mail'">
       <rect x="2" y="4" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
       <path d="M2 4l6 5 6-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </template>
+    <!-- ============================================ -->
+    <!-- 新增：权限维度语义图标 Dimension Icons      -->
+    <!-- 用于 PermissionDimensionSelector            -->
+    <!-- ============================================ -->
+    <template v-else-if="name === 'box'">
+      <path d="M8 1.5L14 4.5V11.5L8 14.5L2 11.5V4.5L8 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M2 4.5L8 7.5L14 4.5M8 7.5V14.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+    </template>
+    <template v-else-if="name === 'building'">
+      <rect x="4" y="2" width="8" height="12" rx="1" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M7 5h.01M9 5h.01M7 8h.01M9 8h.01M7 11h.01M9 11h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M6 14v1M10 14v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </template>
+    <template v-else-if="name === 'folder'">
+      <path d="M2 4.5C2 3.7 2.7 3 3.5 3H6l1.5 2h5c.8 0 1.5.7 1.5 1.5V12c0 .8-.7 1.5-1.5 1.5h-9C2.7 13.5 2 12.8 2 12V4.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </template>
+    <template v-else-if="name === 'calendar'">
+      <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </template>
+    <template v-else-if="name === 'location'">
+      <path d="M8 14.5C8 14.5 3 9.5 3 6a5 5 0 0110 0c0 3.5-5 8.5-5 8.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="8" cy="6" r="1.8" stroke="currentColor" stroke-width="1.5"/>
+    </template>
+    <template v-else-if="name === 'coin'">
+      <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+    </template>
+    <template v-else-if="name === 'ban'">
+      <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M4.5 4.5l7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </template>
     <template v-else-if="name === 'file'">
       <path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6l-4-4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -281,7 +340,12 @@ export default {
         // 功能图标
         'search', 'user', 'link', 'clipboard', 'eye', 'eye-off', 'lock', 'key',
         'mobile', 'robot', 'chart-bar', 'edit', 'trash', 'help', 'filter',
+        'filter-alt', 'tune',  // [Phase 3.8c 2026-08-25] M3 Material Symbols
         'mail', 'file', 'chat',
+        // 列表/网格视图
+        'list', 'grid',
+        // 权限维度语义图标
+        'box', 'building', 'folder', 'calendar', 'location', 'coin', 'ban',
         // 新增图标
         'layers', 'sort', 'timer',
         // 状态图标

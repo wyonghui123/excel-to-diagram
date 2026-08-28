@@ -89,7 +89,7 @@ def preload_role_permissions(
     预热指定角色的权限规则
 
     Args:
-        engine: ManagementDimensionEngine 实例
+        engine: PermissionDimensionEngine 实例
         data_source: 数据源对象
         role_ids: 要预热的角色ID列表
         batch_size: 批处理大小
@@ -153,7 +153,7 @@ def preload_hot_roles(
     预热热点角色权限规则（主入口）
 
     Args:
-        engine: ManagementDimensionEngine 实例
+        engine: PermissionDimensionEngine 实例
         data_source: 数据源对象
         top_n: 预热 TOP N 个热点角色
         batch_size: 批处理大小
@@ -186,7 +186,7 @@ def main():
     """命令行入口"""
     import argparse
     from meta.core.datasource import get_data_source
-    from meta.services.management_dimension_engine import ManagementDimensionEngine
+    from meta.services.permission_dimension_engine import PermissionDimensionEngine
     
     parser = argparse.ArgumentParser(description='预热热点角色权限规则')
     parser.add_argument('--top-n', type=int, default=50, help='预热 TOP N 个热点角色')
@@ -209,7 +209,7 @@ def main():
     logger.info(f"[SYMBOL] 数据库路径: {db_path}")
     
     data_source = get_data_source('sqlite', database=db_path)
-    engine = ManagementDimensionEngine(data_source, ttl_seconds=300)
+    engine = PermissionDimensionEngine(data_source, ttl_seconds=300)
     
     stats = preload_hot_roles(
         engine,

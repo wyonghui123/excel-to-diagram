@@ -6,20 +6,20 @@
         <span v-if="role?.code" class="rpc-subtitle">{{ role.code }}</span>
       </div>
       <div class="rpc-header__right">
-        <el-button @click="handleReset" :disabled="saving">
-          <el-icon><RefreshLeft /></el-icon>
+        <AppButton variant="secondary" @click="handleReset" :disabled="saving">
+          <AppIcon name="refresh" :size="14" />
           重置
-        </el-button>
-        <el-button type="primary" @click="handleSave" :loading="saving">
-          <el-icon><Check /></el-icon>
+        </AppButton>
+        <AppButton variant="primary" @click="handleSave" :loading="saving">
+          <AppIcon name="check" :size="14" />
           保存
-        </el-button>
+        </AppButton>
       </div>
     </div>
 
     <el-container class="rpc-container">
       <el-aside width="20%" class="rpc-aside">
-        <ManagementDimensionSelector
+        <PermissionDimensionSelector
           v-model="selectedDimensionId"
           :dimensions="managementDimensions"
           :loading="dimensionsLoading"
@@ -48,8 +48,8 @@
                   @preview="handleRulePreview"
                 />
                 <div class="editor-actions">
-                  <el-button @click="handleRuleCancel">取消</el-button>
-                  <el-button type="primary" @click="handleRuleSubmit">保存规则</el-button>
+                  <AppButton variant="secondary" @click="handleRuleCancel">取消</AppButton>
+                  <AppButton variant="primary" @click="handleRuleSubmit">保存规则</AppButton>
                 </div>
               </div>
             </div>
@@ -68,16 +68,16 @@
             <div class="section-header">
               <h3 class="section-title">已配置规则列表（共 {{ permissionRules.length }} 条）</h3>
               <div class="section-actions">
-                <el-input
+                <AppInput
                   v-model="ruleSearchKeyword"
                   placeholder="搜索规则..."
                   clearable
                   style="width: 200px;"
                 >
                   <template #prefix>
-                    <el-icon><Search /></el-icon>
+                    <AppIcon name="search" :size="14" />
                   </template>
-                </el-input>
+                </AppInput>
               </div>
             </div>
             <el-table
@@ -127,8 +127,8 @@
                 align="center"
               >
                 <template #default="{ row }">
-                  <el-icon v-if="row.inherit_to_children" color="#52c41a"><Check /></el-icon>
-                  <el-icon v-else color="#d9d9d9"><Close /></el-icon>
+                  <el-icon v-if="row.inherit_to_children" :style="{ color: 'var(--color-success, #52c41a)' }"><Check /></el-icon>
+                  <el-icon v-else :style="{ color: 'var(--color-text-tertiary, #d9d9d9)' }"><Close /></el-icon>
                 </template>
               </el-table-column>
               <el-table-column
@@ -161,12 +161,12 @@
                 fixed="right"
               >
                 <template #default="{ row }">
-                  <el-button type="primary" link size="small" @click="handleEditRule(row)">
+                  <AppButton variant="text" size="sm" @click="handleEditRule(row)">
                     编辑
-                  </el-button>
-                  <el-button type="danger" link size="small" @click="handleDeleteRule(row)">
+                  </AppButton>
+                  <AppButton variant="danger" size="sm" @click="handleDeleteRule(row)">
                     删除
-                  </el-button>
+                  </AppButton>
                 </template>
               </el-table-column>
             </el-table>
@@ -181,8 +181,9 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from '@/composables/useMessage'
-import { RefreshLeft, Check, Search, Close } from '@element-plus/icons-vue'
-import ManagementDimensionSelector from '@/components/common/ManagementDimensionSelector/ManagementDimensionSelector.vue'
+import { Close } from '@element-plus/icons-vue'
+import { AppButton, AppInput, AppIcon } from '@/components/common'
+import PermissionDimensionSelector from '@/components/common/PermissionDimensionSelector/PermissionDimensionSelector.vue'
 import ConditionRuleEditor from '@/components/common/ConditionRuleEditor/ConditionRuleEditor.vue'
 import ImpactPreview from '@/components/common/ImpactPreview/ImpactPreview.vue'
 import * as permService from '@/services/permissionService'
@@ -265,7 +266,7 @@ async function loadRole() {
   }
 }
 
-async function loadManagementDimensions() {
+async function loadPermissionDimensions() {
   dimensionsLoading.value = true
 
   try {
@@ -278,7 +279,7 @@ async function loadManagementDimensions() {
     }))
   } catch (e) {
     console.error('Failed to load management dimensions:', e)
-    error('加载管理维度失败')
+    error('加载权限维度失败')
   } finally {
     dimensionsLoading.value = false
   }
@@ -480,7 +481,7 @@ function handleReset() {
   }
   
   loadRole()
-  loadManagementDimensions()
+  loadPermissionDimensions()
   loadPermissionRules()
 }
 
@@ -507,7 +508,7 @@ watch(permissionRules, () => {
 
 onMounted(() => {
   loadRole()
-  loadManagementDimensions()
+  loadPermissionDimensions()
   loadPermissionRules()
 })
 </script>

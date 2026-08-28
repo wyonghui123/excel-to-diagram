@@ -7,21 +7,24 @@
 
 /**
  * 权限来源类型
- * - auto: 菜单自动派生
- * - include: 手动包含（grant）
+ * - auto: 跟随菜单（自动联动：勾选菜单自动授予，取消菜单联动清除）
+ * - include: 单独授予（独立生效：不随菜单勾选变化）
  * - exclude: 手动排除（deny）
- * - '': 未分配
+ * - '': 未分配（不显示来源标签）
+ * [REFACTOR 2026-08-28 v68] 参考 SAP PFCG / AWS IAM 的来源语义：
+ *   标识回答两个问题——权限从哪来 + 改父级时是否联动
  */
 export type PermissionSource = 'auto' | 'include' | 'exclude' | ''
 
 /**
  * 权限来源标签（UI 显示文本）
+ * none 为空字符串：未分配菜单不显示来源标签
  */
 export const SOURCE_LABELS = {
-  auto: '自动',
-  include: '包含',
+  auto: '跟随菜单',
+  include: '单独授予',
   exclude: '排除',
-  none: '未分配',
+  none: '',
 } as const
 
 /**
@@ -124,3 +127,70 @@ export const BADGE_LABELS = {
   hasDataScope: '有数据范围',
   denied: '禁止',
 } as const
+
+// ==================== 权限数据模型（单一事实源） ====================
+// [2026-08-28 重构清理] 原 useMenuPermission.ts 与 MenuPermissionMatrix.vue
+// 各维护一份同名 interface（字段漂移无编译保护），统一收敛到此处。
+// 字段与后端 role_menu_api._build_role_unified_data 的返回结构对齐。
+
+/** 单条功能权限（required_permissions 数组项） */
+export interface Permission {
+  code: string
+  label: string
+  granted: boolean
+  source: PermissionSource
+}
+
+/** 数据范围（菜单级 data_scopes 数组项） */
+export interface DataScope {
+  resource_type: string
+  permissions: Array<{ level: string }>
+}
+
+/** 动作分组（view/edit/manage）实时状态 */
+export interface ActionGroupState {
+  granted: boolean
+  source: PermissionSource
+}
+
+/** 独立动作（export/import/assign 等，不参与分组） */
+export interface StandalonePerm {
+  action: string
+  label: string
+  granted: boolean
+  source: PermissionSource
+}
+
+/** BO 维度的权限分组（bo_permission_groups 数组项，由后端 _derive_bo_permission_groups 推导） */
+export interface BoPermissionGroup {
+  bo_id: string
+  bo_name: string
+  groups: Record<string, ActionGroupState>
+  standalone: StandalonePerm[]
+}
+
+/** 菜单的 BO 绑定声明（menus.bo_bindings JSON 字段） */
+export interface BoBinding {
+  bo_id: string
+  role: 'primary' | 'secondary' | 'reference'
+  include_actions?: string[]
+}
+
+/** 菜单权限模型（unified-permissions 接口的菜单项，含树形 children） */
+export interface Menu {
+  menu_code: string
+  display_name: string
+  menu_path: string
+  assigned: boolean
+  has_data_scope: boolean
+  required_permissions: Permission[]
+  bo_permission_groups?: BoPermissionGroup[]
+  data_scopes?: DataScope[]
+  data_permission_hint?: { resource_types: string[] }
+  bo_bindings?: BoBinding[]
+  parent_menu?: string
+  primary_object_type?: string
+  object_types?: string[]
+  auto_generated?: boolean
+  children?: Menu[]
+}

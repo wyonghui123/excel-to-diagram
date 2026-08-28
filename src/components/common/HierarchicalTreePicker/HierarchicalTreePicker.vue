@@ -2,15 +2,14 @@
   <div class="htp-root">
     <!-- 顶栏搜索 -->
     <div v-if="showSearch" class="htp-search">
-      <el-input
+      <AppInput
         v-model="searchQuery"
         :placeholder="`输入名称或编码搜索${totalCount ? `（共 ${totalCount} 条）` : ''}`"
         clearable
-        size="default"
         @update:model-value="onSearchInput"
       >
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
+        <template #prefix><AppIcon name="search" /></template>
+      </AppInput>
     </div>
 
     <!-- 工具栏 -->
@@ -18,21 +17,21 @@
       <!-- [R26 2026-07-24] 工具栏显示逻辑修复: 不再依赖 multiple
            历史 bug: v-if="showToolbar && multiple" 让单选模式下工具栏 (展开/收起/刷新/清除) 全部不可见
            新逻辑: 工具栏始终可见 (single 模式下去掉清除按钮, 因为没有勾选概念) -->
-      <el-button text size="small" @click="toggleExpandAll">
-        <el-icon><component :is="allExpanded ? Fold : Expand" /></el-icon>
+      <AppButton variant="text" size="sm" @click="toggleExpandAll">
+        <AppIcon :name="allExpanded ? 'chevron-up' : 'chevron-down'" />
         {{ allExpanded ? '收起' : '展开' }}
-      </el-button>
-      <el-button v-if="multiple" text size="small" :disabled="checkedIds.length === 0" @click="handleClear">清除</el-button>
-      <el-button text size="small" :disabled="loading" @click="loadTreeData">
-        <el-icon><Refresh /></el-icon>
+      </AppButton>
+      <AppButton v-if="multiple" variant="text" size="sm" :disabled="checkedIds.length === 0" @click="handleClear">清除</AppButton>
+      <AppButton variant="text" size="sm" :disabled="loading" @click="loadTreeData">
+        <AppIcon name="refresh" />
         刷新
-      </el-button>
+      </AppButton>
     </div>
 
     <!-- 树主体 (R3: 全部叶子平铺, 无父子层级) -->
     <div class="htp-tree-container">
       <div v-if="loading" class="htp-loading">
-        <el-icon class="is-loading"><Loading /></el-icon>
+        <AppIcon name="refresh" class="htp-loading-icon" />
         <span>加载中...</span>
       </div>
       <el-tree
@@ -65,9 +64,11 @@
                 { 'htp-node-disabled': isExcludedNode(data) }]"
               :data-tk="data.__tk"
             >
-              <el-icon v-if="resolveIcon(data.icon)" :size="14">
-                <component :is="resolveIcon(data.icon)" />
-              </el-icon>
+              <component
+                v-if="resolveIcon(data.icon)"
+                :is="resolveIcon(data.icon)"
+                :size="14"
+              />
               <span class="htp-node-label" :title="data.name">{{ data.name }}</span>
               <span v-if="data.code" class="htp-node-code">{{ data.code }}</span>
               <el-tag v-if="isExcludedNode(data)" size="small" type="info" class="htp-node-tag">
@@ -80,9 +81,11 @@
             :class="['htp-node', { 'htp-node-disabled': isExcludedNode(data) }]"
             :data-tk="data.__tk"
           >
-            <el-icon v-if="resolveIcon(data.icon)" :size="14">
-              <component :is="resolveIcon(data.icon)" />
-            </el-icon>
+            <component
+              v-if="resolveIcon(data.icon)"
+              :is="resolveIcon(data.icon)"
+              :size="14"
+            />
             <span class="htp-node-label" :title="data.name">{{ data.name }}</span>
             <span v-if="data.code" class="htp-node-code">{{ data.code }}</span>
             <el-tag v-if="isExcludedNode(data)" size="small" type="info" class="htp-node-tag">
@@ -128,8 +131,10 @@
  *   - 不再保留任何父节点
  */
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { Search, Loading, Fold, Expand, Refresh } from '@element-plus/icons-vue'
 import { resolveIcon } from './iconMap'
+import AppInput from '../AppInput/AppInput.vue'
+import AppButton from '../AppButton/AppButton.vue'
+import AppIcon from '../AppIcon/AppIcon.vue'
 
 const props = defineProps({
   dimensionId: { type: String, required: true },
@@ -396,7 +401,7 @@ async function loadTreeData() {
     if (props.filterParams.version_id) {
       params.set('version_id', String(props.filterParams.version_id))
     }
-    const url = `/api/v2/bo/management_dimension/${props.dimensionId}/tree?${params}`
+    const url = `/api/v2/bo/permission_dimension/${props.dimensionId}/tree?${params}`
     const resp = await fetch(url, { credentials: 'include' })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const json = await resp.json()
@@ -667,7 +672,9 @@ function handleClear() {
 function findNodeById(id) {
   function walk(nodes) {
     for (const n of nodes) {
-      if (n.id === id) return n
+      // [FIX 2026-08-24] id 冲突场景 (生产脏数据: 4 层 id 相同) 下,
+      //   允许用 unique_key 精确命中目标节点, 避免 findNodeById 永远返回根节点
+      if (n.id === id || n.unique_key === id) return n
       if (n.children) {
         const r = walk(n.children)
         if (r) return r
@@ -681,10 +688,12 @@ function findNodeById(id) {
 function buildAncestorPath(nodeId) {
   const node = findNodeById(nodeId)
   if (!node) return ''
-  const byId = new Map()
+  // [FIX 2026-08-24] 用 unique_key 链走父级 (与 buildNestedTree 的孤儿判定一致)
+  //   旧实现走 parent_id: 生产脏数据 parent_id 在 4 层间相同, 链会坍塌/错指
+  const byUnique = new Map()
   function index(arr) {
     for (const n of arr) {
-      byId.set(n.id, n)
+      byUnique.set(n.unique_key, n)
       if (n.children) index(n.children)
     }
   }
@@ -694,8 +703,8 @@ function buildAncestorPath(nodeId) {
   let cur = node
   while (cur) {
     parts.unshift(cur.name)
-    if (cur.parent_id == null) break
-    cur = byId.get(cur.parent_id)
+    if (cur.parent_unique_key == null) break
+    cur = byUnique.get(cur.parent_unique_key)
   }
   return parts.join(' > ')
 }
@@ -780,6 +789,14 @@ onMounted(async () => {
   min-height: 200px;
   gap: 8px;
   color: var(--el-text-color-secondary);
+}
+/* [P1-Base-04] AppIcon 替换 el-icon 后的 loading 旋转动画 (原 .el-icon.is-loading) */
+:deep(.htp-loading-icon) {
+  animation: htp-rotating 1.2s linear infinite;
+}
+@keyframes htp-rotating {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .htp-node {
   display: inline-flex;

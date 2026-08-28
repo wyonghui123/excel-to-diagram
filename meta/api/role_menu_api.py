@@ -11,6 +11,7 @@ import json
 
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
+from meta.core.permission_label import get_permission_label
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from meta.api._audit_helper import write_permission_config_audit
@@ -36,37 +37,10 @@ def _get_permission_label(perm_code):
     让"详细权限"列表中对象和动作都显示中文, 而非仅显示动作名.
     原 cap-label 只显示动作 ("创建"), 与 cap-code ("domain:create") 配合时
     用户需在英文对象名 + 中文动作名之间反复对照.
+    [2026-08-28 重构] 实现抽取到 meta/Core/permission_label.py 公共 util
+    （与 role_consistency_audit._fallback_label 共用，消除双副本），此处仅委托。
     """
-    if perm_code == '*':
-        return '超级权限'
-    parts = perm_code.split(':')
-    if len(parts) != 2:
-        return perm_code
-    resource_type, suffix = parts
-    meta_obj = registry.get(resource_type)
-
-    # 1. 优先从 BO meta 的 action.name 拿中文动作名
-    action_name = None
-    if meta_obj:
-        action = meta_obj.get_action_by_suffix(suffix)
-        if action and action.name:
-            action_name = action.name
-
-    # 2. 回退到标准动作 name (元数据 _standard_actions.yaml)
-    if not action_name:
-        from meta.core.standard_action_loader import StandardActionLoader
-        for sa in StandardActionLoader.get_actions():
-            if sa.get_permission_suffix() == suffix and sa.name:
-                action_name = sa.name
-                break
-
-    # 3. 组装 "{对象中文名}:{动作中文名}" (有对象名时)
-    if meta_obj and getattr(meta_obj, 'name', None) and action_name:
-        return f"{meta_obj.name}:{action_name}"
-    if action_name:
-        return action_name
-    # 4. 都没有则兜底原 code
-    return perm_code
+    return get_permission_label(perm_code)
 
 
 # [FIX v1.0.2] 权限代码快速存在性检查 (缓存)
@@ -154,7 +128,7 @@ def _derive_bo_permission_groups(bo_bindings, req_perms_display, is_assigned):
             resource_perms[bo_id] = {}
         resource_perms[bo_id][action] = {
             'granted': p.get('granted', False),
-            'source': p.get('source', 'auto' if is_assigned else 'manual'),
+            'source': p.get('source', 'auto' if is_assigned else ''),
         }
 
     # 1.1 [FIX v1.0.2] 从 bo_bindings 补全 actions_map
@@ -337,19 +311,15 @@ def get_role_menu_permissions(role_id):
         }), 500
 
 
-@role_menu_bp.route('/<int:role_id>/unified-permissions', methods=['GET'])
-@login_required
-def get_role_unified_permissions(role_id):
-    """获取角色统一权限视图 (SAP PFCG 风格)
-    
-    返回菜单-功能权限-数据权限三层联动视图：
-    - 菜单是入口层（Entry）
-    - required_permissions 是能力层（Capability），自动关联
-    - 数据权限是约束层（Scope），可选配置
-    
-    参考 SAP SU24 的设计：选 Tcode 自动带入 Auth Object
+def _build_role_unified_data(role_id):
+    """[P2-Matrix-03] 构建角色统一权限数据（纯函数，无 jsonify）
 
-    [单一事实源] 主数据源为 menus 表，与 LandingPage/侧边栏菜单一致
+    逻辑与历史端点 get_role_unified_permissions 完全一致（单一事实源为 menus 表）：
+    返回菜单-功能权限-数据权限三层联动视图 data dict；异常时返回 None。
+
+    供两处复用：
+    1. GET /roles/<role_id>/unified-permissions（仅做 jsonify 包装）
+    2. GET /permission_dimension/meta?role_id=（P2-Matrix-03 聚合端点）
     """
     try:
         ds = _get_data_source()
@@ -357,12 +327,11 @@ def get_role_unified_permissions(role_id):
         # [FIX 2026-06-08 v2] 统一BO模型：菜单 = intent = bo + action
         # 权限配置页只展示 sidebar intent 菜单（与侧边栏/菜单API一致）
         # show_in_sidebar=1 自然排除所有独立 *-list CRUD 页面（show_in_sidebar=0）
-        # 再排除 system（纯容器节点，无 required_permissions）
+        # [FIX 2026-08-24] 不再排除 'system'：树形菜单视图需要父节点（system）作为容器显示子菜单层级
         cursor = ds.execute(
             "SELECT * FROM menus WHERE is_active = 1 "
             "AND show_in_sidebar = 1 "
             "AND menu_code != 'dashboard' "
-            "AND menu_code != 'system' "
             "ORDER BY sort_order"
         )
         columns = [desc[0] for desc in cursor.description]
@@ -385,11 +354,13 @@ def get_role_unified_permissions(role_id):
                 data_perms[rt] = []
             data_perms[rt].append({'resource_id': rid, 'level': pl})
         
+        # [FIX 2026-08-28 v67] JOIN 加 granted=1 过滤: bo_api v2 端点会写入 granted=0 行,
+        #   被排除的权限不应视为已授予 (此前未过滤, exclude 的权限也显示 granted)
         cursor = ds.execute(
             """SELECT p.code, p.name, p.resource_type, p.action 
                FROM permissions p
                JOIN role_permissions rp ON p.id = rp.permission_id
-               WHERE rp.role_id = ?""",
+               WHERE rp.role_id = ? AND rp.granted = 1""",
             [role_id]
         )
         role_function_perms = set()
@@ -433,12 +404,19 @@ def get_role_unified_permissions(role_id):
             
             req_perms_display = []
             for p in req_perms:
-                is_granted = _is_perm_granted(p)
+                # [FIX 2026-08-28 v67] 菜单未分配时 granted 一律 false:
+                #   此前 granted 只查 role_permissions 表, 与菜单分配状态脱钩,
+                #   残留权限(如 '*')会让未分配菜单也显示 12/12 权限徽章, 严重误导
+                # [REFACTOR 2026-08-28 v68] source 双语义:
+                #   ''     : 未分配菜单 → 前端不显示来源标签
+                #   'auto' : 已分配 → 「跟随菜单」(取消勾选菜单时联动清除)
+                #   (include/exclude 仅在前端编辑会话内由手动操作产生)
+                is_granted = is_assigned and _is_perm_granted(p)
                 req_perms_display.append({
                     'code': p,
                     'label': _get_permission_label(p),
                     'granted': is_granted,
-                    'source': 'auto' if is_assigned else 'manual',
+                    'source': 'auto' if is_assigned else '',
                 })
 
             # [FIX v1.0.2] 从 bo_bindings 派生额外的 crud 明细权限
@@ -464,7 +442,8 @@ def get_role_unified_permissions(role_id):
                             req_perms_display.append({
                                 'code': derived_code,
                                 'label': _get_permission_label(derived_code),
-                                'granted': _is_perm_granted(derived_code),
+                                # [FIX 2026-08-28 v67] 同上: 未分配菜单 granted 一律 false
+                                'granted': is_assigned and _is_perm_granted(derived_code),
                                 'source': 'unbound',  # 标记: 从 bo_bindings 派生
                             })
                             existing_codes.add(derived_code)
@@ -537,29 +516,83 @@ def get_role_unified_permissions(role_id):
         
         all_resource_types_with_data = list(data_perms.keys())
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'role_id': role_id,
-                'menus': result,
-                'role_function_permissions': list(role_function_perms),
-                'role_function_permission_details': role_function_perm_details,
-                'summary': {
-                    'total_menus': len(all_menus),
-                    'assigned_menus': len(assigned_menus),
-                    'total_data_scopes': sum(len(v) for v in data_perms.values()),
-                    'data_resource_types': all_resource_types_with_data,
-                    'total_function_permissions': len(role_function_perms),
-                }
+        return {
+            'role_id': role_id,
+            'menus': result,
+            'role_function_permissions': list(role_function_perms),
+            'role_function_permission_details': role_function_perm_details,
+            'summary': {
+                'total_menus': len(all_menus),
+                'assigned_menus': len(assigned_menus),
+                'total_data_scopes': sum(len(v) for v in data_perms.values()),
+                'data_resource_types': all_resource_types_with_data,
+                'total_function_permissions': len(role_function_perms),
             }
-        })
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return None
+
+
+@role_menu_bp.route('/<int:role_id>/unified-permissions', methods=['GET'])
+@login_required
+def get_role_unified_permissions(role_id):
+    """获取角色统一权限视图 (SAP PFCG 风格)
+
+    [P2-Matrix-03] 已重构：核心逻辑抽至 _build_role_unified_data()，
+    本端点仅做 jsonify 包装（行为不变）。
+    """
+    data = _build_role_unified_data(role_id)
+    if data is None:
+        return jsonify({'success': False, 'message': '获取角色统一权限失败'}), 500
+    return jsonify({'success': True, 'data': data})
+
+
+@role_menu_bp.route('/<int:role_id>/permission-audit', methods=['GET'])
+@admin_required
+def get_role_permission_audit(role_id):
+    """[2026-08-28] 角色权限一致性体检（替代原「模拟预览」占位）
+
+    6 项校验：孤儿功能权限 / 空授权菜单 / 写权限无数据范围 /
+    范围无关联菜单 / 残留排除记录 / 超级权限提示。
+    逻辑在 meta.services.role_consistency_audit，口径对齐 _build_role_unified_data。
+    """
+    from meta.services.role_consistency_audit import run_role_consistency_audit
+    try:
+        ds = _get_data_source()
+        result = run_role_consistency_audit(ds, role_id)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'权限体检失败: {e}'}), 500
+
+
+@role_menu_bp.route('/<int:role_id>/permission-audit/cleanup', methods=['POST'])
+@admin_required
+def cleanup_role_permission_audit(role_id):
+    """[2026-08-28] 一键清理体检发现的残留权限（孤儿授权 + 残留排除）
+
+    仅删除不属于任何已分配菜单的 role_permissions 行，
+    已分配菜单的授权/显式 Deny 一律保留。
+    """
+    from meta.services.role_consistency_audit import cleanup_role_permission_residue
+    try:
+        ds = _get_data_source()
+        with ds.transaction():
+            result = cleanup_role_permission_residue(ds, role_id)
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='role_permissions',
+            object_id=role_id,
+            data={'cleanup': result},
+        )
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'清理失败: {e}'}), 500
 
 
 @role_menu_bp.route('/<int:role_id>/menu-permissions', methods=['PUT'])

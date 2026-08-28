@@ -20,7 +20,7 @@ from meta.core.models import registry
 from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
-from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, \
+from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, \
     PARENT_FIELD_MAP
 
 logger = logging.getLogger(__name__)

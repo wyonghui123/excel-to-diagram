@@ -209,6 +209,7 @@
             :key="tableKey"
             v-loading="loading"
             :data="data"
+            :row-key="rowKey"
             :default-sort="defaultSort"
             :sort="sortInfo"
             border
@@ -1701,14 +1702,19 @@ watch(() => props.externalEditing, (val) => {
 })
 
 // [NFR-007] 同时 watch data 和 columns，确保 objectType 变化后两者都更新再 doLayout
+// [FIX v20 2026-08-26] 使用 row[config.rowKey] 而非 row.id，保证与 rowKey 配置一致
+//   - 修复: SearchHelpDialog 用 :row-key="'value'" 但 selectedIds 中存的是 row.value
+//     原代码用 row.id === row.value（巧合相等）能跑；但 rowKey 改为 'value' 后应保持一致
 watch([data, columns], () => {
   nextTick(() => {
     if (tableRef.value) {
       tableRef.value.doLayout()
     }
     if (selectedIds.value.size === 0) return
+    const rowKey = config.rowKey || 'id'
     data.value.forEach(row => {
-      const isSelected = selectedIds.value.has(row.id)
+      const rowKeyValue = row[rowKey]
+      const isSelected = rowKeyValue != null && selectedIds.value.has(rowKeyValue)
       tableRef.value.toggleRowSelection(row, isSelected)
     })
   })

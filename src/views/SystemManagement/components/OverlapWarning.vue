@@ -2,7 +2,7 @@
 /**
  * 重复配置警告组件
  *
- * 显示 Section 1 (管理维度) 与 Section 3 (条件型权限) 之间的重叠加警告。
+ * 显示 Section 1 (权限维度) 与 Section 3 (条件型权限) 之间的重叠加警告。
  * 遵循 YonDesign 规范，使用主色淡背景 + 错误色文字。
  */
 import { computed } from 'vue'

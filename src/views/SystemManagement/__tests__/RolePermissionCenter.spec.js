@@ -38,7 +38,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -72,7 +72,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -94,7 +94,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -117,12 +117,12 @@ describe('RolePermissionCenter - 4区域布局', () => {
   
   describe('组件集成', () => {
     
-    it('应该集成ManagementDimensionSelector组件', async () => {
+    it('应该集成PermissionDimensionSelector组件', async () => {
       const wrapper = mount(RolePermissionCenter, {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: {
+            PermissionDimensionSelector: {
               template: '<div class="mock-dimension-selector">Dimension Selector</div>'
             },
             ConditionRuleEditor: true,
@@ -145,7 +145,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: {
               template: '<div class="mock-rule-editor">Rule Editor</div>'
             },
@@ -168,7 +168,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: {
               template: '<div class="mock-impact-preview">Impact Preview</div>'
@@ -199,7 +199,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -234,7 +234,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: {
               template: '<div></div>',
               methods: {
@@ -269,7 +269,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -303,7 +303,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -319,7 +319,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
       wrapper.unmount()
     })
     
-    it('应该在挂载时加载管理维度', async () => {
+    it('应该在挂载时加载权限维度', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -334,7 +334,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -362,7 +362,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -393,7 +393,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -424,7 +424,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -451,7 +451,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -476,7 +476,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }
@@ -504,7 +504,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         global: {
           plugins: [router],
           stubs: {
-            ManagementDimensionSelector: true,
+            PermissionDimensionSelector: true,
             ConditionRuleEditor: true,
             ImpactPreview: true
           }

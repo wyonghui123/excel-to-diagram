@@ -279,7 +279,7 @@ class ApplicationBuilder:
         from meta.api.data_permission_api import data_perm_bp
         from meta.api.role_menu_api import role_menu_bp
         from meta.api.role_dim_api import role_dim_bp
-        from meta.api.management_dimension_api import management_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
+        from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
         from meta.api.user_group_api import user_group_bp
         from meta.api.enum_api import enum_bp
         from meta.api.menu_permission_api import menu_permission_bp
@@ -326,7 +326,7 @@ class ApplicationBuilder:
         app.register_blueprint(data_perm_bp)
         app.register_blueprint(role_menu_bp)
         app.register_blueprint(role_dim_bp)
-        app.register_blueprint(management_dimension_bp)
+        app.register_blueprint(permission_dimension_bp)
         app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
         app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
         app.register_blueprint(user_group_bp)

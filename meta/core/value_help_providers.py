@@ -16,7 +16,7 @@ def _build_ancestors(dimension_id: str, instance_id: int, data_source) -> Tuple[
 
     层级链: product → version → domain → sub_domain → service_module → business_object
 
-    复用 management_dimension_api._PARENT_INFO_MAP / RESOURCE_TABLE_MAP 逻辑
+    复用 permission_dimension_api._PARENT_INFO_MAP / RESOURCE_TABLE_MAP 逻辑
     最多递归 6 层 (product → business_object)
 
     返回:
@@ -364,7 +364,7 @@ class BoValueHelpProvider(ValueHelpProvider):
         #   业务背景: service_module 等层级字段在详情页只读态显示"编码 - 名称"，
         #   通过 hover tooltip 展示完整祖先路径 (产品 > 版本 > 领域 > 子领域 > 服务模块)
         #   顶层维度 (product) 无祖先, ancestor_path 为空字符串
-        #   实现复用 management_dimension_api._build_ancestor_path, 保持与 /instances 接口一致
+        #   实现复用 permission_dimension_api._build_ancestor_path, 保持与 /instances 接口一致
         # [R23 2026-07-24] 详情页字段反推: 同时返回 ancestor_ids (按 dim_name → id 映射)
         #   场景: 详情页 service_module_id 变化时, 自动回填 sub_domain_id / domain_id / version_id
         #   前端只需读 ancestor_ids[parent_dim] 即可, 无需自己解析路径字符串
@@ -373,7 +373,7 @@ class BoValueHelpProvider(ValueHelpProvider):
         }
         if self.target_bo in HIERARCHY_DIMS:
             try:
-                from meta.api import management_dimension_api as mda
+                from meta.api import permission_dimension_api as mda
                 mda._get_engine()  # 确保 _data_source 已初始化
                 if mda._data_source is not None:
                     raw_id = record.get(self.value_field)

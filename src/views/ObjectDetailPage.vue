@@ -59,10 +59,15 @@
         @saved="handleSaved"
       >
         <!-- Role permission config panel -->
+        <!-- [v44 FIX 2026-08-27] 传入 :editing 与角色整体编辑态联动
+             根因：DetailPage internalEditing 已 expose（line 1584），但此处从未传递，
+             导致「基本信息」等 section 可编辑，而权限面板永远 readonly -->
         <template #section-permissions="{ data }">
           <PermissionConfigPanel
             :role-id="data?.id || id"
             :role="data"
+            :editing="detailPageRef?.internalEditing === true"
+            :flush-on-exit="true"
             @saved="handleRefresh"
           />
         </template>

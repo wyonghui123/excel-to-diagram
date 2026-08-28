@@ -1,5 +1,5 @@
 # ============================================
-# 管理维度 → 业务对象字段映射配置
+# 权限维度 → 业务对象字段映射配置
 #
 # 目的:
 # 1. 替代 dimension_scope_engine.py 中的硬编码 RESOURCE_TABLE_MAP / PARENT_FIELD_MAP
@@ -24,8 +24,8 @@
 # ============================================
 
 id: dimension_object_mapping
-name: 管理维度对象映射
-description: 管理维度与业务对象字段的映射配置（替代硬编码）
+name: 权限维度对象映射
+description: 权限维度与业务对象字段的映射配置（替代硬编码）
 persistent: false
 
 # 保留兼容: 业务层级维度 (硬编码层级链)
@@ -160,6 +160,7 @@ dimension_priority:
   version: 20
   domain: 30
   sub_domain: 40
+  # org: 50         # [P4-Org-01 预留] 组织维度（generic，Phase 4 启用）
   # region: 5       # 通用维度优先级通常更高
   # department: 6
 

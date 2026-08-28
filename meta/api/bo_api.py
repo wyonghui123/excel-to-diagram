@@ -3118,6 +3118,7 @@ def create_permission_rule_v2():
             'resource_type': data.get('resource_type'),
             'dimension_code': data.get('dimension_code'),
             'condition': data.get('condition', ''),
+            'condition_display': data.get('condition_display', ''),
             'scope_mode': data.get('scope_mode', 'include'),
             'permission_level': data.get('permission_level', 'read'),
             'is_denied': data.get('is_denied', False),
@@ -3144,17 +3145,26 @@ def create_permission_rule_v2():
 @permission_rule_v2_bp.route('/<int:rule_id>', methods=['PUT'])
 @login_required
 def update_permission_rule_v2(rule_id):
-    """更新权限规则"""
+    """更新权限规则
+
+    [v48 2026-08-27] 优先更新统一表 data_permission_rules（列表查询读该表）；
+    若该行不在统一表（legacy 数据）才回退到 update_rule 写 permission_rules。
+    此前只调 update_rule() 写 legacy 表，导致"变更条件保存后刷新仍是旧值"。
+    """
     try:
         from meta.services.condition_permission_service import ConditionPermissionService
         from meta.core.bo_framework import bo_framework
-        
+
         service = ConditionPermissionService(bo_framework._data_source)
-        
+
         data = request.get_json(silent=True) or {}
-        
-        success = service.update_rule(rule_id, data)
-        
+
+        # 先尝试统一表更新
+        success = service.update_unified_rule(rule_id, data)
+        if not success:
+            # 回退 legacy 表
+            success = service.update_rule(rule_id, data)
+
         if success:
             return jsonify({'success': True, 'message': '权限规则更新成功'})
         return jsonify({'success': False, 'message': '更新失败'}), 400

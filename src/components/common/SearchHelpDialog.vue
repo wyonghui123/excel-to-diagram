@@ -159,7 +159,7 @@ const presentation = computed(() => props.valueHelpConfig?.presentation || {})
 const behavior = computed(() => props.valueHelpConfig?.behavior || {})
 
 // [FIX 2026-07-24-R19] 弹窗标题: "选择数据" → "选择XX" (如选择子领域)
-//   dimensionId 到中文名映射 (与后端 management_dimension 一致)
+//   dimensionId 到中文名映射 (与后端 permission_dimension 一致)
 const DIMENSION_LABEL_MAP = {
   product: '产品',
   version: '版本',

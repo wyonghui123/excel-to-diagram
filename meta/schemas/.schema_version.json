@@ -266,18 +266,6 @@
       "fields": [],
       "table": ""
     },
-    "management_dimension": {
-      "hash": "4a122ba07fc7150815f62421c08a84ca",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "field",
-        "resource_types",
-        "description"
-      ],
-      "table": "management_dimensions"
-    },
     "menu": {
       "hash": "c515b65a3a9e98834ef5a2e54db7fbe8",
       "fields": [

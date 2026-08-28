@@ -407,6 +407,14 @@ async function _doRequest(method, url, options, traceId, startTime) {
       httpStatus: resp.status,
       traceId,
     }
+    // [P1-Base-03] 透传后端结构化错误码（如 400 {"error":"SCOPE_CODE_INVALID", ...}），
+    //   供 permissionService 识别 scopeCode 匹配失败并抛 ScopeCodeInvalidError（5.5.4 P0 红线）
+    if (body.error) {
+      result.error = body.error
+    }
+    if (body.available_scope_codes) {
+      result.available_scope_codes = body.available_scope_codes
+    }
     // 兼容旧 _handleResponse: errors 保持在顶层（useBOApi/useMetaList 依赖 result.errors）
     if (body.errors) {
       result.errors = body.errors

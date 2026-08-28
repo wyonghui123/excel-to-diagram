@@ -1,17 +1,15 @@
 <template>
-  <el-dialog
+  <AppModal
     v-model="visible"
     :title="dialogTitle"
     width="800px"
-    :destroy-on-close="true"
-    class="assignment-dialog"
     @open="handleOpen"
     @close="handleClose"
   >
     <div class="ad-content">
       <!-- 搜索栏 -->
       <div v-if="targetType" class="vh-search-bar">
-        <el-input
+        <AppInput
           ref="searchInputRef"
           v-model="dialogSearchQuery"
           placeholder="输入关键词实时搜索..."
@@ -21,7 +19,6 @@
           @clear="handleSearchClear"
         />
       </div>
-
       <MetaListPage
         ref="metaListRef"
         v-if="targetType"
@@ -46,19 +43,19 @@
           已选择 {{ selectedItems.length }} 项
         </span>
         <div class="ad-footer__actions">
-          <el-button @click="handleClose">取消</el-button>
-          <el-button
-            type="primary"
+          <AppButton variant="secondary" @click="handleClose">取消</AppButton>
+          <AppButton
+            variant="primary"
             :disabled="selectedItems.length === 0"
             :loading="submitting"
             @click="handleSubmit"
           >
             确定
-          </el-button>
+          </AppButton>
         </div>
       </div>
     </template>
-  </el-dialog>
+  </AppModal>
 </template>
 
 <script setup>
@@ -67,6 +64,9 @@ import { Search } from '@element-plus/icons-vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import MetaListPage from '@/components/common/MetaListPage/MetaListPage.vue'
 import boService from '@/services/boService'
+import AppModal from '../AppModal/AppModal.vue'
+import AppInput from '../AppInput/AppInput.vue'
+import AppButton from '../AppButton/AppButton.vue'
 
 const props = defineProps({
   modelValue: {
@@ -235,20 +235,6 @@ function handleClose() {
 </script>
 
 <style scoped>
-.assignment-dialog :deep(.el-dialog__header) {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.assignment-dialog :deep(.el-dialog__body) {
-  padding: 16px 20px;
-}
-
-.assignment-dialog :deep(.el-dialog__footer) {
-  padding: 12px 20px;
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-
 .ad-content {
   display: flex;
   flex-direction: column;

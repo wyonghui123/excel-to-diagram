@@ -78,7 +78,7 @@ def setup_test_db():
         updated_at DATETIME
     )""")
 
-    cursor.execute("""CREATE TABLE management_dimensions (
+    cursor.execute("""CREATE TABLE permission_dimensions (
         id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT, field TEXT, resource_types TEXT, description TEXT,
         relation_object TEXT, display_field TEXT, is_auto_generated INTEGER DEFAULT 0, source_schema TEXT,
         cascade_parent TEXT
@@ -143,7 +143,7 @@ def setup_test_db():
         (5, 2, 'sub_domain', 'product_id = 1', 'write', 0, 1, 1, None, '2026-01-01', 1, None),
     ])
 
-    cursor.executemany("INSERT INTO management_dimensions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+    cursor.executemany("INSERT INTO permission_dimensions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         (1, 'product', '产品', 'product_id', 'domain,sub_domain,service_module,business_object', '产品线权限', 'product', 'name', 0, '', ''),
         (2, 'domain_type', '领域类型', 'domain_type', 'domain', '领域类型权限', '', '', 0, '', ''),
         (3, 'employee', '员工', 'created_by', 'domain,sub_domain', '员工数据权限', 'user', 'display_name', 0, '', ''),
@@ -501,14 +501,14 @@ def test_service_dimensions(db_path):
     passed = 0
     failed = 0
 
-    dims = service.get_management_dimensions()
+    dims = service.get_permission_dimensions()
     if len(dims) >= 4:
         passed += 1
     else:
         failed += 1
         print(f"  [X] dimensions: expected >=4, got {len(dims)}")
 
-    dims = service.get_management_dimensions('domain')
+    dims = service.get_permission_dimensions('domain')
     if all('domain' in (d.get('resource_types') or '') for d in dims):
         passed += 1
     else:
