@@ -87,8 +87,8 @@ class PermissionAuditService:
         
         # 1. 获取用户角色
         cursor = self.ds.execute("""
-            SELECT r.* FROM roles r
-            INNER JOIN user_roles ur ON r.id = ur.role_id
+            SELECT r.* FROM permission_sets r
+            INNER JOIN user_permission_sets ur ON r.id = ur.permission_set_id
             WHERE ur.user_id = ?
         """, [user_id])
         summary['roles'] = self._rows_to_dicts(cursor)
@@ -97,8 +97,8 @@ class PermissionAuditService:
         cursor = self.ds.execute("""
             SELECT DISTINCT p.code, p.name
             FROM permissions p
-            INNER JOIN role_permissions rp ON p.id = rp.permission_id
-            INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+            INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
+            INNER JOIN user_permission_sets ur ON rp.permission_set_id = ur.permission_set_id
             WHERE ur.user_id = ?
         """, [user_id])
         summary['function_permissions'] = [
@@ -148,7 +148,7 @@ class PermissionAuditService:
         stats['total_users'] = cursor.fetchone()[0]
         
         # 总角色数
-        cursor = self.ds.execute("SELECT COUNT(*) FROM roles")
+        cursor = self.ds.execute("SELECT COUNT(*) FROM permission_sets")
         stats['total_roles'] = cursor.fetchone()[0]
         
         # 总数据权限数
@@ -206,7 +206,7 @@ class PermissionAuditService:
             SELECT u.id, u.username, u.display_name, COUNT(dp.id) as perm_count
             FROM users u
             LEFT JOIN data_permissions dp ON u.id = dp.user_id
-            WHERE u.id NOT IN (SELECT user_id FROM user_roles WHERE role_id = 1)
+            WHERE u.id NOT IN (SELECT user_id FROM user_permission_sets WHERE permission_set_id = 1)
             GROUP BY u.id
             HAVING perm_count > 10
         """)

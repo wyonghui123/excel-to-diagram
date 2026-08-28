@@ -178,7 +178,7 @@ class LocalAuthProvider(AuthProvider):
             [user['id']]
         )
 
-        roles = self._get_user_roles(user['id'])
+        roles = self._get_user_permission_sets(user['id'])
         permissions = self._get_user_permissions(user['id'])
 
         return UserInfo(
@@ -205,7 +205,7 @@ class LocalAuthProvider(AuthProvider):
         if user.get('status') != 'active':
             return None
 
-        roles = self._get_user_roles(user['id'])
+        roles = self._get_user_permission_sets(user['id'])
         permissions = self._get_user_permissions(user['id'])
 
         return UserInfo(
@@ -229,21 +229,21 @@ class LocalAuthProvider(AuthProvider):
             [new_hash, user_id]
         )
 
-    def _get_user_roles(self, user_id: int) -> List[Dict]:
+    def _get_user_permission_sets(self, user_id: int) -> List[Dict]:
         cursor = self.ds.execute(
-            """SELECT r.id, r.code, r.name FROM roles r
-               JOIN group_roles gr ON r.id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            """SELECT r.id, r.code, r.name FROM permission_sets r
+               JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )
         roles = []
         seen = set()
         for row in cursor.fetchall():
-            role_id = row[0] if isinstance(row, (list, tuple)) else row['id']
-            if role_id in seen:
+            permission_set_id = row[0] if isinstance(row, (list, tuple)) else row['id']
+            if permission_set_id in seen:
                 continue
-            seen.add(role_id)
+            seen.add(permission_set_id)
             if isinstance(row, (list, tuple)):
                 roles.append({
                     'id': row[0],
@@ -261,9 +261,9 @@ class LocalAuthProvider(AuthProvider):
     def _get_user_permissions(self, user_id: int) -> List[str]:
         cursor = self.ds.execute(
             """SELECT DISTINCT p.code FROM permissions p
-               JOIN role_permissions rp ON p.id = rp.permission_id
-               JOIN group_roles gr ON rp.role_id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               JOIN permission_set_permissions rp ON p.id = rp.permission_id
+               JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )

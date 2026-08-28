@@ -108,15 +108,15 @@ class MenuPermissionService:
             result['reason'] = '无需权限检查'
             return result
 
-        # [FIX 2026-06-08] 快速通道：如果用户通过 role_menu_permissions 直接被授予了此菜单
-        # 路径：user → user_group_members → group_roles → role_menu_permissions
-        # 这符合"admin 在 UI 上给角色勾选菜单"的直觉，无需确保 role_permissions 已同步
+        # [FIX 2026-06-08] 快速通道：如果用户通过 permission_set_menu_permissions 直接被授予了此菜单
+        # 路径：user → org_members → org_permission_sets → permission_set_menu_permissions
+        # 这符合"admin 在 UI 上给角色勾选菜单"的直觉，无需确保 permission_set_permissions 已同步
         try:
             cursor = self.ds.execute("""
                 SELECT 1
-                FROM role_menu_permissions rmp
-                INNER JOIN group_roles gr ON rmp.role_id = gr.role_id
-                INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                FROM permission_set_menu_permissions rmp
+                INNER JOIN org_permission_sets gr ON rmp.permission_set_id = gr.permission_set_id
+                INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
                 WHERE ugm.user_id = ? AND rmp.menu_code = ?
                 LIMIT 1
             """, [user_id, menu_code])
@@ -125,7 +125,7 @@ class MenuPermissionService:
                 result['reason'] = '通过角色菜单权限直接授予'
                 return result
         except Exception as _e:
-            logger.warning(f"[check_menu_visibility] role_menu_permissions 快捷检查失败: {_e}")
+            logger.warning(f"[check_menu_visibility] permission_set_menu_permissions 快捷检查失败: {_e}")
 
         user_perms = self._get_user_permission_codes(user_id)
         
@@ -258,26 +258,26 @@ class MenuPermissionService:
         """获取用户的所有功能权限编码"""
         result = set()
 
-        # [FIX 2026-06-08] 路径1：用户-角色直连（user_roles）
+        # [FIX 2026-06-08] 路径1：用户-角色直连（user_permission_sets）
         cursor = self.ds.execute("""
             SELECT DISTINCT p.code
             FROM permissions p
-            INNER JOIN role_permissions rp ON p.id = rp.permission_id
-            INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+            INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
+            INNER JOIN user_permission_sets ur ON rp.permission_set_id = ur.permission_set_id
             WHERE ur.user_id = ?
         """, [user_id])
 
         for row in cursor.fetchall():
             result.add(row[0])
 
-        # [FIX 2026-06-08] 路径2：用户-用户组-角色（user_group_members → group_roles）
+        # [FIX 2026-06-08] 路径2：用户-用户组-角色（org_members → org_permission_sets）
         # 这是当前系统的实际授权路径（assign_role 通过 _get_or_create_personal_group）
         cursor = self.ds.execute("""
             SELECT DISTINCT p.code
             FROM permissions p
-            INNER JOIN role_permissions rp ON p.id = rp.permission_id
-            INNER JOIN group_roles gr ON rp.role_id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
+            INNER JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
+            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
         """, [user_id])
 
@@ -297,12 +297,12 @@ class MenuPermissionService:
                     SELECT 1 FROM data_permissions 
                     WHERE user_id = ? AND resource_type = ?
                     UNION
-                    SELECT 1 FROM role_data_permissions rdp
-                    INNER JOIN user_roles ur ON rdp.role_id = ur.role_id
+                    SELECT 1 FROM permission_set_data_permissions rdp
+                    INNER JOIN user_permission_sets ur ON rdp.permission_set_id = ur.permission_set_id
                     WHERE ur.user_id = ? AND rdp.resource_type = ?
                     UNION
-                    SELECT 1 FROM group_data_permissions gdp
-                    INNER JOIN user_group_members ugm ON gdp.group_id = ugm.group_id
+                    SELECT 1 FROM org_data_permissions gdp
+                    INNER JOIN org_members ugm ON gdp.org_id = ugm.org_id
                     WHERE ugm.user_id = ? AND gdp.resource_type = ?
                 )
             """, [user_id, rt, user_id, rt, user_id, rt])
