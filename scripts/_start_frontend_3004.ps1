@@ -1,0 +1,2 @@
+Set-Location 'd:\filework\excel-to-diagram'
+Start-Process cmd -ArgumentList '/c','npm run dev -- --port 3004' -RedirectStandardOutput 'd:\filework\excel-to-diagram\logs\frontend.log' -RedirectStandardError 'd:\filework\excel-to-diagram\logs\frontend-err.log' -PassThru -WindowStyle Hidden
