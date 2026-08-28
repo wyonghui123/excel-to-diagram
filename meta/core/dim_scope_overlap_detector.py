@@ -10,9 +10,9 @@ DimScopeOverlapDetector — Section 1 / Section 3 重叠加检测器
 3. 提示合并/覆盖
 
 本模块提供：
-- detect_overlaps(role_id, resource_type) -> List[OverlapInfo]
-- has_overlap(role_id, field) -> bool
-- get_overlap_count(role_id) -> int
+- detect_overlaps(permission_set_id, resource_type) -> List[OverlapInfo]
+- has_overlap(permission_set_id, field) -> bool
+- get_overlap_count(permission_set_id) -> int
 
 重叠加判定规则（FR-006: 重复配置处理）：
 - Section 1 配的 dimension_code == Section 3 配的 field
@@ -45,13 +45,13 @@ class DimScopeOverlapDetector:
 
     def detect_overlaps(
         self,
-        role_id: int,
+        permission_set_id: int,
         resource_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """检测 Section 1 (管理维度) 与 Section 3 (条件规则) 的重叠加
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
             resource_type: 资源类型（如 domain, sub_domain），None 表示所有
 
         Returns:
@@ -80,11 +80,11 @@ class DimScopeOverlapDetector:
         if not is_enabled('ENABLE_DUP_CONFIG_WARNING'):
             return []
 
-        dim_scopes = self._get_dim_scopes(role_id, resource_type)
+        dim_scopes = self._get_dim_scopes(permission_set_id, resource_type)
         if not dim_scopes:
             return []
 
-        rules = self._get_condition_rules(role_id, resource_type)
+        rules = self._get_condition_rules(permission_set_id, resource_type)
         if not rules:
             return []
 
@@ -124,19 +124,19 @@ class DimScopeOverlapDetector:
 
         return overlaps
 
-    def has_overlap(self, role_id: int, field: str) -> bool:
+    def has_overlap(self, permission_set_id: int, field: str) -> bool:
         """快速检测指定字段是否有重叠加"""
-        overlaps = self.detect_overlaps(role_id)
+        overlaps = self.detect_overlaps(permission_set_id)
         return any(o['field'] == field for o in overlaps)
 
-    def get_overlap_count(self, role_id: int) -> int:
+    def get_overlap_count(self, permission_set_id: int) -> int:
         """获取重叠加总数"""
-        overlaps = self.detect_overlaps(role_id)
+        overlaps = self.detect_overlaps(permission_set_id)
         return len(overlaps)
 
-    def get_overlap_summary(self, role_id: int) -> Dict[str, Any]:
+    def get_overlap_summary(self, permission_set_id: int) -> Dict[str, Any]:
         """获取重叠加摘要（供 UI 顶部展示）"""
-        overlaps = self.detect_overlaps(role_id)
+        overlaps = self.detect_overlaps(permission_set_id)
         if not overlaps:
             return {
                 'has_overlap': False,
@@ -154,7 +154,7 @@ class DimScopeOverlapDetector:
     # ----------------------------------------------------------------
 
     def _get_dim_scopes(
-        self, role_id: int, resource_type: Optional[str]
+        self, permission_set_id: int, resource_type: Optional[str]
     ) -> List[Dict[str, Any]]:
         """获取角色的管理维度范围"""
         try:
@@ -164,9 +164,9 @@ class DimScopeOverlapDetector:
             cursor.execute("""
                 SELECT dimension_code, dimension_values, inherit_children,
                        scope_mode, bo_id
-                FROM role_dimension_scopes
-                WHERE role_id = ?
-            """, (role_id,))
+                FROM permission_set_dimension_scopes
+                WHERE permission_set_id = ?
+            """, (permission_set_id,))
             scopes = []
             for row in cursor.fetchall():
                 if resource_type and row[4] and row[4] != resource_type:
@@ -185,7 +185,7 @@ class DimScopeOverlapDetector:
             return []
 
     def _get_condition_rules(
-        self, role_id: int, resource_type: Optional[str]
+        self, permission_set_id: int, resource_type: Optional[str]
     ) -> List[Dict[str, Any]]:
         """获取角色的条件规则"""
         try:
@@ -196,8 +196,8 @@ class DimScopeOverlapDetector:
                 SELECT resource_type, condition, permission_level, is_denied,
                        analysis_mode
                 FROM permission_rules
-                WHERE role_id = ?
-            """, (role_id,))
+                WHERE permission_set_id = ?
+            """, (permission_set_id,))
             rules = []
             for row in cursor.fetchall():
                 rt = row[0]
