@@ -204,11 +204,11 @@ def dev_login():
 
     cursor2 = _data_source.execute(
         "SELECT r.name, r.code, p.code "
-        "FROM roles r "
-        "JOIN group_roles gr ON r.id = gr.role_id "
-        "JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
+        "FROM permission_sets r "
+        "JOIN org_permission_sets gr ON r.id = gr.permission_set_id "
+        "JOIN org_members ugm ON gr.org_id = ugm.org_id "
         "JOIN users u ON u.id = ugm.user_id "
-        "LEFT JOIN role_permissions rp ON r.id = rp.role_id "
+        "LEFT JOIN permission_set_permissions rp ON r.id = rp.permission_set_id "
         "LEFT JOIN permissions p ON rp.permission_id = p.id "
         "WHERE u.username = ?", [username]
     )

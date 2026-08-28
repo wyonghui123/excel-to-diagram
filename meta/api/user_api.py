@@ -14,7 +14,7 @@ from meta.services.query.virtual_sort import _build_audit_derived_order_join
 from meta.services.permission_service import PermissionService
 from meta.services.auth_provider import _hash_password_pbdkdf2
 from meta.services.data_permission_service import DataPermissionService
-from meta.services.user_group_service import UserGroupService
+from meta.services.org_service import OrgService
 from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
 from meta.core.bo_framework import BOFramework
 from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
@@ -31,13 +31,13 @@ _data_source = None
 _bo_framework = None
 _perm_service = None
 _data_perm_service = None
-_user_group_service = None
+_org_service = None
 _svc_audit_interceptor = None
 
 
 def init_user_services(data_source=None):
     """初始化用户服务"""
-    global _data_source, _perm_service, _data_perm_service, _user_group_service, _svc_audit_interceptor
+    global _data_source, _perm_service, _data_perm_service, _org_service, _svc_audit_interceptor
     
     if data_source:
         _data_source = data_source
@@ -50,7 +50,7 @@ def init_user_services(data_source=None):
     
     _perm_service = PermissionService(_data_source)
     _data_perm_service = DataPermissionService(_data_source)
-    _user_group_service = UserGroupService(_data_source)
+    _org_service = OrgService(_data_source)
     _svc_audit_interceptor = SvcAuditInterceptor(_data_source)
 
 
@@ -74,11 +74,11 @@ def _get_data_perm_service():
     return _data_perm_service
 
 
-def _get_user_group_service():
+def _get_org_service():
     """获取用户组服务实例"""
-    if _user_group_service is None:
+    if _org_service is None:
         init_user_services()
-    return _user_group_service
+    return _org_service
 
 
 def _get_svc_audit_interceptor():
@@ -195,7 +195,7 @@ def list_users():
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 20, type=int)
     keyword = request.args.get('keyword', '').strip()
-    group_id = request.args.get('group_id', type=int)
+    org_id = request.args.get('org_id', type=int)
 
     # [FIX 2026-06-08] 排序参数解析：兼容两种常见约定
     # 1. El-Table v2 / Element Plus: ?sort_by=updated_at&order=desc
@@ -210,12 +210,12 @@ def list_users():
         kw = f'%{keyword}%'
         params.extend([kw, kw, kw])
 
-    if group_id:
-        conditions.append("id IN (SELECT user_id FROM user_group_members WHERE group_id = ?)")
-        params.append(group_id)
+    if org_id:
+        conditions.append("id IN (SELECT user_id FROM org_members WHERE org_id = ?)")
+        params.append(org_id)
 
     if not has_all_permission and has_group_permission:
-        manageable_user_ids = _get_user_group_service().get_manageable_users(user_id, has_all_permission=False)
+        manageable_user_ids = _get_org_service().get_manageable_users(user_id, has_all_permission=False)
         if not manageable_user_ids:
             return jsonify({
                 'success': True,
@@ -286,9 +286,9 @@ def list_users():
         placeholders = ','.join(['?'] * len(user_ids))
         cursor = _data_source.execute(
             f"SELECT ugm.user_id, r.id, r.code, r.name, r.description, r.is_system "
-            f"FROM roles r "
-            f"JOIN group_roles gr ON r.id = gr.role_id "
-            f"JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
+            f"FROM permission_sets r "
+            f"JOIN org_permission_sets gr ON r.id = gr.permission_set_id "
+            f"JOIN org_members ugm ON gr.org_id = ugm.org_id "
             f"WHERE ugm.user_id IN ({placeholders})",
             user_ids
         )
@@ -362,8 +362,8 @@ def create_user():
         generated_temp_password = result.data.get('generated_temp_password')
 
         role_ids = data.get('role_ids', [])
-        for role_id in role_ids:
-            _get_perm_service().assign_role(user_id, role_id)
+        for permission_set_id in role_ids:
+            _get_perm_service().assign_role(user_id, permission_set_id)
 
     response_data = {'id': user_id, 'username': username}
     if generated_temp_password:
@@ -398,7 +398,7 @@ def get_current_user_profile():
     user.pop('password_hash', None)
     
     # 添加角色和权限信息
-    user['roles'] = _get_perm_service().get_user_roles(user_id)
+    user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
     
     perm_service = _get_perm_service()
     user['permissions'] = perm_service.get_user_permissions(user_id)
@@ -461,9 +461,9 @@ def get_user(user_id):
             return jsonify({'success': False, 'message': '用户不存在'}), 404
 
         user = result.data
-        user['roles'] = _get_perm_service().get_user_roles(user_id)
+        user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
         user['permissions'] = _get_perm_service().get_user_permissions(user_id)
-        user['groups'] = _get_user_group_service().get_user_groups(user_id)
+        user['groups'] = _get_org_service().get_orgs(user_id)
         user['data_permissions'] = _get_data_perm_service().get_all_user_data_permissions_with_groups(user_id)
 
         return jsonify({'success': True, 'data': user})
@@ -489,7 +489,7 @@ def update_user(user_id):
         return jsonify({'success': False, 'message': '无权修改'}), 403
     
     if not has_all_permission and not is_self:
-        if not _get_user_group_service().can_manage_user(operator_id, user_id, has_all_permission=False):
+        if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
             return jsonify({'success': False, 'message': '无权修改该用户'}), 403
 
     data = request.get_json(silent=True) or {}
@@ -522,35 +522,35 @@ def update_user(user_id):
 
             if (has_all_permission or has_group_permission) and 'role_ids' in data:
                 if not has_all_permission:
-                    if not _get_user_group_service().can_manage_user(operator_id, user_id, has_all_permission=False):
+                    if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
                         return jsonify({'success': False, 'message': '无权修改该用户角色'}), 403
                 
-                current_roles = {r['id'] for r in _get_perm_service().get_user_roles(user_id)}
+                current_roles = {r['id'] for r in _get_perm_service().get_user_permission_sets(user_id)}
                 new_roles = set(data['role_ids'])
 
                 added_roles = new_roles - current_roles
                 removed_roles = current_roles - new_roles
 
-                for role_id in added_roles:
-                    if not _get_data_perm_service().can_assign_role(operator_id, role_id):
+                for permission_set_id in added_roles:
+                    if not _get_data_perm_service().can_assign_role(operator_id, permission_set_id):
                         return jsonify({'success': False, 'message': '无权分配该角色，可能导致权限提升'}), 403
-                    _get_perm_service().assign_role(user_id, role_id)
+                    _get_perm_service().assign_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_associate(
                         object_type='user',
                         object_id=user_id,
                         tgt_type='role',
-                        tgt_id=role_id,
+                        tgt_id=permission_set_id,
                         association_name='roles',
                         user_id=str(operator_id) if operator_id else None,
                         user_name=operator_name,
                     )
-                for role_id in removed_roles:
-                    _get_perm_service().remove_role(user_id, role_id)
+                for permission_set_id in removed_roles:
+                    _get_perm_service().remove_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_dissociate(
                         object_type='user',
                         object_id=user_id,
                         tgt_type='role',
-                        tgt_id=role_id,
+                        tgt_id=permission_set_id,
                         association_name='roles',
                         user_id=str(operator_id) if operator_id else None,
                         user_name=operator_name,
@@ -723,7 +723,7 @@ def get_current_user_detail():
         return jsonify({'success': False, 'message': 'User not found'}), 404
 
     user = result.data
-    user['roles'] = _get_perm_service().get_user_roles(user_id)
+    user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
     user['permissions'] = _get_perm_service().get_user_permissions(user_id)
 
     return jsonify({'success': True, 'data': user})
@@ -772,9 +772,9 @@ def get_user_menus(user_id):
         cursor = ds.execute("""
             SELECT DISTINCT mp.menu_code, mp.menu_name, mp.menu_path, mp.icon
             FROM menu_permissions mp
-            JOIN role_menu_permissions rmp ON mp.menu_code = rmp.menu_code
-            JOIN group_roles gr ON rmp.role_id = gr.role_id
-            JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            JOIN permission_set_menu_permissions rmp ON mp.menu_code = rmp.menu_code
+            JOIN org_permission_sets gr ON rmp.permission_set_id = gr.permission_set_id
+            JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
             AND mp.is_active = 1
             ORDER BY mp.sort_order

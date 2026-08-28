@@ -69,8 +69,8 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
     """[FIX 2026-06-15] 收集用户在指定 dimension 上可见的 id 集合
 
     数据源链路:
-        user_group_members → group_roles → role_dimension_scopes
-        → DimensionScopeEngine.expand_dimension_values(role_id) → {dim: set(ids)}
+        org_members → org_permission_sets → permission_set_dimension_scopes
+        → DimensionScopeEngine.expand_dimension_values(permission_set_id) → {dim: set(ids)}
 
     链式扩展:
         HIERARCHY_CHAIN 只到 sub_domain, 但 service_module/business_object
@@ -93,7 +93,7 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
     try:
         # 1. user → group_ids
         cursor = _data_source.execute(
-            "SELECT group_id FROM user_group_members WHERE user_id = ?",
+            "SELECT org_id FROM org_members WHERE user_id = ?",
             [user_id]
         )
         group_ids = [r[0] for r in cursor.fetchall()]
@@ -103,7 +103,7 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
         # 2. groups → role_ids (DISTINCT)
         placeholders = ",".join("?" for _ in group_ids)
         cursor = _data_source.execute(
-            f"SELECT DISTINCT role_id FROM group_roles WHERE group_id IN ({placeholders})",
+            f"SELECT DISTINCT permission_set_id FROM org_permission_sets WHERE org_id IN ({placeholders})",
             group_ids
         )
         role_ids = [r[0] for r in cursor.fetchall()]
@@ -126,9 +126,9 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
             _dim_exclude_values as _exclude_of,
         )
 
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                expanded = engine.expand_dimension_values(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
             except Exception:
                 expanded = {}
 
@@ -140,7 +140,7 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
                 # wildcard-only (无 exclude) → 该 dim 全可见 → 整体返回 None
                 if _is_wc(dim_data) and not _exclude_of(dim_data):
                     logger.info(
-                        f'[get_user_dimension_scope] role={role_id} dim={dim} wildcard-only '
+                        f'[get_user_dimension_scope] role={permission_set_id} dim={dim} wildcard-only '
                         f'→ 全可见, 返回 None'
                     )
                     return None
@@ -819,7 +819,7 @@ _RESOURCE_TYPE_LABELS = {
 #   这些是「授权主体」(principal)，不是业务对象 ——
 #   用户、角色、用户组的分配走专用路径（用户详情/角色详情/用户组详情），不在功能权限矩阵展示。
 #   与 SAP PFCG / Oracle Security Console / AWS IAM / Salesforce Profile 一致。
-_IDENTITY_RESOURCE_TYPES = frozenset({'user', 'role', 'user_group'})
+_IDENTITY_RESOURCE_TYPES = frozenset({'user', 'role', 'org'})
 
 def _is_identity_resource(rt: str) -> bool:
     return rt in _IDENTITY_RESOURCE_TYPES
@@ -946,7 +946,7 @@ def _build_resource_action_matrix() -> Dict[str, List[str]]:
 
     无 actions 字段的 rt 回退默认 CRUD 集（防御：yaml 改动遗漏时矩阵不塌）。
 
-    [Phase 6 2026-08-25] 过滤权限主体 (user/role/user_group) ——
+    [Phase 6 2026-08-25] 过滤权限主体 (user/role/org) ——
       它们走专用分配路径，不进入功能权限矩阵的可授权动作白名单。
     """
     # [v36 2026-08-27] 合并 list→read; 新增 import 作为默认动作（导出/导入是常见配套）
@@ -1000,14 +1000,14 @@ def _matrix_action_columns() -> List[str]:
     return columns or list(_MATRIX_ACTION_COLUMNS)
 
 
-def _build_role_matrices(role_id: int,
+def _build_role_matrices(permission_set_id: int,
                          columns: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
     """[P2-Matrix-03] 构建角色资源×动作矩阵 + 来源明细（Spec 5.4.1 验收）
 
     数据源与来源语义（Spec 5.3.1 来源标签 4 色）：
-    - include（手动）：role_permissions JOIN permissions 直接分配的功能权限
-    - auto（菜单）：  role_menu_permissions → menus.required_permissions（勾选菜单自动授予）
-    - derived（维度）：role_dimension_scopes（维度范围勾选 → 派生 read）
+    - include（手动）：permission_set_permissions JOIN permissions 直接分配的功能权限
+    - auto（菜单）：  permission_set_menu_permissions → menus.required_permissions（勾选菜单自动授予）
+    - derived（维度）：permission_set_dimension_scopes（维度范围勾选 → 派生 read）
     - exclude（Deny）：permission_rules / data_permission_rules 中 is_denied=1
     合并优先级（Deny 优先，Spec 2.2）：exclude > include > auto > derived
 
@@ -1025,9 +1025,9 @@ def _build_role_matrices(role_id: int,
         manual: Dict[tuple, str] = {}
         cursor = ds.execute(
             "SELECT p.resource_type, p.action, p.code "
-            "FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id "
-            "WHERE rp.role_id = ?",
-            [role_id],
+            "FROM permissions p JOIN permission_set_permissions rp ON p.id = rp.permission_id "
+            "WHERE rp.permission_set_id = ?",
+            [permission_set_id],
         )
         for row in cursor.fetchall() or []:
             rt, action, code = row
@@ -1040,9 +1040,9 @@ def _build_role_matrices(role_id: int,
         auto: Dict[tuple, str] = {}
         cursor = ds.execute(
             "SELECT m.required_permissions "
-            "FROM menus m JOIN role_menu_permissions rmp ON m.menu_code = rmp.menu_code "
-            "WHERE rmp.role_id = ? AND m.is_active = 1",
-            [role_id],
+            "FROM menus m JOIN permission_set_menu_permissions rmp ON m.menu_code = rmp.menu_code "
+            "WHERE rmp.permission_set_id = ? AND m.is_active = 1",
+            [permission_set_id],
         )
         for row in cursor.fetchall() or []:
             req_raw = row[0]
@@ -1060,8 +1060,8 @@ def _build_role_matrices(role_id: int,
         # ---- 3. derived（维度范围勾选 → 派生 read）----
         derived: Dict[tuple, str] = {}
         cursor = ds.execute(
-            "SELECT dimension_code FROM role_dimension_scopes WHERE role_id = ?",
-            [role_id],
+            "SELECT dimension_code FROM permission_set_dimension_scopes WHERE permission_set_id = ?",
+            [permission_set_id],
         )
         dimension_codes_with_scope: Set[str] = set()
         for row in cursor.fetchall() or []:
@@ -1105,8 +1105,8 @@ def _build_role_matrices(role_id: int,
         exclude: Dict[tuple, str] = {}
         cursor = ds.execute(
             "SELECT resource_type, permission_level FROM data_permission_rules "
-            "WHERE role_id = ? AND is_denied = 1",
-            [role_id],
+            "WHERE permission_set_id = ? AND is_denied = 1",
+            [permission_set_id],
         )
         for row in cursor.fetchall() or []:
             rt, pl = row
@@ -1114,8 +1114,8 @@ def _build_role_matrices(role_id: int,
                 exclude[(rt, pl)] = "exclude"
         cursor = ds.execute(
             "SELECT resource_type, permission_level FROM permission_rules "
-            "WHERE role_id = ? AND is_denied = 1",
-            [role_id],
+            "WHERE permission_set_id = ? AND is_denied = 1",
+            [permission_set_id],
         )
         for row in cursor.fetchall() or []:
             rt, pl = row
@@ -1140,7 +1140,7 @@ def _build_role_matrices(role_id: int,
                 resource_type_labels[rt] = rt
 
         # 行集合 = 所有资源类型（即使无权限记录也显示空行），按 yaml 定义顺序
-        # [Phase 6 2026-08-25] 排除权限主体 (user/role/user_group) ——
+        # [Phase 6 2026-08-25] 排除权限主体 (user/role/org) ——
         #   它们在「用户详情/角色详情/用户组详情」走专用分配路径，不进入功能权限矩阵
         # [FIX 2026-08-25] 合并 merged 里出现但 yaml 未声明的 bo_id
         #   例如 scheduled_task / task_queue / enum_type 等业务 bo，
@@ -1228,13 +1228,13 @@ def _build_role_matrices(role_id: int,
             })
 
         return {
-            "role_id": role_id,
+            "permission_set_id": permission_set_id,
             "columns": action_columns,
             "resources": resources,
             "sources_detail": sources_detail,
         }
     except Exception as e:
-        logger.error(f"[P2-Matrix-03] 构建角色矩阵失败 [role_id={role_id}]: {e}")
+        logger.error(f"[P2-Matrix-03] 构建角色矩阵失败 [permission_set_id={permission_set_id}]: {e}")
         return None
 
 
@@ -1244,7 +1244,7 @@ def get_permission_meta():
     """[P1-Base-02] 权限配置元数据聚合端点（D2 致命修复）
 
     URL: /api/v2/bo/permission_dimension/meta
-    Query: role_id=<int>（可选，Phase 2 起返回角色矩阵占位）
+    Query: permission_set_id=<int>（可选，Phase 2 起返回角色矩阵占位）
 
     返回（验收 §5.4.1 P1-Base-02）：
     - dimension_priority: {dimension_code: priority}
@@ -1255,11 +1255,11 @@ def get_permission_meta():
     - normalizedForTreePicker / normalizedForDimensionSelector / normalizedForConditionEditor
       （E6 三个 pre-normalized 适配字段，前端零转换）
     - role_resource_action_matrix / menu_permission_matrix:
-      有 role_id 时空对象占位（Phase 2 P2-Matrix-03 填充），无 role_id 为 null
+      有 permission_set_id 时空对象占位（Phase 2 P2-Matrix-03 填充），无 permission_set_id 为 null
     """
     try:
         engine = _get_engine()
-        role_id = request.args.get("role_id", type=int)
+        permission_set_id = request.args.get("permission_set_id", type=int)
 
         # [P2-Matrix-02] scope_code 白名单校验（BLOCKER，5.5.4 P0 铁律）
         # 支持逗号分隔多编码（与前端 archdata scopeCode=SCP,SCM 一致）。
@@ -1387,17 +1387,17 @@ def get_permission_meta():
         # 5. 角色矩阵（[P2-Matrix-03] 填充：资源×动作矩阵 + 菜单矩阵 + 来源明细）
         role_matrix: Optional[Dict[str, Any]] = None
         menu_matrix: Optional[List[Dict[str, Any]]] = None
-        if role_id:
+        if permission_set_id:
             # [FIX 2026-08-25] 确保 _data_source 已初始化（多进程 waitress 下不同 worker 可能未初始化）
             if not _data_source:
                 _get_engine()
             # 菜单矩阵复用 role_menu_api 已重构的纯函数（菜单→required_permissions→bo_permission_groups）
             from meta.api.role_menu_api import _build_role_unified_data
 
-            unified_data = _build_role_unified_data(role_id)
+            unified_data = _build_role_unified_data(permission_set_id)
             if unified_data is not None:
                 menu_matrix = unified_data.get("menus")
-            role_matrix = _build_role_matrices(role_id, columns=matrix_columns)
+            role_matrix = _build_role_matrices(permission_set_id, columns=matrix_columns)
 
         return jsonify({
             "success": True,
@@ -1604,55 +1604,55 @@ def get_dimension_instances(dimension_id: str):
 
 
 @permission_dimension_bp.route(
-    "/../roles/<int:role_id>/permission-rules", methods=["GET"]
+    "/../roles/<int:permission_set_id>/permission-rules", methods=["GET"]
 )
 @_login_required
-def get_role_permission_rules(role_id: int):
+def get_role_permission_rules(permission_set_id: int):
     """
     获取角色的权限规则
 
-    参数：role_id
+    参数：permission_set_id
     返回：该角色的所有权限规则（从 permission_rule 表查询）
     """
     try:
         engine = _get_engine()
-        rules = engine._get_role_permission_rules(role_id)
+        rules = engine._get_role_permission_rules(permission_set_id)
 
-        return jsonify({"success": True, "data": {"rules": rules, "role_id": role_id}})
+        return jsonify({"success": True, "data": {"rules": rules, "permission_set_id": permission_set_id}})
     except Exception as e:
-        logger.error(f"获取角色权限规则失败 [role_id={role_id}]: {e}")
+        logger.error(f"获取角色权限规则失败 [permission_set_id={permission_set_id}]: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 
 roles_bp = Blueprint("permission_dimension_roles", __name__, url_prefix="/api/v1/roles")
 
 
-@roles_bp.route("/<int:role_id>/permission-rules", methods=["GET"])
+@roles_bp.route("/<int:permission_set_id>/permission-rules", methods=["GET"])
 @_login_required
-def get_role_permission_rules_v2(role_id: int):
+def get_role_permission_rules_v2(permission_set_id: int):
     """
     获取角色的权限规则
 
-    参数：role_id
+    参数：permission_set_id
     返回：该角色的所有权限规则（从 permission_rule 表查询）
     """
     try:
         engine = _get_engine()
-        rules = engine._get_role_permission_rules(role_id)
+        rules = engine._get_role_permission_rules(permission_set_id)
 
-        return jsonify({"success": True, "data": {"rules": rules, "role_id": role_id}})
+        return jsonify({"success": True, "data": {"rules": rules, "permission_set_id": permission_set_id}})
     except Exception as e:
-        logger.error(f"获取角色权限规则失败 [role_id={role_id}]: {e}")
+        logger.error(f"获取角色权限规则失败 [permission_set_id={permission_set_id}]: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-@roles_bp.route("/<int:role_id>/permission-rules", methods=["POST"])
+@roles_bp.route("/<int:permission_set_id>/permission-rules", methods=["POST"])
 @_login_required
-def save_permission_rule(role_id: int):
+def save_permission_rule(permission_set_id: int):
     """
     保存权限规则
 
-    参数：role_id, resource_type, condition, permission_level, inherit_to_children, propagate_to_parents, is_denied
+    参数：permission_set_id, resource_type, condition, permission_level, inherit_to_children, propagate_to_parents, is_denied
     返回：保存结果
     保存后自动失效缓存
     """
@@ -1672,7 +1672,7 @@ def save_permission_rule(role_id: int):
         engine = _get_engine()
 
         rule_data = {
-            "role_id": role_id,
+            "permission_set_id": permission_set_id,
             "resource_type": data["resource_type"],
             "condition": data["condition"],
             "permission_level": data.get("permission_level", "read"),
@@ -1687,11 +1687,11 @@ def save_permission_rule(role_id: int):
 
         cursor = _data_source.execute(
             """INSERT INTO permission_rules
-               (role_id, resource_type, condition, permission_level, is_denied,
+               (permission_set_id, resource_type, condition, permission_level, is_denied,
                 inherit_to_children, propagate_to_parents, analysis_mode, created_by)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                rule_data["role_id"],
+                rule_data["permission_set_id"],
                 rule_data["resource_type"],
                 rule_data["condition"],
                 rule_data["permission_level"],
@@ -1705,9 +1705,9 @@ def save_permission_rule(role_id: int):
 
         rule_id = cursor.lastrowid
 
-        engine.invalidate_cache(role_id=role_id)
+        engine.invalidate_cache(permission_set_id=permission_set_id)
 
-        logger.info(f"保存权限规则成功 [role_id={role_id}, rule_id={rule_id}]")
+        logger.info(f"保存权限规则成功 [permission_set_id={permission_set_id}, rule_id={rule_id}]")
 
         # [FIX 2026-06-12] 角色权限规则审计日志: 关联到角色对象
         from meta.api._audit_helper import write_permission_config_audit
@@ -1716,29 +1716,29 @@ def save_permission_rule(role_id: int):
             object_type='permission_rule',
             object_id=rule_id,
             data={
-                'role_id': role_id,
+                'permission_set_id': permission_set_id,
                 'resource_type': data.get('resource_type'),
                 'permission_level': data.get('permission_level', 'read'),
             },
             parent_object_type='role',
-            parent_object_id=role_id,
+            parent_object_id=permission_set_id,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": {"rule_id": rule_id, "role_id": role_id},
+                "data": {"rule_id": rule_id, "permission_set_id": permission_set_id},
                 "message": "Permission rule saved successfully",
             }
         )
     except Exception as e:
-        logger.error(f"保存权限规则失败 [role_id={role_id}]: {e}")
+        logger.error(f"保存权限规则失败 [permission_set_id={permission_set_id}]: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-@roles_bp.route("/<int:role_id>/resource-action-matrix", methods=["PUT"])
+@roles_bp.route("/<int:permission_set_id>/resource-action-matrix", methods=["PUT"])
 @_login_required
-def save_resource_action_matrix(role_id: int):
+def save_resource_action_matrix(permission_set_id: int):
     """
     保存角色「资源 × 动作」矩阵手动授权
 
@@ -1753,9 +1753,9 @@ def save_resource_action_matrix(role_id: int):
 
     存储语义（与 _build_role_matrices 的 manual 来源对齐）：
       - granted=true  → 确保 permissions 表存在 code="{rt}:{action}" 记录，
-                          resource_type=rt, action=action，然后 INSERT role_permissions(role_id, permission_id)
-      - granted=false → DELETE role_permissions 中对应 permission 的关联行
-      - 已存在的 role_menu_permissions / role_dimension_scopes 不在此端点处理
+                          resource_type=rt, action=action，然后 INSERT permission_set_permissions(permission_set_id, permission_id)
+      - granted=false → DELETE permission_set_permissions 中对应 permission 的关联行
+      - 已存在的 permission_set_menu_permissions / permission_set_dimension_scopes 不在此端点处理
         （它们走 PUT /menu-permissions 和 POST /dimension-scopes）
 
     事务 + 缓存失效：失败自动回滚。
@@ -1836,37 +1836,37 @@ def save_resource_action_matrix(role_id: int):
                     raise RuntimeError(f"无法为 {code} 分配 permission_id")
 
                 if granted:
-                    # 确保 (role_id, permission_id) 存在 —— INSERT OR IGNORE 避免重复键冲突
+                    # 确保 (permission_set_id, permission_id) 存在 —— INSERT OR IGNORE 避免重复键冲突
                     ds.execute(
-                        """INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+                        """INSERT OR IGNORE INTO permission_set_permissions (permission_set_id, permission_id)
                            VALUES (?, ?)""",
-                        [role_id, perm_id],
+                        [permission_set_id, perm_id],
                     )
                     granted_count += 1
                 else:
                     # 撤销：DELETE 关联
                     ds.execute(
-                        "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?",
-                        [role_id, perm_id],
+                        "DELETE FROM permission_set_permissions WHERE permission_set_id = ? AND permission_id = ?",
+                        [permission_set_id, perm_id],
                     )
                     revoked_count += 1
 
         # 缓存失效（与 POST /permission-rules 同样的 invalidate 模式）
         try:
             engine = _get_engine()
-            engine.invalidate_cache(role_id=role_id)
+            engine.invalidate_cache(permission_set_id=permission_set_id)
         except Exception as cache_err:
             logger.warning(f"[resource-action-matrix] 缓存失效失败（非阻断）: {cache_err}")
 
         logger.info(
-            f"[resource-action-matrix] 保存成功 role_id={role_id} "
+            f"[resource-action-matrix] 保存成功 permission_set_id={permission_set_id} "
             f"granted={granted_count} revoked={revoked_count}"
         )
 
         return jsonify({
             "success": True,
             "data": {
-                "role_id": role_id,
+                "permission_set_id": permission_set_id,
                 "granted": granted_count,
                 "revoked": revoked_count,
                 "total": len(cells),
@@ -1874,26 +1874,26 @@ def save_resource_action_matrix(role_id: int):
             "message": "Resource action matrix saved",
         })
     except Exception as e:
-        logger.error(f"保存资源×动作矩阵失败 [role_id={role_id}]: {e}")
+        logger.error(f"保存资源×动作矩阵失败 [permission_set_id={permission_set_id}]: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-@roles_bp.route("/<int:role_id>/calculate-impact", methods=["POST"])
+@roles_bp.route("/<int:permission_set_id>/calculate-impact", methods=["POST"])
 @_login_required
-def calculate_impact(role_id: int):
+def calculate_impact(permission_set_id: int):
     """
     计算影响范围
 
-    参数：role_id
+    参数：permission_set_id
     返回：影响范围（调用 PermissionDimensionEngine.calculate_impact()）
     """
     try:
         engine = _get_engine()
-        result = engine.calculate_impact(role_id)
+        result = engine.calculate_impact(permission_set_id)
 
         return jsonify({"success": True, "data": result})
     except Exception as e:
-        logger.error(f"计算影响范围失败 [role_id={role_id}]: {e}")
+        logger.error(f"计算影响范围失败 [permission_set_id={permission_set_id}]: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 

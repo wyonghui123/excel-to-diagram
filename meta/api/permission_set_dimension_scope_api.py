@@ -19,7 +19,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-role_dim_bp = Blueprint('role_dim', __name__, url_prefix='/api/v1/roles')
+role_dim_bp = Blueprint('role_dim', __name__, url_prefix='/api/v1/permission-sets')
 
 _data_source = None
 
@@ -38,7 +38,7 @@ def _is_wildcard_values(values):
     return WILDCARD_MARKER in values
 
 
-def _load_scopes_raw(ds, role_id):
+def _load_scopes_raw(ds, permission_set_id):
     """[FR-007] 读取角色当前所有 dim scope (原始 dict 格式, 用于审计比较)
 
     Returns:
@@ -47,8 +47,8 @@ def _load_scopes_raw(ds, role_id):
     try:
         cursor = ds.execute(
             "SELECT dimension_code, dimension_values, inherit_children, scope_mode "
-            "FROM role_dimension_scopes WHERE role_id = ?",
-            [role_id]
+            "FROM permission_set_dimension_scopes WHERE permission_set_id = ?",
+            [permission_set_id]
         )
         rows = []
         for row in cursor.fetchall():
@@ -69,8 +69,8 @@ def _load_scopes_raw(ds, role_id):
         return []
 
 
-def _get_role_users(ds, role_id):
-    """[FR-005] 查询该角色绑定的所有用户 ID (通过 user_group_members → group_roles 链路)
+def _get_role_users(ds, permission_set_id):
+    """[FR-005] 查询该角色绑定的所有用户 ID (通过 org_members → org_permission_sets 链路)
 
     Returns:
         list of int: user_ids
@@ -78,10 +78,10 @@ def _get_role_users(ds, role_id):
     try:
         cursor = ds.execute(
             "SELECT DISTINCT ugm.user_id "
-            "FROM group_roles gr "
-            "JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
-            "WHERE gr.role_id = ?",
-            [role_id]
+            "FROM org_permission_sets gr "
+            "JOIN org_members ugm ON gr.org_id = ugm.org_id "
+            "WHERE gr.permission_set_id = ?",
+            [permission_set_id]
         )
         return [row[0] for row in cursor.fetchall()]
     except Exception as e:
@@ -90,17 +90,17 @@ def _get_role_users(ds, role_id):
 
 
 def _get_user_other_roles(ds, user_id, exclude_role_id):
-    """[FR-005] 查询用户的其他角色 (排除当前 role_id)
+    """[FR-005] 查询用户的其他角色 (排除当前 permission_set_id)
 
     Returns:
         list of int: role_ids
     """
     try:
         cursor = ds.execute(
-            "SELECT DISTINCT gr.role_id "
-            "FROM group_roles gr "
-            "JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
-            "WHERE ugm.user_id = ? AND gr.role_id != ?",
+            "SELECT DISTINCT gr.permission_set_id "
+            "FROM org_permission_sets gr "
+            "JOIN org_members ugm ON gr.org_id = ugm.org_id "
+            "WHERE ugm.user_id = ? AND gr.permission_set_id != ?",
             [user_id, exclude_role_id]
         )
         return [row[0] for row in cursor.fetchall()]
@@ -121,7 +121,7 @@ class DimScopePermissionError(Exception):
     pass
 
 
-def _check_wildcard_exclude_conflict(ds, role_id, new_scopes):
+def _check_wildcard_exclude_conflict(ds, permission_set_id, new_scopes):
     """[FR-005] 多角色 Union 防冲突校验 (PM 决策: 选项 C)
 
     同一用户的所有角色不允许同时出现 '*' 通配 + 任何 exclude。
@@ -148,11 +148,11 @@ def _check_wildcard_exclude_conflict(ds, role_id, new_scopes):
 
     # 2. 检查与用户其他角色的冲突
     # 查询该 role 绑定的所有用户 → 每个用户的其他 role → 其他 role 的 scopes
-    user_ids = _get_role_users(ds, role_id)
+    user_ids = _get_role_users(ds, permission_set_id)
     conflict_user_ids = []
 
     for user_id in user_ids:
-        other_role_ids = _get_user_other_roles(ds, user_id, role_id)
+        other_role_ids = _get_user_other_roles(ds, user_id, permission_set_id)
         for other_role_id in other_role_ids:
             other_scopes = _load_scopes_raw(ds, other_role_id)
             other_has_wildcard = any(
@@ -204,7 +204,7 @@ def _check_wildcard_exclude_permission(new_scopes, user):
             )
 
 
-def _log_dim_scope_changes(ds, role_id, old_scopes, new_scopes, user):
+def _log_dim_scope_changes(ds, permission_set_id, old_scopes, new_scopes, user):
     """[FR-007] 审计日志: 检测新旧 scopes 变化, 写入高危操作审计
 
     审计事件:
@@ -237,22 +237,22 @@ def _log_dim_scope_changes(ds, role_id, old_scopes, new_scopes, user):
             write_permission_config_audit(
                 action='UPDATE',
                 object_type='role_dimension_scope',
-                object_id=role_id,
+                object_id=permission_set_id,
                 data={'event': 'dim_scope_wildcard_enabled',
-                      'dimension_code': dim_code, 'role_id': role_id},
+                      'dimension_code': dim_code, 'permission_set_id': permission_set_id},
                 parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_id=permission_set_id,
             )
             # 高危变更附加记录
             write_permission_config_audit(
                 action='UPDATE',
                 object_type='role_dimension_scope',
-                object_id=role_id,
+                object_id=permission_set_id,
                 data={'event': 'high_risk_permission_change',
                       'change': 'wildcard_enabled',
-                      'role_id': role_id, 'dimension_code': dim_code},
+                      'permission_set_id': permission_set_id, 'dimension_code': dim_code},
                 parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_id=permission_set_id,
             )
 
         # 检测 wildcard 关闭
@@ -260,11 +260,11 @@ def _log_dim_scope_changes(ds, role_id, old_scopes, new_scopes, user):
             write_permission_config_audit(
                 action='UPDATE',
                 object_type='role_dimension_scope',
-                object_id=role_id,
+                object_id=permission_set_id,
                 data={'event': 'dim_scope_wildcard_disabled',
-                      'dimension_code': dim_code, 'role_id': role_id},
+                      'dimension_code': dim_code, 'permission_set_id': permission_set_id},
                 parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_id=permission_set_id,
             )
 
         # 检测 exclude 设置
@@ -272,12 +272,12 @@ def _log_dim_scope_changes(ds, role_id, old_scopes, new_scopes, user):
             write_permission_config_audit(
                 action='UPDATE',
                 object_type='role_dimension_scope',
-                object_id=role_id,
+                object_id=permission_set_id,
                 data={'event': 'dim_scope_exclude_set',
-                      'dimension_code': dim_code, 'role_id': role_id,
+                      'dimension_code': dim_code, 'permission_set_id': permission_set_id,
                       'excluded_ids': new_vals},
                 parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_id=permission_set_id,
             )
 
         # 检测 exclude 取消
@@ -285,11 +285,11 @@ def _log_dim_scope_changes(ds, role_id, old_scopes, new_scopes, user):
             write_permission_config_audit(
                 action='UPDATE',
                 object_type='role_dimension_scope',
-                object_id=role_id,
+                object_id=permission_set_id,
                 data={'event': 'dim_scope_exclude_unset',
-                      'dimension_code': dim_code, 'role_id': role_id},
+                      'dimension_code': dim_code, 'permission_set_id': permission_set_id},
                 parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_id=permission_set_id,
             )
 
 
@@ -357,13 +357,13 @@ def admin_required(f):
     return decorated
 
 
-@role_dim_bp.route('/<int:role_id>/dimension-scopes', methods=['GET'])
+@role_dim_bp.route('/<int:permission_set_id>/dimension-scopes', methods=['GET'])
 @login_required
-def get_dimension_scopes(role_id):
+def get_dimension_scopes(permission_set_id):
     try:
         ds = _ds()
         cursor = ds.execute(
-            "SELECT id, role_id, dimension_code, dimension_values, inherit_children, scope_mode FROM role_dimension_scopes WHERE role_id = ?", [role_id]
+            "SELECT id, permission_set_id, dimension_code, dimension_values, inherit_children, scope_mode FROM permission_set_dimension_scopes WHERE permission_set_id = ?", [permission_set_id]
         )
         cols = [d[0] for d in (cursor.description or [])]
         rows = []
@@ -421,9 +421,9 @@ def get_dimension_scopes(role_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-@role_dim_bp.route('/<int:role_id>/dimension-scopes', methods=['POST'])
+@role_dim_bp.route('/<int:permission_set_id>/dimension-scopes', methods=['POST'])
 @admin_required
-def save_dimension_scopes(role_id):
+def save_dimension_scopes(permission_set_id):
     try:
         data = request.get_json()
         # [FIX 2026-06-15] 空 list 是合法操作 (用户清空维度范围), 不应 400
@@ -447,24 +447,24 @@ def save_dimension_scopes(role_id):
         # [FR-005] 多角色 Union 防冲突校验 (PM 决策: 选项 C)
         # 同一用户的所有角色不允许同时出现 '*' 通配 + 任何 exclude
         try:
-            _check_wildcard_exclude_conflict(ds, role_id, data)
+            _check_wildcard_exclude_conflict(ds, permission_set_id, data)
         except DimScopeConflictError as e:
             return jsonify({'success': False, 'error_code': 'DIM_SCOPE_CONFLICT',
                             'message': str(e),
                             'conflict_user_ids': e.conflict_user_ids}), 409
 
         # [FR-007] 保存前读取旧 scopes (用于审计比较)
-        old_scopes = _load_scopes_raw(ds, role_id)
+        old_scopes = _load_scopes_raw(ds, permission_set_id)
 
         with ds.transaction():
-            ds.execute("DELETE FROM role_dimension_scopes WHERE role_id = ?", [role_id])
+            ds.execute("DELETE FROM permission_set_dimension_scopes WHERE permission_set_id = ?", [permission_set_id])
             for item in data:
                 ds.execute(
-                    "INSERT INTO role_dimension_scopes "
-                    "(role_id, dimension_code, dimension_values, inherit_children, scope_mode) "
+                    "INSERT INTO permission_set_dimension_scopes "
+                    "(permission_set_id, dimension_code, dimension_values, inherit_children, scope_mode) "
                     "VALUES (?, ?, ?, ?, ?)",
                     [
-                        role_id,
+                        permission_set_id,
                         item.get('dimension_code'),
                         json.dumps(item.get('dimension_values', [])),
                         1 if item.get('inherit_children', True) else 0,
@@ -476,23 +476,23 @@ def save_dimension_scopes(role_id):
         write_permission_config_audit(
             action='UPDATE',
             object_type='role_dimension_scope',
-            object_id=role_id,
+            object_id=permission_set_id,
             data={'scopes_count': len(data) if isinstance(data, list) else 0,
                   'dimension_codes': [item.get('dimension_code') for item in data] if isinstance(data, list) else []},
             parent_object_type='role',
-            parent_object_id=role_id,
+            parent_object_id=permission_set_id,
         )
 
         # [FR-007] 审计日志: 检测新旧 scopes 变化, 写入高危操作审计
         # (wildcard 启用/关闭, exclude 设置/取消, high_risk_permission_change)
         try:
-            _log_dim_scope_changes(ds, role_id, old_scopes, data, current_user)
+            _log_dim_scope_changes(ds, permission_set_id, old_scopes, data, current_user)
         except Exception as audit_err:
             logger.warning(f'[FR-007] _log_dim_scope_changes failed: {audit_err}')
 
-        # [P5 补充 2026-07-26] 触发 derivation_pipeline 重新生成 role_effective_intents
+        # [P5 补充 2026-07-26] 触发 derivation_pipeline 重新生成 permission_set_effective_intents
         # 当 effective_intents_enabled=True 时, IntentScopeAdapter/DataPermissionInterceptor
-        # 从 role_effective_intents 表读取权限。如果不触发 derivation, 表数据不会更新,
+        # 从 permission_set_effective_intents 表读取权限。如果不触发 derivation, 表数据不会更新,
         # 导致 E2 (exclude 后 wyonghui4 看不到 339) / A2 (wyonghui4 sub_domain 包含 339) 测试失败
         try:
             from meta.core.permission_flags import is_enabled
@@ -503,15 +503,15 @@ def save_dimension_scopes(role_id):
                 if db_path:
                     dao = EffectiveIntentDAO(db_path)
                     pipeline = PermissionDerivationPipeline(db_path=db_path, dao=dao)
-                    pipeline.derive(role_id=role_id)
+                    pipeline.derive(permission_set_id=permission_set_id)
                     logger.info(
-                        f'[P5-AutoDerive] derivation_pipeline.derive(role_id={role_id}) '
+                        f'[P5-AutoDerive] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                         f'completed after dimension-scopes update'
                     )
         except Exception as derive_err:
             # 不阻塞保存操作, 只记录警告
             logger.warning(
-                f'[P5-AutoDerive] derivation_pipeline.derive(role_id={role_id}) '
+                f'[P5-AutoDerive] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                 f'failed (non-fatal): {derive_err}'
             )
 
@@ -520,22 +520,22 @@ def save_dimension_scopes(role_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-@role_dim_bp.route('/<int:role_id>/derived-permissions', methods=['GET'])
+@role_dim_bp.route('/<int:permission_set_id>/derived-permissions', methods=['GET'])
 @login_required
-def get_derived_permissions(role_id):
+def get_derived_permissions(permission_set_id):
     try:
         engine = get_dimension_scope_engine(_ds())
-        result = engine.auto_sync_all(role_id)
+        result = engine.auto_sync_all(permission_set_id)
         # [FIX 2026-06-12] 自动推导完成后也写 audit (跟手动 save 一致, 让操作日志完整)
         write_permission_config_audit(
             action='UPDATE',
             object_type='role_dimension_scope',
-            object_id=role_id,
+            object_id=permission_set_id,
             data={'auto_derived': True,
                   'recommended_menus': len(result.get('recommended_menus', [])) if isinstance(result, dict) else 0,
                   'derived_permissions': len(result.get('derived_permissions', [])) if isinstance(result, dict) else 0},
             parent_object_type='role',
-            parent_object_id=role_id,
+            parent_object_id=permission_set_id,
         )
         return jsonify({'success': True, 'data': result})
     except Exception as e:

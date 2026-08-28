@@ -17,7 +17,7 @@ from meta.services.auth_middleware import is_admin, get_current_user
 from meta.api._audit_helper import write_permission_config_audit
 from functools import wraps
 
-role_menu_bp = Blueprint('role_menu', __name__, url_prefix='/api/v1/roles')
+permission_set_menu_bp = Blueprint('permission_set_menu', __name__, url_prefix='/api/v1/permission-sets')
 
 _data_source = None
 
@@ -252,9 +252,9 @@ def admin_required(f):
     return decorated
 
 
-@role_menu_bp.route('/<int:role_id>/menu-permissions', methods=['GET'])
+@permission_set_menu_bp.route('/<int:permission_set_id>/menu-permissions', methods=['GET'])
 @login_required
-def get_role_menu_permissions(role_id):
+def get_permission_set_menu_permissions(permission_set_id):
     """获取角色的菜单权限配置"""
     try:
         ds = _get_data_source()
@@ -280,8 +280,8 @@ def get_role_menu_permissions(role_id):
         all_menus = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
         cursor = ds.execute(
-            "SELECT menu_code FROM role_menu_permissions WHERE role_id = ?",
-            [role_id]
+            "SELECT menu_code FROM permission_set_menu_permissions WHERE permission_set_id = ?",
+            [permission_set_id]
         )
         assigned_menus = set(row[0] for row in cursor.fetchall())
         
@@ -311,15 +311,15 @@ def get_role_menu_permissions(role_id):
         }), 500
 
 
-def _build_role_unified_data(role_id):
+def _build_role_unified_data(permission_set_id):
     """[P2-Matrix-03] 构建角色统一权限数据（纯函数，无 jsonify）
 
     逻辑与历史端点 get_role_unified_permissions 完全一致（单一事实源为 menus 表）：
     返回菜单-功能权限-数据权限三层联动视图 data dict；异常时返回 None。
 
     供两处复用：
-    1. GET /roles/<role_id>/unified-permissions（仅做 jsonify 包装）
-    2. GET /permission_dimension/meta?role_id=（P2-Matrix-03 聚合端点）
+    1. GET /roles/<permission_set_id>/unified-permissions（仅做 jsonify 包装）
+    2. GET /permission_dimension/meta?permission_set_id=（P2-Matrix-03 聚合端点）
     """
     try:
         ds = _get_data_source()
@@ -338,14 +338,14 @@ def _build_role_unified_data(role_id):
         all_menus = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
         cursor = ds.execute(
-            "SELECT menu_code FROM role_menu_permissions WHERE role_id = ?", [role_id]
+            "SELECT menu_code FROM permission_set_menu_permissions WHERE permission_set_id = ?", [permission_set_id]
         )
         assigned_menus = set(row[0] for row in cursor.fetchall())
         
         cursor = ds.execute(
             "SELECT resource_type, resource_id, permission_level "
-            "FROM role_data_permissions WHERE role_id = ?",
-            [role_id]
+            "FROM permission_set_data_permissions WHERE permission_set_id = ?",
+            [permission_set_id]
         )
         data_perms = {}
         for row in cursor.fetchall():
@@ -359,9 +359,9 @@ def _build_role_unified_data(role_id):
         cursor = ds.execute(
             """SELECT p.code, p.name, p.resource_type, p.action 
                FROM permissions p
-               JOIN role_permissions rp ON p.id = rp.permission_id
-               WHERE rp.role_id = ? AND rp.granted = 1""",
-            [role_id]
+               JOIN permission_set_permissions rp ON p.id = rp.permission_id
+               WHERE rp.permission_set_id = ? AND rp.granted = 1""",
+            [permission_set_id]
         )
         role_function_perms = set()
         role_function_perm_details = {}
@@ -405,7 +405,7 @@ def _build_role_unified_data(role_id):
             req_perms_display = []
             for p in req_perms:
                 # [FIX 2026-08-28 v67] 菜单未分配时 granted 一律 false:
-                #   此前 granted 只查 role_permissions 表, 与菜单分配状态脱钩,
+                #   此前 granted 只查 permission_set_permissions 表, 与菜单分配状态脱钩,
                 #   残留权限(如 '*')会让未分配菜单也显示 12/12 权限徽章, 严重误导
                 # [REFACTOR 2026-08-28 v68] source 双语义:
                 #   ''     : 未分配菜单 → 前端不显示来源标签
@@ -517,7 +517,7 @@ def _build_role_unified_data(role_id):
         all_resource_types_with_data = list(data_perms.keys())
         
         return {
-            'role_id': role_id,
+            'permission_set_id': permission_set_id,
             'menus': result,
             'role_function_permissions': list(role_function_perms),
             'role_function_permission_details': role_function_perm_details,
@@ -535,23 +535,23 @@ def _build_role_unified_data(role_id):
         return None
 
 
-@role_menu_bp.route('/<int:role_id>/unified-permissions', methods=['GET'])
+@permission_set_menu_bp.route('/<int:permission_set_id>/unified-permissions', methods=['GET'])
 @login_required
-def get_role_unified_permissions(role_id):
+def get_role_unified_permissions(permission_set_id):
     """获取角色统一权限视图 (SAP PFCG 风格)
 
     [P2-Matrix-03] 已重构：核心逻辑抽至 _build_role_unified_data()，
     本端点仅做 jsonify 包装（行为不变）。
     """
-    data = _build_role_unified_data(role_id)
+    data = _build_role_unified_data(permission_set_id)
     if data is None:
         return jsonify({'success': False, 'message': '获取角色统一权限失败'}), 500
     return jsonify({'success': True, 'data': data})
 
 
-@role_menu_bp.route('/<int:role_id>/permission-audit', methods=['GET'])
+@permission_set_menu_bp.route('/<int:permission_set_id>/permission-audit', methods=['GET'])
 @admin_required
-def get_role_permission_audit(role_id):
+def get_role_permission_audit(permission_set_id):
     """[2026-08-28] 角色权限一致性体检（替代原「模拟预览」占位）
 
     6 项校验：孤儿功能权限 / 空授权菜单 / 写权限无数据范围 /
@@ -561,7 +561,7 @@ def get_role_permission_audit(role_id):
     from meta.services.role_consistency_audit import run_role_consistency_audit
     try:
         ds = _get_data_source()
-        result = run_role_consistency_audit(ds, role_id)
+        result = run_role_consistency_audit(ds, permission_set_id)
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         import traceback
@@ -569,23 +569,23 @@ def get_role_permission_audit(role_id):
         return jsonify({'success': False, 'message': f'权限体检失败: {e}'}), 500
 
 
-@role_menu_bp.route('/<int:role_id>/permission-audit/cleanup', methods=['POST'])
+@permission_set_menu_bp.route('/<int:permission_set_id>/permission-audit/cleanup', methods=['POST'])
 @admin_required
-def cleanup_role_permission_audit(role_id):
+def cleanup_role_permission_audit(permission_set_id):
     """[2026-08-28] 一键清理体检发现的残留权限（孤儿授权 + 残留排除）
 
-    仅删除不属于任何已分配菜单的 role_permissions 行，
+    仅删除不属于任何已分配菜单的 permission_set_permissions 行，
     已分配菜单的授权/显式 Deny 一律保留。
     """
     from meta.services.role_consistency_audit import cleanup_role_permission_residue
     try:
         ds = _get_data_source()
         with ds.transaction():
-            result = cleanup_role_permission_residue(ds, role_id)
+            result = cleanup_role_permission_residue(ds, permission_set_id)
         write_permission_config_audit(
             action='UPDATE',
-            object_type='role_permissions',
-            object_id=role_id,
+            object_type='permission_set_permissions',
+            object_id=permission_set_id,
             data={'cleanup': result},
         )
         return jsonify({'success': True, 'data': result})
@@ -595,9 +595,9 @@ def cleanup_role_permission_audit(role_id):
         return jsonify({'success': False, 'message': f'清理失败: {e}'}), 500
 
 
-@role_menu_bp.route('/<int:role_id>/menu-permissions', methods=['PUT'])
+@permission_set_menu_bp.route('/<int:permission_set_id>/menu-permissions', methods=['PUT'])
 @admin_required
-def update_role_menu_permissions(role_id):
+def update_permission_set_menu_permissions(permission_set_id):
     """更新角色的菜单权限配置，并自动同步关联的功能权限
     
     SAP PFCG 风格：选中菜单时自动授予所需功能权限
@@ -635,14 +635,14 @@ def update_role_menu_permissions(role_id):
         
         with ds.transaction():
             ds.execute(
-                "DELETE FROM role_menu_permissions WHERE role_id = ?",
-                [role_id]
+                "DELETE FROM permission_set_menu_permissions WHERE permission_set_id = ?",
+                [permission_set_id]
             )
             
             for menu_code in menu_codes:
                 ds.execute(
-                    "INSERT INTO role_menu_permissions (role_id, menu_code) VALUES (?, ?)",
-                    [role_id, menu_code]
+                    "INSERT INTO permission_set_menu_permissions (permission_set_id, menu_code) VALUES (?, ?)",
+                    [permission_set_id, menu_code]
                 )
             
             cursor = ds.execute(
@@ -690,7 +690,7 @@ def update_role_menu_permissions(role_id):
 
                 # [FIX v1.0.2] 补全 explicit_granted/explicit_denied 中不在 menus.required_permissions 里的权限
                 #   场景: 维度 scope 派生 (例 version:read) 不在 menus.required_permissions 中,
-                #         但用户通过 applyDerived 显式 grant, 需要写入 role_permissions
+                #         但用户通过 applyDerived 显式 grant, 需要写入 permission_set_permissions
                 #   例: TEST60 点了"自动推导", derived_permissions 含 version:read,
                 #       menus.required_permissions 只有 product:create/read/update/delete,
                 #       → 旧逻辑会找不到 version:read 的 id, 静默忽略
@@ -740,7 +740,7 @@ def update_role_menu_permissions(role_id):
                                 original_code = f"{ec_parts[0]}:{ec_action_parts[1]}"
                                 perm_id_map[original_code] = epid
                 
-                # [FIX 2026-06-08] 处理显式拒绝的权限：删除 role_permissions 条目
+                # [FIX 2026-06-08] 处理显式拒绝的权限：删除 permission_set_permissions 条目
                 for code in explicit_denied:
                     pid = perm_id_map.get(code)
                     if not pid:
@@ -751,8 +751,8 @@ def update_role_menu_permissions(role_id):
                             pid = perm_id_map.get(expanded)
                     if pid:
                         ds.execute(
-                            "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?",
-                            [role_id, pid]
+                            "DELETE FROM permission_set_permissions WHERE permission_set_id = ? AND permission_id = ?",
+                            [permission_set_id, pid]
                         )
                 
                 # [FIX 2026-06-08] 处理显式授予的权限：确保存在
@@ -766,10 +766,10 @@ def update_role_menu_permissions(role_id):
                             pid = perm_id_map.get(expanded)
                     if pid:
                         ds.execute(
-                            """INSERT OR REPLACE INTO role_permissions 
-                               (role_id, permission_id, created_at, granted) 
+                            """INSERT OR REPLACE INTO permission_set_permissions 
+                               (permission_set_id, permission_id, created_at, granted) 
                                VALUES (?, ?, CURRENT_TIMESTAMP, 1)""",
-                            [role_id, pid]
+                            [permission_set_id, pid]
                         )
                         synced_permissions.append(code)
                 
@@ -790,10 +790,10 @@ def update_role_menu_permissions(role_id):
                         if pid:
                             try:
                                 ds.execute(
-                                    """INSERT OR IGNORE INTO role_permissions 
-                                       (role_id, permission_id, created_at, granted) 
+                                    """INSERT OR IGNORE INTO permission_set_permissions 
+                                       (permission_set_id, permission_id, created_at, granted) 
                                        VALUES (?, ?, CURRENT_TIMESTAMP, 1)""",
-                                    [role_id, pid]
+                                    [permission_set_id, pid]
                                 )
                                 synced_permissions.append(code)
                             except Exception as e:
@@ -803,10 +803,10 @@ def update_role_menu_permissions(role_id):
         write_permission_config_audit(
             action='UPDATE',
             object_type='role_menu',
-            object_id=role_id,
+            object_id=permission_set_id,
             data={'menu_codes': menu_codes, 'synced_permissions_count': len(set(synced_permissions))},
             parent_object_type='role',
-            parent_object_id=role_id,
+            parent_object_id=permission_set_id,
         )
 
         return jsonify({

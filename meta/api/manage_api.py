@@ -228,9 +228,9 @@ def _apply_scope_filter(object_type: str, conditions):
         engine = DimensionScopeEngine(_data_source)
         # 查 user 的 role_ids
         cur = _data_source.execute(
-            """SELECT DISTINCT gr.role_id
-               FROM group_roles gr
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            """SELECT DISTINCT gr.permission_set_id
+               FROM org_permission_sets gr
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )
@@ -239,7 +239,7 @@ def _apply_scope_filter(object_type: str, conditions):
         if role_ids:
             placeholders = ','.join('?' * len(role_ids))
             cnt_cur = _data_source.execute(
-                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                f"SELECT COUNT(*) FROM permission_set_dimension_scopes WHERE permission_set_id IN ({placeholders})",
                 role_ids,
             )
             has_scope = cnt_cur.fetchone()[0] > 0

@@ -103,9 +103,9 @@ def _derive_bo_ids_from_dim_scope(ds, user_id: int) -> list:
     # 1. 拿 user → group → role 链路
     try:
         cursor = ds.execute(
-            """SELECT DISTINCT gr.role_id
-               FROM group_roles gr
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            """SELECT DISTINCT gr.permission_set_id
+               FROM org_permission_sets gr
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )
@@ -361,9 +361,9 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
                 from meta.services.dimension_scope_engine import DimensionScopeEngine
                 ds_engine = DimensionScopeEngine(ds)
                 cursor = ds.execute(
-                    """SELECT DISTINCT gr.role_id
-                       FROM group_roles gr
-                       JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                    """SELECT DISTINCT gr.permission_set_id
+                       FROM org_permission_sets gr
+                       JOIN org_members ugm ON gr.org_id = ugm.org_id
                        WHERE ugm.user_id = ?""",
                     [user_id]
                 )
@@ -377,13 +377,13 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
                     _dim_exclude_values as _exclude_of,
                 )
                 relationship_wildcard = False
-                for role_id in user_role_ids:
-                    expanded = ds_engine.expand_dimension_values(role_id)
+                for permission_set_id in user_role_ids:
+                    expanded = ds_engine.expand_dimension_values(permission_set_id)
                     rel_data = expanded.get('relationship')
                     if _has_any(rel_data) and _is_wc(rel_data) and not _exclude_of(rel_data):
                         relationship_wildcard = True
                         break
-                    data_conds = ds_engine.derive_data_conditions(role_id)
+                    data_conds = ds_engine.derive_data_conditions(permission_set_id)
                     rel_cond = data_conds.get('relationship')
                     if rel_cond:
                         dim_scope_conds.append(rel_cond)
