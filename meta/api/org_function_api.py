@@ -8,7 +8,7 @@
   DELETE /api/v1/orgs/<org_id>/functions/<fn>  — 移除某职能
 """
 from flask import Blueprint, request, jsonify
-from meta.services.auth_middleware import login_required, is_admin
+from meta.services.auth_middleware import login_required, is_admin, get_current_user
 from meta.services.org_function_service import OrgFunctionService
 from meta.core.datasource import get_data_source
 
@@ -45,9 +45,10 @@ def list_functions(org_id):
 
 @org_function_bp.route('', methods=['POST'])
 @login_required
-@is_admin
 def add_function(org_id):
     """添加新职能"""
+    if not is_admin():
+        return jsonify({'success': False, 'message': 'Admin required'}), 403
     data = request.get_json() or {}
     function_type = data.get('function_type')
     is_primary = data.get('is_primary', False)
@@ -65,9 +66,10 @@ def add_function(org_id):
 
 @org_function_bp.route('/<function_type>', methods=['DELETE'])
 @login_required
-@is_admin
 def remove_function(org_id, function_type):
     """移除某职能"""
+    if not is_admin():
+        return jsonify({'success': False, 'message': 'Admin required'}), 403
     svc = _get_function_service()
     success = svc.remove_function(org_id, function_type)
     return jsonify({'success': success})
