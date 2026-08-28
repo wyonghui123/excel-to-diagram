@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-角色权限一致性体检服务 (Permission Health Check)
+权限集一致性体检服务 (Permission Health Check)
 
 [2026-08-28] 应用户需求实现"权限体检"，替代原「模拟预览」占位按钮。
-对单个角色执行一致性校验：
+对单个权限集执行一致性校验：
 
-  C1 unreachable_perms   不可达功能权限：role_permissions 已授予，但没有任何
+  C1 unreachable_perms   不可达功能权限：permission_set_permissions 已授予，但没有任何
                          已分配菜单（含非 sidebar 的 -list 页面）能提供入口，
                          且非维度范围派生 —— 用户无法通过 UI 使用该权限。
                          注意：v2 资源矩阵的直接授权属合法 manual_include
@@ -14,14 +14,14 @@
   C2 empty_menus         空授权菜单：菜单已分配但一个权限都没授予
   C3 write_without_scope 有写权限但无数据范围：菜单授予 create/update/delete 等
                          写动作，但数据权限与维度范围均为空
-  C4 scope_without_menu  范围配置了但菜单未分配：role_data_permissions /
-                         role_dimension_scopes 声明了范围，却没有对应菜单分配
+  C4 scope_without_menu  范围配置了但菜单未分配：permission_set_data_permissions /
+                         permission_set_dimension_scopes 声明了范围，却没有对应菜单分配
   C5 residual_excludes   残留排除记录：granted=0（Deny）行，但其权限代码不属于
                          任何已分配菜单 —— 编辑会话的残留（可清理）
   C6 super_permission    超级权限提示：持有 '*' 时三层校验失去意义，仅提示
 
 数据口径与 role_menu_api._build_role_unified_data 保持一致（单一事实源 menus 表），
-但预期权限计算包含非 sidebar 菜单（role_menu_permissions 可含 -list 页面）。
+但预期权限计算包含非 sidebar 菜单（permission_set_menu_permissions 可含 -list 页面）。
 """
 
 from typing import Any, Dict, List, Set
@@ -82,9 +82,9 @@ def _fallback_label(code: str) -> str:
     return get_permission_label(code)
 
 
-def _load_role_context(ds, role_id: int):
+def _load_role_context(ds, permission_set_id: int):
     """加载体检所需的全部原始数据（口径对齐 _build_role_unified_data）"""
-    # 含非 sidebar 菜单（-list 页面也在 role_menu_permissions 中出现）
+    # 含非 sidebar 菜单（-list 页面也在 permission_set_menu_permissions 中出现）
     cursor = ds.execute(
         "SELECT * FROM menus WHERE is_active = 1 "
         "AND menu_code != 'dashboard' ORDER BY sort_order"
@@ -93,19 +93,19 @@ def _load_role_context(ds, role_id: int):
     menus = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     cursor = ds.execute(
-        "SELECT menu_code FROM role_menu_permissions WHERE role_id = ?", [role_id]
+        "SELECT menu_code FROM permission_set_menu_permissions WHERE permission_set_id = ?", [permission_set_id]
     )
     assigned_menus = {row[0] for row in cursor.fetchall()}
 
     # granted=1 已授予功能权限 (含明细), granted=0 排除记录
-    # [FIX 2026-08-28] row_id 必须取 rp.id (role_permissions 行 id)，用于清理 DELETE；
+    # [FIX 2026-08-28] row_id 必须取 rp.id (permission_set_permissions 行 id)，用于清理 DELETE；
     #   之前误用 p.id (permissions.id)，导致 DELETE 条件错位、清理假成功
     cursor = ds.execute(
         """SELECT p.id, p.code, p.name, rp.granted, rp.id
            FROM permissions p
-           JOIN role_permissions rp ON p.id = rp.permission_id
-           WHERE rp.role_id = ?""",
-        [role_id],
+           JOIN permission_set_permissions rp ON p.id = rp.permission_id
+           WHERE rp.permission_set_id = ?""",
+        [permission_set_id],
     )
     granted_rows: List[Dict[str, Any]] = []   # granted=1
     excluded_rows: List[Dict[str, Any]] = []  # granted=0
@@ -117,14 +117,14 @@ def _load_role_context(ds, role_id: int):
             excluded_rows.append(item)
 
     cursor = ds.execute(
-        "SELECT DISTINCT resource_type FROM role_data_permissions WHERE role_id = ?",
-        [role_id],
+        "SELECT DISTINCT resource_type FROM permission_set_data_permissions WHERE permission_set_id = ?",
+        [permission_set_id],
     )
     data_perm_types = {row[0] for row in cursor.fetchall()}
 
     cursor = ds.execute(
-        "SELECT dimension_code FROM role_dimension_scopes WHERE role_id = ?",
-        [role_id],
+        "SELECT dimension_code FROM permission_set_dimension_scopes WHERE permission_set_id = ?",
+        [permission_set_id],
     )
     dimension_codes = {row[0] for row in cursor.fetchall() if row[0]}
 
@@ -169,9 +169,9 @@ def _dimension_expected_codes(ctx) -> Set[str]:
     return expected
 
 
-def run_role_consistency_audit(ds, role_id: int) -> Dict[str, Any]:
+def run_permission_set_consistency_audit(ds, permission_set_id: int) -> Dict[str, Any]:
     """执行 6 项体检，返回 {ok, issues[], summary}"""
-    ctx = _load_role_context(ds, role_id)
+    ctx = _load_role_context(ds, permission_set_id)
     issues: List[Dict[str, Any]] = []
 
     def _add(check_id, severity, title, description, items, fixable=False):
@@ -199,7 +199,7 @@ def run_role_consistency_audit(ds, role_id: int) -> Dict[str, Any]:
         # 超级权限下其他检查无意义，直接返回
         return {
             'ok': len(issues) == 0,
-            'role_id': role_id,
+            'permission_set_id': permission_set_id,
             'issues': issues,
             'summary': {
                 'total_issues': len(issues),
@@ -413,7 +413,7 @@ def run_role_consistency_audit(ds, role_id: int) -> Dict[str, Any]:
 
     return {
         'ok': len(issues) == 0,
-        'role_id': role_id,
+        'permission_set_id': permission_set_id,
         'issues': issues,
         'summary': {
             'total_issues': len(issues),
@@ -427,14 +427,14 @@ def run_role_consistency_audit(ds, role_id: int) -> Dict[str, Any]:
     }
 
 
-def cleanup_role_permission_residue(ds, role_id: int) -> Dict[str, Any]:
+def cleanup_role_permission_residue(ds, permission_set_id: int) -> Dict[str, Any]:
     """一键清理：仅删除 C5 残留排除记录（granted=0 且不属于任何已分配菜单）
 
     [安全边界] v2 资源矩阵的直接授权是合法 manual_include，
     granted=1 的权限行一律不动，避免误删用户的手动授权。
     返回删除明细。
     """
-    ctx = _load_role_context(ds, role_id)
+    ctx = _load_role_context(ds, permission_set_id)
     expected = _expected_codes_for_assigned_menus(ctx)
 
     deleted_excludes: List[str] = []
@@ -442,7 +442,7 @@ def cleanup_role_permission_residue(ds, role_id: int) -> Dict[str, Any]:
     for row in ctx['excluded_rows']:
         if row['code'] in expected:
             continue
-        ds.execute("DELETE FROM role_permissions WHERE id = ?", [row['row_id']])
+        ds.execute("DELETE FROM permission_set_permissions WHERE id = ?", [row['row_id']])
         deleted_excludes.append(row['code'])
 
     return {
