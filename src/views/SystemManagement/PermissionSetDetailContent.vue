@@ -1,8 +1,8 @@
 <template>
-  <div class="role-permission-detail">
+  <div class="permission-set-detail">
     <PageShell
       :title="pageTitle"
-      :subtitle="role?.code || ''"
+      :subtitle="permissionSet?.code || ''"
       :breadcrumbs="breadcrumbs"
       :show-back-button="true"
       @back="handleBack"
@@ -10,19 +10,19 @@
     >
       <ObjectPage
         :title="pageTitle"
-        :subtitle="role?.code || ''"
-        :status="roleStatus"
-        :status-type="roleStatusType"
+        :subtitle="permissionSet?.code || ''"
+        :status="permissionSetStatus"
+        :status-type="permissionSetStatusType"
         :show-back-button="false"
         :sections="permissionSections"
-        :form-data="roleData"
+        :form-data="permissionSetData"
         :field-definitions="fieldDefs"
         :loading="loading"
         :actions="detailActions"
         :editing="isEditing"
         :saving="isSaving"
         :object-type="'permission_set'"
-        :object-id="roleId"
+        :object-id="permissionSetId"
         size="lg"
         @tab-change="handleTabChange"
         @action="handleDetailAction"
@@ -36,8 +36,8 @@
                保存通过 ref.save() 在顶层「保存」动作中一并提交 -->
           <PermissionConfigPanel
             ref="permPanelRef"
-            :role-id="roleId"
-            :role="role"
+            :permission-set-id="permissionSetId"
+            :permission-set="permissionSet"
             :editing="isEditing"
             @saved="handlePermissionSaved"
             @reset="handlePermissionReset"
@@ -62,11 +62,11 @@
         </template>
       </ObjectPage>
 
-      <!-- [v70 2026-08-28] 权限体检弹窗：体检是角色 object 的 validation action，
+      <!-- [v70 2026-08-28] 权限体检弹窗：体检是权限集 object 的 validation action，
            入口在 ObjectPage 头部标准 action 区（原 PermissionConfigPanel 底部按钮已移除） -->
       <PermissionAuditDialog
         v-if="showAuditDialog"
-        :role-id="roleId"
+        :permission-set-id="permissionSetId"
         @close="showAuditDialog = false"
       />
     </PageShell>
@@ -90,8 +90,10 @@ const tabStore = useTabStore()
 const message = useMessage()
 
 const roleId = computed(() => route.params.roleId as string)
+// [v70 2026-08-29 P4-新4a] Spec 16: 统一变量名为 permissionSetId，roleId 仅作 alias 保持外部路由 param 名兼容
+const permissionSetId = computed(() => roleId.value)
 
-const role = ref<any>(null)
+const permissionSet = ref<any>(null)
 const loading = ref(false)
 const isEditing = ref(false)
 const isSaving = ref(false)
@@ -99,28 +101,28 @@ const isSaving = ref(false)
 const permPanelRef = ref<any>(null)
 
 const isNewMode = computed(() => {
-  return !roleId.value || roleId.value === 'new'
+  return !permissionSetId.value || permissionSetId.value === 'new'
 })
 
 const assignedGroups = ref<any[]>([])
 const loadingGroups = ref(false)
 
 const pageTitle = computed(() =>
-  `权限集详情：${role.value?.name || '加载中...'}`
+  `权限集详情：${permissionSet.value?.name || '加载中...'}`
 )
 
-const roleStatus = computed(() =>
-  role.value?.is_active ? '启用中' : '已停用'
+const permissionSetStatus = computed(() =>
+  permissionSet.value?.is_active ? '启用中' : '已停用'
 )
 
-const roleStatusType = computed(() =>
-  role.value?.is_active ? 'success' : 'default'
+const permissionSetStatusType = computed(() =>
+  permissionSet.value?.is_active ? 'success' : 'default'
 )
 
 const breadcrumbs = computed(() => [
   { label: '系统管理', to: '/system' },
   { label: '用户与权限', to: '/user-permission' },
-  { label: '角色管理', to: '/user-permission?tab=roles' },
+  { label: '权限集管理', to: '/user-permission?tab=permission_sets' },
   { label: pageTitle.value }
 ])
 
@@ -131,10 +133,10 @@ const fieldDefs = computed(() => ({
   is_active: { label: '状态', type: 'switch' }
 }))
 
-const roleData = computed(() => role.value || {})
+const permissionSetData = computed(() => permissionSet.value || {})
 
-// [v70 2026-08-28] 权限体检是角色 object 的 validation action，放入标准 action 区。
-//   浏览态可见（编辑中数据未落库，体检结果会误导）；新建模式无 roleId，不显示。
+// [v70 2026-08-28] 权限体检是权限集 object 的 validation action，放入标准 action 区。
+//   浏览态可见（编辑中数据未落库，体检结果会误导）；新建模式无 permissionSetId，不显示。
 const detailActions = computed(() => {
   const actions = [
     { id: 'edit', label: '编辑', icon: 'edit', type: 'primary' },
@@ -165,7 +167,7 @@ const permissionSections = [
     type: 'standard',
     fieldGroups: [
       {
-        title: '角色标识',
+        title: '权限集标识',
         icon: 'tag',
         layout: 'grid-2',
         fields: ['name', 'code']
@@ -192,7 +194,7 @@ const permissionSections = [
   },
   {
     key: 'assigned_groups',
-    label: '用户组',
+    label: '已分配组织',
     icon: 'users',
     type: 'custom'
   },
@@ -204,18 +206,18 @@ const permissionSections = [
   }
 ]
 
-async function loadRole() {
-  if (!roleId.value) return
+async function loadPermissionSet() {
+  if (!permissionSetId.value) return
 
   loading.value = true
   try {
-    const result = await boService.read('permission_set', roleId.value)
+    const result = await boService.read('permission_set', permissionSetId.value)
 
     if (result.success) {
-      role.value = result.data
+      permissionSet.value = result.data
     }
   } catch (error) {
-    console.error('Failed to load role:', error)
+    console.error('Failed to load permission set:', error)
   } finally {
     loading.value = false
   }
@@ -224,10 +226,10 @@ async function loadRole() {
 }
 
 async function loadAssignedGroups() {
-  if (!roleId.value) return
+  if (!permissionSetId.value) return
   loadingGroups.value = true
   try {
-    const result = await boService.queryAssociations('permission_set', roleId.value, 'assigned_orgs', { page_size: 999 })
+    const result = await boService.queryAssociations('permission_set', permissionSetId.value, 'assigned_orgs', { page_size: 999 })
     if (result.success) {
       assignedGroups.value = Array.isArray(result.data) ? result.data : (result.data?.items || [])
     } else {
@@ -242,21 +244,21 @@ async function loadAssignedGroups() {
 }
 
 async function handleSave() {
-  if (!role.value) return
+  if (!permissionSet.value) return
 
   isSaving.value = true
   try {
     const saveData = {
-      name: role.value.name,
-      description: role.value.description,
-      is_active: role.value.is_active
+      name: permissionSet.value.name,
+      description: permissionSet.value.description,
+      is_active: permissionSet.value.is_active
     }
 
     let result
     if (isNewMode.value) {
       result = await boService.create('permission_set', saveData)
     } else {
-      result = await boService.update('permission_set', roleId.value, saveData)
+      result = await boService.update('permission_set', permissionSetId.value, saveData)
     }
 
     if (result.success) {
@@ -268,7 +270,7 @@ async function handleSave() {
         try {
           await permPanelRef.value.save()
         } catch (permError) {
-          // 保存失败 → 保持编辑态让用户修正重试（角色元数据已落库，不回滚）
+          // 保存失败 → 保持编辑态让用户修正重试（权限集元数据已落库，不回滚）
           message.error('权限集已保存，但权限设置保存失败，请在权限配置区检查后重试', permError)
           return
         }
@@ -276,23 +278,19 @@ async function handleSave() {
       message.success(isNewMode.value ? '创建成功' : '保存成功')
       isEditing.value = false
       if (isNewMode.value && result.data?.id) {
-        const newRoute = router.resolve({
-          name: 'RolePermissionDetail',
-          params: { roleId: result.data.id }
-        })
-        tabStore.replaceTabId(route.path, newRoute.path, newRoute.fullPath)
-        router.replace({
-          name: 'RolePermissionDetail',
-          params: { roleId: result.data.id }
-        })
+        // [P4-新4a 2026-08-29] Fix: 旧代码引用不存在的 RolePermissionDetail 路由。
+        // 路由表里只有 PermissionSetDetailContent，跳转自身带新 id。
+        const newPath = `/system/permission-set-detail/${result.data.id}`
+        tabStore.replaceTabId(route.path, newPath, newPath)
+        router.replace({ path: newPath })
       } else {
-        await loadRole()
+        await loadPermissionSet()
       }
     } else {
       message.error(result.message || '保存失败')
     }
   } catch (error) {
-    console.error('Failed to save role:', error)
+    console.error('Failed to save permission set:', error)
     message.error('保存权限失败：' + (error?.message || '请稍后重试'), error)
   } finally {
     isSaving.value = false
@@ -300,7 +298,7 @@ async function handleSave() {
 }
 
 function handleCancel() {
-  loadRole()
+  loadPermissionSet()
 }
 
 function handleNavigate(crumb: any) {
@@ -317,11 +315,11 @@ function handleBack() {
   if (remaining.length === 0) {
     router.push('/')
   } else {
-    const activeTab = remaining.find(t => t.id === tabStore.activeTabId)
+    const activeTab = tabStore.tabs.find(t => t.id === tabStore.activeTabId)
     if (activeTab?.path) {
       router.push(activeTab.path)
     } else {
-      router.push({ path: '/user-permission', query: { tab: 'roles' } })
+      router.push({ path: '/user-permission', query: { tab: 'permission_sets' } })
     }
   }
 }
@@ -331,16 +329,16 @@ function handleTabChange(tabKey: string) {
 }
 
 function handlePermissionSaved() {
-  loadRole()
+  loadPermissionSet()
 }
 
 onMounted(() => {
-  loadRole()
+  loadPermissionSet()
 })
 </script>
 
 <style scoped lang="scss">
-.role-permission-detail {
+.permission-set-detail {
   height: 100%;
   display: flex;
   flex-direction: column;

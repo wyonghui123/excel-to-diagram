@@ -133,11 +133,11 @@
     </div>
   </div>
 
-  <!-- [v70 2026-08-28] 权限体检弹窗：体检是角色 object 的 validation action，
-       入口在 ObjectPage/标题栏标准 action 区（objectType==='role' 时显示） -->
+  <!-- [v70 2026-08-28] 权限体检弹窗：体检是权限集 object 的 validation action，
+       入口在 ObjectPage/标题栏标准 action 区（objectType==='permission_set' 时显示） -->
   <PermissionAuditDialog
     v-if="showAuditDialog"
-    :role-id="id"
+    :permission-set-id="id"
     @close="showAuditDialog = false"
   />
 </template>
@@ -560,10 +560,12 @@ const computedActions = computed(() => {
   return actions
 })
 
-// [v70 2026-08-28] 角色 object 的 validation action：权限体检。
-//   仅浏览态显示（编辑中数据未落库，体检结果会误导）；新建模式无 roleId 不显示。
+// [v70 2026-08-28] 权限集 object 的 validation action：权限体检。
+//   仅浏览态显示（编辑中数据未落库，体检结果会误导）；新建模式无 permissionSetId 不显示。
+//   [P4-新4 2026-08-29] Spec 16: 同时支持 'role' (历史) 和 'permission_set' (新) objectType
 function appendRoleAuditAction(actions) {
-  if (props.objectType === 'role' && !internalEditing.value && props.id !== 'new') {
+  const isPermissionSet = props.objectType === 'permission_set' || props.objectType === 'role'
+  if (isPermissionSet && !internalEditing.value && props.id !== 'new') {
     actions.push(buildAction('audit'))
   }
 }

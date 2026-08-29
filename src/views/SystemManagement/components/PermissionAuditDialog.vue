@@ -100,7 +100,8 @@ import {
   cleanupPermissionResidue,
 } from '@/services/permissionService'
 
-const props = defineProps<{ roleId: string }>()
+// [P4-新4 2026-08-29] Spec 16: 统一使用 permissionSetId
+const props = defineProps<{ permissionSetId: string }>()
 defineEmits<{ (e: 'close'): void }>()
 
 const message = useMessage()
@@ -129,7 +130,7 @@ function severityLabel(severity: string) {
 async function runAudit() {
   loading.value = true
   try {
-    const res: any = await runPermissionAudit(props.roleId)
+    const res: any = await runPermissionAudit(props.permissionSetId)
     result.value = res?.data || res
   } catch (e: any) {
     message.error(`权限体检失败: ${e?.message || e}`)
@@ -158,7 +159,7 @@ async function handleCleanup() {
   }
   cleaning.value = true
   try {
-    const res: any = await cleanupPermissionResidue(props.roleId)
+    const res: any = await cleanupPermissionResidue(props.permissionSetId)
     const data = res?.data || res
     const count = data?.deleted_count ?? 0
     lastCleanupInfo.value = count > 0 ? `已清理 ${count} 条残留记录` : '没有需要清理的残留记录'

@@ -1,8 +1,8 @@
 <template>
-  <div class="role-detail">
+  <div class="permission-set-detail">
     <PageShell
       :title="pageTitle"
-      :subtitle="role?.code || ''"
+      :subtitle="permissionSet?.code || ''"
       :breadcrumbs="breadcrumbs"
       :show-back-button="true"
       @back="handleBack"
@@ -10,19 +10,19 @@
     >
       <ObjectPage
         :title="pageTitle"
-        :subtitle="role?.code || ''"
-        :status="roleStatus"
-        :status-type="roleStatusType"
+        :subtitle="permissionSet?.code || ''"
+        :status="permissionSetStatus"
+        :status-type="permissionSetStatusType"
         :show-back-button="false"
         :sections="sections"
-        :form-data="roleData"
+        :form-data="permissionSetData"
         :auto-load-meta="true"
         :loading="loading"
         :actions="detailActions"
         :editing="isEditing"
         :saving="isSaving"
         :object-type="'permission_set'"
-        :object-id="roleId"
+        :object-id="permissionSetId"
         size="lg"
         @update:editing="isEditing = $event"
         @save="handleSave"
@@ -32,10 +32,10 @@
       </ObjectPage>
     </PageShell>
 
-    <div v-if="!roleId" class="rd-empty">
+    <div v-if="!permissionSetId" class="psd-empty">
       <AppIcon name="warning" size="32" />
-      <div class="rd-empty__title">缺少参数</div>
-      <div class="rd-empty__desc">权限集ID无效</div>
+      <div class="psd-empty__title">缺少参数</div>
+      <div class="psd-empty__desc">权限集ID无效</div>
       <AppButton variant="primary" size="sm" @click="handleBack">返回</AppButton>
     </div>
   </div>
@@ -60,22 +60,24 @@ const roleId = computed(() => {
   const id = route.params.id || route.params.roleId
   return id ? String(id) : null
 })
+// [P4-新4b 2026-08-29] Spec 16: 统一变量名为 permissionSetId，roleId 仅作 alias 保持路由 param 兼容
+const permissionSetId = computed(() => roleId.value)
 
-const role = ref(null)
+const permissionSet = ref(null)
 const loading = ref(false)
 const isEditing = ref(false)
 const isSaving = ref(false)
 
 const pageTitle = computed(() =>
-  isNewMode.value ? '新建角色' : (role.value?.name || '角色详情')
+  isNewMode.value ? '新建权限集' : (permissionSet.value?.name || '权限集详情')
 )
 
-const roleStatus = computed(() =>
-  role.value?.is_active ? '启用中' : '已停用'
+const permissionSetStatus = computed(() =>
+  permissionSet.value?.is_active ? '启用中' : '已停用'
 )
 
-const roleStatusType = computed(() =>
-  role.value?.is_active ? 'success' : 'default'
+const permissionSetStatusType = computed(() =>
+  permissionSet.value?.is_active ? 'success' : 'default'
 )
 
 const breadcrumbs = computed(() => [
@@ -85,7 +87,7 @@ const breadcrumbs = computed(() => [
   { label: pageTitle.value }
 ])
 
-const roleData = computed(() => role.value || {})
+const permissionSetData = computed(() => permissionSet.value || {})
 
 const detailActions = [
   { id: 'edit', label: '编辑', icon: 'edit', type: 'primary' },
@@ -145,21 +147,21 @@ const sections = [
   }
 ]
 
-async function loadRole() {
-  if (!roleId.value) return
+async function loadPermissionSet() {
+  if (!permissionSetId.value) return
 
   loading.value = true
   try {
-    const result = await boService.read('permission_set', roleId.value)
+    const result = await boService.read('permission_set', permissionSetId.value)
 
     if (result.success) {
-      role.value = result.data
+      permissionSet.value = result.data
       updateTabLabel()
     } else {
       message.error(result.message || '加载失败')
     }
   } catch (error) {
-    console.error('Failed to load role:', error)
+    console.error('Failed to load permission set:', error)
     message.error('加载失败')
   } finally {
     loading.value = false
@@ -168,8 +170,8 @@ async function loadRole() {
 
 function updateTabLabel() {
   const tab = tabStore.tabs.find(t => t.id === route.path)
-  if (tab && role.value) {
-    tabStore.updateTabLabel(tab.id, `角色: ${role.value.name || role.value.code}`)
+  if (tab && permissionSet.value) {
+    tabStore.updateTabLabel(tab.id, `权限集: ${permissionSet.value.name || permissionSet.value.code}`)
   }
 }
 
@@ -178,10 +180,10 @@ function handlePermissionsSaved() {
 }
 
 const isNewMode = computed(() => {
-  return !roleId.value || roleId.value === 'new'
+  return !permissionSetId.value || permissionSetId.value === 'new'
 })
 
-async function initNewRole() {
+async function initNewPermissionSet() {
   try {
     const result = await metaService.getUIConfig('permission_set')
     if (result.success && result.data?.fields) {
@@ -191,67 +193,63 @@ async function initNewRole() {
           defaults[f.id] = f.default
         }
       }
-      role.value = { ...defaults }
+      permissionSet.value = { ...defaults }
     } else {
-      role.value = { is_active: 1 }
+      permissionSet.value = { is_active: 1 }
     }
   } catch {
-    role.value = { is_active: 1 }
+    permissionSet.value = { is_active: 1 }
   }
   isEditing.value = true
 }
 
 function handleApplyDefaults(defaults) {
-  if (!role.value) {
-    role.value = { ...defaults }
+  if (!permissionSet.value) {
+    permissionSet.value = { ...defaults }
   } else {
     for (const [key, value] of Object.entries(defaults)) {
-      if (role.value[key] === undefined) {
-        role.value[key] = value
+      if (permissionSet.value[key] === undefined) {
+        permissionSet.value[key] = value
       }
     }
   }
 }
 
 async function handleSave() {
-  if (!role.value) return
+  if (!permissionSet.value) return
 
   isSaving.value = true
   try {
     const saveData = {
-      name: role.value.name,
-      description: role.value.description,
-      is_active: role.value.is_active
+      name: permissionSet.value.name,
+      description: permissionSet.value.description,
+      is_active: permissionSet.value.is_active
     }
 
     let result
     if (isNewMode.value) {
       result = await boService.create('permission_set', saveData)
     } else {
-      result = await boService.update('permission_set', roleId.value, saveData)
+      result = await boService.update('permission_set', permissionSetId.value, saveData)
     }
 
     if (result.success) {
       message.success(isNewMode.value ? '创建成功' : '保存成功')
       isEditing.value = false
       if (isNewMode.value && result.data?.id) {
-        const newRoute = router.resolve({
-          name: 'RolePermissionDetail',
-          params: { roleId: result.data.id }
-        })
-        tabStore.replaceTabId(route.path, newRoute.path, newRoute.fullPath)
-        router.replace({
-          name: 'RolePermissionDetail',
-          params: { roleId: result.data.id }
-        })
+        // [P4-新4b 2026-08-29] Fix: 旧代码引用不存在的 RolePermissionDetail 路由。
+        // 跳转到 PermissionSetDetailContent (有完整权限联动)。
+        const newPath = `/system/permission-set-detail/${result.data.id}`
+        tabStore.replaceTabId(route.path, newPath, newPath)
+        router.replace({ path: newPath })
       } else {
-        await loadRole()
+        await loadPermissionSet()
       }
     } else {
       message.error(result.message || '保存失败')
     }
   } catch (error) {
-    console.error('Failed to save role:', error)
+    console.error('Failed to save permission set:', error)
     message.error('保存权限集失败：' + (error?.message || '请检查输入后重试'), error)
   } finally {
     isSaving.value = false
@@ -260,7 +258,7 @@ async function handleSave() {
 
 function handleCancel() {
   isEditing.value = false
-  loadRole()
+  loadPermissionSet()
 }
 
 function handleNavigate(crumb) {
@@ -281,39 +279,39 @@ function handleBack() {
     if (activeTab?.path) {
       router.push(activeTab.path)
     } else {
-      router.push({ path: '/user-permission', query: { tab: 'roles' } })
+      router.push({ path: '/user-permission', query: { tab: 'permission_sets' } })
     }
   }
 }
 
 onMounted(() => {
   if (isNewMode.value) {
-    initNewRole()
+    initNewPermissionSet()
   } else {
-    loadRole()
+    loadPermissionSet()
   }
 })
 
 watch(() => route.params.id || route.params.roleId, (newId, oldId) => {
   if (newId !== oldId) {
     if (!newId || newId === 'new') {
-      initNewRole()
+      initNewPermissionSet()
     } else {
-      loadRole()
+      loadPermissionSet()
     }
   }
 })
 </script>
 
 <style scoped lang="scss">
-.role-detail {
+.permission-set-detail {
   height: 100%;
   display: flex;
   flex-direction: column;
   background-color: var(--color-bg-page);
 }
 
-.rd-empty {
+.psd-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -329,7 +327,7 @@ watch(() => route.params.id || route.params.roleId, (newId, oldId) => {
   }
 
   &__desc {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--color-text-tertiary);
   }
 }
