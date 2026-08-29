@@ -1,17 +1,19 @@
-id: user_group_member
-name: 用户组成员
-table_name: user_group_members
-description: 用户组成员关系
+id: org_member
+name: 组织成员
+table_name: org_members
+description: 组织成员关系（原 user_group_member.yaml, Plan A 迁移）
+aliases:
+  - 组织成员
+  - OrgMember
+  - 用户组成员
+  - user_group_member
 
 # [FIX 2026-06-15] audit_log parent_object 关联:
-# 之前 yaml 缺 parent_object + hierarchy 配置, _resolve_parent_info 返回 (None, None)
-# 导致 user_group_member 的 cud audit 全部 parent=NULL, 用户组详情页"操作日志" tab 看不到
-# 修复后: 写入审计日志时自动填 parent_object_type='user_group', parent_object_id=group_id
-# 不设 path_field/depth_field 因为 user_group_member 不需要树形层级 (仅用 group_id 做反向关联)
-parent_object: user_group
+# 修复后: 写入审计日志时自动填 parent_object_type='org', parent_object_id=org_id
+parent_object: org
 hierarchy:
   enabled: true
-  parent_field: group_id
+  parent_field: org_id
 
 fields:
   - id: id
@@ -29,19 +31,19 @@ fields:
     required: true
     description: 用户ID
 
-  - id: group_id
-    name: 用户组ID
+  - id: org_id
+    name: 组织ID
     type: integer
-    db_column: group_id
+    db_column: org_id
     required: true
-    description: 用户组ID
+    description: 组织ID
 
   - id: is_manager
     name: 是否管理员
     type: boolean
     db_column: is_manager
     default: false
-    description: 是否为组管理员
+    description: 是否为组织管理员
 
   - id: joined_at
     name: 加入时间
@@ -50,13 +52,13 @@ fields:
     description: 加入时间
 
 indexes:
-  - fields: [user_id, group_id]
+  - fields: [user_id, org_id]
     unique: true
-    name: idx_user_group_member_unique
-  - fields: [group_id]
-    name: idx_user_group_member_group
+    name: idx_org_member_unique
+  - fields: [org_id]
+    name: idx_org_member_org
   - fields: [user_id]
-    name: idx_user_group_member_user
+    name: idx_org_member_user
 
 relations: []
 actions: []
@@ -75,8 +77,8 @@ ui_badge:
       false: info
 
 routes:
-  detail: /detail/user_group_member/user_group_member-detail
-  list: /user_group_member-management
+  detail: /detail/org_member/org_member-detail
+  list: /org_member-management
 
 list:
   pagination:
@@ -85,7 +87,7 @@ list:
 
 nested:
   enabled: True
-  parent: user_group
+  parent: org
   children: []
 
 persistence:

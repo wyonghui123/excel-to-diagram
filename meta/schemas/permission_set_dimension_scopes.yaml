@@ -1,13 +1,13 @@
 # ============================================
-# 角色维度范围 (复数别名) - Phase 13 placeholder
-# [GAP-FIX 2026-07-23] 注册为 role_dimension_scope 表格的复数视图
-# (phase13 commit dccdd8b6 提到这个 endpoint 但没注册 yaml)
+# 权限集维度范围 (复数别名) - Phase 13 placeholder
+# [GAP-FIX 2026-07-23] 注册为 permission_set_dimension_scope 表格的复数视图
+# (Spec 16: role_dimension_scopes → permission_set_dimension_scopes)
 # ============================================
 
-id: role_dimension_scopes
-name: 角色维度范围 (复数视图)
-table_name: role_dimension_scopes
-description: 角色维度范围列表视图 (alias of role_dimension_scope)
+id: permission_set_dimension_scopes
+name: 权限集维度范围 (复数视图)
+table_name: permission_set_dimension_scopes
+description: 权限集维度范围列表视图 (alias of permission_set_dimension_scope)
 is_view: true
 
 aspects: [audit_aspect]
@@ -21,10 +21,10 @@ fields:
     db_column: id
     required: true
     unique: true
-  - id: role_id
-    name: 角色ID
+  - id: permission_set_id
+    name: 权限集ID
     type: integer
-    db_column: role_id
+    db_column: permission_set_id
   - id: dimension_code
     name: 维度编码
     type: string

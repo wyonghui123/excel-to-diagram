@@ -1,15 +1,15 @@
 # ============================================
-# 角色权限关联元模型
-# 说明: 角色与权限的多对多关联
+# 权限集权限关联元模型
+# 说明: 权限集与权限的多对多关联 (Spec 16: role_permission → permission_set_permission)
 # ============================================
 
-id: role_permission
-name: 角色权限
-table_name: role_permissions
-description: 角色与权限的多对多关联
+id: permission_set_permission
+name: 权限集权限
+table_name: permission_set_permissions
+description: 权限集与权限的多对多关联
 
 semantics:
-  meaning: 角色权限关联
+  meaning: 权限集权限关联
   category: system_entity
 
 fields:
@@ -23,14 +23,14 @@ fields:
     semantics:
       meaning: 自增主键
 
-  - id: role_id
-    name: 角色ID
+  - id: permission_set_id
+    name: 权限集ID
     type: integer
-    db_column: role_id
+    db_column: permission_set_id
     required: true
-    description: 关联角色ID
+    description: 关联权限集ID
     semantics:
-      meaning: 关联的角色
+      meaning: 关联的权限集
       parent_key: true
 
   - id: permission_id
@@ -61,9 +61,9 @@ fields:
       meaning: 记录创建的时间戳
 
 indexes:
-  - fields: [role_id, permission_id]
+  - fields: [permission_set_id, permission_id]
     unique: true
-    name: idx_role_permission_unique
+    name: idx_permission_set_permission_unique
 
 relations: []
 actions: []
@@ -83,8 +83,8 @@ ui_badge:
       false: info
 
 routes:
-  detail: /detail/role_permission/role_permission-detail
-  list: /role_permission-management
+  detail: /detail/permission_set_permission/permission_set_permission-detail
+  list: /permission_set_permission-management
 
 list:
   pagination:

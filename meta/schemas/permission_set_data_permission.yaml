@@ -1,7 +1,12 @@
-id: role_data_permission
-name: 角色数据权限
-table_name: role_data_permissions
-description: 角色级别的数据访问权限配置，控制角色可访问的资源实例范围
+# ============================================
+# 权限集数据权限元模型
+# 说明: 权限集级别的数据访问权限配置 (Spec 16: role_data_permission → permission_set_data_permission)
+# ============================================
+
+id: permission_set_data_permission
+name: 权限集数据权限
+table_name: permission_set_data_permissions
+description: 权限集级别的数据访问权限配置，控制权限集可访问的资源实例范围
 
 fields:
   - id: id
@@ -11,11 +16,11 @@ fields:
     required: true
     unique: true
 
-  - id: role_id
-    name: 角色ID
+  - id: permission_set_id
+    name: 权限集ID
     type: integer
     required: true
-    description: 关联的角色ID
+    description: 关联的权限集ID
 
   - id: resource_type
     name: 资源类型
@@ -62,8 +67,8 @@ category_config:
 # ============================================
 
 routes:
-  detail: /detail/role_data_permission/role_data_permission-detail
-  list: /role_data_permission-management
+  detail: /detail/permission_set_data_permission/permission_set_data_permission-detail
+  list: /permission_set_data_permission-management
 
 list:
   pagination:

@@ -1,22 +1,24 @@
 # ============================================
-# 角色元模型
-# 说明: 系统角色，用于RBAC权限控制
+# 权限集元模型 (原 role.yaml, Plan A 迁移)
+# 说明: 权限集（Permission Set），用于RBAC权限控制
 # ============================================
 
-id: role
-name: 角色
-table_name: roles
-description: 系统角色，用于基于角色的权限控制
+id: permission_set
+name: 权限集
+table_name: permission_sets
+description: 权限集，用于基于权限集的访问控制（PBAC）
 display_name_field: name
 aspects: [audit_aspect]
 
 semantics:
-  meaning: 系统角色
+  meaning: 权限集
   category: system_entity
   hierarchy_level: 0
   aliases:
-    - 角色
-    - Role
+    - 权限集
+    - PermissionSet
+    - role
+    - 角色  # 历史 alias
 
 audit:
   enabled: true
@@ -53,33 +55,33 @@ fields:
       meaning: 自增主键
 
   - id: code
-    name: 角色编码
+    name: 权限集编码
     type: string
     db_column: code
     required: true
     unique: true
-    description: 角色编码，如 admin, editor, viewer
+    description: 权限集编码，如 admin, editor, viewer
     semantics:
-      meaning: 角色的唯一编码
+      meaning: 权限集的唯一编码
       business_key: true
       immutable: true
 
   - id: name
-    name: 角色名称
+    name: 权限集名称
     type: string
     db_column: name
     required: true
-    description: 角色显示名称
+    description: 权限集显示名称
     semantics:
-      meaning: 角色的显示名称
+      meaning: 权限集的显示名称
 
   - id: description
     name: 描述
     type: text
     db_column: description
-    description: 角色描述
+    description: 权限集描述
     semantics:
-      meaning: 角色的详细说明
+      meaning: 权限集的详细说明
       searchable: true
 
   - id: is_active
@@ -87,9 +89,9 @@ fields:
     type: boolean
     db_column: is_active
     default: true
-    description: 角色是否启用，停用后该角色的权限将失效
+    description: 权限集是否启用，停用后该权限集的权限将失效
     semantics:
-      meaning: 角色的启用/停用状态
+      meaning: 权限集的启用/停用状态
     enum_values:
       - value: 1
         label: 启用中
@@ -102,25 +104,25 @@ fields:
       editable: true
 
   - id: is_system
-    name: 系统角色
+    name: 系统权限集
     type: boolean
     db_column: is_system
     default: false
-    description: 系统角色不可删除，新建角色默认为自定义角色
+    description: 系统权限集不可删除，新建权限集默认为自定义权限集
     enum_values:
       - value: 1
-        label: 系统角色
+        label: 系统权限集
         color: info
       - value: 0
-        label: 自定义角色
+        label: 自定义权限集
         color: default
     semantics:
-      meaning: 标记是否为系统内置角色
+      meaning: 标记是否为系统内置权限集
       readonly_always: true
     constraints:
       - type: no_delete
         trigger_value: true
-        message: 系统角色不可删除
+        message: 系统权限集不可删除
     ui:
       widget: select
 
@@ -136,55 +138,55 @@ fields:
   - id: user_count
     name: 用户数
     type: integer
-    description: 角色关联的用户数量（计算字段）
+    description: 权限集关联的用户数量（计算字段）
     semantics:
       meaning: 用户统计
       computed: true
       readonly_always: true
-      sql: "SELECT COUNT(*) FROM user_roles WHERE role_id = ?"
+      sql: "SELECT COUNT(*) FROM user_permission_sets WHERE permission_set_id = ?"
       cacheable: true
       cache_ttl: 600
 
   - id: menu_count
     name: 菜单数
     type: integer
-    description: 角色关联的菜单数量（计算字段）
+    description: 权限集关联的菜单数量（计算字段）
     semantics:
       meaning: 菜单权限统计
       computed: true
       readonly_always: true
-      sql: "SELECT COUNT(*) FROM role_menus WHERE role_id = ?"
+      sql: "SELECT COUNT(*) FROM permission_set_menu_permissions WHERE permission_set_id = ?"
       cacheable: true
       cache_ttl: 600
 
   - id: permission_count
     name: 权限数
     type: integer
-    description: 角色关联的权限数量（计算字段）
+    description: 权限集关联的权限数量（计算字段）
     semantics:
       meaning: 权限统计
       computed: true
       readonly_always: true
-      sql: "SELECT COUNT(*) FROM role_permissions WHERE role_id = ?"
+      sql: "SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?"
       cacheable: true
       cache_ttl: 600
 
   - id: data_perm_count
     name: 数据权限数
     type: integer
-    description: 角色关联的数据权限数量（计算字段）
+    description: 权限集关联的数据权限数量（计算字段）
     semantics:
       meaning: 数据权限统计
       computed: true
       readonly_always: true
-      sql: "SELECT COUNT(*) FROM permission_rules WHERE role_id = ?"
+      sql: "SELECT COUNT(*) FROM permission_rules WHERE permission_set_id = ?"
       cacheable: true
       cache_ttl: 600
 
 indexes:
   - fields: [code]
     unique: true
-    name: idx_role_code
+    name: idx_permission_set_code
 
 relations: []
 
@@ -194,11 +196,11 @@ associations:
     label: 权限
     plural_label: 权限列表
     type: many_to_many
-    through: role_permissions
-    source_key: role_id
+    through: permission_set_permissions
+    source_key: permission_set_id
     target_entity: permission
     target_key: permission_id
-    description: 角色权限关联
+    description: 权限集权限关联
     display:
       label: 权限
       plural_label: 权限
@@ -220,39 +222,39 @@ associations:
         label: 撤销权限
         confirm_message: 确定要撤销此权限吗？
 
-  assigned_groups:
-    name: assigned_groups
-    label: 用户组
-    plural_label: 用户组列表
-    target_type: user_group
+  assigned_orgs:
+    name: assigned_orgs
+    label: 组织
+    plural_label: 组织列表
+    target_type: org
     type: reverse_many_to_many
-    through: group_roles
-    source_key: role_id
-    target_key: group_id
-    description: 分配了此角色的用户组。用户组成员将自动获得此角色权限。
+    through: org_permission_sets
+    source_key: permission_set_id
+    target_key: org_id
+    description: 分配了此权限集的组织。组织成员将自动获得此权限集权限。
     display:
-      label: 用户组
-      plural_label: 用户组
+      label: 组织
+      plural_label: 组织
       target_display_field: name
       target_code_field: code
       columns:
         - id: code
-          label: 组编码
+          label: 组织编码
           width: 120
         - id: name
-          label: 组名称
+          label: 组织名称
           width: 180
     readonly: true
-    help_text: 此角色已分配给以下用户组。如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作。
+    help_text: 此权限集已分配给以下组织。如需分配到更多组织，请在组织详情页的"权限集"标签页中操作。
 
 ui_view_config:
   showChangeHistory: true
 
   list:
     detail_mode: page
-    detail_path: '/detail/role'
-    title: 角色管理
-    description: 系统角色列表
+    detail_path: '/detail/permission_set'
+    title: 权限集管理
+    description: 系统权限集列表
     columns:
       - field: code
         width: 120
@@ -288,9 +290,9 @@ ui_view_config:
         widget: badge
         filter_options:
           - value: 1
-            label: 系统角色
+            label: 系统权限集
           - value: 0
-            label: 自定义角色
+            label: 自定义权限集
         badge_colors:
           true: info
           false: default
@@ -315,7 +317,7 @@ ui_view_config:
       - description
     actions:
       - id: create
-        label: 新建角色
+        label: 新建权限集
         icon: plus
         type: primary
       - id: export
@@ -331,20 +333,20 @@ ui_view_config:
         label: 批量删除
         icon: delete
         type: danger
-        confirm: 确定要删除选中的角色吗？
+        confirm: 确定要删除选中的权限集吗？
     filters:
       - field: code
         type: text
-        placeholder: 搜索角色编码
+        placeholder: 搜索权限集编码
       - field: name
         type: text
-        placeholder: 搜索角色名称
+        placeholder: 搜索权限集名称
       - field: is_system
         type: select
         placeholder: 选择类型
 
   form:
-    title: 角色信息
+    title: 权限集信息
     layout: vertical
     sections:
       - title: 基本信息
@@ -357,7 +359,7 @@ ui_view_config:
 
   detail:
     mode: page
-    page_route: RolePermissionDetail
+    page_route: PermissionSetDetailContent
     layout: tabs
     title: "{record.name} 详情"
     actions:
@@ -389,12 +391,12 @@ ui_view_config:
         label: 权限配置
         type: custom
 
-      - id: assigned_groups
-        label: 用户组 (已分配)
+      - id: assigned_orgs
+        label: 组织 (已分配)
         type: association
-        association: assigned_groups
-        description: 此角色已分配给以下用户组，用户组成员自动获得此角色权限
-        help_text: 如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作
+        association: assigned_orgs
+        description: 此权限集已分配给以下组织，组织成员自动获得此权限集权限
+        help_text: 如需分配到更多组织，请在组织详情页的"权限集"标签页中操作
         actions:
           - list
 
@@ -403,31 +405,31 @@ ui_view_config:
         type: history
 
 actions:
-  - id: role_create
-    name: 创建角色
+  - id: permission_set_create
+    name: 创建权限集
     type: crud
     method: POST
-    path: /api/v1/roles
-  - id: role_read
-    name: 查询角色
+    path: /api/v1/permission-sets
+  - id: permission_set_read
+    name: 查询权限集
     type: crud
     method: GET
-    path: /api/v1/roles/{id}
-  - id: role_update
-    name: 更新角色
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_update
+    name: 更新权限集
     type: crud
     method: PUT
-    path: /api/v1/roles/{id}
-  - id: role_delete
-    name: 删除角色
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_delete
+    name: 删除权限集
     type: crud
     method: DELETE
-    path: /api/v1/roles/{id}
-  - id: role_list
-    name: 角色列表
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_list
+    name: 权限集列表
     type: crud
     method: GET
-    path: /api/v1/roles
+    path: /api/v1/permission-sets
 
 import_export:
   import_enabled: true
@@ -436,18 +438,18 @@ import_export:
   cascade_import: false
   conflict_strategy: upsert
   conflict_key: code
-  description_for_agent: "角色数据导入导出，支持批量创建和更新角色"
+  description_for_agent: "权限集数据导入导出，支持批量创建和更新权限集"
 
 category_config:
-  create_permission: role:create
-  update_permission: role:update
-  delete_permission: role:delete
+  create_permission: permission_set:create
+  update_permission: permission_set:update
+  delete_permission: permission_set:delete
   owner_auto_permission: false
 
 deletion_policy:
   cascade_delete:
-    - user_roles
-    - role_permissions
+    - user_permission_sets
+    - permission_set_permissions
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
@@ -455,22 +457,22 @@ deletion_policy:
 
 ui_actions:
   create:
-    label: 新建角色
+    label: 新建权限集
     icon: plus
     type: primary
-    permission: "role:create"
+    permission: "permission_set:create"
     visible_when: true
   export:
     label: 导出
     icon: download
     type: default
-    permission: "role:export"
+    permission: "permission_set:export"
     visible_when: true
   import:
     label: 导入
     icon: upload
     type: default
-    permission: "role:import"
+    permission: "permission_set:import"
     visible_when: true
 
 ui_badge:
@@ -496,8 +498,8 @@ audit_levels:
     category: relation
 
 routes:
-  detail: /detail/role
-  list: /role-management
+  detail: /detail/permission_set
+  list: /permission-set-management
 
 list:
   pagination:
