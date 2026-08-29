@@ -1,14 +1,14 @@
 <template>
   <el-dialog
     :model-value="true"
-    :title="`管理关联角色 - ${groupName}`"
+    :title="`管理关联权限集 - ${resolvedOrgName}`"
     width="600px"
     :close-on-click-modal="false"
     @close="$emit('close')"
   >
     <el-alert type="info" :closable="false" style="margin-bottom: 16px">
       <template #title>
-        用户组成员将自动继承所选角色的所有数据权限。权限的单一来源是「角色」。
+        组织成员将自动继承所选权限集的所有数据权限。权限的单一来源是「权限集」。
       </template>
     </el-alert>
 
@@ -19,14 +19,14 @@
 
     <template v-else>
       <div class="section-header">
-        <span>已选角色 ({{ selectedRoleIds.length }})</span>
+        <span>已选权限集 ({{ selectedRoleIds.length }})</span>
         <el-button v-if="selectedRoleIds.length > 0" type="danger" link size="small" @click="clearAll">
           清空
         </el-button>
       </div>
 
       <div class="role-selector">
-        <el-empty v-if="allRoles.length === 0" description="暂无可选角色，请先在「角色管理」中创建角色" />
+        <el-empty v-if="allRoles.length === 0" description="暂无可选权限集，请先在「权限集管理」中创建权限集" />
         <el-checkbox-group v-else v-model="selectedRoleIds">
           <div
             v-for="role in allRoles"
@@ -47,6 +47,8 @@
           </div>
         </el-checkbox-group>
       </div>
+
+      <OrgFunctionPanel :org-id="resolvedOrgId" :is-admin="isAdmin" />
     </template>
 
     <template #footer>
@@ -59,20 +61,28 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { Loading } from '@element-plus/icons-vue'
 import boService from '@/services/boService'
+import OrgFunctionPanel from './components/OrgFunctionPanel.vue'
 
 const props = defineProps({
   groupId: { type: [String, Number], required: true },
+  orgId: { type: [String, Number], default: null },
+  isAdmin: { type: Boolean, default: false },
   groupName: { type: String, default: '' },
+  orgName: { type: String, default: '' },
   existingRoles: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['close', 'saved'])
 
 const message = useCrudMessage()
+
+// 兼容旧 groupId 调用方式，新代码应传 orgId
+const resolvedOrgId = computed(() => props.orgId ?? props.groupId)
+const resolvedOrgName = computed(() => props.orgName || props.groupName)
 
 const allRoles = ref([])
 const selectedRoleIds = ref([])
