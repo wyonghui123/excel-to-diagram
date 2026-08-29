@@ -92,12 +92,12 @@
             />
           </template>
           <template v-else-if="section.type === 'custom' && section.key === 'permissions'">
-            <!-- [v44 2026-08-27] Special handling for role permission config
+            <!-- [v44 2026-08-27] Special handling for permission_set permission config
                  - 之前硬编码渲染 PermissionConfigPanel（无 :editing 绑定），
                    会导致双渲染 + 永远 readonly。
-                 - 现统一交给外部 slot（RolePermissionDetail.vue 的 #section-permissions）
+                 - 现统一交给外部 slot（PermissionSetDetailContent.vue 的 #section-permissions）
                    渲染完整组件并传 :editing
-                 - 历史兼容：如果没传 slot，role 页面回退到硬编码版本（但这次已无此场景）
+                 - 历史兼容：如果没传 slot，permission_set 页面回退到硬编码版本（但这次已无此场景）
               -->
             <slot :name="`section-${section.key}`" />
           </template>
@@ -283,12 +283,16 @@ const hasRealObjectId = computed(() => {
 // [FIX 2026-06-12] 父对象查询: 哪些 objectType 自身日志很少, 但 "权限配置/成员管理/关联操作" 等
 // 会写日志到 child object_type (parent_object_type=自身, parent_object_id=自身ID).
 // 这些对象在详情页"操作日志" tab 需要同时拉 self + child 日志.
+// [Plan C 2026-08-29] 'role'/'user_group' 仍为后端 BO type 编码 (audit_log.parent_object_type),
+//   新前端 objectType `permission_set`/`org` 通过下方的 typeMapping 桥接.
 const SELF_REFERRING_PARENT_OBJECT_TYPES = new Set([
-  'role',        // role_menu / role_permissions / role_data_permission / role_dimension_scope / role_v2_menu_permissions / permission_rule
-  'user',        // user_role / user_group_member / user_data_scope
-  'user_group',  // user_group_member
-  'product',     // product-level 子对象 (如未来增加 product_member)
-  'version',     // version-level 子对象
+  'role',             // 兼容历史 audit log parent_object_type
+  'permission_set',   // 新 BO 编码 (Plan C 之后)
+  'user',             // user_role / user_group_member / user_data_scope
+  'user_group',       // 兼容历史
+  'org',              // 新 BO 编码 (Plan C 之后)
+  'product',          // product-level 子对象 (如未来增加 product_member)
+  'version',          // version-level 子对象
 ])
 
 const effectiveParentObjectType = computed(() => {

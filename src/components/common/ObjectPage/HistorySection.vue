@@ -47,7 +47,7 @@ const props = defineProps({
   // [FIX 2026-06-12] 父对象查询: 当对象本身只有"自身日志" 而"权限配置/关联操作"
   // 等写到了 child object_type (parent_object_type=自身, parent_object_id=自身ID) 时,
   // 必须传 parentObjectType/parentObjectId 一起查 (后端 audit_api 用 OR 联合查询).
-  // 典型用法: 角色详情页 (parent=role) / 用户组详情页 (parent=user_group) /
+  // 典型用法: 权限集详情页 (parent=permission_set) / 组织详情页 (parent=org) /
   //           用户详情页 (parent=user).
   parentObjectType: {
     type: String,
