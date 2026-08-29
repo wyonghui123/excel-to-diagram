@@ -2,18 +2,19 @@ schema: permission_rule
 name: 条件权限规则
 total_rules: 4
 rules:
-- id: BR-permission_rule-FLD-REQ-role_id
+# [P2-11 2026-08-29] Spec 16: role_id → permission_set_id
+- id: BR-permission_rule-FLD-REQ-permission_set_id
   type: field_constraint
   object: permission_rule
   subtype: required
-  field: role_id
-  source: schema:permission_rule.yaml:fields[role_id].required
+  field: permission_set_id
+  source: schema:permission_rule.yaml:fields[permission_set_id].required
   derived_scenarios:
-  - id: T_PERMISSION_RULE_FLD_REQ_ROLE_ID_001
-    title: 字段 role_id 必填,空值应拒绝
+  - id: T_PERMISSION_RULE_FLD_REQ_PERMISSION_SET_ID_001
+    title: 字段 permission_set_id 必填,空值应拒绝
     priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-role_id'',
-      { field: ''role_id'', value: null, expected: ''error'' })'
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-permission_set_id'',
+      { field: ''permission_set_id'', value: null, expected: ''error'' })'
 - id: BR-permission_rule-FLD-REQ-resource_type
   type: field_constraint
   object: permission_rule

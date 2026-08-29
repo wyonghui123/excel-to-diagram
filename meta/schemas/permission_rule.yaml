@@ -4,11 +4,12 @@ table_name: permission_rules
 description: 基于条件的动态权限规则，支持维度过滤和条件匹配
 
 fields:
-  - id: role_id
-    name: 角色ID
+  # [P2-11 2026-08-29] Spec 16: role_id → permission_set_id
+  - id: permission_set_id
+    name: 权限集ID
     type: integer
     required: true
-    description: 关联的角色ID
+    description: 关联的权限集ID
     ui:
       visible: true
       editable: true
@@ -99,16 +100,17 @@ fields:
       editable: false
 
 associations:
-  - name: role
+  # [P2-11 2026-08-29] Spec 16: role → permission_set
+  - name: permission_set
     type: reference
-    target_entity: role
-    source_key: role_id
-    description: 关联的角色
+    target_entity: permission_set
+    source_key: permission_set_id
+    description: 关联的权限集
 
 audit:
   enabled: true
   strategy: business_only
-  fields: [role_id, resource_type, condition, permission_level, is_denied]
+  fields: [permission_set_id, resource_type, condition, permission_level, is_denied]
 
 category_config:
   category: system
