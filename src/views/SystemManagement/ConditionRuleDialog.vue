@@ -579,7 +579,7 @@ async function handleSave() {
   try {
     // [Phase 3.13] v13 简化：save payload 不再含 permission_level / is_denied
     const payload = {
-      role_id: props.roleId,
+      permission_set_id: props.roleId,
       resource_type: form.resource_type,
       condition: form.condition,
       inherit_to_children: form.inherit_to_children,

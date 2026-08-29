@@ -357,7 +357,7 @@ function allCapsGranted(menu) {
 async function loadConditionRules() {
   if (!props.role) return
   try {
-    const r = await permService.loadConditionRules({ role_id: props.role.id })
+    const r = await permService.loadConditionRules({ permission_set_id: props.role.id })
     if (r.success) conditionRules.value = r.data || []
   } catch (e) {
     console.error('Failed to load condition rules:', e)

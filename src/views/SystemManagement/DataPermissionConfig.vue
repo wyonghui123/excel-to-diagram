@@ -248,7 +248,7 @@ function openCreateDialog() {
 
 function openEditDialog(rule) {
   editingRule.value = { ...rule }
-  selectedRoleId.value = rule.role_id
+  selectedRoleId.value = rule.permission_set_id
   showRuleDialog.value = true
 }
 
