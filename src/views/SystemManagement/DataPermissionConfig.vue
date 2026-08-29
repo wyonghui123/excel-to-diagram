@@ -63,11 +63,12 @@
       </template>
     </MetaTable>
 
+    <!-- [P2-9 2026-08-29] Spec 16: ConditionRuleDialog prop 统一为 permissionSetId -->
     <ConditionRuleDialog
       v-if="showRuleDialog"
       :visible="showRuleDialog"
       :rule="editingRule"
-      :role-id="selectedRoleId"
+      :permission-set-id="selectedRoleId"
       @close="showRuleDialog = false"
       @saved="onRuleSaved"
     />

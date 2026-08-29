@@ -90,9 +90,10 @@
          一体化后，范围与动作在同一组件内表达，无需联动校验对话框
          保留 state refs 以避免破坏编译 -->
 
+    <!-- [P2-9 2026-08-29] Spec 16: ConditionRuleDialog prop 统一为 permissionSetId -->
     <ConditionRuleDialog
       v-if="showAddConditionDialog"
-      :role-id="permissionSetId"
+      :permission-set-id="permissionSetId"
       :editing-rule="editingRule"
       :readonly="dialogReadonly"
       @close="handleConditionDialogClose"

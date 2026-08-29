@@ -216,9 +216,10 @@
       @update:visible="confirmState.visible = $event"
     />
 
+    <!-- [P2-9 2026-08-29] Spec 16: ConditionRuleDialog prop 统一为 permissionSetId -->
     <ConditionRuleDialog
       v-if="showConditionDialog"
-      :roleId="role?.id"
+      :permission-set-id="role?.id"
       @close="showConditionDialog = false"
       @saved="onConditionRuleSaved"
     />

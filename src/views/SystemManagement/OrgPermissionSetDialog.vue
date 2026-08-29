@@ -48,7 +48,7 @@
         </el-checkbox-group>
       </div>
 
-      <OrgFunctionPanel :org-id="resolvedOrgId" :is-admin="isAdmin" />
+      <OrgFunctionPanel :org-id="orgId" :is-admin="isAdmin" />
     </template>
 
     <template #footer>
@@ -67,11 +67,11 @@ import { Loading } from '@element-plus/icons-vue'
 import boService from '@/services/boService'
 import OrgFunctionPanel from './components/OrgFunctionPanel.vue'
 
+// [P2-9 2026-08-29] Spec 16: 清理 groupId 兼容性，prop 统一为 orgId
+//   移除向后兼容：调用方已全部使用 orgId
 const props = defineProps({
-  groupId: { type: [String, Number], required: true },
-  orgId: { type: [String, Number], default: null },
+  orgId: { type: [String, Number], required: true },
   isAdmin: { type: Boolean, default: false },
-  groupName: { type: String, default: '' },
   orgName: { type: String, default: '' },
   existingRoles: { type: Array, default: () => [] },
 })
@@ -80,9 +80,8 @@ const emit = defineEmits(['close', 'saved'])
 
 const message = useCrudMessage()
 
-// 兼容旧 groupId 调用方式，新代码应传 orgId
-const resolvedOrgId = computed(() => props.orgId ?? props.groupId)
-const resolvedOrgName = computed(() => props.orgName || props.groupName)
+// [P2-9 2026-08-29] Spec 16: 移除 resolvedOrgId/resolvedOrgName，prop 已统一为 orgId/orgName
+const resolvedOrgName = computed(() => props.orgName)
 
 const allRoles = ref([])
 const selectedRoleIds = ref([])
@@ -117,11 +116,11 @@ async function handleSave() {
     const toRemove = currentRoleIds.filter(id => !newRoleIds.includes(id))
     
     for (const roleId of toAdd) {
-      await boService.associate('org', props.groupId, 'permission_sets', roleId, 'permission_set')
+      await boService.associate('org', props.orgId, 'permission_sets', roleId, 'permission_set')
     }
 
     for (const roleId of toRemove) {
-      await boService.dissociate('org', props.groupId, 'permission_sets', roleId, 'permission_set')
+      await boService.dissociate('org', props.orgId, 'permission_sets', roleId, 'permission_set')
     }
     
     message.success(`成功关联 ${selectedRoleIds.value.length} 个权限集`)

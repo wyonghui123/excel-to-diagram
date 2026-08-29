@@ -36,8 +36,8 @@ describe('OrgPermissionSetDialog', () => {
   const mountComponent = (props = {}) => {
     return mount(OrgPermissionSetDialog, {
       props: {
-        groupId: 1,
-        groupName: '开发团队',
+        orgId: 1,
+        orgName: '开发团队',
         existingRoles: [],
         ...props
       },
@@ -48,10 +48,10 @@ describe('OrgPermissionSetDialog', () => {
   }
 
   describe('数据加载', () => {
-    it('应该在挂载时加载角色列表', async () => {
+    it('应该在挂载时加载权限集列表', async () => {
       await mountComponent()
-      
-      expect(mockBoService.query).toHaveBeenCalledWith('role', expect.objectContaining({
+
+      expect(mockBoService.query).toHaveBeenCalledWith('permission_set', expect.objectContaining({
         page: 1,
         page_size: 100
       }))
@@ -131,7 +131,7 @@ describe('OrgPermissionSetDialog', () => {
       
       await wrapper.vm.handleSave()
       
-      expect(mockBoService.dissociate).toHaveBeenCalledWith('user_group', 1, 'roles', 3, 'role')
+      expect(mockBoService.dissociate).toHaveBeenCalledWith('org', 1, 'permission_sets', 3, 'permission_set')
     })
 
     it('保存成功后应该关闭对话框', async () => {
