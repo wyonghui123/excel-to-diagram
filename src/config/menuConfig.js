@@ -3,8 +3,8 @@ export const tabGroupConfigs = {
     title: '用户与权限管理',
     tabs: [
       { key: 'users', label: '用户管理', objectType: 'user' },
-      { key: 'user-groups', label: '用户组管理', objectType: 'user_group' },
-      { key: 'roles', label: '角色管理', objectType: 'role' },
+      { key: 'orgs', label: '组织管理', objectType: 'org' },
+      { key: 'permission-sets', label: '权限集管理', objectType: 'permission_set' },
     ],
   },
   'business-config': {

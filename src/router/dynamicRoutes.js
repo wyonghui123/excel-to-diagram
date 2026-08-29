@@ -11,8 +11,8 @@ const PAGE_TYPE_COMPONENTS = {
 const STATIC_ROUTE_NAMES = new Set([
   'landing', 'login', 'theme-preview', 'archdata-chart', 'config',
   'test', 'component-comparison', 'navigation-test',
-  'ObjectDetail', 'ObjectDetailCreate', 'RoleDetail',
-  'AccountSettings', 'RolePermissionCenter', 'RolePermissionDetail',
+  'ObjectDetail', 'ObjectDetailCreate', 'PermissionSetDetail',
+  'AccountSettings', 'PermissionSetCenter', 'PermissionSetDetailContent',
   'system-admin', 'ArchDataManagement',
   'task-management', 'task-definitions', 'task-queues', 'task-executions', 'ai-async-tasks'
 ])
@@ -20,8 +20,8 @@ const STATIC_ROUTE_NAMES = new Set([
 const STATIC_ROUTE_PATHS = new Set([
   '/dev/theme-preview', '/archdata-chart', '/config', '/test',
   '/component-comparison', '/dev/navigation-test', '/account',
-  '/detail/', '/system-admin', '/role/',
-  '/system/role-permission/', '/system/role-detail/',
+  '/detail/', '/system-admin', '/permission-set/',
+  '/system/permission-set-permission/', '/system/permission-set-detail/',
   '/system/task-management', '/system/task-definitions',
   '/system/task-queues', '/system/task-executions', '/system/ai-async-tasks',
 ])
