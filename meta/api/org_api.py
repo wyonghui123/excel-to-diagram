@@ -276,7 +276,7 @@ def get_org_data_permissions(org_id):
 @org_bp.route('/orgs/<int:org_id>/data-permissions', methods=['POST'])
 @login_required
 @require_permission('user:update')
-@v1_deprecated(migrated_to='/api/v2/bo/user_group/<org_id>/associations/roles')
+@v1_deprecated(migrated_to='/api/v2/bo/org/<org_id>/associations/permission_sets')
 def add_group_data_permission(org_id):
     """[已废弃] 为组织添加数据权限 - 建议创建角色并关联到组织"""
     try:
@@ -301,7 +301,7 @@ def add_group_data_permission(org_id):
 @org_bp.route('/orgs/<int:org_id>/data-permissions/<int:perm_id>', methods=['DELETE'])
 @login_required
 @require_permission('user:update')
-@v1_deprecated(migrated_to='/api/v2/bo/user_group/<org_id>/associations/roles')
+@v1_deprecated(migrated_to='/api/v2/bo/org/<org_id>/associations/permission_sets')
 def remove_group_data_permission(org_id, perm_id):
     """[已废弃] 删除组织数据权限"""
     try:
@@ -317,11 +317,11 @@ def remove_group_data_permission(org_id, perm_id):
 @org_bp.route('/orgs/<int:org_id>/roles', methods=['GET'])
 @login_required
 @require_permission('user:read')
-@v1_deprecated(migrated_to='/api/v2/bo/user_group/<org_id>/associations/roles')
+@v1_deprecated(migrated_to='/api/v2/bo/org/<org_id>/associations/permission_sets')
 def get_org_permission_sets(org_id):
     """
-    [已废弃] 获取组织关联的角色列表
-    请使用 v2 API: GET /api/v2/bo/user_group/{org_id}/associations/roles
+    [已废弃] 获取组织关联的权限集列表
+    请使用 v2 API: GET /api/v2/bo/org/{org_id}/associations/permission_sets
     """
     try:
         service = _get_group_service()
@@ -338,43 +338,43 @@ def set_org_permission_sets(org_id):
     """批量设置组织角色（增量更新）"""
     try:
         data = request.get_json()
-        new_role_ids = set(data.get('role_ids', []))
-        
+        new_permission_set_ids = set(data.get('permission_set_ids', []))
+
         current_user = get_current_user()
         _set_user_context()
         bo = _get_bo_framework()
 
         with _data_source.transaction():
             cursor = _data_source.execute(
-                "SELECT role_id FROM org_permission_sets WHERE org_id = ?",
+                "SELECT permission_set_id FROM org_permission_sets WHERE org_id = ?",
                 [org_id]
             )
             rows = cursor.fetchall()
-            existing_role_ids = set(row[0] for row in rows)
+            existing_permission_set_ids = set(row[0] for row in rows)
 
-            roles_to_add = new_role_ids - existing_role_ids
-            roles_to_remove = existing_role_ids - new_role_ids
+            permission_sets_to_add = new_permission_set_ids - existing_permission_set_ids
+            permission_sets_to_remove = existing_permission_set_ids - new_permission_set_ids
 
             removed_count = 0
-            for rid in roles_to_remove:
+            for pid in permission_sets_to_remove:
                 result = bo.dissociate(
-                    src_type='user_group',
+                    src_type='org',
                     src_id=org_id,
-                    tgt_type='role',
-                    tgt_id=rid,
-                    association_name='roles'
+                    tgt_type='permission_set',
+                    tgt_id=pid,
+                    association_name='permission_sets'
                 )
                 if result.success:
                     removed_count += 1
 
             added_count = 0
-            for rid in roles_to_add:
+            for pid in permission_sets_to_add:
                 result = bo.associate(
-                    src_type='user_group',
+                    src_type='org',
                     src_id=org_id,
-                    tgt_type='role',
-                    tgt_id=rid,
-                    association_name='roles'
+                    tgt_type='permission_set',
+                    tgt_id=pid,
+                    association_name='permission_sets'
                 )
                 if result.success:
                     added_count += 1
@@ -395,21 +395,21 @@ def set_org_permission_sets(org_id):
 @org_bp.route('/orgs/<int:org_id>/roles/<int:permission_set_id>', methods=['POST'])
 @login_required
 @require_permission('user:update')
-def add_group_role(org_id, role_id):
-    """为组织添加单个角色"""
+def add_group_role(org_id, permission_set_id):
+    """为组织添加单个权限集"""
     try:
         current_user = get_current_user()
         _set_user_context()
         bo = _get_bo_framework()
-        
+
         result = bo.associate(
-            src_type='user_group',
+            src_type='org',
             src_id=org_id,
-            tgt_type='role',
-            tgt_id=role_id,
-            association_name='roles'
+            tgt_type='permission_set',
+            tgt_id=permission_set_id,
+            association_name='permission_sets'
         )
-        
+
         if result.success:
             return jsonify({'success': True})
         return jsonify({'success': False, 'message': result.message}), 400
@@ -420,21 +420,21 @@ def add_group_role(org_id, role_id):
 @org_bp.route('/orgs/<int:org_id>/roles/<int:permission_set_id>', methods=['DELETE'])
 @login_required
 @require_permission('user:update')
-def remove_group_role(org_id, role_id):
-    """从组织移除角色"""
+def remove_group_role(org_id, permission_set_id):
+    """从组织移除权限集"""
     try:
         current_user = get_current_user()
         _set_user_context()
         bo = _get_bo_framework()
-        
+
         result = bo.dissociate(
-            src_type='user_group',
+            src_type='org',
             src_id=org_id,
-            tgt_type='role',
-            tgt_id=role_id,
-            association_name='roles'
+            tgt_type='permission_set',
+            tgt_id=permission_set_id,
+            association_name='permission_sets'
         )
-        
+
         if result.success:
             return jsonify({'success': True})
         return jsonify({'success': False, 'message': result.message}), 500
