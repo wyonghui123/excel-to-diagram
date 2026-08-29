@@ -48,9 +48,9 @@ function _getMetaStore() {
 export const OBJECT_TYPE_LABELS = {
   // 身份与权限
   user: '用户',
-  role: '角色',
-  user_group: '用户组',
-  user_group_member: '用户组成员',
+  role: '权限集',
+  user_group: '组织',
+  user_group_member: '组织成员',
   // 菜单
   menu: '菜单',
   menu_permission: '菜单权限',

@@ -228,7 +228,7 @@ import { serialize, serializeDisplay, parseConditionToRuleRows } from '@/compone
 //   - 保留 conditionExpressionService 文件（未来需要完整解析 Rule Builder 时再用）
 
 const props = defineProps({
-  roleId: { type: [String, Number], required: true },
+  roleId: { type: [String, Number], required: true },  // [Plan C 2026-08-29] 暂保留 roleId prop 名（向后兼容 PermissionConfigPanel 透传），内部已统一使用此值
   editingRule: { type: Object, default: null },  // 编辑模式时传入的规则
   // [v45 2026-08-27] 浏览态只读模式：可打开查看，但内容不可编辑、无保存按钮
   readonly: { type: Boolean, default: false },
