@@ -264,7 +264,7 @@ PermissionConfigPanel.vue（嵌入角色详情页 / Drawer 内）
 │        { label: '采购订单 (BO)', to: null }   // 最后一项 = 当前聚焦项
 │      ]
 │      → 最后一项自动加粗 --color-text-primary（BreadcrumbNav 内置行为），无需手工拼接 " / " 分隔
-│      → breadcrumbItems 由后端 /meta?role_id= 返回的 pre-normalized breadcrumbItemsForCurrentFocus
+│      → breadcrumbItems 由后端 /meta?permission_set_id= 返回的 pre-normalized breadcrumbItemsForCurrentFocus
 │        字段直接提供（见 5.6.5 E7/F4），前端零转换
 │    <el-badge value="已配 4/5" class="ml-sm" type="primary" size="small" />
 │
@@ -2681,9 +2681,9 @@ v9 资源行布局（严格符合 YonDesign 规范）：
 
 ```python
 # 步骤 1: 找到正确的路由
-api = page.evaluate("fetch('/api/v1/roles?page=1&page_size=5')")
-role_id = api['data']['data'][0]['id']
-page.goto(f'http://localhost:3005/system/role-detail/{role_id}')
+api = page.evaluate("fetch('/api/v1/permission-sets?page=1&page_size=5')")
+permission_set_id = api['data']['data'][0]['id']
+page.goto(f'http://localhost:3005/system/permission-set-detail/{permission_set_id}')
 
 # 步骤 2: 检查 active chip 的实际计算样式
 active_chip = page.locator('.ram-scope-mode-chip--active').first
