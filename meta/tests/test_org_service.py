@@ -64,10 +64,10 @@ def ds():
         CREATE TABLE IF NOT EXISTS group_roles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_by INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(group_id, role_id)
+            UNIQUE(group_id, permission_set_id)
         );
         CREATE TABLE IF NOT EXISTS group_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +80,7 @@ def ds():
         );
         CREATE TABLE IF NOT EXISTS role_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT
@@ -335,12 +335,12 @@ def test_get_group_roles(svc, ds):
     gid = _insert_group(ds, 'RoleGroup', 'role_grp')
     rid = _insert_role(ds, 'LinkedRole', 'linked_role')
     ds.execute(
-        "INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+        "INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)",
         [gid, rid]
     )
     roles = svc.get_group_roles(gid)
     assert len(roles) == 1
-    assert roles[0]['role_id'] == rid
+    assert roles[0]['permission_set_id'] == rid
 
 
 def test_add_group_role(svc, ds):
@@ -373,7 +373,7 @@ def test_set_group_roles_replaces(svc, ds):
     # 替换为只有 r3
     svc.set_group_roles(gid, [r3])
     roles = svc.get_group_roles(gid)
-    role_ids = [r['role_id'] for r in roles]
+    role_ids = [r['permission_set_id'] for r in roles]
     assert role_ids == [r3]
     assert r1 not in role_ids
     assert r2 not in role_ids
@@ -397,7 +397,7 @@ def test_get_roles_not_in_group(svc, ds):
 # ============== 6. 权限链路聚合 ==============
 
 def test_get_user_effective_data_permissions_via_groups(svc, ds):
-    """通过 user→group→role→data_permission 链路聚合权限"""
+    """通过 user→group→permission_set→data_permission 链路聚合权限"""
     # 1) 创建用户
     uid = _insert_user(ds, 'perm_user')
 
@@ -413,7 +413,7 @@ def test_get_user_effective_data_permissions_via_groups(svc, ds):
 
     # 5) 创建 data permission
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, ?, ?, ?)",
+        "INSERT INTO role_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, ?, ?, ?)",
         [rid, 'product', 100, 'read']
     )
 

@@ -20,7 +20,7 @@ from meta.services.user_group_service import UserGroupService
 
 @pytest.fixture
 def ds():
-    """完整的真实 schema（参考 meta/schemas/user_group.yaml）"""
+    """完整的真实 schema（参考 meta/schemas/org.yaml）"""
     db_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
     db_path = db_file.name
     db_file.close()
@@ -66,10 +66,10 @@ def ds():
         CREATE TABLE group_roles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_by INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(group_id, role_id)
+            UNIQUE(group_id, permission_set_id)
         );
         CREATE TABLE group_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +82,7 @@ def ds():
         );
         CREATE TABLE role_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT
@@ -245,14 +245,14 @@ def test_add_member_idempotent_manager(svc, ds):
 
 
 def test_add_group_role_duplicate(svc, ds):
-    """同一 group-role 重复添加：UNIQUE 约束"""
+    """同一 group-permission_set 重复添加：UNIQUE 约束"""
     g = _insert_group(ds, 'DupRoleG', 'dup_role_g')
     r = _insert_role(ds, code='dup_role', name='Dup')
     assert svc.add_group_role(g, r) is True
     # 第二次添加（应被 INSERT OR IGNORE 忽略）
     assert svc.add_group_role(g, r) is True
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM group_roles WHERE group_id = ? AND role_id = ?",
+        "SELECT COUNT(*) FROM group_roles WHERE group_id = ? AND permission_set_id = ?",
         [g, r]
     )
     assert cursor.fetchone()[0] == 1
@@ -292,7 +292,7 @@ def test_role_shared_across_groups(svc, ds):
     svc.add_group_role(g1, r)
     svc.add_group_role(g2, r)
     # 验证：2 个 group_roles 记录
-    cursor = ds.execute("SELECT COUNT(*) FROM group_roles WHERE role_id = ?", [r])
+    cursor = ds.execute("SELECT COUNT(*) FROM group_roles WHERE permission_set_id = ?", [r])
     assert cursor.fetchone()[0] == 2
 
 
@@ -311,11 +311,11 @@ def test_effective_data_permissions_dedup(svc, ds):
     svc.add_group_role(g2, r2)
     # 同一 product/level 的 permission 出现在 2 个角色
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO role_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r1]
     )
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO role_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r2]
     )
     perms = svc.get_user_effective_data_permissions_via_groups(u)
@@ -332,11 +332,11 @@ def test_effective_data_permissions_different_resources(svc, ds):
     r = _insert_role(ds, code='multi_role', name='Multi')
     svc.add_group_role(g, r)
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO role_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r]
     )
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'order', 200, 'write')",
+        "INSERT INTO role_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'order', 200, 'write')",
         [r]
     )
     perms = svc.get_user_effective_data_permissions_via_groups(u)
@@ -545,7 +545,7 @@ def test_set_group_roles_clears_existing(svc, ds):
     assert result is True
     # 验证：r1 已移除，r2 存在
     cursor = ds.execute(
-        "SELECT role_id FROM group_roles WHERE group_id = ? ORDER BY role_id", [g]
+        "SELECT permission_set_id FROM group_roles WHERE group_id = ? ORDER BY permission_set_id", [g]
     )
     role_ids = [r[0] for r in cursor.fetchall()]
     assert role_ids == [r2]
@@ -595,7 +595,7 @@ def test_user_in_multiple_groups_with_different_roles(svc, ds):
     perm_svc = PermissionService(ds)
     perm_svc._ensure_user_in_group(u, g1)  # 先建 personal group
     roles = perm_svc.get_user_roles(u)
-    # 应有 3 个角色（r1, r2 + system personal group role?）
+    # 应有 3 个角色（r1, r2 + system personal group permission_set?）
     # 实际：personal group 暂无角色
     assert len(roles) == 2
     role_ids = {r['id'] for r in roles}

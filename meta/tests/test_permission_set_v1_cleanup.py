@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-V1 Cleanup - role.yaml 字段 + API 验证
+V1 Cleanup - permission_set.yaml 字段 + API 验证
 
 依据: spec-auth-object-category-v2-2026-06-10.md FR-V1-001 + FR-V1-002
-- role.yaml 不应再含 is_super_admin / priority 字段
-- role API 不再返回这 2 字段
+- permission_set.yaml 不应再含 is_super_admin / priority 字段
+- permission_set API 不再返回这 2 字段
 """
 import pytest
 import yaml
@@ -13,12 +13,12 @@ import os
 
 SCHEMA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'schemas', 'role.yaml'
+    'schemas', 'permission_set.yaml'
 )
 
 
 class TestRoleSchemaV1:
-    """V1 简化: role.yaml 字段验证"""
+    """V1 简化: permission_set.yaml 字段验证"""
 
     @pytest.fixture(scope='class')
     def role_schema(self):
@@ -26,16 +26,16 @@ class TestRoleSchemaV1:
             return yaml.safe_load(f)
 
     def test_role_yaml_excludes_is_super_admin(self, role_schema):
-        """is_super_admin 字段已从 role.yaml 删除"""
+        """is_super_admin 字段已从 permission_set.yaml 删除"""
         field_ids = [f['id'] for f in role_schema.get('fields', [])]
         assert 'is_super_admin' not in field_ids, \
-            "is_super_admin 字段不应再存在于 role.yaml"
+            "is_super_admin 字段不应再存在于 permission_set.yaml"
 
     def test_role_yaml_excludes_priority(self, role_schema):
-        """priority 字段已从 role.yaml 删除"""
+        """priority 字段已从 permission_set.yaml 删除"""
         field_ids = [f['id'] for f in role_schema.get('fields', [])]
         assert 'priority' not in field_ids, \
-            "priority 字段不应再存在于 role.yaml"
+            "priority 字段不应再存在于 permission_set.yaml"
 
     def test_role_yaml_has_core_fields(self, role_schema):
         """核心字段保留"""
@@ -85,7 +85,7 @@ class TestRoleColumnsInDB:
             FROM users u
             JOIN user_group_members ugm ON u.id = ugm.user_id
             JOIN group_roles gr ON ugm.group_id = gr.group_id
-            JOIN role_permissions rp ON gr.role_id = rp.role_id
+            JOIN role_permissions rp ON gr.permission_set_id = rp.permission_set_id
             JOIN permissions p ON rp.permission_id = p.id
             WHERE p.code = '*' AND u.username = 'admin'
         """)
@@ -95,12 +95,12 @@ class TestRoleColumnsInDB:
 
 
 class TestRoleApiV1:
-    """V1 简化: role API 响应不再含 is_super_admin / priority"""
+    """V1 简化: permission_set API 响应不再含 is_super_admin / priority"""
 
     def test_list_roles_api_excludes_is_super_admin(self, api_client, admin_token):
-        """GET /api/v1/roles 响应不再含 is_super_admin 字段"""
+        """GET /api/v1/permission-sets 响应不再含 is_super_admin 字段"""
         resp = api_client.get(
-            '/api/v1/roles',
+            '/api/v1/permission-sets',
             headers={'Authorization': f'Bearer {admin_token}'},
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.data[:200]}"
@@ -110,12 +110,12 @@ class TestRoleApiV1:
         if items:
             for item in items:
                 assert 'is_super_admin' not in item, \
-                    f"role 列表响应不应含 is_super_admin: {item}"
+                    f"permission_set 列表响应不应含 is_super_admin: {item}"
 
     def test_list_roles_api_excludes_priority(self, api_client, admin_token):
-        """GET /api/v1/roles 响应不再含 priority 字段"""
+        """GET /api/v1/permission-sets 响应不再含 priority 字段"""
         resp = api_client.get(
-            '/api/v1/roles',
+            '/api/v1/permission-sets',
             headers={'Authorization': f'Bearer {admin_token}'},
         )
         assert resp.status_code == 200
@@ -124,7 +124,7 @@ class TestRoleApiV1:
         if items:
             for item in items:
                 assert 'priority' not in item, \
-                    f"role 列表响应不应含 priority: {item}"
+                    f"permission_set 列表响应不应含 priority: {item}"
 
     @staticmethod
     def _extract_role_list(payload):

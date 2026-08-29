@@ -44,7 +44,7 @@ def fresh_migration_db():
     conn.executescript('''
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -58,13 +58,13 @@ def fresh_migration_db():
 
         CREATE TABLE role_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER, dimension_code TEXT, scope_mode TEXT,
+            permission_set_id INTEGER, dimension_code TEXT, scope_mode TEXT,
             dimension_values TEXT, inherit_children INTEGER DEFAULT 1
         );
 
         CREATE TABLE data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
+            permission_set_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
             resource_type VARCHAR(200), dimension_code VARCHAR(200),
             condition TEXT, scope_mode VARCHAR(50) DEFAULT 'include',
             permission_level VARCHAR(50) DEFAULT 'read',
@@ -81,7 +81,7 @@ def fresh_migration_db():
 
         CREATE TABLE role_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -90,7 +90,7 @@ def fresh_migration_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
     ''')
     conn.commit()
@@ -101,23 +101,23 @@ def fresh_migration_db():
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _insert_dim_scope(conn, role_id, dim_code, scope_mode, dim_values):
+def _insert_dim_scope(conn, permission_set_id, dim_code, scope_mode, dim_values):
     """辅助: 插入 role_dimension_scopes"""
     conn.execute(
         'INSERT INTO role_dimension_scopes '
-        '(role_id, dimension_code, scope_mode, dimension_values) '
+        '(permission_set_id, dimension_code, scope_mode, dimension_values) '
         'VALUES (?, ?, ?, ?)',
-        (role_id, dim_code, scope_mode, json.dumps(dim_values) if dim_values else None),
+        (permission_set_id, dim_code, scope_mode, json.dumps(dim_values) if dim_values else None),
     )
 
 
-def _insert_perm_rule(conn, role_id, resource_type, condition, level, is_denied):
+def _insert_perm_rule(conn, permission_set_id, resource_type, condition, level, is_denied):
     """辅助: 插入 data_permission_rules"""
     conn.execute(
         'INSERT INTO data_permission_rules '
-        '(role_id, resource_type, condition, permission_level, is_denied) '
+        '(permission_set_id, resource_type, condition, permission_level, is_denied) '
         'VALUES (?, ?, ?, ?, ?)',
-        (role_id, resource_type, condition, level, is_denied),
+        (permission_set_id, resource_type, condition, level, is_denied),
     )
 
 
@@ -173,7 +173,7 @@ class TestMigrationRollback:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO permission_rules_v2 "
-            "(role_id, resource_type, permission_level, source) "
+            "(permission_set_id, resource_type, permission_level, source) "
             "VALUES (99, 'manual_bo', 'read', 'manual')"
         )
         # 插入待迁移数据
@@ -188,7 +188,7 @@ class TestMigrationRollback:
         conn = sqlite3.connect(fresh_migration_db)
         count = conn.execute(
             "SELECT COUNT(*) FROM permission_rules_v2 "
-            "WHERE source = 'manual' AND role_id = 99"
+            "WHERE source = 'manual' AND permission_set_id = 99"
         ).fetchone()[0]
         assert count == 1
         conn.close()
@@ -267,7 +267,7 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT * FROM permission_rules_v2 WHERE role_id = 1"
+            "SELECT * FROM permission_rules_v2 WHERE permission_set_id = 1"
         ).fetchone()
         assert row is not None
         include = json.loads(row['include_conditions'])
@@ -282,7 +282,7 @@ class TestMigrationEdgeCases:
         # 直接插入异常 JSON
         conn.execute(
             "INSERT INTO role_dimension_scopes "
-            "(role_id, dimension_code, scope_mode, dimension_values) "
+            "(permission_set_id, dimension_code, scope_mode, dimension_values) "
             "VALUES (?, ?, ?, ?)",
             (1, 'domain', 'include', 'not_a_json'),
         )
@@ -293,7 +293,7 @@ class TestMigrationEdgeCases:
 
         stats = up(fresh_migration_db)
         # 异常数据被跳过, 正常数据被迁移
-        assert stats['dimension_scopes'] == 1  # 只有 role_id=2 的成功
+        assert stats['dimension_scopes'] == 1  # 只有 permission_set_id=2 的成功
 
     def test_empty_condition_text(self, fresh_migration_db):
         """data_permission_rules condition='' → 转换为空 conditions"""
@@ -315,7 +315,7 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO data_permission_rules "
-            "(role_id, resource_type, condition, permission_level, is_denied) "
+            "(permission_set_id, resource_type, condition, permission_level, is_denied) "
             "VALUES (?, ?, NULL, ?, ?)",
             (10, 'product', 'read', 0),
         )
@@ -332,7 +332,7 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO data_permission_rules "
-            "(role_id, resource_type, condition, permission_level, is_denied) "
+            "(permission_set_id, resource_type, condition, permission_level, is_denied) "
             "VALUES (?, NULL, ?, ?, ?)",
             (10, "status='active'", 'read', 0),
         )
@@ -397,7 +397,7 @@ class TestMigrationToDerivationE2E:
         # 推导
         dao = EffectiveIntentDAO(fresh_migration_db)
         pipeline = PermissionDerivationPipeline(db_path=fresh_migration_db, dao=dao)
-        result = pipeline.derive(role_id=1)
+        result = pipeline.derive(permission_set_id=1)
 
         # 应该生成 Intents
         assert result['intent_count'] > 0
@@ -407,7 +407,7 @@ class TestMigrationToDerivationE2E:
         # 验证 role_effective_intents 表有数据
         conn = sqlite3.connect(fresh_migration_db)
         count = conn.execute(
-            "SELECT COUNT(*) FROM role_effective_intents WHERE role_id = 1"
+            "SELECT COUNT(*) FROM role_effective_intents WHERE permission_set_id = 1"
         ).fetchone()[0]
         assert count > 0
         conn.close()
@@ -419,7 +419,7 @@ class TestMigrationToDerivationE2E:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
         from meta.core.effective_intent_checker import EffectiveIntentChecker
 
-        # 准备数据: role 1 有 domain=[1,2] 权限
+        # 准备数据: permission_set 1 有 domain=[1,2] 权限
         conn = sqlite3.connect(fresh_migration_db)
         _insert_dim_scope(conn, 1, 'domain', 'include', [1, 2])
         # 业务对象表
@@ -434,15 +434,15 @@ class TestMigrationToDerivationE2E:
         up(fresh_migration_db)
         dao = EffectiveIntentDAO(fresh_migration_db)
         pipeline = PermissionDerivationPipeline(db_path=fresh_migration_db, dao=dao)
-        pipeline.derive(role_id=1)
+        pipeline.derive(permission_set_id=1)
 
         # 检查权限
         checker = EffectiveIntentChecker(db_path=fresh_migration_db)
         # domain#1 在 include=[1,2] 中 → 允许
-        r1 = checker.check(role_id=1, bo_id='domain', action_name='read',
+        r1 = checker.check(permission_set_id=1, bo_id='domain', action_name='read',
                            record_id=1, user_id=999)
         # domain#3 不在 include=[1,2] 中 → 拒绝
-        r3 = checker.check(role_id=1, bo_id='domain', action_name='read',
+        r3 = checker.check(permission_set_id=1, bo_id='domain', action_name='read',
                            record_id=3, user_id=999)
 
         # 注意: domain 表没有 owner_id 字段, 所以 owner 检查会失败, 走 include 路径

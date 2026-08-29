@@ -1,5 +1,5 @@
 /**
- * RolePermissionCenter 组件测试 - 4区域布局
+ * PermissionSetCenter 组件测试 - 4区域布局
  * 
  * 测试内容：
  * 1. 4区域布局渲染
@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createWebHistory } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
-import RolePermissionCenter from '../RolePermissionCenter.vue'
+import PermissionSetCenter from '../PermissionSetCenter.vue'
 
 const mockFetch = vi.fn()
 global.fetch = mockFetch
@@ -20,12 +20,12 @@ global.fetch = mockFetch
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/system/roles/:roleId', component: RolePermissionCenter },
+    { path: '/system/roles/:permissionSetId', component: PermissionSetCenter },
     { path: '/system', component: { template: '<div>System</div>' } }
   ]
 })
 
-describe('RolePermissionCenter - 4区域布局', () => {
+describe('PermissionSetCenter - 4区域布局', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mockFetch.mockClear()
@@ -34,7 +34,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
   describe('布局渲染', () => {
     
     it('应该渲染4个主要区域', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -68,7 +68,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -90,7 +90,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
     })
     
     it('应该显示保存和重置按钮', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -118,7 +118,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
   describe('组件集成', () => {
     
     it('应该集成PermissionDimensionSelector组件', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -141,7 +141,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
     })
     
     it('应该集成ConditionRuleEditor组件', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -164,7 +164,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
     })
     
     it('应该集成ImpactPreview组件', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -195,7 +195,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         json: () => Promise.resolve({ data: [] })
       })
 
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -230,7 +230,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
           json: () => Promise.resolve({ data: [] })
         })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -265,7 +265,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         json: () => Promise.resolve({ success: true })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -299,7 +299,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -330,7 +330,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -358,7 +358,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -389,7 +389,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
         })
       })
       
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -420,7 +420,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
   describe('工具函数', () => {
     
     it('getDimensionName应该返回正确的维度名称', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -447,7 +447,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
     })
     
     it('getPermissionLevelLabel应该返回正确的权限级别标签', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -472,7 +472,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
     })
     
     it('getPermissionLevelType应该返回正确的权限级别类型', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {
@@ -500,7 +500,7 @@ describe('RolePermissionCenter - 4区域布局', () => {
   describe('响应式布局', () => {
     
     it('小屏幕应该调整布局', async () => {
-      const wrapper = mount(RolePermissionCenter, {
+      const wrapper = mount(PermissionSetCenter, {
         global: {
           plugins: [router],
           stubs: {

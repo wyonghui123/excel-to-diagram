@@ -1,5 +1,5 @@
 /**
- * RolePermissionCenter 新功能测试
+ * PermissionSetCenter 新功能测试
  * 
  * 测试内容：
  * 1. 编辑按钮功能
@@ -12,7 +12,7 @@ import { mount } from '@vue/test-utils'
 import { createRouter, createWebHistory } from 'vue-router'
 import { createPinia } from 'pinia'
 
-describe('RolePermissionCenter - 新增功能测试', () => {
+describe('PermissionSetCenter - 新增功能测试', () => {
   
   describe('编辑按钮功能', () => {
     

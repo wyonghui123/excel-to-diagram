@@ -12,7 +12,7 @@ from ._base import BaseFactory, unique_str, register_factory
 class UserGroupFactory(BaseFactory):
     """用户组工厂"""
 
-    _OBJECT_TYPE = 'user_group'
+    _OBJECT_TYPE = 'org'
 
     @classmethod
     def _base_defaults(cls) -> Dict[str, Any]:

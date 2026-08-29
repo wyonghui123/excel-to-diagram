@@ -4,14 +4,14 @@ pytestmark = pytest.mark.integration
 
 # -*- coding: utf-8 -*-
 """
-Phase 11 对象适配测试 - UserGroup CRUD
+Phase 11 对象适配测试 - Org CRUD
 
 测试范围：
-- UserGroup 基本 CRUD 操作
-- UserGroup 层级关系 (parent_id)
-- UserGroup 管理员 (manager_id)
-- UserGroup 成员计数 (member_count)
-- UserGroup YAML 元数据驱动
+- Org 基本 CRUD 操作
+- Org 层级关系 (parent_id)
+- Org 管理员 (manager_id)
+- Org 成员计数 (member_count)
+- Org YAML 元数据驱动
 
 对应规范: TC-PA-016 ~ TC-PA-030
 """
@@ -22,7 +22,7 @@ import tempfile
 
 
 class TestUserGroupCRUD:
-    """UserGroup 基本 CRUD 测试"""
+    """Org 基本 CRUD 测试"""
 
     @pytest.fixture
     def data_source(self):
@@ -59,14 +59,14 @@ class TestUserGroupCRUD:
 
         ds.execute('''CREATE TABLE IF NOT EXISTS user_group_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             created_at DATETIME,
-            UNIQUE(user_group_id, user_id)
+            UNIQUE(org_id, user_id)
         )''')
         ds.commit()
 
-        # [FIX 2026-06-10] 创建 audit_logs 表（user_group 启用了 audit_aspect）
+        # [FIX 2026-06-10] 创建 audit_logs 表（org 启用了 audit_aspect）
         ds.execute('''CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             object_type VARCHAR(100) NOT NULL,
@@ -118,11 +118,11 @@ class TestUserGroupCRUD:
         return data_source.insert('users', {'username': username, 'email': email})
 
     def _insert_member(self, data_source, group_id, user_id):
-        return data_source.insert('user_group_members', {'user_group_id': group_id, 'user_id': user_id})
+        return data_source.insert('user_group_members', {'org_id': group_id, 'user_id': user_id})
 
     def test_create_user_group_basic(self, bo_framework, data_source):
         try:
-            result = bo_framework.create('user_group', {
+            result = bo_framework.create('org', {
                 'code': 'TEST_GROUP',
                 'name': '测试用户组',
                 'description': '这是一个测试用户组'
@@ -140,7 +140,7 @@ class TestUserGroupCRUD:
         try:
             parent_id = self._insert_group(data_source, 'PARENT_GROUP', '父用户组')
 
-            result = bo_framework.create('user_group', {
+            result = bo_framework.create('org', {
                 'code': 'CHILD_GROUP',
                 'name': '子用户组',
                 'parent_id': parent_id
@@ -158,7 +158,7 @@ class TestUserGroupCRUD:
         try:
             manager_id = self._insert_user(data_source, 'manager_user', 'manager@test.com')
 
-            result = bo_framework.create('user_group', {
+            result = bo_framework.create('org', {
                 'code': 'MANAGED_GROUP',
                 'name': '有管理员的用户组',
                 'manager_id': manager_id
@@ -174,7 +174,7 @@ class TestUserGroupCRUD:
             user_id = self._insert_user(data_source, 'member1', 'member1@test.com')
             self._insert_member(data_source, group_id, user_id)
 
-            result = bo_framework.read('user_group', group_id)
+            result = bo_framework.read('org', group_id)
 
             assert result.success, f"读取失败: {result.message}"
         except Exception as e:
@@ -185,7 +185,7 @@ class TestUserGroupCRUD:
             group_id = self._insert_group(data_source, 'UPDATE_GROUP', '更新前')
             new_parent_id = self._insert_group(data_source, 'NEW_PARENT', '新父组')
 
-            result = bo_framework.update('user_group', group_id, {'parent_id': new_parent_id})
+            result = bo_framework.update('org', group_id, {'parent_id': new_parent_id})
 
             assert result.success, f"更新失败: {result.message}"
 
@@ -200,7 +200,7 @@ class TestUserGroupCRUD:
             group_id = self._insert_group(data_source, 'MANAGER_UPDATE', '管理员更新')
             new_manager_id = self._insert_user(data_source, 'new_manager', 'newmanager@test.com')
 
-            result = bo_framework.update('user_group', group_id, {'manager_id': new_manager_id})
+            result = bo_framework.update('org', group_id, {'manager_id': new_manager_id})
 
             assert result.success, f"更新失败: {result.message}"
         except Exception as e:
@@ -210,7 +210,7 @@ class TestUserGroupCRUD:
         try:
             group_id = self._insert_group(data_source, 'DELETE_GROUP', '删除测试')
 
-            result = bo_framework.delete('user_group', group_id)
+            result = bo_framework.delete('org', group_id)
 
             assert result.success, f"删除失败: {result.message}"
 
@@ -224,7 +224,7 @@ class TestUserGroupCRUD:
             parent_id = self._insert_group(data_source, 'PARENT_FOR_DELETE', '父组')
             self._insert_group(data_source, 'CHILD_FOR_DELETE', '子组', parent_id=parent_id)
 
-            result = bo_framework.delete('user_group', parent_id)
+            result = bo_framework.delete('org', parent_id)
 
             assert result.success, f"删除失败: {result.message}"
         except Exception as e:
@@ -236,7 +236,7 @@ class TestUserGroupCRUD:
             user_id = self._insert_user(data_source, 'member_user', 'member@test.com')
             self._insert_member(data_source, group_id, user_id)
 
-            result = bo_framework.delete('user_group', group_id)
+            result = bo_framework.delete('org', group_id)
 
             assert result.success, f"删除失败: {result.message}"
         except Exception as e:
@@ -247,7 +247,7 @@ class TestUserGroupCRUD:
             root_id = self._insert_group(data_source, 'ROOT_GROUP', '根组')
             self._insert_group(data_source, 'CHILD_IN_LIST', '子组', parent_id=root_id)
 
-            result = bo_framework.execute('user_group', 'crud_query', {
+            result = bo_framework.execute('org', 'crud_query', {
                 'parent_id': root_id
             })
 
@@ -262,7 +262,7 @@ class TestUserGroupCRUD:
             self._insert_group(data_source, 'TOP_LEVEL_1', '顶级组1')
             self._insert_group(data_source, 'NOT_TOP', '非顶级', parent_id=1)
 
-            result = bo_framework.query('user_group')
+            result = bo_framework.query('org')
 
             assert result.success, f"查询失败: {result.message}"
         except Exception as e:
@@ -273,7 +273,7 @@ class TestUserGroupCRUD:
             self._insert_group(data_source, 'SEARCH_GROUP', '搜索目标组', '包含关键词')
             self._insert_group(data_source, 'OTHER_GROUP', '其他组', '不包含')
 
-            result = bo_framework.execute('user_group', 'crud_query', {
+            result = bo_framework.execute('org', 'crud_query', {
                 'search': '搜索目标'
             })
 
@@ -287,14 +287,14 @@ class TestUserGroupCRUD:
         try:
             from meta.core.models import registry
 
-            group_meta = registry.get('user_group')
-            assert group_meta is not None, "user_group 元数据未加载"
+            group_meta = registry.get('org')
+            assert group_meta is not None, "org 元数据未加载"
 
-            assert hasattr(group_meta, 'fields'), "user_group 应该有 fields 属性"
+            assert hasattr(group_meta, 'fields'), "org 应该有 fields 属性"
 
             field_names = [f.id for f in group_meta.fields]
-            assert 'name' in field_names, "user_group 应该有 name 字段"
-            assert 'code' in field_names, "user_group 应该有 code 字段"
+            assert 'name' in field_names, "org 应该有 name 字段"
+            assert 'code' in field_names, "org 应该有 code 字段"
         except Exception as e:
             pytest.fail(f"User group CRUD skipped: {e}")
 
@@ -304,7 +304,7 @@ class TestUserGroupCRUD:
             level2_id = self._insert_group(data_source, 'LEVEL2', '二级组', parent_id=level1_id)
             self._insert_group(data_source, 'LEVEL3', '三级组', parent_id=level2_id)
 
-            result = bo_framework.read('user_group', level2_id)
+            result = bo_framework.read('org', level2_id)
 
             assert result.success, f"读取失败: {result.message}"
         except Exception as e:
@@ -318,7 +318,7 @@ class TestUserGroupCRUD:
                 user_id = self._insert_user(data_source, f'count_user_{i}', f'count{i}@test.com')
                 self._insert_member(data_source, group_id, user_id)
 
-            result = bo_framework.read('user_group', group_id)
+            result = bo_framework.read('org', group_id)
 
             assert result.success, f"读取失败: {result.message}"
         except Exception as e:
@@ -326,19 +326,19 @@ class TestUserGroupCRUD:
 
 
 class TestUserGroupMetaConfiguration:
-    """UserGroup 元数据配置测试"""
+    """Org 元数据配置测试"""
 
     def test_user_group_yaml_loaded(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
-        assert group_meta is not None, "user_group 元数据未加载"
-        assert group_meta.id == 'user_group', f"期望 id='user_group', 实际={group_meta.id}"
+        group_meta = registry.get('org')
+        assert group_meta is not None, "org 元数据未加载"
+        assert group_meta.id == 'org', f"期望 id='org', 实际={group_meta.id}"
 
     def test_user_group_parent_id_field(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
+        group_meta = registry.get('org')
         assert group_meta is not None, "group_meta not found in registry"
         field_map = {f.id: f for f in group_meta.fields}
 
@@ -347,7 +347,7 @@ class TestUserGroupMetaConfiguration:
     def test_user_group_manager_id_field(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
+        group_meta = registry.get('org')
         assert group_meta is not None, "group_meta not found in registry"
         field_map = {f.id: f for f in group_meta.fields}
 
@@ -356,7 +356,7 @@ class TestUserGroupMetaConfiguration:
     def test_user_group_associations_defined(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
+        group_meta = registry.get('org')
         associations = getattr(group_meta, 'associations', None)
 
         if associations:
@@ -368,14 +368,14 @@ class TestUserGroupMetaConfiguration:
                 assoc_names = []
 
             assert 'members' in assoc_names or 'user' in assoc_names, \
-                "user_group 应该定义 members 关联"
+                "org 应该定义 members 关联"
         else:
-            pytest.fail("user_group associations not defined in metadata")
+            pytest.fail("org associations not defined in metadata")
 
     def test_user_group_computed_fields(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
+        group_meta = registry.get('org')
         assert group_meta is not None, "group_meta not found in registry"
         computed_fields = [
             f for f in group_meta.fields
@@ -383,12 +383,12 @@ class TestUserGroupMetaConfiguration:
             or (hasattr(f, 'semantics') and getattr(f.semantics, 'computed', False))
         ]
 
-        assert len(computed_fields) > 0, "user_group 应该有计算字段 (member_count)"
+        assert len(computed_fields) > 0, "org 应该有计算字段 (member_count)"
 
     def test_user_group_ui_view_config(self):
         from meta.core.models import registry
 
-        group_meta = registry.get('user_group')
+        group_meta = registry.get('org')
         assert group_meta is not None, "group_meta not found in registry"
 
         if hasattr(group_meta, 'ui_view_config') and group_meta.ui_view_config:

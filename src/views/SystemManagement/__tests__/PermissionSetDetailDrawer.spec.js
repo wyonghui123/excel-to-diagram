@@ -29,7 +29,7 @@ const mockUnifiedData = {
   }
 }
 
-describe('RoleDetailDrawer', () => {
+describe('PermissionSetDetailDrawer', () => {
   describe('基本渲染', () => {
     it('应该渲染角色详情抽屉', () => {
       const wrapper = mount({
@@ -313,7 +313,7 @@ describe('RoleDetailDrawer', () => {
   })
 })
 
-describe('RoleDetailDrawer 权限控制', () => {
+describe('PermissionSetDetailDrawer 权限控制', () => {
   describe('Tab 可见性', () => {
     it('权限配置 Tab 应该默认显示', () => {
       const wrapper = mount({
@@ -386,7 +386,7 @@ describe('RoleDetailDrawer 权限控制', () => {
   })
 })
 
-describe('RoleDetailDrawer 日志加载', () => {
+describe('PermissionSetDetailDrawer 日志加载', () => {
   describe('日志数据获取', () => {
     it('应该从 API 获取角色日志', () => {
       const logs = [

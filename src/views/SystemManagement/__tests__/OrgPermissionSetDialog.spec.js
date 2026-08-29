@@ -1,11 +1,11 @@
 /**
- * GroupRoleDialog.spec.js - 用户组角色对话框测试
+ * OrgPermissionSetDialog.spec.js - 用户组角色对话框测试
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
-import GroupRoleDialog from '@/views/SystemManagement/GroupRoleDialog.vue'
+import OrgPermissionSetDialog from '@/views/SystemManagement/OrgPermissionSetDialog.vue'
 
 const mockBoService = {
   query: vi.fn(),
@@ -23,7 +23,7 @@ const mockRoles = [
   { id: 3, code: 'viewer', name: '访客', is_system: false }
 ]
 
-describe('GroupRoleDialog', () => {
+describe('OrgPermissionSetDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     
@@ -34,7 +34,7 @@ describe('GroupRoleDialog', () => {
   })
 
   const mountComponent = (props = {}) => {
-    return mount(GroupRoleDialog, {
+    return mount(OrgPermissionSetDialog, {
       props: {
         groupId: 1,
         groupName: '开发团队',
@@ -124,7 +124,7 @@ describe('GroupRoleDialog', () => {
       mockBoService.dissociate.mockResolvedValue({ success: true })
       
       const wrapper = await mountComponent({
-        existingRoles: [{ role_id: 1 }, { role_id: 3 }]
+        existingRoles: [{ permission_set_id: 1 }, { permission_set_id: 3 }]
       })
       
       wrapper.vm.selectedRoleIds = [1, 2]
@@ -152,8 +152,8 @@ describe('GroupRoleDialog', () => {
     it('应该初始化已选角色', async () => {
       const wrapper = await mountComponent({
         existingRoles: [
-          { role_id: 1, code: 'admin' },
-          { role_id: 2, code: 'user' }
+          { permission_set_id: 1, code: 'admin' },
+          { permission_set_id: 2, code: 'user' }
         ]
       })
       

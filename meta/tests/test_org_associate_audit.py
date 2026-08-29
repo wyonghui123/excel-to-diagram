@@ -53,7 +53,7 @@ def bo_framework():
         framework._test_user_id = result.data['id']
 
     code = f'test_group_{random.randint(1000, 9999)}'
-    result = framework.create('user_group', {
+    result = framework.create('org', {
         'code': code,
         'name': f'测试用户组 {code}',
         'description': '用于测试关联操作',
@@ -71,7 +71,7 @@ def bo_framework():
 
     if hasattr(framework, '_test_group_id') and framework._test_group_id:
         try:
-            framework.delete('user_group', framework._test_group_id)
+            framework.delete('org', framework._test_group_id)
         except:
             pass
 
@@ -91,7 +91,7 @@ def test_data(bo_framework):
 
     if test_group_id:
         try:
-            bo_framework.delete('user_group', test_group_id)
+            bo_framework.delete('org', test_group_id)
         except:
             pass
 
@@ -121,7 +121,7 @@ class TestUserGroupAssociateAudit:
         bo_framework.set_user_context(user_id=1, user_name='admin', ip_address='127.0.0.1')
 
         result = bo_framework.associate(
-            src_type='user_group',
+            src_type='org',
             src_id=test_group_id,
             tgt_type='user',
             tgt_id=test_user_id,
@@ -142,7 +142,7 @@ class TestUserGroupAssociateAudit:
         bo_framework.set_user_context(user_id=1, user_name='admin', ip_address='127.0.0.1')
 
         result = bo_framework.associate(
-            src_type='user_group',
+            src_type='org',
             src_id=test_group_id,
             tgt_type='user',
             tgt_id=test_user_id,
@@ -159,7 +159,7 @@ class TestUserGroupAssociateAudit:
             result = bo_framework._data_source.execute(
                 '''
                 SELECT * FROM audit_logs
-                WHERE object_type='user_group'
+                WHERE object_type='org'
                 AND object_id=?
                 AND action='ASSOCIATE'
                 ORDER BY created_at DESC
@@ -189,7 +189,7 @@ class TestUserGroupAssociateAudit:
         print(f"  - User: {log_dict['user_name']}")
         print(f"  - Created At: {log_dict['created_at']}")
 
-        assert log_dict['object_type'] == 'user_group'
+        assert log_dict['object_type'] == 'org'
         assert str(log_dict['object_id']) == str(test_group_id)
         assert log_dict['action'] == 'ASSOCIATE'
         assert 'user' in log_dict['field_name'].lower() or 'member' in log_dict['field_name'].lower() or '成员' in log_dict['field_name']
@@ -232,7 +232,7 @@ class TestUserGroupAssociateAudit:
 
         if test_group_id:
             try:
-                self.bo_framework.delete('user_group', test_group_id)
+                self.bo_framework.delete('org', test_group_id)
             except:
                 pass
 

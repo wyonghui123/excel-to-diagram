@@ -44,7 +44,7 @@ def app_with_db():
     conn.executescript('''
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -57,7 +57,7 @@ def app_with_db():
 
         CREATE TABLE role_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -66,7 +66,7 @@ def app_with_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         CREATE TABLE products (
@@ -79,7 +79,7 @@ def app_with_db():
             (3, 'P3', 'Product 3', 999, 'active');
 
         CREATE TABLE roles (id INTEGER PRIMARY KEY, name TEXT);
-        INSERT INTO roles VALUES (100, 'Role A'), (101, 'Role B');
+        INSERT INTO roles VALUES (100, 'PermissionSet A'), (101, 'PermissionSet B');
     ''')
     conn.commit()
     conn.close()
@@ -135,7 +135,7 @@ class TestPermissionRulesV2Crud:
         """POST /api/v2/unified-permission-rules → 创建规则"""
         _, db_path = app_with_db
         resp = client.post('/api/v2/unified-permission-rules', json={
-            'role_id': 100,
+            'permission_set_id': 100,
             'resource_type': 'product',
             'permission_level': 'read',
             'include_conditions': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -149,7 +149,7 @@ class TestPermissionRulesV2Crud:
         # 验证 DB
         conn = sqlite3.connect(db_path)
         row = conn.execute(
-            'SELECT role_id, resource_type, permission_level FROM permission_rules_v2 WHERE id = ?',
+            'SELECT permission_set_id, resource_type, permission_level FROM permission_rules_v2 WHERE id = ?',
             [data['data']['id']]
         ).fetchone()
         conn.close()
@@ -158,32 +158,32 @@ class TestPermissionRulesV2Crud:
         assert row[2] == 'read'
 
     def test_list_rules_by_role(self, client, app_with_db):
-        """GET /api/v2/unified-permission-rules?role_id=100 → 列表"""
+        """GET /api/v2/unified-permission-rules?permission_set_id=100 → 列表"""
         _, db_path = app_with_db
         # 先插入数据
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level) "
             "VALUES (100, 'product', 'read'), (100, 'version', 'write'), (101, 'product', 'admin')"
         )
         conn.commit()
         conn.close()
 
-        resp = client.get('/api/v2/unified-permission-rules?role_id=100')
+        resp = client.get('/api/v2/unified-permission-rules?permission_set_id=100')
         assert resp.status_code == 200
         data = resp.get_json()
         assert data['success'] is True
         rules = data['data']
-        assert len(rules) == 2  # role 100 有 2 条
+        assert len(rules) == 2  # permission_set 100 有 2 条
         for r in rules:
-            assert r['role_id'] == 100
+            assert r['permission_set_id'] == 100
 
     def test_list_all_rules(self, client, app_with_db):
-        """GET /api/v2/unified-permission-rules (无 role_id) → 全部"""
+        """GET /api/v2/unified-permission-rules (无 permission_set_id) → 全部"""
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level) "
             "VALUES (100, 'product', 'read'), (101, 'version', 'write')"
         )
         conn.commit()
@@ -200,7 +200,7 @@ class TestPermissionRulesV2Crud:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level) "
             "VALUES (100, 'product', 'read')"
         )
         rule_id = cursor.lastrowid
@@ -224,7 +224,7 @@ class TestPermissionRulesV2Crud:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level) "
             "VALUES (100, 'product', 'read')"
         )
         rule_id = cursor.lastrowid
@@ -254,7 +254,7 @@ class TestPermissionRulesV2Crud:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level) "
             "VALUES (100, 'product', 'read')"
         )
         rule_id = cursor.lastrowid
@@ -275,10 +275,10 @@ class TestPermissionRulesV2Crud:
         assert row[0] == 0
 
     def test_create_rule_validates_required_fields(self, client):
-        """POST 缺少 role_id → 400"""
+        """POST 缺少 permission_set_id → 400"""
         resp = client.post('/api/v2/unified-permission-rules', json={
             'resource_type': 'product',
-            # 缺 role_id
+            # 缺 permission_set_id
         })
         assert resp.status_code == 400
 
@@ -290,11 +290,11 @@ class TestEffectiveIntentsCrud:
     """P3.2 role_effective_intents CRUD API"""
 
     def test_list_intents_by_role(self, client, app_with_db):
-        """GET /api/v2/roles/<role_id>/effective-intents → 列表"""
+        """GET /api/v2/roles/<permission_set_id>/effective-intents → 列表"""
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}'), "
             "       (100, 'product', 'list', '{}'), "
             "       (101, 'product', 'read', '{}')"
@@ -306,14 +306,14 @@ class TestEffectiveIntentsCrud:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data['success'] is True
-        assert len(data['data']) == 2  # role 100 有 2 个
+        assert len(data['data']) == 2  # permission_set 100 有 2 个
 
     def test_list_intents_filter_by_bo(self, client, app_with_db):
         """GET /api/v2/roles/100/effective-intents?bo_id=product → 按 BO 过滤"""
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}'), "
             "       (100, 'version', 'read', '{}')"
         )
@@ -331,7 +331,7 @@ class TestEffectiveIntentsCrud:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}')"
         )
         intent_id = cursor.lastrowid
@@ -363,7 +363,7 @@ class TestEffectiveIntentsCrud:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}')"
         )
         intent_id = cursor.lastrowid
@@ -395,7 +395,7 @@ class TestDerivationTrigger:
         # 先插入规则
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps([{'field': 'owner_id', 'op': '=', 'value': 999}])]
         )
@@ -412,7 +412,7 @@ class TestDerivationTrigger:
         # 验证 role_effective_intents 表被写入
         conn = sqlite3.connect(db_path)
         rows = conn.execute(
-            'SELECT action_name FROM role_effective_intents WHERE role_id = 100'
+            'SELECT action_name FROM role_effective_intents WHERE permission_set_id = 100'
         ).fetchall()
         conn.close()
         actions = {r[0] for r in rows}
@@ -439,7 +439,7 @@ class TestSqlPreview:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -470,7 +470,7 @@ class TestSqlPreview:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': '${user.id}'}],
@@ -499,7 +499,7 @@ class TestCompletenessCheck:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}')"
         )
         conn.commit()
@@ -525,7 +525,7 @@ class TestCompletenessCheck:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope, is_stale) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope, is_stale) "
             "VALUES (100, 'product', 'read', '{}', 1)"
         )
         conn.commit()
@@ -548,10 +548,10 @@ class TestRoleDiff:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
-            "VALUES (100, 'product', 'read', '{}'), "  # role A 有
-            "       (101, 'product', 'read', '{}'), "  # role B 有
-            "       (101, 'version', 'read', '{}')"    # role B 独有
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
+            "VALUES (100, 'product', 'read', '{}'), "  # permission_set A 有
+            "       (101, 'product', 'read', '{}'), "  # permission_set B 有
+            "       (101, 'version', 'read', '{}')"    # permission_set B 独有
         )
         conn.commit()
         conn.close()
@@ -573,7 +573,7 @@ class TestRoleDiff:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{}'), "
             "       (101, 'product', 'read', '{}')"
         )
@@ -599,7 +599,7 @@ class TestPermissionSimulate:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -638,7 +638,7 @@ class TestPermissionSimulate:
         _, db_path = app_with_db
         conn = sqlite3.connect(db_path)
         conn.execute(
-            "INSERT INTO role_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO role_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [],

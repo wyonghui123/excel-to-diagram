@@ -4,23 +4,23 @@ pytestmark = pytest.mark.integration
 
 # -*- coding: utf-8 -*-
 """
-Role API 测试 - 客户视角
+PermissionSet API 测试 - 客户视角
 
-测试 role_api.py 全部端点（url_prefix='/api/v1/roles'）：
-- GET    /api/v1/roles                                    — 角色列表
-- POST   /api/v1/roles                                    — 创建角色
-- GET    /api/v1/roles/<role_id>                          — 获取角色
-- PUT    /api/v1/roles/<role_id>                          — 更新角色
-- DELETE /api/v1/roles/<role_id>                          — 删除角色
-- PUT    /api/v1/roles/<role_id>/permissions              — 设置权限
-- GET    /api/v1/roles/<role_id>/permissions              — 获取权限
-- GET    /api/v1/roles/<role_id>/menus                    — 获取菜单权限
-- GET    /api/v1/roles/<role_id>/data-permissions         — 数据权限列表
-- POST   /api/v1/roles/<role_id>/data-permissions         — 创建数据权限
-- POST   /api/v1/roles/<role_id>/users                    — 分配用户
-- DELETE /api/v1/roles/<role_id>/users/<user_id>          — 移除用户
-- GET    /api/v1/roles/permissions                        — 全局权限列表
-- GET    /api/v1/roles/<role_id>/logs                     — 角色日志
+测试 role_api.py 全部端点（url_prefix='/api/v1/permission-sets'）：
+- GET    /api/v1/permission-sets                                    — 角色列表
+- POST   /api/v1/permission-sets                                    — 创建角色
+- GET    /api/v1/permission-sets/<permission_set_id>                          — 获取角色
+- PUT    /api/v1/permission-sets/<permission_set_id>                          — 更新角色
+- DELETE /api/v1/permission-sets/<permission_set_id>                          — 删除角色
+- PUT    /api/v1/permission-sets/<permission_set_id>/permissions              — 设置权限
+- GET    /api/v1/permission-sets/<permission_set_id>/permissions              — 获取权限
+- GET    /api/v1/permission-sets/<permission_set_id>/menus                    — 获取菜单权限
+- GET    /api/v1/permission-sets/<permission_set_id>/data-permissions         — 数据权限列表
+- POST   /api/v1/permission-sets/<permission_set_id>/data-permissions         — 创建数据权限
+- POST   /api/v1/permission-sets/<permission_set_id>/users                    — 分配用户
+- DELETE /api/v1/permission-sets/<permission_set_id>/users/<user_id>          — 移除用户
+- GET    /api/v1/permission-sets/permissions                        — 全局权限列表
+- GET    /api/v1/permission-sets/<permission_set_id>/logs                     — 角色日志
 """
 
 import json
@@ -69,18 +69,18 @@ def created_roles(client, auth_headers):
 
     for rid in reversed(cleanup):
         try:
-            client.delete(f'/api/v1/roles/{rid}', headers=auth_headers)
+            client.delete(f'/api/v1/permission-sets/{rid}', headers=auth_headers)
         except Exception:
             pass
 
 
 def _create_role(client, auth_headers, data=None, cleanup=None):
     payload = data or {
-        'name': 'Test Role',
+        'name': 'Test PermissionSet',
         'code': f'T_{os.urandom(3).hex().upper()}',
         'description': 'Test',
     }
-    resp = client.post('/api/v1/roles', data=json.dumps(payload), headers=auth_headers)
+    resp = client.post('/api/v1/permission-sets', data=json.dumps(payload), headers=auth_headers)
     try:
         r = json.loads(resp.data)
     except Exception:
@@ -100,7 +100,7 @@ class TestRoleApiCRUD:
     def test_create_duplicate_code(self, client, auth_headers, created_roles):
         code = f'D_{os.urandom(3).hex().upper()}'
         _create_role(client, auth_headers, {'name': 'R1', 'code': code}, cleanup=created_roles)
-        resp = client.post('/api/v1/roles',
+        resp = client.post('/api/v1/permission-sets',
                            data=json.dumps({'name': 'R2', 'code': code}),
                            headers=auth_headers)
         assert resp.status_code in [200, 400, 401, 409, 500]
@@ -109,15 +109,15 @@ class TestRoleApiCRUD:
         resp, data = _create_role(client, auth_headers, cleanup=created_roles)
         rid = (data.get('data') or {}).get('id') or data.get('id')
         if rid:
-            resp = client.get(f'/api/v1/roles/{rid}', headers=auth_headers)
+            resp = client.get(f'/api/v1/permission-sets/{rid}', headers=auth_headers)
             assert resp.status_code in [200, 401, 404, 500]
 
     def test_get_nonexistent(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/99999', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/99999', headers=auth_headers)
         assert resp.status_code in [401, 404, 500]
 
     def test_list_roles(self, client, auth_headers):
-        resp = client.get('/api/v1/roles', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets', headers=auth_headers)
         assert resp.status_code in [200, 401, 404, 500]
 
     def test_update_role(self, client, auth_headers, created_roles):
@@ -126,7 +126,7 @@ class TestRoleApiCRUD:
         if rid:
             created_roles.remove(rid)
             resp = client.put(
-                f'/api/v1/roles/{rid}',
+                f'/api/v1/permission-sets/{rid}',
                 data=json.dumps({'name': 'Updated'}),
                 headers=auth_headers,
             )
@@ -137,40 +137,40 @@ class TestRoleApiCRUD:
         rid = (data.get('data') or {}).get('id') or data.get('id')
         if rid:
             created_roles.remove(rid)
-            resp = client.delete(f'/api/v1/roles/{rid}', headers=auth_headers)
+            resp = client.delete(f'/api/v1/permission-sets/{rid}', headers=auth_headers)
             assert resp.status_code in [200, 204, 401, 500]
 
 
 class TestRoleApiPermissions:
 
     def test_global_permissions_list(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/permissions', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/permissions', headers=auth_headers)
         # 410: API已废弃，使用 GET /api/v2/bo/permission
         assert resp.status_code in [200, 401, 404, 410, 500]
 
     def test_get_role_permissions(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/1/permissions', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/1/permissions', headers=auth_headers)
         assert resp.status_code in [200, 401, 404, 500]
 
     def test_set_role_permissions(self, client, auth_headers):
         resp = client.put(
-            '/api/v1/roles/1/permissions',
+            '/api/v1/permission-sets/1/permissions',
             data=json.dumps({'permission_ids': [1, 2, 3]}),
             headers=auth_headers,
         )
         assert resp.status_code in [200, 201, 400, 401, 404, 500]
 
     def test_get_role_menus(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/1/menus', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/1/menus', headers=auth_headers)
         assert resp.status_code in [200, 401, 404, 500]
 
     def test_get_data_permissions(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/1/data-permissions', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/1/data-permissions', headers=auth_headers)
         assert resp.status_code in [200, 401, 404, 500]
 
     def test_create_data_permission(self, client, auth_headers):
         resp = client.post(
-            '/api/v1/roles/1/data-permissions',
+            '/api/v1/permission-sets/1/data-permissions',
             data=json.dumps({
                 'object_type': 'user',
                 'permission_level': 'own',
@@ -184,7 +184,7 @@ class TestRoleApiUsers:
 
     def test_add_user_to_role(self, client, auth_headers):
         resp = client.post(
-            '/api/v1/roles/1/users',
+            '/api/v1/permission-sets/1/users',
             data=json.dumps({'user_id': 1}),
             headers=auth_headers,
         )
@@ -192,34 +192,34 @@ class TestRoleApiUsers:
 
     def test_add_multiple_users(self, client, auth_headers):
         resp = client.post(
-            '/api/v1/roles/1/users',
+            '/api/v1/permission-sets/1/users',
             data=json.dumps({'user_ids': [1, 2, 3]}),
             headers=auth_headers,
         )
         assert resp.status_code in [200, 201, 400, 401, 404, 500]
 
     def test_remove_user_from_role(self, client, auth_headers):
-        resp = client.delete('/api/v1/roles/1/users/99999', headers=auth_headers)
+        resp = client.delete('/api/v1/permission-sets/1/users/99999', headers=auth_headers)
         assert resp.status_code in [200, 204, 400, 401, 404, 500]
 
 
 class TestRoleApiLogs:
 
     def test_get_role_logs(self, client, auth_headers):
-        resp = client.get('/api/v1/roles/1/logs', headers=auth_headers)
+        resp = client.get('/api/v1/permission-sets/1/logs', headers=auth_headers)
         assert resp.status_code in [200, 401, 404, 500]
 
 
 class TestRoleApiAuthRequired:
 
     def test_list_without_auth(self, client):
-        resp = client.get('/api/v1/roles', headers={'Content-Type': 'application/json'})
+        resp = client.get('/api/v1/permission-sets', headers={'Content-Type': 'application/json'})
         assert resp.status_code in [200, 401, 403, 302, 500]
 
     def test_create_without_auth(self, client):
-        resp = client.post('/api/v1/roles', data=json.dumps({'name': 'x'}), headers={'Content-Type': 'application/json'})
+        resp = client.post('/api/v1/permission-sets', data=json.dumps({'name': 'x'}), headers={'Content-Type': 'application/json'})
         assert resp.status_code in [200, 400, 401, 403, 302, 500]
 
     def test_get_without_auth(self, client):
-        resp = client.get('/api/v1/roles/1', headers={'Content-Type': 'application/json'})
+        resp = client.get('/api/v1/permission-sets/1', headers={'Content-Type': 'application/json'})
         assert resp.status_code in [200, 401, 403, 302, 500]

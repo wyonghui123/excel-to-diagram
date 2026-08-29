@@ -8,8 +8,8 @@
 - test_permission_audit_api.py (权限审计 API)
 
 测试范围:
-- 角色菜单权限: /api/v1/roles/*/menu-permissions
-- 角色维度范围: /api/v2/bo/role-dimension-scopes
+- 角色菜单权限: /api/v1/permission-sets/*/menu-permissions
+- 角色维度范围: /api/v2/bo/permission_set-dimension-scopes
 - 权限审计: /api/v1/permission-audit/*
 """
 
@@ -59,7 +59,7 @@ class TestRoleMenuPermissions:
 
     def test_get_role_menu_permissions(self, api_client, admin_headers):
         """获取角色菜单权限"""
-        resp = api_client.get('/api/v1/roles/1/menu-permissions', headers=admin_headers)
+        resp = api_client.get('/api/v1/permission-sets/1/menu-permissions', headers=admin_headers)
         assert resp.status_code in [200, 401, 404, 500]
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -67,7 +67,7 @@ class TestRoleMenuPermissions:
 
     def test_get_role_unified_permissions(self, api_client, admin_headers):
         """获取角色统一权限"""
-        resp = api_client.get('/api/v1/roles/1/unified-permissions', headers=admin_headers)
+        resp = api_client.get('/api/v1/permission-sets/1/unified-permissions', headers=admin_headers)
         assert resp.status_code in [200, 401, 404, 500]
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -77,14 +77,14 @@ class TestRoleMenuPermissions:
 
     def test_update_role_menu_permissions_unauthorized(self, api_client):
         """未授权更新菜单权限"""
-        resp = api_client.put('/api/v1/roles/1/menu-permissions', json={
+        resp = api_client.put('/api/v1/permission-sets/1/menu-permissions', json={
             'menu_codes': ['test_menu']
         })
         assert resp.status_code in (200, 401, 403, 404, 500)
 
     def test_update_role_menu_permissions_success(self, api_client, admin_headers):
         """成功更新菜单权限"""
-        resp = api_client.put('/api/v1/roles/1/menu-permissions', json={
+        resp = api_client.put('/api/v1/permission-sets/1/menu-permissions', json={
             'menu_codes': []
         }, headers=admin_headers)
         assert resp.status_code in [200, 401, 404, 500]
@@ -93,7 +93,7 @@ class TestRoleMenuPermissions:
 
     def test_menu_permissions_structure(self, api_client, admin_headers):
         """菜单权限结构验证"""
-        resp = api_client.get('/api/v1/roles/1/menu-permissions', headers=admin_headers)
+        resp = api_client.get('/api/v1/permission-sets/1/menu-permissions', headers=admin_headers)
         data = resp.get_json()
         menus = data.get('data', [])
         if menus:
@@ -103,7 +103,7 @@ class TestRoleMenuPermissions:
 
     def test_unified_permissions_three_layers(self, api_client, admin_headers):
         """统一权限三层结构"""
-        resp = api_client.get('/api/v1/roles/1/unified-permissions', headers=admin_headers)
+        resp = api_client.get('/api/v1/permission-sets/1/unified-permissions', headers=admin_headers)
         data = resp.get_json()
         body = data.get('data', {})
         menus = body.get('menus', [])
@@ -115,7 +115,7 @@ class TestRoleMenuPermissions:
 
     def test_auto_sync_permissions_on_menu_update(self, api_client, admin_headers):
         """菜单更新时自动同步权限"""
-        resp = api_client.put('/api/v1/roles/1/menu-permissions', json={
+        resp = api_client.put('/api/v1/permission-sets/1/menu-permissions', json={
             'menu_codes': []
         }, headers=admin_headers)
         data = resp.get_json()
@@ -124,7 +124,7 @@ class TestRoleMenuPermissions:
 
     def test_super_admin_role_all_permissions(self, api_client, admin_headers):
         """超级管理员拥有所有权限"""
-        resp = api_client.get('/api/v1/roles/1/unified-permissions', headers=admin_headers)
+        resp = api_client.get('/api/v1/permission-sets/1/unified-permissions', headers=admin_headers)
         assert resp.status_code in [200, 401, 404, 500]
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -137,7 +137,7 @@ class TestRoleDimensionScopeAPI:
 
     @property
     def base_url(self):
-        return '/api/v2/bo/role-dimension-scopes'
+        return '/api/v2/bo/permission_set-dimension-scopes'
 
     def test_list_role_dimension_scopes(self, api_client, admin_headers):
         """列出角色维度范围"""
@@ -150,7 +150,7 @@ class TestRoleDimensionScopeAPI:
     def test_list_by_role_id(self, api_client, admin_headers):
         """按角色 ID 列出"""
         response = api_client.get(
-            f'{self.base_url}?role_id=1&page=1&page_size=10',
+            f'{self.base_url}?permission_set_id=1&page=1&page_size=10',
             headers=admin_headers
         )
         assert response.status_code in [200, 400, 401, 403, 404, 500]
@@ -158,7 +158,7 @@ class TestRoleDimensionScopeAPI:
     def test_create_role_dimension_scope(self, api_client, admin_headers):
         """创建角色维度范围"""
         data = {
-            'role_id': 1,
+            'permission_set_id': 1,
             'dimension': 'domain',
             'scope_value': 'all'
         }
@@ -246,7 +246,7 @@ class TestPermissionAuditAPI:
     def test_get_change_history_with_filters(self, api_client, admin_headers):
         """获取权限变更历史（带过滤）"""
         response = api_client.get(
-            f'{self.base_url}/history?user_id=1&resource_type=role&limit=10',
+            f'{self.base_url}/history?user_id=1&resource_type=permission_set&limit=10',
             headers=admin_headers
         )
         assert response.status_code in [200, 401, 403, 404, 500]
