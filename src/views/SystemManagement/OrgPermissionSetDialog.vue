@@ -92,7 +92,7 @@ const saving = ref(false)
 async function loadAllRoles() {
   loading.value = true
   try {
-    const result = await boService.query('role', { page: 1, page_size: 100 })
+    const result = await boService.query('permission_set', { page: 1, page_size: 100 })
     if (result.success) {
       allRoles.value = result.data?.items || []
     }
@@ -117,11 +117,11 @@ async function handleSave() {
     const toRemove = currentRoleIds.filter(id => !newRoleIds.includes(id))
     
     for (const roleId of toAdd) {
-      await boService.associate('user_group', props.groupId, 'roles', roleId, 'role')
+      await boService.associate('org', props.groupId, 'permission_sets', roleId, 'permission_set')
     }
-    
+
     for (const roleId of toRemove) {
-      await boService.dissociate('user_group', props.groupId, 'roles', roleId, 'role')
+      await boService.dissociate('org', props.groupId, 'permission_sets', roleId, 'permission_set')
     }
     
     message.success(`成功关联 ${selectedRoleIds.value.length} 个角色`)

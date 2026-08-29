@@ -21,7 +21,7 @@
         :actions="detailActions"
         :editing="isEditing"
         :saving="isSaving"
-        :object-type="'role'"
+        :object-type="'permission_set'"
         :object-id="roleId"
         size="lg"
         @tab-change="handleTabChange"
@@ -209,7 +209,7 @@ async function loadRole() {
 
   loading.value = true
   try {
-    const result = await boService.read('role', roleId.value)
+    const result = await boService.read('permission_set', roleId.value)
 
     if (result.success) {
       role.value = result.data
@@ -227,7 +227,7 @@ async function loadAssignedGroups() {
   if (!roleId.value) return
   loadingGroups.value = true
   try {
-    const result = await boService.queryAssociations('role', roleId.value, 'assigned_groups', { page_size: 999 })
+    const result = await boService.queryAssociations('permission_set', roleId.value, 'assigned_orgs', { page_size: 999 })
     if (result.success) {
       assignedGroups.value = Array.isArray(result.data) ? result.data : (result.data?.items || [])
     } else {
@@ -254,9 +254,9 @@ async function handleSave() {
 
     let result
     if (isNewMode.value) {
-      result = await boService.create('role', saveData)
+      result = await boService.create('permission_set', saveData)
     } else {
-      result = await boService.update('role', roleId.value, saveData)
+      result = await boService.update('permission_set', roleId.value, saveData)
     }
 
     if (result.success) {

@@ -197,7 +197,7 @@
             :page-size="20"
             :show-filter="true"
             :click-mode="'expand'"
-            object-type="role"
+            object-type="permission_set"
             :object-id="role?.id"
             @page-change="setRoleLogsPage"
             @filter-change="setRoleLogsFilters"
@@ -290,13 +290,13 @@ const {
   loadLogs: loadRoleLogs,
   setPage: setRoleLogsPage,
   setFilters: setRoleLogsFilters
-} = useAuditLogs('role', computed(() => props.role?.id), {
+} = useAuditLogs('permission_set', computed(() => props.role?.id), {
   autoLoad: false,
   // [FIX 2026-06-12] 角色详情"操作日志" tab 同时拉:
-  //  - object_type='role' & object_id=role.id (角色自身的 UPDATE 名称/描述等)
-  //  - parent_object_type='role' & parent_object_id=role.id (权限配置 5 种 object_type)
+  //  - object_type='permission_set' & object_id=role.id (角色自身的 UPDATE 名称/描述等)
+  //  - parent_object_type='permission_set' & parent_object_id=role.id (权限配置 5 种 object_type)
   // 后端 audit_api.py get_audit_logs 会用 OR 联合查询两种条件
-  parentObjectType: 'role',
+  parentObjectType: 'permission_set',
   parentObjectId: computed(() => props.role?.id),
 })
 
@@ -368,7 +368,7 @@ async function loadAssignedGroups() {
   if (!props.role) return
   loadingGroups.value = true
   try {
-    const result = await boService.queryAssociations('role', props.role.id, 'assigned_groups', { page_size: 999 })
+    const result = await boService.queryAssociations('permission_set', props.role.id, 'assigned_orgs', { page_size: 999 })
     if (result.success) {
       assignedGroups.value = Array.isArray(result.data) ? result.data : (result.data?.items || [])
     } else {

@@ -21,7 +21,7 @@
         :actions="detailActions"
         :editing="isEditing"
         :saving="isSaving"
-        :object-type="'role'"
+        :object-type="'permission_set'"
         :object-id="roleId"
         size="lg"
         @update:editing="isEditing = $event"
@@ -150,7 +150,7 @@ async function loadRole() {
 
   loading.value = true
   try {
-    const result = await boService.read('role', roleId.value)
+    const result = await boService.read('permission_set', roleId.value)
 
     if (result.success) {
       role.value = result.data
@@ -183,7 +183,7 @@ const isNewMode = computed(() => {
 
 async function initNewRole() {
   try {
-    const result = await metaService.getUIConfig('role')
+    const result = await metaService.getUIConfig('permission_set')
     if (result.success && result.data?.fields) {
       const defaults = {}
       for (const f of result.data.fields) {
@@ -226,9 +226,9 @@ async function handleSave() {
 
     let result
     if (isNewMode.value) {
-      result = await boService.create('role', saveData)
+      result = await boService.create('permission_set', saveData)
     } else {
-      result = await boService.update('role', roleId.value, saveData)
+      result = await boService.update('permission_set', roleId.value, saveData)
     }
 
     if (result.success) {
