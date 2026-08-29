@@ -44,11 +44,11 @@
           />
         </template>
 
-        <!-- Custom Slot: 关联用户组 -->
+        <!-- Custom Slot: 关联组织 -->
         <template #section-assigned_groups>
           <div style="padding: 16px;">
-            <p v-if="loadingGroups">加载用户组...</p>
-            <p v-else-if="assignedGroups.length === 0">暂无关联用户组</p>
+            <p v-if="loadingGroups">加载组织...</p>
+            <p v-else-if="assignedGroups.length === 0">暂无关联组织</p>
             <div v-else>
               <div v-for="group in assignedGroups" :key="group.id" style="padding:8px 12px;margin-bottom:4px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between">
                 <div>
@@ -106,7 +106,7 @@ const assignedGroups = ref<any[]>([])
 const loadingGroups = ref(false)
 
 const pageTitle = computed(() =>
-  `角色权限配置：${role.value?.name || '加载中...'}`
+  `权限集详情：${role.value?.name || '加载中...'}`
 )
 
 const roleStatus = computed(() =>
@@ -125,8 +125,8 @@ const breadcrumbs = computed(() => [
 ])
 
 const fieldDefs = computed(() => ({
-  name: { label: '角色名称', type: 'text' },
-  code: { label: '角色编码', type: 'text' },
+  name: { label: '权限集名称', type: 'text' },
+  code: { label: '权限集编码', type: 'text' },
   description: { label: '描述', type: 'textarea' },
   is_active: { label: '状态', type: 'switch' }
 }))
@@ -269,7 +269,7 @@ async function handleSave() {
           await permPanelRef.value.save()
         } catch (permError) {
           // 保存失败 → 保持编辑态让用户修正重试（角色元数据已落库，不回滚）
-          message.error('角色已保存，但权限设置保存失败，请在权限配置区检查后重试', permError)
+          message.error('权限集已保存，但权限设置保存失败，请在权限配置区检查后重试', permError)
           return
         }
       }

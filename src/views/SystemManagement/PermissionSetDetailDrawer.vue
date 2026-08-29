@@ -2,14 +2,14 @@
   <div v-if="visible" class="drawer-overlay" @click.self="$emit('close')">
     <div class="drawer-panel">
       <div class="drawer-header">
-        <h3>{{ role?.name || '角色' }} - 角色详情</h3>
+        <h3>{{ role?.name || '权限集' }} - 权限集详情</h3>
         <button class="close-btn" @click="$emit('close')">&times;</button>
       </div>
 
       <div class="drawer-content">
         <div class="section basic-info">
-          <div class="info-row"><span class="label">角色编码：</span><span>{{ role?.code || '-' }}</span></div>
-          <div class="info-row"><span class="label">角色名称：</span><span>{{ role?.name || '-' }}</span></div>
+          <div class="info-row"><span class="label">权限集编码：</span><span>{{ role?.code || '-' }}</span></div>
+          <div class="info-row"><span class="label">权限集名称：</span><span>{{ role?.name || '-' }}</span></div>
           <div class="info-row"><span class="label">描述：</span><span>{{ role?.description || '无' }}</span></div>
         </div>
 
@@ -270,7 +270,7 @@ const LEVEL_LABELS = Object.fromEntries(
 )
 
 const tabs = [
-  { key: 'groups', label: '关联用户组' },
+  { key: 'groups', label: '关联组织' },
   { key: 'permissions', label: '权限配置' },
   { key: 'logs', label: '操作日志' }
 ]

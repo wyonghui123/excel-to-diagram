@@ -35,7 +35,7 @@
     <div v-if="!roleId" class="rd-empty">
       <AppIcon name="warning" size="32" />
       <div class="rd-empty__title">缺少参数</div>
-      <div class="rd-empty__desc">角色ID无效</div>
+      <div class="rd-empty__desc">权限集ID无效</div>
       <AppButton variant="primary" size="sm" @click="handleBack">返回</AppButton>
     </div>
   </div>
@@ -81,7 +81,7 @@ const roleStatusType = computed(() =>
 const breadcrumbs = computed(() => [
   { label: '系统管理', to: '/system' },
   { label: '用户与权限', to: '/user-permission' },
-  { label: '角色管理', to: '/user-permission?tab=roles' },
+  { label: '权限集管理', to: '/user-permission?tab=permission_sets' },
   { label: pageTitle.value }
 ])
 
@@ -101,7 +101,7 @@ const sections = [
     type: 'standard',
     fieldGroups: [
       {
-        title: '角色标识',
+        title: '权限集标识',
         icon: 'tag',
         layout: 'grid-2',
         fields: ['name', 'code']
@@ -252,7 +252,7 @@ async function handleSave() {
     }
   } catch (error) {
     console.error('Failed to save role:', error)
-    message.error('保存角色失败：' + (error?.message || '请检查输入后重试'), error)
+    message.error('保存权限集失败：' + (error?.message || '请检查输入后重试'), error)
   } finally {
     isSaving.value = false
   }

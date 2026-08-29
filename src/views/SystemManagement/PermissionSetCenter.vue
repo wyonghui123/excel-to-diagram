@@ -2,7 +2,7 @@
   <div class="role-permission-center">
     <div class="rpc-header">
       <div class="rpc-header__left">
-        <h2 class="rpc-title">角色权限配置：{{ role?.name || '加载中...' }}</h2>
+        <h2 class="rpc-title">权限集配置：{{ role?.name || '加载中...' }}</h2>
         <span v-if="role?.code" class="rpc-subtitle">{{ role.code }}</span>
       </div>
       <div class="rpc-header__right">
@@ -452,7 +452,7 @@ function handleImpactFilterChange(filter) {
 
 async function handleSave() {
   if (!roleId.value) {
-    error('无法保存：缺少角色ID')
+    error('无法保存：缺少权限集ID')
     return
   }
 

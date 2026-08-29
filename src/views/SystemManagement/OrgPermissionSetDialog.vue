@@ -124,7 +124,7 @@ async function handleSave() {
       await boService.dissociate('org', props.groupId, 'permission_sets', roleId, 'permission_set')
     }
     
-    message.success(`成功关联 ${selectedRoleIds.value.length} 个角色`)
+    message.success(`成功关联 ${selectedRoleIds.value.length} 个权限集`)
     emit('saved')
     emit('close')
   } catch (e) {
