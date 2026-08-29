@@ -1,7 +1,11 @@
-id: group_data_permission
-name: 用户组数据权限
-table_name: group_data_permissions
-description: 用户组的数据访问权限
+# 组织数据权限 (原 group_data_permission.yaml, Spec 16 §3.1 line 168)
+# 表名: group_data_permissions → org_data_permissions
+# 字段: group_id → org_id
+
+id: org_data_permission
+name: 组织数据权限
+table_name: org_data_permissions
+description: 组织的数据访问权限
 
 fields:
   - id: id
@@ -12,12 +16,12 @@ fields:
     unique: true
     description: 技术主键
 
-  - id: group_id
-    name: 用户组ID
+  - id: org_id
+    name: 组织ID
     type: integer
-    db_column: group_id
+    db_column: org_id
     required: true
-    description: 用户组ID
+    description: 组织ID（关联 orgs.id）
 
   - id: resource_type
     name: 资源类型
@@ -54,11 +58,11 @@ fields:
     description: 创建时间
 
 indexes:
-  - fields: [group_id, resource_type, resource_id]
+  - fields: [org_id, resource_type, resource_id]
     unique: true
-    name: idx_group_data_perm_unique
-  - fields: [group_id]
-    name: idx_group_data_perm_group
+    name: idx_org_data_perm_unique
+  - fields: [org_id]
+    name: idx_org_data_perm_org
 
 relations: []
 actions: []
@@ -77,8 +81,8 @@ ui_badge:
       false: info
 
 routes:
-  detail: /detail/group_data_permission/group_data_permission-detail
-  list: /group_data_permission-management
+  detail: /detail/org_data_permission/org_data_permission-detail
+  list: /org_data_permission-management
 
 list:
   pagination:
