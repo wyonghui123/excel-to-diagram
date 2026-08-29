@@ -55,7 +55,7 @@
                 <span class="matrix-meta-diag">
                   <span v-if="metaLastError.httpStatus">HTTP {{ metaLastError.httpStatus }}</span>
                   <span v-if="metaLastError.code">code: {{ metaLastError.code }}</span>
-                  <span>请求：GET /api/v2/bo/permission_dimension/meta?scope_code=SCP&amp;role_id={{ props.roleId }}</span>
+                  <span>请求：GET /api/v2/bo/permission_dimension/meta?scope_code=SCP&amp;permission_set_id={{ props.permissionSetId }}</span>
                   <span>排查：① 后端 Python 服务是否启动；② /api/v2/bo/permission_dimension/meta 接口是否注册；③ 角色 ID 是否已保存为数字 ID。</span>
                 </span>
               </AppAlert>
@@ -92,7 +92,7 @@
 
     <ConditionRuleDialog
       v-if="showAddConditionDialog"
-      :role-id="roleId"
+      :role-id="permissionSetId"
       :editing-rule="editingRule"
       :readonly="dialogReadonly"
       @close="handleConditionDialogClose"
@@ -143,13 +143,13 @@ import { hydrateIdExpressionDisplay } from '@/services/permissionService'
 const message = useMessage()
 
 const props = defineProps<{
-  roleId: string
+  permissionSetId: string
   /** [v40 2026-08-27] 编辑态由外层 ObjectPage 统一控制（一体化模式） */
   editing?: boolean
   /**
    * [BUG-V072 2026-08-28] 退出编辑时是否自动 flush 权限保存
-   * 背景: ObjectDetailPage 路由（/detail/role/:id）的保存按钮只调
-   *   boService.update('role', ...) 保存基本信息, 完全不触发 permPanelRef.save(),
+   * 背景: ObjectDetailPage 路由（/detail/permission_set/:id）的保存按钮只调
+   *   boService.update('permission_set', ...) 保存基本信息, 完全不触发 permPanelRef.save(),
    *   导致用户在权限面板反勾选菜单后点保存, 实际只保存了 name/description/is_active,
    *   刷新后菜单从 DB 重读回来仍是勾选态 —— 表现为"反勾选后又被勾上".
    * 修复: ObjectDetailPage 传 :flush-on-exit="true", watch(isEditing) 退出时
@@ -172,7 +172,7 @@ const {
   selectAll,
   clearAll,
   save: saveMenuPermissions
-} = useMenuPermission(toRef(props, 'roleId'))
+} = useMenuPermission(toRef(props, 'permissionSetId'))
 
 const showAddConditionDialog = ref(false)
 const editingRule = ref(null)
@@ -196,7 +196,7 @@ const activeMenu = ref<any>(null)
 // [v70 2026-08-28] 「权限体检」入口已上移到 RolePermissionDetail 的 ObjectPage 标准 action 区
 // ============================================================================
 // [P2-Matrix-01] 资源 × 动作 矩阵（Spec 5.3.1 子 Tab A）
-// 通过 /permission_dimension/meta?role_id&scope_code=SCP 加载：
+// 通过 /permission_dimension/meta?permission_set_id&scope_code=SCP 加载：
 //   - role_resource_action_matrix：角色矩阵（行=资源，列=动作，cell={granted, source}）
 //   - resource_action_matrix：每资源类型可授权动作（A5 灰化禁选依据）
 //   - scopeCode 无效 → scopeError → Warning AppAlert（P2-Matrix-02 BLOCKER，绝不回退全量）
@@ -268,12 +268,12 @@ const hasPendingChanges = computed(
 
 /** [一体化 Phase 3 2026-08-25] 加载范围矩阵（从 role_dimension_scopes 派生为 resource_type 视角） */
 async function loadScopeMatrix() {
-  if (!props.roleId) return
-  if (!/^\d+$/.test(String(props.roleId))) return
+  if (!props.permissionSetId) return
+  if (!/^\d+$/.test(String(props.permissionSetId))) return
   try {
-    const r = await permService.loadDimensionScopes(props.roleId)
+    const r = await permService.loadDimensionScopes(props.permissionSetId)
     if (r.success && r.data) {
-      // 后端返回 [{ role_id, dimension_code, scope_mode, dimension_values, ... }]
+      // 后端返回 [{ permission_set_id, dimension_code, scope_mode, dimension_values, ... }]
       // 转换为 resource_type → dimension_code → scope 嵌套结构
       const m: Record<string, Record<string, any>> = {}
       for (const scope of r.data) {
@@ -362,10 +362,10 @@ function handleMatrixChange(changes) {
 //   ObjectPage 顶部「编辑/保存」是唯一标准入口，不再提供底部保存双入口
 
 async function loadMatrixMeta() {
-  if (!props.roleId) return
+  if (!props.permissionSetId) return
   // 角色未保存（new / 非数字 id）不加载矩阵
-  if (!/^\d+$/.test(String(props.roleId))) return
-  await loadMetaWithScope(SCOPE_CODE, { role_id: props.roleId })
+  if (!/^\d+$/.test(String(props.permissionSetId))) return
+  await loadMetaWithScope(SCOPE_CODE, { permission_set_id: props.permissionSetId })
 }
 
 /** [v47 2026-08-27] 把持久化的条件规则合并回 scopeMatrix
@@ -380,11 +380,11 @@ async function loadMatrixMeta() {
  *  [2026-08-28 重构] 返回原始规则列表供非阻塞清理任务使用；
  *    emitScopeChange 死调用已删除 —— scopeMatrix 是深层 reactive ref，
  *    经 :scope-matrix prop 传入 ResourceActionMatrix，变更自动联动。
- *  返回：rules 数组（加载失败 / 无 roleId 时返回 null） */
+ *  返回：rules 数组（加载失败 / 无 permissionSetId 时返回 null） */
 async function mergeSavedConditionRules() {
-  if (!props.roleId || !/^\d+$/.test(String(props.roleId))) return null
+  if (!props.permissionSetId || !/^\d+$/.test(String(props.permissionSetId))) return null
   try {
-    const r = await permService.loadConditionRules({ role_id: props.roleId, rule_type: 'condition' })
+    const r = await permService.loadConditionRules({ permission_set_id: props.permissionSetId, rule_type: 'condition' })
     if (!r.success) return null
     const rules = r.data || []
     // 按 resource_type 分组，各组保留 id 最大（最新）的一条
@@ -634,12 +634,12 @@ async function savePermissions() {
   // [2026-08-28 重构清理] saving ref 已删除（无任何读取方，保存中状态由 ObjectPage 顶层管理）
   try {
     // 1. 保存资源×动作授权（矩阵）
-    if (props.roleId && /^\d+$/.test(String(props.roleId))) {
+    if (props.permissionSetId && /^\d+$/.test(String(props.permissionSetId))) {
       const cells = (matrixChanges.value || []).filter(
         (c) => c && c.resource_type && c.action,
       )
       if (cells.length > 0) {
-        await permService.saveResourceActionMatrix(props.roleId, cells)
+        await permService.saveResourceActionMatrix(props.permissionSetId, cells)
       }
     }
 
@@ -678,7 +678,7 @@ defineExpose({
  *    - 否则跳过（dimension 未配置）
  */
 async function saveScopeMatrix() {
-  if (!props.roleId) return
+  if (!props.permissionSetId) return
   const scopes: any[] = []
   // 聚合：按 dimension_code 分组
   const byDim: Record<string, any[]> = {}
@@ -715,7 +715,7 @@ async function saveScopeMatrix() {
     }
     // 其他情况：dimension 未配置，跳过
   }
-  await permService.saveDimensionScopes(props.roleId, scopes)
+  await permService.saveDimensionScopes(props.permissionSetId, scopes)
 }
 
 // [v33 2026-08-27] 删 handleDeleteConditionRule / handleEditConditionRule（条件规则列表回调已无引用）
@@ -757,7 +757,7 @@ async function handleConditionRuleSaved(savedRule) {
 }
 
 async function initPermissions() {
-  if (!props.roleId) return
+  if (!props.permissionSetId) return
   try {
     await loadMenus()
     await loadMatrixMeta()         // [P2-Matrix-01] 加载资源×动作矩阵

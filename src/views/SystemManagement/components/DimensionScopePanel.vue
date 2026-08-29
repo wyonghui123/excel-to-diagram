@@ -124,7 +124,7 @@ import * as permService from '@/services/permissionService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 
 const props = defineProps({
-  roleId: {
+  permissionSetId: {
     type: String,
     required: true
   }
@@ -419,11 +419,11 @@ async function loadDimensions() {
 }
 
 async function loadDimensionScopes() {
-  if (!props.roleId) return
-  // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int role_id
-  if (!/^\d+$/.test(String(props.roleId))) return
+  if (!props.permissionSetId) return
+  // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int permission_set_id
+  if (!/^\d+$/.test(String(props.permissionSetId))) return
   try {
-    const result = await permService.loadDimensionScopes(props.roleId)
+    const result = await permService.loadDimensionScopes(props.permissionSetId)
     if (result.success && result.data) {
       for (const scope of result.data) {
         const dimId = scope.dimension_code
@@ -551,7 +551,7 @@ async function autoDerive() {
   autoDeriving.value = true
   try {
     await saveDimensionScopesInternal()
-    const result = await permService.derivePermissions(props.roleId)
+    const result = await permService.derivePermissions(props.permissionSetId)
     if (result.success) {
       emit('auto-derived', result.data)
       const menuCount = result.data.recommended_menus?.length || 0
@@ -569,10 +569,10 @@ async function autoDerive() {
 }
 
 async function saveDimensionScopesInternal() {
-  // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id
-  // 不拦截会触发 POST /api/v1/roles/new/dimension-scopes -> 500
-  if (!/^\d+$/.test(String(props.roleId))) {
-    throw new Error('保存失败: 角色尚未保存, 请先保存角色')
+  // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int permission_set_id
+  // 不拦截会触发 POST /api/v1/permission-sets/new/dimension-scopes -> 500
+  if (!/^\d+$/.test(String(props.permissionSetId))) {
+    throw new Error('保存失败: 权限集尚未保存, 请先保存权限集')
   }
   const scopes = []
   for (const dim of sortedDimensions.value) {
@@ -597,7 +597,7 @@ async function saveDimensionScopesInternal() {
     }
   }
 
-  const result = await permService.saveDimensionScopes(props.roleId, scopes)
+  const result = await permService.saveDimensionScopes(props.permissionSetId, scopes)
   if (!result.success) {
     throw new Error(result.message || '保存失败')
   }

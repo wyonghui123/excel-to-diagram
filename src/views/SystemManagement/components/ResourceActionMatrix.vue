@@ -316,7 +316,7 @@
       元数据未就绪：请检查角色是否已保存、scope_code 是否有效、网络是否可达
     </div>
     <div v-else-if="rows.length === 0" class="ram-empty">
-      当前角色 {{ props.matrix?.role_id }} 在元数据中未找到任何资源类型（请检查 resource_types.yaml）
+      当前角色 {{ props.matrix?.permission_set_id }} 在元数据中未找到任何资源类型（请检查 resource_types.yaml）
     </div>
 
     <!-- exclude 恢复 Allow 二次确认（Spec 5.3.1：danger variant 仍为橙系） -->
@@ -417,7 +417,7 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  /** role_resource_action_matrix：{ role_id, columns, resources:[{resource_type,label,cells}] } */
+  /** role_resource_action_matrix：{ permission_set_id, columns, resources:[{resource_type,label,cells}] } */
   matrix: {
     type: Object,
     default: null,
