@@ -443,13 +443,14 @@ class DataPermissionService:
         修复: 之前 _get_role_inherited_permission_level 只查父级的 role_data_perm,
         导致当前层级的 role 权限无法被检测到
         """
-        role_ids = self._get_user_role_ids(user_id)
-        if not role_ids:
+        # [P4-新3 2026-08-29] Spec 16: 局部变量 role_ids → permission_set_ids
+        permission_set_ids = self._get_user_role_ids(user_id)
+        if not permission_set_ids:
             return None
-        placeholders = ','.join(['?'] * len(role_ids))
+        placeholders = ','.join(['?'] * len(permission_set_ids))
         cursor = self.ds.execute(
             f"SELECT permission_level, inherit_to_children FROM permission_set_data_permissions WHERE permission_set_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
-            role_ids + [resource_type, resource_id]
+            permission_set_ids + [resource_type, resource_id]
         )
         level_order = {'read': 1, 'write': 2, 'admin': 3}
         best_level = None
@@ -488,8 +489,9 @@ class DataPermissionService:
         best_level = None
         level_order = {'read': 1, 'write': 2, 'admin': 3}
 
-        role_ids = self._get_user_role_ids(user_id)
-        if not role_ids:
+        # [P4-新3 2026-08-29] Spec 16: 局部变量 role_ids → permission_set_ids
+        permission_set_ids = self._get_user_role_ids(user_id)
+        if not permission_set_ids:
             return None
 
         for parent_type in parent_types:
@@ -497,10 +499,10 @@ class DataPermissionService:
             if parent_id is None:
                 continue
 
-            placeholders = ','.join(['?'] * len(role_ids))
+            placeholders = ','.join(['?'] * len(permission_set_ids))
             cursor = self.ds.execute(
                 f"SELECT permission_level, inherit_to_children FROM permission_set_data_permissions WHERE permission_set_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
-                role_ids + [parent_type, parent_id]
+                permission_set_ids + [parent_type, parent_id]
             )
             for row in cursor.fetchall():
                 if row[1]:
