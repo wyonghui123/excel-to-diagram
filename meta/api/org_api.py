@@ -330,6 +330,18 @@ def remove_group_data_permission(org_id, perm_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@org_bp.route('/orgs/<int:org_id>/permission-preview', methods=['GET'])
+@login_required
+@require_permission('org:read')
+def get_org_permission_preview(org_id):
+    """权限预览：org 有效权限全集（含父级继承与来源追溯）"""
+    try:
+        service = _get_group_service()
+        return jsonify({'success': True, 'data': service.get_permission_preview('org', org_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @org_bp.route('/orgs/<int:org_id>/roles', methods=['GET'])
 @login_required
 @require_permission('user:read')

@@ -473,6 +473,18 @@ def get_user(user_id):
         return jsonify({'success': False, 'message': f'获取用户详情失败: {str(e)}'}), 500
 
 
+@user_bp.route('/<int:user_id>/permission-preview', methods=['GET'])
+@login_required
+@require_permission('user:read')
+def get_user_permission_preview(user_id):
+    """权限预览：user 有效权限全集（经所属 org 继承链聚合，含来源追溯）"""
+    try:
+        service = _get_org_service()
+        return jsonify({'success': True, 'data': service.get_permission_preview('user', user_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @user_bp.route('/<int:user_id>', methods=['PUT'])
 @login_required
 def update_user(user_id):
