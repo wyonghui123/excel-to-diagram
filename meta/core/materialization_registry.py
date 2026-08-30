@@ -234,8 +234,10 @@ def get_updated_at(
                 "WHERE object_type = ? AND object_id = ? AND action = 'UPDATE'",
                 (object_type, str(object_id)),
             ).fetchone()
+            # 注意: MAX() 聚合即使无匹配行也返回一行 (None,)，必须判空再 fallback
             if row:
-                return row[0] if isinstance(row, tuple) else row.get("MAX(created_at)") or fallback
+                value = row[0] if isinstance(row, tuple) else row.get("MAX(created_at)")
+                return value or fallback
             return fallback
         except Exception as e:
             logger.warning(

@@ -122,6 +122,18 @@ def get_audit_logs():
         action = request.args.get('action', '')
         object_type = request.args.get('object_type', '')
         object_id = request.args.get('object_id', '')
+        # [FIX 2026-08-30] Spec 16 别名归一化: user_group → org
+        # 前端 OrgManagement 详情仍以 'user_group' 作为 objectType 查询审计日志,
+        # 而 Spec 16 迁移后审计日志写入 object_type='org', 直接按 alias 查询返回空。
+        # 用 registry 别名解析 (org.yaml semantics.aliases) 归一到规范 object_type。
+        if object_type:
+            try:
+                from meta.core.models import registry
+                meta_obj = registry.get(object_type)
+                if meta_obj is not None and meta_obj.id != object_type:
+                    object_type = meta_obj.id
+            except Exception:
+                pass
         # [FIX 2026-06-12] 支持按 parent_object 查询 (角色/用户/用户组详情页"操作日志" tab)
         # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
         parent_object_type = request.args.get('parent_object_type', '')
