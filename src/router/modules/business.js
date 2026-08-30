@@ -79,6 +79,12 @@ export default [
     meta: { title: '架构数据管理', requiresAuth: true }
   },
   {
+    path: '/org-management',
+    name: 'OrgManagement',
+    component: () => import('@/views/SystemManagement/OrgManagement.vue'),
+    meta: { title: '组织管理', requiresAuth: true }
+  },
+  {
     path: '/account',
     name: 'AccountSettings',
     component: () => import('@/views/AccountSettings/index.vue'),

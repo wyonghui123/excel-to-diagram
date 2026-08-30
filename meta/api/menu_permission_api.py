@@ -368,6 +368,7 @@ def get_visible_menu_tree():
                 'sort_order': m.get('sort_order', 0),
                 'parent_menu': m.get('parent_menu', ''),
                 'auto_generated': m.get('auto_generated', False),
+                'show_in_sidebar': m.get('show_in_sidebar', 1),
             })
         
         visible_codes = {m['menu_code'] for m in flat}
@@ -437,7 +438,9 @@ def get_visible_menu_tree():
         # Build leaf_menus: leaf nodes excluding hub children and dashboard
         hub_parent_codes = set()
         parent_codes = set()
+        parent_page_types = {}
         for m in flat:
+            parent_page_types[m['menu_code']] = m.get('page_type')
             if m.get('page_type') == 'multi_object_hub':
                 hub_parent_codes.add(m['menu_code'])
             if m.get('children'):
@@ -460,9 +463,22 @@ def get_visible_menu_tree():
             #   (这类菜单通常 menu_path 指向 generic container page 而非真实功能页)
             if m.get('page_type') == 'custom_page':
                 continue
-            if m['menu_code'] in parent_codes:
+            # 隐藏菜单(sid=0, 如 task-management 下的 task-definitions/task-queues 等)不作为 landing 卡片
+            # 用 falsy 判断以兼容 int 0 / TEXT '0' / False / None
+            if not m.get('show_in_sidebar'):
                 continue
-            if m.get('parent_menu') and m['parent_menu'] in hub_parent_codes:
+            # [FIX 2026-08-29] 精确排除: 挂在 custom_page 容器下、无 direct children 的 multi_object_hub
+            # [FIX 2026-08-29] 仅展示"严格叶子": 无 children 的功能页
+            #   ① 排空容器: 挂在容器(custom_page/multi_object_hub)下、自身也无 children 的多对象空容器
+            #      (如 business-config 业务配置, parent=system= custom_page, 无 children) 不作为 landing 卡片
+            #   ② arch-data 顶层 hub(parent 非容器)仍作为工作台入口保留
+            #   ③ user-permission/system 等容器自身因有 children 走下方 parent_codes 排除
+            #   ④ 容器下的 object_list 叶子子菜单(user-list/permission_set-list/org-list)正常展示
+            if (m.get('page_type') == 'multi_object_hub'
+                    and not m.get('children')
+                    and parent_page_types.get(m.get('parent_menu')) in ('custom_page', 'multi_object_hub')):
+                continue
+            if m['menu_code'] in parent_codes:
                 continue
             leaf_menus.append({
                 'menu_code': m['menu_code'],

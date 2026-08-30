@@ -314,6 +314,35 @@ def init_menu_permissions(db_path):
                 'message': '建议分配审计日志查看权限'
             })
         },
+        {
+            # [MOMP 通用化 2026-08-30] 组织管理页（user_group 单类型 MOMP）
+            #   - menu_path=/org-management 对应前端路由 name=OrgManagement
+            #   - parent_menu='' 顶级菜单，与 用户与权限管理(user-permission) 同级兄弟，
+            #     不做系统管理(system)子级
+            #   - 必须含 user_group:import/export 权限: 前端 canImport/canExport 按键
+            #     以 hasPermission('user_group:import') 为门槛，缺则导入导出按钮置灰
+            'menu_code': 'org-management',
+            'menu_name': '组织管理',
+            'menu_path': '/org-management',
+            'icon': 'OfficeBuilding',
+            'color': '#0ea5e9',
+            'sort_order': 52,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'user_group',
+            'object_types': json.dumps(['user_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'user_group', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'import', 'export']},
+            ]),
+            'required_permissions': json.dumps([
+                'user_group:create', 'user_group:read', 'user_group:update', 'user_group:delete',
+                'user_group:list', 'user_group:import', 'user_group:export',
+            ]),
+            'data_permission_hint': json.dumps({
+                'resource_types': ['user_group'],
+                'message': '建议分配组织(user_group)数据权限'
+            })
+        },
     ]
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
@@ -640,6 +669,33 @@ def init_menu_permissions(db_path):
         print("  [OK] 无需展开 (所有权限已存在)")
     else:
         print(f"  [OK] 跨 {roles_touched} 个角色共授权 {total_granted} 条 permissions")
+
+    # ========== 步骤7.8：把核心系统菜单默认绑定到 admin 角色 ==========
+    # 目的：新初始化环境 admin 开箱即可看到系统管理菜单（如 org-management），
+    #   否则这些新菜单因无角色绑定而不出现在侧边栏/accessibleMenus。
+    # role_menu_permissions 列: (role_id, menu_code, created_at)，无 granted 列。
+    print("\n[步骤7.8] 默认绑定核心系统菜单到 admin 角色...")
+    # 幂等: 仅当 admin 角色(role code='admin')存在时绑定, 不覆盖已有其他角色绑定
+    admin_role = cursor.execute("SELECT id FROM roles WHERE code = 'admin' AND is_active = 1 LIMIT 1").fetchone()
+    if not admin_role:
+        print("  [SKIP] 未找到 admin 角色 (code='admin'), 跳过默认绑定")
+    else:
+        admin_role_id = admin_role[0]
+        bound = 0
+        # 需默认对 admin 可见的系统菜单编码（新菜单在此登记）
+        default_admin_menus = ['org-management']
+        for mcode in default_admin_menus:
+            # 仅当该菜单已入 menu_permissions 白名单才绑定
+            if cursor.execute("SELECT 1 FROM menu_permissions WHERE menu_code = ?", [mcode]).fetchone():
+                cursor.execute(
+                    "INSERT OR IGNORE INTO role_menu_permissions (role_id, menu_code, created_at) VALUES (?,?,datetime('now'))",
+                    [admin_role_id, mcode]
+                )
+                bound += 1
+        if bound:
+            print(f"  ✅ admin 角色(#{admin_role_id}) 已绑定 {bound} 个系统菜单: {default_admin_menus}")
+        else:
+            print("  [OK] 无需绑定")
 
     print("\n" + "=" * 60)
     print("[OK] 菜单权限表 & 导航表初始化完成！")

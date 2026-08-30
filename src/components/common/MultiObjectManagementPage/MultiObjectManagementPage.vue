@@ -5,6 +5,7 @@
       :compact="true"
       :action-disabled="actionDisabledMap"
       :hide-chart-button="true"
+      :hide-version-context="page.disableVersionContext"
       :active-view="viewMode"
       @change="handleToolbarChange"
       @action="onGlobalAction"
@@ -12,7 +13,9 @@
       <!-- [A7 2026-07-30] 嵌入式图表 toggle 按钮（默认启用，无需 flag）
            替代老的"图表视图"按钮：list ↔ chart 就地切换，不跳路由 -->
       <template #actions>
-        <el-tooltip :content="viewMode === 'chart' ? '切回列表视图' : '就地切换为图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+        <!-- [MOMP 通用化 2026-08-30] disableVersionContext 页面（组织页）隐藏嵌入式图表 toggle，
+             无版本上下文时图表无意义 -->
+        <el-tooltip v-if="!page.disableVersionContext" :content="viewMode === 'chart' ? '切回列表视图' : '就地切换为图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
           <el-button
             size="small"
             :icon="TrendCharts"
@@ -41,16 +44,15 @@
       @collapse-change="handleSidebarCollapse"
     >
       <template #master>
-        <div v-if="page.versionContext.selectedVersionId" class="momp-sidebar">
-          <RelationScopeTree
+        <div v-if="showVersionScopedContent" class="momp-sidebar">
+          <!-- [MOMP 通用化 2026-08-30] 动态注入 scope 树组件：默认 RelationScopeTree（archdata 零回归），
+               组织页注入 OrgScopeTree。props/events 由 scopeTreeProps/scopeTreeEvents 组装 -->
+          <component
+            :is="scopeTreeComponent"
             ref="scopeTreeRef"
             :key="scopeTreeKey"
-            :version-id="page.versionContext.selectedVersionId"
-            :initial-bo-ids="initialBoIds"
-            :initial-relation-codes="initialRelationCodes"
-            :filter-disabled="page.activeTab !== 'relationship'"
-            :scope-ids="page.scopeIds"
-            @scope-change="page.handleScopeChange"
+            v-bind="scopeTreeProps"
+            v-on="scopeTreeEvents"
           />
         </div>
         <div v-else class="momp-empty-sidebar">
@@ -61,7 +63,7 @@
 
       <template #detail>
         <div class="momp-detail-content">
-          <template v-if="page.versionContext.selectedVersionId">
+          <template v-if="showVersionScopedContent">
             <!-- [FIX 2026-07-30] chart 视图下隐藏 tabs/list，只显示 detailContent slot -->
             <template v-if="viewMode === 'list'">
               <div class="momp-tabs-row">
@@ -274,13 +276,46 @@ const router = useRouter()
 // [NEW v3.20 2026-06-19] 从 route name 推导 menu_code
 // 路由 /system/archdata → name = "ArchDataManagement" → 映射 menu_code = "arch-data"
 // 路由 /archdata-chart → name = "archdata-chart" → 也走"架构数据"前缀（图表导出）
+// [MOMP 通用化 2026-08-30] 优先使用 options.menuCodeProvider 注入（组织页 → 'org-management'），
+//   未注入时回退到原 archdata 白名单推导，保证 archdata 零回归
 const menuCode = computed(() => {
+  const provider = props.options?.menuCodeProvider
+  if (typeof provider === 'function') return provider({ route })
   const name = route?.name
   if (name === 'ArchDataManagement' || name === 'archdata-chart' || name === 'archdata') {
     return 'arch-data'
   }
   return ''
 })
+
+// [MOMP 通用化 2026-08-30] scopeTree 注入：默认 RelationScopeTree（archdata 零回归），
+//   组织页注入 OrgScopeTree。org 语义只经由 options.scopeTree 传入，组件本体零硬编码。
+const scopeTreeComponent = computed(() => props.options?.scopeTree?.component || RelationScopeTree)
+const scopeTreeProps = computed(() => {
+  if (page.disableVersionContext) {
+    return {
+      ...(props.options?.scopeTree?.props || {}),
+      scopeIds: page.scopeIds
+    }
+  }
+  return {
+    ...(props.options?.scopeTree?.props || {}),
+    versionId: page.versionContext.selectedVersionId,
+    initialBoIds: initialBoIds.value,
+    initialRelationCodes: initialRelationCodes.value,
+    filterDisabled: page.activeTab !== 'relationship',
+    scopeIds: page.scopeIds
+  }
+})
+const scopeTreeEvents = computed(() => ({
+  ...(props.options?.scopeTree?.events || {}),
+  'scope-change': page.handleScopeChange
+}))
+
+// [MOMP 通用化 2026-08-30] disableVersionContext=true 时，sidebar/detail 不依赖版本号即可渲染
+const showVersionScopedContent = computed(() =>
+  page.disableVersionContext || !!page.versionContext?.selectedVersionId
+)
 
 // [v32] 引入 chart tab 的 Pinia stores (单一数据源)
 const tabStore = useTabStore()
