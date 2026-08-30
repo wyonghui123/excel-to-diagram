@@ -783,6 +783,17 @@ const computedSections = computed(() => {
             fields: filterFields(tab.fields)
           }]
         })
+      } else if (tab.type === 'readonly_aggregate') {
+        sections.push({
+          key: tab.id || 'permission_preview',
+          label: tab.label || '权限预览',
+          icon: tab.icon || 'lock',
+          type: 'readonly_aggregate',
+          props: {
+            endpoint: (tab.endpoint || tab.props?.endpoint || '').replace('{id}', String(props.id)),
+            ...(tab.props || {})
+          }
+        })
       } else if (tab.type === 'custom') {
         sections.push({
           key: tab.id || 'custom',

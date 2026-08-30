@@ -79,6 +79,13 @@
             </template>
           </template>
 
+          <template v-else-if="section.type === 'readonly_aggregate'">
+            <ReadonlyAggregateSection
+              :endpoint="resolveEndpoint(section)"
+              :fetch-fn="section.props?.fetchFn || null"
+            />
+          </template>
+
           <template v-else-if="section.type === 'custom' && section.component">
             <div class="op-custom-banner">
               <AppIcon name="bulb" :size="14" />
@@ -169,6 +176,7 @@ import FieldGroupSection from './FieldGroupSection.vue'
 import AssociationSection from './AssociationSection.vue'
 import HistorySection from './HistorySection.vue'
 import PermissionConfigPanel from '@/views/SystemManagement/components/PermissionConfigPanel.vue'
+import ReadonlyAggregateSection from '../ReadonlyAggregateSection/ReadonlyAggregateSection.vue'
 
 const MAIN_CONTENT_TAB_KEY = '__main_content__'
 
@@ -408,6 +416,13 @@ function getComponent(componentName) {
   } catch (e) {
     return 'div'
   }
+}
+
+// [权限预览] 解析 readonly_aggregate section 的拉取端点（优先 props.endpoint，其次 endpointFn）
+function resolveEndpoint(section) {
+  if (section.props?.endpoint) return section.props.endpoint
+  if (section.props?.endpointFn) return section.props.endpointFn({ objectType, objectId })
+  return ''
 }
 
 const _prevEffectiveTabKeys = ref('')
