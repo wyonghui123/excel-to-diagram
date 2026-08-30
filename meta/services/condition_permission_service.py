@@ -982,14 +982,18 @@ class ConditionPermissionService:
         return {'allowed': False}
 
     def _get_user_rules(self, user_id: int, resource_type: str) -> List[Dict]:
-        """获取用户的条件型权限规则"""
-        cursor = self.ds.execute("""
+        """获取用户的条件型权限规则（含祖先组织继承）"""
+        from meta.services.org_service import OrgService
+        org_ids = OrgService(self.ds).get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
             SELECT pr.rowid AS id, pr.* FROM permission_rules pr
             INNER JOIN org_permission_sets gr ON pr.permission_set_id = gr.permission_set_id
-            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
-            WHERE ugm.user_id = ? AND pr.resource_type = ?
+            WHERE gr.org_id IN ({placeholders}) AND pr.resource_type = ?
             ORDER BY pr.is_denied DESC, pr.rowid
-        """, [user_id, resource_type])
+        """, org_ids + [resource_type])
         return self._rows_to_dicts(cursor)
 
     def _get_resource_detail(self, resource_type: str, resource_id: int) -> Optional[Dict]:

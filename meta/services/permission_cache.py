@@ -1,24 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-[MODULE] permission_cache �?Phase 8 三级缓存
-[DESCRIPTION] L1 请求�?/ L2 角色�?/ L3 全局�?缓存, 加速权限决�?[SPEC] spec-permission-system-unification-2026-07-19 §3.13 / §8.8
+[MODULE] permission_cache — Phase 8 三级缓存
+[DESCRIPTION] L1 请求级 / L2 角色级 / L3 全局级 缓存, 加速权限决策
+[SPEC] spec-permission-system-unification-2026-07-19 §3.13 / §8.8
 
 [设计原则]
-  L1 Cache (请求�? �?threading.local, 单次请求内缓�?    - TTL: 请求生命周期 (clear_l1() 显式清空)
+  L1 Cache (请求级) — threading.local, 单次请求内缓存
+    - TTL: 请求生命周期 (clear_l1() 显式清空)
     - 存储: 用户权限决策结果
-    - 命中�? > 90%
+    - 命中率: > 90%
 
-  L2 Cache (角色�? �?TTLCache, 5 分钟 TTL
-    - 存储: 角色�?dimension scope + permission rules
-    - 失效: 角色配置变更�?(invalidate(permission_set_id))
+  L2 Cache (角色级) — TTLCache, 5 分钟 TTL
+    - 存储: 角色的 dimension scope + permission rules
+    - 失效: 角色配置变更时 (invalidate(role_id))
 
-  L3 Cache (全局�? �?SQLite :memory:, 1 小时 TTL
+  L3 Cache (全局级) — SQLite :memory:, 1 小时 TTL
     - 存储: BO.yaml schema + 全局规则
-    - 失效: 配置文件变更�?(invalidate_all())
+    - 失效: 配置文件变更时 (invalidate_all())
 
-  PermissionCacheManager �?统一管理 L1+L2+L3 级联查询
+  PermissionCacheManager — 统一管理 L1+L2+L3 级联查询
     get_or_load(key, loader):
-      L1 miss �?L2 miss �?L3 miss �?loader()
+      L1 miss → L2 miss → L3 miss → loader()
       命中层级: L1 (request) > L2 (role) > L3 (global) > loader
 """
 import json
@@ -33,27 +35,27 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# P8-T1: L1 请求级缓�?(threading.local)
+# P8-T1: L1 请求级缓存 (threading.local)
 # ============================================================================
 
 class L1RequestCache:
-    """[P8-T1] 请求级缓�?�?基于 threading.local
+    """[P8-T1] 请求级缓存 — 基于 threading.local
 
-    同一请求 (线程) 内不重复计算同一 key 的权限决�?
-    线程隔离: 不同线程�?L1 缓存互不影响.
+    同一请求 (线程) 内不重复计算同一 key 的权限决策.
+    线程隔离: 不同线程的 L1 缓存互不影响.
     """
 
     def __init__(self):
         self._local = threading.local()
 
     def _get_store(self) -> Dict[Tuple, Any]:
-        """获取当前线程�?L1 存储 (懒初始化)"""
+        """获取当前线程的 L1 存储 (懒初始化)"""
         if not hasattr(self._local, 'store'):
             self._local.store = {}
         return self._local.store
 
     def get(self, key: Tuple) -> Optional[Any]:
-        """[P8-T1] 查询 L1, 未命中返�?None"""
+        """[P8-T1] 查询 L1, 未命中返回 None"""
         return self._get_store().get(key)
 
     def put(self, key: Tuple, value: Any) -> None:
@@ -65,7 +67,7 @@ class L1RequestCache:
         key: Tuple,
         loader: Callable[[], Any],
     ) -> Any:
-        """[P8-T1] 查询 L1, 未命中则�?loader 加载并写�?""
+        """[P8-T1] 查询 L1, 未命中则调 loader 加载并写入"""
         store = self._get_store()
         if key in store:
             logger.debug(f'[P8-T1 L1 hit] key={key}')
@@ -76,21 +78,21 @@ class L1RequestCache:
         return value
 
     def clear(self) -> None:
-        """[P8-T1] 清空当前线程�?L1 缓存"""
+        """[P8-T1] 清空当前线程的 L1 缓存"""
         if hasattr(self._local, 'store'):
             self._local.store.clear()
 
 
 # ============================================================================
-# P8-T2: L2 角色级缓�?(TTLCache, TTL=5min)
+# P8-T2: L2 角色级缓存 (TTLCache, TTL=5min)
 # ============================================================================
 
 class L2RoleCache:
-    """[P8-T2] 角色级缓�?�?TTLCache, 5 分钟 TTL
+    """[P8-T2] 角色级缓存 — TTLCache, 5 分钟 TTL
 
-    key = (permission_set_id, resource_type, action)
-    不同 role/resource/action �?key 互不干扰.
-    TTL 过期后自�?miss, 调用 loader 重新加载.
+    key = (role_id, resource_type, action)
+    不同 role/resource/action 的 key 互不干扰.
+    TTL 过期后自动 miss, 调用 loader 重新加载.
     """
 
     def __init__(self, ttl_seconds: int = 300):
@@ -106,7 +108,7 @@ class L2RoleCache:
         return (time.time() - timestamp) > self._ttl
 
     def _purge_expired(self) -> None:
-        """清除过期�?(惰性清�?"""
+        """清除过期项 (惰性清除)"""
         now = time.time()
         expired_keys = [
             k for k, (ts, _) in self._store.items()
@@ -149,49 +151,50 @@ class L2RoleCache:
                     return value
                 # 过期, 删除
                 del self._store[key]
-        # �?loader (锁外, 避免长时间持�?
+        # 调 loader (锁外, 避免长时间持锁)
         value = loader()
         with self._lock:
             self._store[key] = (time.time(), value)
         logger.debug(f'[P8-T2 L2 miss→load] key={key}')
         return value
 
-    def invalidate(self, permission_set_id: Optional[int] = None) -> int:
-        """[P8-T4] 失效指定 role �?L2 缓存
+    def invalidate(self, role_id: Optional[int] = None) -> int:
+        """[P8-T4] 失效指定 role 的 L2 缓存
 
         Args:
-            permission_set_id: 角色 ID. None 表示失效所�?
+            role_id: 角色 ID. None 表示失效所有.
 
         Returns:
-            被清除的条目�?        """
+            被清除的条目数
+        """
         with self._lock:
-            if permission_set_id is None:
+            if role_id is None:
                 count = len(self._store)
                 self._store.clear()
                 return count
             # key 格式: (role_id, resource_type, action, ...)
             keys_to_remove = [
                 k for k in self._store
-                if len(k) > 0 and k[0] == permission_set_id
+                if len(k) > 0 and k[0] == role_id
             ]
             for k in keys_to_remove:
                 del self._store[k]
             return len(keys_to_remove)
 
     def invalidate_all(self) -> int:
-        """[P8-T4] 失效所�?L2 缓存"""
-        return self.invalidate(permission_set_id=None)
+        """[P8-T4] 失效所有 L2 缓存"""
+        return self.invalidate(role_id=None)
 
 
 # ============================================================================
-# P8-T3: L3 全局级缓�?(SQLite :memory:)
+# P8-T3: L3 全局级缓存 (SQLite :memory:)
 # ============================================================================
 
 class L3GlobalCache:
-    """[P8-T3] 全局级缓�?�?SQLite :memory:, 1 小时 TTL
+    """[P8-T3] 全局级缓存 — SQLite :memory:, 1 小时 TTL
 
-    跨角色共�?schema / 全局规则.
-    数据持久�?SQLite :memory: �?(进程内共�?.
+    跨角色共享 schema / 全局规则.
+    数据持久在 SQLite :memory: 中 (进程内共享).
     """
 
     def __init__(self, ttl_seconds: int = 3600):
@@ -204,7 +207,7 @@ class L3GlobalCache:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        """初始�?cache_entries �?""
+        """初始化 cache_entries 表"""
         with self._lock:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS cache_entries (
@@ -219,7 +222,7 @@ class L3GlobalCache:
             self._conn.commit()
 
     def _key_to_json(self, key: Tuple) -> str:
-        """�?tuple key 转为 JSON 字符�?(用作 SQLite 主键)"""
+        """将 tuple key 转为 JSON 字符串 (用作 SQLite 主键)"""
         return json.dumps(list(key), ensure_ascii=False)
 
     def get(self, key: Tuple) -> Optional[Any]:
@@ -271,7 +274,7 @@ class L3GlobalCache:
         return value
 
     def invalidate_all(self) -> int:
-        """[P8-T4] 失效所�?L3 缓存"""
+        """[P8-T4] 失效所有 L3 缓存"""
         with self._lock:
             cursor = self._conn.execute("SELECT COUNT(*) FROM cache_entries")
             count = cursor.fetchone()[0]
@@ -281,19 +284,19 @@ class L3GlobalCache:
 
 
 # ============================================================================
-# P8-T1+T2+T3: PermissionCacheManager �?统一管理三级级联缓存
+# P8-T1+T2+T3: PermissionCacheManager — 统一管理三级级联缓存
 # ============================================================================
 
 class PermissionCacheManager:
     """[P8-T1/T2/T3/T4] 统一管理 L1+L2+L3 级联查询
 
-    级联查询顺序: L1 (request) �?L2 (role) �?L3 (global) �?loader
-    任一层命中则直接返回, 不再调下�?
+    级联查询顺序: L1 (request) → L2 (role) → L3 (global) → loader
+    任一层命中则直接返回, 不再调下层.
 
     用法:
         mgr = PermissionCacheManager()
         result = mgr.get_or_load(
-            key=(permission_set_id, resource_type, action),
+            key=(role_id, resource_type, action),
             loader=lambda: expensive_permission_calc()
         )
     """
@@ -313,12 +316,12 @@ class PermissionCacheManager:
         key: Tuple,
         loader: Callable[[], Any],
     ) -> Any:
-        """级联查询 L1 �?L2 �?L3 �?loader
+        """级联查询 L1 → L2 → L3 → loader
 
-        命中层级会向上回�?
-          L2 命中 �?回填 L1
-          L3 命中 �?回填 L1 + L2
-          loader  �?回填 L1 + L2 + L3
+        命中层级会向上回填:
+          L2 命中 → 回填 L1
+          L3 命中 → 回填 L1 + L2
+          loader  → 回填 L1 + L2 + L3
         """
         # L1
         v = self._l1.get(key)
@@ -346,25 +349,25 @@ class PermissionCacheManager:
         return v
 
     def clear_l1(self) -> None:
-        """[P8-T4] 清空 L1 (请求�?"""
+        """[P8-T4] 清空 L1 (请求级)"""
         self._l1.clear()
 
-    def invalidate(self, permission_set_id: Optional[int] = None) -> None:
+    def invalidate(self, role_id: Optional[int] = None) -> None:
         """[P8-T4] 失效缓存
 
         Args:
-            permission_set_id: 指定角色 ID �?L1 清空 + L2 �?permission_set_id 失效 + L3 全清
-                     None �?全部失效
+            role_id: 指定角色 ID → L1 清空 + L2 按 role_id 失效 + L3 全清
+                     None → 全部失效
         """
         # L1 清空 (请求级缓存与 role_id 无强绑定)
         self._l1.clear()
-        # L2 �?role_id 失效
-        self._l2.invalidate(permission_set_id=permission_set_id)
-        # L3 全清 (全局 schema 变更概率�? 全清更安�?
+        # L2 按 role_id 失效
+        self._l2.invalidate(role_id=role_id)
+        # L3 全清 (全局 schema 变更概率低, 全清更安全)
         self._l3.invalidate_all()
 
     def invalidate_all(self) -> None:
-        """[P8-T4] 失效所有缓�?(L1+L2+L3)"""
+        """[P8-T4] 失效所有缓存 (L1+L2+L3)"""
         self._l1.clear()
         self._l2.invalidate_all()
         self._l3.invalidate_all()

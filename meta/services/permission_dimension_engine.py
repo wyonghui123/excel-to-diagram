@@ -2,11 +2,14 @@
 """
 权限维度引擎
 
-核心功能�?1. �?hierarchies.yaml、permission_rule.yaml �?dimension_object_mapping.yaml 加载维度定义
+核心功能：
+1. 从 hierarchies.yaml、permission_rule.yaml 和 dimension_object_mapping.yaml 加载维度定义
 2. 计算权限影响范围（核心方法）
-3. 实现向下继承和向上传播规�?4. 集成 EnumCacheManager 提供缓存能力
+3. 实现向下继承和向上传播规则
+4. 集成 EnumCacheManager 提供缓存能力
 
-性能要求�?- 缓存命中 < 0.1ms
+性能要求：
+- 缓存命中 < 0.1ms
 - 首次计算 < 100ms
 """
 
@@ -24,7 +27,8 @@ from meta.services.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
 
-# [P1-Base-05] 权限元数�?yaml 权威清单（供 loaded_schema_report.json 生成�?# 注意: scripts/check_yaml_drift.py �?REPORT_FILES 必须与本清单保持同步
+# [P1-Base-05] 权限元数据 yaml 权威清单（供 loaded_schema_report.json 生成）
+# 注意: scripts/check_yaml_drift.py 的 REPORT_FILES 必须与本清单保持同步
 SCHEMA_REPORT_FILES = [
     'dimension_object_mapping.yaml',
     'hierarchies.yaml',
@@ -33,19 +37,21 @@ SCHEMA_REPORT_FILES = [
     'menu.yaml',
 ]
 
-# [REMOVED] 2026-06-03: service_module �?business_object 从权限维度移�?# 新的层级�? product �?version �?domain �?sub_domain (4�?
+# [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
+# 新的层级链: product → version → domain → sub_domain (4层)
 RESOURCE_TABLE_MAP = {
     'product': 'products',
     'version': 'versions',
     'domain': 'domains',
     'sub_domain': 'sub_domains',
     # [V1.1.8 2026-06-15] 重新加回 service_module / business_object / relationship 的表映射
-    #   原因: dimension_scope_engine �?_build_chain_condition 需�?    #   RESOURCE_TABLE_MAP 查这�?BO 的物理表�?(即使它们不参�?HIERARCHY_CHAIN 展开)
-    #   旧版注释掉导�?chain 构造时 self._resource_table_map.get('service_module') �?None, 链式 SQL 失败
+    #   原因: dimension_scope_engine 的 _build_chain_condition 需要
+    #   RESOURCE_TABLE_MAP 查这些 BO 的物理表名 (即使它们不参与 HIERARCHY_CHAIN 展开)
+    #   旧版注释掉导致 chain 构造时 self._resource_table_map.get('service_module') → None, 链式 SQL 失败
     'service_module': 'service_modules',
     'business_object': 'business_objects',
     'relationship': 'relationships',
-    # [FIX v1.2.34 2026-06-21] annotation 表映�?(WriteScopeInterceptor 需�?
+    # [FIX v1.2.34 2026-06-21] annotation 表映射 (WriteScopeInterceptor 需要)
     'annotation': 'annotations',
 }
 
@@ -53,19 +59,20 @@ CHILD_TYPE_MAP = {
     'product': ['version'],
     'version': ['domain'],
     'domain': ['sub_domain'],
-    'sub_domain': [],  # 已移�?service_module �?business_object
-    # 'service_module': ['business_object'],  # 已移�?}
+    'sub_domain': [],  # 已移除 service_module 和 business_object
+    # 'service_module': ['business_object'],  # 已移除
+}
 
-# [P7-T3 2026-07-20] 权限维度映射�?(Spec §3.15 / §8.7)
-# 4 �? product �?version �?domain �?sub_domain
-# 用于声明式配�?(P7-T1) �?dimension scope 派生 (P7-T3)
+# [P7-T3 2026-07-20] 权限维度映射链 (Spec §3.15 / §8.7)
+# 4 层: product → version → domain → sub_domain
+# 用于声明式配置 (P7-T1) 和 dimension scope 派生 (P7-T3)
 MANAGEMENT_DIMENSION_CHAIN = ['product', 'version', 'domain', 'sub_domain']
 
 PARENT_FIELD_MAP = {
     'version': 'product_id',
     'domain': 'version_id',
     'sub_domain': 'domain_id',
-    # [V1.1.8+ 2026-06-15] service_module / business_object 链路恢复 (WriteScope 需�?
+    # [V1.1.8+ 2026-06-15] service_module / business_object 链路恢复 (WriteScope 需要)
     'service_module': 'sub_domain_id',
     'business_object': 'service_module_id',
 }
@@ -77,7 +84,8 @@ DISPLAY_FIELD_MAP = {
     'sub_domain': 'sub_domain_name',
     # [R21 2026-07-24] 加回 service_module: tree API 需要展示服务模块树
     'service_module': 'name',
-    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需�?    'business_object': 'name',
+    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
+    'business_object': 'name',
 }
 
 CODE_FIELD_MAP = {
@@ -85,13 +93,15 @@ CODE_FIELD_MAP = {
     'version': 'code',
     'domain': 'code',
     'sub_domain': 'code',
-    # [R21 2026-07-24] 加回 service_module: tree API 需�?    'service_module': 'code',
-    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需�?    'business_object': 'code',
+    # [R21 2026-07-24] 加回 service_module: tree API 需要
+    'service_module': 'code',
+    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
+    'business_object': 'code',
 }
 
 
 # ============================================================================
-# [P7-T3 2026-07-20] 权限维度映射链解�?(Spec §3.15 / §8.7)
+# [P7-T3 2026-07-20] 权限维度映射链解析 (Spec §3.15 / §8.7)
 # ============================================================================
 
 def resolve_dimension_chain(
@@ -101,17 +111,17 @@ def resolve_dimension_chain(
 ) -> Optional[List[str]]:
     """[P7-T3] 解析权限维度映射链的子链
 
-    �?start 解析�?end, 返回包含两端的子�?
-    �?start �?end 不在链中, �?start �?end 之后, 返回 None.
+    从 start 解析到 end, 返回包含两端的子链.
+    若 start 或 end 不在链中, 或 start 在 end 之后, 返回 None.
 
     Args:
-        start: 起始维度 (�?'product')
-        end: 结束维度 (�?'sub_domain')
-        chain: 可�? 自定义链 (默认�?MANAGEMENT_DIMENSION_CHAIN)
+        start: 起始维度 (如 'product')
+        end: 结束维度 (如 'sub_domain')
+        chain: 可选, 自定义链 (默认用 MANAGEMENT_DIMENSION_CHAIN)
 
     Returns:
-        List[str] 子链 (�?['product', 'version', 'domain', 'sub_domain'])
-        �?None (无法解析)
+        List[str] 子链 (如 ['product', 'version', 'domain', 'sub_domain'])
+        或 None (无法解析)
 
     Examples:
         >>> resolve_dimension_chain('product', 'sub_domain')
@@ -135,30 +145,39 @@ class PermissionDimensionEngine:
     """
     权限维度引擎
     
-    提供权限影响范围计算、维度定义加载、继承规则应用等核心功能�?    """
+    提供权限影响范围计算、维度定义加载、继承规则应用等核心功能。
+    """
     
     def __init__(self, data_source, ttl_seconds: int = 300):
         """
-        初始化权限维度引�?        
+        初始化权限维度引擎
+        
         Args:
-            data_source: 数据源对�?            ttl_seconds: 缓存TTL（秒），默认300�?        """
+            data_source: 数据源对象
+            ttl_seconds: 缓存TTL（秒），默认300秒
+        """
         self.ds = data_source
         self.evaluator = ConditionEvaluator()
         self.cache = EnumCacheManager(ttl_seconds=ttl_seconds, max_size=500)
         
         self._dimension_metadata: Optional[Dict[str, Any]] = None
         self._schema_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
-        # [P1-Base-01] 资源表映射改�?yaml 优先、硬编码 fallback（改 yaml 即生效）
+        # [P1-Base-01] 资源表映射改为 yaml 优先、硬编码 fallback（改 yaml 即生效）
         self._resource_table_map = self._load_resource_table_map()
         # [P1-Base-05] 生成 yaml 顶层 key 基线报告（供 check_yaml_drift.py 检测结构漂移）
         self._generate_loaded_schema_report()
         
-        logger.info(f"[OK] PermissionDimensionEngine 初始化完�?(TTL={ttl_seconds}s)")
+        logger.info(f"[OK] PermissionDimensionEngine 初始化完成 (TTL={ttl_seconds}s)")
     
     def _load_resource_table_map(self) -> Dict[str, str]:
-        """[P1-Base-01] �?yaml 构建资源表映射，yaml 优先、模块级硬编码兜�?
-        数据来源（三级合并）�?        1. 模块�?RESOURCE_TABLE_MAP（硬编码兜底基底�?        2. hierarchies.yaml `levels[].table_name`（business 维度表名，如 product→products�?        3. dimension_object_mapping.yaml `dimension_object_mappings[].value_table`
-           （generic 维度值表，如 org→orgs / region→regions�?
+        """[P1-Base-01] 从 yaml 构建资源表映射，yaml 优先、模块级硬编码兜底
+
+        数据来源（三级合并）：
+        1. 模块级 RESOURCE_TABLE_MAP（硬编码兜底基底）
+        2. hierarchies.yaml `levels[].table_name`（business 维度表名，如 product→products）
+        3. dimension_object_mapping.yaml `dimension_object_mappings[].value_table`
+           （generic 维度值表，如 org→orgs / region→regions）
+
         Returns:
             {resource_type: table_name}
         """
@@ -177,9 +196,9 @@ class PermissionDimensionEngine:
                         if obj and table:
                             table_map[obj] = table
             except Exception as e:
-                logger.warning(f"hierarchies.yaml 解析失败，resource table map 使用硬编�?fallback: {e}")
+                logger.warning(f"hierarchies.yaml 解析失败，resource table map 使用硬编码 fallback: {e}")
 
-        # 来源 3: dimension_object_mapping.yaml �?generic 维度 value_table
+        # 来源 3: dimension_object_mapping.yaml 的 generic 维度 value_table
         mapping_path = os.path.join(self._schema_dir, 'dimension_object_mapping.yaml')
         if os.path.exists(mapping_path):
             try:
@@ -191,14 +210,18 @@ class PermissionDimensionEngine:
                     if code and value_table:
                         table_map[code] = value_table
             except Exception as e:
-                logger.warning(f"dimension_object_mapping.yaml 解析失败，resource table map 使用硬编�?fallback: {e}")
+                logger.warning(f"dimension_object_mapping.yaml 解析失败，resource table map 使用硬编码 fallback: {e}")
 
         return table_map
 
     def _generate_loaded_schema_report(self) -> None:
-        """[P1-Base-05] 生成 loaded_schema_report.json（yaml 顶层 key 基线�?
-        �?engine 初始化（加载 yaml）后生成基线报告�?        scripts/check_yaml_drift.py 通过对比「当�?yaml 顶层 key」与「本报告基线」，
-        检�?yaml 结构漂移（yaml 已改动但服务未重启重新加载），提示运维重启或审查�?        报告写到 engine 同目�?loaded_schema_report.json，失败不阻断初始化（降级 WARNING）�?        """
+        """[P1-Base-05] 生成 loaded_schema_report.json（yaml 顶层 key 基线）
+
+        在 engine 初始化（加载 yaml）后生成基线报告。
+        scripts/check_yaml_drift.py 通过对比「当前 yaml 顶层 key」与「本报告基线」，
+        检测 yaml 结构漂移（yaml 已改动但服务未重启重新加载），提示运维重启或审查。
+        报告写到 engine 同目录 loaded_schema_report.json，失败不阻断初始化（降级 WARNING）。
+        """
         report = {
             'generated_at': datetime.now(timezone.utc).isoformat(),
             'schemas': {},
@@ -227,18 +250,21 @@ class PermissionDimensionEngine:
         try:
             with open(report_path, 'w', encoding='utf-8') as f:
                 json.dump(report, f, ensure_ascii=False, indent=2)
-            logger.info(f"[P1-Base-05] 已生�?loaded_schema_report.json ({len(report['schemas'])} �?yaml)")
+            logger.info(f"[P1-Base-05] 已生成 loaded_schema_report.json ({len(report['schemas'])} 个 yaml)")
         except Exception as e:
             logger.warning(f"写入 loaded_schema_report.json 失败: {e}")
 
     def _read_dimension_object_mapping(self) -> Dict[str, Any]:
-        """[P1-Base-01] 读取 dimension_object_mapping.yaml（第三处 yaml 来源�?
+        """[P1-Base-01] 读取 dimension_object_mapping.yaml（第三处 yaml 来源）
+
         Returns:
             {
               'dimension_object_mappings': List[Dict],  # 维度→BO 字段映射
-              'dimension_priority': Dict[str, int],      # 维度优先�?              'combination_policy': Dict[str, Any],      # owner/visibility 组合策略
+              'dimension_priority': Dict[str, int],      # 维度优先级
+              'combination_policy': Dict[str, Any],      # owner/visibility 组合策略
             }
-            文件缺失或解析失败时返回全空结构（调用方�?fallback，不崩溃）�?        """
+            文件缺失或解析失败时返回全空结构（调用方走 fallback，不崩溃）。
+        """
         result: Dict[str, Any] = {
             'dimension_object_mappings': [],
             'dimension_priority': {},
@@ -261,10 +287,11 @@ class PermissionDimensionEngine:
     
     def _load_dimension_metadata(self) -> Dict[str, Any]:
         """
-        �?hierarchies.yaml �?permission_rule.yaml 加载维度定义
+        从 hierarchies.yaml 和 permission_rule.yaml 加载维度定义
         
         Returns:
-            维度元数据字典，包含�?            - dimensions: 维度列表
+            维度元数据字典，包含：
+            - dimensions: 维度列表
             - resource_types: 资源类型列表
             - hierarchies: 层级结构定义
         """
@@ -275,7 +302,7 @@ class PermissionDimensionEngine:
                 'dimensions': [],
                 'resource_types': [],
                 'hierarchies': {},
-                # [P1-Base-01] 第三�?yaml 来源：dimension_object_mapping.yaml
+                # [P1-Base-01] 第三处 yaml 来源：dimension_object_mapping.yaml
                 'dimension_object_mappings': [],
                 'dimension_priority': {},
                 'combination_policy': {},
@@ -299,20 +326,22 @@ class PermissionDimensionEngine:
                         for field in fields:
                             if field.get('id') == 'resource_type':
                                 description = field.get('description', '')
-                                # [REMOVED] 2026-06-03: service_module �?business_object 从权限维度移�?                                if 'domain/sub_domain' in description:
+                                # [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
+                                if 'domain/sub_domain' in description:
                                     metadata['resource_types'] = ['domain', 'sub_domain']
                                 break
             
-            # [P1-Base-01] 第三�?yaml：dimension_object_mapping.yaml
+            # [P1-Base-01] 第三处 yaml：dimension_object_mapping.yaml
             mapping_meta = self._read_dimension_object_mapping()
             metadata['dimension_object_mappings'] = mapping_meta['dimension_object_mappings']
             metadata['dimension_priority'] = mapping_meta['dimension_priority']
             metadata['combination_policy'] = mapping_meta['combination_policy']
             
             if not metadata['resource_types']:
-                # [REMOVED] 2026-06-03: service_module �?business_object 从管理维度移�?                metadata['resource_types'] = ['domain', 'sub_domain']
+                # [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
+                metadata['resource_types'] = ['domain', 'sub_domain']
             
-            logger.info(f"[OK] 加载维度元数�? {len(metadata['dimensions'])} 个维�? {len(metadata['resource_types'])} 个资源类�?)
+            logger.info(f"[OK] 加载维度元数据: {len(metadata['dimensions'])} 个维度, {len(metadata['resource_types'])} 个资源类型")
             return metadata
         
         import asyncio
@@ -331,12 +360,13 @@ class PermissionDimensionEngine:
     
     def _load_dimension_metadata_sync(self) -> Dict[str, Any]:
         """
-        同步加载维度元数据（用于异步环境不可用时�?        """
+        同步加载维度元数据（用于异步环境不可用时）
+        """
         metadata = {
             'dimensions': [],
             'resource_types': [],
             'hierarchies': {},
-            # [P1-Base-01] 第三�?yaml 来源：dimension_object_mapping.yaml
+            # [P1-Base-01] 第三处 yaml 来源：dimension_object_mapping.yaml
             'dimension_object_mappings': [],
             'dimension_priority': {},
             'combination_policy': {},
@@ -360,18 +390,20 @@ class PermissionDimensionEngine:
                     for field in fields:
                         if field.get('id') == 'resource_type':
                             description = field.get('description', '')
-                            # [REMOVED] 2026-06-03: service_module �?business_object 从权限维度移�?                            if 'domain/sub_domain' in description:
+                            # [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
+                            if 'domain/sub_domain' in description:
                                 metadata['resource_types'] = ['domain', 'sub_domain']
                             break
         
-        # [P1-Base-01] 第三�?yaml：dimension_object_mapping.yaml
+        # [P1-Base-01] 第三处 yaml：dimension_object_mapping.yaml
         mapping_meta = self._read_dimension_object_mapping()
         metadata['dimension_object_mappings'] = mapping_meta['dimension_object_mappings']
         metadata['dimension_priority'] = mapping_meta['dimension_priority']
         metadata['combination_policy'] = mapping_meta['combination_policy']
         
         if not metadata['resource_types']:
-            # [REMOVED] 2026-06-03: service_module �?business_object 从权限维度移�?            metadata['resource_types'] = ['domain', 'sub_domain']
+            # [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
+            metadata['resource_types'] = ['domain', 'sub_domain']
         
         return metadata
     
@@ -402,8 +434,11 @@ class PermissionDimensionEngine:
         return dimensions
     
     def get_dimension_priority(self) -> Dict[str, int]:
-        """[P1-Base-01] 获取权限维度优先级（dimension_object_mapping.yaml�?
-        返回 dimension_priority 段，�?{'product': 10, 'version': 20, 'domain': 30, 'sub_domain': 40}�?        文件缺失/解析失败时返回空 dict（调用方自行 fallback）�?
+        """[P1-Base-01] 获取权限维度优先级（dimension_object_mapping.yaml）
+
+        返回 dimension_priority 段，如 {'product': 10, 'version': 20, 'domain': 30, 'sub_domain': 40}。
+        文件缺失/解析失败时返回空 dict（调用方自行 fallback）。
+
         Returns:
             {dimension_code: priority_int}
         """
@@ -411,10 +446,12 @@ class PermissionDimensionEngine:
         return metadata.get('dimension_priority', {})
     
     def get_dimension_object_mappings(self) -> List[Dict[str, Any]]:
-        """[P1-Base-02] 获取权限维度→BO 字段映射列表（dimension_object_mapping.yaml�?
-        返回 dimension_object_mappings 段（未启�?generic 维度为注释时为空）：
+        """[P1-Base-02] 获取权限维度→BO 字段映射列表（dimension_object_mapping.yaml）
+
+        返回 dimension_object_mappings 段（未启用 generic 维度为注释时为空）：
             [{dimension_code, dimension_type, description, applies_to: [...], ...}]
-        文件缺失/解析失败时返回空 list�?
+        文件缺失/解析失败时返回空 list。
+
         Returns:
             维度映射配置 list
         """
@@ -422,11 +459,13 @@ class PermissionDimensionEngine:
         return metadata.get('dimension_object_mappings', [])
     
     def get_combination_policy(self) -> Dict[str, Any]:
-        """[P1-Base-01] 获取 owner/visibility 组合策略（dimension_object_mapping.yaml�?
+        """[P1-Base-01] 获取 owner/visibility 组合策略（dimension_object_mapping.yaml）
+
         返回 combination_policy 段：
             scope_combination: AND | OR
             owner_always_visible: bool
-        文件缺失/解析失败时返回空 dict�?
+        文件缺失/解析失败时返回空 dict。
+
         Returns:
             combination_policy 配置 dict
         """
@@ -438,41 +477,46 @@ class PermissionDimensionEngine:
         dimension_code: str,
         value_ids: List[int],
     ) -> List[int]:
-        """[F7 扩展�?· Phase 4 预留] 通用维度（org/region/department）自动展开
+        """[F7 扩展点 · Phase 4 预留] 通用维度（org/region/department）自动展开
 
-        [P1-Base-01] 仅预留签名与透传；Phase 4（P4-Org-01）填充函数体�?        - 读取 dimension_object_mapping.yaml �?filter_through_hierarchy: true �?generic 维度
-        - �?value_table / owning_org 层级追溯展开子树
-        - derivePermissions �?generic 维度仅推数据规则，不生成菜单/功能权限
+        [P1-Base-01] 仅预留签名与透传；Phase 4（P4-Org-01）填充函数体：
+        - 读取 dimension_object_mapping.yaml 中 filter_through_hierarchy: true 的 generic 维度
+        - 沿 value_table / owning_org 层级追溯展开子树
+        - derivePermissions 对 generic 维度仅推数据规则，不生成菜单/功能权限
 
         TODO(P4-Org-01): 实现 org 维度 filter_through_hierarchy 展开逻辑
 
         Args:
-            dimension_code: 维度标识（如 'org'�?            value_ids: 选中的维度�?ID 列表
+            dimension_code: 维度标识（如 'org'）
+            value_ids: 选中的维度值 ID 列表
 
         Returns:
             展开后的完整 value_ids（Phase 4 前为透传，无副作用）
         """
         logger.debug(
-            f"[F7] _apply_generic_dimension_auto_expand 未实现（Phase 4 填充�? "
+            f"[F7] _apply_generic_dimension_auto_expand 未实现（Phase 4 填充）: "
             f"dimension_code={dimension_code}"
         )
         return list(value_ids)
     
-    def calculate_impact(self, permission_set_id: int) -> Dict[str, Any]:
+    def calculate_impact(self, role_id: int) -> Dict[str, Any]:
         """
         计算权限影响范围（核心方法）
         
         Args:
-            permission_set_id: 角色ID
+            role_id: 角色ID
             
         Returns:
             影响范围结果，包含：
-            - summary: 汇总信�?            - affected_objects: 受影响对象列�?            - calculation_meta: 计算元数�?        """
+            - summary: 汇总信息
+            - affected_objects: 受影响对象列表
+            - calculation_meta: 计算元数据
+        """
         start_time = time.perf_counter()
-        cache_key = f"impact:role:{permission_set_id}"
+        cache_key = f"impact:role:{role_id}"
         
         async def loader():
-            return self._calculate_impact_internal(permission_set_id)
+            return self._calculate_impact_internal(role_id)
         
         import asyncio
         try:
@@ -482,7 +526,7 @@ class PermissionDimensionEngine:
             asyncio.set_event_loop(loop)
         
         if loop.is_running():
-            result = self._calculate_impact_internal(permission_set_id)
+            result = self._calculate_impact_internal(role_id)
             cache_hit = False
         else:
             result = loop.run_until_complete(self.cache.get_or_load(cache_key, loader))
@@ -494,14 +538,15 @@ class PermissionDimensionEngine:
             result['calculation_meta']['performance_ms'] = round(elapsed_ms, 2)
             result['calculation_meta']['cache_hit'] = cache_hit
         
-        logger.info(f"[OK] 计算权限影响范围 [permission_set_id={permission_set_id}]: {result['summary']['total_affected']} 个对�? 耗时 {elapsed_ms:.2f}ms")
+        logger.info(f"[OK] 计算权限影响范围 [role_id={role_id}]: {result['summary']['total_affected']} 个对象, 耗时 {elapsed_ms:.2f}ms")
         
         return result
     
-    def _calculate_impact_internal(self, permission_set_id: int) -> Dict[str, Any]:
+    def _calculate_impact_internal(self, role_id: int) -> Dict[str, Any]:
         """
-        内部方法：计算权限影响范�?        """
-        rules = self._get_role_permission_rules(permission_set_id)
+        内部方法：计算权限影响范围
+        """
+        rules = self._get_role_permission_rules(role_id)
         
         if not rules:
             return {
@@ -585,13 +630,15 @@ class PermissionDimensionEngine:
         基于 condition 构建影响范围查询
         
         Args:
-            condition: 条件表达�?            resource_type: 资源类型
+            condition: 条件表达式
+            resource_type: 资源类型
             
         Returns:
-            匹配的对象列�?        """
+            匹配的对象列表
+        """
         table_name = self._resource_table_map.get(resource_type)
         if not table_name:
-            logger.warning(f"未知的资源类�? {resource_type}")
+            logger.warning(f"未知的资源类型: {resource_type}")
             return []
         
         sql_where = self.evaluator.predicate_to_sql_where(condition)
@@ -648,9 +695,11 @@ class PermissionDimensionEngine:
         propagate_to_parents: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        应用向下继承和向上传播规�?        
+        应用向下继承和向上传播规则
+        
         Args:
-            affected_objects: 受影响对象列�?            inherit_to_children: 是否向下继承
+            affected_objects: 受影响对象列表
+            inherit_to_children: 是否向下继承
             propagate_to_parents: 是否向上传播
             
         Returns:
@@ -672,13 +721,15 @@ class PermissionDimensionEngine:
     
     def _get_all_children(self, resource_type: str, resource_id: int) -> List[Dict[str, Any]]:
         """
-        获取所有子对象（递归�?        
+        获取所有子对象（递归）
+        
         Args:
             resource_type: 资源类型
             resource_id: 资源ID
             
         Returns:
-            子对象列�?        """
+            子对象列表
+        """
         children = []
         child_types = CHILD_TYPE_MAP.get(resource_type, [])
         
@@ -732,19 +783,21 @@ class PermissionDimensionEngine:
                     children.extend(sub_children)
                     
             except Exception as e:
-                logger.error(f"获取子对象失�?[{child_type}]: {e}")
+                logger.error(f"获取子对象失败 [{child_type}]: {e}")
         
         return children
     
     def _get_all_parents(self, resource_type: str, resource_id: int) -> List[Dict[str, Any]]:
         """
-        获取所有父对象（递归�?        
+        获取所有父对象（递归）
+        
         Args:
             resource_type: 资源类型
             resource_id: 资源ID
             
         Returns:
-            父对象列�?        """
+            父对象列表
+        """
         parents = []
         table_name = self._resource_table_map.get(resource_type)
         if not table_name:
@@ -834,34 +887,35 @@ class PermissionDimensionEngine:
                 parents.extend(grand_parents)
                 
         except Exception as e:
-            logger.error(f"获取父对象失�?[{resource_type}]: {e}")
+            logger.error(f"获取父对象失败 [{resource_type}]: {e}")
         
         return parents
     
-    def _get_role_permission_rules(self, permission_set_id: int) -> List[Dict[str, Any]]:
+    def _get_role_permission_rules(self, role_id: int) -> List[Dict[str, Any]]:
         """
-        获取角色的权限规�?        
+        获取角色的权限规则
+        
         Args:
-            permission_set_id: 角色ID
+            role_id: 角色ID
             
         Returns:
             权限规则列表
         """
         try:
             cursor = self.ds.execute(
-                """SELECT rowid AS id, permission_set_id, resource_type, condition, permission_level,
+                """SELECT rowid AS id, role_id, resource_type, condition, permission_level,
                           is_denied, inherit_to_children, propagate_to_parents, analysis_mode
                    FROM permission_rules
-                   WHERE permission_set_id = ?
+                   WHERE role_id = ?
                    ORDER BY is_denied DESC, rowid""",
-                [permission_set_id]
+                [role_id]
             )
             
             rules = []
             for row in cursor.fetchall():
                 rule = {
                     'id': row[0],
-                    'permission_set_id': row[1],
+                    'role_id': row[1],
                     'resource_type': row[2],
                     'condition': row[3],
                     'permission_level': row[4],
@@ -875,15 +929,16 @@ class PermissionDimensionEngine:
             return rules
             
         except Exception as e:
-            logger.error(f"获取角色权限规则失败 [permission_set_id={permission_set_id}]: {e}")
+            logger.error(f"获取角色权限规则失败 [role_id={role_id}]: {e}")
             return []
     
-    def invalidate_cache(self, permission_set_id: Optional[int] = None):
+    def invalidate_cache(self, role_id: Optional[int] = None):
         """
         失效缓存
         
         Args:
-            permission_set_id: 角色ID，如果为None则清空所有缓�?        """
+            role_id: 角色ID，如果为None则清空所有缓存
+        """
         import asyncio
         try:
             loop = asyncio.get_event_loop()
@@ -891,8 +946,8 @@ class PermissionDimensionEngine:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         
-        if permission_set_id:
-            cache_key = f"impact:role:{permission_set_id}"
+        if role_id:
+            cache_key = f"impact:role:{role_id}"
             if loop.is_running():
                 if cache_key in self.cache._l1_cache:
                     del self.cache._l1_cache[cache_key]
@@ -900,7 +955,7 @@ class PermissionDimensionEngine:
                         self.cache.stats.invalidations += 1
             else:
                 loop.run_until_complete(self.cache.invalidate(cache_key))
-            logger.info(f"[REFRESH] 缓存失效 [permission_set_id={permission_set_id}]")
+            logger.info(f"[REFRESH] 缓存失效 [role_id={role_id}]")
         else:
             if loop.is_running():
                 self.cache._l1_cache.clear()
@@ -908,7 +963,7 @@ class PermissionDimensionEngine:
                     self.cache.stats.invalidations += 1
             else:
                 loop.run_until_complete(self.cache.invalidate_all())
-            logger.info("[SYMBOL] 清空所有缓�?)
+            logger.info("[SYMBOL] 清空所有缓存")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """

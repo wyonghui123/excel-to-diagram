@@ -64,27 +64,41 @@ class PermissionService:
                 [org_id, user_id]
             )
 
+    def _get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """用户的有效组织 ID 集合 = 任职 org（org_members）∪ 各 org 祖先链
+
+        [最小范围 · 组织架构继承] 支撑"父组织挂权限集 → 子组织成员沿祖先链自动获得权限"。
+        """
+        from meta.services.org_service import OrgService
+        return OrgService(self.ds).get_user_effective_org_ids(user_id)
+
     def get_user_permission_sets(self, user_id: int) -> List[Dict[str, Any]]:
-        """获取用户的所有角色（仅通过组织路径）"""
+        """获取用户的所有角色（仅通过组织路径，含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT DISTINCT r.id, r.code, r.name, r.description, r.is_system
+            f"""SELECT DISTINCT r.id, r.code, r.name, r.description, r.is_system
                FROM permission_sets r
                JOIN org_permission_sets gr ON r.id = gr.permission_set_id
-               JOIN org_members ugm ON gr.org_id = ugm.org_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         return self._rows_to_dicts(cursor)
 
     def get_user_permissions(self, user_id: int) -> List[str]:
-        """获取用户的所有权限编码列表（仅通过组织路径）"""
+        """获取用户的所有权限编码列表（仅通过组织路径，含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT DISTINCT p.code FROM permissions p
+            f"""SELECT DISTINCT p.code FROM permissions p
                JOIN permission_set_permissions rp ON p.id = rp.permission_id
                JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
-               JOIN org_members ugm ON gr.org_id = ugm.org_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         return [row[0] for row in cursor.fetchall()]
 
@@ -177,13 +191,21 @@ class PermissionService:
                     "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
                     [permission_set_id, pid]
                 )
-            affected = self.ds.execute(
-                """SELECT DISTINCT ugm.user_id FROM org_members ugm
-                   JOIN org_permission_sets gr ON ugm.org_id = gr.org_id
-                   WHERE gr.permission_set_id = ?""",
+            # [最小范围] 受影响用户 = 绑定该权限集的 org（含其子孙组织）的全部成员
+            cursor = self.ds.execute(
+                "SELECT DISTINCT org_id FROM org_permission_sets WHERE permission_set_id = ?",
                 [permission_set_id]
             )
-            user_ids = [row[0] for row in affected.fetchall()]
+            bound_org_ids = [row[0] for row in cursor.fetchall()]
+            from meta.services.org_service import OrgService
+            _org_service = OrgService(self.ds)
+            user_ids = []
+            seen_user_ids = set()
+            for org_id in bound_org_ids:
+                for uid in _org_service.get_org_subtree_user_ids(org_id):
+                    if uid not in seen_user_ids:
+                        seen_user_ids.add(uid)
+                        user_ids.append(uid)
             if user_ids:
                 from meta.services.token_version_service import token_version_service
                 token_version_service.bump(user_ids)

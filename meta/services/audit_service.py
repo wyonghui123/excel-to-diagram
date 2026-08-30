@@ -17,25 +17,26 @@ from meta.core.datasource import DataSource
 # [P9-T4 2026-07-20] 审计字段清洗规则 (Spec §3.17 / §8.9)
 # ============================================================================
 
-# 历史占位值集�?(统一显示�?'-')
+# 历史占位值集合 (统一显示为 '-')
 _LEGACY_NULL_PLACEHOLDERS = frozenset({
     'legacy_null', 'null', 'undefined', 'none', 'n/a', 'na', '',
 })
 
 
 def clean_audit_field(value: Any, field_type: Optional[str] = None) -> Any:
-    """[P9-T4] 清洗审计字段的历史占位�?(Spec §3.17)
+    """[P9-T4] 清洗审计字段的历史占位值 (Spec §3.17)
 
     清洗规则:
-      - None / 空字符串 / 'null' / 'undefined' / 'none' / 'n/a' / 'na' / 'legacy_null' �?'-'
+      - None / 空字符串 / 'null' / 'undefined' / 'none' / 'n/a' / 'na' / 'legacy_null' → '-'
       - 大小写不敏感
-      - 合法值保留原�?(�?strip 两端空格)
+      - 合法值保留原样 (仅 strip 两端空格)
 
     Args:
-        value: 待清洗的�?        field_type: 可�? 字段类型 (�?'phone' 触发脱敏)
+        value: 待清洗的值
+        field_type: 可选, 字段类型 (如 'phone' 触发脱敏)
 
     Returns:
-        清洗后的�?(str 或原始类�?
+        清洗后的值 (str 或原始类型)
 
     Examples:
         >>> clean_audit_field(None)
@@ -47,17 +48,17 @@ def clean_audit_field(value: Any, field_type: Optional[str] = None) -> Any:
         >>> clean_audit_field('13800138000', field_type='phone')
         '138****8000'
     """
-    # None �?'-'
+    # None → '-'
     if value is None:
         return '-'
 
-    # �?str 类型: 直接返回 (除非需要脱�?
+    # 非 str 类型: 直接返回 (除非需要脱敏)
     if not isinstance(value, str):
         if field_type == 'phone':
             return _mask_phone(str(value))
         return value
 
-    # str 类型: �?strip
+    # str 类型: 先 strip
     stripped = value.strip()
     if stripped.lower() in _LEGACY_NULL_PLACEHOLDERS:
         return '-'
@@ -66,18 +67,18 @@ def clean_audit_field(value: Any, field_type: Optional[str] = None) -> Any:
     if field_type == 'phone':
         return _mask_phone(stripped)
 
-    # �?strip 后返�?(保留中间空格)
+    # 仅 strip 后返回 (保留中间空格)
     return stripped
 
 
 def _mask_phone(phone: str) -> str:
-    """[P9-T4 v2] 手机号脱�? 留前3�?, 中间�?* 脱敏 (不可�?
+    """[P9-T4 v2] 手机号脱敏: 留前3后4, 中间用 * 脱敏 (不可逆)
 
     Args:
         phone: 手机号字符串
 
     Returns:
-        脱敏后的字符�?(�?'138****8000')
+        脱敏后的字符串 (如 '138****8000')
 
     Examples:
         >>> _mask_phone('13800138000')
@@ -85,9 +86,11 @@ def _mask_phone(phone: str) -> str:
         >>> _mask_phone('1380000')  # 长度不足 7, 原样返回
         '1380000'
     """
-    # 去除非数字字�?    digits = re.sub(r'\D', '', phone)
+    # 去除非数字字符
+    digits = re.sub(r'\D', '', phone)
     if len(digits) < 7:
-        return digits  # 长度不足, 不脱�?    return f"{digits[:3]}****{digits[-4:]}"
+        return digits  # 长度不足, 不脱敏
+    return f"{digits[:3]}****{digits[-4:]}"
 
 
 @dataclass
@@ -134,19 +137,21 @@ class AuditRecord:
     agent_reasoning: Optional[str] = None
     log_category: Optional[str] = None
     log_level: Optional[str] = None
-    # [DECORATIVE] v2 字段（FR-LOG-005，Spec v1.0 实施 2026-06-05）�?全部 nullable 兼容 v1
+    # [DECORATIVE] v2 字段（FR-LOG-005，Spec v1.0 实施 2026-06-05）— 全部 nullable 兼容 v1
     action_kind: Optional[str] = None       # 'instance' | 'static'
     outcome: Optional[str] = None          # 'success' | 'failure' | 'denied' | 'retry'
     parent_action_id: Optional[Any] = None # 批量聚合 FK
     error_message: Optional[str] = None    # 失败/拒绝原因
-    retention_until: Optional[str] = None  # ISO 8601 截止�? 月）
+    retention_until: Optional[str] = None  # ISO 8601 截止（6 月）
 
 
 class BatchAuditContext:
     """
-    批量审计日志聚合上下�?(FR-LOG-007)
-    �?026-06-05 Spec v1.0 实施�?
-    100 条记录创�?�?1 �?header + N �?detail（parent_action_id 关联�?    对齐 Stripe batch events 模式
+    批量审计日志聚合上下文 (FR-LOG-007)
+    【2026-06-05 Spec v1.0 实施】
+
+    100 条记录创建 → 1 条 header + N 条 detail（parent_action_id 关联）
+    对齐 Stripe batch events 模式
 
     用法:
         with BatchAuditContext(
@@ -171,14 +176,16 @@ class BatchAuditContext:
         self._error_msg: Optional[str] = None
 
     def __enter__(self) -> 'BatchAuditContext':
-        # 1. 创建 header（标记为 static + 批量�?        from meta.core.action_models import DEFAULT_RETENTION_DAYS
+        # 1. 创建 header（标记为 static + 批量）
+        from meta.core.action_models import DEFAULT_RETENTION_DAYS
         from datetime import datetime, timedelta
         try:
             self.header_id = self.audit.create(AuditRecord(
                 id=None,
                 created_at=datetime.utcnow().isoformat(),
                 object_type=self.object_type,
-                object_id='batch',  # 标记为批量聚�?                action=self.action,
+                object_id='batch',  # 标记为批量聚合
+                action=self.action,
                 field_name='',
                 old_value=None,
                 new_value=None,
@@ -186,8 +193,9 @@ class BatchAuditContext:
                 user_name=self.user_ctx.get('user_name', 'system'),
                 ip_address=self.user_ctx.get('ip_address', ''),
                 user_agent=self.user_ctx.get('user_agent', ''),
-                action_kind='static',  # 批量操作通常�?static
-                outcome='success',  # 初始�?success，__exit__ 时根据异常更�?                retention_until=(datetime.utcnow() + timedelta(days=DEFAULT_RETENTION_DAYS)).isoformat(),
+                action_kind='static',  # 批量操作通常是 static
+                outcome='success',  # 初始为 success，__exit__ 时根据异常更新
+                retention_until=(datetime.utcnow() + timedelta(days=DEFAULT_RETENTION_DAYS)).isoformat(),
                 log_category='business',
                 log_level='INFO',
                 status='success',
@@ -195,14 +203,15 @@ class BatchAuditContext:
                 parent_action_id=None,
             ))
         except Exception as e:
-            # header 创建失败不应阻断主流�?            import logging
+            # header 创建失败不应阻断主流程
+            import logging
             logging.getLogger(__name__).error(f"[BatchAuditContext] Failed to create header: {e}")
             self.header_id = None
         return self
 
     def add_detail(self, object_id: Any, outcome: str = 'success', error_msg: Optional[str] = None,
                    field_name: str = '', old_value: Any = None, new_value: Any = None) -> None:
-        """添加一�?detail（带 parent_action_id 关联�?""
+        """添加一条 detail（带 parent_action_id 关联）"""
         from meta.core.action_models import DEFAULT_RETENTION_DAYS
         from datetime import datetime, timedelta
         # detail 动作：把 batch_xxx 拆为 xxx
@@ -239,7 +248,7 @@ class BatchAuditContext:
             logging.getLogger(__name__).error(f"[BatchAuditContext] Failed to add detail: {e}")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # batch 整体失败时更�?header
+        # batch 整体失败时更新 header
         if exc_type and self.header_id is not None:
             self._error_msg = f"{exc_type.__name__}: {exc_val}"
             try:
@@ -253,13 +262,15 @@ class AuditService:
 
     AUDIT_TABLE = "audit_logs"
     
-    # FK 字段模式（以 _id 结尾，但不是 id 本身�?    FK_FIELD_PATTERN = re.compile(r'^(?!id$).*_id$')
+    # FK 字段模式（以 _id 结尾，但不是 id 本身）
+    FK_FIELD_PATTERN = re.compile(r'^(?!id$).*_id$')
     
-    # 对象标识字段名（存储�?extra_data 中）
+    # 对象标识字段名（存储在 extra_data 中）
     OBJECT_KEY_FIELD = 'audit_object_key'
     OBJECT_DISPLAY_FIELD = 'audit_object_display_name'
     
-    # 功能开关（可通过配置关闭�?    ENABLE_OBJECT_IDENTITY = True
+    # 功能开关（可通过配置关闭）
+    ENABLE_OBJECT_IDENTITY = True
     ENABLE_FK_STRUCTURING = True
 
     def __init__(self, data_source: DataSource):
@@ -267,7 +278,7 @@ class AuditService:
 
     def _get_object_identity(self, object_type: str, object_id: Any) -> Dict[str, str]:
         """
-        获取对象标识（业�?key 和显示名称）
+        获取对象标识（业务 key 和显示名称）
         
         Args:
             object_type: 对象类型
@@ -283,8 +294,9 @@ class AuditService:
             return {}
         
         try:
-            # 尝试查询对象�?key �?name/display_name
-            # 支持的表名映�?            table_name = object_type
+            # 尝试查询对象的 key 和 name/display_name
+            # 支持的表名映射
+            table_name = object_type
             
             # 查询对象
             records = self.ds.find(table_name, filters={'id': object_id})
@@ -307,17 +319,22 @@ class AuditService:
             return result
             
         except Exception as e:
-            # 查询失败时返回空（不影响日志写入�?            return {}
+            # 查询失败时返回空（不影响日志写入）
+            return {}
 
     def _structure_fk_value(self, field_name: str, value: Any) -> Any:
         """
-        结构�?FK �?        
-        当字段名�?_id 结尾时，尝试解析目标对象信息
+        结构化 FK 值
+        
+        当字段名以 _id 结尾时，尝试解析目标对象信息
         
         Args:
-            field_name: 字段�?            value: 字段�?            
+            field_name: 字段名
+            value: 字段值
+            
         Returns:
-            结构�?JSON 或原始�?        """
+            结构化 JSON 或原始值
+        """
         if not self.ENABLE_FK_STRUCTURING:
             return value
         
@@ -328,7 +345,8 @@ class AuditService:
         if not self.FK_FIELD_PATTERN.match(field_name):
             return value
         
-        # 如果已经是结构化 JSON，直接返�?        if isinstance(value, dict) and 'target_type' in value:
+        # 如果已经是结构化 JSON，直接返回
+        if isinstance(value, dict) and 'target_type' in value:
             return value
         if isinstance(value, str) and value.startswith('{') and 'target_type' in value:
             return value
@@ -352,11 +370,13 @@ class AuditService:
             records = self.ds.find(target_type, filters={'id': target_id})
             
             if not records:
-                # 查询失败，返回原始�?                return value
+                # 查询失败，返回原始值
+                return value
             
             record = records[0]
             
-            # 构造结构化�?            result = {
+            # 构造结构化值
+            result = {
                 'target_type': target_type,
                 'target_id': target_id,
             }
@@ -374,11 +394,13 @@ class AuditService:
             return json.dumps(result, ensure_ascii=False)
             
         except Exception as e:
-            # 解析失败时返回原始�?            return value
+            # 解析失败时返回原始值
+            return value
 
     def _structure_fk_values_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        结构化数据中的所�?FK �?        
+        结构化数据中的所有 FK 值
+        
         Args:
             data: 数据字典
             
@@ -415,15 +437,17 @@ class AuditService:
         """
         写入审计日志
 
-        增强功能�?        1. 自动添加对象标识（audit_object_key, audit_object_display_name）到 extra_data
-        2. 自动结构�?FK 字段值（{target_type, target_id, target_key, target_display}�?        3. [v3.18] 自动 derive log_category (FR-003), log_level (FR-004), retention_until (FR-013)
+        增强功能：
+        1. 自动添加对象标识（audit_object_key, audit_object_display_name）到 extra_data
+        2. 自动结构化 FK 字段值（{target_type, target_id, target_key, target_display}）
+        3. [v3.18] 自动 derive log_category (FR-003), log_level (FR-004), retention_until (FR-013)
         4. [v3.18] 写入 outcome / cascade_root_id / cascade_root_action (FR-005/009)
         """
         try:
             now = datetime.now().isoformat()
 
-            # [FIX 2026-06-20 P2 v2] AuditService 入口�?auto-gen transaction_id/trace_id
-            # 覆盖所有调用方: AuditInterceptor + AuditLogger + 4 个直�?INSERT 路径
+            # [FIX 2026-06-20 P2 v2] AuditService 入口处 auto-gen transaction_id/trace_id
+            # 覆盖所有调用方: AuditInterceptor + AuditLogger + 4 个直接 INSERT 路径
             # (auth_api/user_api/user_reset_password/subflow_engine)
             if not transaction_id:
                 import uuid as _uuid
@@ -432,21 +456,22 @@ class AuditService:
                 import uuid as _uuid
                 trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
 
-            # [FIX 2026-06-19 E.2] 强制 action 不能为空, 否则�?ERROR
-            # 业务人员看到 '未识别操�? 是因为某些路径传入了�?action
-            # 这里是入口拦�? 早于所有后续处�?            if not action or (isinstance(action, str) and action.strip().upper() in ('', 'NULL', 'NONE')):
+            # [FIX 2026-06-19 E.2] 强制 action 不能为空, 否则报 ERROR
+            # 业务人员看到 '未识别操作' 是因为某些路径传入了空 action
+            # 这里是入口拦截, 早于所有后续处理
+            if not action or (isinstance(action, str) and action.strip().upper() in ('', 'NULL', 'NONE')):
                 import logging as _logging
                 _logging.getLogger(__name__).error(
                     f"[audit_service.log] action is empty/None! object_type={object_type} "
                     f"object_id={object_id} user_id={user_id} extra_data={extra_data}"
                 )
                 action = 'UNKNOWN'
-                # 把这个错误也记下�? 方便排查
+                # 把这个错误也记下来, 方便排查
                 if extra_data is None:
                     extra_data = {}
                 extra_data['_action_validation_error'] = 'action was empty at log() entry'
 
-            # [v3.18 FR-003/004/013] 自动 derive 缺失�?log_category/log_level/retention_until
+            # [v3.18 FR-003/004/013] 自动 derive 缺失的 log_category/log_level/retention_until
             from meta.core.audit_constants import (
                 derive_category, derive_level, retention_days,
             )
@@ -462,15 +487,17 @@ class AuditService:
             # 获取对象标识
             object_identity = self._get_object_identity(object_type, object_id)
             
-            # 合并�?extra_data
+            # 合并到 extra_data
             if object_identity:
                 extra_data = extra_data or {}
                 extra_data.update(object_identity)
             
             field_logs = []
             
-            # 支持直接传递字段名和�?            if field_name:
-                # FK 结构�?                structured_old = self._structure_fk_value(field_name, old_value) if old_value else ''
+            # 支持直接传递字段名和值
+            if field_name:
+                # FK 结构化
+                structured_old = self._structure_fk_value(field_name, old_value) if old_value else ''
                 structured_new = self._structure_fk_value(field_name, new_value) if new_value else ''
                 
                 field_logs.append({
@@ -480,7 +507,8 @@ class AuditService:
                 })
             
             elif action == 'CREATE' and new_data:
-                # FK 结构�?                structured_data = self._structure_fk_values_in_data(new_data)
+                # FK 结构化
+                structured_data = self._structure_fk_values_in_data(new_data)
                 for field, value in structured_data.items():
                     field_logs.append({
                         'field_name': field,
@@ -490,7 +518,8 @@ class AuditService:
             
             elif action == 'UPDATE':
                 if old_data and new_data:
-                    # FK 结构�?                    structured_old = self._structure_fk_values_in_data(old_data)
+                    # FK 结构化
+                    structured_old = self._structure_fk_values_in_data(old_data)
                     structured_new = self._structure_fk_values_in_data(new_data)
                     
                     all_fields = set(list(structured_old.keys()) + list(structured_new.keys()))
@@ -510,7 +539,8 @@ class AuditService:
                                 'new_value': new_str,
                             })
                 elif new_data:
-                    # FK 结构�?                    structured_data = self._structure_fk_values_in_data(new_data)
+                    # FK 结构化
+                    structured_data = self._structure_fk_values_in_data(new_data)
                     for field, value in structured_data.items():
                         if value is not None and str(value):
                             field_logs.append({
@@ -520,7 +550,8 @@ class AuditService:
                             })
             
             elif action == 'DELETE' and old_data:
-                # FK 结构�?                structured_data = self._structure_fk_values_in_data(old_data)
+                # FK 结构化
+                structured_data = self._structure_fk_values_in_data(old_data)
                 
                 system_fields = {'id', 'created_at', 'updated_at'}
                 redundant_prefixes = ('version_',)
@@ -719,7 +750,8 @@ class AuditService:
             "total_pages": total_pages,
         }
 
-    # 字段优先级：取第一个非空字段作为对象的显示�?    _DISPLAY_FIELD_CANDIDATES = ('display_name', 'name', 'username', 'title', 'code')
+    # 字段优先级：取第一个非空字段作为对象的显示名
+    _DISPLAY_FIELD_CANDIDATES = ('display_name', 'name', 'username', 'title', 'code')
 
     def _resolve_display_name(self, record: Dict[str, Any]) -> str:
         """从对象记录中取第一个非空的 display 字段"""
@@ -730,7 +762,8 @@ class AuditService:
         return ''
 
     def _lookup_display_names(self, type_id_pairs) -> Dict[str, str]:
-        """批量�?(type, id) -> display_name 映射�?
+        """批量查 (type, id) -> display_name 映射。
+
         type_id_pairs: Iterable[Tuple[str, str]]
         返回: {(type, id): display_name}
         """
@@ -738,7 +771,7 @@ class AuditService:
         if not type_id_pairs:
             return result
 
-        # �?type 分组
+        # 按 type 分组
         grouped: Dict[str, List[str]] = {}
         for t, i in type_id_pairs:
             if not t or i is None or i == '':
@@ -760,7 +793,7 @@ class AuditService:
             unique_ids = set(str(i) for i in id_list)
             table_name = type_to_table.get(t, t)
             try:
-                # 优先�?id 列表查询（如果支持的话）；否则降级查全表
+                # 优先按 id 列表查询（如果支持的话）；否则降级查全表
                 try:
                     rows = self.ds.find(table_name, filters={'id': list(unique_ids)}) or []
                 except Exception:
@@ -816,7 +849,7 @@ class AuditService:
                     'id': parent_id,
                 }
 
-        # [FIX 2026-06-09] 为每条记录附�?object/parent �?display name
+        # [FIX 2026-06-09] 为每条记录附上 object/parent 的 display name
         try:
             pairs = set()
             for r in records:
@@ -828,7 +861,8 @@ class AuditService:
                 pid = r.get('parent_object_id')
                 if pt and pid is not None and pid != '':
                     pairs.add((pt, str(pid)))
-                # 关联日志�?old_data/new_data 里的 target_id 也要�?                for fld in ('old_data', 'new_data'):
+                # 关联日志的 old_data/new_data 里的 target_id 也要查
+                for fld in ('old_data', 'new_data'):
                     payload = r.get(fld)
                     if isinstance(payload, dict):
                         tt = payload.get('target_type')
@@ -949,7 +983,8 @@ class AuditService:
         获取按日志类型和级别统计
         
         Args:
-            start_time: 开始时�?            end_time: 结束时间
+            start_time: 开始时间
+            end_time: 结束时间
             
         Returns:
             Dict: 统计结果
@@ -1034,7 +1069,7 @@ class AuditService:
     def retry_failed_record(self, record_id: int) -> Dict[str, Any]:
         records = self.ds.find(self.AUDIT_TABLE, filters={"id": record_id})
         if not records:
-            return {"success": False, "message": "记录不存�?}
+            return {"success": False, "message": "记录不存在"}
 
         record = records[0]
         if record.get("status") != "failed":
@@ -1116,20 +1151,20 @@ class AuditService:
         return file_path
 
     # ========================================================================
-    # [P9-T1 2026-07-20] 决策日志记录 �?异步写入 permission_decisions
+    # [P9-T1 2026-07-20] 决策日志记录 — 异步写入 permission_decisions
     # Spec §4.9 / §8.9 P9-T1
     # ========================================================================
 
     # 决策日志表名
     PERMISSION_DECISIONS_TABLE = "permission_decisions"
 
-    # 线程�?(单线�? 避免过度并发; 主流程不被阻�?
+    # 线程池 (单线程, 避免过度并发; 主流程不被阻塞)
     _decision_log_executor = None
     _decision_log_executor_lock = threading.Lock()
 
     @classmethod
     def _get_decision_log_executor(cls):
-        """[P9-T1] 懒加载决策日志线程池 (单线�? 保证顺序写入)"""
+        """[P9-T1] 懒加载决策日志线程池 (单线程, 保证顺序写入)"""
         if cls._decision_log_executor is None:
             with cls._decision_log_executor_lock:
                 if cls._decision_log_executor is None:
@@ -1152,21 +1187,21 @@ class AuditService:
     ) -> bool:
         """[P9-T1] 记录权限决策日志 (Spec §4.9.1)
 
-        异步写入 permission_decisions �? 不阻塞主流程.
-        即使 DB 写入失败也不抛异�?(保证主流程不被阻�?.
+        异步写入 permission_decisions 表, 不阻塞主流程.
+        即使 DB 写入失败也不抛异常 (保证主流程不被阻塞).
 
         Args:
-            user: {'id': int, 'username': str, 'permission_set_id': Optional[int]}
+            user: {'id': int, 'username': str, 'role_id': Optional[int]}
             action: 操作类型 ('read' / 'write' / 'delete' / 'manage')
             resource_type: 资源类型 ('product' / 'version' / ...)
             resource_id: 资源 ID
             decision: 决策结果 ('allow' / 'deny')
-            reason: 决策原因 ('owner_match' / 'prohibition_match' / 'visibility_denied' �?
-            trace_id: 可�? 追踪 ID (自动生成)
-            extra_data: 可�? 额外数据 (JSON 序列化存�?
+            reason: 决策原因 ('owner_match' / 'prohibition_match' / 'visibility_denied' 等)
+            trace_id: 可选, 追踪 ID (自动生成)
+            extra_data: 可选, 额外数据 (JSON 序列化存储)
 
         Returns:
-            True 表示提交成功 (异步写入, 不一定立即落�?
+            True 表示提交成功 (异步写入, 不一定立即落库)
         """
         try:
             # 提取用户信息
@@ -1190,13 +1225,13 @@ class AuditService:
                 'created_at': datetime.now().isoformat(),
             }
 
-            # �?extra_data �?role_id, 提取到顶�?(用于 by_role 报告)
-            if extra_data and 'permission_set_id' in extra_data and permission_set_id is None:
+            # 若 extra_data 含 role_id, 提取到顶层 (用于 by_role 报告)
+            if extra_data and 'role_id' in extra_data and role_id is None:
                 role_id = extra_data['role_id']
 
-            # 同步写入 (保证测试可见�? 但用 try/except 保护主流�?
+            # 同步写入 (保证测试可见性, 但用 try/except 保护主流程)
             # 异步模式留给生产环境配置; 测试场景下同步写入更易断言
-            self._write_decision_record(record, permission_set_id)
+            self._write_decision_record(record, role_id)
 
             return True
         except Exception as e:
@@ -1206,14 +1241,14 @@ class AuditService:
             )
             return False
 
-    def _write_decision_record(self, record: Dict[str, Any], permission_set_id: Optional[int] = None) -> None:
-        """[P9-T1] 实际写入 permission_decisions �?(内部方法)
+    def _write_decision_record(self, record: Dict[str, Any], role_id: Optional[int] = None) -> None:
+        """[P9-T1] 实际写入 permission_decisions 表 (内部方法)
 
-        �?extra_data �?permission_set_id 等额外字�? 也会一并写�?
+        若 extra_data 含 role_id 等额外字段, 也会一并写入.
 
         Args:
             record: 决策日志记录
-            permission_set_id: 可�? 角色ID (用于 by_role 报告; 若为 None, 不写�?permission_set_id �?
+            role_id: 可选, 角色ID (用于 by_role 报告; 若为 None, 不写入 role_id 列)
         """
         try:
             # 检查表是否存在 (兼容老库)
@@ -1238,15 +1273,15 @@ class AuditService:
                     )
                 """)
 
-            # �?role_id 放到顶层 (如果列存�?
+            # 把 role_id 放到顶层 (如果列存在)
             insert_record = dict(record)
-            if permission_set_id is not None:
-                insert_record['permission_set_id'] = permission_set_id
+            if role_id is not None:
+                insert_record['role_id'] = role_id
 
             # 写入
             self.ds.insert(self.PERMISSION_DECISIONS_TABLE, insert_record)
         except Exception as e:
-            # 不抛异常, 仅记日志 (主流程不被阻�?
+            # 不抛异常, 仅记日志 (主流程不被阻塞)
             import logging
             logging.getLogger(__name__).debug(
                 f"[P9-T1 _write_decision_record] failed: {e}"

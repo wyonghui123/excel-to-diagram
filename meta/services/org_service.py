@@ -85,6 +85,35 @@ class OrgService:
         )
         return self._rows_to_dicts(cursor)
 
+    def get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """获取用户的有效组织 ID 集合 = 任职全部 org（org_members）∪ 各 org 祖先链（含自身）
+
+        [最小范围 · 组织架构继承] 支撑"父组织挂权限集 → 子组织成员沿祖先链自动获得权限"。
+        所有"用户 → 权限集/权限"的口径（功能权限、菜单、数据权限）都应改用本方法返回的
+        org ID 集合做 `gr.org_id IN (...)` 过滤，替代原来"仅查直属 org_members.org_id"。
+        """
+        cursor = self.ds.execute(
+            "SELECT DISTINCT org_id FROM org_members WHERE user_id = ?",
+            [user_id]
+        )
+        direct_ids = [row[0] for row in cursor.fetchall()]
+        effective = set(direct_ids)
+        for org_id in direct_ids:
+            effective.update(self.get_all_ancestor_orgs(org_id))
+        return sorted(effective)
+
+    def get_org_subtree_user_ids(self, org_id: int) -> List[int]:
+        """获取组织自身 + 全部子孙组织的成员用户 ID（权限变更后用于失效令牌 bump）"""
+        org_ids = [org_id] + self.get_all_descendant_orgs(org_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(
+            f"SELECT DISTINCT user_id FROM org_members WHERE org_id IN ({placeholders})",
+            org_ids
+        )
+        return [row[0] for row in cursor.fetchall()]
+
     def add_member(self, org_id: int, user_id: int, is_manager: bool = False) -> bool:
         """添加成员到组织"""
         try:
@@ -324,14 +353,18 @@ class OrgService:
 
         重构后的权限解析路径：
         User → UserGroup → Role → DataPermission
+        [最小范围] 用户有效组织含祖先链，父组织挂权限集 → 子成员一并继承
         """
-        cursor = self.ds.execute("""
+        org_ids = self.get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
             SELECT DISTINCT rdp.* FROM permission_set_data_permissions rdp
             INNER JOIN org_permission_sets gr ON rdp.permission_set_id = gr.permission_set_id
-            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
-            WHERE ugm.user_id = ?
+            WHERE gr.org_id IN ({placeholders})
             ORDER BY rdp.resource_type, rdp.resource_id
-        """, [user_id])
+        """, org_ids)
         return self._rows_to_dicts(cursor)
 
     def migrate_org_data_permissions_to_roles(self):

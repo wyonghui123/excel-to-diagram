@@ -17,6 +17,11 @@ class MenuPermissionService:
     def __init__(self, data_source):
         self.ds = data_source
 
+    def _get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """用户的有效组织 ID 集合 = 任职 org ∪ 祖先链（支撑父组织挂权限集 → 子成员继承）"""
+        from meta.services.org_service import OrgService
+        return OrgService(self.ds).get_user_effective_org_ids(user_id)
+
     def _rows_to_dicts(self, cursor) -> List[Dict[str, Any]]:
         rows = cursor.fetchall()
         if not rows:
@@ -109,21 +114,23 @@ class MenuPermissionService:
             return result
 
         # [FIX 2026-06-08] 快速通道：如果用户通过 permission_set_menu_permissions 直接被授予了此菜单
-        # 路径：user → org_members → org_permission_sets → permission_set_menu_permissions
+        # 路径：user → org_members → org_permission_sets → permission_set_menu_permissions（含祖先组织继承）
         # 这符合"admin 在 UI 上给角色勾选菜单"的直觉，无需确保 permission_set_permissions 已同步
         try:
-            cursor = self.ds.execute("""
-                SELECT 1
-                FROM permission_set_menu_permissions rmp
-                INNER JOIN org_permission_sets gr ON rmp.permission_set_id = gr.permission_set_id
-                INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
-                WHERE ugm.user_id = ? AND rmp.menu_code = ?
-                LIMIT 1
-            """, [user_id, menu_code])
-            if cursor.fetchone():
-                result['visible'] = True
-                result['reason'] = '通过角色菜单权限直接授予'
-                return result
+            org_ids = self._get_user_effective_org_ids(user_id)
+            if org_ids:
+                placeholders = ','.join('?' * len(org_ids))
+                cursor = self.ds.execute(f"""
+                    SELECT 1
+                    FROM permission_set_menu_permissions rmp
+                    INNER JOIN org_permission_sets gr ON rmp.permission_set_id = gr.permission_set_id
+                    WHERE gr.org_id IN ({placeholders}) AND rmp.menu_code = ?
+                    LIMIT 1
+                """, org_ids + [menu_code])
+                if cursor.fetchone():
+                    result['visible'] = True
+                    result['reason'] = '通过角色菜单权限直接授予'
+                    return result
         except Exception as _e:
             logger.warning(f"[check_menu_visibility] permission_set_menu_permissions 快捷检查失败: {_e}")
 
@@ -270,19 +277,21 @@ class MenuPermissionService:
         for row in cursor.fetchall():
             result.add(row[0])
 
-        # [FIX 2026-06-08] 路径2：用户-用户组-角色（org_members → org_permission_sets）
+        # [FIX 2026-06-08] 路径2：用户-用户组-角色（org_members → org_permission_sets，含祖先组织继承）
         # 这是当前系统的实际授权路径（assign_role 通过 _get_or_create_personal_group）
-        cursor = self.ds.execute("""
-            SELECT DISTINCT p.code
-            FROM permissions p
-            INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
-            INNER JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
-            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
-            WHERE ugm.user_id = ?
-        """, [user_id])
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if org_ids:
+            placeholders = ','.join('?' * len(org_ids))
+            cursor = self.ds.execute(f"""
+                SELECT DISTINCT p.code
+                FROM permissions p
+                INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
+                INNER JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
+                WHERE gr.org_id IN ({placeholders})
+            """, org_ids)
 
-        for row in cursor.fetchall():
-            result.add(row[0])
+            for row in cursor.fetchall():
+                result.add(row[0])
 
         return result
 
@@ -292,20 +301,34 @@ class MenuPermissionService:
             return True
         
         for rt in resource_types:
-            cursor = self.ds.execute("""
-                SELECT COUNT(*) FROM (
-                    SELECT 1 FROM data_permissions 
-                    WHERE user_id = ? AND resource_type = ?
-                    UNION
-                    SELECT 1 FROM permission_set_data_permissions rdp
-                    INNER JOIN user_permission_sets ur ON rdp.permission_set_id = ur.permission_set_id
-                    WHERE ur.user_id = ? AND rdp.resource_type = ?
-                    UNION
-                    SELECT 1 FROM org_data_permissions gdp
-                    INNER JOIN org_members ugm ON gdp.org_id = ugm.org_id
-                    WHERE ugm.user_id = ? AND gdp.resource_type = ?
-                )
-            """, [user_id, rt, user_id, rt, user_id, rt])
+            org_ids = self._get_user_effective_org_ids(user_id)
+            if not org_ids:
+                # 无有效组织 → org 分支恒空，仅检查直连与个人组角色路径
+                cursor = self.ds.execute("""
+                    SELECT COUNT(*) FROM (
+                        SELECT 1 FROM data_permissions 
+                        WHERE user_id = ? AND resource_type = ?
+                        UNION
+                        SELECT 1 FROM permission_set_data_permissions rdp
+                        INNER JOIN user_permission_sets ur ON rdp.permission_set_id = ur.permission_set_id
+                        WHERE ur.user_id = ? AND rdp.resource_type = ?
+                    )
+                """, [user_id, rt, user_id, rt])
+            else:
+                placeholders = ','.join('?' * len(org_ids))
+                cursor = self.ds.execute(f"""
+                    SELECT COUNT(*) FROM (
+                        SELECT 1 FROM data_permissions 
+                        WHERE user_id = ? AND resource_type = ?
+                        UNION
+                        SELECT 1 FROM permission_set_data_permissions rdp
+                        INNER JOIN user_permission_sets ur ON rdp.permission_set_id = ur.permission_set_id
+                        WHERE ur.user_id = ? AND rdp.resource_type = ?
+                        UNION
+                        SELECT 1 FROM org_data_permissions gdp
+                        WHERE gdp.org_id IN ({placeholders}) AND gdp.resource_type = ?
+                    )
+                """, [user_id, rt, user_id, rt] + org_ids + [rt])
             
             count = cursor.fetchone()[0]
             if count > 0:

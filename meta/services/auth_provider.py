@@ -229,13 +229,21 @@ class LocalAuthProvider(AuthProvider):
             [new_hash, user_id]
         )
 
+    def _get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """用户的有效组织 ID 集合 = 任职 org ∪ 祖先链（支撑父组织挂权限集 → 子成员继承）"""
+        from meta.services.org_service import OrgService
+        return OrgService(self.ds).get_user_effective_org_ids(user_id)
+
     def _get_user_permission_sets(self, user_id: int) -> List[Dict]:
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT r.id, r.code, r.name FROM permission_sets r
+            f"""SELECT r.id, r.code, r.name FROM permission_sets r
                JOIN org_permission_sets gr ON r.id = gr.permission_set_id
-               JOIN org_members ugm ON gr.org_id = ugm.org_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         roles = []
         seen = set()
@@ -259,13 +267,16 @@ class LocalAuthProvider(AuthProvider):
         return roles
 
     def _get_user_permissions(self, user_id: int) -> List[str]:
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT DISTINCT p.code FROM permissions p
+            f"""SELECT DISTINCT p.code FROM permissions p
                JOIN permission_set_permissions rp ON p.id = rp.permission_id
                JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
-               JOIN org_members ugm ON gr.org_id = ugm.org_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         return [row[0] if isinstance(row, (list, tuple)) else row['code'] for row in cursor.fetchall()]
 
