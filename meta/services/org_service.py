@@ -367,6 +367,145 @@ class OrgService:
         """, org_ids)
         return self._rows_to_dicts(cursor)
 
+    # ========== 权限预览聚合内核（org/user 共用） ==========
+
+    def get_org_name(self, org_id: int) -> str:
+        """取组织名称（缺失返回空串）"""
+        cursor = self.ds.execute("SELECT name FROM orgs WHERE id = ?", [org_id])
+        row = cursor.fetchone()
+        return row[0] if row else ''
+
+    def _ancestor_chain(self, org_id: int) -> List[Dict[str, Any]]:
+        """构造 [本org, 父, 祖父...] 链，relation 标 direct/inherited，depth 根=0 向上递增。
+
+        沿用 get_all_ancestor_orgs 的循环防护。
+        """
+        chain = [{'org_id': org_id, 'relation': 'direct', 'depth': 0}]
+        for depth, aid in enumerate(self.get_all_ancestor_orgs(org_id), start=1):
+            chain.append({'org_id': aid, 'relation': 'inherited', 'depth': depth})
+        return chain
+
+    def _get_set_permissions(self, ps_id: int) -> List[Dict[str, Any]]:
+        """权限集内权限明细（含 granted=false 用于"排除"标注）"""
+        cursor = self.ds.execute(
+            """SELECT p.id AS permission_id, p.code AS permission_code,
+                      p.name AS permission_name, psp.granted AS granted
+               FROM permission_set_permissions psp
+               INNER JOIN permissions p ON psp.permission_id = p.id
+               WHERE psp.permission_set_id = ?
+               ORDER BY p.code""",
+            [ps_id]
+        )
+        return self._rows_to_dicts(cursor)
+
+    def get_permission_preview(self, identity_type: str, identity_id: int) -> Dict[str, Any]:
+        """权限预览聚合内核：返回 org 或 user 的有效权限全集（含继承与来源）。
+
+        复用主张：org/user 两入口共享本方法，仅根集合来源不同：
+        - org  : 根 = [org_id]，链 = _ancestor_chain（本组织优先，取最深 depth 小者）
+        - user : 根 = get_user_effective_org_ids（直属+祖先，天然去重，跨 root 用 sources 平铺）
+        只读聚合，无任何全量回退。
+        """
+        if identity_type == 'org':
+            chain = self._ancestor_chain(identity_id)
+            root_org_ids = [identity_id]
+        elif identity_type == 'user':
+            root_org_ids = self.get_user_effective_org_ids(identity_id)
+            chain = [{'org_id': oid, 'relation': 'direct', 'depth': 0} for oid in root_org_ids]
+        else:
+            raise ValueError(f"unknown identity_type: {identity_type}")
+
+        identity_name = self.get_org_name(identity_id) if identity_type == 'org' else ''
+
+        ps_map = {}     # ps_id -> merged permission_set
+        dp_map = {}     # (resource_type, resource_id, level) -> merged data_permission
+
+        for node in chain:
+            org_id = node['org_id']
+            org_name = self.get_org_name(org_id)
+            for ps in self.get_org_permission_sets(org_id):
+                ps_id = ps['permission_set_id']
+                src = {'org_id': org_id, 'org_name': org_name, 'relation': node['relation']}
+                merged = ps_map.get(ps_id)
+                if merged is None:
+                    ps_map[ps_id] = {
+                        'permission_set_id': ps_id,
+                        'permission_set_code': ps.get('code'),
+                        'permission_set_name': ps.get('name'),
+                        'description': ps.get('description'),
+                        'is_system': bool(ps.get('is_system')),
+                        'granted': True,
+                        '_depth': node['depth'],
+                        'source_orgs': [src],
+                        'permissions': self._get_set_permissions(ps_id),
+                    }
+                else:
+                    # org 单根链：仅当更浅（depth 更小）时替换为最深层来源
+                    if identity_type == 'org' and node['depth'] < merged['_depth']:
+                        merged['_depth'] = node['depth']
+                        merged['source_orgs'] = [src]
+                        merged['permissions'] = self._get_set_permissions(ps_id)
+                    # user 多根：平铺 sources
+                    if identity_type == 'user' and src not in merged['source_orgs']:
+                        merged['source_orgs'].append(src)
+
+        # 数据权限聚合：跨有效权限集去重 (resource_type, resource_id, permission_level)
+        for node in chain:
+            org_id = node['org_id']
+            org_name = self.get_org_name(org_id)
+            for ps in self.get_org_permission_sets(org_id):
+                ps_id = ps['permission_set_id']
+                ps_name = ps.get('name') or ps.get('code')
+                cursor = self.ds.execute(
+                    """SELECT resource_type, resource_id, permission_level, inherit_to_children
+                       FROM permission_set_data_permissions
+                       WHERE permission_set_id = ?
+                       ORDER BY resource_type, resource_id""",
+                    [ps_id]
+                )
+                for row in self._rows_to_dicts(cursor):
+                    key = (row['resource_type'], row['resource_id'], row['permission_level'])
+                    src = {
+                        'org_id': org_id,
+                        'org_name': org_name,
+                        'permission_set_name': ps_name,
+                    }
+                    if key not in dp_map:
+                        dp_map[key] = {
+                            'resource_type': row['resource_type'],
+                            'resource_id': row['resource_id'],
+                            'permission_level': row['permission_level'],
+                            'inherit_to_children': bool(row.get('inherit_to_children')),
+                            'sources': [src],
+                        }
+                    elif src not in dp_map[key]['sources']:
+                        dp_map[key]['sources'].append(src)
+
+        permission_sets = [ps_map[k] for k in sorted(ps_map)]
+        for ps in permission_sets:
+            ps.pop('_depth', None)
+
+        return {
+            'identity_type': identity_type,
+            'identity_id': identity_id,
+            'identity_name': identity_name,
+            'root_orgs': [{'org_id': oid, 'org_name': self.get_org_name(oid)} for oid in root_org_ids],
+            'summary': {
+                'permission_set_count': len(permission_sets),
+                'source_org_count': len({s['org_id'] for ps in permission_sets for s in ps['source_orgs']}),
+                'direct_count': sum(
+                    1 for ps in permission_sets
+                    if any(s['relation'] == 'direct' for s in ps['source_orgs'])
+                ),
+                'inherited_count': len(permission_sets) - sum(
+                    1 for ps in permission_sets
+                    if any(s['relation'] == 'direct' for s in ps['source_orgs'])
+                ),
+            },
+            'permission_sets': permission_sets,
+            'data_permissions': list(dp_map.values()),
+        }
+
     def migrate_org_data_permissions_to_roles(self):
         """
         将旧的 org_data_permissions 迁移到基于角色的模型
