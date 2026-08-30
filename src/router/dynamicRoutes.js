@@ -20,8 +20,9 @@ const STATIC_ROUTE_NAMES = new Set([
 const STATIC_ROUTE_PATHS = new Set([
   '/dev/theme-preview', '/archdata-chart', '/config', '/test',
   '/component-comparison', '/dev/navigation-test', '/account',
-  '/detail/', '/system-admin', '/permission-set/',
-  '/system/permission-set-permission/', '/system/permission-set-detail/',
+  '/detail/', '/system-admin', '/role/', '/org/',
+  '/system/role-permission/', '/system/role-detail/',
+  '/permission-set/', '/permission-bundle/',
   '/system/task-management', '/system/task-definitions',
   '/system/task-queues', '/system/task-executions', '/system/ai-async-tasks',
 ])

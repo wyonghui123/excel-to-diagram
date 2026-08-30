@@ -52,7 +52,9 @@ export function useMenuPermissions() {
     // Fallback: compute on frontend
     const hubParents = new Set()
     const parentMenus = new Set()
+    const parentByCode = {}
     for (const m of flatMenus.value) {
+      parentByCode[m.menu_code] = m.page_type
       if (m.page_type === 'multi_object_hub') {
         hubParents.add(m.menu_code)
       }
@@ -63,8 +65,16 @@ export function useMenuPermissions() {
     return flatMenus.value.filter(m => {
       if (!m.menu_code || m.menu_code === 'dashboard') return false
       if (!m.menu_path) return false
+      // 隐藏菜单(sid=0)不作为 landing 卡片
+      if (m.show_in_sidebar === 0) return false
+      // [FIX 2026-08-29] 与后端一致, 仅展示"严格叶子":
+      //   ① 排空容器: 挂在容器(custom_page/multi_object_hub)下、自身也无 children 的多对象空容器(business-config)
+      //   ② top-level hub(arch-data) 保留; 容器自身有 children 走 parentMenus 排除
+      //   ③ 容器下的 object_list 叶子子菜单(user-list 等)正常展示
+      if (m.page_type === 'multi_object_hub'
+          && !(m.children && m.children.length > 0)
+          && ['custom_page', 'multi_object_hub'].includes(parentByCode[m.parent_menu])) return false
       if (parentMenus.has(m.menu_code)) return false
-      if (m.parent_menu && hubParents.has(m.parent_menu)) return false
       return true
     })
   })

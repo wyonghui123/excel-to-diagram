@@ -12,8 +12,11 @@ import metaService from '@/services/metaService'
 const SUPPORTED_OBJECT_TYPES = [
   'user',
   'user_group',
+  'org',
   'role',
   'permission',
+  'permission_set',
+  'permission_bundle',
   'enum_type',
   'enum_value',
   'domain',
@@ -61,8 +64,11 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
 
   const typeLabels = {
     'user': '用户',
-    'user_group': '组织',
-    'role': '权限集',
+    'user_group': '用户组',
+    'org': '组织',
+    'role': '角色',
+    'permission_set': '权限集',
+    'permission_bundle': '权限包',
     'permission': '权限',
     'enum_type': '枚举类型',
     'enum_value': '枚举值',
@@ -84,7 +90,7 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     }
   ]
 
-  if (normalizedType === 'user_group') {
+  if (normalizedType === 'org') {
     breadcrumbs.push({
       path: '/user-permission',
       title: '用户与权限管理'
@@ -93,7 +99,7 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
       path: '/user-permission',
       title: '组织管理'
     })
-  } else if (normalizedType === 'role') {
+  } else if (normalizedType === 'permission_set' || normalizedType === 'permission_bundle') {
     breadcrumbs.push({
       path: '/user-permission',
       title: '用户与权限管理'
