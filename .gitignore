@@ -116,6 +116,9 @@ logs/*.out
 meta/architecture.db.backup_*
 meta/architecture.db.backup_archive_*
 
+# DB snapshots (Spec 16 Phase 0 迁移前快照, 不入仓)
+meta/architecture.db.snapshot_*
+
 # Test artifact archives (date-stamped folders)
 _archive_*/
 
