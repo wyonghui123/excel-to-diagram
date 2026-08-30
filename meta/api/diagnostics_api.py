@@ -239,7 +239,7 @@ def _build_dim_scope_stats() -> dict:
             wildcard_rows = conn.execute(
                 "SELECT rds.permission_set_id, r.code, rds.dimension_code "
                 "FROM permission_set_dimension_scopes rds "
-                "LEFT JOIN roles r ON rds.permission_set_id = r.id "
+                "LEFT JOIN permission_sets r ON rds.permission_set_id = r.id "
                 "WHERE rds.dimension_values LIKE '%\"*\"%' "
                 "AND rds.scope_mode = 'include'"
             ).fetchall()

@@ -125,7 +125,7 @@ def list_roles():
     # [FIX 2026-06-08] 非管理员不能访问角色列表（避免 OperationalError 500）
     if not is_admin():
         return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
-    roles = _get_perm_service().get_all_roles()
+    roles = _get_perm_service().get_all_permission_sets()
 
     # [FR-006] 批量获取权限和更新时间, 避免 N+1 查询
     if roles:
@@ -433,7 +433,7 @@ def get_role_menus(permission_set_id):
             return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
 
         cursor = _data_source.execute("""
-            SELECT menu_code, created_at FROM role_menu_permissions
+            SELECT menu_code, created_at FROM permission_set_menu_permissions
             WHERE permission_set_id = ?
             ORDER BY created_at DESC
         """, [permission_set_id])

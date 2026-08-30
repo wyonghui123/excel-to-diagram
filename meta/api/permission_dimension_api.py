@@ -1392,7 +1392,7 @@ def get_permission_meta():
             if not _data_source:
                 _get_engine()
             # 菜单矩阵复用 role_menu_api 已重构的纯函数（菜单→required_permissions→bo_permission_groups）
-            from meta.api.role_menu_api import _build_role_unified_data
+            from meta.api.permission_set_menu_api import _build_role_unified_data
 
             unified_data = _build_role_unified_data(permission_set_id)
             if unified_data is not None:

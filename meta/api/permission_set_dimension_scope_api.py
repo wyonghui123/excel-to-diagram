@@ -19,7 +19,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-role_dim_bp = Blueprint('permission_set_dimension_scope', __name__, url_prefix='/api/v1/permission-set-dimension-scopes')
+role_dim_bp = Blueprint('permission_set_dimension_scope', __name__, url_prefix='/api/v1/permission-sets')
 
 _data_source = None
 

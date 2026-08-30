@@ -83,6 +83,22 @@ def _set_user_context():
     )
 
 
+def _bump_org_subtree_users(org_id: int) -> None:
+    """组织（含子孙）全部成员权限变更后失效令牌，强制重新鉴权拉取最新权限
+
+    [最小范围] 组织挂/摘权限集会影响该组织自身 + 全部子孙组织的成员，
+    必须对所有受影响用户 token bump，否则已登录用户要等 token 过期才生效。
+    """
+    try:
+        _get_group_service()  # 确保 _data_source 已初始化
+        from meta.services.token_version_service import token_version_service
+        user_ids = OrgService(_data_source).get_org_subtree_user_ids(org_id)
+        if user_ids:
+            token_version_service.bump(user_ids)
+    except Exception:
+        pass
+
+
 # v1.4 P8 Sunset (2026-06-05): 已移除 4 个主表 CRUD 端点
 #   - GET /orgs: 改用 v2/bo/user_group 端点
 #   - POST /orgs: 改用 v2/bo/user_group 端点
@@ -379,6 +395,9 @@ def set_org_permission_sets(org_id):
                 if result.success:
                     added_count += 1
 
+        # [最小范围] 挂/摘权限集影响 org 子树全部成员，失效令牌强制刷新
+        _bump_org_subtree_users(org_id)
+
         return jsonify({
             'success': True,
             'data': {
@@ -411,6 +430,7 @@ def add_group_role(org_id, permission_set_id):
         )
 
         if result.success:
+            _bump_org_subtree_users(org_id)
             return jsonify({'success': True})
         return jsonify({'success': False, 'message': result.message}), 400
     except Exception as e:
@@ -436,6 +456,7 @@ def remove_group_role(org_id, permission_set_id):
         )
 
         if result.success:
+            _bump_org_subtree_users(org_id)
             return jsonify({'success': True})
         return jsonify({'success': False, 'message': result.message}), 500
     except Exception as e:

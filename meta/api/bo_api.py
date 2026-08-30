@@ -3028,6 +3028,16 @@ def list_set_permissions_v2(ps_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+# [Spec 16 2026-08-29] alias: /api/v2/permission-sets/<id>/unified-permissions
+# 与 /api/v2/roles/<id>/unified-permissions (role_v2_bp) 等价, 保留两份避免破坏旧调用方
+@permission_set_v2_bp.route('/<int:ps_id>/unified-permissions', methods=['GET'])
+@login_required
+def get_permission_set_unified_permissions_alias(ps_id):
+    """[Spec 16] alias: GET /api/v2/permission-sets/{id}/unified-permissions"""
+    # 委托给 role_v2_bp 的 handler (内部用 permission_set_id 参数)
+    return get_role_unified_permissions(ps_id)
+
+
 @permission_set_v2_bp.route('/user/<int:user_id>', methods=['GET'])
 @login_required
 def list_user_permission_sets_v2(user_id):
