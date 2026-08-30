@@ -55,8 +55,18 @@
           />
           <div class="menu-title-area">
             <span class="menu-name">{{ node.menu.display_name }}</span>
-            <span v-if="node.children.length > 0" class="menu-path">
-              ({{ countAssignedDescendants(node) }} 子项已分配)
+            <!-- [2026-08-30 只读态] 菜单来源权限集（来源 ps 集合，仿资源矩阵「来源：」标签） -->
+            <span
+              v-if="!props.editing && node.menu.source_ps_names?.length"
+              class="menu-source"
+            >
+              <el-tooltip
+                :content="`来源权限集：${node.menu.source_ps_names.join('、')}`"
+                placement="top"
+                :teleported="true"
+              >
+                <span class="menu-source-label">来源：{{ node.menu.source_ps_names.join('、') }}</span>
+              </el-tooltip>
             </span>
           </div>
 
@@ -405,23 +415,6 @@ function toggleExpand(code: string) {
   expandVersion.value++
 }
 
-/** [Phase 6 2026-08-25] 统计子节点中已分配的数量（用于父节点徽章）
- *  注: _partial 在 menuTree computed 里已计算（响应式更新），
- *       这里只读不改。
- *  [v32 2026-08-27] 改用派生态 (stateMap) 计算，避免父节点"所有子都分配但自身未勾"
- *  时的徽章与勾选不一致问题。
- */
-function countAssignedDescendants(node: MenuTreeNode): number {
-  let total = 0
-  function walk(n: MenuTreeNode) {
-    const s = stateMap.value.get(n.menu.menu_code)
-    if (s === 'assigned' || (s === undefined && n.menu.assigned)) total++
-    n.children.forEach(walk)
-  }
-  walk(node)
-  return total
-}
-
 function handleToggleMenu(menu: Menu) {
   // [v44 2026-08-27] 浏览态：理论 disabled 已阻断，这里再加防御性 guard
   if (!props.editing) return
@@ -623,9 +616,19 @@ function grantedCapCount(menu: Menu) {
   white-space: nowrap;
 }
 
-.menu-path {
+.menu-source {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 240px;
+  cursor: default;
+}
+.menu-source-label {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu-badges {

@@ -544,7 +544,7 @@ ui_view_config:
         label: 权限预览
         icon: lock
         type: readonly_aggregate
-        endpoint: /api/v1/users/{id}/permission-preview
+        endpoint: /api/v1/users/{id}/permission-config
 
 # ────────────────────────────────────────────
 # 状态转换规则

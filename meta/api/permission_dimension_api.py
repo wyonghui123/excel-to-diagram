@@ -1037,7 +1037,39 @@ def _build_role_matrices(permission_set_id: int,
                 manual[(rt, action)] = "include"
 
         # ---- 2. auto（菜单分配：勾选菜单 → required_permissions 自动授予）----
+        # [FIX 2026-08-30] 与 _build_role_unified_data 的 _is_perm_granted 语义对齐：
+        #   仅当该权限确实存在于权限集（permission_set_permissions granted=1 或超级权限 *）时，
+        #   才标记为 auto 授予。此前直接取菜单原始 required_permissions 全量，
+        #   导致「菜单树只显示 read、矩阵却全动作 granted」两处不一致（领域/子领域等行出现编辑权限）。
         auto: Dict[tuple, str] = {}
+        has_super_perm = False
+        role_perm_codes: Set[str] = set()
+        cursor = ds.execute(
+            "SELECT p.code FROM permissions p "
+            "JOIN permission_set_permissions rp ON p.id = rp.permission_id "
+            "WHERE rp.permission_set_id = ? AND rp.granted = 1",
+            [permission_set_id],
+        )
+        for (code,) in cursor.fetchall() or []:
+            if code == "*":
+                has_super_perm = True
+            else:
+                role_perm_codes.add(code)
+
+        def _auto_granted(code: str) -> bool:
+            """与 _build_role_unified_data._is_perm_granted 同语义：
+            超级权限全授；否则按 code（含 expanded 格式兼容）命中权限集实际权限。"""
+            if has_super_perm:
+                return True
+            if code in role_perm_codes:
+                return True
+            parts = code.split(":")
+            if len(parts) == 2:
+                expanded = f"{parts[0]}:{parts[0]}_{parts[1]}"
+                if expanded in role_perm_codes:
+                    return True
+            return False
+
         cursor = ds.execute(
             "SELECT m.required_permissions "
             "FROM menus m JOIN permission_set_menu_permissions rmp ON m.menu_code = rmp.menu_code "
@@ -1053,6 +1085,8 @@ def _build_role_matrices(permission_set_id: int,
             if not isinstance(req, list):
                 continue
             for code in req:
+                if not _auto_granted(code):
+                    continue
                 parts = str(code).split(":")
                 if len(parts) == 2 and parts[0] and parts[1]:
                     auto[(parts[0], parts[1])] = "auto"

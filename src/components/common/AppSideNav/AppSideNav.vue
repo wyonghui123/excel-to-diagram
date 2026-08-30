@@ -56,7 +56,8 @@ import {
   Search,
   Lock,
   Key,
-  CircleCheck
+  CircleCheck,
+  OfficeBuilding
 } from '@element-plus/icons-vue'
 
 const iconMap = {
@@ -88,7 +89,9 @@ const iconMap = {
   Key,
   'key': Key,
   CircleCheck,
-  'circle-check': CircleCheck
+  'circle-check': CircleCheck,
+  OfficeBuilding,
+  'office-building': OfficeBuilding
 }
 
 const props = defineProps({

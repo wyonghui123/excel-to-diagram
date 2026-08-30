@@ -82,6 +82,7 @@ class ObjectTypeService {
         'relationship': '关系',
         'user': '用户',
         'org': '组织',
+        'user_group': '组织',
         'permission_set': '权限集',
         'permission': '权限',
         'enum_type': '枚举类型',

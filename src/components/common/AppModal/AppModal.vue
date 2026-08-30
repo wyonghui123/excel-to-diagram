@@ -52,7 +52,16 @@
 
 <script setup>
 import { computed, watch, onMounted, onUnmounted, useSlots, ref, nextTick } from 'vue'
+import { useZIndex } from 'element-plus'
 import AppButton from '../AppButton/AppButton.vue'
+
+const { nextZIndex } = useZIndex()
+// [FIX 2026-08-30] 默认动态 z-index：打开时取 nextZIndex()，确保盖过已开启的
+//   Element Plus 弹层 (el-drawer/el-dialog 默认从 2000 起动态递增)。
+//   之前固定 var(--z-index-modal)=1400 < el 弹层 2000+ → 从 drawer 中弹出的
+//   AppModal 被 drawer 盖住 (如组织详情"+ 添加"弹窗)。
+//   动态递增同时保证弹窗内 el-select 下拉再次 nextZIndex() 后能正常显示。
+const dynamicZIndex = ref(null)
 
 const slots = useSlots()
 const modalRef = ref(null)
@@ -170,13 +179,21 @@ const containerClasses = computed(() => [
   }
 ])
 
-const containerStyle = computed(() => ({
-  width: typeof props.width === 'number' ? `${props.width}px` : props.width
-}))
+const containerStyle = computed(() => {
+  const w = props.width
+  // [2026-08-30] 纯数字字符串（如 width="720"）补 px：
+  //   无单位的 width 会被浏览器忽略 → 回退 .app-modal__container 的 width:100%，弹窗异常全宽
+  if (typeof w === 'number') return { width: `${w}px` }
+  if (typeof w === 'string' && /^\d+(\.\d+)?$/.test(w.trim())) return { width: `${w.trim()}px` }
+  return { width: w }
+})
 
 const modalStyle = computed(() => {
   if (props.zIndex != null) {
     return { zIndex: Number(props.zIndex) }
+  }
+  if (dynamicZIndex.value != null) {
+    return { zIndex: dynamicZIndex.value }
   }
   return {}
 })
@@ -268,19 +285,27 @@ const unlockBodyScroll = () => {
   }
 }
 
-watch(() => props.modelValue, (newVal) => {
+// immediate: 支持父组件以 v-if + model-value="true" 挂载的用法 (如 ConditionRuleDialog)，
+// 挂载时即分配动态 z-index，避免渲染时无 z-index 落回 CSS 默认值
+watch(() => props.modelValue, (newVal, oldVal) => {
   if (newVal) {
-    saveTriggerElement()
-    emit('open')
-    lockBodyScroll()
-    nextTick(() => {
-      focusFirstElement()
-    })
+    if (props.zIndex == null && dynamicZIndex.value == null) {
+      dynamicZIndex.value = nextZIndex()
+    }
+    // immediate 首次执行 (oldVal===undefined) 只分配 z-index，不触发副作用
+    if (oldVal !== undefined) {
+      saveTriggerElement()
+      emit('open')
+      lockBodyScroll()
+      nextTick(() => {
+        focusFirstElement()
+      })
+    }
   } else {
     unlockBodyScroll()
     restoreFocus()
   }
-})
+}, { immediate: true })
 
 onMounted(() => {
   document.addEventListener('keydown', handleKeydown)

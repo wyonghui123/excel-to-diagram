@@ -11,14 +11,12 @@
 /**
  * OrgManagement — 组织管理页（基于 MOMP 通用化注入）
  *
- * ⚠️ 依赖说明（务必阅读，防止误判已有 org 对象）：
- *   "用户组 → 组织（org）"的重命名目前仅停留在设计稿
- *   docs/spec_权限体系升级/16_role_to_permission_set_and_user_group_to_org.md（准备稿，不改代码）。
- *   元数据层尚无 org.yaml / org_functions，user_group 仍是"纯用户组"。
- *   因此本页以 user_group 作为组织的数据源：
- *     - 本页的导入导出即 user_groups 表这份主数据的导入导出（组织主数据维护）
- *     - 待 spec 16 落地（user_groups→orgs）后，本页需将对象类型/编码切到 org，
- *       并补 org_type / org_scope / org_functions 的额外管理语义。
+ * ⚠️ 数据源说明（Spec 16 迁移后）：
+ *   本分支为 Spec 16 权限集重构分支，提交 5b2b0ed 已将 user_group.yaml
+ *   迁移为 org.yaml（表 user_groups → orgs，含 org_type/org_scope/functions 语义）。
+ *   org.yaml 的 semantics.aliases 声明了 user_group 别名，因此本页下方
+ *   objectTypes=['user_group'] 运行时会被 registry 解析到 org（orgs 表），
+ *   即当前"组织"数据源实际为主数据 org。
  *
  * [MOMP 通用化 2026-08-30] 本页只做"配置注入"，不触碰 MOMP 本体：
  *   - objectTypes=['user_group']：以现有 user_group 元数据作为组织数据源
@@ -64,12 +62,12 @@ const pageOptions = {
       })
     }
   },
-  // 未选组织→id__in 空集守卫，绝不回退到全量加载
+  // 未选组织→不设 id__in，默认展示全部 org（不施加范围过滤）
   filterStrategies: {
     'user_group'(filters, scopeIds) {
       const ids = scopeIds?.['user_group']?.effective || []
       if (ids.length) return { ...filters, id__in: ids.join(',') }
-      return { ...filters, id__in: '-1' }
+      return filters
     }
   }
 }

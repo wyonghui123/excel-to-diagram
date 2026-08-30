@@ -415,6 +415,15 @@
                 </el-dropdown>
               </template>
             </el-table-column>
+
+            <!-- [MOMP 2026-08-30] 自定义空态：未选择范围时给出明确指示，替代默认"暂无数据" -->
+            <template #empty>
+              <div class="list-empty-state">
+                <el-icon :size="32" class="list-empty-icon"><FolderOpened /></el-icon>
+                <div class="list-empty-title">{{ props.emptyText }}</div>
+                <div v-if="props.emptyHint" class="list-empty-hint">{{ props.emptyHint }}</div>
+              </div>
+            </template>
           </el-table>
         </div>
       </div>
@@ -502,7 +511,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort, FolderOpened } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
@@ -620,6 +629,15 @@ const props = defineProps({
   externalEditing: {
     type: Boolean,
     default: null
+  },
+  // [MOMP 2026-08-30] 空态文案（用于"未选择范围"等场景给出明确指示，替代默认"暂无数据"）
+  emptyText: {
+    type: String,
+    default: '暂无数据'
+  },
+  emptyHint: {
+    type: String,
+    default: ''
   },
   // ========== compact mode props ==========
   displayMode: {
@@ -2034,6 +2052,31 @@ defineExpose({
 .table-wrapper {
   flex: 1;
   min-height: 0;
+}
+
+/* [MOMP 2026-08-30] 空态提示：未选择范围时给出明确指示 */
+.list-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+}
+
+.list-empty-state .list-empty-icon {
+  color: var(--color-text-quaternary, #c0c4cc);
+}
+
+.list-empty-state .list-empty-title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.list-empty-state .list-empty-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
 }
 
 .custom-table {

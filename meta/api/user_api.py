@@ -485,6 +485,20 @@ def get_user_permission_preview(user_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@user_bp.route('/<int:user_id>/permission-config', methods=['GET'])
+@login_required
+@require_permission('user:read')
+def get_user_permission_config(user_id):
+    """融合权限配置：user 下所有有效权限集合并为「完整的一份」（菜单+矩阵+数据范围）"""
+    try:
+        service = _get_org_service()
+        return jsonify({'success': True, 'data': service.get_fused_permission_config('user', user_id)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @user_bp.route('/<int:user_id>', methods=['PUT'])
 @login_required
 def update_user(user_id):

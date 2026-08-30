@@ -562,7 +562,7 @@ ui_view_config:
         label: 权限预览
         icon: lock
         type: readonly_aggregate
-        endpoint: /api/v1/orgs/{id}/permission-preview
+        endpoint: /api/v1/orgs/{id}/permission-config
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)

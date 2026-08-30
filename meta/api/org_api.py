@@ -342,6 +342,20 @@ def get_org_permission_preview(org_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@org_bp.route('/orgs/<int:org_id>/permission-config', methods=['GET'])
+@login_required
+@require_permission('org:read')
+def get_org_permission_config(org_id):
+    """融合权限配置：org 下所有有效权限集合并为「完整的一份」（菜单+矩阵+数据范围）"""
+    try:
+        service = _get_group_service()
+        return jsonify({'success': True, 'data': service.get_fused_permission_config('org', org_id)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @org_bp.route('/orgs/<int:org_id>/roles', methods=['GET'])
 @login_required
 @require_permission('user:read')

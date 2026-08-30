@@ -64,7 +64,7 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
 
   const typeLabels = {
     'user': '用户',
-    'user_group': '用户组',
+    'user_group': '组织',
     'org': '组织',
     'role': '角色',
     'permission_set': '权限集',

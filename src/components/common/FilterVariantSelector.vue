@@ -49,7 +49,7 @@
     </div>
     
     <Teleport to="body">
-      <div v-if="showSaveDialog" class="variant-dialog-overlay" @click.self="showSaveDialog = false">
+      <div v-if="showSaveDialog" class="variant-dialog-overlay" :style="saveDialogZIndex ? { zIndex: saveDialogZIndex } : {}" @click.self="showSaveDialog = false">
         <div class="variant-dialog">
           <div class="variant-dialog-header">
             <h3>保存过滤方案</h3>
@@ -93,10 +93,19 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useZIndex } from 'element-plus'
 import { useMessage } from '@/composables/useMessage'
 import * as filterVariantService from '@/services/filterVariantService'
 
 const message = useMessage()
+
+// [FIX 2026-08-30] 动态 z-index：与 AppModal 统一策略。
+//   弹窗从 el-drawer/el-dialog (z 2000+) 之上打开时，固定 1300 会被盖住
+const { nextZIndex } = useZIndex()
+const saveDialogZIndex = ref(null)
+watch(showSaveDialog, (v) => {
+  if (v) saveDialogZIndex.value = nextZIndex()
+})
 
 const props = defineProps({
   objectType: {
