@@ -410,8 +410,7 @@ ui_view_config:
   showChangeHistory: true
 
   list:
-    detail_mode: page
-    detail_path: '/detail/org'
+    detail_mode: drawer
     title: 组织管理
     description: 系统组织列表
     columns:
@@ -543,11 +542,6 @@ ui_view_config:
           - manager_id
           - description
 
-      - id: functions
-        label: 职能配置
-        type: custom
-        description: 组织可以承担多种职能（行政主体/法人/管理单位/采购单元/核算单元/利润中心/成本中心）
-
       - id: members
         label: 成员
         type: association
@@ -563,6 +557,12 @@ ui_view_config:
         actions:
           - assign
           - unassign
+
+      - id: permission_preview
+        label: 权限预览
+        icon: lock
+        type: readonly_aggregate
+        endpoint: /api/v1/orgs/{id}/permission-preview
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)

@@ -540,6 +540,12 @@ ui_view_config:
           - assign
           - unassign
 
+      - id: permission_preview
+        label: 权限预览
+        icon: lock
+        type: readonly_aggregate
+        endpoint: /api/v1/users/{id}/permission-preview
+
 # ────────────────────────────────────────────
 # 状态转换规则
 # ────────────────────────────────────────────
