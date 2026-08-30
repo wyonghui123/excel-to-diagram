@@ -398,6 +398,22 @@ class OrgService:
         )
         return self._rows_to_dicts(cursor)
 
+    def _get_org_permission_sets(self, org_id: int) -> List[Dict[str, Any]]:
+        """获取组织关联权限集（预览专用，只取现存列）。
+
+        不复用 get_org_permission_sets：该共享方法仍引用 Spec16 迁移已删除的 r.priority 列，
+        此处仅选取 permission_sets 现存的 code/name/description/is_system。
+        """
+        cursor = self.ds.execute(
+            """SELECT r.id AS permission_set_id, r.code, r.name, r.description, r.is_system
+               FROM org_permission_sets gr
+               INNER JOIN permission_sets r ON gr.permission_set_id = r.id
+               WHERE gr.org_id = ?
+               ORDER BY r.name""",
+            [org_id]
+        )
+        return self._rows_to_dicts(cursor)
+
     def get_permission_preview(self, identity_type: str, identity_id: int) -> Dict[str, Any]:
         """权限预览聚合内核：返回 org 或 user 的有效权限全集（含继承与来源）。
 
@@ -423,7 +439,7 @@ class OrgService:
         for node in chain:
             org_id = node['org_id']
             org_name = self.get_org_name(org_id)
-            for ps in self.get_org_permission_sets(org_id):
+            for ps in self._get_org_permission_sets(org_id):
                 ps_id = ps['permission_set_id']
                 src = {'org_id': org_id, 'org_name': org_name, 'relation': node['relation']}
                 merged = ps_map.get(ps_id)
@@ -453,7 +469,7 @@ class OrgService:
         for node in chain:
             org_id = node['org_id']
             org_name = self.get_org_name(org_id)
-            for ps in self.get_org_permission_sets(org_id):
+            for ps in self._get_org_permission_sets(org_id):
                 ps_id = ps['permission_set_id']
                 ps_name = ps.get('name') or ps.get('code')
                 cursor = self.ds.execute(

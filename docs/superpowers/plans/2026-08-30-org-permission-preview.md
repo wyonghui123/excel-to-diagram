@@ -248,6 +248,8 @@ Expected: FAIL `AttributeError: 'OrgService' object has no attribute 'get_permis
 
 > 注意：`get_org_permission_sets` 已 SELECT `r.code`, `r.name`, `r.description`, `r.priority`, `r.is_system`（见 [org_service.py L288-299](file:///d:/filework/worktrees/feat-permission-set-refactor/meta/services/org_service.py)），故 `ps.get('code'/'name'/'is_system')` 有效。
 
+> **实现期修正（Spec16 迁移遗留）**：真实 `permission_sets` 表已无 `priority` 列，`get_org_permission_sets` 引用 `r.priority` 会报 `no such column`。为避免触碰共享方法，内核改用新增私有方法 `_get_org_permission_sets(org_id)`（只 select `permission_set_id/code/name/description/is_system` 现存列），内核中两处 org→权限集查询均改用之。
+
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cd d:\filework\worktrees\feat-permission-set-refactor && python -m pytest meta/tests/test_permission_preview.py -v`
