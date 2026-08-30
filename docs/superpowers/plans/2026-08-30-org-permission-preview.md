@@ -196,8 +196,7 @@ Expected: FAIL `AttributeError: 'OrgService' object has no attribute 'get_permis
                 ps_id = ps['permission_set_id']
                 ps_name = ps.get('name') or ps.get('code')
                 cursor = self.ds.execute(
-                    """SELECT resource_type, resource_id, permission_level,
-                              inherit_to_children, children_ids
+                    """SELECT resource_type, resource_id, permission_level, inherit_to_children
                        FROM permission_set_data_permissions
                        WHERE permission_set_id = ?
                        ORDER BY resource_type, resource_id""",
@@ -428,8 +427,8 @@ git commit -m "feat(perm): org/user 权限预览只读端点"
 import { ref, computed } from 'vue'
 
 const props = defineProps({
-  endpoint: { type: String, default: '' },   // 由元数据 config 注入，如 /api/v1/orgs/{id}/permission-preview（id 已插值）
-  fetchFn: { type: Function, default: null }, // 可注入的拉取函数（默认用 fetch）
+  endpoint: { type: String, default: '' },   // 由元数据 config 注入，如 /orgs/{id}/permission-preview（id 已插值；/api/v1 前缀会被归一化）
+  fetchFn: { type: Function, default: null }, // 可注入的拉取函数（默认用 apiV1.get）
 })
 const emit = defineEmits(['loaded'])
 
@@ -445,18 +444,19 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    let endpoint = props.endpoint
+    if (endpoint.startsWith('/api/v1')) endpoint = endpoint.replace('/api/v1', '')
     const resp = props.fetchFn
       ? await props.fetchFn(props.endpoint)
-      : await fetch(props.endpoint)
-    const json = await resp.json()
-    if (json.success) {
-      data.value = json.data
-      emit('loaded', json.data)
+      : await apiV1.get(endpoint)
+    if (resp.success) {
+      data.value = resp.data
+      emit('loaded', resp.data)
     } else {
-      error.value = json.message || '加载失败'
+      error.value = resp.message || '加载失败'
     }
   } catch (e) {
-    error.value = String(e)
+    error.value = String(e?.message || e)
   } finally {
     loading.value = false
   }
