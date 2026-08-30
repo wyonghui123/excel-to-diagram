@@ -118,6 +118,14 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   const metaObjectRef = ref(null)
   provide('metaObject', metaObjectRef)
 
+  // [MOMP 通用化 2026-08-30] 注入扩展点常量
+  //   disableVersionContext: 组织页等无需版本上下文的页面设为 true，
+  //     使 baseFilters 不含版本/产品过滤、canImport/Export/ShowChart/Refresh 去掉
+  //     selectedVersionId 前置、保存/恢复图表状态时跳过版本上下文。
+  const disableVersionContext = config.disableVersionContext === true
+  // stateKey: 替代硬编码的图表状态暂存 key，组织页用 'orgManagerStateBeforeDiagram'
+  const stateRestoreKey = config.stateKey || 'archManagerStateBeforeDiagram'
+
   // 便捷引用：层级配置数组（供 hierarchyService 纯函数使用）
   const levels = hierarchyTypes.levels
 
@@ -282,6 +290,13 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   function _computeTypeFilters(objectType) {
     const filters = {}
 
+    // [MOMP 通用化 2026-08-30] filterStrategies 优先级最高（比 customFilterBuilders 更优先），
+    //   供组织管理页等非层级对象页注入按类型过滤策略。组织页在此做
+    //   effective 非空→id__in / 空→id__in 空集守卫，确保未选组织时绝不回退全量加载。
+    if (config.filterStrategies?.[objectType]) {
+      return config.filterStrategies[objectType](filters, scopeIds)
+    }
+
     if (config.customFilterBuilders?.[objectType]) {
       return config.customFilterBuilders[objectType](filters, scopeIds)
     }
@@ -431,6 +446,19 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    *   关系过滤: scope.relationCodes/categoryTypes/filterRelationCodes → scopeIds.relationExtra
    */
   function handleScopeChange(scope) {
+    // [MOMP 通用化 2026-08-30] scopeAdapter.handleScopeChange 覆盖默认处理：
+    //   组织页注入 OrgScopeTree 专用 scope 语义（orgIds/effectiveOrgIds），与 archdata 的
+    //   selected*Ids/effective*Ids 映射解耦，保证组织语义只进 adapter、不进本通用逻辑。
+    if (config.scopeAdapter?.handleScopeChange) {
+      return config.scopeAdapter.handleScopeChange(scope, {
+        scopeIds,
+        objectTypes,
+        levels: levels.value,
+        hierarchyService,
+        scopeSource
+      })
+    }
+
     // [FIX 2026-08-07] 添加短字段名映射, 兼容 treeNodesToScope 返回的 { boIds, domainIds, ... } 格式
     //   RelationScopeTree 的 scope-change 事件使用短字段名, 而 URL scope 参数使用 selected*Ids 格式
     const typeToShortField = {
@@ -541,7 +569,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   const canImport = computed(() => {
     if (actionsConfig.value.import.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有import权限就启用
     return objectTypes.some(type => authStore.hasPermission(`${type}:import`))
@@ -549,28 +577,29 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   const canExport = computed(() => {
     if (actionsConfig.value.export.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有export权限就启用
     return objectTypes.some(type => authStore.hasPermission(`${type}:export`))
   })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (actionsConfig.value.chart.require_filters === false) return true
     return hasScopeSelection.value
   })
   const canRefresh = computed(() =>
-    actionsConfig.value.refresh.enabled !== false && !!versionContext.selectedVersionId.value
+    actionsConfig.value.refresh.enabled !== false && (disableVersionContext || !!versionContext.selectedVersionId.value)
   )
 
   const importContext = computed(() => ({
-    version_id: versionContext.selectedVersionId.value,
-    product_id: versionContext.selectedProductId.value
+    version_id: disableVersionContext ? null : versionContext.selectedVersionId.value,
+    product_id: disableVersionContext ? null : versionContext.selectedProductId.value
   }))
 
   const baseFilters = computed(() => {
     const f = {}
+    if (disableVersionContext) return f
     if (versionContext.selectedVersionId.value) f.version_id = versionContext.selectedVersionId.value
     if (versionContext.selectedProductId.value) f.product_id = versionContext.selectedProductId.value
     return f
@@ -760,7 +789,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // 架构管理 → 图表展示 → 返回 状态持久化
   // 跳转前快照到 sessionStorage, 返回时由调用方读取并恢复 (避免 SPA 卸载导致 in-memory state 全部丢失)
-  const STATE_RESTORE_KEY = 'archManagerStateBeforeDiagram'
+  const STATE_RESTORE_KEY = stateRestoreKey
 
   function saveStateForDiagram() {
     try {
@@ -769,8 +798,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
         // [v32-FIX] 显式保存产品/版本 ID，避免 restore 时依赖单例 sessionStorage 异步恢复
         //   versionContext 是单例，tab 切回场景下 refs 保留，但 F5 刷新后 restoreContext() 是异步的，
         //   onMounted 时 selectedVersionId 仍为 null，导致 v-if 不渲染树，restore 的 scopeIds 无法应用
-        versionId: versionContext.selectedVersionId.value,
-        productId: versionContext.selectedProductId.value,
+        versionId: disableVersionContext ? null : versionContext.selectedVersionId.value,
+        productId: disableVersionContext ? null : versionContext.selectedProductId.value,
         scopeIds: {},
         tabFilters: JSON.parse(JSON.stringify(tabFilters.value || {})),
         initialBoIds: [],
@@ -838,7 +867,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       // [v32-FIX] 先恢复版本上下文，确保 v-if="selectedVersionId" 立即为 true，树能渲染
       //   然后再恢复 scopeIds/initialBoIds/initialRelationCodes 到树上
       // [FIX 2026-06-25] skipVersionRestore=true 时跳过版本上下文恢复（URL 优先场景）
-      if (!skipVersionRestore) {
+      // [MOMP 通用化 2026-08-30] disableVersionContext=true 时强制跳过版本上下文恢复
+      if (!skipVersionRestore && !disableVersionContext) {
         if (state.versionId != null) {
           versionContext.selectedVersionId.value = state.versionId
         }
@@ -923,6 +953,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     activeTab,
     tabs,
     versionContext,
+    disableVersionContext,
     filterFlow,
     contextSource,
     scopeSource,

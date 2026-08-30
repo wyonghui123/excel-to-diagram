@@ -1,6 +1,8 @@
 <template>
   <div class="global-toolbar">
-    <div class="gt-context">
+    <!-- [MOMP 通用化 2026-08-30] hideVersionContext=true（组织页等无版本上下文页面）时整体隐藏
+         产品/版本选择器区域，但保留右侧 actions（刷新/导入/导出） -->
+    <div v-if="!hideVersionContext" class="gt-context">
       <template v-if="compact && hasSelection">
         <span class="gt-compact-label">{{ selectedProduct?.name }} / {{ selectedVersion?.name }}</span>
         <el-button type="primary" link size="small" class="gt-switch-btn" @click="openSwitchDialog">
@@ -53,7 +55,7 @@
       </template>
     </div>
 
-    <div class="gt-sep"></div>
+    <div v-if="!hideVersionContext" class="gt-sep"></div>
 
     <div class="gt-actions">
       <el-tooltip v-if="!hideChartButton" :content="activeView === 'chart' ? '返回列表视图' : '图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
@@ -146,6 +148,12 @@ const props = defineProps({
     default: true
   },
   hideChartButton: {
+    type: Boolean,
+    default: false
+  },
+  // [MOMP 通用化 2026-08-30] hideVersionContext=true 时隐藏产品/版本选择器（gt-context）区域，
+  // 但保留 actions（刷新/导入/导出）。用于组织管理等无版本上下文的多对象页面。
+  hideVersionContext: {
     type: Boolean,
     default: false
   },
