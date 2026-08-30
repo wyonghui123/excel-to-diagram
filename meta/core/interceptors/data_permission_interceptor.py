@@ -380,14 +380,18 @@ class DataPermissionInterceptor(Interceptor):
         )
 
     def _get_role_ids(self, context: 'ActionContext') -> List[int]:
-        """从 context 获取当前用户的所有 permission_set_id"""
+        """从 context 获取当前用户的所有 permission_set_id（含祖先组织继承）"""
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(context.user_id)
+            if not org_ids:
+                return []
+            placeholders = ','.join('?' * len(org_ids))
             cursor = context.data_source.execute(
-                """SELECT DISTINCT gr.permission_set_id
+                f"""SELECT DISTINCT gr.permission_set_id
                    FROM org_permission_sets gr
-                   JOIN org_members ugm ON gr.org_id = ugm.org_id
-                   WHERE ugm.user_id = ?""",
-                [context.user_id]
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             return [row[0] for row in cursor.fetchall()]
         except Exception as e:
@@ -420,14 +424,18 @@ class DataPermissionInterceptor(Interceptor):
         except ImportError:
             return False
 
-        # 1. 查 user 的所有 permission_set_id (通过 group 链路)
+        # 1. 查 user 的所有 permission_set_id (通过 group 链路，含祖先组织继承)
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(context.user_id)
+            if not org_ids:
+                return False
+            placeholders = ','.join('?' * len(org_ids))
             cursor = context.data_source.execute(
-                """SELECT DISTINCT gr.permission_set_id
+                f"""SELECT DISTINCT gr.permission_set_id
                    FROM org_permission_sets gr
-                   JOIN org_members ugm ON gr.org_id = ugm.org_id
-                   WHERE ugm.user_id = ?""",
-                [context.user_id]
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             role_ids = [row[0] for row in cursor.fetchall()]
         except Exception as e:

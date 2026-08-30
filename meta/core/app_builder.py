@@ -277,7 +277,7 @@ class ApplicationBuilder:
         from meta.api.user_api import user_bp
         from meta.api.role_api import role_bp
         from meta.api.data_permission_api import data_perm_bp
-        from meta.api.role_menu_api import role_menu_bp
+        from meta.api.permission_set_menu_api import permission_set_menu_bp
         from meta.api.role_dim_api import role_dim_bp
         from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
         from meta.api.user_group_api import user_group_bp
@@ -324,7 +324,7 @@ class ApplicationBuilder:
         app.register_blueprint(user_bp)
         app.register_blueprint(role_bp)
         app.register_blueprint(data_perm_bp)
-        app.register_blueprint(role_menu_bp)
+        app.register_blueprint(permission_set_menu_bp)
         app.register_blueprint(role_dim_bp)
         app.register_blueprint(permission_dimension_bp)
         app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
@@ -581,6 +581,7 @@ class ApplicationBuilder:
             'bos',          # /api/v1/bos (FR-017 BO list)
             'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
             'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+            # [Spec 16 2026-08-29] 见 meta/server.py 的 V1_SPECIAL_PREFIXES (本文件不被实际调用)
         }
 
         @app.before_request
@@ -590,6 +591,9 @@ class ApplicationBuilder:
             V1_SPECIAL_PREFIXES 中的路径由 endpoint 层处理：
             - 业务关系路由继续工作
             - 主表 CRUD 路由（GET/POST/PUT/DELETE /user-groups, /roles）已移除
+
+            注意: 实际生效的版本在 meta/server.py (有 V1_CRUD_MIGRATION 精细化逻辑)
+            本文件版本仅作历史存档保留, 当前不被 server.py 调用.
             """
             if request.path.startswith('/api/v1/'):
                 path_parts = request.path[len('/api/v1/'):].split('/')

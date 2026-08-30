@@ -761,6 +761,13 @@ def create_app(db_path=None):
         'bos',          # /api/v1/bos (FR-017 BO list)
         'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
         'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+        # [Spec 16 2026-08-29] 旧 roles/user-groups → 新 permission_sets/orgs
+        # 路径段名变更后保留 v1 业务路由, 避免 deprecate_v1_crud 误拦截
+        'permission-sets',                 # /api/v1/permission-sets/* (Spec 16, 旧 roles)
+        'permission-set-menus',            # /api/v1/permission-set-menus/*
+        'permission-set-dimension-scopes', # /api/v1/permission-set-dimension-scopes/*
+        'orgs',                            # /api/v1/orgs/* (Spec 16, 旧 user-groups)
+        'org-permission-sets',             # /api/v1/org-permission-sets/* (Spec 16, 旧 group-roles)
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

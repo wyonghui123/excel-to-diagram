@@ -1268,8 +1268,20 @@ class MetaRegistry:
             self._ui_config_cache.pop(meta_object.id, None)
 
     def get(self, object_id: str) -> Optional[MetaObject]:
-        """获取元数据对象"""
-        return self._objects.get(object_id)
+        """获取元数据对象
+
+        [Spec 16 2026-08-29] 支持别名解析：如历史别名 user_group → org。
+        注册 id 优先精确匹配；未命中时按对象的 aliases 进行反向查找，
+        便于迁移后旧 object_type 仍能解析到新 id 的对象。
+        """
+        obj = self._objects.get(object_id)
+        if obj is not None:
+            return obj
+        for existing in self._objects.values():
+            aliases = getattr(getattr(existing, 'semantics', None), 'aliases', None)
+            if aliases and object_id in aliases:
+                return existing
+        return None
 
     def list_objects(self) -> List[str]:
         """列出所有元数据对象ID"""

@@ -2227,11 +2227,15 @@ class WriteScopeInterceptor(Interceptor):
             pass
 
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(user_id)
+            if not org_ids:
+                return []
+            placeholders = ','.join('?' * len(org_ids))
             rows = context.data_source.execute(
-                "SELECT DISTINCT gr.permission_set_id FROM org_permission_sets gr "
-                "JOIN org_members ugm ON ugm.org_id = gr.org_id "
-                "WHERE ugm.user_id = ?",
-                [user_id]
+                f"SELECT DISTINCT gr.permission_set_id FROM org_permission_sets gr "
+                f"WHERE gr.org_id IN ({placeholders})",
+                org_ids
             ).fetchall()
             role_ids = [r[0] for r in rows]
         except Exception as e:
@@ -2847,14 +2851,18 @@ class WriteScopeInterceptor(Interceptor):
         return RESOURCE_TABLE_MAP.get(object_type)
 
     def _get_user_role_ids_direct(self, user_id: int, data_source) -> Tuple[int, ...]:
-        """获取用户的 role_ids (直接 data_source 版本, 用于 FK scope 校验)"""
+        """获取用户的 role_ids (直接 data_source 版本, 用于 FK scope 校验; 含祖先组织继承)"""
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(data_source).get_user_effective_org_ids(user_id)
+            if not org_ids:
+                return ()
+            placeholders = ','.join('?' * len(org_ids))
             cursor = data_source.execute(
-                """SELECT DISTINCT gr.permission_set_id
+                f"""SELECT DISTINCT gr.permission_set_id
                    FROM org_permission_sets gr
-                   JOIN org_members ugm ON gr.org_id = ugm.org_id
-                   WHERE ugm.user_id = ?""",
-                [user_id]
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             return tuple(row[0] for row in cursor.fetchall())
         except Exception:
