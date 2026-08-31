@@ -11,6 +11,7 @@ Permission Feature Flags
   unified_permission_ui          — Phase 3: 启用新 UI
   condition_structured           — Phase 2: 结构化条件 (替代自由文本)
   action_independent             — Phase 2: action 独立性 (废弃 LEVEL_ORDER)
+  permission_set_refactor_enabled — Spec16: 启用 permission_set/org 表名 (默认开启)
 """
 import os
 from typing import Dict
@@ -22,6 +23,8 @@ _FLAGS: Dict[str, bool] = {
     'unified_permission_ui': False,
     'condition_structured': False,
     'action_independent': False,
+    # Spec16: 一次性合并方案 B - 默认开启. 关闭时回退到 role/user_group 旧表 (用于回滚验证).
+    'permission_set_refactor_enabled': True,
 }
 
 
