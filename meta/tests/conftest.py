@@ -1482,11 +1482,11 @@ def db_connection():
         CREATE TABLE group_roles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE,
-            FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
-            UNIQUE(group_id, role_id)
+            FOREIGN KEY (permission_set_id) REFERENCES roles(id) ON DELETE CASCADE,
+            UNIQUE(group_id, permission_set_id)
         )
     """)
     conn.execute("""
@@ -1577,10 +1577,10 @@ def created_role(db_connection):
     cursor.execute("""
         INSERT INTO roles (code, name, description)
         VALUES (?, ?, ?)
-    """, ('admin', 'Administrator', 'Full access role'))
+    """, ('admin', 'Administrator', 'Full access permission_set'))
     db_connection.commit()
-    role_id = cursor.lastrowid
-    cursor.execute("SELECT * FROM roles WHERE id = ?", (role_id,))
+    permission_set_id = cursor.lastrowid
+    cursor.execute("SELECT * FROM roles WHERE id = ?", (permission_set_id,))
     return cursor.fetchone()
 
 
@@ -1606,16 +1606,16 @@ def multiple_roles(db_connection):
 def user_with_role(db_connection, created_user, created_role):
     cursor = db_connection.cursor()
     cursor.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)",
-        ('test_role_group', 'Test Role Group'))
+        ('test_role_group', 'Test PermissionSet Group'))
     group_id = cursor.lastrowid
     cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
         (created_user['id'], group_id))
-    cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+    cursor.execute("INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)",
         (group_id, created_role['id']))
     db_connection.commit()
     return {
         'user': dict(created_user),
-        'role': dict(created_role),
+        'permission_set': dict(created_role),
         'group_id': group_id,
     }
 
@@ -1735,7 +1735,7 @@ def ensure_test_hierarchy_data():
                 INSERT OR IGNORE INTO business_objects (code, name, service_module_id, version_id, created_at)
                 VALUES 
                     ('user', '用户', ?, 1, datetime('now')),
-                    ('role', '角色', ?, 1, datetime('now')),
+                    ('permission_set', '角色', ?, 1, datetime('now')),
                     ('permission', '权限', ?, 1, datetime('now'))
             """, (sm_id, sm_id, sm_id))
 
@@ -1776,9 +1776,9 @@ def ensure_test_relationships():
             cursor.execute("""
                 INSERT OR IGNORE INTO relationships (name, from_entity, to_entity, relation_type, version_id, created_at)
                 VALUES 
-                    ('user_group_members', 'user', 'user_group', 'many_to_many', 1, datetime('now')),
-                    ('group_roles', 'user_group', 'role', 'many_to_many', 1, datetime('now')),
-                    ('role_permissions', 'role', 'permission', 'many_to_many', 1, datetime('now'))
+                    ('user_group_members', 'user', 'org', 'many_to_many', 1, datetime('now')),
+                    ('group_roles', 'org', 'permission_set', 'many_to_many', 1, datetime('now')),
+                    ('role_permissions', 'permission_set', 'permission', 'many_to_many', 1, datetime('now'))
             """)
             conn.commit()
 

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 [MODULE] permission_migration — 数据权限规则迁移 (Phase 3 P3-T2/P3-T3)
-[DESCRIPTION] 将 role_dimension_scopes / permission_rules 数据迁移到
+[DESCRIPTION] 将 permission_set_dimension_scopes / permission_rules 数据迁移到
               data_permission_rules 统一表, 通过 rule_type 区分.
 [SPEC] spec-permission-system-unification-2026-07-19 §8.3 P3-T2/P3-T3
 
-[P3-T2] role_dimension_scopes → data_permission_rules (rule_type='dimension')
+[P3-T2] permission_set_dimension_scopes → data_permission_rules (rule_type='dimension')
 [P3-T3] permission_rules → data_permission_rules (rule_type='condition')
 
 [设计原则]
@@ -19,8 +19,8 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 
-def migrate_role_dimension_scopes(ds) -> int:
-    """[P3-T2] 将 role_dimension_scopes 数据迁移到 data_permission_rules
+def migrate_permission_set_dimension_scopes(ds) -> int:
+    """[P3-T2] 将 permission_set_dimension_scopes 数据迁移到 data_permission_rules
 
     Args:
         ds: DB 数据源 (有 .execute() 方法)
@@ -36,47 +36,47 @@ def migrate_role_dimension_scopes(ds) -> int:
         )
 
     # 2. 幂等: 检查是否已迁移 (按 source_table + source_id 唯一)
-    already_migrated = _count_migrated(ds, 'role_dimension_scopes')
+    already_migrated = _count_migrated(ds, 'permission_set_dimension_scopes')
     if already_migrated > 0:
         logger.info(
             f'[P3-T2] Already migrated {already_migrated} rows from '
-            f'role_dimension_scopes. Skip.'
+            f'permission_set_dimension_scopes. Skip.'
         )
         return 0
 
     # 3. 读取源数据
-    if not _table_exists(ds, 'role_dimension_scopes'):
-        logger.warning('[P3-T2] role_dimension_scopes table does not exist. Skip.')
+    if not _table_exists(ds, 'permission_set_dimension_scopes'):
+        logger.warning('[P3-T2] permission_set_dimension_scopes table does not exist. Skip.')
         return 0
 
     src_rows = ds.execute(
-        "SELECT id, role_id, dimension_code, dimension_values, "
-        "inherit_children, scope_mode FROM role_dimension_scopes"
+        "SELECT id, permission_set_id, dimension_code, dimension_values, "
+        "inherit_children, scope_mode FROM permission_set_dimension_scopes"
     ).fetchall()
 
     if not src_rows:
-        logger.info('[P3-T2] No data in role_dimension_scopes. Skip.')
+        logger.info('[P3-T2] No data in permission_set_dimension_scopes. Skip.')
         return 0
 
     # 4. 批量插入
     migrated = 0
     for row in src_rows:
-        src_id, role_id, dim_code, dim_values, inherit_children, scope_mode = row
+        src_id, permission_set_id, dim_code, dim_values, inherit_children, scope_mode = row
         ds.execute(
             "INSERT INTO data_permission_rules "
-            "(role_id, rule_type, dimension_code, condition, scope_mode, "
+            "(permission_set_id, rule_type, dimension_code, condition, scope_mode, "
             " permission_level, inherit_to_children, propagate_to_parents, "
             " source_table, source_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                role_id, 'dimension', dim_code, dim_values, scope_mode or 'include',
+                permission_set_id, 'dimension', dim_code, dim_values, scope_mode or 'include',
                 'read', inherit_children if inherit_children is not None else 1,
-                0, 'role_dimension_scopes', src_id,
+                0, 'permission_set_dimension_scopes', src_id,
             ]
         )
         migrated += 1
 
-    logger.info(f'[P3-T2] Migrated {migrated} rows from role_dimension_scopes')
+    logger.info(f'[P3-T2] Migrated {migrated} rows from permission_set_dimension_scopes')
     return migrated
 
 
@@ -108,7 +108,7 @@ def migrate_permission_rules(ds) -> int:
         return 0
 
     src_rows = ds.execute(
-        "SELECT role_id, resource_type, condition, permission_level, "
+        "SELECT permission_set_id, resource_type, condition, permission_level, "
         "is_denied, inherit_to_children, propagate_to_parents "
         "FROM permission_rules"
     ).fetchall()
@@ -119,18 +119,18 @@ def migrate_permission_rules(ds) -> int:
 
     migrated = 0
     for idx, row in enumerate(src_rows):
-        role_id, resource_type, condition, permission_level, is_denied, \
+        permission_set_id, resource_type, condition, permission_level, is_denied, \
             inherit_to_children, propagate_to_parents = row
         # permission_rules 没有 id 主键, 用 idx+1 作为 source_id
         src_id = idx + 1
         ds.execute(
             "INSERT INTO data_permission_rules "
-            "(role_id, rule_type, resource_type, condition, "
+            "(permission_set_id, rule_type, resource_type, condition, "
             " permission_level, is_denied, inherit_to_children, propagate_to_parents, "
             " source_table, source_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                role_id, 'condition', resource_type, condition,
+                permission_set_id, 'condition', resource_type, condition,
                 permission_level or 'read', is_denied or 0,
                 inherit_to_children if inherit_to_children is not None else 1,
                 propagate_to_parents if propagate_to_parents is not None else 0,
@@ -149,7 +149,7 @@ def migrate_all(ds) -> Dict[str, int]:
     Returns:
         {'dimension': N, 'condition': M, 'total': N+M}
     """
-    dim_count = migrate_role_dimension_scopes(ds)
+    dim_count = migrate_permission_set_dimension_scopes(ds)
     cond_count = migrate_permission_rules(ds)
     return {
         'dimension': dim_count,
@@ -221,14 +221,14 @@ def migrate_visibility_config(ds, bo_metadata: dict = None) -> int:
         for resource_type, visibility_value in bo_metadata.items():
             if not visibility_value:
                 continue
-            # 生成 visibility rule (为所有 role_id 通配, 用 0 表示通配)
+            # 生成 visibility rule (为所有 permission_set_id 通配, 用 0 表示通配)
             ds.execute(
                 "INSERT INTO data_permission_rules "
-                "(role_id, rule_type, resource_type, condition, scope_mode, "
+                "(permission_set_id, rule_type, resource_type, condition, scope_mode, "
                 " permission_level, source_table, source_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    0,  # role_id=0 表示对所有角色生效 (visibility 是 BO 级配置)
+                    0,  # permission_set_id=0 表示对所有角色生效 (visibility 是 BO 级配置)
                     'visibility',
                     resource_type,
                     str(visibility_value),
@@ -254,7 +254,7 @@ def migrate_visibility_config(ds, bo_metadata: dict = None) -> int:
                 for (vis_val,) in rows:
                     ds.execute(
                         "INSERT INTO data_permission_rules "
-                        "(role_id, rule_type, resource_type, condition, "
+                        "(permission_set_id, rule_type, resource_type, condition, "
                         " permission_level, source_table, source_id) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         [
@@ -280,7 +280,7 @@ def _discover_bo_tables_with_visibility(ds) -> list:
         ).fetchall()
         for (table_name,) in rows:
             if table_name in ('sqlite_sequence', 'data_permission_rules',
-                              'role_dimension_scopes', 'permission_rules'):
+                              'permission_set_dimension_scopes', 'permission_rules'):
                 continue
             try:
                 cols = ds.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -299,7 +299,7 @@ def _discover_bo_tables_with_visibility(ds) -> list:
 # ============================================================================
 
 _LEGACY_TABLES_TO_DEPRECATE = [
-    'role_dimension_scopes',
+    'permission_set_dimension_scopes',
     'permission_rules',
 ]
 
@@ -404,7 +404,7 @@ def migrate_all_with_visibility(ds, bo_metadata: dict = None) -> Dict[str, int]:
     Returns:
         {'dimension': N, 'condition': M, 'visibility': K, 'total': N+M+K}
     """
-    dim_count = migrate_role_dimension_scopes(ds)
+    dim_count = migrate_permission_set_dimension_scopes(ds)
     cond_count = migrate_permission_rules(ds)
     vis_count = migrate_visibility_config(ds, bo_metadata)
     return {

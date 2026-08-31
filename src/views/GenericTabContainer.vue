@@ -100,9 +100,21 @@ const title = computed(() => {
   return getGroupTitle(props.group)
 })
 
+// [2026-08-30 Spec16] "组织管理"为 user-permission 组下的子 tab（menu_code=org-management）。
+// 它是 multi_object_hub 页面类型（非 object_list），需用组件渲染而非 GenericObjectList，
+// 因此精确映射该 tab 渲染 OrgManagement.vue（MOMP 泛化页）。
+const ORG_MANAGEMENT_LOADER = () => import('@/views/SystemManagement/OrgManagement.vue')
+
+function decorateOrgTab(tab) {
+  if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
+    return { ...tab, component: ORG_MANAGEMENT_LOADER }
+  }
+  return tab
+}
+
 const allTabs = computed(() => {
   if (USE_API_MENU && menuLoaded.value && apiTabs.value && apiTabs.value.length > 0) {
-    return apiTabs.value
+    return apiTabs.value.map(decorateOrgTab)
   }
 
   const configTabs = getGroupTabs(props.group)
@@ -110,7 +122,7 @@ const allTabs = computed(() => {
     ...t,
     key: t.key || t.menu_code,
     label: t.label || t.menu_name,
-  }))
+  })).map(decorateOrgTab)
 })
 
 const resolvedComponents = ref({})

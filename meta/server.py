@@ -122,16 +122,18 @@ from meta.services.trace_service import (
 )
 from meta.api.auth_api import auth_bp, init_auth_services
 from meta.api.user_api import user_bp, init_user_services
-from meta.api.role_api import role_bp, init_role_services
+from meta.api.permission_set_api import permission_set_bp, init_permission_set_services
 from meta.api.data_permission_api import data_perm_bp, init_data_perm_services
 # from meta.api.role_data_permission_api import role_data_permission_bp  # 模块不存在，已废弃
-from meta.api.user_group_api import user_group_bp, init_user_group_services
+from meta.api.org_api import org_bp, init_org_services
+from meta.api.org_function_api import org_function_bp, init_org_function_services
 from meta.api.enum_api import enum_bp, init_enum_services
 from meta.api.menu_permission_api import menu_permission_bp
 from meta.api.permission_bundle_api import permission_bundle_bp
 from meta.api.permission_audit_api import permission_audit_bp
-from meta.api.role_menu_api import role_menu_bp
-from meta.api.role_dimension_scope_api import role_dim_bp
+from meta.api.permission_set_menu_api import permission_set_menu_bp
+from meta.api.permission_set_dimension_scope_api import role_dim_bp as ps_dim_scope_bp
+# file's blueprint var is still role_dim_bp (Plan B kept for compat)
 from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
 from meta.api.permission_rule_api import permission_rule_bp
 from meta.api.permission_sync_api import permission_sync_bp
@@ -377,12 +379,13 @@ def create_app(db_path=None):
     from meta.scripts.migrate_system_admin import run_migration
     run_migration()
     init_user_services(data_source)
-    init_role_services(data_source)
+    init_permission_set_services(data_source)
     init_data_perm_services(data_source)
     init_enum_services(data_source, db_path)
     init_identity_services(data_source)
     init_association_services(data_source)
-    init_user_group_services(data_source)
+    init_org_services(data_source)
+    init_org_function_services(data_source)
     
     init_change_notification_tables(data_source)
 
@@ -661,15 +664,16 @@ def create_app(db_path=None):
     app.register_blueprint(schema_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(user_bp)
-    app.register_blueprint(role_bp)
+    app.register_blueprint(permission_set_bp)
     app.register_blueprint(data_perm_bp)
     # app.register_blueprint(role_data_permission_bp)  # 模块不存在，已废弃
-    app.register_blueprint(role_menu_bp)
-    app.register_blueprint(role_dim_bp)
+    app.register_blueprint(permission_set_menu_bp)
+    app.register_blueprint(ps_dim_scope_bp)
     app.register_blueprint(permission_dimension_bp)
     app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
     app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
-    app.register_blueprint(user_group_bp)
+    app.register_blueprint(org_bp)
+    app.register_blueprint(org_function_bp)
     app.register_blueprint(enum_bp)
     app.register_blueprint(menu_permission_bp)
     app.register_blueprint(permission_bundle_bp)
@@ -757,6 +761,13 @@ def create_app(db_path=None):
         'bos',          # /api/v1/bos (FR-017 BO list)
         'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
         'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+        # [Spec 16 2026-08-29] 旧 roles/user-groups → 新 permission_sets/orgs
+        # 路径段名变更后保留 v1 业务路由, 避免 deprecate_v1_crud 误拦截
+        'permission-sets',                 # /api/v1/permission-sets/* (Spec 16, 旧 roles)
+        'permission-set-menus',            # /api/v1/permission-set-menus/*
+        'permission-set-dimension-scopes', # /api/v1/permission-set-dimension-scopes/*
+        'orgs',                            # /api/v1/orgs/* (Spec 16, 旧 user-groups)
+        'org-permission-sets',             # /api/v1/org-permission-sets/* (Spec 16, 旧 group-roles)
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

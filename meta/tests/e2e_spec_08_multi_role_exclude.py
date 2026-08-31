@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Spec 08 多角色 exclude 跨 role 生效回归测试
+Spec 08 多角色 exclude 跨 permission_set 生效回归测试
 
 [P0-1 补充 2026-07-26]
-背景: EffectiveIntentChecker.check_multi_role 实现了多角色 exclude 跨 role 生效
-      (任一 role exclude 命中即拒绝, Deny 优先), 但 e2e_spec_08 系列未直接覆盖。
+背景: EffectiveIntentChecker.check_multi_role 实现了多角色 exclude 跨 permission_set 生效
+      (任一 permission_set exclude 命中即拒绝, Deny 优先), 但 e2e_spec_08 系列未直接覆盖。
 
 测试目标:
-1. 多角色场景下, 任一 role exclude 命中 → 整体拒绝 (Deny 优先)
+1. 多角色场景下, 任一 permission_set exclude 命中 → 整体拒绝 (Deny 优先)
 2. 多角色场景下, exclude 不命中 + 任一 include 命中 → 允许 (OR 合并)
-3. 多角色场景下, 一个 role 有 Intent + 另一 role 无 Intent → 走 Intent 路径
+3. 多角色场景下, 一个 permission_set 有 Intent + 另一 permission_set 无 Intent → 走 Intent 路径
 4. 所有角色都无 Intent → 允许所有 (默认)
-5. exclude 跨 role 生效: role A 的 exclude 优先于 role B 的 include
+5. exclude 跨 permission_set 生效: permission_set A 的 exclude 优先于 permission_set B 的 include
 
 测试用户:
 - admin: 通配, 全部可见
@@ -79,7 +79,7 @@ def get_data_items(resp):
 results = []
 
 print("=" * 80)
-print("Spec 08 多角色 exclude 跨 role 生效回归测试")
+print("Spec 08 多角色 exclude 跨 permission_set 生效回归测试")
 print("=" * 80)
 
 print("\n[Setup] 登录所有测试用户")
@@ -95,12 +95,12 @@ admin = users['admin']
 # [P2-B1 修复 2026-07-26] 保存原始 dim_scope 状态用于恢复
 # [P2-B2 修复 2026-07-26] 扩展预清理范围到所有相关角色 (11821/11993/12009/12010)
 #   - 之前测试可能遗留 wildcard/exclude 配置
-#   - 同一用户跨多个 role 时, wildcard+exclude 会触发 409 冲突
-#   - 测试开始时必须重置所有相关 role 到安全 include-only baseline
+#   - 同一用户跨多个 permission_set 时, wildcard+exclude 会触发 409 冲突
+#   - 测试开始时必须重置所有相关 permission_set 到安全 include-only baseline
 # ============================================================
 print("\n[Setup] 保存原始 dim_scope 状态")
-ORIGINAL_DIM_SCOPES = {}  # {role_id: [scope_dict, ...]}
-# 扩展到所有相关 role (避免跨角色 409 冲突)
+ORIGINAL_DIM_SCOPES = {}  # {permission_set_id: [scope_dict, ...]}
+# 扩展到所有相关 permission_set (避免跨角色 409 冲突)
 RELATED_ROLE_IDS = [11821, 11993, 12009, 12010]
 SAFE_BASELINES = {
     11821: [{'dimension_code': 'domain', 'dimension_values': [2200],
@@ -114,7 +114,7 @@ SAFE_BASELINES = {
              'inherit_children': True, 'scope_mode': 'include'}],
 }
 for rid in RELATED_ROLE_IDS:
-    status, resp, _ = call(admin, 'GET', f'/api/v1/roles/{rid}/dimension-scopes')
+    status, resp, _ = call(admin, 'GET', f'/api/v1/permission-sets/{rid}/dimension-scopes')
     if status == 200 and isinstance(resp, dict):
         items = resp.get('data', [])
         # 简化存储: 只保留 dimension_code, dimension_values, scope_mode, inherit_children
@@ -127,29 +127,29 @@ for rid in RELATED_ROLE_IDS:
                 'inherit_children': item.get('inherit_children', 1),
             })
         ORIGINAL_DIM_SCOPES[rid] = simplified
-        print(f"  role {rid}: {len(simplified)} scopes saved")
+        print(f"  permission_set {rid}: {len(simplified)} scopes saved")
 
-# [P2-B2 修复] 预清理: 重置所有相关 role 到 SAFE_BASELINE
-print("\n[Setup] 预清理: 重置所有相关 role 到 SAFE_BASELINE (避免跨角色 409 冲突)")
+# [P2-B2 修复] 预清理: 重置所有相关 permission_set 到 SAFE_BASELINE
+print("\n[Setup] 预清理: 重置所有相关 permission_set 到 SAFE_BASELINE (避免跨角色 409 冲突)")
 setup_ok_count = 0
 for rid in RELATED_ROLE_IDS:
     baseline = SAFE_BASELINES.get(rid, [])
     if not baseline:
         continue
-    status, resp, _ = call(admin, 'POST', f'/api/v1/roles/{rid}/dimension-scopes',
+    status, resp, _ = call(admin, 'POST', f'/api/v1/permission-sets/{rid}/dimension-scopes',
                            body=baseline)
     if status == 200:
         setup_ok_count += 1
-        print(f"  role {rid}: RESET OK")
+        print(f"  permission_set {rid}: RESET OK")
     else:
-        print(f"  role {rid}: RESET FAIL status={status}")
+        print(f"  permission_set {rid}: RESET FAIL status={status}")
 if setup_ok_count != len(RELATED_ROLE_IDS):
     print(f"  [WARNING] 预清理未全部成功 ({setup_ok_count}/{len(RELATED_ROLE_IDS)}), 后续测试可能 409")
 
 
-def restore_dim_scope(role_id):
-    """恢复 role 的原始 dim_scope"""
-    scopes = ORIGINAL_DIM_SCOPES.get(role_id, [])
+def restore_dim_scope(permission_set_id):
+    """恢复 permission_set 的原始 dim_scope"""
+    scopes = ORIGINAL_DIM_SCOPES.get(permission_set_id, [])
     # dimension_values 可能是 list of dict (含 id/code/name) 或 list of int
     # API 接受 list of int, 需要提取 id
     clean_scopes = []
@@ -168,7 +168,7 @@ def restore_dim_scope(role_id):
             'scope_mode': s.get('scope_mode', 'include'),
             'inherit_children': s.get('inherit_children', 1),
         })
-    status, _, _ = call(admin, 'POST', f'/api/v1/roles/{role_id}/dimension-scopes',
+    status, _, _ = call(admin, 'POST', f'/api/v1/permission-sets/{permission_set_id}/dimension-scopes',
                         body=clean_scopes)
     return status
 
@@ -210,19 +210,19 @@ results.append(('A2: wyonghui3 多角色 Union 返回多于单角色', len(sub_i
 
 
 # ============================================================
-# Part B: 多角色 exclude 跨 role 生效 (Deny 优先)
+# Part B: 多角色 exclude 跨 permission_set 生效 (Deny 优先)
 # ============================================================
 print("\n" + "=" * 80)
-print("Part B: 多角色 exclude 跨 role 生效 (Deny 优先)")
+print("Part B: 多角色 exclude 跨 permission_set 生效 (Deny 优先)")
 print("=" * 80)
 
-# B1: 给 wyonghui3 配 exclude (sub_domain=[339]) 在 role 12010
+# B1: 给 wyonghui3 配 exclude (sub_domain=[339]) 在 permission_set 12010
 # 期望: wyonghui3 通过 11821 角色仍可看到 339, 但 12010 的 exclude 应该拒绝 (Deny 优先)
 # [P2-B1 修复 2026-07-26] 修正 URL (v1+hyphen) 和 body 格式 (list)
 # [P2-B2 修复 2026-07-26] 移除 "409 当 PASS 跳过" 逻辑:
-#   - 预清理 (Setup) 已重置所有相关 role, 不应再出现 409
+#   - 预清理 (Setup) 已重置所有相关 permission_set, 不应再出现 409
 #   - 409 = 预清理失败或新缺陷, 应记为 FAIL 并实际验证 B2
-print("\n[B1] admin 给 wyonghui3 的 role 12010 配 exclude sub_domain=[339]")
+print("\n[B1] admin 给 wyonghui3 的 permission_set 12010 配 exclude sub_domain=[339]")
 exclude_body = [
     {
         'dimension_code': 'sub_domain',
@@ -231,7 +231,7 @@ exclude_body = [
     }
 ]
 status, resp, _ = call(admin, 'POST',
-    '/api/v1/roles/12010/dimension-scopes',
+    '/api/v1/permission-sets/12010/dimension-scopes',
     body=exclude_body)
 print(f"  Set exclude status: {status}")
 # [P2-B2 修复] 409 = 预清理失败 = FAIL (不再跳过)
@@ -243,27 +243,27 @@ if status == 409:
 results.append(('B1: 设置 exclude sub_domain=[339]', b1_ok))
 
 if b1_ok:
-    # B2: 验证 wyonghui3 看不到 339 (exclude 跨 role 生效)
-    print("\n[B2] wyonghui3 GET sub_domain list (期望不含 339, exclude 跨 role 生效)")
+    # B2: 验证 wyonghui3 看不到 339 (exclude 跨 permission_set 生效)
+    print("\n[B2] wyonghui3 GET sub_domain list (期望不含 339, exclude 跨 permission_set 生效)")
     status, resp, _ = call(users['wyonghui3'], 'GET',
         '/api/v2/bo/sub_domain?pageSize=200')
     items = get_data_items(resp)
     sub_ids = [item.get('id') for item in items]
     has_339_after_exclude = 339 in sub_ids
     print(f"  wyonghui3 visible sub_domains count: {len(sub_ids)}")
-    print(f"  包含 339 (期望 False, exclude 跨 role 生效): {has_339_after_exclude}")
-    results.append(('B2: wyonghui3 exclude 跨 role 生效 (不含 339)', not has_339_after_exclude))
+    print(f"  包含 339 (期望 False, exclude 跨 permission_set 生效): {has_339_after_exclude}")
+    results.append(('B2: wyonghui3 exclude 跨 permission_set 生效 (不含 339)', not has_339_after_exclude))
 
-    # B3: 恢复 role 12010 原始 dim_scope (清理测试数据)
+    # B3: 恢复 permission_set 12010 原始 dim_scope (清理测试数据)
     # [P2-B1 修复] 改用 restore_dim_scope 恢复原始状态 (而非清空)
-    print("\n[B3] 清理: 恢复 role 12010 原始 dim_scope")
+    print("\n[B3] 清理: 恢复 permission_set 12010 原始 dim_scope")
     status = restore_dim_scope(12010)
     print(f"  Restore status: {status}")
-    results.append(('B3: 恢复 role 12010', status == 200 or status == 404))
+    results.append(('B3: 恢复 permission_set 12010', status == 200 or status == 404))
 else:
     # B1 失败时, B2/B3 也记为 FAIL (避免假 PASS)
-    results.append(('B2: wyonghui3 exclude 跨 role 生效 (不含 339)', False))
-    results.append(('B3: 恢复 role 12010', False))
+    results.append(('B2: wyonghui3 exclude 跨 permission_set 生效 (不含 339)', False))
+    results.append(('B3: 恢复 permission_set 12010', False))
 
 
 # ============================================================
@@ -284,13 +284,13 @@ results.append(('C1: 无 Intent 时默认允许所有 (admin)', len(items) >= 0)
 
 
 # ============================================================
-# Part D: 多角色 + 一个 role 有 Intent + 一个无 Intent
+# Part D: 多角色 + 一个 permission_set 有 Intent + 一个无 Intent
 # ============================================================
 print("\n" + "=" * 80)
 print("Part D: 多角色混合 (一个有 Intent + 一个无 Intent)")
 print("=" * 80)
 
-# D1: wyonghui2 有 2 个 role: 11821 (有 dim scope) + 12009 (有 dim scope)
+# D1: wyonghui2 有 2 个 permission_set: 11821 (有 dim scope) + 12009 (有 dim scope)
 # 期望: 走 Intent 路径 (has_any_intent=True), 不是默认允许
 print("\n[D1] wyonghui2 GET product list (多角色都有 dim scope)")
 status, resp, _ = call(users['wyonghui2'], 'GET',
@@ -340,12 +340,12 @@ results.append(('E1: wyonghui 创建 product 成功 (owner_id=self)',
                 status in (200, 201) and created_id is not None))
 
 if created_id:
-    # E2: 给 wyonghui 的 role 配 exclude 包含 created_id
+    # E2: 给 wyonghui 的 permission_set 配 exclude 包含 created_id
     # dimension_code='product' (顶层维度)
     # [P2-B2 修复 2026-07-26] 移除 "409 当 PASS 跳过" 逻辑:
-    #   - 预清理 (Setup) 已重置所有相关 role, 不应再出现 409
+    #   - 预清理 (Setup) 已重置所有相关 permission_set, 不应再出现 409
     #   - 409 = 预清理失败或新缺陷, 应记为 FAIL 并实际验证 E3/E4
-    print(f"\n[E2] admin 给 role 11993 配 exclude product=[{created_id}]")
+    print(f"\n[E2] admin 给 permission_set 11993 配 exclude product=[{created_id}]")
     exclude_body = [
         {
             'dimension_code': 'product',
@@ -354,7 +354,7 @@ if created_id:
         }
     ]
     status, resp, _ = call(admin, 'POST',
-        '/api/v1/roles/11993/dimension-scopes',
+        '/api/v1/permission-sets/11993/dimension-scopes',
         body=exclude_body)
     print(f"  Set exclude status: {status}")
     # [P2-B2 修复] 409 = 预清理失败 = FAIL (不再跳过)
@@ -391,8 +391,8 @@ if created_id:
         results.append(('E3: Owner 优先级 > exclude (wyonghui 可见自己的 product)', False))
         results.append(('E4: Owner 写权限 > exclude (wyonghui 可修改自己的 product)', False))
 
-    # E5: 清理 - 恢复 role 11993 原始 dim_scope
-    print(f"\n[E5] 清理: 恢复 role 11993 原始 dim_scope")
+    # E5: 清理 - 恢复 permission_set 11993 原始 dim_scope
+    print(f"\n[E5] 清理: 恢复 permission_set 11993 原始 dim_scope")
     status = restore_dim_scope(11993)
     print(f"  Restore status: {status}")
 

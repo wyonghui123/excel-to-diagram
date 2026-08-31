@@ -13,6 +13,11 @@
 
 [SPEC] spec-permission-system-unification-2026-07-19 §4.13 / §8.13
 [FR] FR-030 (Profile 瘦化)
+
+[Plan B Task 2] 合并 role_service.py 逻辑
+    - 历史: role_service.py 已在 Plan A (commit 68e0872) 重命名/合并阶段被消除
+    - 当前: permission_set_service.py 已是单一真相源 (P13 模块)
+    - 角色(role)→权限集(permission_set) 表名重命名见 Plan A (rename_roles_to_permission_sets.py)
 """
 import logging
 from datetime import datetime
@@ -31,44 +36,28 @@ class PermissionSetService:
             data_source: DB 数据源 (需支持 execute(sql, params) 接口)
         """
         self._ds = data_source
+        # 注意: 表结构由 migration v070 (rename_roles_to_permission_sets.py)
+        # 统一创建, 列名遵循生产 schema (permission_set_id / role_id / permission_id / granted).
+        # 本类方法的 SQL (INSERT/SELECT) 已使用生产列名, 无需运行时建表.
         self._ensure_tables()
 
     # ========================================================================
-    # 表初始化 (lazy, 幂等)
+    # 表初始化 (lazy, 幂等) - DEPRECATED
     # ========================================================================
     def _ensure_tables(self):
-        """[P13-T1/T2] 确保 permission_sets 和 user_permission_sets 表存在"""
-        try:
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS permission_sets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code VARCHAR(200) NOT NULL UNIQUE,
-                    name VARCHAR(200) NOT NULL,
-                    description TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at VARCHAR(200),
-                    updated_at VARCHAR(200)
-                )
-            """)
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS user_permission_sets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    permission_set_id INTEGER NOT NULL,
-                    created_at VARCHAR(200),
-                    UNIQUE(user_id, permission_set_id)
-                )
-            """)
-            self._ds.execute("""
-                CREATE TABLE IF NOT EXISTS permission_set_permissions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    permission_set_id INTEGER NOT NULL,
-                    permission_code VARCHAR(200) NOT NULL,
-                    created_at VARCHAR(200)
-                )
-            """)
-        except Exception as e:
-            logger.debug(f'[P13] _ensure_tables (ignore if exists): {e}')
+        """[DEPRECATED] 表结构已由 migration v070 创建, 此方法保留仅为兼容.
+
+        历史: 早期 P13 实现期望通过 IF NOT EXISTS 自动建表.
+        问题: schema 与生产 DB 不匹配 (列名错位: permission_set_id vs role_id /
+              permission_code vs permission_id), 会导致 CREATE 创建出"伪表",
+              后续 INSERT 会写入错误列. 因此禁用在生产路径.
+        后续: 若未来需要在测试/fresh DB 中初始化 schema, 请调用迁移脚本
+              `python -m meta.migrations.v070__rename_roles_to_permission_sets` +
+              `python -m meta.migrations.v071__drop_p13_t3_residue_tables`,
+              而非在本类中建表.
+        """
+        # No-op: 表已由 migration v070/v071 创建
+        return
 
     # ========================================================================
     # P13-T1: permission_sets CRUD
@@ -138,6 +127,10 @@ class PermissionSetService:
         except Exception as e:
             logger.error(f'[P13-T1] list_all failed: {e}')
             return []
+
+    def get_all_permission_sets(self) -> List[Dict[str, Any]]:
+        """[Plan B] 别名方法, 兼容 role_service.get_all_roles() 调用方"""
+        return self.list_all()
 
     def update(self, ps_id: int, data: Dict[str, Any]) -> bool:
         """[P13-T1] 更新 Permission Set
@@ -254,9 +247,9 @@ class PermissionSetService:
 
         流程:
           1. 创建新 Permission Set (code=set_code, name=set_name)
-          2. 查询角色所有权限 (role_permissions JOIN permissions)
+          2. 查询角色所有权限 (从 permission_set_permissions JOIN permissions)
           3. 把权限复制到 permission_set_permissions
-          4. (可选) 关联到角色对应的所有用户 (通过 user_roles 表, 若存在)
+          4. (可选) 关联到角色对应的所有用户
 
         Args:
             role_id: 角色 ID
@@ -276,11 +269,12 @@ class PermissionSetService:
             if ps_id is None:
                 return None
 
-            # 2. 查询角色权限
+            # 2. 查询角色权限 (注: 表已重命名为 permission_set_*)
+            # role_permissions 已重命名为 permission_set_permissions
             cursor = self._ds.execute(
                 """SELECT p.code FROM permissions p
-                   JOIN role_permissions rp ON rp.permission_id = p.id
-                   WHERE rp.role_id = ?""",
+                   JOIN permission_set_permissions psp ON psp.permission_id = p.id
+                   WHERE psp.permission_set_id = ?""",
                 [role_id]
             )
             rows = cursor.fetchall()
@@ -288,16 +282,16 @@ class PermissionSetService:
             for row in rows:
                 perm_code = row[0] if isinstance(row, (tuple, list)) else row['code']
                 self._ds.execute(
-                    """INSERT INTO permission_set_permissions
+                    """INSERT OR IGNORE INTO permission_set_permissions
                        (permission_set_id, permission_code, created_at)
                        VALUES (?, ?, ?)""",
                     [ps_id, perm_code, now]
                 )
 
-            # 3. 关联到角色对应的所有用户 (若有 user_roles 表)
+            # 3. 关联到角色对应的所有用户
             try:
                 cursor = self._ds.execute(
-                    "SELECT user_id FROM user_roles WHERE role_id = ?",
+                    "SELECT user_id FROM user_permission_sets WHERE permission_set_id = ?",
                     [role_id]
                 )
                 user_rows = cursor.fetchall()
@@ -305,7 +299,6 @@ class PermissionSetService:
                     uid = urow[0] if isinstance(urow, (tuple, list)) else urow['user_id']
                     self.assign_to_user(uid, ps_id)
             except Exception:
-                # user_roles 表可能不存在, 跳过
                 pass
 
             logger.info(
@@ -318,18 +311,7 @@ class PermissionSetService:
             return None
 
     def user_has_permission_via_set(self, user_id: int, permission: str) -> bool:
-        """[P13-T3] 通过 Permission Set 检查用户是否有指定权限
-
-        用于验证迁移一致性: 迁移后 user_has_permission_via_set(user_id, perm)
-        应与迁移前 user_has_permission_via_role(user_id, perm) 结果一致.
-
-        Args:
-            user_id: 用户 ID
-            permission: 权限 code (如 'product.read')
-
-        Returns:
-            bool: True 表示用户通过 Permission Set 拥有该权限
-        """
+        """[P13-T3] 通过 Permission Set 检查用户是否有指定权限"""
         try:
             cursor = self._ds.execute(
                 """SELECT COUNT(*) FROM permission_set_permissions psp

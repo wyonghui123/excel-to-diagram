@@ -175,11 +175,11 @@ class ConditionPermissionService:
 
             cursor = self.ds.execute(
                 """INSERT INTO permission_rules
-                   (role_id, resource_type, condition, permission_level, is_denied,
+                   (permission_set_id, resource_type, condition, permission_level, is_denied,
                     inherit_to_children, propagate_to_parents, analysis_mode, created_by)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
-                    data['role_id'],
+                    data['permission_set_id'],
                     data['resource_type'],
                     data['condition'],
                     data.get('permission_level', 'read'),
@@ -237,17 +237,17 @@ class ConditionPermissionService:
         except Exception:
             return False
 
-    def get_rules_by_role(self, role_id: int, resource_type: Optional[str] = None) -> List[Dict]:
+    def get_rules_by_role(self, permission_set_id: int, resource_type: Optional[str] = None) -> List[Dict]:
         """获取角色的权限规则"""
         if resource_type:
             cursor = self.ds.execute(
-                "SELECT rowid AS id, * FROM permission_rules WHERE role_id = ? AND resource_type = ? ORDER BY resource_type",
-                [role_id, resource_type]
+                "SELECT rowid AS id, * FROM permission_rules WHERE permission_set_id = ? AND resource_type = ? ORDER BY resource_type",
+                [permission_set_id, resource_type]
             )
         else:
             cursor = self.ds.execute(
-                "SELECT rowid AS id, * FROM permission_rules WHERE role_id = ? ORDER BY resource_type",
-                [role_id]
+                "SELECT rowid AS id, * FROM permission_rules WHERE permission_set_id = ? ORDER BY resource_type",
+                [permission_set_id]
             )
         rules = self._rows_to_dicts(cursor)
         
@@ -261,12 +261,12 @@ class ConditionPermissionService:
         """获取所有权限规则"""
         if resource_type:
             cursor = self.ds.execute(
-                "SELECT rowid AS id, * FROM permission_rules WHERE resource_type = ? ORDER BY role_id, rowid",
+                "SELECT rowid AS id, * FROM permission_rules WHERE resource_type = ? ORDER BY permission_set_id, rowid",
                 [resource_type]
             )
         else:
             cursor = self.ds.execute(
-                "SELECT rowid AS id, * FROM permission_rules ORDER BY role_id, resource_type, rowid"
+                "SELECT rowid AS id, * FROM permission_rules ORDER BY permission_set_id, resource_type, rowid"
             )
         rules = self._rows_to_dicts(cursor)
         
@@ -292,7 +292,7 @@ class ConditionPermissionService:
             self.ds.execute("""
                 CREATE TABLE IF NOT EXISTS data_permission_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    role_id INTEGER NOT NULL,
+                    permission_set_id INTEGER NOT NULL,
                     rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
                     resource_type VARCHAR(200),
                     dimension_code VARCHAR(200),
@@ -332,13 +332,13 @@ class ConditionPermissionService:
 
             cursor = self.ds.execute(
                 """INSERT INTO data_permission_rules
-                   (role_id, rule_type, resource_type, dimension_code, condition,
+                   (permission_set_id, rule_type, resource_type, dimension_code, condition,
                     condition_display,
                     scope_mode, permission_level, is_denied,
                     inherit_to_children, propagate_to_parents, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
                 [
-                    data['role_id'],
+                    data['permission_set_id'],
                     rule_type,
                     data.get('resource_type'),
                     data.get('dimension_code'),
@@ -358,29 +358,29 @@ class ConditionPermissionService:
 
     def get_unified_rules_by_role(
         self,
-        role_id: int,
+        permission_set_id: int,
         rule_type: Optional[str] = None,
     ) -> List[Dict]:
         """[P11] 获取角色的统一权限规则 (从 data_permission_rules 表)
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
             rule_type: 可选, 按规则类型过滤 (condition/dimension/owner/visibility/prohibition)
         """
         self._ensure_unified_table()
         if rule_type:
             cursor = self.ds.execute(
                 """SELECT * FROM data_permission_rules
-                   WHERE role_id = ? AND rule_type = ?
+                   WHERE permission_set_id = ? AND rule_type = ?
                    ORDER BY id""",
-                [role_id, rule_type]
+                [permission_set_id, rule_type]
             )
         else:
             cursor = self.ds.execute(
                 """SELECT * FROM data_permission_rules
-                   WHERE role_id = ?
+                   WHERE permission_set_id = ?
                    ORDER BY rule_type, id""",
-                [role_id]
+                [permission_set_id]
             )
         rules = self._rows_to_dicts(cursor)
         # 补齐 friendly_condition (复用现有逻辑)
@@ -400,13 +400,13 @@ class ConditionPermissionService:
             cursor = self.ds.execute(
                 """SELECT * FROM data_permission_rules
                    WHERE rule_type = ?
-                   ORDER BY role_id, id""",
+                   ORDER BY permission_set_id, id""",
                 [rule_type]
             )
         else:
             cursor = self.ds.execute(
                 """SELECT * FROM data_permission_rules
-                   ORDER BY role_id, rule_type, id"""
+                   ORDER BY permission_set_id, rule_type, id"""
             )
         rules = self._rows_to_dicts(cursor)
         for rule in rules:
@@ -422,7 +422,7 @@ class ConditionPermissionService:
         permission_rules，而列表查询读 data_permission_rules —— 导致
         "变更配置条件保存后刷新仍是旧值"（更新根本没落到统一表）。
 
-        安全限定：data 中若带 role_id / resource_type / rule_type，
+        安全限定：data 中若带 permission_set_id / resource_type / rule_type，
         会作为 WHERE 条件二次校验，防止 id 跨表误更新。
         """
         self._ensure_unified_table()
@@ -443,7 +443,7 @@ class ConditionPermissionService:
             where = ["id = ?"]
             params.append(rule_id)
             # 安全限定条件（调用方传了才校验）
-            for wf in ['role_id', 'resource_type', 'rule_type']:
+            for wf in ['permission_set_id', 'resource_type', 'rule_type']:
                 if data.get(wf) not in (None, ''):
                     where.append(f"{wf} = ?")
                     params.append(data[wf])
@@ -801,7 +801,7 @@ class ConditionPermissionService:
         """检查是否有权限规则引用了指定资源"""
         affected = []
         cursor = self.ds.execute(
-            "SELECT rowid AS id, role_id, resource_type, condition, permission_level, is_denied FROM permission_rules"
+            "SELECT rowid AS id, permission_set_id, resource_type, condition, permission_level, is_denied FROM permission_rules"
         )
         rules = self._rows_to_dicts(cursor)
 
@@ -982,14 +982,18 @@ class ConditionPermissionService:
         return {'allowed': False}
 
     def _get_user_rules(self, user_id: int, resource_type: str) -> List[Dict]:
-        """获取用户的条件型权限规则"""
-        cursor = self.ds.execute("""
+        """获取用户的条件型权限规则（含祖先组织继承）"""
+        from meta.services.org_service import OrgService
+        org_ids = OrgService(self.ds).get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
             SELECT pr.rowid AS id, pr.* FROM permission_rules pr
-            INNER JOIN group_roles gr ON pr.role_id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-            WHERE ugm.user_id = ? AND pr.resource_type = ?
+            INNER JOIN org_permission_sets gr ON pr.permission_set_id = gr.permission_set_id
+            WHERE gr.org_id IN ({placeholders}) AND pr.resource_type = ?
             ORDER BY pr.is_denied DESC, pr.rowid
-        """, [user_id, resource_type])
+        """, org_ids + [resource_type])
         return self._rows_to_dicts(cursor)
 
     def _get_resource_detail(self, resource_type: str, resource_id: int) -> Optional[Dict]:

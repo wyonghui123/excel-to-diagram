@@ -154,18 +154,18 @@ def write_permission_config_audit(
 
     [FIX 2026-06-12] 支持 parent_object_type/parent_object_id, 让 RoleDetailDrawer
     通过 "parent_object_type='role' AND parent_object_id=2" 过滤, 把角色相关的
-    5 种 object_type (role_permissions/role_data_permission/role_v2_menu_permissions/
+    5 种 object_type (permission_set_permissions/role_data_permission/role_v2_menu_permissions/
     role_menu/permission_rule) 全部归集到角色详情页"操作日志" tab.
 
     Args:
         action: 'CREATE' / 'UPDATE' / 'DELETE'
-        object_type: e.g. 'role_permissions', 'role_menu', 'role_data_permission'
+        object_type: e.g. 'permission_set_permissions', 'role_menu', 'role_data_permission'
         object_id: 角色ID 或 规则ID (str/int 都行)
         data: 新数据
         old_data: 旧数据 (UPDATE/DELETE 用)
         audit_logger: 可选, 传入 AuditLogger 实例; 不传则自动 new
         parent_object_type: 父对象 type, e.g. 'role' (让 audit_log 可按父对象查)
-        parent_object_id: 父对象 id, e.g. role_id=2
+        parent_object_id: 父对象 id, e.g. permission_set_id=2
 
     Returns:
         True if written, False on error

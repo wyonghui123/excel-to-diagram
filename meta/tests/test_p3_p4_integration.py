@@ -49,7 +49,7 @@ def db_full_legacy():
         -- [P3-T1] 新统一表
         CREATE TABLE IF NOT EXISTS data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
             resource_type VARCHAR(200),
             dimension_code VARCHAR(200),
@@ -67,7 +67,7 @@ def db_full_legacy():
 
         CREATE TABLE IF NOT EXISTS role_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             dimension_code VARCHAR(200) NOT NULL,
             dimension_values TEXT NOT NULL,
             inherit_children INTEGER DEFAULT 1,
@@ -75,7 +75,7 @@ def db_full_legacy():
         );
 
         CREATE TABLE IF NOT EXISTS permission_rules (
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             condition TEXT NOT NULL,
             permission_level VARCHAR(200) NOT NULL DEFAULT 'read',
@@ -102,7 +102,7 @@ def db_full_legacy():
             username TEXT UNIQUE
         );
         CREATE TABLE IF NOT EXISTS role_permissions (
-            role_id INTEGER,
+            permission_set_id INTEGER,
             permission_code TEXT,
             resource_type TEXT
         );
@@ -113,7 +113,7 @@ def db_full_legacy():
         );
         CREATE TABLE IF NOT EXISTS user_roles (
             user_id INTEGER,
-            role_id INTEGER
+            permission_set_id INTEGER
         );
     """)
     # 测试数据
@@ -124,13 +124,13 @@ def db_full_legacy():
     conn.execute("INSERT INTO products (id, name, code, owner_id, visibility) VALUES (1, 'P1', 'p1', 1, 'public')")
     conn.execute("INSERT INTO products (id, name, code, owner_id, visibility) VALUES (2, 'P2', 'p2', 2, 'private')")
     conn.execute("INSERT INTO versions (id, name, code, product_id, visibility) VALUES (1, 'V1', 'v1', 1, 'team')")
-    conn.execute("INSERT INTO role_dimension_scopes (id, role_id, dimension_code, dimension_values, scope_mode) VALUES (1, 1, 'product', '[1]', 'include')")
-    conn.execute("INSERT INTO permission_rules (role_id, resource_type, condition, permission_level) VALUES (1, 'product', \"status = 'active'\", 'read')")
-    # alice (id=1) → role 1, bob (id=2) → role 2
-    conn.execute("INSERT INTO user_roles (user_id, role_id) VALUES (1, 1)")
-    conn.execute("INSERT INTO user_roles (user_id, role_id) VALUES (2, 2)")
-    # role 1 有 product.read 权限, role 2 没有
-    conn.execute("INSERT INTO role_permissions (role_id, permission_code, resource_type) VALUES (1, 'product.read', 'product')")
+    conn.execute("INSERT INTO role_dimension_scopes (id, permission_set_id, dimension_code, dimension_values, scope_mode) VALUES (1, 1, 'product', '[1]', 'include')")
+    conn.execute("INSERT INTO permission_rules (permission_set_id, resource_type, condition, permission_level) VALUES (1, 'product', \"status = 'active'\", 'read')")
+    # alice (id=1) → permission_set 1, bob (id=2) → permission_set 2
+    conn.execute("INSERT INTO user_roles (user_id, permission_set_id) VALUES (1, 1)")
+    conn.execute("INSERT INTO user_roles (user_id, permission_set_id) VALUES (2, 2)")
+    # permission_set 1 有 product.read 权限, permission_set 2 没有
+    conn.execute("INSERT INTO role_permissions (permission_set_id, permission_code, resource_type) VALUES (1, 'product.read', 'product')")
     conn.execute("INSERT INTO permissions (code, name, resource_type) VALUES ('product.read', 'View Product', 'product')")
     conn.commit()
 
@@ -366,8 +366,8 @@ class TestP3T8Regression:
         migrate_role_dimension_scopes(ds)
         # 即使旧表被 drop, 新表数据可读
         rows = ds.execute(
-            "SELECT role_id, dimension_code, condition FROM data_permission_rules "
-            "WHERE rule_type='dimension' AND role_id=1"
+            "SELECT permission_set_id, dimension_code, condition FROM data_permission_rules "
+            "WHERE rule_type='dimension' AND permission_set_id=1"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][1] == 'product'
@@ -433,7 +433,7 @@ class TestP4T1PermissionResolverCheck:
         from meta.services.permission_resolver import PermissionResolver
         ds = db_full_legacy
         resolver = PermissionResolver(ds)
-        # user 2 (bob) 无 product.read 权限 (role 2 没有 product.read)
+        # user 2 (bob) 无 product.read 权限 (permission_set 2 没有 product.read)
         result = resolver.check(
             user={'id': 2, 'username': 'bob'},
             action='read',
@@ -448,7 +448,7 @@ class TestP4T1PermissionResolverCheck:
         from meta.services.permission_resolver import PermissionResolver
         ds = db_full_legacy
         resolver = PermissionResolver(ds)
-        # Alice (id=1) 拥有 product 1, alice 有 product.read 权限 (via role 1)
+        # Alice (id=1) 拥有 product 1, alice 有 product.read 权限 (via permission_set 1)
         result = resolver.check(
             user={'id': 1, 'username': 'alice'},
             action='read',
@@ -478,7 +478,7 @@ class TestP4T1PermissionResolverCheck:
         # 插入 prohibition 规则
         ds.execute(
             "INSERT INTO data_permission_rules "
-            "(role_id, rule_type, resource_type, is_denied) "
+            "(permission_set_id, rule_type, resource_type, is_denied) "
             "VALUES (?, ?, ?, ?)",
             [1, 'prohibition', 'product', 1]
         )

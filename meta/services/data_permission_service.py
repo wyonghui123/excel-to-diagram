@@ -23,6 +23,11 @@ class DataPermissionService:
         self.ds = data_source
         self._hierarchy_loader = HierarchyConfigLoader
 
+    def _get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """用户的有效组织 ID 集合 = 任职 org ∪ 祖先链（支撑父组织挂权限集 → 子成员继承）"""
+        from meta.services.org_service import OrgService
+        return OrgService(self.ds).get_user_effective_org_ids(user_id)
+
     @property
     def HIERARCHY_ORDER(self):
         return self._hierarchy_loader.get_type_order()
@@ -443,13 +448,14 @@ class DataPermissionService:
         修复: 之前 _get_role_inherited_permission_level 只查父级的 role_data_perm,
         导致当前层级的 role 权限无法被检测到
         """
-        role_ids = self._get_user_role_ids(user_id)
-        if not role_ids:
+        # [P4-新3 2026-08-29] Spec 16: 局部变量 role_ids → permission_set_ids
+        permission_set_ids = self._get_user_role_ids(user_id)
+        if not permission_set_ids:
             return None
-        placeholders = ','.join(['?'] * len(role_ids))
+        placeholders = ','.join(['?'] * len(permission_set_ids))
         cursor = self.ds.execute(
-            f"SELECT permission_level, inherit_to_children FROM role_data_permissions WHERE role_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
-            role_ids + [resource_type, resource_id]
+            f"SELECT permission_level, inherit_to_children FROM permission_set_data_permissions WHERE permission_set_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
+            permission_set_ids + [resource_type, resource_id]
         )
         level_order = {'read': 1, 'write': 2, 'admin': 3}
         best_level = None
@@ -461,13 +467,13 @@ class DataPermissionService:
 
     def _get_group_direct_permission_level(self, user_id: int, resource_type: str,
                                               resource_id: int) -> Optional[str]:
-        """P12 新增: 查用户当前层级通过 user_group 获得的直接权限"""
-        group_ids = self._get_user_group_ids(user_id)
+        """P12 新增: 查用户当前层级通过 org 获得的直接权限"""
+        group_ids = self._get_org_ids(user_id)
         if not group_ids:
             return None
         placeholders = ','.join(['?'] * len(group_ids))
         cursor = self.ds.execute(
-            f"SELECT permission_level, inherit_to_children FROM group_data_permissions WHERE group_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
+            f"SELECT permission_level, inherit_to_children FROM org_data_permissions WHERE org_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
             group_ids + [resource_type, resource_id]
         )
         level_order = {'read': 1, 'write': 2, 'admin': 3}
@@ -488,8 +494,9 @@ class DataPermissionService:
         best_level = None
         level_order = {'read': 1, 'write': 2, 'admin': 3}
 
-        role_ids = self._get_user_role_ids(user_id)
-        if not role_ids:
+        # [P4-新3 2026-08-29] Spec 16: 局部变量 role_ids → permission_set_ids
+        permission_set_ids = self._get_user_role_ids(user_id)
+        if not permission_set_ids:
             return None
 
         for parent_type in parent_types:
@@ -497,10 +504,10 @@ class DataPermissionService:
             if parent_id is None:
                 continue
 
-            placeholders = ','.join(['?'] * len(role_ids))
+            placeholders = ','.join(['?'] * len(permission_set_ids))
             cursor = self.ds.execute(
-                f"SELECT permission_level, inherit_to_children FROM role_data_permissions WHERE role_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
-                role_ids + [parent_type, parent_id]
+                f"SELECT permission_level, inherit_to_children FROM permission_set_data_permissions WHERE permission_set_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
+                permission_set_ids + [parent_type, parent_id]
             )
             for row in cursor.fetchall():
                 if row[1]:
@@ -520,7 +527,7 @@ class DataPermissionService:
         best_level = None
         level_order = {'read': 1, 'write': 2, 'admin': 3}
 
-        group_ids = self._get_user_group_ids(user_id)
+        group_ids = self._get_org_ids(user_id)
         if not group_ids:
             return None
 
@@ -531,7 +538,7 @@ class DataPermissionService:
 
             placeholders = ','.join(['?'] * len(group_ids))
             cursor = self.ds.execute(
-                f"SELECT permission_level, inherit_to_children FROM group_data_permissions WHERE group_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
+                f"SELECT permission_level, inherit_to_children FROM org_data_permissions WHERE org_id IN ({placeholders}) AND resource_type = ? AND resource_id = ?",
                 group_ids + [parent_type, parent_id]
             )
             for row in cursor.fetchall():
@@ -543,22 +550,25 @@ class DataPermissionService:
         return best_level
 
     def _get_user_role_ids(self, user_id: int) -> List[int]:
-        """通过用户组间接获取用户的所有角色 ID"""
+        """通过用户组间接获取用户的所有角色 ID（含祖先组织继承）"""
         try:
+            org_ids = self._get_user_effective_org_ids(user_id)
+            if not org_ids:
+                return []
+            placeholders = ','.join('?' * len(org_ids))
             cursor = self.ds.execute(
-                """SELECT DISTINCT gr.role_id FROM group_roles gr
-                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-                   WHERE ugm.user_id = ?""",
-                [user_id]
+                f"SELECT DISTINCT gr.permission_set_id FROM org_permission_sets gr "
+                f"WHERE gr.org_id IN ({placeholders})",
+                org_ids
             )
             return [row[0] for row in cursor.fetchall()]
         except Exception:
             return []
 
-    def _get_user_group_ids(self, user_id: int) -> List[int]:
+    def _get_org_ids(self, user_id: int) -> List[int]:
         try:
             cursor = self.ds.execute(
-                "SELECT group_id FROM user_group_members WHERE user_id = ?",
+                "SELECT org_id FROM org_members WHERE user_id = ?",
                 [user_id]
             )
             return [row[0] for row in cursor.fetchall()]
@@ -569,7 +579,7 @@ class DataPermissionService:
         """获取用户所有有效权限（包括直接权限和通过用户组→角色继承的权限）
         
         [重构后] 权限解析路径：User → UserGroup → Role → DataPermission
-        不再直接查询 group_data_permissions（已废弃）
+        不再直接查询 org_data_permissions（已废弃）
         """
         result = []
 
@@ -584,21 +594,24 @@ class DataPermissionService:
             result.append(perm)
         logger.debug("User %s direct permissions: %s", user_id, len(direct_perms))
 
-        # 2. 通过用户组→角色获得的权限
-        cursor = self.ds.execute("""
-            SELECT rdp.*, r.name as role_name, g.name as group_name
-            FROM role_data_permissions rdp
-            JOIN group_roles gr ON gr.role_id = rdp.role_id
-            JOIN user_group_members ugm ON ugm.group_id = gr.group_id
-            JOIN roles r ON r.id = rdp.role_id
-            JOIN user_groups g ON g.id = gr.group_id
-            WHERE ugm.user_id = ?
-        """, [user_id])
-        group_role_perms = self._rows_to_dicts(cursor)
-        for perm in group_role_perms:
-            perm['source'] = 'group_role'
+        # 2. 通过组织→权限集获得的权限（含祖先组织继承）
+        org_ids = self._get_user_effective_org_ids(user_id)
+        org_permission_set_perms = []
+        if org_ids:
+            placeholders = ','.join('?' * len(org_ids))
+            cursor = self.ds.execute(f"""
+                SELECT rdp.*, r.name as role_name, g.name as group_name
+                FROM permission_set_data_permissions rdp
+                JOIN org_permission_sets gr ON gr.permission_set_id = rdp.permission_set_id
+                JOIN permission_sets r ON r.id = rdp.permission_set_id
+                JOIN orgs g ON g.id = gr.org_id
+                WHERE gr.org_id IN ({placeholders})
+            """, org_ids)
+            org_permission_set_perms = self._rows_to_dicts(cursor)
+        for perm in org_permission_set_perms:
+            perm['source'] = 'org_permission_set'
             result.append(perm)
-        logger.debug("User %s group-role permissions: %s", user_id, len(group_role_perms))
+        logger.debug("User %s group-role permissions: %s", user_id, len(org_permission_set_perms))
         logger.debug("User %s total effective permissions: %s", user_id, len(result))
 
         return result
@@ -696,11 +709,11 @@ class DataPermissionService:
             return meta_obj.table_name
         return resource_type
 
-    def get_role_data_permissions(self, role_id: int) -> List[Dict[str, Any]]:
+    def get_permission_set_data_permissions(self, permission_set_id: int) -> List[Dict[str, Any]]:
         """获取角色的数据权限，包含资源详情和路径"""
         cursor = self.ds.execute(
-            "SELECT * FROM role_data_permissions WHERE role_id = ? ORDER BY resource_type, resource_id",
-            [role_id]
+            "SELECT * FROM permission_set_data_permissions WHERE permission_set_id = ? ORDER BY resource_type, resource_id",
+            [permission_set_id]
         )
         perms = self._rows_to_dicts(cursor)
 
@@ -710,15 +723,15 @@ class DataPermissionService:
 
         return perms
 
-    def add_role_data_permission(self, role_id: int, resource_type: str, resource_id: int,
+    def add_role_data_permission(self, permission_set_id: int, resource_type: str, resource_id: int,
                                   permission_level: str, inherit_to_children: bool = True,
                                   created_by: int = None) -> Optional[int]:
         try:
             cursor = self.ds.execute(
-                """INSERT OR REPLACE INTO role_data_permissions
-                   (role_id, resource_type, resource_id, permission_level, inherit_to_children, created_by)
+                """INSERT OR REPLACE INTO permission_set_data_permissions
+                   (permission_set_id, resource_type, resource_id, permission_level, inherit_to_children, created_by)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                [role_id, resource_type, resource_id, permission_level,
+                [permission_set_id, resource_type, resource_id, permission_level,
                  1 if inherit_to_children else 0, created_by]
             )
             cursor = self.ds.execute("SELECT last_insert_rowid()")
@@ -726,8 +739,8 @@ class DataPermissionService:
             if result and result[0]:
                 return result[0]
             cursor = self.ds.execute(
-                "SELECT id FROM role_data_permissions WHERE role_id=? AND resource_type=? AND resource_id=?",
-                [role_id, resource_type, resource_id]
+                "SELECT id FROM permission_set_data_permissions WHERE permission_set_id=? AND resource_type=? AND resource_id=?",
+                [permission_set_id, resource_type, resource_id]
             )
             row = cursor.fetchone()
             return row[0] if row else None
@@ -737,7 +750,7 @@ class DataPermissionService:
 
     def remove_role_data_permission(self, perm_id: int) -> bool:
         try:
-            self.ds.execute("DELETE FROM role_data_permissions WHERE id = ?", [perm_id])
+            self.ds.execute("DELETE FROM permission_set_data_permissions WHERE id = ?", [perm_id])
             return True
         except Exception:
             return False
@@ -746,22 +759,25 @@ class DataPermissionService:
         """获取所有有数据权限配置的角色"""
         cursor = self.ds.execute("""
             SELECT DISTINCT r.*,
-                   (SELECT COUNT(*) FROM role_data_permissions WHERE role_id = r.id) as perm_count
-            FROM roles r
-            WHERE r.id IN (SELECT DISTINCT role_id FROM role_data_permissions)
+                   (SELECT COUNT(*) FROM permission_set_data_permissions WHERE permission_set_id = r.id) as perm_count
+            FROM permission_sets r
+            WHERE r.id IN (SELECT DISTINCT permission_set_id FROM permission_set_data_permissions)
             ORDER BY r.id
         """)
         return self._rows_to_dicts(cursor)
 
     def get_user_data_permissions_from_roles(self, user_id: int) -> List[Dict[str, Any]]:
-        """获取用户通过用户组→角色获得的数据权限"""
-        cursor = self.ds.execute("""
-            SELECT rdp.* FROM role_data_permissions rdp
-            INNER JOIN group_roles gr ON rdp.role_id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-            WHERE ugm.user_id = ?
+        """获取用户通过用户组→角色获得的数据权限（含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
+            SELECT rdp.* FROM permission_set_data_permissions rdp
+            INNER JOIN org_permission_sets gr ON rdp.permission_set_id = gr.permission_set_id
+            WHERE gr.org_id IN ({placeholders})
             ORDER BY rdp.resource_type, rdp.resource_id
-        """, [user_id])
+        """, org_ids)
         return self._rows_to_dicts(cursor)
 
     def get_all_user_data_permissions(self, user_id: int) -> List[Dict[str, Any]]:
@@ -783,11 +799,11 @@ class DataPermissionService:
 
         return list(combined.values())
 
-    def get_group_data_permissions(self, group_id: int) -> List[Dict[str, Any]]:
+    def get_org_data_permissions(self, org_id: int) -> List[Dict[str, Any]]:
         """获取用户组的数据权限，包含资源详情和路径"""
         cursor = self.ds.execute(
-            "SELECT * FROM group_data_permissions WHERE group_id = ? ORDER BY resource_type, resource_id",
-            [group_id]
+            "SELECT * FROM org_data_permissions WHERE org_id = ? ORDER BY resource_type, resource_id",
+            [org_id]
         )
         perms = self._rows_to_dicts(cursor)
 
@@ -889,23 +905,23 @@ class DataPermissionService:
 
         return path_chain
 
-    def add_group_data_permission(self, group_id: int, resource_type: str, resource_id: int,
+    def add_group_data_permission(self, org_id: int, resource_type: str, resource_id: int,
                                    permission_level: str, inherit_to_children: bool = True) -> Optional[int]:
         """为用户组添加数据权限"""
         try:
             cursor = self.ds.execute(
-                """INSERT OR REPLACE INTO group_data_permissions
-                   (group_id, resource_type, resource_id, permission_level, inherit_to_children)
+                """INSERT OR REPLACE INTO org_data_permissions
+                   (org_id, resource_type, resource_id, permission_level, inherit_to_children)
                    VALUES (?, ?, ?, ?, ?)""",
-                [group_id, resource_type, resource_id, permission_level, 1 if inherit_to_children else 0]
+                [org_id, resource_type, resource_id, permission_level, 1 if inherit_to_children else 0]
             )
             cursor = self.ds.execute("SELECT last_insert_rowid()")
             result = cursor.fetchone()
             if result and result[0]:
                 return result[0]
             cursor = self.ds.execute(
-                "SELECT id FROM group_data_permissions WHERE group_id=? AND resource_type=? AND resource_id=?",
-                [group_id, resource_type, resource_id]
+                "SELECT id FROM org_data_permissions WHERE org_id=? AND resource_type=? AND resource_id=?",
+                [org_id, resource_type, resource_id]
             )
             row = cursor.fetchone()
             return row[0] if row else None
@@ -915,7 +931,7 @@ class DataPermissionService:
     def remove_group_data_permission(self, perm_id: int) -> bool:
         """删除用户组数据权限"""
         try:
-            self.ds.execute("DELETE FROM group_data_permissions WHERE id = ?", [perm_id])
+            self.ds.execute("DELETE FROM org_data_permissions WHERE id = ?", [perm_id])
             return True
         except Exception:
             return False
@@ -924,23 +940,26 @@ class DataPermissionService:
         """
         获取用户通过用户组获得的数据权限
 
-        [重构后] 权限解析路径：User → UserGroup → Role → DataPermission
-        不再直接查询 group_data_permissions（已废弃）
+        [重构后] 权限解析路径：User → UserGroup → Role → DataPermission（含祖先组织继承）
+        不再直接查询 org_data_permissions（已废弃）
         """
-        cursor = self.ds.execute("""
-            SELECT DISTINCT rdp.* FROM role_data_permissions rdp
-            INNER JOIN group_roles gr ON rdp.role_id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-            WHERE ugm.user_id = ?
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
+            SELECT DISTINCT rdp.* FROM permission_set_data_permissions rdp
+            INNER JOIN org_permission_sets gr ON rdp.permission_set_id = gr.permission_set_id
+            WHERE gr.org_id IN ({placeholders})
             ORDER BY rdp.resource_type, rdp.resource_id
-        """, [user_id])
+        """, org_ids)
         return self._rows_to_dicts(cursor)
 
     def get_user_data_permissions_from_groups_legacy(self, user_id: int) -> List[Dict[str, Any]]:
-        """[已废弃] 旧版：直接从 group_data_permissions 获取用户组数据权限"""
+        """[已废弃] 旧版：直接从 org_data_permissions 获取用户组数据权限"""
         cursor = self.ds.execute("""
-            SELECT gdp.* FROM group_data_permissions gdp
-            INNER JOIN user_group_members ugm ON gdp.group_id = ugm.group_id
+            SELECT gdp.* FROM org_data_permissions gdp
+            INNER JOIN org_members ugm ON gdp.org_id = ugm.org_id
             WHERE ugm.user_id = ?
             ORDER BY gdp.resource_type, gdp.resource_id
         """, [user_id])
@@ -952,17 +971,17 @@ class DataPermissionService:
 
         [重构后] 用户组权限现在通过角色间接获取：
         - 直接权限: data_permissions (user直接分配)
-        - 角色权限: role_data_permissions (用户直接关联角色)
-        - 用户组权限: 通过 group_roles → role_data_permissions 链路获取
+        - 角色权限: permission_set_data_permissions (用户直接关联角色)
+        - 用户组权限: 通过 org_permission_sets → permission_set_data_permissions 链路获取
         """
         direct = self.get_user_data_permissions(user_id)
         from_roles = self.get_user_data_permissions_from_roles(user_id)
-        from_group_roles = self.get_user_data_permissions_from_groups(user_id)
+        from_org_permission_sets = self.get_user_data_permissions_from_groups(user_id)
 
         combined = {}
         level_order = {'read': 1, 'write': 2, 'admin': 3}
 
-        for p in direct + from_roles + from_group_roles:
+        for p in direct + from_roles + from_org_permission_sets:
             key = (p['resource_type'], p['resource_id'])
             if key not in combined:
                 combined[key] = p
@@ -974,25 +993,28 @@ class DataPermissionService:
 
         return list(combined.values())
 
-    def get_role_priority(self, role_id: int) -> int:
+    def get_role_priority(self, permission_set_id: int) -> int:
         """获取角色优先级"""
-        cursor = self.ds.execute("SELECT priority FROM roles WHERE id = ?", [role_id])
+        cursor = self.ds.execute("SELECT priority FROM permission_sets WHERE id = ?", [permission_set_id])
         row = cursor.fetchone()
         return row[0] if row else 0
 
     def get_user_max_role_priority(self, user_id: int) -> int:
-        """获取用户的最高角色优先级（通过用户组间接获取）"""
-        cursor = self.ds.execute("""
-            SELECT MAX(r.priority) FROM roles r
-            INNER JOIN group_roles gr ON r.id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-            WHERE ugm.user_id = ?
-        """, [user_id])
+        """获取用户的最高角色优先级（通过用户组间接获取，含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return 0
+        placeholders = ','.join('?' * len(org_ids))
+        cursor = self.ds.execute(f"""
+            SELECT MAX(r.priority) FROM permission_sets r
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            WHERE gr.org_id IN ({placeholders})
+        """, org_ids)
         row = cursor.fetchone()
         return row[0] if row and row[0] is not None else 0
 
-    def can_assign_role(self, operator_id: int, role_id: int) -> bool:
+    def can_assign_role(self, operator_id: int, permission_set_id: int) -> bool:
         """检查操作者是否可以分配该角色（防止权限提升）"""
         operator_priority = self.get_user_max_role_priority(operator_id)
-        target_priority = self.get_role_priority(role_id)
+        target_priority = self.get_role_priority(permission_set_id)
         return operator_priority >= target_priority

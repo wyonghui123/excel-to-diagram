@@ -3,8 +3,8 @@
 
 覆盖：
 1. Product/Version 多对象批量导出、批量导入 CUD、deep insert
-2. User/Role/UserGroup 单对象批量导出、批量导入 CUD
-3. 批量关联建立和移除（user-group, role-group）
+2. User/PermissionSet/Org 单对象批量导出、批量导入 CUD
+3. 批量关联建立和移除（user-group, permission_set-group）
 """
 
 import pytest
@@ -227,9 +227,9 @@ class TestUserRoleUserGroupExportImport:
         """导出角色：Sheet 结构正确"""
         roles = self._get_role_data()
         if not roles:
-            pytest.skip("数据库中无 role 数据")
+            pytest.skip("数据库中无 permission_set 数据")
 
-        result = self.ie.export_cascade('role', options={
+        result = self.ie.export_cascade('permission_set', options={
             'include_operation_mode': True,
             'include_metadata_sheet': True,
         })
@@ -239,16 +239,16 @@ class TestUserRoleUserGroupExportImport:
         from openpyxl import load_workbook
         wb = load_workbook(result.file_path)
 
-        assert '角色' in wb.sheetnames or 'role' in wb.sheetnames, \
+        assert '角色' in wb.sheetnames or 'permission_set' in wb.sheetnames, \
             f"应包含角色 Sheet，实际: {wb.sheetnames}"
 
     def test_03_export_user_group_has_correct_structure(self):
         """导出用户组：Sheet 结构正确"""
         groups = self._get_user_group_data()
         if not groups:
-            pytest.skip("数据库中无 user_group 数据")
+            pytest.skip("数据库中无 org 数据")
 
-        result = self.ie.export_cascade('user_group', options={
+        result = self.ie.export_cascade('org', options={
             'include_operation_mode': True,
             'include_metadata_sheet': True,
         })
@@ -258,7 +258,7 @@ class TestUserRoleUserGroupExportImport:
         from openpyxl import load_workbook
         wb = load_workbook(result.file_path)
 
-        assert '用户组' in wb.sheetnames or 'user_group' in wb.sheetnames, \
+        assert '用户组' in wb.sheetnames or 'org' in wb.sheetnames, \
             f"应包含用户组 Sheet，实际: {wb.sheetnames}"
 
     def test_04_user_cud_upsert_create(self):
@@ -294,7 +294,7 @@ class TestUserRoleUserGroupExportImport:
             'name': f'测试角色_{new_code}',
         }
         config = ImportExportConfig()
-        result = self.ie._upsert_record('role', record, config)
+        result = self.ie._upsert_record('permission_set', record, config)
         assert result is True, "upsert 创建角色应成功"
 
         cursor = ds.execute("SELECT name FROM roles WHERE code = ?", [new_code])
@@ -314,7 +314,7 @@ class TestUserRoleUserGroupExportImport:
             'name': f'测试用户组_{new_code}',
         }
         config = ImportExportConfig()
-        result = self.ie._upsert_record('user_group', record, config)
+        result = self.ie._upsert_record('org', record, config)
         assert result is True, "upsert 创建用户组应成功"
 
         cursor = ds.execute("SELECT name FROM user_groups WHERE code = ?", [new_code])
@@ -332,7 +332,7 @@ class TestUserRoleUserGroupExportImport:
         child_code = f"child_grp_{uuid.uuid4().hex[:6]}"
 
         config = ImportExportConfig()
-        self.ie._upsert_record('user_group', {'code': parent_code, 'name': f'父组_{parent_code}'}, config)
+        self.ie._upsert_record('org', {'code': parent_code, 'name': f'父组_{parent_code}'}, config)
 
         cursor = ds.execute("SELECT id FROM user_groups WHERE code = ?", [parent_code])
         parent_row = cursor.fetchone()
@@ -340,7 +340,7 @@ class TestUserRoleUserGroupExportImport:
             pytest.skip("父组创建失败")
 
         parent_id = parent_row[0]
-        self.ie._upsert_record('user_group', {'code': child_code, 'name': f'子组_{child_code}', 'parent_id': parent_id}, config)
+        self.ie._upsert_record('org', {'code': child_code, 'name': f'子组_{child_code}', 'parent_id': parent_id}, config)
 
         cursor = ds.execute("SELECT parent_id FROM user_groups WHERE code = ?", [child_code])
         child_row = cursor.fetchone()
@@ -406,7 +406,7 @@ class TestBatchAssociation:
 
         row = self._get_user_and_group()
         if not row:
-            pytest.skip("数据库中无 user/user_group 数据")
+            pytest.skip("数据库中无 user/org 数据")
 
         user_id, username, group_id, group_code = row
 
@@ -433,9 +433,9 @@ class TestBatchAssociation:
 
         row = self._get_role_and_group()
         if not row:
-            pytest.skip("数据库中无 role/user_group 数据")
+            pytest.skip("数据库中无 permission_set/org 数据")
 
-        role_id, role_code, group_id, group_code = row
+        permission_set_id, role_code, group_id, group_code = row
 
         cursor = ds.execute("""
             SELECT name FROM sqlite_master
@@ -445,19 +445,19 @@ class TestBatchAssociation:
             pytest.skip("group_roles 关联表不存在")
 
         cursor = ds.execute("""
-            SELECT 1 FROM group_roles WHERE role_id = ? AND group_id = ?
-        """, [role_id, group_id])
+            SELECT 1 FROM group_roles WHERE permission_set_id = ? AND group_id = ?
+        """, [permission_set_id, group_id])
         if cursor.fetchone():
             pytest.skip("角色已分配给用户组")
 
         ds.execute("""
-            INSERT INTO group_roles (role_id, group_id)
+            INSERT INTO group_roles (permission_set_id, group_id)
             VALUES (?, ?)
-        """, [role_id, group_id])
+        """, [permission_set_id, group_id])
 
         cursor = ds.execute("""
-            SELECT 1 FROM group_roles WHERE role_id = ? AND group_id = ?
-        """, [role_id, group_id])
+            SELECT 1 FROM group_roles WHERE permission_set_id = ? AND group_id = ?
+        """, [permission_set_id, group_id])
         assert cursor.fetchone() is not None, "角色应被分配给用户组"
 
     def test_05_export_user_with_group_membership(self):
@@ -473,12 +473,12 @@ class TestBatchAssociation:
     def test_06_export_user_group_with_members(self):
         """导出用户组：包含成员关系"""
         from meta.core.models import registry
-        user_group = registry.get('user_group')
-        if not user_group:
-            pytest.skip("找不到 user_group 元模型")
+        org = registry.get('org')
+        if not org:
+            pytest.skip("找不到 org 元模型")
 
-        has_members_assoc = hasattr(user_group, 'associations') and 'members' in user_group.associations
-        assert has_members_assoc, "user_group 应有 members 关联定义"
+        has_members_assoc = hasattr(org, 'associations') and 'members' in org.associations
+        assert has_members_assoc, "org 应有 members 关联定义"
 
 
 class TestValueHelpForObjects:
@@ -486,8 +486,8 @@ class TestValueHelpForObjects:
 
     覆盖：
     1. user.status: enum type (user_status)
-    2. user_group.parent_id: bo type (user_group, 层级选择)
-    3. user_group.manager_id: bo type (user)
+    2. org.parent_id: bo type (org, 层级选择)
+    3. org.manager_id: bo type (user)
     4. product.owner_id: bo type (user)
     5. version.product_id: bo type (product)
     6. version.owner_id: bo type (user)
@@ -539,45 +539,45 @@ class TestValueHelpForObjects:
             f"user_status 应包含 active/激活，实际: {dv_values}"
 
     def test_03_user_group_parent_id_value_help_bo(self):
-        """user_group.parent_id: bo value_help (user_group, 层级选择)"""
-        field = self._find_field('user_group', 'parent_id')
+        """org.parent_id: bo value_help (org, 层级选择)"""
+        field = self._find_field('org', 'parent_id')
         if not field:
-            pytest.skip("找不到 user_group.parent_id 字段")
+            pytest.skip("找不到 org.parent_id 字段")
 
         vh = getattr(field, 'value_help', None)
-        assert vh is not None, "user_group.parent_id 应有 value_help"
+        assert vh is not None, "org.parent_id 应有 value_help"
 
         source = getattr(vh, 'source', None)
-        assert source is not None, "user_group.parent_id value_help 应有 source"
+        assert source is not None, "org.parent_id value_help 应有 source"
 
         source_type = getattr(source, 'type', None)
-        assert source_type == 'bo', f"user_group.parent_id source.type 应为 bo，实际: {source_type}"
+        assert source_type == 'bo', f"org.parent_id source.type 应为 bo，实际: {source_type}"
 
         target_bo = getattr(source, 'target_bo', None)
-        assert target_bo == 'user_group', \
-            f"user_group.parent_id target_bo 应为 user_group，实际: {target_bo}"
+        assert target_bo == 'org', \
+            f"org.parent_id target_bo 应为 org，实际: {target_bo}"
 
         hierarchy = getattr(source, 'hierarchy', None)
-        assert hierarchy is not None, "user_group.parent_id 应有 hierarchy 配置（层级选择）"
+        assert hierarchy is not None, "org.parent_id 应有 hierarchy 配置（层级选择）"
 
     def test_04_user_group_manager_id_value_help_bo(self):
-        """user_group.manager_id: bo value_help (user)"""
-        field = self._find_field('user_group', 'manager_id')
+        """org.manager_id: bo value_help (user)"""
+        field = self._find_field('org', 'manager_id')
         if not field:
-            pytest.skip("找不到 user_group.manager_id 字段")
+            pytest.skip("找不到 org.manager_id 字段")
 
         vh = getattr(field, 'value_help', None)
-        assert vh is not None, "user_group.manager_id 应有 value_help"
+        assert vh is not None, "org.manager_id 应有 value_help"
 
         source = getattr(vh, 'source', None)
-        assert source is not None, "user_group.manager_id value_help 应有 source"
+        assert source is not None, "org.manager_id value_help 应有 source"
 
         source_type = getattr(source, 'type', None)
-        assert source_type == 'bo', f"user_group.manager_id source.type 应为 bo，实际: {source_type}"
+        assert source_type == 'bo', f"org.manager_id source.type 应为 bo，实际: {source_type}"
 
         target_bo = getattr(source, 'target_bo', None)
         assert target_bo == 'user', \
-            f"user_group.manager_id target_bo 应为 user，实际: {target_bo}"
+            f"org.manager_id target_bo 应为 user，实际: {target_bo}"
 
     def test_05_product_owner_id_value_help_bo(self):
         """product.owner_id: bo value_help (user)"""
@@ -687,9 +687,9 @@ class TestValueHelpForObjects:
         ds = get_data_source('sqlite', database=get_test_db_path())
         cursor = ds.execute("SELECT id FROM user_groups LIMIT 1")
         if not cursor.fetchone():
-            pytest.skip("数据库中无 user_group 数据")
+            pytest.skip("数据库中无 org 数据")
 
-        result = self.ie.export_cascade('user_group', options={
+        result = self.ie.export_cascade('org', options={
             'include_operation_mode': True,
             'include_metadata_sheet': True,
         })
@@ -700,7 +700,7 @@ class TestValueHelpForObjects:
         wb = load_workbook(result.file_path)
 
         group_sheet = None
-        for name in ['用户组', 'user_group']:
+        for name in ['用户组', 'org']:
             if name in wb.sheetnames:
                 group_sheet = wb[name]
                 break
@@ -782,9 +782,9 @@ class TestRelatedObjectsValueHelp:
 
     补充：
     1. version.visibility: enum (public/draft)
-    2. role.is_active: enum (启用/停用)
-    3. role.is_system: enum (系统角色/自定义角色)
-    4. user_group.manager_id: value_filter (status: active)
+    2. permission_set.is_active: enum (启用/停用)
+    3. permission_set.is_system: enum (系统角色/自定义角色)
+    4. org.manager_id: value_filter (status: active)
     """
 
     @pytest.fixture(autouse=True)
@@ -865,30 +865,30 @@ class TestRelatedObjectsValueHelp:
         assert has_visibility_dv, f"可见性列应有数据验证，实际 DV 数量: {len(dvs)}"
 
     def test_03_role_is_active_enum_values(self):
-        """role.is_active: enum_values (启用/停用)"""
-        field = self._find_field('role', 'is_active')
+        """permission_set.is_active: enum_values (启用/停用)"""
+        field = self._find_field('permission_set', 'is_active')
         if not field:
-            pytest.skip("找不到 role.is_active 字段")
+            pytest.skip("找不到 permission_set.is_active 字段")
 
         enum_values = getattr(field, 'enum_values', None)
-        assert enum_values is not None, "role.is_active 应有 enum_values"
+        assert enum_values is not None, "permission_set.is_active 应有 enum_values"
 
         values = [ev.get('value') if isinstance(ev, dict) else getattr(ev, 'value', None) for ev in enum_values]
         assert 1 in values or True in values or 'true' in [str(v).lower() for v in values], \
-            f"role.is_active 应包含启用值，实际: {values}"
+            f"permission_set.is_active 应包含启用值，实际: {values}"
 
     def test_04_role_is_system_enum_values(self):
-        """role.is_system: enum_values (系统角色/自定义角色)"""
-        field = self._find_field('role', 'is_system')
+        """permission_set.is_system: enum_values (系统角色/自定义角色)"""
+        field = self._find_field('permission_set', 'is_system')
         if not field:
-            pytest.skip("找不到 role.is_system 字段")
+            pytest.skip("找不到 permission_set.is_system 字段")
 
         enum_values = getattr(field, 'enum_values', None)
-        assert enum_values is not None, "role.is_system 应有 enum_values"
+        assert enum_values is not None, "permission_set.is_system 应有 enum_values"
 
         values = [ev.get('value') if isinstance(ev, dict) else getattr(ev, 'value', None) for ev in enum_values]
         assert 1 in values or True in values or 'true' in [str(v).lower() for v in values], \
-            f"role.is_system 应包含系统角色值，实际: {values}"
+            f"permission_set.is_system 应包含系统角色值，实际: {values}"
 
     def test_05_role_export_is_active_has_dv(self):
         """导出角色：is_active 列应有枚举下拉"""
@@ -896,9 +896,9 @@ class TestRelatedObjectsValueHelp:
         ds = get_data_source('sqlite', database=get_test_db_path())
         cursor = ds.execute("SELECT id FROM roles LIMIT 1")
         if not cursor.fetchone():
-            pytest.skip("数据库中无 role 数据")
+            pytest.skip("数据库中无 permission_set 数据")
 
-        result = self.ie.export_cascade('role', options={
+        result = self.ie.export_cascade('permission_set', options={
             'include_operation_mode': True,
             'include_metadata_sheet': True,
         })
@@ -909,7 +909,7 @@ class TestRelatedObjectsValueHelp:
         wb = load_workbook(result.file_path)
 
         role_sheet = None
-        for name in ['角色', 'role']:
+        for name in ['角色', 'permission_set']:
             if name in wb.sheetnames:
                 role_sheet = wb[name]
                 break
@@ -936,19 +936,19 @@ class TestRelatedObjectsValueHelp:
         assert has_is_active_dv, f"启用状态列应有数据验证，实际 DV 数量: {len(dvs)}"
 
     def test_06_user_group_manager_id_value_filter(self):
-        """user_group.manager_id: value_filter (status: active)"""
-        field = self._find_field('user_group', 'manager_id')
+        """org.manager_id: value_filter (status: active)"""
+        field = self._find_field('org', 'manager_id')
         if not field:
-            pytest.skip("找不到 user_group.manager_id 字段")
+            pytest.skip("找不到 org.manager_id 字段")
 
         vh = getattr(field, 'value_help', None)
-        assert vh is not None, "user_group.manager_id 应有 value_help"
+        assert vh is not None, "org.manager_id 应有 value_help"
 
         source = getattr(vh, 'source', None)
-        assert source is not None, "user_group.manager_id value_help 应有 source"
+        assert source is not None, "org.manager_id value_help 应有 source"
 
         value_filter = getattr(source, 'value_filter', None)
-        assert value_filter is not None, "user_group.manager_id 应有 value_filter 配置"
+        assert value_filter is not None, "org.manager_id 应有 value_filter 配置"
 
         if isinstance(value_filter, dict):
             assert value_filter.get('status') == 'active', \

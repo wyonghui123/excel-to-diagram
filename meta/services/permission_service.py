@@ -3,8 +3,8 @@
 功能权限服务
 
 【架构决策 2026-06-02】
-用户角色分配统一通过用户组实现，移除直接 user_roles 路径。
-用户 → 个人用户组 → 角色
+用户角色分配统一通过组织实现，移除直接 user_permission_sets 路径。
+用户 → 个人组织 → 角色
 """
 
 import logging
@@ -36,55 +36,69 @@ class PermissionService:
         return [dict(zip(columns, row)) for row in rows]
 
     def _get_or_create_personal_group(self, user_id: int) -> int:
-        """获取或创建用户的个人用户组，返回 group_id"""
+        """获取或创建用户的个人组织，返回 org_id"""
         cursor = self.ds.execute(
-            "SELECT id FROM user_groups WHERE code = ?",
-            [f'personal_group_user_{user_id}']
+            "SELECT id FROM orgs WHERE code = ?",
+            [f'personal_org_user_{user_id}']
         )
         row = cursor.fetchone()
         if row:
             return row[0]
         
         cursor = self.ds.execute(
-            """INSERT INTO user_groups (code, name, description, created_at, updated_at)
+            """INSERT INTO orgs (code, name, description, created_at, updated_at)
                VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
-            [f'personal_group_user_{user_id}', f'个人组_{user_id}', f'用户 {user_id} 的个人组']
+            [f'personal_org_user_{user_id}', f'个人组_{user_id}', f'用户 {user_id} 的个人组']
         )
         return cursor.lastrowid
 
-    def _ensure_user_in_group(self, user_id: int, group_id: int) -> None:
-        """确保用户在用户组中"""
+    def _ensure_user_in_group(self, user_id: int, org_id: int) -> None:
+        """确保用户在组织中"""
         cursor = self.ds.execute(
-            "SELECT 1 FROM user_group_members WHERE group_id = ? AND user_id = ?",
-            [group_id, user_id]
+            "SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?",
+            [org_id, user_id]
         )
         if not cursor.fetchone():
             self.ds.execute(
-                "INSERT OR IGNORE INTO user_group_members (group_id, user_id, joined_at) VALUES (?, ?, datetime('now'))",
-                [group_id, user_id]
+                "INSERT OR IGNORE INTO org_members (org_id, user_id, joined_at) VALUES (?, ?, datetime('now'))",
+                [org_id, user_id]
             )
 
-    def get_user_roles(self, user_id: int) -> List[Dict[str, Any]]:
-        """获取用户的所有角色（仅通过用户组路径）"""
+    def _get_user_effective_org_ids(self, user_id: int) -> List[int]:
+        """用户的有效组织 ID 集合 = 任职 org（org_members）∪ 各 org 祖先链
+
+        [最小范围 · 组织架构继承] 支撑"父组织挂权限集 → 子组织成员沿祖先链自动获得权限"。
+        """
+        from meta.services.org_service import OrgService
+        return OrgService(self.ds).get_user_effective_org_ids(user_id)
+
+    def get_user_permission_sets(self, user_id: int) -> List[Dict[str, Any]]:
+        """获取用户的所有角色（仅通过组织路径，含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT DISTINCT r.id, r.code, r.name, r.description, r.is_system
-               FROM roles r
-               JOIN group_roles gr ON r.id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+            f"""SELECT DISTINCT r.id, r.code, r.name, r.description, r.is_system
+               FROM permission_sets r
+               JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         return self._rows_to_dicts(cursor)
 
     def get_user_permissions(self, user_id: int) -> List[str]:
-        """获取用户的所有权限编码列表（仅通过用户组路径）"""
+        """获取用户的所有权限编码列表（仅通过组织路径，含祖先组织继承）"""
+        org_ids = self._get_user_effective_org_ids(user_id)
+        if not org_ids:
+            return []
+        placeholders = ','.join('?' * len(org_ids))
         cursor = self.ds.execute(
-            """SELECT DISTINCT p.code FROM permissions p
-               JOIN role_permissions rp ON p.id = rp.permission_id
-               JOIN group_roles gr ON rp.role_id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-               WHERE ugm.user_id = ?""",
-            [user_id]
+            f"""SELECT DISTINCT p.code FROM permissions p
+               JOIN permission_set_permissions rp ON p.id = rp.permission_id
+               JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
+               WHERE gr.org_id IN ({placeholders})""",
+            org_ids
         )
         return [row[0] for row in cursor.fetchall()]
 
@@ -92,14 +106,14 @@ class PermissionService:
         permissions = self.get_user_permissions(user_id)
         return '*' in permissions or permission_code in permissions
 
-    def assign_role(self, user_id: int, role_id: int) -> bool:
-        """分配角色给用户（通过个人用户组）"""
+    def assign_permission_set(self, user_id: int, permission_set_id: int) -> bool:
+        """分配角色给用户（通过个人组织）"""
         try:
-            group_id = self._get_or_create_personal_group(user_id)
-            self._ensure_user_in_group(user_id, group_id)
+            org_id = self._get_or_create_personal_group(user_id)
+            self._ensure_user_in_group(user_id, org_id)
             self.ds.execute(
-                "INSERT OR IGNORE INTO group_roles (group_id, role_id) VALUES (?, ?)",
-                [group_id, role_id]
+                "INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
+                [org_id, permission_set_id]
             )
             from meta.services.token_version_service import token_version_service
             token_version_service.bump(user_id)
@@ -107,21 +121,21 @@ class PermissionService:
         except Exception:
             return False
 
-    def remove_role(self, user_id: int, role_id: int) -> bool:
-        """从用户移除角色（通过个人用户组）"""
+    def remove_permission_set(self, user_id: int, permission_set_id: int) -> bool:
+        """从用户移除角色（通过个人组织）"""
         try:
             cursor = self.ds.execute(
-                "SELECT id FROM user_groups WHERE code = ?",
-                [f'personal_group_user_{user_id}']
+                "SELECT id FROM orgs WHERE code = ?",
+                [f'personal_org_user_{user_id}']
             )
             row = cursor.fetchone()
             if not row:
                 return True
 
-            group_id = row[0]
+            org_id = row[0]
             self.ds.execute(
-                "DELETE FROM group_roles WHERE group_id = ? AND role_id = ?",
-                [group_id, role_id]
+                "DELETE FROM org_permission_sets WHERE org_id = ? AND permission_set_id = ?",
+                [org_id, permission_set_id]
             )
             from meta.services.token_version_service import token_version_service
             token_version_service.bump(user_id)
@@ -129,19 +143,19 @@ class PermissionService:
         except Exception:
             return False
 
-    def get_all_roles(self) -> List[Dict[str, Any]]:
+    def get_all_permission_sets(self) -> List[Dict[str, Any]]:
         """获取所有角色列表
 
-        P7/P8 注意：本方法被 v1/role-api.py list_roles 端点调用，
+        P7/P8 注意：本方法被 v1/permission_set-api.py list_roles 端点调用，
         v1 端点会在此基础上做业务增强：
-          - 嵌套 permissions（每个 role 的权限列表）
+          - 嵌套 permissions（每个 permission_set 的权限列表）
           - 手动 SSOT 派生 updated_at
-        v2/bo/role 端点会做标准 BO 框架增强，但**不**包含这两个业务增强。
+        v2/bo/permission_set 端点会做标准 BO 框架增强，但**不**包含这两个业务增强。
         因此本方法**保留**（不标记 @deprecated）。
         未来如要让 v2 完全替代，需在 BO 框架的 view_config 中
         配置嵌套 permissions 字段 + 启用 SSOT 派生。
         """
-        cursor = self.ds.execute("SELECT * FROM roles ORDER BY id")
+        cursor = self.ds.execute("SELECT * FROM permission_sets ORDER BY id")
         return self._rows_to_dicts(cursor)
 
     def get_all_permissions(self) -> List[Dict[str, Any]]:
@@ -152,18 +166,18 @@ class PermissionService:
         cursor = self.ds.execute("SELECT * FROM permissions ORDER BY id")
         return self._rows_to_dicts(cursor)
 
-    def get_role_permissions(self, role_id: int) -> List[Dict[str, Any]]:
+    def get_permission_set_permissions(self, permission_set_id: int) -> List[Dict[str, Any]]:
         cursor = self.ds.execute(
             """SELECT p.* FROM permissions p
-               JOIN role_permissions rp ON p.id = rp.permission_id
-               WHERE rp.role_id = ?""",
-            [role_id]
+               JOIN permission_set_permissions rp ON p.id = rp.permission_id
+               WHERE rp.permission_set_id = ?""",
+            [permission_set_id]
         )
         return self._rows_to_dicts(cursor)
 
-    def set_role_permissions(self, role_id: int, permission_ids: List[int]) -> bool:
+    def set_permission_set_permissions(self, permission_set_id: int, permission_ids: List[int]) -> bool:
         try:
-            self.ds.execute("DELETE FROM role_permissions WHERE role_id = ?", [role_id])
+            self.ds.execute("DELETE FROM permission_set_permissions WHERE permission_set_id = ?", [permission_set_id])
             # P10 修复: 去重 permission_ids（避免 UNIQUE 约束失败）
             # 否则 list=[p1, p1, p2] 会插入 2 次 p1 → UNIQUE 约束失败 → 整个调用失败
             seen = set()
@@ -174,16 +188,24 @@ class PermissionService:
                     unique_pids.append(pid)
             for pid in unique_pids:
                 self.ds.execute(
-                    "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
-                    [role_id, pid]
+                    "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
+                    [permission_set_id, pid]
                 )
-            affected = self.ds.execute(
-                """SELECT DISTINCT ugm.user_id FROM user_group_members ugm
-                   JOIN group_roles gr ON ugm.group_id = gr.group_id
-                   WHERE gr.role_id = ?""",
-                [role_id]
+            # [最小范围] 受影响用户 = 绑定该权限集的 org（含其子孙组织）的全部成员
+            cursor = self.ds.execute(
+                "SELECT DISTINCT org_id FROM org_permission_sets WHERE permission_set_id = ?",
+                [permission_set_id]
             )
-            user_ids = [row[0] for row in affected.fetchall()]
+            bound_org_ids = [row[0] for row in cursor.fetchall()]
+            from meta.services.org_service import OrgService
+            _org_service = OrgService(self.ds)
+            user_ids = []
+            seen_user_ids = set()
+            for org_id in bound_org_ids:
+                for uid in _org_service.get_org_subtree_user_ids(org_id):
+                    if uid not in seen_user_ids:
+                        seen_user_ids.add(uid)
+                        user_ids.append(uid)
             if user_ids:
                 from meta.services.token_version_service import token_version_service
                 token_version_service.bump(user_ids)

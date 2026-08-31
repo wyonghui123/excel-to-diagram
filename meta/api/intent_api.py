@@ -216,15 +216,15 @@ def get_bo_action(bo_id, action_name):
 # Role Intent CRUD
 # ============================================================
 
-@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents')
-def list_role_intents(role_id):
+@v1_deprecated(migrated_to='/api/v2/roles/<permission_set_id>/intents')
+def list_permission_set_intents(permission_set_id):
     """列出角色的 Intent 权限（FR-017 AC-4）
 
     Response:
         {
             "success": true,
             "data": [
-                {"id": 1, "role_id": 1, "bo_id": "...", "action_name": "...",
+                {"id": 1, "permission_set_id": 1, "bo_id": "...", "action_name": "...",
                  "granted": true, "source": "manual", ...},
                 ...
             ]
@@ -232,15 +232,15 @@ def list_role_intents(role_id):
     """
     try:
         dao = get_role_intent_dao()
-        intents = dao.list_for_role(int(role_id))
+        intents = dao.list_for_role(int(permission_set_id))
         return jsonify({"success": True, "data": intents})
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to list role intents: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>')
-def grant_or_deny_intent(role_id, bo_id, action_name):
+@v1_deprecated(migrated_to='/api/v2/roles/<permission_set_id>/intents/<bo_id>/<action_name>')
+def grant_or_deny_intent(permission_set_id, bo_id, action_name):
     """授予或拒绝 Intent 权限（FR-017 AC-4）
 
     Request Body:
@@ -258,7 +258,7 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
 
     [P1-B4 补充 2026-07-26] manual intent 变更后触发 derivation_pipeline 重推导
       - FR-013: manual intent 优先级最高, 覆盖 derived/template
-      - 调用 derivation_pipeline.derive(role_id) 重新生成 role_effective_intents
+      - 调用 derivation_pipeline.derive(permission_set_id) 重新生成 permission_set_effective_intents
       - 失败不阻塞主操作, 仅记录警告
     """
     try:
@@ -275,7 +275,7 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
         # 修复: 检查 DAO 返回值, 失败时返回 500 (避免静默 success)
         if granted:
             ok = dao.grant(
-                role_id=int(role_id),
+                permission_set_id=int(permission_set_id),
                 bo_id=bo_id,
                 action_name=action_name,
                 parameters=parameters,
@@ -283,7 +283,7 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
             )
         else:
             ok = dao.deny(
-                role_id=int(role_id),
+                permission_set_id=int(permission_set_id),
                 bo_id=bo_id,
                 action_name=action_name,
                 parameters=parameters,
@@ -296,7 +296,7 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
             }), 500
 
         # [P1-B4 补充 2026-07-26] manual intent 变更后触发 derivation 重推导
-        # FR-013: manual intent 优先级最高, derive 后会合并到 role_effective_intents
+        # FR-013: manual intent 优先级最高, derive 后会合并到 permission_set_effective_intents
         try:
             from meta.core.permission_flags import is_enabled
             if is_enabled('effective_intents_enabled'):
@@ -308,15 +308,15 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
                 if db_path:
                     eff_dao = EffectiveIntentDAO(db_path)
                     pipeline = PermissionDerivationPipeline(db_path=db_path, dao=eff_dao)
-                    pipeline.derive(role_id=int(role_id))
+                    pipeline.derive(permission_set_id=int(permission_set_id))
                     logger.info(
-                        f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                        f'[P1-B4] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                         f'completed after manual intent grant/deny '
                         f'(bo={bo_id}, action={action_name}, granted={granted})'
                     )
         except Exception as derive_err:
             logger.warning(
-                f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                f'[P1-B4] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                 f'failed (non-fatal): {derive_err}'
             )
 
@@ -333,8 +333,8 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>')
-def revoke_intent(role_id, bo_id, action_name):
+@v1_deprecated(migrated_to='/api/v2/roles/<permission_set_id>/intents/<bo_id>/<action_name>')
+def revoke_intent(permission_set_id, bo_id, action_name):
     """撤销 Intent 权限（FR-017 AC-4）
 
     [P1-B4 修复 2026-07-26] 移除 bo_framework.transaction() 包装, 检查 DAO 返回值
@@ -350,7 +350,7 @@ def revoke_intent(role_id, bo_id, action_name):
     try:
         dao = get_role_intent_dao()
         ok = dao.revoke(
-            role_id=int(role_id),
+            permission_set_id=int(permission_set_id),
             bo_id=bo_id,
             action_name=action_name,
         )
@@ -372,15 +372,15 @@ def revoke_intent(role_id, bo_id, action_name):
                 if db_path:
                     eff_dao = EffectiveIntentDAO(db_path)
                     pipeline = PermissionDerivationPipeline(db_path=db_path, dao=eff_dao)
-                    pipeline.derive(role_id=int(role_id))
+                    pipeline.derive(permission_set_id=int(permission_set_id))
                     logger.info(
-                        f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                        f'[P1-B4] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                         f'completed after manual intent revoke '
                         f'(bo={bo_id}, action={action_name})'
                     )
         except Exception as derive_err:
             logger.warning(
-                f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                f'[P1-B4] derivation_pipeline.derive(permission_set_id={permission_set_id}) '
                 f'failed (non-fatal): {derive_err}'
             )
 
@@ -403,6 +403,6 @@ add_dual_routes(intent_bp, '/permissions/check_intent', check_intent_permission,
 add_dual_routes(intent_bp, '/bos', list_bos, ['GET'])
 add_dual_routes(intent_bp, '/bos/<bo_id>/actions', list_bo_actions, ['GET'])
 add_dual_routes(intent_bp, '/bos/<bo_id>/actions/<action_name>', get_bo_action, ['GET'])
-add_dual_routes(intent_bp, '/roles/<role_id>/intents', list_role_intents, ['GET'])
-add_dual_routes(intent_bp, '/roles/<role_id>/intents/<bo_id>/<action_name>', grant_or_deny_intent, ['PUT'])
-add_dual_routes(intent_bp, '/roles/<role_id>/intents/<bo_id>/<action_name>', revoke_intent, ['DELETE'])
+add_dual_routes(intent_bp, '/roles/<permission_set_id>/intents', list_permission_set_intents, ['GET'])
+add_dual_routes(intent_bp, '/roles/<permission_set_id>/intents/<bo_id>/<action_name>', grant_or_deny_intent, ['PUT'])
+add_dual_routes(intent_bp, '/roles/<permission_set_id>/intents/<bo_id>/<action_name>', revoke_intent, ['DELETE'])

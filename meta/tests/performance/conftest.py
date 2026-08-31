@@ -330,8 +330,8 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
     _safe_create_table(ds, """
         CREATE TABLE IF NOT EXISTS group_roles (
             group_id INTEGER,
-            role_id INTEGER,
-            PRIMARY KEY (group_id, role_id)
+            permission_set_id INTEGER,
+            PRIMARY KEY (group_id, permission_set_id)
         )
     """)
 
@@ -346,9 +346,9 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
 
     _safe_create_table(ds, """
         CREATE TABLE IF NOT EXISTS role_permissions (
-            role_id INTEGER,
+            permission_set_id INTEGER,
             permission_id INTEGER,
-            PRIMARY KEY (role_id, permission_id)
+            PRIMARY KEY (permission_set_id, permission_id)
         )
     """)
     
@@ -373,7 +373,7 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
             INSERT INTO roles (name, description, created_at)
             VALUES ('admin', '管理员角色', ?)
         """, [now])
-        role_id = cursor.lastrowid
+        permission_set_id = cursor.lastrowid
     except Exception:
         pass
     
@@ -383,7 +383,7 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
         ds.commit()
         return user_id
 
-    role_id = role_row[0] if not hasattr(role_row, 'keys') else role_row['id']
+    permission_set_id = role_row[0] if not hasattr(role_row, 'keys') else role_row['id']
     try:
         cursor = ds.execute("""
             INSERT INTO user_groups (code, name) VALUES (?, ?)
@@ -393,8 +393,8 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
             INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)
         """, [user_id, group_id])
         ds.execute("""
-            INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)
-        """, [group_id, role_id])
+            INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)
+        """, [group_id, permission_set_id])
     except Exception:
         pass
 
@@ -421,8 +421,8 @@ def _create_test_user(ds, username: str = "admin", password: str = "admin123"):
             perm_id = perm_row[0] if not hasattr(perm_row, 'keys') else perm_row['id']
             try:
                 ds.execute("""
-                    INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)
-                """, [role_id, perm_id])
+                    INSERT INTO role_permissions (permission_set_id, permission_id) VALUES (?, ?)
+                """, [permission_set_id, perm_id])
             except Exception:
                 pass
     

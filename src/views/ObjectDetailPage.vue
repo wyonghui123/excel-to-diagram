@@ -64,8 +64,8 @@
              导致「基本信息」等 section 可编辑，而权限面板永远 readonly -->
         <template #section-permissions="{ data }">
           <PermissionConfigPanel
-            :role-id="data?.id || id"
-            :role="data"
+            :permission-set-id="data?.id || id"
+            :permission-set="data"
             :editing="detailPageRef?.internalEditing === true"
             :flush-on-exit="true"
             @saved="handleRefresh"

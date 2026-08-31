@@ -545,11 +545,11 @@ def _create_test_schema(conn):
         CREATE TABLE IF NOT EXISTS group_roles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (group_id) REFERENCES user_groups(id),
-            FOREIGN KEY (role_id) REFERENCES roles(id),
-            UNIQUE(group_id, role_id)
+            FOREIGN KEY (permission_set_id) REFERENCES roles(id),
+            UNIQUE(group_id, permission_set_id)
         )
     """)
 
@@ -672,7 +672,7 @@ def created_role(db_isolated):
             cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
                 (created_user['id'], group_id))
             # 给用户组分配角色
-            cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+            cursor.execute("INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)",
                 (group_id, created_role['id']))
             db_isolated.commit()
     [RETURN] sqlite3.Row: 角色记录
@@ -681,10 +681,10 @@ def created_role(db_isolated):
     cursor.execute("""
         INSERT INTO roles (code, name, description)
         VALUES (?, ?, ?)
-    """, ('admin', 'Administrator', 'Full access role'))
+    """, ('admin', 'Administrator', 'Full access permission_set'))
     db_isolated.commit()
-    role_id = cursor.lastrowid
-    cursor.execute("SELECT * FROM roles WHERE id = ?", (role_id,))
+    permission_set_id = cursor.lastrowid
+    cursor.execute("SELECT * FROM roles WHERE id = ?", (permission_set_id,))
     return cursor.fetchone()
 
 
@@ -695,24 +695,24 @@ def user_with_role(created_user, created_role):
     [DESCRIPTION] 创建一个已分配角色的用户（通过用户组间接关联）
     [USAGE]
         def test_user_role(user_with_role):
-            assert user_with_role['role']['code'] == 'admin'
-    [RETURN] dict: {'user': 用户记录, 'role': 角色记录, 'group_id': 用户组ID}
+            assert user_with_role['permission_set']['code'] == 'admin'
+    [RETURN] dict: {'user': 用户记录, 'permission_set': 角色记录, 'group_id': 用户组ID}
     """
     conn = created_user if hasattr(created_user, 'cursor') else None
     if conn is None:
-        return {'user': created_user, 'role': created_role, 'group_id': None}
+        return {'user': created_user, 'permission_set': created_role, 'group_id': None}
 
     cursor = conn.cursor()
     cursor.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)",
-        ('test_user_role_group', 'Test User Role Group'))
+        ('test_user_role_group', 'Test User PermissionSet Group'))
     group_id = cursor.lastrowid
     cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
         (created_user['id'], group_id))
-    cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+    cursor.execute("INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)",
         (group_id, created_role['id']))
     conn.commit()
 
-    return {'user': created_user, 'role': created_role, 'group_id': group_id}
+    return {'user': created_user, 'permission_set': created_role, 'group_id': group_id}
 
 
 # ==================== API Response Assertion Helpers ====================

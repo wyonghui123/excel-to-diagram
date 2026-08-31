@@ -5,8 +5,8 @@ import { nextTick, ref } from 'vue'
 vi.mock('@/composables/useMetaList', () => ({
   useMetaList: () => ({
     data: ref([
-      { id: 1, username: 'admin', name: 'Test Object 1', code: 'OBJ001', user_id: 10, user_id_display: 'Admin User', role_id: 5, role_name: 'Editor', status: 'active' },
-      { id: 2, username: 'user1', name: 'Test Object 2', code: 'OBJ002', user_id: 20, user_id_display: 'Normal User', role_id: 3, role_name: 'Viewer', status: 'inactive' }
+      { id: 1, username: 'admin', name: 'Test Object 1', code: 'OBJ001', user_id: 10, user_id_display: 'Admin User', permission_set_id: 5, role_name: 'Editor', status: 'active' },
+      { id: 2, username: 'user1', name: 'Test Object 2', code: 'OBJ002', user_id: 20, user_id_display: 'Normal User', permission_set_id: 3, role_name: 'Viewer', status: 'inactive' }
     ]),
     loading: ref(false),
     error: ref(null),
@@ -62,7 +62,7 @@ describe('MetaListPage - FK字段链接 & BusinessKey 链接渲染', () => {
       }
     },
     { 
-      prop: 'role_id', 
+      prop: 'permission_set_id', 
       label: '角色', 
       width: 150,
       valueHelpConfig: {
@@ -95,7 +95,7 @@ describe('MetaListPage - FK字段链接 & BusinessKey 链接渲染', () => {
 
     it('TC-ML-FK-004: 不同FK列有不同的目标对象类型', () => {
       const userColumn = defaultColumns.find(c => c.prop === 'user_id')
-      const roleColumn = defaultColumns.find(c => c.prop === 'role_id')
+      const roleColumn = defaultColumns.find(c => c.prop === 'permission_set_id')
       
       expect(userColumn.valueHelpConfig.source.target_bo).toBe('user')
       expect(roleColumn.valueHelpConfig.source.target_bo).toBe('role')
@@ -275,8 +275,8 @@ describe('MetaListPage - FK字段链接 & BusinessKey 链接渲染', () => {
     })
 
     it('TC-ML-DISP-002: 无_display后缀时使用_name后缀', () => {
-      const row = { role_id: 5, role_name: 'Editor' }
-      const column = defaultColumns.find(c => c.prop === 'role_id')
+      const row = { permission_set_id: 5, role_name: 'Editor' }
+      const column = defaultColumns.find(c => c.prop === 'permission_set_id')
       
       const nameKey = `${column.prop.replace(/_id$/, '')}_name`
       expect(row[nameKey]).toBe('Editor')

@@ -4,11 +4,11 @@ Runtime Dimension Resolver — 运行时维度解析器
 
 【背景 2026-06-04】
 Spec v1.3 (data-permission-unified-model) 引入运行时动态展开：
-- 配置层：role_dimension_scopes（用户配的维度值）
+- 配置层：permission_set_dimension_scopes（用户配的维度值）
 - 应用层：BO 的 dimension_bindings（YAML 声明）
 - 执行层：拦截器运行时从上述 2 源动态拼 SQL（无中间表）
 
-本模块实现运行时从 role_dimension_scopes 读取用户配置，
+本模块实现运行时从 permission_set_dimension_scopes 读取用户配置，
 结合 BO 的 dimension_bindings 解析为 SQL WHERE 条件。
 
 【M2.1 扩展 — Owner 过滤】
@@ -51,7 +51,7 @@ class RuntimeDimensionResolver:
     """运行时维度解析器
 
     职责：
-    1. 读取 role_dimension_scopes 中用户的维度值配置
+    1. 读取 permission_set_dimension_scopes 中用户的维度值配置
     2. 结合 BO 的 dimension_bindings 解析为 SQL WHERE 条件
     3. 支持公共维度（bo_id=NULL）和 BO 级覆盖
     4. M2.1: 支持 Owner 过滤运行时展开
@@ -109,7 +109,7 @@ class RuntimeDimensionResolver:
     ) -> List[Dict[str, Any]]:
         """无缓存的 resolve 实现（P0 重构：可缓存化）"""
         if role_ids is None:
-            role_ids = self._get_user_roles(user_id)
+            role_ids = self._get_user_permission_sets(user_id)
         if not role_ids:
             return []
 
@@ -294,16 +294,16 @@ class RuntimeDimensionResolver:
             conditions.append(owner_cond)
         return conditions
 
-    def _get_user_roles(self, user_id: int) -> List[int]:
+    def _get_user_permission_sets(self, user_id: int) -> List[int]:
         """获取用户的角色 ID 列表"""
         try:
             # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
             with safe_connect_for_read(self._db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT DISTINCT gr.role_id
-                    FROM user_group_members ugm
-                    JOIN group_roles gr ON ugm.group_id = gr.group_id
+                    SELECT DISTINCT gr.permission_set_id
+                    FROM org_members ugm
+                    JOIN org_permission_sets gr ON ugm.org_id = gr.org_id
                     WHERE ugm.user_id = ?
                 """, (user_id,))
                 roles = [row[0] for row in cursor.fetchall()]
@@ -322,15 +322,15 @@ class RuntimeDimensionResolver:
                 cursor = conn.cursor()
                 placeholders = ','.join('?' * len(role_ids))
                 cursor.execute(f"""
-                    SELECT role_id, dimension_code, dimension_values, inherit_children,
+                    SELECT permission_set_id, dimension_code, dimension_values, inherit_children,
                            scope_mode, bo_id
-                    FROM role_dimension_scopes
-                    WHERE role_id IN ({placeholders})
+                    FROM permission_set_dimension_scopes
+                    WHERE permission_set_id IN ({placeholders})
                 """, role_ids)
                 scopes = []
                 for row in cursor.fetchall():
                     scopes.append({
-                        'role_id': row[0],
+                        'permission_set_id': row[0],
                         'dimension_code': row[1],
                         'dimension_values': row[2],
                         'inherit_children': row[3],

@@ -1,0 +1,99 @@
+# ============================================
+# 权限集权限关联元模型
+# 说明: 权限集与权限的多对多关联 (Spec 16: role_permission → permission_set_permission)
+# ============================================
+
+id: permission_set_permission
+name: 权限集权限
+table_name: permission_set_permissions
+description: 权限集与权限的多对多关联
+
+semantics:
+  meaning: 权限集权限关联
+  category: system_entity
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: permission_set_id
+    name: 权限集ID
+    type: integer
+    db_column: permission_set_id
+    required: true
+    description: 关联权限集ID
+    semantics:
+      meaning: 关联的权限集
+      parent_key: true
+
+  - id: permission_id
+    name: 权限ID
+    type: integer
+    db_column: permission_id
+    required: true
+    description: 关联权限ID
+    semantics:
+      meaning: 关联的权限
+
+  - id: granted
+    name: 授予状态
+    type: boolean
+    db_column: granted
+    required: true
+    default: true
+    description: true=包含(include), false=排除(exclude)
+    semantics:
+      meaning: 权限包含或排除
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+
+indexes:
+  - fields: [permission_set_id, permission_id]
+    unique: true
+    name: idx_permission_set_permission_unique
+
+relations: []
+actions: []
+
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  granted:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/permission_set_permission/permission_set_permission-detail
+  list: /permission_set_permission-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

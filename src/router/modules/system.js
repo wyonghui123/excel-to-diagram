@@ -1,6 +1,6 @@
 /**
  * [FR-018] 系统/管理路由 (需要管理员权限)
- *  - 系统管理、角色权限、任务调度、审计日志
+ *  - 系统管理、权限集、任务调度、审计日志
  */
 export default [
   {
@@ -16,26 +16,26 @@ export default [
     meta: { title: '审计日志管理', requiresAuth: true, requiresAdmin: true }
   },
   {
-    path: '/system/role-permission/:roleId',
-    name: 'RolePermissionCenter',
-    component: () => import('@/views/SystemManagement/RolePermissionCenter.vue'),
-    meta: { title: '角色权限配置', requiresAuth: true, requiresAdmin: true }
+    path: '/system/permission-set-permission/:roleId',
+    name: 'PermissionSetCenter',
+    component: () => import('@/views/SystemManagement/PermissionSetCenter.vue'),
+    meta: { title: '权限集配置', requiresAuth: true, requiresAdmin: true }
   },
   {
-    path: '/system/role-detail/:roleId',
-    name: 'RolePermissionDetail',
-    // [FIX 2026-07-12] 路由原本指向 RoleDetail.vue (简化版, 无联动)
-    // 改为 RolePermissionDetail.vue, 含 PermissionConfigPanel + useMenuPermission
-    // 修复: 角色详情中勾掉 "管理/编辑" 后对应 "删除" 等操作明细不联动的问题
-    component: () => import('@/views/SystemManagement/RolePermissionDetail.vue'),
-    meta: { title: '角色详情', requiresAuth: true, requiresAdmin: true }
+    path: '/system/permission-set-detail/:roleId',
+    name: 'PermissionSetDetailContent',
+    // [FIX 2026-07-12] 路由原本指向 PermissionSetDetail.vue (简化版, 无联动)
+    // 改为 PermissionSetDetailContent.vue, 含 PermissionConfigPanel + useMenuPermission
+    // 修复: 权限集详情中勾掉 "管理/编辑" 后对应 "删除" 等操作明细不联动的问题
+    component: () => import('@/views/SystemManagement/PermissionSetDetailContent.vue'),
+    meta: { title: '权限集详情', requiresAuth: true, requiresAdmin: true }
   },
   {
-    path: '/role/:id',
-    name: 'RoleDetail',
-    component: () => import('@/views/SystemManagement/RoleDetail.vue'),
+    path: '/permission-set/:id',
+    name: 'PermissionSetDetail',
+    component: () => import('@/views/SystemManagement/PermissionSetDetail.vue'),
     meta: {
-      title: '角色详情',
+      title: '权限集详情',
       requiresAuth: true,
       requiresAdmin: true
     }

@@ -821,6 +821,9 @@ def parse_ui_detail_tab(data: Dict[str, Any]) -> 'UIDetailTab':
         association=data.get("association", ""),
         widget=data.get("widget", ""),
         actions=actions,
+        endpoint=data.get("endpoint", ""),
+        icon=data.get("icon", ""),
+        props=data.get("props", {}),
     )
 
 

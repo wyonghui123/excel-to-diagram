@@ -380,7 +380,7 @@ class PermissionResolver:
         if not user_id:
             return False
         try:
-            # 查询: role_id IN (用户的角色列表) AND rule_type='prohibition' AND is_denied=1
+            # 查询: permission_set_id IN (用户的角色列表) AND rule_type='prohibition' AND is_denied=1
             # 简化: 查询所有 prohibition 规则 (无角色绑定则对所有人生效)
             rows = self._ds.execute(
                 "SELECT resource_type, condition FROM data_permission_rules "
@@ -524,7 +524,7 @@ class PermissionResolver:
         """[P10-T3] 检查 Field mask — `*` 下敏感字段仍被 mask (deny)
 
         判定逻辑:
-          1. 查询 field_permissions 表, 检查 role_id 对应角色是否有该字段的 mask 配置
+          1. 查询 field_permissions 表, 检查 permission_set_id 对应角色是否有该字段的 mask 配置
           2. 若 is_masked=1 → Deny (不允许读敏感字段)
           3. 否则 → Allow
 
@@ -546,10 +546,10 @@ class PermissionResolver:
 
         try:
             # 查询: 该用户的角色是否有该字段的 mask 配置
-            # 通过 user_roles → field_permissions 关联
+            # 通过 user_permission_sets → field_permissions 关联
             rows = self._ds.execute(
                 "SELECT fp.is_masked FROM field_permissions fp "
-                "JOIN user_roles ur ON fp.role_id = ur.role_id "
+                "JOIN user_permission_sets ur ON fp.permission_set_id = ur.permission_set_id "
                 "WHERE ur.user_id = ? "
                 "  AND fp.resource_type = ? AND fp.field_name = ? "
                 "  AND fp.permission_level = ? LIMIT 1",
@@ -569,13 +569,13 @@ class PermissionResolver:
                     "  AND permission_level = ? LIMIT 1",
                     [resource_type, field_name, action]
                 ).fetchone()
-                # 仅在 user_roles 表为空时使用 fallback
+                # 仅在 user_permission_sets 表为空时使用 fallback
                 try:
                     user_role_count = self._ds.execute(
-                        "SELECT COUNT(*) FROM user_roles"
+                        "SELECT COUNT(*) FROM user_permission_sets"
                     ).fetchone()[0]
                     if user_role_count > 0:
-                        # 有 user_roles 数据但当前 user 没有 → Allow (无 mask 配置)
+                        # 有 user_permission_sets 数据但当前 user 没有 → Allow (无 mask 配置)
                         return True
                 except Exception:
                     pass
@@ -713,7 +713,7 @@ class PermissionResolver:
     def _check_action(self, user, action: str, resource_type: str) -> bool:
         """[P4-T1 Layer 1] 检查功能权限 (user 是否有 {resource_type}.{action} 权限)
 
-        通过 user_roles → role_permissions → permissions 关联查询.
+        通过 user_permission_sets → permission_set_permissions → permissions 关联查询.
 
         Returns:
             True 表示有功能权限
@@ -727,36 +727,36 @@ class PermissionResolver:
         perm_code = f'{resource_type}.{action}'
         wildcard_code = f'{resource_type}.*'
         try:
-            # 优先: 通过 user_roles 关联查询
+            # 优先: 通过 user_permission_sets 关联查询
             row = self._ds.execute(
-                "SELECT 1 FROM user_roles ur "
-                "JOIN role_permissions rp ON ur.role_id = rp.role_id "
+                "SELECT 1 FROM user_permission_sets ur "
+                "JOIN permission_set_permissions rp ON ur.permission_set_id = rp.permission_set_id "
                 "WHERE ur.user_id = ? "
                 "  AND (rp.permission_code = ? OR rp.permission_code = ?) LIMIT 1",
                 [user_id, perm_code, wildcard_code]
             ).fetchone()
             if row:
                 return True
-            # Fallback 1: 检查 role_permissions 是否存在该 code (无 user-role 关联时,
-            # 假设所有 role_permissions 都对该 user 生效 — 仅用于测试 fixture 兼容)
+            # Fallback 1: 检查 permission_set_permissions 是否存在该 code (无 user-role 关联时,
+            # 假设所有 permission_set_permissions 都对该 user 生效 — 仅用于测试 fixture 兼容)
             row = self._ds.execute(
-                "SELECT 1 FROM role_permissions rp "
+                "SELECT 1 FROM permission_set_permissions rp "
                 "WHERE rp.permission_code = ? OR rp.permission_code = ? LIMIT 1",
                 [perm_code, wildcard_code]
             ).fetchone()
-            # 注: 这个 fallback 仅在 user_roles 表为空时使用, 实际生产应通过 user_roles
-            # 检查 user_roles 表是否存在且有数据
+            # 注: 这个 fallback 仅在 user_permission_sets 表为空时使用, 实际生产应通过 user_permission_sets
+            # 检查 user_permission_sets 表是否存在且有数据
             try:
                 user_role_count = self._ds.execute(
-                    "SELECT COUNT(*) FROM user_roles"
+                    "SELECT COUNT(*) FROM user_permission_sets"
                 ).fetchone()[0]
                 if user_role_count > 0:
-                    # 有 user_roles 数据但当前 user 没有 → Deny
+                    # 有 user_permission_sets 数据但当前 user 没有 → Deny
                     return False
-                # user_roles 表为空 → 用 fallback (允许)
+                # user_permission_sets 表为空 → 用 fallback (允许)
                 return row is not None
             except Exception:
-                # user_roles 表不存在 → 用 fallback
+                # user_permission_sets 表不存在 → 用 fallback
                 return row is not None
         except Exception as e:
             logger.debug(f'[P4-T1 _check_action] error: {e}')

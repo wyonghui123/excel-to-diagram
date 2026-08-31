@@ -1,0 +1,514 @@
+# ============================================
+# 权限集元模型 (原 role.yaml, Plan A 迁移)
+# 说明: 权限集（Permission Set），用于RBAC权限控制
+# ============================================
+
+id: permission_set
+name: 权限集
+table_name: permission_sets
+description: 权限集，用于基于权限集的访问控制（PBAC）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 权限集
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 权限集
+    - PermissionSet
+    - role
+    - 角色  # 历史 alias
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - is_system
+  associate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: code
+    name: 权限集编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    description: 权限集编码，如 admin, editor, viewer
+    semantics:
+      meaning: 权限集的唯一编码
+      business_key: true
+      immutable: true
+
+  - id: name
+    name: 权限集名称
+    type: string
+    db_column: name
+    required: true
+    description: 权限集显示名称
+    semantics:
+      meaning: 权限集的显示名称
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 权限集描述
+    semantics:
+      meaning: 权限集的详细说明
+      searchable: true
+
+  - id: is_active
+    name: 启用状态
+    type: boolean
+    db_column: is_active
+    default: true
+    description: 权限集是否启用，停用后该权限集的权限将失效
+    semantics:
+      meaning: 权限集的启用/停用状态
+    enum_values:
+      - value: 1
+        label: 启用中
+        color: success
+      - value: 0
+        label: 已停用
+        color: default
+    ui:
+      widget: switch
+      editable: true
+
+  - id: is_system
+    name: 系统权限集
+    type: boolean
+    db_column: is_system
+    default: false
+    description: 系统权限集不可删除，新建权限集默认为自定义权限集
+    enum_values:
+      - value: 1
+        label: 系统权限集
+        color: info
+      - value: 0
+        label: 自定义权限集
+        color: default
+    semantics:
+      meaning: 标记是否为系统内置权限集
+      readonly_always: true
+    constraints:
+      - type: no_delete
+        trigger_value: true
+        message: 系统权限集不可删除
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+      audit_field: true
+
+  - id: user_count
+    name: 用户数
+    type: integer
+    description: 权限集关联的用户数量（计算字段）
+    semantics:
+      meaning: 用户统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM user_permission_sets WHERE permission_set_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: menu_count
+    name: 菜单数
+    type: integer
+    description: 权限集关联的菜单数量（计算字段）
+    semantics:
+      meaning: 菜单权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM permission_set_menu_permissions WHERE permission_set_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: permission_count
+    name: 权限数
+    type: integer
+    description: 权限集关联的权限数量（计算字段）
+    semantics:
+      meaning: 权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: data_perm_count
+    name: 数据权限数
+    type: integer
+    description: 权限集关联的数据权限数量（计算字段）
+    semantics:
+      meaning: 数据权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM permission_rules WHERE permission_set_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_permission_set_code
+
+relations: []
+
+associations:
+  permissions:
+    name: permissions
+    label: 权限
+    plural_label: 权限列表
+    type: many_to_many
+    through: permission_set_permissions
+    source_key: permission_set_id
+    target_entity: permission
+    target_key: permission_id
+    description: 权限集权限关联
+    display:
+      label: 权限
+      plural_label: 权限
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 权限编码
+          width: 150
+        - id: name
+          label: 权限名称
+          width: 180
+    actions:
+      grant:
+        name: grant_permission
+        label: 授予权限
+      revoke:
+        name: revoke_permission
+        label: 撤销权限
+        confirm_message: 确定要撤销此权限吗？
+
+  assigned_orgs:
+    name: assigned_orgs
+    label: 组织
+    plural_label: 组织列表
+    target_type: org
+    type: reverse_many_to_many
+    through: org_permission_sets
+    source_key: permission_set_id
+    target_key: org_id
+    description: 分配了此权限集的组织。组织成员将自动获得此权限集权限。
+    display:
+      label: 组织
+      plural_label: 组织
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 组织编码
+          width: 120
+        - id: name
+          label: 组织名称
+          width: 180
+    readonly: true
+    help_text: 此权限集已分配给以下组织。如需分配到更多组织，请在组织详情页的"权限集"标签页中操作。
+
+ui_view_config:
+  showChangeHistory: true
+
+  list:
+    detail_mode: page
+    detail_path: '/detail/permission_set'
+    title: 权限集管理
+    description: 系统权限集列表
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+        filterable: true
+      - field: name
+        width: 150
+        sortable: true
+        filterable: true
+      - field: description
+        width: 200
+        type: ellipsis
+      - field: is_active
+        width: 100
+        filterable: true
+        filter_type: select
+        widget: badge
+        filter_options:
+          - value: 1
+            label: 启用中
+          - value: 0
+            label: 已停用
+        badge_colors:
+          true: success
+          false: default
+        labels:
+          true: 启用
+          false: 停用
+      - field: is_system
+        width: 100
+        filterable: true
+        filter_type: select
+        widget: badge
+        filter_options:
+          - value: 1
+            label: 系统权限集
+          - value: 0
+            label: 自定义权限集
+        badge_colors:
+          true: info
+          false: default
+        labels:
+          true: 系统
+          false: 自定义
+      - field: created_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: updated_at
+        width: 160
+        format: datetime
+        label: 变更时间
+        filter_type: date_range
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - name
+      - code
+      - description
+    actions:
+      - id: create
+        label: 新建权限集
+        icon: plus
+        type: primary
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+      - id: import
+        label: 导入
+        icon: upload
+        type: default
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的权限集吗？
+    filters:
+      - field: code
+        type: text
+        placeholder: 搜索权限集编码
+      - field: name
+        type: text
+        placeholder: 搜索权限集名称
+      - field: is_system
+        type: select
+        placeholder: 选择类型
+
+  form:
+    title: 权限集信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [is_active, is_system]
+      - title: 描述
+        columns:
+          - fields: [description]
+
+  detail:
+    mode: page
+    page_route: PermissionSetDetailContent
+    layout: tabs
+    title: "{record.name} 详情"
+    actions:
+      - id: edit
+        label: 编辑
+        icon: edit
+        type: primary
+      - id: save
+        label: 保存
+        icon: check
+        type: primary
+      - id: cancel
+        label: 取消
+        icon: close
+        type: default
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - name
+          - code
+          - description
+          - is_active
+          - is_system
+          - permission_count
+
+      - id: permissions
+        label: 权限配置
+        type: custom
+
+      - id: assigned_orgs
+        label: 组织 (已分配)
+        type: association
+        association: assigned_orgs
+        description: 此权限集已分配给以下组织，组织成员自动获得此权限集权限
+        help_text: 如需分配到更多组织，请在组织详情页的"权限集"标签页中操作
+        actions:
+          - list
+
+      - id: audit-log
+        label: 操作日志
+        type: history
+
+actions:
+  - id: permission_set_create
+    name: 创建权限集
+    type: crud
+    method: POST
+    path: /api/v1/permission-sets
+  - id: permission_set_read
+    name: 查询权限集
+    type: crud
+    method: GET
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_update
+    name: 更新权限集
+    type: crud
+    method: PUT
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_delete
+    name: 删除权限集
+    type: crud
+    method: DELETE
+    path: /api/v1/permission-sets/{id}
+  - id: permission_set_list
+    name: 权限集列表
+    type: crud
+    method: GET
+    path: /api/v1/permission-sets
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code
+  description_for_agent: "权限集数据导入导出，支持批量创建和更新权限集"
+
+category_config:
+  create_permission: permission_set:create
+  update_permission: permission_set:update
+  delete_permission: permission_set:delete
+  owner_auto_permission: false
+
+deletion_policy:
+  cascade_delete:
+    - user_permission_sets
+    - permission_set_permissions
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建权限集
+    icon: plus
+    type: primary
+    permission: "permission_set:create"
+    visible_when: true
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "permission_set:export"
+    visible_when: true
+  import:
+    label: 导入
+    icon: upload
+    type: default
+    permission: "permission_set:import"
+    visible_when: true
+
+ui_badge:
+  is_active:
+    color_map:
+      1: info
+  is_system:
+    color_map:
+      1: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+  - name: associate
+    level: INFO
+    category: relation
+
+routes:
+  detail: /detail/permission_set
+  list: /permission-set-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

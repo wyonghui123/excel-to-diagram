@@ -20,8 +20,8 @@ AUDIT_CHILD_CONFIG = {
     'business_objects': {
         'children': {'annotations': {'target_type': 'business_object', 'target_id': True}},
     },
-    'roles': {
-        'children': {'role_permissions': 'role_id'},
+    'permission_sets': {
+        'children': {'permission_set_permissions': 'permission_set_id'},
     },
 }
 

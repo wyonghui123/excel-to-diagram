@@ -1,11 +1,18 @@
 <template>
   <div class="value-help-field">
     <template v-if="resultType === 'dropdown'">
-      <!-- 单选：使用 filterable 确保 el-select 正确显示选中项的 label -->
+      <!-- 单选：使用 filterable 确保 el-select 正确显示选中项的 label
+           [FIX 2026-08-30] 单选加 remote + remote-method，与多选行为一致。
+           原因: 纯 filterable 是"本地过滤"已加载 options，而打开下拉时仅预加载前
+           page_size(200) 条 (id asc)。当目标记录不在前 200 条 (如 orgs 表 200+ 行,
+           "供应链云" id=8326) 时，输入搜索词永远查不到 (不发 API 请求)。
+           加 remote 后: 输入触发 handleRemoteSearch → 后端 search 命中任意记录。 -->
       <el-select
         v-if="!isMultiple"
         v-model="internalValue"
         filterable
+        remote
+        :remote-method="handleRemoteSearch"
         :loading="loading"
         :disabled="disabled || !bindingSatisfied"
         :placeholder="placeholder"

@@ -227,8 +227,10 @@ import { serialize, serializeDisplay, parseConditionToRuleRows } from '@/compone
 //   - 删掉 translateToFriendlyCondition / parseConditionToDimConfigs 引用 — 业务语义预览已去除
 //   - 保留 conditionExpressionService 文件（未来需要完整解析 Rule Builder 时再用）
 
+// [P2-9 2026-08-29] Spec 16: prop 统一改为 permissionSetId
+//   移除向后兼容：父组件 PermissionConfigPanel 已使用 permissionSetId 变量
 const props = defineProps({
-  roleId: { type: [String, Number], required: true },
+  permissionSetId: { type: [String, Number], required: true },
   editingRule: { type: Object, default: null },  // 编辑模式时传入的规则
   // [v45 2026-08-27] 浏览态只读模式：可打开查看，但内容不可编辑、无保存按钮
   readonly: { type: Boolean, default: false },
@@ -481,9 +483,9 @@ const showFieldHelp = ref(false)
 const overlapWarnings = ref([])
 
 async function fetchOverlapWarnings() {
-  if (!props.roleId || !form.resource_type) return
+  if (!props.permissionSetId || !form.resource_type) return
   try {
-    const r = await permService.loadOverlapWarnings(props.roleId, form.resource_type)
+    const r = await permService.loadOverlapWarnings(props.permissionSetId, form.resource_type)
     if (r.success) {
       overlapWarnings.value = r.data?.overlaps || r.data?.warnings || []
     }
@@ -579,7 +581,7 @@ async function handleSave() {
   try {
     // [Phase 3.13] v13 简化：save payload 不再含 permission_level / is_denied
     const payload = {
-      role_id: props.roleId,
+      permission_set_id: props.permissionSetId,
       resource_type: form.resource_type,
       condition: form.condition,
       inherit_to_children: form.inherit_to_children,

@@ -11,15 +11,15 @@ interface ConditionRule {
   is_denied: boolean
 }
 
-export function useConditionRules(roleId: Ref<string>) {
+export function useConditionRules(permissionSetId: Ref<string>) {
   const rules = ref<ConditionRule[]>([])
   const loading = ref(false)
   const saving = ref(false)
 
   async function loadRules() {
-    if (!roleId.value) return
-    // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int role_id
-    if (!/^\d+$/.test(String(roleId.value))) {
+    if (!permissionSetId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态 (permission_set 尚未保存), 后端期望 int permission_set_id
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
       rules.value = []
       return
     }
@@ -29,7 +29,7 @@ export function useConditionRules(roleId: Ref<string>) {
       // [P11 Phase 11] Panel 3 只显示 rule_type='condition' 的规则
       // (其他 rule_type 由各 Panel 自行加载: prohibition/owner/visibility)
       const r = await permService.loadConditionRules({
-        role_id: roleId.value,
+        permission_set_id: permissionSetId.value,
         rule_type: 'condition'
       })
 
@@ -47,17 +47,17 @@ export function useConditionRules(roleId: Ref<string>) {
   }
 
   async function addRule(rule: Omit<ConditionRule, 'id'>) {
-    if (!roleId.value) return
-    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id
-    if (!/^\d+$/.test(String(roleId.value))) {
-      throw new Error('添加失败: 角色尚未保存, 请先保存角色')
+    if (!permissionSetId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int permission_set_id
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
+      throw new Error('添加失败: 权限集尚未保存, 请先保存权限集')
     }
 
     saving.value = true
     try {
       const r = await permService.saveConditionRule({
         ...rule,
-        role_id: roleId.value
+        permission_set_id: permissionSetId.value
       })
 
       if (!r.success) {
@@ -75,15 +75,15 @@ export function useConditionRules(roleId: Ref<string>) {
   }
 
   async function updateRule(ruleId: number | string, updates: Partial<ConditionRule>) {
-    if (!roleId.value) return
-    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id (Number('new')=NaN, 路径异常)
-    if (!/^\d+$/.test(String(roleId.value))) {
-      throw new Error('更新失败: 角色尚未保存, 请先保存角色')
+    if (!permissionSetId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int permission_set_id (Number('new')=NaN, 路径异常)
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
+      throw new Error('更新失败: 权限集尚未保存, 请先保存权限集')
     }
     saving.value = true
     try {
       const r = await permService.savePermissionRules(
-        Number(roleId.value),
+        Number(permissionSetId.value),
         { ...updates, id: ruleId },
         'update'
       )
@@ -103,10 +103,10 @@ export function useConditionRules(roleId: Ref<string>) {
   }
 
   async function deleteRule(ruleId: number | string) {
-    if (!roleId.value) return
+    if (!permissionSetId.value) return
     // [GUARD 2026-06-14] 创建态不触发删除 (rules 为空, 不会到这)
-    if (!/^\d+$/.test(String(roleId.value))) {
-      throw new Error('删除失败: 角色尚未保存')
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
+      throw new Error('删除失败: 权限集尚未保存')
     }
     saving.value = true
     try {

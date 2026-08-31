@@ -9,6 +9,8 @@ _SAFE_TABLE_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 _VALID_TABLES_CACHE = None
 _EXTRA_TABLES = set()
 
+# [Spec 16 2026-08-29] 新表名（permsission_sets/orgs 等）已由 registry.all() 动态加入
+# 旧表名保留在 LEGACY_TABLES 中仅用于历史兼容, 不再是默认安全白名单
 _SYSTEM_TABLES = frozenset({
     'users', 'roles', 'permissions', 'role_permissions',
     'user_group_members', 'group_roles', 'annotations', 'audit_logs',

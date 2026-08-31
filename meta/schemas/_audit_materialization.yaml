@@ -164,6 +164,11 @@ audit_materialization:
     object_type: user_group_member
     notes: 从 v_audit_all 聚合
 
+  - name: orgs
+    strategy: audit_derived
+    object_type: org
+    notes: 从 v_audit_all 聚合（org.yaml updated_at 由 audit_aspect 注入为 virtual 字段）
+
   # ─── 策略: none ──────────────────────────────────────────
   # 不需要 updated_at（中间表/关系表/无 UI 显示）
   # 示例: cascading_relationships, change_events 等

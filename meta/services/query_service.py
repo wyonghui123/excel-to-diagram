@@ -1640,11 +1640,11 @@ class QueryService:
             False - user 没有任何 role 的 dimension scope 涉及此 object_type
         """
         try:
-            # 1. 查 user 的所有 role_id (通过 group 链路)
+            # 1. 查 user 的所有 permission_set_id (通过 group 链路)
             cursor = self.ds.execute(
-                """SELECT DISTINCT gr.role_id
-                   FROM group_roles gr
-                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                """SELECT DISTINCT gr.permission_set_id
+                   FROM org_permission_sets gr
+                   JOIN org_members ugm ON gr.org_id = ugm.org_id
                    WHERE ugm.user_id = ?""",
                 [user_id]
             )
@@ -1656,18 +1656,18 @@ class QueryService:
         if not role_ids:
             return False
 
-        # 2. 查 role_dimension_scopes, 确认至少有一个 role 有 scope
+        # 2. 查 permission_set_dimension_scopes, 确认至少有一个 role 有 scope
         try:
             placeholders = ','.join('?' * len(role_ids))
             cursor = self.ds.execute(
-                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                f"SELECT COUNT(*) FROM permission_set_dimension_scopes WHERE permission_set_id IN ({placeholders})",
                 role_ids
             )
             count = cursor.fetchone()[0]
             if not count:
                 return False
         except Exception as e:
-            logger.debug(f"[_try_apply_dimension_scope] check role_dimension_scopes failed: {e}")
+            logger.debug(f"[_try_apply_dimension_scope] check permission_set_dimension_scopes failed: {e}")
             return False
 
         # 3. 派生所有 role 的 data_conditions
@@ -1688,18 +1688,18 @@ class QueryService:
         )
 
         per_role_conds: List[List[Dict]] = []
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                expanded = engine.expand_dimension_values(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
                 dim_data = expanded.get(object_type)
                 # wildcard-only (无 exclude) → 全可见 → 跳过 dim scope 过滤
                 if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
                     logger.info(
-                        f"[_try_apply_dimension_scope] user={user_id} role={role_id} "
+                        f"[_try_apply_dimension_scope] user={user_id} role={permission_set_id} "
                         f"object_type={object_type} wildcard-only → 全可见, 跳过 dim scope"
                     )
                     return False  # 不应用 dim scope 过滤
-                data_conditions = engine.derive_data_conditions(role_id)
+                data_conditions = engine.derive_data_conditions(permission_set_id)
                 cond_expr = data_conditions.get(object_type)
                 if not cond_expr:
                     continue
@@ -1708,11 +1708,11 @@ class QueryService:
                     continue
                 per_role_conds.append(conds)
                 logger.info(
-                    f"[_try_apply_dimension_scope] user={user_id} role={role_id} "
+                    f"[_try_apply_dimension_scope] user={user_id} role={permission_set_id} "
                     f"object_type={object_type} -> conds={conds}"
                 )
             except Exception as e:
-                logger.warning(f"[_try_apply_dimension_scope] derive role_id={role_id} failed: {e}")
+                logger.warning(f"[_try_apply_dimension_scope] derive permission_set_id={permission_set_id} failed: {e}")
 
         if not per_role_conds:
             return False

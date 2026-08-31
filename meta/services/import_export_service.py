@@ -4417,9 +4417,9 @@ class ImportExportService:
 
                 effective_user_id = getattr(_thread_local, 'user_id', None) or user_id
                 cursor = self.data_source.execute(
-                    """SELECT DISTINCT gr.role_id
-                       FROM group_roles gr
-                       JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                    """SELECT DISTINCT gr.permission_set_id
+                       FROM org_permission_sets gr
+                       JOIN org_members ugm ON gr.org_id = ugm.org_id
                        WHERE ugm.user_id = ?""",
                     [effective_user_id]
                 )
@@ -4435,18 +4435,18 @@ class ImportExportService:
                         _dim_is_wildcard as _is_wc,
                         _dim_exclude_values as _exclude_of,
                     )
-                    for role_id in role_ids:
+                    for permission_set_id in role_ids:
                         try:
-                            expanded = engine.expand_dimension_values(role_id)
+                            expanded = engine.expand_dimension_values(permission_set_id)
                             dim_data = expanded.get(object_type)
                             # wildcard-only (无 exclude) → 全可见 → 跳过 dim scope 过滤
                             if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
                                 logger.info(
-                                    f"[_build_permission_filter] user={effective_user_id} role={role_id} "
+                                    f"[_build_permission_filter] user={effective_user_id} role={permission_set_id} "
                                     f"object_type={object_type} wildcard-only → 全可见, 跳过 dim scope"
                                 )
                                 return "", []  # 不应用 dim scope 过滤
-                            data_conditions = engine.derive_data_conditions(role_id)
+                            data_conditions = engine.derive_data_conditions(permission_set_id)
                             cond_expr = data_conditions.get(object_type)
                             if not cond_expr:
                                 continue
@@ -4454,11 +4454,11 @@ class ImportExportService:
                             if conds:
                                 per_role_conds.append(conds)
                                 logger.info(
-                                    f"[_build_permission_filter] user={effective_user_id} role={role_id} "
+                                    f"[_build_permission_filter] user={effective_user_id} role={permission_set_id} "
                                     f"object_type={object_type} -> {len(conds)} conds"
                                 )
                         except Exception as e:
-                            logger.warning(f"[_build_permission_filter] role {role_id} derive failed: {e}")
+                            logger.warning(f"[_build_permission_filter] role {permission_set_id} derive failed: {e}")
                             continue
 
                     if per_role_conds:

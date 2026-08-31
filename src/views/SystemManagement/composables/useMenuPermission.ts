@@ -11,7 +11,7 @@ import {
 // 注：分组/独立动作的切换交互已由 ResourceActionMatrix（矩阵 change 回写）承担，
 //     原 toggleMenu / toggleActionGroup / toggleStandaloneAction 不可达，已删除。
 
-export function useMenuPermission(roleId: Ref<string>) {
+export function useMenuPermission(permissionSetId: Ref<string>) {
   const menus = ref<Menu[]>([])
   const loading = ref(false)
   const saving = ref(false)
@@ -28,17 +28,17 @@ export function useMenuPermission(roleId: Ref<string>) {
   }
 
   async function loadMenus() {
-    if (!roleId.value) return
-    // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int role_id
-    // 不拦截会触发 GET /api/v1/roles/new/unified-permissions -> 500
-    if (!/^\d+$/.test(String(roleId.value))) {
+    if (!permissionSetId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态 (permission_set 尚未保存), 后端期望 int permission_set_id
+    // 不拦截会触发 GET /api/v1/permission-sets/new/unified-permissions -> 500
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
       menus.value = []
       return
     }
 
     loading.value = true
     try {
-      const r = await permService.loadUnifiedPermissions(roleId.value)
+      const r = await permService.loadUnifiedPermissions(permissionSetId.value)
 
       if (r.success && r.data?.menus) {
         menus.value = r.data.menus
@@ -126,10 +126,10 @@ export function useMenuPermission(roleId: Ref<string>) {
   }
 
   async function save() {
-    if (!roleId.value) return
-    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id
-    if (!/^\d+$/.test(String(roleId.value))) {
-      throw new Error('保存失败: 角色尚未保存, 请先保存角色')
+    if (!permissionSetId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int permission_set_id
+    if (!/^\d+$/.test(String(permissionSetId.value))) {
+      throw new Error('保存失败: 权限集尚未保存, 请先保存权限集')
     }
 
     saving.value = true
@@ -174,7 +174,7 @@ export function useMenuPermission(roleId: Ref<string>) {
         )
         .map(p => ({ code: p.code, granted: !!p.granted }))
 
-      const r = await permService.saveMenuPermissions(roleId.value, { menu_codes: assignedCodes, permissions })
+      const r = await permService.saveMenuPermissions(permissionSetId.value, { menu_codes: assignedCodes, permissions })
 
       if (!r.success) {
         throw new Error(r.message || '保存失败')

@@ -53,7 +53,7 @@ def _get_audit_logs(action=None, object_type=None, limit=50):
     return rows
 
 
-def _create_user_group_with_roles(ds, user_id, role_id):
+def _create_user_group_with_roles(ds, user_id, permission_set_id):
     """创建用户组并将用户添加到组，然后给组分配角色"""
     import time
     import random
@@ -61,11 +61,11 @@ def _create_user_group_with_roles(ds, user_id, role_id):
     random_suffix = f'{int(time.time() * 1000) % 100000}_{random.randint(1000, 9999)}'
     group_code = f'audit_group_{user_id}_{random_suffix}'
     
-    # v3.18: 确保 role 存在
-    role_exists = ds.execute("SELECT 1 FROM roles WHERE id = ?", [role_id]).fetchone()
+    # v3.18: 确保 permission_set 存在
+    role_exists = ds.execute("SELECT 1 FROM roles WHERE id = ?", [permission_set_id]).fetchone()
     if not role_exists:
         ds.execute("INSERT INTO roles (id, name, code) VALUES (?, ?, ?)",
-            (role_id, f'AutoRole_{role_id}', f'auto_role_{role_id}'))
+            (permission_set_id, f'AutoRole_{permission_set_id}', f'auto_role_{permission_set_id}'))
         ds.commit()
     
     # 先清理旧的用户组，避免残留数据
@@ -85,20 +85,20 @@ def _create_user_group_with_roles(ds, user_id, role_id):
     group_id = ds.execute("SELECT MAX(id) FROM user_groups WHERE code = ?", [group_code]).fetchone()[0]
     
     if group_id is None:
-        raise RuntimeError(f"Failed to create user_group with code: {group_code}")
+        raise RuntimeError(f"Failed to create org with code: {group_code}")
     
     ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
         (user_id, group_id))
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
-        (group_id, role_id))
+    ds.execute("INSERT INTO group_roles (group_id, permission_set_id) VALUES (?, ?)",
+        (group_id, permission_set_id))
     ds.commit()
     return group_id
 
 
-def _cleanup_user_group_association(ds, group_id, role_id):
+def _cleanup_user_group_association(ds, group_id, permission_set_id):
     """清理用户组-角色关联"""
-    ds.execute("DELETE FROM group_roles WHERE group_id = ? AND role_id = ?",
-        (group_id, role_id))
+    ds.execute("DELETE FROM group_roles WHERE group_id = ? AND permission_set_id = ?",
+        (group_id, permission_set_id))
     ds.execute("DELETE FROM user_group_members WHERE group_id = ?", [group_id])
     ds.execute("DELETE FROM user_groups WHERE id = ?", [group_id])
     ds.commit()
@@ -120,7 +120,7 @@ class TestUserGroupAssociateAudit:
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
         auditor.log_associate(
-            object_type='user_group',
+            object_type='org',
             object_id=str(group_id),
             tgt_type='user',
             tgt_id=str(user_id),
@@ -141,27 +141,27 @@ class TestRoleAssignAudit:
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
 
-        # v3.18: 动态获取有效的 user_id 和 role_id
+        # v3.18: 动态获取有效的 user_id 和 permission_set_id
         user_row = ds.execute("SELECT id FROM users WHERE id > 1 LIMIT 1").fetchone()
         role_row = ds.execute("SELECT id FROM roles LIMIT 1").fetchone()
         if not user_row or not role_row:
-            pytest.skip("需要有效的 user 和 role 数据")
+            pytest.skip("需要有效的 user 和 permission_set 数据")
         user_id = user_row[0]
-        role_id = role_row[0]
+        permission_set_id = role_row[0]
 
-        group_id = _create_user_group_with_roles(ds, user_id, role_id)
+        group_id = _create_user_group_with_roles(ds, user_id, permission_set_id)
 
         auditor.log_associate(
-            object_type='user_group',
+            object_type='org',
             object_id=str(group_id),
-            tgt_type='role',
-            tgt_id=str(role_id),
+            tgt_type='permission_set',
+            tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1',
             user_name='admin',
         )
 
-        _cleanup_user_group_association(ds, group_id, role_id)
+        _cleanup_user_group_association(ds, group_id, permission_set_id)
 
 
 class TestAssociateDissociateActionNaming:
@@ -171,44 +171,44 @@ class TestAssociateDissociateActionNaming:
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
 
-        # v3.18: 动态获取有效的 user_id 和 role_id
+        # v3.18: 动态获取有效的 user_id 和 permission_set_id
         user_row = ds.execute("SELECT id FROM users WHERE id > 1 LIMIT 1").fetchone()
         role_row = ds.execute("SELECT id FROM roles LIMIT 1").fetchone()
         if not user_row or not role_row:
-            pytest.skip("需要有效的 user 和 role 数据")
+            pytest.skip("需要有效的 user 和 permission_set 数据")
         user_id = user_row[0]
-        role_id = role_row[0]
+        permission_set_id = role_row[0]
 
-        group_id = _create_user_group_with_roles(ds, user_id, role_id)
+        group_id = _create_user_group_with_roles(ds, user_id, permission_set_id)
 
         auditor.log_associate(
-            object_type='user_group', object_id=str(group_id),
-            tgt_type='role', tgt_id=str(role_id),
+            object_type='org', object_id=str(group_id),
+            tgt_type='permission_set', tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1', user_name='admin',
         )
 
-        _cleanup_user_group_association(ds, group_id, role_id)
+        _cleanup_user_group_association(ds, group_id, permission_set_id)
 
     def test_dissociate_action_in_audit_logs(self, ds):
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
 
-        # v3.18: 动态获取有效的 user_id 和 role_id
+        # v3.18: 动态获取有效的 user_id 和 permission_set_id
         user_row = ds.execute("SELECT id FROM users WHERE id > 1 LIMIT 1").fetchone()
         role_row = ds.execute("SELECT id FROM roles LIMIT 1").fetchone()
         if not user_row or not role_row:
-            pytest.skip("需要有效的 user 和 role 数据")
+            pytest.skip("需要有效的 user 和 permission_set 数据")
         user_id = user_row[0]
-        role_id = role_row[0]
+        permission_set_id = role_row[0]
 
-        group_id = _create_user_group_with_roles(ds, user_id, role_id)
+        group_id = _create_user_group_with_roles(ds, user_id, permission_set_id)
 
-        _cleanup_user_group_association(ds, group_id, role_id)
+        _cleanup_user_group_association(ds, group_id, permission_set_id)
 
         auditor.log_dissociate(
-            object_type='user_group', object_id=str(group_id),
-            tgt_type='role', tgt_id=str(role_id),
+            object_type='org', object_id=str(group_id),
+            tgt_type='permission_set', tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1', user_name='admin',
         )
@@ -217,22 +217,22 @@ class TestAssociateDissociateActionNaming:
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
 
-        # v3.18: 动态获取有效的 user_id 和 role_id
+        # v3.18: 动态获取有效的 user_id 和 permission_set_id
         user_row = ds.execute("SELECT id FROM users WHERE id > 1 LIMIT 1").fetchone()
         role_row = ds.execute("SELECT id FROM roles LIMIT 1").fetchone()
         if not user_row or not role_row:
-            pytest.skip("需要有效的 user 和 role 数据")
+            pytest.skip("需要有效的 user 和 permission_set 数据")
         user_id = user_row[0]
-        role_id = role_row[0]
+        permission_set_id = role_row[0]
 
-        group_id = _create_user_group_with_roles(ds, user_id, role_id)
+        group_id = _create_user_group_with_roles(ds, user_id, permission_set_id)
 
         before_assign = len(_get_audit_logs( action='ASSIGN'))
         before_revoke = len(_get_audit_logs( action='REVOKE'))
 
         auditor.log_associate(
-            object_type='user_group', object_id=str(group_id),
-            tgt_type='role', tgt_id=str(role_id),
+            object_type='org', object_id=str(group_id),
+            tgt_type='permission_set', tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1', user_name='admin',
         )
@@ -243,7 +243,7 @@ class TestAssociateDissociateActionNaming:
         assert after_assign == before_assign, "No new ASSIGN records should be created"
         assert after_revoke == before_revoke, "No new REVOKE records should be created"
 
-        _cleanup_user_group_association(ds, group_id, role_id)
+        _cleanup_user_group_association(ds, group_id, permission_set_id)
 
 
 class TestAuditLogActionCompleteness:
@@ -253,28 +253,28 @@ class TestAuditLogActionCompleteness:
         from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
         auditor = SvcAuditInterceptor(ds)
 
-        # v3.18: 动态获取有效的 user_id 和 role_id
+        # v3.18: 动态获取有效的 user_id 和 permission_set_id
         user_row = ds.execute("SELECT id FROM users WHERE id > 1 LIMIT 1").fetchone()
         role_row = ds.execute("SELECT id FROM roles LIMIT 1").fetchone()
         if not user_row or not role_row:
-            pytest.skip("需要有效的 user 和 role 数据")
+            pytest.skip("需要有效的 user 和 permission_set 数据")
         user_id = user_row[0]
-        role_id = role_row[0]
+        permission_set_id = role_row[0]
 
-        group_id = _create_user_group_with_roles(ds, user_id, role_id)
+        group_id = _create_user_group_with_roles(ds, user_id, permission_set_id)
 
         auditor.log_associate(
-            object_type='user_group', object_id=str(group_id),
-            tgt_type='role', tgt_id=str(role_id),
+            object_type='org', object_id=str(group_id),
+            tgt_type='permission_set', tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1', user_name='admin',
         )
 
         auditor.log_dissociate(
-            object_type='user_group', object_id=str(group_id),
-            tgt_type='role', tgt_id=str(role_id),
+            object_type='org', object_id=str(group_id),
+            tgt_type='permission_set', tgt_id=str(permission_set_id),
             association_name='roles',
             user_id='1', user_name='admin',
         )
 
-        _cleanup_user_group_association(ds, group_id, role_id)
+        _cleanup_user_group_association(ds, group_id, permission_set_id)

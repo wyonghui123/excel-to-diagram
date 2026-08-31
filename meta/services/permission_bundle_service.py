@@ -147,14 +147,14 @@ class PermissionBundleService:
             
             # 获取管理员角色ID
             cursor = self.ds.execute(
-                "SELECT id FROM roles WHERE name = 'admin'"
+                "SELECT id FROM permission_sets WHERE name = 'admin'"
             )
             row = cursor.fetchone()
             if row:
                 admin_role_id = row[0]
                 # 将用户添加到管理员角色
                 self.ds.execute(
-                    """INSERT OR IGNORE INTO user_roles (user_id, role_id)
+                    """INSERT OR IGNORE INTO user_permission_sets (user_id, permission_set_id)
                        VALUES (?, ?)""",
                     [user_id, admin_role_id]
                 )
@@ -222,8 +222,8 @@ class PermissionBundleService:
         cursor = self.ds.execute("""
             SELECT DISTINCT p.code
             FROM permissions p
-            INNER JOIN role_permissions rp ON p.id = rp.permission_id
-            INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+            INNER JOIN permission_set_permissions rp ON p.id = rp.permission_id
+            INNER JOIN user_permission_sets ur ON rp.permission_set_id = ur.permission_set_id
             WHERE ur.user_id = ?
         """, [user_id])
         user_perms = set(row[0] for row in cursor.fetchall())

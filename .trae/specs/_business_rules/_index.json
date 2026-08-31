@@ -1,5 +1,5 @@
 {
-  "total_rules": 771,
+  "total_rules": 735,
   "objects": [
     {
       "object_id": "ai_async_task",
@@ -679,59 +679,6 @@
       ]
     },
     {
-      "object_id": "role",
-      "object_name": "角色",
-      "rule_count": 15,
-      "rule_ids": [
-        "BR-role-AUDIT-create",
-        "BR-role-AUDIT-update",
-        "BR-role-AUDIT-delete",
-        "BR-role-ASPECT-audit",
-        "BR-role-IE-import",
-        "BR-role-IE-export",
-        "BR-role-FLD-REQ-code",
-        "BR-role-FLD-UNQ-code",
-        "BR-role-FLD-IMM-code",
-        "BR-role-FLD-REQ-name",
-        "BR-role-FLD-ENUM-is_active",
-        "BR-role-FLD-ENUM-is_system",
-        "BR-role-SRV-ASSERT-CHECK-audit_constants-177",
-        "BR-role-SRV-RETURN-FALSE-data_permission_interceptor-162",
-        "BR-role-SRV-RETURN-FALSE-permission_interceptor-534"
-      ]
-    },
-    {
-      "object_id": "role_data_permission",
-      "object_name": "角色数据权限",
-      "rule_count": 3,
-      "rule_ids": [
-        "BR-role_data_permission-FLD-REQ-role_id",
-        "BR-role_data_permission-FLD-REQ-resource_type",
-        "BR-role_data_permission-FLD-REQ-resource_id"
-      ]
-    },
-    {
-      "object_id": "role_dimension_scope",
-      "object_name": "角色维度范围",
-      "rule_count": 4,
-      "rule_ids": [
-        "BR-role_dimension_scope-FLD-REQ-role_id",
-        "BR-role_dimension_scope-FLD-REQ-dimension_code",
-        "BR-role_dimension_scope-FLD-REQ-dimension_values",
-        "BR-role_dimension_scope-FLD-ENUM-scope_mode"
-      ]
-    },
-    {
-      "object_id": "role_permission",
-      "object_name": "角色权限",
-      "rule_count": 3,
-      "rule_ids": [
-        "BR-role_permission-FLD-REQ-role_id",
-        "BR-role_permission-FLD-REQ-permission_id",
-        "BR-role_permission-FLD-REQ-granted"
-      ]
-    },
-    {
       "object_id": "scheduled_task",
       "object_name": "任务定义",
       "rule_count": 10,
@@ -958,31 +905,6 @@
         "BR-user-PM-password-special-required",
         "BR-user-PM-email-format-valid",
         "BR-user-PM-concurrent-login-3-devices"
-      ]
-    },
-    {
-      "object_id": "user_group",
-      "object_name": "用户组",
-      "rule_count": 9,
-      "rule_ids": [
-        "BR-user_group-AUDIT-create",
-        "BR-user_group-AUDIT-update",
-        "BR-user_group-AUDIT-delete",
-        "BR-user_group-ASPECT-audit",
-        "BR-user_group-FLD-REQ-name",
-        "BR-user_group-FLD-REQ-code",
-        "BR-user_group-FLD-UNQ-code",
-        "BR-user_group-FLD-PAT-code",
-        "BR-user_group-FLD-IMM-code"
-      ]
-    },
-    {
-      "object_id": "user_group_member",
-      "object_name": "用户组成员",
-      "rule_count": 2,
-      "rule_ids": [
-        "BR-user_group_member-FLD-REQ-user_id",
-        "BR-user_group_member-FLD-REQ-group_id"
       ]
     },
     {

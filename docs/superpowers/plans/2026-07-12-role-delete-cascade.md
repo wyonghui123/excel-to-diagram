@@ -1,5 +1,7 @@
 # 角色删除级联 Implementation Plan
 
+> **[历史标记]** pre-permission-set-refactor (2026-08-28 之前的内容, 术语未升级, 角色 = 现权限集)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 修复角色删除报错"无法删除：角色权限 的 角色ID 引用了此记录（N条）"——通过 yaml associations.cascade_delete 静默级联 + is_system 保护。

@@ -277,7 +277,7 @@ def read_bo(object_type, obj_id):
 def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
     """[V1.1.10 2026-06-15] 单条 BO get 应用 dim scope 校验
 
-    语义: 调用 DimensionScopeEngine.derive_data_conditions(role_id) 派生当前 object_type 的 cond_expr,
+    语义: 调用 DimensionScopeEngine.derive_data_conditions(permission_set_id) 派生当前 object_type 的 cond_expr,
           检查 obj_id 是否在派生范围内. 不在 → 返回 True (deny).
 
     [FIX 2026-06-17] owner 例外: 用户对自己 owner 的资源始终可见 (跟 _do_list 路径一致)
@@ -334,11 +334,11 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
             except Exception as e:
                 logger.debug(f'[_check_single_bo_in_dim_scope] owner check failed: {e}')
 
-        # 拿 user 的所有 role_id
+        # 拿 user 的所有 permission_set_id
         cursor = ds.execute(
-            """SELECT DISTINCT gr.role_id
-               FROM group_roles gr
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            """SELECT DISTINCT gr.permission_set_id
+               FROM org_permission_sets gr
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )
@@ -349,8 +349,8 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
         # 多 role 任一允许 → 放行 (OR 语义)
         from meta.services.dimension_scope_engine import DimensionScopeEngine
         engine = DimensionScopeEngine(ds)
-        for role_id in role_ids:
-            data_conds = engine.derive_data_conditions(role_id)
+        for permission_set_id in role_ids:
+            data_conds = engine.derive_data_conditions(permission_set_id)
             cond_expr = data_conds.get(object_type)
             if not cond_expr:
                 continue  # 该 role 无 dim scope 派生
@@ -2553,15 +2553,15 @@ def _infer_target_type(src_type: str, association_name: str) -> str:
 role_v2_bp = Blueprint('role_v2', __name__, url_prefix='/api/v2/roles')
 
 
-@role_v2_bp.route('/<int:role_id>/unified-permissions', methods=['GET'])
+@role_v2_bp.route('/<int:permission_set_id>/unified-permissions', methods=['GET'])
 @login_required
-def get_role_unified_permissions(role_id):
+def get_role_unified_permissions(permission_set_id):
     """获取角色的统一权限（菜单权限矩阵）
 
     权限计算公式: effective = (auto_menu ∪ manual_include) - manual_exclude
     - auto_menu: 已分配菜单的 required_permissions 自动派生
-    - manual_include: role_permissions 中 granted=1 的记录
-    - manual_exclude: role_permissions 中 granted=0 的记录
+    - manual_include: permission_set_permissions 中 granted=1 的记录
+    - manual_exclude: permission_set_permissions 中 granted=0 的记录
     """
     try:
         from meta.services.menu_permission_service import MenuPermissionService
@@ -2572,11 +2572,11 @@ def get_role_unified_permissions(role_id):
         # 获取角色已分配的菜单
         cursor = ds.execute("""
             SELECT rmp.menu_code, m.menu_name, m.menu_path, m.icon, m.sort_order
-            FROM role_menu_permissions rmp
+            FROM permission_set_menu_permissions rmp
             JOIN menus m ON rmp.menu_code = m.menu_code
-            WHERE rmp.role_id = ?
+            WHERE rmp.permission_set_id = ?
             ORDER BY m.sort_order, m.menu_name
-        """, [role_id])
+        """, [permission_set_id])
 
         assigned_menus = {}
         for row in cursor.fetchall():
@@ -2593,10 +2593,10 @@ def get_role_unified_permissions(role_id):
         # 查询角色的手动权限覆盖（include/exclude）
         cursor = ds.execute("""
             SELECT rp.permission_id, rp.granted, p.code
-            FROM role_permissions rp
+            FROM permission_set_permissions rp
             JOIN permissions p ON rp.permission_id = p.id
-            WHERE rp.role_id = ?
-        """, [role_id])
+            WHERE rp.permission_set_id = ?
+        """, [permission_set_id])
         manual_overrides = {}  # {perm_code: {'granted': bool, 'source': str}}
         for row in cursor.fetchall():
             manual_overrides[row[2]] = {
@@ -2781,7 +2781,7 @@ def get_role_unified_permissions(role_id):
             })
 
         # 获取角色信息
-        cursor = ds.execute("SELECT id, code, name FROM roles WHERE id = ?", [role_id])
+        cursor = ds.execute("SELECT id, code, name FROM permission_sets WHERE id = ?", [permission_set_id])
         role_row = cursor.fetchone()
         role_info = None
         if role_row:
@@ -2802,9 +2802,9 @@ def get_role_unified_permissions(role_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-@role_v2_bp.route('/<int:role_id>/menu-permissions', methods=['PUT'])
+@role_v2_bp.route('/<int:permission_set_id>/menu-permissions', methods=['PUT'])
 @login_required
-def update_role_menu_permissions(role_id):
+def update_permission_set_menu_permissions(permission_set_id):
     """更新角色的菜单权限和功能权限
 
     请求体:
@@ -2816,13 +2816,13 @@ def update_role_menu_permissions(role_id):
         ]
     }
 
-    采用全量替换策略：DELETE 该角色所有 role_permissions 记录，再 INSERT 请求中的手动权限。
+    采用全量替换策略：DELETE 该角色所有 permission_set_permissions 记录，再 INSERT 请求中的手动权限。
     """
     try:
         ds = _get_data_source()
 
         # 获取角色信息
-        cursor = ds.execute("SELECT is_system FROM roles WHERE id = ?", [role_id])
+        cursor = ds.execute("SELECT is_system FROM permission_sets WHERE id = ?", [permission_set_id])
         role_row = cursor.fetchone()
         if not role_row:
             return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
@@ -2835,15 +2835,15 @@ def update_role_menu_permissions(role_id):
 
         with ds.transaction():
             # 1. 保存菜单分配
-            ds.execute("DELETE FROM role_menu_permissions WHERE role_id = ?", [role_id])
+            ds.execute("DELETE FROM permission_set_menu_permissions WHERE permission_set_id = ?", [permission_set_id])
             for menu_code in menu_codes:
                 ds.execute(
-                    "INSERT INTO role_menu_permissions (role_id, menu_code) VALUES (?, ?)",
-                    [role_id, menu_code]
+                    "INSERT INTO permission_set_menu_permissions (permission_set_id, menu_code) VALUES (?, ?)",
+                    [permission_set_id, menu_code]
                 )
 
             # 2. 全量替换手动权限 include/exclude
-            ds.execute("DELETE FROM role_permissions WHERE role_id = ?", [role_id])
+            ds.execute("DELETE FROM permission_set_permissions WHERE permission_set_id = ?", [permission_set_id])
             for perm in permissions:
                 perm_code = perm.get('code', '')
                 granted = perm.get('granted', True)
@@ -2851,18 +2851,18 @@ def update_role_menu_permissions(role_id):
                 perm_row = cursor.fetchone()
                 if perm_row:
                     ds.execute("""
-                        INSERT INTO role_permissions (role_id, permission_id, granted, created_at)
+                        INSERT INTO permission_set_permissions (permission_set_id, permission_id, granted, created_at)
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    """, [role_id, perm_row[0], 1 if granted else 0])
+                    """, [permission_set_id, perm_row[0], 1 if granted else 0])
 
         # [FIX 2026-06-12] 角色 v2 菜单权限审计日志: 关联到角色对象
         write_permission_config_audit(
             action='UPDATE',
             object_type='role_v2_menu_permissions',
-            object_id=role_id,
+            object_id=permission_set_id,
             data={'menu_codes': menu_codes, 'permission_count': len(permissions)},
             parent_object_type='role',
-            parent_object_id=role_id,
+            parent_object_id=permission_set_id,
         )
 
         return jsonify({
@@ -3028,6 +3028,16 @@ def list_set_permissions_v2(ps_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+# [Spec 16 2026-08-29] alias: /api/v2/permission-sets/<id>/unified-permissions
+# 与 /api/v2/roles/<id>/unified-permissions (role_v2_bp) 等价, 保留两份避免破坏旧调用方
+@permission_set_v2_bp.route('/<int:ps_id>/unified-permissions', methods=['GET'])
+@login_required
+def get_permission_set_unified_permissions_alias(ps_id):
+    """[Spec 16] alias: GET /api/v2/permission-sets/{id}/unified-permissions"""
+    # 委托给 role_v2_bp 的 handler (内部用 permission_set_id 参数)
+    return get_role_unified_permissions(ps_id)
+
+
 @permission_set_v2_bp.route('/user/<int:user_id>', methods=['GET'])
 @login_required
 def list_user_permission_sets_v2(user_id):
@@ -3060,12 +3070,12 @@ def list_permission_rules_v2():
 
         service = ConditionPermissionService(bo_framework._data_source)
 
-        role_id = request.args.get('role_id', type=int)
+        permission_set_id = request.args.get('permission_set_id', type=int)
         rule_type = request.args.get('rule_type', type=str)
 
         # [P11] 优先从 data_permission_rules 统一表读取
-        if role_id:
-            rules = service.get_unified_rules_by_role(role_id, rule_type=rule_type)
+        if permission_set_id:
+            rules = service.get_unified_rules_by_role(permission_set_id, rule_type=rule_type)
         else:
             rules = service.get_all_unified_rules(rule_type=rule_type)
 
@@ -3098,7 +3108,7 @@ def create_permission_rule_v2():
             data['is_denied'] = True
 
         # 必填字段校验 (visibility 规则可无 condition)
-        required_fields = ['role_id', 'resource_type']
+        required_fields = ['permission_set_id', 'resource_type']
         if rule_type in ('condition', 'dimension', 'owner', 'prohibition'):
             required_fields.append('condition')
         for field in required_fields:
@@ -3113,7 +3123,7 @@ def create_permission_rule_v2():
         user_id = current_user.get('user_id')
 
         rule_data = {
-            'role_id': data.get('role_id'),
+            'permission_set_id': data.get('permission_set_id'),
             'rule_type': rule_type,
             'resource_type': data.get('resource_type'),
             'dimension_code': data.get('dimension_code'),

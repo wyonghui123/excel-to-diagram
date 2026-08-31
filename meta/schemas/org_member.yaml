@@ -1,0 +1,95 @@
+id: org_member
+name: 组织成员
+table_name: org_members
+description: 组织成员关系（原 user_group_member.yaml, Plan A 迁移）
+aliases:
+  - 组织成员
+  - OrgMember
+  - 用户组成员
+  - user_group_member
+
+# [FIX 2026-06-15] audit_log parent_object 关联:
+# 修复后: 写入审计日志时自动填 parent_object_type='org', parent_object_id=org_id
+parent_object: org
+hierarchy:
+  enabled: true
+  parent_field: org_id
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+
+  - id: user_id
+    name: 用户ID
+    type: integer
+    db_column: user_id
+    required: true
+    description: 用户ID
+
+  - id: org_id
+    name: 组织ID
+    type: integer
+    db_column: org_id
+    required: true
+    description: 组织ID
+
+  - id: is_manager
+    name: 是否管理员
+    type: boolean
+    db_column: is_manager
+    default: false
+    description: 是否为组织管理员
+
+  - id: joined_at
+    name: 加入时间
+    type: datetime
+    db_column: joined_at
+    description: 加入时间
+
+indexes:
+  - fields: [user_id, org_id]
+    unique: true
+    name: idx_org_member_unique
+  - fields: [org_id]
+    name: idx_org_member_org
+  - fields: [user_id]
+    name: idx_org_member_user
+
+relations: []
+actions: []
+
+ui_view_config:
+  skip_auto_menu: true
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  is_manager:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/org_member/org_member-detail
+  list: /org_member-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: True
+  parent: org
+  children: []
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

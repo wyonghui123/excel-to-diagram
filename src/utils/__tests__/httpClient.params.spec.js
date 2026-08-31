@@ -2,7 +2,7 @@
  * Regression test: httpClient 必须把 options.params 拼到 URL query string
  *
  * 背景: 2026-06-08 发现 httpClient.request() 直接用 `${baseUrl}${path}` 构造 URL,
- *       完全忽略 options.params, 导致 loadConditionRules({ role_id: 1803 })
+ *       完全忽略 options.params, 导致 loadConditionRules({ permission_set_id: 1803 })
  *       实际请求是 GET /api/v1/permission-rules (无 query string),
  *       后端走 get_all_rules() 分支, 任意角色都看到全部规则.
  *
@@ -54,13 +54,13 @@ describe('httpClient query params (regression: get_all_rules bug)', () => {
     clearInflightCache()
   })
 
-  it('应该把单个 string 参数拼到 URL (主问题: role_id 丢失)', async () => {
+  it('应该把单个 string 参数拼到 URL (主问题: permission_set_id 丢失)', async () => {
     mockFetch.mockImplementation(() => mockSuccessResponse([]))
-    await apiV1.get('/permission-rules', { params: { role_id: '1803' } })
+    await apiV1.get('/permission-rules', { params: { permission_set_id: '1803' } })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const calledUrl = mockFetch.mock.calls[0][0]
-    expect(calledUrl).toBe('/api/v1/permission-rules?role_id=1803')
+    expect(calledUrl).toBe('/api/v1/permission-rules?permission_set_id=1803')
   })
 
   it('应该把 number 参数拼到 URL', async () => {
@@ -68,7 +68,7 @@ describe('httpClient query params (regression: get_all_rules bug)', () => {
     await apiV1.get('/roles', { params: { page: 2 } })
 
     const calledUrl = mockFetch.mock.calls[0][0]
-    expect(calledUrl).toBe('/api/v1/roles?page=2')
+    expect(calledUrl).toBe('/api/v1/permission-sets?page=2')
   })
 
   it('应该把多个参数拼到 URL', async () => {
@@ -131,18 +131,18 @@ describe('httpClient query params (regression: get_all_rules bug)', () => {
   })
 
   it('应该对带不同 params 的请求独立去重 (不是按 URL 单独去重)', async () => {
-    // 关键: GET /permission-rules?role_id=1 和 ?role_id=2 是不同请求
+    // 关键: GET /permission-rules?permission_set_id=1 和 ?permission_set_id=2 是不同请求
     // dedupe cache key 应该包含 params
     mockFetch.mockImplementation(() => mockSuccessResponse([]))
 
-    const p1 = apiV1.get('/permission-rules', { params: { role_id: 1 }, dedupe: false })
-    const p2 = apiV1.get('/permission-rules', { params: { role_id: 2 }, dedupe: false })
+    const p1 = apiV1.get('/permission-rules', { params: { permission_set_id: 1 }, dedupe: false })
+    const p2 = apiV1.get('/permission-rules', { params: { permission_set_id: 2 }, dedupe: false })
     await Promise.all([p1, p2])
 
     expect(mockFetch).toHaveBeenCalledTimes(2)
     const urls = mockFetch.mock.calls.map(c => c[0])
-    expect(urls).toContain('/api/v1/permission-rules?role_id=1')
-    expect(urls).toContain('/api/v1/permission-rules?role_id=2')
+    expect(urls).toContain('/api/v1/permission-rules?permission_set_id=1')
+    expect(urls).toContain('/api/v1/permission-rules?permission_set_id=2')
   })
 
   it('download (responseType=blob) 也应该支持 params', async () => {

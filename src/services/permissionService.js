@@ -41,7 +41,7 @@ export const RESOURCE_LABELS = {
 
 // [Phase 6 2026-08-25] 权限主体白名单（与后端 _IDENTITY_RESOURCE_TYPES 同步）
 //   这些 rt 不参与功能权限矩阵资源列表
-export const IDENTITY_RESOURCE_TYPES = new Set(['user', 'role', 'user_group'])
+export const IDENTITY_RESOURCE_TYPES = new Set(['user', 'permission_set', 'org'])
 
 /**
  * 维度父子映射
@@ -307,7 +307,7 @@ export function getDimensionName(dimensions, resourceType) {
  * @returns {Promise<object>}
  */
 export async function loadRoles(params = {}) {
-  const r = await apiV2.get('/bo/role', { params })
+  const r = await apiV2.get('/bo/permission_set', { params })
   // v2 返回分页格式 {items, total, page, page_size}，适配为 v1 格式 {data: [array]}
   if (r.success && r.data?.items) {
     return { success: true, data: r.data.items }
@@ -321,7 +321,7 @@ export async function loadRoles(params = {}) {
  * @returns {Promise<object>}
  */
 export async function loadRole(roleId) {
-  return await apiV2.get(`/bo/role/${roleId}`)
+  return await apiV2.get(`/bo/permission_set/${roleId}`)
 }
 
 /**
@@ -419,10 +419,10 @@ export async function hydrateIdExpressionDisplay(resourceType, expr) {
  * @returns {Promise<object>}
  */
 export async function loadPermissionRules(roleId, params = {}) {
-  const r = await apiV2.get('/bo/permission_rule', { params: { role_id: roleId, ...params } })
-  // v2 返回分页格式，适配为 v1 格式 {data: {role_id, rules: [...]}}
+  const r = await apiV2.get('/bo/permission_rule', { params: { permission_set_id: roleId, ...params } })
+  // v2 返回分页格式，适配为 v1 格式 {data: {permission_set_id, rules: [...]}}
   if (r.success && r.data?.items) {
-    return { success: true, data: { role_id: roleId, rules: r.data.items } }
+    return { success: true, data: { permission_set_id: roleId, rules: r.data.items } }
   }
   return r
 }
@@ -436,12 +436,12 @@ export async function loadPermissionRules(roleId, params = {}) {
  */
 export async function savePermissionRules(roleId, rule, mode = 'create') {
   if (mode === 'batch') {
-    return await apiV1.post(`/roles/${roleId}/permission-rules/batch`, rule)
+    return await apiV1.post(`/permission-sets/${roleId}/permission-rules/batch`, rule)
   }
   if (mode === 'update' && rule.id) {
-    return await apiV1.put(`/roles/${roleId}/permission-rules/${rule.id}`, rule)
+    return await apiV1.put(`/permission-sets/${roleId}/permission-rules/${rule.id}`, rule)
   }
-  return await apiV1.post(`/roles/${roleId}/permission-rules`, rule)
+  return await apiV1.post(`/permission-sets/${roleId}/permission-rules`, rule)
 }
 
 /**
@@ -451,7 +451,7 @@ export async function savePermissionRules(roleId, rule, mode = 'create') {
  * @returns {Promise<object>}
  */
 export async function deletePermissionRule(roleId, ruleId) {
-  return await apiV1.delete(`/roles/${roleId}/permission-rules/${ruleId}`)
+  return await apiV1.delete(`/permission-sets/${roleId}/permission-rules/${ruleId}`)
 }
 
 /**
@@ -462,7 +462,7 @@ export async function deletePermissionRule(roleId, ruleId) {
  * @returns {Promise<object>}
  */
 export async function patchPermissionRule(roleId, ruleId, patchData) {
-  return await apiV1.patch(`/roles/${roleId}/permission-rules/${ruleId}`, patchData)
+  return await apiV1.patch(`/permission-sets/${roleId}/permission-rules/${ruleId}`, patchData)
 }
 
 /**
@@ -472,7 +472,7 @@ export async function patchPermissionRule(roleId, ruleId, patchData) {
  * @returns {Promise<object>}
  */
 export async function calculateImpact(roleId, rule) {
-  return await apiV1.post(`/roles/${roleId}/calculate-impact`, rule)
+  return await apiV1.post(`/permission-sets/${roleId}/calculate-impact`, rule)
 }
 
 /**
@@ -499,7 +499,7 @@ export async function previewCondition(previewData) {
  * @returns {Promise<object>}
  */
 export async function loadUnifiedPermissions(roleId) {
-  return await apiV1.get(`/roles/${roleId}/unified-permissions`)
+  return await apiV1.get(`/permission-sets/${roleId}/unified-permissions`)
 }
 
 /**
@@ -509,7 +509,7 @@ export async function loadUnifiedPermissions(roleId) {
  * @returns {Promise<object>}
  */
 export async function saveMenuPermissions(roleId, permissions) {
-  return await apiV1.put(`/roles/${roleId}/menu-permissions`, permissions)
+  return await apiV1.put(`/permission-sets/${roleId}/menu-permissions`, permissions)
 }
 
 /**
@@ -523,7 +523,7 @@ export async function saveMenuPermissions(roleId, permissions) {
  * @returns {Promise<object>}
  */
 export async function saveResourceActionMatrix(roleId, cells) {
-  return await apiV1.put(`/roles/${roleId}/resource-action-matrix`, { cells })
+  return await apiV1.put(`/permission-sets/${roleId}/resource-action-matrix`, { cells })
 }
 
 /**
@@ -534,7 +534,7 @@ export async function saveResourceActionMatrix(roleId, cells) {
  * @returns {Promise<object>} { ok, issues[], summary }
  */
 export async function runPermissionAudit(roleId) {
-  return await apiV1.get(`/roles/${roleId}/permission-audit`)
+  return await apiV1.get(`/permission-sets/${roleId}/permission-audit`)
 }
 
 /**
@@ -543,7 +543,7 @@ export async function runPermissionAudit(roleId) {
  * @returns {Promise<object>} { deleted_residual_excludes[], deleted_count }
  */
 export async function cleanupPermissionResidue(roleId) {
-  return await apiV1.post(`/roles/${roleId}/permission-audit/cleanup`)
+  return await apiV1.post(`/permission-sets/${roleId}/permission-audit/cleanup`)
 }
 
 /**
@@ -552,7 +552,7 @@ export async function cleanupPermissionResidue(roleId) {
  * @returns {Promise<object>}
  */
 export async function loadDimensionScopes(roleId) {
-  return await apiV1.get(`/roles/${roleId}/dimension-scopes`)
+  return await apiV1.get(`/permission-sets/${roleId}/dimension-scopes`)
 }
 
 /**
@@ -562,7 +562,7 @@ export async function loadDimensionScopes(roleId) {
  * @returns {Promise<object>}
  */
 export async function saveDimensionScopes(roleId, scopes) {
-  return await apiV1.post(`/roles/${roleId}/dimension-scopes`, scopes)
+  return await apiV1.post(`/permission-sets/${roleId}/dimension-scopes`, scopes)
 }
 
 /**
@@ -571,7 +571,7 @@ export async function saveDimensionScopes(roleId, scopes) {
  * @returns {Promise<object>}
  */
 export async function derivePermissions(roleId) {
-  return await apiV1.get(`/roles/${roleId}/derived-permissions`)
+  return await apiV1.get(`/permission-sets/${roleId}/derived-permissions`)
 }
 
 /**
@@ -581,7 +581,7 @@ export async function derivePermissions(roleId) {
  * @returns {Promise<object>}
  */
 export async function loadOverlapWarnings(roleId, resourceType) {
-  return await apiV1.get(`/roles/${roleId}/overlaps`, { params: { resource_type: resourceType } })
+  return await apiV1.get(`/permission-sets/${roleId}/overlaps`, { params: { resource_type: resourceType } })
 }
 
 /**
@@ -643,17 +643,17 @@ export async function batchDataPermissions(data) {
 }
 
 /**
- * 为用户组添加数据权限
+ * 为组织添加数据权限
  * @param {number} groupId
  * @param {object} data
  * @returns {Promise<object>}
- * @deprecated 此处使用 v1 子路径 /user-groups/{id}/data-permissions.
- *   v1 顶层 5 个端点 (GET/POST/PUT/DELETE /user-groups) 已 sunset (410),
- *   迁移到 /api/v2/bo/user_group. 该子路径暂未 sunset, 仍可使用;
+ * @deprecated 此处使用 v1 子路径 /orgs/{id}/data-permissions.
+ *   v1 顶层 5 个端点 (GET/POST/PUT/DELETE /orgs) 已 sunset (410),
+ *   迁移到 /api/v2/bo/org. 该子路径暂未 sunset, 仍可使用;
  *   后续如该子路径也 sunset, 需迁移到 v2 等价接口 (e.g. data-permission BO action).
  */
 export async function addGroupDataPermission(groupId, data) {
-  return await apiV1.post(`/user-groups/${groupId}/data-permissions`, data)
+  return await apiV1.post(`/orgs/${groupId}/data-permissions`, data)
 }
 
 /**

@@ -1253,7 +1253,7 @@ class ActionExecutor:
         """删除记录时自动清理 M2M 中间表中的关联行
 
         [FIX 2026-06-10] 级联删除前先 SELECT 待删行，每条删除记录一条 DISSOCIATE 审计日志。
-        修复 bug：删除 user_group 时，user_group_members / group_roles 等中间表被级联清空，
+        修复 bug：删除 org 时，org_members / org_permission_sets 等中间表被级联清空，
         但 audit_logs 表无任何记录，导致审计链断裂。
 
         注：meta_object.associations 是 dict[str, AssociationDefinition]，
@@ -1325,48 +1325,48 @@ class ActionExecutor:
             except Exception as e:
                 logger.warning(f"[M2M Cleanup] Failed to clean {through}: {e}")
 
-    def _cascade_pre_delete_role(self, role_id: int) -> None:
+    def _cascade_pre_delete_role(self, permission_set_id: int) -> None:
         """[FIX BUG-V061 2026-07-12] 角色删除前先清空所有引用此角色的中间表.
 
         [L13.1 fix 2026-07-13] 补全 audit_logs: 每个级联删除都写 DISSOCIATE 审计
-        之前只有 role_permissions 写 (且仅 26/28), role_menu_permissions / role_dimension_scopes
+        之前只有 permission_set_permissions 写 (且仅 26/28), permission_set_menu_permissions / permission_set_dimension_scopes
         完全没审计. 现在所有 7 张表都审计, 配合 audit_recovery.py 可 100% 恢复.
 
         已知会被引用的表 (本地 DB 验证):
-        - role_permissions          (角色-权限 M2M)
-        - role_menu_permissions     (角色-菜单 M2M)  -- 不是 role_menus
+        - permission_set_permissions          (角色-权限 M2M)
+        - permission_set_menu_permissions     (角色-菜单 M2M)  -- 不是 role_menus
         - permission_rules          (角色级条件权限 1:N)
-        - role_data_permissions     (角色级数据权限 1:N)
-        - role_dimension_scopes     (角色级维度范围 1:N)
-        - user_roles                (角色-用户 M2M)
-        - group_roles               (角色-用户组 M2M, DB FK 已 ON DELETE CASCADE)
+        - permission_set_data_permissions     (角色级数据权限 1:N)
+        - permission_set_dimension_scopes     (角色级维度范围 1:N)
+        - user_permission_sets                (角色-用户 M2M)
+        - org_permission_sets               (角色-用户组 M2M, DB FK 已 ON DELETE CASCADE)
         """
         CASCADE_TABLES_FOR_ROLE = [
-            ('role_permissions', 'permission_id'),
-            ('role_menu_permissions', 'menu_id'),
+            ('permission_set_permissions', 'permission_id'),
+            ('permission_set_menu_permissions', 'menu_id'),
             ('permission_rules', 'rule_id'),
-            ('role_data_permissions', 'data_permission_id'),
-            ('role_dimension_scopes', 'scope_id'),
-            ('user_roles', 'user_id'),
-            # group_roles: DB 已 ON DELETE CASCADE, 不必手动删除
+            ('permission_set_data_permissions', 'data_permission_id'),
+            ('permission_set_dimension_scopes', 'scope_id'),
+            ('user_permission_sets', 'user_id'),
+            # org_permission_sets: DB 已 ON DELETE CASCADE, 不必手动删除
         ]
         for table, target_col in CASCADE_TABLES_FOR_ROLE:
             try:
                 # [L13.1] 先 SELECT 出所有要删除的 row (记录 target_id 用于 audit)
                 try:
                     sel_cursor = self.ds.execute(
-                        f"SELECT {target_col} FROM {table} WHERE role_id = ?", (role_id,)
+                        f"SELECT {target_col} FROM {table} WHERE permission_set_id = ?", (permission_set_id,)
                     )
                     target_ids = [row[0] for row in sel_cursor.fetchall()] if hasattr(sel_cursor, 'fetchall') else []
                 except Exception:
                     target_ids = []
 
                 cursor = self.ds.execute(
-                    f"DELETE FROM {table} WHERE role_id = ?", (role_id,)
+                    f"DELETE FROM {table} WHERE permission_set_id = ?", (permission_set_id,)
                 )
                 deleted = cursor.rowcount if hasattr(cursor, 'rowcount') else None
                 logger.info(
-                    f"[BUG-V061] cascade role_delete: deleted role_id={role_id} from {table} "
+                    f"[BUG-V061] cascade role_delete: deleted permission_set_id={permission_set_id} from {table} "
                     f"(rowcount={deleted})"
                 )
 
@@ -1382,23 +1382,23 @@ class ActionExecutor:
                         try:
                             self.audit_logger.log(
                                 object_type='role',
-                                object_id=role_id,
+                                object_id=permission_set_id,
                                 action='DISSOCIATE',
                                 field_name=target_col,
                                 old_value=json.dumps({"target_type": target_col.replace('_id', ''), "target_id": tid}),
                                 extra_data={
-                                    "cascade_reason": f"role#{role_id} deletion",
+                                    "cascade_reason": f"role#{permission_set_id} deletion",
                                     "through_table": table,
-                                    "fk_column": "role_id",
+                                    "fk_column": "permission_set_id",
                                 },
                                 user_id=user_id,
                                 user_name=user_name,
                             )
                         except Exception as audit_err:
-                            logger.warning(f"[L13.1] audit log failed for {table} role#{role_id} -> {tid}: {audit_err}")
+                            logger.warning(f"[L13.1] audit log failed for {table} role#{permission_set_id} -> {tid}: {audit_err}")
             except Exception as e:
                 logger.warning(
-                    f"[BUG-V061] Failed to clean {table} for role_id={role_id}: {e}"
+                    f"[BUG-V061] Failed to clean {table} for permission_set_id={permission_set_id}: {e}"
                 )
 
     def _resolve_parent_info(self, meta_object: MetaObject, data: Dict[str, Any]) -> tuple:
@@ -2068,8 +2068,8 @@ class ActionExecutor:
 
             # [FIX BUG-V061 2026-07-12] 角色删除支持级联清理子表
             # 背景: _check_reverse_fk_references 只能从 other_obj.relations[] (且为 dict) 读
-            #       cascade_delete, 但 role 引用表 (role_permissions / role_menu_permissions /
-            #       permission_rules / role_data_permissions / role_dimension_scopes)
+            #       cascade_delete, 但 role 引用表 (permission_set_permissions / permission_set_menu_permissions /
+            #       permission_rules / permission_set_data_permissions / permission_set_dimension_scopes)
             #       schema 中均无 relations 节, 导致删除角色永远卡在 FK check.
             # 修复: role 删除前先清空所有引用此 role 的中间表, 再走 FK check.
             if meta_object.id == 'role':
@@ -2136,11 +2136,11 @@ class ActionExecutor:
                 # [L11.3 fix 2026-07-13] DELETE 二次确认 — 防止 AI/用户误删关键实体
                 # 必须带 X-Confirm-Delete: <uuid> header, 二次确认才能继续
                 # 设计: 不强制 (向后兼容), 但要求危险操作显式 confirm
-                # 触发条件: (1) object_type 是 P0 关键实体 (role/user/user_group/permission)
+                # 触发条件: (1) object_type 是 P0 关键实体 (role/user/org/permission)
                 #          (2) 关联引用 > 0 (会触发级联)
                 #          (3) 用户没传 X-Confirm-Delete header
                 from flask import request as _flask_req
-                _critical_types = ('role', 'user', 'user_group', 'permission', 'product')
+                _critical_types = ('role', 'user', 'org', 'permission', 'product')
                 if meta_object.object_name in _critical_types:
                     _confirm = _flask_req.headers.get('X-Confirm-Delete', '').strip()
                     if not _confirm:
@@ -2153,9 +2153,9 @@ class ActionExecutor:
                             from meta.core.sql_connection_pool import get_conn
                             with get_conn() as _conn:
                                 _cur = _conn.cursor()
-                                # 简化: 只查 role_permissions
+                                # 简化: 只查 permission_set_permissions
                                 if meta_object.object_name == 'role':
-                                    _cur.execute("SELECT COUNT(*) FROM role_permissions WHERE role_id = ?", (id_value,))
+                                    _cur.execute("SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?", (id_value,))
                                     _ref_count = _cur.fetchone()[0]
                         except Exception:
                             pass

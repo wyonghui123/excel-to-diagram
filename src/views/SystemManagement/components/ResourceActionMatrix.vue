@@ -90,20 +90,31 @@
       :header-cell-style="{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }"
     >
       <!-- 资源列 -->
-      <el-table-column label="资源" min-width="120" fixed="left">
+      <el-table-column label="资源" min-width="150" fixed="left">
         <template #default="{ row }">
-          <el-tooltip
-            v-if="isRowReadonly(row)"
-            :content="rowReadonlyReason(row)"
-            placement="top"
-            :teleported="true"
-          >
-            <span class="ram-resource-label ram-resource-label--readonly">
-              {{ resourceLabel(row) }}
-              <AppIcon name="lock" :size="11" class="ram-row-lock" />
+          <div class="ram-resource-cell">
+            <el-tooltip
+              v-if="isRowReadonly(row)"
+              :content="rowReadonlyReason(row)"
+              placement="top"
+              :teleported="true"
+            >
+              <span class="ram-resource-label ram-resource-label--readonly">
+                {{ resourceLabel(row) }}
+                <AppIcon name="lock" :size="11" class="ram-row-lock" />
+              </span>
+            </el-tooltip>
+            <span v-else class="ram-resource-label">{{ resourceLabel(row) }}</span>
+            <!-- [v74 2026-08-30] 融合视图拆行：同一资源出现多行时，每行显示其来源权限集名
+                 （单行资源不显示，避免噪音） -->
+            <span
+              v-if="row.ps_names && row.ps_names.length > 0 && (rtRowCounts[row.resource_type] || 0) > 1"
+              class="ram-ps-source"
+              :title="`来源权限集：${row.ps_names.join('、')}`"
+            >
+              来源：{{ row.ps_names.join('、') }}
             </span>
-          </el-tooltip>
-          <span v-else class="ram-resource-label">{{ resourceLabel(row) }}</span>
+          </div>
         </template>
       </el-table-column>
 
@@ -124,45 +135,55 @@
       <el-table-column label="数据范围" min-width="240" v-if="dimensions.length > 0">
         <template #default="{ row }">
           <div class="ram-scope-cell">
-            <div class="ram-scope-modes" v-if="applicableDimensions(row.resource_type).length > 0 || rowScopeMode(row.resource_type) === 'configured'">
+            <div class="ram-scope-modes" v-if="applicableDimensions(row.resource_type).length > 0 || rowScopeMode(row) === 'configured'">
               <!-- [Phase 3.17 2026-08-25] v17：单一按钮 + 自带状态
                    - 未配置 → 虚线边框 + 灰色 + 「+ 配置条件」（提示用户添加）
                    - 已配置 → 实色边框 + 主色背景 + 「⚙ 配置条件（N 条）」+ 预览表达式
-                   - 替换 v16 的 mode chip + 独立按钮的双元素设计 -->
+                   - 替换 v16 的 mode chip + 独立按钮的双元素设计
+                   [v74 2026-08-30] 浏览态（readonly）下：
+                   - 已配置 → 「查看条件（N 条）」可点击查看
+                   - 未配置 → 禁用按钮「未配置」，不可点击（避免打开空弹窗） -->
               <button
                 class="ram-scope-condition-btn"
                 :class="{
-                  'ram-scope-condition-btn--empty': rowScopeMode(row.resource_type) !== 'configured'
+                  'ram-scope-condition-btn--empty': rowScopeMode(row) !== 'configured'
                 }"
+                :disabled="props.readonly && rowScopeMode(row) !== 'configured'"
                 @click.stop="openConditionDialog(row)"
-                :title="(props.readonly ? '查看条件（浏览态只读）\n' : '') + rowExpressionTooltip(row.resource_type) || '点击配置数据范围条件'"
+                :title="
+                  rowScopeMode(row) === 'configured'
+                    ? (props.readonly ? '查看条件（浏览态只读）\n' : '') + rowExpressionTooltip(row)
+                    : (props.readonly ? '未配置数据范围' : '点击配置数据范围条件')
+                "
               >
                 <AppIcon
-                  :name="rowScopeMode(row.resource_type) === 'configured' ? 'tune' : 'plus'"
+                  :name="rowScopeMode(row) === 'configured' ? 'tune' : 'plus'"
                   :size="11"
                 />
                 <span>
                   {{
-                    rowScopeMode(row.resource_type) === 'configured'
-                      ? `配置条件（${rowRuleCount(row.resource_type)} 条）`
-                      : '配置条件'
+                    rowScopeMode(row) === 'configured'
+                      ? (props.readonly ? `查看（${rowRuleCount(row)} 条）` : `配置条件（${rowRuleCount(row)} 条）`)
+                      : (props.readonly ? '未配置' : '配置条件')
                   }}
                 </span>
+                <!-- [2026-08-30] 值名摘要：去掉「仅以下资源：」前缀，只展示值名称（最多 3 个）
+                     例: id IN (2200,2201,2202,2203) → 「供应链云、xx、yy…」 -->
                 <span
-                  v-if="rowScopeMode(row.resource_type) === 'configured'"
+                  v-if="rowScopeMode(row) === 'configured' && rowValueSummary(row)"
                   class="ram-scope-condition-preview"
                 >
-                  {{ rowExpressionPreview(row.resource_type) || '（无规则）' }}
+                  {{ rowValueSummary(row) }}
                 </span>
                 <AppIcon
-                  v-if="rowScopeMode(row.resource_type) === 'configured'"
+                  v-if="rowScopeMode(row) === 'configured'"
                   :name="props.readonly ? 'eye' : 'edit'"
                   :size="11"
                 />
               </button>
               <!-- [v58 2026-08-27] 快速删除：无需进弹窗逐条清理，行内一键删除该资源配置规则 -->
               <button
-                v-if="rowScopeMode(row.resource_type) === 'configured' && !props.readonly"
+                v-if="rowScopeMode(row) === 'configured' && !props.readonly"
                 class="ram-scope-clear-btn"
                 title="删除该资源的配置规则"
                 @click.stop="clearRowCondition(row)"
@@ -256,52 +277,73 @@
         </template>
       </el-table-column>
 
-      <!-- 行批量操作 -->
-      <el-table-column label="操作" width="96" align="center" fixed="right">
+      <!-- [2026-08-30 方案 B] 低频动作「更多动作」独立列（不固定，随表格横向滚动）：
+           职责分离 → 操作列 = 批量行操作（全选/清空）；更多动作 = 该资源的低频动作配置。
+           无低频动作（N=0）时显示「—」，保持列结构稳定、避免视觉跳动。
+           浏览态只读查看（popover 内 checkbox 禁用）。 -->
+      <el-table-column label="更多动作" width="90" align="center">
         <template #default="{ row }">
           <div class="ram-row-actions">
-            <AppButton size="sm" variant="text" :disabled="props.readonly" @click="toggleRow(row)">
+            <template v-if="extraActionsOf(row.resource_type).length > 0">
+              <!-- [v62 2026-08-28] 差异化动作入口：
+                   该资源支持但未进主矩阵列的低频动作（支持率 < 50%），
+                   在弹层中勾选配置；浏览态仅查看授权情况 -->
+              <el-popover placement="left-start" :width="260" trigger="click">
+                <template #reference>
+                  <AppButton size="sm" variant="text">
+                    {{ props.readonly ? '' : '+' }}{{ extraActionsOf(row.resource_type).length }} 动作
+                  </AppButton>
+                </template>
+                <div class="ram-more-panel">
+                  <div class="ram-more-title">
+                    更多动作（{{ resourceLabel(row) }} 专属，主矩阵列未展示）
+                  </div>
+                  <label
+                    v-for="a in extraActionsOf(row.resource_type)"
+                    :key="a"
+                    class="ram-more-item"
+                  >
+                    <el-checkbox
+                      :model-value="cellOf(row, a).granted"
+                      :disabled="props.readonly || isRowReadonly(row)"
+                      @change="(v) => handleCellChange(row, a, !!v)"
+                    />
+                    <span class="ram-more-label">{{ actionLabel(a) }}</span>
+                    <span
+                      v-if="showSourceTag(row, a)"
+                      class="source-tag"
+                      :class="[`source-tag--${cellOf(row, a).source}`]"
+                    >
+                      {{ sourceLabel(cellOf(row, a).source) }}
+                    </span>
+                  </label>
+                </div>
+              </el-popover>
+            </template>
+            <span v-else class="ram-more-empty">—</span>
+          </div>
+        </template>
+      </el-table-column>
+
+      <!-- 行批量操作 [2026-08-30] 浏览态整列隐藏：全选/清空是纯编辑操作，浏览态无内容无价值 -->
+      <el-table-column
+        v-if="!props.readonly"
+        label="操作"
+        width="90"
+        align="center"
+        fixed="right"
+      >
+        <template #default="{ row }">
+          <div class="ram-row-actions">
+            <AppButton
+              v-if="!props.readonly"
+              size="sm"
+              variant="text"
+              :disabled="props.readonly"
+              @click="toggleRow(row)"
+            >
               {{ isRowAllGranted(row) ? '清空行' : '全选行' }}
             </AppButton>
-            <!-- [v62 2026-08-28] 差异化动作入口：
-                 该资源支持但未进主矩阵列的低频动作（支持率 < 50%），
-                 在行内 popover 勾选配置；N=0 时按钮隐藏（当前数据全部 N=0，界面零变化） -->
-            <el-popover
-              v-if="extraActionsOf(row.resource_type).length > 0"
-              placement="left-start"
-              :width="260"
-              trigger="click"
-            >
-              <template #reference>
-                <AppButton size="sm" variant="text">
-                  +{{ extraActionsOf(row.resource_type).length }} 动作
-                </AppButton>
-              </template>
-              <div class="ram-more-panel">
-                <div class="ram-more-title">
-                  更多动作（{{ resourceLabel(row) }} 专属，主矩阵列未展示）
-                </div>
-                <label
-                  v-for="a in extraActionsOf(row.resource_type)"
-                  :key="a"
-                  class="ram-more-item"
-                >
-                  <el-checkbox
-                    :model-value="cellOf(row, a).granted"
-                    :disabled="props.readonly || isRowReadonly(row)"
-                    @change="(v) => handleCellChange(row, a, !!v)"
-                  />
-                  <span class="ram-more-label">{{ actionLabel(a) }}</span>
-                  <span
-                    v-if="showSourceTag(row, a)"
-                    class="source-tag"
-                    :class="[`source-tag--${cellOf(row, a).source}`]"
-                  >
-                    {{ sourceLabel(cellOf(row, a).source) }}
-                  </span>
-                </label>
-              </div>
-            </el-popover>
           </div>
         </template>
       </el-table-column>
@@ -316,7 +358,7 @@
       元数据未就绪：请检查角色是否已保存、scope_code 是否有效、网络是否可达
     </div>
     <div v-else-if="rows.length === 0" class="ram-empty">
-      当前角色 {{ props.matrix?.role_id }} 在元数据中未找到任何资源类型（请检查 resource_types.yaml）
+      当前角色 {{ props.matrix?.permission_set_id }} 在元数据中未找到任何资源类型（请检查 resource_types.yaml）
     </div>
 
     <!-- exclude 恢复 Allow 二次确认（Spec 5.3.1：danger variant 仍为橙系） -->
@@ -417,7 +459,7 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  /** role_resource_action_matrix：{ role_id, columns, resources:[{resource_type,label,cells}] } */
+  /** role_resource_action_matrix：{ permission_set_id, columns, resources:[{resource_type,label,cells}] } */
   matrix: {
     type: Object,
     default: null,
@@ -502,6 +544,9 @@ function cloneMatrixRows() {
     return {
       resource_type: r.resource_type,
       label: r.label || '',
+      // [v74 2026-08-30] 融合视图拆行：行级数据范围 + 来源权限集名（同资源多行区分）
+      row_scope: r.row_scope || null,
+      ps_names: Array.isArray(r.ps_names) ? [...r.ps_names] : [],
       cells: Object.fromEntries(
         keys.map((a) => [
           a,
@@ -540,6 +585,13 @@ watch(
 const resourceOptions = computed(() => {
   const types = Array.from(new Set(rows.value.map((r) => r.resource_type)))
   return types.map((rt) => ({ label: resourceLabel(rt), value: rt }))
+})
+
+// [v74 2026-08-30] 同资源类型的行数（融合视图拆行时 >1 → 每行显示来源权限集名）
+const rtRowCounts = computed(() => {
+  const m = {}
+  for (const r of rows.value) m[r.resource_type] = (m[r.resource_type] || 0) + 1
+  return m
 })
 
 const actionOptions = computed(() => {
@@ -889,8 +941,15 @@ function applicableDimensions(resourceType) {
  *      因为这些是旧的「包含/排除」语义，已被 Rule Builder 操作符替代
  *    - v17 起「新」路径只有 Rule Builder，dimConfigs 仅作为历史数据兼容读取
  */
-function rowScopeMode(resourceType) {
-  const data = scopeMatrixLocal.value?.[resourceType]
+/** [v74 2026-08-30] 行级优先：同资源多行（融合视图拆行）时每行自带 row_scope，
+ *   行带 row_scope 字段则只认行级（即使为 null 也不回退，避免跨行污染）；
+ *   无该字段（「权限配置」tab 单权限集场景）回退到 rt 级 scopeMatrixLocal。
+ *   入参统一为 row 对象。
+ */
+function rowScopeMode(row) {
+  const rt = typeof row === 'string' ? row : row.resource_type
+  const hasRowScope = row && Object.prototype.hasOwnProperty.call(row, 'row_scope')
+  const data = hasRowScope ? (row.row_scope || null) : scopeMatrixLocal.value?.[rt]
   if (!data) return ''
   // 优先看 v16 起写入的 __expression
   if (data.__expression && data.__expression.trim()) return 'configured'
@@ -900,21 +959,13 @@ function rowScopeMode(resourceType) {
 // [Phase 3.15 2026-08-25] v15 删掉 rowValueSource / toggleRowValueSource
 //   不再有 picker/expression chip 切换（详见 §6.24）
 
-/** [Phase 3.5e + 3.15 + 3.17 2026-08-25] 表达式预览（截断到 20 字符）
- *   v15 后：预览的是 Rule Builder 生成的完整条件表达式（如 "product_id IN (1,2,3) AND domain = 'CORE'"）
- *   v17 后：返回值用于按钮内的预览文本，未配置时返回空
- *   [v45 2026-08-27] 优先用 __expression_display（字段中文 label + picker 显示名，
- *   如「业务对象 IN (供应链计划BO, 库存管理BO)」），无则回落原始表达式 */
-function rowExpressionPreview(resourceType) {
-  const data = scopeMatrixLocal.value?.[resourceType] || {}
-  const expr = data.__expression_display || data.__expression || ''
-  return expr.length > 28 ? expr.slice(0, 26) + '...' : expr
-}
-
 /** [v56 2026-08-27] 按钮 tooltip：完整人类可读描述 + 技术表达式（次级信息）
- *  头部产品惯例（Salesforce/Fiori 筛选器）：主文案业务可读，原始表达式放 tooltip */
-function rowExpressionTooltip(resourceType) {
-  const data = scopeMatrixLocal.value?.[resourceType] || {}
+ *  头部产品惯例（Salesforce/Fiori 筛选器）：主文案业务可读，原始表达式放 tooltip
+ *  [v74 2026-08-30] 行级优先 */
+function rowExpressionTooltip(row) {
+  const rt = typeof row === 'string' ? row : row.resource_type
+  const hasRowScope = row && Object.prototype.hasOwnProperty.call(row, 'row_scope')
+  const data = hasRowScope ? (row.row_scope || {}) : (scopeMatrixLocal.value?.[rt] || {})
   const display = data.__expression_display || ''
   const technical = data.__expression || ''
   if (!display && !technical) return ''
@@ -924,11 +975,32 @@ function rowExpressionTooltip(resourceType) {
   return display || technical
 }
 
+/** [2026-08-30 元数据驱动] 按钮值名摘要：消费后端结构化字段 __scope_value_names
+ *  （值名列表，最多 3 个超出省略），不解析 display 中文文案字符串。
+ *  例: id IN (2200,2201,2202,2203) → 「供应链云、xx、yy…」
+ *  无结构化值名（非 id-IN 条件，如「状态为 active」）时回退 display 截断。 */
+function rowValueSummary(row) {
+  const rt = typeof row === 'string' ? row : row.resource_type
+  const hasRowScope = row && Object.prototype.hasOwnProperty.call(row, 'row_scope')
+  const data = hasRowScope ? (row.row_scope || {}) : (scopeMatrixLocal.value?.[rt] || {})
+  const names = data.__scope_value_names || []
+  if (names.length) {
+    const show = names.slice(0, 3).join('、')
+    return names.length > 3 ? `${show}…` : show
+  }
+  const display = data.__expression_display || ''
+  return display.length > 28 ? display.slice(0, 26) + '…' : display
+}
+
 /** [Phase 3.17 2026-08-25] v17：该资源的规则数
  *   通过逗号/AND/OR 等分隔符大致估算（精确数需等 Rule Builder 输出后端持久化）
- *   简化估算：按 `AND`/`OR` 拆分行数 + 1（最小 1）*/
-function rowRuleCount(resourceType) {
-  const expr = scopeMatrixLocal.value?.[resourceType]?.__expression || ''
+ *   简化估算：按 `AND`/`OR` 拆分行数 + 1（最小 1）
+ *   [v74 2026-08-30] 行级优先 */
+function rowRuleCount(row) {
+  const rt = typeof row === 'string' ? row : row.resource_type
+  const hasRowScope = row && Object.prototype.hasOwnProperty.call(row, 'row_scope')
+  const data = hasRowScope ? (row.row_scope || {}) : (scopeMatrixLocal.value?.[rt] || {})
+  const expr = data.__expression || ''
   if (!expr) return 0
   // 简化：按 AND/OR 拆分（不区分大小写）
   const parts = expr.split(/\s+AND\s+|\s+OR\s+/i).filter(Boolean)
@@ -959,11 +1031,13 @@ function rowRuleCount(resourceType) {
 function openConditionDialog(row) {
   if (!row) return
   // [v45 2026-08-27] 浏览态不再阻断：允许点击查看条件（父组件以只读模式打开弹窗）
+  // [v74 2026-08-30] 融合视图拆行：把该行的 row_scope 一并带出（父组件据此回填弹窗内容）
   emit('open-condition-dialog', {
     resourceType: row.resource_type,
     rowLabel: row.resource_label || row.label || row.resource_type,
     mode: 'custom',  // v15 dialog 只有 custom mode（Rule Builder）
     readonly: props.readonly,  // [v45] 父组件据此切换弹窗只读模式
+    rowScope: row.row_scope || null,
   })
 }
 
@@ -1135,6 +1209,23 @@ async function clearRowCondition(row) {
   color: var(--color-text-primary);
 }
 
+/* [v74 2026-08-30] 融合视图拆行：资源名 + 来源权限集名（多来源行） */
+.ram-resource-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.4;
+}
+.ram-ps-source {
+  font-size: 10px;
+  color: var(--color-text-tertiary, #999);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* [v42 2026-08-27] 派生只读行视觉（关系资源）：灰色 + lock icon 提示 */
 .ram-resource-label--readonly {
   color: var(--color-text-secondary);
@@ -1166,6 +1257,12 @@ async function clearRowCondition(row) {
   gap: var(--spacing-xs, 8px);
   padding: 4px 0;
   cursor: pointer;
+}
+/* [2026-08-30] 无低频动作占位 */
+.ram-more-empty {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-disabled, #bbb);
+  user-select: none;
 }
 .ram-more-label {
   font-size: var(--font-size-sm);
@@ -1400,17 +1497,16 @@ async function clearRowCondition(row) {
   color: var(--color-primary, #ea580c) !important;
   border-style: solid !important;
 }
-/* 已配置态的预览文本 */
+/* [2026-08-30] 值名摘要：仅展示值名称（最多 3 个），无「仅以下资源：」前缀 */
 .ram-scope-condition-preview {
-  font-size: 10px !important;
+  font-size: var(--font-size-xs) !important;
   font-weight: 400 !important;
   color: var(--color-text-secondary, #666) !important;
   margin-left: 4px !important;
-  padding-left: 6px !important;
-  border-left: 1px solid var(--color-primary-border, rgba(234, 88, 12, 0.3)) !important;
-  max-width: 200px !important;
+  max-width: 160px !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 /* ==========================================================================

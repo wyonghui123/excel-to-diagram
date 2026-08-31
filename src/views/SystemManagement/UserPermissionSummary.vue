@@ -1,27 +1,27 @@
 <template>
   <div class="perm-summary">
-    <!-- 角色分配 -->
+    <!-- 权限集分配 -->
     <div class="perm-section">
       <h4 class="perm-section-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
         </svg>
-        角色分配
+        权限集分配
         <span class="perm-count">{{ user.roles?.length || 0 }}</span>
       </h4>
       <div v-if="user.roles?.length" class="perm-tags">
         <span v-for="role in user.roles" :key="role.id" class="sm-tag sm-tag-primary">{{ role.name }}</span>
       </div>
-      <div v-else class="perm-empty">未分配角色</div>
+      <div v-else class="perm-empty">未分配权限集</div>
     </div>
 
-    <!-- 用户组归属 -->
+    <!-- 组织归属 -->
     <div class="perm-section">
       <h4 class="perm-section-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75M9 11a4 4 0 100-8 4 4 0 000 8z"/>
         </svg>
-        用户组归属
+        组织归属
         <span class="perm-count">{{ user.groups?.length || 0 }}</span>
       </h4>
       <div v-if="user.groups?.length" class="perm-group-list">
@@ -31,7 +31,7 @@
           <span v-else class="sm-tag">成员</span>
         </div>
       </div>
-      <div v-else class="perm-empty">未加入任何用户组</div>
+      <div v-else class="perm-empty">未加入任何组织</div>
     </div>
 
     <!-- 功能权限 -->

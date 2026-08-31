@@ -191,8 +191,8 @@ def _build_dim_scope_stats() -> dict:
         {
             'wildcard_count': int,
             'exclude_count': int,
-            'wildcard_roles': [{role_id, role_code, dimension_code}, ...],
-            'exclude_roles': [{role_id, role_code, dimension_code, excluded_ids}, ...],
+            'wildcard_roles': [{permission_set_id, role_code, dimension_code}, ...],
+            'exclude_roles': [{permission_set_id, role_code, dimension_code, excluded_ids}, ...],
             'conflict_users': [user_id, ...],
             'feature_flags': {'wildcard_enabled': bool, 'exclude_enabled': bool}
         }
@@ -237,23 +237,23 @@ def _build_dim_scope_stats() -> dict:
         try:
             # wildcard 统计 (dimension_values 含 '"*"')
             wildcard_rows = conn.execute(
-                "SELECT rds.role_id, r.code, rds.dimension_code "
-                "FROM role_dimension_scopes rds "
-                "LEFT JOIN roles r ON rds.role_id = r.id "
+                "SELECT rds.permission_set_id, r.code, rds.dimension_code "
+                "FROM permission_set_dimension_scopes rds "
+                "LEFT JOIN permission_sets r ON rds.permission_set_id = r.id "
                 "WHERE rds.dimension_values LIKE '%\"*\"%' "
                 "AND rds.scope_mode = 'include'"
             ).fetchall()
             result['wildcard_roles'] = [
-                {'role_id': r[0], 'role_code': r[1] or '', 'dimension_code': r[2]}
+                {'permission_set_id': r[0], 'role_code': r[1] or '', 'dimension_code': r[2]}
                 for r in wildcard_rows
             ]
             result['wildcard_count'] = len(wildcard_rows)
 
             # exclude 统计
             exclude_rows = conn.execute(
-                "SELECT rds.role_id, r.code, rds.dimension_code, rds.dimension_values "
-                "FROM role_dimension_scopes rds "
-                "LEFT JOIN roles r ON rds.role_id = r.id "
+                "SELECT rds.permission_set_id, r.code, rds.dimension_code, rds.dimension_values "
+                "FROM permission_set_dimension_scopes rds "
+                "LEFT JOIN roles r ON rds.permission_set_id = r.id "
                 "WHERE rds.scope_mode = 'exclude'"
             ).fetchall()
             result['exclude_roles'] = []
@@ -263,7 +263,7 @@ def _build_dim_scope_stats() -> dict:
                 except (json.JSONDecodeError, TypeError):
                     excluded_ids = []
                 result['exclude_roles'].append({
-                    'role_id': r[0], 'role_code': r[1] or '',
+                    'permission_set_id': r[0], 'role_code': r[1] or '',
                     'dimension_code': r[2], 'excluded_ids': excluded_ids,
                 })
             result['exclude_count'] = len(exclude_rows)
@@ -272,14 +272,14 @@ def _build_dim_scope_stats() -> dict:
             # 查询同时绑定 wildcard 角色和 exclude 角色的用户
             conflict_rows = conn.execute(
                 "SELECT DISTINCT ugm.user_id "
-                "FROM user_group_members ugm "
-                "JOIN group_roles gr1 ON ugm.group_id = gr1.group_id "
-                "JOIN role_dimension_scopes rds1 ON gr1.role_id = rds1.role_id "
+                "FROM org_members ugm "
+                "JOIN org_permission_sets gr1 ON ugm.org_id = gr1.org_id "
+                "JOIN permission_set_dimension_scopes rds1 ON gr1.permission_set_id = rds1.permission_set_id "
                 "WHERE rds1.dimension_values LIKE '%\"*\"%' AND rds1.scope_mode = 'include' "
                 "AND EXISTS ("
-                "  SELECT 1 FROM group_roles gr2 "
-                "  JOIN role_dimension_scopes rds2 ON gr2.role_id = rds2.role_id "
-                "  WHERE gr2.group_id = ugm.group_id "
+                "  SELECT 1 FROM org_permission_sets gr2 "
+                "  JOIN permission_set_dimension_scopes rds2 ON gr2.permission_set_id = rds2.permission_set_id "
+                "  WHERE gr2.org_id = ugm.org_id "
                 "  AND rds2.scope_mode = 'exclude'"
                 ")"
             ).fetchall()

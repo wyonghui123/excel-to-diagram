@@ -224,7 +224,7 @@ async function loadFieldMeta() {
           const isBusinessKey = semantics.business_key === true
           const isComputed = f.computed === true
           const isReadonlyAlways = semantics.readonly_always === true
-          // parent_key（自引用外键，如 user_group.parent_id）允许用户修改：
+          // parent_key（自引用外键，如 org.parent_id）允许用户修改：
           // 用户可重新指定父组，所以这里不应把 parent_key 当作 immutable。
           const isImmutable = semantics.immutable === true || f.immutable === true
           const backendNotEditable = f.editable === false
@@ -534,7 +534,7 @@ const childMetaListRefs = ref({})
 const isAddMode = computed(() => !props.objectId || props.objectId === 'new')
 
 // [FIX v1.1 2026-06-11] isCodeAutoManaged 判定需要等待后端确认 key_template.enabled
-// 原"启发式判断"导致 role/user_group/permission 等无 key_template 的对象
+// 原"启发式判断"导致 permission_set/org/permission 等无 key_template 的对象
 // 误显示"自动"标签（因为它们的 code 字段可编辑）。现在只有后端明确 enabled=true
 // 时才显示。
 const keyTemplateLoaded = ref(false)

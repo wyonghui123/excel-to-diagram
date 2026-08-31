@@ -98,6 +98,8 @@
                   :options="listOptions"
                   :enable-detail="true"
                   :enable-auto-crud="true"
+                  :empty-text="emptyState.text"
+                  :empty-hint="emptyState.hint"
                   @row-dblclick="(payload) => handleRowDblClick(tab.name, payload)"
                 >
                   <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
@@ -804,6 +806,19 @@ const listOptions = computed(() => ({
   pageSize: 20,
   ...(props.options.listOptions || {})
 }))
+
+// [MOMP 2026-08-30] 空态文案：未选择范围 → 明确指示用户去左侧勾选；否则维持"暂无数据"
+//   空范围（effective 为空）时 filterStrategies 注入 id__in='-1' 空集守卫，列表必然为空，
+//   此时必须给出可操作的指示而非笼统的"暂无数据"。
+const emptyState = computed(() => {
+  if (!page.hasScopeSelection) {
+    return {
+      text: '当前未选择范围',
+      hint: '请在左侧树中勾选要查看的对象/组织后，列表将按所选范围展示数据'
+    }
+  }
+  return { text: '暂无数据', hint: '当前范围下无数据，可尝试调整左侧范围或筛选条件' }
+})
 
 const currentSortInfo = computed(() => activeMetaListPage.value?.sortInfo || null)
 const currentDefaultSort = computed(() => activeMetaListPage.value?.defaultSort || null)

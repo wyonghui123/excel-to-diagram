@@ -35,7 +35,7 @@ def hook_db():
     conn.executescript('''
         CREATE TABLE role_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -44,11 +44,11 @@ def hook_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         CREATE TABLE group_roles (
-            group_id INTEGER, role_id INTEGER
+            group_id INTEGER, permission_set_id INTEGER
         );
         CREATE TABLE user_group_members (
             user_id INTEGER, group_id INTEGER
@@ -58,7 +58,7 @@ def hook_db():
         INSERT INTO user_group_members VALUES (999, 1);
 
         INSERT INTO role_effective_intents
-            (role_id, bo_id, action_name, data_scope, source)
+            (permission_set_id, bo_id, action_name, data_scope, source)
         VALUES
             (100, 'product', 'read',
              '{"include":[{"field":"owner_id","op":"=","value":"${user.id}"}],"exclude":[]}',

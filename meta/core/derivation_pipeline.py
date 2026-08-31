@@ -9,11 +9,11 @@ PermissionDerivationPipeline — Layer 2 → Layer 1 推导管道
   Step 4: 统一展开 (核心: LEVEL_BUNDLES + 条件结构化)
   Step 5: 维度→菜单推导 (可选)
   Step 6: 菜单→BO actions 推导 + 反向建议 (可选)
-  Step 7: 冲突解决 + 合并 → 写入 role_effective_intents
+  Step 7: 冲突解决 + 合并 → 写入 permission_set_effective_intents
   Step 8: 标记 stale 清除
 
 [输出]
-  role_effective_intents 表: (role_id, bo_id, action_name, data_scope, derivation_mode, source)
+  permission_set_effective_intents 表: (permission_set_id, bo_id, action_name, data_scope, derivation_mode, source)
 
 [Cartesian 语义保留 (AC-008)]
   derivation_mode='dynamic' 时, include_conditions 中的 ID 列表保持原样,
@@ -44,11 +44,11 @@ class PermissionDerivationPipeline:
         # [P4 补充] 惰性初始化 DimensionScopeEngine (复用其维度展开逻辑)
         self._dim_engine = None
 
-    def derive(self, role_id: int) -> Dict[str, Any]:
+    def derive(self, permission_set_id: int) -> Dict[str, Any]:
         """执行 8 步推导
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
 
         Returns:
             {
@@ -60,11 +60,11 @@ class PermissionDerivationPipeline:
             }
         """
         # Step 1: 加载 permission_rules_v2
-        rules = self._load_permission_rules(role_id)
+        rules = self._load_permission_rules(permission_set_id)
 
         if not rules:
             # 无规则: 清空该角色所有 Intent (避免脏数据)
-            self._dao.delete_for_role(role_id)
+            self._dao.delete_for_role(permission_set_id)
             return {
                 'intent_count': 0,
                 'actions': [],
@@ -74,15 +74,15 @@ class PermissionDerivationPipeline:
             }
 
         # Step 2-3: 加载菜单和手工 Intent (FR-013 manual intent 优先级)
-        # [P1-A2 2026-07-26] 实现 _load_manual_intents, 从 role_intents 表加载
+        # [P1-A2 2026-07-26] 实现 _load_manual_intents, 从 permission_set_intents 表加载
         #   source='manual' 的 (bo_id, action_name, granted) 记录
         #   - granted=true  → 强制包含该 (bo_id, action_name) intent
         #   - granted=false → 强制排除该 (bo_id, action_name) intent
-        # [P1-A6 2026-07-26] FR-011 实现 _load_role_menus, 从 role_menu_permissions
+        # [P1-A6 2026-07-26] FR-011 实现 _load_role_menus, 从 permission_set_menu_permissions
         #   表加载角色已授权的 menu_code 列表
         # [P1-A7 2026-07-26] FR-012 加载 object_owd (对象基线, 最低优先级兜底)
-        menus = self._load_role_menus(role_id)
-        manual_intents = self._load_manual_intents(role_id)
+        menus = self._load_role_menus(permission_set_id)
+        manual_intents = self._load_manual_intents(permission_set_id)
         owd = self._load_object_owd()
 
         # Step 4: 统一展开 (规则 → intents)
@@ -100,9 +100,9 @@ class PermissionDerivationPipeline:
             self._apply_owd_baseline(expanded, owd)
 
         # [P4 补充] Step 4.5: 维度展开 (复用 DimensionScopeEngine)
-        # 把 role_dimension_scopes + v2 规则中的维度配置展开为所有 BO 的条件
+        # 把 permission_set_dimension_scopes + v2 规则中的维度配置展开为所有 BO 的条件
         # 这一步会为 HIERARCHY_CHAIN 中的每个 BO 生成额外的 intents
-        dim_expanded = self._expand_dimensions_to_intents(role_id)
+        dim_expanded = self._expand_dimensions_to_intents(permission_set_id)
         expanded.extend(dim_expanded)
 
         # [P1-A6 2026-07-26] Step 5: 维度→菜单推导 (FR-011)
@@ -137,12 +137,12 @@ class PermissionDerivationPipeline:
         if manual_intents:
             self._merge_manual_intents(expanded, manual_intents)
 
-        # Step 7: 合并 → 写入 role_effective_intents
+        # Step 7: 合并 → 写入 permission_set_effective_intents
         # 先删除旧的, 再批量插入 (简化逻辑, 后续可优化为增量)
-        self._dao.delete_for_role(role_id)
+        self._dao.delete_for_role(permission_set_id)
         for intent in expanded:
             self._dao.upsert(
-                role_id=role_id,
+                permission_set_id=permission_set_id,
                 bo_id=intent['bo_id'],
                 action_name=intent['action_name'],
                 data_scope=intent['data_scope'],
@@ -151,7 +151,7 @@ class PermissionDerivationPipeline:
             )
 
         # Step 8: 清除 stale 标记
-        self._dao.clear_stale(role_id)
+        self._dao.clear_stale(permission_set_id)
 
         # 计算摘要
         actions = sorted({i['action_name'] for i in expanded})
@@ -166,17 +166,17 @@ class PermissionDerivationPipeline:
     # ============================================================
     # Step 1: 加载配置源
     # ============================================================
-    def _load_permission_rules(self, role_id: int) -> List[Dict[str, Any]]:
+    def _load_permission_rules(self, permission_set_id: int) -> List[Dict[str, Any]]:
         """从 permission_rules_v2 表加载规则"""
         with sqlite3.connect(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 '''
                 SELECT * FROM permission_rules_v2
-                WHERE role_id = ?
+                WHERE permission_set_id = ?
                 ORDER BY id
                 ''',
-                [role_id],
+                [permission_set_id],
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -255,18 +255,18 @@ class PermissionDerivationPipeline:
     # ============================================================
     # [P1-A2 2026-07-26] Step 3: 加载手工 Intent (FR-013)
     # ============================================================
-    def _load_manual_intents(self, role_id: int) -> List[Dict[str, Any]]:
-        """[P1-A2 2026-07-26] 从 role_intents 表加载手工 Intent
+    def _load_manual_intents(self, permission_set_id: int) -> List[Dict[str, Any]]:
+        """[P1-A2 2026-07-26] 从 permission_set_intents 表加载手工 Intent
 
         [FR-013 manual intent 优先级生效]
-          role_intents 表 (FR-017 BO 统一模型) 存储 (role_id, bo_id, action_name, granted, source)
+          permission_set_intents 表 (FR-017 BO 统一模型) 存储 (permission_set_id, bo_id, action_name, granted, source)
           其中 source='manual' 的记录是手工配置, 优先级最高, 覆盖 derived 推导结果
 
           - granted=true  → 强制包含该 (bo_id, action_name) intent (即使 derived 没推导出来)
           - granted=false → 强制排除该 (bo_id, action_name) intent (即使 derived 推导出来了)
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
 
         Returns:
             [{bo_id, action_name, granted}, ...]
@@ -274,10 +274,10 @@ class PermissionDerivationPipeline:
         result: List[Dict[str, Any]] = []
         try:
             with sqlite3.connect(self._db_path) as conn:
-                # 检查 role_intents 表是否存在
+                # 检查 permission_set_intents 表是否存在
                 cursor = conn.execute(
                     "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name='role_intents'"
+                    "WHERE type='table' AND name='permission_set_intents'"
                 )
                 if cursor.fetchone() is None:
                     return result  # 表不存在, 返回空
@@ -285,10 +285,10 @@ class PermissionDerivationPipeline:
                 rows = conn.execute(
                     '''
                     SELECT bo_id, action_name, granted
-                    FROM role_intents
-                    WHERE role_id = ? AND source = 'manual'
+                    FROM permission_set_intents
+                    WHERE permission_set_id = ? AND source = 'manual'
                     ''',
-                    [role_id],
+                    [permission_set_id],
                 ).fetchall()
             for row in rows:
                 bo_id = row[0] if not isinstance(row, tuple) else row[0]
@@ -428,12 +428,12 @@ class PermissionDerivationPipeline:
                 self._dim_engine = None
         return self._dim_engine
 
-    def _expand_dimensions_to_intents(self, role_id: int) -> List[Dict[str, Any]]:
+    def _expand_dimensions_to_intents(self, permission_set_id: int) -> List[Dict[str, Any]]:
         """[P4 补充] 维度展开: 调用 DimensionScopeEngine 生成所有 BO 的条件
 
         [背景]
-          旧系统 DimensionScopeEngine.derive_data_conditions(role_id) 会:
-          1. 加载 role_dimension_scopes 配置 (含 include/exclude/wildcard)
+          旧系统 DimensionScopeEngine.derive_data_conditions(permission_set_id) 会:
+          1. 加载 permission_set_dimension_scopes 配置 (含 include/exclude/wildcard)
           2. 向上展开 (sub_domain → domain → version → product)
           3. 向下展开 (product → version → domain → sub_domain)
           4. 为每个 BO 生成 SQL WHERE 条件
@@ -453,7 +453,7 @@ class PermissionDerivationPipeline:
           避免新增对象后静态 ID 列表过期
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
 
         Returns:
             [{bo_id, action_name, data_scope, derivation_mode, source}, ...]
@@ -464,7 +464,7 @@ class PermissionDerivationPipeline:
 
         try:
             # 调用旧系统获取所有 BO 的 SQL 条件 (含 exclude 已合并)
-            bo_conditions = engine.derive_data_conditions(role_id)
+            bo_conditions = engine.derive_data_conditions(permission_set_id)
         except Exception:
             return []
 
@@ -476,7 +476,7 @@ class PermissionDerivationPipeline:
         # 例: product wildcard → 所有 BO 的 intent 存空 include (所有可见)
         #     而非 id IN (1,2,3,...) 静态列表
         try:
-            wildcard_dims = engine.get_wildcard_dims(role_id)
+            wildcard_dims = engine.get_wildcard_dims(permission_set_id)
         except Exception:
             wildcard_dims = set()
 
@@ -491,7 +491,7 @@ class PermissionDerivationPipeline:
         # 修复后: 用动态子查询 "domain_id IN (2200)" 覆盖, 自动包含 SD 455
         if not wildcard_affected_bos:
             try:
-                dim_configs = self._load_dim_scope_configs(role_id)
+                dim_configs = self._load_dim_scope_configs(permission_set_id)
                 if dim_configs:
                     dynamic_sql_map = self._generate_dynamic_dim_scope_sql(dim_configs)
                     for bo_id, dyn_sql in dynamic_sql_map.items():
@@ -503,7 +503,7 @@ class PermissionDerivationPipeline:
         # [P5 修复 2026-07-26] 提取 exclude 配置 (用于附加到 data_scope.exclude)
         # 这样 IntentScopeAdapter 在 read 时会生成 NOT (id IN (...)) 条件
         try:
-            excluded = engine._load_exclude_values(role_id)
+            excluded = engine._load_exclude_values(permission_set_id)
         except Exception:
             excluded = {}
 
@@ -512,9 +512,9 @@ class PermissionDerivationPipeline:
         #   - IntentScopeAdapter 找不到 create/update/delete intent
         #   - 写操作回退到 legacy, 但 legacy 也有 bug (_dim_has_any_values 不兼容 set)
         #   - 即使 legacy 修复, effective_intents 路径仍然不工作
-        # 修复: 查询 role_permissions 获取该 role 实际持有的 (bo_id, action) 集合,
+        # 修复: 查询 permission_set_permissions 获取该 role 实际持有的 (bo_id, action) 集合,
         #       为每个 (bo_id, action) 生成 intent, 使用相同的 dim scope 条件
-        role_actions = self._load_role_actions_for_dim(role_id)
+        role_actions = self._load_role_actions_for_dim(permission_set_id)
 
         result = []
         for bo_id, sql_condition in bo_conditions.items():
@@ -559,10 +559,10 @@ class PermissionDerivationPipeline:
             }
 
             # [P5 修复 2026-07-26] 决定为该 BO 生成哪些 action 的 intent
-            # 优先用 role_permissions 中实际持有的 action (覆盖 create/update/delete/import)
+            # 优先用 permission_set_permissions 中实际持有的 action (覆盖 create/update/delete/import)
             # 回退到 read level (read/list/export) 保证向后兼容
             # [P1-B3 修复 2026-07-26] actions_for_bo 取 role_actions ∪ expand_level('read')
-            #   修复 bug: 之前只取 role_actions, 当 role_permissions 只有 [read, export] 时,
+            #   修复 bug: 之前只取 role_actions, 当 permission_set_permissions 只有 [read, export] 时,
             #   不生成 list intent, 导致 _unified_expand 写入的旧 list intent (来自
             #   permission_rules_v2 migrated_dim_scope) 不被覆盖, dim_scope 变更后
             #   list intent 仍保持旧值, IntentScopeAdapter 用旧 SQL 过滤, 行为错误
@@ -586,10 +586,10 @@ class PermissionDerivationPipeline:
 
         return result
 
-    def _load_role_actions_for_dim(self, role_id: int) -> Dict[str, List[str]]:
+    def _load_role_actions_for_dim(self, permission_set_id: int) -> Dict[str, List[str]]:
         """[P5 补充 2026-07-26] 加载 role 实际持有的 (bo_id, action) 集合
 
-        从 role_permissions + permissions 表查询, 解析 permission.code
+        从 permission_set_permissions + permissions 表查询, 解析 permission.code
         格式: '{resource_type}:{action}' (如 'sub_domain:create')
 
         Returns:
@@ -612,11 +612,11 @@ class PermissionDerivationPipeline:
                 rows = conn.execute(
                     '''
                     SELECT p.code
-                    FROM role_permissions rp
+                    FROM permission_set_permissions rp
                     JOIN permissions p ON rp.permission_id = p.id
-                    WHERE rp.role_id = ? AND rp.granted = 1
+                    WHERE rp.permission_set_id = ? AND rp.granted = 1
                     ''',
-                    [role_id],
+                    [permission_set_id],
                 ).fetchall()
             for row in rows:
                 code = row[0] if not isinstance(row, tuple) else row[0]
@@ -692,8 +692,8 @@ class PermissionDerivationPipeline:
 
         return affected
 
-    def _load_dim_scope_configs(self, role_id: int) -> Dict[str, List[int]]:
-        """[P6 修复 2026-07-26] 加载 role_dimension_scopes 的原始配置
+    def _load_dim_scope_configs(self, permission_set_id: int) -> Dict[str, List[int]]:
+        """[P6 修复 2026-07-26] 加载 permission_set_dimension_scopes 的原始配置
 
         返回用户配置的 dim_vals (非展开值), 用于生成动态子查询 SQL
         例: domain=[2200] → {'domain': [2200]}
@@ -711,8 +711,8 @@ class PermissionDerivationPipeline:
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
                     "SELECT dimension_code, dimension_values, scope_mode "
-                    "FROM role_dimension_scopes WHERE role_id = ?",
-                    [role_id],
+                    "FROM permission_set_dimension_scopes WHERE permission_set_id = ?",
+                    [permission_set_id],
                 ).fetchall()
             for row in rows:
                 dim_code = row[0] if not isinstance(row, tuple) else row[0]
@@ -842,37 +842,37 @@ class PermissionDerivationPipeline:
     # ============================================================
     # [P0 修复 2026-07-26] FR-011 菜单反向推导 4 个方法
     # ============================================================
-    def _load_role_menus(self, role_id: int) -> List[str]:
+    def _load_role_menus(self, permission_set_id: int) -> List[str]:
         """[P0 修复 2026-07-26] FR-011 加载角色已授权的 menu_code 列表
 
-        从 role_menu_permissions 表加载 (role_id, menu_code) 关联.
+        从 permission_set_menu_permissions 表加载 (permission_set_id, menu_code) 关联.
 
         Args:
-            role_id: 角色 ID
+            permission_set_id: 角色 ID
 
         Returns:
             [menu_code, ...]  e.g. ['domain_management', 'sub_domain_management', ...]
 
         [设计说明]
-          - role_menu_permissions 表由 role_menu_api.py 维护
-          - 表结构: (role_id, menu_code) 简单关联, 无 action 粒度
+          - permission_set_menu_permissions 表由 role_menu_api.py 维护
+          - 表结构: (permission_set_id, menu_code) 简单关联, 无 action 粒度
           - 菜单本身定义了 bo_bindings, 指明关联的 BO 和 role
           - 通过菜单授权, 用户间接获得 BO 的 read 权限
         """
         result: List[str] = []
         try:
             with sqlite3.connect(self._db_path) as conn:
-                # 检查 role_menu_permissions 表是否存在
+                # 检查 permission_set_menu_permissions 表是否存在
                 cursor = conn.execute(
                     "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name='role_menu_permissions'"
+                    "WHERE type='table' AND name='permission_set_menu_permissions'"
                 )
                 if cursor.fetchone() is None:
                     return result  # 表不存在, 返回空
 
                 rows = conn.execute(
-                    'SELECT menu_code FROM role_menu_permissions WHERE role_id = ?',
-                    [role_id],
+                    'SELECT menu_code FROM permission_set_menu_permissions WHERE permission_set_id = ?',
+                    [permission_set_id],
                 ).fetchall()
             for row in rows:
                 menu_code = row[0] if not isinstance(row, tuple) else row[0]

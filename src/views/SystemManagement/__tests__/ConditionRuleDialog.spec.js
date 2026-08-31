@@ -68,7 +68,7 @@ describe('ConditionRuleDialog - Value Help样式与级联', () => {
     
     wrapper = mount(ConditionRuleDialog, {
       props: {
-        roleId: 1
+        permissionSetId: 1
       },
       attachTo: document.body
     })

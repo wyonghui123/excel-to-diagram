@@ -254,8 +254,8 @@ class DataPermissionInterceptor(Interceptor):
 
         # [Phase 2 2026-07-25] Feature flag 切换到 IntentScopeAdapter (新路径)
         # Spec: docs/spec_权限体系升级/12_implementation_plan.md P2.6
-        # 当 effective_intents_enabled=True 时, 用 role_effective_intents 表
-        # (Layer 1 事实层) 替代 role_dimension_scopes + data_permission_rules
+        # 当 effective_intents_enabled=True 时, 用 permission_set_effective_intents 表
+        # (Layer 1 事实层) 替代 permission_set_dimension_scopes + data_permission_rules
         # 默认关闭, 不影响现有系统
         try:
             from meta.core.permission_flags import is_enabled
@@ -272,7 +272,7 @@ class DataPermissionInterceptor(Interceptor):
         # 但跳过 visibility scope + owner 例外 (relationship 无这些字段)
         # 见 _apply_scope_filter_after_dimension 中的 ASSOCIATION_BOS_SKIP_VISIBILITY 处理
 
-        # [FIX v1.0.2 + v1.0.5 2026-06-10] 优先应用 role_dimension_scopes 派生条件
+        # [FIX v1.0.2 + v1.0.5 2026-06-10] 优先应用 permission_set_dimension_scopes 派生条件
         # 当角色声明了 dimension scope (例: TEST60 version=[2,11,12]) 时,
         # DimensionScopeEngine 自动向上展开到 parent BO (例: product={1,17}),
         # 然后注入到 query_conditions。
@@ -380,14 +380,18 @@ class DataPermissionInterceptor(Interceptor):
         )
 
     def _get_role_ids(self, context: 'ActionContext') -> List[int]:
-        """从 context 获取当前用户的所有 role_id"""
+        """从 context 获取当前用户的所有 permission_set_id（含祖先组织继承）"""
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(context.user_id)
+            if not org_ids:
+                return []
+            placeholders = ','.join('?' * len(org_ids))
             cursor = context.data_source.execute(
-                """SELECT DISTINCT gr.role_id
-                   FROM group_roles gr
-                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-                   WHERE ugm.user_id = ?""",
-                [context.user_id]
+                f"""SELECT DISTINCT gr.permission_set_id
+                   FROM org_permission_sets gr
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             return [row[0] for row in cursor.fetchall()]
         except Exception as e:
@@ -395,11 +399,11 @@ class DataPermissionInterceptor(Interceptor):
             return []
 
     def _apply_dimension_scope_filter(self, context: 'ActionContext') -> bool:
-        """[FIX v1.0.2 / v1.0.3] 应用 role_dimension_scopes 派生条件
+        """[FIX v1.0.2 / v1.0.3] 应用 permission_set_dimension_scopes 派生条件
 
         流程:
-        1. 查 user → group → role 链路拿到所有 role_id
-        2. 调 DimensionScopeEngine.derive_data_conditions(role_id) 拿所有 role 的派生条件
+        1. 查 user → group → role 链路拿到所有 permission_set_id
+        2. 调 DimensionScopeEngine.derive_data_conditions(permission_set_id) 拿所有 role 的派生条件
         3. 如果当前 object_type 在派生条件中, 注入到 query_conditions
         4. 任一 role 有 dimension scope 且 object_type 在其派生条件中 → 允许
 
@@ -420,14 +424,18 @@ class DataPermissionInterceptor(Interceptor):
         except ImportError:
             return False
 
-        # 1. 查 user 的所有 role_id (通过 group 链路)
+        # 1. 查 user 的所有 permission_set_id (通过 group 链路，含祖先组织继承)
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(context.user_id)
+            if not org_ids:
+                return False
+            placeholders = ','.join('?' * len(org_ids))
             cursor = context.data_source.execute(
-                """SELECT DISTINCT gr.role_id
-                   FROM group_roles gr
-                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-                   WHERE ugm.user_id = ?""",
-                [context.user_id]
+                f"""SELECT DISTINCT gr.permission_set_id
+                   FROM org_permission_sets gr
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             role_ids = [row[0] for row in cursor.fetchall()]
         except Exception as e:
@@ -437,18 +445,18 @@ class DataPermissionInterceptor(Interceptor):
         if not role_ids:
             return False
 
-        # 2. 查 role_dimension_scopes, 确认至少有一个 role 有 scope
+        # 2. 查 permission_set_dimension_scopes, 确认至少有一个 role 有 scope
         try:
             placeholders = ','.join('?' * len(role_ids))
             cursor = context.data_source.execute(
-                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                f"SELECT COUNT(*) FROM permission_set_dimension_scopes WHERE permission_set_id IN ({placeholders})",
                 role_ids
             )
             count = cursor.fetchone()[0]
             if not count:
                 return False  # 角色没有 dimension scope, 走原 scope filter
         except Exception as e:
-            logger.debug(f'[_apply_dimension_scope_filter] check role_dimension_scopes failed: {e}')
+            logger.debug(f'[_apply_dimension_scope_filter] check permission_set_dimension_scopes failed: {e}')
             return False
 
         # 3. 派生所有 role 的 data_conditions
@@ -466,18 +474,18 @@ class DataPermissionInterceptor(Interceptor):
         )
         per_role_conditions: List[List[Dict]] = []
 
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                expanded = engine.expand_dimension_values(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
                 dim_data = expanded.get(object_type)
                 # wildcard-only (无 exclude) → 全可见 → 跳过 dim scope 过滤
                 if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
                     logger.info(
-                        f'[_apply_dimension_scope_filter] user={context.user_id} role={role_id} '
+                        f'[_apply_dimension_scope_filter] user={context.user_id} role={permission_set_id} '
                         f'object_type={object_type} wildcard-only → 全可见, 跳过 dim scope'
                     )
                     return False  # 不应用 dim scope 过滤
-                data_conditions = engine.derive_data_conditions(role_id)
+                data_conditions = engine.derive_data_conditions(permission_set_id)
                 cond_expr = data_conditions.get(object_type)
                 if not cond_expr:
                     continue
@@ -488,11 +496,11 @@ class DataPermissionInterceptor(Interceptor):
                     continue
                 per_role_conditions.append(conds)
                 logger.info(
-                    f'[_apply_dimension_scope_filter] user={context.user_id} role={role_id} '
+                    f'[_apply_dimension_scope_filter] user={context.user_id} role={permission_set_id} '
                     f'object_type={object_type} -> conds={conds}'
                 )
             except Exception as e:
-                logger.warning(f'[_apply_dimension_scope_filter] derive role_id={role_id} failed: {e}')
+                logger.warning(f'[_apply_dimension_scope_filter] derive permission_set_id={permission_set_id} failed: {e}')
 
         if not per_role_conditions:
             return False  # 没有 role 派生该 object_type, 走原 scope filter

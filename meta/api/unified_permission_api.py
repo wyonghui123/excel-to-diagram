@@ -4,7 +4,7 @@ Phase 3 统一权限管理 API
 
 [覆盖] P3.1-P3.7
   - permission_rules_v2 CRUD
-  - role_effective_intents CRUD
+  - permission_set_effective_intents CRUD
   - 推导管道触发
   - SQL 预览
   - 完整性检查
@@ -52,16 +52,16 @@ def _current_user_id() -> Optional[int]:
 # ============================================================================
 @unified_permission_bp.route('/unified-permission-rules', methods=['GET'])
 def list_unified_rules():
-    """GET /api/v2/unified-permission-rules?role_id=X&resource_type=Y"""
+    """GET /api/v2/unified-permission-rules?permission_set_id=X&resource_type=Y"""
     try:
         from meta.core.permission_rule_v2_dao import PermissionRuleV2DAO
 
         dao = PermissionRuleV2DAO(_get_db_path())
-        role_id = request.args.get('role_id', type=int)
+        permission_set_id = request.args.get('permission_set_id', type=int)
         resource_type = request.args.get('resource_type')
 
-        if role_id:
-            rules = dao.list_by_role(role_id, resource_type)
+        if permission_set_id:
+            rules = dao.list_by_role(permission_set_id, resource_type)
         else:
             rules = dao.list_all(resource_type)
 
@@ -80,17 +80,17 @@ def create_unified_rule():
         body = request.get_json(silent=True) or {}
 
         # 必填校验
-        role_id = body.get('role_id')
+        permission_set_id = body.get('permission_set_id')
         resource_type = body.get('resource_type')
-        if not role_id or not resource_type:
+        if not permission_set_id or not resource_type:
             return jsonify({
                 'success': False,
-                'message': 'role_id and resource_type are required',
+                'message': 'permission_set_id and resource_type are required',
             }), 400
 
         dao = PermissionRuleV2DAO(_get_db_path())
         rule_id = dao.create(
-            role_id=role_id,
+            permission_set_id=permission_set_id,
             resource_type=resource_type,
             permission_level=body.get('permission_level', 'read'),
             include_conditions=body.get('include_conditions'),
@@ -164,11 +164,11 @@ def delete_unified_rule(rule_id: int):
 
 
 # ============================================================================
-# P3.2 role_effective_intents CRUD
+# P3.2 permission_set_effective_intents CRUD
 # ============================================================================
-@unified_permission_bp.route('/roles/<int:role_id>/effective-intents', methods=['GET'])
-def list_effective_intents(role_id: int):
-    """GET /api/v2/roles/<role_id>/effective-intents?bo_id=X&action_name=Y"""
+@unified_permission_bp.route('/roles/<int:permission_set_id>/effective-intents', methods=['GET'])
+def list_effective_intents(permission_set_id: int):
+    """GET /api/v2/roles/<permission_set_id>/effective-intents?bo_id=X&action_name=Y"""
     try:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
@@ -177,9 +177,9 @@ def list_effective_intents(role_id: int):
         action_name = request.args.get('action_name')
 
         if bo_id and action_name:
-            intents = dao.get_for_bo_action(role_id, bo_id, action_name)
+            intents = dao.get_for_bo_action(permission_set_id, bo_id, action_name)
         else:
-            intents = dao.list_for_role(role_id)
+            intents = dao.list_for_role(permission_set_id)
             if bo_id:
                 intents = [i for i in intents if i.get('bo_id') == bo_id]
             if action_name:
@@ -192,10 +192,10 @@ def list_effective_intents(role_id: int):
 
 
 @unified_permission_bp.route(
-    '/roles/<int:role_id>/effective-intents/<int:intent_id>', methods=['PUT']
+    '/roles/<int:permission_set_id>/effective-intents/<int:intent_id>', methods=['PUT']
 )
-def update_effective_intent(role_id: int, intent_id: int):
-    """PUT /api/v2/roles/<role_id>/effective-intents/<id> — 更新 data_scope"""
+def update_effective_intent(permission_set_id: int, intent_id: int):
+    """PUT /api/v2/roles/<permission_set_id>/effective-intents/<id> — 更新 data_scope"""
     try:
         body = request.get_json(silent=True) or {}
         data_scope = body.get('data_scope')
@@ -205,10 +205,10 @@ def update_effective_intent(role_id: int, intent_id: int):
         db_path = _get_db_path()
         with sqlite3.connect(db_path) as conn:
             cursor = conn.execute(
-                '''UPDATE role_effective_intents
+                '''UPDATE permission_set_effective_intents
                    SET data_scope = ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ? AND role_id = ?''',
-                [json.dumps(data_scope, ensure_ascii=False), intent_id, role_id],
+                   WHERE id = ? AND permission_set_id = ?''',
+                [json.dumps(data_scope, ensure_ascii=False), intent_id, permission_set_id],
             )
             conn.commit()
             if cursor.rowcount == 0:
@@ -221,16 +221,16 @@ def update_effective_intent(role_id: int, intent_id: int):
 
 
 @unified_permission_bp.route(
-    '/roles/<int:role_id>/effective-intents/<int:intent_id>', methods=['DELETE']
+    '/roles/<int:permission_set_id>/effective-intents/<int:intent_id>', methods=['DELETE']
 )
-def delete_effective_intent(role_id: int, intent_id: int):
-    """DELETE /api/v2/roles/<role_id>/effective-intents/<id>"""
+def delete_effective_intent(permission_set_id: int, intent_id: int):
+    """DELETE /api/v2/roles/<permission_set_id>/effective-intents/<id>"""
     try:
         db_path = _get_db_path()
         with sqlite3.connect(db_path) as conn:
             cursor = conn.execute(
-                'DELETE FROM role_effective_intents WHERE id = ? AND role_id = ?',
-                [intent_id, role_id],
+                'DELETE FROM permission_set_effective_intents WHERE id = ? AND permission_set_id = ?',
+                [intent_id, permission_set_id],
             )
             conn.commit()
             if cursor.rowcount == 0:
@@ -245,9 +245,9 @@ def delete_effective_intent(role_id: int, intent_id: int):
 # ============================================================================
 # P3.3 推导管道触发
 # ============================================================================
-@unified_permission_bp.route('/roles/<int:role_id>/derive', methods=['POST'])
-def trigger_derivation(role_id: int):
-    """POST /api/v2/roles/<role_id>/derive — 触发推导管道"""
+@unified_permission_bp.route('/roles/<int:permission_set_id>/derive', methods=['POST'])
+def trigger_derivation(permission_set_id: int):
+    """POST /api/v2/roles/<permission_set_id>/derive — 触发推导管道"""
     try:
         from meta.core.derivation_pipeline import PermissionDerivationPipeline
         from meta.core.effective_intent_dao import EffectiveIntentDAO
@@ -255,7 +255,7 @@ def trigger_derivation(role_id: int):
         db_path = _get_db_path()
         dao = EffectiveIntentDAO(db_path)
         pipeline = PermissionDerivationPipeline(db_path=db_path, dao=dao)
-        result = pipeline.derive(role_id=role_id)
+        result = pipeline.derive(permission_set_id=permission_set_id)
 
         return jsonify({'success': True, 'data': result})
     except Exception as e:
@@ -266,9 +266,9 @@ def trigger_derivation(role_id: int):
 # ============================================================================
 # P3.4 SQL 预览
 # ============================================================================
-@unified_permission_bp.route('/roles/<int:role_id>/sql-preview', methods=['GET'])
-def sql_preview(role_id: int):
-    """GET /api/v2/roles/<role_id>/sql-preview?bo_id=X&action=Y"""
+@unified_permission_bp.route('/roles/<int:permission_set_id>/sql-preview', methods=['GET'])
+def sql_preview(permission_set_id: int):
+    """GET /api/v2/roles/<permission_set_id>/sql-preview?bo_id=X&action=Y"""
     try:
         from meta.core.intent_scope_adapter import IntentScopeAdapter
 
@@ -281,7 +281,7 @@ def sql_preview(role_id: int):
         db_path = _get_db_path()
         adapter = IntentScopeAdapter(db_path)
         result = adapter.get_filter_for_roles(
-            role_ids=[role_id],
+            role_ids=[permission_set_id],
             bo_id=bo_id,
             action_name=action_name,
             user_id=user_id,
@@ -307,15 +307,15 @@ def sql_preview(role_id: int):
 # ============================================================================
 # P3.5 完整性检查
 # ============================================================================
-@unified_permission_bp.route('/roles/<int:role_id>/completeness', methods=['GET'])
-def completeness_check(role_id: int):
-    """GET /api/v2/roles/<role_id>/completeness — 红黄绿灯"""
+@unified_permission_bp.route('/roles/<int:permission_set_id>/completeness', methods=['GET'])
+def completeness_check(permission_set_id: int):
+    """GET /api/v2/roles/<permission_set_id>/completeness — 红黄绿灯"""
     try:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         db_path = _get_db_path()
         dao = EffectiveIntentDAO(db_path)
-        intents = dao.list_for_role(role_id)
+        intents = dao.list_for_role(permission_set_id)
 
         intent_count = len(intents)
         stale_count = sum(1 for i in intents if i.get('is_stale'))

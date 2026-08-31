@@ -271,6 +271,35 @@ def create_enum_value(ds, enum_type_id: str, code: str, name: str, sort_order: i
     print(f"    [创建枚举值] {code}: {display_name}")
 
 
+# 用户在 user.yaml 内联定义的 status 枚举（value_help.enum_type_id=user_status）
+# 让 schema 内联定义落库，使 enumService 按类型名加载可用、枚举管理页可见
+USER_STATUS_ENUM_ID = 'user_status'
+USER_STATUS_VALUES = [
+    ('active', '活跃', 0),
+    ('inactive', '未激活', 1),
+    ('locked', '已锁定', 2),
+]
+
+
+def seed_user_status(ds) -> tuple:
+    """注册 user.status 枚举类型及其值（幂等）。
+
+    值来源: meta/schemas/user.yaml 的 status 字段内联 enum_values。
+    """
+    type_created = 0
+    value_created = 0
+    if not check_enum_type_exists(ds, USER_STATUS_ENUM_ID):
+        create_enum_type(ds, USER_STATUS_ENUM_ID,
+                         name='用户状态',
+                         description='用户账号状态（来自 user.yaml 内联定义）')
+        type_created = 1
+    for code, name, sort_order in USER_STATUS_VALUES:
+        if not check_enum_value_exists(ds, USER_STATUS_ENUM_ID, code):
+            create_enum_value(ds, USER_STATUS_ENUM_ID, code, name, sort_order=sort_order)
+            value_created += 1
+    return type_created, value_created
+
+
 def migrate_enum_class(ds, enum_class: type) -> tuple:
     """迁移单个枚举类，返回 (类型创建数, 值创建数)"""
     enum_type_id = get_enum_type_name(enum_class)
@@ -458,6 +487,13 @@ def migrate_enums(db_path: str = None) -> dict:
         type_count, value_count = migrate_enum_class(ds, enum_class)
         total_types_created += type_count
         total_values_created += value_count
+
+    # [B] user.yaml 内联枚举 user_status 落库
+    print(f"\n处理枚举: {USER_STATUS_ENUM_ID}（来自 user.yaml 内联定义）")
+    print("-" * 40)
+    us_type, us_value = seed_user_status(ds)
+    total_types_created += us_type
+    total_values_created += us_value
     
     removed = cleanup_orphan_enum_values(ds)
     total_values_removed += removed

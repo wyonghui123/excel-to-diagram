@@ -1,0 +1,622 @@
+# 组织元模型 (原 user_group.yaml, Plan A 迁移 + Spec 16 §2.2/2.3 扩展)
+# 说明: 组织（Org），用于组织用户和实现委托管理。
+# 新增字段: org_type (department/team/division/company), org_scope (internal/external)
+# 表名: user_groups → orgs
+# 关联表: user_group_members → org_members, group_roles → org_permission_sets
+
+id: org
+name: 组织
+table_name: orgs
+description: 组织（Org），用于组织用户和实现委托管理
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 组织
+  category: security_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 组织
+    - Org
+    - 用户组  # 历史 alias
+    - user_group
+
+deletion_policy:
+  # [FIX 2026-06-12 v2] 强依赖检查: 有成员/权限集/数据权限/子组时禁止删除,
+  # 避免误删导致权限/数据权限丢失。
+  mode: restrict  # 改用 restrict mode, 让 restrict_on 规则生效
+  restrict_on:
+    - table: org_members
+      foreign_key: org_id
+      message: 组织下还有成员，请先移除所有成员后再删除
+    - table: org_permission_sets
+      foreign_key: org_id
+      message: 组织还分配了权限集，请先撤销权限集后再删除
+    - table: org_data_permissions
+      foreign_key: org_id
+      message: 组织还配置了数据权限，请先清除数据权限后再删除
+    - table: orgs
+      foreign_key: parent_id
+      message: 该组织下还有子组织，请先删除或迁移子组织后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - manager_id
+      - parent_id
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: name
+    name: 组织名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 组织名称
+    semantics:
+      meaning: 组织显示名称
+      display_name: true
+
+  - id: code
+    name: 组织编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[a-z][a-z0-9_]*$"
+    description: 组织唯一编码
+    semantics:
+      meaning: 组织业务编码
+      business_key: true
+      immutable: true
+
+  - id: org_type
+    name: 组织类型
+    type: string
+    db_column: org_type
+    required: true
+    default: department
+    description: 组织类型（部门/团队/事业部/公司）
+    enum_values:
+      - value: department
+        label: 部门
+        color: primary
+      - value: team
+        label: 团队
+        color: success
+      - value: division
+        label: 事业部
+        color: warning
+      - value: company
+        label: 公司
+        color: danger
+    semantics:
+      meaning: 组织类型分类
+    ui:
+      widget: select
+      filterable: true
+
+  - id: org_scope
+    name: 组织范围
+    type: string
+    db_column: org_scope
+    required: true
+    default: internal
+    description: 组织范围（内部/外部）
+    enum_values:
+      - value: internal
+        label: 内部
+        color: info
+      - value: external
+        label: 外部
+        color: default
+    semantics:
+      meaning: 组织所属范围
+    ui:
+      widget: select
+
+  - id: parent_id
+    name: 上级组织
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级组织ID，支持层级结构
+    semantics:
+      meaning: 上级组织引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: manager_id
+    name: 管理员
+    type: integer
+    db_column: manager_id
+    nullable: true
+    description: 组织管理员ID
+    semantics:
+      meaning: 组织管理员
+      display:
+        type: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定管理员"
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 1
+      presentation:
+        result_type: dropdown
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+          - field: email
+            label: 邮箱
+            width: 200
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+    nullable: true
+    description: 组织描述
+    semantics:
+      meaning: 组织详细说明
+      searchable: true
+    ui:
+      render_as: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: member_count
+    name: 成员数
+    type: integer
+    description: 组织成员数量（计算字段，通过 org_members 子查询获得）
+    computed: true
+    db_column: null
+    semantics:
+      meaning: 成员统计
+      virtual: true
+      cacheable: true
+      cache_ttl: 300
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_org_code
+  - fields: [parent_id]
+    name: idx_org_parent
+  - fields: [org_type]
+    name: idx_org_type
+  - fields: [org_scope]
+    name: idx_org_scope
+
+relations: []
+
+associations:
+  members:
+    name: members
+    label: 成员
+    plural_label: 成员列表
+    target_type: user
+    type: many_to_many
+    through: org_members
+    source_key: org_id
+    target_key: user_id
+    description: 组织成员关联
+    metadata_fields:
+      - id: is_manager
+        name: 是否管理员
+        type: boolean
+        default: false
+        description: 是否为组织管理员
+    display:
+      label: 成员
+      plural_label: 成员
+      target_display_field: display_name
+      target_code_field: username
+      target_avatar_field: avatar_url
+      columns:
+        - id: username
+          label: 用户名
+          width: 120
+        - id: display_name
+          label: 显示名称
+          width: 150
+        - id: email
+          label: 邮箱
+          width: 200
+    actions:
+      assign:
+        name: add_member
+        label: 添加成员
+      unassign:
+        name: remove_member
+        label: 移除成员
+        confirm_message: 确定要从此组织移除该成员吗？
+
+  permission_sets:
+    name: permission_sets
+    label: 权限集
+    plural_label: 权限集列表
+    target_type: permission_set
+    type: many_to_many
+    through: org_permission_sets
+    source_key: org_id
+    target_key: permission_set_id
+    description: 组织权限集关联
+    display:
+      label: 权限集
+      plural_label: 权限集
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 权限集编码
+          width: 120
+        - id: name
+          label: 权限集名称
+          width: 150
+        - id: description
+          label: 描述
+          width: 250
+    actions:
+      assign:
+        name: assign_permission_set
+        label: 分配权限集
+      unassign:
+        name: revoke_permission_set
+        label: 撤销权限集
+        confirm_message: 确定要撤销此权限集的分配吗？
+
+  functions:
+    name: functions
+    label: 职能
+    plural_label: 职能列表
+    target_type: org_function
+    type: one_to_many
+    source_key: id
+    target_key: org_id
+    description: 组织多职能配置 (Spec 16 §2.3)
+    display:
+      label: 职能
+      plural_label: 职能
+      target_display_field: function_type
+      columns:
+        - id: function_type
+          label: 职能类型
+          width: 150
+        - id: is_primary
+          label: 是否主职能
+          width: 100
+    actions:
+      add:
+        name: add_function
+        label: 添加职能
+      remove:
+        name: remove_function
+        label: 移除职能
+
+category_config:
+  create_permission: org:create
+  update_permission: org:update
+  delete_permission: org:delete
+  owner_auto_permission: false
+
+# 安全配置（启用权限委托）
+security:
+  permission_delegation: true
+
+ui_view_config:
+  showChangeHistory: true
+
+  list:
+    detail_mode: drawer
+    title: 组织管理
+    description: 系统组织列表
+    columns:
+      - field: name
+        width: 200
+      - field: code
+        width: 120
+        sortable: true
+      - field: org_type
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: org_scope
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: parent_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+        placeholder: "无上级"
+      - field: manager_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定"
+      - field: member_count
+        width: 100
+        sortable: true
+        filterable: true
+        filter_type: number_range
+        type: number
+        align: right
+        computed: true
+        computation:
+          type: count_relations
+          scope: self
+      - field: description
+        width: 250
+        type: ellipsis
+      - field: created_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: updated_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - name
+      - code
+    actions:
+      - id: create
+        label: 新建组织
+        icon: plus
+        type: primary
+        permission: org:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+      - id: import
+        label: 导入
+        icon: upload
+        type: default
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        permission: org:delete
+        confirm: 确定要删除选中的组织吗？
+    defaultSort:
+      field: updated_at
+      order: desc
+    filters:
+      - field: name
+        label: 组织名称
+        type: string
+        operator: contains
+      - field: code
+        label: 组织编码
+        type: string
+        operator: contains
+      - field: org_type
+        label: 组织类型
+        type: select
+        options:
+          - { value: department, label: 部门 }
+          - { value: team, label: 团队 }
+          - { value: division, label: 事业部 }
+          - { value: company, label: 公司 }
+
+  form:
+    title: 组织信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [org_type, org_scope]
+          - fields: [parent_id, manager_id]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - org_type
+          - org_scope
+          - parent_id
+          - manager_id
+          - description
+
+      - id: members
+        label: 成员
+        type: association
+        association: members
+        actions:
+          - assign
+          - unassign
+
+      - id: permission_sets
+        label: 权限集
+        type: association
+        association: permission_sets
+        actions:
+          - assign
+          - unassign
+
+      - id: permission_preview
+        label: 权限预览
+        icon: lock
+        type: readonly_aggregate
+        endpoint: /api/v1/orgs/{id}/permission-config
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建组织
+    icon: plus
+    type: primary
+    permission: "org:create"
+    visible_when: true
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "org:export"
+    visible_when: true
+  import:
+    label: 导入
+    icon: upload
+    type: default
+    permission: "org:import"
+    visible_when: true
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+  - name: associate
+    level: INFO
+    category: relation
+  - name: dissociate
+    level: INFO
+    category: relation
+
+routes:
+  detail: /detail/org
+  list: /org-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

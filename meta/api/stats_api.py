@@ -80,9 +80,9 @@ def _get_user_domain_scopes(ds, user):
             return None
         cursor = ds.execute(
             """SELECT rds.dimension_values
-               FROM role_dimension_scopes rds
-               JOIN group_roles gr ON rds.role_id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               FROM permission_set_dimension_scopes rds
+               JOIN org_permission_sets gr ON rds.permission_set_id = gr.permission_set_id
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ? AND rds.dimension_code = 'domain'""",
             [user_id]
         )
