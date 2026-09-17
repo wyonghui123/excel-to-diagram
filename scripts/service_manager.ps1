@@ -8,7 +8,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet('status','start','stop','restart','force-restart','start-fe','start-be','watchdog','watchdog-start','watchdog-stop','clear-stale-lock','list-locks','preflight')]
+    [ValidateSet('status','start','stop','restart','force-restart','start-fe','start-be','watchdog','watchdog-start','watchdog-stop','clear-stale-lock','list-locks','preflight','doctor')]
     [string]$Command = 'status',
 
     [Parameter()]
@@ -45,6 +45,27 @@ function Read-EnvPort($key, $default) {
                     if ($parts.Length -eq 2 -and $parts[0].Trim() -eq $key) {
                         $val = $parts[1].Trim()
                         if ($val -match '^\d+$') { return [int]$val }
+                    }
+                }
+            }
+        } catch {}
+    }
+    return $default
+}
+
+# [fix-svc 2026-06-30] 读取 .env 中的 bool 变量
+function Read-EnvBool($key, $default) {
+    if (Test-Path $envFile) {
+        try {
+            $lines = Get-Content $envFile -ErrorAction Stop
+            foreach ($line in $lines) {
+                $trimmed = $line.Trim()
+                if ($trimmed -and -not $trimmed.StartsWith('#')) {
+                    $parts = $trimmed -split '=', 2
+                    if ($parts.Length -eq 2 -and $parts[0].Trim() -eq $key) {
+                        $val = $parts[1].Trim().ToLower()
+                        if ($val -eq 'true') { return $true }
+                        if ($val -eq 'false') { return $false }
                     }
                 }
             }
@@ -570,10 +591,15 @@ function Start-Service($svcName) {
     try {
         # 🆕 v3.8: waitress 模式 - FLASK_DEBUG 必须 false (生产模式)
         # 避开 startup_checks 的 CORS 检查 (或显式设 CORS_ALLOWED_ORIGINS)
-        $env:FLASK_DEBUG = 'false'
+        # [fix-svc 2026-06-29] 回滚 64f528d 中的 dev 配置:
+        #   - FLASK_ENV: development → production (生产模式)
+        #   - DEV_MODE: 移除 (生产不应启用 YAML 热加载)
+        # 如需 dev_login, 请用其他方式启用 (例如临时 env: FLASK_ENV=development DEV_MODE=true)
+        # [fix-svc 2026-06-30] 从 .env 读取 FLASK_DEBUG (避免 startup_checks 失败)
+        $env:FLASK_DEBUG = Read-EnvBool 'FLASK_DEBUG' $false
         $env:TESTING = 'false'
-        $env:FLASK_ENV = 'production'
-        $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004'
+        $env:FLASK_ENV = 'development'
+        $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004,http://localhost:3005'
         # 🆕 v3.18: 注入 AGENT_PORT 给 waitress_server.py 用
         $env:AGENT_PORT = $port.ToString()
 
@@ -775,6 +801,11 @@ switch ($Command) {
         if (-not (Wait-Lock)) { exit 1 }
         try { Start-Service 'backend' } finally { Release-Lock }
         exit 0
+    }
+    'doctor' {
+        # [P2 2026-09-05] 委派给 python 实现 (体检逻辑单一实现, ps1 不重复造轮子)
+        & python (Join-Path $root 'scripts\service_manager.py') doctor @args
+        exit $LASTEXITCODE
     }
     'restart' {
         # 检查是否有测试正在运行

@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import logging
+import os
 from abc import abstractmethod
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
@@ -676,14 +677,25 @@ class SQLiteAdapter(SQLDataSource):
         from meta.core.sql_write_queue import WriteQueue, WriteQueueConfig
 
         pool_config = ConnectionConfig(
-            max_readers=kwargs.get("max_readers", 20),
+            max_readers=int(os.environ.get(
+                'SQLITE_MAX_READERS',
+                str(kwargs.get("max_readers", 10))  # V007.42 FR-009: 20 → 10
+            )),
+            mmap_size=int(os.environ.get(
+                'SQLITE_MMAP_SIZE',
+                str(kwargs.get("mmap_size", 0))  # V007.42 FR-008: 默认 0 (禁用)
+            )),
             idle_timeout=kwargs.get("idle_timeout", 300.0),
             max_lifetime=kwargs.get("max_lifetime", 3600.0),
             acquire_timeout=kwargs.get("acquire_timeout", 30.0),
         )
         queue_config = WriteQueueConfig(
             checkpoint_interval=kwargs.get("checkpoint_interval", 50),
-            checkpoint_mode=kwargs.get("checkpoint_mode", "TRUNCATE"),
+            # [V007.40 BUG-FIX] 默认 TRUNCATE → PASSIVE
+            # 背景: V007.39 修了 sql_config.py 的 WriteQueueConfig 默认值,
+            #       但 sql_adapters.py 这里又显式传 "TRUNCATE" 覆盖了默认值.
+            #       修法: 改 PASSIVE, 与 sql_config.py 默认值一致.
+            checkpoint_mode=kwargs.get("checkpoint_mode", "PASSIVE"),
         )
 
         # [DECORATIVE] v3.13: 池初始化失败时, 直接 raise (不再 fallback to legacy)
@@ -789,22 +801,87 @@ class SQLiteAdapter(SQLDataSource):
             if params:
                 return cursor.execute(command, params)
             return cursor.execute(command)
-        
-        max_retries = 3
+
+        # [V007.42 FR-001] 升级 retry 机制: Decorrelated Jitter + I/O 限流
+        # 升级要点 (对比 V007.34):
+        #   - base: 50ms → 200ms (SQLite 官方建议最小 200ms)
+        #   - cap: 无限 → 2s
+        #   - 算法: 固定指数 → Decorrelated Jitter (AWS 2015)
+        #     delay = min(cap, random.uniform(base, prev_sleep * 3))
+        #   - 总预算: ≥ 250ms (实测 retry span 156~193ms, 三次研究 D1)
+        #   - 集成 I/O 限流 (FR-002): 每执行前 check, 失败时 record
+        max_retries = int(os.environ.get('SQLITE_READ_RETRY_MAX', '3'))
+        retry_base = float(os.environ.get('SQLITE_READ_RETRY_BASE_MS', '200')) / 1000.0
+        retry_cap = 2.0  # 硬编码 cap=2s
         last_error = None
+        prev_sleep = retry_base
+        import random as _random
+
+        # 尝试获取 metric 记录 (失败降级)
+        try:
+            from meta.core.observability import metrics_inc as _metrics_inc
+        except ImportError:
+            _metrics_inc = None
+
         for attempt in range(max_retries):
             conn = None
             try:
+                # [V007.42 FR-002] I/O 限流检查 (限流状态下减速 200ms)
+                if hasattr(self._pool, '_check_io_rate_limit'):
+                    self._pool._check_io_rate_limit()
+
                 with self._pool.reader() as conn:
                     cursor = conn.cursor()
                     if params:
-                        return cursor.execute(command, params)
-                    return cursor.execute(command)
+                        result = cursor.execute(command, params)
+                    else:
+                        result = cursor.execute(command)
+                    # 成功! 清除该 connection 的错误标记
+                    if hasattr(self._pool, '_thread_connections'):
+                        tid = threading.get_ident()
+                        if tid in self._pool._thread_connections:
+                            self._pool._thread_connections[tid].clear_error()
+                    if attempt > 0 and _metrics_inc:
+                        _metrics_inc('read_retry_success_total')
+                    return result
             except Exception as e:
                 last_error = e
                 err_str = str(e).lower()
+                # [V007.16] 标记 thread-local connection 为 bad (触发重建)
+                if "disk i/o error" in err_str or "database is locked" in err_str:
+                    if hasattr(self._pool, '_thread_connections'):
+                        tid = threading.get_ident()
+                        if tid in self._pool._thread_connections:
+                            self._pool._thread_connections[tid].mark_error(err_str)
+                            logger.warning(
+                                "[V007.16] _execute_via_read_pool: marked bad connection "
+                                "(tid=%d, attempt=%d, err=%s)",
+                                tid, attempt, err_str
+                            )
+                    # [V007.42 FR-002] I/O 限流: 记录此次错误
+                    if hasattr(self._pool, '_record_io_error'):
+                        self._pool._record_io_error()
+                    # [V007.42 FR-001] Decorrelated Jitter 重试
+                    # AWS 2015 paper: sleep = min(cap, random.uniform(base, prev * 3))
+                    if attempt < max_retries - 1:
+                        delay = min(
+                            retry_cap,
+                            _random.uniform(retry_base, prev_sleep * 3)
+                        )
+                        prev_sleep = delay
+                        if _metrics_inc:
+                            _metrics_inc('read_retry_total')
+                        logger.warning(
+                            "[V007.42] _execute_via_read_pool: retrying (Decorrelated Jitter) "
+                            "(attempt %d/%d, sleep %.3fs): %s",
+                            attempt + 1, max_retries, delay, err_str
+                        )
+                        time.sleep(delay)
+                        continue
                 if "closed database" in err_str or "operational" in err_str:
                     if attempt < max_retries - 1:
+                        # 短暂退避后重试 (新 connection)
+                        time.sleep(0.05 * (attempt + 1))
                         continue
                 raise
         raise last_error
@@ -817,21 +894,21 @@ class SQLiteAdapter(SQLDataSource):
         对于依赖相关子查询（如 computed *_count 过滤）的 SQL，
         必须用新连接才能读到最新数据。
 
+        [V007.41 BUG-FIX] 改用 safe_connect_for_read 统一 L0 入口
+        背景: 第4次全面检查发现 fresh_connection() 漏修, V007.41 统一改工厂.
+
         用法：
             with registry.ds.fresh_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, params)
                 ...
         """
-        import sqlite3 as _sqlite3
         if not self._db_path:
             raise RuntimeError("SQL adapter not connected; call connect() first")
-        conn = _sqlite3.connect(self._db_path)
-        conn.row_factory = _sqlite3.Row
-        try:
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(self._db_path) as conn:
             yield conn
-        finally:
-            conn.close()
 
     def _execute_via_write_queue(self, command: str, params: Optional[tuple]) -> Any:
         # [DECORATIVE] v3.18: 记录 DB 操作到监控日志（含 trace_id）
@@ -870,17 +947,9 @@ class SQLiteAdapter(SQLDataSource):
                 result = cursor.execute(command)
             if auto_commit:
                 conn.commit()
-                self._commit_counter += 1
-                if self._commit_counter >= self._write_queue._config.checkpoint_interval:
-                    self._commit_counter = 0
-                    try:
-                        conn.execute(
-                            "PRAGMA wal_checkpoint({0})".format(
-                                self._write_queue._config.checkpoint_mode
-                            )
-                        )
-                    except Exception:
-                        pass
+                # [V007.39 BUG-FIX] 删除 _do_write 里的重复 checkpoint 逻辑
+                # WriteQueue.commit() 已经在每 N 次 commit 后自动执行 checkpoint,
+                # 这里再执行一次是双重触发, 且 except Exception: pass 静默吞掉 disk I/O error
             return result
 
         return self._write_queue.submit_and_wait(_do_write)
@@ -969,8 +1038,13 @@ class SQLiteAdapter(SQLDataSource):
         elif self._connection:
             self._connection.execute(f"RELEASE SAVEPOINT {savepoint_name}")
 
-    def checkpoint(self, mode: str = "TRUNCATE") -> None:
-        """执行 WAL checkpoint ([DECORATIVE] v3.13: 池唯一路径)"""
+    def checkpoint(self, mode: str = "PASSIVE") -> None:
+        """执行 WAL checkpoint ([DECORATIVE] v3.13: 池唯一路径)
+
+        [V007.40 BUG-FIX] 默认 TRUNCATE → PASSIVE
+        背景: 这是另一处顶层 checkpoint 入口 (写连接 adapter, line 1007),
+              V007.39 漏修. 改 PASSIVE 跟 sql_adapters.py:1003 保持一致.
+        """
         if self._write_queue:
             self._write_queue.checkpoint(mode)
 

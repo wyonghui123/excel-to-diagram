@@ -8,8 +8,10 @@
 from flask import Blueprint, request, jsonify, g
 from meta.services.auth_middleware import login_required, require_permission
 from meta.services.condition_permission_service import ConditionPermissionService
+from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 import os
+from meta.core.db_path import get_meta_db_path
 
 permission_rule_bp = Blueprint('permission_rule', __name__, url_prefix='/api/v1/permission-rules')
 
@@ -33,7 +35,7 @@ _data_source = None
 def _get_service():
     global _data_source
     if _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     return ConditionPermissionService(_data_source)
 
@@ -41,6 +43,7 @@ def _get_service():
 @permission_rule_bp.route('', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/permission-rules')
 def list_rules():
     """获取权限规则列表"""
     try:
@@ -61,6 +64,7 @@ def list_rules():
 @permission_rule_bp.route('/<int:rule_id>', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def get_rule(rule_id):
     """获取单条权限规则"""
     try:
@@ -76,6 +80,7 @@ def get_rule(rule_id):
 @permission_rule_bp.route('', methods=['POST'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules')
 def create_rule():
     """创建权限规则"""
     try:
@@ -114,6 +119,7 @@ def create_rule():
 @permission_rule_bp.route('/<int:rule_id>', methods=['PUT'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def update_rule(rule_id):
     """更新权限规则"""
     try:
@@ -130,6 +136,7 @@ def update_rule(rule_id):
 @permission_rule_bp.route('/<int:rule_id>', methods=['DELETE'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def delete_rule(rule_id):
     """删除权限规则"""
     try:
@@ -256,13 +263,13 @@ def list_dimension_values_for_rule(dimension_code):
         { success, data: [{id, code, name, parent_name}, ...] }
     """
     try:
-        # 复用 management_dimension_api 的引擎, 保持单一事实
-        from meta.api.management_dimension_api import (
+        # 复用 permission_dimension_api 的引擎, 保持单一事实
+        from meta.api.permission_dimension_api import (
             _data_source,
             _PARENT_INFO_MAP,
             _get_engine,
         )
-        from meta.services.management_dimension_engine import (
+        from meta.services.permission_dimension_engine import (
             CODE_FIELD_MAP,
             DISPLAY_FIELD_MAP,
             RESOURCE_TABLE_MAP,
@@ -365,7 +372,7 @@ def list_dimensions_for_rule():
     真实端点是 /management-dimensions. 这里转发, 保持前端不动。
     """
     try:
-        from meta.api.management_dimension_api import _get_engine
+        from meta.api.permission_dimension_api import _get_engine
         engine = _get_engine()
         dimensions = engine.get_available_dimensions()
         result = []
@@ -387,7 +394,7 @@ def list_dimensions_for_rule():
 
 
 def _guess_cascade_parent(dim_id):
-    """粗略级联父维度（与 management_dimension.yaml 顺序保持一致）。"""
+    """粗略级联父维度（与 permission_dimension.yaml 顺序保持一致）。"""
     cascade = {
         'sub_domain': 'domain',
         'service_module': 'sub_domain',

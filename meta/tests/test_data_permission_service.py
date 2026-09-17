@@ -37,26 +37,26 @@ def ds():
             username TEXT UNIQUE NOT NULL,
             display_name TEXT
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             UNIQUE(user_id, group_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             priority INTEGER DEFAULT 0,
             is_system INTEGER DEFAULT 0
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -109,7 +109,7 @@ def ds():
             permission_level TEXT,
             inherit_to_children INTEGER DEFAULT 1
         );
-        CREATE TABLE role_data_permissions (
+        CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             resource_type TEXT,
@@ -118,7 +118,7 @@ def ds():
             inherit_to_children INTEGER DEFAULT 1,
             created_by INTEGER
         );
-        CREATE TABLE group_data_permissions (
+        CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             resource_type TEXT,
@@ -210,13 +210,13 @@ def _insert_business_object(ds, name='BO1', code='bo1', service_module_id=None, 
 
 
 def _insert_group(ds, code='g1', name='G1'):
-    ds.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)", [code, name])
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO orgs (code, name) VALUES (?, ?)", [code, name])
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_role(ds, code='R1', name='Role1', priority=0):
-    ds.execute("INSERT INTO roles (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO permission_sets (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 def _setup_hierarchy(ds, owner=None):
@@ -506,7 +506,7 @@ def test_get_user_data_permissions_from_groups_legacy(svc, ds):
     """get_user_data_permissions_from_groups_legacy: 已废弃但仍可用"""
     uid = _insert_user(ds, 'legacy_user')
     g = _insert_group(ds)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
     p = _insert_product(ds)
     svc.add_group_data_permission(g, 'product', p, 'read')
     perms = svc.get_user_data_permissions_from_groups_legacy(uid)
@@ -523,8 +523,8 @@ def test_get_user_data_permissions_from_roles(svc, ds):
     g = _insert_group(ds)
     r = _insert_role(ds)
     p = _insert_product(ds)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     svc.add_role_data_permission(r, 'product', p, 'read')
     perms = svc.get_user_data_permissions_from_roles(uid)
     assert len(perms) == 1
@@ -538,8 +538,8 @@ def test_get_all_user_data_permissions_merge(svc, ds):
     r = _insert_role(ds)
     p1 = _insert_product(ds, 'P1', 'p1')
     p2 = _insert_product(ds, 'P2', 'p2')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # 直接: p1=read, 角色: p1=write, 角色: p2=read
     svc.add_data_permission(uid, 'product', p1, 'read')
     svc.add_role_data_permission(r, 'product', p1, 'write')
@@ -611,10 +611,10 @@ def test_get_user_max_role_priority(svc, ds):
     r1 = _insert_role(ds, code='r1', priority=5)
     r2 = _insert_role(ds, code='r2', priority=20)
     r3 = _insert_role(ds, code='r3', priority=10)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r1])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r2])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r3])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r1])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r2])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r3])
     assert svc.get_user_max_role_priority(uid) == 20
 
 
@@ -625,8 +625,8 @@ def test_can_assign_role(svc, ds):
     g = _insert_group(ds)
     op_role = _insert_role(ds, code='op_role', priority=5)
     target_role = _insert_role(ds, code='target', priority=20)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [op, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, op_role])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [op, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, op_role])
     # 操作者只有 5 优先级，不能分配 20 优先级的角色
     assert svc.can_assign_role(op, target_role) is False
 
@@ -637,8 +637,8 @@ def test_can_assign_role_equal_priority(svc, ds):
     g = _insert_group(ds)
     op_role = _insert_role(ds, code='eq_op', priority=10)
     target_role = _insert_role(ds, code='eq_target', priority=10)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [op, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, op_role])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [op, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, op_role])
     assert svc.can_assign_role(op, target_role) is True
 
 

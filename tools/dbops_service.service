@@ -1,0 +1,16 @@
+[Unit]
+Description=Database Operations Service (V007.63 dbops_service)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/miniconda3-py39/bin/python -u /opt/app/shared/dbops_service.py
+Environment="DBOPS_SERVICE_PORT=9204"
+Environment="DBOPS_SERVICE_SECRET=v007.63-dbops"
+Environment="DBOPS_SERVICE_DB_PATH=/opt/app/deployments/meta/architecture.db"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

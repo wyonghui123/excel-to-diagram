@@ -792,7 +792,7 @@ describe('v2 API 前端集成测试', () => {
         ok: true,
         json: () => Promise.resolve({
           success: true,
-          data: { id: 1, role_id: 1, menu_id: 1, can_view: true, can_edit: false }
+          data: { id: 1, permission_set_id: 1, menu_id: 1, can_view: true, can_edit: false }
         })
       })
 
@@ -803,7 +803,7 @@ describe('v2 API 前端集成测试', () => {
           'Authorization': 'Bearer mock-token'
         },
         body: JSON.stringify({
-          role_id: 1,
+          permission_set_id: 1,
           menu_id: 1,
           can_view: true,
           can_edit: false
@@ -812,7 +812,7 @@ describe('v2 API 前端集成测试', () => {
 
       const data = await response.json()
       expect(data.success).toBe(true)
-      expect(data.data.role_id).toBe(1)
+      expect(data.data.permission_set_id).toBe(1)
     })
 
     it('应该读取菜单权限', async () => {
@@ -820,7 +820,7 @@ describe('v2 API 前端集成测试', () => {
         ok: true,
         json: () => Promise.resolve({
           success: true,
-          data: { id: 1, role_id: 1, menu_id: 1, can_view: true }
+          data: { id: 1, permission_set_id: 1, menu_id: 1, can_view: true }
         })
       })
 
@@ -838,7 +838,7 @@ describe('v2 API 前端集成测试', () => {
         ok: true,
         json: () => Promise.resolve({
           success: true,
-          data: { items: [{ id: 1, role_id: 1 }], total: 1 }
+          data: { items: [{ id: 1, permission_set_id: 1 }], total: 1 }
         })
       })
 

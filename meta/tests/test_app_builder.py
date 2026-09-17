@@ -383,33 +383,42 @@ class TestServiceDependencyOrder:
 class TestStandardActionLoaderStartup:
     """§7.11 StandardActionLoader 启动加载测试"""
 
-    def test_standard_action_loader_loads_12_actions(self):
-        """StandardActionLoader 加载 12 个标准动作"""
+    def test_standard_action_loader_loads_16_actions(self):
+        """StandardActionLoader 加载 16 个标准动作
+        [Spec 21 PM 反馈 2026-09-12] 从 12 扩到 16（增 unassign/associate/dissociate/grant）"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         actions = StandardActionLoader.get_actions()
-        assert len(actions) == 12
+        assert len(actions) == 16
 
     def test_standard_action_loader_suffix_map_complete(self):
-        """StandardActionLoader 包含全部 12 对 suffix 映射"""
+        """StandardActionLoader 包含全部 16 对 suffix 映射"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         smap = StandardActionLoader.get_suffix_map()
-        assert len(smap) == 12
+        assert len(smap) == 16
         assert smap['crud_create'] == 'create'
         assert smap['assign'] == 'assign'
+        # [Spec 21 PM 反馈 2026-09-12] 新增的 4 个 action
+        assert smap['unassign'] == 'unassign'
+        assert smap['associate'] == 'associate'
+        assert smap['dissociate'] == 'dissociate'
+        assert smap['grant'] == 'grant'
 
     def test_standard_action_loader_action_codes_complete(self):
-        """StandardActionLoader 包含全部 12 个 action_code"""
+        """StandardActionLoader 包含全部 16 个 action_code"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         codes = StandardActionLoader.get_action_codes()
-        assert len(codes) == 12
+        assert len(codes) == 16
         assert 'create' in codes
         assert 'manage' in codes
+        # [Spec 21 PM 反馈 2026-09-12] 新增的 4 个 action_code
+        for new_code in ('unassign', 'associate', 'dissociate', 'grant'):
+            assert new_code in codes, f'缺少新增 action_code: {new_code}'
 
     def test_meta_action_service_not_in_app_builder(self):
         """app_builder.py 不再调用 init_meta_action_services"""

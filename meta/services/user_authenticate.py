@@ -23,6 +23,7 @@ from meta.services.auth_provider import LocalAuthProvider
 from meta.services.token_service import TokenService
 from meta.services.rate_limiter import rate_limiter
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,10 @@ def _get_auth_provider():
     global _data_source, _auth_provider
     if _auth_provider is None:
         if _data_source is None:
-            db_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'architecture.db',
-            )
+            # [INCIDENT-2026-09-03] 相对路径 fallback 依赖 cwd: staging cwd=deploy/current
+            # 时解析到 current/meta/architecture.db (旧库, 缺 org_members) 导致登录崩溃。
+            # 优先用环境变量 (staging env 已设置 SQLITE_DB_PATH), 相对路径仅作本地开发兜底。
+            db_path = os.environ.get('SQLITE_DB_PATH') or get_meta_db_path()
             _data_source = get_data_source("sqlite", database=db_path)
         _auth_provider = LocalAuthProvider(_data_source)
     return _auth_provider

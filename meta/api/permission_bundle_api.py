@@ -15,6 +15,7 @@ from meta.services.menu_permission_service import MenuPermissionService
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from functools import wraps
+from meta.core.db_path import get_meta_db_path
 
 def admin_required(f):
     @wraps(f)
@@ -34,7 +35,7 @@ _data_source = None
 def _get_data_source():
     global _data_source
     if _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     return _data_source
 

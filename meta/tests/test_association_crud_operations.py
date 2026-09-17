@@ -34,7 +34,7 @@ class TestRolePermissionAssociation:
         cursor = conn.cursor()
 
         cursor.execute('''
-            CREATE TABLE roles (
+            CREATE TABLE permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
@@ -54,7 +54,7 @@ class TestRolePermissionAssociation:
         ''')
 
         cursor.execute('''
-            CREATE TABLE role_permissions (
+            CREATE TABLE permission_set_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role_id INTEGER NOT NULL,
                 permission_id INTEGER NOT NULL,
@@ -89,7 +89,7 @@ class TestRolePermissionAssociation:
         """TC-PA-031: Role分配权限 - 基本分配"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('TEST_ROLE', '测试角色')
         )
         role_id = cursor.lastrowid
@@ -109,7 +109,7 @@ class TestRolePermissionAssociation:
         assert result.success, f"分配失败: {result.message}"
 
         cursor.execute(
-            "SELECT * FROM role_permissions WHERE role_id = ? AND permission_id = ?",
+            "SELECT * FROM permission_set_permissions WHERE role_id = ? AND permission_id = ?",
             (role_id, perm_id)
         )
         assoc = cursor.fetchone()
@@ -119,7 +119,7 @@ class TestRolePermissionAssociation:
         """TC-PA-032: Role分配权限 - 重复分配"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('IDEMPOTENT_ROLE', '幂等角色')
         )
         role_id = cursor.lastrowid
@@ -131,7 +131,7 @@ class TestRolePermissionAssociation:
         perm_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
             (role_id, perm_id)
         )
         db_connection.commit()
@@ -147,7 +147,7 @@ class TestRolePermissionAssociation:
         """TC-PA-033: Role分配权限 - 批量分配"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('BATCH_ROLE', '批量角色')
         )
         role_id = cursor.lastrowid
@@ -169,7 +169,7 @@ class TestRolePermissionAssociation:
             assert result.success
 
         cursor.execute(
-            "SELECT COUNT(*) FROM role_permissions WHERE role_id = ?",
+            "SELECT COUNT(*) FROM permission_set_permissions WHERE role_id = ?",
             (role_id,)
         )
         count = cursor.fetchone()[0]
@@ -179,7 +179,7 @@ class TestRolePermissionAssociation:
         """TC-PA-034: Role取消权限 - 基本取消"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('UNASSIGN_ROLE', '取消角色')
         )
         role_id = cursor.lastrowid
@@ -191,7 +191,7 @@ class TestRolePermissionAssociation:
         perm_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
             (role_id, perm_id)
         )
         db_connection.commit()
@@ -204,7 +204,7 @@ class TestRolePermissionAssociation:
         assert result.success
 
         cursor.execute(
-            "SELECT * FROM role_permissions WHERE role_id = ? AND permission_id = ?",
+            "SELECT * FROM permission_set_permissions WHERE role_id = ? AND permission_id = ?",
             (role_id, perm_id)
         )
         assert cursor.fetchone() is None
@@ -213,7 +213,7 @@ class TestRolePermissionAssociation:
         """TC-PA-035: Role取消权限 - 不存在"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('NONEXIST_ROLE', '不存在角色')
         )
         role_id = cursor.lastrowid
@@ -240,7 +240,7 @@ class TestUserGroupMemberAssociation:
         cursor = conn.cursor()
 
         cursor.execute('''
-            CREATE TABLE user_groups (
+            CREATE TABLE orgs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
@@ -258,7 +258,7 @@ class TestUserGroupMemberAssociation:
         ''')
 
         cursor.execute('''
-            CREATE TABLE user_group_members (
+            CREATE TABLE org_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -293,7 +293,7 @@ class TestUserGroupMemberAssociation:
         """TC-PA-036: UserGroup添加成员 - 基本添加"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('MEMBER_GROUP', '成员组')
         )
         group_id = cursor.lastrowid
@@ -313,7 +313,7 @@ class TestUserGroupMemberAssociation:
         assert result.success, f"添加成员失败: {result.message}"
 
         cursor.execute(
-            "SELECT * FROM user_group_members WHERE group_id = ? AND user_id = ?",
+            "SELECT * FROM org_members WHERE group_id = ? AND user_id = ?",
             (group_id, user_id)
         )
         member = cursor.fetchone()
@@ -323,7 +323,7 @@ class TestUserGroupMemberAssociation:
         """TC-PA-037: UserGroup添加成员 - 重复添加"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('IDEM_GROUP', '幂等组')
         )
         group_id = cursor.lastrowid
@@ -335,7 +335,7 @@ class TestUserGroupMemberAssociation:
         user_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+            "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
             (group_id, user_id)
         )
         db_connection.commit()
@@ -351,7 +351,7 @@ class TestUserGroupMemberAssociation:
         """TC-PA-038: UserGroup添加成员 - 批量添加"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('BATCH_GROUP', '批量组')
         )
         group_id = cursor.lastrowid
@@ -373,7 +373,7 @@ class TestUserGroupMemberAssociation:
             assert result.success
 
         cursor.execute(
-            "SELECT COUNT(*) FROM user_group_members WHERE group_id = ?",
+            "SELECT COUNT(*) FROM org_members WHERE group_id = ?",
             (group_id,)
         )
         count = cursor.fetchone()[0]
@@ -383,7 +383,7 @@ class TestUserGroupMemberAssociation:
         """TC-PA-039: UserGroup移除成员 - 基本移除"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('REMOVE_GROUP', '移除组')
         )
         group_id = cursor.lastrowid
@@ -395,7 +395,7 @@ class TestUserGroupMemberAssociation:
         user_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+            "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
             (group_id, user_id)
         )
         db_connection.commit()
@@ -408,7 +408,7 @@ class TestUserGroupMemberAssociation:
         assert result.success
 
         cursor.execute(
-            "SELECT * FROM user_group_members WHERE group_id = ? AND user_id = ?",
+            "SELECT * FROM org_members WHERE group_id = ? AND user_id = ?",
             (group_id, user_id)
         )
         assert cursor.fetchone() is None
@@ -417,7 +417,7 @@ class TestUserGroupMemberAssociation:
         """TC-PA-040: UserGroup移除成员 - 不存在"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('NONEXIST_GROUP', '不存在组')
         )
         group_id = cursor.lastrowid
@@ -444,7 +444,7 @@ class TestAssociationQuery:
         cursor = conn.cursor()
 
         cursor.execute('''
-            CREATE TABLE roles (
+            CREATE TABLE permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
@@ -463,7 +463,7 @@ class TestAssociationQuery:
         ''')
 
         cursor.execute('''
-            CREATE TABLE role_permissions (
+            CREATE TABLE permission_set_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role_id INTEGER NOT NULL,
                 permission_id INTEGER NOT NULL,
@@ -473,7 +473,7 @@ class TestAssociationQuery:
         ''')
 
         cursor.execute('''
-            CREATE TABLE user_groups (
+            CREATE TABLE orgs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
@@ -491,7 +491,7 @@ class TestAssociationQuery:
         ''')
 
         cursor.execute('''
-            CREATE TABLE user_group_members (
+            CREATE TABLE org_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -501,7 +501,7 @@ class TestAssociationQuery:
         ''')
 
         cursor.execute('''
-            CREATE TABLE group_roles (
+            CREATE TABLE org_permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 role_id INTEGER NOT NULL,
@@ -529,7 +529,7 @@ class TestAssociationQuery:
         """TC-PA-041: 查询Role权限列表"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('QUERY_ROLE', '查询角色')
         )
         role_id = cursor.lastrowid
@@ -541,7 +541,7 @@ class TestAssociationQuery:
             )
             perm_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 (role_id, perm_id)
             )
         db_connection.commit()
@@ -558,7 +558,7 @@ class TestAssociationQuery:
         """TC-PA-042: 查询UserGroup成员列表"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('QUERY_GROUP', '查询组')
         )
         group_id = cursor.lastrowid
@@ -570,7 +570,7 @@ class TestAssociationQuery:
             )
             user_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
                 (group_id, user_id)
             )
         db_connection.commit()
@@ -587,7 +587,7 @@ class TestAssociationQuery:
         """TC-PA-043: 查询UserGroup角色列表"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('GROUP_FOR_ROLES', '角色组')
         )
         group_id = cursor.lastrowid
@@ -599,17 +599,17 @@ class TestAssociationQuery:
         user_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('GROUP_ROLE_1', '组角色1')
         )
         role_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
+            "INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
             (user_id, group_id)
         )
         cursor.execute(
-            "INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+            "INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
             (group_id, role_id)
         )
         db_connection.commit()
@@ -624,7 +624,7 @@ class TestAssociationQuery:
         """TC-PA-044: 权限计数 - Role权限数"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO roles (code, name) VALUES (?, ?)",
+            "INSERT INTO permission_sets (code, name) VALUES (?, ?)",
             ('COUNT_ROLE', '计数角色')
         )
         role_id = cursor.lastrowid
@@ -636,7 +636,7 @@ class TestAssociationQuery:
             )
             perm_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 (role_id, perm_id)
             )
         db_connection.commit()
@@ -653,7 +653,7 @@ class TestAssociationQuery:
         """TC-PA-045: 成员计数 - UserGroup成员数"""
         cursor = db_connection.cursor()
         cursor.execute(
-            "INSERT INTO user_groups (code, name) VALUES (?, ?)",
+            "INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('MEMBER_COUNT_GROUP', '成员计数组')
         )
         group_id = cursor.lastrowid
@@ -665,7 +665,7 @@ class TestAssociationQuery:
             )
             user_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
                 (group_id, user_id)
             )
         db_connection.commit()

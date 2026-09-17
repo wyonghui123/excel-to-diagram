@@ -1,0 +1,20 @@
+[Unit]
+Description=Staging core_service (19200)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment="CORE_SERVICE_PORT=19200"
+Environment="CORE_SERVICE_BIND=0.0.0.0"
+Environment="CORE_SERVICE_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="CORE_SERVICE_SECRET=staging-v007.49-d"
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/bin/core_service.py
+Restart=always
+RestartSec=5
+User=nobody
+Group=nobody
+StandardOutput=append:/opt/app/staging/logs/core_service.log
+StandardError=append:/opt/app/staging/logs/core_service.log
+
+[Install]
+WantedBy=multi-user.target

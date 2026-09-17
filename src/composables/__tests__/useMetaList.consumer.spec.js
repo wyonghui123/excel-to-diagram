@@ -164,9 +164,9 @@ describe('5 Consumer × MetaListPage 契约守卫（PR 9）', () => {
       expect(consumerSources.AssignmentDialog).toContain(`:display-mode="'dialog'"`)
     })
 
-    it('C4.4: 渲染在 el-dialog 内', () => {
-      expect(consumerSources.AssignmentDialog).toContain(`<el-dialog`)
-      expect(consumerSources.AssignmentDialog).toContain(`</el-dialog>`)
+    it('C4.4: 渲染在 AppModal 内（P1-Base-04 合规化）', () => {
+      expect(consumerSources.AssignmentDialog).toContain(`<AppModal`)
+      expect(consumerSources.AssignmentDialog).toContain(`</AppModal>`)
     })
 
     it('C4.5: dialogTitle 动态计算', () => {

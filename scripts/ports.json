@@ -1,0 +1,5 @@
+{
+  "_comment": "[P0 2026-09-05 端口单一真源] 所有消费方 (vite.config.js / service_manager.py / waitress_server.py / browser_auth_cli.py / playwright.config.js) 统一读本文件。历史问题: 端口散落在 .env.development / service_manager / vite 兜底 / sync-ports / CLI 硬编码 6 处且互相矛盾, 每轮修一个文件打地鼠 (详见 docs/retrospectives/2026-09-05-env-port-drift.md)。进程环境变量仍可临时覆盖 (多实例场景), 但默认值只认这里。",
+  "frontend": 3006,
+  "backend": 3011
+}

@@ -59,6 +59,7 @@
           @delete="handleMetaListDelete"
           @action="handleMetaListAction"
           @data-loaded="handleDataLoaded"
+          @row-dblclick="handleMetaListDblClick"
         />
       </div>
 
@@ -215,7 +216,7 @@ const props = defineProps({
   rowMutability: {
     type: String,
     default: null,
-    validator: (v) => [null, 'locked', 'extensible', 'fully_editable'].includes(v)
+    validator: (v) => [null, 'locked', 'extensible', 'fullEditable'].includes(v)
   },
   toolbarActions: {
     type: Array,
@@ -413,6 +414,13 @@ function handleMetaListDelete(row) {
 
 function handleMetaListAction({ action, row }) {
   emit('action', { action, row })
+}
+
+// [FIX 2026-06-29] 行双击 → 触发 detail action
+//   - 嵌在父 detail page 里的 child list, 双击打开 child 的 detail
+function handleMetaListDblClick({ row }) {
+  if (!row) return
+  metaListRef.value?.onRowAction?.({ action: { key: 'detail' }, row })
 }
 
 function handleDataLoaded(data) {

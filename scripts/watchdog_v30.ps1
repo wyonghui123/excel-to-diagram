@@ -74,9 +74,9 @@ function Restart-Backend-Once {
             -RedirectStandardError (Join-Path $root 'restart_backend.err') `
             -PassThru
 
-        # Wait for restart to complete (up to 15 seconds)
+        # Wait for restart to complete (up to 40 seconds, waitress needs 10-35s)
         $ready = $false
-        for ($i = 0; $i -lt 15; $i++) {
+        for ($i = 0; $i -lt 40; $i++) {
             Start-Sleep -Seconds 1
             if (Test-Port 3010) {
                 $ready = $true
@@ -88,7 +88,7 @@ function Restart-Backend-Once {
             WLog "AUTO-RESTART: Backend restarted successfully (port 3010 OPEN)"
             return $true
         } else {
-            WLog "AUTO-RESTART: Backend port 3010 still closed after 15s"
+            WLog "AUTO-RESTART: Backend port 3010 still closed after 40s"
             return $false
         }
     } catch {

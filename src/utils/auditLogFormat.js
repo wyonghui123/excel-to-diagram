@@ -1,45 +1,62 @@
 /**
- * auditLogFormat.js - 操作日志字段业务化工具
- *
- * 业务人员视角: 把后端技术字段翻译为业务术语
- * - object_type: 模型名 → 业务术语 (如 annotation → 备注)
- * - action: 内部 action → 业务动作 (如 DELETE_BLOCKED → 删除已阻止)
- * - user_name: system → 系统
+ * 审计日志格式化工具
  *
  * 单一事实源: 这里集中管理所有翻译 map, 列表页 + 详情弹窗共用
+ * 优先级: 业务级翻译 > 后端注入 label > 原值
  *
- * @module utils/auditLogFormat
+ * [FIX 2026-07-22] 暴露 category/level 翻译 + tag type, 替换各处本地翻译表
+ *
+ * [P1-A 2026-07-25] action 翻译/颜色单一事实源迁移到后端 /audit/meta/actions
+ *   - 启动时 auditMetaStore.loadActions() 拉取 enum_values 并缓存
+ *   - getActionLabel / getActionTagType 优先读 store, 本地 ACTION_LABELS /
+ *     ACTION_TAG_TYPES 仅作为降级 fallback (网络失败/启动未完成时)
+ *   - 详见 stores/auditMetaStore.js + services/auditLogService.js#getMetaActions
  */
 
+import { useAuditMetaStore } from '@/stores/auditMetaStore'
+
+// [P1-A] 懒加载 auditMetaStore 实例 (避免模块加载时 Pinia 未就绪)
+//   - 首次调用 _getMetaStore() 时 try useAuditMetaStore(), 失败/未就绪返回 null
+//   - 缓存结果, 后续调用直接返回
+let _cachedMetaStore = null
+let _metaStoreTried = false
+function _getMetaStore() {
+  if (_metaStoreTried) return _cachedMetaStore
+  _metaStoreTried = true
+  try {
+    _cachedMetaStore = useAuditMetaStore()
+  } catch (_e) {
+    // Pinia 未安装或不在 setup 上下文 - 降级走本地 fallback
+    _cachedMetaStore = null
+  }
+  return _cachedMetaStore
+}
+
 /**
- * object_type → 业务名 翻译表
+ * object_type → 业务对象名 翻译表
  *
- * 来源: yaml schema 的 name 字段 (meta/schemas/*.yaml)
- * 优先级: useHierarchyTypes.getLabel (运行时) > 此表 (静态回退)
+ * [降级策略 2026-07-25 P1-D]
+ * 后端 _enrich_log_labels 已改用 DisplayNameService (yaml registry) 注入 object_type_label.
+ * 此硬编码表仅作为 fallback:
+ *   - 调用方未传 log 参数 (如 AuditLog.vue 的 formatObjectTypeLabel(group.object_type))
+ *   - 后端注入失败 (yaml registry 未注册该 object_type)
+ *   - audit 专用伪类型 (__audit_failure__, _unknown) 不在 registry 中
+ *
+ * TODO(P2): 后端新增 /audit/meta/object-types 接口后, getObjectTypeLabel 可改为
+ *           auditMetaStore 优先 (与 getActionLabel 一致), 此表可进一步缩减.
  */
 export const OBJECT_TYPE_LABELS = {
-  // 主层级
-  product: '产品',
-  version: '版本',
-  domain: '领域',
-  sub_domain: '子领域',
-  service_module: '服务模块',
-  business_object: '业务对象',
-  // 关联
-  relationship: '业务关系',
-  // 权限
-  permission: '权限',
-  permission_rule: '权限规则',
-  permission_bundle: '权限包',
-  role: '角色',
-  role_menu: '角色菜单',
-  role_permissions: '角色权限',
-  role_dimension_scope: '角色数据范围',
-  role_data_permission: '角色数据权限',
-  // 用户
+  // 身份与权限
+  // [FIX 2026-09-06 角色迁移] role/user_group 已分别迁移到 permission_set/org。
+  // 新类型 org/permission_set/org_member 补充为 fallback 首选;
+  // 旧键 role/user_group 保留用于翻译迁移前的历史日志行。
   user: '用户',
-  user_group: '用户组',
-  user_group_member: '用户组成员',
+  org: '组织',
+  org_member: '组织成员',
+  permission_set: '权限集',
+  role: '权限集（历史）',
+  user_group: '组织（历史）',
+  user_group_member: '组织成员（历史）',
   // 菜单
   menu: '菜单',
   menu_permission: '菜单权限',
@@ -58,7 +75,14 @@ export const OBJECT_TYPE_LABELS = {
   // 测试/内部
   test_objects: '测试对象',
   __audit_failure__: '审计异常',
-  _unknown: '未识别操作'
+  _unknown: '未识别操作',
+  product: '产品',
+  version: '版本',
+  domain: '领域',
+  sub_domain: '子域',
+  service_module: '服务模块',
+  business_object: '业务对象',
+  relationship: '业务关系',
 }
 
 /**
@@ -88,11 +112,11 @@ export const ACTION_LABELS = {
   BATCH_CREATE: '批量创建',
   BATCH_UPDATE: '批量更新',
   BATCH_DELETE: '批量删除',
-  BATCH_ASSIGN: '批量分配',
-  BATCH_UNASSIGN: '批量取消',
+  BATCH_IMPORT: '批量导入',
 
-  // 业务流
+  // 工作流 / 任务
   SUBFLOW: '执行子流程',
+  METRIC_RECORD: '性能指标记录',  // [FIX 2026-07-22] log_performance 占位，metric_name 在 extra_data
   SYNC: '数据同步',
   DATA_SYNC: '数据同步',
   EXPORT: '导出',
@@ -122,101 +146,91 @@ export const ACTION_LABELS = {
   CASCADE_DELETE: '级联删除',
 
   // 性能监控 (业务视图隐藏)
-  api_response_time: 'API 响应时间',
-  db_query_time: '数据库查询时间',
-  time: '性能计时',
-  METRIC: '性能指标',
-  UNKNOWN: '未识别操作'
+  PERF_THRESHOLD: '性能阈值',
+
+  // 通用占位
+  READONLY: '查看',
 }
 
 /**
- * 内部技术 action 集合 (业务视图应该隐藏, 仅在审计视图显示)
- * 包含: 性能监控 + 审计系统元数据 + 未知
+ * 业务隐藏的 action 集合 (审计员视图才能看到)
  */
-export const INTERNAL_ACTIONS = new Set([
+const HIDDEN_ACTIONS = new Set([
   'AUDIT_WRITE_FAILED',
   'AUDIT_RETRY_SUCCESS',
   'AUDIT_RETRY_FAILED',
-  'api_response_time',
-  'db_query_time',
-  'time',
-  'METRIC',
-  'UNKNOWN'
+  'PERF_THRESHOLD',
 ])
 
 /**
- * 是否是内部技术 action (业务视图应该隐藏)
+ * action → 业务动作
+ * @param {string} action - 后端 action 字段
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 action_label)
+ * @returns {string} 业务动作名
+ *
+ * [OPT 2026-07-25] 优先用后端注入的 action_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (虽当前未注入 action_label,
+ *     但保留接口兼容未来扩展)
+ *
+ * [P1-A 2026-07-25] 优先级调整:
+ *   1. log.action_label (后端 per-log 注入, 最权威)
+ *   2. auditMetaStore.actionMap.get(action).label (后端 enum_values 单一事实源)
+ *   3. ACTION_LABELS[action] (本地硬编码 fallback, 网络失败/启动未完成时)
+ *   4. action 原值
  */
-export function isInternalAction(action) {
-  return INTERNAL_ACTIONS.has(action)
-}
-
-/**
- * 获取 object_type 业务名
- * @param {string} objectType - 后端 object_type 值
- * @returns {string} 业务名 (找不到回退原值)
- */
-export function getObjectTypeLabel(objectType) {
-  if (!objectType) return ''
-  return OBJECT_TYPE_LABELS[objectType] || objectType
-}
-
-/**
- * 获取 action 业务名
- * @param {string} action - 后端 action 值
- * @returns {string} 业务动作 (找不到回退原值)
- */
-export function getActionLabel(action) {
-  if (!action) return '未知'
+export function getActionLabel(action, log) {
+  if (!action) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.action_label) return log.action_label
+  // 优先级 2: auditMetaStore (后端 enum_values 缓存)
+  const store = _getMetaStore()
+  if (store && store.loaded) {
+    const item = store.actionMap.get(action)
+    if (item && item.label) return item.label
+  }
+  // 优先级 3: 本地翻译表 (降级, 保证后端缺失时仍可显示)
   return ACTION_LABELS[action] || action
 }
 
 /**
- * user_name 业务化
- * @param {string} userName
- * @returns {string}
+ * 是否是审计员视图才看到的 action (业务视图应隐藏)
  */
-export function getUserNameDisplay(userName) {
-  if (!userName) return '-'
-  if (userName === 'system') return '系统'
-  if (userName === '[REDACTED]') return '已脱敏'
-  return userName
+export function isInternalAction(action) {
+  return HIDDEN_ACTIONS.has(action)
 }
 
 /**
- * 内部技术字段精确集合 (业务视图应该隐藏)
+ * object_type → 业务对象名
+ * @param {string} type - 后端 object_type
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 object_type_label)
+ * @returns {string} 业务对象名
  *
- * 隐藏规则:
- * 1. 精确匹配: 以下 Set 中的字段名
- * 2. 模式匹配: isInternalField() 中补充 _id 后缀等规则
+ * [OPT 2026-07-25] 优先用后端注入的 object_type_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:873)
  */
-export const INTERNAL_FIELDS = new Set([
-  '_record',          // 整个对象的 cud summary, 在 group header 已表明
-  'extra_data',       // 元数据
-  'cascade_root_id',  // 级联来源 ID
-  'cascade_root_action',
-  // 系统时间戳/操作人 (业务人员无需在变更字段中看到)
+export function getObjectTypeLabel(type, log) {
+  if (!type) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.object_type_label) return log.object_type_label
+  // 优先级 2: 本地翻译表 (降级)
+  return OBJECT_TYPE_LABELS[type] || type
+}
+
+/**
+ * 内部技术字段集合 (业务视图应该隐藏, 不在列表/详情展示)
+ *
+ * 包括:
+ * 1. 审计元字段: id, created_at/updated_at, created_by/updated_by, created_via, updated_via
+ * 2. 关系元字段: extra_data, transaction_id, trace_id, source_bo_id, target_bo_id
+ * 3. 主键字段: id (但 business_key 保留作为业务标识)
+ */
+const INTERNAL_FIELDS = new Set([
+  // 元字段
   'id',
-  'created_at',
-  'updated_at',
-  'created_by',
-  'updated_by',
-  // annotation 技术字段
-  'target_type',
-  'target_id',
-  // [FIX 2026-06-19] AI Agent 元数据 (业务视图隐藏)
-  'agent_id',
-  'agent_session_id',
-  'agent_reasoning',
-  'tool_call_id',
-  // [FIX 2026-06-19] 审计系统状态字段
-  'error_message',
-  'retry_count',
-  'status',
-  'status_entered_at',
-  'row_hash',
-  'prev_hash',
-  'retention_until',
+  'created_at', 'updated_at', 'created_by', 'updated_by',
+  'created_via', 'updated_via',
+  'transaction_id', 'trace_id',
+  'extra_data',
 ])
 
 /**
@@ -260,8 +274,15 @@ export function isInternalField(fieldName) {
 /**
  * 字段名 → 业务名 翻译表
  *
- * 把技术字段名翻译为业务人员可理解的术语
- * 优先级: 此表 > 原字段名
+ * [降级策略 2026-07-25 P1-D]
+ * 后端 _enrich_log_labels 已改用 DisplayNameService (yaml schema field.name) 注入 field_name_label.
+ * 此硬编码表仅作为 fallback:
+ *   - 调用方未传 log 参数 (如 AuditLog.vue 的 getFieldLabel(item.field_name))
+ *   - 后端注入失败 (yaml schema 中该 object_type 无此 field)
+ *   - audit 专用字段 (old_value, new_value, field_name) 不在任何 object_type 的 fields 中
+ *
+ * TODO(P2): 后端新增 /audit/meta/fields?object_type=xxx 接口后, getFieldLabel 可改为
+ *           auditMetaStore 优先 (与 getActionLabel 一致), 此表可进一步缩减.
  */
 export const FIELD_LABELS = {
   // 通用业务字段
@@ -301,6 +322,16 @@ export const FIELD_LABELS = {
   max_length: '最大长度',
   min_length: '最小长度',
   default_value: '默认值',
+
+  // [FIX 2026-09-06 关联字段名] 关联操作日志的 field_name 为关联名 (复数),
+  // 与后端 audit_api.FIELD_NAME_LABELS 保持一致
+  permission_sets: '权限集',
+  org_members: '组织成员',
+  users: '用户',
+  menus: '菜单',
+  service_modules: '服务模块',
+  business_objects: '业务对象',
+  role_permissions: '权限集权限',
 }
 
 /**
@@ -357,15 +388,30 @@ export const FIELD_VALUE_LABELS = {
   false: '否',
   True: '是',
   False: '否',
+
+  // [FIX 2026-09-13] user.status 等 enum 字段翻译 fallback
+  // 主路径走后端 _format_field_value 查 yaml enum_values 注入 old/new_value_display
+  // 此处作为前端 fallback (后端注入失败 / 历史日志没标签时)
+  active: '活跃',
+  inactive: '未激活',
+  locked: '已锁定',
+  frozen: '已冻结',
 }
 
 /**
  * 获取字段业务名
  * @param {string} fieldName - 后端字段名
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 field_name_label)
  * @returns {string} 业务名 (找不到回退格式化后的字段名)
+ *
+ * [OPT 2026-07-25] 优先用后端注入的 field_name_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:875)
  */
-export function getFieldLabel(fieldName) {
+export function getFieldLabel(fieldName, log) {
   if (!fieldName) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.field_name_label) return log.field_name_label
+  // 优先级 2: 本地翻译表 (降级)
   if (FIELD_LABELS[fieldName]) return FIELD_LABELS[fieldName]
   // 回退: 把下划线分隔转为更可读的格式 (relation_type → Relation Type)
   // 但优先用翻译表
@@ -376,19 +422,41 @@ export function getFieldLabel(fieldName) {
  * 获取字段值业务显示
  * @param {string} value - 后端字段值
  * @param {string} [fieldName] - 字段名 (用于上下文相关翻译)
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 *_display 字段)
  * @returns {string} 业务值
+ *
+ * [OPT 2026-07-25 P0-2] 优先读后端注入的 old_value_display / new_value_display
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:1049)
+ *   - 消除前端 N 次 JSON.parse 的性能问题
+ *   - 降级才走前端 JSON 解析 + 枚举翻译
  */
-export function getFieldValueDisplay(value, fieldName) {
+export function getFieldValueDisplay(value, fieldName, log) {
   if (value === null || value === undefined || value === '') return '(空)'
+
+  // 优先级 1: 后端注入的 *_display 字段
+  //   调用方需传 log, 并根据当前是 old/new 自动选择对应 display
+  if (log) {
+    if (log.old_value === value && log.old_value_display) return log.old_value_display
+    if (log.new_value === value && log.new_value_display) return log.new_value_display
+  }
+
   const str = String(value)
 
-  // 1. FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+  // 优先级 2: FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
   //    → 显示 target_display
   if (str.startsWith('{')) {
     try {
       const parsed = JSON.parse(str)
       if (parsed.target_display) return parsed.target_display
       if (parsed.target_key) return parsed.target_key
+      // [FIX 2026-09-06 可读性] AuditInterceptor 单字段包装格式 {"value": X}:
+      // 权限集/组织/用户 CRUD 日志的 old/new_value 都是这种格式,
+      // 之前解析不到 target_display/target_key 就原样返回, 列表出现原始 JSON
+      if ('value' in parsed && Object.keys(parsed).length === 1) {
+        return parsed.value === null || parsed.value === undefined || parsed.value === ''
+          ? '(空)'
+          : String(parsed.value)
+      }
       // 降级: 显示 JSON 中的可读部分
       return str
     } catch {
@@ -396,9 +464,155 @@ export function getFieldValueDisplay(value, fieldName) {
     }
   }
 
-  // 2. 枚举值翻译
+  // 优先级 3: 枚举值翻译
   if (FIELD_VALUE_LABELS[str]) return FIELD_VALUE_LABELS[str]
 
-  // 3. 原值
+  // 优先级 4: 原值
   return str
+}
+
+/**
+ * 日志分类 (log_category) → 业务显示 + Element-Plus tag 类型
+ * 对应 audit_logs.log_category 字段
+ */
+export const LOG_CATEGORY_LABELS = {
+  business: { label: '业务审计', type: 'primary' },
+  security: { label: '安全日志', type: 'danger' },
+  operation: { label: '运营日志', type: 'info' },
+  performance: { label: '性能日志', type: 'warning' },
+  system: { label: '系统日志', type: '' }
+}
+
+/**
+ * 日志级别 (log_level) → 业务显示 + Element-Plus tag 类型
+ */
+export const LOG_LEVEL_LABELS = {
+  DEBUG: { label: '调试', type: 'info' },
+  INFO: { label: '信息', type: 'primary' },
+  WARNING: { label: '警告', type: 'warning' },
+  ERROR: { label: '错误', type: 'danger' },
+  CRITICAL: { label: '严重', type: 'danger' }
+}
+
+/**
+ * action → Element-Plus tag 类型 (用于按钮颜色)
+ */
+export const ACTION_TAG_TYPES = {
+  CREATE: 'success',
+  UPDATE: 'warning',
+  DELETE: 'danger',
+  DELETE_BLOCKED: 'danger',
+  ASSOCIATE: 'primary',
+  DISSOCIATE: 'info',
+  METRIC_RECORD: 'warning',  // [FIX 2026-07-22]
+  AUDIT_WRITE_FAILED: 'danger',
+  PERMISSION_DENIED: 'danger',
+  LOGIN_FAILED: 'danger',
+  SQL_INJECTION_ATTEMPT: 'danger',
+  CONFIG_CHANGE: 'warning',
+  CONFIG_ERROR: 'danger',
+  SUBFLOW: 'primary',
+  SYNC: 'info',
+  DATA_SYNC: 'info',
+  BATCH_CREATE: 'success',
+  BATCH_UPDATE: 'warning',
+  BATCH_DELETE: 'danger',
+  EXPORT: '',
+  IMPORT: '',
+  LOGIN: 'primary',
+  LOGOUT: 'info',
+  PASSWORD_CHANGE: 'warning',
+  RESET_PASSWORD: 'warning',
+  STARTUP: 'success',
+  SHUTDOWN: 'info',
+  CASCADE_DELETE: 'danger',
+  GRANT: 'primary',
+  REVOKE: 'info',
+  ASSIGN: 'primary',
+  UNASSIGN: 'info',
+  MANAGE: 'warning',
+  APPROVE: 'primary',
+  READ: 'info',
+  unlock: 'primary'
+}
+
+export function getCategoryLabel(category) {
+  return LOG_CATEGORY_LABELS[category]?.label || category
+}
+
+export function getCategoryTagType(category) {
+  return LOG_CATEGORY_LABELS[category]?.type || ''
+}
+
+export function getLevelLabel(level) {
+  return LOG_LEVEL_LABELS[level]?.label || level
+}
+
+export function getLevelTagType(level) {
+  return LOG_LEVEL_LABELS[level]?.type || 'info'
+}
+
+/**
+ * [P1-A 2026-07-25] 优先级调整:
+ *   1. auditMetaStore.actionMap.get(action).color (后端 enum_values 单一事实源)
+ *      - 'default' / 空 → 规范化为 '' (Element Plus default 样式)
+ *   2. ACTION_TAG_TYPES[action] (本地硬编码 fallback)
+ *   3. 'info' 默认
+ */
+export function getActionTagType(action) {
+  if (!action) return 'info'
+  // 优先级 1: auditMetaStore (后端 enum_values 缓存)
+  const store = _getMetaStore()
+  if (store && store.loaded) {
+    const item = store.actionMap.get(action)
+    if (item && item.color) {
+      // 规范化: 'default' / 空 → '' (Element Plus 无类型)
+      const c = item.color
+      if (c && c !== 'default') return c
+      return ''
+    }
+  }
+  // 优先级 2: 本地 fallback
+  return ACTION_TAG_TYPES[action] || 'info'
+}
+
+/**
+ * 用户名业务化 (例如 system → 系统, [REDACTED] → 已脱敏)
+ */
+const USER_NAME_LABELS = {
+  system: '系统',
+  admin: '管理员',
+  '[REDACTED]': '已脱敏',
+  anonymous: '匿名',
+}
+
+export function getUserNameDisplay(name) {
+  if (!name) return '-'
+  return USER_NAME_LABELS[name] || name
+}
+
+/**
+ * 解析 FK 结构化值中的 target_display
+ *
+ * 后端 FK 值格式: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+ * 解析后显示: "采购订单（business_object）"
+ *
+ * 优先级:
+ *   1. 后端注入的 *_display 字段 (getFieldValueDisplay 已处理)
+ *   2. 本函数解析 raw JSON 中的 target_display
+ *   3. 原值
+ *
+ * [C5 2026-07-25] 从 AuditLog.vue + AuditLogDetail.vue 抽取为公共函数, 消除重复实现
+ */
+export function parseTargetDisplay(raw) {
+  if (!raw) return '-'
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (parsed && parsed.target_display && parsed.target_type) {
+      return `${parsed.target_display}（${parsed.target_type}）`
+    }
+    return raw
+  } catch {
+    return raw
+  }
 }

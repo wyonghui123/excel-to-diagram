@@ -486,9 +486,9 @@ class TestBOFrameworkRelationships:
         cursor = db_connection.cursor()
         
         cursor.execute("""
-            SELECT r.* FROM roles r
-            INNER JOIN group_roles gr ON r.id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            SELECT r.* FROM permission_sets r
+            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
+            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
             WHERE ugm.user_id = ?
         """, (user_with_role['user']['id'],))
         
@@ -502,8 +502,8 @@ class TestBOFrameworkRelationships:
         cursor = db_connection.cursor()
         
         cursor.execute("""
-            SELECT g.* FROM user_groups g
-            INNER JOIN user_group_members ugm ON g.id = ugm.group_id
+            SELECT g.* FROM orgs g
+            INNER JOIN org_members ugm ON g.id = ugm.group_id
             WHERE ugm.user_id = ?
         """, (user_in_group['user']['id'],))
         

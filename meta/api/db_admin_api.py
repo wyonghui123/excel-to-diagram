@@ -28,6 +28,7 @@ from flask import current_app, g  # noqa: E402
 
 from meta.services.auth_middleware import get_current_user, is_admin  # noqa: E402
 from meta.core.datasource import get_data_source  # noqa: E402
+from meta.core.db_path import get_meta_db_path
 
 db_admin_bp = Blueprint('db_admin', __name__, url_prefix='/api/v2/action')
 
@@ -77,7 +78,7 @@ def _require_admin() -> bool:
 
 def _get_db_path() -> str:
     """获取主 DB 路径"""
-    return os.path.join(_PROJECT_ROOT, 'meta', 'architecture.db')
+    return get_meta_db_path()
 
 
 def _get_backup_dir() -> str:
@@ -146,22 +147,22 @@ def db_health():
     # 2. DB 完整性
     db_path = _get_db_path()
     try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        try:
+        # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(db_path) as conn:
             check = conn.execute('PRAGMA integrity_check').fetchone()[0]
-            result['data']['integrity'] = check
-            if check != 'ok':
-                result['data']['status'] = 'critical'
-        finally:
-            conn.close()
+        result['data']['integrity'] = check
+        if check != 'ok':
+            result['data']['status'] = 'critical'
     except Exception as e:
         result['data']['integrity'] = f'error: {e}'
         result['data']['status'] = 'critical'
 
     # 3. WAL 模式
     try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        try:
+        # [V007.46 BUG-FIX] 改用 safe_connect_for_read
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(db_path) as conn:
             journal_mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
             wal_info = {
                 'journal_mode': journal_mode,
@@ -171,15 +172,14 @@ def db_health():
                     os.path.getsize(db_path + '-wal') if os.path.exists(db_path + '-wal') else 0
                 )
                 # checkpoint stats
-                busy = conn.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+                # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
+                busy = conn.execute('PRAGMA wal_checkpoint(PASSIVE)').fetchone()
                 wal_info['checkpoint'] = {
                     'busy': busy[0] if busy else None,
                     'log_pages': busy[1] if busy else None,
                     'checkpointed_pages': busy[2] if busy else None,
                 }
             result['data']['wal_info'] = wal_info
-        finally:
-            conn.close()
     except Exception as e:
         result['data']['wal_info'] = {'error': str(e)}
 

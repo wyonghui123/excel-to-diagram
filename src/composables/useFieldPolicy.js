@@ -57,7 +57,7 @@ export function useFieldPolicy(metaConfig, columns) {
    * 从后端字段策略 API 加载策略评估结果
    * @param {string} objectType - 对象类型
    * @param {string} context - 上下文 (read|create|update)
-   * @param {string} mutability - 可变性 (locked|extensible|fully_editable)
+   * @param {string} mutability - 可变性 (locked|extensible|fullEditable)
    * @returns {Promise<boolean>} 是否加载成功
    */
   async function loadFieldPolicies(objectType, context, mutability) {
@@ -287,7 +287,7 @@ export function useFieldPolicy(metaConfig, columns) {
    *
    * @param {string} fieldId - 字段标识
    * @param {Object} row - 行数据（用于判断是否新行）
-   * @param {string} mutability - 对象 mutability (locked/fully_editable/extensible)
+   * @param {string} mutability - 对象 mutability (locked/fullEditable/extensible)
    * @returns {boolean}
    */
   function isEditable(fieldId, row = null, mutability = null) {
@@ -490,7 +490,7 @@ export function useFieldPolicy(metaConfig, columns) {
    * 
    * @param {string} fieldId - 字段标识
    * @param {Object} row - 行数据
-   * @param {string} mutability - mutability 值 (locked/fully_editable/extensible)
+   * @param {string} mutability - mutability 值 (locked/fullEditable/extensible)
    * @returns {boolean}
    */
   function evaluateMutability(fieldId, row, mutability) {
@@ -498,7 +498,7 @@ export function useFieldPolicy(metaConfig, columns) {
       return false
     }
     
-    if (mutability === 'fully_editable') {
+    if (mutability === 'fullEditable') {
       return true
     }
     
@@ -565,7 +565,7 @@ export function useFieldPolicy(metaConfig, columns) {
       return false
     }
     
-    if (mutability === 'fully_editable') {
+    if (mutability === 'fullEditable') {
       return true
     }
     
@@ -589,7 +589,7 @@ export function useFieldPolicy(metaConfig, columns) {
    * 列表页 / 详情页 mount 时调用，激活后端 field-policies API
    * @param {string} objectType - 对象类型 (如 'user', 'role')
    * @param {string} context - 上下文 (read|create|update)
-   * @param {string} mutability - 可变性 (locked|extensible|fully_editable)
+   * @param {string} mutability - 可变性 (locked|extensible|fullEditable)
    * @returns {Promise<boolean>}
    */
   async function autoLoad(objectType, context = 'read', mutability = null) {

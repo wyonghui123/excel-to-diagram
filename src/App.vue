@@ -1,28 +1,35 @@
 <template>
-  <!-- [FR-004] ElConfigProvider 注入 Element Plus locale (替代 app.use 全量注册) -->
+  <!-- [FR-004] ElConfigProvider 注入 Element Plus locale，替代 app.use 全量注册 -->
   <el-config-provider :locale="epLocale" size="default">
     <div id="app">
       <div v-if="!authStore.sessionReady" class="session-loading">
         <div class="loading-spinner"></div>
       </div>
       <template v-else>
-        <LoginPage v-if="authEnabled && !authStore.isLoggedIn" />
-        <ChangePasswordDialog
-          v-else-if="authEnabled && authStore.isLoggedIn && authStore.mustChangePassword"
-          :visible="authStore.mustChangePassword"
-          @close="handleChangePasswordClose"
-        />
-        <AppRootLayout v-else>
-          <!-- [FR-007] keep-alive 缓存列表/工作台页面 -->
-          <!-- [FR-021] ErrorBoundary 捕获路由页面错误 -->
-          <ErrorBoundary>
-            <router-view v-slot="{ Component }">
-              <keep-alive :max="10" :include="cachedRouteNames" :exclude="excludeRouteNames">
-                <component :is="Component" />
-              </keep-alive>
-            </router-view>
-          </ErrorBoundary>
-        </AppRootLayout>
+        <!-- [FIX P3 2026-06-30] URL ?help= 公开帮助中心模式: 隐藏 LoginPage, 全屏展示 PublicHelpDrawer
+             这样未登录用户访问 ?help= 不会看到登录页, 也不会被 router 跳走 -->
+        <template v-if="hasHelpQuery">
+          <PublicHelpDrawer />
+        </template>
+        <template v-else>
+          <LoginPage v-if="authEnabled && !authStore.isLoggedIn" />
+          <ChangePasswordDialog
+            v-else-if="authEnabled && authStore.isLoggedIn && authStore.mustChangePassword"
+            :visible="authStore.mustChangePassword"
+            @close="handleChangePasswordClose"
+          />
+          <AppRootLayout v-else>
+            <!-- [FR-007] keep-alive 缓存列表与工作台页面 -->
+            <!-- [FR-021] ErrorBoundary 捕获路由页面错误 -->
+            <ErrorBoundary>
+              <router-view v-slot="{ Component }">
+                <keep-alive :max="10" :include="cachedRouteNames" :exclude="excludeRouteNames">
+                  <component :is="Component" />
+                </keep-alive>
+              </router-view>
+            </ErrorBoundary>
+          </AppRootLayout>
+        </template>
       </template>
       <NotificationContainer />
     </div>
@@ -31,17 +38,26 @@
 
 <script setup>
 // [FR-014] Options API → <script setup>
-import { inject } from 'vue'
+import { inject, ref, onMounted } from 'vue'
 import LoginPage from './components/LoginPage.vue'
 import ChangePasswordDialog from './components/ChangePasswordDialog.vue'
 import NotificationContainer from './components/NotificationContainer.vue'
 import AppRootLayout from './components/common/AppRootLayout.vue'
+import PublicHelpDrawer from './components/common/PublicHelpDrawer/PublicHelpDrawer.vue'
 import ErrorBoundary from './components/common/ErrorBoundary.vue'
 import { useAuthStore } from './stores/authStore'
 import { useMessage } from './composables/useMessage'
 
 const authStore = useAuthStore()
 const message = useMessage()
+
+// [FIX P3 2026-06-30] 是否在公开帮助中心模式
+//   sessionReady 之后才能确定（不能创建在 setup 阶段, sessionReady 还是 false）
+const hasHelpQuery = ref(false)
+
+onMounted(() => {
+  hasHelpQuery.value = new URLSearchParams(window.location.search).has('help')
+})
 
 // [FR-004] 接收 main.js 注入的 locale
 const epLocale = inject('elementPlusLocale', null)
@@ -57,6 +73,7 @@ const cachedRouteNames = [
   'ObjectDetail',      // 详情查看 (不含编辑)
   'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
   'RelationshipManagement', // 架构数据管理 (per-tab 实例 + v-show)
+  'OrgManagement',     // 组织管理 (MOMP 泛化页, 返回需保留列表状态)
 ]
 
 // [FR-007] 明确排除的组件名

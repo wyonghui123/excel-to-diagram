@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from meta.core.yaml_loader import load_yaml_directory
 from meta.core.models import registry
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +71,7 @@ class HierarchyService:
         if not data_source:
             from meta.core.datasource import get_data_source
             import os
-            db_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), '..', 'architecture.db'
-            )
+            db_path = get_meta_db_path()
             data_source = get_data_source("sqlite", database=db_path)
 
         hierarchy_levels = self.get_levels()

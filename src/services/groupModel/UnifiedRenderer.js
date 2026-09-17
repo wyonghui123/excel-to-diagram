@@ -1,12 +1,26 @@
 import { isTerminalGroup } from './types.js'
 import { getArrowSyntax, sanitizeLabel } from '@/composables/useMermaid/syntax/_shared/arrowHelper.js'
 
+// [DBG 2026-09-04] services 层 pure class 不能接 Vue composable; 探测 window.__archPage.debug
+//   仅在 ?mode=debug 时打 console; 生产静默. 之前 12 处裸 console.log 在产线刷屏 (715+ 条/渲染 +
+//   4.3 万字符子 dump), 是浏览器日志头号噪音源. 排查者仍可调 __archPage.debug.getLogs() 取全量.
+const _urDebug = () => (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug) || null
+const _urLog = (...args) => {
+  const dbg = _urDebug()
+  if (dbg && dbg.isDebug) dbg.debugLog(...args)
+}
+const _urTrace = (...args) => {
+  // buffer-only: 子 dump / 子项渲染 trace 即使在 debug 模式也不打 console
+  const dbg = _urDebug()
+  if (dbg && dbg.isDebug && typeof dbg.debugTrace === 'function') dbg.debugTrace(...args)
+}
+
 export class UnifiedRenderer {
   static render(groupModel, links, chartType, options = {}) {
     const flattenedGroups = groupModel.getFlattenedGroups()
-    console.log('[UnifiedRenderer] flattenedGroups count:', flattenedGroups.length)
+    _urLog('[UnifiedRenderer] flattenedGroups count:', flattenedGroups.length)
     flattenedGroups.forEach((g, i) => {
-      console.log(`  [${i}] id=${g.id}, type=${g.type}, title=${g.title}, isTerminal=${isTerminalGroup(g, chartType)}, children=${JSON.stringify(g.children?.map(c => c.id || c))}, enabled=${g.enabled}, _disabledAncestorPath=${JSON.stringify(g._disabledAncestorPath)}`)
+      _urTrace(`  [${i}] id=${g.id}, type=${g.type}, title=${g.title}, isTerminal=${isTerminalGroup(g, chartType)}, children=${JSON.stringify(g.children?.map(c => c.id || c))}, enabled=${g.enabled}, _disabledAncestorPath=${JSON.stringify(g._disabledAncestorPath)}`)
     })
 
     const codeToIdMap = new Map()
@@ -34,7 +48,7 @@ export class UnifiedRenderer {
       }
     })
     const rootGroups = flattenedGroups.filter(g => !childIds.has(g.id))
-    console.log('[UnifiedRenderer] rootGroups count:', rootGroups.length)
+    _urLog('[UnifiedRenderer] rootGroups count:', rootGroups.length)
 
     rootGroups.forEach(group => {
       if (!processedGroups.has(group.id)) {
@@ -82,7 +96,7 @@ export class UnifiedRenderer {
       ? `${group.title}（${disabledPath.join(' / ')}）`
       : (group.title || group.elementRef?.name || group.id)
 
-    console.log(`[UnifiedRenderer] renderGroup: id=${group.id}, type=${group.type}, isTerminal=${isTerminal}, title=${displayTitle}, children=${group.children?.length}, _disabledAncestorPath=${JSON.stringify(disabledPath)}`)
+    _urLog(`[UnifiedRenderer] renderGroup: id=${group.id}, type=${group.type}, isTerminal=${isTerminal}, title=${displayTitle}, children=${group.children?.length}, _disabledAncestorPath=${JSON.stringify(disabledPath)}`)
 
     if (isTerminal) {
       const displayCode = group.elementRef?.code ? `\\n(${group.elementRef.code})` : ''
@@ -98,7 +112,7 @@ export class UnifiedRenderer {
           childrenMap.set(g.id, g)
         })
 
-        console.log(`[UnifiedRenderer] container ${group.id} has ${group.children.length} children`)
+        _urLog(`[UnifiedRenderer] container ${group.id} has ${group.children.length} children`)
 
         group.children.forEach(childRef => {
           const child = childRef.id ? childRef : childrenMap.get(childRef)
@@ -115,23 +129,23 @@ export class UnifiedRenderer {
               const childDisplayTitle = childDisabledPath && childDisabledPath.length > 0
                 ? `${childTitle}（${childDisabledPath.join(' / ')}）`
                 : childTitle
-              console.log(`[UnifiedRenderer]   rendering child ${child.id} as terminal: ${childDisplayTitle}`)
+              _urTrace(`[UnifiedRenderer]   rendering child ${child.id} as terminal: ${childDisplayTitle}`)
               code += `${indent}  ${child.id}["${centerMark}${childDisplayTitle}${displayCode}"]\n`
             } else if (!processedGroups.has(child.id)) {
-              console.log(`[UnifiedRenderer]   rendering child ${child.id}`)
+              _urTrace(`[UnifiedRenderer]   rendering child ${child.id}`)
               code += UnifiedRenderer.renderGroupFromFlattened(child, flattenedGroups, chartType, depth + 1, processedGroups)
             } else {
-              console.log(`[UnifiedRenderer]   child ${child.id} already processed`)
+              _urTrace(`[UnifiedRenderer]   child ${child.id} already processed`)
             }
           } else {
-            console.log(`[UnifiedRenderer]   child NOT FOUND:`, childRef)
+            _urTrace(`[UnifiedRenderer]   child NOT FOUND:`, childRef)
           }
         })
       }
 
       // 渲染 containers（终端节点）- 兼容旧结构
       if (group.containers && group.containers.length > 0) {
-        console.log(`[UnifiedRenderer] container ${group.id} has ${group.containers.length} containers`)
+        _urLog(`[UnifiedRenderer] container ${group.id} has ${group.containers.length} containers`)
         group.containers.forEach(container => {
           const isContainerTerminal = isTerminalGroup(container, chartType)
           if (isContainerTerminal) {
@@ -143,12 +157,12 @@ export class UnifiedRenderer {
             const containerDisplayTitle = containerDisabledPath && containerDisabledPath.length > 0
               ? `${containerTitle}（${containerDisabledPath.join(' / ')}）`
               : containerTitle
-            console.log(`[UnifiedRenderer]   rendering container ${container.id} as terminal: ${containerDisplayTitle}`)
+            _urTrace(`[UnifiedRenderer]   rendering container ${container.id} as terminal: ${containerDisplayTitle}`)
             code += `${indent}  ${container.id}["${centerMark}${containerDisplayTitle}${displayCode}"]\n`
           }
         })
       } else if (!group.children || group.children.length === 0) {
-        console.log(`[UnifiedRenderer] container ${group.id} has NO children and NO containers`)
+        _urTrace(`[UnifiedRenderer] container ${group.id} has NO children and NO containers`)
       }
 
       code += `${indent}end\n`

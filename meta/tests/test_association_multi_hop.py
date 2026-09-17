@@ -31,25 +31,25 @@ def _insert_user(ds, username='u'):
 
 
 def _insert_group(ds, code='g1', name='Group1'):
-    ds.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)", [code, name])
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO orgs (code, name) VALUES (?, ?)", [code, name])
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_group_member(ds, user_id, group_id, is_manager=0):
     ds.execute(
-        "INSERT OR IGNORE INTO user_group_members (user_id, group_id, is_manager) VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO org_members (user_id, group_id, is_manager) VALUES (?, ?, ?)",
         [user_id, group_id, is_manager]
     )
 
 
 def _insert_role(ds, code='r1', name='Role1', priority=10):
-    ds.execute("INSERT INTO roles (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO permission_sets (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_group_role(ds, group_id, role_id):
     ds.execute(
-        "INSERT OR IGNORE INTO group_roles (group_id, role_id) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
         [group_id, role_id]
     )
 
@@ -118,26 +118,26 @@ def ds():
             username TEXT UNIQUE NOT NULL,
             display_name TEXT
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             UNIQUE(user_id, group_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             priority INTEGER DEFAULT 0,
             is_system INTEGER DEFAULT 0
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -190,7 +190,7 @@ def ds():
             permission_level TEXT,
             inherit_to_children INTEGER DEFAULT 1
         );
-        CREATE TABLE role_data_permissions (
+        CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             resource_type TEXT,
@@ -199,7 +199,7 @@ def ds():
             inherit_to_children INTEGER DEFAULT 1,
             created_by INTEGER
         );
-        CREATE TABLE group_data_permissions (
+        CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             resource_type TEXT,

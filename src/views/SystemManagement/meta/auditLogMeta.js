@@ -41,34 +41,10 @@ export const auditLogMeta = {
       width: 160,
       sortable: true
     },
-    {
-      key: 'log_category',
-      label: '日志类型',
-      type: 'tag',
-      width: 100,
-      sortable: true,
-      options: [
-        { label: '业务审计', value: 'business', color: 'primary' },
-        { label: '安全日志', value: 'security', color: 'danger' },
-        { label: '运营日志', value: 'operation', color: 'info' },
-        { label: '性能日志', value: 'performance', color: 'warning' },
-        { label: '系统日志', value: 'system', color: 'default' }
-      ]
-    },
-    {
-      key: 'log_level',
-      label: '日志级别',
-      type: 'tag',
-      width: 80,
-      sortable: true,
-      options: [
-        { label: '调试', value: 'DEBUG', color: 'default' },
-        { label: '信息', value: 'INFO', color: 'info' },
-        { label: '警告', value: 'WARNING', color: 'warning' },
-        { label: '错误', value: 'ERROR', color: 'danger' },
-        { label: '严重', value: 'CRITICAL', color: 'danger' }
-      ]
-    },
+    // [FIX 2026-09-06 死列清理] 移除 log_category / log_level / action_kind / outcome 四列:
+    // 1) list API (audit_api.py GET /logs) 的 SELECT 不返回这些字段, 列恒为空
+    // 2) action_kind/outcome 仅存在于 audit_service 物化表, audit_logs 表无此列
+    // 3) 本页所有日志均为 business/INFO (log_business 硬编码), 常量列无信息量
     {
       key: 'action',
       label: '操作类型',
@@ -81,32 +57,6 @@ export const auditLogMeta = {
         { label: '删除', value: 'DELETE', color: 'danger' },
         { label: '关联', value: 'ASSOCIATE', color: 'info' },
         { label: '取消关联', value: 'DISSOCIATE', color: 'info' }
-      ]
-    },
-    {
-      // [DECORATIVE] FR-LOG-012: action_kind 列
-      key: 'action_kind',
-      label: 'Action Kind',
-      type: 'tag',
-      width: 110,
-      sortable: true,
-      options: [
-        { label: '[DECORATIVE] Instance', value: 'instance', color: 'primary' },
-        { label: '[SYMBOL] Static', value: 'static', color: 'info' }
-      ]
-    },
-    {
-      // [DECORATIVE] FR-LOG-012: outcome 列
-      key: 'outcome',
-      label: '执行结果',
-      type: 'tag',
-      width: 100,
-      sortable: true,
-      options: [
-        { label: '[OK] Success', value: 'success', color: 'success' },
-        { label: '[X] Failure', value: 'failure', color: 'danger' },
-        { label: '[SYMBOL] Denied', value: 'denied', color: 'warning' },
-        { label: '[REFRESH] Retry', value: 'retry', color: 'info' }
       ]
     },
     {
@@ -123,7 +73,9 @@ export const auditLogMeta = {
       width: 80
     },
     {
-      key: 'formatted_identity',
+      // [FIX 2026-09-06 业务标识修正] 后端从未返回 formatted_identity (前端死字段),
+      // 真实字段是后端 _generate_business_key 生成的 business_key
+      key: 'business_key',
       label: '业务标识',
       type: 'text',
       width: 200,
@@ -165,35 +117,10 @@ export const auditLogMeta = {
   ],
 
   // 过滤器定义（元数据驱动：从列配置自动生成）
+  // [FIX 2026-09-06 死过滤器清理] 移除 log_category / log_level / action_kind / outcome:
+  // list API 虽支持 log_category/log_level 查询参数, 但本页数据恒为 business/INFO,
+  // 过滤无意义; action_kind/outcome 在 audit_logs 表中不存在
   filters: [
-    {
-      key: 'log_category',
-      label: '日志类型',
-      type: 'select',
-      options: [
-        { label: '全部', value: '' },
-        { label: '业务审计', value: 'business' },
-        { label: '安全日志', value: 'security' },
-        { label: '运营日志', value: 'operation' },
-        { label: '性能日志', value: 'performance' },
-        { label: '系统日志', value: 'system' }
-      ],
-      defaultValue: ''
-    },
-    {
-      key: 'log_level',
-      label: '日志级别',
-      type: 'select',
-      options: [
-        { label: '全部', value: '' },
-        { label: '调试', value: 'DEBUG' },
-        { label: '信息', value: 'INFO' },
-        { label: '警告', value: 'WARNING' },
-        { label: '错误', value: 'ERROR' },
-        { label: '严重', value: 'CRITICAL' }
-      ],
-      defaultValue: ''
-    },
     {
       key: 'action',
       label: '操作类型',
@@ -209,14 +136,18 @@ export const auditLogMeta = {
       defaultValue: ''
     },
     {
+      // [FIX 2026-09-06 角色迁移] 新增 org/permission_set;
+      // role/user_group 为迁移前历史日志的 object_type, 保留以便检索历史记录
       key: 'object_type',
       label: '对象类型',
       type: 'select',
       options: [
         { label: '全部', value: '' },
         { label: '用户', value: 'user' },
-        { label: '角色', value: 'role' },
-        { label: '用户组', value: 'user_group' },
+        { label: '组织', value: 'org' },
+        { label: '权限集', value: 'permission_set' },
+        { label: '组织（历史）', value: 'user_group' },
+        { label: '权限集（历史）', value: 'role' },
         { label: '产品', value: 'product' },
         { label: '版本', value: 'version' },
         { label: '领域', value: 'domain' },
@@ -240,32 +171,6 @@ export const auditLogMeta = {
       apiUrl: '/api/v2/bo/user?page_size=1000'
     },
     {
-      // [DECORATIVE] FR-LOG-012: action_kind filter
-      key: 'action_kind',
-      label: 'Action Kind',
-      type: 'select',
-      options: [
-        { label: '全部', value: '' },
-        { label: '[DECORATIVE] Instance', value: 'instance' },
-        { label: '[SYMBOL] Static', value: 'static' }
-      ],
-      defaultValue: ''
-    },
-    {
-      // [DECORATIVE] FR-LOG-012: outcome filter
-      key: 'outcome',
-      label: '执行结果',
-      type: 'select',
-      options: [
-        { label: '全部', value: '' },
-        { label: '[OK] Success', value: 'success' },
-        { label: '[X] Failure', value: 'failure' },
-        { label: '[SYMBOL] Denied', value: 'denied' },
-        { label: '[REFRESH] Retry', value: 'retry' }
-      ],
-      defaultValue: ''
-    },
-    {
       key: 'date_range',
       label: '时间范围',
       type: 'datetime-range',
@@ -284,24 +189,13 @@ export const auditLogMeta = {
         fields: [
           { key: 'id', label: '记录ID', type: 'text' },
           { key: 'created_at', label: '操作时间', type: 'datetime' },
-          { key: 'log_category', label: '日志类型', type: 'tag', options: [
-            { label: '业务审计', value: 'business', color: 'primary' },
-            { label: '安全日志', value: 'security', color: 'danger' },
-            { label: '运营日志', value: 'operation', color: 'info' },
-            { label: '性能日志', value: 'performance', color: 'warning' },
-            { label: '系统日志', value: 'system', color: 'default' }
-          ]},
-          { key: 'log_level', label: '日志级别', type: 'tag', options: [
-            { label: '调试', value: 'DEBUG', color: 'default' },
-            { label: '信息', value: 'INFO', color: 'info' },
-            { label: '警告', value: 'WARNING', color: 'warning' },
-            { label: '错误', value: 'ERROR', color: 'danger' },
-            { label: '严重', value: 'CRITICAL', color: 'danger' }
-          ]},
+          // [FIX 2026-09-06 死字段清理] 移除 log_category/log_level:
+          // detail API SELECT 不返回这两个字段, 且值恒为 business/INFO
           { key: 'action', label: '操作类型', type: 'tag' },
           { key: 'object_type', label: '对象类型', type: 'text' },
           { key: 'object_id', label: '对象ID', type: 'text' },
-          { key: 'formatted_identity', label: '业务标识', type: 'text' }
+          // [FIX 2026-09-06] formatted_identity 为前端死字段, 后端真实字段是 business_key
+          { key: 'business_key', label: '业务标识', type: 'text' }
         ]
       },
       {

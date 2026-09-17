@@ -266,18 +266,6 @@
       "fields": [],
       "table": ""
     },
-    "management_dimension": {
-      "hash": "4a122ba07fc7150815f62421c08a84ca",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "field",
-        "resource_types",
-        "description"
-      ],
-      "table": "management_dimensions"
-    },
     "menu": {
       "hash": "c515b65a3a9e98834ef5a2e54db7fbe8",
       "fields": [
@@ -725,5 +713,18 @@
       "table": "new_objects"
     }
   },
-  "last_sync": "2026-05-24T12:44:06.472505"
+  "last_sync": "2026-05-24T12:44:06.472505",
+  "phase_migrations": [
+    {
+      "phase": "phase1-db-schema-refactor",
+      "date": "2026-08-28",
+      "migrations": [
+        "v070__rename_roles_to_permission_sets",
+        "v071__drop_p13_t3_residue_tables",
+        "v072__rename_user_groups_to_orgs",
+        "v073__create_org_functions"
+      ],
+      "note": "Physical schema rename: roles→permission_sets, user_groups→orgs. Created org_functions table. YAML metadata rename deferred to Plan B. Follows meta/migrations/README.md naming: v<NNN>__<desc>.py + migrate(db_path, skip_backup=False) -> bool."
+    }
+  ]
 }

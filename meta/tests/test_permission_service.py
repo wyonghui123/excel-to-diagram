@@ -36,7 +36,7 @@ def ds():
             status TEXT DEFAULT 'active',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -44,7 +44,7 @@ def ds():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
@@ -52,7 +52,7 @@ def ds():
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, group_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -61,7 +61,7 @@ def ds():
             is_system INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -78,7 +78,7 @@ def ds():
             scope TEXT DEFAULT 'all',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE role_permissions (
+        CREATE TABLE permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
@@ -130,18 +130,18 @@ def _insert_personal_group(ds, user_id):
     """插入个人组（用于 _get_or_create_personal_group 测试）"""
     code = f'personal_group_user_{user_id}'
     ds.execute(
-        "INSERT INTO user_groups (code, name, description) VALUES (?, ?, ?)",
+        "INSERT INTO orgs (code, name, description) VALUES (?, ?, ?)",
         [code, f'Personal group for user {user_id}', 'auto-generated']
     )
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_role(ds, code='R', name='Role', priority=0, is_system=0):
     ds.execute(
-        "INSERT INTO roles (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO permission_sets (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, ?)",
         [code, name, 'desc', priority, is_system]
     )
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_permission(ds, code='P', resource_type='product', action='read'):
@@ -160,7 +160,7 @@ def test_get_or_create_personal_group_creates(svc, ds):
     group_id = svc._get_or_create_personal_group(uid)
     assert group_id > 0
     # 验证 DB 中存在
-    cursor = ds.execute("SELECT code FROM user_groups WHERE id = ?", [group_id])
+    cursor = ds.execute("SELECT code FROM orgs WHERE id = ?", [group_id])
     row = cursor.fetchone()
     assert row is not None
     assert row[0] == f'personal_group_user_{uid}'
@@ -177,12 +177,12 @@ def test_get_or_create_personal_group_returns_existing(svc, ds):
 # ============== 2. 内部方法：_ensure_user_in_group ==============
 
 def test_ensure_user_in_group_inserts(svc, ds):
-    """_ensure_user_in_group: 插入 user_group_members"""
+    """_ensure_user_in_group: 插入 org_members (Spec16: 旧 user_group_members 改名为 org_members)"""
     uid = _insert_user(ds, 'ensure_user')
     gid = _insert_personal_group(ds, uid)
     svc._ensure_user_in_group(uid, gid)
     cursor = ds.execute(
-        "SELECT 1 FROM user_group_members WHERE user_id = ? AND group_id = ?",
+        "SELECT 1 FROM org_members WHERE user_id = ? AND group_id = ?",
         [uid, gid]
     )
     assert cursor.fetchone() is not None
@@ -195,7 +195,7 @@ def test_ensure_user_in_group_idempotent(svc, ds):
     svc._ensure_user_in_group(uid, gid)
     svc._ensure_user_in_group(uid, gid)  # 第二次
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM user_group_members WHERE user_id = ? AND group_id = ?",
+        "SELECT COUNT(*) FROM org_members WHERE user_id = ? AND group_id = ?",
         [uid, gid]
     )
     assert cursor.fetchone()[0] == 1
@@ -216,7 +216,7 @@ def test_get_user_roles_via_personal_group(svc, ds):
     gid = _insert_personal_group(ds, uid)
     svc._ensure_user_in_group(uid, gid)
     rid = _insert_role(ds, code='dev', name='Developer')
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [gid, rid])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [gid, rid])
     roles = svc.get_user_roles(uid)
     assert len(roles) == 1
     assert roles[0]['id'] == rid
@@ -239,8 +239,8 @@ def test_get_user_permissions_via_role(svc, ds):
     svc._ensure_user_in_group(uid, gid)
     rid = _insert_role(ds, code='editor', name='Editor')
     pid = _insert_permission(ds, code='product.read')
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [gid, rid])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [gid, rid])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
     perms = svc.get_user_permissions(uid)
     assert 'product.read' in perms
 
@@ -254,8 +254,8 @@ def test_has_permission_true(svc, ds):
     svc._ensure_user_in_group(uid, gid)
     rid = _insert_role(ds, code='admin', name='Admin')
     pid = _insert_permission(ds, code='product.write')
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [gid, rid])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [gid, rid])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
     assert svc.has_permission(uid, 'product.write') is True
 
 
@@ -275,7 +275,7 @@ def test_assign_role_creates_personal_group(svc, ds):
     assert result is True
     # 验证：用户有了 personal 组 + 角色关联
     cursor = ds.execute(
-        "SELECT g.id FROM user_groups g WHERE g.code = ?", [f'personal_group_user_{uid}']
+        "SELECT g.id FROM orgs g WHERE g.code = ?", [f'personal_group_user_{uid}']
     )
     assert cursor.fetchone() is not None
     roles = svc.get_user_roles(uid)
@@ -347,8 +347,8 @@ def test_get_role_permissions_with_perms(svc, ds):
     rid = _insert_role(ds, code='full_role')
     p1 = _insert_permission(ds, code='product.read')
     p2 = _insert_permission(ds, code='product.write')
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p2])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p2])
     perms = svc.get_role_permissions(rid)
     codes = [p['code'] for p in perms]
     assert 'product.read' in codes
@@ -364,8 +364,8 @@ def test_set_role_permissions_replaces(svc, ds):
     p2 = _insert_permission(ds, code='b.perm')
     p3 = _insert_permission(ds, code='c.perm')
     # 初始有 p1, p2
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p2])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p2])
     # 替换为只有 p3
     result = svc.set_role_permissions(rid, [p3])
     assert result is True
@@ -378,7 +378,7 @@ def test_set_role_permissions_empty_clears(svc, ds):
     """set_role_permissions([]) 清空"""
     rid = _insert_role(ds, code='clear_role')
     p1 = _insert_permission(ds, code='to.clear')
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, p1])
     svc.set_role_permissions(rid, [])
     perms = svc.get_role_permissions(rid)
     assert perms == []
@@ -417,9 +417,9 @@ def test_check_permission_unified_true(svc, ds):
     gid = _insert_personal_group(ds, uid)
     rid = _insert_role(ds, code='check_role')
     pid = _insert_permission(ds, code='user:read', resource_type='user', action='read')
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [gid, rid])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
-    # _ensure_user_in_group 才行（get_user_roles JOIN user_group_members）
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [gid, rid])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [rid, pid])
+    # _ensure_user_in_group 才行（get_user_roles JOIN org_members）
     svc._ensure_user_in_group(uid, gid)
     assert svc.check_permission_unified(uid, 'user', 'read') is True
 

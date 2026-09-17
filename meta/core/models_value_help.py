@@ -71,6 +71,9 @@ class ValueHelpBehavior:
     out_mappings: List[ValueHelpOutMapping] = field(default_factory=list)
     cascade_select: List['CascadeSelectConfig'] = field(default_factory=list)
     enabled_condition: str = ""
+    # [FIX 2026-09-05 父组织树状 SearchHelp] 自引用层级防环:
+    # True 时前端 ValueHelpField 编辑态传入当前记录 id, SearchHelpDialog 通用树剪掉 自身+子孙
+    exclude_self: bool = False
 
 
 @dataclass

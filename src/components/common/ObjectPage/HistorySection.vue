@@ -33,6 +33,7 @@ import AuditLog from '../AuditLog/AuditLog.vue'
 import { AuditLogDetail } from '../AuditLogDetail'
 import AppIcon from '../AppIcon/AppIcon.vue'
 import { useAuditLogs } from '@/composables/useAuditLogs'
+import metaService from '@/services/metaService'
 
 const props = defineProps({
   objectType: {
@@ -46,7 +47,7 @@ const props = defineProps({
   // [FIX 2026-06-12] 父对象查询: 当对象本身只有"自身日志" 而"权限配置/关联操作"
   // 等写到了 child object_type (parent_object_type=自身, parent_object_id=自身ID) 时,
   // 必须传 parentObjectType/parentObjectId 一起查 (后端 audit_api 用 OR 联合查询).
-  // 典型用法: 角色详情页 (parent=role) / 用户组详情页 (parent=user_group) /
+  // 典型用法: 权限集详情页 (parent=permission_set) / 组织详情页 (parent=org) /
   //           用户详情页 (parent=user).
   parentObjectType: {
     type: String,
@@ -78,6 +79,39 @@ const hasRealObjectId = computed(() => {
   return true
 })
 
+// [FIX BUG-V046 2026-07-04 dev agent] 从 entity meta 读 audit.history.excluded_child_object_types
+// 详情页"操作日志" tab 排除特定子对象类型
+// 例: domain.yaml 配 [sub_domain, service_module, business_object, relationship]
+//     → 领域详情页"操作日志" tab 不会显示这些子对象的操作日志
+const excludedChildObjectTypes = ref([])
+
+async function loadExcludedChildObjectTypes() {
+  if (!props.objectType) {
+    excludedChildObjectTypes.value = []
+    return
+  }
+  try {
+    const result = await metaService.getUIConfig(props.objectType, { forceRefresh: false })
+    if (result.success && result.data) {
+      const excluded = result.data.audit_history_excluded_child_object_types || []
+      excludedChildObjectTypes.value = Array.isArray(excluded) ? excluded : []
+    } else {
+      excludedChildObjectTypes.value = []
+    }
+  } catch (e) {
+    console.warn('[HistorySection] loadExcludedChildObjectTypes failed (non-fatal):', e)
+    excludedChildObjectTypes.value = []
+  }
+}
+
+watch(
+  () => props.objectType,
+  () => {
+    loadExcludedChildObjectTypes()
+  },
+  { immediate: true }
+)
+
 const {
   logs: auditLogs,
   total: auditLogsTotal,
@@ -93,6 +127,7 @@ const {
     pageSize: 20,
     parentObjectType: computed(() => props.parentObjectType),
     parentObjectId: computed(() => props.parentObjectId),
+    excludedObjectTypes: computed(() => excludedChildObjectTypes.value),
   }
 )
 

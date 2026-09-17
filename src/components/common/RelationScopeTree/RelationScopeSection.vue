@@ -84,6 +84,16 @@ import { apiV1, apiV2 } from '@/utils/httpClient'
 
 const USE_FILTERSOURCE = import.meta.env.VITE_FEATURE_SCOPETREE_FILTERSOURCE !== 'false'
 
+// [性能优化 2026-06-29] 关系数据 version 级缓存
+//   背景: 每次 OSS 选择变化都触发 loadRelationships 全量重拉 (V863: 12 次串行 HTTP 拉 5634 rel + 6 次 HTTP 拉 2850 BO)
+//   优化: relationship 和 BO 数据只随 version_id 变化, OSS 变化时跳过 HTTP 只重建树
+//   安全: 编辑/新增/删除后 refreshAll 传 force=true 强制重拉; 手动刷新按钮也 force=true
+//   禁用: 设置 VITE_FEATURE_RELATION_CACHE=false 即可回退到原逻辑
+const USE_RELATION_CACHE = import.meta.env.VITE_FEATURE_RELATION_CACHE !== 'false'
+
+// [PERF 2026-08-14] 分页全量拉取并行化 (纯异步函数, 见 fetchAllPages.js 注释与单测)
+import { fetchAllPagesParallel } from './fetchAllPages.js'
+
 const props = defineProps({
   versionId: {
     type: Number,
@@ -132,6 +142,8 @@ const classifierLoading = ref(false)
 const allRelationships = ref([])
 const businessObjects = ref([])
 const loadError = ref('')
+// [性能优化] 记录上次成功加载的 version_id, 作为缓存 key
+const cachedVersionId = ref(null)
 const guard = createScopeGuard()
 
 // [FIX] 标记：handleClassifierCheck 正在处理用户勾选操作
@@ -295,13 +307,18 @@ const classifierTreeData = USE_FILTERSOURCE
     })
 
 watch(classifierTreeData, (newVal) => {
-  if (!USE_FILTERSOURCE) return
   if (newVal && newVal.length > 0) {
     nextTick(() => {
       // 树数据重建后：
       // 1) 勾选/展开状态由 installStoreSetDataHook 在 setData 内部自动恢复
       // 2) 这里只需要重新应用 filter (设置 store.filterText) 让 :filter-node-method 重算新节点 visible
-      filterAndCollapse()
+      if (USE_FILTERSOURCE) {
+        filterAndCollapse()
+      }
+      // [DEFAULT-EXPAND 2026-08-15] 树数据就绪后应用默认展开到第三层
+      //   (仅对象范围内部 / 对象范围内部与外部)
+      // [DEFAULT-EXPAND-ONCE 2026-09-04] 仅首次应用一次, 之后用户操作不应被默认展开覆盖
+      expandDefaultLevelsOnce()
     })
   }
 })
@@ -442,13 +459,17 @@ function getClassifierNodeIcon(data) {
 
 const metaObject = inject('metaObject', ref(null))
 
-async function loadRelationships() {
+async function loadRelationships(options = {}) {
+  const { force = false } = options
   if (!props.versionId) return
+  // [RACE-FIX 2026-08-19] 捕获本次请求的目标版本。修复: versionId 在分页/去重 await 期间
+  //   变化时, 旧版本请求返回会用旧数据覆盖新版本, 并把 cachedVersionId 错配为最新 versionId
+  //   (缓存 key 与数据版本不一致 → 后续命中缓存拿到错版本数据)。守卫: 仅最新版本能写入副作用。
+  const targetVersion = props.versionId
 
   const isStaleRefresh = props.stale
   const isSilentRefresh = !isStaleRefresh && classifierLoading.value === false && allRelationships.value.length > 0
   if (isStaleRefresh) isAllExpanded.value = false
-  console.log('[RelationScopeSection] loadRelationships START: isSilentRefresh=' + isSilentRefresh + ', isStaleRefresh=' + isStaleRefresh + ', allRelationships=' + allRelationships.value.length + ', boIds=' + props.selectedBoIds?.length)
 
   if (isStaleRefresh && !USE_FILTERSOURCE) {
     preservedCheckedKeys.value = new Set()
@@ -466,39 +487,86 @@ async function loadRelationships() {
     }
   }
 
+  // [性能优化 2026-06-29] version 级缓存命中判断
+  //   命中条件: feature flag 开启 + 非强制 + version 未变 + 已有缓存
+  //   命中行为: 跳过 HTTP, 用缓存的 relationship + BO 只重建树
+  //   失效: force=true (编辑/手动刷新) / version 变化 / 首次加载 (无缓存)
+  // [PERF 2026-08-15] 移除 isSilentRefresh 条件: OSS 变更(stale=true)也应命中缓存.
+  //   关系/BO 数据是 version 级的, OSS 变更只改变树的分析范围, 不改变数据本身.
+  //   之前 canUseCache 含 isSilentRefresh, 而 isSilentRefresh = !isStaleRefresh && ...,
+  //   stale=true 时 → isSilentRefresh=false → 跳过缓存 → 每次 OSS 变更都全量重拉
+  //   关系+BO (V863: 5634 rel + 2850 BO, 多次分页 HTTP), 与缓存设计注释意图不符.
+  const versionUnchanged = cachedVersionId.value === props.versionId
+  const hasCachedData = allRelationships.value.length > 0 && businessObjects.value.length > 0
+  const canUseCache = USE_RELATION_CACHE && !force && versionUnchanged && hasCachedData
+
+  if (canUseCache) {
+    trace.log('loadRelationships→cache hit', {
+      relCount: allRelationships.value.length,
+      boCount: businessObjects.value.length,
+      versionId: props.versionId
+    })
+    // 用缓存数据只重建树 (buildRelationScopeTree 是纯函数, 依赖 selectedIds + rel + BO)
+    if (USE_FILTERSOURCE) {
+      classifierTreeData.value = buildRelationScopeTree(
+        {
+          domainIds: props.selectedDomainIds || [],
+          subDomainIds: props.selectedSubDomainIds || [],
+          serviceModuleIds: props.selectedServiceModuleIds || [],
+          businessObjectIds: props.selectedBoIds || []
+        },
+        allRelationships.value,
+        businessObjects.value
+      )
+    }
+    emit('load', { relationships: allRelationships.value })
+    return
+  }
+
   if (!isSilentRefresh) {
     classifierLoading.value = true
   }
   loadError.value = ''
   try {
-    console.log('[RelationScopeSection] loadRelationships: version_id=' + props.versionId)
     // [v1.1.15 修复] 用 v2 端点 /api/v2/bo/relationship 替代 v1 端点
     //   背景: TEST888 用户调 /api/v1/relationships?version_id=764 返回 0 条关系,
     //         但调 /api/v2/bo/relationship?version_id=764 返回 11 条 (跟 list 表格一致)
     //   原因: v1/v2 端点权限过滤或查询路径不同
     //   修复: el-tree 跟 list 表格一样用 v2 端点, 避免 el-tree 永远拿不到关系数据
-    const result = await apiV2.get('/bo/relationship', { params: { version_id: props.versionId, page_size: 10000 } })
-
-    if (!result.success) {
-      throw new Error(result.message || `服务端错误`)
-    }
-
-    const newRelationships = result.data?.items || result.data || []
+    //
+    // [BUG-V032 修复 2026-06-29] 分页拉全量 Relationship, 不受 MAX_USER_PAGE_SIZE=500 限制
+    //   根因: 一次性 page_size=10000 实际被 cap 为 500 (V863 5634 rel → 500 rel),
+    //         关系范围树 count 严重偏小
+    //   修复: 循环分页拉全量
+    const REL_PAGE_SIZE = 500
+    // [PERF 2026-08-14] 分页并行化: 首页取 total → 剩余页并发拉取 (替代原串行逐页 while 循环)
+    let newRelationships = await fetchAllPagesParallel(
+      async (page) => {
+        const r = await apiV2.get('/bo/relationship', {
+          params: { version_id: props.versionId, page, page_size: REL_PAGE_SIZE }
+        })
+        if (!r.success) throw new Error(r.message || `服务端错误`)
+        return { items: r.data?.items || r.data || [], total: r.data?.total }
+      },
+      { pageSize: REL_PAGE_SIZE, maxPages: 30 }
+    )
 
     // 准备新 businessObjects
+    // [RACE-FIX 2026-08-19] 分页 await 期间 version 可能已切换 → 丢弃过期请求, 避免旧数据覆盖
+    if (props.versionId !== targetVersion) return
     let newBusinessObjects
     if (metaObject.value?.business_objects?.length > 0) {
       newBusinessObjects = metaObject.value.business_objects || metaObject.value.businessObjects || []
     } else {
       newBusinessObjects = await loadBusinessObjectsWithHierarchy()
     }
-    console.log('[RelationScopeSection] loadRelationships: newRelationships=' + newRelationships.length + ', newBusinessObjects=' + newBusinessObjects.length)
+    // [RACE-FIX 2026-08-19] loadBusinessObjectsWithHierarchy 的 await 期间 version 可能已切换 → 丢弃
+    if (props.versionId !== targetVersion) return
 
     // 直接赋值 (store.setData hook 会处理状态恢复)
     allRelationships.value = newRelationships
-    console.log('[RelationScopeSection] ASSIGNED allRelationships: ' + newRelationships.length)
     businessObjects.value = newBusinessObjects
-    console.log('[RelationScopeSection] after assign: treeData=' + (classifierTreeData.value?.length || 0))
+    cachedVersionId.value = props.versionId  // [性能优化] 记录缓存 key
 
     if (USE_FILTERSOURCE) {
       classifierTreeData.value = buildRelationScopeTree(
@@ -511,7 +579,6 @@ async function loadRelationships() {
         newRelationships,
         newBusinessObjects
       )
-      console.log('[RelationScopeSection] FILTERSOURCE: built tree with ' + classifierTreeData.value.length + ' root nodes')
     }
 
     emit('load', { relationships: allRelationships.value })
@@ -531,15 +598,32 @@ async function loadRelationships() {
 
 async function loadBusinessObjectsWithHierarchy() {
   try {
-    const [boResult, smResult, sdResult] = await Promise.all([
-      boService.query('business_object', { version_id: props.versionId, page_size: 10000 }),
+    // [BUG-V032 修复 2026-06-29] 分页拉全量 BO, 不受 MAX_USER_PAGE_SIZE=500 限制
+    // 根因: 一次性 page_size=10000 实际被 cap 为 500 (V863 2850 BO → 500 BO),
+    //       前端 relationClassifier 拿不到完整 sub_domain_id, 范围内/范围内与外部分类错乱
+    // 修复: 内部循环分页 (每页 500), 拼接全部 BO
+    const PAGE_SIZE = 500
+    // [PERF 2026-08-14] 分页并行化: 首页取 total → 剩余页并发拉取 (替代原串行逐页 while 循环)
+    const allBos = await fetchAllPagesParallel(
+      async (page) => {
+        const r = await boService.query('business_object', {
+          version_id: props.versionId,
+          page,
+          page_size: PAGE_SIZE
+        })
+        return { items: (r?.data?.items || r?.data || r || []), total: r?.data?.total }
+      },
+      { pageSize: PAGE_SIZE, maxPages: 20 }
+    )
+
+    const [smResult, sdResult] = await Promise.all([
       boService.query('service_module', { version_id: props.versionId, page_size: 5000 }),
       boService.query('sub_domain', { version_id: props.versionId, page_size: 1000 })
     ])
 
-    const bos = (boResult.data?.items || boResult.data || boResult || [])
     const sms = (smResult.data?.items || smResult.data || smResult || [])
     const sds = (sdResult.data?.items || sdResult.data || sdResult || [])
+    const bos = allBos
 
     const smById = new Map()
     sms.forEach(sm => {
@@ -645,7 +729,6 @@ function handleClassifierCheck(data, { checkedKeys, checkedNodes, halfCheckedNod
   const effectiveChecked = checkedKeys || []
   preservedCheckedKeys.value = new Set(effectiveChecked)
   preservedHalfCheckedKeys.value = new Set(halfCheckedNodes?.map(n => n.id) || [])
-  console.log('[RelationScopeSection] handleClassifierCheck: preserved=' + preservedCheckedKeys.value.size)
   classifier.selectedScopeIds.value = effectiveChecked
   emitScopeChange()
 
@@ -653,7 +736,6 @@ function handleClassifierCheck(data, { checkedKeys, checkedNodes, halfCheckedNod
     nextTick(() => {
       const currentChecked = relationTreeRef.value?.getCheckedKeys?.() || []
       if (currentChecked.length > 0) {
-        console.log('[RelationScopeSection] handleClassifierCheck: force clear lingering keys:', currentChecked.length)
         guard.enter()
         relationTreeRef.value?.setCheckedKeys([], false)
         guard.exit()
@@ -673,6 +755,67 @@ function handleExpandAll() {
     }
   })
 }
+
+// [DEFAULT-EXPAND 2026-08-15] 关系范围树默认展开到第三层。
+//   用户需求: 默认展开"对象范围内部"、"对象范围内部与外部"两个顶级节点到第三层
+//   (顶级 → 分类 → 领域/模块), "对象范围外部"仅展开顶级节点。
+//   实现: 直接在 el-tree store.nodesMap 上逐个 node.expand() (el-tree 2.15+ 无
+//   setExpandedKeys API), 并同步写入展开状态容器 —— FILTERSOURCE 写 userExpandedKeys,
+//   非 FILTERSOURCE 写 classifier.expandedNodeIds —— 保证 installStoreSetDataHook
+//   在树数据重建后仍能恢复默认展开。
+function expandDefaultLevels() {
+  const store = relationTreeRef.value?.store
+  if (!store?.nodesMap) return
+  const defaultExpandScopes = new Set(['internal', 'cross-boundary'])
+  const expandNode = (node) => {
+    if (!node) return
+    const key = String(node.id)
+    if (USE_FILTERSOURCE) {
+      userExpandedKeys.value.add(key)
+    } else if (!classifier.expandedNodeIds.value.includes(node.id)) {
+      classifier.expandedNodeIds.value.push(node.id)
+    }
+    const n = store.nodesMap[key]
+    if (n && !n.isLeaf && typeof n.expand === 'function' && !n.expanded) {
+      n.expand()
+    }
+  }
+  classifierTreeData.value.forEach(top => {
+    // 仅"对象范围内部 / 对象范围内部与外部"展开 (顶级 + 分类 + 领域/模块到第三层);
+    // "对象范围外部"完全不展开 (图表中不存在对象范围外部节点, 默认收起更清晰)
+    if (!defaultExpandScopes.has(top.scopeType)) return
+    expandNode(top)               // 第一层: 顶级节点
+    top.children?.forEach(catNode => {
+      expandNode(catNode)         // 第二层: 分类节点
+      catNode.children?.forEach(subNode => {
+        expandNode(subNode)       // 第三层: 领域 / 模块节点
+      })
+    })
+  })
+}
+
+// [DEFAULT-EXPAND 2026-08-15] 加载完成(loading true→false)后补一次默认展开,
+//   覆盖 classifierTreeData watch 因树渲染时序未就绪的首次加载边缘情况。
+//   expandDefaultLevels 幂等, 重复调用无副作用。
+// [DEFAULT-EXPAND-ONCE 2026-09-04] 默认展开只在 RSS 首次挂载/首次加载完成后应用一次.
+//   根因: 之前每次 classifierTreeData 重建 (用户勾选 RSS 节点 → selectedRelationCodes
+//   变化 → 异步 loadRelationships 完成 → 树重建) 都会重跑 expandDefaultLevels, 覆盖用户
+//   已手动折叠的节点 → 用户反馈"勾选 RSS 后几秒, 顶部分类被展开". 用户语义: 默认展开只
+//   在"打开页面第一次看到 RSS 树"时生效一次, 之后用户怎么操作就怎么展示.
+//   实现: 引入 _defaultExpandApplied ref, expandDefaultLevels 入口短路判断.
+const _defaultExpandApplied = ref(false)
+function expandDefaultLevelsOnce() {
+  if (_defaultExpandApplied.value) return
+  expandDefaultLevels()
+  _defaultExpandApplied.value = true
+}
+watch(classifierLoading, (val) => {
+  if (!val && hasData.value) {
+    nextTick(() => {
+      expandDefaultLevelsOnce()
+    })
+  }
+})
 
 function handleCollapseAll() {
   classifier.collapseAll()
@@ -741,7 +884,7 @@ function handleClear() {
 }
 
 async function handleRefresh() {
-  await loadRelationships()
+  await loadRelationships({ force: true })
 }
 
 function clear() {
@@ -860,6 +1003,17 @@ watch(relationTreeRef, (val) => {
 
 onMounted(() => {
   loadRelationships()
+})
+
+// [性能优化] version_id 变化时清缓存, 确保切换 version 后拉新数据
+//   注意: 父组件 RelationScopeTree 也会在 version 变化时清空 selectedBoIds 等,
+//   但子组件不会重新挂载 (无 :key 绑定 version), 需要显式 watch 清缓存。
+watch(() => props.versionId, (newVal, oldVal) => {
+  if (oldVal != null && newVal !== oldVal) {
+    cachedVersionId.value = null
+    allRelationships.value = []
+    businessObjects.value = []
+  }
 })
 
 defineExpose({

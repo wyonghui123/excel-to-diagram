@@ -157,6 +157,8 @@ meta/architecture.db.pre_*
 /backend-test.out
 /meta/backend.err
 /meta/backend.out
+/tools/_dev.err
+/tools/_dev.log
 /scripts/logs/*.err
 /scripts/logs/*.out
 /scripts/logs/
@@ -196,3 +198,204 @@ meta/architecture.db.pre_*
 /scripts/probe_*.py
 /scripts/list_*.py
 
+
+# Verification artifacts (debug scripts, screenshots)
+.verify/
+
+# ===== v2026.07.16: V007.74 调查发现 — 临时诊断脚本路径扩展 =====
+# 之前 v3.24 的 /_*.py 只匹配 root 目录的临时脚本
+# 但 V007.74 调查发现 _v00774_*.py 在 tests/ 下也被 git 跟踪 (untracked)
+# 扩展到全 repo: tests/ 下的 _*.py 也算临时诊断脚本 (不应该是产品代码)
+
+# 扩展: tests/ 下的 _*.py 临时脚本 (V007.74 调查发现)
+/tests/_*.py
+/tests/_*.txt
+/tests/_*.log
+/tests/_*.patch
+/tests/_*.html
+
+# frontend_dist_files/ 是 V007.13 发版的 build output (80+ MB)
+/frontend_dist_files/
+/frontend_dist_files/**/*
+
+# 临时 manifest / state / PID 文件 (deploy 过程产物)
+*.lockfile
+*.state.json
+*.deploy_state
+
+# ===== v2026.07.16: V007.79 调查发现 — DB 备份 + MagicMock =====
+# DB 备份 (V007.50 之后 watchdog 生成的)
+meta/architecture.bak.*
+meta/architecture.db.bak.*
+
+# MagicMock 目录 (测试残留, V007.79 调查发现)
+/meta/tests/MagicMock/
+
+# 乱码文件名 (GBK mojibake 0xef 0xbf 0xbd, 风险)
+# 匹配 ASCII 字符 + 3 字节 mojibake 序列
+"*[0xef][0xbf][0xbd]*"
+
+# ===== v2026.09.02: 临时文件统一目录 (service-management-v5) =====
+# 所有 AI 调试临时文件统一放 .tmp/，禁止污染 scripts/ 或 root
+.tmp/
+/.tmp/
+!.tmp/.gitkeep
+!.tmp/README.md
+
+# scripts/ 下的临时文件 (仅匹配下划线开头的调试残留)
+# 真正的服务脚本没有下划线前缀
+/scripts/_*.py
+/scripts/_*.txt
+/scripts/_*.log
+/scripts/_*.bat
+/scripts/_*.ps1
+/scripts/_*.sh
+!/scripts/_hooks/
+!/scripts/_start_*.ps1  # 早期启动脚本保留
+!/scripts/_find_vite.py
+!/scripts/_probe_ports*.ps1
+!/scripts/_probe_ports_py.py
+!/scripts/_probe_backend_py.ps1
+!/scripts/_manual_start.py
+!/scripts/_wt_*.py
+!/scripts/_v33_*.py
+!/scripts/_sync_*.py
+!/scripts/_session_cleanup.py
+!/scripts/_ports_sync.py
+!/scripts/_events.py
+!/scripts/_coord_*.py
+!/scripts/_config_backup.py
+!/scripts/_check_3010.py
+
+# scripts/_tmp_* 临时文件
+/scripts/_tmp_*
+
+# scripts/logs 调试日志
+/scripts/logs/_*.log
+/scripts/logs/_*.txt
+
+# ===== v2026.08.28: 二次 git 检查遗漏后清理 =====
+# 临时诊断探针 / 截图 / 缓存 (除 lessons-learned 文档硬链接保留的 2 个)
+# 探针 _probe_real_repro.py 和 _probe_save_full.py 已被 commit (7511f1e)，
+# 用否定规则显式保留避免被下面的通配符误伤
+!/test_helpers/_probe_real_repro.py
+!/test_helpers/_probe_save_full.py
+
+# 一次性探针脚本 (下划线开头)
+test_helpers/_*.py
+test_helpers/_*.txt
+test_helpers/_*.json
+test_helpers/_*.png
+test_helpers/_*.js
+
+# 截图 / 缓存 / 输出目录
+test_helpers/_shot_*.png
+test_helpers/_capture_*.png
+test_helpers/_v*.png
+test_helpers/.cache_*.json
+test_helpers/out/
+test_helpers/scripts/
+test_helpers/cj.txt
+
+# 探针辅助文件
+test_helpers/diag_*.py
+test_helpers/fix_*.png
+test_helpers/occlude_*.png
+test_helpers/probe_*.js
+test_helpers/probe_*.txt
+test_helpers/probe_*.json
+test_helpers/shots_*.png
+test_helpers/verify_*.py
+test_helpers/verify_staging_*.py
+test_helpers/test_output/
+
+# 部署产物 (manifest_utils 生成的 delta 包)
+deploy-v*.zip
+
+# 调试残留 (日常开发产生, 不入仓)
+cookies_*.txt
+chip_debug_*.png
+original_dialog
+watchdog.err
+watchdog.out
+
+# 临时脚本 (root 调试 / 多版本探针)
+test_dimension_scope.py
+test_v19_picker_multi.py
+test_rename_out.txt
+verify_*.py
+verify_filter.py
+
+# 测试数据 (业务上传/导出)
+products_*.json
+
+# 性能分析 dump
+tmp_pyspy/
+
+# Engine 运行时生成的 yaml 漂移基线报告 (启动时自动重新生成)
+meta/services/loaded_schema_report.json
+
+# 中文业务文件 (影响范围 / 影響範圍 xlsx 等, 不应入仓)
+# 文件名包含乱码中文 (UTF-16 LE 在 git 输出是 octal escape)
+# 用通配符匹配任意非 ASCII 中文 + _YYYY-MM-DD.xlsx
+?*_2026-??-??.xlsx
+
+# v35/v37 重构一次性脚本 (已执行过, 留工作树供追溯, 不入仓)
+.scripts/
+
+# Root 调试截图 (dialog_v* / full_page_v* / matrix_v* / picker_v* / source_chip_v*)
+dialog_v*.png
+full_page_v*.png
+full_page_debug*.png
+matrix_v*.png
+picker_*.png
+source_chip_v*.png
+repro_link_code_fail.png
+
+# Root 调试脚本 / 输出 (dump_menus_tree / probe_*/restart_out 等)
+dump_menus_tree.py
+dump_output.txt
+kill_flask.ps1
+restart_3011.py
+restart_out.txt
+original_dialog
+original_dialog.vue
+probe_*_out.txt
+probe_layout_out.txt
+probe_diag_rel_out.txt
+probe_visual2_out.txt
+probe_rename_out.txt
+probe_out.txt
+
+# Root 环境变量 (.env.*.local 已忽略, 这里覆盖不带 local 后缀的)
+.env.development
+
+# Playwright 测试日志 (注意是 hyphen 不是下划线)
+test-results/
+
+# ===== v2026.08.28: Phase 0 快照文件 (Plan A 权限集重构) =====
+meta/architecture.db.snapshot_20260828
+meta/architecture.db.snapshot_*
+
+.test_run_mig.txt
+
+# ===== v2026.09.02 v5.5: .agents/ 跨 IDE 兼容 Skill 镜像 (本地 Junction, 不入仓) =====
+# .agents/skills/ 是 .trae/skills/ 的 Junction 镜像 (Windows Directory Junction)
+# Git 不识别 junction 类型, 会递归 add 目标文件污染仓库
+# 本地用, 不入仓. 由 docs/governance/2026-09-02-v5.5-execution-report.md 触发创建
+.agents/skills/
+!.agents/README.md
+# ===== v2026.09.02: 临时文件统一目录 (service-management-v5) =====
+tools/_scratch/
+
+# Dev server runtime artifacts (locked by running vite, break pre-commit stash)
+.runtime/
+.service_manager.log*
+tools/.staging_rounds/
+logs/*.png
+
+# DB artifacts must never be tracked/deployed [INCIDENT-2026-09-03 #12]
+*.db
+*.db.*
+*.db-wal
+*.db-shm

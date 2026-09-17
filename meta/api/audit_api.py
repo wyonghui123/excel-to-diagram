@@ -5,6 +5,7 @@
 
 from flask import Blueprint, jsonify, request, g
 from datetime import datetime
+from typing import Optional
 import csv
 import io
 
@@ -121,6 +122,18 @@ def get_audit_logs():
         action = request.args.get('action', '')
         object_type = request.args.get('object_type', '')
         object_id = request.args.get('object_id', '')
+        # [FIX 2026-08-30] Spec 16 别名归一化: user_group → org
+        # 前端 OrgManagement 详情仍以 'user_group' 作为 objectType 查询审计日志,
+        # 而 Spec 16 迁移后审计日志写入 object_type='org', 直接按 alias 查询返回空。
+        # 用 registry 别名解析 (org.yaml semantics.aliases) 归一到规范 object_type。
+        if object_type:
+            try:
+                from meta.core.models import registry
+                meta_obj = registry.get(object_type)
+                if meta_obj is not None and meta_obj.id != object_type:
+                    object_type = meta_obj.id
+            except Exception:
+                pass
         # [FIX 2026-06-12] 支持按 parent_object 查询 (角色/用户/用户组详情页"操作日志" tab)
         # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
         parent_object_type = request.args.get('parent_object_type', '')
@@ -281,6 +294,10 @@ def get_audit_logs():
             # 与 object_display (展示名) 字段, 供前端 drawer 渲染
             log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
 
+            # [NEW 2026-07-18] 注入 object_type_label / field_name_label /
+            # parent_object_type_label (中英文映射), 解决 test_audit_labels T8 端到端冒烟
+            _enrich_log_labels(log)
+
             logs.append(log)
 
         return jsonify({
@@ -338,12 +355,77 @@ def get_audit_log_detail(log_id):
 
         # [FIX 2026-06-11] 解析 extra_data JSON: deleted_data 与 object_display
         log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
-        
+
+        # [OPT 2026-07-25 P0-3] detail 接口也注入 label 字段, 与 list 接口一致
+        _enrich_log_labels(log, _data_source)
+
         return jsonify({
             'success': True,
             'data': log
         })
     
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@audit_bp.route('/meta/actions', methods=['GET'])
+@login_required
+def get_audit_meta_actions():
+    """[P0-3 2026-07-25] 返回 audit_log action 字段的 enum_values 元数据
+
+    单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+
+    Returns:
+      {
+        "success": true,
+        "data": [
+          {"value": "CREATE", "label": "创建", "color": "success"},
+          {"value": "UPDATE", "label": "更新", "color": "info"},
+          ...
+        ]
+      }
+
+    用途:
+      - 前端启动时调一次, 缓存到 store, 替代 auditLogFormat.js ACTION_LABELS
+      - 前端 ACTION_TAG_TYPES color_mapping 也可由此驱动
+      - 列表筛选 dropdown 的 options 来源
+    """
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
+
+    try:
+        result: list = []
+        try:
+            from meta.core.yaml_loader import registry
+            audit_meta = registry.get('audit_log')
+            if audit_meta and hasattr(audit_meta, 'fields'):
+                for field in audit_meta.fields:
+                    if getattr(field, 'id', None) != 'action':
+                        continue
+                    enum_values = getattr(field, 'enum_values', None) or []
+                    for ev in enum_values:
+                        if isinstance(ev, dict):
+                            val = ev.get('value')
+                            if not val:
+                                continue
+                            result.append({
+                                'value': val,
+                                'label': ev.get('label', val),
+                                'color': ev.get('color', ''),
+                            })
+                        elif isinstance(ev, str):
+                            result.append({'value': ev, 'label': ev, 'color': ''})
+                    break
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[audit_api] /meta/actions load enum_values failed: {_e}"
+            )
+
+        return jsonify({'success': True, 'data': result})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -760,3 +842,651 @@ def _extract_deleted_data(extra_data_raw) -> dict:
         return result if isinstance(result, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+
+# ============================================================
+# [NEW 2026-07-18] 审计日志 label 映射 + enrich 函数
+# 解决 test_audit_labels 缺失符号 (OBJECT_TYPE_LABELS / FIELD_NAME_LABELS /
+# _enrich_log_labels / _enrich_log_labels_batch) 导致 33 个 integration fail
+# ============================================================
+
+OBJECT_TYPE_LABELS = {
+    # 核心对象
+    "user": "用户",
+    "role": "角色",
+    "user_group": "用户组",
+    "menu": "菜单",
+    "permission": "权限",
+    "permission_rule": "权限规则",
+    "product": "产品",
+    "version": "版本",
+    "domain": "领域",
+    "sub_domain": "子领域",
+    "service_module": "服务模块",
+    "business_object": "业务对象",
+    "relationship": "关系",
+    "annotation": "标注",
+    "enum_type": "枚举类型",
+    "enum_value": "枚举值",
+    # 权限相关
+    "role_menu": "角色菜单权限",
+    "role_dimension_scope": "角色维度范围",
+    "role_permissions": "角色功能权限",
+    "role_data_permission": "角色数据权限",
+    "role_v2_menu_permissions": "角色菜单权限(v2)",
+    "user_group_members": "用户组成员",
+    "group_roles": "用户组角色",
+    # 系统
+    "audit_log": "审计日志",
+    "system_config": "系统配置",
+    "view_config": "视图配置",
+}
+
+
+# [OPT 2026-07-25 P0-3] ACTION_LABELS: 从 audit_log.yaml 的 enum_values 单一事实源加载
+#   - 避免前后端双重维护 (前端 auditLogFormat.js ACTION_LABELS 已降级为 fallback)
+#   - 启动时加载一次, 模块级缓存
+_ACTION_LABELS_CACHE: Optional[dict] = None
+
+
+def _load_action_labels_from_schema() -> dict:
+    """从 audit_log.yaml 加载 action 字段的 enum_values → {value: label}
+
+    单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+    失败时降级返回空 dict (调用方用原值)
+    """
+    global _ACTION_LABELS_CACHE
+    if _ACTION_LABELS_CACHE is not None:
+        return _ACTION_LABELS_CACHE
+
+    result: dict = {}
+    try:
+        from meta.core.yaml_loader import registry
+        audit_meta = registry.get('audit_log')
+        if audit_meta and hasattr(audit_meta, 'fields'):
+            for field in audit_meta.fields:
+                if getattr(field, 'id', None) != 'action':
+                    continue
+                enum_values = getattr(field, 'enum_values', None) or []
+                for ev in enum_values:
+                    # 兼容 dict 和 str 两种形式 (见 bo_api.py:3229)
+                    if isinstance(ev, dict):
+                        val = ev.get('value')
+                        label = ev.get('label', val)
+                        if val:
+                            result[val] = label
+                    elif isinstance(ev, str):
+                        result[ev] = ev
+                break
+    except Exception as _e:
+        # 降级: 返回空 dict, 调用方用原值
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[audit_api] _load_action_labels_from_schema failed: {_e}, "
+            f"action_label will fallback to raw action"
+        )
+
+    _ACTION_LABELS_CACHE = result
+    return result
+
+
+def get_action_label(action: str) -> str:
+    """[P0-3] action → 业务动作 label (供 _enrich_log_labels 和 /meta/actions 使用)"""
+    if not action:
+        return ''
+    labels = _load_action_labels_from_schema()
+    return labels.get(action, action)
+
+
+# [P0-2 2026-07-25] 字段值业务化显示
+#   - 解决前端 auditLogFormat.getFieldValueDisplay 客户端 N 次 JSON.parse 的性能问题
+#   - 后端在 list/detail 接口直接返回 old_value_display / new_value_display
+def _format_field_value(value, data_source=None, object_type=None, field_name=None) -> str:
+    """格式化字段值为业务可读形式
+
+    规则:
+      1. None/空 → '(空)'
+      2. JSON 字符串 (FK 结构化值) → 解析出 target_display / target_key;
+         [FIX 2026-09-06 历史数据重解析] 9/4 前写入的关联日志 target_display
+         存的是降级串 (model_utils display_field 属性名错位, 当时的
+         get_object_display 解析失败), 读取侧用 target_type/target_id 重新解析
+      3. enum 字段值 → 查 yaml schema 的 enum_values 转中文 label
+         (user.yaml status: active→活跃, inactive→未激活, locked→已锁定, frozen→已冻结)
+         [FIX 2026-09-13 audit log status 显示英文问题]
+      4. 原值 → str(value)
+
+    [R018 P1 BUG-D] 加 sentinel 模式防御: 形如 __no_such_association__/__xxx__
+    的异常标识符不再展示给用户, 统一显示为 '(空)' (历史 7/18-7/19 数据噪音)
+
+    Args:
+        value: 后端字段原值 (可能是 str/None/int/float)
+        data_source: 数据源 (用于历史 target_display 降级串的重解析, 可为 None)
+        object_type: 对象类型 (用于查 enum_values 翻译, 如 user/permission_set)
+        field_name: 字段名 (用于查 enum_values 翻译, 如 status/visibility)
+
+    Returns:
+        str: 业务可读字符串
+    """
+    import re as _sentinel_re
+    # 匹配 __xxx__ / __xxx__:数字 / __xxx__:{json} 等异常标识变体
+    _SENTINEL_PAT = _sentinel_re.compile(r'^__[a-z][a-z0-9_]*__(?::.*)?$')
+
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        if value == '':
+            return ''
+        # [R018 P1 BUG-D] 异常 sentinel 降级 (历史噪音 / 解析失败标识)
+        if _SENTINEL_PAT.match(value):
+            return ''
+        # FK 结构化值: {"target_type":"...","target_id":470,"target_display":"采购订单"}
+        if value.startswith('{'):
+            try:
+                import json as _json
+                parsed = _json.loads(value)
+                if isinstance(parsed, dict):
+                    if 'value' in parsed and len(parsed) == 1:
+                        # [FIX 2026-09-06 可读性] AuditInterceptor._log_create/_log_update/
+                        # _log_delete 写入的单字段包装格式 {"value": X} — 之前未解包,
+                        # 导致权限集/组织/用户等 CREATE/UPDATE/DELETE 日志的
+                        # old_value_display/new_value_display 显示原始 JSON。
+                        inner = parsed['value']
+                        if inner in (None, ''):
+                            return '(空)'
+                        # enum 翻译 (单字段包装格式也可能包 enum 值)
+                        enum_label = _get_field_enum_label(object_type, field_name, inner)
+                        if enum_label:
+                            return enum_label
+                        return str(inner)
+                    tgt_display = parsed.get('target_display')
+                    tgt_type = parsed.get('target_type')
+                    tgt_id = parsed.get('target_id')
+                    # [FIX 2026-09-06 历史数据重解析] target_display 缺失或为
+                    # "{type}:{id}" 降级串时, 用 target_type/target_id 重新解析;
+                    # 解析失败或仍为降级串则回退原值, 不影响新数据 (新数据已是真实名称)
+                    if tgt_type and tgt_id not in (None, ''):
+                        import re as _re
+                        _fallback_pat = r'^[a-z_]+:\d+$'
+                        if not tgt_display or _re.match(_fallback_pat, str(tgt_display)):
+                            try:
+                                from meta.core.model_utils import get_object_display
+                                resolved = get_object_display(
+                                    str(tgt_type), tgt_id, data_source)
+                                if resolved and not _re.match(_fallback_pat, str(resolved)):
+                                    return str(resolved)
+                            except Exception:
+                                pass
+                    if tgt_display:
+                        return str(tgt_display)
+                    if parsed.get('target_key'):
+                        return str(parsed['target_key'])
+            except (ValueError, TypeError):
+                pass
+        # 普通 enum 字段值翻译 (单值, 非 FK JSON)
+        # 例子: user.status = "inactive" → "未激活"
+        enum_label = _get_field_enum_label(object_type, field_name, value)
+        if enum_label:
+            return enum_label
+        return value
+    return str(value)
+
+
+def _get_field_enum_label(object_type, field_name, value) -> str:
+    """[FIX 2026-09-13 audit log] 查 yaml schema 的 enum_values 把字段值翻译成业务中文
+
+    单一事实源: meta/schemas/<object_type>.yaml fields[<field_name>].enum_values
+      例如 user.yaml status 字段:
+        [{value: active, label: 活跃}, {value: inactive, label: 未激活},
+         {value: locked, label: 已锁定}, {value: frozen, label: 已冻结}]
+
+    Args:
+        object_type: 对象类型 (如 'user', 'permission_set')
+        field_name: 字段名 (如 'status', 'visibility')
+        value: 字段值 (如 'inactive')
+
+    Returns:
+        str: 翻译后的中文 label, 找不到时返回空串 (调用方降级用原值)
+    """
+    if not object_type or not field_name or value is None:
+        return ''
+    try:
+        from meta.core.yaml_loader import registry as _yaml_registry
+        meta = _yaml_registry.get(object_type)
+        if not meta:
+            return ''
+        field = next((f for f in meta.fields if f.id == field_name), None)
+        if not field or not getattr(field, 'enum_values', None):
+            return ''
+        for ev in field.enum_values:
+            if isinstance(ev, dict) and ev.get('value') == value:
+                label = ev.get('label', '')
+                if label and label != ev.get('value'):
+                    return str(label)
+        return ''
+    except Exception:
+        return ''
+
+FIELD_NAME_LABELS = {
+    # 通用字段
+    "name": "名称",
+    "code": "编码",
+    "description": "描述",
+    "status": "状态",
+    "display_name": "显示名",
+    "email": "邮箱",
+    "username": "用户名",
+    "password": "密码",
+    "created_at": "创建时间",
+    "updated_at": "更新时间",
+    # 菜单/权限相关
+    "menu_codes": "菜单编码列表",
+    "menu_names": "菜单名称列表",
+    "dimension_codes": "维度编码列表",
+    "permission_ids": "权限ID列表",
+    "permission_names": "权限名称列表",
+    "scopes_count": "范围数量",
+    "is_denied": "是否禁止",
+    "inherit_to_children": "是否继承给子级",
+    "synced_permissions_count": "已同步权限数量",
+    # 关系/对象相关
+    "object_type": "对象类型",
+    "object_id": "对象ID",
+    "parent_object_type": "父对象类型",
+    "parent_object_id": "父对象ID",
+    "relation_type": "关系类型",
+    "relation_code": "关系编码",
+    "category_type": "分类类型",
+    "category_label": "分类标签",
+    # 版本/产品
+    "product_id": "产品ID",
+    "version_id": "版本ID",
+    "visibility": "可见性",
+    "owner_id": "所有者ID",
+    # 操作
+    "action": "操作",
+    "old_value": "旧值",
+    "new_value": "新值",
+    "field_name": "字段名",
+    # [FIX 2026-09-06 关联字段名] 关联操作日志的 field_name 为关联名 (复数),
+    # yaml schema 未声明为字段 → DisplayNameService 降级, 在此补中文标签
+    "permission_sets": "权限集",
+    "org_members": "组织成员",
+    "users": "用户",
+    "menus": "菜单",
+    "service_modules": "服务模块",
+    "business_objects": "业务对象",
+    "role_permissions": "权限集权限",
+}
+
+
+_display_name_service = None
+
+
+def _get_display_name_service():
+    """[P1-D 2026-07-25] 懒加载 DisplayNameService (基于 yaml registry)
+
+    DisplayNameService 是字段显示名称的单一事实源:
+      - 字段级: registry.get(object_type).fields[i].name (yaml schema 定义)
+      - 对象级: registry.get(object_type).name (yaml schema 顶层 name)
+      - 视图覆盖: ui_view_config.list.columns[].title (例外配置)
+
+    失败时返回 None, 调用方降级走 OBJECT_TYPE_LABELS / FIELD_NAME_LABELS.
+    """
+    global _display_name_service
+    if _display_name_service is not None:
+        return _display_name_service
+    try:
+        from meta.services.display_name_service import DisplayNameService
+        from meta.core.yaml_loader import registry as _yaml_registry
+        _display_name_service = DisplayNameService(_yaml_registry)
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[audit_api] DisplayNameService init failed: {_e}, "
+            f"field_name_label will fallback to FIELD_NAME_LABELS"
+        )
+        _display_name_service = None
+    return _display_name_service
+
+
+def _get_object_type_label(object_type: str) -> str:
+    """[P1-D 2026-07-25] 获取 object_type 的中文标签
+
+    优先级:
+      1. yaml registry.get(object_type).name (单一事实源)
+         - 覆盖 user→用户, role→角色, product→产品, version→版本 等
+      2. OBJECT_TYPE_LABELS 硬编码 fallback
+         - 覆盖 audit 专用伪类型 (如 __audit_failure__, _unknown)
+         - 覆盖 registry 未注册的衍生类型 (如 role_menu, role_permissions)
+      3. object_type 原值
+    """
+    if not object_type:
+        return ''
+    # 优先: yaml registry (单一事实源)
+    try:
+        from meta.core.yaml_loader import registry as _yaml_registry
+        meta = _yaml_registry.get(object_type)
+        if meta and getattr(meta, 'name', None):
+            return meta.name
+    except Exception:
+        pass
+    # 降级: 硬编码 (audit 专用伪类型 / 衍生类型)
+    return OBJECT_TYPE_LABELS.get(object_type, object_type)
+
+
+def _get_field_name_label(object_type: str, field_name: str) -> str:
+    """[P1-D 2026-07-25] 获取字段的中文标签
+
+    优先级:
+      1. DisplayNameService.get_field_name(object_type, field_name, context='list')
+         - yaml schema fields[].name (单一事实源)
+         - 视图覆盖: ui_view_config.list.columns[].title
+      2. FIELD_NAME_LABELS 硬编码 fallback
+         - 覆盖 audit 专用字段 (action, old_value, new_value, field_name)
+         - 覆盖 registry 未注册的 object_type 场景
+      3. field_name 原值
+
+    注意:
+      - DisplayNameService 只对 registry 中已注册的 object_type 有效,
+        对于 audit 专用伪类型 (如 __audit_failure__) 会直接降级到硬编码.
+      - 当 DisplayNameService 返回值等于 field_name 时, 视为未找到, 继续降级.
+    """
+    if not field_name:
+        return ''
+    # 优先: DisplayNameService (yaml schema field.name 单一事实源)
+    if object_type:
+        try:
+            svc = _get_display_name_service()
+            if svc is not None:
+                label = svc.get_field_name(object_type, field_name, context='list')
+                if label and label != field_name:
+                    return label
+        except Exception:
+            pass
+    # 降级: 硬编码
+    return FIELD_NAME_LABELS.get(field_name, field_name)
+
+
+def _enrich_log_labels(log, data_source=None):
+    """[NEW 2026-07-18] 为单条审计日志注入 6 个 label/display 字段.
+
+    注入字段:
+      - action_label: 根据 action 查 audit_log.yaml enum_values (单一事实源)
+      - object_type_label: 根据 object_type 查 yaml registry (DisplayNameService)
+      - field_name_label: 根据 field_name 查 yaml schema (DisplayNameService)
+      - parent_object_type_label: 根据 parent_object_type 查 yaml registry
+      - old_value_display: 格式化 old_value (FK JSON 解析为 target_display)
+      - new_value_display: 格式化 new_value (FK JSON 解析为 target_display)
+
+    规则:
+      - 空/None 值不注入 (避免 label="" 前端显示空白)
+      - 已有 *_label 字段不覆盖 (调用方自定义优先)
+      - 未知类型降级为原值 (label == key)
+      - 非 dict 入参静默忽略 (不抛异常)
+
+    [OPT 2026-07-25 P0-3] 新增 action_label 注入, 消除前端 ACTION_LABELS 重复表
+    [OPT 2026-07-25 P0-2] 新增 old_value_display / new_value_display,
+                          消除前端 N 次 JSON.parse 的性能问题
+    [OPT 2026-07-25 P1-D] object_type_label / field_name_label 改用
+                          DisplayNameService (yaml schema 单一事实源),
+                          OBJECT_TYPE_LABELS / FIELD_NAME_LABELS 降级为 fallback.
+                          消除后端硬编码与 yaml schema 字段中文名的重复维护.
+    """
+    if not isinstance(log, dict):
+        return
+
+    act = log.get('action', '') or ''
+    ot = log.get('object_type', '') or ''
+    fn = log.get('field_name', '') or ''
+    pot = log.get('parent_object_type', '') or ''
+
+    # [P0-3] action_label 从 schema 加载, 单一事实源
+    if act and not log.get('action_label'):
+        log['action_label'] = get_action_label(act)
+    # [P1-D] object_type_label 优先 DisplayNameService (yaml registry.name)
+    if ot and not log.get('object_type_label'):
+        log['object_type_label'] = _get_object_type_label(ot)
+    # [P1-D] field_name_label 优先 DisplayNameService (yaml schema field.name)
+    if fn and not log.get('field_name_label'):
+        log['field_name_label'] = _get_field_name_label(ot, fn)
+    # [P1-D] parent_object_type_label 同样走 DisplayNameService
+    if pot and not log.get('parent_object_type_label'):
+        log['parent_object_type_label'] = _get_object_type_label(pot)
+
+    # [P0-2] 字段值业务化显示, 替代前端 getFieldValueDisplay 客户端解析
+    # [FIX 2026-09-06 历史数据重解析] 传入 data_source, 关联日志历史 target_display
+    # 降级串 (如 "permission_set:5978") 由读取侧重新解析真实名称
+    # [FIX 2026-09-13 enum 翻译] 传入 object_type + field_name, 让 _format_field_value
+    # 能查 yaml schema enum_values, 把 "inactive"→"未激活"、"locked"→"已锁定" 等
+    if 'old_value_display' not in log:
+        log['old_value_display'] = _format_field_value(
+            log.get('old_value'), data_source, object_type=ot, field_name=fn)
+    if 'new_value_display' not in log:
+        log['new_value_display'] = _format_field_value(
+            log.get('new_value'), data_source, object_type=ot, field_name=fn)
+
+
+def _enrich_log_labels_batch(logs, data_source=None):
+    """[NEW 2026-07-18] 批量注入 label 字段 (列表版本).
+
+    Args:
+        logs: list[dict] 或 None. None/空列表静默忽略.
+        data_source: 数据源 (传递给 _enrich_log_labels 用于历史值重解析)
+    """
+    if not logs:
+        return
+    for log in logs:
+        _enrich_log_labels(log, data_source)
+
+
+# ============================================================================
+# [P9-T3 2026-07-20] 审计 API — GET /audit/decisions + /compliance
+# Spec §4.9 / §8.9 P9-T3
+# ============================================================================
+
+# 审计可访问角色 (Admin + Auditor)
+_AUDIT_ACCESSIBLE_ROLE_CODES = frozenset({'admin', 'auditor'})
+
+
+def _is_audit_accessible(current_user: dict) -> bool:
+    """[P9-T3] 校验当前用户是否有审计访问权限
+
+    仅 admin / auditor 角色可访问; 其他角色返回 403.
+
+    Args:
+        current_user: {'id': int, 'username': str, 'role_id': Optional[int]}
+
+    Returns:
+        True 表示可访问; False 表示禁止访问
+    """
+    if not current_user:
+        return False
+
+    # 检查 role_code (优先) 或 role_id (兜底)
+    role_code = current_user.get('role_code')
+    if role_code and role_code.lower() in _AUDIT_ACCESSIBLE_ROLE_CODES:
+        return True
+
+    # role_id 1 (Admin) / 2 (Auditor) — Spec §3.17 / §8.9 角色约定
+    role_id = current_user.get('role_id')
+    if role_id in (1, 2):
+        return True
+
+    # is_superuser / is_admin 旁路
+    if current_user.get('is_superuser') or current_user.get('is_admin'):
+        return True
+
+    # 通配符权限 '*'
+    perms = current_user.get('permissions', []) or []
+    if '*' in perms or 'audit_log:read' in perms:
+        return True
+
+    return False
+
+
+def get_permission_decisions(
+    data_source,
+    page: int = 1,
+    page_size: int = 20,
+    current_user: Optional[dict] = None,
+    filters: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/decisions — 分页查询权限决策日志
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        page: 页码 (1-based)
+        page_size: 每页条数 (默认 20)
+        current_user: 当前用户 (用于权限校验)
+        filters: 可选过滤条件 {'user_id': N, 'resource_type': 'product', 'decision': 'allow'}
+
+    Returns:
+        分页结果 dict:
+            {'data': [...], 'total': N, 'page': P, 'page_size': S, 'total_pages': T}
+        或
+            {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问决策日志',
+        }
+
+    try:
+        # 查询全部
+        all_records = data_source.find('permission_decisions', filters=filters or {}) or []
+
+        # 按 created_at 倒序
+        all_records.sort(key=lambda r: r.get('created_at', ''), reverse=True)
+
+        total = len(all_records)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_records = all_records[start:end]
+
+        return {
+            'data': page_records,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'data': [],
+            'total': 0,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': 0,
+        }
+
+
+def get_compliance_report(
+    data_source,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/compliance — 生成合规报告
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        start_date: 可选, 起始日期
+        end_date: 可选, 结束日期
+        current_user: 当前用户 (用于权限校验)
+
+    Returns:
+        {'report': {...}} 或 {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问合规报告',
+        }
+
+    try:
+        from meta.services.compliance_reporter import ComplianceReporter
+        reporter = ComplianceReporter(data_source)
+        report = reporter.generate_report(start_date=start_date, end_date=end_date)
+        return {'report': report}
+    except Exception as e:
+        return {'error': str(e), 'report': {}}
+
+
+# ============================================================================
+# Flask 路由 (Blueprint)
+# ============================================================================
+
+@audit_bp.route('/decisions', methods=['GET'])
+@login_required
+def get_audit_decisions_route():
+    """[P9-T3] GET /audit/decisions — Flask 路由"""
+    user = get_current_user()
+    # 提取 role_id (兼容 dict / object)
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 20))
+
+    # 过滤参数
+    filters = {}
+    if request.args.get('user_id'):
+        filters['user_id'] = int(request.args['user_id'])
+    if request.args.get('resource_type'):
+        filters['resource_type'] = request.args['resource_type']
+    if request.args.get('decision'):
+        filters['decision'] = request.args['decision']
+
+    ds = _data_source or get_data_source()
+    result = get_permission_decisions(
+        ds, page=page, page_size=page_size,
+        current_user=current_user, filters=filters,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)
+
+
+@audit_bp.route('/compliance', methods=['GET'])
+@login_required
+def get_compliance_report_route():
+    """[P9-T3] GET /audit/compliance — Flask 路由"""
+    user = get_current_user()
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    ds = _data_source or get_data_source()
+    result = get_compliance_report(
+        ds, start_date=start_date, end_date=end_date,
+        current_user=current_user,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)

@@ -95,6 +95,10 @@ class UIDetailTab:
     association: str = ""
     widget: str = ""
     actions: List[str] = field(default_factory=list)
+    # [权限预览] readonly_aggregate 等扩展 tab 字段
+    endpoint: str = ""
+    icon: str = ""
+    props: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

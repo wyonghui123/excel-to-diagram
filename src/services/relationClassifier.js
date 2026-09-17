@@ -75,8 +75,13 @@ export function classifyRelation(rel, filterParams, businessObjects) { // eslint
     srcInScope = domainIds.includes(srcDomainId)
     tgtInScope = domainIds.includes(tgtDomainId)
   } else {
-    srcInScope = true
-    tgtInScope = true
+    // [SCOPE-EMPTY 2026-09-04] 对象范围 (domain/subDomain/serviceModule/businessObject)
+    //   没有任何选择时, 没有任何对象"在范围内" → 所有关系应归为「范围外」(EXTERNAL).
+    //   此前误设 true/true → 所有关系全部落入「范围内」, 与用户语义相悖:
+    //   "范围内关系"要求两端都在已选对象内, 空选择下不应存在范围内关系.
+    //   与 buildRelationCategoryTree 的空 centerScope 行为 (两端均 out) 对齐.
+    srcInScope = false
+    tgtInScope = false
   }
 
   const scopeType = (srcInScope && tgtInScope)
@@ -201,12 +206,10 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
     return true
   })
 
-  uniqueRelations.forEach(rel => {
-    const srcBo = getBoInfo(rel, 'source')
-    const tgtBo = getBoInfo(rel, 'target')
-    rel._sourceBo = srcBo
-    rel._targetBo = tgtBo
-  })
+  // [perf-2026-06-29] 单次遍历合并: 原代码先 forEach 解析 srcBo/tgtBo (mutate rel._sourceBo/_targetBo),
+  //   再 forEach 分类统计. 两次遍历 5634 rel × 2 = 11268 次循环, 但中间无副作用.
+  //   合并为 1 次遍历, 对每条 rel: 解析 → mutate → 过滤 → 分类 → 统计. 行为等价.
+  //   关键不变量: mutate 永远在过滤前完成, 下游消费者仍能读取 _sourceBo/_targetBo.
 
   const categoryStats = {
     [ScopeType.INTERNAL]: {
@@ -230,8 +233,11 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
   }
 
   uniqueRelations.forEach(rel => {
-    const srcBo = rel._sourceBo
-    const tgtBo = rel._targetBo
+    // [perf-2026-06-29] 单次遍历: 解析 + mutate (保留原第 1 次遍历行为, 下游消费者依赖 _sourceBo/_targetBo)
+    const srcBo = getBoInfo(rel, 'source')
+    const tgtBo = getBoInfo(rel, 'target')
+    rel._sourceBo = srcBo
+    rel._targetBo = tgtBo
 
     // 树构建仍需 srcBo/tgtBo，后端分类结果不能替代层级信息
     if (!srcBo || !tgtBo) return

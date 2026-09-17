@@ -36,34 +36,34 @@ describe('useCrudMessage', () => {
   })
 
   describe('成功反馈', () => {
-    it('saved() 默认文案是 "数据保存成功"', () => {
+    it('saved() 默认文案是 "数据已保存"', () => {
       const m = useCrudMessage()
       m.saved()
-      expect(mockUseMessage.success).toHaveBeenCalledWith('数据保存成功')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('数据已保存')
     })
 
-    it('saved("用户") 文案是 "用户保存成功"', () => {
+    it('saved("用户") 文案是 "用户已保存"', () => {
       const m = useCrudMessage()
       m.saved('用户')
-      expect(mockUseMessage.success).toHaveBeenCalledWith('用户保存成功')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('用户已保存')
     })
 
-    it('created() 文案是 "用户创建成功"', () => {
+    it('created() 文案是 "用户已创建"', () => {
       const m = useCrudMessage()
       m.created('用户')
-      expect(mockUseMessage.success).toHaveBeenCalledWith('用户创建成功')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('用户已创建')
     })
 
-    it('updated() 文案是 "角色更新成功"', () => {
+    it('updated() 文案是 "角色已更新"', () => {
       const m = useCrudMessage()
       m.updated('角色')
-      expect(mockUseMessage.success).toHaveBeenCalledWith('角色更新成功')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('角色已更新')
     })
 
-    it('deleted() 文案是 "数据删除成功"', () => {
+    it('deleted() 文案是 "数据已删除"', () => {
       const m = useCrudMessage()
       m.deleted()
-      expect(mockUseMessage.success).toHaveBeenCalledWith('数据删除成功')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('数据已删除')
     })
 
     it('stateChanged("锁定", "用户") 文案是 "用户已锁定"', () => {
@@ -72,10 +72,10 @@ describe('useCrudMessage', () => {
       expect(mockUseMessage.success).toHaveBeenCalledWith('用户已锁定')
     })
 
-    it('stateChanged("激活") 默认 entity 是 "用户"', () => {
+    it('stateChanged("激活") 默认 entity 是 "数据"', () => {
       const m = useCrudMessage()
       m.stateChanged('激活')
-      expect(mockUseMessage.success).toHaveBeenCalledWith('用户已激活')
+      expect(mockUseMessage.success).toHaveBeenCalledWith('数据已激活')
     })
 
     it('profileUpdated() 文案是 "个人信息已更新"', () => {
@@ -101,46 +101,46 @@ describe('useCrudMessage', () => {
     it('error() 默认文案 "操作失败"', () => {
       const m = useCrudMessage()
       m.error()
-      expect(mockUseMessage.error).toHaveBeenCalledWith('操作失败')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('操作失败', null)
     })
 
     it('error("保存失败") 自定义文案', () => {
       const m = useCrudMessage()
       m.error('保存失败')
-      expect(mockUseMessage.error).toHaveBeenCalledWith('保存失败')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('保存失败', null)
     })
 
     it('error() 优先从 err.response.data.message 提取', () => {
       const m = useCrudMessage()
       const err = { response: { data: { message: '用户名已存在' } } }
       m.error('保存失败', err)
-      expect(mockUseMessage.error).toHaveBeenCalledWith('用户名已存在')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('用户名已存在', err)
     })
 
     it('error() 其次从 err.message 提取', () => {
       const m = useCrudMessage()
       const err = { message: 'Network Error' }
       m.error('保存失败', err)
-      expect(mockUseMessage.error).toHaveBeenCalledWith('Network Error')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('Network Error', err)
     })
 
     it('error() err 无有效消息时用 defaultMsg', () => {
       const m = useCrudMessage()
       const err = {}
       m.error('保存失败', err)
-      expect(mockUseMessage.error).toHaveBeenCalledWith('保存失败')
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('保存失败', err)
     })
 
     it('error() null err 时用 defaultMsg', () => {
       const m = useCrudMessage()
       m.error('保存失败', null)
-      expect(mockUseMessage.error).toHaveBeenCalledWith('保存失败')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('保存失败', null)
     })
 
-    it('networkError() 文案是 "网络错误，请稍后重试"', () => {
+    it('networkError() 文案是 "网络连接失败，请检查网络后重试"', () => {
       const m = useCrudMessage()
       m.networkError()
-      expect(mockUseMessage.error).toHaveBeenCalledWith('网络错误，请稍后重试')
+      expect(mockUseMessage.error).toHaveBeenCalledWith('网络连接失败，请检查网络后重试')
     })
   })
 
@@ -178,9 +178,131 @@ describe('useCrudMessage', () => {
       expect(m1).not.toBe(m2)
       // 但行为一致
       m1.saved('A')
-      expect(mockUseMessage.success).toHaveBeenLastCalledWith('A保存成功')
+      expect(mockUseMessage.success).toHaveBeenLastCalledWith('A已保存')
       m2.saved('B')
-      expect(mockUseMessage.success).toHaveBeenLastCalledWith('B保存成功')
+      expect(mockUseMessage.success).toHaveBeenLastCalledWith('B已保存')
+    })
+  })
+
+  describe('[Spec 22 2026-09-13] extractErrorMessage 增强识别 apiV2 包装格式', () => {
+    it('识别 apiV2 包装格式 { message, httpStatus, code }', () => {
+      const m = useCrudMessage()
+      // ActionPermissionInterceptor 拒绝时 apiV2.put 返回的格式
+      const err = {
+        success: false,
+        data: null,
+        message: '缺少权限 activate（state_transition: enable_user, object: user）',
+        code: 'ERR_403_FORBIDDEN',
+        httpStatus: 403,
+      }
+      m.error('启用失败', err)
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith(
+        '缺少权限 activate（state_transition: enable_user, object: user）',
+        err,
+      )
+    })
+
+    it('识别 axios 原生错误格式（向后兼容）', () => {
+      const m = useCrudMessage()
+      const err = { response: { data: { message: '用户名已存在' } } }
+      m.error('保存失败', err)
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('用户名已存在', err)
+    })
+
+    it('识别通用 Error.message 格式（向后兼容）', () => {
+      const m = useCrudMessage()
+      const err = { message: 'Network Error' }
+      m.error('保存失败', err)
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('Network Error', err)
+    })
+
+    it('fallback: 全部字段空时使用 defaultMsg', () => {
+      const m = useCrudMessage()
+      m.error('保存失败', {})
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('保存失败', {})
+    })
+  })
+
+  describe('[Spec 22 2026-09-13] isPermissionDenied 检测', () => {
+    it('apiV2 包装格式 httpStatus=403', async () => {
+      const { isPermissionDenied } = await import('@/composables/useCrudMessage.js')
+      expect(isPermissionDenied({ httpStatus: 403 })).toBe(true)
+    })
+
+    it('apiV2 包装格式 code=ERR_403_FORBIDDEN', async () => {
+      const { isPermissionDenied } = await import('@/composables/useCrudMessage.js')
+      expect(isPermissionDenied({ code: 'ERR_403_FORBIDDEN' })).toBe(true)
+    })
+
+    it('axios 原生 response.status=403', async () => {
+      const { isPermissionDenied } = await import('@/composables/useCrudMessage.js')
+      expect(isPermissionDenied({ response: { status: 403 } })).toBe(true)
+    })
+
+    it('非 403 不算权限拒绝', async () => {
+      const { isPermissionDenied } = await import('@/composables/useCrudMessage.js')
+      expect(isPermissionDenied({ httpStatus: 500 })).toBe(false)
+      expect(isPermissionDenied({})).toBe(false)
+      expect(isPermissionDenied(null)).toBe(false)
+    })
+  })
+
+  describe('[Spec 22 2026-09-13] permissionDenied 专用反馈', () => {
+    it('后端有具体 message 时优先显示', () => {
+      const m = useCrudMessage()
+      const err = {
+        success: false,
+        message: '缺少权限 lock（state_transition: lock_user, object: user）',
+        httpStatus: 403,
+      }
+      m.permissionDenied('锁定', err, 'lock')
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith(
+        '缺少权限 lock（state_transition: lock_user, object: user）',
+        err,
+      )
+    })
+
+    it('后端无 message 时前端组装 + 显示权限码提示', () => {
+      const m = useCrudMessage()
+      const err = { httpStatus: 403 }
+      m.permissionDenied('启用', err, 'activate')
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith(
+        '当前用户无权限启用（需权限 activate）',
+        err,
+      )
+    })
+
+    it('后端无 message 且无 actionRef 时显示通用提示', () => {
+      const m = useCrudMessage()
+      const err = { httpStatus: 403 }
+      m.permissionDenied('启用', err)
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith(
+        '当前用户无权限启用',
+        err,
+      )
+    })
+  })
+
+  describe('[Spec 22 2026-09-13] stateChangeFailed 自动识别 403', () => {
+    it('err.httpStatus=403 → 走 permissionDenied', () => {
+      const m = useCrudMessage()
+      const err = {
+        message: '缺少权限 activate',
+        httpStatus: 403,
+      }
+      m.stateChangeFailed('启用', err, 'activate')
+      // 期望显示后端 message
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('缺少权限 activate', err)
+    })
+
+    it('err 非 403 → 走通用 error 显示失败', () => {
+      const m = useCrudMessage()
+      const err = {
+        message: '数据库连接超时',
+        httpStatus: 500,
+      }
+      m.stateChangeFailed('启用', err)
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('启用失败', err)
     })
   })
 })

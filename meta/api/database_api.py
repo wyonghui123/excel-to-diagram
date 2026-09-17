@@ -18,6 +18,7 @@ from flask import Blueprint, request, jsonify
 from meta.services.auth_middleware import login_required, is_admin
 import os
 import logging
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,7 @@ def _get_data_source():
     global _data_source
     if _data_source is None:
         from meta.core.datasource import get_data_source
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            'architecture.db'
-        )
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     return _data_source
 
@@ -166,7 +164,8 @@ def database_integrity_check():
 def database_wal_checkpoint():
     if not is_admin():
         return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
-    mode = request.args.get('mode', 'TRUNCATE')
+    # [V007.39 BUG-FIX] 默认 TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
+    mode = request.args.get('mode', 'PASSIVE')
     if mode not in ('PASSIVE', 'TRUNCATE', 'RESTART', 'FULL'):
         return jsonify({"error": "Invalid checkpoint mode: {0}".format(mode)}), 400
     ds = _get_data_source()

@@ -4,23 +4,23 @@
 
 复盘问题:
   1. 角色详情页"操作日志" tab 看不到日志 (root cause: 6 个权限 API 写日志时未
-     设 parent_object_type='role' + parent_object_id=role_id, 后端 audit_api
+     设 parent_object_type='permission_set' + parent_object_id=permission_set_id, 后端 audit_api
      也没支持按 parent_object 查询)
   2. 产品/版本详情页"操作日志" tab 看不到日志 (root cause: ObjectPageContent
      对 SELF_REFERRING_PARENT_OBJECT_TYPES 未自动注入 parentObjectType)
 
 测试策略 (按 P0 建议):
   - 真实 HTTP 链路: admin login → 触发 6 种权限写操作 → 查 audit/logs
-    (parent_object_type=role&parent_object_id=X) → 强断言 total > 0 且包含
+    (parent_object_type=permission_set&parent_object_id=X) → 强断言 total > 0 且包含
     期望的 object_type
   - 不 mock, 不容许 status in [200,401,404,500] 这种空壳断言
   - 覆盖:
-    1) role_menu        (PUT /api/v1/roles/<id>/menu-permissions)
-    2) role_permissions (PUT /api/v1/roles/<id>/permissions)
-    3) role_data_permission (POST /api/v1/roles/<id>/data-permissions)
-    4) role_dimension_scope (POST /api/v1/roles/<id>/dimension-scopes)
+    1) role_menu        (PUT /api/v1/permission-sets/<id>/menu-permissions)
+    2) role_permissions (PUT /api/v1/permission-sets/<id>/permissions)
+    3) role_data_permission (POST /api/v1/permission-sets/<id>/data-permissions)
+    4) role_dimension_scope (POST /api/v1/permission-sets/<id>/dimension-scopes)
     5) permission_rule  (POST /api/v1/permission-rules)
-    6) role 自身 CUD     (POST/PUT/DELETE /api/v1/roles)
+    6) permission_set 自身 CUD     (POST/PUT/DELETE /api/v1/permission-sets)
     7) product / version 自身 CUD (BO API v2)
     8) 父对象查询 OR 联合 (self + child) — 这正是 RoleDetail 详情页真实行为
 
@@ -59,7 +59,7 @@ def admin_session():
     if r.status_code != 200:
         pytest.skip(f"dev-login failed, status={r.status_code}: {r.text[:200]}")
     # 验证 cookie 真的能访问受保护 API
-    r = s.get(f'{BASE_URL}/api/v1/roles?page=1&page_size=1')
+    r = s.get(f'{BASE_URL}/api/v1/permission-sets?page=1&page_size=1')
     if r.status_code not in (200, 401, 403):
         pytest.skip(f"Cookie invalid, status={r.status_code}")
     if r.status_code == 401:
@@ -95,61 +95,61 @@ def _query_audit_logs(session, *, object_type=None, object_id=None,
 
 
 def _create_role(session, code=None, name=None) -> int:
-    """建一个测试用角色, 返回 role_id"""
+    """建一个测试用角色, 返回 permission_set_id"""
     code = code or _gen_unique_code('audit_role')
-    name = name or f'Audit E2E Role {code[-8:]}'
-    r = session.post(f'{BASE_URL}/api/v1/roles', json={
+    name = name or f'Audit E2E PermissionSet {code[-8:]}'
+    r = session.post(f'{BASE_URL}/api/v1/permission-sets', json={
         'code': code,
         'name': name,
         'description': 'Created by test_audit_role_parent_query_e2e',
         'is_system': False,
     })
     if r.status_code not in (200, 201):
-        pytest.skip(f"Cannot create test role: {r.status_code} {r.text[:200]}")
+        pytest.skip(f"Cannot create test permission_set: {r.status_code} {r.text[:200]}")
     data = r.json()
-    assert data.get('success') is True, f"create role failed: {data}"
-    role_id = data.get('data', {}).get('id')
-    if not role_id:
-        pytest.skip(f"create role returned no id: {data}")
-    return int(role_id)
+    assert data.get('success') is True, f"create permission_set failed: {data}"
+    permission_set_id = data.get('data', {}).get('id')
+    if not permission_set_id:
+        pytest.skip(f"create permission_set returned no id: {data}")
+    return int(permission_set_id)
 
 
-def _delete_role(session, role_id):
+def _delete_role(session, permission_set_id):
     """清理: 删测试用角色 (即使失败也不抛, 避免影响主断言)"""
     try:
-        session.delete(f'{BASE_URL}/api/v1/roles/{role_id}')
+        session.delete(f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}')
     except Exception:
         pass
 
 
 # =============================================================================
-# 1. role_menu: 角色菜单分配 -> 写日志 -> parent_object_type=role 能查到
+# 1. role_menu: 角色菜单分配 -> 写日志 -> parent_object_type=permission_set 能查到
 # =============================================================================
 
 class TestRoleMenuParentQueryE2E:
-    """role_menu 写日志后, 按 parent_object_type=role 查询应能看到"""
+    """role_menu 写日志后, 按 parent_object_type=permission_set 查询应能看到"""
 
     def test_role_menu_write_creates_auditable_log(self, admin_session):
-        """端到端: 建 role → 设菜单 → 查 audit logs (parent=role)"""
-        role_id = _create_role(admin_session)
+        """端到端: 建 permission_set → 设菜单 → 查 audit logs (parent=permission_set)"""
+        permission_set_id = _create_role(admin_session)
         try:
-            # 设菜单 (PUT /api/v1/roles/<id>/menu-permissions)
+            # 设菜单 (PUT /api/v1/permission-sets/<id>/menu-permissions)
             r = admin_session.put(
-                f'{BASE_URL}/api/v1/roles/{role_id}/menu-permissions',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}/menu-permissions',
                 json={'menu_codes': ['dashboard', 'system']}
             )
             assert r.status_code == 200, f"set menu-permissions failed: {r.status_code} {r.text[:300]}"
             assert r.json().get('success') is True, f"set menu-permissions not success: {r.json()}"
 
-            # 查 audit logs (parent_object_type=role + parent_object_id=role_id)
+            # 查 audit logs (parent_object_type=permission_set + parent_object_id=permission_set_id)
             # 稍等异步 writer flush
             time.sleep(0.5)
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
-                parent_object_type='role',
-                parent_object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
+                parent_object_type='permission_set',
+                parent_object_id=permission_set_id,
             )
             assert status == 200, f"audit logs query failed: {status} {body}"
             assert body.get('success') is True, f"audit logs not success: {body}"
@@ -158,27 +158,27 @@ class TestRoleMenuParentQueryE2E:
             total = body.get('total', 0)
             assert total > 0, f"期望至少 1 条日志 (角色自身 CUD), 实际 total={total}"
 
-            # 至少应包含 role 自身 CREATE 日志 (创建 role 时 BO 框架写)
+            # 至少应包含 permission_set 自身 CREATE 日志 (创建 permission_set 时 BO 框架写)
             obj_types = {log.get('object_type') for log in logs}
-            assert 'role' in obj_types, \
-                f"期望 object_type='role' 出现在结果中, 实际: {obj_types}"
+            assert 'permission_set' in obj_types, \
+                f"期望 object_type='permission_set' 出现在结果中, 实际: {obj_types}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
 
 # =============================================================================
-# 2. role_permissions: 角色功能权限 -> 写日志 -> parent_object_type=role 能查到
+# 2. role_permissions: 角色功能权限 -> 写日志 -> parent_object_type=permission_set 能查到
 # =============================================================================
 
 class TestRolePermissionsParentQueryE2E:
-    """role_permissions 写日志后, 按 parent_object_type=role 查询应能看到"""
+    """role_permissions 写日志后, 按 parent_object_type=permission_set 查询应能看到"""
 
     def test_role_permissions_write_creates_auditable_log(self, admin_session):
-        role_id = _create_role(admin_session)
+        permission_set_id = _create_role(admin_session)
         try:
-            # 设功能权限 (PUT /api/v1/roles/<id>/permissions)
+            # 设功能权限 (PUT /api/v1/permission-sets/<id>/permissions)
             r = admin_session.put(
-                f'{BASE_URL}/api/v1/roles/{role_id}/permissions',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}/permissions',
                 json={'permission_ids': []}  # 空数组也允许
             )
             assert r.status_code == 200, f"set permissions failed: {r.status_code} {r.text[:300]}"
@@ -187,10 +187,10 @@ class TestRolePermissionsParentQueryE2E:
             time.sleep(0.5)
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
-                parent_object_type='role',
-                parent_object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
+                parent_object_type='permission_set',
+                parent_object_id=permission_set_id,
             )
             assert status == 200, f"audit logs query failed: {status} {body}"
             assert body.get('success') is True
@@ -201,25 +201,25 @@ class TestRolePermissionsParentQueryE2E:
 
             # 应包含 role_permissions 日志 (write_permission_config_audit 调 audit_logger.log_create)
             obj_types = {log.get('object_type') for log in logs}
-            assert any(t in obj_types for t in ('role_permissions', 'role')), \
-                f"期望 role_permissions 或 role 自身日志, 实际: {obj_types}"
+            assert any(t in obj_types for t in ('role_permissions', 'permission_set')), \
+                f"期望 role_permissions 或 permission_set 自身日志, 实际: {obj_types}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
 
 # =============================================================================
-# 3. role_data_permission: 角色数据权限 -> 写日志 -> parent_object_type=role
+# 3. role_data_permission: 角色数据权限 -> 写日志 -> parent_object_type=permission_set
 # =============================================================================
 
 class TestRoleDataPermissionParentQueryE2E:
-    """role_data_permission 写日志后, 按 parent_object_type=role 查询应能看到"""
+    """role_data_permission 写日志后, 按 parent_object_type=permission_set 查询应能看到"""
 
     def test_role_data_permission_write_creates_auditable_log(self, admin_session):
-        role_id = _create_role(admin_session)
+        permission_set_id = _create_role(admin_session)
         try:
-            # 加数据权限规则 (POST /api/v1/roles/<id>/data-permissions)
+            # 加数据权限规则 (POST /api/v1/permission-sets/<id>/data-permissions)
             r = admin_session.post(
-                f'{BASE_URL}/api/v1/roles/{role_id}/data-permissions',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}/data-permissions',
                 json={
                     'resource_type': 'product',
                     'condition': 'id = 1',
@@ -236,10 +236,10 @@ class TestRoleDataPermissionParentQueryE2E:
             time.sleep(0.5)
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
-                parent_object_type='role',
-                parent_object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
+                parent_object_type='permission_set',
+                parent_object_id=permission_set_id,
             )
             assert status == 200
             assert body.get('success') is True
@@ -249,38 +249,38 @@ class TestRoleDataPermissionParentQueryE2E:
             assert total > 0, f"期望 total > 0, 实际 {total}"
 
             obj_types = {log.get('object_type') for log in logs}
-            assert any(t in obj_types for t in ('role_data_permission', 'role')), \
-                f"期望 role_data_permission 或 role 自身日志, 实际: {obj_types}"
+            assert any(t in obj_types for t in ('role_data_permission', 'permission_set')), \
+                f"期望 role_data_permission 或 permission_set 自身日志, 实际: {obj_types}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
 
 # =============================================================================
-# 4. role 自身 CUD: 创建/更新/删除 -> 自身日志 (object_type=role)
+# 4. permission_set 自身 CUD: 创建/更新/删除 -> 自身日志 (object_type=permission_set)
 # =============================================================================
 
 class TestRoleSelfCUDLogsE2E:
-    """role 自身 CREATE/UPDATE/DELETE 应产生 object_type=role 的日志"""
+    """permission_set 自身 CREATE/UPDATE/DELETE 应产生 object_type=permission_set 的日志"""
 
     def test_role_create_update_delete_produces_3_logs(self, admin_session):
-        role_id = _create_role(admin_session)
+        permission_set_id = _create_role(admin_session)
         try:
-            # 更新 role
+            # 更新 permission_set
             r = admin_session.put(
-                f'{BASE_URL}/api/v1/roles/{role_id}',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}',
                 json={'name': f'Updated Name {uuid.uuid4().hex[:6]}'}
             )
             # 200 OR 200-with-success, 业务可能因 is_system 拒绝 (本测试用的不是系统角色, 应允许)
             if r.status_code == 400 and 'is_system' in r.text:
-                pytest.skip("Server treats test role as system, skip update assertion")
-            assert r.status_code == 200, f"update role failed: {r.status_code} {r.text[:300]}"
+                pytest.skip("Server treats test permission_set as system, skip update assertion")
+            assert r.status_code == 200, f"update permission_set failed: {r.status_code} {r.text[:300]}"
 
             time.sleep(0.5)
-            # 查 self 自身日志 (object_type=role + object_id=role_id)
+            # 查 self 自身日志 (object_type=permission_set + object_id=permission_set_id)
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
             )
             assert status == 200
             assert body.get('success') is True
@@ -291,7 +291,7 @@ class TestRoleSelfCUDLogsE2E:
             assert total >= 2, \
                 f"期望至少 2 条 (CREATE+UPDATE), 实际 total={total}; logs={[(l.get('action'), l.get('object_type')) for l in logs[:5]]}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
 
 # =============================================================================
@@ -392,17 +392,17 @@ class TestProductVersionSelfLogsE2E:
 # =============================================================================
 
 class TestAuditApiParentOrUnionE2E:
-    """GET /api/v1/audit/logs?object_type=role&object_id=X
-                  &parent_object_type=role&parent_object_id=X
+    """GET /api/v1/audit/logs?object_type=permission_set&object_id=X
+                  &parent_object_type=permission_set&parent_object_id=X
     应返回 (self 自身 OR child 父对象) 的联合结果, 而不是 AND 收窄到 0"""
 
     def test_or_union_returns_combined_logs(self, admin_session):
-        """建 role + 触发权限操作 → OR 联合查询应看到所有相关日志"""
-        role_id = _create_role(admin_session)
+        """建 permission_set + 触发权限操作 → OR 联合查询应看到所有相关日志"""
+        permission_set_id = _create_role(admin_session)
         try:
-            # 触发 1 次权限操作, 写 parent_object_type='role' 的日志
+            # 触发 1 次权限操作, 写 parent_object_type='permission_set' 的日志
             r = admin_session.put(
-                f'{BASE_URL}/api/v1/roles/{role_id}/permissions',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}/permissions',
                 json={'permission_ids': []}
             )
             assert r.status_code == 200
@@ -412,10 +412,10 @@ class TestAuditApiParentOrUnionE2E:
             # 同时传 self + parent, 应走 OR 联合
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
-                parent_object_type='role',
-                parent_object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
+                parent_object_type='permission_set',
+                parent_object_id=permission_set_id,
             )
             assert status == 200
             assert body.get('success') is True
@@ -423,24 +423,24 @@ class TestAuditApiParentOrUnionE2E:
             logs = body.get('data', [])
             total = body.get('total', 0)
             assert total >= 2, \
-                f"OR 联合应返回 self (role CUD) + child (role_permissions) 至少 2 条, 实际 total={total}; " \
+                f"OR 联合应返回 self (permission_set CUD) + child (role_permissions) 至少 2 条, 实际 total={total}; " \
                 f"object_types={[(l.get('object_type'), l.get('action')) for l in logs[:5]]}"
 
             # 验证确实有 self 和 child 两类日志
             obj_types = {log.get('object_type') for log in logs}
             # self 自身日志由 BO 框架 AuditInterceptor 自动产生
             # child 父对象日志由 write_permission_config_audit 显式产生
-            assert 'role' in obj_types, \
-                f"OR 联合结果应包含 object_type='role' (自身), 实际: {obj_types}"
+            assert 'permission_set' in obj_types, \
+                f"OR 联合结果应包含 object_type='permission_set' (自身), 实际: {obj_types}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
     def test_parent_only_query_returns_child_logs(self, admin_session):
         """只传 parent_object_type+parent_object_id (不传 self) 应能查到 child 日志"""
-        role_id = _create_role(admin_session)
+        permission_set_id = _create_role(admin_session)
         try:
             r = admin_session.put(
-                f'{BASE_URL}/api/v1/roles/{role_id}/permissions',
+                f'{BASE_URL}/api/v1/permission-sets/{permission_set_id}/permissions',
                 json={'permission_ids': []}
             )
             assert r.status_code == 200
@@ -450,8 +450,8 @@ class TestAuditApiParentOrUnionE2E:
             # 只传 parent, 应走纯 parent_object 查询
             status, body = _query_audit_logs(
                 admin_session,
-                parent_object_type='role',
-                parent_object_id=role_id,
+                parent_object_type='permission_set',
+                parent_object_id=permission_set_id,
             )
             assert status == 200
             assert body.get('success') is True
@@ -459,23 +459,23 @@ class TestAuditApiParentOrUnionE2E:
             assert total >= 1, \
                 f"纯 parent 查询应至少返回 1 条 child 日志, 实际 total={total}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)
 
     def test_self_only_query_returns_self_logs(self, admin_session):
         """只传 self (object_type+object_id), 应能查到 self 自身日志"""
-        role_id = _create_role(admin_session)
+        permission_set_id = _create_role(admin_session)
         try:
             time.sleep(0.5)
             status, body = _query_audit_logs(
                 admin_session,
-                object_type='role',
-                object_id=role_id,
+                object_type='permission_set',
+                object_id=permission_set_id,
             )
             assert status == 200
             assert body.get('success') is True
             total = body.get('total', 0)
-            # role CREATE 一定写日志 (BO 框架 AuditInterceptor)
+            # permission_set CREATE 一定写日志 (BO 框架 AuditInterceptor)
             assert total >= 1, \
-                f"纯 self 查询应返回 role 自身 CREATE 日志, 实际 total={total}"
+                f"纯 self 查询应返回 permission_set 自身 CREATE 日志, 实际 total={total}"
         finally:
-            _delete_role(admin_session, role_id)
+            _delete_role(admin_session, permission_set_id)

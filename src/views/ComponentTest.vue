@@ -214,6 +214,13 @@
 
 <script setup>
 import { ref } from 'vue'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 import { useRouter } from 'vue-router'
 import { AppButton, AppInput, AppCard, AppSelect, AppModal } from '@/components/common'
 
@@ -259,7 +266,7 @@ const handleConfirm = () => {
 }
 
 const handleCancel = () => {
-  console.log('取消操作')
+  _dbgLog('取消操作')
 }
 </script>
 

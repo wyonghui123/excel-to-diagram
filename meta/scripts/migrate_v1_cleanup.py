@@ -91,20 +91,20 @@ def pre_check(conn, dry_run=False):
 
     # 统计将被影响的数据
     if has_super_admin:
-        cur = conn.execute("SELECT COUNT(*) AS c FROM roles WHERE is_super_admin = 1")
+        cur = conn.execute("SELECT COUNT(*) AS c FROM permission_sets WHERE is_super_admin = 1")
         super_admin_count = cur.fetchone()['c']
         print(f"\n[Pre-check] is_super_admin=1 的角色数: {super_admin_count}")
 
         if super_admin_count > 0:
             cur = conn.execute(
-                "SELECT id, code, name FROM roles WHERE is_super_admin = 1"
+                "SELECT id, code, name FROM permission_sets WHERE is_super_admin = 1"
             )
             print("  这些角色将被备份:")
             for row in cur.fetchall():
                 print(f"    - id={row['id']}, code={row['code']}, name={row['name']}")
 
     if has_priority:
-        cur = conn.execute("SELECT COUNT(*) AS c FROM roles WHERE priority IS NOT NULL AND priority != 0")
+        cur = conn.execute("SELECT COUNT(*) AS c FROM permission_sets WHERE priority IS NOT NULL AND priority != 0")
         priority_nonzero = cur.fetchone()['c']
         print(f"\n[Pre-check] priority 非 0 的角色数: {priority_nonzero}")
 
@@ -112,9 +112,9 @@ def pre_check(conn, dry_run=False):
     cur = conn.execute("""
         SELECT COUNT(DISTINCT u.id) AS c
         FROM users u
-        JOIN user_group_members ugm ON u.id = ugm.user_id
-        JOIN group_roles gr ON ugm.group_id = gr.group_id
-        JOIN role_permissions rp ON gr.role_id = rp.role_id
+        JOIN org_members ugm ON u.id = ugm.user_id
+        JOIN org_permission_sets gr ON ugm.group_id = gr.group_id
+        JOIN permission_set_permissions rp ON gr.role_id = rp.role_id
         JOIN permissions p ON rp.permission_id = p.id
         WHERE p.code = '*'
     """)
@@ -139,7 +139,7 @@ def backup_data(conn):
     # 创建备份表 (结构同 roles)
     conn.execute(f"""
         CREATE TABLE {BACKUP_TABLE} AS
-        SELECT * FROM roles
+        SELECT * FROM permission_sets
         WHERE 1=0
     """)
 
@@ -157,7 +157,7 @@ def backup_data(conn):
         where_clause = " OR ".join(conditions)
         conn.execute(f"""
             INSERT INTO {BACKUP_TABLE}
-            SELECT * FROM roles WHERE {where_clause}
+            SELECT * FROM permission_sets WHERE {where_clause}
         """)
         cur = conn.execute(f"SELECT COUNT(*) AS c FROM {BACKUP_TABLE}")
         print(f"  备份完成: {cur.fetchone()['c']} 行")
@@ -181,7 +181,7 @@ def migrate_admin_permissions(conn, dry_run=False):
         print("  is_super_admin 列已不存在, 跳过迁移")
         return
 
-    cur = conn.execute("SELECT id, code FROM roles WHERE is_super_admin = 1")
+    cur = conn.execute("SELECT id, code FROM permission_sets WHERE is_super_admin = 1")
     super_admin_roles = cur.fetchall()
 
     if not super_admin_roles:
@@ -203,7 +203,7 @@ def migrate_admin_permissions(conn, dry_run=False):
 
         # 检查该角色是否已有 '*' 权限
         cur = conn.execute(
-            "SELECT 1 FROM role_permissions WHERE role_id = ? AND permission_id = ?",
+            "SELECT 1 FROM permission_set_permissions WHERE role_id = ? AND permission_id = ?",
             [role_id, wildcard_perm_id]
         )
         if cur.fetchone():
@@ -214,7 +214,7 @@ def migrate_admin_permissions(conn, dry_run=False):
             print(f"  [DRY-RUN] 角色 {role_code} 需绑定 '*' 权限 (permission_id={wildcard_perm_id})")
         else:
             conn.execute(
-                "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 [role_id, wildcard_perm_id]
             )
             print(f"  角色 {role_code} 已绑定 '*' 权限")
@@ -231,16 +231,16 @@ def drop_columns(conn, dry_run=False):
 
     if has_super_admin:
         if dry_run:
-            print(f"  [DRY-RUN] ALTER TABLE roles DROP COLUMN is_super_admin")
+            print(f"  [DRY-RUN] ALTER TABLE permission_sets DROP COLUMN is_super_admin")
         else:
-            conn.execute("ALTER TABLE roles DROP COLUMN is_super_admin")
+            conn.execute("ALTER TABLE permission_sets DROP COLUMN is_super_admin")
             print("  is_super_admin 已删除")
 
     if has_priority:
         if dry_run:
-            print(f"  [DRY-RUN] ALTER TABLE roles DROP COLUMN priority")
+            print(f"  [DRY-RUN] ALTER TABLE permission_sets DROP COLUMN priority")
         else:
-            conn.execute("ALTER TABLE roles DROP COLUMN priority")
+            conn.execute("ALTER TABLE permission_sets DROP COLUMN priority")
             print("  priority 已删除")
 
 
@@ -260,9 +260,9 @@ def post_check(conn):
     cur = conn.execute("""
         SELECT COUNT(DISTINCT u.id) AS c
         FROM users u
-        JOIN user_group_members ugm ON u.id = ugm.user_id
-        JOIN group_roles gr ON ugm.group_id = gr.group_id
-        JOIN role_permissions rp ON gr.role_id = rp.role_id
+        JOIN org_members ugm ON u.id = ugm.user_id
+        JOIN org_permission_sets gr ON ugm.group_id = gr.group_id
+        JOIN permission_set_permissions rp ON gr.role_id = rp.role_id
         JOIN permissions p ON rp.permission_id = p.id
         WHERE p.code = '*'
     """)
@@ -288,12 +288,12 @@ def downgrade(conn):
 
     # 恢复 priority 列
     if not has_priority:
-        conn.execute("ALTER TABLE roles ADD COLUMN priority INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE permission_sets ADD COLUMN priority INTEGER DEFAULT 0")
         print("  priority 列已恢复")
 
     # 恢复 is_super_admin 列
     if not has_super_admin:
-        conn.execute("ALTER TABLE roles ADD COLUMN is_super_admin INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE permission_sets ADD COLUMN is_super_admin INTEGER DEFAULT 0")
         print("  is_super_admin 列已恢复")
 
     # 从备份表恢复数据
@@ -307,9 +307,9 @@ def downgrade(conn):
             if column_exists(conn, BACKUP_TABLE, col) if False else True:
                 # 简化: 直接更新
                 conn.execute(f"""
-                    UPDATE roles
+                    UPDATE permission_sets
                     SET {col} = (
-                        SELECT {col} FROM {BACKUP_TABLE} WHERE {BACKUP_TABLE}.id = roles.id
+                        SELECT {col} FROM {BACKUP_TABLE} WHERE {BACKUP_TABLE}.id = permission_sets.id
                     )
                     WHERE id IN (SELECT id FROM {BACKUP_TABLE})
                 """)

@@ -209,12 +209,12 @@ const emit = defineEmits(['update:modelValue', 'filter-change'])
 
 const popoverVisible = ref(false)
 const manualCloseRequested = ref(false)
-const popoverRef = ref(null)  // Popover 元素引用
-const filterTriggerRef = ref(null)  // 过滤触发器引用
+const popoverRef = ref(null)  // Popover element ref
+const filterTriggerRef = ref(null)  // Filter trigger ref
 const searchInputRef = ref(null)
-const valueHelpRef = ref(null)  // Value Help 组件引用
-const valueHelpValue = ref(null)  // Value Help 临时值（确认前）
-const valueHelpDisplayValue = ref('')  // Value Help 显示文本（确认前）
+const valueHelpRef = ref(null)  // ValueHelp component ref
+const valueHelpValue = ref(null)  // ValueHelp pending value (before confirm)
+const valueHelpDisplayValue = ref('')  // ValueHelp pending display text (before confirm)
 const searchValue = ref('')
 const selectValue = ref([])
 const dateRange = ref([])
@@ -238,6 +238,13 @@ const resolvedValueHelpConfig = computed(() => {
   }
   return {
     ...props.valueHelpConfig,
+    // [FIX 2026-09-05 父组织树状 SearchHelp] 过滤场景保持下拉:
+    // 字段 value_help 改为 dialog/tree (如 org.parent_id) 后, 列头筛选弹层内
+    // 不适合再弹大对话框, 统一回退 dropdown (带远程搜索)
+    presentation: {
+      ...props.valueHelpConfig.presentation,
+      result_type: 'dropdown',
+    },
     behavior: {
       ...props.valueHelpConfig.behavior,
       multiple: props.valueHelpConfig.behavior?.multiple !== undefined

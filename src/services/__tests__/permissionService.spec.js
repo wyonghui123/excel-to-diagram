@@ -16,7 +16,12 @@ import {
   getPermissionLevelType,
   getPermissionLevelLabel,
   getResourceLabel,
+  getActionLabel,
   getDimensionName,
+  loadPermissionMeta,
+  invalidatePermissionMetaCache,
+  loadPermissionMetaWithScope,
+  ScopeCodeInvalidError,
   loadRoles,
   loadRole,
   loadDimensions,
@@ -34,6 +39,10 @@ const mocks = vi.hoisted(() => ({
   apiV1Put: vi.fn(),
   apiV1Delete: vi.fn(),
   apiV1Patch: vi.fn(),
+  apiV2Get: vi.fn(),
+  apiV2Post: vi.fn(),
+  apiV2Put: vi.fn(),
+  apiV2Delete: vi.fn(),
 }))
 
 vi.mock('@/utils/httpClient', () => ({
@@ -43,6 +52,12 @@ vi.mock('@/utils/httpClient', () => ({
     put: mocks.apiV1Put,
     delete: mocks.apiV1Delete,
     patch: mocks.apiV1Patch,
+  },
+  apiV2: {
+    get: mocks.apiV2Get,
+    post: mocks.apiV2Post,
+    put: mocks.apiV2Put,
+    delete: mocks.apiV2Delete,
   },
 }))
 
@@ -64,6 +79,10 @@ describe('permissionService', () => {
     mocks.apiV1Put.mockReset()
     mocks.apiV1Delete.mockReset()
     mocks.apiV1Patch.mockReset()
+    mocks.apiV2Get.mockReset()
+    mocks.apiV2Post.mockReset()
+    mocks.apiV2Put.mockReset()
+    mocks.apiV2Delete.mockReset()
   })
 
   // ==================== 常量完整性 ====================
@@ -182,20 +201,20 @@ describe('permissionService', () => {
   // ==================== API 函数 ====================
 
   describe('loadRoles', () => {
-    it('应调用 GET /roles 并返回成功响应', async () => {
+    it('应调用 GET /bo/role 并返回成功响应', async () => {
       const rolesData = [{ id: 1, name: 'admin' }, { id: 2, name: 'viewer' }]
-      mocks.apiV1Get.mockResolvedValueOnce(okResp(rolesData))
+      mocks.apiV2Get.mockResolvedValueOnce(okResp(rolesData))
 
       const result = await loadRoles()
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/roles', { params: {} })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role', { params: {} })
       expect(result.success).toBe(true)
       expect(result.data).toEqual(rolesData)
     })
 
     it('响应无 success 字段时应包装为 { data } 返回', async () => {
       const rawResp = { data: [{ id: 1 }] }
-      mocks.apiV1Get.mockResolvedValueOnce(rawResp)
+      mocks.apiV2Get.mockResolvedValueOnce(rawResp)
 
       const result = await loadRoles()
 
@@ -203,43 +222,43 @@ describe('permissionService', () => {
     })
 
     it('应传递 params 参数', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp([]))
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([]))
 
       await loadRoles({ page: 2, page_size: 10 })
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/roles', { params: { page: 2, page_size: 10 } })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role', { params: { page: 2, page_size: 10 } })
     })
   })
 
   describe('loadRole', () => {
-    it('应调用 GET /roles/:roleId', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp({ id: 1, name: 'admin' }))
+    it('应调用 GET /bo/role/:roleId', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({ id: 1, name: 'admin' }))
 
       const result = await loadRole(1)
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/roles/1')
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role/1')
       expect(result.success).toBe(true)
     })
   })
 
   describe('loadDimensions', () => {
-    it('应调用 GET /management-dimensions 并传递 params', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp([{ id: 1, code: 'product' }]))
+    it('应调用 GET /bo/permission_dimension 并传递 params', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([{ id: 1, code: 'product' }]))
 
       const result = await loadDimensions({ page: 1 })
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/management-dimensions', { params: { page: 1 } })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_dimension', { params: { page: 1 } })
       expect(result.success).toBe(true)
     })
   })
 
   describe('loadPermissionRules', () => {
-    it('应调用 GET /roles/:roleId/permission-rules', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp([{ id: 10, role_id: 1 }]))
+    it('应调用 GET /bo/permission_rule 并传递 role_id 参数', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([{ id: 10, role_id: 1 }]))
 
       const result = await loadPermissionRules(1, { page: 1 })
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/roles/1/permission-rules', { params: { page: 1 } })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_rule', { params: { role_id: 1, page: 1 } })
       expect(result.success).toBe(true)
     })
   })
@@ -309,24 +328,113 @@ describe('permissionService', () => {
   })
 
   describe('searchUsers', () => {
-    it('应调用 GET /users 并传递 keyword 和默认 page_size=20', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp([{ id: 1, username: 'alice' }]))
+    it('应调用 GET /bo/user 并传递 keyword 和默认 page_size=20', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([{ id: 1, username: 'alice' }]))
 
       const result = await searchUsers('alice')
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/users', {
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/user', {
         params: { keyword: 'alice', page_size: 20 },
       })
       expect(result.success).toBe(true)
     })
 
     it('应合并额外 params', async () => {
-      mocks.apiV1Get.mockResolvedValueOnce(okResp([]))
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([]))
 
       await searchUsers('bob', { page: 2 })
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/users', {
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/user', {
         params: { keyword: 'bob', page_size: 20, page: 2 },
+      })
+    })
+  })
+
+  // ==================== P1-Base-03: 元数据缓存 /meta（D3 修复） ====================
+
+  describe('loadPermissionMeta（P1-Base-03）', () => {
+    beforeEach(() => {
+      invalidatePermissionMetaCache()
+      mocks.apiV2Get.mockReset()
+    })
+
+    it('API 成功时返回 meta 且标签函数 metaCache 优先', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({
+        resource_type_labels: { domain: '领域X' },
+        action_labels: { create: '新建' },
+        permission_level_labels: { read: { label: '只读X' } },
+      }))
+
+      const meta = await loadPermissionMeta()
+
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_dimension/meta')
+      expect(meta.resource_type_labels.domain).toBe('领域X')
+      // metaCache 优先于常量 fallback
+      expect(getResourceLabel('domain')).toBe('领域X')
+      expect(getActionLabel('create')).toBe('新建')
+      expect(getPermissionLevelLabel('read')).toBe('只读X')
+    })
+
+    it('API 异常时返回 null，标签走常量 fallback 不白屏', async () => {
+      mocks.apiV2Get.mockRejectedValueOnce(new Error('network down'))
+
+      const meta = await loadPermissionMeta()
+
+      expect(meta).toBeNull()
+      expect(getResourceLabel('domain')).toBe('领域')
+      expect(getActionLabel('create')).toBe('创建')
+      expect(getPermissionLevelLabel('read')).toBe('只读')
+    })
+
+    it('响应 success=false 时返回 null', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce({ success: false, message: 'err' })
+
+      const meta = await loadPermissionMeta()
+
+      expect(meta).toBeNull()
+    })
+
+    it('invalidatePermissionMetaCache 清除缓存后重新请求', async () => {
+      mocks.apiV2Get.mockResolvedValue(okResp({ resource_type_labels: { domain: '领域A' } }))
+
+      await loadPermissionMeta()
+      expect(mocks.apiV2Get).toHaveBeenCalledTimes(1)
+
+      invalidatePermissionMetaCache()
+      await loadPermissionMeta()
+      expect(mocks.apiV2Get).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('loadPermissionMetaWithScope（P1-Base-03 scopeCode 铁律）', () => {
+    beforeEach(() => {
+      mocks.apiV2Get.mockReset()
+    })
+
+    it('SCOPE_CODE_INVALID 时抛 ScopeCodeInvalidError 并带 available_scope_codes', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce({
+        success: false,
+        error: 'SCOPE_CODE_INVALID',
+        message: '范围编码（scope_code）无效',
+        available_scope_codes: ['SCP'],
+      })
+
+      await expect(
+        loadPermissionMetaWithScope({ scope_code: 'XXX' })
+      ).rejects.toMatchObject({
+        name: 'ScopeCodeInvalidError',
+        availableScopeCodes: ['SCP'],
+      })
+    })
+
+    it('成功时原样返回响应', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({}))
+
+      const r = await loadPermissionMetaWithScope({ scope_code: 'SCP' })
+
+      expect(r.success).toBe(true)
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_dimension/meta', {
+        params: { scope_code: 'SCP' },
       })
     })
   })

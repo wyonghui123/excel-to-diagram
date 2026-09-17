@@ -198,6 +198,49 @@ describe('CollapsiblePanel', () => {
     })
   })
 
+  describe('widthMode (NEW 2026-07-22)', () => {
+    it('默认 fluid 模式：展开时不锁 inline width，由 CSS 100% 接管', () => {
+      const wrapper = createWrapper({ defaultExpanded: true, defaultWidth: 280 })
+      // 默认 widthMode='fluid'，应该没有 inline style.width
+      const inlineStyle = wrapper.find('.collapsible-panel').attributes('style') || ''
+      expect(inlineStyle).not.toContain('width: 280px')
+      // root <div> 应该有 .collapsible-panel，CSS 默认 width: 100%
+      expect(wrapper.find('.collapsible-panel').exists()).toBe(true)
+    })
+
+    it('fluid 模式下根容器应用 width:100%（避免 sidebar 拖宽时面板只占 defaultWidth）', () => {
+      const wrapper = createWrapper({ defaultExpanded: true })
+      const rootStyle = wrapper.find('.collapsible-panel').element.style
+      // 测试环境会同步应用 CSS，这里通过类名判断模式 (cp--width-fixed 在 fluid 下不应该出现)
+      expect(wrapper.classes()).not.toContain('cp--width-fixed')
+    })
+
+    it('fixed 模式锁死 currentWidth (splitter 场景)', () => {
+      const wrapper = createWrapper({ widthMode: 'fixed', defaultExpanded: true, defaultWidth: 350 })
+      expect(wrapper.classes()).toContain('cp--width-fixed')
+      const inlineStyle = wrapper.find('.collapsible-panel').attributes('style') || ''
+      expect(inlineStyle).toContain('width: 350px')
+    })
+
+    it('折叠态 (collapsed) 总是覆盖成 48px，无论 widthMode', async () => {
+      const wrapperFixed = createWrapper({
+        widthMode: 'fixed',
+        defaultExpanded: false,
+        heightFull: true
+      })
+      const style = wrapperFixed.find('.collapsible-panel').attributes('style') || ''
+      expect(style).toContain('width: 48px')
+    })
+
+    it('widthMode 校验：非法值回退默认 (validator)', () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const wrapper = createWrapper({ widthMode: 'invalid', defaultExpanded: true })
+      // Vue validator 失败时控制台会有 warning，但组件仍能 mount
+      consoleWarn.mockRestore()
+      expect(wrapper.find('.collapsible-panel').exists()).toBe(true)
+    })
+  })
+
   describe('slots', () => {
     it('renders default slot content', () => {
       const wrapper = createWrapper({}, {
@@ -244,7 +287,7 @@ describe('CollapsiblePanel', () => {
 
     it('does not apply height when heightFull is false', () => {
       const wrapper = createWrapper({ heightFull: false })
-      const style = wrapper.find('.collapsible-panel').attributes('style')
+      const style = wrapper.find('.collapsible-panel').attributes('style') || ''
       expect(style).not.toContain('height')
     })
   })

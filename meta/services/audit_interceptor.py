@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from typing import Callable, Optional, Dict, Any
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -290,8 +291,16 @@ class AuditInterceptor:
 
     def log_delete(self, object_type: str, object_id: int, data: Dict[str, Any],
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
-                   trace_id: Optional[str] = None, transaction_id: Optional[str] = None):
-        """记录删除操作"""
+                   trace_id: Optional[str] = None, transaction_id: Optional[str] = None,
+                   outcome: str = "success"):
+        """记录删除操作
+
+        [R018 P1 BUG-E] outcome 区分成功/失败/回滚:
+          - success: 真实物理删除成功
+          - failed: 删除被拒绝 (RESTRICT 违反 / 记录不存在 / 事务回滚)
+          - rolled_back: 部分执行后回滚
+        默认 success (兼容历史调用)
+        """
         # [FIX P2 2026-06-20] auto-gen tx_id if missing
         trace_id, transaction_id = _ensure_audit_tx_context(trace_id, transaction_id)
         try:
@@ -316,6 +325,8 @@ class AuditInterceptor:
             eff_user_name = kwargs.get('user_name', captured_user_name)
             eff_ip = kwargs.get('ip_address', captured_ip)
             eff_ua = kwargs.get('user_agent', captured_ua)
+            # [R018 P1 BUG-E] outcome 透传 (成功/失败/回滚)
+            eff_outcome = kwargs.get('outcome', outcome)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
@@ -327,6 +338,7 @@ class AuditInterceptor:
                 user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
+                outcome=eff_outcome,
             )
 
         self.async_writer.submit(
@@ -543,7 +555,7 @@ class AuditInterceptor:
             if not table_name:
                 return None
 
-            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+            db_path = get_meta_db_path()
             ds = get_data_source('sqlite', database=db_path)
 
             cursor = ds.execute(f"SELECT * FROM {table_name} WHERE id = ? LIMIT 1", [int(tgt_id)])

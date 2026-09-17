@@ -44,11 +44,16 @@ class TestWriteQueueConfig:
         assert config.submit_timeout == 30.0
         assert config.operation_timeout == 60.0
         assert config.checkpoint_interval == 50
-        assert config.checkpoint_mode == "TRUNCATE"
+        # [V007.40 BUG-FIX] 默认值 TRUNCATE → PASSIVE
+        # 背景: V007.40 修了 sql_config.py 的默认值, 避免 pool 初始化时
+        #       走 TRUNCATE 截断 WAL → 读连接 mmap 视图失效 → disk I/O error.
+        assert config.checkpoint_mode == "PASSIVE"
 
     def test_checkpoint_mode_options(self):
         """测试检查点模式选项"""
-        for mode in ["TRUNCATE", "PASSIVE", "RESTART"]:
+        for mode in ["PASSIVE", "RESTART"]:
+            # [V007.40] TRUNCATE 从合法选项中移除 (避免意外触发)
+            # 仍可显式传 TRUNCATE 但不在 default 路径上
             config = WriteQueueConfig(checkpoint_mode=mode)
             assert config.checkpoint_mode == mode
 

@@ -8,7 +8,7 @@ cursor = conn.cursor()
 print("=== Latest audit logs ===")
 cursor.execute("""
     SELECT id, object_type, object_id, action, field_name, user_id, user_name, created_at
-    FROM audit_logs 
+    FROM v_audit_all 
     ORDER BY id DESC 
     LIMIT 10
 """)

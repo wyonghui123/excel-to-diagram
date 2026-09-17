@@ -1,0 +1,19 @@
+[Unit]
+Description=Staging unified_18081 (frontend SPA + API proxy)
+After=network-online.target staging-core.service staging-backend.service
+Wants=staging-core.service staging-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/app/staging/deploy/current
+Environment="BACKEND_PORT=13011"
+ExecStart=/opt/miniconda3-py39/bin/python3 /opt/app/staging/deploy/current/unified_18081.py
+Restart=always
+RestartSec=5
+User=nobody
+Group=nobody
+StandardOutput=append:/opt/app/staging/logs/unified_server.log
+StandardError=append:/opt/app/staging/logs/unified_server.log
+
+[Install]
+WantedBy=multi-user.target

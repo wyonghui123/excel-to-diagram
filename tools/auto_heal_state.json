@@ -1,0 +1,26 @@
+{
+  "heal_history": [
+    {
+      "ts": 1784638501.6051826,
+      "result": "FAIL",
+      "exit_before": -142925235574
+    },
+    {
+      "ts": 1784639701.5953765,
+      "result": "FAIL",
+      "exit_before": -142925235574
+    },
+    {
+      "ts": 1784641201.5832567,
+      "result": "FAIL",
+      "exit_before": -142925235574
+    },
+    {
+      "ts": 1784641801.5893064,
+      "result": "FAIL",
+      "exit_before": -142925235574
+    }
+  ],
+  "consecutive_fails": 11,
+  "daemon_started_ts": 0
+}

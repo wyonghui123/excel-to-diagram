@@ -45,7 +45,7 @@
           <div v-else-if="field.type === 'value_help'" class="filter-bar__value-help-wrap">
             <ValueHelpField
               :model-value="getModelValue(field.key)"
-              :value-help-config="field.valueHelpConfig || field.value_help"
+              :value-help-config="toFilterVhConfig(field.valueHelpConfig || field.value_help)"
               :placeholder="field.placeholder || '请选择' + field.label"
               :form-values="modelValue"
               @update:model-value="updateModel(field.key, $event)"
@@ -212,6 +212,13 @@ function getModelValue(key) {
   const val = props.modelValue?.[key]
   if (val === undefined || val === null) return ''
   return val
+}
+
+/** [FIX 2026-09-05 父组织树状 SearchHelp] 过滤场景保持下拉:
+ *  字段 value_help 改为 dialog/tree (如 org.parent_id) 后, 筛选栏回退 dropdown */
+function toFilterVhConfig(cfg) {
+  if (!cfg || cfg?.presentation?.result_type !== 'dialog') return cfg
+  return { ...cfg, presentation: { ...cfg.presentation, result_type: 'dropdown' } }
 }
 
 function updateModel(key, value) {

@@ -35,6 +35,14 @@ from meta.services.chain_owner_resolver import (
     resolve_root_owner as _chain_resolve_root_owner,
     resolve_root_product_id as _chain_resolve_root_product_id,
 )
+# [V2.2 2026-07-22] Spec 08 - 复用引擎新结构辅助函数 (Dict[str, Dict[str, Set]])
+from meta.services.dimension_scope_engine import (
+    _dim_has_any_values,
+    _dim_include_values,
+    _dim_is_wildcard,
+    _dim_exclude_values,
+    SYSTEM_LEVEL_BOS,
+)
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -47,7 +55,8 @@ logger = logging.getLogger(__name__)
 
 # [TBD-B] 关联操作字段名约定: 跟现有 object_id/record_id 一致
 _ASSOCIATE_SRC_KEY = 'src_id'
-_ASSOCIATE_DST_KEY = 'target_id'
+# [FIX BUG-V050 2026-07-10] 原值 'target_id' 是错的, bo.associate() 传 'tgt_id'
+_ASSOCIATE_DST_KEY = 'tgt_id'
 
 # [性能] 链向上追溯: 用单次 SQL JOIN 查 owner, 避免 N+1
 # HIERARCHY_CHAIN 顺序: product → version → domain → sub_domain (从顶层到底层)
@@ -264,8 +273,12 @@ _WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN = os.environ.get(
 # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验开关
 # 启用后, _check_dim_scope 在 role 循环前增加 perm 前置检查
 # Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+# [FIX BUG-V055 2026-07-12] 默认值改为 true: 写权限 dim scope 必须与功能权限联动
+#   根因: 关闭时, role A (read + dim scope 含制造云) + role B (create + dim scope 仅供应链云)
+#   的场景下, role A 的 dim scope 误放行 create 操作 (role A 没有 create 权限)
+#   开启后, dim scope 检查前先校验该 role 是否有对应功能权限, 无则跳过
 _WRITE_SCOPE_V2_1_PERM_CHECK = os.environ.get(
-    'WRITE_SCOPE_V2_1_PERM_CHECK', 'false'
+    'WRITE_SCOPE_V2_1_PERM_CHECK', 'true'
 ).lower() in ('true', '1', 'yes')
 
 # [V2.1 2026-06-22] action → perm 后缀映射
@@ -276,6 +289,13 @@ _ACTION_TO_PERM_SUFFIX = {
     'associate': 'update',   # 关联动作算 update
     'dissociate': 'delete',  # 解除关联算 delete
 }
+
+# [Spec 19 M2 2026-09-05] 安全实体不走维度写校验
+# org/user/user_group/role 等系统级对象的写范围由 OrgAdminGuardInterceptor(P26)
+# 行级委托校验 + 端点侧校验负责；维度模型（product/version/domain/...）不覆盖
+# 这些对象——用户权限集无维度配置时 dim scope 恒不命中，会把受托管理员的
+# org/user 写操作（含成员关联）全部误拒。
+_SCOPE_SKIP_OBJECTS = set(SYSTEM_LEVEL_BOS) | {'org', 'org_member'}
 
 
 class WriteScopeInterceptor(Interceptor):
@@ -293,6 +313,84 @@ class WriteScopeInterceptor(Interceptor):
     @property
     def priority(self) -> int:
         return 35
+
+    # ========================================================================
+    # [P4-T3 / P4-T5 2026-07-19] PDP 入口 + V2.1 写路径联动
+    # ========================================================================
+    def _call_pdp(self, context, action: str, resource_type: str,
+                  resource=None, resource_id=None):
+        """[P4-T3] 调用 PermissionResolver.check() (PDP 入口)
+
+        Phase 4 渐进式改造:
+          - 当前: 仅记录决策日志, 不改变原写路径校验
+          - 后续 Phase 5+: 由 PDP 决策
+
+        Returns:
+            bool: True=Allow, False=Deny, None=PDP 不可用 (fallback)
+        """
+        try:
+            from meta.services.permission_resolver import PermissionResolver
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                return None
+            user = getattr(context, 'user', None) or getattr(context, 'current_user', None)
+            if user is None:
+                return None
+            resolver = PermissionResolver(ds)
+            return resolver.check(
+                user=user,
+                action=action,
+                resource_type=resource_type,
+                resource=resource,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f'[P4-T3 _call_pdp] fallback to legacy: {e}'
+            )
+            return None
+
+    def _check_write_read_linkage(self, context, resource_type: str,
+                                   resource_id) -> bool:
+        """[P4-T5] V2.1 写路径联动 — 写操作前先调用读路径 PDP
+
+        Spec §3.2.1 V2.1: "不可见资源的写操作被拒绝"
+
+        流程:
+          1. 调用 PermissionResolver.check(action='read', ...)
+          2. 若读不可见 → 写操作拒绝
+
+        Args:
+            context: ActionContext
+            resource_type: BO 名
+            resource_id: 资源 ID
+
+        Returns:
+            True=可读可见 (允许写), False=不可见 (拒绝写), None=PDP 不可用
+        """
+        try:
+            from meta.services.permission_resolver import PermissionResolver
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                return None
+            user = getattr(context, 'user', None) or getattr(context, 'current_user', None)
+            if user is None:
+                return None
+            resolver = PermissionResolver(ds)
+            # 读路径 PDP
+            return resolver.check(
+                user=user,
+                action='read',
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f'[P4-T5 _check_write_read_linkage] fallback: {e}'
+            )
+            return None
 
     def should_execute(self, context: 'ActionContext') -> bool:
         # 仅对写操作生效, 读操作已有 DataPermissionInterceptor
@@ -334,6 +432,11 @@ class WriteScopeInterceptor(Interceptor):
             logger.warning('write_scope: user_info 缺少 user_id, 跳过 (防御性)')
             return
 
+        # [Spec 19 M2] 安全实体（org/user/role/...）跳过维度写校验：
+        # 写范围由 OrgAdminGuardInterceptor(P26 行级委托) + 端点侧校验负责
+        if context.object_type in _SCOPE_SKIP_OBJECTS:
+            return
+
         # step 1: admin / '*' 跳过
         if is_admin(user_info):
             return
@@ -343,6 +446,25 @@ class WriteScopeInterceptor(Interceptor):
         if '*' in permissions:
             return
 
+        # [Phase 2 2026-07-25] Feature flag 切换到 IntentScopeAdapter (新路径)
+        # Spec: docs/spec_权限体系升级/12_implementation_plan.md P2.13
+        # 当 effective_intents_enabled=True 时, 用 permission_set_effective_intents 表
+        # (Layer 1 事实层) 替代 _check_target (dim scope + visibility + owner chain)
+        # 默认关闭, 不影响现有系统
+        # [Note] WriteScopeDenied 会被正常抛出 (语义: 拒绝), 其他异常回退到 legacy
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                if self._apply_effective_intents_write_check(context, user_id):
+                    return  # 新路径已应用, 跳过原逻辑
+        except WriteScopeDenied:
+            raise  # 拒绝异常向上抛 (保持原语义)
+        except Exception as e:
+            logger.warning(
+                f'[P2-WriteHook] effective_intents check failed, '
+                f'fallback to legacy: {e}'
+            )
+
         # 遍历 target (主对象 + 关联操作 src/target)
         for side, target in self._get_targets(context):
             self._check_target(context, user_id, side, target)
@@ -351,6 +473,180 @@ class WriteScopeInterceptor(Interceptor):
         # Spec: docs/specs/spec-write-scope-policy-v2.md FR-002/FR-003/FR-005/FR-006
         self._validate_fk_scope_policies(context, user_id)
 
+    def _apply_effective_intents_write_check(
+        self, context: 'ActionContext', user_id: int
+    ) -> bool:
+        """[Phase 2 P2.13] 使用 IntentScopeAdapter 校验写权限
+
+        Returns:
+            True  — 已校验通过 (调用方应跳过原逻辑)
+            False — 未应用 (调用方应回退到原逻辑)
+
+        [拒绝语义]
+            任一 target 拒绝 → 抛 WriteScopeDenied (调用方 before_action 直接抛出)
+
+        [Feature flag]
+            effective_intents_enabled=True 时启用
+            失败时回退到原逻辑 (防御性)
+
+        [多 target 语义]
+            associate/dissociate: src + dst 两个 target 都要通过才放行
+            crud_create: 1 个 parent target (parent 必须在 scope 内)
+            crud_update/crud_delete: 1 个 primary target
+        """
+        try:
+            from meta.core.intent_scope_adapter import IntentScopeAdapter
+
+            db_path = self._get_db_path(context)
+            if not db_path:
+                return False
+
+            role_ids = self._get_user_role_ids(context, user_id)
+            if not role_ids:
+                return False  # 无 role, 回退到 legacy (legacy 也会拒绝)
+
+            targets = self._get_targets(context)
+            if not targets:
+                # 顶层 BO create 等场景无 target, legacy 也不处理
+                # 但回退让 legacy 决定 (保持原行为)
+                return False
+
+            action_name = self._get_action_name_for_write(context)
+
+            adapter = IntentScopeAdapter(db_path)
+
+            for side, target in targets:
+                object_type = target['type']
+                target_id = target['id']
+                if not target_id:
+                    continue
+
+                result = adapter.check_record_allowed(
+                    role_ids=role_ids,
+                    bo_id=object_type,
+                    action_name=action_name,
+                    record_id=target_id,
+                    user_id=user_id,
+                )
+
+                # [P5 修复 2026-07-26] 区分 source 语义:
+                # - 'record_not_found': 记录不存在, 回退到 legacy (legacy 也会抛 WriteScopeDenied,
+                #   但语义正确, B2 测试期望 404/拒绝)
+                # - 'no_intent_allows_all': 无 Intent 配置, 回退到 legacy 5 步检查
+                #   (legacy 包含 owner chain + dim scope + visibility 完整链路, C1/D2 测试依赖)
+                # - 其他 not allowed (exclude/default_deny/no_role): 真正拒绝, 抛 WriteScopeDenied
+                source = result.get('source')
+                if source in ('record_not_found', 'no_intent_allows_all'):
+                    logger.info(
+                        f'[P2-WriteHook] fallback to legacy: user={user_id} '
+                        f'bo={object_type} id={target_id} action={action_name} '
+                        f'source={source} reason={result.get("reason")}'
+                    )
+                    return False  # 回退到 legacy 5 步检查
+
+                if not result['allowed']:
+                    # 真正拒绝 → 抛 WriteScopeDenied (保持原异常类型)
+                    logger.info(
+                        f'[P2-WriteHook] denied: user={user_id} '
+                        f'bo={object_type} id={target_id} action={action_name} '
+                        f'source={source} reason={result.get("reason")}'
+                    )
+                    raise WriteScopeDenied(
+                        object_type, target_id, user_id,
+                        {
+                            'source': source,
+                            'reason': result.get('reason'),
+                            'hook': 'effective_intents',
+                        },
+                        side,
+                    )
+
+                # [P5 修复 2026-07-26] 补充 visibility 检查 (V1.1.6 H13 严格化)
+                # IntentScopeAdapter 只校验 include/exclude SQL, 不校验 visibility
+                # 写权限 = owner chain 命中 OR (dim_scope 命中 AND visibility=public)
+                # create_parent / relationship update 例外: 不修改 BO 本身, 仅作 chain 引用
+                # 典型场景: B1/D2 - admin 创建 sub_domain/BO (visibility=private),
+                #   wyonghui dim_scope 匹配 (domain=2200) 但不应能修改非 owner 的 private 资源
+                is_create_path = (side == 'create_parent')
+                is_relationship_update = (
+                    context.action == 'crud_update' and object_type == 'relationship'
+                )
+                # owner 命中时 visibility 不限制 (IntentScopeAdapter 已检查 _is_owner)
+                is_owner_match = (result.get('source') == 'owner')
+                if (
+                    not is_create_path
+                    and not is_relationship_update
+                    and not is_owner_match
+                ):
+                    record = self._load_record(context, object_type, target_id)
+                    if record:
+                        visibility_check = self._check_visibility(
+                            context, object_type, record
+                        )
+                        if not visibility_check.get('allow'):
+                            logger.info(
+                                f'[P2-WriteHook] denied (visibility): user={user_id} '
+                                f'bo={object_type} id={target_id} action={action_name} '
+                                f'source={source} visibility={visibility_check.get("visibility")}'
+                            )
+                            raise WriteScopeDenied(
+                                object_type, target_id, user_id,
+                                {
+                                    'source': 'effective_intents_visibility_check',
+                                    'reason': (
+                                        f"dim scope matched but visibility="
+                                        f"{visibility_check.get('visibility')}"
+                                    ),
+                                    'hook': 'effective_intents',
+                                    'visibility': visibility_check.get('visibility'),
+                                },
+                                side,
+                            )
+
+            # 所有 target 都允许
+            logger.info(
+                f'[P2-WriteHook] allowed: user={user_id} '
+                f'bo={context.object_type} action={action_name} '
+                f'targets={len(targets)}'
+            )
+            return True
+        except WriteScopeDenied:
+            raise  # 重新抛出, 不吞掉
+        except Exception as e:
+            logger.warning(f'[P2-WriteHook] internal error: {e}')
+            return False
+
+    def _get_db_path(self, context: 'ActionContext') -> Optional[str]:
+        """[Phase 2] 从 context 获取 db_path
+
+        复用 DataPermissionInterceptor 同名方法的逻辑
+        """
+        ds = getattr(context, 'data_source', None)
+        if ds is not None:
+            db_path = getattr(ds, 'db_path', None) or getattr(ds, '_db_path', None)
+            if db_path:
+                return db_path
+        # fallback: 从环境变量或默认路径
+        return os.environ.get('DB_PATH') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'db', 'archdata.db'
+        )
+
+    def _get_action_name_for_write(self, context: 'ActionContext') -> str:
+        """[Phase 2] 将 context.action 映射为 Intent action_name
+
+        Returns:
+            'create' / 'update' / 'delete'
+
+        [映射规则] (跟 _ACTION_TO_PERM_SUFFIX 一致)
+            crud_create → 'create'
+            crud_update → 'update'
+            crud_delete → 'delete'
+            associate   → 'update'  (关联动作算 update)
+            dissociate  → 'delete'  (解除关联算 delete)
+        """
+        return _ACTION_TO_PERM_SUFFIX.get(context.action, 'update')
+
     def _get_targets(self, context: 'ActionContext') -> List[Tuple[str, Dict[str, Any]]]:
         """获取需要校验的 target 列表
 
@@ -358,12 +654,26 @@ class WriteScopeInterceptor(Interceptor):
             [(side, {'type': bo, 'id': int}), ...]
         """
         if context.action in ('associate', 'dissociate'):
-            return [
-                ('src', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_SRC_KEY)}),
-                ('dst', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_DST_KEY)}),
-            ]
+            # [FIX BUG-V050 2026-07-10] 兼容多种字段名
+            #   - bo.associate() 传 src_id/tgt_id
+            #   - 旧代码只识别 src_id/tgt_id (已正确)
+            #   但前端可能传 source_id/target_id/source_bo_id/target_bo_id
+            src_id = (
+                context.params.get(_ASSOCIATE_SRC_KEY)
+                or context.params.get('source_id')
+                or context.params.get('source_bo_id')
+            )
+            dst_id = (
+                context.params.get(_ASSOCIATE_DST_KEY)
+                or context.params.get('target_id')
+                or context.params.get('target_bo_id')
+            )
+            targets = []
+            if src_id:
+                targets.append(('src', {'type': context.object_type, 'id': src_id}))
+            if dst_id:
+                targets.append(('dst', {'type': context.object_type, 'id': dst_id}))
+            return targets
         # [H14.1 2026-06-15] create 操作: 新 record 没 id, 用 parent (e.g. version_id) 加载
         #   例: 创建 domain 时, parent_type=version, parent_id 从 params.version_id 取
         #   顶层 BO (product) create 无 parent → 跳过 (让 functional perm 阶段处理)
@@ -734,8 +1044,8 @@ class WriteScopeInterceptor(Interceptor):
           - 读权限: derive_data_conditions 包含向上展开, 用于过滤查询结果
           - 写权限 (update/delete): 只匹配"直接声明的维度层级", 不匹配向上展开
             例: 角色 5970 配 domain=[703]
-              → update domain 703: domain 在直接声明中 → matched ✓
-              → update product 475: product 不在直接声明中 (向上展开) → not matched ✓
+              → update domain 703: domain 在直接声明中 → matched
+              → update product 475: product 不在直接声明中 (向上展开) → not matched
           - 写权限 (create): 检查 parent 下是否有用户 scope 内的 child
             例: create domain under version 764
               → version 764 下有 domain 703 (在 scope 内) → 允许创建
@@ -787,7 +1097,7 @@ class WriteScopeInterceptor(Interceptor):
                 logger.warning(f"[WriteScope ANNOTATION] engine init failed: {type(e).__name__}: {e}", exc_info=True)
                 return {'matched': False, 'roles_checked': []}
             roles_checked = []
-            for role_id in role_ids:
+            for permission_set_id in role_ids:
                 try:
                     # [V2.1.13] cascade perm check 用 parent 类型 perm
                     # 从 annotation.record.target_type 获取 parent 类型
@@ -799,20 +1109,20 @@ class WriteScopeInterceptor(Interceptor):
                                 params_target_type = params_target_type.split(' - ')[0].strip()
                             parent_type = params_target_type or parent_type
                         parent_perm = f'{parent_type}:{target_perm_suffix}' if parent_type else target_perm
-                        role_perm_codes = self._get_role_perm_codes(context, role_id)
-                        if not self._role_has_perm(role_id, parent_perm, role_perm_codes):
+                        role_perm_codes = self._get_role_perm_codes(context, permission_set_id)
+                        if not self._role_has_perm(permission_set_id, parent_perm, role_perm_codes):
                             roles_checked.append({
-                                'role_id': role_id, 'cond': None,
+                                'permission_set_id': permission_set_id, 'cond': None,
                                 'skipped': 'missing_parent_perm', 'perm_required': parent_perm,
                             })
                             continue
 
-                    expanded = engine.expand_dimension_values(role_id)
+                    expanded = engine.expand_dimension_values(permission_set_id)
                     parent_match = self._check_ancestor_dim_scope(
                         context, object_type, record, expanded
                     )
                     entry = {
-                        'role_id': role_id, 'cond': None,
+                        'permission_set_id': permission_set_id, 'cond': None,
                         'direct_dim': False, 'parent_match': parent_match,
                         'cascade': 'annotation-to-parent',
                     }
@@ -822,7 +1132,7 @@ class WriteScopeInterceptor(Interceptor):
                     if parent_match:
                         return {'matched': True, 'roles_checked': roles_checked}
                 except Exception as e:
-                    logger.debug(f'annotation cascade check failed for role {role_id}: {e}')
+                    logger.debug(f'annotation cascade check failed for role {permission_set_id}: {e}')
                     continue
             return {'matched': False, 'roles_checked': roles_checked}
 
@@ -834,41 +1144,71 @@ class WriteScopeInterceptor(Interceptor):
             logger.debug(f'load DimensionScopeEngine failed: {e}')
             return {'matched': False, 'roles_checked': []}
 
-        for role_id in role_ids:
+        # [P1-T4 2026-07-19] 快速路径: 检查角色是否有 scope_mode='all' 的维度
+        # Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T4
+        # 当角色任一维度的 scope_mode='all' 时, expand 返回全量 ID,
+        # derive_data_conditions 生成的条件必然匹配, 可直接跳过逐条 SQL 检查
+        # 语义: scope_mode='all' = 该维度无限制 → 写路径维度校验必然通过
+        try:
+            scope_all_roles = self._get_scope_all_roles(context, role_ids)
+        except Exception:
+            scope_all_roles = set()
+
+        for permission_set_id in role_ids:
             try:
+                # [P1-T4] 快速路径: scope_mode='all' 的角色直接放行
+                if permission_set_id in scope_all_roles:
+                    roles_checked.append({
+                        'permission_set_id': permission_set_id, 'cond': 'scope_mode=all',
+                        'direct_dim': True, 'fast_path': True,
+                    })
+                    return {'matched': True, 'roles_checked': roles_checked}
+
                 # [V2.1.2 2026-06-22] 前置 perm 检查: 检查该 ROLE 自身是否有 target perm
                 # 修复 V2.1 bug: 之前用 user 全量 perm, 导致 role A (read) + role B (write)
                 # 情况下, role A 的 dim scope 命中会被误放行
-                # V2.1.2: 查询 role_permissions JOIN permissions WHERE role_id = ?
+                # V2.1.2: 查询 permission_set_permissions JOIN permissions WHERE permission_set_id = ?
                 if _WRITE_SCOPE_V2_1_PERM_CHECK:
-                    role_perm_codes = self._get_role_perm_codes(context, role_id)
-                    if not self._role_has_perm(role_id, target_perm, role_perm_codes):
+                    role_perm_codes = self._get_role_perm_codes(context, permission_set_id)
+                    if not self._role_has_perm(permission_set_id, target_perm, role_perm_codes):
                         roles_checked.append({
-                            'role_id': role_id,
+                            'permission_set_id': permission_set_id,
                             'cond': None,
                             'skipped': 'missing_functional_perm',
                             'perm_required': target_perm,
                         })
                         logger.debug(
-                            f'_check_dim_scope: role={role_id} missing {target_perm}, '
+                            f'_check_dim_scope: role={permission_set_id} missing {target_perm}, '
                             f'skipping dim scope check'
                         )
                         continue
 
                 # [V1.1.8] 写权限: 只用直接声明的维度
-                expanded = engine.expand_dimension_values(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
                 # 检查 object_type 是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
+                # [V2.2 2026-07-22] Spec 08: 新结构 Dict[str, Dict[str, Set]]
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
                     # 直接声明: 用 derive_data_conditions 的 cond 匹配
-                    conditions = engine.derive_data_conditions(role_id)
+                    conditions = engine.derive_data_conditions(permission_set_id)
                     cond_expr = conditions.get(object_type)
+                    # [V2.2] wildcard-only (无 exclude) → 引擎跳过该维度生成条件 → 全可见
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
                     role_check_entry = {
-                        'role_id': role_id, 'cond': cond_expr,
+                        'permission_set_id': permission_set_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
                     }
+                    if is_wildcard_only:
+                        role_check_entry['wildcard'] = True
                     if _WRITE_SCOPE_V2_1_PERM_CHECK:
                         role_check_entry['perm_check'] = 'passed'
                     roles_checked.append(role_check_entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -876,10 +1216,10 @@ class WriteScopeInterceptor(Interceptor):
                 elif is_create:
                     # [V1.1.8] create 路径: object_type 是 parent, 检查其下是否有 scope 内的 child
                     parent_match = self._check_parent_dim_scope(
-                        context, object_type, record, expanded, engine, role_id
+                        context, object_type, record, expanded, engine, permission_set_id
                     )
                     parent_entry = {
-                        'role_id': role_id, 'cond': None,
+                        'permission_set_id': permission_set_id, 'cond': None,
                         'direct_dim': False, 'parent_match': parent_match,
                     }
                     if _WRITE_SCOPE_V2_1_PERM_CHECK:
@@ -894,7 +1234,7 @@ class WriteScopeInterceptor(Interceptor):
                         context, object_type, record, expanded
                     )
                     ancestor_entry = {
-                        'role_id': role_id, 'cond': None,
+                        'permission_set_id': permission_set_id, 'cond': None,
                         'direct_dim': False, 'ancestor_match': ancestor_match,
                     }
                     if _WRITE_SCOPE_V2_1_PERM_CHECK:
@@ -903,10 +1243,31 @@ class WriteScopeInterceptor(Interceptor):
                     if ancestor_match:
                         return {'matched': True, 'roles_checked': roles_checked}
             except Exception as e:
-                logger.debug(f'derive_data_conditions failed for role {role_id}: {e}')
+                logger.debug(f'derive_data_conditions failed for role {permission_set_id}: {e}')
                 continue
 
         return {'matched': False, 'roles_checked': roles_checked}
+
+    def _get_scope_all_roles(self, context: 'ActionContext', role_ids: List[int]) -> Set[int]:
+        """[P1-T4 2026-07-19] 获取有 scope_mode='all' 配置的角色 ID 集合
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T4
+        用途: 写路径快速短路 — scope_mode='all' 的角色维度校验必然通过
+        返回: 有任一维度配置 scope_mode='all' 的 permission_set_id 集合
+        """
+        if not role_ids:
+            return set()
+        try:
+            placeholders = ','.join('?' * len(role_ids))
+            cursor = context.data_source.execute(
+                f"SELECT DISTINCT permission_set_id FROM permission_set_dimension_scopes "
+                f"WHERE permission_set_id IN ({placeholders}) AND scope_mode = 'all'",
+                role_ids
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug(f'[_get_scope_all_roles] query failed: {e}')
+            return set()
 
     # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验 helper 方法
     def _get_user_perm_codes(self, context: 'ActionContext') -> set:
@@ -936,16 +1297,16 @@ class WriteScopeInterceptor(Interceptor):
             pass
         return set()
 
-    def _get_role_perm_codes(self, context: 'ActionContext', role_id: int) -> set:
+    def _get_role_perm_codes(self, context: 'ActionContext', permission_set_id: int) -> set:
         """[V2.1.2] 获取指定 role 的 perm codes (role-specific, NOT user-wide)
 
         修复 V2.1 bug: 之前用 _get_user_perm_codes (user 全量), 导致
         multi-role 用户的 read-only role 的 dim scope 命中会被误放行.
 
         Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
-        数据源: role_permissions JOIN permissions WHERE role_id = ?
+        数据源: permission_set_permissions JOIN permissions WHERE permission_set_id = ?
 
-        [CACHE] per-request 缓存在 context._role_perm_codes_cache[role_id]
+        [CACHE] per-request 缓存在 context._role_perm_codes_cache[permission_set_id]
         """
         try:
             # per-request cache
@@ -953,35 +1314,35 @@ class WriteScopeInterceptor(Interceptor):
             if cache is None:
                 cache = {}
                 context._role_perm_codes_cache = cache
-            if role_id in cache:
-                return cache[role_id]
+            if permission_set_id in cache:
+                return cache[permission_set_id]
 
             # 查询 role 自身的 perm codes
             ds = getattr(context, 'data_source', None)
             if ds is None:
-                cache[role_id] = set()
+                cache[permission_set_id] = set()
                 return set()
 
             rows = ds.execute(
                 "SELECT p.code FROM permissions p "
-                "JOIN role_permissions rp ON p.id = rp.permission_id "
-                "WHERE rp.role_id = ?",
-                [role_id],
+                "JOIN permission_set_permissions rp ON p.id = rp.permission_id "
+                "WHERE rp.permission_set_id = ?",
+                [permission_set_id],
             ).fetchall()
             codes = {row[0] for row in rows}
-            cache[role_id] = codes
+            cache[permission_set_id] = codes
             return codes
         except Exception as e:
-            logger.debug(f'_get_role_perm_codes(role_id={role_id}) failed: {e}')
+            logger.debug(f'_get_role_perm_codes(permission_set_id={permission_set_id}) failed: {e}')
             return set()
 
     def _role_has_perm(
-        self, role_id: int, target_perm: str, perm_codes: set
+        self, permission_set_id: int, target_perm: str, perm_codes: set
     ) -> bool:
         """[V2.1] 检查 perm_codes 中是否含 target_perm (role-specific 或 user-wide)
 
         Args:
-            role_id: role ID (保留用于 logging)
+            permission_set_id: role ID (保留用于 logging)
             target_perm: 'service_module:update' 等
             perm_codes: 候选 perm code 集合 (V2.1.2 应为 role-specific)
 
@@ -1031,17 +1392,29 @@ class WriteScopeInterceptor(Interceptor):
             logger.debug(f'load DimensionScopeEngine failed: {e}')
             return {'matched': False, 'roles_checked': []}
 
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                expanded = engine.expand_dimension_values(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
                 # 检查 parent 对象是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
-                    conditions = engine.derive_data_conditions(role_id)
+                # [V2.2 2026-07-22] Spec 08: 新结构
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
+                    conditions = engine.derive_data_conditions(permission_set_id)
                     cond_expr = conditions.get(object_type)
-                    roles_checked.append({
-                        'role_id': role_id, 'cond': cond_expr,
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
+                    entry = {
+                        'permission_set_id': permission_set_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
-                    })
+                    }
+                    if is_wildcard_only:
+                        entry['wildcard'] = True
+                    roles_checked.append(entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -1051,13 +1424,13 @@ class WriteScopeInterceptor(Interceptor):
                     context, object_type, record, expanded
                 )
                 roles_checked.append({
-                    'role_id': role_id, 'cond': None,
+                    'permission_set_id': permission_set_id, 'cond': None,
                     'direct_dim': False, 'ancestor_match': ancestor_match,
                 })
                 if ancestor_match:
                     return {'matched': True, 'roles_checked': roles_checked}
             except Exception as e:
-                logger.debug(f'derive_data_conditions failed for role {role_id}: {e}')
+                logger.debug(f'derive_data_conditions failed for role {permission_set_id}: {e}')
                 continue
 
         # [FIX FR-005 2026-06-23] 决策埋点 - dim_scope 未命中 (annotation-permission-hardening)
@@ -1086,6 +1459,11 @@ class WriteScopeInterceptor(Interceptor):
 
         不走 _check_parent_dim_scope (语义: parent 下是否有 scope 内的 child),
         因为 annotation 不是 HIERARCHY_CHAIN 的 child.
+
+        [FIX BUG-V058 2026-07-12] 添加 V2.1 perm check:
+          annotation 的写权限跟随 parent, dim scope 检查前需校验 role 是否有
+          parent_type:create 权限. 否则 biz 角色 (BO read + MFG dim scope)
+          会在 MFG BO 下误放行 annotation create.
         """
         role_ids = self._get_user_role_ids(context, user_id)
         if not role_ids:
@@ -1099,17 +1477,41 @@ class WriteScopeInterceptor(Interceptor):
             logger.debug(f'load DimensionScopeEngine failed: {e}')
             return {'matched': False, 'roles_checked': []}
 
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                expanded = engine.expand_dimension_values(role_id)
+                # [FIX BUG-V058] V2.1 perm check: annotation 写权限跟随 parent
+                if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                    parent_perm = f'{object_type}:create'
+                    role_perm_codes = self._get_role_perm_codes(context, permission_set_id)
+                    if not self._role_has_perm(permission_set_id, parent_perm, role_perm_codes):
+                        roles_checked.append({
+                            'permission_set_id': permission_set_id, 'cond': None,
+                            'skipped': 'missing_parent_perm',
+                            'perm_required': parent_perm,
+                        })
+                        continue
+
+                expanded = engine.expand_dimension_values(permission_set_id)
                 # 检查 parent 对象是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
-                    conditions = engine.derive_data_conditions(role_id)
+                # [V2.2 2026-07-22] Spec 08: 新结构
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
+                    conditions = engine.derive_data_conditions(permission_set_id)
                     cond_expr = conditions.get(object_type)
-                    roles_checked.append({
-                        'role_id': role_id, 'cond': cond_expr,
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
+                    entry = {
+                        'permission_set_id': permission_set_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
-                    })
+                    }
+                    if is_wildcard_only:
+                        entry['wildcard'] = True
+                    roles_checked.append(entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -1119,13 +1521,13 @@ class WriteScopeInterceptor(Interceptor):
                     context, object_type, record, expanded
                 )
                 roles_checked.append({
-                    'role_id': role_id, 'cond': None,
+                    'permission_set_id': permission_set_id, 'cond': None,
                     'direct_dim': False, 'ancestor_match': ancestor_match,
                 })
                 if ancestor_match:
                     return {'matched': True, 'roles_checked': roles_checked}
             except Exception as e:
-                logger.debug(f'derive_data_conditions failed for role {role_id}: {e}')
+                logger.debug(f'derive_data_conditions failed for role {permission_set_id}: {e}')
                 continue
 
         return {'matched': False, 'roles_checked': roles_checked}
@@ -1188,7 +1590,7 @@ class WriteScopeInterceptor(Interceptor):
             return self._check_ancestor_dim_scope(context, target_type, parent_record, expanded)
 
         from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_ANCHOR, EXTENDED_CHAIN_PARENT
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
         current_id = record.get('id')
         if not current_id:
@@ -1235,6 +1637,27 @@ class WriteScopeInterceptor(Interceptor):
                 logger.info(f'[WriteScope EXT_CHAIN] ABORT: object_type={object_type} not in HIERARCHY_CHAIN after {visited} steps')
                 return False  # visited 用尽仍未进入 chain, 异常
 
+            # [FIX BUG-V059 2026-07-12] EXT_CHAIN 步进后检查步进目标层级的直接匹配
+            # 场景: service_module delete, EXT_CHAIN 步进到 sub_domain(299)
+            # dim scope 声明在 sub_domain=[299], 但 ancestor 循环从 obj_idx-1 开始
+            # (跳过 sub_domain 自身), 导致 sub_domain 级别的 dim scope 永远不会被匹配
+            # 修复: 步进后先检查 current_id 是否在 expanded[object_type] 中
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            step_dim_data = expanded.get(object_type)
+            if _dim_has_any_values(step_dim_data):
+                # wildcard-only (无 exclude) → 跳过该维度 (祖先层全可见)
+                if _dim_is_wildcard(step_dim_data) and not _dim_exclude_values(step_dim_data):
+                    logger.debug(
+                        f'[WriteScope EXT_CHAIN] wildcard-only match: {object_type} 全可见'
+                    )
+                    return True
+                # 仅 include 用于祖先匹配 (exclude 不参与祖先链推导)
+                if current_id in _dim_include_values(step_dim_data):
+                    logger.debug(
+                        f'[WriteScope EXT_CHAIN] direct match: {object_type}({current_id}) in dim scope'
+                    )
+                    return True
+
         obj_dim = object_type
 
         # 找 object_type (或锚点 dim) 在 chain 中的位置
@@ -1245,12 +1668,22 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 沿 chain 向上找, 检查每个祖先是否在直接声明的维度中
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
         for ancestor_idx in range(obj_idx - 1, -1, -1):
             ancestor_dim = HIERARCHY_CHAIN[ancestor_idx]
-            if ancestor_dim not in expanded or not expanded[ancestor_dim]:
+            ancestor_data = expanded.get(ancestor_dim)
+            if not _dim_has_any_values(ancestor_data):
                 continue
 
-            ancestor_ids = expanded[ancestor_dim]
+            # wildcard-only (无 exclude) → 跳过该维度 (祖先层全可见)
+            if _dim_is_wildcard(ancestor_data) and not _dim_exclude_values(ancestor_data):
+                logger.debug(
+                    f'[WriteScope ANCESTOR] wildcard-only match: {ancestor_dim} 全可见'
+                )
+                return True
+
+            # 仅 include 用于祖先匹配 (exclude 不参与祖先链推导)
+            ancestor_ids = _dim_include_values(ancestor_data)
 
             # 从 current_id (锚点 id) 沿 chain 向上逐步查到 ancestor_dim
             step_id = current_id
@@ -1306,6 +1739,10 @@ class WriteScopeInterceptor(Interceptor):
         - delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
         - 原因: 删除关系影响两端, 需要两端都有写权限
         - 参考: 用户反馈 "实例的删除权限难道不是依赖源和目标来的吗, 参考写的权限"
+        [FIX BUG-V057 2026-07-12] delete 改为与 create/update 一致: 任一端在 scope 即可
+        - 关系的写权限基于源业务对象 (owner chain + dim scope 都只沿 source_bo_id 追溯)
+        - delete 不应比 create/update 更严格: 用户可以在自己 scope 内删除关系
+        - 实际场景: ITTF01(SCM) → ECN10(MFG), SCM 用户应可删除此关系 (源端在 scope)
         """
         # [V1.2.0] Functional perm gate: 防止"只读 user 误创关系"
         # 仅对 relationship 操作生效 (object_type 在 _check_dim_scope 调用前已路由到此)
@@ -1421,6 +1858,9 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 检查每个 BO 链上每一级 ancestor dim 是否在 expanded scope 内
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+        #   - wildcard-only (无 exclude) → 该维度全可见 → 祖先链直接匹配
+        #   - exclude/wildcard+exclude 不参与祖先链推导, 只匹配 include
         ancestor_field_to_dim = {
             'sub_domain_id': 'sub_domain',
             'domain_id': 'domain',
@@ -1438,32 +1878,34 @@ class WriteScopeInterceptor(Interceptor):
                     continue
                 for field, dim in ancestor_field_to_dim.items():
                     ancestor_id = row[['sub_domain_id', 'domain_id', 'version_id', 'product_id'].index(field) + 1]
-                    if ancestor_id and dim in expanded and expanded[dim] and ancestor_id in expanded[dim]:
+                    if not ancestor_id:
+                        continue
+                    dim_data = expanded.get(dim)
+                    if not _dim_has_any_values(dim_data):
+                        continue
+                    # wildcard-only (无 exclude) → 该维度全可见
+                    if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                        side_matches[side] = True
+                        break
+                    # 仅 include 用于祖先匹配
+                    if ancestor_id in _dim_include_values(dim_data):
                         side_matches[side] = True
                         break
                 break  # 每个 bo_id 只有一行
 
         # 判定最终结果
-        if is_delete_path:
-            # delete: source 和 target 都必须在 scope 内
-            src_ok = side_matches.get('source', False)
-            tgt_ok = side_matches.get('target', False)
-            if src_ok and tgt_ok:
-                return True
-            # 设置失败侧信息用于错误消息
-            if not src_ok and not tgt_ok:
-                context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})'
-            elif not src_ok:
-                context._rel_failed_side = f'源业务对象({src_code})'
-            else:
-                context._rel_failed_side = f'目标业务对象({tgt_code})'
-            return False
-        else:
-            # create/update: 任一端 (source 或 target) 的 chain 在 scope 内即可
-            if side_matches.get('source', False) or side_matches.get('target', False):
-                return True
+        # [FIX BUG-V057 2026-07-12] 统一 create/update/delete: 任一端在 scope 即可
+        #   关系的写权限基于源业务对象, delete 不应比 create/update 更严格
+        if side_matches.get('source', False) or side_matches.get('target', False):
+            return True
+        # 设置失败侧信息
+        if not side_matches.get('source', False) and not side_matches.get('target', False):
             context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})都不在用户 scope 内'
-            return False
+        elif not side_matches.get('source', False):
+            context._rel_failed_side = f'源业务对象({src_code})'
+        else:
+            context._rel_failed_side = f'目标业务对象({tgt_code})'
+        return False
 
     # ========================================================================
     # [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验辅助方法
@@ -1610,7 +2052,7 @@ class WriteScopeInterceptor(Interceptor):
     def _check_parent_dim_scope(
         self, context: 'ActionContext', object_type: str,
         record: Dict[str, Any], expanded: Dict[str, set],
-        engine, role_id: int
+        engine, permission_set_id: int
     ) -> bool:
         """[V1.1.8] 检查 object_type (parent) 下是否有用户直接 dim scope 内的 child
 
@@ -1626,7 +2068,7 @@ class WriteScopeInterceptor(Interceptor):
         Returns: True 如果 parent 下有用户 scope 内的 child
         """
         from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_PARENT
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
         # [FIX v1.2.32] EXTENDED_CHAIN 类型: 先步进到 HIERARCHY_CHAIN
         current_id = record.get('id')
@@ -1659,14 +2101,37 @@ class WriteScopeInterceptor(Interceptor):
             # [FIX v1.2.32] 步进到 sub_domain 后, 直接检查其 domain_id 是否在 scope 内
             # 因为 sub_domain 是 HIERARCHY_CHAIN 最底层, 没有更深的 child dim 可检查
             # 但用户 scope 通常声明 domain (如 domain=[703]), 需要检查 sub_domain 的 domain_id
-            if effective_object_type == 'sub_domain' and 'domain' in expanded and expanded['domain']:
-                domain_ids = expanded['domain']
-                sd_row = context.data_source.execute(
-                    "SELECT domain_id FROM sub_domains WHERE id = ?",
-                    [current_id]
-                ).fetchone()
-                if sd_row and sd_row[0] in domain_ids:
-                    return True
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            if effective_object_type == 'sub_domain':
+                domain_data = expanded.get('domain')
+                if _dim_has_any_values(domain_data):
+                    # wildcard-only (无 exclude) → domain 层全可见 → parent match
+                    if _dim_is_wildcard(domain_data) and not _dim_exclude_values(domain_data):
+                        return True
+                    domain_ids = _dim_include_values(domain_data)
+                    sd_row = context.data_source.execute(
+                        "SELECT domain_id FROM sub_domains WHERE id = ?",
+                        [current_id]
+                    ).fetchone()
+                    if sd_row and sd_row[0] in domain_ids:
+                        return True
+
+            # [FIX BUG-V059.2 2026-07-12] 步进到 sub_domain 后, 也检查 sub_domain 自身的 dim scope
+            # 场景: BO create under SM, dim scope 声明在 sub_domain=[299,339] (非 domain 层级)
+            # 之前只检查 domain 层级的 dim scope, 漏掉了 sub_domain 层级的直接匹配
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            if effective_object_type == 'sub_domain':
+                sd_data = expanded.get('sub_domain')
+                if _dim_has_any_values(sd_data):
+                    # wildcard-only (无 exclude) → sub_domain 层全可见 → parent match
+                    if _dim_is_wildcard(sd_data) and not _dim_exclude_values(sd_data):
+                        return True
+                    sd_ids = _dim_include_values(sd_data)
+                    if current_id in sd_ids:
+                        logger.debug(
+                            f'_check_parent_dim_scope: sub_domain({current_id}) direct match in scope'
+                        )
+                        return True
 
         # 找 effective_object_type 在 chain 中的位置
         try:
@@ -1675,12 +2140,20 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 检查所有更深层级的维度是否有直接声明
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
         for child_idx in range(obj_idx + 1, len(HIERARCHY_CHAIN)):
             child_dim = HIERARCHY_CHAIN[child_idx]
-            if child_dim not in expanded or not expanded[child_dim]:
+            child_data = expanded.get(child_dim)
+            if not _dim_has_any_values(child_data):
                 continue
 
-            child_ids = expanded[child_dim]
+            # wildcard-only (无 exclude) → child 层全可见 → parent match
+            if _dim_is_wildcard(child_data) and not _dim_exclude_values(child_data):
+                return True
+            # exclude 不参与 child 检查 (语义: exclude 不应扩大范围)
+            child_ids = _dim_include_values(child_data)
+            if not child_ids:
+                continue
             child_table = RESOURCE_TABLE_MAP.get(child_dim)
             if not child_table:
                 continue
@@ -1751,7 +2224,7 @@ class WriteScopeInterceptor(Interceptor):
     def _get_user_role_ids(
         self, context: 'ActionContext', user_id: Optional[int]
     ) -> List[int]:
-        """[v2.1] 获取 user 的所有 role_id
+        """[v2.1] 获取 user 的所有 permission_set_id
 
         性能: per-request 缓存 (g.current_user.role_ids) + LRU fallback
         """
@@ -1767,11 +2240,15 @@ class WriteScopeInterceptor(Interceptor):
             pass
 
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(context.data_source).get_user_effective_org_ids(user_id)
+            if not org_ids:
+                return []
+            placeholders = ','.join('?' * len(org_ids))
             rows = context.data_source.execute(
-                "SELECT DISTINCT gr.role_id FROM group_roles gr "
-                "JOIN user_group_members ugm ON ugm.group_id = gr.group_id "
-                "WHERE ugm.user_id = ?",
-                [user_id]
+                f"SELECT DISTINCT gr.permission_set_id FROM org_permission_sets gr "
+                f"WHERE gr.org_id IN ({placeholders})",
+                org_ids
             ).fetchall()
             role_ids = [r[0] for r in rows]
         except Exception as e:
@@ -1804,7 +2281,7 @@ class WriteScopeInterceptor(Interceptor):
         if not record.get('id'):
             return False
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
             table = RESOURCE_TABLE_MAP.get(object_type)
             if not table:
                 return False
@@ -1945,7 +2422,7 @@ class WriteScopeInterceptor(Interceptor):
         性能: 单次 SELECT * (含必需字段), 不做 N+1
         """
         try:
-            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
             table = RESOURCE_TABLE_MAP.get(object_type)
             if not table:
                 return None
@@ -2280,9 +2757,16 @@ class WriteScopeInterceptor(Interceptor):
 
     def _is_fk_value_in_scope(self, user_id: int, target_bo: str, fk_value: Any,
                                data_source) -> bool:
-        """检查 FK 值是否在用户的 dim scope 内
+        """检查 FK 值是否在用户的权限范围内
 
-        使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
+        检查 3 种权限路径:
+        1. 显式 data_permissions (DataPermissionService.get_allowed_resource_ids)
+        2. Owner chain (用户是 product owner 即可引用该 product 下的所有层级对象)
+        3. Dim scope (DimensionScopeEngine 派生条件)
+
+        [FIX BUG-V050 2026-07-10] 之前只检查 dim scope, 但用户在自己拥有的 product 下
+        创建的子对象 (如 TEST001 service_module) 不在 dim scope 内 (在另一个 domain),
+        导致创建 business_object 引用时 FK 校验失败。
         """
         # [FIX v1.2.30 2026-06-20] 跳过非整数 FK 值 (字符串名称/非 ID)
         #   例: source_domain_id='采购管理' (domain NAME, 不是 id)
@@ -2292,6 +2776,33 @@ class WriteScopeInterceptor(Interceptor):
             if isinstance(fk_value, bool):
                 return True  # bool 是 int 子类, 显式排除
             return True  # 字符串等非整数值放行, 让 FK 解析阶段报错
+
+        # [FIX BUG-V050] 检查 0: 显式 data_permissions
+        try:
+            from meta.services.data_permission_service import DataPermissionService
+            dpf = DataPermissionService(data_source)
+            allowed_ids = dpf.get_allowed_resource_ids(user_id, target_bo)
+            if allowed_ids and fk_value in allowed_ids:
+                logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched data_permissions')
+                return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] data_permission check failed: {e}')
+
+        # [FIX BUG-V050] 检查 1: owner chain (用户是 product owner 即可引用该 product 下的子对象)
+        try:
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
+            owner_subquery = build_owner_exception_subquery(None, target_bo, user_id)
+            if owner_subquery:
+                table_name = self._get_table_name_for_bo(target_bo)
+                if table_name:
+                    sql = f"SELECT COUNT(*) FROM {table_name} WHERE id = ? AND id IN ({owner_subquery})"
+                    cursor = data_source.execute(sql, [fk_value])
+                    if cursor.fetchone()[0] > 0:
+                        logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched owner_chain')
+                        return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] owner_chain check failed: {e}')
+
         # 1. 获取用户的 role_ids
         role_ids = self._get_user_role_ids_direct(user_id, data_source)
         if not role_ids:
@@ -2301,7 +2812,7 @@ class WriteScopeInterceptor(Interceptor):
         try:
             placeholders = ','.join('?' * len(role_ids))
             cursor = data_source.execute(
-                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                f"SELECT COUNT(*) FROM permission_set_dimension_scopes WHERE permission_set_id IN ({placeholders})",
                 list(role_ids)
             )
             count = cursor.fetchone()[0]
@@ -2314,10 +2825,18 @@ class WriteScopeInterceptor(Interceptor):
         from meta.services.dimension_scope_engine import DimensionScopeEngine
         engine = DimensionScopeEngine(data_source)
 
-        for role_id in role_ids:
+        for permission_set_id in role_ids:
             try:
-                conditions = engine.derive_data_conditions(role_id)
+                expanded = engine.expand_dimension_values(permission_set_id)
+                dim_data = expanded.get(target_bo)
+                # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+                if not _dim_has_any_values(dim_data):
+                    continue
+                conditions = engine.derive_data_conditions(permission_set_id)
                 cond_expr = conditions.get(target_bo)
+                # wildcard-only (无 exclude) → 全可见 → FK 值必然在 scope 内
+                if cond_expr is None and _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                    return True
                 if not cond_expr:
                     continue
 
@@ -2335,24 +2854,28 @@ class WriteScopeInterceptor(Interceptor):
                     logger.warning(f'_is_fk_value_in_scope: query failed: {e}')
 
             except Exception as e:
-                logger.warning(f'_is_fk_value_in_scope: derive role={role_id} failed: {e}')
+                logger.warning(f'_is_fk_value_in_scope: derive role={permission_set_id} failed: {e}')
 
         return False  # 所有 role 都不匹配
 
     def _get_table_name_for_bo(self, object_type: str) -> Optional[str]:
         """获取 BO 对象类型对应的数据库表名"""
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
         return RESOURCE_TABLE_MAP.get(object_type)
 
     def _get_user_role_ids_direct(self, user_id: int, data_source) -> Tuple[int, ...]:
-        """获取用户的 role_ids (直接 data_source 版本, 用于 FK scope 校验)"""
+        """获取用户的 role_ids (直接 data_source 版本, 用于 FK scope 校验; 含祖先组织继承)"""
         try:
+            from meta.services.org_service import OrgService
+            org_ids = OrgService(data_source).get_user_effective_org_ids(user_id)
+            if not org_ids:
+                return ()
+            placeholders = ','.join('?' * len(org_ids))
             cursor = data_source.execute(
-                """SELECT DISTINCT gr.role_id
-                   FROM group_roles gr
-                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-                   WHERE ugm.user_id = ?""",
-                [user_id]
+                f"""SELECT DISTINCT gr.permission_set_id
+                   FROM org_permission_sets gr
+                   WHERE gr.org_id IN ({placeholders})""",
+                org_ids
             )
             return tuple(row[0] for row in cursor.fetchall())
         except Exception:
@@ -2368,11 +2891,16 @@ class WriteScopeInterceptor(Interceptor):
         from meta.services.dimension_scope_engine import DimensionScopeEngine
         engine = DimensionScopeEngine(data_source)
 
-        for role_id in role_ids:
-            conditions = engine.derive_data_conditions(role_id)
+        for permission_set_id in role_ids:
+            expanded = engine.expand_dimension_values(permission_set_id)
+            dim_data = expanded.get(target_bo)
+            conditions = engine.derive_data_conditions(permission_set_id)
             cond_expr = conditions.get(target_bo)
+            # [V2.2 2026-07-22] Spec 08: 优先展示 cond_expr, 其次 wildcard
             if cond_expr:
                 return f'{target_bo}: {cond_expr[:100]}'
+            if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                return f'{target_bo}: 全维度可见 (wildcard)'
 
         return f'{target_bo}: 无 dim scope 限制'
 

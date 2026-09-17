@@ -19,6 +19,13 @@ parent_object: product
 # 影响：version 对象不再继承 code 字段，仅使用 name 作为业务键
 aspects: [audit_aspect, owner_aspect]
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+resource:
+  type: hierarchy
+  parent: product
+  parent_field: product_id
+  inherit_to_children: true  # version 的 dim scope 向下展开到 domain/sub_domain
+
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
   - dimension: version
@@ -461,6 +468,23 @@ relations:
       meaning: 版本与领域的层级关系, 但删除行为非级联 (阻止)
 
 # ────────────────────────────────────────────
+# 索引定义
+# ────────────────────────────────────────────
+# [FIX BUG-V049 2026-07-09] 添加 (product_id, name) 联合唯一索引
+# 根因: 2026-06-13 移除 naming_aspect/code 字段后，index_rule_engine 对
+#   business_key=True 的 name 字段自动创建 uidx_versions_name 单字段全局唯一索引，
+#   导致不同产品的同名版本(如 V1)被拦截。version.yaml 虽在 import_export.conflict_key
+#   声明了 "product_id,name" 联合唯一，但引擎不读 conflict_key。
+# 修复: 显式定义 (product_id, name) 联合唯一索引，引擎 _get_fields_in_composite_unique
+#   检测到 name 属于复合唯一索引后，跳过单字段唯一索引创建。
+indexes:
+  - name: uidx_versions_product_name
+    fields: [product_id, name]
+    type: unique
+    priority: high
+    description: "产品+版本名称联合唯一索引（同一产品内版本名唯一，不同产品可有同名版本）"
+
+# ────────────────────────────────────────────
 # 操作定义
 # ────────────────────────────────────────────
 actions:
@@ -520,6 +544,21 @@ actions:
     method: POST
     path: /api/v1/versions/compare
     description: 对比两个版本的差异
+
+  # [FIX 2026-07-10] BUG-V051: 补全 import/export actions
+  #   委托给统一 export-import 端点
+  - id: import
+    name: 导入
+    type: business
+    method: POST
+    path: /api/v1/export-import/import
+    description: 通过统一导入端点从Excel批量导入版本
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出版本到Excel
 
 # ────────────────────────────────────────────
 # 校验规则

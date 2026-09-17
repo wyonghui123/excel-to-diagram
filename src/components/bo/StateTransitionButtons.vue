@@ -127,7 +127,7 @@ const executeTransition = async (transition) => {
       `/bo/${props.objectType}/${props.objectId}`,
       { [transition.stateField]: transition.toState }
     )
-    
+
     if (data.success) {
       // [FIX 2026-06-09] 用 useCrudMessage 替代 ElMessage
       message.stateChanged(transition.label, '数据')
@@ -138,12 +138,15 @@ const executeTransition = async (transition) => {
       emit('refresh', refreshPayload)
       await loadTransitions()
     } else {
-      message.error(`${transition.label} 失败`, data)
-      emit('error', { transition, error: data.message })
+      // [Spec 22 2026-09-13] 失败走 stateChangeFailed，自动识别 403 权限拒绝场景
+      // ActionPermissionInterceptor 拒绝时，后端 message 含「缺少权限 activate（state_transition: xxx）」
+      message.stateChangeFailed(transition.label, data, transition.actionRef || '')
+      emit('error', { transition, error: data.message, httpStatus: data.httpStatus })
     }
   } catch (error) {
-    console.error('State transition error:', error)
-    message.error(`${transition.label} 失败`, error)
+    // 真正的网络异常（apiV2 不会到这里，network error 走 apiV2 包装）
+    console.error('State transition unexpected error:', error)
+    message.stateChangeFailed(transition.label, error, transition.actionRef || '')
     emit('error', { transition, error: error.message })
   } finally {
     loading.value = false

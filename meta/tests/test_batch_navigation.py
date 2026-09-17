@@ -123,14 +123,14 @@ class TestBatchQueryM2M:
         if group_code is None:
             import uuid
             group_code = f'test_group_{uuid.uuid4().hex[:8]}'
-        cursor.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)",
+        cursor.execute("INSERT INTO orgs (code, name) VALUES (?, ?)",
             (group_code, f'Test Group {group_code}'))
         group_id = cursor.lastrowid
         for user_id in user_ids:
-            cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
+            cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
                 (user_id, group_id))
         for role_id in role_ids:
-            cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+            cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
                 (group_id, role_id))
         return group_id
 
@@ -214,7 +214,7 @@ class TestBatchQueryM2M:
         from meta.core.association_engine import AssociationEngine
 
         cursor = db_connection.cursor()
-        cursor.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)",
+        cursor.execute("INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('empty_group', 'Empty Group'))
         group_id = cursor.lastrowid
         db_connection.commit()

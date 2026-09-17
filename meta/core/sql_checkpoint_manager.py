@@ -33,10 +33,16 @@ class CheckpointManager:
     """智能 WAL Checkpoint 管理器
 
     策略优先级：
-    1. WAL 大小超阈值 → TRUNCATE checkpoint（立即）
-    2. 时间间隔超阈值 → TRUNCATE checkpoint
-    3. 低峰期 → RESTART checkpoint（更彻底）
+    1. WAL 大小超阈值 → PASSIVE checkpoint (不阻塞读, 不截断 WAL, 由 force_passive 周期性推)
+    2. 时间间隔超阈值 → PASSIVE checkpoint
+    3. 低峰期 → RESTART checkpoint（更彻底, 仅在 2-5 点低峰期执行）
     4. 被动模式 → PASSIVE checkpoint（不阻塞读者）
+
+    [V007.40 BUG-FIX] 默认策略从 TRUNCATE → PASSIVE
+    背景: V007.39 修了显式调用的 checkpoint, 但 sql_checkpoint_manager.should_checkpoint
+          返回的 mode 仍是 TRUNCATE, execute_checkpoint 默认参数也是 TRUNCATE.
+          TRUNCATE 截断 WAL → 读连接 mmap 视图失效 → disk I/O error.
+    修法: 阈值触发用 PASSIVE, RESTART 留给低峰期专用 (low_traffic_restart 路径).
     """
 
     def __init__(
@@ -97,7 +103,9 @@ class CheckpointManager:
                     wal_size_mb, self._config.wal_size_threshold_mb
                 ),
                 "priority": "high",
-                "mode": "TRUNCATE",
+                # [V007.40 BUG-FIX] mode: TRUNCATE → PASSIVE
+                # 阈值触发也用 PASSIVE, 避免截断 WAL 触发 I/O error
+                "mode": "PASSIVE",
             })
 
         if time_since_last > self._config.checkpoint_interval_seconds:
@@ -107,7 +115,8 @@ class CheckpointManager:
                     time_since_last, self._config.checkpoint_interval_seconds
                 ),
                 "priority": "medium",
-                "mode": "TRUNCATE",
+                # [V007.40 BUG-FIX] mode: TRUNCATE → PASSIVE
+                "mode": "PASSIVE",
             })
 
         if self._is_low_traffic_window():
@@ -129,7 +138,14 @@ class CheckpointManager:
             "time_since_last_seconds": time_since_last,
         }
 
-    def execute_checkpoint(self, mode: str = "TRUNCATE") -> Dict[str, Any]:
+    def execute_checkpoint(self, mode: str = "PASSIVE") -> Dict[str, Any]:
+        """[V007.40 BUG-FIX] 默认 TRUNCATE → PASSIVE
+
+        背景: V007.40 漏修了 default parameter. should_checkpoint() 返回的 mode
+              已改 PASSIVE, 但 execute_checkpoint 的默认参数仍是 TRUNCATE.
+              任何 caller 不传 mode 时仍会走 TRUNCATE → 截断 WAL → I/O error.
+        修法: 默认 PASSIVE. RESTART 仍可通过显式 mode="RESTART" 触发 (低峰期专用).
+        """
         result = {
             "mode": mode,
             "wal_size_before_mb": self.get_wal_size_mb(),

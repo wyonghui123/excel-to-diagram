@@ -1,6 +1,6 @@
 # 💡 经验记录索引
 
-> **最后更新**: 2026-04-08  
+> **最后更新**: 2026-08-28  
 > **维护者**: 开发团队
 
 ---
@@ -34,6 +34,14 @@ Element Plus UI 组件库的踩坑与解决方案
 |------|------|---------|--------|
 | [dropdown-modal-occlusion.md](./element-plus/dropdown-modal-occlusion.md) | 弹窗内下拉被遮罩看不到 | `:teleported="false"` + 父级 `overflow: visible` | Teleport + z-index 战争 |
 
+### [部署相关经验](./)
+
+部署 / 上传 / 部署拓扑的踩坑与解决方案
+
+| 文档 | 问题 | 解决方案 | 关键点 |
+|------|------|---------|--------|
+| [deploy-topology.md](./deploy-topology.md) | staging 反复栽在"路径解析"上 (≥5 次) | DeployTarget + PathResolver + ResourceType 三层抽象 | md5 不构成送达证明 / introspect 是金标准 / 双发策略 |
+
 ### [调试经验](./debugging/)
 
 常见问题的调试方法和技巧
@@ -55,7 +63,9 @@ Element Plus UI 组件库的踩坑与解决方案
 | MetaListPage 工具栏漂移/偏移 | [layout/toolbar-drift-recurrence.md](./layout/toolbar-drift-recurrence.md) |
 | Mermaid 渲染异常 | [debugging/mermaid-debugging.md](./debugging/mermaid-debugging.md) |
 | 弹窗内下拉被遮罩看不到 | [element-plus/dropdown-modal-occlusion.md](./element-plus/dropdown-modal-occlusion.md) |
+| staging 反复栽在"路径解析"上 (symlink 双发) | [deploy-topology.md](./deploy-topology.md) |
 | 测试"通过"但实际 UI 不可见 | [testing/testability-iron-rules.md](./testing/testability-iron-rules.md) |
+| 反勾选保存 bug 探针假阳性 / Vue 响应式状态依赖 | [testing/permission-save-false-positive.md](./testing/permission-save-false-positive.md) |
 
 ---
 

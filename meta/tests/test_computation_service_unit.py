@@ -59,7 +59,7 @@ def mock_db():
 
     # 用户组成员表（user_group.member_count 测试用）
     cur.execute(
-        "CREATE TABLE user_group_members ("
+        "CREATE TABLE org_members ("
         "group_id INTEGER, user_id INTEGER)"
     )
 
@@ -94,7 +94,7 @@ def mock_db():
         ],
     )
     cur.executemany(
-        "INSERT INTO user_group_members VALUES (?, ?)",
+        "INSERT INTO org_members VALUES (?, ?)",
         [(500, 1), (500, 2), (500, 3), (501, 4)],
     )
 

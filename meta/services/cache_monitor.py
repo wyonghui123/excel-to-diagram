@@ -27,6 +27,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class CacheMonitor:
         初始化监控器
         
         Args:
-            engine: ManagementDimensionEngine 实例
+            engine: PermissionDimensionEngine 实例
             target_hit_rate: 目标命中率（百分比）
             target_avg_time_ms: 目标平均响应时间（毫秒）
             alert_threshold: 告警阈值（百分比）
@@ -370,7 +371,7 @@ def create_monitoring_api_blueprint():
     def get_monitor():
         global _monitor
         if _monitor is None:
-            from meta.api.management_dimension_api import _get_engine
+            from meta.api.permission_dimension_api import _get_engine
             engine = _get_engine()
             _monitor = CacheMonitor(engine)
         return _monitor
@@ -461,7 +462,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     
     from meta.core.datasource import get_data_source
-    from meta.services.management_dimension_engine import ManagementDimensionEngine
+    from meta.services.permission_dimension_engine import PermissionDimensionEngine
     
     parser = argparse.ArgumentParser(description='缓存性能监控')
     parser.add_argument('--db-path', type=str, help='数据库路径')
@@ -475,13 +476,10 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    db_path = args.db_path or os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        'architecture.db'
-    )
+    db_path = args.db_path or get_meta_db_path()
     
     data_source = get_data_source('sqlite', database=db_path)
-    engine = ManagementDimensionEngine(data_source, ttl_seconds=300)
+    engine = PermissionDimensionEngine(data_source, ttl_seconds=300)
     monitor = CacheMonitor(engine)
     
     report = monitor.get_performance_report()

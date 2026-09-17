@@ -266,7 +266,7 @@ export function useFormCascade(metaObject, formData) {
   const cascade = useCascadeSelect(metaObject)
   let unwatch = null
   
-  async function initialize() {
+  async function initialize(shouldSkipClear) {
     const cascadeConfig = metaObject.value?.cascade_select
     if (!cascadeConfig || cascadeConfig.length === 0) return
 
@@ -299,6 +299,10 @@ export function useFormCascade(metaObject, formData) {
       // 后续用户真正编辑才会触发 callback。
       await nextTick()
       unwatch = cascade.watchParentChanges(formData, function(fieldId, _newValue) {
+        // [R25 2026-07-24] 反向推导 (syncDerivedHierarchyFields) 期间跳过级联清空
+        //   原因: syncDerivedHierarchyFields 更新 domain_id/sub_domain_id 时,
+        //   watchParentChanges 误认为是用户手动改了父字段, 清空下游 service_module_id
+        if (shouldSkipClear && shouldSkipClear()) return
         cascade.clearAllDownstream(fieldId, formData.value)
       })
     }

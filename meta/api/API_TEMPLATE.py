@@ -8,6 +8,7 @@
 from flask import Blueprint, request, jsonify
 from meta.core.datasource import get_data_source
 import os
+from meta.core.db_path import get_meta_db_path
 
 {api_name}_bp = Blueprint('{api_name}', __name__, url_prefix='/api/v1/{api_name}')
 
@@ -22,7 +23,7 @@ def init_services(data_source=None):
     [WARNING] 重要：必须使用以下方式获取数据库路径，禁止使用相对路径！
     
     正确：
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     
     错误：
@@ -33,7 +34,7 @@ def init_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     # _service = YourService(_data_source)
 
@@ -70,10 +71,7 @@ def example():
 # 
 # [WARNING] 重要：数据库路径必须使用以下方式：
 # 
-#    db_path = os.path.join(
-#        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-#        'architecture.db'
-#    )
+#    db_path = get_meta_db_path()
 # 
 # 禁止使用：
 #    - "meta/architecture.db"

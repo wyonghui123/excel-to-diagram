@@ -26,37 +26,53 @@ logger = logging.getLogger(__name__)
 # 通过环境变量开启诊断日志（默认关闭）
 _AUDIT_DEBUG = os.environ.get('AUDIT_DEBUG', '').lower() in ('1', 'true', 'yes')
 
+# [FIX 2026-09-06 角色迁移] role/user_group 已分别迁移到 permission_set/org
+# (org.yaml 头部注释: "原 user_group.yaml"; schemas 目录已无 role.yaml/user_group.yaml)。
+# 此映射用于新写入日志的 target_type 显示名, 只保留现存实体。
 _TYPE_DISPLAY_MAP = {
     'user': '用户',
-    'user_group': '用户组',
-    'role': '角色',
+    'org': '组织',
+    'org_member': '组织成员',
+    'permission_set': '权限集',
     'permission': '权限',
+    'menu': '菜单',
+    'service_module': '服务模块',
+    'business_object': '业务对象',
 }
 
+# [FIX 2026-09-06 角色迁移] 对齐 org.yaml (members/permission_sets/functions)
+# 与 permission_set.yaml (permissions/assigned_orgs) 的现行关联定义
 _ASSOCIATION_DISPLAY_MAP = {
     'members': '成员',
-    'roles': '角色',
+    'permission_sets': '权限集',
+    'assigned_orgs': '组织',
     'permissions': '权限',
+    'functions': '功能',
 }
 
 
 class AuditInterceptor(Interceptor):
     """
     审计日志拦截器
-    
-    注意：
-    - CRUD 审计日志写入已统一由 ActionExecutor._write_audit_log_v2() 处理。
-    - 关联操作（associate/dissociate）的审计日志由此拦截器处理。
-    
+
+    [FIX 2026-09-06 审计断链·最终结论] CRUD 审计由 ActionExecutor._write_audit_log_v2 统一写入:
+    bo_framework.execute → PersistenceInterceptor(P95) → ActionRegistry → ActionExecutor,
+    该路径此前被 .env TESTING=true 短路 (已改为仅 PYTEST_CURRENT_TEST 跳过)。
+    本拦截器若也写 CRUD 会造成双写 (2026-09-06 实测: 同一次 PUT 产生 2 条记录),
+    故 CRUD 开关保持 True, 本拦截器只负责关联操作审计。
+
     此拦截器功能：
     1. 在 before_action 中获取旧数据（用于 UPDATE/DELETE）
-    2. 在 after_action 中写入 CRUD 审计日志（已禁用，由ActionExecutor处理）和关联操作审计日志（已启用）
+    2. 在 after_action 中写入关联操作审计日志（AUDIT_ASSOC_WRITE_DISABLED=False，已启用）
     3. 触发其他后处理逻辑（如通知、缓存刷新等）
-    
+
     优先级：90（在持久化之后执行）
     """
-    
-    AUDIT_CRUD_WRITE_DISABLED = True   # CRUD 审计日志由 ActionExecutor 统一处理
+
+    # [FIX 2026-09-06 双写回退] 短暂改为 False 以恢复 CRUD 审计，但实测与 ActionExecutor
+    # （经 PersistenceInterceptor→ActionRegistry 委托）双写。CRUD 审计统一归 ActionExecutor，
+    # 断链根因是其 TESTING=true 短路，已在 action_executor._write_audit_log_v2 修复。
+    AUDIT_CRUD_WRITE_DISABLED = True
     AUDIT_ASSOC_WRITE_DISABLED = False  # 关联操作审计日志由此拦截器处理
     
     @property
@@ -85,8 +101,8 @@ class AuditInterceptor(Interceptor):
     def after_action(self, context: ActionContext) -> None:
         """动作执行后：处理 CRUD 后处理逻辑和关联操作审计日志写入
 
-        - CRUD 审计日志写入已由 ActionExecutor._write_audit_log_v2() 统一处理（跳过）
-        - 关联操作（associate/dissociate/batch_*/assign/unassign）审计日志由此拦截器写入
+        - CRUD 审计日志由本拦截器写入（AUDIT_CRUD_WRITE_DISABLED=False，已恢复）
+        - 关联操作（associate/dissociate/batch_*/assign/unassign）审计日志由本拦截器写入
         """
         if _AUDIT_DEBUG:
             logger.debug(f"[AuditInterceptor] after_action: action={context.action} is_crud={context.is_crud_action} object_id={context.object_id}")

@@ -56,8 +56,17 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
+  // [FIX 2026-09-06] 硬刷新动态路由页空白修复:
+  //   app.use(router) 的 install 期导航发生在动态路由注册之前, 刷新 /permission-set-management
+  //   等动态页时 to.matched=[] 的导航已就位; 此处注册完路由后必须重试一次导航,
+  //   否则 matched=[] 的原始导航被 next() 放行 → router-view 无匹配组件 → 页面空白。
+  //   仅在"首轮注册 + 原导航未匹配 + 现在能解析到"三个条件同时成立时重试, 无死循环:
+  //   重试后 isDynamicRouteRegistered()=true 不再进入本分支; 真正未知路径 resolve 仍为空也跳过。
   if (!isDynamicRouteRegistered()) {
     await generateDynamicRoutes(router)
+    if (to.matched.length === 0 && router.resolve(to.fullPath).matched.length > 0) {
+      return next({ ...to, replace: true })
+    }
   }
 
   document.title = to.meta.title ? `${to.meta.title} - ArchWorkspace` : 'ArchWorkspace'
@@ -111,6 +120,13 @@ router.beforeEach(async (to, from, next) => {
       if (!authStore.sessionReady) {
         return
       }
+    }
+
+    // [FIX P3 2026-06-30] URL ?help= 携带帮助中心参数时, 跳过登录校验
+    //   帮助中心是公开内容 (scenario.json 是静态资源), 未登录也可访问
+    if (to.query.help) {
+      next()
+      return
     }
 
     if (!authStore.isLoggedIn) {

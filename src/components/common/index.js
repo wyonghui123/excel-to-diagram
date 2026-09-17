@@ -9,7 +9,7 @@ import EnumSearchHelp from './EnumSearchHelp.vue'
 import ValueHelpField from './ValueHelpField.vue'
 import SearchHelpDialog from './SearchHelpDialog.vue'
 import { FilterBar } from './FilterBar'
-import { ManagementDimensionSelector } from './ManagementDimensionSelector'
+import { PermissionDimensionSelector } from './PermissionDimensionSelector'
 
 import { AppButton } from './AppButton'
 import { AppInput } from './AppInput'
@@ -40,6 +40,8 @@ import { SubNavTabs } from './SubNavTabs'
 import { ObjectChildSection } from './ObjectChildSection'
 import { PageShell } from './PageShell'
 import { FkLinkField } from './FkLinkField'
+import { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
+import { ConditionRuleBuilder, ConditionRuleRow } from './ConditionRuleBuilder'
 
 export { AppButton } from './AppButton'
 export { AppInput } from './AppInput'
@@ -62,7 +64,7 @@ export { ConditionRuleEditor, ValueHelpSelector } from './ConditionRuleEditor'
 export { DetailPage, DetailSection } from './DetailPage'
 export { AssignmentDialog } from './AssignmentDialog'
 export { AppHeader, TopNavHeader, ConfirmDialog, EmptyState, MetaTable, MetaForm, MetaDialog, EnumSelect, EnumSearchHelp, ValueHelpField, SearchHelpDialog, FilterBar }
-export { ManagementDimensionSelector } from './ManagementDimensionSelector'
+export { PermissionDimensionSelector } from './PermissionDimensionSelector'
 export { AppShell } from './AppShell'
 export { AppLayout } from './AppLayout'
 export { MetaListPage } from './MetaListPage'
@@ -70,6 +72,7 @@ export { SubNavTabs } from './SubNavTabs'
 export { ObjectChildSection } from './ObjectChildSection'
 export { PageShell } from './PageShell'
 export { FkLinkField } from './FkLinkField'
+export { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
 
 export default {
   AppButton,
@@ -98,7 +101,7 @@ export default {
   FilterBar,
   DateTimePicker,
   EnumSearchHelp,
-  ManagementDimensionSelector,
+  PermissionDimensionSelector,
   ImpactPreview,
   ConditionRuleEditor,
   ValueHelpSelector,
@@ -114,5 +117,9 @@ export default {
   SubNavTabs,
   ObjectChildSection,
   PageShell,
-  FkLinkField
+  FkLinkField,
+  HierarchicalTreePicker,
+  // [v26 2026-08-26] 通用条件规则配置组件（替代 ConditionRuleDialog 内嵌实现）
+  ConditionRuleBuilder,
+  ConditionRuleRow
 }

@@ -1,0 +1,23 @@
+[Unit]
+Description=Staging services watchdog (18081/13011/19200/19101 auto-restart)
+Documentation=file:///opt/app/staging/bin/staging_watchdog.sh help
+After=network-online.target
+# Only run on staging servers (skip prod)
+ConditionHost=yonaa-staging
+
+[Service]
+Type=simple
+ExecStart=/opt/app/staging/bin/staging_watchdog.sh --watch --interval 30
+Restart=always
+RestartSec=10
+User=root
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/app/staging/logs /var/run/staging_watchdog
+StandardOutput=append:/opt/app/staging/logs/staging_watchdog.log
+StandardError=append:/opt/app/staging/logs/staging_watchdog.log
+
+[Install]
+WantedBy=multi-user.target

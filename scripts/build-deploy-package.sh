@@ -88,25 +88,39 @@ build_frontend() {
 # ============================================================
 copy_backend() {
     log_info "复制后端代码..."
-    
+
     local backend_src="${PROJECT_ROOT}/meta"
     local backend_dist="$BUILD_DIR/backend"
-    
+
     mkdir -p "$backend_dist"
-    
+
     if [[ -d "$backend_src" ]]; then
         cp -r "$backend_src"/* "$backend_dist/"
-        log_pass "后端代码已复制"
+        log_pass "meta/ 已复制"
     else
         log_fail "后端源码目录不存在: $backend_src"
         exit 1
     fi
-    
+
+    # 复制顶级模块 (与 meta/ 平级, 同样需要被打包)
+    # 之前漏了这些, 导致 v004 启动报 No module named 'telemetry' 等
+    for module in telemetry rls mcp schema test_helpers; do
+        local module_src="${PROJECT_ROOT}/${module}"
+        if [[ -d "$module_src" ]]; then
+            # 删除目标已存在的 (避免冲突)
+            rm -rf "$backend_dist/${module}"
+            cp -r "$module_src" "$backend_dist/${module}"
+            log_pass "顶级模块已复制: ${module}/"
+        else
+            log_warn "顶级模块不存在: ${module}/ (跳过)"
+        fi
+    done
+
     # 复制 requirements.txt
     if [[ -f "${PROJECT_ROOT}/requirements.txt" ]]; then
         cp "${PROJECT_ROOT}/requirements.txt" "$backend_dist/"
     fi
-    
+
     # 复制 server.py
     if [[ -f "${PROJECT_ROOT}/server.py" ]]; then
         cp "${PROJECT_ROOT}/server.py" "$backend_dist/"

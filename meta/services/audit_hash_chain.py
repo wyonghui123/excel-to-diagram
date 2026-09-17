@@ -19,6 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import List, Dict, Any
+from meta.core.db_path import get_meta_db_path
 
 
 # 字段顺序必须稳定 (canonical)
@@ -172,7 +173,7 @@ def verify_chain(conn: sqlite3.Connection, start_id: int = 0) -> List[Dict[str, 
 
 if __name__ == "__main__":
     from pathlib import Path
-    DB = Path(__file__).parent.parent / "architecture.db"
+    DB = Path(get_meta_db_path())
     conn = sqlite3.connect(str(DB))
     try:
         print("=== 1. Backfill hash chain ===")

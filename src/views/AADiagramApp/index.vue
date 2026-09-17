@@ -8,6 +8,8 @@
       :has-next="canNavNext"
       :next-label="navNextLabel"
       :show-back-to-arch="currentStep === 0"
+      :chart-type="chartType"
+      :chart-type-text="chartTypeText"
       @change="handleStepChange"
       @prev="onNavPrev"
       @next="onNavNext"
@@ -26,6 +28,13 @@
 
 <script>
 import { computed, watch, onMounted } from 'vue'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 import { useRouter } from 'vue-router'
 import { useDiagramSteps } from './composables/useDiagramSteps.js'
 import { useDiagramData } from './composables/useDiagramData.js'
@@ -101,6 +110,14 @@ export default {
     } = useDiagramData()
 
     // 步骤组件的 props (3 步骤模式: 0=类型, 1=配置, 2=展示)
+    // [v54] chartTypeText: 用于 StepNavigator "类型"步骤旁的中文标签
+    //  直接读 configStore.chartType, 避免 computed 链路过长导致响应式丢失
+    const chartTypeText = computed(() => {
+      const t = configStore.chartType
+      if (t === 'businessObject') return '业务对象图'
+      if (t === 'serviceModule') return '服务模块图'
+      return ''
+    })
     const stepProps = computed(() => {
       const propsMap = {
         0: {
@@ -269,7 +286,7 @@ export default {
             archData = JSON.parse(archDataStr)
             // 重新写回 Pinia, 让后续 tab 切换也能用上
             chartArchStore.setArchData(archData)
-            console.log('[v32] F5 refresh: restored archData from sessionStorage')
+            _dbgLog('[v32] F5 refresh: restored archData from sessionStorage')
           } catch (err) {
             console.error('[v32] Failed to parse archData from sessionStorage:', err)
           }
@@ -288,7 +305,7 @@ export default {
           const savedChartType = sessionStorage.getItem('archDataChartType')
           if (savedChartType && !configStore.chartType) {
             configStore.updateChartType(savedChartType)
-            console.log('[v33] F5 refresh: restored chartType=', savedChartType)
+            _dbgLog('[v33] F5 refresh: restored chartType=', savedChartType)
           }
 
           // 恢复 currentStep (3 步骤模式: 0/1/2)
@@ -311,9 +328,9 @@ export default {
           if (restoredStep === 2) {
             const cachedDiagram = loadCachedDiagram()
             if (cachedDiagram) {
-              console.log('[v44] diagramData 缓存命中, 保留 step 2')
+              _dbgLog('[v44] diagramData 缓存命中, 保留 step 2')
             } else {
-              console.log('[v44] diagramData 缓存未命中 (范围/配置变了 / TTL 过期 / F5 丢失), 回退到 step 1')
+              _dbgLog('[v44] diagramData 缓存未命中 (范围/配置变了 / TTL 过期 / F5 丢失), 回退到 step 1')
               restoredStep = 1
             }
           }
@@ -326,7 +343,7 @@ export default {
         // [2026-06-13] 6 步骤 fallback 已废弃
         //   之前: 走 6 步骤默认流程 (StepUpload → StepScope → StepScope → StepChartType → StepConfig → StepDisplay)
         //   现在: 重定向到架构管理页, 让用户先选择数据
-        console.log('[v40] no archData (neither Pinia nor sessionStorage), redirecting to arch manager (6-step fallback deprecated)')
+        _dbgLog('[v40] no archData (neither Pinia nor sessionStorage), redirecting to arch manager (6-step fallback deprecated)')
         router.replace('/system/archdata')
         return
       }
@@ -337,7 +354,7 @@ export default {
         if (newSeq > 0) {
           const newArchData = chartArchStore.archData
           if (newArchData) {
-            console.log('[v32] chartArchStore.sequence changed, re-initializing')
+            _dbgLog('[v32] chartArchStore.sequence changed, re-initializing')
             // [V1.2.9] 重置 diagramData，避免保留上一次的缓存
             // 之前只做了 resetSteps + initDataFromArch，但 diagramData 仍持有旧值
             resetData()
@@ -354,7 +371,7 @@ export default {
 
       // 测试专用: dev 环境暴露组件状态到 window，方便 e2e 测试
       if (import.meta.env.DEV) {
-        console.log('[AADiagramApp] mounted (new), DEV=', import.meta.env.DEV)
+        _dbgLog('[AADiagramApp] mounted (new), DEV=', import.meta.env.DEV)
         window.__diagramApp = {
           diagramData,
           currentStep,
@@ -364,15 +381,20 @@ export default {
           generateDiagram,
           previewData,
           chartType,
+          chartTypeText,
           centerScope,
           router,
           chartArchStore,
           // DEBUG 临时暴露
           selectedRelationNodeIds,
           relationCategoryTree,
-          filteredRelations
+          filteredRelations,
+          // [BUG-V033 诊断] 暴露 available* 和 relationFilteredBoCodes
+          availableSubDomains,
+          availableDomains,
+          availableServiceModules
         }
-        console.log('[AADiagramApp] window.__diagramApp exposed (new)')
+        _dbgLog('[AADiagramApp] window.__diagramApp exposed (new)')
       }
     })
 

@@ -82,8 +82,8 @@ export function useNavigation(options = {}) {
   function buildBreadcrumbsForObject(objectType, objectName = null) {
     const typeLabels = {
       'user': '用户',
-      'user_group': '用户组',
-      'role': '角色',
+      'user_group': '组织',
+      'role': '权限集',
       'permission': '权限',
       'enum_type': '枚举类型',
       'enum_value': '枚举值',
@@ -102,10 +102,10 @@ export function useNavigation(options = {}) {
 
     if (objectType === 'user_group') {
       crumbs.push({ path: '/user-permission', title: '用户与权限管理' })
-      crumbs.push({ path: '/user-permission', title: '用户组管理' })
+      crumbs.push({ path: '/user-permission', title: '组织管理' })
     } else if (objectType === 'role') {
       crumbs.push({ path: '/user-permission', title: '用户与权限管理' })
-      crumbs.push({ path: '/user-permission', title: '角色管理' })
+      crumbs.push({ path: '/user-permission', title: '权限集管理' })
     } else if (objectType === 'user') {
       crumbs.push({ path: '/user-permission', title: '用户与权限管理' })
       crumbs.push({ path: '/user-permission', title: '用户管理' })

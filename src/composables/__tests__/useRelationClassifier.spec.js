@@ -77,11 +77,19 @@ function createComposable(domainIds, subDomainIds, serviceModuleIds, businessObj
 describe('useRelationClassifier', () => {
 
   describe('basic tree structure', () => {
-    it('should return tree with all relations when no domains selected', () => {
+    // [SCOPE-EMPTY 2026-09-04] 对象范围无任何选择 → 无对象"在范围内":
+    //   所有关系都归「范围外」, 不存在「范围内」/「范围内与外部」桶 (用户语义).
+    it('should put all relations under 范围外 when no object scope selected', () => {
       const { treeData } = createComposable([], [], [], [], mockRelationships, mockBusinessObjects)
       expect(treeData.value.length).toBeGreaterThan(0)
       const totalCount = treeData.value.reduce((sum, n) => sum + n.count, 0)
       expect(totalCount).toBe(mockRelationships.length)
+      const externalNode = treeData.value.find(n => n.id === ScopeType.EXTERNAL)
+      expect(externalNode).toBeDefined()
+      expect(externalNode.name).toBe('范围外')
+      expect(externalNode.count).toBe(mockRelationships.length)
+      expect(treeData.value.find(n => n.id === ScopeType.INTERNAL)).toBeUndefined()
+      expect(treeData.value.find(n => n.id === ScopeType.CROSS_BOUNDARY)).toBeUndefined()
     })
 
     it('should return empty tree when no relationships', () => {

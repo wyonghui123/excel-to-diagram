@@ -1,0 +1,126 @@
+# tools/config/deploy_topology.yaml
+#
+# [2026-09-13] 通用部署目标配置
+# ----------------------------------------------------------------------------
+# 设计:
+#   - 每个 target = 一个独立部署环境 (staging / production / dev / preview)
+#   - 每个 target 声明 resolver (路径解析策略) + resource_overrides
+#   - exec_fn / upload_fn / md5_fn 默认绑定 staging_round.remote_*
+#   - 切到 prod / dev / k8s 时, 加新 entry 即可, 不需要改代码
+#
+# Lessons Learned (symlink_namespace_package 场景):
+#   staging 真实情况 (2026-09-13 验证):
+#     - deploy_root = /opt/app/staging/deploy/current (symlink)
+#     - current -> v1789297457_staging_spec22 (实际快照目录)
+#     - meta -> /opt/app/staging/deploy/current (也是 symlink)
+#     - backend cwd = /opt/app/staging/deploy/v1789297457_staging_spec22
+#     - meta/ 目录下只有 spec22 修改过的子集文件 (bo_api.py / models.py /
+#       yaml_loader.py / models_enums.py / permission_dimension_api.py / user.yaml /
+#       _standard_actions.yaml)
+#     - meta/ 下没有完整 core/ 业务代码 (bo_framework / action_constants 等缺失)
+#     - Python 加载 `meta.api.bo_api` 时, 实际走 namespace package 解析,
+#       仅在 meta/api/ 下找 bo_api.py (找到)
+#     - 然后 meta.api.bo_api 里 `from meta.core.bo_framework` 找不到
+#     - **关键洞察**: backend 通过 lazy import / lazy route 注册规避了
+#       cold-start 失败 (endpoint 在第一次请求时才实际加载), 所以 401
+#       (endpoint registered) 仍然能通过 health check
+#     - **修复**: 上传 spec22 修改的 4 个文件双发 (meta/X/Y + X/Y),
+#       - 顶层 X/Y 提供完整的 core/ 包
+#       - meta/X/Y 提供 spec22 修改的"补丁版"
+#   解决方案: 用 symlink_namespace_package resolver, 自动双发到
+#   {deploy_root}/meta/X/Y + {deploy_root}/X/Y
+# ----------------------------------------------------------------------------
+
+# ---------- staging ----------
+staging:
+  host: 172.20.59.7
+  gw_port: 19200
+  deploy_root: /opt/app/staging/deploy/current
+  resolver: symlink_namespace_package
+
+  # 资源类型级 overrides (可选)
+  resource_overrides:
+    python_module:
+      # [FIX 2026-09-14] 由默认双发改为强制单发.
+      # 修复原因: 双发会把 py 文件写到 current/meta/** 死镜像, 与
+      # check_meta_import_origin.py 门禁矛盾、与 HOFF §3「禁止向 current/meta/** 部署」冲突。
+      # 原 spec22 双发设计意图: meta/X/Y 提供补丁版, 顶层 X/Y 提供完整 core/ 兜底。
+      # 但生产使用中: 补丁版与完整版同内容, 双发只是浪费, 还掩盖了活树/死镜像的语义不一致。
+      # 当前结论: meta/ 镜像从未被 import 加载 (loader 通过 deploy/meta symlink→current 解析活树),
+      # 实际需要做的 = 改活树 + 重启服务。
+      #
+      # 实现注意: path_resolvers.SymlinkNamespacePackageResolver 内部对 python_module
+      # 分支做了 `override.get("double_path_prefixes") or self.DOUBLE_PATH_PREFIXES` 兜底,
+      # 单纯删除 yaml 中 double_path_prefixes 不会触发单发 (会被类默认顶上)。
+      # 因此这里显式把 double_path_prefixes 设空列表覆盖类默认,
+      # 再配合 target_path_template 走单发模板 ({relative} = repo 路径去 meta/ 前缀)。
+      double_path_prefixes: []
+      target_path_template: "{deploy_root}/{relative}"
+      # 如确需双发 (应急场景), 显式覆盖:
+      # double_path_prefixes:
+      #   - meta/api/
+      #   - meta/core/
+      #   - meta/services/
+      #   - meta/blueprints/
+    yaml_config:
+      double_path_prefixes:
+        - meta/schemas/
+        - meta/config/
+    # 单发资源: {relative} = 去 meta/ 前缀后的相对路径 (活树是顶层, current/meta/** 是死镜像)
+    json_config:
+      target_path_template: "{deploy_root}/{relative}"
+    static_asset:
+      target_path_template: "{deploy_root}/{relative}"
+    db_migration:
+      target_path_template: "{deploy_root}/{relative}"
+
+  # 健康检查端点 (verify 时用)
+  health_check:
+    base_url: http://172.20.59.7:13011
+    spec22_endpoints:
+      - /api/v2/bo/user/state-transition-actions
+      - /api/v2/bo/user/1/state_transitions
+
+# ---------- production (2026-09-14 实测修正) ----------
+# 实测事实:
+#   - 网关: core_service 9200, HTTPS (self-signed), secret 见 staging_round.use_prod_gateway
+#   - deploy_root = /opt/app/deployments/meta (meta 包根本身, 扁平布局;
+#     /opt/app/deployments/current -> meta 为兼容 symlink)
+#   - backend: meta-backend.service, miniconda py39, 监听 172.20.59.7:5001
+#   - frontend: meta-unified.service, unified_8081.py, dist=/opt/app/deployments/frontend_dist_files
+production:
+  host: 172.20.59.7
+  gw_port: 9200
+  gw_https: true
+  deploy_root: /opt/app/deployments/meta
+  resolver: flat_meta_package
+  resource_overrides:
+    json_config:
+      target_path_template: "{deploy_root}/{relative}"
+    static_asset:
+      target_path_template: "{deploy_root}/{relative}"
+    db_migration:
+      target_path_template: "{deploy_root}/{relative}"
+  health_check:
+    base_url: http://172.20.59.7:5001
+
+# ---------- dev (本地 copy) ----------
+dev:
+  host: null            # 本地
+  gw_port: null
+  deploy_root: ""       # 不需要远端 root
+  resolver: local
+  resource_overrides: {}
+  health_check: null
+
+# ---------- preview / k8s pod (未来扩展) ----------
+# preview:
+#   host: preview-gw.internal
+#   gw_port: 19200
+#   deploy_root: /opt/app/preview/deploy/current
+#   resolver: volume_mount    # k8s pod 用 volume mount, 单发
+#   resource_overrides:
+#     python_module:
+#       target_path_template: "{deploy_root}/app/{relative}"
+#     yaml_config:
+#       target_path_template: "{deploy_root}/app/{relative}"

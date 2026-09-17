@@ -63,7 +63,7 @@ class TestPermissionServiceUnified:
         """)
 
         cursor.execute("""
-            CREATE TABLE roles (
+            CREATE TABLE permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code VARCHAR(200) UNIQUE NOT NULL,
                 name VARCHAR(200) NOT NULL,
@@ -74,7 +74,7 @@ class TestPermissionServiceUnified:
         """)
 
         cursor.execute("""
-            CREATE TABLE role_permissions (
+            CREATE TABLE permission_set_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role_id INTEGER NOT NULL,
                 permission_id INTEGER NOT NULL,
@@ -83,7 +83,7 @@ class TestPermissionServiceUnified:
         """)
 
         cursor.execute("""
-            CREATE TABLE user_groups (
+            CREATE TABLE orgs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR(200) NOT NULL,
                 code VARCHAR(200) UNIQUE NOT NULL,
@@ -94,7 +94,7 @@ class TestPermissionServiceUnified:
         """)
 
         cursor.execute("""
-            CREATE TABLE user_group_members (
+            CREATE TABLE org_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 group_id INTEGER NOT NULL,
@@ -103,7 +103,7 @@ class TestPermissionServiceUnified:
         """)
 
         cursor.execute("""
-            CREATE TABLE group_roles (
+            CREATE TABLE org_permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 role_id INTEGER NOT NULL,
@@ -111,15 +111,15 @@ class TestPermissionServiceUnified:
             )
         """)
 
-        cursor.execute("INSERT INTO roles (id, code, name) VALUES (1, 'admin', '管理员')")
-        cursor.execute("INSERT INTO roles (id, code, name) VALUES (2, 'user', '普通用户')")
+        cursor.execute("INSERT INTO permission_sets (id, code, name) VALUES (1, 'admin', '管理员')")
+        cursor.execute("INSERT INTO permission_sets (id, code, name) VALUES (2, 'user', '普通用户')")
 
-        cursor.execute("INSERT INTO user_groups (id, code, name) VALUES (1, 'admin_group', 'Admin Group')")
-        cursor.execute("INSERT INTO user_groups (id, code, name) VALUES (2, 'user_group', 'User Group')")
-        cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (1, 1)")
-        cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (2, 2)")
-        cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (1, 1)")
-        cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (2, 2)")
+        cursor.execute("INSERT INTO orgs (id, code, name) VALUES (1, 'admin_group', 'Admin Group')")
+        cursor.execute("INSERT INTO orgs (id, code, name) VALUES (2, 'user_group', 'User Group')")
+        cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (1, 1)")
+        cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (2, 2)")
+        cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (1, 1)")
+        cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (2, 2)")
 
         conn.commit()
         conn.close()
@@ -219,28 +219,28 @@ class TestCreatePermissionUnified:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE roles (
+                CREATE TABLE permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_groups (
+                CREATE TABLE orgs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_group_members (
+                CREATE TABLE org_members (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     group_id INTEGER NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE group_roles (
+                CREATE TABLE org_permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id INTEGER NOT NULL,
                     role_id INTEGER NOT NULL,
@@ -248,7 +248,7 @@ class TestCreatePermissionUnified:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE role_permissions (
+                CREATE TABLE permission_set_permissions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role_id INTEGER NOT NULL,
                     permission_id INTEGER NOT NULL,
@@ -330,28 +330,28 @@ class TestCheckPermissionUnified:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE roles (
+                CREATE TABLE permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_groups (
+                CREATE TABLE orgs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_group_members (
+                CREATE TABLE org_members (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     group_id INTEGER NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE group_roles (
+                CREATE TABLE org_permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id INTEGER NOT NULL,
                     role_id INTEGER NOT NULL,
@@ -359,17 +359,17 @@ class TestCheckPermissionUnified:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE role_permissions (
+                CREATE TABLE permission_set_permissions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role_id INTEGER NOT NULL,
                     permission_id INTEGER NOT NULL,
                     UNIQUE(role_id, permission_id)
                 )
             """)
-            cursor.execute("INSERT INTO roles (id, code, name) VALUES (1, 'admin', '管理员')")
-            cursor.execute("INSERT INTO user_groups (id, code, name) VALUES (1, 'admin_group', 'Admin Group')")
-            cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (1, 1)")
-            cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (1, 1)")
+            cursor.execute("INSERT INTO permission_sets (id, code, name) VALUES (1, 'admin', '管理员')")
+            cursor.execute("INSERT INTO orgs (id, code, name) VALUES (1, 'admin_group', 'Admin Group')")
+            cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (1, 1)")
+            cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (1, 1)")
             conn.commit()
             conn.close()
             yield service
@@ -390,7 +390,7 @@ class TestCheckPermissionUnified:
                 name='创建业务对象'
             )
             service.ds.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 [1, perm_id]
             )
 
@@ -411,7 +411,7 @@ class TestCheckPermissionUnified:
                 name='创建业务对象'
             )
             service.ds.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 [1, perm_id]
             )
 
@@ -450,28 +450,28 @@ class TestBackwardCompatibility:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE roles (
+                CREATE TABLE permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_groups (
+                CREATE TABLE orgs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code VARCHAR(200) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE user_group_members (
+                CREATE TABLE org_members (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     group_id INTEGER NOT NULL
                 )
             """)
             cursor.execute("""
-                CREATE TABLE group_roles (
+                CREATE TABLE org_permission_sets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id INTEGER NOT NULL,
                     role_id INTEGER NOT NULL,
@@ -479,7 +479,7 @@ class TestBackwardCompatibility:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE role_permissions (
+                CREATE TABLE permission_set_permissions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role_id INTEGER NOT NULL,
                     permission_id INTEGER NOT NULL,
@@ -517,7 +517,7 @@ class TestBackwardCompatibility:
                 name='删除领域'
             )
             service.ds.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 [1, perm_id]
             )
 
@@ -534,7 +534,7 @@ class TestBackwardCompatibility:
                 name='读取版本'
             )
             service.ds.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
                 [1, perm_id]
             )
 

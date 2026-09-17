@@ -20,6 +20,7 @@ Action Handlers - 业务操作的处理器函数 (v2 增强)
 
 from typing import Dict, Any, Callable, Optional
 import logging
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +54,7 @@ def clear_other_current_versions_handler(params: Dict[str, Any], context: Dict[s
         try:
             from meta.core.datasource import get_data_source
             import os
-            db_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'architecture.db',
-            )
+            db_path = get_meta_db_path()
             datasource = get_data_source("sqlite", database=db_path)
         except Exception as e:
             logger.warning(f"[version.clear_other_current] Failed to get datasource: {e}")

@@ -1,275 +1,416 @@
 /**
  * v39 修复: 架构管理页 chip 数字 = 扁平去重 BO 数 / 关系数
+ * v48 修复 (2026-07-08): 改用树节点 count 精确累加, 避免双重计数
  * 跨页一致性: 架构管理 chip 数字 == 图表页 业务对象数/关系数
  */
 import { describe, it, expect } from 'vitest'
 
-// 1. 模拟 flattenSelectedBoIds 计算
-describe('flattenSelectedBoIds (v39 扁平去重 BO 数)', () => {
-  function computeFlattenSelectedBoIds({
+// ============================================================
+// 1. v48 新算法: selectedBoCount (按"未被祖先覆盖"原则累加)
+// ============================================================
+describe('selectedBoCount V048 (按树节点 count 精确累加)', () => {
+  // 模拟 production code 的 selectedBoCount 算法
+  function buildCountMap(treeData, type) {
+    const map = new Map()
+    function walk(nodes) {
+      if (!nodes) return
+      for (const n of nodes) {
+        if (n.type === type && (n.count || 0) > 0) {
+          map.set(n.originalId || n.id, n.count)
+        }
+        if (n.children) walk(n.children)
+      }
+    }
+    walk(treeData)
+    return map
+  }
+
+  function selectedBoCountV048({
     selectedBoIds = [],
-    selectedServiceModuleIds = [],
-    selectedSubDomainIds = [],
     selectedDomainIds = [],
+    selectedSubDomainIds = [],
+    selectedServiceModuleIds = [],
     treeData = [],
     hierarchyMap = {}
   }) {
-    // 1. build boIdsBySm from treeData
-    const boIdsBySm = new Map()
-    function walkBos(nodes) {
-      if (!nodes) return
-      for (const n of nodes) {
-        if (n.type === 'business_object') {
-          const info = hierarchyMap[n.id]
-          if (info?.serviceModuleId != null) {
-            const list = boIdsBySm.get(info.serviceModuleId) || []
-            list.push(n.id)
-            boIdsBySm.set(info.serviceModuleId, list)
-          }
-        }
-        if (n.children) walkBos(n.children)
-      }
-    }
-    walkBos(treeData)
+    const smChildCount = buildCountMap(treeData, 'service_module')
+    const sdChildCount = buildCountMap(treeData, 'sub_domain')
+    const domainChildCount = buildCountMap(treeData, 'domain')
 
-    // 2. 展开
-    const result = new Set()
-    for (const id of selectedBoIds) result.add(id)
+    // [V048b] ID 类型规范化: 兼容数字/字符串/带前缀 id
+    const normalizeId = (v) => {
+      if (v == null) return v
+      if (typeof v === 'number') return v
+      const s = String(v)
+      const numStr = s.replace(/^(d|s|sm)_/, '')
+      const n = Number(numStr)
+      return Number.isNaN(n) ? s : n
+    }
+
+    const selectedDomainSet = new Set(selectedDomainIds.map(normalizeId))
+    const selectedSubDomainSet = new Set(selectedSubDomainIds.map(normalizeId))
+    let total = 0
+
+    // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
     for (const smId of selectedServiceModuleIds) {
-      for (const boId of (boIdsBySm.get(smId) || [])) result.add(boId)
+      const nId = normalizeId(smId)
+      const info = hierarchyMap[nId] || hierarchyMap[smId] || hierarchyMap[`sm_${nId}`]
+      if (!info) continue
+      if (selectedSubDomainSet.has(info.subDomainId)) continue
+      if (selectedDomainSet.has(info.domainId)) continue
+      total += smChildCount.get(nId) || smChildCount.get(smId) || 0
     }
+
+    // 2. 选中的 SD (只在所属 domain 未被选中时累加)
     for (const sdId of selectedSubDomainIds) {
-      const info = hierarchyMap[sdId]
+      const nId = normalizeId(sdId)
+      const info = hierarchyMap[nId] || hierarchyMap[sdId] || hierarchyMap[`s_${nId}`]
       if (!info) continue
-      for (const smId of boIdsBySm.keys()) {
-        const smInfo = hierarchyMap[smId]
-        if (smInfo?.subDomainId === info.subDomainId) {
-          for (const boId of (boIdsBySm.get(smId) || [])) result.add(boId)
-        }
-      }
+      if (selectedDomainSet.has(info.domainId)) continue
+      total += sdChildCount.get(nId) || sdChildCount.get(sdId) || 0
     }
+
+    // 3. 选中的 domain (直接累加)
     for (const dId of selectedDomainIds) {
-      const info = hierarchyMap[dId]
-      if (!info) continue
-      for (const smId of boIdsBySm.keys()) {
-        const smInfo = hierarchyMap[smId]
-        if (smInfo?.domainId === info.domainId) {
-          for (const boId of (boIdsBySm.get(smId) || [])) result.add(boId)
-        }
-      }
+      const nId = normalizeId(dId)
+      total += domainChildCount.get(nId) || domainChildCount.get(dId) || 0
     }
-    return [...result]
+
+    // 4. 兜底: 只选了 BO (无任何祖先) → 用 selectedBoIds.length
+    if (
+      total === 0 &&
+      selectedBoIds.length > 0 &&
+      selectedDomainIds.length === 0 &&
+      selectedSubDomainIds.length === 0 &&
+      selectedServiceModuleIds.length === 0
+    ) {
+      total = selectedBoIds.length
+    }
+
+    return total
   }
 
-  // 树结构: domain1 → sd1 → sm1(BO1,BO2) / sm2(BO3)
-  //         domain1 → sd2 → sm3(BO4)
-  //         domain2 → sd3 → sm4(BO5,BO6,BO7)
-  const treeData = [{
-    id: 'd_1', originalId: 1, type: 'domain', children: [
-      { id: 's_10', originalId: 10, type: 'sub_domain', children: [
-        { id: 'sm_100', originalId: 100, type: 'service_module', children: [
-          { id: 1000, type: 'business_object' },
-          { id: 1001, type: 'business_object' }
-        ]},
-        { id: 'sm_101', originalId: 101, type: 'service_module', children: [
-          { id: 1002, type: 'business_object' }
-        ]}
-      ]},
-      { id: 's_11', originalId: 11, type: 'sub_domain', children: [
-        { id: 'sm_102', originalId: 102, type: 'service_module', children: [
-          { id: 1003, type: 'business_object' }
-        ]}
-      ]}
-    ]
-  }, {
-    id: 'd_2', originalId: 2, type: 'domain', children: [
-      { id: 's_20', originalId: 20, type: 'sub_domain', children: [
-        { id: 'sm_200', originalId: 200, type: 'service_module', children: [
-          { id: 2000, type: 'business_object' },
-          { id: 2001, type: 'business_object' },
-          { id: 2002, type: 'business_object' }
-        ]}
-      ]}
-    ]
-  }]
+  // 树结构: domain1(4 BO) → sd1(3 BO) → sm1(2 BO) / sm2(1 BO)
+  //                  sd2(1 BO) → sm3(1 BO)
+  //         domain2(3 BO) → sd3(3 BO) → sm4(3 BO)
+  const treeData = [
+    {
+      id: 'd_1', originalId: 1, type: 'domain', name: 'Domain 1', count: 4,
+      children: [
+        {
+          id: 's_10', originalId: 10, type: 'sub_domain', name: 'SD 1', count: 3,
+          children: [
+            { id: 'sm_100', originalId: 100, type: 'service_module', name: 'SM 1', count: 2, children: [] },
+            { id: 'sm_101', originalId: 101, type: 'service_module', name: 'SM 2', count: 1, children: [] },
+          ]
+        },
+        {
+          id: 's_11', originalId: 11, type: 'sub_domain', name: 'SD 2', count: 1,
+          children: [
+            { id: 'sm_102', originalId: 102, type: 'service_module', name: 'SM 3', count: 1, children: [] },
+          ]
+        },
+      ]
+    },
+    {
+      id: 'd_2', originalId: 2, type: 'domain', name: 'Domain 2', count: 3,
+      children: [
+        {
+          id: 's_20', originalId: 20, type: 'sub_domain', name: 'SD 3', count: 3,
+          children: [
+            { id: 'sm_200', originalId: 200, type: 'service_module', name: 'SM 4', count: 3, children: [] },
+          ]
+        },
+      ]
+    },
+  ]
 
   const hierarchyMap = {
-    'd_1': { domainId: 1 },
-    'd_2': { domainId: 2 },
-    's_10': { domainId: 1, subDomainId: 10 },
-    's_11': { domainId: 1, subDomainId: 11 },
-    's_20': { domainId: 2, subDomainId: 20 },
-    'sm_100': { domainId: 1, subDomainId: 10, serviceModuleId: 100 },
-    'sm_101': { domainId: 1, subDomainId: 10, serviceModuleId: 101 },
-    'sm_102': { domainId: 1, subDomainId: 11, serviceModuleId: 102 },
-    'sm_200': { domainId: 2, subDomainId: 20, serviceModuleId: 200 },
-    // 关键: 也存数字 key (production code 反查用)
+    1: { domainId: 1 },
+    2: { domainId: 2 },
+    10: { domainId: 1, subDomainId: 10 },
+    11: { domainId: 1, subDomainId: 11 },
+    20: { domainId: 2, subDomainId: 20 },
     100: { domainId: 1, subDomainId: 10, serviceModuleId: 100 },
     101: { domainId: 1, subDomainId: 10, serviceModuleId: 101 },
     102: { domainId: 1, subDomainId: 11, serviceModuleId: 102 },
     200: { domainId: 2, subDomainId: 20, serviceModuleId: 200 },
-    1000: { domainId: 1, subDomainId: 10, serviceModuleId: 100 },
-    1001: { domainId: 1, subDomainId: 10, serviceModuleId: 100 },
-    1002: { domainId: 1, subDomainId: 10, serviceModuleId: 101 },
-    1003: { domainId: 1, subDomainId: 11, serviceModuleId: 102 },
-    2000: { domainId: 2, subDomainId: 20, serviceModuleId: 200 },
-    2001: { domainId: 2, subDomainId: 20, serviceModuleId: 200 },
-    2002: { domainId: 2, subDomainId: 20, serviceModuleId: 200 }
   }
 
-  it('只选 BO 4 个 → 4 个 BO', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedBoIds: [1000, 1001, 1002, 1003],
-      treeData, hierarchyMap
+  // ========================================
+  // 用户场景: 选 1 个 domain (级联到 SD/SM)
+  // ========================================
+  it('用户场景 A: 选 domain 1 (el-tree 级联到 SD 10,11 + SM 100,101,102)', () => {
+    // 勾上: [domain 1, sd 10, sd 11, sm 100, sm 101, sm 102]
+    const result = selectedBoCountV048({
+      selectedDomainIds: [1],
+      selectedSubDomainIds: [10, 11],
+      selectedServiceModuleIds: [100, 101, 102],
+      treeData,
+      hierarchyMap,
     })
-    expect(new Set(result).size).toBe(4)
+    expect(result).toBe(4) // domain 1 的 count
   })
 
-  it('选 1 个 domain (含 4 BO) → 4 个 BO', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedDomainIds: ['d_1'],
-      treeData, hierarchyMap
+  it('用户场景 B: 选 SD 10 (级联到 SM 100,101)', () => {
+    const result = selectedBoCountV048({
+      selectedSubDomainIds: [10],
+      selectedServiceModuleIds: [100, 101],
+      treeData,
+      hierarchyMap,
     })
-    expect(new Set(result).size).toBe(4)  // 1000,1001,1002,1003
+    expect(result).toBe(3) // SD 10 的 count
   })
 
-  it('选 1 个 sub_domain (含 2 BO) → 2 个 BO', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedSubDomainIds: ['s_10'],
-      treeData, hierarchyMap
-    })
-    expect(new Set(result).size).toBe(3)  // 1000,1001,1002
-  })
-
-  it('选 1 个 service_module (含 2 BO) → 2 个 BO', () => {
-    // selectedServiceModuleIds 元素是 number (originalId)
-    const result = computeFlattenSelectedBoIds({
+  it('用户场景 C: 选单个 SM 100', () => {
+    const result = selectedBoCountV048({
       selectedServiceModuleIds: [100],
-      treeData, hierarchyMap
+      treeData,
+      hierarchyMap,
     })
-    expect(new Set(result).size).toBe(2)  // 1000,1001
+    expect(result).toBe(2) // SM 100 的 count
   })
 
-  it('混合: 选 1 domain + 1 BO from 其他 domain', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedDomainIds: ['d_1'],
-      selectedBoIds: [2000],
-      treeData, hierarchyMap
+  it('用户场景 D: restore 5 BO (无祖先)', () => {
+    const result = selectedBoCountV048({
+      selectedBoIds: [1000, 1001, 1002, 1003, 1004],
+      treeData,
+      hierarchyMap,
     })
-    expect(new Set(result).size).toBe(5)  // 1000,1001,1002,1003,2000
+    expect(result).toBe(5)
   })
 
-  it('重复: 同时选 domain 和 sub_domain → 去重', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedDomainIds: ['d_1'],
-      selectedSubDomainIds: ['s_10'],
-      treeData, hierarchyMap
+  // ========================================
+  // 用户报的 bug V048 (原 2032 → 1610)
+  // ========================================
+  it('V048 bug 复现: restore 422 BO + 选财务云 domain (级联)', () => {
+    // 树结构: domain 1 (id=2205) count=1610
+    //         sd 10 + sd 11, sm 100-102 共 1610 BO
+    const treeData2 = [{
+      id: 'd_2205', originalId: 2205, type: 'domain', name: '财务云', count: 1610,
+      children: [
+        { id: 's_300', originalId: 300, type: 'sub_domain', name: 'SD', count: 900, children: [
+          { id: 'sm_1001', originalId: 1001, type: 'service_module', name: 'SM1', count: 500, children: [] },
+          { id: 'sm_1002', originalId: 1002, type: 'service_module', name: 'SM2', count: 400, children: [] },
+        ]},
+        { id: 's_301', originalId: 301, type: 'sub_domain', name: 'SD', count: 710, children: [
+          { id: 'sm_1003', originalId: 1003, type: 'service_module', name: 'SM3', count: 410, children: [] },
+          { id: 'sm_1004', originalId: 1004, type: 'service_module', name: 'SM4', count: 300, children: [] },
+        ]},
+      ]
+    }]
+    const hMap = {
+      2205: { domainId: 2205 },
+      300: { domainId: 2205, subDomainId: 300 },
+      301: { domainId: 2205, subDomainId: 301 },
+      1001: { domainId: 2205, subDomainId: 300 },
+      1002: { domainId: 2205, subDomainId: 300 },
+      1003: { domainId: 2205, subDomainId: 301 },
+      1004: { domainId: 2205, subDomainId: 301 },
+    }
+    // 选 422 BO + 选 财务云 (级联到 4 个 SM)
+    const result = selectedBoCountV048({
+      selectedBoIds: Array.from({ length: 422 }, (_, i) => i + 1),
+      selectedDomainIds: [2205],
+      selectedSubDomainIds: [300, 301],
+      selectedServiceModuleIds: [1001, 1002, 1003, 1004],
+      treeData: treeData2,
+      hierarchyMap: hMap,
     })
-    expect(new Set(result).size).toBe(4)  // 4 BO, 去重
+    // 修复前 = 422 + 500 + 400 + 410 + 300 = 2032 (双重计数)
+    // 修复后 = 1610 (domain count, BO 被覆盖)
+    expect(result).toBe(1610)
   })
 
-  it('全选: 2 domains → 7 BO', () => {
-    const result = computeFlattenSelectedBoIds({
-      selectedDomainIds: ['d_1', 'd_2'],
-      treeData, hierarchyMap
+  // ========================================
+  // 跨 SD 选 SM (无级联)
+  // ========================================
+  it('跨 SD 选 SM: SM 100 (sd 10) + SM 200 (sd 20, domain 2)', () => {
+    const result = selectedBoCountV048({
+      selectedServiceModuleIds: [100, 200],
+      treeData,
+      hierarchyMap,
     })
-    expect(new Set(result).size).toBe(7)  // 4 + 3
+    expect(result).toBe(5) // 2 + 3
+  })
+
+  it('跨 domain 选 SD: SD 10 (domain 1) + SD 20 (domain 2)', () => {
+    const result = selectedBoCountV048({
+      selectedSubDomainIds: [10, 20],
+      treeData,
+      hierarchyMap,
+    })
+    expect(result).toBe(6) // 3 + 3
+  })
+
+  it('全选: 2 domains (级联到所有 SD/SM)', () => {
+    const result = selectedBoCountV048({
+      selectedDomainIds: [1, 2],
+      selectedSubDomainIds: [10, 11, 20],
+      selectedServiceModuleIds: [100, 101, 102, 200],
+      treeData,
+      hierarchyMap,
+    })
+    expect(result).toBe(7) // 4 + 3
+  })
+
+  // ========================================
+  // 边界场景
+  // ========================================
+  it('边界: 空选择 → 0', () => {
+    expect(selectedBoCountV048({ treeData, hierarchyMap })).toBe(0)
+  })
+
+  it('边界: treeData 为空 + restore 5 BO → 5', () => {
+    expect(selectedBoCountV048({
+      selectedBoIds: [1, 2, 3, 4, 5],
+      treeData: [],
+      hierarchyMap: {},
+    })).toBe(5)
+  })
+
+  it('边界: restore 5 BO + 选 1 SM → 5 (SM 覆盖 BO, 等于 SM count)', () => {
+    // 选 SM 100 (count=2) + restore 5 BO (无祖先)
+    // 修复: SM 100 被勾上时, selectedBoIds 被祖先覆盖, 只算 SM count
+    const result = selectedBoCountV048({
+      selectedBoIds: [1000, 1001, 1002, 1003, 1004],
+      selectedServiceModuleIds: [100],
+      treeData,
+      hierarchyMap,
+    })
+    // 修复后: total = 2 (SM 100 count)
+    expect(result).toBe(2)
+  })
+
+  it('v39 旧行为对比 (仅记录, 不期望): 同样输入下 placeholder 算法 = 5+2 = 7 (双重计数)', () => {
+    // v39 算法在同样输入下: 5 BO + SM 100 placeholder 2 = 7 (双重计数 bug)
+    // 修复后: 2 (只算 SM count)
+    // 此测试仅做 v39 vs V048 对比记录
+    const v48Result = selectedBoCountV048({
+      selectedBoIds: [1000, 1001, 1002, 1003, 1004],
+      selectedServiceModuleIds: [100],
+      treeData,
+      hierarchyMap,
+    })
+    expect(v48Result).not.toBe(7) // 不等于 v39 的双重计数结果
+  })
+
+  // ========================================
+  // V048b: ID 类型规范化 (兼容 emit 字符串 id)
+  // ========================================
+  it('V048b: emit 字符串 id (带前缀 d_/s_/sm_) → 仍然 141 (不双重计数)', () => {
+    // 模拟 emit 用了 node.id fallback (prefixed 字符串) 而不是 node.data.originalId
+    const result = selectedBoCountV048({
+      selectedDomainIds: ['d_1'],  // 字符串
+      selectedSubDomainIds: ['s_10', 's_11'],  // 字符串
+      selectedServiceModuleIds: ['sm_100', 'sm_101', 'sm_102'],  // 字符串
+      treeData,
+      hierarchyMap,
+    })
+    // hierarchyMap key 是数字, emit 是字符串 → V048 原始算法会 fail (返回 0)
+    // V048b normalize 后应能正确处理
+    // 实际生产中 hierarchyMap 实际可能不兼容字符串, 但 selectedBoCount 本身应该正确
+    // 这里我们期望: 用 normalize 后 Set 跳过逻辑生效
+    //   selectedDomainSet = {1} (normalize 'd_1' = 1)
+    //   selectedSubDomainSet = {10, 11}
+    //   SM loop: info.domainId=1 in Set → continue
+    //   SD loop: info.domainId=1 in Set → continue
+    //   domain loop: domainChildCount.get(1) = 4
+    expect(result).toBe(4)
+  })
+
+  // ========================================
+  // V048c 修复: selectedDomainIds 去重
+  // ========================================
+  it('V048c bug 复现: selectedDomainIds 含重复 id → selectedBoCount 累加两次', () => {
+    // 如果 selectedDomainIds 含重复 id (如 [1, 1])
+    // selectedBoCount 会累加两次 domain count
+    // 这是 bug 状态，期望 8 (4+4) 而不是 4
+    const result = selectedBoCountV048({
+      selectedDomainIds: [1, 1],  // 重复 id
+      treeData,
+      hierarchyMap,
+    })
+    // Bug 状态: domain loop 执行两次 → 4 + 4 = 8
+    expect(result).toBe(8)
+    // 修复: handleObjectScopeChange 用 Set 去重: selectedDomainIds.value = [...new Set(domainIds.map(normalizeId))]
+    // 这样就不会出现重复 id
+  })
+
+  it('V048c 修复: handleObjectScopeChange 去重后 selectedDomainIds 无重复', () => {
+    // 模拟 handleObjectScopeChange 的去重逻辑
+    const normalizeId = (v) => {
+      if (v == null) return v
+      if (typeof v === 'number') return v
+      const s = String(v)
+      const numStr = s.replace(/^(d|s|sm)_/, '')
+      const n = Number(numStr)
+      return Number.isNaN(n) ? s : n
+    }
+    const rawDomainIds = [1, 1, 'd_1', 1]  // 含重复
+    const dedupedDomainIds = [...new Set(rawDomainIds.map(normalizeId))]
+    expect(dedupedDomainIds).toEqual([1])  // 去重后只剩 1 个
+
+    // 用去重后的 id 调用 selectedBoCount
+    const result = selectedBoCountV048({
+      selectedDomainIds: dedupedDomainIds,
+      treeData,
+      hierarchyMap,
+    })
+    expect(result).toBe(4)  // 正确: 只累加一次
   })
 })
 
-// 2. 模拟 selectedBoCount (新 chip 数字)
-describe('selectedBoCount chip (v39 = 扁平 BO 数, 对齐图表页)', () => {
-  function selectedBoCountNew(localSelectedBoCount, flattenBoIds, fallbackIds) {
-    if (localSelectedBoCount > 0) return localSelectedBoCount
-    if (flattenBoIds && flattenBoIds.length > 0) return new Set(flattenBoIds).size
-    // 兜底
-    return (fallbackIds.bo?.length || 0) + (fallbackIds.d?.length || 0) +
-      (fallbackIds.sd?.length || 0) + (fallbackIds.sm?.length || 0)
-  }
-
-  it('用户场景: 4 源混杂 9 个 → 扁平 19 BO (跟图表页一致)', () => {
-    // 模拟: 选 1 domain (4 BO) + 1 sd (3 BO, 部分重叠) + 3 sm (含新 BO) + 4 bo
-    // 扁平去重后 = 19 BO (跟图表页 19 对象 一致)
-    const flattenIds = Array.from({ length: 19 }, (_, i) => 1000 + i)
-    const fallbackIds = { bo: [1000, 1001, 1002, 1003], d: ['d_1'], sd: ['s_10'], sm: ['sm_100', 'sm_101', 'sm_102'] }
-    // 旧: 4+1+1+3 = 9
-    // 新: 19
-    expect(selectedBoCountNew(0, flattenIds, fallbackIds)).toBe(19)
-  })
-
-  it('localSelectedBoCount 优先 (正常路径)', () => {
-    // handleObjectScopeChange 已写过, 直接用
-    expect(selectedBoCountNew(15, [], { bo: [], d: [], sd: [], sm: [] })).toBe(15)
-  })
-
-  it('local=0 + 无 flatten (空选择) → 0', () => {
-    expect(selectedBoCountNew(0, [], { bo: [], d: [], sd: [], sm: [] })).toBe(0)
-  })
-
-  it('local=0 + 有 flatten (restore 路径) → 扁平数', () => {
-    const flattenIds = [1, 2, 3, 4, 5]
-    expect(selectedBoCountNew(0, flattenIds, { bo: [], d: [], sd: [], sm: [] })).toBe(5)
-  })
-})
-
-// 3. 跨页一致性
-describe('v39 跨页一致性: 架构 chip == 图表页 业务对象/关系数', () => {
+// ============================================================
+// 2. 跨页一致性 (不变)
+// ============================================================
+describe('跨页一致性: 架构 chip == 图表页 业务对象/关系数', () => {
   it('用户场景: 架构 chip 19 对象 = 图表导航 19 对象', () => {
-    // 架构页 selectedBoCount (v39) = 19
     const archChipBoCount = 19
-    // 图表页 displayStats.total.businessObjects = 19 (finalBoCodes = 中心∪关系)
     const chartNavBoCount = 19
     expect(archChipBoCount).toBe(chartNavBoCount)
   })
 
-  it('用户场景 v40 修复: 架构 chip 12 关系 = 图表导航 12 关系 ✅ 一致', () => {
-    // v40 修复后: 架构页 relationCodesCount 用 selectedRelationIds.length (= 关系记录数 12)
-    //   跟图表页 total.objectRelations (= filteredRelations.length = 12) 口径一致
-    //   跟"关系范围"树节点 count (也是关系记录数) 一致
-    //   跟管理页 "对象范围 chip" 用的 BO 数口径一致
-    const archChipRelCount = 12  // v40: 关系数, 不再是关系类型编码数
-    const chartNavRelCount = 12  // 图表页 filteredRelations.length
+  it('用户场景 v40 修复: 架构 chip 12 关系 = 图表导航 12 关系', () => {
+    const archChipRelCount = 12
+    const chartNavRelCount = 12
     expect(archChipRelCount).toBe(chartNavRelCount)
   })
 
-  it('v40 兜底: 当 selectedRelationIds 为空 (旧 code 路径) → 回退到 selectedRelationCodes 数', () => {
-    // 兜底逻辑保证向后兼容: 老路径 (无 relationIds, 只有 relationCodes) 仍能显示
+  it('v40 兜底: 当 selectedRelationIds 为空 → 回退到 selectedRelationCodes 数', () => {
     function relationCodesCountV40(selectedRelationIds, selectedRelationCodes) {
       if (selectedRelationIds && selectedRelationIds.length > 0) return selectedRelationIds.length
       return selectedRelationCodes?.length || 0
     }
-    // 正常路径
     expect(relationCodesCountV40([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], ['APPROVES', 'CONTAINS'])).toBe(12)
-    // 兜底路径 (无 ids, 仅有 codes)
     expect(relationCodesCountV40([], ['APPROVES', 'CONTAINS'])).toBe(2)
-    // 空选择
     expect(relationCodesCountV40([], [])).toBe(0)
   })
 })
 
-// 4. 关系范围树节点 count: 已用 buildRelationScopeTree 关系数
+// ============================================================
+// 3. 关系范围树节点 count (不变)
+// ============================================================
 describe('关系范围树节点 count (v39 现状 = 关系数, 已对齐)', () => {
   function buildClassifierNodeCount(node) {
-    // 模拟 buildRelationScopeTree 中节点的 count 字段
     return node.count || 0
   }
 
   it('节点 count = 该子树下关系数', () => {
     const classifierNode = {
       name: '跨域',
-      count: 8,  // 8 条关系
+      count: 8,
       children: [{ name: 'domain1→domain2', count: 3 }, { name: 'd2→d3', count: 5 }]
     }
     expect(buildClassifierNodeCount(classifierNode)).toBe(8)
-    // 子节点也对齐
-    const childTotal = classifierNode.children.reduce((s, c) => s + c.count, 0)
-    expect(childTotal).toBe(8)
+    expect(classifierNode.children.reduce((s, c) => s + c.count, 0)).toBe(8)
   })
 })
 
-// 5. 对象范围树节点 count (v39 新: BO 数, 非下层节点数)
+// ============================================================
+// 4. 对象范围树节点 count (buildHierarchyTree, 验证 count 字段正确)
+// ============================================================
 describe('对象范围树节点 count (v39 新: BO 数, 非下层节点数)', () => {
-  // 模拟 buildHierarchyTree 逻辑
   function buildHierarchyTree(domains, subDomains, serviceModules, businessObjects) {
     const subDomainMap = new Map()
     const serviceModuleMap = new Map()
@@ -342,9 +483,6 @@ describe('对象范围树节点 count (v39 新: BO 数, 非下层节点数)', ()
     })
   }
 
-  // 测试数据: domain1(2 BO) → sd1(3 BO) → sm1(2 BO) / sm2(1 BO)
-  //         domain1(2 BO) → sd2(1 BO) → sm3(1 BO)
-  //         domain2(3 BO) → sd3(3 BO) → sm4(3 BO)
   const domains = [
     { id: 1, name: 'Domain 1', code: 'D1' },
     { id: 2, name: 'Domain 2', code: 'D2' }
@@ -361,14 +499,10 @@ describe('对象范围树节点 count (v39 新: BO 数, 非下层节点数)', ()
     { id: 200, sub_domain_id: 20, name: 'SM 4', code: 'SM4' }
   ]
   const businessObjects = [
-    // sm1 (100): 2 BO
     { id: 1000, service_module_id: 100 },
     { id: 1001, service_module_id: 100 },
-    // sm2 (101): 1 BO
     { id: 1002, service_module_id: 101 },
-    // sm3 (102): 1 BO
     { id: 1003, service_module_id: 102 },
-    // sm4 (200): 3 BO
     { id: 2000, service_module_id: 200 },
     { id: 2001, service_module_id: 200 },
     { id: 2002, service_module_id: 200 }
@@ -376,30 +510,22 @@ describe('对象范围树节点 count (v39 新: BO 数, 非下层节点数)', ()
 
   it('service_module 节点 count = 该模块内 BO 数', () => {
     const tree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
-    const sm1 = tree[0].children[0].children[0] // sm_100
-    expect(sm1.count).toBe(2)
-    const sm2 = tree[0].children[0].children[1] // sm_101
-    expect(sm2.count).toBe(1)
-    const sm4 = tree[1].children[0].children[0] // sm_200
-    expect(sm4.count).toBe(3)
+    expect(tree[0].children[0].children[0].count).toBe(2) // sm_100
+    expect(tree[0].children[0].children[1].count).toBe(1) // sm_101
+    expect(tree[1].children[0].children[0].count).toBe(3) // sm_200
   })
 
   it('sub_domain 节点 count = 该子域内所有 BO 数', () => {
     const tree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
-    const sd1 = tree[0].children[0] // s_10 (sm1: 2 BO + sm2: 1 BO = 3 BO)
-    expect(sd1.count).toBe(3)
-    const sd2 = tree[0].children[1] // s_11 (sm3: 1 BO)
-    expect(sd2.count).toBe(1)
-    const sd3 = tree[1].children[0] // s_20 (sm4: 3 BO)
-    expect(sd3.count).toBe(3)
+    expect(tree[0].children[0].count).toBe(3) // s_10: 2+1
+    expect(tree[0].children[1].count).toBe(1) // s_11: 1
+    expect(tree[1].children[0].count).toBe(3) // s_20: 3
   })
 
   it('domain 节点 count = 该域内所有 BO 数', () => {
     const tree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
-    const d1 = tree[0] // sd1: 3 BO + sd2: 1 BO = 4 BO
-    expect(d1.count).toBe(4)
-    const d2 = tree[1] // sd3: 3 BO
-    expect(d2.count).toBe(3)
+    expect(tree[0].count).toBe(4) // d_1: 3+1
+    expect(tree[1].count).toBe(3) // d_2: 3
   })
 
   it('空 BO 列表 → 所有节点 count = 0', () => {
@@ -416,7 +542,6 @@ describe('对象范围树节点 count (v39 新: BO 数, 非下层节点数)', ()
       { id: 9998, service_module_id: undefined }
     ]
     const tree = buildHierarchyTree(domains, subDomains, serviceModules, bosWithNull)
-    // 总数不变 (null/undefined 的 BO 被忽略)
     expect(tree[0].count).toBe(4)
     expect(tree[1].count).toBe(3)
   })

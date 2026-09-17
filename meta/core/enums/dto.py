@@ -22,7 +22,7 @@ class EnumTypeDTO:
         id: 枚举类型唯一标识（如 order_status）
         name: 显示名称
         category: 分类（system/business）
-        mutability: 可变性（locked/extensible/fully_editable）
+        mutability: 可变性（locked/extensible/fullEditable）
         description: 说明文本
         dimension_schema: 多维枚举的维度定义（JSON格式）
         value_count: 包含的枚举值数量

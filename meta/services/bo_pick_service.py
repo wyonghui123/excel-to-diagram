@@ -16,6 +16,7 @@
 import logging
 import os
 from typing import Optional, Dict, Any
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,7 @@ def _default_db_path() -> str:
     )
     if env_db_path:
         return env_db_path
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db',
-    )
+    return get_meta_db_path()
 
 
 def _default_data_source():

@@ -1,7 +1,7 @@
 /**
  * 重复配置检测 Composable
  *
- * 封装 Section 1 (管理维度) 与 Section 3 (条件型权限) 重叠加检测。
+ * 封装 Section 1 (权限维度) 与 Section 3 (条件型权限) 重叠加检测。
  * 优先调用后端 API，后端未就绪时回退到本地计算。
  */
 import { ref } from 'vue'

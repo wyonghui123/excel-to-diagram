@@ -1,0 +1,125 @@
+bo: role_effective_intents
+type: entity
+description: |
+  Layer 1 权限事实表 — 角色有效 Intent (单一事实来源)
+
+  [Phase 1] 统一权限架构事实层
+  - 每条记录是一个原子权限事实: (role, bo, action) → data_scope
+  - action 独立 (read/delete 互不包含, 无 LEVEL_ORDER 隐含)
+  - data_scope 统一: {include: [...], exclude: [...]}
+  - derivation_mode: static (显式IN) / dynamic (CHILDREN_OF)
+
+fields:
+  - name: id
+    type: integer
+    primary_key: true
+    autoincrement: true
+
+  - name: role_id
+    type: integer
+    required: true
+    description: 角色 ID
+
+  - name: bo_id
+    type: varchar(100)
+    required: true
+    description: 业务对象 ID (如 product, version)
+
+  - name: action_name
+    type: varchar(100)
+    required: true
+    description: |
+      操作名称 (独立, 无隐含包含)
+      常见值: read, list, create, update, delete, export, import
+
+  - name: data_scope
+    type: text
+    description: |
+      数据范围 JSON: {include: [...], exclude: [...]}
+      - include: [{field, op, value}] 允许范围 (空=全部)
+      - exclude: [{field, op, value}] 否决范围 (空=无否决)
+
+  - name: derivation_mode
+    type: varchar(20)
+    default: static
+    description: |
+      推导模式:
+      - static: 显式值列表 (IN [1,2,3]), 层级变更需重推导
+      - dynamic: CHILDREN_OF 运行时展开, 层级变更自动生效
+
+  - name: source
+    type: varchar(50)
+    default: derived
+    description: |
+      配置来源:
+      - manual: 管理员手动设置
+      - derived: 推导管道自动生成
+      - template: 模板应用
+
+  - name: is_stale
+    type: integer
+    default: 0
+    description: |
+      是否需要重推导 (1=stale)
+      - 维度配置变更时标记为 stale
+      - 推导管道重新运行后清除
+
+  - name: created_at
+    type: datetime
+    default: CURRENT_TIMESTAMP
+
+  - name: updated_at
+    type: datetime
+    default: CURRENT_TIMESTAMP
+
+constraints:
+  - type: unique
+    fields: [role_id, bo_id, action_name]
+    description: 同一角色同一 bo+action 只有一条 Intent
+
+indexes:
+  - name: idx_eff_intents_role
+    fields: [role_id]
+    description: 按角色查询
+
+  - name: idx_eff_intents_bo_action
+    fields: [bo_id, action_name]
+    description: 按 bo+action 查询
+
+  - name: idx_eff_intents_stale
+    fields: [is_stale]
+    where: "is_stale = 1"
+    description: 查询待重推导的 Intent
+
+actions:
+  - name: read
+    method: GET
+    path: /api/v1/permission/effective-intents
+    required_permissions: ['permission:read']
+
+  - name: list
+    method: GET
+    path: /api/v1/permission/effective-intents
+    required_permissions: ['permission:read']
+
+  - name: upsert
+    method: PUT
+    path: /api/v1/permission/effective-intents
+    required_permissions: ['permission:write']
+
+  - name: delete
+    method: DELETE
+    path: /api/v1/permission/effective-intents/<int:role_id>
+    required_permissions: ['permission:admin']
+
+  - name: derive
+    method: POST
+    path: /api/v1/permission/derive
+    required_permissions: ['permission:admin']
+    description: 触发推导管道 (Phase 2)
+
+  - name: simulate
+    method: POST
+    path: /api/v1/permission/simulate
+    required_permissions: ['permission:read']
+    description: 访问模拟 (FR-016)

@@ -93,11 +93,13 @@ export function useAssociationNavigation() {
       )
     }
 
+    // [P2-10 2026-08-29] Spec 16: role → permission_set, user_group → org
+    //   路径与 src/config/menuConfig.js 中的 tab key 保持一致
     const routePathMap = {
       'user': '/user-permission/users',
-      'role': '/user-permission/roles',
+      'permission_set': '/user-permission/permission-sets',
       'permission': '/user-permission/permissions',
-      'user_group': '/user-permission/groups',
+      'org': '/user-permission/orgs',
       'enum_type': '/business-config/enums',
       'enum_value': '/business-config/enums',
     }
@@ -127,9 +129,10 @@ export function useAssociationNavigation() {
       return true
     }
 
+    // [P2-10 2026-08-29] Spec 16: role → permission_set, user_group → org
     const routePathMap = {
-      'role': '/user-permission/roles',
-      'user_group': '/user-permission/groups',
+      'permission_set': '/user-permission/permission-sets',
+      'org': '/user-permission/orgs',
       'user': '/user-permission/users',
       'enum_type': '/business-config/enums',
     }
@@ -155,11 +158,12 @@ export function useAssociationNavigation() {
     }
   }
 
+  // [P2-10 2026-08-29] Spec 16: role → permission_set, user_group → org
   const routePathMap = {
     'user': '/user-permission/users',
-    'role': '/user-permission/roles',
+    'permission_set': '/user-permission/permission-sets',
     'permission': '/user-permission/permissions',
-    'user_group': '/user-permission/groups',
+    'org': '/user-permission/orgs',
     'enum_type': '/business-config/enums',
     'enum_value': '/business-config/enums',
     'domain': '/data/domains',

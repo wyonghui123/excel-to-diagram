@@ -93,7 +93,10 @@ fields:
   - id: password
     name: 密码
     type: string
-    db_column: password_hash
+    # [FIX 2026-07-17] yaml_driver 引擎发现 db_column 与 password_hash 字段冲突
+    # password 是 virtual 字段 (创建用户时的初始密码表单输入), 不会映射到 SQL 列
+    # 持久化列由 password_hash 字段承担 (db_column: password_hash)
+    # 不设置 db_column -> yaml_loader 默认使用 field.id="password", 但因 storage=VIRTUAL 被 SQL 生成跳过
     required: false
     semantics:
       meaning: 初始密码：admin 创建用户时可填，留空则后端自动生成 12 位强随机密码，首次登录强制改密
@@ -147,7 +150,14 @@ fields:
         color: danger
         icon: lock
         category: error
-        description: 用户账号已锁定，无法登录系统
+        description: 用户账号已锁定（违规临时锁定，可解锁恢复），无法登录系统
+      # [Spec 22 PM 反馈 2026-09-13 第十六次] 5 状态机对齐 Salesforce
+      - value: frozen
+        label: 已冻结
+        color: warning
+        icon: snowflake
+        category: error
+        description: 用户账号被冻结（Salesforce Freeze 等价物：保留 license + 数据 + 历史所有权，阻止登录），用于安全审查期
     value_help:
       source:
         type: enum
@@ -163,6 +173,7 @@ fields:
           active: success
           inactive: info
           locked: danger
+          frozen: warning
     ui:
       widget: value_help
       form_widget: select
@@ -186,7 +197,7 @@ fields:
       analytics:
         category: measure
     computation:
-      formula: 'DATEDIFF(NOW(), COALESCE((SELECT MAX(created_at) FROM audit_logs WHERE object_type=''user'' AND object_id=user.id AND field_name=''状态'' AND action=''UPDATE''), user.created_at), "days")'
+      formula: 'DATEDIFF(NOW(), COALESCE((SELECT MAX(created_at) FROM v_audit_all WHERE object_type=''user'' AND object_id=user.id AND field_name=''状态'' AND action=''UPDATE''), user.created_at), "days")'
     ui:
       widget: number
       editable: false
@@ -474,6 +485,7 @@ ui_view_config:
           active: success
           inactive: warning
           locked: danger
+          frozen: warning
       - field: last_login_at
         width: 160
         format: datetime
@@ -537,15 +549,43 @@ ui_view_config:
           - assign
           - unassign
 
+      - id: permission_preview
+        label: 权限预览
+        icon: lock
+        type: readonly_aggregate
+        endpoint: /api/v1/users/{id}/permission-config
+
 # ────────────────────────────────────────────
-# 状态转换规则
+# 状态转换规则 [Spec 22 2026-09-13 PM 反馈第十六次 + 第十七次]
+# 4 状态机对齐 Salesforce: active / inactive / locked / frozen
+# 6 个通用 action 全部接入 state_transition:
+#   activate / deactivate / lock / unlock / freeze / unfreeze
+#   (+ reset_password 不改 status field，独立 action endpoint)
+#
+# [PM 反馈第十七次 2026-09-13] archive/restore 已撤销:
+#   - 长期不活跃由 deactivate + frozen 覆盖
+#   - 删除的数据恢复由 audit_log row_snapshot + restore endpoint 承担（TBD）
+#   - 详见 Spec 22 §6.7
+#
+# action_ref 引用 _standard_actions.yaml 通用 action，资源矩阵「更多动作」列展示
+# ActionPermissionInterceptor 在 PUT 触发时校验当前用户 action_ref 权限
+#
+# 业界职责分离原则（Salesforce / Microsoft Entra / SAP 一致）:
+#   - lock/unlock: 临时违规锁定（保留数据）
+#   - freeze/unfreeze: 安全审查期冻结（保留 license + 数据 + 所有权）
+#   - activate/deactivate: 业务启用/停用（释放 license）
+#   每个动作独立权限码——客服可只授权 unlock 而不能 lock
 # ────────────────────────────────────────────
 rules:
   - id: activate_user
     name: 激活用户
     type: state_transition
+    action_ref: activate
     state_field: status
-    from_states: [inactive, locked]
+    # [PM 反馈 2026-09-13 第十六次] 修复：原 [inactive, locked] 让 activate 兼任 unlock，
+    # 违反 Salesforce lock/unlock 独立授权原则。改为仅从 inactive 激活，
+    # locked 用户必须走 unlock transition 才能恢复
+    from_states: [inactive]
     to_state: active
     triggers: [before_update]
     ui_hints:
@@ -554,29 +594,78 @@ rules:
       confirm_message: "确定要激活此用户吗？"
       highlight: true
 
-  - id: lock_user
-    name: 锁定用户
-    type: state_transition
-    state_field: status
-    from_states: [active, inactive]
-    to_state: locked
-    triggers: [before_update]
-    ui_hints:
-      label: 锁定
-      icon: lock
-      confirm_message: "确定要锁定此用户吗？"
-
   - id: deactivate_user
     name: 停用用户
     type: state_transition
+    action_ref: deactivate
     state_field: status
-    from_states: [active, locked]
+    from_states: [active]
     to_state: inactive
     triggers: [before_update]
     ui_hints:
       label: 停用
       icon: pause_circle
       confirm_message: "确定要停用此用户吗？"
+
+  - id: lock_user
+    name: 锁定用户
+    type: state_transition
+    action_ref: lock
+    state_field: status
+    from_states: [active]
+    to_state: locked
+    triggers: [before_update]
+    ui_hints:
+      label: 锁定
+      icon: lock
+      confirm_message: "确定要锁定此用户吗？锁定后必须使用解锁操作才能恢复。"
+
+  - id: unlock_user
+    name: 解锁用户
+    type: state_transition
+    action_ref: unlock
+    state_field: status
+    from_states: [locked]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 解锁
+      icon: lock-open
+      confirm_message: "确定要解锁此用户吗？解锁后用户可正常登录。"
+
+  - id: freeze_user
+    name: 冻结用户
+    type: state_transition
+    action_ref: freeze
+    state_field: status
+    from_states: [active, locked]
+    to_state: frozen
+    triggers: [before_update]
+    ui_hints:
+      label: 冻结
+      icon: snowflake
+      confirm_message: "确定要冻结此用户吗？冻结后保留数据与 license 但禁止登录。"
+
+  - id: unfreeze_user
+    name: 解冻用户
+    type: state_transition
+    action_ref: unfreeze
+    state_field: status
+    from_states: [frozen]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 解冻
+      icon: fire
+      confirm_message: "确定要解冻此用户吗？解冻后用户可正常登录。"
+
+  # [Spec 22 PM 反馈 2026-09-13 第十七次] archive_user / restore_user 已撤销
+  # 撤销原因：归档不是用户手动操作（详见 Spec 22 §6.7），由 deactivate + frozen 覆盖长期不活跃场景。
+  # 如需恢复被删除数据，走 audit_log row_snapshot + restore endpoint（待 TBD 实施）。
+
+  # [Spec 22 PM 反馈 2026-09-13 第十六次] reset_password 不改 status 字段
+  # 由 BoActionRegistry 注册的独立 endpoint 处理（POST /bo/user/{id}/reset_password），
+  # 不需要 state_transition 包装。这里只在 yaml 注释说明引用，不创建 rule。
 
 # ────────────────────────────────────────────
 # 操作定义
@@ -635,6 +724,7 @@ ui_badge:
       active: success
       inactive: info
       locked: info
+      frozen: warning
   locale:
     color_map:
       zh-CN: info

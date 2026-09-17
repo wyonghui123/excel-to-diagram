@@ -40,7 +40,7 @@ def _create_test_db():
             roles TEXT DEFAULT ''
         )
     """)
-    conn.execute("INSERT INTO users (username, roles) VALUES ('admin', 'admin')")
+    conn.execute("INSERT INTO users (username, permission_sets) VALUES ('admin', 'admin')")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

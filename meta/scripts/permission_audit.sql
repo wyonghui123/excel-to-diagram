@@ -1,10 +1,21 @@
 -- ============================================================
--- V1 权限审计 SQL (基于简化后的权限模型)
+-- V2 权限审计 SQL (Spec 16 RENAME + Spec 19 软删后)
 --
--- V1 简化说明:
---   - 管理员 = 拥有 '*' 通配权限的用户
---   - roles 表不再有 is_super_admin 和 priority 字段
---   - 权限赋权路径: 用户 → 用户组 → 角色 → 权限
+-- V2 关键变更:
+--   - roles -> permission_sets
+--   - role_permissions -> permission_set_permissions
+--   - user_roles -> user_permission_sets
+--   - user_groups -> orgs
+--   - user_group_members -> org_members
+--   - group_roles -> org_permission_sets
+--   - role_data_permissions -> permission_set_data_permissions
+--   - role_dimension_scopes -> permission_set_dimension_scopes
+--   - role_effective_intents -> permission_set_effective_intents
+--   - role_menu_permissions -> permission_set_menu_permissions
+--   - group_data_permissions -> org_data_permissions
+--   - user_group_members.is_manager / orgs.manager_id 软删 (Spec 19 M4)
+--     不再作为审计维度; 受托管理员由 OrgAdminScopeService 提供
+--   - 管理员仍 = 拥有 '*' 通配权限的用户
 --
 -- 使用方式:
 --   sqlite3 meta/architecture.db < permission_audit.sql
@@ -27,58 +38,58 @@ SELECT id, code, name, description FROM permissions ORDER BY code;
 -- ============================================================
 
 -- 2.1 查看所有管理员 (拥有 '*' 权限的用户)
---    V1 简化: 管理员 = 拥有 '*' 权限的用户
+--    V2 简化: 管理员 = 拥有 '*' 权限的用户 (经 permission_sets 链路)
 SELECT '=== 2.1 所有管理员 ===' AS '';
 SELECT DISTINCT
     u.id AS user_id,
     u.username,
     u.display_name,
     u.email,
-    u.is_active
+    u.status
 FROM users u
-JOIN user_roles ur ON u.id = ur.user_id
-JOIN roles r ON ur.role_id = r.id
-JOIN role_permissions rp ON r.id = rp.role_id
-JOIN permissions p ON rp.permission_id = p.id
+JOIN user_permission_sets ups ON u.id = ups.user_id
+JOIN permission_sets ps ON ups.permission_set_id = ps.id
+JOIN permission_set_permissions psp ON ps.id = psp.permission_set_id
+JOIN permissions p ON psp.permission_id = p.id
 WHERE p.code = '*'
-  AND r.is_active = 1
+  AND ps.is_active = 1
 ORDER BY u.username;
 
 -- 2.2 查看管理员数量统计
 SELECT '=== 2.2 管理员统计 ===' AS '';
 SELECT
     COUNT(DISTINCT u.id) AS admin_count,
-    (SELECT COUNT(*) FROM users WHERE is_active = 1) AS active_user_count
+    (SELECT COUNT(*) FROM users WHERE status = 'active') AS active_user_count
 FROM users u
-JOIN user_roles ur ON u.id = ur.user_id
-JOIN roles r ON ur.role_id = r.id
-JOIN role_permissions rp ON r.id = rp.role_id
-JOIN permissions p ON rp.permission_id = p.id
-WHERE p.code = '*' AND r.is_active = 1;
+JOIN user_permission_sets ups ON u.id = ups.user_id
+JOIN permission_sets ps ON ups.permission_set_id = ps.id
+JOIN permission_set_permissions psp ON ps.id = psp.permission_set_id
+JOIN permissions p ON psp.permission_id = p.id
+WHERE p.code = '*' AND ps.is_active = 1;
 
 -- 2.3 查看 admin 角色详情
-SELECT '=== 2.3 admin 角色详情 ===' AS '';
+SELECT '=== 2.3 admin 权限集详情 ===' AS '';
 SELECT
-    r.id AS role_id,
-    r.code,
-    r.name,
-    r.description,
-    r.is_active,
-    r.is_system
-FROM roles r
-WHERE r.code = 'admin';
+    ps.id AS permission_set_id,
+    ps.code,
+    ps.name,
+    ps.description,
+    ps.is_active,
+    ps.is_system
+FROM permission_sets ps
+WHERE ps.code = 'admin';
 
--- 2.4 查看 admin 角色的所有权限
-SELECT '=== 2.4 admin 角色权限 ===' AS '';
+-- 2.4 查看 admin 权限集的所有权限
+SELECT '=== 2.4 admin 权限集权限 ===' AS '';
 SELECT
     p.id AS perm_id,
     p.code,
     p.name,
     p.description
 FROM permissions p
-JOIN role_permissions rp ON p.id = rp.permission_id
-JOIN roles r ON rp.role_id = r.id
-WHERE r.code = 'admin';
+JOIN permission_set_permissions psp ON p.id = psp.permission_id
+JOIN permission_sets ps ON psp.permission_set_id = ps.id
+WHERE ps.code = 'admin';
 
 -- ============================================================
 -- 3. 用户权限查询
@@ -92,94 +103,93 @@ WITH user_perms AS (
         u.id AS user_id,
         u.username,
         u.display_name,
-        r.code AS role_code,
-        r.name AS role_name,
+        ps.code AS permission_set_code,
+        ps.name AS permission_set_name,
         p.code AS perm_code,
         p.name AS perm_name
     FROM users u
-    JOIN user_roles ur ON u.id = ur.user_id
-    JOIN roles r ON ur.role_id = r.id
-    JOIN role_permissions rp ON r.id = rp.role_id
-    JOIN permissions p ON rp.permission_id = p.id
-    WHERE u.username = 'admin' AND r.is_active = 1
+    JOIN user_permission_sets ups ON u.id = ups.user_id
+    JOIN permission_sets ps ON ups.permission_set_id = ps.id
+    JOIN permission_set_permissions psp ON ps.id = psp.permission_set_id
+    JOIN permissions p ON psp.permission_id = p.id
+    WHERE u.username = 'admin' AND ps.is_active = 1
 )
-SELECT * FROM user_perms ORDER BY role_code, perm_code;
+SELECT * FROM user_perms ORDER BY permission_set_code, perm_code;
 
--- 3.2 查看用户通过用户组获得的权限
-SELECT '=== 3.2 用户组间接权限 ===' AS '';
+-- 3.2 查看用户通过组织 (旧"用户组") 获得的权限
+SELECT '=== 3.2 组织间接权限 ===' AS '';
 SELECT DISTINCT
     u.username,
-    ug.name AS group_name,
-    r.code AS role_code,
-    r.name AS role_name,
+    o.name AS org_name,
+    ps.code AS permission_set_code,
+    ps.name AS permission_set_name,
     p.code AS perm_code,
     p.name AS perm_name
 FROM users u
-JOIN user_group_members ugm ON u.id = ugm.user_id
-JOIN user_groups ug ON ugm.group_id = ug.id
-JOIN group_roles gr ON ug.id = gr.group_id
-JOIN roles r ON gr.role_id = r.id
-JOIN role_permissions rp ON r.id = rp.role_id
-JOIN permissions p ON rp.permission_id = p.id
-WHERE r.is_active = 1
-ORDER BY u.username, ug.name, r.code;
+JOIN org_members om ON u.id = om.user_id
+JOIN orgs o ON om.org_id = o.id
+JOIN org_permission_sets ops ON o.id = ops.org_id
+JOIN permission_sets ps ON ops.permission_set_id = ps.id
+JOIN permission_set_permissions psp ON ps.id = psp.permission_set_id
+JOIN permissions p ON psp.permission_id = p.id
+WHERE ps.is_active = 1
+ORDER BY u.username, o.name, ps.code;
 
--- 3.3 查看所有用户及其角色
-SELECT '=== 3.3 所有用户角色 ===' AS '';
+-- 3.3 查看所有用户及其权限集
+SELECT '=== 3.3 所有用户权限集 ===' AS '';
 SELECT
     u.id AS user_id,
     u.username,
     u.display_name,
-    u.is_active,
-    GROUP_CONCAT(DISTINCT r.name, ', ') AS roles
+    u.status,
+    GROUP_CONCAT(DISTINCT ps.name) AS permission_sets
 FROM users u
-LEFT JOIN user_roles ur ON u.id = ur.user_id
-LEFT JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
-GROUP BY u.id, u.username, u.display_name, u.is_active
+LEFT JOIN user_permission_sets ups ON u.id = ups.user_id
+LEFT JOIN permission_sets ps ON ups.permission_set_id = ps.id AND ps.is_active = 1
+GROUP BY u.id, u.username, u.display_name, u.status
 ORDER BY u.username;
 
 -- ============================================================
--- 4. 用户组查询
+-- 4. 组织查询 (旧"用户组", Spec 16 重命名)
 -- ============================================================
 
--- 4.1 查看所有用户组
-SELECT '=== 4.1 所有用户组 ===' AS '';
+-- 4.1 查看所有组织
+SELECT '=== 4.1 所有组织 ===' AS '';
 SELECT
-    ug.id AS group_id,
-    ug.name AS group_name,
-    ug.description,
-    ug.is_active,
-    (SELECT COUNT(*) FROM user_group_members WHERE group_id = ug.id) AS member_count
-FROM user_groups ug
-ORDER BY ug.name;
+    o.id AS org_id,
+    o.name AS org_name,
+    o.description,
+    (SELECT COUNT(*) FROM org_members WHERE org_id = o.id) AS member_count
+FROM orgs o
+ORDER BY o.name;
 
--- 4.2 查看某用户组的所有成员
---    使用示例: 将 'Administrators' 替换为目标组名
-SELECT '=== 4.2 用户组成员 (Administrators) ===' AS '';
+-- 4.2 查看某组织的所有成员
+--    使用示例: 将 'Administrators' 替换为目标组织名
+SELECT '=== 4.2 组织成员 (Administrators) ===' AS '';
 SELECT
     u.id AS user_id,
     u.username,
     u.display_name,
-    u.is_active,
-    ugm.is_manager AS is_group_manager,
-    ugm.joined_at
+    u.status,
+    om.joined_at
 FROM users u
-JOIN user_group_members ugm ON u.id = ugm.user_id
-JOIN user_groups ug ON ugm.group_id = ug.id
-WHERE ug.name = 'Administrators'
-ORDER BY ugm.is_manager DESC, u.username;
+JOIN org_members om ON u.id = om.user_id
+JOIN orgs o ON om.org_id = o.id
+WHERE o.name = 'Administrators'
+ORDER BY u.username;
 
--- 4.3 查看用户组的管理员
-SELECT '=== 4.3 用户组管理员 ===' AS '';
+-- 4.3 受托管理员审计 (Spec 19 M4 软删后)
+--    orgs.manager_id 与 org_members.is_manager 已软删
+--    受托管理员由 OrgAdminScopeService 通过资源矩阵动态计算
+--    实际可用性数据见 tools/v19_p2_audit_remote.py
+SELECT '=== 4.3 受托管理员 (审计) ===' AS '';
 SELECT
-    ug.name AS group_name,
-    u.username AS manager_username,
-    u.display_name AS manager_display
-FROM user_group_members ugm
-JOIN user_groups ug ON ugm.group_id = ug.id
-JOIN users u ON ugm.user_id = u.id
-WHERE ugm.is_manager = 1
-ORDER BY ug.name;
+    o.name AS org_name,
+    COUNT(om.user_id) AS member_count
+FROM orgs o
+LEFT JOIN org_members om ON o.id = om.org_id
+GROUP BY o.id, o.name
+ORDER BY o.name;
 
 -- ============================================================
 -- 5. 权限覆盖与冲突检测 (V2b Deny-Overrides-Allow 预备)
@@ -191,32 +201,32 @@ SELECT '=== 5.1 敏感权限持有者 ===' AS '';
 SELECT
     p.code AS sensitive_perm,
     p.name AS perm_name,
-    GROUP_CONCAT(DISTINCT u.username, ', ') AS users
+    GROUP_CONCAT(DISTINCT u.username) AS users
 FROM permissions p
-JOIN role_permissions rp ON p.id = rp.permission_id
-JOIN roles r ON rp.role_id = r.id
-JOIN user_roles ur ON r.id = ur.role_id
-JOIN users u ON ur.user_id = u.id
-WHERE u.is_active = 1 AND r.is_active = 1
+JOIN permission_set_permissions psp ON p.id = psp.permission_id
+JOIN permission_sets ps ON psp.permission_set_id = ps.id
+JOIN user_permission_sets ups ON ps.id = ups.permission_set_id
+JOIN users u ON ups.user_id = u.id
+WHERE u.status = 'active' AND ps.is_active = 1
   AND p.code IN ('*', 'user:delete', 'role:assign', 'permission:grant')
 GROUP BY p.code, p.name
 ORDER BY p.code;
 
--- 5.2 查看拥有多角色的用户 (潜在职责分离风险)
-SELECT '=== 5.2 多角色用户 (潜在 SoD 风险) ===' AS '';
+-- 5.2 查看拥有多权限集的用户 (潜在职责分离风险)
+SELECT '=== 5.2 多权限集用户 (潜在 SoD 风险) ===' AS '';
 SELECT
     u.id AS user_id,
     u.username,
     u.display_name,
-    COUNT(DISTINCT r.id) AS role_count,
-    GROUP_CONCAT(DISTINCT r.name, ', ') AS roles
+    COUNT(DISTINCT ps.id) AS permission_set_count,
+    GROUP_CONCAT(DISTINCT ps.name) AS permission_sets
 FROM users u
-JOIN user_roles ur ON u.id = ur.user_id
-JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
-WHERE u.is_active = 1
+JOIN user_permission_sets ups ON u.id = ups.user_id
+JOIN permission_sets ps ON ups.permission_set_id = ps.id AND ps.is_active = 1
+WHERE u.status = 'active'
 GROUP BY u.id, u.username, u.display_name
-HAVING COUNT(DISTINCT r.id) >= 3
-ORDER BY role_count DESC, u.username;
+HAVING COUNT(DISTINCT ps.id) >= 3
+ORDER BY permission_set_count DESC, u.username;
 
 -- ============================================================
 -- 6. 审计与合规
@@ -264,7 +274,7 @@ ORDER BY role_count DESC, u.username;
 --     al.new_value
 -- FROM audit_logs al
 -- WHERE al.object_type = 'permission'
---    OR al.object_type = 'role'
+--    OR al.object_type = 'permission_set'
 -- ORDER BY al.created_at DESC
 -- LIMIT 50;
 
@@ -272,38 +282,38 @@ ORDER BY role_count DESC, u.username;
 -- 7. 健康检查
 -- ============================================================
 
--- 7.1 检查孤立的用户角色关联 (角色已被删除但用户仍有关联)
-SELECT '=== 7.1 孤立用户角色 ===' AS '';
+-- 7.1 检查孤立的用户权限集关联 (权限集已被删除但用户仍有关联)
+SELECT '=== 7.1 孤立用户权限集 ===' AS '';
 SELECT
-    ur.id AS ur_id,
+    ups.id AS ups_id,
     u.username,
     u.id AS user_id,
-    ur.role_id
-FROM user_roles ur
-JOIN users u ON ur.user_id = u.id
-WHERE ur.role_id NOT IN (SELECT id FROM roles);
+    ups.permission_set_id
+FROM user_permission_sets ups
+JOIN users u ON ups.user_id = u.id
+WHERE ups.permission_set_id NOT IN (SELECT id FROM permission_sets);
 -- 结果为空 = 正常
 
--- 7.2 检查孤立的角色权限 (权限已被删除但角色仍有关联)
-SELECT '=== 7.2 孤立角色权限 ===' AS '';
+-- 7.2 检查孤立的权限集权限 (权限已被删除但权限集仍有关联)
+SELECT '=== 7.2 孤立权限集权限 ===' AS '';
 SELECT
-    rp.id AS rp_id,
-    r.name AS role_name,
-    rp.permission_id
-FROM role_permissions rp
-JOIN roles r ON rp.role_id = r.id
-WHERE rp.permission_id NOT IN (SELECT id FROM permissions);
+    psp.id AS psp_id,
+    ps.name AS permission_set_name,
+    psp.permission_id
+FROM permission_set_permissions psp
+JOIN permission_sets ps ON psp.permission_set_id = ps.id
+WHERE psp.permission_id NOT IN (SELECT id FROM permissions);
 -- 结果为空 = 正常
 
--- 7.3 检查孤立用户组成员 (用户或组已被删除)
-SELECT '=== 7.3 孤立用户组成员 ===' AS '';
+-- 7.3 检查孤立组织成员 (用户或组织已被删除)
+SELECT '=== 7.3 孤立组织成员 ===' AS '';
 SELECT
-    ugm.id AS ugm_id,
-    ugm.user_id,
-    ugm.group_id
-FROM user_group_members ugm
-WHERE ugm.user_id NOT IN (SELECT id FROM users)
-   OR ugm.group_id NOT IN (SELECT id FROM user_groups);
+    om.id AS om_id,
+    om.user_id,
+    om.org_id
+FROM org_members om
+WHERE om.user_id NOT IN (SELECT id FROM users)
+   OR om.org_id NOT IN (SELECT id FROM orgs);
 -- 结果为空 = 正常
 
 -- 7.4 检查 orphaned admin (没有任何有效权限链路的用户)
@@ -313,12 +323,12 @@ SELECT
     u.username,
     u.display_name
 FROM users u
-WHERE u.is_active = 1
+WHERE u.status = 'active'
   AND u.id NOT IN (
-    SELECT DISTINCT ur.user_id FROM user_roles ur
-    JOIN roles r ON ur.role_id = r.id
-    JOIN role_permissions rp ON r.id = rp.role_id
-    WHERE r.is_active = 1
+    SELECT DISTINCT ups.user_id FROM user_permission_sets ups
+    JOIN permission_sets ps ON ups.permission_set_id = ps.id
+    JOIN permission_set_permissions psp ON ps.id = psp.permission_set_id
+    WHERE ps.is_active = 1
   )
 ORDER BY u.username;
 -- 结果可能为空 = 正常 (某些用户可能只有数据权限)
@@ -329,11 +339,11 @@ ORDER BY u.username;
 
 SELECT '=== 8. 权限体系统计 ===' AS '';
 SELECT '总用户数' AS metric, COUNT(*) AS value FROM users;
-SELECT '活跃用户数' AS metric, COUNT(*) AS value FROM users WHERE is_active = 1;
-SELECT '角色总数' AS metric, COUNT(*) AS value FROM roles;
-SELECT '活跃角色数' AS metric, COUNT(*) AS value FROM roles WHERE is_active = 1;
+SELECT '活跃用户数' AS metric, COUNT(*) AS value FROM users WHERE status = 'active';
+SELECT '权限集总数' AS metric, COUNT(*) AS value FROM permission_sets;
+SELECT '活跃权限集数' AS metric, COUNT(*) AS value FROM permission_sets WHERE is_active = 1;
 SELECT '权限总数' AS metric, COUNT(*) AS value FROM permissions;
-SELECT '用户组总数' AS metric, COUNT(*) AS value FROM user_groups;
-SELECT '用户组成员关系数' AS metric, COUNT(*) AS value FROM user_group_members;
+SELECT '组织总数' AS metric, COUNT(*) AS value FROM orgs;
+SELECT '组织成员关系数' AS metric, COUNT(*) AS value FROM org_members;
 
 .quit

@@ -315,23 +315,36 @@ class DeletionService:
         
         old_record = self._get_record(entity_type, entity_id)
         if not old_record:
+            # [R018 P1 BUG-E] 记录不存在时写 outcome=failed 审计 (便于追溯无效删除尝试)
+            self._write_audit_log(
+                entity_type, entity_id,
+                {'success': False, 'message': '记录不存在'},
+                {}, operator_id, operator_name,
+                outcome='failed',
+            )
             return {'success': False, 'message': '记录不存在'}
-        
+
         violations = self.check_restrict_rules(entity_type, entity_id, policy)
         if violations:
-            return {
+            # [R018 P1 BUG-E] RESTRICT 拒绝时写 outcome=failed 审计
+            failed_result = {
                 'success': False,
                 'message': '删除被拒绝',
                 'errors': [v['message'] for v in violations],
                 'details': violations,
             }
-        
+            self._write_audit_log(
+                entity_type, entity_id, failed_result, old_record,
+                operator_id, operator_name, outcome='failed',
+            )
+            return failed_result
+
         result = self.hard_delete(entity_type, entity_id, policy,
                                     operator_id, operator_name, old_record)
-        
+
         self._write_audit_log(entity_type, entity_id, result, old_record,
-                             operator_id, operator_name)
-        
+                             operator_id, operator_name, outcome=("success" if result.get("success") else "failed"))
+
         return result
     
     def _get_record(self, entity_type: str, entity_id: int) -> Optional[Dict]:
@@ -352,10 +365,16 @@ class DeletionService:
             logger.warning(f"[Deletion] Failed to get record: {e}")
         return None
     
-    def _write_audit_log(self, entity_type: str, entity_id: int, 
+    def _write_audit_log(self, entity_type: str, entity_id: int,
                         result: Dict, old_record: Dict,
-                        operator_id: int, operator_name: str):
-        """写入审计日志"""
+                        operator_id: int, operator_name: str,
+                        outcome: str = "success"):
+        """写入审计日志
+
+        [R018 P1 BUG-E] outcome 参数区分:
+          - success: 物理删除成功
+          - failed: 删除被拒 (RESTRICT/记录不存在) 或事务回滚
+        """
         try:
             self.audit_interceptor.log_delete(
                 object_type=entity_type,
@@ -363,7 +382,11 @@ class DeletionService:
                 data=old_record,
                 user_id=str(operator_id) if operator_id else None,
                 user_name=operator_name,
+                outcome=outcome,
             )
-            logger.info(f"[Audit] Logged DELETE on {entity_type}/{entity_id}")
+            logger.info(
+                f"[Audit] Logged DELETE on {entity_type}/{entity_id} "
+                f"outcome={outcome}"
+            )
         except Exception as e:
             logger.error(f"[Audit] Failed to write log: {e}")

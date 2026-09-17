@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 from typing import List, Dict, Tuple, Optional
 from meta.core.models import (
     MetaObject, MetaField, MetaRelation, FieldType, RelationType,
-    ObjectType, FieldStorage, ViewConfig, IndexType, IndexSource
+    ObjectType, FieldStorage, ViewConfig, IndexType, IndexSource, MetaIndex
 )
 from meta.core.datasource import DataSource, DataSourceType, get_data_source
 from meta.core.sql_adapters import SQLDataSource

@@ -252,13 +252,13 @@ class TestAnnotationExportConsistency:
 
     def test_resource_table_map_includes_annotation(self):
         """[FIX v1.2.34 2026-06-21] RESOURCE_TABLE_MAP 包含 annotation"""
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
         assert 'annotation' in RESOURCE_TABLE_MAP
         assert RESOURCE_TABLE_MAP['annotation'] == 'annotations'
 
     def test_resource_table_map_includes_all_main_types(self):
         """RESOURCE_TABLE_MAP 包含所有主要 object_type"""
-        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+        from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
         expected = {'product', 'version', 'domain', 'sub_domain', 'service_module', 'business_object', 'relationship', 'annotation'}
         for t in expected:
             assert t in RESOURCE_TABLE_MAP, f"RESOURCE_TABLE_MAP 缺 {t}"

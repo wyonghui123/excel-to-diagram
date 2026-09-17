@@ -1,14 +1,18 @@
 /**
  * auditLogMeta.spec.js - 审计日志元数据配置测试
  *
- * M5: 前端扩展测试
  * 测试范围：
  * 1. 元数据基本结构完整性
- * 2. 表格列定义包含 log_category 和 log_level
- * 3. 过滤器定义包含日志类型和级别筛选
+ * 2. 表格列定义（含死列清理回归）
+ * 3. 过滤器定义（含角色迁移后的 object_type 选项）
  * 4. 详情配置完整性
  * 5. API 配置完整性
- * 6. 元数据与后端 YAML 配置一致性
+ *
+ * [FIX 2026-09-06] 配合审计日志死列清理 + 角色迁移对齐:
+ * - log_category/log_level/action_kind/outcome 列与过滤器已移除
+ *   (list API SELECT 不返回, audit_logs 表无 action_kind/outcome 列)
+ * - formatted_identity(前端死字段) 已替换为 business_key(后端生成)
+ * - object_type 过滤器新增 org/permission_set, role/user_group 保留为历史值
  */
 
 import { describe, it, expect } from 'vitest'
@@ -32,7 +36,7 @@ describe('auditLogMeta', () => {
       expect(auditLogMeta.list).toBeDefined()
       expect(auditLogMeta.list.defaultSort).toBeDefined()
       expect(auditLogMeta.list.defaultSort.field).toBe('created_at')
-      expect(auditLogMeta.list.defaultSort.order).toBe('desc')
+      expect(auditLogMeta.list.defaultSort.direction).toBe('desc')
     })
 
     it('应该包含分页配置', () => {
@@ -42,42 +46,6 @@ describe('auditLogMeta', () => {
   })
 
   describe('表格列定义', () => {
-    it('应该包含 log_category 列', () => {
-      const col = auditLogMeta.tableColumns.find(c => c.key === 'log_category')
-      expect(col).toBeDefined()
-      expect(col.label).toBe('日志类型')
-      expect(col.type).toBe('tag')
-      expect(col.sortable).toBe(true)
-    })
-
-    it('log_category 列应该有正确的选项', () => {
-      const col = auditLogMeta.tableColumns.find(c => c.key === 'log_category')
-      const values = col.options.map(o => o.value)
-      expect(values).toContain('business')
-      expect(values).toContain('security')
-      expect(values).toContain('operation')
-      expect(values).toContain('performance')
-      expect(values).toContain('system')
-    })
-
-    it('应该包含 log_level 列', () => {
-      const col = auditLogMeta.tableColumns.find(c => c.key === 'log_level')
-      expect(col).toBeDefined()
-      expect(col.label).toBe('日志级别')
-      expect(col.type).toBe('tag')
-      expect(col.sortable).toBe(true)
-    })
-
-    it('log_level 列应该有正确的选项', () => {
-      const col = auditLogMeta.tableColumns.find(c => c.key === 'log_level')
-      const values = col.options.map(o => o.value)
-      expect(values).toContain('DEBUG')
-      expect(values).toContain('INFO')
-      expect(values).toContain('WARNING')
-      expect(values).toContain('ERROR')
-      expect(values).toContain('CRITICAL')
-    })
-
     it('应该包含 action 列', () => {
       const col = auditLogMeta.tableColumns.find(c => c.key === 'action')
       expect(col).toBeDefined()
@@ -108,9 +76,23 @@ describe('auditLogMeta', () => {
       expect(col.sortable).toBe(true)
     })
 
-    it('应该包含业务标识列', () => {
-      const col = auditLogMeta.tableColumns.find(c => c.key === 'formatted_identity')
+    it('业务标识列应该绑定 business_key (后端真实字段)', () => {
+      const col = auditLogMeta.tableColumns.find(c => c.key === 'business_key')
       expect(col).toBeDefined()
+      expect(col.label).toBe('业务标识')
+    })
+
+    it('不应再包含 formatted_identity 死字段列', () => {
+      expect(auditLogMeta.tableColumns.find(c => c.key === 'formatted_identity')).toBeUndefined()
+    })
+
+    it('不应包含 list API 不返回的死列', () => {
+      // audit_api.py GET /logs 的 SELECT 不返回这四个字段,
+      // action_kind/outcome 在 audit_logs 表中也不存在
+      const deadKeys = ['log_category', 'log_level', 'action_kind', 'outcome']
+      for (const key of deadKeys) {
+        expect(auditLogMeta.tableColumns.find(c => c.key === key)).toBeUndefined()
+      }
     })
 
     it('应该包含 IP 地址列', () => {
@@ -120,37 +102,32 @@ describe('auditLogMeta', () => {
   })
 
   describe('过滤器定义', () => {
-    it('应该包含 log_category 过滤器', () => {
-      const filter = auditLogMeta.filters.find(f => f.key === 'log_category')
-      expect(filter).toBeDefined()
-      expect(filter.label).toBe('日志类型')
-      expect(filter.type).toBe('select')
-      const values = filter.options.map(o => o.value)
-      expect(values).toContain('business')
-      expect(values).toContain('security')
-    })
-
-    it('应该包含 log_level 过滤器', () => {
-      const filter = auditLogMeta.filters.find(f => f.key === 'log_level')
-      expect(filter).toBeDefined()
-      expect(filter.label).toBe('日志级别')
-      expect(filter.type).toBe('select')
-      const values = filter.options.map(o => o.value)
-      expect(values).toContain('DEBUG')
-      expect(values).toContain('INFO')
-      expect(values).toContain('WARNING')
-    })
-
     it('应该包含 action 过滤器', () => {
       const filter = auditLogMeta.filters.find(f => f.key === 'action')
       expect(filter).toBeDefined()
       expect(filter.type).toBe('select')
     })
 
-    it('应该包含 object_type 过滤器', () => {
+    it('object_type 过滤器应该包含迁移后的 org 与 permission_set', () => {
       const filter = auditLogMeta.filters.find(f => f.key === 'object_type')
       expect(filter).toBeDefined()
-      expect(filter.type).toBe('select')
+      const values = filter.options.map(o => o.value)
+      expect(values).toContain('org')
+      expect(values).toContain('permission_set')
+    })
+
+    it('object_type 过滤器应该保留历史值 role/user_group 以检索迁移前日志', () => {
+      const filter = auditLogMeta.filters.find(f => f.key === 'object_type')
+      const values = filter.options.map(o => o.value)
+      expect(values).toContain('role')
+      expect(values).toContain('user_group')
+    })
+
+    it('不应包含死过滤器', () => {
+      const deadKeys = ['log_category', 'log_level', 'action_kind', 'outcome']
+      for (const key of deadKeys) {
+        expect(auditLogMeta.filters.find(f => f.key === key)).toBeUndefined()
+      }
     })
 
     it('应该包含 user_name 过滤器', () => {
@@ -179,15 +156,23 @@ describe('auditLogMeta', () => {
       expect(auditLogMeta.detail.title).toBe('审计日志详情')
     })
 
-    it('详情应该包含基本信息分区', () => {
+    it('详情基本信息分区应该包含业务标识 (business_key)', () => {
       const section = auditLogMeta.detail.sections.find(s => s.title === '基本信息')
       expect(section).toBeDefined()
       const fieldKeys = section.fields.map(f => f.key)
       expect(fieldKeys).toContain('id')
       expect(fieldKeys).toContain('created_at')
-      expect(fieldKeys).toContain('log_category')
-      expect(fieldKeys).toContain('log_level')
       expect(fieldKeys).toContain('action')
+      expect(fieldKeys).toContain('business_key')
+    })
+
+    it('详情不应包含死字段', () => {
+      const deadKeys = ['log_category', 'log_level', 'formatted_identity']
+      for (const section of auditLogMeta.detail.sections) {
+        for (const key of deadKeys) {
+          expect(section.fields.find(f => f.key === key)).toBeUndefined()
+        }
+      }
     })
 
     it('详情应该包含变更详情分区', () => {
@@ -215,22 +200,6 @@ describe('auditLogMeta', () => {
       expect(fieldKeys).toContain('trace_id')
       expect(fieldKeys).toContain('transaction_id')
     })
-
-    it('log_category 在详情中应有 tag 类型和选项', () => {
-      const basicSection = auditLogMeta.detail.sections.find(s => s.title === '基本信息')
-      const categoryField = basicSection.fields.find(f => f.key === 'log_category')
-      expect(categoryField.type).toBe('tag')
-      expect(categoryField.options).toBeDefined()
-      expect(categoryField.options.length).toBeGreaterThan(0)
-    })
-
-    it('log_level 在详情中应有 tag 类型和选项', () => {
-      const basicSection = auditLogMeta.detail.sections.find(s => s.title === '基本信息')
-      const levelField = basicSection.fields.find(f => f.key === 'log_level')
-      expect(levelField.type).toBe('tag')
-      expect(levelField.options).toBeDefined()
-      expect(levelField.options.length).toBeGreaterThan(0)
-    })
   })
 
   describe('API 配置', () => {
@@ -255,46 +224,6 @@ describe('auditLogMeta', () => {
       expect(auditLogMeta.api.endpoints.detail).toBeDefined()
       expect(auditLogMeta.api.endpoints.detail.method).toBe('GET')
       expect(auditLogMeta.api.endpoints.detail.path).toBe('/logs/:id')
-    })
-  })
-
-  describe('元数据一致性', () => {
-    it('过滤器中的 category 选项应与列定义一致', () => {
-      const colOptions = auditLogMeta.tableColumns
-        .find(c => c.key === 'log_category').options.map(o => o.value)
-      const filterOptions = auditLogMeta.filters
-        .find(f => f.key === 'log_category').options
-        .filter(o => o.value !== '')
-        .map(o => o.value)
-      expect(filterOptions).toEqual(colOptions)
-    })
-
-    it('过滤器中的 level 选项应与列定义一致', () => {
-      const colOptions = auditLogMeta.tableColumns
-        .find(c => c.key === 'log_level').options.map(o => o.value)
-      const filterOptions = auditLogMeta.filters
-        .find(f => f.key === 'log_level').options
-        .filter(o => o.value !== '')
-        .map(o => o.value)
-      expect(filterOptions).toEqual(colOptions)
-    })
-
-    it('详情中的 category 选项应与列定义一致', () => {
-      const colOptions = auditLogMeta.tableColumns
-        .find(c => c.key === 'log_category').options.map(o => o.value)
-      const basicSection = auditLogMeta.detail.sections.find(s => s.title === '基本信息')
-      const detailOptions = basicSection.fields
-        .find(f => f.key === 'log_category').options.map(o => o.value)
-      expect(detailOptions).toEqual(colOptions)
-    })
-
-    it('详情中的 level 选项应与列定义一致', () => {
-      const colOptions = auditLogMeta.tableColumns
-        .find(c => c.key === 'log_level').options.map(o => o.value)
-      const basicSection = auditLogMeta.detail.sections.find(s => s.title === '基本信息')
-      const detailOptions = basicSection.fields
-        .find(f => f.key === 'log_level').options.map(o => o.value)
-      expect(detailOptions).toEqual(colOptions)
     })
   })
 })

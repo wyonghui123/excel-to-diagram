@@ -245,10 +245,10 @@ class TestGetAllowedActions:
         assert 'edit' not in allowed
         assert 'delete' not in allowed
 
-    def test_fully_editable_returns_all_actions(self):
+    def test_fullEditable_returns_all_actions(self):
         meta = _make_meta_object(
             actions=[{'id': 'create'}, {'id': 'edit'}, {'id': 'delete'}],
-            mutability='fully_editable',
+            mutability='fullEditable',
         )
         policy = ActionPolicy(meta)
         allowed = policy.get_allowed_actions()

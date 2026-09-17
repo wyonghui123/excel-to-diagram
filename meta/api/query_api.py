@@ -5,6 +5,7 @@ from meta.services.query_service import (
     AggregateMeasure, AggregateRequest, AggregateResult
 )
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 
 query_bp = Blueprint('query', __name__, url_prefix='/api/v1/query')
 
@@ -14,7 +15,7 @@ _query_service = None
 def _get_query_service():
     global _query_service
     if _query_service is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         ds = get_data_source('sqlite', database=db_path)
         _query_service = QueryService(ds)
     return _query_service

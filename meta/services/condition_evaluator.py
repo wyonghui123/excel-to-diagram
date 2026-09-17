@@ -24,6 +24,8 @@ ALLOWED_FIELDS = {
     'service_module_id', 'business_object_id', 'domain_type', 'code',
     'name', 'status', 'created_by', 'owner_id', 'organization_id',
     'department_id', 'resource_type', 'category', 'type',
+    # [Spec 19 M2 2026-09-05] org/user 资源类型行级条件字段
+    'org_type', 'parent_id', 'username', 'display_name', 'email',
 }
 DANGEROUS_PATTERNS = [
     r'DROP\s', r'DELETE\s', r'UPDATE\s', r'INSERT\s', r'ALTER\s',
@@ -48,11 +50,31 @@ class ConditionEvaluator:
 
         Returns:
             是否匹配
+
+        [P1-T3 2026-07-19] 支持 '*' 通配符 — 表示无限制条件
+            Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T3
+            用途: permission_rules.condition='*' 时跳过条件过滤
         """
         if not condition or not condition.strip():
             return True
 
+        # [P1-T3 Wildcard] '*' 表示无限制条件（通配符）
+        if condition.strip() == '*':
+            import logging
+            logging.getLogger(__name__).info(
+                '[P1-WILDCARD] condition=\'*\': wildcard match (no restriction)'
+            )
+            return True
+
         condition = condition.strip()
+
+        # [P3-T5 2026-07-19] 短路: 1=1 (always true) / 1=0 (always false)
+        # Spec §3.18.6: visibility='public' → 1=1
+        # 用途: visibility_condition_mapper 生成的 1=1 表达式需要被识别为 True
+        if condition == '1=1':
+            return True
+        if condition == '1=0':
+            return False
 
         if condition.startswith('{'):
             return self._evaluate_field_range(condition, resource)

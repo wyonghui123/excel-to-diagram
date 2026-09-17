@@ -18,6 +18,11 @@ from dataclasses import dataclass, field
 from queue import Queue, Empty
 from concurrent.futures import Future, CancelledError
 
+# [V007.15 L3] phantom TX detection
+import sqlite3
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
+
 logger = logging.getLogger(__name__)
 
 DISABLE_WRITE_QUEUE = os.environ.get('DISABLE_WRITE_QUEUE', '').lower() in ('true', '1', 'yes')
@@ -30,8 +35,9 @@ class WriteQueueConfig:
     operation_timeout: float = 60.0
     # [DECORATIVE] v3.18 P0 调优: 间隔从 50 降到 10, 防止 WAL 膨胀导致 checkpoint 失败
     checkpoint_interval: int = 10
-    # [DECORATIVE] v3.18 P0 调优: 模式从 FULL 改为 TRUNCATE (FULL 会阻塞读,TRUNCATE 更激进但不会因 busy 失败)
-    checkpoint_mode: str = "TRUNCATE"  # PASSIVE → FULL → TRUNCATE
+    # [V007.39 BUG-FIX] TRUNCATE 截断 WAL 文件 → 读连接 mmap 视图失效 → disk I/O error
+    # 改为 PASSIVE: 不阻塞读, 不截断 WAL, 写入后 WAL 自然增长由 force_passive_checkpoint 管理
+    checkpoint_mode: str = "PASSIVE"
 
 
 @dataclass
@@ -138,11 +144,42 @@ class WriteQueue:
         logger.info("WriteQueue started")
 
     def stop(self, timeout: float = 10.0):
-        self._running = False
+        # [V007.40 BUG-FIX] drain in-flight operations before stopping
+        # 背景: V007.39 之前, stop() 直接 _running=False + put None + join,
+        #       正在执行的 op 会被中断 → 数据丢失 + future 永久 hang.
+        # 修法: 先 flush() 等待当前 op 完成, 再 _running=False + drain queue.
+        #       超时后强制退出 (避免 hang 死等).
+        logger.info("WriteQueue stopping: waiting for in-flight ops (timeout=%.1fs)", timeout)
         try:
-            self._queue.put_nowait(None)
-        except Exception:
-            pass
+            # 1. flush 等待 in-flight 完成
+            self.flush(timeout=timeout)
+        except Exception as e:
+            logger.warning("WriteQueue flush during stop failed: %s", e)
+        # 2. 停止 _write_loop
+        self._running = False
+        # 3. 排空剩余 queue (失败的 op 设 exception, 防止 caller hang)
+        drained = 0
+        failed = 0
+        while True:
+            try:
+                op = self._queue.get_nowait()
+            except Empty:
+                break
+            if op is None:
+                continue
+            # 设置 exception 让 future 不要永久 hang
+            if not op.future.done():
+                op.future.set_exception(
+                    RuntimeError("WriteQueue stopped before operation completed")
+                )
+                failed += 1
+            drained += 1
+        if drained or failed:
+            logger.info(
+                "WriteQueue stop: drained %d ops, %d set to failed state",
+                drained, failed,
+            )
+        # 4. join thread
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
         logger.info("WriteQueue stopped")
@@ -228,27 +265,52 @@ class WriteQueue:
     def begin_transaction(self):
         """
         开始显式事务
-        
+
         优化：增加事务状态检测，避免嵌套事务问题。
+
+        [V007.15 L3] 加 phantom TX 检测:
+        - 用 savepoint probe 探测 SQLite 真实状态
+        - 如果 SQLite in tx 但 Python state=False → phantom, 强制 ROLLBACK
+        - 然后正常 BEGIN IMMEDIATE
         """
         if self._in_transaction:
-            logger.debug("WriteQueue: Already in transaction, skipping BEGIN")
+            # 已经标记 in_tx, 跳过
+            metrics_inc('begin_skipped_already_in_tx')
             return
-        
+
         def _do_begin(conn):
+            # [V007.15 L3 治本] 防御性检查: 连接是否真的不在 tx 中
+            actual = get_tx_state(conn)
+            if actual == TxState.WRITE or actual == TxState.READ:
+                # 实际在 tx, 但 Python 状态 False — phantom TX!
+                logger.warning(
+                    f"[V007.15 L3] WriteQueue: phantom TX detected "
+                    f"(Python=False, SQLite={actual}), forcing ROLLBACK"
+                )
+                metrics_inc('phantom_tx_detected')
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                self._in_transaction = False
+
             try:
-                # 检查连接的实际事务状态
-                # SQLite没有直接的PRAGMA查询事务状态，但我们可以通过尝试BEGIN来检测
                 # 2026-06-05 修复：使用 BEGIN IMMEDIATE 防止多进程写冲突
                 conn.execute("BEGIN IMMEDIATE")
                 self._in_transaction = True
+                metrics_inc('begin_success')
                 logger.debug("WriteQueue: Transaction started")
             except Exception as e:
-                error_str = str(e)
+                error_str = str(e).lower()
                 if "cannot start a transaction within a transaction" in error_str:
                     # 连接已经在事务中，更新状态
                     logger.warning("WriteQueue: Connection already in transaction, updating state")
                     self._in_transaction = True
+                elif "locked" in error_str or "busy" in error_str:
+                    metrics_inc('begin_locked')
+                    log_tx_event('begin', None, 'locked', str(e))
+                    logger.error("WriteQueue: Failed to begin transaction (locked): %s", error_str)
+                    raise
                 else:
                     logger.error("WriteQueue: Failed to begin transaction: %s", error_str)
                     raise
@@ -340,7 +402,7 @@ class WriteQueue:
 
         self.submit_and_wait(_do_release)
 
-    def checkpoint(self, mode: str = "TRUNCATE"):
+    def checkpoint(self, mode: str = "PASSIVE"):
         def _do_checkpoint(conn):
             conn.execute("PRAGMA wal_checkpoint({0})".format(mode))
             self._stats["checkpoint_count"] += 1
@@ -371,19 +433,68 @@ class WriteQueue:
                 wait_time = time.time() - op.submitted_at
                 self._stats["total_wait_time"] += wait_time
 
-                try:
-                    with self._pool.writer() as conn:
-                        op.execute(conn)
-                    self._stats["completed_count"] += 1
-                    exec_time = op.completed_at - op.started_at
-                    self._stats["total_exec_time"] += exec_time
-                    self._recent_latencies.append(exec_time)
-                    if len(self._recent_latencies) > self._max_recent:
-                        self._recent_latencies.pop(0)
-                except Exception as e:
-                    self._stats["failed_count"] += 1
-                    logger.error("Write operation failed: %s", str(e))
-                    logger.debug("Traceback: %s", traceback.format_exc())
+                # [V007.20 2026-07-06] 撞锁重试机制
+                # 背景: yonaa 1w+ annotation import 卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
+                #       WriteQueue 单写线程 + audit_async_queue + async_audit_writer 三条
+                #       路径同时写 audit_logs, 撞锁 (SQLITE_BUSY 'database is locked') 频率高.
+                #       之前: 撞锁 1 次就 fail, audit 写失败链递归放大.
+                # 修法: 撞锁视为暂时性错误, sleep + 重试 N 次 (指数 backoff)
+                #       配合 busy_timeout=30000 (sql_connection_pool.py V007.20 L4)
+                # 注意: 不用 op.execute() 因为 WriteOperation.execute 失败时
+                #       永久 set_exception 到 future (第 2 次会 raise InvalidStateError).
+                #       retry 时直接调 op.func 拿到结果, 全部 attempt 成功后才 set_result.
+                _retryable_errors = ("database is locked", "disk i/o error", "database is busy")
+                _max_retries = 5
+                _op_success = False
+                for attempt in range(_max_retries + 1):
+                    try:
+                        op.started_at = time.time()
+                        with self._pool.writer() as conn:
+                            result = op.func(conn, *op.args, **op.kwargs)
+                        op.completed_at = time.time()
+                        # 全部 attempt 成功后才标记 future 完成
+                        if not op.future.done():
+                            op.future.set_result(result)
+                        _op_success = True
+                        exec_time = op.completed_at - op.started_at
+                        self._stats["completed_count"] += 1
+                        self._stats["total_exec_time"] += exec_time
+                        self._recent_latencies.append(exec_time)
+                        if len(self._recent_latencies) > self._max_recent:
+                            self._recent_latencies.pop(0)
+                        if attempt > 0:
+                            self._stats["retry_success_count"] = \
+                                self._stats.get("retry_success_count", 0) + 1
+                            logger.info(
+                                "WriteQueue retry success after %d attempts: %s",
+                                attempt, str(op.func)[:80]
+                            )
+                        break  # 成功, 退出 retry loop
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        is_retryable = any(re in err_str for re in _retryable_errors)
+                        if is_retryable and attempt < _max_retries:
+                            # 撞锁重试: 指数 backoff 50ms * 2^attempt + 随机抖动
+                            import random as _random
+                            delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                            self._stats["retry_count"] = \
+                                self._stats.get("retry_count", 0) + 1
+                            logger.warning(
+                                "WriteQueue retryable error (attempt %d/%d, sleep %.3fs): %s | op=%s",
+                                attempt + 1, _max_retries, delay, err_str,
+                                str(op.func)[:80]
+                            )
+                            time.sleep(delay)
+                            # 注意: 不重新入队 (_queue.put), 立即重试避免其他 op 插队
+                            # 因为撞锁通常很快释放 (其他 connection commit)
+                            continue
+                        # 不可重试 或 已达 max_retries
+                        if not op.future.done():
+                            op.future.set_exception(e)
+                        self._stats["failed_count"] += 1
+                        logger.error("Write operation failed: %s", str(e))
+                        logger.debug("Traceback: %s", traceback.format_exc())
+                        break
 
             except Exception as e:
                 logger.error("Write loop error: %s", str(e))
@@ -424,3 +535,4 @@ class WriteQueue:
             stats["throughput_per_sec"] = 0.0
 
         return stats
+

@@ -7,6 +7,7 @@ from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.table_name_validator import invalidate_cache as invalidate_table_cache
 from meta.core.startup_checks import run_startup_checks
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ class ApplicationBuilder:
         _init_service(ds, 'manage', 'init_manage_services')
         _init_service(ds, 'auth', 'init_auth_services')
         _init_service(ds, 'user', 'init_user_services')
-        _init_service(ds, 'role', 'init_role_services')
+        # [Spec16 Plan D 2026-09-02] 'role' + 'user_group' 旧 service 初始化已废弃 (PermissionSet/Org 服务覆盖)
         _init_service(ds, 'data_perm', 'init_data_perm_services')
         _init_service(ds, 'enum', 'init_enum_services', db_path)
         _init_service(ds, 'identity', 'init_identity_services')
@@ -180,7 +181,6 @@ class ApplicationBuilder:
         schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
         actions = StandardActionLoader.load(schemas_dir)
         logger.info(f"[AppBuilder] 标准动作已加载: {len(actions)} 个")
-        _init_service(ds, 'user_group', 'init_user_group_services')
         _init_service(ds, 'change_notification', 'init_change_notification_tables')
 
         _init_database_service(ds)
@@ -224,6 +224,10 @@ class ApplicationBuilder:
         # [PermissionInterceptor 注册补齐 2026-06-07]
         # PermissionInterceptor(P30) 与 server.py 对齐：先功能权限校验，再数据权限过滤
         bo_framework.register_interceptor(PermissionInterceptor())
+        # [Spec 22 FR-004 2026-09-13] state_transition action_ref 校验拦截器
+        # priority=31，在 PermissionInterceptor 之后立即执行
+        from meta.core.interceptors.action_permission_interceptor import ActionPermissionInterceptor
+        bo_framework.register_interceptor(ActionPermissionInterceptor())
         # [V1.1.8] WriteScopeInterceptor (P35) 在 PermissionInterceptor 之后
         bo_framework.register_interceptor(WriteScopeInterceptor())
         bo_framework.register_interceptor(DataPermissionInterceptor())
@@ -275,12 +279,11 @@ class ApplicationBuilder:
         from meta.api.schema_api import schema_bp
         from meta.api.auth_api import auth_bp
         from meta.api.user_api import user_bp
-        from meta.api.role_api import role_bp
+        # [Spec16 Plan D 2026-09-02] role_bp / role_dim_bp / user_group_bp 三个旧 Blueprint 模块已 GONE (dead import)
+        # 这里删除 import 以避免引用不存在模块的 ImportError 风险
         from meta.api.data_permission_api import data_perm_bp
-        from meta.api.role_menu_api import role_menu_bp
-        from meta.api.role_dim_api import role_dim_bp
-        from meta.api.management_dimension_api import management_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
-        from meta.api.user_group_api import user_group_bp
+        from meta.api.permission_set_menu_api import permission_set_menu_bp
+        from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp, ps_matrix_bp
         from meta.api.enum_api import enum_bp
         from meta.api.menu_permission_api import menu_permission_bp
         from meta.api.permission_bundle_api import permission_bundle_bp
@@ -294,7 +297,7 @@ class ApplicationBuilder:
         from meta.api.filter_variant_api import filter_variant_bp
         from meta.api.identity_api import identity_bp
         from meta.api.association_api import association_bp
-        from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp
+        from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp, permission_set_v2_bp
         from meta.api.value_help_api import value_help_bp
         from meta.api.special_routes_api import special_bp
         from meta.api.annotation_routes_api import annotation_bp
@@ -322,14 +325,13 @@ class ApplicationBuilder:
         app.register_blueprint(schema_bp)
         app.register_blueprint(auth_bp)
         app.register_blueprint(user_bp)
-        app.register_blueprint(role_bp)
+        # [Spec16 Plan D 2026-09-02] 删除 role_bp / role_dim_bp / user_group_bp 三个 dead register
         app.register_blueprint(data_perm_bp)
-        app.register_blueprint(role_menu_bp)
-        app.register_blueprint(role_dim_bp)
-        app.register_blueprint(management_dimension_bp)
-        app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
+        app.register_blueprint(permission_set_menu_bp)
+        app.register_blueprint(permission_dimension_bp)
+        app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules (permission_dimension_api)
+        app.register_blueprint(ps_matrix_bp)  # /api/v1/permission-sets/<id>/resource-action-matrix (GET+PUT)
         app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
-        app.register_blueprint(user_group_bp)
         app.register_blueprint(enum_bp)
         app.register_blueprint(menu_permission_bp)
         app.register_blueprint(permission_bundle_bp)
@@ -347,6 +349,10 @@ class ApplicationBuilder:
         app.register_blueprint(meta_v2_bp)
         app.register_blueprint(role_v2_bp)
         app.register_blueprint(permission_rule_v2_bp)
+        app.register_blueprint(permission_set_v2_bp)  # [P13-T4] Permission Set API
+        # [Phase 3 P3.1-P3.7 2026-07-25] 统一权限管理 API
+        from meta.api.unified_permission_api import unified_permission_bp
+        app.register_blueprint(unified_permission_bp)
         app.register_blueprint(value_help_bp)
         app.register_blueprint(special_bp)
         app.register_blueprint(annotation_bp)
@@ -445,9 +451,19 @@ class ApplicationBuilder:
             if result == "ok":
                 logger.info(f"[AppBuilder] Preflight DB check: OK ({file_size} bytes)")
             else:
-                logger.error(f"[AppBuilder] Preflight DB integrity_check FAILED: {result}")
+                # [2026-08-18] FAIL-FAST: DB 损坏时中止启动, 避免带伤运行几小时后才暴露
+                #   (v20260817 事故: 03:00 已 malformed 仍运行到 12:40 写入才失败).
+                #   中止前提示恢复方案 (用最近 quick_check=ok 的备份替换 + 重启).
+                raise RuntimeError(
+                    f"[AppBuilder] Preflight DB integrity_check FAILED: {result}. "
+                    f"DB 已损坏, 中止启动. 请用最近可用备份恢复 {db_path} 后重启. "
+                    f"(备份候选: *.bak.20260715_* / *.pre_v20260712_* / *.predeploy_*)"
+                )
         except sqlite3.DatabaseError:
-            logger.error("[AppBuilder] Preflight: DB is corrupt")
+            raise RuntimeError(
+                f"[AppBuilder] Preflight DB is corrupt: {db_path}. "
+                f"中止启动, 请先恢复 DB."
+            )
         except Exception as e:
             logger.error(f"[AppBuilder] Preflight DB error: {e}")
         return self
@@ -567,6 +583,7 @@ class ApplicationBuilder:
             'bos',          # /api/v1/bos (FR-017 BO list)
             'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
             'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+            # [Spec 16 2026-08-29] 见 meta/server.py 的 V1_SPECIAL_PREFIXES (本文件不被实际调用)
         }
 
         @app.before_request
@@ -576,6 +593,9 @@ class ApplicationBuilder:
             V1_SPECIAL_PREFIXES 中的路径由 endpoint 层处理：
             - 业务关系路由继续工作
             - 主表 CRUD 路由（GET/POST/PUT/DELETE /user-groups, /roles）已移除
+
+            注意: 实际生效的版本在 meta/server.py (有 V1_CRUD_MIGRATION 精细化逻辑)
+            本文件版本仅作历史存档保留, 当前不被 server.py 调用.
             """
             if request.path.startswith('/api/v1/'):
                 path_parts = request.path[len('/api/v1/'):].split('/')
@@ -667,10 +687,7 @@ class ApplicationBuilder:
 
 
 def _default_db_path():
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db'
-    )
+    return get_meta_db_path()
 
 
 def _init_service(ds, name, fn_name, *extra_args):

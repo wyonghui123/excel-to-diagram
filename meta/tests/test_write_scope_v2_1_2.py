@@ -11,7 +11,7 @@
 
 [FIX v2.1.2]
   v2.1 perm 检查改为: 该 role 自身的 perm
-  - 查 role_permissions JOIN permissions WHERE role_id = ?
+  - 查 permission_set_permissions JOIN permissions WHERE role_id = ?
   - role A 无 service_module:update → 即使 dim scope 命中也 skip
   - 修复多角色用户跨域越权
 
@@ -107,7 +107,7 @@ class TestV2_1_2GetRolePermCodes:
         self.interceptor = WriteScopeInterceptor()
 
     def test_returns_role_specific_perms(self):
-        """返回 role 自身的 perm codes (从 role_permissions JOIN permissions)"""
+        """返回 role 自身的 perm codes (从 permission_set_permissions JOIN permissions)"""
         ds = MockDataSource(rows_by_query={
             'role_permissions': [
                 ('service_module:read',),
@@ -189,8 +189,8 @@ class TestV2_1_2RoleSpecificPermCheck:
             # role 5433 dim scope: domain=[706] (假设会覆盖)
             # role 5970 dim scope: domain=[703]
             dim_scope_map = {
-                5433: {'domain': {706}},  # role A 覆盖 domain=706 (继承)
-                5970: {'domain': {703}},  # role B 覆盖 domain=703
+                5433: {'domain': {'include': {706}, 'exclude': set(), 'wildcard': False}},  # role A 覆盖 domain=706 (继承)
+                5970: {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}},  # role B 覆盖 domain=703
             }
 
             with patch.object(
@@ -240,7 +240,7 @@ class TestV2_1_2RoleSpecificPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (SELECT id FROM service_modules sm JOIN sub_domains sd ON sm.sub_domain_id=sd.id WHERE sd.domain_id IN (703))'
                     }
@@ -271,7 +271,7 @@ class TestV2_1_2RoleSpecificPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -302,7 +302,7 @@ class TestV2_1_2RoleSpecificPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -353,7 +353,7 @@ class TestV2_1_2TEST333WScenario:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     with patch.object(
                         interceptor, '_check_ancestor_dim_scope', return_value=False
                     ):
@@ -408,7 +408,7 @@ class TestV2_1_2_RoleSpecificPerm:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -450,7 +450,7 @@ class TestV2_1_2_RoleSpecificPerm:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     with patch(
                         'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                         True,
@@ -486,7 +486,7 @@ class TestV2_1_2_RoleSpecificPerm:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     with patch(
                         'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                         True,
@@ -514,7 +514,7 @@ class TestV2_1_2_RoleSpecificPerm:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -551,7 +551,7 @@ class TestV2_1_2_RoleSpecificPerm:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -604,8 +604,8 @@ class TestV2_1_2_RoleSpecificPerm:
                     mock_engine = mock_engine_cls.return_value
                     # role A dim scope 假设覆盖了 1 (从某个继承)
                     dim_scope_map = {
-                        5433: {'service_module': {1}},  # role A 也覆盖了 1
-                        5970: {'service_module': {1}},  # role B 也覆盖了 1
+                        5433: {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}},  # role A 也覆盖了 1
+                        5970: {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}},  # role B 也覆盖了 1
                     }
                     def expand_side_effect(role_id):
                         return dim_scope_map.get(role_id, {})

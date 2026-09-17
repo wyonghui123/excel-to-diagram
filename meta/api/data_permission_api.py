@@ -8,6 +8,7 @@ from meta.services.auth_middleware import login_required, is_admin
 from meta.services.data_permission_service import DataPermissionService
 from meta.core.datasource import get_data_source
 import os
+from meta.core.db_path import get_meta_db_path
 
 data_perm_bp = Blueprint('data_permission', __name__, url_prefix='/api/v1/data-permissions')
 
@@ -20,7 +21,7 @@ def init_data_perm_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     _data_perm_service = DataPermissionService(_data_source)
 

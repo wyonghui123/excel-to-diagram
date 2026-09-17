@@ -1,0 +1,30 @@
+[Unit]
+# [P0-3 2026-09-12] staging meta 后端 systemd unit
+# 解决: server.py 是手工启动的孤儿进程 (PPID=1), 杀后无人接管, staging 就 502.
+# 替代原 setsid 启动模式, 由 systemd 负责 lifecycle (Restart=always + RestartSec=5).
+Description=Meta Backend (staging, port 13011, current deploy, OPT 2026-09-12)
+After=network.target
+# [staging 依赖]: dbops_audit (健康审计) + research-portal (无依赖, 仅备注)
+
+[Service]
+Type=simple
+User=root
+# [P0-3 关键] 显式 PORT=13011 (避免 server.py 读 ports.json 拿到 3011 prod 端口)
+# server.py 第 883 行: port = int(os.environ.get('PORT', _default_port))
+Environment="PORT=13011"
+# [meta 服务] backend 用 staging 部署目录 (current 软链)
+WorkingDirectory=/opt/app/staging/deploy/current
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/current/server.py
+# [staging 默认 dev-login 模式] FLASK_ENV 不设即 dev mode (auth_api.py dev_login 检查)
+# [日志] 走 journald, journalctl -u meta-staging -f
+StandardOutput=journal
+StandardError=journal
+# [进程管理] 异常退出自动重启, 给后端 5s 缓冲避免 race
+Restart=always
+RestartSec=5
+# [L11 安全] (沿用 meta-unified 模板)
+ProtectSystem=full
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

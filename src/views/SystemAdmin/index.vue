@@ -7,11 +7,30 @@
         :enable-auto-crud="false"
         @detail="handleViewDetail"
       >
+        <template #cell-object_type="{ row }">
+          {{ formatObjectTypeLabel(row.object_type, row) }}
+        </template>
         <template #cell-field_name="{ row }">
           <span v-if="row.field_name && row.field_name !== '_record'" class="field-name-badge">
-            {{ getFieldName(row.field_name) }}
+            {{ getFieldLabel(row.field_name, row) }}
           </span>
           <span v-else class="no-field">-</span>
+        </template>
+        <template #cell-old_value="{ row }">
+          {{ getFieldValueDisplay(row.old_value, row.field_name, row) }}
+        </template>
+        <template #cell-new_value="{ row }">
+          {{ getFieldValueDisplay(row.new_value, row.field_name, row) }}
+        </template>
+        <template #cell-user_name="{ row }">
+          {{ getUserNameDisplay(row.user_name) }}
+        </template>
+        <!-- [FIX 2026-09-06 死列清理] 移除 cell-log_category/cell-log_level:
+             list API 不返回这两个字段, 对应列已从 auditLogMeta 移除 -->
+        <template #cell-action="{ row }">
+          <el-tag :type="getActionTagType(row.action)" size="small">
+            {{ getActionLabel(row.action, row) }}
+          </el-tag>
         </template>
       </GenericObjectList>
     </div>
@@ -27,44 +46,37 @@
           <el-descriptions-item label="操作时间">
             {{ formatDateTime(selectedLog.created_at) }}
           </el-descriptions-item>
-          <el-descriptions-item label="日志类型">
-            <el-tag :type="getCategoryTagType(selectedLog.log_category)" size="small">
-              {{ getCategoryLabel(selectedLog.log_category) }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="日志级别">
-            <el-tag :type="getLevelTagType(selectedLog.log_level)" size="small">
-              {{ getLevelLabel(selectedLog.log_level) }}
-            </el-tag>
-          </el-descriptions-item>
+          <!-- [FIX 2026-09-06 死字段清理] 移除 日志类型/日志级别:
+               detail API 不返回 log_category/log_level, 标签恒为空 -->
           <el-descriptions-item label="操作类型">
             <el-tag :type="getActionTagType(selectedLog.action)" size="small">
-              {{ getActionLabel(selectedLog.action) }}
+              {{ getActionLabel(selectedLog.action, selectedLog) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="对象类型">
-            {{ getObjectTypeLabel(selectedLog.object_type) }}
+            {{ formatObjectTypeLabel(selectedLog.object_type, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="对象ID">
             {{ selectedLog.object_id }}
           </el-descriptions-item>
+          <!-- [FIX 2026-09-06] formatted_identity 为前端死字段, 后端真实字段是 business_key -->
           <el-descriptions-item label="业务标识">
-            {{ selectedLog.formatted_identity || selectedLog.business_key || '-' }}
+            {{ selectedLog.business_key || selectedLog.object_display || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="操作人">
-            {{ selectedLog.user_name || '-' }}
+            {{ getUserNameDisplay(selectedLog.user_name) }}
           </el-descriptions-item>
           <el-descriptions-item label="IP地址">
             {{ selectedLog.ip_address || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="字段名">
-            {{ getFieldName(selectedLog.field_name) }}
+            {{ getFieldLabel(selectedLog.field_name, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="旧值">
-            <div class="value-text">{{ selectedLog.old_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="新值">
-            <div class="value-text">{{ selectedLog.new_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="链路追踪ID">
             {{ selectedLog.trace_id || '-' }}
@@ -82,6 +94,14 @@
 import { ref } from 'vue'
 import GenericObjectList from '@/views/GenericObjectList.vue'
 import { formatDate } from '@/composables/useMetaList'
+import {
+  getObjectTypeLabel as formatObjectTypeLabel,
+  getActionLabel,
+  getFieldLabel,
+  getFieldValueDisplay,
+  getUserNameDisplay,
+  getActionTagType,
+} from '@/utils/auditLogFormat'
 
 const showDetail = ref(false)
 const selectedLog = ref(null)
@@ -89,78 +109,6 @@ const selectedLog = ref(null)
 function handleViewDetail(payload) {
   selectedLog.value = payload.row
   showDetail.value = true
-}
-
-const OBJECT_TYPE_MAP = {
-  'user': '用户',
-  'role': '角色',
-  'user_group': '用户组',
-  'product': '产品',
-  'version': '版本',
-  'domain': '领域',
-  'sub_domain': '子域',
-  'service_module': '服务模块',
-  'business_object': '业务对象',
-  'relationship': '关系',
-  'annotation': '标注',
-  'enum_type': '枚举类型',
-  'enum_value': '枚举值',
-  '__audit_failure__': '审计失败'
-}
-
-const COMMON_FIELD_NAMES = {
-  'id': 'ID',
-  'name': '名称',
-  'code': '编码',
-  'description': '描述',
-  'created_at': '创建时间',
-  'updated_at': '更新时间',
-  'created_by': '创建人',
-  'updated_by': '更新人',
-  'status': '状态',
-  'is_active': '是否激活',
-  'username': '用户名',
-  'display_name': '显示名称',
-  'email': '邮箱'
-}
-
-function getObjectTypeLabel(type) {
-  return OBJECT_TYPE_MAP[type] || type
-}
-
-function getFieldName(fieldKey) {
-  if (!fieldKey || fieldKey === '_record') return '-'
-  return COMMON_FIELD_NAMES[fieldKey] || fieldKey
-}
-
-function getCategoryTagType(category) {
-  const map = { business: 'primary', security: 'danger', operation: 'info', performance: 'warning', system: '' }
-  return map[category] || ''
-}
-
-function getCategoryLabel(category) {
-  const map = { business: '业务审计', security: '安全日志', operation: '运营日志', performance: '性能日志', system: '系统日志' }
-  return map[category] || category
-}
-
-function getLevelTagType(level) {
-  const map = { DEBUG: 'info', INFO: 'primary', WARNING: 'warning', ERROR: 'danger', CRITICAL: 'danger' }
-  return map[level] || 'info'
-}
-
-function getLevelLabel(level) {
-  const map = { DEBUG: '调试', INFO: '信息', WARNING: '警告', ERROR: '错误', CRITICAL: '严重' }
-  return map[level] || level
-}
-
-function getActionTagType(action) {
-  const map = { CREATE: 'success', UPDATE: 'warning', DELETE: 'danger', ASSOCIATE: 'primary', DISSOCIATE: 'info' }
-  return map[action] || 'info'
-}
-
-function getActionLabel(action) {
-  const map = { CREATE: '创建', UPDATE: '更新', DELETE: '删除', ASSOCIATE: '关联', DISSOCIATE: '取消关联' }
-  return map[action] || action
 }
 
 function formatDateTime(datetime) {

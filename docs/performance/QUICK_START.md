@@ -152,13 +152,13 @@ python meta/tests/performance/run_performance_test.py \
 # meta/server.py
 
 from meta.core.datasource import get_data_source
-from meta.services.management_dimension_engine import ManagementDimensionEngine
+from meta.services.permission_dimension_engine import PermissionDimensionEngine
 from meta.scripts.preload_hot_roles import preload_hot_roles
 
 # 初始化数据源和引擎
 db_path = os.path.join(os.path.dirname(__file__), 'architecture.db')
 data_source = get_data_source('sqlite', database=db_path)
-engine = ManagementDimensionEngine(data_source, ttl_seconds=300)
+engine = PermissionDimensionEngine(data_source, ttl_seconds=300)
 
 # 预热热点角色
 print("🔥 预热热点角色...")
@@ -271,7 +271,7 @@ curl http://localhost:5000/api/v1/cache/health
 python -m meta.scripts.preload_hot_roles --top-n 100
 
 # 调整缓存 TTL（在代码中）
-engine = ManagementDimensionEngine(data_source, ttl_seconds=600)  # 10分钟
+engine = PermissionDimensionEngine(data_source, ttl_seconds=600)  # 10分钟
 ```
 
 ### 2. 响应时间慢 (> 200ms)

@@ -16,6 +16,7 @@ from flask import Blueprint, request, jsonify, g, current_app
 from functools import wraps
 
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 
 
 # Blueprint
@@ -162,7 +163,7 @@ def _compute_level(record: dict, root: dict) -> int:
 
 def _get_db_path() -> Path:
     """获取 DB 路径 (跟 audit_service 一致)"""
-    return Path(__file__).parent.parent / "architecture.db"
+    return Path(get_meta_db_path())
 
 
 # ============ 自测 ============

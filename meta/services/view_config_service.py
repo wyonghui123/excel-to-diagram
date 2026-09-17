@@ -31,6 +31,7 @@ from meta.core.models import (
 from meta.core.yaml_loader import load_yaml_file, get_yaml_schema_dir
 from meta.core.ui_config.value_help_formatter import value_help_to_dict
 from meta.services.action_policy import ActionPolicy, create_action_policy
+from meta.core.db_path import get_meta_db_path
 
 DEV_MODE = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes') or os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
@@ -983,7 +984,7 @@ class ViewConfigService:
         try:
             import os
             from meta.core.datasource import get_data_source
-            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+            db_path = get_meta_db_path()
             ds = get_data_source("sqlite", database=db_path)
             sql = """
                 SELECT code, name FROM enum_values

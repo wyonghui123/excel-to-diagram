@@ -19,7 +19,18 @@
     </div>
     <div class="object-page__header-right">
       <span v-if="status" :class="['status-badge', `status-badge--${statusType}`]">{{ status }}</span>
-      <StateTransitionButtons v-if="showStateTransitions && objectType && objectId && objectId !== 'new' && !editing" :object-type="objectType" :object-id="objectId" size="small" @refresh="(payload) => handleStateTransitionRefresh(payload)" />
+      <div
+        v-if="showStateTransitions && objectType && objectId && objectId !== 'new' && !editing"
+        class="op-state-transitions"
+      >
+        <StateTransitionButtons
+          :object-type="objectType"
+          :object-id="objectId"
+          size="small"
+          @refresh="(payload) => handleStateTransitionRefresh(payload)"
+        />
+      </div>
+      <span v-if="showStateTransitions && objectType && objectId && objectId !== 'new' && !editing && actions && actions.length > 0" class="op-group-sep"></span>
       <div v-if="actions && actions.length > 0" class="op-actions">
         <AppButton v-for="act in visibleActions" :key="act.key" :variant="act.variant" size="sm" :loading="act.key === 'save' && saving" class="op-action-btn" @click="handleAction(act)">
           {{ act.label }}
@@ -205,6 +216,47 @@ function handleStateTransitionRefresh(payload = {}) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* [FIX 2026-09-13] state-transition buttons group:
+     1) 统一内部按钮 padding/height, 跟 op-actions 一致 (避免"大小不同")
+     2) 加分组分隔条, 跟 op-actions 之间形成视觉 group 边界 (避免"组间 vs 组内间隔不一致")
+*/
+.op-state-transitions {
+  display: flex;
+  align-items: center;
+}
+
+.op-state-transitions :deep(.state-transition-buttons) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+/* [FIX 2026-09-13] 强制让 state-transition 的 el-button 跟 op-action-btn 一样大小/内边距 */
+.op-state-transitions :deep(.state-transition-buttons .el-button) {
+  height: 24px;
+  padding: 0 11px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--el-border-radius-base);
+}
+
+.op-state-transitions :deep(.state-transition-buttons .el-button + .el-button) {
+  margin-left: 0;  /* 覆盖 Element Plus 默认 ml 8px, 让 gap 12px 完全控制 */
+}
+
+/* [FIX 2026-09-13] group 分隔: 竖线 + 双倍间距, 跟组内 gap 形成视觉差 */
+.op-group-sep {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--color-border, #d4d4d8);
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
 .object-page__breadcrumb {

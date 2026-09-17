@@ -6,12 +6,14 @@ from meta.services.hierarchy_filter_service import HierarchyFilterService
 from meta.services.cascade_service import get_type_order, HierarchyConfigLoader
 from meta.services.auth_middleware import login_required, get_current_user, is_admin
 from meta.services.data_permission_filter import DataPermissionFilter
+from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records
 from meta.api.special_routes_api import _compute_category, list_relationships
 import os
 import logging
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ def init_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     _manage_service = ManageService(_data_source)
     _query_service = QueryService(_data_source)
@@ -227,9 +229,9 @@ def _apply_scope_filter(object_type: str, conditions):
         engine = DimensionScopeEngine(_data_source)
         # 查 user 的 role_ids
         cur = _data_source.execute(
-            """SELECT DISTINCT gr.role_id
-               FROM group_roles gr
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            """SELECT DISTINCT gr.permission_set_id
+               FROM org_permission_sets gr
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ?""",
             [user_id]
         )
@@ -238,15 +240,31 @@ def _apply_scope_filter(object_type: str, conditions):
         if role_ids:
             placeholders = ','.join('?' * len(role_ids))
             cnt_cur = _data_source.execute(
-                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                f"SELECT COUNT(*) FROM permission_set_dimension_scopes WHERE permission_set_id IN ({placeholders})",
                 role_ids,
             )
             has_scope = cnt_cur.fetchone()[0] > 0
             if has_scope:
                 # 收集所有 role 的条件 (跨 role OR, role 内 AND)
+                # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+                #   任一 role 的 object_type wildcard-only → 全可见 → 跳过 dim scope 过滤
+                from meta.services.dimension_scope_engine import (
+                    _dim_has_any_values as _has_any,
+                    _dim_is_wildcard as _is_wc,
+                    _dim_exclude_values as _exclude_of,
+                )
                 from meta.services.query_service import QueryCondition
                 or_group = []
                 for rid in role_ids:
+                    expanded = engine.expand_dimension_values(rid)
+                    dim_data = expanded.get(object_type)
+                    # wildcard-only (无 exclude) → 全可见 → 跳过 dim scope 过滤
+                    if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
+                        logger.info(
+                            f'[_apply_scope_filter] user={user_id} role={rid} '
+                            f'object_type={object_type} wildcard-only → 全可见, 跳过 dim scope'
+                        )
+                        return conditions  # 不应用 dim scope 过滤
                     conds = engine.derive_data_conditions(rid)
                     expr = conds.get(object_type)
                     if not expr:
@@ -395,7 +413,7 @@ def create_record(object_type):
         user = get_current_user()
         if user and result.data and result.data.get('id'):
             from meta.services.data_permission_service import DataPermissionService
-            ds = _get_data_source() if _data_source else get_data_source("sqlite", database=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db'))
+            ds = _get_data_source() if _data_source else get_data_source("sqlite", database=get_meta_db_path())
             perm_service = DataPermissionService(ds)
             perm_service.add_data_permission(
                 user_id=user.get('user_id'),

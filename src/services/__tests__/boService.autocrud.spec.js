@@ -225,7 +225,7 @@ describe('BOService AutoCRUD (MetaListPage enableAutoCrud)', () => {
 
     describe(' - add member (N-M)', () => {
       it('N-M  add', async () => {
-        const memberData = { user_group_id: 10, user_id: 20 }
+        const memberData = { org_id: 10, user_id: 20 }
         const createdData = { id: 30, ...memberData }
 
         global.fetch.mockResolvedValue(createSuccessResponse(createdData))
@@ -233,7 +233,7 @@ describe('BOService AutoCRUD (MetaListPage enableAutoCrud)', () => {
         const result = await boService.create(USER_GROUP_MEMBER_OBJ, memberData)
 
         expect(result.success).toBe(true)
-        expect(result.data.user_group_id).toBe(10)
+        expect(result.data.org_id).toBe(10)
         expect(result.data.user_id).toBe(20)
       })
     })

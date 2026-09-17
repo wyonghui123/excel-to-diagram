@@ -1,0 +1,120 @@
+# Migration Lint Legacy 白名单
+#
+# 用途: 标记不接受新规范 (v<NNN>__<desc> 命名 / 缺 migrate() 函数)
+# 的历史 migration 文件. lint 加 --legacy 选项时会跳过这些文件.
+#
+# 维护规则:
+#   - 新文件不允许加入此白名单 (新文件必须遵守 L1/L2 规范)
+#   - 已有文件只在 P1.5 rename 一次性迁移后才会移除
+#   - 添加时附理由 + ticket
+#
+# 格式:
+#   - name: 文件名
+#     reason: 为什么是 legacy
+#     ticket: 关联的 ticket / PR
+#     destructive_allowed: 是否有 DROP (lint 跳过 L5)
+
+- name: 2026_06_28_bug_v031_sm_domain_id_trigger.sql
+  reason: V007.46 老格式 (日期前缀)
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_change_notification_tables.sql
+  reason: V007.46 老格式 (无版本号)
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_log_category_and_level.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_password_enhancement_fields.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_performance_indexes.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_performance_indexes_v2.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_performance_indexes_v3.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_relationship_columns.py
+  reason: V007.46 老格式 + migrate() 签名不规范
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_role_dim_scope_bo_id_2026.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_role_intents_2026.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_role_permissions_granted.py
+  reason: V007.46 老格式 + migrate() 签名不规范
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_token_version.py
+  reason: V007.46 老格式 + migrate() 签名不规范
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: add_version_column.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: compensate_association_audit.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: drop_user_group_member_count.py
+  reason: V007.46 老格式 + DROP TABLE
+  ticket: P1.5-rename
+  destructive_allowed: true
+- name: drop_user_roles_table.py
+  reason: V007.46 老格式 + DROP TABLE
+  ticket: P1.5-rename
+  destructive_allowed: true
+- name: enhance_audit_log_v2.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: fix_version_consistency.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: fix_version_unique_index.py
+  reason: V007.46 老格式 + DROP INDEX
+  ticket: P1.5-rename
+  destructive_allowed: true
+- name: recover_db.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: remove_aa_diagram_menu_2026.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: rename_product_management_menu_2026.py
+  reason: V007.46 老格式 + 缺 migrate()
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: v007_45_add_audit_logs_created_at_epoch.py
+  reason: v007_45 旧 v-号格式 (应为 v045__)
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: v007_50_add_audit_union_view.py
+  reason: v007_50 旧 v-号格式
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: v007_51_add_updated_at_materialized.py
+  reason: v007_51 旧 v-号格式
+  ticket: P1.5-rename
+  destructive_allowed: false
+- name: v2_001_audit_log_v2.sql
+  reason: v2_001 旧 v-号格式 + DROP
+  ticket: P1.5-rename
+  destructive_allowed: true

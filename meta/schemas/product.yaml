@@ -11,6 +11,12 @@ description: 产品线是业务系统的顶层分类，代表一个独立的产�
 display_name_field: name
 aspects: [audit_aspect, owner_aspect, naming_aspect]
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+# 4 种类型: independent | association | subordinate | hierarchy
+resource:
+  type: independent
+  inherit_to_children: true  # product 的 dim scope 向下展开到 version/domain/sub_domain
+
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
   - dimension: product
@@ -526,10 +532,15 @@ associations:
 # ────────────────────────────────────────────
 # 状态转换规则
 # ────────────────────────────────────────────
+# ────────────────────────────────────────────
+# 状态转换规则 [Spec 22 2026-09-13]
+# action_ref 引用 _standard_actions.yaml 通用 action
+# ────────────────────────────────────────────
 rules:
   - id: activate_product
     name: 激活产品线
     type: state_transition
+    action_ref: activate
     state_field: is_active
     from_states: [false]
     to_state: true
@@ -543,6 +554,7 @@ rules:
   - id: deactivate_product
     name: 停用产品线
     type: state_transition
+    action_ref: deactivate
     state_field: is_active
     from_states: [true]
     to_state: false
@@ -603,6 +615,21 @@ actions:
     method: DELETE
     path: /api/v1/products/{id}
     description: 删除产品线
+
+  # [FIX 2026-07-10] BUG-V051: 补全 import/export actions
+  #   委托给统一 export-import 端点
+  - id: import
+    name: 导入
+    type: business
+    method: POST
+    path: /api/v1/export-import/import
+    description: 通过统一导入端点从Excel批量导入产品线
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出产品线到Excel
 
 # ────────────────────────────────────────────
 # 校验规则

@@ -47,7 +47,7 @@ export default {
 
     const rows = [
       { key: 'import', label: '导入' },
-      { key: 'center', label: '中心范围' },
+      { key: 'center', label: '对象范围' },
       { key: 'external', label: '外部关联' },
       { key: 'total', label: '选择总数' }
     ]

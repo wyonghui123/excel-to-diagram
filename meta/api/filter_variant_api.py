@@ -7,17 +7,30 @@
 from flask import Blueprint, request, jsonify
 import os
 import json
+import logging
 from datetime import datetime
+
+from meta.core.safe_connect import safe_connect_for_read, safe_connect_for_write
+from meta.core.bo_framework import bo_framework
+from meta.core.db_path import get_meta_db_path
+
+logger = logging.getLogger(__name__)
 
 filter_variant_bp = Blueprint('filter_variant', __name__, url_prefix='/api/v1/filter-variants')
 
 _db_path = None
+# [V007.40 BUG-FIX] _init_table 一次性执行标志
+# 背景: before_request 每次请求都调 _init_table → CREATE TABLE IF NOT EXISTS.
+#       虽然 IF NOT EXISTS 是幂等的, 但 db 仍会执行 schema check + 写 db header
+#       → 高频请求场景加重 mmap 视图失效风险.
+# 修法: 加 _table_initialized 标志, 首次初始化后不再重复执行.
+_table_initialized = False
 
 
 def _get_db_path():
     global _db_path
     if _db_path is None:
-        _db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        _db_path = get_meta_db_path()
     return _db_path
 
 
@@ -33,27 +46,52 @@ def _is_admin():
     return getattr(g, 'is_admin', False)
 
 
-def _execute_query(sql, params=(), fetch=True):
-    """执行数据库查询"""
-    import sqlite3
+def _execute_read_query(sql, params=()):
+    """[V007.41] L0 只读查询
+
+    用 safe_connect_for_read 统一入口, timeout + busy_timeout 已封装.
+    """
     db_path = _get_db_path()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
+    with safe_connect_for_read(db_path) as conn:
+        cursor = conn.cursor()
         cursor.execute(sql, params)
-        if fetch:
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        else:
-            conn.commit()
-            return cursor.lastrowid
-    finally:
-        conn.close()
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def _execute_write_query(sql, params=()):
+    """[V007.41] L0 写查询 (force_no_tx)
+
+    Phase 2: 用 force_no_tx=True 保持 V007.40 简单语义.
+    Phase 3: 调用方应改用 bo_framework.transaction() 包裹.
+    """
+    db_path = _get_db_path()
+    with safe_connect_for_write(db_path, force_no_tx=True) as conn:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+        return cursor.lastrowid
+
+
+# 兼容旧调用 (V007.40 接口). 内部根据 fetch 决定走 read 还是 write.
+def _execute_query(sql, params=(), fetch=True):
+    """[V007.41] 兼容旧调用, 内部拆分 read/write."""
+    if fetch:
+        return _execute_read_query(sql, params)
+    return _execute_write_query(sql, params)
 
 
 def _init_table():
-    """初始化过滤变体表"""
+    """初始化过滤变体表
+
+    [V007.40 BUG-FIX] 改成一次性执行
+    背景: before_request 每次请求都调, 触发 CREATE TABLE IF NOT EXISTS.
+          IF NOT EXISTS 是幂等的, 但 db 仍会执行 schema check + 写 db header.
+    修法: 加 _table_initialized 标志, 首次初始化后不再重复执行.
+    """
+    global _table_initialized
+    if _table_initialized:
+        return
     sql = '''
     CREATE TABLE IF NOT EXISTS filter_variants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,9 +106,11 @@ def _init_table():
     )
     '''
     _execute_query(sql, fetch=False)
-    
+
     _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_user_obj ON filter_variants(user_id, object_type)', fetch=False)
     _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_shared ON filter_variants(is_shared, object_type)', fetch=False)
+
+    _table_initialized = True
 
 
 @filter_variant_bp.before_request
@@ -178,24 +218,26 @@ def create_variant():
     if is_shared and not _is_admin():
         return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
     
-    if is_default:
-        _execute_query(
-            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-            (user_id, object_type),
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹, 根治 silent partial commit
+    with bo_framework.transaction() as txn:
+        if is_default:
+            _execute_query(
+                'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+                (user_id, object_type),
+                fetch=False
+            )
+
+        now = datetime.now().isoformat()
+        sql = '''
+            INSERT INTO filter_variants (name, object_type, filters, user_id, is_shared, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        variant_id = _execute_query(
+            sql,
+            (name, object_type, json.dumps(filters), user_id, is_shared, is_default, now, now),
             fetch=False
         )
-    
-    now = datetime.now().isoformat()
-    sql = '''
-        INSERT INTO filter_variants (name, object_type, filters, user_id, is_shared, is_default, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    '''
-    variant_id = _execute_query(
-        sql,
-        (name, object_type, json.dumps(filters), user_id, is_shared, is_default, now, now),
-        fetch=False
-    )
-    
+
     return jsonify({
         'success': True,
         'data': {
@@ -231,21 +273,23 @@ def update_variant(variant_id):
     
     if is_shared and not _is_admin():
         return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
-    
-    if is_default:
+
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹
+    with bo_framework.transaction() as txn:
+        if is_default:
+            _execute_query(
+                'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+                (user_id, existing['object_type']),
+                fetch=False
+            )
+
+        now = datetime.now().isoformat()
         _execute_query(
-            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-            (user_id, existing['object_type']),
+            'UPDATE filter_variants SET name = ?, filters = ?, is_shared = ?, is_default = ?, updated_at = ? WHERE id = ?',
+            (name, json.dumps(filters), is_shared, is_default, now, variant_id),
             fetch=False
         )
-    
-    now = datetime.now().isoformat()
-    _execute_query(
-        'UPDATE filter_variants SET name = ?, filters = ?, is_shared = ?, is_default = ?, updated_at = ? WHERE id = ?',
-        (name, json.dumps(filters), is_shared, is_default, now, variant_id),
-        fetch=False
-    )
-    
+
     return jsonify({
         'success': True,
         'data': {
@@ -293,19 +337,21 @@ def set_default_variant(variant_id):
         return jsonify({'success': False, 'message': '变体不存在或无权访问'}), 404
     
     existing = existing[0]
-    
-    _execute_query(
-        'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-        (user_id, existing['object_type']),
-        fetch=False
-    )
-    
-    _execute_query(
-        'UPDATE filter_variants SET is_default = 1 WHERE id = ?',
-        (variant_id,),
-        fetch=False
-    )
-    
+
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹
+    with bo_framework.transaction() as txn:
+        _execute_query(
+            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+            (user_id, existing['object_type']),
+            fetch=False
+        )
+
+        _execute_query(
+            'UPDATE filter_variants SET is_default = 1 WHERE id = ?',
+            (variant_id,),
+            fetch=False
+        )
+
     return jsonify({
         'success': True,
         'message': '已设置为默认变体'

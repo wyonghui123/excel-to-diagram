@@ -437,7 +437,7 @@ class SecureEnumAdmin(IEnumAdmin):
         
         # mutability 校验
         if 'mutability' in data and data['mutability']:
-            valid_mutabilities = ['locked', 'extensible', 'fully_editable']
+            valid_mutabilities = ['locked', 'extensible', 'fullEditable']
             if data['mutability'] not in valid_mutabilities:
                 raise ValidationError(
                     f"无效的可变性值: {data['mutability']}, "

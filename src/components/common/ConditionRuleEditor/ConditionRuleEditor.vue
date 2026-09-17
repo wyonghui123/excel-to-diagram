@@ -56,7 +56,7 @@
           size="sm"
           @click="conditionMode = 'dimension'"
         >
-          管理维度
+          权限维度
         </AppButton>
         <AppButton
           :variant="conditionMode === 'custom' ? 'primary' : 'secondary'"
@@ -123,7 +123,7 @@
         </div>
         
         <div v-if="availableDimensions.length === 0" class="empty-state">
-          暂无可用管理维度
+          暂无可用权限维度
         </div>
       </div>
 

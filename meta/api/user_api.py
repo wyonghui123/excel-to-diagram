@@ -14,7 +14,7 @@ from meta.services.query.virtual_sort import _build_audit_derived_order_join
 from meta.services.permission_service import PermissionService
 from meta.services.auth_provider import _hash_password_pbdkdf2
 from meta.services.data_permission_service import DataPermissionService
-from meta.services.user_group_service import UserGroupService
+from meta.services.org_service import OrgService
 from meta.services.audit_interceptor import AuditInterceptor as SvcAuditInterceptor
 from meta.core.bo_framework import BOFramework
 from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
@@ -22,6 +22,7 @@ from meta.core.interceptors.audit_interceptor import AuditInterceptor
 from meta.core.interceptors.context_interceptor import ContextInterceptor
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +32,18 @@ _data_source = None
 _bo_framework = None
 _perm_service = None
 _data_perm_service = None
-_user_group_service = None
+_org_service = None
 _svc_audit_interceptor = None
 
 
 def init_user_services(data_source=None):
     """初始化用户服务"""
-    global _data_source, _perm_service, _data_perm_service, _user_group_service, _svc_audit_interceptor
+    global _data_source, _perm_service, _data_perm_service, _org_service, _svc_audit_interceptor
     
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     
     schema_dir = get_yaml_schema_dir()
@@ -50,7 +51,7 @@ def init_user_services(data_source=None):
     
     _perm_service = PermissionService(_data_source)
     _data_perm_service = DataPermissionService(_data_source)
-    _user_group_service = UserGroupService(_data_source)
+    _org_service = OrgService(_data_source)
     _svc_audit_interceptor = SvcAuditInterceptor(_data_source)
 
 
@@ -74,11 +75,11 @@ def _get_data_perm_service():
     return _data_perm_service
 
 
-def _get_user_group_service():
+def _get_org_service():
     """获取用户组服务实例"""
-    if _user_group_service is None:
+    if _org_service is None:
         init_user_services()
-    return _user_group_service
+    return _org_service
 
 
 def _get_svc_audit_interceptor():
@@ -142,7 +143,7 @@ def _build_user_order_sql(sort_by: str, sort_dir: str):
 
     Returns:
         (join_clause, order_by_sql):
-        - join_clause: 例如 "LEFT JOIN (SELECT ... FROM audit_logs ...) _audit_sort ON ..."
+        - join_clause: 例如 "LEFT JOIN (SELECT ... FROM v_audit_all ...) _audit_sort ON ..."
                        若无需 JOIN 则返回空串
         - order_by_sql: 例如 "_audit_sort._audit_value DESC" 或 "users.username ASC"
     """
@@ -195,7 +196,7 @@ def list_users():
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 20, type=int)
     keyword = request.args.get('keyword', '').strip()
-    group_id = request.args.get('group_id', type=int)
+    org_id = request.args.get('org_id', type=int)
 
     # [FIX 2026-06-08] 排序参数解析：兼容两种常见约定
     # 1. El-Table v2 / Element Plus: ?sort_by=updated_at&order=desc
@@ -210,12 +211,12 @@ def list_users():
         kw = f'%{keyword}%'
         params.extend([kw, kw, kw])
 
-    if group_id:
-        conditions.append("id IN (SELECT user_id FROM user_group_members WHERE group_id = ?)")
-        params.append(group_id)
+    if org_id:
+        conditions.append("id IN (SELECT user_id FROM org_members WHERE org_id = ?)")
+        params.append(org_id)
 
     if not has_all_permission and has_group_permission:
-        manageable_user_ids = _get_user_group_service().get_manageable_users(user_id, has_all_permission=False)
+        manageable_user_ids = _get_org_service().get_manageable_users(user_id, has_all_permission=False)
         if not manageable_user_ids:
             return jsonify({
                 'success': True,
@@ -237,29 +238,45 @@ def list_users():
     offset = (page - 1) * page_size
 
     # [FIX 2026-06-08] 构造 ORDER BY：物理字段直接排序，updated_at 走 audit JOIN
+    # [V007.51 Phase 2] 物化列优先：users 表有物化 updated_at 列，优先直接读取
     join_clause, order_by = _build_user_order_sql(sort_by, sort_dir)
 
-    # [_audit_sort 永远要存在] 因为 SELECT 列表引用了 _audit_sort._audit_value
-    # 即使用户没按 updated_at 排序，前端仍可能展示变更时间列。
-    # 因此：物理字段排序时也保留 LEFT JOIN（无额外成本，仅多一个子查询）。
+    # [V007.51] 检查是否可用物化列（零 JOIN 开销）
+    _use_materialized = False
     if not join_clause:
         audit_result = _build_audit_derived_order_join(
             table_name='users', obj_type='user',
-            sort_field='updated_at', sort_direction='asc',  # 方向不影响 JOIN 结构
+            sort_field='updated_at', sort_direction='asc',
         )
-        # 注意：_build_audit_derived_order_join 返回 3-tuple (join, order_alias, dir)
         if audit_result:
             join_clause = audit_result[0]
+            # V007.51: join_clause 为空字符串表示走物化列
+            if join_clause == "":
+                _use_materialized = True
+                order_by_materialized = audit_result[1]  # COALESCE(users.updated_at, users.created_at)
 
-    data_sql = f"""
-        SELECT users.id, users.username, users.email, users.display_name,
-               users.status, users.sso_provider, users.last_login_at, users.created_at,
-               _audit_sort._audit_value AS updated_at
-        FROM users {join_clause}
-        WHERE {where_clause}
-        ORDER BY {order_by}
-        LIMIT ? OFFSET ?
-    """
+    # [V007.51] 物化列路径：直接从 users.updated_at 读取，不需要 _audit_sort
+    if _use_materialized:
+        data_sql = f"""
+            SELECT users.id, users.username, users.email, users.display_name,
+                   users.status, users.sso_provider, users.last_login_at, users.created_at,
+                   COALESCE(users.updated_at, users.created_at) AS updated_at
+            FROM users
+            WHERE {where_clause}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?
+        """
+    else:
+        # 回退：走 _audit_sort LEFT JOIN
+        data_sql = f"""
+            SELECT users.id, users.username, users.email, users.display_name,
+                   users.status, users.sso_provider, users.last_login_at, users.created_at,
+                   _audit_sort._audit_value AS updated_at
+            FROM users {join_clause}
+            WHERE {where_clause}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?
+        """
     cursor = _data_source.execute(data_sql, tuple(params + [page_size, offset]))
     columns = [desc[0] for desc in cursor.description]
     users = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -270,9 +287,9 @@ def list_users():
         placeholders = ','.join(['?'] * len(user_ids))
         cursor = _data_source.execute(
             f"SELECT ugm.user_id, r.id, r.code, r.name, r.description, r.is_system "
-            f"FROM roles r "
-            f"JOIN group_roles gr ON r.id = gr.role_id "
-            f"JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
+            f"FROM permission_sets r "
+            f"JOIN org_permission_sets gr ON r.id = gr.permission_set_id "
+            f"JOIN org_members ugm ON gr.org_id = ugm.org_id "
             f"WHERE ugm.user_id IN ({placeholders})",
             user_ids
         )
@@ -303,9 +320,22 @@ def list_users():
 @user_bp.route('', methods=['POST'])
 @login_required
 def create_user():
-    """创建用户"""
-    if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+    """创建用户
+
+    [Spec 19 M2 FR-004] 委托管理员（持有 org_member:manage / user:create /
+    user:manage:group 任一码）可在受托组织范围内创建用户，必须指定 org_ids
+    （归属组织，须全部落在受托子树内）；全局管理员 org_ids 可选。
+    """
+    current = get_current_user()
+    user_permissions = current.get('permissions', []) or []
+    is_super = is_admin()
+    is_delegate = (
+        'org_member:manage' in user_permissions
+        or 'user:create' in user_permissions
+        or 'user:manage:group' in user_permissions
+    )
+    if not is_super and not is_delegate:
+        return jsonify({'success': False, 'message': '需要管理员权限或组织管理委托'}), 403
 
     data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
@@ -318,6 +348,36 @@ def create_user():
 
     if password and len(password) < 6:
         return jsonify({'success': False, 'message': '密码长度不能少于6位'}), 400
+
+    # [Spec 19 M2 FR-004] 归属组织与行级范围校验（钥匙二）
+    raw_org_ids = data.get('org_ids') or []
+    org_ids = []
+    for v in raw_org_ids:
+        try:
+            org_ids.append(int(v))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': f'org_ids 含非法值: {v}'}), 400
+
+    if not is_super:
+        if not org_ids:
+            return jsonify({'success': False,
+                            'message': '受托管理员创建用户必须指定 org_ids（归属组织）'}), 400
+        from meta.services.org_admin_scope_service import OrgAdminScopeService
+        from meta.core.bo_framework import bo_framework as _bof
+        scope_svc = OrgAdminScopeService(_bof._data_source)
+        for oid in org_ids:
+            ok, reason = scope_svc.check_org_scope(current.get('user_id'), oid, 'crud_create')
+            if not ok:
+                from meta.core.permission_audit import log_permission_decision
+                log_permission_decision(
+                    user_id=current.get('user_id'),
+                    target_type='user', target_id=None, action='create',
+                    decision='deny',
+                    reason=f'create user with org#{oid}: {reason}',
+                    interceptor='user_api.create_user',
+                )
+                return jsonify({'success': False,
+                                'message': f'组织 #{oid} 不在受托范围内（{reason}）'}), 403
 
     cursor = _data_source.execute("SELECT id FROM users WHERE username = ?", [username])
     if cursor.fetchone():
@@ -345,9 +405,15 @@ def create_user():
         user_id = result.data['id']
         generated_temp_password = result.data.get('generated_temp_password')
 
+        # [Spec 19 M2 FR-004] 绑定归属组织（org_members）
+        if org_ids:
+            org_service = _get_org_service()
+            for oid in org_ids:
+                org_service.add_member(oid, user_id)
+
         role_ids = data.get('role_ids', [])
-        for role_id in role_ids:
-            _get_perm_service().assign_role(user_id, role_id)
+        for permission_set_id in role_ids:
+            _get_perm_service().assign_role(user_id, permission_set_id)
 
     response_data = {'id': user_id, 'username': username}
     if generated_temp_password:
@@ -382,7 +448,7 @@ def get_current_user_profile():
     user.pop('password_hash', None)
     
     # 添加角色和权限信息
-    user['roles'] = _get_perm_service().get_user_roles(user_id)
+    user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
     
     perm_service = _get_perm_service()
     user['permissions'] = perm_service.get_user_permissions(user_id)
@@ -445,9 +511,9 @@ def get_user(user_id):
             return jsonify({'success': False, 'message': '用户不存在'}), 404
 
         user = result.data
-        user['roles'] = _get_perm_service().get_user_roles(user_id)
+        user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
         user['permissions'] = _get_perm_service().get_user_permissions(user_id)
-        user['groups'] = _get_user_group_service().get_user_groups(user_id)
+        user['groups'] = _get_org_service().get_orgs(user_id)
         user['data_permissions'] = _get_data_perm_service().get_all_user_data_permissions_with_groups(user_id)
 
         return jsonify({'success': True, 'data': user})
@@ -455,6 +521,32 @@ def get_user(user_id):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'获取用户详情失败: {str(e)}'}), 500
+
+
+@user_bp.route('/<int:user_id>/permission-preview', methods=['GET'])
+@login_required
+@require_permission('user:read')
+def get_user_permission_preview(user_id):
+    """权限预览：user 有效权限全集（经所属 org 继承链聚合，含来源追溯）"""
+    try:
+        service = _get_org_service()
+        return jsonify({'success': True, 'data': service.get_permission_preview('user', user_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@user_bp.route('/<int:user_id>/permission-config', methods=['GET'])
+@login_required
+@require_permission('user:read')
+def get_user_permission_config(user_id):
+    """融合权限配置：user 下所有有效权限集合并为「完整的一份」（菜单+矩阵+数据范围）"""
+    try:
+        service = _get_org_service()
+        return jsonify({'success': True, 'data': service.get_fused_permission_config('user', user_id)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @user_bp.route('/<int:user_id>', methods=['PUT'])
@@ -465,7 +557,13 @@ def update_user(user_id):
     operator_id = current_user.get('user_id')
     
     has_all_permission = is_admin()
-    has_group_permission = _get_perm_service().has_permission(operator_id, 'user:manage:group')
+    # [Spec 19 M2 FR-004] 委托管理员编辑码：user:update（新格式）或
+    # user:manage:group（v1 遗留码，过渡期兼容）
+    user_permissions = current_user.get('permissions', []) or []
+    has_group_permission = (
+        _get_perm_service().has_permission(operator_id, 'user:manage:group')
+        or 'user:update' in user_permissions
+    )
     
     is_self = operator_id == user_id
     
@@ -473,7 +571,7 @@ def update_user(user_id):
         return jsonify({'success': False, 'message': '无权修改'}), 403
     
     if not has_all_permission and not is_self:
-        if not _get_user_group_service().can_manage_user(operator_id, user_id, has_all_permission=False):
+        if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
             return jsonify({'success': False, 'message': '无权修改该用户'}), 403
 
     data = request.get_json(silent=True) or {}
@@ -506,35 +604,39 @@ def update_user(user_id):
 
             if (has_all_permission or has_group_permission) and 'role_ids' in data:
                 if not has_all_permission:
-                    if not _get_user_group_service().can_manage_user(operator_id, user_id, has_all_permission=False):
+                    if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
                         return jsonify({'success': False, 'message': '无权修改该用户角色'}), 403
                 
-                current_roles = {r['id'] for r in _get_perm_service().get_user_roles(user_id)}
+                current_roles = {r['id'] for r in _get_perm_service().get_user_permission_sets(user_id)}
                 new_roles = set(data['role_ids'])
 
                 added_roles = new_roles - current_roles
                 removed_roles = current_roles - new_roles
 
-                for role_id in added_roles:
-                    if not _get_data_perm_service().can_assign_role(operator_id, role_id):
+                for permission_set_id in added_roles:
+                    if not _get_data_perm_service().can_assign_role(operator_id, permission_set_id):
                         return jsonify({'success': False, 'message': '无权分配该角色，可能导致权限提升'}), 403
-                    _get_perm_service().assign_role(user_id, role_id)
+                    _get_perm_service().assign_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_associate(
                         object_type='user',
                         object_id=user_id,
                         tgt_type='role',
-                        tgt_id=role_id,
+                        tgt_id=permission_set_id,
                         association_name='roles',
                         user_id=str(operator_id) if operator_id else None,
                         user_name=operator_name,
                     )
-                for role_id in removed_roles:
-                    _get_perm_service().remove_role(user_id, role_id)
+                for permission_set_id in removed_roles:
+                    # [Spec 19 M2 V4] 移除权限集同样受 can_assign_role 约束：
+                    # 优先级低于目标权限集的操作者不可移除（防破坏受托配置）
+                    if not _get_data_perm_service().can_assign_role(operator_id, permission_set_id):
+                        return jsonify({'success': False, 'message': '无权移除该角色（角色优先级不足）'}), 403
+                    _get_perm_service().remove_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_dissociate(
                         object_type='user',
                         object_id=user_id,
                         tgt_type='role',
-                        tgt_id=role_id,
+                        tgt_id=permission_set_id,
                         association_name='roles',
                         user_id=str(operator_id) if operator_id else None,
                         user_name=operator_name,
@@ -611,9 +713,32 @@ def batch_delete_users():
 @user_bp.route('/<int:user_id>/reset-password', methods=['POST'])
 @login_required
 def reset_password(user_id):
-    """重置密码"""
+    """重置密码
+
+    [Spec 19 M2 FR-004] 全局管理员；或受托管理员（user:update /
+    user:manage:group / org_member:manage 任一码）对受托组织范围内
+    任职的用户（check_user_scope）。
+    """
+    current = get_current_user()
+    user_permissions = current.get('permissions', []) or []
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        delegate_codes = {'user:update', 'user:manage:group', 'org_member:manage'}
+        if not (delegate_codes & set(user_permissions)):
+            return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        from meta.services.org_admin_scope_service import OrgAdminScopeService
+        from meta.core.bo_framework import bo_framework as _bof
+        scope_svc = OrgAdminScopeService(_bof._data_source)
+        ok, reason = scope_svc.check_user_scope(current.get('user_id'), user_id, 'reset_password')
+        if not ok:
+            from meta.core.permission_audit import log_permission_decision
+            log_permission_decision(
+                user_id=current.get('user_id'),
+                target_type='user', target_id=user_id, action='reset_password',
+                decision='deny', reason=reason,
+                interceptor='user_api.reset_password',
+            )
+            return jsonify({'success': False,
+                            'message': f'用户 #{user_id} 不在受托范围内（{reason}）'}), 403
 
     data = request.get_json(silent=True) or {}
     new_password = data.get('new_password', '')
@@ -707,7 +832,7 @@ def get_current_user_detail():
         return jsonify({'success': False, 'message': 'User not found'}), 404
 
     user = result.data
-    user['roles'] = _get_perm_service().get_user_roles(user_id)
+    user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
     user['permissions'] = _get_perm_service().get_user_permissions(user_id)
 
     return jsonify({'success': True, 'data': user})
@@ -756,9 +881,9 @@ def get_user_menus(user_id):
         cursor = ds.execute("""
             SELECT DISTINCT mp.menu_code, mp.menu_name, mp.menu_path, mp.icon
             FROM menu_permissions mp
-            JOIN role_menu_permissions rmp ON mp.menu_code = rmp.menu_code
-            JOIN group_roles gr ON rmp.role_id = gr.role_id
-            JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            JOIN permission_set_menu_permissions rmp ON mp.menu_code = rmp.menu_code
+            JOIN org_permission_sets gr ON rmp.permission_set_id = gr.permission_set_id
+            JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
             AND mp.is_active = 1
             ORDER BY mp.sort_order
@@ -799,7 +924,7 @@ def get_user_logs(user_id):
         offset = (page - 1) * page_size
         
         cursor = ds.execute("""
-            SELECT * FROM audit_logs
+            SELECT * FROM v_audit_all
             WHERE object_type = 'user' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -811,7 +936,7 @@ def get_user_logs(user_id):
             logs.append(dict(zip(columns, row)))
         
         cursor = ds.execute(
-            "SELECT COUNT(*) as total FROM audit_logs WHERE object_type = 'user' AND object_id = ?",
+            "SELECT COUNT(*) as total FROM v_audit_all WHERE object_type = 'user' AND object_id = ?",
             [user_id]
         )
         total = cursor.fetchone()[0]

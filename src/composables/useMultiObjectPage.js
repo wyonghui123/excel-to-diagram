@@ -89,6 +89,7 @@ import { useContextFilterSource } from './filterSources/useContextFilterSource'
 import { useScopeFilterSource } from './filterSources/useScopeFilterSource'
 import { useHierarchyTypes } from './useHierarchyTypes'
 import * as hierarchyService from '@/services/hierarchyService'
+import { stripIdPrefix } from '@/services/archDataConverter'
 import { useAuthStore } from '@/stores/authStore'
 
 /**
@@ -116,6 +117,14 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   const hierarchyTypes = useHierarchyTypes()
   const metaObjectRef = ref(null)
   provide('metaObject', metaObjectRef)
+
+  // [MOMP 通用化 2026-08-30] 注入扩展点常量
+  //   disableVersionContext: 组织页等无需版本上下文的页面设为 true，
+  //     使 baseFilters 不含版本/产品过滤、canImport/Export/ShowChart/Refresh 去掉
+  //     selectedVersionId 前置、保存/恢复图表状态时跳过版本上下文。
+  const disableVersionContext = config.disableVersionContext === true
+  // stateKey: 替代硬编码的图表状态暂存 key，组织页用 'orgManagerStateBeforeDiagram'
+  const stateRestoreKey = config.stateKey || 'archManagerStateBeforeDiagram'
 
   // 便捷引用：层级配置数组（供 hierarchyService 纯函数使用）
   const levels = hierarchyTypes.levels
@@ -281,6 +290,13 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   function _computeTypeFilters(objectType) {
     const filters = {}
 
+    // [MOMP 通用化 2026-08-30] filterStrategies 优先级最高（比 customFilterBuilders 更优先），
+    //   供组织管理页等非层级对象页注入按类型过滤策略。组织页在此做
+    //   effective 非空→id__in / 空→id__in 空集守卫，确保未选组织时绝不回退全量加载。
+    if (config.filterStrategies?.[objectType]) {
+      return config.filterStrategies[objectType](filters, scopeIds)
+    }
+
     if (config.customFilterBuilders?.[objectType]) {
       return config.customFilterBuilders[objectType](filters, scopeIds)
     }
@@ -430,11 +446,33 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    *   关系过滤: scope.relationCodes/categoryTypes/filterRelationCodes → scopeIds.relationExtra
    */
   function handleScopeChange(scope) {
+    // [MOMP 通用化 2026-08-30] scopeAdapter.handleScopeChange 覆盖默认处理：
+    //   组织页注入 OrgScopeTree 专用 scope 语义（orgIds/effectiveOrgIds），与 archdata 的
+    //   selected*Ids/effective*Ids 映射解耦，保证组织语义只进 adapter、不进本通用逻辑。
+    if (config.scopeAdapter?.handleScopeChange) {
+      return config.scopeAdapter.handleScopeChange(scope, {
+        scopeIds,
+        objectTypes,
+        levels: levels.value,
+        hierarchyService,
+        scopeSource
+      })
+    }
+
+    // [FIX 2026-08-07] 添加短字段名映射, 兼容 treeNodesToScope 返回的 { boIds, domainIds, ... } 格式
+    //   RelationScopeTree 的 scope-change 事件使用短字段名, 而 URL scope 参数使用 selected*Ids 格式
+    const typeToShortField = {
+      domain: 'domainIds',
+      sub_domain: 'subDomainIds',
+      service_module: 'serviceModuleIds',
+      business_object: 'boIds'
+    }
     objectTypes.forEach(type => {
       if (hierarchyService.isHierarchyType(levels.value, type)) {
         const selectedKey = `selected${_pascalCase(type)}Ids`
         const effectiveKey = `effective${_pascalCase(type)}Ids`
-        scopeIds[type].selected = scope[selectedKey] || []
+        const shortKey = typeToShortField[type]
+        scopeIds[type].selected = scope[selectedKey] || scope[shortKey] || []
         scopeIds[type].effective = scope[effectiveKey] || []
       }
     })
@@ -531,7 +569,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   const canImport = computed(() => {
     if (actionsConfig.value.import.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有import权限就启用
     return objectTypes.some(type => authStore.hasPermission(`${type}:import`))
@@ -539,28 +577,29 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   const canExport = computed(() => {
     if (actionsConfig.value.export.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有export权限就启用
     return objectTypes.some(type => authStore.hasPermission(`${type}:export`))
   })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false
-    if (!versionContext.selectedVersionId.value) return false
+    if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (actionsConfig.value.chart.require_filters === false) return true
     return hasScopeSelection.value
   })
   const canRefresh = computed(() =>
-    actionsConfig.value.refresh.enabled !== false && !!versionContext.selectedVersionId.value
+    actionsConfig.value.refresh.enabled !== false && (disableVersionContext || !!versionContext.selectedVersionId.value)
   )
 
   const importContext = computed(() => ({
-    version_id: versionContext.selectedVersionId.value,
-    product_id: versionContext.selectedProductId.value
+    version_id: disableVersionContext ? null : versionContext.selectedVersionId.value,
+    product_id: disableVersionContext ? null : versionContext.selectedProductId.value
   }))
 
   const baseFilters = computed(() => {
     const f = {}
+    if (disableVersionContext) return f
     if (versionContext.selectedVersionId.value) f.version_id = versionContext.selectedVersionId.value
     if (versionContext.selectedProductId.value) f.product_id = versionContext.selectedProductId.value
     return f
@@ -621,6 +660,19 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     objectTypes: objectTypes.filter(t => t !== 'relationship')
   }))
 
+  // [任务B 2026-06-29] 导出对话框可选类型: 在原 objectTypes 基础上额外暴露 annotation
+  //   - annotation 不作为页面 Tab (ArchDataManagement.vue objectTypes 不含 annotation)
+  //   - 仅在导出对话框作为可勾选类型, 默认不勾选 (ExportDialog defaultUnselectedTypes)
+  //   - relationship 也出现在导出对话框, 默认不勾选
+  //   - 后端 manage_api.py 已种入 annotation:export 权限, export_import_api.py 走 selected_types 路径
+  const exportObjectTypes = computed(() => {
+    const base = [...objectTypes]
+    if (!base.includes('annotation')) {
+      base.push('annotation')
+    }
+    return base
+  })
+
   const objectTypeLabels = computed(() => {
     const labels = {}
     for (const type of objectTypes) {
@@ -629,6 +681,10 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       } else {
         labels[type] = hierarchyService.getLabel(levels.value, type) || type
       }
+    }
+    // annotation 不在 objectTypes 内, 单独补标签 (schema name = "备注信息")
+    if (!labels['annotation']) {
+      labels['annotation'] = '备注信息'
     }
     return labels
   })
@@ -678,10 +734,12 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       if (!scope) return
 
       // 优先使用 selected（用户在树上直接勾选），其次 effective（树计算的可见范围）
+      // [FIX 2026-08-14] 剥离树节点 ID 前缀 (d_/s_/sm_/bo_) 归一化为纯数字,
+      //   防止 prefixed ID 进入 chartData.hierarchyFilter → preview 请求 → 后端 500
       const ids = scope.selected.length > 0
-        ? [...scope.selected]
+        ? [...scope.selected].map(stripIdPrefix)
         : scope.effective.length > 0
-          ? [...scope.effective]
+          ? [...scope.effective].map(stripIdPrefix)
           : []
 
       if (ids.length > 0) {
@@ -731,7 +789,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // 架构管理 → 图表展示 → 返回 状态持久化
   // 跳转前快照到 sessionStorage, 返回时由调用方读取并恢复 (避免 SPA 卸载导致 in-memory state 全部丢失)
-  const STATE_RESTORE_KEY = 'archManagerStateBeforeDiagram'
+  const STATE_RESTORE_KEY = stateRestoreKey
 
   function saveStateForDiagram() {
     try {
@@ -740,8 +798,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
         // [v32-FIX] 显式保存产品/版本 ID，避免 restore 时依赖单例 sessionStorage 异步恢复
         //   versionContext 是单例，tab 切回场景下 refs 保留，但 F5 刷新后 restoreContext() 是异步的，
         //   onMounted 时 selectedVersionId 仍为 null，导致 v-if 不渲染树，restore 的 scopeIds 无法应用
-        versionId: versionContext.selectedVersionId.value,
-        productId: versionContext.selectedProductId.value,
+        versionId: disableVersionContext ? null : versionContext.selectedVersionId.value,
+        productId: disableVersionContext ? null : versionContext.selectedProductId.value,
         scopeIds: {},
         tabFilters: JSON.parse(JSON.stringify(tabFilters.value || {})),
         initialBoIds: [],
@@ -809,7 +867,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       // [v32-FIX] 先恢复版本上下文，确保 v-if="selectedVersionId" 立即为 true，树能渲染
       //   然后再恢复 scopeIds/initialBoIds/initialRelationCodes 到树上
       // [FIX 2026-06-25] skipVersionRestore=true 时跳过版本上下文恢复（URL 优先场景）
-      if (!skipVersionRestore) {
+      // [MOMP 通用化 2026-08-30] disableVersionContext=true 时强制跳过版本上下文恢复
+      if (!skipVersionRestore && !disableVersionContext) {
         if (state.versionId != null) {
           versionContext.selectedVersionId.value = state.versionId
         }
@@ -838,7 +897,12 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       }
 
       if (state.tabFilters && typeof state.tabFilters === 'object') {
-        tabFilters.value = { ...tabFilters.value, ...state.tabFilters }
+        // [FIX 2026-09-04] tabFilters 是 computed (L267), 不能 .value= 赋值, 否则
+        //   [Vue warn] Write operation failed: computed value is readonly.
+        //   语义: tabFilters 由 scopeIds 关系派生, scopeIds.restore (L884-897) 后
+        //   显式 watchers (L278-287) 会 tabFiltersVersion.value++ 触发重算.
+        //   这里显式 bump 兜底, 确保 restore 后首次读 tabFilters 即拿到新值.
+        tabFiltersVersion.value++
       }
 
       // 返回 initialBoIds / initialRelationCodes 供调用方驱动树的重新挂载
@@ -875,7 +939,21 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // [E2E] dev 环境暴露给 e2e 测试
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart }
+    // [FIX 2026-09-06] 之前整对象替换会抹掉同轮 setup 里先注册的键
+    //   (如 MultiObjectManagementPage L354 的 __archPage.forceChartMode debug 钩子),
+    //   改为合并保留既有键, 后注册者仍可覆盖同名。
+    window.__archPage = { ...(window.__archPage || {}), objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart,
+      // [E2E 2026-08-08] 直接设置 scope (替代 enableChartButton 的 10 次轮询)
+      setScope: (domainId, versionId) => {
+        if (scopeIds?.domain) {
+          scopeIds.domain.selected = [domainId]
+          scopeIds.domain.effective = [domainId]
+        }
+        if (versionContext?.selectedVersionId) {
+          versionContext.selectedVersionId.value = versionId
+        }
+      }
+    }
   }
 
   return {
@@ -883,6 +961,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     activeTab,
     tabs,
     versionContext,
+    disableVersionContext,
     filterFlow,
     contextSource,
     scopeSource,
@@ -911,6 +990,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     handleExportSuccess,
     importContext,
     exportContext,
+    exportObjectTypes,
     objectTypeLabels,
     baseFilters,
     exportFilters

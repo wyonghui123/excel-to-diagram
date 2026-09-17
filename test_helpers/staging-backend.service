@@ -1,0 +1,23 @@
+[Unit]
+Description=Staging meta_backend (13011 - arch-data-manage-api)
+After=network-online.target staging-core.service
+Wants=staging-core.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/app/staging/deploy/current
+Environment="PORT=13011"
+Environment="SQLITE_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="ARCH_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="FLASK_DEBUG=true"
+Environment="FLASK_SECRET_KEY=staging-flask-key-2026-07-14-staging-secret"
+Environment="JWT_SECRET_KEY=staging-jwt-secret-2026-07-14-staging-jwt"
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/current/server.py
+Restart=always
+RestartSec=5
+User=root
+StandardOutput=append:/opt/app/staging/logs/backend.log
+StandardError=append:/opt/app/staging/logs/backend.log
+
+[Install]
+WantedBy=multi-user.target

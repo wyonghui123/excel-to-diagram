@@ -50,7 +50,7 @@ vi.mock('@/services/metaService', () => {
             { id: 'name', name: '名称', type: 'string' },
             { id: 'code', name: '编码', type: 'string' },
             { id: 'user_id', name: '用户', type: 'integer', value_help: { source: { type: 'bo', target_bo: 'user' } } },
-            { id: 'role_id', name: '角色', type: 'integer', value_help: { source: { type: 'bo', target_bo: 'role' }, behavior: {}, presentation: {} } },
+            { id: 'permission_set_id', name: '角色', type: 'integer', value_help: { source: { type: 'bo', target_bo: 'role' }, behavior: {}, presentation: {} } },
             { id: 'status', name: '状态', type: 'string', enum_values: [{ label: '启用', value: 'active' }] }
           ]
         }
@@ -91,7 +91,7 @@ describe('ObjectPage - FK字段识别与渲染', () => {
     type: 'standard',
     fieldGroups: [{
       title: '基础信息',
-      fields: ['name', 'code', 'user_id', 'role_id', 'status']
+      fields: ['name', 'code', 'user_id', 'permission_set_id', 'status']
     }]
   }]
 
@@ -213,7 +213,7 @@ describe('ObjectPage - FK字段识别与渲染', () => {
       const wrapper = createWrapper({
         fieldDefinitions: {
           user_id: { label: '用户', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'user' } } },
-          role_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } }
+          permission_set_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } }
         }
       })
 
@@ -221,7 +221,7 @@ describe('ObjectPage - FK字段识别与渲染', () => {
 
       const vm = wrapper.vm
       expect(vm.getFkTargetObjectType('user_id')).toBe('user')
-      expect(vm.getFkTargetObjectType('role_id')).toBe('role')
+      expect(vm.getFkTargetObjectType('permission_set_id')).toBe('role')
     })
 
     it('TC-OP-FK-009: 非FK字段返回null', async () => {
@@ -269,14 +269,14 @@ describe('ObjectPage - FK字段识别与渲染', () => {
     it('TC-OP-FK-012: 无display字段时返回原始值', async () => {
       const wrapper = createWrapper({
         formData: {
-          role_id: 5
+          permission_set_id: 5
         }
       })
 
       await nextTick()
 
       const vm = wrapper.vm
-      expect(vm.getFieldDisplayValue('role_id')).toBe(5)
+      expect(vm.getFieldDisplayValue('permission_set_id')).toBe(5)
     })
 
     it('TC-OP-FK-013: 值为null时返回空字符串', async () => {
@@ -423,13 +423,13 @@ describe('ObjectPage - FK字段识别与渲染', () => {
         editing: false,
         formData: {
           user_id: 1,
-          role_id: 2,
+          permission_set_id: 2,
           group_id: 3,
           name: 'Multi FK Test'
         },
         fieldDefinitions: {
           user_id: { label: '用户', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'user' } } },
-          role_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } },
+          permission_set_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } },
           group_id: { label: '用户组', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'user_group' } } },
           name: { label: '名称', type: 'text' }
         }
@@ -439,7 +439,7 @@ describe('ObjectPage - FK字段识别与渲染', () => {
 
       const vm = wrapper.vm
       expect(vm.isFkField('user_id')).toBe(true)
-      expect(vm.isFkField('role_id')).toBe(true)
+      expect(vm.isFkField('permission_set_id')).toBe(true)
       expect(vm.isFkField('group_id')).toBe(true)
       expect(vm.isFkField('name')).toBe(false)
     })
@@ -449,11 +449,11 @@ describe('ObjectPage - FK字段识别与渲染', () => {
         editing: false,
         formData: {
           user_id: 10,
-          role_id: 20
+          permission_set_id: 20
         },
         fieldDefinitions: {
           user_id: { label: '用户', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'user' } } },
-          role_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } }
+          permission_set_id: { label: '角色', type: 'integer', valueHelp: { source: { type: 'bo', target_bo: 'role' } } }
         }
       })
 

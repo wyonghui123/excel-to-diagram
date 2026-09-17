@@ -12,12 +12,14 @@ import logging
 from flask import Blueprint, request, jsonify
 
 from meta.core.permission_explainer import get_permission_explainer
+from meta.api._deprecation import v1_deprecated
 
 logger = logging.getLogger(__name__)
 
 permission_bp = Blueprint("permission_api", __name__)
 
 
+@v1_deprecated(migrated_to='/api/v2/permissions/explain')
 def explain_permission():
     """FR-012 权限决策解释（5 步 + SQL 预览）
 
@@ -77,6 +79,7 @@ def explain_permission():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/permissions/check')
 def check_permission():
     """快速权限检查（true/false）
 

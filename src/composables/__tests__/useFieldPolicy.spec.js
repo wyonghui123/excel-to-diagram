@@ -367,7 +367,7 @@ describe('useFieldPolicy', () => {
       const { isEditable } = useFieldPolicy(metaConfig)
 
       expect(isEditable('name', {}, 'locked')).toBe(false)
-      expect(isEditable('name', {}, 'fully_editable')).toBe(true)
+      expect(isEditable('name', {}, 'fullEditable')).toBe(true)
       expect(isEditable('name', { is_system: false }, 'extensible')).toBe(true)
       expect(isEditable('name', { is_system: true }, 'extensible')).toBe(false)
     })
@@ -501,11 +501,11 @@ describe('useFieldPolicy', () => {
       expect(evaluateMutability('name', {}, 'locked')).toBe(false)
     })
 
-    it('returns true for fully_editable', () => {
+    it('returns true for fullEditable', () => {
       const metaConfig = createMetaConfig([])
       const { evaluateMutability } = useFieldPolicy(metaConfig)
 
-      expect(evaluateMutability('name', {}, 'fully_editable')).toBe(true)
+      expect(evaluateMutability('name', {}, 'fullEditable')).toBe(true)
     })
 
     it('returns false for system fields in extensible mode', () => {
@@ -592,7 +592,7 @@ describe('useFieldPolicy', () => {
       const { getEditableFields } = useFieldPolicy(metaConfig)
 
       expect(getEditableFields(['name'], {}, 'locked')).toEqual([])
-      expect(getEditableFields(['name'], {}, 'fully_editable')).toEqual(['name'])
+      expect(getEditableFields(['name'], {}, 'fullEditable')).toEqual(['name'])
     })
   })
 
@@ -625,11 +625,11 @@ describe('useFieldPolicy', () => {
       expect(isRowEditable({ id: 1 }, 'locked')).toBe(false)
     })
 
-    it('returns true for fully_editable mutability', () => {
+    it('returns true for fullEditable mutability', () => {
       const metaConfig = createMetaConfig([])
       const { isRowEditable } = useFieldPolicy(metaConfig)
 
-      expect(isRowEditable({ id: 1 }, 'fully_editable')).toBe(true)
+      expect(isRowEditable({ id: 1 }, 'fullEditable')).toBe(true)
     })
 
     it('returns true for create action in extensible mode', () => {

@@ -16,7 +16,7 @@ except Exception as e:
     print("menus query error:", e)
 
 try:
-    c.execute("SELECT COUNT(*) FROM role_dimension_scopes")
+    c.execute("SELECT COUNT(*) FROM permission_set_dimension_scopes")
     print("role_dimension_scopes count:", c.fetchone()[0])
 except Exception as e:
     print("role_dimension_scopes error:", e)

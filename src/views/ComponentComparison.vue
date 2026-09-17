@@ -4740,6 +4740,13 @@ AppShell (全局容器)
 
 <script setup>
 import { ref, computed } from 'vue'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 // [DEV-ONLY] ComponentComparison 是组件对比页面, 故意用 ElMessage/ElMessageBox 演示 EP 原生效果
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, Close, Search, Edit, Delete, Plus } from '@element-plus/icons-vue'
@@ -4804,7 +4811,7 @@ function handleDemoTabClose(tabId) {
 }
 
 function handleDemoSearch(keyword) {
-  console.log('搜索:', keyword)
+  _dbgLog('搜索:', keyword)
 }
 
 // 页面组件模式演示数据
@@ -5225,11 +5232,11 @@ detailPage:
       component: "SystemManagement/ChangeHistory"`
 
 function handleEnumTabChange(tabKey) {
-  console.log('[ObjectPage Demo] Tab 切换:', tabKey)
+  _dbgLog('[ObjectPage Demo] Tab 切换:', tabKey)
 }
 
 function handleEnumFieldUpdate(updateData) {
-  console.log('[ObjectPage Demo] 字段更新:', updateData)
+  _dbgLog('[ObjectPage Demo] 字段更新:', updateData)
   Object.assign(enumFormData.value, updateData)
 }
 
@@ -5476,9 +5483,9 @@ function openDataScopeForMenu(menu) {
 }
 
 function handlePermissionTabChange(tabKey) {
-  console.log('[Permission Demo] Tab 切换:', tabKey)
+  _dbgLog('[Permission Demo] Tab 切换:', tabKey)
   if (tabKey === 'audit-log') {
-    console.log('[Permission Demo] 加载操作日志...')
+    _dbgLog('[Permission Demo] 加载操作日志...')
   }
 }
 

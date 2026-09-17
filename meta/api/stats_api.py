@@ -3,6 +3,7 @@ from meta.core.datasource import get_data_source
 from meta.services.auth_middleware import get_current_user
 import json
 from datetime import datetime, timedelta
+from meta.core.db_path import get_meta_db_path
 
 stats_bp = Blueprint('stats', __name__, url_prefix='/api/v1')
 
@@ -15,7 +16,7 @@ def _get_data_source():
     global _data_source
     if _data_source is None:
         import os
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     return _data_source
 
@@ -80,9 +81,9 @@ def _get_user_domain_scopes(ds, user):
             return None
         cursor = ds.execute(
             """SELECT rds.dimension_values
-               FROM role_dimension_scopes rds
-               JOIN group_roles gr ON rds.role_id = gr.role_id
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               FROM permission_set_dimension_scopes rds
+               JOIN org_permission_sets gr ON rds.permission_set_id = gr.permission_set_id
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
                WHERE ugm.user_id = ? AND rds.dimension_code = 'domain'""",
             [user_id]
         )

@@ -258,9 +258,9 @@ class TestAssociationAPI:
             pytest.skip("No group association")
 
         cursor.execute("""
-            SELECT r.* FROM roles r
-            INNER JOIN group_roles gr ON r.id = gr.role_id
-            INNER JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+            SELECT r.* FROM permission_sets r
+            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
+            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
             WHERE ugm.user_id = ?
         """, (user_id,))
         roles = cursor.fetchall()
@@ -273,17 +273,17 @@ class TestAssociationAPI:
         """TC-BE-006-23: 分配关联（通过用户组）"""
         cursor = db_connection.cursor()
 
-        cursor.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)",
+        cursor.execute("INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('test_assign_group', 'Test Assign Group'))
         group_id = cursor.lastrowid
-        cursor.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)",
+        cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
             (created_user['id'], group_id))
-        cursor.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)",
+        cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
             (group_id, created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
-            SELECT * FROM group_roles
+            SELECT * FROM org_permission_sets
             WHERE group_id = ? AND role_id = ?
         """, (group_id, created_role['id']))
         association = cursor.fetchone()
@@ -302,13 +302,13 @@ class TestAssociationAPI:
             pytest.skip("No group association")
 
         cursor.execute("""
-            DELETE FROM group_roles
+            DELETE FROM org_permission_sets
             WHERE group_id = ? AND role_id = ?
         """, (group_id, role_id))
         db_connection.commit()
 
         cursor.execute("""
-            SELECT * FROM group_roles
+            SELECT * FROM org_permission_sets
             WHERE group_id = ? AND role_id = ?
         """, (group_id, role_id))
         association = cursor.fetchone()

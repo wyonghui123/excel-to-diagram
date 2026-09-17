@@ -68,6 +68,8 @@ def value_help_to_dict(vh):
                     for cs in vh.behavior.cascade_select
                 ],
                 "enabled_condition": vh.behavior.enabled_condition,
+                # [FIX 2026-09-05 父组织树状 SearchHelp] 自引用层级防环标记
+                "exclude_self": vh.behavior.exclude_self,
             }
         if vh.presentation:
             result["presentation"] = {

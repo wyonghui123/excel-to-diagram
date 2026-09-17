@@ -49,6 +49,11 @@ export function useWorkspaceFilter(options = {}) {
   /**
    * 从 YAML hierarchies 配置获取父过滤字段映射
    * 例如: { domain: 'version_id', sub_domain: 'domain_id', ... }
+   *
+   * 优先级:
+   *   1. level.filter_param (来自 hierarchies.yaml，最权威)
+   *   2. level.foreign_key_field (来自 hierarchies.yaml)
+   *   3. children_field 正则推导 (向后兼容 fallback)
    */
   const parentFilterFieldMap = computed(() => {
     const meta = metaObject?.value
@@ -56,14 +61,16 @@ export function useWorkspaceFilter(options = {}) {
     const map = {}
 
     levels.forEach((level, index) => {
-      const objType = level.object_type
+      const objType = level.object_type || level.object
       if (index === 0) {
-        // 根级别使用 root_filter 字段
+        // 根级别: 使用 root_filter 或 version 上下文字段
         map[objType] = meta?.hierarchies?.[0]?.root_filter || 'version_id'
       } else {
-        // 非根级别使用 children_field 转换
-        // children_field: 'sub_domains' → filter_field: 'domain_id'
-        map[objType] = level.children_field?.replace(/_ids?$/, '_id') || `${objType}_id`
+        // 非根级别: 优先使用 YAML 声明的 filter_param / foreign_key_field
+        map[objType] = level.filter_param
+          || level.foreign_key_field
+          || level.children_field?.replace(/_ids?$/, '_id')
+          || `${objType}_id`
       }
     })
 

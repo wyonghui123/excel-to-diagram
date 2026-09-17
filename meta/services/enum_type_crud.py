@@ -21,16 +21,14 @@ from datetime import datetime
 from typing import Any, Dict
 
 from flask import g, request
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
 
 def _get_ds():
     from meta.core.datasource import get_data_source
-    db_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db',
-    )
+    db_path = get_meta_db_path()
     return get_data_source("sqlite", database=db_path)
 
 

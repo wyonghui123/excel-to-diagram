@@ -27,7 +27,15 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from meta.tests.test_utils import get_test_db_path
+
+
+def _fallback_db_path():
+    """手工执行且未传 db_path 时的兜底 (P0 迁移治理: 解除对 meta.tests 的依赖)"""
+    try:
+        from meta.core.db_path import get_meta_db_path
+    except ImportError:  # 远端树目录大小写差异兼容
+        from meta.Core.db_path import get_meta_db_path
+    return get_meta_db_path()
 
 
 def get_existing_columns(cursor):
@@ -36,9 +44,10 @@ def get_existing_columns(cursor):
     return {row[1] for row in cursor.fetchall()}
 
 
-def migrate():
-    """执行迁移"""
-    db_path = get_test_db_path()
+def migrate(db_path=None, skip_backup=False):
+    """执行迁移 (P0 迁移治理: 标准签名, runner 传 db_path; 手工执行可省略)"""
+    if not db_path:
+        db_path = _fallback_db_path()
     print(f"数据库路径: {db_path}")
 
     if not os.path.exists(db_path):
@@ -126,13 +135,14 @@ def migrate():
     return True
 
 
-def backfill_data():
+def backfill_data(db_path=None):
     """回填已有数据：根据 source_bo_id/target_bo_id 填充关联的 domain_id 等字段
 
     注意：此回填基于 BOs 的当前 domain 信息。如果 relationships 与 BOs 的版本不匹配，
     回填的 domain_id 可能指向不同版本的数据。这是数据一致性问题，需要在数据层面修复。
     """
-    db_path = get_test_db_path()
+    if not db_path:
+        db_path = _fallback_db_path()
     print(f"\n开始回填数据...")
 
     conn = sqlite3.connect(db_path)

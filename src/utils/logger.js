@@ -17,6 +17,10 @@
 const isDev = import.meta.env?.DEV ?? false
 const isProd = import.meta.env?.PROD ?? false
 
+// telemetry 端点（sendBeacon 不能用 httpClient，需要原始 URL）
+import { API_BASE } from '@/utils/api'
+const TELEMETRY_ERROR_URL = `${API_BASE}/telemetry/error`
+
 /**
  * 异步上报到后端 (fire-and-forget, 不阻塞调用方)
  * @param {'debug'|'info'|'warn'|'error'} level
@@ -39,7 +43,7 @@ function sendTelemetry(level, message, extra) {
     })
     // sendBeacon 上限 64KB
     if (payload.length < 65536) {
-      navigator.sendBeacon('/api/v1/telemetry/error', payload)
+      navigator.sendBeacon(TELEMETRY_ERROR_URL, payload)
     }
   } catch (_) {
     // 上报失败静默,不传播到调用方

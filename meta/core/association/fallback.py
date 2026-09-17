@@ -20,8 +20,8 @@ AUDIT_CHILD_CONFIG = {
     'business_objects': {
         'children': {'annotations': {'target_type': 'business_object', 'target_id': True}},
     },
-    'roles': {
-        'children': {'role_permissions': 'role_id'},
+    'permission_sets': {
+        'children': {'permission_set_permissions': 'permission_set_id'},
     },
 }
 
@@ -108,7 +108,7 @@ def fallback_query_associations(context: ActionContext, association_name: str) -
 
 def _execute_audit_query(data_source, where_clause, bind_params, order_by='created_at DESC'):
     """执行 audit_logs 查询并返回记录列表"""
-    sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY {order_by}"
+    sql = f"SELECT * FROM v_audit_all WHERE {where_clause} ORDER BY {order_by}"
     cursor = data_source.execute(sql, bind_params)
     columns = [desc[0] for desc in cursor.description]
     rows = cursor.fetchall()

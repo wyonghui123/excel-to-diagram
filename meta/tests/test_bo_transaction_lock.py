@@ -16,7 +16,10 @@ from meta.core.interceptors.lock_interceptor import LockInterceptor
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
 from meta.core.exceptions import ConcurrentModificationError
-import random
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_txn_commit_{random.randint(1000, 9999)}'  (8 处, 9999 范围冲突风险)
+# 新模式: UserFactory.build()  (PID + counter 保证唯一)
+from meta.tests.factories import UserFactory
 
 pytestmark = pytest.mark.integration
 
@@ -72,7 +75,8 @@ class TestTransactionControl:
 
     def test_01_transaction_commit(self, txn_bo_framework):
         bo_framework, data_source = txn_bo_framework
-        username = f'test_txn_commit_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -100,7 +104,8 @@ class TestTransactionControl:
 
     def test_02_transaction_rollback(self, txn_bo_framework):
         bo_framework, data_source = txn_bo_framework
-        username = f'test_txn_rollback_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0]
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -134,7 +139,8 @@ class TestTransactionControl:
 
     def test_03_nested_transaction(self, txn_bo_framework):
         bo_framework, data_source = txn_bo_framework
-        username = f'test_txn_nested_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0]
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -165,7 +171,8 @@ class TestLockInterceptor:
 
     def test_01_optimistic_lock_success(self, lock_bo_framework):
         bo_framework, data_source = lock_bo_framework
-        username = f'test_lock_opt_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0]
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -194,7 +201,8 @@ class TestLockInterceptor:
 
     def test_02_pessimistic_lock_acquire_release(self, lock_bo_framework):
         bo_framework, data_source = lock_bo_framework
-        username = f'test_lock_pess_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0]
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -265,7 +273,8 @@ class TestBOFrameworkIntegration:
 
     def test_01_full_crud_lifecycle(self, full_bo_framework):
         bo_framework, data_source = full_bo_framework
-        username = f'test_lifecycle_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0]
+        username = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 
@@ -300,8 +309,9 @@ class TestBOFrameworkIntegration:
 
     def test_02_concurrent_operations(self, full_bo_framework):
         bo_framework, data_source = full_bo_framework
-        username1 = f'test_concurrent_1_{random.randint(1000, 9999)}'
-        username2 = f'test_concurrent_2_{random.randint(1000, 9999)}'
+        # [FIX 2026-07-17 P0] 2 个并发 user, 需不同 username
+        username1 = UserFactory.build()['username']
+        username2 = UserFactory.build()['username']
 
         bo_framework.set_user_context(user_id=1, user_name='admin')
 

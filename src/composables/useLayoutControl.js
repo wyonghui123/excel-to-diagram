@@ -2,7 +2,7 @@ import { reactive, computed } from 'vue'
 
 const layoutControlConfig = reactive({
   enabled: false,
-  overallDirection: 'LR',
+  overallDirection: 'TB',
   groups: [],
   engine: 'dagre',
   preserveOrder: true

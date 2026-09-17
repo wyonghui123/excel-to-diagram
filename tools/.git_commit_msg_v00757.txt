@@ -1,0 +1,41 @@
+V007.57: log_service 改 nobody 用户运行, 规避阿里云 HIPS 杀进程
+
+背景:
+V007.55 + V007.56 已用 systemd Restart=always 守护 log_service (5s 自动重启),
+并定位 SIGKILL 元凶是阿里云 HIPS (AliHips, PID 878)。
+但 systemd 守护只是治标 — HIPS 还是每 5s 杀一次, 浪费资源 + 仍有日志噪音。
+
+修复:
+1. service 文件 User=root → User=nobody + Group=nobody
+2. ReadWritePaths=/opt/app/deployments/meta + /opt/app/staging/meta 等
+3. ProtectSystem=full (不是 strict)
+4. 远端 chown -R nobody:nobody 所有 DB 目录 + log 目录 + tools 目录
+5. chmod a+r log_service.py (root 启的 nobody 进程要能读)
+
+新增 8 工具:
+- deploy_log_service_systemd.py: 上传 service + daemon-reload + restart
+- chown_log_service_dirs.py: chown DB/log 目录给 nobody
+- chown_readable.py: chmod log_service.py 可读
+- fix_staging_chown.py: chown symlink 跟随
+- monitor_hips.py: 2 分钟 12 次监控 HIPS 是否还杀
+- verify_nobody.py: ps/端口 健康检查
+- find_log_service_paths.py: 探查 log_service.py 真实路径 (debug 用)
+- find_staging_log.py: 探查 staging 真实路径
+
+验证:
+- systemctl status: 2 active / 0 failed
+- --check-log-service: 2 alive / 0 dead
+- 进程 user: nobody (不是 root)
+- 端口 9101/19101 都返回 200
+- 2 分钟监控 12 次检查, 0 杀进程事件 (之前 root 时是 5s/次)
+- HIPS 不再杀 nobody 用户启的进程 (符合阿里云 HIPS 设计 — 默认只监控 root)
+
+同步文档:
+- AGENT_INFRA.md: §3 状态加 nobody
+- DEPLOYMENT_STANDARDS.md: §13.1 工具表加 3 行
+- DEPLOY_RHYTHM.md: §6.2 加 V007.57 完成
+- INCIDENT_RESPONSE_RUNBOOK.md: §9 加 nobody 验证 §9.0
+- STAGING_GUIDE.md: log_service 管理加 V007.57 nobody
+- DEPLOY_INFRASTRUCTURE.md: §1.3 工具表加 3 行 (#25-27)
+
+Refs: V007.55 systemd 守护, V007.56 HIPS 定位, V007.57 nobody 治本

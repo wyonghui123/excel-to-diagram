@@ -16,7 +16,7 @@ pytestmark = pytest.mark.unit
 
 
 class _MockEngine:
-    """模拟 ManagementDimensionEngine"""
+    """模拟 PermissionDimensionEngine"""
     def get_cache_stats(self):
         return {
             'cache_size': 50,

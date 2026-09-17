@@ -5,11 +5,11 @@ Intent Resolver — FR-017 BO 统一模型的 Intent 解析器
 【背景 2026-06-04】
 Spec v1.4 FR-017:
 - Intent = (BO_id, action_name, parameters) 二元组
-- role_intents 表存角色-Intent 权限
+- permission_set_intents 表存角色-Intent 权限
 - 5 步权限计算: Intent → Action perm → BO perm → 数据 → 条件
 
 【v1.4 实施】
-- RoleIntentDAO: role_intents 表 CRUD
+- RoleIntentDAO: permission_set_intents 表 CRUD
 - IntentPermissionChecker: 5 步权限检查
 - IntentMigrationHelper: menu.yaml 兼容迁移
 """
@@ -24,16 +24,14 @@ from meta.core.feature_flags import is_enabled
 from meta.core.runtime_dimension_resolver import get_runtime_dimension_resolver
 from meta.core.bo_schema_loader import get_bo_schema_loader
 from meta.core.scope_evaluator import get_scope_evaluator
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
 
 def _get_db_path() -> str:
     """获取数据库路径"""
-    current = os.path.abspath(__file__)
-    for _ in range(2):
-        current = os.path.dirname(current)
-    return os.path.join(current, 'architecture.db')
+    return get_meta_db_path()
 
 
 # ============================================================
@@ -41,13 +39,26 @@ def _get_db_path() -> str:
 # ============================================================
 
 class RoleIntentDAO:
-    """role_intents 表 DAO（FR-017 AC-4）
+    """permission_set_intents 表 DAO（FR-017 AC-4）
 
-    替代 role_actions + role_menu_permissions。
+    替代 role_actions + permission_set_menu_permissions。
+
+    [P1-B4 修复 2026-07-26] 改用与 EffectiveIntentDAO 一致的直连模式
+    背景:
+      - 旧实现用 safe_connect_for_write, 但该函数的 tx_state 探测在新连接上
+        总是返回 NONE, 导致 ConnectionRefusedError → DAO 静默返回 False
+      - API 未检查返回值 → 返回 success=True 但实际未写入
+      - EffectiveIntentDAO 已用 sqlite3.connect() 直连模式, 此处对齐
     """
 
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or _get_db_path()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """获取数据库连接 (与 EffectiveIntentDAO 一致)"""
+        conn = sqlite3.connect(self._db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     @staticmethod
     def make_parameters_hash(parameters: Optional[Dict[str, Any]]) -> str:
@@ -58,7 +69,7 @@ class RoleIntentDAO:
 
     def grant(
         self,
-        role_id: int,
+        permission_set_id: int,
         bo_id: str,
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
@@ -71,15 +82,13 @@ class RoleIntentDAO:
         """
         params_hash = self.make_parameters_hash(parameters)
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO role_intents
-                (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-            """, (role_id, bo_id, action_name, params_hash, source))
-            conn.commit()
-            conn.close()
+            with self._get_conn() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO permission_set_intents
+                    (permission_set_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                """, (permission_set_id, bo_id, action_name, params_hash, source))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to grant intent: {e}")
@@ -87,7 +96,7 @@ class RoleIntentDAO:
 
     def deny(
         self,
-        role_id: int,
+        permission_set_id: int,
         bo_id: str,
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
@@ -95,15 +104,13 @@ class RoleIntentDAO:
         """拒绝 Intent 权限（grant=0）"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO role_intents
-                (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
-                VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
-            """, (role_id, bo_id, action_name, params_hash))
-            conn.commit()
-            conn.close()
+            with self._get_conn() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO permission_set_intents
+                    (permission_set_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
+                    VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
+                """, (permission_set_id, bo_id, action_name, params_hash))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to deny intent: {e}")
@@ -111,7 +118,7 @@ class RoleIntentDAO:
 
     def revoke(
         self,
-        role_id: int,
+        permission_set_id: int,
         bo_id: str,
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
@@ -119,38 +126,33 @@ class RoleIntentDAO:
         """撤销 Intent 权限"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM role_intents
-                WHERE role_id = ? AND bo_id = ? AND action_name = ?
-                  AND parameters_hash = ?
-            """, (role_id, bo_id, action_name, params_hash))
-            conn.commit()
-            conn.close()
+            with self._get_conn() as conn:
+                conn.execute("""
+                    DELETE FROM permission_set_intents
+                    WHERE permission_set_id = ? AND bo_id = ? AND action_name = ?
+                      AND parameters_hash = ?
+                """, (permission_set_id, bo_id, action_name, params_hash))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to revoke intent: {e}")
             return False
 
-    def list_for_role(self, role_id: int) -> List[Dict[str, Any]]:
+    def list_for_role(self, permission_set_id: int) -> List[Dict[str, Any]]:
         """列出角色的所有 Intent 权限"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, role_id, bo_id, action_name, parameters_hash,
-                       granted, source, created_at, updated_at
-                FROM role_intents
-                WHERE role_id = ?
-                ORDER BY bo_id, action_name
-            """, (role_id,))
-            rows = cursor.fetchall()
-            conn.close()
+            with self._get_conn() as conn:
+                rows = conn.execute("""
+                    SELECT id, permission_set_id, bo_id, action_name, parameters_hash,
+                           granted, source, created_at, updated_at
+                    FROM permission_set_intents
+                    WHERE permission_set_id = ?
+                    ORDER BY bo_id, action_name
+                """, (permission_set_id,)).fetchall()
             return [
                 {
                     'id': r[0],
-                    'role_id': r[1],
+                    'permission_set_id': r[1],
                     'bo_id': r[2],
                     'action_name': r[3],
                     'parameters_hash': r[4],
@@ -177,17 +179,15 @@ class RoleIntentDAO:
             return False
         params_hash = self.make_parameters_hash(parameters)
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            placeholders = ','.join('?' * len(role_ids))
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM role_intents
-                WHERE role_id IN ({placeholders})
-                  AND bo_id = ? AND action_name = ?
-                  AND parameters_hash = ? AND granted = 1
-            """, (*role_ids, bo_id, action_name, params_hash))
-            count = cursor.fetchone()[0]
-            conn.close()
+            with self._get_conn() as conn:
+                placeholders = ','.join('?' * len(role_ids))
+                cursor = conn.execute(f"""
+                    SELECT COUNT(*) FROM permission_set_intents
+                    WHERE permission_set_id IN ({placeholders})
+                      AND bo_id = ? AND action_name = ?
+                      AND parameters_hash = ? AND granted = 1
+                """, (*role_ids, bo_id, action_name, params_hash))
+                count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to check intent: {e}")
@@ -202,7 +202,7 @@ class IntentPermissionChecker:
     """Intent 权限检查器（FR-017 AC-5）
 
     5 步检查:
-    1. Intent 权限 (role_intents)
+    1. Intent 权限 (permission_set_intents)
     2. Action required_permissions
     3. BO 权限 (Entity BO CRUD)
     4. 数据权限 (维度范围 + Owner)
@@ -242,17 +242,17 @@ class IntentPermissionChecker:
         all_passed = True
 
         # Step 1: Intent 权限
-        user_roles = self._resolver._get_user_roles(user_id)
+        user_permission_sets = self._resolver._get_user_permission_sets(user_id)
         intent_granted = self._dao.has_intent(
-            role_ids=user_roles, bo_id=bo_id, action_name=action_name,
+            role_ids=user_permission_sets, bo_id=bo_id, action_name=action_name,
             parameters=parameters,
         )
         steps.append({
             'step': 1,
             'name': 'Intent 权限',
             'passed': intent_granted,
-            'details': f'role_intents: {bo_id}.{action_name} granted={intent_granted}',
-            'role_ids': user_roles,
+            'details': f'permission_set_intents: {bo_id}.{action_name} granted={intent_granted}',
+            'role_ids': user_permission_sets,
         })
         all_passed = all_passed and intent_granted
 
@@ -262,7 +262,7 @@ class IntentPermissionChecker:
         step2_passed = True
         for perm in required_perms:
             # 检查用户角色是否有 perm 的权限
-            if not self._has_static_permission(user_roles, perm):
+            if not self._has_static_permission(user_permission_sets, perm):
                 step2_passed = False
                 break
         steps.append({
@@ -275,15 +275,15 @@ class IntentPermissionChecker:
         all_passed = all_passed and step2_passed
 
         # Step 3: BO 权限（Entity BO 自动 CRUD）
-        # P0 修复：Intent grant 隐含 BO:action 权限（避免重复 grant role_permissions）
+        # P0 修复：Intent grant 隐含 BO:action 权限（避免重复 grant permission_set_permissions）
         bo_type = self._schema_loader.get_bo_type(bo_id)
         step3_passed = self._dao.has_intent(
-            role_ids=user_roles, bo_id=bo_id, action_name=action_name,
+            role_ids=user_permission_sets, bo_id=bo_id, action_name=action_name,
         )
         if not step3_passed and bo_type == 'entity':
-            # fallback: 查 role_permissions
+            # fallback: 查 permission_set_permissions
             bo_perm = f'{bo_id}:{action_name}'
-            step3_passed = self._has_static_permission(user_roles, bo_perm)
+            step3_passed = self._has_static_permission(user_permission_sets, bo_perm)
         steps.append({
             'step': 3,
             'name': 'BO 权限',
@@ -296,7 +296,7 @@ class IntentPermissionChecker:
         data_conditions: List[Dict[str, Any]] = []
         if is_enabled('ENABLE_RUNTIME_RESOLUTION'):
             data_conditions = self._resolver.resolve(
-                user_id=user_id, bo_id=bo_id, role_ids=user_roles,
+                user_id=user_id, bo_id=bo_id, role_ids=user_permission_sets,
             )
         owner_cond = None
         if is_enabled('ENABLE_OWNER_FILTER'):
@@ -417,29 +417,29 @@ class IntentPermissionChecker:
     def _has_static_permission(
         self, role_ids: List[int], perm_code: str,
     ) -> bool:
-        """检查角色是否有静态权限（P0 修复：真正查询 role_permissions 表）
+        """检查角色是否有静态权限（P0 修复：真正查询 permission_set_permissions 表）
 
         查询逻辑：
-        role_permissions JOIN permissions
-        WHERE role_id IN (...) AND permissions.code = ? AND granted = 1
+        permission_set_permissions JOIN permissions
+        WHERE permission_set_id IN (...) AND permissions.code = ? AND granted = 1
         """
         if not role_ids or not perm_code:
             return False
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            placeholders = ','.join('?' * len(role_ids))
-            cursor.execute(
-                f"""
-                SELECT COUNT(*) FROM role_permissions rp
-                JOIN permissions p ON rp.permission_id = p.id
-                WHERE rp.role_id IN ({placeholders})
-                  AND p.code = ? AND rp.granted = 1
-                """,
-                (*role_ids, perm_code),
-            )
-            count = cursor.fetchone()[0]
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(role_ids))
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*) FROM permission_set_permissions rp
+                    JOIN permissions p ON rp.permission_id = p.id
+                    WHERE rp.permission_set_id IN ({placeholders})
+                      AND p.code = ? AND rp.granted = 1
+                    """,
+                    (*role_ids, perm_code),
+                )
+                count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:  # noqa: BLE001
             logger.error(
@@ -456,7 +456,7 @@ class MenuIntentMigrationHelper:
     """menu.yaml 兼容迁移帮助器（FR-017 AC-3）
 
     扫描 menu.yaml 的 bo_bindings + required_permissions，
-    生成默认 Intent 并写入 role_intents。
+    生成默认 Intent 并写入 permission_set_intents。
     """
 
     def __init__(self):

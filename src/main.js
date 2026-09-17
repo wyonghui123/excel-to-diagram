@@ -4,6 +4,8 @@ import { createPersistedState } from 'pinia-plugin-persistedstate'
 import router from './router'
 import { setOnUnauthorized } from './utils/api'
 import { useAuthStore } from './stores/authStore'
+// [P1-A 2026-07-25] 启动时预加载审计日志 action 元数据 (单一事实源: 后端 enum_values)
+import { useAuditMetaStore } from './stores/auditMetaStore'
 import { logger } from './utils/logger'
 
 // [FR-004] 移除 Element Plus 全量注册,改用 unplugin-vue-components 按需导入
@@ -39,6 +41,34 @@ pinia.use(createPersistedState({
 
 app.use(pinia)
 app.use(router)
+
+// [DBG 2026-09-04] 浏览器 console 全局黑名单 (logger.js [DEBUG] [httpClient] 应用层高频 dedup
+//   在产线刷屏 ~15 条/会话). 仅在产线 (无 ?mode=debug) 时按首参前缀静默, debug 模式透传.
+//   与 _dbgLog/_dbgTrace 一致: 产线静默, 排查者调 window.__consoleBuffer.getLogs() 取全量.
+//   同时代理 console.debug/info — logger.js 调 console.debug, 单代理 console.log 漏掉.
+;(function installConsoleProxy() {
+  const isDebug = new URLSearchParams(window.location.search).get('mode') === 'debug'
+  // 黑名单: 首参文本前缀命中则 buffer-only (产线); debug 模式透传
+  const QUIET_PREFIXES = ['[DEBUG] [httpClient]', '[DEBUG] [Router]']
+  const buffer = []
+  const MAX = 300
+  window.__consoleBuffer = { getLogs: (n = 80) => buffer.slice(-n).reverse() }
+  const wrap = (orig) => function(...args) {
+    const first = args[0]
+    const isQuiet = typeof first === 'string' && QUIET_PREFIXES.some(p => first.startsWith(p))
+    if (isDebug || !isQuiet) {
+      orig.apply(console, args)
+    } else {
+      // 静默: 仅入 buffer (供后续排查)
+      const text = args.map(a => typeof a === 'string' ? a : (() => { try { return JSON.stringify(a) } catch (e) { return String(a) } })()).join(' ')
+      buffer.push({ time: Date.now(), text })
+      if (buffer.length > MAX) buffer.splice(0, buffer.length - MAX)
+    }
+  }
+  console.log = wrap(console.log)
+  console.debug = wrap(console.debug)
+  console.info = wrap(console.info)
+})()
 
 // [FR-015] setOnUnauthorized 提前注册 (在任何 HTTP 请求之前)
 //   - 旧位置在 L79,太晚: loadFromCookie 等初始化请求可能触发 401 但回调未就绪
@@ -95,4 +125,14 @@ app.provide('elementPlusLocale', epLocale)
 const authStore = useAuthStore()
 authStore.loadFromCookie('restore').then(() => {
   app.mount('#app')
+  // [P1-A 2026-07-25] 应用启动后异步预加载审计日志 action 元数据
+  //   - 不阻塞 mount, 失败静默降级到本地 ACTION_LABELS fallback
+  //   - 后续 audit log 页面打开时可直接读 store, 无需等待
+  //   - 仅登录后才拉取 (避免未登录用户无意义请求 /audit/meta/actions 401)
+  if (authStore.isLoggedIn) {
+    const auditMetaStore = useAuditMetaStore()
+    auditMetaStore.loadActions().catch(e => {
+      logger.warn('[main] auditMetaStore.loadActions failed (will use local fallback):', e)
+    })
+  }
 })

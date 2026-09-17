@@ -46,7 +46,7 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS roles (
+        CREATE TABLE IF NOT EXISTS permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -68,7 +68,7 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS role_data_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
@@ -78,7 +78,7 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS group_data_permissions (
+        CREATE TABLE IF NOT EXISTS org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
@@ -88,14 +88,14 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS user_groups (
+        CREATE TABLE IF NOT EXISTS orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS user_group_members (
+        CREATE TABLE IF NOT EXISTS org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
@@ -104,7 +104,7 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS user_roles (
+        CREATE TABLE IF NOT EXISTS user_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -113,7 +113,7 @@ def create_test_db():
     """)
 
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS group_roles (
+        CREATE TABLE IF NOT EXISTS org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -201,15 +201,15 @@ def create_test_db():
 
     password_hash = hashlib.sha256('test123'.encode('utf-8')).hexdigest()
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, roles) VALUES (?, ?, ?, ?)",
+        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
         ['admin', password_hash, 'Admin User', '["admin"]']
     )
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, roles) VALUES (?, ?, ?, ?)",
+        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
         ['demo', password_hash, 'Demo User', '["viewer"]']
     )
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, roles) VALUES (?, ?, ?, ?)",
+        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
         ['noperm', password_hash, 'NoPerm User', '[]']
     )
 

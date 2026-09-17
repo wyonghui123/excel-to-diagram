@@ -25,6 +25,13 @@ import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services
 import { saveAllDrafts as _saveAllDraftsSvc, getDraftCreates as _getDraftCreatesSvc } from '@/services/draftPersistService'
 import { useBoAction } from '@/composables/useBoAction'
 import { t as i18nT } from '@/i18n'
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. useMetaList 是高频调用 composable, 之前 refresh × 8 + stale × 7/会话
+//   刷屏. 产线静默, 排查者调 window.__consoleBuffer.getLogs() 即可取全量.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+// [P0-4 2026-07-25] 接入 authStore.hasPermission, 替代 _checkPermission 占位实现
+import { useAuthStore } from '@/stores/authStore'
 import {
   isInternalProp,
   transformFilters,
@@ -85,6 +92,17 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     ? objectTypeOrRef
     : shallowRef(objectTypeOrRef)
 
+  // [P0-4 2026-07-25] 接入 authStore 权限检查 (替代 _checkPermission 占位实现)
+  //   - 必须在 setup 函数内调用 useAuthStore()
+  //   - 失败时降级为 false (无权限) 以保证安全
+  let _authStore = null
+  try {
+    _authStore = useAuthStore()
+  } catch (_e) {
+    // 在非 setup 上下文调用时, 降级为 null, _checkPermission 退回占位行为
+    console.warn('[useMetaList] useAuthStore() 调用失败, _checkPermission 将退回占位行为:', _e?.message)
+  }
+
   // [NFR-004] 请求竞态安全：版本号保护
   let _initVersion = 0
   let _loadVersion = 0
@@ -117,7 +135,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     // - 'always': 始终显示
     // - 'manual': 手动控制（需要用户点击按钮显示）
     filterDisplayMode: options.filterDisplayMode || 'hover',
-    // 行可维护性：'locked' | 'extensible' | 'fully_editable' | null
+    // 行可维护性：'locked' | 'extensible' | 'fullEditable' | null
     rowMutability: options.rowMutability || null,
     // 自定义数据获取器 (params) => Promise<{success, data}>
     fetcher: options.fetcher || null,
@@ -484,7 +502,9 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         : boService.query(objectTypeRef.value, params))
       // [NFR-004] 竞态检查：如果期间又触发了新的 loadList，丢弃本次结果
       if (version !== _loadVersion) {
-        console.warn(`[useMetaList] loadList stale result discarded for ${objectTypeRef.value}`)
+        // [FIX 2026-09-04] stale 是设计内行为 (NFR-004 竞态守卫), 切 tab / 高频筛选时
+        //   频繁触发, 产线刷屏 ~7 条/会话. 改为 _dbgTrace (debug 模式可看, 产线静默).
+        _dbgTrace(`[useMetaList] loadList stale result discarded for ${objectTypeRef.value}`)
         return
       }
       if (result?.data) {
@@ -689,11 +709,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    */
   function handleSelectionChange(rows) {
     selectedRows.value = rows
-    
+
     const rowKey = config.rowKey || 'id'
     const currentPageIds = new Set(data.value.map(row => row[rowKey]))
     const newSet = new Set([...selectedIds.value].filter(id => !currentPageIds.has(id)))
-    
+
     rows.forEach(row => {
       if (row[rowKey]) {
         newSet.add(row[rowKey])
@@ -1007,7 +1027,9 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    * 刷新当前列表（保持当前页和过滤条件）
    */
   async function refresh() {
-    console.log(`[useMetaList] refresh: objectType=${objectTypeRef.value}`)
+    // [FIX 2026-09-04] refresh 是用户主动点击, 但每次都 console.log ~8 条/会话刷屏.
+    //   改为 _dbgLog (debug 模式可看, 产线静默).
+    _dbgLog(`[useMetaList] refresh: objectType=${objectTypeRef.value}`)
     boService.clearCache(objectTypeRef.value)
     await loadList()
   }
@@ -1502,17 +1524,32 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   }
 
   /**
-   * 权限检查（简化版，后续集成权限系统）
+   * 权限检查 (接入 authStore.hasPermission)
    * @private
-   * @param {Object} action - 操作配置
+   * @param {Object} action - 操作配置 (含 .permission 权限字符串, 如 'user:delete')
    * @returns {Boolean} 是否有权限
+   *
+   * [P0-4 2026-07-25] 替代占位实现, 接入 authStore.hasPermission
+   *   - 优先级 1: action 无配置 permission → 视为公开操作, 返回 true
+   *   - 优先级 2: authStore 已加载 → 调用 authStore.hasPermission(action.permission)
+   *   - 优先级 3: authStore 未加载 (非 setup 上下文) → 降级返回 true (兼容旧测试)
+   *
+   * 安全策略:
+   *   - 后端 API 仍会做权威校验, 这里只是 UI 显隐控制
+   *   - 即使这里返回 true, 后端拒绝时仍会 403
    */
   function _checkPermission(action) {
     if (!action.permission) return true
-    
-    // TODO: 集成实际的权限检查系统
-    // 例如：return hasPermission(action.permission)
-    return true  // 暂时返回 true
+    if (!_authStore) {
+      // 降级: 非 setup 上下文 (如某些单元测试), 保持旧行为
+      return true
+    }
+    // 支持权限字符串或数组 (数组时任意一项满足即可)
+    const perm = action.permission
+    if (Array.isArray(perm)) {
+      return perm.some(p => _authStore.hasPermission(p))
+    }
+    return _authStore.hasPermission(perm)
   }
 
   /**

@@ -75,8 +75,14 @@ export default [
   {
     path: '/system/archdata',
     name: 'ArchDataManagement',
-    component: () => import('@/views/SystemManagement/RelationshipManagement.vue'),
+    component: () => import('@/views/SystemManagement/ArchDataManagement.vue'),
     meta: { title: '架构数据管理', requiresAuth: true }
+  },
+  {
+    path: '/org-management',
+    name: 'OrgManagement',
+    component: () => import('@/views/SystemManagement/OrgManagement.vue'),
+    meta: { title: '组织管理', requiresAuth: true }
   },
   {
     path: '/account',

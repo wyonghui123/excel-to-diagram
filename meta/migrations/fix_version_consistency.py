@@ -21,12 +21,26 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from meta.tests.test_utils import get_test_db_path
 
 
-def fix_version_consistency():
+def _fallback_db_path():
+    """手工执行且未传 db_path 时的兜底 (P0 迁移治理: 解除对 meta.tests 的依赖)"""
+    try:
+        from meta.core.db_path import get_meta_db_path
+    except ImportError:  # 远端树目录大小写差异兼容
+        from meta.Core.db_path import get_meta_db_path
+    return get_meta_db_path()
+
+
+def migrate(db_path=None, skip_backup=False):
+    """runner 标准入口 (P0 迁移治理)"""
+    return fix_version_consistency(db_path)
+
+
+def fix_version_consistency(db_path=None):
     """修复 relationships 的版本一致性问题"""
-    db_path = get_test_db_path()
+    if not db_path:
+        db_path = _fallback_db_path()
     print(f"数据库路径: {db_path}")
 
     if not os.path.exists(db_path):

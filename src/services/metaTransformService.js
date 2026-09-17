@@ -9,6 +9,8 @@
 
 import { normalizeFilterType, inferFilterType } from './filterService'
 import { sortColumnsByDefaultOrder } from './columnOrderService'
+// [P1-B 2026-07-25] 接入 ActionPolicy, 替代 filterRowActions 中硬编码状态判断
+import { canPerformAction as _canPerformActionByPolicy } from './actionPolicyService'
 
 /**
  * 转换列定义为 Element Plus el-table-column 格式
@@ -79,7 +81,11 @@ export function transformColumns(yamlColumns, options = {}) {
       maxTags: col.maxTags || 2,
 
       businessKey: col.business_key || col.businessKey || false,
-      valueHelpConfig: col.value_help_config || col.valueHelpConfig || null,
+      // [BUG-V036 2026-06-29] YAML column 配置使用 `value_help` (snake_case),
+      //   后端 API 可能返回 `value_help_config`, 前端转换后是 `valueHelpConfig`。
+      //   三种命名都要支持, 否则 YAML 中配置的 FK 列头过滤和 FK link 都会丢失。
+      //   与 filterService.js L95 的逻辑保持一致。
+      valueHelpConfig: col.value_help_config || col.valueHelpConfig || col.value_help || null,
 
       editable: col.editable !== false,
       immutable: col.immutable === true,
@@ -434,7 +440,7 @@ export function getDefaultOrdering(metaConfig) {
  * @param {Array} rowActions - 行操作配置数组
  * @param {Object} row - 当前行数据
  * @param {string} objectType - 对象类型
- * @param {string|null} rowMutability - 行可维护性 ('locked'|'extensible'|'fully_editable'|null)
+ * @param {string|null} rowMutability - 行可维护性 ('locked'|'extensible'|'fullEditable'|null)
  * @param {Function} checkPermission - 权限检查函数
  * @param {Function} evaluateCondition - 条件评估函数
  * @returns {Array} 过滤后的行操作
@@ -444,37 +450,11 @@ export function filterRowActions(rowActions, row, objectType, rowMutability, che
     if (checkPermission && !checkPermission(action)) return false
     if (evaluateCondition && !evaluateCondition(action.condition, row)) return false
 
-    const actionKey = (action.key || '').toLowerCase()
-
-    // [FIX 2026-06-13] 未保存的新行 (_isNew=true / __new_xxx)
-    //   - 隐藏单行 edit/update (新行的编辑由 inline cell 处理)
-    //   - 隐藏单行 delete (新行的"删除"应该走本地 removeNewRow, 不调后端)
-    if (row && (row._isNew === true || (typeof row.id === 'string' && row.id.startsWith('__new_')))) {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (objectType === 'enum_type' && row?.category === 'system') {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (rowMutability === 'locked') {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (rowMutability === 'extensible') {
-      if (actionKey === 'edit' || actionKey === 'update') {
-        return false
-      }
-      if (actionKey === 'delete') {
-        return row?.is_system !== true && row?.system_value !== true
-      }
-    }
+    // [P1-B 2026-07-25] 行级状态规则统一委托给 actionPolicyService
+    //   替代原散落的 _isNew / category=system / rowMutability 硬编码块
+    //   规则源: services/actionPolicyService.js#canPerformAction
+    const policy = _canPerformActionByPolicy(action, row, { objectType, rowMutability })
+    if (!policy.allowed) return false
 
     return true
   })

@@ -28,6 +28,7 @@ import re
 import signal
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -278,10 +279,7 @@ def execute_subflow(
         try:
             from meta.core.datasource import get_data_source
             import os
-            db_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'architecture.db',
-            )
+            db_path = get_meta_db_path()
             ds = get_data_source("sqlite", database=db_path)
             transaction_context = ds
             ds.execute("BEGIN IMMEDIATE TRANSACTION")
@@ -672,10 +670,7 @@ def _write_audit(name, atomic, total, succeeded, failed, skipped, overall, user_
         from meta.core.datasource import get_data_source
         from meta.core.action_executor import AuditLogger
         import json as _json
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'architecture.db',
-        )
+        db_path = get_meta_db_path()
         ds = get_data_source('sqlite', database=db_path)
         audit_logger = AuditLogger(ds)
         audit_logger.log(

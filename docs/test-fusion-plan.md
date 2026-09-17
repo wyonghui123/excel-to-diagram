@@ -68,7 +68,7 @@
 | `test_value_help_validation.py` | **M8 VP-1** | **已有** |
 | `test_aggregate_manager.py` | **M8 VP-3** | **已有** |
 | `test_aggregate_refresh_integration.py` | **M8 VP-3** | **已有** |
-| `test_management_dimension_api.py` | M3 | 已有 |
+| `test_permission_dimension_api.py` | M3 | 已有 |
 | `test_audit_interceptor_unified.py` | M5 | 已有（9 failed） |
 | `test_unified_meta_model.py` | M1 | 已有 |
 | `test_role_permission_apis.py` | M6.5 | 已有 |

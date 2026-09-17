@@ -10,6 +10,7 @@ from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.schema_generator import SchemaGenerator
 from meta.core.table_name_validator import validate_table_name
+from meta.core.db_path import get_meta_db_path
 
 schema_bp = Blueprint('schema', __name__, url_prefix='/api/v1/schema')
 
@@ -17,7 +18,7 @@ schema_bp = Blueprint('schema', __name__, url_prefix='/api/v1/schema')
 def _get_data_source():
     """获取数据源"""
     import os
-    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+    db_path = get_meta_db_path()
     return get_data_source("sqlite", database=db_path)
 
 

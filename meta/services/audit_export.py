@@ -6,14 +6,44 @@ BO 业务 Action: audit.export (v3.1 文件流)
 管理员导出审计日志为 xlsx/csv 文件。
 直接走 SQL 查询 + openpyxl/csv 写文件 (不走 audit_service.export_audit_log, 那个有 r.id 属性 bug)。
 返回 ActionResult 含 file_data (v3.1 新增文件流支持)。
+
+[R018 FIX] 增强:
+  1. SQL 增 trace_id, transaction_id, agent_id, agent_session_id, tool_call_id,
+     user_agent, outcome, cascade_root_id, cascade_root_action 8 列
+  2. 解析 FK 结构化 JSON (new_value/old_value) 提取 target_display 给运维人员看
 """
 import csv
+import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_parse_target_display(value: Any) -> Optional[str]:
+    """
+    [R018] 从 FK 结构化 JSON 提取 target_display 给人看
+    例如: '{"target_type":"versions","target_id":764,"target_display":"v1.0"}' -> 'v1.0'
+    若不是 JSON 或无 display, 返回 None (调用方决定是否落回原值)
+    """
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not (s.startswith('{') and s.endswith('}')):
+        return None
+    try:
+        obj = json.loads(s)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    display = obj.get('target_display')
+    if display:
+        return str(display)
+    return None
 
 
 def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'ActionResult':
@@ -34,10 +64,7 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
 
     # 引入 db
     import os
-    db_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db',
-    )
+    db_path = get_meta_db_path()
 
     # 构造 SQL 条件
     conditions = []
@@ -63,22 +90,38 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
     if format_type not in ('xlsx', 'csv'):
         format_type = 'xlsx'
 
+    # [R018 FIX] 增加 8 列: trace_id, transaction_id, agent_id, agent_session_id,
+    # tool_call_id, user_agent, outcome, cascade_root_id, cascade_root_action
+    # 增加 2 列辅助: target_display_new, target_display_old (从 FK JSON 提取)
+    HEADERS = [
+        'id', 'object_type', 'object_id', 'action', 'field_name',
+        'old_value', 'new_value', 'target_display_old', 'target_display_new',
+        'user_id', 'user_name', 'ip_address', 'user_agent',
+        'trace_id', 'transaction_id',
+        'agent_id', 'agent_session_id', 'tool_call_id', 'agent_reasoning',
+        'outcome', 'cascade_root_id', 'cascade_root_action',
+        'log_category', 'log_level',
+        'created_at',
+    ]
+
     # 查数据
     try:
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
-                       user_id, user_name, ip_address, created_at
-                FROM audit_logs
-                WHERE {where_clause}
-                ORDER BY created_at DESC
-                LIMIT 10000""",
-            sql_params
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        with safe_connect_for_read(db_path) as conn:
+            cursor = conn.execute(
+                f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
+                           user_id, user_name, ip_address, user_agent, created_at,
+                           trace_id, transaction_id,
+                           agent_id, agent_session_id, tool_call_id, agent_reasoning,
+                           outcome, cascade_root_id, cascade_root_action,
+                           log_category, log_level
+                    FROM v_audit_all
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT 10000""",
+                sql_params
+            )
+            rows = cursor.fetchall()
     except Exception as e:
         logger.exception(f"[audit.export] query failed: {e}")
         return ActionResult(success=False, data=None, message=f'查询失败: {e}')
@@ -97,21 +140,30 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
     file_name = f"audit_log_{timestamp}.{format_type}"
     file_path = os.path.join(output_dir, file_name)
 
+    def _row_to_record(r):
+        """[R018] 把 row dict 转成与 HEADERS 对齐的列表, 同时附加 target_display 解析"""
+        old_val = r['old_value']
+        new_val = r['new_value']
+        target_display_old = _safe_parse_target_display(old_val)
+        target_display_new = _safe_parse_target_display(new_val)
+        return [
+            r['id'], r['object_type'], r['object_id'], r['action'], r['field_name'],
+            old_val, new_val, target_display_old, target_display_new,
+            r['user_id'], r['user_name'], r['ip_address'], r['user_agent'],
+            r['trace_id'], r['transaction_id'],
+            r['agent_id'], r['agent_session_id'], r['tool_call_id'], r['agent_reasoning'],
+            r['outcome'], r['cascade_root_id'], r['cascade_root_action'],
+            r['log_category'], r['log_level'],
+            r['created_at'],
+        ]
+
     try:
         if format_type == 'csv':
             with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    'id', 'object_type', 'object_id', 'action', 'field_name',
-                    'old_value', 'new_value', 'user_id', 'user_name',
-                    'ip_address', 'created_at',
-                ])
+                writer.writerow(HEADERS)
                 for r in rows:
-                    writer.writerow([
-                        r['id'], r['object_type'], r['object_id'], r['action'],
-                        r['field_name'], r['old_value'], r['new_value'],
-                        r['user_id'], r['user_name'], r['ip_address'], r['created_at'],
-                    ])
+                    writer.writerow(_row_to_record(r))
         else:  # xlsx
             try:
                 from openpyxl import Workbook
@@ -122,32 +174,16 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
                 file_path = os.path.join(output_dir, file_name)
                 with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.writer(f)
-                    writer.writerow([
-                        'id', 'object_type', 'object_id', 'action', 'field_name',
-                        'old_value', 'new_value', 'user_id', 'user_name',
-                        'ip_address', 'created_at',
-                    ])
+                    writer.writerow(HEADERS)
                     for r in rows:
-                        writer.writerow([
-                            r['id'], r['object_type'], r['object_id'], r['action'],
-                            r['field_name'], r['old_value'], r['new_value'],
-                            r['user_id'], r['user_name'], r['ip_address'], r['created_at'],
-                        ])
+                        writer.writerow(_row_to_record(r))
             else:
                 wb = Workbook()
                 ws = wb.active
                 ws.title = 'Audit Log'
-                ws.append([
-                    'id', 'object_type', 'object_id', 'action', 'field_name',
-                    'old_value', 'new_value', 'user_id', 'user_name',
-                    'ip_address', 'created_at',
-                ])
+                ws.append(HEADERS)
                 for r in rows:
-                    ws.append([
-                        r['id'], r['object_type'], r['object_id'], r['action'],
-                        r['field_name'], r['old_value'], r['new_value'],
-                        r['user_id'], r['user_name'], r['ip_address'], r['created_at'],
-                    ])
+                    ws.append(_row_to_record(r))
                 wb.save(file_path)
                 wb.close()
     except Exception as e:

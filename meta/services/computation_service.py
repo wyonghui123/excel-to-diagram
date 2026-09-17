@@ -595,10 +595,10 @@ class ComputationService:
         try:
             placeholders = ','.join(['?'] * len(group_ids))
             sql = f"""
-                SELECT group_id, COUNT(*) as member_count
-                FROM user_group_members
-                WHERE group_id IN ({placeholders})
-                GROUP BY group_id
+                SELECT org_id, COUNT(*) as member_count
+                FROM org_members
+                WHERE org_id IN ({placeholders})
+                GROUP BY org_id
             """
             cursor = data_source.execute(sql, tuple(group_ids))
             count_map = {row[0]: row[1] for row in cursor.fetchall()}

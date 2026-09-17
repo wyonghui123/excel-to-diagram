@@ -24,24 +24,108 @@ import { useMessage } from './useMessage'
 
 /**
  * 从 err 对象提取后端错误消息
+ *
+ * [Spec 22 2026-09-13] 增强识别 apiV2 包装格式 { success:false, message, httpStatus, code }
+ * 此前仅识别 axios 风格 err.response.data.message，导致 apiV2 PUT 失败时
+ * 走到 fallback，丢失后端具体错误（如 ActionPermissionInterceptor 的 403 详情）。
+ *
+ * 识别优先级：
+ *   1. err.response?.data?.message         (原生 axios 错误)
+ *   2. err.message                          (通用 Error 对象)
+ *   3. err.data?.message                    (包装层 data 内嵌)
+ *   4. err.message_zh / err.message_en     (i18n 多语言)
+ *   5. fallback                            (兜底默认文案)
+ *
  * @param {Error|object} err
  * @param {string} fallback
  * @returns {string}
  */
 function extractErrorMessage(err, fallback) {
   if (!err) return fallback
-  // axios 风格: err.response.data.message
+  // 1. axios 原生错误
   if (err.response?.data?.message) return err.response.data.message
-  // fetch 包装: err.message
-  if (err.message) return err.message
+  // 2. apiV2 包装错误：{ success:false, message, httpStatus, code }
+  if (typeof err.message === 'string' && err.message && !err.message.startsWith('Error:')) {
+    return err.message
+  }
+  // 3. 包装层 data 内嵌
+  if (err.data?.message) return err.data.message
+  // 4. i18n 多语言
+  if (err.message_zh) return err.message_zh
+  if (err.message_en) return err.message_en
+  // 5. 兜底
   return fallback
+}
+
+/**
+ * [Spec 22 2026-09-13] 检测是否为 HTTP 403 权限拒绝
+ * 用于 StateTransitionButtons 等详情页对 action_ref 权限不足时显示专门提示
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isPermissionDenied(err) {
+  if (!err) return false
+  // apiV2 包装格式
+  if (err.httpStatus === 403 || err.code === 'ERR_403_FORBIDDEN') return true
+  // axios 原生
+  if (err.response?.status === 403) return true
+  return false
 }
 
 export function useCrudMessage() {
   const message = useMessage()
 
+  /**
+   * [Spec 22 2026-09-13] 权限拒绝（403）专用反馈
+   * 场景：用户点击 state_transition 按钮但未持有对应 action_ref 权限
+   * 显示更友好的提示（说明缺少哪个权限 + 操作建议）
+   *
+   * @param {string} action - 操作名，如 '启用' / '锁定'
+   * @param {Error|object} err - 错误对象（含后端 message）
+   * @param {string} [actionRef] - 权限码（可选，如 'activate'），用于提示补充
+   */
+  const permissionDenied = (action = '此操作', err = null, actionRef = '') => {
+    const backendMsg = extractErrorMessage(err, '')
+    // 优先显示后端 message（包含「缺少权限 activate（state_transition: enable_user, object: user）」等具体信息）
+    if (backendMsg) {
+      message.error(backendMsg, err)
+      return
+    }
+    // 兜底：前端组装
+    const hint = actionRef ? `（需权限 ${actionRef}）` : ''
+    message.error(`当前用户无权限${action}${hint}`, err)
+  }
+
+  /**
+   * [Spec 22 2026-09-13] 状态变更失败（带权限检测）
+   * 自动根据 err.httpStatus 区分 403（权限不足）与其他错误
+   * 调用方只需传 err，无需判断错误类型
+   *
+   * @param {string} action - 操作名
+   * @param {Error|object} err - 错误对象
+   * @param {string} [actionRef] - 权限码（可选）
+   */
+  const stateChangeFailed = (action, err = null, actionRef = '') => {
+    if (isPermissionDenied(err)) {
+      permissionDenied(action, err, actionRef)
+    } else {
+      message.error(`${action}失败`, err)
+    }
+  }
+
   return {
     // ===== 成功反馈（语义化） =====
+
+    /**
+     * [Spec 22 2026-09-13] 权限拒绝（403）专用反馈（暴露给调用方）
+     */
+    permissionDenied,
+
+    /**
+     * [Spec 22 2026-09-13] 状态变更失败（带权限检测，暴露给调用方）
+     */
+    stateChangeFailed,
+
 
     /**
      * 保存成功（创建/更新统称）

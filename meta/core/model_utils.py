@@ -3,17 +3,22 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# [FIX 2026-09-06 角色迁移] role/user_group 已分别迁移到 permission_set/org
+# (org.yaml 注释: "原 user_group.yaml"; 无 role.yaml)。降级映射只保留现存实体,
+# 避免回退查询已不存在的 roles/user_groups 表。
 _OBJECT_DISPLAY_FIELD_MAP = {
     'user': 'display_name',
-    'user_group': 'name',
-    'role': 'name',
+    'org': 'name',
+    'org_member': 'name',
+    'permission_set': 'name',
     'permission': 'name',
 }
 
 _OBJECT_TABLE_MAP = {
     'user': 'users',
-    'user_group': 'user_groups',
-    'role': 'roles',
+    'org': 'orgs',
+    'org_member': 'org_members',
+    'permission_set': 'permission_sets',
     'permission': 'permissions',
 }
 
@@ -54,7 +59,11 @@ def get_object_display(object_type: str, object_id: int, data_source) -> str:
         from meta.core.models import registry
         meta_obj = registry.get(object_type)
         if meta_obj:
-            display_field = getattr(meta_obj, 'display_field', None)
+            # [FIX 2026-09-06 属性名错位] MetaObject 的属性是 display_name_field
+            # (models.py:908, yaml_loader.py:2061 读 yaml 的 display_name_field 键),
+            # 之前误写为 display_field 导致恒为 None, 权限集/组织名称解析退化成
+            # f"{object_type}:{id}" 占位串 (display_name_service.py L66 用的才是正确属性)。
+            display_field = getattr(meta_obj, 'display_name_field', None)
             if not display_field:
                 for f in meta_obj.fields:
                     semantics = getattr(f, 'semantics', None)

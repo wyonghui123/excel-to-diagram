@@ -1,0 +1,63 @@
+[Unit]
+# [2026-09-14 P0-3] staging-backend.service - 替代孤儿 18920 (手动 nohup 拉起)
+# 背景: delta-7 staging 后端是 PPID=1 孤儿 (systemctl restart meta-unified 无效),
+#       机器重启后不会自拉, 违反 systemd 管理约束.
+# [2026-09-14 r015] Environment= 块对齐 staging 现役孤儿进程的 /proc/<pid>/environ 实测真值
+#   (见 docs/staging-runbook.md §2.11 真相表)。仅修 env 块, secret/路径维持现役值不变 —
+#   避免 JWT secret 改动引爆跨环境 cookie 互刷。secret 轮换应走独立 PR + SOP。
+#   与现役的差异 (本次未对齐, 故意保留模板写法):
+#     - CORS_ALLOWED_ORIGINS / FLASK_ENV: 现役进程未设 (后端代码有默认值), 模板保留供未来启用
+#   若未来 install 前现役 env 真值已再次漂移, 必须先更新 runbook §2.11, 再据此更新本文件。
+# 安装: sudo cp staging-backend.service /etc/systemd/system/
+#       sudo systemctl daemon-reload
+#       sudo systemctl enable staging-backend.service
+#       sudo systemctl start staging-backend.service
+# 监控: systemctl status staging-backend / journalctl -u staging-backend -f
+Description=Meta Architecture staging backend (delta-7 hardening)
+Documentation=https://github.com/wyonghui123/excel-to-diagram
+After=network.target
+
+[Service]
+Type=simple
+# [2026-09-14 P0-3] 必须 nobody + Group=nobody, 避免 HIPS 杀 root 监听端口
+User=nobody
+Group=nobody
+WorkingDirectory=/opt/app/staging/bin
+Environment="PORT=13011"
+# [2026-09-14 r015] 对齐现役真值 (runbook §2.11)
+Environment="JWT_SECRET_KEY=staging-jwt-secret-2026-07-14-staging-jwt"
+Environment="FLASK_SECRET_KEY=staging-flask-key-2026-07-14-staging-secret"
+Environment="FLASK_DEBUG=true"
+Environment="SQLITE_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="ARCH_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="CORE_SERVICE_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="CORE_SERVICE_PORT=19200"
+# 模板额外保留 (现役未设, 模板写法供未来启用):
+Environment="CORS_ALLOWED_ORIGINS=http://127.0.0.1:18081,http://localhost:18081"
+Environment="FLASK_ENV=staging"
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/current/server.py
+
+# [2026-09-14 P0-3] 自动重启策略 - on-failure (systemd 会接管重启)
+Restart=on-failure
+RestartSec=5
+
+# 超时保护
+TimeoutStartSec=30
+TimeoutStopSec=10
+
+# 资源限制
+LimitNOFILE=65536
+
+# 日志输出
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=staging-backend
+
+# [2026-09-14 P0-3] nobody 用户授权 + 去掉旧 systemd 不识别的 ReadWritePaths
+#   log_service_prod 已因这条指令告警 1 个多月, 这里用兼容写法 (旧 systemd 不支持 ReadWritePaths)
+ProtectSystem=full
+PrivateTmp=false
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

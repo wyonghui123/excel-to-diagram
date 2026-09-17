@@ -27,13 +27,19 @@ if sys.stdout.encoding != 'utf-8':
 
 
 def init_menu_permissions(db_path):
-    """初始化菜单权限表和 menus 导航表数据（元数据驱动）"""
+    """初始化菜单权限表和 menus 导航表数据（元数据驱动）
+
+    [V007.49-A] 增量更新模式（2026-07-12 修复）：
+        修复原 "已有数据就跳过" 的问题。原逻辑会导致 BUG-V056 类的"代码已部署
+        但 DB 数据未更新"的问题。改为：每次启动都执行 UPSERT 检测新增/变更
+        的菜单权限声明、bo_bindings、required_permissions，并展开到角色。
+    """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-
-    print("=" * 60)
-    print("初始化菜单权限表 & menus 导航表")
-    print("=" * 60)
+    cursor.execute("SELECT COUNT(*) FROM menu_permissions")
+    perm_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM menus")
+    menu_count = cursor.fetchone()[0]
 
     # ========== 步骤1：创建 menu_permissions 表（权限） ==========
     print("\n[步骤1] 创建 menu_permissions 表...")
@@ -58,16 +64,17 @@ def init_menu_permissions(db_path):
 
     # 创建 role_menu_permissions 关联表（many-to-many: role <-> menu_permission）
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS role_menu_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_menu_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             menu_code VARCHAR(200) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(role_id, menu_code)
+            UNIQUE(permission_set_id, menu_code)
         )
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmp_role ON role_menu_permissions(role_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmp_menu ON role_menu_permissions(menu_code)")
+    # [2026-09-15 v089 Spec 19 M4 修复] role_menu_permissions → permission_set_menu_permissions
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmp_role ON permission_set_menu_permissions(permission_set_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmp_menu ON permission_set_menu_permissions(menu_code)")
 
     # ========== 步骤2：创建 menus 表（导航） ==========
     print("\n[步骤2] 创建 menus 导航表...")
@@ -106,7 +113,7 @@ def init_menu_permissions(db_path):
 
     print("  [OK] 两表创建完成")
 
-    # ========== 步骤3：检查 menu_permissions 是否已有数据 ==========
+    # ========== 步骤3：检查现有数据（[V007.49-A] 仅记录，不再跳过） ==========
     print("\n[步骤3] 检查现有数据...")
     cursor.execute("SELECT COUNT(*) FROM menu_permissions")
     perm_count = cursor.fetchone()[0]
@@ -114,13 +121,13 @@ def init_menu_permissions(db_path):
     menus_count = cursor.fetchone()[0]
 
     if perm_count > 0:
-        print(f"  ⏭️  已有 {perm_count} 条权限数据")
+        print(f"  [INFO] 已有 {perm_count} 条权限数据，将进行增量 UPSERT")
 
     if menus_count > 0:
-        print(f"  ⏭️  已有 {menus_count} 条导航数据")
+        print(f"  [INFO] 已有 {menus_count} 条导航数据，将进行增量 UPSERT")
 
     # ========== 步骤4：系统菜单定义（元数据驱动） ==========
-    print("\n[步骤4] 插入系统菜单数据...")
+    print("\n[步骤4] 同步系统菜单数据...")
 
     system_menus = [
         {
@@ -152,24 +159,34 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'sub_domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'service_module', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'business_object', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
-                # 🆕 BMRD-2026-06-14 方案A: 关系对象随架构数据自动带入 (FR-013 轻量版)
-                # 关系数据是跨层级的纽带, 架构数据管理页操作 domain/sub_domain/... 时必然要查阅
-                # 其相互之间的关系, role='derived' 表示派生而非主 BO
-                # [H14.1] relationship yaml 支持 import, 补全
-                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'export', 'import']},
-                # 🆕 BMRD-2026-06-14 审计日志自动带入
+                # [FIX BUG-V056 2026-07-12] relationship 补全 create/update/delete
+                # 之前只有 read/export/import, 导致: 1) 用户无法在角色详情页勾选关系的编辑/管理权限
+                # 2) 关系编辑权限不出现在 JWT permissions 中, 创建/更新关系被拒
+                # relationship 不再是纯派生对象, 用户需要手动创建/编辑/删除关系
+                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+                # [NEW] BMRD-2026-06-14 审计日志自动带入
                 # domain 详情页"操作日志" tab 需要 read 权限, 紧化 v1 endpoint 后
                 # (v1 现在也校验 audit_log:read) 必须显式 grant 才能看到
                 # [H14.1] audit_log yaml import_enabled=false, 只保留 export
                 {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'export']},
             ]),
             'required_permissions': json.dumps([
+                # [FIX 2026-07-10] BUG-V051: 补全所有架构对象的导入导出权限
+                # 之前 required_permissions 只配了部分 export/import (e.g. domain:export/import),
+                # 漏了 sub_domain:import, service_module:import, business_object:import/export,
+                # relationship:import, audit_log:export
+                # 导致: 1) 用户勾选这些权限保存没效果 (DB 不存在)  2) 详细权限列表显示不到
+                # [FIX-2 2026-07-10] 移除 batch_import (与 import 重复, 委托给统一 export-import 端点)
                 'domain:create', 'domain:read', 'domain:update', 'domain:delete', 'domain:export', 'domain:import',
                 'sub_domain:create', 'sub_domain:read', 'sub_domain:update', 'sub_domain:delete',
+                'sub_domain:export', 'sub_domain:import',
                 'service_module:create', 'service_module:read', 'service_module:update', 'service_module:delete',
+                'service_module:export', 'service_module:import',
                 'business_object:create', 'business_object:read', 'business_object:update', 'business_object:delete',
-                # 🆕 关系对象 (derived) 的最低权限
-                'relationship:read', 'relationship:export',
+                'business_object:export', 'business_object:import',
+                # [FIX BUG-V056 2026-07-12] 关系对象补全 create/update/delete
+                'relationship:create', 'relationship:read', 'relationship:update', 'relationship:delete',
+                'relationship:export', 'relationship:import',
                 # 🆕 审计日志 (derived) 的最低权限 (操作日志 tab 必需)
                 'audit_log:read', 'audit_log:export',
             ]),
@@ -194,7 +211,12 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'version', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
             ]),
             'required_permissions': json.dumps([
+                # [FIX 2026-07-10] BUG-V051: 补全 product/version 的 import/export/set_current/compare
                 'product:create', 'product:read', 'product:update', 'product:delete',
+                'product:import', 'product:export',
+                'version:create', 'version:read', 'version:update', 'version:delete',
+                'version:import', 'version:export',
+                'version:set_current', 'version:compare',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['product'],
@@ -215,32 +237,74 @@ def init_menu_permissions(db_path):
             'data_permission_hint': None
         },
         {
+            # [FIX 2026-09-01 v2] 父菜单 user-permission 作为分组容器 (multi_object_hub, page_type='multi_object_hub',
+            #   show_in_sidebar=1 但不带 menu_path), 3 个子菜单 (用户/权限集/组织管理) 作为独立 landing 卡片.
+            #   leaf_menus 算法:
+            #     - 顶层 multi_object_hub 有 children → 被 parent_codes 排除 (不出现在 landing 卡片)
+            #     - 但其 children 在第 376-403 行的 child_rows SQL 中按 visible parent_menu 附加到 flat
+            #     - children 是 object_list → 进入 leaf_menus 显示为 3 张独立卡片
+            #   侧边栏: user-permission 作为父节点, 3 个 child 嵌套渲染 (见 AppRootLayout.vue apiNavigationItems)
             'menu_code': 'user-permission',
             'menu_name': '用户与权限管理',
-            'menu_path': '/user-permission',
+            'menu_path': '',  # 父容器无 path, 不可点击直达, 仅作分组
+            'icon': 'User',
+            'color': '#ef4444',
+            'sort_order': 50,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps([]),  # 父容器无权限要求, 由子菜单控制
+            'data_permission_hint': None
+        },
+        {
+            # 子菜单: 用户管理 - page_type=object_list, parent_menu=user-permission
+            'menu_code': 'user-management',
+            'menu_name': '用户',
+            'menu_path': '/user-management',
             'icon': 'User',
             'color': '#ef4444',
             'sort_order': 51,
-            'parent_menu': '',
-            'page_type': 'multi_object_hub',
+            'parent_menu': 'user-permission',
+            'page_type': 'object_list',
             'primary_object_type': 'user',
-            'object_types': json.dumps(['user', 'role', 'user_group']),
+            # [Plan D 2026-08-29 Spec16] role → permission_set, user_group → org
+            'object_types': json.dumps(['user']),
             'bo_bindings': json.dumps([
-                # [H14.1] 同步 yaml import_export: user / role 支持导入导出
-                # user_group yaml 未配 import_export (无导入导出服务), 显式声明的 assign/unassign/grant/revoke 由 6.5 反向 KEEP
+                # user 支持导入导出
                 {'bo_id': 'user', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
-                {'bo_id': 'role', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
-                {'bo_id': 'user_group', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'assign', 'unassign', 'grant', 'revoke']},
             ]),
             'required_permissions': json.dumps([
                 'user:create', 'user:read', 'user:update', 'user:delete',
-                'role:create', 'role:read', 'role:update', 'role:delete',
-                'user_group:create', 'user_group:read', 'user_group:update', 'user_group:delete',
-                'user_group:assign', 'user_group:unassign', 'user_group:grant', 'user_group:revoke',
             ]),
             'data_permission_hint': json.dumps({
-                'resource_types': ['user', 'role', 'user_group'],
+                'resource_types': ['user'],
                 'message': '需要用户管理相关权限'
+            })
+        },
+        {
+            # 子菜单: 权限集管理
+            'menu_code': 'permission-set-management',
+            'menu_name': '权限集',
+            'menu_path': '/permission-set-management',
+            'icon': 'Key',
+            'color': '#f97316',
+            'sort_order': 52,
+            'parent_menu': 'user-permission',
+            'page_type': 'object_list',
+            'primary_object_type': 'permission_set',
+            'object_types': json.dumps(['permission_set']),
+            'bo_bindings': json.dumps([
+                # permission_set 支持导入导出
+                {'bo_id': 'permission_set', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+            ]),
+            'required_permissions': json.dumps([
+                'permission_set:create', 'permission_set:read', 'permission_set:update', 'permission_set:delete',
+            ]),
+            'data_permission_hint': json.dumps({
+                'resource_types': ['permission_set'],
+                'message': '需要权限集管理相关权限'
             })
         },
         {
@@ -293,6 +357,35 @@ def init_menu_permissions(db_path):
                 'message': '建议分配审计日志查看权限'
             })
         },
+        {
+            # [MOMP 通用化 2026-08-30] 组织管理页（org 单类型 MOMP）
+            #   - menu_path=/org-management 对应前端路由 name=OrgManagement
+            #   - [FIX 2026-09-01 v2] 改为 user-permission 父菜单下的子菜单 (parent_menu='user-permission'),
+            #     与 user-management / permission-set-management 并列作为独立 landing 卡片.
+            #   - page_type=object_list (非 multi_object_hub), 避免被 line 491-494 排除.
+            #   - [Plan D 2026-08-29 Spec16] user_group → org
+            'menu_code': 'org-management',
+            'menu_name': '组织管理',
+            'menu_path': '/org-management',
+            'icon': 'OfficeBuilding',
+            'color': '#0ea5e9',
+            'sort_order': 53,
+            'parent_menu': 'user-permission',
+            'page_type': 'object_list',
+            'primary_object_type': 'org',
+            'object_types': json.dumps(['org']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'org', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'import', 'export']},
+            ]),
+            'required_permissions': json.dumps([
+                'org:create', 'org:read', 'org:update', 'org:delete',
+                'org:list', 'org:import', 'org:export',
+            ]),
+            'data_permission_hint': json.dumps({
+                'resource_types': ['org'],
+                'message': '建议分配组织数据权限'
+            })
+        },
     ]
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
@@ -303,13 +396,21 @@ def init_menu_permissions(db_path):
     conn.commit()
 
     # ========== 步骤5：写入/更新 menu_permissions 表（权限） ==========
+    # [V007.49-A] 增量更新：每次启动都会 UPSERT，触发条件由 7.5 检测权限变更日志输出
     print("\n[步骤5] 同步 menu_permissions 表...")
+    perm_new = 0
+    perm_updated = 0
     for menu in system_menus:
         cursor.execute(
-            "SELECT menu_code FROM menu_permissions WHERE menu_code = ?",
+            "SELECT menu_code, required_permissions FROM menu_permissions WHERE menu_code = ?",
             [menu['menu_code']]
         )
-        if cursor.fetchone():
+        existing = cursor.fetchone()
+        if existing:
+            old_perms_str = existing[1]
+            old_perms = set(json.loads(old_perms_str) if old_perms_str else [])
+            new_perms = set(menu['required_permissions'])
+            added = new_perms - old_perms
             cursor.execute("""
                 UPDATE menu_permissions SET
                     menu_name = ?, menu_path = ?,
@@ -327,7 +428,11 @@ def init_menu_permissions(db_path):
                 menu.get('data_permission_hint'),
                 menu['menu_code'],
             ])
-            print(f"  [OK] perm: {menu['menu_name']} ({menu['menu_code']})")
+            if added:
+                print(f"  [UPDATE] perm: {menu['menu_name']} (+{len(added)} perms: {sorted(added)})")
+                perm_updated += 1
+            else:
+                print(f"  [SKIP]   perm: {menu['menu_name']} (无变化)")
         else:
             cursor.execute("""
                 INSERT INTO menu_permissions
@@ -344,16 +449,25 @@ def init_menu_permissions(db_path):
                 menu['sort_order'],
                 menu.get('data_permission_hint')
             ])
-            print(f"  [OK] perm: {menu['menu_name']} ({menu['menu_code']})")
+            print(f"  [NEW]    perm: {menu['menu_name']} ({menu['menu_code']})")
+            perm_new += 1
+    print(f"  [SUMMARY] menu_permissions: +{perm_new} 新增, ~{perm_updated} 更新")
 
     # ========== 步骤6：同步 menus 导航表（每次启动 UPSERT） ==========
+    # [V007.49-A] 增量更新：每次启动都同步 bo_bindings 等关键字段
     print("\n[步骤6] 同步 menus 导航表...")
+    nav_new = 0
+    nav_updated = 0
     for menu in system_menus:
         cursor.execute(
-            "SELECT menu_code FROM menus WHERE menu_code = ?",
+            "SELECT menu_code, bo_bindings FROM menus WHERE menu_code = ?",
             [menu['menu_code']]
         )
-        if cursor.fetchone():
+        existing = cursor.fetchone()
+        if existing:
+            old_bindings = existing[1]
+            new_bindings = json.dumps(menu.get('bo_bindings', '[]'), ensure_ascii=False)
+            bindings_changed = old_bindings != new_bindings
             cursor.execute("""
                 UPDATE menus SET
                     menu_name = ?, menu_path = ?, page_type = ?,
@@ -377,7 +491,11 @@ def init_menu_permissions(db_path):
                 menu['sort_order'],
                 menu['menu_code'],
             ])
-            print(f"  [OK] nav:  {menu['menu_name']} ({menu['menu_code']}) [{menu.get('page_type')}]")
+            if bindings_changed:
+                print(f"  [UPDATE] nav:  {menu['menu_name']} (bo_bindings changed)")
+                nav_updated += 1
+            else:
+                print(f"  [SKIP]   nav:  {menu['menu_name']}")
         else:
             cursor.execute("""
                 INSERT INTO menus
@@ -401,7 +519,9 @@ def init_menu_permissions(db_path):
                 menu.get('description', ''),
                 menu['sort_order'],
             ])
-            print(f"  [OK] nav:  {menu['menu_name']} ({menu['menu_code']}) [{menu.get('page_type')}]")
+            print(f"  [NEW]    nav:  {menu['menu_name']} ({menu['menu_code']})")
+            nav_new += 1
+    print(f"  [SUMMARY] menus: +{nav_new} 新增, ~{nav_updated} 更新")
 
     # ========== 步骤6.5: yaml import_export → menu bo_bindings 自动对齐 ==========
     # [H14.1] 单一事实源同步: 从 meta/schemas/*.yaml 读 import_export.import_enabled /
@@ -547,9 +667,9 @@ def init_menu_permissions(db_path):
     # 注: 这是 init-time 展开, 跟 SAP SU24 的"事务码 → 默认授权对象"等价。
     print("\n[步骤7.7] 展开菜单权限到角色 (FR-013 轻量版)...")
     cursor.execute("""
-        SELECT rmp.role_id, r.code, mp.required_permissions
-        FROM role_menu_permissions rmp
-        JOIN roles r ON r.id = rmp.role_id
+        SELECT rmp.permission_set_id, r.code, mp.required_permissions
+        FROM permission_set_menu_permissions rmp
+        JOIN permission_sets r ON r.id = rmp.permission_set_id
         JOIN menu_permissions mp ON mp.menu_code = rmp.menu_code
         WHERE r.is_active = 1
     """)
@@ -572,13 +692,13 @@ def init_menu_permissions(db_path):
                 continue
             perm_id = perm_row[0]
             cursor.execute("""
-                SELECT 1 FROM role_permissions
-                WHERE role_id = ? AND permission_id = ?
+                SELECT 1 FROM permission_set_permissions
+                WHERE permission_set_id = ? AND permission_id = ?
             """, [role_id, perm_id])
             if cursor.fetchone():
                 continue  # 已存在
             cursor.execute("""
-                INSERT INTO role_permissions (role_id, permission_id, granted)
+                INSERT INTO permission_set_permissions (permission_set_id, permission_id, granted)
                 VALUES (?, ?, 1)
             """, [role_id, perm_id])
             granted_for_role += 1
@@ -586,12 +706,40 @@ def init_menu_permissions(db_path):
             roles_touched += 1
             total_granted += granted_for_role
             rel_count = sum(1 for p in req_perms if 'relationship' in p)
-            print(f"  ✅ {role_code}: +{granted_for_role} permissions (含 {rel_count} relationship)")
+            print(f"  [OK] {role_code}: +{granted_for_role} permissions (含 {rel_count} relationship)")
 
     if total_granted == 0:
         print("  [OK] 无需展开 (所有权限已存在)")
     else:
         print(f"  [OK] 跨 {roles_touched} 个角色共授权 {total_granted} 条 permissions")
+
+    # ========== 步骤7.8：把核心系统菜单默认绑定到 admin 角色 ==========
+    # 目的：新初始化环境 admin 开箱即可看到系统管理菜单（如 org-management），
+    #   否则这些新菜单因无角色绑定而不出现在侧边栏/accessibleMenus。
+    # role_menu_permissions 列: (role_id, menu_code, created_at)，无 granted 列。
+    print("\n[步骤7.8] 默认绑定核心系统菜单到 admin 角色...")
+    # 幂等: 仅当 admin 角色(role code='admin')存在时绑定, 不覆盖已有其他角色绑定
+    admin_role = cursor.execute("SELECT id FROM permission_sets WHERE code = 'admin' AND is_active = 1 LIMIT 1").fetchone()
+    if not admin_role:
+        print("  [SKIP] 未找到 admin 角色 (code='admin'), 跳过默认绑定")
+    else:
+        admin_role_id = admin_role[0]
+        bound = 0
+        # 需默认对 admin 可见的系统菜单编码（新菜单在此登记）
+        # [FIX 2026-09-01] 拆 3 个: 用户 / 权限集 / 组织管理
+        default_admin_menus = ['user-management', 'permission-set-management', 'org-management']
+        for mcode in default_admin_menus:
+            # 仅当该菜单已入 menu_permissions 白名单才绑定
+            if cursor.execute("SELECT 1 FROM menu_permissions WHERE menu_code = ?", [mcode]).fetchone():
+                cursor.execute(
+                    "INSERT OR IGNORE INTO permission_set_menu_permissions (permission_set_id, menu_code, created_at) VALUES (?,?,datetime('now'))",
+                    [admin_role_id, mcode]
+                )
+                bound += 1
+        if bound:
+            print(f"  [OK] admin 角色(#{admin_role_id}) 已绑定 {bound} 个系统菜单: {default_admin_menus}")
+        else:
+            print("  [OK] 无需绑定")
 
     print("\n" + "=" * 60)
     print("[OK] 菜单权限表 & 导航表初始化完成！")

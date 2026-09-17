@@ -390,6 +390,7 @@ dimensions:
     filter_param: id
     ancestor_param: null
     table_alias: p
+    display_mode: tree
     description: 按产品维度展示
 
   - id: version
@@ -399,6 +400,7 @@ dimensions:
     filter_param: product_id
     ancestor_param: id
     table_alias: v
+    display_mode: tree
     description: 按版本维度展示
 
   - id: domain
@@ -408,6 +410,7 @@ dimensions:
     filter_param: id
     ancestor_param: null
     table_alias: d
+    display_mode: tree
     description: 按领域维度展示
 
   - id: sub_domain
@@ -417,6 +420,7 @@ dimensions:
     filter_param: domain_id
     ancestor_param: id
     table_alias: sd
+    display_mode: tree
     description: 按子领域维度展示
     
   # [REMOVED] service_module - 2026-06-03 按业务需求移除

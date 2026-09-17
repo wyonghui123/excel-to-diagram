@@ -11,22 +11,37 @@
           <span class="odp-title-bar__title">{{ displayTitle }}</span>
         </div>
         <div class="odp-title-bar__right">
-          <AppButton
-            v-for="act in (detailPageRef?.visibleActions || [])"
-            :key="act.key"
-            :variant="act.variant || 'secondary'"
-            size="sm"
-            @click="detailPageRef?.handleObjectPageAction({ action: act })"
+          <div
+            v-if="(detailPageRef?.visibleActions || []).length > 0"
+            class="odp-action-group"
           >
-            {{ act.label }}
-          </AppButton>
-          <StateTransitionButtons
+            <AppButton
+              v-for="act in (detailPageRef?.visibleActions || [])"
+              :key="act.key"
+              :variant="act.variant || 'secondary'"
+              size="sm"
+              class="odp-action-btn"
+              @click="detailPageRef?.handleObjectPageAction({ action: act })"
+            >
+              {{ act.label }}
+            </AppButton>
+          </div>
+          <span
+            v-if="(detailPageRef?.visibleActions || []).length > 0 && objectType && id && id !== 'new'"
+            class="odp-group-sep"
+            aria-hidden="true"
+          ></span>
+          <div
             v-if="objectType && id && id !== 'new'"
-            :object-type="objectType"
-            :object-id="id"
-            size="small"
-            @success="handleStateTransitionSuccess"
-          />
+            class="odp-state-transitions"
+          >
+            <StateTransitionButtons
+              :object-type="objectType"
+              :object-id="id"
+              size="small"
+              @success="handleStateTransitionSuccess"
+            />
+          </div>
         </div>
       </div>
 
@@ -59,10 +74,16 @@
         @saved="handleSaved"
       >
         <!-- Role permission config panel -->
+        <!-- [v44 FIX 2026-08-27] 传入 :editing 与角色整体编辑态联动
+             根因：DetailPage internalEditing 已 expose（line 1584），但此处从未传递，
+             导致「基本信息」等 section 可编辑，而权限面板永远 readonly -->
         <template #section-permissions="{ data }">
           <PermissionConfigPanel
-            :role-id="data?.id || id"
-            :role="data"
+            :permission-set-id="data?.id || id"
+            :permission-set="data"
+            :editing="detailPageRef?.internalEditing === true"
+            :flush-on-exit="true"
+            :show-ps-source="isNonPermissionSetObject"
             @saved="handleRefresh"
           />
         </template>
@@ -136,13 +157,36 @@ const rawId = computed(() => route.params.id)
 const lastValidObjectType = ref(null)
 const lastValidId = ref(null)
 watch([rawObjectType, rawId], ([newType, newId]) => {
+  // [BUG-V037 cherry-pick 2026-07-03] 跨对象切换时立即同步 lastValidObjectType
+  //   例: /detail/user/123 → /detail/user_group?mode=add
+  //     - rawId=undefined (URL 无 id 段), 当前 watch 不刷新 lastValidObjectType
+  //     - 旧: objectType='user' (缓存), id='123' (缓存), 表现为显示"新建用户(123)"
+  //   修复: rawObjectType 切到不同有效对象立即同步 lastValidObjectType;
+  //         add 模式 (newId=undefined) 同时清空 lastValidId 防止 id 缓存污染;
+  //         tab 切走 (newType=undefined) 不进任何分支, 保护缓存 (2026-06-18 v1 fix).
+  //   来源: feat/annotation-category-filter @ 797edb8
+  //   验证: Vue reactive simulation 49/49 通过
+  if (newType && newType !== lastValidObjectType.value) {
+    lastValidObjectType.value = newType
+    if (!newId) lastValidId.value = null
+  }
   if (newType && newId) {
     lastValidObjectType.value = newType
     lastValidId.value = newId
   }
 }, { immediate: true })
 const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
-const id = computed(() => lastValidId.value || rawId.value)
+// [FIX v2b 2026-06-29] mode='add' 时强制 id='new' (而不是 lastValidId 缓存的 id)
+//   例: 用户从 DEMOPROD (id=533) 详情回 list → 点"新建"
+//     URL=/detail/product?mode=add, lastValidId='533' (详情缓存), rawId=undefined
+//     旧 id = lastValidId.value || rawId.value = '533'
+//     → DetailPage 收到 id='533', mode='add' → 进入"新建"模式但加载 533 数据 → 显示 DEMOPROD 预填 (错)
+//   修复: queryMode='add' 时, id 必须是 'new' (告诉 DetailPage 这是新建)
+//         id='new' → DetailPage 不 fetch 533 数据 → 表单空白 (对)
+const id = computed(() => {
+  if (rawMode.value === 'add') return 'new'
+  return lastValidId.value || rawId.value
+})
 // [FIX 2026-06-18] mode 也需要缓存：add 模式下 route.query.mode='add'，
 //   切走时 query 清空 → mode 退到 'view'，切回时又变 'add'，触发
 //   DetailPage watch 的 "same object mode change" 分支走
@@ -155,13 +199,37 @@ watch(rawMode, (newMode) => {
     lastValidMode.value = newMode
   }
 }, { immediate: true })
-const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
-// [FIX 2026-06-18] 重命名为 detailPageMountKey：仅用于强制 remount DetailPage
-//   (PermissionConfigPanel saved 后)，平时稳定不变。
-//   之前叫 detailPageKey 时配合 v-if="objectType && (id || mode === 'add')"，
-//   在 app 顶部 tab 切走时 (route 变化 → id 变 undefined) 会 unmount DetailPage，
-//   切回时 remount 丢失 internalEditing 等内部状态。
-const detailPageMountKey = ref(0)
+// [FIX v2 2026-06-29] 进有效 id 时强制 'view', 即使 lastValidMode='add' (新建失败场景)
+// 例: 用户在 /detail/product?mode=add 失败 → 回 list → 进 DEMOPROD (id=533)
+//   - lastValidMode='add' (新建缓存), rawMode=undefined (URL 无 ?mode=)
+//   - 不强制 view → mode='add' → DetailPage 进入"新建"模式但有 id → 显示空表单 (错)
+//   - 强制 view → mode='view' → DetailPage 正常加载 533 详情 (对)
+const mode = computed(() => {
+  const currentId = lastValidId.value || rawId.value
+  const queryMode = rawMode.value
+  if (currentId && currentId !== 'new' && !queryMode) {
+    return 'view'
+  }
+  return lastValidMode.value || queryMode || 'view'
+})
+// [FIX 2026-06-29] detailPageMountKey 用 objectType+id+mode 派生, 切不同对象/模式时强制 remount DetailPage
+//   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
+//   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
+//   必须 refresh 才能看到 DEMOPROD
+//   修复: key 包含 objectType+id+mode, 切不同对象/模式 → key 变 → Vue 强制重建 → 加载新 data
+//   副作用: internalEditing 等状态会重置 (用户期望: 进新对象就该重置, 所以正确)
+//   注意: route params 变化 (undefined → 有效 → undefined) 不会触发此 key 变 (因为 lastValid 缓存)
+//         只在 newType&&newId 都有效时才更新 key, 切走不更新
+//   [FIX v3 2026-06-29] key 加入 mode, 确保 view→add 切换时强制 remount
+//     - 之前: DEMOPROD 详情 (product-533) → 新建 (product-533) 同 key → 组件复用 → 表单残留 DEMOPROD 数据
+//     - 修复后: DEMOPROD 详情 (product-533-view) → 新建 (product-533-add) key 不同 → 强制重建 → 空白表单
+const detailPageMountKey = computed(() => {
+  const t = lastValidObjectType.value || rawObjectType.value
+  const i = lastValidId.value || rawId.value
+  if (!t || !i) return 0
+  const m = mode.value
+  return `${t}-${i}-${m}`
+})
 // [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
 //   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
 //   保证切走再切回时 DetailPage 不被销毁
@@ -216,6 +284,13 @@ const readonly = computed(() => route.query.readonly === 'true')
 const showDelete = computed(() => route.query.showDelete !== 'false')
 const showHistory = computed(() => route.query.showHistory !== 'false')
 
+// [Spec 21 PM 反馈 2026-09-12] 非 permission_set 对象（如 organization / role / user）的详情页
+// 复用 PermissionConfigPanel 显示「权限预览」tab 时，应该显示「来源权限集」列：
+//   - 这些场景是跨权限集聚合视图，列出每个资源/动作来自哪些权限集
+//   - 让用户清楚「为什么这个角色能访问」/「这个组织的权限构成」
+// permission_set 自己的详情页保持不显示（避免误读为可按权限集配置）
+const isNonPermissionSetObject = computed(() => objectType.value !== 'permission_set')
+
 const pageTitle = computed(() => {
   if (!objectType.value) return '对象详情'
   const metaName = entityMeta.value?.name || entityMeta.value?.label
@@ -225,7 +300,11 @@ const pageTitle = computed(() => {
 })
 
 const objectName = ref('')
-const displayTitle = computed(() => objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value)
+// [FIX 2026-06-29] mode='add' 时不拼接 objectName，避免从详情页切回新建时显示旧产品名
+const displayTitle = computed(() => {
+  if (mode.value === 'add') return pageTitle.value
+  return objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value
+})
 
 const dirty = ref(false)
 const showConfirmDialog = ref(false)
@@ -299,6 +378,22 @@ function handleSaved(savedData) {
     }
 
     router.replace({ path: newPath }).catch(() => {})
+  }
+  // [FIX V015d 2026-07-10] edit 模式保存后也通知 list 刷新
+  // 原 BUG:
+  //   handleSaved 只在 mode === 'add' 分支里 dispatch 'excel-diagram:list-refresh' 事件.
+  //   edit 模式保存后回到 list (e.g. 用户组编辑名称/描述), list 完全不知道要刷新,
+  //   看到的还是缓存的旧数据. 必须手动 Ctrl+Shift+R 硬刷新整个浏览器才能看到变更.
+  //   复现: /detail/user_group/<id> 改 name/description 保存 → 返回 list → 仍是旧值.
+  // 修复: 移出 add 分支, edit/add 都 dispatch 事件 (action='update' | 'create').
+  //       MetaListPage._windowEventHandler 已匹配 objectType, list 会 forceRefresh.
+  //       add 分支仍保留 (因为有 coordinator.refreshAll() 兜底).
+  try {
+    window.dispatchEvent(new CustomEvent('excel-diagram:list-refresh', {
+      detail: { objectType: objectType.value, action: mode.value === 'add' ? 'create' : 'update', id: savedData?.id }
+    }))
+  } catch (e) {
+    console.warn('[BUG-V015d] window event dispatch failed:', e)
   }
 }
 
@@ -481,6 +576,60 @@ function updateTabLabel() {
     flex: 0 0 auto;
     margin-left: auto;
   }
+}
+
+/* [FIX 2026-09-13] group 化:
+     1) odp-action-group (编辑/删除) 与 odp-state-transitions (停用/锁定/冻结)
+        各包成独立 flex container, 组内 gap 8px (按钮紧凑)
+     2) 中间用 odp-group-sep 1px×16px 竖线分隔, 加 margin: 0 8px
+     3) odp-state-transitions 内部 button 强制跟 odp-action-btn 同 size/padding
+*/
+.odp-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.odp-state-transitions {
+  display: flex;
+  align-items: center;
+}
+
+.odp-state-transitions :deep(.state-transition-buttons) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.odp-state-transitions :deep(.state-transition-buttons .el-button) {
+  height: 24px;
+  padding: 0 11px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--el-border-radius-base);
+}
+
+.odp-state-transitions :deep(.state-transition-buttons .el-button + .el-button) {
+  margin-left: 0;  /* 覆盖 Element Plus 默认 ml, 用 gap 完全控制 */
+}
+
+.odp-action-btn :deep(.el-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.odp-group-sep {
+  display: inline-block;
+  width: 2px;
+  height: 22px;
+  background: var(--color-border, #a1a1aa);
+  border-radius: 1px;
+  margin: 0 12px;
+  flex-shrink: 0;
 }
 
 .odp-back-link {

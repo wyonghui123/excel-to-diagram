@@ -1,0 +1,74 @@
+{
+  "started_at": "2026-09-03T16:55:00+08:00",
+  "git": {
+    "branch": "release/integrated-main",
+    "head": "9081acb62ac30d59d44c7ba25254bf1aa42af0c8",
+    "head_short": "9081ac",
+    "uncommitted_changes": false
+  },
+  "build": {
+    "dist_zip": "tools/.staging_rounds/r001_9081ac_dist.zip",
+    "dist_size_mb": 17.5,
+    "zip_md5": "ec9a4c82 (mx80 v5 verified, dist zip not preserved)",
+    "n_files": 129,
+    "key_chunks": [
+      "PermissionConfigPanel-DS4-P1Pi.js",
+      "vendor-mermaid-DqLdkIeh.js",
+      "vendor-vue-ep-C0Ugr7nq.js",
+      "vendor-echarts-B9F17iRh.js",
+      "vendor-xlsx-BBWTpfDg.js"
+    ],
+    "build_command": "npm run build (with chunk cycle gate) - backfilled from mx80 v5 history"
+  },
+  "deploy": {
+    "status": "OK",
+    "at": "2026-09-03T16:55:00+08:00",
+    "remote_backup": "/opt/app/staging/frontend_dist_files_bak_20260903_mx84 (legacy name, pre-rounds format)",
+    "key_chunks_served": [
+      "PermissionConfigPanel-DS4-P1Pi.js",
+      "vendor-mermaid-DqLdkIeh.js",
+      "vendor-vue-ep-C0Ugr7nq.js",
+      "vendor-echarts-B9F17iRh.js",
+      "vendor-xlsx-BBWTpfDg.js"
+    ],
+    "probe_stdout": "index=200\nchunk=200",
+    "note": "Backfilled from mx80 v5 manual deployment; remote name uses pre-rounds convention"
+  },
+  "verify": {
+    "status": "PASS",
+    "at": "2026-09-04T01:46:54+08:00",
+    "spec": "tools\\.staging_rounds\\default_spec.json",
+    "checks": [
+      {
+        "name": "ps1228_sub_domain_contains",
+        "permission_set_id": 1228,
+        "tab_clicked": true,
+        "expect_hits": {
+          "目标绩效": true
+        },
+        "forbid_hits": {
+          "未配置": true
+        },
+        "data_scope_context": "未配置 | 未配置 | 未配置 | 查看（1 条）目标绩效 | 未配置 | 未配置 | 未配置 | 未配置 | 未配置",
+        "screenshot": "tools\\.staging_rounds\\round_001_screenshots\\ps1228_sub_domain_contains.png",
+        "ok": true
+      },
+      {
+        "name": "ps1232_sub_domain_contains",
+        "permission_set_id": 1232,
+        "tab_clicked": true,
+        "expect_hits": {
+          "时间管理": true
+        },
+        "forbid_hits": {
+          "未配置": true
+        },
+        "data_scope_context": "未配置 | 未配置 | 未配置 | 查看（1 条）时间管理 | 未配置 | 未配置 | 未配置 | 未配置 | 未配置",
+        "screenshot": "tools\\.staging_rounds\\round_001_screenshots\\ps1232_sub_domain_contains.png",
+        "ok": true
+      }
+    ]
+  },
+  "note": "Backfilled: v84 row_scope fix + chunk cycle gate (deployed via mx80 v5, verified PASS)",
+  "round": 1
+}

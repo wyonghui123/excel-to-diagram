@@ -363,14 +363,14 @@ def parse_audit_action_config(data: Dict[str, Any]) -> "AuditActionConfig":
 
 def parse_audit_config(data: Dict[str, Any]) -> "AuditConfig":
     """解析审计日志配置"""
-    from meta.core.models import AuditConfig, AuditActionConfig
+    from meta.core.models import AuditConfig, AuditActionConfig, AuditHistoryConfig
     if not data:
         return AuditConfig()
-    
+
     config = AuditConfig(
         enabled=data.get("enabled", True),
     )
-    
+
     if "create" in data:
         config.create = parse_audit_action_config(data["create"])
     if "update" in data:
@@ -379,11 +379,18 @@ def parse_audit_config(data: Dict[str, Any]) -> "AuditConfig":
         config.delete = parse_audit_action_config(data["delete"])
     if "associate" in data:
         config.associate = parse_audit_action_config(data["associate"])
-    
+
     if "actions" in data:
         for action_name, action_data in data["actions"].items():
             config.actions[action_name] = parse_audit_action_config(action_data)
-    
+
+    # [FIX BUG-V048 2026-07-06 dev agent] 解析 audit.history (V046 yaml 配置的入口)
+    # 例: audit: { history: { excluded_child_object_types: [sub_domain, ...] } }
+    if "history" in data and isinstance(data["history"], dict):
+        config.history = AuditHistoryConfig(
+            excluded_child_object_types=list(data["history"].get("excluded_child_object_types", []) or [])
+        )
+
     return config
 
 
@@ -493,6 +500,7 @@ def parse_value_help(data: Dict[str, Any]) -> Optional["ValueHelpConfig"]:
                 out_mappings=out_mappings,
                 cascade_select=cascade_selects,
                 enabled_condition=bd.get("enabled_condition", ""),
+                exclude_self=bd.get("exclude_self", False),
             )
 
         presentation = None
@@ -814,6 +822,9 @@ def parse_ui_detail_tab(data: Dict[str, Any]) -> 'UIDetailTab':
         association=data.get("association", ""),
         widget=data.get("widget", ""),
         actions=actions,
+        endpoint=data.get("endpoint", ""),
+        icon=data.get("icon", ""),
+        props=data.get("props", {}),
     )
 
 
@@ -1493,13 +1504,13 @@ def parse_state_transition(data: Dict[str, Any]) -> MetaStateTransition:
     """解析状态转换规则"""
     scope_str = data.get("scope", "object").lower()
     scope = RULE_SCOPE_MAP.get(scope_str, RuleScope.OBJECT)
-    
+
     triggers = _parse_triggers(data.get("triggers", []))
-    
+
     side_effects = []
     for se in data.get("side_effects", []):
         side_effects.append(parse_state_transition_side_effect(se))
-    
+
     return MetaStateTransition(
         id=data.get("id", ""),
         name=data.get("name", ""),
@@ -1512,6 +1523,8 @@ def parse_state_transition(data: Dict[str, Any]) -> MetaStateTransition:
         state_field=data.get("state_field", "status"),
         from_states=data.get("from_states", []),
         to_state=data.get("to_state", ""),
+        # [Spec 22 FR-002 2026-09-13] 引用通用 action 池的 action_id（权限码）
+        action_ref=data.get("action_ref", ""),
         allowed_roles=data.get("allowed_roles", []),
         auto_actions=data.get("auto_actions", []),
         validation_expression=data.get("validation_expression", ""),
@@ -2339,6 +2352,37 @@ def get_meta_object(object_id: str) -> Optional['MetaObject']:
 def get_yaml_schema_dir() -> str:
     current_dir = Path(__file__).parent.parent
     return str(current_dir / "schemas")
+
+
+# [FIX 2026-07-22] 层级值帮助 picker: 读 hierarchies.yaml 的 biz_hierarchy
+_BIZ_HIERARCHY_CACHE = None
+
+
+def get_biz_hierarchy() -> Optional[Dict[str, Any]]:
+    """读 hierarchies.yaml 的 biz_hierarchy 定义
+
+    Returns: {"id": "biz_hierarchy", "levels": [{object, foreign_key_field, ...}, ...], ...}
+    """
+    global _BIZ_HIERARCHY_CACHE
+    if _BIZ_HIERARCHY_CACHE is not None:
+        return _BIZ_HIERARCHY_CACHE
+
+    schema_dir = get_yaml_schema_dir()
+    hierarchies_path = Path(schema_dir) / "hierarchies.yaml"
+    if not hierarchies_path.exists():
+        return None
+
+    try:
+        with open(hierarchies_path, 'r', encoding='utf-8') as f:
+            doc = yaml.safe_load(f) or {}
+        for h in doc.get('hierarchies', []) or []:
+            if h.get('id') == 'biz_hierarchy':
+                _BIZ_HIERARCHY_CACHE = h
+                return h
+    except Exception:
+        return None
+
+    return None
 
 
 def _infer_value_help_from_field(data: Dict[str, Any], ui_annotation) -> Optional["ValueHelpConfig"]:

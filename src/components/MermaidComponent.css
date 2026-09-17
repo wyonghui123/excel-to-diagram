@@ -761,3 +761,330 @@
   fill-opacity: 0 !important;
   stroke: none !important;
 }
+
+/* ============================================================
+   [CTX 2026-08-07] 右键上下文菜单 —— [FIX 2026-08-22] 缺失样式从 feat/worktree 补回
+   merge 时丢失该块, 导致 .mermaid-ctx-menu position:static、被容器 overflow 裁剪、
+   被图例面板盖住, 右键菜单"弹出但看不见". 见 probe_menu_vis.py 诊断.
+   ============================================================ */
+.mermaid-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
+.mermaid-ctx-menu .ctx-menu-header {
+  padding: 6px 12px;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.mermaid-ctx-menu .ctx-menu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 2px 0;
+}
+.mermaid-ctx-menu .ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: #333;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-item:hover {
+  background: #f0f5ff;
+  color: #1a73e8;
+}
+/* [CTX-COLOR 2026-08-11] 颜色设置子菜单项样式: 小标题 / 当前值勾选 / 返回 / 子菜单箭头 */
+.mermaid-ctx-menu .ctx-menu-header-sm {
+  padding: 6px 16px 2px;
+  color: #b0b0b0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.mermaid-ctx-menu .ctx-menu-check {
+  flex: 0 0 14px;
+  color: #1a73e8;
+  font-size: 13px;
+  font-weight: bold;
+}
+.mermaid-ctx-menu .ctx-menu-check-placeholder {
+  flex: 0 0 14px;
+}
+.mermaid-ctx-menu .ctx-menu-label {
+  flex: 1;
+}
+.mermaid-ctx-menu .ctx-menu-submenu-arrow {
+  color: #bbb;
+  font-size: 16px;
+  line-height: 1;
+}
+.mermaid-ctx-menu .ctx-menu-item--back {
+  color: #1a73e8;
+}
+.mermaid-ctx-menu .ctx-menu-item--submenu {
+  font-weight: 500;
+}
+/* [UX 2026-08-11] 悬停展开的子菜单面板: 独立滑出面板, 与父菜单同级浮层 */
+.mermaid-ctx-menu .ctx-submenu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 160px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* ============================================================
+   [DBG 2026-08-08] 浮动调试面板 —— [FIX 2026-08-22] 从 worktree 补回纯样式
+   (主仓 MermaidComponent 有用到 .mermaid-debug-panel, 但 css 缺失此样式块)
+   ============================================================ */
+.mermaid-debug-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9998;
+  width: 240px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  font-size: 13px;
+  user-select: none;
+  overflow: hidden;
+}
+.mermaid-debug-panel .debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #1a73e8;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mermaid-debug-panel .debug-panel-close {
+  cursor: pointer;
+  opacity: 0.8;
+  font-size: 14px;
+  line-height: 1;
+}
+.mermaid-debug-panel .debug-panel-close:hover {
+  opacity: 1;
+}
+.mermaid-debug-panel .debug-panel-body {
+  padding: 8px;
+}
+.mermaid-debug-panel .debug-section {
+  margin-bottom: 8px;
+}
+.mermaid-debug-panel .debug-section-title {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+.mermaid-debug-panel .debug-btn {
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 2px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #f8f8f8;
+  cursor: pointer;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.mermaid-debug-panel .debug-btn:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+.mermaid-debug-panel .debug-panel-hint {
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  padding-top: 4px;
+  border-top: 1px solid #f0f0f0;
+  margin-top: 4px;
+}
+
+/* [FIX 2026-09-04] 渲染覆盖层 / 折叠缓冲层 / 角落等待指示器 样式集.
+   MermaidComponent.vue 模板 2003+ 行已定义 overlay/loading/fold-buffer DOM 元素与 is-rendering class,
+   但本 css 文件 (release/integrated-main 分支基线) 从未包含这些规则, 导致:
+   1) "图表渲染中" 转圈 overlay 永不可见 (display block 无绝对定位);
+   2) .is-rendering / .is-fold-rendering class 加上后无 svg opacity:0, mermaid.run() 期间新 svg 堆叠中心可见;
+   3) 折叠缓冲层 clone 后无视觉样式, 缓冲层与新 svg 同时可见错位;
+   4) 角落小指示器无 box / 阴影.
+   用户反馈: 切换展开子领域/服务模块/业务对象时, 长时间"裸渲染前情况", 节点堆叠可见.
+   修复: 追加完整覆盖层 + 缓冲层 + 角落指示器 + keyframes 规则集.
+   历史定义见 e40a2f6 (chart 嵌入图表视图 + 布局控制/展开/配色/隐藏增量修复). */
+
+/* 渲染期隐藏未完成 SVG (元素堆叠在中心), 渲染完成后淡入 (transition). */
+.mermaid-content.is-rendering svg {
+  opacity: 0 !important;
+}
+/* [FOLD-OVERLAP 2026-08-12] 折叠渲染期间同等隐藏新 SVG (与 is-rendering 效果一致),
+   但不触发 loading 遮罩. 根因: 折叠渲染跳过遮罩后, 新 svg 在 mermaid.run() 布局完成前
+   全部堆叠在中心且完全可见, 用户透过缓冲层看到底层元素重叠. */
+.mermaid-content.is-fold-rendering svg {
+  opacity: 0 !important;
+}
+.mermaid-content svg {
+  transition: opacity 0.3s ease;
+}
+
+/* 整屏渲染覆盖层: 转圈 + "图表渲染中...", 覆盖未完成 svg
+   positioned inside mermaid-wrapper, higher z than draggable-area (z=2). */
+.mermaid-rendering-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  color: #909399;
+  font-size: 14px;
+  background-color: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+}
+.rendering-fade-enter-active,
+.rendering-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.rendering-fade-enter-from,
+.rendering-fade-leave-to {
+  opacity: 0;
+}
+
+/* [A1 2026-08-10] 折叠缓冲层: 折叠/展开渲染期间克隆的旧图占位
+   与 mermaid-rendering-overlay 同层定位 (absolute, 覆盖内容区), 但不显示转圈,
+   用于"不闪整屏 loading + 新图就绪后交叉淡出"的平滑过渡.
+   z-index: 2 = 与 .draggable-area 同层, 低于 overlay (3), 避免覆盖 loading 转圈. */
+.mermaid-fold-buffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+  background-color: transparent;
+  transition: opacity 0.3s ease;
+}
+.mermaid-fold-buffer svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+.mermaid-fold-buffer--leaving {
+  opacity: 0 !important;
+}
+
+/* [UX 2026-08-13] 折叠/展开渲染的轻量等待反馈: 延迟 500ms 显示的右上角小指示器.
+   不遮罩整图 (旧图缓冲层持续可见), 长耗时渲染时给用户"正在渲染"信号, 避免误以为没点上. */
+.mermaid-fold-loading {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background-color: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e7ed;
+  border-radius: 16px;
+  color: #606266;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 4;
+  pointer-events: none;
+  user-select: none;
+}
+.mermaid-fold-loading-icon {
+  animation: mermaid-loading-spin 1s linear infinite;
+}
+.mermaid-fold-loading-text {
+  white-space: nowrap;
+}
+.fold-loading-fade-enter-active,
+.fold-loading-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fold-loading-fade-enter-from,
+.fold-loading-fade-leave-to {
+  opacity: 0;
+}
+
+/* 动态转圈: 强制旋转动画 (不依赖 Element Plus 的 is-loading) */
+.mermaid-loading-icon {
+  animation: mermaid-loading-spin 1s linear infinite;
+}
+@keyframes mermaid-loading-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 循环递增的 loading dots: 三个圆点依次弹起/放大, 循环往复 */
+.mermaid-loading-text {
+  display: inline-flex;
+  align-items: baseline;
+}
+.mermaid-loading-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 3px;
+}
+.mermaid-loading-dots i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #909399;
+  animation: mermaid-dot-bounce 1.2s infinite ease-in-out;
+}
+.mermaid-loading-dots i:nth-child(1) { animation-delay: 0s; }
+.mermaid-loading-dots i:nth-child(2) { animation-delay: 0.2s; }
+.mermaid-loading-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes mermaid-dot-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.4);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

@@ -11,6 +11,7 @@ import os
 from typing import Any, Dict
 
 from flask import g
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,7 @@ def function_subscription_list_handler(params: Dict[str, Any], context: Dict[str
 
     try:
         from meta.core.datasource import get_data_source
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'architecture.db',
-        )
+        db_path = get_meta_db_path()
         ds = get_data_source("sqlite", database=db_path)
 
         rows = ds.execute(

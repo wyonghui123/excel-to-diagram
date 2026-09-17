@@ -22,16 +22,27 @@ export const BLOCK_DIAGRAM_STYLES = {
     fontSize: 16
   },
   classDefs: {
-    default: 'fill:#fafafa,stroke:#666666,stroke-width:1px,color:#000000,font-size:24px,text-align:center',
-    node: 'text-align:center,font-size:24px,font-weight:bold',
+    // [FIX 2026-08-02] 节点字号 24px→16px: classDef default 对所有无显式 class 的节点生效,
+    //   classDef node 由 :::node 标记应用, 两处 24px 导致 BO/SM 图节点字体过大 (用户反馈"字体很大")。
+    //   容器标题仍为 24px (CSS 注入 #mermaid-italic-style), 16px 节点 + 24px 容器形成正确层级。
+    default: 'fill:#fafafa,stroke:#666666,stroke-width:1px,color:#000000,font-size:16px,text-align:center',
+    // [FONT 2026-08-09] 业务对象节点字号 +20% (16px→19.2px), 保持加粗.
+    node: 'text-align:center,font-size:19.2px,font-weight:bold',
+    // [TITLE 2026-08-09] 折叠聚合节点 (领域/子领域/服务模块) 字号放大 50% (16px→24px).
+    // [FONT 2026-08-09] 折叠节点文字改斜体(font-style:italic) 并显式 font-weight:normal,
+    //   覆盖 classDef node 生成的 `.node > * { font-weight:bold }` (作用于所有结构类为 node 的元素),
+    //   否则折叠节点仍显示加粗 (用户要求不用 strong).
+    collapseNode: 'text-align:center,font-size:24px,font-style:italic,font-weight:normal',
     container: 'fill:#ffffff,stroke:#000000,stroke-width:2px',
     edgeLabel: 'color:#000000,fill:none,stroke:none,font-size:16px'
   }
 }
 
 export function useBlockDiagramStyle() {
-  const getNodeStyle = (color, textColor = BLOCK_DIAGRAM_STYLES.node.textColor) => {
-    return `fill:${color},stroke:#333333,stroke-width:2px,color:${textColor}`
+  const getNodeStyle = (color, textColor = BLOCK_DIAGRAM_STYLES.node.textColor, stroke = '#333333', strokeWidth = 2, dashArray = null) => {
+    // [FIX 2026-08-02] 支持自定义边框: 中心范围节点用粗虚线边框区分 (fill 保持分组色)
+    const dashPart = dashArray ? `,stroke-dasharray:${dashArray}` : ''
+    return `fill:${color},stroke:${stroke},stroke-width:${strokeWidth}px,color:${textColor}${dashPart}`
   }
 
   const getContainerStyle = (fillColor) => {
@@ -47,6 +58,7 @@ export function useBlockDiagramStyle() {
     let code = ''
     code += `\nclassDef default ${BLOCK_DIAGRAM_STYLES.classDefs.default}\n`
     code += `\nclassDef node ${BLOCK_DIAGRAM_STYLES.classDefs.node}\n`
+    code += `\nclassDef collapseNode ${BLOCK_DIAGRAM_STYLES.classDefs.collapseNode}\n`
     code += `\nclassDef edgeLabel ${BLOCK_DIAGRAM_STYLES.classDefs.edgeLabel}\n`
     return code
   }

@@ -38,7 +38,7 @@ def ds():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             token_version INTEGER DEFAULT 0
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -48,7 +48,7 @@ def ds():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
@@ -56,7 +56,7 @@ def ds():
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, group_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -65,7 +65,7 @@ def ds():
             is_system INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -83,20 +83,20 @@ def ds():
             scope TEXT DEFAULT 'all',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE role_permissions (
+        CREATE TABLE permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
             UNIQUE(role_id, permission_id)
         );
-        CREATE TABLE role_data_permissions (
+        CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT
         );
-        CREATE TABLE group_data_permissions (
+        CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             resource_type TEXT,
@@ -163,18 +163,18 @@ def _insert_user(ds, username='u', token_version=0):
 
 def _insert_group(ds, name='G', code='g', parent_id=None, manager_id=None):
     ds.execute(
-        "INSERT INTO user_groups (name, code, parent_id, manager_id, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
+        "INSERT INTO orgs (name, code, parent_id, manager_id, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
         [name, code, parent_id, manager_id]
     )
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_role(ds, code='R', name='R', priority=0, is_system=0):
     ds.execute(
-        "INSERT INTO roles (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO permission_sets (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, ?)",
         [code, name, 'desc', priority, is_system]
     )
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_permission(ds, code='P', resource_type='product', action='read', scope='all'):
@@ -247,7 +247,7 @@ def test_permission_revoke_invalidates_token(ds, perm_svc, token_svc):
     perm_svc.assign_role(u, r)
     g = perm_svc._get_or_create_personal_group(u)
     perm_svc._ensure_user_in_group(u, g)
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
     assert perm_svc.has_permission(u, 'revoke.perm') is True
 
     # 2) 验证 token 缓存
@@ -269,7 +269,7 @@ def test_wildcard_grant_and_revoke(ds, perm_svc):
     perm_svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='admin_role', name='Admin')
     p = _insert_permission(ds, code='*')
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
     perm_svc.assign_role(u, r)
     # 任意权限通过
     assert perm_svc.has_permission(u, 'any.permission') is True
@@ -294,11 +294,11 @@ def test_multiple_roles_with_overlapping_permissions(ds, perm_svc):
     p2 = _insert_permission(ds, code='shared.write')
     p3 = _insert_permission(ds, code='unique.perm')
     # r1: p1 + p3
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r1, p1])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r1, p3])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r1, p1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r1, p3])
     # r2: p1 + p2
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r2, p1])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r2, p2])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r2, p1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r2, p2])
     perm_svc.assign_role(u, r1)
     perm_svc.assign_role(u, r2)
     # 用户应有所有 3 个权限（去重后）
@@ -323,7 +323,7 @@ def test_disabled_role_cannot_be_used(ds, perm_svc):
     perm_svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='sys_role', name='System', is_system=1)
     p = _insert_permission(ds, code='sys.perm')
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
     perm_svc.assign_role(u, r)
     # 仍可使用
     assert perm_svc.has_permission(u, 'sys.perm') is True
@@ -342,7 +342,7 @@ def test_data_permissions_via_groups(ds, group_svc, perm_svc):
     group_svc.add_group_role(g, r)
     # 角色有 data permissions
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO permission_set_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r]
     )
     # 通过 group_svc 聚合
@@ -362,7 +362,7 @@ def test_data_permissions_isolated_between_groups(ds, group_svc):
     r1 = _insert_role(ds, code='r_iso1', name='R1')
     group_svc.add_group_role(g1, r1)
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO permission_set_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r1]
     )
     perms = group_svc.get_user_effective_data_permissions_via_groups(u)
@@ -436,7 +436,7 @@ def test_user_without_personal_group_gets_one(ds, perm_svc):
     assert perm_svc.assign_role(u, r) is True
     # 验证：只有 1 个 personal group
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM user_groups WHERE code = ?", [f'personal_group_user_{u}']
+        "SELECT COUNT(*) FROM orgs WHERE code = ?", [f'personal_group_user_{u}']
     )
     assert cursor.fetchone()[0] == 1
 
@@ -493,7 +493,7 @@ def test_e2e_permission_lifecycle(ds, perm_svc, token_svc):
     # 3) 关联权限
     g = perm_svc._get_or_create_personal_group(u)
     perm_svc._ensure_user_in_group(u, g)
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
 
     # 4) 验证权限
     assert perm_svc.has_permission(u, 'e2e.perm') is True

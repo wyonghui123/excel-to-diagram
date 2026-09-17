@@ -17,12 +17,14 @@
             :center-scope-bo-codes="centerScopeBoCodes"
             :business-objects="businessObjects"
             :center-scope-highlight="configStore.centerScopeHighlight"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
@@ -40,12 +42,14 @@
             :center-scope="configStore.centerScope"
             :center-scope-highlight="configStore.centerScopeHighlight"
             :business-objects="businessObjects"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
@@ -170,6 +174,13 @@
 
 <script>
 import { ref, computed } from 'vue'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 import { AppButton } from '../../../../components/common'
 import { AppIcon } from '../../../../components/common/AppIcon'
 import CenterDomainSelect from '../../../../components/CenterDomainSelect.vue'
@@ -224,13 +235,10 @@ export default {
     const enableLegacyMode = ref(false)
 
     const passedDomainProducts = computed(() => {
-      console.log('[StepConfig] computed passedDomainProducts')
-      console.log('[StepConfig] props.domainProducts (from index.vue, filtered):', props.domainProducts?.length)
-      console.log('[StepConfig] props.previewData?.domainProducts (original):', props.previewData?.domainProducts?.length)
       // 优先使用 props.domainProducts（从 index.vue 传入的 filteredDomainProducts）
       // 只有当 domainProducts 为空时才 fallback 到 previewData?.domainProducts
-      return props.domainProducts?.length > 0 
-        ? props.domainProducts 
+      return props.domainProducts?.length > 0
+        ? props.domainProducts
         : (props.previewData?.domainProducts || [])
     })
     const passedCenterScope = computed(() => configStore.centerScope || [])
@@ -322,7 +330,7 @@ export default {
     return {
       localLayoutControlConfig: {
         enabled: true,
-        overallDirection: 'LR',
+        overallDirection: 'TB',
         groups: [],
         engine: 'elk',
         preserveOrder: true
@@ -332,21 +340,15 @@ export default {
   watch: {
     'configStore.centerScope': {
       immediate: true,
-      handler(newVal) {
-        console.log('[StepConfig] WATCH configStore.centerScope:', newVal?.length, 'newVal:', newVal?.slice?.(0, 5))
-      }
+      handler() {}
     },
     'configStore.centerScopeMarkers': {
       immediate: true,
-      handler(newVal) {
-        console.log('[StepConfig] WATCH configStore.centerScopeMarkers:', 'domains:', newVal?.domains?.size, 'subDomains:', newVal?.subDomains?.size, 'serviceModules:', newVal?.serviceModules?.size)
-      }
+      handler() {}
     },
     'configStore.centerScopeColor': {
       immediate: true,
-      handler(newVal, oldVal) {
-        console.log('[StepConfig] WATCH configStore.centerScopeColor:', 'old:', oldVal, 'new:', newVal)
-      }
+      handler() {}
     }
   },
   methods: {
@@ -372,9 +374,9 @@ export default {
       }
     },
     handleLayoutControlConfigUpdate(value) {
-      console.log('[StepConfig] handleLayoutControlConfigUpdate:', JSON.stringify(value, null, 2))
+      _dbgLog('[StepConfig] handleLayoutControlConfigUpdate:', JSON.stringify(value, null, 2))
       this.localLayoutControlConfig = value
-      console.log('[StepConfig] calling configStore.updateLayoutControlConfig')
+      _dbgLog('[StepConfig] calling configStore.updateLayoutControlConfig')
       this.configStore.updateLayoutControlConfig(value)
     },
     handleGenerate() {
@@ -390,7 +392,7 @@ export default {
       this.configStore.updateAssignmentMode(this.enableLegacyMode ? 'legacy' : 'auto')
     },
     handleAddGroup() {
-      console.log('[StepConfig] handleAddGroup - forwarding to layout control')
+      _dbgLog('[StepConfig] handleAddGroup - forwarding to layout control')
       const currentConfig = this.configStore.layoutControlConfig || this.localLayoutControlConfig
       const newGroup = {
         id: `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -416,7 +418,7 @@ export default {
       this.handleLayoutControlConfigUpdate(newConfig)
     },
     handleAutoGroup() {
-      console.log('[StepConfig] handleAutoGroup - triggering auto group')
+      _dbgLog('[StepConfig] handleAutoGroup - triggering auto group')
       if (this.$refs.layoutSelectorRef) {
         this.$refs.layoutSelectorRef.triggerAutoGroup()
       }

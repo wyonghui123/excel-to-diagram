@@ -44,6 +44,23 @@ class ActionType(Enum):
     CUSTOM = "custom"
 
 
+class InstanceScope(Enum):
+    """[Spec 21 PM 反馈 2026-09-12] 动作的语义作用域
+
+    与 ActionType（业务分类）正交：
+      - ActionType 决定矩阵列头分块（CRUD / 批量 / 业务）
+      - InstanceScope 决定列头副标签（[对象级] vs [实例级]）
+
+    取值：
+      - OBJECT:  对象级动作（对该资源类型生效，无需指定具体实例）
+                  例: 创建前无实例、列表入口、搜索、管理
+      - INSTANCE: 实例级动作（对资源类型的具体实例生效，需配合数据范围限定实例集合）
+                  例: 读/更新/删除/审批/分配/授权/撤销 等
+    """
+    OBJECT = "object"
+    INSTANCE = "instance"
+
+
 class ValidationSeverity(Enum):
     ERROR = "error"
     WARNING = "warning"

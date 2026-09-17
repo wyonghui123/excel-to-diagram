@@ -89,7 +89,7 @@ class TestBuildCountRelationsExpr:
         """user_group + self: user_group_members WHERE group_id = id"""
         sql = build_count_relations_expr("user_groups", "user_group", scope="self")
         assert sql is not None
-        assert "FROM user_group_members" in sql
+        assert "FROM org_members" in sql
         assert "user_group_members.group_id = user_groups.id" in sql
 
     def test_domain_descendants_joins_three_tables(self):

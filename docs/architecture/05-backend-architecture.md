@@ -373,7 +373,7 @@ ConstraintEngine._check_constraint() 路由
 | **变更通知** | `change_notification_service.py`, `websocket_notifier.py`, `webhook_service.py` [NEW] | WebSocket 实时推送 + 出站 webhook | **OBSERVER** |
 | **过滤与条件** | `filter_service.py` | 过滤器变体管理、条件表达式解析 | — |
 | **字段与实体** | `field_service.py`, `entity_service.py`, `field_policy_engine.py` [NEW], `field_policy_validation.py` [NEW], `computation_service.py` [NEW], `i18n_service.py` [NEW] | 字段元数据查询、字段策略执行、公式字段计算、多语种 | STRATEGY |
-| **层级与路径** | `hierarchy_service.py`, `hierarchy_validation_service.py` [NEW], `config_driven_hierarchy_filter.py` [NEW], `management_dimension_engine.py` [NEW], `runtime_dimension_resolver.py` [NEW] | 层级树构建、路径计算、维度范围运行时解析 | — |
+| **层级与路径** | `hierarchy_service.py`, `hierarchy_validation_service.py` [NEW], `config_driven_hierarchy_filter.py` [NEW], `permission_dimension_engine.py` [NEW], `runtime_dimension_resolver.py` [NEW] | 层级树构建、路径计算、维度范围运行时解析 | — |
 | **[NEW] 安全/可观测性** | `rate_limiter.py`, `trace_service.py`, `cache_monitor.py`, `object_identity_service.py`, `redundancy_registry.py` [NEW], `consistency_guard.py` [NEW], `date_format_service.py` [NEW] | API 限流、链路追踪、缓存监控、对象身份、冗余/一致性守卫 | FACADE |
 
 **[NEW] 子包**：

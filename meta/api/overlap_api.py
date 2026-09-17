@@ -7,7 +7,7 @@ Overlap Detection API — 重复配置检测 API
 可能配相同字段，UI 需要显示警告。
 
 端点：
-    GET  /api/v1/roles/<int:role_id>/overlaps
+    GET  /api/v1/roles/<int:permission_set_id>/overlaps
         - 列出该角色的所有重叠加
         - Query 参数：
             - resource_type: 按资源类型过滤
@@ -24,7 +24,7 @@ Overlap Detection API — 重复配置检测 API
                 }
             }
 
-    GET  /api/v1/roles/<int:role_id>/overlaps/summary
+    GET  /api/v1/roles/<int:permission_set_id>/overlaps/summary
         - 仅返回摘要（轻量级）
 """
 import os
@@ -40,6 +40,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from meta.core.dim_scope_overlap_detector import get_overlap_detector
+from meta.api._deprecation import v1_deprecated
 
 logger = logging.getLogger(__name__)
 
@@ -53,18 +54,19 @@ def _login_required(f):
     def wrapper(*args, **kwargs):
         from meta.core.auth_helpers import is_authenticated
         if not is_authenticated():
-            return jsonify({'success': False, 'error': '未登录'}), 401
+            return jsonify({'success': False, 'message': '未登录'}), 401
         return f(*args, **kwargs)
     return wrapper
 
 
-def get_role_overlaps(role_id: int):
+@v1_deprecated(migrated_to='/api/v2/roles/<int:permission_set_id>/overlaps')
+def get_role_overlaps(permission_set_id: int):
     """获取角色的所有重叠加"""
     try:
         resource_type = request.args.get('resource_type', None)
         detector = get_overlap_detector()
-        overlaps = detector.detect_overlaps(role_id, resource_type=resource_type)
-        summary = detector.get_overlap_summary(role_id)
+        overlaps = detector.detect_overlaps(permission_set_id, resource_type=resource_type)
+        summary = detector.get_overlap_summary(permission_set_id)
         return jsonify({
             'success': True,
             'data': {
@@ -74,24 +76,31 @@ def get_role_overlaps(role_id: int):
         })
     except Exception as e:
         logger.error(f"get_role_overlaps failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
-def get_role_overlap_summary(role_id: int):
+@v1_deprecated(migrated_to='/api/v2/roles/<int:permission_set_id>/overlaps/summary')
+def get_role_overlap_summary(permission_set_id: int):
     """获取角色的重叠加摘要（轻量级）"""
     try:
         detector = get_overlap_detector()
-        summary = detector.get_overlap_summary(role_id)
+        summary = detector.get_overlap_summary(permission_set_id)
         return jsonify({
             'success': True,
             'data': summary,
         })
     except Exception as e:
         logger.error(f"get_role_overlap_summary failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 # v1.4 修复：用 helper 注册 v1+v2 双路由（v1 保留 6 个月过渡）
 from meta.api._dual_route import add_dual_routes
-add_dual_routes(overlap_bp, '/roles/<int:role_id>/overlaps', get_role_overlaps, ['GET'])
-add_dual_routes(overlap_bp, '/roles/<int:role_id>/overlaps/summary', get_role_overlap_summary, ['GET'])
+add_dual_routes(overlap_bp, '/roles/<int:permission_set_id>/overlaps', get_role_overlaps, ['GET'])
+add_dual_routes(overlap_bp, '/roles/<int:permission_set_id>/overlaps/summary', get_role_overlap_summary, ['GET'])
+
+# [FIX 2026-09-01 Spec16 Plan D] Plan D 重构期间, 路由前缀从 /roles/ 改为 /permission-sets/
+# 前端 permissionService.js:584 调用的是新名, 但 overlap_api 当时只改了注释没改 add_dual_routes
+# 这里补上 /permission-sets/<id>/overlaps 别名(同步 v1+v2)
+add_dual_routes(overlap_bp, '/permission-sets/<int:permission_set_id>/overlaps', get_role_overlaps, ['GET'])
+add_dual_routes(overlap_bp, '/permission-sets/<int:permission_set_id>/overlaps/summary', get_role_overlap_summary, ['GET'])

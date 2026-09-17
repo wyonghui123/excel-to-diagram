@@ -8,6 +8,7 @@ SAP CAP function / Palantir Function 模式。
 import logging
 import os
 from typing import Any, Dict
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,7 @@ def _get_manager():
     """复用 stats_api.py 的 manager 构造模式"""
     from meta.core.aggregate_manager import AggregateManager
     from meta.core.datasource import get_data_source
-    db_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db',
-    )
+    db_path = get_meta_db_path()
     ds = get_data_source("sqlite", database=db_path)
     manager = AggregateManager(ds)
     manager.register_all()

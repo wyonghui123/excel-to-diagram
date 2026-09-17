@@ -57,6 +57,40 @@ import urllib.error
 from typing import Optional, Any, Dict, List, Union
 from pathlib import Path
 
+# [FIX 2026-09-05] dev-login 后端端口不再硬编码: 优先 BACKEND_PORT 环境变量,
+#   默认读 scripts/ports.json (端口唯一真源), 兜底 3010
+#   (service_manager 启动后端时传 AGENT_PORT/BACKEND_PORT)
+def _resolve_backend_port():
+    env_port = os.environ.get("BACKEND_PORT")
+    if env_port:
+        return env_port
+    try:
+        import json as _json
+        _ports_file = Path(__file__).resolve().parent.parent / "scripts" / "ports.json"
+        with open(_ports_file, "r", encoding="utf-8") as f:
+            return str(_json.load(f).get("backend", 3010))
+    except Exception:
+        return "3010"
+
+
+def _resolve_frontend_port():
+    """[P0 2026-09-05 端口单一真源] FE 端口默认读 scripts/ports.json（此前硬编码 3004 已漂移）"""
+    env_port = os.environ.get("FRONTEND_PORT")
+    if env_port:
+        return env_port
+    try:
+        import json as _json
+        _ports_file = Path(__file__).resolve().parent.parent / "scripts" / "ports.json"
+        with open(_ports_file, "r", encoding="utf-8") as f:
+            return str(_json.load(f).get("frontend", 3006))
+    except Exception:
+        return "3006"
+
+
+_BACKEND_PORT = _resolve_backend_port()
+_FRONTEND_PORT = _resolve_frontend_port()
+DEV_LOGIN_URL = f"http://localhost:{_BACKEND_PORT}/api/v1/auth/dev-login?username={{username}}"
+
 try:
     from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 except ImportError:
@@ -237,7 +271,7 @@ class PlaywrightCLI:
             是否成功
         """
         result = self.request(
-            f"http://localhost:3010/api/v1/auth/dev-login?username={username}"
+            DEV_LOGIN_URL.format(username=username)
         )
 
         if "error" in result:
@@ -265,7 +299,7 @@ class PlaywrightCLI:
     def authenticated_navigate(
         self,
         target_path: str,
-        base_url: str = "http://localhost:3004",
+        base_url: str = None,
         wait_for_selector: str = None,
         wait_for_function: str = None,
         timeout: int = 15000
@@ -279,7 +313,7 @@ class PlaywrightCLI:
 
         Args:
             target_path: 目标路径，如 '/system/archdata'
-            base_url: 前端基础 URL
+            base_url: 前端基础 URL（默认读 scripts/ports.json frontend，可用 FRONTEND_PORT 覆盖）
             wait_for_selector: 等待指定的 CSS 选择器出现（支持逗号分隔的多选择器）
             wait_for_function: 等待指定的 JS 表达式返回真值
             timeout: 超时时间 (ms)
@@ -287,6 +321,8 @@ class PlaywrightCLI:
         Returns:
             Page 对象
         """
+        if base_url is None:
+            base_url = f"http://localhost:{_FRONTEND_PORT}"
         t0 = time.time()
         if self.telemetry:
             self.telemetry.page_visited = target_path
@@ -296,7 +332,7 @@ class PlaywrightCLI:
 
         # Step 1: 浏览器访问 dev-login 设 cookie
         page.goto(
-            "http://localhost:3010/api/v1/auth/dev-login?username=admin",
+            DEV_LOGIN_URL.format(username="admin"),
             wait_until="domcontentloaded",
             timeout=10000
         )
@@ -1898,7 +1934,7 @@ if __name__ == "__main__":
         # 测试 goto
         print("[2/3] 测试页面导航...")
         try:
-            cli.goto("http://localhost:3004/")
+            cli.goto(f"http://localhost:{_FRONTEND_PORT}/")
             print("[OK] 页面加载成功")
         except Exception as e:
             print(f"[FAIL] 页面加载失败: {e}")

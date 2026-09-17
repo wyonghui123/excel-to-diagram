@@ -13,6 +13,7 @@ from meta.services.rate_limiter import rate_limiter
 from meta.services.token_blacklist_service import token_blacklist_service
 from meta.core.datasource import get_data_source
 import os
+from meta.core.db_path import get_meta_db_path
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/v1/auth')
 
@@ -41,7 +42,9 @@ def init_auth_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        # [INCIDENT-2026-09-03] 同 user_authenticate.py: 相对路径 fallback 依赖 cwd,
+        # staging 上指向旧库导致登录崩溃, 优先用环境变量。
+        db_path = os.environ.get('SQLITE_DB_PATH') or get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     _auth_provider = LocalAuthProvider(_data_source)
 
@@ -204,11 +207,11 @@ def dev_login():
 
     cursor2 = _data_source.execute(
         "SELECT r.name, r.code, p.code "
-        "FROM roles r "
-        "JOIN group_roles gr ON r.id = gr.role_id "
-        "JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
+        "FROM permission_sets r "
+        "JOIN org_permission_sets gr ON r.id = gr.permission_set_id "
+        "JOIN org_members ugm ON gr.org_id = ugm.org_id "
         "JOIN users u ON u.id = ugm.user_id "
-        "LEFT JOIN role_permissions rp ON r.id = rp.role_id "
+        "LEFT JOIN permission_set_permissions rp ON r.id = rp.permission_set_id "
         "LEFT JOIN permissions p ON rp.permission_id = p.id "
         "WHERE u.username = ?", [username]
     )

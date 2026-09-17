@@ -1,0 +1,30 @@
+[Unit]
+Description=Deploy Service (V007.65 deploy_service V0.3 - real deploy.sh worker, L14.3)
+Documentation=https://internal/docs/L14-deploy-orchestration
+# [L14.3] V0.3 deploy_worker 接真实 deploy.sh, 调用方式:
+#   bash $DEPLOY_SCRIPT_DIR/deploy.sh --version X --port Y --zip Z --no-systemd
+# 状态机 / token / rollback / cancel / history 全部可用
+After=network.target
+# [L14] 端口 9215: 9205 已被 error_aggregator_service 占用 (2026-07-14 实测)
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/miniconda3-py39/bin/python -u /opt/app/shared/deploy_service.py
+# [L14] 端口 9215 (避开 error_aggregator 9205)
+Environment="DEPLOY_SERVICE_PORT=9215"
+# [L4 NSFOCUS] BIND=172.20.59.7 读 .env_global
+Environment="DEPLOY_SERVICE_BIND=172.20.59.7"
+Environment="DEPLOY_SERVICE_SECRET=v007.65-deploy"
+Environment="DEPLOY_SCRIPT_DIR=/opt/app/shared"
+Environment="DEPLOY_LOG_DIR=/opt/app/deploy_logs"
+# [L4 NSFOCUS] 从 .env_global source
+EnvironmentFile=/opt/app/.env_global
+Restart=always
+RestartSec=5
+# [L11 安全]
+ProtectSystem=full
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

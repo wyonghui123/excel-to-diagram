@@ -314,6 +314,28 @@ CREATE TABLE IF NOT EXISTS role_dimension_scopes (
     scope_mode VARCHAR(200) DEFAULT 'include'
 )
 
+-- [P3-T1 2026-07-19] data_permission_rules 统一表: 合并 role_dimension_scopes +
+--   permission_rules + visibility 配置到单表, 通过 rule_type 区分.
+--   Spec: spec-permission-system-unification-2026-07-19 §3.5 / §8.3 P3-T1
+--   rule_type 枚举: condition | dimension | owner | visibility | prohibition
+CREATE TABLE IF NOT EXISTS data_permission_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role_id INTEGER NOT NULL,
+    rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
+    resource_type VARCHAR(200),
+    dimension_code VARCHAR(200),
+    condition TEXT,
+    scope_mode VARCHAR(50) DEFAULT 'include',
+    permission_level VARCHAR(50) DEFAULT 'read',
+    is_denied INTEGER DEFAULT 0,
+    inherit_to_children INTEGER DEFAULT 1,
+    propagate_to_parents INTEGER DEFAULT 0,
+    source_table VARCHAR(100),
+    source_id INTEGER,
+    created_at VARCHAR(200),
+    updated_at VARCHAR(200)
+);
+
 -- 角色权限: 角色与权限的多对多关联
 CREATE TABLE IF NOT EXISTS role_permissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -423,35 +445,11 @@ CREATE TABLE IF NOT EXISTS users (
     hour_cycle INTEGER DEFAULT 24
 )
 
--- 用户组: 用户组，用于组织用户和实现委托管理
-CREATE TABLE IF NOT EXISTS user_groups (
-    created_by VARCHAR(200),
-    updated_by VARCHAR(200),
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name VARCHAR(200) NOT NULL,
-    code VARCHAR(200) UNIQUE NOT NULL,
-    parent_id INTEGER,
-    manager_id INTEGER,
-    description VARCHAR(200),
-    created_at DATETIME
-)
-
--- 用户组成员: 用户组成员关系
-CREATE TABLE IF NOT EXISTS user_group_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    group_id INTEGER NOT NULL,
-    is_manager INTEGER DEFAULT 0,
-    joined_at DATETIME
-)
-
--- 用户角色: 用户与角色的多对多关联
-CREATE TABLE IF NOT EXISTS user_roles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    role_id INTEGER NOT NULL,
-    created_at DATETIME
-)
+-- [v089 2026-09-15 DROP] legacy 表 user_groups / user_group_members / user_roles
+--   已由 v072 RENAME 为 orgs / org_members / user_permission_sets (Spec16)。
+--   v080 backup + v081 drop 未生效; v089 补刀 DROP (data-pickup 已确认 rows=0)。
+--   SSOT 文件保持同步: 此处不再 CREATE 上述 legacy 表。
+--   orgs.manager_id / org_members.is_manager 列保留 (v088 软删, SQLite 3.35- 无 DROP COLUMN)。
 
 -- 新对象: 新对象描述
 CREATE TABLE IF NOT EXISTS new_objects (
@@ -656,19 +654,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_username ON users(username)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sso ON users(sso_provider, sso_user_id)
 CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name)
 
--- Indexes for 用户组
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_group_code ON user_groups(code)
-CREATE INDEX IF NOT EXISTS idx_user_group_parent ON user_groups(parent_id)
-CREATE INDEX IF NOT EXISTS idx_user_groups_name ON user_groups(name)
-
--- Indexes for 用户组成员
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_group_member_unique ON user_group_members(user_id, group_id)
-CREATE INDEX IF NOT EXISTS idx_user_group_member_group ON user_group_members(group_id)
-CREATE INDEX IF NOT EXISTS idx_user_group_member_user ON user_group_members(user_id)
-
--- Indexes for 用户角色
-CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_role_unique ON user_roles(user_id, role_id)
+-- [v089] 上述 legacy 表对应索引已 DROP (随表)
 
 -- Indexes for 新对象
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code ON new_objects(code)

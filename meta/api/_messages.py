@@ -36,6 +36,7 @@ MSG_AUTH_SERVICE_ERROR = "认证服务异常，请稍后重试"
 # 资源不存在
 MSG_USER_NOT_FOUND = "用户不存在"
 MSG_ROLE_NOT_FOUND = "角色不存在"
+MSG_PERMISSION_SET_NOT_FOUND = "权限集不存在"  # Plan B alias
 MSG_RECORD_NOT_FOUND = "记录不存在"
 MSG_ANNOTATION_NOT_FOUND = "标注不存在"
 MSG_SUBSCRIPTION_NOT_FOUND = "订阅不存在"
@@ -49,6 +50,7 @@ MSG_TARGET_TYPE_REQUIRED = "目标类型不能为空"
 
 # 系统角色
 MSG_SYSTEM_ROLE_IMMUTABLE = "系统内置角色不能修改或删除"
+MSG_SYSTEM_PERMISSION_SET_IMMUTABLE = "系统内置权限集不能修改或删除"  # Plan B alias
 
 # 操作成功（业务化，已存在 - 由 useMessage 处理）
 MSG_LOGIN_SUCCESS = "登录成功"

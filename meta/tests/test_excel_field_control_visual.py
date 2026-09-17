@@ -550,7 +550,7 @@ class TestProductVersionUserRoleReadonlyMandatory:
         from meta.core.datasource import get_data_source
         from meta.tests.test_utils import get_test_db_path
         ds = get_data_source('sqlite', database=get_test_db_path())
-        cursor = ds.execute("SELECT id FROM roles WHERE is_system = 1 LIMIT 1")
+        cursor = ds.execute("SELECT id FROM permission_sets WHERE is_system = 1 LIMIT 1")
         if not cursor.fetchone():
             pytest.skip("数据库中无系统角色")
 

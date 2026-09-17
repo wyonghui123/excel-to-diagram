@@ -16,6 +16,7 @@ from meta.services.menu_permission_service import MenuPermissionService
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin
 from functools import wraps
+from meta.core.db_path import get_meta_db_path
 
 def admin_required(f):
     @wraps(f)
@@ -36,7 +37,7 @@ _data_source = None
 def _get_data_source():
     global _data_source
     if _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     return _data_source
 
@@ -278,38 +279,43 @@ def get_visible_menu_tree():
     """获取当前用户可见的完整菜单树（含层级结构、icon/color/description）"""
     try:
         import json as _json
-        from meta.api.role_menu_api import _get_data_source as _role_ds
+        from meta.api.permission_set_menu_api import _get_data_source as _role_ds
         
         user = g.current_user
         user_id = user.get('user_id') or user.get('id')
         ds = _role_ds() if callable(_role_ds) else _get_data_source()
         
+        # [Spec16 Plan D 2026-09-02] 旧表 group_roles/user_group_members/role_permissions/role_menu_permissions 已重命名为:
+        #   group_roles             → org_permission_sets  (group_id, role_id) → (org_id, permission_set_id)
+        #   user_group_members      → org_members          (group_id, user_id) → (org_id, user_id)
+        #   role_permissions        → permission_set_permissions
+        #   role_menu_permissions   → permission_set_menu_permissions
         role_rows = ds.execute(
-            """SELECT DISTINCT gr.role_id FROM group_roles gr
-               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
-               WHERE ugm.user_id = ?""", [user_id]
+            """SELECT DISTINCT ops.permission_set_id FROM org_permission_sets ops
+               JOIN org_members om ON ops.org_id = om.org_id
+               WHERE om.user_id = ?""", [user_id]
         ).fetchall()
-        role_ids = [r[0] for r in role_rows]
-        
+        permission_set_ids = [r[0] for r in role_rows]
+
         user_perms = set()
-        if role_ids:
-            ph = ','.join('?' * len(role_ids))
+        if permission_set_ids:
+            ph = ','.join('?' * len(permission_set_ids))
             perm_rows = ds.execute(
-                f"SELECT p.code FROM role_permissions rp "
-                f"JOIN permissions p ON rp.permission_id = p.id "
-                f"WHERE rp.role_id IN ({ph})", role_ids
+                f"SELECT p.code FROM permission_set_permissions psp "
+                f"JOIN permissions p ON psp.permission_id = p.id "
+                f"WHERE psp.permission_set_id IN ({ph})", permission_set_ids
             ).fetchall()
             user_perms = {r[0] for r in perm_rows}
-        
+
         has_super = '*' in user_perms
-        
-        # [FIX 2026-06-08] 查询用户通过 role_menu_permissions 直接被授予的菜单
+
+        # [Spec16 Plan D 2026-09-02] 直接授予的菜单: role_menu_permissions → permission_set_menu_permissions
         granted_menu_codes = set()
-        if role_ids:
-            mh = ','.join('?' * len(role_ids))
+        if permission_set_ids:
+            mh = ','.join('?' * len(permission_set_ids))
             menu_grant_rows = ds.execute(
-                f"SELECT DISTINCT rmp.menu_code FROM role_menu_permissions rmp "
-                f"WHERE rmp.role_id IN ({mh})", role_ids
+                f"SELECT DISTINCT psmp.menu_code FROM permission_set_menu_permissions psmp "
+                f"WHERE psmp.permission_set_id IN ({mh})", permission_set_ids
             ).fetchall()
             granted_menu_codes = {r[0] for r in menu_grant_rows}
         
@@ -368,6 +374,7 @@ def get_visible_menu_tree():
                 'sort_order': m.get('sort_order', 0),
                 'parent_menu': m.get('parent_menu', ''),
                 'auto_generated': m.get('auto_generated', False),
+                'show_in_sidebar': m.get('show_in_sidebar', 1),
             })
         
         visible_codes = {m['menu_code'] for m in flat}
@@ -437,7 +444,9 @@ def get_visible_menu_tree():
         # Build leaf_menus: leaf nodes excluding hub children and dashboard
         hub_parent_codes = set()
         parent_codes = set()
+        parent_page_types = {}
         for m in flat:
+            parent_page_types[m['menu_code']] = m.get('page_type')
             if m.get('page_type') == 'multi_object_hub':
                 hub_parent_codes.add(m['menu_code'])
             if m.get('children'):
@@ -460,9 +469,22 @@ def get_visible_menu_tree():
             #   (这类菜单通常 menu_path 指向 generic container page 而非真实功能页)
             if m.get('page_type') == 'custom_page':
                 continue
-            if m['menu_code'] in parent_codes:
+            # 隐藏菜单(sid=0, 如 task-management 下的 task-definitions/task-queues 等)不作为 landing 卡片
+            # 用 falsy 判断以兼容 int 0 / TEXT '0' / False / None
+            if not m.get('show_in_sidebar'):
                 continue
-            if m.get('parent_menu') and m['parent_menu'] in hub_parent_codes:
+            # [FIX 2026-08-29] 精确排除: 挂在 custom_page 容器下、无 direct children 的 multi_object_hub
+            # [FIX 2026-08-29] 仅展示"严格叶子": 无 children 的功能页
+            #   ① 排空容器: 挂在容器(custom_page/multi_object_hub)下、自身也无 children 的多对象空容器
+            #      (如 business-config 业务配置, parent=system= custom_page, 无 children) 不作为 landing 卡片
+            #   ② arch-data 顶层 hub(parent 非容器)仍作为工作台入口保留
+            #   ③ user-permission/system 等容器自身因有 children 走下方 parent_codes 排除
+            #   ④ 容器下的 object_list 叶子子菜单(user-list/permission_set-list/org-list)正常展示
+            if (m.get('page_type') == 'multi_object_hub'
+                    and not m.get('children')
+                    and parent_page_types.get(m.get('parent_menu')) in ('custom_page', 'multi_object_hub')):
+                continue
+            if m['menu_code'] in parent_codes:
                 continue
             leaf_menus.append({
                 'menu_code': m['menu_code'],
@@ -500,4 +522,4 @@ def get_visible_menu_tree():
             'object_type_route_map': object_type_route_map,
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500

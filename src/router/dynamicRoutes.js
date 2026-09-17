@@ -1,4 +1,11 @@
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 import { useMenuCache } from '@/composables/useMetaCache'
 import { resolveRoutePath } from '@/utils/routeTemplate'
 
@@ -11,8 +18,8 @@ const PAGE_TYPE_COMPONENTS = {
 const STATIC_ROUTE_NAMES = new Set([
   'landing', 'login', 'theme-preview', 'archdata-chart', 'config',
   'test', 'component-comparison', 'navigation-test',
-  'ObjectDetail', 'ObjectDetailCreate', 'RoleDetail',
-  'AccountSettings', 'RolePermissionCenter', 'RolePermissionDetail',
+  'ObjectDetail', 'ObjectDetailCreate', 'PermissionSetDetail',
+  'AccountSettings', 'PermissionSetCenter', 'PermissionSetDetailContent',
   'system-admin', 'ArchDataManagement',
   'task-management', 'task-definitions', 'task-queues', 'task-executions', 'ai-async-tasks'
 ])
@@ -20,8 +27,9 @@ const STATIC_ROUTE_NAMES = new Set([
 const STATIC_ROUTE_PATHS = new Set([
   '/dev/theme-preview', '/archdata-chart', '/config', '/test',
   '/component-comparison', '/dev/navigation-test', '/account',
-  '/detail/', '/system-admin', '/role/',
+  '/detail/', '/system-admin', '/role/', '/org/',
   '/system/role-permission/', '/system/role-detail/',
+  '/permission-set/', '/permission-bundle/',
   '/system/task-management', '/system/task-definitions',
   '/system/task-queues', '/system/task-executions', '/system/ai-async-tasks',
 ])
@@ -84,32 +92,32 @@ function _isStaticRoute(name, path) {
 function _registerRoute(router, menu) {
   const component = _resolveComponent(menu)
   if (!component) {
-    console.log(`[DynamicRoutes] SKIP ${menu.menu_code}: no component (page_type=${menu.page_type})`)
+    _dbgLog(`[DynamicRoutes] SKIP ${menu.menu_code}: no component (page_type=${menu.page_type})`)
     return false
   }
 
   const path = resolveRoutePath(menu)
 
   if (_isStaticRoute(menu.menu_code, path)) {
-    console.log(`[DynamicRoutes] SKIP ${menu.menu_code}: static route (path=${path})`)
+    _dbgLog(`[DynamicRoutes] SKIP ${menu.menu_code}: static route (path=${path})`)
     return false
   }
 
   const pathKey = `${path}|${menu.menu_code}`
   if (_registeredPathKeys.has(pathKey)) {
-    console.log(`[DynamicRoutes] SKIP ${menu.menu_code}: already registered pathKey`)
+    _dbgLog(`[DynamicRoutes] SKIP ${menu.menu_code}: already registered pathKey`)
     return false
   }
 
   const name = menu.menu_code
 
   if (router.hasRoute(name)) {
-    console.log(`[DynamicRoutes] skip duplicate: ${name} (already registered)`)
+    _dbgLog(`[DynamicRoutes] skip duplicate: ${name} (already registered)`)
     _registeredPathKeys.add(pathKey)
     return false
   }
 
-  console.log(`[DynamicRoutes] REGISTER ${menu.menu_code}: path=${path}, page_type=${menu.page_type}`)
+  _dbgLog(`[DynamicRoutes] REGISTER ${menu.menu_code}: path=${path}, page_type=${menu.page_type}`)
 
   const route = {
     path,
@@ -147,7 +155,7 @@ export async function generateDynamicRoutes(router) {
     await loadMenuPermissions()
     menus = accessibleMenus.value || []
 
-    console.log('[DynamicRoutes] accessibleMenus:', menus.length, menus.map(m => m.menu_code))
+    _dbgLog('[DynamicRoutes] accessibleMenus:', menus.length, menus.map(m => m.menu_code))
 
     if (menus.length > 0) {
       const menuCacheForStore = useMenuCache()
@@ -169,7 +177,7 @@ export async function generateDynamicRoutes(router) {
       flatMenus.push(...menu.children.filter(c => c.menu_code !== 'dashboard'))
     }
 
-    console.log(`[DynamicRoutes] processing ${menu.menu_code}, children: ${menu.children?.length || 0}, flatMenus: ${flatMenus.length}`)
+    _dbgLog(`[DynamicRoutes] processing ${menu.menu_code}, children: ${menu.children?.length || 0}, flatMenus: ${flatMenus.length}`)
 
     for (const m of flatMenus) {
       if (_registerRoute(router, m)) count++
@@ -177,7 +185,7 @@ export async function generateDynamicRoutes(router) {
   }
 
   _routesRegistered = true
-  console.log(`[DynamicRoutes] registered ${count} dynamic routes`)
+  _dbgLog(`[DynamicRoutes] registered ${count} dynamic routes`)
   return count
 }
 

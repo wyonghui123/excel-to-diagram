@@ -32,10 +32,13 @@ class StandardActionLoader:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
 
-        from meta.core.models import MetaAction, ActionType
+        from meta.core.models import MetaAction, ActionType, InstanceScope
 
         cls._actions = []
         for item in data.get('standard_actions', []):
+            # [Spec 21 PM 反馈 2026-09-12] 读取 instance_scope 字段
+            #   缺省 instance（向后兼容旧 yaml 未声明的 action）
+            instance_scope_value = item.get('instance_scope', 'instance')
             cls._actions.append(MetaAction(
                 id=item['id'],
                 name=item['name'],
@@ -43,6 +46,7 @@ class StandardActionLoader:
                 method=item.get('method', 'POST'),
                 path='',
                 description=item.get('description', ''),
+                instance_scope=InstanceScope(instance_scope_value),
             ))
 
         cls._suffix_map = {}

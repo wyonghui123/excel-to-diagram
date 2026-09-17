@@ -227,6 +227,11 @@ export function buildLogFilter(filters = {}) {
     out.parent_object_id = String(filters.parentObjectId)
   }
   if (filters.transactionId) out.transaction_id = filters.transactionId
+  // [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 排除特定子对象类型
+  // 多个用逗号分隔: "sub_domain,service_module,business_object,relationship"
+  if (filters.excludedObjectTypes && filters.excludedObjectTypes.length > 0) {
+    out.excluded_object_types = filters.excludedObjectTypes.join(',')
+  }
   return out
 }
 
@@ -264,6 +269,20 @@ export async function getFailedLogs() {
 export async function exportLogs({ filters = {} } = {}) {
   const params = new URLSearchParams(buildLogFilter(filters))
   return apiV1.get(`/audit/logs/export?${params.toString()}`)
+}
+
+/**
+ * [P1-A 2026-07-25] 获取 audit_log action 字段的 enum_values 元数据
+ *
+ * 调用后端 GET /audit/meta/actions, 返回 [{value, label, color}].
+ * 用于替代前端 auditLogFormat.js ACTION_LABELS / ACTION_TAG_TYPES 硬编码表.
+ *
+ * 单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+ *
+ * @returns {Promise<{success: boolean, data?: Array<{value:string,label:string,color:string}>}>}
+ */
+export async function getMetaActions() {
+  return apiV1.get('/audit/meta/actions')
 }
 
 // ============================================================================

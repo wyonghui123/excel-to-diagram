@@ -32,7 +32,7 @@ from ._base import (
 )
 from .user import UserFactory
 from .role import RoleFactory
-from .user_group import UserGroupFactory
+from .org import UserGroupFactory
 from .bo import BusinessObjectFactory
 from .version import VersionFactory
 from .domain import DomainFactory

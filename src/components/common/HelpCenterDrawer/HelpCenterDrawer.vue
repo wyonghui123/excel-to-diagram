@@ -1,31 +1,41 @@
 <!--
-  HelpCenterDrawer - P1 阶段，iframe 嵌入 /docs/user-guide/index.html
+  HelpCenterDrawer - P3 简化
+  - 删除"切换产品版本" subtab: 只保留 "archdata-management"
+  - 删除"章节手册" tab: 整个 HelpCenterDrawer 只展示"操作场景"
+  - 新增最大化按钮: 抽屉可展开至全屏
+  - 新增 URL 自动展开: ?help=archdata-management&step=2 直接打开对应步骤
 -->
 <template>
   <Teleport to="body">
     <Transition name="help-drawer">
       <div v-if="modelValue" class="help-drawer" role="dialog" aria-label="Help Center">
         <div class="help-drawer__mask" @click="handleClose"></div>
-        <div class="help-drawer__wrapper" :style="wrapperStyle">
+        <div class="help-drawer__wrapper" :style="wrapperStyle" :class="{ 'is-maximized': isMaximized }">
           <div class="help-drawer__header">
             <div class="help-drawer__title">
               <el-icon class="help-drawer__title-icon" :size="20">
                 <QuestionFilled />
               </el-icon>
-              <span>帮助中心</span>
+              <span>操作场景</span>
             </div>
             <div class="help-drawer__header-actions">
               <button
                 type="button"
                 class="help-drawer__header-btn"
-                aria-label="Open help docs in new tab"
-                title="新窗口打开"
-                @click="openInNewTab"
+                :aria-label="isMaximized ? 'Restore' : 'Maximize'"
+                :title="isMaximized ? '还原' : '最大化'"
+                @click="toggleMaximize"
               >
-                <svg viewBox="0 0 24 24" width="16" height="16">
+                <svg v-if="!isMaximized" viewBox="0 0 24 24" width="16" height="16">
                   <path
                     fill="currentColor"
-                    d="M14 3v2h3.59L9.29 13.29l1.42 1.42L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"
+                    d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"
+                  />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" width="16" height="16">
+                  <path
+                    fill="currentColor"
+                    d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
                   />
                 </svg>
               </button>
@@ -46,24 +56,7 @@
           </div>
 
           <div class="help-drawer__body">
-            <iframe
-              v-if="modelValue"
-              :key="iframeKey"
-              :src="helpUrl"
-              class="help-drawer__iframe"
-              title="帮助文档"
-              referrerpolicy="no-referrer-when-downgrade"
-              @load="handleIframeLoad"
-              @error="handleIframeError"
-            ></iframe>
-
-            <div v-if="loadError" class="help-drawer__fallback">
-              <el-icon :size="48" class="help-drawer__fallback-icon"><Warning /></el-icon>
-              <p class="help-drawer__fallback-title">无法加载帮助文档</p>
-              <p class="help-drawer__fallback-desc">{{ loadError }}</p>
-              <el-button type="primary" @click="retry">重试</el-button>
-              <el-button @click="openInNewTab">新窗口打开</el-button>
-            </div>
+            <HelpAccordion :scenario-id="scenarioId" :initial-step="initialStep" />
           </div>
         </div>
       </div>
@@ -73,7 +66,8 @@
 
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
-import { QuestionFilled, Warning } from '@element-plus/icons-vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
+import { HelpAccordion } from '@/components/common/HelpAccordion'
 
 const props = defineProps({
   modelValue: {
@@ -84,49 +78,47 @@ const props = defineProps({
     type: [Number, String],
     default: 880
   },
-  helpUrl: {
+  scenarioId: {
     type: String,
-    default: '/docs/user-guide/index.html'
+    default: 'archdata-management'
+  },
+  // [FIX P3 2026-06-30] initial-step 提升为 prop, 由父组件从 URL 解析传入
+  initialStep: {
+    type: Number,
+    default: null
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'close', 'open-in-new-tab'])
+const emit = defineEmits(['update:modelValue', 'close'])
 
-const wrapperStyle = computed(() => ({
-  width: typeof props.width === 'number' ? `${props.width}px` : props.width
-}))
+// [FIX P3 2026-06-30] 最大化状态
+const isMaximized = ref(false)
 
-const iframeKey = ref(0)
-const loadError = ref('')
+function toggleMaximize() {
+  isMaximized.value = !isMaximized.value
+}
+
+const wrapperStyle = computed(() => {
+  if (isMaximized.value) return {}
+  return {
+    width: typeof props.width === 'number' ? `${props.width}px` : props.width
+  }
+})
 
 function handleClose() {
   emit('update:modelValue', false)
   emit('close')
 }
 
-function openInNewTab() {
-  window.open(props.helpUrl, '_blank', 'noopener,noreferrer')
-  emit('open-in-new-tab', props.helpUrl)
-}
-
-function retry() {
-  loadError.value = ''
-  iframeKey.value += 1
-}
-
-function handleIframeLoad() {
-  loadError.value = ''
-}
-
-function handleIframeError() {
-  loadError.value = `帮助文档加载失败：${props.helpUrl}`
-}
-
 function handleKeydown(e) {
   if (!props.modelValue) return
   if (e.key === 'Escape') {
-    e.preventDefault()
-    handleClose()
+    // 先还原最大化, 再关闭
+    if (isMaximized.value) {
+      isMaximized.value = false
+    } else {
+      handleClose()
+    }
   }
 }
 
@@ -135,9 +127,9 @@ watch(
   (val) => {
     if (val) {
       document.body.style.overflow = 'hidden'
-      iframeKey.value += 1
     } else {
       document.body.style.overflow = ''
+      isMaximized.value = false
     }
   }
 )
@@ -177,6 +169,14 @@ onUnmounted(() => {
   max-width: 95vw;
   background: var(--el-bg-color, #ffffff);
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+  height: 100%;
+  transition: width 0.25s ease, max-width 0.25s ease;
+}
+
+/* [FIX P3 2026-06-30] 最大化 */
+.help-drawer__wrapper.is-maximized {
+  width: 100% !important;
+  max-width: 100vw;
   height: 100%;
 }
 
@@ -238,43 +238,6 @@ onUnmounted(() => {
   background: var(--el-fill-color-blank, #ffffff);
 }
 
-.help-drawer__iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-}
-
-.help-drawer__fallback {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-lg, 24px);
-  text-align: center;
-  gap: var(--spacing-sm, 8px);
-}
-
-.help-drawer__fallback-icon {
-  color: var(--yonyou-orange-500, #f97316);
-}
-
-.help-drawer__fallback-title {
-  font-size: var(--el-font-size-large, 16px);
-  font-weight: 600;
-  color: var(--el-text-color-primary, #1d2129);
-  margin: 0;
-}
-
-.help-drawer__fallback-desc {
-  font-size: var(--el-font-size-base, 14px);
-  color: var(--el-text-color-secondary, #86909c);
-  margin: 0 0 var(--spacing-md, 16px);
-  word-break: break-all;
-}
-
 .help-drawer-enter-active,
 .help-drawer-leave-active {
   transition: opacity 0.25s ease;
@@ -282,7 +245,7 @@ onUnmounted(() => {
 
 .help-drawer-enter-active .help-drawer__wrapper,
 .help-drawer-leave-active .help-drawer__wrapper {
-  transition: transform 0.25s ease;
+  transition: transform 0.25s ease, width 0.25s ease, max-width 0.25s ease;
 }
 
 .help-drawer-enter-from,

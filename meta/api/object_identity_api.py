@@ -11,6 +11,7 @@ import os
 
 from meta.core.datasource import get_data_source
 from meta.services.object_identity_service import ObjectIdentityService
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def init_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     _identity_service = ObjectIdentityService(_data_source)
 

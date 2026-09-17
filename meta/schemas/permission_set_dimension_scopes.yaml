@@ -1,0 +1,61 @@
+# ============================================
+# 权限集维度范围 (复数别名) - Phase 13 placeholder
+# [GAP-FIX 2026-07-23] 注册为 permission_set_dimension_scope 表格的复数视图
+# (Spec 16: role_dimension_scopes → permission_set_dimension_scopes)
+# ============================================
+
+id: permission_set_dimension_scopes
+name: 权限集维度范围 (复数视图)
+table_name: permission_set_dimension_scopes
+description: 权限集维度范围列表视图 (alias of permission_set_dimension_scope)
+is_view: true
+
+aspects: [audit_aspect]
+bo_category: configuration
+bo_sub_category: customizing
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+  - id: permission_set_id
+    name: 权限集ID
+    type: integer
+    db_column: permission_set_id
+  - id: dimension_code
+    name: 维度编码
+    type: string
+    db_column: dimension_code
+    max_length: 100
+  - id: dimension_values
+    name: 维度值列表
+    type: json
+    db_column: dimension_values
+  - id: inherit_children
+    name: 包含下级
+    type: boolean
+    db_column: inherit_children
+    default: true
+  - id: scope_mode
+    name: 范围模式
+    type: string
+    db_column: scope_mode
+    default: include
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: false  # View 不写 audit

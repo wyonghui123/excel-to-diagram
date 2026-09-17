@@ -1,0 +1,58 @@
+# ============================================
+# 权限资源继承 - Phase 13 placeholder
+# [GAP-FIX 2026-07-23] phase13 commit dccdd8b6 引用了此 endpoint
+# phase13 整合时未注册 yaml + 未建表.
+# 这里注册为 data_permission_rules 表的视图
+# (rule_type='inherit' 视角的列表)
+# ============================================
+
+id: permission_resource_inheritance
+name: 权限资源继承
+table_name: data_permission_rules
+description: 权限资源继承规则 (view over data_permission_rules)
+is_view: true
+
+aspects: [audit_aspect]
+bo_category: configuration
+bo_sub_category: customizing
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+  - id: role_id
+    name: 角色ID
+    type: integer
+    db_column: role_id
+  - id: resource_type
+    name: 资源类型
+    type: string
+    db_column: resource_type
+    max_length: 100
+  - id: resource_id
+    name: 资源ID
+    type: integer
+    db_column: resource_id
+  - id: rule_type
+    name: 规则类型
+    type: string
+    db_column: rule_type
+    max_length: 50
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: false

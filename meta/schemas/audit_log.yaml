@@ -10,6 +10,14 @@ description: 审计日志记录所有业务对象的变更历史，包括创建�
 persistent: false  # 审计日志是只读对象，不应该被手动创建或修改
 is_view: false
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+# Subordinate: 自动继承被审计对象 (object_type + object_id) 的 owner
+resource:
+  type: subordinate
+  parent_type_field: object_type
+  parent_id_field: object_id
+  inherit_owner: true
+
 # ────────────────────────────────────────────
 # 导入导出配置（审计日志只读，不支持导入）
 # ────────────────────────────────────────────
@@ -21,6 +29,8 @@ import_export:
 # ────────────────────────────────────────────
 # 语义标注
 # ────────────────────────────────────────────
+aspects: [audit_aspect]
+
 semantics:
   meaning: 系统审计日志
   category: system_entity
@@ -219,10 +229,126 @@ fields:
         category: dimension
         type: categorical
         display_name: 操作类型
+    # [FIX 2026-07-22] action 列: 抽象业务动作，与 BO 解耦
+    #  来源:
+    #    1. _standard_actions.yaml (15 个标准动作 id, 如 crud_create → CREATE)
+    #    2. ActionExecutor 固定字面量 (CREATE/UPDATE/DELETE)
+    #    3. 系统事件硬编码 (LOGIN/STARTUP/AUDIT_WRITE_FAILED 等)
+    #  之前引用 enum_type_id=audit_action_type 但该 enum 不存在,
+    #  现在改为 enum_values 内联, 保证列表筛选能覆盖所有实际值
+    enum_values:
+      - value: CREATE
+        label: 创建
+        color: success
+      - value: UPDATE
+        label: 更新
+        color: info
+      - value: DELETE
+        label: 删除
+        color: danger
+      - value: READ
+        label: 查看
+        color: default
+      - value: ASSOCIATE
+        label: 添加关联
+        color: primary
+      - value: DISSOCIATE
+        label: 移除关联
+        color: info
+      - value: ASSIGN
+        label: 分配
+        color: primary
+      - value: UNASSIGN
+        label: 取消分配
+        color: info
+      - value: GRANT
+        label: 授权
+        color: primary
+      - value: REVOKE
+        label: 撤销
+        color: info
+      - value: MANAGE
+        label: 管理
+        color: warning
+      - value: APPROVE
+        label: 审批
+        color: primary
+      - value: EXPORT
+        label: 导出
+        color: default
+      - value: IMPORT
+        label: 导入
+        color: default
+      - value: BATCH_CREATE
+        label: 批量创建
+        color: success
+      - value: BATCH_UPDATE
+        label: 批量更新
+        color: info
+      - value: BATCH_DELETE
+        label: 批量删除
+        color: danger
+      - value: LOGIN
+        label: 登录
+        color: primary
+      - value: LOGOUT
+        label: 登出
+        color: info
+      - value: LOGIN_FAILED
+        label: 登录失败
+        color: danger
+      - value: PASSWORD_CHANGE
+        label: 密码修改
+        color: warning
+      - value: RESET_PASSWORD
+        label: 重置密码
+        color: warning
+      - value: PERMISSION_DENIED
+        label: 权限拒绝
+        color: danger
+      - value: SQL_INJECTION_ATTEMPT
+        label: SQL 注入拦截
+        color: danger
+      - value: unlock
+        label: 解锁
+        color: primary
+      - value: STARTUP
+        label: 系统启动
+        color: success
+      - value: SHUTDOWN
+        label: 系统关闭
+        color: info
+      - value: CONFIG_CHANGE
+        label: 配置变更
+        color: warning
+      - value: CONFIG_ERROR
+        label: 配置错误
+        color: danger
+      - value: AUDIT_WRITE_FAILED
+        label: 审计写入失败
+        color: danger
+      - value: DELETE_BLOCKED
+        label: 删除已阻止
+        color: danger
+      - value: CASCADE_DELETE
+        label: 级联删除
+        color: danger
+      - value: SUBFLOW
+        label: 执行子流程
+        color: primary
+      - value: SYNC
+        label: 数据同步
+        color: info
+      - value: DATA_SYNC
+        label: 数据同步
+        color: info
+      - value: METRIC_RECORD
+        label: 性能指标记录
+        color: warning
     value_help:
       source:
         type: enum
-        enum_type_id: audit_action_type
+        enum_type_id: standard_action
         sort_by: sort_order
       behavior:
         validation: true
@@ -716,26 +842,40 @@ relations: []
 # 注意：审计日志是只读对象，不能有 create/update/delete 等写操作
 # ────────────────────────────────────────────
 actions:
-  - id: audit_log_list
+  # [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名
+  # 原因: 之前 action.id 用 'audit_log_read' (非标准) → permission code 拼成
+  #       'audit_log:audit_log_read' (双重前缀) → DB 实际存的 code
+  # 修复: 改用 _standard_actions.yaml 里的标准 id 'crud_list'/'crud_read'/'crud_delete',
+  #       permission code 自动拼成 'audit_log:read'/'audit_log:list'/'audit_log:delete' (短名)
+  - id: crud_list
     name: 列表查询
     type: crud
     method: GET
     path: /api/v1/audit_logs
     description: 查询审计日志列表
 
-  - id: audit_log_read
+  - id: crud_read
     name: 查看日志详情
     type: crud
     method: GET
     path: /api/v1/audit_logs/{id}
     description: 查看审计日志详情
 
-  - id: audit_log_delete
+  - id: crud_delete
     name: 删除日志
     type: crud
     method: DELETE
     path: /api/v1/audit_logs/{id}
     description: 删除审计日志记录
+
+  # [FIX 2026-07-10] BUG-V051: 补全 export action
+  #   委托给统一 export-import 端点
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出审计日志到Excel
 
 # ────────────────────────────────────────────
 # 查询定义

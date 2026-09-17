@@ -58,9 +58,10 @@ def build_count_relations_expr(
             f"OR {rel_table}.target_bo_id = {table_name}.id)"
         )
     if scope == "self" and object_type == "user_group":
+        # [Spec 16 2026-08-29] user_group → org, 字段 group_id → org_id
         return (
-            f"(SELECT COUNT(*) FROM user_group_members "
-            f"WHERE user_group_members.group_id = {table_name}.id)"
+            f"(SELECT COUNT(*) FROM org_members "
+            f"WHERE org_members.org_id = {table_name}.id)"
         )
     if scope == "descendants":
         if object_type == "domain":

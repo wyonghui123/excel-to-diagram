@@ -103,6 +103,37 @@ def require_permission(permission_code: str):
     return decorator
 
 
+def require_permission_any(*permission_codes):
+    """[Spec 19 M1 TR-002] 任一权限码放行（过渡期双码并存）
+
+    语义：持有 codes 中任意一个（或 '*' 通配）即放行。
+    用途：org_api 成员管理端点从 user:update 过渡到 org_member:manage 期间
+    两码并存，避免一步到位破坏既有持码用户。
+    """
+    def decorator(f):
+        @wraps(f)
+        @login_required
+        def decorated(*args, **kwargs):
+            if is_self_service():
+                return f(*args, **kwargs)
+
+            user_permissions = g.current_user.get('permissions', [])
+
+            if '*' in user_permissions:
+                return f(*args, **kwargs)
+
+            if not any(code in user_permissions for code in permission_codes):
+                return jsonify({
+                    'error': f'需要权限之一: {", ".join(permission_codes)}',
+                    'code': 'FORBIDDEN',
+                    'required_permission_any': list(permission_codes)
+                }), 403
+
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
 def require_permission_unified(resource_type: str, action_code: str):
     """
     统一语义的权限检查装饰器

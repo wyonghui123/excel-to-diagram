@@ -2,10 +2,10 @@
 """
 安全日志拦截器
 
-在安全相关对象（用户/角色/权限/用户组）变更时自动记录安全事件日志。
-使用 StructuredLogger.log_security() 写入结构化安全日志。
+安全相关对象变更时自动记录安全事件日志。
+    使用 StructuredLogger.log_security() 写入结构化安全日志。
 
-优先级：96（在 BusinessLogInterceptor 之后执行）
+    优先级：96（在 BusinessLogInterceptor 之后执行）
 """
 
 import logging
@@ -22,17 +22,23 @@ logger = logging.getLogger(__name__)
 class SecurityLogInterceptor(Interceptor):
     """
     安全日志拦截器
-    
+
     仅在安全相关对象变更时触发，记录安全事件：
     - 用户创建/删除
-    - 角色创建/删除
+    - 权限集创建/删除（原"角色"，2026-09 迁移）
     - 权限变更
-    - 用户组变更
-    
+    - 组织变更（原"用户组"，spec 16 迁移）
+
     安全事件使用 WARNING/HIGH 级别，确保在审计日志中可追踪。
     """
 
-    SECURITY_OBJECT_TYPES: Set[str] = {'user', 'role', 'permission', 'user_group'}
+    # [FIX 2026-09-06 角色迁移] role→permission_set、user_group→org 已迁移；
+    # 旧值 'role'/'user_group' 保留：org_admin_guard 等兼容层的历史关联对
+    # （user↔role、menu_permission↔role）仍会以旧 object_type 进入拦截器链
+    SECURITY_OBJECT_TYPES: Set[str] = {
+        'user', 'permission', 'org', 'permission_set',
+        'role', 'user_group',  # 历史值（旧角色体系关联路径）
+    }
 
     EVENT_MAP = {
         CRUD_CREATE: 'ENTITY_CREATED',
@@ -72,7 +78,7 @@ class SecurityLogInterceptor(Interceptor):
 
         if context.object_type == 'permission':
             severity = 'WARNING'
-        if context.action == CRUD_DELETE and context.object_type in ('user', 'role'):
+        if context.action == CRUD_DELETE and context.object_type in ('user', 'role', 'permission_set'):
             severity = 'ERROR'
 
         object_id = context.object_id

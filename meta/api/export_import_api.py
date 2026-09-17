@@ -24,6 +24,7 @@ from meta.services.manage_service import ManageService
 from meta.services.query_service import QueryService
 from meta.services.auth_middleware import login_required, get_current_user
 from meta.services.permission_service import PermissionService
+from meta.core.db_path import get_meta_db_path
 
 export_import_bp = Blueprint('export_import', __name__, url_prefix='/api/v1')
 
@@ -68,7 +69,7 @@ def init_services(data_source=None):
         _data_source = data_source
     elif _data_source is None:
         import os
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+        db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
     _manage_service = ManageService(_data_source)
     _query_service = QueryService(_data_source)

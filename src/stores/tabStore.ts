@@ -1,4 +1,11 @@
 import { defineStore } from 'pinia'
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 import { ref, computed, watch } from 'vue'
 import { useAuthStore } from './authStore'  // [FR-001] 绑定用户
 
@@ -171,7 +178,7 @@ export const useTabStore = defineStore('tab', () => {
       const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
         ? crypto.randomUUID().replace(/-/g, '')
         : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      console.debug(`[tabStore] user changed, clearing tabs: ${oldId} -> ${newId}, trace_id=${traceId}`)
+      _dbgLog(`[tabStore] user changed, clearing tabs: ${oldId} -> ${newId}, trace_id=${traceId}`)
       tabs.value = []
       activeTabId.value = null
     }
@@ -231,7 +238,7 @@ export const useTabStore = defineStore('tab', () => {
             const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
               ? crypto.randomUUID().replace(/-/g, '')
               : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-            console.debug(`[tabStore] user mismatch, clearing tabs: persisted=${persistedUserId}, current=${currentUserId}, trace_id=${traceId}`)
+            _dbgLog(`[tabStore] user mismatch, clearing tabs: persisted=${persistedUserId}, current=${currentUserId}, trace_id=${traceId}`)
             return { tabs: [], activeTabId: null }
           }
           // [FR-002] legacy 升级: _userId 为 null (老数据) → 升级为当前 user,保留 tabs

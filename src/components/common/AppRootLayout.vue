@@ -27,9 +27,9 @@
     v-if="helpDrawerEnabled"
     v-model="helpOpen"
     :width="800"
-    help-url="/docs/user-guide/index.html"
+    :scenario-id="helpAutoScenario || 'archdata-management'"
+    :initial-step="helpAutoStep"
     @close="handleHelpClose"
-    @open-in-new-tab="handleHelpOpenInNewTab"
   />
 
   <div v-if="showOfflineBanner" class="offline-banner">
@@ -68,6 +68,22 @@ const showAccountDialog = ref(false)
 const menuLoadError = ref(null)
 const helpOpen = ref(false)
 const helpDrawerEnabled = ref(true)
+// [FIX P3 2026-06-30] URL ?help=&step= 自动打开帮助中心
+//   scenarioId 从 query.help 读取, initialStep 从 query.step 读取
+const helpAutoScenario = ref(null)
+const helpAutoStep = ref(null)
+
+function readHelpQuery() {
+  const params = new URLSearchParams(window.location.search)
+  const help = params.get('help')
+  const step = parseInt(params.get('step'), 10)
+  if (help) {
+    helpAutoScenario.value = help
+    helpAutoStep.value = Number.isFinite(step) ? step : null
+    return true
+  }
+  return false
+}
 
 function openHelp(_payload) {
   helpOpen.value = true
@@ -75,10 +91,6 @@ function openHelp(_payload) {
 
 function handleHelpClose() {
   helpOpen.value = false
-}
-
-function handleHelpOpenInNewTab(url) {
-  console.info('[HelpCenter] open in new tab:', url)
 }
 
 const USE_API_MENU = true
@@ -239,12 +251,20 @@ async function refreshMenu() {
 onMounted(async () => {
   await loadMenuWithCache()
   await generateDynamicRoutes(router)
+  // [FIX P3 2026-06-30] 启动时如果 URL 携带 help 参数, 自动打开 drawer
+  if (readHelpQuery() && authStore.isLoggedIn) {
+    helpOpen.value = true
+  }
 })
 
 watch(() => authStore.isLoggedIn, async (loggedIn) => {
   if (loggedIn) {
     await refreshMenu()
     await generateDynamicRoutes(router)
+    // 登录后若 URL 仍带 help 参数, 打开 drawer
+    if (helpAutoScenario.value) {
+      helpOpen.value = true
+    }
   }
 })
 

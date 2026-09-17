@@ -24,6 +24,13 @@ import { useRoute } from 'vue-router'
 import boService from '@/services/boService'
 import { useAuthStore } from '@/stores/authStore'
 
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 __archPage.debug, 仅 ?mode=debug 时输出.
+//   useVersionContext 是单例 + provide/inject 双重机制, fallback (L475) 是设计内行为
+//   (sharedContext 全应用共享, ValueHelpField 在没 provide 的父级下渲染时触发).
+//   之前 console.warn 每次 fallback 刷屏 9 条/会话, 改为 trace 仅 debug 可见.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
 const VERSION_CONTEXT_KEY = 'versionContext'
 
 const STORAGE_KEYS = {
@@ -472,7 +479,7 @@ export function provideVersionContext(options = {}) {
 export function injectVersionContext() {
   const context = inject(VERSION_CONTEXT_KEY)
   if (!context) {
-    console.warn('[useVersionContext] No version context provided, using default context')
+    _dbgTrace('[useVersionContext] No version context provided, using default context')
     return useVersionContext()
   }
   return context

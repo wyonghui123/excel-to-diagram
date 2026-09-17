@@ -11,6 +11,7 @@ pytestmark = pytest.mark.integration
 - product:     is_active true/false + 2条转换规则
 - version:     is_current true/false + 2条转换规则
 - change_subscription: enabled true/false + enum_values 增强
+- permission_set: is_active true/false + 2条转换规则 [Spec 21 PM 反馈 2026-09-12 第十次]
 """
 
 import sys
@@ -246,6 +247,51 @@ def test_change_subscription_state_transition_rules():
 
 
 # ============================================================
+# 4.5 permission_set State 采纳验证
+# [Spec 21 PM 反馈 2026-09-12 第十次] 权限集详情页需要对象级业务 action
+# 启用/停用围绕 is_active 状态字段；模板参考 product.yaml line 535-559
+# ============================================================
+
+def test_permission_set_state_transition_rules():
+    """测试 permission_set 有2条状态转换规则（启用/停用）"""
+    print("\n=== 测试 permission_set 状态转换规则 [Spec 21 第十次反馈] ===")
+
+    setup()
+    meta_obj = registry.get('permission_set')
+    assert meta_obj is not None, "permission_set 元对象未注册"
+
+    assert hasattr(meta_obj, 'rules'), "permission_set 缺少 rules"
+    assert meta_obj.rules is not None, "permission_set rules 为空"
+
+    state_rules = [r for r in meta_obj.rules if hasattr(r, 'state_field') and r.state_field == 'is_active']
+    rule_ids = {r.id: r for r in state_rules}
+
+    assert 'enable_permission_set' in rule_ids, "缺少 enable_permission_set 规则"
+    assert 'disable_permission_set' in rule_ids, "缺少 disable_permission_set 规则"
+
+    enable = rule_ids['enable_permission_set']
+    assert list(enable.from_states) == [False], f"enable from_states 应为 [False], 实为 {list(enable.from_states)}"
+    assert enable.to_state is True, f"enable to_state 应为 True, 实为 {enable.to_state}"
+    assert enable.state_field == 'is_active'
+
+    disable = rule_ids['disable_permission_set']
+    assert list(disable.from_states) == [True], f"disable from_states 应为 [True], 实为 {list(disable.from_states)}"
+    assert disable.to_state is False, f"disable to_state 应为 False, 实为 {disable.to_state}"
+    assert disable.state_field == 'is_active'
+
+    # ui_hints 必须带 label/icon/confirm_message，前端 StateTransitionButtons 靠它渲染按钮
+    for rid, expected_label in [('enable_permission_set', '启用'), ('disable_permission_set', '停用')]:
+        rule = rule_ids[rid]
+        ui_hints = getattr(rule, 'ui_hints', None)
+        assert ui_hints is not None, f"{rid} 缺少 ui_hints"
+        assert ui_hints.label == expected_label, f"{rid} label 应为 {expected_label}, 实为 {ui_hints.label}"
+        assert ui_hints.icon, f"{rid} ui_hints.icon 缺失"
+        assert ui_hints.confirm_message, f"{rid} ui_hints.confirm_message 缺失"
+
+    print("[OK] permission_set 启用/停用状态转换规则配置正确")
+
+
+# ============================================================
 # 5. 已验证存量对象汇总验证
 # ============================================================
 
@@ -301,6 +347,7 @@ def run_all_tests():
         test_version_state_transition_rules,
         test_change_subscription_has_enabled_enum_values,
         test_change_subscription_state_transition_rules,
+        test_permission_set_state_transition_rules,
         test_user_state_remains_correct,
         test_change_event_state_remains_correct,
     ]

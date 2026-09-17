@@ -54,6 +54,7 @@
           @tab-change="handleTabChange"
           @field-update="handleFieldUpdate"
           @field-display-update="handleFieldDisplayUpdate"
+          @out-mapping="handleOutMapping"
           @update:editing="internalEditing = $event"
           @action="handleObjectPageAction"
         >
@@ -116,6 +117,7 @@
         @tab-change="handleTabChange"
         @field-update="handleFieldUpdate"
         @field-display-update="handleFieldDisplayUpdate"
+        @out-mapping="handleOutMapping"
         @update:editing="internalEditing = $event"
         @action="handleObjectPageAction"
       >
@@ -130,10 +132,18 @@
       </div>
     </div>
   </div>
+
+  <!-- [v70 2026-08-28] 权限体检弹窗：体检是权限集 object 的 validation action，
+       入口在 ObjectPage/标题栏标准 action 区（objectType==='permission_set' 时显示） -->
+  <PermissionAuditDialog
+    v-if="showAuditDialog"
+    :permission-set-id="id"
+    @close="showAuditDialog = false"
+  />
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, onActivated, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
@@ -144,6 +154,7 @@ import { objectTypeService } from '@/services/objectTypeService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
+import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -224,7 +235,7 @@ function syncCoordinatorRegistration() {
 }
 watch(coordinatorRefreshKey, syncCoordinatorRegistration)
 
-const { selectedVersionId } = useVersionContext()
+const { selectedVersionId, selectedVersion } = useVersionContext()
 
 const emit = defineEmits(['update:modelValue', 'close', 'refresh', 'delete', 'loaded', 'saved', 'created'])
 
@@ -288,11 +299,30 @@ const internalEditing = ref(effectiveMode.value === 'add' || effectiveMode.value
 const saving = ref(false)
 
 const entityMeta = ref(null)
+// [R25 2026-07-24] 反向推导期间跳过级联清空
+//   syncDerivedHierarchyFields 更新 domain_id/sub_domain_id 时,
+//   watchParentChanges 误清空下游 service_module_id
+const isSyncingDerived = ref(false)
 const cascade = useFormCascade(
   computed(() => entityMeta.value),
   computed(() => data.value || {})
 )
 const metaLoaded = ref(false)
+
+// [FIX 2026-06-29] 用于 drawer 标题加对象名 (objectType + objectName 格式)
+const objectName = ref('')
+function updateObjectName(data) {
+  if (!data) return
+  const primary = entityMeta.value?.display_name_field
+  const nameFields = primary ? [primary] : ['name', 'username', 'title', 'code', 'label']
+  for (const f of nameFields) {
+    if (data[f]) {
+      objectName.value = String(data[f])
+      return
+    }
+  }
+  objectName.value = ''
+}
 
 async function loadEntityMeta() {
   if (!props.objectType) {
@@ -320,7 +350,7 @@ async function loadEntityMeta() {
     // 但需要 entityMeta 加载完才有 cascade_select 配置可用。
     // 这里 fire-and-forget：watch 注册是同步的，inferParentFields 只在编辑模式有意义。
     if (entityMeta.value?.cascade_select?.length) {
-      cascade.initialize()
+      cascade.initialize(() => isSyncingDerived.value)
     }
   }
 }
@@ -348,12 +378,16 @@ const hasAuditAspect = computed(() => {
 })
 
 const drawerTitle = computed(() => {
-  const metaLabel = entityMeta.value?.name || entityMeta.value?.label
-  const objectLabel = metaLabel || objectTypeService.getLabel(props.objectType)
+  // [FIX 2026-06-29] 使用 getDetailLabel 自动产出 "objectLabel 详情 [objectName]" 格式
+  //   - add 模式: "新建objectLabel"
+  //   - view 模式 + 有 name: "objectLabel 详情 objectName"
+  //   - view 模式 + 无 name: "objectLabel 详情"
   if (effectiveMode.value === 'add') {
+    const metaLabel = entityMeta.value?.name || entityMeta.value?.label
+    const objectLabel = metaLabel || objectTypeService.getLabel(props.objectType)
     return `新建${objectLabel}`
   }
-  return `${objectLabel}详情`
+  return objectTypeService.getDetailLabel(props.objectType, objectName.value)
 })
 
 const dataSubtitle = computed(() => {
@@ -418,12 +452,16 @@ const computedFieldDefs = computed(() => {
       && !(isBusinessKey && !isAddMode)
       && !isComputed
     
-    const fieldReadonly = isReadonlyAlways 
-      || backendReadonly 
-      || uiEditable === false 
+    const fieldReadonly = isReadonlyAlways
+      || backendReadonly
+      || uiEditable === false
       || (isBusinessKey && !isAddMode)
       || isComputed
       || f.id.toLowerCase() === 'type'
+      // [R21 2026-07-24] 元模型驱动: 有 derived_from 或 readonly_always 的字段始终 readonly
+      //   覆盖所有 BO: business_object / service_module / relationship
+      || (f.semantics?.readonly_always === true)
+      || (f.semantics?.derived_from)
     
     let valueHelp = f.value_help
     if (!valueHelp && f.ui?.relation) {
@@ -465,7 +503,11 @@ const computedFieldDefs = computed(() => {
       valueHelp,
       // [FIX 2026-06-16] 把 business_key 透传给 fieldDefs，让 ObjectPageField
       //   在 view 模式下能给业务键(主key) 加橙色高亮 (YonDesign primary)
-      business_key: isBusinessKey
+      business_key: isBusinessKey,
+      // [R27 2026-07-24] 透传 semantics, 让 ObjectPageField 能识别 derived_from / readonly_always
+      //   业务背景: 详情页层级字段 (domain_id / sub_domain_id) 由 service_module_id 反推,
+      //   ObjectPageField.isFieldReadonly 需要通过 derived_from 判定 readonly
+      semantics
     }
   }
   return defs
@@ -489,7 +531,7 @@ const computedActions = computed(() => {
   const yamlActions = detailConfig?.actions || []
 
   if (yamlActions.length > 0) {
-    return yamlActions.map(a => {
+    const actions = yamlActions.map(a => {
       if (typeof a === 'string') {
         return buildAction(a)
       }
@@ -502,6 +544,8 @@ const computedActions = computed(() => {
         container: a.container
       }
     })
+    appendRoleAuditAction(actions)
+    return actions
   }
 
   const actions = [buildAction('edit')]
@@ -512,15 +556,29 @@ const computedActions = computed(() => {
   if (props.showDelete && !internalEditing.value) {
     actions.push(buildAction('delete'))
   }
+  appendRoleAuditAction(actions)
   return actions
 })
+
+// [v70 2026-08-28] 权限集 object 的 validation action：权限体检。
+//   仅浏览态显示（编辑中数据未落库，体检结果会误导）；新建模式无 permissionSetId 不显示。
+//   [P4-新4 2026-08-29] Spec 16: 同时支持 'role' (历史) 和 'permission_set' (新) objectType
+function appendRoleAuditAction(actions) {
+  const isPermissionSet = props.objectType === 'permission_set' || props.objectType === 'role'
+  if (isPermissionSet && !internalEditing.value && props.id !== 'new') {
+    actions.push(buildAction('audit'))
+  }
+}
 
 function buildAction(key) {
   const map = {
     edit: { id: 'edit', key: 'edit', label: '编辑', icon: 'edit', variant: 'primary' },
     save: { id: 'save', key: 'save', label: '保存', icon: 'save', variant: 'primary' },
     cancel: { id: 'cancel', key: 'cancel', label: '取消', icon: 'close', variant: 'secondary' },
-    delete: { id: 'delete', key: 'delete', label: '删除', icon: 'delete', variant: 'danger' }
+    delete: { id: 'delete', key: 'delete', label: '删除', icon: 'delete', variant: 'danger' },
+    // [v71 2026-08-28] 权限体检用 primary 变体：与标题栏 编辑/删除 视觉一致
+    //   （该标题栏 danger 也渲染为品牌色填充，secondary 灰白会显得突兀）
+    audit: { id: 'audit', key: 'audit', label: '权限体检', icon: 'search', variant: 'primary' }
   }
   return map[key] || { id: key, key, label: key, icon: key, variant: '' }
 }
@@ -725,6 +783,17 @@ const computedSections = computed(() => {
             fields: filterFields(tab.fields)
           }]
         })
+      } else if (tab.type === 'readonly_aggregate') {
+        sections.push({
+          key: tab.id || 'permission_preview',
+          label: tab.label || '权限预览',
+          icon: tab.icon || 'lock',
+          type: 'readonly_aggregate',
+          props: {
+            endpoint: (tab.endpoint || tab.props?.endpoint || '').replace('{id}', String(props.id)),
+            ...(tab.props || {})
+          }
+        })
       } else if (tab.type === 'custom') {
         sections.push({
           key: tab.id || 'custom',
@@ -853,7 +922,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable'
+        rowMutability: cs.rowMutability || 'fullEditable'
       })
     } else if (cs.child_object) {
       sections.push({
@@ -871,7 +940,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable',
+        rowMutability: cs.rowMutability || 'fullEditable',
         inlineEdit: cs.inlineEdit || null,
         columns: cs.columns || null
       })
@@ -911,6 +980,7 @@ onMounted(() => {
     }
     if (selectedVersionId.value) {
       data.value.version_id = selectedVersionId.value
+      data.value.version_id_display = selectedVersion.value?.name || ''
     }
     loading.value = false
   } else {
@@ -1055,6 +1125,7 @@ watch(() => [props.objectType, props.id, props.mode, props.createMode, props.edi
         data.value = {}
         if (selectedVersionId.value) {
           data.value.version_id = selectedVersionId.value
+          data.value.version_id_display = selectedVersion.value?.name || ''
         }
         loading.value = false
         console.debug('[DetailPage] watch (add mode, first init): set data={}')
@@ -1078,6 +1149,7 @@ watch(() => [props.objectType, props.id, props.mode, props.createMode, props.edi
 watch(selectedVersionId, () => {
   if ((effectiveMode.value === 'add' || props.id === 'new') && selectedVersionId.value && !data.value.version_id) {
     data.value.version_id = selectedVersionId.value
+    data.value.version_id_display = selectedVersion.value?.name || ''
   }
 })
 
@@ -1103,8 +1175,9 @@ async function fetchData(options = {}) {
     console.debug('[DetailPage] fetchData, objectType:', props.objectType, 'id:', props.id)
     const result = await boService.read(props.objectType, props.id, options)
     if (result.success) {
-      console.debug('[DetailPage] fetchData success, data:', result.data)
       data.value = result.data
+      // [FIX 2026-06-29] 更新对象名 (用于 drawer 标题)
+      updateObjectName(result.data)
       emit('loaded', result.data)
     } else {
       // [FIX 2026-06-14] 把 httpStatus/code 也带上, 让 403/404 等更明确
@@ -1159,6 +1232,195 @@ function handleFieldUpdate({ key, value }) {
   if (data.value) {
     data.value = { ...data.value, [key]: value }
   }
+  // [R23 2026-07-24] service_module_id 变化 → 自动回填 domain_id / sub_domain_id
+  //   业务背景: 详情页服务模块是唯一可选字段, 领域/子领域作为派生 readonly 展示
+  if (key === 'service_module_id' && value && value !== '') {
+    syncDerivedHierarchyFields(value)
+  } else if (key === 'service_module_id' && (!value || value === '')) {
+    clearDerivedHierarchyFields()
+  }
+  // [R21 2026-07-24] tree picker 层级入口字段: 选择后自动回填祖先字段
+  //   sub_domain_id (service_module 详情页) → 回填 domain_id
+  //   source_bo_id (relationship 详情页) → 回填 source_service_module_id / source_sub_domain_id / source_domain_id
+  //   target_bo_id (relationship 详情页) → 回填 target_service_module_id / target_sub_domain_id / target_domain_id
+  else if ((key === 'sub_domain_id' || key === 'source_bo_id' || key === 'target_bo_id') && value && value !== '') {
+    syncHierarchyAncestors(key, value)
+  } else if ((key === 'sub_domain_id' || key === 'source_bo_id' || key === 'target_bo_id') && (!value || value === '')) {
+    clearHierarchyAncestors(key)
+  }
+}
+
+// [R27 2026-07-24] out-mapping 处理 (例如: 选服务模块时自动带出 code 字段)
+function handleOutMapping(updates) {
+  console.debug('[R27 out-mapping]', updates)
+  if (!data.value || !updates) return
+  // 检查 out-mapping 后的值是否与当前 data 一致, 避免无限循环
+  let changed = false
+  const newData = { ...data.value }
+  for (const [k, v] of Object.entries(updates)) {
+    if (newData[k] !== v) {
+      newData[k] = v
+      changed = true
+    }
+  }
+  if (changed) {
+    data.value = newData
+  }
+}
+
+// [R23 2026-07-24] 从 service_module 的 resolve 响应中拿 ancestor_ids,
+//   回填到 domain_id / sub_domain_id (并同步 _display, 保持 UI 显示文本)
+//   数据源: 后端 /api/v2/value-help/bo/service_module/resolve?value=xxx
+//   响应: { value, display, code, ancestor_path, ancestor_ids: { sub_domain, domain, version } }
+async function syncDerivedHierarchyFields(serviceModuleId) {
+  // [R25 2026-07-24] 设置标志: 阻止 watchParentChanges 在此期间清空下游字段
+  isSyncingDerived.value = true
+  try {
+    const resp = await fetch(
+      `/api/v2/value-help/bo/service_module/resolve?value=${encodeURIComponent(serviceModuleId)}`,
+      { credentials: 'include' }
+    )
+    if (!resp.ok) {
+      console.warn('[R23 sync] resolve failed status=', resp.status)
+      return
+    }
+    const json = await resp.json()
+    if (!json.success || !json.data) return
+    const ids = json.data.ancestor_ids || {}
+    const names = json.data.ancestor_names || {}
+    const display = json.data.display || ''
+    const code = json.data.code || ''
+    if (!data.value) {
+      console.warn('[R23 sync] data.value is null, abort')
+      return
+    }
+    const updates = { ...data.value }
+    let changed = false
+    // service_module 自身: 同步 display 字段
+    updates.service_module_name = display
+    updates.service_module_code = code
+    updates.service_module_id_display = code ? `${code} - ${display}` : display
+    changed = true
+    // [R24 2026-07-24] 派生字段: 一次性从 ancestor_names 拿 display (避免多次异步 resolve)
+    if (ids.sub_domain != null && updates.sub_domain_id !== ids.sub_domain) {
+      updates.sub_domain_id = ids.sub_domain
+      updates.sub_domain_id_display = names.sub_domain || `#${ids.sub_domain}`
+      changed = true
+    }
+    if (ids.domain != null && updates.domain_id !== ids.domain) {
+      updates.domain_id = ids.domain
+      updates.domain_id_display = names.domain || `#${ids.domain}`
+      changed = true
+    }
+    if (changed) {
+      data.value = updates
+    }
+    // [R25] 等待 watch flush 完成后再清除标志, 防止异步 watch 在此之后触发清空
+    await nextTick()
+  } catch (e) {
+    // 静默失败: 用户已经看到 service_module 选中, 不强制打断
+    console.warn('[DetailPage] syncDerivedHierarchyFields failed:', e)
+  } finally {
+    isSyncingDerived.value = false
+  }
+}
+
+function clearDerivedHierarchyFields() {
+  if (!data.value) return
+  data.value = {
+    ...data.value,
+    domain_id: null,
+    sub_domain_id: null,
+    domain_id_display: '',
+    sub_domain_id_display: '',
+  }
+}
+
+// [R21 2026-07-24] tree picker 层级入口字段的祖先回填映射
+//   key → { target_bo, prefix, fields: [{id_field, display_field, ancestor_key}] }
+//   target_bo: 用于调用 resolve API 的维度名
+//   prefix: relationship 双端字段前缀 (source/target), 单端为空
+//   fields: 需要回填的祖先字段列表 (id_field = 数据字段, display_field = 展示字段, ancestor_key = ancestor_ids 中的 key)
+const HIERARCHY_ENTRY_MAP = {
+  sub_domain_id: {
+    target_bo: 'sub_domain',
+    prefix: '',
+    fields: [
+      { id_field: 'domain_id', display_field: 'domain_id_display', ancestor_key: 'domain' },
+    ],
+  },
+  source_bo_id: {
+    target_bo: 'business_object',
+    prefix: 'source_',
+    fields: [
+      { id_field: 'source_service_module_id', display_field: 'source_service_module_id_display', ancestor_key: 'service_module' },
+      { id_field: 'source_sub_domain_id', display_field: 'source_sub_domain_id_display', ancestor_key: 'sub_domain' },
+      { id_field: 'source_domain_id', display_field: 'source_domain_id_display', ancestor_key: 'domain' },
+    ],
+  },
+  target_bo_id: {
+    target_bo: 'business_object',
+    prefix: 'target_',
+    fields: [
+      { id_field: 'target_service_module_id', display_field: 'target_service_module_id_display', ancestor_key: 'service_module' },
+      { id_field: 'target_sub_domain_id', display_field: 'target_sub_domain_id_display', ancestor_key: 'sub_domain' },
+      { id_field: 'target_domain_id', display_field: 'target_domain_id_display', ancestor_key: 'domain' },
+    ],
+  },
+}
+
+// [R21 2026-07-24] tree picker 选择后, 从后端 resolve 获取 ancestor_ids 并回填祖先字段
+//   复用 /api/v2/value-help/bo/{target_bo}/resolve?value={id} 接口
+//   响应: { value, display, code, ancestor_path, ancestor_ids: {domain, sub_domain, service_module, ...}, ancestor_names: {...} }
+async function syncHierarchyAncestors(entryKey, entryValue) {
+  const config = HIERARCHY_ENTRY_MAP[entryKey]
+  if (!config) return
+  isSyncingDerived.value = true
+  try {
+    const resp = await fetch(
+      `/api/v2/value-help/bo/${config.target_bo}/resolve?value=${encodeURIComponent(entryValue)}`,
+      { credentials: 'include' }
+    )
+    if (!resp.ok) {
+      console.warn(`[R21 sync] resolve failed status=${resp.status} for ${entryKey}`)
+      return
+    }
+    const json = await resp.json()
+    if (!json.success || !json.data) return
+    const ids = json.data.ancestor_ids || {}
+    const names = json.data.ancestor_names || {}
+    if (!data.value) return
+    const updates = { ...data.value }
+    let changed = false
+    for (const f of config.fields) {
+      const ancestorId = ids[f.ancestor_key]
+      if (ancestorId != null && updates[f.id_field] !== ancestorId) {
+        updates[f.id_field] = ancestorId
+        updates[f.display_field] = names[f.ancestor_key] || `#${ancestorId}`
+        changed = true
+      }
+    }
+    if (changed) {
+      data.value = updates
+    }
+    await nextTick()
+  } catch (e) {
+    console.warn(`[R21 sync] syncHierarchyAncestors failed for ${entryKey}:`, e)
+  } finally {
+    isSyncingDerived.value = false
+  }
+}
+
+// [R21 2026-07-24] tree picker 清空后, 清除关联的祖先字段
+function clearHierarchyAncestors(entryKey) {
+  const config = HIERARCHY_ENTRY_MAP[entryKey]
+  if (!config || !data.value) return
+  const updates = { ...data.value }
+  for (const f of config.fields) {
+    updates[f.id_field] = null
+    updates[f.display_field] = ''
+  }
+  data.value = updates
 }
 
 function handleFieldDisplayUpdate({ key, displayValue }) {
@@ -1206,6 +1468,11 @@ async function handleObjectPageAction({ action }) {
       await handleDelete()
       break
 
+    case 'audit':
+      // [v70 2026-08-28] 角色 validation action：打开权限体检弹窗
+      showAuditDialog.value = true
+      break
+
     default:
   }
 }
@@ -1224,10 +1491,6 @@ async function handleSave() {
   saving.value = true
   try {
     const isCreate = effectiveMode.value === 'add' || props.id === 'new'
-    const url = isCreate 
-      ? `/api/v2/bo/${props.objectType}` 
-      : `/api/v2/bo/${props.objectType}/${props.id}`
-    const method = isCreate ? 'POST' : 'PUT'
 
     let payload
     if (isCreate) {
@@ -1363,6 +1626,9 @@ defineExpose({
   handleObjectPageAction,
   handleRefresh
 })
+
+// [v70 2026-08-28] 权限体检弹窗状态（角色 object validation action）
+const showAuditDialog = ref(false)
 </script>
 
 <style scoped lang="scss">

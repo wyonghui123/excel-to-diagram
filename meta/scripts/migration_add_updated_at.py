@@ -27,13 +27,13 @@ def migrate_add_updated_at(db_path):
             print("[DECORATIVE] 为 roles 表添加 updated_at 字段...")
             # SQLite 不支持在 ALTER TABLE 中使用非常量默认值，所以分两步执行
             cursor.execute("""
-                ALTER TABLE roles 
+                ALTER TABLE permission_sets 
                 ADD COLUMN updated_at DATETIME
             """)
 
             # 更新现有记录的 updated_at 值（使用 created_at 的值）
             cursor.execute("""
-                UPDATE roles SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+                UPDATE permission_sets SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)
             """)
             print("[OK] roles 表已添加 updated_at 字段")
         else:
@@ -47,13 +47,13 @@ def migrate_add_updated_at(db_path):
             print("[DECORATIVE] 为 user_groups 表添加 updated_at 字段...")
             # SQLite 不支持在 ALTER TABLE 中使用非常量默认值，所以分两步执行
             cursor.execute("""
-                ALTER TABLE user_groups
+                ALTER TABLE orgs
                 ADD COLUMN updated_at DATETIME
             """)
 
             # 更新现有记录的 updated_at 值（使用 created_at 的值）
             cursor.execute("""
-                UPDATE user_groups SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+                UPDATE orgs SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)
             """)
             print("[OK] user_groups 表已添加 updated_at 字段")
         else:
@@ -68,11 +68,11 @@ def migrate_add_updated_at(db_path):
         # 为 roles 表创建触发器
         cursor.execute("""
             CREATE TRIGGER trg_roles_updated_at
-            AFTER UPDATE ON roles
+            AFTER UPDATE ON permission_sets
             FOR EACH ROW
             WHEN OLD.updated_at IS NOT NULL OR NEW.updated_at IS NOT NULL
             BEGIN
-                UPDATE roles SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                UPDATE permission_sets SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
             END
         """)
         print("[OK] 已创建 roles 表更新触发器")
@@ -80,11 +80,11 @@ def migrate_add_updated_at(db_path):
         # 为 user_groups 表创建触发器
         cursor.execute("""
             CREATE TRIGGER trg_user_groups_updated_at
-            AFTER UPDATE ON user_groups
+            AFTER UPDATE ON orgs
             FOR EACH ROW
             WHEN OLD.updated_at IS NOT NULL OR NEW.updated_at IS NOT NULL
             BEGIN
-                UPDATE user_groups SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                UPDATE orgs SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
             END
         """)
         print("[OK] 已创建 user_groups 表更新触发器")
@@ -94,11 +94,11 @@ def migrate_add_updated_at(db_path):
         # 验证迁移结果
         print("\n[DECORATIVE] 验证迁移结果:")
         
-        cursor.execute("SELECT COUNT(*) FROM roles WHERE updated_at IS NOT NULL")
+        cursor.execute("SELECT COUNT(*) FROM permission_sets WHERE updated_at IS NOT NULL")
         roles_count = cursor.fetchone()[0]
         print(f"   - roles 表: {roles_count} 条记录有 updated_at 值")
         
-        cursor.execute("SELECT COUNT(*) FROM user_groups WHERE updated_at IS NOT NULL")
+        cursor.execute("SELECT COUNT(*) FROM orgs WHERE updated_at IS NOT NULL")
         groups_count = cursor.fetchone()[0]
         print(f"   - user_groups 表: {groups_count} 条记录有 updated_at 值")
         

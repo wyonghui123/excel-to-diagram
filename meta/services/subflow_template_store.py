@@ -14,9 +14,11 @@ Subflow Template Store (v3.7)
 import json
 import logging
 import os
-import sqlite3
 import threading
 from typing import Any, Dict, List, Optional
+
+from meta.core.safe_connect import safe_connect_for_read, safe_connect_for_write
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,30 +31,27 @@ class SubflowTemplateStore:
 
     @staticmethod
     def _get_db_path() -> str:
-        return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'architecture.db',
-        )
+        return get_meta_db_path()
 
     @classmethod
     def _ensure_table(cls):
         """确保 subflow_templates 表存在"""
         try:
-            conn = sqlite3.connect(cls._get_db_path())
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS subflow_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    description TEXT,
-                    steps_json TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_by INTEGER,
-                    is_active INTEGER DEFAULT 1
-                )
-            """)
-            conn.commit()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+            with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subflow_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL,
+                        description TEXT,
+                        steps_json TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        created_by INTEGER,
+                        is_active INTEGER DEFAULT 1
+                    )
+                """)
+                conn.commit()
         except Exception as e:
             logger.exception(f"[TemplateStore] ensure_table failed: {e}")
 
@@ -61,11 +60,11 @@ class SubflowTemplateStore:
         """从 DB 加载到内存"""
         cls._ensure_table()
         try:
-            conn = sqlite3.connect(cls._get_db_path())
-            rows = conn.execute(
-                "SELECT name, description, steps_json, created_at FROM subflow_templates WHERE is_active=1"
-            ).fetchall()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+            with safe_connect_for_read(cls._get_db_path()) as conn:
+                rows = conn.execute(
+                    "SELECT name, description, steps_json, created_at FROM subflow_templates WHERE is_active=1"
+                ).fetchall()
             cls._cache = {}
             cls._cache_meta = {}
             for r in rows:
@@ -102,7 +101,13 @@ class SubflowTemplateStore:
     @classmethod
     def set(cls, name: str, steps: List[Dict[str, Any]], description: str = '',
            created_by: Optional[int] = None) -> Dict[str, Any]:
-        """创建/更新模板"""
+        """创建/更新模板
+
+        [V007.41 BUG-FIX] 决策 A: 保留 force_no_tx=True + 全局锁
+        理由: subflow_template 是 admin 配置, 并发低, 全局锁已串行化.
+              cleanup / add_to_blacklist 类似.
+              业务上没有 silent partial commit 风险 (cache 同步 in critical section).
+        """
         with _lock:
             if not cls._cache:
                 cls._load_cache()
@@ -110,30 +115,31 @@ class SubflowTemplateStore:
 
             try:
                 cls._ensure_table()
-                conn = sqlite3.connect(cls._get_db_path())
-                # 存在则更新, 不存在则插入
-                cursor = conn.execute(
-                    "SELECT id FROM subflow_templates WHERE name = ?", [name]
-                )
-                if cursor.fetchone():
-                    conn.execute(
-                        """UPDATE subflow_templates
-                           SET steps_json = ?, description = ?, updated_at = CURRENT_TIMESTAMP
-                           WHERE name = ?""",
-                        [steps_json, description, name]
+                # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+                # 决策 A: 保留 force_no_tx=True (admin + 全局锁)
+                with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                    # 存在则更新, 不存在则插入
+                    cursor = conn.execute(
+                        "SELECT id FROM subflow_templates WHERE name = ?", [name]
                     )
-                    op = 'updated'
-                else:
-                    conn.execute(
-                        """INSERT INTO subflow_templates
-                           (name, description, steps_json, created_by) VALUES (?, ?, ?, ?)""",
-                        [name, description, steps_json, created_by]
-                    )
-                    op = 'created'
-                conn.commit()
-                conn.close()
+                    if cursor.fetchone():
+                        conn.execute(
+                            """UPDATE subflow_templates
+                               SET steps_json = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                               WHERE name = ?""",
+                            [steps_json, description, name]
+                        )
+                        op = 'updated'
+                    else:
+                        conn.execute(
+                            """INSERT INTO subflow_templates
+                               (name, description, steps_json, created_by) VALUES (?, ?, ?, ?)""",
+                            [name, description, steps_json, created_by]
+                        )
+                        op = 'created'
+                    conn.commit()
 
-                # 更新缓存
+                # 更新缓存 (in critical section)
                 cls._cache[name] = steps
                 cls._cache_meta[name] = {
                     'description': description,
@@ -146,19 +152,21 @@ class SubflowTemplateStore:
 
     @classmethod
     def delete(cls, name: str) -> Dict[str, Any]:
-        """删除模板"""
+        """删除模板
+
+        [V007.41 BUG-FIX] 决策 A: 保留 force_no_tx=True + 全局锁
+        """
         with _lock:
             try:
                 cls._ensure_table()
-                conn = sqlite3.connect(cls._get_db_path())
-                cursor = conn.execute("SELECT id FROM subflow_templates WHERE name = ?", [name])
-                if not cursor.fetchone():
-                    conn.close()
-                    return {'success': False, 'message': f'模板 {name} 不存在'}
+                # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+                with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                    cursor = conn.execute("SELECT id FROM subflow_templates WHERE name = ?", [name])
+                    if not cursor.fetchone():
+                        return {'success': False, 'message': f'模板 {name} 不存在'}
 
-                conn.execute("DELETE FROM subflow_templates WHERE name = ?", [name])
-                conn.commit()
-                conn.close()
+                    conn.execute("DELETE FROM subflow_templates WHERE name = ?", [name])
+                    conn.commit()
 
                 cls._cache.pop(name, None)
                 cls._cache_meta.pop(name, None)

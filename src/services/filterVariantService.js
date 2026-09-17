@@ -6,7 +6,7 @@
  * @module services/filterVariantService
  */
 
-import { apiV1 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 
 /**
  * 查询筛选方案列表
@@ -16,18 +16,18 @@ import { apiV1 } from '@/utils/httpClient'
  * @returns {Promise<{success: boolean, data?: object, message?: string}>}
  */
 export async function queryFilterVariants(params = {}) {
-  return await apiV1.get('/filter-variants', { params })
+  return await apiV2.get('/bo/filter_variant', { params })
 }
 
 /**
  * 创建筛选方案
- * POST /api/v1/filter-variants
+ * POST /api/v2/bo/filter_variant
  *
  * @param {object} data - { object_type, name, filters, is_default, ... }
  * @returns {Promise<{success: boolean, data?: object, message?: string}>}
  */
 export async function createFilterVariant(data) {
-  return await apiV1.post('/filter-variants', data)
+  return await apiV2.post('/bo/filter_variant', data)
 }
 
 /**
@@ -43,13 +43,13 @@ export async function setDefaultFilterVariant(id) {
 
 /**
  * 删除筛选方案
- * DELETE /api/v1/filter-variants/:id
+ * DELETE /api/v2/bo/filter_variant/:id
  *
  * @param {string|number} id
  * @returns {Promise<{success: boolean, message?: string}>}
  */
 export async function deleteFilterVariant(id) {
-  return await apiV1.delete(`/filter-variants/${id}`)
+  return await apiV2.delete(`/bo/filter_variant/${id}`)
 }
 
 export default {

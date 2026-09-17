@@ -76,7 +76,7 @@ export function renderGroupModelToMermaid(groups, options = {}) {
 
     code += `${indent}subgraph ${groupId}["${groupTitle}"]\n`
     
-    const subDirection = group.layout.direction || (actualDirection === 'TB' ? 'LR' : 'TB')
+    const subDirection = group.layout.direction || actualDirection
     code += `${indent}  direction ${subDirection}\n`
 
     if (group._assignedNodes && group._assignedNodes.length > 0) {

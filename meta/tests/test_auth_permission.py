@@ -54,7 +54,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS roles (
+        CREATE TABLE IF NOT EXISTS permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -74,7 +74,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS role_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
@@ -145,7 +145,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS user_groups (
+        CREATE TABLE IF NOT EXISTS orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -155,7 +155,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS user_group_members (
+        CREATE TABLE IF NOT EXISTS org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -164,7 +164,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS group_roles (
+        CREATE TABLE IF NOT EXISTS org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -173,7 +173,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS role_data_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
@@ -185,7 +185,7 @@ def create_test_db():
     """)
     
     ds.execute("""
-        CREATE TABLE IF NOT EXISTS group_data_permissions (
+        CREATE TABLE IF NOT EXISTS org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
@@ -239,28 +239,28 @@ def create_test_db():
         ['inactive', 'inactive@example.com', password_hash, 'Inactive User', 'inactive']
     )
     
-    ds.execute("INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['admin', '管理员', '系统管理员', 1])
-    ds.execute("INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['editor', '编辑者', '可编辑数据', 0])
-    ds.execute("INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['viewer', '查看者', '只读权限', 0])
+    ds.execute("INSERT INTO permission_sets (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['admin', '管理员', '系统管理员', 1])
+    ds.execute("INSERT INTO permission_sets (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['editor', '编辑者', '可编辑数据', 0])
+    ds.execute("INSERT INTO permission_sets (code, name, description, is_system) VALUES (?, ?, ?, ?)", ['viewer', '查看者', '只读权限', 0])
     
     ds.execute("INSERT INTO permissions (code, name, resource_type, action) VALUES (?, ?, ?, ?)", ['*:*', '全部权限', '*', '*'])
     ds.execute("INSERT INTO permissions (code, name, resource_type, action) VALUES (?, ?, ?, ?)", ['domain:read', '查看领域', 'domain', 'read'])
     ds.execute("INSERT INTO permissions (code, name, resource_type, action) VALUES (?, ?, ?, ?)", ['domain:write', '编辑领域', 'domain', 'write'])
     ds.execute("INSERT INTO permissions (code, name, resource_type, action) VALUES (?, ?, ?, ?)", ['business_object:read', '查看业务对象', 'business_object', 'read'])
     
-    ds.execute("INSERT OR IGNORE INTO user_groups (code, name, description) VALUES (?, ?, ?)", ['test_admin_group', '管理员组', '测试管理员组'])
-    ds.execute("INSERT OR IGNORE INTO user_groups (code, name, description) VALUES (?, ?, ?)", ['test_editor_group', '编辑者组', '测试编辑者组'])
+    ds.execute("INSERT OR IGNORE INTO orgs (code, name, description) VALUES (?, ?, ?)", ['test_admin_group', '管理员组', '测试管理员组'])
+    ds.execute("INSERT OR IGNORE INTO orgs (code, name, description) VALUES (?, ?, ?)", ['test_editor_group', '编辑者组', '测试编辑者组'])
     
-    ds.execute("INSERT OR IGNORE INTO group_roles (group_id, role_id) VALUES (?, ?)", [1, 1])
-    ds.execute("INSERT OR IGNORE INTO group_roles (group_id, role_id) VALUES (?, ?)", [2, 2])
+    ds.execute("INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [1, 1])
+    ds.execute("INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [2, 2])
     
-    ds.execute("INSERT OR IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)", [1, 2])
-    ds.execute("INSERT OR IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)", [2, 1])
+    ds.execute("INSERT OR IGNORE INTO org_members (group_id, user_id) VALUES (?, ?)", [1, 2])
+    ds.execute("INSERT OR IGNORE INTO org_members (group_id, user_id) VALUES (?, ?)", [2, 1])
     
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [1, 1])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [2, 2])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [2, 3])
-    ds.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", [2, 4])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [1, 1])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 2])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 3])
+    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 4])
     
     ds.execute("INSERT INTO products (id, name, code) VALUES (?, ?, ?)", [1, '测试产品', 'TEST_PROD'])
     

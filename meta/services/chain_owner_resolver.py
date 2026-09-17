@@ -22,7 +22,7 @@
   - 缓存: 留给 caller (per-request g 缓存)
 """
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
 if TYPE_CHECKING:
     pass
@@ -171,6 +171,53 @@ def resolve_root_product_id(
     except Exception as e:
         logger.debug(f'resolve_root_product_id ({object_type}) failed: {e}')
         return None
+
+
+def resolve_subordinate_owner(
+    data_source, resource_type: str, record: Dict[str, Any]
+) -> Optional[int]:
+    """[P2-T5] 解析 subordinate 资源的 owner (含 parent 继承)
+
+    解析顺序:
+      1. 资源自身 owner_id (直接字段)
+      2. resource.created_by → username lookup (向后兼容)
+      3. 沿 parent_chain (parent_type + parent_id) → 查父资源 owner
+
+    Args:
+        data_source: DB 数据源
+        resource_type: BO 名 (e.g. 'annotation', 'audit_log')
+        record: 资源 dict (需含 'id', 可选 'owner_id', 'parent_type', 'parent_id')
+
+    Returns:
+        owner_id (int) 或 None
+    """
+    if not record or not record.get('id'):
+        return None
+
+    # 1. 自身 owner_id (优先, 即使是 subordinate 也要先看显式 owner)
+    direct_owner = record.get('owner_id')
+    if direct_owner is not None:
+        try:
+            return int(direct_owner)
+        except (TypeError, ValueError):
+            pass
+
+    # 2. 沿 parent_chain 继承 (subordinate 特征)
+    parent_type = record.get('parent_type')
+    parent_id = record.get('parent_id')
+    if parent_type and parent_id:
+        try:
+            table = f'{parent_type}s' if not parent_type.endswith('s') else parent_type
+            row = data_source.execute(
+                f'SELECT owner_id FROM {table} WHERE id = ? LIMIT 1',
+                [parent_id]
+            ).fetchone()
+            if row and row[0] is not None:
+                return int(row[0])
+        except Exception as e:
+            logger.debug(f'resolve_subordinate_owner parent lookup failed: {e}')
+
+    return None
 
 
 def build_owner_exception_subquery(

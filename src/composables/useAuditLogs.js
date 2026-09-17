@@ -20,7 +20,7 @@ import { ref, computed, unref, onMounted, shallowRef } from 'vue'
 import * as auditLogService from '@/services/auditLogService'
 
 export function useAuditLogs(objectType, objectId, options = {}) {
-  const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId } = options
+  const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId, excludedObjectTypes } = options
 
   // [M2 PR-2.1] 审计日志数据是 API 整体返回后整体替换，无 push/splice 原地修改 → shallowRef
   //   性能: 1000+ 条日志 reactive 创建 1000+ Proxy → shallowRef 0 Proxy
@@ -37,6 +37,13 @@ export function useAuditLogs(objectType, objectId, options = {}) {
   // [FIX 2026-06-12] parentObjectType/parentObjectId 也支持响应式 ref
   const resolvedParentObjectType = computed(() => unref(parentObjectType))
   const resolvedParentObjectId = computed(() => unref(parentObjectId))
+  // [FIX BUG-V046 2026-07-04 dev agent] excludedObjectTypes 也支持响应式 ref
+  const resolvedExcludedObjectTypes = computed(() => {
+    const raw = unref(excludedObjectTypes)
+    if (Array.isArray(raw)) return raw
+    if (raw == null) return []
+    return [String(raw)]
+  })
 
   async function loadLogs(params = {}) {
     const type = resolvedObjectType.value
@@ -49,7 +56,13 @@ export function useAuditLogs(objectType, objectId, options = {}) {
     const result = await auditLogService.getLogsByObject(type, id, {
       page: params.page || currentPage.value,
       pageSize: params.pageSize || pageSize,
-      filters: { ...filters.value, ...(params.filters || {}) },
+      filters: {
+        ...filters.value,
+        ...(params.filters || {}),
+        // [FIX BUG-V048.2 2026-07-06 coordinator] excludedObjectTypes 必须放 filters 里
+        // 原代码放在顶层 options, 被 getLogsByObject 的 destructure 默默丢弃, 实际永远不传给后端
+        excludedObjectTypes: resolvedExcludedObjectTypes.value,
+      },
       parentObjectType: resolvedParentObjectType.value,
       parentObjectId: resolvedParentObjectId.value,
     })

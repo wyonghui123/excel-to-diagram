@@ -35,11 +35,11 @@ def create_group_roles_table(conn):
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT * FROM group_roles LIMIT 1")
+        cursor.execute("SELECT * FROM org_permission_sets LIMIT 1")
         print("group_roles 表已存在")
     except sqlite3.OperationalError:
         cursor.execute("""
-            CREATE TABLE group_roles (
+            CREATE TABLE org_permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
                 role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
@@ -60,7 +60,7 @@ def create_system_admin_group(conn):
     
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    cursor.execute("SELECT id FROM user_groups WHERE code = 'system_admin'")
+    cursor.execute("SELECT id FROM orgs WHERE code = 'system_admin'")
     row = cursor.fetchone()
     
     if row:
@@ -68,7 +68,7 @@ def create_system_admin_group(conn):
         return row['id']
     
     cursor.execute(
-        "INSERT INTO user_groups (name, code, description, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO orgs (name, code, description, created_at) VALUES (?, ?, ?, ?)",
         ('系统管理员', 'system_admin', '系统管理员用户组，拥有系统最高权限', now)
     )
     
@@ -94,7 +94,7 @@ def add_admin_to_group(conn, group_id):
     user_id = user_row['id']
     
     cursor.execute(
-        "SELECT id FROM user_group_members WHERE user_id = ? AND group_id = ?",
+        "SELECT id FROM org_members WHERE user_id = ? AND group_id = ?",
         (user_id, group_id)
     )
     
@@ -103,7 +103,7 @@ def add_admin_to_group(conn, group_id):
         return user_id
     
     cursor.execute(
-        "INSERT INTO user_group_members (user_id, group_id, is_manager, joined_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO org_members (user_id, group_id, is_manager, joined_at) VALUES (?, ?, ?, ?)",
         (user_id, group_id, 1, now)
     )
     
@@ -118,7 +118,7 @@ def assign_role_to_group(conn, group_id):
     
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    cursor.execute("SELECT id FROM roles WHERE code = 'admin'")
+    cursor.execute("SELECT id FROM permission_sets WHERE code = 'admin'")
     role_row = cursor.fetchone()
     
     if not role_row:
@@ -128,7 +128,7 @@ def assign_role_to_group(conn, group_id):
     role_id = role_row['id']
     
     cursor.execute(
-        "SELECT id FROM group_roles WHERE group_id = ? AND role_id = ?",
+        "SELECT id FROM org_permission_sets WHERE group_id = ? AND role_id = ?",
         (group_id, role_id)
     )
     
@@ -137,7 +137,7 @@ def assign_role_to_group(conn, group_id):
         return role_id
     
     cursor.execute(
-        "INSERT INTO group_roles (group_id, role_id, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO org_permission_sets (group_id, role_id, created_at) VALUES (?, ?, ?)",
         (group_id, role_id, now)
     )
     
@@ -152,14 +152,14 @@ def verify_migration(conn):
     
     print("\n=== 迁移验证 ===")
     
-    cursor.execute("SELECT id, name, code FROM user_groups WHERE code = 'system_admin'")
+    cursor.execute("SELECT id, name, code FROM orgs WHERE code = 'system_admin'")
     group = cursor.fetchone()
     if group:
         print(f"[DECORATIVE] 用户组: {group['name']} ({group['code']})")
         
         cursor.execute("""
             SELECT u.username, u.display_name 
-            FROM user_group_members ugm 
+            FROM org_members ugm 
             JOIN users u ON u.id = ugm.user_id 
             WHERE ugm.group_id = ?
         """, (group['id'],))
@@ -168,8 +168,8 @@ def verify_migration(conn):
         
         cursor.execute("""
             SELECT r.name, r.code 
-            FROM group_roles gr 
-            JOIN roles r ON r.id = gr.role_id 
+            FROM org_permission_sets gr 
+            JOIN permission_sets r ON r.id = gr.role_id 
             WHERE gr.group_id = ?
         """, (group['id'],))
         roles = cursor.fetchall()
@@ -182,8 +182,8 @@ def verify_migration(conn):
         
         cursor.execute("""
             SELECT r.name, r.code 
-            FROM user_roles ur 
-            JOIN roles r ON r.id = ur.role_id 
+            FROM user_permission_sets ur 
+            JOIN permission_sets r ON r.id = ur.role_id 
             WHERE ur.user_id = ?
         """, (user['id'],))
         roles = cursor.fetchall()
@@ -191,8 +191,8 @@ def verify_migration(conn):
         
         cursor.execute("""
             SELECT ug.name, ug.code 
-            FROM user_group_members ugm 
-            JOIN user_groups ug ON ug.id = ugm.group_id 
+            FROM org_members ugm 
+            JOIN orgs ug ON ug.id = ugm.group_id 
             WHERE ugm.user_id = ?
         """, (user['id'],))
         groups = cursor.fetchall()

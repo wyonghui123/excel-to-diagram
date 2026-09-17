@@ -1,3 +1,9 @@
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
 /**
  * keyTemplateService.js - 键模板推导 service
  *
@@ -210,7 +216,7 @@ export async function suggestKeyTemplateCode(
     // Step 2: 检查无效 parent_id
     if (hasInvalidParentId(parentParams)) {
       if (config.debug) {
-        console.log('[keyTemplateService] Skipped: parent record not yet saved')
+        _dbgLog('[keyTemplateService] Skipped: parent record not yet saved')
       }
       return { success: false, skipped: 'invalid_parent' }
     }

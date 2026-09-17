@@ -128,7 +128,7 @@ async function mutation(mutationString, variables = {}) {
 // =============================================================================
 
 /**
- * snake_case → PascalCase: user_group → UserGroup
+ * snake_case → PascalCase: org → Org, permission_set → PermissionSet
  */
 function _snakeToPascal(snakeStr) {
   return snakeStr
@@ -138,7 +138,7 @@ function _snakeToPascal(snakeStr) {
 }
 
 /**
- * entity snake_case → GraphQL root field: user_group → userGroup
+ * entity snake_case → GraphQL root field: org → org, permission_set → permissionSet
  */
 function _entityNameToRoot(snakeStr) {
   const pascal = _snakeToPascal(snakeStr)

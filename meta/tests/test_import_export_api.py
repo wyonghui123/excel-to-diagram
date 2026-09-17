@@ -1939,6 +1939,98 @@ class TestBusinessKeyContext:
                 assert '版本编码' in meta, "说明 sheet should have 版本编码"
                 print(f"[PASS] 说明 sheet has context: 产品编码={meta.get('产品编码')}, 版本编码={meta.get('版本编码')}")
 
+    def test_05b_meta_sheet_no_context_without_version_id(self, api_client):
+        """[BUG-FIX 2026-07-03] 测试说明 Sheet 在无 version_id 时不写"上下文信息" section
+
+        之前无条件写 row 7-12 (产品编码/产品名称/版本编码/版本名称/版本ID),
+        即使 single mode 导出无 version_id, 也会留 5 行空字符串 + 1 行 section header.
+        修复后: 无 version_id 时整段跳过, 节省 6 行
+        """
+        client, headers = api_client
+        response = client.post(
+            '/api/v1/export',
+            data=json.dumps({
+                'object_type': 'domain',
+                'scope': 'single'
+                # 注意: 没有 filters / version_id
+            }),
+            headers={**headers, 'Content-Type': 'application/json'}
+        )
+
+        try:
+            data = json.loads(response.data)
+        except (json.JSONDecodeError, ValueError):
+            data = {}
+        file_path = data.get('data', {}).get('file_path')
+
+        if file_path and os.path.exists(file_path):
+            from openpyxl import load_workbook
+            wb = load_workbook(file_path)
+
+            if '说明' in wb.sheetnames:
+                ws = wb['说明']
+                # 收集 row 1-15 的所有非空 cell
+                all_values = []
+                for row in ws.iter_rows(min_row=1, max_row=15, max_col=2):
+                    for cell in row:
+                        if cell.value is not None and str(cell.value).strip():
+                            all_values.append(str(cell.value))
+
+                # 不应出现"上下文信息"/"产品编码"/"版本编码"等
+                for forbidden in ['上下文信息', '产品编码', '产品名称', '版本编码', '版本名称', '版本ID']:
+                    assert forbidden not in all_values, (
+                        f"无 version_id 时不应出现 '{forbidden}' in 说明 sheet, "
+                        f"实际内容: {all_values}"
+                    )
+                print(f"[PASS] 说明 sheet 无 version_id 时跳过 上下文信息 section")
+
+    def test_05c_collect_child_object_types_respects_include_annotations(self, api_client):
+        """[BUG-FIX 2026-07-03] 测试 _collect_child_object_types 被 include_annotations=False 关闭
+
+        之前 _collect_child_object_types 硬编码自动追加 annotation 作为 polymorphic child,
+        即使用户不希望导出 (single mode / multi 模式下未勾选 annotation).
+        修复后: caller 传 options={'include_annotations': False} 时不追加
+        """
+        from meta.services.import_export_service import ImportExportService
+        from meta.core.models import registry
+
+        # 验证 annotation 本身在 registry 里
+        annotation_meta = registry.get('annotation')
+        if annotation_meta is None:
+            pytest.skip("annotation not in registry (test env 限制)")
+
+        # 准备一个 service 实例 (无需数据库连接, _collect_child_object_types 不查 DB)
+        from meta.core.datasource import get_data_source
+        ds = get_data_source()
+        service = ImportExportService(ds)
+
+        # Case 1: 默认 (不传 options) → 应包含 annotation (向后兼容)
+        default_map = service._collect_child_object_types(['domain'])
+        assert 'annotation' in default_map, (
+            f"默认行为应包含 annotation (向后兼容), 实际: {list(default_map.keys())}"
+        )
+
+        # Case 2: include_annotations=False → 不应包含 annotation
+        closed_map = service._collect_child_object_types(
+            ['domain'],
+            options={'include_annotations': False}
+        )
+        assert 'annotation' not in closed_map, (
+            f"include_annotations=False 时不应追加 annotation, 实际: {list(closed_map.keys())}"
+        )
+
+        # Case 3: include_child_objects=False → 也不应包含 annotation
+        #  (L822-823 优先用 include_child_objects)
+        closed2_map = service._collect_child_object_types(
+            ['domain'],
+            options={'include_child_objects': False}
+        )
+        assert 'annotation' not in closed2_map, (
+            f"include_child_objects=False 时不应追加 annotation, 实际: {list(closed2_map.keys())}"
+        )
+
+        print(f"[PASS] _collect_child_object_types 正确响应 include_annotations option")
+
     def test_06_get_product_version_codes_method(self, api_client):
         """测试 _get_product_version_codes 方法
         

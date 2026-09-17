@@ -122,17 +122,19 @@ from meta.services.trace_service import (
 )
 from meta.api.auth_api import auth_bp, init_auth_services
 from meta.api.user_api import user_bp, init_user_services
-from meta.api.role_api import role_bp, init_role_services
+from meta.api.permission_set_api import permission_set_bp, init_permission_set_services
 from meta.api.data_permission_api import data_perm_bp, init_data_perm_services
 # from meta.api.role_data_permission_api import role_data_permission_bp  # 模块不存在，已废弃
-from meta.api.user_group_api import user_group_bp, init_user_group_services
+from meta.api.org_api import org_bp, init_org_services
+from meta.api.org_function_api import org_function_bp, init_org_function_services
 from meta.api.enum_api import enum_bp, init_enum_services
 from meta.api.menu_permission_api import menu_permission_bp
 from meta.api.permission_bundle_api import permission_bundle_bp
 from meta.api.permission_audit_api import permission_audit_bp
-from meta.api.role_menu_api import role_menu_bp
-from meta.api.role_dimension_scope_api import role_dim_bp
-from meta.api.management_dimension_api import management_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp
+from meta.api.permission_set_menu_api import permission_set_menu_bp
+from meta.api.permission_set_dimension_scope_api import role_dim_bp as ps_dim_scope_bp
+# file's blueprint var is still role_dim_bp (Plan B kept for compat)
+from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp, ps_matrix_bp
 from meta.api.permission_rule_api import permission_rule_bp
 from meta.api.permission_sync_api import permission_sync_bp
 from meta.api.owner_transfer_api import owner_transfer_bp
@@ -140,7 +142,7 @@ from meta.api.filter_variant_api import filter_variant_bp
 from meta.api.audit_api import audit_bp, init_audit_services
 from meta.api.object_identity_api import identity_bp, init_services as init_identity_services
 from meta.api.association_api import association_bp, init_association_services
-from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp
+from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp, permission_set_v2_bp
 from meta.api.value_help_api import value_help_bp
 from meta.api.special_routes_api import special_bp, init_special_services
 from meta.api.annotation_routes_api import annotation_bp, init_annotation_services
@@ -352,6 +354,20 @@ def create_app(db_path=None):
 
     data_source = get_data_source("sqlite", database=db_path)
 
+    # [P5 补充 2026-07-26] 启动时检测 SQLite 运行时配置 (WAL/busy_timeout/...)
+    # 必须在任何 layer 调用 get_runtime_config() 之前完成
+    # 解决: DEMO 用户创建 product 时 RuntimeError: DB config not detected yet
+    try:
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
+        logging.getLogger(__name__).info(
+            "[PREFLIGHT] detect_runtime_config() called for db_path=%s", db_path
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[PREFLIGHT] detect_runtime_config failed (non-fatal): %s", e
+        )
+
     from meta.core.db_health_monitor import init_monitor
     init_monitor(db_path)
     logging.getLogger(__name__).info("DBHealthMonitor initialized")
@@ -363,12 +379,13 @@ def create_app(db_path=None):
     from meta.scripts.migrate_system_admin import run_migration
     run_migration()
     init_user_services(data_source)
-    init_role_services(data_source)
+    init_permission_set_services(data_source)
     init_data_perm_services(data_source)
     init_enum_services(data_source, db_path)
     init_identity_services(data_source)
     init_association_services(data_source)
-    init_user_group_services(data_source)
+    init_org_services(data_source)
+    init_org_function_services(data_source)
     
     init_change_notification_tables(data_source)
 
@@ -414,6 +431,9 @@ def create_app(db_path=None):
     # [V1.1.8] OwnerChainInterceptor (P25) 在 PermissionInterceptor (P30) 之前
     #   owner chain 命中 -> 跳过 functional perm 检查
     bo_framework.register_interceptor(OwnerChainInterceptor())
+    # [Spec 19 M1 2026-09-05] 组织管理守卫(P26)：组织移动守卫 + 敏感关联门禁（权限集绑定/职位分配仅限全局管理员）
+    from meta.core.interceptors.org_admin_guard_interceptor import OrgAdminGuardInterceptor
+    bo_framework.register_interceptor(OrgAdminGuardInterceptor())
     bo_framework.register_interceptor(PermissionInterceptor())
     bo_framework.register_interceptor(DataPermissionInterceptor())
     bo_framework.register_interceptor(FieldPolicyInterceptor())
@@ -552,7 +572,12 @@ def create_app(db_path=None):
 
     @app.before_request
     def setup_trace():
-        print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        try:
+            print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        except (OSError, ValueError):
+            # [FIX 2026-06-29] Windows 下后台进程 stdout 可能已关闭/管道断开,
+            # 静默吞掉 print 错误, 不影响业务
+            pass
         g.trace_id = get_or_create_trace_id()
         g.transaction_id = str(secrets.token_hex(16))
         g.agent_id = request.headers.get('X-Agent-Id')
@@ -642,15 +667,17 @@ def create_app(db_path=None):
     app.register_blueprint(schema_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(user_bp)
-    app.register_blueprint(role_bp)
+    app.register_blueprint(permission_set_bp)
     app.register_blueprint(data_perm_bp)
     # app.register_blueprint(role_data_permission_bp)  # 模块不存在，已废弃
-    app.register_blueprint(role_menu_bp)
-    app.register_blueprint(role_dim_bp)
-    app.register_blueprint(management_dimension_bp)
+    app.register_blueprint(permission_set_menu_bp)
+    app.register_blueprint(ps_dim_scope_bp)
+    app.register_blueprint(permission_dimension_bp)
     app.register_blueprint(roles_bp)  # /api/v1/roles/<id>/permission-rules
+    app.register_blueprint(ps_matrix_bp)  # /api/v1/permission-sets/<id>/resource-action-matrix (GET+PUT)
     app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
-    app.register_blueprint(user_group_bp)
+    app.register_blueprint(org_bp)
+    app.register_blueprint(org_function_bp)
     app.register_blueprint(enum_bp)
     app.register_blueprint(menu_permission_bp)
     app.register_blueprint(permission_bundle_bp)
@@ -674,6 +701,10 @@ def create_app(db_path=None):
     app.register_blueprint(meta_v2_bp)
     app.register_blueprint(role_v2_bp)
     app.register_blueprint(permission_rule_v2_bp)
+    app.register_blueprint(permission_set_v2_bp)  # [P13-T4] Permission Set API
+    # [Phase 3 P3.1-P3.7 2026-07-25] 统一权限管理 API (permission_rules_v2 CRUD + 推导 + 预览 + 模拟)
+    from meta.api.unified_permission_api import unified_permission_bp
+    app.register_blueprint(unified_permission_bp)
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
@@ -734,6 +765,16 @@ def create_app(db_path=None):
         'bos',          # /api/v1/bos (FR-017 BO list)
         'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
         'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+        # [Spec 16 2026-08-29] 旧 roles/user-groups → 新 permission_sets/orgs
+        # 路径段名变更后保留 v1 业务路由, 避免 deprecate_v1_crud 误拦截
+        'permission-sets',                 # /api/v1/permission-sets/* (Spec 16, 旧 roles)
+        'permission-set-menus',            # /api/v1/permission-set-menus/*
+        'permission-set-dimension-scopes', # /api/v1/permission-set-dimension-scopes/*
+        'orgs',                            # /api/v1/orgs/* (Spec 16, 旧 user-groups)
+        'org-permission-sets',             # /api/v1/org-permission-sets/* (Spec 16, 旧 group-roles)
+        # [Spec16 Plan D 2026-09-02] menu_permission_bp /visible 路由仍被前端菜单渲染使用
+        # 加白名单避免 deprecate_v1_crud 中间件误拦截
+        'menu-permission',                 # /api/v1/menu-permission/visible
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源
@@ -747,7 +788,7 @@ def create_app(db_path=None):
         'permission-bundles': 'permission_bundle',
         'permission-rules': 'permission_rule',
         'data-permissions': 'data_permission',
-        'management-dimensions': 'management_dimension',
+        'management-dimensions': 'permission_dimension',
         'filter-variants': 'filter_variant',
         'menu-permission': 'menu_permission',
         'identity': 'identity',
@@ -834,7 +875,14 @@ def create_app(db_path=None):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 3010))
+    # [P0 2026-09-05 端口单一真源] 默认读 scripts/ports.json (3011), 不再硬编码 5000
+    try:
+        import json as _json
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts', 'ports.json'), 'r', encoding='utf-8') as _pf:
+            _default_port = int(_json.load(_pf).get('backend', 3011))
+    except Exception:
+        _default_port = 3011
+    port = int(os.environ.get('PORT', _default_port))
     
     is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     if not is_reloader:

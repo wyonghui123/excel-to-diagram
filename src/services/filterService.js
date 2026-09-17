@@ -1,3 +1,9 @@
+
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
 /**
  * FilterService — 元数据驱动过滤器服务
  * 
@@ -342,7 +348,7 @@ export function addFilterParam(params, key, value, columns, filterFields, option
   if (key.includes('__')) {
     params[key] = String(value)
     if (options.debug) {
-      console.log(`[FilterService] 原始参数透传: ${key}=${value}`)
+      _dbgTrace(`[FilterService] 原始参数透传: ${key}=${value}`)
     }
     return
   }
@@ -358,7 +364,7 @@ export function addFilterParam(params, key, value, columns, filterFields, option
   const apiKey = (field?.api_param_key || field?.apiParamKey || key)
 
   if (options.debug) {
-    console.log(`[FilterService] 添加过滤参数: ${key}=${value} (type: ${fieldType}, format: ${fieldFormat}, filterType: ${filterType})`)
+    _dbgTrace(`[FilterService] 添加过滤参数: ${key}=${value} (type: ${fieldType}, format: ${fieldFormat}, filterType: ${filterType})`)
   }
 
   const isDateRange = Array.isArray(value) && (
@@ -379,13 +385,13 @@ export function addFilterParam(params, key, value, columns, filterFields, option
     if (value[0]) {
       params[`${baseKey}_start`] = formatDate(value[0], false)
       if (options.debug) {
-        console.log(`[FilterService] 日期开始: ${baseKey}_start=${params[`${baseKey}_start`]}`)
+        _dbgTrace(`[FilterService] 日期开始: ${baseKey}_start=${params[`${baseKey}_start`]}`)
       }
     }
     if (value[1]) {
       params[`${baseKey}_end`] = formatDate(value[1], true)
       if (options.debug) {
-        console.log(`[FilterService] 日期结束: ${baseKey}_end=${params[`${baseKey}_end`]}`)
+        _dbgTrace(`[FilterService] 日期结束: ${baseKey}_end=${params[`${baseKey}_end`]}`)
       }
     }
   } else if (Array.isArray(value)) {
@@ -409,13 +415,13 @@ export function addFilterParam(params, key, value, columns, filterFields, option
       // 单元素数组 + 数字字段：当作单值处理（如 FK 字段选择）
       params[apiKey] = String(value[0])
       if (options.debug) {
-        console.log(`[FilterService] 单值过滤: ${apiKey}=${value[0]}`)
+        _dbgTrace(`[FilterService] 单值过滤: ${apiKey}=${value[0]}`)
       }
     } else {
       // 多选过滤：使用 __in
       params[`${apiKey}__in`] = value.join(',')
       if (options.debug) {
-        console.log(`[FilterService] 多选过滤: ${apiKey}__in=${params[`${apiKey}__in`]}`)
+        _dbgTrace(`[FilterService] 多选过滤: ${apiKey}__in=${params[`${apiKey}__in`]}`)
       }
     }
   } else {
@@ -427,12 +433,12 @@ export function addFilterParam(params, key, value, columns, filterFields, option
     if (isTextField && !isIdField && !isNumericValue) {
       params[`${apiKey}__like`] = `%${value}%`
       if (options.debug) {
-        console.log(`[FilterService] 模糊过滤: ${apiKey} LIKE '%${value}%'`)
+        _dbgTrace(`[FilterService] 模糊过滤: ${apiKey} LIKE '%${value}%'`)
       }
     } else {
       params[apiKey] = String(value)
       if (options.debug) {
-        console.log(`[FilterService] 精确过滤: ${apiKey}=${value}`)
+        _dbgTrace(`[FilterService] 精确过滤: ${apiKey}=${value}`)
       }
     }
   }
@@ -481,7 +487,7 @@ export function buildFilterQueryParams(options = {}) {
   if (keyword && keyword.trim()) {
     params.keyword = keyword.trim()
     if (debug) {
-      console.log(`[FilterService] 关键词搜索: "${keyword}"`)
+      _dbgTrace(`[FilterService] 关键词搜索: "${keyword}"`)
     }
   }
 

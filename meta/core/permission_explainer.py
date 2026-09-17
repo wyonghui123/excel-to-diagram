@@ -23,16 +23,14 @@ from meta.core.runtime_dimension_resolver import get_runtime_dimension_resolver
 from meta.core.bo_schema_loader import get_bo_schema_loader
 from meta.core.aspect_loader import get_aspect_loader
 from meta.core.scope_evaluator import get_scope_evaluator
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
 
 def _get_db_path() -> str:
     """获取数据库路径"""
-    current = os.path.abspath(__file__)
-    for _ in range(2):
-        current = os.path.dirname(current)
-    return os.path.join(current, 'architecture.db')
+    return get_meta_db_path()
 
 
 class PermissionExplainer:

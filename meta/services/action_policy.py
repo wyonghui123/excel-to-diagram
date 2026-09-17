@@ -255,8 +255,8 @@ class ActionPolicy:
             # extensible: 保留所有操作
             return actions
         
-        if mutability == 'fully_editable':
-            # fully_editable: 保留所有操作
+        if mutability == 'fullEditable':
+            # fullEditable: 保留所有操作
             return actions
         
         return actions

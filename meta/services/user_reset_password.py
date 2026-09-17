@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict
 
 from flask import g
+from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +40,7 @@ def user_reset_password_handler(params: Dict[str, Any], context: Dict[str, Any])
     # 引入 db
     from meta.core.datasource import get_data_source
     import os
-    db_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'architecture.db',
-    )
+    db_path = get_meta_db_path()
     ds = get_data_source("sqlite", database=db_path)
     if not ds:
         return {'success': False, 'data': None, 'message': '数据源未初始化'}

@@ -62,7 +62,7 @@ def _create_test_db():
     """)
 
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_groups (
+        CREATE TABLE IF NOT EXISTS orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
             code TEXT,

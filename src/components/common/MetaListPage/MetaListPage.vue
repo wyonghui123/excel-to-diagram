@@ -209,6 +209,7 @@
             :key="tableKey"
             v-loading="loading"
             :data="data"
+            :row-key="rowKey"
             :default-sort="defaultSort"
             :sort="sortInfo"
             border
@@ -414,6 +415,15 @@
                 </el-dropdown>
               </template>
             </el-table-column>
+
+            <!-- [MOMP 2026-08-30] 自定义空态：未选择范围时给出明确指示，替代默认"暂无数据" -->
+            <template #empty>
+              <div class="list-empty-state">
+                <el-icon :size="32" class="list-empty-icon"><FolderOpened /></el-icon>
+                <div class="list-empty-title">{{ props.emptyText }}</div>
+                <div v-if="props.emptyHint" class="list-empty-hint">{{ props.emptyHint }}</div>
+              </div>
+            </template>
           </el-table>
         </div>
       </div>
@@ -501,7 +511,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort, FolderOpened } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
@@ -570,7 +580,10 @@ function getActionIcon(action) {
 }
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
+import { objectTypeService } from '@/services/objectTypeService'
 import { useListActionStore } from '@/stores/listActionStore'
+// [P1-B 2026-07-25] 接入 ActionPolicy, 替代 canDelete 硬编码状态判断
+import { canPerformAction as _canPerformActionByPolicy } from '@/services/actionPolicyService'
 
 // [FR-004] 声明组件名以支持 keep-alive include 白名单匹配
 defineOptions({ name: 'MetaListPage' })
@@ -611,11 +624,20 @@ const props = defineProps({
   rowMutability: {
     type: String,
     default: null,
-    validator: (v) => [null, 'locked', 'extensible', 'fully_editable'].includes(v)
+    validator: (v) => [null, 'locked', 'extensible', 'fullEditable'].includes(v)
   },
   externalEditing: {
     type: Boolean,
     default: null
+  },
+  // [MOMP 2026-08-30] 空态文案（用于"未选择范围"等场景给出明确指示，替代默认"暂无数据"）
+  emptyText: {
+    type: String,
+    default: '暂无数据'
+  },
+  emptyHint: {
+    type: String,
+    default: ''
   },
   // ========== compact mode props ==========
   displayMode: {
@@ -893,6 +915,8 @@ const secondaryToolbarActions = computed(() =>
 )
 
 const showDetailDrawer = ref(false)
+// [FIX 2026-06-29] 保存当前详情行用于 title 显示 (objectType + objectName 格式)
+const currentDetailRow = ref(null)
 const selectedDetailId = ref(null)
 const detailEditMode = ref(false)
 const detailCreateMode = ref(false)
@@ -907,7 +931,22 @@ const detailTitle = computed(() => {
   if (detailCreateMode.value) {
     return `新建 ${metaConfig.value?.name || ''}`
   }
-  return metaConfig.value?.detail?.title || `${metaConfig.value?.name || '详情'}`
+  // [FIX 2026-06-29] 标题优先用 metaConfig.detail.title 或 metaConfig.name,
+  //                  并自动追加 row.name (来自 rowActions 触发的当前行)
+  //   1) 优先 metaConfig.detail.title (后端配置)
+  //   2) 否则 metaConfig.name (前端元数据)
+  //   3) 否则用 objectTypeService.getDetailLabel 自动产出 "关系详情"
+  //   4) 追加 row.name (如果有)
+  const base = metaConfig.value?.detail?.title
+    || metaConfig.value?.name
+    || objectTypeService.getDetailLabel(props.objectType, '')
+  // 尝试从当前 currentDetailRow 获取对象名
+  const targetRow = currentDetailRow.value
+  const targetName = targetRow?.name || targetRow?.code || targetRow?.title || ''
+  if (targetName && base) {
+    return `${base} ${targetName}`
+  }
+  return base || '详情'
 })
 
 const showDeleteConfirm = ref(false)
@@ -1199,7 +1238,7 @@ function getBadgeTagType(row, column) {
 function getBadgeDisplayValue(row, column) {
   const rawValue = row[column.prop]
   if (rawValue === '') return '-'
-  
+
   if (rawValue == null) {
     if (column.enum_values) {
       const nullVal = column.type === 'boolean' ? 0 : null
@@ -1209,6 +1248,28 @@ function getBadgeDisplayValue(row, column) {
       if (fallback) return fallback.label
     }
     return '-'
+  }
+
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串 / 'undefined')
+  //   原 BUG: 数据库早期导入数据时, 后端对空 relation_type 写了字符串 'legacy_null' 占位.
+  //     UI 走 getBadgeDisplayValue 后, rawValue='legacy_null' 不在 enum_values 里也不在 options 里,
+  //     最终落到 `return rawValue` → 用户在关系类型列看到 'legacy_null'.
+  //     期望: 显示 '-' (与空值一致).
+  //   修复: 在最开头 (string 路径) 把这种 sentinel 值映射为 '-'.
+  //   注意: 正则不能含 'a'/'g' 等字符, 否则会被 babel 误判为 regex flag (如 /...n/a/i → 'a' 无效 flag)
+  //   所以 'n/a' 单独 check, 不放在字符集里.
+  if (typeof rawValue === 'string') {
+    const cleaned = rawValue.trim().toLowerCase()
+    if (
+      cleaned === 'null' ||
+      cleaned === 'undefined' ||
+      cleaned === 'none' ||
+      cleaned === 'n/a' ||
+      cleaned === 'na' ||
+      /^legacy[_\s-]*null$/.test(cleaned)
+    ) {
+      return '-'
+    }
   }
   
   if (typeof rawValue === 'boolean') {
@@ -1303,12 +1364,17 @@ function canPerformCrud() {
 }
 
 function canDelete(row) {
-  if (!props.rowMutability) return true
-  if (props.rowMutability === 'locked') return false
-  if (props.rowMutability === 'extensible') {
-    return row?.is_system !== true && row?.system_value !== true
-  }
-  return true
+  // [P1-B 2026-07-25] 委托给 actionPolicyService, 统一行级状态规则
+  //   规则源: services/actionPolicyService.js#canPerformAction
+  //   - locked: 禁
+  //   - extensible + is_system: 禁
+  //   - 其他: 允许
+  const policy = _canPerformActionByPolicy(
+    { key: 'delete' },
+    row,
+    { rowMutability: props.rowMutability }
+  )
+  return policy.allowed
 }
 
 /**
@@ -1492,12 +1558,14 @@ function openCreateDrawer() {
   detailCreateMode.value = true
   detailEditMode.value = false
   selectedDetailId.value = null
+  currentDetailRow.value = null  // [FIX 2026-06-29] 清空 current row
   showDetailDrawer.value = true
 }
 
 function openDetailDrawer(row, editMode = false) {
   detailCreateMode.value = false
   selectedDetailId.value = row.id
+  currentDetailRow.value = row  // [FIX 2026-06-29] 保存当前行供 title 使用
   detailEditMode.value = editMode
   showDetailDrawer.value = true
 }
@@ -1652,14 +1720,19 @@ watch(() => props.externalEditing, (val) => {
 })
 
 // [NFR-007] 同时 watch data 和 columns，确保 objectType 变化后两者都更新再 doLayout
+// [FIX v20 2026-08-26] 使用 row[config.rowKey] 而非 row.id，保证与 rowKey 配置一致
+//   - 修复: SearchHelpDialog 用 :row-key="'value'" 但 selectedIds 中存的是 row.value
+//     原代码用 row.id === row.value（巧合相等）能跑；但 rowKey 改为 'value' 后应保持一致
 watch([data, columns], () => {
   nextTick(() => {
     if (tableRef.value) {
       tableRef.value.doLayout()
     }
     if (selectedIds.value.size === 0) return
+    const rowKey = config.rowKey || 'id'
     data.value.forEach(row => {
-      const isSelected = selectedIds.value.has(row.id)
+      const rowKeyValue = row[rowKey]
+      const isSelected = rowKeyValue != null && selectedIds.value.has(rowKeyValue)
       tableRef.value.toggleRowSelection(row, isSelected)
     })
   })
@@ -1711,6 +1784,16 @@ onMounted(() => {
     }
   }
 })
+
+// [FIX 2026-06-30] 监听 initialFilters 变化, 重新应用过滤并刷新数据
+//   之前只在 onMounted 应用一次, scope tree 勾选后 Tab 不刷新 → 显示全部
+watch(() => props.initialFilters, (newFilters) => {
+  if (!newFilters || Object.keys(newFilters).length === 0) return
+  setContextFilters(newFilters)
+  if (props.options.autoLoad !== false) {
+    refresh()
+  }
+}, { deep: true })
 
 // [FR-004] 路由级 keep-alive 恢复时刷新数据
 // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
@@ -1784,6 +1867,8 @@ function handleMetaListAction(action, row) {
 
 defineExpose({
   tableRef,
+  // [FIX 2026-06-29] 暴露 onRowAction 让 MOMP/GenericObjectList 等父组件可在 dblclick 时触发 action
+  onRowAction,
   metaConfig,
   data,
   loading,
@@ -1967,6 +2052,31 @@ defineExpose({
 .table-wrapper {
   flex: 1;
   min-height: 0;
+}
+
+/* [MOMP 2026-08-30] 空态提示：未选择范围时给出明确指示 */
+.list-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+}
+
+.list-empty-state .list-empty-icon {
+  color: var(--color-text-quaternary, #c0c4cc);
+}
+
+.list-empty-state .list-empty-title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.list-empty-state .list-empty-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
 }
 
 .custom-table {

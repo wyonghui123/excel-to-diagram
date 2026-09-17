@@ -49,25 +49,25 @@ def ds():
             name TEXT,
             parent_id INTEGER
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             UNIQUE(user_id, group_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             priority INTEGER DEFAULT 0
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
@@ -218,13 +218,13 @@ def _insert_business_object(ds, name='BO1', code='bo1', service_module_id=None, 
 
 
 def _insert_group(ds, code='g1', name='G1'):
-    ds.execute("INSERT INTO user_groups (code, name) VALUES (?, ?)", [code, name])
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO orgs (code, name) VALUES (?, ?)", [code, name])
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_role(ds, code='R1', name='Role1', priority=0):
-    ds.execute("INSERT INTO roles (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    ds.execute("INSERT INTO permission_sets (code, name, priority) VALUES (?, ?, ?)", [code, name, priority])
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_rule(ds, role_id, resource_type, condition, permission_level='read',
@@ -391,8 +391,8 @@ def test_check_permission_matched(svc, ds):
     p1 = _insert_product(ds, 'P1', 'p1')
     p2 = _insert_product(ds, 'P2', 'p2')
     # 关联：user → group → role
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # 规则：p1 有 read 权限
     _insert_rule(ds, r, 'product', f'id = {p1}', permission_level='read')
     # p1 应通过
@@ -409,8 +409,8 @@ def test_check_permission_denied_priority(svc, ds):
     g = _insert_group(ds)
     uid = _insert_user(ds, 'denied_user')
     p = _insert_product(ds, 'DP', 'dp')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # grant: 全部 product 都有 read
     _insert_rule(ds, r, 'product', '1 = 1', permission_level='read')
     # deny: p 被禁止
@@ -426,8 +426,8 @@ def test_check_permission_highest_level(svc, ds):
     g = _insert_group(ds)
     uid = _insert_user(ds, 'multi_level_user')
     p = _insert_product(ds, 'MLP', 'mlp')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # 两条规则：read 和 write
     _insert_rule(ds, r, 'product', f'id = {p}', permission_level='read')
     _insert_rule(ds, r, 'product', f'id = {p}', permission_level='write')
@@ -461,8 +461,8 @@ def test_get_authorized_resource_ids(svc, ds):
     r = _insert_role(ds)
     g = _insert_group(ds)
     uid = _insert_user(ds, 'auth_user')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # 规则：所有 product
     _insert_rule(ds, r, 'product', '1 = 1', permission_level='read')
     p1 = _insert_product(ds, 'P1', 'p1')
@@ -476,8 +476,8 @@ def test_get_authorized_resource_ids_filtered_by_action(svc, ds):
     r = _insert_role(ds)
     g = _insert_group(ds)
     uid = _insert_user(ds, 'action_user')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # p1 只有 read，p2 有 write
     p1 = _insert_product(ds, 'P1', 'p1')
     p2 = _insert_product(ds, 'P2', 'p2')
@@ -499,8 +499,8 @@ def test_get_authorized_resource_ids_skips_denied(svc, ds):
     uid = _insert_user(ds, 'denied_skip_user')
     p1 = _insert_product(ds, 'P1', 'p1')
     p2 = _insert_product(ds, 'P2', 'p2')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # grant all + deny p1
     _insert_rule(ds, r, 'product', '1 = 1', permission_level='read')
     _insert_rule(ds, r, 'product', f'id = {p1}', permission_level='read', is_denied=True)
@@ -652,8 +652,8 @@ def test_check_permission_parent_visibility(svc, ds):
     uid = _insert_user(ds, 'parent_vis_user')
     v = _insert_version(ds, 'V1', 'v1')
     d = _insert_domain(ds, 'D1', 'd1', version_id=v)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # 规则：对 domain 有 write
     _insert_rule(ds, r, 'domain', f'id = {d}', permission_level='write')
     # 检查 version（父级）：应当至少 read（来自子级继承）
@@ -673,8 +673,8 @@ def test_full_permission_lifecycle(svc, ds):
     g = _insert_group(ds)
     uid = _insert_user(ds, 'lifecycle_user')
     p = _insert_product(ds, 'LC', 'lc')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
 
     # 1) grant
     rid = _insert_rule(ds, r, 'product', f'id = {p}', permission_level='read')
@@ -695,9 +695,9 @@ def test_multiple_roles_higher_level(svc, ds):
     g = _insert_group(ds)
     uid = _insert_user(ds, 'multi_role_user')
     p = _insert_product(ds, 'MR', 'mr')
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [uid, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r1])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r2])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [uid, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r1])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r2])
     # r1: read, r2: write
     _insert_rule(ds, r1, 'product', f'id = {p}', permission_level='read')
     _insert_rule(ds, r2, 'product', f'id = {p}', permission_level='write')
@@ -713,8 +713,8 @@ def test_owner_wins_over_denied(svc, ds):
     g = _insert_group(ds)
     owner = _insert_user(ds, 'owner_wins')
     p = _insert_product(ds, owner_id=owner, created_by=owner)
-    ds.execute("INSERT INTO user_group_members (user_id, group_id) VALUES (?, ?)", [owner, g])
-    ds.execute("INSERT INTO group_roles (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
     # denied 规则
     _insert_rule(ds, r, 'product', f'id = {p}', permission_level='read', is_denied=True)
     result = svc.check_permission(owner, 'product', p, 'read')

@@ -13,7 +13,7 @@ from meta.core.action_constants import (
 )
 from meta.core.models_enums import (
     FieldType, ObjectType, FieldStorage, FieldSource,
-    RelationType, ActionType, ValidationSeverity, QueryOperator, AggregateType,
+    RelationType, ActionType, InstanceScope, ValidationSeverity, QueryOperator, AggregateType,
     RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory, ArchObjectType,
     DimensionKey, BusinessRelationType, RelationCategory, Direction,
     HierarchyScopeType,
@@ -244,13 +244,18 @@ class StateTransitionUIHints:
 class MetaStateTransition(MetaRule):
     """
     状态转换规则
-    
+
     用于定义状态机的状态转换规则。
     """
     rule_type: RuleType = field(default=RuleType.STATE_TRANSITION)
     state_field: str = "status"
     from_states: List[str] = field(default_factory=list)
     to_state: str = ""
+    # [Spec 22 FR-002 2026-09-13] 引用 _standard_actions.yaml 的 action_id（权限码）
+    # 非空 = 该 transition 与对应 action 共享 label/icon，并通过
+    #       ActionPermissionInterceptor 校验当前用户是否持有该 action_ref 权限
+    # 空字符串 = 自定义 transition，向后兼容旧 yaml
+    action_ref: str = ""
     allowed_roles: List[str] = field(default_factory=list)
     auto_actions: List[str] = field(default_factory=list)
     validation_expression: str = ""
@@ -557,13 +562,19 @@ class DataPermissionDimension:
 @dataclass
 class MetaAction:
     """元数据操作"""
-    
+
     id: str
     name: str
     action_type: ActionType
     method: str
     path: str
     description: str = ""
+    # [Spec 21 PM 反馈 2026-09-12] 动作的语义作用域（与 action_type 正交）
+    #   object   → 列头标 [对象级]
+    #   instance → 列头标 [实例级]
+    # 缺省值：向后兼容旧代码/旧 yaml 未声明 instance_scope 的 action → 兜底为 instance
+    #   （历史推断：CRUD 操作的语义大多是对实例生效，仅 create/list/import/search/manage 是对象级）
+    instance_scope: InstanceScope = InstanceScope.INSTANCE
     input_schema: Dict[str, Any] = field(default_factory=dict)
     output_schema: Dict[str, Any] = field(default_factory=dict)
     semantics: SemanticAnnotation = field(default_factory=SemanticAnnotation)
@@ -799,18 +810,30 @@ class AuditActionConfig:
 
 
 @dataclass
+class AuditHistoryConfig:
+    """[FIX BUG-V048 2026-07-06 dev agent] 审计历史 tab 的配置
+    用于详情页"操作日志" tab 显示控制 (如排除特定子对象类型日志)
+    """
+    excluded_child_object_types: List[str] = field(default_factory=list)
+
+
+@dataclass
 class AuditConfig:
     """审计日志配置"""
     enabled: bool = True
-    
+
     create: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="all"))
     update: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="changed_only", exclude=["id", "created_at", "updated_at"]))
     delete: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="business_only", exclude=["id", "created_at", "updated_at"]))
-    
+
     associate: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True))
     dissociate: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True))
-    
+
     actions: Dict[str, AuditActionConfig] = field(default_factory=dict)
+
+    # [FIX BUG-V048 2026-07-06 dev agent] 详情页"操作日志" tab 配置
+    # 之前 V046 在 yaml 配 audit.history.excluded_child_object_types 但 AuditConfig 没这个字段, 完全被忽略
+    history: AuditHistoryConfig = field(default_factory=AuditHistoryConfig)
     
     def get_action_config(self, action: str) -> AuditActionConfig:
         """获取动作的审计配置"""
@@ -1256,8 +1279,20 @@ class MetaRegistry:
             self._ui_config_cache.pop(meta_object.id, None)
 
     def get(self, object_id: str) -> Optional[MetaObject]:
-        """获取元数据对象"""
-        return self._objects.get(object_id)
+        """获取元数据对象
+
+        [Spec 16 2026-08-29] 支持别名解析：如历史别名 user_group → org。
+        注册 id 优先精确匹配；未命中时按对象的 aliases 进行反向查找，
+        便于迁移后旧 object_type 仍能解析到新 id 的对象。
+        """
+        obj = self._objects.get(object_id)
+        if obj is not None:
+            return obj
+        for existing in self._objects.values():
+            aliases = getattr(getattr(existing, 'semantics', None), 'aliases', None)
+            if aliases and object_id in aliases:
+                return existing
+        return None
 
     def list_objects(self) -> List[str]:
         """列出所有元数据对象ID"""

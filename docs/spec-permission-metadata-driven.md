@@ -44,7 +44,7 @@
 
 **断裂点5：存在10+处违反"单一事实源"原则的硬编码。** 包括 `PERMISSION_LABELS`（30+条）、`MENU_DISPLAY_NAMES`（5条）、`_resource_name()`、`_action_name()`、`_get_resource_name()`、`menuIconMap` 等，这些信息全部可以从 YAML 的 `name` 字段和 `MetaRegistry` 动态获取。
 
-**断裂点6：ManagementDimension 已建模但未成为配置入口。** 项目已有完善的 `management_dimensions` 表、`ManagementDimensionEngine`（影响范围计算）、`ConditionRuleDialog`（维度条件编辑），但维度仅用于 condition 表达式内部，未成为角色定义的第一级概念。
+**断裂点6：ManagementDimension 已建模但未成为配置入口。** 项目已有完善的 `management_dimensions` 表、`PermissionDimensionEngine`（影响范围计算）、`ConditionRuleDialog`（维度条件编辑），但维度仅用于 condition 表达式内部，未成为角色定义的第一级概念。
 
 ### 1.2 业务目标
 

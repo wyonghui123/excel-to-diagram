@@ -1,1 +1,2 @@
 export { useMermaidColors, COLOR_SCHEMES, DEFAULT_COLOR, DEFAULT_LINK_COLOR } from './useMermaidColors.js'
+export { createColorStateTracker } from './colorStateTracker.js'

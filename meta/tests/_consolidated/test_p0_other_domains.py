@@ -331,7 +331,7 @@ class TestBusinessLog:
         assert r.status_code in [200, 401, 404, 410, 500]
 
 
-class TestManagementDimension:
+class TestPermissionDimension:
     """[TEST CLASS] 管理维度测试"""
 
     def test_api(self):

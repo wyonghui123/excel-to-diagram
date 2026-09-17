@@ -51,6 +51,17 @@ if sys.platform == "win32":
 STATUS_FILE = PROJECT_ROOT / ".service_status.json"
 
 
+def _load_ports() -> Dict[str, int]:
+    """[P0 2026-09-05] 读端口唯一真源 scripts/ports.json"""
+    try:
+        with open(PROJECT_ROOT / "scripts" / "ports.json", encoding="utf-8") as f:
+            data = json.load(f)
+        return {"frontend": int(data.get("frontend", 3006)),
+                "backend": int(data.get("backend", 3011))}
+    except Exception:
+        return {"frontend": 3006, "backend": 3011}
+
+
 def _log(msg: str, level: str = "INFO"):
     icons = {"OK": "[OK]", "FAIL": "[X]", "WARN": "[!]", "INFO": "[i]"}
     print(f"{icons.get(level, '[?]}')} {msg}")
@@ -86,13 +97,14 @@ def check_sandbox() -> Dict[str, Any]:
 
 def check_backend_status() -> Dict[str, Any]:
     """检查后端状态"""
-    # 端口
+    # 端口 (P0: 读 ports.json 真源, 原硬编码 3010 已漂移)
     import socket
+    be_port = _load_ports()["backend"]
     port_listening = False
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(3)
-        port_listening = (s.connect_ex(("127.0.0.1", 3010)) == 0)
+        port_listening = (s.connect_ex(("127.0.0.1", be_port)) == 0)
         s.close()
     except OSError:
         pass
@@ -100,7 +112,7 @@ def check_backend_status() -> Dict[str, Any]:
     # /health
     health = run_subprocess(
         ["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
-         "http://localhost:3010/health"],
+         f"http://localhost:{be_port}/health"],
         timeout=10,
     )
     health_code = health["stdout"].strip() if health["success"] else "?"
@@ -135,7 +147,7 @@ def check_backend_status() -> Dict[str, Any]:
 
     issues = []
     if not port_listening:
-        issues.append("端口 3010 未监听")
+        issues.append(f"端口 {be_port} 未监听")
     if health_code not in ("200", "204"):
         issues.append(f"/health 返回 {health_code}（期望 200）")
     if code_version and code_version != head_hash:
@@ -164,6 +176,43 @@ def check_process_ownership() -> Dict[str, Any]:
     if result["success"] and "一致" in result["stdout"]:
         return {"status": "OK", "summary": "PID 一致"}
     return {"status": "WARN", "summary": "PID 可能不一致", "details": result["stdout"][:300]}
+
+
+def check_port_consistency() -> Dict[str, Any]:
+    """[P3 2026-09-05] 端口配置一致性 — 检测历史硬编码坏值复活"""
+    ports = _load_ports()
+    fe, be = ports["frontend"], ports["backend"]
+    bad_patterns = {
+        "test_helpers/browser_auth_cli.py": ["localhost:3010"],
+        "vite.config.js": ["|| '3010'", "|| '3005'"],
+        "package.json": ["localhost:3004"],
+        "playwright.config.js": ["localhost:3004"],
+    }
+    issues = []
+    checked = []
+    for rel_path, patterns in bad_patterns.items():
+        p = PROJECT_ROOT / rel_path
+        if not p.exists():
+            continue
+        checked.append(rel_path)
+        try:
+            content = p.read_text(encoding="utf-8", errors="ignore")
+            for pat in patterns:
+                if pat in content:
+                    issues.append(f"{rel_path} 含硬编码 '{pat}'")
+        except OSError:
+            pass
+    env_dev = PROJECT_ROOT / ".env.development"
+    if env_dev.exists():
+        for line in env_dev.read_text(encoding="utf-8", errors="ignore").splitlines():
+            s = line.strip()
+            if s.startswith(("BACKEND_PORT=", "VITE_PORT=", "PORT=")):
+                issues.append(f".env.development 含端口行: {s}")
+
+    if issues:
+        return {"status": "FAIL", "summary": f"端口漂移: {issues}",
+                "details": {"ports": ports, "checked": checked}}
+    return {"status": "OK", "summary": f"端口一致 (FE={fe}, BE={be}, 真源=ports.json)"}
 
 
 def check_working_tree() -> Dict[str, Any]:
@@ -280,6 +329,7 @@ def diagnose_all() -> Dict[str, Any]:
         ("沙箱状态", check_sandbox),
         ("后端状态", check_backend_status),
         ("进程所有者", check_process_ownership),
+        ("端口一致性", check_port_consistency),
         ("工作树", check_working_tree),
         ("最近错误", check_recent_errors),
         ("DEBUG 遗留", check_debug_code_residue),

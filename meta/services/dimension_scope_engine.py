@@ -14,17 +14,87 @@
 
 import json
 import logging
+import os
 from typing import Dict, List, Set, Optional
 
 from meta.core.models import registry
 from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
-from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, \
-    PARENT_FIELD_MAP
+from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, \
+    PARENT_FIELD_MAP, CODE_FIELD_MAP
 
 logger = logging.getLogger(__name__)
 
+
+
+
+
+
+def _dim_include_values(dim_data) -> set:
+    """获取维度的 include 集合
+
+    [P5 修复 2026-07-26] 兼容两种返回结构:
+      - 旧结构 (Set[int]): expand_dimension_values 返回 Dict[str, Set[int]]
+        此时 dim_data 是 set, 整个 set 即为 include
+      - 新结构 (Dict[str, Set]): Spec 08 要求 Dict[str, Dict[str, Set]]
+        此时 dim_data 是 dict, 读取 'include' 键
+    """
+    if not dim_data:
+        return set()
+    if isinstance(dim_data, set):
+        return dim_data  # 旧结构: set 即 include
+    return dim_data.get('include', set()) or set()
+
+
+
+def _dim_is_wildcard(dim_data) -> bool:
+    """检查维度是否为通配符 (全维度可见)
+
+    [P5 修复 2026-07-26] 兼容旧结构 (set 无 wildcard 信息, 返回 False)
+    """
+    if not dim_data:
+        return False
+    if isinstance(dim_data, set):
+        return False  # 旧结构无 wildcard 信息
+    return bool(dim_data.get('wildcard', False))
+
+
+
+def _dim_exclude_values(dim_data) -> set:
+    """获取维度的 exclude 集合
+
+    [P5 修复 2026-07-26] 兼容旧结构 (set 无 exclude 信息, 返回空 set)
+    """
+    if not dim_data:
+        return set()
+    if isinstance(dim_data, set):
+        return set()  # 旧结构无 exclude 信息
+    return dim_data.get('exclude', set()) or set()
+
+
+
+def _dim_has_any_values(dim_data) -> bool:
+    """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)
+
+    [P5 修复 2026-07-26] 兼容两种返回结构:
+      - 旧结构 (Set[int]): 非空 set 即视为有值
+      - 新结构 (Dict[str, Set]): 检查 include/exclude/wildcard 任一非空
+
+    修复前: 当 expand_dimension_values 返回 set 时, dim_data.get('include')
+            抛 AttributeError 'set' object has no attribute 'get',
+            异常被 _check_dim_scope 静默捕获 → role 被跳过 → 写权限被拒
+    修复后: set 类型直接检查非空, dict 类型走原有逻辑
+    """
+    if not dim_data:
+        return False
+    if isinstance(dim_data, set):
+        return bool(dim_data)  # 旧结构: 非空 set = 有值
+    return bool(
+        dim_data.get('include')
+        or dim_data.get('exclude')
+        or dim_data.get('wildcard')
+    )
 
 def _resolve_table_name(bo_id: str) -> Optional[str]:
     """解析 BO 对应的数据库表名
@@ -145,49 +215,100 @@ class DimensionScopeEngine:
     def __init__(self, data_source):
         self._ds = data_source
 
+    # ==================================================================
+    # [Spec 20] 维度范围业务键锚定 (dimension scope business key anchoring)
+    # ==================================================================
+    # 环境开关: 默认关闭, 设 DIM_SCOPE_BIZKEY_ENABLED=1 开启 (灰度/回滚入口)
+    BIZKEY_ENV_FLAG = 'DIM_SCOPE_BIZKEY_ENABLED'
+
+    @classmethod
+    def _bizkey_enabled(cls) -> bool:
+        """业务键锚定开关 (Spec 20): 默认关闭, 保持存量数字 ID 行为不变"""
+        return os.environ.get(cls.BIZKEY_ENV_FLAG, '') == '1'
+
+    def _resolve_bizkeys(self, dim_code: str, codes: List[str]) -> Dict[str, Set[int]]:
+        """业务键锚点解析: code → 命中 ID 集合 (跨所有版本)
+
+        Spec 20 核心原语: 同一业务键 (如 domain.code='SCM') 在不同产品版本下
+        会被创建为多条记录 (每 version 一条), 数字 ID 各不相同。
+        本方法把业务键解析为当前库内所有命中 ID, 供动态子查询使用。
+
+        Args:
+            dim_code: 维度资源类型 (product/version/domain/sub_domain...)
+            codes:    业务键列表, 如 ['SCM']
+
+        Returns:
+            Dict[codes[i], Set[int]]; dim_code 无表映射或 codes 为空 → {}
+            未命中的 code → 空 set (调用方据此 fail-closed)
+        """
+        table = RESOURCE_TABLE_MAP.get(dim_code)
+        code_field = CODE_FIELD_MAP.get(dim_code)
+        if not table or not code_field or not codes:
+            return {}
+        ph = ','.join('?' * len(codes))
+        try:
+            rows = self._ds.execute(
+                f"SELECT id, {code_field} FROM {table} WHERE {code_field} IN ({ph})",
+                [str(c) for c in codes],
+            ).fetchall()
+        except Exception:
+            logger.exception("[Spec20] _resolve_bizkeys query failed dim=%s", dim_code)
+            return {}
+        result: Dict[str, Set[int]] = {c: set() for c in codes}
+        for row_id, row_code in rows:
+            if row_code in result and row_id is not None:
+                result[row_code].add(row_id)
+        return result
+
     def expand_dimension_values(self, role_id: int) -> Dict[str, Set[int]]:
+        """[Spec 20] 兼容签名: 锚点解析为当刻 ID 快照进 expanded, 旧调用方行为不变"""
+        expanded, _, _, _, _ = self.expand_dimension_values_detail(role_id)
+        return expanded
+
+    def expand_dimension_values_detail(
+        self, role_id: int
+    ) -> tuple:
+        """[Spec 20] 扩展版维度展开
+
+        Returns:
+            expanded:  {dim: set(ids)}  — 与旧版语义一致 (含锚点快照, 供
+                        derive_recommended_menus / write_scope_interceptor 等旧消费方)
+            native:    {dim: set(ids)}  — scope 中直接写的数字 ID (生成 SQL 的原生部分)
+            anchors:   {dim: set(code)} — 业务键锚点 (生成 SQL 的动态部分)
+            inherited: {child_dim: {anchor_dim: set(ids)}} — 锚点 scope 向下继承的
+                        快照 (derive_data_conditions 需将其从 native 剔除并动态化)
+            failed:    {dim: set(code)} — 解析 0 命中 / 开关关闭的锚点 (fail-closed 依据)
+        """
         scopes = self._load_scopes(role_id)
-        expanded = {}
-        for scope in scopes:
-            code = scope['dimension_code']
-            # [FIX 2026-06-15] 兼容三种数据形态:
-            # 1. dim_values 为 JSON 字符串 (主流, 来自 UI 配置)
-            # 2. dim_values 为 list (Python 调用)
-            # 3. dim_values 为 NULL (旧数据, id 实际存到 inherit_children)
-            # 修复前: dim_values=NULL 时 set(None) 抛 TypeError
-            # 修复后: NULL 时降级读 inherit_children (同样存 JSON 列表)
-            raw_dv = scope.get('dimension_values')
-            if raw_dv is None:
-                # [FIX 2026-06-15] Bug #3: NULL → 读 inherit_children 字段
-                raw_dv = scope.get('inherit_children')
-                if raw_dv is None:
-                    continue
-            if isinstance(raw_dv, str):
-                try:
-                    values = set(json.loads(raw_dv))
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            elif isinstance(raw_dv, (list, tuple)):
-                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
-            else:
-                continue
-            if not values:
-                continue
+        expanded: Dict[str, Set[int]] = {}
+        native: Dict[str, Set[int]] = {}
+        anchors: Dict[str, Set[str]] = {}
+        inherited: Dict[str, Dict[str, Set[int]]] = {}
+        failed: Dict[str, Set[str]] = {}
+        bizkey_on = self._bizkey_enabled()
 
-            if code not in expanded:
-                expanded[code] = set()
-            expanded[code].update(values)
+        def _record(dim, ids, from_anchor_dim=None):
+            if not ids:
+                return
+            expanded.setdefault(dim, set()).update(ids)
+            if from_anchor_dim:
+                inherited.setdefault(dim, {}).setdefault(from_anchor_dim, set()).update(ids)
 
-            if not (scope.get('inherit_children') or scope.get('inherit_children') == 1):
-                continue
-
+        def _expand_down_chain(start_dim, start_ids, from_anchor_dim=None):
+            """沿 HIERARCHY_CHAIN 向下展开 (笛卡尔保留: 子维度显式 include 时 break)"""
             try:
-                idx = HIERARCHY_CHAIN.index(code)
+                idx = HIERARCHY_CHAIN.index(start_dim)
             except ValueError:
-                continue
-
-            current_ids = set(values)
+                return
+            current_ids = set(start_ids)
             for next_dim in HIERARCHY_CHAIN[idx + 1:]:
+                # [FIX Cartesion 2026-07-23 PM Option B]
+                # 笛卡尔积语义: 子维度已被显式 include 配置时不再继承 (保留精确意图)
+                if self._has_explicit_include_for_dim(scopes, next_dim):
+                    logger.info(
+                        f'[P1-CARTESION] parent={start_dim}, child={next_dim} '
+                        f'explicit include — break inherit chain')
+                    break
                 parent_field = PARENT_FIELD_MAP.get(next_dim)
                 child_table = RESOURCE_TABLE_MAP.get(next_dim)
                 if not parent_field or not child_table or not current_ids:
@@ -195,22 +316,112 @@ class DimensionScopeEngine:
                 ph = ','.join('?' * len(current_ids))
                 rows = self._ds.execute(
                     f"SELECT id FROM {child_table} WHERE {parent_field} IN ({ph})",
-                    list(current_ids)
-                ).fetchall()
+                    list(current_ids)).fetchall()
                 current_ids = {row[0] for row in rows}
-                if current_ids:
-                    if next_dim not in expanded:
-                        expanded[next_dim] = set()
-                    expanded[next_dim].update(current_ids)
-                else:
+                if not current_ids:
                     break
-        return expanded
+                _record(next_dim, current_ids, from_anchor_dim=from_anchor_dim)
+
+        for scope in scopes:
+            code = scope['dimension_code']
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode == 'exclude':
+                continue  # [P5] exclude 由 _load_exclude_values 处理
+            if scope_mode == 'all':
+                all_ids = self._get_all_dimension_ids(code)
+                if not all_ids:
+                    continue
+                _record(code, all_ids)
+                # [P1-T6 2026-07-19] 审计日志: scope_mode='all' 使用记录
+                logger.info(f'[P1-WILDCARD] scope_mode=all: role_id={role_id}, '
+                            f'dimension={code}, all_ids_count={len(all_ids)}')
+                if scope.get('inherit_children', 1) == 1:
+                    _expand_down_chain(code, all_ids)
+                continue
+
+            # [FIX 2026-06-15] 兼容三种数据形态: JSON 字符串 / list / NULL (降级读 inherit_children)
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                raw_dv = scope.get('inherit_children')
+                if raw_dv is None:
+                    continue
+            if isinstance(raw_dv, str):
+                try:
+                    parsed = json.loads(raw_dv)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                parsed = list(raw_dv)
+            else:
+                continue
+
+            # [P5 修复 2026-07-26] 通配符 '*' → 展开为该维度全量 ID (等价 scope_mode='all')
+            if any(str(v).strip() == '*' for v in parsed):
+                all_ids = self._get_all_dimension_ids(code)
+                if not all_ids:
+                    # 全量查询失败 → 跳过此维度 (避免误授权)
+                    continue
+                _record(code, all_ids)
+                logger.info(f'[P5-WILDCARD] dimension_values=["*"]: role_id={role_id}, '
+                            f'dimension={code}, all_ids_count={len(all_ids)}')
+                if scope.get('inherit_children', 1) == 1:
+                    _expand_down_chain(code, all_ids)
+                continue
+
+            # ── [Spec 20] 普通分支: 数字 + 业务键锚点分离 ──
+            numeric_vals = set(int(x) for x in parsed
+                               if str(x).lstrip('-').isdigit())
+            anchor_codes = [str(x).strip() for x in parsed
+                            if isinstance(x, str) and str(x).strip() != '*'
+                            and not str(x).lstrip('-').isdigit()]
+
+            if numeric_vals:
+                native.setdefault(code, set()).update(numeric_vals)
+                _record(code, numeric_vals)
+
+            if anchor_codes:
+                if bizkey_on:
+                    resolved = self._resolve_bizkeys(code, anchor_codes)
+                    miss = {c for c in anchor_codes if not resolved.get(c)}
+                    if miss:
+                        # 严格模式 (Spec 20 §4.2): 任一锚点失败 → 整维度 fail-closed
+                        failed.setdefault(code, set()).update(miss)
+                        logger.warning(
+                            f'[Spec20-BIZKEY] unresolved anchors: role_id={role_id}, '
+                            f'dim={code}, codes={sorted(miss)} — dimension will be 1=0')
+                        continue
+                    snap_ids = set().union(*[resolved[c] for c in anchor_codes])
+                    anchors.setdefault(code, set()).update(anchor_codes)
+                    _record(code, snap_ids)
+                    if scope.get('inherit_children') or scope.get('inherit_children') == 1:
+                        _expand_down_chain(code, snap_ids, from_anchor_dim=code)
+                else:
+                    # 开关 OFF → fail-closed (绝不回退 fail-open)
+                    failed.setdefault(code, set()).update(anchor_codes)
+                    logger.warning(
+                        f'[Spec20-BIZKEY] flag off: role_id={role_id}, dim={code}, '
+                        f'codes={sorted(anchor_codes)} — dimension will be 1=0')
+                    continue
+
+            if not numeric_vals:
+                continue
+
+            if not (scope.get('inherit_children') or scope.get('inherit_children') == 1):
+                continue
+            _expand_down_chain(code, numeric_vals)
+        return expanded, native, anchors, inherited, failed
 
     def derive_data_conditions(self, role_id: int) -> Dict[str, str]:
         """派生每个 BO 的数据权限条件
 
         [FIX 2026-06-10] 优先使用 dimension_object_mapping.yaml 的映射配置，
         硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP 仅作 fallback（向后兼容）。
+
+        [P5 修复 2026-07-26] 支持 scope_mode='exclude':
+          - exclude 模式的 dimension_values 表示"排除这些 ID"
+          - 生成的 SQL: id NOT IN (excluded_ids)
+          - 例: sub_domain exclude [339] → sub_domain.id NOT IN (339)
+          - 当 include 和 exclude 同时存在时, AND 连接
 
         支持的 filter_type:
           - direct: resource.field = dim_value
@@ -223,23 +434,42 @@ class DimensionScopeEngine:
             例: dimension=product, bo=domain, field=product_id (chain)
                   → 沿 version 表追溯 product_id
         """
-        expanded = self.expand_dimension_values(role_id)
+        # [Spec 20] 扩展展开: native/anchors/inherited/failed 分离
+        expanded, native_vals, anchor_map, inherited_map, failed_anchors = \
+            self.expand_dimension_values_detail(role_id)
         # [V2.1.5 2026-06-23] 保存未被向上展开污染的 expanded,
         #   用于 line 384 "防止跨版本数据污染" 的 version 判断
         #   避免 domain=[703] 误匹配 version_id=764
         original_expanded = {k: set(v) for k, v in expanded.items()}
+        # [P5 修复 2026-07-26] 加载 exclude 配置 (单独存储, 不污染 expanded)
+        excluded = self._load_exclude_values(role_id)
         loader = get_dimension_object_mapping_loader()
         use_yaml_mapping = loader.is_loaded()
 
         # [FIX v1.0.1] 向上展开: 已知子维度时, 反查父资源 ID
         # 例: TEST60 有 version=[2,11,12], 要列 product
         #     → 查 versions.product_id IN (2,11,12) → expanded['product'] = {1, ...}
+        # [Spec 20] 锚点维度跳过向上展开: 锚点跨版本, 反查父级只会产生
+        #   version/product 数字快照 → 生成 version_id IN (...) 快照条件,
+        #   破坏 G2 动态性 (新版本数据插入后 SQL 必须不变仍命中)
         chain_for_expansion = HIERARCHY_CHAIN  # 向上展开仍用硬编码层级链
         for dim_code, dim_idx in [(c, i) for i, c in enumerate(chain_for_expansion)]:
             if dim_code not in expanded:
                 continue
+            if dim_code in anchor_map:
+                continue  # [Spec 20] 锚点维度: 父级范围由动态子查询覆盖, 不快照化
+            # [Spec 20] 剔除锚点继承快照后反查父级:
+            # 继承快照 (例: sub_domain {301,302} 来自 domain 锚点) 参与向上反查会
+            # 产生 version/product 数字快照 → 破坏 G2 动态性
+            inherited_ids_up: Set[int] = set()
+            if dim_code in inherited_map:
+                for ids in inherited_map[dim_code].values():
+                    inherited_ids_up |= ids
+            native_for_up = set(expanded[dim_code]) - inherited_ids_up
+            if not native_for_up:
+                continue
             # 沿 chain 向上反查
-            current_ids = set(expanded[dim_code])
+            current_ids = native_for_up
             for i in range(dim_idx - 1, -1, -1):
                 target_dim = chain_for_expansion[i]
                 child_dim = chain_for_expansion[i + 1]
@@ -283,61 +513,112 @@ class DimensionScopeEngine:
                     bindings = loader.get_bindings_for_bo(dim_code, resource_type)
                     if not bindings:
                         continue
-                    vals = sorted(expanded[dim_code])
-                    if not vals:
-                        continue
+
+                    # ── [Spec 20] native 计算: 剔除快照, 保持动态 SQL 纯净 (G2 铁证) ──
+                    # 1. 剔除锚点继承快照 (子维度的 expanded 含父锚点向下继承的 ID)
+                    inherited_ids: Set[int] = set()
+                    if dim_code in inherited_map:
+                        for ids in inherited_map[dim_code].values():
+                            inherited_ids |= ids
+                    # 2. 剔除锚点解析快照 (锚点维度自身的 expanded 含 resolve 产物)
+                    dim_anchors = anchor_map.get(dim_code, set())
+                    anchor_snap_ids: Set[int] = set()
+                    if dim_anchors:
+                        resolved = self._resolve_bizkeys(dim_code, sorted(dim_anchors))
+                        for ids in resolved.values():
+                            anchor_snap_ids |= ids
+                    dim_native = expanded[dim_code] - inherited_ids - anchor_snap_ids
+                    vals = sorted(dim_native)
 
                     # [V1.1.9] multi-binding 内部用 OR 合并 (单 binding 时 OR 退化为单 cond)
                     binding_parts = []
-                    for binding in bindings:
-                        field = binding.get('field')
-                        filter_type = binding.get('filter_type', 'direct')
-                        if not field:
-                            continue
+                    # [Spec 20] fail-closed: 该维度锚点解析失败 → 1=0 (不生成其他条件)
+                    if dim_code in failed_anchors:
+                        binding_parts.append('1 = 0')
+                    else:
+                        for binding in bindings:
+                            field = binding.get('field')
+                            filter_type = binding.get('filter_type', 'direct')
+                            if not field:
+                                continue
 
-                        if filter_type == 'direct':
-                            if len(vals) == 1:
-                                binding_parts.append(f"{field} = {vals[0]}")
-                            else:
-                                binding_parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in vals)})"
-                                )
-                        elif filter_type == 'fk':
-                            # 资源表的 field 是该维度的外键
-                            if len(vals) == 1:
-                                binding_parts.append(f"{field} = {vals[0]}")
-                            else:
-                                binding_parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in vals)})"
-                                )
-                        elif filter_type == 'chain':
-                            chain_cond = self._build_chain_condition(
-                                resource_type, dim_code, vals,
-                                custom_field=field if field else None,
-                            )
-                            if chain_cond:
-                                binding_parts.append(chain_cond)
-                        elif filter_type == 'fk_expanded':
-                            # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
-                            # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
-                            # → service_modules WHERE sub_domain_id IN (138,139,146)
-                            child_ids = self._expand_down(dim_code, resource_type, vals)
-                            if child_ids:
-                                if len(child_ids) == 1:
-                                    binding_parts.append(f"{field} = {child_ids[0]}")
-                                else:
+                            if filter_type in ('direct', 'fk'):
+                                src_anchor_dims = (
+                                    sorted(inherited_map.get(dim_code, {}).keys())
+                                    if dim_code in inherited_map else [])
+                                if dim_anchors or src_anchor_dims:
+                                    if dim_anchors and not src_anchor_dims:
+                                        # [Spec 20] 锚点维度自身: fk 型单层动态子查询
+                                        cond = self._anchor_dynamic_condition(
+                                            resource_type, dim_code,
+                                            dim_native, dim_anchors,
+                                            binding_field=field)
+                                    else:
+                                        # [Spec 20] 值来自上游锚点继承 → 沿 chain 动态
+                                        # 追溯到锚点源维度 (HIERARCHY 单父链取第一个)
+                                        cond = self._build_chain_condition(
+                                            resource_type,
+                                            src_anchor_dims[0],
+                                            sorted(dim_native),
+                                            anchor_codes=sorted(
+                                                anchor_map.get(src_anchor_dims[0], set())))
+                                    if cond:
+                                        binding_parts.append(cond)
+                                    elif vals:  # 动态构造失败兜底: 用快照 (不放大)
+                                        binding_parts.append(
+                                            f"{field} IN ({','.join(str(v) for v in vals)})"
+                                            if len(vals) > 1 else f"{field} = {vals[0]}")
+                                elif vals:
                                     binding_parts.append(
-                                        f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
-                                    )
-                            else:
-                                # 没有子维度值 → 0 条可见
-                                binding_parts.append("1 = 0")
+                                        f"{field} IN ({','.join(str(v) for v in vals)})"
+                                        if len(vals) > 1 else f"{field} = {vals[0]}")
+                            elif filter_type == 'chain':
+                                chain_cond = self._build_chain_condition(
+                                    resource_type, dim_code, vals,
+                                    custom_field=field if field else None,
+                                    anchor_codes=sorted(dim_anchors) if dim_anchors else None,
+                                )
+                                if chain_cond:
+                                    binding_parts.append(chain_cond)
+                            elif filter_type == 'fk_expanded':
+                                if dim_anchors:
+                                    # [Spec 20] 锚点 → 转 chain 动态 (快照 fk_expanded 不适用)
+                                    cond = self._build_chain_condition(
+                                        resource_type, dim_code, vals,
+                                        anchor_codes=sorted(dim_anchors))
+                                    if cond:
+                                        binding_parts.append(cond)
+                                    elif not vals:
+                                        binding_parts.append('1 = 0')
+                                else:
+                                    # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
+                                    # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
+                                    # → service_modules WHERE sub_domain_id IN (138,139,146)
+                                    child_ids = self._expand_down(dim_code, resource_type, vals)
+                                    if child_ids:
+                                        if len(child_ids) == 1:
+                                            binding_parts.append(f"{field} = {child_ids[0]}")
+                                        else:
+                                            binding_parts.append(
+                                                f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
+                                            )
+                                    else:
+                                        # 没有子维度值 → 0 条可见
+                                        binding_parts.append("1 = 0")
                     if binding_parts:
                         # 多个 binding (例: source + target) 用 OR 合并
                         if len(binding_parts) == 1:
                             parts.append(binding_parts[0])
                         else:
                             parts.append(f"({' OR '.join(binding_parts)})")
+
+                # [Spec 20] 纯锚点失败维度 (expanded 无值) 显式生成 1=0, 防止静默全可见
+                for failed_dim in failed_anchors:
+                    if failed_dim in expanded:
+                        continue  # 混合场景 (含数字) 已在主循环 fail-closed 分支处理
+                    failed_bindings = loader.get_bindings_for_bo(failed_dim, resource_type)
+                    if failed_bindings:
+                        parts.append('1 = 0')
             else:
                 # ────────────────────────────────────────
                 # 老路径: 硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP (向后兼容)
@@ -385,6 +666,21 @@ class DimensionScopeEngine:
             if parts:
                 conditions[resource_type] = ' AND '.join(parts)
 
+            # [P5 修复 2026-07-26] 处理 exclude: 生成 id NOT IN (...)
+            # exclude 仅对 dimension 自身的 BO 生效 (例: sub_domain exclude [339] → sub_domain.id NOT IN (339))
+            # 不向上/向下传播 (避免误伤父子维度)
+            if resource_type in excluded and excluded[resource_type]:
+                excl_vals = sorted(excluded[resource_type])
+                if len(excl_vals) == 1:
+                    excl_sql = f"id != {excl_vals[0]}"
+                else:
+                    excl_sql = f"id NOT IN ({','.join(str(v) for v in excl_vals)})"
+                if resource_type in conditions:
+                    conditions[resource_type] = f"{conditions[resource_type]} AND {excl_sql}"
+                else:
+                    # 无 include 条件但存在 exclude: 用 1=1 占位 + NOT IN
+                    conditions[resource_type] = f"1=1 AND {excl_sql}"
+
         # [FIX 2026-06-22] 防止跨版本数据污染
         # 当 expanded['version'] 非空时, 给所有有 version_id 字段的资源类型追加 version_id 过滤
         # 适用资源: HIERARCHY_CHAIN (除 product, version 外) + VERSION_AWARE_BOS
@@ -411,12 +707,49 @@ class DimensionScopeEngine:
 
         return conditions
 
+    def _anchor_dynamic_condition(
+        self, resource_type: str, dim_code: str,
+        native_ids: Set[int], anchor_codes: Set[str],
+        binding_field: Optional[str] = None,
+        filter_type: str = 'fk',
+    ) -> Optional[str]:
+        """[Spec 20] 锚点动态 SQL 条件 (fk 型单层子查询)
+
+        fk/direct:  {field} IN (SELECT id FROM {dim_table} WHERE (id IN (n)) OR (code IN ('a')))
+        chain 型嵌套子查询由 _build_chain_condition 承担 (Task 3 已支持链尾锚点)
+        """
+        if not anchor_codes:
+            return None
+        if filter_type == 'chain':
+            return self._build_chain_condition(
+                resource_type, dim_code, sorted(native_ids),
+                custom_field=binding_field,
+                anchor_codes=sorted(anchor_codes))
+        # fk / direct 型: 单层子查询
+        dim_table = RESOURCE_TABLE_MAP.get(dim_code)
+        field = binding_field or 'id'
+        if not dim_table:
+            return None
+        val_parts = []
+        if native_ids:
+            val_parts.append(
+                f"id IN ({','.join(str(int(v)) for v in sorted(native_ids))})")
+        code_field = CODE_FIELD_MAP.get(dim_code, 'code')
+        quoted = ', '.join("'" + str(c).replace("'", "''") + "'"
+                           for c in sorted(anchor_codes))
+        val_parts.append(f"{code_field} IN ({quoted})")
+        if not val_parts:
+            return None
+        return (f"{field} IN (SELECT id FROM {dim_table} "
+                f"WHERE {' OR '.join(val_parts)})")
+
     def _build_chain_condition(
         self,
         resource_type: str,
         target_dim: str,
         dim_vals: List[int],
         custom_field: Optional[str] = None,
+        anchor_codes: Optional[List[str]] = None,
     ) -> Optional[str]:
         """沿 HIERARCHY_CHAIN 追溯到 target_dim，构造链式 SQL。
 
@@ -555,12 +888,25 @@ class DimensionScopeEngine:
             return None
 
         # ─────────────── 2. 构造 SQL ───────────────
-        vals = ', '.join(str(int(v)) for v in dim_vals)
+        # [Spec 20] 链尾支持业务键锚点: WHERE (id IN (n1,n2)) OR (code IN ('a1','a2'))
+        # RAW 通道无 params (condition_parser RAW → return value, []) → 内联转义单引号
+        val_parts = []
+        if dim_vals:
+            vals = ', '.join(str(int(v)) for v in dim_vals)
+            val_parts.append(f"id IN ({vals})")
+        if anchor_codes:
+            code_field = CODE_FIELD_MAP.get(target_dim, 'code')
+            quoted = ', '.join("'" + str(c).replace("'", "''") + "'"
+                               for c in anchor_codes)
+            val_parts.append(f"{code_field} IN ({quoted})")
+        if not val_parts:
+            return None
 
-        # cur_query 初始 = target_dim 表的 id 列表
+        # cur_query 初始 = target_dim 表的 id/锚点列表
         # chain[-1] = (target_dim_table, None, None)
         target_dim_table = chain[-1][0]
-        cur_query = f"SELECT DISTINCT id FROM {target_dim_table} WHERE id IN ({vals})"
+        cur_query = (f"SELECT DISTINCT id FROM {target_dim_table} "
+                     f"WHERE {' OR '.join(val_parts)}")
 
         # 从 chain[-2] 倒序走到 chain[0] (leaf), 每层包裹一层
         #   chain[i] = (table, parent_field, parent_table)
@@ -762,12 +1108,161 @@ class DimensionScopeEngine:
             'data_conditions': conditions,
         }
 
-    def _load_scopes(self, role_id: int):
+    def _load_scopes(self, permission_set_id: int):
         cursor = self._ds.execute(
-            "SELECT * FROM role_dimension_scopes WHERE role_id = ?", [role_id]
+            "SELECT * FROM permission_set_dimension_scopes WHERE permission_set_id = ?", [permission_set_id]
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_wildcard_dims(self, role_id: int) -> set:
+        """[P5 修复 2026-07-26] 获取角色配置为 wildcard 的维度集合
+
+        检测条件:
+          - scope_mode='all' (显式 wildcard)
+          - scope_mode='include' 且 dimension_values 包含 '*' (隐式 wildcard)
+
+        用途:
+          derivation_pipeline 对 wildcard 维度存储空 include (动态条件),
+          而非静态 ID 列表, 避免新增对象后 intent 过期。
+
+        Returns:
+            set of dimension_code (如 {'product', 'domain'})
+        """
+        wildcard_dims = set()
+        try:
+            scopes = self._load_scopes(role_id)
+            for scope in scopes:
+                scope_mode = scope.get('scope_mode', 'include')
+                if scope_mode == 'all':
+                    code = scope.get('dimension_code')
+                    if code:
+                        wildcard_dims.add(code)
+                    continue
+                # 检测 dimension_values=['*']
+                if scope_mode == 'include':
+                    raw_dv = scope.get('dimension_values')
+                    if raw_dv is None:
+                        raw_dv = scope.get('inherit_children')
+                    if raw_dv is None:
+                        continue
+                    if isinstance(raw_dv, str):
+                        try:
+                            parsed = json.loads(raw_dv)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                    elif isinstance(raw_dv, (list, tuple)):
+                        parsed = list(raw_dv)
+                    else:
+                        continue
+                    if any(str(v).strip() == '*' for v in parsed):
+                        code = scope.get('dimension_code')
+                        if code:
+                            wildcard_dims.add(code)
+        except Exception as e:
+            logger.warning(f'get_wildcard_dims failed for role {role_id}: {e}')
+        return wildcard_dims
+
+    def _load_exclude_values(self, role_id: int) -> Dict[str, Set[int]]:
+        """[P5 修复 2026-07-26] 加载 scope_mode='exclude' 的维度排除值
+
+        返回: {dimension_code: set(excluded_ids)}
+        例: {'sub_domain': {339}}
+
+        [设计原则]
+          - exclude 仅对自身维度生效, 不沿 HIERARCHY_CHAIN 传播
+          - 多个 exclude scope 同维度时, ID 取并集
+          - exclude 与 include 独立处理 (不互相覆盖)
+        """
+        scopes = self._load_scopes(role_id)
+        excluded: Dict[str, Set[int]] = {}
+        for scope in scopes:
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode != 'exclude':
+                continue
+            code = scope.get('dimension_code')
+            if not code:
+                continue
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                raw_dv = scope.get('inherit_children')
+            if raw_dv is None:
+                continue
+            if isinstance(raw_dv, str):
+                try:
+                    values = set(json.loads(raw_dv))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
+            else:
+                continue
+            if not values:
+                continue
+            if code not in excluded:
+                excluded[code] = set()
+            excluded[code].update(values)
+        return excluded
+
+    def _has_explicit_include_for_dim(self, scopes, dim_code: str) -> bool:
+        """[P1-T2 2026-07-19] 检查 scopes 中是否对 dim_code 有显式的 include 配置
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T2
+        用途: scope_mode='all' 向下展开子维度时, 若子维度已被显式 include 配置,
+              保留精确值 (笛卡尔积语义), 避免被父维度 'all' 展开覆盖
+        返回: True 表示 scopes 中存在 dim_code 的显式 include scope (有非空 dimension_values)
+        """
+        for scope in scopes:
+            if scope.get('dimension_code') != dim_code:
+                continue
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode != 'include':
+                continue
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                # 兼容旧数据: NULL 时降级读 inherit_children 字段
+                raw_dv = scope.get('inherit_children')
+            if raw_dv is None:
+                continue
+            if isinstance(raw_dv, str):
+                try:
+                    values = json.loads(raw_dv)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                values = raw_dv
+            else:
+                continue
+            if values:
+                return True
+        return False
+
+    def _get_all_dimension_ids(self, dimension_code: str) -> Set[int]:
+        """[P1-T2 2026-07-19] 获取指定维度的全量 ID
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T2
+        用途: scope_mode='all' 时查询该维度表的所有 ID
+        返回: 全量 ID 集合，查询失败返回空集合
+
+        注意: 仅支持 HIERARCHY_CHAIN 中的维度（product/version/domain/sub_domain）
+              其他维度返回空集合（由调用方处理）
+        """
+        table = RESOURCE_TABLE_MAP.get(dimension_code)
+        if not table:
+            logger.warning(
+                f'[_get_all_dimension_ids] unknown dimension_code: {dimension_code}'
+            )
+            return set()
+        try:
+            rows = self._ds.execute(
+                f"SELECT id FROM {table}"
+            ).fetchall()
+            return {row[0] for row in rows if row[0] is not None}
+        except Exception as e:
+            logger.warning(
+                f'[_get_all_dimension_ids] query failed for {dimension_code}: {e}'
+            )
+            return set()
 
     def _get_all_resource_types(self) -> List[str]:
         try:

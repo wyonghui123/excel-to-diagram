@@ -88,60 +88,34 @@ def _ensure_enum_tables(ds):
         logger.warning(f"Failed to ensure enum tables: {e}")
 
 
-# [FIX 2026-06-04] 批量从 audit_logs 实时计算 updated_at（virtual 字段）。
-# 遵循 aspects.yaml 中 audit_aspect 的 derive_rule：
-#   updated_at = MAX(audit_logs.created_at) WHERE action='UPDATE'
-#   若无 UPDATE 日志则 fallback 到记录自身的 created_at
-# 一次性 GROUP BY 批量查询，避免 N+1。
+# [V007.52 SSOT] 统一的 updated_at 派生（v_audit_all 或物化列自动选择）
+# 早期版本手动实现 v_audit_all 聚合查询，V007.52 改为调用
+# MaterializationRegistry 统一入口。
+# [PERF 2026-09-14] 进一步收敛到 SSOT 批量路径 enrich_audit_virtual_fields：
+# 原逐行 get_updated_at 在列表接口（page_size 500）下产生 O(n) 次派生查询，
+# 与 prod 列表接口 502 同根因；批量路径降为 O(n/500) 次聚合。
+# preserve_existing=True 保持原语义：已有 updated_at 的记录不覆盖。
 def _enrich_updated_at(records, object_type):
-    """为 records 列表中每条记录计算 updated_at（virtual 字段，来自 audit_logs）"""
+    """为 records 列表中每条记录计算 updated_at
+
+    [PERF 2026-09-14 SSOT 批量] 路径选择与原逐行实现一致：
+    - materialized 表（enum_types/users）：批量读列
+    - audit_derived 表（罕见 enum 用到）：分片聚合 v_audit_all
+    - none / 未注册：fallback 到 created_at
+    - 已有 updated_at 的记录不覆盖（preserve_existing=True）
+    """
     if not records:
         return records
-    # 提取 id 列表（用字符串以避免 int/str 类型不匹配）
-    record_ids = []
-    for r in records:
-        rid = r.get('id')
-        if rid is not None:
-            record_ids.append(str(rid))
 
-    if not record_ids:
-        for r in records:
-            r['updated_at'] = r.get('created_at')
-        return records
+    from meta.core.audit_derived_fields import enrich_audit_virtual_fields
 
-    # 批量查询：每个 object_id 最近一次 UPDATE 的时间
-    placeholders = ','.join(['?'] * len(record_ids))
-    update_times = {}
-    try:
-        cursor = _data_source.execute(
-            f"SELECT object_id, MAX(created_at) as max_update_at "
-            f"FROM audit_logs "
-            f"WHERE object_type = ? AND object_id IN ({placeholders}) "
-            f"AND action = 'UPDATE' "
-            f"GROUP BY object_id",
-            [object_type] + record_ids
-        )
-        for row in cursor.fetchall():
-            if isinstance(row, dict):
-                oid = str(row.get('object_id'))
-                ts = row.get('max_update_at')
-            else:
-                oid = str(row[0])
-                ts = row[1] if len(row) > 1 else None
-            if ts:
-                update_times[oid] = ts
-    except Exception as e:
-        logger.debug(f"[_enrich_updated_at] audit_logs query skipped: {e}")
-        update_times = {}
-
-    # 应用：UPDATE 时间存在则用之，否则 fallback 到 created_at
-    for record in records:
-        rid = str(record.get('id'))
-        if rid in update_times:
-            record['updated_at'] = update_times[rid]
-        else:
-            record['updated_at'] = record.get('created_at')
-    return records
+    return enrich_audit_virtual_fields(
+        ds=_get_data_source(),
+        object_type=object_type,
+        records=records,
+        field_ids=['updated_at'],
+        preserve_existing=True,
+    )
 
 
 def _get_data_source():
@@ -336,7 +310,7 @@ def get_enum_type(enum_type_id):
         try:
             logger.info(f"正在查询枚举类型 {enum_type_id} 的变更历史...")
             cursor = ds.execute("""
-                SELECT * FROM audit_logs
+                SELECT * FROM v_audit_all
                 WHERE object_type = 'enum_type' AND object_id = ?
                 ORDER BY created_at DESC
                 LIMIT 50
@@ -576,7 +550,7 @@ def get_enum_type_history(enum_type_id):
         page_size = request.args.get('page_size', request.args.get('pageSize', 20), type=int)
         
         cursor = ds.execute("""
-            SELECT * FROM audit_logs 
+            SELECT * FROM v_audit_all 
             WHERE object_type = 'enum_type' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -589,7 +563,7 @@ def get_enum_type_history(enum_type_id):
             result.append(row_dict)
         
         cursor = ds.execute("""
-            SELECT COUNT(*) as total FROM audit_logs 
+            SELECT COUNT(*) as total FROM v_audit_all 
             WHERE object_type = 'enum_type' AND object_id = ?
         """, [enum_type_id])
         total = cursor.fetchone()[0]

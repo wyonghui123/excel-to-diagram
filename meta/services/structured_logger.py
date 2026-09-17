@@ -19,6 +19,7 @@ if str(project_root) not in sys.path:
 
 from enums.log_category import LogCategory
 from enums.log_level import LogLevel
+from meta.core.db_path import get_meta_db_path
 
 
 @dataclass
@@ -499,7 +500,10 @@ class StructuredLogger:
             tags: 标签 (endpoint/method 等)
             threshold: 阈值 (超过此值记录 WARNING)
             trace_id: 链路追踪ID
-            
+
+            [FIX 2026-07-22] action 列改为固定占位 'METRIC_RECORD'
+              metric_name 移到 extra_data.metric_name
+
         Returns:
             bool: 写入是否成功
         """
@@ -519,7 +523,7 @@ class StructuredLogger:
         entry = LogEntry(
             category=LogCategory.PERFORMANCE,
             level=level,
-            action=metric_name,
+            action='METRIC_RECORD',  # [FIX 2026-07-22] 占位常量，metric_name 在 extra_data
             trace_id=trace_id,
             extra_data=extra_data
         )
@@ -606,7 +610,7 @@ class StructuredLogger:
             if ds is None:
                 from meta.core.datasource import get_data_source
                 import os
-                db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+                db_path = get_meta_db_path()
                 ds = get_data_source('sqlite', database=db_path)
             from meta.services.audit_service import AuditService
             audit_service = AuditService(ds)

@@ -92,9 +92,8 @@
               >
                 {{ formatObjectTypeLabel(group.object_type) }}
               </span>
-              <!-- [FIX 2026-06-24 业务化] 显示对象业务名/business_key -->
-              <!-- 解决: 用户看到的是 "备注#552" 而不是 "备注: TEST11111-XXX" -->
-              <!-- 优先级: business_key 包含 ":" (API fallback) > business_key 原值 > object_id -->
+              <!-- 解决 用户看到的是 备注井号552 而不是 备注冒号 TEST11111-XXX -->
+              <!-- 优先级 business_key 包含 冒号 作为 API fallback 大于 business_key 原值 大于 object_id -->
               <span
                 v-if="groupBusinessKey(group)"
                 class="al-group-business-key"
@@ -154,10 +153,10 @@
                     <span class="al-associate-add">+ {{ formatBatchTargets(item._batch_targets) }}</span>
                   </div>
                   <div class="al-detail" v-else-if="item.field_name">
-                    <span class="al-field">{{ getFieldLabel(item.field_name) }}:</span>
-                    <span class="al-old">{{ getFieldValueDisplay(item.old_value, item.field_name) }}</span>
+                    <span class="al-field">{{ getFieldLabel(item.field_name, item) }}:</span>
+                    <span class="al-old">{{ getFieldValueDisplay(item.old_value, item.field_name, item) }}</span>
                     <span class="al-arrow">→</span>
-                    <span class="al-new">{{ getFieldValueDisplay(item.new_value, item.field_name) }}</span>
+                    <span class="al-new">{{ getFieldValueDisplay(item.new_value, item.field_name, item) }}</span>
                   </div>
                   <div class="al-detail al-detail--create" v-else-if="item.action === 'CREATE'">
                     <span>创建记录</span>
@@ -198,7 +197,7 @@
                     <span class="al-child-type">{{ getObjectTypeLabel(child.object_type) }}</span>
                     <span class="al-child-action">{{ formatAction(child.action) }}</span>
                     <span v-if="child.field_name" class="al-child-detail">
-                      {{ getFieldLabel(child.field_name) }}: {{ getFieldValueDisplay(child.old_value, child.field_name) }} → {{ getFieldValueDisplay(child.new_value, child.field_name) }}
+                      {{ getFieldLabel(child.field_name, child) }}: {{ getFieldValueDisplay(child.old_value, child.field_name, child) }} → {{ getFieldValueDisplay(child.new_value, child.field_name, child) }}
                     </span>
                   </div>
                 </div>
@@ -246,7 +245,7 @@ import { computed, ref, watch } from 'vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 import AppCollapse from '@/components/common/AppCollapse/AppCollapse.vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getObjectTypeLabel } from '@/utils/auditLogFormat'
+import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getObjectTypeLabel, parseTargetDisplay } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   logs: {
@@ -649,19 +648,6 @@ function groupBusinessKey(group) {
     return `#${group.object_id}`
   }
   return ''
-}
-
-function parseTargetDisplay(raw) {
-  if (!raw) return '-'
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (parsed && parsed.target_display && parsed.target_type) {
-      return `${parsed.target_display}（${parsed.target_type}）`
-    }
-    return raw
-  } catch {
-    return raw
-  }
 }
 
 function formatBatchTargets(targets) {

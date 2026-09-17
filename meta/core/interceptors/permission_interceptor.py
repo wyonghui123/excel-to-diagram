@@ -172,7 +172,33 @@ class PermissionInterceptor(Interceptor):
 
         # 回退到现有逻辑
         if required not in permissions:
-            # [FIX FR-005 2026-06-23] 决策埋点 (annotation-permission-hardening)
+            # [FIX BUG-V058 2026-07-12] annotation 功能权限跟随 parent 对象
+            # annotation 是辅助对象, 写权限应继承自 parent (target_type)
+            # 例: 用户有 business_object:update 权限 → 应允许对该 BO 创建/更新/删除备注
+            # 与 WriteScopeInterceptor 的 annotation cascade 逻辑一致:
+            #   - WriteScopeInterceptor 对 annotation update/delete 已走 parent dim scope
+            #   - V2.1.13 已改 perm check 为 parent_type:update (非 annotation:update)
+            #   - 但 PermissionInterceptor 仍要求 annotation:create/update/delete → 被拒
+            if context.object_type == 'annotation' and suffix in ('create', 'update', 'delete'):
+                parent_type = None
+                # create: 从 params.target_type 获取
+                if hasattr(context, 'params') and context.params:
+                    parent_type = context.params.get('target_type')
+                # update/delete: 从 record 获取
+                if not parent_type and hasattr(context, 'record') and context.record:
+                    parent_type = context.record.get('target_type')
+                # 处理 "code - name" 格式
+                if isinstance(parent_type, str) and ' - ' in parent_type:
+                    parent_type = parent_type.split(' - ')[0].strip()
+                if parent_type:
+                    parent_perm = f'{parent_type}:{suffix}'
+                    if parent_perm in permissions:
+                        logger.info(
+                            f'PermissionInterceptor: annotation:{suffix} bypassed via '
+                            f'parent perm {parent_perm} for user {user_info.get("username")}'
+                        )
+                        return  # parent 有对应写权限, 允许 annotation 操作
+
             from meta.core.permission_audit import log_permission_decision
             log_permission_decision(
                 user_id=user_info.get('id'),
@@ -548,12 +574,27 @@ def _check_yaml_permission(user_info, object_type, action_suffix):
 
     if user_info is None:
         return None
-    user_roles = user_info.get('roles', [])
-    if not user_roles:
+    raw_roles = user_info.get('roles', [])
+    if not raw_roles:
         # 无 roles 字段，使用 'user' 作为默认
-        user_roles = ['user']
-    if not isinstance(user_roles, (list, set, tuple)):
+        raw_roles = ['user']
+    if not isinstance(raw_roles, (list, set, tuple)):
         return None
+
+    # [Spec 19 M2 2026-09-05] 角色码归一化：
+    # JWT roles 是权限集列表（dict: {id, code, name}），RLS yaml 静态规则
+    # 匹配的是字符串码；dict 直接传入 check_action 会 AttributeError 被吞掉，
+    # 导致所有动态权限集用户在 yaml 覆盖实体上被误判为 deny。
+    user_roles = []
+    for role in raw_roles:
+        if isinstance(role, dict):
+            code = role.get('code')
+            if code:
+                user_roles.append(str(code))
+        elif role:
+            user_roles.append(str(role))
+    if not user_roles:
+        user_roles = ['user']
 
     # 任意一个 role 通过即允许
     for role in user_roles:
@@ -563,11 +604,31 @@ def _check_yaml_permission(user_info, object_type, action_suffix):
         except Exception:
             continue
     # 所有 role 都不允许
-    # 但如果 YAML 中无任何该 entity 规则 → 回退
+    # [Spec 19 M2 2026-09-05] 回退语义修正：
+    # yaml 规则面向静态角色（role:admin/manager/user/viewer）编写；
+    # 用户的权限集码不属于该实体任何 applies_to 名单时，说明 yaml 规则
+    # 并非为该用户设计 → 回退 JWT 功能码检查（仍是 fail-closed），
+    # 而非直接 deny（否则动态权限集用户在 yaml 覆盖实体上永远被拒）。
     try:
         from rls.loader import get_loader
-        if not get_loader().has_rule_for(object_type):
+        rules = get_loader().load_all().get(object_type)
+        if not rules:
             return None  # YAML 无该 entity 规则，回退
+        # 收集该实体全部 applies_to 出现过的角色码
+        declared_roles = set()
+        for section in ('actions', 'row_filters', 'field_masks'):
+            entries = rules.get(section) or {}
+            values = entries.values() if isinstance(entries, dict) else entries
+            for entry in values:
+                if isinstance(entry, dict):
+                    declared_roles.update(entry.get('applies_to') or [])
+                elif isinstance(entry, (list, tuple)):
+                    declared_roles.update(entry)
+        normalized_declared = {
+            str(r).split('role:')[-1] for r in declared_roles if r
+        }
+        if not (set(user_roles) & normalized_declared):
+            return None  # 用户角色不在 yaml 规则设计范围内 → 回退 JWT 检查
     except Exception:
         return None
     return False  # YAML 有规则且所有 role 都不允许

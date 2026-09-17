@@ -15,6 +15,13 @@
 
 import { apiV1 } from '@/utils/httpClient'
 
+// [DBG 2026-09-04] 产线 console 噪音治理: window 探测 useDebugMode 注册的 __archPage.debug,
+//   仅 ?mode=debug 时输出. 产线静默, 排查者调 __archPage.debug.getLogs() 即可取全量.
+//   避免 services 层耦合 Vue composable, 同时统一 UI / services 处理方式.
+const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
+const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+
+
 /**
  * @typedef {Object} EnumOption
  * @property {string} value - 枚举值代码
@@ -89,7 +96,7 @@ const EnumService = {
     if (cache && this._cache.has(enumTypeId)) {
       const cached = this._cache.get(enumTypeId);
       if (Date.now() - cached.timestamp < this._cacheTimeout) {
-        console.log(`[EnumService] Cache HIT for: ${enumTypeId}`);
+        _dbgLog(`[EnumService] Cache HIT for: ${enumTypeId}`);
         return cached.data;
       }
       this._cache.delete(enumTypeId);
@@ -121,7 +128,7 @@ const EnumService = {
         return [];
       }
 
-      const values = this._normalizeEnumValues(result.data?.data || []);
+      const values = this._normalizeEnumValues(this._extractValuesArray(result));
 
       if (cache) {
         this._addToCache(enumTypeId, values);
@@ -200,6 +207,46 @@ const EnumService = {
   },
   
   /**
+   * 提取 values 数组 - 兼容双层包装的双端点响应结构
+   *
+   * 高速端点 (/enums/{id}/options) backend: {data: [{code, name}, ...]}
+   *   → apiV1.get 返回 result.data = [{code, name}, ...]
+   *   → _loadFromHighSpeedEndpoint 包装 data: { data: result.data } = {data: [...]}
+   *   → enumApiResult.data = {data: [{...}, ...]}  ← 包装 1 层
+   *
+   * 标准端点 (/enum-types/{id}/values) backend: {data: {data: [...], total: 6, ...}}
+   *   → apiV1.get 返回 result.data = {data: [...], total: 6, ...}
+   *   → _loadFromStandardEndpoint 包装 data: { data: result.data } = {data: {data: [...]}}
+   *   → enumApiResult.data = {data: {data: [{...}, ...]}}  ← 包装 2 层
+   *
+   * [FIX 2026-06-29 v2] 之前只剥 1 层, 标准端点拿到 {data: [...]} 对象 (非数组),
+   *   _normalizeEnumValues 返回 [], 弹窗保持默认 4 个 categories
+   *   [FIX 实际根因] _extractValuesArray 需要递归或更智能地找到数组
+   *
+   * @param {Object} result - _loadFromHighSpeedEndpoint / _loadFromStandardEndpoint 返回
+   * @returns {Array} values 数组
+   * @private
+   */
+  _extractValuesArray(result) {
+    if (!result || !result.data) return []
+
+    // 递归查找数组: data → data.data → data.data.data (depth < 5 防爆栈)
+    // 高速端点: {data: [{...}]} → 数组在 depth=1
+    // 标准端点: {data: {data: [...]}} → 数组在 depth=2
+    let current = result.data
+    let depth = 0
+    while (current && !Array.isArray(current) && depth < 5) {
+      if (current.data === undefined || current.data === null) {
+        return []
+      }
+      current = current.data
+      depth++
+    }
+
+    return Array.isArray(current) ? current : []
+  },
+
+  /**
    * 规范化枚举值格式
    *
    * 将 API 返回的各种格式统一转换为 {value, label} 格式
@@ -243,14 +290,14 @@ const EnumService = {
     if (this._cache.size >= this._maxCacheSize && !this._cache.has(enumTypeId)) {
       const oldestKey = this._cache.keys().next().value;
       this._cache.delete(oldestKey);
-      console.log(`[EnumService] LRU eviction: removed ${oldestKey}`);
+      _dbgLog(`[EnumService] LRU eviction: removed ${oldestKey}`);
     }
 
     this._cache.set(enumTypeId, {
       data: values,
       timestamp: Date.now()
     });
-    console.log(`[EnumService] Cached ${values.length} options for: ${enumTypeId}`);
+    _dbgLog(`[EnumService] Cached ${values.length} options for: ${enumTypeId}`);
   },
   
   /**
@@ -269,7 +316,7 @@ const EnumService = {
   clearCacheFor(enumTypeId) {
     if (this._cache.has(enumTypeId)) {
       this._cache.delete(enumTypeId);
-      console.log(`[EnumService] Cache cleared for: ${enumTypeId}`);
+      _dbgLog(`[EnumService] Cache cleared for: ${enumTypeId}`);
     }
   },
 
@@ -309,7 +356,7 @@ const EnumService = {
       optionsMap.set(id, results[index]);
     });
 
-    console.log(`[EnumService] Preloaded ${enumTypeIds.length} enums`);
+    _dbgLog(`[EnumService] Preloaded ${enumTypeIds.length} enums`);
     return optionsMap;
   },
   

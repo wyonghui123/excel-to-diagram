@@ -42,7 +42,7 @@ def create_tables(conn):
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS roles (
+        CREATE TABLE IF NOT EXISTS permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -65,22 +65,22 @@ def create_tables(conn):
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_roles (
+        CREATE TABLE IF NOT EXISTS user_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, role_id)
+            UNIQUE(user_id, permission_set_id)
         )
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS role_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(role_id, permission_id)
+            UNIQUE(permission_set_id, permission_id)
         )
     """)
 
@@ -98,82 +98,39 @@ def create_tables(conn):
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS role_data_permissions (
+        CREATE TABLE IF NOT EXISTS permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             resource_id INTEGER NOT NULL,
             permission_level TEXT NOT NULL DEFAULT 'read',
             inherit_to_children INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_by INTEGER,
-            FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
-            UNIQUE(role_id, resource_type, resource_id)
+            FOREIGN KEY (permission_set_id) REFERENCES permission_sets(id) ON DELETE CASCADE,
+            UNIQUE(permission_set_id, resource_type, resource_id)
         )
     """)
 
+    # [2026-09-15 v089 Spec 19 M4 软删] idx_role_code ON roles → idx_permission_set_code ON permission_sets
+    # 原 idx_role_code 在 roles 表 DROP 后报 no such table; idx_role_data_perm_* 同理
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_sso ON users(sso_provider, sso_user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_role_code ON roles(code)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_permission_set_code ON permission_sets(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_permission_code ON permissions(code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_data_permission_user ON data_permissions(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_data_permission_resource ON data_permissions(resource_type, resource_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_role_data_perm_role ON role_data_permissions(role_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_role_data_perm_resource ON role_data_permissions(resource_type, resource_id)")
+    # [2026-09-16 v087 hot-fix] role_id → permission_set_id (column rename)
+    # 原 role_id 在 v087 后表是 permission_set_data_permissions, 列改名为 permission_set_id
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_permission_set_data_perm_role ON permission_set_data_permissions(permission_set_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_permission_set_data_perm_resource ON permission_set_data_permissions(resource_type, resource_id)")
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            code TEXT UNIQUE NOT NULL,
-            parent_id INTEGER REFERENCES user_groups(id),
-            manager_id INTEGER REFERENCES users(id),
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_group_code ON user_groups(code)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_group_parent ON user_groups(parent_id)")
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_group_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            group_id INTEGER NOT NULL REFERENCES user_groups(id),
-            is_manager INTEGER DEFAULT 0,
-            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, group_id)
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_group_member_group ON user_group_members(group_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_group_member_user ON user_group_members(user_id)")
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS group_roles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
-            role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER,
-            UNIQUE(group_id, role_id)
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_group_roles_group ON group_roles(group_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_group_roles_role ON group_roles(role_id)")
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS group_data_permissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL REFERENCES user_groups(id),
-            resource_type TEXT NOT NULL,
-            resource_id INTEGER NOT NULL,
-            permission_level TEXT DEFAULT 'read',
-            inherit_to_children INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(group_id, resource_type, resource_id)
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_group_data_perm_group ON group_data_permissions(group_id)")
+    # [2026-09-15 v089 Spec 19 M4 软删] 删除整段 legacy 表 CREATE
+    # 原 orgs / org_members / org_permission_sets / org_data_permissions
+    # 这四张表的 CREATE 由 init_auth_tables.py (新增) 在 init_auth_system 末尾
+    # 单独负责, 走 IF NOT EXISTS 幂等创建 (legacy DROP 之后).
+    # 若此处保留会因 FK 引用 user_groups/roles 而在 v089 DROP 后启动失败.
+    # 见 §2.19 runbook / §V19_STAGING_LAUNCH_LEARNINGS
 
     conn.commit()
     print("Tables created successfully")
@@ -193,11 +150,11 @@ def seed_roles(conn):
 
     for code, name, desc, is_system in roles:
         cursor.execute(
-            "INSERT OR IGNORE INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO permission_sets (code, name, description, is_system) VALUES (?, ?, ?, ?)",
             (code, name, desc, is_system)
         )
         cursor.execute(
-            "UPDATE roles SET name = ?, description = ? WHERE code = ?",
+            "UPDATE permission_sets SET name = ?, description = ? WHERE code = ?",
             (name, desc, code)
         )
 
@@ -228,7 +185,7 @@ def seed_permissions(conn):
 def seed_role_permissions(conn):
     cursor = conn.cursor()
 
-    cursor.execute("SELECT id, code FROM roles")
+    cursor.execute("SELECT id, code FROM permission_sets")
     role_map = {row['code']: row['id'] for row in cursor.fetchall()}
 
     cursor.execute("SELECT id, code FROM permissions")
@@ -240,7 +197,7 @@ def seed_role_permissions(conn):
 
     if admin_role_id and '*' in perm_map:
         cursor.execute(
-            "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
             (admin_role_id, perm_map['*'])
         )
 
@@ -253,7 +210,7 @@ def seed_role_permissions(conn):
                 action = parts[1]
                 if action in ('create', 'read', 'update', 'export'):
                     cursor.execute(
-                        "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
                         (editor_role_id, pid)
                     )
 
@@ -266,7 +223,7 @@ def seed_role_permissions(conn):
                 action = parts[1]
                 if action in ('read', 'export'):
                     cursor.execute(
-                        "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
                         (viewer_role_id, pid)
                     )
 
@@ -289,11 +246,11 @@ def seed_admin_user(conn):
 
     user_id = cursor.lastrowid
 
-    cursor.execute("SELECT id FROM roles WHERE code = 'admin'")
+    cursor.execute("SELECT id FROM permission_sets WHERE code = 'admin'")
     role_row = cursor.fetchone()
     if role_row:
         cursor.execute(
-            "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+            "INSERT INTO user_permission_sets (user_id, permission_set_id) VALUES (?, ?)",
             (user_id, role_row['id'])
         )
 
@@ -307,9 +264,9 @@ def seed_admin_user(conn):
 def add_is_active_to_roles(conn):
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT is_active FROM roles LIMIT 1")
+        cursor.execute("SELECT is_active FROM permission_sets LIMIT 1")
     except sqlite3.OperationalError:
-        cursor.execute("ALTER TABLE roles ADD COLUMN is_active INTEGER DEFAULT 1")
+        cursor.execute("ALTER TABLE permission_sets ADD COLUMN is_active INTEGER DEFAULT 1")
         print("Added is_active column to roles table")
     conn.commit()
 

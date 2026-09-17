@@ -17,11 +17,18 @@ audit_retry_worker.py (v3.18 FR-010)
 import threading
 import time
 import json
+import os
 import logging
 from datetime import datetime
 from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
+
+# [FIX R018 P2 OBS-G g3 2026-09-15] retry worker 最大重试次数
+# 超过此次数后 source AUDIT_WRITE_FAILED 状态置 'gave_up', 跳出无限循环
+# 防止 audit_retry_worker 自身失败时反复重试同一条 source 重建行
+# 默认 3 次, 可通过环境变量 AUDIT_RETRY_MAX_ATTEMPTS 覆盖
+AUDIT_RETRY_MAX_ATTEMPTS = int(os.environ.get('AUDIT_RETRY_MAX_ATTEMPTS', '3'))
 
 
 class AuditRetryWorker:
@@ -38,6 +45,7 @@ class AuditRetryWorker:
             'retried': 0,
             'success': 0,
             'failed': 0,
+            'gave_up': 0,  # [FIX R018 P2 OBS-G g3 2026-09-15] retry 达 max 后放弃计数
         }
         self._stats_lock = threading.Lock()
 
@@ -78,15 +86,18 @@ class AuditRetryWorker:
             return
 
         # 扫 status='failed' 的 AUDIT_WRITE_FAILED 记录
+        # [FIX R018 P2 OBS-G g3 2026-09-15] 加 retry_count 列, 跳过已达 max_retry 的
         try:
             rows = self._ds.execute(
                 """SELECT id, object_type, object_id, user_id, user_name,
-                          ip_address, user_agent, extra_data, created_at
+                          ip_address, user_agent, extra_data, created_at,
+                          error_message, retry_count
                    FROM audit_logs
                    WHERE action='AUDIT_WRITE_FAILED' AND status='failed'
+                     AND retry_count < ?
                    ORDER BY id ASC
                    LIMIT ?""",
-                (self._batch_size,)
+                (AUDIT_RETRY_MAX_ATTEMPTS, self._batch_size)
             ).fetchall()
         except Exception as e:
             logger.error("Failed to scan AUDIT_WRITE_FAILED: %s", str(e))
@@ -101,24 +112,73 @@ class AuditRetryWorker:
         logger.info("AuditRetryWorker: found %d AUDIT_WRITE_FAILED records", len(rows))
 
         for row in rows:
-            audit_id, obj_type, obj_id, user_id, user_name, ip_addr, user_agent, extra_data_str, created_at = row
+            (audit_id, obj_type, obj_id, user_id, user_name, ip_addr, user_agent,
+             extra_data_str, created_at, source_error_message, source_retry_count) = row
             try:
                 extra_data = json.loads(extra_data_str) if extra_data_str else {}
-                self._retry_one(audit_id, obj_type, obj_id, user_id, user_name, ip_addr, user_agent, extra_data, created_at)
+                # [FIX R018 P2 OBS-G g2 2026-09-15] 把 source error_message 传给 _retry_one
+                # 背景: 当前 retry 重建行 error_message='' 丢原始 error, 645 条孤儿记录
+                # 改为继承到 retry 行的 extra_data.original_error
+                self._retry_one(
+                    audit_id, obj_type, obj_id, user_id, user_name,
+                    ip_addr, user_agent, extra_data, created_at,
+                    source_error_message=source_error_message or '',
+                    source_retry_count=source_retry_count or 0,
+                )
             except Exception as e:
                 logger.error("AuditRetryWorker retry failed for id=%d: %s", audit_id, str(e))
                 with self._stats_lock:
                     self._stats['failed'] += 1
+                # [FIX R018 P2 OBS-G g3 2026-09-15] retry 自身失败时, 累加 source.retry_count
+                # 达到 max 后 status='gave_up', 避免无限重试
+                self._mark_retry_attempt(audit_id, source_retry_count or 0)
+
+    def _mark_retry_attempt(self, audit_id: int, current_retry_count: int):
+        """[FIX R018 P2 OBS-G g3 2026-09-15] 累加 retry_count, 达 max 后标 'gave_up'
+
+        避免 retry worker 自身失败时, 下一轮又扫到同一条 source, 无限循环重建。
+        'gave_up' 状态需 ops 人工介入 (离线 grep failed-audit-*.log 或直接 SQL 查)。
+        """
+        new_retry_count = (current_retry_count or 0) + 1
+        try:
+            if new_retry_count >= AUDIT_RETRY_MAX_ATTEMPTS:
+                # 放弃: 标 gave_up, 不再被 _scan_and_retry 扫到 (retry_count >= max)
+                self._ds.execute(
+                    "UPDATE audit_logs SET retry_count=?, status='gave_up' WHERE id=?",
+                    (new_retry_count, audit_id)
+                )
+                logger.warning(
+                    "AuditRetryWorker gave up on audit_id=%d after %d attempts, status=gave_up",
+                    audit_id, new_retry_count
+                )
+                with self._stats_lock:
+                    self._stats['gave_up'] = self._stats.get('gave_up', 0) + 1
+            else:
+                # 累加 retry_count, 留作下一轮
+                self._ds.execute(
+                    "UPDATE audit_logs SET retry_count=? WHERE id=?",
+                    (new_retry_count, audit_id)
+                )
+            if not getattr(self._ds, 'in_transaction', False):
+                self._ds.commit()
+        except Exception as e:
+            logger.error("Failed to mark retry attempt for audit_id=%d: %s", audit_id, str(e))
 
     def _retry_one(self, audit_id: int, obj_type: str, obj_id: str,
                    user_id: Any, user_name: str, ip_addr: str, user_agent: str,
-                   extra_data: dict, created_at: str):
+                   extra_data: dict, created_at: str,
+                   source_error_message: str = '',
+                   source_retry_count: int = 0):
         """重试一条 AUDIT_WRITE_FAILED"""
         # 从 extra_data 提取原始 audit 信息
         original_action = extra_data.get('original_action', 'UNKNOWN')
         original_trace_id = extra_data.get('original_trace_id')
 
         # 重建 audit 记录 (obj 级别, field 级别丢失)
+        # [FIX R018 P2 OBS-G g2 2026-09-15] 保留原 error_message:
+        #   1) error_message 字段直接写 source 的 error (截断 500 字避免过长)
+        #   2) extra_data.original_error 写完整 (供后续分析)
+        # 背景: 旧版写 error_message='', 645 条 retry 行无 error 可查, 变成孤儿
         retry_record = {
             'object_type': obj_type,
             'object_id': obj_id,
@@ -141,12 +201,16 @@ class AuditRetryWorker:
                 'original_audit_id': audit_id,
                 'original_trace_id': original_trace_id,
                 'original_created_at': created_at,
+                # [FIX R018 P2 OBS-G g2 2026-09-15] 完整原 error 留存
+                'original_error': (source_error_message or '')[:1000],
             }, ensure_ascii=False),
             'trace_id': original_trace_id,
             'transaction_id': None,
             'status': 'retried',
             'retry_count': 1,
-            'error_message': '',
+            # [FIX R018 P2 OBS-G g2 2026-09-15] 改用源 error 截断 500 字
+            # 旧版硬编码 '' 导致 645 条 retry 行无 error 信息
+            'error_message': (source_error_message or '')[:500],
             'agent_id': None,
             'agent_session_id': None,
             'tool_call_id': None,

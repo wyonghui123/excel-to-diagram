@@ -1,11 +1,18 @@
 <template>
   <div class="value-help-field">
     <template v-if="resultType === 'dropdown'">
-      <!-- 单选：使用 filterable 确保 el-select 正确显示选中项的 label -->
+      <!-- 单选：使用 filterable 确保 el-select 正确显示选中项的 label
+           [FIX 2026-08-30] 单选加 remote + remote-method，与多选行为一致。
+           原因: 纯 filterable 是"本地过滤"已加载 options，而打开下拉时仅预加载前
+           page_size(200) 条 (id asc)。当目标记录不在前 200 条 (如 orgs 表 200+ 行,
+           "供应链云" id=8326) 时，输入搜索词永远查不到 (不发 API 请求)。
+           加 remote 后: 输入触发 handleRemoteSearch → 后端 search 命中任意记录。 -->
       <el-select
         v-if="!isMultiple"
         v-model="internalValue"
         filterable
+        remote
+        :remote-method="handleRemoteSearch"
         :loading="loading"
         :disabled="disabled || !bindingSatisfied"
         :placeholder="placeholder"
@@ -49,7 +56,32 @@
     </template>
 
     <template v-else-if="resultType === 'dialog'">
+      <!-- [R21 2026-07-24] tree 模式且层级维度: tooltip 展示完整祖先路径 -->
+      <!--   业务背景: service_module 详情页只读态显示"编码 - 名称" -->
+      <!--   hover 时显示 "产品 > 版本 > 领域 > 子领域" 提供层级上下文 -->
+      <el-tooltip
+        v-if="displayMode === 'tree' && hasAncestorPath"
+        :content="ancestorPath"
+        placement="top"
+        :show-after="300"
+      >
+        <el-input
+          :model-value="displayValue"
+          :disabled="disabled"
+          :placeholder="placeholder"
+          readonly
+          @click="handleDialogOpen"
+          style="width: 100%"
+        >
+          <template #suffix>
+            <el-icon class="vh-search-icon" @click="handleDialogOpen">
+              <Search />
+            </el-icon>
+          </template>
+        </el-input>
+      </el-tooltip>
       <el-input
+        v-else
         :model-value="displayValue"
         :disabled="disabled"
         :placeholder="placeholder"
@@ -68,6 +100,8 @@
         :value-help-config="valueHelpConfig"
         :multiple="isMultiple"
         :selected-value="modelValue"
+        :tree-filter-params="treeFilterParams"
+        :exclude-ids="excludeIds"
         @confirm="handleDialogConfirm"
       />
     </template>
@@ -92,6 +126,7 @@
 import { ref, computed, watch, onMounted, nextTick, getCurrentInstance } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { useValueHelp } from '@/composables/useValueHelp'
+import { injectVersionContext } from '@/composables/useVersionContext'
 import SearchHelpDialog from './SearchHelpDialog.vue'
 
 const props = defineProps({
@@ -113,6 +148,7 @@ const {
   optionsList,
   loading,
   displayValue,
+  ancestorPath,
   loadOptions,
   loadOptionsDebounced,
   resolveDisplay,
@@ -128,6 +164,17 @@ const resultType = computed(() => {
   return props.valueHelpConfig?.presentation?.result_type || 'dropdown'
 })
 
+// [R21 2026-07-24] tree 模式标识 (用于 tooltip 是否启用)
+const displayMode = computed(() => {
+  return props.valueHelpConfig?.presentation?.display_mode || ''
+})
+
+// [R21 2026-07-24] 是否有祖先路径可展示
+//   仅层级维度 (service_module/sub_domain/domain/version/business_object) 且有值时为 true
+const hasAncestorPath = computed(() => {
+  return Boolean(ancestorPath.value && ancestorPath.value.trim())
+})
+
 const isMultiple = computed(() => {
   return props.valueHelpConfig?.behavior?.multiple === true
 })
@@ -138,6 +185,25 @@ const minSearchLength = computed(() => {
 
 const bindingSatisfied = computed(() => {
   return isBindingSatisfied(props.formValues)
+})
+
+// [R21 2026-07-24] tree 模式: 注入版本上下文
+//   业务对象模型 context.field = version_id, 版本由全局 useVersionContext 确定
+//   优先取 formValues.version_id (表单已填), fallback 到全局版本上下文
+const versionCtx = injectVersionContext()
+const treeFilterParams = computed(() => {
+  const versionId = props.formValues?.version_id ?? versionCtx?.selectedVersionId?.value
+  return versionId ? { version_id: versionId } : {}
+})
+
+// [FIX 2026-09-05 父组织树状 SearchHelp] 自引用层级防环:
+// behavior.exclude_self=true (元数据显式声明, 如 org.parent_id) 时,
+// 编辑态把当前记录 id 传给 SearchHelpDialog, 由通用树剪掉 自身+全部子孙。
+// 注意: 不能无条件传 formValues.id — manager_id(user 引用) 等跨表引用会误伤同数字 id 的目标记录。
+const excludeIds = computed(() => {
+  if (props.valueHelpConfig?.behavior?.exclude_self !== true) return []
+  const selfId = props.formValues?.id
+  return (selfId != null && selfId !== '') ? [Number(selfId)] : []
 })
 
 // 关键：先设 null，等 onMounted 后 el-option 渲染完成再设真实值
@@ -289,6 +355,7 @@ function handleDialogOpen() {
 }
 
 function handleDialogConfirm(selection) {
+  console.debug('[VHF handleDialogConfirm] selection=', selection, 'outMappings.length=', outMappings.value.length)
   if (isMultiple.value) {
     const values = selection.map(s => s.value)
     emit('update:modelValue', values)
@@ -303,6 +370,7 @@ function handleDialogConfirm(selection) {
     emit('change', val)
     if (selection && outMappings.value.length > 0) {
       const updates = applyOutMappings(selection, props.formValues)
+      console.debug('[VHF handleDialogConfirm] out-mapping updates=', updates)
       if (Object.keys(updates).length > 0) {
         emit('out-mapping', updates)
       }

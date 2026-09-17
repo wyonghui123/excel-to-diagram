@@ -36,7 +36,11 @@ def run_startup_checks(app):
 
 
 def _is_debug():
-    return os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    # [BUG-FIX V007.36] 默认值 'True' 跟 server.py:983 一致
+    # 之前默认 'false' 导致手动启动 server.py 时, _is_production_safe() 错判为生产模式,
+    # 在没有 .env (JWT_SECRET_KEY) 时阻断启动. deploy.sh 启动时显式设了 FLASK_DEBUG=false
+    # 掩盖了此 bug, 直到 2026-07-07 23:51 手动启动才暴露.
+    return os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
 
 
 def _is_testing():

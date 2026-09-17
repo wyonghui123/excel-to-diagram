@@ -1,0 +1,10 @@
+[
+  "code length = 255386 bytes",
+  "nodes = 1610, edges = 3299",
+  "\n--- parse() ---",
+  "FAIL: name=TypeError",
+  "msg=DOMPurify.sanitize is not a function",
+  "hash: {}",
+  "stack (40 lines):",
+  "TypeError: DOMPurify.sanitize is not a function\n    at Object.sanitizeText (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/chunk-7R4GIKGN.mjs:2736:22)\n    at FlowDB.sanitizeText (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/flowDiagram-PKNHOUZH.mjs:105:27)\n    at FlowDB.addVertex (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/flowDiagram-PKNHOUZH.mjs:176:18)\n    at Object.anonymous (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/flowDiagram-PKNHOUZH.mjs:1196:14)\n    at Parser.parse (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/flowDiagram-PKNHOUZH.mjs:1583:36)\n    at newParser.parse (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/chunks/mermaid.core/flowDiagram-PKNHOUZH.mjs:2342:23)\n    at Diagram.fromText (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/mermaid.core.mjs:773:18)\n    at async Object.parse (file:///D:/filework/release-prep-worktree/node_modules/mermaid/dist/mermaid.core.mjs:913:22)"
+]
