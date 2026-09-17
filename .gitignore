@@ -399,3 +399,6 @@ logs/*.png
 *.db.*
 *.db-wal
 *.db-shm
+
+# L2 monitor violations (auto-written, do not track)
+.agent-violations.json
