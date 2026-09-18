@@ -969,6 +969,28 @@ def _record_prod_deploy(entry: dict):
     _save_prod_history(h)
 
 
+def _update_prod_history(stamp: str, **patch) -> bool:
+    """[2026-09-18 P1-2] 按 stamp 局部更新 history 条目 (避免重复 append).
+
+    两步写策略:
+      - upload OK → _record_prod_deploy({stamp, status: 'PENDING_VERIFY', ...})
+      - deploy 完成 → _update_prod_history(stamp, status='OK', service_active_after=..., ...)
+    即使中途 abort (如 grace 探活失败), stamp 仍存在 → 操作者可定位 + 用 prod-rollback 回滚.
+
+    返回: True=找到并更新, False=未找到 (stamp 缺失, 不抛错, 由 caller 决定).
+    """
+    h = _load_prod_history()
+    found = False
+    for e in h['entries']:
+        if e.get('stamp') == stamp:
+            e.update(patch)
+            found = True
+            break
+    if found:
+        _save_prod_history(h)
+    return found
+
+
 def _check_prod_service_active() -> tuple:
     """prod meta-backend.service 是否 active."""
     r = remote_exec(
@@ -1125,6 +1147,80 @@ def _prod_verify_endpoint(path: str) -> dict:
     return {'stage': 'ok', 'path': path, 'http': code, 'time_s': t, 'token_used': tok[:12] + '...'}
 
 
+def _guess_list_endpoint(failed_path: str) -> Optional[str]:
+    """[2026-09-18 P1-4] 从失败端点猜对应的 list 端点.
+
+    启发式:
+      - /api/v1/roles/1/permissions  ->  /api/v1/roles
+      - /api/v2/bo/user/123          ->  /api/v2/bo/user
+      - /api/v2/bo/permission_set/5  ->  /api/v2/bo/permission_set
+
+    返回 None 表示猜不到(让 caller 跳过 hint).
+    """
+    import re
+    # 匹配 /api/<ver>/<...>/<int_id>[/<sub>...]  → 截到第一个 /<数字> 之前.
+    # 用 /api/(?:[^/]+/)*  贪婪匹配 resource 名 (允许 bo/user, permission_set 等多段).
+    m = re.match(r'(/api/[^/]+(?:/[^/]+)*?)/(?=\d)', failed_path)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _hint_empty_table_for_failed_endpoint(failed_path: str, exc: 'ProdVerifyError') -> Optional[str]:
+    """[2026-09-18 P1-4] 端点 5xx/404 时, 自动猜 list 端点判空.
+
+    返回 hint 字符串 (None = 没线索, 不显示 hint).
+    """
+    # 仅在 probe 阶段失败 (不是 login 失败) 才检查 list
+    if exc.stage != 'probe':
+        return None
+    list_path = _guess_list_endpoint(failed_path)
+    if not list_path:
+        return None
+    # 登录 + 查 list 端点
+    try:
+        login = remote_exec(
+            "curl -s -m 8 -X POST -H 'Content-Type: application/json' "
+            '-d \'{"username":"admin","password":"admin123"}\' '
+            f'http://127.0.0.1:{PROD_BACKEND_PORT}/api/v1/auth/login',
+            timeout=20
+        )
+        if login.get('error'):
+            return None
+        try:
+            data = json.loads((login.get('stdout') or '').strip())
+        except Exception:
+            return None
+        tok = (data.get('data') or {}).get('token') or (data.get('data') or {}).get('access_token')
+        if not tok:
+            return None
+        list_resp = remote_exec(
+            f"curl -s -m 8 -H 'Authorization: Bearer {tok}' "
+            f"http://127.0.0.1:{PROD_BACKEND_PORT}{list_path}",
+            timeout=15
+        )
+        if list_resp.get('error'):
+            return None
+        body = (list_resp.get('stdout') or '').strip()
+        try:
+            j = json.loads(body)
+        except Exception:
+            return None
+        if not j.get('success'):
+            return None
+        data_obj = j.get('data') or {}
+        if isinstance(data_obj, dict):
+            total = data_obj.get('total', None)
+            items = data_obj.get('items', None)
+            if total == 0 or items == []:
+                return (f'端点 {failed_path} 失败, 但 {list_path} 列表为空 '
+                        f'(total=0 / items=[]). 大概率是表内无数据 (数据问题), 与本次部署代码无关. '
+                        f'请确认 prod 数据是否被清空/迁移, 或换一个有数据的 id 重试.')
+    except Exception:
+        return None
+    return None
+
+
 # ======================================================================
 # 子命令: prod-preflight
 # ======================================================================
@@ -1266,6 +1362,20 @@ def cmd_prod_deploy(args):
     if rc != 0:
         sys.exit(f'[ABORT] deploy_upload.py upload 失败 (rc={rc}). prod 部署中止, DB backup 留在 {db_backup}.')
 
+    # [2026-09-18 P1-2] upload OK 立即写 history PENDING. 即使后续 restart grace abort,
+    # stamp 仍存在 → 操作者可定位 + 用 prod-rollback 回滚.
+    _record_prod_deploy({
+        'stamp': stamp,
+        'at': datetime.now(TZ_CN).isoformat(timespec='seconds'),
+        'local_head': git_head(),
+        'local_head_short': git_head_short(),
+        'files': list(args.files),
+        'db_backup': db_backup if db_backup_ok else None,
+        'db_manifest': db_manifest if manifest_ok else None,
+        'status': 'PENDING_VERIFY',
+        'approved_deploy': True,
+    })
+
     # Step 6: systemctl restart
     print('\n[6/7] systemctl restart meta-backend.service ...')
     r = _prod_restart()
@@ -1276,17 +1386,40 @@ def cmd_prod_deploy(args):
         print('       stdout: ' + out.replace('\n', '\n       '))
     if err:
         print('       stderr: ' + err.replace('\n', '\n       '))
-    time.sleep(2.0)
 
-    ok, info = _check_prod_service_active()
-    print(f'       service active: {ok} ({info})')
-    if not ok:
-        sys.exit(f'[ABORT] 重启后 service 未 active: {info}. 用 prod-rollback 回滚.')
+    # [2026-09-18 P0-1 grace] restart 后 systemd 拉起 Python + 加载 yaml + 启动 Flask
+    # 通常 2-5s, 但 systemd health-check + Python 启动 + 大量 schema 加载 可能 5-8s.
+    # 本次 prod 部署 实际 restart 成功 (service active=true), 但单次 sleep 2s + 一次性
+    # 探活捕到 false-negative → [ABORT] 误回滚风险. 改为 grace + 多次重试.
+    GRACE_SECONDS = 8
+    PROBE_RETRY_MAX = 3
+    print(f'       grace {GRACE_SECONDS}s + {PROBE_RETRY_MAX} 次重试探活 ...')
+    time.sleep(GRACE_SECONDS)
 
-    ok, info = _check_prod_port_listen(PROD_BACKEND_PORT)
-    print(f'       port {PROD_BACKEND_PORT}: {ok} ({info})')
-    if not ok:
-        sys.exit(f'[ABORT] 重启后 port {PROD_BACKEND_PORT} 未 LISTEN. 用 prod-rollback 回滚.')
+    service_ok = False
+    port_ok = False
+    service_info = ''
+    port_info = ''
+    for attempt in range(1, PROBE_RETRY_MAX + 1):
+        service_ok, service_info = _check_prod_service_active()
+        port_ok, port_info = _check_prod_port_listen(PROD_BACKEND_PORT)
+        print(f'       probe #{attempt}/{PROBE_RETRY_MAX}: service={service_ok} port={port_ok}')
+        if service_ok and port_ok:
+            if attempt > 1:
+                print(f'       [GRACE-OK] 第 {attempt} 次探活成功 (前 {attempt-1} 次为 false-negative)')
+            break
+        if attempt < PROBE_RETRY_MAX:
+            time.sleep(1.0)
+
+    print(f'       service active: {service_ok} ({service_info})')
+    print(f'       port {PROD_BACKEND_PORT}: {port_ok} ({port_info})')
+    if not (service_ok and port_ok):
+        # [2026-09-18 P1-2] abort 前覆盖 history 为 FAIL_RESTART, 保留 stamp + DB backup.
+        _update_prod_history(stamp, status='FAIL_RESTART',
+                             service_active_after=service_ok,
+                             port_listen=port_ok)
+        sys.exit(f'[ABORT] 重启后 {GRACE_SECONDS}s grace + {PROBE_RETRY_MAX} 次探活仍未就绪 '
+                 f'(service={service_ok} port={port_ok}). 用 prod-rollback 回滚.')
 
     # Step 7: introspect + 端点验收
     print('\n[7/7] introspect + 端点验收 ...')
@@ -1323,24 +1456,26 @@ def cmd_prod_deploy(args):
                 print(f'       [FAIL] {p}: stage={e.stage}')
                 if e.raw:
                     print(f'              raw[:200]={e.raw[:200]!r}')
+                # [2026-09-18 P1-2] abort 前覆盖 history 为 FAIL_VERIFY, 保留 stamp.
+                _update_prod_history(stamp, status='FAIL_VERIFY',
+                                     service_active_after=service_ok,
+                                     port_listen=port_ok,
+                                     introspect_ok=introspect_ok,
+                                     endpoints=endpoint_results)
                 # [P0-2] prod-deploy 在 verify 失败时也 abort, 但保留 DB backup (回滚用)
                 sys.exit(f'[ABORT] prod-verify 失败 ({p} stage={e.stage}). '
                          f'已上传到 prod, DB backup 在 {db_backup}, 用 prod-rollback 回滚.')
 
-    # 记历史
-    _record_prod_deploy({
-        'stamp': stamp,
-        'at': datetime.now(TZ_CN).isoformat(timespec='seconds'),
-        'local_head': git_head(),
-        'local_head_short': git_head_short(),
-        'files': list(args.files),
-        'db_backup': db_backup if db_backup_ok else None,
-        'db_manifest': db_manifest if manifest_ok else None,
-        'service_active_after': ok,
-        'introspect_ok': introspect_ok,
-        'endpoints': endpoint_results,
-        'approved_deploy': True,
-    })
+    # [2026-09-18 P1-2] 两步写策略: upload 时已 PENDING, deploy 完成用 update 覆盖 OK.
+    # 即使 introspect 失败也写 OK (代码已上传 + restart 成功, introspect 失败仅 WARNING).
+    final_status = 'OK' if introspect_ok and not endpoint_results else (
+        'INTROSPECT_FAIL' if not introspect_ok else 'OK'
+    )
+    _update_prod_history(stamp, status=final_status,
+                         service_active_after=service_ok,
+                         port_listen=port_ok,
+                         introspect_ok=introspect_ok,
+                         endpoints=endpoint_results)
 
     print()
     if introspect_ok:
@@ -1389,6 +1524,12 @@ def cmd_prod_verify(args):
                     print(f'         raw[:200]={e.raw[:200]!r}')
                 if e.reason:
                     print(f'         reason={e.reason}')
+                # [2026-09-18 P1-4] 端点 500/404 时自动判 list 端点是否空 (本次 prod-verify
+                # 报 /api/v1/roles/1/permissions 500, 但实际是 roles 表空 → 数据问题非代码).
+                # 若对应 list 端点 total=0, 提示"端点存在但表空, 与代码无关".
+                hint = _hint_empty_table_for_failed_endpoint(p, e)
+                if hint:
+                    print(f'         [HINT] {hint}')
         if any_fail:
             sys.exit(f'[ABORT] prod-verify 至少 1 个端点失败. 上方日志见 stage + raw.')
 
