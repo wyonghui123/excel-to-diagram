@@ -1055,7 +1055,9 @@ def _prod_verify_endpoint(path: str) -> dict:
         data = json.loads(out)
     except Exception:
         return {'error': True, 'stage': 'login-parse', 'raw': out[:200]}
+    # [2026-09-18 FIX] prod /api/v1/auth/login 实际返回 data.token (不是 data.access_token)
     tok = (data.get('access_token') or data.get('token') or
+           (data.get('data') or {}).get('token') or
            (data.get('data') or {}).get('access_token'))
     if not tok:
         return {'error': True, 'stage': 'login-no-token', 'raw': out[:200]}
