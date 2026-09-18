@@ -35,6 +35,17 @@ staging_round.py - staging 部署-验证-修复多轮迭代工作台
   python staging_round.py prod-verify --files meta/services/audit_service.py --endpoints /api/v2/bo/audit_log
   python staging_round.py prod-rollback --to <stamp> # dry-run
   python staging_round.py prod-rollback --to <stamp> --confirm   # 实际回滚
+
+--- [2026-09-18 P0-3] PowerShell 调用示例 (注意 nargs='*' + 数组参数):
+  # 必传 APPROVED_DEPLOY=1; --files / --endpoints 用 PowerShell 数组 @('a','b','c')
+  $env:APPROVED_DEPLOY='1'
+  python tools/staging_round.py prod-deploy --files @('meta/api/audit_api.py','meta/api/management_dimension_api.py') --force-allow-stale
+  python tools/staging_round.py prod-verify --endpoints @('/api/v1/enum-types','/api/v2/bo/permission_dimension/meta')
+
+  # 常见陷阱: 不要用引号包整个 list (会被当成单个 arg):
+  #   python ... --files "a.py b.py c.py"   # X 错, 整个字符串是 1 个 arg
+  #   python ... --files @('a.py','b.py')   # O 对, PS 数组展开成多个 arg
+  # 也可避免 PS 引号: 把命令写进 .ps1 脚本用 -File 调用
 """
 import argparse
 import hashlib
@@ -1040,8 +1051,31 @@ def _prod_restart() -> dict:
     return remote_exec(f"systemctl restart {PROD_BACKEND_SERVICE} 2>&1", timeout=90)
 
 
+class ProdVerifyError(RuntimeError):
+    """[2026-09-18 P0-2] _prod_verify_endpoint 失败时 raise, 让 caller abort prod-deploy.
+
+    本次教训: token 路径写错 (`data.access_token` 而非实际 `data.token`),
+    _prod_verify_endpoint 一直在 login-no-token stage 静默 fail, prod-verify 看着像 OK,
+    但实际端点从来没验过. 改为 raise 让 caller 必须处理.
+    """
+    def __init__(self, stage: str, path: str, raw: str = '', reason: dict = None):
+        self.stage = stage
+        self.path = path
+        self.raw = raw
+        self.reason = reason or {}
+        msg = f"[ProdVerifyError] stage={stage} path={path}"
+        if raw:
+            msg += f" raw[:200]={raw[:200]!r}"
+        if reason:
+            msg += f" reason={reason}"
+        super().__init__(msg)
+
+
 def _prod_verify_endpoint(path: str) -> dict:
-    """POST /api/v1/auth/login 取 Bearer + GET path 探活. 真实登录 (prod 无 dev-login)."""
+    """POST /api/v1/auth/login 取 Bearer + GET path 探活. 真实登录 (prod 无 dev-login).
+
+    失败时 raise ProdVerifyError (不要 return dict — caller 容易吞掉 error).
+    """
     login = remote_exec(
         f"curl -s -m 8 -X POST -H 'Content-Type: application/json' "
         f"-d '{{\"username\":\"admin\",\"password\":\"admin123\"}}' "
@@ -1049,18 +1083,29 @@ def _prod_verify_endpoint(path: str) -> dict:
         timeout=20
     )
     if login.get('error'):
-        return {'error': True, 'stage': 'login', 'reason': login}
+        raise ProdVerifyError('login', path, reason=login)
     out = (login.get('stdout') or '').strip()
     try:
         data = json.loads(out)
-    except Exception:
-        return {'error': True, 'stage': 'login-parse', 'raw': out[:200]}
+    except Exception as e:
+        raise ProdVerifyError('login-parse', path, raw=out[:200], reason={'exc': str(e)})
     # [2026-09-18 FIX] prod /api/v1/auth/login 实际返回 data.token (不是 data.access_token)
-    tok = (data.get('access_token') or data.get('token') or
-           (data.get('data') or {}).get('token') or
-           (data.get('data') or {}).get('access_token'))
+    # [2026-09-18 P0-2] 4 路径尝试, 都拿不到时 raise + 打印 body 头帮助诊断
+    candidates = [
+        data.get('access_token'),
+        data.get('token'),
+        (data.get('data') or {}).get('token'),
+        (data.get('data') or {}).get('access_token'),
+    ]
+    tok = next((t for t in candidates if t), None)
     if not tok:
-        return {'error': True, 'stage': 'login-no-token', 'raw': out[:200]}
+        # 打印 token 解析失败的诊断信息 (top-level keys + nested data keys)
+        diag = {
+            'top_keys': list(data.keys()),
+            'data_keys': list((data.get('data') or {}).keys()) if isinstance(data.get('data'), dict) else None,
+            'candidates_all_none': True,
+        }
+        raise ProdVerifyError('login-no-token', path, raw=out[:200], reason=diag)
     probe = remote_exec(
         f"curl -s -o /dev/null -w '%{{http_code}} %{{time_total}}' -m 15 "
         f"-H 'Authorization: Bearer {tok}' "
@@ -1068,7 +1113,7 @@ def _prod_verify_endpoint(path: str) -> dict:
         timeout=25
     )
     if probe.get('error'):
-        return {'error': True, 'stage': 'probe', 'reason': probe}
+        raise ProdVerifyError('probe', path, reason=probe)
     line = (probe.get('stdout') or '').strip().splitlines()[-1] if probe.get('stdout') else ''
     parts = line.split()
     code = parts[0] if parts else '?'
@@ -1204,6 +1249,9 @@ def cmd_prod_deploy(args):
         argv.append('--force-allow-stale')
     if args.stale_days is not None:
         argv += ['--stale-days', str(args.stale_days)]
+    # [2026-09-18 P0-1] prod-deploy 默认传 --retry-on-mismatch=2 (再重试 2 次, 共 3 次尝试)
+    # 治 gateway 偶发 truncated response; 多次重试可覆盖大多数偶发情况
+    argv += ['--retry-on-mismatch', '2']
     argv += list(args.files)
     saved_argv = sys.argv
     try:
@@ -1258,13 +1306,22 @@ def cmd_prod_deploy(args):
 
     endpoint_results = []
     if args.verify_endpoints:
+        # [2026-09-18 P0-2] 捕获 ProdVerifyError, 失败即 sys.exit(1) (prod-deploy abort).
+        # 上传已完成, DB backup 仍在 — 需用 prod-rollback 回滚. 这里只 print 不终止部署
+        # (因为 prod-deploy 的目的是上传+restart, verify 是 nice-to-have smoke test).
         for p in args.verify_endpoints:
-            r = _prod_verify_endpoint(p)
-            endpoint_results.append(r)
-            if r.get('error'):
-                print(f'       [FAIL] {p}: {r}')
-            else:
+            try:
+                r = _prod_verify_endpoint(p)
+                endpoint_results.append(r)
                 print(f'       [OK] {p}: http={r["http"]} time={r["time_s"]}s')
+            except ProdVerifyError as e:
+                endpoint_results.append({'error': True, 'path': p, 'stage': e.stage})
+                print(f'       [FAIL] {p}: stage={e.stage}')
+                if e.raw:
+                    print(f'              raw[:200]={e.raw[:200]!r}')
+                # [P0-2] prod-deploy 在 verify 失败时也 abort, 但保留 DB backup (回滚用)
+                sys.exit(f'[ABORT] prod-verify 失败 ({p} stage={e.stage}). '
+                         f'已上传到 prod, DB backup 在 {db_backup}, 用 prod-rollback 回滚.')
 
     # 记历史
     _record_prod_deploy({
@@ -1316,12 +1373,20 @@ def cmd_prod_verify(args):
 
     if args.endpoints:
         print('\n[endpoints]')
+        any_fail = False
         for p in args.endpoints:
-            r = _prod_verify_endpoint(p)
-            if r.get('error'):
-                print(f'  [FAIL] {p}: {r}')
-            else:
+            try:
+                r = _prod_verify_endpoint(p)
                 print(f'  [OK] {p}: http={r["http"]} time={r["time_s"]}s')
+            except ProdVerifyError as e:
+                any_fail = True
+                print(f'  [FAIL] {p}: stage={e.stage}')
+                if e.raw:
+                    print(f'         raw[:200]={e.raw[:200]!r}')
+                if e.reason:
+                    print(f'         reason={e.reason}')
+        if any_fail:
+            sys.exit(f'[ABORT] prod-verify 至少 1 个端点失败. 上方日志见 stage + raw.')
 
 
 # ======================================================================
@@ -1502,14 +1567,17 @@ def main():
     # ---- prod 子命令 (2.1 2026-09-15: 一站式 prod 部署/验收/状态/回滚) ----
     p_pp = sub.add_parser('prod-preflight', help='[prod] 部署前 4 项 sanity check (port/service/DB/落后 commits)')
     p_pd = sub.add_parser('prod-deploy', help='[prod] 一站式 prod 部署 (preflight+upload+restart+introspect+端点)')
-    p_pd.add_argument('--files', nargs='+', required=True, help='要部署的 .py 路径列表 (相对 repo)')
+    # [2026-09-18 P0-3] nargs='*' 兼容 PowerShell 数组 (nargs='+' 必须至少 1 个,
+    # PowerShell 传入 @() 空数组 + 引号字符串会被当作单个 arg). default=None 改 []
+    # 让代码层做"至少 1 个 .py"的校验, 而不是 argparse 强制 (后者在 PS 下报错不友好).
+    p_pd.add_argument('--files', nargs='*', default=None, help='要部署的 .py 路径列表 (相对 repo, 至少 1 个)')
     p_pd.add_argument('--skip-stale-check', action='store_true', help='跳过 1.1 stale check')
     p_pd.add_argument('--force-allow-stale', action='store_true', help='强制放行 stale 检查')
     p_pd.add_argument('--stale-days', type=int, default=None, help='自定义 stale 阈值 (默认 7)')
-    p_pd.add_argument('--verify-endpoints', nargs='+', default=None, help='部署后真实登录验收的端点 (例: /api/v2/bo/audit_log)')
+    p_pd.add_argument('--verify-endpoints', nargs='*', default=None, help='部署后真实登录验收的端点 (例: /api/v2/bo/audit_log)')
     p_pv = sub.add_parser('prod-verify', help='[prod] 不重启, 仅 introspect + 端点验收')
-    p_pv.add_argument('--files', nargs='+', default=None, help='要 introspect 的 .py 列表')
-    p_pv.add_argument('--endpoints', nargs='+', default=None, help='要验收的端点列表')
+    p_pv.add_argument('--files', nargs='*', default=None, help='要 introspect 的 .py 列表')
+    p_pv.add_argument('--endpoints', nargs='*', default=None, help='要验收的端点列表')
     sub.add_parser('prod-status', help='[prod] 服务状态 + 落后 commits + 部署历史 + 远端 backup')
     p_pr = sub.add_parser('prod-rollback', help='[prod] 用 .bak_<stamp> 回滚到指定历史 deploy')
     p_pr.add_argument('--to', required=True, help='目标 stamp (从 prod-status 历史里挑)')

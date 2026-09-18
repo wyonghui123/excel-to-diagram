@@ -423,8 +423,35 @@ def cmd_upload(args, target: DeployTarget) -> int:
                 )
                 any_fail = True
                 continue
-        results = target.upload(local, resource_type=rt, skip_verify=args.skip_verify)
-        upload_ok = _print_upload_results(results)
+        # [2026-09-18 P0-1] retry on md5 mismatch (治 gateway 偶发 truncated response)
+        # 本次教训: 11:12:56 audit_api.py 远端 size 58203 < 本地 70029, gateway 第一次
+        # 响应截断, md5 校验抓到. 默认重试 2 次 (sleep 1.5s), 简单粗暴但有效.
+        # 语义: --retry-on-mismatch=N 表示 "md5 mismatch 时再重试 N 次" (不含初次),
+        #      N=0 不重试, N=1 共 2 次尝试, N=2 共 3 次尝试.
+        retry_n = max(0, int(getattr(args, "retry_on_mismatch", 1)))
+        max_attempts = retry_n + 1
+        upload_ok = False
+        last_results = []
+        for attempt in range(1, max_attempts + 1):
+            results = target.upload(local, resource_type=rt, skip_verify=args.skip_verify)
+            last_results = results
+            upload_ok = _print_upload_results(results)
+            if upload_ok:
+                if attempt > 1:
+                    print(f"  [RETRY-OK] 第 {attempt}/{max_attempts} 次重试成功")
+                break
+            # 仅在最后尝试前 retry; 不 retry 上传本身 fail (如 4xx/5xx), 只 retry md5 mismatch
+            has_mismatch = any(r.success and r.md5_match is False for r in results)
+            has_hard_fail = any(not r.success for r in results)
+            if has_hard_fail:
+                print(f"  [RETRY-SKIP] 硬错 (非 md5 mismatch), 不重试")
+                break
+            if attempt < max_attempts and has_mismatch:
+                print(f"  [RETRY] md5 mismatch, 第 {attempt}/{max_attempts} 次重试 (sleep 1.5s)")
+                import time as _time_retry
+                _time_retry.sleep(1.5)
+                continue
+            break
         if not upload_ok:
             _ok = False
             _error = "upload result mismatch/fail"
@@ -826,6 +853,12 @@ def main():
                     help="prod 远端 mtime 距今超过 N 天视为 stale (默认 7)")
     sp.add_argument("--force-allow-stale", action="store_true",
                     help="强制放行 stale 警告 (必须显式声明, 推荐先 git log 对照)")
+    # [2026-09-18 P0-1] retry on md5 mismatch — 治 gateway 偶发 truncated response
+    # 本次 prod 教训: 11:12:56 audit_api.py 远端 size 58203 < 本地 70029, gateway 第一次
+    # 上传 truncated body (传输中断), md5 mismatch 抓到了但 abort 整个 deploy.
+    # 默认重试 1 次 (i.e. 最多 2 次), 仅 retry md5 mismatch, 不 retry 硬错 (4xx/5xx).
+    sp.add_argument("--retry-on-mismatch", type=int, default=1,
+                    help="md5 mismatch 时自动重试次数 (默认 1 = 最多 2 次; 0=禁用)")
 
     # verify
     sp = sub.add_parser("verify", help="校验本地 vs 远端 md5")
