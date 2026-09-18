@@ -220,30 +220,21 @@ associations:
         label: 撤销权限
         confirm_message: 确定要撤销此权限吗？
 
-  assigned_groups:
-    name: assigned_groups
-    label: 用户组
-    plural_label: 用户组列表
-    target_type: user_group
-    type: reverse_many_to_many
-    through: group_roles
-    source_key: role_id
-    target_key: group_id
-    description: 分配了此角色的用户组。用户组成员将自动获得此角色权限。
-    display:
-      label: 用户组
-      plural_label: 用户组
-      target_display_field: name
-      target_code_field: code
-      columns:
-        - id: code
-          label: 组编码
-          width: 120
-        - id: name
-          label: 组名称
-          width: 180
-    readonly: true
-    help_text: 此角色已分配给以下用户组。如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作。
+  # [2026-09-18 fix] Spec 19 v089 drop user_group/group_roles 后,
+  # 原 assigned_groups (target_type: user_group, through: group_roles) 失效.
+  # org_members 表没有 role_id, 无法简单 reverse. 注释掉整个关联 block,
+  # 等 spec22+ 设计 role-org 关联时再加回来.
+  #
+  # assigned_orgs:
+  #   name: assigned_orgs
+  #   label: 关联组织
+  #   target_type: org
+  #   type: reverse_many_to_many
+  #   through: org_members
+  #   source_key: user_id  # 没 role_id, 等 spec22+ 中间表
+  #   target_key: org_id
+  #   deprecated: true
+
 
 ui_view_config:
   showChangeHistory: true
