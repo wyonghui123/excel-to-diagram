@@ -407,7 +407,7 @@ def pull_db(remote_db, local_db, backup=None, host=None, port=None, target=None,
     # Step 5: restore 到本地
     print(f'[pull_db] restoring to local SQLite...', flush=True)
     final_path = restore_local_db(sql_text, local_db, backup_path=backup)
-    print(f'[pull_db]   ✓ {final_path} ({os.path.getsize(final_path):,} bytes)', flush=True)
+    print(f'[pull_db]   [OK] {final_path} ({os.path.getsize(final_path):,} bytes)', flush=True)
 
     # Step 6: 清理 staging
     if cleanup:

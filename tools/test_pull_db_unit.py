@@ -376,7 +376,7 @@ def main():
     test_restore_local_db_with_backup()
     test_resolve_target()
     test_pull_db_end_to_end_with_mock()
-    print('\n[unit] ✓ ALL UNIT TESTS PASSED')
+    print('\n[unit] [OK] ALL UNIT TESTS PASSED')
 
 
 if __name__ == '__main__':

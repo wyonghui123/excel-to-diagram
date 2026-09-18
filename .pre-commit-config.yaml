@@ -13,7 +13,7 @@ repos:
         entry: python d:/filework/scan_ai_content.py
         language: system
         pass_filenames: true
-        types_or: [python, javascript, typescript, vue, css, html]
+        types_or: [python, javascript, ts, tsx, vue, css, html]
         stages: [pre-commit]
 
       # 2. AI 内容防护严格模式（包含 MEDIUM）
@@ -34,12 +34,7 @@ repos:
         stages: [manual]
 
       # 4. 编码检查（防止 GBK 文件混入）
-      - id: check-encoding
-        name: Check File Encoding (UTF-8)
-        entry: python d:/filework/check_encoding.py
-        language: system
-        pass_filenames: true
-        stages: [pre-commit]
+      # [removed 2026-09-18] check_encoding.py no longer exists; hook fails every commit
 
       # 5. 规范文件 Emoji 检查
       - id: scan-rules-emoji

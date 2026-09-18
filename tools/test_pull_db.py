@@ -89,7 +89,7 @@ def _verify_local_db(local_db_path, expected_counts):
             actual = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
             if actual != expected:
                 raise PullError(f'{table} count mismatch: got {actual}, expected {expected}')
-            print(f'[test]   ✓ {table}: {actual}')
+            print(f'[test]   [OK] {table}: {actual}')
     finally:
         conn.close()
 
@@ -146,13 +146,13 @@ def main():
         print('\n[test] Step 4: verify local db')
         _verify_local_db(test_db_local, {'small': 100, 'medium': 10000, 'big': 1000})
 
-        print('\n[test] ✓ ALL CHECKS PASSED')
+        print('\n[test] [OK] ALL CHECKS PASSED')
         return 0
     except PullError as e:
-        print(f'\n[test] ✗ PULL ERROR: {e}')
+        print(f'\n[test] [FAIL] PULL ERROR: {e}')
         return 1
     except Exception as e:
-        print(f'\n[test] ✗ UNEXPECTED ERROR: {e}')
+        print(f'\n[test] [FAIL] UNEXPECTED ERROR: {e}')
         import traceback
         traceback.print_exc()
         return 1
