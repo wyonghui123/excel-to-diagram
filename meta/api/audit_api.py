@@ -297,7 +297,10 @@ def get_audit_logs():
 
             # [NEW 2026-07-18] 注入 object_type_label / field_name_label /
             # parent_object_type_label (中英文映射), 解决 test_audit_labels T8 端到端冒烟
-            _enrich_log_labels(log)
+            # [FIX 2026-09-18 audit log 可读性] 传入 _data_source 让 _format_field_value
+            # 能重解析历史 FK 占位串 (如 "permission_set:1195"); 否则列表页
+            # 显示降级串, 详情页 (L361 已传) 显示真实名称, 用户体验不一致
+            _enrich_log_labels(log, _data_source)
 
             logs.append(log)
 
@@ -978,11 +981,21 @@ def _format_field_value(value, data_source=None, object_type=None, field_name=No
     if isinstance(value, str):
         if value == '':
             return ''
+        # [FIX 2026-09-18 audit log 可读性] _record 伪字段翻译
+        #   - 场景: audit_service 写入 field_name='_record', new_value='CREATE'/'UPDATE'/'DELETE'
+        #     表示整条记录的 CRUD 操作 (没有具体字段变更, 例如只改 status)
+        #   - 业务人员看到 'CREATE' 完全不知道这是审计系统术语, 应该显示"创建"
+        #   - 复用 getActionLabel 的 action 翻译表, 保证 action 列和新值列显示一致
+        if field_name == '_record':
+            action_label = get_action_label(value)
+            if action_label and action_label != value:
+                return action_label
         # [R018 P1 BUG-D] 异常 sentinel 降级 (历史噪音 / 解析失败标识)
         if _SENTINEL_PAT.match(value):
             return ''
         # FK 结构化值: {"target_type":"...","target_id":470,"target_display":"采购订单"}
-        if value.startswith('{'):
+        # JSON 列表值: ["domain:read", "audit_log:export", ...] (audit log 关联操作写入的)
+        if value.startswith('{') or value.startswith('['):
             try:
                 import json as _json
                 parsed = _json.loads(value)
@@ -1022,6 +1035,16 @@ def _format_field_value(value, data_source=None, object_type=None, field_name=No
                         return str(tgt_display)
                     if parsed.get('target_key'):
                         return str(parsed['target_key'])
+                # [FIX 2026-09-18 audit log 可读性] JSON 列表压缩显示
+                #   - 场景: audit log 关联操作 (关联权限集/组织成员/角色菜单 等)
+                #     把关联项数组写进 old_value/new_value (TEXT 字段)
+                #   - 例: '["domain:read", "sub_domain:read", ...]' 22 项, 直接显示很乱
+                #   - 翻译为: "domain:read, sub_domain:read, ... 等 22 项"
+                #   - 触发条件: value 是 JSON list, 长度 > 3 时压缩
+                elif isinstance(parsed, list):
+                    compact = _format_json_list(parsed)
+                    if compact:
+                        return compact
             except (ValueError, TypeError):
                 pass
         # 普通 enum 字段值翻译 (单值, 非 FK JSON)
@@ -1029,7 +1052,39 @@ def _format_field_value(value, data_source=None, object_type=None, field_name=No
         enum_label = _get_field_enum_label(object_type, field_name, value)
         if enum_label:
             return enum_label
+        # [FIX 2026-09-18 audit log 可读性] 字符串 enum miss 后的 boolean 翻译
+        # 场景: schema 字段类型是 boolean 但日志写入的是 "0"/"1" (TEXT 字段强转) →
+        # 之前落到 return value, 列表显示 "0"/"1"; 业务人员看不懂
+        bool_label = _get_field_boolean_label(object_type, field_name, value)
+        if bool_label:
+            return bool_label
+        # [FIX 2026-09-18 audit log 可读性] 字符串形式的纯数字 FK ID 翻译
+        #   - 场景: audit_logs.old_value 是 "250" (str), 对应 org.parent_id
+        #   - 之前显示 "250", 现在查 orgs.name 显示 "大财务应用架构"
+        #   - 仅当 schema 中该字段有 semantics.display.target_type 时才解析,
+        #     避免把 "数量 = 5" 的 "5" 翻译成无关表里的 "5"
+        if value.isdigit():
+            fk_label = _get_field_fk_display(object_type, field_name, int(value), data_source)
+            if fk_label:
+                return fk_label
         return value
+
+    # [FIX 2026-09-18 audit log 可读性] 非 str 类型的 boolean/int 处理
+    #   - SQLite TEXT 字段存 "True"/"False" (Python bool 默认 repr) → str 路径走不到
+    #   - 数值型字段可能直接返回 0/1 (如 AuditInterceptor 的 _extract_changes)
+    #   - 仅当 schema 字段类型为 boolean 时才翻译 (避免把 "0 件" 数量翻译成 "否")
+    if isinstance(value, (bool, int)):
+        bool_label = _get_field_boolean_label(object_type, field_name, value)
+        if bool_label:
+            return bool_label
+        # [FIX 2026-09-18 audit log 可读性] 纯数字 FK ID 翻译
+        #   - 场景: org.parent_id 这种 FK, audit_logs.old_value 直接是 "250" (ID)
+        #   - schema 字段 semantics.display.target_type=org 指定了 FK 目标
+        #   - 之前显示原始 "250", 业务看不出是谁; 现在查 orgs.name 显示 "大财务应用架构"
+        #   - data_source=None 时降级, 不影响 detail 接口的更高优先级 (FK JSON) 路径
+        fk_label = _get_field_fk_display(object_type, field_name, value, data_source)
+        if fk_label:
+            return fk_label
     return str(value)
 
 
@@ -1067,6 +1122,178 @@ def _get_field_enum_label(object_type, field_name, value) -> str:
         return ''
     except Exception:
         return ''
+
+
+def _get_field_boolean_label(object_type, field_name, value) -> str:
+    """[FIX 2026-09-18 audit log 可读性] 把 boolean 字段值翻译成业务中文
+
+    业务背景: yaml schema 中 type: boolean 的字段 (如 is_active/is_default/is_archived/
+    is_hidden/is_system/required_any_permission/show_in_sidebar/auto_generated 等)
+    写入 audit_logs.old_value/new_value (TEXT 类型) 时, Python 默认 repr 会输出
+    "True"/"False", 数值也可能存 "0"/"1"/"0"/1。这些原始值业务人员完全看不懂。
+
+    翻译规则:
+      - True / 1 / "1" / "true" / "True" → "是"
+      - False / 0 / "0" / "false" / "False" → "否"
+
+    重要约束:
+      - 必须先查 yaml schema, 仅当字段 type == 'boolean' 才翻译
+      - 防止误把 "数量 = 0 件" 的 int 0 翻译成 "否"
+      - 找不到 schema 字段 (object_type 未知 / 字段不在 schema 中) 返回空串
+      - 找不到返回空串是设计要求: 调用方降级走 str(value) 原值, 不影响非 boolean 字段
+
+    Args:
+        object_type: 对象类型 (如 'menu', 'menu_permission', 'enum_value')
+        field_name: 字段名 (如 'is_active', 'is_default')
+        value: 字段值 (True/False/0/1/"0"/"1"/"True"/"False"/"true"/"false")
+
+    Returns:
+        str: "是" / "否" / "" (空串表示非 boolean 字段, 调用方降级)
+    """
+    if not object_type or not field_name or value is None:
+        return ''
+    # 仅翻译 schema 中明确为 boolean 的字段, 防止误伤数量/计数等 int 字段
+    try:
+        from meta.core.yaml_loader import registry as _yaml_registry
+        from meta.core.models import FieldType
+        meta = _yaml_registry.get(object_type)
+        if not meta:
+            return ''
+        field = next((f for f in meta.fields if f.id == field_name), None)
+        if not field:
+            return ''
+        # Field 模型用 field_type 属性 (FieldType 枚举); 也兼容字符串 'boolean'
+        field_type = getattr(field, 'field_type', None) or getattr(field, 'type', None)
+        is_boolean = field_type == FieldType.BOOLEAN or str(field_type).lower() == 'boolean'
+        if not is_boolean:
+            return ''
+        # 已确认是 boolean 字段, 把各种 Python/字符串形式归一为 True/False
+        if value in (True, 1, '1', 'true', 'True', 'TRUE'):
+            return '是'
+        if value in (False, 0, '0', 'false', 'False', 'FALSE'):
+            return '否'
+        return ''  # 异常类型不强行翻译, 降级给调用方
+    except Exception:
+        return ''
+
+
+def _get_field_fk_display(object_type, field_name, value, data_source=None) -> str:
+    """[FIX 2026-09-18 audit log 可读性] 把纯数字 FK ID 翻译成业务显示名
+
+    业务背景: 一些 FK 字段 (如 org.parent_id) 在 audit_logs.old_value/new_value 中
+    直接存原始 ID 字符串/数字 (如 "250"), 而非 FK 结构化 JSON。schema 中通过
+    field.semantics.display.target_type 指定 FK 目标对象类型 (如 org),
+    通过 field.semantics.display.display_field 指定显示字段 (如 name)。
+
+    翻译规则:
+      - 必须是 yaml schema 中的字段
+      - 字段必须有 semantics.display.target_type (FK 目标)
+      - data_source 不为 None (无连接时降级)
+      - ID > 0 时查 target 表的 display_field 列, 返回 "名称 (id)" 或仅 "名称"
+      - ID 为 0/负数时返回空串 (降级给调用方显示原值, 通常是 "(空)")
+
+    设计要点:
+      - 与 _get_field_boolean_label 同样采用严格 schema 约束, 避免误把任意 int 字段翻译
+      - 找不到 schema 字段 → 空串降级
+      - 字段不是 FK → 空串降级
+      - data_source=None → 空串降级 (与 detail 接口行为一致, list 接口也已传)
+      - 解析失败 → 空串降级
+
+    Args:
+        object_type: 对象类型 (如 'org')
+        field_name: 字段名 (如 'parent_id')
+        value: FK ID 值 (int 或 str)
+        data_source: 数据库连接 (必需)
+
+    Returns:
+        str: 翻译后的显示名, 失败返回空串
+    """
+    if not object_type or not field_name or data_source is None:
+        return ''
+    # value 必须是正整数 ID
+    try:
+        int_value = int(value) if not isinstance(value, bool) else 0
+    except (ValueError, TypeError):
+        return ''
+    if int_value <= 0:
+        return ''
+    try:
+        from meta.core.yaml_loader import registry as _yaml_registry
+        meta = _yaml_registry.get(object_type)
+        if not meta:
+            return ''
+        field = next((f for f in meta.fields if f.id == field_name), None)
+        if not field:
+            return ''
+        # [FIX 2026-09-18 多策略识别 FK 目标] 尝试 3 种 yaml 路径, 按优先级:
+        #   1. field.value_help.source.target_bo (org.parent_id: target_bo=org)
+        #      这是最标准的 FK 目标声明, yaml loader 已加载到 MetaField.value_help
+        #   2. field.semantics.parent_key=True (自引用父子结构, 如 org.parent_id)
+        #      此时 FK 目标就是 object_type 自身
+        #   3. field.semantics.custom.target_type (历史 custom 字典, 兜底)
+        target_type = None
+        vh = getattr(field, 'value_help', None)
+        if vh is not None:
+            source = getattr(vh, 'source', None)
+            if source is not None:
+                target_type = getattr(source, 'target_bo', None)
+        if not target_type:
+            semantics = getattr(field, 'semantics', None)
+            if semantics and getattr(semantics, 'parent_key', False):
+                # 自引用父子结构 (parent_key=True), 目标就是当前 object_type
+                target_type = object_type
+        if not target_type:
+            semantics = getattr(field, 'semantics', None)
+            if semantics:
+                custom = getattr(semantics, 'custom', None) or {}
+                target_type = custom.get('target_type')
+        if not target_type:
+            return ''
+        # 用 model_utils.get_object_display (与 FK JSON 解析共用)
+        from meta.core.model_utils import get_object_display
+        resolved = get_object_display(target_type, int_value, data_source)
+        if not resolved:
+            return ''
+        # 避免降级串回填 (如 "org:250")
+        fallback_pat = __import__('re').compile(r'^[a-z_]+:\d+$')
+        if fallback_pat.match(str(resolved)):
+            return ''
+        return str(resolved)
+    except Exception:
+        return ''
+
+
+def _format_json_list(parsed_list, max_show=3) -> str:
+    """[FIX 2026-09-18 audit log 可读性] 把 JSON 列表压缩为业务可读字符串
+
+    业务背景: audit log 关联操作 (角色权限集/组织成员/角色菜单 等) 把关联项
+    数组写进 old_value/new_value, 列表可能很长 (10-30+ 项)。直接展示原始 JSON
+    在 audit log 列表里非常难读, 业务人员看不出"改了什么"。
+
+    翻译规则:
+      - 长度 <= max_show: 直接用 ', ' 连接所有项
+      - 长度 > max_show: "前 N 项, ... 等 X 项"
+
+    Examples:
+        ["a", "b"]                       -> "a, b"
+        ["a", "b", "c"]                  -> "a, b, c"
+        ["a", "b", "c", "d", "e"]        -> "a, b, c ... 等 5 项"
+
+    Args:
+        parsed_list: 已经 JSON.loads 的 list (list of str/int)
+        max_show: 最多显示的前 N 项 (默认 3)
+
+    Returns:
+        str: 业务可读的压缩字符串
+    """
+    if not isinstance(parsed_list, list) or len(parsed_list) == 0:
+        return ''
+    items = [str(x) for x in parsed_list]
+    total = len(items)
+    if total <= max_show:
+        return ', '.join(items)
+    head = ', '.join(items[:max_show])
+    return f'{head} ... 等 {total} 项'
 
 FIELD_NAME_LABELS = {
     # 通用字段

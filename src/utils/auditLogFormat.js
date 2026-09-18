@@ -217,6 +217,21 @@ export function getObjectTypeLabel(type, log) {
 }
 
 /**
+ * 判断字段名是否符合 boolean 字段的常见命名模式
+ *
+ * [FIX 2026-09-18] 用于 getFieldValueDisplay 中 "0/1/true/false" → "否/是" 的翻译判断
+ *   - 避免误把业务数值 0 (如数量=0) 显示成 "否"
+ *   - 匹配模式: is_* / *_active / *_enabled / *_default / *_required 等
+ *
+ * @param {string} fieldName - 字段名
+ * @returns {boolean} 是否符合 boolean 字段常见命名
+ */
+function isLikelyBooleanField(fieldName) {
+  if (!fieldName) return false
+  return /^(is_|_is$|.*_(active|enabled|default|required|archived|hidden|current|editable|visible))$/.test(fieldName)
+}
+
+/**
  * 内部技术字段集合 (业务视图应该隐藏, 不在列表/详情展示)
  *
  * 包括:
@@ -442,11 +457,54 @@ export function getFieldValueDisplay(value, fieldName, log) {
 
   const str = String(value)
 
-  // 优先级 2: FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+  // 优先级 2.5: [FIX 2026-09-18] 布尔值翻译 (后端未注入 *_display 时的 fallback)
+  //   场景: 后端 _format_field_value 已处理 boolean 字段, 但仍可能有以下 fallback:
+  //   - 历史日志写入时不是 boolean 类型 (string "0"/"1"/"true"/"false")
+  //   - 字段名属于 yaml schema 中 type:boolean 但前端无法查 schema 时
+  //   - 业务人员视角: "0"→"否", "1"→"是", "True"→"是", "False"→"否"
+  //   仅当字段名符合 boolean 字段常见模式 (is_* / *_active / *_enabled / *_default / *_required)
+  //   才翻译, 避免误把 "数量 0" 显示成 "否"
+  if (isLikelyBooleanField(fieldName)) {
+    if (str === '1' || str === 'true' || str === 'True' || str === 'TRUE') {
+      return '是'
+    }
+    if (str === '0' || str === 'false' || str === 'False' || str === 'FALSE') {
+      return '否'
+    }
+    if (typeof value === 'boolean') {
+      return value ? '是' : '否'
+    }
+    if (typeof value === 'number' && (value === 0 || value === 1)) {
+      return value === 1 ? '是' : '否'
+    }
+  }
+
+  // 优先级 2.7: [FIX 2026-09-18] _record 伪字段翻译 (前端 fallback)
+  //   场景: audit log 写入 field_name='_record', value='CREATE'/'UPDATE'/'DELETE'
+  //   业务人员看到 CREATE 不直观, 翻译为 "创建"/"更新"/"删除"
+  //   后端 _format_field_value 已处理, 这里只是兜底 (后端注入失败时)
+  if (fieldName === '_record') {
+    const actionLabel = getActionLabel(str)
+    if (actionLabel && actionLabel !== str) {
+      return actionLabel
+    }
+  }
+
+  // 优先级 3: FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
   //    → 显示 target_display
-  if (str.startsWith('{')) {
+  //    JSON 列表值: ["domain:read", "audit_log:export", ...] → 压缩为前 3 项 + 等 X 项
+  if (str.startsWith('{') || str.startsWith('[')) {
     try {
       const parsed = JSON.parse(str)
+      if (Array.isArray(parsed)) {
+        // [FIX 2026-09-18] JSON 列表压缩显示
+        //   后端 _format_field_value 已处理, 这里作为前端 fallback
+        const total = parsed.length
+        if (total === 0) return '(空)'
+        const items = parsed.map((x) => String(x))
+        if (total <= 3) return items.join(', ')
+        return `${items.slice(0, 3).join(', ')} ... 等 ${total} 项`
+      }
       if (parsed.target_display) return parsed.target_display
       if (parsed.target_key) return parsed.target_key
       // [FIX 2026-09-06 可读性] AuditInterceptor 单字段包装格式 {"value": X}:
