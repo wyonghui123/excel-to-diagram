@@ -21,13 +21,6 @@
       </el-tabs>
 
       <template v-if="!showBizkeyContent">
-      <!-- [Spec 20 v5 L2 对偶 hint] 实例锚定解释 — 与业务键 hint 镜像同构 (对比学习建立心智):
-           文案可经 source.instance_hint 覆盖, 缺省为父对象中立通用句式 -->
-      <div v-if="source.type === 'bo'" class="vh-bizkey-hint vh-instance-hint">
-        <el-icon><InfoFilled /></el-icon>
-        <span>{{ instanceHintText }}</span>
-      </div>
-
       <!-- Recent items section, excluded selected -->
       <div v-if="filteredRecentItems.length > 0 && !dialogSearchQuery" class="recent-section">
         <div class="recent-header">
@@ -923,12 +916,6 @@ const bizkeyHint = computed(
   () => bizkeyConfig.value.hint || '业务键锚定：同一编码可对应多个实例，新增实例自动纳入规则。'
 )
 
-// [Spec 20 v5 L2 对偶 hint] 实例锚定解释 — 与业务键 hint 镜像同构:
-//   同一句式模板下「固定指向 vs 自动覆盖」对照, 用户读完两条即完成心智建模。
-//   可经 source.instance_hint 覆盖; 缺省父对象中立, 不绑定任何维度叙事。
-const instanceHintText = computed(
-  () => source.value.instance_hint || '实例锚定：仅匹配当前所选实例，新增不自动纳入。'
-)
 const bizkeyColumns = computed(() => {
   const cols = bizkeyConfig.value.columns
   if (Array.isArray(cols) && cols.length > 0) return cols
@@ -1372,10 +1359,6 @@ function handleConfirm() {
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-lighter);
   border-radius: 4px;
-}
-/* [Spec 20 v5 L2] 实例锚定对偶 hint: 复用 bizkey hint 样式, 补与后续内容区的间距 */
-.vh-instance-hint {
-  margin-bottom: 8px;
 }
 .vh-bizkey-hint .el-icon {
   color: var(--el-color-primary);

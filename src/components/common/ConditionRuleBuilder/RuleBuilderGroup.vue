@@ -167,24 +167,25 @@ const emit = defineEmits(['update:node', 'change', 'removeGroup'])
 // [v30 fix8] label 简化: 仅显示字段名 (不附加类型), 避免长字段名 + 类型被截断
 //   - 完整信息 (字段名 + 类型) 通过 el-option slot + title tooltip 展示
 // [Spec 20 v5 L1 字段即模式] anchor_semantics 驱动语义分组:
-//   分组标题即教育 — 用户选择前即可感知「ID 与编码平级表象下的语义分级」(快照 vs 动态)。
+//   分组标题即教育 — 用户选择前即可感知「业务键 vs 属性」分级。
 //   判定与后端 condition_permission_service.get_resource_field_metadata 同源;
 //   旧后端 (无 anchor_semantics 键) 时由 is_business_key/is_foreign_key 兜底, 向后兼容。
 //   零字段名/维度硬编码 — 分组完全由语义信号派生。
+// [2026-09-18 PM 反馈] 移除「实例锚定 · 快照」分组：
+//   原 instance 字段（FK id / 技术主键 id）fallback 到 attr（属性条件），
+//   避免再提示「仅匹配当前所选实例，新增不自动纳入」类锚定概念。
 const SEMANTICS_GROUPS = [
   { key: 'bizkey', label: '业务键锚定 · 动态' },
-  { key: 'instance', label: '实例锚定 · 快照' },
   { key: 'attr', label: '属性条件' },
 ]
 
 function fieldSemanticsOf(f) {
-  if (f.anchor_semantics) return f.anchor_semantics
+  if (f.anchor_semantics && f.anchor_semantics !== 'instance') return f.anchor_semantics
   // 旧后端兜底: 与后端 anchor_semantics 判定逻辑同源
   if (f.is_business_key && f.is_foreign_key) return 'bizkey'  // FK code (v5 白名单)
-  if (f.is_foreign_key) return 'instance'                     // FK id: 选目标对象实例
-  if (f.db_column === 'id') return 'instance'                 // 技术主键: 选资源自身实例
   if (f.is_business_key) return 'bizkey'                      // self-ref 业务键
-  return null                                                 // 普通属性
+  // [2026-09-18] instance (FK id / 技术主键) → 落到 attr, 不再独立分组
+  return 'attr'
 }
 
 const fieldOptions = computed(() => {
