@@ -348,9 +348,13 @@ def cmd_pack(args):
         print('[1/4] --reuse-dist: 远端 dist 已对齐 HEAD, 跳过 npm run build, 复用本地 dist/')
     else:
         print(f'[1/4] build (含 chunk 循环门禁) ...')
-        # [v1.1] Windows trae-sandbox 不传 PATH, npm 直接找不到. 用 npm.cmd
-        npm_cmd = 'npm.cmd' if sys.platform == 'win32' else 'npm'
-        r = subprocess.run([npm_cmd, 'run', 'build'], cwd=REPO, shell=True)
+        # [2026-09-18 P1] Windows: subprocess.run([npm.cmd,'run','build'], shell=True) 经 cmd.exe 中转
+        # 会触发 0xC0000409 STACK_BUFFER_OVERRUN, 改用 cmd.exe /c 显式字符串. 等价但避免 list+shell 引号陷阱.
+        if sys.platform == 'win32':
+            build_cmd = 'npm.cmd run build'
+        else:
+            build_cmd = 'npm run build'
+        r = subprocess.run(build_cmd, cwd=REPO, shell=True)
         if r.returncode != 0:
             sys.exit('[ABORT] npm run build 失败. 见上方输出.')
 
