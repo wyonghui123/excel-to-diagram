@@ -88,11 +88,6 @@
       <el-checkbox v-model="onlyAssigned" class="ram-only-assigned">
         仅显示已分配
       </el-checkbox>
-      <!-- [Spec 21 FR-004 2026-09-12] 未配置数据范围筛选
-           勾选 → 仅展示无数据范围条件的行，便于审计"默认全实例"的资源 -->
-      <el-checkbox v-model="showUnscopedRisk" class="ram-show-unscoped-risk" data-test="ram-show-unscoped-risk">
-        仅显示未配置数据范围
-      </el-checkbox>
       <span class="ram-spacer"></span>
       <AppButton size="sm" variant="secondary" :disabled="props.readonly" @click="selectAllFiltered">
         全选当前筛选
@@ -132,35 +127,6 @@
             <span class="ram-variant-row-mark">—</span>
           </div>
           <div v-else class="ram-resource-cell" :class="{ 'ram-resource-cell--tree': treeMode }">
-            <!-- [Spec 21 FR-002 2026-09-12] 敏感动作未配范围警示（强警示·橙）
-                 触发：未配置数据范围 + 至少 1 个敏感动作已勾选
-                 优先级高于 unscoped-warn（条件更窄、警示更深） -->
-            <div v-if="isSensitiveScopeGap(row)" class="ram-sensitive-warn" data-test="ram-sensitive-warn">
-              <el-tooltip
-                :content="sensitiveScopeGapReason(row)"
-                placement="top"
-                :teleported="true"
-              >
-                <span class="ram-sensitive-warn-icon">
-                  <AppIcon name="warning" :size="11" />
-                </span>
-              </el-tooltip>
-            </div>
-            <!-- [Spec 21 FR-004 2026-09-12] 未配置数据范围弱警示（蓝）
-                 触发：未配置范围 + 任意动作已勾（不限敏感动作）
-                 注意：与 ram-sensitive-warn 并存——敏感动作出现时同时显示两层，
-                       但只有敏感动作出现时才显示强警示；其余动作只有弱警示 -->
-            <div v-else-if="isUnscopedRisk(row) && hasAnyActionGranted(row)" class="ram-unscoped-warn" data-test="ram-unscoped-warn">
-              <el-tooltip
-                :content="'该资源类型未配置数据范围，勾选动作后默认对所有实例生效。'"
-                placement="top"
-                :teleported="true"
-              >
-                <span class="ram-unscoped-warn-icon">
-                  <AppIcon name="alert-circle" :size="11" />
-                </span>
-              </el-tooltip>
-            </div>
             <!-- [2026-09-06 PM 反馈] 长资源名不用省略号截断信息：溢出时 hover tooltip
                  显示全文（未溢出不弹）。溢出集合由渲染后测量预计算（measureLabelOverflow），
                  避免依赖 hover 时机。 -->
@@ -693,56 +659,6 @@ function instanceScopeTag(action) {
   return INSTANCE_SCOPE_LABEL[scope] || INSTANCE_SCOPE_LABEL.instance
 }
 
-/** [Spec 21 FR-002 2026-09-12] 敏感动作清单
- *  这些动作未配数据范围时风险特别高：
- *    - delete: 直接删数据（不可逆）
- *    - export/import: 数据出域/入域（合规风险）
- *    - revoke/dissociate: 撤销授权/解绑关联（提权风险）
- *  Spec 21 §3.2 / §4.2 — 行级警示语义来源 */
-const SENSITIVE_ACTIONS = ['delete', 'export', 'import', 'revoke', 'dissociate']
-
-/** [Spec 21 FR-002 2026-09-12] 敏感动作未配范围判定
- *  触发条件：浏览态不警示 + 数据范围已配置不警示 + 至少一个敏感动作已勾选
- *  注意：isSupported 才计（不支持的动作即使有 cell.granted=true 也不警示，
- *        因为它们不会真正生效）*/
-function isSensitiveScopeGap(row) {
-  if (props.readonly) return false
-  if (rowScopeMode(row) === 'configured') return false
-  return SENSITIVE_ACTIONS.some((a) =>
-    isSupported(row.resource_type, a) && cellOf(row, a).granted
-  )
-}
-
-/** [Spec 21 FR-002 2026-09-12] 警示 tooltip 文案 */
-function sensitiveScopeGapReason(row) {
-  const granted = SENSITIVE_ACTIONS.filter((a) =>
-    isSupported(row.resource_type, a) && cellOf(row, a).granted
-  )
-  const names = granted.map(actionLabel).join('、')
-  return `已对该资源类型开放【${names}】权，\n` +
-         `但「数据范围」未配置 → 当前默认 = 全实例。\n` +
-         `建议：点击「配置条件」限定实例集合，避免误操作/合规风险。`
-}
-
-/** [Spec 21 FR-004 2026-09-12] 行级已勾任何动作判定（不限敏感动作）
- *  用途：未配置范围 + 任意动作已勾时，显示【弱警示】[弱警示] ram-unscoped-warn
- *  与 ram-sensitive-warn 区别：
- *    - unscoped-warn: 全动作适用，警示色（蓝），条件更宽
- *    - sensitive-warn: 仅 5 类敏感动作，警示色（橙），条件更窄 + 警示更深 */
-function hasAnyActionGranted(row) {
-  return rowActions(row).some((a) =>
-    isSupported(row.resource_type, a) && cellOf(row, a).granted
-  )
-}
-
-/** [Spec 21 FR-004 2026-09-12] 未配置数据范围判定（仅浏览态排除）
- *  数据范围 cell 即便写了 dimension_values 也不算"已配置"——v17 后只有
-  Rule Builder 输出的 __expression 才算（参见 rowScopeMode 实现）*/
-function isUnscopedRisk(row) {
-  if (props.readonly) return false
-  return rowScopeMode(row) !== 'configured'
-}
-
 /** 动作中文兜底（优先 props.actionLabels） */
 const DEFAULT_ACTION_LABELS = {
   create: '创建',
@@ -989,9 +905,7 @@ const actionOptionsGrouped = computed(() => {
     .map(g => ({ label: g.label, options: groups[g.type] }))
 })
 
-// [Spec 21 FR-004 2026-09-12] 仅显示未配置数据范围（开关）
-const showUnscopedRisk = ref(false)
-
+// 资源行筛选：按已选资源类型 + 仅显示已分配
 const filteredRows = computed(() => {
   let list = rows.value
   if (resourceFilters.value.length > 0) {
@@ -1002,12 +916,6 @@ const filteredRows = computed(() => {
     list = list.filter((r) =>
       (props.matrix?.columns || []).some((a) => r.cells[a]?.granted),
     )
-  }
-  // [Spec 21 FR-004 2026-09-12] 未配置范围筛选：保留 rowScopeMode != 'configured' 的行
-  //  使用 rowScopeMode 而非 isUnscopedRisk：后者还会排除 readonly，但筛选要
-  //  按数据状态独立判断（浏览态也允许筛选看哪些资源没配范围）
-  if (showUnscopedRisk.value) {
-    list = list.filter((r) => rowScopeMode(r) !== 'configured')
   }
   return list
 })
@@ -1819,50 +1727,6 @@ async function clearRowCondition(row) {
   align-items: flex-start;
   gap: 2px;
   line-height: 1.4;
-}
-/* ==========================================================================
- * [Spec 21 FR-002/FR-004 2026-09-12] 资源列警示样式
- *   两种警示视觉对比（避免误标）：
- *     - ram-sensitive-warn: 强警示（橙/警告色），仅 5 类敏感动作触发
- *     - ram-unscoped-warn: 弱警示（蓝/品牌色），未配范围 + 任意动作触发
- *   设计规范：行内小图标 + tooltip 解释，避免占用列宽；
- *   icon 走 AppIcon (name=warning / alert-circle) 保证字形统一
- * ========================================================================== */
-.ram-sensitive-warn {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: 2px;
-}
-.ram-sensitive-warn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1px 4px;
-  background: var(--color-warning-bg, #fdf6ec);
-  color: var(--color-warning, #e6a23c);
-  border: 1px solid var(--color-warning, #e6a23c);
-  border-radius: 3px;
-  font-size: 10px;
-  line-height: 1;
-  cursor: help;
-}
-.ram-unscoped-warn {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: 2px;
-}
-.ram-unscoped-warn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1px 4px;
-  background: rgba(64, 158, 255, 0.08);
-  color: var(--color-brand, #409eff);
-  border: 1px solid rgba(64, 158, 255, 0.4);
-  border-radius: 3px;
-  font-size: 10px;
-  line-height: 1;
-  cursor: help;
 }
 
 /* [FR-014 2026-09-06] 树模式：展开箭头与资源标签同行。
