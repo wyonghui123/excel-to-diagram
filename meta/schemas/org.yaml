@@ -19,8 +19,7 @@ semantics:
   aliases:
     - 组织
     - Org
-    - 用户组  # 历史 alias
-    - user_group
+    - 用户组  # 历史 alias (中文保留, 英文移除以避免与 v089 DROP 后的 user_group 混淆)
 
 deletion_policy:
   # [FIX 2026-06-12 v2] 强依赖检查: 有成员/权限集/数据权限/子组时禁止删除,

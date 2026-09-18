@@ -641,34 +641,6 @@
       ],
       "table": "users"
     },
-    "user_group": {
-      "hash": "94ead932db4e548e80a65163cae3d323",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "name",
-        "code",
-        "parent_id",
-        "manager_id",
-        "description",
-        "created_at",
-        "updated_at",
-        "member_count"
-      ],
-      "table": "user_groups"
-    },
-    "user_group_member": {
-      "hash": "e7c4931fd98aa9217b9b56ea7ceb6fe3",
-      "fields": [
-        "id",
-        "user_id",
-        "group_id",
-        "is_manager",
-        "joined_at"
-      ],
-      "table": "user_group_members"
-    },
     "user_role": {
       "hash": "c242c6db247ee37d5aa091c264bd5f6a",
       "fields": [

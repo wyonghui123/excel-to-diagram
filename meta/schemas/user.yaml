@@ -414,14 +414,15 @@ relations: []
 
 associations:
   - name: groups
-    target_type: user_group
+    # [Spec 19 v072 rename] user_group → org
+    target_type: org
     type: many_to_many
-    through: user_group_members
+    through: org_members
     source_key: user_id
-    target_key: group_id
+    target_key: org_id
     display:
-      label: 所属用户组
-      plural_label: 用户组列表
+      label: 所属组织
+      plural_label: 组织列表
       target_display_field: name
       target_code_field: code
       columns:
@@ -700,7 +701,8 @@ actions:
 deletion_policy:
   restrict_on:
   cascade_delete:
-    - user_group_members
+    # [Spec 19 v072 rename] user_group_members → org_members
+    - org_members
     - change_subscriptions
     - filter_variants
     - data_permissions

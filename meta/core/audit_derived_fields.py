@@ -104,7 +104,8 @@ def _object_type_to_table_name(object_type: str) -> str:
         'enum_value': 'enum_values',
         'user': 'users',
         'role': 'roles',
-        'user_group': 'user_groups',
+        # [Spec 19 v072 rename] user_group → org
+        'user_group': 'orgs',
         'product': 'products',
         'version': 'versions',
         'domain': 'domains',

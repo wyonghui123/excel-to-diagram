@@ -13,13 +13,16 @@ _EXTRA_TABLES = set()
 # 旧表名保留在 LEGACY_TABLES 中仅用于历史兼容, 不再是默认安全白名单
 _SYSTEM_TABLES = frozenset({
     'users', 'roles', 'permissions', 'role_permissions',
-    'user_group_members', 'group_roles', 'annotations', 'audit_logs',
+    # [Spec 19 2026-09-15] user_group_members / group_roles / user_groups 已 DROP (v089)
+    # 由 org_members / org_permission_sets / orgs 替代
+    'annotations', 'audit_logs',
     'change_events', 'change_subscriptions', 'filter_variants',
     'menu', 'menu_permissions', 'role_menu',
     'permission_rules', 'permission_bundles',
     'enum_values', 'enum_types',
     'hierarchies', 'hierarchy_scopes',
-    'data_permissions', 'user_groups',
+    'data_permissions',
+    'orgs', 'org_members', 'org_permission_sets',
     'employee_data_scopes', 'role_dimension_scopes',
     'sqlite_master', 'sqlite_sequence',
 })

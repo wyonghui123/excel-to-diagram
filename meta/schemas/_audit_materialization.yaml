@@ -82,18 +82,13 @@ audit_materialization:
     object_type: permission_bundle
     notes: 权限包变更时更新
 
-  # roles / user_groups 走 business_trigger（V007.51 不再覆盖）
+  # roles 走 business_trigger（V007.51 不再覆盖）
+  # [Spec 19 2026-09-15] user_groups 已 DROP (v089), 配置移除避免启动 SQL error
   - name: roles
     strategy: business_trigger
     object_type: role
     trigger: trg_roles_updated_at
     notes: 历史触发器，业务表 UPDATE 时自动写
-
-  - name: user_groups
-    strategy: business_trigger
-    object_type: user_group
-    trigger: trg_user_groups_updated_at
-    notes: 历史触发器
 
   # ─── 策略: audit_derived ─────────────────────────────────
   # 无物化列，靠 v_audit_all 实时聚合 MAX(created_at) WHERE action='UPDATE'
@@ -157,11 +152,6 @@ audit_materialization:
   - name: permission_rules
     strategy: audit_derived
     object_type: permission_rule
-    notes: 从 v_audit_all 聚合
-
-  - name: user_group_members
-    strategy: audit_derived
-    object_type: user_group_member
     notes: 从 v_audit_all 聚合
 
   - name: orgs

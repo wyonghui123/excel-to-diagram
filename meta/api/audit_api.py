@@ -60,7 +60,8 @@ BUSINESS_KEY_METADATA = {
         'primary': 'name',
         'secondary': 'code',
         'format': '{primary}({secondary})',
-        'table': 'user_groups',
+        # [Spec 19 v072] user_groups → orgs
+        'table': 'orgs',
         'fields': ['name', 'code']
     },
     'product': {
@@ -874,6 +875,7 @@ OBJECT_TYPE_LABELS = {
     "role_permissions": "角色功能权限",
     "role_data_permission": "角色数据权限",
     "role_v2_menu_permissions": "角色菜单权限(v2)",
+    # [Spec 19 v089 DROP] user_group_members / group_roles 已废弃, 保留翻译以兼容历史审计日志
     "user_group_members": "用户组成员",
     "group_roles": "用户组角色",
     # 系统

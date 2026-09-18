@@ -190,7 +190,8 @@ def set_group_members(group_id):
 
         with _data_source.transaction():
             cursor = _data_source.execute(
-                "SELECT user_id FROM user_group_members WHERE group_id = ?",
+                # [Spec 19 v072 rename] user_group_members → org_members
+                "SELECT user_id FROM org_members WHERE org_id = ?",
                 [group_id]
             )
             rows = cursor.fetchall()
@@ -363,7 +364,8 @@ def set_group_roles(group_id):
 
         with _data_source.transaction():
             cursor = _data_source.execute(
-                "SELECT role_id FROM group_roles WHERE group_id = ?",
+                # [Spec 19 v072 rename] group_roles → org_permission_sets
+                "SELECT permission_set_id FROM org_permission_sets WHERE org_id = ?",
                 [group_id]
             )
             rows = cursor.fetchall()
@@ -494,7 +496,7 @@ def migrate_group_permissions():
 def get_user_group_logs(group_id):
     """获取指定用户组的操作日志"""
     try:
-        cursor = _data_source.execute("SELECT id, name FROM user_groups WHERE id = ?", [group_id])
+        cursor = _data_source.execute("SELECT id, name FROM orgs WHERE id = ?", [group_id])
         group = cursor.fetchone()
         if not group:
             return jsonify({'success': False, 'message': '用户组不存在'}), 404

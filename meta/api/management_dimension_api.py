@@ -65,7 +65,8 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
     """[FIX 2026-06-15] 收集用户在指定 dimension 上可见的 id 集合
 
     数据源链路:
-        user_group_members → group_roles → role_dimension_scopes
+        org_members → org_permission_sets → role_dimension_scopes
+        (Spec 19, v072+v089 改: user_group_members → org_members, group_roles → org_permission_sets)
         → DimensionScopeEngine.expand_dimension_values(role_id) → {dim: set(ids)}
 
     链式扩展:
@@ -87,19 +88,20 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
         return None
 
     try:
-        # 1. user → group_ids
+        # 1. user → org_ids (Spec 19 v072 rename: user_group → org)
         cursor = _data_source.execute(
-            "SELECT group_id FROM user_group_members WHERE user_id = ?",
+            "SELECT org_id FROM org_members WHERE user_id = ?",
             [user_id]
         )
         group_ids = [r[0] for r in cursor.fetchall()]
         if not group_ids:
             return None
 
-        # 2. groups → role_ids (DISTINCT)
+        # 2. orgs → permission_set_ids (Spec 19 v072+v074 rename: group_roles → org_permission_sets)
+        # 注: role_id 字段在 role_dimension_scopes 中保持 role_id (指 permission_sets.id)
         placeholders = ",".join("?" for _ in group_ids)
         cursor = _data_source.execute(
-            f"SELECT DISTINCT role_id FROM group_roles WHERE group_id IN ({placeholders})",
+            f"SELECT DISTINCT permission_set_id FROM org_permission_sets WHERE org_id IN ({placeholders})",
             group_ids
         )
         role_ids = [r[0] for r in cursor.fetchall()]
