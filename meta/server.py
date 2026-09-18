@@ -784,7 +784,7 @@ def create_app(db_path=None):
         # v1_path_segment: v2_singular_object_type
         'users': 'user',
         'roles': 'role',
-        'user-groups': 'user_group',
+        'user-groups': 'org',
         'permission-bundles': 'permission_bundle',
         'permission-rules': 'permission_rule',
         'data-permissions': 'data_permission',
