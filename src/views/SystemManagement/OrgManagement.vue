@@ -11,20 +11,16 @@
 /**
  * OrgManagement — 组织管理页（基于 MOMP 通用化注入）
  *
- * ⚠️ 依赖说明（务必阅读，防止误判已有 org 对象）：
- *   "用户组 → 组织（org）"的重命名目前仅停留在设计稿
- *   docs/spec_权限体系升级/16_role_to_permission_set_and_user_group_to_org.md（准备稿，不改代码）。
- *   元数据层尚无 org.yaml / org_functions，user_group 仍是"纯用户组"。
- *   因此本页以 user_group 作为组织的数据源：
- *     - 本页的导入导出即 user_groups 表这份主数据的导入导出（组织主数据维护）
- *     - 待 spec 16 落地（user_groups→orgs）后，本页需将对象类型/编码切到 org，
- *       并补 org_type / org_scope / org_functions 的额外管理语义。
+ * [Spec 16 已落地 2026-09-18] user_group → org 切换：
+ *   - 后端 object type 现为 "org" (org.yaml id: org, table: orgs)
+ *   - 历史 alias "user_group" 已被 v089 DROP, 后端 registry 不再识别
+ *   - 本页配置对象类型/编码已切到 org, 关联数据由 orgs / org_members 提供
  *
  * [MOMP 通用化 2026-08-30] 本页只做"配置注入"，不触碰 MOMP 本体：
- *   - objectTypes=['user_group']：以现有 user_group 元数据作为组织数据源
+ *   - objectTypes=['org']：以 org.yaml 作为组织数据源
  *   - scopeTree.component=OrgScopeTree：注入自研扁平→树组织范围选择组件
  *   - scopeAdapter.handleScopeChange：把 org 范围（orgIds/effectiveOrgIds）映射到 scopeIds
- *   - filterStrategies['user_group']：effective 非空→id__in / 空→id__in 空集守卫（绝不回退全量）
+ *   - filterStrategies['org']：effective 非空→id__in / 空→id__in 空集守卫（绝不回退全量）
  *   - disableVersionContext=true：隐藏产品/版本选择器，GlobalToolbar 保留刷新/导入/导出
  *   - stateKey/menuCodeProvider：独立图表状态暂存 key 与菜单权限编码
  */
@@ -34,12 +30,12 @@ import OrgScopeTree from '@/components/common/OrgScopeTree/OrgScopeTree.vue'
 
 defineOptions({ name: 'OrgManagement' })
 
-const objectTypes = ['user_group']
+const objectTypes = ['org']
 
 const pageOptions = {
-  defaultTab: 'user_group',
+  defaultTab: 'org',
   tabs: {
-    user_group: { label: '组织' }
+    org: { label: '组织' }
   },
   // 注入 org 范围树（非层级单类型，扁平 → parent_id 客户端组装）
   scopeTree: {
@@ -51,7 +47,7 @@ const pageOptions = {
   disableVersionContext: true,
   stateKey: 'orgManagerStateBeforeDiagram',
   menuCodeProvider: () => 'org-management',
-  // org 范围语义映射：树 emit {orgIds, effectiveOrgIds} → scopeIds['user_group']
+  // org 范围语义映射：树 emit {orgIds, effectiveOrgIds} → scopeIds['org']
   scopeAdapter: {
     handleScopeChange(scope, ctx) {
       const { scopeIds, objectTypes } = ctx
@@ -69,8 +65,8 @@ const pageOptions = {
   //   用户反馈: 组织管理页应默认展示全部组织, 守卫语义不符合业务预期
   //   行为: 有勾选 → 按 scope 过滤; 未勾选 → 不过滤, 后端全量
   filterStrategies: {
-    'user_group'(filters, scopeIds) {
-      const ids = scopeIds?.['user_group']?.effective || []
+    'org'(filters, scopeIds) {
+      const ids = scopeIds?.['org']?.effective || []
       if (ids.length) return { ...filters, id__in: ids.join(',') }
       return filters
     }

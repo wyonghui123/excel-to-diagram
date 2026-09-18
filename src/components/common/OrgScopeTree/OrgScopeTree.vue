@@ -79,7 +79,7 @@
  * OrgScopeTree — 组织范围树（MOMP 注入的 scope 树组件，供组织管理页使用）
  *
  * [MOMP 通用化 2026-08-30] 组件本体零 MOMP/archdata 硬编码：
- *   - 数据源：user_group（单类型平面列表，parent_id 自引用 → 客户端组装树）
+ *   - 数据源：org（单类型平面列表，parent_id 自引用 → 客户端组装树）
  *   - node-key=id（无前缀），show-checkbox + check-strictly=false 级联多选
  *   - emit 'scope-change'：{ orgIds, effectiveOrgIds }（effective = 选中 ∪ 子孙）
  *   - 暴露 selectByCode / selectAll / clear / _test.treeData 兼容 MOMP scopeTreeRef 约定
@@ -93,7 +93,7 @@ import { createScopeGuard } from '@/composables/scopeGuard'
 
 const props = defineProps({
   showSearch: { type: Boolean, default: true },
-  // [MOMP 通用化] scopeIds 由 MOMP 传入（page.scopeIds），结构 scopeIds['user_group']={selected,effective}
+  // [MOMP 通用化] scopeIds 由 MOMP 传入（page.scopeIds），结构 scopeIds['org']={selected,effective}
   scopeIds: { type: Object, default: () => ({}) }
 })
 
@@ -112,7 +112,7 @@ const guard = createScopeGuard()
 const treeProps = computed(() => ({ label: 'name', children: 'children' }))
 
 // ============================================================
-//  数据加载：扁平 user_group → parent_id 组装树
+//  数据加载：扁平 org → parent_id 组装树
 // ============================================================
 async function loadTreeData(options = {}) {
   const { silent = false } = options
@@ -176,7 +176,7 @@ function buildOrgTree(items) {
     originalId: org.id,
     name: org.name,
     code: org.code,
-    type: 'user_group',
+    type: 'org',
     parentId: org.parent_id,
     children: []
   }))
@@ -245,7 +245,7 @@ function handleCheck() {
 //  反向同步：scopeIds 变化 → setCheckedKeys 恢复勾选
 // ============================================================
 const objectCheckedNodeKeys = computed(() => {
-  const scope = props.scopeIds?.['user_group']
+  const scope = props.scopeIds?.['org']
   const ids = (scope?.selected && scope.selected.length > 0 ? scope.selected : (scope?.effective || []))
   if (!ids?.length) return []
   return collectLeafMatchingKeys(treeData.value, ids)

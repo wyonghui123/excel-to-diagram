@@ -94,16 +94,16 @@ def add_admin_to_group(conn, group_id):
     user_id = user_row['id']
     
     cursor.execute(
-        "SELECT id FROM org_members WHERE user_id = ? AND group_id = ?",
+        "SELECT id FROM org_members WHERE user_id = ? AND org_id = ?",
         (user_id, group_id)
     )
-    
+
     if cursor.fetchone():
         print(f"admin 用户已在系统管理员用户组中")
         return user_id
-    
+
     cursor.execute(
-        "INSERT INTO org_members (user_id, group_id, is_manager, joined_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO org_members (user_id, org_id, is_manager, joined_at) VALUES (?, ?, ?, ?)",
         (user_id, group_id, 1, now)
     )
     
@@ -128,16 +128,16 @@ def assign_role_to_group(conn, group_id):
     role_id = role_row['id']
     
     cursor.execute(
-        "SELECT id FROM org_permission_sets WHERE group_id = ? AND role_id = ?",
+        "SELECT id FROM org_permission_sets WHERE org_id = ? AND permission_set_id = ?",
         (group_id, role_id)
     )
-    
+
     if cursor.fetchone():
         print(f"系统管理员角色已分配给用户组")
         return role_id
-    
+
     cursor.execute(
-        "INSERT INTO org_permission_sets (group_id, role_id, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO org_permission_sets (org_id, permission_set_id, created_at) VALUES (?, ?, ?)",
         (group_id, role_id, now)
     )
     
@@ -158,19 +158,19 @@ def verify_migration(conn):
         print(f"[DECORATIVE] 用户组: {group['name']} ({group['code']})")
         
         cursor.execute("""
-            SELECT u.username, u.display_name 
-            FROM org_members ugm 
-            JOIN users u ON u.id = ugm.user_id 
-            WHERE ugm.group_id = ?
+            SELECT u.username, u.display_name
+            FROM org_members ugm
+            JOIN users u ON u.id = ugm.user_id
+            WHERE ugm.org_id = ?
         """, (group['id'],))
         members = cursor.fetchall()
         print(f"  成员: {', '.join([m['username'] for m in members])}")
-        
+
         cursor.execute("""
-            SELECT r.name, r.code 
-            FROM org_permission_sets gr 
-            JOIN permission_sets r ON r.id = gr.role_id 
-            WHERE gr.group_id = ?
+            SELECT r.name, r.code
+            FROM org_permission_sets gr
+            JOIN permission_sets r ON r.id = gr.permission_set_id
+            WHERE gr.org_id = ?
         """, (group['id'],))
         roles = cursor.fetchall()
         print(f"  角色: {', '.join([r['name'] for r in roles])}")
@@ -181,18 +181,18 @@ def verify_migration(conn):
         print(f"\n[DECORATIVE] 用户: {user['username']} ({user['display_name']})")
         
         cursor.execute("""
-            SELECT r.name, r.code 
-            FROM user_permission_sets ur 
-            JOIN permission_sets r ON r.id = ur.role_id 
+            SELECT r.name, r.code
+            FROM user_permission_sets ur
+            JOIN permission_sets r ON r.id = ur.permission_set_id
             WHERE ur.user_id = ?
         """, (user['id'],))
         roles = cursor.fetchall()
         print(f"  直接角色: {', '.join([r['name'] for r in roles])}")
         
         cursor.execute("""
-            SELECT ug.name, ug.code 
-            FROM org_members ugm 
-            JOIN orgs ug ON ug.id = ugm.group_id 
+            SELECT ug.name, ug.code
+            FROM org_members ugm
+            JOIN orgs ug ON ug.id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user['id'],))
         groups = cursor.fetchall()
