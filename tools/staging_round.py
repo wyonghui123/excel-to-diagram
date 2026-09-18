@@ -473,7 +473,10 @@ def _check_key_tables() -> tuple:
         """
 import sqlite3, json, sys
 db = '/opt/app/staging/meta/architecture.db'
-need = ['permission_sets', 'role_permissions', 'user_permission_sets', 'permission_set_permissions']
+# [FIX 2026-09-18] Spec 16 v073 后 role_permissions 已废弃, 由 permission_set_permissions 替代
+# Spec 19 v089 后 org_* 已替代 user_group* / group_roles
+need = ['permission_sets', 'permission_set_permissions', 'user_permission_sets',
+        'orgs', 'org_members', 'org_permission_sets']
 try:
     c = sqlite3.connect(db)
     rows = c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\").fetchall()
