@@ -52,6 +52,7 @@
 | **了解 release 工作流** | `d:\filework\.trae\rules\release-sync-workflow.md` |
 | **写 HANDOVER (开发智能体)** | `.trae/templates/DEPLOY_HANDOVER.template.md` |
 | **看 HANDOVER 历史案例 (PM)** | `DEPLOY_HANDOVER_BUG_V043.md`, `DEPLOY_HANDOVER_BUG_V044.md` (项目根) |
+| **🆕 远端 DB 同步 (拉/推 staging + production)** | `.trae/rules/remote-db-sync.md` + [`tools/REMOTE_DB_OPS.md`](../../tools/REMOTE_DB_OPS.md) |
 
 **关键脚本**:
 - `scripts/service_manager.ps1` - 统一服务管理
@@ -59,6 +60,7 @@
 - `scripts/build-deploy-package.sh` - 部署打包 (唯一)
 - `scripts/sync-integration-db.ps1` - integration DB 同步 (8 步 + 备份)
 - `scripts/check_rules_consistency.py` - 规范一致性检查 (新增)
+- **`tools/pull_db.py` + `tools/push_db.py`** - 远端 SQLite 同步 (一行命令搞定, 见 `tools/REMOTE_DB_OPS.md`)
 
 ---
 
@@ -78,6 +80,7 @@
 - `inspect/user_context.py` - 用户上下文
 - `inspect/table_schema.py --check-code-fields` - 字段映射
 - `inspect/code_map.py --type reference` - 代码引用
+- **`tools/pull_db.py`** - 拉远端 DB 到本地调试 (staging/production 一行命令, 见 `tools/REMOTE_DB_OPS.md`)
 
 ---
 

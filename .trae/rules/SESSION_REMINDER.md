@@ -69,6 +69,8 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 | 问题修复（多会话）| invoke `problem-fixing` Skill |
 | E2E 测试 | invoke `e2e-testing` Skill |
 | 浏览器验证 | `PlaywrightCLI` (test_helpers/browser_auth_cli.py) |
+| **🆕 拉远端 DB 到本地 (staging/prod)** | `python tools/pull_db.py --remote <path> --local <path> --backup <bak>` (详见 `tools/REMOTE_DB_OPS.md`) |
+| **🆕 推本地 DB 到 staging/prod** | `python tools/push_db.py --local <path> --target staging\|production` (⚠️ 替换主 DB) |
 | **调试前** | `python scripts/debug/env/diagnose.py` |
 | **调试日志** | `python scripts/debug/log/extractor.py --pattern X --tail N` |
 | **重启后端** | `python scripts/debug/restart/restart_safe.py restart` |
