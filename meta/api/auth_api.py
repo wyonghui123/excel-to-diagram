@@ -205,15 +205,19 @@ def dev_login():
     if not row:
         return jsonify({'success': False, 'message': f'用户 {username} 不存在'}), 404
 
+    # [FIX 2026-09-17] 同时纳入直接用户授权 (user_permission_sets),
+    # 之前只走 org_permission_sets, admin 的 user_permission_sets=admin → permission_set=admin → '*'
+    # 在 org_permission_sets 为空时全部丢失, dev-login 拿到空 permissions, is_admin() 返回 False。
     cursor2 = _data_source.execute(
         "SELECT r.name, r.code, p.code "
         "FROM permission_sets r "
-        "JOIN org_permission_sets gr ON r.id = gr.permission_set_id "
-        "JOIN org_members ugm ON gr.org_id = ugm.org_id "
-        "JOIN users u ON u.id = ugm.user_id "
+        "JOIN users u ON u.username = ? "
+        "LEFT JOIN user_permission_sets ups ON ups.user_id = u.id AND ups.permission_set_id = r.id "
+        "LEFT JOIN org_permission_sets gr ON gr.permission_set_id = r.id "
+        "LEFT JOIN org_members ugm ON ugm.org_id = gr.org_id AND ugm.user_id = u.id "
         "LEFT JOIN permission_set_permissions rp ON r.id = rp.permission_set_id "
         "LEFT JOIN permissions p ON rp.permission_id = p.id "
-        "WHERE u.username = ?", [username]
+        "WHERE ups.id IS NOT NULL OR ugm.id IS NOT NULL", [username]
     )
     rows = cursor2.fetchall()
     roles = {}

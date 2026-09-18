@@ -235,15 +235,21 @@ class LocalAuthProvider(AuthProvider):
         return OrgService(self.ds).get_user_effective_org_ids(user_id)
 
     def _get_user_permission_sets(self, user_id: int) -> List[Dict]:
+        # [FIX 2026-09-17] 同时考虑直接用户授权 (user_permission_sets) 与组织授权 (org_permission_sets),
+        # 之前只走 org_permission_sets 导致 admin 的 user_permission_sets=admin → permission_set=admin → '*'
+        # 完全失效, /audit/meta/actions 等需要 '*' 的端点全部 403。
         org_ids = self._get_user_effective_org_ids(user_id)
-        if not org_ids:
-            return []
-        placeholders = ','.join('?' * len(org_ids))
+        union_clauses = ["(SELECT 1 FROM user_permission_sets WHERE user_id = ? AND permission_set_id = r.id)"]
+        params: list = [user_id]
+        if org_ids:
+            org_placeholders = ','.join('?' * len(org_ids))
+            union_clauses.append(f"(SELECT 1 FROM org_permission_sets WHERE permission_set_id = r.id AND org_id IN ({org_placeholders}))")
+            params.extend(org_ids)
+        where_exists = ' OR '.join(union_clauses)
         cursor = self.ds.execute(
             f"""SELECT r.id, r.code, r.name FROM permission_sets r
-               JOIN org_permission_sets gr ON r.id = gr.permission_set_id
-               WHERE gr.org_id IN ({placeholders})""",
-            org_ids
+               WHERE {where_exists}""",
+            params
         )
         roles = []
         seen = set()
@@ -267,16 +273,20 @@ class LocalAuthProvider(AuthProvider):
         return roles
 
     def _get_user_permissions(self, user_id: int) -> List[str]:
+        # [FIX 2026-09-17] 同上, 用户直接授权 + 组织授权两条路径都要并入, 才能拿到 '*' 通配。
         org_ids = self._get_user_effective_org_ids(user_id)
-        if not org_ids:
-            return []
-        placeholders = ','.join('?' * len(org_ids))
+        union_clauses = ["(SELECT 1 FROM user_permission_sets WHERE user_id = ? AND permission_set_id = rp.permission_set_id)"]
+        params: list = [user_id]
+        if org_ids:
+            org_placeholders = ','.join('?' * len(org_ids))
+            union_clauses.append(f"(SELECT 1 FROM org_permission_sets WHERE permission_set_id = rp.permission_set_id AND org_id IN ({org_placeholders}))")
+            params.extend(org_ids)
+        where_exists = ' OR '.join(union_clauses)
         cursor = self.ds.execute(
             f"""SELECT DISTINCT p.code FROM permissions p
                JOIN permission_set_permissions rp ON p.id = rp.permission_id
-               JOIN org_permission_sets gr ON rp.permission_set_id = gr.permission_set_id
-               WHERE gr.org_id IN ({placeholders})""",
-            org_ids
+               WHERE {where_exists}""",
+            params
         )
         return [row[0] if isinstance(row, (list, tuple)) else row['code'] for row in cursor.fetchall()]
 
