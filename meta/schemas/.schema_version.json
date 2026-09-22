@@ -1,702 +1,241 @@
 {
   "objects": {
     "ai_async_task": {
+      "table_name": "ai_async_tasks",
       "hash": "1ec0d9648eedf33f3ec69e3de3c7cb83",
-      "fields": [
-        "id",
-        "task_type",
-        "session_id",
-        "agent_id",
-        "parent_task_id",
-        "request",
-        "context",
-        "priority",
-        "queue",
-        "status",
-        "worker_id",
-        "started_at",
-        "completed_at",
-        "duration_ms",
-        "result",
-        "error_message",
-        "tokens_used",
-        "cost",
-        "model_used",
-        "retry_count",
-        "max_retries",
-        "timeout",
-        "tenant_id",
-        "user_id",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "ai_async_tasks"
+      "fields_count": 26
     },
     "annotation": {
+      "table_name": "annotations",
       "hash": "919454fa5b2a9dd980657e39c49a28b4",
-      "fields": [
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "target_type",
-        "target_id",
-        "category",
-        "content",
-        "target_code",
-        "target_name",
-        "category_label"
-      ],
-      "table": "annotations"
+      "fields_count": 12
     },
     "audit_log": {
-      "hash": "a4770ad50ed07a5267bd65a8e1fb19cc",
-      "fields": [
-        "id",
-        "log_category",
-        "log_level",
-        "object_type",
-        "object_id",
-        "parent_object_type",
-        "parent_object_id",
-        "action",
-        "field_name",
-        "old_value",
-        "new_value",
-        "user_id",
-        "user_name",
-        "ip_address",
-        "user_agent",
-        "created_at",
-        "extra_data",
-        "trace_id",
-        "transaction_id",
-        "status",
-        "status_entered_at",
-        "retry_count",
-        "error_message",
-        "agent_id",
-        "agent_session_id",
-        "tool_call_id",
-        "agent_reasoning"
-      ],
-      "table": "audit_logs"
+      "table_name": "audit_logs",
+      "hash": "134e1311c8a91de738760aad14ae9634",
+      "fields_count": 30
+    },
+    "": {
+      "table_name": "",
+      "hash": "1d516a0f1d9c45f8625df48553c09ddd",
+      "fields_count": 0
     },
     "business_object": {
-      "hash": "dc8b67789ff645ac7ea6e5cf35718aa7",
-      "fields": [
-        "product_code",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "version_code",
-        "service_module_code",
-        "id",
-        "version_id",
-        "domain_id",
-        "sub_domain_id",
-        "service_module_id",
-        "code",
-        "name",
-        "description",
-        "domain_name",
-        "sub_domain_name",
-        "service_module_name",
-        "version_name",
-        "owner_id",
-        "relation_count"
-      ],
-      "table": "business_objects"
+      "table_name": "business_objects",
+      "hash": "12ecddaecfd9bab6fee95febdf7724dd",
+      "fields_count": 20
     },
     "change_event": {
+      "table_name": "change_events",
       "hash": "2af1f33412c2a283dceac0b6a0de3422",
-      "fields": [
-        "id",
-        "object_type",
-        "object_id",
-        "event_type",
-        "changed_fields",
-        "old_values",
-        "new_values",
-        "payload",
-        "channels",
-        "status",
-        "status_entered_at",
-        "retry_count",
-        "created_at",
-        "delivered_at",
-        "audit_log_id",
-        "delivery_latency_seconds"
-      ],
-      "table": "change_events"
+      "fields_count": 16
     },
     "change_subscription": {
+      "table_name": "change_subscriptions",
       "hash": "bfc15cceddeecce0a38deab424bfcc42",
-      "fields": [
-        "id",
-        "user_id",
-        "object_type",
-        "event_types",
-        "channel",
-        "filter_condition",
-        "webhook_url",
-        "webhook_secret",
-        "enabled",
-        "created_at"
-      ],
-      "table": "change_subscriptions"
+      "fields_count": 10
     },
     "data_permission": {
+      "table_name": "data_permissions",
       "hash": "0783355f21e83b2bbde4008198a35a57",
-      "fields": [
-        "user_id",
-        "resource_type",
-        "resource_id",
-        "permission_level",
-        "inherit_to_children",
-        "created_at"
-      ],
-      "table": "data_permissions"
+      "fields_count": 6
+    },
+    "dimension_object_mapping": {
+      "table_name": "",
+      "hash": "1d516a0f1d9c45f8625df48553c09ddd",
+      "fields_count": 0
     },
     "domain": {
-      "hash": "e3c4644b26a284c67fd125f4963b6a4e",
-      "fields": [
-        "product_code",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "version_code",
-        "id",
-        "version_id",
-        "code",
-        "name",
-        "description",
-        "version_name",
-        "owner_id",
-        "relation_count",
-        "child_count",
-        "bo_density"
-      ],
-      "table": "domains"
+      "table_name": "domains",
+      "hash": "731070a712323139d5db0dbec7f6f869",
+      "fields_count": 15
     },
     "employee_data_scope": {
+      "table_name": "employee_data_scopes",
       "hash": "a354bf8cec231115c9ecb3e5300e37d2",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "condition_template",
-        "description"
-      ],
-      "table": "employee_data_scopes"
+      "fields_count": 5
     },
     "enum_type": {
+      "table_name": "enum_types",
       "hash": "4baa9478a68e1e204882fe99b3d5618a",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "name",
-        "category",
-        "mutability",
-        "dimension_schema",
-        "description",
-        "dimension_count",
-        "value_count",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "enum_types"
+      "fields_count": 12
     },
     "enum_value": {
+      "table_name": "enum_values",
       "hash": "3fb05d138b3d881886a1fbe93176f019",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "enum_type_id",
-        "code",
-        "name",
-        "name_en",
-        "dimensions",
-        "sort_order",
-        "is_active",
-        "is_system",
-        "parent_code",
-        "metadata",
-        "enum_type_name",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "enum_values"
+      "fields_count": 16
     },
     "filter_variant": {
+      "table_name": "filter_variants",
       "hash": "0dab77e2328f7cd18c9978fea302def2",
-      "fields": [
-        "id",
-        "name",
-        "object_type",
-        "filters",
-        "user_id",
-        "is_shared",
-        "is_default",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "filter_variants"
+      "fields_count": 9
     },
     "group_data_permission": {
+      "table_name": "group_data_permissions",
       "hash": "dd130824d1d7a4a2db021c4d32061bc9",
-      "fields": [
-        "id",
-        "group_id",
-        "resource_type",
-        "resource_id",
-        "permission_level",
-        "inherit_to_children",
-        "created_at"
-      ],
-      "table": "group_data_permissions"
+      "fields_count": 7
     },
     "hierarchies": {
+      "table_name": "",
       "hash": "1d516a0f1d9c45f8625df48553c09ddd",
-      "fields": [],
-      "table": ""
+      "fields_count": 0
     },
     "menu": {
+      "table_name": "menus",
       "hash": "c515b65a3a9e98834ef5a2e54db7fbe8",
-      "fields": [
-        "id",
-        "menu_code",
-        "menu_name",
-        "menu_path",
-        "page_type",
-        "object_types",
-        "primary_object_type",
-        "bo_bindings",
-        "required_permissions",
-        "required_any_permission",
-        "data_permission_hint",
-        "page_config",
-        "parent_menu",
-        "icon",
-        "color",
-        "description",
-        "sort_order",
-        "is_active",
-        "show_in_sidebar",
-        "auto_generated"
-      ],
-      "table": "menus"
+      "fields_count": 20
     },
     "menu_permission": {
+      "table_name": "menu_permissions",
       "hash": "590847d0b84e69ef2b566dec1e49df47",
-      "fields": [
-        "menu_code",
-        "menu_name",
-        "menu_path",
-        "required_permissions",
-        "required_any_permission",
-        "parent_menu",
-        "icon",
-        "sort_order",
-        "is_active",
-        "data_permission_hint",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "menu_permissions"
+      "fields_count": 12
     },
-    "meta_action": {
-      "hash": "b8f4864b8b73ecdb51f8b33172b60368",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "action_type",
-        "method",
-        "description",
-        "created_at"
-      ],
-      "table": "meta_actions"
+    "org": {
+      "table_name": "orgs",
+      "hash": "56e6d2e0ae35de1cb92e1017ce15b76e",
+      "fields_count": 13
+    },
+    "org_data_permission": {
+      "table_name": "org_data_permissions",
+      "hash": "0e768607d6daa58969cd904d943363d2",
+      "fields_count": 7
+    },
+    "org_member": {
+      "table_name": "org_members",
+      "hash": "44d225cd8100510d0409fe96dc8cdbae",
+      "fields_count": 5
     },
     "permission": {
-      "hash": "4428d9cc4d197e35220a4333fe0ee95b",
-      "fields": [
-        "code",
-        "name",
-        "resource_type",
-        "action",
-        "description",
-        "action_id",
-        "action_code",
-        "resource_id",
-        "scope"
-      ],
-      "table": "permissions"
+      "table_name": "permissions",
+      "hash": "bdc5439db2bd0eb34d49fa7af7896a3c",
+      "fields_count": 8
     },
     "permission_bundle": {
+      "table_name": "permission_bundles",
       "hash": "8e03303a0ab37d280a9e128946c349cd",
-      "fields": [
-        "bundle_code",
-        "bundle_name",
-        "description",
-        "menu_permissions",
-        "function_permissions",
-        "data_permission_template",
-        "is_active",
-        "is_system",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "permission_bundles"
+      "fields_count": 10
+    },
+    "permission_resource": {
+      "table_name": "permissions",
+      "hash": "5ab88717b885c9659ad948f72a98507b",
+      "fields_count": 9
+    },
+    "permission_resource_inheritance": {
+      "table_name": "data_permission_rules",
+      "hash": "24efa025453f2e5eb1b3350d9fb25584",
+      "fields_count": 9
     },
     "permission_rule": {
-      "hash": "4b1fcdd3c7cb3b0cb6df4383c36a630f",
-      "fields": [
-        "role_id",
-        "resource_type",
-        "condition",
-        "permission_level",
-        "is_denied",
-        "inherit_to_children",
-        "propagate_to_parents",
-        "analysis_mode",
-        "created_at",
-        "created_by",
-        "updated_at"
-      ],
-      "table": "permission_rules"
+      "table_name": "permission_rules",
+      "hash": "f8bb0c2bbd252f342bfcb0f159c2ee30",
+      "fields_count": 11
+    },
+    "permission_set": {
+      "table_name": "permission_sets",
+      "hash": "4dd5fd4c9d1a99328ecbf989eecef070",
+      "fields_count": 14
+    },
+    "permission_set_data_permission": {
+      "table_name": "permission_set_data_permissions",
+      "hash": "ff576b8a871f3cb6ccc794ee1a531263",
+      "fields_count": 8
+    },
+    "permission_set_dimension_scope": {
+      "table_name": "permission_set_dimension_scopes",
+      "hash": "2038cbeb384de5d193ddb5b93bd089b4",
+      "fields_count": 10
+    },
+    "permission_set_dimension_scopes": {
+      "table_name": "permission_set_dimension_scopes",
+      "hash": "25201c77005ddf6acc88eb9c2e0039f1",
+      "fields_count": 10
+    },
+    "permission_set_permission": {
+      "table_name": "permission_set_permissions",
+      "hash": "35c1d3e6eece1bfde46650222995145b",
+      "fields_count": 5
     },
     "product": {
-      "hash": "cb5710f268ff63c565f970542513aeed",
-      "fields": [
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "name",
-        "code",
-        "description",
-        "owner_id",
-        "is_active",
-        "child_count"
-      ],
-      "table": "products"
+      "table_name": "products",
+      "hash": "cf4f4a266ab5699aa45b410cf7e0cb7d",
+      "fields_count": 12
     },
     "relationship": {
-      "hash": "23bb128fdd5af2d12ab221850cfb9dd4",
-      "fields": [
-        "product_code",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "version_code",
-        "id",
-        "version_id",
-        "source_domain_id",
-        "source_sub_domain_id",
-        "source_service_module_id",
-        "target_domain_id",
-        "target_sub_domain_id",
-        "target_service_module_id",
-        "source_bo_id",
-        "target_bo_id",
-        "source_code",
-        "target_code",
-        "code",
-        "relation_code",
-        "relation_desc",
-        "relation_type_name",
-        "relation_category",
-        "source_bo_name",
-        "target_bo_name",
-        "category_label",
-        "category_type",
-        "activity_label",
-        "domain_relation",
-        "sub_domain_relation",
-        "module_relation",
-        "is_in_scope",
-        "source_domain_name",
-        "source_sub_domain_name",
-        "source_service_module_name",
-        "target_domain_name",
-        "target_sub_domain_name",
-        "target_service_module_name",
-        "version_name"
-      ],
-      "table": "relationships"
+      "table_name": "relationships",
+      "hash": "410778cac94fb38eca160d68a3bb2d81",
+      "fields_count": 44
     },
     "role": {
-      "hash": "d2c93c8d7b54de63b566c894a9530a4c",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "code",
-        "name",
-        "description",
-        "is_system",
-        "is_super_admin",
-        "priority",
-        "created_at",
-        "updated_at",
-        "menu_count",
-        "permission_count",
-        "user_count",
-        "data_perm_count"
-      ],
-      "table": "roles"
+      "table_name": "roles",
+      "hash": "f75da5b628beb5056cf1ceee69313d77",
+      "fields_count": 14
+    },
+    "role_data_permission": {
+      "table_name": "role_data_permissions",
+      "hash": "46f7547ae62d4e4b11ff3b5865fbf273",
+      "fields_count": 8
     },
     "role_dimension_scope": {
+      "table_name": "role_dimension_scopes",
       "hash": "a7a77c4ea0f0c1e328869eb8dee7bd67",
-      "fields": [
-        "id",
-        "role_id",
-        "dimension_code",
-        "dimension_values",
-        "inherit_children",
-        "scope_mode"
-      ],
-      "table": "role_dimension_scopes"
+      "fields_count": 6
     },
     "role_permission": {
-      "hash": "a3fffc51423727eaf2cc477d641a6aa9",
-      "fields": [
-        "id",
-        "role_id",
-        "permission_id",
-        "created_at"
-      ],
-      "table": "role_permissions"
+      "table_name": "role_permissions",
+      "hash": "04187e7ed1d40498307d7b14037bf7f1",
+      "fields_count": 5
     },
     "scheduled_task": {
+      "table_name": "scheduled_tasks",
       "hash": "54811dd5356875de6dbe138a68c376af",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "description",
-        "category",
-        "handler",
-        "handler_config",
-        "trigger_mode",
-        "schedule",
-        "trigger_config",
-        "queue",
-        "priority",
-        "timeout",
-        "max_retries",
-        "retry_delay",
-        "retry_backoff",
-        "tenant_scope",
-        "enabled",
-        "last_run_at",
-        "next_run_at",
-        "ai_config",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "scheduled_tasks"
+      "fields_count": 23
     },
     "service_module": {
-      "hash": "cf6f8c6af3983391d722a066a14e0345",
-      "fields": [
-        "product_code",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "version_code",
-        "sub_domain_code",
-        "id",
-        "version_id",
-        "domain_id",
-        "sub_domain_id",
-        "code",
-        "name",
-        "description",
-        "domain_name",
-        "sub_domain_name",
-        "version_name",
-        "owner_id",
-        "relation_count",
-        "child_count",
-        "bo_density"
-      ],
-      "table": "service_modules"
+      "table_name": "service_modules",
+      "hash": "9cc35f763620b38b15232d593a567472",
+      "fields_count": 20
     },
     "sub_domain": {
-      "hash": "64a72ec37489b322dd000bc09c4777b7",
-      "fields": [
-        "product_code",
-        "created_by",
-        "updated_by",
-        "version_code",
-        "domain_code",
-        "id",
-        "version_id",
-        "domain_id",
-        "code",
-        "name",
-        "description",
-        "domain_name",
-        "version_name",
-        "created_at",
-        "updated_at",
-        "owner_id",
-        "relation_count",
-        "child_count",
-        "bo_density"
-      ],
-      "table": "sub_domains"
+      "table_name": "sub_domains",
+      "hash": "0a3dd0bdd565cd50a1191f070d9e8546",
+      "fields_count": 18
     },
     "task_execution": {
+      "table_name": "task_executions",
       "hash": "1d56d4d35ae2e6d9b7918702f6d9b250",
-      "fields": [
-        "id",
-        "name",
-        "task_id",
-        "task_type",
-        "handler",
-        "status",
-        "attempt",
-        "trigger_type",
-        "trigger_source",
-        "queue",
-        "priority",
-        "params",
-        "result",
-        "error_message",
-        "error_traceback",
-        "timeout",
-        "max_retries",
-        "retry_count",
-        "worker_id",
-        "queued_at",
-        "started_at",
-        "completed_at",
-        "duration_ms",
-        "tokens_used",
-        "cost",
-        "model_used",
-        "ai_session_id",
-        "agent_id",
-        "ai_context",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "task_executions"
+      "fields_count": 31
     },
     "task_queue": {
+      "table_name": "task_queues",
       "hash": "aa2e72474417526b2f461fe2e7011e6b",
-      "fields": [
-        "id",
-        "name",
-        "description",
-        "priority",
-        "max_workers",
-        "timeout",
-        "enabled",
-        "current_workers",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "task_queues"
+      "fields_count": 10
+    },
+    "test_objects": {
+      "table_name": "test_objects",
+      "hash": "2d2d56fb599621697d67bfe91ec4db6a",
+      "fields_count": 6
+    },
+    "test_table": {
+      "table_name": "test_table",
+      "hash": "21bb19abfa13bf21fbc957f9fb8730b2",
+      "fields_count": 3
     },
     "user": {
-      "hash": "6d4f651718e37ff9c665f0178c889ee5",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "username",
-        "email",
-        "password_hash",
-        "password_hash",
-        "display_name",
-        "status",
-        "status_entered_at",
-        "current_status_duration_days",
-        "sso_provider",
-        "sso_user_id",
-        "must_change_password",
-        "password_history",
-        "last_login_at",
-        "created_at",
-        "updated_at",
-        "inactive_days",
-        "account_age_days",
-        "locale",
-        "timezone",
-        "date_style",
-        "time_style",
-        "hour_cycle"
-      ],
-      "table": "users"
-    },
-    "user_role": {
-      "hash": "c242c6db247ee37d5aa091c264bd5f6a",
-      "fields": [
-        "id",
-        "user_id",
-        "role_id",
-        "created_at"
-      ],
-      "table": "user_roles"
+      "table_name": "users",
+      "hash": "2888f533b105878a501b46ac9bf6db14",
+      "fields_count": 24
     },
     "version": {
-      "hash": "7a123568d81201cd2f07f8fc3a5b178b",
-      "fields": [
-        "created_at",
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "visibility",
-        "product_code",
-        "id",
-        "product_id",
-        "name",
-        "code",
-        "description",
-        "is_current",
-        "product_name",
-        "owner_id",
-        "child_count"
-      ],
-      "table": "versions"
+      "table_name": "versions",
+      "hash": "695f07dc5d94bf503b948e79a7ddebb0",
+      "fields_count": 14
     },
     "new_object": {
+      "table_name": "new_objects",
       "hash": "ac788cafdec31f72375398f1f47ae73a",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "description",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "new_objects"
+      "fields_count": 6
     }
   },
-  "last_sync": "2026-05-24T12:44:06.472505",
-  "phase_migrations": [
-    {
-      "phase": "phase1-db-schema-refactor",
-      "date": "2026-08-28",
-      "migrations": [
-        "v070__rename_roles_to_permission_sets",
-        "v071__drop_p13_t3_residue_tables",
-        "v072__rename_user_groups_to_orgs",
-        "v073__create_org_functions"
-      ],
-      "note": "Physical schema rename: roles→permission_sets, user_groups→orgs. Created org_functions table. YAML metadata rename deferred to Plan B. Follows meta/migrations/README.md naming: v<NNN>__<desc>.py + migrate(db_path, skip_backup=False) -> bool."
-    }
-  ]
+  "last_sync": "2026-09-22T07:11:42.003912",
+  "note": "PoC A baseline 2026-09-22, commit 46aa28cd era, 47 objects registered"
 }

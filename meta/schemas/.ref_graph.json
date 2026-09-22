@@ -1,0 +1,513 @@
+{
+  "yaml_dir": "meta\\schemas",
+  "total_yaml_files": 54,
+  "scanned_yaml_files": 50,
+  "total_edges": 8,
+  "total_warnings": 3,
+  "yaml_summary": [
+    {
+      "file": "ai_async_task.yaml",
+      "obj_id": "ai_async_task",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "annotation.yaml",
+      "obj_id": "annotation",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "aspects.yaml",
+      "obj_id": "aspects",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "audit_log.yaml",
+      "obj_id": "audit_log",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "audit_log_expectations.yaml",
+      "obj_id": "audit_log_expectations",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "business_object.yaml",
+      "obj_id": "business_object",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "change_event.yaml",
+      "obj_id": "change_event",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "change_subscription.yaml",
+      "obj_id": "change_subscription",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "data_permission.yaml",
+      "obj_id": "data_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "dimension_object_mapping.yaml",
+      "obj_id": "dimension_object_mapping",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "domain.yaml",
+      "obj_id": "domain",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "employee_data_scope.yaml",
+      "obj_id": "employee_data_scope",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "enum_type.yaml",
+      "obj_id": "enum_type",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "enum_value.yaml",
+      "obj_id": "enum_value",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "filter_variant.yaml",
+      "obj_id": "filter_variant",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "group_data_permission.yaml",
+      "obj_id": "group_data_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "hierarchies.yaml",
+      "obj_id": "hierarchies",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "menu.yaml",
+      "obj_id": "menu",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "menu_permission.yaml",
+      "obj_id": "menu_permission",
+      "edge_count": 1,
+      "warning_count": 1
+    },
+    {
+      "file": "org.yaml",
+      "obj_id": "org",
+      "edge_count": 2,
+      "warning_count": 1
+    },
+    {
+      "file": "org_data_permission.yaml",
+      "obj_id": "org_data_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "org_member.yaml",
+      "obj_id": "org_member",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission.yaml",
+      "obj_id": "permission",
+      "edge_count": 1,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_bundle.yaml",
+      "obj_id": "permission_bundle",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_resource.yaml",
+      "obj_id": "permission_resource",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_resource_inheritance.yaml",
+      "obj_id": "permission_resource_inheritance",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_rule.yaml",
+      "obj_id": "permission_rule",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_set.yaml",
+      "obj_id": "permission_set",
+      "edge_count": 2,
+      "warning_count": 1
+    },
+    {
+      "file": "permission_set_data_permission.yaml",
+      "obj_id": "permission_set_data_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_set_dimension_scope.yaml",
+      "obj_id": "permission_set_dimension_scope",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_set_dimension_scopes.yaml",
+      "obj_id": "permission_set_dimension_scopes",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "permission_set_permission.yaml",
+      "obj_id": "permission_set_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "product.yaml",
+      "obj_id": "product",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "relationship.yaml",
+      "obj_id": "relationship",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "resource_types.yaml",
+      "obj_id": "resource_types",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "role.yaml",
+      "obj_id": "role",
+      "edge_count": 1,
+      "warning_count": 0
+    },
+    {
+      "file": "role_data_permission.yaml",
+      "obj_id": "role_data_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "role_dimension_scope.yaml",
+      "obj_id": "role_dimension_scope",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "role_effective_intents.yaml",
+      "obj_id": "role_effective_intents",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "role_permission.yaml",
+      "obj_id": "role_permission",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "scheduled_task.yaml",
+      "obj_id": "scheduled_task",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "service_module.yaml",
+      "obj_id": "service_module",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "shared_properties.yaml",
+      "obj_id": "shared_properties",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "sub_domain.yaml",
+      "obj_id": "sub_domain",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "task_execution.yaml",
+      "obj_id": "task_execution",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "task_queue.yaml",
+      "obj_id": "task_queue",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "test_objects.yaml",
+      "obj_id": "test_objects",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "test_table.yaml",
+      "obj_id": "test_table",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "user.yaml",
+      "obj_id": "user",
+      "edge_count": 1,
+      "warning_count": 0
+    },
+    {
+      "file": "version.yaml",
+      "obj_id": "version",
+      "edge_count": 0,
+      "warning_count": 0
+    }
+  ],
+  "edges": [
+    {
+      "from_yaml": "menu_permission",
+      "from_table": "menu_permissions",
+      "assoc": "roles",
+      "through": "role_menu_permissions",
+      "to_entity": "role_menu_permissions",
+      "type": "many_to_many",
+      "source_key": "menu_code",
+      "target_key": "role_id"
+    },
+    {
+      "from_yaml": "org",
+      "from_table": "orgs",
+      "assoc": "members",
+      "through": "org_members",
+      "to_entity": "org_members",
+      "type": "many_to_many",
+      "source_key": "org_id",
+      "target_key": "user_id"
+    },
+    {
+      "from_yaml": "org",
+      "from_table": "orgs",
+      "assoc": "permission_sets",
+      "through": "org_permission_sets",
+      "to_entity": "org_permission_sets",
+      "type": "many_to_many",
+      "source_key": "org_id",
+      "target_key": "permission_set_id"
+    },
+    {
+      "from_yaml": "permission",
+      "from_table": "permissions",
+      "assoc": "roles",
+      "through": "role_permissions",
+      "to_entity": "role_permissions",
+      "type": "many_to_many",
+      "source_key": "permission_id",
+      "target_key": "role_id"
+    },
+    {
+      "from_yaml": "permission_set",
+      "from_table": "permission_sets",
+      "assoc": "permissions",
+      "through": "permission_set_permissions",
+      "to_entity": "permission_set_permissions",
+      "type": "many_to_many",
+      "source_key": "permission_set_id",
+      "target_key": "permission_id"
+    },
+    {
+      "from_yaml": "permission_set",
+      "from_table": "permission_sets",
+      "assoc": "assigned_orgs",
+      "through": "org_permission_sets",
+      "to_entity": "org_permission_sets",
+      "type": "reverse_many_to_many",
+      "source_key": "permission_set_id",
+      "target_key": "org_id"
+    },
+    {
+      "from_yaml": "role",
+      "from_table": "roles",
+      "assoc": "permissions",
+      "through": "role_permissions",
+      "to_entity": "role_permissions",
+      "type": "many_to_many",
+      "source_key": "role_id",
+      "target_key": "permission_id"
+    },
+    {
+      "from_yaml": "user",
+      "from_table": "users",
+      "assoc": "groups",
+      "through": "org_members",
+      "to_entity": "org_members",
+      "type": "many_to_many",
+      "source_key": "user_id",
+      "target_key": "org_id"
+    }
+  ],
+  "warnings": [
+    {
+      "type": "through_ref_missing",
+      "yaml": "menu_permission.yaml",
+      "assoc": "roles",
+      "missing_ref": "role_menu_permissions",
+      "path": "role_menu_permissions"
+    },
+    {
+      "type": "through_ref_missing",
+      "yaml": "org.yaml",
+      "assoc": "permission_sets",
+      "missing_ref": "org_permission_sets",
+      "path": "org_permission_sets"
+    },
+    {
+      "type": "through_ref_missing",
+      "yaml": "permission_set.yaml",
+      "assoc": "assigned_orgs",
+      "missing_ref": "org_permission_sets",
+      "path": "org_permission_sets"
+    }
+  ],
+  "orphan_join_tables": [
+    "org_permission_sets",
+    "role_menu_permissions"
+  ],
+  "all_known_entities": [
+    "_action_groups",
+    "_audit_materialization",
+    "_standard_actions",
+    "ai_async_task",
+    "ai_async_tasks",
+    "annotation",
+    "annotations",
+    "aspects",
+    "audit_log",
+    "audit_log_expectations",
+    "audit_logs",
+    "business_object",
+    "business_objects",
+    "change_event",
+    "change_events",
+    "change_subscription",
+    "change_subscriptions",
+    "data_permission",
+    "data_permission_rules",
+    "data_permissions",
+    "dimension_object_mapping",
+    "domain",
+    "domains",
+    "employee_data_scope",
+    "employee_data_scopes",
+    "enum_type",
+    "enum_types",
+    "enum_value",
+    "enum_values",
+    "filter_variant",
+    "filter_variants",
+    "group_data_permission",
+    "group_data_permissions",
+    "hierarchies",
+    "menu",
+    "menu_permission",
+    "menu_permissions",
+    "menus",
+    "new_object",
+    "new_objects",
+    "org",
+    "org_data_permission",
+    "org_data_permissions",
+    "org_member",
+    "org_members",
+    "orgs",
+    "permission",
+    "permission_bundle",
+    "permission_bundles",
+    "permission_resource",
+    "permission_resource_inheritance",
+    "permission_rule",
+    "permission_rules",
+    "permission_set",
+    "permission_set_data_permission",
+    "permission_set_data_permissions",
+    "permission_set_dimension_scope",
+    "permission_set_dimension_scopes",
+    "permission_set_permission",
+    "permission_set_permissions",
+    "permission_sets",
+    "permissions",
+    "product",
+    "products",
+    "relationship",
+    "relationships",
+    "resource_types",
+    "role",
+    "role_data_permission",
+    "role_data_permissions",
+    "role_dimension_scope",
+    "role_dimension_scopes",
+    "role_effective_intents",
+    "role_permission",
+    "role_permissions",
+    "roles",
+    "scheduled_task",
+    "scheduled_tasks",
+    "service_module",
+    "service_modules",
+    "shared_properties",
+    "sub_domain",
+    "sub_domains",
+    "task_execution",
+    "task_executions",
+    "task_queue",
+    "task_queues",
+    "test_objects",
+    "test_table",
+    "user",
+    "users",
+    "version",
+    "versions"
+  ]
+}

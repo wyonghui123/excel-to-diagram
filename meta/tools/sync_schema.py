@@ -17,10 +17,11 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
 
-from meta import registry, list_meta_objects, get_meta_object
+from meta import registry, get_meta_object
 from meta.core.datasource import DataSource, DataSourceType, get_data_source, DataSourceFactory
 from meta.core.schema_generator import SchemaGenerator, SchemaMigrator, sync_schema_from_meta
 from meta.core.models import MetaObject, MetaField, FieldType
+from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
 
 
 SCHEMA_VERSION_FILE = "meta/schemas/.schema_version.json"
@@ -28,8 +29,11 @@ SCHEMA_VERSION_FILE = "meta/schemas/.schema_version.json"
 
 def get_all_meta_objects() -> List:
     """获取所有元数据对象"""
+    # [PoC A fix 2026-09-22] 确保 yaml 已加载到 registry
+    if not registry.list_objects():
+        register_from_directory(get_yaml_schema_dir())
     objects = []
-    for obj_id in list_meta_objects():
+    for obj_id in registry.list_objects():
         obj = get_meta_object(obj_id)
         if obj:
             objects.append(obj)
@@ -42,8 +46,8 @@ def compute_meta_hash(meta_object: MetaObject) -> str:
         meta_object.table_name,
         "|".join([
             "{0}:{1}:{2}:{3}".format(
-                f.db_column, f.field_type.value, f.required, f.unique
-            ) for f in sorted(meta_object.fields, key=lambda x: x.db_column)
+                f.db_column or "", f.field_type.value, f.required, f.unique
+            ) for f in sorted(meta_object.fields, key=lambda x: (x.db_column or ""))
         ]),
         meta_object.semantics.hierarchy_level
     )
