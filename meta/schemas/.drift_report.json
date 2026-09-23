@@ -1,0 +1,498 @@
+{
+  "source": "sqlite",
+  "local_db": "meta/architecture.db",
+  "yaml_objects_scanned": 44,
+  "yaml_objects_with_drift": 20,
+  "reports": [
+    {
+      "object_id": "ai_async_task",
+      "table_name": "ai_async_tasks",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "annotation",
+      "table_name": "annotations",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "target_code",
+        "target_name",
+        "category_label"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "audit_log",
+      "table_name": "audit_logs",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "action_kind",
+        "outcome",
+        "cascade_root_id",
+        "cascade_root_action",
+        "retention_until",
+        "prev_hash",
+        "row_hash",
+        "created_at_epoch"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "business_object",
+      "table_name": "business_objects",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "product_code",
+        "version_code",
+        "service_module_code",
+        "domain_name",
+        "sub_domain_name",
+        "service_module_name",
+        "version_name",
+        "relation_count",
+        "bo_category",
+        "bo_sub_category",
+        "category_config"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "change_event",
+      "table_name": "change_events",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "delivery_latency_seconds"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "change_subscription",
+      "table_name": "change_subscriptions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "data_permission",
+      "table_name": "data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "id"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "domain",
+      "table_name": "domains",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "product_code",
+        "version_code",
+        "version_name",
+        "relation_count",
+        "child_count",
+        "bo_density"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "employee_data_scope",
+      "table_name": "employee_data_scopes",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "enum_type",
+      "table_name": "enum_types",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "dimension_count",
+        "value_count"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "enum_value",
+      "table_name": "enum_values",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "enum_type_name"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "filter_variant",
+      "table_name": "filter_variants",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "group_data_permission",
+      "table_name": "group_data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "menu",
+      "table_name": "menus",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "created_at",
+        "created_by",
+        "updated_by",
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "menu_permission",
+      "table_name": "menu_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "org",
+      "table_name": "orgs",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "org_data_permission",
+      "table_name": "org_data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "org_member",
+      "table_name": "org_members",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission",
+      "table_name": "permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_bundle",
+      "table_name": "permission_bundles",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_resource",
+      "table_name": "permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "action",
+        "resource_id",
+        "scope"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_resource_inheritance",
+      "table_name": "data_permission_rules",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "permission_level",
+        "permission_set_id",
+        "condition_display",
+        "dimension_code",
+        "condition",
+        "scope_mode",
+        "is_denied",
+        "inherit_to_children",
+        "propagate_to_parents",
+        "source_table",
+        "source_id",
+        "expires_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_rule",
+      "table_name": "permission_rules",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_set",
+      "table_name": "permission_sets",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "priority"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_set_data_permission",
+      "table_name": "permission_set_data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_set_dimension_scope",
+      "table_name": "permission_set_dimension_scopes",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_set_dimension_scopes",
+      "table_name": "permission_set_dimension_scopes",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "permission_set_permission",
+      "table_name": "permission_set_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "product",
+      "table_name": "products",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "child_count"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "relationship",
+      "table_name": "relationships",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "product_code",
+        "version_code",
+        "relation_type_name",
+        "relation_type_name_en",
+        "relation_category",
+        "source_bo_name",
+        "target_bo_name",
+        "category_label",
+        "category_type",
+        "activity_label",
+        "domain_relation",
+        "sub_domain_relation",
+        "module_relation",
+        "is_in_scope",
+        "source_domain_name",
+        "source_sub_domain_name",
+        "source_service_module_name",
+        "target_domain_name",
+        "target_sub_domain_name",
+        "target_service_module_name",
+        "version_name"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "role",
+      "table_name": "roles",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "role_data_permission",
+      "table_name": "role_data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "role_dimension_scope",
+      "table_name": "role_dimension_scopes",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "role_permission",
+      "table_name": "role_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "scheduled_task",
+      "table_name": "scheduled_tasks",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "service_module",
+      "table_name": "service_modules",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "product_code",
+        "version_code",
+        "sub_domain_code",
+        "domain_name",
+        "sub_domain_name",
+        "version_name",
+        "relation_count",
+        "child_count",
+        "bo_density"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "sub_domain",
+      "table_name": "sub_domains",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at",
+        "product_code",
+        "version_code",
+        "domain_code",
+        "domain_name",
+        "version_name",
+        "relation_count",
+        "child_count",
+        "bo_density"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "task_execution",
+      "table_name": "task_executions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "task_queue",
+      "table_name": "task_queues",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "test_objects",
+      "table_name": "test_objects",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "test_table",
+      "table_name": "test_table",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "user",
+      "table_name": "users",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "status_entered_at",
+        "updated_at",
+        "current_status_duration_days",
+        "inactive_days",
+        "account_age_days"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "version",
+      "table_name": "versions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "code",
+        "status",
+        "updated_at",
+        "product_code",
+        "product_name",
+        "child_count"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "new_object",
+      "table_name": "new_objects",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    }
+  ],
+  "timestamp": "2026-09-23T21:40:53.788939"
+}
