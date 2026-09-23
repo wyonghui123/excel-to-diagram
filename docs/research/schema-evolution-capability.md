@@ -1,7 +1,7 @@
 # Schema Evolution Capability — 整体方案
 
-> **版本**:v3.0(从 v1.0/v1.1/v2.0 收敛合并)
-> **日期**:2026-09-18
+> **版本**:v3.2 (v3.0 + 第四次研究 MDL + 第五次研究 EP 库 + PoC A/B/C 实证)
+> **日期**:2026-09-22(v3.2 升级)
 > **作者**:AI Agent + 团队 review
 > **文档类型**:战略 + 战术一体化方案
 > **性质**:单一真相源,所有"schema 演化能力建设"的入口文档
@@ -20,7 +20,7 @@
 |---|---|---|
 | **D1** | **范式转移**:从"规范驱动"→"识别驱动" | 规范是治标,识别才是治本 |
 | **D2** | **3 支柱权重**:业务架构 60% > 部署 20% > schema 10% | 反推我们历史事故分布 |
-| **D3** | **可测试先行**:3 个 PoC(修正后 1.2-1.7 人天) → 验证后再投入 | 避免"规范过载"陷阱(详见 §9.5 第三次研究) |
+| **D3** | **可测试先行**:4 个 PoC(修正后 1.7-3.2 人天) → 验证后再投入 | 避免"规范过载"陷阱(详见 §9.5 第三次 + 第四次研究) |
 
 ### 0.3 关键论断(反对过度规范化)
 
@@ -122,7 +122,9 @@
 
 **实证**: 2026-09-18 prod 部署 P0 三件套教训 — restart false-negative → abort → 误回滚风险。B1+B2 已治标。
 
-### 2.4 支柱 C:Schema 规范(10%)—精简到 3 条
+### 2.4 支柱 C:Schema 规范(10%)—7 子原语(v3.2 升级)
+
+> **v3.2 升级**:第五次研究新增 C6(执行模式必选)+ C7(回退路径必填)。原 C1-C5 不变。
 
 #### 子原语 C1:Expand-Contract 强制
 
@@ -144,6 +146,26 @@
 #### 子原语 C3:单 Migration 短小
 
 单个 migration < 30 行 SQL/Python(不含 docstring)。**长 = 必然耦合 = 必然可拆 = 必须拆**。
+
+#### 子原语 C6:Execution Pattern 必选(第五次研究新增)
+
+**必填字段**:`execution_pattern: EP1-EP8` (详见 §11)。
+
+**决策依据**: §11.3 决策树(变更类型 × 表大小 × DB 引擎 × 应用层改造)
+
+**验证工具**: D4 审查阶段 `meta/tools/migration_lint.py` 机读校验(PoC E)
+
+**不通过的后果**:**阻断 PR merge**
+
+#### 子原语 C7:Rollback Path 必填(第五次研究新增)
+
+**必填字段**:`rollback_strategy: A/B/C`
+
+- **A 自动 undo**(Flyway undo): 仅适合纯 schema 变更,**数据变更不可逆**
+- **B 新 migration 修补**(Forward-fix): 业内**主流推荐**(Flyway 官方文档)
+- **C DB 快照 + 还原**: 大改动需停机,**当前项目默认不启用**
+
+**当前项目默认 B**(v089 即 B)。
 
 #### 不在规范里的(避免过载)
 
@@ -305,6 +327,45 @@
 
 **建议**:PoC D 暂缓,等迁移到 PostgreSQL 时再考虑。
 
+### 4.7 PoC E:Migration Lint(第五次研究新增,v3.2)
+
+**目的**:在 PR 阶段机读校验 `execution_pattern` + `rollback_strategy` 两个必填字段。
+
+**假设**:**H5**: 通过静态 lint 强制填写 EP/回退字段,可显著降低"未指定执行模式"导致的 prod 锁表事故。
+
+| 项 | 内容 |
+|---|---|
+| 投入 | 0.5 人天(基于 AST 解析 + YAML schema 校验) |
+| 产出 | `meta/tools/migration_lint.py` |
+| 集成点 | PR CI hook(类似 PoC B 的 ref_graph CI 阻断) |
+
+**实现核心**:
+```python
+def lint_migration(migration_path: str) -> List[Issue]:
+    issues = []
+    spec = load_migration_spec(migration_path)  # 解析 .migration_spec/vXXX.yaml
+    if 'execution_pattern' not in spec:
+        issues.append(Issue.MISSING_EXECUTION_PATTERN(migration_path))
+    if 'rollback_strategy' not in spec:
+        issues.append(Issue.MISSING_ROLLBACK_STRATEGY(migration_path))
+    if spec.get('execution_pattern') not in {f'EP{i}' for i in range(1, 9)}:
+        issues.append(Issue.INVALID_EXECUTION_PATTERN(spec.get('execution_pattern')))
+    # EP4-EP8 在 SQLite 上不可用
+    if spec.get('execution_pattern') in {'EP2', 'EP3', 'EP4', 'EP8'}:
+        issues.append(Issue.EP_NOT_SUPPORTED_ON_SQLITE(spec['execution_pattern']))
+    return issues
+```
+
+**成功标准**:
+- [ ] 检测"缺 execution_pattern" 100% 命中
+- [ ] 检测"缺 rollback_strategy" 100% 命中
+- [ ] 检测"SQLite 上用 EP2-EP8" 100% 命中
+- [ ] 退出码语义:有 issue → exit 1(CI 阻断)
+
+**失败标准**:
+- 误报率 > 10% → 改 strict 模式
+- 漏报(实际不合规但未告警) > 0 → 立即修复
+
 ---
 
 ## §5 行业最佳实践(对标)
@@ -456,7 +517,7 @@ PoC C 失败 → 改 strict → lenient 模式,再试
 
 ### 选项 B:先 PoC,验证后再决定(推荐)
 
-**做什么**: 原 2.5 人天 / **第三次研究修正后 1.2-1.7 人天**跑 3 个 PoC,验证后决策
+**做什么**: 原 2.5 人天 / **第三次+第四次研究修正后 1.7-3.2 人天**跑 4 个 PoC,验证后决策
 **适用**: 资源有限,需要证据再投入
 **核心修正**:PoC A 第一动作不是"建",而是"修 sync_schema.py import + 跑一次 diff"(0.2 人天实证)。详见 §9.5。
 
@@ -668,6 +729,32 @@ def run_prod_preflight(args):
 
 **关键点**:`deploy.sh` 加一行是**整个研究的成败点** —— 没有这个,drift_check 只是个一次性玩具。
 
+#### 阶段 5:执行层基建(0.5-1.5 人天,第五次研究新增)
+
+> **承接**:前三阶段完成"识别层闭环"后,第五次研究引入"执行层"概念。
+> **新增 PoC E**(见 §4.7):`migration_lint.py` 静态校验 EP/rollback 字段。
+
+| 动作 | 时间 | 产出 |
+|---|---|---|
+| 写 `meta/tools/migration_lint.py` | 0.3 人天 | 静态校验 `execution_pattern` + `rollback_strategy` 必填 |
+| 跑一次真实 lint(对 v001-v089 历史 migration) | 0.1 人天 | 历史 migration 合规报告 |
+| 接入 PR CI hook | 0.1 人天 | **强制点**(PR 缺 EP/rollback 即阻断) |
+
+**成功标准**:
+- [ ] 检测"缺 execution_pattern" 100% 命中
+- [ ] 检测"缺 rollback_strategy" 100% 命中
+- [ ] 历史 migration 合规率报告输出(预期 < 5%,作为 baseline)
+
+**失败标准**:
+- 误报率 > 10% → 改 strict 模式
+- 历史 migration 100% 不合规 → 说明 PoC C 的 lint 规则不切实际,需放宽
+
+**与原 §9.5.3 阶段 1-4 的关系**:
+- 阶段 1-4 = 识别层闭环(L1-L4 yaml 部分)
+- **阶段 5 = 执行层基建**(C6/C7 + PoC E)
+
+**合计工作量**:**1.2-1.7(识别) + 0.5-1.5(执行) = 1.7-3.2 人天**(从 §9.5 修正后 1.2-1.7 人天,扩展为完整闭环)。
+
 ### 9.5.4 修正后的"成功/失败标准"
 
 #### 整体成功标准(整个选项 B 走完)
@@ -821,13 +908,239 @@ python -m meta.tools.sync_schema --diff
 
 ---
 
-## §11 一句话
+## §11 Migration 执行模式库(第五次研究,v3.2 新增)
 
-> **"v3.0 把'演化能力'从'migration 规范'重新定义为'业务架构 + 部署 + schema 三支柱'(权重 60:20:10)。schema 规范精简到 3 条,业务架构 review 上升为最高优先级,识别系统 + 3 个 PoC 是可立即测试的下一步。失败也是学习。"**
+> **承接**:第四次研究(MDL 8 阶段)解决"如何设计",本节解决"如何执行"。
+> **关键命题**:给定设计好的 migration 文件,**执行策略**(EP1-EP8)的适用场景和代价。
+
+### 11.1 为什么"执行模式"和"设计模式"是两件事
+
+| 维度 | 第四次研究:设计模式 | 第五次研究:执行模式 |
+|---|---|---|
+| 关心什么 | migration 文件长什么样 | migration 文件怎么 apply 到 prod DB |
+| 输出 | migration SQL/Python 代码 | **执行策略**(单条 vs 拆分 vs 异步) |
+| 失败代价 | 代码写错 → review 时返工 | 锁表 30 分钟 → **整个 prod 不可用** |
+| 业内代表 | Expand-Contract / Branch By Abstraction | Online DDL / Backfill 分批 / 灰度 |
+
+### 11.2 EP 库总览(8 个执行模式)
+
+#### EP1:瞬时 DDL(Synchronous DDL)
+
+**定义**:同步执行 DDL,接受短暂锁表。
+
+**适用**:
+- 小表(< 10 万行)
+- 业务低峰期
+- 风险可控的变更(`ADD COLUMN NULL` / `ADD INDEX`)
+
+**风险**:大表**分钟级锁表**,主从延迟雪崩。
+
+**决策规则**:
+```
+if (table_rows < 100k) AND (变更类型 ∈ {ADD COLUMN NULL, ADD INDEX}) AND (低峰期):
+    → EP1 (瞬时)
+else:
+    → 评估 EP2-EP8
+```
+
+#### EP2:Online DDL(原生)— MySQL 5.6+ / PostgreSQL 11+
+
+**定义**:使用 DB 原生 Online DDL,内部实现"先复制 → 后切换"。
+
+**MySQL**:`ALTER TABLE ... ALGORITHM=INPLACE, LOCK=NONE`
+**PostgreSQL**:`ALTER TABLE ... CONCURRENTLY`(限于索引)
+
+**适用**:大表 `ADD COLUMN` / `ADD INDEX`,业务高峰期可接受轻微性能影响。
+
+**我们的现状**:**SQLite 不支持**。
+
+#### EP3:Concurrent Index(并发索引)
+
+**定义**:创建索引不锁表(仅阻塞写入,不阻塞读取)。
+
+**MySQL**:部分版本原生支持。
+**PostgreSQL**:`CREATE INDEX CONCURRENTLY` —— 业内金标准。
+**SQLite**:**不支持**。
+
+#### EP4:影子表 + 双写(Shadow Table + Dual Write)
+
+**定义**:创**新表(影子表)** → 应用层**双写**新旧表 → 后台**数据迁移** → 切读 → 删旧表。
+
+**业内代表**:
+- Facebook OnlineSchemaChange(2010)
+- GitHub gh-ost(2016)
+- Shopify pt-online-schema-change
+
+**适用**:大表 `ALTER COLUMN TYPE` / `DROP COLUMN` / 重命名
+
+**代价**:双倍存储(临时) + 双写应用层代码改造 + 数据迁移耗时。
+
+#### EP5:分批提交(Batched Backfill)
+
+**定义**:Backfill 大批量数据时,**分批**(每次 1 万行) + **间歇**(每批间 sleep)**提交**。
+
+**适用**:`UPDATE WHERE` 大批量回填,批量数据迁移。
+
+**关键参数**:
+- `batch_size = 10000`(业内经验值)
+- `sleep_ms = 100`(让其他 DML 能进来)
+- **必须有"已迁移到哪"的进度持久化**
+
+#### EP6:Backfill Async(异步后台任务)
+
+**定义**:把 Backfill 放到**应用层后台任务**,不阻塞 migration。
+
+**优势**:migration 阶段只做"加列"(快),backfill 在生产环境**慢慢跑**。
+
+**适用**:数据规模大,bashfill 可能**小时级**,业务可接受"新老数据暂时不一致"。
+
+#### EP7:Feature Flag + 应用层分支
+
+**定义**:**用 Feature Flag 控制**新代码路径的开启/关闭,migration 与应用层解耦。
+
+**业内代表**:Stripe / GitHub 批量回填
+
+**优势**:migration 失败 → 关 flag 即可,**无需回退 DB**。
+
+**适用**:复杂迁移(类型变更 + 应用层同步),长期演进(90 天 deprecate 周期)。
+
+#### EP8:gh-ost / pt-osc(影子表工具)
+
+**定义**:用外部工具实现 EP4,**自动管理影子表 + 双写 + 切读**。
+
+**优势**:**应用层零修改**(工具接管),可暂停 / 可恢复(binlog 位置记录)。
+
+**限制**:**MySQL only**,需要 binlog row 模式。
+
+### 11.3 决策框架:何时用哪个 EP?
+
+#### 11.3.1 决策树
+
+```
+Step 1: 变更类型是什么?
+│
+├── ADD COLUMN NULL → EP1 (瞬时)
+├── ADD COLUMN NOT NULL 无 DEFAULT → EP5 (分批 backfill) 或 EP6 (异步)
+├── ADD INDEX                    → EP3 (Concurrent Index) [PG/MySQL] 或 EP1 [SQLite]
+├── MODIFY COLUMN TYPE           → EP4 (影子表) 或 EP7 (Feature Flag)
+├── DROP COLUMN                  → EP4 (影子表 - 谨慎) 或 90 天 deprecate 后 EP1
+├── RENAME COLUMN                → EP7 (Feature Flag) 或 双写 EP4
+└── DROP TABLE                   → EP1 (瞬时) + 30 天 deprecate 检查
+
+Step 2: 表大小?
+│
+├── < 10万行    → EP1 (默认)
+├── 10万 - 100万 → 评估 Step 3
+└── > 100万     → EP4-EP8(必须)
+
+Step 3: DB 引擎?
+│
+├── SQLite      → 几乎只能用 EP1/EP5 (无 Online DDL)
+├── MySQL 5.6+  → EP2 / EP3 / EP4 / EP8 都支持
+└── PostgreSQL 11+ → EP2 / EP3 都支持, EP4 / EP8 需外部工具
+
+Step 4: 是否允许应用层改造?
+│
+├── 是           → EP4 / EP6 / EP7 都可以
+└── 否           → EP8 (gh-ost) 优先
+```
+
+#### 11.3.2 决策矩阵(速查表)
+
+| 变更类型 | 小表(< 10万) | 中表(10万-100万) | 大表(> 100万) |
+|---|---|---|---|
+| ADD COLUMN NULL | EP1 | EP1 | EP2/EP5 |
+| ADD COLUMN NOT NULL | EP1+EP5 | EP5 | EP5+EP6 |
+| ADD INDEX | EP1 | EP3 | EP3 |
+| MODIFY TYPE | EP1+EP7 | EP7 | EP4/EP7/EP8 |
+| DROP COLUMN | EP1(慎) | EP4 | EP4(90天) |
+| RENAME COLUMN | EP7 | EP7 | EP7 |
+| DROP TABLE | EP1+审计 | EP1+审计 | EP1+审计 |
+
+### 11.4 对我们项目的具体含义
+
+#### 11.4.1 现状盘点
+
+- **DB 引擎**:SQLite(`meta/architecture.db`,109 MB)
+- **SQLite 不支持**:EP2(Online DDL) / EP3(Concurrent Index) / EP4(影子表) / EP8(gh-ost)
+- **SQLite 部分支持**:EP5(分批) / EP6(应用层异步) / EP7(Feature Flag)
+- **当前主用**:EP1(瞬时)
+
+#### 11.4.2 我们的"现实选择集"
+
+| EP | 是否可用 | 备注 |
+|---|---|---|
+| EP1 瞬时 DDL | ✅ 主用 | SQLite 文件锁,小表秒级,大表分钟级 |
+| EP5 分批提交 | ✅ 可用 | Python 层 for-loop + commit + sleep |
+| EP6 Backfill Async | ✅ 可用 | 已有 `ai_async_task` 对象可复用 |
+| EP7 Feature Flag | ✅ 可用 | 通过 yaml 的 `enabled` 字段 + 代码分支 |
+| EP2/EP3/EP4/EP8 | ❌ 不可用 | SQLite 限制 |
+
+#### 11.4.3 SQLite 特定的"Online DDL 替代方案"
+
+| 场景 | 替代方案 |
+|---|---|
+| 大表 ALTER | **关闭服务 → 离线 ALTER → 重启** |
+| 大表 ADD INDEX | **关闭服务 → 离线加索引 → 重启**(SQLite 索引维护慢) |
+| 数据迁移 | EP5 分批 + EP6 异步 |
+| 紧急回退 | **保留 DB 文件 backup,失败可回滚** |
+
+#### 11.4.4 未来切引擎的迁移路径
+
+> **当我们从 SQLite 切到 PostgreSQL/MySQL 时**(无论是 v200 还是更早),EP 库会"激活":
+
+| 当前 SQLite 限制 | 切到 PG/MySQL 后可获得 |
+|---|---|
+| 无 Online DDL | EP2(原生) |
+| 无 Concurrent Index | EP3(`CREATE INDEX CONCURRENTLY`) |
+| 无影子表 | EP4(双写) / EP8(gh-ost) |
+
+**关键**:**EP7(Feature Flag)和 EP6(异步)与引擎无关,先实施可平滑迁移**。
+
+### 11.5 对 v3.2 子原语的补充
+
+#### 11.5.1 C6(Execution Pattern 必选)
+
+| 项 | 内容 |
+|---|---|
+| 必填字段 | `execution_pattern: EP1-EP8` |
+| 决策依据 | §11.3 决策树(变更类型 × 表大小 × DB 引擎 × 应用层改造) |
+| 验证工具 | D4 审查阶段 `meta/tools/migration_lint.py` 机读校验 |
+| 不通过的后果 | **阻断 PR merge** |
+| 成本 | ~0.3 人天 |
+
+#### 11.5.2 C7(Rollback Path 必填)
+
+| 策略 | 说明 | 当前项目使用 |
+|---|---|---|
+| A 自动 undo | 仅适合纯 schema 变更,**数据变更不可逆** | ❌ |
+| B 新 migration 修补 | 业内**主流推荐**(Flyway 官方) | ✅ **默认**(v089 即 B) |
+| C DB 快照 + 还原 | 大改动需停机 | ❌ |
+
+### 11.6 可立即落地的工作(优先级)
+
+| 优先级 | 工作 | 产出 | 工作量 |
+|---|---|---|---|
+| P0 | 把 EP1-EP8 + 决策树写入本文档 | 模式库单一真相源 | ✅ 本次完成 |
+| P1 | `meta/tools/migration_lint.py` 静态校验 | PoC E | 0.3 人天 |
+| P2 | 把 EP 决策集成到 `migration_runner.py` | 钩子函数 | 0.3 人天 |
+| P3 | 真实 case demo(v089 重新设计) | 案例文档 | 1-2 人天 |
+| 未来 | 切到 PG/MySQL 激活 EP2/EP3/EP8 | 与现有系统集成 | 3-5 人天 |
+
+### 11.7 一句话总结
+
+> **"识别"完成后,真正决定 prod 稳定的是"执行模式"。业内 8 个 EP(EP1-EP8)覆盖从瞬时到影子表的全光谱;我们当前在 SQLite 受限,但 EP7(Feature Flag) / EP6(异步) / EP5(分批) 仍然可用;v3.0 子原语 C1-C5 应升级到 C1-C7,新增 C6(执行模式必选)+ C7(回退路径必填)。"**
 
 ---
 
-**版本**: v3.0
+## §12 一句话(总)
+
+> **"v3.2 把'演化能力'从'migration 规范'重新定义为'业务架构 + 部署 + schema 三支柱'(权重 60:20:10)。识别层 100% 闭环(L1-L4 yaml 部分 + PoC A/B/C 已实证);执行层新增 C6(执行模式必选)+ C7(回退路径必填),通过 PoC E(migration lint)落地。schema 规范从 3 条升级到 7 条,业务架构 review 仍为最高优先级。失败也是学习。"**
+
+---
+
+**版本**: v3.2 (v3.0 + 第四次研究 + 第五次研究)
 **生效日期**: 2026-09-25(预留 1 周共识期)
+**下次 review 触发**: PoC A/B/C/E 任一失败 / 切引擎到 PG/MySQL / v100+
 **下次 review**: 2027-03-18
 **核心反馈渠道**: team + AI Agent
