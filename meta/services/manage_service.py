@@ -54,6 +54,8 @@ class ManageService:
         self.data_source = data_source
         self.rule_engine = rule_engine or RuleEngine(data_source)
         self.executor = ActionExecutor(data_source, self.rule_engine)
+        # [§6.5.3 P0] 审计表在平台库；复用 executor 已解析好的审计库, 避免重复逻辑
+        self.audit_ds = self.executor.audit_logger.audit_ds
         self.notification_service = ChangeNotificationService(data_source)
 
     def set_audit_user(self, user_id: Any = None, user_name: str = "",
@@ -73,7 +75,7 @@ class ManageService:
     def _get_latest_audit_log_id(self, object_type: str, object_id: Any) -> Optional[int]:
         """获取最近的审计日志ID"""
         try:
-            logs = self.data_source.find(
+            logs = self.audit_ds.find(
                 "audit_logs",
                 filters={"object_type": object_type, "object_id": str(object_id)},
                 order_by="id DESC",

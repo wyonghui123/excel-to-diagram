@@ -332,7 +332,12 @@ def _batch_enrich_updated_at(
     if registry.is_materialized(table_name):
         result_map = _batch_read_materialized(ds, table_name, pending_ids)
     elif strategy == STRATEGY_AUDIT_DERIVED:
-        result_map = _batch_read_audit_derived(ds, object_type, pending_ids)
+        # [§6.5.3 P0] audit_logs 是平台表：路由开启时业务库是应用库, 那里没有
+        # audit_logs ⇒ 若跟随业务库读会取不到值, updated_at 静默变空。
+        from meta.core.datasource import resolve_audit_data_source
+        result_map = _batch_read_audit_derived(
+            resolve_audit_data_source(ds), object_type, pending_ids
+        )
     else:
         result_map = {}
 

@@ -169,8 +169,13 @@ class AuditLogger:
     
     AUDIT_TABLE = "audit_logs"
     
-    def __init__(self, data_source: DataSource, enabled: bool = True):
+    def __init__(self, data_source: DataSource, enabled: bool = True,
+                 audit_data_source: DataSource = None):
         self.ds = data_source
+        # [§6.5.3 P0] 审计读写恒走平台库（APP_DB_ROUTING 关闭时等同业务库）。
+        # 应用库里没有 audit_logs / users —— 跟随业务库会静默写失败、读不到。
+        from meta.core.datasource import resolve_audit_data_source
+        self.audit_ds = audit_data_source or resolve_audit_data_source(data_source)
         self.enabled = enabled
         self._current_user: Dict[str, Any] = {}
         self._agent_context: Dict[str, Any] = {}
@@ -218,7 +223,8 @@ class AuditLogger:
             display_name = None
             if effective_user_id:
                 try:
-                    rows = self.ds.execute(
+                    # [§6.5.3 P0] users 是平台表 —— 恒从审计(平台)库查
+                    rows = self.audit_ds.execute(
                         "SELECT display_name, username FROM users WHERE id = ?",
                         (effective_user_id,),
                     ).fetchall()
@@ -250,7 +256,7 @@ class AuditLogger:
                     if v is not None:
                         extra_data[k] = v
 
-            audit_svc = AuditService(self.ds)
+            audit_svc = AuditService(self.audit_ds)
             return audit_svc.log(
                 object_type=object_type,
                 object_id=object_id,
@@ -1663,7 +1669,8 @@ class ActionExecutor:
         for vf in virtual_fields:
             field_id = vf.id
             try:
-                rows = self.ds.query(
+                # [§6.5.3 P0] v_audit_all 是平台库视图 —— 恒从审计库读
+                rows = self.audit_logger.audit_ds.query(
                     "SELECT MAX(created_at_epoch) as max_epoch, MAX(created_at) as max_iso "
                     "FROM v_audit_all WHERE object_type = ? AND object_id = ? "
                     "AND action IN ('CREATE', 'UPDATE')",
@@ -2360,9 +2367,12 @@ class ActionExecutor:
             # version 的 audit log 仍然落库, 不符合 all-or-nothing).
             # 事务内直接同步调用 audit_fn, 让 audit insert 加入当前
             # 事务, 共享 commit/rollback 生命周期.
+            # [§6.5.3 P0] 事务判断与包装都用**审计库**：审计可能落在平台库, 而业务
+            # 事务在应用库 —— 用业务库的 in_transaction 判断会误判"已在事务中"。
+            audit_ds = self.audit_logger.audit_ds
             in_txn = False
             try:
-                in_txn = bool(getattr(self.ds, 'in_transaction', False))
+                in_txn = bool(getattr(audit_ds, 'in_transaction', False))
             except Exception:
                 in_txn = False
             if in_txn:
@@ -2396,7 +2406,7 @@ class ActionExecutor:
                     user_agent=user_agent,
                 )
             else:
-                with self.ds.transaction():
+                with audit_ds.transaction():
                     audit_fn(
                         trace_id=trace_id,
                         transaction_id=transaction_id,

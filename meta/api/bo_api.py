@@ -123,12 +123,19 @@ def _extract_assoc_query_params(args):
 
 
 def _get_data_source():
+    """平台 BO 的默认数据源，但**优先返回请求绑定的应用库**（§6.5.3 改动 3）。
+
+    应用 BO（如 `greeting`）同样由本模块的 `/api/v2/bo/<object_type>` 提供，
+    归属靠 `app_registry` 的注册期映射推断、由 `server.py` 的 `before_request`
+    完成绑定。未绑定（平台请求 / `APP_DB_ROUTING=0`）→ 平台库，行为不变。
+    """
     global _data_source
     if _data_source is None:
         from meta.core.datasource import get_data_source
         db_path = get_meta_db_path()
         _data_source = get_data_source("sqlite", database=db_path)
-    return _data_source
+    from meta.core.datasource import resolve_data_source
+    return resolve_data_source(_data_source)
 
 
 # ── [R0-2 2026-06-11] 422 ComputationNotSupportedError 统一拦截 ──
@@ -237,7 +244,9 @@ def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
         return
     try:
         from meta.services.audit_service import AuditService
-        audit_service = AuditService(_get_data_source())
+        # [§6.5.3 P0] 变更历史来自 audit_logs —— 恒从平台库读（应用库无审计表）
+        from meta.core.datasource import resolve_audit_data_source
+        audit_service = AuditService(resolve_audit_data_source(_get_data_source()))
         record['change_history'] = audit_service.get_object_history(
             object_type, obj_id, include_children=True
         )
@@ -1019,7 +1028,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
         if meta_obj and meta_obj.associations:
             assoc_def = meta_obj.associations.get(association_name)
             if assoc_def and hasattr(assoc_def, 'through') and assoc_def.through:
-                ds = bo._data_source
+                ds = bo._ds()  # [§6.5.3 改动 3] 关联中间表属业务数据 → 随请求库
                 sql = f"SELECT * FROM {assoc_def.through} WHERE id = ?"
                 logger.info(f"[unassign] Looking up record: {sql} with params: [{association_record_id}]")
                 cursor = ds.execute(sql, [int(association_record_id)])
@@ -1122,7 +1131,7 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
         if meta_obj and meta_obj.associations:
             assoc_def = meta_obj.associations.get(association_name)
             if assoc_def and hasattr(assoc_def, 'through') and assoc_def.through:
-                ds = bo._data_source
+                ds = bo._ds()  # [§6.5.3 改动 3] 关联中间表属业务数据 → 随请求库
                 tgt_key = assoc_def.target_key if hasattr(assoc_def, 'target_key') else 'target_id'
                 placeholders = ','.join(['?' for _ in association_record_ids])
                 sql = f"SELECT id, {tgt_key} FROM {assoc_def.through} WHERE id IN ({placeholders})"
@@ -1238,7 +1247,7 @@ def batch_delete_bo(object_type):
     
     try:
         bo = _get_bo()
-        manage_service = ManageService(bo._data_source)
+        manage_service = ManageService(bo._ds())  # [§6.5.3 改动 3]
         
         # 设置审计用户
         current_user = getattr(g, 'current_user', None) or {}

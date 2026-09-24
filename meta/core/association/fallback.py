@@ -181,6 +181,11 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
         )
 
         data_source = context.data_source
+        # [§6.5.3 P0] v_audit_all 是平台视图（应用库只建应用 BO 表，不含审计表）。
+        # 审计查询恒走平台库；_query_child_ids / _query_relationship_ids 查的是
+        # 业务/元数据表，仍用业务 ds。
+        from meta.core.datasource import resolve_audit_data_source
+        audit_ds = resolve_audit_data_source(data_source)
         all_rows = []
 
         # === L1: 自身日志 ===
@@ -189,7 +194,7 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
         if action:
             l1_where = f"({l1_where}) AND action = ?"
             l1_params.append(action)
-        l1_rows = _execute_audit_query(data_source, l1_where, l1_params)
+        l1_rows = _execute_audit_query(audit_ds, l1_where, l1_params)
         for r in l1_rows:
             r['_source'] = 'own'
         all_rows.extend(l1_rows)
@@ -200,7 +205,7 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
         if action:
             l2_where = f"({l2_where}) AND action = ?"
             l2_params.append(action)
-        l2_rows = _execute_audit_query(data_source, l2_where, l2_params)
+        l2_rows = _execute_audit_query(audit_ds, l2_where, l2_params)
         for r in l2_rows:
             if r.get('action') in ('ASSOCIATE', 'DISSOCIATE', 'ASSIGN', 'REVOKE'):
                 r['_source'] = 'association_target'
@@ -223,7 +228,7 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
                     l3_where = f"({l3_where}) AND action = ?"
                     l3_params.append(action)
 
-                l3_rows = _execute_audit_query(data_source, l3_where, l3_params)
+                l3_rows = _execute_audit_query(audit_ds, l3_where, l3_params)
                 for r in l3_rows:
                     r['_source'] = 'child_object'
                     r['_child_type'] = child_type
@@ -245,7 +250,7 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
                         l3b_where = f"({l3b_where}) AND action = ?"
                         l3b_params = list(rel_ids) + [action]
 
-                    l3b_rows = _execute_audit_query(data_source, l3b_where, l3b_params)
+                    l3b_rows = _execute_audit_query(audit_ds, l3b_where, l3b_params)
                     for r in l3b_rows:
                         r['_source'] = 'relationship'
                     all_rows.extend(l3b_rows)

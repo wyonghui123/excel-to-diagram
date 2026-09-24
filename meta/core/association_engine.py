@@ -664,8 +664,11 @@ def _store_effective_ids(context: 'ActionContext', effective_ids: list) -> None:
 class AssociationEngine:
     def _write_audit_log(self, context: ActionContext, action: str,
                         tgt_type: str, tgt_id: int, association_name: str = None):
+        # [§6.5.3 P0] 审计表在平台库；context.data_source 在应用请求里是应用库,
+        # 应用库无 audit_logs ⇒ 跟随业务库会静默失败 (association_audit 吞异常)。
+        from meta.core.datasource import resolve_audit_data_source
         write_association_audit(
-            data_source=context.data_source,
+            data_source=resolve_audit_data_source(context.data_source),
             object_type=context.object_type,
             src_id=context.params.get('src_id'),
             tgt_type=tgt_type,
