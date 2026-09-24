@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional, Type
 from enum import Enum
+import contextvars
 import os
 import threading
 import time
@@ -576,3 +577,248 @@ def get_data_source_cache_stats() -> dict:
     """[V007.24] 获取缓存统计 (供 health check)"""
     with _data_source_cache_lock:
         return _data_source_cache_stats.copy()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 请求级数据源绑定（多产品平台 §6.5）
+#
+# 背景: 应用（app）的数据应落在自己的库（<SQLITE_DB_DIR>/<app_id>.db），
+#       而平台级数据（用户/角色/权限/菜单）恒在 platform.db。
+#       拦截器链与 BO 框架**没有 app_id 概念**，因此需要一个"请求级"的
+#       数据源出口，由请求入口按路由前缀绑定，业务代码按需取用。
+#
+# 为什么用 contextvars 而不是 Flask `g`:
+#   `g` 只在 Flask 请求上下文内有效，一旦调用链进入线程池 / 异步组件就会失效；
+#   contextvars 由运行时不变量管理，读写在任意深度都一致。
+#
+# ⚠️ 重要语义（与方案文档的表述有出入，以代码为准）:
+#   contextvars **不会**自动传播进新起的 `threading.Thread` —— 新线程看到的是
+#   default（None）。这对本项目是**期望行为**：后台写线程（sql_write_queue /
+#   async_audit_writer）不应该"继承"某个请求的 app 绑定，否则会把数据写错库。
+#   后台组件需要目标数据源时，应当**显式接收** data_source 参数。
+# ─────────────────────────────────────────────────────────────────────────────
+
+_bound_app_id: contextvars.ContextVar = contextvars.ContextVar(
+    'bound_app_id', default=None
+)
+_bound_app_data_source: contextvars.ContextVar = contextvars.ContextVar(
+    'bound_app_data_source', default=None
+)
+
+# [多产品平台 §6.5.3] 应用库路由总开关。默认关闭 ⇒ 存量部署零行为变化。
+ENV_APP_DB_ROUTING = "APP_DB_ROUTING"
+
+
+def is_app_db_routing_enabled() -> bool:
+    """应用库路由开关（`APP_DB_ROUTING`，默认关闭）。
+
+    关闭时（默认）：
+    - 应用表仍建在平台库（`app_registry._sync_app_tables`）
+    - 请求不做绑定（`server.py` 的 `bind_app_data_source`）
+    - 读取不分流（`bo_api._get_data_source` / `BOFramework` 取用点）
+    ⇒ 与改造前**完全一致**，存量部署零风险。
+
+    打开时（`APP_DB_ROUTING=1`）：上述三处同时生效（§6.5.3 改动 1~3）。
+    """
+    raw = os.environ.get(ENV_APP_DB_ROUTING, "") or ""
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def open_app_data_source(app_id: str, database_file: str = ''):
+    """按 `app_id` 打开（或复用缓存的）应用库数据源，**不触碰请求上下文**。
+
+    与 `bind_app_data_source()` 的唯一区别：本函数只做"解析路径 → 建目录 →
+    经 `get_data_source()` 缓存取用"，**不设置 contextvars**。
+
+    用途：启动期的建表流程（`app_registry._sync_app_tables`）需要拿到应用库，
+    但启动期没有请求上下文 —— 若走 `bind_app_data_source()` 会把绑定留在
+    主线程 contextvars 上，污染后续所有请求（§6.5.3 改动 2）。
+
+    Args:
+        app_id: 应用标识（须与目录名一致）。可能来自 URL 路由，故做安全校验。
+        database_file: `app.yaml` 的 `database.file`（只取文件名部分）。
+
+    Raises:
+        ValueError: `app_id` 为空或含路径分隔符（见 `db_path.get_app_db_path`）。
+    """
+    from meta.core.db_path import get_app_db_path
+
+    db_path = get_app_db_path(app_id, database_file)
+    app_dir = os.path.dirname(db_path)
+    if app_dir and not os.path.isdir(app_dir):
+        os.makedirs(app_dir, exist_ok=True)
+
+    return get_data_source('sqlite', database=db_path)
+
+
+def bind_app_data_source(app_id: str, database_file: str = ''):
+    """把当前执行上下文绑定到某个应用库，并返回该应用的数据源。
+
+    首次绑定会按 `get_app_db_path()` 解析路径（目录不存在则创建），
+    再经 `get_data_source()` 缓存取用 —— 因此同一应用重复绑定得到同一实例。
+
+    Args:
+        app_id: 应用标识（须与目录名一致）。可能来自 URL 路由，故做安全校验。
+        database_file: `app.yaml` 的 `database.file`（只取文件名部分）。
+
+    Returns:
+        DataSource: 该应用的数据源实例。
+
+    Raises:
+        ValueError: `app_id` 为空或含路径分隔符（见 `db_path.get_app_db_path`）。
+    """
+    data_source = open_app_data_source(app_id, database_file)
+    _bound_app_id.set(app_id)
+    _bound_app_data_source.set(data_source)
+    _v007_24_logger.debug(
+        "[§6.5] bound app data source: app_id=%s", app_id
+    )
+    return data_source
+
+
+def unbind_app_data_source() -> None:
+    """解除当前执行上下文的应用库绑定（回到平台库语义）。
+
+    刻意只做"清空"而非"恢复到上一层"—— 应用之间不直接互相调用
+    （跨应用走事件，§6.14），因此不存在嵌套绑定的场景。
+    """
+    _bound_app_id.set(None)
+    _bound_app_data_source.set(None)
+
+
+def get_bound_app_id() -> Optional[str]:
+    """返回当前上下文绑定的 app_id（未绑定则为 None）。"""
+    return _bound_app_id.get()
+
+
+def get_bound_app_data_source():
+    """返回当前上下文绑定的应用数据源（未绑定则为 None）。"""
+    return _bound_app_data_source.get()
+
+
+def resolve_data_source(default=None):
+    """请求级解析：已绑定应用库则返回应用数据源，否则返回 `default`。
+
+    这是业务代码的**统一取用出口**：把平台数据源作为 `default` 传入，
+    应用请求自动落到应用库，平台请求（未绑定）行为完全不变。
+    """
+    return _bound_app_data_source.get() or default
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [§6.5.3 P0] 审计数据源解析 —— 模型乙：平台表（含审计）恒从平台库读写
+#
+# 背景: 审计写入点常与业务数据**共用**同一个 ActionExecutor，而后者在应用请求里
+#       已被路由到应用库。应用库只建应用 BO 表（SchemaMigrator 只建传入的 BO），
+#       不含 audit_logs / audit_logs_archive / v_audit_all，也不含 users ——
+#       审计若跟随绑定写向应用库会**静默失败**（_write_audit_log_v2 只记 warning），
+#       同时 updated_at 等审计派生字段读不到而变空。
+# ─────────────────────────────────────────────────────────────────────────────
+def get_platform_data_source():
+    """返回平台库数据源，**忽略**请求级应用绑定。
+
+    优先复用全局 BOFramework 持有的实例 —— 它在启动期已被显式设为平台库
+    （server.py），且尊重 `SQLITE_DB_PATH` / `ARCH_DB_PATH` 覆盖；未初始化
+    （或循环导入）时回落到 `get_meta_db_path()`。
+    """
+    try:
+        from meta.core.bo_framework import bo_framework
+        data_source = getattr(bo_framework, '_data_source', None)
+        if data_source is not None:
+            return data_source
+    except Exception:  # noqa: BLE001 - 循环导入 / 未初始化, 走路径兜底
+        pass
+    from meta.core.db_path import get_meta_db_path
+    return get_data_source('sqlite', database=get_meta_db_path())
+
+
+def resolve_audit_data_source(business_data_source):
+    """审计读写的数据源（§6.5.3 P0）。
+
+    `APP_DB_ROUTING=0`（默认）→ 与业务库一致（改造前行为, 零变化）
+    `APP_DB_ROUTING=1`        → 恒为平台库
+
+    默认关闭时返回 `business_data_source` 是刻意的：路由关闭时应用 BO 本就建在
+    平台库，两者是同一个实例，语义与改造前完全一致（存量零风险）。
+    """
+    if not is_app_db_routing_enabled():
+        return business_data_source
+    return get_platform_data_source()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 多库关闭编排（多产品平台 §6.5.3 改动 4 / §6.5.1 F3 论据三）
+#
+# 背景: 原先 server.py 的 _cleanup_resources() 只处理**一个** data_source。
+#       多库之后，每个库各自持有一个 WriteQueue（写线程 daemon=True）——
+#       未被 flush/stop 的库会在进程退出时**静默丢失在途写入**。
+#       本函数把"关闭编排"收口到数据源层，供 server.py 调用。
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def shutdown_all_data_sources(timeout: float = 30.0,
+                              final_checkpoint: bool = True,
+                              primary=None) -> Dict[str, Any]:
+    """关闭进程前统一编排：遍历**所有活跃数据源**逐个收尾。
+
+    每个数据源按序执行:
+    1. `write_queue.flush()` —— 等在途写入落盘
+    2. `write_queue.stop()`  —— 停写线程
+    3. 最终 `PRAGMA wal_checkpoint(TRUNCATE)` —— 用独立连接做，避免依赖已停的写队列
+    4. `pool.shutdown()` —— 释放连接池
+
+    Args:
+        timeout: 单个数据源的 flush/stop 超时（秒）。
+        final_checkpoint: 是否做最终 WAL checkpoint（TRUNCATE）。
+        primary: 主数据源；若它不在缓存中也会被纳入（防止遗漏平台库）。
+
+    Returns:
+        dict: `{"total": n, "db_paths": [...], "errors": [{"db_path":..., "error":...}]}`
+        —— 返回结构可断言，便于测试与运维日志。
+    """
+    import sqlite3
+
+    with _data_source_cache_lock:
+        targets = [(key[1], ds) for key, ds in _data_source_cache.items()]
+
+    if primary is not None and all(ds is not primary for _, ds in targets):
+        targets.append((getattr(primary, '_db_path', ''), primary))
+
+    result: Dict[str, Any] = {"total": len(targets), "db_paths": [], "errors": []}
+
+    for db_path, ds in targets:
+        result["db_paths"].append(db_path)
+
+        write_queue = getattr(ds, '_write_queue', None)
+        # 只在队列仍在运行时收尾：已停止的队列 flush() 会阻塞满 timeout
+        # （写线程已退出，无人消费 barrier），见 sql_write_queue.stop() 的幂等说明。
+        if write_queue is not None and getattr(write_queue, 'is_running', False):
+            try:
+                write_queue.flush(timeout=timeout)
+            except Exception as exc:  # noqa: BLE001 - 关闭路径不能因单个库失败而中断
+                result["errors"].append({"db_path": db_path, "error": f"flush: {exc}"})
+            try:
+                write_queue.stop(timeout=timeout)
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append({"db_path": db_path, "error": f"stop: {exc}"})
+
+        if final_checkpoint and db_path and db_path != ':memory:':
+            try:
+                conn = sqlite3.connect(db_path, timeout=10)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append({"db_path": db_path, "error": f"checkpoint: {exc}"})
+
+        pool = getattr(ds, '_pool', None)
+        if pool is not None:
+            try:
+                pool.shutdown()
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append({"db_path": db_path, "error": f"pool: {exc}"})
+
+    _v007_24_logger.info(
+        "[§6.5] shutdown orchestration: %d data source(s), %d error(s)",
+        result["total"], len(result["errors"]),
+    )
+    return result

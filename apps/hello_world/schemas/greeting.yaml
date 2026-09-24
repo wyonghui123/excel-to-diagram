@@ -1,0 +1,156 @@
+# ============================================
+# hello_world 应用的示例业务对象
+#
+# 用途: 验证应用包能被平台加载并注册 schema（PoC 1）
+# 结构参照 meta/schemas/_template.yaml
+# ============================================
+
+id: greeting
+name: 问候语
+table_name: greetings
+description: hello_world 应用的示例业务对象
+
+semantics:
+  meaning: 用于验证应用包加载的示例业务对象
+  category: business_entity
+  business_key: [code]
+
+deletion_policy:
+  mode: restrict
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    description: 问候语唯一编码
+    semantics:
+      business_key: true
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 问候语显示名称
+    semantics:
+      display_name: true
+
+  - id: message
+    name: 问候内容
+    type: string
+    db_column: message
+    max_length: 500
+    nullable: true
+    description: 实际问候文本
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_greeting_code
+
+ui_view_config:
+  list:
+    title: 问候语管理
+    searchFields:
+      - code
+      - name
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: message
+        width: 250
+        type: ellipsis
+    actions:
+      - id: create
+        label: 新建
+        icon: plus
+        type: primary
+        permission: hello_world:create
+
+  form:
+    title: 问候语信息
+    layout: vertical
+    groups:
+      - id: basic
+        label: 基本信息
+        columns: 2
+        fields:
+          - code
+          - name
+      - id: content
+        label: 内容
+        columns: 1
+        fields:
+          - message
+
+  detail:
+    layout: tabs
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - message
+
+category_config:
+  create_permission: hello_world:create
+  update_permission: hello_world:update
+  delete_permission: hello_world:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

@@ -68,6 +68,16 @@ class BOFramework:
     def interceptors(self) -> List[Interceptor]:
         return self._interceptors
 
+    def _ds(self):
+        """[多产品平台 §6.5.3 改动 3] 请求级数据源解析。
+
+        已绑定应用库（应用请求）→ 应用数据源；未绑定（平台请求 /
+        `APP_DB_ROUTING=0`）→ 本实例的平台数据源。业务资源走这里，
+        平台资源（用户/角色/权限/菜单/登录审计）由各自 API 显式持有平台库。
+        """
+        from meta.core.datasource import resolve_data_source
+        return resolve_data_source(self._data_source)
+
     def register_interceptor(self, interceptor: Interceptor) -> 'BOFramework':
         self._interceptors.append(interceptor)
         self._interceptors.sort(key=lambda x: x.priority)
@@ -117,11 +127,14 @@ class BOFramework:
         if not meta_object:
             return ActionResult(success=False, message=f"Unknown object type: {object_type}")
 
+        # [§6.5.3 改动 3] 请求级解析一次：应用请求 → 应用库，平台请求 → 平台库。
+        # 后续 ActionContext / 事务 / 深插入均以它为准，保证同一次动作只碰一个库。
+        ds = self._ds()
         context = ActionContext(
             meta_object=meta_object,
             action=action,
             params=params,
-            data_source=self._data_source,
+            data_source=ds,
             **self._user_context,
         )
 
@@ -147,8 +160,8 @@ class BOFramework:
             _should_wrap = (
                 not _DISABLE
                 and action in _AUTO_TXN_ACTIONS
-                and hasattr(self._data_source, 'in_transaction')
-                and not self._data_source.in_transaction
+                and hasattr(ds, 'in_transaction')
+                and not ds.in_transaction
             )
 
             if _should_wrap:
@@ -273,7 +286,7 @@ class BOFramework:
         return self.execute(object_type, 'crud_query', params)
 
     def deep_insert(self, object_type: str, params: Dict[str, Any]) -> ActionResult:
-        return self._deep_insert_engine.execute(object_type, params, self._data_source)
+        return self._deep_insert_engine.execute(object_type, params, self._ds())
 
     def register_action_handler(self, object_type: str, action_id: str, handler) -> 'BOFramework':
         if object_type not in self._action_handlers:
@@ -482,8 +495,9 @@ class BOFramework:
     def begin_transaction(self, isolation_level: str = 'READ_COMMITTED') -> str:
         import uuid
         transaction_id = str(uuid.uuid4())[:8]
-        if hasattr(self._data_source, 'begin_transaction'):
-            self._data_source.begin_transaction()
+        ds = self._ds()  # [§6.5.3 改动 3] 与 execute() 解析结果一致，避免跨库事务
+        if hasattr(ds, 'begin_transaction'):
+            ds.begin_transaction()
         logger.info(f"[BOFramework] Transaction started: {transaction_id}")
         return transaction_id
 
@@ -496,12 +510,13 @@ class BOFramework:
         - SQLite state verification after commit
         - Prometheus metrics + structured log
         """
+        ds = self._ds()  # [§6.5.3 改动 3]
         config = get_runtime_config()
         success = True
         err_msg = None
         try:
-            if hasattr(self._data_source, 'commit'):
-                self._data_source.commit()
+            if hasattr(ds, 'commit'):
+                ds.commit()
             logger.info(f"[BOFramework] Transaction committed: {transaction_id}")
         except Exception as e:
             err_msg = str(e)
@@ -512,11 +527,11 @@ class BOFramework:
         finally:
             # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
             try:
-                if hasattr(self._data_source, '_in_transaction'):
-                    self._data_source._in_transaction = False
-                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                    if hasattr(self._data_source._write_queue, '_in_transaction'):
-                        self._data_source._write_queue._in_transaction = False
+                if hasattr(ds, '_in_transaction'):
+                    ds._in_transaction = False
+                if hasattr(ds, '_write_queue') and ds._write_queue:
+                    if hasattr(ds._write_queue, '_in_transaction'):
+                        ds._write_queue._in_transaction = False
             except Exception as e:
                 log_tx_event('commit', transaction_id, 'state_reset_error', str(e))
                 success = False
@@ -524,16 +539,16 @@ class BOFramework:
             # [V007.15 L2] 显式调 conn.rollback() 强制重置 (防御性)
             if config.use_explicit_conn_rollback:
                 try:
-                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                        wq = self._data_source._write_queue
+                    if hasattr(ds, '_write_queue') and ds._write_queue:
+                        wq = ds._write_queue
                         if hasattr(wq, '_write_conn') and wq._write_conn:
                             wq._write_conn.rollback()
                 except Exception:
                     pass  # 可能在 tx 外, 不算 failure
 
             # [V007.15 L2 验证] 用 savepoint probe 验证 SQLite 实际状态
-            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                wq = self._data_source._write_queue
+            if hasattr(ds, '_write_queue') and ds._write_queue:
+                wq = ds._write_queue
                 if hasattr(wq, '_write_conn') and wq._write_conn:
                     actual = get_tx_state(wq._write_conn)
                     if actual != TxState.NONE:
@@ -553,12 +568,13 @@ class BOFramework:
         """
         [V007.15 L2] rollback with state-aware defense + observability.
         """
+        ds = self._ds()  # [§6.5.3 改动 3]
         config = get_runtime_config()
         success = True
         err_msg = None
         try:
-            if hasattr(self._data_source, 'rollback'):
-                self._data_source.rollback()
+            if hasattr(ds, 'rollback'):
+                ds.rollback()
             logger.info(f"[BOFramework] Transaction rolled back: {transaction_id}")
         except Exception as e:
             err_msg = str(e)
@@ -569,11 +585,11 @@ class BOFramework:
         finally:
             # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
             try:
-                if hasattr(self._data_source, '_in_transaction'):
-                    self._data_source._in_transaction = False
-                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                    if hasattr(self._data_source._write_queue, '_in_transaction'):
-                        self._data_source._write_queue._in_transaction = False
+                if hasattr(ds, '_in_transaction'):
+                    ds._in_transaction = False
+                if hasattr(ds, '_write_queue') and ds._write_queue:
+                    if hasattr(ds._write_queue, '_in_transaction'):
+                        ds._write_queue._in_transaction = False
             except Exception as e:
                 log_tx_event('rollback', transaction_id, 'state_reset_error', str(e))
                 success = False
@@ -581,16 +597,16 @@ class BOFramework:
             # [V007.15 L2] 显式 conn.rollback() 兜底
             if config.use_explicit_conn_rollback:
                 try:
-                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                        wq = self._data_source._write_queue
+                    if hasattr(ds, '_write_queue') and ds._write_queue:
+                        wq = ds._write_queue
                         if hasattr(wq, '_write_conn') and wq._write_conn:
                             wq._write_conn.rollback()
                 except Exception:
                     pass
 
             # [V007.15 L2 验证] savepoint probe
-            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
-                wq = self._data_source._write_queue
+            if hasattr(ds, '_write_queue') and ds._write_queue:
+                wq = ds._write_queue
                 if hasattr(wq, '_write_conn') and wq._write_conn:
                     actual = get_tx_state(wq._write_conn)
                     if actual != TxState.NONE:

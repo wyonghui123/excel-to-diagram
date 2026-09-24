@@ -296,9 +296,17 @@ class MenuAutoGenerator:
                     menus.append(self.generate_object_list_menu(obj))
         return menus
 
-    def persist_to_db(self, data_source, menus: List[Dict] = None) -> int:
-        """将菜单记录持久化到 menus 导航表"""
-        if not _schema_mtime_changed():
+    def persist_to_db(self, data_source, menus: List[Dict] = None, force: bool = False) -> int:
+        """将菜单记录持久化到 menus 导航表
+
+        Args:
+            data_source: 数据源
+            menus: 待写入菜单; None 时用 generate_all()
+            force: True 时跳过 mtime 变更检测。
+                应用包场景必须传 True —— _schema_mtime_changed() 只监视
+                meta/schemas/, 不覆盖 apps/<app_id>/schemas/ (见 roadmap §10.2)
+        """
+        if not force and not _schema_mtime_changed():
             logger.debug("[MenuAutoGenerator] No YAML changes detected, skipping persist_to_db")
             return 0
 

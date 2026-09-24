@@ -270,7 +270,25 @@ def _preflight_db_integrity_check(db_path):
 def _cleanup_resources(data_source):
     logger = logging.getLogger(__name__)
 
-    # [DECORATIVE] v3.18: 关闭时强制 TRUNCATE checkpoint（防止 WAL 残留导致损坏）
+    # [§6.5.3 改动 4] 多库关闭编排：遍历**所有活跃数据源**（平台库 + 各应用库）
+    # 逐个 flush 写队列 → stop 写线程 → 最终 WAL checkpoint → 释放连接池。
+    # 改造前只处理传入的单个 data_source，多库场景下其余库的写队列不会被
+    # flush/stop（写线程 daemon=True）⇒ 在途写入静默丢失。
+    try:
+        from meta.core.datasource import shutdown_all_data_sources
+
+        summary = shutdown_all_data_sources(timeout=30.0, primary=data_source)
+        logger.info(
+            "Data sources shut down: %d (errors=%d)",
+            summary["total"], len(summary["errors"]),
+        )
+        for item in summary["errors"]:
+            logger.warning("Shutdown issue on %s: %s", item["db_path"], item["error"])
+        return
+    except Exception as e:
+        logger.warning("Orchestrated shutdown failed, falling back to single-source cleanup: %s", e)
+
+    # 兜底：编排不可用时，退回到只清理主数据源（原行为）
     if data_source and hasattr(data_source, '_db_path'):
         try:
             conn = sqlite3.connect(data_source._db_path, timeout=10)
@@ -585,6 +603,47 @@ def create_app(db_path=None):
         g.tool_call_id = request.headers.get('X-Tool-Call-Id')
         g.agent_reasoning = request.headers.get('X-Agent-Reasoning')
 
+    # [多产品平台 §6.5.3 改动 1] 请求级数据源绑定（APP_DB_ROUTING，默认关闭）
+    # 必须放在 Flask 层而非 BO 拦截器：鉴权 / 菜单等"动作之前"的读取也要拿到
+    # 绑定（ContextInterceptor 是 BO 动作拦截器，触发时机太晚，见 §6.5.3 陷阱）。
+    @app.before_request
+    def bind_request_app_data_source():
+        from meta.core.datasource import (
+            bind_app_data_source as _bind_app_ds,
+            is_app_db_routing_enabled,
+        )
+        if not is_app_db_routing_enabled():
+            return None
+
+        from meta.core.app_registry import (
+            get_app_database_file,
+            resolve_app_id_for_request,
+        )
+        app_id = resolve_app_id_for_request(request.path)
+        if not app_id:
+            return None  # 平台请求 → 不绑定 → 走平台库（与改造前一致）
+
+        try:
+            _bind_app_ds(app_id, get_app_database_file(app_id))
+        except ValueError:
+            # 非法 app_id（路径穿越尝试）→ 拒绝绑定；路由层随后会 404
+            logging.getLogger(__name__).warning(
+                "[AppRouting] 拒绝非法 app_id: %r (path=%s)", app_id, request.path
+            )
+        return None
+
+    @app.teardown_request
+    def unbind_request_app_data_source(exc=None):
+        """请求结束解绑 —— 线程复用（waitress）下防止绑定泄漏到下一个请求。"""
+        from meta.core.datasource import (
+            get_bound_app_id,
+            is_app_db_routing_enabled,
+            unbind_app_data_source as _unbind_app_ds,
+        )
+        if is_app_db_routing_enabled() and get_bound_app_id() is not None:
+            _unbind_app_ds()
+        return None
+
     @app.after_request
     def add_trace_header(response):
         trace_id = get_trace_id()
@@ -746,6 +805,20 @@ def create_app(db_path=None):
     from meta.services.bo_action_registrations import register_all_bo_actions
     register_all_bo_actions()
 
+    # [多产品平台 v1.8] 应用包注册（roadmap §6.3 / §6.4.1 方案甲）
+    # ENABLED_APPS 未设置 → legacy 模式, 不加载任何应用, 零行为变化
+    try:
+        from meta.core.app_registry import register_apps
+        _registered_apps = register_apps(app, data_source=data_source)
+        if _registered_apps:
+            logging.getLogger(__name__).info(
+                "[AppRegistry] 已加载应用: %s",
+                [m.app_id for m in _registered_apps],
+            )
+    except Exception as _app_err:
+        # 应用加载失败必须中止启动（路由冲突等属配置错误, 静默降级更危险）
+        logging.getLogger(__name__).error("[AppRegistry] 应用加载失败: %s", _app_err)
+        raise
 
     init_socketio(app)
 
@@ -775,6 +848,9 @@ def create_app(db_path=None):
         # [Spec16 Plan D 2026-09-02] menu_permission_bp /visible 路由仍被前端菜单渲染使用
         # 加白名单避免 deprecate_v1_crud 中间件误拦截
         'menu-permission',                 # /api/v1/menu-permission/visible
+        # [多产品平台 v1.8] 应用包路由前缀 /api/v1/apps/<app_id>/*
+        # 不加白名单会被本中间件按"其他 v1 路径"误判为 410
+        'apps',
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

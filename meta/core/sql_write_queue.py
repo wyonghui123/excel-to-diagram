@@ -144,6 +144,15 @@ class WriteQueue:
         logger.info("WriteQueue started")
 
     def stop(self, timeout: float = 10.0):
+        # [§6.5.3] 幂等短路：已停止（或从未启动）时直接返回。
+        # 背景: flush() 向队列投递一个 barrier 并等待**写线程**消费；写线程已退出时
+        #       无人消费 → barrier.wait() 必然阻塞满 timeout。而关闭路径会重复调用
+        #       stop()（"多库关闭编排" + 数据源 disconnect() 各一次），
+        #       每个库因此白等 2 个 timeout（实测 10s 超时下 20s/库）。
+        if not self._running and (self._thread is None or not self._thread.is_alive()):
+            logger.debug("WriteQueue already stopped, skip")
+            return
+
         # [V007.40 BUG-FIX] drain in-flight operations before stopping
         # 背景: V007.39 之前, stop() 直接 _running=False + put None + join,
         #       正在执行的 op 会被中断 → 数据丢失 + future 永久 hang.

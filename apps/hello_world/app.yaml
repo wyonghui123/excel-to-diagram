@@ -1,0 +1,52 @@
+# ============================================
+# 应用包描述符（PoC 1）
+# 规范见 docs/platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md §6.2
+#
+# 注意: app.id 同时用作 目录名 / 路由前缀 / DB 文件名 / 权限命名空间前缀,
+#       因此只允许小写字母/数字/下划线（不允许连字符）。
+# ============================================
+app:
+  id: hello_world
+  name: 示例应用
+  version: 1.0.0
+  description: 多产品平台的最小验证应用包（PoC 1）
+  vendor: internal
+
+  # 平台版本约束（防止平台升级破坏应用）
+  platform:
+    min_version: "0.9.0"
+    max_version: "<1.0.0"
+
+  # 入口资源（路径相对本目录）
+  schemas:
+    - schemas/greeting.yaml
+  blueprints:
+    - blueprints/greeting_api.py
+  components: []
+
+  # 菜单双层挂载（§6.6）
+  menu:
+    internal_root: /hello_world
+    portal_mount:
+      code: app_hello_world
+      parent: business_apps
+      icon: app-store
+      order: 900
+      target_url: /app/hello_world
+
+  # 权限命名空间（必须等于 app.id）
+  permission_namespace: hello_world
+
+  # 产品绑定（§6.2）: fixed = 与 platform.db 中 product 1:1
+  product_binding:
+    mode: fixed
+    product_code: HELLO
+
+  # 数据存储
+  database:
+    file: data/hello_world.db
+
+  # 允许引用的平台模块白名单（阻断应用越界 import）
+  allowed_platform_modules:
+    - meta.core.bo_framework
+    - meta.core.datasource
