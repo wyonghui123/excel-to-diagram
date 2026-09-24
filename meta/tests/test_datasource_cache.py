@@ -196,3 +196,64 @@ class TestPerformance:
         elapsed_ms = (time.perf_counter() - start) * 1000
         # 1000 次 < 50ms (单次 < 50us, 留余量)
         assert elapsed_ms < 50, f"1000 cached calls took {elapsed_ms:.2f}ms, expected < 50ms"
+
+
+class TestMultiAppDataSourceScale:
+    """[多产品平台] 验证"平台库 + N 个应用库"场景下 fd 泄漏检测的实际边界。
+
+    背景:
+        多产品平台需要"平台库 + N 个应用库"并存, 会创建 N+1 个 DataSource
+        instance, 超过硬编码阈值 5。本测试确认该阈值的**真实触发边界**,
+        以判断它是"启动阻断"还是"运行期告警"。
+
+    结论(由本测试断言):
+        1. 启动 60s 宽限期内创建任意数量 instance → 不触发 (启动安全)
+        2. 启动 60s 后新建 instance 且已缓存 > 5 → 严格模式抛异常
+        3. 同上但非严格模式 → 仅告警, 不抛 (生产默认行为)
+    """
+
+    def test_multi_app_within_grace_period_no_raise(self, monkeypatch, tmp_path):
+        """启动 60s 宽限期内创建 7 个库 → 不触发 (证明启动期安全)"""
+        monkeypatch.setenv("V007_24_STRICT_MODE", "1")
+        from meta.core import datasource
+
+        # 模拟"刚启动" (宽限期内)
+        datasource._data_source_cache_stats["boot_time"] = time.time()
+
+        # 平台库 + 6 个应用库 = 7 个 instance, 远超阈值 5
+        for i in range(7):
+            get_data_source("sqlite", database=str(tmp_path / f"app_{i}.db"))
+
+        assert get_data_source_cache_stats()["instance_count"] == 7
+
+    def test_multi_app_after_grace_period_raises_in_strict_mode(self, monkeypatch, tmp_path):
+        """启动 60s 后新建第 6 个库 → 严格模式抛 DataSourceLeakError (运行期风险)"""
+        monkeypatch.setenv("V007_24_STRICT_MODE", "1")
+        from meta.core import datasource
+
+        # 模拟"已运行 100s" (超出宽限期)
+        datasource._data_source_cache_stats["boot_time"] = time.time() - 100
+
+        # 先建 5 个 (count 依次到 5, 5 不 > 5, 不触发)
+        for i in range(5):
+            get_data_source("sqlite", database=str(tmp_path / f"app_{i}.db"))
+        assert get_data_source_cache_stats()["instance_count"] == 5
+
+        # 第 6 个 → count=6 > 5 → 触发
+        with pytest.raises(DataSourceLeakError):
+            get_data_source("sqlite", database=str(tmp_path / "app_5.db"))
+
+    def test_multi_app_after_grace_period_no_raise_in_normal_mode(self, monkeypatch, tmp_path):
+        """启动 60s 后新建第 6 个库 → 非严格模式仅告警不抛 (生产默认行为)"""
+        monkeypatch.delenv("V007_24_STRICT_MODE", raising=False)
+        from meta.core import datasource
+
+        datasource._data_source_cache_stats["boot_time"] = time.time() - 100
+
+        for i in range(5):
+            get_data_source("sqlite", database=str(tmp_path / f"app_{i}.db"))
+
+        # 第 6 个: 只 log error + metric, 不抛
+        ds = get_data_source("sqlite", database=str(tmp_path / "app_5.db"))
+        assert ds is not None
+        assert get_data_source_cache_stats()["instance_count"] == 6
