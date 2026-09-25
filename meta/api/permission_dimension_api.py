@@ -818,6 +818,50 @@ _RESOURCE_TYPE_LABELS = {
     'task_queue': '任务队列',
 }
 
+
+def _lookup_resource_label(rt: str) -> Optional[str]:
+    """[FIX 2026-09-25] 资源行中文名兜底：从 YAML registry 取 BO 的 `name`。
+
+    为什么需要：
+        `_RESOURCE_TYPE_LABELS` 是平台资源的硬编码中文表，`resource_types.yaml`
+        只声明平台 BO。应用 BO（apps/<app_id>/schemas/*.yaml，例 outbound_order
+        的 `name: 出库单`）由 app_registry 累加注册进 registry，但不在上述两处 ——
+        修复前权限矩阵行显示英文 id（outbound_order 而非「出库单」）。
+
+    返回:
+        中文名；registry 未注册该 rt，或注册名与 rt 相同（无中文名）时返回 None，
+        由调用方决定兜底策略（通常回落 rt 本身）。
+    """
+    if not rt:
+        return None
+    try:
+        from meta.core.models import registry
+        obj = registry.get(rt) if hasattr(registry, "get") else None
+        name = getattr(obj, "name", None) if obj is not None else None
+        if isinstance(name, str) and name.strip() and name.strip() != rt:
+            return name.strip()
+    except Exception as e:
+        logger.debug(f"[P1-Base-02] 资源中文名查询 registry 失败（rt={rt}）: {e}")
+    return None
+
+
+def _is_app_bo(rt: str) -> bool:
+    """[FIX 2026-09-25] rt 是否为某个已启用应用的 BO（app_registry 注册期建立映射）。
+
+    用途：meta 级 resource_type_labels 的白名单门禁（原 r3 防漂移逻辑）需精确放宽 ——
+    只接受应用 BO（其注册来源是 apps/<app_id>/schemas/*.yaml，属合法 SSOT），
+    而 relationship/annotation 等漂移 rt 依旧被过滤。
+    """
+    if not rt:
+        return False
+    try:
+        from meta.core.app_registry import get_app_id_for_bo
+        return bool(get_app_id_for_bo(rt))
+    except Exception as e:
+        logger.debug(f"[P1-Base-02] 应用 BO 归属查询失败（rt={rt}）: {e}")
+        return False
+
+
 # [Phase 6 2026-08-25] 权限主体白名单（identity resources）
 #   这些是「授权主体」(principal)，不是业务对象 ——
 #   角色的分配走专用路径（角色详情），不在功能权限矩阵展示。
@@ -1357,7 +1401,8 @@ def _build_role_matrices(permission_set_id: int,
         resource_types_data = _load_schema_yaml("resource_types.yaml")
         for rt, rt_cfg in resource_types_data.items():
             if isinstance(rt_cfg, dict) and rt not in resource_type_labels:
-                resource_type_labels[rt] = rt
+                # [FIX 2026-09-25] yaml 声明但硬编码表无中文名时，先尝试 registry 中文名
+                resource_type_labels[rt] = _lookup_resource_label(rt) or rt
 
         # 行集合 = 所有资源类型（即使无权限记录也显示空行），按 yaml 定义顺序
         # [Phase 6 2026-08-25] 排除权限主体 (user/role/org) ——
@@ -1390,9 +1435,11 @@ def _build_role_matrices(permission_set_id: int,
         # 把 yaml 已声明但 merged 里没有的真业务 BO 也兜底展示 (空行+标签)
         # [FIX 2026-08-25] 把 merged 里有但 yaml 没声明的 bo 也暴露给前端
         # （fallback label = bo_id 本身，前端用 props.resourceTypeLabels[rt] || rt 兜底）
+        # [FIX 2026-09-25] 应用 BO（warehouse/stock_item/outbound_order/waybill 等）走
+        #   本分支 —— 先取 registry 中文名（「仓库/库存物料/出库单/运单」），无则回落 rt
         for rt in extra_rts:
             if rt and rt not in resource_type_labels:
-                resource_type_labels[rt] = rt
+                resource_type_labels[rt] = _lookup_resource_label(rt) or rt
         row_types = (
             [rt for rt in resource_types_data.keys() if not _is_identity_resource(rt)]
             + extra_rts
@@ -1555,7 +1602,8 @@ def get_permission_meta():
             if _is_identity_resource(rt):
                 continue
             if isinstance(resource_types_data[rt], dict) and rt not in resource_type_labels:
-                resource_type_labels[rt] = rt
+                # [FIX 2026-09-25] 同 _build_role_matrices：registry 中文名优先，回落 rt
+                resource_type_labels[rt] = _lookup_resource_label(rt) or rt
         # [Phase 6 2026-08-25] 把权限主体标签也剔掉
         for iden in _IDENTITY_RESOURCE_TYPES:
             resource_type_labels.pop(iden, None)
@@ -1564,6 +1612,9 @@ def get_permission_meta():
         # arch-data 菜单历史残留的 'relationship'/'annotation' perm code, yaml 已
         # 删声明, 但 menus.required_permissions JSON 还没清干净), 不应进入前端 labels
         # 防止 PermissionConfigPanel 用兜底 label 渲染出"关系/标注"行.
+        # [FIX 2026-09-25] 追加第三来源: 应用 BO（app_registry 注册，来源 apps/<app_id>/
+        #   schemas/*.yaml）也算合法 —— 中文名由 registry 提供。漂移 rt 既非白名单
+        #   也非应用 BO，仍被过滤，原防护语义不变。
         _META_LABELS_ALLOWED_RTS = frozenset({
             'scheduled_task', 'task_queue', 'task_execution',
             'ai_async_task', 'enum_type',
@@ -1586,17 +1637,23 @@ def get_permission_meta():
                         parts = str(code).split(":")
                         if parts and parts[0] and parts[0] != "*" and not _is_identity_resource(parts[0]):
                             # [r3 2026-09-02] 严格过滤: 只允许 yaml 已声明或白名单
-                            if parts[0] not in resource_type_labels and parts[0] in _META_LABELS_ALLOWED_RTS:
-                                resource_type_labels[parts[0]] = parts[0]
-                    if primary and not _is_identity_resource(primary) and primary not in resource_type_labels and primary in _META_LABELS_ALLOWED_RTS:
-                        resource_type_labels[primary] = primary
+                            # [FIX 2026-09-25] 追加应用 BO: 其注册来源是 apps/<app_id>/schemas
+                            #   （合法 SSOT），中文名由 registry 提供；漂移 rt（relationship/
+                            #   annotation）既非白名单也非应用 BO → 仍被过滤，原防护不变
+                            if parts[0] not in resource_type_labels and (parts[0] in _META_LABELS_ALLOWED_RTS or _is_app_bo(parts[0])):
+                                resource_type_labels[parts[0]] = _lookup_resource_label(parts[0]) or parts[0]
+                    if primary and not _is_identity_resource(primary) and primary not in resource_type_labels:
+                        # [FIX 2026-09-25] 同上：应用 BO 可绕过白名单（漂移 rt 不可）
+                        if primary in _META_LABELS_ALLOWED_RTS or _is_app_bo(primary):
+                            resource_type_labels[primary] = _lookup_resource_label(primary) or primary
                     if obj_types_raw:
                         try:
                             obj_types = json.loads(obj_types_raw) if isinstance(obj_types_raw, str) else obj_types_raw
                             if isinstance(obj_types, list):
                                 for t in obj_types:
-                                    if t and not _is_identity_resource(t) and t not in resource_type_labels and t in _META_LABELS_ALLOWED_RTS:
-                                        resource_type_labels[t] = t
+                                    if t and not _is_identity_resource(t) and t not in resource_type_labels:
+                                        if t in _META_LABELS_ALLOWED_RTS or _is_app_bo(t):
+                                            resource_type_labels[t] = _lookup_resource_label(t) or t
                         except Exception:
                             pass
             except Exception as e:
