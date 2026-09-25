@@ -12,6 +12,8 @@ import json
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.permission_label import get_permission_label
+# [FIX 2026-09-25 缺陷④] permission_set_permissions 写入统一走 schema 自适应助手
+from meta.core.permission_set_permissions import ensure_granted as ensure_psp_granted
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from meta.api._audit_helper import write_permission_config_audit
@@ -783,22 +785,12 @@ def update_permission_set_menu_permissions(permission_set_id):
                             expanded = f"{parts[0]}:{parts[0]}_{parts[1]}"
                             pid = perm_id_map.get(expanded)
                     if pid:
-                        # [FIX 2026-09-02] try/except 兜底: Plan D 迁移期间 permission_set_permissions 表 schema
-                        #   可能不一致 (无 granted/permission_code 列), 任意单条 INSERT 失败不应阻塞整个 PUT
-                        #   否则前端 PermissionConfigPanel.flushOnExit 拿到 500, 用户改菜单失效
-                        # [FIX 2026-09-02 P1] permission_set_permissions.permission_code 是 NOT NULL,
-                        #   INSERT 必须给 permission_code. 反向查: code -> pid 在 perm_id_map,
-                        #   维护 pid -> code 反向索引用于 INSERT.
-                        try:
-                            ds.execute(
-                                """INSERT OR REPLACE INTO permission_set_permissions
-                                   (permission_set_id, permission_id, permission_code, created_at, granted)
-                                   VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)""",
-                                [permission_set_id, pid, code]
-                            )
+                        # [FIX 2026-09-25 缺陷④] 原实现硬编码 permission_code 列，在 ID-form 库
+                        #   （无该列，实测 verify_app.db）上 INSERT 抛异常被 `except: pass` 吞掉，
+                        #   PUT 却返回"已同步 0 项功能权限" → 勾选菜单永远写不进功能权限。
+                        #   改为按实际列名写入；失败仍不阻塞整个 PUT，但会记 warning。
+                        if ensure_psp_granted(ds, permission_set_id, pid, code):
                             synced_permissions.append(code)
-                        except Exception:
-                            pass
 
                 # [FIX 2026-06-08] 自动同步：跳过已被显式拒绝的权限
                 for mc, perms in menu_perm_map.items():
@@ -815,17 +807,9 @@ def update_permission_set_menu_permissions(permission_set_id):
                                 expanded = f"{parts[0]}:{parts[0]}_{parts[1]}"
                                 pid = perm_id_map.get(expanded)
                         if pid:
-                            try:
-                                # [FIX 2026-09-02 P1] permission_code NOT NULL, 必须传 code
-                                ds.execute(
-                                    """INSERT OR IGNORE INTO permission_set_permissions
-                                       (permission_set_id, permission_id, permission_code, created_at, granted)
-                                       VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)""",
-                                    [permission_set_id, pid, code]
-                                )
+                            # [FIX 2026-09-25 缺陷④] 同上：按实际列名写入（ID-form 库无 permission_code）
+                            if ensure_psp_granted(ds, permission_set_id, pid, code):
                                 synced_permissions.append(code)
-                            except Exception as e:
-                                pass
 
         # [FIX 2026-06-12] 角色菜单权限 (PFCG) 审计日志: 关联到角色对象
         write_permission_config_audit(

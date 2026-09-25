@@ -471,7 +471,12 @@ def get_visible_menu_tree():
                 continue
             # 隐藏菜单(sid=0, 如 task-management 下的 task-definitions/task-queues 等)不作为 landing 卡片
             # 用 falsy 判断以兼容 int 0 / TEXT '0' / False / None
-            if not m.get('show_in_sidebar'):
+            # [FIX 2026-09-25 缺陷⑧] 例外: 应用内页面(挂在应用根菜单下, 根菜单 page_type='')
+            #   应用页面由 menu_auto_generator 生成时固定 show_in_sidebar=0(语义: 只作父菜单子项,
+            #   不进侧边栏顶层), 但语义上就是应用的功能叶子, 应出现在工作台卡片区.
+            #   有 children 的应用根菜单仍被下方 parent_codes 规则排除, 不会重复成卡片;
+            #   平台叶子(sid=1)与任务管理子项(parent 的 page_type 非空)不受影响.
+            if not m.get('show_in_sidebar') and parent_page_types.get(m.get('parent_menu')) != '':
                 continue
             # [FIX 2026-08-29] 精确排除: 挂在 custom_page 容器下、无 direct children 的 multi_object_hub
             # [FIX 2026-08-29] 仅展示"严格叶子": 无 children 的功能页

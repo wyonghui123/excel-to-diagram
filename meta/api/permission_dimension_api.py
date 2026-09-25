@@ -28,6 +28,8 @@ from meta.services.permission_dimension_engine import (
 )
 from meta.services.dimension_scope_engine import DimensionScopeEngine
 from meta.core.db_path import get_meta_db_path
+# [FIX 2026-09-25 缺陷④] permission_set_permissions 写入统一走 schema 自适应助手
+from meta.core.permission_set_permissions import ensure_granted as ensure_psp_granted
 
 _PARENT_INFO_MAP = {
     'version': ('product', 'products', 'product_id', 'name'),
@@ -1040,6 +1042,57 @@ def _load_object_owd_list() -> List[Dict[str, Any]]:
         return []
 
 
+def _build_app_resource_actions(default_actions: List[str]) -> Dict[str, List[str]]:
+    """[FIX 2026-09-25 缺陷⑦] 已启用应用的应用 BO → 可授权动作集
+
+    来源: apps/<app_id>/schemas/*.yaml（应用 schema，与注册期同一 SSOT）。
+    动作集 = 默认 CRUD+export/import ∪ 该 BO 声明的 actions（与平台 BO 同款范式：
+    未显式声明也有默认集，声明了则并入，只增不减）。
+
+    为什么必须单独读应用目录：
+        `_load_schema_yaml()` / BoSchemaLoader 只认 meta/schemas（平台目录），
+        应用 schema 在 apps/<app_id>/schemas/（注册期由 app_registry 累加进 YAML
+        registry）。resource_types.yaml 里没有任何应用 BO —— 不补这一步，矩阵对
+        应用资源永远"不支持任何动作"（实测 outbound_order 6 列全灰，页面不可勾）。
+    """
+    result: Dict[str, List[str]] = {}
+    try:
+        from meta.core.app_loader import get_apps_root
+        from meta.core.app_registry import get_enabled_app_ids
+    except Exception as e:
+        logger.debug(f"[P2-Matrix-01] 应用 BO 动作：依赖导入失败: {e}")
+        return result
+
+    for app_id in get_enabled_app_ids():
+        schema_dir = get_apps_root() / app_id / "schemas"
+        if not schema_dir.is_dir():
+            continue
+        for path in sorted(schema_dir.glob("*.yaml")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+            except Exception as e:
+                logger.warning(f"[P2-Matrix-01] 读取应用 schema 失败 {path}: {e}")
+                continue
+            if not isinstance(data, dict):
+                continue
+            bo_id = data.get("id")
+            if not isinstance(bo_id, str) or not bo_id.strip():
+                continue
+            bo_id = bo_id.strip()
+            if _is_identity_resource(bo_id) or bo_id in result:
+                continue
+            actions = list(default_actions)
+            declared = data.get("actions")
+            if isinstance(declared, list):
+                for a in declared:
+                    name = a.get("id") if isinstance(a, dict) else a
+                    if name and str(name) not in actions:
+                        actions.append(str(name))
+            result[bo_id] = actions
+    return result
+
+
 def _build_resource_action_matrix() -> Dict[str, List[str]]:
     """[P2-Matrix-01 / A5] 构建每个资源类型的可授权动作清单
 
@@ -1051,6 +1104,10 @@ def _build_resource_action_matrix() -> Dict[str, List[str]]:
     [Phase 6 2026-08-25] 过滤权限主体 (role) ——
       角色走专用分配路径，不进入功能权限矩阵的可授权动作白名单。
       [Spec 19 M2] org/user 已移出主体白名单，作为委托授权行参与矩阵（yaml actions 收窄）。
+
+    [FIX 2026-09-25 缺陷⑦] 并入已启用应用的应用 BO（apps/<app_id>/schemas/*.yaml）
+    —— 修复前矩阵无应用条目，前端应用行（出库单/库存/仓库/运单）动作位全部灰化
+    "该资源不支持此动作"，无法授权。只补缺口（setdefault），不覆盖平台声明。
     """
     # [v36 2026-08-27] 合并 list→read; 新增 import 作为默认动作（导出/导入是常见配套）
     default_actions = ["read", "create", "update", "delete", "export", "import"]
@@ -1067,6 +1124,12 @@ def _build_resource_action_matrix() -> Dict[str, List[str]]:
             result[rt] = [str(a) for a in actions]
         else:
             result[rt] = list(default_actions)
+    # [FIX 2026-09-25 缺陷⑦] 合并应用 BO 动作（异常兜底：不阻断平台矩阵下发）
+    try:
+        for rt, acts in _build_app_resource_actions(default_actions).items():
+            result.setdefault(rt, acts)
+    except Exception as e:
+        logger.warning(f"[P2-Matrix-01] 应用 BO 动作合并失败（非阻断）: {e}")
     return result
 
 
@@ -2344,15 +2407,12 @@ def save_resource_action_matrix(permission_set_id: int):
                     raise RuntimeError(f"无法为 {code} 分配 permission_id")
 
                 if granted:
-                    # 确保 (permission_set_id, permission_id) 存在 —— INSERT OR IGNORE 避免重复键冲突
-                    # [FIX 2026-09-02] permission_set_permissions.permission_code 是 NOT NULL,
-                    #   INSERT 必须给 permission_code. 用 code 字段 (已有).
-                    ds.execute(
-                        """INSERT OR IGNORE INTO permission_set_permissions
-                           (permission_set_id, permission_id, permission_code, granted)
-                           VALUES (?, ?, ?, 1)""",
-                        [permission_set_id, perm_id, code],
-                    )
+                    # [FIX 2026-09-25 缺陷④] 原实现硬编码 permission_code 列，在 ID-form 库
+                    #   （无该列，实测 verify_app.db）上抛 "no column named permission_code" →
+                    #   整个 PUT 500 + 事务回滚（矩阵勾选保存完全不可用）。改为按实际列名写入；
+                    #   写入失败直接报错（本端点原有语义就是失败即 500 回滚，不静默）。
+                    if not ensure_psp_granted(ds, permission_set_id, perm_id, code):
+                        raise RuntimeError(f"写入 permission_set_permissions 失败: {code}")
                     granted_count += 1
                 else:
                     # 撤销：DELETE 关联
