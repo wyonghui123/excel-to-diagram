@@ -591,7 +591,7 @@ def get_data_source_cache_stats() -> dict:
 #   `g` 只在 Flask 请求上下文内有效，一旦调用链进入线程池 / 异步组件就会失效；
 #   contextvars 由运行时不变量管理，读写在任意深度都一致。
 #
-# ⚠️ 重要语义（与方案文档的表述有出入，以代码为准）:
+# [WARN] 重要语义（与方案文档的表述有出入，以代码为准）:
 #   contextvars **不会**自动传播进新起的 `threading.Thread` —— 新线程看到的是
 #   default（None）。这对本项目是**期望行为**：后台写线程（sql_write_queue /
 #   async_audit_writer）不应该"继承"某个请求的 app 绑定，否则会把数据写错库。

@@ -57,7 +57,7 @@ class TestGetDataSourceCache:
         """[V007.24] 同一 db_path 返回同一 instance (零 fd 泄漏)"""
         ds1 = get_data_source("sqlite", database=temp_db)
         ds2 = get_data_source("sqlite", database=temp_db)
-        assert ds1 is ds2  # ✅ 同一 instance
+        assert ds1 is ds2  # [OK] 同一 instance
 
     def test_different_db_path_returns_different_instance(self, temp_db):
         """[V007.24] 不同 db_path 返回不同 instance"""
@@ -66,7 +66,7 @@ class TestGetDataSourceCache:
         try:
             ds1 = get_data_source("sqlite", database=temp_db)
             ds2 = get_data_source("sqlite", database=db_path2)
-            assert ds1 is not ds2  # ✅ 不同 instance
+            assert ds1 is not ds2  # [OK] 不同 instance
         finally:
             os.unlink(db_path2)
 
@@ -75,7 +75,7 @@ class TestGetDataSourceCache:
         for _ in range(100):
             get_data_source("sqlite", database=temp_db)
         instances = list_data_source_instances()
-        assert len(instances) == 1  # ✅ 零泄漏
+        assert len(instances) == 1  # [OK] 零泄漏
 
     def test_cache_stats_hits_misses(self, temp_db):
         """[V007.24] 缓存命中/未命中统计"""
