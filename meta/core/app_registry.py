@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
 from pathlib import Path
@@ -412,6 +413,111 @@ def _attach_app_menus_to_root(data_source, bo_ids: List[str], root_code: str) ->
     return getattr(cursor, "rowcount", 0) or len(bo_ids)
 
 
+def _sync_app_permissions(data_source, bo_ids: List[str]) -> int:
+    """为应用 BO 补写权限行（roadmap §6.5.2 缺口①）。
+
+    为什么必需:
+        平台的权限同步（server.py 的 init_auth_system → PermissionSyncService
+        .sync_all()）跑在 register_apps() **之前**，且它是从**内存 registry** 推导
+        权限码的 ⇒ 那一刻应用 BO 尚未注册，`permissions` 表永远不会有应用权限。
+        后果：菜单 required_permissions 里的 `<bo>:<action>` 成了悬空权限，
+        权限矩阵勾选应用菜单后"已同步 0 项功能权限"（实测见 §10.15）。
+
+    Returns:
+        本次新写入 `permissions` 表的权限码条数（幂等，重复启动返回 0）。
+
+    为什么用 `PermissionSyncService(data_source)` 而非 `get_permission_sync_service()`:
+        后者是模块级单例，init_auth 阶段可能已用**临时连接适配器**把它创建出来，
+        该连接随后关闭 ⇒ 复用单例会静默丢弃写入。
+    """
+    if data_source is None or not bo_ids:
+        return 0
+
+    from meta.services.permission_sync_service import PermissionSyncService
+
+    service = PermissionSyncService(data_source)
+    created = 0
+    for bo_id in bo_ids:
+        result = service.sync_for_object(bo_id)
+        created += len(result.get("created") or [])
+    return created
+
+
+def _aggregate_app_root_permissions(data_source, manifest: AppManifest,
+                                    bo_ids: List[str], root_code: str) -> int:
+    """把应用各 BO 的权限聚合到应用根菜单上（roadmap §6.5.2 缺口②）。
+
+    为什么必需:
+        应用内菜单由 menu_auto_generator 写入且固定 show_in_sidebar=0，而权限矩阵
+        只把 show_in_sidebar=1 的菜单当授权单位 ⇒ 应用内菜单的 bo_bindings /
+        required_permissions 读不到；应用根菜单虽可见却是个空壳
+        （bindings=[] / reqperm=[]）⇒ 勾选应用菜单同步 0 项，权限矩阵里也看不到
+        应用对象。本函数把各 BO 的声明**聚合写到根菜单**，对齐平台 hub 范式
+        （如 arch-data 聚合 6 个 BO 的绑定）。
+
+    为什么逐 BO 调 generate_object_list_menu，而不用 generate_multi_object_menu /
+    _derive_bo_bindings(..., read_only=True):
+        后者会把除首个以外的 BO 降级为只读（read_suffixes 只留 read/list/export），
+        造成**少授权**。逐 BO 取全量绑定再合并去重才完整。
+
+    刻意不动 page_type / object_types / primary_object_type:
+        src/router/dynamicRoutes.js 会据 object_types 决定路由 props —— 改这三项
+        会把应用 hub 变成对象列表页（§10.15 风险记录）。
+
+    Returns:
+        聚合后根菜单的权限码条数。
+    """
+    if data_source is None or not bo_ids or not root_code:
+        return 0
+
+    from meta.core.models import registry
+    from meta.services.menu_auto_generator import menu_auto_generator
+
+    bindings: List[dict] = []
+    required: List[str] = []
+    seen_bo_ids = set()
+    seen_codes = set()
+    resource_types: List[str] = []
+
+    for bo_id in bo_ids:
+        obj = registry.get(bo_id) if hasattr(registry, "get") else None
+        if obj is None:
+            continue
+        menu = menu_auto_generator.generate_object_list_menu(obj)
+
+        for binding in menu.get("bo_bindings") or []:
+            binding_bo = binding.get("bo_id")
+            if not binding_bo or binding_bo in seen_bo_ids:
+                continue
+            seen_bo_ids.add(binding_bo)
+            bindings.append(binding)
+            resource_types.append(binding_bo)
+
+        for code in menu.get("required_permissions") or []:
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
+            required.append(code)
+
+    if not required and not bindings:
+        return 0
+
+    hint = {
+        "resource_types": resource_types,
+        "message": f"建议分配{manifest.name}相关数据权限",
+    }
+    data_source.execute(
+        """UPDATE menus
+           SET bo_bindings = ?, required_permissions = ?, data_permission_hint = ?
+           WHERE menu_code = ?""",
+        (json.dumps(bindings, ensure_ascii=False),
+         json.dumps(required, ensure_ascii=False),
+         json.dumps(hint, ensure_ascii=False),
+         root_code),
+    )
+    return len(required)
+
+
 def _verify_installed(data_source, manifests: List[AppManifest]) -> None:
     """对照 installed_apps 登记做软校验（roadmap §6.3）——只告警, 不阻断启动。
 
@@ -554,10 +660,17 @@ def register_apps(
             # 顺序要求: 根菜单先存在, 才能把应用内菜单挂上去
             root_code = _ensure_app_root_menu(data_source, manifest)
             attached = _attach_app_menus_to_root(data_source, bo_ids, root_code)
+            # [§6.5.2 缺口①] 应用权限行: 平台权限同步早于应用注册, 必须在此补写
+            perms = _sync_app_permissions(data_source, bo_ids)
+            # [§6.5.2 缺口②] 权限矩阵的授权单位是根菜单（应用内菜单 show_in_sidebar=0）
+            root_perms = _aggregate_app_root_permissions(
+                data_source, manifest, bo_ids, root_code
+            )
             logger.info(
                 "[AppRegistry] app '%s': 补建表 %s 个, 补菜单 %s 条, "
-                "根菜单 '%s', 挂载 %s 条",
+                "根菜单 '%s', 挂载 %s 条, 补权限 %s 条, 根菜单聚合 %s 条",
                 manifest.app_id, tables, menus, root_code, attached,
+                perms, root_perms,
             )
 
     # [§6.14.2] 事件表（outbox / consumed_events）：与业务表同库

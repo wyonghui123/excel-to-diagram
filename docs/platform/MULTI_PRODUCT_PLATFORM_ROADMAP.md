@@ -4,7 +4,7 @@
 >
 > **与其它文档的关系**：[ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md](../ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md) 解决"能力维度"（BPMN / 多租户 / 报表 / AI…）；本文解决"应用产品维度 + 部署拓扑维度"。两份文档正交，互不替代。
 >
-> **状态**：v1.27（全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）**）
+> **状态**：v1.29（全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）** + **多实例并行隔离实测通过：8 处平台库路径破口已补，主库零写入（§10.15）** + **应用权限管理维度已打通（v1.29：应用权限行补写 + 根菜单聚合 + 应用 schema 补 export/import，§10.15 (7)）**）
 > **最后更新**：2026-09-25
 > **结论摘要**：现有平台已完成约 70% 的平台化基建（四层抽象中 L1/L2 已具备、L3/L4 缺失）。**真正缺失的只有"应用产品"这一层抽象**，Phase 1 约 40 人天可交付"单 instance 多 app 合并部署"。数据层 **3 处前置疑点已全部收敛**：F2 多库路径入口（**已实现**，§10.6）、F3 写队列/维护调度（**经核实为非缺口**，§10.7）、F1 fd 阈值（**实测降级为 P1**，§10.0）；另 1 条铁律（事务不跨库 F5）。**数据层已无阻塞项**。
 >
@@ -14,7 +14,7 @@
 >
 > **四个实施级发现**：① 生产路径不使用 `ApplicationBuilder` → 按 §6.4.1 方案甲落地；② `deprecate_v1_crud` 中间件会把 `/api/v1/apps/*` 判为 410 → 已加白名单（§6.7）；③ 表名白名单缓存与菜单 mtime 守卫会静默拦截应用资源 → 已修复（§10.3）；④ **应用菜单必须有父菜单才可见** → 已实现 `portal_mount` 根菜单（§6.6、§10.4）。
 >
-> **下一步**：**① 补 P1 分流缺口**——`query_api` / `export_import_api` / `stats_api` / `association_api` 的 `_get_data_source()` 单例，以及应用包 `migrations/` 消费点、`bo_pick_service._default_data_source()`、`export_import_api.py` 的 `ManageService(_data_source)` 单例（§10.10 / §10.11 末尾"未纳入本次范围"，§10.12 末尾）——这些是**读错库的数据正确性风险**，优先级高于体验类收尾项。**② `/graphql` 关闭已列 backlog**（v1.27 决定推迟；其安全画像与已关闭的 `/mcp` **完全一致**——未鉴权 + schema 泄露，属**安全项**而非功能项，见 §6.3.1 (6)；同批发现的 `/_metrics`、`/api/v1/test/ready` 一并待定）。**③ 应用 `migrations/` 接线**——能力已具备（v1.27 §6.3.1 实测 1：per-app runner 开箱可用，接线无隐藏工作量），**但须先定三项口径**（迁移命名空间 / 执行时机 / 失败语义 + 依赖顺序），口径未定前不做接线。**`/mcp` 未鉴权入口已于 v1.26 实测确认并关闭**（原①）。**PoC 3（门户聚合）已推迟到 Phase 2 触发式启动**："TMS 与 WMS 一起展示"用 **Type 2 合并部署**即可，已实测双应用根菜单在**同一平台库、同一菜单响应**中同栏可见（v1.24 §10.14）；Type 3 的增量仅"多实例 + 跨实例菜单聚合"，触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离，§3.2）未出现前不投入。**§6.5.3 四项改动已全部完成**（改动 1~3 → v1.20 §10.10；改动 4 → v1.17 §10.9），**PoC 2 已在真实应用包上验证通过**（v1.22 §10.12：应用库独立、平台库共享、审计归属正确、多应用各落各库），**PoC 4 已实测跨应用事件的"不丢 / 不重 / 死信"三项保证**（v1.23 §10.13）。路由模型为**双库并存**（§11 Q4）。
+> **下一步**：**① 补 P1 分流缺口**——`query_api` / `export_import_api` / `stats_api` / `association_api` 的 `_get_data_source()` 单例，以及应用包 `migrations/` 消费点、`bo_pick_service._default_data_source()`、`export_import_api.py` 的 `ManageService(_data_source)` 单例（§10.10 / §10.11 末尾"未纳入本次范围"，§10.12 末尾）——这些是**读错库的数据正确性风险**，优先级高于体验类收尾项。**② `/graphql` 关闭已列 backlog**（v1.27 决定推迟；其安全画像与已关闭的 `/mcp` **完全一致**——未鉴权 + schema 泄露，属**安全项**而非功能项，见 §6.3.1 (6)；同批发现的 `/_metrics`、`/api/v1/test/ready` 一并待定）。**③ 应用 `migrations/` 接线**——能力已具备（v1.27 §6.3.1 实测 1：per-app runner 开箱可用，接线无隐藏工作量），**但须先定三项口径**（迁移命名空间 / 执行时机 / 失败语义 + 依赖顺序），口径未定前不做接线。**`/mcp` 未鉴权入口已于 v1.26 实测确认并关闭**（原①）。**PoC 3（门户聚合）已推迟到 Phase 2 触发式启动**："TMS 与 WMS 一起展示"用 **Type 2 合并部署**即可，已实测双应用根菜单在**同一平台库、同一菜单响应**中同栏可见（v1.24 §10.14）；Type 3 的增量仅"多实例 + 跨实例菜单聚合"，触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离，§3.2）未出现前不投入。**§6.5.3 四项改动已全部完成**（改动 1~3 → v1.20 §10.10；改动 4 → v1.17 §10.9），**PoC 2 已在真实应用包上验证通过**（v1.22 §10.12：应用库独立、平台库共享、审计归属正确、多应用各落各库），**PoC 4 已实测跨应用事件的"不丢 / 不重 / 死信"三项保证**（v1.23 §10.13）。路由模型为**双库并存**（§11 Q4）。**④ 应用权限管理维度已打通（✅ 2026-09-25，v1.29）** —— 实测**推翻**了原前提"须改 `/api/v1/menu-permission/menus/all`"（该端点**无任何前端调用方**；权限管理 UI 的真取数是 `/permission-sets/<id>/unified-permissions`，且它**已经**在 `menus` 表上工作并带应用维度）。真实堵点是三处，已全部修：应用权限行缺席（平台权限同步早于应用注册）⇒ 启动期补写 `_sync_app_permissions`；权限矩阵的授权单位是根菜单、而根菜单 `required_permissions` 初始为空 ⇒ 启动期逐 BO 聚合 `_aggregate_app_root_permissions`；应用 schema 缺 `export/import` actions ⇒ 4 个 schema 补齐（§10.15 (7)）。**残留 3 项入 backlog**：④ `permission_set_permissions` 写入列假设错误（勾选菜单自动授予功能权限**全平台静默失效**，用户决定只记录不修）、⑤ `/api/v1/admin/permissions/sync` 被 v1 sunset 劫持、⑥ `apps/hello_world/schemas/greeting.yaml` 同类悬空权限（§6.3.1 (6)）。
 
 ---
 
@@ -616,6 +616,11 @@ per-app 场景下的 `.py` 迁移 / `prerequisites()` / `rollback()` / CLI `--dr
 |----|---------|---------|
 | **A2** `table_prefix` 实现 | 当前看不出做的意义；属**单向门**，实测证据已固化，启动时有据可依 | 本节 (4) |
 | **`/graphql` 关闭** | 用户暂未确认其意义。**注：其安全画像与已关闭的 `/mcp` 完全一致（未鉴权 + schema 泄露）**，属安全项而非功能项 | §11 Q5「同批发现」 |
+| **未启用应用的请求语义**（v1.28 新增） | 平台级 instance 收到 `/api/v1/apps/<app>/...` 时**仍会打开该应用的应用库**（实测 `data/warehouse.db` 被写），且未注册路由最终返回 **500 而非 404/403** —— 根因是 `before_request` 的 URL 前缀解析**不校验 `ENABLED_APPS`**，叠加既有 `@app.errorhandler(Exception)` 吞 `NotFound` 的全站 quirk | §10.15 |
+| **一次性运维脚本的硬编码平台库路径**（v1.28 新增） | 本轮只清了 `create_app()` **启动链路**（`server.py` / `init_auth` / `migrate_system_admin` / `init_menu_permissions`）；`meta/migrations/*`、`meta/scripts/*`、`meta/tools/drift_check.py`、`meta/ops_server.py` 等一次性脚本中仍有硬编码，不在启动链路故**刻意不扩大范围** | §10.15 / §6.5.1 F2 |
+| **`permission_set_permissions` 写入列假设错误 ⇒ "勾选菜单自动授予功能权限"全平台静默失效**（v1.29 新增） | `PUT /api/v1/permission-sets/<id>/menu-permissions` 的 INSERT 带**不存在的 `permission_code` 列**，异常被 `except Exception: pass` 吞掉 ⇒ **含平台菜单在内**一律返回"已同步 0 项"。4 个库 schema 均为 `(id, permission_set_id, permission_id, granted, created_at)`，手工复现得 `OperationalError: no column named permission_code`。**用户 2026-09-25 决定只记录不改**；修法可照 [v084 L130](../../meta/migrations/v084__org_admin_delegation_m2.py#L130) 的"按列自适应"范式 | §10.15 (7) ④ |
+| **`/api/v1/admin/permissions/sync` 被 v1 sunset 中间件劫持**（v1.29 新增） | 返回 410 `API Moved`，`migrated_to` 指向**不存在**的 `/api/v2/bo/admin/permissions/sync`（再请求得 `NotFound` → 被全局 errorhandler 包装为 500）⇒ 管理员手工同步入口实际不可用 | §10.15 (7) ⑤ |
+| **`apps/hello_world/schemas/greeting.yaml` 同类悬空权限**（v1.29 新增） | 与 §10.15 (7) 缺口③ 同款（开了 `import_export` 但 `actions` 未声明 export/import）⇒ 该应用菜单的 `greeting:export` / `greeting:import` 无对应权限行。本轮刻意不扩大范围 | §10.15 (7) ⑥ |
 
 ### 6.4 ApplicationBuilder 改造
 
@@ -846,6 +851,15 @@ if time.time() - _data_source_cache_stats["boot_time"] > 60:   # ← 关键：60
 而当前**只有一个环境变量入口** `SQLITE_DB_PATH`。若 §6.5 的 `data/warehouse.db` 在业务代码里直接拼接，就**违反了这条既有铁律**。
 
 > **✅ v1.13 已实现并验证（§10.6）**：[db_path.py](../../meta/core/db_path.py) 新增 `get_app_data_dir()` 与 `get_app_db_path(app_id, database_file='')`，24 个测试全通过。
+
+> **⚠️ v1.28 实测：这条铁律此前在 8 处被绕过，正是"多实例并行隔离失效"的根因**（详见 §10.15）。`get_meta_db_path()` 虽已覆盖 80+ 处 API，但**启动链路**仍有两类破口：
+> - **[server.py L505](../../meta/server.py#L505) 的 `init_menu_permissions(<硬编码 ARCH_DB_PATH>)`** —— 只认 `ARCH_DB_PATH`，导致**设了 `SQLITE_DB_PATH` 的隔离实例仍把菜单权限写回仓库内主库**；
+> - **[init_auth.py](../../meta/scripts/init_auth.py) / [migrate_system_admin.py](../../meta/scripts/migrate_system_admin.py) 的模块级 `DB_PATH` 硬编码** —— 两者都在 `create_app()` 启动序列上（`server.py` L403/L405 延迟导入）；
+> - 5 处 API 的惰性 fallback：`role_api` / `user_group_api` / `role_menu_api` / `management_dimension_api` / `role_dimension_scope_api`。
+>
+> **已全部改为经 `get_meta_db_path()` 解析**，并把该函数优先级补全为 **`SQLITE_DB_PATH` > `ARCH_DB_PATH` > 仓库内**（与 `intent_api` / `migration_runner` / `bo_framework` / `bo_pick_service` 处既有的 `SQLITE_DB_PATH or ARCH_DB_PATH` 写法对齐；此前**只认 `ARCH_DB_PATH`**）。⇒ **一个进程只读/写一个平台库**，多实例并行（Type 1 形态）由"文档承诺"变为**实测事实**。
+>
+> **本轮刻意不扩大范围**：`meta/migrations/*`、`meta/scripts/*`（`init_auth_tables` / `init_permission_bundles` / `init_database` / `preload_hot_roles`…）、`meta/tools/drift_check.py`、`meta/ops_server.py` 中仍有硬编码，但**均不在 `create_app()` 启动链路**（属一次性运维脚本），已入 §6.3.1 (6) backlog。
 
 **实现后的两条解析规则（分工明确，互不越界）**：
 
@@ -1984,6 +1998,123 @@ federation:
 
 **回归**：本文件 9 passed；本次为**纯新增测试文件、零生产代码改动**，既有套件不受影响（运行经 `python d:\filework\test.py --file meta/tests/test_merged_two_apps_menu.py`，项目铁律禁直接 pytest）。
 
+### 10.15 多实例并行隔离：平台库串号确认 + 修复（✅ 2026-09-25）
+
+**触发**：用户提出核心使用场景 —— "**我并行地在同一个代码库里开发**：应用架构管理（平台级）+ WMS + TMS，在 localhost **起多个 instance** 并行开发 / 测试 / 验证"，要求确认这个能力**真的可用**，而不是只写在文档里。执行顺序按"**先钉事实 → 再动隔离 → 再补权限面**"（本版完成前两步）。
+
+#### (1) 实测 1（修复前，同库）—— 串号确认
+
+两个进程都指向**仓库内主库**（A：`ENABLED_APPS=warehouse,tms` @3021；B：**平台级**，不设 `ENABLED_APPS` @3022）：
+
+| 指标 | A | B（平台级） |
+|------|---|---|
+| `/api/v1/menu-permission/visible` | 23 条 | **23 条 —— 与 A 字节级完全相同**（`MD5=44325ED767B6CF1FFC194AA9913A989A`、36107 B） |
+| B 能否看到应用菜单 | — | **能**（`app_warehouse` / `app_tms` / `app_hello_world`） |
+| B 请求 `/api/v1/apps/warehouse/health` | — | **500**（内里 `NotFound`），且**打开了 `data/warehouse.db` 连接池** |
+| 主库写入 | — | B 启动让主库 **+4096 B**（mtime `10:34:46 → 10:55:36 → 10:57:01`） |
+| `menus` 表（三阶段采样） | 48 行（恒等） | 48 行（无写冲突） |
+
+⇒ **平台级 instance 会串到应用菜单、会打开未启用应用的应用库**。这与 §3.1 的 Type 1 承诺（"多 instance 各管各的库"）不符。
+
+#### (2) 根因（代码级）
+
+`get_meta_db_path()` 这个**统配入口本身是对的**（80+ 处 API 已使用），破口在**启动链路的 8 处绕过**（清单与逐处说明见 §6.5.1 F2）。最关键是三处：`server.py` L505 的 `init_menu_permissions(<硬编码 ARCH_DB_PATH>)`、`init_auth.py` 与 `migrate_system_admin.py` 的模块级 `DB_PATH` —— 它们**都在 `create_app()` 启动序列上**，因此 `SQLITE_DB_PATH` 被"抄近路"绕过，隔离实例的启动期写入全部落回主库。
+
+#### (3) 实施（8 文件 / 15 处编辑）
+
+| 文件 | 改动 |
+|------|------|
+| [db_path.py](../../meta/core/db_path.py) | `get_meta_db_path()` 优先级补全为 **`SQLITE_DB_PATH` > `ARCH_DB_PATH` > 仓库内**；docstring 优先级表同步 |
+| [server.py](../../meta/server.py#L505) | `init_menu_permissions(get_meta_db_path())`（原为只认 `ARCH_DB_PATH`） |
+| [init_auth.py](../../meta/scripts/init_auth.py) | 模块级 `DB_PATH` 改走 `get_meta_db_path()`；`except ImportError` 兜底同款 env 解析（直接以脚本运行/被 `sys.path.insert(<repo>/meta)` 导入时 `meta` 包不可见） |
+| [migrate_system_admin.py](../../meta/scripts/migrate_system_admin.py) | 同构改造（同上） |
+| `role_api` / `user_group_api` / `role_menu_api` / `management_dimension_api` / `role_dimension_scope_api` | 5 处惰性 fallback 改走 `get_meta_db_path()` |
+
+`python -m py_compile` 8 文件全部通过。
+
+#### (4) 实测 2（修复后，三份库设计）—— 核心断言全通过
+
+主库**只读对照** + `plat_a.db`（A 用）+ `plat_b.db`（B 用，且**预删全部 `app_%` 菜单**以放大差异）：
+
+| 断言 | 修复前 | 修复后 |
+|------|--------|--------|
+| 主库是否被写 | **是** | **否** —— MD5 `6F6748243811A2434E2F4476619C34C7` / `110133248` B / mtime `11:08:01`，**3 次采样（启动前 / 两实例起来后 / 关闭后）零变化** |
+| B 是否看到应用菜单 | 是（与 A 完全相同） | **否** —— `CODE_COUNT` 15、`HAS_app_warehouse` / `HAS_app_tms` 均 `False`、`app_*` 零命中；根菜单 5（A 为 8） |
+| 两实例 visible 是否相同 | 相同（23 = 23） | **不同** —— A 23 条含 `app_warehouse` / `app_tms`；B 15 条（`MD5=1ADFC007…`） |
+| 各实例是否写自己的库 | — | **是** —— `plat_a.db` mtime `11:10:04 → 11:16:52`、`plat_b.db → 11:16:54` |
+
+日志直证路径切换（同一行，改前 → 改后）：
+
+```
+migrate_system_admin: 数据库路径: D:\filework\excel-to-diagram\meta\architecture.db   ← 改前（硬编码）
+migrate_system_admin: 数据库路径: d:\filework\_mpp_probe\plat_a.db                    ← 改后
+init_auth:            Initializing auth system with DB: d:\filework\_mpp_probe\plat_a.db
+enum 迁移:            开始迁移枚举值到数据库: d:\filework\_mpp_probe\plat_a.db
+```
+
+#### (5) 回归
+
+[test_db_path.py](../../meta/tests/test_db_path.py) **24 passed**；8 文件串行回归：`test_role_api` 20 / `test_user_group_api` 22 / `test_server_app_integration` 10 / `test_merged_two_apps_menu` 9 / `test_server_app_db_routing_integration` 9 / `test_app_registry` 11 **passed**、`test_management_dimension_api` **18 skipped**（环境门禁 `SubscriptionFactory`，非失败）、`test_role_menu_dim_api` **8 failed**。
+
+> **`test_role_menu_dim_api.py` 8 failed 属既有问题（非本次引入）**：`role_menu_bp` 全仓**只有定义、无任何 `register_blueprint`** —— [app_builder.py L282](../../meta/core/app_builder.py#L282) 注释明确记载 Spec16 Plan D 已把 `role_api` / `user_group_api` / `role_dimension_scope_api` / `role_menu_api` 四个旧 Blueprint 模块标为 **dead import**。测试打不到路由 → `NotFound` → 被既有 `@app.errorhandler(Exception)`（`server.py` L709）包装为 500 ⇒ **请求到了不存在的蓝图**；本次改动未触及任何蓝图注册。
+
+#### (6) 结论与残留
+
+**结论：多 instance 并行 + 平台库互不污染，从本版起有实测证据**（此前只有设计承诺）。残留两项已入 §6.3.1 (6) backlog：① **未启用应用的请求语义**（仍会打开该应用的应用库；未注册路由返回 500 而非 404/403）；② **一次性运维脚本的硬编码路径**（本轮刻意不扩大范围）。
+
+**下一步（用户已授权）**：打通**应用权限管理维度** —— 已于本版（v1.29）执行完毕，见下文 **(7)**。原拟改的 `/api/v1/menu-permission/menus/all` 经实测**不是权限管理 UI 的取数入口**，该前提被推翻。
+
+> **证据留档**：`d:\filework\_mpp_probe\`（三份库 + A/B 两轮日志 + visible JSON + cookie jar，保留不删）。
+
+#### (7) 应用权限管理维度打通（✅ 2026-09-25，v1.29）
+
+**第一步是"先实测"：原"下一步"的前提被推翻**
+
+| 检查项 | 实测结论 |
+|--------|---------|
+| `/api/v1/menu-permission/menus/all` | 读 `menu_permissions` 表（12 条平台菜单），但**全仓零前端调用方** ⇒ 它不是权限管理 UI 的取数入口 |
+| 权限管理 UI 的真实取数 | `/api/v1/permission-sets/<id>/unified-permissions`（+ `/<id>/menu-permissions`）—— 已读 `menus` 表且以 `show_in_sidebar = 1` 为授权单位（[permission_set_menu_api.py L332](../../meta/api/permission_set_menu_api.py#L332)）、**已带应用维度** |
+| A 实例（`ENABLED_APPS=warehouse,tms`） | unified 返回 **14 条**（含 `app_warehouse` / `app_tms`） |
+| B 实例（平台级） | **11 条**（零应用菜单） |
+
+⇒ **取数链路本已正确**；真正缺的是"菜单 ↔ 权限"的三处内容缺口（下表）。
+
+**三个真实缺口（均有实测证据）**
+
+| 缺口 | 现象 | 根因 |
+|------|------|------|
+| ① 应用权限行缺失 | `permissions` 表 319 行、**零应用权限** ⇒ 菜单 `required_permissions` 里的 `<bo>:<action>` 全是悬空码 | `init_auth_system()`（[server.py L403](../../meta/server.py#L403)）走 `PermissionSyncService.sync_all()`，它是从**内存 registry** 推导权限码的，而该调用跑在 `register_apps()`（[L826](../../meta/server.py#L826)）**之前** ⇒ 那一刻应用 BO 尚未注册；应用注册链路也不补同步 |
+| ② 应用根菜单空壳 | `app_warehouse` 的 `bo_bindings='[]'` / `required_permissions='[]'`；勾选应用菜单 → "已同步 0 项"、权限矩阵 `groups=0` | 应用内菜单固定 `show_in_sidebar=0`，而矩阵/菜单 API 的授权单位只认 `show_in_sidebar=1` ⇒ 真正带权限的应用内菜单读不到，可见的根菜单却是空壳。对照平台 hub `arch-data`：bindings=6 / reqperm=32 / groups=6 |
+| ③ 悬空权限 | 菜单共需 28 条应用权限码，同步后仍缺 8 条 = 4 BO × `export`/`import` | 4 个应用 schema 开了 `import_export` 但 `actions` 未声明 export/import（平台 `domain.yaml` 有同款 BUG-V051 修法） |
+
+**实施（用户拍板：聚合到应用根菜单 + 补 export/import）**
+
+| 改动 | 落点 | 说明 |
+|------|------|------|
+| **P1 补权限行** | [app_registry.py `_sync_app_permissions()`](../../meta/core/app_registry.py#L416) | 启动循环内逐 BO `PermissionSyncService(data_source).sync_for_object(bo_id)`。**用类不用 `get_permission_sync_service()` 单例** —— 后者在 `init_auth` 阶段可能已用临时连接适配器创建，连接关闭后复用它静默丢写 |
+| **P2 根菜单聚合** | [app_registry.py `_aggregate_app_root_permissions()`](../../meta/core/app_registry.py#L446) | 逐 BO 调 `menu_auto_generator.generate_object_list_menu(obj)` 取**全量** `bo_bindings` / `required_permissions`，合并去重后 `UPDATE menus` 写回根菜单。**刻意不动** `page_type` / `object_types` / `primary_object_type`（[dynamicRoutes.js](../../src/router/dynamicRoutes.js) 会据此决定路由 props）；也不用 `generate_multi_object_menu` / `_derive_bo_bindings(read_only=True)` —— 它们会把除首个以外的 BO 降级为只读 ⇒ **少授权** |
+| **P3 补 actions** | `apps/warehouse/schemas/{warehouse,stock_item,outbound_order}.yaml` + `apps/tms/schemas/waybill.yaml` | 各补 `export` / `import` 两个 business action，委托统一 `/api/v1/export-import/*` 端点（不为每个 BO 单建端点） |
+
+**实测 3（修复后）**
+
+- **启动日志（A）**：`app 'warehouse': 补建表 3 个, 补菜单 3 条, 根菜单 'app_warehouse', 挂载 3 条, 补权限 21 条, 根菜单聚合 21 条`；`app 'tms': …, 补权限 7 条, 根菜单聚合 7 条`
+- **DB（A）**：`permissions` 应用行 **0 → 28**（4 BO × 7）；`app_warehouse` reqperm=21 / bindings=3、`app_tms` 7 / 1（`page_type` / `object_types` 保持空，未越界改动）
+- **`unified-permissions`（ps=1）**：`app_warehouse` 3 / 21 / **groups=3**（bo_ids: outbound_order, stock_item, warehouse）、`app_tms` 1 / 7 / 1 —— 与平台 `arch-data`（6 / 32 / 6）同构
+- **离线探针**（`_mpp_probe/probe_perm_sync.py`）：`CREATED_TOTAL 28`、`APP_CREATED 28`、**`MISSING_AFTER_SYNC []`**（缺口③ 归零）
+- **B（平台级）回归**：日志 `ENABLED_APPS 未设置 → legacy 模式, 不加载应用`；`permissions` 319 行**不变**、零应用权限、零应用根菜单
+
+**回归**：`test_app_registry` 11 / `test_warehouse_app_poc2` 17 / `test_merged_two_apps_menu` 9 / `test_permission_sync_api` 10 / `test_menu_permission_api` 12 —— **全 passed**（入口 `python d:\filework\test.py --file meta/tests/<f>.py`）。
+
+**残留三项（已入 §6.3.1 (6) backlog，本轮按用户决定"只记录"）**
+
+| # | 项 | 证据 / 影响 |
+|---|---|---|
+| **④** | **PUT `/permission-sets/<id>/menu-permissions` 的"勾选菜单 → 自动授予功能权限"在全平台（含平台菜单）恒返回"已同步 0 项"** | INSERT 带 `permission_code` 列，而 4 个库 schema 均为 `(id, permission_set_id, permission_id, granted, created_at)` ⇒ `OperationalError: no column named permission_code` 被 `except Exception: pass`（[permission_set_menu_api.py L800](../../meta/api/permission_set_menu_api.py#L800)）静默吞掉。**对照实测**：平台菜单（`arch-data` / `domain-list` / `product-management`）同样为 0 ⇒ 与本次应用改动**无关的既有缺陷**。同款写法另见 [permission_dimension_api.py L2295](../../meta/api/permission_dimension_api.py#L2295) |
+| **⑤** | `/api/v1/admin/permissions/sync` 被 v1 sunset 中间件劫持 | 410 `API Moved` → `migrated_to` 指向不存在的 v2 路径（`NotFound` → 全局 errorhandler 包装为 500）⇒ 管理员手工同步入口实际不可用 |
+| **⑥** | `apps/hello_world/schemas/greeting.yaml` 同类悬空权限 | 与缺口③ 同款，本轮刻意不扩大范围 |
+
+**行为变化提示（P2 的预期副作用）**：应用根菜单的 `required_permissions` 由空变为 21 / 7 条 ⇒ 与平台菜单语义一致，**非超管角色需被授予应用菜单才可见 / 可进**（此前无条件可见）。
+
 ### PoC 2：`warehouse-app`（✅ 完成，见 §10.12）
 
 ### PoC 3：`portal-app`（⏸ 已推迟到 Phase 2，触发式启动 —— 见 §10.14）
@@ -2197,3 +2328,5 @@ federation:
 | 2026-09-24 | **v1.25** | **架构方向符合性 check（面向 Agent / AI）+ 三条单向门口径入档**（§11 Q5，零代码、无新增测试）。**背景**：用户确认 AI / Agent 能力**整体推迟**，当下只做"架构是否符合该方向"的核对。**核对结论：方向符合** —— 声明式 `app.yaml`（= 机器可读的能力描述）、权限命名空间 = `app.id`、事件契约（= 行业标准 outbox）、业务分库（= per-app / per-tenant 多库主流）、L1–L4 分层与应用边界三层校验（= modular monolith 主流答案）均天然适配，且 Type 1/2/3 是同一能力图的不同投影，未来"动态性落在能力层"时拓扑无需重做。**核对发现一处真实不符（单向门）**：**能力清单的事实源分裂** —— MCP 面 20 个 tools 派生自 [meta/graphql/\_\_init\_\_.py](../../meta/graphql/__init__.py) 中**硬编码**的 `ENTITY_SCHEMAS`（10 个平台实体），而应用能力注册在 YAML schema 引擎（`MetaRegistry`），两者互不相通 ⇒ **应用能力无法暴露**。**入档三条单向门口径**：S1 能力清单 = schema 引擎注册表的**只读投影**（禁止第二份清单）；S2 调用者身份 / 权限走**统一鉴权入口**（现状 MCP 为手工传 `user_context`、RLS 标 `[DECORATIVE]`）；S3 库命名预留 `tenant × app` 二维。**发现一个当下真实暴露面（唯一代码级动作）**：`/mcp` 三路由**未见鉴权**（`meta/server.py` 4 个 `before_request` 均非鉴权），需先实测确认再关入口。**明确不做**：MCP 协议升级 / 工具级授权 / 渐进披露 / skill 包 / A2A / 应用市场 / 门户（V2-5）/ cell 拆分 / WASM 沙箱 / 备份复制 —— 全部顺延 Phase 2/3。同步更新 §七 V2-3（注明与 MCP 面共用能力清单与鉴权入口）/ 头部（状态、下一步）/ 附录 B |
 | 2026-09-24 | **v1.26** | **`/mcp` 未鉴权入口：实测确认 + 已关闭**（§11 Q5「配套的当下动作」，代码级 4 行改动）。**触发**：v1.25 记录的唯一代码级动作——"先实测确认（未登录请求该端点），确认后关入口"。**实测（真实 dev 服务 `python dev.py`，`FLASK_PORT=3015`，不带任何 Cookie / Authorization）**：`GET /mcp` **200**（12.7KB：`name` / `protocol: mcp-2024-11-05` / 20 tools）、`GET /mcp/tools` **200**（12.7KB：20 tools + `inputSchema`）、`POST /mcp`（`tools/list`）**200**（13.5KB）；`POST /mcp` 的 `tools/call`（`list_user` / `get_user_by_id`）亦 **200**，但返回 `{"tool":"rls_blocked","allowed":false,"deny_reason":"role set() cannot read user"}` ⇒ **能力清单与 server info 完全裸露，实体数据因 RLS「空上下文即拒绝」而未被取到**（属偶然 fail-closed，非鉴权边界）。**基线对照**：`/api/v1/auth/me`、`/api/v1/permission-sets`、`/api/v1/roles`、`/api/v1/menu-permission/visible`、`/api/v2/bo/user`、`/api/v1/schema/entities` 未登录**全部 401**（证明"未鉴权"不是全站设计）。**实施（方案 A：关入口，4 行）**：[meta/server.py](../../meta/server.py#L802) 生产路径 + [meta/core/app_builder.py](../../meta/core/app_builder.py#L370) 新入口，**两处 `from mcp import mcp_bp` / `register_blueprint(mcp_bp)` 均已移除**（只留说明性注释，指向 §11 Q5 S2）；[mcp/\_\_init\_\_.py](../../mcp/__init__.py#L10) 与 [mcp/server.py](../../mcp/server.py#L9) 的"回滚说明"改写为当前状态。`mcp/` 模块保留（Agent 面 Phase 2 从统一鉴权入口重开）。**验证**：关闭后三路由在服务端日志中为 `werkzeug.exceptions.NotFound`（与任意未注册路径 `/definitely-not-a-route` 行为一致；HTTP 状态 500 源于**既有** [@app.errorhandler(Exception)](../../meta/server.py#L707) 吞掉 `NotFound` 的全站 quirk，非本次引入）；`/api/v1/*` 仍全部 401（未变）；[mcp/tests/test_server.py](../../mcp/tests/test_server.py) **8 passed**（blueprint 独立测试不受影响）；[test_merged_two_apps_menu.py](../../meta/tests/test_merged_two_apps_menu.py) **9 passed**（create_app 路径回归）。**既有失败如实记录（与本次改动无关）**：`test_app_builder.py` 3 failed —— `TestStandardActionLoaderStartup` 三例硬断言 16 个标准动作，实际 23（export / import / manage / search / list / read / grant / revoke… 系 2026-09-12 后扩充），属**陈旧断言**；本次改动仅从 `with_blueprints()` 移除一个 import 与一次 register，与 `StandardActionLoader` 无调用关系。**同批发现（未处理，已记入 §11 Q5 待决策）**：`/graphql` 同属未受保护入口 —— `GET /graphql/health` 200（回显 10 个实体名）、`POST /graphql` 200；实测 `users` / `roles` / `userGroups` / `products` / `domains` / `businessObjects` 六个根查询**均返回空数组**（resolver 以 `{}` 走 `bo_framework`，数据权限层同样 fail-closed）⇒ 与 `/mcp` 同类（schema 目录可枚举、数据未泄漏），是否一并关闭待定。同步更新 §11 Q5（配套动作标 ✅ 已执行 + 实测表 + 同批发现）/ 头部（状态、下一步）/ 附录 B |
 | 2026-09-25 | **v1.27** | **应用 `migrations/` 执行环：认知修正 + 两项探针实测**（§6.3.1 新增；零生产代码改动，纯新增 2 个探针测试文件）。**认知修正（本轮最重要）**：此前（含 [app_registry.py L444](../../meta/core/app_registry.py#L444) 的注释）给人的印象是"应用 `migrations/` 无消费点、升级这条腿是断的" —— **准确说法是"升级缺的是结构变更执行这一环的接线，不是能力"**：迁移基础设施早已随"部署智能体"建成，`MigrationRunner.__init__(data_source, migrations_dir=None)` 的**目标库与脚本目录均为构造参数** ⇒ per-app / per-db 天然支持（含 `schema_migrations` 版本表 / `migration_lock` 并发锁 / checksum / 幂等 / 备份 / rollback / 超时 / 审计日志 / `--dry-run` CLI）。同时修正另一处表述：该环的**执行机制并不依赖请求级数据源路由**（原 §6.3 如此记载），只有**目标库**随 `APP_DB_ROUTING` 取值而定。**实测 1**（新文件 [test_per_app_migration_runner_probe.py](../../meta/tests/test_per_app_migration_runner_probe.py)，**6 passed / 0.87s**）：`schema_migrations` / `migration_lock` **落应用库**（平台库反例断言通过：无探针表、无版本表）、幂等生效（第二次返回 0，仅 1 行 `SUCCESS`）、`migrations_dir` 任意目录有效、**无全局耦合**（换库即重新执行、备份落应用库旁）⇒ **接线无隐藏工作量**；唯一路径派生耦合是审计日志路径（多应用共用一份 `logs/migrations.log`）。**实测 2**（新文件 [test_app_table_name_collision_probe.py](../../meta/tests/test_app_table_name_collision_probe.py)，**8 passed / 5.55s**，**真实 `create_app()` + 真实 `register_apps()` + 临时应用包**）：`APP_DB_ROUTING=0` 下同名 BO **不报错、无任何告警** —— 不同 BO id + 同 `table_name` ⇒ 两应用各自独有的列被**合并进同一张物理表**（证据 `probe_items_shared cols: ['code','id','only_a','only_b']`）；相同 BO id + 同 `table_name` ⇒ `registry` 被后注册方**静默覆盖**（[models.py L1277](../../meta/core/models.py#L1277) `self._objects[id] = obj`），先注册方列**丢失**（证据 `probe_dup_table cols: ['code','id','only_y']`）⇒ **当前既无表名命名空间、也无冲突检测（选项 B）**。成因链：[yaml_loader.py L2029](../../meta/core/yaml_loader.py#L2029) 直取 `table_name` → `_sync_app_tables()` 不派生前缀 → `SchemaMigrator.migrate` 遇表已存在仅 `ALTER ADD` 补列。**三项待定优化（接线时必须一并定口径）**：① **迁移命名空间** —— 分流关闭时应用与平台迁移**同库同表**，两个应用的 `0001_init.py` 同名会被误判"已执行"而**静默跳过**（须加 `<app_id>__` 前缀 + `tools/migration_lint.py` 强制校验）；② **执行时机** —— 现有为**部署期进程外 CLI**，而应用安装/升级是**运行期**动作（`install_app()` 只解压 + 校验 + 登记）⇒ 建议挂启动期 `register_apps()`，紧随 `_sync_app_tables()`；③ **失败语义 + 依赖拓扑顺序** —— **单向门，须现在定**（失败阻断启动还是告警放行？多应用依赖顺序如何进迁移序列）。**A 档四项细化**：A1 应用 `migrations/` 消费点（按上表接线，须先定三项口径）、A2 `table_prefix` 表名命名空间（**实测 2 已证实风险真实存在**）、A3 卸载反向依赖检查 G4（`EventContractRegistry.subscribers_for(event_name)` 是现成落点）、A4 跨应用只读视图（`ATTACH DATABASE` 全文**零实现代码**）。**决策（用户 2026-09-25）**：**A2 `table_prefix` 实现 + `/graphql` 关闭一并列为 backlog 推迟**（`/graphql` 注：其安全画像与已关闭的 `/mcp` **完全一致** —— 未鉴权 + schema 泄露，属**安全项**而非功能项；同批发现的 `/_metrics`、`/api/v1/test/ready` 一并待定）。**本次实测未覆盖（后续可补）**：per-app 场景下的 `.py` 迁移 / `prerequisites()` / `rollback()` / CLI `--dry-run`；`APP_DB_ROUTING=1` 下的同名表行为；同名 BO 对菜单 / 权限（进程级单例）的生产影响。同步更新 §6.3（修正表述）/ §6.3.1（新增）/ 头部（状态、下一步）/ 附录 B |
+| 2026-09-25 | **v1.28** | **多实例并行隔离：串号实测确认 + 8 处平台库路径破口修复**（§10.15 新增）。**触发**：用户提出核心使用场景——"**并行地在同一代码库里开发**应用架构管理（平台级）+ WMS + TMS，在 localhost **起多个 instance** 并行开发 / 测试 / 验证"，要求确认该能力**真的可用**而非只写在文档里；按其"**先钉事实 → 再动隔离 → 再补权限面**"的顺序执行（本版完成前两步）。**实测 1（修复前，A/B 同指仓库内主库）——串号确认**：A（`ENABLED_APPS=warehouse,tms` @3021）与 B（**平台级** @3022）的 `/api/v1/menu-permission/visible` **字节级完全相同**（同为 23 条 / `MD5=44325ED7…` / 36107 B），**B 能看到 `app_warehouse` / `app_tms` / `app_hello_world`**；B 请求 `/api/v1/apps/warehouse/health` 返回 **500**（内里 `NotFound`）且**打开了 `data/warehouse.db` 连接池**；B 启动使主库 **+4096 B**（mtime `10:34:46 → 10:55:36 → 10:57:01`）。**根因（代码级）**：统配入口 [get_meta_db_path()](../../meta/core/db_path.py) 本身正确（80+ 处 API 已用），破口在**启动链路的 8 处绕过**——最关键是 [server.py L505](../../meta/server.py#L505) 的 `init_menu_permissions(<硬编码 ARCH_DB_PATH>)`（**只认 `ARCH_DB_PATH`，故设了 `SQLITE_DB_PATH` 的隔离实例仍写回主库**）、[init_auth.py](../../meta/scripts/init_auth.py) 与 [migrate_system_admin.py](../../meta/scripts/migrate_system_admin.py) 的模块级 `DB_PATH`（两者均在 `create_app()` 启动序列上，`server.py` L403/L405 延迟导入），另有 5 处 API 惰性 fallback（`role_api` / `user_group_api` / `role_menu_api` / `management_dimension_api` / `role_dimension_scope_api`）。**实施（8 文件 / 15 处编辑）**：`get_meta_db_path()` 优先级补全为 **`SQLITE_DB_PATH` > `ARCH_DB_PATH` > 仓库内**（与 `intent_api` / `migration_runner` / `bo_framework` / `bo_pick_service` 既有的 `SQLITE_DB_PATH or ARCH_DB_PATH` 写法对齐）；`server.py` / `init_auth.py` / `migrate_system_admin.py` 改走该入口（后两者带 `try/except ImportError` 兜底，因直接以脚本运行或被 `sys.path.insert(<repo>/meta)` 导入时 `meta` 包不可见）；5 处 API fallback 同构改造；`py_compile` 8 文件全过。**实测 2（修复后，三份库设计：主库只读对照 + `plat_a.db` + 预删全部 `app_%` 菜单的 `plat_b.db`）—— 核心断言全反转**：① 主库 MD5 `6F6748243811A2434E2F4476619C34C7` / `110133248` B / mtime `11:08:01`，**3 次采样零变化**（此前 B 启动即写主库）；② B 的 visible `CODE_COUNT` 15、`HAS_app_warehouse` / `HAS_app_tms` **均 False**、`app_*` **零命中**；③ 两实例不再相同（A 23 条含两应用 vs B 15 条）；④ 各实例写自己的库（`plat_a.db` mtime `11:10:04 → 11:16:52`、`plat_b.db → 11:16:54`）。**日志直证路径切换**：`migrate_system_admin` 打印 `D:\filework\excel-to-diagram\meta\architecture.db`（改前）→ `d:\filework\_mpp_probe\plat_a.db`（改后）。**回归**：[test_db_path.py](../../meta/tests/test_db_path.py) **24 passed**；8 文件串行回归（`test_role_api` 20 / `test_user_group_api` 22 / `test_server_app_integration` 10 / `test_merged_two_apps_menu` 9 / `test_server_app_db_routing_integration` 9 / `test_app_registry` 11 passed；`test_management_dimension_api` 18 skipped 属环境门禁）。**既有失败如实记录（非本次引入，已亲自 grep 核实）**：`test_role_menu_dim_api.py` **8 failed** —— `role_menu_bp` 全仓**只有定义、无任何 `register_blueprint`**，[app_builder.py L282](../../meta/core/app_builder.py#L282) 注释记载 Spec16 Plan D 已把四个旧 Blueprint 模块标为 **dead import**；测试打不到路由 → `NotFound` → 被既有 `@app.errorhandler(Exception)` 包装为 500，本次改动未触及任何蓝图注册。**两项残留入 §6.3.1 (6) backlog**：① 未启用应用的请求语义（仍会打开该应用的应用库；未注册路由返回 **500 而非 404/403**，根因 `before_request` URL 前缀解析不校验 `ENABLED_APPS`）；② 一次性运维脚本（`meta/migrations/*`、`meta/scripts/*`、`meta/tools/drift_check.py`、`meta/ops_server.py`）仍有硬编码，**不在启动链路故刻意不扩大范围**。**下一步（用户已授权）**：应用权限管理维度——`/api/v1/menu-permission/menus/all` 改读 `menus` 表并带应用维度（当前只 12 条平台菜单、无应用维度）。同步更新 §6.5.1 F2（v1.28 实测块）/ §6.3.1 (6)（+2 条 backlog）/ §10.15（新增）/ 附录 B（本行） |
+| 2026-09-25 | **v1.29** | **应用权限管理维度打通：实测推翻原前提 + 三缺口修复 + 3 项残留入 backlog**（§10.15 (7) 新增）。**触发**：v1.28 授权的下一步——"`/api/v1/menu-permission/menus/all` 改读 `menus` 表并带应用维度，使多 instance 登录后各自在权限管理里看到自己的 WMS / TMS 菜单对象"。**实测 1（前提推翻，本轮最重要）**：`/api/v1/menu-permission/menus/all` **全仓零前端调用方**（grep 前端源码无命中）；权限管理 UI 的真实取数是 `GET /api/v1/permission-sets/<id>/unified-permissions`，而它**本来就**在 `menus` 表上工作、**本来就**带应用维度（实测 A 实例 ps=1 返回 **14 条**菜单，含 `app_warehouse` / `app_tms`；对照 B 实例 11 条）。⇒ 原方案"改端点"是伪需求，**真实堵点在应用侧数据是否齐备**。**实测 2（三缺口定位，均以 DB 直查 + 离线探针取证）**：**缺口①** 应用权限行缺席——`permissions` 表应用行 **0**（总 319）⇒ 权限矩阵里应用对象的功能权限**无行可选**（根因：平台 `PermissionSyncService` 同步早于 `register_apps()`，且应用 BO 不在其扫描范围内）；**缺口②** 权限矩阵的**授权单位是 `show_in_sidebar=1` 的菜单**，而应用内菜单固定 `show_in_sidebar=0`，应用根菜单 `required_permissions` 又为空 ⇒ 应用根菜单在矩阵中**有菜单无权限**（对照 `arch-data` hub：6 BO / 32 权限 / 6 groups）；**缺口③** 应用 schema 缺 `export/import` actions ⇒ 8 条权限码**悬空**（菜单 `required_permissions` 引用但 `permissions` 表无行）。**实施（P1/P2/P3 三层，5 文件）**：**P3** 4 个应用 schema 补 `actions: export/import`（[warehouse.yaml](../../apps/warehouse/schemas/warehouse.yaml) / [stock_item.yaml](../../apps/warehouse/schemas/stock_item.yaml) / [outbound_order.yaml](../../apps/warehouse/schemas/outbound_order.yaml) / [waybill.yaml](../../apps/tms/schemas/waybill.yaml)，均指向已有通用端点 `/api/v1/export-import/{export,import}`，`conflict_key` 与既有 `import_export` 块对齐）；**P1** [app_registry.py](../../meta/core/app_registry.py) 新增 `_sync_app_permissions()`（启动期按已声明 BO 逐个 `sync_for_object()` 补写 `permissions` 行）；**P2** 新增 `_aggregate_app_root_permissions()`（逐 BO 调 `generate_object_list_menu()`，**去重合并**其 `bo_bindings` / `required_permissions` / `resource_types` 后 `UPDATE menus SET bo_bindings/required_permissions/data_permission_hint WHERE menu_code=<根菜单>`；**刻意不用** `generate_multi_object_menu` / `_derive_bo_bindings(read_only=True)`——后者会少授权；**刻意不动** `page_type` / `object_types` / `primary_object_type`——根菜单是挂载点不是 hub）。启动顺序固化为"补建表 → 补菜单 → 建根菜单 → 挂载 → **补权限 → 根菜单聚合**"。**实测 3（修复后 A 实例 @3031 / `t8_c.db`，B 实例 @3032 / `t8_d.db` 作对照）**：启动日志 `app 'warehouse': … 补权限 21 条, 根菜单聚合 21 条` / `app 'tms': … 7 条 / 7 条`；`permissions` 应用行 **0 → 28**（总 347）；根菜单 `app_warehouse` **reqperm=21 / bindings=3**、`app_tms` **7 / 1**，且 `page_type=''` / `object_types=[]`（未越界）；`unified-permissions` 中 `app_warehouse` **bindings=3 / reqperm=21 / groups=3**（outbound_order / stock_item / warehouse）、`app_tms` **1 / 7 / 1**；离线探针 `CREATED_TOTAL 28` / `APP_CREATED 28` / **`MISSING_AFTER_SYNC []`**（缺口③归零）；**B 实例隔离保持**：日志 `ENABLED_APPS 未设置 → legacy 模式`，`permissions` 319 行不变、零应用权限、零应用根菜单。**回归**：[test_app_registry.py](../../meta/tests/test_app_registry.py) 11 / [test_warehouse_app_poc2.py](../../meta/tests/test_warehouse_app_poc2.py) 17 / [test_merged_two_apps_menu.py](../../meta/tests/test_merged_two_apps_menu.py) 9 / [test_permission_sync_api.py](../../meta/tests/test_permission_sync_api.py) 10 / [test_menu_permission_api.py](../../meta/tests/test_menu_permission_api.py) 12，全通过。**新发现缺陷④（用户决定：只记录 backlog 不修）**：`permission_set_permissions` 表在 4 个库（`meta/architecture.db` / `arch_backup.db` / `t8_a.db` / `t8_b.db`）的 schema **均为 `(id, permission_set_id, permission_id, granted, created_at)`——无 `permission_code` 列**，而 [permission_set_menu_api.py](../../meta/api/permission_set_menu_api.py) 的 PUT 路径按"带 `permission_code` 的 INSERT"写入且异常被 `except Exception: pass` 吞 ⇒ **权限矩阵里勾选菜单"自动授予功能权限"在全平台静默失效**（实测：PUT 应用菜单与 PUT 平台菜单**同样报"已同步 0 项"**，证明与本轮应用改动无关；手工复现 `OperationalError: table permission_set_permissions has no column named permission_code`，去掉该列则 INSERT 成功）。**同批入 backlog**：⑤ `/api/v1/admin/permissions/sync` 被 v1 sunset 中间件劫持为 410；⑥ `apps/hello_world/schemas/greeting.yaml` 同类悬空权限（同缺口③成因）。**行为变化提示**：P2 后根菜单 `required_permissions` 由空变为 21 / 7 条 ⇒ 权限矩阵里应用根菜单会**新出现功能权限勾选项**（预期行为，非回归）。**遗留证据文件**：`_mpp_probe/`（`dump_unified.py` / `dbcheck.py` / `prove_insert.py` / `probe_perm_sync.py` + `t8_c.db` / `t8_d.db` 与日志）。同步更新 §6.3.1 (6)（+3 条 backlog）/ §10.15 (6)（改写"下一步"）/ §10.15 (7)（新增）/ 头部（状态、下一步）/ 附录 B（本行） |

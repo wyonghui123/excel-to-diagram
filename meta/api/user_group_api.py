@@ -14,6 +14,7 @@ from meta.core.interceptors.persistence_interceptor import PersistenceIntercepto
 from meta.core.interceptors.audit_interceptor import AuditInterceptor
 from meta.core.interceptors.context_interceptor import ContextInterceptor
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir, registry
 import os
 
@@ -42,8 +43,7 @@ def init_user_group_services(data_source=None):
     if data_source:
         _data_source = data_source
     elif _data_source is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
-        _data_source = get_data_source("sqlite", database=db_path)
+        _data_source = get_data_source("sqlite", database=get_meta_db_path())
     
     schema_dir = get_yaml_schema_dir()
     register_from_directory(schema_dir)

@@ -20,7 +20,17 @@ import io
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+try:
+    from meta.core.db_path import get_meta_db_path
+    DB_PATH = get_meta_db_path()
+except ImportError:
+    # 直接以脚本方式运行（python meta/scripts/migrate_system_admin.py）时 meta 包不可见,
+    # 退回与 init_auth.py / init_menu_permissions.py 相同的 env 解析
+    DB_PATH = (
+        os.environ.get('SQLITE_DB_PATH')
+        or os.environ.get('ARCH_DB_PATH')
+        or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
+    )
 
 
 def get_db():

@@ -5,7 +5,8 @@
 
 平台库解析优先级:
 1. 环境变量 SQLITE_DB_PATH (staging/prod 部署环境由启动脚本注入)
-2. 仓库内 meta/architecture.db (本地开发默认)
+2. 环境变量 ARCH_DB_PATH (次级兼容项, 历史启动脚本使用)
+3. 仓库内 meta/architecture.db (本地开发默认)
 
 应用库（多产品平台，见 docs/platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md §6.5.1 F2）:
 1. 环境变量 SQLITE_DB_DIR (部署时把整个应用库目录重定位到数据盘)
@@ -21,8 +22,12 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 
 
 def get_meta_db_path() -> str:
-    """返回 meta/architecture.db 的绝对路径（env 优先，相对路径仅本地开发兜底）"""
-    env = os.environ.get('SQLITE_DB_PATH')
+    """返回平台库（meta/architecture.db）的绝对路径（env 优先，相对路径仅本地开发兜底）
+
+    `ARCH_DB_PATH` 为次级兼容项 —— 与 `intent_api` / `migration_runner` /
+    `bo_framework` 等处既有的 `SQLITE_DB_PATH or ARCH_DB_PATH` 判断保持一致。
+    """
+    env = os.environ.get('SQLITE_DB_PATH') or os.environ.get('ARCH_DB_PATH')
     if env:
         return env
     # 上溯两级即 <repo>/meta/

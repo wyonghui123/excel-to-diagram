@@ -502,8 +502,10 @@ def create_app(db_path=None):
 
     menu_auto_generator.persist_to_db(data_source)
 
-    db_path = os.environ.get('ARCH_DB_PATH', os.path.join(os.path.dirname(__file__), 'architecture.db'))
-    init_menu_permissions(db_path)
+    # 与主链路同一解析入口（SQLITE_DB_PATH > ARCH_DB_PATH > 仓库内）——
+    # 此前只认 ARCH_DB_PATH, 设 SQLITE_DB_PATH 的隔离实例仍会写回仓库内主库
+    from meta.core.db_path import get_meta_db_path
+    init_menu_permissions(get_meta_db_path())
 
     init_task_menus(data_source)
 

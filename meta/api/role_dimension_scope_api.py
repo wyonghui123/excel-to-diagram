@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify
 import os
 
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from meta.services.dimension_scope_engine import get_dimension_scope_engine
@@ -24,11 +25,7 @@ _data_source = None
 def _ds():
     global _data_source
     if _data_source is None:
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'architecture.db'
-        )
-        _data_source = get_data_source("sqlite", database=db_path)
+        _data_source = get_data_source("sqlite", database=get_meta_db_path())
     return _data_source
 
 

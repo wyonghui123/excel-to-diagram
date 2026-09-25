@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 from flask import Blueprint, g, jsonify, request
 
 from meta.core.datasource import get_data_source
+from meta.core.db_path import get_meta_db_path
 from meta.services.management_dimension_engine import (
     CHILD_TYPE_MAP,
     CODE_FIELD_MAP,
@@ -47,10 +48,7 @@ _data_source = None
 def _get_engine() -> ManagementDimensionEngine:
     global _engine, _data_source
     if _engine is None:
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "architecture.db"
-        )
-        _data_source = get_data_source("sqlite", database=db_path)
+        _data_source = get_data_source("sqlite", database=get_meta_db_path())
         _engine = ManagementDimensionEngine(_data_source, ttl_seconds=300)
     return _engine
 
