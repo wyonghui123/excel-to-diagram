@@ -37,6 +37,7 @@
                保存通过 ref.save() 在顶层「保存」动作中一并提交 -->
           <PermissionConfigPanel
             ref="permPanelRef"
+            :key="permissionSetId"
             :permission-set-id="permissionSetId"
             :permission-set="permissionSet"
             :editing="isEditing"
@@ -111,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { boService } from '@/services/boService'
@@ -385,6 +386,20 @@ async function handleRefresh(payload: any) {
 
 onMounted(() => {
   loadPermissionSet()
+})
+
+// [FIX 2026-09-25 缺陷 B] SPA 内切换权限集（路由 param 变化、组件被复用）时此前不重新加载：
+//   外层标题/状态/已分配组织停留在上一个权限集，内层 PermissionConfigPanel 也只在
+//   onMounted 拉数据 → 用户看到的是上一个权限集的菜单勾选与资源矩阵。
+//   实测：整页加载 ps=1（权限面板 20 行资源）后 SPA 切到别的权限集，仍显示 20 行（应为 15）。
+//   修法：① 本 watch 重载详情与已分配组织并退出编辑态；
+//         ② 模板上 `:key="permissionSetId"` 让权限面板整体重建，其内部状态
+//            （选中菜单 / 未保存矩阵与范围变更 / 资源矩阵视图）随之归零后重新加载。
+watch(permissionSetId, (now, before) => {
+  if (!now || now === before) return
+  isEditing.value = false
+  showAuditDialog.value = false
+  loadPermissionSet()   // 内部会串行调用 loadAssignedGroups()
 })
 </script>
 

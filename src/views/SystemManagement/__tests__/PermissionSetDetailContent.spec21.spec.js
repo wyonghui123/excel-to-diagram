@@ -135,4 +135,30 @@ describe('Spec 21 PM 反馈第十次 - PermissionSetDetailContent 状态转换�
     // 不应抛错
     await expect(wrapper.vm.handleRefresh({})).resolves.toBeUndefined()
   })
+
+  // [FIX 2026-09-25 缺陷 B] 同一路由内切换权限集（组件被复用）：此前只在 onMounted 加载，
+  //   标题与权限面板停留在上一个权限集；修复后 watch(permissionSetId) 重新拉取。
+  it('[缺陷 B 修复] 路由 param 变化（SPA 内切换权限集）重新拉取数据', async () => {
+    boService.read
+      .mockResolvedValueOnce({ success: true, data: { id: 5, code: 'admin', name: '管理员', is_active: true } })
+      .mockResolvedValueOnce({ success: true, data: { id: 6, code: 'viewer', name: '查看者', is_active: true } })
+
+    const router = buildRouter()
+    await router.push('/system/permission-set-detail/5')
+    await router.isReady()
+
+    const wrapper = mount(PermissionSetDetailContent, {
+      global: { plugins: [router] },
+      props: {}
+    })
+    await flushPromises()
+    expect(boService.read).toHaveBeenCalledTimes(1)
+
+    await router.push('/system/permission-set-detail/6')
+    await flushPromises()
+
+    expect(boService.read).toHaveBeenCalledTimes(2)
+    expect(boService.read).toHaveBeenNthCalledWith(2, 'permission_set', '6')
+    expect(wrapper.text()).toContain('查看者')
+  })
 })
