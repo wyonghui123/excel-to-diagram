@@ -147,6 +147,11 @@ def _load_module_from_path(path: Path, module_name: str):
     return module
 
 
+def load_app_module(path: Path, module_name: str):
+    """按文件路径加载应用内模块（公开入口，供事件 handler 加载复用）。"""
+    return _load_module_from_path(path, module_name)
+
+
 def _find_blueprints(module) -> list:
     """找出模块中定义的所有 Flask Blueprint 实例。"""
     from flask import Blueprint
@@ -211,26 +216,31 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
     """把应用 schema 目录累加注册到平台 YAML registry。
 
     Returns:
-        {app_id: [本次新增的 BO id, ...]}
+        {app_id: [应用**声明**的 BO id, ...]}
         用于后续"补建表"与"补菜单"——应用的 schema 是在平台建表/菜单流程
         之后才注册的, 因此需要单独补做（见 roadmap §10.2 缺口 A/B）。
+
+    为什么用"声明"而非"本次新增"（与 L236 归属索引同一个坑）:
+        `register_from_directory` 有**目录级缓存**，同一进程内第二次调用直接
+        返回缓存、不产生新增 ⇒ 若按"新增"做补建表/补菜单，第二个 create_app()
+        （多应用同启、测试、热重载）会**静默漏建表**，读写随即落到不存在的表。
+        建表与菜单写入本身都是幂等的，按"声明"重放是安全的。
     """
     from meta.core.models import registry
     from meta.core.table_name_validator import invalidate_cache as invalidate_table_cache
     from meta.core.yaml_loader import load_yaml_directory, register_from_directory
     from meta.services.view_config_service import view_config_service
 
-    added_by_app: Dict[str, List[str]] = {}
+    declared_by_app: Dict[str, List[str]] = {}
     for manifest in manifests:
         schema_dir = manifest.app_dir / "schemas"
         if not schema_dir.is_dir():
-            added_by_app[manifest.app_id] = []
+            declared_by_app[manifest.app_id] = []
             continue
 
         before = set(registry.list_types())
         register_from_directory(str(schema_dir))
         added = sorted(set(registry.list_types()) - before)
-        added_by_app[manifest.app_id] = added
 
         # [§6.5.3 改动 1] 登记 bo → app 归属：应用 BO 走平台通用 BO API，请求路径
         # 里没有 app_id，只能靠这份映射推断归属。**按应用声明的 schema 文件建立**
@@ -243,6 +253,9 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
         for bo_id in declared:
             _bo_to_app[bo_id] = manifest.app_id
 
+        # 补建表 / 补菜单同样按"声明"重放（幂等）—— 见函数 docstring
+        declared_by_app[manifest.app_id] = declared
+
         logger.info(
             "[AppRegistry] app '%s': 注册 schema 目录 %s, 声明 BO: %s, 本次新增: %s",
             manifest.app_id, schema_dir, declared, added,
@@ -252,7 +265,7 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
     #   "Invalid table name: 'xxx'. Must be one of registered tables from YAML schemas."
     view_config_service.invalidate_cache()
     invalidate_table_cache()
-    return added_by_app
+    return declared_by_app
 
 
 def _resolve_app_table_target(platform_data_source, manifest: AppManifest):
@@ -433,6 +446,54 @@ def _verify_installed(data_source, manifests: List[AppManifest]) -> None:
             )
 
 
+def _register_event_contracts(manifests: List[AppManifest]) -> int:
+    """登记 app.yaml 的 events 契约并做启动期校验（roadmap §6.14.4 ④）。
+
+    Returns:
+        登记的契约条数（publish + subscribe）
+
+    Raises:
+        EventContractError: 订阅了不存在的事件 / 来源应用未启用 / 缺幂等键
+    """
+    from meta.core.event_outbox import EventContractError, get_event_contract_registry
+
+    registry = get_event_contract_registry()
+    count = 0
+    for manifest in manifests:
+        for decl in manifest.events_publish:
+            registry.register_publish(manifest.app_id, decl)
+            count += 1
+        for decl in manifest.events_subscribe:
+            registry.register_subscribe(manifest.app_id, decl, str(manifest.app_dir))
+            count += 1
+
+    try:
+        registry.validate([m.app_id for m in manifests])
+    except EventContractError as e:
+        raise AppRegistrationError(f"事件契约校验失败: {e}") from e
+    return count
+
+
+def _prepare_event_tables(manifests: List[AppManifest]) -> int:
+    """为声明了 events 的应用准备 outbox / consumed_events 表。
+
+    表位置与业务表一致（`resolve_event_data_source`）—— 这是 §6.14.4 ①
+    "outbox 与业务写同库同事务"的前提。
+    """
+    from meta.core.event_consumer import ensure_consumed_table
+    from meta.core.event_outbox import ensure_outbox_table, resolve_event_data_source
+
+    prepared = 0
+    for manifest in manifests:
+        if not (manifest.events_publish or manifest.events_subscribe):
+            continue
+        data_source = resolve_event_data_source(manifest.app_id)
+        ensure_outbox_table(data_source)
+        ensure_consumed_table(data_source)
+        prepared += 1
+    return prepared
+
+
 def register_apps(
     app,
     app_ids: Optional[List[str]] = None,
@@ -465,9 +526,9 @@ def register_apps(
         _app_database_files[manifest.app_id] = manifest.database_file
     _verify_installed(data_source, manifests)
 
-    added_by_app: Dict[str, List[str]] = {}
+    declared_by_app: Dict[str, List[str]] = {}
     if register_schemas:
-        added_by_app = _register_app_schemas(manifests)
+        declared_by_app = _register_app_schemas(manifests)
 
     for manifest in manifests:
         count = _register_blueprints(app, manifest)
@@ -476,10 +537,16 @@ def register_apps(
             manifest.app_id, count, manifest.route_prefix,
         )
 
+    # [§6.14.4 ④] 事件契约：登记 + 启动期校验（订阅了不存在的事件即启动失败）
+    # 契约登记与 data_source 无关（纯内存），因此放在建表/菜单补做之前
+    contracts = _register_event_contracts(manifests)
+    if contracts:
+        logger.info("[AppRegistry] 事件契约 %s 条（publish + subscribe）", contracts)
+
     # 应用 schema 是在平台建表/菜单流程之后才注册的 → 需补做
     if register_schemas:
         for manifest in manifests:
-            bo_ids = added_by_app.get(manifest.app_id, [])
+            bo_ids = declared_by_app.get(manifest.app_id, [])
             if not bo_ids:
                 continue
             tables = _sync_app_tables(data_source, manifest, bo_ids)
@@ -492,5 +559,11 @@ def register_apps(
                 "根菜单 '%s', 挂载 %s 条",
                 manifest.app_id, tables, menus, root_code, attached,
             )
+
+    # [§6.14.2] 事件表（outbox / consumed_events）：与业务表同库
+    if data_source is not None:
+        prepared = _prepare_event_tables(manifests)
+        if prepared:
+            logger.info("[AppRegistry] 事件表已就绪（%s 个应用）", prepared)
 
     return manifests

@@ -1,0 +1,53 @@
+# ============================================
+# 应用包描述符（PoC 4：跨应用事件的订阅方）
+# 规范见 docs/platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md §6.2、§6.14.3
+# ============================================
+app:
+  id: tms
+  name: 运输管理
+  version: 1.0.0
+  description: 多产品平台的真实应用包（PoC 4）—— 消费 warehouse 的 outbound_completed 事件建运单
+  vendor: internal
+
+  platform:
+    min_version: "0.9.0"
+    max_version: "<1.0.0"
+
+  schemas:
+    - schemas/waybill.yaml
+  blueprints:
+    - blueprints/dispatch_api.py
+  components: []
+
+  # 跨应用事件（§6.14.3）
+  #   - from: 来源应用（启动期校验：必须有启用中的发布方, §6.14.4 ④）
+  #   - idempotency_key: 去重依据。投递是 at-least-once, 消费端幂等是硬要求
+  #     （§6.14.4 ②）—— 重复投递不会产生第二张运单
+  events:
+    subscribe:
+      - name: outbound_completed
+        from: warehouse
+        handler: blueprints/handlers/on_outbound_completed.py
+        idempotency_key: "order_no"
+
+  menu:
+    internal_root: /tms
+    portal_mount:
+      code: app_tms
+      parent: business_apps
+      icon: truck
+      order: 902
+      target_url: /app/tms
+
+  permission_namespace: tms
+
+  product_binding:
+    mode: fixed
+    product_code: TMS
+
+  database:
+    file: data/tms.db
+
+  allowed_platform_modules:
+    - meta.core.bo_framework
+    - meta.core.datasource

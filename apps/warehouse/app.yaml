@@ -1,0 +1,64 @@
+# ============================================
+# 应用包描述符（PoC 2：真实应用 / PoC 4：事件发布方）
+# 规范见 docs/platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md §6.2、§6.14.3
+#
+# 注意: app.id 同时用作 目录名 / 路由前缀 / DB 文件名 / 权限命名空间前缀,
+#       因此只允许小写字母/数字/下划线（不允许连字符）。
+# ============================================
+app:
+  id: warehouse
+  name: 仓储管理
+  version: 1.0.0
+  description: 多产品平台的真实应用包（PoC 2 / PoC 4）—— 应用独立库 + 请求级数据源路由 + 跨应用事件发布方
+  vendor: internal
+
+  # 平台版本约束（防止平台升级破坏应用）
+  platform:
+    min_version: "0.9.0"
+    max_version: "<1.0.0"
+
+  # 入口资源（路径相对本目录）
+  schemas:
+    - schemas/warehouse.yaml
+    - schemas/stock_item.yaml
+    - schemas/outbound_order.yaml
+  blueprints:
+    - blueprints/inventory_api.py
+  components: []
+
+  # 跨应用事件（§6.14.3）: WMS 出库完成 → 供 TMS 建运单
+  #   事件行与业务写在**同一事务**落本应用库（§6.14.4 ①），故进程崩溃不丢
+  events:
+    publish:
+      - name: outbound_completed
+        entity: outbound_order
+        trigger: after_update
+        condition: "status == 'shipped'"
+        payload: [order_no, item_id, quantity, warehouse_id, shipped_at]
+
+  # 菜单双层挂载（§6.6）
+  menu:
+    internal_root: /warehouse
+    portal_mount:
+      code: app_warehouse
+      parent: business_apps
+      icon: warehouse
+      order: 901
+      target_url: /app/warehouse
+
+  # 权限命名空间（必须等于 app.id）
+  permission_namespace: warehouse
+
+  # 产品绑定（§6.2）: fixed = 与 platform.db 中 product 1:1
+  product_binding:
+    mode: fixed
+    product_code: WMS
+
+  # 数据存储（§6.5.1 F2: 文件名由本字段决定, 目录由 SQLITE_DB_DIR 决定）
+  database:
+    file: data/warehouse.db
+
+  # 允许引用的平台模块白名单（阻断应用越界 import）
+  allowed_platform_modules:
+    - meta.core.bo_framework
+    - meta.core.datasource

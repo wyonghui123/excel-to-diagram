@@ -1,0 +1,174 @@
+# ============================================
+# tms 应用的业务对象：运单
+#
+# 用途: PoC 4 —— 跨应用事件的**消费方实体**。
+#       由 blueprints/handlers/on_outbound_completed.py 在收到
+#       warehouse 的 outbound_completed 事件时建单（roadmap §6.14.2）
+# 结构参照 meta/schemas/_template.yaml
+# ============================================
+
+id: waybill
+name: 运单
+table_name: waybills
+description: 运输管理应用的运单
+
+semantics:
+  meaning: 由出库完成事件驱动创建的运输单据
+  category: business_entity
+  business_key: [waybill_no]
+
+deletion_policy:
+  mode: restrict
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: waybill_no
+    name: 运单号
+    type: string
+    db_column: waybill_no
+    required: true
+    unique: true
+    max_length: 50
+    description: 运单唯一编号（由来源出库单号派生）
+    semantics:
+      business_key: true
+
+  - id: order_no
+    name: 来源出库单号
+    type: string
+    db_column: order_no
+    required: true
+    max_length: 50
+    description: 来源 warehouse 应用的出库单号（事件的幂等键）
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+
+  - id: quantity
+    name: 数量
+    type: float
+    db_column: quantity
+    required: true
+    ui:
+      widget: number
+
+  - id: warehouse_id
+    name: 发货仓库
+    type: integer
+    db_column: warehouse_id
+    required: true
+
+  - id: status
+    name: 运单状态
+    type: string
+    db_column: status
+    required: true
+    max_length: 20
+    default: created
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+indexes:
+  - fields: [waybill_no]
+    unique: true
+    name: idx_waybill_no
+  - fields: [order_no]
+    unique: false
+    name: idx_waybill_order_no
+
+ui_view_config:
+  list:
+    title: 运单管理
+    searchFields:
+      - waybill_no
+      - order_no
+    columns:
+      - field: waybill_no
+        width: 160
+        sortable: true
+      - field: order_no
+        width: 160
+      - field: quantity
+        width: 100
+      - field: status
+        width: 110
+    actions:
+      - id: create
+        label: 新建
+        icon: plus
+        type: primary
+        permission: tms:create
+
+  form:
+    title: 运单信息
+    layout: vertical
+    groups:
+      - id: basic
+        label: 基本信息
+        columns: 2
+        fields:
+          - waybill_no
+          - order_no
+          - item_id
+          - quantity
+          - warehouse_id
+          - status
+
+  detail:
+    layout: tabs
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - waybill_no
+          - order_no
+          - item_id
+          - quantity
+          - warehouse_id
+          - status
+
+category_config:
+  create_permission: tms:create
+  update_permission: tms:update
+  delete_permission: tms:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: waybill_no

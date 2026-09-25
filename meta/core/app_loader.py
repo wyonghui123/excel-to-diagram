@@ -40,6 +40,10 @@ SUBDIR_MIGRATIONS = "migrations"
 
 MANIFEST_FILENAME = "app.yaml"
 
+#: 事件触发点（roadmap §6.14.3）；与平台 action 常量的对应关系见
+#: `meta/core/event_outbox.py` 的 ACTION_TO_TRIGGER
+EVENT_TRIGGERS = ("after_create", "after_update", "after_delete")
+
 
 class AppManifestError(ValueError):
     """app.yaml 缺失、格式错误或校验失败。启动期快速失败用。"""
@@ -55,6 +59,48 @@ class ProductBinding:
 
     mode: str
     product_code: str = ""
+
+
+@dataclass
+class EventPublishDecl:
+    """发布声明（roadmap §6.14.3）。
+
+    ```yaml
+    events:
+      publish:
+        - name: outbound_completed
+          entity: outbound_order      # 本应用的 BO id
+          trigger: after_update
+          condition: "status == 'shipped'"   # 可选
+          payload: [order_no, quantity]      # 只带必要字段
+    ```
+    """
+
+    name: str
+    entity: str
+    trigger: str
+    condition: str = ""
+    payload: List[str] = field(default_factory=list)
+
+
+@dataclass
+class EventSubscribeDecl:
+    """订阅声明（roadmap §6.14.3）。
+
+    ```yaml
+    events:
+      subscribe:
+        - name: outbound_completed
+          from: warehouse                    # 来源应用（启动期校验必须存在发布方）
+          handler: blueprints/handlers/on_outbound_completed.py
+          idempotency_key: "order_no"        # 去重依据（at-least-once，硬要求）
+    ```
+    """
+
+    name: str
+    source_app: str
+    handler: str
+    idempotency_key: str
 
 
 @dataclass
@@ -79,6 +125,8 @@ class AppManifest:
     product_binding: Optional[ProductBinding] = None
     database_file: str = ""
     allowed_platform_modules: List[str] = field(default_factory=list)
+    events_publish: List[EventPublishDecl] = field(default_factory=list)
+    events_subscribe: List[EventSubscribeDecl] = field(default_factory=list)
 
     @property
     def route_prefix(self) -> str:
@@ -145,6 +193,68 @@ def _parse_product_binding(raw: Dict[str, Any], app_id: str) -> Optional[Product
             f"app '{app_id}': product_binding.mode='fixed' 时必须提供 product_code"
         )
     return ProductBinding(mode=mode, product_code=product_code)
+
+
+def _parse_events(raw: Dict[str, Any]) -> tuple:
+    """解析并校验 `events.publish` / `events.subscribe`（roadmap §6.14.3）。
+
+    命名冲突（同一事件被同一应用既发布又订阅）属于配置错误，直接失败。
+
+    Returns:
+        (publish_decls, subscribe_decls)
+    """
+    node = raw.get("events")
+    if node is None:
+        return [], []
+    if not isinstance(node, dict):
+        raise AppManifestError("events 需为对象（含 publish / subscribe）")
+
+    publishes: List[EventPublishDecl] = []
+    for index, item in enumerate(_dict_list(node, "publish")):
+        ctx = f"events.publish[{index}]"
+        decl = EventPublishDecl(
+            name=_require_str(item, "name", ctx),
+            entity=_require_str(item, "entity", ctx),
+            trigger=_require_str(item, "trigger", ctx),
+            condition=_optional_str(item, "condition"),
+            payload=_str_list(item, "payload"),
+        )
+        if decl.trigger not in EVENT_TRIGGERS:
+            raise AppManifestError(
+                f"{ctx}: trigger 必须为 {EVENT_TRIGGERS} 之一, 实际为 '{decl.trigger}'"
+            )
+        if not decl.payload:
+            raise AppManifestError(
+                f"{ctx}: payload 需声明至少一个字段（跨应用写只带必要字段, §6.14.3）"
+            )
+        publishes.append(decl)
+
+    subscribes: List[EventSubscribeDecl] = []
+    for index, item in enumerate(_dict_list(node, "subscribe")):
+        ctx = f"events.subscribe[{index}]"
+        subscribes.append(EventSubscribeDecl(
+            name=_require_str(item, "name", ctx),
+            source_app=_require_str(item, "from", ctx),
+            handler=_require_str(item, "handler", ctx),
+            idempotency_key=_require_str(item, "idempotency_key", ctx),
+        ))
+
+    duplicated = {p.name for p in publishes} & {s.name for s in subscribes}
+    if duplicated:
+        raise AppManifestError(
+            f"同一应用不能既发布又订阅同一事件: {sorted(duplicated)}"
+            "（跨应用事件是应用间机制, §6.14）"
+        )
+    return publishes, subscribes
+
+
+def _dict_list(raw: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
+    value = raw.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        raise AppManifestError(f"'{key}' 需为对象列表")
+    return value
 
 
 def _check_files_exist(app_dir: Path, rel_paths: List[str], kind: str) -> None:
@@ -226,6 +336,11 @@ def load_manifest(app_dir: Path) -> AppManifest:
     _check_files_exist(app_dir, blueprints, "blueprints")
     _check_files_exist(app_dir, components, "components")
 
+    events_publish, events_subscribe = _parse_events(raw)
+    _check_files_exist(
+        app_dir, [s.handler for s in events_subscribe], "events.subscribe.handler"
+    )
+
     return AppManifest(
         app_id=app_id,
         name=_require_str(raw, "name", str(manifest_path)),
@@ -245,6 +360,8 @@ def load_manifest(app_dir: Path) -> AppManifest:
         product_binding=_parse_product_binding(raw, app_id),
         database_file=_optional_str(database, "file"),
         allowed_platform_modules=_str_list(raw, "allowed_platform_modules"),
+        events_publish=events_publish,
+        events_subscribe=events_subscribe,
     )
 
 

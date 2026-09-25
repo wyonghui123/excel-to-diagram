@@ -313,7 +313,6 @@ class ApplicationBuilder:
         from meta.api.task_api import task_api_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
-        from mcp import mcp_bp
         from telemetry import telemetry_bp
 
         app.register_blueprint(query_bp)
@@ -368,7 +367,8 @@ class ApplicationBuilder:
         app.register_blueprint(task_api_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
-        app.register_blueprint(mcp_bp)
+        # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，
+        # 实测未登录可枚举 20 个 tools）。Agent 面待 Phase 2 从统一鉴权入口重开。
         app.register_blueprint(telemetry_bp)
 
         # v3.18: diagnostics + metrics 端点

@@ -6,7 +6,8 @@ mcp/server.py - M10 v1.1.0 MCP HTTP Server
 - GET /mcp 返回 server info
 - 0 业务代码破坏
 
-回滚：删除 mcp/ 目录 + app_builder.py 中 blueprint 注册即可
+[状态 2026-09-24 / roadmap §11 Q5 S2] 本 blueprint 当前不再注册进 app
+（meta/server.py 与 meta/core/app_builder.py 两处注册已移除，原因：三条路由无鉴权）。
 """
 import json
 import logging

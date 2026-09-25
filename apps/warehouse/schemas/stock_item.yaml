@@ -1,0 +1,191 @@
+# ============================================
+# warehouse 应用的业务对象：库存物料
+#
+# 用途: PoC 2 —— 含**同库外键**（warehouses.id），验证应用内关联
+#       在应用独立库中自洽（跨库关联按 §6.5.1 F5 铁律不允许）
+# 结构参照 meta/schemas/_template.yaml
+# ============================================
+
+id: stock_item
+name: 库存物料
+table_name: stock_items
+description: 仓储管理应用的库存物料
+
+semantics:
+  meaning: 某仓库中某物料的可用量
+  category: business_entity
+  business_key: [code]
+
+deletion_policy:
+  mode: restrict
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: code
+    name: 物料编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    description: 库存物料唯一编码
+    semantics:
+      business_key: true
+
+  - id: name
+    name: 物料名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 物料显示名称
+    semantics:
+      display_name: true
+
+  - id: warehouse_id
+    name: 所属仓库
+    type: integer
+    db_column: warehouse_id
+    required: true
+    description: 所属仓库（同应用库内引用 warehouses.id）
+    ui:
+      widget: select
+      relation: warehouse
+    semantics:
+      meaning: 库存物料所属的仓库
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 所属仓库
+
+  - id: quantity
+    name: 数量
+    type: float
+    db_column: quantity
+    required: true
+    description: 可用数量
+    ui:
+      widget: number
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+relations:
+  - id: stock_item_to_warehouse
+    name: 所属仓库
+    type: parent_child
+    target: warehouse
+    cardinality: "N:1"
+    description: 库存物料归属的仓库（生成 warehouse_id 外键）
+    semantics:
+      meaning: 库存物料与仓库的层级关系
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_stock_item_code
+  - fields: [warehouse_id]
+    unique: false
+    name: idx_stock_item_warehouse
+
+ui_view_config:
+  list:
+    title: 库存物料管理
+    searchFields:
+      - code
+      - name
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: warehouse_id
+        width: 140
+      - field: quantity
+        width: 100
+        sortable: true
+    actions:
+      - id: create
+        label: 新建
+        icon: plus
+        type: primary
+        permission: warehouse:create
+
+  form:
+    title: 库存物料信息
+    layout: vertical
+    groups:
+      - id: basic
+        label: 基本信息
+        columns: 2
+        fields:
+          - code
+          - name
+      - id: stock
+        label: 库存信息
+        columns: 2
+        fields:
+          - warehouse_id
+          - quantity
+
+  detail:
+    layout: tabs
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - warehouse_id
+          - quantity
+
+category_config:
+  create_permission: warehouse:create
+  update_permission: warehouse:update
+  delete_permission: warehouse:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

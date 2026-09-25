@@ -2,7 +2,13 @@
 
 > **版本**: v1.0.0
 > **创建日期**: 2026-06-06
-> **状态**: ✅ M10 MCP Server 实施完成 / 32 测试 PASS
+> **状态**: ⛔ **HTTP 端点已关闭（2026-09-24）** — 原状态：M10 MCP Server 实施完成 / 32 测试 PASS
+>
+> **[2026-09-24 更新]** `/mcp` 三条路由（`POST /mcp`、`GET /mcp`、`GET /mcp/tools`）实测**无鉴权**
+> （未登录返回 200，可枚举 20 个 tools 与字段 schema），已按 [MULTI_PRODUCT_PLATFORM_ROADMAP §11 Q5](./platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md)
+> **方案 A 关闭入口**：`meta/server.py` 与 `meta/core/app_builder.py` 两处 `mcp_bp` 注册均已移除。
+> 本文档第 1 节的 HTTP 方式（`POST /mcp` / `GET /mcp/info`）**当前不可用**；`mcp/` 模块代码保留，
+> Agent 面待 Phase 2 从统一鉴权入口重开后本文档再同步。下方 HTTP 端点章节仅作历史参考。
 
 ---
 

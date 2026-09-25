@@ -270,6 +270,14 @@ def _preflight_db_integrity_check(db_path):
 def _cleanup_resources(data_source):
     logger = logging.getLogger(__name__)
 
+    # [§6.14.2] 先停跨应用事件投递线程，再做多库关闭编排 —— 否则在途投递可能与
+    # 写队列关闭交叉（事件投递本身也写库）。
+    try:
+        from meta.core.event_outbox import stop_event_dispatcher
+        stop_event_dispatcher()
+    except Exception as e:
+        logger.warning("Event dispatcher shutdown failed: %s", e)
+
     # [§6.5.3 改动 4] 多库关闭编排：遍历**所有活跃数据源**（平台库 + 各应用库）
     # 逐个 flush 写队列 → stop 写线程 → 最终 WAL checkpoint → 释放连接池。
     # 改造前只处理传入的单个 data_source，多库场景下其余库的写队列不会被
@@ -475,6 +483,10 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(AuditInterceptor())
     bo_framework.register_interceptor(BusinessLogInterceptor())
     bo_framework.register_interceptor(PersistenceInterceptor())
+    # [多产品平台 §6.14.2] 跨应用事件：业务写成功后在同一事务内写 outbox。
+    # 无事件契约时 should_execute 直接短路 → legacy 零影响。
+    from meta.core.interceptors.outbox_interceptor import OutboxInterceptor
+    bo_framework.register_interceptor(OutboxInterceptor())
     bo_framework.register_interceptor(SecurityLogInterceptor())
     bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
     # [H13 2026-06-15] WriteScopeInterceptor 写权限数据范围检查
@@ -787,9 +799,10 @@ def create_app(db_path=None):
     from meta.api.metrics_api import register_metrics_route
     register_metrics_route(app)
 
-    # M10 v1.1.0: MCP Server Blueprint (JSON-RPC 2.0, 20 tools from ENTITY_SCHEMAS)
-    from mcp import mcp_bp
-    app.register_blueprint(mcp_bp)
+    # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 M10 MCP Server Blueprint 注册已移除。
+    # 原因：实测未登录 GET /mcp、GET /mcp/tools、POST /mcp 均返回 200（能力清单裸露），
+    # 而全站受保护端点均返回 401 —— 三条路由不在统一鉴权入口内。
+    # Agent 面待 Phase 2 从统一鉴权入口（§11 Q5 S2）重开，勿在此处单独注册。
 
     # M13 v1.4.0: Schema Dashboard Blueprint (entity summary + drift detection)
     from meta.api.schema_api import schema_dashboard_bp
@@ -818,6 +831,15 @@ def create_app(db_path=None):
     except Exception as _app_err:
         # 应用加载失败必须中止启动（路由冲突等属配置错误, 静默降级更危险）
         logging.getLogger(__name__).error("[AppRegistry] 应用加载失败: %s", _app_err)
+        raise
+
+    # [多产品平台 §6.14.2] 跨应用事件投递线程（无事件契约时不启动）
+    try:
+        from meta.core.event_outbox import start_event_dispatcher
+        if start_event_dispatcher() is not None:
+            logging.getLogger(__name__).info("[EventDispatcher] 跨应用事件投递已启动")
+    except Exception as _evt_err:
+        logging.getLogger(__name__).error("[EventDispatcher] 启动失败: %s", _evt_err)
         raise
 
     init_socketio(app)

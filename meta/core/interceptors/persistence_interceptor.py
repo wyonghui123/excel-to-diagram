@@ -38,6 +38,9 @@ class PersistenceInterceptor(Interceptor):
 
     def __init__(self):
         self._registry = None
+        # [FIX 2026-09-24 §6.5.3] 按数据源分桶缓存 —— 多应用库路由下每个库各自持有
+        # 一个 ActionRegistry（内含 ActionExecutor，绑定该库的连接池）。
+        self._registries: Dict[Any, ActionRegistry] = {}
         self._association_engine = AssociationEngine()
         # [SPR-04 T-S03-02] suffix operator dispatch table
         # [FIX v3.18 2026-06-10] 改用方法名字符串 + getattr 模式：
@@ -53,9 +56,32 @@ class PersistenceInterceptor(Interceptor):
         }
 
     def _get_registry(self, context: ActionContext) -> ActionRegistry:
-        if self._registry is None:
-            self._registry = ActionRegistry(context.data_source)
-        return self._registry
+        """取本次请求数据源对应的 ActionRegistry。
+
+        [FIX 2026-09-24 §6.5.3] 原实现只缓存**第一个**请求的 registry 并永久复用:
+        `if self._registry is None`。多应用库路由（`APP_DB_ROUTING=1`）下,
+        PersistenceInterceptor 是**全局单例**（`server.py` 只注册一次）,
+        于是第二个应用（如 hello_world）的写入会被送进第一个应用（如 warehouse）
+        的库 —— 表不存在时静默失败, 表同名时**写错库**, 单应用场景不可见。
+
+        修复: 按数据源身份（`DataSource` 未覆写 `__eq__`/`__hash__`）分桶缓存,
+        同一 data_source 复用同一 registry, 不同 data_source 各自新建。
+
+        兼容: 测试 / 手工装配直接给 `self._registry` 赋值时, 它不属于任何桶
+        ⇒ 原样返回, 不覆盖调用方注入的替身。
+        """
+        if self._registry is not None and not any(
+            self._registry is cached for cached in self._registries.values()
+        ):
+            return self._registry
+
+        data_source = context.data_source
+        registry = self._registries.get(data_source)
+        if registry is None:
+            registry = ActionRegistry(data_source)
+            self._registries[data_source] = registry
+        self._registry = registry
+        return registry
 
     def before_action(self, context: ActionContext) -> None:
         pass

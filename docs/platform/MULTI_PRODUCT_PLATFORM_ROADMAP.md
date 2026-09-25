@@ -4,17 +4,17 @@
 >
 > **与其它文档的关系**：[ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md](../ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md) 解决"能力维度"（BPMN / 多租户 / 报表 / AI…）；本文解决"应用产品维度 + 部署拓扑维度"。两份文档正交，互不替代。
 >
-> **状态**：v1.21（全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库**）
-> **最后更新**：2026-09-24
+> **状态**：v1.27（全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）**）
+> **最后更新**：2026-09-25
 > **结论摘要**：现有平台已完成约 70% 的平台化基建（四层抽象中 L1/L2 已具备、L3/L4 缺失）。**真正缺失的只有"应用产品"这一层抽象**，Phase 1 约 40 人天可交付"单 instance 多 app 合并部署"。数据层 **3 处前置疑点已全部收敛**：F2 多库路径入口（**已实现**，§10.6）、F3 写队列/维护调度（**经核实为非缺口**，§10.7）、F1 fd 阈值（**实测降级为 P1**，§10.0）；另 1 条铁律（事务不跨库 F5）。**数据层已无阻塞项**。
 >
 > **行业对标（v1.18~v1.19）**：核心方向经 Salesforce / ServiceNow / Microsoft / SAP / Odoo / AWS 验证，**不需要推翻**；发现 **3 项 P0 差距已全部补入方案**（§4.4、[对标报告](./INDUSTRY_BENCHMARK_APP_PLATFORM.md)）：**G1 补 expand-contract 纪律**（§6.10 改写，蓝绿降为特例）、**G2 补表名命名空间**（§6.2.2 新增 `table_prefix` + 三层校验）、**G3 补"删除即废弃"**（§6.10）。另补 G4（卸载反向依赖检查验收项）。合计约 5.5 人天，均为规范 + 校验类改动，**不动架构**。
 >
-> **应用已可端到端加载并可见**：`ENABLED_APPS=hello_world` 启动后——应用路由可达、应用 BO 表自动创建、**菜单生成并挂到应用根菜单、菜单 API 真实返回**；legacy 模式零行为变化；**193 个新测试全通过**（§10.1~§10.11）。
+> **应用已可端到端加载并可见**：`ENABLED_APPS=hello_world` 启动后——应用路由可达、应用 BO 表自动创建、**菜单生成并挂到应用根菜单、菜单 API 真实返回**；legacy 模式零行为变化；**244 个新测试全通过**（§10.1~§10.14）。
 >
 > **四个实施级发现**：① 生产路径不使用 `ApplicationBuilder` → 按 §6.4.1 方案甲落地；② `deprecate_v1_crud` 中间件会把 `/api/v1/apps/*` 判为 410 → 已加白名单（§6.7）；③ 表名白名单缓存与菜单 mtime 守卫会静默拦截应用资源 → 已修复（§10.3）；④ **应用菜单必须有父菜单才可见** → 已实现 `portal_mount` 根菜单（§6.6、§10.4）。
 >
-> **下一步**：`APP_DB_ROUTING=1` 下的**独立库真实启用验证**——即把 hello_world 换成真实应用包（PoC 2 `warehouse-app`），验证应用库独立、平台库共享、日志归属正确；并补上 `query_api` / `export_import_api` / `stats_api` / `association_api` 的分流（§10.10 末尾"未纳入本次范围"）。**§6.5.3 四项改动已全部完成**（改动 1~3 → v1.20 §10.10；改动 4 → v1.17 §10.9）。路由模型为**双库并存**（§11 Q4）。
+> **下一步**：**① 补 P1 分流缺口**——`query_api` / `export_import_api` / `stats_api` / `association_api` 的 `_get_data_source()` 单例，以及应用包 `migrations/` 消费点、`bo_pick_service._default_data_source()`、`export_import_api.py` 的 `ManageService(_data_source)` 单例（§10.10 / §10.11 末尾"未纳入本次范围"，§10.12 末尾）——这些是**读错库的数据正确性风险**，优先级高于体验类收尾项。**② `/graphql` 关闭已列 backlog**（v1.27 决定推迟；其安全画像与已关闭的 `/mcp` **完全一致**——未鉴权 + schema 泄露，属**安全项**而非功能项，见 §6.3.1 (6)；同批发现的 `/_metrics`、`/api/v1/test/ready` 一并待定）。**③ 应用 `migrations/` 接线**——能力已具备（v1.27 §6.3.1 实测 1：per-app runner 开箱可用，接线无隐藏工作量），**但须先定三项口径**（迁移命名空间 / 执行时机 / 失败语义 + 依赖顺序），口径未定前不做接线。**`/mcp` 未鉴权入口已于 v1.26 实测确认并关闭**（原①）。**PoC 3（门户聚合）已推迟到 Phase 2 触发式启动**："TMS 与 WMS 一起展示"用 **Type 2 合并部署**即可，已实测双应用根菜单在**同一平台库、同一菜单响应**中同栏可见（v1.24 §10.14）；Type 3 的增量仅"多实例 + 跨实例菜单聚合"，触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离，§3.2）未出现前不投入。**§6.5.3 四项改动已全部完成**（改动 1~3 → v1.20 §10.10；改动 4 → v1.17 §10.9），**PoC 2 已在真实应用包上验证通过**（v1.22 §10.12：应用库独立、平台库共享、审计归属正确、多应用各落各库），**PoC 4 已实测跨应用事件的"不丢 / 不重 / 死信"三项保证**（v1.23 §10.13）。路由模型为**双库并存**（§11 Q4）。
 
 ---
 
@@ -161,6 +161,8 @@ graph TB
 | Type 4 混合 | ❌ | △ | ✅ |
 
 > **Phase 1 的目标是 Type 1 + Type 2 做扎实**。Type 3 的跨实例数据联邦推迟到 Phase 2——因为 Type 2 已经能覆盖绝大多数企业场景，过早引入分布式复杂度会拖垮 Phase 1。
+>
+> **✅ v1.24 补充（PoC 3 推迟的依据，§10.14）**："WMS + TMS 一起展示"**不需要 Type 3** —— Type 2 合并部署（单 instance + 共享平台库的用户/角色/权限/菜单 + 各应用独立业务库）已实测支持**双应用根菜单同栏可见**（同一平台库、同一父菜单、同一份菜单 API 响应）。Type 3（门户聚合，原 PoC 3）改为**触发式启动**，下列任一条出现即启动：① 两个产品需**独立演进**（发版节奏互不牵制）；② 归属**不同团队**维护；③ 单 instance 的容量/故障域需隔离（**独立扩容**）；④ 需要**交付隔离**（客户只买其一 / 合规要求物理隔离）。
 
 ---
 
@@ -487,6 +489,10 @@ app:
 
 > **实现代价**：BO 框架本就以元数据驱动、经映射层访问物理表（`table_name_validator` 已在做白名单校验），因此"逻辑 BO 名 → 物理表名"的映射是**既有能力**，本次只是把映射规则从"同名"改为"带前缀"。
 
+> **v1.27 实测 + backlog（2026-09-25）**：本方案要解决的问题**已用探针实测证实真实存在** —— `APP_DB_ROUTING=0` 下同名 BO **不报错、无任何告警**：不同 BO id + 同 `table_name` ⇒ 两应用各自独有的列被**合并进同一张物理表**；相同 BO id + 同 `table_name` ⇒ `registry` 被后注册方**静默覆盖**，先注册方列**丢失**（证据见 **§6.3.1 (4)**，`meta/tests/test_app_table_name_collision_probe.py`，8 passed）。
+>
+> **本项实现已于 2026-09-25 列入 backlog 推迟**（§6.3.1 (6)），故 §6.11 中"表名命名空间 2d"**不计入当前排期**；实测证据已固化，启动时有据可依。
+
 ### 6.3 启动流程
 
 ```mermaid
@@ -537,7 +543,79 @@ sequenceDiagram
 >
 > **为什么不做硬校验**：`ENABLED_APPS` 未设置即 legacy 模式，存量 DB 不会有 `installed_apps` 表，硬校验会让存量部署直接起不来。校验目标是**让漂移可见**，而非阻断启动。
 >
-> **图中 `alt 版本变化 → 跑 migrations/` 尚未接入**：应用 `migrations/` 的执行依赖**请求级数据源路由（§6.5）**——路径入口已就位（§10.6），但应用表当前仍建在平台库上，故暂无独立迁移目标。已在 §10.5 / §10.6 记录为已知缺口。
+> **图中 `alt 版本变化 → 跑 migrations/` 尚未接入（v1.27 修正表述）**：此前（含 [app_registry.py](../../meta/core/app_registry.py) L444 的注释）给人的印象是"应用 `migrations/` 无消费点、升级这条腿是断的"。**准确说法是**——升级缺的是**"结构变更执行"这一环的接线，不是能力**；迁移基础设施早已随"部署智能体"建成，且目标库与脚本目录均为构造参数，**per-app / per-db 天然支持**（v1.27 实测 1 已证实开箱可用）。
+>
+> 另一处修正：该环的**执行机制并不依赖请求级数据源路由**（`MigrationRunner` 的数据源/目录都是构造参数）；**目标库**则随 `APP_DB_ROUTING` 取值而定（关闭 → 平台库；开启 → 应用库）。正因分流关闭时应用与平台迁移会同库同表，优化 1「迁移命名空间」必须一并处理。详见 **§6.3.1**。
+
+### 6.3.1 应用 `migrations/` 执行：既有基础设施 + 接线方案（v1.27 实测确认）
+
+> **结论先行**：**能力已具备，缺的是接线 + 三项口径**。不需要新建迁移框架，也不需要 MCP / 额外基础设施。
+
+#### (1) 既有基础设施全貌（`meta/core/migration_runner.py`，**无需新建**）
+
+| 能力 | 落点 |
+|------|------|
+| 版本表 / 并发锁 | `schema_migrations`（含 checksum、status、失败记录）+ `migration_lock` |
+| 幂等 | `is_migration_executed` / `is_migration_failed` / `record_migration`（按 `migration_name` 判定） |
+| **目标库 + 脚本目录** | `__init__(self, data_source, migrations_dir=None)` —— **两者均为构造参数**；默认目录 `meta/core/migrations` |
+| 迁移格式 | `.sql` 与 `.py`（`.py` 走 `migrate(db_path, skip_backup)` 协议） |
+| 备份 / 回滚 / 超时 / 审计 | 备份落在目标库旁；rollback 删记录；审计 `db_path.parent.parent/logs/migrations.log` |
+| CLI | `python -m meta.core.migration_runner [--dry-run] [--db-path PATH]` |
+| 配套工具 | `tools/migration_lint.py`、`tools/monitor_migrations.py`、`tools/backfill_schema_migrations.py` |
+| 平台自身用法 | 平台脚本在 `meta/migrations/`，由部署期 `deploy.sh PHASE 2.6` + `tools/staging_deploy_orchestrator.py`（Step 6 dry-run / Step 8 执行）触发 |
+
+**实测 1**（`meta/tests/test_per_app_migration_runner_probe.py`，**6 passed / 0.87s**）：给"某应用库 + 某应用 `migrations/` 目录" new 一个 `MigrationRunner`，**开箱可用**——
+
+| 子问题 | 实测答案 |
+|--------|---------|
+| `schema_migrations` / `migration_lock` 落哪 | **落应用库**（平台库反例断言通过：无探针表、无 `schema_migrations`） |
+| 幂等 | 生效：第二次跑返回 0，`schema_migrations` 仅 1 行 `SUCCESS` |
+| `migrations_dir` 任意目录 | 生效：构造参数覆盖默认目录 |
+| 隐藏全局耦合 | **无**：换库跑同一目录 → 重新执行；备份落应用库旁 |
+
+⇒ **接线无隐藏工作量**。唯一路径派生耦合是审计日志路径（多应用会共用一份 `logs/migrations.log`）。
+
+#### (2) 三项待定优化（接线时必须一并定口径）
+
+| # | 问题 | 现状 | 建议 |
+|---|------|------|------|
+| 1 | **迁移命名空间** | `schema_migrations` 按 `migration_name` 判定；**分流关闭时应用与平台迁移同表同库** ⇒ 两个应用的 `0001_init.py` 同名会被误判"已执行"而**静默跳过** | 迁移名加应用前缀（`<app_id>__0001_init.py`），并由 `tools/migration_lint.py` 强制校验 |
+| 2 | **执行时机** | 现有为**部署期进程外 CLI**；而应用安装/升级是**运行期**动作（`install_app()` 只做"解压 + 校验 manifest + 写 `installed_apps`"，不建库/不建表） | 挂到启动期 `register_apps()`，紧随 `_sync_app_tables()`（§6.3 时序图 L511 之后） |
+| 3 | **失败语义 + 依赖顺序** | 仅见 §9「串行 + 事务；升级前强制备份」 | **单向门，须现在定口径**：迁移失败是**阻断启动**还是告警放行？多应用间依赖顺序（`dependencies.yaml`）如何在迁移序列中体现？ |
+
+#### (3) A 档：方案已写、代码未实现的 4 项（v1.27 细化）
+
+| # | 项 | 方案位置 | 细化结论 |
+|---|----|---------|---------|
+| **A1** | 应用 `migrations/` 消费点 | §6.3 + §10.6 | 按 (1)(2) 接线即可，**须先定三项口径** |
+| **A2** | `table_prefix` 表名命名空间 | §6.2.2 | **实测 2 已证实风险真实存在** ⇒ 建议实现，但**已列为 backlog**（2026-09-25 决定推迟） |
+| **A3** | 卸载反向依赖检查（G4） | §4.4 / §6.12 | `EventContractRegistry.subscribers_for(event_name)`（`meta/core/event_outbox.py`）是现成落点 |
+| **A4** | 跨应用只读视图（`ATTACH DATABASE`） | §6.2.1 | 全文**零实现代码**（`ATTACH DATABASE` 仅出现在文档描述中） |
+
+#### (4) 实测 2：A2 的风险证据（`meta/tests/test_app_table_name_collision_probe.py`，**8 passed / 5.55s**）
+
+用**真实 `create_app()` + 真实 `register_apps()` + 临时应用包**，在 `APP_DB_ROUTING=0` 下：
+
+| 场景 | 实测结果 | 证据 |
+|------|---------|------|
+| 不同 BO id + 同 `table_name` | **不报错**；两个应用各自独有的列被**合并进同一张物理表**；无任何前缀表 | `probe_items_shared cols: ['code','id','only_a','only_b']` |
+| 相同 BO id + 同 `table_name` | **不报错**；`registry` 被后注册方**静默覆盖**（`meta/core/models.py` L1277 `self._objects[id] = obj`），先注册方列**丢失** | `probe_dup_table cols: ['code','id','only_y']`（`only_x` 已不在） |
+| 分流关闭时 | 未创建任何应用库文件（符合预期） | `data/` 下无 `*.db` |
+
+**成因链**：`meta/core/yaml_loader.py` L2029 `table_name = data.get("table_name", "")` → `_sync_app_tables()` 不派生前缀 → `SchemaMigrator.migrate` 遇表已存在仅 `ALTER ADD` 补列 ⇒ **全程不报错**。
+
+⇒ **结论：当前既无表名命名空间，也无冲突检测（选项 B：静默覆盖/共用）。**
+
+#### (5) 本次实测未覆盖（后续可补）
+
+per-app 场景下的 `.py` 迁移 / `prerequisites()` / `rollback()` / CLI `--dry-run`；`APP_DB_ROUTING=1` 下的同名表行为；同名 BO 对菜单/权限（进程级单例）的生产影响。（本次仅覆盖 `.sql` + 分流关闭路径。）
+
+#### (6) Backlog（附证据，2026-09-25 决定推迟）
+
+| 项 | 推迟理由 | 证据引用 |
+|----|---------|---------|
+| **A2** `table_prefix` 实现 | 当前看不出做的意义；属**单向门**，实测证据已固化，启动时有据可依 | 本节 (4) |
+| **`/graphql` 关闭** | 用户暂未确认其意义。**注：其安全画像与已关闭的 `/mcp` 完全一致（未鉴权 + schema 泄露）**，属安全项而非功能项 | §11 Q5「同批发现」 |
 
 ### 6.4 ApplicationBuilder 改造
 
@@ -846,6 +924,8 @@ def get_app_db_path(app_id: str, database_file: str = '') -> str:
 - **合并部署（Type 2）**：门户菜单树 = 各应用的根菜单集合，点击后走同源路由 `/app/warehouse/...`；
 - **独立部署（Type 3）**：门户实例读取各实例的根菜单，`target_url` 指向跨域地址，Phase 2 配合 SSO 跳转。
 
+> **✅ v1.24 实测（Type 2 已覆盖"同栏展示"，§10.14）**：同一 instance 同时启用 `warehouse` + `tms` 后，两个应用根菜单（`app_warehouse` / `app_tms`，order 901/902）落在**同一平台库**、挂**同一父菜单**，同一份菜单 API 响应中同时返回两者，且各自 `menu_path` 指向 `/app/warehouse` / `/app/tms` —— **"一起展示"不需要门户进程**，PoC 3 已推迟（§3.2）。
+
 `menu_code` 命名约定：**应用内菜单 `warehouse.stock_list`，应用根菜单 `app_warehouse`**。由于 `menu_code` 是 unique 业务键，该约定天然防止跨应用冲突。
 
 > **⚠️ v1.10 实测确认：为什么"应用根菜单"不是可选项，而是必需项**
@@ -1039,13 +1119,13 @@ const appRouteModules = import.meta.glob('../apps/*/routes.js', { eager: true })
 ### 6.12 Phase 1 验收清单
 
 - [ ] `hello-world-app` 可 build → install → 菜单出现 → uninstall → 菜单消失
-- [ ] `warehouse-app` 数据落 `data/warehouse.db`，用户/角色仍在 `data/platform.db`
-- [ ] `--apps warehouse` 与 `--apps warehouse,tms` 两种启动方式均正常
+- [x] `warehouse-app` 数据落 `data/warehouse.db`，用户/角色仍在 `data/platform.db` —— ✅ **已验证**（v1.22，§10.12：应用库独立且 8 张平台表均不进入应用库）
+- [x] `--apps warehouse` 与 `--apps warehouse,tms` 两种启动方式均正常 —— ✅ **已验证**（v1.22，§10.12：实际开关为 `ENABLED_APPS`，§6.3；单应用与双应用同启各落各库）
 - [ ] **6 个以上应用同时启用可正常启动**（已验证：启动期不触发 fd 阈值，§10.0）
 - [ ] 运行 >60s 后新建数据源不再打出误导性 `POSSIBLE FD LEAK`（§6.5.1 F1 改造后）
 - [ ] **所有多库路径均经由 `db_path.py` 获取**（验证 §6.5.1 F2，代码扫描无越权拼路径）——**路径入口已就位**（v1.13，§10.6），待多库代码落地后执行扫描
 - [ ] 并发请求下数据源不串（`contextvars` 生效，压测验证）
-- [ ] 审计日志正确落入应用库，登录日志正确落入平台库
+- [x] **审计日志与登录日志均落平台库**（模型乙 §6.5.2 / §6.5.3 P0；本项原为"审计落应用库"，v1.16 Q4 决策后已修正）—— ✅ **已验证**（v1.21 §10.11 + v1.22 §10.12：应用库无 `audit_logs`，且 `resolve_audit_data_source(app_ds) is get_platform_data_source()`）
 - [ ] 多库下 WriteQueue 与 WAL checkpoint 各自独立运行、无互相阻塞（§6.5.1 F3）——**"各自独立"已验证**（§10.7：独立 pool / 独立写线程 / 写入不串库）；"无互相阻塞"待多库实跑压测确认
 - [ ] 关闭进程时**所有库**的写队列均被 flush/stop（§6.5.1 F3 论据三）——✅ **已验证**（v1.17，§10.9）
 - [ ] 路由冲突时启动失败并给出明确错误
@@ -1053,15 +1133,16 @@ const appRouteModules = import.meta.glob('../apps/*/routes.js', { eager: true })
 - [ ] 前端用通用页面类型即可展示应用页面，无需重新构建前端（§6.9）
 - [ ] legacy 模式（不传 `--apps`）行为与改造前完全一致（§6.13）
 - [ ] `product_binding.mode` 为 `fixed` 与 `multi` 两种模式下权限过滤均正确（§6.2）
-- [ ] `product` 表始终位于 `platform.db`，应用库不出现 `products` 表（§1.3 前提）
+- [x] `product` 表始终位于 `platform.db`，应用库不出现 `products` 表（§1.3 前提）—— ✅ **已验证**（v1.22，§10.12：`products` 在"应用库不得出现的平台表"清单内被断言）
 - [ ] 跨应用只读视图（`ATTACH`）可查询另一应用数据，且**不用于跨库写**（§11 Q1）
-- [ ] 业务写成功则事件必达：**kill 进程后重启，outbox 中的事件仍被投递**（§6.14.2）
-- [ ] 重复投递同一事件时，消费端**不产生重复业务数据**（幂等生效，§6.14.2）
-- [ ] 消费端 handler 持续失败时事件进入**死信**，不无限重试、不静默丢弃（§6.14.4）
-- [ ] 订阅了不存在的事件时**启动失败**（事件契约校验，§6.14.4）
+- [x] 业务写成功则事件必达：**kill 进程后重启，outbox 中的事件仍被投递**（§6.14.2）—— ✅ **已验证**（v1.23，§10.13：冻结 Dispatcher 模拟崩溃 → 重建 Dispatcher 后事件仍投递、运单落库）
+- [x] 重复投递同一事件时，消费端**不产生重复业务数据**（幂等生效，§6.14.2）—— ✅ **已验证**（v1.23，§10.13：同幂等键事件重投 → 仍 1 张运单、去重表计数不增）
+- [x] 消费端 handler 持续失败时事件进入**死信**，不无限重试、不静默丢弃（§6.14.4）—— ✅ **已验证**（v1.23，§10.13：`max_attempts=3` → `status='dead'` 且 `last_error` 保留）
+- [x] 订阅了不存在的事件时**启动失败**（事件契约校验，§6.14.4）—— ✅ **已验证**（v1.23，§10.13：trigger 非法 / payload 空 / 事件不存在 / 来源应用未启用 / 缺 `idempotency_key` 均在启动期失败）
 - [ ] **升级后旧版本代码仍可运行**（expand-contract 纪律：新 schema 向后兼容，§6.10）
 - [ ] **应用删除字段/BO 后数据未丢失**（"删除即废弃"，§6.10）
 - [ ] **两个应用定义同名 BO 时不冲突**（表名命名空间，§6.2.2）——构建期 / 安装期 / 启动期三层拦截均生效
+      > **⚠️ v1.27 探针实测：本项当前判定为 ❌ 不通过** —— `APP_DB_ROUTING=0` 下两个应用同名 BO **不报错、无告警**（不同 BO id ⇒ 独有列被合并进同一张表；相同 BO id ⇒ `registry` 静默覆盖、先注册方列丢失），三层拦截一个都不存在（证据 §6.3.1 (4)）。本项实现已列 backlog（§6.3.1 (6)）。
 - [ ] 卸载被其他应用依赖的应用时**被拒绝**并给出依赖清单（§6.2.1、差距 G4）
 
 ### 6.13 存量部署兼容与迁移
@@ -1179,9 +1260,9 @@ events:
 |---|------|------|
 | **V2-1** | **expand-contract 工具化** | 迁移脚本按 expand / migrate / contract 三阶段声明 + 阶段顺序校验 + 升级计划预览。**这是"零停机"的主力手段**（对应 Q2 决策，见 §6.10；v1.19 由"蓝绿部署"调整为该项） |
 | **V2-2** | **蓝绿部署** | 复用 L2 多实例能力：起新实例 → 验证 → 网关切流 → 停旧实例。**仅用于跨引擎 / 跨大版本 / 需原子切换**的场景（v1.19 由 V2-1 降为 V2-2） |
-| V2-3 | 联邦 API | 应用声明式暴露接口给其它实例，HTTP + JWT 鉴权 |
+| V2-3 | 联邦 API | 应用声明式暴露接口给其它实例，HTTP + JWT 鉴权。**与 MCP 面共用同一份能力清单与同一个鉴权入口（§11 Q5 S1/S2）——勿各自维护两套** |
 | V2-4 | CDC 总线跨实例投递 | 将 §6.14 的 Dispatcher 传输层由进程内换为 Redis Stream / Kafka，支持**跨实例**事件（outbox 与幂等消费框架直接复用） |
-| V2-5 | 门户实例模式 | `--mode portal` 聚合各实例菜单 + SSO 跳转 |
+| V2-5 | 门户实例模式 | `--mode portal` 聚合各实例菜单 + SSO 跳转。**原 Phase 1 的 PoC 3，v1.24 推迟至此（Type 2 已实测覆盖"同栏展示"，§10.14）** |
 | V2-6 | 跨实例权限联邦 | 门户校验用户后签发短期 JWT，跳转目标实例 |
 
 联邦契约示例：
@@ -1245,7 +1326,7 @@ federation:
 | **R16** | **事件重复消费产生脏数据** | at-least-once 语义下的重复投递 | 消费端幂等去重表 + `idempotency_key` 声明；**幂等是硬要求非优化项**；§6.14.2 |
 | **R17** | **现有 cdc_bus 被误用于跨应用写** | 开发者复用内存总线做业务写 | §6.14.1 明确边界：内存总线仅用于"可丢失"的实时通知；跨应用写必须走 outbox |
 | **R18** | **平台升级破坏已装应用**（v1.19 新增） | 平台改变默认语义 / 移除 API，导致已装应用行为突变或崩溃 | ① `app.yaml` 的 `platform.min_version/max_version` **准入校验**（已有）；② **表名命名空间 + 删除即废弃**（§6.2.2、§6.10）；③ Phase 2 引入 per-app `api_version` 行为锁定（差距 G8）。行业参照：ServiceNow 以"scoped 命名 + 构建期强制 + 删除不可传递"三件套保证**升级安全** |
-| **R19** | **应用间撞表**（v1.19 新增） | 两个应用各定义同名 BO（如 `item`） | `table_prefix` + **构建期 / 安装期 / 启动期三层校验**（§6.2.2，差距 G2）；对齐 Salesforce namespace / ServiceNow scope 前缀 / Microsoft publisher prefix |
+| **R19** | **应用间撞表**（v1.19 新增） | 两个应用各定义同名 BO（如 `item`） | `table_prefix` + **构建期 / 安装期 / 启动期三层校验**（§6.2.2，差距 G2）；对齐 Salesforce namespace / ServiceNow scope 前缀 / Microsoft publisher prefix。<br>**⚠️ v1.27 探针实测：风险成立且当前敞开** —— 默认关闭分流下静默覆盖 / 共表、无任何拦截（§6.3.1 (4)）；缓解措施 `table_prefix` 已列 backlog（§6.3.1 (6)） |
 | **R20** | **升级删字段导致数据丢失**（v1.19 新增） | 应用 v2 移除字段，安装时自动 DROP 列 | **"删除即废弃"**：只标 `deprecated`、物理列保留，物理清理走独立管理操作（§6.10，差距 G3）。行业参照：ServiceNow 的"删除不随版本传递" |
 
 > **R6 / R7 / R10-R13 是本方案独有的一类风险**——常规多租户方案从零设计不会遇到，因为我们的改造对象是一个**已有的、围绕"全局单库 + 单写队列 + fd 泄漏防护"构建的数据层**。这类风险全部来自"在既有实现上叠加多库"这一前提。其中 **F1（R10）已实测降级为 P1**（§10.0），**F2 / F3 / F5 仍需在 Phase 1 第一周集中处理**。R14 是所有"改造既有系统"类方案的通用风险，靠 legacy 模式兜底。R15-R17 源于"跨应用以写为主"这一业务事实（v1.5），属于**分布式一致性的经典风险**，靠 outbox + 幂等兜底。
@@ -1254,9 +1335,9 @@ federation:
 
 ## 十、PoC 验证路径
 
-> **执行顺序**：~~10.0（前置）~~ ✅ **已完成** → **PoC 1（1-2 天，下一步）** → PoC 2 → PoC 4 → PoC 3。
+> **执行顺序**：~~10.0（前置）~~ ✅ → ~~PoC 1~~ ✅ → ~~PoC 2~~ ✅ → ~~PoC 4~~ ✅ → ~~PoC 3（门户聚合）~~ **⏸ 已推迟到 Phase 2（触发式启动，§10.14）**。
 >
-> 10.0 已验证完毕（结论：F1 降级为 P1，不阻塞）；PoC 1 是成本最低的端到端验证。
+> 10.0 已验证完毕（结论：F1 降级为 P1，不阻塞）；PoC 1 / PoC 2 / PoC 4 已全部完成（§10.1~§10.13），**双应用同栏实测已完成（§10.14）**。**Phase 1 收尾不再包含 PoC 3** —— 下一步为 **P1 分流缺口**（数据正确性风险，§10.14 末尾）。
 
 ### 10.0 前置验证：F1 fd 阈值冲突（✅ 已执行，2026-09-23）
 
@@ -1790,19 +1871,132 @@ federation:
 
 > **既有失败如实记录（非本次引入，已用 `git stash` 隔离验证）**：`test_action_executor.py` 2 failed —— 该文件自建 `audit_logs` 表的 DDL 缺 `parent_object_type` / `error_message` 列，与路由无关；隔离本次改动后**失败完全相同**。
 
-### PoC 2：`warehouse-app`（2-3 天）
-验证数据隔离：应用库独立、平台库共享、`--apps` 启动参数、日志归属正确。
+### 10.12 PoC 2 执行记录：真实应用包 `warehouse` + 多应用各落各库（✅ 2026-09-24）
 
-### PoC 3：`portal-app`（3-5 天，Phase 1 收尾）
+**目标**：把 PoC 1 的示例包 `hello_world` 换成**真实应用包**，在 `APP_DB_ROUTING=1` 下验证"应用库独立、平台库共享、日志与审计归属正确"，并首次覆盖**多应用同启**（§6.12 第二项）。
+
+**产出（1 应用包 + 1 测试 + 2 处代码修复）**：
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| [apps/warehouse/app.yaml](../../apps/warehouse/app.yaml) | 新建 | 真实应用包描述符：2 个 schema、1 个 blueprint、`menu.portal_mount`、`permission_namespace: warehouse`、`product_binding: fixed/WMS`、`database.file: data/warehouse.db`、`allowed_platform_modules` 白名单 |
+| [apps/warehouse/schemas/warehouse.yaml](../../apps/warehouse/schemas/warehouse.yaml) | 新建 | BO `warehouse`（表 `warehouses`）：业务键 `code` + 唯一索引、`1:N → stock_item` |
+| [apps/warehouse/schemas/stock_item.yaml](../../apps/warehouse/schemas/stock_item.yaml) | 新建 | BO `stock_item`（表 `stock_items`）：`quantity` 为 `float`、`warehouse_id` 为**同库外键**（跨库外键禁止，§6.2.1） |
+| [apps/warehouse/blueprints/inventory_api.py](../../apps/warehouse/blueprints/inventory_api.py) | 新建 | 应用自定义 API `/api/v1/apps/warehouse/stock-summary`，经 `resolve_data_source(get_platform_data_source())` 读**自己的库**（§6.5 统一出口） |
+| [meta/tests/test_warehouse_app_poc2.py](../../meta/tests/test_warehouse_app_poc2.py) | 新建 | 端到端 **17 passed**（隔离 13 + 多应用 4） |
+| [meta/core/app_registry.py](../../meta/core/app_registry.py#L210) | 修复 | 补建表 / 补菜单由"本次新增 BO"改为"**声明的 BO**" |
+| [meta/core/interceptors/persistence_interceptor.py](../../meta/core/interceptors/persistence_interceptor.py#L58) | 修复 | `_get_registry` 由"缓存首个 registry"改为"**按数据源分桶缓存**" |
+
+**实施中发现并修复的两个缺陷（共同特征：单应用场景下不可见）**：
+
+1. **补建表 / 补菜单按"本次新增 BO" ⇒ 静默漏建表**。[register_from_directory](../../meta/core/yaml_loader.py) 有**目录级缓存**，同进程第二次 `create_app()`（或启用第二个应用）时"本次新增"为空 ⇒ 建表与菜单写入被整体跳过。修复：改按**声明的 schema 文件**重放（`added_by_app` → `declared_by_app`，写入幂等），与缓存状态无关。这与 v1.20 建"归属映射"踩的是**同一个坑**（§10.10），本次把剩下的建表 / 菜单两处一并改为"按声明"。
+2. **`PersistenceInterceptor._get_registry()` 缓存首个 registry ⇒ 跨应用写错库（P0）**。该拦截器是**全局单例**（`server.py` 只注册一次），原实现 `if self._registry is None: self._registry = ActionRegistry(context.data_source)` 把**第一个请求**的数据源固化下来：多应用路由下第二个应用（hello_world）的写入被送进第一个应用（warehouse）的库 —— 表不存在 ⇒ 静默失败（`[SQLiteDataSource.insert] FAILED ... no such table`），**表同名 ⇒ 写错库且无任何报错**。修复：`self._registries: Dict[DataSource, ActionRegistry]` **按数据源身份分桶**（`DataSource` 未覆写 `__eq__`/`__hash__` ⇒ 身份语义），同一 data_source 复用、不同 data_source 各自新建；`self._registry` 保留为"最近使用的 registry"，故 [action_executor.py](../../meta/core/action_executor.py#L2732) 的 `getattr(interceptor, '_registry')` 与既有 24 处 `interceptor._registry = mock` 的测试写法**均不受影响**。
+
+**验收结果（§6.12 逐项对应）**：
+
+| 验收项 | 结果 | 证据（均在 `test_warehouse_app_poc2.py`） |
+|--------|------|------|
+| 应用数据落 `data/warehouse.db` | ✅ | `test_app_db_is_a_separate_file` / `test_app_bo_write_lands_in_app_db` |
+| 平台表**不进入**应用库（模型乙 §6.5.2） | ✅ | `test_app_db_has_no_platform_tables`（`users`/`roles`/`menus`/`audit_logs`/`audit_logs_archive`/`installed_apps`/`permissions`/`products` 八个全查） |
+| 应用 BO 经平台通用 API 读写**应用库** | ✅ | `test_app_bo_read_comes_from_app_db` + 反面 `test_app_bo_data_absent_from_platform_db` |
+| 应用自定义 API 读自己的库（§6.5 统一出口） | ✅ | `test_app_custom_api_reads_own_db`（`total_quantity` 与库内 `SUM(quantity)` 一致） |
+| 应用根菜单 + 应用内菜单挂载（§6.6） | ✅ | `test_app_menus_mounted_to_root`（`app_warehouse` 为 `show_in_sidebar=1`，子菜单父节点全为 `app_warehouse`）/ `test_menu_api_returns_app_root` |
+| 审计归属正确 | ✅ | `test_audit_belongs_to_platform_db`（`resolve_audit_data_source(app_ds) is get_platform_data_source()`，且应用库无 `audit_logs`） |
+| 请求结束解绑（线程复用不泄漏） | ✅ | `test_binding_released_after_request` |
+| **多应用各落各库** | ✅ | `test_write_goes_to_matching_app_db`（warehouse→`warehouse.db`、hello_world→`hello_world.db`，且互不出现对方的表） |
+| 工具链 install → uninstall **不动应用库数据**（§6.10） | ✅ | `test_uninstall_keeps_app_db_data`（真实 `.bip` 打包 → 安装 → 卸载后 `stock_items` 行数不变） |
+
+**测试写法踩坑（供后续复用）**：
+1. **一个测试文件只允许调用一次 `create_app()`**。`bo_framework` 是进程级单例，而 `create_app()` 会把整套拦截器**追加**进 `bo_framework._interceptors`（[server.py](../../meta/server.py#L466)）⇒ 同进程第二次 `create_app()` 会注册出**两个** `PersistenceInterceptor`，同一次 create 被持久化两遍，第二遍撞上第一遍刚写的业务键 ⇒ 400「值已存在」。本文件因此把 fixture 提为 `scope="module"`，两组场景共用同一实例（同时启用 warehouse + hello_world）。
+2. **跨库反查必须容忍"表不存在"**：断言"某表**不应**在这个库"时，表不存在本身就是期望结果之一，需先查 `sqlite_master` 再查数据（新增 `_rows_if_table()`）；平台库只断言"行数/数据不存在"，不断言"表不存在"（历史残留，同 v1.20 记录）。
+
+**回归（独立进程逐个运行，共 9 个文件）**：PoC 2 **17 passed**；app_db_routing 34 / server_app_db_routing_integration 9 / server_app_integration 10 / app_installer 17 / app_registry / app_loader / app_package / interceptors 单元 **全绿**（`Exit: 0`）。
+
+> **既有失败如实记录（非本次引入）**：`meta/tests/interceptors/test_persistence_interceptor_detailed.py` **1 failed** —— `test_enriches_virtual_redundancy_fields` 断言 `_do_read` 会调用 `EnrichmentEngine.enrich_one`，而当前 [_do_read](../../meta/core/interceptors/persistence_interceptor.py#L181) 只调用 `enrich_fk_display_names`（`enrich_one` 已不在读路径）⇒ 属**陈旧断言**；本次对 `persistence_interceptor.py` 的改动仅在 `__init__` 与 `_get_registry` 两处（`git diff --unified=0` 可证），与 `_do_read` 无关。
+
+> **PoC 2 仍未覆盖（不阻塞收尾，如实记录）**：① `query_api` / `export_import_api` / `stats_api` / `association_api` 的 `_get_data_source()` 单例仍指向平台库（§10.10 末尾"未纳入本次范围"，v1.21 记为 P1）；② v1.21 记录的 P1 三项（应用包 `migrations/` 无消费点 / `bo_pick_service._default_data_source()` 固定平台库 / `export_import_api.py` 的 `ManageService(_data_source)` 单例）；③ 多库并发压测（"WriteQueue 无互相阻塞"，§6.12）。
+
+### 10.13 PoC 4 执行记录：跨应用事件"不丢 / 不重 / 死信"（✅ 2026-09-24）
+
+**目标**：验证 §6.14 核心保证——WMS 出库完成（`outbound_order.status → shipped`）→ TMS 自动建运单，覆盖 §10 PoC 4 的三条关键验证点（不丢 / 不重 / 死信），并首次验证**事件契约启动期校验**与 **outbox 同事务**语义。
+
+**产出（3 个核心模块 + 1 应用包 + 3 处接线 + 1 测试）**：
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| [meta/core/event_outbox.py](../../meta/core/event_outbox.py) | 新建 | 四件套主体：outbox 表 `event_outbox`（含 status 索引）、契约注册表 `EventContractRegistry`（`(app_id, event_name)` 为键、重复注册幂等、`validate()` 启动期校验）、条件求值 [evaluate_condition](../../meta/core/event_outbox.py#L244)（`ast` 白名单，**拒绝函数调用**）、[enqueue_event](../../meta/core/event_outbox.py#L317)（同事务入队，**不自行提交**；同 `(event_name, entity_id, transaction_id)` 去重）、[EventDispatcher](../../meta/core/event_outbox.py#L416)（轮询 / 批量 / 重试 / 死信 / 后台线程，`max_attempts=3`） |
+| [meta/core/event_consumer.py](../../meta/core/event_consumer.py) | 新建 | 幂等消费：`consumed_events` 去重表（`UNIQUE (consumer_app, event_name, idempotency_key)`）+ [consume_event](../../meta/core/event_consumer.py#L57)，**去重标记与业务写在消费端同一事务**；handler 抛异常 ⇒ 整体回滚（标记不残留，可安全重试） |
+| [meta/core/interceptors/outbox_interceptor.py](../../meta/core/interceptors/outbox_interceptor.py) | 新建 | `OutboxInterceptor`，**priority=94**（`after` 阶段按 `reversed(priority)` 执行 ⇒ 紧随 95 `PersistenceInterceptor` 之后拿到持久化结果）；`should_execute` 在契约注册表为空时短路 ⇒ **legacy 零影响** |
+| [apps/warehouse/app.yaml](../../apps/warehouse/app.yaml) | 修改 | 新增 `events.publish`（`outbound_completed` / `after_update` / `condition: "status == 'shipped'"` / 5 字段 payload） |
+| [apps/warehouse/schemas/outbound_order.yaml](../../apps/warehouse/schemas/outbound_order.yaml) | 新建 | 发布方 BO `outbound_order`（表 `outbound_orders`，`status` 默认 `created`） |
+| [apps/tms/](../../apps/tms/) | 新建 | 订阅方应用包：`app.yaml`（`events.subscribe` + `idempotency_key: order_no`）+ `schemas/waybill.yaml` + handler [on_outbound_completed.py](../../apps/tms/blueprints/handlers/on_outbound_completed.py)（经 `ActionRegistry(data_source)` 建运单，**用消费方库**）+ 自定义 API [dispatch_api.py](../../apps/tms/blueprints/dispatch_api.py) |
+| [meta/core/app_loader.py](../../meta/core/app_loader.py#L198) | 修改 | `events` 声明解析（`EventPublishDecl` / `EventSubscribeDecl`：trigger 白名单、payload 非空、handler 文件存在性均在**加载期**校验） |
+| [meta/core/app_registry.py](../../meta/core/app_registry.py#L449) | 修改 | `_register_event_contracts()`（注册 + **启动期 `validate(enabled_app_ids)`**，失败转 `AppRegistrationError`）+ `_prepare_event_tables()`（建 outbox / consumed 表） |
+| [meta/server.py](../../meta/server.py#L488) | 修改 | 注册 `OutboxInterceptor()`；`register_apps` 后 `start_event_dispatcher()`；`_cleanup_resources` 首行 `stop_event_dispatcher()` |
+| [meta/tests/test_event_outbox_poc4.py](../../meta/tests/test_event_outbox_poc4.py) | 新建 | **25 passed**（契约 16 + 跨应用流 9） |
+| [meta/tests/test_warehouse_app_poc2.py](../../meta/tests/test_warehouse_app_poc2.py#L252) | 修复 | 陈旧断言：warehouse 现声明 3 个 BO（新增 `outbound_order`）⇒ `bo_ids` 期望值同步（**非行为回归**） |
+
+**三条关键验证点（§10 PoC 4 原文逐条对应）**：
+
+| 验证点 | 结果 | 证据（均在 `test_event_outbox_poc4.py`） |
+|--------|------|------|
+| ① 业务写成功后立即 `kill` → 重启后事件仍被投递 | ✅ | `test_event_survives_simulated_process_kill` —— fixture 内 `stop_event_dispatcher()` 冻结后台投递（= 崩溃点前未投递），业务写已提交、outbox 行仍在 → **新建 `EventDispatcher` 实例（= 重启后重新扫描）** → 运单落库、outbox 标记 delivered |
+| ② 人为重复投递同一事件 → 不产生重复运单 | ✅ | `test_duplicate_delivery_creates_no_second_waybill` —— 同幂等键事件重投（**经生产 API `enqueue_event` 再入队同载荷事件**表达 at-least-once）→ 仍 1 张运单、`consumed_events` 仍 1 条 |
+| ③ handler 抛异常 → 死信而非无限重试 | ✅ | `test_handler_failure_lands_in_dead_letter` —— 临时覆盖订阅为抛异常 handler，`max_attempts=3` 跑 3 轮 → `status='dead'` / `attempts=3` / `last_error` 含失败标记；且**去重标记已随事务回滚**（consumed=0）⇒ "标记 + 业务数据"原子 |
+
+**机制正确性（比三条关键点更基础的断言）**：
+
+- **同事务**：`test_outbox_row_rolls_back_with_business_transaction` —— 业务事务内 `enqueue_event()` 后抛异常 ⇒ outbox 行数不变（"不丢"的前提是"要么都成、要么都回滚"，§6.14.4 第 1 条）；
+- **表归属**：`test_event_tables_live_in_app_dbs` / `test_business_write_enqueues_event_in_same_db` —— `event_outbox` 在**发布方** warehouse 库、`consumed_events` 在**消费方** tms 库，两者都不出现在平台库，也不出现在对方库；且 `after_create`（非命中 trigger）不产生事件；
+- **契约启动期校验**：trigger 非法 / payload 空 / 同应用既发布又订阅 ⇒ 加载期 `AppManifestError`；订阅不存在的事件 / 来源应用未启用 / 缺 `idempotency_key` ⇒ 注册期 `AppRegistrationError`（§6.14.4 第 4 条）；注册幂等（重复注册不报错）；
+- **条件求值安全**：7 组表达式求值正确 + 拒绝 `__import__('os').system(...)` 等非字面量表达式；
+- **端到端读取**：`test_consumer_app_api_reads_own_db`（TMS 自定义 API 读到本库运单）+ `test_distinct_orders_create_distinct_waybills`（不同订单各自建单）。
+
+**测试写法踩坑（供后续复用）**：
+1. **契约注册表是进程级单例，端到端用例内不得 `reset()`**：端到端用例依赖 `create_app()` 期间注册的真实契约；若在用例后清理，`OutboxInterceptor.should_execute` 会因注册表为空而整体短路 —— 现象是"出库完成未产生事件 + `scanned: 0`"，**极像机制失效**（本次曾据此误判，后经探针脚本证实机制本身正常）。清理仅限**纯契约用例**（本文件收敛为 `TestEventContracts` 类内 autouse fixture）。
+2. **conftest raw-SQL 铁律**：测试正文出现 `UPDATE … SET` 即**全文件 skip**（"use Factory"）。"人为重复投递"因此改用生产 API `enqueue_event(..., transaction_id='txn-dup-probe')` 再入队表达，**不得用 `ALLOW_RAW_SQL=1` 绕过**（标准入口必须能过）。
+3. **死信用例临时替换订阅后须复原**：`register_subscribe` 以 `(app_id, event_name)` 为键天然可替换，测试结束须换回真实订阅；handler 加载带进程级缓存（同文件内 `EventDispatcher.clear_handler_cache()` 失效）。
+
+**验证与回归**：PoC 4 测试 **25 passed**；13 个既有文件回归**全绿**（PoC 2 17 / app_db_routing 34 / server_app_db_routing_integration 9 / server_app_integration 10 / app_loader 15 / app_registry 11 / app_installer 17 / app_package 14 / db_path 24 / audit_platform_routing 15 / audit_interceptor_comprehensive 35 / 拦截器单元与 BO 框架退出码 0）。均经 `python d:\filework\test.py --file <path>` 独立进程运行（项目铁律，禁直接 pytest）。
+
+> **未纳入本次范围（不阻塞收尾，如实记录）**：① Dispatcher 为**同实例进程内**轮询（§6.14.5：跨实例投递属 Phase 2，届时只替换传输层，outbox 与幂等框架复用）；② 事件 payload 为**扁平字段快照**（不做富化 / 引用展开）；③ **死信人工重投工具**未做（当前靠重新入队或直接改库）。
+
+### 10.14 双应用同栏实测 + PoC 3 推迟决策（✅ 2026-09-24）
+
+**触发**：PoC 3（门户聚合 / Type 3 雏形）开工前的决策复核。用户提出——"如果我需要 TMS 与 WMS 一起展示，是不是可以一起部署在一个 DB？"。复核结论：**成立**，Type 2 合并部署（单 instance + 共享平台库 + 各应用独立业务库）已覆盖该场景；"同栏展示"此前缺的只是一次**显式实测**（既有测试只断言过**单应用**根菜单可见：[test_warehouse_app_poc2.py](../../meta/tests/test_warehouse_app_poc2.py#L180) 断言 `app_warehouse`、[test_server_app_integration.py](../../meta/tests/test_server_app_integration.py#L91) 断言 `app_hello_world`）。
+
+**实测**（新建 [test_merged_two_apps_menu.py](../../meta/tests/test_merged_two_apps_menu.py)，**9 passed**）：`ENABLED_APPS=warehouse,tms` + `APP_DB_ROUTING=1` 单实例（全文件唯一一次 `create_app()`，PoC 2 教训 §10.12），断言 5 组：
+
+| # | 断言 | 证据（测试用例） |
+|---|------|------|
+| 1 | 两个应用根菜单**同落平台库**且均 `is_active=1 / show_in_sidebar=1` | `test_both_root_menus_in_platform_db` |
+| 2 | 两行**挂同一父菜单**（同栏；`business_apps` 缺失时一起降级为顶层）+ 声明排序 901 < 902 生效 | `test_roots_share_same_parent` |
+| 3 | 各自的应用内菜单**各挂各的根**（合并不串树） | `test_internal_menus_attached_to_their_own_root` |
+| 4 | **同一份菜单 API 响应**（`/api/v1/menu-permission/visible`）同时返回两个根菜单，`menu_path` 分别为 `/app/warehouse` / `/app/tms` | `test_menu_api_returns_both_roots_in_one_tree` |
+| 5 | 业务库隔离（`warehouse.db` / `tms.db` 互不串表、平台表不进应用库）+ 应用写入**行级探针**不落平台库 + 两个应用路由共存 | `TestMergedAppIsolation` 5 例 |
+
+> **测试写法记录（供后续复用）**：① 平台库在 `--file`（非 xdist）模式下就是共享开发库 `meta/architecture.db` ⇒ "平台库不得出现应用表"这条**表级**断言不成立（历史残留），已改为 PoC 2 同款**行级探针**（写入后查同一行是否出现在平台库）；② 本文件同样只允许一次 `create_app()`（进程级单例），且冻结后台事件投递线程避免轮询干扰。
+
+**决策：PoC 3 推迟到 Phase 2（触发式启动）**。理由：
+1. **能力已覆盖** —— Type 2 交付的就是"单 instance 多应用**同栏**"（第 4 条断言即门户效果的等价物）；Type 3 的增量只有"多实例 + 跨实例菜单聚合 + 跨域跳转"，且 §3.2 矩阵原本就把 Type 3 的正式目标排在 Phase 2（Phase 1 只承诺"菜单聚合雏形"）。
+2. **复杂度不划算** —— 门户聚合需要 portal 进程跨实例读取菜单（跨实例一致性 + SSO 跳转），而触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离）当前均未出现。
+3. **Phase 1 收尾资源转向 P1 分流缺口** —— `query_api` / `export_import_api` / `stats_api` / `association_api` 的单例数据源是**读错库的数据正确性风险**，优先级高于"体验类"的门户聚合。
+
+**回归**：本文件 9 passed；本次为**纯新增测试文件、零生产代码改动**，既有套件不受影响（运行经 `python d:\filework\test.py --file meta/tests/test_merged_two_apps_menu.py`，项目铁律禁直接 pytest）。
+
+### PoC 2：`warehouse-app`（✅ 完成，见 §10.12）
+
+### PoC 3：`portal-app`（⏸ 已推迟到 Phase 2，触发式启动 —— 见 §10.14）
 验证 Type 3 雏形：启动 warehouse(3004) + tms(3005) + portal(3006)，门户聚合菜单，点击跳转。
+**推迟依据（v1.24）**："WMS + TMS 一起展示"用 **Type 2 合并部署**即可 —— 已实测双应用根菜单**同栏可见**（§10.14）；Type 3 的增量仅"多实例 + 跨实例菜单聚合 + 跨域跳转"，触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离，§3.2）未出现前不投入。
 
-### PoC 4：跨应用事件（1 天，v1.5 新增）
+### PoC 4：跨应用事件（✅ 完成，见 §10.13）
 验证 §6.14 核心保证：WMS 出库完成 → TMS 自动建运单。**关键验证点是"不丢"与"不重"**：
-1. 业务写成功后立即 `kill` 进程 → 重启后事件仍被投递（outbox 生效）
-2. 人为重复投递同一事件 → TMS 不产生重复运单（幂等生效）
-3. handler 故意抛异常 → 事件进入死信而非无限重试
+1. 业务写成功后立即 `kill` 进程 → 重启后事件仍被投递（outbox 生效）—— ✅ 已验证
+2. 人为重复投递同一事件 → TMS 不产生重复运单（幂等生效）—— ✅ 已验证
+3. handler 故意抛异常 → 事件进入死信而非无限重试—— ✅ 已验证
 
-> **执行建议**：10.0、PoC 1、F2、F3 均已完成（§10.0、§10.5、§10.6、§10.7）——方案中最大的两类不确定性（数据层阻断、接口设计缺陷）已消除，**数据层已无阻塞项**。**下一步直接进入 §6.5 请求级数据源路由**（落地时附带多库关闭编排），完成后再做 PoC 2（验证应用独立库）。PoC 4 应在 §6.14 实现完成后立即执行——它验证的是**数据一致性**，比功能是否跑通更重要。
+> **执行建议**：10.0、PoC 1、PoC 2、**PoC 4**、F2、F3、§6.5 绑定基础设施、多库关闭编排、§6.5.3 四项改动（含 P0 审计修复）、**双应用同栏实测（§10.14）**均已完成——方案中最大的两类不确定性（数据层阻断、接口设计缺陷）已消除，**数据层、应用库路由、跨应用事件三项均无阻塞项**。**PoC 3 已推迟到 Phase 2（触发式启动，§10.14 / §3.2）**。**下一步建议按此顺序**：① 补 §10.10 / §10.11 / §10.12 末尾记录的 **P1 分流缺口**（`query_api` / `export_import_api` / `stats_api` / `association_api` 单例、应用包 `migrations/` 消费点、`bo_pick_service` 与 `ManageService` 单例）——**数据正确性风险，优先**；② 其余 Phase 1 收尾项（§6.12 验收清单剩余条目）。
 
 ---
 
@@ -1891,6 +2085,38 @@ federation:
 
 **落地方式**：4 项改动**同批**交付 + 环境变量功能开关 `APP_DB_ROUTING`（默认关闭 ⇒ 存量零风险）。完整计划见 §6.5.3。
 
+**Q5：面向 Agent / AI 的能力暴露 —— ✅ 已决策（v1.25）：三条"单向门"只定口径，AI 能力整体顺延**
+
+**背景**：2026-09-24 架构方向符合性 check。行业趋势（MCP 已成 B2B 默认集成面；按需装配 / 渐进披露；capability manifest 为分发单元）指向"**动态性落在能力层，部署层反而收敛**"。核对结论：**现有架构方向符合**——声明式 `app.yaml`、权限命名空间、事件契约、业务分库、L1–L4 分层均天然适配，Agent / AI 能力**整体推迟到 Phase 2/3**；仅以下三处属**单向门**，现在固化口径（文档级，零代码），避免将来返工。
+
+| # | 单向门 | 口径（约束） | 现状是否已符合 |
+|---|--------|-------------|:---:|
+| **S1** | 能力清单的**唯一事实源** | "能力清单"（已注册实体 + 菜单 + 权限点 + 事件声明）**只能**是 YAML schema 引擎注册表（`MetaRegistry`）的只读投影；**禁止维护第二份清单** | ❌ **不符**：MCP 面 20 个 tools 派生自 [../../meta/graphql/\_\_init\_\_.py](../../meta/graphql/__init__.py) 中**硬编码**的 `ENTITY_SCHEMAS`（10 个平台实体），与应用 schema 引擎互不相通 ⇒ **应用能力无法暴露** |
+| **S2** | 调用者身份 / 权限的**统一入口** | HTTP / BO / 事件处理 / **Agent(MCP)** 的能力调用必须经**同一鉴权入口**获取用户与权限上下文 | ❌ **不符**：[../../mcp/tools.py](../../mcp/tools.py) 的 `execute(..., user_context=None)` 为**手工传参**，且 `apply_rls_to_result` 在 [../../mcp/\_\_init\_\_.py](../../mcp/__init__.py) 标 `[DECORATIVE]` ⇒ 权限不强制 |
+| **S3** | 库命名预留 **`tenant × app` 二维** | 与 §4.4 G7 一致；SaaS 化前必须落地（命名铺开后难改） | ⚠️ 待落地（P1） |
+
+**配套的当下动作（唯一代码级）—— ✅ 已执行（v1.26，2026-09-24）**：
+
+`/mcp` 三个路由（`POST /mcp`、`GET /mcp/tools`、`GET /mcp`）经核查**未见任何鉴权**——`meta/server.py` 的 4 个 `before_request` 均非鉴权（缓存 body / trace / 数据源绑定 / v1 废弃拦截），且 blueprint 未加任何装饰器。
+
+**实测（未登录 HTTP，真实 dev 服务）**：
+
+| 请求 | 关闭前 | 关闭后 |
+|------|:---:|:---:|
+| `GET /mcp` | **200**（12.7KB：name / protocol / 20 tools + schema） | 无此路由（NotFound） |
+| `GET /mcp/tools` | **200**（12.7KB：20 tools + `inputSchema`） | 无此路由（NotFound） |
+| `POST /mcp`（`tools/list`） | **200**（13.5KB） | 无此路由（NotFound） |
+| `POST /mcp`（`tools/call` → `list_user` / `get_user_by_id`） | **200**，但返回 `rls_blocked`（`role set() cannot read user`）⇒ **数据未泄漏** | 无此路由 |
+| 对照：`/api/v1/auth/me`、`/api/v1/permission-sets`、`/api/v1/roles`、`/api/v1/menu-permission/visible`、`/api/v2/bo/user`、`/api/v1/schema/entities` | **401** | **401**（未变） |
+
+⇒ 结论：**能力清单（20 tools + 字段 schema）与 server info 完全裸露；实体数据因 RLS「空上下文即拒绝」而未被取到，属偶然的 fail-closed，不是鉴权边界**（且 `apply_rls_to_result` 自标 `[DECORATIVE]`、`user_context` 为手工传参）。
+
+**实施**：按方案 A 关闭入口 —— **两处注册均已移除**（`meta/server.py` 生产路径 + `meta/core/app_builder.py`），`mcp/` 模块保留（`mcp/tests` 8 用例仍独立通过），Agent 面待 Phase 2 从统一鉴权入口（S2）重开。
+
+**同批发现（未处理，待决策）**：`/graphql` 亦不在统一鉴权入口内 —— `GET /graphql/health`（200，回显 10 个实体名）、`POST /graphql`（200，无鉴权）。实测 `users` / `roles` / `userGroups` / `products` / `domains` / `businessObjects` 六个根查询**均返回空数组**（resolver 以空 context 走 `bo_framework`，数据权限层同样 fail-closed）⇒ 与 `/mcp` 同类：**schema 目录可枚举、数据未泄漏**。是否一并关闭见 §7 V2-3 相关口径。
+
+**明确不做（双向门 / 触发式）**：MCP 协议升级（2024-11-05 → 2026-07-28）、工具级授权、渐进披露、skill 包、A2A / Agent Card、应用市场、门户聚合（V2-5）、cell 故障域拆分、WASM 沙箱、备份 / 复制（Litestream / Turso）——**全部顺延 Phase 2/3**。
+
 ---
 
 ## 附录 A：相关文档与代码路径
@@ -1918,7 +2144,10 @@ federation:
 - [sql_maintenance_scheduler.py](../../meta/core/sql_maintenance_scheduler.py) — DB 维护调度（⚠️ **生产路径从未实例化**，死代码；§10.7）
 - [sql_checkpoint_manager.py](../../meta/core/sql_checkpoint_manager.py) — WAL checkpoint 管理（⚠️ 同上，死代码；§10.7）
 - [yaml_loader.py](../../meta/core/yaml_loader.py) — Schema 加载
-- [cdc_bus.py](../../meta/core/cdc_bus.py) — 事件总线（Phase 2 升级）
+- [event_outbox.py](../../meta/core/event_outbox.py) — **跨应用事件（Phase 1）**：outbox 表 + 契约注册表 + Dispatcher（§6.14、§10.13）
+- [event_consumer.py](../../meta/core/event_consumer.py) — 幂等消费去重表（`consumed_events`，§6.14、§10.13）
+- [outbox_interceptor.py](../../meta/core/interceptors/outbox_interceptor.py) — 同事务入队拦截器（priority=94，§6.14、§10.13）
+- [cdc_bus.py](../../meta/core/cdc_bus.py) — 内存事件总线（**仅限实时通知**；跨应用业务写须走 outbox，§6.14.1）
 - [graphql/\_\_init\_\_.py](../../meta/graphql/__init__.py) — Blueprint 追加范式
 
 **前端**
@@ -1962,3 +2191,9 @@ federation:
 | 2026-09-24 | **v1.19** | **3 项 P0 差距全部补入方案**（对标报告 §6 的逐章节修正）。**G1 升级路径修正**：§6.10 改写为"停机升级 + **expand-contract 纪律** → expand-contract 工具化（Phase 2 首项）→ **蓝绿降为特例**"（仅用于跨引擎/跨大版本/需原子切换）；核心新增"**应用迁移脚本必须保证任一时刻旧代码与新 schema 兼容、新代码与旧 schema 也兼容**"；§7 的 V2-1/V2-2 顺序随之调整（原 V2-1 蓝绿 → V2-2），V2-3~V2-6 顺延；§8 注同步修正；**§11 Q2 补落地路径修正说明**（决策目标"零停机 + 不做热加载"不变，只改实现顺序）。**G2 表名命名空间**：§6.2 的 `app.yaml` 新增 `table_prefix` 字段；**新增 §6.2.2**（行业三家全部强制表名前缀，ServiceNow 甚至 build 期阻断；我们的三个强制点 = 构建期 `build_app.py` / 安装期 `install_app.py` / 启动期 `register_apps`）。**G3 "删除即废弃"**：§6.10 新增规则——应用升级时被移除的 BO/字段只标 `deprecated`、**物理列保留**，物理清理走独立管理操作（行业依据：ServiceNow"删除不随版本传递"）。**G4**：§6.12 补卸载反向依赖检查验收项。**连带更新**：§6.11 工作量增列 5.5 人天（表名命名空间 2d / expand-contract 2d / 删除即废弃 1d / 反向依赖 0.5d）；§6.12 验收新增 4 项（升级后旧代码可运行 / 删除字段不丢数据 / 两应用同名 BO 不冲突 / 被依赖应用拒绝卸载）；§9 新增 **R18 平台升级破坏已装应用 / R19 应用间撞表 / R20 升级删字段丢数据**；§4.4 标注 G1~G3 已补入并列出仍未补入的 G5~G10（不阻塞 Phase 1 开工） |
 | 2026-09-24 | **v1.20** | **§6.5.3 改动 1~3 完成：应用库路由接线**（§10.10）。**实施中发现方案缺口并已决策**：改动 1 原文只按 URL 前缀绑定，但**应用 BO 走平台通用 API `/api/v2/bo/<object_type>`（路径无 app_id）**⇒ 只按前缀绑定会让应用 BO 永远绑不上，正好撞上"表在 A 库、读写走 B 库"。**用户确认的两项决策**：① 归属采用**注册期 `bo → app` 映射 + `before_request` 统一绑定**（放弃"应用命名空间 BO 路由"与"请求头 `X-App-Id`"）；② 落库采用**单例 `BOFramework` + `resolve_data_source` 逐点解析**（放弃"每应用一个 BOFramework 实例"，因需把已在两处重复的拦截器注册块再复制一遍）。**产出（4 改 3 测）**：[datasource.py](../../meta/core/datasource.py#L608) 新增 `APP_DB_ROUTING` 开关与 `open_app_data_source()`（**不触碰 contextvars**，供启动期建表）；[app_registry.py](../../meta/core/app_registry.py#L46) 新增归属索引与 `resolve_app_id_for_request()` 等，`_sync_app_tables()` 按开关切换目标库；[server.py](../../meta/server.py#L606) 新增 `before_request` 绑定 + `teardown_request` 解绑（**放在 Flask 层**，因 `ContextInterceptor` 是 BO 动作拦截器触发太晚）；[bo_api.py](../../meta/api/bo_api.py#L125) 与 [bo_framework.py](../../meta/core/bo_framework.py#L71) 取用点接入 `resolve_data_source`（含事务三件套，**保证同一次动作只碰一个库**）。**归属映射按"声明的 schema 文件"而非"本次新增的 BO"建立** —— `register_from_directory` 有目录级缓存，按"新增"建映射在 registry 已预热时会得到**空映射 ⇒ 静默数据错库**。**验证**：新增 [test_app_db_routing.py](../../meta/tests/test_app_db_routing.py) **34 passed** + [test_server_app_db_routing_integration.py](../../meta/tests/test_server_app_db_routing_integration.py) **9 passed**（真实 `create_app()` + `APP_DB_ROUTING=1`：应用表落应用库、应用 BO 读写走应用库、平台库行数不变、请求结束绑定已解除）；8 文件回归 **135 passed**（与基线一致，**默认关闭零行为变化**）。**记录两个测试写法坑**：类级 fixture 不能在 `create_app()` 后复原开关（开关是**请求期**读取）；平台库快照可能残留 `greetings` 表 ⇒ 改为断言行数不变。**未纳入本次范围**：`query_api` / `export_import_api` / `stats_api` / `association_api` 的 `_get_data_source()` 单例仍指向平台库（本次只覆盖 BO CRUD 主链路）。同步更新 §6.5.3 / §10.10（新增）/ 头部 |
 | 2026-09-24 | **v1.21** | **§6.5.3 P0 复核修复：审计恒落平台库**（§10.11）。**触发**：v1.20 交付后做遗漏复核，发现改动 3（读取路径分流）**漏掉审计这一整类取用点**——它不是"待补的第四个 API"，而是会**静默断链**的 P0。**根因（代码级）**：① 应用库只建应用 BO 表（[SchemaMigrator.migrate()](../../meta/core/schema_generator.py#L381) 只建传入的 BO 表），`audit_logs` / `audit_logs_archive` / `v_audit_all` / `users` 都是平台资源；② 审计写入与业务数据**共用同一 ActionExecutor**（[persistence_interceptor.py](../../meta/core/interceptors/persistence_interceptor.py#L57) 的 `ActionRegistry(context.data_source)` 持路由后 ds）⇒ `AuditLogger` 的 `AuditService` 也指向应用库；③ 后果是**双重静默**——写入侧 [_write_audit_log_v2](../../meta/core/action_executor.py#L2419) 只记 warning，读取侧 `updated_at`（审计派生字段）取不到值 ⇒ **字段静默变空（用户可见）**；④ 该缺陷**测试发现不了**（`PYTEST_CURRENT_TEST` 下 `_write_audit_log_v2` 整体跳过）。**用户决策**：**审计统一落平台库**（否决"应用库补建平台表副本"——违反"应用库只放应用 BO 表"、每库一套审计无法集中查询、后续用户/角色表会失控）。**产出（7 改 1 测）**：[datasource.py](../../meta/core/datasource.py#L717) 新增 `get_platform_data_source()`（**忽略**请求级绑定）/ `resolve_audit_data_source()`（**开关关闭时返回业务库本身 ⇒ 存量零变化**）；[action_executor.py](../../meta/core/action_executor.py#L171) `AuditLogger` 新增 `audit_ds` 并覆盖 `users` 查询 / `AuditService(self.audit_ds)` / `v_audit_all` 读取 / `_write_audit_log_v2` 的**事务判断与包装**；[audit_derived_fields.py](../../meta/core/audit_derived_fields.py#L334) `STRATEGY_AUDIT_DERIVED` 分支改走平台库（该函数是 `updated_at` 派生的**唯一公共入口**，改一处全覆盖；物化列分支仍用业务 ds）；[manage_service.py](../../meta/services/manage_service.py#L58) `_get_latest_audit_log_id()` 改用 `self.audit_ds`；[bo_api.py](../../meta/api/bo_api.py#L249) 变更历史；[association/fallback.py](../../meta/core/association/fallback.py#L188) `query_audit_logs()` 的 4 处 `v_audit_all` 查询（`_query_child_ids` / `_query_relationship_ids` 查业务表仍用业务 ds）；[association_engine.py](../../meta/core/association_engine.py#L667) `_write_audit_log()`（原跟随业务库会被 `association_audit` 的 `except` 静默吞掉）。**复核确认"无需修改"并已逐个溯源**：`structured_logger._write_to_audit_logs`（自行解析到平台 ds）/ `audit_retry`（`get_meta_db_path()`）/ `association_api`·`enum_api`·`manage_api`·`permission_*_api`·`user_api` 的 `_get_data_source()`（不经 `resolve_data_source`）/ `core/interceptors/audit_interceptor.py` 的 `_get_audit_service()`（**死代码**，其关联审计走 `context.add_pending_audit` → `bo_framework._flush_pending_audit_records()`）。**验证**：新增 [test_audit_platform_routing.py](../../meta/tests/test_audit_platform_routing.py) **15 passed**（含端到端"审计落平台库且应用库无审计表"、"`updated_at` 派生走平台库"）；8 文件回归 **157 passed**（app_db_routing 34 + binding 33 + db_path 24 + loader 15 + registry 11 + server_integration 9 + package 14 + installer 17）；审计相关 7 套件全绿。**P1 三项写入"未纳入本次范围"（仅记录不修）**：应用包 `migrations/` 无消费点 / 值帮助 `bo_pick_service._default_data_source()` 固定平台库 / `export_import_api.py` 的 `ManageService(_data_source)` 单例——均为功能可用性缺口，非数据错库。**既有失败如实记录（非本次引入，已用 `git stash` 隔离验证失败完全相同）**：`test_action_executor.py` 2 failed（该文件自建 DDL 缺 `parent_object_type` / `error_message` 列）。同步更新 §10.10 末尾 P1 表 / §10.11（新增）/ 头部 |
+| 2026-09-24 | **v1.22** | **PoC 2 完成：真实应用包 + 多应用各落各库**（§10.12）。**产出**：新建**真实应用包** [apps/warehouse/](../../apps/warehouse/)（`app.yaml` + 2 个 schema `warehouse`/`stock_item` + 自定义 blueprint `inventory_api`，含 `menu.portal_mount` / `product_binding` / `allowed_platform_modules` 白名单）；新增端到端测试 [test_warehouse_app_poc2.py](../../meta/tests/test_warehouse_app_poc2.py) **17 passed**（隔离 13 + 多应用 4）。**修复两个"单应用场景不可见"的缺陷**：① [app_registry._register_app_schemas](../../meta/core/app_registry.py#L210) 的补建表/补菜单由"**本次新增 BO**"改为"**声明的 BO**"（`added_by_app` → `declared_by_app`）—— `register_from_directory` 的**目录级缓存**使"本次新增"在同进程第二次 `create_app()` 时为空 ⇒ 建表/菜单被静默跳过（与 v1.20 建归属映射踩的是同一个坑）；② **P0**：[PersistenceInterceptor._get_registry()](../../meta/core/interceptors/persistence_interceptor.py#L58) 原实现把**首个请求**的 registry 永久固化（拦截器是全局单例）⇒ 多应用路由下第二个应用的写入被送进第一个应用的库——表不存在则**静默失败**，**表同名则写错库且无报错**；改为 `self._registries: Dict[DataSource, ActionRegistry]` **按数据源身份分桶缓存**，`self._registry` 仍指向最近使用的 registry（故 [action_executor.py](../../meta/core/action_executor.py#L2732) 的 `getattr(interceptor, '_registry')` 与既有 24 处 `interceptor._registry = mock` 测试写法均不受影响）。**验证**：§6.12 九个验收项逐项有证据（应用库独立 / 8 张平台表不进入应用库 / BO 读写分流 / 应用自定义 API 读自己库 / 双层菜单 / **审计恒平台库** / 请求结束解绑 / **多应用各落各库** / install→uninstall 不动应用库数据）；9 文件回归全绿（PoC 2 17 + app_db_routing 34 + server_app_db_routing_integration 9 + server_app_integration 10 + app_installer 17 + app_registry / app_loader / app_package / interceptors 单元）。**新增两条测试写法坑**：① **一个测试文件只允许调用一次 `create_app()`** —— `bo_framework` 是进程级单例而 `create_app()` 会把整套拦截器**追加**注册（[server.py](../../meta/server.py#L466)）⇒ 第二次 `create_app()` 出现两个 `PersistenceInterceptor`，同一次 create 被持久化两遍 ⇒ 400「值已存在」（本文件 fixture 因此提为 `scope="module"`）；② 跨库反查必须容忍"表不存在"（新增 `_rows_if_table()`）。**既有失败如实记录（非本次引入）**：`test_persistence_interceptor_detailed.py` 1 failed —— `test_enriches_virtual_redundancy_fields` 断言 `_do_read` 调用 `enrich_one` 属**陈旧断言**（`enrich_one` 已不在读路径），本次改动仅 `__init__` + `_get_registry`（`git diff --unified=0` 可证）。同步更新 §6.12（4 项打勾，其中"审计落应用库"按 v1.16 Q4 决策修正为"审计与登录日志均落平台库"）/ §10.12（新增）/ §10 PoC 2 占位标 ✅ / §10 执行建议 / 头部（测试数 193 → 210） |
+| 2026-09-24 | **v1.23** | **PoC 4 完成：跨应用事件"不丢 / 不重 / 死信"**（§10.13）。**产出（3 模块 + 1 应用包 + 3 处接线 + 1 测试）**：新建 [event_outbox.py](../../meta/core/event_outbox.py)（outbox 表 + `EventContractRegistry` 契约注册表 + `ast` 白名单条件求值 + `enqueue_event` **同事务入队** + `EventDispatcher` 轮询/重试/死信）、[event_consumer.py](../../meta/core/event_consumer.py)（`consumed_events` 幂等去重，**标记与业务写同事务**，handler 异常整体回滚可重试）、[outbox_interceptor.py](../../meta/core/interceptors/outbox_interceptor.py)（**priority=94**，紧随 95 `PersistenceInterceptor`；契约注册表为空即短路 ⇒ legacy 零影响）；新建**订阅方应用包** [apps/tms/](../../apps/tms/)（`events.subscribe` + `waybill` BO + handler + 自定义 API），发布方 [apps/warehouse/](../../apps/warehouse/) 新增 `events.publish` 与 `outbound_order` schema；接线 [app_loader.py](../../meta/core/app_loader.py#L198)（events 解析）/ [app_registry.py](../../meta/core/app_registry.py#L449)（契约注册 + **启动期 `validate()`** + 建事件表）/ [server.py](../../meta/server.py#L488)（注册拦截器 + 启动/停止 Dispatcher）。**三条关键验证点全部有实测证据**：① 冻结 Dispatcher 模拟 kill → 重建 Dispatcher 后事件仍投递、运单落库（`test_event_survives_simulated_process_kill`）；② 同幂等键重投 → 仍 1 张运单、去重表计数不增（`test_duplicate_delivery_creates_no_second_waybill`）；③ 抛异常 handler + `max_attempts=3` → `status='dead'` 且去重标记随事务回滚（`test_handler_failure_lands_in_dead_letter`）。另有**同事务回滚**、表归属（outbox 在发布方库 / consumed 在消费方库 / 平台库与对方库均无）、**契约启动期校验**（trigger 非法 / payload 空 / 事件不存在 / 来源应用未启用 / 缺 `idempotency_key`）、条件求值安全（拒绝函数调用）等断言。**验证**：新增 [test_event_outbox_poc4.py](../../meta/tests/test_event_outbox_poc4.py) **25 passed**（契约 16 + 跨应用流 9）；13 个既有文件回归全绿；修正 PoC 2 一处陈旧断言（warehouse 现声明 3 个 BO，**非行为回归**）。**新增三条测试写法坑**：① 契约注册表是**进程级单例**，端到端用例内不得 `reset()`（否则 `should_execute` 静默短路，现象酷似机制失效，清理仅限纯契约用例）；② conftest raw-SQL 铁律下"人为重复投递"须用生产 API `enqueue_event` 重投表达，**不得 `ALLOW_RAW_SQL=1` 绕过**；③ 死信用例临时替换订阅后须复原并清 handler 缓存。同步更新 §6.12（4 项事件条目打勾）/ §10.13（新增）/ §10 PoC 4 占位标 ✅ / §10 执行顺序与执行建议（下一步 **PoC 3 门户聚合**）/ 头部（测试数 210 → 235） |
+| 2026-09-24 | **v1.24** | **双应用同栏实测完成 + PoC 3 推迟到 Phase 2（触发式启动）**（§10.14）。**触发**：PoC 3 开工前复核"TMS 与 WMS 一起展示是否只要一起部署"——结论**成立**，Type 2 合并部署（单 instance + 共享平台库 + 各应用独立业务库）已覆盖；"同栏"此前缺的只是一次**显式实测**（既有断言均为**单应用**根菜单可见）。**产出（纯新增 1 测试文件，零生产代码改动）**：新建 [test_merged_two_apps_menu.py](../../meta/tests/test_merged_two_apps_menu.py) **9 passed** —— `ENABLED_APPS=warehouse,tms` + `APP_DB_ROUTING=1` 单实例下断言：① 两个根菜单**同落平台库**且 `is_active=1 / show_in_sidebar=1`；② 两行**挂同一父菜单**（同栏；`business_apps` 缺失时一起降级为顶层）+ 排序 901 < 902 生效；③ 各自应用内菜单**各挂各的根**（合并不串树）；④ **同一份菜单 API 响应**同时返回 `app_warehouse` / `app_tms`，`menu_path` 分别指向 `/app/warehouse` / `/app/tms`；⑤ 业务库隔离（`warehouse.db` / `tms.db` 互不串表、平台表不进应用库）+ 应用写入**行级探针**不落平台库 + 两应用路由共存。**决策**：**PoC 3 推迟到 Phase 2 触发式启动**——理由：① 能力已覆盖（Type 2 交付的就是"单 instance 多应用同栏"，Type 3 增量仅"多实例 + 跨实例菜单聚合 + 跨域跳转"，§3.2 原本就把 Type 3 正式目标排在 Phase 2）；② 门户聚合需 portal 进程跨实例读菜单（一致性 + SSO），而触发条件（独立演进 / 不同团队 / 独立扩容 / 交付隔离，§3.2）均未出现；③ Phase 1 收尾资源转向 **P1 分流缺口**（`query_api` / `export_import_api` / `stats_api` / `association_api` 等单例数据源 —— **读错库的数据正确性风险**，优先级高于体验类门户聚合）。**新增一条测试写法坑**：平台库在 `--file`（非 xdist）模式下就是共享开发库 `meta/architecture.db` ⇒ "平台库不得出现应用表"的**表级**断言不成立（有历史残留表），须改为 PoC 2 同款**行级探针**。同步更新 §3.2（推迟依据 + 4 条触发条件）/ §6.6（Type 2 已覆盖"同栏展示"实测注）/ §10.14（新增）/ §10 PoC 3 占位标 ⏸ / §10 执行建议（下一步改指 P1 分流缺口）/ 头部（状态、测试数 235 → 244、下一步） |
+| 2026-09-24 | **v1.25** | **架构方向符合性 check（面向 Agent / AI）+ 三条单向门口径入档**（§11 Q5，零代码、无新增测试）。**背景**：用户确认 AI / Agent 能力**整体推迟**，当下只做"架构是否符合该方向"的核对。**核对结论：方向符合** —— 声明式 `app.yaml`（= 机器可读的能力描述）、权限命名空间 = `app.id`、事件契约（= 行业标准 outbox）、业务分库（= per-app / per-tenant 多库主流）、L1–L4 分层与应用边界三层校验（= modular monolith 主流答案）均天然适配，且 Type 1/2/3 是同一能力图的不同投影，未来"动态性落在能力层"时拓扑无需重做。**核对发现一处真实不符（单向门）**：**能力清单的事实源分裂** —— MCP 面 20 个 tools 派生自 [meta/graphql/\_\_init\_\_.py](../../meta/graphql/__init__.py) 中**硬编码**的 `ENTITY_SCHEMAS`（10 个平台实体），而应用能力注册在 YAML schema 引擎（`MetaRegistry`），两者互不相通 ⇒ **应用能力无法暴露**。**入档三条单向门口径**：S1 能力清单 = schema 引擎注册表的**只读投影**（禁止第二份清单）；S2 调用者身份 / 权限走**统一鉴权入口**（现状 MCP 为手工传 `user_context`、RLS 标 `[DECORATIVE]`）；S3 库命名预留 `tenant × app` 二维。**发现一个当下真实暴露面（唯一代码级动作）**：`/mcp` 三路由**未见鉴权**（`meta/server.py` 4 个 `before_request` 均非鉴权），需先实测确认再关入口。**明确不做**：MCP 协议升级 / 工具级授权 / 渐进披露 / skill 包 / A2A / 应用市场 / 门户（V2-5）/ cell 拆分 / WASM 沙箱 / 备份复制 —— 全部顺延 Phase 2/3。同步更新 §七 V2-3（注明与 MCP 面共用能力清单与鉴权入口）/ 头部（状态、下一步）/ 附录 B |
+| 2026-09-24 | **v1.26** | **`/mcp` 未鉴权入口：实测确认 + 已关闭**（§11 Q5「配套的当下动作」，代码级 4 行改动）。**触发**：v1.25 记录的唯一代码级动作——"先实测确认（未登录请求该端点），确认后关入口"。**实测（真实 dev 服务 `python dev.py`，`FLASK_PORT=3015`，不带任何 Cookie / Authorization）**：`GET /mcp` **200**（12.7KB：`name` / `protocol: mcp-2024-11-05` / 20 tools）、`GET /mcp/tools` **200**（12.7KB：20 tools + `inputSchema`）、`POST /mcp`（`tools/list`）**200**（13.5KB）；`POST /mcp` 的 `tools/call`（`list_user` / `get_user_by_id`）亦 **200**，但返回 `{"tool":"rls_blocked","allowed":false,"deny_reason":"role set() cannot read user"}` ⇒ **能力清单与 server info 完全裸露，实体数据因 RLS「空上下文即拒绝」而未被取到**（属偶然 fail-closed，非鉴权边界）。**基线对照**：`/api/v1/auth/me`、`/api/v1/permission-sets`、`/api/v1/roles`、`/api/v1/menu-permission/visible`、`/api/v2/bo/user`、`/api/v1/schema/entities` 未登录**全部 401**（证明"未鉴权"不是全站设计）。**实施（方案 A：关入口，4 行）**：[meta/server.py](../../meta/server.py#L802) 生产路径 + [meta/core/app_builder.py](../../meta/core/app_builder.py#L370) 新入口，**两处 `from mcp import mcp_bp` / `register_blueprint(mcp_bp)` 均已移除**（只留说明性注释，指向 §11 Q5 S2）；[mcp/\_\_init\_\_.py](../../mcp/__init__.py#L10) 与 [mcp/server.py](../../mcp/server.py#L9) 的"回滚说明"改写为当前状态。`mcp/` 模块保留（Agent 面 Phase 2 从统一鉴权入口重开）。**验证**：关闭后三路由在服务端日志中为 `werkzeug.exceptions.NotFound`（与任意未注册路径 `/definitely-not-a-route` 行为一致；HTTP 状态 500 源于**既有** [@app.errorhandler(Exception)](../../meta/server.py#L707) 吞掉 `NotFound` 的全站 quirk，非本次引入）；`/api/v1/*` 仍全部 401（未变）；[mcp/tests/test_server.py](../../mcp/tests/test_server.py) **8 passed**（blueprint 独立测试不受影响）；[test_merged_two_apps_menu.py](../../meta/tests/test_merged_two_apps_menu.py) **9 passed**（create_app 路径回归）。**既有失败如实记录（与本次改动无关）**：`test_app_builder.py` 3 failed —— `TestStandardActionLoaderStartup` 三例硬断言 16 个标准动作，实际 23（export / import / manage / search / list / read / grant / revoke… 系 2026-09-12 后扩充），属**陈旧断言**；本次改动仅从 `with_blueprints()` 移除一个 import 与一次 register，与 `StandardActionLoader` 无调用关系。**同批发现（未处理，已记入 §11 Q5 待决策）**：`/graphql` 同属未受保护入口 —— `GET /graphql/health` 200（回显 10 个实体名）、`POST /graphql` 200；实测 `users` / `roles` / `userGroups` / `products` / `domains` / `businessObjects` 六个根查询**均返回空数组**（resolver 以 `{}` 走 `bo_framework`，数据权限层同样 fail-closed）⇒ 与 `/mcp` 同类（schema 目录可枚举、数据未泄漏），是否一并关闭待定。同步更新 §11 Q5（配套动作标 ✅ 已执行 + 实测表 + 同批发现）/ 头部（状态、下一步）/ 附录 B |
+| 2026-09-25 | **v1.27** | **应用 `migrations/` 执行环：认知修正 + 两项探针实测**（§6.3.1 新增；零生产代码改动，纯新增 2 个探针测试文件）。**认知修正（本轮最重要）**：此前（含 [app_registry.py L444](../../meta/core/app_registry.py#L444) 的注释）给人的印象是"应用 `migrations/` 无消费点、升级这条腿是断的" —— **准确说法是"升级缺的是结构变更执行这一环的接线，不是能力"**：迁移基础设施早已随"部署智能体"建成，`MigrationRunner.__init__(data_source, migrations_dir=None)` 的**目标库与脚本目录均为构造参数** ⇒ per-app / per-db 天然支持（含 `schema_migrations` 版本表 / `migration_lock` 并发锁 / checksum / 幂等 / 备份 / rollback / 超时 / 审计日志 / `--dry-run` CLI）。同时修正另一处表述：该环的**执行机制并不依赖请求级数据源路由**（原 §6.3 如此记载），只有**目标库**随 `APP_DB_ROUTING` 取值而定。**实测 1**（新文件 [test_per_app_migration_runner_probe.py](../../meta/tests/test_per_app_migration_runner_probe.py)，**6 passed / 0.87s**）：`schema_migrations` / `migration_lock` **落应用库**（平台库反例断言通过：无探针表、无版本表）、幂等生效（第二次返回 0，仅 1 行 `SUCCESS`）、`migrations_dir` 任意目录有效、**无全局耦合**（换库即重新执行、备份落应用库旁）⇒ **接线无隐藏工作量**；唯一路径派生耦合是审计日志路径（多应用共用一份 `logs/migrations.log`）。**实测 2**（新文件 [test_app_table_name_collision_probe.py](../../meta/tests/test_app_table_name_collision_probe.py)，**8 passed / 5.55s**，**真实 `create_app()` + 真实 `register_apps()` + 临时应用包**）：`APP_DB_ROUTING=0` 下同名 BO **不报错、无任何告警** —— 不同 BO id + 同 `table_name` ⇒ 两应用各自独有的列被**合并进同一张物理表**（证据 `probe_items_shared cols: ['code','id','only_a','only_b']`）；相同 BO id + 同 `table_name` ⇒ `registry` 被后注册方**静默覆盖**（[models.py L1277](../../meta/core/models.py#L1277) `self._objects[id] = obj`），先注册方列**丢失**（证据 `probe_dup_table cols: ['code','id','only_y']`）⇒ **当前既无表名命名空间、也无冲突检测（选项 B）**。成因链：[yaml_loader.py L2029](../../meta/core/yaml_loader.py#L2029) 直取 `table_name` → `_sync_app_tables()` 不派生前缀 → `SchemaMigrator.migrate` 遇表已存在仅 `ALTER ADD` 补列。**三项待定优化（接线时必须一并定口径）**：① **迁移命名空间** —— 分流关闭时应用与平台迁移**同库同表**，两个应用的 `0001_init.py` 同名会被误判"已执行"而**静默跳过**（须加 `<app_id>__` 前缀 + `tools/migration_lint.py` 强制校验）；② **执行时机** —— 现有为**部署期进程外 CLI**，而应用安装/升级是**运行期**动作（`install_app()` 只解压 + 校验 + 登记）⇒ 建议挂启动期 `register_apps()`，紧随 `_sync_app_tables()`；③ **失败语义 + 依赖拓扑顺序** —— **单向门，须现在定**（失败阻断启动还是告警放行？多应用依赖顺序如何进迁移序列）。**A 档四项细化**：A1 应用 `migrations/` 消费点（按上表接线，须先定三项口径）、A2 `table_prefix` 表名命名空间（**实测 2 已证实风险真实存在**）、A3 卸载反向依赖检查 G4（`EventContractRegistry.subscribers_for(event_name)` 是现成落点）、A4 跨应用只读视图（`ATTACH DATABASE` 全文**零实现代码**）。**决策（用户 2026-09-25）**：**A2 `table_prefix` 实现 + `/graphql` 关闭一并列为 backlog 推迟**（`/graphql` 注：其安全画像与已关闭的 `/mcp` **完全一致** —— 未鉴权 + schema 泄露，属**安全项**而非功能项；同批发现的 `/_metrics`、`/api/v1/test/ready` 一并待定）。**本次实测未覆盖（后续可补）**：per-app 场景下的 `.py` 迁移 / `prerequisites()` / `rollback()` / CLI `--dry-run`；`APP_DB_ROUTING=1` 下的同名表行为；同名 BO 对菜单 / 权限（进程级单例）的生产影响。同步更新 §6.3（修正表述）/ §6.3.1（新增）/ 头部（状态、下一步）/ 附录 B |
