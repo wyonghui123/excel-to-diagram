@@ -33,9 +33,53 @@ print(f"[unified-staging] listen=0.0.0.0:{PORT}", flush=True)
 
 
 # Token 持久化 (per client IP)
+# [FIX 2026-09-26 G1] 缓存落盘持久化: 此前 cache 仅在内存, unified 重启(含每次部署)
+#   即清空 → 前端不发 Authorization 头的请求全部 401 → 全体在线用户被弹到登录页。
+#   落盘后重启自动恢复, 会话跨重启/部署存活。
+#   路径: 默认 <脚本目录>/../../unified_token_cache.json (staging:
+#   /opt/app/staging/unified_token_cache.json, 在 deploy/ 之外, 不随部署被替换),
+#   可用 UNIFIED_TOKEN_CACHE 覆盖。
 TOKEN_CACHE = {}
 TOKEN_TTL = 86400
 _token_lock = threading.Lock()
+TOKEN_CACHE_PATH = os.environ.get(
+    "UNIFIED_TOKEN_CACHE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                 "unified_token_cache.json"),
+)
+
+
+def _load_token_cache():
+    """启动时从磁盘恢复 token 缓存 (丢弃过期条目), 失败不影响启动。"""
+    try:
+        with open(TOKEN_CACHE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        now = time.time()
+        n = 0
+        for ip, entry in (data or {}).items():
+            if isinstance(entry, dict) and entry.get("token") \
+                    and now - entry.get("ts", 0) < TOKEN_TTL:
+                TOKEN_CACHE[ip] = {"token": entry["token"], "ts": entry["ts"]}
+                n += 1
+        print(f"[unified-staging] token cache restored from {TOKEN_CACHE_PATH} ({n} entries)", flush=True)
+    except FileNotFoundError:
+        print(f"[unified-staging] token cache file not found (first boot): {TOKEN_CACHE_PATH}", flush=True)
+    except Exception as e:
+        print(f"[unified-staging] token cache load failed (ignored): {e}", flush=True)
+
+
+def _persist_token_cache():
+    """原子落盘 token 缓存 (仅登录时触发, 频率低); 失败只打日志。"""
+    try:
+        with _token_lock:
+            snapshot = dict(TOKEN_CACHE)
+        tmp = TOKEN_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
+        os.replace(tmp, TOKEN_CACHE_PATH)
+    except Exception as e:
+        print(f"[unified-staging] token cache persist failed (ignored): {e}", flush=True)
+
 
 LOGIN_PATHS = (
     "/api/v1/auth/login",
@@ -50,6 +94,7 @@ def _save_token(client_ip: str, token: str):
             "ts": time.time(),
         }
     print(f"[unified-staging] token saved for {client_ip} (cache size: {len(TOKEN_CACHE)})", flush=True)
+    _persist_token_cache()
 
 
 def _get_token(client_ip: str):
@@ -220,6 +265,7 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def main():
+    _load_token_cache()
     server = ThreadedServer(("0.0.0.0", PORT), UnifiedHandler)
     print(f"[unified-staging] serving on 0.0.0.0:{PORT}", flush=True)
     try:

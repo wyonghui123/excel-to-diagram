@@ -34,11 +34,50 @@ print(f"[unified] listen=0.0.0.0:{PORT}", flush=True)
 # ============================================================
 # Token 持久化 (per client IP)
 # ============================================================
-# 解决 v4 前端 boService 调 BO endpoints 不传 Authorization header 的问题
-# unified 拦截 login 响应, 把 token 存起来, 后续同 IP 请求自动用
+# [FIX 2026-09-26 G1] 缓存落盘持久化: 此前 cache 仅在内存, unified 重启即清空 →
+#   前端不发 Authorization 头的请求全部 401 → 全体在线用户被弹到登录页。
+#   落盘后重启自动恢复, 会话跨重启存活。默认路径 <脚本目录>/../unified_token_cache.json,
+#   可用 UNIFIED_TOKEN_CACHE 覆盖。
 TOKEN_CACHE = {}  # client_ip -> {token, exp, ts}
 TOKEN_TTL = 86400  # 24h
 _token_lock = threading.Lock()
+TOKEN_CACHE_PATH = os.environ.get(
+    "UNIFIED_TOKEN_CACHE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "unified_token_cache.json"),
+)
+
+
+def _load_token_cache():
+    """启动时从磁盘恢复 token 缓存 (丢弃过期条目), 失败不影响启动。"""
+    try:
+        with open(TOKEN_CACHE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        now = time.time()
+        n = 0
+        for ip, entry in (data or {}).items():
+            if isinstance(entry, dict) and entry.get("token") \
+                    and now - entry.get("ts", 0) < TOKEN_TTL:
+                TOKEN_CACHE[ip] = {"token": entry["token"], "ts": entry["ts"]}
+                n += 1
+        print(f"[unified] token cache restored from {TOKEN_CACHE_PATH} ({n} entries)", flush=True)
+    except FileNotFoundError:
+        print(f"[unified] token cache file not found (first boot): {TOKEN_CACHE_PATH}", flush=True)
+    except Exception as e:
+        print(f"[unified] token cache load failed (ignored): {e}", flush=True)
+
+
+def _persist_token_cache():
+    """原子落盘 token 缓存 (仅登录时触发, 频率低); 失败只打日志。"""
+    try:
+        with _token_lock:
+            snapshot = dict(TOKEN_CACHE)
+        tmp = TOKEN_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
+        os.replace(tmp, TOKEN_CACHE_PATH)
+    except Exception as e:
+        print(f"[unified] token cache persist failed (ignored): {e}", flush=True)
 
 # Login 端点 (统一识别)
 LOGIN_PATHS = (
@@ -55,6 +94,7 @@ def _save_token(client_ip: str, token: str):
             "ts": time.time(),
         }
     print(f"[unified] token saved for {client_ip} (cache size: {len(TOKEN_CACHE)})", flush=True)
+    _persist_token_cache()
 
 
 def _get_token(client_ip: str):
@@ -241,6 +281,7 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 if __name__ == "__main__":
+    _load_token_cache()
     with ThreadedServer(("0.0.0.0", PORT), UnifiedHandler) as httpd:
         print(f"[unified] serving on 0.0.0.0:{PORT} (token cache enabled)", flush=True)
         httpd.serve_forever()
