@@ -15,13 +15,16 @@
   - 同时支持 staging / prod (通过 --target 参数切换)
   - 输出 JSON audit log 供回溯
 
-6 项 invariant (对应失败模式家族 4 次复发的可观察特征):
+7 项 invariant (对应失败模式家族 5 次复发的可观察特征):
   I1. server.py cwd 必须匹配 deploy_root (避免 prod/staging server 错启)
   I2. realpath(<deploy_root>/meta) 必须落在 deploy_root 之下 (避免 9-16 symlink 错指)
   I3. import meta.core.standard_action_loader 的 __file__ 必须在 meta/core/ 下 (避免 9-13 加载老版本)
   I4. 必须存在 server.py 进程且监听预期端口 (避免 server 没起)
   I5. 关键 actions (crud_create) 的 instance_scope 必须等于 object (业务不变量)
   I6. git status 必须 clean (禁止未还原调试改动就部署)
+  I7. server.py 顶层 meta.* ImportFrom 必须模块级 + 符号级全部可解析
+      (2026-09-26 家族第 6 次: 文件上传成功 + I1-I6 全 PASS, 但远端旧版模块
+       缺符号 -> /health 500. "import meta.core.X 成功" != "from meta.core.X import Y 成功")
 
 使用:
   python tools/prod_invariant_check.py --target staging
@@ -479,6 +482,156 @@ def check_I6_git_clean() -> InvariantResult:
         )
 
 
+def check_I7_import_symbol_closure(target: "DeployTarget") -> InvariantResult:
+    """I7. server.py 顶层 meta.* ImportFrom 必须模块级 + 符号级全部可解析.
+
+    失败模式 (2026-09-26 staging, 该家族第 6 次复发):
+      7 个文件上传成功, 12 条路径 md5=match, I1-I6 全 PASS,
+      但 /health 500:
+        ImportError: cannot import name 'bind_app_data_source' from 'meta.core.datasource'
+      根因: 远端 meta/core/datasource.py 仍是 Sep-05 旧版, 缺 server.py 新版
+      所引用的 6 个符号. 即 "import meta.core.X 成功" != "from meta.core.X import Y 成功".
+
+    与 I3 互补: I3 查"加载的模块落点对不对", I7 查"该模块的符号全不全".
+    server.py 未找到时跳过 (prod 可能不含顶层 server.py), 不阻塞部署.
+    """
+    deploy_root = target.deploy_root
+    parent = str(Path(deploy_root).parent).replace("\\", "/")
+    # sys.path 语义与 I3 保持一致
+    if deploy_root.endswith("/meta"):
+        sys_path_root = parent           # prod 平铺: server 在 meta 包之外
+    else:
+        sys_path_root = deploy_root      # staging: deploy_root 即顶层
+    candidates = [
+        f"{deploy_root}/server.py",
+        f"{parent}/server.py",
+        f"{parent}/current/server.py",
+    ]
+
+    tmpl = TOOLS / "_invariant_closure.py"
+    tmpl.write_text(INVARIANT_CLOSURE_TEMPLATE.format(
+        candidates=candidates, sys_path_root=sys_path_root))
+    _remote_upload(target, tmpl, "/tmp/_invariant_closure.py")
+
+    out, err, rc = _remote_exec(
+        target,
+        "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_closure.py 2>&1",
+        timeout=60,
+    )
+
+    server_found = False
+    server = ""
+    n_stmt = "0"
+    n_missing = "0"
+    syntax_err = ""
+    missing: List[str] = []
+    for line in out.splitlines():
+        if line.startswith("SERVER_FOUND="):
+            server_found = line[len("SERVER_FOUND="):].strip() == "1"
+        elif line.startswith("SERVER="):
+            server = line[len("SERVER="):].strip()
+        elif line.startswith("IMPORT_STMT_COUNT="):
+            n_stmt = line[len("IMPORT_STMT_COUNT="):].strip()
+        elif line.startswith("MISSING_COUNT="):
+            n_missing = line[len("MISSING_COUNT="):].strip()
+        elif line.startswith("MISSING="):
+            missing.append(line[len("MISSING="):].strip())
+        elif line.startswith("SYNTAX_ERROR="):
+            syntax_err = line[len("SYNTAX_ERROR="):].strip()
+
+    if not server_found:
+        return InvariantResult(
+            invariant_id="I7",
+            description="server.py 顶层 meta.* 符号闭包 (未找到 server.py, 跳过)",
+            passed=True,
+            details=f"candidates={candidates}, 均不存在; raw={out[:200]}",
+            observed={"server_found": False, "candidates": candidates},
+            expected={},
+        )
+    if syntax_err:
+        return InvariantResult(
+            invariant_id="I7",
+            description="server.py 顶层 meta.* 符号闭包 (server.py 语法错误)",
+            passed=False,
+            details=f"server={server}, SyntaxError: {syntax_err}",
+            observed={"server": server, "syntax_error": syntax_err},
+            expected={"syntax_error": ""},
+        )
+
+    passed = (n_missing == "0")
+    details = f"server={server}, meta.* ImportFrom={n_stmt} 条, 缺口={n_missing} 处"
+    if missing:
+        details += " | " + " ; ".join(missing[:6])
+        details += "  => 用 deploy_upload.py 补传对应模块"
+    return InvariantResult(
+        invariant_id="I7",
+        description="server.py 顶层 meta.* import 必须模块级+符号级全部可解析 (防旧版模块缺符号)",
+        passed=passed,
+        details=details,
+        observed={"server": server, "import_stmt_count": n_stmt,
+                  "missing_count": n_missing, "missing": missing[:20]},
+        expected={"missing_count": "0"},
+    )
+
+
+# [2026-09-26 I7] 远端执行的符号闭包探针模板.
+# 只做 AST 收集 + importlib 解析, 不执行业务逻辑; 3 个占位符由 format() 注入.
+INVARIANT_CLOSURE_TEMPLATE = '''
+import ast
+import importlib
+import os
+import sys
+
+CANDIDATES = {candidates!r}
+SERVER = ''
+for c in CANDIDATES:
+    if os.path.isfile(c):
+        SERVER = c
+        break
+if not SERVER:
+    print('SERVER_FOUND=0')
+    raise SystemExit(0)
+
+sys.path.insert(0, {sys_path_root!r})
+with open(SERVER, encoding='utf-8') as f:
+    src = f.read()
+try:
+    tree = ast.parse(src)
+except SyntaxError as e:
+    print('SERVER_FOUND=1')
+    print('SERVER=' + SERVER)
+    print('SYNTAX_ERROR=' + str(e))
+    raise SystemExit(0)
+
+missing = []
+n_stmt = 0
+for node in ast.walk(tree):
+    if not isinstance(node, ast.ImportFrom):
+        continue
+    if node.level != 0 or not node.module or not node.module.startswith('meta'):
+        continue
+    n_stmt += 1
+    m = node.module
+    try:
+        mod = importlib.import_module(m)
+    except Exception as e:
+        missing.append(m + '|' + '<module>' + '|' + type(e).__name__)
+        continue
+    for a in node.names:
+        if a.name == '*':
+            continue
+        if not hasattr(mod, a.name):
+            missing.append(m + '|' + a.name + '|' + 'AttributeError')
+
+print('SERVER_FOUND=1')
+print('SERVER=' + SERVER)
+print('IMPORT_STMT_COUNT=' + str(n_stmt))
+print('MISSING_COUNT=' + str(len(missing)))
+for item in missing[:20]:
+    print('MISSING=' + item)
+'''
+
+
 # --------------------------------------------------------------------------
 # 主流程
 # --------------------------------------------------------------------------
@@ -499,6 +652,7 @@ def run_invariants(target_name: str, module: str = "meta.core.standard_action_lo
         ("I4", lambda: check_I4_listener(target)),
         ("I5", lambda: check_I5_business_invariant(target)),
         ("I6", check_I6_git_clean),
+        ("I7", lambda: check_I7_import_symbol_closure(target)),
     ]
 
     for inv_id, fn in checks:
