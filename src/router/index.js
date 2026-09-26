@@ -117,6 +117,21 @@ router.beforeEach(async (to, from, next) => {
     return next({ ...to, replace: true })
   }
 
+  // [FIX 2026-09-26] 未登录深链空白修复 (staging 实测):
+  //   无会话深链 /user-management → 菜单 API 401 → 动态路由注册 0 条 → 目标路由
+  //   永远 unmatched; 而 unmatched 路由没有 meta.requiresAuth, 下方登录检查整块
+  //   跳过 → next() 放行 → 头部裸条+整页空白, URL 不变、不跳登录页。
+  //   (网关按 IP 注入 token 的环境会掩盖此问题 — 仅无注入的真实客户端复现。)
+  //   修复: 自愈后仍无法解析且未登录 → 重定向首页登录, 携带 redirect 回跳参数
+  //   (与下方 requiresAuth 未登录分支及 LoginPage.vue L82 消费端同约定)。
+  if (to.matched.length === 0 && router.resolve(to.fullPath).matched.length === 0) {
+    const authStore = useAuthStore()
+    if (!authStore.isLoggedIn) {
+      logger.warn('[Router] 未登录访问未匹配路由, 重定向登录:', to.fullPath)
+      return next({ path: '/', query: { redirect: to.fullPath, reason: 'not_logged_in' } })
+    }
+  }
+
   document.title = to.meta.title ? `${to.meta.title} - ArchWorkspace` : 'ArchWorkspace'
 
   if (to.name === 'ObjectDetail') {
