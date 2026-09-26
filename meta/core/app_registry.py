@@ -23,10 +23,12 @@ import importlib.util
 import json
 import logging
 import os
+import socket
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from meta.core.app_loader import AppManifest, load_apps
+from meta.core.app_loader import AppManifest, get_apps_root, load_apps
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,67 @@ class AppRegistrationError(RuntimeError):
 # ─────────────────────────────────────────────────────────────────────────────
 _bo_to_app: Dict[str, str] = {}
 _app_database_files: Dict[str, str] = {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [A 可见性 2026-09-25] 本进程实际加载的应用（事实副本）
+#
+# 用途: ① `/health` 暴露（唯一存活的无鉴权探活点）；② 启动期落盘
+# `runtime_apps.json` —— 让"这台服务器部署了哪些 app"在服务停止 / 日志滚动
+# 之后依然可查。legacy 模式（未设置 ENABLED_APPS）恒为空列表 ⇒ 零行为变化。
+# ─────────────────────────────────────────────────────────────────────────────
+_loaded_manifests: List[AppManifest] = []
+
+#: 启动期落盘文件名（与平台库同目录）
+RUNTIME_APPS_FILENAME = "runtime_apps.json"
+
+
+def get_loaded_apps() -> List[Dict[str, Any]]:
+    """返回本进程已加载应用的序列化清单；legacy 模式为 []。"""
+    return [
+        {
+            "id": m.app_id,
+            "name": m.name,
+            "version": m.version,
+            "dir": str(m.app_dir),
+            "route_prefix": m.route_prefix,
+        }
+        for m in _loaded_manifests
+    ]
+
+
+def write_runtime_apps_snapshot(db_path) -> Optional[str]:
+    """把"本进程实际加载的应用"落盘到平台库同目录的 `runtime_apps.json`。
+
+    这是**事实副本**（不是应然清单）：排查时可据此确认该服务器最后一次启动
+    实际加载了哪些应用、从哪个 apps_root 加载、ENABLED_APPS 是什么。
+
+    任何异常都只记 warning、返回 None —— 可见性功能绝不能阻断启动。
+    """
+    try:
+        db_path = str(db_path)
+        target_dir = Path(db_path).resolve().parent
+        apps = get_loaded_apps()
+        payload = {
+            "service": "arch-data-manage-api",
+            "mode": "enabled" if apps else "legacy",
+            "enabled_apps": get_enabled_app_ids(),
+            "apps": apps,
+            "apps_root": str(get_apps_root()),
+            "db_path": db_path,
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "written_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        out = target_dir / RUNTIME_APPS_FILENAME
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info(
+            "[AppRegistry] %s 已落盘: mode=%s, enabled=%s, loaded=%s",
+            out, payload["mode"], payload["enabled_apps"], [a["id"] for a in apps],
+        )
+        return str(out)
+    except Exception as e:
+        logger.warning("[AppRegistry] runtime_apps.json 落盘失败（不影响启动）: %s", e)
+        return None
 
 
 def get_app_id_for_bo(bo_id: str) -> Optional[str]:
@@ -104,6 +167,7 @@ def reset_app_routing_index() -> None:
     """清空归属索引（仅供测试隔离使用；生产由 register_apps 启动期重建）。"""
     _bo_to_app.clear()
     _app_database_files.clear()
+    del _loaded_manifests[:]
 
 
 def get_enabled_app_ids() -> List[str]:
@@ -678,5 +742,8 @@ def register_apps(
         prepared = _prepare_event_tables(manifests)
         if prepared:
             logger.info("[AppRegistry] 事件表已就绪（%s 个应用）", prepared)
+
+    # [A 可见性 2026-09-25] 全部注册动作成功后才登记事实清单（供 /health 与落盘使用）
+    _loaded_manifests[:] = manifests
 
     return manifests

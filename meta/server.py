@@ -835,6 +835,16 @@ def create_app(db_path=None):
         logging.getLogger(__name__).error("[AppRegistry] 应用加载失败: %s", _app_err)
         raise
 
+    # [A 可见性 2026-09-25] 启动落盘应用清单事实副本（平台库同目录 runtime_apps.json）
+    # 供排查"这台服务器部署了哪些 app"；落盘失败只告警、绝不阻断启动。
+    try:
+        from meta.core.app_registry import write_runtime_apps_snapshot
+        write_runtime_apps_snapshot(db_path)
+    except Exception as _snap_err:
+        logging.getLogger(__name__).warning(
+            "[AppRegistry] runtime_apps.json 落盘调用失败（不影响启动）: %s", _snap_err
+        )
+
     # [多产品平台 §6.14.2] 跨应用事件投递线程（无事件契约时不启动）
     try:
         from meta.core.event_outbox import start_event_dispatcher
@@ -959,7 +969,17 @@ def create_app(db_path=None):
 
     @app.route('/health')
     def health():
-        return jsonify({'status': 'ok', 'service': 'arch-data-manage-api'})
+        # [A 可见性 2026-09-25] 暴露本实例实际加载的应用（唯一存活的无鉴权探活点；
+        # /api/v1/health 已被 v1 sunset 中间件接管返回 410，勿再引用）
+        from meta.core.app_registry import get_enabled_app_ids, get_loaded_apps
+        apps = get_loaded_apps()
+        return jsonify({
+            'status': 'ok',
+            'service': 'arch-data-manage-api',
+            'apps_mode': 'enabled' if apps else 'legacy',
+            'enabled_apps': get_enabled_app_ids(),
+            'apps': apps,
+        })
 
     # M9 v3.5 P3: GraphQL 协议层 (Phase D1 POC) - 0 mutation / 0 subscription
     # 复用 bo_framework，0 业务逻辑改动，v1+v2 API 继续工作

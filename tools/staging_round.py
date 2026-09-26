@@ -1267,12 +1267,184 @@ def cmd_prod_preflight(args):
 
 
 # ======================================================================
+# [2026-09-26 B] app 部署: 清单展开 / 前置门禁 / 三方对账
+#   目标: ① 部署时按清单把"指定 app"传到指定 server; ② 排查时一条命令看清
+#         "这台服务器有哪些 app". 全部只读或复用既有 upload 通道, 不新增远端改动点.
+# ======================================================================
+def _load_deploy_target(name: str):
+    """加载 DeployTarget (把 tools/lib 放进 sys.path)."""
+    lib_dir = str(TOOLS / 'lib')
+    if lib_dir not in sys.path:
+        sys.path.insert(0, lib_dir)
+    from deploy_topology import DeployTarget  # type: ignore
+    return DeployTarget.from_name(name)
+
+
+def _expand_app_files(target, app_ids: list, verbose: bool = True) -> list:
+    """--apps 清单 → 相对 repo 的文件列表 (排除 data/ 与 __pycache__).
+
+    清单门禁: 未在 target.apps 登记的 app 直接 exit (防误传).
+    """
+    from deploy_topology import list_app_package_files, rel_to_repo  # type: ignore
+    out: list = []
+    for aid in app_ids:
+        if aid not in (target.apps or []):
+            sys.exit(
+                f"[ABORT] app '{aid}' 不在 {target.name}.apps 清单内 "
+                f"(当前清单: {target.apps or '[]'}).\n"
+                f"        如确需部署, 先在 tools/config/deploy_topology.yaml 的 "
+                f"{target.name}.apps 中登记 app id."
+            )
+        files = list_app_package_files(aid)
+        if verbose:
+            print(f'       app={aid}: {len(files)} 个文件 (已排除 data/ 与 __pycache__)')
+        for p in files:
+            rel = rel_to_repo(p)
+            if rel:
+                out.append(rel)
+    return out
+
+
+def _check_prod_app_prereqs() -> tuple:
+    """[只读] prod 是否具备部署 app 的前置条件. 只检查, 绝不执行迁移."""
+    import textwrap as _tw
+    script = _tw.dedent(f'''
+        import json, os, sqlite3
+        db = {PROD_DB_PATH!r}
+        out = {{"db": db, "db_exists": os.path.exists(db)}}
+        try:
+            c = sqlite3.connect(db)
+            def has(n):
+                return c.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", (n,)
+                ).fetchone()[0] > 0
+            out["installed_apps_table"] = has("installed_apps")
+            out["schema_migrations_table"] = has("schema_migrations")
+            if out["schema_migrations_table"]:
+                out["recent"] = [r[0] for r in c.execute(
+                    "SELECT migration_name FROM schema_migrations "
+                    "ORDER BY executed_at DESC LIMIT 5").fetchall()]
+            c.close()
+        except Exception as e:
+            out["error"] = str(e)
+        print("APP_PREREQ_JSON=" + json.dumps(out, ensure_ascii=False))
+    ''')
+    remote = f'/tmp/_prod_app_prereq_{_now_ts()}.py'
+    w = write_remote_script(remote, script)
+    if w.get('error'):
+        return False, f'前置检查脚本写入失败: {w}'
+    r = remote_exec(f'python3 {remote}', timeout=30)
+    out = r.get('stdout') or ''
+    line = next((l for l in out.splitlines() if l.startswith('APP_PREREQ_JSON=')), '')
+    if not line:
+        return False, f'前置检查无输出: {(out or str(r))[:200]}'
+    info = json.loads(line.split('=', 1)[1])
+    if not info.get('db_exists'):
+        return False, f"prod 平台库不存在: {info.get('db')}"
+    if not info.get('schema_migrations_table'):
+        return False, 'prod 平台库缺 schema_migrations 表'
+    if not info.get('installed_apps_table'):
+        return False, (
+            'prod 平台库缺 installed_apps 表 (迁移停在 v089). app 部署前必须先在 prod '
+            '显式执行 v090__create_installed_apps 迁移 —— 本命令不会自动执行迁移.'
+        )
+    return True, f"installed_apps OK; recent={info.get('recent')}"
+
+
+def cmd_app_status(args):
+    """[B] app 三方对账 (只读): 清单(应然) vs /health(实时) vs runtime_apps.json(事实)."""
+    target_name = getattr(args, 'target', None) or 'production'
+    target = _load_deploy_target(target_name)
+    if target_name in ('production', 'prod'):
+        use_prod_gateway()
+
+    print(f'==== app-status @ {datetime.now(TZ_CN).strftime("%Y-%m-%d %H:%M:%S")} '
+          f'target={target_name} ====')
+
+    declared = list(target.apps or [])
+    print('\n  [1/3] 应然: deploy_topology.yaml 清单')
+    print(f'        apps_root: {target.apps_root or "(未配置)"}')
+    print(f'        apps:      {declared or "[]"}')
+
+    base = (target.health_base_url or '').rstrip('/')
+    snap = f"{target.db_path.rsplit('/', 1)[0]}/runtime_apps.json" if target.db_path else None
+    import textwrap as _tw
+    script = _tw.dedent(f'''
+        import json, urllib.request
+        out = {{}}
+        try:
+            with urllib.request.urlopen({(base + "/health")!r}, timeout=10) as r:
+                out["health"] = json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            out["health"] = {{"error": str(e)}}
+        p = {snap!r}
+        if p:
+            try:
+                out["snapshot"] = json.load(open(p, encoding="utf-8"))
+            except Exception as e:
+                out["snapshot"] = {{"error": str(e), "path": p}}
+        print("APP_STATUS_JSON=" + json.dumps(out, ensure_ascii=False))
+    ''')
+    remote = f'/tmp/_app_status_{_now_ts()}.py'
+    w = write_remote_script(remote, script)
+    if w.get('error'):
+        sys.exit(f'[ABORT] 采集脚本写入失败: {w}')
+    r = remote_exec(f'python3 {remote}', timeout=30)
+    out = r.get('stdout') or ''
+    line = next((l for l in out.splitlines() if l.startswith('APP_STATUS_JSON=')), '')
+    if not line:
+        sys.exit(f'[ABORT] 远端采集无输出: {(out or str(r))[:300]}')
+    data = json.loads(line.split('=', 1)[1])
+
+    health = data.get('health') or {}
+    live = health.get('enabled_apps')
+    print('\n  [2/3] 实时: /health')
+    if health.get('error'):
+        print(f'        [FAIL] {health["error"]}  ({base}/health)')
+    else:
+        print(f'        apps_mode:    {health.get("apps_mode")}')
+        print(f'        enabled_apps: {live if live is not None else "(未上报)"}')
+
+    snapshot = data.get('snapshot')
+    print('\n  [3/3] 事实副本: runtime_apps.json')
+    if snapshot is None:
+        print('        (跳过: 该 target 未配置 db_path)')
+    elif snapshot.get('error'):
+        print(f'        [WARN] {snapshot["error"]} — {snapshot.get("path")}')
+    else:
+        print(f'        written_at: {snapshot.get("written_at")}  '
+              f'pid={snapshot.get("pid")}  mode={snapshot.get("mode")}')
+        print(f'        enabled:    {snapshot.get("enabled_apps")}')
+        print(f'        loaded:     {[a.get("id") for a in (snapshot.get("apps") or [])]}')
+
+    print('\n  [对账]')
+    live_set = set(live) if isinstance(live, list) else None
+    snap_set = None
+    if snapshot and not snapshot.get('error'):
+        snap_set = set(snapshot.get('enabled_apps') or [])
+    problems = []
+    if live_set is None:
+        problems.append('无法取得实时应用清单 (/health 未上报 enabled_apps)')
+    elif live_set != set(declared):
+        problems.append(f'清单 {sorted(set(declared))} ≠ 实时 {sorted(live_set)}')
+    if snap_set is not None and live_set is not None and snap_set != live_set:
+        problems.append(f'事实副本 {sorted(snap_set)} ≠ 实时 {sorted(live_set)} '
+                        f'(副本可能落后于最近一次 restart)')
+    if problems:
+        for p in problems:
+            print(f'        [WARN] {p}')
+    else:
+        print('        [PASS] 三方一致')
+
+
+# ======================================================================
 # 子命令: prod-deploy (一站式: preflight + 落后警告 + upload + verify + restart + 端点验收)
 # ======================================================================
 def cmd_prod_deploy(args):
     """prod 一站式部署.
 
     流程:
+      0. [B 2026-09-26] --apps 清单展开 + app 前置门禁 (只读; 未传 --apps 时跳过)
       1. prod-preflight (4 项 sanity check)
       2. local HEAD vs prod 落后 commits 比对 (warn, 不阻断)
       3. APPROVED_DEPLOY=1 门禁
@@ -1283,15 +1455,35 @@ def cmd_prod_deploy(args):
       8. 端点验收 (admin/admin123 真实登录)
     """
     use_prod_gateway()
-    if not args.files:
-        sys.exit('[ABORT] --files 必传. 例: --files meta/services/audit_service.py meta/api/audit_api.py')
+    plt_files = [f for f in (args.files or []) if f]
+    app_ids = [a for a in (getattr(args, 'apps', None) or []) if a]
+    if not plt_files and not app_ids:
+        sys.exit('[ABORT] --files / --apps 至少传一个.\n'
+                 '        例: --files meta/services/audit_service.py\n'
+                 '            --apps warehouse  (app 需先登记在 '
+                 'tools/config/deploy_topology.yaml 的 production.apps)')
 
     if os.environ.get('APPROVED_DEPLOY') != '1':
         sys.exit('[ABORT] prod 部署需要 APPROVED_DEPLOY=1 环境变量门禁.\n'
                  '       用户批准 prod 部署时再 export APPROVED_DEPLOY=1 重跑.')
 
     print(f'[prod-deploy] @ {datetime.now(TZ_CN).strftime("%Y-%m-%d %H:%M:%S")} '
-          f'local HEAD={git_head_short()} files={len(args.files)}')
+          f'local HEAD={git_head_short()} files={len(plt_files)} '
+          f'apps={app_ids or "[]"}')
+
+    # Step 0 (B): app 清单展开 + 前置门禁 (全只读, 不做任何远端改动)
+    app_files: list = []
+    if app_ids:
+        print('\n[0/7] app 清单展开 + 前置门禁 (只读) ...')
+        target = _load_deploy_target('production')
+        app_files = _expand_app_files(target, app_ids)
+        for rel in app_files:
+            print(f'         + {rel}')
+        ok, detail = _check_prod_app_prereqs()
+        print(f'       {"[PASS]" if ok else "[FAIL]"} 前置检查: {detail}')
+        if not ok:
+            sys.exit('[ABORT] app 部署前置条件不满足 (见上). prod 未做任何改动.')
+    all_files = plt_files + app_files
 
     # Step 1: preflight
     print('\n[1/7] prod-preflight ...')
@@ -1352,7 +1544,7 @@ def cmd_prod_deploy(args):
     # [2026-09-18 P0-1] prod-deploy 默认传 --retry-on-mismatch=2 (再重试 2 次, 共 3 次尝试)
     # 治 gateway 偶发 truncated response; 多次重试可覆盖大多数偶发情况
     argv += ['--retry-on-mismatch', '2']
-    argv += list(args.files)
+    argv += list(all_files)
     saved_argv = sys.argv
     try:
         sys.argv = ['deploy_upload.py'] + argv
@@ -1369,7 +1561,9 @@ def cmd_prod_deploy(args):
         'at': datetime.now(TZ_CN).isoformat(timespec='seconds'),
         'local_head': git_head(),
         'local_head_short': git_head_short(),
-        'files': list(args.files),
+        'files': list(all_files),
+        'platform_files': list(plt_files),
+        'apps': app_ids,
         'db_backup': db_backup if db_backup_ok else None,
         'db_manifest': db_manifest if manifest_ok else None,
         'status': 'PENDING_VERIFY',
@@ -1424,7 +1618,7 @@ def cmd_prod_deploy(args):
     # Step 7: introspect + 端点验收
     print('\n[7/7] introspect + 端点验收 ...')
     introspect_ok = True
-    for f in args.files:
+    for f in plt_files:
         rel = f.replace('\\', '/').lstrip('./')
         mod = rel[:-3].replace('/', '.') if rel.endswith('.py') else rel.replace('/', '.')
         r = remote_exec(
@@ -1716,6 +1910,9 @@ def main():
     # PowerShell 传入 @() 空数组 + 引号字符串会被当作单个 arg). default=None 改 []
     # 让代码层做"至少 1 个 .py"的校验, 而不是 argparse 强制 (后者在 PS 下报错不友好).
     p_pd.add_argument('--files', nargs='*', default=None, help='要部署的 .py 路径列表 (相对 repo, 至少 1 个)')
+    # [B 2026-09-26] app 维度部署: 按 deploy_topology.yaml 的 production.apps 清单展开整个 app 包
+    p_pd.add_argument('--apps', nargs='*', default=None,
+                      help='要部署的 app id 列表 (需已登记在 deploy_topology.yaml 的 production.apps)')
     p_pd.add_argument('--skip-stale-check', action='store_true', help='跳过 1.1 stale check')
     p_pd.add_argument('--force-allow-stale', action='store_true', help='强制放行 stale 检查')
     p_pd.add_argument('--stale-days', type=int, default=None, help='自定义 stale 阈值 (默认 7)')
@@ -1724,6 +1921,10 @@ def main():
     p_pv.add_argument('--files', nargs='*', default=None, help='要 introspect 的 .py 列表')
     p_pv.add_argument('--endpoints', nargs='*', default=None, help='要验收的端点列表')
     sub.add_parser('prod-status', help='[prod] 服务状态 + 落后 commits + 部署历史 + 远端 backup')
+    # [B 2026-09-26] app 三方对账 (只读): 清单(应然) vs /health(实时) vs runtime_apps.json(事实)
+    p_as = sub.add_parser('app-status', help='[B] app 三方对账 (只读): yaml 清单 vs /health vs runtime_apps.json')
+    p_as.add_argument('--target', '-t', default='production',
+                      help='部署目标 (production / staging, 默认 production)')
     p_pr = sub.add_parser('prod-rollback', help='[prod] 用 .bak_<stamp> 回滚到指定历史 deploy')
     p_pr.add_argument('--to', required=True, help='目标 stamp (从 prod-status 历史里挑)')
     p_pr.add_argument('--confirm', action='store_true', help='确认执行 (不加则只 dry-run)')
@@ -1734,6 +1935,7 @@ def main():
      'preflight': cmd_preflight,
      'prod-preflight': cmd_prod_preflight, 'prod-deploy': cmd_prod_deploy,
      'prod-verify': cmd_prod_verify, 'prod-status': cmd_prod_status,
+     'app-status': cmd_app_status,
      'prod-rollback': cmd_prod_rollback}[args.cmd](args)
 
 if __name__ == '__main__':

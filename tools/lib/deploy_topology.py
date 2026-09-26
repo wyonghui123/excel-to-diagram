@@ -48,6 +48,70 @@ class ResourceType(str, Enum):
 
 
 # --------------------------------------------------------------------------
+# repo 相对路径 + app 包 (2026-09-26 B)
+# --------------------------------------------------------------------------
+#: app 包内不上传的目录名 (运行数据 / 字节码缓存)
+APP_EXCLUDE_DIRS = frozenset({"data", "__pycache__", ".pytest_cache", ".cache"})
+#: app 包内不上传的后缀 (运行数据库 / 编译产物)
+APP_EXCLUDE_SUFFIXES = frozenset({
+    ".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".db-journal", ".db-wal", ".db-shm",
+})
+
+
+def repo_root() -> Path:
+    """本仓库根目录 (tools/lib/deploy_topology.py -> 上溯 3 层)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def rel_to_repo(local_path: Path | str) -> Optional[str]:
+    """转成相对 repo 根的 posix 相对路径; 非 repo 内文件返回 None."""
+    s = str(local_path).replace("\\", "/")
+    root = str(repo_root()).replace("\\", "/").rstrip("/")
+    if s.startswith(root + "/"):
+        return s[len(root) + 1:]
+    marker = "/excel-to-diagram/"
+    idx = s.rfind(marker)
+    if idx != -1:
+        return s[idx + len(marker):]
+    return None
+
+
+def app_id_of(local_path: Path | str) -> Optional[str]:
+    """`apps/<id>/...` -> `<id>`; 不在此结构下返回 None."""
+    rel = rel_to_repo(local_path)
+    if not rel:
+        return None
+    parts = rel.split("/")
+    if len(parts) >= 3 and parts[0] == "apps":
+        return parts[1]
+    return None
+
+
+def list_app_package_files(app_id: str, root: Optional[Path] = None) -> List[Path]:
+    """展开一个 app 包内"应部署"的全部文件.
+
+    排除项 (硬规则):
+      - data/ 等运行期目录 —— 应用库 *.db 属运行数据, 覆盖即丢数据
+      - __pycache__ / *.pyc / *.pyo —— 字节码缓存
+      - *.db / *.sqlite* —— 任何位置的数据库文件, 双保险
+    """
+    base = (Path(root) if root else repo_root()) / "apps" / app_id
+    if not base.is_dir():
+        raise FileNotFoundError(f"app 包不存在: {base}")
+    out: List[Path] = []
+    for p in sorted(base.rglob("*")):
+        if not p.is_file():
+            continue
+        rel_parts = p.relative_to(base).parts
+        if any(part in APP_EXCLUDE_DIRS for part in rel_parts[:-1]):
+            continue
+        if p.suffix.lower() in APP_EXCLUDE_SUFFIXES:
+            continue
+        out.append(p)
+    return out
+
+
+# --------------------------------------------------------------------------
 # 部署目标
 # --------------------------------------------------------------------------
 @dataclass
@@ -93,6 +157,15 @@ class DeployTarget:
     resolver_name: str
     gw_https: bool = False
     resource_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # [2026-09-26 B] app 清单 SSOT: apps_root = app 包根 (与 meta/ 平级);
+    # apps = 该 target 应部署的 app id 列表; 清单外的 app 文件 resolve 直接报错
+    apps_root: Optional[str] = None
+    apps: List[str] = field(default_factory=list)
+    # [2026-09-26 B] 平台库绝对路径 (远端). 由它推导同目录的 runtime_apps.json;
+    # 未配置则 app-status 跳过事实副本对比
+    db_path: Optional[str] = None
+    # [2026-09-26 B] 健康检查基址 (yaml health_check.base_url), 供 app-status 探 /health
+    health_base_url: Optional[str] = None
     # 默认注入 staging_round 的远端函数 (本机 dev 可注入 None 用本地 fs)
     exec_fn: Optional[Any] = None
     upload_fn: Optional[Any] = None
@@ -147,6 +220,10 @@ class DeployTarget:
             resolver_name=d["resolver"],
             gw_https=bool(d.get("gw_https", False)),
             resource_overrides=d.get("resource_overrides", {}),
+            apps_root=d.get("apps_root"),
+            apps=list(d.get("apps") or []),
+            db_path=d.get("db_path"),
+            health_base_url=(d.get("health_check") or {}).get("base_url"),
             exec_fn=exec_fn,
             upload_fn=upload_fn,
             md5_fn=md5_fn,
@@ -195,6 +272,26 @@ class DeployTarget:
         local_path = Path(local_path)
         if not local_path.is_absolute():
             raise ValueError(f"local_path must be absolute: {local_path}")
+
+        # [2026-09-26 B] app 包路径: apps/<id>/X → {apps_root}/<id>/X
+        # 不能套 deploy_root 规则 —— deploy_root 是 meta/ 包根 (prod 下 =
+        # /opt/app/deployments/meta), app 包根是它的兄弟目录
+        # (/opt/app/deployments/apps), 由 apps_root 单独声明.
+        app_id = app_id_of(local_path)
+        if app_id is not None:
+            if not self.apps_root:
+                raise ValueError(
+                    f"target '{self.name}' 未配置 apps_root, 无法解析 app 文件: {local_path}"
+                )
+            if app_id not in self.apps:
+                raise ValueError(
+                    f"app '{app_id}' 不在 target '{self.name}' 的部署清单内 "
+                    f"(当前清单: {self.apps or '[]'}). 如确需部署, 先在 "
+                    f"tools/config/deploy_topology.yaml 的 {self.name}.apps 中登记 app id."
+                )
+            rel = rel_to_repo(local_path) or local_path.name
+            sub = rel[len("apps/"):] if rel.startswith("apps/") else rel
+            return [f"{self.apps_root.rstrip('/')}/{sub}"]
 
         # 推断资源类型
         rt = resource_type or self._detect_resource_type(local_path)

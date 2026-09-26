@@ -157,6 +157,8 @@ meta/architecture.db.pre_*
 /backend-test.out
 /meta/backend.err
 /meta/backend.out
+# 运行期应用清单事实副本（启动落盘, 与 /health 同源；prod 落在平台库同目录）
+/meta/runtime_apps.json
 /tools/_dev.err
 /tools/_dev.log
 /scripts/logs/*.err

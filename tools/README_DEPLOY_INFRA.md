@@ -186,6 +186,47 @@ python tools/audit_viewer.py stats --since 2026-09-01
 
 ---
 
+## 6. app 维度部署 + 三方对账 (2026-09-26 B)
+
+**问题**: 部署只能按"文件"粒度 (`--files`), 没有 app 维度; 且排查时无法一眼看清
+"这台服务器实际部署了哪些 app"。
+
+**清单 SSOT**: `tools/config/deploy_topology.yaml` 每个 target 的 `apps_root` + `apps`
+```yaml
+production:
+  deploy_root: /opt/app/deployments/meta   # meta/ 包根
+  apps_root:   /opt/app/deployments/apps   # app 包根, 与 meta/ 平级 (不是 meta/apps)
+  apps: []                                 # 该服务器应部署的 app id 清单
+```
+`apps_root` 推导依据: `meta/core/app_loader.get_apps_root() = parents[2] / "apps"`,
+即 `__file__=/opt/app/deployments/meta/core/app_loader.py` → `/opt/app/deployments/apps`。
+
+**部署 (app 维度)**:
+```bash
+# 按清单展开整个 app 包 (自动排除 data/ 与 __pycache__), 再走既有 upload/restart/introspect
+APPROVED_DEPLOY=1 python tools/staging_round.py prod-deploy --apps warehouse
+```
+- 文件集 = `apps/<id>/**`, 排除 `data/`(应用库, 运行数据)、`__pycache__`、`*.pyc`、`*.db`
+- 远端落点 = `{apps_root}/<id>/X` (独立规则, 不套 `deploy_root`)
+- **清单门禁**: 未在 `apps` 登记的 app, 在 resolve 阶段即 `[ABORT]`, 防误传
+- **前置门禁 (只读)**: 检查 prod 平台库是否有 `installed_apps` 表 (v090)。
+  缺失即 abort —— 本命令**不会自动执行迁移**, 需先显式跑 v090
+
+**排查 (三方对账, 全只读)**:
+```bash
+python tools/staging_round.py app-status --target production
+```
+| 层 | 来源 | 含义 |
+|----|------|------|
+| 1 应然 | `deploy_topology.yaml` 的 `apps` | 这服务器"应该"有哪些 app |
+| 2 实时 | `GET /health` 的 `apps_mode`/`enabled_apps` | 进程"此刻"加载了哪些 app |
+| 3 事实 | 平台库同目录 `runtime_apps.json` | 最近一次启动"实际"加载了哪些 app |
+
+三方不一致时逐条打印 `[WARN]` 与差异集合。`/health` 未上报 `apps_mode` 说明该实例
+仍是旧代码 (A 的可见性改动未部署)。
+
+---
+
 ## 集成效果
 
 ### 部署前 (在 `deploy_upload.py upload` 中自动串联):

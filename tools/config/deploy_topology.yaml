@@ -38,30 +38,58 @@ staging:
   deploy_root: /opt/app/staging/deploy/current
   resolver: symlink_namespace_package
 
+  # [2026-09-26 B] app 清单 SSOT (语义同 production)
+  #   2026-09-26 只读实测: 三个候选路径**都不存在** ——
+  #     current/apps / deploy/apps / /opt/app/staging/apps 全部 No such file.
+  #   推导 (含 `.resolve()`, 这一步是关键, 漏掉会把值算错):
+  #     app_loader.get_apps_root() = Path(__file__).resolve().parents[2] / "apps"
+  #     __file__  = /opt/app/staging/deploy/meta/core/app_loader.py   (deploy/meta 是 symlink, __file__ 不解析)
+  #     .resolve() -> /opt/app/staging/deploy/v1789297457_staging_spec22/meta/core/app_loader.py
+  #     parents[2] -> /opt/app/staging/deploy/v1789297457_staging_spec22   (= current 的实体)
+  #     ⇒ apps_root = <snapshot>/apps ≡ /opt/app/staging/deploy/current/apps  [OK]
+  #   注意: 因为 get_apps_root() 内部 resolve 过, 这个值对 symlink 漂移免疫
+  #     (current 换快照时, current/apps 自动跟随), 故**不要**写死 snapshot 目录名.
+  #   当前 apps/ 尚未创建 —— app 机制真正落地时由安装流程 mkdir.
+  apps_root: /opt/app/staging/deploy/current/apps
+  apps: []
+
+  # [2026-09-26 FIX] staging 平台库绝对路径 (只读实测: 121548800 bytes, Sep 26 08:18).
+  #   来自现役进程 env SQLITE_DB_PATH/ARCH_DB_PATH, 二者同值.
+  #   app-status 由它推导同目录的 runtime_apps.json 事实副本.
+  db_path: /opt/app/staging/meta/architecture.db
+
   # 资源类型级 overrides (可选)
   resource_overrides:
     python_module:
-      # [FIX 2026-09-14] 由默认双发改为强制单发.
-      # 修复原因: 双发会把 py 文件写到 current/meta/** 死镜像, 与
-      # check_meta_import_origin.py 门禁矛盾、与 HOFF §3「禁止向 current/meta/** 部署」冲突。
-      # 原 spec22 双发设计意图: meta/X/Y 提供补丁版, 顶层 X/Y 提供完整 core/ 兜底。
-      # 但生产使用中: 补丁版与完整版同内容, 双发只是浪费, 还掩盖了活树/死镜像的语义不一致。
-      # 当前结论: meta/ 镜像从未被 import 加载 (loader 通过 deploy/meta symlink→current 解析活树),
-      # 实际需要做的 = 改活树 + 重启服务。
+      # [FIX 2026-09-26] 恢复双发 —— 推翻 2026-09-14 的「强制单发」。
       #
-      # 实现注意: path_resolvers.SymlinkNamespacePackageResolver 内部对 python_module
-      # 分支做了 `override.get("double_path_prefixes") or self.DOUBLE_PATH_PREFIXES` 兜底,
-      # 单纯删除 yaml 中 double_path_prefixes 不会触发单发 (会被类默认顶上)。
-      # 因此这里显式把 double_path_prefixes 设空列表覆盖类默认,
-      # 再配合 target_path_template 走单发模板 ({relative} = repo 路径去 meta/ 前缀)。
-      double_path_prefixes: []
-      target_path_template: "{deploy_root}/{relative}"
-      # 如确需双发 (应急场景), 显式覆盖:
-      # double_path_prefixes:
-      #   - meta/api/
-      #   - meta/core/
-      #   - meta/services/
-      #   - meta/blueprints/
+      # 2026-09-26 远端只读实测 (决定性证据, 非推测):
+      #   1) deploy/meta -> deploy/current/meta    (2026-09-16 21:08 symlink 修复后的现状)
+      #   2) server.py:16  sys.path.insert(0, dirname(dirname(__file__))) = /opt/app/staging/deploy
+      #   3) 以该 sys.path 实测:
+      #        meta.core.audit_derived_fields -> /opt/app/staging/deploy/meta/core/audit_derived_fields.py
+      #        meta.core.app_builder          -> /opt/app/staging/deploy/meta/core/app_builder.py
+      #        import core.<x>                -> ModuleNotFoundError: No module named 'core'
+      #   ⇒ 活树 = {deploy_root}/meta/**；{deploy_root}/*.py 已**不是**可导入路径。
+      #   ⇒ 2026-09-14 的强制单发(落点 current/core/**)自 09-16 symlink 修复之后
+      #      就写进了死目录 —— 表现为「部署成功但代码永不生效」，该家族第 5 次复发。
+      #      (另: 09-14 注释引用的 tools/check_meta_import_origin.py 在仓库中并不存在，属失效依据)
+      #
+      # 例外 (为何不能一刀切只写 meta/ 前缀):
+      #   server.py / ops_server.py / unified_18081.py 是**按文件路径启动**的
+      #   (cmdline: /opt/app/staging/deploy/current/server.py)，必须落在 {deploy_root}/ 顶层。
+      #
+      # 结论: 双发 = {deploy_root}/meta/{relative} + {deploy_root}/{relative}
+      #       同时满足「可 import」与「可执行」两种语义，且对 symlink 拓扑漂移免疫
+      #       (无论 meta 指向 current 还是 current/meta，两份里总有一份是活的)。
+      #       代价 = 多写一份文件，staging 可接受。
+      #
+      # 实现注意: SymlinkNamespacePackageResolver 对 python_module 用
+      # `override.get("double_path_prefixes")` 判前缀；这里统一用 "meta/" 覆盖全部
+      # meta/** 文件 (含 graphql/ handlers/ enums/ migrations/ 等)。
+      # 部署后必须用 introspect 断言实时加载路径，md5 一致不足以保证生效。
+      double_path_prefixes:
+        - meta/
     yaml_config:
       double_path_prefixes:
         - meta/schemas/
@@ -94,6 +122,22 @@ production:
   gw_https: true
   deploy_root: /opt/app/deployments/meta
   resolver: flat_meta_package
+
+  # [2026-09-26 B] app 清单单一真源 (SSOT) —— "这台服务器应该部署哪些 app"
+  #   apps_root = app 包根. 它与 meta/ 平级, 不是 meta/ 的子目录:
+  #     依据 meta/core/app_loader.get_apps_root() = parents[2] / "apps"
+  #     __file__ = /opt/app/deployments/meta/core/app_loader.py
+  #     → parents[2] = /opt/app/deployments → apps_root = /opt/app/deployments/apps
+  #   实测现状 (2026-09-25 只读侦察): prod 无 apps/ 目录、DB 无 installed_apps 表、
+  #     /health 返回 apps_mode=legacy → 本清单应为空.
+  #   上传规则: apps/<id>/X → {apps_root}/<id>/X (排除 data/ 与 __pycache__)
+  #   门禁: 清单外的 app 文件在 resolve 阶段直接报错, 防误传.
+  apps_root: /opt/app/deployments/apps
+  apps: []
+  # 平台库绝对路径 (= staging_round.PROD_DB_PATH, 2026-09-25 实测).
+  # app-status 由它推导同目录的 runtime_apps.json 事实副本.
+  db_path: /opt/app/deployments/meta/architecture.db
+
   resource_overrides:
     json_config:
       target_path_template: "{deploy_root}/{relative}"

@@ -5,27 +5,29 @@
 
 基于 DeployTarget 抽象的部署上传工具, 替换之前的 staging 特定脚本.
 
-用法:
-  # 解析远端路径 (dry-run)
-  python tools/deploy_upload.py resolve meta/api/bo_api.py --target staging
+用法 (注意: --target 是全局参数, **必须写在子命令之前**):
 
-  # 上传单个文件 (自动双发)
-  python tools/deploy_upload.py upload meta/api/bo_api.py --target staging
+  # 解析远端路径 (dry-run, 不联网写)
+  python tools/deploy_upload.py --target staging resolve meta/api/bo_api.py
+
+  # 上传单个文件
+  python tools/deploy_upload.py --target staging upload meta/api/bo_api.py
 
   # 批量上传 (空格分隔多个文件)
-  python tools/deploy_upload.py upload meta/api/bo_api.py meta/core/models.py --target staging
+  python tools/deploy_upload.py --target staging upload meta/api/bo_api.py meta/core/models.py
 
   # 指定资源类型
-  python tools/deploy_upload.py upload meta/schemas/foo.yaml --target staging --resource-type yaml_config
+  python tools/deploy_upload.py --target staging upload meta/schemas/foo.yaml --resource-type yaml_config
 
   # 跳过 md5 验证 (快速模式)
-  python tools/deploy_upload.py upload meta/api/bo_api.py --target staging --skip-verify
+  python tools/deploy_upload.py --target staging upload meta/api/bo_api.py --skip-verify
 
   # 验证远端文件 (不上传)
-  python tools/deploy_upload.py verify meta/api/bo_api.py --target staging
+  python tools/deploy_upload.py --target staging verify meta/api/bo_api.py
 
-  # 健康检查 (introspect spec22 端点)
-  python tools/deploy_upload.py healthcheck --target staging
+  # 健康检查 (introspect 端点 + Python 模块实际加载路径)
+  python tools/deploy_upload.py --target staging healthcheck --introspect \
+      --module meta.core.standard_action_loader
 
 设计:
   - 调用 DeployTarget (tools/lib/deploy_topology.py)
@@ -313,10 +315,15 @@ def _print_verify_results(results: List[VerifyResult]) -> bool:
 # 子命令实现
 # --------------------------------------------------------------------------
 def cmd_resolve(args, target: DeployTarget) -> int:
-    paths = target.resolve_remote_paths(
-        _abs_path(args.local_path),
-        resource_type=ResourceType(args.resource_type) if args.resource_type else None,
-    )
+    # [B 2026-09-26] app 清单门禁 / apps_root 未配置 → 友好报错, 不打 traceback
+    try:
+        paths = target.resolve_remote_paths(
+            _abs_path(args.local_path),
+            resource_type=ResourceType(args.resource_type) if args.resource_type else None,
+        )
+    except ValueError as e:
+        print(f"  [ABORT] {e}")
+        return 1
     print(f"[{target.name}] {args.local_path} -> {len(paths)} 路径:")
     for p in paths:
         print(f"  {p}")
