@@ -171,6 +171,16 @@ class UnifiedHandler(BaseHTTPRequestHandler):
             return
         full = os.path.join(FRONTEND_DIR, rel_path.lstrip("/"))
         if not os.path.isfile(full):
+            # [FIX 2026-09-26] SPA fallback 只允许 HTML 导航请求 (无后缀 / .html)。
+            # 静态资源缺失必须 404, 不回退 index.html —— 否则部署后旧哈希 chunk 的
+            # import() 拿到 HTML(200) 解析失败, 菜单 tab 空白且前端无法识别自愈。
+            lower = rel_path.lower()
+            if lower.endswith((
+                    ".js", ".mjs", ".css", ".map", ".json", ".wasm",
+                    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+                    ".woff", ".woff2", ".ttf", ".eot", ".otf", ".txt", ".xml")):
+                self.send_error(404)
+                return
             # SPA fallback
             full = os.path.join(FRONTEND_DIR, "index.html")
         if not os.path.isfile(full):

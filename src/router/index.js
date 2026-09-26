@@ -55,6 +55,29 @@ const router = createRouter({
   routes
 })
 
+// [FIX 2026-09-26] 部署后旧 chunk 失效自愈 (根治"部署后点菜单 tab 空白, 必须手动 F5"):
+//   部署会整目录替换 frontend_dist_files/, 旧哈希 chunk 从服务器消失。部署前打开的
+//   页面内存里仍持旧 chunk 清单, 点菜单 → 动态 import 旧 URL → 失败 → 导航中断 →
+//   tab 空白。自愈: 识别 chunk 加载失败后自动整页刷新 (sessionStorage 时间戳防循环),
+//   刷新后 index.html(no-cache) 带回新清单, 直接落到目标路由, 用户无感。
+//   服务端配套: unified_18081.py/unified_server.py 对缺失资源返回 404 (不再把
+//   index.html 当 200 返回), 保证本 handler 能可靠拿到失败信号。
+router.onError((error, to) => {
+  const msg = String((error && (error.message || error)) || '')
+  if (!/Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(msg)) {
+    return
+  }
+  const KEY = '__chunkFailReloadAt__'
+  const last = Number(sessionStorage.getItem(KEY) || 0)
+  if (Date.now() - last < 10000) {
+    logger.warn('[Router] chunk 加载失败且 10s 内已自愈过, 跳过自动刷新', msg)
+    return
+  }
+  sessionStorage.setItem(KEY, String(Date.now()))
+  logger.warn('[Router] 检测到旧 chunk 失效 (部署后), 自动刷新页面:', msg)
+  window.location.assign(to && to.fullPath ? to.fullPath : window.location.href)
+})
+
 router.beforeEach(async (to, from, next) => {
   // [FIX 2026-09-06] 硬刷新动态路由页空白修复:
   //   app.use(router) 的 install 期导航发生在动态路由注册之前, 刷新 /permission-set-management

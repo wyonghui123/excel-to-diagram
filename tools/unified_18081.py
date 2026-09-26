@@ -151,6 +151,18 @@ class UnifiedHandler(BaseHTTPRequestHandler):
             return
         full = os.path.join(FRONTEND_DIR, rel_path.lstrip("/"))
         if not os.path.isfile(full):
+            # [FIX 2026-09-26] SPA fallback 只允许 HTML 导航请求 (无后缀 / .html)。
+            # 静态资源 (.js/.css 等) 缺失时必须 404: 部署整目录替换 dist 后旧哈希
+            # chunk 消失, 旧页面点菜单会 import 旧 URL; 若把 index.html 当 200 返回,
+            # 动态 import 拿到 HTML 解析失败且无失败信号, 造成"菜单 tab 空白, 必须
+            # 手动刷新浏览器"。404 让 router.onError (前端自愈) 能可靠识别并自动刷新。
+            lower = rel_path.lower()
+            if lower.endswith((
+                    ".js", ".mjs", ".css", ".map", ".json", ".wasm",
+                    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+                    ".woff", ".woff2", ".ttf", ".eot", ".otf", ".txt", ".xml")):
+                self.send_error(404)
+                return
             full = os.path.join(FRONTEND_DIR, "index.html")
         if not os.path.isfile(full):
             self.send_error(404)

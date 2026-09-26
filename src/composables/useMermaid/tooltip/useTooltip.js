@@ -21,7 +21,11 @@ import { isFeatureEnabled } from '@/utils/featureFlags.js'
 const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
 const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
 const _enumServiceRef = {
-  current: EnumServiceNS?.default || (EnumServiceNS?._cache ? EnumServiceNS : null)
+  // [FIX 2026-09-26] 不能对 module namespace 取 _cache 属性: rollup 静态解析报
+  //   "_cache is not exported by enumService.js" 且构建直接失败。_cache 是
+  //   EnumService 对象上的运行时属性, 经 svc._cache 访问即可 (见下方 L2 逻辑)。
+  //   ESM 下 default 导出始终存在, 旧 CJS-interop 兜底分支保留为 namespace 本身。
+  current: EnumServiceNS?.default || EnumServiceNS
 }
 
 // [v40.2 修复] _enumMapCache 缺失声明 → 第一次 hover 触发 ReferenceError
