@@ -69,11 +69,33 @@ describe('tabStore (FR-016)', () => {
       expect(store.tabs.length).toBe(1)
     })
 
-    it('达到 maxTabs 限制时返回 null', () => {
+    it('[FIX 2026-09-26] 达到 maxTabs 时淘汰最早的非 pinned tab, 新 tab 仍可打开', () => {
       const store = useTabStore()
       store.maxTabs = 2
       store.openTab({ id: 't1', label: 'T1' })
       store.openTab({ id: 't2', label: 'T2' })
+      const result = store.openTab({ id: 't3', label: 'T3' })
+      // 不再静默 return null (曾导致"页面跳转成功但 tab 永不出现")
+      expect(result).not.toBeNull()
+      expect(store.tabs.map(t => t.id)).toEqual(['t2', 't3'])
+      expect(store.activeTabId).toBe('t3')
+    })
+
+    it('[FIX 2026-09-26] 淘汰时跳过 pinned tab, 优先淘汰最早的非 pinned tab', () => {
+      const store = useTabStore()
+      store.maxTabs = 2
+      store.openTab({ id: 'p1', label: 'P1', pinned: true })
+      store.openTab({ id: 't1', label: 'T1' })
+      store.openTab({ id: 't2', label: 'T2' })
+      // p1 是 pinned 受保护; t1 最早的非 pinned 被淘汰
+      expect(store.tabs.map(t => t.id)).toEqual(['p1', 't2'])
+    })
+
+    it('[FIX 2026-09-26] 全部为 pinned 时维持上限语义返回 null', () => {
+      const store = useTabStore()
+      store.maxTabs = 2
+      store.openTab({ id: 'p1', label: 'P1', pinned: true })
+      store.openTab({ id: 'p2', label: 'P2', pinned: true })
       const result = store.openTab({ id: 't3', label: 'T3' })
       expect(result).toBeNull()
       expect(store.tabs.length).toBe(2)

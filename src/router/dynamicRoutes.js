@@ -145,7 +145,11 @@ function _registerRoute(router, menu) {
 }
 
 export async function generateDynamicRoutes(router) {
-  if (_routesRegistered) return
+  // [FIX 2026-09-26] 短路条件与 isDynamicRouteRegistered() 谓词保持一致 (要求 size>0):
+  //   旧实现仅看 _routesRegistered, 与 isDynamicRouteRegistered() (_routesRegistered && size>0)
+  //   矛盾 —— 0 注册时 beforeEach 判定"未注册"反复调用本函数, 却被顶部短路, 形成永久死锁,
+  //   后续导航永远无法补注册 (用户实测: 硬刷新深链空白 + No match warn)。
+  if (_routesRegistered && _registeredPathKeys.size > 0) return
 
   const { accessibleMenus, loadMenuPermissions } = useMenuPermissions()
   const menuCache = useMenuCache()
@@ -184,7 +188,12 @@ export async function generateDynamicRoutes(router) {
     }
   }
 
-  _routesRegistered = true
+  // [FIX 2026-09-26] 仅在确实注册了路由时置位:
+  //   注册 0 条 (菜单 API 失败且无缓存 / 全是 static/custom_page) 时不置位,
+  //   允许后续导航重跑本函数补注册, 消除"已注册却匹配不到"的死锁状态。
+  if (count > 0) {
+    _routesRegistered = true
+  }
   _dbgLog(`[DynamicRoutes] registered ${count} dynamic routes`)
   return count
 }

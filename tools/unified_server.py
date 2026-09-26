@@ -132,7 +132,7 @@ def _extract_token(body: bytes) -> str:
 
 def _is_login_request(method: str, path: str) -> bool:
     """判断是否是登录请求"""
-    if method != "POST":
+    if method not in ("POST", "GET"):
         return False
     # 去掉 query string
     from urllib.parse import urlparse
@@ -161,13 +161,18 @@ class UnifiedHandler(BaseHTTPRequestHandler):
         try:
             req = urllib.request.Request(url, data=body, method=self.command)
             # 转发关键 header
-            for k in ("Authorization", "Content-Type", "X-User-Id", "X-User-Name", "X-IP-Address"):
+            # [FIX 2026-09-26] Cookie 必须透传: 前端业务 API 全靠 auth_token cookie 认证,
+            #   白名单漏 Cookie 导致浏览器登录态永远到不了 backend, 一直靠下方按 IP
+            #   注入陈旧缓存 token 代偿, 缓存过期即全站 401 (TOKEN_EXPIRED/未登录)。
+            for k in ("Authorization", "Content-Type", "Cookie", "X-User-Id", "X-User-Name", "X-IP-Address"):
                 v = self.headers.get(k)
                 if v:
                     req.add_header(k, v)
 
-            # 兜底: 如果客户端没传 Authorization, 用 cached token
-            if not self.headers.get("Authorization"):
+            # 兜底: 如果客户端没传 Authorization 也没有 auth_token cookie, 用 cached token
+            # [FIX 2026-09-26] 带 cookie 的请求不得注入 (cookie 本身就是有效凭证,
+            #   注入会让陈旧的 Authorization 抢在 cookie 之前被 backend 采纳 → 401)
+            if not self.headers.get("Authorization") and "auth_token=" not in (self.headers.get("Cookie") or ""):
                 cached = _get_token(client_ip)
                 if cached:
                     req.add_header("Authorization", f"Bearer {cached}")

@@ -3,7 +3,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useTabStore } from '@/stores/tabStore'
 import { validateDetailRoute } from './detailRouteGuard'
 import { objectTypeService } from '@/services/objectTypeService'
-import { generateDynamicRoutes, isDynamicRouteRegistered } from './dynamicRoutes'
+import { generateDynamicRoutes, isDynamicRouteRegistered, resetDynamicRoutes } from './dynamicRoutes'
+import { useMenuPermissions } from '@/composables/useMenuPermissions'
 import { buildStaticRoutes, countRoutes } from './helpers'
 import { logger } from '@/utils/logger'
 
@@ -87,9 +88,33 @@ router.beforeEach(async (to, from, next) => {
   //   重试后 isDynamicRouteRegistered()=true 不再进入本分支; 真正未知路径 resolve 仍为空也跳过。
   if (!isDynamicRouteRegistered()) {
     await generateDynamicRoutes(router)
-    if (to.matched.length === 0 && router.resolve(to.fullPath).matched.length > 0) {
-      return next({ ...to, replace: true })
+  }
+
+  // [FIX 2026-09-26] 深链解析失败自愈 (根治"硬刷新动态页整页空白 + No match warn"):
+  //   场景: 硬刷新 /permission-set-management, 安装期导航先于 session 恢复,
+  //   generateDynamicRoutes 可能走未登录分支吃到 stale menuCache (useMetaCache 的
+  //   user_id 校验在 expectedUserId=null 时被跳过) 的旧菜单集 → 目标路径不在其中
+  //   → resolve 无匹配 → 原逻辑直接放行 → 整页空白; 且旧菜单已注册 (size>0),
+  //   真实菜单到达后永远无法补注册 (死锁)。
+  //   自愈: reset + 重新注册一次 (此时 auth 已恢复, 会拿到真实菜单), 解析成功则重试导航;
+  //   sessionStorage 时间戳防循环 (真未知路径 10s 内只自愈一次)。
+  if (to.matched.length === 0 && router.resolve(to.fullPath).matched.length === 0) {
+    const HEAL_KEY = '__dynRouteHealAt__'
+    if (Date.now() - Number(sessionStorage.getItem(HEAL_KEY) || 0) > 10000) {
+      sessionStorage.setItem(HEAL_KEY, String(Date.now()))
+      logger.warn('[Router] 深链路由未匹配, 重置动态路由后重试:', to.fullPath)
+      resetDynamicRoutes()
+      // [FIX 2026-09-26] 同时 reset 菜单模块级状态: 否则 loadMenuPermissions 因
+      //   _menusLoaded/_loadedForUserId 短路, 自愈重跑时仍返回导致失配的旧菜单集。
+      useMenuPermissions().reset()
+      await generateDynamicRoutes(router)
+      if (router.resolve(to.fullPath).matched.length > 0) {
+        return next({ ...to, replace: true })
+      }
     }
+  } else if (to.matched.length === 0 && router.resolve(to.fullPath).matched.length > 0) {
+    // [FIX 2026-09-06] 首轮注册完成, 原导航 (matched=[]) 现在能解析到 → 重试一次
+    return next({ ...to, replace: true })
   }
 
   document.title = to.meta.title ? `${to.meta.title} - ArchWorkspace` : 'ArchWorkspace'

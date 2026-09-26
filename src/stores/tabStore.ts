@@ -63,8 +63,20 @@ export const useTabStore = defineStore('tab', () => {
     }
 
     if (tabs.value.length >= maxTabs.value) {
-      console.warn('Tab 数量已达上限')
-      return null
+      // [FIX 2026-09-26] tabs 满时静默 return null 是"点菜单后 tab 不出现"的根因:
+      //   tabs 持久化于 localStorage 且跨标签页共享, 长期使用必然攒满; 此后所有
+      //   新导航照常跳转页面, 但 tab 永不出现 (console.warn 用户不可见)。
+      //   localhost 复现实锤: 注入 10 个 tab 后点「权限集」→ URL 跳转成功、tab 缺失。
+      //   修复: 淘汰最早打开的非 pinned tab 腾位 (数组头部即最早), 保证新 tab 始终可开;
+      //   仅当全部为 pinned 时才真正拒绝 (维持上限语义)。
+      const evictIndex = tabs.value.findIndex(t => !t.pinned)
+      if (evictIndex === -1) {
+        console.warn('[tabStore] Tab 数量已达上限且全部为固定 tab, 无法开启新 tab')
+        return null
+      }
+      const evicted = tabs.value[evictIndex]
+      tabs.value.splice(evictIndex, 1)
+      _dbgLog(`[tabStore] tabs 已满, 淘汰最早非固定 tab: ${evicted.id} (${evicted.label})`)
     }
 
     const newTab: Tab = {
