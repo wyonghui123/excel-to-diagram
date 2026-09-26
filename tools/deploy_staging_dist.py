@@ -56,16 +56,21 @@ md5=$(md5sum "$NEW/index.html" | awk '{print $1}')
 echo "[extract] index.html md5=$md5"
 if [ "$md5" != "__INDEX_MD5__" ]; then echo "[FATAL] index.html md5 mismatch"; exit 1; fi
 
-# G2: 旧 assets 无覆盖合并进新目录 (同路径=同内容, 哈希名不冲突)
+# G2: 旧 assets 无覆盖合并进新目录 (同路径=同内容, 哈希名不冲突)。
+# [2026-09-26 扩展] 合并源 = CUR + 全部历史备份代: 跨代部署时更老 bundle 的
+#   chunk 也保留, 已打开的旧 tab (无自愈能力的老 bundle) 不会因 chunk 404 空白。
 if [ -d "$CUR/assets" ]; then
   old_chunk=$(find "$CUR/assets" -maxdepth 1 -name '*.js' | sort | awk 'NR==1')
   if [ -n "$old_chunk" ]; then
     echo "[old-probe-chunk] $old_chunk"
     echo "$old_chunk" > /tmp/_old_probe_chunk.txt
   fi
-  cp -an "$CUR/assets/." "$NEW/assets/" || { echo "[FATAL] assets merge failed"; exit 1; }
+  for src in "$CUR" $STAGING/frontend_dist_files.bak-*; do
+    [ -d "$src/assets" ] || continue
+    cp -an "$src/assets/." "$NEW/assets/" || { echo "[FATAL] assets merge failed ($src)"; exit 1; }
+  done
   merged=$(find "$NEW/assets" -type f | wc -l)
-  echo "[merge] assets after union: $merged"
+  echo "[merge] assets after union (cur+baks): $merged"
 fi
 
 # 近原子交换
