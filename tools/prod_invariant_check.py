@@ -10,12 +10,12 @@
   但 staging 9-05/9-13 两次复盘都没有把这个 invariant 工具化
 
 设计目标:
-  - 部署完成后强制跑一次, 6 项 invariant 任何 1 项失败 → EXIT 1 (绝不宣称部署成功)
+  - 部署完成后强制跑一次, 8 项 invariant 任何 1 项失败 → EXIT 1 (绝不宣称部署成功)
   - 全部检查都用 introspection (真路径) 而非 md5/symlink 表象
   - 同时支持 staging / prod (通过 --target 参数切换)
   - 输出 JSON audit log 供回溯
 
-7 项 invariant (对应失败模式家族 5 次复发的可观察特征):
+8 项 invariant (对应失败模式家族 5 次复发的可观察特征):
   I1. server.py cwd 必须匹配 deploy_root (避免 prod/staging server 错启)
   I2. realpath(<deploy_root>/meta) 必须落在 deploy_root 之下 (避免 9-16 symlink 错指)
   I3. import meta.core.standard_action_loader 的 __file__ 必须在 meta/core/ 下 (避免 9-13 加载老版本)
@@ -25,6 +25,13 @@
   I7. server.py 顶层 meta.* ImportFrom 必须模块级 + 符号级全部可解析
       (2026-09-26 家族第 6 次: 文件上传成功 + I1-I6 全 PASS, 但远端旧版模块
        缺符号 -> /health 500. "import meta.core.X 成功" != "from meta.core.X import Y 成功")
+  I8. server.py 可达闭包 (模块级, 传递到任意深度) 必须无缺口
+      (2026-09-26 家族第 6 次的「深度 2」变体: server.py 顶层 55 条 ImportFrom
+       全部可解析, 但被牵连的 api/permission_dimension_api.py 内部 import 了
+       远端缺失的 meta.core.permission_set_permissions -> 启动即 ModuleNotFoundError.
+       I7 只覆盖深度 1, I8 收口传递闭包. 按「可达性」而非「全树」判定: 全树扫描
+       在 prod 报 2 处模块级缺口 (management_dimension_api / tools/sync_schema),
+       但 prod /health=200, 二者皆不在可达集内, 属孤岛死代码)
 
 使用:
   python tools/prod_invariant_check.py --target staging
@@ -632,6 +639,292 @@ for item in missing[:20]:
 '''
 
 
+def check_I8_reachability_closure(target: "DeployTarget") -> InvariantResult:
+    """I8. server.py 可达 import 闭包 (模块级, 传递) 必须无缺口.
+
+    失败模式 (2026-09-26 家族第 6 次的「深度 2」变体):
+      server.py 顶层 55 条 meta.* ImportFrom 全部可解析 (I7 PASS), 但被牵连的
+      api/permission_dimension_api.py 内部模块级 import 了
+      meta.core.permission_set_permissions —— 该文件远端不存在.
+      若只推「md5 不一致」的 26 个文件, server 启动即在深度 2 抛
+      ModuleNotFoundError. I7 只看 server.py 自身 (深度 1), 覆盖不到.
+
+    与全树扫描的区别 (为何按「可达性」而非「全树」收敛):
+      2026-09-26 只读实测全树扫描在 prod 报 2 处模块级缺口
+        api/management_dimension_api.py -> meta.services.management_dimension_engine
+        tools/sync_schema.py -> meta.list_meta_objects
+      但 prod /health = 200 —— 二者都不在 server.py 可达集内, 属孤岛死代码.
+      以「全树 STARTUP==0」做门禁会立刻误判 prod 并阻塞其部署.
+
+    作用域规则: 只把「模块级 且 非 try 且 非函数内 且 非 TYPE_CHECKING」
+    的 import 视为可达; 函数内 (LATENT, 调用时才炸) 与 try 包裹 (OPTIONAL,
+    可选依赖) 的缺口不参与判定. server.py 未找到时跳过 (布局差异), 不阻塞部署.
+    """
+    deploy_root = target.deploy_root
+    parent = str(Path(deploy_root).parent).replace("\\", "/")
+    # prod 是平铺布局 (deploy_root 本身就是 meta 包), staging 是 deploy_root/meta
+    live_meta = deploy_root if deploy_root.endswith("/meta") else f"{deploy_root}/meta"
+    candidates = [
+        f"{live_meta}/server.py",
+        f"{parent}/server.py",
+        f"{deploy_root}/server.py",
+    ]
+
+    # 不走 str.format(): 模板内含大量 dict/set 字面量 {} 与 f-string,
+    # 大括号转义易错, 故用唯一占位符 replace() 注入
+    script = (I8_REACHABILITY_TEMPLATE
+              .replace("@@LIVE_META@@", repr(live_meta))
+              .replace("@@SERVER_CANDIDATES@@", repr(candidates)))
+    tmpl = TOOLS / "_invariant_i8.py"
+    tmpl.write_text(script)
+    _remote_upload(target, tmpl, "/tmp/_invariant_i8.py")
+
+    out, err, rc = _remote_exec(
+        target,
+        "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_i8.py 2>&1",
+        timeout=90,
+    )
+
+    server_found = False
+    server = ""
+    n_modules = "0"
+    max_depth = "0"
+    n_gap = "0"
+    gaps: List[str] = []
+    for line in out.splitlines():
+        if line.startswith("SERVER_FOUND="):
+            server_found = line[len("SERVER_FOUND="):].strip() == "1"
+        elif line.startswith("SERVER="):
+            server = line[len("SERVER="):].strip()
+        elif line.startswith("BFS_MODULES="):
+            n_modules = line[len("BFS_MODULES="):].strip()
+        elif line.startswith("MAX_DEPTH="):
+            max_depth = line[len("MAX_DEPTH="):].strip()
+        elif line.startswith("GAP_COUNT="):
+            n_gap = line[len("GAP_COUNT="):].strip()
+        elif line.startswith("GAP="):
+            gaps.append(line[len("GAP="):].strip())
+
+    if not server_found:
+        return InvariantResult(
+            invariant_id="I8",
+            description="server.py 可达 import 闭包 (未找到 server.py, 跳过)",
+            passed=True,
+            details=f"candidates={candidates}, 均不存在; raw={out[:200]}",
+            observed={"server_found": False, "candidates": candidates},
+            expected={},
+        )
+
+    passed = (n_gap == "0")
+    details = (f"server={server}, 可达模块={n_modules}, 最大深度={max_depth}, "
+               f"缺口={n_gap} 处")
+    if gaps:
+        details += " | " + " ; ".join(gaps[:6])
+        details += "  => 用 deploy_upload.py 补传缺失模块"
+    return InvariantResult(
+        invariant_id="I8",
+        description="server.py 可达闭包 (模块级传递) 必须无缺口 (防深度>=2 连带缺失)",
+        passed=passed,
+        details=details,
+        observed={"server": server, "reachable_modules": n_modules,
+                  "max_depth": max_depth, "gap_count": n_gap, "gaps": gaps[:20]},
+        expected={"gap_count": "0"},
+    )
+
+
+# [2026-09-26 I8] 远端执行的可达闭包探针模板.
+# @@LIVE_META@@ / @@SERVER_CANDIDATES@@ 由 check_I8 用 replace() 注入.
+I8_REACHABILITY_TEMPLATE = '''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""[2026-09-26] invariant I8: server.py 可达 import 闭包 (模块级, 传递).
+
+判定: 从 server.py 出发, 沿「模块级 且 非 try 且 非函数内 且 非 TYPE_CHECKING」
+的 meta.* import 递归到任意深度; 任一目标模块/符号不存在 => 缺口 => FAIL.
+函数内 (LATENT) 与 try 包裹 (OPTIONAL) 的缺口不参与判定.
+"""
+import ast
+import os
+
+LIVE_META = @@LIVE_META@@
+SERVER_CANDIDATES = @@SERVER_CANDIDATES@@
+
+
+def resolve_mod(mod):
+    """解析 meta.* 模块位置. 本项目大量 namespace package (无 __init__.py),
+    因此「目录存在且含 .py」也算可解析."""
+    if mod == "meta":
+        p = os.path.join(LIVE_META, "__init__.py")
+        return p if os.path.exists(p) else LIVE_META
+    rel = mod[len("meta."):].replace(".", "/")
+    base = os.path.join(LIVE_META, rel)
+    for p in (base + ".py", os.path.join(base, "__init__.py")):
+        if os.path.exists(p):
+            return p
+    if os.path.isdir(base) and any(f.endswith(".py") for f in os.listdir(base)):
+        return base
+    return None
+
+
+def parse(path):
+    try:
+        with open(path, "rb") as fh:
+            return ast.parse(fh.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def module_level_imports(tree):
+    """模块级 + 非 try + 非函数内 + 非 TYPE_CHECKING 的 meta.* import.
+
+    返回 [(module, symbol|None, lineno)]; symbol=None 表示整模块导入.
+    """
+    parents = {}
+    for node in ast.walk(tree):
+        for ch in ast.iter_child_nodes(node):
+            parents[id(ch)] = node
+
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        cur, blocked = node, False
+        while id(cur) in parents:
+            cur = parents[id(cur)]
+            if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                ast.Lambda, ast.Try)):
+                blocked = True
+                break
+            if isinstance(cur, ast.If):
+                try:
+                    if "TYPE_CHECKING" in ast.unparse(cur.test):
+                        blocked = True
+                        break
+                except Exception:
+                    pass
+        if blocked:
+            continue
+
+        if isinstance(node, ast.ImportFrom):
+            if node.level or not (node.module or "").startswith("meta"):
+                continue
+            out.append((node.module, None, node.lineno))
+            for a in node.names:
+                if a.name != "*":
+                    out.append((node.module, a.name, node.lineno))
+        else:
+            for a in node.names:
+                if a.name.startswith("meta"):
+                    out.append((a.name, None, node.lineno))
+    return out
+
+
+def top_symbols(tree):
+    """模块的顶层符号集 (供 from mod import sym 判定)."""
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    out.add(t.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out.add(node.target.id)
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                out.add(a.asname or a.name)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                out.add(a.asname or a.name.split(".")[0])
+    return out
+
+
+def main():
+    server = ""
+    for c in SERVER_CANDIDATES:
+        if os.path.isfile(c):
+            server = os.path.abspath(c)
+            break
+    print("SERVER_FOUND=" + ("1" if server else "0"))
+    print("SERVER=" + server)
+
+    if not server:
+        print("BFS_MODULES=0")
+        print("MAX_DEPTH=0")
+        print("GAP_COUNT=0")
+        return 0
+
+    root = parse(server)
+    if root is None:
+        print("BFS_MODULES=0")
+        print("MAX_DEPTH=0")
+        print("GAP_COUNT=1")
+        print("GAP=server.py|PARSE_ERROR")
+        return 1
+
+    visited, sym_cache, file_cache = set(), {}, {}
+    gaps = []
+    reported, missing_mods = set(), set()
+    max_depth = 0
+
+    queue = [(m, s, ln, "server.py", 1)
+             for m, s, ln in module_level_imports(root)]
+
+    while queue:
+        mod, sym, ln, origin, depth = queue.pop(0)
+        max_depth = max(max_depth, depth)
+
+        # 模块整体缺失时只报一次: `from meta.b import B` 会产出
+        # (meta.b, None) 与 (meta.b, "B") 两条, 后者应被 missing_mods 吞掉
+        if mod in missing_mods:
+            continue
+        # 同一 (模块, 符号) 只报一次, 避免多个调用方重复刷屏
+        if (mod, sym) in reported:
+            continue
+        reported.add((mod, sym))
+
+        tgt = resolve_mod(mod)
+        if tgt is None:
+            missing_mods.add(mod)
+            gaps.append(origin + ":" + str(ln) + " -> " + mod
+                        + (("." + sym) if sym else "") + " (模块不存在)")
+            continue
+
+        if sym is not None:
+            if mod not in sym_cache:
+                t = None if os.path.isdir(tgt) else parse(tgt)
+                sym_cache[mod] = top_symbols(t) if t else set()
+            if sym not in sym_cache[mod] and not resolve_mod(mod + "." + sym):
+                gaps.append(origin + ":" + str(ln) + " -> " + mod + "." + sym
+                            + " (符号不存在)")
+                continue
+
+        if os.path.isdir(tgt) or mod in visited:
+            continue
+        visited.add(mod)
+
+        if mod not in file_cache:
+            file_cache[mod] = parse(tgt)
+        t = file_cache[mod]
+        if t is None:
+            continue
+        rel = os.path.relpath(tgt, LIVE_META).replace(os.sep, "/")
+        for m2, s2, l2 in module_level_imports(t):
+            queue.append((m2, s2, l2, rel, depth + 1))
+
+    print("BFS_MODULES=" + str(len(visited)))
+    print("MAX_DEPTH=" + str(max_depth))
+    print("GAP_COUNT=" + str(len(gaps)))
+    for g in gaps[:25]:
+        print("GAP=" + g)
+    return 0 if not gaps else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
 # --------------------------------------------------------------------------
 # 主流程
 # --------------------------------------------------------------------------
@@ -653,6 +946,7 @@ def run_invariants(target_name: str, module: str = "meta.core.standard_action_lo
         ("I5", lambda: check_I5_business_invariant(target)),
         ("I6", check_I6_git_clean),
         ("I7", lambda: check_I7_import_symbol_closure(target)),
+        ("I8", lambda: check_I8_reachability_closure(target)),
     ]
 
     for inv_id, fn in checks:
