@@ -664,6 +664,75 @@ def _prepare_event_tables(manifests: List[AppManifest]) -> int:
     return prepared
 
 
+def _prepare_doc_flow(platform_data_source, manifests: List[AppManifest],
+                      declared_by_app: Dict[str, List[str]]) -> int:
+    """[DOC_FLOW Phase 1] 为声明 `doc_flow: enabled` 的应用准备派生基础设施。
+
+    两件事（spec 2026-09-29 §3.2 / §5.3）：
+    1. 边表建在**该应用业务表所在的库**（`_resolve_app_table_target` 同款裁定：
+       routing off → 平台库 / routing on → 应用库）—— derive 必须"同库同事务"，
+       边表与源/目标 BO 异库则事务不可达（F5 铁律，spec §2 关键边界）。
+    2. 规则 upsert 到**平台库** doc_flow_rule（规则是跨应用管辖的元数据，§9.5）；
+       upsert 只管声明字段、不覆盖 status 运行态（doc_flow_rule_store 模块注释）。
+
+    启动期校验（快速失败）：
+    - 规则的 source_bo / target_bo 必须是**本应用声明的 BO** —— 跨应用派生
+      本质是 Phase 3 双记录镜像，Phase 1 直接在启动期拒绝（spec §2 裁定表）。
+    - doc_flow 声明依赖 schema 注册（同库校验需要 BO 清单）→
+      register_schemas=False 时启用 doc_flow 属配置错误。
+
+    legacy 零行为变化：无任何应用声明 doc_flow 时**不做任何 DDL**
+    （连平台库 doc_flow_rule 表都不建，验收项 §8.6"无 doc_flow 表"）。
+
+    Returns:
+        准备了边表的应用数（legacy / 未声明时为 0）。
+    """
+    doc_flow_apps = [m for m in manifests if m.doc_flow_enabled]
+    if not doc_flow_apps or platform_data_source is None:
+        return 0
+
+    from meta.core.doc_flow_rule_store import (
+        ensure_doc_flow_rule_table, upsert_rules,
+    )
+    from meta.core.doc_flow_schema import ensure_doc_flow_edge_tables
+
+    ensure_doc_flow_rule_table(platform_data_source)
+
+    prepared = 0
+    for manifest in doc_flow_apps:
+        declared = declared_by_app.get(manifest.app_id) or []
+        if not declared:
+            raise AppRegistrationError(
+                f"app '{manifest.app_id}': doc_flow.enabled 需要应用 schema 注册"
+                "（register_schemas=True）—— 同库派生校验依赖本应用 BO 清单"
+            )
+        for rule in manifest.doc_flow_rules:
+            missing = [
+                bo for bo in (rule.source_bo, rule.target_bo)
+                if bo not in declared
+            ]
+            if missing:
+                raise AppRegistrationError(
+                    f"app '{manifest.app_id}': doc_flow 规则 '{rule.rule_id}' "
+                    f"引用了非本应用声明的 BO: {missing} —— Phase 1 仅支持"
+                    f"同库派生（F5 事务不跨库，spec §2），跨应用派生归 Phase 3"
+                )
+
+        edge_ds = _resolve_app_table_target(platform_data_source, manifest)
+        ensure_doc_flow_edge_tables(edge_ds)
+        upsert_rules(
+            platform_data_source,
+            [r.to_store_dict() for r in manifest.doc_flow_rules],
+        )
+        logger.info(
+            "[AppRegistry] app '%s': doc_flow 就绪（边表目标 = %s, 规则 %s 条）",
+            manifest.app_id, getattr(edge_ds, "_db_path", "<platform>"),
+            len(manifest.doc_flow_rules),
+        )
+        prepared += 1
+    return prepared
+
+
 def register_apps(
     app,
     app_ids: Optional[List[str]] = None,
@@ -742,6 +811,12 @@ def register_apps(
         prepared = _prepare_event_tables(manifests)
         if prepared:
             logger.info("[AppRegistry] 事件表已就绪（%s 个应用）", prepared)
+
+    # [DOC_FLOW Phase 1] 边表（随应用业务库）+ 规则注册（平台库）；未声明零 DDL
+    if data_source is not None:
+        doc_flow_prepared = _prepare_doc_flow(data_source, manifests, declared_by_app)
+        if doc_flow_prepared:
+            logger.info("[AppRegistry] doc_flow 已就绪（%s 个应用）", doc_flow_prepared)
 
     # [A 可见性 2026-09-25] 全部注册动作成功后才登记事实清单（供 /health 与落盘使用）
     _loaded_manifests[:] = manifests

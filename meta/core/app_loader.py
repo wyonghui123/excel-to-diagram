@@ -104,6 +104,60 @@ class EventSubscribeDecl:
 
 
 @dataclass
+class DocFlowRuleDecl:
+    """单据流派生规则声明（DOC_FLOW Phase 1，spec 2026-09-29 §5.3）。
+
+    ```yaml
+    doc_flow:
+      enabled: true
+      rules:
+        - rule_id: demo-sales-to-delivery-v1
+          source_bo: demo_sales_order
+          target_bo: demo_delivery
+    ```
+
+    Phase 1 边界：source_bo / target_bo 必须是**本应用声明的 BO**（同库才能
+    同事务派生，F5 铁律）——该约束在启动期 `_prepare_doc_flow` 校验。
+
+    Phase 2 增补（spec 2026-09-29-doc-flow-phase2-spec.md §4.1/§5）：
+    - `field_map`：字段映射表 `{"源字段": "目标字段"}`；空 = 同名直拷
+    - `split_key`：分单键字段名数组；空 = 每行自成一组（1 源行 = 1 目标单）
+    - `target_line_bo`：明细行 BO ID；空 = 单表模式（Phase 1 行为）
+    - `head_fk_field`：明细行指向单头的外键字段；空 = 走约定解析
+    """
+
+    rule_id: str
+    source_bo: str
+    target_bo: str
+    source_qty_field: str = "quantity"   # Σ 校验读源行数量的字段名
+    pool: str = "default"                # 消耗池（§6.5，Phase 1 单池够用）
+    check_hook: str = ""                 # Phase 1 留空列位（Phase 2 三段式）
+    map_hook: str = ""                   # Phase 1 留空：空 = 默认映射
+    create_hook: str = ""                # Phase 1 留空列位
+    field_map: Dict[str, str] = field(default_factory=dict)   # 源字段 → 目标字段
+    split_key: List[str] = field(default_factory=list)        # 分单键字段名
+    target_line_bo: str = ""             # 明细行 BO；空 = 单表模式
+    head_fk_field: str = ""              # 明细行→单头 外键字段（显式声明优先）
+
+    def to_store_dict(self) -> Dict[str, Any]:
+        """转成 doc_flow_rule_store.upsert_rules 需要的字典。"""
+        return {
+            "rule_id": self.rule_id,
+            "source_bo": self.source_bo,
+            "target_bo": self.target_bo,
+            "source_qty_field": self.source_qty_field,
+            "pool": self.pool,
+            "check_hook": self.check_hook,
+            "map_hook": self.map_hook,
+            "create_hook": self.create_hook,
+            "field_map": dict(self.field_map),
+            "split_key": list(self.split_key),
+            "target_line_bo": self.target_line_bo,
+            "head_fk_field": self.head_fk_field,
+        }
+
+
+@dataclass
 class AppManifest:
     """app.yaml 的解析结果（不可变视图）。"""
 
@@ -127,6 +181,9 @@ class AppManifest:
     allowed_platform_modules: List[str] = field(default_factory=list)
     events_publish: List[EventPublishDecl] = field(default_factory=list)
     events_subscribe: List[EventSubscribeDecl] = field(default_factory=list)
+    # [DOC_FLOW Phase 1] 单据流派生资格化声明（spec 2026-09-29 §5.3）
+    doc_flow_enabled: bool = False
+    doc_flow_rules: List[DocFlowRuleDecl] = field(default_factory=list)
 
     @property
     def route_prefix(self) -> str:
@@ -248,6 +305,85 @@ def _parse_events(raw: Dict[str, Any]) -> tuple:
     return publishes, subscribes
 
 
+def _parse_doc_flow(raw: Dict[str, Any], app_id: str) -> tuple:
+    """解析并校验 `doc_flow` 资格化声明（DOC_FLOW Phase 1，spec §5.3）。
+
+    Returns:
+        (enabled, rules)
+
+    Raises:
+        AppManifestError: 结构非法 / 必填缺失 / rule_id 重复
+    """
+    node = raw.get("doc_flow")
+    if node is None:
+        return False, []
+    if not isinstance(node, dict):
+        raise AppManifestError("doc_flow 需为对象（含 enabled / rules）")
+
+    enabled = node.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise AppManifestError(f"app '{app_id}': doc_flow.enabled 需为布尔值")
+
+    rules: List[DocFlowRuleDecl] = []
+    seen_rule_ids = set()
+    for index, item in enumerate(_dict_list(node, "rules")):
+        ctx = f"doc_flow.rules[{index}]"
+        decl = DocFlowRuleDecl(
+            rule_id=_require_str(item, "rule_id", ctx),
+            source_bo=_require_str(item, "source_bo", ctx),
+            target_bo=_require_str(item, "target_bo", ctx),
+            source_qty_field=_optional_str(item, "source_qty_field") or "quantity",
+            pool=_optional_str(item, "pool") or "default",
+            check_hook=_optional_str(item, "check_hook"),
+            map_hook=_optional_str(item, "map_hook"),
+            create_hook=_optional_str(item, "create_hook"),
+            field_map=_parse_field_map(item, ctx),
+            split_key=_parse_split_key(item, ctx),
+            target_line_bo=_optional_str(item, "target_line_bo"),
+            head_fk_field=_optional_str(item, "head_fk_field"),
+        )
+        if decl.rule_id in seen_rule_ids:
+            raise AppManifestError(
+                f"app '{app_id}': {ctx} rule_id '{decl.rule_id}' 重复"
+                "（规则 ID 全局唯一，换版 = 新 ID，spec §9.5）"
+            )
+        seen_rule_ids.add(decl.rule_id)
+        rules.append(decl)
+
+    # enabled: true 但未声明任何规则 → 合法（只资格化建表，暂不注册规则）
+    return enabled, rules
+
+
+def _parse_field_map(item: Dict[str, Any], ctx: str) -> Dict[str, str]:
+    """解析 field_map（源字段 → 目标字段）；缺省 = 空 dict（同名直拷）。"""
+    value = item.get("field_map")
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise AppManifestError(f"{ctx} field_map 需为映射对象（源字段: 目标字段）")
+    result: Dict[str, str] = {}
+    for src, tgt in value.items():
+        if not isinstance(src, str) or not isinstance(tgt, str) or not src or not tgt:
+            raise AppManifestError(
+                f"{ctx} field_map 的键与值均需为非空字符串（实际: {src!r} → {tgt!r}）"
+            )
+        result[src] = tgt
+    return result
+
+
+def _parse_split_key(item: Dict[str, Any], ctx: str) -> List[str]:
+    """解析 split_key（分单键字段名数组）；缺省 = 空 list（每行自成一组）。"""
+    value = item.get("split_key")
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+            isinstance(v, str) and v for v in value):
+        raise AppManifestError(
+            f"{ctx} split_key 需为非空字符串数组（分单键字段名）"
+        )
+    return list(value)
+
+
 def _dict_list(raw: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
     value = raw.get(key)
     if value is None:
@@ -341,6 +477,8 @@ def load_manifest(app_dir: Path) -> AppManifest:
         app_dir, [s.handler for s in events_subscribe], "events.subscribe.handler"
     )
 
+    doc_flow_enabled, doc_flow_rules = _parse_doc_flow(raw, app_id)
+
     return AppManifest(
         app_id=app_id,
         name=_require_str(raw, "name", str(manifest_path)),
@@ -362,6 +500,8 @@ def load_manifest(app_dir: Path) -> AppManifest:
         allowed_platform_modules=_str_list(raw, "allowed_platform_modules"),
         events_publish=events_publish,
         events_subscribe=events_subscribe,
+        doc_flow_enabled=doc_flow_enabled,
+        doc_flow_rules=doc_flow_rules,
     )
 
 
