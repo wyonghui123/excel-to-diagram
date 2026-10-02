@@ -27,6 +27,7 @@ except ImportError:
     _simple_eval_mod = None
     _HAS_SIMPLE_EVAL = False
 
+from meta.core.rule_provider import get_rule_provider
 from meta.core.models import (
     MetaObject, MetaRule, MetaComputation, MetaValidation,
     MetaStateTransition, MetaTrigger, MetaConstraint, MetaDerivation,
@@ -227,7 +228,7 @@ class RuleDependencyAnalyzer:
     def analyze(meta_object: MetaObject) -> DependencyGraph:
         graph = DependencyGraph()
         
-        for rule in meta_object.rules:
+        for rule in get_rule_provider().get_rules(meta_object):
             node = RuleDependencyAnalyzer._create_node(rule)
             if node:
                 graph.add_node(node)

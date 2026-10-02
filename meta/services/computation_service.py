@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 from meta.core.models import registry, MetaComputation, RuleType
+from meta.core.rule_provider import get_rule_provider
 from meta.core.table_name_validator import validate_table_name
 
 
@@ -103,7 +104,7 @@ class ComputationService:
             return []
 
         computed_columns = []
-        for rule in meta_obj.rules:
+        for rule in get_rule_provider().get_rules(meta_obj):
             if not isinstance(rule, MetaComputation):
                 continue
 

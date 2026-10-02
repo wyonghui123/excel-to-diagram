@@ -99,6 +99,9 @@ class RuleType(Enum):
     PERMISSION = "permission"
     TRIGGER = "trigger"
     DERIVATION = "derivation"
+    # [规则模型 T-05 2026-10-03] 属性确定（默认值）规则：新建/保存时按因子自动确定字段值
+    # 语义与 COMPUTATION 的差异：COMPUTATION = 无条件/表达式覆盖；DEFAULT = 条件命中 + 首个命中 + FILL_IF_EMPTY/OVERRIDE
+    DEFAULT = "default"
 
 
 class RuleScope(Enum):

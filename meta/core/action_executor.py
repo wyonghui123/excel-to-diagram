@@ -502,6 +502,40 @@ class ActionExecutor:
         """启用/禁用审计日志"""
         self.audit_logger.enabled = enabled
 
+    # ------------------------------------------------------------------
+    # [规则模型 T-11 2026-10-03] 属性确定（默认值）规则接入
+    # ------------------------------------------------------------------
+
+    def _resolve_change_source(self) -> str:
+        """判定本次保存的变更来源（对标 Oracle EBS System vs User Changes）
+
+        - 存在已登录用户 → ``user_input``
+        - 无登录用户（批处理 / Agent / 系统任务）→ ``system``
+
+        该值供 ``MetaDefaultRule.apply_on`` 过滤；未显式设置用户时视为系统。
+        """
+        user = getattr(self.audit_logger, '_current_user', None) or {}
+        if user.get('user_id') or user.get('user_name'):
+            return 'user_input'
+        return 'system'
+
+    @staticmethod
+    def _log_default_rules(meta_object: MetaObject, logs, mode: str = "create") -> None:
+        """记录属性确定规则判定日志（FR-010，一期仅写日志，不落库）
+
+        仅对「命中」或「有跳过原因」的条目记录，避免空跑噪声。
+        """
+        if not logs:
+            return
+        for entry in logs:
+            logger.info(
+                "[DefaultRule] obj=%s mode=%s seq=%s rule=%s target=%s hit=%s "
+                "skip=%s value=%r overwritten=%s factors=%s",
+                meta_object.id, mode, entry.seq, entry.rule_id, entry.target_field,
+                entry.hit, entry.skip_reason or "-", entry.value,
+                entry.overwritten, entry.factor_snapshot,
+            )
+
     def _get_field_business_name(self, meta_object: MetaObject, field_id: str) -> str:
         """获取字段的业务名称"""
         field = meta_object.get_field(field_id)
@@ -1536,6 +1570,14 @@ class ActionExecutor:
                 result.rule_report = report
                 return result
 
+            # [规则模型 T-11 2026-10-03] 属性确定（默认值）规则：先于 BEFORE_SAVE 校验执行，
+            # 使校验能看到被自动带出的值。默认值规则不存在时为纯透传（零行为变更）。
+            data, default_logs = self.rule_engine.apply_defaults(
+                meta_object, data,
+                change_source=self._resolve_change_source(),
+            )
+            self._log_default_rules(meta_object, default_logs, mode="create")
+
             report = self.rule_engine.execute_rules(
                 meta_object, RuleTrigger.BEFORE_SAVE, data
             )
@@ -1875,6 +1917,13 @@ class ActionExecutor:
                 )
                 result.rule_report = report
                 return result
+
+            # [规则模型 T-11 2026-10-03] 属性确定（默认值）规则：先于 BEFORE_SAVE 校验执行
+            data, default_logs = self.rule_engine.apply_defaults(
+                meta_object, data, original_data=original_data,
+                change_source=self._resolve_change_source(),
+            )
+            self._log_default_rules(meta_object, default_logs, mode="update")
 
             report = self.rule_engine.execute_rules(
                 meta_object, RuleTrigger.BEFORE_SAVE, data, original_data

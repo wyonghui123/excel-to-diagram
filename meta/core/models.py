@@ -222,6 +222,55 @@ class MetaComputation(MetaRule):
 
 
 @dataclass
+class MetaDefaultRule(MetaRule):
+    """
+    属性确定规则（默认值规则）
+
+    [规则模型 T-06 2026-10-03] 新建/保存业务对象时，按录入因子（订单类型/行类型/
+    客户/物料等）自动确定其它属性的取值。
+
+    与 MetaComputation 的语义差异：
+    - COMPUTATION：全局排序 + **全部执行**（后写覆盖先写），无「首个命中」
+    - DEFAULT    ：分组（按 target_field）+ **首个命中即停**（first-match wins），
+                   同 priority 以 rule.id 字典序 tie-break
+
+    与 MetaField.default 的差异：
+    - MetaField.default：静态默认值，无条件
+    - MetaDefaultRule  ：条件化默认值，可跨对象取数
+
+    五要素映射（对标 Oracle EBS Defaulting Rules / Fusion Pretransformation）：
+    - 触发 When   → triggers（默认 BEFORE_SAVE）
+    - 因子 Factor → condition 中引用的字段
+    - 条件 If     → condition（SafeExpressionEvaluator 语法，空即无条件命中）
+    - 动作 Then   → target_fields（继承）+ source_type/source_value
+    - 次序·覆盖   → priority（数字小先）+ apply_mode
+    """
+    rule_type: RuleType = field(default=RuleType.DEFAULT)
+
+    # 取值来源（对标 EBS Source 四类）
+    source_type: str = "constant"    # constant / field / cross_object / expression
+    source_value: str = ""           # 常量字面量 / 同对象字段id / 跨对象表达式 / 表达式
+
+    # 覆盖语义（C3）：目标字段为空才填 vs 无条件覆盖
+    apply_mode: str = "fill_if_empty"   # fill_if_empty / override
+
+    # 来源开关（对标 EBS System vs User Changes）
+    apply_on: str = "both"              # user_input / system / both
+
+    # 再判定语义（C10）：因子变更重判且解析不出新值时
+    recompute: str = "keep"             # keep（保留旧值，对标 EBS 默认）/ clear（清空）
+
+    def __post_init__(self):
+        if not self.triggers:
+            self.triggers = [RuleTrigger.BEFORE_SAVE]
+
+    @property
+    def target_field(self) -> str:
+        """目标字段（取 target_fields 首个，便于与 COMPUTATION 的 target_field 对齐）"""
+        return self.target_fields[0] if self.target_fields else ""
+
+
+@dataclass
 class StateTransitionSideEffect:
     """状态转换副作用"""
     type: str = ""
@@ -1046,6 +1095,13 @@ class MetaObject:
     def get_computations(self) -> List[MetaComputation]:
         """获取所有计算规则"""
         return [r for r in self.rules if isinstance(r, MetaComputation)]
+
+    def get_defaults(self) -> List['MetaDefaultRule']:
+        """获取所有属性确定规则（默认值规则）
+
+        [规则模型 T-06 2026-10-03]
+        """
+        return [r for r in self.rules if isinstance(r, MetaDefaultRule)]
     
     def get_state_transitions(self) -> List[MetaStateTransition]:
         """获取所有状态转换规则"""

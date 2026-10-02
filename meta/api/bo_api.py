@@ -9,6 +9,7 @@ MAX_USER_PAGE_SIZE = 500
 
 from meta.core.bo_framework import bo_framework
 from meta.core.models import registry
+from meta.core.rule_provider import get_rule_provider
 from meta.services.auth_middleware import login_required, get_current_user
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
 from meta.services.view_config_service import view_config_service
@@ -469,7 +470,7 @@ def get_state_transition_actions(object_type):
         action_index = {}
 
     action_refs = []
-    for rule in (meta_obj.rules or []):
+    for rule in get_rule_provider().get_rules(meta_obj):
         if not hasattr(rule, 'state_field') or not hasattr(rule, 'to_state'):
             continue
         action_ref = getattr(rule, 'action_ref', '')
@@ -2056,7 +2057,7 @@ def get_state_transitions(object_type, obj_id):
     record = result.data if hasattr(result, 'data') else result
 
     state_transitions = []
-    for rule in meta_obj.rules:
+    for rule in get_rule_provider().get_rules(meta_obj):
         if not hasattr(rule, 'state_field'):
             continue
         if not hasattr(rule, 'from_states') or not hasattr(rule, 'to_state'):
@@ -2113,7 +2114,7 @@ def get_state_transitions_by_string_id(object_type, obj_id):
     record = result.data if hasattr(result, 'data') else result
 
     state_transitions = []
-    for rule in meta_obj.rules:
+    for rule in get_rule_provider().get_rules(meta_obj):
         if not hasattr(rule, 'state_field'):
             continue
         if not hasattr(rule, 'from_states') or not hasattr(rule, 'to_state'):

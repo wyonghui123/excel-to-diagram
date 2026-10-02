@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from meta.core.interceptors.base import Interceptor
 from meta.core.interceptors.permission_interceptor import PermissionDenied
+from meta.core.rule_provider import get_rule_provider
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -71,7 +72,7 @@ class ActionPermissionInterceptor(Interceptor):
             return  # 管理员放行
 
         request_body = context.params or {}
-        rules = meta_obj.rules or []
+        rules = get_rule_provider().get_rules(meta_obj)
 
         # 遍历规则找匹配的 state_transition
         for rule in rules:

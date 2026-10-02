@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict, deque
 import logging
 
+from meta.core.rule_provider import get_rule_provider
 from meta.core.models import (
     MetaObject, MetaRule, MetaRelation, MetaComputation,
     RuleType, RuleTrigger, RelationType
@@ -78,7 +79,7 @@ class CrossObjectDependencyAnalyzer:
                     dependencies[obj_id].append(cross_dep)
         
         for obj_id, meta_obj in objects.items():
-            for rule in meta_obj.rules:
+            for rule in get_rule_provider().get_rules(meta_obj):
                 if rule.rule_type == RuleType.COMPUTATION and isinstance(rule, MetaComputation):
                     for source_field in rule.source_fields:
                         for other_id, other_obj in objects.items():

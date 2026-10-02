@@ -97,6 +97,7 @@ from meta.core.models import (
     MetaValidation,
     MetaConstraint,
     MetaComputation,
+    MetaDefaultRule,
     MetaStateTransition,
     MetaTrigger,
     MetaRule,
@@ -217,6 +218,8 @@ RULE_TYPE_MAP = {
     "permission": RuleType.PERMISSION,
     "trigger": RuleType.TRIGGER,
     "derivation": RuleType.DERIVATION,
+    # [规则模型 T-05 2026-10-03] 属性确定规则
+    "default": RuleType.DEFAULT,
 }
 
 RULE_SCOPE_MAP = {
@@ -1576,7 +1579,7 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
     
     根据规则类型自动选择对应的解析函数
     """
-    rule_type_str = data.get("type", "validation").lower()
+    rule_type_str = data.get("type", data.get("rule_type", "validation")).lower()
     rule_type = RULE_TYPE_MAP.get(rule_type_str, RuleType.VALIDATION)
     
     if rule_type == RuleType.VALIDATION:
@@ -1589,6 +1592,8 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
         return parse_state_transition(data)
     elif rule_type == RuleType.TRIGGER:
         return parse_trigger_rule(data)
+    elif rule_type == RuleType.DEFAULT:
+        return parse_default_rule(data)
     else:
         return MetaRule(
             id=data.get("id", ""),
@@ -1604,6 +1609,39 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
             description=data.get("description", ""),
             semantics=parse_semantics(data.get("semantics", {})),
         )
+
+
+def parse_default_rule(data: Dict[str, Any]) -> MetaDefaultRule:
+    """解析属性确定（默认值）规则
+
+    [规则模型 T-06 2026-10-03]
+    """
+    scope_str = data.get("scope", "field").lower()
+    scope = RULE_SCOPE_MAP.get(scope_str, RuleScope.FIELD)
+
+    triggers = _parse_triggers(data.get("triggers", []))
+
+    target_fields = data.get("target_fields", [])
+    if not target_fields and data.get("target_field"):
+        target_fields = [data["target_field"]]
+
+    return MetaDefaultRule(
+        id=data.get("id", ""),
+        name=data.get("name", ""),
+        scope=scope,
+        triggers=triggers,
+        condition=data.get("condition", ""),
+        priority=data.get("priority", 100),
+        enabled=data.get("enabled", True),
+        description=data.get("description", ""),
+        target_fields=target_fields,
+        source_type=data.get("source_type", "constant"),
+        source_value=data.get("source_value", data.get("action", "")),
+        apply_mode=data.get("apply_mode", "fill_if_empty"),
+        apply_on=data.get("apply_on", "both"),
+        recompute=data.get("recompute", "keep"),
+        semantics=parse_semantics(data.get("semantics", {})),
+    )
 
 
 def parse_query_filter(data: Dict[str, Any]) -> MetaQueryFilter:

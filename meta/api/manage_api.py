@@ -9,6 +9,7 @@ from meta.services.data_permission_filter import DataPermissionFilter
 from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
+from meta.core.rule_provider import get_rule_provider
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records
 from meta.api.special_routes_api import _compute_category, list_relationships
 import os
@@ -1263,7 +1264,7 @@ def get_state_transitions(object_type, id):
         return jsonify({'success': False, 'message': '记录不存在'}), 404
     
     state_transitions = []
-    for rule in meta_obj.rules:
+    for rule in get_rule_provider().get_rules(meta_obj):
         if not hasattr(rule, 'state_field'):
             continue
         if not hasattr(rule, 'from_states') or not hasattr(rule, 'to_state'):

@@ -29,6 +29,7 @@ from typing import List, Dict, Any, Optional, Set
 from enum import Enum
 import logging
 
+from meta.core.rule_provider import get_rule_provider
 from meta.core.models import (
     MetaObject,
     MetaField,
@@ -337,7 +338,7 @@ class MetadataValidator:
         检查 MetaObject.rules 中是否有 MetaDerivation 规则
         指向该字段
         """
-        for rule in meta_obj.rules:
+        for rule in get_rule_provider().get_rules(meta_obj):
             if isinstance(rule, MetaDerivation):
                 if field.id in rule.get_target_fields():
                     if rule.source_object == source_of_truth:
