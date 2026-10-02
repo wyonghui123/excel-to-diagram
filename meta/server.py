@@ -164,6 +164,7 @@ from meta.handlers.audit_handlers import (
     AuditFailureRetryHandler
 )
 from meta.handlers.import_handlers import ImportQueueHandler
+from meta.handlers.platform_handlers import PlatformTickHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
@@ -562,6 +563,8 @@ def create_app(db_path=None):
     task_scheduler.register_handler('audit_log_cleanup', AuditLogCleanupHandler())
     task_scheduler.register_handler('audit_log_archive', AuditLogArchiveHandler())
     task_scheduler.register_handler('import_queue_processor', ImportQueueHandler())
+    # [A5 2026-10-02] 平台心跳：direct 派工 + 认领超时回收 + SLA 升级扫描
+    task_scheduler.register_handler('platform_tick', PlatformTickHandler())
 
     task_scheduler.start()
     set_task_scheduler(task_scheduler)

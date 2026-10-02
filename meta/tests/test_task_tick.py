@@ -162,3 +162,55 @@ class TestTick:
         assert result["counts"]["dispatched"] == 1   # 前一/后一段照常
         assert _status(ds, "T-A") == "claimed"
         assert any(e["stage"] == "reclaim" for e in result["errors"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 调度挂载适配（A5 接入 TaskScheduler）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPlatformTickHandler:
+    """TC-TICK-006~008 调度挂载：handler 适配 + 种子行"""
+
+    def test_TC_TICK_006_handler适配(self, ds):
+        from meta.handlers.platform_handlers import PlatformTickHandler
+
+        _task(ds, task_id="T-A", policy="direct", assignee="u1")
+
+        result = PlatformTickHandler().execute({}, {'data_source': ds})
+
+        assert result.success is True
+        assert result.data["counts"]["dispatched"] == 1
+        assert _status(ds, "T-A") == "claimed"
+
+    def test_TC_TICK_007_errors时success为False(self, ds, monkeypatch):
+        from meta.handlers.platform_handlers import PlatformTickHandler
+
+        _task(ds, task_id="T-BAD", policy="direct", assignee="u1")
+
+        def boom(data_source, task_id, *, now=None):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(task_tick, "resolve_assignment", boom)
+
+        result = PlatformTickHandler().execute({}, {'data_source': ds})
+
+        assert result.success is False
+        assert result.data["errors"][0]["stage"] == "dispatch"
+
+    def test_TC_TICK_008_种子行可调度(self, ds):
+        from meta.core.cron_parser import CronParser
+        from meta.scripts.init_task_seed import init_task_seed_data
+
+        init_task_seed_data(ds)
+
+        rows = ds.execute(
+            "SELECT handler, trigger_mode, schedule, enabled "
+            "FROM scheduled_tasks WHERE code = 'platform_tick'"
+        ).fetchall()
+        assert len(rows) == 1
+        handler, trigger_mode, schedule, enabled = rows[0]
+        assert handler == 'platform_tick'      # 与 server.py 注册名一致
+        assert trigger_mode == 'cron'
+        assert enabled == 1
+        # 调度表达式须能被实际调度器解析（否则加载时静默跳过）
+        assert CronParser().get_next(schedule, T0) is not None

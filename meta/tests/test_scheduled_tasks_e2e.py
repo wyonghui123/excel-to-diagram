@@ -98,12 +98,13 @@ class TestTaskSeedInit:
         
         rows = data_source.query("SELECT * FROM scheduled_tasks")
         
-        assert len(rows) == 7
+        assert len(rows) == 8
         
         task_codes = {row['code'] for row in rows}
         expected_codes = {
             'db_analyze', 'db_vacuum', 'db_integrity_check', 'db_checkpoint',
-            'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor'
+            'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor',
+            'platform_tick'
         }
         assert task_codes == expected_codes
     
@@ -183,7 +184,7 @@ class TestTaskSeedInit:
         init_task_seed_data(data_source)
         
         rows = data_source.query("SELECT COUNT(*) as cnt FROM scheduled_tasks")
-        assert rows[0]['cnt'] == 7
+        assert rows[0]['cnt'] == 8
 
 
 class TestSchedulerLoadAndTrigger:
@@ -265,11 +266,12 @@ class TestSchedulerLoadAndTrigger:
         scheduler = TaskScheduler(data_source=data_source)
         scheduler.load_tasks()
         
-        assert len(scheduler._tasks) == 7
+        assert len(scheduler._tasks) == 8
         
         task_codes = {task['code'] for task in scheduler._tasks.values()}
         expected = {'db_analyze', 'db_vacuum', 'db_integrity_check', 'db_checkpoint',
-                   'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor'}
+                   'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor',
+                   'platform_tick'}
         assert task_codes == expected
     
     def test_load_tasks_calculates_next_run(self, data_source):

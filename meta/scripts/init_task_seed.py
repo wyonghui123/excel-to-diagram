@@ -255,6 +255,21 @@ def init_scheduled_tasks(data_source):
             'description': '每2分钟检查导入队列并处理',
             'enabled': True,
         },
+        {
+            'code': 'platform_tick',
+            'name': '平台心跳（派工/回收/SLA扫描）',
+            'category': 'system',
+            'handler': 'platform_tick',
+            'trigger_mode': 'cron',
+            'schedule': '* * * * *',
+            'queue': 'business',
+            'priority': 50,
+            'timeout': 120,
+            'max_retries': 2,
+            'handler_config': '{}',
+            'description': '每分钟执行平台心跳：direct 派工 + 认领超时回收 + SLA 升级扫描',
+            'enabled': True,
+        },
     ]
 
     count = 0
