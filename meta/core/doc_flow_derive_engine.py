@@ -179,7 +179,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
                  fk_column: Optional[str] = None, fk_value: Any = None,
                  edge_target_bo: Optional[str] = None,
                  edge_target_id: Any = None,
-                 exact_idem: bool = True) -> DeriveResult:
+                 exact_idem: bool = True,
+                 derive_key: str = "") -> DeriveResult:
     """事务内单行派生核心（**不含事务装饰**——调用方负责事务边界）。
 
     两种模式（同一份映射/边/Σ 逻辑，差异只在"目标身份从哪来"）：
@@ -333,7 +334,7 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             "pool": rule["pool"],
             "source_instance_id": "",
             "target_instance_id": "",
-            "derive_key": "",
+            "derive_key": derive_key,
         })
     except Exception as e:  # noqa: BLE001 - 唯一索引冲突 → 幂等重放兜底
         existing = _find_edge_by_key(
@@ -370,7 +371,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
 def derive(app_ds, platform_ds, rule_id: str, source_id: Any,
            source_item: str = "", quantity: Optional[float] = None,
            target_data: Optional[Dict[str, Any]] = None,
-           derived_by: str = "") -> DeriveResult:
+           derived_by: str = "",
+           derive_key: str = "") -> DeriveResult:
     """执行一次派生（同库同事务：目标单行 + 边一起落，一起回滚）。
 
     Args:
@@ -384,6 +386,8 @@ def derive(app_ds, platform_ds, rule_id: str, source_id: Any,
         target_data: 目标单数据；含 `id` = attach 模式（挂既有目标单），
             否则 create 模式（新建目标单行，同名字段自动映射 + 此处覆盖）
         derived_by: 派生执行者（写边 derived_by）
+        derive_key: 边业务幂等键（Phase 2 冲销引擎锚定用：'count:' 前缀；
+            默认空串 = 普通派生）
 
     Raises:
         DocFlowDeriveError: RULE_NOT_FOUND / RULE_DEPRECATED / BO_NOT_REGISTERED /
@@ -429,4 +433,5 @@ def derive(app_ds, platform_ds, rule_id: str, source_id: Any,
         return _derive_core(
             app_ds, rule, source_obj, target_obj, source_id, source_item,
             _num(quantity), target_data, derived_by, now, exact_idem=True,
+            derive_key=derive_key,
         )
