@@ -221,6 +221,17 @@ class TestStructure:
         report = scan(app_ds)
         assert report.codes() == ["IDEM_INDEX_MISSING"]
 
+    def test_idem_index_non_unique_tampered(self, ready_env):
+        """同名普通索引冒充唯一索引 → 必须报（只验名会漏检，防重放实际失效）。"""
+        app_ds, platform_ds = ready_env
+        _fresh_edge(app_ds, platform_ds)
+        app_ds.execute("DROP INDEX {0}".format(_IDEM_INDEX))
+        app_ds.execute(
+            "CREATE INDEX {0} ON doc_flow_edges(source_bo)".format(_IDEM_INDEX))
+
+        report = scan(app_ds)
+        assert "IDEM_INDEX_MISSING" in report.codes()
+
     def test_view_missing(self, ready_env):
         app_ds, platform_ds = ready_env
         _fresh_edge(app_ds, platform_ds)
@@ -345,6 +356,19 @@ class TestRebuild:
         codes = scan(app_ds).codes()
         assert "DUPLICATE_IDEM_KEY" in codes
         assert "IDEM_INDEX_MISSING" in codes
+
+    def test_rebuild_repairs_non_unique_index(self, ready_env):
+        """同名非唯一索引被篡改：rebuild 先摘除、ensure 恢复唯一索引（自愈）。"""
+        app_ds, platform_ds = ready_env
+        _fresh_edge(app_ds, platform_ds)
+        app_ds.execute("DROP INDEX {0}".format(_IDEM_INDEX))
+        app_ds.execute(
+            "CREATE INDEX {0} ON doc_flow_edges(source_bo)".format(_IDEM_INDEX))
+
+        result = rebuild_projection(app_ds)
+        assert result.ok
+        assert result.index_restored
+        assert scan(app_ds).ok          # 唯一性恢复后不再报
 
     def test_rebuild_on_missing_edge_table_fails_cleanly(self, dbs):
         """未启用 doc_flow 的库：重建拒绝且不改任何东西。"""

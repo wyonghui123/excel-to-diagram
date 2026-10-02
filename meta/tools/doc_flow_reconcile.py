@@ -16,6 +16,7 @@
   重建后再复检一次并输出前后对照。
 - --strict：存在 findings 时退出码 1（CI / 运维告警用）。
 - 重建失败（如重复键挡唯一索引，fail-loud）退出码恒为 1。
+- 异常（库不可读 / 被锁 / 半迁移）：[ERROR] 一行 + 退出码 2（不抛裸栈）。
 """
 import argparse
 import json
@@ -71,10 +72,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="显式重建投影（视图 + 缺失索引；绝不改边数据）")
     args = parser.parse_args(argv)
 
-    app_ds = get_data_source("sqlite", database=args.db)
-    report = scan(app_ds)
-    rebuild = rebuild_projection(app_ds) if args.rebuild else None
-    report_after = scan(app_ds) if args.rebuild else None
+    try:
+        app_ds = get_data_source("sqlite", database=args.db)
+        report = scan(app_ds)
+        rebuild = rebuild_projection(app_ds) if args.rebuild else None
+        report_after = scan(app_ds) if args.rebuild else None
+    except Exception as e:  # noqa: BLE001 - 库不可读/被锁/半迁移：异常兜底
+        print("[ERROR] 巡检失败: {0}".format(e))
+        return 2
 
     if args.json:
         payload = {

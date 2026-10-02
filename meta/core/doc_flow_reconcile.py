@@ -15,8 +15,13 @@
     创建失败吞错（重复键挡唯一索引），必须自检，缺一即 fail-loud 不假成功。
 
 边界（如实声明，不扩范围）:
-- "静默少消耗"（人为删正常边）**不可检**——无物化快照对照（§14 R3 完整对账
-  依赖快照物化机制，未来落地后纳入）；本版不做业务锚/孤儿边/超耗检查。
+- **语义侧改账不可检**（无物化快照对照；§14 R3 完整对账依赖快照机制，未来
+  落地后纳入）——具体包括: ① 人为删正常边（静默少消耗）；② 手改 quantity
+  为另一合法正数；③ 手翻 status active→reversed（合法值；边表定稿 17 列无
+  冲销审计位，E6 的 reversed_by 仅记日志，引擎翻转与手工翻转不可区分）；
+  ④ 插孤儿边（target 不存在）；⑤ 改 rule_id 为不存在规则。以上需读事实对象
+  / 规则表或快照对照，属完全体。
+- 本版不做业务锚/孤儿边/超耗检查（2026-10-02 用户拍板精简 3 域）。
 - 跨实例镜像差异不在本版（Phase 3 未启动，无镜像对象）。
 - 不挂定时（E7 触发式；定时巡检属 Phase 4 完全体）。
 - 全表扫描：边表起步量级可接受；大表窗口化留完全体。
@@ -138,11 +143,31 @@ def _stored_view_sql(app_ds) -> Optional[str]:
     return rows[0][0]
 
 
-def _index_exists(app_ds, name: str) -> bool:
+def _index_name_exists(app_ds, name: str) -> bool:
+    """索引名是否存在（不判唯一性）。"""
     rows = app_ds.execute(
         "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (name,)
     ).fetchall()
     return bool(rows)
+
+
+def _unique_index_ok(app_ds, name: str) -> bool:
+    """索引存在**且确实为 UNIQUE**。
+
+    只验名会被"同名普通索引"绕过（DROP 唯一索引后建同名非唯一索引）→ 防重放
+    保障实际失效却亮绿灯。故用 PRAGMA index_list 复核 unique 标志。
+    """
+    try:
+        rows = app_ds.execute(
+            "PRAGMA index_list('{0}')".format(DOC_FLOW_EDGE_TABLE)
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - 库不可读视为不满足
+        return False
+    for r in rows:
+        # PRAGMA index_list 列序: (seq, name, unique, origin, partial)
+        if len(r) >= 3 and r[1] == name and int(r[2]) == 1:
+            return True
+    return False
 
 
 def _expected_view_sql_norm() -> str:
@@ -220,11 +245,11 @@ def scan(app_ds) -> ReconcileReport:
         report.findings = findings
         return report
 
-    if not _index_exists(app_ds, _IDEM_INDEX):
+    if not _unique_index_ok(app_ds, _IDEM_INDEX):
         findings.append(Finding(
             "IDEM_INDEX_MISSING", "error",
-            "唯一幂等索引 {0} 缺失（7 元组防重放保障失效；可用 --rebuild 补建）".format(
-                _IDEM_INDEX),
+            "唯一幂等索引 {0} 缺失或已退化为非唯一（7 元组防重放保障失效；"
+            "可用 --rebuild 补建）".format(_IDEM_INDEX),
         ))
 
     stored_sql = _stored_view_sql(app_ds)
@@ -369,13 +394,18 @@ def rebuild_projection(app_ds) -> RebuildResult:
 
     result.view_existed = _stored_view_sql(app_ds) is not None
     app_ds.execute("DROP VIEW IF EXISTS {0}".format(DOC_FLOW_CONSUMED_VIEW))
+    # 同名非唯一索引（被篡改）会挡住 ensure 的 CREATE INDEX IF NOT EXISTS ——
+    # 先摘除，交给 ensure 重建为唯一索引（重复键仍会 fail-loud，见后置自检）
+    if (not _unique_index_ok(app_ds, _IDEM_INDEX)
+            and _index_name_exists(app_ds, _IDEM_INDEX)):
+        app_ds.execute("DROP INDEX IF EXISTS {0}".format(_IDEM_INDEX))
     ensure_doc_flow_edge_tables(app_ds)   # 视图 IF NOT EXISTS 建回 + 索引补建
 
     stored = _stored_view_sql(app_ds)
     result.view_rebuilt = (
         stored is not None and _norm_sql(stored) == _expected_view_sql_norm()
     )
-    result.index_restored = _index_exists(app_ds, _IDEM_INDEX)
+    result.index_restored = _unique_index_ok(app_ds, _IDEM_INDEX)
     result.ok = result.view_rebuilt and result.index_restored
     if not result.ok:
         if not result.view_rebuilt:
