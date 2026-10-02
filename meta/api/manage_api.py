@@ -55,6 +55,43 @@ def init_services(data_source=None):
         import logging
         logging.getLogger(__name__).warning("Schema sync skipped: %s", str(e))
 
+    # [A1 2026-10-02] 统一任务运行时底座四表（Task/TaskTemplate/Workflow/Run）
+    # 落平台库（task-model-design §12.1 Q1 拍板）；MetaObject 驱动、幂等；
+    # 失败只告警不阻断启动（与上方 Schema sync 同一容错口径）。
+    try:
+        from meta.core.task_schema import ensure_task_tables
+        ensure_task_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task schema ensure skipped: %s", str(e))
+
+    # [A3 2026-10-02] 任务事件账两表（TASK_EVENT + WORKLOG），同落平台库、append-only
+    try:
+        from meta.core.task_event_schema import ensure_task_event_tables
+        ensure_task_event_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task event schema ensure skipped: %s", str(e))
+
+    # [A6 2026-10-02] 任务幂等去重账（唯一键防重 + 存首次结果）；同落平台库
+    try:
+        from meta.core.task_idempotency import ensure_idempotency_table
+        ensure_idempotency_table(_data_source)
+    except Exception as e:
+        logger.warning("Task idempotency schema ensure skipped: %s", str(e))
+
+    # [A7 2026-10-02] 异步补全协议两表（等待单 + 回执）；同落平台库
+    try:
+        from meta.core.task_async import ensure_async_tables
+        ensure_async_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task async schema ensure skipped: %s", str(e))
+
+    # [F2 2026-10-02] SLA 独立对象（第二轴 Stage × Has breached）；同落平台库
+    try:
+        from meta.core.task_sla import ensure_sla_tables
+        ensure_sla_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task SLA schema ensure skipped: %s", str(e))
+
     _ensure_default_permissions(_data_source)
 
     from meta.api.special_routes_api import init_special_services

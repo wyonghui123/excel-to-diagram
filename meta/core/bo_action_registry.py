@@ -42,6 +42,8 @@ class BusinessActionMeta:
     operation_type: str = 'action'       # 'action' (写) | 'function' (读/计算)
     cacheable: bool = False              # Function 模式可缓存
     cache_ttl: int = 0                   # Function 缓存秒数 (0=不缓存)
+    # [B1 2026-10-02] 前置条件（声明式、机器可查；调用 handler 前统一拦截，见 bo_action_contract）
+    preconditions: Optional[List[Dict[str, Any]]] = None
 
 
 class BoActionRegistry:
@@ -80,11 +82,15 @@ class BoActionRegistry:
         operation_type: str = 'action',
         cacheable: bool = False,
         cache_ttl: int = 0,
+        # [B1 2026-10-02] 前置条件（声明式；形状与求值见 meta.core.bo_action_contract）
+        preconditions: Optional[List[Dict[str, Any]]] = None,
     ) -> 'BoActionRegistry':
         """注册一个业务 Action
 
         [DECORATIVE] v3.1: 支持 input_schema/output_schema/requires_admin/idempotent 等行业标准元数据
         参照 Salesforce @AuraEnabled / Power Platform Operation 规范
+        [B1 2026-10-02]: 契约四要件固化（idempotent / preconditions / input_schema / 返回信封），
+                         机器校验见 meta.core.bo_action_contract.validate_registry
         """
         if action_id in self._actions:
             logger.warning(
@@ -107,6 +113,7 @@ class BoActionRegistry:
             operation_type=operation_type,
             cacheable=cacheable,
             cache_ttl=cache_ttl,
+            preconditions=preconditions,
         )
         logger.info(
             f"[BoActionRegistry] Registered: {action_id} "
@@ -148,6 +155,8 @@ class BoActionRegistry:
                 'operation_type': meta.operation_type,
                 'cacheable': meta.cacheable,
                 'cache_ttl': meta.cache_ttl,
+                # [B1 2026-10-02] 前置条件属固化契约的一部分，随 schema 一并输出
+                'preconditions': meta.preconditions or [],
             }
             for meta in self.list_all()
         ]
@@ -200,6 +209,17 @@ class BoActionRegistry:
                     'data': None,
                     'message': f'Permission denied: {meta.permission_required} required',
                 }
+
+        # [B1 2026-10-02] 前置条件统一拦截（声明式契约；既有 action 默认空 → 零行为变化）
+        from meta.core.bo_action_contract import check_preconditions
+        unmet = check_preconditions(meta, params, context or {})
+        if unmet:
+            return {
+                'success': False,
+                'data': None,
+                'message': '前置条件未满足：' + '；'.join(unmet),
+                'code': 'PRECONDITION_FAILED',
+            }
 
         try:
             result = meta.handler(params, context or {})

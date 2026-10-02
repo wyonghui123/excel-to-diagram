@@ -165,6 +165,7 @@ from meta.handlers.audit_handlers import (
 )
 from meta.handlers.import_handlers import ImportQueueHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
+from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
 from meta.api.test_api import test_bp
 from meta.api.debug_api import debug_bp
@@ -782,6 +783,8 @@ def create_app(db_path=None):
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
     app.register_blueprint(task_api_bp)
+    # [A8 2026-10-02] 统一收件箱 + 平台心跳
+    app.register_blueprint(task_inbox_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)

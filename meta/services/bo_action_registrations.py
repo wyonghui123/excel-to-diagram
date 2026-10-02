@@ -17,6 +17,9 @@ BO Action 注册模块
 - 1 个 notification (subscription.create)
 - 4 个 v3.4 function (function.value_help.resolve, function.aggregate.*, function.subscription.list)
 - 3 个 v3.5 enum_type CRUD
+
+[B1 2026-10-02] 注册尾部执行「注册契约机器校验」（见 meta/core/bo_action_contract.py）：
+  idempotent / 前置条件 preconditions / 参数 schema / 返回契约四要件的固化与校验。
 """
 import logging
 
@@ -448,3 +451,11 @@ def register_all_bo_actions(registry=None):
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")
+
+    # [B1 2026-10-02] 注册契约机器校验（idempotent / 前置条件 / 参数 schema / 返回契约）
+    # 固化形状 → 跨应用同一注册形状；warn-only，不阻断启动（与 schema sync 同容错口径）
+    try:
+        from meta.core.bo_action_contract import report_registry_contracts
+        report_registry_contracts(registry)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[BO Action] 契约校验跳过: %s", str(e))
