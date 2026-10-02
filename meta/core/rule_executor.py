@@ -1281,6 +1281,13 @@ class RuleEngine:
                               data_source=self.data_source)
         
         rules = meta_object.get_rules_by_trigger(trigger)
+        # [规则模型 2026-10-03] 属性确定（DEFAULT）规则**不得**在此执行：
+        # 它有专用求值入口 default_by_priority / apply_defaults（按 target_field 分组 +
+        # 组内首个命中获胜 + change_source 感知）。若混入此处，会退化为「全局排序 +
+        # 全部执行」且 change_source 缺省为 both，导致 apply_on='system' 等规则被误触发、
+        # 并覆盖 apply_defaults 已算出的值（E2E 实测：price_list 被 PL_SYS 覆盖）。
+        rules = [r for r in rules
+                 if getattr(r, 'rule_type', None) != RuleType.DEFAULT]
         rules = sorted(rules, key=lambda r: r.priority)
         
         for rule in rules:
