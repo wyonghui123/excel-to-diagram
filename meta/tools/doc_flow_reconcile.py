@@ -16,10 +16,12 @@
   重建后再复检一次并输出前后对照。
 - --strict：存在 findings 时退出码 1（CI / 运维告警用）。
 - 重建失败（如重复键挡唯一索引，fail-loud）退出码恒为 1。
-- 异常（库不可读 / 被锁 / 半迁移）：[ERROR] 一行 + 退出码 2（不抛裸栈）。
+- 异常（库不可读 / 被锁 / 半迁移）：[ERROR] 一行 + 退出码 2（不抛裸栈）；
+  --db 指向不存在的文件同样 exit 2（不静默新建空库）。
 """
 import argparse
 import json
+import os
 import sys
 from typing import List, Optional
 
@@ -71,6 +73,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--rebuild", action="store_true",
                         help="显式重建投影（视图 + 缺失索引；绝不改边数据）")
     args = parser.parse_args(argv)
+
+    if not os.path.isfile(args.db):
+        # 防 SQLite 连接时静默新建空库 → 误报 EDGE_TABLE_MISSING
+        print("[ERROR] 库文件不存在: {0}".format(args.db))
+        return 2
 
     try:
         app_ds = get_data_source("sqlite", database=args.db)

@@ -13,6 +13,7 @@
 API（insert/update），结构篡改只用 DROP INDEX / DROP VIEW / CREATE VIEW。
 """
 import json
+import os
 
 import pytest
 
@@ -261,6 +262,27 @@ class TestStructure:
         report = scan(app_ds)
         assert report.codes() == ["EDGE_TABLE_MISSING"]
 
+    def test_edge_table_columns_missing(self, dbs):
+        """边表列不全（半迁移/人为改表）→ 报缺列且不因 SELECT 抛错。"""
+        app_ds, _ = dbs
+        app_ds.execute(
+            "CREATE TABLE doc_flow_edges (id TEXT PRIMARY KEY, source_bo TEXT)")
+
+        report = scan(app_ds)
+        assert "EDGE_TABLE_COLUMNS_MISSING" in report.codes()
+        assert not report.ok
+
+    def test_schema_index_missing_is_warning(self, ready_env):
+        """结构索引（非幂等索引）缺失 → warn 级，不影响 ok / --strict。"""
+        app_ds, platform_ds = ready_env
+        _fresh_edge(app_ds, platform_ds)
+        app_ds.execute("DROP INDEX idx_doc_flow_source")
+
+        report = scan(app_ds)
+        assert "SCHEMA_INDEX_MISSING" in report.codes()
+        assert report.ok                        # warn 不计入 ok
+        assert report.to_dict()["warnings"] == ["SCHEMA_INDEX_MISSING"]
+
 
 # ---------------------------------------------------------------------------
 # ② 边域
@@ -370,6 +392,35 @@ class TestRebuild:
         assert result.index_restored
         assert scan(app_ds).ok          # 唯一性恢复后不再报
 
+    def test_rebuild_restores_schema_indexes(self, ready_env):
+        """结构索引缺失：rebuild 一并补回（自检三索引齐）。"""
+        app_ds, platform_ds = ready_env
+        _fresh_edge(app_ds, platform_ds)
+        app_ds.execute("DROP INDEX idx_doc_flow_target")
+
+        result = rebuild_projection(app_ds)
+        assert result.ok and result.index_restored
+        assert scan(app_ds).ok
+
+    def test_rebuild_view_failure_rolls_back(self, ready_env, monkeypatch):
+        """视图 CREATE 失败 → 事务回滚：旧视图保持不变（非原子问题修复）。"""
+        app_ds, platform_ds = ready_env
+        _fresh_edge(app_ds, platform_ds)
+
+        real_execute = app_ds.execute
+
+        def boom(sql, params=None):
+            if sql.strip().upper().startswith("CREATE VIEW"):
+                raise RuntimeError("injected create-view failure")
+            return real_execute(sql, params)
+
+        monkeypatch.setattr(app_ds, "execute", boom)
+        result = rebuild_projection(app_ds)
+
+        assert not result.ok
+        assert "回滚" in result.error
+        assert scan(app_ds).ok          # 原视图仍在（未被 DROP 掉）
+
     def test_rebuild_on_missing_edge_table_fails_cleanly(self, dbs):
         """未启用 doc_flow 的库：重建拒绝且不改任何东西。"""
         app_ds, _ = dbs
@@ -411,3 +462,11 @@ class TestCli:
         assert "[OK] 无发现" in out            # 重建后复检
         assert scan(app_ds).ok
         assert reconcile_main(["--db", db_path, "--strict"]) == 0
+
+    def test_cli_rejects_missing_db_file(self, tmp_path, capsys):
+        """--db 指向不存在文件 → [ERROR] + exit 2，且不静默新建空库。"""
+        missing = str(tmp_path / "nope" / "x.db")
+        code = reconcile_main(["--db", missing])
+        assert code == 2
+        assert "[ERROR]" in capsys.readouterr().out
+        assert not os.path.exists(missing)

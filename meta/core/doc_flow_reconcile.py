@@ -5,12 +5,14 @@
 
     S7 巡检最小版（触发式脚本）→ 验收：对账可发现人为改账
     巡检域（最小版 3 域，2026-10-02 用户拍板"精简 3 域"）:
-      ① 结构域    边表缺失 / 唯一幂等索引缺失 / 消耗视图缺失 / 视图 SQL 漂移
+      ① 结构域    边表缺失 / 边表缺列 / 规范索引缺失（幂等索引须唯一，其余
+                  两索引缺失为 warn）/ 消耗视图缺失 / 视图 SQL 漂移
       ② 边域      7 元组幂等键重复 / 同 6 元组异规则 active+normal（R4 双重消耗）/
                   status·quantity_sign·quantity 域值非法
       ③ 视图对账  边表复算 vs 视图查询逐行比对（数值侧双保险；含红字口径）
 
-    投影重建（显式触发，CLI --rebuild）：视图 DROP + 规范重建 + 缺失索引补建；
+    投影重建（显式触发，CLI --rebuild）：视图**单事务原子替换**（失败回滚，
+    旧视图不变）+ 缺失索引/缺列补建；
     **绝不改边数据**（append-only 铁律）；后置自检闭环——SchemaMigrator 对索引
     创建失败吞错（重复键挡唯一索引），必须自检，缺一即 fail-loud 不假成功。
 
@@ -38,7 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.doc_flow_schema import (
     DOC_FLOW_CONSUMED_VIEW, DOC_FLOW_EDGE_TABLE, _build_consumed_view_meta,
-    edge_table_exists,
+    _build_edge_meta, edge_table_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,8 @@ class ReconcileReport:
 
     @property
     def ok(self) -> bool:
-        return not self.findings
+        # 只有 error 级发现才算不 ok（warn 级如缺性能索引仅提示，不影响退出码）
+        return not any(f.severity == "error" for f in self.findings)
 
     def codes(self) -> List[str]:
         return [f.code for f in self.findings]
@@ -89,6 +92,7 @@ class ReconcileReport:
             "edge_count": self.edge_count,
             "active_count": self.active_count,
             "ok": self.ok,
+            "warnings": [f.code for f in self.findings if f.severity == "warn"],
             "findings": [
                 {"code": f.code, "severity": f.severity, "detail": f.detail}
                 for f in self.findings
@@ -170,6 +174,42 @@ def _unique_index_ok(app_ds, name: str) -> bool:
     return False
 
 
+def _expected_edge_columns() -> Tuple[str, ...]:
+    """边表规范列（唯一事实来源 = doc_flow_schema 的 MetaObject 定义）。"""
+    return tuple(f.db_column or f.id for f in _build_edge_meta().fields)
+
+
+def _actual_edge_columns(app_ds) -> set:
+    """边表实际列（PRAGMA table_info 列序: cid, name, type, ...）。"""
+    rows = app_ds.execute(
+        "PRAGMA table_info('{0}')".format(DOC_FLOW_EDGE_TABLE)
+    ).fetchall()
+    return {r[1] for r in rows}
+
+
+def _missing_edge_columns(app_ds) -> List[str]:
+    """相对规范缺失的边表列（空 = 结构齐备）。"""
+    actual = _actual_edge_columns(app_ds)
+    return [c for c in _expected_edge_columns() if c not in actual]
+
+
+def _expected_index_names() -> Tuple[str, ...]:
+    """边表规范索引名（唯一事实来源 = doc_flow_schema MetaObject.indexes）。"""
+    return tuple(ix.name for ix in _build_edge_meta().indexes)
+
+
+def _missing_schema_indexes(app_ds) -> List[str]:
+    """相对规范缺失/失真的索引；唯一幂等索引额外复核 unique 标志。"""
+    out: List[str] = []
+    for name in _expected_index_names():
+        if name == _IDEM_INDEX:
+            if not _unique_index_ok(app_ds, name):
+                out.append(name)
+        elif not _index_name_exists(app_ds, name):
+            out.append(name)
+    return out
+
+
 def _expected_view_sql_norm() -> str:
     return _norm_sql(
         "CREATE VIEW {0} AS {1}".format(DOC_FLOW_CONSUMED_VIEW, _canonical_view_sql())
@@ -245,11 +285,27 @@ def scan(app_ds) -> ReconcileReport:
         report.findings = findings
         return report
 
-    if not _unique_index_ok(app_ds, _IDEM_INDEX):
+    missing_cols = _missing_edge_columns(app_ds)
+    if missing_cols:
+        findings.append(Finding(
+            "EDGE_TABLE_COLUMNS_MISSING", "error",
+            "边表缺列 {0} 个: {1}（结构与规范不符；可用 --rebuild 触发补列）".format(
+                len(missing_cols), ", ".join(missing_cols)),
+        ))
+
+    missing_idx = _missing_schema_indexes(app_ds)
+    if _IDEM_INDEX in missing_idx:
         findings.append(Finding(
             "IDEM_INDEX_MISSING", "error",
             "唯一幂等索引 {0} 缺失或已退化为非唯一（7 元组防重放保障失效；"
             "可用 --rebuild 补建）".format(_IDEM_INDEX),
+        ))
+    other_idx = [n for n in missing_idx if n != _IDEM_INDEX]
+    if other_idx:
+        findings.append(Finding(
+            "SCHEMA_INDEX_MISSING", "warn",
+            "结构索引缺失 {0}: {1}（不影响账本正确性，仅查询性能；"
+            "可用 --rebuild 补建）".format(len(other_idx), ", ".join(other_idx)),
         ))
 
     stored_sql = _stored_view_sql(app_ds)
@@ -264,6 +320,11 @@ def scan(app_ds) -> ReconcileReport:
             "VIEW_SQL_DRIFT", "error",
             "视图定义与规范 SQL 不一致（视图被篡改；可用 --rebuild 重建）",
         ))
+
+    # 缺列时不读边表/不做视图对账（SELECT 会因缺列直接抛错）
+    if missing_cols:
+        report.findings = findings
+        return report
 
     # ── ② 边域（全表扫描） ───────────────────────────────────────────────────
     rows = app_ds.execute(
@@ -372,11 +433,13 @@ def scan(app_ds) -> ReconcileReport:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def rebuild_projection(app_ds) -> RebuildResult:
-    """按边表重建投影：视图 DROP + 规范重建 + 缺失索引补建（幂等可重入）。
+    """按边表重建投影：视图原子替换 + 缺失索引/列补建（幂等可重入）。
 
-    **绝不改边数据**（append-only 铁律）。后置自检闭环：SchemaMigrator 对
-    索引/视图创建失败均吞错（重复键挡唯一索引即静默失败），故重建后逐项
-    复核，缺一即 ok=False + error（fail-loud，不假成功）。
+    **绝不改边数据**（append-only 铁律）。视图替换在单事务内 DROP+CREATE，
+    失败即回滚（旧视图保持不变，不出现"DROP 后建不回"的空窗）。后置自检
+    闭环：SchemaMigrator 对索引创建失败吞错（重复键挡唯一索引即静默失败），
+    故重建后逐项复核（视图达规范形态 + 规范索引齐全），缺一即 ok=False +
+    error（fail-loud，不假成功）。
 
     Args:
         app_ds: 应用库数据源
@@ -393,26 +456,41 @@ def rebuild_projection(app_ds) -> RebuildResult:
         return result
 
     result.view_existed = _stored_view_sql(app_ds) is not None
-    app_ds.execute("DROP VIEW IF EXISTS {0}".format(DOC_FLOW_CONSUMED_VIEW))
-    # 同名非唯一索引（被篡改）会挡住 ensure 的 CREATE INDEX IF NOT EXISTS ——
-    # 先摘除，交给 ensure 重建为唯一索引（重复键仍会 fail-loud，见后置自检）
+
+    # 原子替换视图：DROP + CREATE 同一事务，任一失败即回滚 → 旧视图保持不变
+    # （SchemaMigrator 的视图 CREATE 是 IF NOT EXISTS 且静默吞错，故此处直接
+    #   用规范 SQL 建视图，不走 ensure）
+    try:
+        with app_ds.transaction():
+            app_ds.execute("DROP VIEW IF EXISTS {0}".format(DOC_FLOW_CONSUMED_VIEW))
+            app_ds.execute("CREATE VIEW {0} AS {1}".format(
+                DOC_FLOW_CONSUMED_VIEW, _canonical_view_sql()))
+    except Exception as e:  # noqa: BLE001 - 重建失败必须显式回报，不假成功
+        result.error = "视图重建失败（已回滚，原视图保持不变）: {0}".format(e)
+        return result
+
+    # 同名非唯一索引（被篡改）→ 先摘除，交给 ensure 重建为唯一索引
+    # （重复键仍会 fail-loud，见后置自检）
     if (not _unique_index_ok(app_ds, _IDEM_INDEX)
             and _index_name_exists(app_ds, _IDEM_INDEX)):
         app_ds.execute("DROP INDEX IF EXISTS {0}".format(_IDEM_INDEX))
-    ensure_doc_flow_edge_tables(app_ds)   # 视图 IF NOT EXISTS 建回 + 索引补建
+    ensure_doc_flow_edge_tables(app_ds)   # 索引补建 + 缺列补齐（视图已存在则跳过）
 
     stored = _stored_view_sql(app_ds)
     result.view_rebuilt = (
         stored is not None and _norm_sql(stored) == _expected_view_sql_norm()
     )
-    result.index_restored = _unique_index_ok(app_ds, _IDEM_INDEX)
+    missing_idx = _missing_schema_indexes(app_ds)
+    result.index_restored = not missing_idx
     result.ok = result.view_rebuilt and result.index_restored
     if not result.ok:
         if not result.view_rebuilt:
             result.error = "视图重建后未达规范形态（检查库可写性）"
-        else:
+        elif _IDEM_INDEX in missing_idx:
             result.error = (
                 "唯一索引 {0} 未恢复——通常因边表存在重复 7 元组"
                 "（先清重复再重建；重建不改边数据）".format(_IDEM_INDEX)
             )
+        else:
+            result.error = "结构索引未恢复: {0}".format(", ".join(missing_idx))
     return result
