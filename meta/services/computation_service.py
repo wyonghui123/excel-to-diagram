@@ -55,6 +55,10 @@ class ComputationService:
             return self._count_children(data_source, object_type, record_id, computation)
 
         if comp_type in self.AGGREGATION_TYPES:
+            if self._is_parent_grouped(computation):
+                return self._aggregate_field_by_parent(
+                    data_source, object_type, record_id, computation
+                )
             source_field = computation.get('source_field')
             filters = computation.get('filters')
             return self._aggregate_field(
@@ -84,7 +88,12 @@ class ComputationService:
             elif comp_type == 'count_children':
                 self._batch_count_children(data_source, object_type, records, col['key'], computation)
             elif comp_type in self.AGGREGATION_TYPES:
-                self._batch_aggregate_field(data_source, object_type, records, col['key'], computation)
+                if self._is_parent_grouped(computation):
+                    self._batch_aggregate_field_by_parent(
+                        data_source, object_type, records, col['key'], computation
+                    )
+                else:
+                    self._batch_aggregate_field(data_source, object_type, records, col['key'], computation)
             elif comp_type == 'expression' or computation.get('formula'):
                 self._batch_evaluate_formula(data_source, object_type, records, col['key'], computation)
 
@@ -373,6 +382,128 @@ class ComputationService:
 
         for record in records:
             record[field_key] = result
+
+    @staticmethod
+    def _is_parent_grouped(computation: Dict[str, Any]) -> bool:
+        """判断取值聚合是否按父外键分组 (FR-007 汇总补强).
+
+        声明方式与 count_children 对称: 指定 target_object / child_object
+        表示"按指向本记录的外键, 聚合子表中的 source_field"。
+        未指定则保持原整表/条件聚合语义 (向下兼容)。
+        """
+        return bool(
+            computation.get('target_object') or computation.get('child_object')
+        )
+
+    def _resolve_parent_aggregation(self, computation: Dict[str, Any]):
+        """解析按父分组取值聚合所需的 (table, fk, source_field, sql_func).
+
+        target_object / foreign_key 解析口径与 _count_children 一致:
+        1. target_object / child_object → registry 取表名
+        2. foreign_key 显式指定, 否则从层级/关联配置推导
+
+        Returns:
+            (table_name, fk_field, source_field, sql_func) 或 None (配置不完整)
+        """
+        target_object = computation.get('target_object') or computation.get('child_object', '')
+        if not target_object:
+            return None
+
+        meta_obj = registry.get(target_object)
+        if not meta_obj:
+            return None
+
+        fk_field = computation.get('foreign_key', '')
+        if not fk_field:
+            from meta.services.cascade_service import HierarchyConfigLoader
+            fk_field = HierarchyConfigLoader.get_foreign_key(target_object)
+        if not fk_field:
+            return None
+
+        source_field = computation.get('source_field')
+        if not source_field:
+            return None
+
+        sql_func = self.AGGREGATION_TYPES.get(computation.get('type', ''))
+        if not sql_func:
+            return None
+
+        return meta_obj.table_name, fk_field, source_field, sql_func
+
+    def _aggregate_field_by_parent(self, data_source, object_type: str, record_id: int,
+                                   computation: Dict[str, Any]) -> Any:
+        """按父外键分组取值聚合 (单条): 聚合子表 source_field, 条件 fk = record_id.
+
+        与 _count_children 对称, 仅聚合函数由 SUM/AVG/MAX/MIN 决定。
+        无匹配子行时返回 None (与 SQL 聚合无行语义一致)。
+        """
+        resolved = self._resolve_parent_aggregation(computation)
+        if not resolved:
+            return None
+        table_name, fk_field, source_field, sql_func = resolved
+
+        try:
+            sql = (
+                f"SELECT {sql_func}({source_field}) "
+                f"FROM {table_name} WHERE {fk_field} = ?"
+            )
+            cursor = data_source.execute(sql, (record_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] is not None else None
+        except Exception:
+            return None
+
+    def _batch_aggregate_field_by_parent(self, data_source, object_type: str,
+                                         records: List[Dict], field_key: str,
+                                         computation: Dict[str, Any]):
+        """按父外键分组取值聚合 (批量): 1 个 SQL 替代 N+1.
+
+        与 _batch_count_children 对称: WHERE fk IN (...) GROUP BY fk。
+        无匹配子行的父记录取值为 None；失败时回退到单条实现。
+        """
+        if not records:
+            return
+
+        resolved = self._resolve_parent_aggregation(computation)
+        if not resolved:
+            for record in records:
+                record[field_key] = None
+            return
+        table_name, fk_field, source_field, sql_func = resolved
+
+        record_ids = [r.get('id') for r in records if r.get('id') is not None]
+        unique_ids = list(set(record_ids))
+        if not unique_ids:
+            for record in records:
+                record[field_key] = None
+            return
+
+        try:
+            placeholders = ','.join(['?'] * len(unique_ids))
+            sql = (
+                f"SELECT {fk_field}, {sql_func}({source_field}) AS agg "
+                f"FROM {table_name} "
+                f"WHERE {fk_field} IN ({placeholders}) "
+                f"AND {fk_field} IS NOT NULL "
+                f"GROUP BY {fk_field}"
+            )
+            cursor = data_source.execute(sql, tuple(unique_ids))
+            agg_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            for record in records:
+                rid = record.get('id')
+                record[field_key] = agg_map.get(rid) if rid is not None else None
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                '[FR-007] batch parent aggregation failed, falling back to per-record: %s', e
+            )
+            for record in records:
+                rid = record.get('id')
+                record[field_key] = (
+                    self._aggregate_field_by_parent(data_source, object_type, rid, computation)
+                    if rid is not None else None
+                )
 
     def _count_relations(self, data_source, object_type: str, record_id: int,
                          scope: str) -> int:

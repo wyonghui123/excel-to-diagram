@@ -3,9 +3,14 @@ import pytest
 pytestmark = pytest.mark.integration
 
 # -*- coding: utf-8 -*-
+import os
 import pytest
 import sqlite3
 from unittest.mock import patch, MagicMock
+
+# 本文件全部使用 in-memory sqlite (不触碰真实 DB), 按项目惯例绕过 raw-SQL 守卫
+os.environ.setdefault('ALLOW_RAW_SQL', '1')
+
 from meta.services.computation_service import computation_service
 from meta import get_meta_object
 
@@ -156,3 +161,147 @@ class TestComputeBatch:
         ]
         result = computation_service.compute_batch(mock_data_source, 'domain', records, computed_columns)
         assert result[0]['filtered_sum'] == 20
+
+
+# ─────────────────────────────────────────────────────────
+# [FR-007 汇总补强] 按父外键分组的取值聚合
+# ─────────────────────────────────────────────────────────
+
+@pytest.fixture
+def parent_child_db():
+    conn = sqlite3.connect(':memory:')
+    cursor = conn.cursor()
+    cursor.execute('CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)')
+    cursor.execute(
+        'CREATE TABLE order_lines '
+        '(id INTEGER PRIMARY KEY, order_id INTEGER, amount REAL, qty INTEGER)'
+    )
+    cursor.execute("INSERT INTO orders (id, name) VALUES (1, 'O1')")
+    cursor.execute("INSERT INTO orders (id, name) VALUES (2, 'O2')")
+    cursor.execute("INSERT INTO orders (id, name) VALUES (3, 'O3')")
+    # O1: 2 lines, O2: 1 line, O3: 0 lines
+    cursor.execute("INSERT INTO order_lines (id, order_id, amount, qty) VALUES (11, 1, 10.0, 2)")
+    cursor.execute("INSERT INTO order_lines (id, order_id, amount, qty) VALUES (12, 1, 20.0, 3)")
+    cursor.execute("INSERT INTO order_lines (id, order_id, amount, qty) VALUES (21, 2, 5.0, 1)")
+    conn.commit()
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def patch_child_registry():
+    child_meta = MagicMock()
+    child_meta.table_name = 'order_lines'
+    with patch('meta.services.computation_service.registry.get', return_value=child_meta):
+        yield child_meta
+
+
+def _parent_comp(agg_type, **overrides):
+    comp = {
+        'type': agg_type,
+        'target_object': 'order_line',
+        'foreign_key': 'order_id',
+        'source_field': 'amount',
+    }
+    comp.update(overrides)
+    return comp
+
+
+class TestParentGroupedAggregation:
+    def test_sum_field_by_parent(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        assert computation_service._aggregate_field_by_parent(
+            ds, 'order', 1, _parent_comp('sum_field')
+        ) == 30.0
+
+    def test_avg_field_by_parent(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        assert computation_service._aggregate_field_by_parent(
+            ds, 'order', 1, _parent_comp('avg_field')
+        ) == 15.0
+
+    def test_max_min_field_by_parent(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        assert computation_service._aggregate_field_by_parent(
+            ds, 'order', 1, _parent_comp('max_field')
+        ) == 20.0
+        assert computation_service._aggregate_field_by_parent(
+            ds, 'order', 1, _parent_comp('min_field')
+        ) == 10.0
+
+    def test_no_children_returns_none(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        assert computation_service._aggregate_field_by_parent(
+            ds, 'order', 3, _parent_comp('sum_field')
+        ) is None
+
+    def test_unknown_target_object_returns_none(self, parent_child_db):
+        ds = MockDataSource(parent_child_db)
+        with patch('meta.services.computation_service.registry.get', return_value=None):
+            assert computation_service._aggregate_field_by_parent(
+                ds, 'order', 1, _parent_comp('sum_field')
+            ) is None
+
+    def test_missing_source_field_returns_none(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        comp = _parent_comp('sum_field')
+        comp.pop('source_field')
+        assert computation_service._aggregate_field_by_parent(ds, 'order', 1, comp) is None
+
+    def test_foreign_key_derived_from_hierarchy(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        comp = {'type': 'sum_field', 'target_object': 'order_line', 'source_field': 'amount'}
+        with patch(
+            'meta.services.cascade_service.HierarchyConfigLoader.get_foreign_key',
+            return_value='order_id',
+        ):
+            assert computation_service._aggregate_field_by_parent(ds, 'order', 1, comp) == 30.0
+
+    def test_compute_field_dispatches_parent_grouped(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        result = computation_service.compute_field(
+            ds, 'order', 1, 'total_amount', _parent_comp('sum_field')
+        )
+        assert result == 30.0
+
+    def test_compute_field_unchanged_without_target_object(self, mock_data_source):
+        # 无 target_object 时保持整表聚合语义 (向下兼容)
+        result = computation_service.compute_field(
+            mock_data_source, 'domain', 1, 'total_value',
+            {'type': 'sum_field', 'source_field': 'value'},
+        )
+        assert result == 60
+
+    def test_batch_parent_grouped_sum(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        records = [{'id': 1}, {'id': 2}, {'id': 3}]
+        cols = [{'key': 'total_amount', 'computation': _parent_comp('sum_field')}]
+        result = computation_service.compute_batch(ds, 'order', records, cols)
+        assert result[0]['total_amount'] == 30.0
+        assert result[1]['total_amount'] == 5.0
+        assert result[2]['total_amount'] is None
+
+    def test_batch_parent_grouped_avg(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        records = [{'id': 1}, {'id': 2}]
+        cols = [{'key': 'avg_amount', 'computation': _parent_comp('avg_field')}]
+        result = computation_service.compute_batch(ds, 'order', records, cols)
+        assert result[0]['avg_amount'] == 15.0
+        assert result[1]['avg_amount'] == 5.0
+
+    def test_batch_fallback_on_sql_error(self, parent_child_db, patch_child_registry):
+        ds = MockDataSource(parent_child_db)
+        records = [{'id': 1}, {'id': 2}]
+        cols = [{'key': 'total_amount', 'computation': _parent_comp('sum_field')}]
+        original_execute = MockDataSource.execute
+
+        def flaky_execute(self, sql, params=()):
+            if 'GROUP BY' in sql:
+                raise Exception('boom')
+            return original_execute(self, sql, params)
+
+        # 批量 SQL 抛错 → 逐条回退
+        with patch.object(MockDataSource, 'execute', flaky_execute):
+            result = computation_service.compute_batch(ds, 'order', records, cols)
+        assert result[0]['total_amount'] == 30.0
+        assert result[1]['total_amount'] == 5.0
