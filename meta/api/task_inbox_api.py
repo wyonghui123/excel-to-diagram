@@ -5,6 +5,7 @@
 - GET  /api/v1/task-inbox          统一收件箱（entries + counts，按登录人过滤）
 - GET  /api/v1/task-inbox/counts   分区角标（全量口径）
 - POST /api/v1/platform/tick       平台心跳（派工 / 回收 / 告警；限管理员）
+- POST /api/v1/tasks/<task_id>/start  启动一个任务（executor 适配层统一入口；限管理员）
 
 纪律（§12.1 A8 / Q1）:
 - 行级可见性过滤是硬项：actor 一律取登录态（user_id 优先，退 username），
@@ -27,6 +28,7 @@ from meta.core.datasource import get_data_source
 from meta.core.db_path import get_meta_db_path
 from meta.core.task_inbox import DEFAULT_LIMIT, inbox_counts, inbox_query
 from meta.core.task_tick import platform_tick
+from meta.core.task_executor_adapter import ExecutorAdapterError, start_task
 from meta.services.auth_middleware import (
     get_current_user, is_admin, login_required,
 )
@@ -106,3 +108,31 @@ def platform_tick_route():
         logger.error("[A5] 平台心跳失败: %s", e)
         return jsonify({'success': False, 'message': str(e)}), 500
     return jsonify({'success': True, 'data': result})
+
+
+def start_task_service(task_id: str, *, user, registry=None):
+    """启动一个任务（A5 适配层统一入口）；可测服务函数。
+
+    Returns:
+        (payload, http_status)
+    """
+    if not is_admin(user):
+        return {'success': False, 'message': '需要管理员权限'}, 403
+    try:
+        outcome = start_task(_platform_ds(), str(task_id),
+                             run_as='system', registry=registry)
+    except ExecutorAdapterError as e:
+        # 任务不存在 / 未知类型 / 载体未实现（agent）→ 409 冲突（无副作用）
+        return {'success': False, 'message': str(e)}, 409
+    except Exception as e:
+        logger.error("[A5] 任务启动失败: %s", e)
+        return {'success': False, 'message': str(e)}, 500
+    return {'success': True, 'data': outcome}, 200
+
+
+@task_inbox_bp.route('/api/v1/tasks/<task_id>/start', methods=['POST'])
+@login_required
+def task_start_route(task_id: str):
+    """启动任务：executor 适配层统一入口（run-as 由服务端裁决，不接受客户端身份）。"""
+    payload, code = start_task_service(task_id, user=get_current_user())
+    return jsonify(payload), code

@@ -185,3 +185,49 @@ class TestDispatch:
 
         assert outcome["status"] == "failed"
         assert _status(ds, tid) == "failed"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REST 服务函数（不经 Flask 全栈）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_TC_A5_020_服务函数返回适配结果(ds, registry, monkeypatch):
+    import meta.api.task_inbox_api as api
+
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _register(registry, "demo.sync", lambda p, c: {"success": True})
+    tid = _task(ds, executor_type="system", action_id="demo.sync")
+
+    payload, code = api.start_task_service(
+        tid, user={"user_id": "u-admin", "permissions": ["*"]}, registry=registry)
+
+    assert code == 200
+    assert payload["success"] is True
+    assert payload["data"]["status"] == OUTCOME_COMPLETED
+
+
+def test_TC_A5_021_服务函数非管理员被拒(ds, registry, monkeypatch):
+    import meta.api.task_inbox_api as api
+
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    tid = _task(ds, executor_type="human", status="ready", action_id="")
+
+    payload, code = api.start_task_service(
+        tid, user={"user_id": "u-plain", "permissions": []}, registry=registry)
+
+    assert code == 403
+    assert _status(ds, tid) == "ready"
+
+
+def test_TC_A5_022_服务函数未实现类型映射409(ds, registry, monkeypatch):
+    import meta.api.task_inbox_api as api
+
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    tid = _task(ds, executor_type="agent", status="ready", action_id="")
+
+    payload, code = api.start_task_service(
+        tid, user={"user_id": "u-admin", "permissions": ["*"]}, registry=registry)
+
+    assert code == 409
+    assert payload["success"] is False
+    assert "agent" in payload["message"]
