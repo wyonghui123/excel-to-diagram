@@ -8,7 +8,7 @@ BO Action 注册模块
 1. server.py create_app() 调用（向后兼容）
 2. ApplicationBuilder.with_bo_actions() 调用（新入口）
 
-19 个 Action 分类:
+21 个 Action 分类:
 - 5 个 auth (user.*)
 - 1 个 profile (user.update_profile)
 - 2 个 crud (batch_save, batch_delete)
@@ -17,6 +17,7 @@ BO Action 注册模块
 - 1 个 notification (subscription.create)
 - 4 个 v3.4 function (function.value_help.resolve, function.aggregate.*, function.subscription.list)
 - 3 个 v3.5 enum_type CRUD
+- 2 个 v2.0 allocation (allocation.apply, allocation.split)
 
 [B1 2026-10-02] 注册尾部执行「注册契约机器校验」（见 meta/core/bo_action_contract.py）：
   idempotent / 前置条件 preconditions / 参数 schema / 返回契约四要件的固化与校验。
@@ -68,6 +69,12 @@ def register_all_bo_actions(registry=None):
         enum_type_create_handler,
         enum_type_update_handler,
         enum_type_delete_handler,
+    )
+
+    # 规则模型二期 P7/M7: 拆分 / 分摊
+    from meta.services.allocation_apply import (
+        allocation_apply_handler,
+        allocation_split_handler,
     )
 
     # ==================== 1-5: 用户认证 (auth) ====================
@@ -443,6 +450,58 @@ def register_all_bo_actions(registry=None):
             'required': ['id'],
             'properties': {
                 'id': {'type': 'string'},
+            }
+        },
+        requires_auth=True,
+        requires_admin=True,
+        idempotent=False,
+    )
+
+    # ==================== 20-21: 拆分 / 分摊 (规则模型二期 P7/M7) ====================
+    registry.register(
+        'allocation.apply',
+        allocation_apply_handler,
+        description='把父行金额按权重守恒地分摊到已有 N 个子行 (Σ子行=父行)',
+        object_type='*',
+        category='allocation',
+        input_schema={
+            'type': 'object',
+            'required': ['parent_id', 'target_object', 'target_field', 'weights'],
+            'properties': {
+                'parent_id': {'type': 'integer'},
+                'target_object': {'type': 'string'},
+                'target_field': {'type': 'string'},
+                'source_field': {'type': 'string'},
+                'fk_field': {'type': 'string'},
+                'parent_object': {'type': 'string'},
+                'scale': {'type': 'integer'},
+                'weights': {'type': 'array'},
+            }
+        },
+        requires_auth=True,
+        requires_admin=True,
+        idempotent=False,
+    )
+    registry.register(
+        'allocation.split',
+        allocation_split_handler,
+        description='把父行金额守恒地拆分成 N 个新建子行 (Σ新行=父行)',
+        object_type='*',
+        category='allocation',
+        input_schema={
+            'type': 'object',
+            'required': ['parent_id', 'target_object', 'target_field'],
+            'properties': {
+                'parent_id': {'type': 'integer'},
+                'target_object': {'type': 'string'},
+                'target_field': {'type': 'string'},
+                'source_field': {'type': 'string'},
+                'fk_field': {'type': 'string'},
+                'parent_object': {'type': 'string'},
+                'scale': {'type': 'integer'},
+                'weights': {'type': 'array'},
+                'split_count': {'type': 'integer'},
+                'template': {'type': 'object'},
             }
         },
         requires_auth=True,

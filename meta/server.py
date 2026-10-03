@@ -822,7 +822,7 @@ def create_app(db_path=None):
 
     # v3 BO Action: 注册业务 Action 处理器
     # [FR-5.2] 提取到 meta/services/bo_action_registrations.py
-    # 19 个 register 调用 → 单行 register_all_bo_actions()
+    # 21 个 register 调用 → 单行 register_all_bo_actions()
     from meta.services.bo_action_registrations import register_all_bo_actions
     register_all_bo_actions()
 

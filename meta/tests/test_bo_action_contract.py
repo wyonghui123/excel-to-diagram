@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
   3. 严格模式 assert_registry_contracts 抛错；非严格 report 返回违规数
   4. 前置条件求值：input_present / input_equals / input_in
   5. 注册表 call() 调用 handler 前统一拦截未满足前置条件
-  6. 真实 19 个 action 全部合规（B1 未破坏既有注册）
+  6. 真实 21 个 action 全部合规（B1 未破坏既有注册；P7 新增 allocation.*）
 """
 
 from meta.core.bo_action_contract import (
@@ -324,7 +324,7 @@ class TestCallInterception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 真实 19 个 action 全合规（B1 不破坏既有注册）
+# 真实 21 个 action 全合规（B1 不破坏既有注册；P7 新增 allocation.* 2 个）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestRealRegistryContract:
@@ -335,7 +335,7 @@ class TestRealRegistryContract:
         def _run():
             from meta.services.bo_action_registrations import register_all_bo_actions
             register_all_bo_actions(bo_action_registry)
-            assert len(bo_action_registry.list_ids()) == 19
+            assert len(bo_action_registry.list_ids()) == 21
             assert validate_registry(bo_action_registry) == {}
         _with_isolated_registry(_run)
 
