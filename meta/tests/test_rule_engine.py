@@ -497,6 +497,128 @@ def test_rule_engine_compute():
     print("[PASS] RuleEngine compute 测试通过")
 
 
+def test_rule_engine_cross_field_validation_order():
+    """[P1 统一入口 2026-10-03] 跨字段校验：只改 A(price)，必须能校验到由 A 算出的 B(total)
+
+    依赖序应为 calc_total（算 total）→ total_consistent（校验 total）。
+    为验证「顺序真的由依赖决定而非 priority」，故意把校验的 priority 设得更小
+    （数字越小越靠前）——若仍按 priority 平铺，校验会先于计算执行、读到过期的
+    total 而误判失败；依赖序下则先算后校，通过。
+    """
+    print("\n=== 测试 RuleEngine 跨字段校验（依赖序）===")
+
+    engine = RuleEngine()
+
+    obj = MetaObject(
+        id="cross_field_obj",
+        name="跨字段对象",
+        table_name="cross_field_obj",
+        fields=[
+            MetaField(id="price", name="单价", field_type=FieldType.FLOAT, db_column="price"),
+            MetaField(id="total", name="合计", field_type=FieldType.FLOAT,
+                      db_column="total", computed=True),
+        ],
+        rules=[
+            MetaValidation(
+                id="total_consistent",
+                name="合计必须等于单价×2",
+                rule_type=RuleType.VALIDATION,
+                target_fields=["total"],
+                action="total == price * 2",
+                message="合计与单价不一致",
+                priority=10,           # 故意更小：priority 平铺会先跑校验
+                triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+            MetaComputation(
+                id="calc_total",
+                name="计算合计",
+                rule_type=RuleType.COMPUTATION,
+                source_fields=["price"],
+                target_field="total",
+                formula="price * 2",
+                compute_on_change=True,
+                priority=100,
+                triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+        ]
+    )
+
+    # 用户只改了 price；total 是库里过期的旧值
+    data = {"price": 30.0, "total": 20.0}
+    original_data = {"price": 10.0, "total": 20.0}
+
+    report = engine.execute_rules(obj, RuleTrigger.BEFORE_SAVE, data, original_data)
+
+    order = [r.rule_id for r in report.results]
+    assert order == ["calc_total", "total_consistent"], \
+        "执行顺序应为依赖序 calc_total → total_consistent，实际: {0}".format(order)
+    assert data["total"] == 60.0, "计算规则应先执行，把 total 更新为 60，实际: {0}".format(data["total"])
+    assert report.success, "跨字段校验应通过；若失败说明校验先于计算执行"
+
+    print("  执行顺序: {0}".format(order))
+    print("  total = {0}".format(data["total"]))
+    print("[PASS] RuleEngine 跨字段校验（依赖序）测试通过")
+
+
+def test_compute_only_computes_and_ignores_validation():
+    """[G3 修复 2026-10-03] compute() 只做计算，不再跑链式校验
+
+    契约：
+    - 计算规则按依赖序执行（comp_a → comp_b，尽管 comp_b 的 priority 更小）；
+    - 一条"恒失败"的校验规则不参与 compute()：既不改结果，也不上抛异常；
+    - 该校验仍由 execute_rules(BEFORE_SAVE) 按 action 口径统一执行并阻断。
+    """
+    print("\n=== 测试 compute() 只做计算（G3）===")
+
+    engine = RuleEngine()
+
+    obj = MetaObject(
+        id="compute_only_obj",
+        name="仅计算对象",
+        table_name="compute_only_obj",
+        fields=[
+            MetaField(id="seed", name="种子", field_type=FieldType.INTEGER, db_column="seed"),
+            MetaField(id="a", name="A", field_type=FieldType.INTEGER, db_column="a", computed=True),
+            MetaField(id="b", name="B", field_type=FieldType.INTEGER, db_column="b", computed=True),
+        ],
+        rules=[
+            MetaComputation(
+                id="comp_a", name="先算A",
+                source_fields=["seed"], target_field="a",
+                formula="seed + 1", compute_on_change=False,
+                triggers=[RuleTrigger.BEFORE_SAVE], priority=200,
+            ),
+            MetaComputation(
+                id="comp_b", name="再算B",
+                source_fields=["a"], target_field="b",
+                formula="a * 10", compute_on_change=False,
+                triggers=[RuleTrigger.BEFORE_SAVE], priority=10,
+            ),
+            MetaValidation(
+                id="always_fail", name="恒失败校验",
+                target_fields=["b"], condition="", action="1 == 2",
+                message="校验失败",
+                triggers=[RuleTrigger.BEFORE_SAVE], priority=1,
+            ),
+        ]
+    )
+
+    data = {"seed": 4, "a": 0, "b": 0}
+    result = engine.compute(obj, data, original_data={"seed": 0, "a": 0, "b": 0})
+
+    assert result["a"] == 5, "comp_a 应先执行，实际 a={0}".format(result["a"])
+    assert result["b"] == 50, "comp_b 应在 comp_a 之后执行，实际 b={0}".format(result["b"])
+
+    report = engine.execute_rules(
+        obj, RuleTrigger.BEFORE_SAVE,
+        {"seed": 4, "a": 5, "b": 50}, {"seed": 0, "a": 0, "b": 0}
+    )
+    assert not report.success, "action 恒假的校验应由 execute_rules 判定失败"
+
+    print("  a={0}, b={1}（compute 只做计算）".format(result["a"], result["b"]))
+    print("[PASS] compute() 只做计算（G3）测试通过")
+
+
 def run_all_tests():
     print("=" * 60)
     print("RuleEngine 测试")
@@ -511,6 +633,8 @@ def run_all_tests():
     test_derivation_executor_transformation()
     test_rule_engine_execute_rules()
     test_rule_engine_compute()
+    test_rule_engine_cross_field_validation_order()
+    test_compute_only_computes_and_ignores_validation()
     
     print("\n" + "=" * 60)
     print("所有测试通过！")

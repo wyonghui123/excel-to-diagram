@@ -1028,19 +1028,6 @@ indexes:
   type: btree
   priority: medium
   description: 版本+名称索引（名称搜索场景）
-validations:
-- id: version_id_required
-  name: 版本ID必填
-  type: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
-- id: code_format
-  name: 编码格式
-  type: field
-  rule: code matches '^[A-Z][A-Z0-9_]*$'
-  message: 编码格式不正确，应为大写字母开头
-  severity: warning
 conditional_required_examples:
 - field_id: sub_domain_id
   description: 领域-子领域条件必填示例

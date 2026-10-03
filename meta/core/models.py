@@ -936,7 +936,6 @@ class MetaObject:
     relations: List[MetaRelation] = field(default_factory=list)
     indexes: List[MetaIndex] = field(default_factory=list)
     actions: List[MetaAction] = field(default_factory=list)
-    validations: List[MetaValidation] = field(default_factory=list)
     rules: List[MetaRule] = field(default_factory=list)
     queries: List[MetaQuery] = field(default_factory=list)
     parent_object: str = ""
@@ -1080,10 +1079,6 @@ class MetaObject:
     def get_rules_by_trigger(self, trigger: RuleTrigger) -> List[MetaRule]:
         """按触发时机获取规则"""
         return [r for r in self.rules if trigger in r.triggers and r.enabled]
-    
-    def get_validations(self) -> List[MetaValidation]:
-        """获取所有校验规则"""
-        return [r for r in self.rules if isinstance(r, MetaValidation)]
     
     def get_constraints(self) -> List[MetaConstraint]:
         """获取所有约束规则"""

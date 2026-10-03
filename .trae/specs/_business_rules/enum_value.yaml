@@ -1,6 +1,6 @@
 schema: enum_value
 name: 枚举值
-total_rules: 15
+total_rules: 11
 rules:
 - id: BR-enum_value-ASPECT-audit
   type: aspect
@@ -13,62 +13,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-ASPECT-audit_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-enum_value-VAL-enum-type-id-required
-  type: validations
-  object: enum_value
-  subtype: field
-  rule: enum_type_id is not None and enum_type_id != ''
-  message: 枚举类型不能为空
-  severity: error
-  source: schema:enum_value.yaml:validations[enum_type_id_required]
-  derived_scenarios:
-  - id: T_ENUM_VALUE_VAL_ENUM_TYPE_ID_REQUIRED_001
-    title: '校验: 枚举类型必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-enum_type_id_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-enum_value-VAL-code-required
-  type: validations
-  object: enum_value
-  subtype: field
-  rule: code is not None and code != ''
-  message: 编码不能为空
-  severity: error
-  source: schema:enum_value.yaml:validations[code_required]
-  derived_scenarios:
-  - id: T_ENUM_VALUE_VAL_CODE_REQUIRED_001
-    title: '校验: 编码必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-code_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-enum_value-VAL-name-required
-  type: validations
-  object: enum_value
-  subtype: field
-  rule: name is not None and name != ''
-  message: 名称不能为空
-  severity: error
-  source: schema:enum_value.yaml:validations[name_required]
-  derived_scenarios:
-  - id: T_ENUM_VALUE_VAL_NAME_REQUIRED_001
-    title: '校验: 名称必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-name_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-enum_value-VAL-unique-code-per-type
-  type: validations
-  object: enum_value
-  subtype: constraint
-  rule: UNIQUE(enum_type_id, code)
-  message: 同一枚举类型下编码不能重复
-  severity: error
-  source: schema:enum_value.yaml:validations[unique_code_per_type]
-  derived_scenarios:
-  - id: T_ENUM_VALUE_VAL_UNIQUE_CODE_PER_TYPE_001
-    title: '校验: 编码唯一性 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-unique_code_per_type'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-enum_value-IE-import
   type: import_export
   object: enum_value

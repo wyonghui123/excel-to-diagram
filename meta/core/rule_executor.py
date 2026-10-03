@@ -1288,7 +1288,10 @@ class RuleEngine:
         # 并覆盖 apply_defaults 已算出的值（E2E 实测：price_list 被 PL_SYS 覆盖）。
         rules = [r for r in rules
                  if getattr(r, 'rule_type', None) != RuleType.DEFAULT]
-        rules = sorted(rules, key=lambda r: r.priority)
+        # [P1 统一入口 2026-10-03] 顺序**唯一口径** = 依赖拓扑序。
+        # 历史上顺序有两套口径：compute() 走拓扑链、其余入口按 priority 平铺（G2）。
+        # 现收口到本唯一入口，所有触发时机按同一依赖序执行；执行体不变（见 _execute_rule）。
+        rules = self._order_rules_by_dependency(meta_object, rules)
         
         for rule in rules:
             result = self._execute_rule(rule, context)
@@ -1323,6 +1326,34 @@ class RuleEngine:
                 message="Rule type '{0}' not implemented".format(rule.rule_type.value),
             )
     
+    def _order_rules_by_dependency(self, meta_object: MetaObject,
+                                   rules: List[MetaRule]) -> List[MetaRule]:
+        """按依赖拓扑序排定本次触发的规则执行顺序（唯一顺序口径）。
+
+        [P1 统一入口 2026-10-03] 与平铺执行的差别**仅在顺序**：
+        - 图内规则：按 `RuleDependencyAnalyzer.topological_sort` 的次序（依赖在前）；
+        - 图外规则（分析器未建档的类型，如 PERMISSION）：保持原 priority 稳定序，追加在末尾；
+        - 分析器报环（ValueError）时**回退**到原 priority 顺序并告警，避免因某一个
+          与本次触发无关的环导致整次保存失败。
+        """
+        if len(rules) <= 1:
+            return list(rules)
+
+        by_priority = sorted(rules, key=lambda r: r.priority)
+        try:
+            from meta.core.rule_chain import RuleDependencyAnalyzer
+            graph = RuleDependencyAnalyzer.analyze(meta_object)
+            order = RuleDependencyAnalyzer.topological_sort(graph)
+        except ValueError as e:
+            logger.warning("规则拓扑排序失败，回退到优先级顺序: %s", str(e))
+            return by_priority
+
+        rank = {rule_id: idx for idx, rule_id in enumerate(order)}
+        in_graph = [r for r in by_priority if r.id in rank]
+        out_graph = [r for r in by_priority if r.id not in rank]
+        in_graph.sort(key=lambda r: rank[r.id])
+        return in_graph + out_graph
+
     def validate(self, meta_object: MetaObject, data: Dict[str, Any],
                  trigger: RuleTrigger = RuleTrigger.BEFORE_SAVE) -> RuleExecutionReport:
         """
@@ -1339,9 +1370,7 @@ class RuleEngine:
         return self.execute_rules(meta_object, trigger, data)
     
     def compute(self, meta_object: MetaObject, data: Dict[str, Any],
-                original_data: Optional[Dict[str, Any]] = None,
-                changed_fields: Optional[set] = None,
-                use_chain: bool = True) -> Dict[str, Any]:
+                original_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         执行计算规则
         
@@ -1349,8 +1378,6 @@ class RuleEngine:
             meta_object: 元模型对象
             data: 当前数据
             original_data: 原始数据
-            changed_fields: 变更的字段（用于增量计算）
-            use_chain: 是否使用规则链执行器
             
         Returns:
             计算后的数据
@@ -1358,31 +1385,19 @@ class RuleEngine:
         context = RuleContext(meta_object, data, original_data,
                               data_source=self.data_source)
         
-        if use_chain:
-            try:
-                from meta.core.rule_chain import ImplicitRuleChainExecutor, RuleNodeType
-                chain_executor = ImplicitRuleChainExecutor(meta_object)
-                chain_result = chain_executor.execute(
-                    data=data,
-                    original_data=original_data,
-                    changed_fields=changed_fields,
-                )
-                context.data = chain_result.data
-                for change in chain_result.changes:
-                    if change.field_id not in context.changed_fields:
-                        context.changed_fields.append(change.field_id)
-            except ValueError as e:
-                logger.warning("RuleEngine chain execution failed, falling back to priority order: %s", str(e))
-                self._compute_by_priority(meta_object, context)
-        else:
-            self._compute_by_priority(meta_object, context)
+        # [G3 修复 2026-10-03] 不再走 ImplicitRuleChainExecutor：链会把「校验」与
+        # 「计算」一起跑，且链内校验以 `condition` 当判定、与平铺 ValidationExecutor
+        # 以 `action` 当判定不一致——其结论一旦上抛会**误阻断**合法保存（此前被静默
+        # 丢弃，即 G3）。校验已在 execute_rules(BEFORE_SAVE) 中按 action 口径统一执行
+        # 并阻断，此处只保留「计算」本身，顺序与 execute_rules 统一（依赖拓扑序）。
+        self._compute_by_priority(meta_object, context)
         
         return context.data
     
     def _compute_by_priority(self, meta_object: MetaObject, context) -> None:
-        """按优先级顺序执行计算规则"""
+        """执行计算规则（[P1 2026-10-03] 顺序与 execute_rules 统一为依赖拓扑序）"""
         computations = meta_object.get_computations()
-        computations = sorted(computations, key=lambda r: r.priority)
+        computations = self._order_rules_by_dependency(meta_object, computations)
         
         for rule in computations:
             if rule.enabled:

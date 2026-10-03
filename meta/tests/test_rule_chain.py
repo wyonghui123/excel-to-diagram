@@ -23,7 +23,10 @@ from meta.core.models import (
     MetaStateTransition, MetaTrigger, FieldType, RuleType,
     RuleTrigger, RuleScope, ValidationSeverity
 )
-from meta.core.rule_chain import ImplicitRuleChainExecutor, build_rule_chain
+from meta.core.rule_chain import (
+    ImplicitRuleChainExecutor, build_rule_chain,
+    RuleDependencyAnalyzer, EdgeType,
+)
 
 
 def create_order_meta():
@@ -290,6 +293,93 @@ def test_cycle_detection():
     print("\n[PASS] 循环依赖检测测试通过")
 
 
+def test_explicit_dependency_edges():
+    """[G1 修复 2026-10-03] depends_on 显式依赖边：优先于数据流推断边
+
+    场景一：两条校验规则目标字段不同、彼此无数据流关系，默认只能按 priority 排队；
+    用 depends_on 显式声明后，被依赖者必须先行。
+    场景二（显式优先于推断）：一对互相引用对方输出字段的计算规则，按数据流推断会
+    互相成边形成假环；一旦显式声明方向，反向推断边被丢弃、环即消失。
+    """
+    print("\n=== 测试显式依赖边（depends_on）===")
+
+    # 场景一：显式依赖改变同类型规则的先后
+    ordering_meta = MetaObject(
+        id="explicit_order",
+        name="显式依赖",
+        table_name="explicit_order",
+        fields=[
+            MetaField(id="a", name="A", field_type=FieldType.INTEGER, db_column="a"),
+            MetaField(id="b", name="B", field_type=FieldType.INTEGER, db_column="b"),
+        ],
+        rules=[
+            MetaValidation(
+                id="rule_late",
+                name="后置校验",
+                target_fields=["a"],
+                action="a > 0",
+                triggers=[RuleTrigger.BEFORE_SAVE],
+                priority=10,                  # 数字更小，默认会更早
+            ),
+            MetaValidation(
+                id="rule_dep",
+                name="被依赖的校验",
+                target_fields=["b"],
+                action="b > 0",
+                triggers=[RuleTrigger.BEFORE_SAVE],
+                priority=200,
+                depends_on=["rule_late"],     # 显式：rule_late 必须先跑
+            ),
+        ]
+    )
+
+    graph = RuleDependencyAnalyzer.analyze(ordering_meta)
+    order = RuleDependencyAnalyzer.topological_sort(graph)
+    print("  执行顺序: {0}".format(order))
+    assert "rule_dep" in order and "rule_late" in order
+    assert order.index("rule_late") < order.index("rule_dep"), \
+        "depends_on 应让 rule_late 先于 rule_dep，实际: {0}".format(order)
+    assert "rule_late" in graph.get_dependencies("rule_dep")
+    edge_types = {e.edge_type for e in graph.edges
+                  if e.from_rule == "rule_late" and e.to_rule == "rule_dep"}
+    assert EdgeType.EXPLICIT_DEPENDENCY in edge_types, "应存在显式依赖边"
+
+    # 场景二：显式边优先于推断边（互相引用对方输出字段本会成环）
+    override_meta = MetaObject(
+        id="explicit_override",
+        name="显式边覆盖推断边",
+        table_name="explicit_override",
+        fields=[
+            MetaField(id="x", name="X", field_type=FieldType.INTEGER, db_column="x"),
+            MetaField(id="y", name="Y", field_type=FieldType.INTEGER, db_column="y"),
+        ],
+        rules=[
+            MetaComputation(
+                id="calc_y", name="算Y",
+                source_fields=["x"], target_field="y", formula="x + 1",
+                compute_on_change=False,
+                triggers=[RuleTrigger.BEFORE_SAVE],
+                depends_on=["calc_x"],        # 显式：calc_x 先跑（与推断方向相反）
+            ),
+            MetaComputation(
+                id="calc_x", name="算X",
+                source_fields=["y"], target_field="x", formula="y + 1",
+                compute_on_change=False,
+                triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+        ]
+    )
+
+    graph2 = RuleDependencyAnalyzer.analyze(override_meta)
+    assert RuleDependencyAnalyzer.detect_cycle(graph2) is None, \
+        "显式边应压制反向推断边，不应再出现假环"
+    order2 = RuleDependencyAnalyzer.topological_sort(graph2)
+    print("  覆盖后顺序: {0}".format(order2))
+    assert order2.index("calc_x") < order2.index("calc_y")
+
+    print("[PASS] 显式依赖边（depends_on）测试通过")
+
+
 def run_all_tests():
     print("=" * 60)
     print("隐式规则链测试")
@@ -300,6 +390,7 @@ def run_all_tests():
     test_partial_change_propagation()
     test_validation_failure()
     test_cycle_detection()
+    test_explicit_dependency_edges()
     
     print("\n" + "=" * 60)
     print("所有测试通过！")

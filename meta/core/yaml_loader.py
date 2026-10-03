@@ -1581,19 +1581,19 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
     rule_type = RULE_TYPE_MAP.get(rule_type_str, RuleType.VALIDATION)
     
     if rule_type == RuleType.VALIDATION:
-        return parse_validation(data)
+        rule = parse_validation(data)
     elif rule_type == RuleType.CONSTRAINT:
-        return parse_constraint(data)
+        rule = parse_constraint(data)
     elif rule_type == RuleType.COMPUTATION:
-        return parse_computation(data)
+        rule = parse_computation(data)
     elif rule_type == RuleType.STATE_TRANSITION:
-        return parse_state_transition(data)
+        rule = parse_state_transition(data)
     elif rule_type == RuleType.TRIGGER:
-        return parse_trigger_rule(data)
+        rule = parse_trigger_rule(data)
     elif rule_type == RuleType.DEFAULT:
-        return parse_default_rule(data)
+        rule = parse_default_rule(data)
     else:
-        return MetaRule(
+        rule = MetaRule(
             id=data.get("id", ""),
             name=data.get("name", ""),
             rule_type=rule_type,
@@ -1607,6 +1607,9 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
             description=data.get("description", ""),
             semantics=parse_semantics(data.get("semantics", {})),
         )
+    # [G1 修复 2026-10-03] 显式依赖统一在此注入，避免逐个 parse_* 重复。
+    rule.depends_on = list(data.get("depends_on", []) or [])
+    return rule
 
 
 def parse_default_rule(data: Dict[str, Any]) -> MetaDefaultRule:
@@ -1944,7 +1947,6 @@ def _resolve_aspects(
         local_field_ids.add(f.get("id", ""))
 
     merged_fields = []
-    merged_validations = []
     merged_rules = []
     seen_field_ids: Dict[str, str] = {}
 
@@ -1969,13 +1971,6 @@ def _resolve_aspects(
             sf_copy["included_from"] = aspect_name
             seen_field_ids[sf_id] = aspect_name
             merged_fields.append(sf_copy)
-
-        for val_data in aspect_def.get("validations", []):
-            val_copy = dict(val_data)
-            original_id = val_copy.get("id", "")
-            if original_id:
-                val_copy["id"] = "{0}__{1}".format(aspect_name, original_id)
-            merged_validations.append(val_copy)
 
         for rule_data in aspect_def.get("rules", []):
             rule_copy = dict(rule_data)
@@ -2002,11 +1997,6 @@ def _resolve_aspects(
     data["aspects"] = aspect_names
     data["includes"] = includes
 
-    if merged_validations:
-        existing_validations = list(data.get("validations", []))
-        existing_validations.extend(merged_validations)
-        data["validations"] = existing_validations
-
     if merged_rules:
         existing_rules = list(data.get("rules", []))
         existing_rules.extend(merged_rules)
@@ -2026,7 +2016,6 @@ def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
     fields = [parse_field(f, included_from=f.get("included_from", "")) for f in data.get("fields", [])]
     relations = [parse_relation(r) for r in data.get("relations", [])]
     actions = [parse_action(a) for a in data.get("actions", [])]
-    validations = [parse_validation(v) for v in data.get("validations", [])]
     queries = [parse_query(q) for q in data.get("queries", [])]
     rules = [parse_rule(r) for r in data.get("rules", [])]
     indexes = [parse_index(i) for i in data.get("indexes", [])]
@@ -2082,7 +2071,6 @@ def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
         relations=relations,
         indexes=indexes,
         actions=actions,
-        validations=validations,
         rules=rules,
         queries=queries,
         parent_object=data.get("parent_object", data.get("parent", "")),
@@ -2173,6 +2161,10 @@ def _invalidate_yaml_cache():
     _shared_mtimes.clear()
 
 
+class DeprecatedSchemaSectionError(ValueError):
+    """Schema 使用了已废弃的 validations: 段（规则模型 P3，2026-10-03）"""
+
+
 def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]] = None, aspects_defs: Dict[str, Dict] = None) -> Optional[MetaObject]:
     cache_key = _get_file_cache_key(file_path)
     if cache_key and cache_key in _yaml_cache:
@@ -2184,6 +2176,15 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
 
         if not data:
             return None
+
+        # [规则模型 P3 2026-10-03] 顶层 validations: 段已废弃（运行时从未被消费）。
+        # 字段必填/唯一/格式/枚举请改用字段属性；跨字段/对象级校验请改用 rules:（type: validation）。
+        if isinstance(data, dict) and "validations" in data:
+            raise DeprecatedSchemaSectionError(
+                "Schema '{0}' 使用了已废弃的顶层 'validations:' 段；"
+                "请改用字段属性（required/unique/pattern/enum_values）或 rules:（type: validation）。"
+                .format(file_path)
+            )
 
         if aspects_defs:
             data = _resolve_aspects(data, aspects_defs, shared_props=shared_props)
@@ -2197,6 +2198,8 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
         if cache_key:
             _yaml_cache[cache_key] = obj
         return obj
+    except DeprecatedSchemaSectionError:
+        raise
     except Exception as e:
         print("[YAML Loader] Error loading {0}: {1}".format(file_path, str(e)))
         return None

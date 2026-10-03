@@ -1,6 +1,6 @@
 schema: version
 name: 产品版本
-total_rules: 27
+total_rules: 24
 rules:
 - id: BR-version-DEL
   type: deletability
@@ -137,50 +137,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-version-ASPECT-owner_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-version-VAL-name-required
-  type: validations
-  object: version
-  subtype: field
-  rule: name is not None and name != ''
-  message: 版本名称不能为空
-  severity: error
-  source: schema:version.yaml:validations[name_required]
-  derived_scenarios:
-  - id: T_VERSION_VAL_NAME_REQUIRED_001
-    title: '校验: 名称必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-name_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-version-VAL-product-id-required
-  type: validations
-  object: version
-  subtype: field
-  rule: product_id is not None
-  message: 产品ID不能为空
-  severity: error
-  source: schema:version.yaml:validations[product_id_required]
-  derived_scenarios:
-  - id: T_VERSION_VAL_PRODUCT_ID_REQUIRED_001
-    title: '校验: 产品ID必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-product_id_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-version-VAL-only-one-current-per-product
-  type: validations
-  object: version
-  subtype: business
-  rule: "if is_current:\n    existing = data_source.query(\"SELECT id FROM versions\
-    \ WHERE product_id = ? AND is_current = 1 AND id != ?\", product_id, id)\n   \
-    \ if existing:\n        return False\nreturn True\n"
-  message: 每个产品只能有一个当前版本，请先将其他版本设为非当前版本
-  severity: error
-  source: schema:version.yaml:validations[only_one_current_per_product]
-  derived_scenarios:
-  - id: T_VERSION_VAL_ONLY_ONE_CURRENT_PER_PRODUCT_001
-    title: '校验: 每个产品只能有一个当前版本 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-only_one_current_per_product'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-version-STATE-set-current-version
   type: rules
   object: version

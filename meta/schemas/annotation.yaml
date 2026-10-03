@@ -383,38 +383,6 @@ actions:
     path: /api/v1/annotations/by-target
     description: 按关联对象查询备注列表
 
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
-validations:
-  - id: target_type_required
-    name: 关联对象类型必填
-    type: field
-    rule: target_type is not None
-    message: 关联对象类型不能为空
-    severity: error
-
-  - id: target_id_required
-    name: 关联对象ID必填
-    type: field
-    rule: target_id is not None
-    message: 关联对象ID不能为空
-    severity: error
-
-  - id: category_required
-    name: 备注分类必填
-    type: field
-    rule: category is not None
-    message: 备注分类不能为空
-    severity: error
-
-  - id: category_valid
-    name: 备注分类有效值
-    type: field
-    rule: category in ['important', 'warning', 'info', 'tip', 'TEST']
-    message: 备注分类必须是 important、warning、info、tip 或 TEST
-    severity: error
-
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
 # ============================================

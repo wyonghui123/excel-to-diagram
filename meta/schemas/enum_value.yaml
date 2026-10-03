@@ -500,38 +500,6 @@ actions:
     path: /api/v1/enum-values
     description: 查询枚举值列表
 
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
-validations:
-  - id: enum_type_id_required
-    name: 枚举类型必填
-    type: field
-    rule: enum_type_id is not None and enum_type_id != ''
-    message: 枚举类型不能为空
-    severity: error
-
-  - id: code_required
-    name: 编码必填
-    type: field
-    rule: code is not None and code != ''
-    message: 编码不能为空
-    severity: error
-
-  - id: name_required
-    name: 名称必填
-    type: field
-    rule: name is not None and name != ''
-    message: 名称不能为空
-    severity: error
-
-  - id: unique_code_per_type
-    name: 编码唯一性
-    type: constraint
-    rule: UNIQUE(enum_type_id, code)
-    message: 同一枚举类型下编码不能重复
-    severity: error
-
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
 # ============================================

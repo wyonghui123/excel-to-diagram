@@ -53,6 +53,8 @@ class EdgeType(Enum):
     CONDITION_DEPENDENCY = "condition_dependency"
     CROSS_OBJECT = "cross_object"
     DERIVATION_FLOW = "derivation_flow"
+    # [G1 修复 2026-10-03] 由 `MetaRule.depends_on` 显式声明的依赖边（优先于推断边）
+    EXPLICIT_DEPENDENCY = "explicit_dependency"
 
 
 @dataclass
@@ -155,6 +157,11 @@ class RuleNode:
     condition_fields: Set[str] = field(default_factory=set)
     dependencies: Set[str] = field(default_factory=set)
     priority: int = 100
+    # [D7 2026-10-03] 规则在 meta_object.rules 中的声明下标。
+    # 用途：拓扑排序的**同层平局（tie-break）**判定依据，与平铺执行
+    # （RuleEngine.execute_rules 的 sorted(key=priority) 稳定排序 → 声明序）
+    # 保持同一口径，避免「顺序收口即改序」。
+    declaration_index: int = 0
     
     def should_execute(self, context: RuleChainContext) -> bool:
         if not self.rule.enabled:
@@ -167,11 +174,13 @@ class RuleNode:
             return False
         
         if self.node_type == RuleNodeType.STATE_TRANSITION:
-            if isinstance(self.rule, MetaStateTransition):
-                current_state = context.get_field_value(self.rule.state_field)
-                if current_state in self.rule.from_states:
-                    return True
-            return False
+            # [G11 修复 2026-10-03] 此处**不再**做「live 值 ∈ from_states」预筛。
+            # 该预筛与 flat 侧 StateTransitionExecutor 的准入模型不同：flat 以
+            # ``original_data`` 为「当前态」、``data`` 为「用户期望态」，因此显式
+            # action（data 已置为 to_state）能命中；而 live 预筛会挡掉这种情形，
+            # 却放过「用户未改状态但 form 回提交当前值」的情形。
+            # 准入判定统一由 `_execute_state_transition` 内的 gating 负责（与 flat 对齐）。
+            return isinstance(self.rule, MetaStateTransition)
         
         if self.node_type == RuleNodeType.VALIDATION:
             for f in self.source_fields:
@@ -228,9 +237,10 @@ class RuleDependencyAnalyzer:
     def analyze(meta_object: MetaObject) -> DependencyGraph:
         graph = DependencyGraph()
         
-        for rule in get_rule_provider().get_rules(meta_object):
+        for decl_index, rule in enumerate(get_rule_provider().get_rules(meta_object)):
             node = RuleDependencyAnalyzer._create_node(rule)
             if node:
+                node.declaration_index = decl_index
                 graph.add_node(node)
         
         RuleDependencyAnalyzer._build_edges(graph)
@@ -299,18 +309,52 @@ class RuleDependencyAnalyzer:
     @staticmethod
     def _build_edges(graph: DependencyGraph) -> None:
         nodes_list = list(graph.nodes.values())
+
+        # [G1 修复 2026-10-03] 显式依赖边：`rule.depends_on` 声明的规则先行。
+        # 依据编排专题 §3.3 决定「甲」——显式边**优先于**数据流推断边：记录显式边的
+        # 反向；下方推断边若与之反向冲突则丢弃，避免同一对规则既被显式声明 A→B、
+        # 又被数据流推断成 B→A 而造出假环。
+        explicit_reverse: Set[Tuple[str, str]] = set()
+        for node in nodes_list:
+            for dep_id in list(getattr(node.rule, 'depends_on', None) or []):
+                if dep_id in graph.nodes and dep_id != node.rule.id:
+                    graph.add_edge(DependencyEdge(
+                        from_rule=dep_id,
+                        to_rule=node.rule.id,
+                        edge_type=EdgeType.EXPLICIT_DEPENDENCY,
+                    ))
+                    explicit_reverse.add((node.rule.id, dep_id))
+
+        def _add_inferred(from_rule: str, to_rule: str, edge_type: EdgeType,
+                          field_name: Optional[str] = None) -> None:
+            if (from_rule, to_rule) in explicit_reverse:
+                return
+            graph.add_edge(DependencyEdge(
+                from_rule=from_rule,
+                to_rule=to_rule,
+                edge_type=edge_type,
+                field_name=field_name,
+            ))
         
         for node in nodes_list:
             for target_field in node.target_fields:
                 dependent_rules = graph.get_rules_by_field(target_field)
                 for dep_rule_id in dependent_rules:
-                    if dep_rule_id != node.rule.id:
-                        graph.add_edge(DependencyEdge(
-                            from_rule=node.rule.id,
-                            to_rule=dep_rule_id,
-                            edge_type=EdgeType.DATA_FLOW,
-                            field_name=target_field
-                        ))
+                    if dep_rule_id == node.rule.id:
+                        continue
+                    # [G9 修复 2026-10-03] 状态迁移之间不成边。
+                    # 同一 state_field 上的多条 STATE_TRANSITION 是「互斥选择」——由
+                    # from_states 决定谁命中（一次保存里状态只取一个值），彼此不是
+                    # 数据流上的先后依赖。此前因 source_fields 与 target_fields 同为
+                    # state_field，互斥对必然互相成边（如 activate_product ↔
+                    # deactivate_product），使环检测对状态机大规模误报。
+                    dep_node = graph.nodes.get(dep_rule_id)
+                    if (node.node_type == RuleNodeType.STATE_TRANSITION
+                            and dep_node is not None
+                            and dep_node.node_type == RuleNodeType.STATE_TRANSITION):
+                        continue
+                    _add_inferred(node.rule.id, dep_rule_id,
+                                  EdgeType.DATA_FLOW, target_field)
         
         computation_nodes = [n for n in nodes_list if n.node_type == RuleNodeType.COMPUTATION]
         other_nodes = [n for n in nodes_list if n.node_type != RuleNodeType.COMPUTATION]
@@ -319,19 +363,13 @@ class RuleDependencyAnalyzer:
             for other_node in other_nodes:
                 if other_node.node_type == RuleNodeType.VALIDATION:
                     if comp_node.target_fields & other_node.source_fields:
-                        graph.add_edge(DependencyEdge(
-                            from_rule=comp_node.rule.id,
-                            to_rule=other_node.rule.id,
-                            edge_type=EdgeType.DATA_FLOW
-                        ))
+                        _add_inferred(comp_node.rule.id, other_node.rule.id,
+                                      EdgeType.DATA_FLOW)
                 
                 elif other_node.node_type == RuleNodeType.STATE_TRANSITION:
                     if comp_node.target_fields & other_node.source_fields:
-                        graph.add_edge(DependencyEdge(
-                            from_rule=comp_node.rule.id,
-                            to_rule=other_node.rule.id,
-                            edge_type=EdgeType.CONDITION_DEPENDENCY
-                        ))
+                        _add_inferred(comp_node.rule.id, other_node.rule.id,
+                                      EdgeType.CONDITION_DEPENDENCY)
     
     @staticmethod
     def detect_cycle(graph: DependencyGraph) -> Optional[List[str]]:
@@ -385,6 +423,17 @@ class RuleDependencyAnalyzer:
     
     @staticmethod
     def topological_sort(graph: DependencyGraph) -> List[str]:
+        """拓扑排序（Kahn），同层按「类型权重 → priority → 声明下标」决定次序。
+
+        [G10 修复 2026-10-03] 遇环**必须报错**，不再静默返回残缺序列。
+        原实现下 Kahn 会把所有入度非零（即成环）的节点直接丢弃，返回的序列
+        既不完整也不报错，调用方无法察觉——只能靠 `detect_cycle` 另行把关。
+
+        [D7 2026-10-03] tie-break 第三顺位由 `rule.id` 字典序改为
+        `declaration_index`（YAML 声明顺序），与平铺
+        `RuleEngine.execute_rules`（`sorted(key=priority)` 稳定排序 → 声明序）
+        对齐，避免顺序收口时引入无谓的次序变动。
+        """
         in_degree = {node_id: 0 for node_id in graph.nodes}
         
         for node_id in graph.nodes:
@@ -397,13 +446,13 @@ class RuleDependencyAnalyzer:
                 node = graph.nodes.get(node_id)
                 if node:
                     type_weight = RuleDependencyAnalyzer._get_type_weight(node.node_type)
-                    queue.append((type_weight, node.priority, node_id))
+                    queue.append((type_weight, node.priority, node.declaration_index, node_id))
         
         queue = deque(sorted(queue))
         result = []
         
         while queue:
-            _, _, node_id = queue.popleft()
+            _, _, _, node_id = queue.popleft()
             result.append(node_id)
             
             dependents = list(graph.get_dependents(node_id))
@@ -415,10 +464,19 @@ class RuleDependencyAnalyzer:
                     node = graph.nodes.get(dependent)
                     if node:
                         type_weight = RuleDependencyAnalyzer._get_type_weight(node.node_type)
-                        dependent_queue.append((type_weight, node.priority, dependent))
+                        dependent_queue.append(
+                            (type_weight, node.priority, node.declaration_index, dependent))
             
             for item in sorted(dependent_queue):
                 queue.append(item)
+        
+        if len(result) != len(graph.nodes):
+            unsequenced = sorted(set(graph.nodes) - set(result))
+            raise ValueError(
+                "拓扑排序失败：存在循环依赖，以下规则无法确定执行顺序: {0}。"
+                "请检查规则定义（多为同一字段上的规则互相依赖）。".format(
+                    ", ".join(unsequenced))
+            )
         
         return result
 
@@ -660,35 +718,81 @@ class ImplicitRuleChainExecutor:
         result = {'success': True, 'changes': [], 'triggered_rules': []}
         
         state_field = rule.state_field
-        current_state = context.get_field_value(state_field)
         
-        if current_state not in rule.from_states:
+        # [G11 修复 2026-10-03] 准入 gating，口径与 flat 侧
+        # `StateTransitionExecutor._do_execute`（rule_executor.py）逐条对齐。
+        # 修复前链内只判断「live 值 ∈ from_states」，导致同一批次内互斥兄弟互相覆盖：
+        # activate 写入 True → deactivate 读到 live=True 又写回 False，
+        # 用户请求的状态被静默回滚。
+        current_state = context.original_data.get(state_field)
+        if current_state is None:
+            current_state = context.get_field_value(state_field)
+        effective_state = context.get_field_value(state_field)
+        if effective_state is None:
+            effective_state = current_state
+        
+        # Case 0: data 中没有 state_field —— 普通 update 不改状态
+        if state_field not in context.data:
+            return result
+        # Case 1: 当前态已是目标态 —— 无变化
+        if current_state == rule.to_state:
+            return result
+        # Case 1.5: 用户未改状态（前端 form 回提交当前值）—— 不视为状态切换
+        if context.original_data and effective_state == current_state:
+            return result
+        # Case 2: 已被别的规则改走（既非当前态也非本规则目标态）
+        if effective_state != current_state and effective_state != rule.to_state:
+            return result
+        # Case 3: 期望态须等于目标态（显式 action）或在 from_states 内（中间态过渡）
+        if effective_state != rule.to_state and effective_state not in (rule.from_states or []):
+            return result
+        # Case 4: 规则自身 condition
+        if rule.condition and not self._evaluate_condition(rule.condition, context):
             return result
         
-        old_value = current_state
+        old_value = effective_state
         new_value = rule.to_state
         
         context.set_field_value(state_field, new_value)
-        context.mark_changed(state_field, old_value, new_value)
         
-        result['changes'].append(FieldChange(
-            field_id=state_field,
-            old_value=old_value,
-            new_value=new_value,
-            source_rule=rule.id
-        ))
+        if old_value != new_value:
+            context.mark_changed(state_field, old_value, new_value)
+            result['changes'].append(FieldChange(
+                field_id=state_field,
+                old_value=old_value,
+                new_value=new_value,
+                source_rule=rule.id
+            ))
         
         result['state_change'] = StateChange(
             state_field=state_field,
-            old_state=old_state if (old_state := old_value) else None,
+            old_state=old_value,
             new_state=new_value,
             source_rule=rule.id
         )
         
-        downstream = self.graph.get_rules_by_field(state_field)
-        result['triggered_rules'].extend(downstream - {rule.id})
+        # [G11 修复 2026-10-03] 同一 state_field 上的其它 STATE_TRANSITION 是
+        # **互斥替代项**，不是下游依赖。若把它们拉进传播循环，会在同一批次内
+        # 互相覆盖（这正是 G11 的另一半成因）。
+        downstream = {
+            rid for rid in self.graph.get_rules_by_field(state_field)
+            if not self._is_sibling_state_transition(rid, rule)
+        }
+        result['triggered_rules'].extend(downstream)
         
         return result
+    
+    def _is_sibling_state_transition(self, other_rule_id: str,
+                                     current_rule: MetaStateTransition) -> bool:
+        """判断 `other_rule_id` 是否为本规则自身或「同一 state_field 的互斥兄弟」"""
+        if other_rule_id == current_rule.id:
+            return True
+        other = self.graph.nodes.get(other_rule_id)
+        if other is None or other.node_type != RuleNodeType.STATE_TRANSITION:
+            return False
+        other_rule = other.rule
+        return (isinstance(other_rule, MetaStateTransition)
+                and other_rule.state_field == current_rule.state_field)
     
     def _execute_validation(
         self,

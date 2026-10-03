@@ -1,6 +1,6 @@
 schema: annotation
 name: 备注信息
-total_rules: 12
+total_rules: 8
 rules:
 - id: BR-annotation-AUDIT-create
   type: audit
@@ -52,62 +52,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-ASPECT-audit_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-annotation-VAL-target-type-required
-  type: validations
-  object: annotation
-  subtype: field
-  rule: target_type is not None
-  message: 关联对象类型不能为空
-  severity: error
-  source: schema:annotation.yaml:validations[target_type_required]
-  derived_scenarios:
-  - id: T_ANNOTATION_VAL_TARGET_TYPE_REQUIRED_001
-    title: '校验: 关联对象类型必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-target_type_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-annotation-VAL-target-id-required
-  type: validations
-  object: annotation
-  subtype: field
-  rule: target_id is not None
-  message: 关联对象ID不能为空
-  severity: error
-  source: schema:annotation.yaml:validations[target_id_required]
-  derived_scenarios:
-  - id: T_ANNOTATION_VAL_TARGET_ID_REQUIRED_001
-    title: '校验: 关联对象ID必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-target_id_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-annotation-VAL-category-required
-  type: validations
-  object: annotation
-  subtype: field
-  rule: category is not None
-  message: 备注分类不能为空
-  severity: error
-  source: schema:annotation.yaml:validations[category_required]
-  derived_scenarios:
-  - id: T_ANNOTATION_VAL_CATEGORY_REQUIRED_001
-    title: '校验: 备注分类必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-category_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-annotation-VAL-category-valid
-  type: validations
-  object: annotation
-  subtype: field
-  rule: category in ['important', 'warning', 'info', 'tip', 'TEST']
-  message: 备注分类必须是 important、warning、info、tip 或 TEST
-  severity: error
-  source: schema:annotation.yaml:validations[category_valid]
-  derived_scenarios:
-  - id: T_ANNOTATION_VAL_CATEGORY_VALID_001
-    title: '校验: 备注分类有效值 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-category_valid'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-annotation-FLD-REQ-target_type
   type: field_constraint
   object: annotation

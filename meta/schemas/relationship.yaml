@@ -1707,46 +1707,19 @@ indexes:
   type: composite
   priority: medium
   description: 版本+关系类型复合索引（按类型筛选关系）
-validations:
-- id: version_id_required
-  name: 版本ID必填
-  type: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
+# ────────────────────────────────────────────
+# 校验规则（G 类真缺口：跨字段，无字段属性等价物）
+# [规则模型 P2 2026-10-03] 由旧 validations: 段迁入 rules:（type: validation）
+# ────────────────────────────────────────────
+rules:
 - id: source_not_equal_target
   name: 源目标不能相同
-  type: cross_field
+  type: validation
+  scope: cross_field
   rule: source_bo_id != target_bo_id
   message: 源业务对象和目标业务对象不能相同
   severity: error
-- id: code_unique_within_version
-  name: 关系编码在版本内唯一
-  type: unique
-  rule: (version_id, code) 联合唯一
-  scope: version_id
-  fields:
-  - code
-  message: 关系编码 "{code}" 在当前版本中已存在，请使用唯一编码
-  severity: error
-- id: relation_type_in_enum
-  name: 关系类型必须在枚举中
-  type: field
-  rule: relation_type in ('GENERATES', 'UPDATES', 'TRIGGERS', 'REFERENCES')
-  message: 关系类型 "{relation_type}" 不在允许的枚举值中 (GENERATES/UPDATES/TRIGGERS/REFERENCES)
-  severity: error
-- id: relation_direction_in_enum
-  name: 关系方向必须在枚举中
-  type: field
-  rule: relation_direction is None or relation_direction in ('PUSH', 'PULL', 'BIDIRECTIONAL')
-  message: 关系方向 "{relation_direction}" 不在允许的枚举值中 (PUSH/PULL/BIDIRECTIONAL)
-  severity: error
-- id: relation_code_required
-  name: 关系简称必填
-  type: field
-  rule: relation_code is not None and relation_code != ''
-  message: 关系简称不能为空
-  severity: error
+  priority: 100
 ui_view_config:
   list:
     pageSize: 20

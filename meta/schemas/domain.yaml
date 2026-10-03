@@ -613,13 +613,6 @@ actions:
   method: POST
   path: /api/v1/export-import/import
   description: 通过统一导入端点从Excel批量导入领域
-validations:
-- id: version_id_required
-  name: 版本ID必填
-  type: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
 audit_levels:
 - name: create
   level: INFO

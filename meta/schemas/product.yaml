@@ -631,15 +631,4 @@ actions:
     path: /api/v1/export-import/export
     description: 通过统一导出端点导出产品线到Excel
 
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
-validations:
-  - id: name_required
-    name: 名称必填
-    type: field
-    rule: name is not None and name != ''
-    message: 产品线名称不能为空
-    severity: error
-
 

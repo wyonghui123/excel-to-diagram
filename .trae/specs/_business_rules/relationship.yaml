@@ -1,6 +1,6 @@
 schema: relationship
 name: 业务关系
-total_rules: 28
+total_rules: 26
 rules:
 - id: BR-relationship-DEL
   type: deletability
@@ -102,34 +102,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-ASPECT-audit_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-relationship-VAL-version-id-required
-  type: validations
-  object: relationship
-  subtype: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
-  source: schema:relationship.yaml:validations[version_id_required]
-  derived_scenarios:
-  - id: T_RELATIONSHIP_VAL_VERSION_ID_REQUIRED_001
-    title: '校验: 版本ID必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-VAL-version_id_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-relationship-VAL-source-not-equal-target
-  type: validations
-  object: relationship
-  subtype: cross_field
-  rule: source_bo_id != target_bo_id
-  message: 源业务对象和目标业务对象不能相同
-  severity: error
-  source: schema:relationship.yaml:validations[source_not_equal_target]
-  derived_scenarios:
-  - id: T_RELATIONSHIP_VAL_SOURCE_NOT_EQUAL_TARGET_001
-    title: '校验: 源目标不能相同 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-VAL-source_not_equal_target'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-relationship-IE-import
   type: import_export
   object: relationship

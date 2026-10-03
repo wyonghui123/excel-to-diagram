@@ -440,38 +440,6 @@ relations:
     semantics:
       meaning: 枚举类型与枚举值的关系
 
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
-validations:
-  - id: id_required
-    name: 编码必填
-    type: field
-    rule: id is not None and id != ''
-    message: 编码不能为空
-    severity: error
-
-  - id: name_required
-    name: 名称必填
-    type: field
-    rule: name is not None and name != ''
-    message: 名称不能为空
-    severity: error
-
-  - id: category_required
-    name: 分类必填
-    type: field
-    rule: category is not None and category != ''
-    message: 分类不能为空
-    severity: error
-
-  - id: mutability_required
-    name: 可维护性必填
-    type: field
-    rule: mutability is not None and mutability != ''
-    message: 可维护性不能为空
-    severity: error
-
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
 # ============================================

@@ -44,7 +44,7 @@ test.describe('枚举管理 - 业务流 E2E v2', () => {
 
     let nameEmptyFailed = false;
     try {
-      await BusinessRuleAssertor.assertRule('BR-enum_type-VAL-name_required', { invalid: true, expected: 'error' });
+      await BusinessRuleAssertor.assertRule('BR-enum_type-FLD-REQ-name', { invalid: true, expected: 'error' });
     } catch (e) {
       nameEmptyFailed = true;
     }

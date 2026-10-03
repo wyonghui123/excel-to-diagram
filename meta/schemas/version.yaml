@@ -561,36 +561,6 @@ actions:
     description: 通过统一导出端点导出版本到Excel
 
 # ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
-validations:
-  - id: name_required
-    name: 名称必填
-    type: field
-    rule: name is not None and name != ''
-    message: 版本名称不能为空
-    severity: error
-
-  - id: product_id_required
-    name: 产品ID必填
-    type: field
-    rule: product_id is not None
-    message: 产品ID不能为空
-    severity: error
-
-  - id: only_one_current_per_product
-    name: 每个产品只能有一个当前版本
-    type: business
-    rule: |
-      if is_current:
-          existing = data_source.query("SELECT id FROM versions WHERE product_id = ? AND is_current = 1 AND id != ?", product_id, id)
-          if existing:
-              return False
-      return True
-    message: 每个产品只能有一个当前版本，请先将其他版本设为非当前版本
-    severity: error
-
-# ────────────────────────────────────────────
 # 查询定义
 # ────────────────────────────────────────────
 queries:

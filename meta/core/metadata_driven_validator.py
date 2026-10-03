@@ -82,7 +82,9 @@ class MetadataDrivenValidator:
         return errors
 
     def _skip_field(self, field: 'MetaField', action: str) -> bool:
-        if field.id == 'id':
+        # [规则模型 P3 2026-10-03] 作为业务键（business_key）的 id 字段（如 enum_type.id）
+        # 仍需走字段属性校验（required/pattern/unique），不能无条件跳过。
+        if field.id == 'id' and not getattr(field.semantics, 'business_key', False):
             return True
         is_virtual = (hasattr(field, 'storage') and field.storage.value == 'virtual') or \
                      getattr(field.semantics, 'virtual', False)

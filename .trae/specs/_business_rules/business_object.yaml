@@ -1,6 +1,6 @@
 schema: business_object
 name: 业务对象
-total_rules: 25
+total_rules: 23
 rules:
 - id: BR-business_object-DEL
   type: deletability
@@ -126,34 +126,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ASPECT-naming_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-business_object-VAL-version-id-required
-  type: validations
-  object: business_object
-  subtype: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
-  source: schema:business_object.yaml:validations[version_id_required]
-  derived_scenarios:
-  - id: T_BUSINESS_OBJECT_VAL_VERSION_ID_REQUIRED_001
-    title: '校验: 版本ID必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-VAL-version_id_required'',
-      { invalid: true, expected: ''error'' })'
-- id: BR-business_object-VAL-code-format
-  type: validations
-  object: business_object
-  subtype: field
-  rule: code matches '^[A-Z][A-Z0-9_]*$'
-  message: 编码格式不正确，应为大写字母开头
-  severity: warning
-  source: schema:business_object.yaml:validations[code_format]
-  derived_scenarios:
-  - id: T_BUSINESS_OBJECT_VAL_CODE_FORMAT_001
-    title: '校验: 编码格式 应拒绝无效输入'
-    priority: P2
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-VAL-code_format'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-business_object-IE-import
   type: import_export
   object: business_object

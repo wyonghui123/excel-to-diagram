@@ -1,6 +1,6 @@
 schema: sub_domain
 name: 子领域
-total_rules: 22
+total_rules: 21
 rules:
 - id: BR-sub_domain-DEL
   type: deletability
@@ -125,20 +125,6 @@ rules:
     priority: P2
     assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-ASPECT-naming_aspect'',
       { objectId: ..., aspectFired: true })'
-- id: BR-sub_domain-VAL-version-id-required
-  type: validations
-  object: sub_domain
-  subtype: field
-  rule: version_id is not None
-  message: 版本ID不能为空
-  severity: error
-  source: schema:sub_domain.yaml:validations[version_id_required]
-  derived_scenarios:
-  - id: T_SUB_DOMAIN_VAL_VERSION_ID_REQUIRED_001
-    title: '校验: 版本ID必填 应拒绝无效输入'
-    priority: P0
-    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-VAL-version_id_required'',
-      { invalid: true, expected: ''error'' })'
 - id: BR-sub_domain-IE-import
   type: import_export
   object: sub_domain

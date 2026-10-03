@@ -1,5 +1,5 @@
 {
-  "total_rules": 771,
+  "total_rules": 747,
   "objects": [
     {
       "object_id": "ai_async_task",
@@ -17,16 +17,12 @@
     {
       "object_id": "annotation",
       "object_name": "备注信息",
-      "rule_count": 12,
+      "rule_count": 8,
       "rule_ids": [
         "BR-annotation-AUDIT-create",
         "BR-annotation-AUDIT-update",
         "BR-annotation-AUDIT-delete",
         "BR-annotation-ASPECT-audit",
-        "BR-annotation-VAL-target-type-required",
-        "BR-annotation-VAL-target-id-required",
-        "BR-annotation-VAL-category-required",
-        "BR-annotation-VAL-category-valid",
         "BR-annotation-FLD-REQ-target_type",
         "BR-annotation-FLD-IMM-target_type",
         "BR-annotation-FLD-REQ-target_id",
@@ -104,7 +100,7 @@
     {
       "object_id": "business_object",
       "object_name": "业务对象",
-      "rule_count": 37,
+      "rule_count": 35,
       "rule_ids": [
         "BR-business_object-DEL",
         "BR-business_object-AUTH-check",
@@ -115,8 +111,6 @@
         "BR-business_object-ASPECT-hierarchy",
         "BR-business_object-ASPECT-audit",
         "BR-business_object-ASPECT-naming",
-        "BR-business_object-VAL-version-id-required",
-        "BR-business_object-VAL-code-format",
         "BR-business_object-IE-import",
         "BR-business_object-IE-export",
         "BR-business_object-HIER",
@@ -200,7 +194,7 @@
     {
       "object_id": "domain",
       "object_name": "领域",
-      "rule_count": 33,
+      "rule_count": 32,
       "rule_ids": [
         "BR-domain-DEL",
         "BR-domain-AUTH-check",
@@ -211,7 +205,6 @@
         "BR-domain-ASPECT-hierarchy",
         "BR-domain-ASPECT-audit",
         "BR-domain-ASPECT-naming",
-        "BR-domain-VAL-version-id-required",
         "BR-domain-IE-import",
         "BR-domain-IE-export",
         "BR-domain-HIER",
@@ -251,13 +244,9 @@
     {
       "object_id": "enum_type",
       "object_name": "枚举类型",
-      "rule_count": 192,
+      "rule_count": 188,
       "rule_ids": [
         "BR-enum_type-ASPECT-audit",
-        "BR-enum_type-VAL-id-required",
-        "BR-enum_type-VAL-name-required",
-        "BR-enum_type-VAL-category-required",
-        "BR-enum_type-VAL-mutability-required",
         "BR-enum_type-IE-export",
         "BR-enum_type-FLD-REQ-name",
         "BR-enum_type-FLD-REQ-category",
@@ -450,13 +439,9 @@
     {
       "object_id": "enum_value",
       "object_name": "枚举值",
-      "rule_count": 21,
+      "rule_count": 17,
       "rule_ids": [
         "BR-enum_value-ASPECT-audit",
-        "BR-enum_value-VAL-enum-type-id-required",
-        "BR-enum_value-VAL-code-required",
-        "BR-enum_value-VAL-name-required",
-        "BR-enum_value-VAL-unique-code-per-type",
         "BR-enum_value-IE-import",
         "BR-enum_value-IE-export",
         "BR-enum_value-FLD-REQ-enum_type_id",
@@ -597,7 +582,7 @@
     {
       "object_id": "product",
       "object_name": "产品线",
-      "rule_count": 36,
+      "rule_count": 35,
       "rule_ids": [
         "BR-product-DEL",
         "BR-product-AUTH-check",
@@ -609,7 +594,6 @@
         "BR-product-AUDIT-delete",
         "BR-product-ASPECT-audit",
         "BR-product-ASPECT-naming",
-        "BR-product-VAL-name-required",
         "BR-product-STATE-activate-product",
         "BR-product-STATE-deactivate-product",
         "BR-product-IE-import",
@@ -640,7 +624,7 @@
     {
       "object_id": "relationship",
       "object_name": "业务关系",
-      "rule_count": 34,
+      "rule_count": 32,
       "rule_ids": [
         "BR-relationship-DEL",
         "BR-relationship-AUTH-check",
@@ -649,8 +633,6 @@
         "BR-relationship-AUDIT-delete",
         "BR-relationship-ASPECT-hierarchy",
         "BR-relationship-ASPECT-audit",
-        "BR-relationship-VAL-version-id-required",
-        "BR-relationship-VAL-source-not-equal-target",
         "BR-relationship-IE-import",
         "BR-relationship-IE-export",
         "BR-relationship-FLD-REQ-version_id",
@@ -751,7 +733,7 @@
     {
       "object_id": "service_module",
       "object_name": "服务模块",
-      "rule_count": 39,
+      "rule_count": 38,
       "rule_ids": [
         "BR-service_module-DEL",
         "BR-service_module-AUTH-check",
@@ -762,7 +744,6 @@
         "BR-service_module-ASPECT-hierarchy",
         "BR-service_module-ASPECT-audit",
         "BR-service_module-ASPECT-naming",
-        "BR-service_module-VAL-version-id-required",
         "BR-service_module-IE-import",
         "BR-service_module-IE-export",
         "BR-service_module-HIER",
@@ -803,7 +784,7 @@
     {
       "object_id": "sub_domain",
       "object_name": "子领域",
-      "rule_count": 38,
+      "rule_count": 37,
       "rule_ids": [
         "BR-sub_domain-DEL",
         "BR-sub_domain-AUTH-check",
@@ -814,7 +795,6 @@
         "BR-sub_domain-ASPECT-hierarchy",
         "BR-sub_domain-ASPECT-audit",
         "BR-sub_domain-ASPECT-naming",
-        "BR-sub_domain-VAL-version-id-required",
         "BR-sub_domain-IE-import",
         "BR-sub_domain-IE-export",
         "BR-sub_domain-HIER",
@@ -877,12 +857,11 @@
     {
       "object_id": "test_objects",
       "object_name": "测试对象",
-      "rule_count": 7,
+      "rule_count": 6,
       "rule_ids": [
         "BR-test_objects-AUDIT-create",
         "BR-test_objects-AUDIT-update",
         "BR-test_objects-AUDIT-delete",
-        "BR-test_objects-VAL-name-required",
         "BR-test_objects-FLD-REQ-name",
         "BR-test_objects-FLD-REQ-code",
         "BR-test_objects-FLD-UNQ-code"
@@ -988,7 +967,7 @@
     {
       "object_id": "version",
       "object_name": "产品版本",
-      "rule_count": 55,
+      "rule_count": 52,
       "rule_ids": [
         "BR-version-DEL",
         "BR-version-AUTH-check",
@@ -1000,9 +979,6 @@
         "BR-version-AUDIT-delete",
         "BR-version-ASPECT-audit",
         "BR-version-ASPECT-owner",
-        "BR-version-VAL-name-required",
-        "BR-version-VAL-product-id-required",
-        "BR-version-VAL-only-one-current-per-product",
         "BR-version-STATE-set-current-version",
         "BR-version-STATE-unset-current-version",
         "BR-version-IE-import",
