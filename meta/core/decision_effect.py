@@ -14,8 +14,8 @@
   （`evaluate_transition`），避免「已生效但任务迁移被拒」的反向漂移。
 - **拒绝同样要生效**：`reject` 与 `approve` 走同一协议、同一幂等键口径；
   `decision_actions` 必须**同时**配置两个动作，缺一个即报错（机器强制，非文档）。
-- **对账兜底**：`reconcile_effects()` 双向扫描（done 无回执 / 回执与单据现状不一致 /
-  等待中单据无活跃审批任务），产出告警清单。只读，不建告警存储。
+- **对账兜底**：`reconcile_effects()` 多向扫描（活跃审批任务缺 `decision_actions` 配置 /
+  done 无回执 / 回执与单据现状不一致 / 等待中单据无活跃审批任务），产出告警清单。只读，不建告警存储。
 
 分层纪律:
 - 落**平台库**（Q1 拍板），与 A1/A3/A6 同库同事务。
@@ -413,6 +413,8 @@ def reconcile_effects(
     """对账兜底（§9.7 规范 5）：双向扫描决策-生效漂移，返回告警清单。
 
     方向:
+      0. `approval_without_decision_config` — 活跃审批任务未成对配置 `decision_actions`
+                                              （「接线了但没人配」的假闭环护栏）
       1. `done_without_effect`  — 审批任务已 done 但 outputs 无生效回执（R1 漂移）
       2. `effect_mismatch`      — 回执 `new_status` 与单据现状不一致（需注入 `current_statuses`）
       3. `pending_without_task` — 单据等待审批超 `stale_hours` 但无活跃审批任务
@@ -424,15 +426,33 @@ def reconcile_effects(
     now_dt = now or datetime.now()
 
     rows = data_source.execute(
-        f"SELECT id, status, type, outputs, doc_ref, finished_at FROM {TASK_TABLE} "
-        f"WHERE type IN (?, ?)",
+        f"SELECT id, status, type, outputs, doc_ref, finished_at, executor_config "
+        f"FROM {TASK_TABLE} WHERE type IN (?, ?)",
         EFFECT_TASK_TYPES,
     ).fetchall()
     for r in rows:
-        task_id, status, task_type, outputs_raw, doc_ref, finished_at = r
+        task_id, status, task_type, outputs_raw, doc_ref, finished_at, config_raw = r
         outputs = _load_json(outputs_raw, {}) or {}
         receipt = outputs.get("receipt") if isinstance(outputs, dict) else None
         new_status = receipt.get(DEFAULT_RECEIPT_KEY) if isinstance(receipt, dict) else None
+
+        # 方向 0：活跃审批任务缺 decision_actions 配置（「接线了但没人配」的假闭环护栏）
+        if status not in _INACTIVE_STATES:
+            config = _load_json(config_raw, {}) or {}
+            missing = []
+            for dec in DECISIONS:
+                try:
+                    resolve_decision_action(config, dec)
+                except DecisionEffectError:
+                    missing.append(dec)
+            if missing:
+                findings.append({
+                    "kind": "approval_without_decision_config",
+                    "task_id": task_id, "doc_ref": doc_ref or "",
+                    "detail": f"缺少 decision_actions 配置: {', '.join(missing)}"
+                              f"（approve / reject 必须成对，§9.7 规范 7）",
+                })
+            continue
 
         if status == "done" and not new_status:
             findings.append({

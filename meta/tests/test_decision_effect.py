@@ -412,6 +412,39 @@ class TestReconcile:
 
         assert findings == []
 
+    def test_TC_B3_045_活跃审批任务缺配置(self, ds, registry):
+        # 直接插入一个未配置 decision_actions 的活跃审批任务
+        tid = _approval_task(ds, task_id="T-NOCFG", status="waiting_approval")
+        ds.execute("UPDATE tasks SET executor_config = ? WHERE id = ?", ("{}", tid))
+
+        findings = reconcile_effects(ds)
+
+        assert [f["kind"] for f in findings] == ["approval_without_decision_config"]
+        assert findings[0]["task_id"] == tid
+        assert "approve" in findings[0]["detail"] and "reject" in findings[0]["detail"]
+
+    def test_TC_B3_046_缺一半配置同样告警(self, ds, registry):
+        tid = _approval_task(ds, task_id="T-HALF", status="waiting_approval")
+        ds.execute(
+            "UPDATE tasks SET executor_config = ? WHERE id = ?",
+            (json.dumps({"decision_actions": {"approve": "demo.approve"}}), tid),
+        )
+
+        findings = reconcile_effects(ds)
+
+        assert [f["kind"] for f in findings] == ["approval_without_decision_config"]
+        assert "reject" in findings[0]["detail"]
+
+    def test_TC_B3_047_终态任务不查配置(self, ds, registry):
+        # done（inactive）缺配置不报配置类告警（此处无回执 → 只报 done_without_effect）
+        tid = _approval_task(ds, task_id="T-DONE", status="done")
+        ds.execute("UPDATE tasks SET executor_config = ?, outputs = ? WHERE id = ?",
+                   ("{}", json.dumps({}), tid))
+
+        findings = reconcile_effects(ds)
+
+        assert [f["kind"] for f in findings] == ["done_without_effect"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 入口前置
