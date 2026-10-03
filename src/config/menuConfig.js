@@ -14,12 +14,10 @@ export const tabGroupConfigs = {
     ],
   },
   'task-management': {
-    title: '任务调度',
+    title: '任务管理',
+    // P1：仅「监控」；「定义 / 编排」归 P3。旧 4 tab（scheduled_task 等遗留实体）已切挂下线。
     tabs: [
-      { key: 'task-definitions', label: '任务定义', objectType: 'scheduled_task' },
-      { key: 'task-queues', label: '任务队列', objectType: 'task_queue' },
-      { key: 'task-executions', label: '执行记录', objectType: 'task_execution' },
-      { key: 'ai-async-tasks', label: 'AI异步任务', objectType: 'ai_async_task' },
+      { key: 'monitor', label: '监控' },
     ],
   },
 }

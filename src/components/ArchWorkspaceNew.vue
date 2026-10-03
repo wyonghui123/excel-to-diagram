@@ -44,6 +44,11 @@
       </section>
 
       <section class="section-block">
+        <!-- 「我的待办」：工作台级 task.v1 统一收件箱（P1） -->
+        <TaskInboxPanel @open-detail="openTaskDetail" />
+      </section>
+
+      <section class="section-block">
         <FrequentProductsSection
           :items="favoriteVersions"
           :loading="frequentLoading"
@@ -59,6 +64,14 @@
     <footer class="workspace-footer">
       <p>&copy; 2026 BIP应用架构管理</p>
     </footer>
+
+    <TaskDetailDrawer
+      :visible="taskDrawerVisible"
+      :task-id="taskDrawerTaskId"
+      :current-actor="currentActor"
+      @close="taskDrawerVisible = false"
+      @claimed="onTaskClaimed"
+    />
   </div>
 </template>
 
@@ -68,6 +81,8 @@ import { useRouter } from 'vue-router'
 import { AppIcon } from './common/AppIcon'
 import FrequentProductsSection from './FrequentProductsSection.vue'
 import StatsOverview from './StatsOverview.vue'
+import TaskInboxPanel from '@/views/TaskCenter/TaskInboxPanel.vue'
+import TaskDetailDrawer from '@/views/TaskCenter/TaskDetailDrawer.vue'
 import { useVersionContext } from '@/composables/useVersionContext'
 import { useAuthStore } from '@/stores/authStore'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
@@ -128,6 +143,20 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const isDesktop = ref(false)
+
+// P1「我的待办」：详情抽屉（工作台与 /system/task-management 复用同一抽屉）
+const taskDrawerVisible = ref(false)
+const taskDrawerTaskId = ref('')
+const currentActor = computed(() => authStore.user?.user_id || authStore.user?.username || '')
+
+function openTaskDetail(taskId) {
+  taskDrawerTaskId.value = taskId
+  taskDrawerVisible.value = true
+}
+
+function onTaskClaimed() {
+  /* 认领后由 TaskInboxPanel 自行刷新（refreshCounts） */
+}
 
 const { favoriteVersions, frequentLoading, loadFavoriteVersions } = useVersionContext()
 const { accessibleMenus, flatMenus, leafMenus, loading: menuLoading, loadMenuPermissions } = useMenuPermissions()

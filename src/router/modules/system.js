@@ -43,9 +43,8 @@ export default [
   {
     path: '/system/task-management',
     name: 'task-management',
-    component: () => import('@/views/GenericTabContainer.vue'),
-    props: { group: 'task-management' },
-    meta: { title: '任务调度', requiresAuth: true }
+    component: () => import('@/views/TaskCenter/TaskCenter.vue'),
+    meta: { title: '任务管理', requiresAuth: true, requiresAdmin: true }
   },
   {
     path: '/system/task-definitions',
