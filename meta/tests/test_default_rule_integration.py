@@ -278,3 +278,73 @@ def test_default_rule_log_emitted(tmp_path, caplog):
     assert "d_contract" in text
     assert "not_first_match" in text, "同组被抢先的规则应记 not_first_match"
     assert "apply_on_mismatch" in text, "system 专用规则在 user_input 下应被跳过"
+
+
+# ---------------------------------------------------------------------------
+# 8. 二期：dry-run 预演（不落库）
+# ---------------------------------------------------------------------------
+
+class TestDryRunDefaults:
+    """[规则模型 二期 2026-10-03] dry-run 预演
+
+    核心断言：dry-run 带出值 == 真实保存后的落库值（可回放），
+    且预演本身**不产生任何写库动作**、**不就地改写入参**。
+    """
+
+    def test_dry_run_writes_nothing_and_matches_real_save(self, tmp_path):
+        ds, executor, obj = _prepare(tmp_path, "dry1.db")
+        draft = {"name": "SO-DRY", "order_type": "ZOR", "customer_id": "C001"}
+
+        result = executor.dry_run_defaults(obj, draft)
+
+        # 1) 带出值正确（复用真实链路，故与保存结果同源）
+        assert result["success"] is True
+        assert result["change_source"] == "user_input"
+        assert result["data"]["contract_type"] == "STANDARD"
+        assert result["data"]["payment_terms"] == "NT30"      # 首个命中获胜
+        assert result["data"]["price_list"] == "PL_ZOR"       # override
+        assert set(result["auto_filled_fields"]) == {
+            "contract_type", "payment_terms", "price_list"}   # warehouse 未带出
+
+        # 2) 未落库
+        cur = ds.execute("SELECT COUNT(*) FROM {0}".format(TABLE))
+        assert cur.fetchone()[0] == 0, "dry-run 不得写入任何数据"
+
+        # 3) 入参未被就地改写
+        assert "contract_type" not in draft
+
+        # 4) 可回放：真实保存的落库值与 dry-run 结果逐字段一致
+        new_id = _create(executor, obj, dict(draft))
+        row = ds.find_by_id(TABLE, new_id)
+        for f in ("contract_type", "payment_terms", "price_list", "warehouse"):
+            assert (row[f] or "") == (result["data"].get(f) or ""), f
+
+    def test_dry_run_logs_carry_skip_reasons(self, tmp_path):
+        ds, executor, obj = _prepare(tmp_path, "dry2.db")
+        result = executor.dry_run_defaults(obj, {
+            "name": "SO-DRY2", "order_type": "ZOR", "customer_id": "C002",
+        })
+
+        logs = result["logs"]
+        assert logs, "应返回逐条判定日志"
+        by_rule = {l["rule_id"]: l for l in logs}
+        # 获胜条目：命中且真正写入
+        assert by_rule["d_pt_first"]["hit"] is True
+        assert by_rule["d_pt_first"]["skip_reason"] == ""
+        assert by_rule["d_pt_first"]["value"] == "NT30"
+        # 同组被抢先
+        assert by_rule["d_pt_second"]["skip_reason"] == "not_first_match"
+        # apply_on 不匹配
+        assert by_rule["d_wh_system"]["skip_reason"] == "apply_on_mismatch"
+        # 该目标字段唯一规则 → seq 从 1 起；含因子快照（可回放）
+        assert by_rule["d_contract"]["seq"] == 1
+        assert by_rule["d_contract"]["factor_snapshot"]
+
+    def test_dry_run_does_not_persist_audit_or_data(self, tmp_path):
+        """预演不得写入业务表，也不得因预演产生审计记录"""
+        ds, executor, obj = _prepare(tmp_path, "dry3.db")
+        executor.dry_run_defaults(obj, {
+            "name": "SO-DRY3", "order_type": "ZBV", "customer_id": "C003",
+        })
+        assert ds.execute("SELECT COUNT(*) FROM {0}".format(TABLE)).fetchone()[0] == 0
+        assert ds.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0] == 0

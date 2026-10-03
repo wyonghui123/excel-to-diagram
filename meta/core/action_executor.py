@@ -536,6 +536,56 @@ class ActionExecutor:
                 entry.overwritten, entry.factor_snapshot,
             )
 
+    def dry_run_defaults(self, meta_object: MetaObject, data: Dict[str, Any],
+                         original_data: Optional[Dict[str, Any]] = None,
+                         change_source: Optional[str] = None) -> Dict[str, Any]:
+        """[规则模型 二期 2026-10-03] 属性确定规则 dry-run 预演（不落库）
+
+        与真实保存走**同一条** ``apply_defaults`` 链路（同排序 / 同首个命中 /
+        同覆盖语义 / 同 ``change_source`` 判定），差别仅在：
+        - 在 ``data`` 的**浅拷贝**上求值，绝不写库；
+        - 返回逐条判定日志（``DefaultLogEntry.to_dict()``），供在线配置"试算"展示。
+
+        v1 边界（对齐"先只做日志"）：只覆盖 DEFAULT 规则段，
+        **不含**必填校验 / 计算 / 冗余守卫 —— 它们在真实保存链路的更外层。
+
+        Returns:
+            ``{"success", "change_source", "data", "auto_filled_fields", "logs"}``
+        """
+        draft = dict(data or {})
+        if change_source is None:
+            change_source = self._resolve_change_source()
+
+        try:
+            resolved, logs = self.rule_engine.apply_defaults(
+                meta_object, draft, original_data=original_data,
+                change_source=change_source,
+            )
+        except Exception as e:  # 预演失败不得影响调用方
+            logger.warning("[DefaultRule] dry-run failed: obj=%s err=%s",
+                           meta_object.id, e)
+            return {
+                "success": False,
+                "change_source": change_source,
+                "data": dict(data or {}),
+                "auto_filled_fields": [],
+                "logs": [],
+                "error": str(e),
+            }
+
+        self._log_default_rules(meta_object, logs, mode="dry_run")
+
+        # 获胜条目 = 命中且真正写入了值；其余为 not_first_match 等跳过项
+        auto_filled = [e.target_field for e in logs
+                       if e.hit and e.value is not None and not e.skip_reason]
+        return {
+            "success": True,
+            "change_source": change_source,
+            "data": resolved,
+            "auto_filled_fields": auto_filled,
+            "logs": [e.to_dict() for e in logs],
+        }
+
     def _get_field_business_name(self, meta_object: MetaObject, field_id: str) -> str:
         """获取字段的业务名称"""
         field = meta_object.get_field(field_id)

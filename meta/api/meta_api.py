@@ -319,6 +319,45 @@ def get_form_view_config(object_type: str):
     })
 
 
+@meta_bp.route('/<object_type>/defaults-preview', methods=['POST'])
+def preview_object_defaults(object_type: str):
+    """属性确定规则 dry-run 预演（不落库，仅返回判定日志）
+
+    [规则模型 二期 2026-10-03] 供规则配置 / 表单联动"试算"：
+    传入一份**未保存**的单据草稿，返回会被自动带出的字段与逐条判定日志。
+
+    Body: ``{"data": {...}, "original_data": {...}?}``
+    """
+    _ensure_fresh_meta()
+    meta_obj = registry.get(object_type)
+    if not meta_obj:
+        return jsonify({
+            'success': False,
+            'error': f'Object type not found: {object_type}',
+        }), 404
+
+    payload = request.get_json(silent=True) or {}
+    data = payload.get('data') or {}
+    original_data = payload.get('original_data') or None
+
+    from meta.core.datasource import get_data_source
+    from meta.core.rule_executor import RuleEngine
+    from meta.core.action_executor import ActionExecutor
+    from meta.services.auth_middleware import get_current_user
+
+    ds = get_data_source()
+    executor = ActionExecutor(ds, RuleEngine(ds))
+    user = get_current_user() or {}
+    if user:
+        executor.set_audit_user(
+            user_id=user.get('user_id') or user.get('id'),
+            user_name=user.get('username') or user.get('user_name') or '',
+        )
+
+    result = executor.dry_run_defaults(meta_obj, data, original_data=original_data)
+    return jsonify({'success': result.get('success', False), 'data': result})
+
+
 @meta_bp.route('/reload', methods=['POST'])
 def reload_meta():
     """重新加载元数据"""
