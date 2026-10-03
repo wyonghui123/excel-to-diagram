@@ -158,6 +158,19 @@ class DocFlowRuleDecl:
 
 
 @dataclass
+class RequiresDecl:
+    """应用声明的外部依赖（S6 / G5 安装期校验，roadmap §五 S6）。
+
+    未声明 = 旧行为（零影响）。只声明应用**无法自带**的依赖（他应用的 BO /
+    规则 / 列版本）；自有 schema 的 BO 无需声明（校验时自动并入）。
+    """
+
+    bo: List[str] = field(default_factory=list)
+    rules: List[str] = field(default_factory=list)
+    column_version: str = ""   # 预留：schema hash 机制未落地，本版仅登记不校验
+
+
+@dataclass
 class AppManifest:
     """app.yaml 的解析结果（不可变视图）。"""
 
@@ -184,6 +197,8 @@ class AppManifest:
     # [DOC_FLOW Phase 1] 单据流派生资格化声明（spec 2026-09-29 §5.3）
     doc_flow_enabled: bool = False
     doc_flow_rules: List[DocFlowRuleDecl] = field(default_factory=list)
+    # [S6 / G5] 外部依赖声明（未声明 = None → 零校验、零影响）
+    requires: Optional[RequiresDecl] = None
 
     @property
     def route_prefix(self) -> str:
@@ -303,6 +318,24 @@ def _parse_events(raw: Dict[str, Any]) -> tuple:
             "（跨应用事件是应用间机制, §6.14）"
         )
     return publishes, subscribes
+
+
+def _parse_requires(raw: Dict[str, Any]) -> Optional[RequiresDecl]:
+    """解析 `requires` 依赖声明段（S6 / G5）；未声明返回 None。
+
+    Raises:
+        AppManifestError: 结构非法
+    """
+    node = raw.get("requires")
+    if node is None:
+        return None
+    if not isinstance(node, dict):
+        raise AppManifestError("requires 需为对象（含 bo / rules / column_version）")
+    return RequiresDecl(
+        bo=_str_list(node, "bo"),
+        rules=_str_list(node, "rules"),
+        column_version=_optional_str(node, "column_version"),
+    )
 
 
 def _parse_doc_flow(raw: Dict[str, Any], app_id: str) -> tuple:
@@ -502,6 +535,7 @@ def load_manifest(app_dir: Path) -> AppManifest:
         events_subscribe=events_subscribe,
         doc_flow_enabled=doc_flow_enabled,
         doc_flow_rules=doc_flow_rules,
+        requires=_parse_requires(raw),
     )
 
 

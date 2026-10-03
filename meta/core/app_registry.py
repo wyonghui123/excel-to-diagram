@@ -616,6 +616,36 @@ def _verify_installed(data_source, manifests: List[AppManifest]) -> None:
             )
 
 
+def _verify_dependencies(manifests: List[AppManifest]) -> None:
+    """[S6 / G5] 启用期依赖校验 —— 缺失依赖即拒绝启用（启动中止）。
+
+    与安装期校验共用 `app_dependency.validate_app_set`，差别仅在可用集合：
+    启动期 registry 已加载完成，能拿到**平台 BO 全集**，比安装期更准。
+    读不到平台元数据（如只注册 blueprint 的单测）时降级为仅用应用声明并集，
+    避免因环境缺件而误判依赖缺失。
+
+    Raises:
+        AppRegistrationError: 任一应用平台版本越界 / 依赖 BO、规则缺失
+    """
+    from meta.core.app_dependency import validate_app_set
+
+    platform_bo_ids: set = set()
+    try:
+        from meta.core.models import registry
+        platform_bo_ids = set(registry.list_objects())
+    except Exception as e:  # noqa: BLE001 - 拿不到平台全集 → 降级, 不误判
+        logger.debug("[AppRegistry] 平台 BO 全集不可用 → 依赖校验降级: %s", e)
+
+    problems = validate_app_set(manifests, platform_bo_ids=platform_bo_ids)
+    if not problems:
+        return
+    detail = "; ".join(
+        f"app '{app_id}': " + ", ".join(f"[{f.code}] {f.detail}" for f in findings)
+        for app_id, findings in problems.items()
+    )
+    raise AppRegistrationError(f"依赖校验失败: {detail}")
+
+
 def _register_event_contracts(manifests: List[AppManifest]) -> int:
     """登记 app.yaml 的 events 契约并做启动期校验（roadmap §6.14.4 ④）。
 
@@ -764,6 +794,8 @@ def register_apps(
     for manifest in manifests:
         _app_database_files[manifest.app_id] = manifest.database_file
     _verify_installed(data_source, manifests)
+    # [S6 / G5] 依赖校验（平台版本区间 + requires 的 BO / 规则）→ 缺失拒绝启用
+    _verify_dependencies(manifests)
 
     declared_by_app: Dict[str, List[str]] = {}
     if register_schemas:

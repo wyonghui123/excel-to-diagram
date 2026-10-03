@@ -558,6 +558,23 @@ DOC_FLOW_NODE = {
 }
 
 
+def _write_other_app_declaring_waybill(apps_root: Path) -> None:
+    """另一个启用应用声明 BO `waybill`（用于区分 G5 存在性 vs Phase 1 同库）。"""
+    app_dir = apps_root / "otherapp"
+    (app_dir / "schemas").mkdir(parents=True, exist_ok=True)
+    (app_dir / "app.yaml").write_text(
+        yaml.safe_dump({"app": {
+            "id": "otherapp", "name": "他应用", "version": "1.0.0",
+            "schemas": ["schemas/waybill.yaml"], "blueprints": [], "components": [],
+        }}, allow_unicode=True), encoding="utf-8")
+    (app_dir / "schemas" / "waybill.yaml").write_text(
+        yaml.safe_dump({
+            "id": "waybill", "name": "运单", "table_name": "waybills",
+            "fields": [{"id": "id", "name": "ID", "type": "integer",
+                        "db_column": "id", "required": True, "unique": True}],
+        }, allow_unicode=True), encoding="utf-8")
+
+
 class TestPrepareDocFlowWiring:
 
     def test_routing_off_edge_table_in_platform_db(
@@ -611,7 +628,12 @@ class TestPrepareDocFlowWiring:
         assert DOC_FLOW_CONSUMED_VIEW not in names
 
     def test_cross_app_bo_reference_rejected(self, tmp_path, dbs, wired_menu_helpers):
-        """Phase 1 同库边界：规则引用非本应用 BO → 启动期快速失败。"""
+        """Phase 1 同库边界：规则引用非本应用 BO → 启动期快速失败。
+
+        两道闸门（先后顺序）:
+        1. [S6/G5] 依赖校验：target_bo 在任何启用应用都未声明 → RULE_BO_MISSING
+        2. Phase 1 同库校验：target_bo 由**其他**启用应用声明 → 非本应用声明的 BO
+        """
         _, platform_ds = dbs
         apps_root = tmp_path / "apps"
         _write_manifest(apps_root / "demoapp", {
@@ -621,8 +643,14 @@ class TestPrepareDocFlowWiring:
         })
 
         from meta.core.app_registry import AppRegistrationError, register_apps
-        with pytest.raises(AppRegistrationError, match="非本应用声明的 BO"):
+        with pytest.raises(AppRegistrationError, match="RULE_BO_MISSING"):
             register_apps(_bare_flask_app(), app_ids=["demoapp"],
+                          apps_root=apps_root, data_source=platform_ds)
+
+        # 他应用声明了 waybill → 存在性过关, 但跨库派生仍被 Phase 1 拦下
+        _write_other_app_declaring_waybill(apps_root)
+        with pytest.raises(AppRegistrationError, match="非本应用声明的 BO"):
+            register_apps(_bare_flask_app(), app_ids=["demoapp", "otherapp"],
                           apps_root=apps_root, data_source=platform_ds)
 
     def test_doc_flow_requires_schema_registration(self, tmp_path, dbs):

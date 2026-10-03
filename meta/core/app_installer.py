@@ -142,6 +142,41 @@ def _upsert_record(data_source, record: Dict[str, Any]) -> None:
     )
 
 
+def _install_dependency_findings(manifest, apps_root: Path, data_source) -> list:
+    """[S6 / G5] 安装期依赖校验：平台版本 + requires 的 BO / 规则。
+
+    可用集合 = installed_apps 登记的 bo_ids ∪ 已安装应用 manifest 的声明并集
+    （后者读不到时降级为仅用登记 bo_ids，规则依赖校验随之降级）。
+    """
+    from meta.core.app_dependency import collect_declared_ids, validate_dependencies
+    from meta.core.app_loader import load_apps
+
+    bo_ids: set = set()
+    rule_ids: set = set()
+    try:
+        records = list_installed(data_source)
+    except Exception as e:  # noqa: BLE001 - 登记表不可读不该阻断安装
+        logger.debug("[AppInstaller] installed_apps 不可读 → 依赖校验降级: %s", e)
+        records = []
+    installed_ids = []
+    for rec in records:
+        bo_ids.update(rec.get("bo_ids") or [])
+        if rec.get("app_id"):
+            installed_ids.append(rec["app_id"])
+
+    if installed_ids:
+        try:
+            declared_bos, rule_ids = collect_declared_ids(
+                load_apps(installed_ids, apps_root))
+            bo_ids |= declared_bos
+        except Exception as e:  # noqa: BLE001 - manifest 加载失败 → 降级
+            logger.debug(
+                "[AppInstaller] 已安装应用 manifest 加载失败 → 规则依赖校验降级: %s", e)
+
+    return validate_dependencies(
+        manifest, available_bo_ids=bo_ids, available_rule_ids=rule_ids)
+
+
 def install_app(
     bip_path: Path,
     apps_root: Optional[Path] = None,
@@ -194,6 +229,16 @@ def install_app(
         raise AppInstallError(
             f"包内容不一致: manifest.json 声明 {app_id}@{package_manifest['version']}, "
             f"app.yaml 为 {manifest.app_id}@{manifest.version}"
+        )
+
+    # [S6 / G5] 依赖校验：平台版本 + requires 的 BO / 规则缺失 → 拒绝安装
+    # （数据先解包再回滚成本高, 故在写登记前拦截; 失败时保留已解包目录,
+    #   与"覆盖安装前已备份"的既有行为一致 —— 由调用方决定是否清理）
+    findings = _install_dependency_findings(manifest, root, data_source)
+    if findings:
+        raise AppInstallError(
+            f"应用 '{manifest.app_id}' 依赖校验失败: "
+            + "; ".join(f"[{f.code}] {f.detail}" for f in findings)
         )
 
     mount = manifest.menu_portal_mount or {}
