@@ -11,6 +11,7 @@ ensure_hold_view / rebuild_hold_view / hold_findings
   4. 派生态: active_flag 差值语义、多码并存互不干扰、release 后可再 hold
   5. 视图: ensure 幂等、rebuild 原子替换 + 修复漂移、视图缺失读取报错
   6. 巡检: 干净态 ok；账缺失 / 视图缺失 / 未交替 / 缺 hold_code 均被机器发现
+  7. CLI: --json 机读 / --strict 退出码 / --rebuild 端到端 / 缺库 exit 2
 
 注: 平台内部表（tasks / task_events）暂无 Factory；按仓库既有惯例走 raw SQL
 escape hatch（同 test_decision_effect.py 注释），raw 写仅用于**预置脏数据**。
@@ -46,6 +47,7 @@ from meta.core.task_hold import (
 from meta.core.task_schema import ensure_task_tables
 from meta.core.workflow_engine import advance_run, list_run_tasks, start_run
 from meta.core.workflow_store import publish_workflow
+from meta.tools.task_hold_reconcile import main as hold_reconcile_main
 
 pytestmark = pytest.mark.unit
 
@@ -372,3 +374,67 @@ class TestHoldFindings:
         report = hold_findings(ds)
         assert report.hold_event_count == 0
         assert report.ok
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ④ CLI（meta.tools.task_hold_reconcile；触发式运维脚本）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def db_file(tmp_path):
+    """落盘平台库（CLI 需要真实文件路径）。"""
+    from meta.core.datasource import get_data_source
+
+    path = str(tmp_path / "cli.db")
+    source = get_data_source("sqlite", database=path)
+    with source.transaction():
+        ensure_task_tables(source)
+        ensure_task_event_tables(source)
+        ensure_hold_view(source)
+    return path
+
+
+class TestCli:
+    def test_cli_json_clean(self, db_file, capsys):
+        """TC-WFH-050: --json 机读输出（无 rebuild 时该字段为 null）。"""
+        from meta.core.datasource import get_data_source
+
+        ds = get_data_source("sqlite", database=db_file)
+        _raw_event(ds, "t-1", "hold", json.dumps({"hold_code": "Q1"}))
+        _raw_event(ds, "t-1", "release", json.dumps({"hold_code": "Q1"}))
+
+        code = hold_reconcile_main(["--db", db_file, "--json"])
+        payload = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert payload["report"]["ok"] is True
+        assert payload["report"]["hold_event_count"] == 2
+        assert payload["report"]["active_hold_count"] == 0
+        assert payload["rebuild"] is None
+
+    def test_cli_strict_exit_code(self, db_file):
+        """TC-WFH-051: --strict 仅在 error 级 findings 时退出码 1。"""
+        from meta.core.datasource import get_data_source
+
+        ds = get_data_source("sqlite", database=db_file)
+        with ds.transaction():
+            ds.execute("DROP VIEW IF EXISTS {0}".format(HOLD_VIEW))
+
+        assert hold_reconcile_main(["--db", db_file]) == 0            # 非 strict
+        assert hold_reconcile_main(["--db", db_file, "--strict"]) == 1
+
+    def test_cli_rebuild_restores_view(self, db_file, capsys):
+        """TC-WFH-052: --rebuild 重建视图并复检（端到端）。"""
+        from meta.core.datasource import get_data_source
+
+        ds = get_data_source("sqlite", database=db_file)
+        with ds.transaction():
+            ds.execute("DROP VIEW IF EXISTS {0}".format(HOLD_VIEW))
+
+        assert hold_reconcile_main(["--db", db_file, "--rebuild"]) == 0
+        assert hold_view_exists(ds)
+        assert "视图重建: OK" in capsys.readouterr().out
+
+    def test_cli_missing_db_exit_2(self, tmp_path):
+        """TC-WFH-053: --db 指向不存在文件 → exit 2（不静默新建空库）。"""
+        assert hold_reconcile_main(
+            ["--db", str(tmp_path / "nope.db")]) == 2
