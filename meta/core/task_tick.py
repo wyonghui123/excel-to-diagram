@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""[A5 2026-10-02] 统一心跳入口 — 派工 / 回收 / 告警一次编排
+"""[A5 2026-10-02] 统一心跳入口 — 派工 / 回收 / 告警 / 对账一次编排
 
 职责（§12.1 A5 / §8.2 / §7.6）:
-- 把 A4（投递 / 回收）与 A9（SLA 梯队）串成**一次平台心跳**：调度器 / cron /
-  REST 只需调用 `platform_tick()` 一次，不必各自拼装三个入口。
-- 三段独立、互不拖垮：单段或单任务失败收集进 `errors`，其余照常推进
+- 把 A4（投递 / 回收）、A9（SLA 梯队）与 B3（决策-生效对账）串成**一次平台心跳**：
+  调度器 / cron / REST 只需调用 `platform_tick()` 一次，不必各自拼装四个入口。
+- 各段独立、互不拖垮：单段或单任务失败收集进 `errors`，其余照常推进
   （心跳必须可重复调用；失败下轮自愈）。
 
 分层纪律:
-- 编排层不碰数据：不新建表、不写状态列、不改 A2 守卫 —— 三段各自的内务
+- 编排层不碰数据：不新建表、不写状态列、不改 A2 守卫 —— 各段各自的内务
   （事务、事件账、守卫）由被调模块自理。
 - 幂等由被调模块保证（A4 条件 UPDATE / A9 梯级单调）；本层无状态、不发通知、
   不改任务字段（执行意图归引擎，通知归 A8 / IM）。
@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 from meta.core.sla_ladder import scan_escalations
+from meta.core.decision_effect import reconcile_effects   # [B3 2026-10-03] 对账段
 from meta.core.task_assignment import reclaim_expired, resolve_assignment
 from meta.core.task_schema import TASK_TABLE
 
@@ -58,17 +59,22 @@ def _dispatch_ready_direct(data_source, *,
 
 
 def platform_tick(data_source, *, now: Any = None, dispatch: bool = True,
-                  reclaim: bool = True, escalate: bool = True) -> Dict[str, Any]:
-    """一次平台心跳：派工 → 回收 → 告警（各段可单独关闸，便于运维排查）。
+                  reclaim: bool = True, escalate: bool = True,
+                  reconcile: bool = True) -> Dict[str, Any]:
+    """一次平台心跳：派工 → 回收 → 告警 → 决策-生效对账（各段可单独关闸）。
+
+    对账段只跑**平台库内可判**的方向（done 无回执 / 配置完整性）；跨库方向
+    （回执↔单据现状 / 等待单据无活跃任务）走 CLI 注入，见 meta/tools/task_decision_reconcile.py。
 
     Returns:
-        {dispatched: [...], reclaimed: [...], escalations: [...], errors: [...],
-         counts: {dispatched, reclaimed, escalations, errors}}
+        {dispatched, reclaimed, escalations, reconciliations, errors,
+         counts: {dispatched, reclaimed, escalations, reconciliations, errors}}
     """
     now_dt = now if isinstance(now, datetime) else datetime.now()
     dispatched: List[Dict[str, Any]] = []
     reclaimed: List[Dict[str, Any]] = []
     escalations: List[Dict[str, Any]] = []
+    reconciliations: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
     if dispatch:
@@ -91,15 +97,24 @@ def platform_tick(data_source, *, now: Any = None, dispatch: bool = True,
         except Exception as e:
             errors.append(_error("escalate", e))
 
+    if reconcile:
+        try:
+            # 只读扫描：无 current_statuses / pending_docs 注入 → 仅平台库内可判方向
+            reconciliations = reconcile_effects(data_source, now=now_dt)
+        except Exception as e:
+            errors.append(_error("reconcile", e))
+
     return {
         "dispatched": dispatched,
         "reclaimed": reclaimed,
         "escalations": escalations,
+        "reconciliations": reconciliations,
         "errors": errors,
         "counts": {
             "dispatched": len(dispatched),
             "reclaimed": len(reclaimed),
             "escalations": len(escalations),
+            "reconciliations": len(reconciliations),
             "errors": len(errors),
         },
     }

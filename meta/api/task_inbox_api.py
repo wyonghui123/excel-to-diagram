@@ -88,7 +88,7 @@ def task_inbox_count():
 @task_inbox_bp.route('/api/v1/platform/tick', methods=['POST'])
 @login_required
 def platform_tick_route():
-    """平台心跳：派工 / 回收 / 告警（cron 或管理员手动触发）。"""
+    """平台心跳：派工 / 回收 / 告警 / 决策-生效对账（cron 或管理员手动触发）。"""
     user = get_current_user()
     if not is_admin(user):
         return jsonify({'success': False, 'message': '需要管理员权限'}), 403
@@ -100,6 +100,7 @@ def platform_tick_route():
             dispatch=bool(body.get('dispatch', True)),
             reclaim=bool(body.get('reclaim', True)),
             escalate=bool(body.get('escalate', True)),
+            reconcile=bool(body.get('reconcile', True)),
         )
     except Exception as e:
         logger.error("[A5] 平台心跳失败: %s", e)

@@ -101,7 +101,8 @@ class TestTick:
         assert esc["action"] == "notify"
         assert result["errors"] == []
         assert result["counts"] == {"dispatched": 1, "reclaimed": 1,
-                                    "escalations": 1, "errors": 0}
+                                    "escalations": 1, "reconciliations": 0,
+                                    "errors": 0}
 
     def test_TC_TICK_002_重复tick幂等(self, ds):
         _task(ds, task_id="T-A", policy="direct", assignee="u1")
@@ -113,9 +114,11 @@ class TestTick:
         second = platform_tick(ds, now=_at(900))
 
         assert first["counts"] == {"dispatched": 1, "reclaimed": 1,
-                                   "escalations": 1, "errors": 0}
+                                   "escalations": 1, "reconciliations": 0,
+                                   "errors": 0}
         assert second["counts"] == {"dispatched": 0, "reclaimed": 0,
-                                    "escalations": 0, "errors": 0}
+                                    "escalations": 0, "reconciliations": 0,
+                                    "errors": 0}
 
     def test_TC_TICK_003_单任务失败隔离(self, ds, monkeypatch):
         _task(ds, task_id="T-OK", policy="direct", assignee="u1")
@@ -146,7 +149,8 @@ class TestTick:
                                reclaim=False, escalate=False)
 
         assert result["counts"] == {"dispatched": 0, "reclaimed": 0,
-                                    "escalations": 0, "errors": 0}
+                                    "escalations": 0, "reconciliations": 0,
+                                    "errors": 0}
         assert _status(ds, "T-A") == "ready"
 
     def test_TC_TICK_005_段级异常不中断(self, ds, monkeypatch):
@@ -162,6 +166,46 @@ class TestTick:
         assert result["counts"]["dispatched"] == 1   # 前一/后一段照常
         assert _status(ds, "T-A") == "claimed"
         assert any(e["stage"] == "reclaim" for e in result["errors"])
+
+    def test_TC_TICK_010_对账段发现done无回执(self, ds):
+        ds.execute(
+            "INSERT INTO tasks (id, title, type, status, executor_type, "
+            "created_at, updated_at) VALUES (?, ?, 'approval', 'done', 'system', ?, ?)",
+            ("T-B3", "审批任务", T0.isoformat(timespec="seconds"),
+             T0.isoformat(timespec="seconds")),
+        )
+
+        result = platform_tick(ds, now=_at(0))
+
+        assert [f["kind"] for f in result["reconciliations"]] == ["done_without_effect"]
+        assert result["counts"]["reconciliations"] == 1
+        assert result["errors"] == []          # 发现是「产出」不是「错误」
+
+    def test_TC_TICK_011_对账段可关闸(self, ds):
+        ds.execute(
+            "INSERT INTO tasks (id, title, type, status, executor_type, "
+            "created_at, updated_at) VALUES (?, ?, 'approval', 'done', 'system', ?, ?)",
+            ("T-B3", "审批任务", T0.isoformat(timespec="seconds"),
+             T0.isoformat(timespec="seconds")),
+        )
+
+        result = platform_tick(ds, now=_at(0), reconcile=False)
+
+        assert result["reconciliations"] == []
+        assert result["counts"]["reconciliations"] == 0
+
+    def test_TC_TICK_012_对账段异常隔离(self, ds, monkeypatch):
+        _task(ds, task_id="T-A", policy="direct", assignee="u1")
+
+        def boom(*a, **k):
+            raise RuntimeError("reconcile down")
+
+        monkeypatch.setattr(task_tick, "reconcile_effects", boom)
+
+        result = platform_tick(ds, now=_at(0))
+
+        assert result["counts"]["dispatched"] == 1        # 其余段照常
+        assert any(e["stage"] == "reconcile" for e in result["errors"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
