@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[C1] 编排实例层引擎 —— Run 实例化 / 依赖求值 / 进度派生
+"""[C1/C4] 编排实例层引擎 —— Run 实例化 / 依赖求值 / 进度派生 / 受控转移
 
 职责:
 - `start_run()`: 取定义版本 → 写 `workflow_runs`（含 `definition_snapshot` 深拷贝）
@@ -7,6 +7,9 @@
 - `advance_run()`: 对 `pending` 任务求值 deps，满足则 `pending→ready`
   （复用 A2 状态机守卫 + A3 事件账落账）
 - `run_progress()`: Run 进度**派生**聚合（`workflow_runs` 刻意无状态列，§3.2）
+- `skip_task()` / `compensate_task()`（C4）: 定义层「动态」的两个受控转移 ——
+  跳过（`ready→skipped`，条件边判定为否）与补偿（新建补偿任务 + 业务红字链路，
+  对齐 Oracle `REFERENCE_STEP_INSTANCE_ID`；§3.3 定律 1）
 
 纪律:
 - `definition_snapshot` 必须**深拷贝**（json round-trip）—— 否则后续发布新版本会
@@ -14,9 +17,11 @@
 - 状态只挂实例：Run 无状态列；任务状态是唯一状态列，且只经状态机迁移
 - 本模块不碰 Flask / BO registry
 
-边界（C1 不做，留给后续能力项）:
-- 上游 `outputs` 按 edge 注入下游 `inputs`（运行期数据流）—— 留待 C4/实例层
+边界（本模块不做）:
+- 上游 `outputs` 按 edge 注入下游 `inputs`（运行期数据流）—— 留待实例层后续
 - 任务的实际执行（executor 分派）—— 归 A5/A4
+- 补偿的**业务红字**执行：任务不写对象表（B4 写权单通道），`compensate_task()`
+  只携带 `bo_action` 声明，真正调用归 B 系列 / E6 三档冲销
 """
 from __future__ import annotations
 
@@ -318,3 +323,179 @@ def advance_run(data_source, run_id: str, *, actor: str = "engine",
         status_by_task_id[task["id"]] = "ready"
 
     return {"run_id": run_id, "promoted": promoted, "blocked": blocked}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 受控转移（C4）：跳过 / 补偿
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 受控转移读取任务所需的列
+_RECOVERY_COLUMNS = (
+    "id", "title", "type", "priority", "status", "app_id", "executor_type",
+    "executor_assignee", "executor_candidates", "assign_policy",
+    "executor_config", "executor_fallback", "claim_timeout_seconds",
+    "timeout_seconds", "retry_policy", "due_at", "sla", "workflow_run_id",
+    "workflow_node_id", "doc_ref", "trace_id", "meta",
+)
+_RECOVERY_JSON = ("executor_candidates", "executor_config", "executor_fallback",
+                  "retry_policy", "sla", "meta")
+
+
+def _task_for_recovery(data_source, task_id: str) -> Optional[Dict[str, Any]]:
+    rows = _select(
+        data_source,
+        f"SELECT {', '.join(_RECOVERY_COLUMNS)} FROM {TASK_TABLE} WHERE id = ?",
+        (task_id,), _RECOVERY_JSON)
+    return rows[0] if rows else None
+
+
+def skip_task(
+    data_source,
+    task_id: str,
+    *,
+    actor: str = "engine",
+    actor_kind: str = "system",
+    reason: str = "",
+) -> Dict[str, Any]:
+    """受控转移「跳过」：`ready → skipped`（条件边判定为否），并传播到下游。
+
+    唯一合法来源态是 `ready`（状态机只有 `ready→skipped`）。迁移经 A2
+    `require_transition`（守卫 `edge_condition_failed`）+ A3 `record_transition`
+    配对落账（TASK_EVENT + WORKLOG）。
+
+    传播**复用** `advance_run()` 的 deps 求值（不写第二套级联）：`when=skipped` /
+    `done_or_skipped` 的下游被提升为 `ready`，`when=done` 的下游保持 `pending`。
+
+    Returns:
+        {"task_id", "from_status", "status", "promoted": [task_id...]}
+
+    Raises:
+        WorkflowEngineError: 任务不存在 / 非 ready（结构或并发）
+        TaskTransitionError: 状态机守卫未通过
+    """
+    task = _task_for_recovery(data_source, task_id)
+    if task is None:
+        raise WorkflowEngineError(f"任务不存在: {task_id}")
+
+    require_transition("ready", "skipped", TransitionContext(
+        edge_condition_satisfied=False, actor=actor, actor_kind=actor_kind))
+
+    ts = _now_iso()
+    with data_source.transaction():
+        cursor = data_source.execute(
+            f"UPDATE {TASK_TABLE} SET status = ?, finished_at = COALESCE(finished_at, ?), "
+            "updated_at = ? WHERE id = ? AND status = ?",
+            ("skipped", ts, ts, task_id, "ready"),
+        )
+        if cursor.rowcount == 0:      # 并发/状态不符 → 回滚，不做半截迁移
+            raise WorkflowEngineError(
+                f"任务 {task_id} 当前状态非 ready（实际 {task['status']}），不能跳过")
+        record_transition(
+            data_source, task_id=task_id, from_status="ready", to_status="skipped",
+            actor=actor, actor_kind=actor_kind,
+            reason=reason or "条件边判定为否，引擎跳过",
+            summary="ready → skipped（跳过）",
+            doc_ref=task.get("doc_ref") or "",
+            workflow_run_id=task.get("workflow_run_id") or "",
+            trace_id=task.get("trace_id") or "",
+        )
+
+    result = {"task_id": task_id, "from_status": "ready", "status": "skipped",
+              "promoted": []}
+    run_id = task.get("workflow_run_id")
+    if run_id:
+        result["promoted"] = advance_run(data_source, run_id, actor=actor,
+                                         actor_kind=actor_kind)["promoted"]
+    return result
+
+
+def compensate_task(
+    data_source,
+    task_id: str,
+    *,
+    actor: str = "",
+    actor_kind: str = "system",
+    reason: str = "",
+    bo_action: Any = None,
+) -> Dict[str, Any]:
+    """受控转移「补偿」：为已完成任务新建一张**补偿任务**。
+
+    纪律:
+    - 任务侧**不写对象表**（B4）：红字 / 反向一律交 BO Action（E6 三档），本函数
+      只把 `bo_action` 声明写进新任务的 `meta`，**不代调**。
+    - **不新增状态迁移**：原任务保持 `done`；补偿 = 「新建任务 + 业务红字」。
+    - 新旧链路：`meta.compensates_task_id`（直接前驱）+
+      `meta.reference_task_id`（链根，对齐 Oracle `REFERENCE_STEP_INSTANCE_ID`）。
+    - 幂等**不在本层**：同一任务可多次补偿；业务幂等由 E6 红字单锚保证。
+
+    Returns:
+        {"task_id", "compensates_task_id", "reference_task_id",
+         "workflow_run_id", "promoted": [...]}
+
+    Raises:
+        WorkflowEngineError: 任务不存在 / 原任务非 `done` / 原任务不属任何 Run
+    """
+    original = _task_for_recovery(data_source, task_id)
+    if original is None:
+        raise WorkflowEngineError(f"任务不存在: {task_id}")
+    if original["status"] != "done":
+        raise WorkflowEngineError(
+            f"任务 {task_id} 状态为 {original['status']}，仅 done 任务可补偿"
+            "（failed 未产生业务效果，无需补偿）")
+    run_id = original.get("workflow_run_id") or ""
+    if not run_id:
+        raise WorkflowEngineError(
+            f"任务 {task_id} 不属于任何 Run —— 补偿仅支持编排实例内任务")
+
+    original_meta = original.get("meta")
+    original_meta = original_meta if isinstance(original_meta, dict) else {}
+    chain_root = original_meta.get("reference_task_id") or task_id
+    comp_meta: Dict[str, Any] = {
+        "compensates_task_id": task_id,
+        "reference_task_id": chain_root,
+        "reason": reason,
+    }
+    if bo_action is not None:
+        comp_meta["bo_action"] = bo_action
+
+    new_id = uuid.uuid4().hex
+    ts = _now_iso()
+    with data_source.transaction():
+        data_source.execute(
+            f"INSERT INTO {TASK_TABLE} ({', '.join(_TASK_COLUMNS)}) "
+            f"VALUES ({', '.join('?' for _ in _TASK_COLUMNS)})",
+            (
+                new_id, None, f"补偿：{original['title']}", None,
+                original.get("type") or "story", "pending",
+                original.get("priority") or "P2", original.get("app_id"),
+                original.get("executor_type") or "human",
+                original.get("executor_assignee"),
+                _json_text(original.get("executor_candidates")),
+                original.get("assign_policy") or "direct",
+                _json_text(original.get("executor_config")),
+                _json_text(original.get("executor_fallback")),
+                original.get("claim_timeout_seconds", 300),
+                original.get("timeout_seconds"),
+                _json_text(original.get("retry_policy")),
+                original.get("due_at"), _json_text(original.get("sla")), None,
+                run_id, original.get("workflow_node_id"), None, None,
+                None, None, None, None, 1, original.get("trace_id"), None,
+                original.get("doc_ref"), None, actor or None, ts, None, None,
+                None, _json_text(comp_meta), ts,
+            ),
+        )
+        record_task_event(
+            data_source, task_id=new_id, event_type="created",
+            actor=actor, actor_kind=actor_kind or "system",
+            payload={"workflow_run_id": run_id, "compensates_task_id": task_id,
+                     "reference_task_id": chain_root,
+                     "node_id": original.get("workflow_node_id") or ""},
+            doc_ref=original.get("doc_ref") or "", workflow_run_id=run_id,
+            occurred_at=ts,
+        )
+
+    advanced = advance_run(data_source, run_id, actor=actor or "engine",
+                           actor_kind=actor_kind or "system")
+    return {"task_id": new_id, "compensates_task_id": task_id,
+            "reference_task_id": chain_root, "workflow_run_id": run_id,
+            "promoted": advanced["promoted"]}
