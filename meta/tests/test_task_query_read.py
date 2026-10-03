@@ -160,3 +160,93 @@ class TestListTasks:
     def test_TC_P1_023_非法status拒绝(self, ds):
         with pytest.raises(ValueError):
             list_tasks(ds, status="not-a-status")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REST 服务函数（不经 Flask 全栈）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _admin():
+    return {"user_id": "u-admin", "permissions": ["*"]}
+
+
+def test_TC_P1_030_事件流可见返回200(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1", assignee="u-a")
+    with ds.transaction():
+        record_transition(ds, task_id="T-1", from_status="ready", to_status="claimed",
+                          actor="u-a", actor_kind="human")
+
+    payload, code = api.task_events_service("T-1", user={"user_id": "u-a"})
+
+    assert code == 200
+    assert payload["data"][0]["to_status"] == "claimed"
+
+
+def test_TC_P1_031_事件流不可见返回404(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1", assignee="u-a")
+
+    payload, code = api.task_events_service("T-1", user={"user_id": "u-x"})
+
+    assert code == 404
+    assert payload["success"] is False
+
+
+def test_TC_P1_032_详情可见返回任务(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1", assignee="u-a")
+
+    payload, code = api.task_detail_service("T-1", user={"user_id": "u-a"})
+
+    assert code == 200
+    assert payload["data"]["id"] == "T-1"
+
+
+def test_TC_P1_033_认领成功(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1", assignee="", candidates=["u-a"], assign_policy="claim")
+
+    payload, code = api.task_claim_service("T-1", user={"user_id": "u-a"})
+
+    assert code == 200
+    assert payload["data"]["status"] == "claimed"
+    assert payload["data"]["assignee"] == "u-a"
+
+
+def test_TC_P1_034_认领非候选池返回409(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1", assignee="", candidates=["u-a"], assign_policy="claim")
+
+    payload, code = api.task_claim_service("T-1", user={"user_id": "u-x"})
+
+    assert code == 409
+    assert payload["success"] is False
+    # 无副作用
+    assert ds.execute("SELECT status FROM tasks WHERE id='T-1'").fetchall()[0][0] == "ready"
+
+
+def test_TC_P1_035_监控列表非管理员403(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1")
+
+    payload, code = api.task_monitor_service(user={"user_id": "u-plain", "permissions": []})
+
+    assert code == 403
+
+
+def test_TC_P1_036_监控列表管理员200(ds, monkeypatch):
+    import meta.api.task_inbox_api as api
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    _task(ds, task_id="T-1")
+
+    payload, code = api.task_monitor_service(user=_admin())
+
+    assert code == 200
+    assert payload["data"]["total"] == 1
