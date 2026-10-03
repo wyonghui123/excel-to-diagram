@@ -16,6 +16,12 @@ from dataclasses import dataclass
 from meta.core.models import registry, MetaComputation, RuleType
 from meta.core.rule_provider import get_rule_provider
 from meta.core.table_name_validator import validate_table_name
+# [P2 2026-10-03] 聚合函数表 / 按父分组解析: 唯一定义在 computed_subqueries (SSOT),
+# 本服务与 sort/filter 子查询构造共用同一份, 避免两处漂移。
+from meta.services.query.computed_subqueries import (
+    AGGREGATION_SQL_FUNCS,
+    resolve_parent_aggregation,
+)
 
 
 @dataclass
@@ -36,12 +42,8 @@ class ComputationService:
             cls._instance._cache = {}
         return cls._instance
 
-    AGGREGATION_TYPES = {
-        'sum_field': 'SUM',
-        'avg_field': 'AVG',
-        'max_field': 'MAX',
-        'min_field': 'MIN'
-    }
+    # [P2 2026-10-03] 引用 computed_subqueries 的权威表 (唯一定义处), 避免双源漂移
+    AGGREGATION_TYPES = AGGREGATION_SQL_FUNCS
 
     def compute_field(self, data_source, object_type: str, record_id: int,
                       field_key: str, computation: Dict[str, Any]) -> Any:
@@ -398,37 +400,14 @@ class ComputationService:
     def _resolve_parent_aggregation(self, computation: Dict[str, Any]):
         """解析按父分组取值聚合所需的 (table, fk, source_field, sql_func).
 
-        target_object / foreign_key 解析口径与 _count_children 一致:
-        1. target_object / child_object → registry 取表名
-        2. foreign_key 显式指定, 否则从层级/关联配置推导
+        [P2 2026-10-03] 实现移至 computed_subqueries.resolve_parent_aggregation:
+        与 SSOT 的 sort/filter 相关子查询共用同一份解析逻辑 (单一事实源),
+        避免"读时计算"与"DB 下推"两套口径对不上。
 
         Returns:
             (table_name, fk_field, source_field, sql_func) 或 None (配置不完整)
         """
-        target_object = computation.get('target_object') or computation.get('child_object', '')
-        if not target_object:
-            return None
-
-        meta_obj = registry.get(target_object)
-        if not meta_obj:
-            return None
-
-        fk_field = computation.get('foreign_key', '')
-        if not fk_field:
-            from meta.services.cascade_service import HierarchyConfigLoader
-            fk_field = HierarchyConfigLoader.get_foreign_key(target_object)
-        if not fk_field:
-            return None
-
-        source_field = computation.get('source_field')
-        if not source_field:
-            return None
-
-        sql_func = self.AGGREGATION_TYPES.get(computation.get('type', ''))
-        if not sql_func:
-            return None
-
-        return meta_obj.table_name, fk_field, source_field, sql_func
+        return resolve_parent_aggregation(computation)
 
     def _aggregate_field_by_parent(self, data_source, object_type: str, record_id: int,
                                    computation: Dict[str, Any]) -> Any:
@@ -511,7 +490,21 @@ class ComputationService:
             return self._count_bo_relations(data_source, record_id)
         elif object_type in ('domain', 'sub_domain', 'service_module') and scope == 'descendants':
             return self._count_descendant_relations(data_source, object_type, record_id)
+        elif object_type == 'org' and scope == 'self':
+            # [FIX 2026-10-03] 单记录路径与 _batch_count_relations 对齐 (第 5 处注册点),
+            # 此前只有批量路径认 org, 单记录会落到末尾 return 0
+            return self._count_org_members(data_source, record_id)
         return 0
+
+    def _count_org_members(self, data_source, org_id: int) -> int:
+        try:
+            cursor = data_source.execute(
+                "SELECT COUNT(*) FROM org_members WHERE org_id = ?", (org_id,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else 0
+        except Exception:
+            return 0
 
     def _count_bo_relations(self, data_source, bo_id: int) -> int:
         try:
@@ -572,8 +565,9 @@ class ComputationService:
             self._batch_count_bo_relations(data_source, records, field_key)
         elif object_type in ('domain', 'sub_domain', 'service_module') and scope == 'descendants':
             self._batch_count_descendant_relations(data_source, object_type, records, field_key)
-        elif object_type == 'user_group' and scope == 'self':
-            self._batch_count_user_group_members(data_source, records, field_key)
+        elif object_type == 'org' and scope == 'self':
+            # [FIX 2026-10-03] Spec 16 把 user_group 迁为 org 时漏改 dispatch key
+            self._batch_count_org_members(data_source, records, field_key)
 
     def _batch_count_bo_relations(self, data_source, records: List[Dict], field_key: str):
         if not records:
@@ -716,23 +710,23 @@ class ComputationService:
                 else:
                     record[field_key] = 0
 
-    def _batch_count_user_group_members(self, data_source, records: List[Dict], field_key: str):
+    def _batch_count_org_members(self, data_source, records: List[Dict], field_key: str):
         if not records:
             return
 
-        group_ids = [r.get('id') for r in records if r.get('id')]
-        if not group_ids:
+        org_ids = [r.get('id') for r in records if r.get('id')]
+        if not org_ids:
             return
 
         try:
-            placeholders = ','.join(['?'] * len(group_ids))
+            placeholders = ','.join(['?'] * len(org_ids))
             sql = f"""
                 SELECT org_id, COUNT(*) as member_count
                 FROM org_members
                 WHERE org_id IN ({placeholders})
                 GROUP BY org_id
             """
-            cursor = data_source.execute(sql, tuple(group_ids))
+            cursor = data_source.execute(sql, tuple(org_ids))
             count_map = {row[0]: row[1] for row in cursor.fetchall()}
 
             for record in records:

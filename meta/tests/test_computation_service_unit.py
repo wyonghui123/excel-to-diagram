@@ -5,7 +5,7 @@ ComputationService 单元测试 (P0-2026-06-10)
 覆盖以下方法（之前 0 单元测试覆盖）：
 - _count_children / _batch_count_children
 - _count_relations 各 scope 分支
-- _batch_count_user_group_members
+- _batch_count_org_members
 - _evaluate_expression / _batch_evaluate_formula
 - invalidate_cache
 - merge_computed_columns / get_computed_columns_from_rules
@@ -57,10 +57,10 @@ def mock_db():
         "id INTEGER PRIMARY KEY, source_bo_id INTEGER, target_bo_id INTEGER)"
     )
 
-    # 用户组成员表（user_group.member_count 测试用）
+    # 组织成员表（org.member_count 测试用）
     cur.execute(
         "CREATE TABLE org_members ("
-        "group_id INTEGER, user_id INTEGER)"
+        "org_id INTEGER, user_id INTEGER)"
     )
 
     # 测试数据
@@ -247,8 +247,14 @@ class TestCountRelations:
     def test_count_relations_unsupported_object_type_returns_zero(self, mock_ds):
         """完全未知的 object_type 返回 0"""
         assert computation_service._count_relations(
-            mock_ds, "user_group", 1, "self"
+            mock_ds, "nonexistent_object", 1, "self"
         ) == 0
+
+    def test_count_org_members_self(self, mock_ds):
+        """org + self → COUNT org_members WHERE org_id = ?（与批量路径对齐）"""
+        assert computation_service._count_relations(mock_ds, "org", 500, "self") == 3
+        assert computation_service._count_relations(mock_ds, "org", 501, "self") == 1
+        assert computation_service._count_relations(mock_ds, "org", 999, "self") == 0
 
     def test_count_bo_relations_db_error_returns_zero(self, mock_ds):
         """SQL 异常时降级返回 0"""
@@ -259,41 +265,41 @@ class TestCountRelations:
 
 
 # =============================================================================
-# TestCountUserGroupMembers
+# TestCountOrgMembers
 # =============================================================================
 
 
-class TestCountUserGroupMembers:
-    """_batch_count_user_group_members"""
+class TestCountOrgMembers:
+    """_batch_count_org_members"""
 
-    def test_count_user_group_members_with_data(self, mock_ds):
-        """user_group.member_count = COUNT user_group_members GROUP BY group_id"""
+    def test_count_org_members_with_data(self, mock_ds):
+        """org.member_count = COUNT org_members GROUP BY org_id"""
         records = [{"id": 500}, {"id": 501}, {"id": 999}]
-        computation_service._batch_count_user_group_members(mock_ds, records, "member_count")
-        assert records[0]["member_count"] == 3  # group 500 → 3 members
-        assert records[1]["member_count"] == 1  # group 501 → 1 member
-        assert records[2]["member_count"] == 0  # group 999 → 0 members (no group)
+        computation_service._batch_count_org_members(mock_ds, records, "member_count")
+        assert records[0]["member_count"] == 3  # org 500 → 3 members
+        assert records[1]["member_count"] == 1  # org 501 → 1 member
+        assert records[2]["member_count"] == 0  # org 999 → 0 members (no org)
 
-    def test_count_user_group_members_empty_records(self, mock_ds):
+    def test_count_org_members_empty_records(self, mock_ds):
         """空 records 列表安全返回"""
         records = []
-        computation_service._batch_count_user_group_members(mock_ds, records, "member_count")
+        computation_service._batch_count_org_members(mock_ds, records, "member_count")
         assert records == []
 
-    def test_count_user_group_members_all_without_id(self, mock_ds):
+    def test_count_org_members_all_without_id(self, mock_ds):
         """全部 record 都没 id 时直接返回"""
         records = [{"name": "no_id_1"}, {"name": "no_id_2"}]
-        computation_service._batch_count_user_group_members(mock_ds, records, "member_count")
+        computation_service._batch_count_org_members(mock_ds, records, "member_count")
         # 不会写入 member_count 字段
         for r in records:
             assert "member_count" not in r
 
-    def test_count_user_group_members_db_error_fills_zero(self, mock_ds):
+    def test_count_org_members_db_error_fills_zero(self, mock_ds):
         """SQL 异常时所有 record 的 member_count 设为 0"""
         broken_ds = MagicMock()
         broken_ds.execute.side_effect = Exception("simulated DB error")
         records = [{"id": 500}, {"id": 501}]
-        computation_service._batch_count_user_group_members(broken_ds, records, "member_count")
+        computation_service._batch_count_org_members(broken_ds, records, "member_count")
         assert records[0]["member_count"] == 0
         assert records[1]["member_count"] == 0
 

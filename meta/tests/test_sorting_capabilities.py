@@ -1264,7 +1264,7 @@ class TestComputedSubqueriesMatrix:
 
     @pytest.mark.parametrize("object_type,scope", [
         ("business_object", "self"),
-        ("user_group",      "self"),
+        ("org",             "self"),
         ("domain",          "descendants"),
         ("sub_domain",      "descendants"),
         ("service_module",  "descendants"),
@@ -1276,7 +1276,7 @@ class TestComputedSubqueriesMatrix:
 
     @pytest.mark.parametrize("object_type,scope", [
         ("domain",    "self"),    # domain 没有 source/target_bo_id
-        ("user_group","descendants"),  # user_group 无 descendants 路径
+        ("org",       "descendants"),  # org 无 descendants 路径
         ("unknown",   "self"),
         ("unknown",   "descendants"),
     ])
@@ -1299,7 +1299,7 @@ class TestComputedSubqueriesMatrix:
 
     @pytest.mark.parametrize("object_type", [
         "business_object",   # 无 children
-        "user_group",       # 无 children
+        "org",               # 无 children
         "unknown",
     ])
     def test_count_children_not_supported(self, object_type):
@@ -1311,7 +1311,7 @@ class TestComputedSubqueriesMatrix:
 
     @pytest.mark.parametrize("object_type,scope", [
         ("business_object", "self"),
-        ("user_group",      "self"),
+        ("org",             "self"),
     ])
     def test_count_relations_self_returns_sql(self, object_type, scope):
         """count_relations scope=self 应返回包含 COUNT(*) 的 SQL"""

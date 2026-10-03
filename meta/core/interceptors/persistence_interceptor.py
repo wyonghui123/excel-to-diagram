@@ -1167,6 +1167,10 @@ class PersistenceInterceptor(Interceptor):
 
         历史: [SPR-02] 委托给公共模块 + 保留 count_children / count_relations 特殊路径.
         现在: 全部走 ComputedFieldQuery (fail-fast + 次级稳定键 + validate_table_name).
+
+        [P1 2026-10-03] 触发条件由"字段名以 _count 结尾"改为"computation.type 属于
+        PUSHDOWN_COMPUTATION_TYPES": 否则非 _count 命名的聚合字段(如 rollup 的
+        total_amount)会被误判为非计算字段 → 排序条件被静默丢弃(退回 id DESC).
         """
         try:
             field = meta_object.get_field(field_name)
@@ -1174,10 +1178,15 @@ class PersistenceInterceptor(Interceptor):
             return None
         if not field or not getattr(field, 'computed', False):
             return None
-        if not field_name.endswith('_count'):
+
+        from meta.core.computed_field_query import (
+            ComputedFieldQuery, ComputationNotSupportedError, PUSHDOWN_COMPUTATION_TYPES,
+        )
+        comp_type = (getattr(field, 'computation', None) or {}).get('type', '')
+        # 族内字段 (按 type 判定) 或历史 *_count 命名 → 交给 SSOT (fail-fast)
+        if comp_type not in PUSHDOWN_COMPUTATION_TYPES and not field_name.endswith('_count'):
             return None
 
-        from meta.core.computed_field_query import ComputedFieldQuery, ComputationNotSupportedError
         try:
             cfq = ComputedFieldQuery(meta_object, field)
             return cfq.build_order_clause(is_desc=is_desc)
@@ -1189,13 +1198,14 @@ class PersistenceInterceptor(Interceptor):
         """[R0-3 2026-06-11] SSOT 委托给 ComputedFieldQuery.
 
         历史: [SPR-02] 委托给公共模块 + 保留 relations / count_relations 兜底.
-        现在: count_relations / count_children 走 ComputedFieldQuery,
+        现在: PUSHDOWN_COMPUTATION_TYPES 族内 type 走 ComputedFieldQuery,
               m2m / composition 等其他 type 走 _computed_count_clause (保留).
         """
         from meta.core._computed_count_clause import (
             parse_operator, normalize_values, coerce_for_field_type,
             find_count_assoc, build_count_subquery, apply_count_clause,
         )
+        from meta.core.computed_field_query import PUSHDOWN_COMPUTATION_TYPES
 
         if not meta_object or not key:
             return None, None
@@ -1207,26 +1217,25 @@ class PersistenceInterceptor(Interceptor):
             return None, None
         if not field or not getattr(field, 'computed', False):
             return None, None
-        if not field_name.endswith('_count'):
-            return None, None
 
         field_computation = getattr(field, 'computation', None) or {}
         comp_type = field_computation.get('type', '')
 
-        # [R0-3] count_relations / count_children 走 SSOT
-        if comp_type in ('count_relations', 'count_children'):
-            from meta.core.computed_field_query import ComputedFieldQuery, ComputationNotSupportedError
-            try:
-                cfq = ComputedFieldQuery(meta_object, field)
-                clause, params = cfq.build_filter_clause(operator, value)
-                if clause is not None:
-                    return clause, params
-            except ComputationNotSupportedError:
-                # [R0-2] 不再 silent fallback, 向上抛 422
-                raise
+        # [P1 2026-10-03] 族内字段 (按 computation.type 判定) 一律走 SSOT, 不再依赖
+        # 字段名 `*_count` 后缀 —— 否则 rollup 之类非 _count 命名字段会被判为
+        # "非计算字段" → 过滤条件被静默丢弃(返回未过滤全量数据).
+        # 组合不受支持时 ComputedFieldQuery 直接 raise → 422, 绝不静默降级.
+        if comp_type in PUSHDOWN_COMPUTATION_TYPES:
+            from meta.core.computed_field_query import ComputedFieldQuery
+            cfq = ComputedFieldQuery(meta_object, field)
+            clause, params = cfq.build_filter_clause(operator, value)
+            if clause is not None:
+                return clause, params
             return None, None
 
-        # [保留历史] m2m / composition / parent_child 等其他 type 走 _computed_count_clause
+        # [保留历史] 非族类型 (m2m / composition / parent_child) 走 _computed_count_clause
+        if not field_name.endswith('_count'):
+            return None, None
         values = normalize_values(value, operator)
         values = coerce_for_field_type(field, operator, values)
         base_name = field_name[:-6]
@@ -1576,7 +1585,23 @@ class PersistenceInterceptor(Interceptor):
 
         # [SPR-07 T-S06-01] 倒序 stable sort: 次要 key 先排, 主要 key 后排
         for fname, is_desc in reversed(sort_keys):
-            records.sort(key=lambda r, fn=fname: (r.get(fn) or ''), reverse=is_desc)
+            # [FIX 2026-10-03] 原实现 key=(r.get(fn) or '') 会把数值 0 (以及 False)
+            # 变成 '', 与同列的非零 int 比较时抛 TypeError:
+            #   '<' not supported between instances of 'int' and 'str'
+            # (如 org.member_count 大量为 0 →  DESC 排序必崩)。
+            # 改为类型分桶 (空值 / 数值 / 文本), 空值恒排最后 (正序倒序一致)。
+            def _vkey(r, fn=fname):
+                v = r.get(fn)
+                if v is None or v == '':
+                    return (2, 0.0, '')
+                if isinstance(v, (int, float)):
+                    return (0, float(v), '')
+                return (1, 0.0, str(v))
+
+            non_null = [r for r in records if _vkey(r)[0] != 2]
+            nulls = [r for r in records if _vkey(r)[0] == 2]
+            non_null.sort(key=_vkey, reverse=is_desc)
+            records[:] = non_null + nulls
         return records
 
     # [SPR-01 S-01] 删 _enrich_association_counts / _enrich_fk_display_names wrapper

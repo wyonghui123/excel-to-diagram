@@ -378,37 +378,37 @@ class TestUserMustChangePasswordField:
         assert result.valid, result.get_error_message()
 
 
-class TestUserGroupMemberCount:
-    """测试 user_group.member_count 计算字段"""
+class TestOrgMemberCount:
+    """测试 org.member_count 计算字段（原 user_group, Spec 16/19 迁移）"""
 
-    def test_user_group_has_member_count_field(self):
-        """测试 user_group 对象包含 member_count 字段"""
-        meta_obj = registry.get('user_group')
-        assert meta_obj is not None, "user_group 对象未在 registry 中注册"
+    def test_org_has_member_count_field(self):
+        """测试 org 对象包含 member_count 字段"""
+        meta_obj = registry.get('org')
+        assert meta_obj is not None, "org 对象未在 registry 中注册"
         field = next((f for f in meta_obj.fields if f.id == 'member_count'), None)
-        assert field is not None, "user_group 对象缺少 member_count 字段"
+        assert field is not None, "org 对象缺少 member_count 字段"
 
     def test_member_count_is_computed_field(self):
         """测试 member_count 字段配置为计算字段"""
-        meta_obj = registry.get('user_group')
+        meta_obj = registry.get('org')
         field = next((f for f in meta_obj.fields if f.id == 'member_count'), None)
         assert field is not None
 
         assert field.computed is True, "member_count 应该是计算字段"
 
-    def test_user_group_list_config_has_member_count_computed(self):
-        """测试 user_group 列表配置中 member_count 配置了 computed 和 computation"""
-        meta_obj = registry.get('user_group')
+    def test_org_list_config_has_member_count_computed(self):
+        """测试 org 列表配置中 member_count 配置了 computed 和 computation"""
+        meta_obj = registry.get('org')
         assert meta_obj is not None
 
         list_config = getattr(meta_obj.ui_view_config, 'list', None)
-        assert list_config is not None, "user_group 应该有 ui_view_config.list 配置"
+        assert list_config is not None, "org 应该有 ui_view_config.list 配置"
 
         member_count_col = next(
             (col for col in list_config.columns if col.key == 'member_count'),
             None
         )
-        assert member_count_col is not None, f"user_group 列表配置缺少 member_count 列，当前键: {[col.key for col in list_config.columns]}"
+        assert member_count_col is not None, f"org 列表配置缺少 member_count 列，当前键: {[col.key for col in list_config.columns]}"
 
         assert getattr(member_count_col, 'computed', False) is True, "member_count 列应该设置 computed: true"
         computation = getattr(member_count_col, 'computation', None)
@@ -425,7 +425,7 @@ class TestCountFieldConfigurations:
         ("domain", "relation_count", {"type": "count_relations", "scope": "descendants"}),
         ("sub_domain", "relation_count", {"type": "count_relations", "scope": "descendants"}),
         ("service_module", "relation_count", {"type": "count_relations", "scope": "descendants"}),
-        ("user_group", "member_count", {"type": "count_relations", "scope": "self"}),
+        ("org", "member_count", {"type": "count_relations", "scope": "self"}),
         ("enum_type", "value_count", {"type": "count_children", "child_object": "enum_value"}),
     ])
     def test_count_field_in_list_configuration(self, object_type, field_key, expected_computation):
@@ -483,13 +483,13 @@ class TestCountFieldConfigurations:
         target_object = test_computation.get("target_object") or test_computation.get("child_object", "")
         assert target_object == "version", "_count_children 应该支持 child_object 键"
 
-    def test_user_group_member_count_uses_user_group_members_table(self):
-        """测试 user_group.member_count 使用 user_group_members 表统计成员数"""
+    def test_org_member_count_uses_org_members_table(self):
+        """测试 org.member_count 使用 org_members 表统计成员数"""
         from meta.services.computation_service import ComputationService
         service = ComputationService()
 
-        assert hasattr(service, '_batch_count_user_group_members'), \
-            "ComputationService 应该实现 _batch_count_user_group_members 方法"
+        assert hasattr(service, '_batch_count_org_members'), \
+            "ComputationService 应该实现 _batch_count_org_members 方法"
 
 
 class TestComputedFieldSorting:
@@ -613,14 +613,14 @@ class TestComputedFieldSorting:
 
     def test_count_fields_are_sortable_in_list_config(self):
         """测试计数字段在列表配置中设置了 sortable: true"""
-        meta_obj = registry.get('user_group')
+        meta_obj = registry.get('org')
         list_config = getattr(meta_obj.ui_view_config, 'list', None)
 
         member_count_col = next(
             (col for col in list_config.columns if col.key == 'member_count'),
             None
         )
-        assert member_count_col is not None, "user_group 列表配置应该有 member_count 列"
+        assert member_count_col is not None, "org 列表配置应该有 member_count 列"
         assert getattr(member_count_col, 'sortable', False) is True, \
             "member_count 列应该设置 sortable: true"
 
@@ -636,3 +636,60 @@ class TestComputedFieldSorting:
         assert relation_count_col is not None, "business_object 列表配置应该有 relation_count 列"
         assert getattr(relation_count_col, 'sortable', False) is True, \
             "relation_count 列应该设置 sortable: true"
+
+
+class TestComputationDeclarationConsistency:
+    """[P3 2026-10-03] 计算字段声明两处必须同构。
+
+    同一语义存在两个声明位置:
+      A) MetaField.computation         (字段本体) — v2 排序/过滤 (ComputedFieldQuery) 读这里
+      B) ui_view_config.list.columns[].computation (列表列) — v1 读时计算 (collect_computed_columns) 读这里
+
+    org.member_count 曾只写在 B, v2 排序读不到声明 → 落到内存排序 →
+    "'<' not supported between instances of 'int' and 'str'" 400。
+    本类把它固化为回归护栏, 防止"只写一处"再次发生。
+    """
+
+    def test_list_column_computation_mirrored_on_field(self):
+        """B 侧声明了 computation 的列, 对应 MetaField 必须携带同一份声明"""
+        mismatches = []
+        for oid in registry.list_objects():
+            meta_obj = registry.get(oid)
+            if not meta_obj:
+                continue
+            ui_view_config = getattr(meta_obj, 'ui_view_config', None)
+            list_view = getattr(ui_view_config, 'list', None) if ui_view_config else None
+            for col in (list_view.columns if list_view else []):
+                comp = getattr(col, 'computation', None)
+                if not (getattr(col, 'computed', False) and isinstance(comp, dict) and comp.get('type')):
+                    continue
+                field = meta_obj.get_field(col.key) if hasattr(meta_obj, 'get_field') else None
+                field_comp = getattr(field, 'computation', None) if field else None
+                if not isinstance(field_comp, dict) or not field_comp.get('type'):
+                    mismatches.append(f"{oid}.{col.key}")
+        assert not mismatches, (
+            "以下字段的列表列有 computation 但字段本体缺失 (v2 排序/过滤会静默降级): "
+            + ", ".join(mismatches)
+        )
+
+    def test_declared_pushed_down_types_are_supported(self):
+        """字段本体声明的下推族类型, (type, object, scope) 组合必须被 SSOT 支持"""
+        from meta.core.computed_field_query import PUSHDOWN_COMPUTATION_TYPES, is_supported
+
+        unsupported = []
+        for oid in registry.list_objects():
+            meta_obj = registry.get(oid)
+            if not meta_obj:
+                continue
+            for field in meta_obj.fields:
+                comp = getattr(field, 'computation', None)
+                if not isinstance(comp, dict):
+                    continue
+                comp_type = comp.get('type')
+                if comp_type not in PUSHDOWN_COMPUTATION_TYPES:
+                    continue
+                if not is_supported(comp_type, oid, comp.get('scope', 'self'), comp):
+                    unsupported.append(f"{oid}.{field.id}({comp_type})")
+        assert not unsupported, (
+            "以下字段声明了不受支持的下推组合 (查询会 422): " + ", ".join(unsupported)
+        )

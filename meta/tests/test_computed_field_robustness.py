@@ -146,10 +146,10 @@ class TestComputationNotSupportedErrors:
     """[R0-2] ComputationNotSupportedError 在构造时就抛, 不延迟"""
 
     def test_is_supported_matrix_count_relations_self(self):
-        """count_relations self: business_object / user_group 支持"""
+        """count_relations self: business_object / org 支持"""
         from meta.core.computed_field_query import is_supported
         assert is_supported('count_relations', 'business_object', 'self') is True
-        assert is_supported('count_relations', 'user_group', 'self') is True
+        assert is_supported('count_relations', 'org', 'self') is True
         assert is_supported('count_relations', 'domain', 'self') is False
         assert is_supported('count_relations', 'version', 'self') is False
 
@@ -193,6 +193,77 @@ class TestComputationNotSupportedErrors:
         assert exc_info.value.comp_type == 'count_relations'
         assert exc_info.value.object_type == 'user_group'
         assert exc_info.value.scope == 'descendants'
+
+
+class TestV1FilterPathFailFast:
+    """[P4 2026-10-03] v1 过滤路径 (QueryService) 对不支持的下推族必须 fail-fast.
+
+    历史行为: _apply_computed_field_filter 对未实现类型 `return False`,
+    外层 _apply_meta_driven_filters 又 `except Exception` 吞掉 → 过滤条件被静默
+    丢弃, 返回未过滤的全量数据 (调用方以为过滤生效). 现改为抛
+    ComputationNotSupportedError → API errorhandler → 422.
+    """
+
+    class _MockObject:
+        id = 'service_module'
+        table_name = 'service_modules'
+
+    def _service(self):
+        from unittest.mock import MagicMock
+        from meta.services.query_service import QueryService
+        return QueryService(MagicMock())
+
+    def test_pushdown_family_type_raises(self):
+        """sum_field (下推族) 在 v1 无实现 → 必须抛, 不能静默 return False"""
+        from unittest.mock import MagicMock
+        from meta.core.computed_field_query import ComputationNotSupportedError
+
+        with pytest.raises(ComputationNotSupportedError) as exc:
+            self._service()._apply_computed_field_filter(
+                MagicMock(), self._MockObject(), 'total_amount', '>=5',
+                {'type': 'sum_field', 'scope': 'self'},
+            )
+        assert exc.value.comp_type == 'sum_field'
+        assert exc.value.object_type == 'service_module'
+
+    def test_non_pushdown_type_returns_false(self):
+        """formula 等非下推族仍走其他路径 → 宽容返回 False (保持既有行为)"""
+        from unittest.mock import MagicMock
+
+        assert self._service()._apply_computed_field_filter(
+            MagicMock(), self._MockObject(), 'some_formula', '1',
+            {'type': 'formula', 'scope': 'self'},
+        ) is False
+
+    def test_meta_driven_filters_does_not_swallow(self, monkeypatch):
+        """外层 _apply_meta_driven_filters 必须让 fail-fast 冒泡 (不被 except 吞)"""
+        from unittest.mock import MagicMock
+        from meta.core.computed_field_query import ComputationNotSupportedError
+        from meta.services import query_service as qs_mod
+
+        svc = self._service()
+
+        def boom(*args, **kwargs):
+            raise ComputationNotSupportedError(
+                comp_type='sum_field', object_type='service_module', scope='self'
+            )
+
+        monkeypatch.setattr(svc, '_apply_computed_field_filter', boom)
+        monkeypatch.setattr(qs_mod.filter_service, 'build_filters_from_meta',
+                            lambda *a, **k: [])
+
+        fake_field = MagicMock()
+        fake_field.id = 'total_amount'
+        fake_field.name = 'total_amount'
+        fake_obj = MagicMock()
+        fake_obj.id = 'service_module'
+        fake_obj.table_name = 'service_modules'
+        fake_obj.fields = [fake_field]
+
+        with pytest.raises(ComputationNotSupportedError):
+            svc._apply_meta_driven_filters(
+                MagicMock(), fake_obj, {'total_amount': '>=5'}
+            )
 
 
 # ════════════════════════════════════════════════════════
@@ -420,3 +491,113 @@ class TestPaginationConsistency:
             # ID 无重复
             ids = [it.get('id') for it in items]
             assert len(set(ids)) == len(ids), f"FAIL: duplicate IDs in result"
+
+
+# ════════════════════════════════════════════════════════
+# P2 测试: rollup (sum_field/avg_field/max_field/min_field) 的 sort/filter 下推
+# ════════════════════════════════════════════════════════
+
+class TestRollupComputationQuery:
+    """[P2 2026-10-03] 取值聚合字段走 DB 相关子查询, 不落库; 不支持则 fail-fast.
+
+    夹具用 Mock 对象 + patch registry/validate_table_name, 不依赖 YAML 中真的声明
+    rollup 字段 (当前 schemas 尚无消费者).
+    """
+
+    _CHILD_TABLE = 'sub_domains'
+
+    def _make(self, comp_overrides=None):
+        """(meta_object, field) 夹具"""
+        from unittest.mock import MagicMock
+        comp = {
+            'type': 'sum_field',
+            'child_object': 'sub_domain',
+            'foreign_key': 'domain_id',
+            'source_field': 'amount',
+        }
+        comp.update(comp_overrides or {})
+
+        field = MagicMock()
+        field.id = 'total_amount'          # 故意不用 _count 后缀
+        field.computed = True
+        # field_type 用于过滤值 coerce (URL 参数是字符串 → int)
+        field.field_type = type('FT', (), {'value': 'integer'})()
+        field.computation = comp
+
+        meta_obj = MagicMock()
+        meta_obj.id = 'domain'
+        meta_obj.table_name = 'domains'
+        return meta_obj, field
+
+    def _patches(self):
+        from unittest.mock import MagicMock, patch
+        child = MagicMock()
+        child.table_name = self._CHILD_TABLE
+        return (
+            patch('meta.core.models.registry'),
+            patch('meta.core.table_name_validator.validate_table_name',
+                  side_effect=lambda x: x),
+            child,
+        )
+
+    def test_rollup_field_is_in_pushdown_family(self):
+        """按 type (而非字段名 _count 后缀) 判定必须下推"""
+        from meta.core.computed_field_query import PUSHDOWN_COMPUTATION_TYPES
+        for t in ('sum_field', 'avg_field', 'max_field', 'min_field'):
+            assert t in PUSHDOWN_COMPUTATION_TYPES
+        assert 'formula' not in PUSHDOWN_COMPUTATION_TYPES
+
+    def test_order_clause_uses_correlated_subquery(self):
+        """排序: (SELECT SUM(child.col) ...) DESC, parent.id DESC"""
+        from meta.core.computed_field_query import ComputedFieldQuery
+        meta_obj, field = self._make()
+        reg_p, val_p, child = self._patches()
+        with reg_p as reg, val_p:
+            reg.get.return_value = child
+            clause = ComputedFieldQuery(meta_obj, field).build_order_clause(is_desc=True)
+        # build_order_clause 统一把子查询再包一层括号 (与 count_* 同构)
+        inner = (f"(SELECT SUM({self._CHILD_TABLE}.amount) FROM {self._CHILD_TABLE} "
+                 f"WHERE {self._CHILD_TABLE}.domain_id = domains.id)")
+        assert clause == f"({inner}) DESC, domains.id DESC"
+
+    def test_filter_clause_coalesces_null(self):
+        """过滤: COALESCE(子查询, -1) >= ? (NULL 语义与 count_* 一致)"""
+        from meta.core.computed_field_query import ComputedFieldQuery
+        meta_obj, field = self._make()
+        reg_p, val_p, child = self._patches()
+        with reg_p as reg, val_p:
+            reg.get.return_value = child
+            clause, params = ComputedFieldQuery(meta_obj, field).build_filter_clause('>=', '100')
+        inner = (f"(SELECT SUM({self._CHILD_TABLE}.amount) FROM {self._CHILD_TABLE} "
+                 f"WHERE {self._CHILD_TABLE}.domain_id = domains.id)")
+        assert clause == f"COALESCE(({inner}), -1) >= ?"
+        assert params == [100]
+
+    @pytest.mark.parametrize("func", ["AVG", "MAX", "MIN"])
+    def test_other_aggregations(self, func):
+        from meta.core.computed_field_query import ComputedFieldQuery
+        type_by_func = {'AVG': 'avg_field', 'MAX': 'max_field', 'MIN': 'min_field'}
+        meta_obj, field = self._make({'type': type_by_func[func]})
+        reg_p, val_p, child = self._patches()
+        with reg_p as reg, val_p:
+            reg.get.return_value = child
+            clause = ComputedFieldQuery(meta_obj, field).build_order_clause()
+        assert f"SELECT {func}({self._CHILD_TABLE}.amount)" in clause
+
+    def test_incomplete_config_fails_fast(self):
+        """缺少 source_field → ComputationNotSupportedError (不静默丢弃条件)"""
+        from meta.core.computed_field_query import (
+            ComputedFieldQuery, ComputationNotSupportedError,
+        )
+        meta_obj, field = self._make({'source_field': None})
+        reg_p, val_p, child = self._patches()
+        with reg_p as reg, val_p:
+            reg.get.return_value = child
+            with pytest.raises(ComputationNotSupportedError) as exc:
+                ComputedFieldQuery(meta_obj, field)
+        assert exc.value.comp_type == 'sum_field'
+
+    def test_sum_field_without_computation_not_supported(self):
+        """is_supported 对聚合类型必须带 computation 才能判定"""
+        from meta.core.computed_field_query import is_supported
+        assert is_supported('sum_field', 'domain', 'self') is False

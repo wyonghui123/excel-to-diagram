@@ -464,10 +464,15 @@ class QueryService:
                                         computation = col_computation
                                         break
                 
+                # [P2 2026-10-03] 路由判定按 computation.type 族 (SSOT), 不再只认 count_relations:
+                # count_children / sum_field / avg_field / max_field / min_field 同样可 DB 下推排序.
+                from meta.core.computed_field_query import PUSHDOWN_COMPUTATION_TYPES
+                sort_comp_type = computation.get('type') if computation else None
+
                 if is_physical:
                     builder.order_by(order_field, direction)
-                elif computation and computation.get('type') == 'count_relations':
-                    logger.info(f"[VirtualSort] Field '{order_field}' has count_relations computation, using DB sort")
+                elif sort_comp_type in PUSHDOWN_COMPUTATION_TYPES:
+                    logger.info(f"[VirtualSort] Field '{order_field}' has {sort_comp_type} computation, using DB sort")
                     logger.info(f"[VirtualSort] Computation details: {computation}")
                     data, total = self._execute_computed_field_query(
                         builder, order_field, direction,
@@ -828,31 +833,20 @@ class QueryService:
         object_type = meta_obj.id if meta_obj else ''
         scope = computation.get('scope', 'self')
         
-        if comp_type == 'count_relations':
-            from meta.services.query.computed_subqueries import build_count_relations_expr
-            count_subquery_expr = build_count_relations_expr(
-                table_name, object_type, scope=scope
+        # [P2 2026-10-03] 统一走 computed_subqueries.build_count_subquery_expr (SSOT),
+        # 覆盖 count_relations / count_children / sum_field / avg_field / max_field / min_field,
+        # 避免"每种 type 一个分支"的重复实现再次漂移.
+        from meta.services.query.computed_subqueries import build_count_subquery_expr
+        subquery_expr = build_count_subquery_expr(
+            comp_type, table_name, object_type, scope, computation
+        )
+        if not subquery_expr:
+            logger.warning(
+                f"[ComputedSort] Cannot build subquery: type={comp_type} "
+                f"object={object_type} scope={scope}, falling back to standard query"
             )
-            if not count_subquery_expr:
-                logger.warning(
-                    f"[ComputedSort] Unsupported count_relations scope/object: "
-                    f"scope={scope}, object_type={object_type}"
-                )
-                return builder.execute(), builder.count_all()
-            count_subquery = f"{count_subquery_expr} AS _sort_val"
-        elif comp_type == 'count_children':
-            # [FIX 2026-06-08] count_children DB 排序支持
-            from meta.services.query.computed_subqueries import build_count_children_expr
-            count_subquery_expr = build_count_children_expr(table_name, object_type)
-            if not count_subquery_expr:
-                logger.warning(
-                    f"[ComputedSort] Unknown object_type for count_children: {object_type}"
-                )
-                return builder.execute(), builder.count_all()
-            count_subquery = f"{count_subquery_expr} AS _sort_val"
-        else:
-            logger.warning(f"[ComputedSort] Unknown computation type: {comp_type}")
             return builder.execute(), builder.count_all()
+        count_subquery = f"{subquery_expr} AS _sort_val"
         
         if "WHERE" in base_sql.upper():
             parts = base_sql.split("WHERE", 1)
@@ -1284,6 +1278,11 @@ class QueryService:
             self._apply_cross_table_filters(builder, meta_obj, filter_params)
         
         except Exception as e:
+            # [P4 2026-10-03] 计算字段 fail-fast 必须冒泡到 API errorhandler → 422,
+            # 不能被这里吞掉 (否则又退化为"静默丢弃条件 + 返回未过滤数据")
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                raise
             logger.error(f"[MetaFilter] Failed to apply meta-driven filters: {e}")
         return hierarchy_scope_filters
 
@@ -1342,11 +1341,25 @@ class QueryService:
                 return self._apply_count_children_filter(
                     builder, table_name, object_type, op, value
                 )
-            else:
-                logger.warning(f"[ComputedFieldFilter] Unsupported computation type: {comp_type}")
-                return False
-                
+
+            # [P4 2026-10-03] 属"必须 DB 下推"的族 (SSOT 常量) 但 v1 无实现 —
+            # 绝不静默丢弃条件后返回未过滤结果, 直接 fail-fast → 422
+            from meta.core.computed_field_query import (
+                PUSHDOWN_COMPUTATION_TYPES, ComputationNotSupportedError
+            )
+            if comp_type in PUSHDOWN_COMPUTATION_TYPES:
+                raise ComputationNotSupportedError(
+                    comp_type=comp_type, object_type=object_type, scope=scope,
+                    reason='v1 filter path has no implementation for this type',
+                )
+
+            logger.warning(f"[ComputedFieldFilter] Unsupported computation type: {comp_type}")
+            return False
+
         except Exception as e:
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                raise  # 交给 API 层 errorhandler → 422
             logger.error(f"[ComputedFieldFilter] Failed to apply computed field filter: {e}")
             return False
     
@@ -1383,11 +1396,12 @@ class QueryService:
                 table_name, object_type, scope=scope
             )
             if not count_expr:
-                logger.warning(
-                    f"[ComputedFieldFilter] Unsupported count_relations scope/object: "
-                    f"scope={scope}, object_type={object_type}"
+                # [P4 2026-10-03] 组合不受支持即 fail-fast, 不静默丢弃条件
+                from meta.core.computed_field_query import ComputationNotSupportedError
+                raise ComputationNotSupportedError(
+                    comp_type='count_relations', object_type=object_type, scope=scope,
+                    reason='build_count_relations_expr returned None',
                 )
-                return False
 
             where_clause = self._build_computed_where_clause(count_expr, op, value)
             if where_clause:
@@ -1398,6 +1412,9 @@ class QueryService:
             return False
 
         except Exception as e:
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                raise
             logger.error(f"[ComputedFieldFilter] Failed to apply count_relations filter: {e}")
             return False
     
@@ -1426,10 +1443,12 @@ class QueryService:
             from meta.services.query.computed_subqueries import build_count_children_expr
             count_expr = build_count_children_expr(table_name, object_type)
             if not count_expr:
-                logger.warning(
-                    f"[ComputedFieldFilter] Unknown object_type for count_children: {object_type}"
+                # [P4 2026-10-03] 组合不受支持即 fail-fast, 不静默丢弃条件
+                from meta.core.computed_field_query import ComputationNotSupportedError
+                raise ComputationNotSupportedError(
+                    comp_type='count_children', object_type=object_type,
+                    reason='build_count_children_expr returned None',
                 )
-                return False
 
             where_clause = self._build_computed_where_clause(count_expr, op, value)
             if where_clause:
@@ -1440,6 +1459,9 @@ class QueryService:
             return False
 
         except Exception as e:
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                raise
             logger.error(f"[ComputedFieldFilter] Failed to apply count_children filter: {e}")
             return False
     

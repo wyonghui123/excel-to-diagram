@@ -437,9 +437,6 @@ class MetaField:
     derive_from_field: str = ""
     derive_rule: str = ""
 
-    aggregate_function: str = ""
-    aggregate_source_field: str = ""
-
     compute_expr: str = ""
 
     computed: bool = False

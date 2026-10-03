@@ -290,6 +290,12 @@ fields:
       virtual: true
       cacheable: true
       cache_ttl: 300
+    # [FIX 2026-10-03] computation 声明补到字段本体, 与 business_object.relation_count
+    # 等 7 个对象一致; 此前只写在 ui_view_config.list.columns[] 里, 该位置不会被并回
+    # MetaField, 导致 v2 排序 400 / 过滤被静默丢弃
+    computation:
+      type: count_relations
+      scope: self
 
 indexes:
   - fields: [code]

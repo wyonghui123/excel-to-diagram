@@ -16,9 +16,16 @@ history bug 模式 (silent fallback + 多套重复实现).
 4. 稳定: 次级稳定键 id DESC 防翻页重复
 
 [支持矩阵]
-- count_relations self:      business_object, user_group
+- count_relations self:      business_object, org
 - count_relations descendants: domain, sub_domain, service_module
 - count_children:            version, domain, sub_domain, service_module
+- sum_field / avg_field / max_field / min_field (rollup, 按父外键聚合子表 source_field):
+                             取决于 computation 是否给出 child_object/target_object +
+                             foreign_key(或可从层级推导) + source_field
+
+[P1/P2 2026-10-03] "必须 DB 下推" 的字段集合 = PUSHDOWN_COMPUTATION_TYPES (按 type 判定,
+不再依赖字段名 *_count 后缀). 族内字段的 sort/filter 要么生成子查询, 要么抛
+ComputationNotSupportedError → 422; 绝不静默丢弃条件后返回未过滤结果.
 """
 from __future__ import annotations
 
@@ -57,16 +64,38 @@ class ComputationNotSupportedError(Exception):
 from meta.services.query.computed_subqueries import (
     _COUNT_CHILDREN_MAP,
     COUNT_CHILDREN_SUPPORTED,
+    SQL_AGGREGATION_TYPES,
+    resolve_parent_aggregation,
 )
 
-_COUNT_RELATIONS_SELF = {'business_object', 'user_group'}
+_COUNT_RELATIONS_SELF = {'business_object', 'org'}
 _COUNT_RELATIONS_DESCENDANTS = {'domain', 'sub_domain', 'service_module'}
 
+# [P1 2026-10-03] SQL 可下推 (DB 相关子查询) 计算字段族 — **类型级**声明。
+#
+# 语义: 声明为这些 computation.type 的字段, 其 sort/filter 必须由本模块生成子查询;
+#       若 (type, object, scope) 组合不受支持, 抛 ComputationNotSupportedError,
+#       调用方不得把条件降级为"静默忽略"。
+# 与 is_supported 的区别: is_supported 判断"某个具体组合是否支持",
+#       本集合判断"该字段是否属于必须下推的族"(决定 fail-fast 还是交给其他路径)。
+#
+# [为什么需要类型级判定] 历史调用方用字段名后缀 `*_count` 判定, 因此任何非 `_count`
+# 命名的计算字段(如 rollup 的 total_amount)都会被判为"非计算字段"而静默丢弃
+# sort/filter 条件 —— 返回未过滤的全量数据。改为按 type 判定后, 字段名不再影响语义。
+PUSHDOWN_COMPUTATION_TYPES = (
+    ('count_relations', 'count_children') + tuple(SQL_AGGREGATION_TYPES)
+)
 
-def is_supported(comp_type: str, object_type: str, scope: str = 'self') -> bool:
+
+def is_supported(comp_type: str, object_type: str, scope: str = 'self',
+                 computation: dict = None) -> bool:
     """判断 (comp_type, object_type, scope) 组合是否被支持
 
     单一权威矩阵, 与 computed_subqueries 中的实现同步。
+
+    Args:
+        computation: 取值聚合 (sum_field/avg_field/...) 必需 —— 其可支持性取决于
+            child_object / foreign_key / source_field 是否可解析, 与 object_type 无关。
     """
     if comp_type == 'count_relations':
         if scope == 'self':
@@ -76,7 +105,9 @@ def is_supported(comp_type: str, object_type: str, scope: str = 'self') -> bool:
         return False
     if comp_type == 'count_children':
         return object_type in COUNT_CHILDREN_SUPPORTED
-    # formula / hierarchy_scope 走其他路径 (不在本模块范围)
+    if comp_type in SQL_AGGREGATION_TYPES:
+        return resolve_parent_aggregation(computation or {}) is not None
+    # formula / hierarchy_scope / dimension_count 走其他路径 (不在本模块范围)
     return False
 
 
@@ -163,7 +194,7 @@ def validate_all_computed_fields() -> List[str]:
                 continue
             comp_type = comp.get('type', '')
             scope = comp.get('scope', 'self')
-            if not is_supported(comp_type, meta_obj.id, scope):
+            if not is_supported(comp_type, meta_obj.id, scope, comp):
                 errors.append(
                     f"{meta_obj.id}.{field.id}: computation.type={comp_type} "
                     f"scope={scope} not supported"
@@ -197,11 +228,12 @@ class ComputedFieldQuery:
         from meta.core.table_name_validator import validate_table_name
         self.meta_object = meta_object
         self.field = field
+        self.computation = self._computation()
         self.comp_type = self._comp_type()
         self.scope = self._scope()
 
         # [R0-2 fail-fast] 不支持的组合在构造时就 raise, 而不是返回 None
-        if not is_supported(self.comp_type, meta_object.id, self.scope):
+        if not is_supported(self.comp_type, meta_object.id, self.scope, self.computation):
             raise ComputationNotSupportedError(
                 comp_type=self.comp_type,
                 object_type=meta_object.id,
@@ -212,19 +244,21 @@ class ComputedFieldQuery:
         # [R1-3] SQL 构造前 table_name 校验, 防注入
         self.table_name = validate_table_name(meta_object.table_name)
 
+    def _computation(self) -> dict:
+        return getattr(self.field, 'computation', {}) or {}
+
     def _comp_type(self) -> str:
-        comp = getattr(self.field, 'computation', {}) or {}
-        return comp.get('type', '')
+        return self._computation().get('type', '')
 
     def _scope(self) -> str:
-        comp = getattr(self.field, 'computation', {}) or {}
-        return comp.get('scope', 'self')
+        return self._computation().get('scope', 'self')
 
     def _build_subquery_expr(self) -> Optional[str]:
         """委托给 computed_subqueries.build_count_subquery_expr (SSOT 候选)"""
         from meta.services.query.computed_subqueries import build_count_subquery_expr
         return build_count_subquery_expr(
-            self.comp_type, self.table_name, self.meta_object.id, self.scope
+            self.comp_type, self.table_name, self.meta_object.id, self.scope,
+            self.computation,
         )
 
     def build_order_clause(self, is_desc: bool = False) -> Optional[str]:
@@ -237,7 +271,7 @@ class ComputedFieldQuery:
         Raises:
             ComputationNotSupportedError: 子查询表达式返回 None 时
         """
-        if self.comp_type not in ('count_relations', 'count_children'):
+        if self.comp_type not in PUSHDOWN_COMPUTATION_TYPES:
             return None
 
         expr = self._build_subquery_expr()
@@ -264,7 +298,7 @@ class ComputedFieldQuery:
         Raises:
             ComputationNotSupportedError: 子查询表达式返回 None 时
         """
-        if self.comp_type not in ('count_relations', 'count_children'):
+        if self.comp_type not in PUSHDOWN_COMPUTATION_TYPES:
             return None, []
 
         expr = self._build_subquery_expr()
