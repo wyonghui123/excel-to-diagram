@@ -71,6 +71,10 @@ class OutboxInterceptor(Interceptor):
             return
 
         contracts = registry.publishers_for(app_id, bo_id, trigger)
+        # [D3 2026-10-03] 保留事件名 bo.status_changed 由 BoStatusInterceptor 专属处理
+        # （需要 from→to 语义，condition 表达不了）——此处让位，避免同一写双入队。
+        from meta.core.bo_status_event import BO_STATUS_CHANGED
+        contracts = [c for c in contracts if c.name != BO_STATUS_CHANGED]
         if not contracts:
             return
 

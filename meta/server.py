@@ -490,6 +490,9 @@ def create_app(db_path=None):
     # 无事件契约时 should_execute 直接短路 → legacy 零影响。
     from meta.core.interceptors.outbox_interceptor import OutboxInterceptor
     bo_framework.register_interceptor(OutboxInterceptor())
+    # [D3 2026-10-03] 反向事件：BO 状态变更 → bo.status_changed（保留名，专用拦截器）
+    from meta.core.interceptors.bo_status_interceptor import BoStatusInterceptor
+    bo_framework.register_interceptor(BoStatusInterceptor())
     bo_framework.register_interceptor(SecurityLogInterceptor())
     bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
     # [H13 2026-06-15] WriteScopeInterceptor 写权限数据范围检查
