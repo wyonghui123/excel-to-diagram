@@ -21,6 +21,8 @@
   迁移落账一律走 A3 `record_transition`（一事件 + 一工作日志）。
 - **不越界**：审核子任务生成（human + type=approval）属编排定义/实例层（A4/C 域），
   本模块只做状态归位与 payload 暂存，不建子任务。
+- **写权单通道**（B4）：任务尝试期所有写经 `task_write_scope` 守卫，业务对象表
+  DML 一律 fail-closed；业务写只能走 `registry.call(action_id)`。
 - 落**平台库**（Q1 拍板），与 A1/A3/A6/A7 同库同事务（F5 不跨库）。
 
 对应方案:
@@ -213,11 +215,15 @@ class BOActionExecutor:
         idem_key = build_idem_key(task["workflow_run_id"], task["id"], task["attempt"])
 
         def _attempt(ds):
-            return self._run_attempt(
-                ds, task_id=task["id"], action_id=action_id,
-                run_as=run_as, acceptance_passed=acceptance_passed,
-                reviewer_configured=reviewer_configured,
-            )
+            # [B4 2026-10-04] 写权单通道守卫：任务尝试期的 ds 只放行任务域自有表 DML
+            from meta.core.task_write_guard import task_write_scope
+
+            with task_write_scope(ds) as guarded:
+                return self._run_attempt(
+                    guarded, task_id=task["id"], action_id=action_id,
+                    run_as=run_as, acceptance_passed=acceptance_passed,
+                    reviewer_configured=reviewer_configured,
+                )
 
         wrapped = run_idempotent(
             data_source, idem_key, _attempt,
