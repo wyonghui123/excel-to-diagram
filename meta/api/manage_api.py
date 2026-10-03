@@ -93,6 +93,14 @@ def init_services(data_source=None):
     except Exception as e:
         logger.warning("Task SLA schema ensure skipped: %s", str(e))
 
+    # [F1 2026-10-03] hold 当前态派生视图（task_hold_current），读平台库事件账；
+    # hold / release 只写 TASK_EVENT、不改状态列（task-model-design §12 F1 / §12.1 Q3）
+    try:
+        from meta.core.task_hold import ensure_hold_view
+        ensure_hold_view(_data_source)
+    except Exception as e:
+        logger.warning("Task hold view ensure skipped: %s", str(e))
+
     _ensure_default_permissions(_data_source)
 
     from meta.api.special_routes_api import init_special_services
