@@ -359,3 +359,68 @@ def record_transition(
         ),
     )
     return event_id, worklog_id
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 读路径（append-only 账的查询；只 SELECT，不 UPDATE / DELETE）
+# ─────────────────────────────────────────────────────────────────────────────
+
+_EVENT_COLUMNS = (
+    "id", "task_id", "event_type", "from_status", "to_status",
+    "actor", "actor_kind", "reason", "payload",
+    "doc_ref", "line_refs", "agent_session_id", "trace_id",
+    "occurred_at", "created_at",
+)
+
+MAX_EVENTS_LIMIT = 500
+
+
+def _parse_json(text: Any, fallback: Any) -> Any:
+    if text is None or text == "":
+        return fallback
+    if isinstance(text, (dict, list)):
+        return text
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _event_row(r) -> Dict[str, Any]:
+    return {
+        "id": r[0], "task_id": r[1], "event_type": r[2],
+        "from_status": r[3] or None, "to_status": r[4] or None,
+        "actor": r[5] or None, "actor_kind": r[6] or None,
+        "reason": r[7] or None, "payload": _parse_json(r[8], None),
+        "doc_ref": r[9] or None, "line_refs": _parse_json(r[10], None),
+        "agent_session_id": r[11] or None, "trace_id": r[12] or None,
+        "occurred_at": r[13] or None, "created_at": r[14] or None,
+    }
+
+
+def list_task_events(data_source, task_id: str, *,
+                     limit: int = 200) -> List[Dict[str, Any]]:
+    """取一个任务的事件时间轴（升序：最早 → 最新）。
+
+    只读（append-only 账，无 update / delete）；limit 截取**最早段**（配合前端
+    「加载更早」语义；当前 P1 一次拉全，量级小）。
+
+    Raises:
+        ValueError: task_id 为空 / limit 非正。
+    """
+    if not task_id:
+        raise ValueError("task_id 不能为空")
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise ValueError(f"limit 非法：{limit!r}")
+    if limit <= 0:
+        raise ValueError(f"limit 必须为正：{limit}")
+    limit = min(limit, MAX_EVENTS_LIMIT)
+
+    rows = data_source.execute(
+        f"SELECT {', '.join(_EVENT_COLUMNS)} FROM {TASK_EVENT_TABLE} "
+        f"WHERE task_id = ? ORDER BY occurred_at ASC, created_at ASC LIMIT ?",
+        (str(task_id), limit),
+    ).fetchall()
+    return [_event_row(r) for r in rows]

@@ -259,3 +259,25 @@ def inbox_counts(data_source, *, actor: Optional[str],
     entries = _collect(data_source, actor=actor, role_apps=role_apps,
                        actor_roles=actor_roles, app_id=app_id, now_dt=now_dt)
     return _counts(entries)
+
+
+def task_detail(data_source, task_id: str, *, actor: Optional[str],
+                role_apps: Optional[Dict[str, Iterable[str]]] = None,
+                actor_roles: Optional[Iterable[str]] = None) -> Optional[Dict[str, Any]]:
+    """按**行级可见性**取单条任务（fail-closed）。
+
+    供详情 / 活动流共用同一道闸门：不可见或不存在 → None（REST 侧统一映射 404，
+    不泄露「存在但无权」与「不存在」的差异）。
+    """
+    if not task_id or not actor:
+        return None
+    rows = data_source.execute(
+        f"SELECT {', '.join(_TASK_COLUMNS)} FROM {TASK_TABLE} WHERE id = ?",
+        (str(task_id),),
+    ).fetchall()
+    if not rows:
+        return None
+    task = _row_to_task(rows[0])
+    if not _visible(task, actor=actor, role_apps=role_apps, actor_roles=actor_roles):
+        return None
+    return task
