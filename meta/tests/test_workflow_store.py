@@ -14,6 +14,8 @@
 注: 本文件不含 raw 写 SQL —— 全走 public API，可被 conftest raw-SQL 门控放行。
 """
 
+import json
+
 import pytest
 
 from meta.core.workflow_definition import WorkflowDefinitionError
@@ -23,6 +25,7 @@ from meta.core.workflow_store import (
     get_nodes,
     get_workflow,
     latest_version,
+    list_latest_workflows,
     list_versions,
     load_definition,
     publish_workflow,
@@ -157,8 +160,49 @@ class TestPublish:
                              nodes=_trunk_v1(), trigger_kind="bogus")
 
     def test_all_trigger_kinds_accepted(self, ds):
-        """TC-WFS-010: 值域内每种 trigger_kind 均可发布"""
+        """TC-WFS-010: 值域内每种 trigger_kind 均可发布（event 需合法 trigger_expr）"""
+        exprs = {"event": json.dumps({"event": "outbound_completed"})}
         for kind in TRIGGER_KINDS:
+            result = publish_workflow(ds, workflow_key=f"wf-{kind}",
+                                      name=f"流程{kind}", nodes=_trunk_v1(),
+                                      trigger_kind=kind, trigger_expr=exprs.get(kind, ""))
+            assert result["published"] is True
+
+    def test_event_trigger_without_expr_rejected(self, ds):
+        """TC-WFS-011: kind=event 缺 trigger_expr → 定义期拒绝且不落版本行"""
+        with pytest.raises(WorkflowDefinitionError) as exc:
+            publish_workflow(ds, workflow_key="wf-e", name="流程E",
+                             nodes=_trunk_v1(), trigger_kind="event")
+        assert exc.value.findings[0].code == "TRIGGER_EXPR_MISSING"
+        assert latest_version(ds, "wf-e") == 0
+
+    def test_event_trigger_bad_json_rejected(self, ds):
+        """TC-WFS-012: kind=event 的 trigger_expr 非 JSON / 缺 event 名 → 拒绝"""
+        with pytest.raises(WorkflowDefinitionError) as exc:
+            publish_workflow(ds, workflow_key="wf-e", name="流程E",
+                             nodes=_trunk_v1(), trigger_kind="event",
+                             trigger_expr="not-json")
+        assert exc.value.findings[0].code == "TRIGGER_EXPR_NOT_JSON"
+
+        with pytest.raises(WorkflowDefinitionError) as exc2:
+            publish_workflow(ds, workflow_key="wf-e", name="流程E",
+                             nodes=_trunk_v1(), trigger_kind="event",
+                             trigger_expr=json.dumps({"when": "x == 1"}))
+        assert exc2.value.findings[0].code == "TRIGGER_EVENT_NAME_MISSING"
+        assert latest_version(ds, "wf-e") == 0
+
+    def test_event_trigger_bad_condition_rejected(self, ds):
+        """TC-WFS-013: when 含非白名单表达式 → 定义期拒绝（不发明表达式语言）"""
+        with pytest.raises(WorkflowDefinitionError) as exc:
+            publish_workflow(ds, workflow_key="wf-e", name="流程E",
+                             nodes=_trunk_v1(), trigger_kind="event",
+                             trigger_expr=json.dumps(
+                                 {"event": "e", "when": "__import__('os')"}))
+        assert exc.value.findings[0].code == "TRIGGER_WHEN_INVALID"
+
+    def test_non_event_kind_needs_no_expr(self, ds):
+        """TC-WFS-014: manual / api / schedule 不要求 trigger_expr"""
+        for kind in ("manual", "api", "schedule"):
             result = publish_workflow(ds, workflow_key=f"wf-{kind}",
                                       name=f"流程{kind}", nodes=_trunk_v1(),
                                       trigger_kind=kind)
@@ -238,3 +282,26 @@ class TestRead:
         workflow = get_workflow(ds, "wf-a")
         assert workflow["sla"] == {"total_hours": 8}
         assert workflow["meta"] == {"tier": "gold"}
+
+    def test_list_latest_workflows_one_row_per_key(self, ds):
+        """TC-WFS-028: list_latest_workflows 每 key 只回最新版"""
+        publish_workflow(ds, workflow_key="wf-a", name="流程A", nodes=_trunk_v1())
+        publish_workflow(ds, workflow_key="wf-a", name="流程A改名",
+                         nodes=[_node("n1", 1, title="改")])
+        publish_workflow(ds, workflow_key="wf-b", name="流程B", nodes=_trunk_v1())
+
+        rows = list_latest_workflows(ds)
+        assert [(r["workflow_key"], r["version"]) for r in rows] == [("wf-a", 2),
+                                                                    ("wf-b", 1)]
+        assert rows[0]["name"] == "流程A改名"
+
+    def test_list_latest_workflows_filter_by_trigger_kind(self, ds):
+        """TC-WFS-029: 可按 trigger_kind 过滤（C3 事件触发只扫 event 类）"""
+        publish_workflow(ds, workflow_key="wf-m", name="手动", nodes=_trunk_v1(),
+                         trigger_kind="manual")
+        publish_workflow(ds, workflow_key="wf-e", name="事件", nodes=_trunk_v1(),
+                         trigger_kind="event",
+                         trigger_expr=json.dumps({"event": "outbound_completed"}))
+        rows = list_latest_workflows(ds, trigger_kind="event")
+        assert [r["workflow_key"] for r in rows] == ["wf-e"]
+        assert rows[0]["trigger_expr"] == json.dumps({"event": "outbound_completed"})

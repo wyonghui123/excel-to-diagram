@@ -188,6 +188,27 @@ def list_versions(data_source, workflow_key: str) -> List[Dict[str, Any]]:
     )
 
 
+def list_latest_workflows(data_source,
+                          trigger_kind: Optional[str] = None) -> List[Dict[str, Any]]:
+    """取**每个 workflow_key 的最新版本**定义行（可选按 trigger_kind 过滤）。
+
+    「生效版」语义：定义层多版本并存，运行期扫的永远是各 key 的最新版
+    （在途 Run 仍按自己的快照执行）。
+    """
+    sql = (
+        f"SELECT {', '.join('w.' + c for c in _WORKFLOW_COLUMNS)} "
+        f"FROM {WORKFLOW_TABLE} w JOIN ("
+        f"SELECT workflow_key AS k, MAX(version) AS v FROM {WORKFLOW_TABLE} "
+        "GROUP BY workflow_key) m ON w.workflow_key = m.k AND w.version = m.v"
+    )
+    params: tuple = ()
+    if trigger_kind:
+        sql += " WHERE w.trigger_kind = ?"
+        params = (trigger_kind,)
+    sql += " ORDER BY w.workflow_key ASC"
+    return _select_all(data_source, sql, params, _WORKFLOW_JSON)
+
+
 def get_workflow(data_source, workflow_key: str,
                  version: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """取指定版本定义行；version=None 取最新版。不存在返回 None。"""
@@ -263,6 +284,9 @@ def publish_workflow(
             f"trigger_kind 必须为 {TRIGGER_KINDS} 之一，实际 {trigger_kind!r}")
 
     assert_definition(nodes, edges)  # C2：非法定义 → WorkflowDefinitionError
+    # C3 定义期闸门：非法 trigger_expr 不落半成品版本行（局部 import 避免循环依赖）
+    from meta.core.workflow_trigger import assert_trigger
+    assert_trigger(trigger_kind, trigger_expr)
 
     node_contents = sorted((_node_content(n) for n in nodes),
                            key=lambda c: c["node_id"])
