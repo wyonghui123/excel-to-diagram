@@ -173,6 +173,7 @@ from meta.api.test_api import test_bp
 from meta.api.debug_api import debug_bp
 from meta.scripts.init_task_menus import init_task_menus
 from meta.scripts.init_task_seed import init_task_seed_data
+from meta.scripts.init_region_seed import init_region_seed_data
 from meta.scripts.init_menu_permissions import init_menu_permissions
 
 logging.basicConfig(
@@ -516,6 +517,8 @@ def create_app(db_path=None):
     init_task_menus(data_source)
 
     init_task_seed_data(data_source)
+
+    init_region_seed_data(data_source)
 
     from meta.services.audit_service import AuditService
     _audit_svc = AuditService(data_source)

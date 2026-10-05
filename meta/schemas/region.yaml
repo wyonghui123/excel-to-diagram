@@ -1,0 +1,354 @@
+# 行政区划字典（region）— foundation 步 7「支持对象」延伸 · 地址级联字典
+# 依据: docs/superpowers/specs/2026-10-05-region-dictionary-design.md §3
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.8 / §5.4 / §7 步 7
+# 定位: address 四 FK（country_id / province_id / city_id / district_id）的引用目标
+# 结构: 单表自引用树 regions（code / name / parent_id / level / status）
+#   - 国家层 level=country，编码 = ISO 3166-1 alpha-2（CN / US / JP / DE）
+#   - 国内四级编码 = GB/T 2260 六位码（110000 / 110100 / 110101）
+#   - 直辖市以「市辖区」伪节点（110100 / 120100 / 310100 / 500100）保持四级链均匀
+# key_template: 不启用（业务键=国标代码，无需自动编码）
+
+id: region
+name: 行政区划
+table_name: regions
+description: 行政区划字典（国/省/市/区四级，单表自引用树；address 四 FK 的引用目标）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 行政区划
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 行政区划
+    - 区划
+    - 区划字典
+    - region
+
+deletion_policy:
+  # S19: 主数据禁止物理删除; 子区划 + address 四 FK 引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: regions
+      foreign_key: parent_id
+      message: 该区划存在下级区划，请先删除下级后再删除
+    - table: addresses
+      foreign_key: country_id
+      message: 该区划被地址（国家）引用，请先调整相关地址后再删除
+    - table: addresses
+      foreign_key: province_id
+      message: 该区划被地址（省）引用，请先调整相关地址后再删除
+    - table: addresses
+      foreign_key: city_id
+      message: 该区划被地址（市）引用，请先调整相关地址后再删除
+    - table: addresses
+      foreign_key: district_id
+      message: 该区划被地址（区县）引用，请先调整相关地址后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 区划代码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    pattern: "^[A-Za-z0-9]{2,12}$"
+    description: 区划唯一代码（国家层=ISO 3166-1 alpha-2；国内=GB/T 2260 六位码）
+    semantics:
+      meaning: 区划业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 区划名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 区划名称（如 浙江省 / 杭州市 / 西湖区）
+    semantics:
+      meaning: 区划显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: parent_id
+    name: 上级区划
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级区划ID（自引用树；顶级为国家，parent_id 为空）
+    semantics:
+      meaning: 上级区划引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 4
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "无上级（顶级）"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 自引用层级防环: 编辑态排除当前记录自身（SearchHelpDialog 通用树再排除全部子孙）
+        exclude_self: true
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: level
+    name: 层级
+    type: string
+    db_column: level
+    required: true
+    description: 区划层级（国家/省级/地市/区县）
+    enum_values:
+      - value: country
+        label: 国家
+        color: danger
+      - value: province
+        label: 省级
+        color: warning
+      - value: city
+        label: 地市
+        color: primary
+      - value: district
+        label: 区县
+        color: success
+    semantics:
+      meaning: 区划层级
+      filterable: true
+      filter_type: enum
+      filter_label: 层级
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 区划状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 区划启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（蓝图 §5.4）
+rules:
+  - id: activate_region
+    name: 启用区划
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此区划吗？"
+      highlight: true
+
+  - id: deactivate_region
+    name: 停用区划
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此区划吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_region_code
+  - fields: [parent_id]
+    name: idx_region_parent_id
+  - fields: [level]
+    name: idx_region_level
+  - fields: [status]
+    name: idx_region_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 行政区划管理
+    description: 行政区划字典（国/省/市/区四级树）
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: level
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: parent_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: region
+        display_field: name
+        placeholder: "无上级"
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建区划
+        icon: plus
+        type: primary
+        permission: region:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 行政区划信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [level, parent_id]
+          - fields: [status]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - level
+          - parent_id
+          - status
+
+category_config:
+  create_permission: region:create
+  update_permission: region:update
+  delete_permission: region:delete
+  owner_auto_permission: false

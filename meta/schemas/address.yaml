@@ -1,0 +1,546 @@
+# ============================================
+# 地址（address）— foundation 步 7 · 支持对象（与 calendar 同批；地址库先行）
+# 依据: 蓝图 v2.5 §3.8（F4 两库判定 / v2.3 定性校正）/ §4.3 键与编码 / §5.4 生命周期
+#
+# [F4 两库判定] 设施树（location）＋ 地址库（address）分治两套——本对象是地址库：
+#   设施树回答"东西放在哪 / 作业在哪"（物流结构、随业务结构变更）；
+#   地址库回答"某实体落在哪一点"（地理参考、只被引用）——不是"一树"（site 不泛化为地理点）。
+#   约定：不做成 location / party 字段位；不建私有地址表；不反向挂引用方（引用方向 = 一方 → 地址）。
+#
+# 命名三面: 界面词「地址」（地址库）｜技术标识 address｜物理表 addresses
+#
+# [§4.3 编码] 唯一码走平台 key_template（目标列硬编码为 code——可空则永不被填充 ⇒
+#   code + required + unique 三件套）；形式 ADDR-########（常量前缀 + 定长序列；自动编号、可手工覆盖）。
+#
+# [v2.3 定性校正] 本对象只存"地"——只被引用、不承载用途 / 角色：
+#   用途（bill-to / ship-to / sold-to）＝「地址 × 语境」关联边，归关系侧（C5，随角色层分期展开）；
+#   字段内不得出现用途 / 角色 / 反引用语义（use / purpose / role / site_id / party_id 等）。
+#
+# [一期口径]
+#   - 结构化字段分列存储（国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编）——供检索 / 匹配 / 校验；
+#     国家 = 地址语义根 ⇒ 必填；其余可空（去重深度未决，不预烧约束）
+#   - 格式化全文 formatted_address（展示用）——进单据走快照（S20 精神：主键实时引用 + 文本快照）
+#   - 经纬度不落列（蓝图"一期留扩展点"）：随地理能力专题以可空列追加，不改结构
+#   - 去重按 C7 最小集精神：建档时匹配校验；一期不做全量清洗 / 合并引擎（§5.5）
+#   - 停用 ≠ 删除（§5.4）：生命周期走 status；变更留痕（audit）
+#
+# [接线] site.address_id（设施地址——location 侧随接线批次落）；party 侧经关系 / 角色引用（随角色层）。
+# [未决 · 不在本批] ① C5 用途关联的期次与结构 ② 去重深度（匹配规则强度）③ 各国格式适配（一期单语言单格式 + 扩展点）
+# ============================================
+
+id: address
+name: 地址
+table_name: addresses
+description: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
+display_name_field: formatted_address
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 地址
+  category: core_entity
+  business_key: [code]
+  display_name_field: formatted_address
+  aliases:
+    - 地址
+    - 地址库
+    - Address
+
+deletion_policy:
+  # [§5.4] 被引用地址停用 ≠ 删除：生命周期走 status（active/inactive）；
+  # 引用面删除保护随接线批次追加（site.address_id 等引用面尚未接线 ⇒ 本期 restrict_on 为空）
+  mode: restrict
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # [§4.3] 唯一码：列 = code（key_template 硬编码目标列），界面词 = 地址编码
+  - id: code
+    name: 地址编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 地址唯一识别号（key_template 自动编号 ADDR-########；自动建议、可手工覆盖）
+    semantics:
+      meaning: 地址业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  # ── 结构化字段（四 FK → region 区划字典；级联过滤见字段级 parameter_bindings）──
+  - id: country_id
+    name: 国家
+    type: integer
+    db_column: country_id
+    required: true
+    description: 国家（地址语义根；引用 region 国家级记录）
+    semantics:
+      meaning: 国家
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "选择国家"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 先国家后省市: 只出国家级（constant 绑定不参与必填阻断）
+        parameter_bindings:
+          - target_field: level
+            constant: country
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: false
+
+  - id: province_id
+    name: 省
+    type: integer
+    db_column: province_id
+    nullable: true
+    description: 省/州/一级行政区（引用 region 省级记录；候选=所选国家下的省级）
+    semantics:
+      meaning: 一级行政区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "选择省份"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # country_id 值 → 过滤目标表 parent_id 列; level 常量防脏数据
+        parameter_bindings:
+          - local_field: country_id
+            target_field: parent_id
+            required: true
+          - target_field: level
+            constant: province
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: city_id
+    name: 市
+    type: integer
+    db_column: city_id
+    nullable: true
+    description: 市/二级行政区（引用 region 地市级记录；候选=所选省下的地市）
+    semantics:
+      meaning: 二级行政区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "选择城市"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - local_field: province_id
+            target_field: parent_id
+            required: true
+          - target_field: level
+            constant: city
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: district_id
+    name: 区
+    type: integer
+    db_column: district_id
+    nullable: true
+    description: 区/县/三级行政区（引用 region 区县级记录；候选=所选市下的区县）
+    semantics:
+      meaning: 三级行政区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "选择区县"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - local_field: city_id
+            target_field: parent_id
+            required: true
+          - target_field: level
+            constant: district
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: street
+    name: 街道
+    type: string
+    db_column: street
+    nullable: true
+    max_length: 200
+    description: 街道 / 路名
+    semantics:
+      meaning: 街道 / 路名
+    ui:
+      widget: input
+
+  - id: street_number
+    name: 门牌
+    type: string
+    db_column: street_number
+    nullable: true
+    max_length: 50
+    description: 门牌号
+    semantics:
+      meaning: 门牌号
+    ui:
+      widget: input
+
+  - id: postal_code
+    name: 邮编
+    type: string
+    db_column: postal_code
+    nullable: true
+    max_length: 20
+    description: 邮政编码
+    semantics:
+      meaning: 邮政编码
+      searchable: true
+    ui:
+      widget: input
+
+  # ── 格式化全文（展示用；进单据走快照——S20）──
+  - id: formatted_address
+    name: 地址全文
+    type: text
+    db_column: formatted_address
+    required: true
+    description: 格式化地址全文（展示用；进单据走快照——主键实时引用 + 文本快照）
+    semantics:
+      meaning: 展示用格式化地址全文
+      display_name: true
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 地址状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 地址启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（蓝图 §5.4）
+rules:
+  - id: activate_address
+    name: 启用地址
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此地址吗？"
+      highlight: true
+
+  - id: deactivate_address
+    name: 停用地址
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此地址吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_address_code
+  - fields: [postal_code]
+    name: idx_address_postal_code
+  - fields: [status]
+    name: idx_address_status
+
+# [§4.3] 编码规则：锚 / 支持对象统一走平台 key_template（先例 party.yaml / relationship.yaml）
+# 硬约束：address 无父对象 ⇒ segments 不得含 parent_field（引擎对 parent_field 段强制非空校验）
+key_template:
+  enabled: true
+  user_editable: auto_or_manual
+  auto_suggest: true
+  pattern: 'ADDR-{SEQ:8}'
+  separator: '-'
+  segments:
+    - type: sequence
+      name: address_code_seq
+      padding: 8
+      start: 1
+      auto_detect: true
+  preview: 'ADDR-00000001'
+
+# 级联清下游: 父字段变更时清子字段值 + _display 缓存（DetailPage/useFormCascade 消费）
+cascade_select:
+  - field: province_id
+    parent_object: region
+    parent_display_field: name
+    filter_by: country_id
+  - field: city_id
+    parent_object: region
+    parent_display_field: name
+    filter_by: province_id
+  - field: district_id
+    parent_object: region
+    parent_display_field: name
+    filter_by: city_id
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 地址管理
+    description: 地址库（支持对象；只被引用，不承载用途 / 角色）
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: formatted_address
+        width: 320
+        type: ellipsis
+      - field: country_id
+        width: 140
+        render_as: association
+        target_type: region
+        display_field: name
+      - field: city_id
+        width: 140
+        render_as: association
+        target_type: region
+        display_field: name
+      - field: postal_code
+        width: 100
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - formatted_address
+      - postal_code
+    actions:
+      - id: create
+        label: 新建地址
+        icon: plus
+        type: primary
+        permission: address:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 地址信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, status]
+      - title: 地址结构
+        columns:
+          - fields: [country_id, province_id]
+          - fields: [city_id, district_id]
+          - fields: [street, street_number]
+          - fields: [postal_code]
+      - title: 地址全文
+        columns:
+          - fields: [formatted_address]
+
+  detail:
+    layout: tabs
+    title: "{record.formatted_address} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - formatted_address
+          - country_id
+          - province_id
+          - city_id
+          - district_id
+          - street
+          - street_number
+          - postal_code
+          - status
+
+category_config:
+  create_permission: address:create
+  update_permission: address:update
+  delete_permission: address:delete
+  owner_auto_permission: false
