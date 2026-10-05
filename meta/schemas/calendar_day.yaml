@@ -1,0 +1,238 @@
+# 日历例外日 (Calendar Day) — foundation 步 7「支持对象」· calendar 子表
+# 依据: docs/superpowers/specs/2026-10-05-calendar-dictionary-design.md §3 FR-005 / FR-006
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.7 / §7 步 7
+# 语义: 单个日历的日期级例外，覆盖周工作日模式
+#   - holiday  非工作日（法定节假日 / 企业停产日）
+#   - workday  强制工作日（中国调休：周末上班）
+# 关键语义（P6 Standard 对标）: **无记录即「标准」** —— 删除本表记录即恢复为基准周模式，
+#   故 day_type 只需两值，不设第三种 standard（零成本实现，删除即回归）
+# 键: 唯一 (calendar_id, date) —— 同一日历同一日期只允许一条例外（防重复计数）
+# date 类型: datetime（ISO 8601 日期串 YYYY-MM-DD），复用平台既有 FieldType.DATETIME，零平台改造
+#   理由: ISO 定长同分隔符无时区，字符串序 = 日期序，范围查询与排序天然正确
+#   二期若排程引擎需日期算术/强类型，评估 ALTER 为 DATE（见 spec §10 TBD-8）
+# 一期不实现（见 spec §10 TBD）: 半日容量 capacity（对齐 Oracle HALF_DAY_FOR_ELAPSED）
+
+id: calendar_day
+name: 日历例外日
+table_name: calendar_days
+description: 日历例外日（holiday 非工作日 / workday 强制工作日；无记录即标准）
+parent_object: calendar
+hierarchy:
+  enabled: true
+  parent_field: calendar_id
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: calendar_id
+    name: 日历
+    type: integer
+    db_column: calendar_id
+    required: true
+    description: 所属日历ID
+    semantics:
+      meaning: 所属日历
+      parent_key: true
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: calendar
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: calendar
+      multiple: false
+
+  - id: date
+    name: 日期
+    type: datetime
+    db_column: date
+    required: true
+    description: 例外日期（ISO 8601 日期串 YYYY-MM-DD）
+    semantics:
+      meaning: 例外生效日期
+      filterable: true
+      filter_type: date
+      filter_label: 日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: day_type
+    name: 日期类型
+    type: string
+    db_column: day_type
+    required: true
+    description: 日期类型 holiday=非工作日 / workday=强制工作日（调休）
+    enum_values:
+      - value: holiday
+        label: 非工作日
+        color: danger
+      - value: workday
+        label: 强制工作日
+        color: success
+    semantics:
+      meaning: 例外日类型
+      filterable: true
+      filter_type: enum
+      filter_label: 类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    nullable: true
+    max_length: 200
+    description: 备注（如 春节调休 / 国庆停产）
+    semantics:
+      meaning: 例外日备注
+      data_category: text
+    ui:
+      widget: input
+
+deletion_policy:
+  # 例外日子表: 随父日历一并管理，不设独立 restrict（无其他对象引用例外日）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+indexes:
+  # FR-006: 同一日历同一日期只允许一条例外（防排程重复计数）
+  - fields: [calendar_id, date]
+    unique: true
+    name: idx_calendar_day_unique
+  # 二期跨日历按日期批量查（如「2026-10-01 全厂停工排查」）
+  - fields: [date]
+    name: idx_calendar_day_date
+  - fields: [day_type]
+    name: idx_calendar_day_type
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 日历例外日管理
+    description: 例外日（holiday 非工作日 / workday 强制工作日；无记录即标准）
+    columns:
+      - field: calendar_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: calendar
+        display_field: name
+      - field: date
+        width: 130
+        sortable: true
+        filterable: true
+        filter_type: date
+      - field: day_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: note
+        width: 220
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - note
+    actions:
+      - id: create
+        label: 新建例外日
+        icon: plus
+        type: primary
+        permission: calendar_day:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: date
+      order: asc
+
+  form:
+    title: 例外日信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [calendar_id, date]
+          - fields: [day_type, note]
+
+  detail:
+    layout: tabs
+    title: "例外日详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - calendar_id
+          - date
+          - day_type
+          - note
+
+category_config:
+  create_permission: calendar_day:create
+  update_permission: calendar_day:update
+  delete_permission: calendar_day:delete
+  owner_auto_permission: false

@@ -1,0 +1,475 @@
+# 作业日历（calendar）— foundation 步 7「支持对象」· 排程基准字典
+# 依据: docs/superpowers/specs/2026-10-05-calendar-dictionary-design.md §3
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.7 / §5.4 / §7 步 7
+# 定位: site / 工厂排程的工作日基准（本期为纯参考数据字典，二期排程引擎消费）
+# 结构: 单表自引用树 calendars（周工作日模式 7 布尔 + 地区引用 + 状态）
+#   - parent_calendar_id 空 = 基准日历（顶层，如「CN 国家基准日历」）
+#   - parent_calendar_id 非空 = 派生日历（继承父的周期模式与地区，一期仅支持一级）
+# 周期模式: day_mask_mon ~ day_mask_sun 七个布尔，默认周一至周五（对齐「周一至周五 7×24」通用工厂日历）
+# 例外日: 落子对象 calendar_days（calendar_day.yaml）；无记录即「标准」（P6 Standard 语义）
+# 地区: country_id 引用 region 国家级节点（level=country），可空表示通用日历
+# key_template: 启用（CAL-{SEQ:6}）—— 日历无国标代码，对标 SAP WFCID 短码 + 描述分离
+# 一期不实现（见 spec §10 TBD）: 有效期 valid_from/valid_to · 半日容量 capacity · 长周期 pattern_length
+#                     法定节假日种子（手工维护）· 多级递归继承
+
+id: calendar
+name: 作业日历
+table_name: calendars
+description: 作业日历字典（周工作日模式 + 地区归属；例外日子对象 calendar_days）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 作业日历
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 作业日历
+    - 工作日历
+    - 生产日历
+    - 工厂日历
+    - calendar
+
+key_template: "CAL-{SEQ:6}"
+
+deletion_policy:
+  # S19: 主数据禁止物理删除; 派生日历 + 例外日 引用时 restrict
+  # 注: locations.calendar_id 引用待 location 任务落定后补（该列当前仅为注释占位，见 spec §9.6）
+  mode: restrict
+  restrict_on:
+    - table: calendars
+      foreign_key: parent_calendar_id
+      message: 该日历存在派生日历，请先删除下级日历后再删除
+    - table: calendar_days
+      foreign_key: calendar_id
+      message: 该日历存在例外日记录，请先删除例外日后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 日历编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    description: 日历唯一代码（key_template 自动生成 CAL-{SEQ:6}）
+    semantics:
+      meaning: 日历业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 日历名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 日历名称（如 CN 国家基准日历 / 上海张江厂区日历）
+    semantics:
+      meaning: 日历显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: parent_calendar_id
+    name: 父日历
+    type: integer
+    db_column: parent_calendar_id
+    nullable: true
+    description: 父日历ID（自引用继承；为空=基准日历，非空=派生日历；一期仅支持一级继承）
+    semantics:
+      meaning: 父日历引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 2
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+        placeholder: "无父日历（基准日历）"
+    value_help:
+      source:
+        type: bo
+        target_bo: calendar
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_calendar_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 自引用防环: 编辑态排除当前记录自身
+        exclude_self: true
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: calendar
+      multiple: false
+      clearable: true
+
+  - id: country_id
+    name: 国家/地区
+    type: integer
+    db_column: country_id
+    nullable: true
+    description: 所属国家/地区（引用 region 国家级节点；为空表示通用日历）
+    semantics:
+      meaning: 日历所属国家地区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "通用日历（不限定地区）"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 仅返回国家级节点（level=country 常量锁定），对标 SAP 按国家 ID / Oracle 地理树
+        parameter_bindings:
+          - target_field: level
+            constant: country
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 国家代码
+            width: 100
+          - field: name
+            label: 国家名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: day_mask_mon
+    name: 周一工作
+    type: boolean
+    db_column: day_mask_mon
+    required: true
+    default: true
+    description: 周一是否为工作日
+    ui:
+      widget: switch
+
+  - id: day_mask_tue
+    name: 周二工作
+    type: boolean
+    db_column: day_mask_tue
+    required: true
+    default: true
+    description: 周二是否为工作日
+    ui:
+      widget: switch
+
+  - id: day_mask_wed
+    name: 周三工作
+    type: boolean
+    db_column: day_mask_wed
+    required: true
+    default: true
+    description: 周三是否为工作日
+    ui:
+      widget: switch
+
+  - id: day_mask_thu
+    name: 周四工作
+    type: boolean
+    db_column: day_mask_thu
+    required: true
+    default: true
+    description: 周四是否为工作日
+    ui:
+      widget: switch
+
+  - id: day_mask_fri
+    name: 周五工作
+    type: boolean
+    db_column: day_mask_fri
+    required: true
+    default: true
+    description: 周五是否为工作日
+    ui:
+      widget: switch
+
+  - id: day_mask_sat
+    name: 周六工作
+    type: boolean
+    db_column: day_mask_sat
+    required: true
+    default: false
+    description: 周六是否为工作日（中国调休可置 true）
+    ui:
+      widget: switch
+
+  - id: day_mask_sun
+    name: 周日工作
+    type: boolean
+    db_column: day_mask_sun
+    required: true
+    default: false
+    description: 周日是否为工作日（中国调休可置 true）
+    ui:
+      widget: switch
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 日历状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 日历启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（蓝图 §5.4）
+rules:
+  - id: activate_calendar
+    name: 启用日历
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此日历吗？"
+      highlight: true
+
+  - id: deactivate_calendar
+    name: 停用日历
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此日历吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_calendar_code
+  - fields: [parent_calendar_id]
+    name: idx_calendar_parent_id
+  - fields: [country_id]
+    name: idx_calendar_country_id
+  - fields: [status]
+    name: idx_calendar_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 作业日历管理
+    description: 作业日历字典（周工作日模式 + 地区归属 + 例外日）
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: parent_calendar_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: calendar
+        display_field: name
+        placeholder: "基准日历"
+      - field: country_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: region
+        display_field: name
+        placeholder: "通用"
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建日历
+        icon: plus
+        type: primary
+        permission: calendar:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 作业日历信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [parent_calendar_id, country_id]
+          - fields: [status]
+      - title: 周工作日模式
+        description: 默认周一至周五工作；调休日例外请在下方「例外日」中维护
+        columns:
+          - fields: [day_mask_mon, day_mask_tue, day_mask_wed, day_mask_thu, day_mask_fri]
+          - fields: [day_mask_sat, day_mask_sun]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - parent_calendar_id
+          - country_id
+          - status
+      - id: pattern
+        label: 周工作日模式
+        type: fields
+        fields:
+          - day_mask_mon
+          - day_mask_tue
+          - day_mask_wed
+          - day_mask_thu
+          - day_mask_fri
+          - day_mask_sat
+          - day_mask_sun
+      - id: days
+        label: 例外日
+        type: nested
+        relation: calendar
+        parent_field: calendar_id
+        order_by: date
+        order_asc: true
+        columns:
+          - field: date
+            width: 130
+            sortable: true
+          - field: day_type
+            width: 110
+            filterable: true
+            filter_type: select
+          - field: note
+            width: 220
+
+category_config:
+  create_permission: calendar:create
+  update_permission: calendar:update
+  delete_permission: calendar:delete
+  owner_auto_permission: false
