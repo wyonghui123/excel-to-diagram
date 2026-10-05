@@ -185,6 +185,119 @@ def seed_v101_upward_expansion(ds) -> None:
     )
 
 
+def make_scope_alignment_ds() -> Iterator[object]:
+    """创建临时 SQLite DB + DS wrapper，供 F1 §5.2 护栏 1「读 ⊆ 管」巡检测试。
+
+    表: orgs(含 code/parent_id) + org_members + permission_sets +
+        org_permission_sets + data_permission_rules + permission_set_dimension_scopes
+    """
+    db_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    db_path = db_file.name
+    db_file.close()
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS orgs (
+            id INTEGER PRIMARY KEY, code TEXT, name TEXT,
+            parent_id INTEGER REFERENCES orgs(id), manager_id INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS org_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL, org_id INTEGER NOT NULL,
+            is_manager INTEGER DEFAULT 0, UNIQUE(user_id, org_id)
+        );
+        CREATE TABLE IF NOT EXISTS permission_sets (
+            id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT,
+            description TEXT, is_system INTEGER DEFAULT 0, priority INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS org_permission_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id INTEGER NOT NULL, permission_set_id INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS data_permission_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            permission_set_id INTEGER NOT NULL,
+            rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
+            resource_type VARCHAR(200), condition TEXT,
+            is_denied INTEGER DEFAULT 0,
+            permission_level VARCHAR(50) DEFAULT 'read',
+            expires_at VARCHAR(50)
+        );
+        CREATE TABLE IF NOT EXISTS permission_set_dimension_scopes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            permission_set_id INTEGER NOT NULL,
+            dimension_code TEXT NOT NULL,
+            dimension_values TEXT,
+            inherit_children INTEGER DEFAULT 1,
+            scope_mode VARCHAR(20) DEFAULT 'include'
+        );
+        -- 组织树: 1(根) → 2 → 3; 4(独立根)
+        INSERT INTO orgs (id, code, name, parent_id) VALUES
+            (1, 'HQ', '总部', NULL),
+            (2, 'BU', '事业部', 1),
+            (3, 'PUR', '采购部', 2),
+            (4, 'IND', '独立部门', NULL);
+    """)
+    conn.commit()
+
+    class MockDS:
+        def __init__(self, connection):
+            self._conn = connection
+
+        def execute(self, sql, params=None):
+            cursor = self._conn.cursor()
+            if params:
+                cursor.execute(sql, params)
+            else:
+                cursor.execute(sql)
+            self._conn.commit()
+            return cursor
+
+        def commit(self):
+            self._conn.commit()
+
+    try:
+        yield MockDS(conn)
+    finally:
+        conn.close()
+        os.unlink(db_path)
+
+
+def seed_aligned_role(ds, permission_set_id: int, bind_org_id: int,
+                      user_id: int, read_values: list,
+                      manage_condition: str) -> None:
+    """建一个「读范围与管范围由同一角色表达」的对齐样本。
+
+    - 读范围: permission_set_dimension_scopes(dim=org, values=read_values, inherit=1)
+    - 管理范围: data_permission_rules(resource_type=org, condition=manage_condition)
+    - 角色绑定到 bind_org_id；user_id 归属 bind_org_id
+    """
+    import json
+    ds.execute(
+        "INSERT OR IGNORE INTO permission_sets (id, code, name) VALUES (?, ?, ?)",
+        [permission_set_id, f'PS{permission_set_id}', f'权限集{permission_set_id}'],
+    )
+    ds.execute(
+        "INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
+        [bind_org_id, permission_set_id],
+    )
+    ds.execute(
+        "INSERT INTO permission_set_dimension_scopes "
+        "(permission_set_id, dimension_code, dimension_values, inherit_children) "
+        "VALUES (?, 'org', ?, 1)",
+        [permission_set_id, json.dumps(read_values)],
+    )
+    ds.execute(
+        "INSERT INTO data_permission_rules "
+        "(permission_set_id, rule_type, resource_type, condition) "
+        "VALUES (?, 'condition', 'org', ?)",
+        [permission_set_id, manage_condition],
+    )
+    ds.execute(
+        "INSERT OR IGNORE INTO org_members (user_id, org_id) VALUES (?, ?)",
+        [user_id, bind_org_id],
+    )
+
+
 def seed_menu_domain(ds) -> None:
     """添加 menu_domain 行 (供 derive_* 测试)."""
     import json
