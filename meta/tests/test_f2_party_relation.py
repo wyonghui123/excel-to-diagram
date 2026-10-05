@@ -6,11 +6,11 @@
 
 覆盖:
 1. 命名 (D4) : 技术标识 party_relation / 物理表 party_relations；禁用词 relationship / role·roles / product
-2. 结构      : 字段 id / party1_id / party2_id / role / internal_mark / domain
+2. 结构      : 字段 id / party1_id / party2_id / role / internal_mark / le_org_id
 3. 枚举      : role = {customer, vendor}；internal_mark = {internal, external}
 4. D6        : 不建 code，无 key_template
-5. D5        : 四元组 (party1_id, party2_id, role, domain) 部分唯一索引；domain 非空参与唯一；internal_mark 不入键
-6. 建表/强制 : sync_schema_from_meta 建出表与部分唯一索引；四元组重复被拒、internal_mark 不影响唯一、domain 为空可重复
+5. D5        : 四元组 (party1_id, party2_id, role, le_org_id) 部分唯一索引；le_org_id 非空参与唯一；internal_mark 不入键
+6. 建表/强制 : sync_schema_from_meta 建出表与部分唯一索引；四元组重复被拒、internal_mark 不影响唯一、le_org_id 为空可重复
 
 测试隔离: temp DB（get_data_source）+ sync_schema_from_meta; 不触碰 architecture.db;
          DML 走 ds.insert API（本文件无裸写语句 —— conftest raw-SQL 守卫）
@@ -68,23 +68,23 @@ def pr_ds(tmp_path):
     _clear_data_source_cache_for_testing()
 
 
-def _row(party1, party2, role, domain, mark='external'):
+def _row(party1, party2, role, le_org_id, mark='external'):
     return {
         'id': _row.n,
         'party1_id': party1,
         'party2_id': party2,
         'role': role,
         'internal_mark': mark,
-        'domain': domain,
+        'le_org_id': le_org_id,
     }
 
 
 _row.n = 0
 
 
-def _next_row(ds, party1, party2, role, domain, mark='external'):
+def _next_row(ds, party1, party2, role, le_org_id, mark='external'):
     _row.n += 1
-    ds.insert('party_relations', _row(party1, party2, role, domain, mark))
+    ds.insert('party_relations', _row(party1, party2, role, le_org_id, mark))
 
 
 # ────────────────────────────────────────
@@ -110,7 +110,7 @@ class TestNaming:
 class TestStructure:
     def test_required_fields_present(self):
         fields = _fields()
-        for fid in ('id', 'party1_id', 'party2_id', 'role', 'internal_mark', 'domain'):
+        for fid in ('id', 'party1_id', 'party2_id', 'role', 'internal_mark', 'le_org_id'):
             assert fid in fields, '结构字段缺失: %s' % fid
 
     def test_party_refs_are_required_integers(self):
@@ -156,9 +156,9 @@ class TestUniqueKey:
         uniq = self._unique_indexes()
         assert len(uniq) == 1, '应恰有一个唯一索引'
         idx = uniq[0]
-        assert idx['fields'] == ['party1_id', 'party2_id', 'role', 'domain']
+        assert idx['fields'] == ['party1_id', 'party2_id', 'role', 'le_org_id']
         assert idx.get('type') == 'partial'
-        assert idx.get('condition') == 'domain IS NOT NULL'
+        assert idx.get('condition') == 'le_org_id IS NOT NULL'
 
     def test_internal_mark_not_in_key(self):
         for idx in self._unique_indexes():
@@ -185,7 +185,7 @@ class TestUniqueEnforced:
         with pytest.raises(Exception):
             _next_row(pr_ds, 3, 4, 'vendor', 20, mark='internal')
 
-    def test_different_role_or_domain_allowed(self, pr_ds):
+    def test_different_role_or_le_org_id_allowed(self, pr_ds):
         _next_row(pr_ds, 5, 6, 'customer', 30)
         _next_row(pr_ds, 5, 6, 'vendor', 30)      # 双角色 = 两条实例
         _next_row(pr_ds, 5, 6, 'customer', 31)    # 不同域
@@ -193,8 +193,8 @@ class TestUniqueEnforced:
             'SELECT COUNT(*) FROM party_relations').fetchone()[0]
         assert cnt == 3
 
-    def test_null_domain_rows_not_in_key(self, pr_ds):
-        """部分唯一索引: domain 为空的行不入键 ⇒ 可重复"""
+    def test_null_le_org_id_rows_not_in_key(self, pr_ds):
+        """部分唯一索引: le_org_id 为空的行不入键 ⇒ 可重复"""
         _next_row(pr_ds, 7, 8, 'customer', None)
         _next_row(pr_ds, 7, 8, 'customer', None)
         cnt = pr_ds.execute(

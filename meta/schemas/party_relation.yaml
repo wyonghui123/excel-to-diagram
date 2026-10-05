@@ -8,10 +8,12 @@
 #
 # [F2 §10 D6] 关系实例**不建**独立识别号：业务键即唯一（薄关系，非对外主数据）⇒ 无 code / 无 key_template。
 #
-# [F2 §10 D5] 唯一键 = 四元组 (party1_id, party2_id, role, domain) 部分唯一索引；
-#   domain（法人，I4-A）非空参与唯一；internal_mark 不入键（是标记非判定，I3-A）。
+# [F2 §10 D5] 唯一键 = 四元组 (party1_id, party2_id, role, le_org_id) 部分唯一索引；
+#   le_org_id（法人，I4-A）非空参与唯一；internal_mark 不入键（是标记非判定，I3-A）。
 #   注: 蓝图 §3.3 L267 / §4.3 J8 另述「域内至多 1 条**内部**关系实例」——若需按 internal 单独约束，
-#       可另加内部专用部分唯一索引；本批先落 D5 字面口径（domain 非空参与唯一），差异留待 PM 复核。
+#       可另加内部专用部分唯一索引；本批先落 D5 字面口径（le_org_id 非空参与唯一），差异留待 PM 复核。
+#   [改名 2026-10-05] 原字段名 domain → le_org_id：避免与平台既有 domain 维度（功能域，
+#     dimension_object_mapping.yaml 的 dimension_code: domain）同名异义。
 #
 # [登记] meta/schemas/.schema_version.json 未在本批改动（该文件由在飞 item 批次持有未提交 diff）；
 #   party_relation 作为新对象，将由 sync_schema 下次运行时自动登记（new_objects）。
@@ -153,11 +155,11 @@ fields:
     ui:
       widget: select
 
-  # ── 域（条款挂点；粒度 = 法人，I4-A 已拍）──
-  - id: domain
-    name: 域
+  # ── 法人域（条款挂点；粒度 = 法人，I4-A 已拍；命名避与平台 domain 维度同名）──
+  - id: le_org_id
+    name: 法人域
     type: integer
-    db_column: domain
+    db_column: le_org_id
     nullable: true
     description: 域（商务条款 / 角色数据生效层）；粒度 = 法人（I4-A），指向具备 legal_entity 职能的 org；非空参与唯一键
     semantics:
@@ -194,18 +196,18 @@ fields:
       multiple: false
 
 indexes:
-  # [F2 §10 D5] 四元组部分唯一索引：domain 非空参与唯一（未填 domain 的行不入键）
-  - fields: [party1_id, party2_id, role, domain]
+  # [F2 §10 D5] 四元组部分唯一索引：le_org_id 非空参与唯一（未填 le_org_id 的行不入键）
+  - fields: [party1_id, party2_id, role, le_org_id]
     unique: true
     type: partial
-    condition: "domain IS NOT NULL"
+    condition: "le_org_id IS NOT NULL"
     name: idx_party_relation_unique
   - fields: [party1_id]
     name: idx_party_relation_party1
   - fields: [party2_id]
     name: idx_party_relation_party2
-  - fields: [domain]
-    name: idx_party_relation_domain
+  - fields: [le_org_id]
+    name: idx_party_relation_le_org_id
 
 relations: []
 
