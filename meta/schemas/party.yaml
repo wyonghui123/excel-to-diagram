@@ -1,6 +1,6 @@
 # ============================================
 # 身份主体（Party）基表 — foundation 步 2 · 身份锚（写锚）
-# 依据: F1 治理分域设计 v1.1（§3.1 / §3.5 / §7.1-4）；蓝图 v2.5（§3.1 / §4.1）
+# 依据: F1 治理分域设计 v1.1（§3.1 / §3.5 / §7.1-4）；F2 命名与识别号（§9 D2/D3）；蓝图 v2.5（§3.1 / §4.1）
 # 定位: 唯一写入路径（create/update/delete）；常规读取走两个只读面
 #   - party_archive  对外档案（谓词 COALESCE(source,'')<>'org'，不挂 org 维度绑定）
 #   - party_internal 内部治理台账（谓词 source='org'，挂 org 维度绑定）
@@ -50,6 +50,26 @@ fields:
     semantics:
       meaning: 自增主键
       primary_key: true
+
+  # [F2 §9 D2/D3] 唯一识别号：技术标识/列 = code（平台 key_template 硬编码 code 列，
+  # 见 interceptors/key_template_interceptor.py 与 key_template_engine.py），界面词 = 身份主体编号；
+  # 形式 PATY-########（常量前缀 + 定长序列；自动编号、可手工覆盖）
+  - id: code
+    name: 身份主体编号
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 身份主体唯一识别号（对外/跨系统唯一；key_template 自动编号 PATY-########）
+    semantics:
+      meaning: 身份主体业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
 
   - id: name
     name: 显示名
@@ -117,6 +137,23 @@ indexes:
     name: idx_party_org_unique
   - fields: [source]
     name: idx_party_source
+
+# [F2 §9 D3] 编码规则：锚对象统一走平台 key_template（item 先行；先例 relationship.yaml）
+# 硬约束：party 无父对象 ⇒ segments 不得含 parent_field（引擎对 parent_field 段强制非空校验，
+#         见 meta/core/key_template_engine.py:496-524）；本项仅用常量字面量 + {SEQ:n}
+key_template:
+  enabled: true
+  user_editable: auto_or_manual
+  auto_suggest: true
+  pattern: 'PATY-{SEQ:8}'
+  separator: '-'
+  segments:
+    - type: sequence
+      name: party_code_seq
+      padding: 8
+      start: 1
+      auto_detect: true
+  preview: 'PATY-00000001'
 
 relations: []
 

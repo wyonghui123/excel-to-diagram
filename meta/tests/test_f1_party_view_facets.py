@@ -193,11 +193,11 @@ class TestSamplingRealSchema:
 
     def test_sampling_two_facets(self, facets_env):
         ds = facets_env
-        ds.insert("parties", {"id": 1, "name": "外部供应商A",
+        ds.insert("parties", {"id": 1, "name": "外部供应商A", "code": "PATY-00000001",
                               "party_type": "organization"})
-        ds.insert("parties", {"id": 2, "name": "个人B",
+        ds.insert("parties", {"id": 2, "name": "个人B", "code": "PATY-00000002",
                               "party_type": "person", "source": None})
-        ds.insert("parties", {"id": 3, "name": "总部",
+        ds.insert("parties", {"id": 3, "name": "总部", "code": "PATY-00000003",
                               "party_type": "organization",
                               "source": "org", "org_id": 1})
 
@@ -214,19 +214,19 @@ class TestSamplingRealSchema:
 class TestOrgOneToOneConstraint:
     def test_duplicate_internal_org_rejected(self, facets_env):
         ds = facets_env
-        ds.insert("parties", {"id": 10, "name": "总部A",
+        ds.insert("parties", {"id": 10, "name": "总部A", "code": "PATY-00000010",
                               "party_type": "organization",
                               "source": "org", "org_id": 1})
         with pytest.raises(sqlite3.IntegrityError):
-            ds.insert("parties", {"id": 11, "name": "总部A重复",
+            ds.insert("parties", {"id": 11, "name": "总部A重复", "code": "PATY-00000011",
                                   "party_type": "organization",
                                   "source": "org", "org_id": 1})
 
     def test_external_null_not_conflicting(self, facets_env):
         ds = facets_env
-        ds.insert("parties", {"id": 12, "name": "外部C",
+        ds.insert("parties", {"id": 12, "name": "外部C", "code": "PATY-00000012",
                               "party_type": "organization"})
-        ds.insert("parties", {"id": 13, "name": "外部D",
+        ds.insert("parties", {"id": 13, "name": "外部D", "code": "PATY-00000013",
                               "party_type": "organization"})
         count = ds.execute("SELECT COUNT(*) FROM parties").fetchone()[0]
         assert count == 2
