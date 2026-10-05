@@ -10,8 +10,15 @@
 #
 # [F2 §10 D5] 唯一键 = 四元组 (party1_id, party2_id, role, le_org_id) 部分唯一索引；
 #   le_org_id（法人，I4-A）非空参与唯一；internal_mark 不入键（是标记非判定，I3-A）。
-#   注: 蓝图 §3.3 L267 / §4.3 J8 另述「域内至多 1 条**内部**关系实例」——若需按 internal 单独约束，
-#       可另加内部专用部分唯一索引；本批先落 D5 字面口径（le_org_id 非空参与唯一），差异留待 PM 复核。
+#
+# [J8 延期项 · 2026-10-05 定] 蓝图 §3.3 L268 / L577 / §4.3 L630 另述「域内至多 1 条内部关系实例」（J8）
+#   —— 本批不加该索引。原因: I1=C 已拍（一期只预留表示层结构、不建内部关系实例），
+#      internal_mark='internal' 无数据 ⇒ 两种口径在空集上行为一致；新增约束无收益，
+#      且会把未经复核的唯一性轴烧进 DDL（一个错的唯一索引比没有更糟）。
+#   触发条件: 当 I1 由 C（只预留结构）变为 A/B（实际建内部关系实例）时，必须同批落地 J8 专用部分唯一索引。
+#   推荐列集（Fusion 口径，贴合 J8「防重复建档」本意）:
+#       UNIQUE(party2_id, role, le_org_id) WHERE internal_mark = 'internal'
+#   否决字面口径 UNIQUE(le_org_id) WHERE internal_mark = 'internal'（域内全局仅 1 条，与多子公司现实冲突）。
 #   [改名 2026-10-05] 原字段名 domain → le_org_id：避免与平台既有 domain 维度（功能域，
 #     dimension_object_mapping.yaml 的 dimension_code: domain）同名异义。
 #
