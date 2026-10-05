@@ -1,0 +1,177 @@
+# 物料外部标识 (Item Xref) — foundation 步 1 · item 族子表（一期 · v1.6 核心变更）
+# 依据: 蓝图 §3.4.5 / 规划 §2.5 / §4.9
+# 语义: 外部标识一律 xref 化——客户料号 / 供应商料号 / 制造商件号均为"物 × 伙伴"配对值
+#   唯一 = (item_id, partner_type, partner_id)；单值字段 customer_part_no / vendor_part_no / mpn 已废弃
+# 对标: SAP KNMT / EINA-IDNLF / AMPL; Oracle MTL_CUSTOMER_ITEMS_XREFS / MTL_MFG_PART_NUMBERS
+#
+# [F1 已接线 2026-10-05] partner_id 的语义外键目标 = party **对外档案面** `party_archive`
+#   （F1 §3.5：对外档案恒排除 source='org' 的内部组织表示，口径由视图 SQL 结构强制）。
+#   内部组织表示的引用不走本字段，而走 intra_trade 受控放行（F1 §6 / PartyScopeService）。
+#   partner_type = 客户/供应商/制造商 属**角色层**（蓝图 客户/供应商关系实例，命名待 F2），
+#   角色层未建前 value_help 不按 partner_type 过滤，列出全部对外档案。
+
+id: item_xref
+name: 物料外部标识
+table_name: item_xrefs
+description: 物料外部标识交叉引用（客户/供应商/制造商件号配对）
+parent_object: item
+hierarchy:
+  enabled: true
+  parent_field: item_id
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 物料引用
+    semantics:
+      meaning: 所属物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: partner_type
+    name: 伙伴类型
+    type: string
+    db_column: partner_type
+    required: true
+    description: 伙伴类型（客户/供应商/制造商）
+    enum_values:
+      - value: customer
+        label: 客户
+        color: primary
+      - value: vendor
+        label: 供应商
+        color: success
+      - value: manufacturer
+        label: 制造商
+        color: warning
+    semantics:
+      meaning: 外部标识所属伙伴类型
+    ui:
+      widget: select
+
+  - id: partner_id
+    name: 伙伴
+    type: integer
+    db_column: partner_id
+    required: true
+    description: 伙伴ID（指向 party 对外档案面 party_archive；恒排除 source='org' 的内部组织表示）
+    semantics:
+      meaning: 外部标识对应的伙伴（party 对外档案引用）
+      display:
+        type: association
+        target_type: party_archive
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party_archive
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 显示名
+            width: 200
+          - field: party_type
+            label: 身份类型
+            width: 120
+    ui:
+      widget: select
+      relation: party_archive
+      multiple: false
+
+  - id: part_no
+    name: 外部件号
+    type: string
+    db_column: part_no
+    required: true
+    max_length: 60
+    description: 伙伴侧件号（客户料号 / 供应商料号 / 制造商件号）
+    semantics:
+      meaning: 伙伴侧对该物料的编号
+      searchable: true
+    ui:
+      widget: input
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 备注（如该伙伴的多个料号说明）
+    semantics:
+      meaning: 外部标识备注
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [item_id, partner_type, partner_id]
+    unique: true
+    name: idx_item_xref_unique
+  - fields: [item_id]
+    name: idx_item_xref_item
+  - fields: [partner_type, partner_id]
+    name: idx_item_xref_partner
+  - fields: [part_no]
+    name: idx_item_xref_part_no
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+
+nested:
+  enabled: true
+  parent: item
+  children: []

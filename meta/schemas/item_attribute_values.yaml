@@ -1,0 +1,180 @@
+# 物料分层参数值 (Item Attribute Values) — foundation 步 1 · item 族分层值表（一期预留）
+# 依据: 蓝图 §3.4.2 / §3.4.3（属性轴/两种默认机制）/ §3.4.9; 规划 §2.3 / §2.4
+# 形态 (D2 已拍 v2.5): 单表 + 因子列 —— (attr_code, function_type, org_id) 因子列化（不按层分表）
+# 属性轴止于 3 层 (S2/S3)，阅读顺序 L2 → L1 → L0（逐层回退），层数不写死进物理 schema (S8/S9)：
+#   L0 租户:  org_id / function_type 均空
+#   L1 职能:  function_type 非空, org_id 空         键 (item_id, attr_code, function_type)
+#   L2 组织:  org_id 非空                           键 (item_id, attr_code, org_id)
+# 只装 hybrid 参数（可人工覆盖、缺失时逐层回退）; stored 锚属性在主表 items; derived 不落列。
+#
+# [未决/不阻塞]
+#  1. 值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定 —— 本期以单列 `value`(TEXT, JSON 承载) 占位。
+#  2. 可空复合唯一 —— SQLite 中 NULL 互不相等，唯一约束对含空因子的行不生效（落地实测点）；
+#     本期以普通索引 + 应用层查重承接，待核对后补部分唯一索引。
+
+id: item_attribute_value
+name: 物料分层参数值
+table_name: item_attribute_values
+description: 物料分层参数值（L0/L1/L2 因子列 + 值列，hybrid 参数）
+parent_object: item
+hierarchy:
+  enabled: true
+  parent_field: item_id
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 物料引用
+    semantics:
+      meaning: 所属物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: attr_code
+    name: 参数编码
+    type: string
+    db_column: attr_code
+    required: true
+    max_length: 60
+    description: 参数编码（如 safety_stock / lead_time_days / purchase_uom / lot_control）
+    semantics:
+      meaning: 分层参数标识
+    ui:
+      widget: input
+
+  - id: function_type
+    name: 职能域
+    type: string
+    db_column: function_type
+    nullable: true
+    max_length: 40
+    description: L1 因子——职能域（如 procurement / sales / warehouse / manufacturing）；空 = 不按职能分层
+    semantics:
+      meaning: L1 职能域因子（不含 org，S3）
+    ui:
+      widget: input
+
+  - id: org_id
+    name: 组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: L2 因子——组织覆盖；空 = 不按组织分层
+    semantics:
+      meaning: L2 组织因子
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: value
+    name: 参数值
+    type: text
+    db_column: value
+    nullable: true
+    description: 参数值（承载形态待 §8.3 值存储规范核对；本期以 JSON 文本占位）
+    semantics:
+      meaning: 分层参数的值
+    ui:
+      widget: textarea
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 参数值备注
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [item_id, attr_code]
+    name: idx_item_attr_item_code
+  - fields: [item_id, attr_code, function_type]
+    name: idx_item_attr_l1
+  - fields: [item_id, attr_code, org_id]
+    name: idx_item_attr_l2
+  - fields: [org_id]
+    name: idx_item_attr_org
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+
+nested:
+  enabled: true
+  parent: item
+  children: []

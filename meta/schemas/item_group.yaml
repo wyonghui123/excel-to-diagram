@@ -1,0 +1,260 @@
+# 物料组 (Item Group) — foundation 步 1 · item 族分类对象（独立对象，不是 item 的属性）
+# 依据: docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.4.2 / §3.4.6
+#       docs/superpowers/specs/2026-10-03-item-structure-and-attribute-list-plan.md §2.6
+# 定位: 树形分类; 被 item 引用 (items.item_group_id → item_group.id, N:1);
+#   承载"分类级默认与会计属性"(创建时默认复制到 item)。红线: 分类是 items 的 stored 属性，不是参数层。
+#   [挂起] 会计属性(计价方法/库存计价/会计科目) 随 v2.4 财务相邻项挂起，本表一期不落。
+
+id: item_group
+name: 物料组
+table_name: item_groups
+description: 物料组（树形分类对象，被物料引用）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 物料组
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 物料组
+    - 物料分类
+    - ItemGroup
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: items
+      foreign_key: item_group_id
+      message: 该物料组下还有物料，请先迁移相关物料后再删除
+    - table: item_groups
+      foreign_key: parent_id
+      message: 该物料组下还有子组，请先删除或迁移子组后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - parent_id
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 物料组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 物料组唯一编码
+    semantics:
+      meaning: 物料组业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 物料组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 物料组显示名称
+    semantics:
+      meaning: 物料组显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: parent_id
+    name: 上级物料组
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级物料组ID，支持层级结构
+    semantics:
+      meaning: 上级物料组引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: item_group
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: item_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: item_group
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 物料组说明
+    semantics:
+      meaning: 物料组详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_item_group_code
+  - fields: [parent_id]
+    name: idx_item_group_parent
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 物料组管理
+    description: 物料组（树形分类）
+    columns:
+      - field: name
+        width: 220
+      - field: code
+        width: 140
+        sortable: true
+      - field: parent_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item_group
+        display_field: name
+        placeholder: "无上级"
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建物料组
+        icon: plus
+        type: primary
+        permission: item_group:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 物料组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [parent_id]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - parent_id
+          - description
+
+category_config:
+  create_permission: item_group:create
+  update_permission: item_group:update
+  delete_permission: item_group:delete
+  owner_auto_permission: false

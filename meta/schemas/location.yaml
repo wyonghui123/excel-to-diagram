@@ -1,0 +1,373 @@
+# 位置主数据 (Location) — foundation 步 1 · 位置锚（与 item 并列的另一条线）
+# 依据: docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.5 / §7 步 1
+# 形态: 统一自引用树 (parent_id), location_type ∈ {site, warehouse, zone, bin}
+#   site          可挂根，也可挂另一个 site（园区 → 工厂，可嵌套）
+#     └─ warehouse      只能挂 site
+#          └─ zone           可选中间层（存储 / 拣货 / 暂存）
+#               └─ bin            库位（主流两级：仓库 → 库位）
+# 账/地分离: 账 = org(org_function)，地 = 本树；org × location 无直接边（S7）
+# 一期拍板 (v2.5): W2 平台级主数据(落 meta) · W6 不新增 warehouse 形态 · W10 独立到仓库层
+#   W11 site 在 location 树、地址挂 site、允许多 org 引用 · W12 类型驱动弹性属性 + deletion 一期统一 restrict
+#
+# [待核对/待接线 — 不阻塞骨架]
+#  1. W12 "类型驱动弹性属性"(平台 aspects / 条件字段) 表达力待核对；故本期只落【公共字段】，
+#     类型特有字段（site: address_id/timezone/calendar_id · warehouse: wms_enabled/默认库存策略 ·
+#     zone: 区域类型 · bin: aisle/bay/level/容积/承重/温区/混存规则）待表达力核对后补（不用宽表/JSON）。
+#  2. site 的 address_id / calendar_id 引用支持对象（address / calendar，蓝图 §7 步 7 拟建），
+#     随支持对象落地后接线。
+#  3. 层级合法性（site→site / warehouse 挂 site / zone 可选 / bin 挂 warehouse）随建表校验（W12 已拍）。
+
+id: location
+name: 位置
+table_name: locations
+description: 位置主数据（统一自引用树：site / warehouse / zone / bin）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 位置
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 位置
+    - 地点
+    - 仓库位置
+    - Location
+
+deletion_policy:
+  # W12 已拍: location 一期统一 restrict
+  mode: restrict
+  restrict_on:
+    - table: locations
+      foreign_key: parent_id
+      message: 该位置下还有子位置，请先删除或迁移子位置后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - parent_id
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 位置编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 位置唯一编码（可走 key_template 自动编号）
+    semantics:
+      meaning: 位置业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 位置名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 位置显示名称
+    semantics:
+      meaning: 位置显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: location_type
+    name: 位置类型
+    type: string
+    db_column: location_type
+    required: true
+    description: 位置类型（场地/仓库/区域/库位）
+    enum_values:
+      - value: site
+        label: 场地
+        color: primary
+      - value: warehouse
+        label: 仓库
+        color: success
+      - value: zone
+        label: 区域
+        color: warning
+      - value: bin
+        label: 库位
+        color: info
+    semantics:
+      meaning: 位置在树中的类型（决定父节点合法性）
+      filterable: true
+      filter_type: enum
+      filter_label: 位置类型
+      filter_scope: local
+    ui:
+      widget: select
+      filterable: true
+
+  - id: parent_id
+    name: 上级位置
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级位置ID，支持层级结构
+    semantics:
+      meaning: 上级位置引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: location_type
+            label: 类型
+            width: 100
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 位置状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 位置启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 位置说明
+    semantics:
+      meaning: 位置详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（蓝图 §5.4）
+rules:
+  - id: activate_location
+    name: 启用位置
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此位置吗？"
+      highlight: true
+
+  - id: deactivate_location
+    name: 停用位置
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此位置吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_location_code
+  - fields: [parent_id]
+    name: idx_location_parent
+  - fields: [location_type]
+    name: idx_location_type
+  - fields: [status]
+    name: idx_location_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 位置管理
+    description: 位置主数据（统一自引用树）
+    columns:
+      - field: name
+        width: 220
+      - field: code
+        width: 140
+        sortable: true
+      - field: location_type
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: parent_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: location
+        display_field: name
+        placeholder: "无上级"
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建位置
+        icon: plus
+        type: primary
+        permission: location:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 位置信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [location_type, parent_id]
+          - fields: [status]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - location_type
+          - parent_id
+          - status
+          - description
+
+category_config:
+  create_permission: location:create
+  update_permission: location:update
+  delete_permission: location:delete
+  owner_auto_permission: false

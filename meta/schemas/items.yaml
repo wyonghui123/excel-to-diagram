@@ -1,0 +1,534 @@
+# 物料 (Item) — foundation 步 1 · 物料锚（主对象）
+# 依据: docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.4 / §7 步 1
+#       docs/superpowers/specs/2026-10-03-item-structure-and-attribute-list-plan.md §2.2 / §4.1–4.3
+# 命名三分 (S1): 界面词「物料」/ 技术标识 item / 物理表 items（禁用 product）
+# 结构: 1 主表(stored 锚属性) + 子表/item_group/分层值表（见各自 schema）
+# 红线: item 只装"物料的"东西；流程的(控制参数)/位置的(策略参数)/账的 一律留各自域（§4.12）
+#
+# [本期范围] L0 锚属性 + 生命周期. 以下随拍板/后期：
+#  - allow_* 用途开关: D11 待定（倾向一期暂缓）→ 本期不落列
+#  - 供应方式: D10 已拍移出 item → 归"供应计划策略"（步 5）
+#  - 会计处置: D1 随财务相邻项挂起（v2.4）→ 不进 item
+#  - 采购/销售/库存/质量域参数(hybrid: 采购单位/提前期/安全库存/批次控制 等): 落 item_attribute_values 分层值表
+#
+# [待接线] item_group_id / base_uom 引用 item_groups / uoms（同步建表）
+
+id: item
+name: 物料
+table_name: items
+description: 物料主数据（foundation 物料锚）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 物料
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 物料
+    - 物料主数据
+    - Item
+
+deletion_policy:
+  # S19: 主数据禁止物理删除; 被引用时 restrict（只能停用）
+  mode: restrict
+  restrict_on:
+    - table: item_uom_conversions
+      foreign_key: item_id
+      message: 该物料存在单位换算记录，请先删除换算记录后再删除
+    - table: item_xrefs
+      foreign_key: item_id
+      message: 该物料存在外部标识（客/供/造件号）记录，请先删除后再删除
+    - table: item_attribute_values
+      foreign_key: item_id
+      message: 该物料存在分层参数值记录，请先删除后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # A 标识与名称
+  - id: code
+    name: 物料编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 物料唯一编码（签发冻结，可走 key_template 自动编号）
+    semantics:
+      meaning: 物料业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+      # 签发冻结字段集 = code / item_type / base_uom（active 后不可改）
+      freeze_on_issue: true
+    ui:
+      widget: input
+
+  - id: name
+    name: 物料名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 120
+    description: 物料显示名称
+    semantics:
+      meaning: 物料显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: spec
+    name: 规格型号
+    type: string
+    db_column: spec
+    nullable: true
+    max_length: 120
+    description: 规格型号
+    semantics:
+      meaning: 物料规格型号
+      searchable: true
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 描述备注
+    semantics:
+      meaning: 物料详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  # B 类型与分类
+  - id: item_type
+    name: 物料类型
+    type: string
+    db_column: item_type
+    required: true
+    default: goods
+    description: 物料本体性质（物料/服务；互斥，签发冻结）
+    enum_values:
+      - value: goods
+        label: 物料
+        color: primary
+      - value: service
+        label: 服务
+        color: info
+    semantics:
+      meaning: 物料本体性质
+      filterable: true
+      filter_type: enum
+      filter_label: 物料类型
+      filter_scope: local
+      freeze_on_issue: true
+    ui:
+      widget: radio
+
+  - id: item_group_id
+    name: 物料组
+    type: integer
+    db_column: item_group_id
+    required: true
+    description: 物料组（分类）引用
+    semantics:
+      meaning: 物料所属分类
+      display:
+        type: association
+        target_type: item_group
+        display_field: name
+        placeholder: "请选择物料组"
+    value_help:
+      source:
+        type: bo
+        target_bo: item_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: item_group
+      multiple: false
+      clearable: true
+
+  # C 计量与换算（L0 锚）
+  - id: base_uom
+    name: 基本单位
+    type: integer
+    db_column: base_uom
+    required: true
+    description: 基本计量单位引用（签发冻结）
+    semantics:
+      meaning: 物料基本计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "请选择基本单位"
+      freeze_on_issue: true
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name} ({code})"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: false
+
+  - id: net_weight
+    name: 净重
+    type: float
+    db_column: net_weight
+    nullable: true
+    description: 净重（单位随基本单位/重量单位约定）
+    semantics:
+      meaning: 物料净重
+    ui:
+      widget: input
+      unit_hint: 重量
+
+  - id: gross_weight
+    name: 毛重
+    type: float
+    db_column: gross_weight
+    nullable: true
+    description: 毛重
+    semantics:
+      meaning: 物料毛重
+    ui:
+      widget: input
+      unit_hint: 重量
+
+  # I 外部标识（主值；配对值走 item_xref 子表）
+  - id: barcode
+    name: 主条码
+    type: string
+    db_column: barcode
+    nullable: true
+    max_length: 30
+    description: 主条码（EAN / GTIN）
+    semantics:
+      meaning: 物料主条码
+      searchable: true
+    ui:
+      widget: input
+
+  # A6 生命周期状态
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 生命周期状态 draft/active/frozen/inactive
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+        description: 未签发，不可被单据引用
+      - value: active
+        label: 已签发
+        color: success
+        category: active
+        description: 已签发，可被单据引用、可收发
+      - value: frozen
+        label: 已冻结
+        color: warning
+        category: error
+        description: 冻结，阻止新收发（库存域硬校验）
+      - value: inactive
+        label: 已停用
+        color: default
+        category: inactive
+        description: 停用，阻止新单据引用；老单据可继续结算
+    semantics:
+      meaning: 物料生命周期状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作（蓝图 §3.4.8 / _standard_actions）
+#   draft --activate--> active --freeze--> frozen --unfreeze--> active
+#   active / frozen --deactivate--> inactive
+#   签发冻结字段集 = code / item_type / base_uom（业务规则，由领域校验/规则承接）
+rules:
+  - id: activate_item
+    name: 签发物料
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [draft, inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 签发
+      icon: check_circle
+      confirm_message: "确定要签发此物料吗？签发后 code / item_type / base_uom 将被冻结。"
+      highlight: true
+
+  - id: deactivate_item
+    name: 停用物料
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active, frozen]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此物料吗？停用后将阻止新单据引用。"
+
+  - id: freeze_item
+    name: 冻结物料
+    type: state_transition
+    action_ref: freeze
+    state_field: status
+    from_states: [active]
+    to_state: frozen
+    triggers: [before_update]
+    ui_hints:
+      label: 冻结
+      icon: snowflake
+      confirm_message: "确定要冻结此物料吗？冻结后将阻止新收发。"
+
+  - id: unfreeze_item
+    name: 解冻物料
+    type: state_transition
+    action_ref: unfreeze
+    state_field: status
+    from_states: [frozen]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 解冻
+      icon: fire
+      confirm_message: "确定要解冻此物料吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_item_code
+  - fields: [item_group_id]
+    name: idx_item_group
+  - fields: [item_type]
+    name: idx_item_type
+  - fields: [status]
+    name: idx_item_status
+  - fields: [base_uom]
+    name: idx_item_base_uom
+  - fields: [barcode]
+    name: idx_item_barcode
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 物料管理
+    description: 物料主数据列表
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 200
+      - field: spec
+        width: 160
+        type: ellipsis
+      - field: item_type
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: item_group_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item_group
+        display_field: name
+      - field: base_uom
+        width: 110
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - spec
+      - barcode
+    actions:
+      - id: create
+        label: 新建物料
+        icon: plus
+        type: primary
+        permission: item:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: updated_at
+      order: desc
+    filters:
+      - field: code
+        label: 物料编码
+        type: string
+        operator: contains
+      - field: name
+        label: 物料名称
+        type: string
+        operator: contains
+      - field: item_type
+        label: 物料类型
+        type: select
+        options:
+          - { value: goods, label: 物料 }
+          - { value: service, label: 服务 }
+
+  form:
+    title: 物料信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [spec, item_type]
+          - fields: [item_group_id]
+      - title: 计量信息
+        columns:
+          - fields: [base_uom, barcode]
+          - fields: [net_weight, gross_weight]
+      - title: 其他信息
+        columns:
+          - fields: [status, description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - spec
+          - item_type
+          - item_group_id
+          - base_uom
+          - barcode
+          - net_weight
+          - gross_weight
+          - status
+          - description
+
+category_config:
+  create_permission: item:create
+  update_permission: item:update
+  delete_permission: item:delete
+  owner_auto_permission: false

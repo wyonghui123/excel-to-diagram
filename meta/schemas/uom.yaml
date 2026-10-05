@@ -1,0 +1,322 @@
+# 计量单位主数据 (UoM) — foundation 步 1 · item 族引用基础
+# 依据: docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.4.2 / §7 步 1
+#       docs/superpowers/specs/2026-10-03-item-structure-and-attribute-list-plan.md §4.3
+# 定位: item.base_uom / purchase_uom / sales_uom 与 item_uom_conversion 的引用前提
+# 一期 = 最小集 (code / name / decimal_places / status; 蓝图 §3.4.2 行: code/名称/精度〔小数位〕/状态)
+#       另附 uom_type(计量类别, 便于分类检索); 精度(小数位)随本对象定义
+
+id: uom
+name: 计量单位
+table_name: uoms
+description: 计量单位主数据（基础最小集）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 计量单位
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 计量单位
+    - 单位
+    - UoM
+    - uom
+
+deletion_policy:
+  # S19: 主数据禁止物理删除; 被 item.base_uom / 单位换算引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: items
+      foreign_key: base_uom
+      message: 该单位被物料用作基本计量单位，请先调整相关物料后再删除
+    - table: item_uom_conversions
+      foreign_key: uom_id
+      message: 该单位存在物料单位换算记录，请先删除换算记录后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 单位编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 计量单位唯一编码（如 KG / PC / M）
+    semantics:
+      meaning: 计量单位业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 单位名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 计量单位显示名称（如 千克 / 个 / 米）
+    semantics:
+      meaning: 计量单位显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: uom_type
+    name: 计量类别
+    type: string
+    db_column: uom_type
+    required: true
+    default: quantity
+    description: 计量类别（数量/重量/体积/长度/面积/时间/包装）
+    enum_values:
+      - value: quantity
+        label: 数量
+        color: primary
+      - value: weight
+        label: 重量
+        color: warning
+      - value: volume
+        label: 体积
+        color: info
+      - value: length
+        label: 长度
+        color: success
+      - value: area
+        label: 面积
+        color: success
+      - value: time
+        label: 时间
+        color: info
+      - value: packaging
+        label: 包装
+        color: default
+    semantics:
+      meaning: 计量单位的物理类别
+    ui:
+      widget: select
+      filterable: true
+
+  - id: decimal_places
+    name: 小数位数
+    type: integer
+    db_column: decimal_places
+    required: true
+    default: 0
+    description: 该单位的精度（小数位数）
+    semantics:
+      meaning: 单位精度，决定数量计算与显示的小数位
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 单位状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 单位启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 单位说明
+    semantics:
+      meaning: 计量单位详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（蓝图 §5.4）
+rules:
+  - id: activate_uom
+    name: 启用单位
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此计量单位吗？"
+      highlight: true
+
+  - id: deactivate_uom
+    name: 停用单位
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此计量单位吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_uom_code
+  - fields: [uom_type]
+    name: idx_uom_type
+  - fields: [status]
+    name: idx_uom_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 计量单位管理
+    description: 计量单位主数据列表
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: uom_type
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: decimal_places
+        width: 90
+        type: number
+        align: right
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建单位
+        icon: plus
+        type: primary
+        permission: uom:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 计量单位信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [uom_type, decimal_places]
+          - fields: [status]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - uom_type
+          - decimal_places
+          - status
+          - description
+
+category_config:
+  create_permission: uom:create
+  update_permission: uom:update
+  delete_permission: uom:delete
+  owner_auto_permission: false
