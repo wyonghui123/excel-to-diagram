@@ -1775,10 +1775,14 @@ def get_permission_meta():
             ui_node = hierarchies_ui_config.get(code, {})
             normalized_for_dimension_selector.append({
                 "id": code,
-                "name": ui_node.get("display_name", code),
+                "name": ui_node.get("display_name") or _RESOURCE_TYPE_LABELS.get(code) or code,
                 "description": mapping.get("description", ""),
                 "icon": ui_node.get("icon", ""),
                 "ruleCount": _get_rule_count_for_dimension(code),
+                # [P4-Org-02] 维度类型 (business/generic)。
+                #   说明: 一体化新页面 (PermissionConfigPanel/ResourceActionMatrix) 不做分区渲染,
+                #   此字段留作维度过滤/排序依据 (避免按 spec15 SubTab D1/D2 旧设计解读)
+                "dimensionType": mapping.get("dimension_type", "business"),
             })
 
         normalized_for_condition_editor = []
@@ -1865,7 +1869,9 @@ def get_dimension_instances(dimension_id: str):
 
         offset = (page - 1) * page_size
 
-        table_name = RESOURCE_TABLE_MAP.get(dimension_id)
+        # [P4-Org-02] 三级合并映射 (engine 实例): org 等 generic 维度 → orgs
+        #   静态 RESOURCE_TABLE_MAP 无 org, 必须走 engine 合并表; 未知维度仍 400
+        table_name = engine.get_resource_table(dimension_id)
         if not table_name:
             return jsonify(
                 {"success": False, "message": f"Unknown dimension: {dimension_id}"}
@@ -2022,17 +2028,22 @@ def get_dimension_instances(dimension_id: str):
 
 
 def _query_dimension_codes(ds, dimension_id: str, search: str, page: int, page_size: int,
-                           scoped_ids: Optional[Set[int]] = None) -> Optional[Dict[str, Any]]:
+                           scoped_ids: Optional[Set[int]] = None,
+                           table_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """[Spec 20 Task 9-B] 业务键 code 列表 + 每码命中数 (picker 跨版本 Tab 数据源, 纯函数)
 
     Args:
         scoped_ids: None=不限 (admin); 空集=0 可见; 非空=限定范围 (命中数按可见实例计)
+        table_name: [P4-Org-02] 资源表名 (engine 三级合并映射)。None → 回落模块级
+            静态 RESOURCE_TABLE_MAP（org 等 generic 维度须由调用方显式传入）
 
     Returns:
         {enabled, parent_label, codes: [{code, resolved_count, sample_name}], pagination}
-        dimension_id 无映射 → None (路由层 422)
+        dimension_id 无映射 (未知维度) → None (路由层 422)
+        已知维度但未注册业务键字段 (如 org) → enabled=False (优雅降级, 前端隐藏跨版本 Tab)
     """
-    table_name = RESOURCE_TABLE_MAP.get(dimension_id)
+    if table_name is None:
+        table_name = RESOURCE_TABLE_MAP.get(dimension_id)
     if not table_name:
         return None
 
@@ -2048,9 +2059,14 @@ def _query_dimension_codes(ds, dimension_id: str, search: str, page: int, page_s
         "page": page, "page_size": page_size, "total_count": 0, "total_pages": 0}}
 
     # [Spec 20 v2 2026-09-12] 业务键字段名必须显式注册, 不再静默 fallback "code"。
-    #   维度若无 CODE_FIELD_MAP 注册 → 422 (路由层), 避免用错列名产生脏数据。
+    # [P4-Org-02 2026-10-05] 已知维度但未注册业务键字段 (如 org) → 优雅降级:
+    #   enabled=False (前端隐藏「跨版本/业务键」Tab, 回落「仅此实例」)。
+    #   不注册 org 的原因: enforcement 侧 (_resolve_bizkeys) 用静态 map 解析锚点,
+    #   org fail-closed 空集 → 暴露锚点选项只会静默失效 (选了等于没选)。
+    #   未知维度仍返回 None (上层 422)。
     if dimension_id not in CODE_FIELD_MAP:
-        return None
+        return {"enabled": False, "parent_label": parent_label, "codes": [], "pagination": {
+            "page": page, "page_size": page_size, "total_count": 0, "total_pages": 0}}
     code_field = CODE_FIELD_MAP[dimension_id]
     try:
         cols = [r[1] for r in ds.execute(f"PRAGMA table_info({table_name})").fetchall()]
@@ -2125,7 +2141,7 @@ def get_dimension_codes(dimension_id: str):
     enabled=False, 前端隐藏跨版本 Tab。
     """
     try:
-        _get_engine()  # 确保 _data_source 已初始化
+        engine = _get_engine()  # 确保 _data_source 已初始化
         if not DimensionScopeEngine._bizkey_enabled():
             return jsonify({"success": True, "data": {
                 "enabled": False, "codes": [],
@@ -2148,18 +2164,15 @@ def get_dimension_codes(dimension_id: str):
                 scoped_ids = _get_user_dim_scope_ids(int(user_id), dimension_id)
 
         data = _query_dimension_codes(
-            _data_source, dimension_id, search, page, page_size, scoped_ids=scoped_ids)
+            _data_source, dimension_id, search, page, page_size, scoped_ids=scoped_ids,
+            table_name=engine.get_resource_table(dimension_id))
         if data is None:
-            # [Spec 20 v2 2026-09-12] 维度或业务键字段未注册 — 422 表示客户端 schema 错误
-            #   (区别于 400 请求参数错), 让前端明确知道是配置缺失
-            has_table = dimension_id in RESOURCE_TABLE_MAP
-            if not has_table:
-                return jsonify(
-                    {"success": False, "message": f"Unknown dimension: {dimension_id}"}
-                ), 422
+            # [Spec 20 v2 2026-09-12] 维度未注册 — 422 表示客户端 schema 错误
+            #   (区别于 400 请求参数错), 让前端明确知道是配置缺失。
+            # [P4-Org-02] 已知维度未注册业务键 (如 org) 已在 helper 内优雅降级
+            #   (200 + enabled=False), 不落入此分支。
             return jsonify(
-                {"success": False,
-                 "message": f"Dimension {dimension_id} has no bizkey_field registered in CODE_FIELD_MAP"}
+                {"success": False, "message": f"Unknown dimension: {dimension_id}"}
             ), 422
         return jsonify({"success": True, "data": data})
     except Exception as e:

@@ -12,6 +12,7 @@
   6. derive_data_conditions 动态 SQL (G2 铁证见 TestG2DynamicAcceptance)
   7. fail-closed: 锚点失败 → 1=0
   8. 回归: 纯数字/wildcard/all/exclude 行为不变
+  9. [P4-Org-02] 已知维度未注册业务键 (org) → enabled=False 优雅降级
 """
 import sys
 import os
@@ -405,6 +406,16 @@ class TestDimensionCodesQuery:
     def test_unknown_dim_returns_none(self, ds):
         from meta.api.permission_dimension_api import _query_dimension_codes
         assert _query_dimension_codes(ds, 'nonexistent', '', 1, 20) is None
+
+    def test_known_dim_without_bizkey_degrades_disabled(self, ds):
+        # [P4-Org-02] 已知维度 (org) 未注册业务键字段 → enabled=False 优雅降级,
+        #   前端隐藏「跨版本/业务键」Tab。路由层传 engine 三级合并表名 (orgs);
+        #   org 不在模块级静态 map, 故此处显式传 table_name。
+        from meta.api.permission_dimension_api import _query_dimension_codes
+        data = _query_dimension_codes(ds, 'org', '', 1, 20, table_name='orgs')
+        assert data['enabled'] is False
+        assert data['codes'] == []
+        assert data['pagination']['total_count'] == 0
 
     def test_version_cross_parent_counts(self, ds):
         # version.code='v01' 跨产品 2 份 (跨父对象多份)

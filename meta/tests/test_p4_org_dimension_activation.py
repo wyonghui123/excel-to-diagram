@@ -196,6 +196,30 @@ class TestApplyGenericDimensionAutoExpand:
 
 
 # ────────────────────────────────────────
+# 3b. [P4-Org-02] 引擎三级合并映射公开入口 (org 等 generic 维度)
+# ────────────────────────────────────────
+class TestResourceTableMergedMap:
+    """get_resource_table: /instances 与 /codes 支持 org 的支点"""
+
+    @pytest.fixture
+    def engine(self, mock_ds):
+        from meta.services.permission_dimension_engine import (
+            PermissionDimensionEngine,
+        )
+        return PermissionDimensionEngine(mock_ds, ttl_seconds=300)
+
+    def test_org_resolves_to_orgs(self, engine):
+        """静态 map 无 org, 靠 YAML value_table 合并解析"""
+        assert engine.get_resource_table('org') == 'orgs'
+
+    def test_business_dim_still_resolves(self, engine):
+        assert engine.get_resource_table('product') == 'products'
+
+    def test_unknown_dim_returns_none(self, engine):
+        assert engine.get_resource_table('unknown_xyz') is None
+
+
+# ────────────────────────────────────────
 # 4. item 3: DimensionScopeEngine runtime 展开
 # ────────────────────────────────────────
 class TestRuntimeOrgSubtreeExpansion:

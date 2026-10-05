@@ -21,7 +21,7 @@
       <div class="permission-dimension-selector__view-toggle">
         <el-button-group>
           <AppButton
-            :variant="localViewMode === 'list' ? 'primary' : 'secondary'"
+            :variant="effectiveViewMode === 'list' ? 'primary' : 'secondary'"
             size="sm"
             @click="handleViewModeChange('list')"
           >
@@ -29,7 +29,7 @@
             列表
           </AppButton>
           <AppButton
-            :variant="localViewMode === 'card' ? 'primary' : 'secondary'"
+            :variant="effectiveViewMode === 'card' ? 'primary' : 'secondary'"
             size="sm"
             @click="handleViewModeChange('card')"
           >
@@ -114,8 +114,20 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'view-mode-change'])
 
+// [P4-Org-02] 维度数达到阈值时自动切列表视图 (卡片网格在维度多时过于占空间)
+const AUTO_LIST_THRESHOLD = 10
+
 const searchQuery = ref('')
 const localViewMode = ref(props.viewMode)
+// 用户手动切换后, 自动阈值不再覆盖其选择
+const userToggledView = ref(false)
+
+const effectiveViewMode = computed(() => {
+  if (!userToggledView.value && props.dimensions.length >= AUTO_LIST_THRESHOLD) {
+    return 'list'
+  }
+  return localViewMode.value
+})
 
 const filteredDimensions = computed(() => {
   if (!searchQuery.value) {
@@ -134,7 +146,7 @@ const filteredDimensions = computed(() => {
 
 const contentClasses = computed(() => [
   'permission-dimension-selector__dimensions',
-  `permission-dimension-selector__dimensions--${localViewMode.value}`
+  `permission-dimension-selector__dimensions--${effectiveViewMode.value}`
 ])
 
 const isSelected = (dimension) => {
@@ -143,7 +155,7 @@ const isSelected = (dimension) => {
 
 const getDimensionClasses = (dimension) => [
   'dimension-item',
-  `dimension-item--${localViewMode.value}`,
+  `dimension-item--${effectiveViewMode.value}`,
   {
     'dimension-item--selected': isSelected(dimension),
     'dimension-item--disabled': dimension.disabled
@@ -171,6 +183,7 @@ const handleSearch = () => {
 }
 
 const handleViewModeChange = (mode) => {
+  userToggledView.value = true
   localViewMode.value = mode
   emit('view-mode-change', mode)
 }
@@ -181,6 +194,8 @@ const handleDimensionClick = (dimension) => {
 }
 
 watch(() => props.viewMode, (newVal) => {
+  // 外部显式变更视为新基线: 重置手动覆盖标记, 阈值自动规则重新生效
+  userToggledView.value = false
   localViewMode.value = newVal
 })
 </script>

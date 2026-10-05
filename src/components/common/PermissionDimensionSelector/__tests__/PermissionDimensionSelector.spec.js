@@ -272,4 +272,60 @@ describe('PermissionDimensionSelector', () => {
     const rulesText = wrapper.find('.dimension-item__rules').text()
     expect(rulesText).toContain('0 规则')
   })
+
+  // [P4-Org-02] ≥10 维度自动切列表视图 (卡片默认; 用户手动切换优先)
+  it('维度数量达到阈值时自动切换列表视图', () => {
+    const manyDimensions = Array.from({ length: 10 }, (_, i) => ({
+      id: `dim-${i}`,
+      name: `维度${i}`,
+      code: `DIM_${i}`,
+      ruleCount: 0
+    }))
+
+    const wrapper = mount(PermissionDimensionSelector, {
+      props: {
+        viewMode: 'card',
+        dimensions: manyDimensions
+      }
+    })
+
+    const content = wrapper.find('.permission-dimension-selector__dimensions')
+    expect(content.classes()).toContain('permission-dimension-selector__dimensions--list')
+  })
+
+  it('维度数量少于阈值时保持卡片视图', () => {
+    const wrapper = mount(PermissionDimensionSelector, {
+      props: {
+        viewMode: 'card',
+        dimensions: mockDimensions
+      }
+    })
+
+    const content = wrapper.find('.permission-dimension-selector__dimensions')
+    expect(content.classes()).toContain('permission-dimension-selector__dimensions--card')
+  })
+
+  it('用户手动切换后自动阈值不再覆盖', async () => {
+    const manyDimensions = Array.from({ length: 12 }, (_, i) => ({
+      id: `dim-${i}`,
+      name: `维度${i}`,
+      code: `DIM_${i}`,
+      ruleCount: 0
+    }))
+
+    const wrapper = mount(PermissionDimensionSelector, {
+      props: {
+        viewMode: 'card',
+        dimensions: manyDimensions
+      }
+    })
+
+    const buttons = wrapper.findAll('button')
+    const cardButton = buttons.find(b => b.text().includes('卡片'))
+    await cardButton.trigger('click')
+
+    const content = wrapper.find('.permission-dimension-selector__dimensions')
+    expect(content.classes()).toContain('permission-dimension-selector__dimensions--card')
+    expect(wrapper.emitted('view-mode-change')[0]).toEqual(['card'])
+  })
 })

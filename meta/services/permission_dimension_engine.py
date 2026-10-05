@@ -529,6 +529,22 @@ class PermissionDimensionEngine:
         metadata = self._load_dimension_metadata()
         return metadata.get('dimension_object_mappings', [])
     
+    def get_resource_table(self, dimension_code: str) -> Optional[str]:
+        """[P4-Org-02] 维度 → 资源表名（三级合并映射，org 等 generic 维度依赖此解析）
+
+        合并来源见 _load_resource_table_map（模块级静态兜底 + hierarchies.yaml
+        levels[].table_name + dimension_object_mapping.yaml value_table）。
+        org 等 generic 维度不在模块级静态 RESOURCE_TABLE_MAP 中，必须经本方法
+        解析（org → orgs）；未知维度返回 None（调用方保持 400/422 拒绝）。
+
+        Args:
+            dimension_code: 维度标识（如 'product' / 'org'）
+
+        Returns:
+            物理表名 或 None
+        """
+        return self._resource_table_map.get(dimension_code)
+
     def get_combination_policy(self) -> Dict[str, Any]:
         """[P1-Base-01] 获取 owner/visibility 组合策略（dimension_object_mapping.yaml）
 
