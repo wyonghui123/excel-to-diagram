@@ -964,7 +964,126 @@
         "updated_at"
       ],
       "table": "new_objects"
+    },
+    "party": {
+      "hash": "17433115775963a21bce9a47cecdedee",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "parties"
+    },
+    "party_archive": {
+      "hash": "077d304d28348ff95a30322e362c8062",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "party_archive"
+    },
+    "party_internal": {
+      "hash": "b441da6f64755d7232567d87439c1900",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "party_internal"
+    },
+    "party_relation": {
+      "hash": "d95dc6a5ed37c1d5f2a2c9bf2b8a40fb",
+      "fields": [
+        "id",
+        "party1_id",
+        "party2_id",
+        "role",
+        "internal_mark",
+        "le_org_id"
+      ],
+      "table": "party_relations"
+    },
+    "address": {
+      "hash": "3f8777d5ff805c626bf906ae66f827f2",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "country_id",
+        "province_id",
+        "city_id",
+        "district_id",
+        "street",
+        "street_number",
+        "postal_code",
+        "formatted_address",
+        "status",
+        "created_at"
+      ],
+      "table": "addresses"
+    },
+    "region": {
+      "hash": "7618f0f6033c522a2ca2b618d8dcbff8",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "parent_id",
+        "level",
+        "status",
+        "created_at"
+      ],
+      "table": "regions"
+    },
+    "calendar": {
+      "hash": "c73430f5a52bfb6c98d56cd1e5915e00",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "parent_calendar_id",
+        "country_id",
+        "day_mask_mon",
+        "day_mask_tue",
+        "day_mask_wed",
+        "day_mask_thu",
+        "day_mask_fri",
+        "day_mask_sat",
+        "day_mask_sun",
+        "status",
+        "created_at"
+      ],
+      "table": "calendars"
+    },
+    "calendar_day": {
+      "hash": "356e3fe20cfe53f33cdc196be5f77e40",
+      "fields": [
+        "id",
+        "calendar_id",
+        "date",
+        "day_type",
+        "note"
+      ],
+      "table": "calendar_days"
     }
   },
-  "last_sync": "2026-10-05T00:17:41.698353"
+  "last_sync": "2026-10-05T23:48:44.144829"
 }
