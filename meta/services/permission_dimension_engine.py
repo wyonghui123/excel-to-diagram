@@ -18,11 +18,14 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import yaml
 
 from meta.core.enums.cache_manager import EnumCacheManager
+from meta.core.dimension_object_mapping_loader import (
+    get_dimension_object_mapping_loader,
+)
 from meta.services.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
@@ -139,6 +142,74 @@ def resolve_dimension_chain(
     if start_idx > end_idx:
         return None
     return full_chain[start_idx:end_idx + 1]
+
+
+# ============================================================================
+# [P4-Org-01 2026-10-05] 通用维度（generic）值子树展开
+# ============================================================================
+
+def expand_generic_dimension_subtree(
+    ds,
+    value_table: str,
+    value_field: str,
+    value_ids: Iterable[int],
+) -> Set[int]:
+    """[P4-Org-01] generic 维度值子树展开（沿 value_table 自引用树逐层 BFS）
+
+    - 返回 {选中值} ∪ {全部子孙}; visited 防环（环上节点仅入队一次）
+    - 典型用法: org 维度 `filter_through_hierarchy: true` → orgs.parent_id 树
+    - 语义先例: OrgAdminScopeService.expand_org_scope（orgs 树 BFS + 防环）;
+      本函数表名/字段名由 dimension_object_mapping.yaml 驱动，不绑定具体表
+    - 查询失败 → 返回已展开部分（仅根集合），不放大范围（fail-closed）
+
+    Args:
+        ds: 数据源（提供 execute(sql, params)）
+        value_table: 维度值表（YAML value_table，如 'orgs'）
+        value_field: 值表取值字段（YAML value_field，默认 'id'）
+        value_ids: 选中的维度值 ID 列表
+
+    Returns:
+        展开后的 ID 集合（含根）
+    """
+    result: Set[int] = set()
+    current: List[int] = []
+    for vid in value_ids or []:
+        try:
+            root = int(vid)
+        except (TypeError, ValueError):
+            continue
+        if root not in result:
+            result.add(root)
+            current.append(root)
+
+    while current:
+        ph = ','.join('?' * len(current))
+        try:
+            rows = ds.execute(
+                f"SELECT {value_field} FROM {value_table} "
+                f"WHERE parent_id IN ({ph})",
+                current,
+            ).fetchall()
+        except Exception as e:
+            logger.warning(
+                f"[P4-Org-01] generic 维度子树展开查询失败 "
+                f"(table={value_table}): {e} — 返回已展开部分"
+            )
+            break
+        nxt: List[int] = []
+        for row in rows:
+            cid = row[0] if row else None
+            if cid is None:
+                continue
+            try:
+                cid = int(cid)
+            except (TypeError, ValueError):
+                continue
+            if cid not in result:  # visited 防环
+                result.add(cid)
+                nxt.append(cid)
+        current = nxt
+    return result
 
 
 class PermissionDimensionEngine:
@@ -477,27 +548,43 @@ class PermissionDimensionEngine:
         dimension_code: str,
         value_ids: List[int],
     ) -> List[int]:
-        """[F7 扩展点 · Phase 4 预留] 通用维度（org/region/department）自动展开
+        """[F7 · P4-Org-01 已实现] 通用维度（org/region/department）值自动展开
 
-        [P1-Base-01] 仅预留签名与透传；Phase 4（P4-Org-01）填充函数体：
-        - 读取 dimension_object_mapping.yaml 中 filter_through_hierarchy: true 的 generic 维度
-        - 沿 value_table / owning_org 层级追溯展开子树
-        - derivePermissions 对 generic 维度仅推数据规则，不生成菜单/功能权限
+        `filter_through_hierarchy: true` 的 generic 维度（如 org）:
+        选中值自动含其子孙子树 —— 沿 YAML `value_table` 自引用树（parent_id）
+        逐层 BFS 展开，visited 防环（先例: OrgAdminScopeService.expand_org_scope）。
 
-        TODO(P4-Org-01): 实现 org 维度 filter_through_hierarchy 展开逻辑
+        - 非 generic / 未开启 filter_through_hierarchy / 无 value_table → 透传原值
+        - 查询失败 → 返回已展开部分（仅根集合），不放大范围（fail-closed）
+        - 语义边界: 本扩展仅作用于数据范围（dimension scope / 数据条件），
+          derivePermissions 仅对 HIERARCHY_CHAIN 派生功能权限，generic 维度不生成
+          菜单/功能权限（见 DimensionScopeEngine.derive_permissions）
 
         Args:
             dimension_code: 维度标识（如 'org'）
             value_ids: 选中的维度值 ID 列表
 
         Returns:
-            展开后的完整 value_ids（Phase 4 前为透传，无副作用）
+            展开后的完整 value_ids（含各选中值的全部子孙，升序）
         """
-        logger.debug(
-            f"[F7] _apply_generic_dimension_auto_expand 未实现（Phase 4 填充）: "
-            f"dimension_code={dimension_code}"
-        )
-        return list(value_ids)
+        if not value_ids:
+            return list(value_ids)
+        loader = get_dimension_object_mapping_loader()
+        if loader.get_dimension_type(dimension_code) != 'generic' \
+                or not loader.is_filter_through_hierarchy(dimension_code):
+            return list(value_ids)
+        value_table = loader.get_value_table(dimension_code)
+        if not value_table:
+            return list(value_ids)
+        expanded = expand_generic_dimension_subtree(
+            self.ds, value_table,
+            loader.get_value_field(dimension_code), value_ids)
+        if len(expanded) > len(set(value_ids)):
+            logger.debug(
+                f"[P4-Org-01] generic 维度子树展开: dimension={dimension_code}, "
+                f"{len(set(value_ids))} → {len(expanded)} 个值"
+            )
+        return sorted(expanded)
     
     def calculate_impact(self, role_id: int) -> Dict[str, Any]:
         """

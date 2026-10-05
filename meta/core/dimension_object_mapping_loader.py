@@ -11,6 +11,7 @@ Dimension Object Mapping Loader — 加载管理维度 → BO 字段映射配置
   - get_applies_to(dimension_code) → 该维度适用于哪些 BO/字段
   - get_dimension_type(dimension_code) → business | generic
   - get_value_table(dimension_code) → 通用维度的值表
+  - is_filter_through_hierarchy(dimension_code) → 选中值是否自动含子孙子树 (P4-Org-01)
   - get_combination_policy() → scope_combination (AND/OR), owner_always_visible
 
 缓存策略: LRU + TTL (5min)，避免每次请求都读 YAML。
@@ -149,6 +150,17 @@ class DimensionObjectMappingLoader:
         if not m:
             return 'id'
         return m.get('value_field', 'id')
+
+    def is_filter_through_hierarchy(self, dimension_code: str) -> bool:
+        """[P4-Org-01] 该维度是否开启「选中值自动含子孙子树」
+
+        读取 YAML `filter_through_hierarchy: true`（仅 generic 维度有语义）。
+        未配置 / 维度不存在 → False。
+        """
+        m = self.get_mapping(dimension_code)
+        if not m:
+            return False
+        return bool(m.get('filter_through_hierarchy', False))
 
     def get_priority(self, dimension_code: str) -> int:
         """获取维度优先级（数值越小越高）"""

@@ -17,6 +17,8 @@
 #     - filter_type: direct (本表字段) | fk (外键) | chain (沿 parent 链追溯)
 #   value_table: (仅 generic) 维度值存储表
 #   value_field: (仅 generic) 维度值表的 ID 字段
+#   filter_through_hierarchy: (仅 generic) 选中值是否自动含子孙子树
+#     沿 value_table 自引用树 (parent_id) BFS 展开, 防环（P4-Org-01 org 维度启用）
 #
 # 兼容性:
 #   - 默认从该文件加载; 加载失败时 fallback 到硬编码 RESOURCE_TABLE_MAP/PARENT_FIELD_MAP
@@ -111,7 +113,30 @@ dimension_object_mappings:
         filter_type: chain
 
   # ────────────────────────────────────────
-  # 通用维度示例 (为未来扩展预留)
+  # 通用维度（已激活）
+  # ────────────────────────────────────────
+  # [P4-Org-01 2026-10-05] org 维度激活（generic，数据范围维度，非功能边界）:
+  #   选中 org 自动含其子孙子树（orgs.parent_id 自引用树 BFS 展开，防环）；
+  #   derivePermissions 对 generic 维度仅推数据规则，不生成菜单/功能权限。
+  - dimension_code: org
+    dimension_type: generic
+    description: 组织维度（generic；选中值自动含子孙子树）
+    value_table: orgs
+    value_field: id
+    filter_through_hierarchy: true   # [A11] 选父自动含子孙
+    # [F1 步 2 2026-10-05] party_internal 登记（机制必需）：
+    #   查询管线的注入判定 = derive_data_conditions 按 BO id 查本表 applies_to
+    #   （DimensionObjectMappingLoader.get_bindings_for_bo；BO YAML 的 dimension_bindings
+    #   不被该管线消费，仅走 opt-in 解释路径）⇒ 内部面须在此登记才能真正注入 org 范围。
+    #   安全无损：party 基表 / party_archive 面无条目 ⇒ 永不注入（对外档案结构强制排除内部行）；
+    #   party_internal 全为内部行（source='org'，org_id 非空）⇒ 无条件 AND 恒成立。
+    applies_to:
+      - bo: party_internal
+        field: org_id
+        filter_type: direct
+
+  # ────────────────────────────────────────
+  # 通用维度示例 (region / department / business_line 预留)
   # 启用方法: 取消注释并配置对应字段
   # ────────────────────────────────────────
   # - dimension_code: region
@@ -160,7 +185,7 @@ dimension_priority:
   version: 20
   domain: 30
   sub_domain: 40
-  # org: 50         # [P4-Org-01 预留] 组织维度（generic，Phase 4 启用）
+  org: 50            # [P4-Org-01 已激活] 组织维度（generic，数据范围维度）
   # region: 5       # 通用维度优先级通常更高
   # department: 6
 

@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from meta.core.action_executor import ActionExecutor, ActionResult
-from meta.core.models import MetaObject, registry
+from meta.core.models import MetaObject, ObjectType, registry
 from meta.core.datasource import DataSource
 from meta.core.rule_executor import RuleEngine
 from meta.core.condition_evaluator import ConditionEvaluator
@@ -71,6 +71,23 @@ class ManageService:
         if meta_obj is None:
             raise ValueError("Meta object not found: {0}".format(object_type))
         return meta_obj
+
+    def _reject_if_readonly_view(self, meta_obj: MetaObject) -> Optional[ActionResult]:
+        """[护栏 2026-10-05] 视图对象只读：拒写。
+
+        背景：通用 CRUD 路由（POST/PUT/DELETE /<object_type>）对任意 BO 均开放，
+        而真视图（YAML `object_type: view`）上执行 INSERT/UPDATE/DELETE 会落到
+        SQLite 报错，表现为 500。此处前置拦截，返回干净的失败码（API 侧映射为 400）。
+
+        注：只拦真视图（ObjectType.VIEW）。`is_view: true` 的"物理表逻辑视图"
+        （如 permission_resource → permissions 表）object_type 仍为 entity，不受影响。
+        """
+        if getattr(meta_obj, 'object_type', None) == ObjectType.VIEW:
+            return ActionResult.fail(
+                error="READ_ONLY_VIEW",
+                message="视图对象 '{0}' 为只读，不支持写入操作".format(meta_obj.id),
+            )
+        return None
 
     def _get_latest_audit_log_id(self, object_type: str, object_id: Any) -> Optional[int]:
         """获取最近的审计日志ID"""
@@ -327,6 +344,10 @@ class ManageService:
 
         meta_obj = self._get_meta_object(request.object_type)
 
+        readonly = self._reject_if_readonly_view(meta_obj)
+        if readonly:
+            return readonly
+
         if meta_obj.addability and meta_obj.addability.condition:
             evaluator = ConditionEvaluator()
             parent_data = self._resolve_parent_context(meta_obj, request.data)
@@ -374,6 +395,11 @@ class ManageService:
 
     def update(self, request: UpdateRequest) -> ActionResult:
         meta_obj = self._get_meta_object(request.object_type)
+
+        readonly = self._reject_if_readonly_view(meta_obj)
+        if readonly:
+            return readonly
+
         params = dict(request.data)
         params["id"] = request.id
 
@@ -416,6 +442,10 @@ class ManageService:
 
     def delete(self, request: DeleteRequest) -> ActionResult:
         meta_obj = self._get_meta_object(request.object_type)
+
+        readonly = self._reject_if_readonly_view(meta_obj)
+        if readonly:
+            return readonly
 
         logger.info(f"[ManageService.delete] object_type={request.object_type}, id={request.id}, table_name={meta_obj.table_name}")
 

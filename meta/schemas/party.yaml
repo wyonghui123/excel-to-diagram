@@ -1,0 +1,124 @@
+# ============================================
+# 身份主体（Party）基表 — foundation 步 2 · 身份锚（写锚）
+# 依据: F1 治理分域设计 v1.1（§3.1 / §3.5 / §7.1-4）；蓝图 v2.5（§3.1 / §4.1）
+# 定位: 唯一写入路径（create/update/delete）；常规读取走两个只读面
+#   - party_archive  对外档案（谓词 COALESCE(source,'')<>'org'，不挂 org 维度绑定）
+#   - party_internal 内部治理台账（谓词 source='org'，挂 org 维度绑定）
+# 治理分域: source='org' ↔ org 记录 1:1（org_id 部分唯一索引强制）；外部记录 source 为空（NULL）
+# 红线: 引用字段定名 org_id（禁止 owning_org_id —— 避免 A11 自动扩展误纳入全局注入）
+# ============================================
+
+id: party
+name: 身份主体
+table_name: parties
+description: 身份锚（party）：组织 / 个人的统一身份记录；org 记录经 source='org' 进入本轴（1:1）
+display_name_field: name
+
+# [F1 §7.1-4 写锚] auto_crud 仅供写：基表只声明写动作（create/update/delete），
+# 读面由两个真视图承担（口径由 SQL 结构强制）
+import_export:
+  auto_crud: false
+
+actions:
+  - id: party_create
+    name: 创建身份主体
+    type: crud
+    method: POST
+    path: "/api/v1/partys"
+    description: 创建身份主体记录（唯一写入路径）
+  - id: party_update
+    name: 更新身份主体
+    type: crud
+    method: PUT
+    path: "/api/v1/partys/{id}"
+    description: 更新身份主体记录
+  - id: party_delete
+    name: 删除身份主体
+    type: crud
+    method: DELETE
+    path: "/api/v1/partys/{id}"
+    description: 删除身份主体记录
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: name
+    name: 显示名
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 身份显示名（组织名 / 人名）
+    semantics:
+      meaning: 身份显示名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+
+  - id: party_type
+    name: 身份类型
+    type: string
+    db_column: party_type
+    required: true
+    default: organization
+    max_length: 30
+    description: 身份类型（organization 组织 / person 个人）；超类型 = 单表 + 类型字段（I7-A）
+    enum_values:
+      - value: organization
+        label: 组织
+        color: primary
+      - value: person
+        label: 个人
+        color: success
+    semantics:
+      meaning: 身份类型分类
+    ui:
+      widget: select
+
+  - id: source
+    name: 治理分域
+    type: string
+    db_column: source
+    nullable: true
+    max_length: 30
+    description: 治理分域键：'org' = 内部组织表示（与 orgs 1:1）；外部记录为空（NULL）
+    semantics:
+      meaning: 治理分域来源键（source='org' → 内部组织表示）
+    ui:
+      widget: input
+
+  - id: org_id
+    name: 组织引用
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: orgs 外键；source='org' 时非空且 1:1（部分唯一索引强制）；外部记录为空
+    semantics:
+      meaning: 对应组织（仅 source='org' 的内部表示）
+    ui:
+      widget: input
+
+indexes:
+  # [F1 §3.1] 1:1 强约束：仅对内部行（source='org'）生效的部分唯一索引；禁双写（P1）
+  - fields: [org_id]
+    unique: true
+    type: partial
+    condition: "source = 'org'"
+    name: idx_party_org_unique
+  - fields: [source]
+    name: idx_party_source
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true

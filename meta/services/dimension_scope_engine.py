@@ -22,7 +22,7 @@ from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
 from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, \
-    PARENT_FIELD_MAP, CODE_FIELD_MAP
+    PARENT_FIELD_MAP, CODE_FIELD_MAP, expand_generic_dimension_subtree
 
 logger = logging.getLogger(__name__)
 
@@ -295,11 +295,18 @@ class DimensionScopeEngine:
                 inherited.setdefault(dim, {}).setdefault(from_anchor_dim, set()).update(ids)
 
         def _expand_down_chain(start_dim, start_ids, from_anchor_dim=None):
-            """沿 HIERARCHY_CHAIN 向下展开 (笛卡尔保留: 子维度显式 include 时 break)"""
-            try:
-                idx = HIERARCHY_CHAIN.index(start_dim)
-            except ValueError:
+            """沿 HIERARCHY_CHAIN 向下展开 (笛卡尔保留: 子维度显式 include 时 break)
+
+            [P4-Org-01] 非 HIERARCHY_CHAIN 的 generic 维度 (如 org,
+            filter_through_hierarchy: true): 沿 value_table 自引用树 (parent_id)
+            BFS 展开子孙子树 (防环) — 语义 = 选中值自动含子孙.
+            """
+            if start_dim not in HIERARCHY_CHAIN:
+                subtree = self._expand_generic_subtree(start_dim, start_ids)
+                if subtree:
+                    _record(start_dim, subtree, from_anchor_dim=from_anchor_dim)
                 return
+            idx = HIERARCHY_CHAIN.index(start_dim)
             current_ids = set(start_ids)
             for next_dim in HIERARCHY_CHAIN[idx + 1:]:
                 # [FIX Cartesion 2026-07-23 PM Option B]
@@ -410,6 +417,28 @@ class DimensionScopeEngine:
                 continue
             _expand_down_chain(code, numeric_vals)
         return expanded, native, anchors, inherited, failed
+
+    def _expand_generic_subtree(self, dimension_code: str,
+                                value_ids) -> Set[int]:
+        """[P4-Org-01] generic 维度值子树展开 (runtime 侧缺口补齐)
+
+        `filter_through_hierarchy: true` 的 generic 维度 (如 org): 选中值自动含子孙.
+        - 非 generic / 未开启 / 无 value_table → 返回空集 (调用方保持原值)
+        - 沿 YAML value_table 自引用树 (parent_id) BFS 展开, visited 防环;
+          实现复用 permission_dimension_engine.expand_generic_dimension_subtree
+          (先例: OrgAdminScopeService.expand_org_scope)
+        """
+        loader = get_dimension_object_mapping_loader()
+        if loader.get_dimension_type(dimension_code) != 'generic':
+            return set()
+        if not loader.is_filter_through_hierarchy(dimension_code):
+            return set()
+        value_table = loader.get_value_table(dimension_code)
+        if not value_table:
+            return set()
+        return expand_generic_dimension_subtree(
+            self._ds, value_table,
+            loader.get_value_field(dimension_code), value_ids)
 
     def derive_data_conditions(self, role_id: int) -> Dict[str, str]:
         """派生每个 BO 的数据权限条件
@@ -1244,10 +1273,15 @@ class DimensionScopeEngine:
         用途: scope_mode='all' 时查询该维度表的所有 ID
         返回: 全量 ID 集合，查询失败返回空集合
 
-        注意: 仅支持 HIERARCHY_CHAIN 中的维度（product/version/domain/sub_domain）
-              其他维度返回空集合（由调用方处理）
+        注意: HIERARCHY_CHAIN 维度走 RESOURCE_TABLE_MAP; generic 维度 (org 等)
+              [P4-Org-01] 回落 yaml value_table; 其他维度返回空集合（由调用方处理）
         """
         table = RESOURCE_TABLE_MAP.get(dimension_code)
+        if not table:
+            # [P4-Org-01] generic 维度 (如 org): value_table 由 yaml 驱动, 不在硬编码映射中
+            loader = get_dimension_object_mapping_loader()
+            if loader.get_dimension_type(dimension_code) == 'generic':
+                table = loader.get_value_table(dimension_code)
         if not table:
             logger.warning(
                 f'[_get_all_dimension_ids] unknown dimension_code: {dimension_code}'
