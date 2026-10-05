@@ -1,6 +1,6 @@
 # 规则编排专题：顺序、链式传播与跨对象级联
 
-> **版本**：v1.6 | **日期**：2026-10-03 | **状态**：研究稿 + 方案（P0/P0.5 已执行；G9/G10/G11 已修；D7 tie-break 已统一；P1 顺序唯一入口已落地；G3/G1 已修；**二次检查完成，P2~P6 及加固项已登记待办，见 §4.1**）
+> **版本**：v1.7 | **日期**：2026-10-05 | **状态**：研究稿 + 方案（P0/P0.5 已执行；G9/G10/G11 已修；D7 tie-break 已统一；P1 顺序唯一入口已落地；G3/G1 已修；**二次检查完成，P2~P6 及加固项已登记待办，见 §4.1；第一批 B8/B9/B10/B12 已修，B11 判非缺陷**）
 > **关联文档**：
 > - [2026-10-03-rule-model-consumption-and-layering.md](./2026-10-03-rule-model-consumption-and-layering.md)（v2.1，消费侧模型与分层归属；本专题是其延伸）
 > - [2026-10-02-rule-model-research.md](./2026-10-02-rule-model-research.md)（规则内容/生产侧）
@@ -394,21 +394,22 @@ P1 不是「换入口」而是**语义变更**。直接切唯一入口会引入�
 
 > **用户确认（2026-10-03）**：P2~P6 均为**可选 / 可延后**——彼此不阻塞、当前无触发场景（存量 0 环、无 `permission` 规则、跨对象链未接线），登记为待办即可，**不在本批实施**。
 > 下表 B8~B12 为本批「二次检查」发现项；均为**当前不可达 / 无影响**的加固项，不阻塞提交。
+> **第一批（2026-10-05）**：B8 / B9 / B10 / B12 已修；B11 经核对判定为**有意 fail-fast、非缺陷**，不改。全部改动为**行为中性加固**（存量 0 环、无 `permission` 规则），相关测试全绿。
 
-| # | 待办 | 来源 | 当前影响 |
-|---|---|---|---|
-| B1 | **P2**：环 = 加载期硬失败；传播深度可配 + 超限报错；振荡检测 | §3.4 | 无（存量 0 环） |
-| B2 | **P3**：执行轨迹（`execution_order` / `changes`）落审计 | §3.4 | 无 |
-| B3 | **P4**：聚合派生回写目标对象（A→B→C 打通） | §3.4 | 无（当前派生仅 SELECT） |
-| B4 | **P5**：异步通道 `execution_mode: sync\|async` + 幂等键 + outbox | §3.4 | 无 |
-| B5 | **P6**：启用 `CrossObjectRuleChainExecutor` + 明确事务边界 | §3.4 | 无 |
-| B6 | **G4**：报环时仍静默降级（仅 `logger.warning`），应与 P2 的硬门禁一并收口 | §1.3 | 无（0 环） |
-| B7 | **G5/G6/G7/G8**：跨对象链零接线 / 聚合不回写 / 派生 stub / 求值内核分裂（G8） | §1.3 | 无 |
-| B8 | **二次检查①**：拓扑回退粒度是「全量」——对象内**任意**一处环会把本次触发的**全部**规则降级为 priority 序（[rule_executor.py#L1342-L1349](file:///d:/filework/excel-to-diagram/meta/core/rule_executor.py#L1342-L1349)）。建议改为按连通分量 / 仅成环节点粒度回退 | 二次检查 | 无（存量 0 环）；宜随 B1 一并解决 |
-| B9 | **二次检查②**：图外规则被无条件追加末尾；若它 `depends_on` 一个**不入图**的类型（`permission` / `default`），依赖方向会反（[rule_executor.py#L1351-L1355](file:///d:/filework/excel-to-diagram/meta/core/rule_executor.py#L1351-L1355) + [rule_chain.py#L319-L326](file:///d:/filework/excel-to-diagram/meta/core/rule_chain.py#L319-L326)） | 二次检查 | 无（当前无 `permission` 规则） |
-| B10 | **二次检查③**：`_order_rules_by_dependency` 仅捕 `ValueError`——非环类异常（属性缺失等）会冒泡打断保存，与「避免整次保存失败」的注释相悖。建议收敛为明确环异常 + 其余异常记日志后回退 | 二次检查 | 无（当前不可达） |
-| B11 | **二次检查④**：`DeprecatedSchemaSectionError` 会穿透 `load_yaml_directory` **中止整目录加载**，与其余解析错误「跳过单文件」行为不一致 | 二次检查 | 无（已无残留段） |
-| B12 | **二次检查⑤**：`parse_aspects_yaml` 仍产出已被 `_resolve_aspects` 删除的 `"validations"` 键（死代码残留） | 二次检查 | 无 |
+| # | 待办 | 来源 | 当前影响 | 状态 |
+|---|---|---|---|---|
+| B1 | **P2**：环 = 加载期硬失败；传播深度可配 + 超限报错；振荡检测 | §3.4 | 无（存量 0 环） | 待排期 |
+| B2 | **P3**：执行轨迹（`execution_order` / `changes`）落审计 | §3.4 | 无 | 待排期 |
+| B3 | **P4**：聚合派生回写目标对象（A→B→C 打通） | §3.4 | 无（当前派生仅 SELECT） | 待排期 |
+| B4 | **P5**：异步通道 `execution_mode: sync\|async` + 幂等键 + outbox | §3.4 | 无 | 待排期 |
+| B5 | **P6**：启用 `CrossObjectRuleChainExecutor` + 明确事务边界 | §3.4 | 无 | 待排期 |
+| B6 | **G4**：报环时仍静默降级（仅 `logger.warning`），应与 P2 的硬门禁一并收口 | §1.3 | 无（0 环） | 待排期 |
+| B7 | **G5/G6/G7/G8**：跨对象链零接线 / 聚合不回写 / 派生 stub / 求值内核分裂（G8） | §1.3 | 无 | 待排期 |
+| B8 | **二次检查①**：拓扑回退粒度是「全量」——对象内**任意**一处环会把本次触发的**全部**规则降级为 priority 序。**已改为「仅成环节点降级」**：`topological_sort(graph, strict=False)` 返回已定序部分序列，仅成环节点降级为 priority 序，其余规则仍按依赖序 | 二次检查 | 无（存量 0 环） | ✅ **已修 · 2026-10-05** |
+| B9 | **二次检查②**：图外规则被无条件追加末尾；若它 `depends_on` 一个**不入图**的类型（`permission` / `default`），依赖方向会静默反置。**已在 `_build_edges` 显式告警**（指向非图节点的显式依赖被忽略时记 `logger.warning`），避免无声失真 | 二次检查 | 无（当前无 `permission` 规则） | ✅ **已修 · 2026-10-05**（告警级） |
+| B10 | **二次检查③**：`_order_rules_by_dependency` 仅捕 `ValueError`——非环类异常（属性缺失等）会冒泡打断保存，与「避免整次保存失败」的注释相悖。**已拆分 try/except**：环异常（`ValueError`）→ 部分序列；其余 `Exception` → 记 error（含 `exc_info`）后回退 priority | 二次检查 | 无（当前不可达） | ✅ **已修 · 2026-10-05** |
+| B11 | **二次检查④**：`DeprecatedSchemaSectionError` 会穿透 `load_yaml_directory` **中止整目录加载**，与其余解析错误「跳过单文件」行为不一致 | 二次检查 | 无（已无残留段） | ❌ **非缺陷（有意 fail-fast 迁移守卫）**：异常含文件路径与修法提示；「跳过单文件」会静默丢弃整个对象定义，更糟 |
+| B12 | **二次检查⑤**：`parse_aspects_yaml` 仍产出已被 `_resolve_aspects` 删除的 `"validations"` 键（死代码残留）。**已删除 3 处产出分支的死键**（dict 形 aspect / list 形 aspect / shared_properties 组） | 二次检查 | 无 | ✅ **已修 · 2026-10-05** |
 
 > **二次检查未发现「严重」级问题。** 另：`relationship.yaml` 迁移时删除的 4 条旧校验（`relation_type_in_enum` 等）按 §8.7 的 D/S 分类为**有意删除**（顶层 `validations:` 运行时本就不消费，`MetaObject.validations` 已无读取点），非缺陷。
 
@@ -425,3 +426,4 @@ P1 不是「换入口」而是**语义变更**。直接切唯一入口会引入�
 | v1.4 | 2026-10-03 | **P1 顺序唯一入口已落地并复测**（用户拍板「直接切」，不跑影子模式）。落地方式：**排序做进既有唯一入口** `RuleEngine.execute_rules`（新增 `_order_rules_by_dependency`，不动任何调用点）——图内规则按 `topological_sort` 次序、图外规则按 priority 追加末尾、报环回退 priority 并告警；**执行体仍是 flat 各类型执行器**（只改顺序）。因此 §1.6 的 7 项阻塞**全部失效**（它们只在"链 executor 成为唯一执行体"时成立）。审计复测：环 0 / 拓扑报错 0 / **顺序差异 0** / 未建图规则 0（对存量 8 个有规则对象行为中性）。新增回归用例 `test_rule_engine_cross_field_validation_order`（只改 `price`，依赖序保证先算后校；校验 priority 故意更小以证伪"仍按 priority"）。规则相关 5 个测试文件全绿；`test_rule_engine_layer.py` 的 3 个失败经对照实验确认为既有 `FOREIGN KEY` 数据问题、与本改动无关。新增 §1.7；D2 标记已决；P1 行改为"已落地" | AI Assistant |
 | v1.5 | 2026-10-03 | **G3 + G1 已修并复测**。G3：`compute()` 不再运行 `ImplicitRuleChainExecutor`（删除 `use_chain`/`changed_fields` 形参，全仓确认 3 个调用方均未使用），只保留「计算」且顺序与 `execute_rules` 统一为依赖拓扑序；根治理由是链内校验以 `condition` 当判定、平铺 `ValidationExecutor` 以 `action` 当判定，**上抛链结论会误阻断合法保存**（见 §1.8 根因说明）。G1：`yaml_loader.parse_rule` 统一注入 `depends_on`（此前全仓 0 处读写）；`rule_chain._build_edges` 新增 `EdgeType.EXPLICIT_DEPENDENCY` 显式边且**显式优先于推断**（反向冲突的推断边丢弃）。新增回归 `test_compute_only_computes_and_ignores_validation`、`test_explicit_dependency_edges`；`test_rule_chain`(6) / `test_rule_engine`(11) / `test_rule_provider_unit`(9) / `test_rule_validations_migration`(4) / `test_derivation`(6) 全绿；审计脚本复测顺序差异仍为 0。审计脚本「两路重复执行」指标标注为**设计探针**（生产路径已无重复）。新增 §1.8；G1/G3 标记已修 | AI Assistant |
 | v1.6 | 2026-10-03 | **二次检查完成 + 待办登记**。独立复核本批全部未提交改动（rule_executor / rule_chain / yaml_loader / models / validator / 2 个测试 + 审计脚本 + 校验迁移）：**无「严重」级问题**；提出 3 项加固项与 2 项一致性提示，均已登记 §4.1（B8~B12，均为当前不可达/无影响）。用户确认 **P2~P6 为可选/可延后**（互不阻塞、当前无触发场景），一并登记 B1~B7。**提交范围**：仅规则模型相关文件；`tools/*`+`scripts/*`+`*.service`+`meta/migrations/*` 的批量路径改动（`/opt/miniconda3-py39/bin/python` → `/usr/local/bin/python3`）与 `docs/platform/MULTI_PRODUCT_PLATFORM_ROADMAP.md`（多产品平台 v1.29.8）经核实**与本批无关，排除**。新增 §4.1 | AI Assistant |
+| v1.7 | 2026-10-05 | **第一批（二次检查加固项）已实施并测试全绿**。①**B8**：`rule_chain.topological_sort` 新增 `strict: bool = True`（默认抛 `ValueError` 保持契约；`False` 时返回已定序部分序列 + 告警），`rule_executor._order_rules_by_dependency` 报环时**只把成环节点降级为 priority 序**，其余规则仍按依赖序（`in_graph + pending + out_graph`）。②**B9**：`rule_chain._build_edges` 中显式依赖指向「不入拓扑的类型」时改记 `logger.warning` 后 `continue`，避免方向静默反置。③**B10**：`_order_rules_by_dependency` 拆为「analyze → 任意 `Exception` 记 error 回退 priority」+「`topological_sort` → `ValueError` 走部分序列、其余 `Exception` 回退」，避免畸形规则打断整次保存。④**B12**：`yaml_loader.parse_aspects_yaml` 删除 3 处产出分支的死键 `"validations"`（dict 形 / list 形 / shared_properties）。⑤**B11 判为非缺陷**：`DeprecatedSchemaSectionError` 为**有意 fail-fast 迁移守卫**（含路径与修法提示），「跳过单文件」会静默丢弃整对象，不改。测试：`test_rule_chain`(7) / `test_rule_validations_migration`(5) / `test_rule_engine`(11) 全绿；新增 `test_topological_sort_partial_on_cycle`、`test_parse_aspects_yaml_has_no_validations_key`。全部为**行为中性加固** | AI Assistant |

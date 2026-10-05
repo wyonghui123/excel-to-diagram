@@ -1896,15 +1896,15 @@ def parse_aspects_yaml(schema_dir: str) -> Dict[str, Dict]:
             if data and isinstance(data, dict):
                 for aspect_name, aspect_def in data.items():
                     if isinstance(aspect_def, dict):
+                        # [B12 修复 2026-10-05] 移除死键 "validations"——_resolve_aspects
+                        # 只消费 fields / rules，从不读取该键。
                         result[aspect_name] = {
                             "fields": aspect_def.get("fields", []),
-                            "validations": aspect_def.get("validations", []),
                             "rules": aspect_def.get("rules", []),
                         }
                     elif isinstance(aspect_def, list):
                         result[aspect_name] = {
                             "fields": aspect_def,
-                            "validations": [],
                             "rules": [],
                         }
         except Exception as e:
@@ -1921,7 +1921,6 @@ def parse_aspects_yaml(schema_dir: str) -> Dict[str, Dict]:
                         if isinstance(group_fields, list):
                             result[group_name] = {
                                 "fields": group_fields,
-                                "validations": [],
                                 "rules": [],
                             }
         except Exception as e:

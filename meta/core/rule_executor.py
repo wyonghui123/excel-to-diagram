@@ -1333,26 +1333,48 @@ class RuleEngine:
         [P1 统一入口 2026-10-03] 与平铺执行的差别**仅在顺序**：
         - 图内规则：按 `RuleDependencyAnalyzer.topological_sort` 的次序（依赖在前）；
         - 图外规则（分析器未建档的类型，如 PERMISSION）：保持原 priority 稳定序，追加在末尾；
-        - 分析器报环（ValueError）时**回退**到原 priority 顺序并告警，避免因某一个
-          与本次触发无关的环导致整次保存失败。
+        - 报环时**只降级成环节点**（[B8 2026-10-05]）：其余规则仍按依赖序，不再因
+          某一个与本次触发无关的环让本次触发的全部规则失去依赖序；
+        - 依赖分析/排序出现其他异常时整体回退 priority 并记 error（[B10 2026-10-05]），
+          避免个别畸形规则让整次保存直接失败。
         """
         if len(rules) <= 1:
             return list(rules)
 
         by_priority = sorted(rules, key=lambda r: r.priority)
+
+        from meta.core.rule_chain import RuleDependencyAnalyzer
+
+        # [B10 修复 2026-10-05] 依赖分析异常不再只认 ValueError：任何异常都记日志后
+        # 回退到优先级顺序，避免个别畸形规则让整次保存直接失败。
         try:
-            from meta.core.rule_chain import RuleDependencyAnalyzer
             graph = RuleDependencyAnalyzer.analyze(meta_object)
+        except Exception as e:
+            logger.error("规则依赖分析失败，回退到优先级顺序: %s", str(e), exc_info=True)
+            return by_priority
+
+        try:
             order = RuleDependencyAnalyzer.topological_sort(graph)
+            unsequenced: List[str] = []
         except ValueError as e:
-            logger.warning("规则拓扑排序失败，回退到优先级顺序: %s", str(e))
+            # [B8 修复 2026-10-05] 有环时只把**成环节点**降级为 priority 顺序，其余
+            # 规则仍按依赖序，不再「一处环 → 全体降级」。
+            logger.warning("规则存在循环依赖，仅成环节点降级为优先级顺序: %s", str(e))
+            order = RuleDependencyAnalyzer.topological_sort(graph, strict=False)
+            sequenced = set(order)
+            unsequenced = [nid for nid in graph.nodes if nid not in sequenced]
+        except Exception as e:
+            logger.error("规则拓扑排序失败，回退到优先级顺序: %s", str(e), exc_info=True)
             return by_priority
 
         rank = {rule_id: idx for idx, rule_id in enumerate(order)}
+        unsequenced_set = set(unsequenced)
         in_graph = [r for r in by_priority if r.id in rank]
-        out_graph = [r for r in by_priority if r.id not in rank]
+        pending = [r for r in by_priority if r.id in unsequenced_set]
+        out_graph = [r for r in by_priority
+                     if r.id not in rank and r.id not in unsequenced_set]
         in_graph.sort(key=lambda r: rank[r.id])
-        return in_graph + out_graph
+        return in_graph + pending + out_graph
 
     def validate(self, meta_object: MetaObject, data: Dict[str, Any],
                  trigger: RuleTrigger = RuleTrigger.BEFORE_SAVE) -> RuleExecutionReport:

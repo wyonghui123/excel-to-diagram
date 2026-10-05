@@ -73,3 +73,39 @@ def test_meta_object_no_validations_container():
 
     assert "validations" not in MetaObject.__dataclass_fields__
     assert not hasattr(MetaObject, "get_validations")
+
+
+def test_parse_aspects_yaml_has_no_validations_key(tmp_path):
+    """[B12 2026-10-05] parse_aspects_yaml 不再产出死键 "validations"。
+
+    _resolve_aspects 只消费 fields / rules；保留 "validations" 只会误导后续维护者。
+    覆盖三种产出分支：dict 形 aspect、list 形 aspect、shared_properties 组。
+    """
+    from meta.core.yaml_loader import parse_aspects_yaml
+
+    (tmp_path / "aspects.yaml").write_text(
+        "audit_fields:\n"
+        "  fields:\n"
+        "  - id: created_at\n"
+        "    name: 创建时间\n"
+        "    type: datetime\n"
+        "simple_group:\n"
+        "- id: note\n"
+        "  name: 备注\n"
+        "  type: string\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "shared_properties.yaml").write_text(
+        "shared_group:\n"
+        "- id: tag\n"
+        "  name: 标签\n"
+        "  type: string\n",
+        encoding="utf-8",
+    )
+
+    aspects = parse_aspects_yaml(str(tmp_path))
+    for name in ("audit_fields", "simple_group", "shared_group"):
+        assert name in aspects, "缺少产出分支: {0}".format(name)
+        assert "validations" not in aspects[name], \
+            "{0} 不应再产出 validations 键".format(name)
+        assert "fields" in aspects[name] and "rules" in aspects[name]

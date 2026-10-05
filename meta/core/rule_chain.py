@@ -317,13 +317,23 @@ class RuleDependencyAnalyzer:
         explicit_reverse: Set[Tuple[str, str]] = set()
         for node in nodes_list:
             for dep_id in list(getattr(node.rule, 'depends_on', None) or []):
-                if dep_id in graph.nodes and dep_id != node.rule.id:
-                    graph.add_edge(DependencyEdge(
-                        from_rule=dep_id,
-                        to_rule=node.rule.id,
-                        edge_type=EdgeType.EXPLICIT_DEPENDENCY,
-                    ))
-                    explicit_reverse.add((node.rule.id, dep_id))
+                if dep_id == node.rule.id:
+                    continue
+                if dep_id not in graph.nodes:
+                    # [B9 修复 2026-10-05] 显式依赖指向「不参与拓扑的类型」（如
+                    # PERMISSION/DEFAULT 无图节点）时边会被丢弃，依赖方向可能静默反置。
+                    # 此处显式告警，避免无声失真。
+                    logger.warning(
+                        "规则 '%s' 的 depends_on 目标 '%s' 不在依赖图中"
+                        "（该规则类型不参与拓扑排序），该显式依赖被忽略",
+                        node.rule.id, dep_id)
+                    continue
+                graph.add_edge(DependencyEdge(
+                    from_rule=dep_id,
+                    to_rule=node.rule.id,
+                    edge_type=EdgeType.EXPLICIT_DEPENDENCY,
+                ))
+                explicit_reverse.add((node.rule.id, dep_id))
 
         def _add_inferred(from_rule: str, to_rule: str, edge_type: EdgeType,
                           field_name: Optional[str] = None) -> None:
@@ -422,7 +432,7 @@ class RuleDependencyAnalyzer:
         return type_weights.get(node_type, 100)
     
     @staticmethod
-    def topological_sort(graph: DependencyGraph) -> List[str]:
+    def topological_sort(graph: DependencyGraph, strict: bool = True) -> List[str]:
         """拓扑排序（Kahn），同层按「类型权重 → priority → 声明下标」决定次序。
 
         [G10 修复 2026-10-03] 遇环**必须报错**，不再静默返回残缺序列。
@@ -433,6 +443,10 @@ class RuleDependencyAnalyzer:
         `declaration_index`（YAML 声明顺序），与平铺
         `RuleEngine.execute_rules`（`sorted(key=priority)` 稳定排序 → 声明序）
         对齐，避免顺序收口时引入无谓的次序变动。
+
+        [B8 修复 2026-10-05] 新增 `strict`：默认 True，遇环抛 `ValueError`（保持既有
+        契约）；传 False 时**不抛异常**，返回已定序的部分序列，未定序（成环）节点由
+        调用方决定如何降级。
         """
         in_degree = {node_id: 0 for node_id in graph.nodes}
         
@@ -472,11 +486,16 @@ class RuleDependencyAnalyzer:
         
         if len(result) != len(graph.nodes):
             unsequenced = sorted(set(graph.nodes) - set(result))
-            raise ValueError(
-                "拓扑排序失败：存在循环依赖，以下规则无法确定执行顺序: {0}。"
-                "请检查规则定义（多为同一字段上的规则互相依赖）。".format(
-                    ", ".join(unsequenced))
-            )
+            if strict:
+                raise ValueError(
+                    "拓扑排序失败：存在循环依赖，以下规则无法确定执行顺序: {0}。"
+                    "请检查规则定义（多为同一字段上的规则互相依赖）。".format(
+                        ", ".join(unsequenced))
+                )
+            # [B8 修复 2026-10-05] 非严格模式：返回**已定序的部分**，由调用方把未定序
+            # （即成环）的节点单独降级，避免「一处环 → 全部规则失去依赖序」。
+            logger.warning("拓扑排序存在循环依赖，返回部分序列；未定序节点: %s",
+                           ", ".join(unsequenced))
         
         return result
 

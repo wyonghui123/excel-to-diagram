@@ -380,6 +380,63 @@ def test_explicit_dependency_edges():
     print("[PASS] 显式依赖边（depends_on）测试通过")
 
 
+def test_topological_sort_partial_on_cycle():
+    """[B8 2026-10-05] 有环时非严格排序返回部分序列，合法依赖对次序不受影响。
+
+    场景：cyc_a ↔ cyc_b 互为目标/源字段成环；flow_1 → flow_2 是合法数据流。
+    严格模式遇环必须抛 ValueError；非严格模式只丢下成环节点。
+    """
+    print("\n=== 测试拓扑排序部分序列（B8）===")
+
+    cycle_meta = MetaObject(
+        id="partial_order",
+        name="部分序列",
+        table_name="partial_order",
+        fields=[
+            MetaField(id="seed", name="种子", field_type=FieldType.INTEGER, db_column="seed"),
+            MetaField(id="a", name="A", field_type=FieldType.INTEGER, db_column="a"),
+            MetaField(id="b", name="B", field_type=FieldType.INTEGER, db_column="b"),
+            MetaField(id="c", name="C", field_type=FieldType.INTEGER, db_column="c"),
+            MetaField(id="d", name="D", field_type=FieldType.INTEGER, db_column="d"),
+        ],
+        rules=[
+            MetaComputation(
+                id="cyc_a", name="环A", source_fields=["b"], target_field="a",
+                formula="b + 1", triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+            MetaComputation(
+                id="cyc_b", name="环B", source_fields=["a"], target_field="b",
+                formula="a + 1", triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+            MetaComputation(
+                id="flow_1", name="流1", source_fields=["seed"], target_field="c",
+                formula="seed + 1", triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+            MetaComputation(
+                id="flow_2", name="流2", source_fields=["c"], target_field="d",
+                formula="c * 2", triggers=[RuleTrigger.BEFORE_SAVE],
+            ),
+        ]
+    )
+
+    graph = RuleDependencyAnalyzer.analyze(cycle_meta)
+
+    try:
+        RuleDependencyAnalyzer.topological_sort(graph)
+        raise AssertionError("严格模式遇环应抛 ValueError")
+    except ValueError:
+        pass
+
+    partial = RuleDependencyAnalyzer.topological_sort(graph, strict=False)
+    print("  部分序列: {0}".format(partial))
+    assert set(partial) == {"flow_1", "flow_2"}, \
+        "成环节点应被剔除，实际: {0}".format(partial)
+    assert partial.index("flow_1") < partial.index("flow_2"), \
+        "合法依赖序应保留，实际: {0}".format(partial)
+
+    print("[PASS] 拓扑排序部分序列测试通过")
+
+
 def run_all_tests():
     print("=" * 60)
     print("隐式规则链测试")
@@ -391,6 +448,7 @@ def run_all_tests():
     test_validation_failure()
     test_cycle_detection()
     test_explicit_dependency_edges()
+    test_topological_sort_partial_on_cycle()
     
     print("\n" + "=" * 60)
     print("所有测试通过！")
