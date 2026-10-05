@@ -84,6 +84,11 @@ def make_dim_scope_engine_ds() -> Iterator[object]:
             code TEXT,
             service_module_id INTEGER
         );
+        CREATE TABLE IF NOT EXISTS orgs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            parent_id INTEGER
+        );
     """)
     conn.commit()
 
@@ -120,6 +125,63 @@ def seed_basic_scope(ds) -> None:
     ds.execute(
         "INSERT INTO products (name, code) VALUES (?, ?)",
         ['Product1', 'P1']
+    )
+
+
+def seed_org_tree(ds) -> None:
+    """种子: orgs 自引用树 + 防环用例 (P4-Org-01 org 维度子树展开).
+
+    干净树: 1(根) → 2 → 3; 1 → 4 → 5
+    防环环: 101 → 102 → 103 → 104 → 101 (BFS 必须终止且全覆盖)
+    """
+    rows = [
+        (1, '总部', None),
+        (2, '供应链事业部', 1),
+        (3, '采购部', 2),
+        (4, '财务事业部', 1),
+        (5, '应付组', 4),
+        (101, '环A', 104),
+        (102, '环B', 101),
+        (103, '环C', 102),
+        (104, '环D', 103),
+    ]
+    for org_id, name, parent_id in rows:
+        ds.execute(
+            "INSERT INTO orgs (id, name, parent_id) VALUES (?, ?, ?)",
+            [org_id, name, parent_id],
+        )
+
+
+def seed_v101_upward_expansion(ds) -> None:
+    """种子: ps=1803, version=[2,11,12] (复刻 v1.0.1 向上/向下展开测试拓扑).
+
+    拓扑: product 1
+          ├─ version 2  → domain 64 → sub_domain 301
+          ├─ version 11 → domain 70 → sub_domain 302
+          └─ version 12 → domain 88
+    期望: version=id IN(2,11,12); domain=version_id IN(2,11,12);
+          sub_domain=domain_id IN(64,70,88); product=id 1 (向上反查)
+    """
+    import json
+    ds.execute("INSERT INTO products (id, name, code) VALUES (?, ?, ?)",
+               [1, 'P', 'P1'])
+    for vid in (2, 11, 12):
+        ds.execute(
+            "INSERT INTO versions (id, name, code, product_id) VALUES (?, ?, ?, ?)",
+            [vid, f'v{vid}', f'v{vid}', 1])
+    for did, code, vid in [(64, 'SCM', 2), (70, 'FIN', 11), (88, 'HR', 12)]:
+        ds.execute(
+            "INSERT INTO domains (id, name, code, version_id) VALUES (?, ?, ?, ?)",
+            [did, code, code, vid])
+    for sid, code, did in [(301, 'PL', 64), (302, 'PUR', 70)]:
+        ds.execute(
+            "INSERT INTO sub_domains (id, name, code, domain_id) VALUES (?, ?, ?, ?)",
+            [sid, code, code, did])
+    ds.execute(
+        "INSERT INTO permission_set_dimension_scopes "
+        "(permission_set_id, dimension_code, dimension_values, inherit_children) "
+        "VALUES (?, ?, ?, ?)",
+        [1803, 'version', json.dumps([2, 11, 12]), 1]
     )
 
 

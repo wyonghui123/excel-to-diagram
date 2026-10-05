@@ -27,26 +27,27 @@ from meta.core.interceptors.data_permission_interceptor import DataPermissionInt
 class _FakeDataSource:
     """最小化 DataSource, 只为 _apply_dimension_scope_filter 的两条 SELECT 准备"""
 
-    def __init__(self, role_id_to_scope_dict, user_group_links):
+    def __init__(self, scope_by_ps_dict, user_org_links):
         """
-        role_id_to_scope_dict: {role_id: [{dimension, values, mode, inherit}, ...]}
-        user_group_links: [(user_id, group_id, role_id), ...]
+        scope_by_ps_dict: {permission_set_id: [{dimension, values, mode, inherit}, ...]}
+        user_org_links: [(user_id, org_id, permission_set_id), ...]
         """
-        self._scope_by_role = role_id_to_scope_dict
-        self._links = user_group_links
+        self._scope_by_role = scope_by_ps_dict
+        self._links = user_org_links
 
     def execute(self, sql, params):
         sql = sql.strip()
-        # role_ids query
-        if 'gr.role_id' in sql and 'ugm.user_id' in sql:
-            user_id = params[0]
-            role_ids = [r for (u, g, r) in self._links if u == user_id]
-            return _FakeCursor([(r,) for r in role_ids])
-        # role_dimension_scopes count
-        if 'role_dimension_scopes' in sql and 'COUNT(*)' in sql:
-            placeholders = sql.count('?')
-            role_ids = list(params)
-            count = sum(1 for rid in role_ids if rid in self._scope_by_role)
+        # [FIX 2026-10-05] 现行 interceptor 经 org 链路取 permission_set:
+        #   SELECT DISTINCT gr.permission_set_id FROM org_permission_sets gr
+        #   WHERE gr.org_id IN (...)
+        if 'org_permission_sets' in sql and 'gr.permission_set_id' in sql:
+            org_ids = set(params or [])
+            ps_ids = sorted({ps for (u, org, ps) in self._links if org in org_ids})
+            return _FakeCursor([(p,) for p in ps_ids])
+        # [FIX 2026-10-05] 表名已由 role_dimension_scopes 改为 permission_set_dimension_scopes
+        if 'permission_set_dimension_scopes' in sql and 'COUNT(*)' in sql:
+            ps_ids = list(params)
+            count = sum(1 for pid in ps_ids if pid in self._scope_by_role)
             return _FakeCursor([(count,)])
         return _FakeCursor([])
 
@@ -90,7 +91,7 @@ class _FakeAuthMiddleware:
         return False
 
 
-def _monkeypatch_dpi(monkeypatch, fake_engine):
+def _monkeypatch_dpi(monkeypatch, fake_engine, links):
     """Monkey-patch DataPermissionInterceptor to use our fake engine"""
     from meta.core.interceptors import data_permission_interceptor as dpi_mod
     # AUTH_ENABLED True
@@ -103,13 +104,25 @@ def _monkeypatch_dpi(monkeypatch, fake_engine):
         def __init__(self, *args, **kwargs):
             pass
 
-        def derive_data_conditions(self, role_id):
-            return dict(fake_engine._conds.get(role_id, {}))
+        def expand_dimension_values(self, permission_set_id):
+            # [FIX 2026-10-05] 现行 interceptor 先调 expand_dimension_values:
+            # 空 dict → _dim_has_any_values(None) 为 False, 不走 wildcard 分支
+            return {}
+
+        def derive_data_conditions(self, permission_set_id):
+            return dict(fake_engine._conds.get(permission_set_id, {}))
 
     monkeypatch.setattr(engine_mod, 'DimensionScopeEngine', _FakeEngineCls)
     # is_admin returns False
     from meta.services import auth_middleware as auth_mod
     monkeypatch.setattr(auth_mod, 'is_admin', lambda *args, **kwargs: False)
+    # [FIX 2026-10-05] 现行 interceptor 先经 OrgService.get_user_effective_org_ids
+    # 拿有效 org 集合, 再查 org_permission_sets; stub 掉该 org 链路查询
+    from meta.services.org_service import OrgService
+    monkeypatch.setattr(
+        OrgService, 'get_user_effective_org_ids',
+        lambda self, user_id: sorted({org for (u, org, ps) in links if u == user_id}),
+    )
 
 
 def test_multi_role_or_of_and_nested_not_flattened(monkeypatch):
@@ -136,7 +149,7 @@ def test_multi_role_or_of_and_nested_not_flattened(monkeypatch):
         user_links,
     )
 
-    _monkeypatch_dpi(monkeypatch, engine)
+    _monkeypatch_dpi(monkeypatch, engine, user_links)
     from meta.core.interceptors import data_permission_interceptor as dpi_mod
     interceptor = dpi_mod.DataPermissionInterceptor()
 
@@ -224,7 +237,7 @@ def test_single_role_no_or_group(monkeypatch):
         user_links,
     )
 
-    _monkeypatch_dpi(monkeypatch, engine)
+    _monkeypatch_dpi(monkeypatch, engine, user_links)
     from meta.core.interceptors import data_permission_interceptor as dpi_mod
     interceptor = dpi_mod.DataPermissionInterceptor()
 
@@ -279,7 +292,7 @@ def test_no_role_returns_false(monkeypatch):
     user_links = []  # 没有任何 role
     ds = _FakeDataSource({}, user_links)
 
-    _monkeypatch_dpi(monkeypatch, engine)
+    _monkeypatch_dpi(monkeypatch, engine, user_links)
     from meta.core.interceptors import data_permission_interceptor as dpi_mod
     interceptor = dpi_mod.DataPermissionInterceptor()
 
