@@ -15,7 +15,7 @@ description: 内部治理台账面：恒取 source='org' 的内部组织表示�
 display_name_field: name
 object_type: view
 view_definition: |
-  SELECT id, name, party_type, source, org_id
+  SELECT id, code, name, party_type, source, org_id
   FROM parties
   WHERE source = 'org'
 
@@ -53,6 +53,21 @@ fields:
     semantics:
       meaning: 自增主键
       primary_key: true
+
+  - id: code
+    name: 身份主体编号
+    type: string
+    db_column: code
+    required: true
+    max_length: 20
+    description: 身份主体唯一识别号（继承自 parties.code）
+    semantics:
+      meaning: 身份主体业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
 
   - id: name
     name: 显示名

@@ -154,3 +154,19 @@ class TestCodeGeneration:
         second = eng.generate_code(cfg, {}, 'party',
                                    table_name='parties', prefix_filter=PREFIX)
         assert second == 'PATY-00000002'
+
+
+# ────────────────────────────────────────
+# 5. 面暴露（§10.2 接线：唯一识别号在两个只读面可见）
+# ────────────────────────────────────────
+class TestCodeExposedOnFacets:
+    @pytest.mark.parametrize('bo_id', ['party_archive', 'party_internal'])
+    def test_view_select_exposes_code(self, bo_id):
+        import yaml
+        with open(os.path.join(_SCHEMA_DIR, bo_id + '.yaml'), 'r',
+                  encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        assert data.get('object_type') == 'view'
+        assert 'code' in (data.get('view_definition') or ''), \
+            '%s 视图 SELECT 未暴露 code' % bo_id
+        assert 'code' in {fl['id'] for fl in data.get('fields', [])}
