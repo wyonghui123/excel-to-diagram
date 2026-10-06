@@ -984,11 +984,12 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ② **`best` 范式与分档记录组合会静默选出错误记录**：`best` 按 `c.value` 比优，而分档记录的 `value` 是**占位值**（真实费率由档位定），比优 = 比一串占位值。正确的比优须按**定档后费率**（需数量），本期未实现，故**显式拒绝**（`ResolutionError` → 422），引导配置者改用 `precedence`；
 > ③ **负数量下两条路径分叉**：原 `resolve_scale` 只判 `q == 0`，负数量落入档位匹配 → `total` 找不到覆盖负值的档位 → **抛错**；而 `_op_tier` 对同一输入**静默返 0**。`TestScaleParity` 原来只测非负值，故未暴露。现统一为「非正数量 → 费率 0」（与 `_op_tier` 同口径），并把负值纳入 parity 参数集。**退货/红字应由 `calc_result.sign` 表达，不在阶梯算子内取负**。
 >
-> **FR-009 本期边界登记**（四条，均为**有意取舍而非遗漏**）：
+> **FR-009 本期边界登记**（五条，均为**有意取舍而非遗漏**）：
 > ① **`scale_divisor`（分档基数字段）本期不消费** —— 它要求读单据行字段，与「零 `order_line` / 零主数据」前提冲突，待行对象补齐后接；本期阶梯基数一律取计算基 `base`；
 > ② **「按定档后金额比优」本期不做** —— `resolution=best` 的比优发生在**记录层**（按 `value`），不比较定档后金额，与 SAP 语义一致（见 ②）；且**分档记录 + `best` 已显式拒绝**（见二次审查②），不存在静默误导；
 > ③ **定档留痕落 `calc_detail.factor_snapshot["scales"]`**（复用既有 json 列，**零 schema 改动**），记「落到哪一档 / 定出什么费率」，供 FR-010 回答"为什么是这个值"。
 > ④ **`LookupResult.rates` 的 key 是整型**（`{candidate_id: rate}`）；`to_dict()` 经 `json.dumps` 后 key 会变字符串。当前仅**进程内**消费（`pricing_service` 不经 JSON 读它），故本期不处理；若未来经 API 暴露，消费端须做 `int()` 回转。
+> ⑤ **AC 第 3 条「订单单位 ≠ 计量单位时先按 UoM 换算」本期不做 —— 已被 D19 + TBD-10 显式后置**。D19 拍板「换算归**事实源取值阶段**，引擎内 `base` 恒为标准单位」，完整 `conversion{from_unit,to_unit,factor_expr}` 对象登记为 **TBD-10（后置 P6）**。**故 AC ③ 不是待办，是有界面的本期不做**（此前 Spec 未登记此条，导致 AC 读起来像遗漏，本次补上）。**D19 承诺的「本期只补 `base_source` 枚举 `scaled_quantity`」已于 2026-10-07 兑现**：`calc_result.base_source` / `calc_detail.base_source` 补该值，**只承载「本基来自已换算数量」的声明，引擎不读它做换算**。**重新开启条件**：TBD-10 的 `conversion` 对象落地（须同时满足：换算因子来源挂到 `source_type = market / measurement` 的字段上、且不破坏 C-T0-6 零主数据依赖）。**实测现状（2026-10-07 取证）**：数据层 `uom` / `item_uom_conversion{from,to,factor}` / `items.base_uom` 三表闭环**已注册可建表但零消费代码**；`rate_record.rate_unit` 仅有 `semantics.master_data_ref: uom` 标记，**不建外键**（C-T0-6），故定价层与 UoM 之间**无任何可执行连接**；`rate_type.display_scale` / `numeric_field` 在 `meta/tests` 与 `meta/core` / `meta/services` 中**实质命中为 0**（仅 yaml 声明）。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|

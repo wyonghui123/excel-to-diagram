@@ -266,6 +266,14 @@ fields:
         label: 定价数量
         color: primary
         description: 默认
+      # 【补 2026-10-07 · D19 兑现】换算归**事实源取值阶段**（Spec D19 选 B），
+      # 引擎内 base 恒为标准单位。本枚举只承载「本基来自已换算的数量」这一
+      # **声明**，供配置者表达来源；**引擎不读它做换算**（完整 conversion 对象
+      # 已由 TBD-10 后置 P6）。留空 = 未声明换算来源。
+      - value: scaled_quantity
+        label: 已换算数量
+        color: primary
+        description: 上游事实源阶段已完成 UoM 换算的数量（引擎内不再换算；D19）
       - value: activity_quantity
         label: 活动量
         color: success
