@@ -215,6 +215,16 @@ class TestReplay:
         assert details[0]["running_net_amount"] == 100.0   # formula 累加后
         assert details[1]["running_net_amount"] == 100.0   # round 只读，净额不变
 
+    def test_detail_amount_is_normalized_to_float(self, ds):
+        """明细金额列名是 extended_amount，须被归一为数值（二次审查修正）"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        d = ex["results"][0]["details"][0]
+        assert d["extended_amount"] == 100.0
+        assert isinstance(d["extended_amount"], float)
+        assert isinstance(d["rollup_flag"], bool)
+
     def test_detail_subtotal_key_and_flag(self, ds):
         """带 subtotal_key 的步骤应置 rollup_flag（报表可按小计汇总）"""
         _seed(ds)
@@ -232,6 +242,87 @@ class TestReplay:
         assert r["net_amount"] == 100.0
         assert r["step_results"][1]["amount"] == 0.0
         assert r["state"]["rounded"] == 100.0
+
+
+class TestRecalc:
+    """重算语义：旧结果须作废但保留审计（FR-010 / status.invalid）"""
+
+    def test_recalc_invalidates_previous_result(self, ds):
+        """同一宿主重算 -> 旧行 status=invalid，新行 active，总行数保留"""
+        _seed(ds)
+        svc = PricingService(ds)
+        r1 = _price(ds, document_type="so", document_id=1)
+        r2 = _price(ds, document_type="so", document_id=1)
+        assert r1["result_id"] != r2["result_id"]
+
+        rows = ds.execute("SELECT status, COUNT(*) FROM calc_results"
+                          " GROUP BY status ORDER BY status").fetchall()
+        assert rows == [("active", 1), ("invalid", 1)]
+        # 旧结果仍在（可审计），但回放只认 active
+        assert len(svc.explain("so", 1)["results"]) == 1
+
+    def test_recalc_keeps_history_per_line(self, ds):
+        """行级结果与头级结果互不干扰（document_line_id 区分）"""
+        _seed(ds)
+        svc = PricingService(ds)
+        _price(ds, document_type="so", document_id=1)                       # 头级
+        _price(ds, document_type="so", document_id=1,
+               document_line_id=88, level="line")                            # 行级
+        active = ds.execute("SELECT level, COUNT(*) FROM calc_results"
+                            " WHERE status='active' GROUP BY level"
+                            " ORDER BY level").fetchall()
+        assert active == [("header", 1), ("line", 1)]
+
+        ex_h = svc.explain("so", 1)
+        ex_l = svc.explain("so", 1, document_line_id=88)
+        assert [r["level"] for r in ex_h["results"]] == ["header", "line"]
+        assert [r["level"] for r in ex_l["results"]] == ["line"]
+
+
+class TestAtomicity:
+    """落库原子性：结果行与明细行必须同生共死（FR-010 可回放的前提）"""
+
+    def test_result_and_details_written_together(self, ds):
+        """正常路径：1 结果行 对应 N 明细行，不留孤儿"""
+        _seed(ds)
+        _price(ds, document_type="so", document_id=1)
+        n_r = ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0]
+        n_d = ds.execute("SELECT COUNT(*) FROM calc_details").fetchone()[0]
+        assert n_r == 1
+        assert n_d == 2          # 过程有两个步骤
+
+    def test_failure_rolls_back_result_row(self, ds):
+        """明细写入失败 -> 结果行一并回滚（不留孤儿结果）
+
+        用包装类注入失败点：sqlite3.Connection.execute 是只读内置方法，
+        不能 monkeypatch，故包一层代理把「写明细」那次调用变成抛错。
+        """
+        _seed(ds)
+        svc = PricingService(ds)
+
+        class _Flaky:
+            """代理 ds：calc_details 的 INSERT 抛错，其余透传。"""
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            def execute(self, sql, params=None):
+                if "INSERT INTO calc_details" in str(sql):
+                    raise RuntimeError("simulated detail insert failure")
+                return self._inner.execute(sql, params or [])
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            PricingService(_Flaky(ds)).price_line(
+                "PROC_STD", 1, [{"customer": 1001}], 1.0,
+                sequence_code="SEQ_STD", document_type="so", document_id=1)
+
+        # 事务回滚后：既无结果行也无明细行，更不能是"有结果无明细"
+        n_r = ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0]
+        n_d = ds.execute("SELECT COUNT(*) FROM calc_details").fetchone()[0]
+        assert (n_r, n_d) == (0, 0)
 
 
 class TestErrorHandling:

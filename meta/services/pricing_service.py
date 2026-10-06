@@ -108,11 +108,11 @@ class PricingService:
         rows = self._query("SELECT * FROM lookup_sequences WHERE code = ?", (code,))
         return rows[0] if rows else None
 
-    def get_key_schema(self, code: str) -> Optional[Dict[str, Any]]:
-        rows = self._query("SELECT * FROM key_schemas WHERE code = ?", (code,))
-        return rows[0] if rows else None
-
     def get_rate_type(self, code: str) -> Optional[Dict[str, Any]]:
+        """取费率类型。**当前编排未用**——`calc_result.rate_type_code` 取自
+        计算步骤声明（rate_type_id → code），而非独立查表。
+        保留供后续「按费率类型分组统计 / 分摊」等场景使用。
+        """
         rows = self._query("SELECT * FROM rate_types WHERE code = ?", (code,))
         return rows[0] if rows else None
 
@@ -242,7 +242,7 @@ class PricingService:
         # ---- 阶段三：落结果与明细（FR-010 / FR-011）----
         result_id = None
         if persist and document_type and document_id is not None:
-            result_id = self._persist(
+            result_id = self._persist_with_invalidate(
                 process=proc,
                 level=level,
                 document_type=document_type,
@@ -269,7 +269,7 @@ class PricingService:
     # ------------------------------------------------------------------
     # 落库
     # ------------------------------------------------------------------
-    def _persist(
+    def _persist_with_invalidate(
         self,
         *,
         process: Dict[str, Any],
@@ -283,7 +283,80 @@ class PricingService:
         lk,
         valid_on: Optional[str],
     ) -> int:
-        """写 `calc_result` 一行 + `calc_detail` N 行（FR-010 可回放）。"""
+        """作废旧结果 + 落新结果 + 落明细，**整体一个事务**。
+
+        【补 2026-10-06 二次审查】
+        ① **重算须作废旧结果**：否则同一单据调两次会留下 2 条 active 结果，
+           `explain` 只查 active，回放无法判断哪条有效。`status` 枚举里
+           `invalid` 的语义正是「已被重算取代，保留以便审计」。
+        ② **作废与新写必须同事务**：否则作废成功而新写失败 = 该单据**无有效结果**，
+           比留 2 条 active 更糟。
+        """
+        tx = getattr(self.ds, "transaction", None)
+        if callable(tx):
+            with tx():
+                return self._invalidate_and_persist_inner(
+                    process, level, document_type, document_id,
+                    document_line_id, net, base, calc, lk, valid_on,
+                )
+        sp = f"sp_pricing_{uuid.uuid4().hex[:8]}"
+        # 裸 sqlite 连接（测试用）无 transaction()，用 SAVEPOINT 包裹。
+        # 【注意】不能用 BEGIN —— python sqlite3 默认 autocommit=False，
+        # 已在隐式事务中，显式 BEGIN 会报 "cannot start a transaction
+        # within a transaction"。SAVEPOINT 可嵌套，故两者皆宜。
+        self.ds.execute(f"SAVEPOINT {sp}")
+        try:
+            rid = self._invalidate_and_persist_inner(
+                process, level, document_type, document_id,
+                document_line_id, net, base, calc, lk, valid_on,
+            )
+            self.ds.execute(f"RELEASE SAVEPOINT {sp}")
+            return rid
+        except Exception:
+            self.ds.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            self.ds.execute(f"RELEASE SAVEPOINT {sp}")
+            raise
+
+    def _invalidate_and_persist_inner(
+        self,
+        process: Dict[str, Any],
+        level: str,
+        document_type: str,
+        document_id: int,
+        document_line_id: Optional[int],
+        net: float,
+        base: float,
+        calc: Dict[str, Any],
+        lk,
+        valid_on: Optional[str],
+    ) -> int:
+        self.ds.execute(
+            "UPDATE calc_results SET status = 'invalid', updated_at = ?"
+            " WHERE document_type = ? AND document_id = ?"
+            "   AND status = 'active'"
+            "   AND ((document_line_id IS NULL AND ? IS NULL)"
+            "        OR document_line_id = ?)",
+            [datetime.now().isoformat(timespec="seconds"),
+             document_type, document_id, document_line_id, document_line_id],
+        )
+        return self._persist_inner(
+            process, level, document_type, document_id,
+            document_line_id, net, base, calc, lk, valid_on,
+        )
+
+    def _persist_inner(
+        self,
+        process: Dict[str, Any],
+        level: str,
+        document_type: str,
+        document_id: int,
+        document_line_id: Optional[int],
+        net: float,
+        base: float,
+        calc: Dict[str, Any],
+        lk,
+        valid_on: Optional[str],
+    ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         code = f"CR_{uuid.uuid4().hex[:16]}"
 
@@ -386,8 +459,11 @@ class PricingService:
                 # sqlite 的 REAL/INTEGER 在部分驱动下读回为 str/bytes
                 # （如 DECIMAL 亲和性），回放接口须归一为数值，
                 # 否则前端拿到 "100.0" 字符串做不了算术。
-                for k in ("amount", "running_net_amount", "base_value",
-                          "unit_price"):
+                # 【修 2026-10-06】明细的金额列名是 `extended_amount`（不是
+                # `amount`）—— 原归一列表写的是 `amount`，导致明细金额
+                # 从未被归一，回放接口返回 None。
+                for k in ("extended_amount", "running_net_amount",
+                          "base_value", "unit_price"):
                     d[k] = _to_num(d.get(k))
                 # boolean 列同样可能被读回 0/1 或 "0"/"1"
                 for k in ("rollup_flag", "skip_running_price", "rolling",

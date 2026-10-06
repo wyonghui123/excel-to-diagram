@@ -929,6 +929,11 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ⑥ **回放接口须归一数值/布尔**：sqlite 可能把 REAL/BOOLEAN 读回 `str` / `0`，`explain` 已统一 `_to_num` / `bool` 归一，否则前端拿到 `"100.0"` 字符串做不了算术。
 >
 > **一条语义边界（实测确认）**：`calc_detail.skipped_candidates` 记的是「**因键不匹配 / 被更小 seq 槽位抢先**而跳过」的候选；**同槽位内**被 precedence/exclusive 取一落选**不算 skipped**——那是消解范式的正常结果，不是"跳过"。
+>
+> **T1-4 二次审查补的三处不变量**（都是首轮「23 个用例全绿」时查不出来的，因为它们只在**跨调用**或**列名不对**时才显现）：
+> ① **重算须作废旧结果**：同一宿主（`document_type`+`document_id`+`document_line_id`）重复定价，旧行置 `status='invalid'` 而非删除——`calc_result.status` 枚举里 `invalid` 的语义正是「已被重算取代，保留以便审计」。首轮实现只追加不留痕，`explain` 只查 `active`，会返回 2 条互相矛盾的结果；
+> ② **作废 + 新写 + 明细必须同事务**：否则中途失败会留下「有 `calc_result` 无 `calc_detail`」的孤儿结果，而 FR-010 要求「可解释 = 可回放」，孤儿结果无法解释。实现上用 `bo_framework` 的 `transaction()`，裸 sqlite 连接退化为 `SAVEPOINT`（**不能用 `BEGIN`**——python sqlite3 默认已在隐式事务中）；
+> ③ **明细金额列名是 `extended_amount` 不是 `amount`**：归一化列表里写错列名，导致回放接口明细金额**始终返回 `None`** 而非数值。这是典型的"加了一行归一代码但没验证它作用在哪个字段上"。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|

@@ -280,8 +280,9 @@ def _resolve_weighted(cands: List[Candidate]) -> List[Candidate]:
 def apply_weighted(cands: List[Candidate], base: float) -> float:
     """加权累加：`Σ(rateᵢ × base × weightᵢ)`（FR-008 AC）。
 
-    TR-006 验收：权重 0.5 / 0.3 / 0.2 → 100×.5 + 200×.3 + 300×.2 = 140
-    （base=1）。base 传 1.0 即"单件加权费率"。
+    TR-006 验收：权重 0.5 / 0.3 / 0.2 → 100×.5 + 200×.3 + 300×.2 = 170
+    （50+60+60=170）。base 传 1.0 即"单件加权费率"。
+    [算术修正 2026-10-06] Spec 原文写 140 是错的，已同步修正。
     """
     if not cands:
         return 0.0
