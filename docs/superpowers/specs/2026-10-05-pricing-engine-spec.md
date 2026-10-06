@@ -1,0 +1,856 @@
+# 定价引擎（Pricing Engine）Spec + RFC
+
+> **版本**：v1.5 | **日期**：2026-10-05 | **状态**：**待确认**（**全部待拍板项已清零** —— v1.4 拍板 D18 补第四消解范式 `weighted` / D19 单位换算归事实源取值阶段；v1.5 拍板 D16 费用归属 / D17 重算节奏 / D20 多账簿不纳入 / D21 结果能力接口本期不做 / D22 + D23 改价必填原因（Override 复用 `adjustment`）/ D24 输出映射改为字段约定。**残留 TBD-3~TBD-7 为实施期事项；TBD-10 后置 P6；TBD-12 / TBD-13 保留待议**）
+> **命名声明（v1.3 拍板）**：**元模型层一律使用领域中立名**——费率类型 / 查找序列 / 计算过程 / 费率记录 / 计算结果…；**SAP 术语（条件类型 / 存取序列 / 定价过程 / 条件记录 / 定价结果）降为"业务别名"，只出现在 [§9.3.1](#931-对象模型数据模型) 的"业务别名"与"溯源"列**，不再作主名。通用化只参数化**三个正交轴**（① 计算基来源 ② 率载体 ③ 结果语义），**成本归集层与碳组织边界 / 合并层不属本引擎**（§1.4 N9）。
+> **通用性外部验证（v1.4）**：**v2.0 跨域对撞**（研究稿 §4.9）——三轴在 Oracle **成本域**（`总成本 = 固定 + 变动[单位资源成本 × 消耗数量]`、`单位成本 = 总成本 ÷ 缩放数量`）与**碳域**（`排放量 = 活动数据 × 排放因子`）**逐字同构**；据此补入**第四消解范式 `weighted`**（Oracle 成本域 Sourcing Rule 分配百分比等三处）。**v2.1 Palantir 对照**（研究稿 §4.10）——**两条通用化路径的分野不在能力而在"谁承担域特有逻辑"**；本引擎走"元模型 + 参数化"，故 **N9 边界是这条路径的必要成本**。
+> **关联文档**：
+> - [2026-10-05-pricing-engine-research.md](./2026-10-05-pricing-engine-research.md)（**v2.1**，对标研究报告 —— **本 Spec 的唯一事实来源**）
+> - [2026-10-02-rule-model-spec.md](./2026-10-02-rule-model-spec.md)（v1.3，属性确定 Spec；本 Spec 的对齐范式与上游接缝）
+> - [2026-10-02-rule-model-research.md](./2026-10-02-rule-model-research.md)（v1.11；§10.4 判定"定价宜独立引擎"）
+> - [2026-09-29-doc-flow-copy-control-research.md](./2026-09-29-doc-flow-copy-control-research.md)（下游消费方：复制时"带价 vs 重定价"）
+> - [2026-09-30-object-model-guideline-plan-vs-fact.md](./2026-09-30-object-model-guideline-plan-vs-fact.md)（计划对象 vs 事实对象）
+
+> **一句话**：`default` 规则回答"**填哪个价目表**"，`compute` 回答"**总额 = 数量 × 单价**"，**本引擎回答"这个单价 / 这行金额是怎么一层层算出来的"**。
+>
+> **本文档性质**：把研究稿（940+ 行对标）**收敛为可实施、可验收的需求规格**。研究稿讲"为什么/对标/边界"，本 Spec 讲"**要什么/对象长什么样/怎么分期/怎么验收**"。所有需求均可回溯到研究稿章节（Source 列）。
+
+---
+
+## 1. 背景与目标
+
+### 1.1 背景
+
+平台**目前没有定价引擎**——不是"弱"，是"没有"（研究稿 §2 代码级取证：全仓无 `*pricing*` 文件，`meta/core` 下 13 个 `*engine*.py` 中无定价引擎）。现状能力天花板：
+
+- `MetaDefaultRule` 能按"客户 + 订单类型"**确定用哪张价目表**（`rate_table = PL_ZOR`），但**没有任何东西能把这张价目表算成一个价格**；
+- `MetaComputation` 能算 `total_amount = qty × unit_price` 这类**尾算**，但算不了 `unit_price` **本身怎么来**；
+- 单据行只有"放价格的格子"（`unit_price` / `net_price` / `total_amount`），**没有算价格的机器**。
+
+上位文档 [规则模型研究](./2026-10-02-rule-model-research.md) 已判定：**定价是"同族里最复杂的一类"**（多层累加 / 互斥 vs 累加 / 冲突取优 / 值类型多样），**宜独立引擎**，不能再用属性确定规则表凑合。
+
+**痛点**：一旦业务需要"客户 + 物料 + 数量 → 逐层得到净价（基价 → 折扣 → 附加费 → 税 → 运费）"，平台无任何机制承载；而头部六家（SAP / Oracle / Salesforce / D365 / Odoo / 金蝶）**骨架高度一致**（研究稿 §3、§4）：`价目表 + 条件规则 + 可配置计算序列 + 优先级/取优消解 + 可解释回放`。
+
+### 1.2 业务目标
+
+- **G1** 让"**逐层算出一个价格**"成为平台一等能力：一条**可配置的计算序列**，把一组因子算成一个金额（及小计明细），且**改配置不改代码**。
+- **G2** 覆盖六家共性骨架的**六个必备件**（研究稿 §4）：① 价目表 ② 条件类型 ③ 存取序列 ④ 定价过程 ⑤ 取优/消解 ⑥ 可解释回放。
+- **G3** 可解释：每次定价都能回答"**命中了哪一行、被谁否决、逐层小计、基准是什么**"（对标 Oracle Request Viewer / SF Price Waterfall / 金蝶取价日志）。
+- **G4** 与单据链协同：明确"**搬价 vs 重算**""**按哪一版数量**"，且**已开票/已过账行不得隐式重定价**（红线）。
+- **G5** **不重复造轮子**：复用既有条件内核、首个命中语义、安全表达式求值、`MetaComputation` 宿主，只补真正缺的三件——"**多层累加 + 多候选取优 + 条件记录（价目行）**"。
+
+### 1.3 用户 / 涉众目标
+
+| 角色 | 想要达成 |
+|---|---|
+| 业务配置人员（定价管理员） | 不写代码即可维护价目表 / 价目行 / 条件类型 / 定价过程 / 分摊规则 |
+| 销售 / 开票人员 | 单据上能看到价格怎么来的（逐层明细），并可"查看计算过程" |
+| 财务 / 成本 | 事后计划外费用能摊到业务单据行，去向（成本 / 费用）可配，追溯补差成对留痕 |
+| 平台开发 | 一套"通用确定"元模型，未来可扩展伙伴 / 批次 / 输出 / 文本确定而不改引擎 |
+
+### 1.4 本期目标 / 非目标
+
+**本期目标（须交付）**：P1 单层取价 → P2 多层累加 + 回放 → P3 取优/互斥（研究稿 §7）。
+
+**本期非目标（明确不做，边界登记见 FR-018）**：
+
+- **N1** 选价目表 → 归 `default`（`MetaDefaultRule`）——**选价目表 ≠ 算价格**。
+- **N2** 总额尾算（`total = qty × unit_price`）→ 归 `compute`（`MetaComputation`）。
+- **N3** 跨单据 / 跨期间 **纯财务口径**的费用分摊（无"业务单据行"落点）→ 归待建 `allocation`。
+- **N4** 限价校验（"净价不得低于限价"）→ 归 `validation`（`MetaValidation`）——定价只**产出** min/max 快照。
+- **N5** **搬运动作本身** → 归 `doc_flow`（定价只**声明**策略 `price_mode`）。
+- **N6** 采购侧（供应商 / PO）定价与**成本核算**（移动平均 / 标准价 / 价差取值算法）→ **D7 范围外**（研究稿 §4.7 只做费用对象与分摊模型设计）。
+- **N7** 期货保值 / 风险管理 / 头寸 → 归 **CTRM / 风控**；**质检本身**（检验批 / 使用决策 UD / 质量通知）→ 归 **QMS**（定价只消费"质检结果 → 定价输入字段"这一层）。
+- **N8** 在线配置 UI、规则版本化（首期不做，随元数据定义发布）。
+- **N9 通用化边界（v1.3 拍板）**：元模型虽按"**确定 + 计算**"通用设计，但**只参数化三个正交轴**（① 计算基来源 ② 率载体 ③ 结果语义）；**成本归集层**（成本对象 / 成本构成拆分 cost component split / 价格控制：标准价 · 移动平均 · 价差）与**碳排放的组织边界 / 合并层**（GHG 组织与运营边界、合并口径）**不属本引擎**——引擎只承担"**量 × 率 × 多步**"的计算骨架（研究稿 N6、§4.8E）。
+
+---
+
+## 2. 需求类型总览
+
+| 类型 | 编号段 | 说明 | 来源 |
+|---|---|---|---|
+| 业务需求 Business | §1.2 G1–G5 | 为什么需要定价引擎 | 研究稿 §2、§2.2 |
+| 涉众需求 User | §1.3 | 配置 / 销售 / 财务 / 开发各角色诉求 | 研究稿 §4.6、§4.7 |
+| 方案需求 Solution | §9.2 / §9.3 | 独立引擎 + 通用确定元模型 | 研究稿 §5、§8.2（D7） |
+| 功能需求 FR | FR-001 … FR-018 | 逐条可验收行为 | 研究稿 §3–§7 |
+| 非功能需求 NFR | NFR-001 … NFR-007 | 质量属性 | 研究稿 §5.1、§7 |
+| 接口 / 集成需求 IF | IF-001 … IF-008 | 与既有引擎 / 单据 / 主数据的接缝 | 研究稿 §5.2、§6、§7 |
+| 过渡 / 迁移需求 TR | TR-001 … TR-004 | 灰度、依赖补齐、回滚 | 研究稿 §6.1、§7 |
+
+---
+
+## 3. 功能需求（FR）
+
+> **优先级约定**：Must = P0–P2（本期必须）；Should = P3–P4；Could = P4.5–P6（可后置）。
+> **通用护栏**（适用于全部 FR）：① 已开票 / 已过账的行**不得隐式重定价**；② 重算**须显式触发且留痕**；③ 表达式一律走 `SafeExpressionEvaluator`（禁 `eval`）。
+
+### FR-001 费率表与费率记录（Rate Table / Rate Record）—— 件①（业务别名：价目表 / 价目行·条件记录）
+
+- **Description**：系统 MUST 提供**费率表 `rate_table`**（业务别名：价目表）与其**费率记录 `rate_record`**（业务别名：价目行 / 条件记录），作为"**率**"的库存——**价格、排放因子、作业费率、税率装在同一种载体里**。费率记录 MUST 携带：来自匹配键表的**键**、**值 / 费率**、**有效期**、**币种**、**计量单位 / 计量数量**、**阶梯**、**状态**。
+- **Acceptance Criteria**：
+  - 仅有 **`status = approved`**（审核态）的费率表参与取用（对标金蝶"仅审核态参与取价"）；
+  - 费率记录支持逐行"键 + 值 + 有效期 + 币种 + 计量单位"落库，可被**查找序列**按键检索；
+  - 跨币种费率记录可按汇率换算为单据币种（依赖 IF-008 汇率主数据）；
+  - **载体中立（v1.3）**：同一 `rate_record` 靠所属 `rate_type` 区分"这是价格 / 因子 / 费率 / 税率"，**不为碳因子或作业费率另建表**。
+- **Priority**：Must
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4 件①、§4.2 第 2 层、§3.1.6（金蝶审核态）
+
+### FR-002 费率类型（Rate Type：配置对象，非硬编码枚举）—— 件②（业务别名：条件类型 / 价格类型 / 因子类型）
+
+- **Description**：系统 MUST 把**费率类型 `rate_type`**（业务别名：条件类型 / 价格类型 / 因子类型）落成**可维护的配置对象**（不是硬编码枚举）。硬编码的只是其**属性枚举**（费率类 / 计算类型 / 率载体）。
+- **Acceptance Criteria**：
+  - 费率类型字段至少含：`编码 / 名称 / 费率类 rate_class`（**枚举按过程类型扩展**：pricing 实例取 `{price, discount_surcharge, tax, freight, statistical}`）/ `计算类型 calc_type ∈ {percent, fixed, quantity, formula}` / **`rate_source ∈ {rate_record, external_quote, formula}`（率载体，v1.3 通用化轴②）** / 正负号 `sign` / 舍入规则 `rounding` / 互斥组 `exclusion_group` / 是否手动可录入 `manual_allowed` / 是否必填 `mandatory` / 是否统计 `statistical` / 查找序列引用 `lookup_sequence_id`（研究稿 §4.1 设计含义）；
+  - 六家对标全部支持自建费率类型，本 FR 须满足"**自建即生效**"，改配置不改代码；
+  - 与 D7"通用确定"一致：未来复用同表做伙伴 / 批次确定或碳排放核算时，只新增 `rate_class` 枚举值 / 新增 `rate_source` 取值，**不改表结构**。
+- **Priority**：Must
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4.1（含六家对标表）、§8 D7/§8.2、§8 D9
+
+### FR-003 因子目录与匹配键表（Factor Catalog / Key Schema）—— 件①/③ 的前置键（业务别名：字段目录 / 条件表）
+
+- **Description**：系统 MUST 提供**因子目录 `factor_catalog`**（业务别名：字段目录；哪些字段可当键，含事实源分类）与**匹配键表 `key_schema`**（业务别名：条件表；用哪些因子的**组合**做键）。
+- **Acceptance Criteria**：
+  - 因子目录项含 `source_type ∈ {static, master, quality, measurement, market}`，使**质检 / 计量 / 外部报价**三类事实源字段与主数据字段**同权**（FR-015 前置）；
+  - 匹配键表由因子目录中选字段组成，是费率记录"键"的定义来源；
+  - 匹配键表 + 因子目录与 FR-002 费率类型**同批**交付（研究稿 §6.1 #10 定为 P0）。
+- **Priority**：Must
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4.2 第 1 层、§4.8D①、§6.1 #10、#27
+
+### FR-004 查找序列与取数范式（Lookup Sequence：exclusive / additive）—— 件③（业务别名：存取序列）
+
+- **Description**：系统 MUST 提供**查找序列 `lookup_sequence`**（业务别名：存取序列）：一条**有序查表列表**，每条带 **Exclusive 开关**（首个命中即停 vs 继续向后查累加）。**槽位内默认 exclusive（首个命中）**。
+- **Acceptance Criteria**：
+  - 默认语义 = **exclusive 首个命中**（对标 SAP 存取序列 Exclusive 标志、Odoo 首个、金蝶"命中即止"）；
+  - 需**继续累加**时，须在该条**显式开启**（additive）；
+  - 同 `priority` 必须有**确定 tie-break**（`priority` asc，其次 `rate_record.id` 字典序），**禁止不确定顺序**；
+  - 命中后可回答"**命中哪一行 / 为什么其它行被跳过**"（回放最小骨架，配 FR-010）。
+- **Priority**：Must
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4 件③、§5.1（复用 `default_by_priority` 语义）、§8 D2/§8.1、§5.2
+
+### FR-005 计算过程（Calculation Procedure：可配置计算序列 + 可插拔算子）—— 件④（业务别名：定价过程）
+
+- **Description**：系统 MUST 提供**计算过程 `calc_procedure`**（业务别名：定价过程）：由 `calc_procedure_step` 组成的**有序计算序列**；每步 = `seq + element_type + rate_type? + condition + params`，**步骤须带类型（不是硬编码 if-else）**。
+- **Acceptance Criteria**：
+  - **`result_semantic ∈ {price, cost, emission, tax, hours, quantity}`（默认 `price`）—— 过程声明"产出什么语义"（元 / 吨CO₂e / 小时），引擎不写死为价格（v1.3 通用化轴③）**；
+  - `element_type` 至少覆盖：`list_price / tier / attribute / formula / manual / derived / aggregate / distribute / round / track`（★ 另预留 `quality_premium`，FR-015）；
+  - 过程可按"过程类型 = `pricing`"确定（通用确定骨架，D7 要求**不写死 price**）；未来新增 `costing` / `emission` 过程类型 = **新增过程实例 + 复用同一引擎**，非改引擎；
+  - 每步执行**有条件地更新内存中的中间结果**（对标 Oracle Pricing Algorithm 逐步更新内存 SDO / SAP 定价过程 V/08）；
+  - 步骤可存放**小计**（subtotal），供后续步骤与报表引用（SAP `KZWI1..6`）；
+  - 对标补充（研究稿 v1.9 收口）：金蝶"计算策略"经复证**属定价过程内**（公式化因子聚合层、可回放），且**仅星空旗舰版 / 星瀚具备、星空标准版无**——佐证"过程内多因子聚合"在七家中普遍存在。
+- **Priority**：Must（P2）
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4 件④、§4.4 启示 1、§6.1 #18、§8 D7/§8.2、§1.16、§3.1.6
+
+### FR-006 计算基显式建模（Calculation Base：一等对象）
+
+- **Description**：系统 MUST 把"**基准 base**"显式建模为**一等配置**，而非隐含在公式里的变量。计算明细每步 MUST 记录**四个维度**：
+  - `base_level`（层级：`header` / `line`）
+  - **`base_source`（计算基来源 —— 通用化轴①）**：`pricing_quantity`（定价数量，默认）/ **`activity_quantity`（活动量：燃料消耗 / 用电量 / 工时 —— 碳排放与作业成本用）** / `value` / `weight` / `volume` / `energy` / `hours` / `attribute` / `formula`（选 `formula` 时另记 `base_formula`）
+  - `base_step`（计算基步骤：From/To，百分比 / 折扣基于哪个前序步骤的中间结果）
+  - `rolling`（是否滚动：`true` 时计算基 = 持续更新的**当前滚动净额 `running_net_amount`**）
+- **Acceptance Criteria**：
+  - **`rolling = true` 与 `base_step` 互斥**——滚动时不指定具体前序步骤（对标 Oracle Running Net Price 是单一累加器对象）；
+  - **默认不滚动（cumulative）**，滚动（cascade）**须显式开启**，开启时明细记 `running_net_amount`；
+  - `base_source` 默认为**定价数量**（`qty × rate_unit`），可被 `base_formula` 改写为价值 / 重量 / 活动量 / 能耗（共用 `SafeExpressionEvaluator`）；
+  - **跨域可复用（v1.3）**：把 `base_source` 换成 `activity_quantity`、把率载体换成"排放因子表 / 作业费率表"，同一套**计算基 + 步骤序列**即可算 **碳排放**（活动量 × 排放因子，Scope1→2→3 逐层累加）与 **作业成本**（动因量 × 作业费率）——**无需改引擎**（§1.4 N9 边界：碳的组织边界 / 合并层、成本归集层仍在本引擎外）。
+- **Priority**：Must（P2，与 FR-005 同批）
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4.3 A–D 行 / ⑥、§4.4 启示 2/3、§6.1 #17、§8 D10/D11/D12
+
+### FR-007 多层累加与逐层小计
+
+- **Description**：系统 MUST 支持**步骤间 additive（逐层累加）**：基价 → 折扣 → 附加费 → 税 → 运费，逐层产出小计，最终得净价与行金额。
+- **Acceptance Criteria**：
+  - 步骤间默认 **additive**（不累加就算不出净价）；
+  - 逐层小计可回放（对标 Oracle Request Viewer / SF Waterfall）；
+  - 行金额（`extended_amount`）= 净价 × 数量（按定价单位换算），并可被 `compute` 尾算接续。
+- **Priority**：Must（P2）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.3③/④、§4.4、§3.1.2B3（官方算例）、§8 D2/§8.1
+
+### FR-008 多候选取优、互斥与权重分配（weighted）—— 件⑤
+
+- **Description**：系统 MUST 提供**同粒度多候选的冲突消解**，共**四种范式**（详见 §9.3.1 B2）：
+  - **互斥（`exclusive`）**：排斥组内**只保留获胜者**；
+  - **优先级（`precedence`）**：逐级覆盖，**首个命中获胜**（默认）；
+  - **取优（`best`）**：按度量选最优，**须显式开启并先定义度量**；
+  - **权重分配（`weighted`）· v1.4 新增**：**多候选不取一，全部参与**，按 `rate_record.allocation_weight` **加权累加** `result_amount = Σ(rateᵢ × base × weightᵢ)`，**`Σweightᵢ = 1`**。
+- **Acceptance Criteria**：
+  - 默认 **Precedence**（可预测 / 可回放 / 无需遍历候选全集；合同价应压过促销价）；
+  - **Best Price 绝不隐式默认**——开启时须显式定义度量（最低净价 / 最大折扣 / 含税否）；
+  - 排斥组内按"只保留获胜者"处理（对标 SAP Condition Exclusion OV31/OV32、Oracle Incompatible）；
+  - **权重分配（weighted，v1.4）**：
+    - `allocation_weight` **可空**；**非空即该候选参与加权累加**，不参与"取一"；
+    - **权重和须归一**：同组内 `Σweight = 1`，不满足则**拒绝计算并报错**，禁止静默按比例缩放（可预测性优先于"宽容"）；
+    - **同组内 `allocation_weight` 非空候选与"取一"类候选不可混用**——若组内存在非空 `allocation_weight`，该组按加权累加执行，`exclusion_group.resolution` 与 `lookup_sequence` 优先级对其不生效；
+    - 加权结果**可回放**：每条参与候选的 `rate × base × weight` 贡献值可在 `calc_result` / `calc_detail` 中逐条追出；
+    - 溯源：Oracle 成本域 `Standard cost = (Buy cost × Buy allocation) + (Rolled-up cost × Make allocation) + (Transfer cost × Transfer allocation)`（**多候选全部参与**）、工单 `Cost Factor Allocation`（Pulp 25% / Orange Juice 100%）、LCM `Charge Basis = % of item price`；
+    - **对偶说明**：`allocation_rule` 是 **1→N 摊金额**，`allocation_weight` 是 **N→1 合率**，两者共用同一数学形式的两个方向。
+  - 同一数据下多种范式结果可**分别复现**（验收标准，研究稿 §7 P3）。
+- **Priority**：Should（P3）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4 件⑤、§8 D3/§8.1、§3.1.2A、**§4.9D1 / §4.9A3（v2.0 跨域对撞：Oracle 成本域第四范式）**
+
+### FR-009 阶梯、有效期、币种与计量单位
+
+- **Description**：费率记录 MUST 支持**阶梯 scale**（按数量 / 按金额分档）、**有效期**（`valid_from` / `valid_to`）、**币种**与**计量单位 / 计量数量**。
+- **Acceptance Criteria**：
+  - 阶梯至少支持两种语义：**整单取档**（数量落入某档取档内单一价）与**逐档累进**（各档分别计价再求和）（对标 D365 / SF Volume vs Tier）；
+  - 过期费率记录不参与取价；
+  - 订单单位 ≠ 计量单位时先按 UoM 换算（依赖 IF-008 单位换算）。
+- **Priority**：Should（P4）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4 件①/②、§4.3②、§3.1.4、§6.1 #6
+
+### FR-010 可解释回放 —— 件⑥
+
+- **Description**：系统 MUST 为每次定价产出**可回放明细**，回答"为什么是这个值"。
+- **Acceptance Criteria**：
+  - 每个槽位记两样：**"命中哪一行" + "是否累加"**（最小骨架）；
+  - 逐步记 `seq / element_type / unit_price / extended_amount / base_level / base_source / base_step / rolling`（`rolling=true` 时加 `running_net_amount`）；
+  - 可显示**被选中的、被删除的候选行及删除原因**（对标 Oracle Request Viewer）；
+  - 明细结构**按可回放设计**（含基准与中间小计），不只在"手动查看"时才重算。
+- **Priority**：Must（P2，与 FR-005 同批）
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4 件⑥、§4.4 启示、§3.1.2A/§3.1.6、§5.1、§6 #8
+
+### FR-011 结果对象宿主与生命周期
+
+- **Description**：计算结果 MUST 落成 **`calc_result`（结果行）+ `calc_detail`（步骤明细）**，**附属于业务单据**（`bo_category: transactional` + `bo_sub_category: document` + `composition 1:N`），**不引入独立"定价单据"**。
+- **Acceptance Criteria**：
+  - 结果对象泛化宿主：`document_type` + `document_id` + `document_line_id`（可空 = 头级），使同一套对象可挂**任意 `document` 型 BO**（订单 / 交货 / 开票）；
+  - 值落**行**，头只放**参数 / 开关**（`level ∈ {header, line}` 标记 + 头→行分摊明细）；
+  - 生命周期**随单据**（`cascade_delete`）；重算 = **版本化替换明细 + 留痕**；**已开票 / 已过账行冻结**；
+  - 结果**两层**：结果行（一个费率类型 / 一个 Charge 一条）与步骤明细（一步一条）；
+  - **与 `doc_flow` 边界**：`doc_flow` 只搬**结果字段**（`unit_price` / `net_price`），**不搬明细**；
+  - **结果 → 单据行字段写回 · v1.5 拍板（TBD-9）**：本期**不建 `output_map` 对象**，改为**按 `result_semantic` 约定写回字段**（`price` → `unit_price` / `amount`；`cost` → `cost_amount`；`emission` → `emission_amount`；余者落 `result_amount`）。依据：本期**只有一个过程实例、一套结果结构**，映射关系用约定即可表达，**零配置零新表**；真正的痛点在**多过程 / 多结果结构**时（碳结果要写碳足迹字段、成本结果要写成本字段）——**那才需要对象**。**接口已预留**：将来补 `output_map` 对象时，本条约定即为默认映射，不破坏存量。
+- **Priority**：Must（P2，与 FR-010 同批）
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4.6、§4.6B、§6.1 #21、§8 D4/D15、§5.2
+
+### FR-012 单据链价格传递策略（搬运 / 按量重算金额 / 完全重定价）
+
+- **Description**：系统 MUST 支持把"上游价格流到下游单据"的策略建模为**策略对象**（非布尔），核心为 `price_mode`，并可**逐属性**（价 / 运费 / 税）与**逐费率类型**覆盖；同时把**数量基准来源 `qty_basis`** 与"**单价是否重取**"**解耦**。
+- **Acceptance Criteria**：
+  - `price_mode ∈ {carry（纯搬运）/ recompute_amount（按实际量重算金额）/ repricing（完全重定价）}`，**逐"目标单据类型 × 参考单据类型"**可配（对标 SAP `KNPRS`/`TVCPF`、Oracle Freeze Price/Shipping/Tax、SF Repricing Service）；
+  - `qty_basis ∈ {order_qty, delivered_qty, goods_issued_qty, billed_to_date_qty}`，**开票默认取 `delivered_qty`**（SAP `FKMGK=D` 惯例）；
+  - 三种组合各可复现：① 纯搬运（订单量 + 订单价）；② **订单价 × 实际量**；③ 实际量 + 重取价；
+  - **红线**：已开票 / 已过账行不得隐式重定价；重定价须显式触发（`reprice_trigger`）且留痕；
+  - 策略声明属**计算结果的元数据**（由定价引擎产出、`doc_flow` 与下游单据消费），避免两边各自猜。
+- **Priority**：Should（P4）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.5A/B/C、§6.1 #19/#20、§8 D8/D14
+
+### FR-013 事后 / 计划外费用与分摊
+
+- **Description**：系统 MUST 支持"**事后 / 计划外费用**"作为 `calc_result` 的另一种来源：**不改原单价、独立费用行 + 分摊**，并可**反向挂载**到 PO / 收货 / 订单行。
+- **归属拍板（v1.5 · TBD-1）**：**归定价"费用 / 分摊"子域**（② 方案）——**不破 D7 边界**、不为它另立引擎。依据：三家一致（Oracle `Retroactive Price Adjustment` → 独立 `acquisition cost adjustment` 回写库存估值；SAP 计划外交付成本走独立行 / 独立科目），且**它就是一条 `origin = unplanned` 的 `calc_result`**，**不新建费用单据对象**。三类费用中 **② 事后计划外** 与 **③ 过程执行费** 同构（都是"事后才知金额"）可共用本模型；但 **③ 的成本侧取值算法不在 D7 范围**（见下）。
+- **Acceptance Criteria**：
+  - 结果行扩展 `origin ∈ {planned, unplanned}`、`charge_source ∈ {order, invoice, receipt, service_confirm, settlement}`、`source_document_type` / `source_document_id`（**可 ≠ 宿主单据**）、`target ∈ {price, cost, expense}`、`allocation_basis`、`allocation_rule_id`；
+  - 新增 **`allocation_rule`**：`basis ∈ {equal, value, quantity, weight, volume, manual}`（对标 Oracle LCM **六种**分摊基数）、`manual_factor` / `group_by` / `rounding` / `floor`（地板价）/ **`target ∈ {cost, expense}`**；
+  - **分摊基数是可配枚举、去向是可配字段**（不写死"按行价值比例"、不写死"进费用"）；
+  - 分摊可回放：头记总额、行记摊得额，来源单据与分摊规则可查；
+  - **采购侧成本类费用本期只做对象设计、不实现**（D7 范围外）；`target=cost` 的取值算法归**成本核算**。
+- **Priority**：Could（P4.5）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.7B/C/D、§6.1 #22/#23、§8 D16（TBD-1）
+
+### FR-014 追溯调整与补差
+
+- **Description**：系统 MUST 提供 **`adjustment`** 承载追溯 / 补差：**引用原结果、成对留痕、只结算差额、不改原单据**。
+- **Acceptance Criteria**：
+  - 字段：`original_result_id`（被调整的原费用 / 原价）/ `adjustment_type ∈ {subsequent_debit, subsequent_credit, retro_price_change, rebate_settlement, delta_accrual, provisional_settlement, **override**}` / `delta_amount` / `effective_period` / `posted_flag` / **`reason`（v1.5 拍板 TBD-8 + D22：`adjustment_type = override` 时**必填**，见下）**；
+  - **整体价覆盖（override）· v1.5 拍板（TBD-8）**：**复用 `adjustment`、不新增对象**——`adjustment_type = override` 即"人工整体改价"，语义为"**在原结果上覆盖一个最终价**"。依据：这是六家**零分歧的共识机制**（SAP `Price Override` / SF `pricing element = Override` / Oracle 人工覆盖需 `override_reason` / D365 价格覆盖），缺失最突兀；且它与 `adjustment` **同构**（都是"引用原结果 + 留痕 + 不改原单据"），另立对象会造成重复。**`reason` 必填 = 最小版"谁能改价"（D22）**——**完整权限 / 审批矩阵归权限引擎，不由定价引擎承担**（见 TBD-13）；
+  - 追溯调整**必须显式触发**（费率记录变更**不自动**重算已过账单据，对标 SAP 须 `New Pricing` / `Update Pricing`）；
+  - **成对产生贷 / 借项、仅结算差额**（对标 SAP 开票更正请求订单类型 RK、返利"最终结算冲抵已结算部分"）；
+  - 已过账单据的追溯调整**被拒或强制留痕**（与 FR-012 红线同源）。
+- **Priority**：Could（P4.5，可后置）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.7B/D、§6.1 #24、§4.8D⑤
+
+### FR-015 事实数据驱动重算（优质优价 / 大宗贸易）
+
+- **Description**：系统 MUST（蓝图）支持"**事实数据**"作为定价输入与重算触发：① 作为**匹配键表的一个字段维度**（优质优价）；② 作为**数量折算输入**（干吨 / 净干重 / 金属量）；③ **价可来自外部报价与计价期**（大宗两段式）。
+- **Acceptance Criteria**：
+  - 因子目录 `source_type` 支持 `quality` / `measurement` / `market`（与 FR-003 同权）；
+  - 新增 **`external_rate_source`**（`source ∈ {platts, lme, ice, index, custom}` / `quote_code` / `calendar_id` / `fallback_rule`）与 **`pricing_period`**（`period_type` / `start_offset` / `end_offset` / `average_basis ∈ {close, average, first, last}` / `rounding`）；
+  - `calc_result` 扩展 `rate_source ∈ {rate_record, external_quote, formula}` / `pricing_period_id` / `external_rate_source_id` / **`fact_snapshot`（JSON）**；`qty_basis` 扩容 `dry_weight` / `net_dry_weight` / `assayed_content`；
+  - 优质优价落成 `element_type = quality_premium` 结果行；大宗两段式落成 `adjustment{adjustment_type = provisional_settlement}`（**只结算差额、不改原单据**）；
+  - **`reprice_trigger` 增加 `on_quality_result` / `on_pricing_period_end`**（**蓝图枚举一次给全 · v1.5 拍板 TBD-2 设计侧③**）；
+  - **三条护栏**：① `fact_snapshot` 必须存档（缺一即不可复现）；② 重算须显式触发；③ 暂定价与终价**必须配对可查**（`original_result_id`）；
+  - **`fact_snapshot` 缺失时拒绝结算**；无质检链路 / 无报价源的行业**可不用本机制**（非强制）。
+- **实施节奏拍板（v1.5 · TBD-2）**：**设计侧③（蓝图留全）／实施侧②（只实装 `on_quality_result` 一条链路）**。依据：另两个触发器**依赖尚未实施的对象**——`on_pricing_period_end` 依赖 `external_rate_source` + `pricing_period`（本 FR 内两个新对象，随 P6 走），`provisional_settlement` 依赖 TBD-1 的 `origin` 与 FR-013；**先把枚举给全（零成本），只实装依赖已就绪的那一条**，避免半配置状态。另注：研究稿 §4.8C 规律 2 指出"**质检值直接改价在头部产品里普遍是半成品**"（Oracle / SAP / SF 均【未找到】标准链路，全靠自定义属性绕行）——**这既是本 FR 的机会，也说明它无成熟范式可抄，故须走"蓝图留全 + 分步实施"**。
+- **Priority**：Could（P6，可选；其中 FR-003 的事实源分类建议与 P1 同批先行）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.8B/C/D/E、§6.1 #25/#26/#27、§8 D17（TBD-2）
+
+### FR-016 用量更新（业务别名：条件更新；累计已用量）
+
+- **Description**：系统 SHOULD 支持**用量更新**（业务别名：条件更新）：费率记录跨单据**累计已用量**（如年度合同量用满即失效），由 `usage_group` + `cumulative_usage` 承载。
+- **Acceptance Criteria**：可设最大金额 / 数量 / 单据数，超限**自动失效**（对标 SAP Condition Update `KOUPD`）。
+- **Priority**：Could（P4，可后置；D6 定为"先不做"）
+- **Type Mapping**：Functional
+- **Source**：研究稿 §4.2 第 1/2 层、§6 #7、§8 D6
+
+### FR-017 扩展点例程（逃生门）
+
+- **Description**：系统 SHOULD 提供 **VOFM 式例程**接线（Requirement / Formula），使复杂定制**可插拔、不改引擎**。
+- **Acceptance Criteria**：复用既有 `ActionType.BUSINESS` hook 骨架；自定义例程可注册 / 可替换。
+- **Priority**：Could（P5）
+- **Type Mapping**：Solution / Functional
+- **Source**：研究稿 §4 件④、§6 #9、§7 P5、§5.1
+
+### FR-018 边界登记（防重复造轮子）
+
+- **Description**：系统 MUST 在文档与代码层面**显式登记六条边界**（研究稿 §5.2），且**判据单一化**：
+
+| 界别 | 它回答什么 | 归谁 | 判据 |
+|---|---|---|---|
+| 定价 vs `default` | 金额怎么算 / 填哪个价目表 | 定价 / `MetaDefaultRule` | 选价目表 ≠ 算价格 |
+| 定价 vs `compute` | 多层累加多候选取优 / 无条件表达式覆盖一字段 | 定价 / `MetaComputation` | `compute` 做不了 `unit_price` 怎么来 |
+| 定价 vs `rollup` | 过程内按组聚合 / 跨单据层级守恒汇总 | 定价 / `analytical_engine` | **过程内属定价**；rollup 输入是"已算好的金额" |
+| 定价 vs `allocation` | ① 过程内一步（头→行折扣分摊，哪怕守恒、跨行）② 过程外独立分摊 | 定价 / 待建 `allocation` | **是否在计算过程内**；★ 升级判据：**是否有"可分摊到一个业务单据行"的价格 / 费用语义** |
+| 定价 vs `validation` | 算出净价 / 净价不得低于限价 | 定价 / `MetaValidation` | 定价**产出** min/max；validation **拦** |
+| 定价 vs `doc_flow` | 重新算价 / 把源单价 `field_map` 一对一搬 | 定价 / `doc_flow_rule` | 搬 vs 算；`doc_flow` 只搬结果字段不搬明细 |
+
+- **Acceptance Criteria**：
+  - 上述判据在 Spec / 代码注释 / 评审记录中可查；
+  - **通用化（D7）≠ 把不属于定价的东西塞进定价引擎**——通用化只针对"同一族（SAP 条件技术同族）的确定过程"。
+- **Priority**：Must（文档约束，全程生效）
+- **Type Mapping**：Solution
+- **Source**：研究稿 §5.2、§4.4 启示 4、§4.7E、§8 D13/§8.2、§7 非目标
+
+---
+
+## 4. 非功能需求（NFR）
+
+### NFR-001 性能
+- **Description**：单行定价（P1 单层取价）须在可接受延迟内完成；整单 N 行须支持**批量**（逐行调用但主数据批量 / 缓存）；跨对象取数（客户 / 物料 / 组织主数据）须批量 / 缓存。
+- **Measurement**：基准测试；单行 P1 取价增量与整单 N 行批量耗时；增量重定价（SF `enableDeltaPricing` 式）作为 P4+ 性能项。
+- **Priority**：Must
+- **Source**：研究稿 §4.5C4、§5.1
+
+### NFR-002 安全
+- **Description**：条件与公式一律走 `SafeExpressionEvaluator` **AST 白名单**，**禁止 `eval`**。
+- **Measurement**：危险表达式（如 `__import__`）被拒绝的单测。
+- **Priority**：Must
+- **Source**：研究稿 §5.1
+
+### NFR-003 可观测 / 可解释
+- **Description**：每次定价产出可回放明细（FR-010），支持"查看计算过程"；日志 / 明细结构与回放复用同一份数据结构。
+- **Measurement**：给定一次定价，能还原"命中哪行 + 每步小计 + 基准四字段"。
+- **Priority**：Must
+- **Source**：研究稿 §4 件⑥、§5.1
+
+### NFR-004 兼容（最小改动）
+- **Description**：复用既有 `condition_parser` / `condition_evaluator` / `condition_converter`、`default_by_priority` 首个命中语义、`SafeExpressionEvaluator` + `FormulaFunctionRegistry`、`MetaComputation` 宿主；**不改动 `default` / `compute` 既有行为**，存量测试全绿。
+- **Measurement**：存量测试零回归。
+- **Priority**：Must
+- **Source**：研究稿 §5.1、§5.2
+
+### NFR-005 可测试
+- **Description**：每条 FR 有对应单测；引擎支持 stub 注入（价目行 / 主数据）。**按项目铁律用 `python d:\filework\test.py`，禁止直接 `pytest`**。
+- **Measurement**：FR ↔ 测试用例映射；`test.py` 全绿。
+- **Priority**：Must
+- **Source**：项目测试铁律；研究稿 §7 各阶段 DoD
+
+### NFR-006 最小改动 / 不新造单据
+- **Description**：**不引入独立"定价单据"**；结果对象复用 `document` 型 BO + `composition 1:N` 范式；避免与 `doc_flow` 争"谁是单据"。
+- **Measurement**：对象结构评审；无独立 pricing document BO。
+- **Priority**：Must
+- **Source**：研究稿 §4.6、§8 D15
+
+### NFR-007 可配置性
+- **Description**：费率类型 / 计算过程 / 查找序列 / 分摊规则**均为配置对象**，改配置不改代码。
+- **Measurement**：新增一个费率类型 / 一条过程步骤，无需改引擎代码。
+- **Priority**：Must
+- **Source**：研究稿 §4.1、§4.4、§8 D9
+
+---
+
+## 5. 外部接口需求（IF）
+
+### IF-001 定价调用入口（引擎 API）
+- **Type**：API / Internal
+- **Entry**：引擎方法，输入 = **一行 + 表头上下文**（行对象携带币种 / 客户 / 销售区域等表头字段），输出 = 净价 / 行金额 + 计算明细（`calc_result` + `calc_detail`）。
+- **Interaction**：逐行调用，行对象携带所需表头字段；首期不做真表头条件（D10）。
+- **Error Handling**：无可用费率记录 / 过程未命中 → 返回明确原因 + 回放日志；表达式求值失败 → 记录并被 `SafeExpressionEvaluator` 拒绝。
+- **Source**：研究稿 §4.3⑥1、§4.6B
+
+### IF-002 与 `default` 的接缝
+- **Type**：System Integration
+- **Entry**：`MetaDefaultRule` 确定 `rate_table` → 定价引擎消费该价目表。
+- **Error Handling**：`rate_table` 为空 → 定价回退到 Base Price / 报错（按配置）。
+- **Source**：研究稿 §2.1、§5.2
+
+### IF-003 与 `compute` 的接缝
+- **Type**：System Integration
+- **Entry**：定价产出 `unit_price` / `net_price` → `MetaComputation` 尾算 `total_amount = qty × unit_price`。
+- **Source**：研究稿 §5.2
+
+### IF-004 与 `doc_flow` 的接缝
+- **Type**：System Integration
+- **Entry**：定价引擎**产出** `price_mode` / `freeze_policy` 声明 → `doc_flow` 与下游单据**消费**；`doc_flow` 只搬结果字段，不搬明细。
+- **Error Handling**：未声明策略 → 禁止静默重定价（红线）。
+- **Source**：研究稿 §4.5C、§4.6B、§5.2
+
+### IF-005 与 `validation` 的接缝
+- **Type**：System Integration
+- **Entry**：定价**产出** min/max 价格快照（对标 SF Price Tracking）→ `MetaValidation` 做限价**拦截**（金蝶最低限价）。
+- **Source**：研究稿 §4.4 启示 5、§5.2
+
+### IF-006 与 `rollup` / `analytical` 的接缝
+- **Type**：System Integration
+- **Entry**：过程内按组聚合（SF Aggregate Price，不跨单据）属定价；跨行 / 跨单据层级守恒汇总归 `analytical_engine`。
+- **Source**：研究稿 §5.2
+
+### IF-007 回放查询接口
+- **Type**：API
+- **Entry**：按 `document_type` + `document_id`（+ 可选 `document_line_id`）查询 `calc_result` + `calc_detail`。
+- **Interaction**：返回"命中哪行 / 被删候选及原因 / 逐层小计 / 基准四字段"。
+- **Source**：研究稿 §4 件⑥、§4.6
+
+### IF-008 依赖主数据引用
+- **Type**：System Integration
+- **Entry**：引用 **币种 / 汇率 / 税码·税率·税分类 / 客户价格组·客户定价过程 / 物料价格组·税分类·参考物料 / 销售区域（销售组织 + 分销渠道 + 产品组）/ UoM + 单位换算 / 有效期日历**（研究稿 §4.2 第 3 层）。
+- **Error Handling**：缺失依赖 → 对应费率类型 / 键**不上线**（分期），已上线键在依赖缺失时明确报错，不静默错算。
+- **Source**：研究稿 §4.2、§6.1 #11–#16
+
+---
+
+## 6. 过渡 / 迁移需求（TR）
+
+### TR-001 存量行为不变（天然灰度）
+- **Description**：存量对象无计算过程时，行为完全不变。
+- **Strategy**：计算过程 / 费率类型为**新增配置**，未配置即不触发。
+- **Rollback**：禁用配置即失效。
+
+### TR-002 依赖主数据分期补齐顺序
+- **Description**：引擎依赖一批通用主数据，缺失则不能开跑。
+- **Strategy**（研究稿 §6.1 排序原则，**先依赖后优先级**）：
+  - **P0 前置**：#11 币种主数据、#16 销售区域（`sales` 已有，补渠道 / 产品组）——须先于引擎开跑；
+  - **P1 随费率类型**：#12 汇率（跨币种取价前）、#14 客户价格组 / 客户计算过程、#15 物料价格组 / 税分类 / 参考物料（对应折扣组 / 物料组取价前）；
+  - **P2**：#13 税码 / 税率 / 税分类（税费率类型前）；
+  - **P6**：#25/#26/#27 事实源相关（可选）。
+- **Rollback**：依赖未补齐时，对应条件的计算过程不启用。
+
+### TR-003 结果对象为新增声明
+- **Description**：`calc_result` / `calc_detail` / `allocation_rule` / `adjustment` / `external_rate_source` / `pricing_period` 均为**新增**对象声明。
+- **Strategy**：通过元数据 BO 声明方式新增，**无存量数据迁移**。
+- **Rollback**：停用 / 删除新增 BO 声明；存量单据不受影响。
+
+### TR-004 回滚总策略
+- **Description**：所有新能力以"配置开关 + 新增对象"承载，可单点回退。
+- **Strategy**：① 计算过程 `enabled=false`；② 费率类型 / 费率表停用；③ 新增对象声明移除；④ 引擎调用点可短路。
+- **Rollback**：**无 schema 迁移 → 无数据迁移回滚**（与规则模型 Spec 同范式）。
+
+### TR-005 权重分配（`allocation_weight`）零迁移
+- **Description**：`rate_record.allocation_weight` 为**新增可空字段**，不改动既有取值与算法。
+- **Strategy**：**默认 `null` = 行为完全不变**——存量费率记录一律视为"取一"类候选，三种原有范式（`exclusive` / `precedence` / `best`）行为不受影响；仅当配置了非空权重且同组 Σweight = 1 时，该组才切换为加权累加。
+- **Rollback**：清空所有 `allocation_weight` 即回到 v1.3 行为（无需改代码）。
+
+### TR-006 消解范式验收矩阵（v1.4）
+- **Description**：同一份候选数据下，四种范式各跑一次，结果须与预期一致且互不干扰。
+- **Strategy**：准备**三候选**测试夹具（如 3 条同键费率记录，rate = 100 / 200 / 300）：
+  | 场景 | 配置 | 预期 |
+  |---|---|---|
+  | 优先级 `precedence` | priority 1/2/3 | 命中 priority 1 → 100 |
+  | 取优 `best`（最低净价） | 显式开启 + 度量 | 命中 100 |
+  | 互斥 `exclusive` | 同组 | 只保留获胜者 |
+  | **权重分配 `weighted`** | 权重 0.5 / 0.3 / 0.2 | **100×.5 + 200×.3 + 300×.2 = 140** |
+  | **权重和不归一** | 权重 0.5 / 0.3 | **拒绝计算并报错**（不静默缩放） |
+- **Rollback**：清空权重字段回到默认范式。
+
+---
+
+## 7. 约束与假设
+
+### 7.1 技术约束
+- **C1** 复用既有 `condition_parser` / `condition_evaluator` / `condition_converter`、`default_by_priority`（`meta/core/rule_executor.py` L1432 起）、`SafeExpressionEvaluator` + `FormulaFunctionRegistry`、`MetaComputation`（`meta/core/models.py` L207-221）；不重复造这些轮子。
+- **C2** 表达式求值走 AST 白名单，禁 `eval`。
+- **C3** 结果对象复用 `bo_category: transactional` + `bo_sub_category: document` + `composition 1:N / ownership / cascade_delete`（[sales_order_enhanced.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/examples/sales_order_enhanced.yaml#L378-L387) 范式），**不引入独立"定价单据"**。
+- **C4** 测试按项目铁律用 `python d:\filework\test.py`。
+- **C5** 步骤 = 带 `element_type` 的**算子列表**，禁止硬编码 if-else 分支。
+
+### 7.2 业务约束
+- **B1** **D7 已拍板**：只做定价；元模型按"**通用确定**"设计（命名过程无关；未来加"伙伴确定"= 新增过程类型 + 一张规则表，而非改引擎）。
+- **B2** **采购侧成本类费用本期只做对象设计、不实现**（D7 范围外）；`target=cost` 取值算法归**成本核算**。
+- **B3** 期货 / 风控 / QMS / 成本核算**不属定价**（研究稿 §4.8E）。
+- **B4** **已开票 / 已过账的行禁止隐式重定价**（红线）。
+
+### 7.3 假设
+- **A1** 主数据补齐有排期（TR-002），否则引擎无法引用 → Source：研究稿 §4.2（**已验证缺失**）。
+- **A2** 首期不做在线配置 UI，配置随元数据定义发布 → Source：研究稿 §7 N4（**假设**）。
+- **A3** 匹配键表 + 因子目录 + 费率类型同批（P0）→ Source：研究稿 §6.1 #10（**建议**）。
+- **A4** 平台现在能回答"用哪张价目表"（`MetaDefaultRule`）与"总额 = 数量 × 单价"（`MetaComputation`），不能回答"这张价目表里这个客户这个物料的价格是多少、又叠了哪些折扣" → Source：研究稿 §5.3（**代码级验证**）。
+
+---
+
+## 8. 优先级与里程碑
+
+### 8.1 需求优先级
+
+| ID | 需求 | 优先级 | 阶段 | 理由 |
+|---|---|---|---|---|
+| FR-001 | 费率表 + 费率记录（价目表 / 价目行） | Must | P1 | 价格的"库存"，取价前提 |
+| FR-002 | 费率类型（条件类型，配置对象） | Must | P1 | 六家全部如此；硬编码不可扩展 |
+| FR-003 | 因子目录 + 匹配键表（字段目录 / 条件表） | Must | P0/P1 | 键 = 因子组合，与费率类型同批 |
+| FR-004 | 查找序列（存取序列，exclusive/additive） | Must | P1 | 取数范式，首个命中已具备 |
+| FR-005 | 计算过程（定价过程）+ 可插拔算子 | Must | P2 | 多层累加的载体 |
+| FR-006 | 计算基显式建模 | Must | P2 | 回放必要条件；滚动危险须显式 |
+| FR-007 | 多层累加 + 逐层小计 | Must | P2 | 净价 = 多层叠加产物 |
+| FR-008 | 取优 / 互斥 / **权重分配（weighted）** | Should | P3 | 多命中怎么收；`weighted` 为**跨域补齐**（研究稿 §4.9D1，Oracle 成本域三处在用），v1.4 并入 |
+| FR-009 | 阶梯 + 有效期 | Should | P4 | 费率记录属性 |
+| FR-010 | 可解释回放 | Must | P2 | 区别于普通公式的本质 |
+| FR-011 | 结果对象宿主 | Must | P2 | 回放的宿主；不建独立单据 |
+| FR-012 | 单据链传递策略 | Should | P4 | 搬 vs 算，需显式配置 |
+| FR-013 | 事后 / 计划外费用与分摊 | Could | P4.5 | 有价格语义的费用分摊 |
+| FR-014 | 追溯调整与补差 | Could | P4.5 | 可后置；红线约束 |
+| FR-015 | 事实数据驱动重算 | Could | P6 | 可选；头部普遍"半成品"，平台做成一等即增量 |
+| FR-016 | 条件更新（累计用量） | Could | P4 | D6 先不做 |
+| FR-017 | 扩展点例程 | Could | P5 | 已有 hook 骨架 |
+| FR-018 | 边界登记 | Must | 全程 | 防重复造轮子 |
+
+### 8.2 建议里程碑（对齐研究稿 §7 P0–P6）
+
+| 里程碑 | 范围 | 关键交付 | DoD |
+|---|---|---|---|
+| **M1 = P0 概念定型** | 六件定成平台对象 / 枚举；费率类型落为配置对象 | 元模型草案（表 + 字段 + 枚举） | 六件各有归属对象，与 §5.2 边界不冲突；费率类型字段与 §4.1 一致 |
+| **M2 = P1 单层取价 ★** | 一个物料 × 一个客户 → 一个单价 | 匹配键表 + 因子目录 + 费率表 + 费率记录（含币种 / 计量单位）+ 查找序列（exclusive） | 命中即止，能回答"命中哪一行"；跨币种费率记录可换算 |
+| **M3 = P2 多层累加 + 回放 ★** | 基价 → 折扣 → 附加费 → 税 → 运费 | 费率类型分类 + additive + 计算过程序列（带 `element_type`）+ 计算基四字段 + 小计 + 计算明细 + `calc_result` / `calc_detail` | 逐层小计可回放；每步记 `base_level`/`base_source`/`base_step`/`rolling`（默认不滚动，滚动与 `base_step` 互斥） |
+| **M4 = P3 取优/互斥** | 多同类命中怎么收 | Precedence vs Best Price（显式选择）+ 排斥组 | 同一数据两范式结果可分别复现 |
+| **M5 = P4 阶梯 + 有效期 + 条件更新 + 执行期重算** | 按量分档 / 按日期生效 / 合同量累计 / 发货开票按实际量重算 | 费率记录属性扩展 + 用量累计 + `freeze_policy`/`reprice_trigger`/`qty_basis` | 阶梯 / 过期 / 用满三测例；三种组合各一测例；已开票行重定价被拒 |
+| **M6 = P4.5 事后费用与分摊** | 发票 / 收货 / 服务确认 / 结算上的计划外费用摊到 PO / 收货 / 订单行，可追溯补差 | `allocation_rule` + `calc_result` 费用口径字段 + `adjustment`（可后置） | 一笔费用按 6 种基数摊到行且可回放；`target=cost`/`expense` 各一测例；已过账追溯被拒或留痕 |
+| **M7 = P5 扩展点接线** | 复杂定制逃生门 | `ActionType.BUSINESS` hook 接线 VOFM 式例程 | 自定义例程可插拔，不改引擎 |
+| **M8 = P6 事实数据驱动重算（可选）** | 优质优价 + 大宗贸易 | 因子目录事实源分类 + `external_rate_source`/`pricing_period` + `fact_snapshot`；`qty_basis` 扩容 | 质检值命中匹配键表得升贴水；干吨折算参与计价；暂定价→终价差值可配对回放；`fact_snapshot` 缺失拒绝结算 |
+
+> 里程碑的任务清单与验收细则可另立《定价引擎实施计划》（对齐 [rule-model 实施计划](./2026-10-02-rule-model-implementation-plan.md) 范式）。
+
+---
+
+## 9. 变更设计方案（RFC）
+
+### 9.1 As-Is 分析
+
+- **现有架构**：`meta/core` 下 13 个 `*engine*.py`（workflow / doc_flow_derive / doc_flow_batch / association / key_template / index_rule / enrichment / deep_mutation / deep_insert / constraint / bo / async_interceptor / analytical），**无定价引擎**；全仓无 `*pricing*` 文件。
+- **现有痛点**：单据行只有价格字段（`unit_price` / `net_price` / `total_amount`），无"算价格的机器"；`compute` 只做单表达式尾算，无序列 / 无小计 / 无候选竞争 / 无回放。
+- **可复用代码路径**：
+  - 条件内核：`meta/core/condition_parser.py` / `condition_evaluator.py` / `condition_converter.py`；
+  - 分组 + 首个命中 + tie-break：`meta/core/rule_executor.py`（`default_by_priority`，**L1432 起**）+ `MetaDefaultRule`（`meta/core/models.py` **L224-270**）；
+  - 安全求值：`meta/core/safe_expr_evaluator.py` + `FormulaFunctionRegistry`（`rule_executor.py` L229-230）；
+  - 值计算宿主：`MetaComputation`（`meta/core/models.py` **L207-221**）；
+  - 单据宿主范式：`meta/schemas/examples/sales_order_enhanced.yaml`（`bo_category: transactional` L6-7 + `rel_lines` `composition 1:N / ownership / cascade_delete` L378-387）。
+
+### 9.2 目标状态（Target State）
+
+- **新增独立定价引擎**（D1：独立引擎，非扩展 `compute`）—— `determination`（确定）过程类型第一个实例 = `pricing`。
+- **元模型通用性与命名声明（v1.3 拍板，v1.4 补入第四消解范式）**：本引擎的**元模型 = "通用确定与计算"**（可配置序列 + 量 × 率 + 多步累加 + 候选消解），**本期首个过程实例 = `pricing`**；元模型层一律**领域中立命名**（费率类型 / 查找序列 / 计算过程 / 费率记录 / 计算结果），SAP 术语降为**业务别名**（§9.3.1 命名与溯源对照表）；通用化只参数化**三轴**（`base_source` / `rate_source` / `result_semantic`），**成本归集层与碳组织边界不属本引擎**（§1.4 N9）。**候选消解共四范式**（v1.4 补入第四范式 `weighted` 权重分配：多候选不取一、按权重加权累加，承载于 `rate_record.allocation_weight`，对标 Oracle 成本域 Sourcing Rule 分配百分比，详见 §9.3.1 B2 与 FR-008）。**v2.0 跨域验证（研究稿 §4.9）**：三轴在 Oracle **成本域**（`总成本 = 固定 + 变动[单位资源成本 × 消耗数量]`，`单位成本 = 总成本 ÷ 缩放数量`）与**碳域**（`排放量 = 活动数据 × 排放因子`）**逐字同构**；**v2.1 Palantir 对照**（研究稿 §4.10）：**两条通用化路径的分野不在能力而在"谁承担域特有逻辑"**——本引擎走"元模型 + 参数化"，故域特有逻辑压力落在本引擎，**§1.4 N9 边界是这条路径的必要成本，不是保守**。
+- **两条对象链分开**（研究稿 §4.6）：
+  - **配置 / 主数据链**（计划侧，元模型）：因子目录 → 匹配键表 → 查找序列 → 费率类型 → 计算过程；费率表 + 费率记录（业务别名：价目表 / 价目行·条件记录）；
+  - **单据运行时链**（事实侧）：单据头 → 单据行 → `calc_result`（结果行）→ `calc_detail`（步骤明细）。
+- **关键变更**：
+  1. 新增定价元模型对象（FR-001 ~ FR-003、FR-005、FR-013~FR-015）；
+  2. 新增定价引擎执行器（查找序列命中 + 过程逐步执行 + 计算基求值 + 取优消解）；
+  3. 新增结果对象并复用 `document` BO 范式（FR-011）；
+  4. 与 `default` / `compute` / `doc_flow` / `validation` / `rollup` 按 §5.2 边界接线（IF-002~IF-006）。
+
+### 9.3 详细设计
+
+#### 9.3.1 对象模型（数据模型）
+
+> **命名原则（v1.3 拍板）**：**元模型层一律领域中立**（费率 / 查找 / 计算），**SAP 术语降为"业务别名"**，只出现在本节的"业务别名"与"溯源（对标）"列，**不再作主名**；实例层保留业务别名。命名三段式 = **主名（领域中立）· 代码标识（snake_case）· 业务别名（SAP 等）**。
+
+**命名与溯源对照表（v1.3）**
+
+| 主名（业务别名） | 代码标识 | 业务别名 · 研究稿术语 | 结构溯源 |
+|---|---|---|---|
+| 因子目录（字段目录） | `factor_catalog` | 字段目录 | **SAP 骨架**（KOMG/KOMP）；SF Context / `IsPriceImpacting` |
+| 匹配键表（条件表） | `key_schema` | 条件表 | **SAP 骨架**（V/03·M/03） |
+| 查找序列（存取序列） | `lookup_sequence` | 存取序列 | **SAP 骨架**（V/07·M/07）；D365 find-next |
+| 费率类型（条件类型） | `rate_type` | 条件类型 / 价格类型 / 因子类型 | **六家趋同**（SAP V/06；SF pricing element）；`rate_source` 为 v1.3 新增轴② |
+| 计算过程（定价过程） | `calc_procedure` | 定价过程 | **SAP 骨架**（V/08）；Oracle Pricing Algorithm；SF Pricing Procedure |
+| 计算步骤 | `calc_procedure_step` | 过程步骤 | 多家趋同 |
+| 费率表（价目表） | `rate_table` | 价目表 | Oracle Price List；金蝶价目表（仅审核态） |
+| 费率记录（价目行 / 条件记录） | `rate_record` | 条件记录 | SAP 条件记录 VK11；SF Price Book Entry |
+| 计算结果（结果行） | `calc_result` | 定价结果 | SAP `KONV`；Oracle `Charge` |
+| 计算明细（步骤明细） | `calc_detail` | 定价明细 | Oracle `ChargeComponent`；SF waterfall |
+| 调整（追溯 / 补差） | `adjustment` | 追溯调整 | Oracle retroactive price adjustment；SAP 后续借 / 贷项 |
+| 分摊规则 | `allocation_rule` | — | **Oracle LCM 独有贡献**（六种基数） |
+| 累计用量（累计值） | `cumulative_usage` | 累计值 | SAP Condition Update |
+| 排斥组 | `exclusion_group` | — | SAP Condition Exclusion；Oracle Incompatible |
+| 外部率源（外部价格源） | `external_rate_source` | 外部价格源 | SAP MIC + DCS + Quotation；SF `IndexRate` |
+| 计价期 | `pricing_period` | 计价期 | SAP F&A；SF `PriceRevisionPolicy` |
+
+**通用化三轴（v1.3）**
+
+| 轴 | 归属对象 | 字段 | 取值（"域"示例） |
+|---|---|---|---|
+| ① 计算基来源 | 计算明细 `calc_detail` | `base_source` | `pricing_quantity`（定价）/ `activity_quantity`（碳 · 作业）/ `value` / `weight` / `volume` / `energy` / `hours` / `attribute` / `formula` |
+| ② 率载体 | 费率类型 `rate_type` | `rate_source` | `rate_record`（价目行 · 排放因子 · 作业费率）/ `external_quote`（外部报价）/ `formula`（公式） |
+| ③ 结果语义 | 计算过程 `calc_procedure` | `result_semantic` | `price`（默认）/ `cost` / `emission` / `tax` / `hours` / `quantity` |
+
+> **通用化等价性（v1.3）**：改配三轴，同一引擎即可算 **销售定价**（定价数量 × 价目行 → `price`）、**碳排放**（活动量 × 排放因子 → `emission`，Scope1→2→3 逐层累加）、**作业成本**（动因量 × 作业费率 → `cost`）。**成本归集层 / 碳组织边界与合并层不属本引擎**（§1.4 N9）。
+
+**A. 配置 / 主数据链（元模型，非事务数据）**
+
+| 对象 | 关键字段 | 溯源（对标） |
+|---|---|---|
+| `factor_catalog`（业务别名：字段目录） | `field_id` / `object_type` / **`source_type ∈ {static, master, quality, measurement, market}`** / `is_price_relevant` | SAP 字段目录（KOMG/KOMP）；SF Context / `IsPriceImpacting` |
+| `key_schema`（业务别名：条件表） | `code` / `name` / `key_fields[]`（来自因子目录） | SAP V/03（SD）/ M/03（MM） |
+| `lookup_sequence`（业务别名：存取序列） | `code` / `name` / `steps[{seq, key_schema_id, exclusive}]` | SAP V/07 / M/07；D365 find-next |
+| `rate_type`（业务别名：条件类型，**配置对象**） | `code` / `name` / `rate_class ∈ {price, discount_surcharge, tax, freight, statistical}` / `calc_type ∈ {percent, fixed, quantity, formula}` / **`rate_source ∈ {rate_record, external_quote, formula}`（率载体 · 轴②）** / `sign ∈ {+, -}` / `rounding` / `exclusion_group` / `manual_allowed` / `mandatory` / `statistical` / `lookup_sequence_id` | SAP V/06；SF pricing element |
+| `calc_procedure`（业务别名：定价过程） | `code` / `name` / `procedure_type`（首期 = `pricing`）/ **`result_semantic ∈ {price, cost, emission, tax, hours, quantity}`（结果语义 · 轴③，默认 `price`）** / `steps[{seq, element_type, rate_type_id?, condition?, params{}}]` / `subtotal_keys[]` | SAP V/08；Oracle Pricing Algorithm；SF Pricing Procedure |
+| `exclusion_group`（排斥组） | `code` / `members[]` / `resolution`（保留较高价 / 前置优先；**取值示意，研究稿未给枚举**） | SAP Condition Exclusion OV31/OV32；Oracle Incompatible |
+| `usage_group`（业务别名：条件更新组） | `code` / `max_amount` / `max_quantity` / `max_documents` | SAP Condition Update |
+| `allocation_rule`（分摊规则） | `id` / `basis ∈ {equal, value, quantity, weight, volume, manual}` / `manual_factor` / `group_by` / `rounding` / `floor` / **`target ∈ {cost, expense}`** | Oracle LCM 6 基数；SF DDS 规则决策表 |
+| `external_rate_source`（业务别名：外部价格源） | `id` / `source ∈ {platts, lme, ice, index, custom}` / `quote_code` / `calendar_id` / `fallback_rule` | SAP MIC + DCS + Quotation；SF `IndexRate` |
+| `pricing_period`（计价期） | `id` / `period_type ∈ {shipment_date, receipt_date, invoice_date, fixed_range}` / `start_offset` / `end_offset` / `average_basis ∈ {close, average, first, last}` / `rounding` | SAP F&A 计价期；SF `PriceRevisionPolicy` |
+
+**B. 费率记录（事务性主数据 = 费率记录 / 业务别名：价目行 · 条件记录）**
+
+| 对象 | 关键字段 | 溯源（对标） |
+|---|---|---|
+| `rate_table`（业务别名：价目表） | `code` / `name` / `type` / `currency` / **`status ∈ {draft, approved, inactive}`**（仅 `approved` 参与取价；**枚举取值示意，研究稿仅述"仅审核态参与取价"**） | Oracle Price List；金蝶价目表（仅审核态） |
+| `rate_record`（业务别名：价目行 / 条件记录） | `key_schema_id` + `keys{}` / `rate_type_id` / `rate` / `value` / `valid_from` / `valid_to` / `currency` / `rate_unit` / `rate_qty` / `scale[]`（阶梯）/ **`allocation_weight`（权重 · 第四消解范式 weighted，可空；非空 = 该候选参与"加权累加"而非"取一"，见下方消解范式表）** / `status` | SAP 条件记录 VK11；SF Price Book Entry；**Oracle Sourcing Rule `source_allocation_percentage` / 工单 `Cost Factor Allocation` / LCM `Charge Basis = % of item price`（跨域同构，见研究稿 §4.9D1）** |
+| `rate_supplement`（业务别名：条件补充） | 依附某费率记录的**补充条款**（研究稿 §4.2 第 2 层；本 Spec 未单列 FR，随 FR-001 费率记录交付） | SAP Condition Supplement |
+| `cumulative_usage`（业务别名：累计值） | 费率记录**跨单据累计已用量**（合同量用满失效）——由 FR-016 条件更新组驱动 | SAP Condition Update |
+
+**B2. 候选消解的四种范式（v1.4 拍板 · 补齐第四范式 `weighted`）**
+
+> **背景**：前三期只对标**定价域**（研究稿 §3–§4），得到三种"**取一**"范式；**v2.0 跨域对撞**（研究稿 §4.9）在 Oracle **成本域**发现第四种：**多候选不取一，全部参与，按权重加权累加**。该范式在 Oracle 内部**至少三处在用**（Sourcing Rule 分配百分比 / 工单 `Cost Factor Allocation` / LCM `Charge Basis = % of item price`），且它是已设计的 `allocation_rule`（1→N 摊金额）的**对偶**（N→1 合率）。故本期补齐。
+
+| 范式 | 候选如何处理 | 平台承载 | 结构溯源 |
+|---|---|---|---|
+| **互斥（`exclusive`）** | **取一**（保留较高价 / 前置优先） | `exclusion_group.resolution` | SAP OV31/OV32；Oracle Incompatible |
+| **优先级（`precedence`）** | **取一**（逐级覆盖，首个命中获胜） | `lookup_sequence` + 首个命中 | SAP 条件序列；Oracle **Precedence**；**Oracle 碳域因子 5 级链（物料 > 供应商 > 组织 > 政府地点 > 政府通用）**；平台 `default_by_priority` |
+| **取优（`best`）** | **取一**（按度量选最优） | 随 D3 口径 | Oracle **Best Price** |
+| **权重分配（`weighted`）· ★v1.4 新增** | **全部参与**，按 `allocation_weight` **加权累加**：`result_amount = Σ(rateᵢ × base × weightᵢ)`，`Σweightᵢ = 1` | **`rate_record.allocation_weight`（可空；非空即参与加权累加）** | **Oracle Sourcing Rule `source_allocation_percentage` / `Cost Factor Allocation` / LCM `Charge Basis`**；成本域 `Standard cost = Σ(rateᵢ × allocationᵢ)` |
+
+> **对偶关系**：`allocation_rule`（1 → N，把**一个金额**摊到多行）与 `allocation_weight`（N → 1，把**多个率**合成一个率）共用同一数学形式的两个方向。
+>
+> **互斥约束（v1.4）**：同一消解组内 **`allocation_weight` 非空的候选与"取一"类候选不可混用**——若组内存在非空 `allocation_weight`，则该组按加权累加执行，`exclusion_group.resolution` / `lookup_sequence` 优先级对其不生效。
+
+**C. 单据运行时链（事务数据，属单据）**
+
+| 对象 | 关键字段 | 溯源（对标） |
+|---|---|---|
+| **`calc_result`**（结果行） | `document_type` / `document_id` / **`document_line_id`（可空 = 头级）** / `level ∈ {header, line}` / `rate_type` / `element_type` / `base_level` / `base_source` / `base_step` / `rolling` / `base_formula?` / `rate` / `amount` / `currency` / `sign` / `sequence`；**费用扩展**：`origin ∈ {planned, unplanned}` / `charge_source ∈ {order, invoice, receipt, service_confirm, settlement}` / `source_document_type` / `source_document_id` / `target ∈ {price, cost, expense}` / `allocation_basis` / `allocation_rule_id`；**事实扩展**：`rate_source ∈ {rate_record, external_quote, formula}` / `pricing_period_id` / `external_rate_source_id` / **`fact_snapshot`（JSON）** | SAP 条件行 `KONV`/`PRCD_COND`（`KNUMV`+`KPOSN`+`KSCHL`+`STUNR`+`ZAEHK`；`KHERK=D` 头条件）；Oracle `Charge` |
+| **`calc_detail`**（步骤明细） | `result_id` / `seq` / `element_type` / `price_element_code` / `rollup_flag` / `skip_running_price` / `unit_price` / `extended_amount` / **`running_net_amount`（仅 `rolling=true`）** | Oracle `ChargeComponent`；SF waterfall |
+| **`adjustment`**（追溯 / 补差 / **改价**） | `original_result_id` / `adjustment_type ∈ {subsequent_debit, subsequent_credit, retro_price_change, rebate_settlement, delta_accrual, provisional_settlement, **override**}` / `delta_amount` / `effective_period` / `posted_flag` / **`reason`（`override` 时必填 · v1.5）** | SAP 后续借 / 贷项 + 返利结算；Oracle retroactive price adjustment；**SAP `Price Override` / SF `pricing element = Override` / Oracle 人工覆盖 `override_reason`（TBD-8 已拍板：复用本对象，不另立）** |
+
+**D. 结果元数据（计算结果携带的策略）**
+
+| 元数据 | 取值 | 溯源（对标） |
+|---|---|---|
+| `price_mode` | `carry` / `recompute_amount` / `repricing`（逐"目标单据类型 × 参考单据类型"，可逐属性 price/shipping/tax 覆盖） | SAP `KNPRS`/`TVCPF`；Oracle Freeze Price/Shipping/Tax；SF Repricing |
+| `freeze_policy` | 逐 `price` / `shipping` / `tax`：`recompute` / `freeze` | Oracle `CalculatePricingChargesFlag` 等 |
+| `reprice_trigger` | `on_copy` / `on_ship_confirm` / `on_invoice` / `manual` / `scheduled` / `on_quality_result` / `on_pricing_period_end` | SF Repricing；SAP `New Pricing` / `Update Pricing` |
+| `qty_basis` | `order_qty` / `delivered_qty`（开票默认）/ `goods_issued_qty` / `billed_to_date_qty` / `dry_weight` / `net_dry_weight` / `assayed_content` | SAP `FKMGK`；Oracle 21D/24C |
+
+**E. 关键枚举汇总**
+
+| 枚举 | 取值 |
+|---|---|
+| `element_type`（过程步骤算子） | `list_price` / `tier` / `attribute` / `formula` / `manual` / `derived` / `aggregate` / `distribute` / `round` / `track` / ★`quality_premium` |
+| `rate_class` | `price` / `discount_surcharge` / `tax` / `freight` / `statistical` |
+| `calc_type` | `percent` / `fixed` / `quantity` / `formula` |
+| `base_level` | `header` / `line` |
+| `base_source`（轴① 计算基来源） | `pricing_quantity`（默认）/ **`activity_quantity`（活动量：燃料消耗 / 用电量 / 工时）** / `value` / `weight` / `volume` / `energy` / `hours` / `attribute` / **`scaled_quantity`（缩放数量：量已归一，取"单位 = 总量 ÷ 缩放数量"的分母，对标 Oracle `per-unit cost = total ÷ scaled quantity`；v1.4 拍板 D19）** / `formula` |
+| `rolling` | `true`（cascade，记 `running_net_amount`）/ `false`（cumulative，默认） |
+| `source_type`（因子目录事实源） | `static` / `master` / `quality` / `measurement` / `market` |
+| `rate_source`（轴② 率载体） | `rate_record` / `external_quote` / `formula` |
+| `result_semantic`（轴③ 结果语义） | `price`（默认）/ `cost` / `emission` / `tax` / `hours` / `quantity` |
+
+> **互斥约束**：`rolling=true` 时 `base_step` 不填写；`base_source=formula` 时必填 `base_formula`。
+
+#### 9.3.2 主流程
+
+**流程 A · 单据定价（P1–P2）**
+
+```
+单据保存（头 + 行）
+  └─ [选源] MetaDefaultRule 确定 rate_table          （default，非本引擎）
+  └─ [逐行] 定价引擎调用（行 + 表头上下文）           （IF-001）
+       1. 确定计算过程（procedure_type = pricing）
+       2. 逐步骤执行 calc_procedure_step：
+          - 按 rate_type 的 lookup_sequence 检索 rate_record
+            · exclusive：首个命中即停；additive：继续累加
+            · tie-break：priority asc, record.id asc
+          - 命中后按 calc_type 求值（percent/fixed/quantity/formula）
+            计算基 = base_level/base_source/base_step/rolling（FR-006）
+          - 产出 calc_detail（含中间小计；rolling=true 记 running_net_amount）
+       3. 步骤间 additive 累加 → 净价 / 行金额
+       4. 冲突消解（P3）：Precedence 默认 / Best Price 显式 / 排斥组
+       5. 产出 calc_result（结果行）+ calc_detail（明细）
+  └─ [落库] 展平 unit_price / net_price / extended_amount 到单据行字段
+  └─ [尾算] MetaComputation 计算 total_amount         （compute，非本引擎）
+  └─ [校验] MetaValidation 用 min/max 快照拦限价       （validation，非本引擎）
+```
+
+**流程 B · 下游单据价格传递（P4，FR-012）**
+
+```
+下游单据复制 / 发货确认 / 开票
+  └─ 读计算结果元数据 price_mode
+       ├─ carry            → doc_flow 一对一搬结果字段（不搬明细）
+       ├─ recompute_amount → 金额 = 订单单价 × qty_basis 取到的量（不重取价）
+       └─ repricing        → 用 qty_basis 作输入重跑计算过程（可能跨阶梯档）
+  └─ 红线：已开票 / 已过账行禁止隐式重定价；重定价须显式触发 + 留痕
+```
+
+**流程 C · 事后 / 计划外费用与分摊（P4.5，FR-013/FR-014）**
+
+```
+来源单据（发票 / 收货 / 服务确认 / 结算）录入一笔计划外费用
+  └─ 生成 calc_result{origin=unplanned, source_document_*≠宿主单据}
+  └─ 按 allocation_rule{basis, group_by, floor, target} 摊到目标单据行
+       → 生成 level=line 分摊明细；头记总额
+  └─ 追溯：adjustment{original_result_id, delta_amount}
+       → 成对留痕、只结算差额、不改原单据
+```
+
+**流程 D · 事实数据驱动重算（P6，FR-015）**
+
+```
+质检结果 / 计量值 / 外部报价 → 写入事实源字段（source_type∈{quality,measurement,market}）
+  └─ reprice_trigger ∈ {on_quality_result, on_pricing_period_end} 显式触发
+  └─ 重跑计算过程（事实源字段可入匹配键表 / 可用于数量折算 / 可经外部报价源 + 计价期取价）
+  └─ 结果落 calc_result（含 fact_snapshot 快照）
+  └─ 暂定价 → 终价：adjustment{adjustment_type=provisional_settlement} 只结算差额
+  └─ 护栏：fact_snapshot 缺失拒绝结算；暂定价与终价配对可查
+```
+
+#### 9.3.3 API 设计
+
+- **定价调用**：`POST /api/v1/pricing/price`（或等价内部服务），入参 = 单据类型 + 单据 / 行标识 + 表头上下文；出参 = 净价 / 行金额 + `calc_result[]` + `calc_detail[]`。
+- **回放查询**：`GET /api/v1/pricing/explain?document_type=&document_id=[&document_line_id=]`，返回命中 / 剔除候选及原因 + 逐层小计 + 基准四字段。
+- **分摊执行**：`POST /api/v1/pricing/allocate`，入参 = 费用结果行 + `allocation_rule_id`；出参 = 各行摊得额 + 回放。
+- **重算**：`POST /api/v1/pricing/reprice`，入参 = 单据 + `reprice_trigger` + `qty_basis`；已开票 / 已过账行返回拒绝或强制留痕。
+
+> 端点命名与既有 `POST /api/v1/meta/<object_type>/defaults-preview`（规则模型 dry-run）风格保持一致；具体路径以实施计划为准（TBD-3）。
+
+#### 9.3.4 与既有资产的复用映射
+
+| 资产 | 位置 | 复用方式 |
+|---|---|---|
+| 条件表达式内核 | `condition_parser.py` / `condition_evaluator.py` / `condition_converter.py` | "适用条件"直接用条件表达式 |
+| 分组 + 首个命中 + tie-break | `rule_executor.py` `default_by_priority`（L1432 起）、`models.py` L224-270 | 查找序列"首个命中"借其语义 |
+| 安全表达式求值 | `safe_expr_evaluator.py` + `FormulaFunctionRegistry`（`rule_executor.py` L229-230） | `calc_type=formula` / `base_formula` 复用 |
+| 值计算宿主 | `MetaComputation`（`models.py` L207-221） | 承接小计行 / 尾算 |
+| 单据宿主范式 | `sales_order_enhanced.yaml` L6-7 / L378-387 | `calc_result` / `calc_detail` 挂单据 |
+
+### 9.4 备选方案
+
+| 决策点 | 选项 | 优点 | 代价 | 结论 |
+|---|---|---|---|---|
+| **D1 引擎形态** | A 独立引擎 / B 扩展 `MetaCompute` 加序列 | A：语义显式、可解释最好、边界清晰；B：零新引擎 | B：`compute` 承不住多层累加 / 取优 / 费率记录 | **选 A**（研究稿 §2.2、§6） |
+| **D9 费率类型（条件类型）** | A 配置对象 / B 硬编码枚举 | A：六家全部如此、可扩展；B：实现简单 | B：无法自建、违背 D7 | **选 A** |
+| **D13 过程内派生 / 汇总 / 分摊归属** | A 一律归 `allocation` / B 按"是否在计算过程内"切 | B：符合 SF DDS / Oracle Spread Discount / SAP 组条件事实 | A：会把头级折扣分摊切碎 | **选 B**（判据 = 是否作为计算过程的一步） |
+| **D15 结果宿主** | A 独立"定价单据" / B 附属于业务单据 / C 仅展平字段 | B：三家一致、不与 `doc_flow` 争单据、明细可回放 | A 多一跳且语义冲突；C 不够（D4 要明细） | **选 B** |
+| **D2/D3 取数 / 消解** | Precedence vs Best Price | Precedence：可预测可回放；Best Price：商务最优 | Best Price 需遍历全集 + 先定义度量 | **分层默认**：槽位内 exclusive、步骤间 additive；消解默认 Precedence，Best Price 显式开 |
+| **D12 基准滚动** | 不滚动 / 滚动 | 不滚动：可解释、金额可控；滚动：复利式叠加 | 滚动误配会连带放大 | **默认不滚动，滚动显式开** |
+| **D18 第四消解范式 `weighted`**（v1.4） | A 只做三种"取一" / B 补"多候选按权重加权累加" | B：Oracle 成本域三处在用的真实范式；补上后"定价专属"降为"定价为首个实例"；与 `allocation_rule` 互为对偶 | B：多一个可空字段 + 一条归一校验 | **选 B**（研究稿 §4.9D1；`rate_record.allocation_weight`，Σweight=1 须归一否则报错） |
+| **D19 单位换算放哪一层**（v1.4） | A 塞进 `base_formula` / B 归事实源取值阶段 / C 建完整 `conversion` 对象放引擎内 | B：换算是"单位声明"不是"公式"，混进公式会让同一 `× 率` 无法同时服务 kL 与 GJ，丧失跨域复用 | A：公式失去可复用性；C：新表新枚举，本期收益不可见 | **选 B**（本期只补 `base_source` 枚举 `scaled_quantity`；完整 `conversion` 登记 **TBD-10**） |
+
+#### 9.4.1 研究稿决策点处置映射（D1–D17，回溯表）
+
+> 研究稿 §8 的 17 个决策点在本 Spec 中的处置一览（避免决策散落、便于回溯）：
+> **v1.4 追加**：研究稿 v2.0 / v2.1 新增 **D18–D22**（跨域二次研究 + Palantir 对照）已并入下方 D18–D22 行。
+
+| # | 决策点（研究稿 §8） | 处置 | 本 Spec 落点 |
+|---|---|---|---|
+| D1 | 独立引擎 vs 扩展 `compute` | 采纳 ①独立引擎 | §9.2、§9.4 |
+| D2 | 取数范式默认值 | 采纳"分层默认"（槽位内 exclusive / 步骤间 additive） | FR-004、FR-007 |
+| D3 | 冲突消解范式 | 采纳 ③（默认 Precedence；Best Price 显式开 + 先定度量） | FR-008 |
+| D4 | 定价结果落库形态 | 采纳 ③（字段 + 明细都要） | FR-010、FR-011 |
+| D5 | 可解释回放保留策略 | **待定** | TBD-4 |
+| D6 | 是否要条件更新（累计用量） | 倾向 ②先不做（P4 后置） | FR-016、TBD-5 |
+| D7 | 是否统一"确定引擎" | **✅ 已拍板**：只做定价；元模型按"通用确定与计算"设计（v1.3：参数化三轴 `base_source`/`rate_source`/`result_semantic`，本期首个过程实例 = `pricing`） | §7.2 B1、FR-002、§9.2 |
+| D8 | 复制带价 vs 重定价 | **✅ 已拍板**：③逐"目标单据类型 × 参考单据类型"配 `price_mode` 三档 + 逐属性覆盖 | FR-012 |
+| D9 | 条件类型：配置对象 vs 硬编码枚举 | 采纳 ①配置对象（仅"计算类型"为属性枚举） | FR-002、§9.4 |
+| D10 | 计算基准默认层级 | 采纳 ①行级（表头条件 + 组条件分摊列 P3+） | FR-006、IF-001 |
+| D11 | 基准量默认 | 采纳 ①定价数量（预留 `base_formula`） | FR-006 |
+| D12 | 基准是否滚动 | 采纳 ①默认不滚动（滚动显式开启） | FR-006、§9.4、R3 |
+| D13 | 过程内派生 / 汇总 / 分摊的归属 | 采纳 ②（判据 = 是否在定价过程内） | FR-018 |
+| D14 | 数量基准来源 `qty_basis` | **✅ 已拍板**：②开票默认 `delivered_qty`，与"单价是否重取"解耦 | FR-012 |
+| D15 | 定价结果的对象宿主 | **✅ 已拍板**：②附属于业务单据 | FR-011、§9.4 |
+| D16 | 事后 / 计划外费用归属与去向 | **✅ 已拍板（v1.5）**：**②归定价"费用 / 分摊"子域**——它是 `origin=unplanned` 的 `calc_result`，不新建费用单据、不破 D7；成本侧取值算法仍归成本核算 | FR-013、§9.3.1 C |
+| D17 | 事实数据驱动重算归属与节奏 | **✅ 已拍板（v1.5）**：**设计侧③（`reprice_trigger` 枚举一次给全）／实施侧②（只实装 `on_quality_result`）**——另两个触发器依赖尚未实施的对象，先枚举留全、只实装依赖已就绪者 | FR-015、FR-016 |
+| D18 | 是否补第四消解范式 `weighted`（权重分配） | **✅ 已拍板（v1.4）**：②补——`rate_record.allocation_weight`（可空），非空即参与加权累加；Σweight=1 须归一否则报错 | FR-008、§9.3.1 B2、TR-005/006 |
+| D19 | 单位换算 / 归一化放哪一层 | **✅ 已拍板（v1.4）**：②归事实源取值阶段——取数时上游归一，引擎内 `base` 恒为标准单位；本期只补 `base_source` 枚举 `scaled_quantity`，完整 `conversion` 后置 | FR-006、§9.3.1 E、TBD-10 |
+| D20 | 多账簿 / 多估值基础并行是否纳入 | **✅ 已拍板（v1.5）**：**②不纳入**——属"引擎实例化 / 编排"层，非"过程定义"层；将来若做，走**引擎外多次调用**（同 `procedure` 跑 N 次带不同 `context`），**不在引擎内建多实例** | TBD-11（已关闭） |
+| D21 | 是否给定价结果补能力接口（interface） | **✅ 已拍板（v1.5）**：**②本期不做**，登记 TBD-12——本期只有一个域，多态零收益；将来多域时它比"硬塞一张表"更保守 | TBD-12 |
+| D22 | 是否补"谁能改价"策略位 | **✅ 已拍板（v1.5）**：**②只补最小一条"改价必填原因"**（`adjustment{adjustment_type=override}.reason` 必填），**与 TBD-8 合并实现**；完整权限 / 审批矩阵归权限引擎 | FR-014、TBD-13 |
+| D23 | **整体价覆盖（Override）语义是否补**（原 TBD-8） | **✅ 已拍板（v1.5）**：**①补，复用 `adjustment` + `reason` 必填，不新增对象**——六家零分歧的共识机制，与 `adjustment` 同构；另立对象会重复 | FR-014 |
+| D24 | **结果 → 单据行字段输出映射是否建对象**（原 TBD-9） | **✅ 已拍板（v1.5）**：**本期不建对象**，改为**按 `result_semantic` 约定写回字段**（零配置零新表）；多过程 / 多结果结构时才需要对象，**接口已预留** | FR-011 |
+
+### 9.5 实施与迁移计划
+
+**实施顺序**（对齐 §8.2；**先依赖后优先级**）：
+
+1. **P0**：元模型定型（六件字段 / 枚举）+ 主数据前置（#11 币种、#16 销售区域渠道 / 产品组）；
+2. **P1**：匹配键表 + 因子目录 + 费率类型 + 费率表 + 费率记录 + 查找序列（exclusive）；
+3. **P2**：费率类型分类 + additive + 计算过程序列（`element_type`）+ 计算基四字段 + 小计 + 计算明细 + `calc_result` / `calc_detail`；
+4. **P3**：取优 / 互斥（Precedence vs Best Price + 排斥组）；
+5. **P4**：阶梯 + 有效期 + 用量更新 + 执行期重算（`freeze_policy` / `reprice_trigger` / `qty_basis`）；
+6. **P4.5**：`allocation_rule` + 费用口径字段 + `adjustment`（追溯可后置）；
+7. **P5**：扩展点接线；
+8. **P6**（可选）：事实源分类 + `external_rate_source` / `pricing_period` + `fact_snapshot`。
+
+**风险与缓解**：
+
+| 风险 | 缓解 |
+|---|---|
+| R1 依赖主数据缺失（币种 / 汇率 / 税 / 价格组）导致引擎空转 | TR-002 分期补齐；对应费率类型不上线；缺失时明确报错不静默错算 |
+| R2 Best Price 静默改变金额、不可回放 | **绝不隐式默认 Best Price**；开启须先定义"最优"度量（D3） |
+| R3 基准滚动误配连带放大金额 | **默认不滚动**；滚动显式开启；`rolling` 与 `base_step` 互斥校验（D12） |
+| R4 已开票 / 已过账行被隐式重定价 | 红线 + `reprice_trigger` 显式触发 + 留痕；重定价被拒不静默（§4.5C） |
+| R5 与 `doc_flow` / `allocation` / `rollup` 争边界 | FR-018 六条边界登记 + 单一判据（过程内；是否有"可分摊到业务单据行"的价格语义） |
+| R6 结果明细体积膨胀 | 回放保留策略（TBD-4，D5）；结果版本化替换而非无限追加 |
+
+**测试策略**：
+
+- **单元测试**：费率类型枚举 / 计算类型（percent/fixed/quantity/formula）；查找序列 exclusive vs additive；tie-break 稳定性；计算基四字段（含 `rolling` 与 `base_step` 互斥、`base_formula`）；阶梯两语义；有效期过滤；取优（Precedence / Best Price）与排斥组；`SafeExpressionEvaluator` 拒绝危险表达式；分摊六基数 × `target ∈ {cost, expense}`；`adjustment` 成对 / 只结算差额。
+- **集成测试**：经单据保存链路跑完整"取价 → 累加 → 落库 → 展平字段"；三种传递组合（搬运 / 订单价 × 实际量 / 实际量重取价）；已开票行重定价被拒；`fact_snapshot` 缺失拒绝结算；存量测试全绿（**`python d:\filework\test.py`**）。
+- **E2E**：单据上"查看计算过程"可回放；限价校验（`validation`）拦截生效。
+
+**回滚计划**：
+
+- 计算过程 `enabled=false`；费率类型 / 费率表停用；新增对象声明移除；引擎调用点短路。
+- **无 schema 迁移 → 无数据迁移回滚**（结果对象为新增声明）。
+
+---
+
+## 10. TBD 清单
+
+| 编号 | 待定项 | 缺什么信息 | 下一步 | 关联 |
+|---|---|---|---|---|
+| **TBD-1** | ~~**事后 / 计划外费用的归属与去向**~~（研究稿 D16） | 归属选项：① 归 `allocation` ② 归定价"费用 / 分摊"子域（复用 `calc_result` + `allocation_rule`，`target ∈ {cost, expense}` 作规则字段）③ 只做"进费用" | **✅ 已关闭（v1.5 拍板 D16 = ②）**：归定价"费用 / 分摊"子域；它是 `origin=unplanned` 的 `calc_result`，**不新建费用单据、不破 D7**；成本侧取值算法仍归成本核算 | FR-013、§9.3.1 A/C、§9.4 |
+| **TBD-2** | ~~**事实数据驱动重算（优质优价 / 大宗）的归属与节奏**~~（研究稿 D17） | 选项：① 不做 ② 只做"事实源作为匹配键表字段 + 事实快照"，大宗两段式后置 ③ 完整做（+ `external_rate_source` / `pricing_period` / 暂定价结算） | **✅ 已关闭（v1.5 拍板 D17 = 设计③ / 实施②）**：`reprice_trigger` 枚举**一次给全**（零成本）；**只实装 `on_quality_result`**（另两个依赖 `external_rate_source` / `pricing_period` / TBD-1 的 `origin`，尚未就绪） | FR-015、§8.2 M8 |
+| **TBD-3** | 定价 API 端点路径与命名 | 具体路径 / 方法与既有 API 风格统一 | 随实施计划定 | IF-001、§9.3.3 |
+| **TBD-4** | **可解释回放保留策略**（研究稿 D5） | ① 全量落库 ② 仅最近 N 次 ③ 仅在"手动查看"时重算（涉存储成本） | 待定；**P2 必须先有结构** | FR-010、NFR-003、R6 |
+| **TBD-5** | 条件更新（累计用量）是否纳入首期（研究稿 D6） | ① 要 ② 先不要 | **倾向 ② 先不做**（P4 后置） | FR-016 |
+| **TBD-6** | 在线配置 UI 与规则版本化 | 形态（文件 / DB）+ 历史单据复现策略 | 待定（首期不做） | N8、§7.3 A2 |
+| **TBD-7** | 采购侧成本类费用的实现时点 | D7 范围外，仅做对象设计 | 待业务确认（涉及采购侧时另立） | FR-013、B2 |
+| **TBD-8** | ~~**「整体价覆盖」Override 语义缺口**~~ | 研究稿 §3 对标（Oracle EBS 五种调整类型含 **`Price Override`（New price）**；Salesforce `pricing element` 三态 **Charge / Adjustment / Override**）——即"不以当前累加结果为基准、直接改写"的语义。现行对象模型只能用 `element_type: manual` + `rate_class: price` **隐式**表达，**无一等概念**。缺什么：① 是否把 `override` 补为显式取值 ② 其与前序累加 / 后序步骤的交互规则须定义 | **✅ 已关闭（v1.5 拍板 D23 = ①）**：**复用 `adjustment`**，新增 `adjustment_type = override`（**不另立对象**——它与 `adjustment` 同构：引用原结果 + 留痕 + 不改原单据）。**交互规则**：`override` 在**前序累加完成后**生效，**直接给出最终价**并**清零其后累加步骤**（语义 = "New price"）；`reason` 必填 | FR-005、FR-014、§9.3.1 A/C/E |
+| **TBD-9** | ~~**`pricing_output_map`（结果 → 单据行字段输出映射）缺口**~~ | Salesforce `PricingProcedureOutputMap` 决定"哪个定价结果写回单据的哪个字段"（研究稿 §4.6A）。`calc_result` 已泛化挂任意 `document`（FR-011），但**下游单据行字段名不同即断链**——现无此对象 | **✅ 已关闭（v1.5 拍板 D24 = ②）**：本期**不建对象**，改为**按 `result_semantic` 约定写回字段**（`price`→`unit_price`/`amount`、`cost`→`cost_amount`、`emission`→`emission_amount`，余者落 `result_amount`）。**接口已预留**——多过程 / 多结果结构时再补对象，本约定即默认映射 | FR-011、§9.3.1 C、研究稿 §4.6A |
+| **TBD-10** | **完整单位换算对象 `conversion{from_unit, to_unit, factor_expr}`**（v1.4 拍板 D19：换算归事实源取值阶段，本期只补 `base_source` 枚举 `scaled_quantity`） | 碳域需 kL → GJ（乘密度）、GWP 二次乘数（气体 × GWP = CO₂e）、定价域 `price_unit` 换算——三者形态各异。缺什么：① 是否建独立 `conversion` 对象放**事实源取值阶段**（非计算过程内）② 换算因子的来源（主数据 / 密度表 / 因子库）如何挂到 `source_type = market / measurement` 的字段上 | 后置（P6 随事实源子域）；本期不做 | FR-006、§9.3.1 E、研究稿 §4.9D2 |
+| **TBD-11** | ~~**多账簿 / 多估值基础并行**~~（研究稿 D20） | Oracle 一个 Cost Organization 挂多本 Cost Book（primary 财务 / secondary 管理 / **ledgerless 模拟**），同一批事务按不同规则出多套结果；`pricing_procedure` 当前是**单实例** | **✅ 已关闭（v1.5 拍板 D20 = ②不纳入）**：属"**引擎实例化 / 编排**"层，非"过程定义"层。**边界现在就写清**：将来若做，走**引擎外多次调用**（同一 `procedure` 跑 N 次、每次带不同 `context`），**不在引擎内建多实例** | §1.4 N9、FR-005 |
+| **TBD-12** | **定价结果的能力接口（interface）**（v1.5 保留，研究稿 D21 已拍板②本期不做） | Palantir Interface 提供对象类型多态；将来成本 / 碳 / 税四域结果都满足"可挂单据 · 有明细 · 可回放"这组能力时，可按能力挂载而不必共用一张表。缺什么：① 是否声明接口层 ② 四域是共用一表还是按能力分表 | **保留待议**（D21 已拍板本期不做——只有一个域，多态零收益；但它是多域时比"硬塞一张表"更保守的选项） | FR-011、§1.4 N9 |
+| **TBD-13** | **"谁能改价"的完整权限 / 审批矩阵**（v1.5 保留，研究稿 D22 已拍板②只补最小一条） | 本期**已补最小一条**：`adjustment{adjustment_type=override}.reason` **必填**（FR-014）。仍缺：完整权限矩阵（谁能改价 / 改价要不要审批 / 改价上限），涉及角色、审批流、组织结构 | **保留待议 + 建议归权限引擎**（研究稿倾向：属**组织级治理**，不该由定价引擎单方面承担） | FR-005、FR-011、FR-014、§9.3.1 C |
+
+---
+
+## CHANGELOG
+
+| 日期 | 版本 | 变更 |
+|---|---|---|
+| 2026-10-05 | v1.0 | 初版：由 spec-rfc 流程产出，以研究稿 v1.9 为唯一事实来源，收敛为 10 节 Spec + RFC。含 FR-001~FR-018 / NFR-001~NFR-007 / IF-001~IF-008 / TR-001~TR-004 / M1~M8（P0–P6）；对象模型（配置主数据链 + 价目行 + 单据运行时链 + 结果元数据 + 枚举汇总）；RFC（As-Is / Target / 详细设计 / 备选方案 D1·D9·D13·D15·D2·D3·D12 / 实施迁移 / 风险 / 测试 / 回滚）；TBD-1~TBD-7（其中 TBD-1/TBD-2 对应对标研究的 D16/D17 待拍板） |
+| 2026-10-05 | v1.1 | 二次检查（研究稿忠实性审计）修正 4 处：① FR-005 补记金蝶"计算策略属过程内 + 仅旗舰版/星瀚"（研究稿 §1.16、§3.1.6）；② §9.3.1 B 补 `rate_supplement`（条件补充）与 `cumulative_usage`（累计值）两对象（研究稿 §4.2 第 2 层）；③ 新增 §9.4.1「研究稿决策点处置映射（D1–D17）」回溯表；④ 对研究稿未给枚举的自造取值（`rate_table.status`、`exclusion_group.resolution`）标注"取值示意" |
+| 2026-10-05 | v1.2 | 补记 2 项对象缺口（用户评审提出，本次仅登记、待拍板）：TBD-8 整体价覆盖 Override 语义（Oracle `Price Override` / SF `Override` 三态）—— 对象模型现仅能用 `element_type: manual` 隐式表达；TBD-9 `pricing_output_map`（SF `PricingProcedureOutputMap`）—— `calc_result` 泛化宿主缺"写回哪个字段"的映射 |
+| 2026-10-05 | v1.3 | **命名去 SAP 化 + 通用化边界拍板**（用户评审「不要完全无脑看SAP」）：① 元模型层全面改为**领域中立命名**（`rate_table`/`rate_record`/`rate_type`/`key_schema`/`lookup_sequence`/`calc_procedure`/`calc_result`/`calc_detail`/`adjustment` 等），SAP 术语降为**业务别名**，仅见于 §9.3.1「业务别名」「溯源（对标）」列；② §9.3.1 新增「命名原则 + 命名与溯源对照表（含 SAP 骨架 / 六家趋同 / 某家独有贡献标注）+ 通用化三轴表」；③ 通用化只参数化**三轴**——`base_source`（轴①，扩容 `activity_quantity`/`volume`/`energy`/`hours`）、`rate_source`（轴②，`rate_type` 新增）、`result_semantic`（轴③，`calc_procedure` 新增，默认 `price`）；④ §1.4 新增 **N9 通用化边界**（成本归集层 / 碳组织边界·合并层不属本引擎）；⑤ §9.2 新增「元模型通用性与命名声明」（元模型 = 通用确定与计算，本期首个过程实例 = `pricing`）；⑥ FR-001~FR-006 / NFR-007 / TR-001~TR-004 / §8.1 / §8.2 / §9.3.1 A–E 表 / §9.3.2 流程 A / §9.4 D7·D9 / §9.4.1 D7 行术语同步 |
+| 2026-10-05 | **v1.4** | **跨域验证回写 + 补第四消解范式 `weighted`**（用户评审「② 第四种消解范式 weighted 这个可以补充」）：**背景**——研究稿 v2.0（Oracle 跨域二次研究）与 v2.1（Palantir 对照）已落盘，结论回写本 Spec。① **补第四消解范式 `weighted`（D18 拍板）**——`rate_record` 新增 **`allocation_weight`（可空）**，**非空即该候选参与"加权累加"而非"取一"**，`result_amount = Σ(rateᵢ × base × weightᵢ)`、**Σweight=1 须归一否则拒绝计算并报错**（不静默缩放）；同组内非空权重候选与"取一"类候选**不可混用**；对标 Oracle 成本域 **Sourcing Rule 分配百分比**（`Standard cost = (Buy × Buy alloc) + (Rolled-up × Make alloc) + (Transfer × Transfer alloc)`）、工单 `Cost Factor Allocation`、LCM `Charge Basis = % of item price`；与 `allocation_rule`（1→N 摊金额）**互为对偶**（N→1 合率）。落点：**§9.3.1 B2 新增"候选消解的四种范式"表** / FR-008 扩写四种范式与验收 / §8.1 FR-008 / §9.2 声明 / §9.4 备选方案 D18 / §9.4.1 D18 / §9.5 决策表。② **D19 拍板：单位换算归事实源取值阶段**——取数时上游归一，引擎内 `base` 恒为标准单位（**换算是"单位声明"不是"公式"的一部分**，混进 `base_formula` 会让同一 `× 率` 公式无法同时服务 kL 与 GJ）；本期只补 `base_source` 枚举 **`scaled_quantity`**（对标 Oracle `per-unit cost = total ÷ scaled quantity`），完整 `conversion` 对象登记 **TBD-10**。③ 新增 **TR-005**（`allocation_weight` 零迁移：默认 `null` = 行为完全不变）与 **TR-006**（消解范式验收矩阵，含"权重和不归一须报错"用例）。④ 外部验证结论入 §9.2 与 header：三轴在 Oracle **成本域**（`总成本 = 固定 + 变动[单位资源成本 × 消耗数量]`）与**碳域**（`排放量 = 活动数据 × 排放因子`）**逐字同构**；Palantir 对照结论——**两条通用化路径的分野不在能力而在"谁承担域特有逻辑"**，本引擎走"元模型 + 参数化"，故 **N9 边界是这条路径的必要成本，不是保守**。⑤ 决策表补 **D20 / D21 / D22**（多账簿并行 / 结果能力接口 / 谁能改价，均待拍板）；§10 TBD 补 **TBD-10~TBD-13**；关联研究稿版本同步为 **v2.1** |
+| 2026-10-05 | **v1.5** | **七项待拍板全部落定**（用户评审「采纳你的建议，请更新 spec」）。**共性观察：七项没有一项需要新增对象或改引擎结构**——全落在"已有字段加可空枚举"或"字段名约定"上，**说明元模型骨架已够用，剩下的是填充与约定**。① **D16 / TBD-1 事后费用归属**：**②归定价"费用 / 分摊"子域**——它是 `origin=unplanned` 的 `calc_result`，**不新建费用单据、不破 D7**（依据：Oracle retroactive adjustment 生成独立 acquisition cost adjustment、SAP 计划外交付成本走独立行；且 `origin` 只是一个可空枚举，现在加近乎零成本）。落点 FR-013 新增"归属拍板"段。② **D17 / TBD-2 事实数据重算节奏**：**设计侧③（`reprice_trigger` 枚举一次给全）／实施侧②（只实装 `on_quality_result`）**——另两个触发器依赖尚未实施的 `external_rate_source` / `pricing_period` / TBD-1 的 `origin`，**先枚举留全、只实装依赖已就绪者，避免半配置状态**；并记下研究稿 §4.8C 规律 2"质检值直接改价在头部产品里普遍是半成品"（三家均【未找到】标准链路）——既是机会也说明无成熟范式可抄。落点 FR-015 新增"实施节奏拍板"段。③ **D23 / TBD-8 Override 语义**：**①补，且复用 `adjustment`、不新增对象**——新增 `adjustment_type = override`，语义 = "**前序累加完成后直接给出最终价，并清零其后累加步骤**"（对应 "New price"）；依据是**六家零分歧的共识机制**，缺失最突兀，且它与 `adjustment` 同构（引用原结果 + 留痕 + 不改原单据），另立对象会重复。④ **D22 "谁能改价"**：**②只补最小一条，且与 ③ 合并实现**——`adjustment{adjustment_type=override}.reason` **必填**；**完整权限 / 审批矩阵归权限引擎**（涉及角色 / 审批流 / 组织结构，属组织级治理，不该由定价引擎单方面承担，登记 TBD-13 保留）。⑤ **D24 / TBD-9 输出映射**：**本期不建 `output_map` 对象**，改为**按 `result_semantic` 约定写回字段**（`price`→`unit_price`/`amount`、`cost`→`cost_amount`、`emission`→`emission_amount`，余者落 `result_amount`）——本期只有一个过程实例、一套结果结构，约定即可表达，**零配置零新表**；痛点在多过程 / 多结果结构时才显现，**接口已预留**（本约定即将来对象的默认映射）。落点 FR-011 新增写回约定条目。⑥ **D20 多账簿并行**：**②不纳入**——属"**引擎实例化 / 编排**"层而非"过程定义"层；**边界现在就写清**：将来若做走**引擎外多次调用**（同 `procedure` 跑 N 次带不同 `context`），**不在引擎内建多实例**。**D21 结果能力接口**：**②本期不做**（只有一个域，多态零收益），登记 TBD-12 保留。⑦ 决策表新增 **D23 / D24** 两行；**§10 TBD-1 / TBD-2 / TBD-8 / TBD-9 / TBD-11 五项划线关闭**，TBD-12 / TBD-13 改为"保留待议"并补记已落地的最小版；§9.3.1 C 表 `adjustment` 补 `override` + `reason` + 六家溯源；header 状态改为 **v1.5 · 全部待拍板项已清零** |
