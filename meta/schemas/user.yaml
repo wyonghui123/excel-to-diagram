@@ -20,6 +20,10 @@ semantics:
 
 audit:
   enabled: true
+  # [person 面一期 2026-10-05] party_id 有意不加入 update / delete exclude：
+  # 接线留痕是身份绑定事实（含删除时的最后指向）需可追；party_id 值非敏感，
+  # 排除集口径 = machinery（id / 时间戳）+ secret（password_hash 等）+ plumbing（sso_*）—— party_id 不属任何一类。
+  # 若未来安全口径收紧，可一行翻转（加入两处 exclude）。
   create:
     enabled: true
     fields: all
@@ -78,6 +82,22 @@ fields:
     semantics:
       meaning: 用户邮箱地址
       export_visible: true
+
+  # [person 面一期 · E2-B 接线 2026-10-05] user ↔ party 可空引用（结构先行 D5=A；写入 UI / API 联动另立项）
+  # 可空: 存在无 party 的系统账号（admin / service）⇒ 设 NOT NULL 会阻断既有账号
+  # 不唯一: 一人可持多账号（本地 + SSO）⇒ 允许多账号指向同一 party；反查走 idx_user_party
+  # 不建 DB 级 FK: 照 party.org_id 先例（跨库 / 演进友好）；仅作「当前指向」，不得用于唯一性 / 判定逻辑
+  - id: party_id
+    name: 关联身份
+    type: integer
+    db_column: party_id
+    nullable: true
+    description: 关联的身份主体（party）；系统账号可空；同一 party 可多账号
+    semantics:
+      meaning: 关联的业务身份（party）；仅作当前指向，不得用于唯一性 / 判定逻辑
+    ui:
+      hidden_in_list: true
+      hidden_in_form: true
 
   - id: password_hash
     name: 密码哈希
@@ -409,6 +429,9 @@ indexes:
   - fields: [sso_provider, sso_user_id]
     unique: true
     name: idx_user_sso
+  # [person 面一期 · E2-B] 反查「某人有哪些账号」；不唯一（一人可多账号）
+  - fields: [party_id]
+    name: idx_user_party
 
 relations: []
 

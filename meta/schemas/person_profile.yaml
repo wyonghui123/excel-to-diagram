@@ -1,0 +1,147 @@
+# ============================================
+# 个人档案（person_profile）— foundation 步 2 · person 面一期（E1-A）
+# 依据: person 面与 User 接线设计 v1.2（§3.1 / §3.2）；蓝图 v2.5（§3.1 / 对象清单 #3 / §7 步 2）
+# 定位: party_type='person' 的 PII 专属档案载体；与 parties 1:1（party_id UNIQUE 强制）
+#   独立 object_type ⇒ 独立功能权限域（对象级动作码，照 party_internal 先例）
+# 权限边界（如实声明，禁止夸大）: 对象级隔离 —— 授权 person_profile_read 即可读全表；
+#   平台元模型无字段级权限位（D3b 不做 / TBD-9），不得宣称「已实现 PII 分级保护」（§3.2.1）
+# 简位登记（有意识偏离行业惯例）: mobile / email 属联系方式（四家惯例 = 独立 Contact 对象），
+#   本期临时置于本表（parties 无任何联系方式列，否则 person 不可用）；Contact 立项时迁出（TBD-2）；
+#   迁出代价已核: 两列可空、无索引、无 DB 级 FK ⇒ ALTER TABLE DROP COLUMN 成本低（§3.5）
+# 审计口径: mobile / email 为 PII，create / update / delete 三处 exclude 全覆盖 —— 不落 audit_logs
+#   （避免 PII 在审计表形成第二存储位置 / 另一权限域）；party_id 有意不排除 —— 1:1 接线事实需可追
+#   （含删除时的最后指向）；排除集口径 = machinery（id / 时间戳）+ secret + plumbing，party_id 不属任何一类
+# 类型守卫登记（D2-A，本期未实现）: 「仅 party_type='person' 可挂档案」为应用层校验；
+#   SQLite 无跨表 CHECK ⇒ 接线期补（AC-2 标注「未实现（登记待接线期）」）
+# [登记] .schema_version.json 未在本批改动：手工预登记会使 detect_changes 判为 no_change 而静默跳建表；
+#   本对象由 sync_schema 下次运行时自动登记（new_objects，沿 party_relation 先例 2026-10-05）
+# ============================================
+
+id: person_profile
+name: 个人档案
+table_name: person_profiles
+description: person 私有档案（PII 专属载体）：party_type='person' 的 1:1 扩展档案；独立权限域
+aspects: [audit_aspect]
+
+# [F1 §7.1-4 先例] auto_crud: false —— 动作码显式声明（供权限矩阵引用），不自动补
+import_export:
+  auto_crud: false
+
+actions:
+  - id: person_profile_create
+    name: 创建个人档案
+    type: crud
+    method: POST
+    path: "/api/v1/person_profiles"
+    description: 创建个人档案记录
+  - id: person_profile_read
+    name: 查询个人档案
+    type: crud
+    method: GET
+    path: "/api/v1/person_profiles/{id}"
+    description: 查询单个个人档案记录
+  - id: person_profile_update
+    name: 更新个人档案
+    type: crud
+    method: PUT
+    path: "/api/v1/person_profiles/{id}"
+    description: 更新个人档案记录
+  - id: person_profile_delete
+    name: 删除个人档案
+    type: crud
+    method: DELETE
+    path: "/api/v1/person_profiles/{id}"
+    description: 删除个人档案记录
+  - id: person_profile_list
+    name: 查询个人档案列表
+    type: crud
+    method: GET
+    path: "/api/v1/person_profiles"
+    description: 查询个人档案列表
+
+# [PII 审计口径] mobile / email 三处 exclude 全覆盖；party_id 不排除（接线留痕）
+# 机制说明: exclude 对所有模式统一过滤（audit_interceptor._get_fields_to_log），
+#   故 create（fields: all）也必须显式排除，否则 PII 明文落 audit_logs
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+    exclude:
+      - mobile
+      - email
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - mobile
+      - email
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - mobile
+      - email
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # [D2-A] 1:1 锚：party_id UNIQUE 强制；类型约束（仅 person）为应用层，本期未实现（见头部登记）
+  - id: party_id
+    name: 身份主体引用
+    type: integer
+    db_column: party_id
+    required: true
+    unique: true
+    description: 1:1 锚 → parties.id（仅 party_type='person'；类型守卫为应用层校验，本期未实现）
+    semantics:
+      meaning: 对应身份主体（party），1:1
+
+  # [v1.2 范围收缩] v1.1 拟含 gender / birth_date：经一期最小范畴复核移除
+  #   （gender 无业务入口；birth_date 移除后其类型之争 D9 自然作废）
+  # [简位登记] 联系方式临时置于本表（行业惯例为独立 Contact 对象，TBD-2 迁出）
+  - id: mobile
+    name: 手机号
+    type: string
+    db_column: mobile
+    nullable: true
+    max_length: 32
+    description: 手机号（简位：临置于档案，Contact 立项时迁出；PII —— 不入审计）
+    semantics:
+      meaning: 手机号（PII；简位登记见头部注释）
+
+  - id: email
+    name: 电子邮箱
+    type: string
+    db_column: email
+    nullable: true
+    max_length: 200
+    description: 电子邮箱（简位：临置于档案，Contact 立项时迁出；PII —— 不入审计）
+    semantics:
+      meaning: 电子邮箱（PII；简位登记见头部注释）
+
+indexes:
+  # [D2-A] 1:1 强制：party_id 全局唯一（无部分条件 —— 档案表恒为 person）
+  - fields: [party_id]
+    unique: true
+    name: idx_person_profile_party_unique
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
