@@ -270,11 +270,14 @@ class MetadataDrivenValidator:
             row = None
             matched_value = value
 
+            # [TBD-13 2026-10-06] 存在性检查只需 id: 此前 SELECT id, code, name 硬编码列清单,
+            #   目标表若无 code/name 列则抛 OperationalError 被下方 except 吞掉 → fail-open
+            #   (静默放行不存在的引用, test_fk_not_found_create 因此长期假绿)。
             # 1) 如果 value 是数字, 优先按 id 查 (快路径)
             if value is not None and str(value).isdigit():
                 try:
                     int_val = int(str(value))
-                    query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE id = ? LIMIT 1"
+                    query = f"SELECT id FROM {target_meta.table_name} WHERE id = ? LIMIT 1"
                     cursor = self.ds.execute(query, (int_val,))
                     row = cursor.fetchone()
                 except (ValueError, TypeError):
@@ -282,7 +285,7 @@ class MetadataDrivenValidator:
 
             # 2) 如果 1) 没找到, 按 code 查
             if not row and code_db_col and value is not None:
-                query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
+                query = f"SELECT id FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
                 cursor = self.ds.execute(query, (value,))
                 row = cursor.fetchone()
 
@@ -291,7 +294,7 @@ class MetadataDrivenValidator:
                 candidates = self._parse_bo_cell_value(value)
                 for cand in candidates:
                     if cand and not str(cand).isdigit():
-                        query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
+                        query = f"SELECT id FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
                         cursor = self.ds.execute(query, (cand,))
                         row = cursor.fetchone()
                         if row:
@@ -313,8 +316,10 @@ class MetadataDrivenValidator:
                     i18n_key="validation.field.fk_not_found",
                     params={"target_name": target_name, "field_name": field_name, "value": display_value}
                 )]
-        except Exception:
-            pass
+        except Exception as e:
+            # [TBD-13 2026-10-06] 保留 fail-open(不改行为), 但留痕: 查询失败不得静默
+            logger.debug("[fk_existence] %s.%s 存在性检查查询失败, 本次跳过: %s",
+                         target_object, field.id, e)
         return []
 
     def _pick_prefer_code_for_error(self, value: Any, data: Dict[str, Any],

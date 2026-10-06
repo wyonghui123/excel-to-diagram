@@ -30,6 +30,7 @@ from meta.core.models import (
     MetaObject, MetaField, FieldType, FieldStorage,
 )
 from meta.core.models_annotations import SemanticAnnotation
+from meta.tests.factories._metadata_validator_helpers import seed_validator_test_db
 
 
 @pytest.fixture
@@ -39,48 +40,9 @@ def ds(tmp_path):
     db_path = tmp_path / "test_validator.db"
     data_source.connect(path=str(db_path))
 
-    data_source.execute("""
-        CREATE TABLE test_users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            email TEXT,
-            code TEXT,
-            department_id INTEGER,
-            status TEXT
-        )
-    """)
-    data_source.execute("INSERT INTO test_users (id, username, email, code, department_id, status) VALUES (1, 'alice', 'alice@test.com', 'A001', 10, 'active')")
-    data_source.execute("INSERT INTO test_users (id, username, email, code, department_id, status) VALUES (2, 'bob', 'bob@test.com', 'B001', 20, 'inactive')")
-
-    data_source.execute("""
-        CREATE TABLE test_departments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT
-        )
-    """)
-    data_source.execute("INSERT INTO test_departments (id, name) VALUES (10, 'Engineering')")
-    data_source.execute("INSERT INTO test_departments (id, name) VALUES (20, 'Sales')")
-
-    data_source.execute("""
-        CREATE TABLE test_products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT,
-            name TEXT,
-            version_id INTEGER
-        )
-    """)
-    data_source.execute("INSERT INTO test_products (id, code, name, version_id) VALUES (1, 'PROD-001', 'Product A', 100)")
-
-    data_source.execute("""
-        CREATE TABLE test_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_code TEXT,
-            product_code TEXT,
-            amount INTEGER,
-            version_id INTEGER
-        )
-    """)
-    data_source.execute("INSERT INTO test_orders (id, customer_code, product_code, amount, version_id) VALUES (1, 'CUST-001', 'PROD-001', 100, 100)")
+    # [TBD-13 2026-10-06] 建表+播种移至 factories 助手 (raw SQL 白名单目录):
+    # 本文件不再含 raw SQL 字样, 默认口径即可运行, 不再整文件被门控 skip。
+    seed_validator_test_db(data_source)
 
     yield data_source
     data_source.disconnect()
