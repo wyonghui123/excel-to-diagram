@@ -1,0 +1,252 @@
+# 供应商档案 (Vendor Account) — foundation 步 3 · 角色层 C2 供应商侧（第二步）
+# 依据: docs/superpowers/specs/2026-10-06-customer-account-profile-design.md §12（供应商侧，PM 2026-10-06 拍板「第二步做」）
+#       docs/superpowers/specs/2026-10-04-customer-master-data-object-model-research.md（客户/供应商同构判据）
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §7 步 3
+# 上游已建: party.yaml（身份锚）· party_relation（F2 角色层，role 值域已含 vendor）· customer_account（同批第一步）
+#
+# 定位: 我方与某 party 的「供应商关系侧商务属性」承载对象；挂在 party_relation(role='vendor') 之上 1:1
+# 命名: 与 customer_account 严格对称（vendor_account / vendor_accounts）
+#
+# ── 一手对标（本次新增取证）────────────────────────────────────────────
+# 【SAP】供应商侧是客户侧的**镜像三层**，字段结构一一对应：
+#   客户  KNA1(通用) / KNB1(公司代码) / KNVV(销售区域)
+#   供应商 LFA1(通用) / LFB1(公司代码) / LFM1(采购组织) / LFBK(银行)
+#   LFM1.LIFNR 外键指向 LFA1（实证：sapdatasheet LFM1 字段表 "LIFNR ... Vendor's account number [LFA1]"）
+#   LFM1.WAERS = 采购订单币种（域 CUKY → 引用 TCURC，**跨到本批 currency 对象**）
+#   ⇒ **SAP 客户/供应商同表族对称**，无「供应商是二等公民」的结构性差异
+#
+# 【Oracle】供应商粒度 = VENDOR_ID + PARTY_SITE_ID + PRC_BU_ID（采购业务单元），
+#   官方原文（Procurement 23C）："The site represents a business relationship between
+#   a procurement business unit (BU) and the supplier."
+#   ⇒ **Oracle 的 supplier_site 与我方 customer_account 同为「关系级」** —— 实证支持本设计挂在 relation_id 上
+#   site purposes = Purchasing / Pay / Procurement Card / Primary Pay / Sourcing Only
+#   ⇒ 与客户侧 bill_to / ship_to **用途轴完全对称**
+#   且 POZ_SUPPLIER_SITES_ALL_M_ 同样有 EFFECTIVE_START_DATE / EFFECTIVE_END_DATE / EFFECTIVE_SEQUENCE
+#   ⇒ 供应商侧同样有生效期诉求，但**本期同样不做**（与客户侧 TBD-14 统一处理）
+#
+# ── 与 customer_account 的关系（对称裁定）──────────────────────────────
+#   D-V1 **独立表，不合表** —— 理由：① 动作码独立 ⇒ 权限域独立（与 person/customer 同理）；
+#        ② Oracle 两侧 site purposes 不同（Purchasing/Pay vs Bill-to/Ship-to）⇒ 未来字段必然分化；
+#        ③ SAP 亦为独立表族（LFA1 vs KNA1）。
+#   D-V2 **字段集本期与 customer_account 严格同构**（4 业务字段）—— 因两侧条款字段全部随 D1 挂起。
+#   D-V3 客户侧已有的一切「本期不做」裁定，供应商侧**逐条同等适用**（不因换对象而放宽）。
+#
+# ⚠️ 能力边界（禁止越界宣称）—— 与 customer_account 同级，是**结构占位**:
+#   ① 无任何采购/财务语义字段 —— SAP LFM1 的 WAERS(采购币种) / EKGRP(采购组) / Incoterms /
+#      GR-Based Invoice Verification(收货基于发票校验) / SPERM(采购冻结) / LFABC(ABC 标识) 全不做；
+#      Oracle 的 TERMS_ID / TOLERANCE_ID / RETAINAGE_RATE(保留金比例) / BANK_CHARGE_BEARER /
+#      PAY_SITE_FLAG / PURCHASING_SITE_FLAG 全不做 —— 均随 D1「会计处置」与采购域挂起;
+#   ② **不建 site / site 级档案** —— Oracle supplier_site 的粒度含 PARTY_SITE_ID + PRC_BU_ID，
+#      我方无采购业务单元（PRC_BU）概念，且 site 级字段全是交易/采购控制项 ⇒ 本期只在 account 级;
+#   ③ **不建生效期** —— Oracle 供应商侧同样有 EFFECTIVE_*（与客户侧同一 TBD-14，不重复登记）;
+#   ④ **不建 status**（同 D4：无生效期则启停无意义，且与 party_relation.internal_mark 重叠）;
+#   ⑤ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 与客户侧同一 TBD-16;
+#   ⑥ **不挂权限维度**（同客户侧）⇒ 跨法人数据范围无法收窄。
+#
+# ⚠️ 跨法人差异化条款已可表达（同 customer_account）：
+#   party_relation 唯一键含 le_org_id（法人域）⇒ 同 party 在不同法人下是不同 relation 行
+#   ⇒ 本对象挂 relation_id 即天然「一法人一供应商档案」。
+
+id: vendor_account
+name: 供应商档案
+table_name: vendor_accounts
+description: 供应商档案（我方与某 party 的供应商关系侧商务属性；挂在 party_relation(role='vendor') 之上 1:1）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 供应商档案
+  category: core_entity
+  aliases:
+    - 供应商档案
+    - 供应商账号
+    - vendor account
+    - supplier profile
+    - supplier account
+
+deletion_policy:
+  # S19: 主数据禁止物理删除
+  # restrict_on 留空：vendor_account 当前零引用方（relation_id 是本对象向外的引用，不是入向引用）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  # 无需排除 PII —— 商务参照数据非敏感（与 customer_account 同口径）
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+import_export:
+  auto_crud: false
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 1:1 锚 → party_relation.id（role='vendor'）。照客户侧同款：无 DB 级 FK、无跨表守卫 ⇒ TBD-16
+  - id: relation_id
+    name: 关联供应商关系
+    type: integer
+    db_column: relation_id
+    required: true
+    unique: true
+    description: 关联的供应商关系实例（party_relation 中 role='vendor' 的行）
+    semantics:
+      meaning: 关联的供应商关系实例（party_relation，role='vendor'）；1:1，仅作当前指向
+      data_category: code
+    ui:
+      widget: select
+
+  # 内外类型：对标 Oracle POZ_SUPPLIER_SITES_ALL_M_ 的 supplier traits 概念，
+  # 与客户侧 customer_type 值域保持一致（同为「我方内部单位 / 外部单位」）
+  # ⚠️ 不建采购分类轴（SAP LFKNR 供应商科目组 / LFM1.EKGRP 采购组 / KDGRP 客户组）
+  #    —— 那些是**配置驱动的分类**且影响校验，本字段是纯标签（同客户侧 D6 留痕）
+  - id: vendor_type
+    name: 供应商类型
+    type: string
+    db_column: vendor_type
+    nullable: true
+    max_length: 30
+    description: 供应商类型 internal/external（内部供应方 / 外部供应方）
+    enum_values:
+      - value: internal
+        label: 内部供应方
+        color: info
+      - value: external
+        label: 外部供应方
+        color: default
+    semantics:
+      meaning: 供应商内外类型（纯标签，非配置驱动）
+      filterable: true
+      filter_type: enum
+      filter_label: 供应商类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: name
+    name: 供应商档案名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 供应商档案名称（业务上通常沿用 party 名称，此处为档案的显示名）
+    semantics:
+      meaning: 供应商档案显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 供应商档案说明（自由备注；采购/商务条款字段随 D1 挂起，本期不建）
+    semantics:
+      meaning: 供应商档案详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 5 个显式动作（与 customer_account 严格对称；照 person_profile 范式：不自动挂菜单）
+actions:
+  - id: vendor_account_create
+    name: 新建供应商档案
+    type: create
+    path: /api/v1/vendor_accounts
+    method: POST
+    permission: vendor_account:create
+    ui_hints:
+      label: 新建供应商档案
+      icon: plus
+      primary: true
+
+  - id: vendor_account_read
+    name: 查看供应商档案
+    type: read
+    path: /api/v1/vendor_accounts/{id}
+    method: GET
+    permission: vendor_account:read
+    ui_hints:
+      label: 查看
+      icon: eye
+
+  - id: vendor_account_update
+    name: 编辑供应商档案
+    type: update
+    path: /api/v1/vendor_accounts/{id}
+    method: PUT
+    permission: vendor_account:update
+    ui_hints:
+      label: 编辑
+      icon: edit
+
+  - id: vendor_account_delete
+    name: 删除供应商档案
+    type: delete
+    path: /api/v1/vendor_accounts/{id}
+    method: DELETE
+    permission: vendor_account:delete
+    ui_hints:
+      label: 删除
+      icon: trash
+      danger: true
+
+  - id: vendor_account_list
+    name: 供应商档案列表
+    type: list
+    path: /api/v1/vendor_accounts
+    method: GET
+    permission: vendor_account:list
+    ui_hints:
+      label: 供应商档案列表
+      icon: list
+
+indexes:
+  - fields: [relation_id]
+    unique: true
+    name: idx_vendor_account_relation_unique
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true

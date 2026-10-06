@@ -1,0 +1,244 @@
+# 客户档案 (Customer Account) — foundation 步 3 · 角色层 C2
+# 依据: docs/superpowers/specs/2026-10-06-customer-account-profile-design.md v1.2
+#       （PM 2026-10-06 拍板：① 建骨架 ② 命名 customer_account ③ 供应商留第二步）
+#       docs/superpowers/specs/2026-10-04-customer-master-data-object-model-research.md C2（档案落点）
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §7 步 3 · §3.3
+# 上游已建: party.yaml（身份锚）· party_archive / party_internal（两读面）· party_relation（F2 角色层）
+#
+# 定位: 我方与某 party 的「客户关系侧商务属性」承载对象；挂在 party_relation(role='customer') 之上 1:1
+# 命名裁定（spec Q1，PM 2026-10-06 拍板）:
+#   取 customer_account 而非 customer_profile —— 后者与平台既有 ProfileConfig（权限档案）字面撞车；
+#   且 Oracle HZ_CUST_ACCOUNTS「客户账号」正是本对象的对标语义，未来建第 2 层可无缝复用此名。
+#
+# 粒度裁定（D1，PM 2026-10-06 拍板 = account 级，非研究稿 C2 原倾向的 account × site_use）:
+#   Oracle HZ_CUSTOMER_PROFILES_F 粒度为 CUST_ACCOUNT_ID + SITE_USE_ID，但 SITE_USE_ID **可空**
+#   ⇒ account 级 profile 是 Oracle 的合法子集。且我方 C5「用途对象」已定本期不做，
+#   建 site_use_id 会指向不存在的对象（同 currency decimal_places「无消费者字段是负债」教训）。
+#
+# ⚠️ 能力边界（禁止越界宣称）—— 本对象当前是**结构占位**，无实际业务价值字段:
+#   ① 无任何财务语义字段（信用评级 / 风险码 / 账期 / 折扣 / 催收 / 信用额度）—— 随 D1「会计处置」挂起，
+#      Oracle HZ_CUSTOMER_PROFILES_F 有 12 项、PeopleSoft CUST_CREDIT 独立表，本期全不做;
+#   ② **不建生效期**（Oracle 主键含 EFFECTIVE_START_DATE / EFFECTIVE_END_DATE）—— 平台零对象有生效期机制，
+#      单独引入成孤例 ⇒ TBD-14;
+#   ③ **不建 site_use / 用途对象**（bill-to / ship-to / sold-to）—— 四家一致判定为**交易域**：
+#      Oracle HZ_CUST_SITE_USES_ALL 是交易挂点（订单必填 BILL_TO_SITE_USE_ID）、
+#      SAP 落在订单伙伴表 VBPA 而非客户档案、Salesforce 无此层、PeopleSoft 是三张「角色选择页」;
+#   ④ **不建 status** —— 与 party_relation.internal_mark 语义重叠，且无生效期则启停无意义;
+#   ⑤ **customer_type 是纯标签，非配置驱动** —— SAP KTOKD（客户科目组）可驱动字段分派与校验，本对象不可
+#      ⇒ 不得宣称具备「按客户类型分派行为」能力;
+#   ⑥ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 可写入孤儿行 ⇒ TBD-16;
+#   ⑦ 不挂任何权限维度（与 party_internal 的 org 维度绑定先例不同）⇒ 跨法人数据范围无法收窄;
+#   ⑧ 供应商侧（role='vendor'）本期不做 ⇒ TBD-15（PM 2026-10-06 拍板「第二步」）。
+#
+# ⚠️ 跨法人差异化条款已可表达（spec v1.1 修正）:
+#   party_relation 唯一键含 le_org_id（法人域）⇒ 同一对 party 在不同法人下本就是不同 relation 行
+#   ⇒ 本对象挂 relation_id 即天然「一法人一档案」。剩余缺口仅「同一法人内多销售组织的条款差异」（TBD-17）。
+
+id: customer_account
+name: 客户档案
+table_name: customer_accounts
+description: 客户档案（我方与某 party 的客户关系侧商务属性；挂在 party_relation(role='customer') 之上 1:1）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 客户档案
+  category: core_entity
+  aliases:
+    - 客户档案
+    - 客户账号
+    - customer account
+    - customer profile
+
+deletion_policy:
+  # S19: 主数据禁止物理删除
+  # restrict_on 本期留空：customer_account 当前**零引用方** —— 无任何 schema 字段引用它
+  # （relation_id 是本对象向外的引用，不是入向引用）。
+  # 保留结构供未来接上后补条目（不改骨架）。对比：uom 列 2 条、region 列 5 条。
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  # 无需排除 PII（对照 person_profile 的 exclude 口径）—— 本对象字段全为非敏感商务参照数据
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+import_export:
+  auto_crud: false
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 1:1 锚 → party_relation.id。照 party.party_id / user.party_id / person_profile.party_id 先例：
+  #   不建 DB 级 FK（跨库 / 演进友好），仅作「当前指向」。
+  # ⚠️ 无跨表类型守卫（仅 role='customer' 的 relation 可挂档案）—— 顶层 validations: 已废弃，本期不实现 ⇒ TBD-16
+  - id: relation_id
+    name: 关联客户关系
+    type: integer
+    db_column: relation_id
+    required: true
+    unique: true
+    description: 关联的客户关系实例（party_relation 中 role='customer' 的行）
+    semantics:
+      meaning: 关联的客户关系实例（party_relation，role='customer'）；1:1，仅作当前指向
+      data_category: code
+    ui:
+      widget: select
+
+  # 客户分类轴：对标 Oracle HZ_CUST_ACCOUNTS.CUSTOMER_TYPE（Internal / External）
+  # ⚠️ 与 SAP KTOKD（客户科目组）的差异：SAP 是**配置驱动**（决定该客户走哪些字段与校验），
+  #    本字段是**纯标签** ⇒ 不得宣称具备「按类型分派字段/校验」能力（spec D6 留痕）
+  - id: customer_type
+    name: 客户类型
+    type: string
+    db_column: customer_type
+    nullable: true
+    max_length: 30
+    description: 客户类型 internal/external（内部客户 / 外部客户）
+    enum_values:
+      - value: internal
+        label: 内部客户
+        color: info
+      - value: external
+        label: 外部客户
+        color: default
+    semantics:
+      meaning: 客户内外类型（纯标签，非配置驱动）
+      filterable: true
+      filter_type: enum
+      filter_label: 客户类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: name
+    name: 客户档案名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 客户档案名称（业务上通常沿用 party 名称，此处为档案的显示名）
+    semantics:
+      meaning: 客户档案显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 客户档案说明（自由备注；商务条款字段随 D1 会计处置挂起，本期不建）
+    semantics:
+      meaning: 客户档案详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 5 个显式动作（照 person_profile 范式：角色层档案不自动挂菜单，入口由权限面控制）
+actions:
+  - id: customer_account_create
+    name: 新建客户档案
+    type: create
+    path: /api/v1/customer_accounts
+    method: POST
+    permission: customer_account:create
+    ui_hints:
+      label: 新建客户档案
+      icon: plus
+      primary: true
+
+  - id: customer_account_read
+    name: 查看客户档案
+    type: read
+    path: /api/v1/customer_accounts/{id}
+    method: GET
+    permission: customer_account:read
+    ui_hints:
+      label: 查看
+      icon: eye
+
+  - id: customer_account_update
+    name: 编辑客户档案
+    type: update
+    path: /api/v1/customer_accounts/{id}
+    method: PUT
+    permission: customer_account:update
+    ui_hints:
+      label: 编辑
+      icon: edit
+
+  - id: customer_account_delete
+    name: 删除客户档案
+    type: delete
+    path: /api/v1/customer_accounts/{id}
+    method: DELETE
+    permission: customer_account:delete
+    ui_hints:
+      label: 删除
+      icon: trash
+      danger: true
+
+  - id: customer_account_list
+    name: 客户档案列表
+    type: list
+    path: /api/v1/customer_accounts
+    method: GET
+    permission: customer_account:list
+    ui_hints:
+      label: 客户档案列表
+      icon: list
+
+# 索引：字段级 unique（列级 UNIQUE）+ 命名唯一索引「双落」
+# 对齐 person_profile(idx_person_profile_party_unique) / currency(idx_currency_code) 惯例
+# 不建 idx_customer_account_type：无查询场景，避免孤例（同 uom / region / currency 先例）
+indexes:
+  - fields: [relation_id]
+    unique: true
+    name: idx_customer_account_relation_unique
+
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
