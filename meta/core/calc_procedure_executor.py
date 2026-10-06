@@ -80,6 +80,9 @@ class StepResult:
     element_type: str
     rate_type: Optional[str]
     amount: float = 0.0
+    running_net_amount: float = 0.0
+    subtotal_key: Optional[str] = None
+    skip_running_price: bool = False
     skipped: bool = False
     skip_reason: Optional[str] = None
 
@@ -89,6 +92,9 @@ class StepResult:
             "element_type": self.element_type,
             "rate_type": self.rate_type,
             "amount": self.amount,
+            "running_net_amount": self.running_net_amount,
+            "subtotal_key": self.subtotal_key,
+            "skip_running_price": self.skip_running_price,
             "skipped": self.skipped,
             "skip_reason": self.skip_reason,
         }
@@ -188,8 +194,17 @@ def _op_formula(ctx: StepContext, params: Dict[str, Any]) -> float:
     expr = params.get("expr")
     if not expr:
         raise CalculationError("formula 算子缺少 expr")
-    amount = _safe_eval(expr, {**ctx.state, "base": ctx.base,
-                              "running_net_amount": ctx.running_net_amount})
+    # 【修 2026-10-06】查表产出（lookup_amount）**总是**并入白名单。
+    # 原实现只传 {**state, "base", "running_net_amount"}，若未走查表
+    # （无查找序列）则 lookup_amount 缺失，公式报"变量不在白名单"——
+    # 但那是"没查表"的正常情形，不该是安全错误。
+    # 注：lookup_hit_ids 是列表，_safe_eval 只接受数值，故不放进白名单。
+    amount = _safe_eval(expr, {
+        "lookup_amount": ctx.state.get("lookup_amount", 0.0),
+        **ctx.state,
+        "base": ctx.base,
+        "running_net_amount": ctx.running_net_amount,
+    })
     ctx.state["formula"] = amount
     return amount
 
@@ -450,6 +465,9 @@ def execute(
 
         step_results.append(StepResult(
             seq=seq, element_type=et, rate_type=rate_type, amount=amount,
+            running_net_amount=ctx.running_net_amount,
+            subtotal_key=subtotal_key,
+            skip_running_price=(et in _READONLY_OPS),
         ))
 
     return {

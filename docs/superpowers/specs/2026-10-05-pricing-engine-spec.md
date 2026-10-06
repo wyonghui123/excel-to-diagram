@@ -906,6 +906,7 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 | **T2-1 查找序列引擎** | ✅ **已交付** | `meta/core/lookup_resolver.py` + `meta/tests/test_lookup_resolver.py`（23 用例）。实现 FR-004（有序槽位 / `hit_policy` 下沉 / `(priority,id)` 确定性 tie-break / 回放骨架 `LookupTrace`）与 FR-008（四范式含 `weighted` Σ=1 校验）。**纯函数，零 BO 依赖** |
 | **T2-2 计算过程执行器** | ✅ **已交付** | `meta/core/calc_procedure_executor.py` + `meta/tests/test_calc_procedure_executor.py`（34 用例）。实现 FR-005（**算子注册表**落地 C5：新增算子 = 注册一个函数，不改引擎）/ FR-006（基四字段 + `rolling` 与 `base_step` **互斥校验**）/ FR-007（步骤间 additive + 逐层小计 + `rolling` 覆盖）/ NFR-002（**双防线**：字符白名单 + AST 白名单，**禁 `eval`**）。11 个算子已注册 |
 | **T1-1 ~ T1-3 结果链三表** | ✅ **已交付** | `calc_procedure`（13 列 · 轴③ `result_semantic` 六值 + `procedure_type` 不写死 price）/ `calc_result`（38 列 · **泛化宿主** `document_type`+`document_id`+`document_line_id`可空+`level`，本期**先挂头级**）/ `calc_detail`（28 列 · `running_net_amount` + `factor_snapshot` + `hit_ids`/`skipped_candidates` 回放骨架）。`registry.reload` 79 对象，**10 张表实测建表全部成功**，conflict_key / business_key / 四块齐全 / 19 项 T1 专项口径逐项通过 |
+| **T1-4 定价编排服务** | ✅ **已交付** | `meta/services/pricing_service.py` + `meta/tests/test_pricing_service.py`（23 用例，**真建表 + 真跑全链路**）。把 T2 内核与 T1 配置链串成一条：`price_line`（查表 → 算过程 → 落结果+明细）/ `explain`（IF-002 回放）/ 有效期过滤 / 草稿价目表拒绝 / dry-run。**全程零 `order_line`、零主数据依赖**（有专项用例守护） |
 
 > **T2-1 / T2-2 实施中纠正的四处问题**：
 > ① **TR-006 算术错误**：原文"100×.5 + 200×.3 + 300×.2 = 140"实为 **170**（50+60+60），已修正；
@@ -918,6 +919,16 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ② **`calc_detail` 不冗余存 `currency` 与 `bo 宿主字段`** —— 它是 1:N 从属行（`business_key = [result_id, seq]`），币种与宿主已在 `calc_result` 上，重复存会造成两份真相源。
 >
 > **FR-011 当前落点**：因本仓 `bo_sub_category: document` 仅 `sales_order_enhanced.yaml` 一个且**单头无行**（`order_line` 对象缺失），本期按 §8.2.0 的两步法**先挂头级**（`document_line_id = null` / `level = header`）。待 `order_line` 补齐后**仅填 `document_line_id`**，三表结构与 T2 内核**零改动**。
+>
+> **T1-4 编排层实施中纠正的六处问题**（都是"单测能过、语义是错的"类型，值得记录）：
+> ① **两个序列不可混用**：`lookup_sequence.steps[]`（查找槽位 `{seq, key_schema_id}`）与 `calc_procedure.steps[]`（计算步骤 `{seq, element_type}`）是**不同配置**。初版把计算步骤直接喂给 `lookup()`，报 `KeyError: key_schema_id`。现由 `sequence_code` 显式指定，留空则跳过查表（适用于费率已在单据上的情形）；
+> ② **json 列须反序列化**：`rate_records.keys` 从 sqlite 读出是 **json 文本**，`Candidate.from_dict` 未解析 → 下游 `ck[k]` 报 `string indices must be integers`；
+> ③ **NULL 数值须兜底**：`rate` / `priority` 为 NULL 时原实现透传 `None`，下游 `int + None` 抛 `TypeError`；
+> ④ **加权分支判定须区分"全空/部分空/全有值"**：原用 `any(w is not None)` 使"全空"也走进加权。FR-008 的「不可混用」只约束**部分有值**；
+> ⑤ **`lookup_amount` 应始终在公式白名单内**：未走查表时它缺失属正常情形，不该报"变量不在白名单"这种安全错误；
+> ⑥ **回放接口须归一数值/布尔**：sqlite 可能把 REAL/BOOLEAN 读回 `str` / `0`，`explain` 已统一 `_to_num` / `bool` 归一，否则前端拿到 `"100.0"` 字符串做不了算术。
+>
+> **一条语义边界（实测确认）**：`calc_detail.skipped_candidates` 记的是「**因键不匹配 / 被更小 seq 槽位抢先**而跳过」的候选；**同槽位内**被 precedence/exclusive 取一落选**不算 skipped**——那是消解范式的正常结果，不是"跳过"。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|

@@ -1,0 +1,323 @@
+# -*- coding: utf-8 -*-
+"""
+定价编排服务端到端单测 — 定价引擎 T1-4
+========================================
+**真建表 + 真跑全链路**：查表(FR-004) → 算过程(FR-005/006/007) → 落结果+明细(FR-010/011)。
+
+[关键前提] 全程**不依赖 order_line**：
+  FR-011 按 §8.2.0 两步法先挂头级（document_line_id = NULL / level = header）。
+  本测试据此跑通完整链路；行级挂载待 order_line 补齐后仅需填该字段。
+"""
+import os
+import sqlite3
+import sys
+
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+
+from meta.core.calc_procedure_executor import CalculationError  # noqa: E402
+from meta.core.lookup_resolver import ResolutionError  # noqa: E402
+from meta.core.models import registry  # noqa: E402
+from meta.core.schema_generator import SchemaGenerator  # noqa: E402
+from meta.services.pricing_service import PricingError, PricingService  # noqa: E402
+
+TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
+          "exclusion_group", "rate_table", "rate_record",
+          "calc_procedure", "calc_result", "calc_detail"]
+
+
+@pytest.fixture()
+def ds():
+    """内存 SQLite + 按 yaml 声明真实建表。"""
+    logging_off = None
+    import logging
+    logging_off = logging.disable(logging.CRITICAL)
+    try:
+        registry.reload(os.path.join(ROOT, "meta", "schemas"))
+    finally:
+        if logging_off is not None:
+            logging.disable(logging_off)
+    conn = sqlite3.connect(":memory:")
+    gen = SchemaGenerator("sqlite")
+    for name in TABLES:
+        mo = registry.get(name)
+        assert mo is not None, f"{name} 未注册"
+        conn.execute(gen.generate_create_table(mo))
+        for idx in gen.generate_create_index(mo):
+            conn.execute(idx)
+    yield conn
+    conn.close()
+
+
+def _seed(ds):
+    """种入一份最小可算配置：键(客户) + 序列(1 槽) + 价目表(approved) + 过程 + 3 条费率。
+
+    [两个序列分别配置 · 实施纠正]
+      lookup_sequences.steps  = 查找槽位 [{seq, key_schema_id}]
+      calc_procedures.steps   = 计算步骤 [{seq, element_type, ...}]
+    """
+    now = "2026-10-06 00:00:00"
+    ds.execute("INSERT INTO key_schemas (id,code,name,key_fields,created_at,updated_at)"
+               " VALUES (1,'KEY_CUST','客户键','[\"customer\"]',?,?)", (now, now))
+    ds.execute("INSERT INTO lookup_sequences (id,code,name,steps,created_at,updated_at)"
+               " VALUES (1,'SEQ_STD','标准序列',"
+               "'[{\"seq\":1,\"key_schema_id\":1}]',?,?)", (now, now))
+    ds.execute("INSERT INTO rate_types (id,code,name,rate_class,calc_type,rate_source,"
+               "sign,rounding,exclusion_group_id,manual_allowed,mandatory,statistical,"
+               "lookup_sequence_id,created_at,updated_at)"
+               " VALUES (1,'PRICE_BASE','基本价格','price','percent','rate_record',"
+               "'+',NULL,NULL,0,0,0,1,?,?)", (now, now))
+    ds.execute("INSERT INTO rate_tables (id,code,name,type,currency,owner_org_id,"
+               "status,created_at,updated_at)"
+               " VALUES (1,'PL_STD','标准价目表','standard','CNY',NULL,'approved',?,?)",
+               (now, now))
+    # 过程：先 formula 取查表命中金额，再 round 产出展示值
+    ds.execute("INSERT INTO calc_procedures (id,code,name,procedure_type,"
+               "result_semantic,currency,steps,subtotal_keys,created_at,updated_at)"
+               " VALUES (1,'PROC_STD','标准过程','pricing','price','CNY',"
+               "'[{\"seq\":1,\"element_type\":\"formula\","
+               "\"params\":{\"expr\":\"lookup_amount\"},"
+               "\"subtotal_key\":\"s1\"},"
+               "{\"seq\":2,\"element_type\":\"round\","
+               "\"params\":{\"mode\":\"round\",\"digits\":2}}]',"
+               "'[\"s1\"]',?,?)", (now, now))
+    # 三条候选：priority 1/2/3
+    for rid, prio, rate in ((1, 1, 100.0), (2, 2, 200.0), (3, 3, 300.0)):
+        ds.execute("INSERT INTO rate_records (code,id,rate_table_id,key_schema_id,keys,"
+                   "rate_type_id,rate,hit_policy,priority,status,created_at,updated_at)"
+                   " VALUES (?,?,1,1,'{\"customer\":1001}',1,?,'exclusive',?,'active',?,?)",
+                   (f"RC_{rid}", rid, rate, prio, now, now))
+
+
+def _price(ds, **kw):
+    """便捷调用：默认带查找序列 SEQ_STD。"""
+    params = dict(process_code="PROC_STD", rate_table_id=1,
+                  slot_keys=[{"customer": 1001}], base=1.0,
+                  sequence_code="SEQ_STD")
+    params.update(kw)
+    return PricingService(ds).price_line(**params)
+
+
+class TestEndToEnd:
+    def test_price_line_persists_result_and_details(self, ds):
+        """查表 → 算过程 → 落 1 结果行 + 2 明细行"""
+        _seed(ds)
+        r = _price(ds, document_type="sales_order", document_id=5001)
+        assert r["result_id"] is not None
+        assert r["net_amount"] == 100.0          # precedence 取 priority=1
+        assert r["hit_ids"] == [1]
+        assert len(r["step_results"]) == 2
+
+        n_res = ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0]
+        n_det = ds.execute("SELECT COUNT(*) FROM calc_details").fetchone()[0]
+        assert (n_res, n_det) == (1, 2)
+
+    def test_result_carries_header_level_host(self, ds):
+        """FR-011：本期落头级（document_line_id 为空、level=header）"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        row = ds.execute("SELECT level, document_line_id, process_code,"
+                         " result_semantic, currency FROM calc_results").fetchone()
+        assert row[0] == "header"
+        assert row[1] is None                    # 头级：行 ID 为空
+        assert row[2] == "PROC_STD"
+        assert row[3] == "price"
+        assert row[4] == "CNY"
+
+    def test_dry_run_does_not_persist(self, ds):
+        """persist=False 只算不落库（预览 / defaults-preview 语义）"""
+        _seed(ds)
+        r = _price(ds, document_type="sales_order", document_id=5001,
+                   persist=False)
+        assert r["result_id"] is None
+        assert r["net_amount"] == 100.0
+        assert ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0] == 0
+
+    def test_subtotal_recorded_per_layer(self, ds):
+        """FR-007 逐层小计可回放"""
+        _seed(ds)
+        r = _price(ds, document_type="sales_order", document_id=5001)
+        assert r["subtotals"] == {"s1": 100.0}
+
+    def test_works_without_lookup_sequence(self, ds):
+        """sequence_code 留空 → 跳过查表，纯由计算步骤出结果
+
+        （适用于费率已在单据上的情形，如销售价直接沿用）
+        """
+        _seed(ds)
+        r = _price(ds, sequence_code=None)
+        assert r["hit_ids"] == []              # 未走查表
+        assert r["net_amount"] == 0.0          # lookup_amount 不存在 → formula 得 0
+        assert r["result_id"] is None          # 未传宿主，不落库
+
+    def test_unknown_sequence_raises(self, ds):
+        _seed(ds)
+        with pytest.raises(PricingError, match="查找序列不存在"):
+            _price(ds, sequence_code="SEQ_NOPE")
+
+
+class TestReplay:
+    def test_explain_returns_result_with_details(self, ds):
+        """IF-002：按 document_type + document_id 回放"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        assert len(ex["results"]) == 1
+        res = ex["results"][0]
+        assert res["net_amount"] == 100.0
+        assert len(res["details"]) == 2
+        assert [d["seq"] for d in res["details"]] == [1, 2]
+
+    def test_detail_records_hit_and_skipped_candidates(self, ds):
+        """FR-010：命中哪些候选、剔除了谁及原因，逐条可追
+
+        [语义边界 · 实施实测] `skipped_candidates` 记的是
+        **「因键不匹配 / 被更小 seq 槽位抢先」而跳过**的候选。
+        **同槽位内**被 precedence/exclusive 取一落选**不算 skipped**——
+        那是消解范式的正常结果，不是"跳过"。故本例 3 条同槽位候选中
+        命中 id=1，skipped 为空是正确行为。
+        """
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        d1 = ex["results"][0]["details"][0]
+        assert d1["hit_ids"] == [1]
+        # 同槽位内落选不记 skipped
+        assert d1["skipped_candidates"] == []
+
+    def test_detail_records_skipped_on_key_mismatch(self, ds):
+        """键不匹配的候选才记入 skipped_candidates（带原因）"""
+        _seed(ds)
+        # 第 2 条候选的键不匹配槽位
+        ds.execute("UPDATE rate_records SET keys = '{\"customer\":9999}' WHERE id = 2")
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        d1 = ex["results"][0]["details"][0]
+        reasons = {c["candidate_id"]: c["reason"] for c in d1["skipped_candidates"]}
+        assert reasons.get(2) == "not_in_slot_key"
+
+    def test_detail_records_factor_snapshot(self, ds):
+        """FR-010：记当时的因子取值（只存结果无法复现）"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        snap = ex["results"][0]["details"][0]["factor_snapshot"]
+        assert snap["base"] == 1.0
+
+    def test_detail_running_net_is_per_step(self, ds):
+        """明细的 running_net_amount 是**逐步累计值**，不是恒 0"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        details = ex["results"][0]["details"]
+        assert details[0]["running_net_amount"] == 100.0   # formula 累加后
+        assert details[1]["running_net_amount"] == 100.0   # round 只读，净额不变
+
+    def test_detail_subtotal_key_and_flag(self, ds):
+        """带 subtotal_key 的步骤应置 rollup_flag（报表可按小计汇总）"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        ex = PricingService(ds).explain("sales_order", 5001)
+        d1 = ex["results"][0]["details"][0]
+        assert d1["subtotal_key"] == "s1"
+        assert d1["rollup_flag"] is True
+        assert ex["results"][0]["subtotals"][0]["subtotal_key"] == "s1"
+
+    def test_round_step_does_not_pollute_net(self, ds):
+        """只读算子返回 0.0，不污染净额（与 T2-2 语义一致）"""
+        _seed(ds)
+        r = _price(ds)
+        assert r["net_amount"] == 100.0
+        assert r["step_results"][1]["amount"] == 0.0
+        assert r["state"]["rounded"] == 100.0
+
+
+class TestErrorHandling:
+    """IF-001 Error Handling：无可用费率 / 过程未命中 → 明确原因，不静默。"""
+
+    def test_unknown_process_raises(self, ds):
+        _seed(ds)
+        with pytest.raises(PricingError, match="定价过程不存在"):
+            _price(ds, process_code="PROC_NOPE")
+
+    def test_draft_rate_table_rejected(self, ds):
+        """C-T0-11：仅 approved 参与取价，草稿价目表须被拒"""
+        _seed(ds)
+        ds.execute("UPDATE rate_tables SET status = 'draft' WHERE id = 1")
+        with pytest.raises(PricingError, match="未发布"):
+            _price(ds)
+
+    def test_no_matching_candidate_yields_zero(self, ds):
+        """无命中 → 净额 0，不报错（可回放说明原因）"""
+        _seed(ds)
+        r = _price(ds, slot_keys=[{"customer": 9999}])
+        assert r["net_amount"] == 0.0
+        assert r["hit_ids"] == []
+
+    def test_empty_steps_raises(self, ds):
+        _seed(ds)
+        ds.execute("UPDATE calc_procedures SET steps = '[]' WHERE code = 'PROC_STD'")
+        with pytest.raises(PricingError, match="未定义步骤"):
+            _price(ds)
+
+    def test_unregistered_operator_raises(self, ds):
+        """C5：element_type 未注册 → 报错，不静默跳过"""
+        _seed(ds)
+        ds.execute("UPDATE calc_procedures SET steps ="
+                   " '[{\"seq\":1,\"element_type\":\"no_such_op\"}]' WHERE code='PROC_STD'")
+        with pytest.raises(CalculationError, match="未注册的 element_type"):
+            _price(ds)
+
+
+class TestValidPeriod:
+    def test_valid_on_filters_out_of_range_records(self, ds):
+        """valid_on 过滤有效期（区间含下不含上）"""
+        _seed(ds)
+        ds.execute("UPDATE rate_records SET valid_from = '2026-01-01',"
+                   " valid_to = '2026-06-01' WHERE id = 1")
+        r = _price(ds, valid_on="2026-03-01")
+        assert r["hit_ids"] == [1]
+        r2 = _price(ds, valid_on="2026-09-01")
+        assert r2["hit_ids"] == [2]              # 1 已过期，落到 priority=2
+
+    def test_no_valid_on_ignores_date_filter(self, ds):
+        _seed(ds)
+        ds.execute("UPDATE rate_records SET valid_to = '2020-01-01' WHERE id = 1")
+        r = _price(ds)
+        assert r["hit_ids"] == [1]                # 不传日期则不过滤
+
+
+class TestZeroDependency:
+    """本批次的核心承诺：整条链路不依赖 order_line / 主数据。"""
+
+    def test_no_order_line_dependency_in_code(self):
+        """服务层代码不引用 order_line —— 保证 FR-011 两步法可行"""
+        src = open(os.path.join(ROOT, "meta", "services", "pricing_service.py"),
+                   encoding="utf-8").read()
+        code = "\n".join(ln for ln in src.splitlines()
+                         if not ln.strip().startswith("#"))
+        # 去掉 docstring 段（"""..."""）后再查
+        code = code.split('"""')[0] + code.split('"""')[-1] \
+            if code.count('"""') >= 2 else code
+        assert "order_line" not in code
+
+    def test_detail_does_not_redundant_currency(self, ds):
+        """T1 取舍②：明细不冗余存币种（避免两份真相源）"""
+        _seed(ds)
+        _price(ds, document_type="sales_order", document_id=5001)
+        cols = [d[1] for d in ds.execute("PRAGMA table_info(calc_details)")]
+        assert "currency" not in cols
+
+    def test_currency_taken_from_process_not_arbitrary_table(self, ds):
+        """币种取过程声明值（曾误取任意价目表的币种）"""
+        _seed(ds)
+        ds.execute("INSERT INTO rate_tables (id,code,name,type,currency,owner_org_id,"
+                   "status,created_at,updated_at)"
+                   " VALUES (2,'PL_EUR','欧元表','standard','EUR',NULL,'approved',"
+                   "'2026-10-06','2026-10-06')")
+        ds.execute("UPDATE calc_procedures SET currency = 'USD' WHERE code = 'PROC_STD'")
+        _price(ds, document_type="sales_order", document_id=5001)
+        cur = ds.execute("SELECT currency FROM calc_results").fetchone()[0]
+        assert cur == "USD"

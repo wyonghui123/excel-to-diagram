@@ -28,6 +28,7 @@
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+import json
 
 # 消解范式（FR-008 · Spec §9.3.1 B2 四范式）
 RESOLUTION_PRECEDENCE = "precedence"   # 逐级覆盖，首个命中获胜（默认）
@@ -73,16 +74,45 @@ class Candidate:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Candidate":
-        """从费率记录 dict 构造，缺省值对齐 T0 表声明（rate_record.yaml）。"""
+        """从费率记录 dict 构造，缺省值对齐 T0 表声明（rate_record.yaml）。
+
+        【修 2026-10-06】`keys` / `hit_policy` 等字段从 sqlite 读出来可能是
+        **json 文本**（`keys` 是 json 列，`hit_policy` 若被当 json 存亦然），
+        故此处统一做一次反序列化——否则 `keys` 会是 str，
+        下游 `ck[k]` 报 "string indices must be integers"。
+        """
+        keys = d.get("keys")
+        if isinstance(keys, str):
+            try:
+                keys = json.loads(keys) if keys else {}
+            except (TypeError, ValueError):
+                keys = {}
+
+        def _num(key, default=0.0):
+            """sqlite 的 NULL / 文本数字统一成 float。
+            【修 2026-10-06】`rate` / `priority` 列若为 NULL，原实现直接透传
+            None，下游 `int + None` 抛 TypeError。"""
+            v = d.get(key)
+            if v is None or v == "":
+                return default
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
         return cls(
             id=d["id"],
-            priority=d.get("priority", 100),
+            priority=int(_num("priority", 100)),
             hit_policy=d.get("hit_policy") or HIT_POLICY_EXCLUSIVE,
-            allocation_weight=d.get("allocation_weight"),
-            value=d.get("value", 0.0),
+            allocation_weight=(
+                None if d.get("allocation_weight") in (None, "")
+                else _num("allocation_weight")
+            ),
+            value=_num("value", None) if d.get("value") is not None
+            else _num("rate", 0.0),
             inactive=d.get("inactive", False) or d.get("status") == "inactive",
             key_schema_id=d.get("key_schema_id"),
-            keys=d.get("keys") or {},
+            keys=keys or {},
             raw=d,
         )
 
@@ -186,10 +216,19 @@ def resolve_candidates(
     if not live:
         return []
 
-    # weighted：组内存在非空权重 → 整组按加权累加，优先级/排斥组对其不生效
-    # （FR-008 AC「同组内非空 allocation_weight 与取一类候选不可混用」）
-    if any(c.allocation_weight is not None for c in live):
+    # 【修 2026-10-06】加权分支的判定须区分"全空"与"部分空"：
+    #   全空      → 普通取一（precedence/best/exclusive 语义）
+    #   部分有值  → **报错**（FR-008 AC「不可混用」），由 _resolve_weighted 抛出
+    #   全有值    → 加权累加
+    # 原实现用 `any(... is not None)`，导致"全空"也走进加权分支，
+    # 随后 int + None 报 TypeError 而非按语义处理。
+    has_weight = [c.allocation_weight is not None for c in live]
+    if all(has_weight):
         return _resolve_weighted(live)
+    if any(has_weight):
+        raise ResolutionError(
+            "weighted 范式下同组候选不可混用：部分候选缺 allocation_weight"
+        )
 
     live.sort(key=_sort_key)
 
@@ -249,7 +288,6 @@ def apply_weighted(cands: List[Candidate], base: float) -> float:
     _resolve_weighted(cands)  # 复用校验，不通过直接抛
     return sum(c.value * base * (c.allocation_weight or 0.0) for c in cands)
 
-
 def lookup(
     candidates: List[Candidate],
     steps: List[Dict[str, Any]],
@@ -307,9 +345,11 @@ def lookup(
         winners = resolve_candidates(in_slot, resolution, measure)
         trace.hit_ids = [c.id for c in winners]
 
-        if resolution == RESOLUTION_WEIGHTED or any(
+        # 加权判定与 resolve_candidates 保持一致：全有值才加权
+        winners_have_weight = all(
             c.allocation_weight is not None for c in winners
-        ):
+        )
+        if resolution == RESOLUTION_WEIGHTED or winners_have_weight:
             trace.weighted = True
             result.amount += apply_weighted(winners, 1.0)
         else:
