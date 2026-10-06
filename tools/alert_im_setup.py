@@ -125,7 +125,7 @@ def test_push(im_type: str, webhook: str, secret: str = '', port: int = 9200):
 
 收到此消息表示 IM 告警已就绪.'''
 
-    cmd = f'/opt/miniconda3-py39/bin/python {tmp_alert} --type {im_type} --webhook "{webhook}" --secret "{secret}" --title "{title}" --content "{content}"'
+    cmd = f'/usr/local/bin/python3 {tmp_alert} --type {im_type} --webhook "{webhook}" --secret "{secret}" --title "{title}" --content "{content}"'
     print(f'[2] 远端执行: {cmd[:100]}...')
     r = yexec(cmd, port=port, secret='prod_write', timeout=20)
     print(f'    stdout: {(r.get("stdout") or "").strip()[:500]}')

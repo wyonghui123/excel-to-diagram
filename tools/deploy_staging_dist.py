@@ -81,7 +81,7 @@ mv "$NEW" "$CUR" || { echo "[FATAL] mv new -> current failed"; [ -d "$BAK" ] && 
 echo "[swap] done; backup: $BAK"
 
 # 备份只留最近 KEEP_BAKS 代 (gateway 禁 rm, 用 python)
-/opt/miniconda3-py39/bin/python - "$STAGING" <<'PYEOF'
+/usr/local/bin/python3 - "$STAGING" <<'PYEOF'
 import glob, os, shutil, sys
 baks = sorted(glob.glob(sys.argv[1] + "/frontend_dist_files.bak-*"), reverse=True)
 for old in baks[2:]:
@@ -163,7 +163,7 @@ def main() -> int:
     step("[DONE-remote] seen", "[DONE-remote]" in out)
 
     sr.remote_exec(
-        "/opt/miniconda3-py39/bin/python -c \"import os; os.remove('/tmp/dist_deploy_staging.tar.gz')\"",
+        "/usr/local/bin/python3 -c \"import os; os.remove('/tmp/dist_deploy_staging.tar.gz')\"",
         timeout=15)
     print("[cleanup] remote tarball removed")
     print(f"\n[DONE] staging dist 部署完成 (stamp={stamp}); 旧目录备份保留最近 {KEEP_BAKS} 代")

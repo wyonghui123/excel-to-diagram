@@ -96,7 +96,7 @@ if [ -x "$PY" ]; then
     PVER=$($PY --version 2>&1 | awk '{print $2}')
     run_check "Python 可用: $PY (v$PVER)" pass
 else
-    run_check "Python 不可用: $PY" fail "需要 /opt/miniconda3-py39/bin/python 或 --py 指定"
+    run_check "Python 不可用: $PY" fail "需要 /usr/local/bin/python3 或 --py 指定"
 fi
 
 # ============================================================

@@ -17,7 +17,7 @@ DEPLOY_ROOT="/opt/app"
 DEPLOY_DIR="$DEPLOY_ROOT/deployments/meta"  # yonaa 实际共享路径
 BACKUP_ROOT="$DEPLOY_ROOT/backups"
 LOG_DIR="/opt/app/shared/logs"
-PY="/opt/miniconda3-py39/bin/python"
+PY="/usr/local/bin/python3"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_ROOT/auto-$TIMESTAMP"
 

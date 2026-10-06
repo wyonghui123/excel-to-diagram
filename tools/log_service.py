@@ -2,15 +2,15 @@
 [V007.35] 轻量级 log HTTP service v4 — 可观测性核心
   独立进程, 不依赖 server.py / unified_server, Python 3.8+ 标准库
 
-  核心能力 (v4 新增标记 ★):
-    - 静态日志查询: /api/log, /api/log/list, /api/log/range ★
-    - 实时日志流:   /api/log/stream (SSE tail -f) ★
-    - 数据库诊断:   /api/db/health, /api/db/query ★, /api/db/metrics
-    - 系统可观测:   /api/system, /api/net ★, /api/process ★, /api/dmesg
-    - 配置读取:     /api/config ★
-    - 指标导出:     /api/metrics (Prometheus) ★
+  核心能力 (v4 新增标记 [*]):
+    - 静态日志查询: /api/log, /api/log/list, /api/log/range [*]
+    - 实时日志流:   /api/log/stream (SSE tail -f) [*]
+    - 数据库诊断:   /api/db/health, /api/db/query [*], /api/db/metrics
+    - 系统可观测:   /api/system, /api/net [*], /api/process [*], /api/dmesg
+    - 配置读取:     /api/config [*]
+    - 指标导出:     /api/metrics (Prometheus) [*]
     - 自检:        /api/health, /api/token
-    - [V007.53] SQLite I/O 专项: /api/disk/errors ★, /api/disk/check ★
+    - [V007.53] SQLite I/O 专项: /api/disk/errors [*], /api/disk/check [*]
 
   usage:
     nohup python3 log_service.py > /tmp/log_service.log 2>&1 &
@@ -90,7 +90,7 @@ def _path_allowed(fp: str) -> bool:
             continue
     return False
 
-# ─── 轻量限流 (令牌桶, 内存) ★ ──────────────────
+# ─── 轻量限流 (令牌桶, 内存) [*] ──────────────────
 class RateLimiter:
     def __init__(self, max_per_sec: int = 10):
         self._lock = threading.Lock()
@@ -141,7 +141,8 @@ LOG_TS_RE = re.compile(
     r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})(?:[.,]\d+)?'
 )
 
-def _parse_log_ts(line: str):  # -> Optional[datetime] (Py3.9 兼容)
+def _parse_log_ts(line: str):
+    # -> Optional[datetime] (Py3.9 compatible)
     m = LOG_TS_RE.search(line)
     if not m:
         return None
@@ -201,19 +202,19 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             handlers = {
             "/api/system":    lambda: self._system(),
             "/api/proc":      lambda: self._proc(),
-            "/api/process":   lambda: self._process_detail(q),       # ★
-            "/api/net":       lambda: self._net(q),                  # ★
+            "/api/process":   lambda: self._process_detail(q),       # [*]
+            "/api/net":       lambda: self._net(q),                  # [*]
             "/api/log":       lambda: self._log(q),
-            "/api/log/list":  lambda: self._log_list(q),             # ★
-            "/api/log/range": lambda: self._log_range(q),            # ★
-            "/api/log/stream":lambda: self._log_stream(q),           # ★
+            "/api/log/list":  lambda: self._log_list(q),             # [*]
+            "/api/log/range": lambda: self._log_range(q),            # [*]
+            "/api/log/stream":lambda: self._log_stream(q),           # [*]
             "/api/find":      lambda: self._find(q),
             "/api/db/health": lambda: self._db_health(),
-            "/api/db/query":  lambda: self._db_query(q),             # ★
+            "/api/db/query":  lambda: self._db_query(q),             # [*]
             "/api/db/metrics":lambda: self._db_metrics(),
             "/api/dmesg":     lambda: self._dmesg(q),
-            "/api/config":    lambda: self._config(q),               # ★
-            "/api/metrics":   lambda: self._prometheus(),            # ★
+            "/api/config":    lambda: self._config(q),               # [*]
+            "/api/metrics":   lambda: self._prometheus(),            # [*]
             "/api/health":    lambda: self._json(200, {"ok":True,"uptime":int(time.time()-_START_TIME)}),
             "/api/token":     lambda: self._token(q),
             # [V007.37 v4.5] 合并 dev-agent v3.5 端点 (排查 disk I/O 必需)
@@ -322,7 +323,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         py = [l for l in result.stdout.split("\n") if "python" in l.lower() and "grep" not in l]
         self._json(200, {"total_lines": len(result.stdout.split("\n")), "python": py})
 
-    # ── /api/process ★ ────────────────────────────
+    # ── /api/process [*] ────────────────────────────
     def _process_detail(self, q):
         """每进程详情: pid, name, etime, fd_count, rss_mb, cpu%"""
         name_filter = q.get("name", [""])[0].lower()
@@ -356,7 +357,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         procs.sort(key=lambda x: x.get("fd_count", 0), reverse=True)
         self._json(200, {"count": len(procs), "processes": procs[:50]})
 
-    # ── /api/net ★ ────────────────────────────────
+    # ── /api/net [*] ────────────────────────────────
     def _net(self, q):
         """网络连接: tcp/udp + 端口占用"""
         result = {"tcp_listen": [], "tcp_established": [], "ports": {}}
@@ -406,7 +407,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "stderr": result.stderr[:300] if result.stderr else None,
         })
 
-    # ── /api/log/list ★ ───────────────────────────
+    # ── /api/log/list [*] ───────────────────────────
     def _log_list(self, q):
         """列出日志目录下的文件 (按 mtime 倒序)"""
         d = q.get("dir", [LOG_DIR])[0]
@@ -427,7 +428,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         files.sort(key=lambda x: x["mtime"], reverse=True)
         self._json(200, {"dir": d, "pattern": pattern, "files": files[:max_n], "count": len(files)})
 
-    # ── /api/log/range ★ ──────────────────────────
+    # ── /api/log/range [*] ──────────────────────────
     def _log_range(self, q):
         """按时间范围查询日志: from=2026-07-07T15:00&to=2026-07-07T16:00"""
         fname = q.get("file", ["server.log"])[0]
@@ -457,7 +458,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "elapsed_ms": round((time.time()-start)*1000,1),
         })
 
-    # ── /api/log/stream ★ (SSE tail -f) ───────────
+    # ── /api/log/stream [*] (SSE tail -f) ───────────
     def _log_stream(self, q):
         """SSE 实时推送: curl -N 'http://.../api/log/stream?lines=20'"""
         fname = q.get("file", ["server.log"])[0]
@@ -542,7 +543,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             r["busy_ms"] = conn.execute("PRAGMA busy_timeout").fetchone()[0]
             r["integrity"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
             for tbl in ["users","roles","products","audit_logs","enum_types","enum_values",
-                        "management_dimensions","role_dimension_scopes"]:  # ★ V007.35: 完整表清单
+                        "management_dimensions","role_dimension_scopes"]:  # [*] V007.35: 完整表清单
                 try:
                     r[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
                 except: pass
@@ -551,7 +552,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json(500, {"error": str(e), "type": type(e).__name__})
 
-    # ── /api/db/query ★ ───────────────────────────
+    # ── /api/db/query [*] ───────────────────────────
     def _db_query(self, q):
         """只读 SQL 查询 (仅 SELECT/PRAGMA/EXPLAIN, 拒绝写入)"""
         sql = q.get("q", [""])[0].strip()
@@ -607,7 +608,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         out = "\n".join(all_lines[-lines:])
         self._json(200, {"output": out, "total": len(r.stdout.split("\n"))})
 
-    # ── /api/disk/errors ★ [V007.53 v4.11] ────────
+    # ── /api/disk/errors [*] [V007.53 v4.11] ────────
     def _disk_errors(self, q):
         """扫描 dmesg 中的磁盘 I/O 错误模式, 支持时间窗口过滤
         用法: GET /api/disk/errors?hours=24&token=XXX
@@ -668,7 +669,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "status": "WARNING" if total_errors > 0 else "OK",
         })
 
-    # ── /api/config ★ ─────────────────────────────
+    # ── /api/config [*] ─────────────────────────────
     def _config(self, q):
         """读配置文件: curl 'http://.../api/config?file=/opt/app/deployments/meta/.env'"""
         fname = q.get("file", ["server.log"])[0]
@@ -696,7 +697,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         self._json(200, {"file": fp, "size": os.path.getsize(fp),
                          "content": "\n".join(masked), "lines": len(masked)})
 
-    # ── /api/metrics ★ (Prometheus) ───────────────
+    # ── /api/metrics [*] (Prometheus) ───────────────
     def _prometheus(self):
         """导出 Prometheus 格式指标"""
         metrics = io.StringIO()
@@ -900,7 +901,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json(500, {"err": str(e), "pid": pid})
 
-    # ── /api/deploy/current ★ [V007.45 v4.6] ─────────
+    # ── /api/deploy/current [*] [V007.45 v4.6] ─────────
     def _deploy_current(self, q):
         """[V007.45 BUG-FIX 2026-07-09] 看 current symlink 指向 + 实际目录
         之前 12+ 小时我看 /opt/app/current 误判, 实际是 symlink 指向空 v20260708_014/
@@ -932,7 +933,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             pass
         self._json(200, result)
 
-    # ── /api/deploy/history ★ ───────────────────────
+    # ── /api/deploy/history [*] ───────────────────────
     def _deploy_history(self, q):
         """[V007.45] 看 MANIFEST 或 deploy_history 目录的最近 10 次部署"""
         n = int(q.get("n", ["10"])[0])
@@ -962,7 +963,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             pass
         self._json(200, {"count": len(results), "history": results[:n]})
 
-    # ── /api/deploy/check_files ★ ───────────────────
+    # ── /api/deploy/check_files [*] ───────────────────
     def _deploy_check_files(self, q):
         """[V007.45 BUG-FIX 2026-07-09] 强校验 V007.46 8 文件 MD5
         之前 5/8 V007.46 文件假阳性, 实际未真部署
@@ -1004,7 +1005,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "summary": f"{sum(1 for e in results if e['exists'] and all(v >= 1 for v in e.get('markers', {}).values()))}/{len(results)} V007.46 真部署"
         })
 
-    # ── /api/ports/auto_detect ★ ────────────────────
+    # ── /api/ports/auto_detect [*] ────────────────────
     def _ports_auto_detect(self, q):
         """[V007.45 BUG-FIX] 扫 3011/5001/8081/9101, 跟 server 对齐
         之前 12+ 小时误判 5001 vs 3011, 现在自动选 listening 端口
@@ -1024,7 +1025,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             result["recommend"] = f"启 unified: BACKEND_PORT={server_port} python3 unified_server.py"
         self._json(200, result)
 
-    # ── /api/verify/invariant ★ ─────────────────────
+    # ── /api/verify/invariant [*] ─────────────────────
     def _verify_invariant(self, q):
         """[V007.45] 部署后立即跑 V8ab 业务回归 (200 次压测)
         之前 V8ab 100/100 login 200 误判 V007.46 修复, 实际 login 不触发 disk I/O
@@ -1068,7 +1069,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         )
         self._json(200, result)
 
-    # ── /api/deploy/yonaa_versions ★ [V007.45 v4.6 BUG-FIX 2026-07-09] ─
+    # ── /api/deploy/yonaa_versions [*] [V007.45 v4.6 BUG-FIX 2026-07-09] ─
     def _deploy_yonaa_versions(self, q):
         """[V007.45 BUG-FIX 2026-07-09] 看 yonaa 实际跑的 8 个关键文件 V007.46/V007.47 标记
         之前部署智能体看 worktree MD5 误判, 实际 yonaa 跑的可能不是最新
@@ -1114,7 +1115,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "summary": f"yonaa server.py V007.46 标记={server_v46} (>=1 = V007.46+ 部署, 0 = V007.40- 老版本)"
         })
 
-    # ── /api/deploy/invariant ★ [V007.49 P1 BUG-FIX 2026-07-09] ───
+    # ── /api/deploy/invariant [*] [V007.49 P1 BUG-FIX 2026-07-09] ───
     def _deploy_invariant(self, q):
         """[V007.49 P1 BUG-FIX] 部署智能体跑完 PHASE 0.5 后立即调这端点
         验 8 关键文件 V007.46+V007.47 标记数 + size + mtime, 不依赖 SSH
@@ -1171,7 +1172,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
     # [V007.50 v4.8] P0 远程管理/排查/测试端点实现
     # ──────────────────────────────────────────────────
 
-    # ── /api/manage/journal_mode ★ ──────────────────
+    # ── /api/manage/journal_mode [*] ──────────────────
     def _manage_journal_mode(self, q):
         """[V007.50] 安全切换 journal_mode: ?to=delete|wal&force=1
         步骤: 1) 查当前 2) pkill 持 DB 连接的非关键进程 3) checkpoint 4) 切换 5) 验证
@@ -1271,7 +1272,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         result["action"] = "switched" if result.get("verified") else "switch_failed"
         self._json(200, result)
 
-    # ── /api/diag/trace ★ ──────────────────────────
+    # ── /api/diag/trace [*] ──────────────────────────
     def _diag_trace(self, q):
         """[V007.50] 跨服务追踪: 按 trace_id 聚合 server.log + unified.log + log_service.log
         用法: /api/diag/trace?trace_id=abc123&lines=50
@@ -1313,7 +1314,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         result["found"] = total_matched > 0
         self._json(200, result)
 
-    # ── /api/test/disk_io ★ ────────────────────────
+    # ── /api/test/disk_io [*] ────────────────────────
     def _test_disk_io(self, q):
         """[V007.50] 并发 disk I/O 压测: 多线程同时读写 DB, 统计 fail_rate
         用法: /api/test/disk_io?rounds=5&concurrency=3&write=true
@@ -1385,7 +1386,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "PASS": all_fail == 0,
         })
 
-    # ── /api/deploy/smoke ★ ────────────────────────
+    # ── /api/deploy/smoke [*] ────────────────────────
     def _deploy_smoke(self, q):
         """[V007.50] 一键冒烟: 串联端口/DB/journal_mode/disk_io 多项检查
         部署后立即调: curl http://yonaa:9101/api/deploy/smoke
@@ -1492,7 +1493,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         results["summary"] = "ALL PASS" if all_pass else "FAIL - check details above"
         self._json(200, results)
 
-    # ── /api/upload ★ (POST) ──────────────────────
+    # ── /api/upload [*] (POST) ──────────────────────
     def _upload(self, q):
         """[V007.50] 文件上传: POST /api/upload?path=/tmp/xxx.sh
         body = 文件内容, Content-Type: application/octet-stream
@@ -1540,7 +1541,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json(500, {"error": f"write failed: {e}"})
 
-    # ── /api/exec ★ (GET/POST) ────────────────────
+    # ── /api/exec [*] (GET/POST) ────────────────────
     # 命令白名单: 只允许诊断/管理命令, 禁止危险操作
     EXEC_WHITELIST = [
         "ls", "cat", "head", "tail", "wc", "find", "grep", "du", "df",
@@ -1684,10 +1685,10 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    # ── /api/service/supervisor ★ ─────────────────────────────
+    # ── /api/service/supervisor [*] ─────────────────────────────
     # 看门狗: 检测关键服务进程是否在跑, 死了自动重启
     SUPERVISED_SERVICES = [
-        {"name": "meta_server",      "port": 3011, "cmd": "/opt/miniconda3-py39/bin/python -u /opt/app/deployments/meta/server.py", "log": "/tmp/server-supervisor.log", "critical": True},
+        {"name": "meta_server",      "port": 3011, "cmd": "/usr/local/bin/python3 -u /opt/app/deployments/meta/server.py", "log": "/tmp/server-supervisor.log", "critical": True},
         {"name": "unified",          "port": 8081, "cmd": "python3 /tmp/deploy_bundle/tools/unified_server.py /opt/app/deployments/frontend_dist_files", "log": "/tmp/unified-supervisor.log", "critical": True},
         # log_service 不监控自己, 自身挂了需要外部 (systemd/crontab) 拉起
     ]
@@ -1800,7 +1801,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         return self._json(400, {"error": f"unknown action: {action}",
                                 "valid": ["status", "restart", "start", "stop"]})
 
-    # ── /api/log/archive ★ ─────────────────────────────────────
+    # ── /api/log/archive [*] ─────────────────────────────────────
     def _log_archive(self, q):
         """[V007.51] /api/log/archive?older_than_days=7&max_keep=10&dry_run=0
         归档 /tmp/server-*.log, /tmp/unified-*.log, /tmp/log_service-*.log
@@ -1873,7 +1874,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         result["ts"] = datetime.now().isoformat()
         return self._json(200, result)
 
-    # ── /api/disk/forecast ★ ───────────────────────────────────
+    # ── /api/disk/forecast [*] ───────────────────────────────────
     def _disk_forecast(self, q):
         """[V007.51] /api/disk/forecast
         基于过去 N 天 df 采样数据预测磁盘满的时间
@@ -1955,7 +1956,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                              {"free_gb": round(free_gb, 2), "used_pct": result["used_pct"]})
         return self._json(200, result)
 
-    # ── /api/disk/check ★ [V007.53 v4.11] ──────────
+    # ── /api/disk/check [*] [V007.53 v4.11] ──────────
     def _disk_check(self, q):
         """SQLite disk I/O 综合健康检查: 4 路信号交叉验证
         信号:
@@ -2077,7 +2078,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             self._emit_alert(status, "disk_io", "; ".join(issues), result)
         self._json(200, result)
 
-    # ── /api/db/can_write ★ [V007.49-D 2026-07-13] ──────────
+    # ── /api/db/can_write [*] [V007.49-D 2026-07-13] ──────────
     def _db_can_write(self, q):
         """[V007.49-D] 检测 db 当前是否真正可写 (修补 root 绕过 chmod 的漏洞)
         背景: 2026-07-13 chaos 测试发现, chmod 555 拦截不了 root 用户的 SQLite INSERT
@@ -2181,7 +2182,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
 
         return self._json(200, result)
 
-    # ── /api/health/inspect ★ ──────────────────────────────────
+    # ── /api/health/inspect [*] ──────────────────────────────────
     def _health_inspect(self, q):
         """[V007.51] /api/health/inspect?depth=normal|deep
         normal: 快速检查端口+DB+SQLite版本
@@ -2273,7 +2274,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                 fail += 1
         return {"ok": ok, "fail": fail, "PASS": fail == 0}
 
-    # ── /api/alert/sse ★ ───────────────────────────────────────
+    # ── /api/alert/sse [*] ───────────────────────────────────────
     def _alert_sse(self, q):
         """[V007.51] /api/alert/sse?history=10&block=1
         SSE 推流告警事件

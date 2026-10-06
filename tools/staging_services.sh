@@ -29,7 +29,7 @@ set -u
 BIN_DIR=/opt/app/staging/bin
 DEPLOY_DIR=/opt/app/staging/deploy/current
 LOG_DIR=/opt/app/staging/logs
-PYTHON=/opt/miniconda3-py39/bin/python
+PYTHON=/usr/local/bin/python3
 
 # Service registry: name | port | script | log_file | env_kv_pairs (semicolon-separated KEY=VAL)
 declare -A SVC_PORT=(

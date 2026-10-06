@@ -35,7 +35,7 @@ Environment="CORE_SERVICE_PORT=19200"
 # 模板额外保留 (现役未设, 模板写法供未来启用):
 Environment="CORS_ALLOWED_ORIGINS=http://127.0.0.1:18081,http://localhost:18081"
 Environment="FLASK_ENV=staging"
-ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/current/server.py
+ExecStart=/usr/local/bin/python3 /opt/app/staging/deploy/current/server.py
 
 # [2026-09-14 P0-3] 自动重启策略 - on-failure (systemd 会接管重启)
 Restart=on-failure

@@ -114,7 +114,7 @@ do_check() {
         "http://127.0.0.1:${BACKEND_PORT}/api/v1/auth/login" \
         -H "Content-Type: application/json" \
         -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
-    local LOGIN_OK=$(/opt/miniconda3-py39/bin/python -c "
+    local LOGIN_OK=$(/usr/local/bin/python3 -c "
 import json
 try:
     d = json.loads('''$LOGIN'''.replace('\\\\', '').replace(\"'\", '\"'))

@@ -226,7 +226,7 @@ test_database() {
     local db_dir=$(get_config "paths" "shared_data" || echo "$APP_DIR/shared/data")
     local db_file=$(get_config "database" "file" || echo "architecture.db")
     local db_path="$db_dir/$db_file"
-    local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+    local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
     
     # 检查数据库文件
     if [[ ! -f "$db_path" ]]; then

@@ -8,7 +8,7 @@ chown 所有 log_service 启动需要读的文件/目录给 nobody
 - /opt/app/staging/meta/architecture.db           (staging DB)
 - /opt/app/staging/deploy/current (symlink)        → 跟随
 - /opt/app/staging/logs/*                         (staging logs)
-- /opt/miniconda3-py39/bin/python                 (Python 解释器)
+- /usr/local/bin/python3                 (Python 解释器)
 """
 import sys
 sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
@@ -21,7 +21,7 @@ cmds_prod = [
     # tools 目录下其他可能用到的脚本
     'ls /opt/app/deployments/tools/ | head -20',
     # Python 解释器 nobody 应该能跑 (默认就是)
-    'ls -la /opt/miniconda3-py39/bin/python',
+    'ls -la /usr/local/bin/python3',
     # meta 目录内所有文件 (包括 backup) 全部 nobody 可写
     'chmod -R u+rwX,g+rwX,o+rX /opt/app/deployments/meta',
     # logs 同理

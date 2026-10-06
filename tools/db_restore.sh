@@ -110,6 +110,6 @@ c.close()
 PYEOF
 
 echo "[restore] ===== 恢复完成: $DB_PATH ====="
-echo "  请重启服务 (后端 13011: /opt/miniconda3-py39/bin/python -u $DB_DIR/current/server.py)"
+echo "  请重启服务 (后端 13011: /usr/local/bin/python3 -u $DB_DIR/current/server.py)"
 echo "  或直接重新执行部署脚本 (会自动重启后端)"
 exit 0

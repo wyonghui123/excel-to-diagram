@@ -153,7 +153,7 @@ check_filesystem() {
 
 # 检查 Python 环境
 check_python() {
-    local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+    local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
     
     if [[ ! -x "$py_path" ]]; then
         add_check "Python 环境" "FAIL" "Python 不存在或不可执行: $py_path" ""
@@ -181,7 +181,7 @@ check_database() {
     local db_dir=$(get_config "paths" "shared_data" || echo "$APP_DIR/shared/data")
     local db_file=$(get_config "database" "file" || echo "architecture.db")
     local db_path="$db_dir/$db_file"
-    local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+    local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
     
     if [[ ! -f "$db_path" ]]; then
         add_check "数据库文件" "FAIL" "不存在: $db_path" ""

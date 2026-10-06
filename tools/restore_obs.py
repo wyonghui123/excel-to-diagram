@@ -46,7 +46,7 @@ export CORE_SERVICE_WRITE_SECRET=v007.52-core-write
 export CORE_SERVICE_READ_SECRET=v007.52-core-read
 export OBS_CORE_URL=https://127.0.0.1:9200
 export OBS_AUDIT_LOG=/var/log/core_service_audit.log
-nohup /opt/miniconda3-py39/bin/python observability_service.py > /var/log/observability_service.log 2>&1 &
+nohup /usr/local/bin/python3 observability_service.py > /var/log/observability_service.log 2>&1 &
 echo "obs started pid=$!"
 """
 code, _ = call_core("POST", "/api/upload",

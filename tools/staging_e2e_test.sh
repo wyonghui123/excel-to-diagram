@@ -62,7 +62,7 @@ fi
 
 # T6: chaos readonly (staging 专属)
 echo "  --- T6 chaos readonly ---"
-CHAOS_OUT=$(CHAOS_DB_PATH=/opt/app/staging/meta/architecture.db CHAOS_DB_BAK=/opt/app/staging/meta/architecture.db.chaos_bak /opt/miniconda3-py39/bin/python3 /opt/app/staging/bin/sqlite_chaos.py readonly 2>&1)
+CHAOS_OUT=$(CHAOS_DB_PATH=/opt/app/staging/meta/architecture.db CHAOS_DB_BAK=/opt/app/staging/meta/architecture.db.chaos_bak /usr/local/bin/python3 /opt/app/staging/bin/sqlite_chaos.py readonly 2>&1)
 if echo "$CHAOS_OUT" | grep -q 'BUG-CONFIRMED'; then
     echo "  ✓ T6 chaos readonly: BUG 已确认 (root 绕过 chmod)"
     PASS=$((PASS+1))
@@ -73,7 +73,7 @@ fi
 
 # T7: chaos busy
 echo "  --- T7 chaos busy ---"
-CHAOS_OUT=$(CHAOS_DB_PATH=/opt/app/staging/meta/architecture.db CHAOS_DB_BAK=/opt/app/staging/meta/architecture.db.chaos_bak /opt/miniconda3-py39/bin/python3 /opt/app/staging/bin/sqlite_chaos.py busy 2>&1)
+CHAOS_OUT=$(CHAOS_DB_PATH=/opt/app/staging/meta/architecture.db CHAOS_DB_BAK=/opt/app/staging/meta/architecture.db.chaos_bak /usr/local/bin/python3 /opt/app/staging/bin/sqlite_chaos.py busy 2>&1)
 if echo "$CHAOS_OUT" | grep -q 'INSERT blocked'; then
     echo "  ✓ T7 chaos busy: busy_timeout=5s 防御生效"
     PASS=$((PASS+1))

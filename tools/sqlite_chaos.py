@@ -16,11 +16,11 @@ sqlite_chaos.py - SQLite IO disk error 故障注入工具 [V007.49-D 2026-07-13]
   python tools/sqlite_chaos.py restore     →  (regression_test_suite 自动 restore)
 
 regression_test_suite.py 的优势:
-  ✓ 9 个场景 (本工具 6 个 + WAL corrupt + timeout + readonly_root)
-  ✓ 自动返回 exit code (CI 友好)
-  ✓ --json 报告
-  ✓ 每个场景独立 backup + restore
-  ✓ prod 硬防护 (拒绝在 prod 跑)
+  [OK] 9 个场景 (本工具 6 个 + WAL corrupt + timeout + readonly_root)
+  [OK] 自动返回 exit code (CI 友好)
+  [OK] --json 报告
+  [OK] 每个场景独立 backup + restore
+  [OK] prod 硬防护 (拒绝在 prod 跑)
 
 本文件保留仅作历史参考, 不再接受新功能。新代码请用 regression_test_suite.py。
 本工具将在 V007.56 删除。
@@ -139,7 +139,7 @@ def test_extlock():
     print('\n=== TEST 3: 外部进程持锁 + 真 INSERT ===')
     backup_db()
     proc = subprocess.Popen(
-        ['/opt/miniconda3-py39/bin/python3', '-c', f'''
+        ['/usr/local/bin/python3', '-c', f'''
 import sqlite3, time
 conn = sqlite3.connect("{DB_PATH}", timeout=60)
 conn.execute("BEGIN IMMEDIATE")

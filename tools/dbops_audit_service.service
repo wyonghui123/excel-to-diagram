@@ -7,7 +7,7 @@ After=network.target dbops_service.service
 [Service]
 Type=simple
 User=root
-ExecStart=/opt/miniconda3-py39/bin/python -u /opt/app/shared/dbops_audit_service.py
+ExecStart=/usr/local/bin/python3 -u /opt/app/shared/dbops_audit_service.py
 # [L13.3] 端口 9214: 与 9204 dbops_service V1.0 共存
 Environment="DBOPS_AUDIT_SERVICE_PORT=9214"
 # [L4 NSFOCUS] BIND=172.20.59.7 读 .env_global, 也可在此处显式指定

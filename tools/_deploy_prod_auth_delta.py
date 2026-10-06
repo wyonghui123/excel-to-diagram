@@ -46,7 +46,7 @@ IP=172.20.59.7
 
 # DB 安全快照 (本次不动 DB, 仍按 prod 惯例留底; sqlite3 CLI 太老, 用 python 模块)
 PYBIN="$(command -v python3 || true)"
-[ -x "$PYBIN" ] || PYBIN=/opt/miniconda3-py39/bin/python
+[ -x "$PYBIN" ] || PYBIN=/usr/local/bin/python3
 db_ok=0
 "$PYBIN" - "$STAMP" <<'PYEOF' && db_ok=1
 import sqlite3, sys, os
@@ -135,7 +135,7 @@ fi
 echo SWAP_OK
 
 # 备份保留最近 2 代 (按 mtime; 网关禁 rm -> python)
-/opt/miniconda3-py39/bin/python - <<'PYEOF'
+/usr/local/bin/python3 - <<'PYEOF'
 import glob, os, shutil
 baks = sorted(glob.glob('/opt/app/deployments/frontend_dist_files.bak*'),
               key=os.path.getmtime, reverse=True)
@@ -157,7 +157,7 @@ echo DONE_DIST
 """
 
 CLEANUP_SH = r"""#!/bin/bash
-/opt/miniconda3-py39/bin/python - <<'PYEOF'
+/usr/local/bin/python3 - <<'PYEOF'
 import os
 for p in ('/tmp/_unified_auth_patch.py', '/tmp/_dl_dist.tar.gz',
           '/tmp/_prod_apply_auth.sh', '/tmp/_prod_deploy_dist2.sh'):

@@ -20,7 +20,7 @@
 部署:
   SSH yonaa:
     cd /opt/app/deployments/v20260708_xxx
-    /opt/miniconda3-py39/bin/python meta/migrations/v007_45_add_audit_logs_created_at_epoch.py
+    /usr/local/bin/python3 meta/migrations/v007_45_add_audit_logs_created_at_epoch.py
 """
 import sqlite3
 import os

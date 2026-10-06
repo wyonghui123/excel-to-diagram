@@ -31,7 +31,7 @@ FRONTEND_PORT="${ARG_FRONTEND_PORT:-8081}"
 DEPLOY_ROOT="/opt/app"
 DEPLOYMENTS_DIR="$DEPLOY_ROOT/deployments"
 LOG_DIR="/opt/app/shared/logs"
-PY="/opt/miniconda3-py39/bin/python"
+PY="/usr/local/bin/python3"
 
 # ============================================================
 # 工具函数
@@ -149,7 +149,7 @@ LOGIN=$(curl -s -X POST --max-time 5 \
     "http://127.0.0.1:${BACKEND_PORT}/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"deploy_test","password":"DeployTest@2026!"}' 2>/dev/null)
-LOGIN_RESULT=$(/opt/miniconda3-py39/bin/python -c "
+LOGIN_RESULT=$(/usr/local/bin/python3 -c "
 import json, sys
 try:
     d = json.loads('''$LOGIN'''.replace('\\\\', '').replace(\"'\", '\"'))

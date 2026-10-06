@@ -21,7 +21,7 @@
 部署:
   SSH yonaa:
     cd /opt/app/deployments/v20260714_xxx
-    /opt/miniconda3-py39/bin/python meta/migrations/v007_50_add_audit_union_view.py
+    /usr/local/bin/python3 meta/migrations/v007_50_add_audit_union_view.py
 
   本地:
     python meta/migrations/v007_50_add_audit_union_view.py d:/filework/worktrees/release-prep/meta/architecture.db

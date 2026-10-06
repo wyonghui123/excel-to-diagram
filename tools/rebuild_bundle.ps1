@@ -100,8 +100,8 @@ bash /tmp/deploy_bundle/deploy_history.sh --info v20260703_002
 bash /tmp/deploy_bundle/deploy_history.sh --switch v20260630_003 --port 5000
 
 ## 测试 (远端)
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_rollback_parallel.py
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_frontend_dir.py
+/usr/local/bin/python3 /tmp/deploy_bundle/tests/test_rollback_parallel.py
+/usr/local/bin/python3 /tmp/deploy_bundle/tests/test_frontend_dir.py
 "@
 Set-Content -Path "$bundle/README.txt" -Value $readme -Encoding UTF8
 Write-Host "  + README.txt" -ForegroundColor Green

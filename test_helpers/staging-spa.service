@@ -7,7 +7,7 @@ Wants=staging-core.service staging-backend.service
 Type=simple
 WorkingDirectory=/opt/app/staging/deploy/current
 Environment="BACKEND_PORT=13011"
-ExecStart=/opt/miniconda3-py39/bin/python3 /opt/app/staging/deploy/current/unified_18081.py
+ExecStart=/usr/local/bin/python3 /opt/app/staging/deploy/current/unified_18081.py
 Restart=always
 RestartSec=5
 User=nobody

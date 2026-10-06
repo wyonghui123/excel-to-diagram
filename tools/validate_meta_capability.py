@@ -147,7 +147,7 @@ check("obs down confirmed", code == 200, f"still up? code={code}")
 
 # 通过 core exec 重启 obs
 code, body = call_core("GET", "/api/exec", {
-    "cmd": "cd /opt/app/shared && nohup /opt/miniconda3-py39/bin/python observability_service.py > /var/log/observability_service.log 2>&1 &",
+    "cmd": "cd /opt/app/shared && nohup /usr/local/bin/python3 observability_service.py > /var/log/observability_service.log 2>&1 &",
     "token": t, "bg": "true"
 })
 check("restart obs via core exec", code == 200)

@@ -10,7 +10,7 @@
   python tools/_remote_run.py tools/<script>.sh [timeout] [extra args...]
   python tools/_remote_run.py tools/<script>.py [timeout] [extra args...]
 
-.sh -> bash 执行; .py -> /opt/miniconda3-py39/bin/python 执行.
+.sh -> bash 执行; .py -> /usr/local/bin/python3 执行.
 extra args 透传到远端脚本, 用于对 staging / prod 复用同一份验证脚本.
 
 例: 对 production 跑同一份只读验证脚本 (staging 与 prod 同主机)
@@ -44,7 +44,7 @@ def main() -> int:
         return 2
     argv = (" " + " ".join(extra)) if extra else ""
     if local.suffix == ".py":
-        cmd = f"/opt/miniconda3-py39/bin/python {remote}{argv} 2>&1"
+        cmd = f"/usr/local/bin/python3 {remote}{argv} 2>&1"
     else:
         cmd = f"bash {remote} 2>&1"
     r = sr.remote_exec(cmd, timeout=timeout)

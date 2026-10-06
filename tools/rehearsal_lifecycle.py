@@ -84,7 +84,7 @@ def cmd_start(args):
         f'--setenv=FLASK_DEBUG=false '
         f'--working-directory=/opt/app/deployments_rehearsal/bin '
         f'--user=nobody --group=nobody '
-        f'/opt/miniconda3-py39/bin/python /opt/app/deployments_rehearsal/server.py'
+        f'/usr/local/bin/python3 /opt/app/deployments_rehearsal/server.py'
     )
     # systemd-run 不能直接用 --user 改 User= (要 sudo), 远端多半是 root 部署, 这里直接 root 跑
     r = _sr.remote_exec(cmd, timeout=30)

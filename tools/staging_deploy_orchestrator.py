@@ -244,7 +244,7 @@ log_start_cmd = (
     "LOG_SERVICE_LOG_DIR=/opt/app/staging/deploy/meta "
     "LOG_SERVICE_DB_PATH=/opt/app/staging/deploy/meta/architecture.db "
     "LOG_SERVICE_SECRET=v007.35-infra "
-    "/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/tools/log_service.py "
+    "/usr/local/bin/python3 /opt/app/staging/deploy/tools/log_service.py "
     ">> /opt/app/staging/deploy/logs/log_service.log 2>&1 < /dev/null &'"
 )
 r = exec_cmd(log_start_cmd, timeout=5)
@@ -271,9 +271,9 @@ for line in out.split('\n'):
 if out.strip().endswith('EXIT=0'):
     r2 = exec_cmd("cat /tmp/regression_latest.json 2>&1 | head -c 200", port=19200, timeout=10)
     print(f'  报告: {r2.get("stdout", "").strip()[:200]}')
-    print('  ✓ 回归测试通过, staging io 防护 OK')
+    print('  [OK] 回归测试通过, staging io 防护 OK')
 else:
-    print(f'  ✗ 回归测试有 FAIL, 请检查 staging 状态')
+    print(f'  [FAIL] 回归测试有 FAIL, 请检查 staging 状态')
     print(f'  详情: cd staging && python3 tools/regression_test_suite.py --json /tmp/reg.json')
     if mode == 'daily':
         print('  → daily 模式应暂停 prod 部署, 等修复后再继续')

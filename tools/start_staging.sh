@@ -23,7 +23,7 @@ setsid nohup env \
     CORE_SERVICE_BIND=0.0.0.0 \
     CORE_SERVICE_DB_PATH=/opt/app/staging/meta/architecture.db \
     CORE_SERVICE_SECRET=staging-v007.49-d \
-    /opt/miniconda3-py39/bin/python /opt/app/staging/bin/core_service.py \
+    /usr/local/bin/python3 /opt/app/staging/bin/core_service.py \
     >> $LOG_DIR/core_service.log 2>&1 < /dev/null &
 PID1=$!
 disown $PID1 2>/dev/null
@@ -34,7 +34,7 @@ cd /opt/app/staging/bin
 setsid nohup env \
     LOG_SERVICE_PORT=19101 \
     LOG_SERVICE_DB_PATH=/opt/app/staging/meta/architecture.db \
-    /opt/miniconda3-py39/bin/python /opt/app/staging/bin/log_service.py \
+    /usr/local/bin/python3 /opt/app/staging/bin/log_service.py \
     >> $LOG_DIR/log_service.log 2>&1 < /dev/null &
 PID2=$!
 disown $PID2 2>/dev/null
@@ -47,7 +47,7 @@ echo "=== Staging services started. Run health_check.sh ==="
 # [V007.49-D 2026-07-13] frontend_dist_files 已复制, 端口 18081
 setsid nohup env \
     BACKEND_PORT=13011 \
-    /opt/miniconda3-py39/bin/python3 /opt/app/staging/bin/unified_18081.py \
+    /usr/local/bin/python3 /opt/app/staging/bin/unified_18081.py \
     >> $LOG_DIR/unified_server.log 2>&1 < /dev/null &
 PID3=$!
 disown $PID3 2>/dev/null

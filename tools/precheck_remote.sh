@@ -64,12 +64,12 @@ which python python3 python2 2>/dev/null
 ls /usr/bin/python* 2>/dev/null
 ls /usr/local/bin/python* 2>/dev/null
 ls /opt/*/bin/python* 2>/dev/null
-ls /opt/miniconda*/bin/python* 2>/dev/null
+ls /usr/local/bin/python3 /opt/python3.11*/bin/python3* 2>/dev/null
 ls /opt/conda*/bin/python* 2>/dev/null
 ls /tmp/python-build/Python-*/python 2>/dev/null
 echo ""
 echo "  /opt/app/venv/bin/python: $(ls -la /opt/app/venv/bin/python 2>/dev/null || echo 'NOT FOUND')"
-echo "  /opt/miniconda3-py39/bin/python: $(ls -la /opt/miniconda3-py39/bin/python 2>/dev/null || echo 'NOT FOUND')"
+echo "  /usr/local/bin/python3: $(ls -la /usr/local/bin/python3 2>/dev/null || echo 'NOT FOUND')"
 
 # ============================================================
 # 3. DIRECTORY STRUCTURE

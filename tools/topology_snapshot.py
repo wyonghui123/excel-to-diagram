@@ -183,7 +183,7 @@ def _capture_loader_runtime(target: DeployTarget) -> Dict:
 
     for mod in ["meta.core.standard_action_loader", "meta.api.bo_api"]:
         inner = f"import {mod} as x; print(x.__file__)"
-        cmd = f'bash -c "cd {target.deploy_root} && /opt/miniconda3-py39/bin/python -c \\"{inner}\\""'
+        cmd = f'bash -c "cd {target.deploy_root} && /usr/local/bin/python3 -c \\"{inner}\\""'
         r = target.exec_fn(cmd, timeout=30)
         if isinstance(r, dict):
             stdout = (r.get("stdout") or "").strip()

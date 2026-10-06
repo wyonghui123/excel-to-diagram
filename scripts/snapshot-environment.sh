@@ -39,7 +39,7 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 # 获取 Python 版本
 get_python_info() {
-    local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+    local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
     
     if [[ ! -x "$py_path" ]]; then
         echo '{"version": "not_found", "path": "'"$py_path"'"}'
@@ -126,7 +126,7 @@ get_database_info() {
         exists=true
         size=$(stat -c%s "$db_path" 2>/dev/null || stat -f%z "$db_path" 2>/dev/null || echo "0")
         
-        local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+        local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
         
         tables=$($py_path -c "
 import sqlite3

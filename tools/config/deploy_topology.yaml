@@ -114,7 +114,7 @@ staging:
 #   - 网关: core_service 9200, HTTPS (self-signed), secret 见 staging_round.use_prod_gateway
 #   - deploy_root = /opt/app/deployments/meta (meta 包根本身, 扁平布局;
 #     /opt/app/deployments/current -> meta 为兼容 symlink)
-#   - backend: meta-backend.service, miniconda py39, 监听 172.20.59.7:5001
+#   - backend: meta-backend.service, python3.11.16 (P9 2026-09-30), 监听 172.20.59.7:5001
 #   - frontend: meta-unified.service, unified_8081.py, dist=/opt/app/deployments/frontend_dist_files
 production:
   host: 172.20.59.7

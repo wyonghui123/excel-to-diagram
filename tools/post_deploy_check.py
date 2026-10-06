@@ -94,7 +94,7 @@ def find_running_backend_pid(remote_exec_fn=None) -> list:
             # 简化: 不在 Windows 上做这个检查
             return pids
         else:
-            r = subprocess.run(["pgrep", "-f", "miniconda.*server.py"],
+            r = subprocess.run(["pgrep", "-f", "python.*server.py"],
                                capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
                 pids = [int(x) for x in r.stdout.strip().split() if x.strip()]
@@ -108,7 +108,7 @@ def find_remote_backend_pids(remote_exec_fn) -> list:
     if not remote_exec_fn:
         return []
     try:
-        _, body = remote_exec_fn("pgrep -f 'miniconda.*server.py'", timeout=10)
+        _, body = remote_exec_fn("pgrep -f 'python.*server.py'", timeout=10)
         import json as _json
         j = _json.loads(body)
         if j.get("exit_code") == 0:

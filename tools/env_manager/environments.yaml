@@ -88,8 +88,8 @@ environments:
 
 # 全局配置
 common:
-  python_bin: "/opt/miniconda3-py39/bin/python"
-  python3_bin: "/opt/miniconda3-py39/bin/python3"
+  python_bin: "/usr/local/bin/python3"
+  python3_bin: "/usr/local/bin/python3"
   prod_root: "/opt/app"
   prod_deployments: "/opt/app/deployments"
   shared_dir: "/opt/app/shared"

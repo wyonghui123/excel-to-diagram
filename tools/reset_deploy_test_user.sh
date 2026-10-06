@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh" 2>/dev/null || true
 
 DB="${DB_PATH:-/opt/app/deployments/meta/architecture.db}"
-PY="${PY:-/opt/miniconda3-py39/bin/python}"
+PY="${PY:-/usr/local/bin/python3}"
 DEPLOY_USER="deploy_test"
 DEPLOY_PASSWORD="DeployTest@2026!"
 

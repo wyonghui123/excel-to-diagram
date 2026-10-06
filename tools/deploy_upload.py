@@ -564,7 +564,7 @@ def cmd_healthcheck(args, target: DeployTarget) -> int:
     if args.introspect:
         print(f"\n[{target.name}] Python introspect (检测模块实际加载路径):")
         # 自动用 backend 的 python 解释器
-        python_bin = args.python or "/opt/miniconda3-py39/bin/python"
+        python_bin = args.python or "/usr/local/bin/python3"
         modules = args.module or []
         # [P1] 预期缺失白名单: 缺失模块 ⊆ 白名单 -> [EXPECTED] 不计失败
         allow_missing = set(DEFAULT_EXPECTED_MISSING) | set(args.allow_missing or [])
@@ -775,7 +775,7 @@ def cmd_sync(args, target: DeployTarget) -> int:
         f'pkill -f \\"python.*server.py\\"; sleep 3; '
         f'cd {target.deploy_root}; '
         f'rm -rf meta/core/__pycache__ meta/api/__pycache__; '
-        f'nohup /opt/miniconda3-py39/bin/python server.py '
+        f'nohup /usr/local/bin/python3 server.py '
         f'> {target.deploy_root}/../logs/server_post_sync.log 2>&1 & '
         f'echo started_pid=$!; '
         f'sleep 8; '
@@ -880,7 +880,7 @@ def main():
     sp.add_argument("--module", action="append", default=None,
                      help="introspect 的模块名 (可多次), 例: meta.api.v2_bo.bo_user")
     sp.add_argument("--python", default=None,
-                    help="远端 python 解释器路径 (默认 /opt/miniconda3-py39/bin/python)")
+                    help="远端 python 解释器路径 (默认 /usr/local/bin/python3)")
     sp.add_argument("--allow-missing", action="append", default=None,
                     help="额外的预期缺失模块 (可多次); 默认含 meta 补丁子集已知缺失"
                          " (meta.core.bo_framework / meta.core.action_constants)")

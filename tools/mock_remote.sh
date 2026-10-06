@@ -45,7 +45,7 @@ setup() {
     mkdir -p "$MOCK_ROOT/opt/app/shared/data"
     mkdir -p "$MOCK_ROOT/opt/app/meta"
     mkdir -p "$MOCK_ROOT/etc/systemd/system"
-    mkdir -p "$MOCK_ROOT/opt/miniconda3-py39/bin"
+    mkdir -p "$MOCK_ROOT/usr/local/bin"
 
     ok "创建目录: $MOCK_ROOT"
 
@@ -201,10 +201,10 @@ EOF
     # 6. Mock Python bin
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
         # Windows: 直接用 python
-        echo "Mock python (Windows)" > "$MOCK_ROOT/opt/miniconda3-py39/bin/python"
+        echo "Mock python (Windows)" > "$MOCK_ROOT/usr/local/bin/python3"
     else
-        ln -sf "$(which python3)" "$MOCK_ROOT/opt/miniconda3-py39/bin/python" 2>/dev/null || \
-            echo "Mock python" > "$MOCK_ROOT/opt/miniconda3-py39/bin/python"
+        ln -sf "$(which python3)" "$MOCK_ROOT/usr/local/bin/python3" 2>/dev/null || \
+            echo "Mock python" > "$MOCK_ROOT/usr/local/bin/python3"
     fi
     ok "Mock Python bin"
 

@@ -50,7 +50,7 @@ def install():
     print((r.get('stdout') or '')[:1000])
 
     # 5. 测 cron 表达式有效 (用 run-parts 模拟)
-    r = yexec('bash -c "cd /opt/app/staging/deploy && /opt/miniconda3-py39/bin/python tools/remote_capability_probe.py --check-log-service 2>&1; echo EXIT=$?"',
+    r = yexec('bash -c "cd /opt/app/staging/deploy && /usr/local/bin/python3 tools/remote_capability_probe.py --check-log-service 2>&1; echo EXIT=$?"',
               port=9200, secret='prod_write', timeout=10)
     print('\n=== 模拟 cron 跑 (验证 command 有效) ===')
     print((r.get('stdout') or '')[:1000])

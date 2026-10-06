@@ -14,7 +14,7 @@ User=root
 Environment="PORT=13011"
 # [meta 服务] backend 用 staging 部署目录 (current 软链)
 WorkingDirectory=/opt/app/staging/deploy/current
-ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/current/server.py
+ExecStart=/usr/local/bin/python3 /opt/app/staging/deploy/current/server.py
 # [staging 默认 dev-login 模式] FLASK_ENV 不设即 dev mode (auth_api.py dev_login 检查)
 # [日志] 走 journald, journalctl -u meta-staging -f
 StandardOutput=journal

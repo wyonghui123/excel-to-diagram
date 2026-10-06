@@ -6,7 +6,7 @@
 # 远端: 172.20.59.7 (生产) - MobaXterm SSH root@172.20.59.7
 # 路径约定: /opt/app/{deployments,shared,current,backups}/
 # 端口约定: 5001 (v4 backend) / 8081 (v4 unified frontend) / 5000 (v3 backend 单进程)
-# Python: /opt/miniconda3-py39/bin/python (conda py39 env)
+# Python: /usr/local/bin/python3 (conda py39 env)
 # 用户: root (容器)
 # 包管理: pip (requirements.txt in meta/)
 # 数据库: SQLite (meta/architecture.db)
@@ -43,7 +43,7 @@ PROJECT_DEFAULT_FRONTEND_PORT=8081
 # 远端服务器
 REMOTE_HOST="172.20.59.7"
 REMOTE_USER="root"
-REMOTE_PY="/opt/miniconda3-py39/bin/python"
+REMOTE_PY="/usr/local/bin/python3"
 REMOTE_DEPLOY_ROOT="/opt/app"
 REMOTE_DEPLOYMENTS_DIR="/opt/app/deployments"
 REMOTE_LOG_DIR="/opt/app/shared/logs"
@@ -130,7 +130,7 @@ detect_remote_env() {
     DEPLOY_ROOT="${ARG_DEPLOY_ROOT:-/opt/app}"
     BACKUP_DIR="${ARG_BACKUP_DIR:-$DEPLOY_ROOT/backups}"
     LOG_DIR="${ARG_LOG_DIR:-$DEPLOY_ROOT/shared/logs}"
-    PY="${ARG_PY:-/opt/miniconda3-py39/bin/python}"
+    PY="${ARG_PY:-/usr/local/bin/python3}"
     DEPLOYMENTS_DIR="$DEPLOY_ROOT/deployments"
     CURRENT_LINK="$DEPLOY_ROOT/current"
 

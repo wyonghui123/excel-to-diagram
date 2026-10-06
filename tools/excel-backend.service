@@ -24,7 +24,7 @@ Environment="FLASK_DEBUG=false"
 Environment="FLASK_ENV=production"
 
 # 启动命令
-ExecStart=/opt/miniconda3-py39/bin/python server.py
+ExecStart=/usr/local/bin/python3 server.py
 
 # [V007.25] 自动重启策略
 # - on-failure: 只在非零退出时重启

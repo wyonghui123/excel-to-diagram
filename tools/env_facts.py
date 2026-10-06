@@ -48,7 +48,7 @@ PROBE_LOCAL = REPO / '.runtime' / '_gen_env_facts_probe.py'
 RESOLVE_LOCAL = REPO / '.runtime' / '_gen_env_facts_resolve.py'
 PROBE_REMOTE = '/tmp/env_facts_probe.py'
 RESOLVE_REMOTE = '/tmp/env_facts_resolve.py'
-PY = '/opt/miniconda3-py39/bin/python -I'
+PY = '/usr/local/bin/python3 -I'
 
 FE_DIR = '/opt/app/staging/frontend_dist_files'
 FE_PORT = 18081

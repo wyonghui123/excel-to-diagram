@@ -157,7 +157,7 @@ def probe_db_schema(db_path: str, expected_tables: Optional[List[str]] = None,
 
 
 def probe_python_introspect(host: str, deploy_root: str, module: str,
-                            python_bin: str = "/opt/miniconda3-py39/bin/python",
+                            python_bin: str = "/usr/local/bin/python3",
                             exec_fn=None) -> dict:
     """Python introspect: 远端 import + 看 __file__ 是不是 deploy_root 里的版本.
 
@@ -248,7 +248,7 @@ def run_probe(target_name: str,
               expected_tables: Optional[List[str]] = None,
               introspect_modules: Optional[List[str]] = None,
               deploy_root: Optional[str] = None,
-              python_bin: str = "/opt/miniconda3-py39/bin/python",
+              python_bin: str = "/usr/local/bin/python3",
               tail_migrations: int = 0,
               exec_fn=None) -> dict:
     """跑所有启用的探活, 返回聚合报告.
@@ -371,7 +371,7 @@ def main():
     parser.add_argument('--introspect-module', action='append', default=None,
                         help='要 introspect 的 Python 模块 (可多次)')
     parser.add_argument('--deploy-root', default=None, help='部署目录 (供 introspect)')
-    parser.add_argument('--python-bin', default='/opt/miniconda3-py39/bin/python',
+    parser.add_argument('--python-bin', default='/usr/local/bin/python3',
                         help='远端 Python 解释器')
     parser.add_argument('--tail-migrations', type=int, default=0,
                         help='检查最近 N 条 migration status')

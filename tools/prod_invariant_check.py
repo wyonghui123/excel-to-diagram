@@ -137,7 +137,7 @@ def check_I1_server_cwd(target: "DeployTarget") -> InvariantResult:
 
     out, err, rc = _remote_exec(
         target,
-        "/opt/miniconda3-py39/bin/python /tmp/_invariant_i1.py 2>&1",
+        "/usr/local/bin/python3 /tmp/_invariant_i1.py 2>&1",
         timeout=10,
     )
     pid = ""
@@ -317,7 +317,7 @@ def check_I3_loader_realpath(target: "DeployTarget", module: str = "meta.core.st
 
     out, err, rc = _remote_exec(
         target,
-        "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_introspect.py 2>&1",
+        "/usr/local/bin/python3 -I /tmp/_invariant_introspect.py 2>&1",
         timeout=20,
     )
     loader_path = ""
@@ -406,7 +406,7 @@ def check_I5_business_invariant(target: "DeployTarget") -> InvariantResult:
     失败模式: 2026-09-16 全实例级 bug (loader 加载老版本导致所有 actions 都是 instance)
     """
     out, err, _ = _remote_exec(
-        target, "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_introspect.py 2>&1", timeout=10
+        target, "/usr/local/bin/python3 -I /tmp/_invariant_introspect.py 2>&1", timeout=10
     )
     scope = ""
     for line in out.splitlines():
@@ -522,7 +522,7 @@ def check_I7_import_symbol_closure(target: "DeployTarget") -> InvariantResult:
 
     out, err, rc = _remote_exec(
         target,
-        "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_closure.py 2>&1",
+        "/usr/local/bin/python3 -I /tmp/_invariant_closure.py 2>&1",
         timeout=60,
     )
 
@@ -681,7 +681,7 @@ def check_I8_reachability_closure(target: "DeployTarget") -> InvariantResult:
 
     out, err, rc = _remote_exec(
         target,
-        "/opt/miniconda3-py39/bin/python -I /tmp/_invariant_i8.py 2>&1",
+        "/usr/local/bin/python3 -I /tmp/_invariant_i8.py 2>&1",
         timeout=90,
     )
 

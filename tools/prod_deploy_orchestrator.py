@@ -128,8 +128,8 @@ def main():
     step('Step 0: 探测 prod 9200 通')
     r = exec_cmd("echo OK")
     if r.get('error'):
-        print(f'  ✗ prod 9200 不通: {r}'); sys.exit(1)
-    print(f'  ✓ {r.get("stdout", "").strip()}')
+        print(f'  [FAIL] prod 9200 不通: {r}'); sys.exit(1)
+    print(f'  [OK] {r.get("stdout", "").strip()}')
     sleep_between()
 
     # Step 1: 检查 staging 状态 (确认 prod 部署前 staging 健康)
@@ -138,9 +138,9 @@ def main():
         r = exec_cmd("bash -c 'python3 -c \"import sqlite3; c=sqlite3.connect(\\\"/opt/app/staging/deploy/meta/architecture.db\\\"); print(\\\"FAILED:\\\", c.execute(\\\"SELECT COUNT(*) FROM schema_migrations WHERE status=\\\\\\\"FAILED\\\\\\\"\\\").fetchone()[0])\"' 2>&1", port=19200)
         out = r.get('stdout', '').strip()
         if 'FAILED: 0' in out:
-            print('  ✓ staging 0 FAILED, 可以部署 prod')
+            print('  [OK] staging 0 FAILED, 可以部署 prod')
         else:
-            print(f'  ✗ staging 有 FAILED, 禁止 prod 部署: {out}')
+            print(f'  [FAIL] staging 有 FAILED, 禁止 prod 部署: {out}')
             print('  → 先修 staging, 或切 hotfix 模式')
             sys.exit(1)
         sleep_between()
@@ -171,12 +171,12 @@ def main():
     step('Step 4: 备份 prod DB (deploy.sh PHASE 2 自动)')
     r = exec_cmd(f"bash -c 'cd {REMOTE_BASE} && cp meta/architecture.db backups/architecture.db.pre_prod_deploy_$(date +%Y%m%d_%H%M%S) 2>&1'")
     if r.get('error'):
-        print(f'  ✗ 备份失败: {r}')
+        print(f'  [FAIL] 备份失败: {r}')
         if mode == 'daily':
             print('  → daily 模式禁止继续')
             sys.exit(1)
     else:
-        print('  ✓ 备份完成')
+        print('  [OK] 备份完成')
         # 验证备份
         r = exec_cmd("ls -la /opt/app/deployments/backups/ | tail -3")
         show(r, 500)
@@ -216,7 +216,7 @@ def main():
         "LOG_SERVICE_LOG_DIR=/opt/app/deployments/meta "
         "LOG_SERVICE_DB_PATH=/opt/app/deployments/meta/architecture.db "
         "LOG_SERVICE_SECRET=v007.35-infra "
-        "/opt/miniconda3-py39/bin/python /opt/app/deployments/tools/log_service.py "
+        "/usr/local/bin/python3 /opt/app/deployments/tools/log_service.py "
         ">> /opt/app/deployments/logs/log_service.log 2>&1 < /dev/null &'"
     )
     r = exec_cmd(start_log, timeout=5, bg=True)

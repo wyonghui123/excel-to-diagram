@@ -136,7 +136,7 @@ check_python() {
     
     # 如果配置中没有，使用默认值
     if [[ -z "$expected_py_path" ]]; then
-        expected_py_path="/opt/miniconda3-py39/bin/python"
+        expected_py_path="/usr/local/bin/python3"
     fi
     
     if [[ ! -x "$expected_py_path" ]]; then
@@ -256,7 +256,7 @@ check_database() {
         log_pass "数据库存在: $db_path ($size)"
         
         # 验证数据库可读
-        local py_path=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+        local py_path=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
         
         if $py_path -c "
 import sqlite3

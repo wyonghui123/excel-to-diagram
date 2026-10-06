@@ -41,7 +41,7 @@ FRONTEND_PORT=$(get_config "services.frontend" "port" || echo "8081")
 BACKEND_PORT=$(get_config "services.backend" "port" || echo "5001")
 FRONTEND_WORKDIR=$(get_config "services.frontend" "work_dir" || echo "/opt/app")
 BACKEND_WORKDIR=$(get_config "services.frontend" "work_dir" || echo "/opt/app/meta")
-PYTHON=$(get_config "dependencies.python" "binary" || echo "/opt/miniconda3-py39/bin/python")
+PYTHON=$(get_config "dependencies.python" "binary" || echo "/usr/local/bin/python3")
 
 # 状态文件
 PID_DIR="/opt/app/state"
