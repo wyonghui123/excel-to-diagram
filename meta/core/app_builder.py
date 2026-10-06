@@ -311,6 +311,7 @@ class ApplicationBuilder:
         from meta.api.bo_action_api import bo_action_bp
         from meta.api.db_admin_api import db_admin_bp
         from meta.api.task_api import task_api_bp
+        from meta.api.pricing_api import pricing_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -365,6 +366,7 @@ class ApplicationBuilder:
         app.register_blueprint(bo_action_bp)
         app.register_blueprint(db_admin_bp)
         app.register_blueprint(task_api_bp)
+        app.register_blueprint(pricing_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

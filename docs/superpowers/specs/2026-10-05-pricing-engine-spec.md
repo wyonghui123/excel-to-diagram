@@ -1,6 +1,6 @@
 # 定价引擎（Pricing Engine）Spec + RFC
 
-> **版本**：v1.6 | **日期**：2026-10-06 | **状态**：**待确认**（**全部待拍板项已清零** —— v1.4 拍板 D18 补第四消解范式 `weighted` / D19 单位换算归事实源取值阶段；v1.5 拍板 D16 费用归属 / D17 重算节奏 / D20 多账簿不纳入 / D21 结果能力接口本期不做 / D22 + D23 改价必填原因（Override 复用 `adjustment`）/ D24 输出映射改为字段约定。**v1.6 新增 §7B 三件套通用性分析（代码级取证）并据此收窄 FR-003 / FR-004 职责边界 + 切出 T0 先行批次**；残留 TBD-3~TBD-7 为实施期事项；TBD-10 后置 P6；TBD-12 / TBD-13 保留待议；**TBD-14 / TBD-15 / TBD-16 为 v1.6 新登记**）
+> **版本**：v1.6 | **日期**：2026-10-06 | **状态**：**待确认**（**全部待拍板项已清零** —— v1.4 拍板 D18 补第四消解范式 `weighted` / D19 单位换算归事实源取值阶段；v1.5 拍板 D16 费用归属 / D17 重算节奏 / D20 多账簿不纳入 / D21 结果能力接口本期不做 / D22 + D23 改价必填原因（Override 复用 `adjustment`）/ D24 输出映射改为字段约定。**v1.6 新增 §7B 三件套通用性分析（代码级取证）并据此收窄 FR-003 / FR-004 职责边界 + 切出 T0 先行批次**；**T0/T1/T2 已交付、T1-5 定价 API 层（IF-001/002/003）已落地并结项 TBD-3**；残留 TBD-4~TBD-7 为实施期事项；TBD-10 后置 P6；TBD-12 / TBD-13 保留待议；**TBD-14 / TBD-15 / TBD-16 为 v1.6 新登记**）
 > **三件套通用性结论（v1.6 拍板，详见 §7B）**：因子目录 / 匹配键表 / 查找序列**不是三个定价专表，而是「因子 / 键 / 取数计划」三原语的一种实例化**——通用的是原语，不是表。**通用点已由代码取证**：平台内**四处**（数据权限 / 属性确定 / 派生 / 文档流）自发实现了同一套三问，**无一通用**。据此收窄：`key_schema` 只留 `key_fields[]`、`lookup_sequence` 只留槽位顺序（`exclusive` 下沉为 `rate_record.hit_policy`）、`factor_catalog` **不再重复 `MetaField` 的 `data_type`/`aliases`**（消除双重真相源）。**不新增对象数量。**
 > **配置载体结论（v1.6 拍板，详见 §7C）**：**真正分岔不是"载体"，而是「谁在什么时候写 SSOT」。** 拍板走**「双装载并存」**——**开发态预置**（本期 T0，git 即审计）+ **运行态自举**（方向采纳）**两条路径都产出同一份 yaml**，汇入同一条 `register_from_directory` → `schema_generator` 管线，**不存在两条 SSOT**。**行业基线即运行态**：SAP **V/03 就是顾问勾选字段、生成条件表的事务码**（研究稿 S20/S47）。**关键修正**：`MetaObject` **装不下** yaml 的 4 块（`audit` / `ui_view_config` / `category_config` / `import_export`，§7C.1.1）——故它是**建表中间产物**而非 SSOT，**yaml 才是唯一 SSOT**。**本期禁止结构变更**（C-T0-12，顾问只能选既有因子组合；增删 PK 本身即数据迁移需求）。**EAV 泛化模型不适合因子/键/费率记录**（`keys{}` 组合匹配需索引，JSON 做不到），但**适合"少而固定"的配置**（`permission_rules_v2` 已验证）。
 > **命名声明（v1.3 拍板）**：**元模型层一律使用领域中立名**——费率类型 / 查找序列 / 计算过程 / 费率记录 / 计算结果…；**SAP 术语（条件类型 / 存取序列 / 定价过程 / 条件记录 / 定价结果）降为"业务别名"，只出现在 [§9.3.1](#931-对象模型数据模型) 的"业务别名"与"溯源"列**，不再作主名。通用化只参数化**三个正交轴**（① 计算基来源 ② 率载体 ③ 结果语义），**成本归集层与碳组织边界 / 合并层不属本引擎**（§1.4 N9）。
@@ -907,6 +907,7 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 | **T2-2 计算过程执行器** | ✅ **已交付** | `meta/core/calc_procedure_executor.py` + `meta/tests/test_calc_procedure_executor.py`（34 用例）。实现 FR-005（**算子注册表**落地 C5：新增算子 = 注册一个函数，不改引擎）/ FR-006（基四字段 + `rolling` 与 `base_step` **互斥校验**）/ FR-007（步骤间 additive + 逐层小计 + `rolling` 覆盖）/ NFR-002（**双防线**：字符白名单 + AST 白名单，**禁 `eval`**）。11 个算子已注册 |
 | **T1-1 ~ T1-3 结果链三表** | ✅ **已交付** | `calc_procedure`（13 列 · 轴③ `result_semantic` 六值 + `procedure_type` 不写死 price）/ `calc_result`（38 列 · **泛化宿主** `document_type`+`document_id`+`document_line_id`可空+`level`，本期**先挂头级**）/ `calc_detail`（28 列 · `running_net_amount` + `factor_snapshot` + `hit_ids`/`skipped_candidates` 回放骨架）。`registry.reload` 79 对象，**10 张表实测建表全部成功**，conflict_key / business_key / 四块齐全 / 19 项 T1 专项口径逐项通过 |
 | **T1-4 定价编排服务** | ✅ **已交付** | `meta/services/pricing_service.py` + `meta/tests/test_pricing_service.py`（**37 用例**，真建表 + 真跑全链路）。把 T2 内核与 T1 配置链串成一条：`price_line`（查表 → 算过程 → 落结果+明细）/ `explain`（IF-002 回放）/ **`write_back`（TBD-9 ② 结果按 `result_semantic` 写回单据字段）** / 有效期过滤 / 草稿价目表拒绝 / dry-run。**全程零 `order_line`、零主数据依赖**（有专项用例守护） |
+| **T1-5 定价 API 层** | ✅ **已交付** | `meta/api/pricing_api.py` + `meta/tests/test_pricing_api.py`（**30 用例**，Flask `test_client` 契约测试）。暴露 IF-001/002/003 三条端点；**只做参数校验 + 响应包装**，业务全在服务层。已注册于 `meta/server.py:create_app()`（**实测 `url_map` 三条路由俱在**）|
 
 > **T2-1 / T2-2 实施中纠正的四处问题**：
 > ① **TR-006 算术错误**：原文"100×.5 + 200×.3 + 300×.2 = 140"实为 **170**（50+60+60），已修正；
@@ -934,6 +935,14 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ① **重算须作废旧结果**：同一宿主（`document_type`+`document_id`+`document_line_id`）重复定价，旧行置 `status='invalid'` 而非删除——`calc_result.status` 枚举里 `invalid` 的语义正是「已被重算取代，保留以便审计」。首轮实现只追加不留痕，`explain` 只查 `active`，会返回 2 条互相矛盾的结果；
 > ② **作废 + 新写 + 明细必须同事务**：否则中途失败会留下「有 `calc_result` 无 `calc_detail`」的孤儿结果，而 FR-010 要求「可解释 = 可回放」，孤儿结果无法解释。实现上用 `bo_framework` 的 `transaction()`，裸 sqlite 连接退化为 `SAVEPOINT`（**不能用 `BEGIN`**——python sqlite3 默认已在隐式事务中）；
 > ③ **明细金额列名是 `extended_amount` 不是 `amount`**：归一化列表里写错列名，导致回放接口明细金额**始终返回 `None`** 而非数值。这是典型的"加了一行归一代码但没验证它作用在哪个字段上"。
+
+> **T1-5 API 层二次审查补的四处问题**（30 用例全绿后才查出，与前几轮同型：**实现正确但缺跨字段 / 跨调用不变量**）：
+> ① **`best` 范式永不可达**：服务层 `price_line` 未透传 `measure`，而内核 `resolve_candidates` 对 `best` **绝不隐式默认**（缺 `measure` 直接抛 `ResolutionError`）。即 FR-008 的 `RESOLUTION_BEST` 虽在服务层签名里，**实际调不通**。已补 `measure` 透传 + API 侧校验 `resolution=best` 时 `measure` 必填；
+> ② **`level` 与 `document_line_id` 的一致性此前无人在入口守护**：`calc_result.yaml` 的跨字段不变量（`header`⟺NULL / `line`⟺非 NULL）只在表声明里写了语义，API 层若不校验，会写入**自相矛盾的结果行**（`level=line` 却无行）。现于入口做**推导 + 双向一致性校验 + 枚举白名单**（缺省按 `document_line_id` 推导；`line` 必带行、`header` 必不带行）；
+> ③ **非法 `resolution` 的错误码串号**：`resolution` 写错（如 `first`）会被内核报成 `ResolutionError` → **422「改配置」**，而它其实是**参数写错（400「改请求」）**。现于入口白名单拦为 400。**错误码分界据此确立：400 = 改请求（参数错 / 编排层找不到过程、价目表、查找序列）；422 = 改配置（`ResolutionError` 候选消解失败 / `CalculationError` 未注册算子等结构性矛盾）**；
+> ④ **HTTP 端点命名落地**：§9.3.3 原为建议路径（`/price` `/explain`），实际实现按 RESTful 资源语义定为 `calculate` / `result/<document_type>/<id>` / `write-back`，且**路径里的 `document_type` 即 `calc_result.document_type`**（不是 `object_type`）——与表字段同名，减少心智转换。
+
+> **一条环境事实（实测）**：**live 注册点是 `meta/server.py:create_app()`**（`__main__` 第 1066 行调用它，含自己的 55+ 条 `register_blueprint`）。而 `meta/core/app_builder.py:with_blueprints()` 是**并行的、当前已损坏的**路径——它 `from meta.api.identity_api import identity_bp`，而该模块**在 git 中从未存在**（真实模块是 `meta.api.object_identity_api`），故该函数一旦被调用必然 `ImportError`。本轮**两处都同步注册**（保全照既有 parity），但**验证以 `create_app()` 的 `url_map` 为准**。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|
@@ -1146,14 +1155,38 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
   └─ 护栏：fact_snapshot 缺失拒绝结算；暂定价与终价配对可查
 ```
 
-#### 9.3.3 API 设计
+#### 9.3.3 API 设计（v1.6：IF-001/002/003 已实现）
 
-- **定价调用**：`POST /api/v1/pricing/price`（或等价内部服务），入参 = 单据类型 + 单据 / 行标识 + 表头上下文；出参 = 净价 / 行金额 + `calc_result[]` + `calc_detail[]`。
-- **回放查询**：`GET /api/v1/pricing/explain?document_type=&document_id=[&document_line_id=]`，返回命中 / 剔除候选及原因 + 逐层小计 + 基准四字段。
-- **分摊执行**：`POST /api/v1/pricing/allocate`，入参 = 费用结果行 + `allocation_rule_id`；出参 = 各行摊得额 + 回放。
-- **重算**：`POST /api/v1/pricing/reprice`，入参 = 单据 + `reprice_trigger` + `qty_basis`；已开票 / 已过账行返回拒绝或强制留痕。
+> **实现落点**：`meta/api/pricing_api.py`（`Blueprint('pricing', __name__, url_prefix='/api/v1/pricing')`），
+> 注册于 `meta/server.py:create_app()`。**契约测试**：`meta/tests/test_pricing_api.py`（30 用例，Flask `test_client`）。
+> **分层纪律**：API 层**只做参数校验 + 响应包装**，业务（查表 / 算过程 / 落库 / 写回）**全在服务层** `PricingService`。
 
-> 端点命名与既有 `POST /api/v1/meta/<object_type>/defaults-preview`（规则模型 dry-run）风格保持一致；具体路径以实施计划为准（TBD-3）。
+**已实现（IF-001 / IF-002 / IF-003）**
+
+- **定价调用 · IF-001**：`POST /api/v1/pricing/calculate`
+  入参 = `process_code` + `rate_table_id` + `slot_keys`（`[{因子: 值}]`）+ `base`，可选 `sequence_code` / `document_type` / `document_id` / `document_line_id` / `level` / `resolution` / `measure` / `valid_on` / `persist`；出参 = 净价 / 行金额 + 结果行与明细。
+  **入口校验**：三必填齐备；`slot_keys` 形状；`persist=true` 且给 `document_type` 时须给 `document_id`；`document_line_id` 不可脱离 `document_id`；`level ∈ {header, line}` 且与 `document_line_id` 空值一致；`resolution ∈` 四范式且 `best` 必带 `measure`。
+- **回放查询 · IF-002**：`GET /api/v1/pricing/result/<document_type>/<int:document_id>`
+  可选 query `document_line_id`（缺省 = 头级）；返回命中 / 剔除候选及原因 + 逐层小计 + 计算基四字段。
+  **路径里的 `document_type` 即 `calc_result.document_type`**（宿主元模型对象 ID，如 `sales_order_enhanced`）。
+- **结果写回 · IF-003**：`POST /api/v1/pricing/write-back`
+  入参 = `document_type` + `document_id`（可选 `document_line_id`）；按 `result_semantic` 约定映射（TBD-9 ②，`WRITEBACK_MAP`）；出参 = `written` / `skipped` / `result_ids`。
+
+**错误码分界（本层确立）**
+
+| 状态码 | 语义 | 触发 |
+|---|---|---|
+| **400** | **改请求** | 参数错（`INVALID_PARAM`）；编排层找不到过程 / 价目表 / 查找序列（`PRICING_ERROR`） |
+| **422** | **改配置** | `ResolutionError`（候选消解失败：权重和不归一等）；`CalculationError`（未注册算子等结构性矛盾） |
+| **401** | 未认证 | `login_required`（三条端点均要求登录） |
+
+**尚未实现（P4 / P6）**
+
+- **分摊执行**：`POST /api/v1/pricing/allocate`（FR-013 / FR-014）——依赖 `allocation_rule`（P2 未落地的 5 张表之一），**P4 实装**。
+- **重算**：`POST /api/v1/pricing/reprice`（FR-015）——依赖 `reprice_trigger` 消费链与 `external_rate_source` / `pricing_period`，**P6 实装**。
+
+> 端点命名与既有 API 风格（`/api/v1/<module>/<resource>`、`_response_contract` 的 `ok` / `error_response`）一致；
+> **命名已于 v1.6 落地**（TBD-3 结项），后续增补端点沿用同一 prefix 与错误码分界。
 
 #### 9.3.4 与既有资产的复用映射
 
@@ -1257,7 +1290,7 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 |---|---|---|---|---|
 | **TBD-1** | ~~**事后 / 计划外费用的归属与去向**~~（研究稿 D16） | 归属选项：① 归 `allocation` ② 归定价"费用 / 分摊"子域（复用 `calc_result` + `allocation_rule`，`target ∈ {cost, expense}` 作规则字段）③ 只做"进费用" | **✅ 已关闭（v1.5 拍板 D16 = ②）**：归定价"费用 / 分摊"子域；它是 `origin=unplanned` 的 `calc_result`，**不新建费用单据、不破 D7**；成本侧取值算法仍归成本核算 | FR-013、§9.3.1 A/C、§9.4 |
 | **TBD-2** | ~~**事实数据驱动重算（优质优价 / 大宗）的归属与节奏**~~（研究稿 D17） | 选项：① 不做 ② 只做"事实源作为匹配键表字段 + 事实快照"，大宗两段式后置 ③ 完整做（+ `external_rate_source` / `pricing_period` / 暂定价结算） | **✅ 已关闭（v1.5 拍板 D17 = 设计③ / 实施②）**：`reprice_trigger` 枚举**一次给全**（零成本）；**只实装 `on_quality_result`**（另两个依赖 `external_rate_source` / `pricing_period` / TBD-1 的 `origin`，尚未就绪） | FR-015、§8.2 M8 |
-| **TBD-3** | 定价 API 端点路径与命名 | **编排层接口已实现**（`price_line` / `explain` / `write_back`），**仅缺 HTTP 端点命名**。建议按既有 API 风格定为 `POST /api/v1/pricing/calculate`、`GET /api/v1/pricing/result/<object_type>/<id>`、`POST /api/v1/pricing/write-back` | **待拍板后即可接 API 层**（阻塞 IF-001 的 HTTP 暴露） | IF-001、IF-002、§9.3.3 |
+| **TBD-3** | ~~**定价 API 端点路径与命名**~~ | 编排层接口（`price_line` / `explain` / `write_back`）与 **HTTP 端点命名**均已落地 | **✅ 已结项（v1.6）**：定名 `POST /api/v1/pricing/calculate`（IF-001）、`GET /api/v1/pricing/result/<document_type>/<id>`（IF-002，query `document_line_id`）、`POST /api/v1/pricing/write-back`（IF-003）。**实测证据**：① `create_app()` 后 `url_map` 三条路由俱在；② `meta/tests/test_pricing_api.py` **30 用例契约测试全绿**（状态码 / 字段名 / 字段类型 / 错误码分界）。`allocate` 与 `reprice` 仍属 P4 / P6 未实现，路径已预留 | IF-001、IF-002、IF-003、§9.3.3 |
 | **TBD-4** | **可解释回放保留策略**（研究稿 D5） | ① 全量落库 ② 仅最近 N 次 ③ 仅在"手动查看"时重算（涉存储成本） | 待定；**P2 必须先有结构** | FR-010、NFR-003、R6 |
 | **TBD-5** | 条件更新（累计用量）是否纳入首期（研究稿 D6） | ① 要 ② 先不要 | **倾向 ② 先不做**（P4 后置） | FR-016 |
 | **TBD-6** | 在线配置 UI 与规则版本化 | 形态（文件 / DB）+ 历史单据复现策略 | 待定（首期不做） | N8、§7.3 A2 |

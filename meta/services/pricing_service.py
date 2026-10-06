@@ -181,6 +181,7 @@ class PricingService:
         document_line_id: Optional[int] = None,
         level: str = "header",
         resolution: str = RESOLUTION_PRECEDENCE,
+        measure: Optional[str] = None,
         valid_on: Optional[str] = None,
         persist: bool = True,
     ) -> Dict[str, Any]:
@@ -195,6 +196,8 @@ class PricingService:
                             直接由 calc_procedure 的计算步骤出结果
             document_*:     泛化宿主（FR-011）；本期只挂头级故 line 可空
             resolution:     候选消解范式（FR-008）
+            measure:        `best` 范式的度量（如 min_amount）。**best 必填**，
+                            否则内核报「绝不隐式默认」——不透传则 best 永不可达
             valid_on:       有效期（含下不含上）
             persist:        False = 只算不落库（dry-run / 预览）
 
@@ -247,6 +250,7 @@ class PricingService:
                 steps=slots,                     # ← 查找槽位（非计算步骤）
                 slot_keys=slot_keys,             # ← 与槽位等长
                 resolution=resolution,
+                measure=measure,
             )
             lk_traces = [t.to_dict() for t in lk.traces]
             hit_ids = list(lk.hit_ids)

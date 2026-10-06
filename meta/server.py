@@ -793,6 +793,9 @@ def create_app(db_path=None):
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
     app.register_blueprint(task_api_bp)
+    # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
+    from meta.api.pricing_api import pricing_bp
+    app.register_blueprint(pricing_bp)
     # [A8 2026-10-02] 统一收件箱 + 平台心跳
     app.register_blueprint(task_inbox_bp)
     # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
