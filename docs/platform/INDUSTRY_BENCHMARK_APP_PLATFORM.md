@@ -214,6 +214,55 @@
 
 ---
 
+### 2.9 共享主数据层的归属（v1.30 新增：Material / Location 该放哪一层）
+
+**问题**：`Material`（物料/产品主数据）与 `Location`（仓库/库位）不属于任何单个应用（WMS / TMS / 采购 / 生产都要用），也不该进技术平台层。行业是否在"技术平台 ↔ 业务应用"之间设一个**共享主数据层**？
+
+**行业做法**
+
+| 维度 | 行业实现 |
+|------|---------|
+| **逻辑分层，物理不拆** | SAP 有明确的**跨应用组件（CA）**，MDG 挂在其下（`CA-MDG`，Material 域 `CA-MDG-APP-MM`）；但 S/4 自身的 Material / Business Partner **就住在核心**，MDG 只是**治理层**（运行态数据仍回核心）。ServiceNow 用 **CSDM Foundation 域**承载"被其他域引用的基础数据"，且 Foundation **明确包含 Location**。Dataverse 被定位为 "business data platform"。Odoo 没有"层"概念，而是**被依赖模块**（`stock` / `product`，靠 manifest `depends` 共享） |
+| **单一写者** | 全部厂商都是单写者：SAP 经 **Change Request** 写入核心/MDG；Oracle 由 **Item Master Org** 唯一写入、其他 org 只做分配引用；D365 **明确单向**（F&O → Dataverse），官方"不建议"双向 |
+| **跨模块读取** | 主流一律**同库直接读**：SAP 固定表名跨模块共享（`MARA`(client) → `MARC`(plant) → `MARD`(storage location)）；Oracle 同库 `MTL_*` + KFF；Odoo 同 schema ORM `many2one` / `_inherit`；Salesforce 单库 SOQL JOIN。**唯一跨物理边界的是 D365 dual-write**，代价是**每消费方一份副本 + 映射维护**，靠 integration key / alternate key 对齐 |
+| **标识契约** | **代理键 + 语义键双层**是通行做法：Oracle Item = `INVENTORY_ITEM_ID` + **System Items KFF**；Locator = `INVENTORY_LOCATION_ID` + **Stock Locators KFF**；SAP = 内部号 + **`MATNR`**；Salesforce / NetSuite 用 **External ID** 支持确定性 upsert |
+| **生命周期** | SAP：Change Request + **Edition**（版本快照）+ **Validity Period** + Delete Flag；Odoo：`active=False` 停用而非删除 ⇒ **"停用/删除即废弃、物理列保留"是通行纪律** |
+| **何时升级为独立实例** | 只在**跨系统集成 / 独立交付 / 外部权威源**时发生：SAP **MDI** 把主数据集中为 hub（event log + distribution model，异步近实时）；**Federated MDG** = 核心 MDG + 应用 MDG **两层独立实例**。⇒ **没有厂商因为"被多个应用共享"就把主数据拆成独立服务** |
+
+**判定：✅ 该设"逻辑层"，但不该立即拆"独立实例"**
+
+- 头部产品的**运行态**主数据**全部与消费方同库/同进程**（SAP / Oracle / Odoo / Salesforce / ServiceNow / NetSuite 无例外）；所谓"独立层"是**逻辑归属与治理**上的分层（CA / CSDM Foundation / 被依赖模块 / Dataverse），不是物理上的新运行时。
+- 真正触发物理拆分的是**跨边界**：跨系统、跨交付、外部权威源 ⇒ 对应 SAP MDI / Federated MDG / D365 dual-write。这与我们 roadmap 里 PoC 3 的**触发式启动**写法同构。
+
+**与我们硬约束的对照**
+
+| 我们的约束 | 与行业的关系 | 结论 |
+|---|---|---|
+| 每应用独立库、**跨库不 JOIN / 不建外键** | 行业主流是**同库共享**（SAP/Oracle/Odoo/Salesforce 全体）。但注意：**SQLite `ATTACH` 在单连接内技术上支持跨库 JOIN** ⇒ 该约束是**边界纪律**（为多实例可拆分），**不是技术限制** | ⚠️ 保留纪律，但须写明它**是策略选择**而非能力缺失 |
+| 跨应用读 = `ATTACH` **只读视图** | D365 dual-write 是**物理副本**（复制延迟 + 映射维护）；`ATTACH` 只读视图是**同进程实时读、零复制** ⇒ 一致性上**等价于主流同库直读** | ✅ 一致性等价；差别只在"多实例时失效" ⇒ Type 2 足够 |
+| 跨应用写 = 事件 + 最终一致（outbox + 幂等） | 与 SAP **MDI**（event log + distribution model + 幂等消费）、D365 dual-write（异步 + replay/catch-up）**完全同构** | ✅ 保留 |
+| **表名无应用前缀会静默冲突**（v1.27 实测） | 全部厂商都有命名空间做法（SAP 靠 `MANDT` + 固定表名、Odoo 同 schema **继承而非覆盖**、Salesforce 元数据命名空间、ServiceNow scope 前缀） | ❌ **我们独有的缺口**：`table_prefix` 必须在主数据落地**之前**实现 |
+
+**仓库 vs 库位：分属两层，不应同级**
+
+| 厂商 | 仓库的归属 | 库位的归属 |
+|---|---|---|
+| SAP | **`Plant` = 组织单位**；Storage Location 是 Plant 下 IM 的**最低组织单位** | `Storage Bin` 是 WM/EWM 内最低层（**主数据**，仅 WM/EWM 激活时存在） |
+| Oracle | **`Inventory Org`（即仓库/DC）= 组织单位**（映射 1 business unit / legal entity / ledger） | `Subinventory` / `Locator` 在其下；**`INV_ITEM_LOCATIONS` 的键 = `INVENTORY_LOCATION_ID + ORGANIZATION_ID`** ⇒ locator id **仅在 org 内唯一**，单独按 id 关联会**静默跨 org** |
+| Odoo | `stock.warehouse` = location 树的**视图节点**（组织语义） | `stock.location` = 统一模型（含库位） |
+| NetSuite | `location` = **分类 + 角色访问限制**（Role 只能看指定 Location） | 同 record 模型 |
+| ServiceNow | Location 归 **CSDM Foundation**（跨产品基础数据） | — |
+
+**结论**：
+1. **仓库 = 组织/权限维度**（与 `Plant` / `Inventory Org` / Legal Entity 同级），**权限命名空间挂仓库级**；没有任何厂商把"仓库"做成某个业务应用的私有主数据表。
+2. **库位 = 仓库下的主数据**，**必须带复合键**（对齐 Oracle：`location_id + warehouse_id`）—— 单独按 id 关联会**静默串仓**。
+3. 落地形态：一张 `Location` 主数据表 + `location_type ∈ {WAREHOUSE, BIN}`；`WAREHOUSE` 行**双身份**（既是主数据、又被组织/权限层引用），`BIN` 行 `parent_warehouse_id` 必填。**SAP Business ByDesign 即如此**（Location 在 Supply Chain Design Master Data 维护，同时 3PL 仓库 site 建在 Organization Structure，带 Valid From/To）。
+
+**来源**：SAP MDG Operations Guide（ACH `CA-MDG`）、SAP Architecture Center《Master Data Integration 参考架构》、SAP EWM 组织单位文档、`MARA`→`MARC`→`MARD` 表层级；Oracle *Inventory Organization Parameters*（`MASTER_ORGANIZATION_ID`）、`INV_ITEM_LOCATIONS`、Key Flexfields（MSTK / MTLL）；Odoo 官方 manifest `depends` 与 `stock_warehouses` 文档；Salesforce 多租户平台架构 + External ID upsert 集成模式；ServiceNow CSDM 101 Primer；Microsoft Learn dual-write overview / product mapping；NetSuite `location` 与 role 访问限制。
+> ⚠️ 二手来源待一手确认：SAP MDG 的 Change Request / Edition / Validity Period 细节、Federated MDG 两层实例、ByD 的 Location 双身份、NetSuite `externalId`（每 record 仅 1 个、大小写不敏感）。
+
+---
+
 ## 三、三个最重要的发现
 
 ### 发现 1（认知修正）：我们切分的轴与行业不同

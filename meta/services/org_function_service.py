@@ -40,15 +40,20 @@ class OrgFunctionService:
 
         Args:
             org_id: org id
-            function_type: administrative/legal_entity/management_unit/procurement/accounting/profit_center/cost_center
+            function_type: administrative/legal_entity/management_unit/procurement/accounting
+                /profit_center/cost_center/sales/warehouse/manufacturing/inventory/storage
             is_primary: 是否主职能
 
         Returns:
             新职能 id, 失败返回 None
         """
+        # [D3 扩白名单 2026-10-05] 蓝图 v2.5 拍板: 供应侧职能一次加齐
+        #   (sales / warehouse / manufacturing) + 顺带补齐库存账地职能
+        #   (inventory / storage —— location 轴 "账=org" 所需, §3.5.1)。
         valid_types = {
             'administrative', 'legal_entity', 'management_unit',
             'procurement', 'accounting', 'profit_center', 'cost_center',
+            'sales', 'warehouse', 'manufacturing', 'inventory', 'storage',
         }
         if function_type not in valid_types:
             return None

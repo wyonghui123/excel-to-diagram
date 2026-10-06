@@ -4,8 +4,8 @@
 >
 > **与其它文档的关系**：[ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md](../ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md) 解决"能力维度"（BPMN / 多租户 / 报表 / AI…）；本文解决"应用产品维度 + 部署拓扑维度"。两份文档正交，互不替代。
 >
-> **状态**：v1.29.8（全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）** + **多实例并行隔离实测通过：8 处平台库路径破口已补，主库零写入（§10.15）** + **应用权限管理维度已打通（v1.29：应用权限行补写 + 根菜单聚合 + 应用 schema 补 export/import，§10.15 (7)）** + **功能权限矩阵中应用资源的可见性已实测定性、中文标签已补（v1.29.1：`resources` 行显示"仓库/库存物料/出库单/运单"，§10.15 (8)）** + **缺陷 B 已修复（v1.29.2：SPA 内切换权限集重新加载 —— `:key` 重建 + `watch(permissionSetId)`，§10.15 (8)）** + **缺陷④ 已坐实并同日修复（v1.29.3：用户真实路由 `/detail/permission_set/1232` 二次取证（5 探针）—— "勾选菜单自动授予功能权限"在全平台静默失效的 3 处用户可及写入点改为按列自适应、新增 `permission_set_permissions.py`；"已同步 0 项"→"53 项"、矩阵保存 500→200、真页面 19 行 `1-10 / 14` 含"出库单"，§10.15 (8)）** + **缺陷⑦ 已坐实并同日修复（v1.29.4：应用资源行动作位全灰不可勾 —— 矩阵能力表只读 `resource_types.yaml`（14 个平台资源、零应用 BO）；修法 = `_build_resource_action_matrix()` 合并已启用应用的应用 BO 动作集（默认 CRUD+export/import ∪ schema 声明，setdefault 只补不覆盖），A 模式 14→18 条 / B 模式不变；真页面 outbound_order 6 动作位 全灰→全部可勾、勾"查看"→保存→F5 持久→`outbound_order:read` 落库，§10.15 (8)）** + **缺陷⑧ 已坐实并同日修复（v1.29.5：应用页面不在 landing 工作台卡片区 —— 卡片=菜单可见叶子（SSOT）无误，误伤点在 `leaf_menus` 派生规则把应用页面（`menu_auto_generator` 固定 `show_in_sidebar=0`）当"隐藏菜单"整批排除、应用根菜单又被"容器"规则排除；修法 = 放行"挂载点为应用根菜单（`page_type=''`）"的页面（1 行 + 注释，零波及实测）；真页面卡片 6→10、点新卡片落 `/outbound-order` 正常渲染、B 实例 / 侧边栏 / 权限矩阵零影响，§10.15 (8)）** + **Type 3 前置条件已入档（v1.29.6：多实例登录态隔离 —— P1 cookie 不按端口隔离 / P2 token 跨实例有效，**必须同时修**，只修 P2 会退化成"互踢"；含 CORS 硬约束 + 方案 2 的 7 处改动点 + `token_version` fail-open 评估项，零代码改动，见 PoC 3 段）**） + **跨实例单据流（DOC_FLOW）设计入档（v1.29.7：V2-7 占位 + Phase 1 schema 预留 2 条验收项，设计详见[单据流数量语义文档 §12](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)）** + **单据流平台服务 S1–S7 入档（v1.29.8：二轮 W20 核验后收敛 7 项"契约 + 引擎"；S6 安装期校验 / S7 一致性巡检为净增量，S5 复用 V2-7，设计详见单据流文档 §9.5）**）
-> **最后更新**：2026-09-29
+> **状态**：v1.31.0（**新增 §6.2.3「库形态由部署拓扑决定，不由应用决定」（用户决策＝选项 3）：`APP_DB_ROUTING` 是**实例/拓扑属性**而非应用属性 —— **合并形态（默认，单实例多 app）同库 + `table_prefix`**，单应用独立交付形态才开独立库；据此**收窄 §6.2.1 三条硬约束与 A4 只读视图的适用范围**（仅拆库形态生效）、§6.15.3 缺口 2/3 降为条件缺口；"部署哪些模块"与"库形态"两条轴正交**）+ v1.30.0（**新增 §6.15「共享主数据层（foundation app）规范」**：Material / Location 归属"共享领域层"、**逻辑分层不拆实例** + 三条必须先定的口径 + **仓库 vs 库位分界**（仓库 = 组织/权限维度、库位 = 主数据）+ 3 个前置缺口 + 4 条提升触发条件 + 落地顺序；行业对标证据见 INDUSTRY_BENCHMARK_APP_PLATFORM.md §2.9。历史累积：全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）** + **多实例并行隔离实测通过：8 处平台库路径破口已补，主库零写入（§10.15）** + **应用权限管理维度已打通（v1.29：应用权限行补写 + 根菜单聚合 + 应用 schema 补 export/import，§10.15 (7)）** + **功能权限矩阵中应用资源的可见性已实测定性、中文标签已补（v1.29.1：`resources` 行显示"仓库/库存物料/出库单/运单"，§10.15 (8)）** + **缺陷 B 已修复（v1.29.2：SPA 内切换权限集重新加载 —— `:key` 重建 + `watch(permissionSetId)`，§10.15 (8)）** + **缺陷④ 已坐实并同日修复（v1.29.3：用户真实路由 `/detail/permission_set/1232` 二次取证（5 探针）—— "勾选菜单自动授予功能权限"在全平台静默失效的 3 处用户可及写入点改为按列自适应、新增 `permission_set_permissions.py`；"已同步 0 项"→"53 项"、矩阵保存 500→200、真页面 19 行 `1-10 / 14` 含"出库单"，§10.15 (8)）** + **缺陷⑦ 已坐实并同日修复（v1.29.4：应用资源行动作位全灰不可勾 —— 矩阵能力表只读 `resource_types.yaml`（14 个平台资源、零应用 BO）；修法 = `_build_resource_action_matrix()` 合并已启用应用的应用 BO 动作集（默认 CRUD+export/import ∪ schema 声明，setdefault 只补不覆盖），A 模式 14→18 条 / B 模式不变；真页面 outbound_order 6 动作位 全灰→全部可勾、勾"查看"→保存→F5 持久→`outbound_order:read` 落库，§10.15 (8)）** + **缺陷⑧ 已坐实并同日修复（v1.29.5：应用页面不在 landing 工作台卡片区 —— 卡片=菜单可见叶子（SSOT）无误，误伤点在 `leaf_menus` 派生规则把应用页面（`menu_auto_generator` 固定 `show_in_sidebar=0`）当"隐藏菜单"整批排除、应用根菜单又被"容器"规则排除；修法 = 放行"挂载点为应用根菜单（`page_type=''`）"的页面（1 行 + 注释，零波及实测）；真页面卡片 6→10、点新卡片落 `/outbound-order` 正常渲染、B 实例 / 侧边栏 / 权限矩阵零影响，§10.15 (8)）** + **Type 3 前置条件已入档（v1.29.6：多实例登录态隔离 —— P1 cookie 不按端口隔离 / P2 token 跨实例有效，**必须同时修**，只修 P2 会退化成"互踢"；含 CORS 硬约束 + 方案 2 的 7 处改动点 + `token_version` fail-open 评估项，零代码改动，见 PoC 3 段）**） + **跨实例单据流（DOC_FLOW）设计入档（v1.29.7：V2-7 占位 + Phase 1 schema 预留 2 条验收项，设计详见[单据流数量语义文档 §12](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)）** + **单据流平台服务 S1–S7 入档（v1.29.8：二轮 W20 核验后收敛 7 项"契约 + 引擎"；S6 安装期校验 / S7 一致性巡检为净增量，S5 复用 V2-7，设计详见单据流文档 §9.5）**）
+> **最后更新**：2026-10-03
 > **结论摘要**：现有平台已完成约 70% 的平台化基建（四层抽象中 L1/L2 已具备、L3/L4 缺失）。**真正缺失的只有"应用产品"这一层抽象**，Phase 1 约 40 人天可交付"单 instance 多 app 合并部署"。数据层 **3 处前置疑点已全部收敛**：F2 多库路径入口（**已实现**，§10.6）、F3 写队列/维护调度（**经核实为非缺口**，§10.7）、F1 fd 阈值（**实测降级为 P1**，§10.0）；另 1 条铁律（事务不跨库 F5）。**数据层已无阻塞项**。
 >
 > **行业对标（v1.18~v1.19）**：核心方向经 Salesforce / ServiceNow / Microsoft / SAP / Odoo / AWS 验证，**不需要推翻**；发现 **3 项 P0 差距已全部补入方案**（§4.4、[对标报告](./INDUSTRY_BENCHMARK_APP_PLATFORM.md)）：**G1 补 expand-contract 纪律**（§6.10 改写，蓝绿降为特例）、**G2 补表名命名空间**（§6.2.2 新增 `table_prefix` + 三层校验）、**G3 补"删除即废弃"**（§6.10）。另补 G4（卸载反向依赖检查验收项）。合计约 5.5 人天，均为规范 + 校验类改动，**不动架构**。
@@ -463,8 +463,10 @@ app:
 ### 6.2.1 应用库与平台库的边界约定（v1.16，由 §11 Q4 决策推导）
 
 > **前提**：已决策采用"双库并存"（§11 Q4）——应用库只放**应用 BO 业务表**，平台表（用户/角色/权限/菜单/登录审计）恒在平台库。
+>
+> **⚠️ 适用范围（v1.31 收窄，见 §6.2.3）**：本节三条硬约束**仅对"app 独立库"形态（`APP_DB_ROUTING=1`）生效**。**默认的合并形态**（`APP_DB_ROUTING=0`，单实例多 app 同库）下应用表与平台表**同库** ⇒ **三条约束均不适用**（同库可建外键、可 JOIN、可用 DB 约束）。
 
-由此产生三条**对应用开发者的硬约束**（写应用 `schemas/*.yaml` 时必须遵守）：
+由此产生三条**对应用开发者的硬约束**（写应用 `schemas/*.yaml` 时必须遵守；**仅拆库形态**）：
 
 | 约束 | 内容 | 原因 |
 |------|------|------|
@@ -503,6 +505,37 @@ app:
 > **v1.27 实测 + backlog（2026-09-25）**：本方案要解决的问题**已用探针实测证实真实存在** —— `APP_DB_ROUTING=0` 下同名 BO **不报错、无任何告警**：不同 BO id + 同 `table_name` ⇒ 两应用各自独有的列被**合并进同一张物理表**；相同 BO id + 同 `table_name` ⇒ `registry` 被后注册方**静默覆盖**，先注册方列**丢失**（证据见 **§6.3.1 (4)**，`meta/tests/test_app_table_name_collision_probe.py`，8 passed）。
 >
 > **本项实现已于 2026-09-25 列入 backlog 推迟**（§6.3.1 (6)），故 §6.11 中"表名命名空间 2d"**不计入当前排期**；实测证据已固化，启动时有据可依。
+
+### 6.2.3 库形态由部署拓扑决定，不由应用决定（v1.31 决策：选项 3）
+
+> **决策**：`APP_DB_ROUTING` 的取值是**实例（拓扑）属性**，不是**应用属性**。**往已建实例里加 app，不改变该实例的库形态**；只有实例的**交付定位**（合并交付 ↔ 单应用独立交付）变化时，才对该**实例**做一次库形态切换（开关翻转 + 一次数据迁移）。
+
+| 实例拓扑 | 该实例承载的 app | 库形态 | `APP_DB_ROUTING` | 理由 |
+|---|---|---|---|---|
+| **仅平台**（无 app） | 0 | 只有 `platform.db` | 无关 | 如"架构数据服务管理"这类平台范畴部署 —— **不存在 app 数据，本问题不出现** |
+| **单应用独立交付**（Type 1 / Type 3 的单应用实例） | 1（该实例即该 app 的交付物） | **app 独立库** `data/<app_id>.db` | `1`（开） | 业务数据可**单独交付 / 备份 / 迁移 / 清空**，不与身份·权限·菜单·审计混在一处 |
+| **合并部署**（Type 2 / Type 4 的合并实例） | ≥2 | **同库**（app 表落 `platform.db`）+ `table_prefix` 命名空间 | `0`（关，**默认**） | 同库直读 ⇒ 跨应用读取/引用**不需要视图、不需要事件**；与 SAP / Oracle EBS / Salesforce / Odoo / ServiceNow **全部单库**的行业事实一致（对标报告 §2.1） |
+
+**四条推论（改动了原有表述，须一并接受）**：
+
+| # | 推论 | 影响位置 |
+|---|------|---------|
+| 1 | **§6.2.1 三条硬约束仅在"app 独立库"形态生效** —— 合并形态下应用表与平台表**同库** ⇒ 可建外键、可 JOIN、可用 DB 约束 | §6.2.1 前提 |
+| 2 | **跨应用只读视图（A4）只在"拆库"形态需要** —— 合并形态下主数据与消费方同库 ⇒ 直接读；A4 从"主数据前置"降为**条件缺口** | §6.15.3 缺口 2、§6.11 |
+| 3 | **`table_prefix`（G2）是两种形态的公共前置，且在合并形态下更关键** —— v1.27 撞表实测**正是在 `APP_DB_ROUTING=0`（同库）下发生的** | §6.2.2、§6.15.3 缺口 1 |
+| 4 | `app.yaml` 的 `database.file` 在合并形态下**仅作声明、不生成文件** —— 实测：`APP_DB_ROUTING=0` 未创建任何应用库文件（表都落平台库） | §6.5.1 F2 |
+
+**正交性（v1.31 确认的边界）**：
+
+```
+轴① 部署范围：这台实例装哪些 app / 是否只装平台     ← 由部署清单决定，随时可变
+轴② 库形态  ：实例内部 app 表落在哪                  ← 由实例的拓扑属性决定（本节）
+```
+
+- 轴① 变化（加 / 减 app）**不会**触碰轴② —— 这是本决策的主要收益；
+- 轴② 变化**只由**"该实例是否作为单应用独立交付单元"触发，与"装不装更多应用"无关。
+
+> **✅ 已确认（2026-10-03，用户"按这个方案"）**：上表三行全部有效，且**不需要任何额外动作** —— 后两行的适用条件都要等 Type 3 的 4 条触发条件（§3.2）出现，**在触发之前一律保持 `APP_DB_ROUTING=0`**（即合并形态）。因此本决策**落地成本为零**：今天不动任何默认值、不生成任何应用库文件、不新增任何机制；第 2 行（单应用独立库）只在真正交付"单应用实例"时才启用，属"到点再开"。
 
 ### 6.3 启动流程
 
@@ -790,6 +823,8 @@ APP_DB_ROUTING=1   # 打开 → 应用表建应用库 + 请求绑定 + 读取分
 ```
 
 > 与 `ENABLED_APPS` 一样走环境变量，两条启动路径（`server.py` / `waitress_server.py`）都能生效，且**默认关闭** ⇒ 存量部署零风险。
+>
+> **⚠️ 本开关的语义 = 实例（拓扑）属性，不是应用属性（v1.31 明确，§6.2.3）**：取值由"该实例是**合并交付**还是**单应用独立交付**"决定，**与装哪些 app 无关** —— 往实例里加 app 保持取值不变。合并形态（默认 `0`）下应用表落 `platform.db`、**不生成 `data/<app_id>.db`**，跨应用读写**同库直读**。
 
 **新发现的实施陷阱（必须记下）**：
 
@@ -1126,7 +1161,7 @@ const appRouteModules = import.meta.glob('../apps/*/routes.js', { eager: true })
 | `build_app.py` / `install_app.py` | 3d | 复用 `deploy_archive.py` 打包能力 |
 | `installed_apps` 表 + migration | 2d | 新表 + 新迁移 |
 | ~~前端应用路由动态加载~~ | ~~3d~~ | **移出 Phase 1**（§6.9，前端零改动），推迟到 Phase 1.5 |
-| 跨应用只读视图（`ATTACH DATABASE`） | 2d | §11 Q1 决策；仅 Type 2 合并部署需要 |
+| 跨应用只读视图（`ATTACH DATABASE`） | 2d | §11 Q1 决策；**v1.31 降为条件项（§6.2.3）** —— 仅"app 独立库 / 独立实例"形态需要；**合并形态（默认，Type 2）同库直读，本项不计入排期** |
 | 事件契约规范（`app.yaml` events 声明 + 启动校验） | 1d | §6.14.3 |
 | Outbox 表 + 与业务写同事务（拦截器集成） | 2d | §6.14.2；**"不丢"的唯一保证** |
 | Dispatcher（轮询 + 批量投递 + 重试 + 死信） | 2d | §6.14.2；独立线程，不阻塞业务写 |
@@ -1277,6 +1312,72 @@ events:
 | 消费语义 | 幂等 + 重试 + 死信 | 同左 + 分区/顺序保证 |
 
 > Phase 2 只需替换 Dispatcher 的**传输层**，outbox 与幂等消费框架可完整复用。
+
+---
+
+### 6.15 共享主数据层（foundation app）规范（v1.30 新增）
+
+> **背景**：即将建设 `Material`（物料/产品主数据）与 `Location`（仓库/库位）——它们不属于任何单个应用（WMS / TMS / 采购 / 生产都要用），也不属于技术平台层。本节定其**归属、契约与落地顺序**。**行业对标证据见 [INDUSTRY_BENCHMARK_APP_PLATFORM.md](./INDUSTRY_BENCHMARK_APP_PLATFORM.md) §2.9**（SAP / Oracle / Odoo / Salesforce / ServiceNow / D365 / NetSuite）。
+
+#### 6.15.1 定位：**逻辑分层，不拆实例**
+
+```
+企业应用层     WMS / TMS / 采购 / 生产                ← apps/*（现有）
+──────────────────────────────────────────────────
+共享领域层     Material / Location / 单位·汇率·日历    ← foundation app（本节）
+──────────────────────────────────────────────────
+技术平台层     meta 元模型 / BO / 权限 / 菜单 / 事件     ← platform（现有）
+```
+
+- **它是"一类特殊应用"，不是"新的运行时层"**：它具备应用包的全部契约（schema / 菜单 / 权限 / 事件；**库形态随部署拓扑**，§6.2.3），差别只是**消费方是其他应用**。行业同理——SAP 的跨应用组件（CA）是**逻辑**分层、ServiceNow 的 CSDM Foundation、Odoo 的"被依赖模块"，**运行态数据仍与消费方同库/同进程**。
+- **`product_binding.mode: multi`**（§6.2 已预留语义）正是为它准备的：应用服务多条产品线，`product` 由客户自建（区别于 WMS/TMS 的 `fixed`）。
+- **"不属于平台层"是逻辑归属，不等于"物理上单独一库"（v1.31 修正）**：主数据**不写进平台表、不随平台版本走** —— 但**物理落库形态由部署拓扑决定**（§6.2.3）：**合并形态（默认，单实例多 app）下它与其他应用一样落 `platform.db`，消费方同库直读、无需任何视图**；**独立交付形态下**才用独立库（如 `data/master_data.db`）+ `ATTACH` 实时只读共享。两种形态都不与"平台表"混淆：平台库现任内容是元模型 + 身份 + 权限 + 菜单，而主数据的生命周期（随业务增长）与平台库（随版本升级）不同。
+- **物理拆分（独立实例/服务）是触发式的**，见 6.15.4；未触发前不投入。
+
+#### 6.15.2 三条必须先定的口径（不写代码，与 Type 3 无关）
+
+| # | 口径 | 建议结论 | 行业依据 |
+|---|---|---|---|
+| 1 | **权威归属** | 主数据**只有一个写入方**（foundation app 自身 + 批量导入），其他应用**只读** | 全部厂商单写者：SAP Change Request / Oracle **Item Master Org** 唯一写入 / D365 **明确单向**（F&O → Dataverse，官方"不建议"双向） |
+| 2 | **标识契约** | **代理键 + 语义键双层**：内部 `id` 不出应用，对外用 `material_code` / `location_code`；跨应用引用**存编码**（必要时冗余名称快照） | Oracle `INVENTORY_ITEM_ID` + **System Items KFF**；SAP 内部号 + **`MATNR`**；Salesforce / NetSuite 用 **External ID** 做确定性 upsert |
+| 3 | **读取方式** | Phase 1 = `ATTACH` **只读视图**（A4），**同进程实时读、零复制**；**不引入任何副本** | 副本方案（D365 dual-write）带复制延迟 + 映射维护，是行业明确"不建议双向"的代价；`ATTACH` 只读视图在一致性上**等价于主流同库直读** |
+
+**仓库 vs 库位（重要分界，勿同级）**：
+- **仓库 = 组织/权限维度**（对齐 SAP `Plant`、Oracle `Inventory Org` = 组织单位并映射 legal entity、NetSuite 用 location 做 role 访问限制）⇒ **权限命名空间挂仓库级**；
+- **库位 = 仓库下的主数据**，**必须带复合键**（`location_id + warehouse_id`）—— 对齐 Oracle 教训：`INV_ITEM_LOCATIONS` 的 locator id **仅在 org 内唯一**，单独按 id 关联会**静默跨 org**（这正是我们要防的静默串数据）；
+- 形态：单表 `Location` + `location_type ∈ {WAREHOUSE, BIN}`；`WAREHOUSE` 行**双身份**（既是主数据、又被组织/权限层引用），`BIN` 行 `parent_warehouse_id` 必填（对齐 SAP Business ByDesign：Location 在 Supply Chain Design Master Data 维护，同一 3PL site 又在 Organization Structure 下，带 Valid From/To）。
+
+#### 6.15.3 三个前置缺口（缺口 1 无条件前置；缺口 2 / 3 为**条件缺口**，仅在拆库形态阻塞 —— v1.31 调整，§6.2.3）
+
+| 顺序 | 缺口 | 现状 | 为什么必须在主数据之前 |
+|---|---|---|---|
+| 1 | **`table_prefix` 表名命名空间**（差距 G2 / §6.2.2） | 设计已定（缺省 = `app.id`）、**实现列 backlog**（v1.27 A2 推迟）；v1.27 实测：同名表**静默合并/覆盖**、无任何拦截 | 主数据是**被所有应用引用**的对象，撞表概率最高；且它是**单向门**。**合并形态（默认）下应用表都进 `platform.db` ⇒ 本项更关键** |
+| 2 | **跨应用只读视图**（A4 / §6.2.1） | **零实现代码**，估 2d；**v1.31 降为条件缺口（§6.2.3）** | 仅"app 独立库 / 独立实例"形态需要（拆库时消费方读取主数据的唯一通道）；**合并形态（默认）同库直读，本项不阻塞** |
+| 3 | **跨应用引用校验**（§6.2.1 第三条硬约束） | 拆库形态下跨库**不建外键** ⇒ 只能应用层校验；**合并形态下可直接建外键**（v1.31） | 否则出现"引用了不存在 / 已停用主数据"的脏引用 |
+
+#### 6.15.4 何时才提升为独立实例 / 独立服务（触发式，沿用 §3.2 与 PoC 3 的写法）
+
+| # | 触发条件 | 行业对应 |
+|---|---|---|
+| 1 | 主数据需**跨 instance 共享**（Type 3：WMS 一个实例、TMS 另一个实例，但物料须同源）⇒ `ATTACH` 只读视图失效 | SAP **MDI**（hub + distribution model，异步近实时） |
+| 2 | 主数据成为**独立交付 / 授权单位**（单独版本、单独升级） | **Federated MDG**（核心 MDG + 应用 MDG 两层独立实例） |
+| 3 | 需要**独立的伸缩与故障域**（不愿与任一应用同生共死） | MDI hub 服务化 |
+| 4 | 主数据被**平台外系统**读写（SAP / ERP 为权威源）⇒ 变成集成枢纽 | D365 dual-write / MDI provider-consumer 模型 |
+
+> 4 条均未出现 ⇒ 保持"**foundation app + 只读共享**"（可逆、成本最低）。
+
+#### 6.15.5 落地顺序
+
+| Step | 动作 | 前置 |
+|---|---|---|
+| **0** | 定 6.15.2 三条口径 + 仓库/库位分界（**PM 确认本节即完成**） | — |
+| **1** | 建 `apps/master_data`（或拆 `apps/material` / `apps/location`，取决于是否共用编码规则与权限），`product_binding.mode: multi` + `table_prefix: md` | 缺口 1 |
+| **2** | 打通只读消费（**合并形态：同库直读，无动作**；拆库形态：A4 `ATTACH` 只读视图）+ 引用校验 | 缺口 2、3（**仅拆库形态阻塞**，§6.2.3） |
+| **3** | 主数据变更发**事件**（§6.14 outbox + 幂等消费，PoC 4 已验证），消费方失效本地快照 | 无（已有） |
+
+#### 6.15.6 术语澄清（防混淆）
+
+平台库已有 `products` 表（= 产品线 WMS / TMS，被 `product_binding` 引用），架构数据里有 `product → domain → business_object` 的**设计态**树。**二者都不是"产品主数据"**：`Material` 是**业务域主数据（运行态实例数据）**，不复用 `product` 命名；`Location` 同理不叫 `product_location`。
 
 ---
 
@@ -2413,6 +2514,8 @@ enum 迁移:            开始迁移枚举值到数据库: d:\filework\_mpp_prob
 
 **落地方式**：4 项改动**同批**交付 + 环境变量功能开关 `APP_DB_ROUTING`（默认关闭 ⇒ 存量零风险）。完整计划见 §6.5.3。
 
+**v1.31 细化（选项 3）**：本决策的**开关语义**是**实例（拓扑）属性**而非应用属性 —— 合并交付（默认）走"同库 + `table_prefix`"，单应用独立交付才开独立库；据此 §6.2.1 三条硬约束与 A4 只读视图**仅拆库形态生效**。见 §6.2.3。
+
 **Q5：面向 Agent / AI 的能力暴露 —— ✅ 已决策（v1.25）：三条"单向门"只定口径，AI 能力整体顺延**
 
 **背景**：2026-09-24 架构方向符合性 check。行业趋势（MCP 已成 B2B 默认集成面；按需装配 / 渐进披露；capability manifest 为分发单元）指向"**动态性落在能力层，部署层反而收敛**"。核对结论：**现有架构方向符合**——声明式 `app.yaml`、权限命名空间、事件契约、业务分库、L1–L4 分层均天然适配，Agent / AI 能力**整体推迟到 Phase 2/3**；仅以下三处属**单向门**，现在固化口径（文档级，零代码），避免将来返工。
@@ -2535,3 +2638,5 @@ enum 迁移:            开始迁移枚举值到数据库: d:\filework\_mpp_prob
 | 2026-09-26 | **v1.29.6** | **Type 3 前置条件入档：多实例登录态隔离 P1/P2 必须同时修（零代码改动，PoC 3 段新增小节）**。**触发**：用户实测反馈——"localhost 部署了两个 instance（不同端口），先用 admin 登录 instance1，接着打开 instance2 时系统**自动就登录了**，这合理吗"，并追问"生产·同域名不同端口，解决方案是？"；用户决策"**采纳你的建议**"（= 不改 P1/P2 代码 + 落记录到 roadmap + `token_version` fail-open 单独评估）。**诊断结论：现象是规范的必然结果，不是 bug** —— 四条机制叠加：① cookie 名固定 `auth_token`（[auth_api.py L133](../../meta/api/auth_api.py#L133) `/login` / [L253](../../meta/api/auth_api.py#L253) `/dev-login` **均不设 `domain`**）⇒ 浏览器按 **host** 归类，而 RFC 6265 §8.5 明确 **"Cookies do not provide isolation by port"** ⇒ `localhost:3031` / `localhost:3032` **共享同一 cookie**；② token 为**无状态 JWT**（HS256，密钥取同仓库同一 `.env`），[verify_token](../../meta/services/token_service.py#L121-L130) **只验签、不查库** ⇒ 任何实例都认账；③ 前端不存 token（无 localStorage），登录态完全靠 `/api/v1/auth/me`（[authStore.js L40-62](../../src/stores/authStore.js#L40-L62)）；④ [login_required](../../meta/services/auth_middleware.py#L68) 在**每个已认证响应**上重写 cookie（7 天滑动续期）⇒ 两实例互相"续命"。**更强结论（用户实测已证明）**：跨库同样不隔离 —— 3031（`verify_app.db`）与 3032（`verify_plat.db`）用**完全不同的数据库**仍互通 ⇒ **换库解决不了**，隔离只能落在 cookie 名与 token 声明层。**关键洞察（已入档）**：**P1 / P2 必须同时修** —— 只修 P2（JWT 加 `aud`、cookie 名不变）会**退化成"互踢"**（后登录方的 token 覆盖共用 cookie ⇒ 前者 `aud` 校验失败被登出，比现状更糟）；只修 P1 则 token 仍可复制到另一实例使用，不满足"独立故障域"。**入档内容（PoC 3 段新增「PoC 3 前置条件（v1.29.6 入档）」小节，7 块）**：① 四条机制表（含代码位置）；② 跨库不隔离的实测结论；③ P1/P2 单修 vs 同修三场景对比表；④ **方案 2 的 7 处改动点**（[auth_api.py L133 / L253 / L159](../../meta/api/auth_api.py#L133) + [auth_middleware.py L32 / L68](../../meta/services/auth_middleware.py#L32) + [token_service.py L93-109 / L121-130](../../meta/services/token_service.py#L93-L109)，实例标识建议 env **`INSTANCE_ID`**、默认空 = legacy 零变化）；⑤ **CORS 硬约束**（[server.py L662-684](../../meta/server.py#L662-L684)：跨端口即跨域，须配 `CORS_ALLOWED_ORIGINS` = **精确 origin 含端口**、**不能 `*`**——响应恒定发 `Allow-Credentials: true`；当前"白名单空且非 debug ⇒ 不给 `Access-Control-Allow-Origin`"是 Type 3 联调第一个坑）；⑥ **决策前置**（多实例**是否共享平台库**：共享则 7 点即收口、不共享则并入 §6.5.1 F2 库编排）；⑦ **同批评估项（不捆绑、单独排期）**：[token_version_service.py L29-45](../../meta/services/token_version_service.py#L29-L45) 的 **fail-open**（`if not token_version: return True` + `except Exception: return True`）—— 使"角色变更即失效旧 token"在 DB/cache 异常与 `token_version=0` 两种情况下**静默放行**，是当下真安全缺陷，但改 fail-closed 会改变所有已登录请求行为，**先评估、后动手**。**不修的理由**：Type 3 的 4 条触发条件（§3.2）未出现；Type 2（单进程）不存在此问题。**证据来源**：2026-09-26 用户手工实测（双 instance 自动登录 + 跨库仍互通）+ 代码级溯源（5 处 auth 面文件逐行读取）。同步更新 PoC 3 段（新增小节）/ 头部（状态 v1.29.6、最后更新 2026-09-26）/ 附录 B（本行） |
 | 2026-09-27 | **v1.29.7** | **跨实例单据流（DOC_FLOW）设计入档：V2-7 占位 + Phase 1 schema 预留（零代码，纯文档）**。**触发**：统一任务模型单据流研究（独立文档升至 v1.2）完成跨 instance 方案设计与 W9–W14 六家头部产品二次核验（W9 SAP ALE/IDoc 状态记录+BD87 人工重处理 / W10 Odoo inter-company 实为同库多公司（降级为"草稿→确认"锚点）/ W11 NetSuite Order Reservation 人工 Closed / W12 Salesforce Platform Events at-least-once + ReplayId + 幂等消费同事务 + "published once, no retry" / W13 Oracle AQ-TxEventQ "enqueue and dequeue are atomic" / W14 Palantir Object-backed link + "Store each fact once" + 跨 Ontology link 不支持走 shared Ontology + Action 即事务边界），方案获多源独立佐证并确立三条修正铁律：**M1 pending 严禁自动释放**（超时→告警→人工，防确认竞态超发）、**M2 取消-确认竞态走死信人工、不自动补偿，联邦 API 只读不写**、**M3 pending 非对称**（仅源侧出向边有 pending，入向边随目标单同事务天然 confirmed）。**方案**：双记录镜像（源侧出向边=消耗事实 + 目标侧入向边=来源事实，各归各库、不放平台库；远程引用=(instance_id, bo, id, item) 四元组不建外键）+ derive 远程模式=本地事务分解（pending 边 + outbox 同事务 → 远程建单+入向边 → 确认事件 → confirmed）；未结口径 `open_qty = ordered − (Σ confirmed + Σ pending)`。**本文件改动（2 处）**：① §七 Phase 2 表新增 **V2-7 跨实例单据流（DOC_FLOW）** 占位行（触发式，写路径复用 V2-4 + §6.14 outbox 框架，读校验走 V2-3 且只读不写）；② §6.12 Phase 1 验收清单补 **schema 预留 2 条**（边表 `source_instance_id` / `target_instance_id` / `derive_key` 列已建且同实例写入为空零行为变化 + BO 派生资格化声明如 `warehouse/outbound_order`）。完整设计（含被否决的联邦 API 同步写 / 中央边库 / Saga 协调器三替代方案）见 [2026-09-08-doc-flow-quantity-semantics.md §12](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)。同步更新头部（状态 v1.29.7、最后更新 2026-09-27）/ §6.12（+2 验收项）/ §七（+V2-7）/ 附录 B（本行） |
 | 2026-09-29 | **v1.29.8** | **单据流平台服务 S1–S7 入档（纯文档，零代码）**。**触发**：单据流数量语义研究二轮深度核验（W20）——行业一手证据（SAP Copy Control 三段式 Requirement/Data Transfer/Create + VOFM 客户命名空间 600–999 / ServiceNow `cmdb_rel_ci` + `cmdb_rel_type` / Palantir link type status 生命周期 / Dataverse 解决方案导入缺失依赖校验 / Salesforce 集成模式）+ 本仓库代码库对账。**核验修正 3 点**：① "消耗池"与"视图自动生成"未找到直接先例 ⇒ 如实标注为**自研扩展**（最近先例 = SAP EKPO 超交容差 UEBTO/UNTTO）；② **S5 跨实例镜像协调器已被 §七 V2-7 覆盖**（修正此前"新增"表述）；③ 死信人工处理无官方先例（自研，§6.14 已实现）。**净增量 = S6 / S7 两项**：**S6 安装期校验与契约演进**（落点 `app_registry` 安装链，行业最强先例 = Dataverse 解决方案导入校验）；**S7 一致性巡检 + 投影重建**（承接单据流文档 §14 R1 护栏，自研无先例）。**规则注册表设计收敛**：`rule_id` 从字符串标识升级为注册规则记录（`doc_flow_rule`：check / map / create 三段式钩子 + `pool` 声明 + `status` 生命周期 active / deprecated 停新不禁旧；"规则是数据、钩子是代码"）。完整设计见 [2026-09-08-doc-flow-quantity-semantics.md §9.5](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)（该文档同步升至 v1.6：§9.5 + W20 核验行 + W20 来源块）。同步更新头部（状态 v1.29.8、最后更新 2026-09-29）/ §五（+S6/S7 补充小节）/ 附录 B（本行） |
+| 2026-10-03 | **v1.30.0** | **共享主数据层（foundation app）规范入档：Material / Location 归属定稿（零代码，纯文档；§6.15 新增 + 对标报告 §2.9 新增）**。**触发**：用户规划建设 `Material`（物料/产品主数据）与 `Location`（仓库/库位）主数据，提问"**这些算不算业务平台级别的？它不适合放在现有平台层，但在企业应用与底层平台之间是不是要构建这么一个平台**"；随后指示"**请继续研究一下头部产品的架构，确认好之后可以文档化**"。**研究方法**：委托子智能体做行业对标（SAP S/4HANA + MDG + MDI、Oracle EBS/Fusion、Odoo、Salesforce、ServiceNow CSDM、Microsoft D365/Dataverse、NetSuite、SAP ByD），并回溯本仓库既有结论（A4 跨应用只读视图零实现 / G2 `table_prefix` 列 backlog / §6.2.1 三条硬约束 / v1.27 撞表实测 / §6.14 事件机制 / §11 Q1 跨应用读=ATTACH 只读视图·写=事件）。**核心结论：该设"逻辑层"，但不该立即拆"独立实例"** —— 头部产品（SAP/Oracle/Odoo/Salesforce/ServiceNow/NetSuite）的**运行态主数据全部与消费方同库/同进程**，"独立层"是**逻辑归属与治理**上的分层（SAP 跨应用组件 CA（MDG 挂 `CA-MDG`，Material 域 `CA-MDG-APP-MM`，但 S/4 自身 Material/Business Partner 就住在核心、MDG 仅治理层）/ ServiceNow **CSDM Foundation 域**（明确含 Location）/ Odoo **被依赖模块**（manifest `depends`）/ Dataverse "business data platform"）；**物理拆分只在跨边界时发生**（跨系统 / 独立交付 / 外部权威源 ⇒ SAP **MDI** hub + distribution model / **Federated MDG** 两层实例 / D365 **dual-write 单向**且官方"不建议双向"）⇒ 与 PoC 3 的**触发式启动**写法同构。**⇒ 结论：它是"一类特殊应用"（foundation app），不是新的运行时层**；`product_binding.mode: multi`（§6.2 v1.3 已预留）正是为它准备；**不放 `platform.db`**（平台库 = 元模型+身份+权限+菜单，v1.28 刚确立"每 instance 一份平台库"隔离，主数据生命周期不同会破坏该边界）⇒ 独立库 + `ATTACH` 实时只读共享。**仓库 vs 库位（重要分界，行业一致）**：**仓库 = 组织/权限维度**（SAP `Plant`、Oracle `Inventory Org`（组织单位，映射 legal entity）、NetSuite location 做 role 访问限制、ServiceNow 归 CSDM Foundation）⇒ **权限命名空间挂仓库级**；**库位 = 仓库下的主数据**，**必须带复合键**（`location_id + warehouse_id`）—— 对齐 Oracle `INV_ITEM_LOCATIONS` 教训（key = `INVENTORY_LOCATION_ID + ORGANIZATION_ID`，locator id **仅 org 内唯一**，单独按 id 关联会**静默跨 org**）；形态 = 单表 `Location` + `location_type ∈ {WAREHOUSE, BIN}`（`WAREHOUSE` 行双身份、`BIN` 行 `parent_warehouse_id` 必填），对齐 SAP ByD（Location 在 Supply Chain Design Master Data + 3PL site 在 Organization Structure）。**对硬约束的三点修正/确认**：① "跨库不 JOIN / 不建外键"**是边界纪律而非技术限制**（SQLite `ATTACH` 单连接内技术上支持跨库 JOIN）——表述更正；② `ATTACH` 只读视图是**同进程实时读、零复制**，一致性上**等价于主流同库直读**，与 D365 dual-write 的"物理副本 + 映射维护"**不同构**（此前若被视为同类需更正）；③ 跨应用写走事件 + 最终一致**与 SAP MDI / D365 dual-write 完全同构，保留**。**我们独有的缺口（行业无此问题）**：**表名无应用前缀会静默冲突**（v1.27 实测 ⇒ `table_prefix` G2 必须在主数据落地**之前**实现）。**§6.15 六小节**：6.15.1 定位（逻辑分层不拆实例 + 不放 platform.db 的理由）/ 6.15.2 三条必须先定口径（权威归属=单写者·只读、标识契约=代理键 + `material_code`/`location_code` 语义键、读取方式=`ATTACH` 只读视图）+ 仓库 vs 库位分界 / 6.15.3 三个前置缺口（`table_prefix` → A4 只读视图 → 引用校验）/ 6.15.4 四条提升触发条件（跨 instance 共享 / 独立交付授权 / 独立伸缩故障域 / 平台外系统权威源）/ 6.15.5 落地顺序 Step 0~3（Step 0 = PM 确认本节即完成，与 Type 3 无关）/ 6.15.6 术语澄清（平台库 `products` 表 = 产品线 ≠ "产品主数据"）。**对标报告 §2.9 新增内容**：行业做法六维表（逻辑分层 / 单写者 / 跨模块读取 / 标识契约 / 生命周期 / 何时升级独立实例）+ 判定 + 与硬约束对照表 + 仓库 vs 库位五厂商表 + 来源清单（**已标注 4 项二手来源待一手确认**：SAP MDG Change Request/Edition/Validity Period 细节、Federated MDG 两层实例、ByD Location 双身份、NetSuite externalId 细节）。**同步更新**：§6.15（新增）/ 头部（状态 v1.30.0、最后更新 2026-10-03）/ 对标报告 §2.9（新增 + 附录来源待并入）/ 附录 B（本行）。**未做**：零代码改动、未创建任何新文件、未动 A4/G2 的 backlog 状态。 |
+| 2026-10-03 | **v1.31.0** | **库形态决策（选项 3）：`APP_DB_ROUTING` 是实例/拓扑属性，不是应用属性（零代码，纯文档；§6.2.3 新增 + 连带收窄 6 处）**。**触发**：用户对"App / 模块分层 / 分库"架构的反思 —— "**这感觉有点复杂，你再回来反思一下……这个架构设计是不是合理的？对比一下 SAP 跟 Oracle、Salesforce**"。**核实结论（推翻此前表述）**：① **分库今天不是默认行为** —— `APP_DB_ROUTING` 默认关闭（[server.py L628](../../meta/server.py#L628) / [test_app_db_routing.py L5](../../meta/tests/test_app_db_routing.py#L5) / [test_app_table_name_collision_probe.py L261](../../meta/tests/test_app_table_name_collision_probe.py#L261) "未创建任何应用库文件"）⇒ **今天实际是单库**，分库是"默认关闭的能力"；② 该开关是**实例级/环境变量级**（`setenv`），**不是 per-app 属性**；③ 行业对标：**没有任何头部厂商按应用/模块拆库** —— SAP（系统表 + 业务表同库，命名空间 `MARA`/`VBAK`）、Oracle EBS（单一 `APPS` schema，前缀 `MTL_`/`PO_`）、Salesforce（单库多租户，对象只是元数据）、Odoo（单 schema，模块 `depends`）、ServiceNow（CSDM）**全部单库**。⇒ 判定"**App / 模块分层本身合理，问题只在把'分库'设成了默认**"（分库唯一硬收益 = 应用包可独立交付成 instance（Type 3），其 4 条触发条件至今未触发）。**用户决策**：**选项 3 —— 按部署拓扑决定库形态**。**用户追问并确认（本轮新增结论）**：该决策与"今天部署哪些模块"**正交** —— 轴① 部署范围（装哪些 app / 是否只装平台，由部署清单决定、随时可变）与轴② 库形态（实例内部 app 表落哪，由实例拓扑决定）互不触碰；远程服务器只跑"架构数据服务管理"（平台范畴，**0 个 app ⇒ 无 app 数据 ⇒ 本问题不出现**），本地装 WMS/TMS（≥2 app ⇒ 同库，与选项 3 一致），**两者不矛盾**。**§6.2.3 新增内容**：决策表述（往已建实例加 app **不改变**库形态；仅"合并交付 ↔ 单应用独立交付"变化时才做一次**实例级**切换）+ 三行拓扑-形态映射表（仅平台 0 app ⇒ 只有 `platform.db`、开关无关 / 单应用独立交付 ⇒ `data/<app_id>.db`，`APP_DB_ROUTING=1` / 合并部署 ≥2 app ⇒ **同库 + `table_prefix`**，`APP_DB_ROUTING=0` 默认）+ **四条推论** + 正交性边框图 + **已确认（2026-10-03 用户"按这个方案"）**：三行全部有效、落地成本为零 —— Type 3 触发条件（§3.2）出现前一律保持 `APP_DB_ROUTING=0`，"单应用独立库"到点再开**。**连带收窄 6 处**：① §6.2.1 前提（加"适用范围"——三条硬约束**仅拆库形态生效**，合并形态同库可建外键/JOIN/DB 约束）；② §6.5.3 功能开关（补"开关语义 = 实例属性"、合并形态不生成 app 库文件、跨应用同库直读）；③ §6.11 工作量表（A4 跨应用只读视图 2d 标为**条件项、不计入排期**）；④ §6.15.1（更正"不放进 `platform.db`"为**逻辑归属 ≠ 物理单库**；合并形态同库直读无需视图；"应用包契约"中的"独立库"改为"库形态随部署拓扑"）；⑤ §6.15.3（标题改"缺口 1 无条件 / 缺口 2、3 为条件缺口"，缺口 1 补"合并形态下更关键"——v1.27 撞表实测**正是在 `APP_DB_ROUTING=0` 下发生**）；⑥ §6.15.5 Step 2（合并形态同库直读无动作）。**同步更新**：头部（状态 v1.31.0）/ §6.2.1 / §6.2.3（新增）/ §6.5.3 / §6.11 / §6.15.1 / §6.15.3 / §6.15.5 / 附录 B（本行）。**未做**：零代码改动、**未改 `APP_DB_ROUTING` 默认值（仍为关闭）**、未动 A4/G2 的 backlog 状态、未创建任何新文件。 |

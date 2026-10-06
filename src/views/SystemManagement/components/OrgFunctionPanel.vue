@@ -102,6 +102,11 @@ const availableFunctionTypes = [
   { value: 'accounting', label: '核算组织' },
   { value: 'profit_center', label: '利润中心' },
   { value: 'cost_center', label: '成本中心' },
+  { value: 'sales', label: '销售组织' },
+  { value: 'warehouse', label: '仓储组织' },
+  { value: 'manufacturing', label: '制造组织' },
+  { value: 'inventory', label: '库存组织' },
+  { value: 'storage', label: '存储组织' },
 ]
 
 function formatFunctionType(t) {
