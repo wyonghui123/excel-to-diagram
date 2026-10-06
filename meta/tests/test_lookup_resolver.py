@@ -8,6 +8,7 @@
 """
 import os
 import sys
+import json
 
 import pytest
 
@@ -20,12 +21,15 @@ from meta.core.lookup_resolver import (  # noqa: E402
     apply_weighted,
     lookup,
     resolve_candidates,
+    resolve_scale,
     RESOLUTION_BEST,
     RESOLUTION_EXCLUSIVE,
     RESOLUTION_PRECEDENCE,
     RESOLUTION_WEIGHTED,
     HIT_POLICY_ADDITIVE,
     HIT_POLICY_EXCLUSIVE,
+    SCALE_INCREMENTAL,
+    SCALE_TOTAL,
     SKIP_HIT_BY_EARLIER,
     SKIP_NOT_IN_GROUP,
 )
@@ -267,3 +271,184 @@ class TestCandidate构造:
         """原始 dict 保留，便于回放时取未建模字段"""
         src = {"id": 1, "value": 1.0, "extra": "x"}
         assert Candidate.from_dict(src).raw is src
+
+
+# --------------------------------------------------------------------------
+# FR-009 阶梯：档位表 0-10 / 10-50 / 50-∞（费率 100 / 90 / 80）
+# --------------------------------------------------------------------------
+_TIERS = [
+    {"from": 0, "to": 10, "rate": 100.0},
+    {"from": 10, "to": 50, "rate": 90.0},
+    {"from": 50, "to": None, "rate": 80.0},
+]
+
+
+def _tiered(semantic, tiers=None, value=0.0, **kw):
+    return Candidate(id=1, value=value, key_schema_id=1,
+                     keys={"customer": 1001},
+                     scale=list(tiers if tiers is not None else _TIERS),
+                     scale_semantic=semantic, **kw)
+
+
+class TestFR009阶梯:
+    """FR-009 AC：至少两种语义 —— 整单取档（total）/ 逐档累进（incremental）。"""
+
+    def test_total_picks_tier_rate(self):
+        """整单取档：qty=20 落在 [10,50) → 费率 90（金额 = 90 × 20 = 1800）"""
+        sc = resolve_scale(_tiered(SCALE_TOTAL), 20)
+        assert sc["rate"] == 90.0
+        assert sc["tier"] == {"from": 10, "to": 50, "rate": 90.0}
+
+    def test_total_top_tier_is_open_ended(self):
+        """顶档 `to` 缺省 = 不封口：qty=999 落到 [50, ∞) → 80"""
+        sc = resolve_scale(_tiered(SCALE_TOTAL), 999)
+        assert sc["rate"] == 80.0
+        assert sc["tier"]["to"] is None
+
+    def test_incremental_equivalent_rate(self):
+        """逐档累进：qty=20 → 10×100 + 10×90 = 1900 → 等效费率 95"""
+        sc = resolve_scale(_tiered(SCALE_INCREMENTAL), 20)
+        assert sc["rate"] == pytest.approx(95.0)
+        assert sc["tier"] is None          # 累进无单一命中档
+
+    def test_zero_qty_yields_zero_rate(self):
+        """qty=0 → 金额必为 0，不因"档位未覆盖 0"误报配置错误（头级调用常见）"""
+        assert resolve_scale(_tiered(SCALE_TOTAL), 0)["rate"] == 0.0
+        assert resolve_scale(_tiered(SCALE_INCREMENTAL), 0)["rate"] == 0.0
+
+    def test_negative_qty_yields_zero_rate(self):
+        """负数量同 0 处理（二次审查补）。
+
+        [为何要这条] 原实现只判 `q == 0`，负数量会落入档位匹配：`total` 找不到
+        覆盖负值的档位 → **抛错**；而 `_op_tier` 对同一输入**静默返 0** —— 两条
+        路径分叉。退货/红字应由 `calc_result.sign` 表达，不在阶梯算子内取负。
+        """
+        assert resolve_scale(_tiered(SCALE_TOTAL), -5)["rate"] == 0.0
+        assert resolve_scale(_tiered(SCALE_INCREMENTAL), -5)["rate"] == 0.0
+
+    def test_empty_semantic_means_disabled(self):
+        """scale 有值但 scale_semantic 为空 = 阶梯不启用（表声明）→ 取 value"""
+        c = _tiered(None, value=7.0)
+        assert resolve_scale(c, 20)["rate"] == 7.0
+
+    def test_no_scale_returns_value(self):
+        """未分档记录：费率 = value（与 FR-009 之前行为一致）"""
+        assert resolve_scale(Candidate(id=1, value=7.0), 20)["rate"] == 7.0
+
+    def test_unknown_semantic_raises(self):
+        with pytest.raises(ResolutionError, match="未知的阶梯语义"):
+            resolve_scale(_tiered("graduated"), 20)
+
+    def test_missing_qty_raises(self):
+        """声明了阶梯却拿不到数量 → 无从定档，拒绝计算"""
+        with pytest.raises(ResolutionError, match="未提供阶梯基数"):
+            resolve_scale(_tiered(SCALE_TOTAL), None)
+
+    def test_qty_in_gap_raises(self):
+        """档位有空隙 → 拒绝计算并报错（不静默取 0）"""
+        gapped = [{"from": 0, "to": 10, "rate": 100.0},
+                  {"from": 50, "to": 60, "rate": 80.0}]
+        with pytest.raises(ResolutionError, match="不落在"):
+            resolve_scale(_tiered(SCALE_TOTAL, tiers=gapped), 20)
+
+    def test_from_dict_parses_scale_json(self):
+        """scale 是 json 列，须反序列化（否则下游会把 json 文本当档位数组遍历）"""
+        c = Candidate.from_dict({"id": 1, "value": 0.0,
+                                 "scale": json.dumps(_TIERS),
+                                 "scale_semantic": "total",
+                                 "scale_divisor": "quantity"})
+        assert c.scale[1]["rate"] == 90.0
+        assert c.scale_semantic == "total"
+        assert c.scale_divisor == "quantity"
+
+    def test_from_dict_bad_scale_json_raises(self):
+        """scale 解析失败必须报错 —— 静默当"不分档"会**静默算错价**
+        （与 `keys` 解析失败不同：后者只是匹配不上，保守且不会算错）"""
+        with pytest.raises(ResolutionError, match="不是合法 json"):
+            Candidate.from_dict({"id": 1, "value": 0.0, "scale": "{not json"})
+
+    @pytest.mark.parametrize("bad", ['{"from": 0, "to": 10, "rate": 100}',
+                                     "[1, 2, 3]",
+                                     "123",
+                                     '"text"'])
+    def test_from_dict_scale_wrong_shape_raises(self, bad):
+        """shape 不对也要报错（二次审查补）。
+
+        [为何要这条] 原实现只查 `isinstance(scale, list)` 再赋 `[]` ——
+        **json 合法但形状不对**（对象 / 元素非 dict）会被静默降级为"不分档"，
+        与畸形 json 同样会取占位 `value` 静默算错价。
+        """
+        with pytest.raises(ResolutionError, match="档位对象数组"):
+            Candidate.from_dict({"id": 1, "value": 0.0, "scale": bad,
+                                 "scale_semantic": "total"})
+
+    def test_from_dict_empty_scale_is_legal(self):
+        """`scale` 缺省 / 空串 / 空数组 = 不分档，**不算配置错误**"""
+        for empty in (None, "", "[]"):
+            c = Candidate.from_dict({"id": 1, "value": 7.0, "scale": empty})
+            assert c.scale == []
+
+    def test_best_on_tiered_record_raises(self):
+        """best 范式不可用于分档记录（二次审查补）。
+
+        [为何要这条] `best` 按 `c.value` 比优，而分档记录的 `value` 是**占位值**
+        （真实费率由档位定）——拿它比优 = 比一串占位值，**静默选出错误记录**。
+        正确的比优须按定档后费率（需数量），本期未实现，故显式拒绝。
+        """
+        with pytest.raises(ResolutionError, match="best 范式不可用于分档"):
+            resolve_candidates([_tiered(SCALE_TOTAL)],
+                               RESOLUTION_BEST, measure="min_amount")
+
+    def test_lookup_applies_scale_and_records_trace(self):
+        """端到端：amount = 定档后费率（不是占位的 value=0），且回放留痕"""
+        r = lookup(
+            candidates=[_tiered(SCALE_TOTAL)],
+            steps=[{"seq": 1, "key_schema_id": 1}],
+            slot_keys=[{"customer": 1001}],
+            scale_qty=20,
+        )
+        assert r.amount == 90.0            # 若仍读 c.value 则为 0 → 静默错价
+        assert r.rates[1] == 90.0
+        assert r.traces[0].scales[0]["tier"]["from"] == 10
+
+    def test_lookup_without_scale_qty_raises(self):
+        """命中分档记录但不给基数 → 报错，不静默按 value 算"""
+        with pytest.raises(ResolutionError, match="未提供阶梯基数"):
+            lookup(
+                candidates=[_tiered(SCALE_TOTAL)],
+                steps=[{"seq": 1, "key_schema_id": 1}],
+                slot_keys=[{"customer": 1001}],
+            )
+
+    def test_scale_applies_inside_weighted_branch(self):
+        """加权 + 阶梯：权重乘的是**定档后费率**（不是占位 value）"""
+        a = _tiered(SCALE_TOTAL, allocation_weight=0.5)
+        b = Candidate(id=2, priority=2, value=200.0, key_schema_id=1,
+                      keys={"customer": 1001}, allocation_weight=0.5)
+        r = lookup(
+            candidates=[a, b],
+            steps=[{"seq": 1, "key_schema_id": 1}],
+            slot_keys=[{"customer": 1001}],
+            resolution=RESOLUTION_WEIGHTED,
+            scale_qty=20,
+        )
+        # 90×0.5 + 200×0.5 = 145（若漏传 rates 则为 0×0.5 + 200×0.5 = 100）
+        assert r.amount == pytest.approx(145.0)
+
+
+class TestScaleParity:
+    """FR-009 的两个语义在**两条路径**上必须同义，否则同一份配置换个写法就换了价：
+    查找序列 `resolve_scale`（返费率） vs 计算过程内联 `tier` 算子（返金额）。
+
+    判据：`费率 × 数量 == 算子金额`。任一侧改动导致分叉，本用例立即失败。
+    """
+
+    @pytest.mark.parametrize("qty", [-10, -1, 0, 1, 9, 10, 20, 49, 50, 999])
+    @pytest.mark.parametrize("semantic", [SCALE_TOTAL, SCALE_INCREMENTAL])
+    def test_rate_times_qty_equals_inline_tier_amount(self, semantic, qty):
+        from meta.core.calc_procedure_executor import OPERATORS, StepContext
+
+        rate = resolve_scale(_tiered(semantic), qty)["rate"]
+        ctx = StepContext(state={}, base=float(qty))
+        amount = OPERATORS["tier"](ctx, {"tiers": list(_TIERS), "semantic": semantic})
+        assert rate * qty == pytest.approx(amount)

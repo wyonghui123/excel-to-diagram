@@ -537,3 +537,92 @@ class TestZeroDependency:
         _price(ds, document_type="sales_order", document_id=5001)
         cur = ds.execute("SELECT currency FROM calc_results").fetchone()[0]
         assert cur == "USD"
+
+
+class TestFR009阶梯链路:
+    """FR-009 端到端：分档费率记录走完整链路（查表 → 定档 → 算过程 → 落库 + 留痕）。
+
+    [为何单列这一层] 内核层 `test_lookup_resolver.TestFR009阶梯` 只验
+    `lookup()` / `resolve_scale`。但分档记录的 `value` 是**无意义占位（通常为 0）**
+    ——若服务层仍读 `c.value`，就会把 0 当单价算出来并写回单据，
+    这是一条**静默错价路径**，只有跑全链路才暴露（内核层看不见服务层的取用方式）。
+    """
+
+    # 三档：0-10 → 100；10-50 → 90；50+ → 80（顶档不封口，yaml 里就是写 `to:` 留空）
+    _TIERS = ('[{"from": 0, "to": 10, "rate": 100.0}, '
+              '{"from": 10, "to": 50, "rate": 90.0}, '
+              '{"from": 50, "to": null, "rate": 80.0}]')
+
+    def _seed_tiered(self, ds, semantic):
+        """把标准夹具改造成「单条分档记录 + 费率×数量过程」。
+
+        [为何改过程] 标准夹具的过程是 `formula("lookup_amount")`，直接把**费率**
+        当金额。要验证 `费率 × 数量 == 金额` 的等价，过程须显式乘基数。
+        """
+        _seed(ds)
+        ds.execute("UPDATE calc_procedures SET steps ="
+                   " '[{\"seq\":1,\"element_type\":\"formula\","
+                   "\"params\":{\"expr\":\"lookup_amount * base\"}}]'"
+                   " WHERE code = 'PROC_STD'")
+        ds.execute("DELETE FROM rate_records WHERE id IN (2, 3)")
+        # 分档记录的 rate/value 是**占位 0**：真实费率完全由命中的档位决定
+        ds.execute("UPDATE rate_records SET scale = ?, scale_semantic = ?,"
+                   " value = 0.0, rate = 0.0 WHERE id = 1",
+                   (self._TIERS, semantic))
+
+    def _stored_rate(self, ds):
+        from meta.services.pricing_service import _to_num
+        return _to_num(ds.execute("SELECT rate FROM calc_results").fetchone()[0])
+
+    def test_total_tier_flows_through_full_chain(self, ds):
+        """total 整单取档：base=20 落 10-50 档 → 费率 90 → 金额 90×20=1800"""
+        self._seed_tiered(ds, "total")
+        r = _price(ds, document_type="so", document_id=1, base=20.0)
+        assert r["net_amount"] == pytest.approx(1800.0)
+        # 落库的 rate 必须是**定档后费率 90**，不是占位 0
+        assert self._stored_rate(ds) == pytest.approx(90.0)
+
+    def test_incremental_tier_equivalent_rate(self, ds):
+        """incremental 逐档累进：base=20 → 10×100+10×90=1900 → 等效费率 95"""
+        self._seed_tiered(ds, "incremental")
+        r = _price(ds, document_type="so", document_id=1, base=20.0)
+        assert r["net_amount"] == pytest.approx(95.0 * 20.0)
+        assert self._stored_rate(ds) == pytest.approx(95.0)
+
+    def test_scale_trace_persisted_in_factor_snapshot(self, ds):
+        """FR-010：明细须能回答"落到哪一档 / 定出什么费率"（FR-009 的可解释性）"""
+        self._seed_tiered(ds, "total")
+        _price(ds, document_type="so", document_id=1, base=20.0)
+        ex = PricingService(ds).explain("so", 1)
+        scales = ex["results"][0]["details"][0]["factor_snapshot"]["scales"]
+        assert len(scales) == 1
+        assert scales[0]["candidate_id"] == 1
+        assert scales[0]["rate"] == pytest.approx(90.0)
+        assert scales[0]["tier"] == {"from": 10.0, "to": 50.0, "rate": 90.0}
+
+    def test_write_back_uses_tier_rate_not_placeholder(self, ds):
+        """写回行单价取**定档后费率**，绝不把占位 0 写进单据（静默错价防护）"""
+        from meta.core.models import MetaObject, MetaField
+        from meta.core.models_enums import FieldType
+        self._seed_tiered(ds, "total")
+        ds.execute("CREATE TABLE IF NOT EXISTS so_tier (id integer,"
+                   " unit_price float, amount float)")
+        if registry.get("so_tier") is None:
+            mo = MetaObject(id="so_tier", name="so_tier", table_name="so_tier")
+            for n in ("id", "unit_price", "amount"):
+                ft = FieldType("integer") if n == "id" else FieldType("float")
+                mo.fields.append(MetaField(id=n, name=n, field_type=ft, db_column=n))
+            registry.register(mo)
+        ds.execute("INSERT INTO so_tier (id, unit_price, amount) VALUES (1, NULL, 0)")
+        _price(ds, document_type="so_tier", document_id=1, base=20.0,
+               document_line_id=88, level="line")
+        wb = PricingService(ds).write_back("so_tier", 1, document_line_id=88)
+        assert wb["written"]["unit_price"] == pytest.approx(90.0)
+
+    def test_bad_scale_json_raises_resolution_error(self, ds):
+        """scale 非法 json → 抛 ResolutionError（不静默当"不分档"取占位 0）"""
+        _seed(ds)
+        ds.execute("UPDATE rate_records SET scale = '{not json',"
+                   " scale_semantic = 'total' WHERE id = 1")
+        with pytest.raises(ResolutionError, match="不是合法 json"):
+            _price(ds)

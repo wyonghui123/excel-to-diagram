@@ -191,7 +191,8 @@ class PricingService:
             process_code:   定价过程编码（calc_procedures.code）
             rate_table_id:  价目表 ID
             slot_keys:      与**查找序列**槽位等长的键值，如 [{"customer": 1001}]
-            base:           计算基数（由 FR-006 的 base_level/base_source 决定）
+            base:           计算基数（由 FR-006 的 base_level/base_source 决定）。
+                            **同时用作 FR-009 阶梯基数**（命中带 `scale` 的费率记录时按此定档）
             sequence_code:  查找序列编码。**留空则跳过 FR-004 查表**，
                             直接由 calc_procedure 的计算步骤出结果
             document_*:     泛化宿主（FR-011）；本期只挂头级故 line 可空
@@ -251,6 +252,10 @@ class PricingService:
                 slot_keys=slot_keys,             # ← 与槽位等长
                 resolution=resolution,
                 measure=measure,
+                # 【FR-009 2026-10-06】阶梯基数 = 计算基（数量）。
+                # `rate_record.scale_divisor`（分档基数字段）**本期不消费**：它要求读
+                # 单据行字段，与"零 order_line / 零主数据"前提冲突，待行对象补齐后接。
+                scale_qty=base,
             )
             lk_traces = [t.to_dict() for t in lk.traces]
             hit_ids = list(lk.hit_ids)
@@ -260,7 +265,8 @@ class PricingService:
                 "lookup_hit_ids": list(lk.hit_ids),
             }
             for c in lk.candidates:
-                initial_state[f"rate_{c.id}"] = c.value
+                # 【FR-009】分档记录的 `c.value` 是无意义占位，须用**定档后费率**
+                initial_state[f"rate_{c.id}"] = lk.rates.get(c.id, c.value)
 
         # ---- 阶段二：算过程（FR-005/006/007 / T2-2）----
         calc = execute(steps=steps, base=base, initial_state=initial_state)
@@ -398,7 +404,11 @@ class PricingService:
         # 取法：首个命中的候选费率；无查表时由 amount/base 派生。
         hit_rate: Optional[float] = None
         if lk and lk.candidates:
-            hit_rate = _to_num(lk.candidates[0].value)
+            # 【FR-009 2026-10-06】分档记录的 `c.value` 是占位，须取**定档后费率**
+            #（否则会把 0 当单价写回单据）
+            hit_rate = _to_num(lk.rates.get(lk.candidates[0].id))
+            if hit_rate is None:
+                hit_rate = _to_num(lk.candidates[0].value)
         if hit_rate is None:
             hit_rate = (net / base) if base not in (None, 0) else None
 
@@ -455,8 +465,13 @@ class PricingService:
                     json.dumps(trace.hit_ids) if trace else None,
                     json.dumps([{"candidate_id": c, "reason": r}
                                 for c, r in trace.skipped]) if trace else None,
-                    json.dumps({"valid_on": valid_on, "base": base},
-                               ensure_ascii=False),
+                    json.dumps(
+                        {"valid_on": valid_on, "base": base,
+                         # 【FR-009】定档留痕（落到哪一档 / 定出什么费率）。FR-010 要求
+                         # 能回答"为什么是这个值"，分档记录的"为什么"含"哪一档"。
+                         # 复用既有 json 列承载，**零 schema 改动**。
+                         "scales": list(trace.scales) if trace else []},
+                        ensure_ascii=False),
                     now, now,
                 ],
             )

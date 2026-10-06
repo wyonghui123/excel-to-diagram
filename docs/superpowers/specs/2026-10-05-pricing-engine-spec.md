@@ -903,11 +903,12 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 | 批次 | 状态 | 落点 |
 |---|---|---|
 | **T0-1 ~ T0-7** | ✅ **已交付** | `meta/schemas/` 七张表（`factor_catalog` / `key_schema` / `lookup_sequence` / `rate_type` / `exclusion_group` / `rate_table` / `rate_record`）；`registry.reload` 注册 + `schema_generator` 实测建表 7/7 通过，C-T0 约束 16 项逐项相符 |
-| **T2-1 查找序列引擎** | ✅ **已交付** | `meta/core/lookup_resolver.py` + `meta/tests/test_lookup_resolver.py`（23 用例）。实现 FR-004（有序槽位 / `hit_policy` 下沉 / `(priority,id)` 确定性 tie-break / 回放骨架 `LookupTrace`）与 FR-008（四范式含 `weighted` Σ=1 校验）。**纯函数，零 BO 依赖** |
+| **T2-1 查找序列引擎** | ✅ **已交付** | `meta/core/lookup_resolver.py` + `meta/tests/test_lookup_resolver.py`（**64 用例**，含 T1-6 追加的 FR-009 定档、两路径同义 parity、二次审查三处守护）。实现 FR-004（有序槽位 / `hit_policy` 下沉 / `(priority,id)` 确定性 tie-break / 回放骨架 `LookupTrace`）与 FR-008（四范式含 `weighted` Σ=1 校验）。**纯函数，零 BO 依赖** |
 | **T2-2 计算过程执行器** | ✅ **已交付** | `meta/core/calc_procedure_executor.py` + `meta/tests/test_calc_procedure_executor.py`（34 用例）。实现 FR-005（**算子注册表**落地 C5：新增算子 = 注册一个函数，不改引擎）/ FR-006（基四字段 + `rolling` 与 `base_step` **互斥校验**）/ FR-007（步骤间 additive + 逐层小计 + `rolling` 覆盖）/ NFR-002（**双防线**：字符白名单 + AST 白名单，**禁 `eval`**）。11 个算子已注册 |
 | **T1-1 ~ T1-3 结果链三表** | ✅ **已交付** | `calc_procedure`（13 列 · 轴③ `result_semantic` 六值 + `procedure_type` 不写死 price）/ `calc_result`（38 列 · **泛化宿主** `document_type`+`document_id`+`document_line_id`可空+`level`，本期**先挂头级**）/ `calc_detail`（28 列 · `running_net_amount` + `factor_snapshot` + `hit_ids`/`skipped_candidates` 回放骨架）。`registry.reload` 79 对象，**10 张表实测建表全部成功**，conflict_key / business_key / 四块齐全 / 19 项 T1 专项口径逐项通过 |
-| **T1-4 定价编排服务** | ✅ **已交付** | `meta/services/pricing_service.py` + `meta/tests/test_pricing_service.py`（**37 用例**，真建表 + 真跑全链路）。把 T2 内核与 T1 配置链串成一条：`price_line`（查表 → 算过程 → 落结果+明细）/ `explain`（IF-002 回放）/ **`write_back`（TBD-9 ② 结果按 `result_semantic` 写回单据字段）** / 有效期过滤 / 草稿价目表拒绝 / dry-run。**全程零 `order_line`、零主数据依赖**（有专项用例守护） |
+| **T1-4 定价编排服务** | ✅ **已交付** | `meta/services/pricing_service.py` + `meta/tests/test_pricing_service.py`（**42 用例**，真建表 + 真跑全链路）。把 T2 内核与 T1 配置链串成一条：`price_line`（查表 → 算过程 → 落结果+明细）/ `explain`（IF-002 回放）/ **`write_back`（TBD-9 ② 结果按 `result_semantic` 写回单据字段）** / 有效期过滤 / 草稿价目表拒绝 / dry-run。**全程零 `order_line`、零主数据依赖**（有专项用例守护） |
 | **T1-5 定价 API 层** | ✅ **已交付** | `meta/api/pricing_api.py` + `meta/tests/test_pricing_api.py`（**30 用例**，Flask `test_client` 契约测试）。暴露 IF-001/002/003 三条端点；**只做参数校验 + 响应包装**，业务全在服务层。已注册于 `meta/server.py:create_app()`（**实测 `url_map` 三条路由俱在**）|
+| **T1-6 阶梯取价（FR-009）** | ✅ **已交付** | `lookup_resolver.resolve_scale`（费率记录**自带档位** · 产**费率**）+ `calc_procedure_executor._tier_bounds`/`_op_tier`（过程**内联档位** · 产**金额**）+ 服务层接线（`scale_qty=base` / 三处改读 `LookupResult.rates`）。两语义（`total` 整单取档 / `incremental` 逐档累进）**同义**由 `TestScaleParity` 逐例守护；服务层 `TestFR009阶梯链路` 5 用例覆盖全链路 + 写回防护 |
 
 > **T2-1 / T2-2 实施中纠正的四处问题**：
 > ① **TR-006 算术错误**：原文"100×.5 + 200×.3 + 300×.2 = 140"实为 **170**（50+60+60），已修正；
@@ -943,6 +944,25 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ④ **HTTP 端点命名落地**：§9.3.3 原为建议路径（`/price` `/explain`），实际实现按 RESTful 资源语义定为 `calculate` / `result/<document_type>/<id>` / `write-back`，且**路径里的 `document_type` 即 `calc_result.document_type`**（不是 `object_type`）——与表字段同名，减少心智转换。
 
 > **一条环境事实（实测）**：**live 注册点是 `meta/server.py:create_app()`**（`__main__` 第 1066 行调用它，含自己的 55+ 条 `register_blueprint`）。而 `meta/core/app_builder.py:with_blueprints()` 是**并行的、当前已损坏的**路径——它 `from meta.api.identity_api import identity_bp`，而该模块**在 git 中从未存在**（真实模块是 `meta.api.object_identity_api`），故该函数一旦被调用必然 `ImportError`。本轮**两处都同步注册**（保全照既有 parity），但**验证以 `create_app()` 的 `url_map` 为准**。
+
+> **T1-6 / FR-009 阶梯取价实施注记**（2026-10-06；核内 `resolve_scale` + `_op_tier` + 服务层接线）：
+> ① **定档产出「费率」而非「金额」**：`lookup()` 的产出量纲与 `Candidate.value` 一致（TR-006 权重夹具 `100×.5+200×.3+300×.2=170` / `base=1.0`，即费率口径；下游过程再乘数量）。故 `resolve_scale` 返回**等效费率**——`incremental` 用 `Σ(分段量 × 档费率) / 总量`。**若返金额，同一个 `lookup_amount` 变量会时而费率时而金额，配置无法统一书写**；
+> ② **定档时机 = 记录选定之后**：对标 SAP 存取序列（先选中条件记录、再按数量落 Staffel 档位）。故 `resolve_candidates` 保持按 `value` 比较（比优发生在定档前）——这是**有意的语义边界，不是遗漏**；
+> ③ **`scale` 与 `keys` 同为 json 列，但容错策略必须相反**：`keys` 解析失败 → 该候选匹配不上（保守，不会算错价）→ 静默当 `{}`；`scale` 解析失败 → 若静默当"不分档"就会取占位 `value`（分档记录的 `value` 多半是 0）→ **静默算出错误价格**，故**必须抛 `ResolutionError`**（HTTP 层 422）；
+> ④ **修掉 `_op_tier` 的真实缺陷**：原写 `float(t.get("to", float("inf")))` 只兜「缺键」，兜不住「**显式 null**」；而 yaml 里顶档写 `to:`（留空）读出正是 `None`，`float(None)` 抛 `TypeError`。该缺陷由 `TestScaleParity` 首轮 10 例失败暴露（**不是新代码错，是既有实现错**）。现抽 `_tier_bounds` 同时兜两种情形；
+> ⑤ **两路径同义由可执行断言守护**：`resolve_scale`（自带档位 · 产费率）`× 数量` **==** `_op_tier`（内联档位 · 产金额），由 `TestScaleParity` 逐例（`total`/`incremental` × 10 个数量点，含 **0 / 负值** / 档界 / 顶档）断言。**优于抽公共函数**：两条路径的输入结构本就不同，抽函数会强行耦合；用断言守护可在任一侧改动导致分叉时**立即失败**；
+> ⑥ **服务层三处改读定档后费率**（`LookupResult.rates` 作**单一真相源**）：`rate_{id}` 初值 / `calc_result.rate` 落库 / 加权分支。原因：分档记录的 `c.value` 是**无意义占位**，下游若继续读会把 0 当单价写回单据——这是**静默错价路径**，故服务层 `TestFR009阶梯链路` 专设「写回单价 ≠ 0」用例守护。
+>
+> **T1-6 二次审查补的三处**（都是「一次实现看起来对、但存在**不报错却算错价**的旁路」）：
+> ① **`scale` 只兜「json 畸形」兜不住「**形状不对**」**：原实现 `if not isinstance(scale, list): scale = []`，把「对象而非数组 / 元素非 dict」静默降级为"不分档"——与畸形 json 同样会取占位 `value` 得出错价。现对「已声明但形状不符」一并抛 `ResolutionError`（`None`/空串/空数组仍合法 = 不分档）；
+> ② **`best` 范式与分档记录组合会静默选出错误记录**：`best` 按 `c.value` 比优，而分档记录的 `value` 是**占位值**（真实费率由档位定），比优 = 比一串占位值。正确的比优须按**定档后费率**（需数量），本期未实现，故**显式拒绝**（`ResolutionError` → 422），引导配置者改用 `precedence`；
+> ③ **负数量下两条路径分叉**：原 `resolve_scale` 只判 `q == 0`，负数量落入档位匹配 → `total` 找不到覆盖负值的档位 → **抛错**；而 `_op_tier` 对同一输入**静默返 0**。`TestScaleParity` 原来只测非负值，故未暴露。现统一为「非正数量 → 费率 0」（与 `_op_tier` 同口径），并把负值纳入 parity 参数集。**退货/红字应由 `calc_result.sign` 表达，不在阶梯算子内取负**。
+>
+> **FR-009 本期边界登记**（四条，均为**有意取舍而非遗漏**）：
+> ① **`scale_divisor`（分档基数字段）本期不消费** —— 它要求读单据行字段，与「零 `order_line` / 零主数据」前提冲突，待行对象补齐后接；本期阶梯基数一律取计算基 `base`；
+> ② **「按定档后金额比优」本期不做** —— `resolution=best` 的比优发生在**记录层**（按 `value`），不比较定档后金额，与 SAP 语义一致（见 ②）；且**分档记录 + `best` 已显式拒绝**（见二次审查②），不存在静默误导；
+> ③ **定档留痕落 `calc_detail.factor_snapshot["scales"]`**（复用既有 json 列，**零 schema 改动**），记「落到哪一档 / 定出什么费率」，供 FR-010 回答"为什么是这个值"。
+> ④ **`LookupResult.rates` 的 key 是整型**（`{candidate_id: rate}`）；`to_dict()` 经 `json.dumps` 后 key 会变字符串。当前仅**进程内**消费（`pricing_service` 不经 JSON 读它），故本期不处理；若未来经 API 暴露，消费端须做 `int()` 回转。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|

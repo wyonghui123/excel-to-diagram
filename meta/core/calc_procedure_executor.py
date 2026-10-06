@@ -139,6 +139,21 @@ def _op_list_price(ctx: StepContext, params: Dict[str, Any]) -> float:
     return amount
 
 
+def _tier_bounds(t: Dict[str, Any]) -> Tuple[float, float]:
+    """档位区间 **含下不含上**，`to` 可空 / 可缺省 = 不封口。
+
+    【修 2026-10-06 FR-009】原实现写 `float(t.get("to", float("inf")))` ——
+    只兜"**缺键**"，兜不住"**显式 null**"。而 yaml 里顶档写 `to:`（留空）是合法
+    写法，读出来就是 `None`，于是 `float(None)` 抛 `TypeError`。
+    口径须与 `lookup_resolver.resolve_scale` 完全一致
+    （由 `test_lookup_resolver.py::TestScaleParity` 逐例守护）。
+    """
+    lo, hi = t.get("from"), t.get("to")
+    lo = 0.0 if lo in (None, "") else float(lo)
+    hi = float("inf") if hi in (None, "") else float(hi)
+    return lo, hi
+
+
 @register_operator("tier")
 def _op_tier(ctx: StepContext, params: Dict[str, Any]) -> float:
     """阶梯：按 params['tiers']（[{from,to,rate}]）选档。
@@ -146,6 +161,10 @@ def _op_tier(ctx: StepContext, params: Dict[str, Any]) -> float:
     两语义（FR-005 / T0-7 `scale_semantic`）：
       total       = 整单取档（总量落在哪档取哪档的费率）
       incremental = 逐档累进（分段计算后累加）
+
+    【与 FR-009 的关系】费率记录自带的档位表（`rate_record.scale`）由查找序列
+    的 `resolve_scale` 定档、产出**费率**；本算子处理**过程内联**的档位、直接产出
+    **金额**。两条路径的两个语义必须同义 —— 由 `TestScaleParity` 守护。
     """
     tiers = params.get("tiers") or []
     qty = float(params.get("quantity", ctx.base) or 0.0)
@@ -157,14 +176,14 @@ def _op_tier(ctx: StepContext, params: Dict[str, Any]) -> float:
     if semantic == "incremental":
         total = 0.0
         for t in tiers:
-            lo, hi = float(t.get("from", 0)), float(t.get("to", float("inf")))
+            lo, hi = _tier_bounds(t)
             seg = max(0.0, min(qty, hi) - lo)      # 区间含下不含上
             total += seg * float(t.get("rate", 0.0) or 0.0)
         amount = total
     else:
         hit = None
         for t in tiers:
-            lo, hi = float(t.get("from", 0)), float(t.get("to", float("inf")))
+            lo, hi = _tier_bounds(t)
             if lo <= qty < hi:
                 hit = float(t.get("rate", 0.0) or 0.0)
                 break
