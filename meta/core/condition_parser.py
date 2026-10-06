@@ -15,6 +15,10 @@ ConditionExpressionParser
 """
 from typing import Any, Dict, List, Optional, Tuple
 
+import os
+
+import yaml
+
 # 操作符白名单 (与 SafeExpressionEvaluator.ALLOWED_OPERATORS 对齐)
 SUPPORTED_OPS = {
     '=', '!=', '<', '<=', '>', '>=',
@@ -26,10 +30,21 @@ SUPPORTED_OPS = {
     'RAW',  # [P4 补充] 原生 SQL 片段 (用于推导管道 cross-BO 条件)
 }
 
-# [P1-A3 2026-07-26] HIERARCHY 链 (与 dimension_scope_engine 一致)
-# (dim_code, fk_field_pointing_to_parent, table_name)
+# ────────────────────────────────────────────
+# HIERARCHY 链 (与 dimension_scope_engine 一致)
 # 用于 DESCENDANTS_OF / ANCESTORS_ALL_OF 递归查询
-_HIERARCHY_FK = [
+#
+# [2026-10-05] 改为由 meta/schemas/hierarchies.yaml `levels[]` 驱动 (SSOT)。
+#   改动原因：原为硬编码 6 张产品版本维度表 —— 虽与主数据无关，但违反领域中立
+#   （换业务域即失效），且与 hierarchies.yaml 存在双份声明漂移风险。
+#   层级链本身由 hierarchies.yaml `hierarchies[].levels[].level` 顺序声明，
+#   本模块只做「yaml 优先 + 硬编码兜底 + 解析失败告警」，语义与原实现完全一致。
+#   参见 Spec 2026-10-02-rule-model-spec.md §7A.4 待解耦合 #1。
+# ────────────────────────────────────────────
+
+# 硬编码兜底基底 (yaml 不可用时使用)：
+# (dim_code, fk_field_pointing_to_parent, table_name)
+_HIERARCHY_FK_FALLBACK = [
     ('product', None, 'products'),
     ('version', 'product_id', 'versions'),
     ('domain', 'version_id', 'domains'),
@@ -38,7 +53,17 @@ _HIERARCHY_FK = [
     ('business_object', 'service_module_id', 'business_objects'),
 ]
 
+# ────────────────────────────────────────────
 # 维度字段 → 子表映射 (用于 CHILDREN_OF)
+#
+# [2026-10-05 说明] 此表**刻意保持静态**、不从 hierarchies.yaml 推导，原因有二：
+#   ① 语义不同：它描述的是「CHILDREN_OF 操作符的 field → 表」解析索引，
+#      而非「层级链」；key 是 id 列名（domain_id / sub_domain_id ...），非外键字段。
+#   ② 存在刻意的不对称：`domain_id` / `product_id` 刻意**不写** parent_col，
+#      使 `_build_children_of` 走 `parent_field` 兜底（由调用方传入）。
+#      按 yaml 的 `filter_param` 机械推导会把 parent_col 填成 version_id/product_id，
+#      **改变既有 SQL 语义**。故维持现状，只在此说明依赖来源。
+# ────────────────────────────────────────────
 _DIM_CHILD_TABLES = {
     'domain_id': {'table': 'domains', 'id_col': 'id'},
     'sub_domain_id': {'table': 'sub_domains', 'id_col': 'id', 'parent_col': 'domain_id'},
@@ -46,6 +71,56 @@ _DIM_CHILD_TABLES = {
     'product_id': {'table': 'products', 'id_col': 'id'},
     'version_id': {'table': 'versions', 'id_col': 'id', 'parent_col': 'product_id'},
 }
+
+
+def _load_hierarchy_chain() -> List[Tuple[str, Optional[str], str]]:
+    """[2026-10-05] 从 hierarchies.yaml `levels[]` 加载层级链 (SSOT)
+
+    映射规则：每个 level → (object, foreign_key_field, table_name)，
+    按 `level` 升序。`kind=association` 的 level 无 table_name，自动跳过。
+
+    实测与原硬编码 6 项**逐项相等**（biz_hierarchy level 0~5）。
+
+    Returns:
+        [(dim_code, fk_field, table_name), ...]；yaml 不可用时返回硬编码兜底。
+    """
+    fallback = list(_HIERARCHY_FK_FALLBACK)
+
+    schema_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')
+    yaml_path = os.path.join(schema_dir, 'hierarchies.yaml')
+
+    if not os.path.exists(yaml_path):
+        return fallback
+
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"[Warning] condition_parser: hierarchies.yaml 解析失败，使用硬编码 fallback: {e}")
+        return fallback
+
+    # 取 levels[] 最完整的那一个 hierarchy（多组时以最长链为准）
+    best_levels: List[Dict[str, Any]] = []
+    for h in data.get('hierarchies', []) or []:
+        levels = [lv for lv in (h.get('levels') or []) if lv.get('table_name')]
+        if len(levels) > len(best_levels):
+            best_levels = levels
+
+    if not best_levels:
+        return fallback
+
+    best_levels.sort(key=lambda lv: lv.get('level', 0))
+
+    chain = [
+        (lv['object'], lv.get('foreign_key_field'), lv['table_name'])
+        for lv in best_levels
+        if lv.get('object') and lv.get('table_name')
+    ]
+
+    return chain or fallback
+
+
+_HIERARCHY_FK = _load_hierarchy_chain()
 
 
 class ConditionExpressionParser:

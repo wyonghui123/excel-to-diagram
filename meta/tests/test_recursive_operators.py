@@ -72,21 +72,32 @@ class TestChildrenOf:
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'sub_domain_id', 'op': 'CHILDREN_OF', 'value': 101}]
+        # CHILDREN_OF 契约: value 必须是 dict
+        #   {parent_field: <子表中的父外键列>, parent_value: <父 id>}
+        conditions = [{
+            'field': 'sub_domain_id',
+            'op': 'CHILDREN_OF',
+            'value': {'parent_field': 'domain_id', 'parent_value': 101},
+        }]
 
         sql, params = parser.to_sql(conditions)
-        assert 'sub_domains' in sql.lower() or 'domain_id' in sql.lower()
-        assert 101 in params
+        assert 'FROM sub_domains' in sql
+        assert 'domain_id' in sql
+        assert params == [101]
 
     def test_children_of_unknown_field_raises(self, hierarchy_db):
         """CHILDREN_OF 未知字段应抛 ValueError 或返回错误"""
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'unknown_field', 'op': 'CHILDREN_OF', 'value': 1}]
+        conditions = [{
+            'field': 'unknown_field',
+            'op': 'CHILDREN_OF',
+            'value': {'parent_field': 'domain_id', 'parent_value': 1},
+        }]
 
-        # 应抛异常或返回错误信息
-        with pytest.raises((ValueError, Exception)):
+        # 未知维度字段必须抛 ValueError (而非 AttributeError 等意外异常)
+        with pytest.raises(ValueError, match='unknown dimension field'):
             parser.to_sql(conditions)
 
 
@@ -94,16 +105,27 @@ class TestAncestorsOf:
     """ANCESTORS_OF: 单层向上"""
 
     def test_ancestors_of_generates_parent_query(self, hierarchy_db):
-        """ANCESTORS_OF sub_domain_id=1001 → 查 domains (parent)"""
+        """ANCESTORS_OF: sub_domain_id=1001 → 查 domains (parent)"""
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'domain_id', 'op': 'ANCESTORS_OF', 'value': 1001}]
+        # ANCESTORS_OF 契约: value 必须是 dict
+        #   {child_table: 本层表, child_id: 本层 id, parent_col: 指向父的列}
+        conditions = [{
+            'field': 'domain_id',
+            'op': 'ANCESTORS_OF',
+            'value': {
+                'child_table': 'sub_domains',
+                'child_id': 1001,
+                'parent_col': 'domain_id',
+            },
+        }]
 
-        # 应生成查 parent 的 SQL
         sql, params = parser.to_sql(conditions)
-        # SQL 应包含 domains 表或 domain_id 字段
-        assert isinstance(sql, str)
+        # 单层向上: 从 sub_domains 取父列, 只出现一次 SELECT
+        assert 'FROM sub_domains' in sql
+        assert 'SELECT domain_id FROM sub_domains' in sql
+        assert params == [1001]
 
 
 class TestDescendantsOf:
@@ -114,12 +136,21 @@ class TestDescendantsOf:
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'domain_id', 'op': 'DESCENDANTS_OF', 'value': 101}]
+        # DESCENDANTS_OF 契约: value 必须是 dict
+        #   {parent_dim: 祖先维度名, parent_value: 祖先 id}
+        # field=domain_id 属于 sub_domain, 故 parent_dim 取其祖先 domain
+        conditions = [{
+            'field': 'domain_id',
+            'op': 'DESCENDANTS_OF',
+            'value': {'parent_dim': 'domain', 'parent_value': 101},
+        }]
 
         sql, params = parser.to_sql(conditions)
-        # 应生成跨层子查询 (含 sub_domains 表)
-        assert isinstance(sql, str)
-        assert 101 in params
+        # 自 domain 向下递归到 sub_domain (含 domains 与 sub_domains 两张表)
+        assert 'FROM domains' in sql
+        assert 'FROM sub_domains' in sql
+        assert sql.lower().count('select') >= 2
+        assert params == [101]
 
     def test_descendants_of_generates_recursive_sql(self, hierarchy_db):
         """DESCENDANTS_OF 应生成多层递归 SQL (跨 product→version→domain→...)"""
@@ -127,22 +158,36 @@ class TestDescendantsOf:
 
         parser = ConditionExpressionParser()
         # 从 product=1 向下递归到 business_object
-        conditions = [{'field': 'product_id', 'op': 'DESCENDANTS_OF', 'value': 1}]
+        # field=service_module_id 属于 business_object (链底), parent_dim=product (链顶)
+        conditions = [{
+            'field': 'service_module_id',
+            'op': 'DESCENDANTS_OF',
+            'value': {'parent_dim': 'product', 'parent_value': 1},
+        }]
 
         sql, params = parser.to_sql(conditions)
-        # SQL 应是嵌套子查询 (跨多层)
-        assert isinstance(sql, str)
-        # 应包含多次 SELECT (递归)
-        assert sql.lower().count('select') >= 2
+        # 应贯穿整条链: products → versions → domains → sub_domains
+        #              → service_modules → business_objects
+        for table in ('products', 'versions', 'domains',
+                      'sub_domains', 'service_modules', 'business_objects'):
+            assert f'FROM {table}' in sql
+        # 6 张表 = 6 层嵌套 SELECT
+        assert sql.lower().count('select') == 6
+        assert params == [1]
 
     def test_descendants_of_unknown_dim_raises(self, hierarchy_db):
-        """DESCENDANTS_OF 未知维度应抛异常"""
+        """DESCENDANTS_OF 未知维度应抛 ValueError"""
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'unknown_id', 'op': 'DESCENDANTS_OF', 'value': 1}]
+        conditions = [{
+            'field': 'unknown_id',
+            'op': 'DESCENDANTS_OF',
+            'value': {'parent_dim': 'domain', 'parent_value': 1},
+        }]
 
-        with pytest.raises((ValueError, Exception)):
+        # field 无法映射到层级链中的维度
+        with pytest.raises(ValueError, match='cannot determine dim for field'):
             parser.to_sql(conditions)
 
 
@@ -154,37 +199,65 @@ class TestAncestorsAllOf:
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'business_object_id', 'op': 'ANCESTORS_ALL_OF', 'value': 100001}]
+        # ANCESTORS_ALL_OF 契约: value 必须是 dict
+        #   {child_dim: 起点维度, child_id: 起点 id, target_dim: 终点维度}
+        conditions = [{
+            'field': 'product_id',
+            'op': 'ANCESTORS_ALL_OF',
+            'value': {
+                'child_dim': 'business_object',
+                'child_id': 100001,
+                'target_dim': 'product',
+            },
+        }]
 
         sql, params = parser.to_sql(conditions)
-        assert isinstance(sql, str)
-        # 应生成跨层子查询 (含 service_modules, sub_domains, domains, versions, products)
-        assert sql.lower().count('select') >= 2
+        # 自 business_object 上溯至 product, 贯穿整条链
+        for table in ('business_objects', 'service_modules',
+                      'sub_domains', 'domains', 'versions', 'products'):
+            assert f'FROM {table}' in sql
+        assert sql.lower().count('select') == 6
+        assert params == [100001]
 
     def test_ancestors_all_of_to_specific_target(self, hierarchy_db):
         """ANCESTORS_ALL_OF 到特定 target_dim (如 sub_domain)"""
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        # 从 business_object 向上到 sub_domain
+        # 从 business_object 向上到 sub_domain (只上溯 2 层, 不到 product)
         conditions = [{
-            'field': 'business_object_id',
+            'field': 'sub_domain_id',
             'op': 'ANCESTORS_ALL_OF',
-            'value': 100001,
-            'target_dim': 'sub_domain',
+            'value': {
+                'child_dim': 'business_object',
+                'child_id': 100001,
+                'target_dim': 'sub_domain',
+            },
         }]
 
         sql, params = parser.to_sql(conditions)
-        assert isinstance(sql, str)
+        # 到达 target_dim 即停止: 含 sub_domains, 但不含 domains/versions/products
+        assert 'FROM sub_domains' in sql
+        for table in ('domains', 'versions', 'products'):
+            assert f'FROM {table}' not in sql
+        assert params == [100001]
 
     def test_ancestors_all_of_unknown_dim_raises(self, hierarchy_db):
-        """ANCESTORS_ALL_OF 未知 child_dim 应抛异常"""
+        """ANCESTORS_ALL_OF 未知 child_dim 应抛 ValueError"""
         from meta.core.condition_parser import ConditionExpressionParser
 
         parser = ConditionExpressionParser()
-        conditions = [{'field': 'unknown_id', 'op': 'ANCESTORS_ALL_OF', 'value': 1}]
+        conditions = [{
+            'field': 'product_id',
+            'op': 'ANCESTORS_ALL_OF',
+            'value': {
+                'child_dim': 'unknown_dim',
+                'child_id': 1,
+                'target_dim': 'product',
+            },
+        }]
 
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError, match='unknown child_dim'):
             parser.to_sql(conditions)
 
 
@@ -198,13 +271,17 @@ class TestRecursiveVsSingleLevel:
         parser = ConditionExpressionParser()
 
         # CHILDREN_OF: domain → sub_domain (单层)
-        children_sql, _ = parser.to_sql([
-            {'field': 'sub_domain_id', 'op': 'CHILDREN_OF', 'value': 101}
-        ])
-        # DESCENDANTS_OF: domain → sub_domain + service_module + business_object (多层)
-        descendants_sql, _ = parser.to_sql([
-            {'field': 'domain_id', 'op': 'DESCENDANTS_OF', 'value': 101}
-        ])
+        children_sql, _ = parser.to_sql([{
+            'field': 'sub_domain_id',
+            'op': 'CHILDREN_OF',
+            'value': {'parent_field': 'domain_id', 'parent_value': 101},
+        }])
+        # DESCENDANTS_OF: 同一 field, 但自 domain 逐层向下 (多层)
+        descendants_sql, _ = parser.to_sql([{
+            'field': 'service_module_id',
+            'op': 'DESCENDANTS_OF',
+            'value': {'parent_dim': 'domain', 'parent_value': 101},
+        }])
 
         # DESCENDANTS 应包含更多 SELECT (递归)
-        assert descendants_sql.lower().count('select') >= children_sql.lower().count('select')
+        assert descendants_sql.lower().count('select') > children_sql.lower().count('select')

@@ -1,9 +1,11 @@
 # 规则模型（属性确定）Spec + RFC
 
-> **版本**：v1.3 | **日期**：2026-10-03 | **状态**：已实施（一期 M1~M4 + 二期 M5/M6/M7 已落地）
+> **版本**：v1.5 | **日期**：2026-10-06 | **状态**：已实施（一期 M1~M4 + 二期 M5/M6/M7 已落地；v1.4 补 §7A 分层归属章节；v1.5 修复 §7A.5 递归操作符测试失配，**未改需求边界、未改生产代码行为**）
 > **关联文档**：
 > - [2026-10-02-rule-model-research.md](./2026-10-02-rule-model-research.md)（v1.11，对标研究报告）
 > - [2026-10-02-rule-model-implementation-plan.md](./2026-10-02-rule-model-implementation-plan.md)（实施计划 / Phase / 任务 / 里程碑）
+> - [2026-10-03-rule-model-consumption-and-layering.md](./2026-10-03-rule-model-consumption-and-layering.md)（v2.1，消费侧与「三段式」分层框架）
+> - [2026-10-04-foundation-object-model-and-architecture.md](file:///d:/filework/docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md)（foundation 蓝图 v2.5 —— 已把规则模型归入「机制」）
 > - 对象模型总纲（计划对象 vs 事实对象）§5.4 谁是事实
 
 ---
@@ -156,6 +158,90 @@ class RuleProvider:
 
 ---
 
+## 7A. 分层归属（v1.4 补记 · 2026-10-05）
+
+> **为何补这一节**：本 Spec 与 [foundation 蓝图](file:///d:/filework/docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md)、
+> [10-03 消费与分层研究](./2026-10-03-rule-model-consumption-and-layering.md) 曾出现**口径不对齐**——foundation 蓝图已明确「把规则模型归入**机制**」，
+> 10-03 研究已给出「**三段式**」框架，而本文档（含实施计划）**通篇未对"规则模型属于哪一层 / 是否依赖主数据"作任何声明**。
+> 这是**文档缺口，不是设计缺陷**。本节把口径补齐，作为后续 Spec 的引用基准。
+
+### 7A.1 结论一句话
+
+> **规则模型不属于 foundation 的「对象」层，而属于其「机制」层**（foundation 蓝图 §:48 原文：「把规则模型归入"机制"」）。
+> 它在运行时**三段并存**，问"它属于哪一层"本身设错了题型——正确问法是「**在这三层分别是什么**」（10-03 研究 §:127-129）。
+
+### 7A.2 三段落点（10-03 研究 §:131-135）
+
+| 层 | 规则模型在该层是什么 | 代码落点 |
+|---|---|---|
+| **BO 声明层** | 规则**声明**挂在对象上（哪些对象有规则、规则作用于哪个字段） | `MetaObject.rules` 内的 `MetaDefaultRule` / `MetaComputation` / `MetaDerivation` 等 |
+| **EO 实例层** | 规则**取值**时读写"字段名 → 值"字典，**不感知业务对象** | `RuleContext.data`（`get_field_value` / `set_field_value` / `get_original_value`） |
+| **基础设施层** | 规则**执行**引擎——与规则内容无关的通用能力 | 6 个 Executor + `RuleEngine.default_by_priority` + `SafeExpressionEvaluator` |
+
+### 7A.3 「是否依赖主数据」——代码级结论：真实依赖 0 处
+
+> **取证范围**：`rule_executor.py` / `condition_evaluator.py` / `condition_parser.py` / `condition_converter.py` /
+> `safe_expr_evaluator.py` / `formula_functions.py` / `doc_flow_derive_engine.py` / `doc_flow_rule_store.py`
+> 共 8 个文件，按主数据关键词（item / uom / location / party / supplier / customer / material / warehouse / organization）
+> 逐一检索并**人工判定每处上下文的语义**（区分"真实读取主数据"与"变量名 / 注释 / 内置容器方法恰好同词"）。
+
+**结论：真实主数据依赖 = 0 处。** 全部命中均为假依赖：
+
+| 命中类型 | 典型位置 | 说明 |
+|---|---|---|
+| Python 内置容器方法 | `rule_executor.py:1171` / `:1464`、`condition_evaluator.py:132`、`condition_converter.py:172`、`formula_functions.py:437,501`、`doc_flow_derive_engine.py:216` | 均为 `.items()` / 形参 `item` / 局部列表变量 `items` |
+| E2E 现象注释 | `rule_executor.py:1288` `price_list 被 PL_SYS 覆盖` | 注释文本；`meta/schemas/` 全目录 grep `price_list` / 价目表**零命中**（该对象尚未建档） |
+| 命名巧合 | `doc_flow_derive_engine.py:6,82,177,248-251,259-260,371-384` 的 `source_item` / `target_item` | 语义是**单据行项目标识**（行级幂等键），`:384` docstring 明确"行级 BO 派生留空串即可"，**非主数据 item 对象** |
+
+**取数通道只有 3 条形态，全部领域中立**：
+
+```
+RuleContext.data（字段名 → 值）
+  ├─ registry.get(ref.object_id)          ← 绑定哪个对象由规则自己声明（依赖反转）
+  ├─ get_meta_object(rule.source_object)  ← 源对象由规则自己声明
+  └─ build_cross_object_locals(data_source, meta_object, data)  ← 通用签名，无 BO 参数
+```
+
+**决定性证据**——`cross_object_resolver.py:243-254` 的签名里**没有任何业务对象类型参数**：
+
+```python
+def build_cross_object_locals(data_source: Any, meta_object: Any, data: Dict[str, Any]) -> Dict[str, Any]
+```
+
+条件内核同样领域中立：
+- `condition_evaluator.evaluate(condition: str, context: Dict[str, Any])` —— 只消费「字段名 → 值」映射，`"self"` / `"parent"` 是**通用相对路径关键字**，非具体对象名；
+- `condition_converter.convert(text) -> [{field, op, value}]` —— `field` 是不透明字符串（正则 `[A-Za-z_][A-Za-z0-9_\.]*`），由调用方决定它指向哪个 schema。
+
+> **重要口径**：`registry.get(ref.object_id)`（`rule_executor.py:521`）**不是耦合**——规则必须绑定到某个对象才能执行，
+> 而**绑定关系由规则声明自身携带**（`MetricReference.object_id`），引擎只做动态解析。**换成 uom 还是 item，规则自己说了算，引擎不选。**
+> 这正是 foundation 蓝图 §:647 判定 `default_by_priority` 为「平台现成机制、可直接复用」的依据。
+
+### 7A.4 四条待解的耦合（登记，非本 Spec 实施范围；#1 已处置、#2 原判断已推翻）
+
+| # | 问题 | 位置 | 性质 | 处置 |
+|---|---|---|---|---|
+| ~~1~~ | **条件解析内核硬编码 6 张产品版本维度表** | `condition_parser.py:32-39` `_HIERARCHY_FK` + `:42-48` `_DIM_CHILD_TABLES` | 违反领域中立（**与主数据无关**，但换业务域即失效） | ✅ **已处置（2026-10-05）**：`_HIERARCHY_FK` 改为由 `meta/schemas/hierarchies.yaml` `levels[]` 驱动（SSOT，采用「yaml 优先 + 硬编码兜底 + 解析失败告警」范式，与 `permission_dimension_engine._load_resource_table_map` 一致）。实测加载结果与原硬编码**逐项相等**；`_DIM_CHILD_TABLES` **刻意保持静态**（它是「CHILDREN_OF 操作符的 field→表」解析索引而非层级链投影，且 `domain_id`/`product_id` 刻意不写 `parent_col` 以走调用方兜底，机械推导会**改变既有 SQL 语义**），已在代码注释中说明依赖来源 |
+| ~~2~~ | **条件"解析"与"求值"是两条未打通的路径** | 10-03 研究 §:118-121 的判断 | ❌ **原判断有误，已推翻** | ✅ **已核实（2026-10-05）**：深入实现层后确认三条路径是**流水线上的不同段**，各自服务不同消费方，**不是重复实现**：<br>① `ConditionConverter`：自由文本 → `[{field,op,value}]`，消费方 = 迁移脚本（`migrate_rules_to_v2`，一次性把 legacy 规则转 v2）<br>② `ConditionExpressionParser`：结构化 → SQL WHERE，消费方 = `intent_scope_adapter` / `effective_intent_checker`（**需落 SQL** 做数据权限过滤）<br>③ `ConditionEvaluator`：自由文本 → bool（内存求值），消费方 = `action_executor` / `manage_api` / 两个 permission api（**对象级前置条件，无法落 SQL**）<br>②③分叉是**必要**的（一个要 SQL 过滤、一个要内存 bool），**不合并**。真实待解问题仅剩「①的解析结果能否被③复用」——因②③的输入形态本就不同（dict vs 字符串），统一收益低、风险高。**本期不做** |
+| 3 | **表达式函数库无单位换算函数** | `formula_functions.py` 全库 | **能力缺口**（非耦合）：foundation 蓝图已把 `item_uom_conversion` 列入一期（`uom ↔ item_uom_conversion ↔ items` 三表闭环已成立） | 换算**建议归 foundation 取数侧**（保持"引擎不感知业务对象"，与定价引擎 D19「单位换算归事实源取值阶段」同向） |
+| 4 | **产品版本维度表硬编码散落 12+ 处** | `intent_scope_adapter.py:407` 与 `:428`（**同一文件内重复定义两份** `_TABLE_MAP`）· `effective_intent_checker.py:270,301` · `runtime_dimension_resolver.py:196` · `permission_system_comparator.py:45` · `derivation_pipeline.py:781` · `dimension_scope_engine.py:969` · `data_permission_service.py:822,858` · `condition_permission_service.py:33` · `chain_owner_resolver.py:48` · `org_service.py:32` · `management_dimension_engine.py:36` · `permission_dimension_engine.py:49` · `draft_batch_save.py:380` · `association/fallback.py:18` · `_descendant_subquery.py:10,35,53` · `value_help_providers.py:34,41` | 违反领域中立 + 双份声明漂移风险（`hierarchies.yaml` 已是 SSOT） | **登记，不在本期收敛**。理由：涉及权限 / 派生 / 关联 / 值帮助四个子系统，逐模块收敛需各自回归测试，收益（消除硬编码）不足以承担此风险。有真实痛点（如新增层级要改 15 处）时再做，届时应抽一个**共享的层级表名映射读取函数**而非逐处替换 |
+
+### 7A.5 递归操作符测试失配（已修复，v1.5）
+
+`meta/tests/test_recursive_operators.py` 曾长期 **7 failed / 3 passed**，且 3 个「通过」是假阳性。**已于 v1.5 修复，现 10 passed。**
+
+| 项 | 结论 |
+|---|---|
+| 根因 | 测试传 `'value': 101`（裸 int），实现契约要求 dict（`parent_field`/`parent_value`/`parent_dim`/`child_dim`/`child_id`/`target_dim`），`int.get()` 触发 `AttributeError` |
+| 判定依据 | 权威设计 [Spec 09 §3.2](../../spec_权限体系升级/09_unified_permission_architecture.md) 明确 `value` 为 dict；实现与之一致 → **改测试，不改实现** |
+| 假阳性 | 3 个「期望异常」用例断言写成 `pytest.raises((ValueError, Exception))`，`AttributeError` 被父类 `Exception` 兜住 → 已收紧为 `pytest.raises(ValueError, match=...)` |
+| 附带发现 | 全仓库检索 `parent_dim`/`child_dim`/`child_value` 等键**仅命中实现自身**，YAML 中仅注释提及 → 该路径**无生产调用方**（死代码），故契约对齐无存量影响 |
+
+> **遗留疑点（不在本期范围）**：`DESCENDANTS_OF` 生成的 SQL 外层为 `field IN (...)`，
+> 当 `field='domain_id'` 时语义是把「domain 的 id」当作「sub_domain 的 id」比对。
+> 需确认是操作符语义本身如此，还是应由调用方传更深的 `field`（如 `service_module_id`）。
+
+---
+
 ## 8. 优先级与里程碑
 
 | 优先级 | 需求 |
@@ -258,3 +344,5 @@ class RuleProvider:
 | 2026-10-03 | v1.1 | **实施后回填 5 处口径**（代码级核实，不改需求边界）：① FR-005 增「首个命中」细化 —— 获胜判据为「**条件命中且实际写入成功**」（首个能产出值的规则），分组维度实测 `target_field`；② FR-007 增一期边界 —— 来源标记 `auto_filled_fields` **不跨请求持久化**（TBD-3），`RECOMPUTE_CLEAR` 仅对同一请求内多次重判生效，`previously_auto_filled` 形参已预留；③ FR-010 增实现口径 —— 日志载体 `DefaultLogEntry`，**不并入 `RuleExecutionReport`**（T-13），经 `apply_defaults` 返回值 + `_log_default_rules` 输出，`skip_reason` 五枚举实测值；④ §9.3 增字段名回填 —— 实为 `source_value` / `apply_mode` / `recompute`（草案名 `overwrite` / `on_recompute` / `source_ref`）及来源标记为 `set`；⑤ FR-011 前次已回填（`get_rules` 原样返回） |
 | 2026-10-03 | v1.2 | **二期开工（N2 部分落地）**：§8 二期行拆分 —— dry-run 已落地 v1（`dry_run_defaults` + `POST /api/v1/meta/<object_type>/defaults-preview`，浅拷贝 / 零写库 / 零审计），其余（拆分·分摊、集合确定、汇总补强、定价、在线配置、规则版本化）仍在队列；N2 同步标注「范围为守卫段以内的 DEFAULT 规则链」；撤销「紧接着补校验」（已核实具备）。实现细节见实施计划 M5 |
 | 2026-10-03 | v1.3 | **二期·汇总补强(M6) + 拆分/分摊(M7) 落地回填**：§8 二期行新增 M6（按父分组取值聚合）/M7（1→N 守恒 + 2 个 BO Action）已落地说明，并从「仍在队列」移除这两项；FR-012 追加实施回填 —— 拆分/分摊**仍以独立服务 + BO Action 交付、未引入 `RuleType.ALLOCATION`、边界不变**，反向汇总的「按父分组取值聚合」M6 已落地、仍缺「子行增删改 → 父行重算」。实现细节见实施计划 M6 / M7 |
+| 2026-10-05 | v1.4 | **补 §7A「分层归属」整节（纯文档，未改需求边界、未改代码行为）**。起因：与 foundation 蓝图（已把规则模型归入「**机制**」）及 10-03 消费与分层研究（已给「**三段式**」框架）**口径不对齐**——本 Spec 与实施计划通篇未对"规则模型属于哪一层 / 是否依赖主数据"作任何声明，属**文档缺口而非设计缺陷**。§7A 内容：① 结论一句话（机制层非对象层）+ 正确问法；② 三段落点表（BO 声明层 / EO 实例层 / 基础设施层）及其代码落点；③ **「是否依赖主数据」的代码级结论：真实依赖 0 处**——8 个文件逐处人工判定，全部命中为假依赖（内置容器 `.items()` / 形参名 / E2E 注释 / `source_item` 命名巧合），取数通道仅 3 条且全领域中立，决定性证据是 `build_cross_object_locals` 签名无任何 BO 类型参数；同时澄清 `registry.get(ref.object_id)` 是**依赖反转**（绑定关系由规则声明携带）而非耦合，这正是蓝图 §:647 判定 `default_by_priority` 可直接复用的依据；④ §7A.4 登记**四条待解耦合**（#1 已处置、#2 原判断已推翻、#3 能力缺口、#4 散落 12+ 处）；⑤ §7A.5 登记**已知既存缺陷**。header 关联文档同步补 10-03 与 foundation 蓝图两份。<br>**配套代码与文档改动（同批）**：① `condition_parser._HIERARCHY_FK` 由硬编码 6 张维度表改为 `hierarchies.yaml levels[]` 驱动（SSOT，「yaml 优先 + 硬编码兜底 + 解析失败告警」范式），**实测与原硬编码逐项相等**，9 组用例经 git stash 基线 diff 验证输出**逐字节一致**；`_DIM_CHILD_TABLES` 刻意保持静态并加注释（机械推导会改变既有 SQL 语义）；② `meta/schemas/README.md` 补「两类性质完全不同的对象」判据 + 业务对象四分区（锚层 / 支持对象含 uom 换算闭环 / 事务 / 平台元数据自身）+ 「规则模型的归属」小节 + S19 主数据删除约束提示。<br>**§7A.4 #2 纠正**：10-03 研究 §:118-121 判断「条件解析与求值是两条未打通的路径」，**深入实现层后推翻**——三者实为流水线不同段（Converter 文本→结构化供迁移脚本 / Parser 结构化→SQL 供权限过滤 / Evaluator 文本→bool 供对象级前置条件），②③分叉是**必要的**（一个要 SQL、一个要内存 bool），不合并。 |
+| 2026-10-06 | v1.5 | **修复 §7A.5 递归操作符测试失配（7 failed / 3 passed → 10 passed，未改生产代码）**。经 git stash 基线对照确认 7 个失败**非 v1.4 改动引入**，而是测试与实现的 `value` 契约失配：测试传裸 int（`'value': 101`），实现要求 dict（`parent_field`/`parent_value`/`parent_dim`/`child_dim`/`child_id`/`target_dim`），`int.get()` 触发 `AttributeError`。判定**改测试而非改实现**，依据为权威设计 Spec 09 §3.2 明确 `value` 为 dict、实现与之一致，且全仓库检索这些键**仅命中实现自身**、YAML 中仅见于注释 → 该路径无生产调用方（死代码），契约对齐无存量影响。同时消除 3 个「期望异常」用例的**假阳性**（断言原为 `pytest.raises((ValueError, Exception))`，`AttributeError` 被父类 `Exception` 兜住），收紧为 `pytest.raises(ValueError, match=...)` 并逐条匹配错误消息。§7A.5 相应改写为「已修复」并保留一条**遗留疑点**：`DESCENDANTS_OF` 外层 `field IN (...)` 在 `field='domain_id'` 时的语义是否应由调用方传更深的 `field`，待后续真正接线时确认。 |
