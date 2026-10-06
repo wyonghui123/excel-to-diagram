@@ -785,7 +785,7 @@ class TestCompositionCountSortRegression(TestComputedFieldApiHelper):
 class TestCompositionCountFilter(TestComputedFieldApiHelper):
     """G1: composition/parent_child 关联类型 count_children 字段过滤。
 
-    ⚠️ 已知问题 (2026-06-09):
+    [已知问题] (2026-06-09):
        _try_build_computed_filter 仅支持 many_to_many/one_to_many,
        不支持 composition/parent_child。本类测试预期失败，
        用作后续修复的测试依据。
