@@ -48,10 +48,14 @@ semantics:
     - pricing result
 
 deletion_policy:
-  # 【有意不设 restrict_on】结果是历史快照，删除是业务动作（如作废重算），
-  # 不应被过程/单据的删除策略拦住。对标 Oracle Charge 可单独 delete。
+  # 【反向引用 · 2026-10-06】adjustments.original_result_id 现为指向本表的真外键；
+  #   按仓库既有写法登记为 restrict。过程/单据仍不设（结果是历史快照，
+  #   删除是业务动作，如作废重算，对标 Oracle Charge 可单独 delete）。
   mode: restrict
-  restrict_on: []
+  restrict_on:
+    - table: adjustments
+      foreign_key: original_result_id
+      message: 该定价结果存在追溯调整记录，请先处理相关调整后再删除
   cascade_delete: []
 
 audit:
@@ -596,16 +600,15 @@ fields:
 
   - id: pricing_period_id
     name: 价格期间
-    type: string
+    type: integer
     db_column: pricing_period_id
     required: false
     nullable: true
-    max_length: 50
-    description: 价格期间 ID（引用 pricing_periods.code）
+    description: 价格期间 ID（引用 pricing_periods.id）
     semantics:
       meaning: 价格期间（对标 SAP 有效期）
     ui:
-      widget: input
+      widget: reference
 
   - id: external_rate_source_id
     name: 外部率源
@@ -738,7 +741,35 @@ indexes:
   - fields: [status]
     name: idx_calc_result_status
 
-relations: []
+relations:
+  # 【真外键 · 2026-10-06】三条前向引用收紧为 DB 级 FK（N:1）。
+  #   allocation_rule_id / external_rate_source_id / pricing_period_id 均已为整型列。
+  - id: calc_result_to_allocation_rule
+    name: 分摊规则
+    type: reference
+    target: allocation_rule
+    source_field: allocation_rule_id
+    target_field: id
+    cardinality: N:1
+    description: 本行采用的分摊规则（FR-013）
+
+  - id: calc_result_to_external_rate_source
+    name: 外部率源
+    type: reference
+    target: external_rate_source
+    source_field: external_rate_source_id
+    target_field: id
+    cardinality: N:1
+    description: 本行采用的外部价格源（FR-015）
+
+  - id: calc_result_to_pricing_period
+    name: 计价期
+    type: reference
+    target: pricing_period
+    source_field: pricing_period_id
+    target_field: id
+    cardinality: N:1
+    description: 本行采用的计价期（FR-015）
 
 ui_view_config:
   showChangeHistory: true

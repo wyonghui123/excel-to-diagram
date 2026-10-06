@@ -1,0 +1,303 @@
+# 追溯调整（Adjustment）— 定价元模型 P2 对象补齐（Spec §9.3.1 C 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 C 表（`adjustment` 行）/ TBD-8 + D22（override 复用本对象，不另立）
+# 定位: 对**既有定价结果**的追溯 / 补差 / 改价记录（SAP 后续借 / 贷项 + 返利结算；
+#       Oracle retroactive price adjustment；SF `pricing element = Override`）
+#
+# 【真外键 · 2026-10-06】original_result_id → calc_results.id 建 DB 级 FK（N:1），
+#   与 calc_detail.result_id（有意不建 FK 的快照明细）区别：调整是对**特定结果行**的
+#   追溯动作，必须是真实存在的结果，故收紧为真外键。
+#
+# 【条件必填 · 交由服务层校验】`reason` 在 `adjustment_type = override` 时必填
+#   （Spec v1.5 拍板 TBD-8 + D22）；平台字段级**不支持条件必填**，故此处声明
+#   `required: false`，条件必填规则留给服务层实现。
+#
+# 【业务键】事务数据、无 `code`；参照 calc_detail 的做法用「引用 + 判别列」组合，
+#   本表取 [original_result_id, adjustment_type] 作为去重锚点。
+
+id: adjustment
+name: 追溯调整
+table_name: adjustments
+description: 追溯调整——对既有定价结果的补差 / 追溯改价 / 手工覆盖
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价结果的追溯调整行
+  category: transactional
+  bo_sub_category: document
+  business_key: [original_result_id, adjustment_type]
+  display_name_field: id
+  aliases:
+    - 追溯调整
+    - 补差
+    - 改价
+    - adjustment
+    - retroactive adjustment
+
+deletion_policy:
+  # 调整是业务动作记录，本身不被其他对象引用；删除由业务层判定
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - original_result_id
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - original_result_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: original_result_id
+    name: 原结果ID
+    type: integer
+    db_column: original_result_id
+    required: false
+    nullable: true
+    description: 被调整的原定价结果 ID（引用 calc_results.id）
+    semantics:
+      meaning: 原定价结果行 ID
+    ui:
+      widget: reference
+
+  - id: adjustment_type
+    name: 调整类型
+    type: string
+    db_column: adjustment_type
+    required: true
+    default: subsequent_debit
+    description: 追溯调整的类型
+    enum_values:
+      - value: subsequent_debit
+        label: 后续借项
+        color: warning
+        is_initial: true
+        description: 事后补收（对标 SAP 后续借项）
+      - value: subsequent_credit
+        label: 后续贷项
+        color: success
+        description: 事后退还（对标 SAP 后续贷项）
+      - value: retro_price_change
+        label: 追溯改价
+        color: info
+        description: 价格变更追溯回算
+      - value: rebate_settlement
+        label: 返利结算
+        color: primary
+        description: 返利 / 折扣结算
+      - value: delta_accrual
+        label: 补提
+        color: info
+        description: 差额计提
+      - value: provisional_settlement
+        label: 暂估结算
+        color: info
+        description: 暂估价转正式结算
+      - value: override
+        label: 手工覆盖
+        color: danger
+        description: 人工改价（reason 必填，Spec v1.5 TBD-8 + D22）
+    semantics:
+      meaning: 调整类型（对标 SAP 后续借/贷项、SF Override、Oracle override_reason）
+      filterable: true
+      filter_type: enum
+      filter_label: 调整类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: delta_amount
+    name: 调整金额
+    type: number
+    db_column: delta_amount
+    required: true
+    default: 0
+    description: 调整金额（正 = 追加，负 = 冲减）
+    semantics:
+      meaning: 本次调整的金额差额
+    ui:
+      widget: number
+
+  - id: effective_period
+    name: 生效期间
+    type: string
+    db_column: effective_period
+    required: false
+    nullable: true
+    max_length: 50
+    description: 调整生效期间（如 2026-10），空 = 立即生效
+    semantics:
+      meaning: 调整生效期间
+    ui:
+      widget: input
+
+  - id: posted_flag
+    name: 已过账
+    type: boolean
+    db_column: posted_flag
+    required: true
+    default: false
+    description: 是否已过账到财务
+    semantics:
+      meaning: 过账标记；true = 已过账，不可再改
+    ui:
+      widget: switch
+
+  - id: reason
+    name: 调整原因
+    type: text
+    db_column: reason
+    required: false
+    nullable: true
+    max_length: 500
+    description: >
+      调整原因。**`adjustment_type = override` 时必填**
+      （Spec v1.5 拍板 TBD-8 + D22）；平台字段级不支持条件必填，故声明 required: false，
+      条件必填由服务层校验。
+    semantics:
+      meaning: 调整原因说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [original_result_id]
+    name: idx_adjustment_original_result
+  - fields: [adjustment_type]
+    name: idx_adjustment_type
+
+relations:
+  - id: adjustment_to_result
+    name: 原定价结果
+    type: reference
+    target: calc_result
+    source_field: original_result_id
+    target_field: id
+    cardinality: N:1
+    description: 调整所指向的原定价结果行
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 追溯调整管理
+    description: 对既有定价结果的补差 / 追溯改价 / 手工覆盖
+    columns:
+      - field: original_result_id
+        width: 110
+        type: number
+      - field: adjustment_type
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: delta_amount
+        width: 120
+        type: number
+        align: right
+      - field: effective_period
+        width: 120
+      - field: posted_flag
+        width: 90
+        type: boolean
+        align: center
+      - field: created_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - reason
+    defaultSort:
+      field: created_at
+      order: desc
+
+  form:
+    title: 追溯调整信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [original_result_id, adjustment_type]
+          - fields: [delta_amount, effective_period]
+          - fields: [posted_flag]
+      - title: 其他信息
+        columns:
+          - fields: [reason]
+
+  detail:
+    layout: tabs
+    title: "调整 #{record.id} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - original_result_id
+          - adjustment_type
+          - delta_amount
+          - effective_period
+          - posted_flag
+          - reason
+
+category_config:
+  create_permission: adjustment:create
+  update_permission: adjustment:update
+  delete_permission: adjustment:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: original_result_id, adjustment_type

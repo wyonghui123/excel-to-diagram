@@ -1,0 +1,358 @@
+# 计价期（Pricing Period）— 定价元模型 P2 对象补齐（Spec §9.3.1 A 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表（`pricing_period` 行）/ FR-015（事实扩展）
+# 定位: 变量取价的计价期定义——按装运日 / 收货日 / 开票日或固定区间取均价
+#       对标 SAP F&A 计价期；Salesforce `PriceRevisionPolicy`
+#       被 `calc_result.pricing_period_id` 引用（已由 string 引 code 收紧为整型真外键）。
+#
+# 【C-T0-6 · 零主数据依赖】无主数据外键引用。
+
+id: pricing_period
+name: 计价期
+table_name: pricing_periods
+description: 计价期——按单据日期或固定区间取均价的期间定义
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价计价期
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 计价期
+    - pricing period
+    - price revision policy
+
+deletion_policy:
+  # 被 calc_results.pricing_period_id 引用（真外键）——服务层预检给友好提示，
+  #   DB 级 FK 兜底；与 address/calendar 的做法一致。
+  mode: restrict
+  restrict_on:
+    - table: calc_results
+      foreign_key: pricing_period_id
+      message: 该计价期已被定价结果引用，请先处理相关结果后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 计价期编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 计价期唯一编码
+    semantics:
+      meaning: 计价期业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 计价期名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 计价期显示名称
+    semantics:
+      meaning: 计价期显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: period_type
+    name: 期间类型
+    type: string
+    db_column: period_type
+    required: true
+    default: shipment_date
+    description: 计价期的起算基准
+    enum_values:
+      - value: shipment_date
+        label: 装运日
+        color: primary
+        is_initial: true
+        description: 以装运日为基准（对标 SAP 计价期）
+      - value: receipt_date
+        label: 收货日
+        color: info
+        description: 以收货日为基准
+      - value: invoice_date
+        label: 开票日
+        color: info
+        description: 以开票日为基准
+      - value: fixed_range
+        label: 固定区间
+        color: warning
+        description: 固定起止区间（不随单据日期浮动）
+    semantics:
+      meaning: 计价期起算基准
+      filterable: true
+      filter_type: enum
+      filter_label: 期间类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: start_offset
+    name: 起始偏移
+    type: integer
+    db_column: start_offset
+    required: true
+    default: 0
+    description: 相对基准日的起始偏移（天，可负）
+    semantics:
+      meaning: 计价期起始偏移天数
+    ui:
+      widget: number
+
+  - id: end_offset
+    name: 结束偏移
+    type: integer
+    db_column: end_offset
+    required: true
+    default: 0
+    description: 相对基准日的结束偏移（天，可负）
+    semantics:
+      meaning: 计价期结束偏移天数
+    ui:
+      widget: number
+
+  - id: average_basis
+    name: 均价基准
+    type: string
+    db_column: average_basis
+    required: true
+    default: average
+    description: 计价期内取价的口径
+    enum_values:
+      - value: close
+        label: 收盘价
+        color: primary
+        description: 取期末收盘价
+      - value: average
+        label: 均价
+        color: success
+        is_initial: true
+        description: 取区间均价
+      - value: first
+        label: 首价
+        color: info
+        description: 取区间首个报价
+      - value: last
+        label: 末价
+        color: info
+        description: 取区间最后报价
+    semantics:
+      meaning: 计价期取价口径
+      filterable: true
+      filter_type: enum
+      filter_label: 均价基准
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: rounding
+    name: 取整方式
+    type: string
+    db_column: rounding
+    required: false
+    nullable: true
+    max_length: 20
+    description: 计价结果的取整方式（none / round / ceil / floor），空 = 不取整
+    enum_values:
+      - value: none
+        label: 不取整
+        color: default
+      - value: round
+        label: 四舍五入
+        color: primary
+      - value: ceil
+        label: 向上取整
+        color: info
+      - value: floor
+        label: 向下取整
+        color: info
+    semantics:
+      meaning: 计价结果取整方式
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 计价期业务说明
+    semantics:
+      meaning: 计价期说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_pricing_period_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 计价期管理
+    description: 按单据日期或固定区间取均价的期间定义
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: period_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: start_offset
+        width: 100
+        type: number
+        align: right
+      - field: end_offset
+        width: 100
+        type: number
+        align: right
+      - field: average_basis
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建计价期
+        icon: plus
+        type: primary
+        permission: pricing_period:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 计价期信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [period_type]
+          - fields: [start_offset, end_offset]
+      - title: 取价口径
+        columns:
+          - fields: [average_basis, rounding]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - period_type
+          - start_offset
+          - end_offset
+          - average_basis
+          - rounding
+          - description
+
+category_config:
+  create_permission: pricing_period:create
+  update_permission: pricing_period:update
+  delete_permission: pricing_period:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

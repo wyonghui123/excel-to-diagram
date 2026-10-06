@@ -1,0 +1,321 @@
+# 外部价格源（External Rate Source）— 定价元模型 P2 对象补齐（Spec §9.3.1 A 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表（`external_rate_source` 行）/ FR-015
+# 定位: 外部行情 / 指数的取价来源定义（对标 SAP MIC + DCS + Quotation；SF `IndexRate`）
+#       被 `calc_result.external_rate_source_id`（FR-015 实现期接入）引用。
+#
+# 【calendar_id 真外键】calendar_id → 作业日历（calendar）N:1 ——
+#   价格源按日历取报价（如 LME 按交易日），calendar.yaml 的 table_name = calendars。
+#
+# 【C-T0-6 · 零主数据依赖】除 calendar 外不引用主数据。
+
+id: external_rate_source
+name: 外部价格源
+table_name: external_rate_sources
+description: 外部价格源——外部行情 / 指数取价来源定义
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 外部价格源（行情 / 指数）
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 外部价格源
+    - 外部率源
+    - external rate source
+    - index rate
+
+deletion_policy:
+  # 被 calc_results.external_rate_source_id 引用（真外键）——服务层预检给友好提示，
+  #   DB 级 FK 兜底；与 address/calendar 的做法一致。
+  mode: restrict
+  restrict_on:
+    - table: calc_results
+      foreign_key: external_rate_source_id
+      message: 该外部价格源已被定价结果引用，请先处理相关结果后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 来源编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 外部价格源唯一编码
+    semantics:
+      meaning: 外部价格源业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 来源名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 外部价格源显示名称
+    semantics:
+      meaning: 外部价格源显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: source
+    name: 来源类型
+    type: string
+    db_column: source
+    required: true
+    default: index
+    description: 外部价格源类型
+    enum_values:
+      - value: platts
+        label: Platts
+        color: primary
+        description: Platts 商品行情
+      - value: lme
+        label: LME
+        color: info
+        description: 伦敦金属交易所行情
+      - value: ice
+        label: ICE
+        color: info
+        description: 洲际交易所行情
+      - value: index
+        label: 指数
+        color: success
+        is_initial: true
+        description: 通用指数
+      - value: custom
+        label: 自定义
+        color: default
+        description: 自定义外部源
+    semantics:
+      meaning: 外部价格源类型
+      filterable: true
+      filter_type: enum
+      filter_label: 来源类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: quote_code
+    name: 报价代码
+    type: string
+    db_column: quote_code
+    required: false
+    nullable: true
+    max_length: 50
+    description: 外部源的报价 / 合约代码（如行情代码），空 = 按来源默认
+    semantics:
+      meaning: 外部报价代码
+    ui:
+      widget: input
+
+  - id: calendar_id
+    name: 取价日历
+    type: integer
+    db_column: calendar_id
+    required: false
+    nullable: true
+    description: 取价所依据的作业日历 ID（引用 calendars.id），空 = 自然日
+    semantics:
+      meaning: 取价日历（交易日基准）
+    ui:
+      widget: reference
+
+  - id: fallback_rule
+    name: 兜底规则
+    type: string
+    db_column: fallback_rule
+    required: false
+    nullable: true
+    max_length: 200
+    description: 取不到外部报价时的兜底规则描述，空 = 不兜底（计算报错）
+    semantics:
+      meaning: 外部报价缺失时的兜底规则
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 外部价格源业务说明
+    semantics:
+      meaning: 外部价格源说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_external_rate_source_code
+  - fields: [calendar_id]
+    name: idx_external_rate_source_calendar
+
+relations:
+  - id: external_rate_source_to_calendar
+    name: 取价日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 外部价格源的取价日历
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 外部价格源管理
+    description: 外部行情 / 指数取价来源定义
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: source
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: quote_code
+        width: 140
+      - field: calendar_id
+        width: 120
+        type: number
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - quote_code
+      - description
+    actions:
+      - id: create
+        label: 新建外部价格源
+        icon: plus
+        type: primary
+        permission: external_rate_source:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 外部价格源信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [source, quote_code]
+      - title: 取价
+        columns:
+          - fields: [calendar_id, fallback_rule]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - source
+          - quote_code
+          - calendar_id
+          - fallback_rule
+          - description
+
+category_config:
+  create_permission: external_rate_source:create
+  update_permission: external_rate_source:update
+  delete_permission: external_rate_source:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

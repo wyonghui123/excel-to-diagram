@@ -1,0 +1,368 @@
+# 分摊规则（Allocation Rule）— 定价元模型 P2 对象补齐（Spec §9.3.1 A 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表（`allocation_rule` 行）/ FR-013 / §9.3.1 B2「对偶关系」
+# 定位: 把**一个金额**按配置基数摊到**多行**（1→N）——成本/费用归集的分摊定义
+#       对标 Oracle LCM 六种分摊基数；SF DDS 规则决策表
+#
+# 【对偶关系 · Spec §9.3.1 B2】
+#   本表（1→N，摊金额）与 `rate_record.allocation_weight`（N→1，合率）互为对偶，
+#   共用同一数学形式 `Σ(rateᵢ × base × weightᵢ)` 的两个方向。
+#
+# 【六种分摊基数 · Spec §9.3.1 A 表】
+#   basis ∈ {equal, value, quantity, weight, volume, manual} —— 取自 Oracle LCM。
+#
+# 【C-T0-6 · 零主数据依赖】无主数据外键引用。
+
+id: allocation_rule
+name: 分摊规则
+table_name: allocation_rules
+description: 分摊规则——把一个金额按配置基数摊到多行（1→N）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 成本/费用分摊规则（1→N 摊金额）
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 分摊规则
+    - allocation rule
+    - charge basis
+    - 归集规则
+
+deletion_policy:
+  # 被 calc_results.allocation_rule_id 引用（真外键）——服务层预检给友好提示，
+  #   DB 级 FK 兜底；与 address/calendar 的做法一致。
+  mode: restrict
+  restrict_on:
+    - table: calc_results
+      foreign_key: allocation_rule_id
+      message: 该分摊规则已被定价结果引用，请先处理相关结果后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 规则编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 分摊规则唯一编码
+    semantics:
+      meaning: 分摊规则业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 规则名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 分摊规则显示名称
+    semantics:
+      meaning: 分摊规则显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: basis
+    name: 分摊基数
+    type: string
+    db_column: basis
+    required: true
+    default: equal
+    description: 分摊所依据的基数（Oracle LCM 六种基数）
+    enum_values:
+      - value: equal
+        label: 平均
+        color: default
+        is_initial: true
+        description: 均分到各行（各占 1/N）
+      - value: value
+        label: 价值
+        color: primary
+        description: 按行价值占比分摊
+      - value: quantity
+        label: 数量
+        color: info
+        description: 按行数量占比分摊
+      - value: weight
+        label: 重量
+        color: info
+        description: 按行重量占比分摊
+      - value: volume
+        label: 体积
+        color: info
+        description: 按行体积占比分摊
+      - value: manual
+        label: 手工系数
+        color: warning
+        description: 按手工系数（manual_factor）分摊
+    semantics:
+      meaning: 分摊基数；manual 时取 manual_factor
+      filterable: true
+      filter_type: enum
+      filter_label: 分摊基数
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: manual_factor
+    name: 手工系数
+    type: number
+    db_column: manual_factor
+    required: false
+    nullable: true
+    description: 手工分摊系数（basis = manual 时使用）
+    semantics:
+      meaning: 手工分摊系数
+    ui:
+      widget: number
+
+  - id: group_by
+    name: 分组维度
+    type: string
+    db_column: group_by
+    required: false
+    nullable: true
+    max_length: 100
+    description: 分摊的分组维度（如按行项目 / 成本中心分组），空 = 不分组
+    semantics:
+      meaning: 分摊分组维度
+    ui:
+      widget: input
+
+  - id: rounding
+    name: 取整方式
+    type: string
+    db_column: rounding
+    required: false
+    nullable: true
+    max_length: 20
+    description: 分摊结果取整方式（none / round / ceil / floor），空 = 不取整
+    enum_values:
+      - value: none
+        label: 不取整
+        color: default
+      - value: round
+        label: 四舍五入
+        color: primary
+      - value: ceil
+        label: 向上取整
+        color: info
+      - value: floor
+        label: 向下取整
+        color: info
+    semantics:
+      meaning: 分摊结果取整方式
+    ui:
+      widget: select
+
+  - id: floor
+    name: 地板价
+    type: number
+    db_column: floor
+    required: false
+    nullable: true
+    description: 分摊结果的下限（地板价），空 = 不下限
+    semantics:
+      meaning: 分摊结果下限
+    ui:
+      widget: number
+
+  - id: target
+    name: 归集方向
+    type: string
+    db_column: target
+    required: true
+    default: cost
+    description: 分摊结果归集到成本或费用
+    enum_values:
+      - value: cost
+        label: 成本
+        color: warning
+        is_initial: true
+      - value: expense
+        label: 费用
+        color: danger
+    semantics:
+      meaning: 归集方向（对标 LCM Charge Basis）
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 分摊规则业务说明
+    semantics:
+      meaning: 分摊规则说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_allocation_rule_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 分摊规则管理
+    description: 1→N 把金额摊到多行的归集规则
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: basis
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: target
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 260
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建分摊规则
+        icon: plus
+        type: primary
+        permission: allocation_rule:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 分摊规则信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [basis, target]
+      - title: 计算参数
+        columns:
+          - fields: [manual_factor, group_by]
+          - fields: [rounding, floor]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - basis
+          - target
+          - manual_factor
+          - group_by
+          - rounding
+          - floor
+          - description
+
+category_config:
+  create_permission: allocation_rule:create
+  update_permission: allocation_rule:update
+  delete_permission: allocation_rule:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

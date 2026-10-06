@@ -1,0 +1,266 @@
+# 条件更新组（Usage Group / 累计用量组）— 定价元模型 P2 对象补齐（Spec §9.3.1 A 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表（`usage_group` 行）/ FR-016
+# 定位: 驱动「累计用量」的上限配置——合同量用满即失效（对标 SAP Condition Update）
+#       组给上限，`cumulative_usage` 记实际累计值。
+#
+# 【C-T0-6 · 零主数据依赖】无主数据外键引用。
+
+id: usage_group
+name: 条件更新组
+table_name: usage_groups
+description: 条件更新组（累计用量组）——累计用量的上限配置
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 累计用量上限组
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 条件更新组
+    - 累计用量组
+    - usage group
+    - condition update
+
+deletion_policy:
+  # 被 cumulative_usages.usage_group_id 引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: cumulative_usages
+      foreign_key: usage_group_id
+      message: 该条件更新组已被累计用量引用，请先处理相关累计用量后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 条件更新组唯一编码
+    semantics:
+      meaning: 条件更新组业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 条件更新组显示名称
+    semantics:
+      meaning: 条件更新组显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: max_amount
+    name: 金额上限
+    type: number
+    db_column: max_amount
+    required: false
+    nullable: true
+    description: 累计金额上限，空 = 不限制
+    semantics:
+      meaning: 累计金额上限
+    ui:
+      widget: number
+
+  - id: max_quantity
+    name: 数量上限
+    type: number
+    db_column: max_quantity
+    required: false
+    nullable: true
+    description: 累计数量上限，空 = 不限制
+    semantics:
+      meaning: 累计数量上限
+    ui:
+      widget: number
+
+  - id: max_documents
+    name: 单据数上限
+    type: integer
+    db_column: max_documents
+    required: false
+    nullable: true
+    description: 累计单据数上限，空 = 不限制
+    semantics:
+      meaning: 累计单据数上限
+    ui:
+      widget: number
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 条件更新组业务说明
+    semantics:
+      meaning: 条件更新组说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_usage_group_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 条件更新组管理
+    description: 累计用量上限配置（量用满即失效）
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: max_amount
+        width: 120
+        type: number
+        align: right
+      - field: max_quantity
+        width: 120
+        type: number
+        align: right
+      - field: max_documents
+        width: 110
+        type: number
+        align: right
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建条件更新组
+        icon: plus
+        type: primary
+        permission: usage_group:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 条件更新组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [max_amount, max_quantity]
+          - fields: [max_documents]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - max_amount
+          - max_quantity
+          - max_documents
+          - description
+
+category_config:
+  create_permission: usage_group:create
+  update_permission: usage_group:update
+  delete_permission: usage_group:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

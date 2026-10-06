@@ -1,0 +1,250 @@
+# 累计用量（Cumulative Usage / 累计值）— 定价元模型 P2 对象补齐（Spec §9.3.1 B 表）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 B 表（`cumulative_usage` 行）/ §9.3.1 A 表（`usage_group` 行）/ FR-016
+# 定位: 某条费率记录**跨单据累计已用量**——合同量用满即失效
+#       （对标 SAP Condition Update）。由 usage_group 给上限驱动。
+#
+# 【唯一锚点】一条费率记录对应一个累计计数器 ⇒ rate_record_id 唯一
+#   （indexes 里 unique）。rate_record_id / usage_group_id 均为真外键（N:1）。
+#
+# 【C-T0-6 · 零主数据依赖】仅引用本引擎自身对象。
+
+id: cumulative_usage
+name: 累计用量
+table_name: cumulative_usages
+description: 累计用量——费率记录跨单据累计已用量（合同量用满失效）
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 费率记录的跨单据累计用量
+  category: transactional
+  business_key: [rate_record_id]
+  display_name_field: id
+  aliases:
+    - 累计用量
+    - 累计值
+    - cumulative usage
+    - condition update
+
+deletion_policy:
+  # 累计值是费率记录的从属计数器；删除由业务层随费率记录生命周期处理
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - rate_record_id
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - rate_record_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: rate_record_id
+    name: 费率记录ID
+    type: integer
+    db_column: rate_record_id
+    required: true
+    description: 所属费率记录 ID（引用 rate_records.id）。一条记录一个计数器
+    semantics:
+      meaning: 所属费率记录 ID
+    ui:
+      widget: reference
+
+  - id: usage_group_id
+    name: 条件更新组
+    type: integer
+    db_column: usage_group_id
+    required: false
+    nullable: true
+    description: 累计上限所依据的条件更新组 ID（引用 usage_groups.id），空 = 不设上限
+    semantics:
+      meaning: 条件更新组（累计上限来源）
+    ui:
+      widget: reference
+
+  - id: used_amount
+    name: 已用金额
+    type: number
+    db_column: used_amount
+    required: true
+    default: 0
+    description: 累计已用金额
+    semantics:
+      meaning: 累计已用金额
+    ui:
+      widget: number
+
+  - id: used_quantity
+    name: 已用数量
+    type: number
+    db_column: used_quantity
+    required: true
+    default: 0
+    description: 累计已用数量
+    semantics:
+      meaning: 累计已用数量
+    ui:
+      widget: number
+
+  - id: used_documents
+    name: 已用单据数
+    type: integer
+    db_column: used_documents
+    required: true
+    default: 0
+    description: 累计已用单据数
+    semantics:
+      meaning: 累计已用单据数
+    ui:
+      widget: number
+
+  - id: last_used_at
+    name: 最后使用时间
+    type: datetime
+    db_column: last_used_at
+    nullable: true
+    description: 最近一次累计发生时间
+    semantics:
+      meaning: 最近一次累计发生时间
+    ui:
+      widget: datetime
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 一条费率记录一个累计计数器 ⇒ rate_record_id 唯一
+  - fields: [rate_record_id]
+    unique: true
+    name: idx_cumulative_usage_rate_record
+  - fields: [usage_group_id]
+    name: idx_cumulative_usage_group
+
+relations:
+  - id: cumulative_usage_to_rate_record
+    name: 费率记录
+    type: reference
+    target: rate_record
+    source_field: rate_record_id
+    target_field: id
+    cardinality: N:1
+    description: 累计值所属的费率记录
+
+  - id: cumulative_usage_to_usage_group
+    name: 条件更新组
+    type: reference
+    target: usage_group
+    source_field: usage_group_id
+    target_field: id
+    cardinality: N:1
+    description: 累计上限所依据的条件更新组
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 累计用量
+    description: 费率记录跨单据累计已用量
+    columns:
+      - field: rate_record_id
+        width: 120
+        type: number
+      - field: usage_group_id
+        width: 120
+        type: number
+      - field: used_amount
+        width: 120
+        type: number
+        align: right
+      - field: used_quantity
+        width: 120
+        type: number
+        align: right
+      - field: used_documents
+        width: 110
+        type: number
+        align: right
+      - field: last_used_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: rate_record_id
+      order: asc
+
+  detail:
+    layout: tabs
+    title: "累计用量 #{record.id} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - rate_record_id
+          - usage_group_id
+          - used_amount
+          - used_quantity
+          - used_documents
+          - last_used_at
+
+category_config:
+  create_permission: cumulative_usage:create
+  update_permission: cumulative_usage:update
+  delete_permission: cumulative_usage:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: rate_record_id
