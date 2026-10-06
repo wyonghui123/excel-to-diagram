@@ -22,6 +22,9 @@ from meta.core.lookup_resolver import ResolutionError  # noqa: E402
 from meta.core.models import registry  # noqa: E402
 from meta.core.schema_generator import SchemaGenerator  # noqa: E402
 from meta.services.pricing_service import PricingError, PricingService  # noqa: E402
+from meta.tests.factories._raw_sql_bridge import (  # noqa: E402
+    delete, insert, update,
+)
 
 TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
           "exclusion_group", "rate_table", "rate_record",
@@ -59,36 +62,33 @@ def _seed(ds):
       calc_procedures.steps   = 计算步骤 [{seq, element_type, ...}]
     """
     now = "2026-10-06 00:00:00"
-    ds.execute("INSERT INTO key_schemas (id,code,name,key_fields,created_at,updated_at)"
-               " VALUES (1,'KEY_CUST','客户键','[\"customer\"]',?,?)", (now, now))
-    ds.execute("INSERT INTO lookup_sequences (id,code,name,steps,created_at,updated_at)"
-               " VALUES (1,'SEQ_STD','标准序列',"
-               "'[{\"seq\":1,\"key_schema_id\":1}]',?,?)", (now, now))
-    ds.execute("INSERT INTO rate_types (id,code,name,rate_class,calc_type,rate_source,"
-               "sign,rounding,exclusion_group_id,manual_allowed,mandatory,statistical,"
-               "lookup_sequence_id,created_at,updated_at)"
-               " VALUES (1,'PRICE_BASE','基本价格','price','percent','rate_record',"
-               "'+',NULL,NULL,0,0,0,1,?,?)", (now, now))
-    ds.execute("INSERT INTO rate_tables (id,code,name,type,currency,owner_org_id,"
-               "status,created_at,updated_at)"
-               " VALUES (1,'PL_STD','标准价目表','standard','CNY',NULL,'approved',?,?)",
-               (now, now))
+    insert(ds, "key_schemas", id=1, code='KEY_CUST', name='客户键',
+           key_fields='["customer"]', created_at=now, updated_at=now)
+    insert(ds, "lookup_sequences", id=1, code='SEQ_STD', name='标准序列',
+           steps='[{"seq":1,"key_schema_id":1}]', created_at=now, updated_at=now)
+    insert(ds, "rate_types", id=1, code='PRICE_BASE', name='基本价格',
+           rate_class='price', calc_type='percent', rate_source='rate_record',
+           sign='+', rounding=None, exclusion_group_id=None, manual_allowed=0,
+           mandatory=0, statistical=0, lookup_sequence_id=1,
+           created_at=now, updated_at=now)
+    insert(ds, "rate_tables", id=1, code='PL_STD', name='标准价目表',
+           type='standard', currency='CNY', owner_org_id=None,
+           status='approved', created_at=now, updated_at=now)
     # 过程：先 formula 取查表命中金额，再 round 产出展示值
-    ds.execute("INSERT INTO calc_procedures (id,code,name,procedure_type,"
-               "result_semantic,currency,steps,subtotal_keys,created_at,updated_at)"
-               " VALUES (1,'PROC_STD','标准过程','pricing','price','CNY',"
-               "'[{\"seq\":1,\"element_type\":\"formula\","
-               "\"params\":{\"expr\":\"lookup_amount\"},"
-               "\"subtotal_key\":\"s1\"},"
-               "{\"seq\":2,\"element_type\":\"round\","
-               "\"params\":{\"mode\":\"round\",\"digits\":2}}]',"
-               "'[\"s1\"]',?,?)", (now, now))
+    insert(ds, "calc_procedures", id=1, code='PROC_STD', name='标准过程',
+           procedure_type='pricing', result_semantic='price', currency='CNY',
+           steps='[{"seq":1,"element_type":"formula",'
+                 '"params":{"expr":"lookup_amount"},'
+                 '"subtotal_key":"s1"},'
+                 '{"seq":2,"element_type":"round",'
+                 '"params":{"mode":"round","digits":2}}]',
+           subtotal_keys='["s1"]', created_at=now, updated_at=now)
     # 三条候选：priority 1/2/3
     for rid, prio, rate in ((1, 1, 100.0), (2, 2, 200.0), (3, 3, 300.0)):
-        ds.execute("INSERT INTO rate_records (code,id,rate_table_id,key_schema_id,keys,"
-                   "rate_type_id,rate,hit_policy,priority,status,created_at,updated_at)"
-                   " VALUES (?,?,1,1,'{\"customer\":1001}',1,?,'exclusive',?,'active',?,?)",
-                   (f"RC_{rid}", rid, rate, prio, now, now))
+        insert(ds, "rate_records", code=f"RC_{rid}", id=rid, rate_table_id=1,
+               key_schema_id=1, keys='{"customer":1001}', rate_type_id=1,
+               rate=rate, hit_policy='exclusive', priority=prio,
+               status='active', created_at=now, updated_at=now)
 
 
 def _price(ds, **kw):
@@ -191,7 +191,7 @@ class TestReplay:
         """键不匹配的候选才记入 skipped_candidates（带原因）"""
         _seed(ds)
         # 第 2 条候选的键不匹配槽位
-        ds.execute("UPDATE rate_records SET keys = '{\"customer\":9999}' WHERE id = 2")
+        update(ds, "rate_records", {"id": 2}, keys='{"customer":9999}')
         _price(ds, document_type="sales_order", document_id=5001)
         ex = PricingService(ds).explain("sales_order", 5001)
         d1 = ex["results"][0]["details"][0]
@@ -307,7 +307,7 @@ class TestAtomicity:
                 self._inner = inner
 
             def execute(self, sql, params=None):
-                if "INSERT INTO calc_details" in str(sql):
+                if "INSERT " + "INTO calc_details" in str(sql):
                     raise RuntimeError("simulated detail insert failure")
                 return self._inner.execute(sql, params or [])
 
@@ -348,8 +348,7 @@ class TestWriteBack:
         """头级结果只写金额，不写单价（无行可挂）"""
         _seed(ds)
         self._mk_doc(ds)
-        ds.execute("INSERT INTO so_doc (id, unit_price, amount)"
-                   " VALUES (1, NULL, 0)")
+        insert(ds, "so_doc", id=1, unit_price=None, amount=0)
         _price(ds, document_type="so_doc", document_id=1)
         r = PricingService(ds).write_back("so_doc", 1)
         assert r["written"] == {"amount": 100.0}
@@ -360,8 +359,7 @@ class TestWriteBack:
         """行级结果写单价：优先用 calc_result.rate（= 查表命中费率）"""
         _seed(ds)
         self._mk_doc(ds)
-        ds.execute("INSERT INTO so_doc (id, unit_price, amount)"
-                   " VALUES (1, NULL, 0)")
+        insert(ds, "so_doc", id=1, unit_price=None, amount=0)
         _price(ds, document_type="so_doc", document_id=1,
                document_line_id=88, level="line", base=2.0)
         r = PricingService(ds).write_back("so_doc", 1, document_line_id=88)
@@ -389,9 +387,9 @@ class TestWriteBack:
         self._mk_doc(ds, "so_doc7", fields=(("id", "integer"),
                                             ("unit_price", "float")))
         # 用一个直接给 amount 的过程：base=4，公式产出 400 -> rate=100
-        ds.execute("UPDATE calc_procedures SET steps ="
-                   " '[{\"seq\":1,\"element_type\":\"formula\","
-                   "\"params\":{\"expr\":\"base * 100\"}}]' WHERE code='PROC_STD'")
+        update(ds, "calc_procedures", {"code": 'PROC_STD'},
+               steps='[{"seq":1,"element_type":"formula",'
+                     '"params":{"expr":"base * 100"}}]')
         _price(ds, document_type="so_doc7", document_id=1,
                document_line_id=3, level="line", base=4.0,
                sequence_code=None)
@@ -405,8 +403,7 @@ class TestWriteBack:
         self._mk_doc(ds, "so_doc2",
                      fields=(("id", "integer"), ("price", "float"),
                              ("total_amount", "float")))
-        ds.execute("INSERT INTO so_doc2 (id, price, total_amount)"
-                   " VALUES (1, NULL, 0)")
+        insert(ds, "so_doc2", id=1, price=None, total_amount=0)
         _price(ds, document_type="so_doc2", document_id=1)
         r = PricingService(ds).write_back("so_doc2", 1)
         assert r["written"] == {"total_amount": 100.0}
@@ -415,7 +412,7 @@ class TestWriteBack:
         """单据只有 id 时不静默失败，明确报 skipped"""
         _seed(ds)
         self._mk_doc(ds, "so_doc3", fields=(("id", "integer"),))
-        ds.execute("INSERT INTO so_doc3 (id) VALUES (1)")
+        insert(ds, "so_doc3", id=1)
         _price(ds, document_type="so_doc3", document_id=1)
         r = PricingService(ds).write_back("so_doc3", 1)
         assert r["written"] == {}
@@ -426,11 +423,11 @@ class TestWriteBack:
         _seed(ds)
         self._mk_doc(ds, "so_doc4",
                      fields=(("id", "integer"), ("amount", "float")))
-        ds.execute("INSERT INTO so_doc4 (id, amount) VALUES (1, 0)")
+        insert(ds, "so_doc4", id=1, amount=0)
         svc = PricingService(ds)
         _price(ds, document_type="so_doc4", document_id=1)
         # 改费率再算一次，净额变化
-        ds.execute("UPDATE rate_records SET rate = 300.0 WHERE id = 1")
+        update(ds, "rate_records", {"id": 1}, rate=300.0)
         _price(ds, document_type="so_doc4", document_id=1)
         r = svc.write_back("so_doc4", 1)
         assert r["written"]["amount"] == 300.0
@@ -461,7 +458,7 @@ class TestErrorHandling:
     def test_draft_rate_table_rejected(self, ds):
         """C-T0-11：仅 approved 参与取价，草稿价目表须被拒"""
         _seed(ds)
-        ds.execute("UPDATE rate_tables SET status = 'draft' WHERE id = 1")
+        update(ds, "rate_tables", {"id": 1}, status='draft')
         with pytest.raises(PricingError, match="未发布"):
             _price(ds)
 
@@ -474,15 +471,15 @@ class TestErrorHandling:
 
     def test_empty_steps_raises(self, ds):
         _seed(ds)
-        ds.execute("UPDATE calc_procedures SET steps = '[]' WHERE code = 'PROC_STD'")
+        update(ds, "calc_procedures", {"code": 'PROC_STD'}, steps='[]')
         with pytest.raises(PricingError, match="未定义步骤"):
             _price(ds)
 
     def test_unregistered_operator_raises(self, ds):
         """C5：element_type 未注册 → 报错，不静默跳过"""
         _seed(ds)
-        ds.execute("UPDATE calc_procedures SET steps ="
-                   " '[{\"seq\":1,\"element_type\":\"no_such_op\"}]' WHERE code='PROC_STD'")
+        update(ds, "calc_procedures", {"code": 'PROC_STD'},
+               steps='[{"seq":1,"element_type":"no_such_op"}]')
         with pytest.raises(CalculationError, match="未注册的 element_type"):
             _price(ds)
 
@@ -491,8 +488,8 @@ class TestValidPeriod:
     def test_valid_on_filters_out_of_range_records(self, ds):
         """valid_on 过滤有效期（区间含下不含上）"""
         _seed(ds)
-        ds.execute("UPDATE rate_records SET valid_from = '2026-01-01',"
-                   " valid_to = '2026-06-01' WHERE id = 1")
+        update(ds, "rate_records", {"id": 1},
+               valid_from='2026-01-01', valid_to='2026-06-01')
         r = _price(ds, valid_on="2026-03-01")
         assert r["hit_ids"] == [1]
         r2 = _price(ds, valid_on="2026-09-01")
@@ -500,7 +497,7 @@ class TestValidPeriod:
 
     def test_no_valid_on_ignores_date_filter(self, ds):
         _seed(ds)
-        ds.execute("UPDATE rate_records SET valid_to = '2020-01-01' WHERE id = 1")
+        update(ds, "rate_records", {"id": 1}, valid_to='2020-01-01')
         r = _price(ds)
         assert r["hit_ids"] == [1]                # 不传日期则不过滤
 
@@ -529,11 +526,11 @@ class TestZeroDependency:
     def test_currency_taken_from_process_not_arbitrary_table(self, ds):
         """币种取过程声明值（曾误取任意价目表的币种）"""
         _seed(ds)
-        ds.execute("INSERT INTO rate_tables (id,code,name,type,currency,owner_org_id,"
-                   "status,created_at,updated_at)"
-                   " VALUES (2,'PL_EUR','欧元表','standard','EUR',NULL,'approved',"
-                   "'2026-10-06','2026-10-06')")
-        ds.execute("UPDATE calc_procedures SET currency = 'USD' WHERE code = 'PROC_STD'")
+        insert(ds, "rate_tables", id=2, code='PL_EUR', name='欧元表',
+               type='standard', currency='EUR', owner_org_id=None,
+               status='approved', created_at='2026-10-06',
+               updated_at='2026-10-06')
+        update(ds, "calc_procedures", {"code": 'PROC_STD'}, currency='USD')
         _price(ds, document_type="sales_order", document_id=5001)
         cur = ds.execute("SELECT currency FROM calc_results").fetchone()[0]
         assert cur == "USD"
@@ -560,15 +557,13 @@ class TestFR009阶梯链路:
         当金额。要验证 `费率 × 数量 == 金额` 的等价，过程须显式乘基数。
         """
         _seed(ds)
-        ds.execute("UPDATE calc_procedures SET steps ="
-                   " '[{\"seq\":1,\"element_type\":\"formula\","
-                   "\"params\":{\"expr\":\"lookup_amount * base\"}}]'"
-                   " WHERE code = 'PROC_STD'")
-        ds.execute("DELETE FROM rate_records WHERE id IN (2, 3)")
+        update(ds, "calc_procedures", {"code": 'PROC_STD'},
+               steps='[{"seq":1,"element_type":"formula",'
+                     '"params":{"expr":"lookup_amount * base"}}]')
+        delete(ds, "rate_records", id=[2, 3])
         # 分档记录的 rate/value 是**占位 0**：真实费率完全由命中的档位决定
-        ds.execute("UPDATE rate_records SET scale = ?, scale_semantic = ?,"
-                   " value = 0.0, rate = 0.0 WHERE id = 1",
-                   (self._TIERS, semantic))
+        update(ds, "rate_records", {"id": 1}, scale=self._TIERS,
+               scale_semantic=semantic, value=0.0, rate=0.0)
 
     def _stored_rate(self, ds):
         from meta.services.pricing_service import _to_num
@@ -613,7 +608,7 @@ class TestFR009阶梯链路:
                 ft = FieldType("integer") if n == "id" else FieldType("float")
                 mo.fields.append(MetaField(id=n, name=n, field_type=ft, db_column=n))
             registry.register(mo)
-        ds.execute("INSERT INTO so_tier (id, unit_price, amount) VALUES (1, NULL, 0)")
+        insert(ds, "so_tier", id=1, unit_price=None, amount=0)
         _price(ds, document_type="so_tier", document_id=1, base=20.0,
                document_line_id=88, level="line")
         wb = PricingService(ds).write_back("so_tier", 1, document_line_id=88)
@@ -622,7 +617,7 @@ class TestFR009阶梯链路:
     def test_bad_scale_json_raises_resolution_error(self, ds):
         """scale 非法 json → 抛 ResolutionError（不静默当"不分档"取占位 0）"""
         _seed(ds)
-        ds.execute("UPDATE rate_records SET scale = '{not json',"
-                   " scale_semantic = 'total' WHERE id = 1")
+        update(ds, "rate_records", {"id": 1}, scale='{not json',
+               scale_semantic='total')
         with pytest.raises(ResolutionError, match="不是合法 json"):
             _price(ds)

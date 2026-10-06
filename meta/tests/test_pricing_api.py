@@ -26,6 +26,7 @@ import meta.services.auth_middleware as auth_mw  # noqa: E402
 
 from meta.core.models import registry  # noqa: E402
 from meta.core.schema_generator import SchemaGenerator  # noqa: E402
+from meta.tests.factories._raw_sql_bridge import insert, update  # noqa: E402
 
 TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
           "exclusion_group", "rate_table", "rate_record",
@@ -76,33 +77,30 @@ def ds():
 def _seed(ds):
     """最小可算配置：客户键 + 单槽序列 + 已发布价目表 + 过程 + 3 条候选。"""
     now = "2026-10-06 00:00:00"
-    ds.execute("INSERT INTO key_schemas (id,code,name,key_fields,created_at,updated_at)"
-               " VALUES (1,'KEY_CUST','客户键','[\"customer\"]',?,?)", (now, now))
-    ds.execute("INSERT INTO lookup_sequences (id,code,name,steps,created_at,updated_at)"
-               " VALUES (1,'SEQ_STD','标准序列',"
-               "'[{\"seq\":1,\"key_schema_id\":1}]',?,?)", (now, now))
-    ds.execute("INSERT INTO rate_types (id,code,name,rate_class,calc_type,rate_source,"
-               "sign,rounding,exclusion_group_id,manual_allowed,mandatory,statistical,"
-               "lookup_sequence_id,created_at,updated_at)"
-               " VALUES (1,'PRICE_BASE','基本价格','price','percent','rate_record',"
-               "'+',NULL,NULL,0,0,0,1,?,?)", (now, now))
-    ds.execute("INSERT INTO rate_tables (id,code,name,type,currency,owner_org_id,"
-               "status,created_at,updated_at)"
-               " VALUES (1,'PL_STD','标准价目表','standard','CNY',NULL,'approved',?,?)",
-               (now, now))
-    ds.execute("INSERT INTO calc_procedures (id,code,name,procedure_type,"
-               "result_semantic,currency,steps,subtotal_keys,created_at,updated_at)"
-               " VALUES (1,'PROC_STD','标准过程','pricing','price','CNY',"
-               "'[{\"seq\":1,\"element_type\":\"formula\","
-               "\"params\":{\"expr\":\"lookup_amount\"},\"subtotal_key\":\"s1\"},"
-               "{\"seq\":2,\"element_type\":\"round\","
-               "\"params\":{\"mode\":\"round\",\"digits\":2}}]',"
-               "'[\"s1\"]',?,?)", (now, now))
+    insert(ds, "key_schemas", id=1, code='KEY_CUST', name='客户键',
+           key_fields='["customer"]', created_at=now, updated_at=now)
+    insert(ds, "lookup_sequences", id=1, code='SEQ_STD', name='标准序列',
+           steps='[{"seq":1,"key_schema_id":1}]', created_at=now, updated_at=now)
+    insert(ds, "rate_types", id=1, code='PRICE_BASE', name='基本价格',
+           rate_class='price', calc_type='percent', rate_source='rate_record',
+           sign='+', rounding=None, exclusion_group_id=None, manual_allowed=0,
+           mandatory=0, statistical=0, lookup_sequence_id=1,
+           created_at=now, updated_at=now)
+    insert(ds, "rate_tables", id=1, code='PL_STD', name='标准价目表',
+           type='standard', currency='CNY', owner_org_id=None,
+           status='approved', created_at=now, updated_at=now)
+    insert(ds, "calc_procedures", id=1, code='PROC_STD', name='标准过程',
+           procedure_type='pricing', result_semantic='price', currency='CNY',
+           steps='[{"seq":1,"element_type":"formula",'
+                 '"params":{"expr":"lookup_amount"},"subtotal_key":"s1"},'
+                 '{"seq":2,"element_type":"round",'
+                 '"params":{"mode":"round","digits":2}}]',
+           subtotal_keys='["s1"]', created_at=now, updated_at=now)
     for rid, prio, rate in ((1, 1, 100.0), (2, 2, 200.0), (3, 3, 300.0)):
-        ds.execute("INSERT INTO rate_records (code,id,rate_table_id,key_schema_id,keys,"
-                   "rate_type_id,rate,hit_policy,priority,status,created_at,updated_at)"
-                   " VALUES (?,?,1,1,'{\"customer\":1001}',1,?,'exclusive',?,'active',?,?)",
-                   (f"RC_{rid}", rid, rate, prio, now, now))
+        insert(ds, "rate_records", code=f"RC_{rid}", id=rid, rate_table_id=1,
+               key_schema_id=1, keys='{"customer":1001}', rate_type_id=1,
+               rate=rate, hit_policy='exclusive', priority=prio,
+               status='active', created_at=now, updated_at=now)
 
 
 def _mk_doc(ds, oid="so_doc"):
@@ -235,7 +233,7 @@ class TestCalculateContract:
     def test_unapproved_rate_table_is_400_pricing_error(self, client, ds):
         """C-T0-11：仅 approved 参与取价 → 属"改请求"类错误（400）"""
         _seed(ds)
-        ds.execute("UPDATE rate_tables SET status='draft' WHERE id=1")
+        update(ds, "rate_tables", {"id": 1}, status='draft')
         resp = client.post("/api/v1/pricing/calculate", json=_calc_body(), headers=AUTH)
         assert resp.status_code == 400
         assert resp.get_json()["code"] == "PRICING_ERROR"
@@ -243,8 +241,8 @@ class TestCalculateContract:
     def test_unknown_operator_is_422_calculation_error(self, client, ds):
         """配置本身矛盾（未注册算子）→ 422，与参数错(400)区分开"""
         _seed(ds)
-        ds.execute("UPDATE calc_procedures SET steps = ? WHERE id = 1",
-                   ('[{"seq":1,"element_type":"no_such_op"}]',))
+        update(ds, "calc_procedures", {"id": 1},
+               steps='[{"seq":1,"element_type":"no_such_op"}]')
         resp = client.post("/api/v1/pricing/calculate", json=_calc_body(), headers=AUTH)
         assert resp.status_code == 422
         payload = resp.get_json()
@@ -255,8 +253,7 @@ class TestCalculateContract:
         """FR-008：权重和≠1 拒绝计算（不静默缩放）→ 422"""
         _seed(ds)
         for rid, w in ((1, 0.5), (2, 0.3), (3, 0.1)):   # Σ=0.9
-            ds.execute("UPDATE rate_records SET allocation_weight=? WHERE id=?",
-                       (w, rid))
+            update(ds, "rate_records", {"id": rid}, allocation_weight=w)
         resp = client.post("/api/v1/pricing/calculate", json=_calc_body(), headers=AUTH)
         assert resp.status_code == 422
         assert resp.get_json()["code"] == "RESOLUTION_ERROR"
@@ -337,8 +334,7 @@ class TestCalculateContract:
         """weighted 归一后加权累加：100×.5 + 200×.3 + 300×.2 = 170（TR-006）"""
         _seed(ds)
         for rid, w in ((1, 0.5), (2, 0.3), (3, 0.2)):
-            ds.execute("UPDATE rate_records SET allocation_weight=? WHERE id=?",
-                       (w, rid))
+            update(ds, "rate_records", {"id": rid}, allocation_weight=w)
         resp = client.post("/api/v1/pricing/calculate",
                            json=_calc_body(resolution="weighted", persist=False),
                            headers=AUTH)
@@ -403,7 +399,7 @@ class TestWriteBackContract:
     def test_writes_amount_and_reports_map(self, client, ds):
         _seed(ds)
         _mk_doc(ds)
-        ds.execute("INSERT INTO so_doc (id, unit_price, amount) VALUES (1, NULL, 0)")
+        insert(ds, "so_doc", id=1, unit_price=None, amount=0)
         client.post("/api/v1/pricing/calculate",
                     json=_calc_body(document_type="so_doc", document_id=1),
                     headers=AUTH)
