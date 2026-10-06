@@ -161,6 +161,16 @@ FIELD_TYPE_MAP = {
     "integer": FieldType.INTEGER,
     "int": FieldType.INTEGER,
     "float": FieldType.FLOAT,
+    # 【补 2026-10-06】`number` 是 yaml 侧既有的合法别名（金额 / 数量 / 单据数
+    # 三类都用它声明），但此前**未登记进映射** → `parse_field` 静默回落
+    # `FieldType.STRING` → 建表落 `VARCHAR(200)`。实测危害：VARCHAR 列上
+    # `used_amount + 100.5` 存回的是**文本** `'100.5'`（`typeof` = text），
+    # 且字符串比较 `'9' > '10'` 为真 —— 涉及金额上限 / 权重 / 费率 / 金额的
+    # 一切 SQL 算术与比较都不可靠。影响面：15 张表 49 处，含
+    # `rate_records.rate` / `calc_results.amount` / `calc_details.*` 等核心列
+    # （既有测试因 `_to_num` 归一而未暴露）。归入 FLOAT 而非 INTEGER——
+    # 金额与数量本就允许小数。
+    "number": FieldType.FLOAT,
     "boolean": FieldType.BOOLEAN,
     "bool": FieldType.BOOLEAN,
     "datetime": FieldType.DATETIME,
