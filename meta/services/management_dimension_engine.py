@@ -27,23 +27,21 @@ from meta.services.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
 
-# [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
-# 新的层级链: product → version → domain → sub_domain (4层)
-RESOURCE_TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
-    # [V1.1.8 2026-06-15] 重新加回 service_module / business_object / relationship 的表映射
-    #   原因: dimension_scope_engine 的 _build_chain_condition 需要
-    #   RESOURCE_TABLE_MAP 查这些 BO 的物理表名 (即使它们不参与 HIERARCHY_CHAIN 展开)
-    #   旧版注释掉导致 chain 构造时 RESOURCE_TABLE_MAP.get('service_module') → None, 链式 SQL 失败
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-    'relationship': 'relationships',
-    # [FIX v1.2.34 2026-06-21] annotation 表映射 (WriteScopeInterceptor 需要)
-    'annotation': 'annotations',
-}
+# [A1 2026-10-06] 本表与 permission_dimension_engine.RESOURCE_TABLE_MAP 逐字相同，
+#   故改为单一来源 + 本模块重导出（避免两份副本各自漂移）。
+#   本模块与 permission 引擎是两个独立引擎（各有 MANAGEMENT_DIMENSION_CHAIN /
+#   DISPLAY_FIELD_MAP），但「BO → 物理表名」是平台级事实，不该各写一份。
+#   保留本名是为了不改 meta/api/management_dimension_api.py 等既有导入方。
+# [原注释保留] [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
+#   新的层级链: product → version → domain → sub_domain (4层)
+#   [V1.1.8 2026-06-15] 重新加回 service_module / business_object / relationship 的表映射
+#     原因: dimension_scope_engine 的 _build_chain_condition 需要
+#     RESOURCE_TABLE_MAP 查这些 BO 的物理表名 (即使它们不参与 HIERARCHY_CHAIN 展开)
+#     旧版注释掉导致 chain 构造时 RESOURCE_TABLE_MAP.get('service_module') → None, 链式 SQL 失败
+#   [FIX v1.2.34 2026-06-21] annotation 表映射 (WriteScopeInterceptor 需要)
+from meta.services.permission_dimension_engine import (  # noqa: E402
+    RESOURCE_TABLE_MAP,
+)
 
 CHILD_TYPE_MAP = {
     'product': ['version'],

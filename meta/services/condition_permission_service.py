@@ -26,6 +26,13 @@ from meta.services.permission_dimension_engine import (
 logger = logging.getLogger(__name__)
 
 
+# [A1 2026-10-06] 本表与上方导入的 _DIM_TABLES 内容不同，是**有意为之**，不是重复：
+#   _DIM_TABLES（来自 permission_dimension_engine）用于「维度名白名单」判断
+#     （_fk_code_field_map / _anchor_target_of_field 中的 `dim in _DIM_TABLES`），
+#     含 relationship / annotation，不含 org / user。
+#   本表用于「BO → 物理表名」取表拼 SQL，含 org / user（Spec 19 M2 委托授权），
+#     不含 relationship / annotation。
+#   两者若合并，org 会被误判为维度、relationship 会被误当作可取表对象，故保持分离。
 RESOURCE_TABLE_MAP = {
     'product': 'products',
     'version': 'versions',

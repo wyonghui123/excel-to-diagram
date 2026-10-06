@@ -29,6 +29,9 @@ from typing import Any, Dict, List, Optional
 
 from meta.core.condition_parser import ConditionExpressionParser
 from meta.core.effective_intent_dao import EffectiveIntentDAO
+# [A1 2026-10-06] 表名映射与 IntentScopeAdapter 共用同一份（原两文件各写两份，
+#   四份内容逐字相同）。放在 intent_scope_adapter 是因为它先被本模块镜像实现。
+from meta.core.intent_scope_adapter import TABLE_MAP
 
 
 class EffectiveIntentChecker:
@@ -259,20 +262,8 @@ class EffectiveIntentChecker:
 
     def _get_record(self, bo_id: str, record_id: int) -> Optional[Dict[str, Any]]:
         """获取记录数据"""
-        # 表名映射 (bo_id → 表名)
-        # [P2 修复 2026-07-26] 补充 service_module → service_modules 映射
-        # 之前缺失, 导致 service_module 的 owner 检查失败 (走默认 bo_id+'s' 拼接仍正确,
-        # 但保持显式映射便于维护)
-        table_map = {
-            'product': 'products',
-            'version': 'versions',
-            'domain': 'domains',
-            'sub_domain': 'sub_domains',
-            'service_module': 'service_modules',
-            'business_object': 'business_objects',
-        }
-
-        table = table_map.get(bo_id, bo_id + 's')  # 简单复数
+        # [A1 2026-10-06] 表名映射已提为模块级 TABLE_MAP（与 IntentScopeAdapter 共用）
+        table = TABLE_MAP.get(bo_id, bo_id + 's')  # 简单复数
 
         try:
             with sqlite3.connect(self._db_path) as conn:
@@ -293,17 +284,8 @@ class EffectiveIntentChecker:
         params: List[Any],
     ) -> bool:
         """检查记录是否匹配 WHERE 条件"""
-        # [P2 修复 2026-07-26] 补充 service_module → service_modules 映射
-        table_map = {
-            'product': 'products',
-            'version': 'versions',
-            'domain': 'domains',
-            'sub_domain': 'sub_domains',
-            'service_module': 'service_modules',
-            'business_object': 'business_objects',
-        }
-
-        table = table_map.get(bo_id, bo_id + 's')
+        # [A1 2026-10-06] 表名映射已提为模块级 TABLE_MAP（与 IntentScopeAdapter 共用）
+        table = TABLE_MAP.get(bo_id, bo_id + 's')
 
         try:
             with sqlite3.connect(self._db_path) as conn:
