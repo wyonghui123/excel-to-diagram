@@ -1,0 +1,329 @@
+# 币种主数据 (Currency) — foundation 支持对象波次 · ISO 4217 字典
+# 依据: docs/superpowers/specs/2026-10-06-currency-object-design.md §4
+#       docs/superpowers/specs/2026-10-05-region-dictionary-design.md 附录 B（载体选型 + PM 2026-10-05 拍板「币种 = 完整 BO」）
+#       docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §7 步 7
+# 定位: 单据流金额字段（doc_flow.currency）的币种载体；同族参照 uom / region / calendar / address
+# 一期 = 最小集（code ISO 4217 alpha-3 / name / decimal_places / status）；精度取 Oracle Fusion 路线（主表字段，非 SAP TCURX 例外表）
+# key_template: 不启用（业务键 = ISO 4217 代码，无需自动编码；同 region 先例）
+#
+# ⚠️ 能力边界（禁止越界宣称）
+#   本对象仅交付「币种字典」。**不交付任何换算 / 折算 / 舍入能力**：
+#   ① 汇率域（currency_rate）不建 —— SAP TCURR/TCURF/TCURV · Oracle GL_DAILY_RATES · SF DatedConversionRate 三家全部独立成域（TBD-1）
+#   ② 功能货币 / 账簿货币 / 报告货币三元未建模（SFAS #52 / IAS 21；Remeasurement ≠ Translation）（TBD-8，与 D1 会计处置同一挂起决策）
+#   ③ 币种生效期不建（Oracle Start/End Date · SAP GDATU）（TBD-2）
+#   ④ decimal_places 本期**无执行消费者**（平台无精度引擎，金额为裸 double）—— 不宣称「已实现按币种精度舍入」
+#   ⑤ symbol 为**文档级字段**（Oracle 官方：符号不保证显示，Oracle GL 不用）—— 不建 UI 消费点
+#   ⑥ doc_flow.currency 是裸 STRING（meta/core/doc_flow_schema.py，属 meta/core/* 守 S5 不动）⇒ 无引用完整性保证（TBD-5，本期最大缺口）
+#
+# ⚠️ 币种码启用后不可改（Oracle Fusion 官方硬规则）：
+#   "You cannot change a currency code after you enable the currency, even if you later disable that currency."
+#   平台**无字段冻结机制**（与 TBD-9 字段级权限同源缺口）⇒ 仅以 code.semantics.immutable 标注 + 测试锁定约定，**不可宣称强制**
+
+id: currency
+name: 币种
+table_name: currencies
+description: 币种主数据（ISO 4217 字典；单据流金额字段的币种载体）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 币种
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 币种
+    - 货币
+    - currency
+
+deletion_policy:
+  # S19: 主数据禁止物理删除
+  # restrict_on 本期留空：币种当前**零引用方** —— doc_flow.currency 是裸 STRING（不构成 FK 引用），
+  # 无任何 schema 字段引用它。保留结构供未来接上后补条目（不改骨架）。
+  # 对比：uom 列 2 条（items.base_uom / item_uom_conversions.uom_id）、region 列 5 条（自引用 + addresses 四 FK）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  # 无需排除 PII（对照 person_profile 的 exclude 口径）—— 币种字段全为非敏感公共参照数据
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # ISO 4217 alpha-3：SAP ISOCD(CHAR 3) · Oracle Code(3字符) · SF IsoCode —— 三家一致
+  # ⚠️ 正则有意严于 uom（uom 为 ^[A-Za-z][A-Za-z0-9_]*$ 宽松口径）：
+  #    ISO 4217 是强标准，宽松正则等于没有校验。spec §4.1 已留痕为「与 uom 有意不同的口径」
+  # ⚠️ pattern 写在字段顶层（平台两种写法都支持，TBD-12 2026-10-06 起 loader 双读兼容；
+  #    semantics.pattern 优先、本字段兜底）。历史真相：MetaField 曾无 pattern 属性、
+  #    顶层写法静默失效 —— 同款缺陷曾存在于 party.yaml:64 / region.yaml:93 等 9 处。
+  # ⚠️ max_length 同理：TBD-12 之前是死字段（loader 未映射），现已生效（应用层长度校验）。
+  # ⚠️ 生效层级：pattern / max_length **仅应用层**生效 —— DB 层无 CHECK、无列宽约束。
+  - id: code
+    name: 币种代码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: ISO 4217 三字母币种代码（如 CNY / USD / JPY）
+    semantics:
+      meaning: ISO 4217 alpha-3 币种代码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 币种名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 币种中文名称（如 人民币 / 美元 / 日元）
+    semantics:
+      meaning: 币种显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: name_en
+    name: 币种英文名称
+    type: string
+    db_column: name_en
+    nullable: true
+    max_length: 64
+    description: 币种英文名称（如 Chinese Yuan / US Dollar）
+    semantics:
+      meaning: 币种英文名称（接口级预留，平台多语言一期不做）
+      data_category: text
+
+  # 精度路线裁定：采 Oracle Fusion 路线（主表字段 Precision），不抄 SAP TCURX 例外表
+  # 依据 Oracle 官方 FAQ：Precision = "the number of digits to the right of the decimal point
+  #   used in regular currency transactions"（USD = 2）
+  #   Oracle 另有 Extended Precision / Minimum Accountable Unit，本期均不做（无计算引擎消费）
+  # 默认值 2（ISO 主流币种）；已知例外：JPY/KRW = 0、BHD/KWD/OMR/JOD/TND = 3（靠人工录入，本期无 check 约束）
+  - id: decimal_places
+    name: 小数位数
+    type: integer
+    db_column: decimal_places
+    required: true
+    default: 2
+    description: 该币种的精度（小数位数），ISO 主流币种为 2（JPY/KRW 为 0，部分中东币种为 3）
+    semantics:
+      meaning: 币种精度，决定该币种金额的计算与显示小数位
+      data_category: number
+    ui:
+      widget: input
+
+  # ⚠️ 文档级字段 / 无平台消费者（spec §5）
+  # Oracle 官方："Even if you enter a symbol for a currency, the symbol is not always displayed
+  #   when an amount is displayed in this currency. Some applications use currency symbols...
+  #   Others, like Oracle Fusion General Ledger, do not."
+  # 同 TBD-10（sensitivity 死字段）教训：保留字段但不建 UI 消费点、不宣称符号已展示
+  - id: symbol
+    name: 币种符号
+    type: string
+    db_column: symbol
+    nullable: true
+    max_length: 8
+    description: 币种显示符号（如 ¥ / $ / €）；文档级字段，平台暂不消费
+    semantics:
+      meaning: 币种显示符号（文档级，平台无消费者）
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 币种状态 active/inactive（生命周期约定；停用仅改状态，记录物理留存 ⇒ 历史报表按 code 取数不受影响）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 币种启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 币种说明
+    semantics:
+      meaning: 币种详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期: 复用平台标准动作 activate / deactivate（完全照 uom.yaml / region.yaml，不自定义生命周期动作）
+rules:
+  - id: activate_currency
+    name: 启用币种
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此币种吗？"
+
+  - id: deactivate_currency
+    name: 停用币种
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此币种吗？"
+
+# 索引口径留痕（spec §4.2）：uom / region 两个同族先例均只有唯一索引、无二级索引
+# ⇒ 币种不建 idx_currency_status，避免孤例；若列表页出现性能问题再补（TBD-4）
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_currency_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 币种管理
+    description: 币种字典（ISO 4217）
+    columns:
+      - field: code
+        width: 100
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: name_en
+        width: 180
+        sortable: true
+      - field: symbol
+        width: 80
+      - field: decimal_places
+        width: 100
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - name_en
+    actions:
+      - id: create
+        label: 新建币种
+        icon: plus
+        type: primary
+        permission: currency:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 币种信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [name_en, symbol]
+          - fields: [decimal_places, status]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - name_en
+          - symbol
+          - decimal_places
+          - status
+
+category_config:
+  create_permission: currency:create
+  update_permission: currency:update
+  delete_permission: currency:delete
+  owner_auto_permission: false
