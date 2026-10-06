@@ -33,9 +33,11 @@ def integration_db():
     conn = sqlite3.connect(db_path)
     conn.executescript('''
         -- Layer 2: 统一规则表
+        -- [A1 2026-10-06] 列名 role_id → permission_set_id，对齐 Spec 16 改名
+        --   (permission_rule.yaml 字段 id: permission_set_id, 标注 [P2-11 2026-08-29])
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -49,7 +51,7 @@ def integration_db():
         -- Layer 1: 事实表
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -58,7 +60,7 @@ def integration_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 层级表
@@ -73,8 +75,10 @@ def integration_db():
         INSERT INTO sub_domains VALUES (101, 1, 'SD11', 999), (102, 1, 'SD12', 888);
 
         -- RBAC 表
-        CREATE TABLE org_permission_sets (group_id INTEGER, role_id INTEGER);
-        CREATE TABLE org_members (user_id INTEGER, group_id INTEGER);
+        -- [A1 2026-10-06] 列名对齐生产: (org_id, permission_set_id)
+        --   见 org.yaml:358-363 through=org_permission_sets / target_key=permission_set_id
+        CREATE TABLE org_permission_sets (org_id INTEGER, permission_set_id INTEGER);
+        CREATE TABLE org_members (user_id INTEGER, org_id INTEGER);
         INSERT INTO org_permission_sets VALUES (1, 100), (1, 101);
         INSERT INTO org_members VALUES (999, 1);
     ''')
@@ -98,7 +102,7 @@ class TestPipelineToAdapterIntegration:
         # Step 1: 插入 permission_rules_v2 规则
         conn = sqlite3.connect(integration_db)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps([{'field': 'owner_id', 'op': '=', 'value': 999}])]
         )
@@ -108,7 +112,7 @@ class TestPipelineToAdapterIntegration:
         # Step 2: 执行推导
         dao = EffectiveIntentDAO(integration_db)
         pipeline = PermissionDerivationPipeline(db_path=integration_db, dao=dao)
-        result = pipeline.derive(role_id=100)
+        result = pipeline.derive(permission_set_id=100)
 
         # 验证推导结果
         assert result['intent_count'] > 0
@@ -137,7 +141,7 @@ class TestPipelineToAdapterIntegration:
         # 插入 write 级别规则
         conn = sqlite3.connect(integration_db)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (101, 'product', 'write', ?)",
             [json.dumps([{'field': 'owner_id', 'op': '=', 'value': 999}])]
         )
@@ -147,7 +151,7 @@ class TestPipelineToAdapterIntegration:
         # 推导
         dao = EffectiveIntentDAO(integration_db)
         pipeline = PermissionDerivationPipeline(db_path=integration_db, dao=dao)
-        pipeline.derive(role_id=101)
+        pipeline.derive(permission_set_id=101)
 
         # 验证 update Intent 存在且可被 adapter 读取
         adapter = IntentScopeAdapter(integration_db, dao=dao)
@@ -172,7 +176,7 @@ class TestChildrenOfInAdapter:
         # 插入含 CHILDREN_OF 的 Intent
         dao = EffectiveIntentDAO(integration_db)
         dao.upsert(
-            role_id=200, bo_id='sub_domain', action_name='read',
+            permission_set_id=200, bo_id='sub_domain', action_name='read',
             data_scope={
                 'include': [{
                     'field': 'sub_domain_id',
@@ -210,7 +214,7 @@ class TestDataScopeBoundaries:
         # 直接 SQL 插入 NULL data_scope
         conn = sqlite3.connect(integration_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (300, 'product', 'read', NULL)"
         )
         conn.commit()
@@ -234,7 +238,7 @@ class TestDataScopeBoundaries:
 
         conn = sqlite3.connect(integration_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (301, 'product', 'read', '{}')"
         )
         conn.commit()
@@ -257,7 +261,7 @@ class TestDataScopeBoundaries:
 
         conn = sqlite3.connect(integration_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (302, 'product', 'read', 'invalid json {{{')"
         )
         conn.commit()
@@ -290,7 +294,7 @@ class TestMultiRoleExcludeSemantics:
 
         # role A: include owner_id=999, exclude owner_id=999 (自相矛盾, 但用于测试)
         dao.upsert(
-            role_id=400, bo_id='product', action_name='read',
+            permission_set_id=400, bo_id='product', action_name='read',
             data_scope={
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
                 'exclude': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -299,7 +303,7 @@ class TestMultiRoleExcludeSemantics:
 
         # role B: include owner_id=999, 无 exclude
         dao.upsert(
-            role_id=401, bo_id='product', action_name='read',
+            permission_set_id=401, bo_id='product', action_name='read',
             data_scope={
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
                 'exclude': [],
@@ -330,7 +334,7 @@ class TestMultiRoleExcludeSemantics:
 
         # role A: 空 include (all) + exclude owner_id=999
         dao.upsert(
-            role_id=500, bo_id='product', action_name='read',
+            permission_set_id=500, bo_id='product', action_name='read',
             data_scope={
                 'include': [],
                 'exclude': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -339,7 +343,7 @@ class TestMultiRoleExcludeSemantics:
 
         # role B: include owner_id=999 (允许)
         dao.upsert(
-            role_id=501, bo_id='product', action_name='read',
+            permission_set_id=501, bo_id='product', action_name='read',
             data_scope={
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
                 'exclude': [],
@@ -374,7 +378,7 @@ class TestStaleIntentStillUsable:
 
         # 插入 Intent
         dao.upsert(
-            role_id=600, bo_id='product', action_name='read',
+            permission_set_id=600, bo_id='product', action_name='read',
             data_scope={'include': [], 'exclude': []},
         )
 
@@ -394,7 +398,7 @@ class TestStaleIntentStillUsable:
 
         dao = EffectiveIntentDAO(integration_db)
         dao.upsert(
-            role_id=601, bo_id='product', action_name='read',
+            permission_set_id=601, bo_id='product', action_name='read',
             data_scope={'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
                         'exclude': []},
         )
@@ -415,7 +419,7 @@ class TestStaleIntentStillUsable:
 
         dao = EffectiveIntentDAO(integration_db)
         dao.upsert(
-            role_id=602, bo_id='product', action_name='read',
+            permission_set_id=602, bo_id='product', action_name='read',
             data_scope={'include': [], 'exclude': []},
         )
         dao.mark_stale(602)

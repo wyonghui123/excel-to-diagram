@@ -34,7 +34,7 @@ def adapter_db():
     conn.executescript('''
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -43,7 +43,7 @@ def adapter_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 业务表
@@ -56,7 +56,10 @@ def adapter_db():
         INSERT INTO products VALUES
             (1, 'P1', 'Product 1', 100, 100, 'active', 2),
             (2, 'P2', 'Product 2', 200, 200, 'archived', 5),
-            (3, 'P3', 'Product 3', 100, 100, 'active', 1);
+            (3, 'P3', 'Product 3', 100, 100, 'active', 1),
+            -- [A1 2026-10-06] owner_id ≠ created_by：用于验证 include 分支的
+            --   ${user.id} 运行时变量（_is_owner 只看 owner_id，故该记录非 owner）
+            (4, 'P4', 'Product 4', 900, 100, 'active', 1);
     ''')
     conn.commit()
     conn.close()
@@ -81,7 +84,7 @@ class TestIntentScopeAdapter:
     def _insert_intent(self, role_id, bo_id, action, data_scope):
         """辅助: 插入 Intent"""
         self.dao.upsert(
-            role_id=role_id,
+            permission_set_id=role_id,
             bo_id=bo_id,
             action_name=action,
             data_scope=data_scope,
@@ -104,8 +107,10 @@ class TestIntentScopeAdapter:
         result = self.adapter.get_filter_for_roles([1], 'product', 'read')
         assert result is not None
         assert '1=1' in result['cond_expr']
-        # sources 是 list, 单个 role 时应包含 'all' (空 include 的 source)
-        assert 'all' in result['sources']
+        # sources 是 list, 空 include 的 role 贡献 'include_all'
+        # [A1 2026-10-06] 实现侧该 token 为 'include_all'（见 intent_scope_adapter:149），
+        #   旧断言 'all' 已随 P4/P5 语义细化而失效
+        assert 'include_all' in result['sources']
 
     def test_include_in_clause(self):
         """include IN 条件正确生成"""
@@ -172,14 +177,39 @@ class TestIntentScopeAdapter:
         assert result['allowed'] is False
         assert result['source'] == 'no_role'
 
-    def test_check_record_allowed_default_deny(self):
-        """check_record_allowed: 无 Intent → 默认拒绝"""
+    def test_check_record_allowed_no_intent_falls_back(self):
+        """check_record_allowed: 无 Intent → 拒绝 + 回退 legacy
+
+        [A1 2026-10-06] 原用例名 test_check_record_allowed_default_deny，
+        但它实际测的是「该 role 无 Intent」场景。实现侧 P5 修复后该场景
+        返回 source='no_intent_allows_all'（allowed 仍为 False，交调用方回退
+        legacy 5 步检查），而非 'default_deny'（那是「有意图但不匹配」的落点）。
+        另 user_id 原取 100，恰为 record 1 的 owner，会被 Owner 优先检查短路。
+        """
         result = self.adapter.check_record_allowed(
             role_ids=[999],
             bo_id='product',
             action_name='read',
             record_id=1,
-            user_id=100,
+            user_id=999,
+        )
+        assert result['allowed'] is False
+        assert result['source'] == 'no_intent_allows_all'
+
+    def test_check_record_allowed_default_deny(self):
+        """check_record_allowed: 有 Intent 但不匹配 → default_deny"""
+        self._insert_intent(31, 'product', 'read', {
+            'include': [{'field': 'owner_id', 'op': '=', 'value': 100}],
+            'exclude': [],
+        })
+
+        # user_id=999 非 owner，且 record 2 的 owner_id=200 ≠ 100 → 不匹配
+        result = self.adapter.check_record_allowed(
+            role_ids=[31],
+            bo_id='product',
+            action_name='read',
+            record_id=2,
+            user_id=999,
         )
         assert result['allowed'] is False
         assert result['source'] == 'default_deny'
@@ -188,43 +218,53 @@ class TestIntentScopeAdapter:
         """check_record_allowed: 空 include = 允许所有"""
         self._insert_intent(30, 'product', 'read', {'include': [], 'exclude': []})
 
+        # [A1 2026-10-06] user_id 由 100 改为 999：原值恰为 record 1 的 owner_id，
+        #   会被 Owner 优先检查短路（返回 'owner'），到不了空 include 分支。
         result = self.adapter.check_record_allowed(
             role_ids=[30],
             bo_id='product',
             action_name='read',
             record_id=1,
-            user_id=100,
+            user_id=999,
         )
         assert result['allowed'] is True
         assert result['source'] == 'include_all'
 
     def test_check_record_allowed_owner_runtime_variable(self):
-        """check_record_allowed: owner_id = ${user.id} 运行时变量"""
+        """check_record_allowed: 运行时变量 ${user.id} 参与 include 匹配
+
+        [A1 2026-10-06] 原用例用 record 1 + user_id=100 断言 source='include'，
+        但 100 即 record 1 的 owner_id，Owner 优先检查先命中并返回 'owner'，
+        include 分支不可达。改用 record 4（owner_id=900 ≠ created_by=100），
+        以 created_by 作为 include 字段——_is_owner 只看 owner_id，
+        故该记录能真正进入 include 匹配并验证 ${user.id} 解析。
+        """
         self._insert_intent(40, 'product', 'read', {
-            'include': [{'field': 'owner_id', 'op': '=', 'value': '${user.id}'}],
+            'include': [{'field': 'created_by', 'op': '=', 'value': '${user.id}'}],
             'exclude': [],
         })
 
-        # user_id=100, product 1 的 owner_id=100 → 允许
+        # user_id=100 = record 4 的 created_by → include 命中
         result = self.adapter.check_record_allowed(
             role_ids=[40],
             bo_id='product',
             action_name='read',
-            record_id=1,
+            record_id=4,
             user_id=100,
         )
         assert result['allowed'] is True
         assert result['source'] == 'include'
 
-        # user_id=999, product 1 的 owner_id=100 ≠ 999 → 拒绝
+        # user_id=999 ≠ created_by 100 → include 不命中 → default_deny
         result = self.adapter.check_record_allowed(
             role_ids=[40],
             bo_id='product',
             action_name='read',
-            record_id=1,
+            record_id=4,
             user_id=999,
         )
         assert result['allowed'] is False
+        assert result['source'] == 'default_deny'
 
     def test_check_record_allowed_exclude_denies(self):
         """check_record_allowed: exclude 命中 → 拒绝"""
