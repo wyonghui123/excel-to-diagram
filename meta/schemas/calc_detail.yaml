@@ -1,0 +1,567 @@
+# 定价明细（步骤明细 / Calculation Detail）— 定价元模型 T1-3
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 C 表 / FR-005、FR-006、FR-007、FR-010 / TR-006
+# 定位: 一次计算中**每个步骤**的回放明细 —— 逐层小计、算基四维度、命中过程
+#       对标 Oracle ChargeComponent；SF waterfall；SAP KZWI1..6
+#
+# 【FR-010 可解释 = 可回放】本表是回放的**最终落点**：
+#   每条记录说清"这一步用了什么类型、基于什么算、算出多少、算完累计多少、为什么跳过"。
+#   结构按可回放设计（§7 FR-010），故含 factor_snapshot 而非只存结果。
+#
+# 【为什么 result_id 存整数而不是外键约束到 calc_result】
+#   与 calc_result.process_code 同理：明细是**历史快照**，必须能在
+#   结果行被物理清理后仍可独立取证。故只存 id 不建 FK，删除保护由业务层承担。
+#
+# 【C-T0-6 · 零主数据依赖】无主数据外键引用。
+
+id: calc_detail
+name: 定价明细
+table_name: calc_details
+description: 定价明细（步骤明细）——逐步骤回放，支持逐层小计与可解释
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价步骤明细（回放）
+  category: transactional
+  bo_sub_category: document
+  # 明细是 1:N 的从属行，组合随主行（calc_result）走，
+  # 故 business_key = result_id + seq（同一结果内的步骤序号唯一）
+  business_key: [result_id, seq]
+  display_name_field: id
+  aliases:
+    - 定价明细
+    - 步骤明细
+    - 计算明细
+    - charge component
+    - waterfall
+
+deletion_policy:
+  # 从属于 calc_result：主行删则明细跟随（由业务层级联调用）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - result_id
+      - seq
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - result_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: result_id
+    name: 结果ID
+    type: integer
+    db_column: result_id
+    required: true
+    description: 所属定价结果 ID（calc_results.id）。不建外键（快照可独立取证）
+    semantics:
+      meaning: 所属结果行 ID
+    ui:
+      widget: reference
+
+  - id: seq
+    name: 步骤序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 步骤在过程中的次序（与 calc_procedure.steps[].seq 对应）
+    semantics:
+      meaning: 步骤序号；与 result_id 组成业务键
+    ui:
+      widget: number
+
+  # 【C5】element_type 必带
+  - id: element_type
+    name: 元素类型
+    type: string
+    db_column: element_type
+    required: true
+    max_length: 50
+    description: 计算元素类型（对应算子注册表 key）
+    semantics:
+      meaning: 计算元素类型（C5：步骤必带类型）
+      filterable: true
+      filter_type: text
+    ui:
+      widget: input
+
+  - id: price_element_code
+    name: 价格要素码
+    type: string
+    db_column: price_element_code
+    required: false
+    nullable: true
+    max_length: 50
+    description: 价格要素编码（对应 SAP KSCHL 的价格要素语义，便于按要素汇总）
+    semantics:
+      meaning: 价格要素编码
+    ui:
+      widget: input
+
+  - id: rate_type_code
+    name: 费率类型
+    type: string
+    db_column: rate_type_code
+    required: false
+    nullable: true
+    max_length: 50
+    description: 本步用到的费率类型编码（快照）
+    semantics:
+      meaning: 费率类型编码（快照）
+    ui:
+      widget: input
+
+  - id: label
+    name: 步骤说明
+    type: string
+    db_column: label
+    required: false
+    nullable: true
+    max_length: 200
+    description: 步骤的可读说明（回放时直接展示，省去查过程定义）
+    semantics:
+      meaning: 步骤可读说明
+    ui:
+      widget: input
+
+  # ---------------- 金额三件套（对标 ChargeComponent）----------------
+  - id: unit_price
+    name: 单价
+    type: number
+    db_column: unit_price
+    required: false
+    nullable: true
+    description: 本步单价
+    semantics:
+      meaning: 本步单价
+    ui:
+      widget: number
+
+  - id: extended_amount
+    name: 金额
+    type: number
+    db_column: extended_amount
+    required: true
+    default: 0
+    description: 本步产出金额（round/aggregate/derived/track 等只读算子为 0）
+    semantics:
+      meaning: 本步产出金额
+    ui:
+      widget: number
+
+  - id: running_net_amount
+    name: 累计净额
+    type: number
+    db_column: running_net_amount
+    required: true
+    default: 0
+    description: >
+      本步执行后的累计净额。**仅 rolling=true 的步骤会改写它**，
+      非滚动步骤下逐层递增（FR-007 逐层小计）。
+    semantics:
+      meaning: 本步执行后的累计净额（逐层小计的可回放载体）
+    ui:
+      widget: number
+
+  - id: rollup_flag
+    name: 汇总标志
+    type: boolean
+    db_column: rollup_flag
+    required: true
+    default: false
+    description: 本步是否为小计节点（可被报表按 rollup 汇总）
+    semantics:
+      meaning: 是否为小计节点
+    ui:
+      widget: switch
+
+  - id: skip_running_price
+    name: 不累加
+    type: boolean
+    db_column: skip_running_price
+    required: true
+    default: false
+    description: 本步是否**不参与净额累加**（只读算子：round/aggregate/derived/track）
+    semantics:
+      meaning: 本步是否跳过净额累加（与执行器 _READONLY_OPS 语义一致）
+    ui:
+      widget: switch
+
+  - id: subtotal_key
+    name: 小计键
+    type: string
+    db_column: subtotal_key
+    required: false
+    nullable: true
+    max_length: 50
+    description: 本步的小计键（对应 calc_procedure.steps[].subtotal_key）
+    semantics:
+      meaning: 本步的小计键
+    ui:
+      widget: input
+
+  # ---------------- 计算基四维度（FR-006）----------------
+  - id: base_level
+    name: 基层级
+    type: string
+    db_column: base_level
+    required: false
+    nullable: true
+    max_length: 10
+    description: 计算基层级
+    enum_values:
+      - value: header
+        label: 头级
+        color: info
+      - value: line
+        label: 行级
+        color: primary
+    semantics:
+      meaning: 计算基层级（FR-006 四维度之一）
+    ui:
+      widget: select
+
+  - id: base_source
+    name: 基来源
+    type: string
+    db_column: base_source
+    required: false
+    nullable: true
+    max_length: 20
+    description: 计算基来源。通用化轴①
+    enum_values:
+      - value: pricing_quantity
+        label: 定价数量
+        color: primary
+        description: 默认
+      - value: activity_quantity
+        label: 活动量
+        color: success
+      - value: value
+        label: 价值
+        color: info
+      - value: weight
+        label: 重量
+        color: info
+      - value: volume
+        label: 体积
+        color: info
+      - value: energy
+        label: 能耗
+        color: info
+      - value: hours
+        label: 工时
+        color: success
+      - value: attribute
+        label: 属性
+        color: default
+      - value: formula
+        label: 公式
+        color: warning
+    semantics:
+      meaning: 计算基来源（FR-006 四维度之一，轴①）
+      filterable: true
+      filter_type: enum
+      filter_label: 基来源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: base_step
+    name: 基步骤
+    type: string
+    db_column: base_step
+    required: false
+    nullable: true
+    max_length: 50
+    description: 计算基取自哪个前序步骤。**与 rolling=true 互斥**（FR-006 AC）
+    semantics:
+      meaning: 计算基所在前序步骤（FR-006 四维度之一）
+    ui:
+      widget: input
+
+  - id: rolling
+    name: 滚动
+    type: boolean
+    db_column: rolling
+    required: true
+    default: false
+    description: 是否滚动。与 base_step 互斥；true 时改写 running_net_amount
+    semantics:
+      meaning: 是否滚动计算基（FR-006 四维度之一）
+    ui:
+      widget: switch
+
+  - id: base_value
+    name: 基值
+    type: number
+    db_column: base_value
+    required: false
+    nullable: true
+    description: 本步实际采用的计算基数取值
+    semantics:
+      meaning: 本步实际采用的计算基数
+    ui:
+      widget: number
+
+  # ---------------- 回放要素（FR-010）----------------
+  - id: skipped
+    name: 已跳过
+    type: boolean
+    db_column: skipped
+    required: true
+    default: false
+    description: 本步是否被跳过（condition 为假等）
+    semantics:
+      meaning: 本步是否被跳过
+    ui:
+      widget: switch
+
+  - id: skip_reason
+    name: 跳过原因
+    type: string
+    db_column: skip_reason
+    required: false
+    nullable: true
+    max_length: 50
+    description: 跳过原因（如 condition_false）
+    enum_values:
+      - value: condition_false
+        label: 条件为假
+        color: default
+    semantics:
+      meaning: 跳过原因（与执行器 skip_reason 枚举一致）
+      filterable: true
+      filter_type: enum
+      filter_label: 跳过原因
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: hit_ids
+    name: 命中候选
+    type: json
+    db_column: hit_ids
+    required: false
+    nullable: true
+    description: >
+      本步命中的费率记录 ID 列表（来自查找引擎的 LookupTrace）。
+      加权场景下为全部参与候选（FR-008「每条参与候选可逐条追出」）。
+    semantics:
+      meaning: 本步命中的候选 ID 列表（回放：命中了哪几行）
+    ui:
+      widget: json
+      editable: false
+
+  - id: skipped_candidates
+    name: 剔除候选
+    type: json
+    db_column: skipped_candidates
+    required: false
+    nullable: true
+    description: >
+      被剔除的候选及原因，形如
+      [{"candidate_id":7,"reason":"not_in_slot_key"}]。
+      对标查找引擎 LookupTrace.skipped（FR-004 AC「为什么其它行被跳过」）。
+    semantics:
+      meaning: 被剔除候选及原因（回放：为何没选它）
+    ui:
+      widget: json
+      editable: false
+
+  # 【FR-010】因子快照 —— 可回放的关键
+  - id: factor_snapshot
+    name: 因子快照
+    type: json
+    db_column: factor_snapshot
+    required: false
+    nullable: true
+    description: >
+      本步取数时用到的因子取值快照，如 {"customer_id":1001,"qty":50}。
+      抽取了当时的结果值而不抽因子 → 无法复现"为什么算出这个价"。
+    semantics:
+      meaning: 本步因子取值快照（可回放的关键，FR-010）
+    ui:
+      widget: json
+      editable: false
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 明细业务说明
+    semantics:
+      meaning: 明细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 【回放主路径】按结果行取全部步骤明细（IF-002 明确按 document 查结果后追明细）
+  - fields: [result_id, seq]
+    name: idx_calc_detail_result_seq
+  - fields: [element_type]
+    name: idx_calc_detail_element
+  - fields: [skipped]
+    name: idx_calc_detail_skipped
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 定价明细
+    description: 逐步骤回放（可解释 = 可回放）
+    columns:
+      - field: result_id
+        width: 90
+        type: number
+      - field: seq
+        width: 70
+        type: number
+        align: right
+      - field: element_type
+        width: 130
+        filterable: true
+        filter_type: text
+      - field: label
+        width: 160
+        type: ellipsis
+      - field: extended_amount
+        width: 110
+        type: number
+        align: right
+      - field: running_net_amount
+        width: 120
+        type: number
+        align: right
+      - field: rolling
+        width: 80
+        type: boolean
+        align: center
+      - field: skipped
+        width: 80
+        type: boolean
+        align: center
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - label
+      - description
+    defaultSort:
+      field: seq
+      order: asc
+
+  detail:
+    layout: tabs
+    title: "步骤明细 #{record.seq} 详情"
+    tabs:
+      - id: step
+        label: 步骤
+        type: fields
+        fields:
+          - result_id
+          - seq
+          - element_type
+          - rate_type_code
+          - price_element_code
+          - label
+      - id: amount
+        label: 金额与小计
+        type: fields
+        fields:
+          - unit_price
+          - extended_amount
+          - running_net_amount
+          - rollup_flag
+          - skip_running_price
+          - subtotal_key
+      - id: base
+        label: 计算基
+        type: fields
+        fields:
+          - base_level
+          - base_source
+          - base_value
+          - base_step
+          - rolling
+      - id: replay
+        label: 回放要素
+        type: fields
+        fields:
+          - hit_ids
+          - skipped_candidates
+          - factor_snapshot
+          - skipped
+          - skip_reason
+          - description
+
+category_config:
+  create_permission: calc_detail:create
+  update_permission: calc_detail:update
+  delete_permission: calc_detail:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  # 【修 2026-10-06】本表无 code 字段（明细是 1:N 从属行，不独立编码）。
+  #   upsert 锚点用业务键 result_id + seq。
+  conflict_key: result_id, seq

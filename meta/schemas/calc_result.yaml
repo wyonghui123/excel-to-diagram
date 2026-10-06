@@ -1,0 +1,874 @@
+# 定价结果（结果行 / Calculation Result）— 定价元模型 T1-2
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 C 表 / FR-010、FR-011 / IF-002、IF-003 / C-T0-6、C-T0-8
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §3.1.6、§4.2
+# 定位: 一次定价计算的**结果行** —— 挂业务单据，承载净价/行金额与策略元数据
+#       对标 SAP 条件行 KONV/PRCD_COND（KNUMV + KPOSN + KSCHL + STUNR + ZAEHK）；
+#            Oracle Charge；SF Price Book Entry
+#
+# 【泛化宿主 · FR-011】**不引入独立"定价单据"**，结果挂业务单据：
+#   document_type + document_id + document_line_id（**可空 = 头级**）+ level。
+#   同一套对象可挂**任意 document 型 BO**（订单 / 交货 / 开票）。
+#
+#   【★ 现状：行级受阻于 order_line 缺失】
+#   本仓 `bo_sub_category: document` 当前仅 `sales_order_enhanced.yaml` 一个，
+#   且它是**单头无行**（rel_lines 声明的 target_object: order_line 该 yaml 不存在）。
+#   故本期先落**头级**（document_line_id = null, level = header），
+#   待 order_line 补齐后仅填 document_line_id 即可，**本表结构与内核零改动**。
+#   依据：Spec §8.2.0「FR-011 落库挂载受阻于 order_line，可拆两步：先头级，后填值」。
+#
+# 【为什么 process_code / rate_type 存字符串而非整型外键】
+#   calc_result 是**历史快照**：即使过程/费率类型被改被删，历史结果仍要可回放
+#   （FR-010「可解释 = 能回放」）。若建外键且源记录被删，result 就成了孤儿。
+#   故存 code 字符串 + 同名字段快照（rate_type_code / process_code）。
+#   删除保护因此由业务层承担（process 级 restrict_on 为空），这是**有意的取舍**。
+#
+# 【C-T0-6 · 零主数据依赖】currency 纯标识 + master_data_ref 标记，不建外键。
+
+id: calc_result
+name: 定价结果
+table_name: calc_results
+description: 定价结果（结果行）——挂业务单据的定价结论
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价结果行（历史快照）
+  category: transactional
+  bo_sub_category: document
+  # 【见文件头说明】业务键用 code：过程/单据/费率类型均为字符串快照，
+  # 不依赖源表存活，故 code 是唯一稳定的去重锚点。
+  business_key: [code]
+  display_name_field: id
+  aliases:
+    - 定价结果
+    - 结果行
+    - 计算结果
+    - charge
+    - pricing result
+
+deletion_policy:
+  # 【有意不设 restrict_on】结果是历史快照，删除是业务动作（如作废重算），
+  # 不应被过程/单据的删除策略拦住。对标 Oracle Charge 可单独 delete。
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - code
+      - document_type
+      - document_id
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - code
+      - created_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 结果编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 100
+    description: 结果唯一编码（承载 business_key / upsert 锚点）
+    semantics:
+      meaning: 结果唯一标识
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  # ---------------- 泛化宿主（FR-011）----------------
+  - id: document_type
+    name: 单据类型
+    type: string
+    db_column: document_type
+    required: true
+    max_length: 50
+    description: 宿主单据的元模型对象 ID（订单 / 交货 / 开票…）。不建外键
+    semantics:
+      meaning: 宿主单据对象 ID（纯标识，非外键 —— 跨任意 document 型 BO）
+      filterable: true
+      filter_type: text
+    ui:
+      widget: input
+
+  - id: document_id
+    name: 单据ID
+    type: integer
+    db_column: document_id
+    required: true
+    description: 宿主单据记录 ID
+    semantics:
+      meaning: 宿主单据记录 ID
+    ui:
+      widget: number
+
+  - id: document_line_id
+    name: 单据行ID
+    type: integer
+    db_column: document_line_id
+    required: false
+    nullable: true
+    description: >
+      宿主单据**行**记录 ID。**可空 = 头级**。
+      【现状】order_line 对象尚未落地，本期先挂头级（null），待行对象补齐后仅填此值。
+    semantics:
+      meaning: 宿主单据行 ID；可空表示头级结果
+    ui:
+      widget: number
+
+  - id: level
+    name: 层级
+    type: string
+    db_column: level
+    required: true
+    default: header
+    description: 结果层级
+    enum_values:
+      - value: header
+        label: 头级
+        color: info
+        is_initial: true
+        description: 挂在单据头（document_line_id 为空）
+      - value: line
+        label: 行级
+        color: primary
+        description: 挂在单据行（document_line_id 非空）
+    semantics:
+      meaning: 结果层级；与 document_line_id 的空值一致
+      filterable: true
+      filter_type: enum
+      filter_label: 层级
+      filter_scope: local
+    ui:
+      widget: select
+
+  # ---------------- 计算过程与策略元数据 ----------------
+  - id: process_code
+    name: 过程编码
+    type: string
+    db_column: process_code
+    required: true
+    max_length: 50
+    description: 定价过程编码。引用 calc_procedures.code（字符串快照，非外键）
+    semantics:
+      meaning: 定价过程编码（快照，源过程删除后仍可回放）
+    ui:
+      widget: input
+
+  - id: result_semantic
+    name: 结果语义
+    type: string
+    db_column: result_semantic
+    required: true
+    default: price
+    description: 结果语义（快照自过程）。通用化轴③
+    enum_values:
+      - value: price
+        label: 价格
+        color: primary
+        is_initial: true
+      - value: cost
+        label: 成本
+        color: warning
+      - value: emission
+        label: 碳排放
+        color: info
+      - value: tax
+        label: 税额
+        color: danger
+      - value: hours
+        label: 工时
+        color: success
+      - value: quantity
+        label: 数量
+        color: default
+    semantics:
+      meaning: 结果语义（轴③ 快照）
+    ui:
+      widget: select
+
+  - id: rate_type_code
+    name: 费率类型
+    type: string
+    db_column: rate_type_code
+    required: false
+    nullable: true
+    max_length: 50
+    description: 费率类型编码（字符串快照）。对应 SAP KSCHL
+    semantics:
+      meaning: 费率类型编码（快照）
+    ui:
+      widget: input
+
+  - id: element_type
+    name: 元素类型
+    type: string
+    db_column: element_type
+    required: false
+    nullable: true
+    max_length: 50
+    description: 计算元素类型（快照自步骤）。C5：必带，取值须在算子注册表内
+    semantics:
+      meaning: 计算元素类型（快照）
+    ui:
+      widget: input
+
+  # ---------------- 计算基四字段（FR-006）----------------
+  - id: base_level
+    name: 基层级
+    type: string
+    db_column: base_level
+    required: true
+    default: line
+    description: 计算基所在层级
+    enum_values:
+      - value: header
+        label: 头级
+        color: info
+      - value: line
+        label: 行级
+        color: primary
+        is_initial: true
+    semantics:
+      meaning: 计算基层级（FR-006 四维度之一）
+    ui:
+      widget: select
+
+  - id: base_source
+    name: 基来源
+    type: string
+    db_column: base_source
+    required: true
+    default: pricing_quantity
+    description: 计算基来源。通用化轴①
+    enum_values:
+      - value: pricing_quantity
+        label: 定价数量
+        color: primary
+        is_initial: true
+        description: 定价数量（qty × rate_unit）
+      - value: activity_quantity
+        label: 活动量
+        color: success
+        description: 燃料消耗 / 用电量 / 工时（碳排放与作业成本用）
+      - value: value
+        label: 价值
+        color: info
+      - value: weight
+        label: 重量
+        color: info
+      - value: volume
+        label: 体积
+        color: info
+      - value: energy
+        label: 能耗
+        color: info
+      - value: hours
+        label: 工时
+        color: success
+      - value: attribute
+        label: 属性
+        color: default
+      - value: formula
+        label: 公式
+        color: warning
+        description: 另记 base_formula
+    semantics:
+      meaning: 计算基来源（FR-006 四维度之一，轴①）
+      filterable: true
+      filter_type: enum
+      filter_label: 基来源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: base_step
+    name: 基步骤
+    type: string
+    db_column: base_step
+    required: false
+    nullable: true
+    max_length: 50
+    description: 计算基取自哪个前序步骤。**与 rolling=true 互斥**（FR-006 AC）
+    semantics:
+      meaning: 计算基所在前序步骤（FR-006 四维度之一）
+    ui:
+      widget: input
+
+  - id: rolling
+    name: 滚动
+    type: boolean
+    db_column: rolling
+    required: true
+    default: false
+    description: 是否滚动（true 时基 = 持续更新的 running_net_amount）。与 base_step 互斥
+    semantics:
+      meaning: 是否滚动计算基（FR-006 四维度之一）
+    ui:
+      widget: switch
+
+  - id: base_formula
+    name: 基公式
+    type: text
+    db_column: base_formula
+    nullable: true
+    max_length: 500
+    description: base_source = formula 时的基表达式（白名单 AST，禁止 eval）
+    semantics:
+      meaning: 基表达式（base_source=formula 时使用）
+    ui:
+      widget: textarea
+
+  # ---------------- 金额与量 ----------------
+  - id: rate
+    name: 费率
+    type: number
+    db_column: rate
+    required: false
+    nullable: true
+    description: 本行费率
+    semantics:
+      meaning: 本行费率
+    ui:
+      widget: number
+
+  - id: base
+    name: 计算基
+    type: number
+    db_column: base
+    required: false
+    nullable: true
+    description: 本行实际采用的计算基数
+    semantics:
+      meaning: 实际采用的计算基数
+    ui:
+      widget: number
+
+  - id: amount
+    name: 金额
+    type: number
+    db_column: amount
+    required: true
+    default: 0
+    description: 本行结果金额
+    semantics:
+      meaning: 本行结果金额
+    ui:
+      widget: number
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: false
+    nullable: true
+    description: 整次计算的净额（= 末行 running_net_amount）
+    semantics:
+      meaning: 整次计算的净额
+    ui:
+      widget: number
+
+  - id: currency
+    name: 币种
+    type: string
+    db_column: currency
+    required: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: ISO 4217 币种代码。主数据引用，不建外键
+    semantics:
+      meaning: 币种；master_data_ref = currency
+      master_data_ref: currency
+      data_category: code
+    ui:
+      widget: input
+
+  - id: sign
+    name: 正负号
+    type: string
+    db_column: sign
+    required: true
+    default: "+"
+    description: 对基价的作用方向
+    enum_values:
+      - value: "+"
+        label: 叠加
+        color: success
+        is_initial: true
+      - value: "-"
+        label: 抵扣
+        color: warning
+    semantics:
+      meaning: 费率作用方向
+    ui:
+      widget: select
+
+  - id: sequence
+    name: 序号
+    type: integer
+    db_column: sequence
+    required: true
+    default: 0
+    description: 结果行序号（对标 SAP STUNR）
+    semantics:
+      meaning: 结果行序号（SAP STUNR）
+    ui:
+      widget: number
+
+  # ---------------- 费用扩展（FR-013 / D16）----------------
+  - id: origin
+    name: 来源性质
+    type: string
+    db_column: origin
+    required: true
+    default: planned
+    description: 计划内/外。unplanned = 事后费用（不新建费用单据，D16 ②）
+    enum_values:
+      - value: planned
+        label: 计划内
+        color: primary
+        is_initial: true
+      - value: unplanned
+        label: 计划外
+        color: warning
+        description: 事后/计划外费用
+    semantics:
+      meaning: 费用性质（D16：unplanned 即事后费用，不破 D7）
+      filterable: true
+      filter_type: enum
+      filter_label: 性质
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: charge_source
+    name: 费用来源单据
+    type: string
+    db_column: charge_source
+    required: false
+    nullable: true
+    max_length: 30
+    description: 费用来源单据类型（origin = unplanned 时有意义）
+    enum_values:
+      - value: order
+        label: 订单
+        color: primary
+      - value: invoice
+        label: 发票
+        color: info
+      - value: receipt
+        label: 收货
+        color: info
+      - value: service_confirm
+        label: 服务确认
+        color: info
+      - value: settlement
+        label: 结算
+        color: info
+    semantics:
+      meaning: 费用来源单据类型
+    ui:
+      widget: select
+
+  - id: target
+    name: 归集方向
+    type: string
+    db_column: target
+    required: false
+    nullable: true
+    max_length: 20
+    description: 归集到价格/成本/费用
+    enum_values:
+      - value: price
+        label: 价格
+        color: primary
+      - value: cost
+        label: 成本
+        color: warning
+      - value: expense
+        label: 费用
+        color: danger
+    semantics:
+      meaning: 归集方向（对标 LCM Charge Basis）
+    ui:
+      widget: select
+
+  - id: allocation_basis
+    name: 分摊基数
+    type: string
+    db_column: allocation_basis
+    required: false
+    nullable: true
+    max_length: 20
+    description: 分摊基数（与 allocation_rule 配对）
+    enum_values:
+      - value: quantity
+        label: 数量
+        color: primary
+      - value: value
+        label: 价值
+        color: info
+      - value: weight
+        label: 重量
+        color: info
+      - value: volume
+        label: 体积
+        color: info
+      - value: net_amount
+        label: 净额
+        color: primary
+    semantics:
+      meaning: 分摊基数
+    ui:
+      widget: select
+
+  - id: allocation_rule_id
+    name: 分摊规则
+    type: integer
+    db_column: allocation_rule_id
+    required: false
+    nullable: true
+    description: 分摊规则 ID（引用 allocation_rules.id）。FR-013 实现期接入
+    semantics:
+      meaning: 分摊规则（1→N 摊金额，对偶于 allocation_weight 的 N→1 合率）
+    ui:
+      widget: reference
+
+  # ---------------- 事实扩展（FR-015）----------------
+  - id: rate_source
+    name: 率载体
+    type: string
+    db_column: rate_source
+    required: true
+    default: rate_record
+    description: 率值来源。通用化轴②
+    enum_values:
+      - value: rate_record
+        label: 费率记录
+        color: primary
+        is_initial: true
+      - value: external_quote
+        label: 外部报价
+        color: info
+      - value: formula
+        label: 公式
+        color: warning
+    semantics:
+      meaning: 率载体（轴②）
+      filterable: true
+      filter_type: enum
+      filter_label: 率载体
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: pricing_period_id
+    name: 价格期间
+    type: string
+    db_column: pricing_period_id
+    required: false
+    nullable: true
+    max_length: 50
+    description: 价格期间 ID（引用 pricing_periods.code）
+    semantics:
+      meaning: 价格期间（对标 SAP 有效期）
+    ui:
+      widget: input
+
+  - id: external_rate_source_id
+    name: 外部率源
+    type: integer
+    db_column: external_rate_source_id
+    required: false
+    nullable: true
+    description: 外部率源 ID（引用 external_rate_sources.id）。FR-015 实现期接入
+    semantics:
+      meaning: 外部率源（Platts / LME / ICE 等）
+    ui:
+      widget: reference
+
+  # 【FR-015】事实快照 —— 变量取价的可回放载体
+  - id: fact_snapshot
+    name: 事实快照
+    type: json
+    db_column: fact_snapshot
+    required: false
+    nullable: true
+    description: >
+      计算时的事实变量快照（JSON），如 {"customer_id":1001,"qty":50}。
+      变量取价（FR-015）的可回放载体：取价当时的因子值落在结果行上，
+      即使主数据后续变更也能复现当时结果。
+    semantics:
+      meaning: 事实变量快照（FR-015 可回放）
+    ui:
+      widget: json
+      editable: false
+
+  # ---------------- 结果策略元数据（§9.3.1 D）----------------
+  - id: price_mode
+    name: 价格模式
+    type: string
+    db_column: price_mode
+    required: true
+    default: carry
+    description: 后续单据如何取价
+    enum_values:
+      - value: carry
+        label: 沿用
+        color: primary
+        is_initial: true
+        description: 沿用本单已定价结果（对标 SAP KNPRS）
+      - value: recompute_amount
+        label: 重算金额
+        color: warning
+        description: 金额重算、单价沿用（对标 Oracle Freeze Price/Shipping/Tax）
+      - value: repricing
+        label: 重新定价
+        color: info
+        description: 全部重新定价
+    semantics:
+      meaning: 价格模式（对标 SAP KNPRS / TVCPF）
+      filterable: true
+      filter_type: enum
+      filter_label: 价格模式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 结果状态。invalid = 已作废（重算后旧结果保留以便审计）
+    enum_values:
+      - value: active
+        label: 有效
+        color: success
+        category: active
+        is_initial: true
+      - value: invalid
+        label: 已作废
+        color: info
+        category: inactive
+        description: 已被重算取代，保留以便审计
+    semantics:
+      meaning: 结果状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 结果业务说明
+    semantics:
+      meaning: 结果说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_calc_result_code
+  # 【FR-011 泛化宿主查询路径】IF-002：按 document_type + document_id
+  # (+ 可选 document_line_id) 查询 —— 这是回放查询的主路径
+  - fields: [document_type, document_id, document_line_id]
+    name: idx_calc_result_doc
+  - fields: [process_code]
+    name: idx_calc_result_process
+  - fields: [status]
+    name: idx_calc_result_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 定价结果查询
+    description: 挂单据的定价结论（可回放）
+    columns:
+      - field: code
+        width: 190
+        sortable: true
+      - field: document_type
+        width: 120
+        filterable: true
+        filter_type: text
+      - field: document_id
+        width: 100
+        type: number
+      - field: level
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: process_code
+        width: 150
+      - field: rate_type_code
+        width: 130
+      - field: amount
+        width: 110
+        type: number
+        align: right
+      - field: currency
+        width: 80
+        align: center
+      - field: sign
+        width: 70
+        align: center
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: created_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - description
+    actions:
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: sequence
+      order: asc
+
+  detail:
+    layout: tabs
+    title: "定价结果 {record.code} 详情"
+    tabs:
+      - id: host
+        label: 宿主单据
+        type: fields
+        fields:
+          - code
+          - document_type
+          - document_id
+          - document_line_id
+          - level
+      - id: calc
+        label: 计算基与过程
+        type: fields
+        fields:
+          - process_code
+          - result_semantic
+          - rate_type_code
+          - element_type
+          - base_level
+          - base_source
+          - base_step
+          - rolling
+          - base_formula
+      - id: amount
+        label: 金额
+        type: fields
+        fields:
+          - rate
+          - base
+          - amount
+          - net_amount
+          - currency
+          - sign
+          - sequence
+      - id: charge
+        label: 费用扩展
+        type: fields
+        fields:
+          - origin
+          - charge_source
+          - target
+          - allocation_basis
+          - allocation_rule_id
+      - id: fact
+        label: 事实快照
+        type: fields
+        fields:
+          - rate_source
+          - pricing_period_id
+          - external_rate_source_id
+          - fact_snapshot
+      - id: meta
+        label: 策略与状态
+        type: fields
+        fields:
+          - price_mode
+          - status
+          - description
+
+category_config:
+  create_permission: calc_result:create
+  update_permission: calc_result:update
+  delete_permission: calc_result:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

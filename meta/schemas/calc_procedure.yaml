@@ -1,0 +1,389 @@
+# 定价过程（Calculation Procedure）— 定价元模型 T1-1
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-005 / FR-006 / FR-007 / C5 / C-T0-8 / C-T0-13
+# 定位: 可配置的有序计算序列 —— "这个过程由哪些带类型的步骤组成"
+#       是 meta/core/calc_procedure_executor.py 的**配置载体**（T2-2 已实现引擎）
+#       对标 SAP V/08；Oracle Pricing Algorithm；SF Pricing Procedure
+#
+# 【通用化三轴 · §9.2 / D7】
+#   本表承载 **轴③ result_semantic** —— 过程声明"产出什么语义"（元 / 吨CO₂e / 小时），
+#   引擎**不写死为价格**。未来新增 costing / emission 过程 = **新增过程实例 +
+#   复用同一引擎**，非改引擎（D7 拍板：只做定价，但元模型按"通用确定与计算"设计）。
+#   轴① 计算基来源在 calc_detail.base_source（逐步骤可不同）；
+#   轴② 率载体在 calc_result.rate_source。
+#
+# 【C5 硬约束】步骤**必须带 element_type**（不是硬编码 if-else）——
+#   element_type 的取值须在 calc_procedure_executor.OPERATORS 注册表内；
+#   未注册类型执行期直接报错。本表把 element_type 做成**受控枚举**以提前暴露。
+#
+# 【C-T0-13】yaml 是唯一 SSOT；本表仅声明，MetaObject 只承载建表所需子集。
+#
+# 【零主数据依赖 · C-T0-6】无主数据外键引用。
+
+id: calc_procedure
+name: 定价过程
+table_name: calc_procedures
+description: 定价过程（业务别名：定价计算过程）——可配置的有序计算序列
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价计算过程定义
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 定价过程
+    - 定价程序
+    - pricing procedure
+    - calculation procedure
+
+deletion_policy:
+  # 【修 2026-10-06 口径】calc_result 侧不建外键到本表（结果行只记 process_code
+  #   字符串 + 快照，见下），故 restrict_on 为空；引用检查由业务层承担。
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 过程编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 过程唯一编码（如 PROC_SALES_STD）
+    semantics:
+      meaning: 过程业务编码；calc_result.process_code 引用它
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 过程名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 过程显示名称（如 标准销售定价过程）
+    semantics:
+      meaning: 过程显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 【通用确定骨架 · D7】不写死 price；首期只实装 pricing
+  - id: procedure_type
+    name: 过程类型
+    type: string
+    db_column: procedure_type
+    required: true
+    default: pricing
+    description: 过程类型。本期只实装 pricing；新增 costing/emission 属新增实例而非改引擎
+    enum_values:
+      - value: pricing
+        label: 定价过程
+        color: primary
+        is_initial: true
+        description: 产出价格（本期唯一实装类型）
+      - value: costing
+        label: 成本过程
+        color: warning
+        description: 产出成本（FR-013 实现期接入，引擎无需改动）
+      - value: emission
+        label: 排放过程
+        color: info
+        description: 产出碳排放量（FR-015 实现期接入，引擎无需改动）
+    semantics:
+      meaning: 过程类型 —— 通用确定骨架，不写死 price（D7）
+      filterable: true
+      filter_type: enum
+      filter_label: 过程类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 【轴③ · 通用化】
+  - id: result_semantic
+    name: 结果语义
+    type: string
+    db_column: result_semantic
+    required: true
+    default: price
+    description: 本过程产出什么语义的量。引擎不写死为价格
+    enum_values:
+      - value: price
+        label: 价格
+        color: primary
+        is_initial: true
+        description: 金额/单价（元）
+      - value: cost
+        label: 成本
+        color: warning
+        description: 成本额（元）
+      - value: emission
+        label: 碳排放
+        color: info
+        description: 排放量（吨 CO₂e）—— 对标成本域与碳管理
+      - value: tax
+        label: 税额
+        color: danger
+        description: 税额（元）
+      - value: hours
+        label: 工时
+        color: success
+        description: 作业工时（小时）—— 对标作业成本
+      - value: quantity
+        label: 数量
+        color: default
+        description: 数量
+    semantics:
+      meaning: 结果语义 —— 通用化轴③
+      filterable: true
+      filter_type: enum
+      filter_label: 结果语义
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: currency
+    name: 币种
+    type: string
+    db_column: currency
+    required: false
+    nullable: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: 本过程的默认币种。空 = 不限。主数据引用，不建外键
+    semantics:
+      meaning: 默认币种；master_data_ref = currency
+      master_data_ref: currency
+      data_category: code
+    ui:
+      widget: input
+
+  # 【C5】element_type 受控枚举，取值须落在 calc_procedure_executor.OPERATORS
+  - id: steps
+    name: 计算步骤
+    type: json
+    db_column: steps
+    required: true
+    description: >
+      有序步骤数组，元素形如
+      {"seq":1, "element_type":"list_price", "rate_type_id":1,
+        "condition":null, "params":{"rate_source":"rate_record"},
+        "rolling":false, "base_step":null, "subtotal_key":"s1_base"}。
+      【C5】element_type 必带，取值须在执行器算子注册表内，未注册即报错。
+      【步骤级控制项】rolling / base_step / subtotal_key / condition 写在
+      步骤对象顶层（不是 params 内）——见 T2-2 实施纠正记录。
+      【FR-006 互斥】rolling=true 与 base_step 同时给会报错。
+    semantics:
+      meaning: 计算步骤序列；执行器按 seq 升序逐步更新中间结果
+      display_detail: true
+    ui:
+      widget: json
+      editable: false
+
+  - id: subtotal_keys
+    name: 小计键
+    type: json
+    db_column: subtotal_keys
+    required: false
+    nullable: true
+    description: >
+      需要留存小计的步骤键名数组（须是 steps[].subtotal_key 的子集）。
+      供报表与后续步骤引用（对标 SAP KZWI1..6）。
+    semantics:
+      meaning: 需留存小计的步骤键；执行器只在这些键上记小计
+    ui:
+      widget: tags
+      editable: false
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 过程业务说明
+    semantics:
+      meaning: 过程说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_calc_procedure_code
+  - fields: [procedure_type]
+    name: idx_calc_procedure_type
+  - fields: [result_semantic]
+    name: idx_calc_procedure_semantic
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 定价过程管理
+    description: 可配置的有序计算序列
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: procedure_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: result_semantic
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: currency
+        width: 80
+        align: center
+      - field: description
+        width: 220
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建定价过程
+        icon: plus
+        type: primary
+        permission: calc_procedure:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 定价过程信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [procedure_type, result_semantic]
+          - fields: [currency]
+      - title: 计算定义
+        columns:
+          - fields: [steps]
+          - fields: [subtotal_keys]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - procedure_type
+          - result_semantic
+          - currency
+      - id: steps
+        label: 计算定义
+        type: fields
+        fields:
+          - steps
+          - subtotal_keys
+      - id: other
+        label: 其他信息
+        type: fields
+        fields:
+          - description
+
+category_config:
+  create_permission: calc_procedure:create
+  update_permission: calc_procedure:update
+  delete_permission: calc_procedure:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code
