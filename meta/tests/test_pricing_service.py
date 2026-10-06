@@ -621,3 +621,193 @@ class TestFR009阶梯链路:
                scale_semantic='total')
         with pytest.raises(ResolutionError, match="不是合法 json"):
             _price(ds)
+
+
+class TestFR016ConditionalUpdate:
+    """FR-016 条件更新（累计用量 · 对标 SAP Condition Update `KOUPD`）
+
+    AC：「可设最大金额 / 数量 / 单据数，**超限自动失效**」。
+
+    【本类的 fixture 单独建两张 P2 表】主 `ds` fixture 的 TABLES 列表不含
+    `usage_groups` / `cumulative_usages`（那是 T0-7 交付时的口径），
+    故此处按 yaml 声明补建，避免动既有 fixture 影响 42 条存量用例。
+    """
+
+    @pytest.fixture()
+    def ds_usage(self, ds):
+        gen = SchemaGenerator("sqlite")
+        for name in ("usage_group", "cumulative_usage"):
+            mo = registry.get(name)
+            assert mo is not None, f"{name} 未注册"
+            ds.execute(gen.generate_create_table(mo))
+        return ds
+
+    def _mk_group(self, ds, *, gid=1, max_amount=None,
+                  max_quantity=None, max_documents=None):
+        insert(ds, "usage_groups", id=gid, code=f"UG_{gid}", name="条件更新组",
+               max_amount=max_amount, max_quantity=max_quantity,
+               max_documents=max_documents)
+
+    def _mk_counter(self, ds, rate_record_id, group_id):
+        insert(ds, "cumulative_usages", id=rate_record_id,
+               rate_record_id=rate_record_id, usage_group_id=group_id,
+               used_amount=0, used_quantity=0, used_documents=0)
+
+    # ---- 读侧：触顶即失效 ----
+    def test_amount_cap_exhausted_candidate_skipped(self, ds_usage):
+        """累计金额触顶 → 该费率记录不再参与取价（回放记 record_inactive）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_amount=50.0)
+        self._mk_counter(ds, 1, 1)
+        update(ds, "cumulative_usages", {"rate_record_id": 1}, used_amount=50.0)
+
+        r = _price(ds)
+        # 原 priority=1 的记录已用满 → 落到 priority=2 的 200.0
+        assert r["hit_ids"] == [2]
+        assert r["net_amount"] == 200.0
+        skipped = [(s["candidate_id"], s["reason"])
+                   for s in r["traces"][0]["skipped"]]
+        assert (1, "record_inactive") in skipped
+
+    def test_quantity_cap_not_reached_still_hits(self, ds_usage):
+        """未触顶 → 正常命中（守护"触顶判定"不是"有组就失效"）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_quantity=100.0)
+        self._mk_counter(ds, 1, 1)
+        update(ds, "cumulative_usages", {"rate_record_id": 1}, used_quantity=40.0)
+
+        r = _price(ds, base=10.0)
+        assert r["hit_ids"] == [1]
+        assert r["net_amount"] == 100.0
+
+    def test_document_cap_exhausted(self, ds_usage):
+        """单据数上限触顶同样失效（第三个维度）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_documents=2)
+        self._mk_counter(ds, 1, 1)
+        update(ds, "cumulative_usages", {"rate_record_id": 1}, used_documents=2)
+
+        assert _price(ds)["hit_ids"] == [2]
+
+    def test_null_cap_dimension_is_unlimited(self, ds_usage):
+        """上限为空的维度不参与判定（max_quantity 空 + 金额用满 → 仍失效）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_quantity=None, max_amount=10.0)
+        self._mk_counter(ds, 1, 1)
+        update(ds, "cumulative_usages", {"rate_record_id": 1},
+               used_amount=10.0, used_quantity=99999.0)
+
+        # 数量虽超但该维度无上限 → 只按金额判失效
+        assert _price(ds)["hit_ids"] == [2]
+
+    def test_no_counter_row_means_no_limit(self, ds_usage):
+        """未登记累计计数器 = 不参与条件更新（不失效）"""
+        ds = ds_usage
+        _seed(ds)
+        assert _price(ds)["hit_ids"] == [1]
+
+    def test_missing_group_table_is_tolerated(self, ds):
+        """P2 表未建库时不得阻断取价（缺表容错，退化为"无上限"）"""
+        _seed(ds)
+        # 主 ds fixture 刻意不含 usage_groups / cumulative_usages
+        assert _price(ds)["hit_ids"] == [1]
+
+    # ---- 写侧：落库后累计 ----
+    def test_accumulates_after_persist(self, ds_usage):
+        """落库后按 金额/net · 数量/base · 单据数+1 累加"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_amount=10000.0)
+        self._mk_counter(ds, 1, 1)
+
+        _price(ds, base=10.0, document_type="so", document_id=1)
+        row = ds.execute(
+            "SELECT used_amount, used_quantity, used_documents, last_used_at"
+            " FROM cumulative_usages WHERE rate_record_id = 1").fetchone()
+        assert row[0] == pytest.approx(100.0)    # net
+        assert row[1] == pytest.approx(10.0)     # base
+        assert row[2] == 1
+        assert row[3] is not None                 # last_used_at 已写
+
+    def test_dry_run_does_not_accumulate(self, ds_usage):
+        """dry-run（persist=False）不累计 —— 预览不应吃掉合同量"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_amount=10000.0)
+        self._mk_counter(ds, 1, 1)
+
+        _price(ds, base=10.0, persist=False)
+        row = ds.execute(
+            "SELECT used_documents FROM cumulative_usages"
+            " WHERE rate_record_id = 1").fetchone()
+        assert row[0] == 0
+
+    def test_accumulates_twice_then_expires(self, ds_usage):
+        """端到端：连算两次用满上限 → 第三次该记录失效（AC 全链路）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_amount=150.0)
+        self._mk_counter(ds, 1, 1)
+
+        _price(ds, base=10.0, document_type="so", document_id=1)
+        assert ds.execute(
+            "SELECT used_amount FROM cumulative_usages"
+            " WHERE rate_record_id = 1").fetchone()[0] == pytest.approx(100.0)
+
+        _price(ds, base=10.0, document_type="so", document_id=2)
+        assert ds.execute(
+            "SELECT used_amount FROM cumulative_usages"
+            " WHERE rate_record_id = 1").fetchone()[0] == pytest.approx(200.0)
+
+        # 已超 150 → 第三次改由 priority=2 的记录承接
+        assert _price(ds, document_type="so", document_id=3)["hit_ids"] == [2]
+
+    def test_accumulation_rolls_back_with_failed_persist(self, ds_usage):
+        """明细写失败 → 累计用量一并回滚（同事务，不得"结果没成但量已扣"）"""
+        ds = ds_usage
+        _seed(ds)
+        self._mk_group(ds, max_amount=10000.0)
+        self._mk_counter(ds, 1, 1)
+
+        class _Flaky:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def execute(self, sql, params=None):
+                if "INSERT " + "INTO calc_details" in str(sql):
+                    raise RuntimeError("simulated detail insert failure")
+                return self._inner.execute(sql, params or [])
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            PricingService(_Flaky(ds)).price_line(
+                "PROC_STD", 1, [{"customer": 1001}], 10.0,
+                sequence_code="SEQ_STD", document_type="so", document_id=1)
+
+        row = ds.execute(
+            "SELECT used_amount, used_documents FROM cumulative_usages"
+            " WHERE rate_record_id = 1").fetchone()
+        assert row == (0, 0)
+
+
+class TestFR012PolicyMetadata:
+    """FR-012 执行期重算策略元数据（§9.3.1 D）"""
+
+    def test_three_policy_fields_exist(self, ds):
+        cols = {r[1] for r in ds.execute("PRAGMA table_info(calc_results)")}
+        assert {"freeze_policy", "reprice_trigger", "qty_basis"} <= cols
+
+    def test_defaults_are_empty_not_baked(self, ds):
+        """空 = 不自动重定价（红线：不得隐式重定价）—— 落库须为 NULL"""
+        _seed(ds)
+        _price(ds, document_type="so", document_id=1)
+        row = ds.execute(
+            "SELECT freeze_policy, reprice_trigger, qty_basis"
+            " FROM calc_results").fetchone()
+        assert row == (None, None, None)

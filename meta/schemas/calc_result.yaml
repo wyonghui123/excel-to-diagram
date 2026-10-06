@@ -670,6 +670,123 @@ fields:
     ui:
       widget: select
 
+  - id: freeze_policy
+    name: 冻结策略
+    type: string
+    db_column: freeze_policy
+    required: false
+    nullable: true
+    max_length: 20
+    description: 单价是否随下游单据重取。recompute = 重取 / freeze = 沿用本次结果（对标 Oracle CalculatePricingChargesFlag）
+    enum_values:
+      - value: recompute
+        label: 重取单价
+        color: warning
+        is_initial: true
+        description: 下游单据按其自身条件重新取价
+      - value: freeze
+        label: 沿用单价
+        color: primary
+        description: 沿用本结果的单价，不重新取价
+    semantics:
+      meaning: 下游单据是否重取单价
+    ui:
+      widget: select
+
+  - id: reprice_trigger
+    name: 重定价触发
+    type: string
+    db_column: reprice_trigger
+    required: false
+    nullable: true
+    max_length: 30
+    description: 显式触发重定价的事件。空 = 不自动重定价（红线：已开票/已过账行不得隐式重定价）
+    enum_values:
+      - value: manual
+        label: 人工触发
+        color: primary
+        is_initial: true
+        description: 只能由人工显式发起重定价
+      - value: on_copy
+        label: 复制单据时
+        color: info
+        description: 单据复制时重定价（对标 SF Repricing）
+      - value: on_ship_confirm
+        label: 发货确认时
+        color: info
+        description: 发货过账时重定价
+      - value: on_invoice
+        label: 开票时
+        color: info
+        description: 开票时重定价
+      - value: scheduled
+        label: 批处理调度
+        color: default
+        description: 由批处理作业定时重定价
+      - value: on_quality_result
+        label: 质检结果到达时
+        color: warning
+        description: 质检值到达后重定价（FR-015 优质优价；依赖尚未实施的事实源）
+      - value: on_pricing_period_end
+        label: 计价期结束时
+        color: warning
+        description: 计价期终价结算后重定价（FR-015 大宗贸易；依赖 pricing_period）
+    semantics:
+      meaning: 重定价的显式触发事件
+      filterable: true
+      filter_type: enum
+      filter_label: 重定价触发
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: qty_basis
+    name: 数量基准
+    type: string
+    db_column: qty_basis
+    required: false
+    nullable: true
+    max_length: 30
+    description: 金额重算时取哪个数量。与「单价是否重取」解耦（FR-012）；开票默认 delivered_qty（SAP FKMGK=D 惯例）
+    enum_values:
+      - value: order_qty
+        label: 订单量
+        color: primary
+        is_initial: true
+        description: 按订单数量
+      - value: delivered_qty
+        label: 交货量
+        color: info
+        description: 按已交货数量（开票默认）
+      - value: goods_issued_qty
+        label: 发料量
+        color: info
+        description: 按已发料数量
+      - value: billed_to_date_qty
+        label: 累计开票量
+        color: info
+        description: 按至今累计开票数量
+      - value: dry_weight
+        label: 干重
+        color: warning
+        description: 按干重（FR-015 大宗贸易）
+      - value: net_dry_weight
+        label: 净干重
+        color: warning
+        description: 按净干重（FR-015）
+      - value: assayed_content
+        label: 化验含量
+        color: warning
+        description: 按化验含量（FR-015 优质优价）
+    semantics:
+      meaning: 金额重算的数量基准
+      filterable: true
+      filter_type: enum
+      filter_label: 数量基准
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: status
     name: 状态
     type: string
@@ -887,6 +1004,9 @@ ui_view_config:
         type: fields
         fields:
           - price_mode
+          - freeze_policy
+          - reprice_trigger
+          - qty_basis
           - status
           - description
 

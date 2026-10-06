@@ -151,6 +151,11 @@ class PricingService:
         故这里只能先按 `rate_table_id`（+ `key_schema_id`）**收窄**，
         走 `idx_rate_record_lookup`，再由 lookup 引擎在结果集内比对键值。
         这是 C-T0-12「结构冻结」的既定代价。
+
+        【FR-016 条件更新】装载阶段即剔除**累计用量已触顶**的费率记录
+        （对标 SAP Condition Update `KOUPD`：条件记录跨单累计，用满即失效）。
+        在此剔除而非在引擎里判，是为了让"用满"与"停用"走**同一条**回放路径
+        （`inactive` → `SKIP_DISABLED`），不新增第三种跳过原因。
         """
         sql = "SELECT * FROM rate_records WHERE rate_table_id = ? AND status = 'active'"
         params: List[Any] = [rate_table_id]
@@ -163,7 +168,89 @@ class PricingService:
                     " AND (valid_to IS NULL OR valid_to > ?)")
             params.extend([valid_on, valid_on])
         sql += " ORDER BY priority ASC, id ASC"
-        return [Candidate.from_dict(r) for r in self._query(sql, tuple(params))]
+        cands = [Candidate.from_dict(r) for r in self._query(sql, tuple(params))]
+        return self._apply_usage_exhaustion(cands)
+
+    # ------------------------------------------------------------------
+    # FR-016 条件更新（累计用量）
+    # ------------------------------------------------------------------
+    def _apply_usage_exhaustion(self, cands: List[Candidate]) -> List[Candidate]:
+        """把**累计用量已触顶**的候选标记为 inactive（不删除、不报错）。
+
+        【为什么"触顶"复用 `inactive` 语义】`cumulative_usage` 上限由
+        `usage_group` 给（金额 / 数量 / 单据数三选），任一触顶即失效
+        （FR-016 AC「超限自动失效」）。失效是**配置状态**而非异常，
+        故走既有 `inactive` 通道，回放记 `record_inactive`。
+
+        【缺表容错】`cumulative_usages` / `usage_groups` 属 P2 对象，
+        早期库可能未建表；查不到即视为"无上限"，不阻断取价。
+        """
+        if not cands:
+            return cands
+        ids = [c.id for c in cands]
+        try:
+            rows = self._query(
+                "SELECT cu.rate_record_id, cu.used_amount, cu.used_quantity,"
+                "       cu.used_documents, ug.max_amount, ug.max_quantity,"
+                "       ug.max_documents"
+                "  FROM cumulative_usages cu"
+                "  JOIN usage_groups ug ON ug.id = cu.usage_group_id"
+                " WHERE cu.rate_record_id IN ({0})".format(
+                    ", ".join("?" * len(ids))),
+                tuple(ids),
+            )
+        except Exception as exc:      # 表未建 / 无该组 —— 视为无上限
+            logger.debug("累计用量检查跳过（表不可用）：%s", exc)
+            return cands
+
+        exhausted = set()
+        for r in rows:
+            for used_col, max_col in (("used_amount", "max_amount"),
+                                      ("used_quantity", "max_quantity"),
+                                      ("used_documents", "max_documents")):
+                cap = _to_num(r.get(max_col))
+                if cap is None:
+                    continue        # 该维度不设上限
+                used = _to_num(r.get(used_col)) or 0.0
+                if used >= cap:
+                    exhausted.add(r["rate_record_id"])
+                    break
+        for c in cands:
+            if c.id in exhausted:
+                c.inactive = True
+        return cands
+
+    def _accumulate_usage(self, lk, *, base: float, net: float) -> None:
+        """把本次用量累加进 `cumulative_usages`（FR-016 写侧）。
+
+        **只在落库路径调用**（dry-run 不累计），且与结果落库**同事务** ——
+        累计值与结果行必须同生共死，否则会出现"结果已生效但用量没计"，
+        下次取价仍判未触顶 = 超发。
+
+        【累加口径】金额累加本次 `net`，数量累加计算基 `base`，
+        单据数 +1（**按命中候选逐条计**，多候选取优时各条各计一次——
+        对标 SAP：每条条件记录各自维护自己的累计值）。
+
+        【缺表容错】与读侧同口径：`cumulative_usages` 未建表时跳过累计，
+        不阻断取价（P2 对象晚于 T0 交付，早期库无此表）。
+        """
+        if lk is None or not lk.hit_ids:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        for cid in lk.hit_ids:
+            try:
+                self.ds.execute(
+                    "UPDATE cumulative_usages"
+                    "   SET used_amount = COALESCE(used_amount, 0) + ?,"
+                    "       used_quantity = COALESCE(used_quantity, 0) + ?,"
+                    "       used_documents = COALESCE(used_documents, 0) + 1,"
+                    "       last_used_at = ?, updated_at = ?"
+                    " WHERE rate_record_id = ?",
+                    [float(net or 0.0), float(base or 0.0), now, now, cid],
+                )
+            except Exception as exc:
+                logger.debug("累计用量写入跳过（表不可用）：%s", exc)
+                return
 
     # ------------------------------------------------------------------
     # 主流程
@@ -316,7 +403,7 @@ class PricingService:
         lk,
         valid_on: Optional[str],
     ) -> int:
-        """作废旧结果 + 落新结果 + 落明细，**整体一个事务**。
+        """作废旧结果 + 落新结果 + 落明细 + 累计用量（FR-016），**整体一个事务**。
 
         【补 2026-10-06 二次审查】
         ① **重算须作废旧结果**：否则同一单据调两次会留下 2 条 active 结果，
@@ -324,14 +411,20 @@ class PricingService:
            `invalid` 的语义正是「已被重算取代，保留以便审计」。
         ② **作废与新写必须同事务**：否则作废成功而新写失败 = 该单据**无有效结果**，
            比留 2 条 active 更糟。
+        ③ **累计用量与结果同事务**（FR-016）：分开写会出现"结果已生效但用量没计"，
+           下次取价仍判未触顶 = 超发。**重算同理**——重算会作废旧结果，
+           故累计只增不减会重复计数，这是 FR-016 已知代价（对标 SAP 亦需
+           手工冲销累计值），本期不做自动冲销。
         """
         tx = getattr(self.ds, "transaction", None)
         if callable(tx):
             with tx():
-                return self._invalidate_and_persist_inner(
+                rid = self._invalidate_and_persist_inner(
                     process, level, document_type, document_id,
                     document_line_id, net, base, calc, lk, valid_on,
                 )
+                self._accumulate_usage(lk, base=base, net=net)
+                return rid
         sp = f"sp_pricing_{uuid.uuid4().hex[:8]}"
         # 裸 sqlite 连接（测试用）无 transaction()，用 SAVEPOINT 包裹。
         # 【注意】不能用 BEGIN —— python sqlite3 默认 autocommit=False，
@@ -343,6 +436,7 @@ class PricingService:
                 process, level, document_type, document_id,
                 document_line_id, net, base, calc, lk, valid_on,
             )
+            self._accumulate_usage(lk, base=base, net=net)
             self.ds.execute(f"RELEASE SAVEPOINT {sp}")
             return rid
         except Exception:
