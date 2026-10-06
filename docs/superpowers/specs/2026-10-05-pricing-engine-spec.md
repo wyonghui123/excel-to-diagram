@@ -1,6 +1,8 @@
 # 定价引擎（Pricing Engine）Spec + RFC
 
-> **版本**：v1.5 | **日期**：2026-10-05 | **状态**：**待确认**（**全部待拍板项已清零** —— v1.4 拍板 D18 补第四消解范式 `weighted` / D19 单位换算归事实源取值阶段；v1.5 拍板 D16 费用归属 / D17 重算节奏 / D20 多账簿不纳入 / D21 结果能力接口本期不做 / D22 + D23 改价必填原因（Override 复用 `adjustment`）/ D24 输出映射改为字段约定。**残留 TBD-3~TBD-7 为实施期事项；TBD-10 后置 P6；TBD-12 / TBD-13 保留待议**）
+> **版本**：v1.6 | **日期**：2026-10-06 | **状态**：**待确认**（**全部待拍板项已清零** —— v1.4 拍板 D18 补第四消解范式 `weighted` / D19 单位换算归事实源取值阶段；v1.5 拍板 D16 费用归属 / D17 重算节奏 / D20 多账簿不纳入 / D21 结果能力接口本期不做 / D22 + D23 改价必填原因（Override 复用 `adjustment`）/ D24 输出映射改为字段约定。**v1.6 新增 §7B 三件套通用性分析（代码级取证）并据此收窄 FR-003 / FR-004 职责边界 + 切出 T0 先行批次**；残留 TBD-3~TBD-7 为实施期事项；TBD-10 后置 P6；TBD-12 / TBD-13 保留待议；**TBD-14 / TBD-15 / TBD-16 为 v1.6 新登记**）
+> **三件套通用性结论（v1.6 拍板，详见 §7B）**：因子目录 / 匹配键表 / 查找序列**不是三个定价专表，而是「因子 / 键 / 取数计划」三原语的一种实例化**——通用的是原语，不是表。**通用点已由代码取证**：平台内**四处**（数据权限 / 属性确定 / 派生 / 文档流）自发实现了同一套三问，**无一通用**。据此收窄：`key_schema` 只留 `key_fields[]`、`lookup_sequence` 只留槽位顺序（`exclusive` 下沉为 `rate_record.hit_policy`）、`factor_catalog` **不再重复 `MetaField` 的 `data_type`/`aliases`**（消除双重真相源）。**不新增对象数量。**
+> **配置载体结论（v1.6 拍板，详见 §7C）**：**真正分岔不是"载体"，而是「谁在什么时候写 SSOT」。** 拍板走**「双装载并存」**——**开发态预置**（本期 T0，git 即审计）+ **运行态自举**（方向采纳）**两条路径都产出同一份 yaml**，汇入同一条 `register_from_directory` → `schema_generator` 管线，**不存在两条 SSOT**。**行业基线即运行态**：SAP **V/03 就是顾问勾选字段、生成条件表的事务码**（研究稿 S20/S47）。**关键修正**：`MetaObject` **装不下** yaml 的 4 块（`audit` / `ui_view_config` / `category_config` / `import_export`，§7C.1.1）——故它是**建表中间产物**而非 SSOT，**yaml 才是唯一 SSOT**。**本期禁止结构变更**（C-T0-12，顾问只能选既有因子组合；增删 PK 本身即数据迁移需求）。**EAV 泛化模型不适合因子/键/费率记录**（`keys{}` 组合匹配需索引，JSON 做不到），但**适合"少而固定"的配置**（`permission_rules_v2` 已验证）。
 > **命名声明（v1.3 拍板）**：**元模型层一律使用领域中立名**——费率类型 / 查找序列 / 计算过程 / 费率记录 / 计算结果…；**SAP 术语（条件类型 / 存取序列 / 定价过程 / 条件记录 / 定价结果）降为"业务别名"，只出现在 [§9.3.1](#931-对象模型数据模型) 的"业务别名"与"溯源"列**，不再作主名。通用化只参数化**三个正交轴**（① 计算基来源 ② 率载体 ③ 结果语义），**成本归集层与碳组织边界 / 合并层不属本引擎**（§1.4 N9）。
 > **通用性外部验证（v1.4）**：**v2.0 跨域对撞**（研究稿 §4.9）——三轴在 Oracle **成本域**（`总成本 = 固定 + 变动[单位资源成本 × 消耗数量]`、`单位成本 = 总成本 ÷ 缩放数量`）与**碳域**（`排放量 = 活动数据 × 排放因子`）**逐字同构**；据此补入**第四消解范式 `weighted`**（Oracle 成本域 Sourcing Rule 分配百分比等三处）。**v2.1 Palantir 对照**（研究稿 §4.10）——**两条通用化路径的分野不在能力而在"谁承担域特有逻辑"**；本引擎走"元模型 + 参数化"，故 **N9 边界是这条路径的必要成本**。
 > **关联文档**：
@@ -110,25 +112,33 @@
 ### FR-003 因子目录与匹配键表（Factor Catalog / Key Schema）—— 件①/③ 的前置键（业务别名：字段目录 / 条件表）
 
 - **Description**：系统 MUST 提供**因子目录 `factor_catalog`**（业务别名：字段目录；哪些字段可当键，含事实源分类）与**匹配键表 `key_schema`**（业务别名：条件表；用哪些因子的**组合**做键）。
+- **职责边界（v1.6 收窄 · 见 §7B.5 / C-T0-1 / C-T0-3）**：
+  - `factor_catalog` **只**声明 `source_type` + `is_price_relevant` 两项**`MetaField` 不具备**的能力；**不得**重复声明 `data_type` / `aliases`（引用 `MetaField.field_type` / `semantics.aliases`），避免**同一字段两处真相源**（§7B.4 缺陷 3）；
+  - `key_schema` **只**承载 `key_fields[]`（匹配维度）；**量级换算（`display_scale` / `numeric_field`）归 `rate_type`，阶梯基数（`scale_divisor`）与排除对象（`exclude_bo`）归 `rate_record`**（§7B.4 缺陷 1）。
 - **Acceptance Criteria**：
   - 因子目录项含 `source_type ∈ {static, master, quality, measurement, market}`，使**质检 / 计量 / 外部报价**三类事实源字段与主数据字段**同权**（FR-015 前置）；
-  - 匹配键表由因子目录中选字段组成，是费率记录"键"的定义来源；
+  - 匹配键表由因子目录中选字段组成，是费率记录"键"的定义来源；**键可被多个 `rate_table` 复用**（复用价值是本表存在的理由，若实施中从未复用则按 §7B.8 备选 D 废表 → TBD-14）；
   - 匹配键表 + 因子目录与 FR-002 费率类型**同批**交付（研究稿 §6.1 #10 定为 P0）。
 - **Priority**：Must
 - **Type Mapping**：Solution / Functional
-- **Source**：研究稿 §4.2 第 1 层、§4.8D①、§6.1 #10、#27
+- **Source**：研究稿 §4.2 第 1 层、§4.8D①、§6.1 #10、#27；**§7B 三件套通用性分析（代码级取证）**
 
 ### FR-004 查找序列与取数范式（Lookup Sequence：exclusive / additive）—— 件③（业务别名：存取序列）
 
-- **Description**：系统 MUST 提供**查找序列 `lookup_sequence`**（业务别名：存取序列）：一条**有序查表列表**，每条带 **Exclusive 开关**（首个命中即停 vs 继续向后查累加）。**槽位内默认 exclusive（首个命中）**。
+- **Description**：系统 MUST 提供**查找序列 `lookup_sequence`**（业务别名：存取序列）：一条**有序查表列表**。**命中策略下沉到费率记录**（`rate_record.hit_policy`，v1.6）：序列只管"第几个槽位、用哪把键"，**"命中即停还是继续累加"由每条费率记录自带**。
+- **职责边界（v1.6 · 见 §7B.4 缺陷 2 / §7B.5 / C-T0-2 / C-T0-4）**：
+  - `lookup_sequence` **只**含 `code` / `name` / `steps[{seq, key_schema_id}]`，**不含 `exclusive`**；
+  - **命中策略改由 `rate_record.hit_policy ∈ {exclusive, additive}` 承载**（默认 `exclusive`），对标 SAP **逐条条件自带** `%GET_VAL` 累加 / 首命中退出；
+  - **消除后果**：支持"**第 1 槽累加 + 第 2 槽取优**"**无需整表复制序列**。
 - **Acceptance Criteria**：
   - 默认语义 = **exclusive 首个命中**（对标 SAP 存取序列 Exclusive 标志、Odoo 首个、金蝶"命中即止"）；
-  - 需**继续累加**时，须在该条**显式开启**（additive）；
+  - 需**继续累加**时，在**该条费率记录**上显式置 `additive`（原为序列级开关，现下沉）；
   - 同 `priority` 必须有**确定 tie-break**（`priority` asc，其次 `rate_record.id` 字典序），**禁止不确定顺序**；
-  - 命中后可回答"**命中哪一行 / 为什么其它行被跳过**"（回放最小骨架，配 FR-010）。
+  - 命中后可回答"**命中哪一行 / 为什么其它行被跳过**"（回放最小骨架，配 FR-010）；
+  - **兼容性**：`hit_policy` 缺省 = `exclusive`，与 v1.5 及更早设计**行为完全一致**（零迁移风险，并入 TR-001）。
 - **Priority**：Must
 - **Type Mapping**：Functional
-- **Source**：研究稿 §4 件③、§5.1（复用 `default_by_priority` 语义）、§8 D2/§8.1、§5.2
+- **Source**：研究稿 §4 件③、§5.1（复用 `default_by_priority` 语义）、§8 D2/§8.1、§5.2；**§7B.4 缺陷 2（逐条件自带的对标取证）**
 
 ### FR-005 计算过程（Calculation Procedure：可配置计算序列 + 可插拔算子）—— 件④（业务别名：定价过程）
 
@@ -430,6 +440,7 @@
 
 ### TR-002 依赖主数据分期补齐顺序
 - **Description**：引擎依赖一批通用主数据，缺失则不能开跑。
+- **责任方划分（v1.6）**：**主数据补齐由数据模块负责**（#11 币种、#16 销售区域、#12 汇率、#14/#15 价格组、#13 税码等）。**本引擎侧不等待**——配置链 T0-1~T0-7 与内核 T1 **均已零主数据依赖**（§8.2.0、C-T0-6），通过 `currency` 降级为 `string` + `master_data_ref` 标记解耦；主数据到位后**仅需补引用完整性校验，不改表结构**。**唯一仍需等待的是 IF-008 跨币种换算与税 / 价格组类费率类型**（T1 之后的事）。
 - **Strategy**（研究稿 §6.1 排序原则，**先依赖后优先级**）：
   - **P0 前置**：#11 币种主数据、#16 销售区域（`sales` 已有，补渠道 / 产品组）——须先于引擎开跑；
   - **P1 随费率类型**：#12 汇率（跨币种取价前）、#14 客户价格组 / 客户计算过程、#15 物料价格组 / 税分类 / 参考物料（对应折扣组 / 物料组取价前）；
@@ -489,6 +500,355 @@
 
 ---
 
+## 7B. 三件套通用性分析（v1.6 · 2026-10-06）
+
+> **为何补这一节**：D7 / §9.2 已声明"元模型 = 通用确定"，但**未回答"通用到什么粒度"**。
+> 因子目录 / 匹配键表 / 查找序列被当作**三张定价专表**直接进入 §8.2 P0 与 §9.3.1 A 表——
+> **本节用代码取证回答：通用的是它们背后的三个原语，不是这三张表。**
+> 结论直接改写 FR-003 / FR-004 的职责边界，并给出 T0 建模口径，**不新增对象数量**。
+
+### 7B.1 结论一句话
+
+> **三件套是"通用取数"的一种实例化，通用点在「因子 / 键 / 取数计划」三原语**；
+> 当前设计把**定价特例**（量级换算、阶梯基数、排除对象）与**通用骨架**混装在同两张表里，
+> **若不拆，第一次复用（伙伴确定 / 税 / 碳）时必然重造**。
+
+### 7B.2 三原语：任何"按已知条件算出未知值"的机制都逃不掉的三问
+
+| 问 | 原语 | 平台现有形态（**代码级取证**） | 定价形态 |
+|---|---|---|---|
+| **看什么** | **因子** Input | `MetaRule.condition` 里**隐含**的字段引用 —— [models.py](file:///d:/filework/excel-to-diagram/meta/core/models.py#L156) | `factor_catalog` 显式立档 |
+| **按什么组合** | **键** Key | 无显式概念（同样隐含在表达式中） | `key_schema.key_fields[]` |
+| **先查谁、命中算不算完** | **取数计划** Plan | `priority` + first-match —— [rule_executor.py](file:///d:/filework/excel-to-diagram/meta/core/rule_executor.py#L1344-L1354) | `lookup_sequence.steps[]` |
+
+**关键区分**：`condition` 是**自由表达式**（`SafeExpressionEvaluator` 语法），因子**藏在字符串里**——
+**不可枚举、不可复用、不可做 UI 下拉、无法回答"哪些字段参与价格"**。
+三件套把同一件事**拆成三层可配置结构**，这是一次**从表达式驱动到目录驱动的升维**，不是重复造轮子。
+
+### 7B.3 平台内已四处自发实现了「三原语」，但无一通用
+
+| 域 | 因子 | 键 | 取数计划 |
+|---|---|---|---|
+| 属性确定（DEFAULT） | condition 引用字段 | 无 | `priority` + first-match |
+| **数据权限** | 记录字段 | `(bo, action, role)` | **Owner > Exclude > Include > 默认拒绝** |
+| 派生（DERIVATION） | `source_fields` | `group_by` | `order_by` + `strategy` |
+| 文档流 | 源字段 | `(doc_type, trigger)` | `flow_mode` |
+
+**四处各造了一套，无一是可复用组件** —— 这正是"通用性"主张的**实证支撑**：不是本引擎的抱负，是已在四处自然涌现的需求。
+（对标：`MetaDerivation` 的 `group_by`/`order_by` 见 [models.py](file:///d:/filework/excel-to-diagram/meta/core/models.py#L391-L394)。）
+
+### 7B.4 三个缺陷（必须修，否则 T0 锁死错误结构）
+
+**缺陷 1：`key_schema` 严重超载 —— 塞了 3+1 个互不相干职责**
+
+| 承载内容 | 归属判断 |
+|---|---|
+| `key_fields[]`（匹配维度） | **通用**（唯一有跨业务价值的部分） |
+| `display_scale` / `numeric_field`（量级换算） | **定价特例**（Part 1 消费，与匹配无关） |
+| `scale_divisor` / `exclude_bo`（阶梯与排除） | **定价特例**（Part 2/3，与匹配无关） |
+| 承载加性取数槽位 | 与 `rate_record.scale[]` / `allocation_weight` 语义重叠 |
+
+> **对标反证**：**六家里五家没有独立的"匹配键目录"**——SAP 只有「条件表 + 存取序列」两层
+> （匹配维度**内联在条件记录里**）；Oracle Fusion 直接在 `ListPrice` 上挂 `QualifyingCriteria`。
+> **独立 `key_schema` 表是本引擎的选择，不是行业基线**，故须收窄到只承载 `key_fields[]`。
+
+**缺陷 2：`lookup_sequence` 把「查」与「怎么用」混在一张表**
+
+- **检索计划**：第几槽位、什么键 —— `seq` / `key_schema_id`
+- **聚合策略**：exclusive（命中即停）vs additive（累加）—— `exclusive`
+
+这两个在六家是**分离且逐条自带**的：SAP 条件表可按 `%GET_VAL` 累加、也可首命中退出，**是每条条件自己的属性，不是序列级属性**。
+混在一张表的直接后果：**"第 1 槽累加、第 2 槽取优"必须整表复制**。
+
+**缺陷 3：`factor_catalog` 与 `MetaField` 是同一事实的两个真相源**
+
+| `MetaField` 已有 | `factor_catalog` 又声明一遍 | 冲突 |
+|---|---|---|
+| `id` / `name` / `field_type` | `id` / `name` / `data_type` | 枚举不同 |
+| `semantics.data_category ∈ {text, code, date, number, amount, quantity, boolean}` | `data_type ∈ {string, number, date, enum, boolean}` | **`amount`/`quantity` vs `string`/`enum` 逐项不对齐** |
+| `semantics.aliases` | `aliases` | 重复 |
+
+> **风险等级**：与 A1 修掉的「表名映射 6 份副本」**是同一类风险**，只是下沉到字段层。
+> 同一字段的类型可能被两处声明为不同枚举 → 换算与校验行为不可预测。
+
+### 7B.5 修正方案（**不新增对象数量**，只收窄职责 + 加一个 flag）
+
+```
+平台层三原语（跨业务，本期只做取证不做实现）
+├─ 因子声明 → 复用 MetaField + semantics，**不新建目录表**
+├─ 键       → 命名的一组因子引用（收窄到只含 key_fields[]）
+└─ 取数计划 → 有序槽位 + **每槽独立**命中策略（exclusive/additive 下沉到 rate_record）
+```
+
+**职责重划（改写 §9.3.1 A 表）**
+
+| 字段 | 从 | 移到 | 理由 |
+|---|---|---|---|
+| `key_schema.display_scale` / `numeric_field` | `key_schema` | `rate_type` | 量级换算属"怎么算"，非"按什么匹配" |
+| `key_schema.scale_divisor` / `exclude_bo` | `key_schema` | `rate_record` | 阶梯基数 / 排除对象属**某条费率记录的属性** |
+| `lookup_sequence.steps[].exclusive` | `lookup_sequence` | `rate_record.hit_policy` | 对标 SAP **逐条件自带**；消除整表复制 |
+| `factor_catalog.data_type` | `factor_catalog` | **删**（引用 `MetaField.field_type`） | 消除双重真相源 |
+| `factor_catalog.aliases` | `factor_catalog` | **删**（引用 `MetaField.semantics.aliases`） | 同上 |
+| `factor_catalog.source_type` + `is_price_relevant` | `factor_catalog` | **保留** | **本表唯一不可替代的内容**：事实源分类 + 价格相关性标记，二者**皆非 `MetaField` 现有能力** |
+
+**`factor_catalog` 收窄后的唯一职责**（这才是它必须独立成表的理由）：
+1. `source_type ∈ {static, master, quality, measurement, market}` —— **让质检 / 计量 / 外部报价与主数据同权**（FR-015 前置，§7B.6）
+2. `is_price_relevant` —— 回答"哪些字段影响价格"（表达式驱动**答不了**）
+
+> **判据统一**：**这个字段换个业务还需要吗？** 需要 → 平台层；不需要 → 定价。
+> 依此：`rate_type` / `calc_procedure` / `base_level` / `scale` / `allocation_weight` / `exclude_bo`
+> **全为定价独有**（B1「未来加伙伴确定 = 新增过程类型 + 一张规则表」，**成立**）。
+
+### 7B.6 与 FR-015 的依赖关系（重排优先级）
+
+`factor_catalog.source_type` 是 **FR-015（事实数据驱动重算）的前置**：
+若主数据字段与非主数据字段（质检值 / 计量值 / 市场报价）**不同权**，FR-015 无法成立。
+故 §8.2 **P0 必须包含 `factor_catalog`**，不可推迟到与 `order_line` 同期。
+
+### 7B.7 对 T0 建模口径的直接约束
+
+| 约束 | 内容 |
+|---|---|
+| **C-T0-1** | `key_schema` **只**含 `code` / `name` / `key_fields[]`；量级换算、阶梯、排除**不得**入表 |
+| **C-T0-2** | `lookup_sequence` **只**含 `code` / `name` / `steps[{seq, key_schema_id}]`；**不含** `exclusive` |
+| **C-T0-3** | `factor_catalog` **不得**声明 `data_type` / `aliases`（引用 `MetaField`）；**只**声明 `source_type` / `is_price_relevant` |
+| **C-T0-4** | `rate_record` 新增 `hit_policy ∈ {exclusive, additive}`（默认 `exclusive`），承载原 `steps[].exclusive` 语义 |
+| **C-T0-5** | 迁移零风险：`exclusive` 默认值 = 原 Spec 语义，存量无配置 → 行为不变（并入 TR-001） |
+| **C-T0-6** | 三表**零主数据依赖**（`currency` 降级为 `string` + `master_data_ref` 标记），可与主数据并行交付 |
+| **C-T0-7~C-T0-13** | **配置载体与作用域约束**（Agent / 运行态背景，见 §7C.5）：yaml 作 SSOT + table 自动物化 / 主数据引用不建外键 / `rate_table` 预留 `owner_org_id` / Agent 生成走同一份 yaml 不旁路写 DB / `status` 草稿发布分离必须落地 / **`key_fields` 本期冻结（禁止结构变更）** / **yaml 仍是唯一 SSOT（`MetaObject` 仅为建表中间产物）** |
+
+### 7B.8 备选方案与否决理由
+
+| 备选 | 否决理由 |
+|---|---|
+| **A. 维持三表原样** | 缺陷 1/2 在**第二次复用**（伙伴确定）时即爆发：量级换算与匹配维度耦合，无法被非定价域复用 |
+| **B. 只加注释说明"这些字段是定价专用"** | 不解决**双重真相源**（`data_type` 枚举冲突是实打实的错），也不解决整表复制 |
+| **C. 抽象出独立"决策原语"包（新模块）** | **超范围**：本期只有一个过程实例，YAGNI。原语**先在文档层立口径**（本节），实现层待第二个实例出现再抽——**这与 §7.2 B1「新增过程类型 + 一张规则表」的承诺一致** |
+| **D** `key_schema` 彻底废掉，匹配维度内联进 `rate_record.keys{}`** | **更接近 SAP 基线**（SAP 条件表内联匹配维度），少一张表。但**六家中 Fusion / Odoo 亦内联**，且本引擎 `key_schema` 承担**可复用的键定义**（多个 `rate_table` 共享同一键结构）——**保留表、收窄职责**是折中；若 P0 实施时发现"键从不复用"，则按 D 废表（登记 TBD-14） |
+
+---
+
+## 7C. 配置载体的未来形态：AI Agent 背景下的选择（v1.6 · 2026-10-06）
+
+> **为何补这一节**：§7B 解决"配置**结构**该怎么分层"，本节解决"配置**载体**该是什么形态"。
+> **现实起点**：本平台**已经是** yaml 声明式，且**已在做** Agent 动态生成——
+> 提这个问题不是"要不要切换"，而是"**已选的路要不要承认它**、边界划在哪"。
+> **结论先行：Agent 时代 yaml 与 table 不是二选一，而是「同一份 SSOT 的两个投影」——
+> yaml 是 SSOT，table 是查询加速物。** Agent 要动的是**生成侧与作用域**，不是载体本身。
+
+### 7C.1 事实前提：yaml 是 SSOT，`MetaObject` 只是建表中间产物
+
+**这不是推论，是仓库既有实现**：
+
+| 事实 | 取证 |
+|---|---|
+| **yaml 是唯一事实源，`.bip`/`manifest.json` 是构建产物** | [app_package.py](file:///d:/filework/excel-to-diagram/meta/core/app_package.py#L10-L12) 原文："包内 `manifest.json` 是**构建产物**; `app.yaml` 仍是唯一事实源" |
+| yaml → registry → 建表流水线已通 | [app_builder.py](file:///d:/filework/excel-to-diagram/meta/core/app_builder.py#L48-L57) `with_yaml_schemas()` → `register_from_directory` → `invalidate_table_cache` |
+| 反向也有：DB → BODefinition 内省 | [app_builder.py](file:///d:/filework/excel-to-diagram/meta/core/app_builder.py#L59-L80) `with_auto_schema()`（`SchemaIntrospector`），**注释标明"仅 introspect，不注册"** |
+| 运行时可增量加工策略（不改代码） | [materialization_registry.py](file:///d:/filework/excel-to-diagram/meta/core/materialization_registry.py#L9-L11) "新表加 `updated_at` 时，只需在 SSOT 加一行，无需改代码" |
+| 枚举已有**双轨**：静态 → DB | [enum_resolver.py](file:///d:/filework/excel-to-diagram/meta/core/enum_resolver.py#L31-L45) `field.enum_values`（静态）→ `value_help` → `enum_values`（DB） |
+
+> **由此得出两个关键约束**：
+> ① **双轨制（yaml 优先 + DB 兜底）已是既成事实**——不是待选方案，是**已在运行的模式**；
+> ② **反向内省存在但刻意不注册**——`with_auto_schema` 明确"仅 introspect，不注册"，
+> 说明**"从 table 反推模型"路上有一道人为闸门**。**这道闸门在 Agent 时代会成为关键设计点**（见 §7C.4）。
+
+#### 7C.1.1 关键修正：`MetaObject` **装不下** yaml 的全部（v1.6 修订）
+
+> **本节修正了 v1.6 初稿的一处立论错误**：初稿曾写「`MetaObject` 是唯一 SSOT，yaml 降级为装载格式」。
+> **经 `_template.yaml` 与 `models.py` 逐块比对，该立论不成立**——`MetaObject` 是**不完整投影**。
+
+[\\_template.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/_template.yaml) 顶层共 **13 个块**，`MetaObject` 的覆盖情况：
+
+| yaml 顶层块 | `MetaObject` 覆盖 |
+|---|---|
+| `id` / `name` / `table_name` / `description` / `semantics` / `fields[]` / `associations` / `indexes` / `rules` / `deletion_policy` | ✅ 有对应字段 |
+| **`audit`**（create / update / delete 三套，字段级 `all` / `changed_only` / `business_only`） | ❌ **无对应字段** |
+| **`ui_view_config`**（list / form / detail 三套视图，含 `searchFields` / `batch_actions` / `placeholder` / `widget: textarea`） | ⚠️ 有 `ViewConfig` 但**是另一个东西**（`sources` / `joins` / `aggregates` = 查询视图，非 UI 布局） |
+| **`category_config`**（`create_permission` / `owner_auto_permission`） | ❌ **无对应字段** |
+| **`import_export`**（`conflict_strategy: upsert` / `conflict_key`） | ❌ **无对应字段** |
+| `enums` | ⚠️ `MetaField.enum_values` 仅覆盖字段级枚举 |
+
+**正确的链路（推翻初稿的"SSOT 下移"）**：
+
+```
+yaml（完整 SSOT，含 MetaObject 装不下的 4 块）
+   │
+   ├─ register_from_directory() → MetaObject（**不完整投影**）→ registry
+   │                                    └→ schema_generator（**只消费 fields / indexes / relations**）→ 建表
+   │
+   └─ 前端 UI / 权限 / 审计 / 导入导出（**直接读 yaml，不经过 MetaObject**）
+```
+
+**两条重要推论**：
+1. **`schema_generator` 从不需要那 4 块**——建表只用到 `fields` / `indexes` / `associations`；
+   故**"让顾问勾字段生成 yaml"这条路完全走得通**，`MetaObject` 在该链路上**只是建表中间产物**。
+2. **这反而降低了运行态自举的治理成本**——见 §7C.4.1 的"顾问只勾 4 项、其余走模板默认值"。
+
+### 7C.2 四种候选载体的对比
+
+| 方案 | 载体 | Agent 适配 | 检索性能 | 版本/回滚 | 校验时机 | 判定 |
+|---|---|---|---|---|---|---|
+| **A. 纯 yaml** | 文件 | ★★★ 生成即写文件，天然 diff | ★ 靠启动期建表 + 索引 | ★★★ git 友好 | **启动期**（fail fast） | **SSOT 应当如此** |
+| **B. 纯 table** | DB 表 | ★ 需 DDL，Agent 改结构风险高 | ★★★ | ★ 需自建版本表 | 运行时 | **不宜作 SSOT** |
+| **C. yaml + table 投影**（平台现状） | A + B | ★★★ | ★★★ | ★★★ | 启动期 + 运行时双校验 | **✅ 就是正确形态** |
+| **D. 泛化 EAV 模型** | 单表 + JSON 列 | ★★ 灵活但查询退化 | ★（JSON 扫描） | ★ | 运行时 | **仅适用于"配置本身即数据"的少数场景** |
+
+**为什么不是 A（纯 yaml，无 table）**：Agent 生成的配置要能被**业务数据查询**。
+因子目录、键、费率记录**是数据不是代码**——若只存 yaml，每次取价都要解析文件 + 内存过滤，**等于把 IO 成本挪到每次业务操作**。
+
+**为什么不是 B（纯 table）**：Agent 改 DDL 意味着**改结构**。
+`CREATE TABLE` 无版本、无回滚、无 diff——**"Agent 动态加一张配置表"在纯 table 下不可审查**。
+
+**为什么不是 D（EAV）**：仓库里已有它的形态且已被验证为**专用**——
+`permission_rules_v2`（[permission_rule_v2_dao.py](file:///d:/filework/excel-to-diagram/meta/core/permission_rule_v2_dao.py#L7-L11)）用 `include_conditions` / `exclude_conditions` **JSON 列**。
+**它是对的**，因为规则**数量少、形状固定、只按 `role_id` 查**。
+但**费率记录不同**：需按 `keys{}` 做**组合等值匹配**（`WHERE key_customer = ? AND key_material = ?`）——
+**JSON 列做不了索引等值匹配**；EAV 要么退化全表扫，要么给每种键组合建宽表（= 回到 B）。
+
+### 7C.3 关键结论：Agent 改变的是**三件事**，不是载体
+
+| 变化 | 说明 | 对载体的要求 |
+|---|---|---|
+| **① 生成侧动态化** | Agent 写 yaml / 建表，而非人手写 | 载体必须**声明式 + 可校验**（A 天然满足；B 不满足） |
+| **② 作用域动态化** | 配置从"全局静态"到"租户/用户/时刻可变" | 需要**作用域维度**（见 §7C.4），**不是换载体能解决的** |
+| **③ 结构稳定、表结构不固定** | 业务加新因子，**不应改 schema** | 决定 `key_schema` 存在与否（**TBD-14 的真正权重**） |
+
+> **反直觉但重要的推论**：Agent 越强，**越需要把载体收紧到声明式**。
+> 手写配置时"表结构随意"成本可接受；**Agent 生成时，宽松载体会把错误从"一次人工返工"变成"自动化污染"**。
+> 即：**灵活性应放在「配置内容」，不该放在「配置结构」**。
+
+### 7C.4 真正需要设计的：作用域维度（而非载体形态）
+
+Agent 时代配置的**本质变化是作用域**，不是格式。当前三件套**全部是全局配置、无作用域字段**：
+
+| 作用域 | 语义 | 现状 | 必要性 |
+|---|---|---|---|
+| **租户 / 组织隔离** | A 公司价目不影响 B 公司 | `rate_table` 无租户字段 | **必须**——否则跨租串价 |
+| **版本 / 生效期** | 规则改动能回溯"当时按什么算" | `rate_record` 有 `valid_from/valid_to`（**行级**），但**结构变更无版本** | **必须**——TBD-4 遗留 |
+| **用户级覆盖** | 某人/某单有特殊价 | **无** | 可能，但应走 `adjustment` 而非改配置 |
+| **草稿 / 发布分离** | Agent 生成的配置先预览再生效 | `rate_table.status ∈ {draft, approved, inactive}`（**已有一半**） | **已有，够用** |
+
+> **`with_auto_schema` 那道闸门的意义**：它当前"仅 introspect，不注册"是**正确的保守设计**——
+> **DB 里的东西不该自动变成模型**。Agent 时代应保持这道闸门，但把闸门从"禁止"改成"**需显式批准**"：
+> Agent 可提议从 table 生成 yaml，**但必须产出 diff 供人确认**，而非静默注册。
+
+### 7C.4.1 运行态自举：双装载 + 仿 SAP V/03 界面（v1.6 **拍板**）
+
+> **本节回答一个 v1.6 初稿未识别的架构问题**：初稿默认"yaml 是开发态产物"，
+> 但**行业基线恰恰是运行态交互生成**——SAP **V/03 就是顾问勾选字段、生成条件表的事务码**
+> （研究稿 **S20**：「条件表 V/03：字段目录选字段生成条件表」；**S47** 路径 V/03 → V/07 → V/08 全为**交互式 T-code**）。
+> 用户评审明确指出该偏差并拍板如下。
+
+#### （1）三种建设模式的对比
+
+| 模式 | 谁写 yaml | 何时写 | 变更留痕 | 回滚 | 判定 |
+|---|---|---|---|---|---|
+| **① 开发态预置** | 开发人员 | 发版 | **git 天然有** | `git revert` | 本期 T0 采用 |
+| **② 运行态自举** | **顾问 / 专家** | **系统运行中，随时** | **须新建配置变更历史** | **须新建快照** | **方向采纳，界面定位见 (3)** |
+| **③ 双装载并存** | 开发人员 + 顾问 | 两者 | **两者都导出 yaml 进 git** | 统一 | ✅ **拍板采用** |
+
+**③ 的关键点：不存在两条 SSOT。** 两条路径**都产出 yaml**，汇入同一条
+`register_from_directory` → `schema_generator` 管线（§7C.1.1 链路图）——
+顾问界面走的是**同一份 yaml 的另一种产生方式**，不是另一套模型。
+
+#### （2）拍板结论（三条）
+
+| # | 拍板项 | 内容 |
+|---|---|---|
+| **P-1** | **SSOT 仍是 yaml**（修正初稿"SSOT 下移至 `MetaObject`"的立论错误） | `MetaObject` 是**建表中间产物**（因 §7C.1.1 它装不下 yaml 的 4 块：`audit` / `ui_view_config` / `category_config` / `import_export`）。**"让顾问勾字段生成 yaml"因此完全走得通**——`schema_generator` 从不需要那 4 块 |
+| **P-2** | **界面定位：仿 SAP V/03** | 顾问在界面**勾选因子 → 预览生成的表结构 → 确认后建表**（研究稿 S20 已取证为行业基线） |
+| **P-3** | **本期禁止结构变更** | `key_fields` **冻结**：顾问只能从**既有因子**中选组合，**不得增删 PK**。变更走发版。理由见 (4) |
+
+#### （3）V/03 式界面的最小字段集（治理成本的关键）
+
+**顾问只暴露 4 项，其余全部由平台模板填充默认值**：
+
+| yaml 块 | 界面暴露 | 默认值 | 说明 |
+|---|---|---|---|
+| `id` / `name` / `fields[]`（键） | ✅ **暴露** | — | 核心：勾选因子 |
+| `table_name` | ✅ 暴露（自动生成可改） | 按 `id` 推导 | 避免手填冲突 |
+| `semantics` | 部分 | `category: system_entity` | |
+| `deletion_policy` | ❌ 不暴露 | `mode: restrict` | **最安全默认** |
+| `audit` | ❌ 不暴露 | `enabled: true` + `changed_only` | **平台默认，不可关** |
+| `category_config` | ❌ 不暴露 | `owner_auto_permission: false` | **保守默认** |
+| `import_export` | ❌ 不暴露 | `conflict_strategy: upsert` + `conflict_key: code` | |
+| `ui_view_config` | ❌ 不暴露 | 前端自动生成 | `skip_auto_menu` 由系统定 |
+
+> **这是本节最重要的结论**：**界面只需暴露「因子勾选 + 名称 + 有效期」**。
+> 顾问动不了 `audit` / `category_config` / `import_export`，
+> **也就动不了最容易出事的权限与审计部分**——运行态自举的**治理成本因此大幅下降**，
+> 远低于"完整 YAML 编辑器"方案。
+
+#### （4）为什么本期禁止结构变更（P-3 的依据）
+
+顾问在生产把 `PK1,PK2` 改成 `PK1,PK2,PK3`，**这次变更本身就是一次数据迁移需求**——
+已有费率记录的 `keys{}` 缺 PK3，且历史 `calc_result` 引用旧结构。
+这不是配置问题，是**元数据版本管理**问题：
+
+| 维度 | 本期禁止结构变更 | 允许结构变更所需 |
+|---|---|---|
+| 顾问能力 | 勾选**既有因子**组合 | 增删 PK |
+| 历史数据 | **无需迁移** | 须迁移 + 须能回滚 |
+| 配置变更历史 | 记录行级增删即可 | 须记录**结构版本**（TBD-15） |
+| 回滚 | 按行回滚 | **结构回滚，难度陡增** |
+
+**这同时收紧了 TBD-14 的验证条件**（见 §10）：因结构冻结，
+`key_schema` 的存在价值**完全取决于「多个 `rate_table` 共用同一 `key`」是否真实发生**——
+若键从不复用，则应按 §7B.8 备选 D 内联进 `rate_record.keys{}`。
+
+#### （5）遗留：运行态自举的完整机制（本期**不做**，登记 TBD-16）
+
+| 缺失机制 | 说明 | 本期处置 |
+|---|---|---|
+| **配置变更历史表** | 运行态改动须有审计流水（who / when / what diff） | **本期不做**（T0 走开发态，git 即审计） |
+| **跨环境一致性** | 测试环境有的配置生产没有 | **本期不做** |
+| **结构版本化 + 迁移** | 见 (4) | **本期禁止结构变更** |
+| **`with_auto_schema` 闸门处置** | 从"禁止"改为"需显式批准 + diff" | **本期不做**（保持现状） |
+
+### 7C.5 给 T0 的口径（T0 方案不变，但边界要写清）
+
+| 约束 | 内容 |
+|---|---|
+| **C-T0-7** | T0-1~T0-7 走 `meta/schemas/*.yaml` 声明（**yaml 作 SSOT**），`schema_generator` 自动物化表 —— **与平台现状一致，无需新机制**；`MetaObject` 仅为建表中间产物（§7C.1.1） |
+| **C-T0-8** | `currency` / `rate_unit` 等主数据引用**不建外键**，只留 `master_data_ref` 标记 —— **Agent / 顾问改 yaml 时不必连带改主数据**（主数据归数据模块） |
+| **C-T0-9** | T0 表**不加租户/作用域字段**（本期不需要），但 `rate_table` **预留 `owner_org_id`** 语义位（登记 TBD-15），**避免 T1 后加字段要动 yaml 结构** |
+| **C-T0-10** | Agent 生成配置走**同一份 yaml**，**不得旁路写 DB** —— 否则回到"两处真相源"（§7B.4 缺陷 3 同类风险） |
+| **C-T0-11** | `status ∈ {draft, approved, inactive}` **必须在 T0 落地**（`rate_table`）—— 它是 C-T0-9 预留机制的唯一现成落点，且 **Agent 生成配置天然需要"先草稿后发布"** |
+| **C-T0-12** | **`key_fields` 本期冻结**（§7C.4.1 P-3）—— 顾问运行态**只能从既有因子中选组合**，**不得增删 PK**；结构变更走发版。理由：增删 PK **本身就是一次数据迁移需求**（历史 `keys{}` 缺新 PK、`calc_result` 引用旧结构），属**元数据版本管理**问题而非配置问题 |
+| **C-T0-13** | **yaml 仍是唯一 SSOT**（§7C.4.1 P-1）—— T0 全部走 yaml 声明；`MetaObject` 仅为 `register_from_directory` 产出的**建表中间产物**（因它装不下 `audit` / `ui_view_config` / `category_config` / `import_export` 四块，见 §7C.1.1）。**后续若做运行态自举，顾问界面亦产出 yaml，不旁路构造 `MetaObject`** |
+
+### 7C.6 备选方案与否决理由
+
+| 备选 | 否决理由 |
+|---|---|
+| **A. 纯 yaml 不物化表** | 业务查询要解析文件 + 内存过滤，**IO 成本挪到每次取价**；且因子目录/费率记录**是数据不是代码** |
+| **B. 纯 table（Agent 直改 DDL）** | `CREATE TABLE` **无版本、无回滚、无 diff**；Agent 改结构**不可审查**——与"配置须可审计"直接冲突 |
+| **C. EAV 单表 + JSON 列** | **JSON 无法索引等值匹配**；`rate_record` 要按 `keys{}` 组合匹配，EAV 退化为全表扫或给每种键组合建宽表（= 回到 B）。**已在 `permission_rules_v2` 验证：EAV 适合"少而固定"，不适合"多而组合"** |
+| **D. 让 Agent 从 DB 反向生成 yaml 并自动注册** | 放开 `with_auto_schema` 的"不注册"闸门。**否决**：DB 里可能有运行时产物（缓存 / 中间态），自动注册会把垃圾变成模型。**改为"提议 + diff + 人工批准"**（§7C.4）——**本期保持现状不动**（§7C.4.1 (5)） |
+| **E. 本期就做 yaml ↔ table 双向同步** | **超范围**。yaml → table 已通；table → yaml 仅在**显式迁移/审计**场景按需触发，非运行时常态。**先要一个明确需求再开** |
+| **F. 让运行态自举旁路构造 `MetaObject`（不经 yaml）** | **否决**——`MetaObject` 装不下 yaml 的 4 块（`audit` / `ui_view_config` / `category_config` / `import_export`，见 §7C.1.1），旁路构造将**丢配置**；且会形成**第二条 SSOT**。**顾问界面必须产出 yaml**（§7C.4.1 P-1） |
+| **G. 本期就做完整 YAML 编辑器供顾问自由编辑全部 13 个块** | **否决**——把 `audit` / `category_config` / `import_export` 暴露给顾问，等于**把权限与审计的开关交给非技术人员**。改为**最小暴露面**（§7C.4.1 (3)：只勾 4 项，其余模板填充） |
+
+### 7C.7 一句话回答题问
+
+> **「灵活因子配置」vs「yaml 声明式动态生成表」不是二选一——后者本就是前者的实现手段**。
+> 通用泛化模型（EAV）**不适合因子/键/费率记录**（组合匹配要索引，JSON 列做不到），
+> 但**适合"结构随用户任意扩展"的配置本身**（如权限规则，`permission_rules_v2` 已验证）。
+>
+> **更正的补充（v1.6 拍板）**：这个问题的真正分岔不是"载体"，而是**"谁在什么时候写 SSOT"**——
+> **开发态预置**（本期 T0，git 即审计）vs **运行态自举**（顾问在 V/03 式界面勾因子生成 yaml）。
+> **拍板走「双装载并存」**：两条路径**都产出同一份 yaml**，汇入同一条
+> `register_from_directory` → `schema_generator` 管线，**不存在两条 SSOT**。
+> **这在行业上有基线**——SAP V/03 正是"字段目录选字段生成条件表"的事务码（研究稿 S20）。
+>
+> **Agent 时代真正该加的不是换载体，是三件事**：**作用域（租户/版本，TBD-15）** +
+> **生成侧校验（diff 审批，TBD-16）** + **草稿发布分离（T0 已具备 `rate_table.status`）**。
+> **其中「本期禁止结构变更」（C-T0-12）是刻意选择**——增删 PK 本身就是数据迁移需求，
+> 属元数据版本管理问题，**不在本期解决**。
+
+---
+
 ## 8. 优先级与里程碑
 
 ### 8.1 需求优先级
@@ -516,16 +876,38 @@
 
 ### 8.2 建议里程碑（对齐研究稿 §7 P0–P6）
 
+#### 8.2.0 T0 先行批次（v1.6 新增 · **零主数据依赖 · 零 `order_line` 依赖**）
+
+> **为何前置**：FR-003 / FR-004 的三件套是**纯配置元数据**，**不引用任何单据、不依赖 `order_line`、不依赖主数据**
+> （`currency` 降级为 `string` + `master_data_ref` 标记，见 C-T0-6）。
+> 且 `factor_catalog.source_type` 是 **FR-015 的前置**（§7B.6），晚建会阻塞 M8。
+> 故从 M1 中切出 T0，**可与主数据补齐并行**（主数据由数据模块负责，见 TR-002）。
+
+| 批次 | 范围 | 对象 | 依赖 | DoD |
+|---|---|---|---|---|
+| **T0-1** | 因子目录 | `factor_catalog` | **无** | `source_type` 五值 + `is_price_relevant`；**不声明 `data_type`/`aliases`**（C-T0-3） |
+| **T0-2** | 匹配键表 | `key_schema` | 无 | **仅** `code`/`name`/`key_fields[]`（C-T0-1） |
+| **T0-3** | 查找序列 | `lookup_sequence` | 无 | **仅** `code`/`name`/`steps[{seq,key_schema_id}]`，**无 `exclusive`**（C-T0-2） |
+| **T0-4** | 费率类型 | `rate_type` | 无 | 承接 `display_scale`/`numeric_field`（v1.6 由 `key_schema` 迁入） |
+| **T0-5** | 排斥组 | `exclusion_group` | 无 | `members[]` + `resolution` |
+| **T0-6** | 费率表 | `rate_table` | 无 | `currency` 为 `string` + `master_data_ref: currency`（C-T0-6） |
+| **T0-7** | 费率记录 | `rate_record` | 无 | 含 `hit_policy`（默认 `exclusive`）+ `scale[]` + `allocation_weight`（C-T0-4） |
+
+> **全部为 `meta/schemas/*.yaml` 声明，零代码**（`_template.yaml` 范式）。
+> **T1 内核（查找序列引擎 / 计算过程执行器 / 多层累加 / 消解范式）亦零主数据依赖**——
+> 均为纯函数，**用内存 dict 夹具单测，不碰任何 BO 表**（IF-001 入口签名即"一行 + 表头上下文"）。
+> **仅 FR-011 落库挂载（`document_line_id` 指向真实行）受阻于 `order_line`**，可拆两步：先头级（`document_line_id` 可空），待行对象补齐后仅填值。
+
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|
-| **M1 = P0 概念定型** | 六件定成平台对象 / 枚举；费率类型落为配置对象 | 元模型草案（表 + 字段 + 枚举） | 六件各有归属对象，与 §5.2 边界不冲突；费率类型字段与 §4.1 一致 |
+| **M1 = P0 概念定型** | 六件定成平台对象 / 枚举；费率类型落为配置对象 | 元模型草案（表 + 字段 + 枚举）**（v1.6：T0-1~T0-7 已先行交付此 DoD）** | 六件各有归属对象，与 §5.2 边界不冲突；费率类型字段与 §4.1 一致 |
 | **M2 = P1 单层取价 ★** | 一个物料 × 一个客户 → 一个单价 | 匹配键表 + 因子目录 + 费率表 + 费率记录（含币种 / 计量单位）+ 查找序列（exclusive） | 命中即止，能回答"命中哪一行"；跨币种费率记录可换算 |
 | **M3 = P2 多层累加 + 回放 ★** | 基价 → 折扣 → 附加费 → 税 → 运费 | 费率类型分类 + additive + 计算过程序列（带 `element_type`）+ 计算基四字段 + 小计 + 计算明细 + `calc_result` / `calc_detail` | 逐层小计可回放；每步记 `base_level`/`base_source`/`base_step`/`rolling`（默认不滚动，滚动与 `base_step` 互斥） |
 | **M4 = P3 取优/互斥** | 多同类命中怎么收 | Precedence vs Best Price（显式选择）+ 排斥组 | 同一数据两范式结果可分别复现 |
 | **M5 = P4 阶梯 + 有效期 + 条件更新 + 执行期重算** | 按量分档 / 按日期生效 / 合同量累计 / 发货开票按实际量重算 | 费率记录属性扩展 + 用量累计 + `freeze_policy`/`reprice_trigger`/`qty_basis` | 阶梯 / 过期 / 用满三测例；三种组合各一测例；已开票行重定价被拒 |
 | **M6 = P4.5 事后费用与分摊** | 发票 / 收货 / 服务确认 / 结算上的计划外费用摊到 PO / 收货 / 订单行，可追溯补差 | `allocation_rule` + `calc_result` 费用口径字段 + `adjustment`（可后置） | 一笔费用按 6 种基数摊到行且可回放；`target=cost`/`expense` 各一测例；已过账追溯被拒或留痕 |
 | **M7 = P5 扩展点接线** | 复杂定制逃生门 | `ActionType.BUSINESS` hook 接线 VOFM 式例程 | 自定义例程可插拔，不改引擎 |
-| **M8 = P6 事实数据驱动重算（可选）** | 优质优价 + 大宗贸易 | 因子目录事实源分类 + `external_rate_source`/`pricing_period` + `fact_snapshot`；`qty_basis` 扩容 | 质检值命中匹配键表得升贴水；干吨折算参与计价；暂定价→终价差值可配对回放；`fact_snapshot` 缺失拒绝结算 |
+| **M8 = P6 事实数据驱动重算（可选）** | 优质优价 + 大宗贸易 | **因子目录事实源分类（T0-1 已交付，此处只做消费）** + `external_rate_source`/`pricing_period` + `fact_snapshot`；`qty_basis` 扩容 | 质检值命中匹配键表得升贴水；干吨折算参与计价；暂定价→终价差值可配对回放；`fact_snapshot` 缺失拒绝结算 |
 
 > 里程碑的任务清单与验收细则可另立《定价引擎实施计划》（对齐 [rule-model 实施计划](./2026-10-02-rule-model-implementation-plan.md) 范式）。
 
@@ -551,6 +933,10 @@
 - **两条对象链分开**（研究稿 §4.6）：
   - **配置 / 主数据链**（计划侧，元模型）：因子目录 → 匹配键表 → 查找序列 → 费率类型 → 计算过程；费率表 + 费率记录（业务别名：价目表 / 价目行·条件记录）；
   - **单据运行时链**（事实侧）：单据头 → 单据行 → `calc_result`（结果行）→ `calc_detail`（步骤明细）。
+- **配置链三原语 vs 定价特例的职责分离（v1.6 · §7B）**：
+  - **通用骨架（平台层三原语）** = **因子**（看什么）/ **键**（按什么组合）/ **取数计划**（先查谁、命中算不算完）。**平台内已在四处自发实现，无一通用**（数据权限 / 属性确定 / 派生 / 文档流，见 §7B.3），故将其**在文档层立口径**；
+  - **定价特例（不通用化）** = `rate_type` / `calc_procedure` / `base_level` / `scale` / `allocation_weight` / `hit_policy` / `exclude_bo`——依判据「换个业务还需要吗」全部留在定价层（B1 承诺成立）；
+  - **落地动作**：`key_schema` 收窄到仅 `key_fields[]`（量级换算 → `rate_type`，阶梯基数 / 排除 → `rate_record`）；`lookup_sequence` 收窄到仅槽位顺序（`exclusive` → `rate_record.hit_policy`）；`factor_catalog` 收窄到仅 `source_type` + `is_price_relevant`（**不重复 `MetaField` 的 `data_type`/`aliases`**）。**不新增对象数量**。
 - **关键变更**：
   1. 新增定价元模型对象（FR-001 ~ FR-003、FR-005、FR-013~FR-015）；
   2. 新增定价引擎执行器（查找序列命中 + 过程逐步执行 + 计算基求值 + 取优消解）；
@@ -598,10 +984,10 @@
 
 | 对象 | 关键字段 | 溯源（对标） |
 |---|---|---|
-| `factor_catalog`（业务别名：字段目录） | `field_id` / `object_type` / **`source_type ∈ {static, master, quality, measurement, market}`** / `is_price_relevant` | SAP 字段目录（KOMG/KOMP）；SF Context / `IsPriceImpacting` |
-| `key_schema`（业务别名：条件表） | `code` / `name` / `key_fields[]`（来自因子目录） | SAP V/03（SD）/ M/03（MM） |
-| `lookup_sequence`（业务别名：存取序列） | `code` / `name` / `steps[{seq, key_schema_id, exclusive}]` | SAP V/07 / M/07；D365 find-next |
-| `rate_type`（业务别名：条件类型，**配置对象**） | `code` / `name` / `rate_class ∈ {price, discount_surcharge, tax, freight, statistical}` / `calc_type ∈ {percent, fixed, quantity, formula}` / **`rate_source ∈ {rate_record, external_quote, formula}`（率载体 · 轴②）** / `sign ∈ {+, -}` / `rounding` / `exclusion_group` / `manual_allowed` / `mandatory` / `statistical` / `lookup_sequence_id` | SAP V/06；SF pricing element |
+| `factor_catalog`（业务别名：字段目录） | `field_id` / `object_type` / **`source_type ∈ {static, master, quality, measurement, market}`** / `is_price_relevant`<br>**（v1.6 收窄：不声明 `data_type` / `aliases`，引用 `MetaField`；本表只承载 `MetaField` 不具备的两项能力，见 §7B.5）** | SAP 字段目录（KOMG/KOMP）；SF Context / `IsPriceImpacting` |
+| `key_schema`（业务别名：条件表） | `code` / `name` / `key_fields[]`（来自因子目录）<br>**（v1.6 收窄：仅匹配维度。`display_scale` / `numeric_field` → `rate_type`；`scale_divisor` / `exclude_bo` → `rate_record`，见 §7B.5）** | SAP V/03（SD）/ M/03（MM） |
+| `lookup_sequence`（业务别名：存取序列） | `code` / `name` / `steps[{seq, key_schema_id}]`<br>**（v1.6 收窄：`exclusive` 已下沉为 `rate_record.hit_policy`，序列只管"第几槽位、用哪把键"，见 §7B.5）** | SAP V/07 / M/07；D365 find-next |
+| `rate_type`（业务别名：条件类型，**配置对象**） | `code` / `name` / `rate_class ∈ {price, discount_surcharge, tax, freight, statistical}` / `calc_type ∈ {percent, fixed, quantity, formula}` / **`rate_source ∈ {rate_record, external_quote, formula}`（率载体 · 轴②）** / `sign ∈ {+, -}` / `rounding` / **`exclusion_group_id`（v1.6 实施时改：原 `exclusion_group` 存 string 引用 code → 改为整型外键，否则 `exclusion_group` 表孤立无引用）** / `manual_allowed` / `mandatory` / `statistical` / **`lookup_sequence_id`（v1.6 实施时改：原存 string 引用 code → 改为整型外键，与其余 `*_id` 口径统一）** / **`display_scale` + `numeric_field`（v1.6 由 `key_schema` 迁入 · 量级换算属"怎么算"）** | SAP V/06；SF pricing element |
 | `calc_procedure`（业务别名：定价过程） | `code` / `name` / `procedure_type`（首期 = `pricing`）/ **`result_semantic ∈ {price, cost, emission, tax, hours, quantity}`（结果语义 · 轴③，默认 `price`）** / `steps[{seq, element_type, rate_type_id?, condition?, params{}}]` / `subtotal_keys[]` | SAP V/08；Oracle Pricing Algorithm；SF Pricing Procedure |
 | `exclusion_group`（排斥组） | `code` / `members[]` / `resolution`（保留较高价 / 前置优先；**取值示意，研究稿未给枚举**） | SAP Condition Exclusion OV31/OV32；Oracle Incompatible |
 | `usage_group`（业务别名：条件更新组） | `code` / `max_amount` / `max_quantity` / `max_documents` | SAP Condition Update |
@@ -614,7 +1000,7 @@
 | 对象 | 关键字段 | 溯源（对标） |
 |---|---|---|
 | `rate_table`（业务别名：价目表） | `code` / `name` / `type` / `currency` / **`status ∈ {draft, approved, inactive}`**（仅 `approved` 参与取价；**枚举取值示意，研究稿仅述"仅审核态参与取价"**） | Oracle Price List；金蝶价目表（仅审核态） |
-| `rate_record`（业务别名：价目行 / 条件记录） | `key_schema_id` + `keys{}` / `rate_type_id` / `rate` / `value` / `valid_from` / `valid_to` / `currency` / `rate_unit` / `rate_qty` / `scale[]`（阶梯）/ **`allocation_weight`（权重 · 第四消解范式 weighted，可空；非空 = 该候选参与"加权累加"而非"取一"，见下方消解范式表）** / `status` | SAP 条件记录 VK11；SF Price Book Entry；**Oracle Sourcing Rule `source_allocation_percentage` / 工单 `Cost Factor Allocation` / LCM `Charge Basis = % of item price`（跨域同构，见研究稿 §4.9D1）** |
+| `rate_record`（业务别名：价目行 / 条件记录） | **`code`**（业务键 · **v1.6 实施时补**）· `rate_table_id`（**v1.6 实施时补**）· `key_schema_id` + `keys{}` / `rate_type_id` / `rate` / `value` / `valid_from` / `valid_to` / `currency` / `rate_unit` / `rate_qty` / `scale[]`（阶梯）/ **`scale_semantic`（v1.6 实施时补 · 阶梯两语义之选）** / **`priority`（v1.6 实施时补 · 同组取用优先级 + tie-break）** / **`allocation_weight`（权重 · 第四消解范式 weighted，可空；非空 = 该候选参与"加权累加"而非"取一"，见下方消解范式表）** / **`hit_policy ∈ {exclusive, additive}`（v1.6 新增 · 由 `lookup_sequence.steps[].exclusive` 下沉，默认 `exclusive`，对标 SAP 逐条件自带，见 §7B.4 缺陷 2）** / **`scale_divisor` + `exclude_bo`（v1.6 由 `key_schema` 迁入 · 阶梯基数 / 排除对象属单条记录属性）** / `status` | SAP 条件记录 VK11；SF Price Book Entry；**Oracle Sourcing Rule `source_allocation_percentage` / 工单 `Cost Factor Allocation` / LCM `Charge Basis = % of item price`（跨域同构，见研究稿 §4.9D1）** |
 | `rate_supplement`（业务别名：条件补充） | 依附某费率记录的**补充条款**（研究稿 §4.2 第 2 层；本 Spec 未单列 FR，随 FR-001 费率记录交付） | SAP Condition Supplement |
 | `cumulative_usage`（业务别名：累计值） | 费率记录**跨单据累计已用量**（合同量用满失效）——由 FR-016 条件更新组驱动 | SAP Condition Update |
 
@@ -791,7 +1177,9 @@
 
 **实施顺序**（对齐 §8.2；**先依赖后优先级**）：
 
-1. **P0**：元模型定型（六件字段 / 枚举）+ 主数据前置（#11 币种、#16 销售区域渠道 / 产品组）；
+1. **P0**：元模型定型（六件字段 / 枚举）+ 主数据前置（#11 币种、#16 销售区域渠道 / 产品组）
+   - **v1.6 拆分**：元模型定型 → **§8.2.0 T0-1~T0-7（yaml 声明，零代码，零主数据 / 零 `order_line` 依赖，可立即开工）**；主数据前置 → **移交数据模块**（TR-002），本引擎侧**不阻塞**；
+   - **T0 须遵守 C-T0-1~C-T0-6**（§7B.7）：`key_schema` 只留 `key_fields[]`、`lookup_sequence` 不含 `exclusive`、`factor_catalog` 不重复 `MetaField`、`rate_record.hit_policy` 默认 `exclusive`、`currency` 降级为 `string`；
 2. **P1**：匹配键表 + 因子目录 + 费率类型 + 费率表 + 费率记录 + 查找序列（exclusive）；
 3. **P2**：费率类型分类 + additive + 计算过程序列（`element_type`）+ 计算基四字段 + 小计 + 计算明细 + `calc_result` / `calc_detail`；
 4. **P3**：取优 / 互斥（Precedence vs Best Price + 排斥组）；
@@ -810,6 +1198,8 @@
 | R4 已开票 / 已过账行被隐式重定价 | 红线 + `reprice_trigger` 显式触发 + 留痕；重定价被拒不静默（§4.5C） |
 | R5 与 `doc_flow` / `allocation` / `rollup` 争边界 | FR-018 六条边界登记 + 单一判据（过程内；是否有"可分摊到业务单据行"的价格语义） |
 | R6 结果明细体积膨胀 | 回放保留策略（TBD-4，D5）；结果版本化替换而非无限追加 |
+| **R7 `factor_catalog` 与 `MetaField` 双重真相源**（v1.6） | 同一字段类型被两处声明且**枚举不对齐**（`amount`/`quantity` vs `string`/`enum`）→ 换算与校验行为不可预测；**已由 C-T0-3 收窄**：`factor_catalog` 只声明 `source_type` + `is_price_relevant`，类型 / 别名一律引用 `MetaField`（§7B.4 缺陷 3） |
+| **R8 `key_schema` / `lookup_sequence` 职责超载**（v1.6） | 量级换算与阶梯基数耦合在"键"里，**换个业务无法复用**；且"第 1 槽累加 + 第 2 槽取优"需整表复制序列。**已由 C-T0-1 / C-T0-2 / C-T0-4 收窄**（§7B.4 缺陷 1/2） |
 
 **测试策略**：
 
@@ -841,6 +1231,9 @@
 | **TBD-11** | ~~**多账簿 / 多估值基础并行**~~（研究稿 D20） | Oracle 一个 Cost Organization 挂多本 Cost Book（primary 财务 / secondary 管理 / **ledgerless 模拟**），同一批事务按不同规则出多套结果；`pricing_procedure` 当前是**单实例** | **✅ 已关闭（v1.5 拍板 D20 = ②不纳入）**：属"**引擎实例化 / 编排**"层，非"过程定义"层。**边界现在就写清**：将来若做，走**引擎外多次调用**（同一 `procedure` 跑 N 次、每次带不同 `context`），**不在引擎内建多实例** | §1.4 N9、FR-005 |
 | **TBD-12** | **定价结果的能力接口（interface）**（v1.5 保留，研究稿 D21 已拍板②本期不做） | Palantir Interface 提供对象类型多态；将来成本 / 碳 / 税四域结果都满足"可挂单据 · 有明细 · 可回放"这组能力时，可按能力挂载而不必共用一张表。缺什么：① 是否声明接口层 ② 四域是共用一表还是按能力分表 | **保留待议**（D21 已拍板本期不做——只有一个域，多态零收益；但它是多域时比"硬塞一张表"更保守的选项） | FR-011、§1.4 N9 |
 | **TBD-13** | **"谁能改价"的完整权限 / 审批矩阵**（v1.5 保留，研究稿 D22 已拍板②只补最小一条） | 本期**已补最小一条**：`adjustment{adjustment_type=override}.reason` **必填**（FR-014）。仍缺：完整权限矩阵（谁能改价 / 改价要不要审批 / 改价上限），涉及角色、审批流、组织结构 | **保留待议 + 建议归权限引擎**（研究稿倾向：属**组织级治理**，不该由定价引擎单方面承担） | FR-005、FR-011、FR-014、§9.3.1 C |
+| **TBD-14** | **`key_schema` 是否废表**（v1.6 新登记） | §7B.4 缺陷 1 取证：**六家中五家无独立"匹配键目录"**（SAP 把匹配维度内联在条件记录里；Fusion 直接挂 `QualifyingCriteria`）。本引擎保留 `key_schema` 的理由是**键可被多个 `rate_table` 复用**。缺什么：① 这个复用是否真实发生 ② 若从未复用，是否按备选 D 内联进 `rate_record.keys{}` 少一张表 | **P0 实施时验证**（T0-2 交付后观察一个周期）；若键从不复用则废表，**不阻塞 T0 先行**。**注意：C-T0-12 结构冻结后，本条的验证条件更严格**——键无法增删 PK，故其存在价值**完全取决于"多 `rate_table` 共用同一 `key`"是否发生**（§7C.4.1 (4)） | FR-003、§7B.5、§7B.8 备选 D、§8.2.0 T0-2、§7C.4.1 (4) |
+| **TBD-15** | **配置作用域（租户隔离 / 结构版本）**（v1.6 新登记，§7C.4） | 三件套**全部是全局配置、无作用域字段**。Agent 时代配置的**本质变化是作用域而非格式**。缺什么：① 租户/组织隔离——`rate_table` 无租户字段，**否则跨租串价** ② 结构变更版本——`rate_record` 有行级 `valid_from/valid_to`，但**改结构（加因子/改键）无版本**，无法回溯"当时按什么算"（与 TBD-4 同源） ③ 用户级覆盖——建议走 `adjustment` 不改配置 | **本期只做预防性预留**（C-T0-9：`rate_table` 预留 `owner_org_id` 语义位）；**实际能力待明确的多租需求再开**。**③ 倾向"不做"**。**② 与 C-T0-12 直接相关——本期已禁止结构变更，故结构版本化本期无需实现** | §7C.4、§7C.5、C-T0-9、C-T0-11、C-T0-12、FR-011 |
+| **TBD-16** | **运行态自举的完整机制**（v1.6 新登记，§7C.4.1 (5)） | 方向已拍板采纳（双装载 + 仿 SAP V/03 界面），但**机制本期全缺**。缺什么：① **配置变更历史表**（who / when / what diff）② **跨环境一致性**（测试环境有的配置生产没有）③ **结构版本化 + 迁移**（C-T0-12 已禁止结构变更，故本期不需）④ **`with_auto_schema` 闸门处置**（"禁止"→"需显式批准 + diff"） | **本期全部不做**（T0 走开发态，git 即审计，**零治理成本**）。**待明确的多租 / 自助需求再开**。**启动条件：出现"顾问要自己加因子"的真实诉求** | §7C.4.1、C-T0-12、C-T0-13、§7C.6 备选 D/F/G |
 
 ---
 
@@ -854,3 +1247,4 @@
 | 2026-10-05 | v1.3 | **命名去 SAP 化 + 通用化边界拍板**（用户评审「不要完全无脑看SAP」）：① 元模型层全面改为**领域中立命名**（`rate_table`/`rate_record`/`rate_type`/`key_schema`/`lookup_sequence`/`calc_procedure`/`calc_result`/`calc_detail`/`adjustment` 等），SAP 术语降为**业务别名**，仅见于 §9.3.1「业务别名」「溯源（对标）」列；② §9.3.1 新增「命名原则 + 命名与溯源对照表（含 SAP 骨架 / 六家趋同 / 某家独有贡献标注）+ 通用化三轴表」；③ 通用化只参数化**三轴**——`base_source`（轴①，扩容 `activity_quantity`/`volume`/`energy`/`hours`）、`rate_source`（轴②，`rate_type` 新增）、`result_semantic`（轴③，`calc_procedure` 新增，默认 `price`）；④ §1.4 新增 **N9 通用化边界**（成本归集层 / 碳组织边界·合并层不属本引擎）；⑤ §9.2 新增「元模型通用性与命名声明」（元模型 = 通用确定与计算，本期首个过程实例 = `pricing`）；⑥ FR-001~FR-006 / NFR-007 / TR-001~TR-004 / §8.1 / §8.2 / §9.3.1 A–E 表 / §9.3.2 流程 A / §9.4 D7·D9 / §9.4.1 D7 行术语同步 |
 | 2026-10-05 | **v1.4** | **跨域验证回写 + 补第四消解范式 `weighted`**（用户评审「② 第四种消解范式 weighted 这个可以补充」）：**背景**——研究稿 v2.0（Oracle 跨域二次研究）与 v2.1（Palantir 对照）已落盘，结论回写本 Spec。① **补第四消解范式 `weighted`（D18 拍板）**——`rate_record` 新增 **`allocation_weight`（可空）**，**非空即该候选参与"加权累加"而非"取一"**，`result_amount = Σ(rateᵢ × base × weightᵢ)`、**Σweight=1 须归一否则拒绝计算并报错**（不静默缩放）；同组内非空权重候选与"取一"类候选**不可混用**；对标 Oracle 成本域 **Sourcing Rule 分配百分比**（`Standard cost = (Buy × Buy alloc) + (Rolled-up × Make alloc) + (Transfer × Transfer alloc)`）、工单 `Cost Factor Allocation`、LCM `Charge Basis = % of item price`；与 `allocation_rule`（1→N 摊金额）**互为对偶**（N→1 合率）。落点：**§9.3.1 B2 新增"候选消解的四种范式"表** / FR-008 扩写四种范式与验收 / §8.1 FR-008 / §9.2 声明 / §9.4 备选方案 D18 / §9.4.1 D18 / §9.5 决策表。② **D19 拍板：单位换算归事实源取值阶段**——取数时上游归一，引擎内 `base` 恒为标准单位（**换算是"单位声明"不是"公式"的一部分**，混进 `base_formula` 会让同一 `× 率` 公式无法同时服务 kL 与 GJ）；本期只补 `base_source` 枚举 **`scaled_quantity`**（对标 Oracle `per-unit cost = total ÷ scaled quantity`），完整 `conversion` 对象登记 **TBD-10**。③ 新增 **TR-005**（`allocation_weight` 零迁移：默认 `null` = 行为完全不变）与 **TR-006**（消解范式验收矩阵，含"权重和不归一须报错"用例）。④ 外部验证结论入 §9.2 与 header：三轴在 Oracle **成本域**（`总成本 = 固定 + 变动[单位资源成本 × 消耗数量]`）与**碳域**（`排放量 = 活动数据 × 排放因子`）**逐字同构**；Palantir 对照结论——**两条通用化路径的分野不在能力而在"谁承担域特有逻辑"**，本引擎走"元模型 + 参数化"，故 **N9 边界是这条路径的必要成本，不是保守**。⑤ 决策表补 **D20 / D21 / D22**（多账簿并行 / 结果能力接口 / 谁能改价，均待拍板）；§10 TBD 补 **TBD-10~TBD-13**；关联研究稿版本同步为 **v2.1** |
 | 2026-10-05 | **v1.5** | **七项待拍板全部落定**（用户评审「采纳你的建议，请更新 spec」）。**共性观察：七项没有一项需要新增对象或改引擎结构**——全落在"已有字段加可空枚举"或"字段名约定"上，**说明元模型骨架已够用，剩下的是填充与约定**。① **D16 / TBD-1 事后费用归属**：**②归定价"费用 / 分摊"子域**——它是 `origin=unplanned` 的 `calc_result`，**不新建费用单据、不破 D7**（依据：Oracle retroactive adjustment 生成独立 acquisition cost adjustment、SAP 计划外交付成本走独立行；且 `origin` 只是一个可空枚举，现在加近乎零成本）。落点 FR-013 新增"归属拍板"段。② **D17 / TBD-2 事实数据重算节奏**：**设计侧③（`reprice_trigger` 枚举一次给全）／实施侧②（只实装 `on_quality_result`）**——另两个触发器依赖尚未实施的 `external_rate_source` / `pricing_period` / TBD-1 的 `origin`，**先枚举留全、只实装依赖已就绪者，避免半配置状态**；并记下研究稿 §4.8C 规律 2"质检值直接改价在头部产品里普遍是半成品"（三家均【未找到】标准链路）——既是机会也说明无成熟范式可抄。落点 FR-015 新增"实施节奏拍板"段。③ **D23 / TBD-8 Override 语义**：**①补，且复用 `adjustment`、不新增对象**——新增 `adjustment_type = override`，语义 = "**前序累加完成后直接给出最终价，并清零其后累加步骤**"（对应 "New price"）；依据是**六家零分歧的共识机制**，缺失最突兀，且它与 `adjustment` 同构（引用原结果 + 留痕 + 不改原单据），另立对象会重复。④ **D22 "谁能改价"**：**②只补最小一条，且与 ③ 合并实现**——`adjustment{adjustment_type=override}.reason` **必填**；**完整权限 / 审批矩阵归权限引擎**（涉及角色 / 审批流 / 组织结构，属组织级治理，不该由定价引擎单方面承担，登记 TBD-13 保留）。⑤ **D24 / TBD-9 输出映射**：**本期不建 `output_map` 对象**，改为**按 `result_semantic` 约定写回字段**（`price`→`unit_price`/`amount`、`cost`→`cost_amount`、`emission`→`emission_amount`，余者落 `result_amount`）——本期只有一个过程实例、一套结果结构，约定即可表达，**零配置零新表**；痛点在多过程 / 多结果结构时才显现，**接口已预留**（本约定即将来对象的默认映射）。落点 FR-011 新增写回约定条目。⑥ **D20 多账簿并行**：**②不纳入**——属"**引擎实例化 / 编排**"层而非"过程定义"层；**边界现在就写清**：将来若做走**引擎外多次调用**（同 `procedure` 跑 N 次带不同 `context`），**不在引擎内建多实例**。**D21 结果能力接口**：**②本期不做**（只有一个域，多态零收益），登记 TBD-12 保留。⑦ 决策表新增 **D23 / D24** 两行；**§10 TBD-1 / TBD-2 / TBD-8 / TBD-9 / TBD-11 五项划线关闭**，TBD-12 / TBD-13 改为"保留待议"并补记已落地的最小版；§9.3.1 C 表 `adjustment` 补 `override` + `reason` + 六家溯源；header 状态改为 **v1.5 · 全部待拍板项已清零** |
+| 2026-10-06 | **v1.6** | **三件套通用性分析 + T0 先行批次切出**（用户评审「因子目录 / 匹配键表 / 查找序列是不是通用规则模型？做深入研究」）。**背景**——D7 / §9.2 已声明"元模型 = 通用确定"，但**未回答"通用到什么粒度"**；三件套此前被当作**三张定价专表**直接进 P0。**本版用代码取证回答该问题，结论：通用的是「因子 / 键 / 取数计划」三原语，不是这三张表。**① **新增 §7B 三件套通用性分析**：**§7B.2 三原语**（看什么 / 按什么组合 / 先查谁命中算不算完）对位平台现有形态（`MetaRule.condition` 隐含因子 + `default_by_priority` 排序，**代码级取证**）——性质是**从表达式驱动到目录驱动的升维**，非重复造轮子；**§7B.3 实证支撑**——平台内**四处**（数据权限 Owner>Exclude>Include>默认拒绝 / 属性确定 / 派生 `group_by`+`order_by` / 文档流）**已自发实现同一套三问，无一通用**；**§7B.4 三个缺陷**——(a) `key_schema` **超载 3+1 职责**（匹配维度 + 量级换算 + 阶梯基数 + 排除对象），**对标反证：六家中五家无独立匹配键目录**（SAP 内联于条件记录、Fusion 挂 `QualifyingCriteria`）；(b) `lookup_sequence` **混"检索计划"与"聚合策略"**，而 SAP 是**逐条件自带** `%GET_VAL` 累加/首命中退出 → 现状"第 1 槽累加 + 第 2 槽取优"须**整表复制序列**；(c) `factor_catalog` 与 `MetaField` 是**同一事实的两个真相源**，且 `data_category`（`amount`/`quantity`）与 `data_type`（`string`/`enum`）**枚举逐项不对齐**——**与 A1 修掉的"表名映射 6 份副本"同类风险，下沉到字段层**。② **据此收窄职责（不新增对象数量）**：`key_schema` 只留 `key_fields[]`（量级换算 → `rate_type`，阶梯基数 / 排除 → `rate_record`）；`lookup_sequence` 只留槽位顺序（**`exclusive` 下沉为 `rate_record.hit_policy ∈ {exclusive, additive}`，默认 `exclusive` 零迁移**）；`factor_catalog` **不再声明 `data_type`/`aliases`**，只留 `MetaField` 不具备的 `source_type` + `is_price_relevant`。**判据统一为「换个业务还需要吗」**。③ **新增 §8.2.0 T0 先行批次（T0-1~T0-7）**：三件套为**纯配置元数据，零主数据依赖、零 `order_line` 依赖**（`currency` 降级为 `string` + `master_data_ref` 标记），**全部为 yaml 声明零代码**，可与主数据补齐**并行**（主数据归数据模块）；且 `factor_catalog.source_type` 是 **FR-015 前置**，晚建阻塞 M8。**T1 内核亦零主数据依赖**（纯函数，内存 dict 夹具单测），**仅 FR-011 落库挂载受阻于 `order_line`**，可拆两步（先头级、待行对象补齐仅填值）。④ 落点同步：FR-003 / FR-004 补"职责边界"与新 Source；§9.2 增"三原语 vs 定价特例"条目；§9.3.1 A/B 表字段迁入迁出逐条标注；§9.5 风险表增 **R7 / R8**；§10 新登记 **TBD-14（`key_schema` 是否废表）**；§7B.7 落 **C-T0-1~C-T0-6** 六条建模口径约束；§7B.8 记四个备选与否决理由（含备选 D"内联进 `rate_record.keys{}`"更近 SAP 基线，故保留表+收窄职责为折中）。⑤ **同版新增 §7C「配置载体的未来形态：AI Agent 背景下的选择」**（用户评审「未来方向上是灵活因子配置还是 yaml 声明式动态生成表？AI Agent 背景下配置结构是否更灵活、基于动态用户指定、载体是 yaml+table 还是通用泛化模型」）。**结论：yaml 与 table 不是二选一，而是同一份 SSOT 的两个投影——yaml 是 SSOT，table 是查询加速物。** 关键是**该问题在平台上已是既成事实**（`app_package.py` 原文「`app.yaml` 仍是唯一事实源」，`.bip`/`manifest.json` 皆构建产物；`app_builder.with_yaml_schemas` 走 yaml→registry→建表；`with_auto_schema` 反向内省**刻意标注"仅 introspect，不注册"**；`enum_resolver` 已有静态→DB 双轨；`materialization_registry` 已有"加一行 SSOT 即生效"先例）——故本节不是"要不要切换"而是"**已选的路要不要承认它**"。**§7C.1 事实取证**（5 条代码级）/ **§7C.2 四载体对比**（A 纯 yaml / B 纯 table / C yaml+table 投影 / D EAV 泛化）与逐条否决理由——**D 否决的硬依据是 `rate_record.keys{}` 需组合等值匹配而 JSON 列无法索引**，且 `permission_rules_v2` 已实证 EAV 适合"少而固定"不适合"多而组合"；**§7C.3 Agent 真正改变的是三件事**（生成侧动态化 / 作用域动态化 / 结构不固定）而非载体本身，并给出**反直觉推论：Agent 越强越要把载体收紧到声明式**（宽松载体把错误从"一次人工返工"变成"自动化污染"）→ **灵活性放在配置内容、不放在配置结构**；**§7C.4 指出真正设计点是作用域而非格式**，逐项盘出三件套**全部无作用域字段**的缺口（租户隔离缺失=跨租串价 / 结构变更无版本 / 用户级覆盖应走 `adjustment`），并给出 `with_auto_schema` 闸门的正确处置——**从"禁止"改为"需显式批准 + diff 人工确认"**；**§7C.5 落 C-T0-7~C-T0-11**（yaml 作 SSOT + table 自动物化 / 主数据引用不建外键 / `rate_table` 预留 `owner_org_id` 语义位 / **Agent 生成走同一份 yaml 不得旁路写 DB**（否则回到双重真相源）/ **`status` 草稿发布分离必须落地——这是 Agent 生成配置天然需要的、且是 T0 唯一现成落点**）；**§7C.6** 记五个备选与否决理由（新增"从 DB 反向生成并自动注册"与"本期做双向同步"两条）；**§7C.7 一句话回答题问**。⑥ §10 新登记 **TBD-15（配置作用域：租户隔离 / 结构版本）**，含"本期只做预防性预留、用户级覆盖倾向不做"的处置。⑦ **同版二次修订 §7C（用户评审指出理解偏差：「配置表结构 PK1/PK2/value1/value2 是否可能**运行态由用户交互生成**，不是开发态」——并反驳「MetaObject 应无法完整覆盖 yaml 吧，是不是 SSOT 是 yaml，只是 MetaObject 辅助 yaml 的生成？」）**。**修正 v1.6 初稿的一处立论错误**：初稿曾写「`MetaObject` 是唯一 SSOT，yaml 降级为装载格式」——经 `_template.yaml`（13 个顶层块）与 `models.py` **逐块比对**，该立论不成立。**新增 §7C.1.1**：`MetaObject` **装不下** yaml 的 4 块（`audit` / `ui_view_config` / `category_config` / `import_export` **完全无对应字段**；`ViewConfig` 是 `sources`/`joins`/`aggregates` **查询视图而非 UI 布局**），故 **`MetaObject` 是不完整投影、只是建表中间产物**；而 `schema_generator` **只消费 `fields`/`indexes`/`relations`**，从不需要那 4 块——**故"让顾问勾字段生成 yaml"这条路完全走得通**。**新增 §7C.4.1 记录三条拍板**：**P-1 SSOT 仍是 yaml**（推翻了初稿"SSOT 下移"）· **P-2 界面定位仿 SAP V/03**（**关键取证：V/03 就是"字段目录选字段生成条件表"的事务码**，研究稿 S20；S47 路径 V/03→V/07→V/08 全为交互式 T-code——**说明行业基线恰恰是运行态自举，v1.6 初稿误把 yaml 当开发态产物**）· **P-3 本期禁止结构变更**（顾问只能选既有因子组合；**理由：增删 PK 本身就是一次数据迁移需求**——历史 `keys{}` 缺新 PK、`calc_result` 引用旧结构，属元数据版本管理问题）。**「双装载」的关键点是不存在两条 SSOT**：两条路径**都产出同一份 yaml**，汇入同一条 `register_from_directory` → `schema_generator` 管线。**§7C.4.1 (3) 给出 V/03 式界面的最小暴露面（治理成本的关键）**：顾问**只勾 4 项**（`id`/`name`/`fields[]`/`table_name`），其余 8 块**全部由平台模板填充默认值**，且 `audit` / `category_config` / `import_export` **明确不暴露**——顾问动不了权限与审计，**运行态自举的治理成本因此远低于"完整 YAML 编辑器"方案**（§7C.6 备选 G 已否决该方案）。**连带影响**：C-T0-12 结构冻结**收紧了 TBD-14 的验证条件**——键无法增删 PK，故 `key_schema` 的存在价值**完全取决于"多 `rate_table` 共用同一 `key`"是否真实发生**。⑧ 新增 **C-T0-12**（`key_fields` 本期冻结）/ **C-T0-13**（yaml 仍是唯一 SSOT，`MetaObject` 仅为建表中间产物，后续运行态自举亦产出 yaml 不旁路构造）；§7B.7 汇总行由 C-T0-7~11 扩为 **C-T0-7~13**；§7C.6 新增备选 **F**（旁路构造 `MetaObject`——丢配置 + 第二条 SSOT）与 **G**（完整 YAML 编辑器——把权限审计开关交给非技术人员）；§7C.7 重写（点明"真正分岔是**谁在什么时候写 SSOT**"而非载体）；§10 新登记 **TBD-16（运行态自举的完整机制：配置变更历史表 / 跨环境一致性 / 结构版本化 / `with_auto_schema` 闸门处置——本期全部不做，启动条件为"出现顾问要自己加因子的真实诉求"）** |

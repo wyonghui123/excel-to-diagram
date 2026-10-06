@@ -1,0 +1,263 @@
+# 排斥组（Exclusion Group）— 定价元模型 T0-5
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-008（Precedence vs Best Price 显式二选一）/ §9.3.1 B2 消解范式
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4（SAP OV31/OV32 条件排斥）
+# 定位: 同一 rate_class 下多候选命中时如何收口——"保留较高价"还是"前置优先"
+#       对标 SAP Condition Exclusion OV31/OV32；Oracle Incompatible
+#
+# 【Spec 取值示意】resolution 枚举取值 Spec 明写"取值示意，研究稿未给枚举"——
+#   故此处取 SAP OV31/OV32 的两种标准做法：keep_highest / first_in_sequence。
+#   若实施期发现第三种需求再增补，**不提前设计**（YAGNI）。
+#
+# 【零主数据依赖 · C-T0-6】无主数据外键引用。
+
+id: exclusion_group
+name: 排斥组
+table_name: exclusion_groups
+description: 排斥组——同组内多候选命中时的消解规则（多候选取优）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价候选排斥组
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 排斥组
+    - exclusion group
+    - incompatibility group
+
+deletion_policy:
+  # 被 rate_type 引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: rate_types
+      foreign_key: exclusion_group_id
+      message: 该排斥组已被费率类型引用，请先调整费率类型后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 排斥组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 排斥组唯一编码
+    semantics:
+      meaning: 排斥组业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 排斥组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 排斥组显示名称
+    semantics:
+      meaning: 排斥组显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: members
+    name: 成员类型
+    type: json
+    db_column: members
+    required: true
+    description: >
+      参与排斥的费率类型编码数组，如 ["PRICE_BASE", "PRICE_CONTRACT"]。
+      数组顺序在 resolution = first_in_sequence 时决定优先级。
+    semantics:
+      meaning: 参与排斥的成员类型编码数组
+      display_detail: true
+    ui:
+      widget: tags
+      editable: false
+
+  - id: resolution
+    name: 消解方式
+    type: string
+    db_column: resolution
+    required: true
+    default: first_in_sequence
+    description: 多候选同时命中时的收口方式
+    enum_values:
+      - value: first_in_sequence
+        label: 前置优先
+        color: primary
+        description: 按查找序列槽位顺序取第一个命中者（对标 SAP OV32）
+      - value: keep_highest
+        label: 保留较高价
+        color: success
+        description: 取价格最高者（对标 SAP OV31）
+    semantics:
+      meaning: 候选消解方式；Precedence 范式即 first_in_sequence，Best Price 即 keep_highest
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 排斥组业务说明
+    semantics:
+      meaning: 排斥组说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_exclusion_group_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 排斥组管理
+    description: 多候选取优的消解规则
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: resolution
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 260
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建排斥组
+        icon: plus
+        type: primary
+        permission: exclusion_group:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 排斥组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [resolution]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - members
+          - resolution
+          - description
+
+category_config:
+  create_permission: exclusion_group:create
+  update_permission: exclusion_group:update
+  delete_permission: exclusion_group:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

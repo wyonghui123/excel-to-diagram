@@ -1,0 +1,365 @@
+# 费率表（Rate Table / 价目表）— 定价元模型 T0-6
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 B 表 / FR-001 / §7C.5（C-T0-6、C-T0-9、C-T0-11）/ TR-003
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4（Oracle Price List；金蝶价目表仅审核态）
+# 定位: 费率记录的容器——一份价目表，按币种/类型组织若干条费率记录
+#
+# 【C-T0-11 · 草稿发布分离】status ∈ {draft, approved, inactive} **本期必须落地**——
+#   仅 approved 参与取价。这是 C-T0-9 预留机制的唯一现成落点，
+#   也是 Agent / 顾问生成配置天然需要的（先草稿、预览、再发布）。
+#   对标金蝶价目表"仅审核态参与取价"。
+#
+# 【C-T0-9 · 作用域预防性预留】owner_org_id 本期**不启用**多租逻辑，
+#   仅预留语义位，避免 T1 后加字段要动 yaml 结构。实际多租能力见 TBD-15。
+#
+# 【C-T0-6 · 零主数据依赖】currency / sales_org 均为纯标识 + master_data_ref 标记，
+#   **不建外键**——主数据归数据模块，Agent / 顾问改 yaml 时不必连带改主数据。
+#   主数据到位后只需补引用完整性校验，**不改表结构**。
+
+id: rate_table
+name: 费率表
+table_name: rate_tables
+description: 费率表（业务别名：价目表）——费率记录的容器
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价价目表
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 费率表
+    - 价目表
+    - rate table
+    - price list
+
+deletion_policy:
+  # 被 rate_record 引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: rate_records
+      foreign_key: rate_table_id
+      message: 该费率表下仍有费率记录，请先处理相关费率记录后再删除
+  # 注：rate_records.rate_table_id 为真实整型外键，删除保护有效
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 价目表编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 费率表唯一编码
+    semantics:
+      meaning: 费率表业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 价目表名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 费率表显示名称（如 标准客户价目表）
+    semantics:
+      meaning: 费率表显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: type
+    name: 价目表类型
+    type: string
+    db_column: type
+    required: false
+    nullable: true
+    max_length: 30
+    description: 价目表类型（standard / contract / promotion），空 = 标准价目表
+    enum_values:
+      - value: standard
+        label: 标准价目表
+        color: primary
+      - value: contract
+        label: 合同价目表
+        color: success
+      - value: promotion
+        label: 促销价目表
+        color: warning
+    semantics:
+      meaning: 价目表业务类型
+    ui:
+      widget: select
+
+  # 【C-T0-6】currency 不建外键 —— 主数据归数据模块，本引擎侧不等待
+  - id: currency
+    name: 币种
+    type: string
+    db_column: currency
+    required: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: ISO 4217 币种代码（如 CNY / USD）。主数据引用，不建外键
+    semantics:
+      meaning: 币种 ISO 代码；master_data_ref = currency（仅标记来源）
+      master_data_ref: currency
+      data_category: code
+    ui:
+      widget: input
+
+  # 【C-T0-9】作用域预防性预留 —— 本期不启用多租，仅占位
+  - id: owner_org_id
+    name: 归属组织
+    type: integer
+    db_column: owner_org_id
+    required: false
+    nullable: true
+    description: >
+      归属组织 ID。【本期不启用】多租 / 组织隔离逻辑，留占位语义以免后续加字段要改结构。
+      实际能力见 TBD-15。
+    semantics:
+      meaning: 归属组织占位字段；本期不参与过滤
+    ui:
+      visible: false
+      editable: false
+
+  # 【C-T0-11】草稿发布分离 —— 本期必须落地
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 价目表状态。**仅 approved 参与取价**；对标金蝶"仅审核态参与取价"
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: default
+        category: draft
+        is_initial: true
+        description: 未发布，不参与取价
+      - value: approved
+        label: 已发布
+        color: success
+        category: active
+        description: 已发布，参与取价
+      - value: inactive
+        label: 已停用
+        color: info
+        category: inactive
+        description: 停用，不参与取价但保留数据
+    semantics:
+      meaning: 价目表发布状态；取价只读 approved
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 价目表业务说明
+    semantics:
+      meaning: 价目表说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_rate_table_code
+  - fields: [status]
+    name: idx_rate_table_status
+  - fields: [currency]
+    name: idx_rate_table_currency
+
+relations: []
+
+rules:
+  # 状态流转：草稿 → 已发布 → 已停用（复用平台标准动作语义）
+  - id: publish_rate_table
+    name: 发布价目表
+    type: state_transition
+    action_ref: approve
+    state_field: status
+    from_states: [draft]
+    to_state: approved
+    triggers: [before_update]
+    ui_hints:
+      label: 发布
+      icon: check_circle
+      confirm_message: "发布后该价目表将参与取价，确定要发布吗？"
+      highlight: true
+
+  - id: deactivate_rate_table
+    name: 停用价目表
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [approved]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后该价目表不再参与取价，确定要停用吗？"
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 费率表管理
+    description: 价目表（仅"已发布"参与取价）
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: currency
+        width: 90
+        align: center
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 220
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建价目表
+        icon: plus
+        type: primary
+        permission: rate_table:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 价目表信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [type, currency]
+          - fields: [status]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - type
+          - currency
+          - status
+          - description
+
+category_config:
+  create_permission: rate_table:create
+  update_permission: rate_table:update
+  delete_permission: rate_table:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

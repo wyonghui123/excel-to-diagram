@@ -1,0 +1,489 @@
+# 费率类型（Rate Type）— 定价元模型 T0-4
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-002 / §7B.5 / §9.2 三轴
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4.1、§4.8D②
+# 定位: 费率记录的"类型"配置对象（**不是**硬编码枚举）——决定这条费率怎么算
+#       对标 SAP V/06 条件类型；SF pricing element
+#
+# 【通用化三轴 · §9.2】本表承载其中两轴:
+#   轴② rate_source（率载体）: rate_record / external_quote / formula
+#   轴③ result_semantic 落在 calc_procedure 上（见 calc_procedure）
+#   轴① 计算基来源（base_level / base_source / base_step / rolling）落在
+#        calc_procedure.steps[].params 上。
+#
+# 【v1.6 收窄】本表 **承接** 由 key_schema 迁入的两项:
+#   display_scale + numeric_field —— 量级换算属"怎么算"，不属"按什么匹配"
+#   （依据：Spec §7B.4 缺陷 1 / §7B.5 职责重划表）
+#
+# 【零主数据依赖 · C-T0-6】无主数据外键引用。
+
+id: rate_type
+name: 费率类型
+table_name: rate_types
+description: 费率类型（业务别名：条件类型，配置对象）——决定一条费率怎么算
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价费率类型（配置对象）
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 费率类型
+    - 条件类型
+    - rate type
+    - pricing element
+
+deletion_policy:
+  # 【修 2026-10-06】原写 table: rate_records + foreign_key: id —— id 是本表自己的主键，
+  #   引用方外键列写错，删除策略不生效。改为真实表名 + 真实外键列。
+  mode: restrict
+  restrict_on:
+    - table: rate_records
+      foreign_key: rate_type_id
+      message: 该费率类型已被费率记录引用，请先处理相关费率记录后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 类型编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 费率类型唯一编码（如 PRICE_BASE / DISC_MATERIAL）
+    semantics:
+      meaning: 费率类型业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 类型名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 费率类型显示名称（如 基本价格 / 物料折扣）
+    semantics:
+      meaning: 费率类型显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: rate_class
+    name: 费率大类
+    type: string
+    db_column: rate_class
+    required: true
+    description: 费率大类，决定该类型在多层累加中的位置
+    enum_values:
+      - value: price
+        label: 价格
+        color: primary
+      - value: discount_surcharge
+        label: 折扣附加费
+        color: success
+      - value: tax
+        label: 税
+        color: warning
+      - value: freight
+        label: 运费
+        color: info
+      - value: statistical
+        label: 统计
+        color: default
+    semantics:
+      meaning: 费率大类；price 为基价，其余为叠加项
+      filterable: true
+      filter_type: enum
+      filter_label: 大类
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: calc_type
+    name: 计算方式
+    type: string
+    db_column: calc_type
+    required: true
+    default: percent
+    description: 费率参与计算的方式
+    enum_values:
+      - value: percent
+        label: 百分比
+        color: primary
+        description: rate 取基价的百分比
+      - value: fixed
+        label: 固定值
+        color: default
+        description: 固定金额/数量
+      - value: quantity
+        label: 按数量
+        color: info
+        description: 费率 × 数量
+      - value: formula
+        label: 公式
+        color: warning
+        description: 由 calc_procedure 的 formula 元素计算
+    semantics:
+      meaning: 费率参与计算的方式
+    ui:
+      widget: select
+
+  - id: rate_source
+    name: 率载体
+    type: string
+    db_column: rate_source
+    required: true
+    default: rate_record
+    description: 率值来源（通用化轴②）。本期只实装 rate_record
+    enum_values:
+      - value: rate_record
+        label: 费率记录
+        color: primary
+        description: 取自 rate_record.rate / value
+      - value: external_quote
+        label: 外部报价
+        color: info
+        description: 取自 external_rate_source（FR-015 实现期接入）
+      - value: formula
+        label: 公式
+        color: warning
+        description: 由计算过程中的 formula 元素产出
+    semantics:
+      meaning: 率载体 —— 通用化轴②，决定率值从哪里来
+    ui:
+      widget: select
+
+  - id: sign
+    name: 正负号
+    type: string
+    db_column: sign
+    required: true
+    default: "+"
+    description: 该费率对基价的作用方向。+ 叠加，- 抵扣
+    enum_values:
+      - value: "+"
+        label: 叠加
+        color: success
+      - value: "-"
+        label: 抵扣
+        color: warning
+    semantics:
+      meaning: 费率作用方向；对标 SAP 附加/折扣的负号约定
+    ui:
+      widget: select
+
+  - id: rounding
+    name: 取整方式
+    type: string
+    db_column: rounding
+    required: false
+    nullable: true
+    max_length: 20
+    description: 取整方式（none / round / ceil / floor），空 = 不取整
+    enum_values:
+      - value: none
+        label: 不取整
+        color: default
+      - value: round
+        label: 四舍五入
+        color: primary
+      - value: ceil
+        label: 向上取整
+        color: info
+      - value: floor
+        label: 向下取整
+        color: info
+    semantics:
+      meaning: 该费率结果的取整方式
+    ui:
+      widget: select
+
+  # 【v1.6 由 key_schema 迁入】量级换算属"怎么算"，不属"按什么匹配"
+  - id: numeric_field
+    name: 数值字段
+    type: string
+    db_column: numeric_field
+    required: false
+    nullable: true
+    max_length: 50
+    description: >
+      量级换算的源字段 ID（如 quantity）。空 = 不做量级换算。
+      由 key_schema 迁入（Spec §7B.5）。
+    semantics:
+      meaning: 量级换算的源字段；与 display_scale 配对使用
+    ui:
+      widget: input
+
+  - id: display_scale
+    name: 显示量级
+    type: string
+    db_column: display_scale
+    required: false
+    nullable: true
+    max_length: 10
+    description: 展示量级单位（如 1 / 1000 / 1000000）。由 key_schema 迁入（Spec §7B.5）
+    semantics:
+      meaning: 费率展示时的量级换算系数
+    ui:
+      widget: input
+
+  - id: exclusion_group_id
+    name: 排斥组
+    type: integer
+    db_column: exclusion_group_id
+    required: false
+    nullable: true
+    description: 排斥组 ID（同组内多候选按 resolution 消解）。空 = 不参与排斥
+    semantics:
+      meaning: 候选排斥组；多同类命中时的消解依据
+    ui:
+      widget: reference
+
+  - id: manual_allowed
+    name: 允许手工改价
+    type: boolean
+    db_column: manual_allowed
+    required: true
+    default: false
+    description: 是否允许在单据上手工覆盖该费率类型的结果
+    semantics:
+      meaning: 是否允许人工改价；false = 只能由计算过程产出
+    ui:
+      widget: switch
+
+  - id: mandatory
+    name: 必须命中
+    type: boolean
+    db_column: mandatory
+    required: true
+    default: false
+    description: 该类型是否必须命中。未命中时计算过程应报错
+    semantics:
+      meaning: 是否必须命中；用于校验"该类型缺配置"的场景
+    ui:
+      widget: switch
+
+  - id: statistical
+    name: 统计项
+    type: boolean
+    db_column: statistical
+    required: true
+    default: false
+    description: 是否仅用于统计展示，不参与金额计算
+    semantics:
+      meaning: 统计项标记；true = 不计入金额
+    ui:
+      widget: switch
+
+  - id: lookup_sequence_id
+    name: 查找序列
+    type: integer
+    db_column: lookup_sequence_id
+    required: false
+    nullable: true
+    description: 该费率类型使用的查找序列 ID（引用 lookup_sequences.id）
+    semantics:
+      meaning: 取数计划 —— 该类型按哪条序列查表
+    ui:
+      widget: reference
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 费率类型业务说明
+    semantics:
+      meaning: 费率类型说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_rate_type_code
+  - fields: [rate_class]
+    name: idx_rate_type_class
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 费率类型管理
+    description: 费率类型（业务别名：条件类型）配置
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: rate_class
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: calc_type
+        width: 100
+      - field: sign
+        width: 70
+        align: center
+      - field: mandatory
+        width: 90
+        type: boolean
+        align: center
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建费率类型
+        icon: plus
+        type: primary
+        permission: rate_type:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 费率类型信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [rate_class, calc_type]
+          - fields: [rate_source, sign]
+      - title: 计算与消解
+        columns:
+          - fields: [rounding, lookup_sequence_id]
+          - fields: [numeric_field, display_scale]
+          - fields: [exclusion_group_id]
+      - title: 控制开关
+        columns:
+          - fields: [manual_allowed, mandatory, statistical]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - rate_class
+          - calc_type
+          - rate_source
+          - sign
+          - rounding
+      - id: calc
+        label: 计算与消解
+        type: fields
+        fields:
+          - numeric_field
+          - display_scale
+          - exclusion_group_id
+          - lookup_sequence_id
+      - id: control
+        label: 控制开关
+        type: fields
+        fields:
+          - manual_allowed
+          - mandatory
+          - statistical
+          - description
+
+category_config:
+  create_permission: rate_type:create
+  update_permission: rate_type:update
+  delete_permission: rate_type:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

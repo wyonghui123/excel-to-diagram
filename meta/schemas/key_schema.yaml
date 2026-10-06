@@ -1,0 +1,250 @@
+# 匹配键表（Key Schema）— 定价元模型 T0-2
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-003 / §7B.5 / §7B.4 缺陷 1 / §7C.4.1 / C-T0-1、C-T0-12
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4.2 第 1 层
+# 定位: 定义"用哪些因子的组合做键"，是费率记录（价目行）匹配的依据
+#       对标 SAP V/03（SD）/ M/03（MM）条件表
+#
+# 【v1.6 收窄 · C-T0-1】本表 **只** 承载 key_fields[]（匹配维度）。
+#   原设计的其它职责已迁出，不得回填：
+#     - display_scale / numeric_field → rate_type（量级换算属"怎么算"，非"按什么匹配"）
+#     - scale_divisor / exclude_bo     → rate_record（阶梯基数/排除对象属单条记录属性）
+#   依据：Spec §7B.4 缺陷 1 —— 原设计让本表超载 3+1 个互不相干职责。
+#   对标反证：六家中五家无独立"匹配键目录"（SAP 内联于条件记录、Fusion 挂
+#   QualifyingCriteria）；本表保留的唯一理由是"键可被多个 rate_table 复用"
+#   —— 该理由是否成立见 TBD-14（T0-2 交付后观察一个周期，若从不复用则废表内联）。
+#
+# 【C-T0-12 结构冻结】key_fields 只能从既有 factor_catalog 中选，
+#   **不得**在本表内增删 PK —— 增删 PK 本身即一次数据迁移需求（历史 keys{} 缺新 PK、
+#   calc_result 引用旧结构），属元数据版本管理问题，不在本期解决。
+#
+# 【零主数据依赖 · C-T0-6】key_fields 存 factor_catalog.field_id 字符串，不建外键。
+
+id: key_schema
+name: 匹配键表
+table_name: key_schemas
+description: 匹配键表（业务别名：条件表）——用哪些因子的组合做键
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价匹配键定义
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 匹配键表
+    - 条件表
+    - key schema
+    - condition table
+
+deletion_policy:
+  # 【修 2026-10-06】原写 table: lookup_sequences / rate_records —— 均为复数表名，
+  #   与本仓 table_name 约定（单数）不符，故删除策略实际不生效。
+  #   且 lookup_sequences.steps 是 json 数组，无 key_schema_id 列可作外键，
+  #   故只对 rate_records.key_schema_id（真实整型外键）设 restrict。
+  #   lookup_sequences 的引用检查须由业务层（配序列时校验）承担。
+  mode: restrict
+  restrict_on:
+    - table: rate_records
+      foreign_key: key_schema_id
+      message: 该匹配键表已被费率记录引用，请先处理相关费率记录后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 键编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 匹配键唯一编码（如 KEY_CUSTOMER_MATERIAL）
+    semantics:
+      meaning: 匹配键业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 键名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 匹配键显示名称（如 客户+物料）
+    semantics:
+      meaning: 匹配键显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: key_fields
+    name: 匹配字段
+    type: json
+    db_column: key_fields
+    required: true
+    description: >
+      匹配维度字段名数组，元素取自 factor_catalog.field_id。
+      如 ["customer", "material"]。数组顺序决定匹配键的展示与校验顺序。
+    semantics:
+      meaning: 组成该键的因子字段名数组；本期结构冻结，只能选既有因子
+      display_detail: true
+    ui:
+      widget: tags
+      editable: false
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 键业务说明
+    semantics:
+      meaning: 匹配键说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_key_schema_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 匹配键表管理
+    description: 定价匹配键定义（业务别名：条件表）
+    columns:
+      - field: code
+        width: 200
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: description
+        width: 260
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建键表
+        icon: plus
+        type: primary
+        permission: key_schema:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 匹配键信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - key_fields
+          - description
+
+category_config:
+  create_permission: key_schema:create
+  update_permission: key_schema:update
+  delete_permission: key_schema:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

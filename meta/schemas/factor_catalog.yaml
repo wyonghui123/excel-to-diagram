@@ -1,0 +1,286 @@
+# 因子目录（Factor Catalog）— 定价元模型 T0-1
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-003 / §7B.5 / §7C.5（C-T0-1~C-T0-3、C-T0-7~C-T0-13）
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4.2 第 1 层
+# 定位: 声明"哪些字段可当定价因子、其事实源分类是什么、是否影响价格"
+#       是 key_schema（匹配键表）的取值来源；FR-015（事实数据驱动重算）的前置
+#
+# 【v1.6 收窄 · C-T0-3】本表只承载 MetaField 不具备的两项能力:
+#   1) source_type —— 事实源分类（让质检/计量/外部报价与主数据同权）
+#   2) is_price_relevant —— 标记该字段是否影响价格
+#   刻意 **不** 声明 data_type / aliases（引用 MetaField.field_type /
+#   MetaField.semantics.aliases），否则同一字段类型会有两个真相源
+#   （见 Spec §7B.4 缺陷 3 —— 与 A1 修掉的"表名映射 6 份副本"同类风险）。
+#
+# 【零主数据依赖 · C-T0-6】object_type / field_id 均为字符串标识，不建外键、
+#   不引用主数据对象，可与主数据补齐并行（本表归定价，不归主数据模块）。
+
+id: factor_catalog
+name: 因子目录
+table_name: factor_catalogs
+description: 定价因子目录（业务别名：字段目录）——哪些字段可当定价因子、事实源分类、是否影响价格
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价因子目录
+  category: system_entity
+  business_key: [field_id, object_type]
+  display_name_field: name
+  aliases:
+    - 因子目录
+    - 字段目录
+    - factor catalog
+    - pricing field
+
+deletion_policy:
+  # 被 key_schema.key_fields[] 引用时 restrict —— 删因子会让已配的键失效
+  # 【注意】key_fields 是 json 数组，存的是 field_id 字符串，
+  #   故引用检查须由业务层（建键时校验），此处不设 restrict_on
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    max_length: 50
+    description: 因子所属元模型对象 ID（如 sales_order / sales_order_line）
+    semantics:
+      meaning: 因子所属对象 ID，引用 MetaObject.id（非外键，纯标识）
+      data_category: code
+    ui:
+      widget: input
+
+  - id: field_id
+    name: 因子字段
+    type: string
+    db_column: field_id
+    required: true
+    max_length: 50
+    description: 因子对应的字段 ID，引用 MetaField.id（非外键，纯标识）
+    semantics:
+      meaning: 因子对应的字段 ID；类型与别名一律引用 MetaField，本表不重复声明
+      data_category: code
+    ui:
+      widget: input
+
+  - id: source_type
+    name: 事实源分类
+    type: string
+    db_column: source_type
+    required: true
+    default: master
+    description: >
+      事实源分类。static=单据自带的固定值；master=主数据；
+      quality=质检值；measurement=计量值；market=外部报价。
+      后三类与主数据同权，是 FR-015（优质优价 / 大宗两段式）的基础。
+    enum_values:
+      - value: static
+        label: 单据字段
+        color: default
+        description: 取自单据行/头自身的字段
+      - value: master
+        label: 主数据
+        color: primary
+        description: 取自主数据对象（伙伴 / 物料 / 销售区域等）
+      - value: quality
+        label: 质检值
+        color: success
+        description: 取自质量检验结果；对标 SAP 变式键 / SF IsPriceImpacting
+      - value: measurement
+        label: 计量值
+        color: warning
+        description: 取自计量折算结果（如干吨 / 金属量）；对标 SAP 批次特定计量单位
+      - value: market
+        label: 外部报价
+        color: info
+        description: 取自外部市场报价（Platts / LME / ICE）；对标 SAP MIC + DCS
+    semantics:
+      meaning: 该因子的数据来源类别，决定取数路径与权限口径
+      filterable: true
+      filter_type: enum
+      filter_label: 事实源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: is_price_relevant
+    name: 是否影响价格
+    type: boolean
+    db_column: is_price_relevant
+    required: true
+    default: true
+    description: 该因子是否参与价格计算。false=仅展示/参考，不进匹配键
+    semantics:
+      meaning: 是否影响价格；表达式驱动模式下答不了此问题，是本表存在价值的核心
+    ui:
+      widget: switch
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 因子业务说明
+    semantics:
+      meaning: 因子说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [object_type, field_id]
+    unique: true
+    name: idx_factor_catalog_obj_field
+  - fields: [source_type]
+    name: idx_factor_catalog_source
+  - fields: [is_price_relevant]
+    name: idx_factor_catalog_price_rel
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 因子目录管理
+    description: 可参与定价的字段清单与事实源分类
+    columns:
+      - field: object_type
+        width: 160
+        sortable: true
+      - field: field_id
+        width: 160
+        sortable: true
+      - field: source_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: is_price_relevant
+        width: 100
+        type: boolean
+        align: center
+      - field: description
+        width: 260
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - object_type
+      - field_id
+      - description
+    actions:
+      - id: create
+        label: 新建因子
+        icon: plus
+        type: primary
+        permission: factor_catalog:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: object_type
+      order: asc
+
+  form:
+    title: 因子信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [object_type, field_id]
+          - fields: [source_type, is_price_relevant]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.field_id} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - object_type
+          - field_id
+          - source_type
+          - is_price_relevant
+          - description
+
+category_config:
+  create_permission: factor_catalog:create
+  update_permission: factor_catalog:update
+  delete_permission: factor_catalog:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: field_id

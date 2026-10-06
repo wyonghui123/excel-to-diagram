@@ -1,0 +1,598 @@
+# 费率记录（Rate Record / 价目行 · 条件记录）— 定价元模型 T0-7
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 B 表 / FR-001、FR-008 / §9.3.1 B2 消解范式 / §7B.5 / C-T0-4、C-T0-5、C-T0-6
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4.2 第 2 层
+# 定位: 一条"某个键组合下、某类费率、某个值"的定价条件记录
+#       对标 SAP 条件记录 VK11；SF Price Book Entry
+#
+# 【v1.6 三处新增/迁入 · 全部由 C-T0-4/C-T0-5 锁定】
+#   1) hit_policy ∈ {exclusive, additive}（默认 exclusive）
+#      —— 由 lookup_sequence.steps[].exclusive **下沉**而来。对标 SAP 逐条件自带
+#         %GET_VAL 累加 / 首命中退出。消除"第 1 槽累加 + 第 2 槽取优须整表复制序列"。
+#   2) scale_divisor + exclude_bo
+#      —— 由 key_schema **迁入**。阶梯基数 / 排除对象属单条记录属性，不属"按什么匹配"。
+#   3) allocation_weight（可空）
+#      —— 第四消解范式 weighted 的载体。非空 = 该候选参与"加权累加"而非"取一"；
+#         Σweight=1 须归一否则拒绝计算并报错（不静默缩放）。
+#         对标 Oracle Sourcing Rule source_allocation_percentage /
+#         工单 Cost Factor Allocation / LCM Charge Basis = % of item price（跨域同构）。
+#
+# 【迁移零风险 · TR-001】hit_policy 缺省 = exclusive，与 v1.5 及更早设计行为完全一致，
+#   存量无配置 → 行为不变。
+#
+# 【C-T0-6 · 零主数据依赖】currency / rate_unit 均不建外键。
+#   rate_unit 虽可关联 uom 主数据（已存在），本期同样用纯标识 + master_data_ref 标记
+#   —— 保持 T0 全部 7 张表口径一致，且避免 Agent / 顾问改 yaml 时连带改主数据。
+
+id: rate_record
+name: 费率记录
+table_name: rate_records
+description: 费率记录（业务别名：价目行 · 条件记录）——键组合下的费率值
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价条件记录
+  category: system_entity
+  # 【修 2026-10-06】原写 business_key = [rate_table_id, key_schema_id, keys]，
+  #   其中 keys 是 json 数组 —— json 列无法作唯一锚点（sqlite 亦无法对
+  #   json 列建 unique 约束），故改为引入稳定的 code 作为业务键。
+  #   语义不变：一条费率记录仍由"表 + 键 + 键值"唯一确定，
+  #   但由 code 承担唯一性，键值组合仍由 idx_rate_record_lookup 索引加速查找。
+  business_key: [code]
+  display_name_field: code
+  aliases:
+    - 费率记录
+    - 价目行
+    - 条件记录
+    - rate record
+    - condition record
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 记录编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 100
+    description: 费率记录唯一编码（人工可读，如 RC_CUST1001_MAT_M001）
+    semantics:
+      meaning: 费率记录唯一标识；承担 business_key / upsert 锚点职责
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: rate_table_id
+    name: 费率表
+    type: integer
+    db_column: rate_table_id
+    required: true
+    description: 所属费率表 ID
+    semantics:
+      meaning: 所属费率表；仅当该表 status = approved 时本记录才参与取价
+    ui:
+      widget: reference
+
+  - id: key_schema_id
+    name: 匹配键表
+    type: integer
+    db_column: key_schema_id
+    required: true
+    description: 匹配键表 ID，定义本记录 keys{} 的结构
+    semantics:
+      meaning: 本记录使用的键定义
+    ui:
+      widget: reference
+
+  - id: keys
+    name: 键值
+    type: json
+    db_column: keys
+    required: true
+    description: >
+      键值对象，字段名须与 key_schema.key_fields[] 一一对应。
+      如 {"customer": 1001, "material": "M001"}。
+      【结构冻结 · C-T0-12】不得增删 PK —— 增删即数据迁移需求。
+    semantics:
+      meaning: 本记录在匹配维度上的取值
+    ui:
+      widget: json
+      editable: false
+
+  - id: rate_type_id
+    name: 费率类型
+    type: integer
+    db_column: rate_type_id
+    required: true
+    description: 费率类型 ID，决定这条费率怎么算
+    semantics:
+      meaning: 费率类型
+    ui:
+      widget: reference
+
+  - id: rate
+    name: 费率
+    type: number
+    db_column: rate
+    required: false
+    nullable: true
+    description: 费率值（配合 rate_type.calc_type 解释：percent=百分比 / fixed=固定值）
+    semantics:
+      meaning: 费率值
+    ui:
+      widget: number
+
+  - id: value
+    name: 固定值
+    type: number
+    db_column: value
+    required: false
+    nullable: true
+    description: 固定金额 / 数量值（calc_type = fixed 时使用）
+    semantics:
+      meaning: 固定值
+    ui:
+      widget: number
+
+  - id: valid_from
+    name: 生效期起
+    type: date
+    db_column: valid_from
+    required: false
+    nullable: true
+    description: 有效期起（空 = 无限早）。取价时按单据日期过滤
+    semantics:
+      meaning: 有效期起；行级有效期，不覆盖结构变更版本（见 TBD-15）
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 生效期止
+    type: date
+    db_column: valid_to
+    required: false
+    nullable: true
+    description: 有效期止（空 = 无限远）
+    semantics:
+      meaning: 有效期止
+    ui:
+      widget: date
+
+  - id: currency
+    name: 币种
+    type: string
+    db_column: currency
+    required: false
+    nullable: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: ISO 4217 币种代码。空 = 继承费率表币种。主数据引用，不建外键
+    semantics:
+      meaning: 币种；master_data_ref = currency。跨币种换算见 IF-008（实现期）
+      master_data_ref: currency
+      data_category: code
+    ui:
+      widget: input
+
+  - id: rate_unit
+    name: 定价单位
+    type: string
+    db_column: rate_unit
+    required: false
+    nullable: true
+    max_length: 20
+    description: 计量单位编码（如 PC / KG）。空 = 不限定。主数据引用，不建外键
+    semantics:
+      meaning: 计量单位；master_data_ref = uom
+      master_data_ref: uom
+      data_category: code
+    ui:
+      widget: input
+
+  - id: rate_qty
+    name: 定价数量
+    type: number
+    db_column: rate_qty
+    required: false
+    nullable: true
+    description: 定价数量（如"每 10 个"填 10）。空 = 1
+    semantics:
+      meaning: 定价单位数量；与 rate_unit 配对
+    ui:
+      widget: number
+
+  # 【阶梯】两种语义：整单取档（跨阶梯比较取最優档）/ 逐档累进（分段计算）
+  - id: scale
+    name: 阶梯
+    type: json
+    db_column: scale
+    required: false
+    nullable: true
+    description: >
+      阶梯数组，元素形如
+      {"from": 0, "to": 100, "rate": 10.0}（区间含下不含上）。
+      空 = 不分档。阶梯语义由 rate_type.calc_type + scale_semantic 决定。
+    semantics:
+      meaning: 阶梯（量价分档）
+    ui:
+      widget: json
+      editable: false
+
+  - id: scale_semantic
+    name: 阶梯语义
+    type: string
+    db_column: scale_semantic
+    required: false
+    nullable: true
+    max_length: 20
+    description: 阶梯语义。empty=不启用 / total=整单取档 / incremental=逐档累进
+    enum_values:
+      - value: total
+        label: 整单取档
+        color: primary
+        description: 按总量落在哪档就取哪档的费率
+      - value: incremental
+        label: 逐档累进
+        color: success
+        description: 按档位分段计算后累加（对标 Oracle Partial quantity pricing）
+    semantics:
+      meaning: 阶梯的两语义之选（Spec §9.3.1 B2）
+    ui:
+      widget: select
+
+  # 【v1.6 迁入 · C-T0-5】阶梯基数 —— 属单条记录属性，非 key_schema
+  - id: scale_divisor
+    name: 阶梯基数
+    type: string
+    db_column: scale_divisor
+    required: false
+    nullable: true
+    max_length: 50
+    description: 阶梯判断所用的基数字段 ID（如 quantity）。空 = 用单据行数量。由 key_schema 迁入
+    semantics:
+      meaning: 阶梯分档的基数字段
+    ui:
+      widget: input
+
+  # 【v1.6 迁入 · C-T0-5】排除对象 —— 属单条记录属性，非 key_schema
+  - id: exclude_bo
+    name: 排除对象
+    type: string
+    db_column: exclude_bo
+    required: false
+    nullable: true
+    max_length: 50
+    description: >
+      排除的业务对象类型 ID（如排除某客户/某物料时填写）。空 = 不排除。
+      由 key_schema 迁入
+    semantics:
+      meaning: 本记录不适用的对象类型
+    ui:
+      widget: input
+
+  # 【v1.6 新增 · C-T0-4】命中策略下沉
+  - id: hit_policy
+    name: 命中策略
+    type: string
+    db_column: hit_policy
+    required: true
+    default: exclusive
+    description: >
+      命中策略。exclusive=首个命中即停（默认，与 v1.5 行为一致）；
+      additive=继续向后查并累加。对标 SAP 逐条件自带 %GET_VAL 累加/首命中退出。
+    enum_values:
+      - value: exclusive
+        label: 命中即止
+        color: primary
+        is_initial: true
+        description: 首个命中后停止查找该槽位后续记录
+      - value: additive
+        label: 继续累加
+        color: success
+        description: 命中后继续查找同组后续记录并累加
+    semantics:
+      meaning: 候选记录的命中策略；由 lookup_sequence.steps[].exclusive 下沉而来
+      filterable: true
+      filter_type: enum
+      filter_label: 命中策略
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 【v1.4 · 第四消解范式 weighted】
+  - id: allocation_weight
+    name: 分配权重
+    type: number
+    db_column: allocation_weight
+    required: false
+    nullable: true
+    description: >
+      加权累加权重（0~1）。非空 = 该候选参与"加权累加"而非"取一"；
+      同组内非空权重候选之 Σweight 必须为 1，否则**拒绝计算并报错**（不静默缩放）。
+      对标 Oracle Sourcing Rule source_allocation_percentage
+    semantics:
+      meaning: 加权累加权重；非空即参与第四消解范式 weighted
+    ui:
+      widget: number
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 100
+    description: >
+      同键多记录的取用优先级，数字小者先。同 priority 必须有确定 tie-break
+      （其次按 id 字典序），禁止不确定顺序
+    semantics:
+      meaning: 同组内取用优先级；tie-break = (priority asc, id asc)
+      filterable: true
+      filter_type: number
+    ui:
+      widget: number
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 记录状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 记录启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 费率记录业务说明
+    semantics:
+      meaning: 费率记录说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_rate_record_code
+  - fields: [rate_table_id]
+    name: idx_rate_record_table
+  - fields: [key_schema_id]
+    name: idx_rate_record_schema
+  - fields: [rate_type_id]
+    name: idx_rate_record_type
+  - fields: [rate_table_id, key_schema_id, priority]
+    name: idx_rate_record_lookup
+  - fields: [status]
+    name: idx_rate_record_status
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 费率记录管理
+    description: 价目行（业务别名：条件记录）
+    columns:
+      - field: code
+        width: 200
+        sortable: true
+      - field: rate_table_id
+        width: 110
+        type: number
+      - field: key_schema_id
+        width: 110
+        type: number
+      - field: rate_type_id
+        width: 110
+        type: number
+      - field: rate
+        width: 100
+        type: number
+        align: right
+      - field: currency
+        width: 80
+        align: center
+      - field: hit_policy
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: priority
+        width: 90
+        type: number
+        align: right
+      - field: valid_from
+        width: 110
+        format: date
+      - field: valid_to
+        width: 110
+        format: date
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - description
+    actions:
+      - id: create
+        label: 新建费率记录
+        icon: plus
+        type: primary
+        permission: rate_record:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: priority
+      order: asc
+
+  form:
+    title: 费率记录信息
+    layout: vertical
+    sections:
+      - title: 归属与键
+        columns:
+          - fields: [code]
+          - fields: [rate_table_id, key_schema_id]
+          - fields: [rate_type_id, keys]
+      - title: 费率值
+        columns:
+          - fields: [rate, value]
+          - fields: [currency, rate_unit, rate_qty]
+      - title: 生效与取用
+        columns:
+          - fields: [valid_from, valid_to]
+          - fields: [hit_policy, priority]
+          - fields: [status]
+      - title: 阶梯与消解
+        columns:
+          - fields: [scale_semantic, scale_divisor]
+          - fields: [exclude_bo, allocation_weight]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "费率记录 {record.code} 详情"
+    tabs:
+      - id: basic
+        label: 归属与键
+        type: fields
+        fields:
+          - code
+          - rate_table_id
+          - key_schema_id
+          - rate_type_id
+          - keys
+      - id: value
+        label: 费率值
+        type: fields
+        fields:
+          - rate
+          - value
+          - currency
+          - rate_unit
+          - rate_qty
+      - id: effective
+        label: 生效与取用
+        type: fields
+        fields:
+          - valid_from
+          - valid_to
+          - hit_policy
+          - priority
+          - status
+      - id: scale
+        label: 阶梯与消解
+        type: fields
+        fields:
+          - scale
+          - scale_semantic
+          - scale_divisor
+          - exclude_bo
+          - allocation_weight
+      - id: other
+        label: 其他信息
+        type: fields
+        fields:
+          - description
+
+category_config:
+  create_permission: rate_record:create
+  update_permission: rate_record:update
+  delete_permission: rate_record:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

@@ -1,0 +1,244 @@
+# 查找序列（Lookup Sequence）— 定价元模型 T0-3
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-004 / §7B.5 / §7B.4 缺陷 2 / C-T0-2、C-T0-12
+#       docs/superpowers/specs/2026-10-05-pricing-engine-research.md §4 件③、§5.1
+# 定位: 有序查表列表——"第几个槽位、用哪把键"
+#       对标 SAP V/07（SD）/ M/07（MM）存取序列；D365 find-next
+#
+# 【v1.6 收窄 · C-T0-2】本表 **只** 承载 steps[{seq, key_schema_id}]（检索计划）。
+#   刻意 **不** 含 exclusive（命中即停 vs 继续累加）——
+#   该开关已下沉为 rate_record.hit_policy ∈ {exclusive, additive}，默认 exclusive。
+#   依据：Spec §7B.4 缺陷 2 —— 混在一张表的直接后果是
+#   "第 1 槽累加 + 第 2 槽取优"必须整表复制序列。
+#   对标反证：SAP 条件表可按 %GET_VAL 累加、也可首命中退出，
+#   是 **每条条件自带** 的属性，不是序列级属性。
+#
+# 【C-T0-4 迁移零风险】hit_policy 缺省 = exclusive，与本引擎 v1.5 及更早设计
+#   行为完全一致，存量无配置 → 行为不变（并入 TR-001）。
+
+id: lookup_sequence
+name: 查找序列
+table_name: lookup_sequences
+description: 查找序列（业务别名：存取序列）——有序查表列表，定义查表次序与所用键
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价查找序列（取数计划）
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 查找序列
+    - 存取序列
+    - lookup sequence
+    - access sequence
+
+deletion_policy:
+  # 【修 2026-10-06】原写 foreign_key: id —— id 是本表主键，引用方外键列写错。
+  #   rate_types.lookup_sequence_id 已改为整型外键（本次审查同步修正），故此处可用。
+  mode: restrict
+  restrict_on:
+    - table: rate_types
+      foreign_key: lookup_sequence_id
+      message: 该查找序列已被费率类型引用，请先调整费率类型后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 序列编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 查找序列唯一编码（如 SEQ_STANDARD）
+    semantics:
+      meaning: 查找序列业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 序列名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 查找序列显示名称（如 标准取价序列）
+    semantics:
+      meaning: 查找序列显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: steps
+    name: 槽位列表
+    type: json
+    db_column: steps
+    required: true
+    description: >
+      有序槽位数组，元素形如 {"seq": 1, "key_schema_id": 1}。
+      seq 从 1 递增，seq 越小优先级越高（先查）。
+      注意：本表 **不含** exclusive —— 命中策略见 rate_record.hit_policy。
+    semantics:
+      meaning: 取数计划的槽位次序；每槽只声明"用哪把键"，不声明命中策略
+      display_detail: true
+    ui:
+      widget: tags
+      editable: false
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 序列业务说明
+    semantics:
+      meaning: 查找序列说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_lookup_sequence_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 查找序列管理
+    description: 定价取数计划（业务别名：存取序列）
+    columns:
+      - field: code
+        width: 200
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: description
+        width: 260
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建序列
+        icon: plus
+        type: primary
+        permission: lookup_sequence:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 查找序列信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - steps
+          - description
+
+category_config:
+  create_permission: lookup_sequence:create
+  update_permission: lookup_sequence:update
+  delete_permission: lookup_sequence:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code
