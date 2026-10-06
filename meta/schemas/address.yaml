@@ -24,7 +24,7 @@
 #   - 去重按 C7 最小集精神：建档时匹配校验；一期不做全量清洗 / 合并引擎（§5.5）
 #   - 停用 ≠ 删除（§5.4）：生命周期走 status；变更留痕（audit）
 #
-# [接线] site.address_id（设施地址——location 侧随接线批次落）；party 侧经关系 / 角色引用（随角色层）。
+# [接线] site.address_id（设施地址——【已接线 2026-10-06】见 location.yaml；deletion 反补见本文件 restrict_on）；party 侧经关系 / 角色引用（随角色层）。
 # [未决 · 不在本批] ① C5 用途关联的期次与结构 ② 去重深度（匹配规则强度）③ 各国格式适配（一期单语言单格式 + 扩展点）
 # ============================================
 
@@ -47,8 +47,13 @@ semantics:
 
 deletion_policy:
   # [§5.4] 被引用地址停用 ≠ 删除：生命周期走 status（active/inactive）；
-  # 引用面删除保护随接线批次追加（site.address_id 等引用面尚未接线 ⇒ 本期 restrict_on 为空）
+  # [接线 2026-10-06] site.address_id 引用面已接线（location.yaml）⇒ 补删除保护；
+  #   party 侧引用面（经关系 / 角色）随接线批次再补
   mode: restrict
+  restrict_on:
+    - table: locations
+      foreign_key: address_id
+      message: 该地址被位置（site）引用，请先解除引用后再删除
   cascade_delete: []
 
 audit:

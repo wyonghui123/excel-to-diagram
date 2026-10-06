@@ -9,12 +9,17 @@
 # 一期拍板 (v2.5): W2 平台级主数据(落 meta) · W6 不新增 warehouse 形态 · W10 独立到仓库层
 #   W11 site 在 location 树、地址挂 site、允许多 org 引用 · W12 类型驱动弹性属性 + deletion 一期统一 restrict
 #
-# [待核对/待接线 — 不阻塞骨架]
-#  1. W12 "类型驱动弹性属性"(平台 aspects / 条件字段) 表达力待核对；故本期只落【公共字段】，
-#     类型特有字段（site: address_id/timezone/calendar_id · warehouse: wms_enabled/默认库存策略 ·
-#     zone: 区域类型 · bin: aisle/bay/level/容积/承重/温区/混存规则）待表达力核对后补（不用宽表/JSON）。
-#  2. site 的 address_id / calendar_id 引用支持对象（address / calendar，蓝图 §7 步 7 拟建），
-#     随支持对象落地后接线。
+# [核对/接线记录]
+#  1. W12 "类型驱动弹性属性" 载体核对（2026-10-06）: 平台 aspects = 静态字段切面
+#     （yaml_loader._resolve_aspects 无条件合并, 无"按类型择字段"表达力）; 条件机制仅
+#     conditional_required（constraint_engine 校验层"条件必填", 非"字段存在性"）
+#     ⇒ 字段级"按类型存在/显示"能力尚缺（留 W12 平台机制）; 其余类型特有字段
+#     （site: timezone · warehouse: wms_enabled/默认库存策略 · zone: 区域类型 ·
+#      bin: aisle/bay/level/容积/承重/温区/混存规则）待机制补齐后落（不用宽表/JSON）。
+#  2. site 的 address_id / calendar_id 引用支持对象（address / calendar）——【已接线 2026-10-06】
+#     前置解除: address/calendar/region 已落地; 以"可空列 + value_help(strict)"先行落
+#     （引用属结构骨架且仅 2 列; 非 site 类型恒空, 条件显示待机制）。
+#     deletion 反补: address.yaml / calendar.yaml 的 restrict_on（locations.address_id / .calendar_id）。
 #  3. 层级合法性（site→site / warehouse 挂 site / zone 可选 / bin 挂 warehouse）随建表校验（W12 已拍）。
 
 id: location
@@ -195,6 +200,90 @@ fields:
       multiple: false
       clearable: true
 
+  # ── site 特有引用（W12 载体核对 2026-10-06: 可空列 + value_help(strict) 先行接线；
+  #    非 site 类型恒空；按类型条件显示待平台机制）──
+  - id: address_id
+    name: 场地地址
+    type: integer
+    db_column: address_id
+    nullable: true
+    description: site 场地地址（引用地址库 address；非 site 类型留空）
+    semantics:
+      meaning: 场地设施地址（site 专用引用）
+      display:
+        type: association
+        target_type: address
+        display_field: formatted_address
+        placeholder: "选择地址（仅 site）"
+    value_help:
+      source:
+        type: bo
+        target_bo: address
+        value_field: id
+        display_field: formatted_address
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dialog
+        display_format: "{formatted_address}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: formatted_address
+            label: 地址
+            width: 300
+    ui:
+      widget: select
+      relation: address
+      multiple: false
+      clearable: true
+
+  - id: calendar_id
+    name: 作业日历
+    type: integer
+    db_column: calendar_id
+    nullable: true
+    description: site 作业日历（引用支持对象 calendar；非 site 类型留空）
+    semantics:
+      meaning: 场地排程工作日基准（site 专用引用）
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+        placeholder: "选择作业日历（仅 site）"
+    value_help:
+      source:
+        type: bo
+        target_bo: calendar
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: calendar
+      multiple: false
+      clearable: true
+
   - id: status
     name: 状态
     type: string
@@ -347,6 +436,10 @@ ui_view_config:
           - fields: [code, name]
           - fields: [location_type, parent_id]
           - fields: [status]
+      - title: 场地信息（site）
+        description: 仅 site 类型使用（其余类型留空）——按类型条件显示待平台机制（W12）
+        columns:
+          - fields: [address_id, calendar_id]
       - title: 其他信息
         columns:
           - fields: [description]
@@ -363,6 +456,8 @@ ui_view_config:
           - name
           - location_type
           - parent_id
+          - address_id
+          - calendar_id
           - status
           - description
 

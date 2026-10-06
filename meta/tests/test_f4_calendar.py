@@ -175,12 +175,13 @@ class TestStructure:
             assert name in idx, f'缺少索引 {name}'
 
     def test_restrict_on_declared(self):
-        """FR-007: 删除保护（locations.calendar_id 待 location 落定后补，见 spec §9.6）"""
+        """FR-007: 删除保护（locations.calendar_id 已接线 2026-10-06, 原待补项见 spec §9.6）"""
         dp = _load_yaml('calendar.yaml')['deletion_policy']
         assert dp['mode'] == 'restrict'
         pairs = {(r['table'], r['foreign_key']) for r in dp['restrict_on']}
         assert ('calendars', 'parent_calendar_id') in pairs
         assert ('calendar_days', 'calendar_id') in pairs
+        assert ('locations', 'calendar_id') in pairs
 
     def test_category_config(self):
         """NFR-004: 权限登记照 region 先例"""
@@ -418,7 +419,7 @@ class TestValueHelp:
 # ────────────────────────────────────────
 class TestFallback:
     def test_calendar_id_absent_from_phase1_schema(self):
-        """FR-009 + TBD-1: location.site.calendar_id 本期不接线（location 在飞）"""
+        """FR-009: calendar 主表不含 calendar_id（site 侧引用落于 location.yaml，不在本表）"""
         cal_cols = set(_fields('calendar.yaml').keys())
         assert 'calendar_id' not in cal_cols, '主表不应有 calendar_id（那是子表字段）'
 
@@ -430,8 +431,9 @@ class TestFallback:
         assert defaults['day_mask_mon'] is True
         assert defaults['day_mask_sun'] is False
 
-    def test_restrict_omits_unbuilt_location_table(self):
-        """TBD-1: locations.calendar_id 列尚不存在，不得写虚假 restrict_on"""
+    def test_restrict_includes_location_wired_column(self):
+        """TBD-1 解除（2026-10-06）: locations.calendar_id 已落列（location.yaml）
+        ⇒ restrict_on 必须含该条目（原"列不存在禁写虚假条目"前提失效）"""
         dp = _load_yaml('calendar.yaml')['deletion_policy']
-        tables = {r['table'] for r in dp['restrict_on']}
-        assert 'locations' not in tables
+        pairs = {(r['table'], r['foreign_key']) for r in dp['restrict_on']}
+        assert ('locations', 'calendar_id') in pairs

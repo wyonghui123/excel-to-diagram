@@ -35,7 +35,7 @@ key_template: "CAL-{SEQ:6}"
 
 deletion_policy:
   # S19: 主数据禁止物理删除; 派生日历 + 例外日 引用时 restrict
-  # 注: locations.calendar_id 引用待 location 任务落定后补（该列当前仅为注释占位，见 spec §9.6）
+  # [接线 2026-10-06] locations.calendar_id 已随 location 落定（原待补项, 见 spec §9.6）⇒ 补删除保护
   mode: restrict
   restrict_on:
     - table: calendars
@@ -44,6 +44,9 @@ deletion_policy:
     - table: calendar_days
       foreign_key: calendar_id
       message: 该日历存在例外日记录，请先删除例外日后再删除
+    - table: locations
+      foreign_key: calendar_id
+      message: 该日历被位置（site）引用，请先解除引用后再删除
   cascade_delete: []
 
 audit:
