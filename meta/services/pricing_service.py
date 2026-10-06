@@ -44,6 +44,29 @@ from meta.core.calc_procedure_executor import (
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------------------------------------------------
+# 结果写回映射（TBD-9 ②：本期不建 pricing_output_map 对象）
+# ----------------------------------------------------------------------
+# 拍板结论：「按 result_semantic 约定写回字段」——`price`→`unit_price`/`amount`、
+# `cost`→`cost_amount`、`emission`→`emission_amount`，余者落 `result_amount`。
+# 理由见 §10 TBD-9：`calc_result` 已泛化挂任意 document 型 BO，但下游单据行
+# 字段名不同即断链；多过程 / 多结果结构时再补对象，本约定即默认映射。
+#
+# 值为 (单价字段 or None, 金额字段)。`None` 表示该语义不产出单价。
+WRITEBACK_MAP: Dict[str, Dict[str, Optional[str]]] = {
+    "price":     {"unit": "unit_price",  "amount": "amount"},
+    "cost":      {"unit": None,           "amount": "cost_amount"},
+    "emission":  {"unit": None,           "amount": "emission_amount"},
+    "tax":       {"unit": None,           "amount": "result_amount"},
+    "hours":     {"unit": "unit_price",   "amount": "result_amount"},
+    "quantity":  {"unit": "unit_price",   "amount": "result_amount"},
+}
+
+# 候选字段名（不同单据可能命名不同，按优先级取第一个存在的）
+_UNIT_CANDIDATES = ("unit_price", "price", "unit_cost")
+_AMOUNT_CANDIDATES = ("amount", "total_amount", "net_amount", "line_amount")
+
+
 def _to_num(v: Any) -> Optional[float]:
     """数值列归一：sqlite 可能读回 str / bytes / None，统一成 float 或 None。"""
     if v is None or v == "":
@@ -365,6 +388,16 @@ class PricingService:
         # lk 为 None 时表示未走查表（无查找序列），此时无候选可回放。
         trace_by_seq = ({t.slot_seq: t for t in lk.traces} if lk else {})
 
+        # 【修 2026-10-06】rate 落**查表命中的费率**，原先硬编码 0。
+        # 写回单据单价时优先取 rate（加权场景下 amount/base 才是均价，
+        # 直接落 rate 会在多候选取优时给出错误单价）。
+        # 取法：首个命中的候选费率；无查表时由 amount/base 派生。
+        hit_rate: Optional[float] = None
+        if lk and lk.candidates:
+            hit_rate = _to_num(lk.candidates[0].value)
+        if hit_rate is None:
+            hit_rate = (net / base) if base not in (None, 0) else None
+
         cur = self.ds.execute(
             """INSERT INTO calc_results
                (code, document_type, document_id, document_line_id, level,
@@ -378,7 +411,7 @@ class PricingService:
                 process["code"], process.get("result_semantic") or "price",
                 "header" if level == "header" else "line",
                 "pricing_quantity", False,
-                0, base, net, net,
+                hit_rate, base, net, net,
                 # 币种取**过程声明的币种**，不取任意价目表的
                 # （原实现取 get_rate_tables()[0]，多表时币种是错的）
                 process.get("currency") or "CNY",
@@ -424,6 +457,113 @@ class PricingService:
                 ],
             )
         return result_id
+
+    # 结果写回（TBD-9 ②）
+    # ------------------------------------------------------------------
+    def write_back(
+        self,
+        document_type: str,
+        document_id: int,
+        document_line_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """把 active 的定价结果**写回业务单据字段**（TBD-9 ②）。
+
+        映射按 `result_semantic` 约定（`WRITEBACK_MAP`）；字段名在候选集中
+        取该单据**实际存在**的第一个，故同一套代码可服务不同命名的单据。
+
+        头级结果（`document_line_id` 为空）只写**金额**字段，不写单价——
+        单价是行级概念，无行可挂。
+
+        Args:
+            document_type / document_id: 宿主单据
+            document_line_id: 行级写回时传入；None = 头级
+
+        Returns:
+            {"written": {字段: 值}, "skipped": [原因], "result_ids": [...]}
+
+        Raises:
+            PricingError: 单据对象未注册 / 找不到可写字段
+        """
+        from meta.core.models import registry
+
+        mo = registry.get(document_type)
+        if not mo:
+            raise PricingError(f"单据对象未注册：{document_type}")
+
+        cols = {f.db_column for f in mo.fields}
+        results = self._query(
+            "SELECT * FROM calc_results WHERE document_type = ?"
+            " AND document_id = ? AND status = 'active'",
+            (document_type, document_id),
+        )
+        if document_line_id is not None:
+            results = [r for r in results
+                       if r.get("document_line_id") == document_line_id]
+        if not results:
+            return {"written": {}, "skipped": ["无 active 定价结果"],
+                    "result_ids": []}
+
+        written: Dict[str, Any] = {}
+        skipped: List[str] = []
+        upd = getattr(self.ds, "update", None)
+
+        for r in results:
+            sem = r.get("result_semantic") or "price"
+            rule = WRITEBACK_MAP.get(sem)
+            if not rule:
+                # 未知语义不猜：落 result_amount，若该单据没有则跳过
+                rule = {"unit": None, "amount": "result_amount"}
+                skipped.append(f"语义 {sem} 无约定映射，按 result_amount 兜底")
+
+            data: Dict[str, Any] = {}
+            amt = _to_num(r.get("amount"))
+            if amt is not None:
+                tgt = rule["amount"]
+                if tgt in cols:
+                    data[tgt] = amt
+                else:
+                    alt = next((c for c in _AMOUNT_CANDIDATES if c in cols),
+                               None)
+                    if alt:
+                        data[alt] = amt
+                    else:
+                        skipped.append(f"单据无金额字段可写（{sem}）")
+
+            # 单价仅行级写；头级无行可挂
+            if document_line_id is not None and rule["unit"]:
+                unit_name = rule["unit"]
+                if unit_name not in cols:
+                    unit_name = next((c for c in _UNIT_CANDIDATES
+                                      if c in cols), None)
+                if unit_name:
+                    u = _to_num(r.get("rate"))
+                    if u is None:
+                        base = _to_num(r.get("base"))
+                        if base not in (None, 0) and amt is not None:
+                            u = amt / base
+                    if u is not None:
+                        data[unit_name] = u
+
+            if not data:
+                skipped.append(f"无可写字段（语义 {sem}）")
+                continue
+
+            if not callable(upd):
+                # 裸 sqlite 连接：直接 UPDATE（列名取自 meta 声明，不接受外部输入）
+                sets = ", ".join(f"{k} = ?" for k in data)
+                self.ds.execute(
+                    f"UPDATE {mo.table_name} SET {sets} WHERE id = ?",
+                    list(data.values()) + [document_id],
+                )
+            else:
+                upd(mo.table_name, document_id, data)
+            written.update(data)
+
+        return {
+            "written": written,
+            "skipped": skipped,
+            "result_ids": [r["id"] for r in results],
+        }
 
     # ------------------------------------------------------------------
     # 回放查询（IF-002 / FR-010）

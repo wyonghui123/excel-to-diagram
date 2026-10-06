@@ -325,6 +325,131 @@ class TestAtomicity:
         assert (n_r, n_d) == (0, 0)
 
 
+class TestWriteBack:
+    """TBD-9 ②：结果按 result_semantic 约定写回单据字段"""
+
+    def _mk_doc(self, ds, oid="so_doc", fields=(("id", "integer"),
+                                                 ("unit_price", "float"),
+                                                 ("amount", "float"))):
+        """造一张最小单据表 + 注册其 meta（供 registry.get 拿字段名）"""
+        from meta.core.models import MetaObject, MetaField, registry
+        from meta.core.models_enums import FieldType
+        cols = ", ".join(f"{n} {t}" for n, t in fields)
+        ds.execute(f"CREATE TABLE IF NOT EXISTS {oid} ({cols})")
+        if registry.get(oid) is None:
+            mo = MetaObject(id=oid, name=oid, table_name=oid)
+            for n, t in fields:
+                mo.fields.append(MetaField(id=n, name=n,
+                                          field_type=FieldType(t),
+                                          db_column=n))
+            registry.register(mo)
+
+    def test_header_writes_amount_only(self, ds):
+        """头级结果只写金额，不写单价（无行可挂）"""
+        _seed(ds)
+        self._mk_doc(ds)
+        ds.execute("INSERT INTO so_doc (id, unit_price, amount)"
+                   " VALUES (1, NULL, 0)")
+        _price(ds, document_type="so_doc", document_id=1)
+        r = PricingService(ds).write_back("so_doc", 1)
+        assert r["written"] == {"amount": 100.0}
+        assert ds.execute("SELECT amount, unit_price FROM so_doc"
+                          " WHERE id=1").fetchone() == (100.0, None)
+
+    def test_line_writes_unit_price_from_rate(self, ds):
+        """行级结果写单价：优先用 calc_result.rate（= 查表命中费率）"""
+        _seed(ds)
+        self._mk_doc(ds)
+        ds.execute("INSERT INTO so_doc (id, unit_price, amount)"
+                   " VALUES (1, NULL, 0)")
+        _price(ds, document_type="so_doc", document_id=1,
+               document_line_id=88, level="line", base=2.0)
+        r = PricingService(ds).write_back("so_doc", 1, document_line_id=88)
+        # 过程是 formula("lookup_amount") -> 净额 = 命中费率 100，与 base 无关；
+        # 单价取 calc_result.rate（= 命中费率），非 amount/base
+        assert r["written"]["unit_price"] == 100.0
+        assert r["written"]["amount"] == 100.0
+
+    def test_rate_recorded_from_hit_candidate(self, ds):
+        """calc_result.rate 落命中的费率（原实现硬编码 0）"""
+        from meta.services.pricing_service import _to_num
+        _seed(ds)
+        self._mk_doc(ds, "so_doc6", fields=(("id", "integer"),
+                                            ("unit_price", "float")))
+        _price(ds, document_type="so_doc6", document_id=1,
+               document_line_id=9, level="line", base=5.0)
+        rate = _to_num(ds.execute("SELECT rate FROM calc_results")
+                       .fetchone()[0])
+        assert rate == 100.0        # priority=1 的候选
+
+    def test_rate_derived_when_no_lookup(self, ds):
+        """无查表时 rate 由 amount/base 派生"""
+        from meta.services.pricing_service import _to_num
+        _seed(ds)
+        self._mk_doc(ds, "so_doc7", fields=(("id", "integer"),
+                                            ("unit_price", "float")))
+        # 用一个直接给 amount 的过程：base=4，公式产出 400 -> rate=100
+        ds.execute("UPDATE calc_procedures SET steps ="
+                   " '[{\"seq\":1,\"element_type\":\"formula\","
+                   "\"params\":{\"expr\":\"base * 100\"}}]' WHERE code='PROC_STD'")
+        _price(ds, document_type="so_doc7", document_id=1,
+               document_line_id=3, level="line", base=4.0,
+               sequence_code=None)
+        rate = _to_num(ds.execute("SELECT rate FROM calc_results")
+                       .fetchone()[0])
+        assert rate == 100.0
+
+    def test_write_back_falls_back_to_candidate_field(self, ds):
+        """单据无 unit_price 字段时落到候选集里的第一个（price）"""
+        _seed(ds)
+        self._mk_doc(ds, "so_doc2",
+                     fields=(("id", "integer"), ("price", "float"),
+                             ("total_amount", "float")))
+        ds.execute("INSERT INTO so_doc2 (id, price, total_amount)"
+                   " VALUES (1, NULL, 0)")
+        _price(ds, document_type="so_doc2", document_id=1)
+        r = PricingService(ds).write_back("so_doc2", 1)
+        assert r["written"] == {"total_amount": 100.0}
+
+    def test_no_writable_field_reports_skip(self, ds):
+        """单据只有 id 时不静默失败，明确报 skipped"""
+        _seed(ds)
+        self._mk_doc(ds, "so_doc3", fields=(("id", "integer"),))
+        ds.execute("INSERT INTO so_doc3 (id) VALUES (1)")
+        _price(ds, document_type="so_doc3", document_id=1)
+        r = PricingService(ds).write_back("so_doc3", 1)
+        assert r["written"] == {}
+        assert r["skipped"] and "金额字段" in r["skipped"][0]
+
+    def test_only_active_result_written(self, ds):
+        """只写 active；重算后旧结果（invalid）不参与写回"""
+        _seed(ds)
+        self._mk_doc(ds, "so_doc4",
+                     fields=(("id", "integer"), ("amount", "float")))
+        ds.execute("INSERT INTO so_doc4 (id, amount) VALUES (1, 0)")
+        svc = PricingService(ds)
+        _price(ds, document_type="so_doc4", document_id=1)
+        # 改费率再算一次，净额变化
+        ds.execute("UPDATE rate_records SET rate = 300.0 WHERE id = 1")
+        _price(ds, document_type="so_doc4", document_id=1)
+        r = svc.write_back("so_doc4", 1)
+        assert r["written"]["amount"] == 300.0
+        assert len(r["result_ids"]) == 1        # 只有一条 active
+
+    def test_unknown_document_type_raises(self, ds):
+        _seed(ds)
+        with pytest.raises(PricingError, match="单据对象未注册"):
+            PricingService(ds).write_back("no_such_bo", 1)
+
+    def test_no_active_result_returns_skip(self, ds):
+        _seed(ds)
+        self._mk_doc(ds, "so_doc5", fields=(("id", "integer"),
+                                            ("amount", "float")))
+        r = PricingService(ds).write_back("so_doc5", 999)
+        assert r["written"] == {}
+        assert r["skipped"] == ["无 active 定价结果"]
+
+
 class TestErrorHandling:
     """IF-001 Error Handling：无可用费率 / 过程未命中 → 明确原因，不静默。"""
 
