@@ -63,7 +63,13 @@ class SchemaGenerator:
             columns.append(col_def)
         
         for relation in meta_object.relations:
-            if relation.relation_type == RelationType.PARENT_CHILD:
+            # 【2026-10-06】原仅 PARENT_CHILD 生成 FK。但 yaml 中以 `type: reference`
+            # 声明的"逻辑引用"（真 FK 语义）此前被静默丢弃 —— 现把 REFERENCE 一并纳入。
+            # 为避免误伤：REFERENCE 必须显式声明 source_field（无 source_field 的旧式
+            # `target_entity/source_key` 关系不生成 FK）。
+            if relation.relation_type in (RelationType.PARENT_CHILD, RelationType.REFERENCE):
+                if relation.relation_type == RelationType.REFERENCE and not relation.source_field:
+                    continue
                 fk_def = self._generate_foreign_key(relation)
                 if fk_def:
                     foreign_keys.append(fk_def)
@@ -188,7 +194,11 @@ class SchemaGenerator:
         if relation.cardinality not in ["N:1", "1:1"]:
             return None
         
-        fk_column = "{0}_id".format(relation.target_object)
+        # 【2026-10-06】优先用显式 source_field 作 FK 列名；未声明时回退
+        #   {target_object}_id（保持既有 PARENT_CHILD 关系行为不变 —— 它们均未声明
+        #   source_field）。此前 source_field 被完全忽略，导致
+        #   "adjustments.original_result_id → calc_result" 只能推出 calc_result_id 的错误列。
+        fk_column = relation.source_field or "{0}_id".format(relation.target_object)
         from meta.core.models import registry
         target_obj = registry.get(relation.target_object)
         ref_table = target_obj.table_name if target_obj and target_obj.table_name else relation.target_object
