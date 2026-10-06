@@ -166,6 +166,33 @@ class TestDefaultExecutor:
         engine.default_by_priority(obj, ctx)
         assert ctx.data["payment_terms"] == 30
 
+    def test_constant_zero_is_valid_value(self):
+        """[TBD-19 修复] 裸 0 是有效常量（原 falsy 判定误报 no_value）"""
+        engine, obj, ctx = self._engine_and_context(
+            [_rule("d1", "payment_terms", "constant", 0)],
+            {"payment_terms": ""})
+        logs = engine.default_by_priority(obj, ctx)
+        assert ctx.data["payment_terms"] == 0
+        assert logs[0].hit is True and logs[0].skip_reason == ""
+
+    def test_constant_false_is_valid_value(self):
+        """[TBD-19 修复] False 是有效常量"""
+        engine, obj, ctx = self._engine_and_context(
+            [_rule("d1", "payment_terms", "constant", False)],
+            {"payment_terms": ""})
+        engine.default_by_priority(obj, ctx)
+        assert ctx.data["payment_terms"] is False
+
+    def test_blank_source_value_still_no_value(self):
+        """空串 / 纯空白仍视为「无值」（no_value 跳过，不写脏值）"""
+        for blank in ("", "   ", None):
+            engine, obj, ctx = self._engine_and_context(
+                [_rule("d1", "payment_terms", "constant", blank)],
+                {"payment_terms": ""})
+            logs = engine.default_by_priority(obj, ctx)
+            assert ctx.data["payment_terms"] == ""
+            assert logs[0].skip_reason == "no_value"
+
     def test_fill_if_empty_skips_non_empty(self):
         engine, obj, ctx = self._engine_and_context(
             [_rule("d1", "payment_terms", "constant", "NT30")],

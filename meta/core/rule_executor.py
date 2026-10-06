@@ -843,7 +843,9 @@ class DefaultExecutor(RuleExecutor):
         source_type = (rule.source_type or "constant").lower()
         raw = rule.source_value
 
-        if not raw:
+        # [TBD-19 修复 2026-10-06] 无值判定只看 None / 纯空白字符串：
+        # 0 / 0.0 / False 是有效常量值（原 `if not raw` 将其误判为「无值」）。
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
             return None
 
         if source_type == "constant":

@@ -402,14 +402,14 @@ rules:
   # 目的：验证「YAML 声明 default 规则 → 加载 → 保存链路执行 → 落库」端到端可用。
   #       此前 default 规则仅有引擎单测 + 手工构造对象的集成测试，零业务 schema 使用。
   # 因子 = item_type；输出 = gross_weight；两条规则演示「优先级 + 首个命中获胜」。
-  # 注意：source_value 常量必须写成引号字符串 —— 裸写 0 会被 RuleExecutor._resolve_source
-  #       的 falsy 判断（if not raw）判为「无值」（已登记 TBD-19，非本规则问题）。
+  # [TBD-19 修复 2026-10-06] 裸写 0 曾被 _resolve_source 的 falsy 判断误判为「无值」；
+  #       平台已修（0 / 0.0 / False 视为有效常量）⇒ 本规则回归自然写法，兼作回归防线。
   - id: default_gross_weight_service
     name: 服务类物料毛重为0
     type: default
     target_fields: [gross_weight]
     source_type: constant
-    source_value: "0"
+    source_value: 0
     condition: "item_type == 'service'"
     apply_mode: fill_if_empty
     priority: 10

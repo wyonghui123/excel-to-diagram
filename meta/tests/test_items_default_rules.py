@@ -14,6 +14,7 @@
 5. 物料类且无净重 → 不写入（no_value，避免写入脏 0）
 
 注意：结构类断言是 TBD-12 同类风险（声明写了但没接线）的回归防线。
+TBD-19（falsy 常量误判）已修复：服务类规则改用裸 0 自然写法，本文件即其回归防线。
 """
 
 import os
@@ -121,7 +122,7 @@ class TestRuleStructure:
         svc = by_id["default_gross_weight_service"]
         net = by_id["default_gross_weight_from_net"]
         assert svc.source_type == "constant"
-        assert svc.source_value == "0"
+        assert svc.source_value == 0   # [TBD-19 修复] 回归自然写法（裸 0），不再用 "0" 引号绕过
         assert svc.condition == "item_type == 'service'"
         assert net.source_type == "field"
         assert net.source_value == "net_weight"

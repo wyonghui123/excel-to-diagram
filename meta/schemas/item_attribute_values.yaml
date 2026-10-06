@@ -10,7 +10,11 @@
 # [未决/不阻塞]
 #  1. 值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定 —— 本期以单列 `value`(TEXT, JSON 承载) 占位。
 #  2. 可空复合唯一 —— SQLite 中 NULL 互不相等，唯一约束对含空因子的行不生效（落地实测点）；
-#     本期以普通索引 + 应用层查重承接，待核对后补部分唯一索引。
+#     本期以普通索引 + 应用层查重承接。
+#     [核对留痕 2026-10-06] schema_generator 已支持部分唯一索引（type: partial + condition + unique
+#     → CREATE UNIQUE INDEX ... WHERE）。拟补法（待 PM 拍板）：L0/L1/L2 各一条，condition 取各自
+#     「上层因子为空」谓词（如 L1: WHERE function_type IS NOT NULL AND org_id IS NULL）⇒ 索引列在
+#     条件下均非空，SQLite 唯一性可生效。L2 键是否含 function_type 需先确认（头注口径不含）。
 
 id: item_attribute_value
 name: 物料分层参数值

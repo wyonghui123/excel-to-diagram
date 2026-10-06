@@ -28,7 +28,7 @@
 #      ⇒ 不得宣称具备「按客户类型分派行为」能力;
 #   ⑥ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 可写入孤儿行 ⇒ TBD-16;
 #   ⑦ 不挂任何权限维度（与 party_internal 的 org 维度绑定先例不同）⇒ 跨法人数据范围无法收窄;
-#   ⑧ 供应商侧（role='vendor'）本期不做 ⇒ TBD-15（PM 2026-10-06 拍板「第二步」）。
+#   ⑧ 供应商侧（role='vendor'）已由同批第二步落地 —— 见 vendor_account.yaml（对称结构）⇒ TBD-15 关闭。
 #
 # ⚠️ 跨法人差异化条款已可表达（spec v1.1 修正）:
 #   party_relation 唯一键含 le_org_id（法人域）⇒ 同一对 party 在不同法人下本就是不同 relation 行
