@@ -95,6 +95,8 @@ class SemanticAnnotation:
     business_key: bool = False
     display_name: bool = False
     pattern: str = ""
+    # [TBD-12 2026-10-06] 允许在 semantics 下声明长度上限（与顶层 max_length 双读兼容）
+    max_length: Optional[int] = None
     examples: List[str] = field(default_factory=list)
     aliases: List[str] = field(default_factory=list)
     category: str = ""

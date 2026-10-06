@@ -1325,6 +1325,30 @@ def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
     if isinstance(semantics_data, dict) and semantics_data.get("virtual", False):
         storage = FieldStorage.VIRTUAL
 
+    # [TBD-12 2026-10-06] 顶层 pattern / max_length 双读兼容
+    # 背景: 消费端 metadata_driven_validator._check_pattern / _check_max_length 早已实现,
+    #   但 MetaField 此前无 pattern 属性、parse_field 也未映射顶层 pattern / max_length
+    #   ⇒ YAML 里写的 pattern / max_length 被静默丢弃(无报错无告警)。
+    # 影响: pattern —— org/items/address/location/item_group/party/region/enum_value 等 9 处顶层
+    #   声明从未生效(如 party.yaml:64), 业务键格式校验形同虚设;
+    #   max_length —— 14 个 schema / 40+ 处, 既不校验长度也不生成列宽。
+    # 策略: 顶层优先, 缺省回退 semantics(两派写法都支持, 零 YAML 迁移)。
+    # 注: key_template 的 pattern(PATY-{SEQ:8}) 走编码模板引擎, 不经过 _check_pattern, 不受影响。
+    _pattern = data.get("pattern")
+    if not _pattern and isinstance(semantics_data, dict):
+        _pattern = semantics_data.get("pattern")
+    _max_length = data.get("max_length")
+    if _max_length is None and isinstance(semantics_data, dict):
+        _max_length = semantics_data.get("max_length")
+    if _max_length is not None:
+        try:
+            _max_length = int(_max_length)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"[TBD-12] field {data.get('id', '?')}: invalid max_length "
+                f"{_max_length!r}, ignored")
+            _max_length = None
+
     return MetaField(
         id=data.get("id", ""),
         name=data.get("name", ""),
@@ -1352,6 +1376,8 @@ def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
         included_from=included_from,
         constraints=data.get("constraints", []),
         value_help=field_value_help,
+        max_length=_max_length,
+        pattern=_pattern or "",
     )
 
 

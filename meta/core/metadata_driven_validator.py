@@ -164,7 +164,12 @@ class MetadataDrivenValidator:
         return []
 
     def _check_pattern(self, field: 'MetaField', value: Any, field_name: str) -> List[ValidationDetail]:
-        pattern = getattr(field.semantics, 'pattern', None)
+        # [TBD-12 2026-10-06] 双读: semantics.pattern 优先, 顶层 pattern 兜底。
+        # 背景: 此前只读 semantics.pattern, 而 MetaField 无顶层 pattern 属性
+        #   ⇒ YAML 顶层写的 pattern(party.yaml:64 / region.yaml:93 / org.yaml:99 等 9 处)
+        #   被静默丢弃, 业务键格式校验形同虚设。
+        # 模式: S1-a 直连(PM 2026-10-06 拍板) —— 不加影子开关, 接线即严格生效。
+        pattern = getattr(field.semantics, 'pattern', None) or getattr(field, 'pattern', None)
         if not pattern:
             return []
         try:

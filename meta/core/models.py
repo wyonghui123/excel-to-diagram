@@ -457,6 +457,12 @@ class MetaField:
     included_from: str = ""
     constraints: List[Dict[str, Any]] = field(default_factory=list)
     value_help: Optional[ValueHelpConfig] = None
+    # [TBD-12 2026-10-06] 字段长度上限（YAML 顶层 max_length 声明此前被静默丢弃 —— parse_field 未映射）
+    # 消费端 metadata_driven_validator._check_max_length 早已实现（含 i18n），本字段补齐数据链。
+    max_length: Optional[int] = None
+    # [TBD-12 2026-10-06] 字段格式正则（YAML 顶层 pattern 声明此前被静默丢弃）
+    # 消费端 _check_pattern 读 semantics.pattern 优先、本字段兜底（两派写法都支持）。
+    pattern: str = ""
 
 
 @dataclass
