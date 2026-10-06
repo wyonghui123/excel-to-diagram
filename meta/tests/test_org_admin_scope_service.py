@@ -15,10 +15,21 @@ import sys
 
 import pytest
 
+# 本文件为服务层单元测试，用内存库 fixture 构造平台内部表
+# （orgs / org_members / permission_sets / org_permission_sets / data_permission_rules），
+# 上述表暂无 Factory；按仓库既有惯例走 raw SQL escape hatch
+# （同 test_task_inbox.py / test_sla_ladder.py 等 30+ 文件），
+# 避免整文件被 conftest 的 raw-SQL 门控拦跳（不设则 23 项全 SKIP）。
+os.environ.setdefault('ALLOW_RAW_SQL', '1')
+
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _PROJECT_ROOT)
 
 from meta.services.org_admin_scope_service import OrgAdminScopeService
+
+# 显式标 unit：文件名含 "service" 会被 conftest 自动判为 integration，
+# 显式标记确保 --unit 模式能收集本文件（否则 23 项被 --unit 排除）。
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
