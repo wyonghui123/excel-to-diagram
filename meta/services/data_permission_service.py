@@ -10,9 +10,12 @@
 
 from typing import List, Dict, Any, Optional, Set, Tuple
 import logging
-
 from meta.services.cascade_service import HierarchyConfigLoader
 from meta.core.models import registry
+# [A1 补漏 2026-10-06] 本模块 _get_resource_detail 内的 8 键表名映射与
+#   permission_dimension_engine.RESOURCE_TABLE_MAP **逐字相同**（二次审查扫描发现，
+#   首次 A1 遗漏）。改为引用权威单一来源，避免两份各自漂移。
+from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -815,17 +818,8 @@ class DataPermissionService:
 
     def _get_resource_detail(self, resource_type: str, resource_id: int) -> Dict:
         """获取资源详情（名称、编码）"""
-        table_map = {
-            'product': 'products',
-            'version': 'versions',
-            'domain': 'domains',
-            'sub_domain': 'sub_domains',
-            'service_module': 'service_modules',
-            'business_object': 'business_objects',
-            'relationship': 'relationships',
-            'annotation': 'annotations',
-        }
-        table_name = table_map.get(resource_type)
+        # [A1 补漏 2026-10-06] 原为逐字重复的 8 键本地表，改用权威 RESOURCE_TABLE_MAP
+        table_name = RESOURCE_TABLE_MAP.get(resource_type)
         if not table_name:
             return {}
 

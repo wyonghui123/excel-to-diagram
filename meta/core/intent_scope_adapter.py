@@ -34,22 +34,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.condition_parser import ConditionExpressionParser
 from meta.core.effective_intent_dao import EffectiveIntentDAO
+from meta.core.hierarchy_loader import get_table_map
 
 # [A1 2026-10-06] bo_id → 物理表名。
 #   本表原先在四个位置各写一份（intent_scope_adapter 的局部 table_map + 类属性
 #   _TABLE_MAP、effective_intent_checker 的 _get_record + _record_matches 局部表），
 #   四份内容逐字相同，属复制粘贴产物。收敛为模块级单一份。
+#   [A2 2026-10-06] 再进一步改为由 hierarchies.yaml 驱动（SSOT），消除最后一层副本。
 #   注意与 permission_dimension_engine.RESOURCE_TABLE_MAP 的区别：那张表额外含
-#   relationship / annotation（审计级联用），本表只覆盖权限链 6 层对象。
+#   relationship / annotation（审计级联用），本表只覆盖权限链 6 层实体对象。
 #   [P2 修复 2026-07-26] 补 service_module 映射，此前缺失。
-TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-}
+TABLE_MAP = get_table_map()
 
 
 class IntentScopeAdapter:

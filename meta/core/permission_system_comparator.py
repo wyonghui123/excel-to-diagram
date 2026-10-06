@@ -25,6 +25,8 @@ import logging
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from meta.core.hierarchy_loader import get_table_map
+
 logger = logging.getLogger(__name__)
 
 # 模块级别导入, 便于测试 patch
@@ -38,14 +40,8 @@ class PermissionSystemComparator:
     """新旧权限系统输出对比"""
 
     # 表名映射 (bo_id → 实际表名)
-    _TABLE_MAP = {
-        'product': 'products',
-        'version': 'versions',
-        'domain': 'domains',
-        'sub_domain': 'sub_domains',
-        'service_module': 'service_modules',
-        'business_object': 'business_objects',
-    }
+    # [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT）。
+    _TABLE_MAP = get_table_map()
 
     def __init__(self, db_path: str):
         self._db_path = db_path

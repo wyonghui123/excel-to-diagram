@@ -21,6 +21,7 @@ from meta.core.models import registry
 from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
+from meta.core.hierarchy_loader import get_fk_chain
 from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, \
     PARENT_FIELD_MAP, CODE_FIELD_MAP, expand_generic_dimension_subtree
 
@@ -963,13 +964,8 @@ class DimensionScopeEngine:
         """
         # FK 链: (parent_dim, child_table, fk_field_in_child_table)
         # 每一步: 从 parent_dim 的 ID 查 child_table 中 fk_field 匹配的记录的 ID
-        FK_CHAIN = [
-            ('product', 'versions', 'product_id'),
-            ('version', 'domains', 'version_id'),
-            ('domain', 'sub_domains', 'domain_id'),
-            ('sub_domain', 'service_modules', 'sub_domain_id'),
-            ('service_module', 'business_objects', 'service_module_id'),
-        ]
+        # [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT），消除硬编码副本。
+        FK_CHAIN = get_fk_chain()
 
         # 找到 parent_dim 在 FK_CHAIN 中的起始位置
         start_idx = None

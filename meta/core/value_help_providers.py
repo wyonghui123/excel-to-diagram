@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from meta.core.models import ValueHelpSource
+from meta.core.hierarchy_loader import get_table_map
 
 
 # [R23 2026-07-24] 详情页字段反推: 一次性返回 path (展示用) 和 ids (回填用)
@@ -34,14 +35,10 @@ def _build_ancestors(dimension_id: str, instance_id: int, data_source) -> Tuple[
         'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
         'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
     }
-    _RESOURCE_TABLE_MAP = {
-        'product': 'products',
-        'version': 'versions',
-        'domain': 'domains',
-        'sub_domain': 'sub_domains',
-        'service_module': 'service_modules',
-        'business_object': 'business_objects',
-    }
+    # [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT）。
+    # _PARENT_INFO_MAP 刻意保持静态：其第 4 位 'name'（父级显示列）无 yaml 依据，
+    # 是 [FIX 2026-06-15] 从 parent_name 纠错而来的经验值，不在 levels[] 声明中。
+    _RESOURCE_TABLE_MAP = get_table_map()
 
     if dimension_id == 'product':
         return '', {}, {}

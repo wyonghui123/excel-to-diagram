@@ -24,6 +24,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from meta.core.level_bundles import expand_level
+from meta.core.hierarchy_loader import get_hierarchy_chain
 
 
 class PermissionDerivationPipeline:
@@ -774,14 +775,8 @@ class PermissionDerivationPipeline:
         # HIERARCHY_CHAIN: product → version → domain → sub_domain
         # 每个 BO 的 (parent_field_on_this_table, table_name)
         # service_module 和 business_object 也在 chain 中 (EXTENDED_CHAIN)
-        HIERARCHY_FK = [
-            ('product', None, 'products'),
-            ('version', 'product_id', 'versions'),
-            ('domain', 'version_id', 'domains'),
-            ('sub_domain', 'domain_id', 'sub_domains'),
-            ('service_module', 'sub_domain_id', 'service_modules'),
-            ('business_object', 'service_module_id', 'business_objects'),
-        ]
+        # [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT），消除硬编码副本。
+        HIERARCHY_FK = get_hierarchy_chain()
 
         result: Dict[str, str] = {}
         for dim_code, dim_vals in dim_configs.items():

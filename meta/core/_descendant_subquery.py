@@ -28,6 +28,8 @@ JOIN 链, 末步的 right 表隐式含一个 <top>_id 字段指向顶层对象.
 """
 from typing import List, Tuple, Optional
 
+from meta.core.hierarchy_loader import get_descendant_paths
+
 # 表别名映射 (显式声明, 不依赖 first-2-chars)
 _TABLE_ALIAS = {
     'business_objects': 'bo',
@@ -47,15 +49,15 @@ _START_TABLE = 'business_objects'
 
 # 注册表: object_type → 中间 JOIN 链
 # 每个 step: (right_table, left_fk) 表示 JOIN right_table ON prev_alias.left_fk = right_table.id
+#
+# [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT）。
+#   刻意只保留原先显式注册的 3 个顶层对象：get_descendant_path() 以「未注册 → None」
+#   表达「该对象类型不参与 descendants 匹配」，而 build_descendant_exists_sql() 遇 None
+#   直接返回 None。若改为注册全部 6 层，product/version/business_object 会从
+#   「返回 None」变成「生成 SQL」，属行为变更，故此处按原键集裁剪。
 _DESCENDANT_PATH_REGISTRY: dict = {
-    'domain': [
-        ('service_modules', 'service_module_id'),
-        ('sub_domains',     'sub_domain_id'),
-    ],
-    'sub_domain': [
-        ('service_modules', 'service_module_id'),
-    ],
-    'service_module': [],
+    k: v for k, v in get_descendant_paths().items()
+    if k in ('domain', 'sub_domain', 'service_module')
 }
 
 

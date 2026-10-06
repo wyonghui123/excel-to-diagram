@@ -21,18 +21,14 @@ v1.4 P8 已删除 5 个 @deprecated 主表 CRUD 方法：
 from typing import List, Dict, Any, Optional
 import logging
 
+from meta.core.hierarchy_loader import get_table_map
+
 logger = logging.getLogger(__name__)
 
 
 # [2026-08-30 权限预览] 数据权限资源类型 → 物理表，用于把 `id IN (...)` 解析成资源名
-PREVIEW_RESOURCE_TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-}
+# [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT），消除硬编码副本。
+PREVIEW_RESOURCE_TABLE_MAP = get_table_map()
 # [2026-08-30 权限预览] 权限级别中文化（read/write/admin/none）
 PREVIEW_LEVEL_ZH = {
     'read': '只读',

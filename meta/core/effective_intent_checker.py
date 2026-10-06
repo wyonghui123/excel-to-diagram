@@ -29,9 +29,14 @@ from typing import Any, Dict, List, Optional
 
 from meta.core.condition_parser import ConditionExpressionParser
 from meta.core.effective_intent_dao import EffectiveIntentDAO
+from meta.core.hierarchy_loader import get_table_map
+
 # [A1 2026-10-06] 表名映射与 IntentScopeAdapter 共用同一份（原两文件各写两份，
-#   四份内容逐字相同）。放在 intent_scope_adapter 是因为它先被本模块镜像实现。
-from meta.core.intent_scope_adapter import TABLE_MAP
+#   四份内容逐字相同）。
+# [A2 2026-10-06 二次审查修正] 原先从 intent_scope_adapter 导入该常量，使本模块
+#   对一个"镜像实现"产生了不必要的依赖（本模块与 IntentScopeAdapter 是并列的同级
+#   实现，不应互为依赖）。现改为双方各自直接从 hierarchy_loader（SSOT）取用。
+TABLE_MAP = get_table_map()
 
 
 class EffectiveIntentChecker:

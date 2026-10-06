@@ -1,6 +1,6 @@
 # 规则模型（属性确定）Spec + RFC
 
-> **版本**：v1.5 | **日期**：2026-10-06 | **状态**：已实施（一期 M1~M4 + 二期 M5/M6/M7 已落地；v1.4 补 §7A 分层归属章节；v1.5 修复 §7A.5 递归操作符测试失配，**未改需求边界、未改生产代码行为**）
+> **版本**：v1.6 | **日期**：2026-10-06 | **状态**：已实施（一期 M1~M4 + 二期 M5/M6/M7 已落地；v1.4 补 §7A 分层归属章节；v1.5 修复 §7A.5 递归操作符测试失配；v1.6 收敛 §7A.4 #4 硬编码并**修正该条口径**（新增 §7A.6），**未改需求边界**）
 > **关联文档**：
 > - [2026-10-02-rule-model-research.md](./2026-10-02-rule-model-research.md)（v1.11，对标研究报告）
 > - [2026-10-02-rule-model-implementation-plan.md](./2026-10-02-rule-model-implementation-plan.md)（实施计划 / Phase / 任务 / 里程碑）
@@ -216,14 +216,14 @@ def build_cross_object_locals(data_source: Any, meta_object: Any, data: Dict[str
 > 而**绑定关系由规则声明自身携带**（`MetricReference.object_id`），引擎只做动态解析。**换成 uom 还是 item，规则自己说了算，引擎不选。**
 > 这正是 foundation 蓝图 §:647 判定 `default_by_priority` 为「平台现成机制、可直接复用」的依据。
 
-### 7A.4 四条待解的耦合（登记，非本 Spec 实施范围；#1 已处置、#2 原判断已推翻）
+### 7A.4 四条待解的耦合（登记，非本 Spec 实施范围；#1 已处置、#2 原判断已推翻、#4 部分处置见 §7A.6）
 
 | # | 问题 | 位置 | 性质 | 处置 |
 |---|---|---|---|---|
 | ~~1~~ | **条件解析内核硬编码 6 张产品版本维度表** | `condition_parser.py:32-39` `_HIERARCHY_FK` + `:42-48` `_DIM_CHILD_TABLES` | 违反领域中立（**与主数据无关**，但换业务域即失效） | ✅ **已处置（2026-10-05）**：`_HIERARCHY_FK` 改为由 `meta/schemas/hierarchies.yaml` `levels[]` 驱动（SSOT，采用「yaml 优先 + 硬编码兜底 + 解析失败告警」范式，与 `permission_dimension_engine._load_resource_table_map` 一致）。实测加载结果与原硬编码**逐项相等**；`_DIM_CHILD_TABLES` **刻意保持静态**（它是「CHILDREN_OF 操作符的 field→表」解析索引而非层级链投影，且 `domain_id`/`product_id` 刻意不写 `parent_col` 以走调用方兜底，机械推导会**改变既有 SQL 语义**），已在代码注释中说明依赖来源 |
 | ~~2~~ | **条件"解析"与"求值"是两条未打通的路径** | 10-03 研究 §:118-121 的判断 | ❌ **原判断有误，已推翻** | ✅ **已核实（2026-10-05）**：深入实现层后确认三条路径是**流水线上的不同段**，各自服务不同消费方，**不是重复实现**：<br>① `ConditionConverter`：自由文本 → `[{field,op,value}]`，消费方 = 迁移脚本（`migrate_rules_to_v2`，一次性把 legacy 规则转 v2）<br>② `ConditionExpressionParser`：结构化 → SQL WHERE，消费方 = `intent_scope_adapter` / `effective_intent_checker`（**需落 SQL** 做数据权限过滤）<br>③ `ConditionEvaluator`：自由文本 → bool（内存求值），消费方 = `action_executor` / `manage_api` / 两个 permission api（**对象级前置条件，无法落 SQL**）<br>②③分叉是**必要**的（一个要 SQL 过滤、一个要内存 bool），**不合并**。真实待解问题仅剩「①的解析结果能否被③复用」——因②③的输入形态本就不同（dict vs 字符串），统一收益低、风险高。**本期不做** |
 | 3 | **表达式函数库无单位换算函数** | `formula_functions.py` 全库 | **能力缺口**（非耦合）：foundation 蓝图已把 `item_uom_conversion` 列入一期（`uom ↔ item_uom_conversion ↔ items` 三表闭环已成立） | 换算**建议归 foundation 取数侧**（保持"引擎不感知业务对象"，与定价引擎 D19「单位换算归事实源取值阶段」同向） |
-| 4 | **产品版本维度表硬编码散落 12+ 处** | `intent_scope_adapter.py:407` 与 `:428`（**同一文件内重复定义两份** `_TABLE_MAP`）· `effective_intent_checker.py:270,301` · `runtime_dimension_resolver.py:196` · `permission_system_comparator.py:45` · `derivation_pipeline.py:781` · `dimension_scope_engine.py:969` · `data_permission_service.py:822,858` · `condition_permission_service.py:33` · `chain_owner_resolver.py:48` · `org_service.py:32` · `management_dimension_engine.py:36` · `permission_dimension_engine.py:49` · `draft_batch_save.py:380` · `association/fallback.py:18` · `_descendant_subquery.py:10,35,53` · `value_help_providers.py:34,41` | 违反领域中立 + 双份声明漂移风险（`hierarchies.yaml` 已是 SSOT） | **登记，不在本期收敛**。理由：涉及权限 / 派生 / 关联 / 值帮助四个子系统，逐模块收敛需各自回归测试，收益（消除硬编码）不足以承担此风险。有真实痛点（如新增层级要改 15 处）时再做，届时应抽一个**共享的层级表名映射读取函数**而非逐处替换 |
+| 4 | ~~**产品版本维度表硬编码散落 12+ 处**~~ **（口径已修正，见 §7A.6）** | 原登记位置见 v1.4；**实际为 5 种值形状、约 50 处**（v1.4 的「12+ 处」与 A2 计划里的「9 处」均因扫描口径只匹配扁平字符串值字典而**系统性低估**） | 违反领域中立 + 双份声明漂移风险（`hierarchies.yaml` 已是 SSOT） | **部分处置（2026-10-06）**：① **已收敛**——A1（`management_dimension_engine`、`intent_scope_adapter`/`effective_intent_checker` 4 份重复）+ A1 补漏（`data_permission_service` 逐字副本）+ A2（新建 `meta/core/hierarchy_loader.py` 作全仓唯一读取入口，9 处改为调用），**每项均以「运行时值 vs 原硬编码逐项相等」验证**；② **仍未收敛**——4 层子集边界 / 非层级键混入 / 显示列 tuple4 / 业务实体表名 / `data_permission_service:203,854` 可推导未做，**理由逐条见 §7A.6**。<br>完整口径修正表（5 种形状 + 已收敛三批 + 未收敛五类 + `_chain_cache` 无锁与缺单测两项基础设施遗留）见 **§7A.6** |
 
 ### 7A.5 递归操作符测试失配（已修复，v1.5）
 
@@ -239,6 +239,43 @@ def build_cross_object_locals(data_source: Any, meta_object: Any, data: Dict[str
 > **遗留疑点（不在本期范围）**：`DESCENDANTS_OF` 生成的 SQL 外层为 `field IN (...)`，
 > 当 `field='domain_id'` 时语义是把「domain 的 id」当作「sub_domain 的 id」比对。
 > 需确认是操作符语义本身如此，还是应由调用方传更深的 `field`（如 `service_module_id`）。
+
+### 7A.6 硬编码散落：**修正后的口径**与收敛明细（二次审查，2026-10-06）
+
+> **⚠️ 口径修正**：v1.4 §7A.4 #4 登记的「散落 12+ 处」**低估了实际面**。当时（以及 A2 计划里的"9 处"）
+> 的扫描口径只匹配**扁平 `{对象: 表名}` 字符串值字典**，系统性地遗漏了另外三种值形状。
+> 二次审查改为「**以层级对象为键的任意 dict 字面量**」重扫，实际为 **5 种形状、约 50 处**。
+
+| 值形状 | 含义 | 典型位置 | 能否 SSOT 化 |
+|---|---|---|---|
+| `flat` | `{对象: 表名}` | `permission_dimension_engine:45` · `org_service:576,643` · `audit_api:857` | 仅当键集全在层级链内 |
+| `tuple2` | `{子: (父对象, 外键)}` | `data_permission_service:204` · `owner_chain_interceptor:45` · `write_scope_interceptor:74` | 可由 `get_hierarchy_chain()` 推导 |
+| `tuple3` | `{对象: (表, 外键, 父对象)}` | `data_permission_service:835` | 可由 `get_hierarchy_chain()` 推导 |
+| `tuple4` | `{对象: (表, 外键, 父, 显示列)}` | `value_help_providers:31` · `management_dimension_api:28` · `permission_dimension_api:34` | **不可**（第 4 位显示列无 yaml 依据） |
+| `dict` | `{对象: {多项配置}}` | `bo_yaml_cache:30` · `audit_api:44` | 需逐项判断 |
+
+**已收敛（2026-10-06；每项均以「运行时值 vs 原硬编码逐项相等」验证，非仅凭测试通过）**：
+
+| 批次 | 位置 | 处理 |
+|---|---|---|
+| A1 | `management_dimension_engine:36` | 与权威 8 键**逐字相同** → 改为从 `permission_dimension_engine` 重导出 |
+| A1 | `intent_scope_adapter:407,428`（**同一文件内两份**）· `effective_intent_checker:270,301` | 4 份 6 键表 → 收敛为 1 份 |
+| A1 补漏 | `data_permission_service:818` | 与权威 8 键**逐字相同**（首次 A1 遗漏，二次审查扫描发现）→ 改为引用 `RESOURCE_TABLE_MAP` |
+| A2 | 新建 `meta/core/hierarchy_loader.py`（`get_hierarchy_chain` / `get_table_map` / `get_fk_chain` / `get_descendant_paths`），`condition_parser` · `intent_scope_adapter` · `effective_intent_checker` · `org_service` · `value_help_providers` · `permission_system_comparator` · `derivation_pipeline` · `dimension_scope_engine` · `_descendant_subquery` 共 9 处改为调用 | 全仓单一读取入口；`condition_parser` 原私有加载器删除改复用 |
+
+**仍未收敛（登记，不在本期）**：
+
+| 类别 | 位置 | 不做的理由 |
+|---|---|---|
+| 4 层子集边界 | `runtime_dimension_resolver:192` · `chain_owner_resolver:44` · `management_dimension_engine:46,63,72` · `permission_dimension_engine:61` | 4 层 vs 6 层是**权限语义决策**，须人工确认其数据源应为 `dimensions[]` 而非 `levels[]` |
+| 非层级键混入 | `condition_permission_service:36,49,59,1211` · `org_service:576` · `draft_batch_save:377` · `association/fallback:18` | 含 `org`/`user`/`relationship` 等**不在 hierarchies.yaml 的实体**。其中 `draft_batch_save` 硬编码 `'relationship'` **单数**（权威为复数 `relationships`），替换即改行为；`association/fallback` 含**跨层反规范化边**（`versions`/`domains` → `business_objects`，而该表无 `version_id`/`domain_id` 列），机械收敛会静默缩小审计级联范围 |
+| 显示列 / 元组尾部 | `value_help_providers:31,41` · `management_dimension_api:28` · `permission_dimension_api:34` | 第 4 位显示列无 yaml 依据，是纠错经验值 |
+| 业务实体表名 | `relationship` · `annotation` · `orgs` · `users` | **不在 hierarchies.yaml**，需各自 schema 文件作 SSOT，属另一议题（不可塞进层级读取器） |
+| 可推导但未做 | `data_permission_service:204`（tuple2）· `:835`（tuple3） | 语义确可由 `get_hierarchy_chain()` 推导，但超出 A2 批准范围，登记待办 |
+
+> **遗留（基础设施）**：`hierarchy_loader._chain_cache` 为**无锁**模块级缓存。当前只在导入期首次求值，
+> 多线程下最坏情况是重复读同一文件（幂等，不产生错误值），故不引入锁；若将来支持运行期热重载，
+> 需补锁与失效机制。另：该模块**尚无专属单测**，等价性目前由 A2 的逐项比对脚本 + 下游套件回归间接覆盖。
 
 ---
 
@@ -346,3 +383,4 @@ def build_cross_object_locals(data_source: Any, meta_object: Any, data: Dict[str
 | 2026-10-03 | v1.3 | **二期·汇总补强(M6) + 拆分/分摊(M7) 落地回填**：§8 二期行新增 M6（按父分组取值聚合）/M7（1→N 守恒 + 2 个 BO Action）已落地说明，并从「仍在队列」移除这两项；FR-012 追加实施回填 —— 拆分/分摊**仍以独立服务 + BO Action 交付、未引入 `RuleType.ALLOCATION`、边界不变**，反向汇总的「按父分组取值聚合」M6 已落地、仍缺「子行增删改 → 父行重算」。实现细节见实施计划 M6 / M7 |
 | 2026-10-05 | v1.4 | **补 §7A「分层归属」整节（纯文档，未改需求边界、未改代码行为）**。起因：与 foundation 蓝图（已把规则模型归入「**机制**」）及 10-03 消费与分层研究（已给「**三段式**」框架）**口径不对齐**——本 Spec 与实施计划通篇未对"规则模型属于哪一层 / 是否依赖主数据"作任何声明，属**文档缺口而非设计缺陷**。§7A 内容：① 结论一句话（机制层非对象层）+ 正确问法；② 三段落点表（BO 声明层 / EO 实例层 / 基础设施层）及其代码落点；③ **「是否依赖主数据」的代码级结论：真实依赖 0 处**——8 个文件逐处人工判定，全部命中为假依赖（内置容器 `.items()` / 形参名 / E2E 注释 / `source_item` 命名巧合），取数通道仅 3 条且全领域中立，决定性证据是 `build_cross_object_locals` 签名无任何 BO 类型参数；同时澄清 `registry.get(ref.object_id)` 是**依赖反转**（绑定关系由规则声明携带）而非耦合，这正是蓝图 §:647 判定 `default_by_priority` 可直接复用的依据；④ §7A.4 登记**四条待解耦合**（#1 已处置、#2 原判断已推翻、#3 能力缺口、#4 散落 12+ 处）；⑤ §7A.5 登记**已知既存缺陷**。header 关联文档同步补 10-03 与 foundation 蓝图两份。<br>**配套代码与文档改动（同批）**：① `condition_parser._HIERARCHY_FK` 由硬编码 6 张维度表改为 `hierarchies.yaml levels[]` 驱动（SSOT，「yaml 优先 + 硬编码兜底 + 解析失败告警」范式），**实测与原硬编码逐项相等**，9 组用例经 git stash 基线 diff 验证输出**逐字节一致**；`_DIM_CHILD_TABLES` 刻意保持静态并加注释（机械推导会改变既有 SQL 语义）；② `meta/schemas/README.md` 补「两类性质完全不同的对象」判据 + 业务对象四分区（锚层 / 支持对象含 uom 换算闭环 / 事务 / 平台元数据自身）+ 「规则模型的归属」小节 + S19 主数据删除约束提示。<br>**§7A.4 #2 纠正**：10-03 研究 §:118-121 判断「条件解析与求值是两条未打通的路径」，**深入实现层后推翻**——三者实为流水线不同段（Converter 文本→结构化供迁移脚本 / Parser 结构化→SQL 供权限过滤 / Evaluator 文本→bool 供对象级前置条件），②③分叉是**必要的**（一个要 SQL、一个要内存 bool），不合并。 |
 | 2026-10-06 | v1.5 | **修复 §7A.5 递归操作符测试失配（7 failed / 3 passed → 10 passed，未改生产代码）**。经 git stash 基线对照确认 7 个失败**非 v1.4 改动引入**，而是测试与实现的 `value` 契约失配：测试传裸 int（`'value': 101`），实现要求 dict（`parent_field`/`parent_value`/`parent_dim`/`child_dim`/`child_id`/`target_dim`），`int.get()` 触发 `AttributeError`。判定**改测试而非改实现**，依据为权威设计 Spec 09 §3.2 明确 `value` 为 dict、实现与之一致，且全仓库检索这些键**仅命中实现自身**、YAML 中仅见于注释 → 该路径无生产调用方（死代码），契约对齐无存量影响。同时消除 3 个「期望异常」用例的**假阳性**（断言原为 `pytest.raises((ValueError, Exception))`，`AttributeError` 被父类 `Exception` 兜住），收紧为 `pytest.raises(ValueError, match=...)` 并逐条匹配错误消息。§7A.5 相应改写为「已修复」并保留一条**遗留疑点**：`DESCENDANTS_OF` 外层 `field IN (...)` 在 `field='domain_id'` 时的语义是否应由调用方传更深的 `field`，待后续真正接线时确认。 |
+| 2026-10-06 | v1.6 | **§7A.4 #4 硬编码部分收敛 + 该条口径修正（新增 §7A.6），未改需求边界**。<br>**口径修正（关键）**：v1.4 登记的「散落 12+ 处」（及 A2 计划里的「9 处」）**系统性低估**——原扫描口径只匹配**扁平 `{对象: 表名}` 字符串值字典**。二次审查改为「**以层级对象为键的任意 dict 字面量**」重扫，实际为 **5 种值形状、约 50 处**：`flat` / `tuple2 {子:(父,外键)}` / `tuple3 {对象:(表,外键,父)}` / `tuple4 {对象:(表,外键,父,显示列)}` / `dict {对象:{多项配置}}`。<br>**已收敛三批（均以「运行时值 vs 原硬编码逐项相等」验证，非仅凭测试通过）**：① **A1** —— `management_dimension_engine` 8 键副本改为从权威 `permission_dimension_engine.RESOURCE_TABLE_MAP` 重导出（实测 `mgmt is perm == True`）；`intent_scope_adapter` 同文件内两份 + `effective_intent_checker` 两份共 **4 份 6 键表**收敛为 1 份。② **A1 补漏（二次审查扫描发现，首次 A1 遗漏）**—— `data_permission_service._get_resource_detail` 内 8 键映射与权威**逐字相同**，改为引用 `RESOURCE_TABLE_MAP`。③ **A2** —— 新建 **`meta/core/hierarchy_loader.py`** 作全仓唯一维度链读取入口（4 接口：`get_hierarchy_chain` / `get_table_map` / `get_fk_chain` / `get_descendant_paths`；`levels[]` 经 `table_name` 非空 + `kind != 'association'` 过滤，含硬编码兜底与解析失败告警，依赖方向合规不触 `services/*`），`condition_parser`（原私有 `_load_hierarchy_chain` 删除）· `intent_scope_adapter` · `effective_intent_checker` · `org_service` · `value_help_providers` · `permission_system_comparator` · `derivation_pipeline` · `dimension_scope_engine` · `_descendant_subquery` 共 **9 处**改为调用。<br>**二次审查另修正 2 处**：① `effective_intent_checker` 原从 `intent_scope_adapter` 导入 `TABLE_MAP`（A1 引入的**无谓耦合**，两模块是并列的同级镜像实现），改为双方各自直接从 `hierarchy_loader` 取用；② `_descendant_subquery` 的 `_DESCENDANT_PATH_REGISTRY` 由 `get_descendant_paths()` 派生但**按原 3 键裁剪**（`domain`/`sub_domain`/`service_module`）——该模块以「未注册 → None」表达「不参与匹配」，全量注册会**改变行为**。<br>**仍未收敛（登记不做，理由逐条见 §7A.6）**：4 层子集边界（`dimensions[]` vs `levels[]` 是权限语义决策）/ 非层级键混入（`org`/`user`/`relationship`；`draft_batch_save` 硬编码单数 `'relationship'`、`association/fallback` 含跨层反规范化边）/ 显示列 tuple4（第 4 位无 yaml 依据）/ 业务实体表名（`relationship`·`annotation`·`orgs`·`users` 不在 hierarchies.yaml）/ `data_permission_service:203,854` 语义可推导但超出 A2 批准范围。<br>**基础设施遗留（登记）**：`hierarchy_loader._chain_cache` 为**无锁**模块级缓存（仅在导入期首次求值，多线程最坏为重复读同一文件，幂等故不加锁）；该模块**尚无专属单测**，等价性由逐项比对脚本 + 下游套件回归间接覆盖。<br>**回归**：76 个相关套件全绿（含 `test_intent_scope_adapter` 14 passed / `test_phase2_integration` 11 passed / `test_recursive_operators` 10 passed / `test_chain_owner_resolver` 30 passed）。 |
