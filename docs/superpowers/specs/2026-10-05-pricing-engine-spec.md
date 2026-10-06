@@ -471,7 +471,7 @@
   | 优先级 `precedence` | priority 1/2/3 | 命中 priority 1 → 100 |
   | 取优 `best`（最低净价） | 显式开启 + 度量 | 命中 100 |
   | 互斥 `exclusive` | 同组 | 只保留获胜者 |
-  | **权重分配 `weighted`** | 权重 0.5 / 0.3 / 0.2 | **100×.5 + 200×.3 + 300×.2 = 140** |
+  | **权重分配 `weighted`** | 权重 0.5 / 0.3 / 0.2 | **100×.5 + 200×.3 + 300×.2 = 170**<br>**（算术修正 2026-10-06：原文写"= 140"是错的，50+60+60=170）** |
   | **权重和不归一** | 权重 0.5 / 0.3 | **拒绝计算并报错**（不静默缩放） |
 - **Rollback**：清空权重字段回到默认范式。
 
@@ -897,6 +897,20 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > **T1 内核（查找序列引擎 / 计算过程执行器 / 多层累加 / 消解范式）亦零主数据依赖**——
 > 均为纯函数，**用内存 dict 夹具单测，不碰任何 BO 表**（IF-001 入口签名即"一行 + 表头上下文"）。
 > **仅 FR-011 落库挂载（`document_line_id` 指向真实行）受阻于 `order_line`**，可拆两步：先头级（`document_line_id` 可空），待行对象补齐后仅填值。
+
+##### 8.2.0.1 T0/T2 实施进度（2026-10-06 回填）
+
+| 批次 | 状态 | 落点 |
+|---|---|---|
+| **T0-1 ~ T0-7** | ✅ **已交付** | `meta/schemas/` 七张表（`factor_catalog` / `key_schema` / `lookup_sequence` / `rate_type` / `exclusion_group` / `rate_table` / `rate_record`）；`registry.reload` 注册 + `schema_generator` 实测建表 7/7 通过，C-T0 约束 16 项逐项相符 |
+| **T2-1 查找序列引擎** | ✅ **已交付** | `meta/core/lookup_resolver.py` + `meta/tests/test_lookup_resolver.py`（23 用例）。实现 FR-004（有序槽位 / `hit_policy` 下沉 / `(priority,id)` 确定性 tie-break / 回放骨架 `LookupTrace`）与 FR-008（四范式含 `weighted` Σ=1 校验）。**纯函数，零 BO 依赖** |
+| **T2-2 计算过程执行器** | ✅ **已交付** | `meta/core/calc_procedure_executor.py` + `meta/tests/test_calc_procedure_executor.py`（34 用例）。实现 FR-005（**算子注册表**落地 C5：新增算子 = 注册一个函数，不改引擎）/ FR-006（基四字段 + `rolling` 与 `base_step` **互斥校验**）/ FR-007（步骤间 additive + 逐层小计 + `rolling` 覆盖）/ NFR-002（**双防线**：字符白名单 + AST 白名单，**禁 `eval`**）。11 个算子已注册 |
+
+> **T2-1 / T2-2 实施中纠正的四处问题**：
+> ① **TR-006 算术错误**：原文"100×.5 + 200×.3 + 300×.2 = 140"实为 **170**（50+60+60），已修正；
+> ② `keys{}` 为 json **不可索引**，取价须先按 `rate_table_id + key_schema_id` 收窄（`idx_rate_record_lookup`）再在结果集内比对——这是 C-T0-12 结构冻结的既定代价，已写入 T0-7 遗留说明；
+> ③ **步骤级控制项与算子参数须分离**：`rolling` / `base_step` / `subtotal_key` / `condition` 是"步骤怎么参与累加"的控制项，**不是算子业务参数**。原实现混在 `params` 内导致互斥校验可被绕过，已改为从步骤顶层读取（顶层优先，兼容 params）；
+> ④ **只读算子须在累加之后执行**：`round` / `aggregate` / `derived` / `track` 返回 `0.0` 不参与累加，但需读到"含本步"的 `running_net_amount`，故在累加后**补跑一次**（原实现先执行后累加，导致 `aggregate(source="running_net_amount")` 取到本步之前的净额）。
 
 | 里程碑 | 范围 | 关键交付 | DoD |
 |---|---|---|---|
