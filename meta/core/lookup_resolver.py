@@ -90,6 +90,11 @@ class Candidate:
     scale: List[Dict[str, Any]] = field(default_factory=list)
     scale_semantic: Optional[str] = None
     scale_divisor: Optional[str] = None
+    # 【补 2026-10-07 FR-009 收口】定价数量（如"每 10 个"填 10）。空/非正 = 1。
+    # `rate` 是「每 rate_qty 个」的单价，喂给计算过程前须折算成**每 1 个**的单价
+    # （见 `per_unit_rate`）。此前本字段全仓零消费 → "每 10 个收 100"被当成
+    # "每个收 100" 直接 × base，**静默 10 倍超收**（实测 10000 vs 期望 1000）。
+    rate_qty: float = 1.0
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Candidate":
@@ -161,7 +166,23 @@ class Candidate:
             scale=scale,
             scale_semantic=(d.get("scale_semantic") or None),
             scale_divisor=(d.get("scale_divisor") or None),
+            rate_qty=_num("rate_qty", 1.0),
         )
+
+    def per_unit_rate(self, rate: Optional[float] = None) -> float:
+        """把「每 `rate_qty` 个」的单价折算成「每 1 个」的单价。
+
+        【FR-009 · 2026-10-07 补】`rate_record.rate_qty` 声明「如"每 10 个"填 10」，
+        而引擎契约是「金额 = **每单位**费率 × 数量」，故折算必须发生在喂给
+        `rate_<id>` / `LookupResult.rates` 之前。
+
+        【为何 `rate_qty <= 0` 兜底为 1 而非报错】存量与配置语义都是「空 = 1」
+        （rate_record.yaml 声明）；负数/0 属配置矛盾，但本期**不引入新的拒绝
+        路径**——若在此抛错，等于让存量脏数据把整张价目表的取价全阻断，
+        比"按 1 处理"风险更大。已登记为待确认项。
+        """
+        r = self.value if rate is None else rate
+        return float(r or 0.0) / (self.rate_qty if self.rate_qty > 0 else 1.0)
 
 
 @dataclass
@@ -279,6 +300,12 @@ def resolve_scale(cand: Candidate, qty: Optional[float]) -> Dict[str, Any]:
     与 `calc_procedure_executor._op_tier` 的两种语义**同义**（后者直接返金额），
     两者一致性由 `test_lookup_resolver.py::TestScaleParity` 逐例守护。
 
+    【FR-009 · 2026-10-07 补】返回的 `rate` 一律经 `per_unit_rate()` 折算成
+    **每 1 个**的单价。本函数是所有费率出口的**唯一收口**（不分档 / total /
+    incremental 三条返回路径、以及 `LookupResult.rates` 与 `lookup_amount`
+    累加都经此），故折算只做一次——服务层 `initial_state["rate_<id>"]` 直接
+    取 `lk.rates` 即已是每单位费率，**不得再除第二次**。
+
     【边界】定档发生在**记录选定之后**，故消解范式（FR-008）仍按 `value` 比较——
     与 SAP「先存取序列选中条件记录、再落 Staffel 档位」一致。
 
@@ -289,7 +316,8 @@ def resolve_scale(cand: Candidate, qty: Optional[float]) -> Dict[str, Any]:
     semantic = cand.scale_semantic
     if not tiers or not semantic:
         # 空 scale = 不分档；空 scale_semantic = 阶梯不启用（rate_record.yaml 声明）
-        return {"semantic": None, "qty": qty, "rate": float(cand.value or 0.0),
+        return {"semantic": None, "qty": qty,
+                "rate": cand.per_unit_rate(),
                 "tier": None}
     if semantic not in SCALE_SEMANTICS:
         raise ResolutionError(
@@ -318,13 +346,17 @@ def resolve_scale(cand: Candidate, qty: Optional[float]) -> Dict[str, Any]:
             lo, hi = _tier_bounds(t)
             seg = max(0.0, min(q, hi) - lo)
             total += seg * _num_or(t.get("rate"), 0.0)
-        return {"semantic": semantic, "qty": q, "rate": total / q, "tier": None}
+        return {"semantic": semantic, "qty": q,
+                "rate": cand.per_unit_rate(total / q), "tier": None}
 
     # SCALE_TOTAL：按声明顺序取首个覆盖 q 的档位
     for t in tiers:
         lo, hi = _tier_bounds(t)
         if lo <= q < hi:
-            rate = _num_or(t.get("rate"), 0.0)
+            # 档位 rate 同样是「每 rate_qty 个」口径，须一并折算；
+            # `tier.rate` 记**折算后**的值，使「费率 × 数量 = 金额」在留痕里
+            # 也自洽（factor_snapshot 回放 FR-010 时直接用它复算）。
+            rate = cand.per_unit_rate(_num_or(t.get("rate"), 0.0))
             return {
                 "semantic": semantic, "qty": q, "rate": rate,
                 "tier": {"from": lo,

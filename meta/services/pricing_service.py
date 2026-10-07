@@ -352,8 +352,13 @@ class PricingService:
                 "lookup_hit_ids": list(lk.hit_ids),
             }
             for c in lk.candidates:
-                # 【FR-009】分档记录的 `c.value` 是无意义占位，须用**定档后费率**
-                initial_state[f"rate_{c.id}"] = lk.rates.get(c.id, c.value)
+                # 【FR-009】分档记录的 `c.value` 是无意义占位，须用**定档后费率**。
+                # 【FR-009 · 2026-10-07 补】`lk.rates` 的费率已由
+                # `resolve_scale` 折算成**每 1 个**的单价（含 `rate_qty`
+                # 折算），此处**不得再除第二次**；fallback 的 `c.value` 是
+                # 未折算的毛额，故走 `per_unit_rate()` 补齐——两条路径口径一致。
+                initial_state[f"rate_{c.id}"] = lk.rates.get(
+                    c.id, c.per_unit_rate())
 
         # ---- 阶段二：算过程（FR-005/006/007 / T2-2）----
         calc = execute(steps=steps, base=base, initial_state=initial_state)
