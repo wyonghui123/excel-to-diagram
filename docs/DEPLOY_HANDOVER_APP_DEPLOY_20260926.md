@@ -379,7 +379,7 @@ python tools/deploy_upload.py --target staging upload meta/core/app_registry.py 
 
 ### 7.7 其他遗留（非本次范围）
 
-- 未跟踪文件 `tools/_invariant_i1.py`、`tools/_invariant_introspect.py`（前序窗口遗留，待 PM 定夺去留）
+- ~~未跟踪文件 `tools/_invariant_i1.py`、`tools/_invariant_introspect.py`（前序窗口遗留，待 PM 定夺去留）~~ → **结论已更正（2026-10-07，实测）**：三者（含 `tools/_invariant_closure.py`）是 `tools/prod_invariant_check.py` 的**运行依赖**——该工具把它们上传到远端 `/tmp/` 后执行（引用点：`prod_invariant_check.py` L134/136/140、L314/316/320/409、L518/521/525）。故**不是"待定夺去留"，而是漏提交**，应随该工具一并入库。
 - roadmap backlog：`permission_set_service.py` 同款破损写入点；"取消勾选菜单不回收已同步功能权限行"；"矩阵保存后元数据不自动重拉（需 F5）"；ROOT_ONLY `/app/*` 死路由
 
 ### 7.8 文档 bug 清理（低风险）
