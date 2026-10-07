@@ -135,7 +135,23 @@ indexes:
   - fields: [uom_id]
     name: idx_item_uom_conv_uom
 
-relations: []
+relations:
+  - id: item_uom_conversion_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 所属物料引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: item_uom_conversion_to_uom
+    name: 换算单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 换算目标单位引用（[FK 2026-10-07] 由展示语义升级为真外键）
 
 ui_view_config:
   skip_auto_menu: true

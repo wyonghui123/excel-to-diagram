@@ -180,7 +180,15 @@ indexes:
   - fields: [parent_id]
     name: idx_item_group_parent
 
-relations: []
+relations:
+  - id: item_group_to_parent
+    name: 上级物料组
+    type: reference
+    target: item_group
+    source_field: parent_id
+    target_field: id
+    cardinality: N:1
+    description: 上级物料组引用（自引用层级；[FK 2026-10-07] 由展示语义升级为真外键；NULL=根节点）
 
 ui_view_config:
   showChangeHistory: true

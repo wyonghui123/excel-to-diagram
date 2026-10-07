@@ -218,7 +218,15 @@ indexes:
   - fields: [org_id]
     name: idx_item_attr_org
 
-relations: []
+relations:
+  - id: item_attribute_value_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 所属物料引用（[FK 2026-10-07] 由展示语义升级为真外键；org_id 按平台惯例（组织维弱引用）不建 FK）
 
 ui_view_config:
   skip_auto_menu: true

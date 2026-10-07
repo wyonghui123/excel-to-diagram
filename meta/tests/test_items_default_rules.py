@@ -26,6 +26,7 @@ from meta.core.schema_generator import sync_schema_from_meta
 from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.table_name_validator import register_table_name
 from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
+from meta.tests.factories._raw_sql_bridge import insert
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SCHEMA_DIR = os.path.join(os.path.dirname(_HERE), "schemas")
@@ -75,6 +76,15 @@ def _prepare(tmp_path):
     register_table_name(obj.table_name)
     ds.execute(AUDIT_DDL)
     sync_schema_from_meta(ds, [obj])
+    # [FK 2026-10-07] items 新增外键 item_group_id→item_groups.id / base_uom→uoms.id。
+    # 本用例库仅同步 items 单表，须补最小父表 + 父行（id=1，对应 _BASE），
+    # 否则插入被 FK 校验拦下（父表缺失：no such table: main.uoms）。
+    ds.execute(
+        "CREATE TABLE IF NOT EXISTS uoms (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    ds.execute(
+        "CREATE TABLE IF NOT EXISTS item_groups (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    insert(ds, "uoms", id=1)
+    insert(ds, "item_groups", id=1)
     engine = RuleEngine(ds)
     executor = ActionExecutor(ds, engine, audit_enabled=True)
     executor.set_audit_user(user_id=1, user_name="测试用户", ip_address="127.0.0.1")

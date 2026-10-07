@@ -166,7 +166,15 @@ indexes:
   - fields: [part_no]
     name: idx_item_xref_part_no
 
-relations: []
+relations:
+  - id: item_xref_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 所属物料引用（[FK 2026-10-07] 由展示语义升级为真外键；partner_id → party_archive 为视图目标，SQLite 不支持视图外键，维持应用层控制）
 
 ui_view_config:
   skip_auto_menu: true

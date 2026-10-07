@@ -439,7 +439,23 @@ indexes:
   - fields: [barcode]
     name: idx_item_barcode
 
-relations: []
+relations:
+  - id: item_to_item_group
+    name: 物料组
+    type: reference
+    target: item_group
+    source_field: item_group_id
+    target_field: id
+    cardinality: N:1
+    description: 物料所属物料组引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: item_to_uom
+    name: 基本单位
+    type: reference
+    target: uom
+    source_field: base_uom
+    target_field: id
+    cardinality: N:1
+    description: 物料基本计量单位引用（[FK 2026-10-07] 由展示语义升级为真外键）
 
 ui_view_config:
   showChangeHistory: true
