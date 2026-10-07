@@ -511,6 +511,11 @@ class ManageService:
         #         导致级联删除被错误拒绝.
         # 修复: 如果所有 child 关联都是 cascade_delete=true, 跳过 cascade_service.before_delete 检查,
         #         让 cascade_interceptor 处理实际的级联删除 (它会读取 associations[] 配置).
+        # 【补 2026-10-07】`cascade_result` 只在 else 分支被赋值，但下方（方法归位后
+        # 变得可达的）`if cascade_result and ...` 会读取它 —— 当
+        # `_all_children_cascade_delete()` 为 True（无 composition children 时为真）
+        # 时抛 UnboundLocalError。原先因 delete() 被截断而从未暴露。
+        cascade_result = None
         if self._all_children_cascade_delete(meta_obj):
             logger.debug(
                 f'[BUG-V013] skip cascade_service.before_delete for {request.object_type}({request.id}) '
@@ -532,36 +537,23 @@ class ManageService:
         skip_rules = request.force
         result = self.executor.execute(meta_obj, "crud_delete", params, skip_rules=skip_rules)
 
-    def _all_children_cascade_delete(self, meta_obj) -> bool:
-        """[FIX BUG-V011 2026-06-26] 检查 meta_obj 的所有 child 关联是否都是 cascade_delete=true.
-
-        读 schema (yaml) 的 associations, 检查每条关联的 cascade_delete.
-        支持 dict 和 AssociationDefinition 两种格式.
-        """
-        try:
-            assocs = getattr(meta_obj, 'associations', None) or []
-            if isinstance(assocs, dict):
-                assocs = list(assocs.values())
-
-            def _get_assoc_field(a, field, default=None):
-                if isinstance(a, dict):
-                    return a.get(field, default)
-                return getattr(a, field, default)
-
-            composition_children = [
-                a for a in assocs
-                if _get_assoc_field(a, 'type') == 'composition'
-            ]
-            if not composition_children:
-                return True
-            return all(
-                _get_assoc_field(a, 'cascade_delete', False)
-                for a in composition_children
-            )
-        except Exception as e:
-            logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
-            return False
-
+        # 【补 2026-10-07 · 修复 delete() 被意外截断】
+        # 取证：`git log -S "_all_children_cascade_delete" -- meta/services/manage_service.py`
+        # 指向提交 86180819，其 diff 为
+        #   `result = self.executor.execute(meta_obj, "crud_delete", ...)`
+        #   `+    def _all_children_cascade_delete(self, meta_obj) -> bool:`
+        # —— 即该新方法被**插入到了 delete() 方法体中间**。后果：其后原有的
+        # 「级联审计日志 + delete 事件发布 + return result」三段，因方法定义
+        # 开启新作用域而变成 `_all_children_cascade_delete` 的不可达代码
+        # （该方法在上一行已 `return False`）。影响：
+        #   ① `delete()` 走到 `result = executor.execute(...)` 后**隐式返回
+        #      None** —— 调用方 `manage_api.py:906` 的 `result.success` 抛
+        #      AttributeError（DELETE 端点 500）、`import_export_service`
+        #      的级联导入删除同样炸；
+        #   ② delete 的 change_event **永不发布**（这正是
+        #      `test_delete_publishes_event` 长期 skip 的真实原因——但当年
+        #      写的理由「requires full app context」是错的）。
+        # 本次只做**方法归位**，不改任何业务逻辑。
         if cascade_result and cascade_result.get('_children_audit_info'):
             try:
                 self._write_cascade_audit_logs(
@@ -586,6 +578,39 @@ class ManageService:
                 logger.warning("Failed to publish delete event: %s", str(e))
 
         return result
+
+    def _all_children_cascade_delete(self, meta_obj) -> bool:
+        """[FIX BUG-V011 2026-06-26] 检查 meta_obj 的所有 child 关联是否都是 cascade_delete=true.
+
+        读 schema (yaml) 的 associations, 检查每条关联的 cascade_delete.
+        支持 dict 和 AssociationDefinition 两种格式.
+
+        【位置补 2026-10-07】本方法原先被误插在 `delete()` 方法体中间，
+        截断了 `delete()` 的后半段（详见 delete() 内的注记）。已归位于此。
+        """
+        try:
+            assocs = getattr(meta_obj, 'associations', None) or []
+            if isinstance(assocs, dict):
+                assocs = list(assocs.values())
+
+            def _get_assoc_field(a, field, default=None):
+                if isinstance(a, dict):
+                    return a.get(field, default)
+                return getattr(a, field, default)
+
+            composition_children = [
+                a for a in assocs
+                if _get_assoc_field(a, 'type') == 'composition'
+            ]
+            if not composition_children:
+                return True
+            return all(
+                _get_assoc_field(a, 'cascade_delete', False)
+                for a in composition_children
+            )
+        except Exception as e:
+            logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
+            return False
 
     def batch_create(self, object_type: str, data_list: List[Dict[str, Any]],
                      skip_validation: bool = False,
