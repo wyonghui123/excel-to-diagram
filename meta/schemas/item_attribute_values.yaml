@@ -1,6 +1,7 @@
 # 物料分层参数值 (Item Attribute Values) — foundation 步 1 · item 族分层值表（一期预留）
 # 依据: 蓝图 §3.4.2 / §3.4.3（属性轴/两种默认机制）/ §3.4.9; 规划 §2.3 / §2.4
 # 形态 (D2 已拍 v2.5；2026-10-07 重估收敛): 单表 + 因子列 —— (attr_code, org_id) 因子列化（不按层分表）
+# 值列 (D2 残余 2026-10-07 收口): **类型化列** —— value_text / value_number / value_boolean（见 [未决] 1）
 # 属性轴止于 2 层 (S2/S3，2026-10-07 重估)，阅读顺序 L2 → L0（逐层回退），层数不写死进物理 schema (S8/S9)：
 #   L0 全局:  org_id 空     键 (item_id, attr_code)
 #   L2 组织:  org_id 非空   键 (item_id, attr_code, org_id)
@@ -9,19 +10,30 @@
 # 只装 hybrid 参数（可人工覆盖、缺失时逐层回退）; stored 锚属性在主表 items; derived 不落列。
 #
 # [未决/不阻塞]
-#  1. 值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定 —— 本期以单列 `value`(TEXT, JSON 承载) 占位。
-#  2. 可空复合唯一 —— SQLite 中 NULL 互不相等，唯一约束对含空因子的行不生效（落地实测点）；
-#     本期以普通索引 + 应用层查重承接。
-#     [核对留痕 2026-10-06，2026-10-07 重估更新] schema_generator 已支持部分唯一索引（type: partial +
-#     condition + unique → CREATE UNIQUE INDEX ... WHERE）。拟补法（待 PM 拍板）：**L0/L2 各一条**——
-#     L0: WHERE org_id IS NULL（键 (item_id, attr_code)）；L2: WHERE org_id IS NOT NULL（键 (item_id, attr_code, org_id)）
-#     ⇒ 索引列在条件下均非空，SQLite 唯一性可生效。（原 L1 条随职能域层砍除删除；原「L2 键是否含
-#     function_type」疑问随列退场消解——口径 = 不含。）
+#  1. ~~值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定~~ —— **已定（2026-10-07 核对落定）：
+#     **类型化列**。核对依据：平台 DSL 标量类型体系（`FieldType`：string/integer/float/boolean/datetime/
+#     text/json）；`type: json` 在平台仅用于复合负载（快照/条件/事件体），标量业务值一律类型化列
+#     （须可 SQL 比较/过滤/索引——JSON 文本比较会坏数字语义）；对标 location 弹性属性结论"不用宽表/JSON"。
+#     映射 = string/text/enum/ref → `value_text`；integer/float → `value_number`；boolean → `value_boolean`；
+#     datetime 类参数按同一映射增列（ADD COLUMN，成本低）。同行为**互斥填充**（一行仅一列非空；类型由
+#     参数目录声明；互斥校验在应用层——DSL 无 CHECK）。原单列 `value`(TEXT, JSON 承载) 占位**废弃**。
+#  2. ~~可空复合唯一 —— SQLite 中 NULL 互不相等，唯一约束对含空因子的行不生效（落地实测点）；
+#     本期以普通索引 + 应用层查重承接。~~ —— **已定（2026-10-07 拍板并落地，见 indexes 段）**：
+#     L0/L2 各一条 partial unique（`uidx_item_attr_l0` WHERE org_id IS NULL /
+#     `uidx_item_attr_l2` WHERE org_id IS NOT NULL）——索引列在条件下均非空 ⇒ SQLite 唯一性生效。
+#     [核对留痕 2026-10-06，2026-10-07 更新] schema_generator 支持部分唯一索引（type: partial +
+#     condition + unique → CREATE UNIQUE INDEX ... WHERE），已实测确认。
+#     （原 L1 条随职能域层砍除删除；原「L2 键是否含 function_type」疑问随列退场消解——口径 = 不含。）
+#
+# [迁移留痕 2026-10-07 实测] dev 库（meta/architecture.db）已物化本表（当前 0 行数据）：含历史
+#   `function_type` 列（L1 砍除待同步）与旧 `value` 列（值列形态收口待同步）。SchemaMigrator 仅支持
+#   ADD COLUMN（无 DROP）——同步窗口（--execute）会补 `value_*` 三列；两旧列去留随同步窗口统一核对
+#   （零数据，必要时可重建表）。
 
 id: item_attribute_value
 name: 物料分层参数值
 table_name: item_attribute_values
-description: 物料分层参数值（L0/L2 因子列 + 值列，hybrid 参数；2026-10-07 重估：L1 职能域层砍除）
+description: 物料分层参数值（L0/L2 因子列 + 类型化值列 value_text/number/boolean，hybrid 参数；2026-10-07：L1 职能域层砍除 + 值列形态收口）
 parent_object: item
 hierarchy:
   enabled: true
@@ -131,16 +143,38 @@ fields:
       multiple: false
       clearable: true
 
-  - id: value
-    name: 参数值
+  - id: value_text
+    name: 参数值（文本）
     type: text
-    db_column: value
+    db_column: value_text
     nullable: true
-    description: 参数值（承载形态待 §8.3 值存储规范核对；本期以 JSON 文本占位）
+    description: 文本类参数值（枚举码 / 引用码 / 字符串；D2 值列形态 2026-10-07：类型化列）
     semantics:
-      meaning: 分层参数的值
+      meaning: 分层参数的文本类值（string/text/enum/ref 类参数）
     ui:
-      widget: textarea
+      widget: input
+
+  - id: value_number
+    name: 参数值（数值）
+    type: float
+    db_column: value_number
+    nullable: true
+    description: 数值类参数值（integer/float 均走本列，REAL 承载；如安全库存、提前期天数）
+    semantics:
+      meaning: 分层参数的数值类值（integer/float 类参数）
+    ui:
+      widget: number
+
+  - id: value_boolean
+    name: 参数值（布尔）
+    type: boolean
+    db_column: value_boolean
+    nullable: true
+    description: 布尔类参数值（如 inspection_required；一行仅一列非空）
+    semantics:
+      meaning: 分层参数的布尔类值（boolean 类参数）
+    ui:
+      widget: switch
 
   - id: description
     name: 备注
@@ -154,10 +188,26 @@ fields:
       widget: textarea
 
 indexes:
+  # [D2 唯一约束 · 2026-10-07 落地] 按层各一条 partial unique（拟补法拍板）：
+  #   L0 行 org_id 恒空 → WHERE org_id IS NULL；L2 行 org_id 非空 → WHERE org_id IS NOT NULL。
+  #   索引列在条件下均非空 ⇒ SQLite 唯一性生效（普通唯一约束对含 NULL 因子的行不生效——NULL 互不相等）。
+  # [去重副作用 · 平台机制] schema_generator._deduplicate_indexes 按「索引字段组合」去重、唯一索引覆盖同字段
+  #   普通索引 ⇒ 原 idx_item_attr_item_code / idx_item_attr_l2 已被下列两条取代，故不再重复声明。
+  # [已知取舍] 「不限 org 的全量查」（列某物料全部参数）不再有专用前缀索引——本表一期预留、当前 0 行，
+  #   暂可接受；若后续性能告警再补 (item_id) 普通索引（字段组合不与下两条冲突）。
+  # [迁移留痕] SchemaMigrator 仅清理 uidx_ 前缀的过时索引 ⇒ 旧普通索引在 dev 库残留为冗余索引（不影响正确性）。
   - fields: [item_id, attr_code]
-    name: idx_item_attr_item_code
+    name: uidx_item_attr_l0
+    type: partial
+    unique: true
+    condition: org_id IS NULL
+    description: L0 全局行唯一（键 item_id + attr_code；org_id 为空的行）
   - fields: [item_id, attr_code, org_id]
-    name: idx_item_attr_l2
+    name: uidx_item_attr_l2
+    type: partial
+    unique: true
+    condition: org_id IS NOT NULL
+    description: L2 组织行唯一（键 item_id + attr_code + org_id）
   - fields: [org_id]
     name: idx_item_attr_org
 
