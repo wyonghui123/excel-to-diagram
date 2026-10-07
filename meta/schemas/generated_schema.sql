@@ -451,16 +451,6 @@ CREATE TABLE IF NOT EXISTS users (
 --   SSOT 文件保持同步: 此处不再 CREATE 上述 legacy 表。
 --   orgs.manager_id / org_members.is_manager 列保留 (v088 软删, SQLite 3.35- 无 DROP COLUMN)。
 
--- 新对象: 新对象描述
-CREATE TABLE IF NOT EXISTS new_objects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code VARCHAR(200) UNIQUE NOT NULL,
-    name VARCHAR(200) NOT NULL,
-    description VARCHAR(200),
-    created_at DATETIME,
-    updated_at DATETIME
-)
-
 -- 产品线: 产品线是业务系统的顶层分类，代表一个独立的产品或产品系列。一个产品线可以包含多个版本。
 CREATE TABLE IF NOT EXISTS products (
     created_at DATETIME,
@@ -655,10 +645,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sso ON users(sso_provider, sso_user_i
 CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name)
 
 -- [v089] 上述 legacy 表对应索引已 DROP (随表)
-
--- Indexes for 新对象
-CREATE UNIQUE INDEX IF NOT EXISTS idx_code ON new_objects(code)
-CREATE INDEX IF NOT EXISTS idx_new_objects_name ON new_objects(name)
 
 -- Indexes for 产品线
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)
