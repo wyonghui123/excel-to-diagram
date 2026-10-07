@@ -796,6 +796,11 @@ def create_app(db_path=None):
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)
+    # [分摊IF-004 2026-10-07] 分摊是平台级能力（算法零业务耦合、留痕已拆出
+    #   allocation_results 独立表），故独立蓝图而非挂在 pricing 下。
+    #   旧路径 /api/v1/pricing/allocate **不留别名**（交付次日即改，无调用方）。
+    from meta.api.allocation_api import allocation_bp
+    app.register_blueprint(allocation_bp)
     # [A8 2026-10-02] 统一收件箱 + 平台心跳
     app.register_blueprint(task_inbox_bp)
     # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
