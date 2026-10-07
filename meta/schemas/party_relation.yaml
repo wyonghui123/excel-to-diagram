@@ -216,7 +216,31 @@ indexes:
   - fields: [le_org_id]
     name: idx_party_relation_le_org_id
 
-relations: []
+relations:
+  - id: party_relation_to_party1
+    name: 我方侧
+    type: reference
+    target: party
+    source_field: party1_id
+    target_field: id
+    cardinality: N:1
+    description: 我方侧身份引用（[FK 2026-10-07] 由展示语义升级为真外键；展示面走 party_internal 视图，物理列存 parties.id，故 FK 指向真表 parties）
+  - id: party_relation_to_party2
+    name: 对手侧
+    type: reference
+    target: party
+    source_field: party2_id
+    target_field: id
+    cardinality: N:1
+    description: 对手侧身份引用（[FK 2026-10-07] 由展示语义升级为真外键；展示面走 party_archive 视图，物理列存 parties.id，故 FK 指向真表 parties）
+  - id: party_relation_to_le_org
+    name: 法人域
+    type: reference
+    target: org
+    source_field: le_org_id
+    target_field: id
+    cardinality: N:1
+    description: 法人域引用（[FK 2026-10-07] 由展示语义升级为真外键；指向具备 legal_entity 职能的 org，"职能"属性由 org_function_service 校验，非 FK 职责）
 
 ui_view_config:
   skip_auto_menu: true

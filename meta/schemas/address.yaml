@@ -453,7 +453,39 @@ cascade_select:
     parent_display_field: name
     filter_by: city_id
 
-relations: []
+relations:
+  - id: address_to_country_region
+    name: 国家
+    type: reference
+    target: region
+    source_field: country_id
+    target_field: id
+    cardinality: N:1
+    description: 国家引用（[FK 2026-10-07] 由展示语义升级为真外键；级联层级合法性由字段级 parameter_bindings 承接）
+  - id: address_to_province_region
+    name: 省
+    type: reference
+    target: region
+    source_field: province_id
+    target_field: id
+    cardinality: N:1
+    description: 省/州/一级行政区引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: address_to_city_region
+    name: 市
+    type: reference
+    target: region
+    source_field: city_id
+    target_field: id
+    cardinality: N:1
+    description: 市引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: address_to_district_region
+    name: 区县
+    type: reference
+    target: region
+    source_field: district_id
+    target_field: id
+    cardinality: N:1
+    description: 区/县引用（[FK 2026-10-07] 由展示语义升级为真外键）
 
 ui_view_config:
   showChangeHistory: true

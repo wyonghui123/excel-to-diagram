@@ -371,7 +371,31 @@ indexes:
   - fields: [status]
     name: idx_location_status
 
-relations: []
+relations:
+  - id: location_to_parent
+    name: 上级位置
+    type: reference
+    target: location
+    source_field: parent_id
+    target_field: id
+    cardinality: N:1
+    description: 上级位置引用（自引用树；[FK 2026-10-07] 由展示语义升级为真外键；层级合法性规则由 W12 承接）
+  - id: location_to_address
+    name: 场地地址
+    type: reference
+    target: address
+    source_field: address_id
+    target_field: id
+    cardinality: N:1
+    description: site 场地地址引用（[FK 2026-10-07] 由展示语义升级为真外键；非 site 类型恒空）
+  - id: location_to_calendar
+    name: 作业日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: site 作业日历引用（[FK 2026-10-07] 由展示语义升级为真外键；非 site 类型恒空）
 
 ui_view_config:
   showChangeHistory: true

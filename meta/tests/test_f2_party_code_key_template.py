@@ -52,7 +52,10 @@ def _load_party_yaml():
 # ────────────────────────────────────────
 @pytest.fixture()
 def party_ds(tmp_path):
-    """临时库: 仅建 party 基表（含 code 列）"""
+    """临时库: party 基表（含 code 列）+ 最小 orgs 父表
+
+    [FK 2026-10-07] parties.org_id 新增真外键 → orgs.id。
+    """
     from meta.core.datasource import (
         _clear_data_source_cache_for_testing, get_data_source,
     )
@@ -64,6 +67,8 @@ def party_ds(tmp_path):
 
     ds = get_data_source("sqlite", database=str(tmp_path / 'f2_party_code.db'))
     sync_schema_from_meta(ds, [obj])
+    ds.execute("CREATE TABLE IF NOT EXISTS orgs "
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     yield ds
     _clear_data_source_cache_for_testing()
 

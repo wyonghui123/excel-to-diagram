@@ -155,7 +155,15 @@ key_template:
       auto_detect: true
   preview: 'PATY-00000001'
 
-relations: []
+relations:
+  - id: party_to_org
+    name: 组织引用
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: '1:1'
+    description: 对应组织引用（[FK 2026-10-07] 由展示语义升级为真外键；1:1 由 idx_party_org_unique 部分唯一索引强制，仅 source='org' 内部行生效）
 
 ui_view_config:
   skip_auto_menu: true

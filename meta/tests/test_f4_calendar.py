@@ -246,7 +246,12 @@ class TestInheritance:
 # ────────────────────────────────────────
 @pytest.fixture()
 def cal_ds(tmp_path):
-    """临时库: 建 calendars + calendar_days 双表（region 不建，country_id 无 FK 目标）"""
+    """临时库: 建 calendars + calendar_days 双表 + 最小 region 父表
+
+    [FK 2026-10-07] calendars.country_id 新增真外键 → regions.id；
+    单看 calendars 的夹具必须补父表，否则插入被 FK 校验拦下
+    （父表缺失：no such table: main.regions）。
+    """
     from meta.core.datasource import (
         _clear_data_source_cache_for_testing, get_data_source,
     )
@@ -255,7 +260,7 @@ def cal_ds(tmp_path):
 
     aspects = parse_aspects_yaml(_SCHEMA_DIR)
     objs = [load_yaml_file(os.path.join(_SCHEMA_DIR, fn), aspects_defs=aspects)
-            for fn in ('calendar.yaml', 'calendar_day.yaml')]
+            for fn in ('region.yaml', 'calendar.yaml', 'calendar_day.yaml')]
     assert all(o is not None for o in objs), 'calendar YAML 加载失败'
 
     ds = get_data_source("sqlite", database=str(tmp_path / 'f4_calendar.db'))

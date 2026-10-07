@@ -25,6 +25,8 @@ _PROJECT_ROOT = os.path.dirname(
 )
 sys.path.insert(0, _PROJECT_ROOT)
 
+from meta.tests.factories._raw_sql_bridge import insert
+
 _META_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCHEMA_DIR = os.path.join(_META_DIR, 'schemas')
 
@@ -52,7 +54,11 @@ def _fields():
 # ────────────────────────────────────────
 @pytest.fixture()
 def pr_ds(tmp_path):
-    """临时库: 仅建 party_relations 表 + 索引"""
+    """临时库: party_relations 表 + 索引 + 父表 parties / orgs
+
+    [FK 2026-10-07] party_relations 新增三条真外键（party1_id / party2_id →
+    parties、le_org_id → orgs），单表库须补父表与父行。
+    """
     from meta.core.datasource import (
         _clear_data_source_cache_for_testing, get_data_source,
     )
@@ -64,6 +70,15 @@ def pr_ds(tmp_path):
 
     ds = get_data_source("sqlite", database=str(tmp_path / 'f2_party_relation.db'))
     sync_schema_from_meta(ds, [obj])
+    # 最小父表 + 父行（用例中 party 用 1–8、le_org 用 10/20/30/31）
+    ds.execute("CREATE TABLE IF NOT EXISTS parties "
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    ds.execute("CREATE TABLE IF NOT EXISTS orgs "
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    for pid in range(1, 9):
+        insert(ds, 'parties', id=pid)
+    for oid in (10, 20, 30, 31):
+        insert(ds, 'orgs', id=oid)
     yield ds
     _clear_data_source_cache_for_testing()
 

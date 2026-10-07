@@ -59,7 +59,11 @@ def _field(schema, field_id):
 # ────────────────────────────────────────
 @pytest.fixture()
 def loc_ds(tmp_path):
-    """临时库: locations 单表（aspects 按平台路径解析）"""
+    """临时库: locations + 父表 address / calendar（aspects 按平台路径解析）
+
+    [FK 2026-10-07] locations 新增三条真外键（parent_id 自引用 /
+    address_id→addresses / calendar_id→calendars），单表库须补父表。
+    """
     from meta.core.datasource import (
         _clear_data_source_cache_for_testing, get_data_source,
     )
@@ -67,12 +71,20 @@ def loc_ds(tmp_path):
     from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
 
     aspects = parse_aspects_yaml(_SCHEMA_DIR)
-    obj = load_yaml_file(os.path.join(_SCHEMA_DIR, 'location.yaml'),
-                         aspects_defs=aspects)
-    assert obj is not None, 'location.yaml 加载失败'
+    objs = [load_yaml_file(os.path.join(_SCHEMA_DIR, fn), aspects_defs=aspects)
+            for fn in ('region.yaml', 'address.yaml', 'calendar.yaml',
+                       'location.yaml')]
+    assert all(o is not None for o in objs), 'location 相关 YAML 加载失败'
 
     ds = get_data_source('sqlite', database=str(tmp_path / 'location.db'))
-    sync_schema_from_meta(ds, [obj])
+    sync_schema_from_meta(ds, objs)
+    # 父行：site 用例硬编码 address_id=101 / calendar_id=201
+    # addresses.country_id 也是真外键 → regions，故先落 region 父行
+    ds.insert('regions', {'id': 1, 'code': 'CN', 'name': '中国',
+                          'level': 'country', 'status': 'active'})
+    ds.insert('addresses', {'id': 101, 'code': 'ADDR-101',
+                            'country_id': 1, 'formatted_address': '测试地址'})
+    ds.insert('calendars', {'id': 201, 'code': 'CAL-201', 'name': '测试日历'})
     yield ds
     _clear_data_source_cache_for_testing()
 
@@ -160,6 +172,13 @@ class TestSchemaLands:
         assert row[1] == 201
 
     def test_non_site_row_refs_null(self, loc_ds):
+        # [FK 2026-10-07] parent_id 自引用外键：先落父行（原依赖上一用例的 id=1，
+        # 但夹具 function-scoped，用例间不共享）
+        loc_ds.insert('locations', {
+            'id': 1, 'code': 'SITE01', 'name': '华东园区',
+            'location_type': 'site', 'status': 'active',
+            'address_id': 101, 'calendar_id': 201,
+        })
         loc_ds.insert('locations', {
             'id': 2, 'code': 'WH01', 'name': '原料仓',
             'location_type': 'warehouse', 'status': 'active', 'parent_id': 1,

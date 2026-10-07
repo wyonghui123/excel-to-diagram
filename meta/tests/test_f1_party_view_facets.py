@@ -126,6 +126,11 @@ def facets_env(tmp_path, party_objs):
 
     ds = get_data_source("sqlite", database=str(tmp_path / 'party_facets.db'))
     sync_schema_from_meta(ds, list(party_objs))
+    # [FK 2026-10-07] parties.org_id 新增真外键 → orgs.id；补最小父表 + 父行
+    # （用例中内部行 org_id=1）
+    ds.execute("CREATE TABLE IF NOT EXISTS orgs "
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    ds.insert("orgs", {"id": 1})
     yield ds
     _clear_data_source_cache_for_testing()
 

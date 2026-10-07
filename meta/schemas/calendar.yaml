@@ -356,7 +356,23 @@ indexes:
   - fields: [status]
     name: idx_calendar_status
 
-relations: []
+relations:
+  - id: calendar_to_parent_calendar
+    name: 父日历
+    type: reference
+    target: calendar
+    source_field: parent_calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 父日历引用（自引用继承；[FK 2026-10-07] 由展示语义升级为真外键；NULL=基准日历）
+  - id: calendar_to_country_region
+    name: 国家/地区
+    type: reference
+    target: region
+    source_field: country_id
+    target_field: id
+    cardinality: N:1
+    description: 所属国家/地区引用（[FK 2026-10-07] 由展示语义升级为真外键；NULL=通用日历）
 
 ui_view_config:
   showChangeHistory: true

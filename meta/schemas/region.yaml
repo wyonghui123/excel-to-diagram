@@ -269,7 +269,15 @@ indexes:
   - fields: [status]
     name: idx_region_status
 
-relations: []
+relations:
+  - id: region_to_parent
+    name: 上级区划
+    type: reference
+    target: region
+    source_field: parent_id
+    target_field: id
+    cardinality: N:1
+    description: 上级区划引用（自引用树；[FK 2026-10-07] 由展示语义升级为真外键；NULL=顶级国家）
 
 ui_view_config:
   showChangeHistory: true

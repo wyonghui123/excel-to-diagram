@@ -160,7 +160,15 @@ indexes:
   - fields: [day_type]
     name: idx_calendar_day_type
 
-relations: []
+relations:
+  - id: calendar_day_to_calendar
+    name: 所属日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 所属日历引用（[FK 2026-10-07] 由展示语义升级为真外键）
 
 ui_view_config:
   showChangeHistory: true
