@@ -1,13 +1,37 @@
 {
   "yaml_dir": "meta\\schemas",
-  "total_yaml_files": 54,
-  "scanned_yaml_files": 50,
+  "total_yaml_files": 89,
+  "scanned_yaml_files": 85,
   "total_edges": 8,
   "total_warnings": 3,
   "yaml_summary": [
     {
+      "file": "address.yaml",
+      "obj_id": "address",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "adjustment.yaml",
+      "obj_id": "adjustment",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
       "file": "ai_async_task.yaml",
       "obj_id": "ai_async_task",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "allocation_result.yaml",
+      "obj_id": "allocation_result",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "allocation_rule.yaml",
+      "obj_id": "allocation_rule",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -42,6 +66,36 @@
       "warning_count": 0
     },
     {
+      "file": "calc_detail.yaml",
+      "obj_id": "calc_detail",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "calc_procedure.yaml",
+      "obj_id": "calc_procedure",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "calc_result.yaml",
+      "obj_id": "calc_result",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "calendar.yaml",
+      "obj_id": "calendar",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "calendar_day.yaml",
+      "obj_id": "calendar_day",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
       "file": "change_event.yaml",
       "obj_id": "change_event",
       "edge_count": 0,
@@ -50,6 +104,24 @@
     {
       "file": "change_subscription.yaml",
       "obj_id": "change_subscription",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "cumulative_usage.yaml",
+      "obj_id": "cumulative_usage",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "currency.yaml",
+      "obj_id": "currency",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "customer_account.yaml",
+      "obj_id": "customer_account",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -90,6 +162,24 @@
       "warning_count": 0
     },
     {
+      "file": "exclusion_group.yaml",
+      "obj_id": "exclusion_group",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "external_rate_source.yaml",
+      "obj_id": "external_rate_source",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "factor_catalog.yaml",
+      "obj_id": "factor_catalog",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
       "file": "filter_variant.yaml",
       "obj_id": "filter_variant",
       "edge_count": 0,
@@ -104,6 +194,54 @@
     {
       "file": "hierarchies.yaml",
       "obj_id": "hierarchies",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "item_attribute_values.yaml",
+      "obj_id": "item_attribute_value",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "item_group.yaml",
+      "obj_id": "item_group",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "item_uom_conversion.yaml",
+      "obj_id": "item_uom_conversion",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "item_xref.yaml",
+      "obj_id": "item_xref",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "items.yaml",
+      "obj_id": "item",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "key_schema.yaml",
+      "obj_id": "key_schema",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "location.yaml",
+      "obj_id": "location",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "lookup_sequence.yaml",
+      "obj_id": "lookup_sequence",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -134,6 +272,30 @@
     {
       "file": "org_member.yaml",
       "obj_id": "org_member",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "party.yaml",
+      "obj_id": "party",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "party_archive.yaml",
+      "obj_id": "party_archive",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "party_internal.yaml",
+      "obj_id": "party_internal",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "party_relation.yaml",
+      "obj_id": "party_relation",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -198,8 +360,44 @@
       "warning_count": 0
     },
     {
+      "file": "person_profile.yaml",
+      "obj_id": "person_profile",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "pricing_period.yaml",
+      "obj_id": "pricing_period",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
       "file": "product.yaml",
       "obj_id": "product",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "rate_record.yaml",
+      "obj_id": "rate_record",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "rate_table.yaml",
+      "obj_id": "rate_table",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "rate_type.yaml",
+      "obj_id": "rate_type",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "region.yaml",
+      "obj_id": "region",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -230,12 +428,6 @@
     {
       "file": "role_dimension_scope.yaml",
       "obj_id": "role_dimension_scope",
-      "edge_count": 0,
-      "warning_count": 0
-    },
-    {
-      "file": "role_effective_intents.yaml",
-      "obj_id": "role_effective_intents",
       "edge_count": 0,
       "warning_count": 0
     },
@@ -294,9 +486,27 @@
       "warning_count": 0
     },
     {
+      "file": "uom.yaml",
+      "obj_id": "uom",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
+      "file": "usage_group.yaml",
+      "obj_id": "usage_group",
+      "edge_count": 0,
+      "warning_count": 0
+    },
+    {
       "file": "user.yaml",
       "obj_id": "user",
       "edge_count": 1,
+      "warning_count": 0
+    },
+    {
+      "file": "vendor_account.yaml",
+      "obj_id": "vendor_account",
+      "edge_count": 0,
       "warning_count": 0
     },
     {
@@ -419,8 +629,16 @@
     "_action_groups",
     "_audit_materialization",
     "_standard_actions",
+    "address",
+    "addresses",
+    "adjustment",
+    "adjustments",
     "ai_async_task",
     "ai_async_tasks",
+    "allocation_result",
+    "allocation_results",
+    "allocation_rule",
+    "allocation_rules",
     "annotation",
     "annotations",
     "aspects",
@@ -429,10 +647,26 @@
     "audit_logs",
     "business_object",
     "business_objects",
+    "calc_detail",
+    "calc_details",
+    "calc_procedure",
+    "calc_procedures",
+    "calc_result",
+    "calc_results",
+    "calendar",
+    "calendar_day",
+    "calendar_days",
+    "calendars",
     "change_event",
     "change_events",
     "change_subscription",
     "change_subscriptions",
+    "cumulative_usage",
+    "cumulative_usages",
+    "currencies",
+    "currency",
+    "customer_account",
+    "customer_accounts",
     "data_permission",
     "data_permission_rules",
     "data_permissions",
@@ -445,11 +679,33 @@
     "enum_types",
     "enum_value",
     "enum_values",
+    "exclusion_group",
+    "exclusion_groups",
+    "external_rate_source",
+    "external_rate_sources",
+    "factor_catalog",
+    "factor_catalogs",
     "filter_variant",
     "filter_variants",
     "group_data_permission",
     "group_data_permissions",
     "hierarchies",
+    "item",
+    "item_attribute_value",
+    "item_attribute_values",
+    "item_group",
+    "item_groups",
+    "item_uom_conversion",
+    "item_uom_conversions",
+    "item_xref",
+    "item_xrefs",
+    "items",
+    "key_schema",
+    "key_schemas",
+    "location",
+    "locations",
+    "lookup_sequence",
+    "lookup_sequences",
     "menu",
     "menu_permission",
     "menu_permissions",
@@ -462,6 +718,12 @@
     "org_member",
     "org_members",
     "orgs",
+    "parties",
+    "party",
+    "party_archive",
+    "party_internal",
+    "party_relation",
+    "party_relations",
     "permission",
     "permission_bundle",
     "permission_bundles",
@@ -478,8 +740,20 @@
     "permission_set_permissions",
     "permission_sets",
     "permissions",
+    "person_profile",
+    "person_profiles",
+    "pricing_period",
+    "pricing_periods",
     "product",
     "products",
+    "rate_record",
+    "rate_records",
+    "rate_table",
+    "rate_tables",
+    "rate_type",
+    "rate_types",
+    "region",
+    "regions",
     "relationship",
     "relationships",
     "resource_types",
@@ -488,7 +762,6 @@
     "role_data_permissions",
     "role_dimension_scope",
     "role_dimension_scopes",
-    "role_effective_intents",
     "role_permission",
     "role_permissions",
     "roles",
@@ -505,8 +778,14 @@
     "task_queues",
     "test_objects",
     "test_table",
+    "uom",
+    "uoms",
+    "usage_group",
+    "usage_groups",
     "user",
     "users",
+    "vendor_account",
+    "vendor_accounts",
     "version",
     "versions"
   ]

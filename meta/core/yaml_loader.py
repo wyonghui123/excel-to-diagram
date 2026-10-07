@@ -1323,8 +1323,8 @@ def parse_action_parameter(data: Dict[str, Any]) -> ActionParameter:
 def _resolve_field_type(type_str: str, field_id: Any = None) -> "FieldType":
     """解析 yaml 字段 `type:`；未知取值抛 `UnknownFieldTypeError`。
 
-    `varchar(n)` / `char(n)`（raw DDL 写法）按 `string` 处理——legacy 方言
-    （如 `role_effective_intents.yaml`）用它声明列宽，长度应另由 `max_length` 承载。
+    `varchar(n)` / `char(n)`（raw DDL 写法）按 `string` 处理——部分 legacy 方言
+    用它声明列宽，长度应另由 `max_length` 承载。
     """
     if type_str in FIELD_TYPE_MAP:
         return FIELD_TYPE_MAP[type_str]
