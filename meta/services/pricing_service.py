@@ -462,6 +462,17 @@ class PricingService:
         lk,
         valid_on: Optional[str],
     ) -> int:
+        # 【2026-10-07 拆表 · TBD-18】此处曾加过
+        #   `AND allocation_rule_id IS NULL` 以防误伤分摊留痕，现已**移除**。
+        #
+        #   起因：分摊留痕原写 `calc_results`（共表），而作废条件只按宿主
+        #   三字段过滤，于是同单据跑一次定价就把分摊留痕置 invalid
+        #   （实测 active 由 1 变 0，FR-013 AC「可回放」静默失效）。
+        #   终解：分摊留痕迁至独立表 `allocation_results`，**物理隔离**。
+        #
+        #   为何保留「按宿主、不按 process_code」的原有范围：Spec L973 定的
+        #   作废语义是「同一宿主重复定价 → 旧行 invalid」，刻意**不**按
+        #   过程区分——同一宿主换过程重算同样应作废旧结果。
         self.ds.execute(
             "UPDATE calc_results SET status = 'invalid', updated_at = ?"
             " WHERE document_type = ? AND document_id = ?"
@@ -609,6 +620,10 @@ class PricingService:
             raise PricingError(f"单据对象未注册：{document_type}")
 
         cols = {f.db_column for f in mo.fields}
+        # 【2026-10-07 拆表】原曾按 `allocation_rule_id IS NULL` 排除分摊留痕，
+        #   现已移除——分摊留痕迁至独立表 `allocation_results`，本表只属定价，
+        #   无需再靠 WHERE 条件区分来源（物理隔离比WHERE 过滤更可靠：
+        #   后者漏写一个条件就串数据）。
         results = self._query(
             "SELECT * FROM calc_results WHERE document_type = ?"
             " AND document_id = ? AND status = 'active'",
@@ -691,11 +706,21 @@ class PricingService:
         document_type: str,
         document_id: int,
         document_line_id: Optional[int] = None,
+        include_allocation: bool = False,
     ) -> Dict[str, Any]:
         """回放查询：结果行 + 步骤明细 + 逐层小计 + 计算基四维度。
 
-        对标 IF-002「按 document_type + document_id（+ 可选 document_line_id）
+        对标 IF-002「按document_type + document_id（+ 可选 document_line_id）
         查询 calc_result + calc_detail」。
+
+        【2026-10-07 拆表 · TBD-18】`include_allocation=True` 时**额外**
+        查 `allocation_results`（分摊留痕专用表），结果放`allocation_results`
+        键下——与定价结果**分开返回**，不混入 `results`。
+
+        为何分开而非合并进 `results`：分摊的数学是一次性闭式
+        （`Σ子行 == 总额` 精确成立，无迭代无中间态），**没有 calc_detail
+        明细可挂**。混进同一个列表只会让前端拿到「有结果、无步骤」的残缺
+        链路——那正是拆表前实测到的症状。
         """
         sql = "SELECT * FROM calc_results WHERE document_type = ? AND document_id = ?"
         params: List[Any] = [document_type, document_id]
@@ -737,9 +762,23 @@ class PricingService:
                 for d in details
                 if d.get("subtotal_key") or d.get("rollup_flag")
             ]
-        return {
+        out = {
             "document_type": document_type,
             "document_id": document_id,
             "document_line_id": document_line_id,
             "results": results,
         }
+        if include_allocation:
+            asql = ("SELECT * FROM allocation_results WHERE document_type = ?"
+                    " AND document_id = ?")
+            aparams: List[Any] = [document_type, document_id]
+            if document_line_id is not None:
+                asql += " AND document_line_id = ?"
+                aparams.append(document_line_id)
+            asql += " AND status = 'active' ORDER BY sequence ASC, id ASC"
+            arows = self._query(asql, tuple(aparams))
+            for r in arows:
+                for k in ("amount", "net_amount"):
+                    r[k] = _to_num(r.get(k))
+            out["allocation_results"] = arows
+        return out

@@ -733,8 +733,14 @@ class AllocationService:
                     source_document_id=spec.get('source_document_id'),
                     target=spec.get('target'),
                     currency=spec.get('currency') or 'CNY',
-                    process_code=spec.get('process_code') or 'ALLOCATION',
                     scale=scale,
+                    # 【2026-10-07 拆表】快照当次配置——规则会被改，
+                    # 只存 rule_id 答不出「当时按什么摊的」
+                    parent_id=parent_id,
+                    basis_field=spec.get('basis_field'),
+                    group_by=group_by,
+                    rounding=rounding,
+                    floor=floor,
                 )
 
         return {
@@ -850,84 +856,91 @@ class AllocationService:
         rows: List[Dict[str, Any]], total: Any, rule: Dict[str, Any],
         charge_source: str = None, source_document_type: str = None,
         source_document_id: Any = None, target: str = None,
-        currency: str = 'CNY', process_code: str = 'ALLOCATION',
-        scale: int = 2, sign: str = '+',
+        currency: str = 'CNY', scale: int = 2, sign: str = '+',
+        parent_id: Any = None, basis_field: str = None,
+        group_by: str = None, rounding: str = None, floor: Any = None,
     ) -> Dict[str, Any]:
-        """把分摊结果落 `calc_result`：**头记总额 + 行记摊得额**。
+        """把分摊结果落 `allocation_results`：**头记总额 + 行记摊得额**。
 
         FR-013 AC「分摊可回放：头记总额、行记摊得额，来源单据与分摊规则可查」。
-        落 calc_result 而非只在业务行上写数字——业务行会被下一次分摊覆盖，
+        落结果表而非只在业务行上写数字——业务行会被下一次分摊覆盖，
         只有结果行能回答「这笔钱当初按什么规则摊的、摊给了谁、来源是哪张单」。
+
+        【2026-10-07 拆表 · TBD-18】原写 `calc_results`（定价结果表），导致
+        定价重算会作废本留痕、`write_back` 又把金额写回两遍（实测缺陷，
+        非推测）。现改为写 `allocation_results` 专用表，与定价**物理隔离**。
+
+        【列集取舍】**不写任何价格列**（rate / base / price_mode /
+        rate_source / result_semantic）。原实现硬塞 `price_mode='carry'`
+        （意为"无价格"）、`base=待摊总额`（把金额当计算基数）——非金额分摊
+        （工时 / 数量 / 重量）下这些不是空值而是**错值**。新表每列对分摊
+        语义成立，故 amount 列命名也不带 currency。
+
+        【快照语义】规则会改，故把当次的 basis / basis_field / group_by /
+        rounding / floor 全部快照进留痕——事后才能复现「当时按什么摊的」；
+        只存 allocation_rule_id 只能答"按哪条规则"，答不出"那条规则当时
+        长什么样"。
 
         Args:
             document_type/id: **宿主**单据（被摊到的那些行所属的单据）
             values / rows: 与 `allocate_by_rule` 的返回一一对应
             total: 待摊总额（头记行的 amount）
             rule: `allocation_rules` 行（回填 allocation_rule_id / basis）
-            charge_source: 费用来源单据类型（origin=unplanned 时有意义）
-            source_document_type/id: 费用来源单据（**可 ≠ 宿主单据**）
-            target: 归集方向 price/cost/expense；缺省取 rule.target
-            process_code: 结果行的 process_code 快照。分摊不经 calc_procedure，
-                故用约定的 `'ALLOCATION'`；留出参数是为了让"按某个过程分摊"
-                的扩展不必改表。
+            parent_id: 被分摊的父记录 id（留痕锚点，区别于宿主行）
+            basis_field / group_by / rounding / floor: 当次配置快照
+            currency: 仅金额场景有意义；非金额分摊传 None 即可
 
         Returns:
             {'header_result_id': int, 'line_result_ids': [int, ...]}
-
-        【为什么 process_code 必填却不指向真实过程】`calc_result` 的
-        process_code 是**快照字符串**（非外键，见 calc_result.yaml 文件头），
-        故填约定值不破坏引用完整性；反过来若允许为空，FR-010「可解释=能回放」
-        就少了一个关键维度。
         """
         now = datetime.now().isoformat(timespec='seconds')
         basis = rule.get('basis') or BASIS_EQUAL
         target = target or rule.get('target') or 'expense'
+        floor_val = _to_decimal(floor) if floor is not None else None
 
-        header_code = f"CR_{uuid.uuid4().hex[:16]}"
+        header_code = f"AR_{uuid.uuid4().hex[:16]}"
         cur = self.ds.execute(
-            """INSERT INTO calc_results
-               (code, document_type, document_id, document_line_id, level,
-                process_code, result_semantic, base_level, base_source,
-                rolling, rate, base, amount, net_amount, currency, sign,
-                sequence, origin, charge_source, source_document_type,
-                source_document_id, target, allocation_basis,
-                allocation_rule_id, rate_source, price_mode, status,
+            """INSERT INTO allocation_results
+               (code, document_type, document_id, document_line_id, parent_id,
+                level, sequence, amount, net_amount, currency, sign,
+                allocation_rule_id, allocation_basis, allocation_basis_field,
+                group_by, rounding, floor_value, origin, charge_source,
+                source_document_type, source_document_id, target, status,
                 created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
-                header_code, document_type, document_id, None, 'header',
-                process_code, 'cost', 'header', 'value',
-                False, None, float(total), float(total), float(total),
-                currency, sign, 0, 'unplanned', charge_source,
-                source_document_type, source_document_id, target,
-                basis, rule.get('id'), 'rate_record', 'carry', 'active',
-                now, now,
+                header_code, document_type, document_id, None, parent_id,
+                'header', 0, float(total), float(total), currency, sign,
+                rule.get('id'), basis, basis_field,
+                group_by, rounding,
+                None if floor_val is None else float(floor_val), 'unplanned',
+                charge_source, source_document_type, source_document_id,
+                target, 'active', now, now,
             ],
         )
         header_id = cur.lastrowid
 
         line_ids = []
         for seq, (row, value) in enumerate(zip(rows, values), start=1):
-            line_code = f"CR_{uuid.uuid4().hex[:16]}"
+            line_code = f"AR_{uuid.uuid4().hex[:16]}"
             c = self.ds.execute(
-                """INSERT INTO calc_results
-                   (code, document_type, document_id, document_line_id, level,
-                    process_code, result_semantic, base_level, base_source,
-                    rolling, rate, base, amount, net_amount, currency, sign,
-                    sequence, origin, charge_source, source_document_type,
-                    source_document_id, target, allocation_basis,
-                    allocation_rule_id, rate_source, price_mode, status,
-                    created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO allocation_results
+                   (code, document_type, document_id, document_line_id,
+                    parent_id, level, sequence, amount, net_amount, currency,
+                    sign, allocation_rule_id, allocation_basis,
+                    allocation_basis_field, group_by, rounding, floor_value,
+                    origin, charge_source, source_document_type,
+                    source_document_id, target, status, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     line_code, document_type, document_id,
-                    row.get('id'), 'line',
-                    process_code, 'cost', 'line', 'value',
-                    False, None, float(total), float(value), float(value),
-                    currency, sign, seq, 'unplanned', charge_source,
-                    source_document_type, source_document_id, target,
-                    basis, rule.get('id'), 'rate_record', 'carry', 'active',
-                    now, now,
+                    row.get('id'), parent_id, 'line', seq,
+                    float(value), float(value), currency, sign,
+                    rule.get('id'), basis, basis_field,
+                    group_by, rounding,
+                    None if floor_val is None else float(floor_val), 'unplanned',
+                    charge_source, source_document_type, source_document_id,
+                    target, 'active', now, now,
                 ],
             )
             line_ids.append(c.lastrowid)

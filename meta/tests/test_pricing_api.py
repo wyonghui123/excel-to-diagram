@@ -450,8 +450,11 @@ class TestWriteBackContract:
 # ======================================================================
 # 分摊端点的数据源走 `SQLiteAdapter`（需要 find/find_by_id/transaction），
 # 与本文件其余部分用的裸 sqlite3.Connection 不同，故单列夹具。
+# 【2026-10-07 拆表】末位 allocation_result 是分摊留痕专用表（对象 id，
+#   单数；registry.get() 按 id 取而非表名）。顺序有依赖：它有真外键
+#   → allocation_rules，故须排在 allocation_rule 之后。
 ALLOC_TABLES = ["pricing_period", "external_rate_source",
-                "allocation_rule", "calc_result"]
+                "allocation_rule", "calc_result", "allocation_result"]
 
 ORDERS_DDL = (
     "CREATE TABLE IF NOT EXISTS orders ("
@@ -616,7 +619,11 @@ class TestAllocateContract:
         assert resp.get_json()["data"]["result_ids"] is None
 
     def test_persists_result_rows_by_default(self, alloc_client, alloc_ds):
-        """默认落 calc_result（FR-013 AC「分摊可回放」）——不留痕等于没这能力。"""
+        """默认落 allocation_result（FR-013 AC「分摊可回放」）。
+
+        【2026-10-07 拆表】原落 calc_result（定价结果表），共用导致定价重算
+        作废分摊留痕、write_back 把金额写回两遍。现为独立表。
+        """
         _alloc_seed(alloc_ds, 100)
         rid = _alloc_rule(alloc_ds)
         resp = alloc_client.post(
@@ -626,8 +633,12 @@ class TestAllocateContract:
         ids = resp.get_json()["data"]["result_ids"]
         assert isinstance(ids["header_result_id"], int)
         assert len(ids["line_result_ids"]) == 3
-        n = alloc_ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0]
+        n = alloc_ds.execute(
+            "SELECT COUNT(*) FROM allocation_results").fetchone()[0]
         assert n == 4
+        # 定价表必须一条不沾 —— 共表是缺陷根因
+        assert alloc_ds.execute(
+            "SELECT COUNT(*) FROM calc_results").fetchone()[0] == 0
 
     def test_basis_field_flows_through_to_weights(self, alloc_client, alloc_ds):
         """契约边界：basis_field 必须真的传到服务层（否则全落均分）。"""

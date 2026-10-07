@@ -169,16 +169,21 @@ def env(tmp_path):
     finally:
         logging.disable(logging.NOTSET)
     gen = SchemaGenerator("sqlite")
+    # 【2026-10-07 拆表】分摊留痕已迁至独立表 allocation_results，
+    #   不再写 calc_results（共用导致定价重算作废留痕 / write_back 写两遍）。
+    #   仍需建 calc_result：定价链路同库，且要验证它不再含分摊列。
     cr_meta = registry.get("calc_result")
     assert cr_meta is not None, "calc_result 未注册"
-    # calc_result 有 FK → pricing_periods / external_rate_sources /
-    # allocation_rules，先建目标表
+    ar_meta = registry.get("allocation_result")
+    assert ar_meta is not None, "allocation_result 未注册"
+    # calc_result / allocation_result 均有 FK → 目标表须先建
     for obj_name in ("pricing_period", "external_rate_source",
                      "allocation_rule"):
         obj = registry.get(obj_name)
         assert obj is not None, f"{obj_name} 未注册"
         ds.execute(gen.generate_create_table(obj))
     ds.execute(gen.generate_create_table(cr_meta))
+    ds.execute(gen.generate_create_table(ar_meta))
 
     parent_meta = _parent_meta()
     child_meta = _child_meta()
@@ -613,11 +618,14 @@ class TestRecordAllocationResults:
         assert res['header_result_id'] is not None
         assert len(res['line_result_ids']) == 3
 
+        # 【2026-10-07 拆表】留痕迁至allocation_results，且不再有
+        #   process_code 列（分摊不经 calc_procedure，无过程可指）。
         header = ds.execute(
             "SELECT level, document_line_id, amount, origin, charge_source,"
             " source_document_type, source_document_id, target,"
-            " allocation_basis, allocation_rule_id, process_code"
-            " FROM calc_results WHERE id = ?", (res['header_result_id'],)
+            " allocation_basis, allocation_rule_id, parent_id"
+            " FROM allocation_results WHERE id = ?",
+            (res['header_result_id'],)
         ).fetchone()
         assert header[0] == 'header'
         assert header[1] is None
@@ -628,11 +636,11 @@ class TestRecordAllocationResults:
         assert header[7] == 'expense'
         assert header[8] == 'quantity'
         assert header[9] == rid
-        assert header[10] == 'ALLOCATION'
+        assert header[10] == 1
 
         lines = ds.execute(
             "SELECT document_line_id, amount, sequence, level"
-            " FROM calc_results WHERE id IN (?,?,?) ORDER BY sequence",
+            " FROM allocation_results WHERE id IN (?,?,?) ORDER BY sequence",
             tuple(res['line_result_ids']),
         ).fetchall()
         assert [l[0] for l in lines] == ids
@@ -652,7 +660,7 @@ class TestRecordAllocationResults:
         })
         line_ids = r['result_ids']['line_result_ids']
         rows = ds.execute(
-            "SELECT document_line_id, amount FROM calc_results"
+            "SELECT document_line_id, amount FROM allocation_results"
             " WHERE id IN (?,?,?)", tuple(line_ids),
         ).fetchall()
         got = {r0[0]: r0[1] for r0 in rows}
@@ -673,11 +681,12 @@ class TestRecordAllocationResults:
         line_ids = r['result_ids']['line_result_ids']
         qs = ','.join('?' * len(line_ids))
         total = ds.execute(
-            f"SELECT SUM(amount) FROM calc_results WHERE id IN ({qs})",
+            f"SELECT SUM(amount) FROM allocation_results"
+            f" WHERE id IN ({qs})",
             tuple(line_ids),
         ).fetchone()[0]
         header = ds.execute(
-            "SELECT amount FROM calc_results WHERE id = ?", (rid_hdr,)
+            "SELECT amount FROM allocation_results WHERE id = ?", (rid_hdr,)
         ).fetchone()[0]
         assert round(total, 2) == round(header, 2) == 100.0
 
@@ -692,11 +701,62 @@ class TestRecordAllocationResults:
             'persist_result': False,
         })
         assert r['result_ids'] is None
-        n = ds.execute("SELECT COUNT(*) FROM calc_results").fetchone()[0]
+        n = ds.execute("SELECT COUNT(*) FROM allocation_results").fetchone()[0]
         assert n == 0
 
     def test_schema_has_source_document_columns(self, env):
         """schema 两列真的建出来了（否则 INSERT 会 OperationalError）。"""
         ds = env
-        cols = {r[1] for r in ds.execute("PRAGMA table_info(calc_results)")}
+        cols = {r[1] for r in ds.execute(
+            "PRAGMA table_info(allocation_results)")}
         assert {'source_document_type', 'source_document_id'} <= cols
+
+    def test_allocation_columns_absent_from_calc_result(self, env):
+        """拆表的**核心断言**：分摊列不得留在定价表里。
+
+        留在calc_results 上意味着两条链路仍共表——那正是本次修复掉的
+        缺陷根因（定价重算作废分摊留痕 / write_back 写两遍）。故不是
+        「暂未迁走」，而是**永不该有**。
+        """
+        ds = env
+        cols = {r[1] for r in ds.execute("PRAGMA table_info(calc_results)")}
+        moved = {'charge_source', 'source_document_type',
+                 'source_document_id', 'allocation_basis',
+                 'allocation_rule_id'}
+        assert not (cols & moved), f"定价表仍含分摊列: {cols & moved}"
+
+    def test_allocation_result_has_no_price_columns(self, env):
+        """新表**不得**含价格列——非金额分摊下它们不是空值而是错值。
+
+        `price_mode='carry'`意为「无价格」、`base=待摊总额` 是把金额
+        当计算基数。这类列一旦存在，工时/数量分摊就会在表里留下一批
+        看着像数据、实则无意义的字段。
+        """
+        ds = env
+        cols = {r[1] for r in ds.execute(
+            "PRAGMA table_info(allocation_results)")}
+        price_cols = {'rate', 'base', 'price_mode', 'rate_source',
+                      'result_semantic', 'base_level', 'base_source',
+                      'rolling', 'process_code'}
+        assert not (cols & price_cols), f"分摊表仍含价格列: {cols & price_cols}"
+
+    def test_rule_snapshot_is_recorded(self, env):
+        """当次配置须快照进留痕——规则会被改，只存 rule_id 答不出
+        「当时按什么摊的」。"""
+        ds = env
+        _seed(ds, 100, lines=((10, 0, None), (30, 0, None), (60, 0, None)))
+        rid = _rule(ds, basis='quantity')
+
+        r = _svc(ds).allocate_by_rule({
+            'allocation_rule_id': rid, 'parent_id': 1,
+            'target_object': 'order_line', 'target_field': 'amount',
+            'basis_field': 'qty', 'document_type': 'order',
+            'group_by': 'cost_center', 'rounding': 'ceil', 'floor': 20,
+        })
+        hdr = r['result_ids']['header_result_id']
+        got = ds.execute(
+            "SELECT allocation_basis, allocation_basis_field, group_by,"
+            " rounding, floor_value"
+            " FROM allocation_results WHERE id = ?", (hdr,)
+        ).fetchone()
+        assert got == ('quantity', 'qty', 'cost_center', 'ceil', 20.0)

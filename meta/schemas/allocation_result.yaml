@@ -1,0 +1,652 @@
+# 分摊结果（Allocation Result）— 分摊留痕专用表（FR-013AC「分摊可回放」）
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 C 表 / FR-013 / FR-014 / TBD-18
+# 定位: 把「一次分摊」的结果**留痕**——头记待摊总额、行记各行摊得额，
+#       连同来源单据与分摊规则，使「这笔钱当初按什么规则摊的、摊给了谁、
+#       来源是哪张单」事后可查。
+#
+#【为何独立成表 · 2026-10-07TBD-18】
+#   本表原**不存在**：分摊留痕写的是 `calc_results`（定价结果表）。共表导致
+#   两个实测缺陷（非推测，见 pricing_service 同日修复注记）：
+#     ① 对同一单据同一行跑一次定价，就把该行分摊留痕置`invalid`
+#        —— FR-013 AC「可回放」静默失效；
+#     ② `write_back` 会把分摊金额再按 `result_semantic='cost'` 写回单据头，
+#        而分摊**已经**把金额写在子行业务字段上了——同一笔钱写两遍。
+#
+# 【列集取舍 · 已拍板】**裁掉全部价格列**，只留对分摊成立的列。
+#   删掉的列（rate / base / price_mode / rate_source / result_semantic /
+#   base_level / base_source / rolling / process_code / pricing_period_id /
+#   external_rate_source_id / freeze_policy / reprice_trigger / qty_basis …）
+#   在非金额分摊下**不是"空值"而是"错值"**：`price_mode='carry'` 表示
+#   「无价格」、`base=待摊总额` 把金额当计算基数。原实现正是硬塞这些值，
+#   使非金额分摊（工时 / 数量 / 重量）在表里留下一批看着像数据、实则
+#   无意义的字段。故本表的**每一列都对分摊语义成立**。
+#
+#   代价（已知并接受）：分摊金额若要参与定价计算，须由调用方显式传入
+#   换算后的值，而非靠本表的价格列隐式联动。
+#
+# 【与 calc_results 的关系】**物理隔离**，不再共表。故定价侧的作废 /
+#   回放 / 写回**不需要**任何「排除分摊」的 WHERE 条件——用表边界代替
+#   WHERE 过滤，从根上消除「漏写一个条件就串数据」这类缺陷。
+#
+# 【重放不对称是设计使然】`calc_result` 有 `calc_detail`（逐步明细），
+#   因为定价要能解释「每一步怎么算的」。分摊的数学是**一次性闭式**
+#   （`Σ子行 == 总额` 精确成立，无迭代、无中间态），无可回放的中间步骤，
+#   故本表**不设**明细子表。头行 + 行行即全部。
+#
+# 【存量】建表时 `calc_results` / `calc_details` / `adjustments` /
+#   `allocation_rules` 实测均0 行（`meta/architecture.db`），故本次拆分
+#   **零数据迁移**，无需回填脚本。
+
+id: allocation_result
+name: 分摊结果
+table_name: allocation_results
+description: 分摊结果留痕——头记待摊总额、行记各行摊得额，含来源单据与分摊规则
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 一次分摊动作的结果留痕（1 头 + N 行）
+  category: transactional
+  bo_sub_category: result
+  business_key: [code]
+  display_name_field: id
+  aliases:
+    - 分摊结果
+    - 分摊留痕
+    - allocation result
+
+deletion_policy:
+  # 随宿主单据生命周期走：宿主删则留痕删（留痕脱离宿主无意义）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 结果编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    description: 分摊结果唯一编码（CR_ 前缀 + 16 位 hex）
+    semantics:
+      meaning: 分摊结果业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  # ---------------- 宿主（被摊到的那些行所属的单据）----------------
+  - id: document_type
+    name: 宿主对象
+    type: string
+    db_column: document_type
+    required: true
+    max_length: 50
+    description: 宿主单据的元模型对象 ID
+    semantics:
+      meaning: 宿主单据对象类型
+      filterable: true
+    ui:
+      widget: reference
+
+  - id: document_id
+    name: 宿主ID
+    type: integer
+    db_column: document_id
+    required: true
+    description: 宿主单据记录 id
+    semantics:
+      meaning: 宿主单据 id
+      filterable: true
+    ui:
+      widget: reference
+
+  - id: document_line_id
+    name: 宿主行ID
+    type: integer
+    db_column: document_line_id
+    required: false
+    nullable: true
+    description: 宿主行记录 id；头级留空、行级填子行 id
+    semantics:
+      meaning: 宿主行 id（头行为空）
+      filterable: true
+    ui:
+      widget: reference
+
+  - id: parent_id
+    name: 父记录ID
+    type: integer
+    db_column: parent_id
+    required: true
+    description: 被分摊的父记录 id（分摊的来源行）
+    semantics:
+      meaning: 被分摊的父记录 id
+    ui:
+      widget: reference
+
+  # ---------------- 头/行判别 ----------------
+  - id: level
+    name: 层级
+    type: string
+    db_column: level
+    required: true
+    description: header = 头记待摊总额；line = 行记摊得额
+    enum_values:
+      - value: header
+        label: 总额
+        color: primary
+        is_initial: true
+      - value: line
+        label: 行
+        color: default
+    semantics:
+      meaning: 头行判别（一次分摊 = 1 头 + N 行）
+      filterable: true
+      filter_type: enum
+    ui:
+      widget: select
+
+  - id: sequence
+    name: 序号
+    type: integer
+    db_column: sequence
+    required: true
+    default: 0
+    description: 行序号（头记0，行 1..N）
+    semantics:
+      meaning: 行序号
+    ui:
+      widget: number
+
+  # ---------------- 金额 ----------------
+  - id: amount
+    name: 摊得额
+    type: number
+    db_column: amount
+    required: true
+    description: |
+      行级 = 该行摊得的量；头级 = 待摊总额。
+      **刻意用number 而非 currency 命名** —— 本表承载的是「量」而非
+      「钱」：金额场景填金额，工时/数量/重量场景填各自的量。
+    semantics:
+      meaning: 本行分摊所得的量
+    ui:
+      widget: number
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: true
+    description: 行净额；头级等于 amount
+    semantics:
+      meaning: 行净额（与 amount 同值，保留列名以便与定价结果对齐比对）
+    ui:
+      widget: number
+
+  - id: currency
+    name: 币种
+    type: string
+    db_column: currency
+    required: false
+    nullable: true
+    max_length: 10
+    default: CNY
+    description: 币种；**非金额场景留空**
+    semantics:
+      meaning: 币种（仅金额场景有意义）
+    ui:
+      widget: input
+
+  - id: sign
+    name: 正负号
+    type: string
+    db_column: sign
+    required: true
+    default: "+"
+    description: 分摊方向符号
+    enum_values:
+      - value: "+"
+        label: 正
+        color: default
+        is_initial: true
+      - value: "-"
+        label: 负
+        color: danger
+    semantics:
+      meaning: 分摊方向
+    ui:
+      widget: select
+
+  # ---------------- 分摊规则快照 ----------------
+  - id: allocation_rule_id
+    name: 分摊规则
+    type: integer
+    db_column: allocation_rule_id
+    required: true
+    description: 分摊规则 id（引用 allocation_rules.id）
+    semantics:
+      meaning: 分摊规则 id
+      filterable: true
+    ui:
+      widget: reference
+
+  - id: allocation_basis
+    name: 分摊基数
+    type: string
+    db_column: allocation_basis
+    required: true
+    description: |
+      分摊所依据的基数。**与 `allocation_rule.basis` 逐字一致**（六值）
+      ——两者不一致会让「按什么摊的」无法反查，等于分摊可回放失效。
+      （原枚举 `{quantity,value,weight,volume,net_amount}` 与 basis
+      **互不覆盖**：缺 equal/manual，多一个 rule 侧没有的 `net_amount`
+      ——`net_amount` 不是一种分摊基数，「净额」是结果属性。）
+    enum_values:
+      - value: equal
+        label: 平均
+        color: default
+      - value: value
+        label: 价值
+        color: primary
+      - value: quantity
+        label: 数量
+        color: info
+      - value: weight
+        label: 重量
+        color: info
+      - value: volume
+        label: 体积
+        color: info
+      - value: manual
+        label: 手工系数
+        color: warning
+    semantics:
+      meaning: 分摊基数（与 allocation_rule.basis 逐字一致）
+      filterable: true
+      filter_type: enum
+    ui:
+      widget: select
+
+  - id: allocation_basis_field
+    name: 基数列
+    type: string
+    db_column: allocation_basis_field
+    required: false
+    nullable: true
+    max_length: 100
+    description: |
+      basis ∈ {value,quantity,weight,volume} 时权重取自子行哪一列。
+      留痕此项才能回答「权重到底按哪列算的」——`basis=quantity` 不足以
+      定位，因为不同单据的数量列可能叫 qty / volume / amount。
+    semantics:
+      meaning: 权重来源列名
+    ui:
+      widget: input
+
+  - id: group_by
+    name: 分组维度
+    type: string
+    db_column: group_by
+    required: false
+    nullable: true
+    max_length: 100
+    description: 本次分摊的分组维度（空 = 未分组）
+    semantics:
+      meaning: 分摊分组维度
+    ui:
+      widget: input
+
+  - id: rounding
+    name: 取整方式
+    type: string
+    db_column: rounding
+    required: false
+    nullable: true
+    max_length: 20
+    description: 本次分摊的取整方式（none / round / ceil / floor）
+    enum_values:
+      - value: none
+        label: 不取整
+        color: default
+      - value: round
+        label: 四舍五入
+        color: primary
+      - value: ceil
+        label: 向上取整
+        color: info
+      - value: floor
+        label: 向下取整
+        color: info
+    semantics:
+      meaning: 取整方式（快照当次配置，便于事后复现）
+    ui:
+      widget: select
+
+  - id: floor_value
+    name: 地板值
+    type: number
+    db_column: floor_value
+    required: false
+    nullable: true
+    description: 本次分摊的地板值（空 = 未设地板）
+    semantics:
+      meaning: 地板值
+    ui:
+      widget: number
+
+  # ---------------- 来源单据 ----------------
+  - id: origin
+    name: 来源性质
+    type: string
+    db_column: origin
+    required: true
+    default: unplanned
+    description: |
+      计划内/外。`unplanned` = 事后费用（不新建费用单据，D16 ②）。
+      **注意：本列是业务语义（费用性质），不是管线标识** —— 不可用它
+      区分「定价结果」与「分摊结果」（拆表前曾有人误用，代价是漏判）。
+    enum_values:
+      - value: planned
+        label: 计划内
+        color: primary
+        is_initial: true
+      - value: unplanned
+        label: 计划外
+        color: warning
+        description: 事后/计划外费用
+    semantics:
+      meaning: 费用性质（D16：unplanned 即事后费用）
+      filterable: true
+    ui:
+      widget: select
+
+  - id: charge_source
+    name: 费用来源类型
+    type: string
+    db_column: charge_source
+    required: false
+    nullable: true
+    max_length: 50
+    description: 费用来源单据类型（order / invoice / …）
+    semantics:
+      meaning: 费用来源单据类型
+    ui:
+      widget: reference
+
+  - id: source_document_type
+    name: 来源单据对象
+    type: string
+    db_column: source_document_type
+    required: false
+    nullable: true
+    max_length: 50
+    description: |
+      费用**来源**单据的元模型对象 ID（发票 / 收货 / 服务确认…）。
+      **可 ≠ 宿主单据** —— 计划外费用正是「钱来自别处、摊到目标行」。
+    semantics:
+      meaning: 费用来源单据对象
+    ui:
+      widget: reference
+
+  - id: source_document_id
+    name: 来源单据ID
+    type: integer
+    db_column: source_document_id
+    required: false
+    nullable: true
+    description: 费用来源单据 id
+    semantics:
+      meaning: 费用来源单据 id
+    ui:
+      widget: reference
+
+  - id: target
+    name: 归集方向
+    type: string
+    db_column: target
+    required: false
+    nullable: true
+    max_length: 20
+    description: 归集方向 cost / expense；非金额场景可留空
+    enum_values:
+      - value: cost
+        label: 成本
+        color: warning
+      - value: expense
+        label: 费用
+        color: danger
+    semantics:
+      meaning: 归集方向（对标 LCM Charge Basis）
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: |
+      active = 有效；invalid = 已被重摊取代，保留以便审计。
+      分摊重跑时旧行置invalid 而非删除。
+    enum_values:
+      - value: active
+        label: 有效
+        color: success
+        is_initial: true
+      - value: invalid
+        label: 已作废
+        color: default
+    semantics:
+      meaning: 留痕有效性（重摊作废旧行，保留审计）
+      filterable: true
+      filter_type: enum
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_allocation_result_code
+  # 回放主查询路径：按宿主定位（与 calc_results 的查询形状一致）
+  - fields: [document_type, document_id]
+    name: idx_allocation_result_host
+  - fields: [parent_id]
+    name: idx_allocation_result_parent
+  - fields: [allocation_rule_id]
+    name: idx_allocation_result_rule
+
+relations:
+  # 【真外键】规则被删则留痕须拒——否则会出现"分摊结果无从追溯按什么规则摊的"
+  - id: allocation_result_to_allocation_rule
+    name: 分摊规则
+    type: reference
+    target: allocation_rule
+    source_field: allocation_rule_id
+    target_field: id
+    cardinality: N:1
+    description: 本行采用的分摊规则（FR-013）
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 分摊结果
+    description: 一次分摊动作的结果留痕（1 头 + N 行）
+    columns:
+      - field: code
+        width: 200
+        sortable: true
+      - field: document_type
+        width: 140
+        filterable: true
+      - field: level
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: allocation_basis
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: amount
+        width: 120
+        type: ellipsis
+      - field: currency
+        width: 80
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: created_at
+        width: 160
+        format: datetime
+        sortable: true
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - source_document_type
+      - group_by
+    actions:
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: created_at
+      order: desc
+
+  form:
+    title: 分摊结果信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [document_type, document_id]
+          - fields: [parent_id, level]
+      - title: 分摊要素
+        columns:
+          - fields: [amount, currency]
+          - fields: [allocation_basis, allocation_basis_field]
+          - fields: [group_by, rounding]
+      - title: 来源
+        columns:
+          - fields: [origin, target]
+          - fields: [charge_source, source_document_type]
+          - fields: [source_document_id, status]
+
+  detail:
+    layout: tabs
+    title: "分摊结果 {record.code}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - document_type
+          - document_id
+          - document_line_id
+          - parent_id
+          - level
+          - sequence
+      - id: allocation
+        label: 分摊要素
+        type: fields
+        fields:
+          - amount
+          - net_amount
+          - currency
+          - sign
+          - allocation_basis
+          - allocation_basis_field
+          - group_by
+          - rounding
+          - floor_value
+          - allocation_rule_id
+      - id: source
+        label: 来源与状态
+        type: fields
+        fields:
+          - origin
+          - charge_source
+          - source_document_type
+          - source_document_id
+          - target
+          - status
+          - created_at
+          - updated_at
+
+category_config:
+  create_permission: allocation_result:create
+  update_permission: allocation_result:update
+  delete_permission: allocation_result:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: false
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

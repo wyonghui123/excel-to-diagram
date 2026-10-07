@@ -485,141 +485,16 @@ fields:
     ui:
       widget: select
 
-  - id: charge_source
-    name: 费用来源单据
-    type: string
-    db_column: charge_source
-    required: false
-    nullable: true
-    max_length: 30
-    description: 费用来源单据类型（origin = unplanned 时有意义）
-    enum_values:
-      - value: order
-        label: 订单
-        color: primary
-      - value: invoice
-        label: 发票
-        color: info
-      - value: receipt
-        label: 收货
-        color: info
-      - value: service_confirm
-        label: 服务确认
-        color: info
-      - value: settlement
-        label: 结算
-        color: info
-    semantics:
-      meaning: 费用来源单据类型
-    ui:
-      widget: select
-
-  # 【FR-013 · 2026-10-07 补】费用**来源单据**（可 ≠ 宿主单据）
-  #   流程 C：发票 / 收货 / 服务确认上录的一笔计划外费用，其金额要摊到
-  #   目标单据行上。此时宿主（document_type/document_id）是**被摊到的单据**，
-  #   而费用**从哪来**只能靠这两列记录 —— 缺了它们，「来源单据可查」
-  #   （FR-013 AC）就无法成立，故本轮随 allocate 端点一并补齐。
-  - id: source_document_type
-    name: 来源单据类型
-    type: string
-    db_column: source_document_type
-    required: false
-    nullable: true
-    max_length: 50
-    description: >
-      费用来源单据的元模型对象 ID（发票 / 收货 / 服务确认…）。
-      **可 ≠ 宿主单据** —— 计划外费用正是「钱来自别处、摊到目标行」。
-    semantics:
-      meaning: 费用来源单据对象 ID（纯标识，非外键 —— 可跨任意 document 型 BO）
-      filterable: true
-      filter_type: text
-    ui:
-      widget: input
-
-  - id: source_document_id
-    name: 来源单据ID
-    type: integer
-    db_column: source_document_id
-    required: false
-    nullable: true
-    description: 费用来源单据记录 ID。与 source_document_type 配对使用，均可空
-    semantics:
-      meaning: 费用来源单据记录 ID
-    ui:
-      widget: number
-
-  - id: target
-    name: 归集方向
-    type: string
-    db_column: target
-    required: false
-    nullable: true
-    max_length: 20
-    description: 归集到价格/成本/费用
-    enum_values:
-      - value: price
-        label: 价格
-        color: primary
-      - value: cost
-        label: 成本
-        color: warning
-      - value: expense
-        label: 费用
-        color: danger
-    semantics:
-      meaning: 归集方向（对标 LCM Charge Basis）
-    ui:
-      widget: select
-
-  - id: allocation_basis
-    name: 分摊基数
-    type: string
-    db_column: allocation_basis
-    required: false
-    nullable: true
-    max_length: 20
-    description: 分摊基数（与 allocation_rule 配对）
-    # 【2026-10-07 对齐】本枚举原为 {quantity,value,weight,volume,net_amount}，
-    # 与 `allocation_rule.basis` 的六值**互不覆盖**（缺 equal/manual，
-    # 多一个 rule 侧没有的 net_amount）——两份枚举对不上，"配对"就是空话。
-    # 现改为与 basis 逐字一致（六值），使「结果行的基数 = 规则的基数」可断言。
-    # `net_amount` 已移除：它不是一种**分摊基数**（无对应的 rule.basis 取值），
-    # 「净额」是结果属性（net_amount 列），不是分摊依据。
-    enum_values:
-      - value: equal
-        label: 平均
-        color: default
-      - value: value
-        label: 价值
-        color: info
-      - value: quantity
-        label: 数量
-        color: primary
-      - value: weight
-        label: 重量
-        color: info
-      - value: volume
-        label: 体积
-        color: info
-      - value: manual
-        label: 手工系数
-        color: warning
-    semantics:
-      meaning: 分摊基数（与 allocation_rule.basis 逐字一致）
-    ui:
-      widget: select
-
-  - id: allocation_rule_id
-    name: 分摊规则
-    type: integer
-    db_column: allocation_rule_id
-    required: false
-    nullable: true
-    description: 分摊规则 ID（引用 allocation_rules.id）。FR-013 实现期接入
-    semantics:
-      meaning: 分摊规则（1→N 摊金额，对偶于 allocation_weight 的 N→1 合率）
-    ui:
-      widget: reference
+  # 【2026-10-07 拆表 · TBD-18】以下五列已迁至 `allocation_result`（分摊留痕
+  #   专用表）：`charge_source` / `source_document_type` /
+  #   `source_document_id` / `allocation_basis` / `allocation_rule_id`。
+  #
+  #   迁移原因：它们只对**分摊**成立，对**定价**无意义。留在本表会让定价结果行
+  #   带着一批恒为空的列（非金额分摊还会写入错值，见 allocation_result 文件头），
+  #   而分摊与定价共表又导致实测缺陷——定价重算作废分摊留痕、write_back 把分摊
+  #   金额写回两遍（详见 pricing_service 同日修复注记）。
+  #
+  #   无数据迁移：建表时本表 0 行（实测 `meta/architecture.db`）。
 
   # ---------------- 事实扩展（FR-015）----------------
   - id: rate_source
@@ -910,17 +785,9 @@ indexes:
     name: idx_calc_result_status
 
 relations:
-  # 【真外键 · 2026-10-06】三条前向引用收紧为 DB 级 FK（N:1）。
-  #   allocation_rule_id / external_rate_source_id / pricing_period_id 均已为整型列。
-  - id: calc_result_to_allocation_rule
-    name: 分摊规则
-    type: reference
-    target: allocation_rule
-    source_field: allocation_rule_id
-    target_field: id
-    cardinality: N:1
-    description: 本行采用的分摊规则（FR-013）
-
+  # 【2026-10-07 拆表】原 calc_result_to_allocation_rule 随
+  #   `allocation_rule_id` 列一并迁至 `allocation_result`（见上文迁移注记）。
+  #   另两条前向引用收紧为 DB 级 FK（N:1）。
   - id: calc_result_to_external_rate_source
     name: 外部率源
     type: reference
@@ -1037,11 +904,10 @@ ui_view_config:
         label: 费用扩展
         type: fields
         fields:
+          # 【2026-10-07 拆表】原含 charge_source / allocation_basis /
+          #   allocation_rule_id / source_document_*，均已迁至 allocation_result
           - origin
-          - charge_source
           - target
-          - allocation_basis
-          - allocation_rule_id
       - id: fact
         label: 事实快照
         type: fields

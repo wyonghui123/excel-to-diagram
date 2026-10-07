@@ -26,9 +26,13 @@ from meta.tests.factories._raw_sql_bridge import (  # noqa: E402
     delete, insert, update,
 )
 
+# 【2026-10-07 拆表】末两位是分摊留痕专用表及其 FK 目标，**顺序有依赖**：
+#   allocation_result 有真外键→ allocation_rules，必须先建目标表。
+#   注意此处填**对象 id**（单数），不是表名（复数）——registry.get() 按 id 取。
 TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
           "exclusion_group", "rate_table", "rate_record",
-          "calc_procedure", "calc_result", "calc_detail"]
+          "calc_procedure", "calc_result", "calc_detail",
+          "allocation_rule", "allocation_result"]
 
 
 @pytest.fixture()
@@ -898,3 +902,126 @@ class TestFR012PolicyMetadata:
             "SELECT freeze_policy, reprice_trigger, qty_basis"
             " FROM calc_results").fetchone()
         assert row == (None, None, None)
+
+
+# ======================================================================
+# 定价 × 分摊 链路隔离（2026-10-07 拆表守护）
+# ======================================================================
+# 【背景】分摊留痕原写`calc_results`（与定价**共表**），而三处消费入口
+#   （作废 / explain / write_back）只按宿主三字段过滤、不区分来源，导致两个
+#   实测缺陷：① 同单据跑一次定价就把分摊留痕置 invalid（FR-013 AC「可回放」
+#   静默失效）；② write_back 把分摊金额再按 result_semantic='cost' 写回单据
+#   头——分摊**已经**把金额写在子行业务字段上了，同一笔钱写两遍。
+#
+# 【终解】分摊留痕迁至独立表 `allocation_results`，**物理隔离**。故本类
+#   不再守护 WHERE 条件（已回退），改守护「表边界本身」：任何一环把分摊
+#   写回 calc_results / 让定价碰到 allocation_results，用例即转红。
+
+#: 分摊留痕行（写入 allocation_results —— 刻意不是 calc_results）
+_ALLOC_ROW = {
+    "code": "AR_TEST", "level": "line", "document_line_id": None,
+    "parent_id": 1, "currency": "CNY", "sign": "+", "sequence": 1,
+    "origin": "unplanned", "target": "expense",
+    "allocation_basis": "equal", "allocation_basis_field": None,
+    "group_by": None, "rounding": "none", "floor_value": None,
+    "allocation_rule_id": 1, "status": "active",
+    "created_at": "2026-10-07 00:00:00", "updated_at": "2026-10-07 00:00:00",
+}
+
+
+def _insert_alloc(ds, document_type="so", document_id=1, amount=33.34):
+    """模拟 record_allocation_results 的写入（头记总额 + 行记摊得额）。"""
+    insert(ds, "allocation_results", document_type=document_type,
+           document_id=document_id, amount=amount, net_amount=amount,
+           **_ALLOC_ROW)
+
+
+class TestPricingAllocationIsolation:
+    """两条链路**物理隔离**（分摊在 allocation_results，定价在 calc_results）"""
+
+    def test_pricing_does_not_invalidate_allocation_row(self, ds):
+        """【核心回归】定价重算不得作废分摊留痕。
+
+        缺陷原样（拆表前）：共表 + 作废条件只按宿主三字段过滤 → 同单据
+        跑一次定价，分摊留痕被置 invalid，FR-013 AC「可回放」静默失效。
+        """
+        _seed(ds)
+        _insert_alloc(ds, "so", 1)
+        _price(ds, document_type="so", document_id=1)
+
+        # 分摊留痕在另一张表，定价的 UPDATE 物理上碰不到它
+        assert ds.execute("SELECT status, amount FROM allocation_results"
+                          ).fetchall() == [("active", 33.34)]
+        # 定价结果仍只写 calc_results
+        codes = {r[0] for r in ds.execute(
+            "SELECT process_code FROM calc_results").fetchall()}
+        assert codes == {"PROC_STD"}
+
+    def test_allocation_rows_never_land_in_calc_results(self, ds):
+        """分摊留痕**绝不**出现在定价表里 —— 共表是缺陷根因，不得回潮。"""
+        _seed(ds)
+        _insert_alloc(ds, "so", 1)
+        _price(ds, document_type="so", document_id=1)
+
+        cols = {r[1] for r in ds.execute("PRAGMA table_info(calc_results)")}
+        assert not (cols & {"allocation_basis", "allocation_rule_id",
+                             "charge_source", "source_document_type"}), (
+            "分摊列重新出现在定价表 → 两条链路又共表了")
+
+    def test_explain_separates_allocation_results(self, ds):
+        """explain 分开返回：定价在 results，分摊在 allocation_results。
+
+        不混进同一个列表——分摊无 calc_detail 明细可挂，混进去前端拿到的是
+        「有结果、无步骤」的残缺链路（那正是拆表前的实测症状）。
+        """
+        _seed(ds)
+        _insert_alloc(ds, "so", 1)
+        _price(ds, document_type="so", document_id=1)
+        svc = PricingService(ds)
+
+        default = svc.explain("so", 1)
+        assert all(r["process_code"] != "ALLOCATION"
+                   for r in default["results"])
+        assert "allocation_results" not in default
+
+        with_alloc = svc.explain("so", 1, include_allocation=True)
+        assert [r["code"] for r in with_alloc["allocation_results"]] == [
+            "AR_TEST"]
+        # 分摊行不得混进定价 results
+        assert all(r["process_code"] != "ALLOCATION"
+                   for r in with_alloc["results"])
+
+    def test_write_back_ignores_allocation_row(self, ds):
+        """分摊金额已直接写在子行业务字段上，再写回就是同一笔钱写两遍。"""
+        from meta.core.models import MetaField, MetaObject, registry
+        from meta.core.models_enums import FieldType
+
+        _seed(ds)
+        oid = "so_alloc_wb"
+        if registry.get(oid) is None:
+            mo = MetaObject(id=oid, name=oid, table_name=oid)
+            for n, t in (("id", "integer"), ("cost_amount", "float")):
+                mo.fields.append(MetaField(id=n, name=n,
+                                          field_type=FieldType(t),
+                                          db_column=n))
+            registry.register(mo)
+        ds.execute(f"CREATE TABLE IF NOT EXISTS {oid}"
+                   " (id integer, cost_amount float)")
+        insert(ds, oid, id=1, cost_amount=None)
+        _insert_alloc(ds, oid, 1, amount=33.34)
+
+        res = PricingService(ds).write_back(oid, 1)
+        assert res["written"] == {}, (
+            f"分摊留痕被写回业务字段（同一笔钱两遍）: {res}")
+        assert ds.execute(f"SELECT cost_amount FROM {oid}"
+                          " WHERE id=1").fetchone()[0] is None
+
+    def test_allocation_row_still_queryable_directly(self, ds):
+        """隔离靠**搬走数据**而非过滤 —— 留痕本身必须完好可查。"""
+        _seed(ds)
+        _insert_alloc(ds, "so", 1, amount=88.88)
+        row = ds.execute(
+            "SELECT code, amount, allocation_rule_id, status"
+            " FROM allocation_results WHERE allocation_rule_id IS NOT NULL"
+        ).fetchall()
+        assert row == [("AR_TEST", 88.88, 1, "active")]

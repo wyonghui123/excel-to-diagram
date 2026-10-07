@@ -32,13 +32,14 @@ semantics:
     - 归集规则
 
 deletion_policy:
-  # 被 calc_results.allocation_rule_id 引用（真外键）——服务层预检给友好提示，
-  #   DB 级 FK 兜底；与 address/calendar 的做法一致。
+  # 被 allocation_results.allocation_rule_id 引用（真外键）——服务层预检给
+  #   友好提示，DB 级 FK 兜底；与 address/calendar 的做法一致。
+  # 【2026-10-07 拆表】原指向 calc_results，分摊留痕独立成表后改指新表。
   mode: restrict
   restrict_on:
-    - table: calc_results
+    - table: allocation_results
       foreign_key: allocation_rule_id
-      message: 该分摊规则已被定价结果引用，请先处理相关结果后再删除
+      message: 该分摊规则已被分摊结果引用，请先处理相关结果后再删除
   cascade_delete: []
 
 audit:
