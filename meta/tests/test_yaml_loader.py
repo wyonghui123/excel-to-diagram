@@ -548,14 +548,16 @@ class TestFieldTypeResolution:
 class TestObjectDefinitionFilter:
     """[2026-10-07] load_yaml_directory 只注册"对象定义"文件。
 
-    schemas/ 目录混放两类 yaml：
+    schemas/ 目录混放三类 yaml：
       ① 对象定义（顶层有 id:）—— 注册为 MetaObject
       ② 配置字典 / 共享属性（顶层无 id:）—— 由专门消费方单独读取
+      ③ `_` 前缀的内部文件（模板 / 共享片段）—— 约定为非对象定义
 
     原实现靠硬编码文件名黑名单（shared_properties / aspects /
-    _standard_actions / _action_groups）区分，新加的字典类文件漏进黑名单就会
-    被静默注册成 id='' 的幽灵对象（role_effective_intents.yaml 即如此）。
-    改为按"顶层有无 id"这一语义判据后，此处守护该行为不再退化。
+    _standard_actions / _action_groups）区分，漏进黑名单的文件会被静默注册：
+      · role_effective_intents.yaml —— 无 id，注册成 id='' 的幽灵对象
+      · _template.yaml —— 有 id，注册成业务对象 new_object，被建表 / 建菜单 / 建权限
+    改为按"顶层有无 id" + "`_` 前缀"两条语义判据后，此处守护该行为不再退化。
     """
 
     SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas"
@@ -591,6 +593,15 @@ class TestObjectDefinitionFilter:
                      "audit_log_expectations", "resource_types"):
             assert name not in ids, f"{name}.yaml 是配置字典，不应注册为对象"
 
+    def test_template_file_is_not_registered(self):
+        """_template.yaml 是给人复制的模板，不得注册成业务对象。"""
+        with tempfile.TemporaryDirectory() as td:
+            objs = self._copy_real_schemas(Path(td))
+        ids = {o.id for o in objs}
+        assert "new_object" not in ids, (
+            "_template.yaml 被注册成业务对象 new_object —— 会导致 sync_schema 建表 "
+            "new_objects、menu_auto_generator 建菜单、permission_sync 建 5 条权限码")
+
     def test_object_definitions_still_registered(self):
         """对象定义仍须正常注册（防止判据过严导致漏注册）。"""
         with tempfile.TemporaryDirectory() as td:
@@ -600,12 +611,11 @@ class TestObjectDefinitionFilter:
             assert expected in ids, f"对象 {expected} 未被注册，判据可能过严"
 
     def test_object_definition_with_id_is_registered(self):
-        """顶层有 id: 的文件必须注册，即使文件名像配置（守护判据按内容而非文件名）。"""
+        """顶层有 id: 且非 `_` 前缀的文件必须注册（判据按内容，不按疑似配置名）。"""
         with tempfile.TemporaryDirectory() as td:
             schemas = Path(td) / "schemas"
             schemas.mkdir()
-            # 刻意用下划线开头 + 疑似配置名，验证不靠文件名判断
-            (schemas / "_looks_like_config.yaml").write_text(
+            (schemas / "looks_like_config.yaml").write_text(
                 "id: real_object\n"
                 "name: 真实对象\n"
                 "table_name: real_objects\n"
@@ -616,6 +626,23 @@ class TestObjectDefinitionFilter:
                 encoding="utf-8")
             objs = self._load_dir(schemas)
         assert [o.id for o in objs] == ["real_object"]
+
+    def test_underscore_prefixed_object_is_skipped(self):
+        """`_` 前缀文件即使带合法 id 也不注册（模板约定优先于内容）。"""
+        with tempfile.TemporaryDirectory() as td:
+            schemas = Path(td) / "schemas"
+            schemas.mkdir()
+            (schemas / "_tpl.yaml").write_text(
+                "id: should_not_register\n"
+                "name: 模板\n"
+                "table_name: tpl_objects\n"
+                "fields:\n"
+                "  - id: code\n"
+                "    name: 编码\n"
+                "    type: string\n",
+                encoding="utf-8")
+            objs = self._load_dir(schemas)
+        assert objs == [], "`_` 前缀文件不应注册为对象"
 
     def test_yaml_without_top_level_id_is_skipped(self):
         """顶层无 id: 的 yaml 不应被注册（守护判据生效）。"""

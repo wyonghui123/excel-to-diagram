@@ -2391,21 +2391,24 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     shared_props = parse_shared_properties(str(dir_path))
     aspects_defs = parse_aspects_yaml(str(dir_path))
     
+    # [2026-10-07] 仅注册"对象定义"文件。schemas/ 目录混放三类 yaml：
+    #   ① 对象定义（顶层有 id:）—— 注册为 MetaObject
+    #   ② 配置字典 / 共享属性（顶层无 id:，内容以业务键为顶层）—— 由各自的消费方
+    #      单独读取（materialization_registry / permission_dimension_api 等），不是对象
+    #   ③ `_` 前缀的内部文件（模板 / 共享片段）—— 约定为"非对象定义"
+    # ②③ 若也走 parse_meta_object，会拿到 id='' 的对象；而 register() 以 id 为键，
+    # 多个这类文件互相覆盖，最终在 registry 里留下一个匿名幽灵对象（table_name /
+    # fields / name 皆空）。多数遍历点自然跳过，但 get_hierarchy_depth() 返回 0，
+    # hierarchy_utils.resolve_object_id_by_depth(0) 存在把幽灵对象当层级对象返回的隐患。
+    # 早期靠硬编码文件名黑名单规避，漏进来的会静默注册（role_effective_intents.yaml
+    # 无 id；_template.yaml 有 id 但按约定是模板），故改为按语义判据而非文件名清单。
     for yaml_file in dir_path.glob("*.yaml"):
+        if yaml_file.name.startswith("_"):
+            print("[YAML Loader] Skipped ('_' prefix, not an object definition): {0}".format(yaml_file.name))
+            continue
         obj = load_yaml_file(str(yaml_file), shared_props=shared_props, aspects_defs=aspects_defs if aspects_defs else None)
         if obj is None:
             continue
-        # [2026-10-07] 仅注册"对象定义"文件。schemas/ 目录混放两类 yaml：
-        #   ① 对象定义（顶层有 id:）—— 注册为 MetaObject
-        #   ② 配置字典 / 共享属性（顶层无 id:，内容以业务键为顶层）—— 由各自的
-        #      消费方单独读取（materialization_registry / permission_dimension_api 等），
-        #      不是对象
-        # ② 若也走 parse_meta_object，会拿到 id='' 的对象，且因 register() 以 id
-        # 为键，多个这类文件会互相覆盖，最终在 registry 里留下一个匿名幽灵对象。
-        # 该幽灵对象 table_name 为空、fields 为空，多数遍历点自然跳过，但
-        # get_hierarchy_depth() 返回 0，层级解析存在被误判的隐患。
-        # 早期靠硬编码文件名黑名单规避，漏进来的（如 role_effective_intents.yaml）
-        # 会静默注册，故改为按"顶层有无 id"这一语义判据。
         if not obj.id:
             print("[YAML Loader] Skipped (no top-level 'id', not an object definition): {0}".format(yaml_file.name))
             continue
