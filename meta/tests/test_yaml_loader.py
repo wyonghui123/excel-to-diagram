@@ -9,6 +9,8 @@ pytestmark = pytest.mark.unit
 
 import pytest
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 
@@ -541,3 +543,88 @@ class TestFieldTypeResolution:
 
         with pytest.raises(UnknownFieldTypeError):
             load_yaml_file(str(p))
+
+
+class TestObjectDefinitionFilter:
+    """[2026-10-07] load_yaml_directory 只注册"对象定义"文件。
+
+    schemas/ 目录混放两类 yaml：
+      ① 对象定义（顶层有 id:）—— 注册为 MetaObject
+      ② 配置字典 / 共享属性（顶层无 id:）—— 由专门消费方单独读取
+
+    原实现靠硬编码文件名黑名单（shared_properties / aspects /
+    _standard_actions / _action_groups）区分，新加的字典类文件漏进黑名单就会
+    被静默注册成 id='' 的幽灵对象（role_effective_intents.yaml 即如此）。
+    改为按"顶层有无 id"这一语义判据后，此处守护该行为不再退化。
+    """
+
+    SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas"
+
+    @staticmethod
+    def _load_dir(schemas_path):
+        from meta.core.yaml_loader import load_yaml_directory
+        return load_yaml_directory(str(schemas_path))
+
+    def _copy_real_schemas(self, tmp_path):
+        """把真实 schemas 目录复制到 tmp，避免污染仓库。"""
+        (tmp_path / "schemas").mkdir()
+        for src in self.SCHEMA_DIR.glob("*.yaml"):
+            shutil.copy2(src, tmp_path / "schemas" / src.name)
+        return self._load_dir(tmp_path / "schemas")
+
+    def test_real_schemas_have_no_empty_id_object(self):
+        """真实 schemas 全量加载后，不得出现空 id 对象。"""
+        with tempfile.TemporaryDirectory() as td:
+            objs = self._copy_real_schemas(Path(td))
+        ids = [o.id for o in objs]
+        assert "" not in ids, "存在 id 为空的幽灵对象，说明无 'id:' 的 yaml 漏过判据"
+        assert all(ids), f"存在空 id: {[i for i in ids if not i]}"
+
+    def test_config_dict_files_are_skipped(self):
+        """已知配置字典类文件不应被注册为对象。"""
+        with tempfile.TemporaryDirectory() as td:
+            objs = self._copy_real_schemas(Path(td))
+        ids = {o.id for o in objs}
+        # 这些文件的顶层是业务键而非 id，各有专门消费方
+        for name in ("shared_properties", "aspects", "_standard_actions",
+                     "_action_groups", "_audit_materialization",
+                     "audit_log_expectations", "resource_types"):
+            assert name not in ids, f"{name}.yaml 是配置字典，不应注册为对象"
+
+    def test_object_definitions_still_registered(self):
+        """对象定义仍须正常注册（防止判据过严导致漏注册）。"""
+        with tempfile.TemporaryDirectory() as td:
+            objs = self._copy_real_schemas(Path(td))
+        ids = {o.id for o in objs}
+        for expected in ("address", "key_schema", "factor_catalog", "item"):
+            assert expected in ids, f"对象 {expected} 未被注册，判据可能过严"
+
+    def test_object_definition_with_id_is_registered(self):
+        """顶层有 id: 的文件必须注册，即使文件名像配置（守护判据按内容而非文件名）。"""
+        with tempfile.TemporaryDirectory() as td:
+            schemas = Path(td) / "schemas"
+            schemas.mkdir()
+            # 刻意用下划线开头 + 疑似配置名，验证不靠文件名判断
+            (schemas / "_looks_like_config.yaml").write_text(
+                "id: real_object\n"
+                "name: 真实对象\n"
+                "table_name: real_objects\n"
+                "fields:\n"
+                "  - id: code\n"
+                "    name: 编码\n"
+                "    type: string\n",
+                encoding="utf-8")
+            objs = self._load_dir(schemas)
+        assert [o.id for o in objs] == ["real_object"]
+
+    def test_yaml_without_top_level_id_is_skipped(self):
+        """顶层无 id: 的 yaml 不应被注册（守护判据生效）。"""
+        with tempfile.TemporaryDirectory() as td:
+            schemas = Path(td) / "schemas"
+            schemas.mkdir()
+            (schemas / "some_dict.yaml").write_text(
+                "alpha: 1\n"
+                "beta: 2\n",
+                encoding="utf-8")
+            objs = self._load_dir(schemas)
+        assert objs == [], "无顶层 id 的配置字典不应产生对象"
