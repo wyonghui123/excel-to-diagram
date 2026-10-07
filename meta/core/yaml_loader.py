@@ -171,12 +171,32 @@ FIELD_TYPE_MAP = {
     # （既有测试因 `_to_num` 归一而未暴露）。归入 FLOAT 而非 INTEGER——
     # 金额与数量本就允许小数。
     "number": FieldType.FLOAT,
+    # 【补 2026-10-07】与 `number` 同源的漏登记（实测 `parse_field` 逐个取证）：
+    # 三者都是 yaml 侧既有写法，此前静默回落 STRING ——
+    #   timestamp ×9（created_at / updated_at 被建成 VARCHAR）
+    #   decimal   ×3（ai_async_task.cost / task_execution.cost 等**金额存成文本**）
+    #   date      ×3（含 rate_record.valid_from / valid_to —— 定价查表的有效期列）
+    # 归法同 `number`：date / timestamp → DATETIME，decimal → FLOAT。
+    "timestamp": FieldType.DATETIME,
+    "date": FieldType.DATETIME,
+    "decimal": FieldType.FLOAT,
     "boolean": FieldType.BOOLEAN,
     "bool": FieldType.BOOLEAN,
     "datetime": FieldType.DATETIME,
     "text": FieldType.TEXT,
     "json": FieldType.JSON,
 }
+
+
+class UnknownFieldTypeError(ValueError):
+    """yaml 字段 `type:` 取值不在 `FIELD_TYPE_MAP` 中（2026-10-07 起不再静默回落 STRING）。
+
+    【为什么抛错而非回落】`number` / `timestamp` / `date` / `decimal` 四处漏登记的
+    历史代价是：金额列被建成 VARCHAR、字符串比较 `'9' > '10'` 为真、日期按文本比较。
+    静默回落把这些缺陷全藏成"能跑"。`load_yaml_file` 对本异常**不吞**
+    （同 `DeprecatedSchemaSectionError`）——否则一个拼错的类型只会让对象静默消失。
+    """
+
 
 RELATION_TYPE_MAP = {
     "parent_child": RelationType.PARENT_CHILD,
@@ -1300,9 +1320,27 @@ def parse_action_parameter(data: Dict[str, Any]) -> ActionParameter:
     )
 
 
+def _resolve_field_type(type_str: str, field_id: Any = None) -> "FieldType":
+    """解析 yaml 字段 `type:`；未知取值抛 `UnknownFieldTypeError`。
+
+    `varchar(n)` / `char(n)`（raw DDL 写法）按 `string` 处理——legacy 方言
+    （如 `role_effective_intents.yaml`）用它声明列宽，长度应另由 `max_length` 承载。
+    """
+    if type_str in FIELD_TYPE_MAP:
+        return FIELD_TYPE_MAP[type_str]
+    if type_str.endswith(")") and type_str.startswith(("varchar(", "char(")):
+        inner = type_str[type_str.index("(") + 1:-1].strip()
+        if inner.isdigit():
+            return FieldType.STRING
+    raise UnknownFieldTypeError(
+        "字段 {0!r} 的 type={1!r} 不在 FIELD_TYPE_MAP 中；合法取值: {2}"
+        "（varchar(n)/char(n) 亦按 string 处理）".format(
+            field_id, type_str, ", ".join(sorted(FIELD_TYPE_MAP))))
+
+
 def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
-    field_type_str = data.get("type", "string").lower()
-    field_type = FIELD_TYPE_MAP.get(field_type_str, FieldType.STRING)
+    field_type_str = str(data.get("type", "string")).lower()
+    field_type = _resolve_field_type(field_type_str, data.get("id"))
 
     storage_str = data.get("storage", "stored").lower()
     storage = FIELD_STORAGE_MAP.get(storage_str, FieldStorage.STORED)
@@ -2233,7 +2271,7 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
         if cache_key:
             _yaml_cache[cache_key] = obj
         return obj
-    except DeprecatedSchemaSectionError:
+    except (DeprecatedSchemaSectionError, UnknownFieldTypeError):
         raise
     except Exception as e:
         print("[YAML Loader] Error loading {0}: {1}".format(file_path, str(e)))

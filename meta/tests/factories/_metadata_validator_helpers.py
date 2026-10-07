@@ -58,3 +58,15 @@ def seed_validator_test_db(ds) -> None:
         )
     """)
     ds.execute("INSERT INTO test_orders (id, customer_code, product_code, amount, version_id) VALUES (1, 'CUST-001', 'PROD-001', 100, 100)")
+
+    # [C-T0-12 2026-10-07] 声明式取值集校验(_check_value_set)的目标表。
+    # 用**真实对象** factor_catalog 的表名/列名(registry 已加载), 使用例校验的是
+    # 真实 wiring —— 即 key_schema.key_fields 的元素须取自 factor_catalogs.field_id。
+    ds.execute("""
+        CREATE TABLE factor_catalogs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            field_id TEXT
+        )
+    """)
+    ds.execute("INSERT INTO factor_catalogs (id, field_id) VALUES (1, 'customer')")
+    ds.execute("INSERT INTO factor_catalogs (id, field_id) VALUES (2, 'material')")

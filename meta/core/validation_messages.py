@@ -46,6 +46,9 @@ _ZH_CN_MESSAGES = {
     "validation.field.no_delete": "{field_name} 为 {value} 时不可删除",
     "validation.field.unique_scope": "{field_name} 在范围内不唯一",
     "validation.field.fk_not_found": "引用的{target_name} '{value}' 不存在（字段：{field_name}）",
+    # [C-T0-12 2026-10-07] 声明式"取值集"校验（field.semantics.custom.value_set_from）
+    "validation.field.value_set_invalid": "{field_name} 含无效取值：{invalid}（须取自{target_name}的既有取值）",
+    "validation.field.value_set_shape": "{field_name} 须为取值数组（形如 [\"customer\",\"material\"]）",
     # [NEW v1.2.13 2026-06-19] 区分单/多字段业务关键字
     # [P4 2026-06-19] 移除【】技术标签，业务化为"编号"
     "validation.object.business_key_single": "编号「{field_name}」值已存在：{value}",

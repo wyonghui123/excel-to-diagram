@@ -502,5 +502,81 @@ class TestValidationDetailToDict:
         assert d["params"]["field_name"] == "用户名"
 
 
+class TestCheckValueSet:
+    """[C-T0-12 2026-10-07] 声明式"取值集"校验（`semantics.custom.value_set_from`）。
+
+    真实用例 = `key_schema.key_fields`（数组元素须取自 `factor_catalog.field_id`）。
+    本类用**真实注册表里的 factor_catalog** + 助手表 `factor_catalogs`，
+    校验的是真实 wiring，而非另造一套夹具。
+    """
+
+    _SPEC = {'value_set_from': {'object': 'factor_catalog', 'field': 'field_id'}}
+
+    def _key_schema_obj(self, spec=None):
+        semantics = SemanticAnnotation(custom=spec or self._SPEC)
+        return _make_object("test_key_schema", "test_key_schemas", [
+            _make_field("key_fields", "匹配字段", field_type=FieldType.JSON,
+                        required=True, semantics=semantics),
+        ])
+
+    def test_valid_elements_pass(self, validator, ds):
+        errors = validator.validate_create(
+            self._key_schema_obj(), {'key_fields': ['customer', 'material']})
+        assert errors == []
+
+    def test_unknown_element_rejected(self, validator, ds):
+        errors = validator.validate_create(
+            self._key_schema_obj(), {'key_fields': ['customer', 'nosuch_factor']})
+        assert len(errors) == 1
+        assert errors[0].rule == "value_set_from"
+        assert errors[0].field_id == "key_fields"
+        assert "nosuch_factor" in errors[0].message
+
+    def test_json_text_form_is_parsed(self, validator, ds):
+        """json 列从库 / 导入进来可能是文本形式（`'["customer"]'`）。"""
+        obj = self._key_schema_obj()
+        assert validator.validate_create(obj, {'key_fields': '["customer"]'}) == []
+        errors = validator.validate_create(
+            obj, {'key_fields': '["customer", "nosuch_factor"]'})
+        assert len(errors) == 1
+        assert "nosuch_factor" in errors[0].message
+
+    def test_non_array_shape_rejected(self, validator, ds):
+        """声明是"取值数组"，标量值不合形状 —— 报错而非静默放行。"""
+        errors = validator.validate_create(
+            self._key_schema_obj(), {'key_fields': 'customer'})
+        assert len(errors) == 1
+        assert errors[0].rule == "value_set_from"
+
+    def test_update_path_also_checked(self, validator, ds):
+        errors = validator.validate_update(
+            self._key_schema_obj(), {'key_fields': ['nosuch_factor']}, exclude_id=1)
+        assert "value_set_from" in [e.rule for e in errors]
+
+    def test_unknown_target_object_fails_open(self, validator, ds):
+        """目标对象解析不到 → 放行留痕（与 TBD-13 的 fail-open 口径一致）。"""
+        obj = self._key_schema_obj(
+            {'value_set_from': {'object': 'no_such_object', 'field': 'x'}})
+        assert validator.validate_create(obj, {'key_fields': ['whatever']}) == []
+
+    def test_no_declaration_means_no_check(self, validator, ds):
+        """未声明该属性 → 干净跳过（不引入全局新失败）。"""
+        obj = _make_object("test_key_schema", "test_key_schemas", [
+            _make_field("key_fields", "匹配字段", field_type=FieldType.JSON),
+        ])
+        assert validator.validate_create(obj, {'key_fields': ['whatever']}) == []
+
+    def test_real_key_schema_declares_value_set_from(self):
+        """真实 wiring 守护：key_schema.yaml 的 key_fields 必须带这条声明。"""
+        from meta.core.models import registry
+
+        ks = registry.get('key_schema')
+        assert ks is not None, "registry 未加载 key_schema"
+        f = next((x for x in ks.fields if x.id == 'key_fields'), None)
+        assert f is not None
+        assert f.semantics.custom.get('value_set_from') == {
+            'object': 'factor_catalog', 'field': 'field_id'}
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])

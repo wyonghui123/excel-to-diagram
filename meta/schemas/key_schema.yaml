@@ -129,6 +129,15 @@ fields:
     semantics:
       meaning: 组成该键的因子字段名数组；本期结构冻结，只能选既有因子
       display_detail: true
+      # 【C-T0-12 执行手段 · 2026-10-07】取值集约束（声明式）。
+      # 元素须取自 factor_catalog.field_id 的既有取值；由
+      # MetadataDrivenValidator._check_value_set 通用消费（它不认识本对象，
+      # 只认这条声明）——"结构冻结"由此从文字约定变成写入即拦。
+      # 注：custom 内的键不会被 parse_semantics 丢弃（其余未登记键会被丢弃）。
+      custom:
+        value_set_from:
+          object: factor_catalog
+          field: field_id
     ui:
       widget: tags
       editable: false

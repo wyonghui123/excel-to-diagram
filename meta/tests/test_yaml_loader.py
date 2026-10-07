@@ -483,3 +483,61 @@ class TestAssociationDerivation:
         assert assoc.hierarchy == False
         assert assoc.foreign_key_field is None
         assert assoc.cascade_delete == False
+
+
+class TestFieldTypeResolution:
+    """`parse_field` 类型解析：别名映射 + 未知类型 fail-fast（2026-10-07）。
+
+    背景：`timestamp` / `date` / `decimal` 与更早的 `number` 同属"yaml 侧既有写法
+    但没登记进 `FIELD_TYPE_MAP`"，此前静默回落 STRING（金额列建为 VARCHAR）。
+    """
+
+    def test_legacy_aliases_map_to_numeric_or_datetime(self):
+        from meta.core.models_enums import FieldType
+        from meta.core.yaml_loader import parse_field
+
+        cases = {
+            'timestamp': FieldType.DATETIME,
+            'date': FieldType.DATETIME,
+            'decimal': FieldType.FLOAT,
+            'number': FieldType.FLOAT,
+        }
+        for declared, expected in cases.items():
+            f = parse_field({'id': 'x_' + declared, 'name': 'X',
+                             'type': declared})
+            assert f.field_type == expected, declared
+
+    def test_varchar_with_length_maps_to_string(self):
+        """raw DDL 写法 `varchar(n)` / `char(n)` 按 string 处理（legacy 方言）。"""
+        from meta.core.models_enums import FieldType
+        from meta.core.yaml_loader import parse_field
+
+        for declared in ('varchar(100)', 'varchar(20)', 'char(4)'):
+            f = parse_field({'id': 'x', 'name': 'X', 'type': declared})
+            assert f.field_type == FieldType.STRING, declared
+
+    def test_unknown_type_raises_not_falls_back(self):
+        """拼错的类型必须报错——静默回落 STRING 正是这类缺陷的温床。"""
+        from meta.core.yaml_loader import UnknownFieldTypeError, parse_field
+
+        with pytest.raises(UnknownFieldTypeError) as exc:
+            parse_field({'id': 'bad', 'name': 'X', 'type': 'strin'})
+        assert 'strin' in str(exc.value)
+
+    def test_load_yaml_file_does_not_swallow_unknown_type(self, tmp_path):
+        """`load_yaml_file` 的兜底 except 不得吞掉本异常（否则对象静默消失）。"""
+        from meta.core.yaml_loader import UnknownFieldTypeError, load_yaml_file
+
+        p = tmp_path / 'bad_field_type.yaml'
+        p.write_text(
+            "id: bad_type_obj\n"
+            "name: 坏类型\n"
+            "table_name: bad_type_objs\n"
+            "fields:\n"
+            "  - id: x\n"
+            "    name: X\n"
+            "    type: strin\n",
+            encoding='utf-8')
+
+        with pytest.raises(UnknownFieldTypeError):
+            load_yaml_file(str(p))

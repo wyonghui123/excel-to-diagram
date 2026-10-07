@@ -14,6 +14,7 @@
 - indexes 复合唯一索引
 """
 
+import json
 import re
 import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
@@ -47,6 +48,7 @@ class MetadataDrivenValidator:
             errors.extend(self._check_max_length(field, field_value, field_name))
             errors.extend(self._check_enum_values(field, field_value, field_name))
             errors.extend(self._check_fk_existence(field, field_value, field_name, data))
+            errors.extend(self._check_value_set(field, field_value, field_name))
 
         errors.extend(self._check_business_key_composite(meta_object, data))
         errors.extend(self._check_unique_indexes(meta_object, data))
@@ -76,6 +78,8 @@ class MetadataDrivenValidator:
                     errors.extend(self._check_enum_values(field, field_value, self._get_field_name(meta_object, field)))
                     errors.extend(self._check_fk_existence(field, field_value,
                                                             self._get_field_name(meta_object, field), data))
+                    errors.extend(self._check_value_set(field, field_value,
+                                                        self._get_field_name(meta_object, field)))
 
         errors.extend(self._check_business_key_composite(meta_object, data, exclude_id=exclude_id))
         errors.extend(self._check_unique_indexes(meta_object, data, exclude_id=exclude_id))
@@ -321,6 +325,106 @@ class MetadataDrivenValidator:
             logger.debug("[fk_existence] %s.%s 存在性检查查询失败, 本次跳过: %s",
                          target_object, field.id, e)
         return []
+
+    def _check_value_set(self, field: 'MetaField', value: Any,
+                         field_name: str) -> List[ValidationDetail]:
+        """[C-T0-12 · 2026-10-07] 声明式"取值集"校验。
+
+        声明位置: `field.semantics.custom['value_set_from']`, 形如
+            {object: factor_catalog, field: field_id}
+        语义: 本字段的取值(数组则逐元素)**必须**出现在目标对象该字段的既有取值中。
+
+        [为什么要它] `key_schema.key_fields` 是 json 字符串数组(元素取自
+        `factor_catalog.field_id`), C-T0-12 要求"只能从既有因子中选、不得增删 PK",
+        但此前该约束**零执行手段**——`key_fields` 运行时代码零引用, 实测取证见
+        Spec TBD-14。此前唯一的效果是: 填错的因子名会被 `rate_record.keys{}`
+        静默匹配不上, 表现为"价目表配了却永不命中"。
+
+        [为什么做成通用属性] 本方法**不认识任何具体对象**——只认这条声明,
+        故别的对象(如"某字段须取自 uom.code")可复用同一属性, 不必在通用校验器里
+        加 `if object_id == 'key_schema'` 之类的特例分支。
+
+        [fail-open 口径] 与 TBD-13 的 `_check_fk_existence` 一致: 目标对象/字段
+        解析不到、或查询抛错时**放行并留痕**, 不把存量脏数据变成阻断。
+        """
+        custom = getattr(field.semantics, 'custom', None) or {}
+        spec = custom.get('value_set_from') if isinstance(custom, dict) else None
+        if not spec or not isinstance(spec, dict):
+            return []
+
+        target_object = spec.get('object')
+        target_field = spec.get('field')
+        if not target_object or not target_field:
+            return []
+
+        elements = self._as_value_list(value)
+        if elements is None:
+            return [ValidationDetail(
+                field_id=field.id, field_name=field_name, rule="value_set_from",
+                message=ValidationMessageRegistry.get(
+                    "validation.field.value_set_shape", field_name=field_name),
+                i18n_key="validation.field.value_set_shape",
+                params={"field_name": field_name, "value": value}
+            )]
+
+        from meta import get_meta_object
+        target_meta = get_meta_object(target_object)
+        if not target_meta:
+            logger.debug("[value_set_from] 目标对象 %s 不存在, %s.%s 本次跳过",
+                         target_object, field.id, spec)
+            return []
+        target_meta_field = next(
+            (f for f in getattr(target_meta, 'fields', []) if f.id == target_field),
+            None)
+        if target_meta_field is None:
+            logger.debug("[value_set_from] 目标字段 %s.%s 不存在, 本次跳过",
+                         target_object, target_field)
+            return []
+
+        invalid = []
+        try:
+            for el in elements:
+                cursor = self.ds.execute(
+                    "SELECT 1 FROM {0} WHERE {1} = ? LIMIT 1".format(
+                        target_meta.table_name, target_meta_field.db_column),
+                    (el,))
+                if not cursor.fetchone():
+                    invalid.append(el)
+        except Exception as e:
+            logger.debug("[value_set_from] %s.%s 取值集查询失败, 本次跳过: %s",
+                         target_object, field.id, e)
+            return []
+
+        if not invalid:
+            return []
+        return [ValidationDetail(
+            field_id=field.id, field_name=field_name, rule="value_set_from",
+            message=ValidationMessageRegistry.get(
+                "validation.field.value_set_invalid",
+                field_name=field_name,
+                invalid="、".join(str(x) for x in invalid),
+                target_name=target_meta.name or target_object),
+            i18n_key="validation.field.value_set_invalid",
+            params={"field_name": field_name, "invalid": invalid,
+                    "target_name": target_meta.name or target_object}
+        )]
+
+    @staticmethod
+    def _as_value_list(value: Any) -> Optional[List[Any]]:
+        """把字段值归一成"待校验的取值列表"; 形状不是数组/数组文本时返回 None。
+
+        json 列从 API 进来是 list, 从库/导入进来可能是 `'["customer"]'` 文本。
+        """
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (TypeError, ValueError):
+                return None
+            if isinstance(parsed, list):
+                return parsed
+        return None
 
     def _pick_prefer_code_for_error(self, value: Any, data: Dict[str, Any],
                                       field: 'MetaField', target_meta) -> str:
