@@ -907,7 +907,7 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 | **T2-2 计算过程执行器** | ✅ **已交付** | `meta/core/calc_procedure_executor.py` + `meta/tests/test_calc_procedure_executor.py`（34 用例）。实现 FR-005（**算子注册表**落地 C5：新增算子 = 注册一个函数，不改引擎）/ FR-006（基四字段 + `rolling` 与 `base_step` **互斥校验**）/ FR-007（步骤间 additive + 逐层小计 + `rolling` 覆盖）/ NFR-002（**双防线**：字符白名单 + AST 白名单，**禁 `eval`**）。11 个算子已注册 |
 | **T1-1 ~ T1-3 结果链三表** | ✅ **已交付** | `calc_procedure`（13 列 · 轴③ `result_semantic` 六值 + `procedure_type` 不写死 price）/ `calc_result`（38 列 · **泛化宿主** `document_type`+`document_id`+`document_line_id`可空+`level`，本期**先挂头级**）/ `calc_detail`（28 列 · `running_net_amount` + `factor_snapshot` + `hit_ids`/`skipped_candidates` 回放骨架）。`registry.reload` 79 对象，**10 张表实测建表全部成功**，conflict_key / business_key / 四块齐全 / 19 项 T1 专项口径逐项通过 |
 | **T1-4 定价编排服务** | ✅ **已交付** | `meta/services/pricing_service.py` + `meta/tests/test_pricing_service.py`（**54 用例**，真建表 + 真跑全链路）。把 T2 内核与 T1 配置链串成一条：`price_line`（查表 → 算过程 → 落结果+明细）/ `explain`（IF-002 回放）/ **`write_back`（TBD-9 ② 结果按 `result_semantic` 写回单据字段）** / 有效期过滤 / 草稿价目表拒绝 / dry-run / **FR-016 条件更新（累计用量触顶自动失效 + 落库同事务累加）**。**全程零 `order_line`、零主数据依赖**（有专项用例守护） |
-| **T1-5 定价 API 层** | ✅ **已交付** | `meta/api/pricing_api.py` + `meta/tests/test_pricing_api.py`（**30 用例**，Flask `test_client` 契约测试）。暴露 IF-001/002/003 三条端点；**只做参数校验 + 响应包装**，业务全在服务层。已注册于 `meta/server.py:create_app()`（**实测 `url_map` 三条路由俱在**）|
+| **T1-5 定价 API 层** | ✅ **已交付** | `meta/api/pricing_api.py` + `meta/tests/test_pricing_api.py`（**46 用例**，Flask `test_client` 契约测试）。暴露 IF-001/002/003 三条端点；**只做参数校验 + 响应包装**，业务全在服务层。已注册于 `meta/server.py:create_app()`（**实测 `url_map` 三条路由俱在**）。**2026-10-07 追加 IF-004 `/allocate`**（契约用例 +16，30 → 46，见 §9.3.3 M6 注记）|
 | **T1-6 阶梯取价（FR-009）** | ✅ **已交付** | `lookup_resolver.resolve_scale`（费率记录**自带档位** · 产**费率**）+ `calc_procedure_executor._tier_bounds`/`_op_tier`（过程**内联档位** · 产**金额**）+ 服务层接线（`scale_qty=base` / 三处改读 `LookupResult.rates`）。两语义（`total` 整单取档 / `incremental` 逐档累进）**同义**由 `TestScaleParity` 逐例守护；服务层 `TestFR009阶梯链路` 5 用例覆盖全链路 + 写回防护 |
 | **TBD-14 验证**（key_schema 是否废表） | 🔍 **已取证，结论：暂不废表**（原定「观察一个周期」不具备条件，详见下方注记） | 代码级取证三条：① `key_fields` **运行时代码零引用**（全仓 `meta/` 内仅见于 yaml 注释与测试夹具），匹配实际只走 `rate_records.keys{}` 逐键比对（`lookup_resolver._matches`）；② `key_schema` ↔ `rate_table` **无任何绑定关系**（`rate_table.yaml` 零 `key_schema` 引用），复用通道是 `rate_records.key_schema_id`，**结构上允许**一钥多表；③ 现存 DB 无定价数据（`meta/architecture.db` 12 张定价表**全 0 行**，`data/*.db` 无定价表），**无法观测复用是否真实发生** |
 | **P2 六对象补齐**（§9.3.1 已声明未落地） | ✅ **已交付** | `meta/schemas/` 六个对象：`allocation_rule`（`basis` 六值 · FR-013）/ `adjustment`（`adjustment_type` 七值含 `override` · FR-014）/ `usage_group`（三上限 · FR-016）/ `cumulative_usage`（FR-016）/ `external_rate_source`（`source` 五值 · FR-015）/ `pricing_period`（`period_type` 四值 + `average_basis` 四值 · FR-015）。`meta/tests/test_pricing_p2_schemas.py`（**69 用例**）逐项守护：注册与 `table_name` · DDL 真建表 · FK 子句**逐条**（含列名）· `pricing_period_id` 已为 INTEGER · 枚举**逐值** + `is_initial` 唯一 · **FK 真约束**（悬空引用抛 `IntegrityError` / 可空 NULL 放行）· 删除保护反补。**六对象零主数据依赖**（C-T0-6） |
@@ -916,12 +916,19 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 > ① **平台级 FK 生成缺口（已修）**：`SchemaGenerator._generate_foreign_key` 原先**只对 `PARENT_CHILD` 生成 FK**，且 FK 列名写死 `{target_object}_id`、**完全忽略 `source_field`**。后果有二：yaml 中以 `type: reference` 声明的真引用被**静默丢弃**；`adjustments.original_result_id → calc_result` 会推出**表内不存在的 `calc_result_id`**，建表即失败。现把 `REFERENCE`（须显式声明 `source_field`）纳入生成门，并让 FK 列名优先取 `source_field`。**实测影响面**：全仓 13 条 `reference` 关系，其中 4 条无 `source_field` 被新门挡掉，仅 **2 条存量关系**（`change_events.audit_log_id→audit_logs`、`change_subscriptions.user_id→users`）新获 FK——两者目标表与源列均存在，且既有测试用手写 DDL 建表（无 FK 子句）故不受影响；
 > ② **`calc_result.pricing_period_id` 由 string 收紧为 INTEGER**（原按 `pricing_periods.code` 引用 → 改按 `id`），与其余 `*_id` 口径统一；`data/app.db` 实测**无任何 `calc_*` / `rate_*` 表**，故无存量数据风险。注：`schema_generator` 只支持 CREATE + ADD COLUMN，类型变更**仅对新建库生效**；
 > ③ **删除保护反补**：`allocation_rule` / `external_rate_source` / `pricing_period` 的 `restrict_on` 登记服务层友好提示（指向 `calc_results.*`），`calc_result.restrict_on` 登记 `adjustments.original_result_id`；DB 级 FK 兜底。口径与同期 foundation 的 `address` / `calendar` 做法一致；
-> ④ **仍待接线的部分**：这六个对象目前是**声明已落地、端点未实现**——`allocate`（P4/M6）/ `reprice`（P6/M8）仍待开工；`conversion` **不在 §9.3.1 清单内**且已由 D19 / TBD-10 后置 P6，本轮不含。条件更新累计（`cumulative_usage` / `usage_group`）已于下条接线。
+> ④ **仍待接线的部分**：这六个对象目前是**声明已落地、端点未实现**——`allocate`（P4/M6）已于 2026-10-07 交付（见 §9.3.3 M6 注记）；`reprice`（P6/M8）**本期后置**；`conversion` **不在 §9.3.1 清单内**且已由 D19 / TBD-10 后置 P6，本轮不含。条件更新累计（`cumulative_usage` / `usage_group`）已于下条接线。
+>
+> **`reprice` 后置的取证结论（2026-10-07）**：比原登记的更不 ready，故本期不实装而非"排期靠后"——
+> ① `PricingService` **无 `recalc` 方法**（`price_line` / `explain` / `write_back` 三条，无重算入口）；
+> ② `freeze_policy` / `reprice_trigger` / `fact_snapshot` 三列**只在测试里被断言存在，生产代码零读写**——即 §9.3.1 D 表登记的 FR-012 策略元数据与 FR-015 回放要素**全是死字段**；
+> ③ `external_rate_sources` / `pricing_periods` 两张表**已建但零服务代码**（与 `allocation_rule` 交付前的状态完全同构）；
+> ④ 叠加下条 ③ 登记的「重算会重复计数」代价（`cumulative_usage` 只增不减），实装须一并处理冲销，跨两个 FR 的改动面。
+> 结论：**先接线重算链路（FR-015 事实源 + 策略字段读侧），再开端点**，否则 `reprice` 只是一个会写错数的壳。
 >
 > **M5 实施注记 · FR-016 条件更新 + FR-012 策略元数据**（2026-10-06）：
 > ① **读侧——"用满"复用 `inactive` 通道**（对标 SAP Condition Update `KOUPD`）。`load_candidates` 装载后 JOIN `cumulative_usages × usage_groups`，三维度（`used_amount`/`max_amount`、`used_quantity`/`max_quantity`、`used_documents`/`max_documents`）任一 `used >= cap` 即置 `inactive`（`cap` 为 NULL = 该维度不限）。**不新增第三种跳过原因**：失效是**配置状态**而非异常，故与"停用"走同一条回放路径（记 `record_inactive`）；
 > ② **写侧——累计用量与结果落库同事务**。`_persist_with_invalidate` 的 `transaction()` 与 `SAVEPOINT` **两个分支均已接入** `_accumulate_usage`（金额累加本次 `net`、数量累加计算基 `base`、单据数 +1，**按命中候选逐条各计一次**）。同事务是硬要求：分开写会出现"结果已生效但用量没计"，下次取价仍判未触顶 = **超发**。**已用测试逐项守护**：明细写失败（故障注入）时累计一并回滚；
-> ③ **已知代价（本期不做）**：**重算会重复计数**——重算先作废旧结果，累计只增不减。取舍理由是「手工冲销累计值」对标 SAP 亦然，本期不做自动冲销；`reprice` 端点（M8/P6）落地时须一并处理；
+> ③ **已知代价（本期不做）**：**重算会重复计数**——重算先作废旧结果，累计只增不减。取舍理由是「手工冲销累计值」对标 SAP 亦然，本期不做自动冲销；`reprice` 端点（M8/P6）落地时须一并处理（该端点已于 2026-10-07 **取证后本期后置**，见上条 `reprice` 后置结论——本项为其落地的前置条件之一，不因后置而消失）；
 > ④ **FR-012 三策略字段已落 `calc_result`**（§9.3.1 D 表补齐）：`freeze_policy`（`recompute`/`freeze`）、`reprice_trigger`（7 值，**空 = 不自动重定价**）、`qty_basis`（7 值）。三者在 Spec 层**一次给全枚举**（D17 设计侧③），实施侧**只实装依赖已就绪者**——`on_quality_result` / `on_pricing_period_end` / `dry_weight` / `net_dry_weight` / `assayed_content` 的枚举**先声明后接线**（依赖 FR-015 事实源与 UoM 换算，后者由 TBD-10 后置 P6）。落库时**须为 NULL**（红线：已开票/已过账行不得隐式重定价），已用测试锁定；
 > ⑤ **缺表容错**：读侧与写侧均 `try/except` 兜底并 `logger.debug`——`cumulative_usages` / `usage_groups` 属 P2 对象，晚于 T0 交付，早期库无此表，**不得阻断取价**。
 
@@ -1238,13 +1245,24 @@ Agent 时代配置的**本质变化是作用域**，不是格式。当前三件�
 | **422** | **改配置** | `ResolutionError`（候选消解失败：权重和不归一等）；`CalculationError`（未注册算子等结构性矛盾） |
 | **401** | 未认证 | `login_required`（三条端点均要求登录） |
 
-**尚未实现（P4 / P6）**
+**尚未实现（P6）**
 
-- **分摊执行**：`POST /api/v1/pricing/allocate`（FR-013 / FR-014）——依赖 `allocation_rule`（P2 未落地的 5 张表之一），**P4 实装**。
-- **重算**：`POST /api/v1/pricing/reprice`（FR-015）——依赖 `reprice_trigger` 消费链与 `external_rate_source` / `pricing_period`，**P6 实装**。
+- ~~**分摊执行**：`POST /api/v1/pricing/allocate`（FR-013 / FR-014）~~ —— ✅ **P4/M6 已交付（2026-10-07）**，详见下方注记。
+- **重算**：`POST /api/v1/pricing/reprice`（FR-015）——依赖 `reprice_trigger` 消费链与 `external_rate_source` / `pricing_period`，**本期后置**（取证结论见注记，非"未开工"而是"不具备开工条件"）。
 
 > 端点命名与既有 API 风格（`/api/v1/<module>/<resource>`、`_response_contract` 的 `ok` / `error_response`）一致；
 > **命名已于 v1.6 落地**（TBD-3 结项），后续增补端点沿用同一 prefix 与错误码分界。
+
+> **M6 实施注记 · FR-013 分摊执行（2026-10-07）**：
+> ① **不是纯接线**。原登记"依赖 P2 未落地的 `allocation_rule`"**经实测不成立**：`allocation_rules` 表与 12 字段 schema 早已落地，但 `allocation_rule` 在 `meta/services` 内**零服务代码**——即 FR-013 AC 的"分摊基数是可配枚举"与"可回放"两条是**死字段**。故本轮实装的是服务能力本身，不是端点壳。
+> ② **`floor` 与守恒的冲突取 waterfall 迭代**：一次钳制 `max(v, floor)` 会抬高 Σ 破坏守恒；实现把低于 floor 的行**钉住**，余额在未触顶行按原权重重分，迭代至不动点。`n × floor > total` 数学无解时**抛 422 而非静默截断**——截断会让"摊得总额 ≠ 待摊总额"，是分摊最忌的静默错误。
+> ③ **`rounding` 与 `scale` 分工**：`scale` = 小数位（量化精度）；`rounding` = 总额取整**方向**。`none`/`round` 均走 `ROUND_HALF_UP`（`none` 不等于"不量化"——总额必须落到最小单位才能整数除法）。**写后守恒的比对基准是「取整后」的总额**（`sum(values)`），不是父行原值；返回体另给 `source_total` 保留父行原值供对账。
+> ④ **`group_by` 语义定为「组间均分 + 组内按 basis」**：权重可加，故"两级都按 basis"与"只做统计分组"都恒等于不分组（死字段），只有组间均分才有区分度。同组行在结果中**不连续**，故分组必须携带下标而非顺序递推。`floor` 是最终行值的下限，只能在全部行这一层统一施加，组内局部钳制会破坏组总额守恒。
+> ⑤ **`basis` 权重来源由调用方显式传 `basis_field`**（不猜列名）：`basis ∈ {value,quantity,weight,volume}` 时缺 `basis_field` 报错；子行该列为空/非正/非法一律 422——零权重会让该行分不到金额，静默跳过等于凭空丢钱。`basis=manual` 因 schema 声明 `manual_factor` 是**单值** number，只能等权；真要逐行手工系数应走 `allocate(weights=[...])`。
+> ⑥ **落库与业务写入的关系定为「子行写字段 + calc_result 留痕」并存**：留痕（头记总额 + 行记摊得额，`origin=unplanned`）满足 FR-013 AC「可回放」，子行写字段满足"分摊结果要真的落到业务上"。两者**同事务**，结果行写失败则业务行一并回滚，不会出现"行上摊了钱但没有结果行"的不可回放状态。
+> ⑦ **补齐 `calc_result` 两列 + 修一处枚举不匹配**：`source_document_type` / `source_document_id` 原在 yaml 中**根本不存在**（实测 `PRAGMA table_info` 确认缺失），是 FR-013 AC「来源单据可查」的载体，本轮补上；`allocation_basis` 原枚举 `{quantity,value,weight,volume,net_amount}` 与 `allocation_rule.basis` 六值**互不覆盖**（缺 equal/manual，多一个 rule 侧没有的 `net_amount`），已对齐为六值并移除 `net_amount`（它不是一种**分摊基数**，"净额"是结果属性）。
+> ⑧ **错误码沿用本层分界**：`AllocationError` 自带 `status_code`，API 层 `_fail` **直接取用**而不另造映射表（400 参数错 / 404 规则或父行不存在 / 422 配置矛盾）——同一张映射表在两处维护必然漂移。`rounding` 等枚举**在入口拦**（400 `INVALID_PARAM`），否则会落到服务层被误标成"配置矛盾"（422）而串号。
+> ⑨ **测试**：`test_allocation_by_rule.py`（**36 用例**，算法 8 + 端到端 11 + floor/rounding 7 + 分组 4 + 留痕 5）；`test_pricing_api.py` 契约层新增 `TestAllocateContract`（**16 用例**，30 → 46）。**检出能力已用三处定点变异验证**（非陪跑）：移除 `rounding` 入口白名单 → 恰 1 条转红且失败原因正是"错误码串号"；`basis_field` 不转发 → 恰 2 条转红；`_fail` 丢弃自带 `status_code` → 恰 3 条转红，其余 43 条不受影响。
 
 #### 9.3.4 与既有资产的复用映射
 

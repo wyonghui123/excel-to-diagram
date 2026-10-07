@@ -18,12 +18,40 @@
     分摊规则会被当成校验静默执行, 爆炸半径大。
 """
 
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import (
+    Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP,
+)
 import re
-from typing import Any, Dict, List, Sequence
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Sequence
+import uuid
 
 
 _IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+# allocation_rule.basis 的六种分摊基数（Oracle LCM）。前四种需调用方给出
+# `basis_field`（从子行哪一列取权重）——引擎不内置业务字段名映射，见
+# `_derive_weights`。`equal` 与 `manual` 不读子行数据。
+BASIS_EQUAL = 'equal'
+BASIS_VALUE = 'value'
+BASIS_QUANTITY = 'quantity'
+BASIS_WEIGHT = 'weight'
+BASIS_VOLUME = 'volume'
+BASIS_MANUAL = 'manual'
+
+BASES = frozenset({
+    BASIS_EQUAL, BASIS_VALUE, BASIS_QUANTITY,
+    BASIS_WEIGHT, BASIS_VOLUME, BASIS_MANUAL,
+})
+#: 需从子行字段取权重的基数（`equal`/`manual` 除外）
+BASIS_FROM_FIELD = frozenset({
+    BASIS_VALUE, BASIS_QUANTITY, BASIS_WEIGHT, BASIS_VOLUME,
+})
+
+#: allocation_rule.rounding 的取整方式。`none` = 保持 plan() 原样（四舍五入到
+#: scale 位，最大余数法保证 Σ 守恒），其余三种是**先按方向取整总额**再分摊，
+#: 故 Σ 仍守恒（总额本身就是取整后的值），只是总额与未取整源值可能差 ≤1 单位。
+ROUNDING_MODES = frozenset({'none', 'round', 'ceil', 'floor'})
 
 
 def _require_ident(name: str, label: str) -> str:
@@ -64,22 +92,37 @@ def _to_decimal(value: Any) -> Decimal:
     raise AllocationError(f'不支持的数值类型: {type(value).__name__}')
 
 
-def plan(total: Any, weights: Sequence[Any], scale: int = 2) -> List[Decimal]:
+def plan(total: Any, weights: Sequence[Any], scale: int = 2,
+         rounding: str = 'none') -> List[Decimal]:
     """按权重把 total 精确划分为 N 份 (最大余数法)。
 
     Args:
         total: 待分配总额 (int / float / str / Decimal), 允许为负 (红字/冲销)
         weights: N 个正权重, 与目标行一一对应
         scale: 小数位数 (默认 2, 即分)
+        rounding: 取整方式（`allocation_rule.rounding`）：
+            `none`（默认，= 原行为，`ROUND_HALF_UP`）/ `round`（同上，显式）
+            / `ceil`（`ROUND_CEILING`）/ `floor`（`ROUND_FLOOR`）。
+
+            【为什么 `none` 与 `round` 等价】不取整不是"不量化"——总额必须落到
+            `scale` 位最小单位才能做整数除法，否则 `sum != total`。二者只差在
+            是否由配置显式声明。
 
     Returns:
-        长度 N 的 Decimal 列表, 满足 sum(result) == total (精确)
+        长度 N 的 Decimal 列表, 满足 sum(result) == total (精确)。
+        `ceil`/`floor` 下 `total` 是**取整后**的总额，故守恒仍精确成立，
+        但与传入的未取整源值可能相差 ≤1 个最小单位。
 
     Raises:
-        AllocationError: weights 为空 / 含非正权重 / scale 为负 / 数值非法
+        AllocationError: weights 为空 / 含非正权重 / scale 为负 /
+            数值非法 / rounding 非法
     """
     if scale < 0:
         raise AllocationError(f'scale 不能为负: {scale}')
+    if rounding not in ROUNDING_MODES:
+        raise AllocationError(
+            f'rounding 非法: {rounding!r}；可选 {sorted(ROUNDING_MODES)}'
+        )
 
     n = len(weights)
     if n == 0:
@@ -99,8 +142,12 @@ def plan(total: Any, weights: Sequence[Any], scale: int = 2) -> List[Decimal]:
     factor = Decimal(10) ** scale
     total_dec = _to_decimal(total)
 
-    # 转整数最小单位 (四舍五入到 scale 位)
-    t = int((total_dec * factor).to_integral_value(rounding=ROUND_HALF_UP))
+    # 转整数最小单位。`none`/`round` 走四舍五入（原有行为）；
+    # `ceil`/`floor` 按配置方向取整总额 —— 守恒仍成立，因为分摊基数就是取整后的 t。
+    mode = ROUND_HALF_UP if rounding in ('none', 'round') else (
+        ROUND_CEILING if rounding == 'ceil' else ROUND_FLOOR
+    )
+    t = int((total_dec * factor).to_integral_value(rounding=mode))
 
     bases: List[int] = []
     rems: List[int] = []
@@ -117,6 +164,78 @@ def plan(total: Any, weights: Sequence[Any], scale: int = 2) -> List[Decimal]:
 
     quant = Decimal(10) ** -scale
     return [(Decimal(b) / factor).quantize(quant) for b in bases]
+
+
+def plan_floor(total: Any, weights: Sequence[Any], floor: Any = None,
+               scale: int = 2, rounding: str = 'none') -> List[Decimal]:
+    """在 `plan()` 之上加**地板价**下限（waterfall 迭代），守恒不变。
+
+    【为什么必须迭代而非一次钳制】`plan()` 只保证 Σ 守恒，不保证每份 ≥ floor。
+    一次钳制（`max(v, floor)`）会把 Σ 抬高，守恒即破。waterfall 的做法是：
+    把低于 floor 的行**钉在 floor**，剩余金额在**未触顶行**按原权重重分，
+    直到无人低于 floor 或无人可再分。故本函数是 O(n²) 最坏、但 n = 子行数
+    （数十量级），无需优化。
+
+    【守恒恒等式】每轮重分的是 `total - Σ已钉住行`，故最终
+    `Σ = Σ已钉住 + (total - Σ已钉住) = total` 精确成立。
+
+    【触顶耗尽】若所有行都被 floor 钉住而仍有余额（即 `n × floor > total`），
+    数学上无解 → 抛 `AllocationError`（422），**不静默截断**：截断会让
+    「摊得总额 ≠ 待摊总额」，正是分摊最忌的静默错误。
+
+    Args:
+        floor: 地板价；None / 非正 → 退化为 `plan()`（不做任何钳制）
+
+    Returns:
+        长度 N 的 Decimal 列表，每份 ≥ floor 且 Σ == total（精确）
+    """
+    if floor is None:
+        return plan(total, weights, scale, rounding)
+
+    f = _to_decimal(floor)
+    quant = Decimal(10) ** -scale
+    f = f.quantize(quant)
+    if f <= 0:
+        # 地板价非正 = 无约束（负地板价对正金额无意义，对负金额是放宽）
+        return plan(total, weights, scale, rounding)
+
+    n = len(weights)
+    values = plan(total, weights, scale, rounding)
+    if n * f > _to_decimal(total).quantize(quant):
+        raise AllocationError(
+            f'地板价无法满足: {n} 行 × {f} = {n * f} > 待摊总额 '
+            f'{_to_decimal(total).quantize(quant)}',
+            status_code=422,
+        )
+
+    pinned: Dict[int, Decimal] = {}
+    while True:
+        active = [i for i in range(n) if i not in pinned]
+        if not active:
+            break
+        below = [i for i in active if values[i] < f]
+        if not below:
+            break
+        for i in below:
+            values[i] = f
+            pinned[i] = f
+        # 已钉住的行退出候选，剩余额度在未触顶行按**原权重**重分
+        free = [i for i in active if i not in pinned]
+        if not free:
+            # 全部行都被钉在 floor 而仍有余额 → 守恒无法维持。
+            # 上面的 n×f ≤ total 预检查已排除此分支，这里是防御性断言：
+            # 静默返回会让「Σ摊得 ≠ 待摊」被当成成功。
+            raise AllocationError(
+                f'地板价钳制后仍无行可承接余额（Σfloor={n * f} < '
+                f'total={_to_decimal(total).quantize(quant)}），无法守恒',
+                status_code=422,
+            )
+        rest_total = _to_decimal(total).quantize(quant) - sum(pinned.values())
+        for i, v in zip(free, plan(rest_total, [weights[i] for i in free],
+                                    scale, rounding)):
+            values[i] = v
+
+    return values
 
 
 class AllocationService:
@@ -321,6 +440,499 @@ class AllocationService:
             ],
             'verified': True,
         }
+
+    # ------------------------------------------------------------------
+    # v3: allocation_rule 驱动（FR-013 / P4.5）
+    # ------------------------------------------------------------------
+
+    def _load_rule(self, rule_id: Any) -> Dict[str, Any]:
+        """按 id 取分摊规则行。
+
+        【为什么不在服务层缓存】规则是**配置**，会被用户在界面上改；
+        缓存会让「改完规则仍按旧规则分摊」，且失效时机无从判断。
+        分摊是低频写操作，每次读一行可忽略。
+        """
+        row = self.ds.find_by_id('allocation_rules', rule_id)
+        if not row:
+            raise AllocationError(
+                f'分摊规则 #{rule_id} 不存在', status_code=404
+            )
+        return row
+
+    @staticmethod
+    def _derive_weights(basis: str, rows: List[Dict[str, Any]],
+                        basis_field: str = None,
+                        manual_factor: Any = None) -> List[Any]:
+        """按分摊基数从子行取权重（`allocate_by_rule` 用）。
+
+        Args:
+            basis: `allocation_rule.basis` 六枚举之一
+            rows: 子行记录（`_resolve_child_rows` 返回，已按 id 升序）
+            basis_field: basis ∈ {value,quantity,weight,volume} 时**必填**，
+                         指明从子行哪一列取权重
+            manual_factor: basis = manual 时用的**单值**系数
+
+        【为什么 basis_field 由调用方给】引擎不知道业务表哪列是"重量"——
+        同一张订单行表，重量可能是 `gross_weight` 也可能是 `net_weight`。
+        内置映射表（value→amount / weight→weight）会把引擎焊死在某一套
+        字段命名上，换个对象就得改代码。故把「读哪一列」交给配置者，
+            引擎只负责「按这一列的占比分」。
+
+        【manual_factor 只能均分】schema 声明它是**单值** number，
+        所以 `basis=manual` + 单值系数 = 等权。这不是本层的简化——
+        是配置的表达能力上限；真要逐行手工系数，调用方应直接用
+        `allocate(weights=[...])`。此处显式按等权处理而非报错。
+        """
+        n = len(rows)
+        if basis == BASIS_EQUAL:
+            return [1] * n
+
+        if basis == BASIS_MANUAL:
+            if manual_factor is None:
+                raise AllocationError('basis=manual 必须提供 manual_factor')
+            f = _to_decimal(manual_factor)
+            if f <= 0:
+                raise AllocationError(
+                    f'manual_factor 必须为正数, 收到: {f}'
+                )
+            return [f] * n
+
+        if basis not in BASIS_FROM_FIELD:
+            raise AllocationError(
+                f'未知分摊基数: {basis!r}；可选 {sorted(BASES)}'
+            )
+
+        if not basis_field:
+            raise AllocationError(
+                f'basis={basis} 必须提供 basis_field（指明从子行哪一列取权重）'
+            )
+        _require_ident(basis_field, 'basis_field')
+
+        weights = []
+        for r in rows:
+            v = r.get(basis_field)
+            if v is None:
+                raise AllocationError(
+                    f'子行 #{r.get("id")} 的 {basis_field} 为空, '
+                    f'无法按该基数分摊',
+                    status_code=422,
+                )
+            try:
+                d = _to_decimal(v)
+            except AllocationError as e:
+                raise AllocationError(
+                    f'子行 #{r.get("id")} 的 {basis_field} 非法: {e}',
+                    status_code=422,
+                )
+            if d <= 0:
+                raise AllocationError(
+                    f'子行 #{r.get("id")} 的 {basis_field} 必须为正数, '
+                    f'收到: {d}（零/负权重会让该行分不到金额）',
+                    status_code=422,
+                )
+            weights.append(d)
+        return weights
+
+    def _resolve_child_rows(self, target_object: str, parent_id: Any,
+                            fk_field: str) -> List[Dict[str, Any]]:
+        """取父行下的子行**完整记录**（`_resolve_children` 只回 id）。"""
+        from meta.core.models import registry
+        meta_obj = registry.get(target_object)
+        if not meta_obj:
+            raise AllocationError(f'未知对象: {target_object}')
+        return self.ds.find(
+            meta_obj.table_name, {fk_field: parent_id}, order_by='id'
+        )
+
+    @staticmethod
+    def _group_rows(rows: List[Dict[str, Any]], group_by: str,
+                    basis_weights: List[Any]):
+        """按 `group_by` 字段把子行聚成组（按组首次出现顺序，确定性）。
+
+        Returns:
+            [(group_key, [(行下标, weight), ...]), ...]
+
+        【为什么携带下标而非 row 对象】同组行在 `rows` 里**不连续**
+        （`[A(g1), B(g2), C(g1)]` → g1 含 A、C），故必须按下标回填，
+        不能靠"顺序递推"。
+        """
+        groups: Dict[Any, List] = {}
+        for idx, (row, w) in enumerate(zip(rows, basis_weights)):
+            groups.setdefault(row.get(group_by), []).append((idx, w))
+        return list(groups.items())
+
+    def allocate_by_rule(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """按 `allocation_rule` 配置分摊父行金额到 N 个已有子行（FR-013）。
+
+        spec:
+            allocation_rule_id  必填  分摊规则 id（allocation_rules.id）
+            parent_id           必填  父记录 id
+            target_object       必填  子对象类型（兼容别名 child_object）
+            target_field        必填  子行待写入字段
+            basis_field         选填  basis ∈ {value,quantity,weight,volume}
+                                 时的权重来源列；equal/manual 不需要
+            group_by            选填  覆盖规则配置的分组维度
+            floor               选填  覆盖规则配置的地板价
+            rounding            选填  覆盖规则配置的取整方式
+            weights             选填  显式权重，**优先于 basis**（调试/特例用）
+            source_field        默认 = target_field
+            fk_field            默认由 HierarchyConfigLoader 推导
+            parent_object       默认由 HierarchyConfigLoader 推导
+            scale               默认 2
+            persist_result      默认 true；false = 只摊不落 calc_result
+            document_type       结果行的宿主对象；默认同上推导
+            charge_source       费用来源单据类型（order/invoice/...）
+            source_document_type/id  费用**来源**单据（可 ≠ 宿主单据）
+            target              归集方向 price/cost/expense；默认 rule.target
+            currency            默认 CNY
+
+        Returns:
+            {'parent_id','target_object','target_field',
+             'total'（实际摊派总额，配置了 ceil/floor 时与 source_total 不同）,
+             'source_total'（父行原值）,
+             'allocation_rule_id','basis','basis_field','group_by',
+             'allocations':[{'id','value','group'}],
+             'result_ids': {'header_result_id','line_result_ids'} | None,
+             'verified': True}
+
+        【守恒恒等式】`plan_floor` 在任何 basis / group_by / floor / rounding
+        组合下都保证 Σ子行 == 待摊总额；写入后再从 DB 回读校验一次
+        （`_sum_children`），避免"算对了但没写进去"被当成成功。
+        """
+        rule_id = spec.get('allocation_rule_id')
+        if rule_id is None:
+            raise AllocationError('allocation_rule_id 必填')
+
+        parent_id = spec.get('parent_id')
+        if parent_id is None:
+            raise AllocationError('parent_id 必填')
+
+        target_object = spec.get('target_object') or spec.get('child_object')
+        if not target_object:
+            raise AllocationError('target_object 必填')
+
+        target_field = _require_ident(spec.get('target_field'), 'target_field')
+        source_field = _require_ident(
+            spec.get('source_field') or target_field, 'source_field'
+        )
+        scale = spec.get('scale', 2)
+        if not isinstance(scale, int) or scale < 0:
+            raise AllocationError(f'scale 必须是非负整数: {scale!r}')
+
+        rule = self._load_rule(rule_id)
+        explicit_weights = spec.get('weights')
+
+        from meta.core.models import registry
+        child_meta = registry.get(target_object)
+        if not child_meta:
+            raise AllocationError(f'未知对象: {target_object}')
+        _require_ident(child_meta.table_name, 'table_name')
+
+        fk_field = _require_ident(
+            self.resolve_foreign_key(target_object, spec.get('fk_field')),
+            'fk_field',
+        )
+        rows = self._resolve_child_rows(target_object, parent_id, fk_field)
+        if not rows:
+            raise AllocationError(
+                f'{target_object} 下 fk={parent_id} 无子行, 无法分摊',
+                status_code=422,
+            )
+
+        if explicit_weights is not None:
+            basis_weights, weight_ids = self._normalize_weights(explicit_weights)
+            if len(basis_weights) != len(rows):
+                raise AllocationError(
+                    f'weights 数 {len(basis_weights)} 与子行数 {len(rows)} '
+                    f'不一致',
+                    status_code=422,
+                )
+            if any(wid is not None for wid in weight_ids):
+                by_id = dict(zip(weight_ids, basis_weights))
+                row_ids = [r.get('id') for r in rows]
+                if set(by_id) != set(row_ids):
+                    raise AllocationError(
+                        'weights 的 id 与父行下的子行不一致',
+                        status_code=422,
+                    )
+                basis_weights = [by_id[rid] for rid in row_ids]
+        else:
+            basis_weights = self._derive_weights(
+                rule.get('basis') or BASIS_EQUAL,
+                rows,
+                basis_field=spec.get('basis_field'),
+                manual_factor=rule.get('manual_factor'),
+            )
+
+        _, total = self._resolve_parent_total(
+            target_object, parent_id, source_field, spec.get('parent_object')
+        )
+
+        rounding = spec.get('rounding') or rule.get('rounding') or 'none'
+        if rounding not in ROUNDING_MODES:
+            raise AllocationError(
+                f'rounding 非法: {rounding!r}；可选 {sorted(ROUNDING_MODES)}'
+            )
+        floor = spec.get('floor') if spec.get('floor') is not None \
+            else rule.get('floor')
+        group_by = spec.get('group_by') or rule.get('group_by')
+
+        values, groups = self._plan_by_rule(
+            total, rows, basis_weights, group_by=group_by,
+            floor=floor, scale=scale, rounding=rounding,
+        )
+
+        # 写后守恒的**比对基准**：rounding=ceil/floor 时 plan 分配的是
+        # 「取整后的总额」（10.4 → ceil → 11），拿原值 10.4 去比会误报
+        # 「Σ子行=11 != 父行=10.4」。守恒的语义是「摊完的钱 == 该摊的钱」，
+        # 而「该摊的钱」在配置了取整方向时就是取整后的值。
+        allocated_total = sum(values)
+
+        executor = self._build_executor()
+        with self.ds.transaction():
+            for row, value in zip(rows, values):
+                result = executor.execute(
+                    child_meta, 'crud_update',
+                    {'id': row.get('id'), target_field: float(value)},
+                )
+                if not result.success:
+                    raise AllocationError(
+                        f'写入子行 #{row.get("id")} 失败: '
+                        f'{result.error or result.message}',
+                        status_code=422,
+                    )
+
+            read_back = self._sum_children(
+                child_meta.table_name, fk_field, parent_id, target_field
+            )
+            if self._quantize(read_back, scale) != self._quantize(
+                    allocated_total, scale):
+                raise AllocationError(
+                    f'守恒校验失败: Σ子行={read_back} != '
+                    f'待摊总额={allocated_total}'
+                )
+
+            # 留痕与业务写入同事务：结果行写失败 → 业务行一并回滚，
+            # 不会出现「行上摊了钱但没有结果行」的不可回放状态。
+            result_ids = None
+            if spec.get('persist_result', True):
+                document_type = spec.get('document_type') or spec.get(
+                    'parent_object'
+                ) or self._resolve_parent_object(target_object)
+                if not document_type:
+                    raise AllocationError(
+                        'persist_result=true 时必须给出 document_type'
+                        '（结果行的宿主对象；默认由层级配置推导）',
+                        status_code=422,
+                    )
+                result_ids = self.record_allocation_results(
+                    document_type, parent_id, values, rows, allocated_total,
+                    rule,
+                    charge_source=spec.get('charge_source'),
+                    source_document_type=spec.get('source_document_type'),
+                    source_document_id=spec.get('source_document_id'),
+                    target=spec.get('target'),
+                    currency=spec.get('currency') or 'CNY',
+                    process_code=spec.get('process_code') or 'ALLOCATION',
+                    scale=scale,
+                )
+
+        return {
+            'parent_id': parent_id,
+            'target_object': target_object,
+            'target_field': target_field,
+            'total': str(self._quantize(allocated_total, scale)),
+            # source_total **不量化**：它的用途就是与 total 对账，说明
+            # 「原本该摊多少 → 实际摊了多少」。若按 scale 量化，scale=0
+            # 时 10.4 会变成 '10'，恰好把取整带来的差额抹平。
+            'source_total': str(_to_decimal(total)),
+            'allocation_rule_id': rule_id,
+            'basis': rule.get('basis') or BASIS_EQUAL,
+            'basis_field': spec.get('basis_field'),
+            'group_by': group_by,
+            'allocations': [
+                {'id': r.get('id'), 'value': str(v), 'group': g}
+                for r, v, g in zip(rows, values, groups)
+            ],
+            'result_ids': result_ids,
+            'verified': True,
+        }
+
+    def _plan_by_rule(self, total: Any, rows: List[Dict[str, Any]],
+                      basis_weights: List[Any], group_by: str = None,
+                      floor: Any = None, scale: int = 2,
+                      rounding: str = 'none'):
+        """按 `group_by` 决定分组层级，再逐组分摊，返回 (values, group_keys)。
+
+        【group_by 数学语义 · 用户拍板】**组间均分 + 组内按 basis**：
+        先把总额等分成 G 份给 G 个组，组内再按 basis 权重分。
+        另两种候选被否：①「两级都按 basis」因权重可加而恒等于不分组
+        （死字段）；②「只做统计分组」同理。故组间**必须**均分才有区分度。
+
+        【floor 在分组下的层级】floor 是**最终行值**的下限，故在组内
+        分摊时施加；组间均分不做钳制（组总额是中间量，不是行值）。
+        但组内钳制会破坏「组内守恒」→ 组总额与 Σ组内 不等。故这里的
+        做法是：组间均分保证总额守恒，floor 冲突由**跨组 waterfall**
+        统一处理（见 `_plan_waterfall_across`），不做组内局部钳制。
+        """
+        if not group_by:
+            values = plan_floor(total, basis_weights, floor, scale, rounding)
+            return values, [None] * len(rows)
+
+        _require_ident(group_by, 'group_by')
+        groups = self._group_rows(rows, group_by, basis_weights)
+        group_totals = plan(total, [1] * len(groups), scale, rounding)
+
+        values: List[Optional[Decimal]] = [None] * len(rows)
+        group_keys: List[Any] = [None] * len(rows)
+        for (key, members), gt in zip(groups, group_totals):
+            idxs = [m[0] for m in members]
+            member_w = [m[1] for m in members]
+            # floor 不在组内施加（会破组内守恒），统一走下面的跨组 waterfall
+            for i, v in zip(idxs, plan(gt, member_w, scale, rounding)):
+                values[i] = v
+                group_keys[i] = key
+
+        if floor is not None and _to_decimal(floor) > 0:
+            values = self._plan_waterfall_across(
+                total, values, basis_weights, floor, scale, rounding
+            )
+        return values, group_keys
+
+    @staticmethod
+    def _plan_waterfall_across(total: Any, values: List[Optional[Decimal]],
+                               weights: List[Any], floor: Any, scale: int,
+                               rounding: str):
+        """分组场景下的 floor 钳制：全行一起 waterfall，跨组重分余额。
+
+        【为什么不在组内局部钳制】组内钳到 floor 会让「Σ组内 > 组总额」，
+        组总额是 `plan` 按守恒分好的，破坏它就等于破坏总额守恒。故 floor
+        只能在**全部行**这一层统一施加，钳制出的缺口由未触顶行（含其他组）
+        按原权重重分——守恒恒等式与 `plan_floor` 相同。
+        """
+        quant = Decimal(10) ** -scale
+        f = _to_decimal(floor).quantize(quant)
+        total_q = _to_decimal(total).quantize(quant)
+        if f <= 0 or total_q <= 0:
+            return values
+        if len(values) * f > total_q:
+            raise AllocationError(
+                f'地板价无法满足: {len(values)} 行 × {f} = '
+                f'{len(values) * f} > 待摊总额 {total_q}',
+                status_code=422,
+            )
+
+        out = list(values)
+        pinned: Dict[int, Decimal] = {}
+        while True:
+            active = [i for i in range(len(out)) if i not in pinned]
+            below = [i for i in active if out[i] < f]
+            if not below:
+                break
+            for i in below:
+                out[i] = f
+                pinned[i] = f
+            free = [i for i in range(len(out)) if i not in pinned]
+            if not free:
+                break
+            rest_total = total_q - sum(pinned.values())
+            for i, v in zip(free, plan(rest_total, [weights[i] for i in free],
+                                       scale, rounding)):
+                out[i] = v
+        return out
+
+    # ------------------------------------------------------------------
+    # v3: 分摊结果留痕（FR-013 AC「分摊可回放」）
+    # ------------------------------------------------------------------
+
+    def record_allocation_results(
+        self, document_type: str, document_id: Any, values: List[Decimal],
+        rows: List[Dict[str, Any]], total: Any, rule: Dict[str, Any],
+        charge_source: str = None, source_document_type: str = None,
+        source_document_id: Any = None, target: str = None,
+        currency: str = 'CNY', process_code: str = 'ALLOCATION',
+        scale: int = 2, sign: str = '+',
+    ) -> Dict[str, Any]:
+        """把分摊结果落 `calc_result`：**头记总额 + 行记摊得额**。
+
+        FR-013 AC「分摊可回放：头记总额、行记摊得额，来源单据与分摊规则可查」。
+        落 calc_result 而非只在业务行上写数字——业务行会被下一次分摊覆盖，
+        只有结果行能回答「这笔钱当初按什么规则摊的、摊给了谁、来源是哪张单」。
+
+        Args:
+            document_type/id: **宿主**单据（被摊到的那些行所属的单据）
+            values / rows: 与 `allocate_by_rule` 的返回一一对应
+            total: 待摊总额（头记行的 amount）
+            rule: `allocation_rules` 行（回填 allocation_rule_id / basis）
+            charge_source: 费用来源单据类型（origin=unplanned 时有意义）
+            source_document_type/id: 费用来源单据（**可 ≠ 宿主单据**）
+            target: 归集方向 price/cost/expense；缺省取 rule.target
+            process_code: 结果行的 process_code 快照。分摊不经 calc_procedure，
+                故用约定的 `'ALLOCATION'`；留出参数是为了让"按某个过程分摊"
+                的扩展不必改表。
+
+        Returns:
+            {'header_result_id': int, 'line_result_ids': [int, ...]}
+
+        【为什么 process_code 必填却不指向真实过程】`calc_result` 的
+        process_code 是**快照字符串**（非外键，见 calc_result.yaml 文件头），
+        故填约定值不破坏引用完整性；反过来若允许为空，FR-010「可解释=能回放」
+        就少了一个关键维度。
+        """
+        now = datetime.now().isoformat(timespec='seconds')
+        basis = rule.get('basis') or BASIS_EQUAL
+        target = target or rule.get('target') or 'expense'
+
+        header_code = f"CR_{uuid.uuid4().hex[:16]}"
+        cur = self.ds.execute(
+            """INSERT INTO calc_results
+               (code, document_type, document_id, document_line_id, level,
+                process_code, result_semantic, base_level, base_source,
+                rolling, rate, base, amount, net_amount, currency, sign,
+                sequence, origin, charge_source, source_document_type,
+                source_document_id, target, allocation_basis,
+                allocation_rule_id, rate_source, price_mode, status,
+                created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                header_code, document_type, document_id, None, 'header',
+                process_code, 'cost', 'header', 'value',
+                False, None, float(total), float(total), float(total),
+                currency, sign, 0, 'unplanned', charge_source,
+                source_document_type, source_document_id, target,
+                basis, rule.get('id'), 'rate_record', 'carry', 'active',
+                now, now,
+            ],
+        )
+        header_id = cur.lastrowid
+
+        line_ids = []
+        for seq, (row, value) in enumerate(zip(rows, values), start=1):
+            line_code = f"CR_{uuid.uuid4().hex[:16]}"
+            c = self.ds.execute(
+                """INSERT INTO calc_results
+                   (code, document_type, document_id, document_line_id, level,
+                    process_code, result_semantic, base_level, base_source,
+                    rolling, rate, base, amount, net_amount, currency, sign,
+                    sequence, origin, charge_source, source_document_type,
+                    source_document_id, target, allocation_basis,
+                    allocation_rule_id, rate_source, price_mode, status,
+                    created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    line_code, document_type, document_id,
+                    row.get('id'), 'line',
+                    process_code, 'cost', 'line', 'value',
+                    False, None, float(total), float(value), float(value),
+                    currency, sign, seq, 'unplanned', charge_source,
+                    source_document_type, source_document_id, target,
+                    basis, rule.get('id'), 'rate_record', 'carry', 'active',
+                    now, now,
+                ],
+            )
+            line_ids.append(c.lastrowid)
+
+        return {'header_result_id': header_id, 'line_result_ids': line_ids}
 
     @staticmethod
     def _resolve_parent_object(target_object: str) -> str:

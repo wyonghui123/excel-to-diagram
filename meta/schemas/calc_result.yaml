@@ -514,6 +514,40 @@ fields:
     ui:
       widget: select
 
+  # 【FR-013 · 2026-10-07 补】费用**来源单据**（可 ≠ 宿主单据）
+  #   流程 C：发票 / 收货 / 服务确认上录的一笔计划外费用，其金额要摊到
+  #   目标单据行上。此时宿主（document_type/document_id）是**被摊到的单据**，
+  #   而费用**从哪来**只能靠这两列记录 —— 缺了它们，「来源单据可查」
+  #   （FR-013 AC）就无法成立，故本轮随 allocate 端点一并补齐。
+  - id: source_document_type
+    name: 来源单据类型
+    type: string
+    db_column: source_document_type
+    required: false
+    nullable: true
+    max_length: 50
+    description: >
+      费用来源单据的元模型对象 ID（发票 / 收货 / 服务确认…）。
+      **可 ≠ 宿主单据** —— 计划外费用正是「钱来自别处、摊到目标行」。
+    semantics:
+      meaning: 费用来源单据对象 ID（纯标识，非外键 —— 可跨任意 document 型 BO）
+      filterable: true
+      filter_type: text
+    ui:
+      widget: input
+
+  - id: source_document_id
+    name: 来源单据ID
+    type: integer
+    db_column: source_document_id
+    required: false
+    nullable: true
+    description: 费用来源单据记录 ID。与 source_document_type 配对使用，均可空
+    semantics:
+      meaning: 费用来源单据记录 ID
+    ui:
+      widget: number
+
   - id: target
     name: 归集方向
     type: string
@@ -545,24 +579,33 @@ fields:
     nullable: true
     max_length: 20
     description: 分摊基数（与 allocation_rule 配对）
+    # 【2026-10-07 对齐】本枚举原为 {quantity,value,weight,volume,net_amount}，
+    # 与 `allocation_rule.basis` 的六值**互不覆盖**（缺 equal/manual，
+    # 多一个 rule 侧没有的 net_amount）——两份枚举对不上，"配对"就是空话。
+    # 现改为与 basis 逐字一致（六值），使「结果行的基数 = 规则的基数」可断言。
+    # `net_amount` 已移除：它不是一种**分摊基数**（无对应的 rule.basis 取值），
+    # 「净额」是结果属性（net_amount 列），不是分摊依据。
     enum_values:
-      - value: quantity
-        label: 数量
-        color: primary
+      - value: equal
+        label: 平均
+        color: default
       - value: value
         label: 价值
         color: info
+      - value: quantity
+        label: 数量
+        color: primary
       - value: weight
         label: 重量
         color: info
       - value: volume
         label: 体积
         color: info
-      - value: net_amount
-        label: 净额
-        color: primary
+      - value: manual
+        label: 手工系数
+        color: warning
     semantics:
-      meaning: 分摊基数
+      meaning: 分摊基数（与 allocation_rule.basis 逐字一致）
     ui:
       widget: select
 
