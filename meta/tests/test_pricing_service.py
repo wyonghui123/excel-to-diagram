@@ -968,28 +968,27 @@ class TestPricingAllocationIsolation:
                              "charge_source", "source_document_type"}), (
             "分摊列重新出现在定价表 → 两条链路又共表了")
 
-    def test_explain_separates_allocation_results(self, ds):
-        """explain 分开返回：定价在 results，分摊在 allocation_results。
+    def test_explain_does_not_read_allocation_table(self, ds):
+        """定价回放**不**读分摊表 —— 查询边界跟着表边界走。
 
-        不混进同一个列表——分摊无 calc_detail 明细可挂，混进去前端拿到的是
-        「有结果、无步骤」的残缺链路（那正是拆表前的实测症状）。
+        拆表后一度让 `PricingService.explain(include_allocation=True)`
+        内联查 `allocation_results`，等于把共表时的跨域耦合原样搬到服务层。
+        现改由 `AllocationService.query_results` 负责（HTTP 出口
+        `GET /api/v1/allocation/result/...`），故定价回放里**没有**分摊键。
         """
         _seed(ds)
         _insert_alloc(ds, "so", 1)
         _price(ds, document_type="so", document_id=1)
-        svc = PricingService(ds)
 
-        default = svc.explain("so", 1)
-        assert all(r["process_code"] != "ALLOCATION"
-                   for r in default["results"])
-        assert "allocation_results" not in default
+        ex = PricingService(ds).explain("so", 1)
+        assert all(r["process_code"] != "ALLOCATION" for r in ex["results"])
+        assert "allocation_results" not in ex
 
-        with_alloc = svc.explain("so", 1, include_allocation=True)
-        assert [r["code"] for r in with_alloc["allocation_results"]] == [
-            "AR_TEST"]
-        # 分摊行不得混进定价 results
-        assert all(r["process_code"] != "ALLOCATION"
-                   for r in with_alloc["results"])
+        # 分摊留痕走自己的服务出口，内容完好可查
+        from meta.services.allocation_service import AllocationService
+        rows = AllocationService(ds).query_results("so", 1)
+        assert [r["code"] for r in rows] == ["AR_TEST"]
+        assert rows[0]["amount"] == 33.34
 
     def test_write_back_ignores_allocation_row(self, ds):
         """分摊金额已直接写在子行业务字段上，再写回就是同一笔钱写两遍。"""

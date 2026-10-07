@@ -32,7 +32,7 @@ import meta.services.auth_middleware as auth_mw  # noqa: E402
 
 from meta.core.models import registry  # noqa: E402
 from meta.core.schema_generator import SchemaGenerator  # noqa: E402
-from meta.tests.factories._raw_sql_bridge import insert  # noqa: E402
+from meta.tests.factories._raw_sql_bridge import insert, update  # noqa: E402
 
 AUTH = {"Authorization": "Bearer test-token",
         "Content-Type": "application/json"}
@@ -410,3 +410,72 @@ class TestAllocateContract:
             headers=AUTH)
         assert ok_resp.status_code == 200, (
             f"新路径也不通 → 404 断言无意义: {ok_resp.get_json()}")
+
+
+# ======================================================================
+# 分摊留痕回放 GET /result/<document_type>/<id>
+# ======================================================================
+class TestAllocationResultReplay:
+    """FR-013 AC「分摊可回放」在**接口层**的出口。
+
+    拆表后留痕落在 `allocation_results`；若无人能查到它，"可回放"就只是
+    表里躺着的行。故本类锁住查询出口的存在与其响应契约。
+    """
+
+    def _allocated(self, client, ds):
+        _alloc_seed(ds, 100)
+        rid = _alloc_rule(ds)
+        resp = client.post("/api/v1/allocation/allocate",
+                           json=_alloc_body(rid, document_type="order"),
+                           headers=AUTH)
+        assert resp.status_code == 200
+        return rid
+
+    def test_replays_header_and_lines(self, alloc_client, alloc_ds):
+        self._allocated(alloc_client, alloc_ds)
+        resp = alloc_client.get("/api/v1/allocation/result/order/1",
+                                headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert set(data) == {"document_type", "document_id",
+                             "document_line_id", "results"}
+        rows = data["results"]
+        assert [r["level"] for r in rows] == ["header", "line", "line", "line"]
+        # amount 归一为数值（不是 "100.0" 字符串）——前端要能直接算术
+        assert rows[0]["amount"] == 100.0
+        assert round(sum(r["amount"] for r in rows[1:]), 2) == 100.0
+
+    def test_status_all_includes_invalid(self, alloc_client, alloc_ds):
+        """默认只回 active；`status=all` 才带出已作废行（审计用）。"""
+        self._allocated(alloc_client, alloc_ds)
+        update(alloc_ds, "allocation_results",
+               where={"level": "line"}, status="invalid")
+
+        active = alloc_client.get(
+            "/api/v1/allocation/result/order/1",
+            headers=AUTH).get_json()["data"]["results"]
+        assert [r["level"] for r in active] == ["header"]
+
+        every = alloc_client.get(
+            "/api/v1/allocation/result/order/1?status=all",
+            headers=AUTH).get_json()["data"]["results"]
+        assert len(every) == 4
+
+    def test_unknown_host_returns_empty_not_404(self, alloc_client):
+        """没有留痕 ≠ 宿主不存在。空列表才是正确语义，不是错误。"""
+        resp = alloc_client.get("/api/v1/allocation/result/order/99999",
+                                headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["results"] == []
+
+    def test_replay_requires_login(self, alloc_ds):
+        from flask import Flask
+
+        from meta.api.allocation_api import (allocation_bp,
+                                             init_alloc_services)
+        init_alloc_services(alloc_ds)
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(allocation_bp)
+        resp = app.test_client().get("/api/v1/allocation/result/order/1")
+        assert resp.status_code == 401

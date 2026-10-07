@@ -239,7 +239,11 @@ def plan_floor(total: Any, weights: Sequence[Any], floor: Any = None,
 
 
 class AllocationService:
-    """把父行金额/数量按权重分摊到 N 个子行 (或拆分成 N 个新行)。"""
+    """把父行的量按权重分摊到 N 个子行 (或拆分成 N 个新行)。
+
+    `amount` 列语义是「量」而非「钱」——金额场景填金额，工时/数量/重量
+    场景填各自的量；算法层（`plan` / `plan_floor`）对两者完全一致。
+    """
 
     def __init__(self, data_source=None):
         self._ds = data_source
@@ -527,7 +531,7 @@ class AllocationService:
             if d <= 0:
                 raise AllocationError(
                     f'子行 #{r.get("id")} 的 {basis_field} 必须为正数, '
-                    f'收到: {d}（零/负权重会让该行分不到金额）',
+                    f'收到: {d}（零/负权重会让该行分不到量）',
                     status_code=422,
                 )
             weights.append(d)
@@ -562,7 +566,7 @@ class AllocationService:
         return list(groups.items())
 
     def allocate_by_rule(self, spec: Dict[str, Any]) -> Dict[str, Any]:
-        """按 `allocation_rule` 配置分摊父行金额到 N 个已有子行（FR-013）。
+        """按 `allocation_rule` 配置分摊父行的量到 N 个已有子行（FR-013）。
 
         spec:
             allocation_rule_id  必填  分摊规则 id（allocation_rules.id）
@@ -579,11 +583,11 @@ class AllocationService:
             fk_field            默认由 HierarchyConfigLoader 推导
             parent_object       默认由 HierarchyConfigLoader 推导
             scale               默认 2
-            persist_result      默认 true；false = 只摊不落 calc_result
+            persist_result      默认 true；false = 只摊不落 allocation_results
             document_type       结果行的宿主对象；默认同上推导
             charge_source       费用来源单据类型（order/invoice/...）
             source_document_type/id  费用**来源**单据（可 ≠ 宿主单据）
-            target              归集方向 price/cost/expense；默认 rule.target
+            target              归集方向 cost/expense；默认 rule.target
             currency            默认 CNY
 
         Returns:
@@ -733,7 +737,6 @@ class AllocationService:
                     source_document_id=spec.get('source_document_id'),
                     target=spec.get('target'),
                     currency=spec.get('currency') or 'CNY',
-                    scale=scale,
                     # 【2026-10-07 拆表】快照当次配置——规则会被改，
                     # 只存 rule_id 答不出「当时按什么摊的」
                     parent_id=parent_id,
@@ -856,7 +859,7 @@ class AllocationService:
         rows: List[Dict[str, Any]], total: Any, rule: Dict[str, Any],
         charge_source: str = None, source_document_type: str = None,
         source_document_id: Any = None, target: str = None,
-        currency: str = 'CNY', scale: int = 2, sign: str = '+',
+        currency: str = 'CNY',
         parent_id: Any = None, basis_field: str = None,
         group_by: str = None, rounding: str = None, floor: Any = None,
     ) -> Dict[str, Any]:
@@ -890,6 +893,11 @@ class AllocationService:
             basis_field / group_by / rounding / floor: 当次配置快照
             currency: 仅金额场景有意义；非金额分摊传 None 即可
 
+        【sign 由总额方向推导，不接受外部传入】`plan()` 允许负总额
+        （红字 / 冲销），此时各行摊得额同为负。若由调用方传 sign，负金额
+        配上 `'+'` 就会让留痕的「分摊方向」与实际摊销方向相反——故此处
+        从 `total` 推导，保证 `sign` 与 `amount` 符号恒一致。
+
         Returns:
             {'header_result_id': int, 'line_result_ids': [int, ...]}
         """
@@ -897,6 +905,7 @@ class AllocationService:
         basis = rule.get('basis') or BASIS_EQUAL
         target = target or rule.get('target') or 'expense'
         floor_val = _to_decimal(floor) if floor is not None else None
+        sign = '-' if _to_decimal(total) < 0 else '+'
 
         header_code = f"AR_{uuid.uuid4().hex[:16]}"
         cur = self.ds.execute(
@@ -946,6 +955,51 @@ class AllocationService:
             line_ids.append(c.lastrowid)
 
         return {'header_result_id': header_id, 'line_result_ids': line_ids}
+
+    def query_results(self, document_type: str, document_id: Any,
+                      document_line_id: Any = None,
+                      status: str = 'active') -> List[Dict[str, Any]]:
+        """回放某宿主的 `allocation_results`（FR-013 AC「分摊可回放」）。
+
+        【为什么查询归本服务而非 PricingService】拆表后两张表分属两条链路；
+        让 `PricingService.explain` 去读 `allocation_results` 只是把共表时的
+        跨域耦合搬到服务层——表边界建了，查询边界也得跟着建。故留痕的
+        读与写都由本服务自己的表负责。
+
+        Args:
+            document_type/id: 宿主单据（与写入时口径一致）
+            document_line_id: 选填；给定则只回该行级留痕（头级仍按宿主匹配）
+            status: 默认只回 `active`；传 None 则含已作废行（审计用）
+
+        Returns:
+            留痕行列表（头 + N 行），按 sequence / id 升序；amount 系列已归一为数值。
+        """
+        sql = ("SELECT * FROM allocation_results"
+               " WHERE document_type = ? AND document_id = ?")
+        params: List[Any] = [document_type, document_id]
+        if document_line_id is not None:
+            sql += " AND document_line_id = ?"
+            params.append(document_line_id)
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY sequence ASC, id ASC"
+
+        cur = self.ds.execute(sql, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if cur.description else []
+        out = [dict(zip(cols, r)) for r in rows]
+        # sqlite 的 REAL 在部分驱动下读回 str（DECIMAL 亲和性），
+        # 回放接口须归一为数值，否则前端拿到 "100.0" 做不了算术。
+        for r in out:
+            for k in ('amount', 'net_amount', 'floor_value'):
+                v = r.get(k)
+                if v is not None:
+                    try:
+                        r[k] = float(v)
+                    except (TypeError, ValueError):
+                        r[k] = None
+        return out
 
     @staticmethod
     def _resolve_parent_object(target_object: str) -> str:

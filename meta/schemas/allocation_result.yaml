@@ -105,7 +105,7 @@ fields:
     required: true
     unique: true
     max_length: 50
-    description: 分摊结果唯一编码（CR_ 前缀 + 16 位 hex）
+    description: 分摊结果唯一编码（AR_ 前缀 + 16 位 hex）
     semantics:
       meaning: 分摊结果业务编码
       business_key: true

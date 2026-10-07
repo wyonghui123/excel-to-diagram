@@ -706,21 +706,17 @@ class PricingService:
         document_type: str,
         document_id: int,
         document_line_id: Optional[int] = None,
-        include_allocation: bool = False,
     ) -> Dict[str, Any]:
         """回放查询：结果行 + 步骤明细 + 逐层小计 + 计算基四维度。
 
         对标 IF-002「按document_type + document_id（+ 可选 document_line_id）
         查询 calc_result + calc_detail」。
 
-        【2026-10-07 拆表 · TBD-18】`include_allocation=True` 时**额外**
-        查 `allocation_results`（分摊留痕专用表），结果放`allocation_results`
-        键下——与定价结果**分开返回**，不混入 `results`。
-
-        为何分开而非合并进 `results`：分摊的数学是一次性闭式
-        （`Σ子行 == 总额` 精确成立，无迭代无中间态），**没有 calc_detail
-        明细可挂**。混进同一个列表只会让前端拿到「有结果、无步骤」的残缺
-        链路——那正是拆表前实测到的症状。
+        【2026-10-07 拆表 · TBD-18】**本方法不再返回分摊留痕**。
+        拆分曾短暂提供 `include_allocation=True` 在本方法内联查
+        `allocation_results`，等于把共表时的跨域耦合原样搬到服务层——
+        表边界建了、查询边界没建。现由 `AllocationService.query_results`
+        负责留痕回放（HTTP 出口 `GET /api/v1/allocation/result/...`）。
         """
         sql = "SELECT * FROM calc_results WHERE document_type = ? AND document_id = ?"
         params: List[Any] = [document_type, document_id]
@@ -762,23 +758,9 @@ class PricingService:
                 for d in details
                 if d.get("subtotal_key") or d.get("rollup_flag")
             ]
-        out = {
+        return {
             "document_type": document_type,
             "document_id": document_id,
             "document_line_id": document_line_id,
             "results": results,
         }
-        if include_allocation:
-            asql = ("SELECT * FROM allocation_results WHERE document_type = ?"
-                    " AND document_id = ?")
-            aparams: List[Any] = [document_type, document_id]
-            if document_line_id is not None:
-                asql += " AND document_line_id = ?"
-                aparams.append(document_line_id)
-            asql += " AND status = 'active' ORDER BY sequence ASC, id ASC"
-            arows = self._query(asql, tuple(aparams))
-            for r in arows:
-                for k in ("amount", "net_amount"):
-                    r[k] = _to_num(r.get(k))
-            out["allocation_results"] = arows
-        return out

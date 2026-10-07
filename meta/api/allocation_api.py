@@ -23,7 +23,7 @@
 
 [错误码映射] 与定价端点同一分界——400「改请求」/ 422「改配置」：
 
-    400INVALID_PARAM     参数缺失或类型错（含 rounding/weights 非法）
+    400 INVALID_PARAM      参数缺失或类型错（含 rounding/weights 非法）
     400 ALLOCATION_ERROR   分摊参数错
     404 ALLOCATION_ERROR   规则或父行不存在
     422 ALLOCATION_ERROR   配置矛盾（floor 无解、基数列缺值/非正）
@@ -31,13 +31,13 @@
 `AllocationError` 自带 `status_code`，映射直接取用，避免同一张映射表
 在两处维护而漂移。
 """
-import logging
 from typing import Optional
 
-from flask import Blueprint
+from flask import Blueprint, request
 
 from meta.api._response_contract import ok
 from meta.api.pricing_api import (
+    _as_int,
     _as_number,
     _fail,
     _is_blank,
@@ -52,8 +52,6 @@ from meta.services.allocation_service import (
     AllocationService,
 )
 from meta.services.auth_middleware import login_required
-
-logger = logging.getLogger(__name__)
 
 allocation_bp = Blueprint(
     'allocation', __name__, url_prefix='/api/v1/allocation')
@@ -180,3 +178,38 @@ def allocate():
     except Exception as exc:
         return _fail(exc)
     return ok(data)
+
+
+# ----------------------------------------------------------------------
+# 分摊留痕回放（FR-013 AC「分摊可回放」）
+# ----------------------------------------------------------------------
+@allocation_bp.route(
+    '/result/<document_type>/<int:document_id>', methods=['GET'])
+@login_required
+def get_result(document_type: str, document_id: int):
+    """回放某宿主的 active 分摊留痕：1 头（待摊总额）+ N 行（各行摊得额）。
+
+    查询参数：
+        document_line_id  选填  行 id；给定则只回该行级留痕
+        status            选填  默认 `active`；传 `all` = 含已作废行（审计用）
+
+    [为何不并入定价回放] 分摊的数学是一次性闭式（`Σ子行 == 总额` 精确成立，
+    无迭代无中间态），**没有 calc_detail 明细可挂**。混进定价的 results
+    只会让前端拿到「有结果、无步骤」的残缺链路——那正是拆表前的实测症状。
+    """
+    try:
+        raw_line = request.args.get('document_line_id')
+        line_id = None if _is_blank(raw_line) else _as_int(
+            raw_line, 'document_line_id')
+        raw_status = (request.args.get('status') or '').strip()
+        status = None if raw_status == 'all' else 'active'
+        rows = _get_alloc_service().query_results(
+            document_type, document_id, line_id, status)
+    except Exception as exc:
+        return _fail(exc)
+    return ok({
+        'document_type': document_type,
+        'document_id': document_id,
+        'document_line_id': line_id,
+        'results': rows,
+    })

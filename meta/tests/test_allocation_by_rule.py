@@ -760,3 +760,72 @@ class TestRecordAllocationResults:
             " FROM allocation_results WHERE id = ?", (hdr,)
         ).fetchone()
         assert got == ('quantity', 'qty', 'cost_center', 'ceil', 20.0)
+
+    def test_negative_total_records_minus_sign(self, env):
+        """负总额（红字 / 冲销）留痕须记 `-`。
+
+        `plan()` 允许负总额，若 sign 恒为 `+`，留痕的「分摊方向」就与
+        amount 的符号相反——查留痕的人会读成"正方向摊了负数"。
+        """
+        ds = env
+        _seed(ds, -100)
+        rid = _rule(ds, basis='equal')
+
+        r = _svc(ds).allocate_by_rule({
+            'allocation_rule_id': rid, 'parent_id': 1,
+            'target_object': 'order_line', 'target_field': 'amount',
+            'document_type': 'order',
+        })
+        ids = [r['result_ids']['header_result_id']] + \
+            r['result_ids']['line_result_ids']
+        qs = ','.join('?' * len(ids))
+        amounts = [row[0] for row in ds.execute(
+            f"SELECT amount FROM allocation_results WHERE id IN ({qs})",
+            tuple(ids))]
+        signs = {row[0] for row in ds.execute(
+            f"SELECT sign FROM allocation_results WHERE id IN ({qs})",
+            tuple(ids))}
+        assert signs == {'-'}, f'sign 未跟随负总额: {signs}'
+        assert all(a < 0 for a in amounts)
+
+    def test_query_results_replays_active_rows(self, env):
+        """留痕的读与写同域：`query_results` 回放头 + 行，默认只回 active。"""
+        ds = env
+        _seed(ds, 100)
+        rid = _rule(ds)
+        _svc(ds).allocate_by_rule({
+            'allocation_rule_id': rid, 'parent_id': 1,
+            'target_object': 'order_line', 'target_field': 'amount',
+            'document_type': 'order',
+        })
+
+        rows = _svc(ds).query_results('order', 1)
+        assert [r['level'] for r in rows] == ['header', 'line', 'line', 'line']
+        # amount 归一为数值（不是 "100.0" 字符串）
+        assert rows[0]['amount'] == 100.0
+        assert round(sum(r['amount'] for r in rows[1:]), 2) == 100.0
+
+        ds.execute("UPDATE allocation_results SET status = 'invalid'"
+                   " WHERE level = 'line'")
+        assert [r['level'] for r in _svc(ds).query_results('order', 1)] == [
+            'header']
+        assert len(_svc(ds).query_results('order', 1, status=None)) == 4
+
+
+def test_apply_handler_dispatches_on_rule_id(monkeypatch):
+    """BO Action `allocation.apply` 按**参数事实**分派，不按开关。
+
+    直调口径（显式 weights）不留痕；规则驱动才写 `allocation_results`。
+    分派错了就等于「该留痕的没留」——故这里锁住分派本身。
+    """
+    from meta.services import allocation_apply
+
+    seen = []
+    monkeypatch.setattr(
+        allocation_apply, '_run',
+        lambda method, params, label: seen.append(method) or {'success': True})
+
+    allocation_apply.allocation_apply_handler({'parent_id': 1}, {})
+    allocation_apply.allocation_apply_handler(
+        {'parent_id': 1, 'allocation_rule_id': 7}, {})
+    assert seen == ['allocate', 'allocate_by_rule']

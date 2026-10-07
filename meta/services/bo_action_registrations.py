@@ -461,12 +461,15 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'allocation.apply',
         allocation_apply_handler,
-        description='把父行金额按权重守恒地分摊到已有 N 个子行 (Σ子行=父行)',
+        description='把父行的量按权重守恒地分摊到已有 N 个子行 (Σ子行=父行)',
         object_type='*',
         category='allocation',
+        # 两种口径：带 allocation_rule_id = 规则驱动（含留痕），
+        # 不带 = 显式 weights 直调。故 required 不锁 weights ——
+        # 规则驱动时权重由 rule.basis / basis_field 推导。
         input_schema={
             'type': 'object',
-            'required': ['parent_id', 'target_object', 'target_field', 'weights'],
+            'required': ['parent_id', 'target_object', 'target_field'],
             'properties': {
                 'parent_id': {'type': 'integer'},
                 'target_object': {'type': 'string'},
@@ -476,6 +479,19 @@ def register_all_bo_actions(registry=None):
                 'parent_object': {'type': 'string'},
                 'scale': {'type': 'integer'},
                 'weights': {'type': 'array'},
+                # ---- 规则驱动口径（allocate_by_rule）----
+                'allocation_rule_id': {'type': 'integer'},
+                'basis_field': {'type': 'string'},
+                'group_by': {'type': 'string'},
+                'rounding': {'type': 'string'},
+                'floor': {'type': 'number'},
+                'persist_result': {'type': 'boolean'},
+                'document_type': {'type': 'string'},
+                'charge_source': {'type': 'string'},
+                'source_document_type': {'type': 'string'},
+                'source_document_id': {'type': 'integer'},
+                'target': {'type': 'string'},
+                'currency': {'type': 'string'},
             }
         },
         requires_auth=True,
@@ -485,7 +501,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'allocation.split',
         allocation_split_handler,
-        description='把父行金额守恒地拆分成 N 个新建子行 (Σ新行=父行)',
+        description='把父行的量守恒地拆分成 N 个新建子行 (Σ新行=父行)',
         object_type='*',
         category='allocation',
         input_schema={
