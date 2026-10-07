@@ -10,6 +10,11 @@
 #   Odoo 统一伙伴 → 标签共用（随统一模型合并）；本平台 party 为统一身份锚 ⇒ 统一分组与模型一致。
 # role_scope 必填无默认: 防静默误挂（避免默认 both 导致字段空转）；双角色通用组显式选 both。
 # [挂起] 分类携带默认值（默认条款组/默认账期等）随条款族（开票/信用/对账）落地，本表一期不落。
+# [生命周期 2026-10-07] 补 status + activate/deactivate（蓝图 §5.4 最小约定 + D4 瞬时开关）
+#   口径: status 为 required + default active（与 party / location / region / uom / currency 先例一致）;
+#         停用 = 单字段触发即改、不加生效日列（D4）; 停用后不进入新挂靠候选，
+#         已挂靠的 party_relations 保留并读单据自身快照（S20）不受影响;
+#         只取 activate / deactivate 两动作——不取 freeze/unfreeze（分类对象无"库存收发冻结"语义）。
 # [登记] meta/schemas/.schema_version.json 未在本批改动（该文件由在飞 item 批次持有未提交 diff）；
 #   party_group 作为新对象，将由 sync_schema 下次运行时自动登记（new_objects）；
 #   两库（meta/architecture.db + data/app.db）已由一次性迁移脚本直接落地建表（备份见 meta/backups/）。
@@ -134,6 +139,35 @@ fields:
     ui:
       widget: select
 
+  # [生命周期 2026-10-07] 两态 status（§5.4 最小约定；停用后不进入新挂靠候选）
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 往来单位组状态 active/inactive（生命周期约定 §5.4；停用=瞬时开关，D4 不加生效日列）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+        description: 启用，可被新往来关系挂靠
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，不进入新挂靠候选；已挂靠关系保留不受影响
+    semantics:
+      meaning: 往来单位组启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: parent_id
     name: 上级组
     type: integer
@@ -215,6 +249,9 @@ indexes:
     name: idx_party_group_code
   - fields: [parent_id]
     name: idx_party_group_parent
+  # [生命周期 2026-10-07] 状态筛选索引（停用组不进入新挂靠候选）
+  - fields: [status]
+    name: idx_party_group_status
 
 relations:
   - id: party_group_to_parent
@@ -225,6 +262,38 @@ relations:
     target_field: id
     cardinality: "N:1"
     description: 上级组引用（自引用层级；加引号防御 YAML 1.1 六十进制解析；NULL=根节点）
+
+# 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
+#   inactive --activate--> active
+#   active   --deactivate--> inactive
+#   仅两态两动作：不取 freeze/unfreeze（分类对象无"库存收发冻结"语义）
+rules:
+  - id: activate_party_group
+    name: 启用往来单位组
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此往来单位组吗？启用后可被新往来关系挂靠。"
+      highlight: true
+
+  - id: deactivate_party_group
+    name: 停用往来单位组
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此往来单位组吗？停用后不进入新挂靠候选，已挂靠关系不受影响。"
 
 ui_view_config:
   showChangeHistory: true
@@ -251,6 +320,10 @@ ui_view_config:
         target_type: party_group
         display_field: name
         placeholder: "无上级"
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
       - field: description
         width: 240
         type: ellipsis
@@ -285,6 +358,7 @@ ui_view_config:
         columns:
           - fields: [code, name]
           - fields: [role_scope, parent_id]
+          - fields: [status]
       - title: 其他信息
         columns:
           - fields: [description]
@@ -301,6 +375,7 @@ ui_view_config:
           - name
           - role_scope
           - parent_id
+          - status
           - description
 
 category_config:

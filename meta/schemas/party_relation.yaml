@@ -28,6 +28,14 @@
 # [party_group 2026-10-07] 分类挂载点 = 关系层：group_id → party_groups（N:1 真外键，可空）。
 #   硬约束: 单列单 FK 目标（不拆客户组/供应商组两列）——统一分组 + 组侧 role_scope 标注适用性；
 #   挂关系层（而非账户层/party 层）: 账户层只覆盖客户侧，party 层管不了角色差异（详见 party_group.yaml 头注）。
+#
+# [生命周期 2026-10-07] 补 status + activate/deactivate（蓝图 §5.4 最小约定 + D4 瞬时开关）
+#   口径: status 为 required + default active（瞬时开关，不加生效日列，D4）;
+#         粒度 = 关系行本身（唯一键含 le_org_id 法人域）⇒「对手在法人 A 停用、法人 B 继续交易」
+#         由不同行分别表达（对标 SAP KNB1/KNVV 公司代码层冻结）;
+#         停用 = 该法人范围内冻结/复通（只补关系层，账户层 customer_account 不重复建 status）;
+#         历史单据读单据自身快照（S20）不依赖停用语义 ⇒ 停用不破坏历史;
+#         只取 activate / deactivate 两动作——不取 freeze/unfreeze（同动作池的 freeze 预留他域）。
 # ============================================
 
 id: party_relation
@@ -254,6 +262,35 @@ fields:
       multiple: false
       clearable: true
 
+  # ── 生命周期状态（[生命周期 2026-10-07] 只补关系层；停用粒度=该法人范围冻结/复通）──
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 关系状态 active/inactive（生命周期约定 §5.4；停用=该法人范围内冻结，D4 不加生效日列）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+        description: 启用，该法人范围内可建立新单据
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，该法人范围内冻结与新单据建立；其他法人行与历史单据不受影响
+    semantics:
+      meaning: 关系启用状态（法人域粒度：停用只冻结本行所在法人范围）
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
 indexes:
   # [F2 §10 D5] 四元组部分唯一索引：le_org_id 非空参与唯一（未填 le_org_id 的行不入键）
   - fields: [party1_id, party2_id, role, le_org_id]
@@ -269,6 +306,9 @@ indexes:
     name: idx_party_relation_le_org_id
   - fields: [group_id]
     name: idx_party_relation_group_id
+  # [生命周期 2026-10-07] 状态筛选索引（消费方按状态过滤：停用行不进入新单据候选）
+  - fields: [status]
+    name: idx_party_relation_status
 
 relations:
   - id: party_relation_to_party1
@@ -303,6 +343,39 @@ relations:
     target_field: id
     cardinality: "N:1"
     description: 往来单位组引用（[FK 2026-10-07] 真外键，可空=未归类；加引号防御 YAML 1.1 六十进制解析）
+
+# 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
+#   inactive --activate--> active
+#   active   --deactivate--> inactive
+#   粒度 = 关系行（含 le_org_id 法人域）：同一对手在不同法人各行独立启停（对标 SAP KNB1/KNVV）
+#   仅两态两动作：不取 freeze/unfreeze（freeze 语义预留他域）
+rules:
+  - id: activate_party_relation
+    name: 启用关系
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此关系吗？启用后该法人范围内可继续建立新单据。"
+      highlight: true
+
+  - id: deactivate_party_relation
+    name: 停用关系
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此关系吗？停用后该法人范围内冻结与新单据建立；其他法人行与历史单据不受影响。"
 
 ui_view_config:
   skip_auto_menu: true

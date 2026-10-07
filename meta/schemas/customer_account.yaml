@@ -23,7 +23,10 @@
 #   ③ **不建 site_use / 用途对象**（bill-to / ship-to / sold-to）—— 四家一致判定为**交易域**：
 #      Oracle HZ_CUST_SITE_USES_ALL 是交易挂点（订单必填 BILL_TO_SITE_USE_ID）、
 #      SAP 落在订单伙伴表 VBPA 而非客户档案、Salesforce 无此层、PeopleSoft 是三张「角色选择页」;
-#   ④ **不建 status** —— 与 party_relation.internal_mark 语义重叠，且无生效期则启停无意义;
+#   ④ ~~**不建 status** —— 与 party_relation.internal_mark 语义重叠，且无生效期则启停无意义;~~
+#      [生命周期 2026-10-07 修订注] 停用语义已落关系层（party_relation.status，两态瞬时开关 §5.4/D4），
+#      account 属其后 1:1 明细面，不重复建 status。原理由不成立：「与 internal_mark 重叠」否 ——
+#      internal_mark 是内｜外标记（非启停）；「无生效期则启停无意义」否 —— D4 已判停用=瞬时开关。
 #   ⑤ **customer_type 是纯标签，非配置驱动** —— SAP KTOKD（客户科目组）可驱动字段分派与校验，本对象不可
 #      ⇒ 不得宣称具备「按客户类型分派行为」能力;
 #   ⑥ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 可写入孤儿行 ⇒ TBD-16;

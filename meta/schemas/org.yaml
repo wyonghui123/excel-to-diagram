@@ -3,6 +3,11 @@
 # 新增字段: org_type (department/team/division/company), org_scope (internal/external)
 # 表名: user_groups → orgs
 # 关联表: user_group_members → org_members, group_roles → org_permission_sets
+# [生命周期 2026-10-07] 补 status + activate/deactivate（蓝图 §5.4 最小约定 + D4 瞬时开关）
+#   口径: status 为 required + default active（与 party / location / region / uom / currency 先例一致）;
+#         停用 = 瞬时开关、不加生效日列（D4）; 停用后不再承接新业务、不进入新引用候选，历史保留;
+#         §5.4 原「org 沿用现有（状态集待定）」由此关闭（两态拍板 2026-10-07）;
+#         只取 activate / deactivate 两动作——不取 freeze/unfreeze（组织无"库存收发冻结"语义）。
 
 id: org
 name: 组织
@@ -145,6 +150,35 @@ fields:
         color: default
     semantics:
       meaning: 组织所属范围
+    ui:
+      widget: select
+
+  # [生命周期 2026-10-07] 两态 status（§5.4 最小约定；此前「状态集待定」由此关闭）
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 组织状态 active/inactive（生命周期约定 §5.4；停用=瞬时开关，D4 不加生效日列）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+        description: 启用，可承接新业务与引用
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，不再承接新业务/不进入新引用候选；历史保留
+    semantics:
+      meaning: 组织启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
     ui:
       widget: select
 
@@ -307,8 +341,43 @@ indexes:
     name: idx_org_type
   - fields: [org_scope]
     name: idx_org_scope
+  # [生命周期 2026-10-07] 状态筛选索引（停用组织不进入新引用候选）
+  - fields: [status]
+    name: idx_org_status
 
 relations: []
+
+# 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
+#   inactive --activate--> active
+#   active   --deactivate--> inactive
+#   仅两态两动作：不取 freeze/unfreeze（组织无"库存收发冻结"语义）
+rules:
+  - id: activate_org
+    name: 启用组织
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此组织吗？启用后可继续承接业务与引用。"
+      highlight: true
+
+  - id: deactivate_org
+    name: 停用组织
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此组织吗？停用后不再承接新业务、不进入新引用候选；历史保留。"
 
 associations:
   members:
@@ -453,6 +522,10 @@ ui_view_config:
         target_type: org
         display_field: name
         placeholder: "无上级"
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
       # [FIX 2026-09-06 Spec 19 v084] manager_id 为死功能 (零数据/无消费点),
       # 「管理员」标签按 spec 下线; DB 列保留至 v085 删列
       - field: member_count
@@ -535,6 +608,7 @@ ui_view_config:
           - fields: [org_type, org_scope]
           # [FIX 2026-09-06 Spec 19 v084] manager_id 死功能下线, 表单不再展示
           - fields: [parent_id]
+          - fields: [status]
       - title: 其他信息
         columns:
           - fields: [description]
@@ -553,6 +627,7 @@ ui_view_config:
           - org_scope
           - parent_id
           # [FIX 2026-09-06 Spec 19 v084] manager_id 死功能下线, 详情不再展示
+          - status
           - description
 
       - id: members
