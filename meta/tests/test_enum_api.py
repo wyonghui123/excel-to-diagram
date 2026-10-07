@@ -17,6 +17,34 @@ pytestmark = pytest.mark.integration
 ENUM_URL = '/api/v1'
 
 
+def _cleanup_enum(api_client, headers, enum_id):
+    """清理枚举类型: 先删值再删类型。
+
+    [Q4-E 2026-10-07] 根因: 类型下有值时 DELETE /enum-types/<id> 被 HAS_VALUES 拦截
+    → 只删类型的旧清理静默失败导致残留 (test_fr* 系列); locked 枚举的值删除被
+    ENUM_VALUE_LOCKED 拦截 → 先改回 extensible 再删值 (类型更新不受 locked 限制)。
+    """
+    try:
+        resp = api_client.get(f'{ENUM_URL}/enum-types/{enum_id}/values', headers=headers)
+        if resp.status_code == 200:
+            values = resp.get_json()['data'].get('data', [])
+            if values:
+                # locked 枚举不可删值 → 先解锁
+                api_client.put(
+                    f'{ENUM_URL}/enum-types/{enum_id}',
+                    json={'mutability': 'extensible'},
+                    headers=headers,
+                )
+                for v in values:
+                    api_client.delete(f"{ENUM_URL}/enum-values/{v['id']}", headers=headers)
+    except Exception:
+        pass
+    try:
+        api_client.delete(f'{ENUM_URL}/enum-types/{enum_id}', headers=headers)
+    except Exception:
+        pass
+
+
 class TestEnumAPI:
     """enum_api 端到端测试 (GAP-006)"""
 
@@ -66,26 +94,27 @@ class TestEnumAPI:
     def test_create_then_get_enum_type(self, api_client, admin_headers):
         """端到端: 创建枚举类型 → 读取 (admin)"""
         enum_id = f'test_enum_{int(time.time())}'
-        resp = api_client.post(
-            f'{ENUM_URL}/enum-types',
-            json={
-                'id': enum_id,
-                'name': 'Test Enum Type',
-                'category': 'business',
-                'mutability': 'extensible',
-            },
-            headers=admin_headers,
-        )
-        assert resp.status_code == 200
-        body = resp.get_json()
-        assert body.get('success') is True
-        # 立即 GET
-        resp2 = api_client.get(f'{ENUM_URL}/enum-types/{enum_id}', headers=admin_headers)
-        assert resp2.status_code == 200
-        assert resp2.get_json()['data']['id'] == enum_id
-        # 清理: DELETE
-        resp3 = api_client.delete(f'{ENUM_URL}/enum-types/{enum_id}', headers=admin_headers)
-        assert resp3.status_code == 200
+        try:
+            resp = api_client.post(
+                f'{ENUM_URL}/enum-types',
+                json={
+                    'id': enum_id,
+                    'name': 'Test Enum Type',
+                    'category': 'business',
+                    'mutability': 'extensible',
+                },
+                headers=admin_headers,
+            )
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body.get('success') is True
+            # 立即 GET
+            resp2 = api_client.get(f'{ENUM_URL}/enum-types/{enum_id}', headers=admin_headers)
+            assert resp2.status_code == 200
+            assert resp2.get_json()['data']['id'] == enum_id
+        finally:
+            # 清理 (try/finally: 中途断言失败也不残留)
+            _cleanup_enum(api_client, admin_headers, enum_id)
 
     def test_create_enum_value_in_known_type(self, api_client, admin_headers):
         """POST /enum-types/<id>/values 在已存在类型下创建值"""
@@ -96,17 +125,19 @@ class TestEnumAPI:
             json={'id': enum_id, 'name': 'Test V', 'category': 'business', 'mutability': 'extensible'},
             headers=admin_headers,
         )
-        # 创建值
-        resp = api_client.post(
-            f'{ENUM_URL}/enum-types/{enum_id}/values',
-            json={'code': 'VAL_A', 'name': 'Value A', 'sort_order': 1},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 200
-        body = resp.get_json()
-        assert body.get('success') is True
-        # 清理
-        api_client.delete(f'{ENUM_URL}/enum-types/{enum_id}', headers=admin_headers)
+        try:
+            # 创建值
+            resp = api_client.post(
+                f'{ENUM_URL}/enum-types/{enum_id}/values',
+                json={'code': 'VAL_A', 'name': 'Value A', 'sort_order': 1},
+                headers=admin_headers,
+            )
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body.get('success') is True
+        finally:
+            # 清理: 必须先删值 (旧版只删类型被 HAS_VALUES 拦截 → 历史残留来源之一)
+            _cleanup_enum(api_client, admin_headers, enum_id)
 
     def test_create_enum_value_in_unknown_type_404(self, api_client, admin_headers):
         """POST /enum-types/<unknown>/values → 404"""
@@ -260,11 +291,8 @@ class TestEnumAPIValidationFR:
         return enum_id
 
     def _cleanup(self, api_client, headers, enum_id):
-        """辅助: 清理"""
-        try:
-            api_client.delete(f'{ENUM_URL}/enum-types/{enum_id}', headers=headers)
-        except Exception:
-            pass
+        """辅助: 清理 (先删值再删类型 —— 旧版只删类型被 HAS_VALUES 拦截导致 fr* 系列残留)"""
+        _cleanup_enum(api_client, headers, enum_id)
 
     # ── FR-001: mutability 值空间校验 (3 档) ──
 
