@@ -15,7 +15,7 @@ description: 内部治理台账面：恒取 source='org' 的内部组织表示�
 display_name_field: name
 object_type: view
 view_definition: |
-  SELECT id, code, name, party_type, source, org_id
+  SELECT id, code, name, party_type, source, org_id, status
   FROM parties
   WHERE source = 'org'
 
@@ -113,6 +113,34 @@ fields:
     description: orgs 外键（本面非空且 1:1；org 维度注入字段）
     semantics:
       meaning: 对应组织
+
+  # [生命周期 2026-10-07] 与基表同列出口径（谓词列 + status），供消费方按状态过滤
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 30
+    description: 身份主体状态 active/inactive（继承自 parties.status；内部行同样可停用）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 身份主体启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
 
 relations: []
 

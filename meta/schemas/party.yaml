@@ -6,6 +6,15 @@
 #   - party_internal 内部治理台账（谓词 source='org'，挂 org 维度绑定）
 # 治理分域: source='org' ↔ org 记录 1:1（org_id 部分唯一索引强制）；外部记录 source 为空（NULL）
 # 红线: 引用字段定名 org_id（禁止 owning_org_id —— 避免 A11 自动扩展误纳入全局注入）
+# [生命周期 2026-10-07] 补 status + activate/deactivate（蓝图 §5.4 最小约定 + D4 瞬时开关）
+#   口径: status 为 required + default active（与 location / region / uom / currency 两态先例一致）;
+#         停用 = 单字段触发即改、**不加生效日列**（D4: 7 表现状即结论、全库零 inactive_date）;
+#         "某日才停用"属未来动作 → scheduled_tasks, 不做行上持续状态;
+#         老单据结算读单据自身快照（S20）不依赖停用语义 ⇒ 停用不破坏历史;
+#         只取 activate / deactivate 两动作——不取 freeze/unfreeze（party 无"库存收发冻结"语义,
+#         D9: 物料无登录概念同理, 身份主体不需要"锁定登录"）;
+#   读面同步: party_archive / party_internal 两个只读视图同列出口径（消费方按状态过滤），
+#         谓词不变（仍由 SQL 结构强制治理分域口径）。
 # ============================================
 
 id: party
@@ -128,6 +137,34 @@ fields:
     ui:
       widget: input
 
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 身份主体状态 active/inactive（生命周期约定 §5.4；停用=瞬时开关，D4 不加生效日列）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+        description: 启用，可被新往来关系引用
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，阻止新往来关系建立；历史单据读自身快照不受影响
+    semantics:
+      meaning: 身份主体启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
 indexes:
   # [F1 §3.1] 1:1 强约束：仅对内部行（source='org'）生效的部分唯一索引；禁双写（P1）
   - fields: [org_id]
@@ -137,6 +174,9 @@ indexes:
     name: idx_party_org_unique
   - fields: [source]
     name: idx_party_source
+  # [生命周期 2026-10-07] 状态筛选索引（消费方按状态过滤：停用方不进入新关系选择候选）
+  - fields: [status]
+    name: idx_party_status
 
 # [F2 §9 D3] 编码规则：锚对象统一走平台 key_template（item 先行；先例 relationship.yaml）
 # 硬约束：party 无父对象 ⇒ segments 不得含 parent_field（引擎对 parent_field 段强制非空校验，
@@ -164,6 +204,39 @@ relations:
     target_field: id
     cardinality: '1:1'
     description: 对应组织引用（[FK 2026-10-07] 由展示语义升级为真外键；1:1 由 idx_party_org_unique 部分唯一索引强制，仅 source='org' 内部行生效）
+
+# 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
+#   inactive --activate--> active
+#   active   --deactivate--> inactive
+#   仅两态两动作：不取 freeze/unfreeze（身份主体无"库存收发冻结"语义）
+#                   不取 lock/unlock（那是 user 专属"限制登录"，D9 已判）
+rules:
+  - id: activate_party
+    name: 启用身份主体
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此身份主体吗？启用后可被新往来关系引用。"
+      highlight: true
+
+  - id: deactivate_party
+    name: 停用身份主体
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此身份主体吗？停用后将阻止建立新的客户/供应商关系，历史单据不受影响。"
 
 ui_view_config:
   skip_auto_menu: true
