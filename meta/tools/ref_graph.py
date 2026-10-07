@@ -123,6 +123,12 @@ def build_ref_graph(yaml_dir: str = "meta/schemas") -> Dict[str, Any]:
     yaml_files = sorted(schema_dir.glob("*.yaml"))
 
     for yp in yaml_files:
+        # [2026-10-07] 与第二遍(L145)对齐: 跳过 _ 前缀文件(_template / _standard_actions 等)。
+        # 第一遍的产物 all_table_names 会写进 .ref_graph.json 的 all_known_entities,
+        # 漏判会把 _template.yaml 的 id: new_object / table_name: new_objects 当成真实实体
+        # 记进产物 —— 与 load_yaml_directory 的 "_" 前缀判据同源同因, 批次 2 只堵了后者。
+        if yp.name.startswith("_"):
+            continue
         try:
             with open(yp, "r", encoding="utf-8") as f:
                 d = yaml.safe_load(f)

@@ -626,9 +626,6 @@
     "role_menu_permissions"
   ],
   "all_known_entities": [
-    "_action_groups",
-    "_audit_materialization",
-    "_standard_actions",
     "address",
     "addresses",
     "adjustment",
@@ -710,8 +707,6 @@
     "menu_permission",
     "menu_permissions",
     "menus",
-    "new_object",
-    "new_objects",
     "org",
     "org_data_permission",
     "org_data_permissions",
