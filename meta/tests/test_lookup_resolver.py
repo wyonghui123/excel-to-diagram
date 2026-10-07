@@ -107,6 +107,166 @@ class TestTR006消解范式验收矩阵:
             resolve_candidates(cands, RESOLUTION_WEIGHTED)
 
 
+# --------------------------------------------------------------------------
+# I-10 · 范式区分性（v1.16 · 2026-10-08）
+#
+# [为何需要这一组] TR-006 的原夹具 priority 1/2/3 与 value 100/200/300 **同序**，
+# 于是 `precedence`（取 priority 最前）与 `best(min_amount)`（取 value 最小）
+# **必然都命中 id=1** —— 两者在同一夹具下同解，测了等于没测：
+#   原夹具实测precedence -> [1] / best(min_amount) -> [1]  ← 无法区分
+# 本组改用**反序夹具**（priority 与 value 反向），令各范式**同数据不同解**，
+# 这才是 FR-008 AC「同一数据下多种范式结果可分别复现」的真验证。
+# --------------------------------------------------------------------------
+
+
+def _reversed_candidates():
+    """反序夹具：priority 升序 1/2/3，但value 降序 300/100/200。
+
+    刻意让 "优先级最前" 与 "金额最小"落在**不同**候选上：
+      id=1  priority=1  value=300   ← precedence 命中（最高优先级）
+      id=2  priority=2  value=100   ← best(min_amount) 命中（最低价）
+      id=3  priority=3  value=200
+    """
+    return [
+        Candidate(id=1, priority=1, value=300.0, key_schema_id=1, keys={"customer": 1001}),
+        Candidate(id=2, priority=2, value=100.0, key_schema_id=1, keys={"customer": 1001}),
+        Candidate(id=3, priority=3, value=200.0, key_schema_id=1, keys={"customer": 1001}),
+    ]
+
+
+class TestI10范式区分性:
+    """I-10：四范式在**同一份反序数据**上须各给出可复现的不同结果。"""
+
+    def test_precedence_hits_highest_priority_not_cheapest(self):
+        """precedence：按 priority 取最前 → id=1（value=300，**不是**最低价）"""
+        r = resolve_candidates(_reversed_candidates(), RESOLUTION_PRECEDENCE)
+        assert [c.id for c in r] == [1]
+        assert r[0].value == 300.0
+
+    def test_best_min_amount_hits_cheapest_not_highest_priority(self):
+        """best/min_amount：按 value 取最小 → id=2（priority=2，非最高优先级）"""
+        r = resolve_candidates(_reversed_candidates(), RESOLUTION_BEST, measure="min_amount")
+        assert [c.id for c in r] == [2]
+        assert r[0].value == 100.0
+
+    def test_best_max_amount_hits_dearest(self):
+        """best/max_amount：按 value 取最大 → id=1"""
+        r = resolve_candidates(_reversed_candidates(), RESOLUTION_BEST, measure="max_amount")
+        assert [c.id for c in r] == [1]
+        assert r[0].value == 300.0
+
+    def test_four_paradigms_are_pairwise_distinguishable(self):
+        """核心断言：四范式**不被混同**——各范式在反序夹具上给出可区分的结果。
+
+        [口径说明 · 为何只断言这两组]
+        `precedence`（priority 最前）与 `best(max_amount)`（value 最大）
+        在本夹具上**必然同为 id=1** —— 反序只把「最低价」挪开了，
+        「最高优先级」与「最高价」仍重合。这是夹具的固有性质，非实现缺陷。
+        故此处断言**真正能区分的两组**：
+          ① precedence([1])≠ best(min_amount)([2])  ← priority 与 value 反向
+          ② best(min_amount)([2]) ≠ best(max_amount)([1])  ← 两个度量之间
+        加上一条：全组带权重时四范式统一退化为加权（见下一例）。
+
+        `exclusive` 与 `precedence` 当前实现等价，其缺口由
+        TestI10已知实现缺口 显式记录，此处不强行要求其单独可分。
+        """
+        cands = _reversed_candidates()
+        prec = [c.id for c in resolve_candidates(cands, RESOLUTION_PRECEDENCE)]
+        bmin = [c.id for c in resolve_candidates(cands, RESOLUTION_BEST, measure="min_amount")]
+        bmax = [c.id for c in resolve_candidates(cands, RESOLUTION_BEST, measure="max_amount")]
+        # ① priority 最前 ≠ 最低价 —— 这是原同序夹具测不出来的
+        assert prec == [1] and bmin == [2]
+        assert prec != bmin
+        # ② 两个度量之间可区分
+        assert bmin != bmax
+        # ③ 确定性：同数据重复跑结果一致（FR-004 AC「可回放」）
+        assert prec == [c.id for c in resolve_candidates(cands, RESOLUTION_PRECEDENCE)]
+        assert bmin == [c.id for c in resolve_candidates(cands, RESOLUTION_BEST, measure="min_amount")]
+
+    def test_weighted_is_the_only_multi_candidate_paradigm(self):
+        """weighted：唯一返回**全部候选**的范式（唯一多候选结果）。"""
+        cands = [
+            Candidate(id=1, priority=1, value=300.0, allocation_weight=0.5),
+            Candidate(id=2, priority=2, value=100.0, allocation_weight=0.3),
+            Candidate(id=3, priority=3, value=200.0, allocation_weight=0.2),
+        ]
+        others = [RESOLUTION_PRECEDENCE, RESOLUTION_BEST, RESOLUTION_EXCLUSIVE]
+        # 对照：取一语义在**无权重**数据上恒返回 1 条
+        plain = [
+            Candidate(id=1, priority=1, value=300.0),
+            Candidate(id=2, priority=2, value=100.0),
+            Candidate(id=3, priority=3, value=200.0),
+        ]
+        for res in others:
+            assert len(resolve_candidates(plain, res, measure="min_amount")) == 1, (
+                "无权重数据下 %s 应恒返回 1 条（取一语义）" % res
+            )
+        # weighted 返回 3 条并给出加权结果：300×.5 + 100×.3 + 200×.2 = 150+30+40 = 220
+        r = resolve_candidates(cands, RESOLUTION_WEIGHTED)
+        assert [c.id for c in r] == [1, 2, 3]
+        assert apply_weighted(r, 1.0) == pytest.approx(220.0)
+
+
+class TestI10已知实现缺口:
+    """把 I-10 取证发现的两处**如实钉死**在此，缺口消除时本类即转红。
+
+    记录而非掩盖，是本组的唯一目的：让"M4 哪些DoD 未达成"有代码级证据，
+    而不是靠人读文档推断。
+    """
+
+    def test_exclusive_is_currently_equivalent_to_precedence(self):
+        """**缺口 A**：`exclusive` 与 `precedence` 实现完全等价（均 `live[:1]`）。
+
+        FR-008 AC 第3 条要求排斥组边界由 `exclusion_group` 显式圈定，
+        但实测 `resolve_candidates` 的两个调用方（`pricing_service` /
+        `pricing_api`）**只传 `resolution` 字符串、不传组边界**，
+        全仓 `exclusion_group` 零运行期引用 → **排斥组从未真正实现**。
+
+        本例断言的是**当前事实**（缺口存在）。实现补齐后本例会转红，
+        届时应改写为断言"exclusive 按组边界独立于 precedence"。
+        """
+        cands = _reversed_candidates()
+        excl = [c.id for c in resolve_candidates(cands, RESOLUTION_EXCLUSIVE)]
+        prec = [c.id for c in resolve_candidates(cands, RESOLUTION_PRECEDENCE)]
+        assert excl == prec == [1], (
+            "若本例转红，说明 exclusive 已按组边界独立于 precedence —— "
+            "请改写本例并移除 §10.1 的排斥组缺口登记"
+        )
+
+    def test_full_weight_group_overrides_other_paradigms(self):
+        """**缺口 B（Spec 已授权，但行为此前无测试锁定）**：全组带权重时，
+        `precedence` / `best` / `exclusive` **一律退化为加权**、返回全部候选。
+
+        依据 FR-008 AC 第 3 条「若组内存在非空 allocation_weight，
+        该组按加权累加执行，resolution 对其不生效」—— **这是授权行为**。
+        本例锁定它，以免后续误改；`best` 的 `measure` 被忽略一事亦在此固化。
+        """
+        cands = [
+            Candidate(id=1, priority=1, value=300.0, allocation_weight=0.5),
+            Candidate(id=2, priority=2, value=100.0, allocation_weight=0.3),
+            Candidate(id=3, priority=3, value=200.0, allocation_weight=0.2),
+        ]
+        for res in (RESOLUTION_PRECEDENCE, RESOLUTION_BEST, RESOLUTION_EXCLUSIVE, RESOLUTION_WEIGHTED):
+            r = resolve_candidates(cands, res, measure="min_amount")
+            assert [c.id for c in r] == [1, 2, 3], (
+                "全组带权重时 %s 应退化为加权并返回全部候选" % res
+            )
+
+    def test_partial_weight_group_is_rejected_regardless_of_paradigm(self):
+        """部分带权重 → **任何**范式都报错（不得静默取一）。
+
+        这是最容易出静默错价的一条路径：若此处退化为"取一"，
+        配置者写了一半权重会被无声忽略。
+        """
+        cands = [
+            Candidate(id=1, priority=1, value=300.0, allocation_weight=0.5),
+            Candidate(id=2, priority=2, value=100.0),
+        ]
+        for res in (RESOLUTION_PRECEDENCE, RESOLUTION_BEST, RESOLUTION_EXCLUSIVE):
+            with pytest.raises(ResolutionError, match="不可混用"):
+                resolve_candidates(cands, res, measure="min_amount")
+
+
 class TestFR004确定性:
     """FR-004 AC：同 priority 须有确定 tie-break，禁止不确定顺序。"""
 

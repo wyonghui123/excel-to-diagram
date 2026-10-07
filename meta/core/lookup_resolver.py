@@ -383,11 +383,28 @@ def resolve_candidates(
                    **best 绝不隐式默认**（FR-008 AC）——未给度量直接报错。
 
     Returns:
-        消解后的候选列表。precedence/best/exclusive 返回**至多 1 条**；
-        weighted 返回**全部**（加权累加，见 apply_weighted）。
+        消解后的候选列表。
+
+        **取一语义**（`precedence` / `exclusive` / `best`）返回**至多 1 条**。
+        **多候选语义**（`weighted`）返回**全部**（加权累加，见 `apply_weighted`）。
+
+        **权重优先于 resolution**（FR-008 AC 第 3 条「若组内存在非空
+        `allocation_weight`，该组按加权累加执行，`resolution` 对其不生效」）：
+        若组内候选**全部**带 `allocation_weight`，则**无论传入哪个范式**
+        （含 `best`，其 `measure` 会被**静默忽略**）一律返回全部候选。
+        部分带、部分不带 → 抛 `ResolutionError`（不静默取一）。
+        判定发生在读取 `resolution` **之前**，故下方的范式分支仅在
+        「全组无权重」时才可能到达。
+
+        **`exclusive` 当前与 `precedence` 实现等价**（均取 `live[:1]`）：
+        排斥组边界须由 `exclusion_group` 圈定，但两个调用方
+        （`PricingService.calculate_line` / `pricing_api`）**只传 `resolution`
+        字符串、不传组边界** → 组边界无人承载，AC 第 3 条的这一半尚未实现。
+        见 Spec §10.1 的排斥组缺口登记。
 
     Raises:
-        ResolutionError: best 范式未定义度量。
+        ResolutionError: best 范式未定义度量 / 未知范式或度量 /
+            权重和 ≠ 1 / 权重部分缺失 / `best` 用于分档记录。
     """
     live = [c for c in candidates if not c.inactive]
     if not live:
