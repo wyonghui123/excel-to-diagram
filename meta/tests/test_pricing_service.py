@@ -623,6 +623,93 @@ class TestFR009阶梯链路:
             _price(ds)
 
 
+class TestRateQty端到端:
+    """FR-009 收口：`rate_qty`（"每 10 个"）在**全链路**被折算。
+
+    [缺陷背景] 该字段此前全仓零消费，`rate` 被当成"每个的单价"直接 × base。
+    实测 `rate=100 / rate_qty=10 / base=100` 得 **10000**，业务期望 **1000**
+    → **静默 10 倍超收**（无异常、无告警）。
+
+    [为何单列这一层] 内核层 `test_lookup_resolver.TestRateQty折算` 只验
+    `per_unit_rate` / `resolve_scale`。而真正会出错钱的是服务层把哪个值喂给
+    `rate_<id>`、以及**写回单据的单价**——内核层看不见这条接缝。
+    """
+
+    _TIERS = ('[{"from": 0, "to": 100, "rate": 100.0}, '
+              '{"from": 100, "to": null, "rate": 80.0}]')
+
+    def _seed_box(self, ds, rate=100.0, **extra):
+        """单条「每 10 个 100」费率记录 + 过程显式 `费率 × 数量`。
+
+        [为何改过程] 标准夹具的过程是 `formula("lookup_amount")`，直接把**费率**
+        当金额；要验证「每单位费率 × 数量 == 金额」，过程须显式乘基数。
+        """
+        _seed(ds)
+        update(ds, "calc_procedures", {"code": 'PROC_STD'},
+               steps='[{"seq":1,"element_type":"formula",'
+                     '"params":{"expr":"rate_1 * base"}}]')
+        delete(ds, "rate_records", id=[2, 3])
+        update(ds, "rate_records", {"id": 1}, rate=rate, rate_unit="PC",
+               rate_qty=10, **extra)
+
+    def _stored_rate(self, ds):
+        from meta.services.pricing_service import _to_num
+        return _to_num(ds.execute("SELECT rate FROM calc_results").fetchone()[0])
+
+    def test_box_rate_is_ten_times_cheaper_per_unit(self, ds):
+        """"每 10 个收 100" + base=100 个 → 金额 1000（修复前为 10000）"""
+        self._seed_box(ds)
+        r = _price(ds, document_type="so", document_id=1, base=100.0)
+        assert r["net_amount"] == pytest.approx(1000.0)
+
+    def test_stored_rate_is_per_unit(self, ds):
+        """落库 rate 必须是**每单位** 10，而非毛额 100（否则回放/写回都错）"""
+        self._seed_box(ds)
+        _price(ds, document_type="so", document_id=1, base=100.0)
+        assert self._stored_rate(ds) == pytest.approx(10.0)
+
+    def test_absent_rate_qty_keeps_legacy_amount(self, ds):
+        """未声明 rate_qty（NULL）→ 恒等折算，金额仍为 rate × base（存量不变）"""
+        self._seed_box(ds, rate=100.0)
+        update(ds, "rate_records", {"id": 1}, rate_qty=None)
+        r = _price(ds, document_type="so", document_id=1, base=100.0)
+        assert r["net_amount"] == pytest.approx(10000.0)
+        assert self._stored_rate(ds) == pytest.approx(100.0)
+
+    def test_write_back_uses_per_unit_price(self, ds):
+        """写回行单价取**每单位** 10，绝不把毛额 100 写进单据（静默错价防护）"""
+        from meta.core.models import MetaObject, MetaField
+        from meta.core.models_enums import FieldType
+        self._seed_box(ds)
+        ds.execute("CREATE TABLE IF NOT EXISTS so_box (id integer,"
+                   " unit_price float, amount float)")
+        if registry.get("so_box") is None:
+            mo = MetaObject(id="so_box", name="so_box", table_name="so_box")
+            for n in ("id", "unit_price", "amount"):
+                ft = FieldType("integer") if n == "id" else FieldType("float")
+                mo.fields.append(MetaField(id=n, name=n, field_type=ft, db_column=n))
+            registry.register(mo)
+        insert(ds, "so_box", id=1, unit_price=None, amount=0)
+        _price(ds, document_type="so_box", document_id=1, base=100.0,
+               document_line_id=88, level="line")
+        wb = PricingService(ds).write_back("so_box", 1, document_line_id=88)
+        assert wb["written"]["unit_price"] == pytest.approx(10.0)
+
+    @pytest.mark.parametrize("semantic", ["total", "incremental"])
+    def test_tiered_box_rate_also_normalized(self, ds, semantic):
+        """「每 10 个」+ 阶梯一并折算（否则留下第二处 10 倍超收口子）。
+
+        base=50 落在 [0,100) 档：total 取档位费率 100 → 每单位 10 → 500；
+        incremental 分段 50×100=5000 → 等效费率 100 → 每单位 10 → 500。
+        两条语义结果相同（本例档位费率恒为 100）。
+        """
+        self._seed_box(ds, rate=0.0, scale=self._TIERS,
+                       scale_semantic=semantic)
+        r = _price(ds, document_type="so", document_id=1, base=50.0)
+        assert r["net_amount"] == pytest.approx(500.0)
+        assert self._stored_rate(ds) == pytest.approx(10.0)
+
+
 class TestFR016ConditionalUpdate:
     """FR-016 条件更新（累计用量 · 对标 SAP Condition Update `KOUPD`）
 

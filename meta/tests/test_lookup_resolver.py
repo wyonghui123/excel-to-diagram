@@ -452,3 +452,100 @@ class TestScaleParity:
         ctx = StepContext(state={}, base=float(qty))
         amount = OPERATORS["tier"](ctx, {"tiers": list(_TIERS), "semantic": semantic})
         assert rate * qty == pytest.approx(amount)
+
+
+# ============================================================================
+# 【FR-009 收口 · 2026-10-07】rate_qty（"每 10 个"）折算
+# ============================================================================
+class TestRateQty折算:
+    """`rate_record.rate_qty` = 定价数量（如"每 10 个"填 10）。
+
+    [缺陷背景] 该字段此前**全仓零消费** —— `rate` 被当成"每个的单价"直接
+    × base。实测：`rate=100 / rate_qty=10 / base=100` 得**10000**，
+    而业务期望 1000（`100/10 × 100`）→ **静默 10 倍超收**，无异常无告警。
+    引擎契约是「金额 = **每单位**费率 × 数量」，故须折算成每 1 个的单价。
+
+    [落点] 折算收敛在 `resolve_scale`（所有费率出口的唯一收口），避免
+    服务层二次除法；`_op_tier` 处理的是**过程内联档位**（无 rate_qty 概念），
+    故 `TestScaleParity` 的 `rate × qty == amount` 判据在 `rate_qty=1`
+    （默认）下仍成立，见 `test_parity_holds_when_rate_qty_is_one`。
+    """
+
+    def test_per_unit_rate_divides_by_rate_qty(self):
+        assert Candidate(id=1, value=100.0, rate_qty=10).per_unit_rate() == 10.0
+
+    def test_per_unit_rate_defaults_to_identity(self):
+        """未声明 rate_qty（默认 1）→ 折算为恒等，存量行为不变"""
+        assert Candidate(id=1, value=100.0).per_unit_rate() == 100.0
+
+    @pytest.mark.parametrize("bad", [0, -5])
+    def test_non_positive_rate_qty_falls_back_to_one(self, bad):
+        """0 / 负数属配置矛盾，本期兜底为 1 而非抛错。
+
+        [取舍] 抛错会让存量脏数据**阻断整张价目表**取价，风险高于"按 1 处理"。
+        """
+        assert Candidate(id=1, value=100.0,
+                         rate_qty=bad).per_unit_rate() == 100.0
+
+    def test_from_dict_reads_textual_rate_qty(self):
+        """sqlite 的 number 列读回可能是文本 / NULL，须统一（与 `_num` 同口径）"""
+        assert Candidate.from_dict(
+            {"id": 1, "rate": 100, "rate_qty": "10"}
+        ).per_unit_rate() == 10.0
+        assert Candidate.from_dict(
+            {"id": 2, "rate": 100, "rate_qty": None}
+        ).per_unit_rate() == 100.0
+
+    def test_explicit_rate_argument_is_normalized(self):
+        """`per_unit_rate(rate)` 传入档位费率时同样折算（阶梯路径依赖此形）"""
+        c = Candidate(id=1, value=999.0, rate_qty=10)
+        assert c.per_unit_rate(100.0) == 10.0
+
+    def test_no_scale_record_is_normalized(self):
+        """不分档路径：rate_qty=10 → 每单位 10（此前得 100，10 倍超收）"""
+        c = Candidate(id=1, value=100.0, rate_qty=10)
+        assert resolve_scale(c, 100)["rate"] == 10.0
+
+    @pytest.mark.parametrize("semantic", [SCALE_TOTAL, SCALE_INCREMENTAL])
+    def test_tier_path_is_normalized(self, semantic):
+        """阶梯两语义一并折算 —— 否则「每 10 个 + 阶梯」留下第二处超收口子。
+
+        qty=50 时两语义各自的未折算费率（`_TIERS` = [0,10)100 / [10,50)90 /
+        [50,∞)80）：
+          - total       = 命中 [50,∞) 档 → 80
+          - incremental = (10×100 + 40×90) ÷ 50 = 4600 ÷ 50 = 92
+        `rate_qty=10` 后两者都应 ÷10（未折算则金额为 4600 / 9200，10 倍超收）。
+        """
+        sc = resolve_scale(_tiered(semantic, rate_qty=10), 50)
+        assert sc["rate"] == pytest.approx({SCALE_TOTAL: 8.0,
+                                            SCALE_INCREMENTAL: 9.2}[semantic])
+        # 与不声明 rate_qty 的同档结果严格成 1/10 —— 直接锁定"折算只做一次"
+        base = resolve_scale(_tiered(semantic), 50)["rate"]
+        assert sc["rate"] * 10 == pytest.approx(base)
+
+    def test_tier_trace_records_normalized_rate(self):
+        """留痕的 `tier.rate` 记折算后值，使 FR-010 回放能直接用它复算"""
+        sc = resolve_scale(_tiered(SCALE_TOTAL, rate_qty=10), 20)
+        assert sc["tier"]["rate"] == 9.0     # 命中档 90 / 10
+
+    def test_lookup_amount_uses_normalized_rate(self):
+        """端到端：`LookupResult.rates` / `amount` 均为每单位费率"""
+        r = lookup(
+            candidates=[Candidate(id=1, value=100.0, rate_qty=10,
+                                  key_schema_id=1, keys={"customer": 1001})],
+            steps=[{"seq": 1, "key_schema_id": 1}],
+            slot_keys=[{"customer": 1001}],
+        )
+        assert r.rates[1] == 10.0
+        assert r.amount == pytest.approx(10.0)
+
+    def test_parity_holds_when_rate_qty_is_one(self):
+        """默认 `rate_qty=1` 下与内联 `tier` 算子仍同义（守护 TestScaleParity
+        的前提未被本次改动破坏）"""
+        from meta.core.calc_procedure_executor import OPERATORS, StepContext
+
+        rate = resolve_scale(_tiered(SCALE_TOTAL), 20)["rate"]
+        ctx = StepContext(state={}, base=20.0)
+        amount = OPERATORS["tier"](
+            ctx, {"tiers": list(_TIERS), "semantic": SCALE_TOTAL})
+        assert rate * 20 == pytest.approx(amount)
