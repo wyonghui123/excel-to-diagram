@@ -1,25 +1,27 @@
 # 物料分层参数值 (Item Attribute Values) — foundation 步 1 · item 族分层值表（一期预留）
 # 依据: 蓝图 §3.4.2 / §3.4.3（属性轴/两种默认机制）/ §3.4.9; 规划 §2.3 / §2.4
-# 形态 (D2 已拍 v2.5): 单表 + 因子列 —— (attr_code, function_type, org_id) 因子列化（不按层分表）
-# 属性轴止于 3 层 (S2/S3)，阅读顺序 L2 → L1 → L0（逐层回退），层数不写死进物理 schema (S8/S9)：
-#   L0 租户:  org_id / function_type 均空
-#   L1 职能:  function_type 非空, org_id 空         键 (item_id, attr_code, function_type)
-#   L2 组织:  org_id 非空                           键 (item_id, attr_code, org_id)
+# 形态 (D2 已拍 v2.5；2026-10-07 重估收敛): 单表 + 因子列 —— (attr_code, org_id) 因子列化（不按层分表）
+# 属性轴止于 2 层 (S2/S3，2026-10-07 重估)，阅读顺序 L2 → L0（逐层回退），层数不写死进物理 schema (S8/S9)：
+#   L0 全局:  org_id 空     键 (item_id, attr_code)
+#   L2 组织:  org_id 非空   键 (item_id, attr_code, org_id)
+# （2026-10-07 重估：原 L1 职能域层已砍除——function_type 列退场，见规划 §5.1 / 规范 v1.2；
+#   L1 空档不再启用，保留 L0/L2 编号不重排。）
 # 只装 hybrid 参数（可人工覆盖、缺失时逐层回退）; stored 锚属性在主表 items; derived 不落列。
 #
 # [未决/不阻塞]
 #  1. 值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定 —— 本期以单列 `value`(TEXT, JSON 承载) 占位。
 #  2. 可空复合唯一 —— SQLite 中 NULL 互不相等，唯一约束对含空因子的行不生效（落地实测点）；
 #     本期以普通索引 + 应用层查重承接。
-#     [核对留痕 2026-10-06] schema_generator 已支持部分唯一索引（type: partial + condition + unique
-#     → CREATE UNIQUE INDEX ... WHERE）。拟补法（待 PM 拍板）：L0/L1/L2 各一条，condition 取各自
-#     「上层因子为空」谓词（如 L1: WHERE function_type IS NOT NULL AND org_id IS NULL）⇒ 索引列在
-#     条件下均非空，SQLite 唯一性可生效。L2 键是否含 function_type 需先确认（头注口径不含）。
+#     [核对留痕 2026-10-06，2026-10-07 重估更新] schema_generator 已支持部分唯一索引（type: partial +
+#     condition + unique → CREATE UNIQUE INDEX ... WHERE）。拟补法（待 PM 拍板）：**L0/L2 各一条**——
+#     L0: WHERE org_id IS NULL（键 (item_id, attr_code)）；L2: WHERE org_id IS NOT NULL（键 (item_id, attr_code, org_id)）
+#     ⇒ 索引列在条件下均非空，SQLite 唯一性可生效。（原 L1 条随职能域层砍除删除；原「L2 键是否含
+#     function_type」疑问随列退场消解——口径 = 不含。）
 
 id: item_attribute_value
 name: 物料分层参数值
 table_name: item_attribute_values
-description: 物料分层参数值（L0/L1/L2 因子列 + 值列，hybrid 参数）
+description: 物料分层参数值（L0/L2 因子列 + 值列，hybrid 参数；2026-10-07 重估：L1 职能域层砍除）
 parent_object: item
 hierarchy:
   enabled: true
@@ -89,24 +91,12 @@ fields:
     ui:
       widget: input
 
-  - id: function_type
-    name: 职能域
-    type: string
-    db_column: function_type
-    nullable: true
-    max_length: 40
-    description: L1 因子——职能域（如 procurement / sales / warehouse / manufacturing）；空 = 不按职能分层
-    semantics:
-      meaning: L1 职能域因子（不含 org，S3）
-    ui:
-      widget: input
-
   - id: org_id
     name: 组织
     type: integer
     db_column: org_id
     nullable: true
-    description: L2 因子——组织覆盖；空 = 不按组织分层
+    description: L2 因子——组织覆盖；空 = L0 全局行（全平台默认，2026-10-07 重估）
     semantics:
       meaning: L2 组织因子
       display:
@@ -166,8 +156,6 @@ fields:
 indexes:
   - fields: [item_id, attr_code]
     name: idx_item_attr_item_code
-  - fields: [item_id, attr_code, function_type]
-    name: idx_item_attr_l1
   - fields: [item_id, attr_code, org_id]
     name: idx_item_attr_l2
   - fields: [org_id]
