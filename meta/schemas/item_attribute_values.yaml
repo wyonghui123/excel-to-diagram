@@ -25,10 +25,17 @@
 #     condition + unique → CREATE UNIQUE INDEX ... WHERE），已实测确认。
 #     （原 L1 条随职能域层砍除删除；原「L2 键是否含 function_type」疑问随列退场消解——口径 = 不含。）
 #
-# [迁移留痕 2026-10-07 实测] dev 库（meta/architecture.db）已物化本表（当前 0 行数据）：含历史
-#   `function_type` 列（L1 砍除待同步）与旧 `value` 列（值列形态收口待同步）。SchemaMigrator 仅支持
-#   ADD COLUMN（无 DROP）——同步窗口（--execute）会补 `value_*` 三列；两旧列去留随同步窗口统一核对
-#   （零数据，必要时可重建表）。
+# [物理落地 2026-10-07 实测·已完成] 本表物理形态已与本yaml 完全对齐（dev 库 meta/architecture.db）：
+#   · `value_text` / `value_number` / `value_boolean` 三列已物化（value_number = REAL、value_boolean = INTEGER，
+#     合 schema_generator TYPE_MAPPING）。
+#   · 唯一索引已就位：uidx_item_attr_l0 (WHERE org_id IS NULL) / uidx_item_attr_l2 (WHERE org_id IS NOT NULL)
+#     + idx_item_attr_org。
+#   · 历史残留已清理：`function_type`（L1 砍除）与旧 `value`（JSON 占位）两列已 DROP；三条同字段旧普通索引
+#     （idx_item_attr_l1 / idx_item_attr_item_code / idx_item_attr_l2）已 DROP。
+#   [列序说明] 物理列序为历史建表遗留（description 位于 value_* 之前），与本yaml 声明序不同——按列名访问，
+#     无功能影响；如需规整可在同步窗口重建表（本表 0 行，成本极低）。
+#   [前置校验] 两旧列删除前已确认：表0 行 + 代码库零引用（无任何读写路径）+ 相关索引已先DROP。
+#     执行前已备份 meta/architecture.db.bak-item-axis-20261007-152536。
 
 id: item_attribute_value
 name: 物料分层参数值
