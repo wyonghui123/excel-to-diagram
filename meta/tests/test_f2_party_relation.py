@@ -54,10 +54,12 @@ def _fields():
 # ────────────────────────────────────────
 @pytest.fixture()
 def pr_ds(tmp_path):
-    """临时库: party_relations 表 + 索引 + 父表 parties / orgs
+    """临时库: party_relations 表 + 索引 + 父表 parties / orgs / party_groups
 
-    [FK 2026-10-07] party_relations 新增三条真外键（party1_id / party2_id →
-    parties、le_org_id → orgs），单表库须补父表与父行。
+    [FK 2026-10-07] party_relations 三条真外键（party1_id / party2_id →
+    parties、le_org_id → orgs）落地，单表库须补父表与父行。
+    [FK 2026-10-07 / party_group] 新增第四条 group_id → party_groups，
+    用例不挂组（group_id 恒 NULL），仅需建父表本体。
     """
     from meta.core.datasource import (
         _clear_data_source_cache_for_testing, get_data_source,
@@ -74,6 +76,8 @@ def pr_ds(tmp_path):
     ds.execute("CREATE TABLE IF NOT EXISTS parties "
                "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     ds.execute("CREATE TABLE IF NOT EXISTS orgs "
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    ds.execute("CREATE TABLE IF NOT EXISTS party_groups "
                "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     for pid in range(1, 9):
         insert(ds, 'parties', id=pid)

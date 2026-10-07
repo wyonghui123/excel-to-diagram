@@ -1,0 +1,310 @@
+# ============================================
+# 往来单位组（party_group）— foundation · party 族分类对象（独立对象，不是 party_relation 的属性）
+# 依据: G2 泛化研究（2026-10-04-classification-objects-as-rule-factor-research.md）
+#       + 2026-10-07 拍板：统一分组（不拆客户组/供应商组），role_scope 标注适用范围
+# 定位: 树形分类; 被 party_relations.group_id 引用（N:1）; 挂载点 = 关系层（非账户层 / 非 party 层）
+#   理由: 账户层只覆盖客户侧（vendor_account 为骨架）、party 层管不了角色差异；
+#         关系层 (party₁, party₂, role, le_org) 天然按角色承载分类。
+# 单表决策: 一张共享表 + role_scope（customer/vendor/both）——硬约束为 party_relations.group_id
+#   单列单 FK 目标；对标: SAP 客户/供应商两套主档 → KTOKD/KTOKK 分设（随主数据模型拆分），
+#   Odoo 统一伙伴 → 标签共用（随统一模型合并）；本平台 party 为统一身份锚 ⇒ 统一分组与模型一致。
+# role_scope 必填无默认: 防静默误挂（避免默认 both 导致字段空转）；双角色通用组显式选 both。
+# [挂起] 分类携带默认值（默认条款组/默认账期等）随条款族（开票/信用/对账）落地，本表一期不落。
+# [登记] meta/schemas/.schema_version.json 未在本批改动（该文件由在飞 item 批次持有未提交 diff）；
+#   party_group 作为新对象，将由 sync_schema 下次运行时自动登记（new_objects）；
+#   两库（meta/architecture.db + data/app.db）已由一次性迁移脚本直接落地建表（备份见 meta/backups/）。
+# ============================================
+
+id: party_group
+name: 往来单位组
+table_name: party_groups
+description: 往来单位组（树形分类对象，被往来关系引用；role_scope 标注客户/供应商适用范围）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 往来单位组
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 往来单位组
+    - 客户组
+    - 供应商组
+    - PartyGroup
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: party_relations
+      foreign_key: group_id
+      message: 该组下还有往来关系，请先迁移相关往来单位后再删除
+    - table: party_groups
+      foreign_key: parent_id
+      message: 该组下还有子组，请先删除或迁移子组后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - parent_id
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 往来单位组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 往来单位组唯一编码（编码空间为全表共享，命名约定建议带角色前缀，如 C_/V_；通用组可不带）
+    semantics:
+      meaning: 往来单位组业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 往来单位组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 往来单位组显示名称
+    semantics:
+      meaning: 往来单位组显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: role_scope
+    name: 适用范围
+    type: string
+    db_column: role_scope
+    required: true
+    max_length: 30
+    description: 适用范围（customer 客户 / vendor 供应商 / both 通用）；必填无默认——防静默误挂
+    enum_values:
+      - value: customer
+        label: 客户
+        color: primary
+      - value: vendor
+        label: 供应商
+        color: success
+      - value: both
+        label: 通用
+        color: info
+    semantics:
+      meaning: 组的角色适用范围（候选过滤与使用提示；不强制挂靠校验）
+    ui:
+      widget: select
+
+  - id: parent_id
+    name: 上级组
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级组ID，支持层级结构
+    semantics:
+      meaning: 上级组引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: party_group
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: party_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 220
+          - field: role_scope
+            label: 适用范围
+            width: 100
+    ui:
+      widget: select
+      relation: party_group
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 往来单位组说明
+    semantics:
+      meaning: 往来单位组详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_party_group_code
+  - fields: [parent_id]
+    name: idx_party_group_parent
+
+relations:
+  - id: party_group_to_parent
+    name: 上级组
+    type: reference
+    target: party_group
+    source_field: parent_id
+    target_field: id
+    cardinality: "N:1"
+    description: 上级组引用（自引用层级；加引号防御 YAML 1.1 六十进制解析；NULL=根节点）
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 往来单位组管理
+    description: 往来单位组（树形分类）
+    columns:
+      - field: name
+        width: 220
+      - field: code
+        width: 140
+        sortable: true
+      - field: role_scope
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: parent_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party_group
+        display_field: name
+        placeholder: "无上级"
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建往来单位组
+        icon: plus
+        type: primary
+        permission: party_group:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 往来单位组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [role_scope, parent_id]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - role_scope
+          - parent_id
+          - description
+
+category_config:
+  create_permission: party_group:create
+  update_permission: party_group:update
+  delete_permission: party_group:delete
+  owner_auto_permission: false
