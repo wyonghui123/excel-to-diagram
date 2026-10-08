@@ -357,3 +357,81 @@ class TestSchemaLands:
         bad['party1_id'] = 999
         with pytest.raises(Exception):
             h3_ds.insert(case['table'], _row(h3_ds, case['table'], bad, 103))
+
+
+# ────────────────────────────────────────
+# 7. org 自引用外键（FK 2026-10-08 · M1/B3 同类不一致修复）
+# ────────────────────────────────────────
+class TestOrgParentFkWiring:
+    """org.parent_id 补对象级relations 声明 → 真外键落地。
+
+    根因: org.yaml 的relations 原为 []，字段级 semantics.hierarchy_level
+    .relation: self_reference 只表达 UI/层级语义；落库器只认 relations[].type
+    ∈ (parent_child|reference) 且 reference 必带 source_field
+    ⇒ parent_id 一直未落成真 FK，与 party_group/item_group/location/
+    region/calendar 五处同类声明不一致（M1/B3 检查项）。
+    """
+
+    def test_yaml_declares_object_level_relation(self):
+        """org.yaml 必须有对象级自引用声明且带 source_field（落库器硬条件）"""
+        rels = _load_raw('org')['relations']
+        assert isinstance(rels, list) and rels, 'org.relations 不得为空'
+        decl = [r for r in rels
+                if r.get('source_field') == 'parent_id'
+                and r.get('target') == 'org']
+        assert decl, '缺 parent_id → org 的自引用声明'
+        assert decl[0].get('type') in ('reference', 'parent_child')
+
+    def test_field_hierarchy_semantics_retained(self):
+        """字段级自引用语义须保留（层级树/防环/弹窗依赖它）"""
+        f = _field(_load_raw('org'), 'parent_id')
+        assert f['semantics']['hierarchy_level']['relation'] == 'self_reference'
+        assert f['semantics']['display']['type'] == 'association'
+        assert f['semantics']['display']['target_type'] == 'org'
+
+    def test_manager_id_not_declared(self):
+        """manager_id 是已废弃死功能（v088 FR-011 完成）⇒ 刻意不建 FK"""
+        rels = _load_raw('org')['relations']
+        assert not [r for r in rels if r.get('source_field') == 'manager_id']
+
+    def test_parent_id_landed_as_real_fk(self, h3_ds):
+        """落库后 orgs 表 parent_id 必须是真外键"""
+        fks = h3_ds.execute('PRAGMA foreign_key_list(orgs)').fetchall()
+        assert [f for f in fks if f[3] == 'parent_id' and f[2] == 'orgs'], \
+            'orgs.parent_id 未落成真外键'
+
+    def test_orphan_parent_rejected(self, h3_ds):
+        """孤儿 parent_id 必须被拒（约束真强制，非仅声明）"""
+        row = _row(h3_ds, 'orgs', _case('org')['insert'], 201)
+        row['parent_id'] = 999999
+        with pytest.raises(Exception):
+            h3_ds.insert('orgs', row)
+
+    def test_valid_parent_accepted(self, h3_ds):
+        """合法 parent_id 可写入（约束不误伤）+ NULL 根节点放行"""
+        case = _case('org')
+        h3_ds.insert('orgs', _row(h3_ds, 'orgs', case['insert'], 202))
+        child = dict(case['insert'])
+        child['parent_id'] = 202
+        child['code'] = 'H3-A-CHILD'   # code 有 UNIQUE 约束，逐行取不同值
+        h3_ds.insert('orgs', _row(h3_ds, 'orgs', child, 203))
+        got = dict(h3_ds.execute(
+            'SELECT id, parent_id FROM orgs WHERE id IN (202, 203)').fetchall())
+        assert got == {202: None, 203: 202}
+
+    def test_self_reference_chain_readable(self, h3_ds):
+        """自引用三级链可读回（UI 组织树弹窗的数据基础）"""
+        case = _case('org')
+        h3_ds.insert('orgs', _row(h3_ds, 'orgs', case['insert'], 204))
+        mid = dict(case['insert'])
+        mid['parent_id'] = 204
+        mid['code'] = 'H3-A-MID'
+        h3_ds.insert('orgs', _row(h3_ds, 'orgs', mid, 205))
+        leaf = dict(case['insert'])
+        leaf['parent_id'] = 205
+        leaf['code'] = 'H3-A-LEAF'
+        h3_ds.insert('orgs', _row(h3_ds, 'orgs', leaf, 206))
+        got = dict(h3_ds.execute(
+            'SELECT id, parent_id FROM orgs WHERE id IN (204, 205, 206)'
+        ).fetchall())
+        assert got == {204: None, 205: 204, 206: 205}

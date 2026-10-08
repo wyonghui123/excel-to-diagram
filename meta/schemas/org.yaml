@@ -345,7 +345,22 @@ indexes:
   - fields: [status]
     name: idx_org_status
 
-relations: []
+relations:
+  # [FK 2026-10-08] 补对象级自引用声明（原relations: [] 空 ⇒ 字段级
+  # semantics.hierarchy_level.relation: self_reference 仅表达UI/层级语义，
+  # 落库器只认 relations[].type ∈ (parent_child|reference) 且 reference 必带
+  # source_field ⇒ parent_id 一直未落成真FK，与 party_group/item_group/location/
+  # region/calendar 五处同类声明不一致。本条补齐后 orgs.parent_id 强制引用。
+  - id: org_to_parent
+    name: 上级组织
+    type: reference
+    target: org
+    source_field: parent_id
+    target_field: id
+    cardinality: "N:1"
+    description: 上级组织引用（自引用层级；[FK 2026-10-08] 由展示语义升级为真外键；NULL=根组织）
+  # 注：manager_id 为已废弃死功能（[v088 2026-09-15 soft-delete Spec 19 M4]
+  # FR-011 过渡完成，零数据 / 无消费点，表单与详情均已下线）⇒ 刻意不建 FK。
 
 # 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
 #   inactive --activate--> active
