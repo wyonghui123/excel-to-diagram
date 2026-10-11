@@ -386,6 +386,101 @@ def init_menu_permissions(db_path):
                 'message': '建议分配组织数据权限'
             })
         },
+        {
+            # [MD-MENU 2026-10-11] 主数据父菜单（分组容器）
+            #   背景: 11 个主数据对象的自动菜单 (item-list / uom-list / location-list 等)
+            #   此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
+            #   => get_visible_menu_tree 捞不到, 导航树上完全不可达.
+            #   形态照抄 user-permission: page_type=multi_object_hub + menu_path=''
+            #     - menu_path='' ⇒ leaf_menus 的 `if not m.get('menu_path'): continue` 跳过,
+            #       不进 landing 卡片区 (与 user-permission 一致)
+            #     - multi_object_hub ⇒ 有 children 时不被 _prune_empty_groups 裁掉;
+            #       同时 dynamicRoutes 会注册 /master-data → GenericTabContainer
+            #       (group='master-data'), 按 children 渲染 tab (聚合页, 与用户权限组同构)
+            #   required_permissions=[] : 父容器不设权限门槛, 由各子菜单自行控制 (同 user-permission)
+            #   [已知局限] (既存缺陷, 非本次引入): get_visible_menu_tree 对 show_in_sidebar=0
+            #      的子菜单 (L383-409 child_rows) 不做权限过滤, 只按 parent_menu 挂载.
+            #      故主数据子菜单对所有能看见父节点的用户可见; 点击后由前端路由守卫
+            #      (requiredPermissions) 与 API 层权限拦截, 不泄露数据.
+            'menu_code': 'master-data',
+            'menu_name': '主数据',
+            'menu_path': '',
+            'icon': 'Goods',
+            'color': '#0ea5e9',
+            'sort_order': 45,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps([]),
+            'data_permission_hint': None
+        },
+        {
+            # [MD-MENU 2026-10-11] 客户档案 —— 用户拍板开独立菜单
+            #   yaml `ui_view_config.skip_auto_menu: true` 保持不变 (角色层档案不参与
+            #   menu_auto_generator 自动生成的口径不动); 菜单在此手工声明, 与
+            #   org-management / user-management 同一套路.
+            #   show_in_sidebar=0 : 与同组 10 条自动菜单口径统一 —— 只在侧边栏展开可见,
+            #   不进 landing 卡片区 (landing 留给工作台/快捷入口).
+            'menu_code': 'customer-account-management',
+            'menu_name': '客户档案',
+            'menu_path': '/customer-account',
+            'icon': 'User',
+            'color': '#0ea5e9',
+            'sort_order': 61,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'customer_account',
+            'object_types': json.dumps(['customer_account']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'customer_account', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            # 权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            # 与 menu_auto_generator._derive_permissions_from_bindings 的口径一致
+            'required_permissions': json.dumps([
+                'customer_account:customer_account_create',
+                'customer_account:customer_account_read',
+                'customer_account:customer_account_update',
+                'customer_account:customer_account_delete',
+                'customer_account:customer_account_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['customer_account'],
+                'message': '建议分配客户档案数据权限'
+            })
+        },
+        {
+            # [MD-MENU 2026-10-11] 供应商档案 —— 与 customer_account 严格对称
+            'menu_code': 'vendor-account-management',
+            'menu_name': '供应商档案',
+            'menu_path': '/vendor-account',
+            'icon': 'User',
+            'color': '#0ea5e9',
+            'sort_order': 62,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'vendor_account',
+            'object_types': json.dumps(['vendor_account']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'vendor_account', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'vendor_account:vendor_account_create',
+                'vendor_account:vendor_account_read',
+                'vendor_account:vendor_account_update',
+                'vendor_account:vendor_account_delete',
+                'vendor_account:vendor_account_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['vendor_account'],
+                'message': '建议分配供应商档案数据权限'
+            })
+        },
     ]
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
@@ -474,7 +569,7 @@ def init_menu_permissions(db_path):
                     primary_object_type = ?, object_types = ?,
                     bo_bindings = ?, required_permissions = ?,
                     parent_menu = ?, icon = ?, color = ?,
-                    description = ?, sort_order = ?
+                    description = ?, sort_order = ?, show_in_sidebar = ?
                 WHERE menu_code = ?
             """, [
                 menu['menu_name'],
@@ -489,6 +584,8 @@ def init_menu_permissions(db_path):
                 menu.get('color', ''),
                 menu.get('description', ''),
                 menu['sort_order'],
+                # [MD-MENU 2026-10-11] 同 INSERT 分支: 未声明时为 1, 与历史行一致
+                menu.get('show_in_sidebar', 1),
                 menu['menu_code'],
             ])
             if bindings_changed:
@@ -503,7 +600,7 @@ def init_menu_permissions(db_path):
                  primary_object_type, bo_bindings, required_permissions,
                  parent_menu, icon, color, description,
                  sort_order, is_active, show_in_sidebar, auto_generated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0)
             """, [
                 menu['menu_code'],
                 menu['menu_name'],
@@ -518,6 +615,9 @@ def init_menu_permissions(db_path):
                 menu.get('color', ''),
                 menu.get('description', ''),
                 menu['sort_order'],
+                # [MD-MENU 2026-10-11] 子菜单声明 show_in_sidebar: 0 时按 0 落库
+                #   (默认 1, 与历史行为一致; 仅 master-data 组的客户/供应商档案显式声明 0)
+                menu.get('show_in_sidebar', 1),
             ])
             print(f"  [NEW]    nav:  {menu['menu_name']} ({menu['menu_code']})")
             nav_new += 1
