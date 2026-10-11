@@ -387,6 +387,79 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [MD-MENU 2026-10-11] 往来单位（party）—— 用户拍板开独立菜单
+            #   背景: party.yaml 声明 ui_view_config.skip_auto_menu: true, 无自动菜单。
+            #         但它是客户/供应商档案的**上游主数据**: customer_account.relation_id
+            #         → party_relations.party2_id → parties.id。yaml 里不写菜单 ⇒ 用户在前端
+            #         点不到 party, 而客户档案的「关联客户关系」value_help 恰好指向
+            #         party_relation, 形成「选不出来的必填外键」。
+            #   口径与 customer_account / vendor_account 一致: yaml 的 skip_auto_menu
+            #   保持不变 (那是"不要自动生成"的声明, 不等于"不许有菜单"), 菜单在此手工声明。
+            #   sort_order=59/60: 排在 customer_account(61) / vendor_account(62) 之前,
+            #   符合「先主体后档案」的阅读顺序; 后续 v091 的自动菜单从 63 接续, 不冲突。
+            'menu_code': 'party-management',
+            'menu_name': '往来单位',
+            'menu_path': '/party',
+            'icon': 'User',
+            'color': '#0ea5e9',
+            'sort_order': 59,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'party',
+            'object_types': json.dumps(['party']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'party', 'role': 'primary',
+                 'include_actions': ['create', 'update', 'delete']},
+            ]),
+            'required_permissions': json.dumps([
+                # [注意] party 只有 create/update/delete 三个动作 (party.yaml:31 actions),
+                #   permissions 表里不存在 party_read / party_list。照 CRUD 惯例补齐
+                #   会让菜单因权限码不存在而永不可见, 故只声明实际存在的三个。
+                'party:party_create',
+                'party:party_update',
+                'party:party_delete',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['party'],
+                'message': '建议分配往来单位数据权限'
+            })
+        },
+        {
+            # [MD-MENU 2026-10-11] 往来单位关系（party_relation）—— 与 party 严格对称
+            #   客户档案.relation_id 的直接指向对象, 不开菜单则该外键在前端无法选择。
+            #   icon=User: AppRootLayout.iconMap 与 AppSideNav.iconMap 的真实交集只有 13 个
+            #   (Bell/DataAnalysis/Document/Edit/FolderOpened/Grid/Home/Key/List/Lock/
+            #   Search/Setting/Star), Connection 只在 rootlayout 单侧注册会渲染空白。
+            #   语义上 party 与 party_relation 同属往来单位主体域, 用同一图标可接受。
+            'menu_code': 'party-relation-management',
+            'menu_name': '往来单位关系',
+            'menu_path': '/party-relation',
+            'icon': 'User',
+            'color': '#0ea5e9',
+            'sort_order': 60,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'party_relation',
+            'object_types': json.dumps(['party_relation']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'party_relation', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'party_relation:party_relation_create',
+                'party_relation:party_relation_read',
+                'party_relation:party_relation_update',
+                'party_relation:party_relation_delete',
+                'party_relation:party_relation_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['party_relation'],
+                'message': '建议分配往来单位关系数据权限'
+            })
+        },
+        {
             # [MD-MENU 2026-10-11] 主数据父菜单（分组容器）
             #   背景: 11 个主数据对象的自动菜单 (item-list / uom-list / location-list 等)
             #   此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
@@ -504,7 +577,13 @@ def init_menu_permissions(db_path):
         if existing:
             old_perms_str = existing[1]
             old_perms = set(json.loads(old_perms_str) if old_perms_str else [])
-            new_perms = set(menu['required_permissions'])
+            # [FIX 2026-10-11] 声明侧的值是 json.dumps 的字符串, 必须先 loads 再取集合。
+            # 原写法 set(menu['required_permissions']) 直接对字符串取集合, 得到的是
+            # 字符集合 {' ', '"', ',', ...} 而非权限码, 使 added 恒为噪声、
+            # [UPDATE] perm 行打印出 "+17 perms: [' ', '"', ...]" 这类假增量。
+            # 此前未暴露是因为所有菜单的声明与库中已有值恰好相同 => added 恒为空集;
+            # 新增菜单 (party / party_relation) 一进来就现形。
+            new_perms = set(json.loads(menu['required_permissions']))
             added = new_perms - old_perms
             cursor.execute("""
                 UPDATE menu_permissions SET

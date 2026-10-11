@@ -9,6 +9,7 @@ YAML 元模型加载器
 """
 
 import os
+import re
 import logging
 import yaml
 from typing import List, Dict, Any, Optional
@@ -1177,10 +1178,54 @@ def parse_cascade_select(data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]
 
 
 def parse_key_template(data: Dict[str, Any]) -> Dict[str, Any]:
-    """解析 key_template 配置，支持 sequence 子配置块"""
+    """解析 key_template 配置，支持 sequence 子配置块
+
+    [FIX KEY-TEMPLATE-STR 2026-10-11] 兼容字符串简写形态
+
+    背景: calendar.yaml 写成 `key_template: "CAL-{SEQ:6}"` (字符串简写),
+          而 party.yaml / address.yaml 等用的是完整嵌套 dict。
+          下游 (KeyTemplateInterceptor、key_template_api 的config/preview/list-objects、
+          metadata_driven_validator) 一律按 dict 访问 `.get('enabled')`,
+          字符串没有 .get => POST /api/v2/bo/calendar 报
+          "'str' object has no attribute 'get'" 400, 作业日历对象完全无法创建,
+          连带 calendar_days 与 locations.calendar_id 都无法落数。
+
+    处理: 在此归一化 —— 字符串视为 pattern, 补出 enabled/auto_suggest 默认值,
+          并从 pattern 的 {SEQ:n} 反推 padding。归一化后所有下游的 dict 假设都成立。
+    """
     kt = data.get("key_template")
-    if not kt or not isinstance(kt, dict):
-        return data.get("key_template", {})
+    if not kt:
+        return {}
+
+    if isinstance(kt, str):
+        pattern = kt.strip()
+        match = re.search(r'\{SEQ:(\d+)\}', pattern)
+        return {
+            'enabled': True,
+            'user_editable': 'auto_or_manual',
+            'auto_suggest': True,
+            'pattern': pattern,
+            'separator': '-',
+            'segments': [{
+                'type': 'sequence',
+                'name': f'{data.get("id", "seq")}_seq',
+                'padding': int(match.group(1)) if match else 6,
+                'start': 1,
+                'auto_detect': True,
+            }],
+            'sequence': {
+                'start': 1,
+                'step': 1,
+                'padding': int(match.group(1)) if match else 6,
+                'reset_strategy': '',
+                'reset_scope': [],
+            },
+            'preview': re.sub(r'\{SEQ:(\d+)\}',
+                              lambda m: '0' * int(m.group(1)), pattern),
+        }
+
+    if not isinstance(kt, dict):
+        return {}
 
     seq_data = kt.get("sequence")
     if seq_data and isinstance(seq_data, dict):
