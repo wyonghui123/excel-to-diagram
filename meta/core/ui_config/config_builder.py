@@ -4,6 +4,26 @@ from meta.core.ui_config.association_extractor import AssociationExtractor
 from meta.core.ui_config.value_help_formatter import value_help_to_dict, _make_json_safe
 
 
+def _ui_view_config_has_renderable_form(ui_view_config):
+    """[FIX BUG-UI-CONFIG 2026-10-11] 判断 ui_view_config.form 是否含可渲染字段。
+
+    DetailPage 遍历 section 时, 字段可能承载在 section.fields 或 section.columns[].fields
+    两种结构中 (见 schema_loader: 显式声明走 columns, 兜底推导走 fields)。
+    只要任一 section 能取出非空字段集合就视为可渲染, 避免对 item/uom 这类
+    显式配置的对象误判为空并覆盖 yaml 声明。
+    """
+    if not ui_view_config:
+        return False
+    form = ui_view_config.get('form') or {}
+    for section in form.get('sections') or []:
+        if section.get('fields'):
+            return True
+        for col in section.get('columns') or []:
+            if col.get('fields'):
+                return True
+    return False
+
+
 class UIConfigBuilder:
 
     def __init__(self, display_name_service, infer_navigation_fn, data_source=None):
@@ -36,6 +56,23 @@ class UIConfigBuilder:
         ui_view_config = getattr(meta_obj, 'ui_view_config', None)
         if ui_view_config:
             config['ui_view_config'] = _make_json_safe(ui_view_config)
+
+        # [FIX BUG-UI-CONFIG 2026-10-11] ui-config 端点缺字段兜底, 导致新建抽屉空白
+        #   背景: /api/v2/meta/<obj>/ui-config 是 DetailPage 新建抽屉的唯一数据源
+        #         (DetailPage.vue: `entityMeta.value?.ui_view_config?.form`),
+        #         但此处原样透传 yaml 原始值, 不经过 view_config_service.get_or_build_view_config,
+        #         因此 yaml 未显式声明 ui_view_config.form / .list.columns 的对象
+        #         (如 vendor_account / customer_account) 返回 form.sections=[] + list.columns=[],
+        #         前端 formSections.length===0 直接跳过整个表单分支 => 抽屉只剩"保存/取消"。
+        #   症状: 点「新建」抽屉能开但 0 个表单项。item/uom 因 yaml 显式配置了 form 不受影响。
+        #   修法: 与 /view-config 端点对齐 —— 配置为空时用 view_config_service 从字段定义推导。
+        #         仅在为空时替换, 不覆盖 yaml 的显式声明。
+        if not _ui_view_config_has_renderable_form(config.get('ui_view_config')):
+            # 延迟 import: view_config_service → ui_config.__init__ → 本模块, 模块级 import 会成环
+            from meta.services.view_config_service import view_config_service
+            _built = view_config_service.get_or_build_view_config(object_type, view_name)
+            if _built:
+                config['ui_view_config'] = _make_json_safe(_built)
 
         fields_info = []
         field_constraints = []

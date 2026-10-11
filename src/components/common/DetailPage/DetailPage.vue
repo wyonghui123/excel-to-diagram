@@ -638,13 +638,21 @@ const computedSections = computed(() => {
 
   if (formSections.length > 0) {
     for (const section of formSections) {
-      if (section.columns && section.columns.length > 0) {
+      // [FIX BUG-UI-CONFIG 2026-10-11] form.sections 存在两种字段承载结构:
+      //   1) section.columns[].fields  —— yaml 显式声明 form 时由 schema_loader 生成
+      //   2) section.fields            —— view_config_service 兜底推导时生成
+      //   原实现只认 (1), 遇到 (2) 时 columns 为空数组 → 整个 section 被 continue 跳过。
+      //   判定改为「columns 里能否取到字段」, 取不到则回落 section.fields。
+      const columnFields = (section.columns || []).map(c => filterFields(c.fields || []))
+      const hasFieldsInColumns = columnFields.some(fs => fs.length > 0)
+
+      if (hasFieldsInColumns) {
         const fieldGroups = []
-        for (const col of section.columns) {
-          const filteredFields = adaptFieldsForMode(filterFields(col.fields || []))
+        for (let i = 0; i < section.columns.length; i++) {
+          const filteredFields = adaptFieldsForMode(columnFields[i])
           if (filteredFields.length === 0) continue
           fieldGroups.push({
-            title: col.title || '',
+            title: section.columns[i].title || '',
             layout: 'grid-2',
             fields: filteredFields
           })
