@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from meta.core.action_context import ActionContext, ActionResult
 from meta.core.interceptors.base import Interceptor
-from meta.core.models import registry
+from meta.core.models import registry, resolve_write_anchor
 from meta.core.datasource import get_data_source
 from meta.core.action_constants import CRUD_CREATE, CRUD_UPDATE, CRUD_DELETE
 from meta.core.table_name_validator import validate_table_name
@@ -126,6 +126,18 @@ class BOFramework:
         meta_object = registry.get(object_type)
         if not meta_object:
             return ActionResult(success=False, message=f"Unknown object type: {object_type}")
+
+        # [F1 write_anchor 2026-10-11] 视图面写转发（面=入口、锚=执行）：
+        # 写动作在链首即以锚身份执行 ⇒ 拦截器链（校验/编码 key_template/权限/审计等）
+        # 全部按锚处理；ActionExecutor 层另有护栏兜底（直调路径）
+        if action in (CRUD_CREATE, CRUD_UPDATE, CRUD_DELETE):
+            _anchor = resolve_write_anchor(meta_object)
+            if _anchor is not None:
+                logger.debug(
+                    "[BOFramework] write_anchor: %s -> %s (action=%s)",
+                    meta_object.id, _anchor.id, action,
+                )
+                meta_object = _anchor
 
         # [§6.5.3 改动 3] 请求级解析一次：应用请求 → 应用库，平台请求 → 平台库。
         # 后续 ActionContext / 事务 / 深插入均以它为准，保证同一次动作只碰一个库。

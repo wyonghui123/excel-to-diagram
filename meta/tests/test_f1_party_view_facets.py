@@ -11,11 +11,13 @@
                internal 面含 source = 'org' 谓词 —— 口径由 SQL 结构强制
 3. 抽样       : 临时库真实建表 / 视图 / 部分唯一索引 → 三行数据两面对照（含空 source）
 4. 1:1 强约束 : 部分唯一索引仅约束 source='org' 行; 外部空 org_id 不冲突
-5. 写护栏    : 两面写入被 READ_ONLY_VIEW 拒（API 侧 400）; 基表 party 不拦
+5. 写护栏    : 无锚真视图（internal）写入被 READ_ONLY_VIEW 拒（API 侧 400）;
+               有锚面（archive, write_anchor=party）护栏放行、转发解析到锚 §7.1-6
 6. 绑定不变量 : 绑定只挂 internal（BO YAML dimension_bindings + 全局 applies_to 双声明）;
                基表 / archive 面无绑定
 7. 注入不变量 : org 维度条件仅注入 internal; 基表 / archive 永不注入
-8. 动作策略  : 基表仅写动作（create/update/delete）; 两面仅读动作（read/list）§7.1-4
+8. 动作策略  : 基表仅写动作（create/update/delete）; internal 仅读（read/list）§7.1-4;
+               archive 读（read/list）+ 写（create/update/delete 转发锚）
 
 测试隔离:
 - temp DB（get_data_source）+ sync_schema_from_meta; 不触碰 architecture.db
@@ -238,27 +240,51 @@ class TestOrgOneToOneConstraint:
 
 
 # ────────────────────────────────────────
-# 5. 写护栏（真视图只读 → API 400）
+# 5. 写护栏（[write_anchor 2026-10-11] 有锚转发 / 无锚拒写 §7.1-6）
 # ────────────────────────────────────────
 class TestWriteGuardFacets:
     def test_base_table_not_blocked(self, party_objs):
         party = next(o for o in party_objs if o.id == 'party')
         assert _bare_manage_service()._reject_if_readonly_view(party) is None
 
-    @pytest.mark.parametrize('bo_id', ['party_archive', 'party_internal'])
-    def test_view_facets_reject_write(self, party_objs, bo_id):
+    def test_archive_has_write_anchor_not_blocked(self, party_objs):
+        """有锚面：护栏放行（写由 ActionExecutor 转发到锚 party）"""
+        archive = next(o for o in party_objs if o.id == 'party_archive')
+        assert getattr(archive, 'write_anchor', '') == 'party'
+        assert _bare_manage_service()._reject_if_readonly_view(archive) is None
+
+    def test_internal_view_rejects_write(self, party_objs):
+        """无锚真视图：仍被 READ_ONLY_VIEW 拒（API 侧 400）"""
         from meta.services.manage_service import (
             CreateRequest, UpdateRequest, DeleteRequest,
         )
         svc = _bare_manage_service()
         results = [
-            svc.create(CreateRequest(object_type=bo_id, data={'name': 'x'})),
-            svc.update(UpdateRequest(object_type=bo_id, id=1, data={'name': 'y'})),
-            svc.delete(DeleteRequest(object_type=bo_id, id=1)),
+            svc.create(CreateRequest(object_type='party_internal', data={'name': 'x'})),
+            svc.update(UpdateRequest(object_type='party_internal', id=1, data={'name': 'y'})),
+            svc.delete(DeleteRequest(object_type='party_internal', id=1)),
         ]
         for r in results:
             assert r.success is False
             assert r.error == 'READ_ONLY_VIEW'
+
+    def test_archive_resolves_write_target_to_party(self, party_objs):
+        """转发解析：archive 的写目标解析为锚 party"""
+        from meta.core.action_executor import ActionExecutor
+        executor = ActionExecutor.__new__(ActionExecutor)  # 解析不触 data_source
+        archive = next(o for o in party_objs if o.id == 'party_archive')
+        target, denied = executor._resolve_view_write_target(archive)
+        assert denied is None
+        assert target is not None and target.id == 'party'
+
+    def test_internal_resolve_denies_without_anchor(self, party_objs):
+        """转发解析：无锚面返回 READ_ONLY_VIEW 拒绝"""
+        from meta.core.action_executor import ActionExecutor
+        executor = ActionExecutor.__new__(ActionExecutor)
+        internal = next(o for o in party_objs if o.id == 'party_internal')
+        target, denied = executor._resolve_view_write_target(internal)
+        assert target is None
+        assert denied is not None and denied.error == 'READ_ONLY_VIEW'
 
 
 # ────────────────────────────────────────
@@ -313,13 +339,20 @@ class TestFrameActions:
             'party_create', 'party_update', 'party_delete',
         }
 
-    @pytest.mark.parametrize('bo_id,expected', [
-        ('party_archive', {'party_archive_read', 'party_archive_list'}),
-        ('party_internal', {'party_internal_read', 'party_internal_list'}),
-    ])
-    def test_facets_read_actions_only(self, party_objs, bo_id, expected):
-        obj = next(o for o in party_objs if o.id == bo_id)
-        assert {a.id for a in obj.actions} == expected
+    def test_internal_facet_read_actions_only(self, party_objs):
+        """internal 无锚：动作集仅读（read / list）§7.1-4"""
+        obj = next(o for o in party_objs if o.id == 'party_internal')
+        assert {a.id for a in obj.actions} == {
+            'party_internal_read', 'party_internal_list',
+        }
+
+    def test_archive_facet_read_write_actions(self, party_objs):
+        """[write_anchor 2026-10-11] archive 有锚：读 + 写（写声明后转发锚执行）"""
+        obj = next(o for o in party_objs if o.id == 'party_archive')
+        assert {a.id for a in obj.actions} == {
+            'party_archive_read', 'party_archive_list',
+            'party_archive_create', 'party_archive_update', 'party_archive_delete',
+        }
 
     @pytest.mark.parametrize('bo_id', ['party', 'party_archive', 'party_internal'])
     def test_auto_crud_declared_false(self, bo_id):

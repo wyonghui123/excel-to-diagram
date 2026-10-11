@@ -21,7 +21,7 @@ import string
 
 logger = logging.getLogger(__name__)
 
-from meta.core.models import MetaObject, MetaField, MetaAction, ActionType, FieldType, RuleTrigger
+from meta.core.models import MetaObject, MetaField, MetaAction, ActionType, FieldType, RuleTrigger, ObjectType
 from meta.core.datasource import DataSource
 from meta.core.query_builder import QueryBuilder
 from meta.core.rule_executor import RuleEngine, RuleExecutionReport
@@ -965,7 +965,17 @@ class ActionExecutor:
                       params: Dict[str, Any], skip_rules: bool = False) -> ActionResult:
         """执行 CRUD Action"""
         method = action.method.upper()
-        
+
+        # [F1 write_anchor 2026-10-11] 视图面写转发（v1 ManageService / v2 BOFramework 两条
+        # 写链路在 ActionExecutor 层收敛，护栏与转发都在此实现）：
+        #   - 有 write_anchor 的视图面：写以锚对象身份继续执行（校验/规则/审计/写库全按锚）
+        #   - 无 write_anchor 的视图面：READ_ONLY_VIEW 拒（原护栏语义不变）
+        if method in ("POST", "PUT", "DELETE") and getattr(meta_object, 'object_type', None) == ObjectType.VIEW:
+            target, denied = self._resolve_view_write_target(meta_object)
+            if denied:
+                return denied
+            meta_object = target
+
         if method == "POST":
             return self._do_create(meta_object, params, skip_rules)
         elif method == "GET":
@@ -982,6 +992,28 @@ class ActionExecutor:
                 error="UNSUPPORTED_METHOD",
                 message="HTTP method '{0}' is not supported".format(method)
             )
+
+    def _resolve_view_write_target(self, meta_object: MetaObject):
+        """[F1 write_anchor 2026-10-11] 解析视图面的写转发目标。
+
+        Returns:
+            (target_obj, None): 转发目标（锚对象），调用方以锚身份继续执行
+            (None, ActionResult): 拒绝（无锚只读 / 锚缺失）
+        """
+        anchor_id = getattr(meta_object, 'write_anchor', '') or ''
+        if not anchor_id:
+            return None, ActionResult.fail(
+                error="READ_ONLY_VIEW",
+                message="视图对象 '{0}' 为只读，不支持写入操作".format(meta_object.id),
+            )
+        from meta.core.models import resolve_write_anchor
+        anchor = resolve_write_anchor(meta_object)
+        if anchor is None:
+            return None, ActionResult.fail(
+                error="WRITE_ANCHOR_NOT_FOUND",
+                message="视图对象 '{0}' 的写锚 '{1}' 不存在".format(meta_object.id, anchor_id),
+            )
+        return anchor, None
 
     # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验
     # ManageService 直接调 ActionExecutor, 绕过 BOFramework 拦截器链,

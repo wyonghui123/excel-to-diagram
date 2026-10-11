@@ -2181,6 +2181,7 @@ def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
         persistent=data.get("persistent", True),
         is_view=data.get("is_view", False),
         view_definition=data.get("view_definition", ""),
+        write_anchor=data.get("write_anchor", ""),
         soft_delete=data.get("soft_delete", False),
         soft_delete_field=data.get("soft_delete_field", "is_deleted"),
         soft_delete_value=data.get("soft_delete_value", True),

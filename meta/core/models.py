@@ -932,6 +932,9 @@ class MetaObject:
     persistent: bool = True
     is_view: bool = False
     view_definition: str = ""
+    # [F1 write_anchor 2026-10-11] 视图面写转发目标（写锚 BO id）：
+    # 空 = 纯只读视图（写请求 READ_ONLY_VIEW 拒）；非空 = 写经本面转发到锚执行
+    write_anchor: str = ""
     
     soft_delete: bool = False
     soft_delete_field: str = "is_deleted"
@@ -1488,3 +1491,16 @@ class MetaRegistry:
 
 # 全局注册表实例
 registry = MetaRegistry()
+
+
+def resolve_write_anchor(meta_object) -> Optional["MetaObject"]:
+    """[F1 write_anchor 2026-10-11] 解析视图面的写锚（面=入口、锚=执行）。
+
+    视图面声明 write_anchor 时，写操作以锚对象身份执行（对齐 SQL 可更新视图语义）：
+    校验 / 规则 / 编码（key_template）/ 审计 / 权限全按锚。
+    无锚（真只读视图）或无该键时返回 None。
+    """
+    anchor_id = getattr(meta_object, 'write_anchor', '') or ''
+    if not anchor_id:
+        return None
+    return registry.get(anchor_id)

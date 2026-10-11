@@ -81,8 +81,13 @@ class ManageService:
 
         注：只拦真视图（ObjectType.VIEW）。`is_view: true` 的"物理表逻辑视图"
         （如 permission_resource → permissions 表）object_type 仍为 entity，不受影响。
+
+        [F1 write_anchor 2026-10-11] 语义修订（对齐 SQL 可更新视图）：
+        - 有 write_anchor 的视图面：此处放行，由 ActionExecutor._execute_crud 转发到锚对象执行
+        - 无 write_anchor 的真视图：仍在此拒写（READ_ONLY_VIEW）
         """
-        if getattr(meta_obj, 'object_type', None) == ObjectType.VIEW:
+        if (getattr(meta_obj, 'object_type', None) == ObjectType.VIEW
+                and not getattr(meta_obj, 'write_anchor', '')):
             return ActionResult.fail(
                 error="READ_ONLY_VIEW",
                 message="视图对象 '{0}' 为只读，不支持写入操作".format(meta_obj.id),

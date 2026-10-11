@@ -18,7 +18,11 @@
  * - 往来单位: party 不直挂 group。分组关系在关系层 —— party_relations.group_id（N:1）
  *   指向 party_groups，伙伴侧是 party2_id（party1_id 恒为我方侧）。
  *   故左树勾选 → 先查 party_relation(group_id__in=选中组) 收集 party2_id，
- *   再用 id__in 过滤 party —— 两段桥接（见 syncBridge）。
+ *   再用 id__in 过滤 party_archive —— 两段桥接（见 syncBridge）。
+ *
+ * [F1 write_anchor 2026-10-11] 右表 party tab 用面 party_archive（对外档案视图）：
+ *   读 = 视图口径（外部身份，恒排除 source='org'）；写经 write_anchor 转发到锚 party。
+ *   此前用基表 party ⇒ 列表可用但详情 404（基表只声明写动作、无 read 动作）。
  *
  * - 桥接不走 scopeAdapter 内联执行，而是 watch page.scopeIds['party_group'].effective：
  *   MOMP 从图表/详情切回时会 restoreStateFromDiagram 直接写 scopeIds（不触发
@@ -37,16 +41,16 @@ import { boService } from '@/services/boService'
 
 defineOptions({ name: 'PartyManagement' })
 
-const objectTypes = ['party', 'party_group']
+const objectTypes = ['party_archive', 'party_group']
 
 // 桥接结果: null = 未选组（不过滤, 全量）; 数组 = 选中组下伙伴 party2_id 集合（可空 → 哨兵）
 const bridgedPartyIds = ref(null)
 let bridgeSeq = 0
 
 const pageOptions = {
-  defaultTab: 'party',
+  defaultTab: 'party_archive',
   tabs: {
-    party: { label: '往来单位' },
+    party_archive: { label: '往来单位' },
     party_group: { label: '往来单位组' }
   },
   // 左树：往来单位组（纯层级分类，parent_id 自引用）
@@ -75,7 +79,8 @@ const pageOptions = {
   },
   filterStrategies: {
     // 勾选往来单位组 → 按桥接的伙伴集合过滤；未选组 → 不过滤（全量）
-    party(filters) {
+    // 键 = objectType（当前为面 party_archive, 见 useMultiObjectPage filterStrategies[objectType]）
+    party_archive(filters) {
       const ids = bridgedPartyIds.value
       if (ids === null) return filters
       if (!ids.length) return { ...filters, id__in: '-1' }  // 空集哨兵, 防后端跳条件回退全量

@@ -4,7 +4,7 @@ import logging
 from flask import Blueprint, request, jsonify, g
 from meta.services.auth_middleware import login_required
 
-from meta.core.models import registry
+from meta.core.models import registry, resolve_write_anchor
 from meta.core.key_template_engine import KeyTemplateEngine, KeyTemplateConfig, SequenceConfig
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,11 @@ def get_config(object_type):
     _src_path = _os.path.abspath(__file__)
     _src_mtime = _os.path.getmtime(_src_path)
     logger.warning(f"[DEBUG_MARK_20260615] ENTERED preview/{object_type}, file={_src_path}, mtime={_src_mtime}, pid={_os.getpid()}, has_engine={_engine is not None}")
+    # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：视图面按锚读取编码规则
+    _anchor = resolve_write_anchor(meta_object)
+    if _anchor is not None:
+        meta_object = _anchor
+        object_type = _anchor.id
     key_template_raw = getattr(meta_object, 'key_template', None)
     if not key_template_raw:
         return jsonify({
@@ -205,6 +210,12 @@ def preview_code(object_type):
             'message': f'Unknown object type: {object_type}'
         }), 404
 
+    # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：视图面按锚生成编码
+    _anchor = resolve_write_anchor(meta_object)
+    if _anchor is not None:
+        meta_object = _anchor
+        object_type = _anchor.id
+
     key_template_raw = getattr(meta_object, 'key_template', None)
     if not key_template_raw or not key_template_raw.get('enabled'):
         return jsonify({
@@ -236,7 +247,9 @@ def preview_code(object_type):
     # [FIXED 2026-06-11] 解析物理表名和 prefix_filter 用于 auto_detect_start
     # 原 BUG: 引擎内部用 config.object_id = 'business_object'，但实际表是 'business_objects'
     # 导致 auto_detect_start SQL 报 "no such table: business_object" 退回 start=1
-    physical_table = _resolve_physical_table_name(object_type)
+    # [F1 write_anchor 2026-10-11] 优先用对象声明的 table_name（如 party → parties，
+    # 不规则复数 +s 候选解析不到），回退旧候选策略
+    physical_table = getattr(meta_object, 'table_name', None) or _resolve_physical_table_name(object_type)
     tokens = _engine._parser.parse(config.pattern)
     prefix_filter = _engine._parser.resolve_prefix(tokens, field_values)
     logger.debug(

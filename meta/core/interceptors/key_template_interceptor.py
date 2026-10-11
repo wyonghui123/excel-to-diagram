@@ -175,6 +175,10 @@ class KeyTemplateInterceptor(Interceptor):
         """
         [NEW 2026-06-11] 将逻辑对象名解析为物理表名。
         例如 'relationship' → 'relationships'（SQLite 中实际表名带复数 s）。
+
+        [FIX 2026-10-11] 优先用 meta_object 声明的 table_name（如 party → parties，
+        不规则复数 +s 候选解析不到 → 原逻辑退回 'party' 导致 auto_detect_start /
+        code 唯一性检查静默失效，可能生成重复编号）；表不存在时回退旧候选策略。
         """
         ds = context.data_source
         try:
@@ -186,6 +190,9 @@ class KeyTemplateInterceptor(Interceptor):
                 existing_tables.add(
                     t[0] if isinstance(t, tuple) else (t.get('name', '') if isinstance(t, dict) else '')
                 )
+            declared = getattr(context.meta_object, 'table_name', None)
+            if declared and declared in existing_tables:
+                return declared
             candidate_tables = [object_type, object_type + 's', object_type + 'es']
             for ct in candidate_tables:
                 if ct in existing_tables:

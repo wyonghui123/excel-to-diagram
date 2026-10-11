@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, g
 MAX_USER_PAGE_SIZE = 500
 
 from meta.core.bo_framework import bo_framework
-from meta.core.models import registry
+from meta.core.models import registry, resolve_write_anchor
 from meta.core.rule_provider import get_rule_provider
 from meta.services.auth_middleware import login_required, get_current_user
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
@@ -470,7 +470,8 @@ def get_state_transition_actions(object_type):
         action_index = {}
 
     action_refs = []
-    for rule in get_rule_provider().get_rules(meta_obj):
+    # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：状态机 action_ref 按锚读取
+    for rule in get_rule_provider().get_rules(resolve_write_anchor(meta_obj) or meta_obj):
         if not hasattr(rule, 'state_field') or not hasattr(rule, 'to_state'):
             continue
         action_ref = getattr(rule, 'action_ref', '')
@@ -2057,7 +2058,8 @@ def get_state_transitions(object_type, obj_id):
     record = result.data if hasattr(result, 'data') else result
 
     state_transitions = []
-    for rule in get_rule_provider().get_rules(meta_obj):
+    # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：状态机规则按锚读取（记录/状态值仍按面读）
+    for rule in get_rule_provider().get_rules(resolve_write_anchor(meta_obj) or meta_obj):
         if not hasattr(rule, 'state_field'):
             continue
         if not hasattr(rule, 'from_states') or not hasattr(rule, 'to_state'):
@@ -2114,7 +2116,8 @@ def get_state_transitions_by_string_id(object_type, obj_id):
     record = result.data if hasattr(result, 'data') else result
 
     state_transitions = []
-    for rule in get_rule_provider().get_rules(meta_obj):
+    # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：状态机规则按锚读取（记录/状态值仍按面读）
+    for rule in get_rule_provider().get_rules(resolve_write_anchor(meta_obj) or meta_obj):
         if not hasattr(rule, 'state_field'):
             continue
         if not hasattr(rule, 'from_states') or not hasattr(rule, 'to_state'):
