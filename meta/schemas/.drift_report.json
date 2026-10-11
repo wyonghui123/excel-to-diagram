@@ -1,12 +1,46 @@
 {
   "source": "sqlite",
   "local_db": "meta/architecture.db",
-  "yaml_objects_scanned": 44,
-  "yaml_objects_with_drift": 20,
+  "yaml_objects_scanned": 79,
+  "yaml_objects_with_drift": 36,
   "reports": [
+    {
+      "object_id": "address",
+      "table_name": "addresses",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "adjustment",
+      "table_name": "adjustments",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
     {
       "object_id": "ai_async_task",
       "table_name": "ai_async_tasks",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "allocation_result",
+      "table_name": "allocation_results",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "allocation_rule",
+      "table_name": "allocation_rules",
       "exists": true,
       "missing_columns": [],
       "extra_columns": [],
@@ -17,12 +51,7 @@
       "table_name": "annotations",
       "exists": true,
       "missing_columns": [],
-      "extra_columns": [
-        "updated_at",
-        "target_code",
-        "target_name",
-        "category_label"
-      ],
+      "extra_columns": [],
       "type_mismatches": []
     },
     {
@@ -38,7 +67,8 @@
         "retention_until",
         "prev_hash",
         "row_hash",
-        "created_at_epoch"
+        "created_at_epoch",
+        "updated_at"
       ],
       "type_mismatches": []
     },
@@ -64,6 +94,53 @@
       "type_mismatches": []
     },
     {
+      "object_id": "calc_detail",
+      "table_name": "calc_details",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "calc_procedure",
+      "table_name": "calc_procedures",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "calc_result",
+      "table_name": "calc_results",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "charge_source",
+        "target",
+        "allocation_basis",
+        "allocation_rule_id"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "calendar",
+      "table_name": "calendars",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "calendar_day",
+      "table_name": "calendar_days",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
       "object_id": "change_event",
       "table_name": "change_events",
       "exists": true,
@@ -82,12 +159,41 @@
       "type_mismatches": []
     },
     {
+      "object_id": "cumulative_usage",
+      "table_name": "cumulative_usages",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "currency",
+      "table_name": "currencies",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "customer_account",
+      "table_name": "customer_accounts",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
       "object_id": "data_permission",
       "table_name": "data_permissions",
       "exists": true,
       "missing_columns": [],
       "extra_columns": [
-        "id"
+        "id",
+        "auto_generated"
       ],
       "type_mismatches": []
     },
@@ -139,6 +245,30 @@
       "type_mismatches": []
     },
     {
+      "object_id": "exclusion_group",
+      "table_name": "exclusion_groups",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "external_rate_source",
+      "table_name": "external_rate_sources",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "factor_catalog",
+      "table_name": "factor_catalogs",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
       "object_id": "filter_variant",
       "table_name": "filter_variants",
       "exists": true,
@@ -149,6 +279,76 @@
     {
       "object_id": "group_data_permission",
       "table_name": "group_data_permissions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "item",
+      "table_name": "items",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "item_attribute_value",
+      "table_name": "item_attribute_values",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "item_group",
+      "table_name": "item_groups",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "item_uom_conversion",
+      "table_name": "item_uom_conversions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "item_xref",
+      "table_name": "item_xrefs",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "key_schema",
+      "table_name": "key_schemas",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "location",
+      "table_name": "locations",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "lookup_sequence",
+      "table_name": "lookup_sequences",
       "exists": true,
       "missing_columns": [],
       "extra_columns": [],
@@ -180,7 +380,9 @@
       "table_name": "orgs",
       "exists": true,
       "missing_columns": [],
-      "extra_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
       "type_mismatches": []
     },
     {
@@ -197,6 +399,54 @@
       "exists": true,
       "missing_columns": [],
       "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "party",
+      "table_name": "parties",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "party_archive",
+      "table_name": "party_archive",
+      "exists": false,
+      "missing_columns": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "party_internal",
+      "table_name": "party_internal",
+      "exists": false,
+      "missing_columns": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "party_relation",
+      "table_name": "party_relations",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "domain"
+      ],
       "type_mismatches": []
     },
     {
@@ -267,7 +517,8 @@
       "exists": true,
       "missing_columns": [],
       "extra_columns": [
-        "priority"
+        "priority",
+        "updated_at"
       ],
       "type_mismatches": []
     },
@@ -306,6 +557,24 @@
       "type_mismatches": []
     },
     {
+      "object_id": "person_profile",
+      "table_name": "person_profiles",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "pricing_period",
+      "table_name": "pricing_periods",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
       "object_id": "product",
       "table_name": "products",
       "exists": true,
@@ -313,6 +582,40 @@
       "extra_columns": [
         "updated_at",
         "child_count"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "rate_record",
+      "table_name": "rate_records",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "rate_table",
+      "table_name": "rate_tables",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "rate_type",
+      "table_name": "rate_types",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "region",
+      "table_name": "regions",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
       ],
       "type_mismatches": []
     },
@@ -343,7 +646,9 @@
         "target_domain_name",
         "target_sub_domain_name",
         "target_service_module_name",
-        "version_name"
+        "version_name",
+        "source_bo_code",
+        "target_bo_code"
       ],
       "type_mismatches": []
     },
@@ -352,7 +657,9 @@
       "table_name": "roles",
       "exists": true,
       "missing_columns": [],
-      "extra_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
       "type_mismatches": []
     },
     {
@@ -457,6 +764,24 @@
       "type_mismatches": []
     },
     {
+      "object_id": "uom",
+      "table_name": "uoms",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "usage_group",
+      "table_name": "usage_groups",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [],
+      "type_mismatches": []
+    },
+    {
       "object_id": "user",
       "table_name": "users",
       "exists": true,
@@ -466,7 +791,18 @@
         "updated_at",
         "current_status_duration_days",
         "inactive_days",
-        "account_age_days"
+        "account_age_days",
+        "password"
+      ],
+      "type_mismatches": []
+    },
+    {
+      "object_id": "vendor_account",
+      "table_name": "vendor_accounts",
+      "exists": true,
+      "missing_columns": [],
+      "extra_columns": [
+        "updated_at"
       ],
       "type_mismatches": []
     },
@@ -484,15 +820,7 @@
         "child_count"
       ],
       "type_mismatches": []
-    },
-    {
-      "object_id": "new_object",
-      "table_name": "new_objects",
-      "exists": true,
-      "missing_columns": [],
-      "extra_columns": [],
-      "type_mismatches": []
     }
   ],
-  "timestamp": "2026-09-23T21:40:53.788939"
+  "timestamp": "2026-10-07T16:25:04.463199"
 }

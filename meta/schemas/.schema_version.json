@@ -1,7 +1,45 @@
 {
   "objects": {
+    "address": {
+      "hash": "3f8777d5ff805c626bf906ae66f827f2",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "country_id",
+        "province_id",
+        "city_id",
+        "district_id",
+        "street",
+        "street_number",
+        "postal_code",
+        "formatted_address",
+        "status",
+        "created_at"
+      ],
+      "table": "addresses"
+    },
+    "adjustment": {
+      "hash": "039a7dd979aec8a0a9c7b037236384c6",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "original_result_id",
+        "adjustment_type",
+        "delta_amount",
+        "effective_period",
+        "posted_flag",
+        "reason",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "adjustments"
+    },
     "ai_async_task": {
-      "hash": "1ec0d9648eedf33f3ec69e3de3c7cb83",
+      "hash": "5451ba9a9e0cfb6236ef504ec7a736dd",
       "fields": [
         "id",
         "task_type",
@@ -31,6 +69,60 @@
         "updated_at"
       ],
       "table": "ai_async_tasks"
+    },
+    "allocation_result": {
+      "hash": "9571cafd5daa71be2e23993a933119c6",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "document_type",
+        "document_id",
+        "document_line_id",
+        "parent_id",
+        "level",
+        "sequence",
+        "amount",
+        "net_amount",
+        "currency",
+        "sign",
+        "allocation_rule_id",
+        "allocation_basis",
+        "allocation_basis_field",
+        "group_by",
+        "rounding",
+        "floor_value",
+        "origin",
+        "charge_source",
+        "source_document_type",
+        "source_document_id",
+        "target",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "allocation_results"
+    },
+    "allocation_rule": {
+      "hash": "6568b1e4a5428d912e5020c9efdb818c",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "basis",
+        "manual_factor",
+        "group_by",
+        "rounding",
+        "floor",
+        "target",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "allocation_rules"
     },
     "annotation": {
       "hash": "919454fa5b2a9dd980657e39c49a28b4",
@@ -117,6 +209,136 @@
       ],
       "table": "business_objects"
     },
+    "calc_detail": {
+      "hash": "8612db1fec761560590e742400109f05",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "result_id",
+        "seq",
+        "element_type",
+        "price_element_code",
+        "rate_type_code",
+        "label",
+        "unit_price",
+        "extended_amount",
+        "running_net_amount",
+        "rollup_flag",
+        "skip_running_price",
+        "subtotal_key",
+        "base_level",
+        "base_source",
+        "base_step",
+        "rolling",
+        "base_value",
+        "skipped",
+        "skip_reason",
+        "hit_ids",
+        "skipped_candidates",
+        "factor_snapshot",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "calc_details"
+    },
+    "calc_procedure": {
+      "hash": "a5f81ae2b7e42f88939e771cf72fadaf",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "procedure_type",
+        "result_semantic",
+        "currency",
+        "steps",
+        "subtotal_keys",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "calc_procedures"
+    },
+    "calc_result": {
+      "hash": "5ad9d635ee9045ebb7e281d5d95b7a7d",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "document_type",
+        "document_id",
+        "document_line_id",
+        "level",
+        "process_code",
+        "result_semantic",
+        "rate_type_code",
+        "element_type",
+        "base_level",
+        "base_source",
+        "base_step",
+        "rolling",
+        "base_formula",
+        "rate",
+        "base",
+        "amount",
+        "net_amount",
+        "currency",
+        "sign",
+        "sequence",
+        "origin",
+        "rate_source",
+        "pricing_period_id",
+        "external_rate_source_id",
+        "fact_snapshot",
+        "price_mode",
+        "freeze_policy",
+        "reprice_trigger",
+        "qty_basis",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "calc_results"
+    },
+    "calendar": {
+      "hash": "c73430f5a52bfb6c98d56cd1e5915e00",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "parent_calendar_id",
+        "country_id",
+        "day_mask_mon",
+        "day_mask_tue",
+        "day_mask_wed",
+        "day_mask_thu",
+        "day_mask_fri",
+        "day_mask_sat",
+        "day_mask_sun",
+        "status",
+        "created_at"
+      ],
+      "table": "calendars"
+    },
+    "calendar_day": {
+      "hash": "356e3fe20cfe53f33cdc196be5f77e40",
+      "fields": [
+        "id",
+        "calendar_id",
+        "date",
+        "day_type",
+        "note"
+      ],
+      "table": "calendar_days"
+    },
     "change_event": {
       "hash": "2af1f33412c2a283dceac0b6a0de3422",
       "fields": [
@@ -155,8 +377,58 @@
       ],
       "table": "change_subscriptions"
     },
+    "cumulative_usage": {
+      "hash": "f82ec514ec8af60aac58add8490ca10f",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "rate_record_id",
+        "usage_group_id",
+        "used_amount",
+        "used_quantity",
+        "used_documents",
+        "last_used_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "cumulative_usages"
+    },
+    "currency": {
+      "hash": "bb75fefcb3e06503c6722097d4231daf",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "name_en",
+        "decimal_places",
+        "symbol",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "currencies"
+    },
+    "customer_account": {
+      "hash": "7477429f58448a96f58bb9773449038a",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "relation_id",
+        "customer_type",
+        "name",
+        "description",
+        "created_at"
+      ],
+      "table": "customer_accounts"
+    },
     "data_permission": {
-      "hash": "0783355f21e83b2bbde4008198a35a57",
+      "hash": "dc898f07a2b10a059de5dff46a5ead64",
       "fields": [
         "user_id",
         "resource_type",
@@ -173,7 +445,7 @@
       "table": ""
     },
     "domain": {
-      "hash": "731070a712323139d5db0dbec7f6f869",
+      "hash": "8228aadca036c1e1bba2d057ee4525e5",
       "fields": [
         "product_code",
         "created_at",
@@ -244,6 +516,56 @@
       ],
       "table": "enum_values"
     },
+    "exclusion_group": {
+      "hash": "e3ee3eef5a52e79a03fb85d99c8617d9",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "members",
+        "resolution",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "exclusion_groups"
+    },
+    "external_rate_source": {
+      "hash": "665967a7206f68da00b7d31beb423eac",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "source",
+        "quote_code",
+        "calendar_id",
+        "fallback_rule",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "external_rate_sources"
+    },
+    "factor_catalog": {
+      "hash": "7ea019700591bf0d4cead3ca59e3fd20",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "object_type",
+        "field_id",
+        "source_type",
+        "is_price_relevant",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "factor_catalogs"
+    },
     "filter_variant": {
       "hash": "0dab77e2328f7cd18c9978fea302def2",
       "fields": [
@@ -300,14 +622,15 @@
       "table": "items"
     },
     "item_attribute_value": {
-      "hash": "92a5a7f4d7b2777caee2cdd450500f13",
+      "hash": "edc4bd10cfb351cd560bbc92dac4f393",
       "fields": [
         "id",
         "item_id",
         "attr_code",
-        "function_type",
         "org_id",
-        "value",
+        "value_text",
+        "value_number",
+        "value_boolean",
         "description"
       ],
       "table": "item_attribute_values"
@@ -350,8 +673,23 @@
       ],
       "table": "item_xrefs"
     },
+    "key_schema": {
+      "hash": "686d54e5f5ac863a9d5b5061d54c8a9a",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "key_fields",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "key_schemas"
+    },
     "location": {
-      "hash": "6d8a6101dfeca98a42a5529a945c9b66",
+      "hash": "85ee0c0e889d5fc0c46404358d532bc5",
       "fields": [
         "updated_at",
         "created_by",
@@ -361,11 +699,28 @@
         "name",
         "location_type",
         "parent_id",
+        "address_id",
+        "calendar_id",
         "status",
         "description",
         "created_at"
       ],
       "table": "locations"
+    },
+    "lookup_sequence": {
+      "hash": "92b404151a511ee96e644862271fda27",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "steps",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "lookup_sequences"
     },
     "menu": {
       "hash": "c515b65a3a9e98834ef5a2e54db7fbe8",
@@ -394,7 +749,7 @@
       "table": "menus"
     },
     "menu_permission": {
-      "hash": "590847d0b84e69ef2b566dec1e49df47",
+      "hash": "82b3857d6bfa5ca4e6dd77ddde665380",
       "fields": [
         "menu_code",
         "menu_name",
@@ -454,6 +809,54 @@
       ],
       "table": "org_members"
     },
+    "party": {
+      "hash": "17433115775963a21bce9a47cecdedee",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "parties"
+    },
+    "party_archive": {
+      "hash": "077d304d28348ff95a30322e362c8062",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "party_archive"
+    },
+    "party_internal": {
+      "hash": "b441da6f64755d7232567d87439c1900",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "party_type",
+        "source",
+        "org_id"
+      ],
+      "table": "party_internal"
+    },
+    "party_relation": {
+      "hash": "d95dc6a5ed37c1d5f2a2c9bf2b8a40fb",
+      "fields": [
+        "id",
+        "party1_id",
+        "party2_id",
+        "role",
+        "internal_mark",
+        "le_org_id"
+      ],
+      "table": "party_relations"
+    },
     "permission": {
       "hash": "bdc5439db2bd0eb34d49fa7af7896a3c",
       "fields": [
@@ -469,7 +872,7 @@
       "table": "permissions"
     },
     "permission_bundle": {
-      "hash": "8e03303a0ab37d280a9e128946c349cd",
+      "hash": "f571252a8479faa6bb64fd170ff2d13f",
       "fields": [
         "bundle_code",
         "bundle_name",
@@ -515,7 +918,7 @@
       "table": "data_permission_rules"
     },
     "permission_rule": {
-      "hash": "f8bb0c2bbd252f342bfcb0f159c2ee30",
+      "hash": "da9d75523439edccfe75c4966add7bc9",
       "fields": [
         "permission_set_id",
         "resource_type",
@@ -552,7 +955,7 @@
       "table": "permission_sets"
     },
     "permission_set_data_permission": {
-      "hash": "ff576b8a871f3cb6ccc794ee1a531263",
+      "hash": "4b0b651d4e93e4a99c6936f713cce72a",
       "fields": [
         "id",
         "permission_set_id",
@@ -608,6 +1011,39 @@
       ],
       "table": "permission_set_permissions"
     },
+    "person_profile": {
+      "hash": "e3b8dc9dddaa1bc186ac1d71cb7ae31a",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "party_id",
+        "mobile",
+        "email"
+      ],
+      "table": "person_profiles"
+    },
+    "pricing_period": {
+      "hash": "950678513626520b79bee98b410de235",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "period_type",
+        "start_offset",
+        "end_offset",
+        "average_basis",
+        "rounding",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "pricing_periods"
+    },
     "product": {
       "hash": "cf4f4a266ab5699aa45b410cf7e0cb7d",
       "fields": [
@@ -625,6 +1061,98 @@
         "child_count"
       ],
       "table": "products"
+    },
+    "rate_record": {
+      "hash": "85d9105af20db9ad1969c02af3003459",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "rate_table_id",
+        "key_schema_id",
+        "keys",
+        "rate_type_id",
+        "rate",
+        "value",
+        "valid_from",
+        "valid_to",
+        "currency",
+        "rate_unit",
+        "rate_qty",
+        "scale",
+        "scale_semantic",
+        "scale_divisor",
+        "exclude_bo",
+        "hit_policy",
+        "allocation_weight",
+        "priority",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "rate_records"
+    },
+    "rate_table": {
+      "hash": "8a9398cb99d00c68afa74276d2d29eac",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "type",
+        "currency",
+        "owner_org_id",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "rate_tables"
+    },
+    "rate_type": {
+      "hash": "77778a027801eee3dd66d697a31315d5",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "rate_class",
+        "calc_type",
+        "rate_source",
+        "sign",
+        "rounding",
+        "numeric_field",
+        "display_scale",
+        "exclusion_group_id",
+        "manual_allowed",
+        "mandatory",
+        "statistical",
+        "lookup_sequence_id",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "rate_types"
+    },
+    "region": {
+      "hash": "7618f0f6033c522a2ca2b618d8dcbff8",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "parent_id",
+        "level",
+        "status",
+        "created_at"
+      ],
+      "table": "regions"
     },
     "relationship": {
       "hash": "410778cac94fb38eca160d68a3bb2d81",
@@ -697,7 +1225,7 @@
       "table": "roles"
     },
     "role_data_permission": {
-      "hash": "46f7547ae62d4e4b11ff3b5865fbf273",
+      "hash": "1f4976bccba836ac42bd448dea8311bb",
       "fields": [
         "id",
         "role_id",
@@ -763,7 +1291,7 @@
       "table": "scheduled_tasks"
     },
     "service_module": {
-      "hash": "9cc35f763620b38b15232d593a567472",
+      "hash": "cf94002c4684db127c3ec96e0c0cbceb",
       "fields": [
         "product_code",
         "created_at",
@@ -789,7 +1317,7 @@
       "table": "service_modules"
     },
     "sub_domain": {
-      "hash": "0a3dd0bdd565cd50a1191f070d9e8546",
+      "hash": "e41dfae5c11f8a07c3fb70a83b9f07b7",
       "fields": [
         "product_code",
         "updated_at",
@@ -813,7 +1341,7 @@
       "table": "sub_domains"
     },
     "task_execution": {
-      "hash": "1d56d4d35ae2e6d9b7918702f6d9b250",
+      "hash": "154096acad76a6dd37036323d3b3e3ce",
       "fields": [
         "id",
         "name",
@@ -903,8 +1431,25 @@
       ],
       "table": "uoms"
     },
+    "usage_group": {
+      "hash": "18ffe918e6cfd3be756b0c84e132b739",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "max_amount",
+        "max_quantity",
+        "max_documents",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "usage_groups"
+    },
     "user": {
-      "hash": "2888f533b105878a501b46ac9bf6db14",
+      "hash": "b4f562a76d8856c68993243e6105cff0",
       "fields": [
         "updated_at",
         "created_by",
@@ -912,6 +1457,7 @@
         "id",
         "username",
         "email",
+        "party_id",
         "password_hash",
         "password",
         "display_name",
@@ -932,6 +1478,21 @@
         "hour_cycle"
       ],
       "table": "users"
+    },
+    "vendor_account": {
+      "hash": "bba45172af9abcef7c7dd322798d6d07",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "relation_id",
+        "vendor_type",
+        "name",
+        "description",
+        "created_at"
+      ],
+      "table": "vendor_accounts"
     },
     "version": {
       "hash": "695f07dc5d94bf503b948e79a7ddebb0",
@@ -964,126 +1525,7 @@
         "updated_at"
       ],
       "table": "new_objects"
-    },
-    "party": {
-      "hash": "17433115775963a21bce9a47cecdedee",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "party_type",
-        "source",
-        "org_id"
-      ],
-      "table": "parties"
-    },
-    "party_archive": {
-      "hash": "077d304d28348ff95a30322e362c8062",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "party_type",
-        "source",
-        "org_id"
-      ],
-      "table": "party_archive"
-    },
-    "party_internal": {
-      "hash": "b441da6f64755d7232567d87439c1900",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "party_type",
-        "source",
-        "org_id"
-      ],
-      "table": "party_internal"
-    },
-    "party_relation": {
-      "hash": "d95dc6a5ed37c1d5f2a2c9bf2b8a40fb",
-      "fields": [
-        "id",
-        "party1_id",
-        "party2_id",
-        "role",
-        "internal_mark",
-        "le_org_id"
-      ],
-      "table": "party_relations"
-    },
-    "address": {
-      "hash": "3f8777d5ff805c626bf906ae66f827f2",
-      "fields": [
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "code",
-        "country_id",
-        "province_id",
-        "city_id",
-        "district_id",
-        "street",
-        "street_number",
-        "postal_code",
-        "formatted_address",
-        "status",
-        "created_at"
-      ],
-      "table": "addresses"
-    },
-    "region": {
-      "hash": "7618f0f6033c522a2ca2b618d8dcbff8",
-      "fields": [
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "code",
-        "name",
-        "parent_id",
-        "level",
-        "status",
-        "created_at"
-      ],
-      "table": "regions"
-    },
-    "calendar": {
-      "hash": "c73430f5a52bfb6c98d56cd1e5915e00",
-      "fields": [
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "code",
-        "name",
-        "parent_calendar_id",
-        "country_id",
-        "day_mask_mon",
-        "day_mask_tue",
-        "day_mask_wed",
-        "day_mask_thu",
-        "day_mask_fri",
-        "day_mask_sat",
-        "day_mask_sun",
-        "status",
-        "created_at"
-      ],
-      "table": "calendars"
-    },
-    "calendar_day": {
-      "hash": "356e3fe20cfe53f33cdc196be5f77e40",
-      "fields": [
-        "id",
-        "calendar_id",
-        "date",
-        "day_type",
-        "note"
-      ],
-      "table": "calendar_days"
     }
   },
-  "last_sync": "2026-10-05T23:48:44.144829"
+  "last_sync": "2026-10-07T15:25:45.864736"
 }
