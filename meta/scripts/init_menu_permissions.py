@@ -397,6 +397,16 @@ def init_menu_permissions(db_path):
             #   保持不变 (那是"不要自动生成"的声明, 不等于"不许有菜单"), 菜单在此手工声明。
             #   sort_order=59/60: 排在 customer_account(61) / vendor_account(62) 之前,
             #   符合「先主体后档案」的阅读顺序; 后续 v091 的自动菜单从 63 接续, 不冲突。
+            #
+            #   [MOMP 升级 2026-10-11] 由 object_list 升级为 multi_object_hub 单页 hub,
+            #   形态照物料管理页 (material-management): 左树 = 往来单位组 (party_group),
+            #   右表 = 往来单位 / 往来单位组 两个 tab。
+            #     动机: party 不直挂 group, 分组关系在关系层 (party_relations.group_id
+            #     → party2_id), 查某组伙伴的主路径收敛成"左树选组 → 右表看该组伙伴"
+            #     (前端 PartyManagement.vue 做两段桥接)。
+            #     往来单位组 tab 是 party_group 的维护入口; v093 下架了 party_group-list
+            #     独立菜单 (同 v092 对 item_group 的处理)。
+            #   GenericTabContainer 对该 menu_code 做精确映射 → PartyManagement.vue。
             'menu_code': 'party-management',
             'menu_name': '往来单位',
             'menu_path': '/party',
@@ -404,12 +414,14 @@ def init_menu_permissions(db_path):
             'color': '#0ea5e9',
             'sort_order': 59,
             'parent_menu': 'master-data',
-            'page_type': 'object_list',
+            'page_type': 'multi_object_hub',
             'primary_object_type': 'party',
-            'object_types': json.dumps(['party']),
+            'object_types': json.dumps(['party', 'party_group']),
             'bo_bindings': json.dumps([
                 {'bo_id': 'party', 'role': 'primary',
                  'include_actions': ['create', 'update', 'delete']},
+                {'bo_id': 'party_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
                 # [注意] party 只有 create/update/delete 三个动作 (party.yaml:31 actions),
@@ -418,11 +430,18 @@ def init_menu_permissions(db_path):
                 'party:party_create',
                 'party:party_update',
                 'party:party_delete',
+                # 往来单位组 tab 需独立维护入口 (v093 下架 party_group-list 菜单),
+                # 权限一并声明 (5 条权限码已存在 permissions 表, 见 party_group.yaml actions)。
+                'party_group:party_group_create',
+                'party_group:party_group_read',
+                'party_group:party_group_update',
+                'party_group:party_group_delete',
+                'party_group:party_group_list',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
-                'resource_types': ['party'],
-                'message': '建议分配往来单位数据权限'
+                'resource_types': ['party', 'party_group'],
+                'message': '建议分配往来单位与往来单位组数据权限'
             })
         },
         {

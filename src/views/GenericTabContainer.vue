@@ -121,12 +121,20 @@ const ORG_MANAGEMENT_LOADER = () => import('@/views/SystemManagement/OrgManageme
 // 左树注入物料组树、右表物料，MOMP 泛化页。与组织管理页同构的映射方式。
 const MATERIAL_MANAGEMENT_LOADER = () => import('@/views/MasterData/MaterialManagement.vue')
 
+// [2026-10-11] "往来单位"同为 master-data 组下的单页 hub（menu_code=party-management），
+// 渲染 PartyManagement.vue —— 左树注入往来单位组树、右表往来单位/往来单位组两个 tab。
+// 与物料管理的差异: party 不直挂 group, 左树→右表的过滤在 PartyManagement 内做两段桥接。
+const PARTY_MANAGEMENT_LOADER = () => import('@/views/MasterData/PartyManagement.vue')
+
 function decorateComponentTab(tab) {
   if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
     return { ...tab, component: ORG_MANAGEMENT_LOADER }
   }
   if (tab.key === 'material-management' || tab.menu_code === 'material-management') {
     return { ...tab, component: MATERIAL_MANAGEMENT_LOADER }
+  }
+  if (tab.key === 'party-management' || tab.menu_code === 'party-management') {
+    return { ...tab, component: PARTY_MANAGEMENT_LOADER }
   }
   return tab
 }
