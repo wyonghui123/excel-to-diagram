@@ -490,6 +490,47 @@ def init_menu_permissions(db_path):
             'data_permission_hint': None
         },
         {
+            # [MD-MENU 2026-10-11] 物料管理 —— 左树(物料组) + 右表(物料) 的 MOMP 聚合页
+            #   动机: 物料组原先是独立菜单 item-group-list, 用户想按组找物料时只能
+            #   点物料组菜单 → 记住组 id → 回物料菜单 → 手工填筛选条件。
+            #   物料组是物料的天然分类维度 (items.item_group_id 直 FK), 把「组」从并列
+            #   菜单升格为左侧导航树, 查物料的主路径收敛成"左树定位 → 右表看该组物料"。
+            #   page_type=multi_object_hub + menu_path='/material-management':
+            #     dynamicRoutes 按 multi_object_hub 注册, GenericTabContainer 里对该
+            #     menu_code 做精确映射 (见 src/views/GenericTabContainer.vue),
+            #     渲染 MaterialManagement.vue 而非 tab 容器。
+            #   object_types=['item'] : 右表只有物料一个 tab; 物料组不做并列 tab
+            #     (用户决策: 只做物料), 而是作为左树存在。
+            #   sort_order=64 : 占用原物料的位置 (item-list 原 so=64), 物料组菜单下架后
+            #     该序号空出, 物料组的入口即本页左树。
+            'menu_code': 'material-management',
+            'menu_name': '物料管理',
+            'menu_path': '/material-management',
+            'icon': 'Box',
+            'color': '#0ea5e9',
+            'sort_order': 64,
+            'parent_menu': 'master-data',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'item',
+            'object_types': json.dumps(['item']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'item', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'item:item_create',
+                'item:item_read',
+                'item:item_update',
+                'item:item_delete',
+                'item:item_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['item'],
+                'message': '建议分配物料数据权限'
+            })
+        },
+        {
             # [MD-MENU 2026-10-11] 客户档案 —— 用户拍板开独立菜单
             #   yaml `ui_view_config.skip_auto_menu: true` 保持不变 (角色层档案不参与
             #   menu_auto_generator 自动生成的口径不动); 菜单在此手工声明, 与

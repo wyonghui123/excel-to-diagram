@@ -85,8 +85,19 @@ const apiTitle = computed(() => {
 
 const apiTabs = computed(() => {
   if (!menuLoaded.value) return null
-  if (!apiMenuNode.value?.children || apiMenuNode.value.children.length === 0) return null
-  return apiMenuNode.value.children.map(child => ({
+  const node = apiMenuNode.value
+  if (!node) return null
+  const children = node.children || []
+  // [FIX 2026-10-11] 无 children 时把节点自身当作唯一 tab。
+  //   背景: multi_object_hub 菜单有两种形态 ——
+  //     (a) 聚合容器 (user-permission / master-data): 有 children, children 即 tabs
+  //     (b) 单页hub (material-management): 无 children, 自己就是要渲染的那一页
+  //   原实现只认 (a), (b) 时 apiTabs=null → 落到 getGroupTabs 配置兜底 → 配置里没有
+  //   该 menu_code → 空容器 (tab 标题渲染了但内容空白, 用户实测)。
+  //   注: org-management 不受影响, 它在 router/modules/business.js 有静态路由直连
+  //   OrgManagement.vue, 不经本容器。
+  const list = children.length > 0 ? children : [node]
+  return list.map(child => ({
     key: child.menu_code,
     label: child.menu_name,
     objectType: child.page_type === 'object_list' ? child.primary_object_type : null,
@@ -105,16 +116,24 @@ const title = computed(() => {
 // 因此精确映射该 tab 渲染 OrgManagement.vue（MOMP 泛化页）。
 const ORG_MANAGEMENT_LOADER = () => import('@/views/SystemManagement/OrgManagement.vue')
 
-function decorateOrgTab(tab) {
+// [2026-10-11] "物料管理"是 master-data 组下的子菜单（menu_code=material-management）。
+// 同样是 multi_object_hub 页面类型，但渲染的是 MaterialManagement.vue ——
+// 左树注入物料组树、右表物料，MOMP 泛化页。与组织管理页同构的映射方式。
+const MATERIAL_MANAGEMENT_LOADER = () => import('@/views/MasterData/MaterialManagement.vue')
+
+function decorateComponentTab(tab) {
   if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
     return { ...tab, component: ORG_MANAGEMENT_LOADER }
+  }
+  if (tab.key === 'material-management' || tab.menu_code === 'material-management') {
+    return { ...tab, component: MATERIAL_MANAGEMENT_LOADER }
   }
   return tab
 }
 
 const allTabs = computed(() => {
   if (USE_API_MENU && menuLoaded.value && apiTabs.value && apiTabs.value.length > 0) {
-    return apiTabs.value.map(decorateOrgTab)
+    return apiTabs.value.map(decorateComponentTab)
   }
 
   const configTabs = getGroupTabs(props.group)
@@ -122,7 +141,7 @@ const allTabs = computed(() => {
     ...t,
     key: t.key || t.menu_code,
     label: t.label || t.menu_name,
-  })).map(decorateOrgTab)
+  })).map(decorateComponentTab)
 })
 
 const resolvedComponents = ref({})

@@ -74,6 +74,7 @@ const cachedRouteNames = [
   'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
   'RelationshipManagement', // 架构数据管理 (per-tab 实例 + v-show)
   'OrgManagement',     // 组织管理 (MOMP 泛化页, 返回需保留列表状态)
+  'MaterialManagement', // 物料管理 (MOMP 泛化页, 左树勾选状态需保留)
 ]
 
 // [FR-007] 明确排除的组件名
