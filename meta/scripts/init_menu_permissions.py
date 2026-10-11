@@ -512,9 +512,11 @@ def init_menu_permissions(db_path):
             'parent_menu': 'master-data',
             'page_type': 'multi_object_hub',
             'primary_object_type': 'item',
-            'object_types': json.dumps(['item']),
+            'object_types': json.dumps(['item', 'item_group']),
             'bo_bindings': json.dumps([
                 {'bo_id': 'item', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'item_group', 'role': 'primary',
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
@@ -523,11 +525,18 @@ def init_menu_permissions(db_path):
                 'item:item_update',
                 'item:item_delete',
                 'item:item_list',
+                # 物料组 tab 需要独立维护入口 (v092 下架了 item-group-list 独立菜单),
+                # 故权限一并声明; 少这 5 条会导致物料组 tab 被路由守卫拦下。
+                'item_group:item_group_create',
+                'item_group:item_group_read',
+                'item_group:item_group_update',
+                'item_group:item_group_delete',
+                'item_group:item_group_list',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
-                'resource_types': ['item'],
-                'message': '建议分配物料数据权限'
+                'resource_types': ['item', 'item_group'],
+                'message': '建议分配物料与物料组数据权限'
             })
         },
         {
