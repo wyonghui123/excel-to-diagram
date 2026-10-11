@@ -1606,6 +1606,10 @@ relations:
   name: 源业务对象
   type: reference
   target: business_object
+  # [FK 2026-10-11] 补 source_field：落库器对 REFERENCE 要求显式 source_field，
+  # 缺失即静默丢弃 ⇒ 声明不完整（DB 侧 FK 由 init_database.py L182 手写 DDL 提供）
+  source_field: source_bo_id
+  target_field: id
   cardinality: N:1
   description: 关系的源端业务对象
   semantics:
@@ -1614,6 +1618,9 @@ relations:
   name: 目标业务对象
   type: reference
   target: business_object
+  # [FK 2026-10-11] 补 source_field（同上；DB 侧 FK 见 init_database.py L183）
+  source_field: target_bo_id
+  target_field: id
   cardinality: N:1
   description: 关系的目标端业务对象
   semantics:
