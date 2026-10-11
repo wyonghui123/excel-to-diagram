@@ -382,10 +382,17 @@ const drawerTitle = computed(() => {
   //   - add 模式: "新建objectLabel"
   //   - view 模式 + 有 name: "objectLabel 详情 objectName"
   //   - view 模式 + 无 name: "objectLabel 详情"
+  const metaLabel = entityMeta.value?.name || entityMeta.value?.label
   if (effectiveMode.value === 'add') {
-    const metaLabel = entityMeta.value?.name || entityMeta.value?.label
     const objectLabel = metaLabel || objectTypeService.getLabel(props.objectType)
     return `新建${objectLabel}`
+  }
+  // [FIX 2026-10-11] view 模式优先用 ui-config 的对象中文名 (entityMeta.name):
+  //   列表页抽屉场景 objectTypeService.labels 可能未就绪 → getLabel 走 _humanize
+  //   英文 fallback, 标题显示 "Item Group详情"。entityMeta 来自 /meta/<type>/ui-config,
+  //   不依赖初始化时序。
+  if (metaLabel) {
+    return objectName.value ? `${metaLabel}详情 ${objectName.value}` : `${metaLabel}详情`
   }
   return objectTypeService.getDetailLabel(props.objectType, objectName.value)
 })
@@ -407,6 +414,16 @@ function getStatusFieldName() {
   return 'status'
 }
 
+// [FIX 2026-10-11] 徽标 value→label 映射:
+//   数据源 = ui-config 的 entityMeta.fields[].enum_values (schema_loader 已透传),
+//   兜底 fields[].options; 此前直接 String(val) → 徽标显示原始英文值 (active)
+function findStatusOption(val) {
+  const statusField = getStatusFieldName()
+  const field = (entityMeta.value?.fields || []).find(f => (f.id || f.name) === statusField)
+  const options = field?.enum_values || field?.options || []
+  return options.find(o => o.value === val || String(o.value) === String(val)) || null
+}
+
 const dataStatus = computed(() => {
   if (!data.value) return ''
   const statusField = getStatusFieldName()
@@ -414,14 +431,27 @@ const dataStatus = computed(() => {
   console.debug('[DetailPage] dataStatus computed:', { statusField, val, data: data.value })
   if (val === undefined || val === null) return ''
   if (typeof val === 'boolean') return val ? '启用中' : '已停用'
+  const opt = findStatusOption(val)
+  if (opt?.label) return String(opt.label)
   return String(val)
 })
+
+// [FIX 2026-10-11] enum color → ObjectPageHeader statusType 映射:
+//   组件仅支持 default/primary/success/warning/error (见 ObjectPageHeader.vue validator),
+//   el-tag 体系的 info(灰) 对应 default, danger 对应 error
+const STATUS_COLOR_TO_TYPE = {
+  success: 'success', warning: 'warning',
+  danger: 'error', error: 'error',
+  primary: 'primary', info: 'default', default: 'default'
+}
 
 const dataStatusType = computed(() => {
   if (!data.value) return 'default'
   const statusField = getStatusFieldName()
   const val = data.value[statusField]
-  if (typeof val === 'boolean') return val ? 'success' : 'danger'
+  if (typeof val === 'boolean') return val ? 'success' : 'error'
+  const opt = findStatusOption(val)
+  if (opt?.color) return STATUS_COLOR_TO_TYPE[opt.color] || 'default'
   return 'default'
 })
 

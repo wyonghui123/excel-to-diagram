@@ -6,6 +6,7 @@ import { setOnUnauthorized } from './utils/api'
 import { useAuthStore } from './stores/authStore'
 // [P1-A 2026-07-25] 启动时预加载审计日志 action 元数据 (单一事实源: 后端 enum_values)
 import { useAuditMetaStore } from './stores/auditMetaStore'
+import { objectTypeService } from './services/objectTypeService'
 import { logger } from './utils/logger'
 
 // [FR-004] 移除 Element Plus 全量注册,改用 unplugin-vue-components 按需导入
@@ -133,6 +134,13 @@ authStore.loadFromCookie('restore').then(() => {
     const auditMetaStore = useAuditMetaStore()
     auditMetaStore.loadActions().catch(e => {
       logger.warn('[main] auditMetaStore.loadActions failed (will use local fallback):', e)
+    })
+    // [FIX 2026-10-11] 预加载对象类型中文名 (/meta/objects)
+    //   此前 init() 仅在 detail 路由触发 (router.beforeEach isDetailRoute 分支),
+    //   列表页抽屉标题 / ValueHelp 弹窗标题因 labels 为空走了英文 fallback
+    //   (Item Group详情 / 选择item_group)。不阻塞 mount, 失败静默降级。
+    objectTypeService.init().catch(e => {
+      logger.warn('[main] objectTypeService.init failed (will fallback to humanized labels):', e)
     })
   }
 })

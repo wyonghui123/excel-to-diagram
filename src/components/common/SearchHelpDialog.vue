@@ -209,6 +209,7 @@ import MetaListPage from '@/components/common/MetaListPage/MetaListPage.vue'
 import HierarchicalTreePicker from '@/components/common/HierarchicalTreePicker'
 import boService from '@/services/boService'
 import { loadDimensionCodes, getResourceLabel } from '@/services/permissionService'
+import { objectTypeService } from '@/services/objectTypeService'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -282,11 +283,19 @@ const dialogTitle = computed(() => {
   if (srcType === 'enum') return '选择枚举值'
   if (srcType === 'bo') {
     const targetBo = source.value.target_bo
-    if (targetBo) return `选择${getResourceLabel(targetBo)}`
+    if (targetBo) return `选择${resolveBoLabel(targetBo)}`
     return '选择数据'
   }
   return '选择值'
 })
+
+// [FIX 2026-10-11] BO 中文名解析: objectTypeService (/meta/objects 全量对象中文名)
+//   就绪时优先 —— 此前只查 permissionService.getResourceLabel, item_group 等
+//   业务对象未注册 → 标题显示 "选择item_group"; 未就绪兜底 getResourceLabel。
+function resolveBoLabel(bo) {
+  if (objectTypeService.isReady()) return objectTypeService.getLabel(bo)
+  return getResourceLabel(bo)
+}
 
 const displayMode = computed(() => presentation.value.display_mode || 'flat')
 const displayColumns = computed(() => presentation.value.display_columns || [])

@@ -74,6 +74,10 @@ class SchemaLoader:
                 'description': getattr(f, 'description', ''),
                 'computed': getattr(f, 'computed', False),
                 'enum_type': getattr(f, 'enum_type', '') or None,
+                # [FIX 2026-10-11] 字段级静态枚举值透传:
+                # DetailPage 状态徽标需要 value→label/color 映射, 此前 ui-config 的
+                # fields 不含 enum_values → 徽标显示原始英文值 (active 而非 启用)
+                'enum_values': _serialize_enum_values(getattr(f, 'enum_values', None)),
                 # [FIX BUG-V051.2 2026-07-10 dev agent] 业务语义 (status, business_key, primary_name)
                 # 原因: 前端 ObjectDetailPage.vue:230 等用 f.semantics?.status 查找状态字段
                 'semantics': _serialize_semantics(getattr(f, 'semantics', None)),
@@ -156,6 +160,28 @@ def _serialize_value_help(vh):
         return value_help_to_dict(vh)
     except Exception:
         return None
+
+
+def _serialize_enum_values(enum_values):
+    """[FIX 2026-10-11] 字段级静态枚举值 → JSON-safe list
+
+    YAML 解析产出格式为 [{value, label, color}] (见 yaml_loader
+    _convert_filter_options_value); 兼容 str 元素 (旧格式), 统一转 dict。
+    供前端 DetailPage 状态徽标做 value→label/color 映射。
+    """
+    if not enum_values:
+        return []
+    result = []
+    for ev in enum_values:
+        if isinstance(ev, dict):
+            result.append({
+                'value': _enum_to_str(ev.get('value', '')),
+                'label': ev.get('label') or '',
+                'color': ev.get('color') or '',
+            })
+        else:
+            result.append({'value': _enum_to_str(ev), 'label': str(ev), 'color': ''})
+    return result
 
 
 def _normalize_associations(associations):
