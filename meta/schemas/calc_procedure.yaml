@@ -284,7 +284,11 @@ relations: []
 ui_view_config:
   showChangeHistory: true
   list:
-    detail_mode: drawer
+    # [PRICE-UI 2026-10-13] drawer → page: 定价过程详情需承载「计算步骤」子表
+    #   (steps 是整个引擎的核心配置, 见 L206-225 的 json 列 —— 它 editable: false,
+    #    独立页才有空间放可视化编辑器; 编辑器本体是独立待办, 本次只切形态)。
+    #   路由由既有 /detail/:objectType/:id 承接, 无需新增前端路由。
+    detail_mode: page
     title: 定价过程管理
     description: 可配置的有序计算序列
     columns:

@@ -242,6 +242,54 @@ indexes:
 
 relations: []
 
+associations:
+  # [PRICE-UI 2026-10-13] 价目表详情内嵌「费率行」子表。
+  #   动机: 价目表的全部业务价值在它的费率行上(阶梯 scale / 优先级 priority /
+  #     权重 allocation_weight 都在 rate_record), 而 rate_record 住在另一个菜单里——
+  #     配置人员必须"记住表 id → 跳到费率记录菜单 → 手工填筛选条件"才能填行。
+  #     内嵌子表把主工作流「建表 → 填阶梯行 → 发布」收敛在同一页。
+  #   载体: rate_record.rate_table_id (真 FK, 字段级 required, 见 rate_record.yaml L108)。
+  #   不加 add/remove 动作: 费率行的增删改走子表内联编辑, 与 org.functions 的
+  #     assign/unassign 语义不同(那管的是关系本身, 这管的是从属数据)。
+  rate_records:
+    name: rate_records
+    label: 费率行
+    plural_label: 费率行列表
+    target_type: rate_record
+    type: one_to_many
+    source_key: id
+    target_key: rate_table_id
+    description: 本价目表下的费率行（价目行 · 条件记录）
+    display:
+      label: 费率行
+      plural_label: 费率行
+      target_display_field: code
+      columns:
+        - id: code
+          label: 行编码
+          width: 150
+        - id: key_schema_id
+          label: 匹配键表
+          width: 120
+        - id: keys
+          label: 键值
+          width: 220
+        - id: rate
+          label: 费率
+          width: 110
+        - id: value
+          label: 值
+          width: 110
+        - id: scale
+          label: 阶梯
+          width: 110
+        - id: priority
+          label: 优先级
+          width: 100
+        - id: allocation_weight
+          label: 权重
+          width: 100
+
 rules:
   # 状态流转：草稿 → 已发布 → 已停用（复用平台标准动作语义）
   - id: publish_rate_table
@@ -274,7 +322,11 @@ rules:
 ui_view_config:
   showChangeHistory: true
   list:
-    detail_mode: drawer
+    # [PRICE-UI 2026-10-13] drawer → page: 价目表详情需承载「费率行」子表
+    #   (阶梯 scale / 优先级 priority / 权重 allocation_weight 都在rate_record 上),
+    #   抽屉塞不下配置人员的主工作流「建表 → 填阶梯行 → 发布」。
+    #   路由由既有 /detail/:objectType/:id 承接, 无需新增前端路由。
+    detail_mode: page
     title: 费率表管理
     description: 价目表（仅"已发布"参与取价）
     columns:

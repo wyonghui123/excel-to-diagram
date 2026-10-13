@@ -806,10 +806,58 @@ relations:
     cardinality: N:1
     description: 本行采用的计价期（FR-015）
 
+associations:
+  # [PRICE-UI 2026-10-13] 定价结果详情内嵌「明细步骤」子表 —— 回放入口。
+  #   动机: Spec 把"可回放 explain"(逐步骤看每一步取价/算价过程) 定为结果页的核心价值,
+  #     而步骤数据在 calc_detail; 两者若分居两个菜单, 回放必须先记result_id 再跳页。
+  #   载体: calc_detail.result_id (真 FK, 字段级 required, 见 calc_detail.yaml L83)。
+  #   排序: calc_detail.seq 是引擎写入的步骤序号, 回放按它升序才是正确的因果顺序。
+  #   不加 add/remove 动作: 明细是引擎产物(只读留痕), 不是人工维护的数据 ——
+  #     手工改动会与 fact_snapshot 存档冲突, 破坏可复现性。
+  calc_details:
+    name: calc_details
+    label: 明细步骤
+    plural_label: 明细步骤列表
+    target_type: calc_detail
+    type: one_to_many
+    source_key: id
+    target_key: result_id
+    description: 本定价结果的逐步骤明细（回放用）
+    display:
+      label: 明细步骤
+      plural_label: 明细步骤
+      target_display_field: label
+      columns:
+        - id: seq
+          label: 步骤
+          width: 80
+        - id: element_type
+          label: 元素类型
+          width: 120
+        - id: label
+          label: 名称
+          width: 180
+        - id: unit_price
+          label: 单价
+          width: 110
+        - id: extended_amount
+          label: 金额
+          width: 120
+        - id: running_net_amount
+          label: 累计净额
+          width: 120
+        - id: rollup_flag
+          label: 小计
+          width: 80
+
 ui_view_config:
   showChangeHistory: true
   list:
-    detail_mode: drawer
+    # [PRICE-UI 2026-10-13] drawer → page: 定价结果是「回放」入口
+    #   (Spec要求可逐步骤回放 explain), 明细步骤在 calc_detail 上 ——
+    #   抽屉塞不下逐步骤展开, 独立页才有空间。
+    #   路由由既有 /detail/:objectType/:id 承接, 无需新增前端路由。
+    detail_mode: page
     title: 定价结果查询
     description: 挂单据的定价结论（可回放）
     columns:

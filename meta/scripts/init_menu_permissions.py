@@ -623,6 +623,713 @@ def init_menu_permissions(db_path):
                 'message': '建议分配供应商档案数据权限'
             })
         },
+        # === [PRICE-MENU 2026-10-13] 定价域菜单接线 ===
+        #   15 个对象分 3 组, 每组一个 multi_object_hub 聚合页 + N 个 object_list 子菜单.
+        #   不挂 external_rate_source / pricing_period (M8 未开工, 挂了会误导「能配但配了不生效」).
+        #   定价域定位 = 平台内置业务域(非应用包): 留在 meta/schemas/, 不拆 apps/ ——
+        #     roadmap G2 (table_prefix) 实测未实现, 拆包会进已敞开的撞表风险区.
+        {
+            # [PRICE-MENU 2026-10-13] 价目与取价 —— 定价域 价目与取价 组聚合页
+            #   背景: 定价域 15 个对象的自动菜单 (rate-table-list / calc-result-list 等)
+            #     此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
+            #     => get_visible_menu_tree 捞不到, 导航树上完全不可达 (同 MD-MENU 2026-10-11 主数据修法).
+            #   page_type=multi_object_hub + menu_path 非空 => dynamicRoutes 注册该路径,
+            #     GenericTabContainer 把 children 渲染成 tab (聚合页, 与用户权限/主数据组同构).
+            #   [结构约束] 子菜单必须是 page_type=object_list —— GenericTabContainer.vue
+            #     只在 object_list 时给 tab 赋 objectType, 再用 GenericObjectList 渲染;
+            #     子菜单若也是 multi_object_hub 则既无 component 又无 objectType,
+            #     tab 标题渲染但内容空白 (GenericTabContainer.vue L94-95 记录的用户实测坑).
+            #     故本组为**并列顶层hub**, 下挂 object_list 子菜单, 不再嵌套第三层.
+            #   required_permissions: 声明本组 全部对象的权限码 —— 父容器不设门槛时
+            #     子菜单可见性由各自守卫负责, 但列出可避免"组可见而组内全空"的误判。
+            'menu_code': 'pricing-price',
+            'menu_name': '价目与取价',
+            'menu_path': '/pricing/price',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 20,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'rate_table',
+            'object_types': json.dumps(['rate_table', 'rate_record', 'rate_type', 'key_schema', 'lookup_sequence', 'exclusion_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'rate_table', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'rate_record', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'rate_type', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'key_schema', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'lookup_sequence', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'exclusion_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'rate_table:rate_table_create',
+                'rate_table:rate_table_read',
+                'rate_table:rate_table_update',
+                'rate_table:rate_table_delete',
+                'rate_table:rate_table_list',
+                'rate_record:rate_record_create',
+                'rate_record:rate_record_read',
+                'rate_record:rate_record_update',
+                'rate_record:rate_record_delete',
+                'rate_record:rate_record_list',
+                'rate_type:rate_type_create',
+                'rate_type:rate_type_read',
+                'rate_type:rate_type_update',
+                'rate_type:rate_type_delete',
+                'rate_type:rate_type_list',
+                'key_schema:key_schema_create',
+                'key_schema:key_schema_read',
+                'key_schema:key_schema_update',
+                'key_schema:key_schema_delete',
+                'key_schema:key_schema_list',
+                'lookup_sequence:lookup_sequence_create',
+                'lookup_sequence:lookup_sequence_read',
+                'lookup_sequence:lookup_sequence_update',
+                'lookup_sequence:lookup_sequence_delete',
+                'lookup_sequence:lookup_sequence_list',
+                'exclusion_group:exclusion_group_create',
+                'exclusion_group:exclusion_group_read',
+                'exclusion_group:exclusion_group_update',
+                'exclusion_group:exclusion_group_delete',
+                'exclusion_group:exclusion_group_list',
+            ]),
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['rate_table', 'rate_record', 'rate_type', 'key_schema', 'lookup_sequence', 'exclusion_group'],
+                'message': '建议分配价目与取价相关对象的数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 费率表 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'rate_table-list',
+            'menu_name': '费率表',
+            'menu_path': '/rate-table',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 90,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'rate_table',
+            'object_types': json.dumps(['rate_table']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'rate_table', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'rate_table:rate_table_create',
+                'rate_table:rate_table_read',
+                'rate_table:rate_table_update',
+                'rate_table:rate_table_delete',
+                'rate_table:rate_table_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['rate_table'],
+                'message': '建议分配费率表数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 费率记录 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'rate_record-list',
+            'menu_name': '费率记录',
+            'menu_path': '/rate-record',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 91,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'rate_record',
+            'object_types': json.dumps(['rate_record']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'rate_record', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'rate_record:rate_record_create',
+                'rate_record:rate_record_read',
+                'rate_record:rate_record_update',
+                'rate_record:rate_record_delete',
+                'rate_record:rate_record_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['rate_record'],
+                'message': '建议分配费率记录数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 费率类型 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'rate_type-list',
+            'menu_name': '费率类型',
+            'menu_path': '/rate-type',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 92,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'rate_type',
+            'object_types': json.dumps(['rate_type']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'rate_type', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'rate_type:rate_type_create',
+                'rate_type:rate_type_read',
+                'rate_type:rate_type_update',
+                'rate_type:rate_type_delete',
+                'rate_type:rate_type_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['rate_type'],
+                'message': '建议分配费率类型数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 匹配键表 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'key_schema-list',
+            'menu_name': '匹配键表',
+            'menu_path': '/key-schema',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 93,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'key_schema',
+            'object_types': json.dumps(['key_schema']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'key_schema', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'key_schema:key_schema_create',
+                'key_schema:key_schema_read',
+                'key_schema:key_schema_update',
+                'key_schema:key_schema_delete',
+                'key_schema:key_schema_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['key_schema'],
+                'message': '建议分配匹配键表数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 查找序列 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'lookup_sequence-list',
+            'menu_name': '查找序列',
+            'menu_path': '/lookup-sequence',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 94,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'lookup_sequence',
+            'object_types': json.dumps(['lookup_sequence']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'lookup_sequence', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'lookup_sequence:lookup_sequence_create',
+                'lookup_sequence:lookup_sequence_read',
+                'lookup_sequence:lookup_sequence_update',
+                'lookup_sequence:lookup_sequence_delete',
+                'lookup_sequence:lookup_sequence_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['lookup_sequence'],
+                'message': '建议分配查找序列数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 排斥组 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'exclusion_group-list',
+            'menu_name': '排斥组',
+            'menu_path': '/exclusion-group',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 95,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'exclusion_group',
+            'object_types': json.dumps(['exclusion_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'exclusion_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'exclusion_group:exclusion_group_create',
+                'exclusion_group:exclusion_group_read',
+                'exclusion_group:exclusion_group_update',
+                'exclusion_group:exclusion_group_delete',
+                'exclusion_group:exclusion_group_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['exclusion_group'],
+                'message': '建议分配排斥组数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 计算过程 —— 定价域 计算过程 组聚合页
+            #   背景: 定价域 15 个对象的自动菜单 (rate-table-list / calc-result-list 等)
+            #     此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
+            #     => get_visible_menu_tree 捞不到, 导航树上完全不可达 (同 MD-MENU 2026-10-11 主数据修法).
+            #   page_type=multi_object_hub + menu_path 非空 => dynamicRoutes 注册该路径,
+            #     GenericTabContainer 把 children 渲染成 tab (聚合页, 与用户权限/主数据组同构).
+            #   [结构约束] 子菜单必须是 page_type=object_list —— GenericTabContainer.vue
+            #     只在 object_list 时给 tab 赋 objectType, 再用 GenericObjectList 渲染;
+            #     子菜单若也是 multi_object_hub 则既无 component 又无 objectType,
+            #     tab 标题渲染但内容空白 (GenericTabContainer.vue L94-95 记录的用户实测坑).
+            #     故本组为**并列顶层hub**, 下挂 object_list 子菜单, 不再嵌套第三层.
+            #   required_permissions: 声明本组 全部对象的权限码 —— 父容器不设门槛时
+            #     子菜单可见性由各自守卫负责, 但列出可避免"组可见而组内全空"的误判。
+            'menu_code': 'pricing-calc',
+            'menu_name': '计算过程',
+            'menu_path': '/pricing/calc',
+            'icon': 'DataAnalysis',
+            'color': '#8b5cf6',
+            'sort_order': 21,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'calc_procedure',
+            'object_types': json.dumps(['calc_procedure', 'factor_catalog']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calc_procedure', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'factor_catalog', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calc_procedure:calc_procedure_create',
+                'calc_procedure:calc_procedure_read',
+                'calc_procedure:calc_procedure_update',
+                'calc_procedure:calc_procedure_delete',
+                'calc_procedure:calc_procedure_list',
+                'factor_catalog:factor_catalog_create',
+                'factor_catalog:factor_catalog_read',
+                'factor_catalog:factor_catalog_update',
+                'factor_catalog:factor_catalog_delete',
+                'factor_catalog:factor_catalog_list',
+            ]),
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calc_procedure', 'factor_catalog'],
+                'message': '建议分配计算过程相关对象的数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 定价过程 —— 定价域/计算过程组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'calc_procedure-list',
+            'menu_name': '定价过程',
+            'menu_path': '/calc-procedure',
+            'icon': 'DataAnalysis',
+            'color': '#8b5cf6',
+            'sort_order': 90,
+            'parent_menu': 'pricing-calc',
+            'page_type': 'object_list',
+            'primary_object_type': 'calc_procedure',
+            'object_types': json.dumps(['calc_procedure']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calc_procedure', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calc_procedure:calc_procedure_create',
+                'calc_procedure:calc_procedure_read',
+                'calc_procedure:calc_procedure_update',
+                'calc_procedure:calc_procedure_delete',
+                'calc_procedure:calc_procedure_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calc_procedure'],
+                'message': '建议分配定价过程数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 因子目录 —— 定价域/计算过程组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'factor_catalog-list',
+            'menu_name': '因子目录',
+            'menu_path': '/factor-catalog',
+            'icon': 'DataAnalysis',
+            'color': '#8b5cf6',
+            'sort_order': 91,
+            'parent_menu': 'pricing-calc',
+            'page_type': 'object_list',
+            'primary_object_type': 'factor_catalog',
+            'object_types': json.dumps(['factor_catalog']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'factor_catalog', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'factor_catalog:factor_catalog_create',
+                'factor_catalog:factor_catalog_read',
+                'factor_catalog:factor_catalog_update',
+                'factor_catalog:factor_catalog_delete',
+                'factor_catalog:factor_catalog_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['factor_catalog'],
+                'message': '建议分配因子目录数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 结果与追溯 —— 定价域 结果与追溯 组聚合页
+            #   背景: 定价域 15 个对象的自动菜单 (rate-table-list / calc-result-list 等)
+            #     此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
+            #     => get_visible_menu_tree 捞不到, 导航树上完全不可达 (同 MD-MENU 2026-10-11 主数据修法).
+            #   page_type=multi_object_hub + menu_path 非空 => dynamicRoutes 注册该路径,
+            #     GenericTabContainer 把 children 渲染成 tab (聚合页, 与用户权限/主数据组同构).
+            #   [结构约束] 子菜单必须是 page_type=object_list —— GenericTabContainer.vue
+            #     只在 object_list 时给 tab 赋 objectType, 再用 GenericObjectList 渲染;
+            #     子菜单若也是 multi_object_hub 则既无 component 又无 objectType,
+            #     tab 标题渲染但内容空白 (GenericTabContainer.vue L94-95 记录的用户实测坑).
+            #     故本组为**并列顶层hub**, 下挂 object_list 子菜单, 不再嵌套第三层.
+            #   required_permissions: 声明本组 全部对象的权限码 —— 父容器不设门槛时
+            #     子菜单可见性由各自守卫负责, 但列出可避免"组可见而组内全空"的误判。
+            'menu_code': 'pricing-result',
+            'menu_name': '结果与追溯',
+            'menu_path': '/pricing/result',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 22,
+            'parent_menu': '',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'calc_result',
+            'object_types': json.dumps(['calc_result', 'calc_detail', 'adjustment', 'allocation_rule', 'allocation_result', 'cumulative_usage', 'usage_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calc_result', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'calc_detail', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'adjustment', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'allocation_rule', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'allocation_result', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'cumulative_usage', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'usage_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calc_result:calc_result_create',
+                'calc_result:calc_result_read',
+                'calc_result:calc_result_update',
+                'calc_result:calc_result_delete',
+                'calc_result:calc_result_list',
+                'calc_detail:calc_detail_create',
+                'calc_detail:calc_detail_read',
+                'calc_detail:calc_detail_update',
+                'calc_detail:calc_detail_delete',
+                'calc_detail:calc_detail_list',
+                'adjustment:adjustment_create',
+                'adjustment:adjustment_read',
+                'adjustment:adjustment_update',
+                'adjustment:adjustment_delete',
+                'adjustment:adjustment_list',
+                'allocation_rule:allocation_rule_create',
+                'allocation_rule:allocation_rule_read',
+                'allocation_rule:allocation_rule_update',
+                'allocation_rule:allocation_rule_delete',
+                'allocation_rule:allocation_rule_list',
+                'allocation_result:allocation_result_create',
+                'allocation_result:allocation_result_read',
+                'allocation_result:allocation_result_update',
+                'allocation_result:allocation_result_delete',
+                'allocation_result:allocation_result_list',
+                'cumulative_usage:cumulative_usage_create',
+                'cumulative_usage:cumulative_usage_read',
+                'cumulative_usage:cumulative_usage_update',
+                'cumulative_usage:cumulative_usage_delete',
+                'cumulative_usage:cumulative_usage_list',
+                'usage_group:usage_group_create',
+                'usage_group:usage_group_read',
+                'usage_group:usage_group_update',
+                'usage_group:usage_group_delete',
+                'usage_group:usage_group_list',
+            ]),
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calc_result', 'calc_detail', 'adjustment', 'allocation_rule', 'allocation_result', 'cumulative_usage', 'usage_group'],
+                'message': '建议分配结果与追溯相关对象的数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 定价结果 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'calc_result-list',
+            'menu_name': '定价结果',
+            'menu_path': '/calc-result',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 90,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'calc_result',
+            'object_types': json.dumps(['calc_result']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calc_result', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calc_result:calc_result_create',
+                'calc_result:calc_result_read',
+                'calc_result:calc_result_update',
+                'calc_result:calc_result_delete',
+                'calc_result:calc_result_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calc_result'],
+                'message': '建议分配定价结果数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 定价明细 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'calc_detail-list',
+            'menu_name': '定价明细',
+            'menu_path': '/calc-detail',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 91,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'calc_detail',
+            'object_types': json.dumps(['calc_detail']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calc_detail', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calc_detail:calc_detail_create',
+                'calc_detail:calc_detail_read',
+                'calc_detail:calc_detail_update',
+                'calc_detail:calc_detail_delete',
+                'calc_detail:calc_detail_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calc_detail'],
+                'message': '建议分配定价明细数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 追溯调整 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'adjustment-list',
+            'menu_name': '追溯调整',
+            'menu_path': '/adjustment',
+            'icon': 'Edit',
+            'color': '#8b5cf6',
+            'sort_order': 92,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'adjustment',
+            'object_types': json.dumps(['adjustment']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'adjustment', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'adjustment:adjustment_create',
+                'adjustment:adjustment_read',
+                'adjustment:adjustment_update',
+                'adjustment:adjustment_delete',
+                'adjustment:adjustment_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['adjustment'],
+                'message': '建议分配追溯调整数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 分摊规则 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'allocation_rule-list',
+            'menu_name': '分摊规则',
+            'menu_path': '/allocation-rule',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 93,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'allocation_rule',
+            'object_types': json.dumps(['allocation_rule']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'allocation_rule', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'allocation_rule:allocation_rule_create',
+                'allocation_rule:allocation_rule_read',
+                'allocation_rule:allocation_rule_update',
+                'allocation_rule:allocation_rule_delete',
+                'allocation_rule:allocation_rule_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['allocation_rule'],
+                'message': '建议分配分摊规则数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 分摊结果 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'allocation_result-list',
+            'menu_name': '分摊结果',
+            'menu_path': '/allocation-result',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 94,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'allocation_result',
+            'object_types': json.dumps(['allocation_result']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'allocation_result', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'allocation_result:allocation_result_create',
+                'allocation_result:allocation_result_read',
+                'allocation_result:allocation_result_update',
+                'allocation_result:allocation_result_delete',
+                'allocation_result:allocation_result_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['allocation_result'],
+                'message': '建议分配分摊结果数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 累计用量 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'cumulative_usage-list',
+            'menu_name': '累计用量',
+            'menu_path': '/cumulative-usage',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 95,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'cumulative_usage',
+            'object_types': json.dumps(['cumulative_usage']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'cumulative_usage', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'cumulative_usage:cumulative_usage_create',
+                'cumulative_usage:cumulative_usage_read',
+                'cumulative_usage:cumulative_usage_update',
+                'cumulative_usage:cumulative_usage_delete',
+                'cumulative_usage:cumulative_usage_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['cumulative_usage'],
+                'message': '建议分配累计用量数据权限'
+            })
+        },
+        {
+            # [PRICE-MENU 2026-10-13] 条件更新组 —— 定价域/结果与追溯组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 与主数据组 11 条子菜单口径统一 —— 随父 hub 在侧边栏
+            #     展开可见, 不进landing 卡片区.
+            'menu_code': 'usage_group-list',
+            'menu_name': '条件更新组',
+            'menu_path': '/usage-group',
+            'icon': 'Grid',
+            'color': '#8b5cf6',
+            'sort_order': 96,
+            'parent_menu': 'pricing-result',
+            'page_type': 'object_list',
+            'primary_object_type': 'usage_group',
+            'object_types': json.dumps(['usage_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'usage_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'usage_group:usage_group_create',
+                'usage_group:usage_group_read',
+                'usage_group:usage_group_update',
+                'usage_group:usage_group_delete',
+                'usage_group:usage_group_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['usage_group'],
+                'message': '建议分配条件更新组数据权限'
+            })
+        },
     ]
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
