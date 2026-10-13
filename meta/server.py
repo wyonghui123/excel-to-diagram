@@ -168,6 +168,7 @@ from meta.handlers.platform_handlers import PlatformTickHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
+from meta.core.platform_modules import is_module_enabled   # [roadmap v1.32.0 §6.2.4] 平台模块部署级启停
 from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
 from meta.api.test_api import test_bp
 from meta.api.debug_api import debug_bp
@@ -514,7 +515,14 @@ def create_app(db_path=None):
     from meta.core.db_path import get_meta_db_path
     init_menu_permissions(get_meta_db_path())
 
-    init_task_menus(data_source)
+    # [roadmap v1.32.0 §6.2.4] 任务菜单与 task blueprint 同门：
+    # 禁用时不写种子 ⇒ 前端侧栏无数据（menus 表无该 menu_code）。
+    # 注意：不写种子不会删除已存在的菜单 —— 已跑过种子的实例若要彻底隐藏，
+    # 需一次性执行 UPDATE menus SET show_in_sidebar=0 WHERE menu_code LIKE 'task%'。
+    if is_module_enabled('tasks'):
+        init_task_menus(data_source)
+    else:
+        logging.getLogger(__name__).info("[PlatformModules] tasks 已禁用 → 跳过任务菜单种子初始化")
 
     init_task_seed_data(data_source)
 
@@ -792,7 +800,20 @@ def create_app(db_path=None):
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
-    app.register_blueprint(task_api_bp)
+    # [roadmap v1.32.0 §6.2.4] 任务体系 = 部署级可关闭的平台模块。
+    # 不注册 blueprint ⇒ 路由真 404（不只是前端看不见），须与菜单种子同门。
+    _tasks_enabled = is_module_enabled('tasks')
+    if _tasks_enabled:
+        app.register_blueprint(task_api_bp)
+        # [A8 2026-10-02] 统一收件箱 + 平台心跳
+        app.register_blueprint(task_inbox_bp)
+        # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
+        app.register_blueprint(task_decision_bp)
+    else:
+        logging.getLogger(__name__).info(
+            "[PlatformModules] tasks 已禁用 (DISABLED_PLATFORM_MODULES) "
+            "→ task/task_inbox/task_decision 三个 blueprint 不注册"
+        )
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)
@@ -801,10 +822,6 @@ def create_app(db_path=None):
     #   旧路径 /api/v1/pricing/allocate **不留别名**（交付次日即改，无调用方）。
     from meta.api.allocation_api import allocation_bp
     app.register_blueprint(allocation_bp)
-    # [A8 2026-10-02] 统一收件箱 + 平台心跳
-    app.register_blueprint(task_inbox_bp)
-    # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
-    app.register_blueprint(task_decision_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1002,12 +1019,16 @@ def create_app(db_path=None):
         # /api/v1/health 已被 v1 sunset 中间件接管返回 410，勿再引用）
         from meta.core.app_registry import get_enabled_app_ids, get_loaded_apps
         apps = get_loaded_apps()
+        # [v1.32.0 §6.2.4] 平台模块开关状态 —— 部署后须能从探活点确认开关是否真的生效
+        from meta.core.platform_modules import disabled_modules, ineffective_disables
         return jsonify({
             'status': 'ok',
             'service': 'arch-data-manage-api',
             'apps_mode': 'enabled' if apps else 'legacy',
             'enabled_apps': get_enabled_app_ids(),
             'apps': apps,
+            'disabled_platform_modules': sorted(disabled_modules()),
+            'ineffective_platform_modules': sorted(ineffective_disables()),
         })
 
     # M9 v3.5 P3: GraphQL 协议层 (Phase D1 POC) - 0 mutation / 0 subscription

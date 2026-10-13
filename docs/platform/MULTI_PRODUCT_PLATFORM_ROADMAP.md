@@ -4,8 +4,8 @@
 >
 > **与其它文档的关系**：[ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md](../ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md) 解决"能力维度"（BPMN / 多租户 / 报表 / AI…）；本文解决"应用产品维度 + 部署拓扑维度"。两份文档正交，互不替代。
 >
-> **状态**：v1.31.0（**新增 §6.2.3「库形态由部署拓扑决定，不由应用决定」（用户决策＝选项 3）：`APP_DB_ROUTING` 是**实例/拓扑属性**而非应用属性 —— **合并形态（默认，单实例多 app）同库 + `table_prefix`**，单应用独立交付形态才开独立库；据此**收窄 §6.2.1 三条硬约束与 A4 只读视图的适用范围**（仅拆库形态生效）、§6.15.3 缺口 2/3 降为条件缺口；"部署哪些模块"与"库形态"两条轴正交**）+ v1.30.0（**新增 §6.15「共享主数据层（foundation app）规范」**：Material / Location 归属"共享领域层"、**逻辑分层不拆实例** + 三条必须先定的口径 + **仓库 vs 库位分界**（仓库 = 组织/权限维度、库位 = 主数据）+ 3 个前置缺口 + 4 条提升触发条件 + 落地顺序；行业对标证据见 INDUSTRY_BENCHMARK_APP_PLATFORM.md §2.9。历史累积：全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）** + **多实例并行隔离实测通过：8 处平台库路径破口已补，主库零写入（§10.15）** + **应用权限管理维度已打通（v1.29：应用权限行补写 + 根菜单聚合 + 应用 schema 补 export/import，§10.15 (7)）** + **功能权限矩阵中应用资源的可见性已实测定性、中文标签已补（v1.29.1：`resources` 行显示"仓库/库存物料/出库单/运单"，§10.15 (8)）** + **缺陷 B 已修复（v1.29.2：SPA 内切换权限集重新加载 —— `:key` 重建 + `watch(permissionSetId)`，§10.15 (8)）** + **缺陷④ 已坐实并同日修复（v1.29.3：用户真实路由 `/detail/permission_set/1232` 二次取证（5 探针）—— "勾选菜单自动授予功能权限"在全平台静默失效的 3 处用户可及写入点改为按列自适应、新增 `permission_set_permissions.py`；"已同步 0 项"→"53 项"、矩阵保存 500→200、真页面 19 行 `1-10 / 14` 含"出库单"，§10.15 (8)）** + **缺陷⑦ 已坐实并同日修复（v1.29.4：应用资源行动作位全灰不可勾 —— 矩阵能力表只读 `resource_types.yaml`（14 个平台资源、零应用 BO）；修法 = `_build_resource_action_matrix()` 合并已启用应用的应用 BO 动作集（默认 CRUD+export/import ∪ schema 声明，setdefault 只补不覆盖），A 模式 14→18 条 / B 模式不变；真页面 outbound_order 6 动作位 全灰→全部可勾、勾"查看"→保存→F5 持久→`outbound_order:read` 落库，§10.15 (8)）** + **缺陷⑧ 已坐实并同日修复（v1.29.5：应用页面不在 landing 工作台卡片区 —— 卡片=菜单可见叶子（SSOT）无误，误伤点在 `leaf_menus` 派生规则把应用页面（`menu_auto_generator` 固定 `show_in_sidebar=0`）当"隐藏菜单"整批排除、应用根菜单又被"容器"规则排除；修法 = 放行"挂载点为应用根菜单（`page_type=''`）"的页面（1 行 + 注释，零波及实测）；真页面卡片 6→10、点新卡片落 `/outbound-order` 正常渲染、B 实例 / 侧边栏 / 权限矩阵零影响，§10.15 (8)）** + **Type 3 前置条件已入档（v1.29.6：多实例登录态隔离 —— P1 cookie 不按端口隔离 / P2 token 跨实例有效，**必须同时修**，只修 P2 会退化成"互踢"；含 CORS 硬约束 + 方案 2 的 7 处改动点 + `token_version` fail-open 评估项，零代码改动，见 PoC 3 段）**） + **跨实例单据流（DOC_FLOW）设计入档（v1.29.7：V2-7 占位 + Phase 1 schema 预留 2 条验收项，设计详见[单据流数量语义文档 §12](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)）** + **单据流平台服务 S1–S7 入档（v1.29.8：二轮 W20 核验后收敛 7 项"契约 + 引擎"；S6 安装期校验 / S7 一致性巡检为净增量，S5 复用 V2-7，设计详见单据流文档 §9.5）**）
-> **最后更新**：2026-10-03
+> **状态**：v1.32.0（**新增 §6.2.4「平台模块启用开关」：平台层模块（规则 / 任务体系）新增部署级启停 `DISABLED_PLATFORM_MODULES` —— **黑名单语义、默认全开**（存量零风险）、两个作用点同门（`server.py` 条件注册 blueprint ⇒ 路由真 404 + 菜单种子同门 ⇒ 前端无数据），并划清与 `ENABLED_APPS` 的两条正交轴；实测确认现有四类机制（`ENABLED_APPS` / blueprint 注册 / 菜单种子 / `feature_flags`）**都管不住平台模块**，且"隐藏菜单"有 3 个副作用**）+ v1.31.0（**新增 §6.2.3「库形态由部署拓扑决定，不由应用决定」（用户决策＝选项 3）：`APP_DB_ROUTING` 是**实例/拓扑属性**而非应用属性 —— **合并形态（默认，单实例多 app）同库 + `table_prefix`**，单应用独立交付形态才开独立库；据此**收窄 §6.2.1 三条硬约束与 A4 只读视图的适用范围**（仅拆库形态生效）、§6.15.3 缺口 2/3 降为条件缺口；"部署哪些模块"与"库形态"两条轴正交**）+ v1.30.0（**新增 §6.15「共享主数据层（foundation app）规范」**：Material / Location 归属"共享领域层"、**逻辑分层不拆实例** + 三条必须先定的口径 + **仓库 vs 库位分界**（仓库 = 组织/权限维度、库位 = 主数据）+ 3 个前置缺口 + 4 条提升触发条件 + 落地顺序；行业对标证据见 INDUSTRY_BENCHMARK_APP_PLATFORM.md §2.9。历史累积：全部决策关闭 + 前置验证已执行 + **PoC 1 全部 7 步完成** + **PoC 2 完成（真实应用包 + 多应用各落各库）** + **PoC 4 完成（跨应用事件：不丢 / 不重 / 死信）** + **数据层前置项已收敛** + **§6.5 绑定基础设施 + 多库关闭编排已实现** + **§6.5.3 改动 1~3 已接线（`APP_DB_ROUTING`，默认关闭）** + **行业对标完成且 3 项 P0 差距已补入** + **§6.5.3 P0 复核修复：审计恒落平台库** + **PoC 3 推迟到 Phase 2（Type 2 已实测双应用同栏可见，§10.14）** + **面向 Agent/AI 的架构方向符合性 check 完成（§11 Q5：三条单向门口径入档）** + **`/mcp` 未鉴权入口已实测确认并关闭（§11 Q5）** + **应用 `migrations/` 执行环实测确认：能力已具备、缺接线 + 三项口径（§6.3.1）** + **多实例并行隔离实测通过：8 处平台库路径破口已补，主库零写入（§10.15）** + **应用权限管理维度已打通（v1.29：应用权限行补写 + 根菜单聚合 + 应用 schema 补 export/import，§10.15 (7)）** + **功能权限矩阵中应用资源的可见性已实测定性、中文标签已补（v1.29.1：`resources` 行显示"仓库/库存物料/出库单/运单"，§10.15 (8)）** + **缺陷 B 已修复（v1.29.2：SPA 内切换权限集重新加载 —— `:key` 重建 + `watch(permissionSetId)`，§10.15 (8)）** + **缺陷④ 已坐实并同日修复（v1.29.3：用户真实路由 `/detail/permission_set/1232` 二次取证（5 探针）—— "勾选菜单自动授予功能权限"在全平台静默失效的 3 处用户可及写入点改为按列自适应、新增 `permission_set_permissions.py`；"已同步 0 项"→"53 项"、矩阵保存 500→200、真页面 19 行 `1-10 / 14` 含"出库单"，§10.15 (8)）** + **缺陷⑦ 已坐实并同日修复（v1.29.4：应用资源行动作位全灰不可勾 —— 矩阵能力表只读 `resource_types.yaml`（14 个平台资源、零应用 BO）；修法 = `_build_resource_action_matrix()` 合并已启用应用的应用 BO 动作集（默认 CRUD+export/import ∪ schema 声明，setdefault 只补不覆盖），A 模式 14→18 条 / B 模式不变；真页面 outbound_order 6 动作位 全灰→全部可勾、勾"查看"→保存→F5 持久→`outbound_order:read` 落库，§10.15 (8)）** + **缺陷⑧ 已坐实并同日修复（v1.29.5：应用页面不在 landing 工作台卡片区 —— 卡片=菜单可见叶子（SSOT）无误，误伤点在 `leaf_menus` 派生规则把应用页面（`menu_auto_generator` 固定 `show_in_sidebar=0`）当"隐藏菜单"整批排除、应用根菜单又被"容器"规则排除；修法 = 放行"挂载点为应用根菜单（`page_type=''`）"的页面（1 行 + 注释，零波及实测）；真页面卡片 6→10、点新卡片落 `/outbound-order` 正常渲染、B 实例 / 侧边栏 / 权限矩阵零影响，§10.15 (8)）** + **Type 3 前置条件已入档（v1.29.6：多实例登录态隔离 —— P1 cookie 不按端口隔离 / P2 token 跨实例有效，**必须同时修**，只修 P2 会退化成"互踢"；含 CORS 硬约束 + 方案 2 的 7 处改动点 + `token_version` fail-open 评估项，零代码改动，见 PoC 3 段）**） + **跨实例单据流（DOC_FLOW）设计入档（v1.29.7：V2-7 占位 + Phase 1 schema 预留 2 条验收项，设计详见[单据流数量语义文档 §12](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)）** + **单据流平台服务 S1–S7 入档（v1.29.8：二轮 W20 核验后收敛 7 项"契约 + 引擎"；S6 安装期校验 / S7 一致性巡检为净增量，S5 复用 V2-7，设计详见单据流文档 §9.5）**）
+> **最后更新**：2026-10-13
 > **结论摘要**：现有平台已完成约 70% 的平台化基建（四层抽象中 L1/L2 已具备、L3/L4 缺失）。**真正缺失的只有"应用产品"这一层抽象**，Phase 1 约 40 人天可交付"单 instance 多 app 合并部署"。数据层 **3 处前置疑点已全部收敛**：F2 多库路径入口（**已实现**，§10.6）、F3 写队列/维护调度（**经核实为非缺口**，§10.7）、F1 fd 阈值（**实测降级为 P1**，§10.0）；另 1 条铁律（事务不跨库 F5）。**数据层已无阻塞项**。
 >
 > **行业对标（v1.18~v1.19）**：核心方向经 Salesforce / ServiceNow / Microsoft / SAP / Odoo / AWS 验证，**不需要推翻**；发现 **3 项 P0 差距已全部补入方案**（§4.4、[对标报告](./INDUSTRY_BENCHMARK_APP_PLATFORM.md)）：**G1 补 expand-contract 纪律**（§6.10 改写，蓝绿降为特例）、**G2 补表名命名空间**（§6.2.2 新增 `table_prefix` + 三层校验）、**G3 补"删除即废弃"**（§6.10）。另补 G4（卸载反向依赖检查验收项）。合计约 5.5 人天，均为规范 + 校验类改动，**不动架构**。
@@ -536,6 +536,136 @@ app:
 - 轴② 变化**只由**"该实例是否作为单应用独立交付单元"触发，与"装不装更多应用"无关。
 
 > **✅ 已确认（2026-10-03，用户"按这个方案"）**：上表三行全部有效，且**不需要任何额外动作** —— 后两行的适用条件都要等 Type 3 的 4 条触发条件（§3.2）出现，**在触发之前一律保持 `APP_DB_ROUTING=0`**（即合并形态）。因此本决策**落地成本为零**：今天不动任何默认值、不生成任何应用库文件、不新增任何机制；第 2 行（单应用独立库）只在真正交付"单应用实例"时才启用，属"到点再开"。
+
+### 6.2.4 平台模块启用开关（v1.32 新增）
+
+> **问题**：平台层模块（规则体系、任务体系等）目前**无部署级启停能力** —— 想让某台服务器的前端看不到它们，只能靠"不跑菜单种子"或手工 `UPDATE menus SET show_in_sidebar=0`，两者都留下了可绕过的入口。
+>
+> **决策**：新增**部署层开关**，语义与 `ENABLED_APPS` 同构 —— **黑名单，默认全开**，存量部署零行为变化。
+
+#### (1) 现状：四类机制，没有一个管得住平台模块
+
+| 现有机制 | 作用范围 | 能否关闭平台模块 |
+|---|---|---|
+| `ENABLED_APPS` | 部署层，但**只管 app** | ❌ 平台模块在 `meta/` 下，**不经过 `app_loader`**，`ENABLED_APPS` 管不到 |
+| blueprint 注册（`server.py`） | 路由 | ❌ **无条件注册**，无开关 |
+| 菜单种子（`init_task_menus.py` / `init_menu_permissions.py`） | 只是**数据写入** | ⚠️ 不跑种子确实前端无数据，但接口仍可直接调 |
+| `feature_flags.py` | **行为**切换（老/新逻辑） | ❌ 不是模块开关，语义不同 |
+
+前端侧栏的唯一判据是 `menus` 表 `is_active=1 AND show_in_sidebar=1`（`meta/api/bo_api.py`）—— 这解释了"隐藏菜单"为什么能做到UI 不可见，但也暴露它的三个副作用：
+
+| # | 副作用 | 说明 |
+|---|---|---|
+| 1 | **接口仍可直接调** | `show_in_sidebar` 只是 UI 判据，不是访问控制 |
+| 2 | **管理员通配权限挡不住** | `required_permissions` 只约束普通用户；持 `*` 的管理员仍可直连API |
+| 3 | **重跑种子会恢复** | `init_task_menus.py` 是幂等写入，`show_in_sidebar` 会被写回 1 |
+
+**先例**：`meta/migrations/v074__spec16_hide_legacy_org_menus_and_fix_dpr.py` 用 `UPDATE menus SET show_in_sidebar=0` 隐藏过菜单 —— 有效，但它是**一次性数据修补**，不是可复用的部署机制。
+
+#### (2) 开关设计
+
+**环境变量**（与 `ENABLED_APPS` 同属部署清单）：
+
+```
+DISABLED_PLATFORM_MODULES=tasks,rules
+```
+
+| 语义 | 取值 | 默认 |
+|---|---|---|
+| **黑名单**（采用） | 列出的模块**关闭**，其余全开 | 空 ⇒ **全开** |
+| （白名单，否决） | 只有列出的开启 | — |
+
+**为什么黑名单**：新增平台模块（如v1.32 之后加的模块）**默认开启**，存量部署不需要改任何配置；与 `ENABLED_APPS`（白名单）方向相反是刻意的 —— `ENABLED_APPS` 面向"应用包"这种**可选交付物**，平台模块则是**平台自带能力**，应当默认在场、按需关闭。
+
+**模块标识**取 `meta/` 下的模块名，与 blueprint 一一对应：
+
+| 模块 id | 代码位置 | 菜单来源 | 可否关闭 |
+|---|---|---|---|
+| `tasks` | `meta/api/task_api.py` / `task_inbox_api.py` / `task_decision_api.py` + `meta/core/task_*.py` | `meta/scripts/init_task_menus.py` | ✅ **可关**（两个作用点均已接线） |
+| `rules` | `meta/core/rule_executor.py` / `rule_chain.py` / `rule_provider.py` / `index_rule_engine.py` / `doc_flow_rule_store.py` | **无专属菜单种子** | ❌ **不可关**（见下） |
+
+> **实测备注（2026-10-13）**：通读 `init_task_menus.py` 与 `init_menu_permissions.py`，**未发现"规则"菜单项** ⇒ 今天真正需要开关的主要是 `tasks`。
+>
+> **`rules` 为何不可关（复查结论）**：核实后发现它**根本没有可关闭的入口**——
+> ① `meta/core/rule_*.py` 是**平台核心库的底层依赖**，被 `action_executor`（BO 动作执行）/ `models`（对象模型）/ `index_management_service`（索引管理）/ `cross_object_chain`（跨对象链）**直接 import**，关掉等于关掉平台核心功能；
+> ② 它**无专属 blueprint、无专属菜单种子** —— 规则体系是"被复用的引擎"，不是一个有独立入口的模块（与任务体系形态不同：任务是"有 UI + 有 API"的模块）。
+> ③ 易混淆项澄清：[permission_rule_api.py](../../meta/api/permission_rule_api.py) 是**权限规则**（数据权限判定，权限矩阵依赖它），**不是"规则体系"**，且同属权限基础设施、不可关。
+>
+> 代码层面已用两个常量把这个边界固化为可执行事实：`KNOWN_PLATFORM_MODULES`（已知的 id，用于自文档）+ **`CLOSABLE_PLATFORM_MODULES = ('tasks',)`**（真正有可关闭入口的 id）。写 `rules` **不报错但无效果**，`/health` 的 `ineffective_platform_modules` 字段会如实报出（避免误以为已关闭）。
+
+#### (3) 两个作用点（缺一不可）
+
+**作用点①`server.py` 条件注册 blueprint** —— 不注册 ⇒ 路由 404，**真正不可达**（解决副作用 1、2）：
+
+```python
+from meta.core.platform_modules import is_module_enabled
+
+if is_module_enabled('tasks'):
+    app.register_blueprint(task_api_bp)
+    app.register_blueprint(task_inbox_bp)
+    app.register_blueprint(task_decision_bp)
+else:
+    logger.info("[PlatformModules] tasks 已禁用 → blueprint 不注册")
+```
+
+**作用点② 菜单种子同门** —— 不写菜单 ⇒ 前端无数据（解决副作用 3）：
+
+```python
+if is_module_enabled('tasks'):
+    init_task_menus(data_source)
+```
+
+> 两个作用点必须**同门**：只做①则菜单还在（点进去 404）；只做②则接口仍可达。
+
+#### (4) 与 `ENABLED_APPS` 的关系（两条轴，正交）
+
+| 轴 | 开关 | 管什么 | 语义 |
+|---|---|---|---|
+| ① 应用包 | `ENABLED_APPS` | `apps/<app_id>/` 下的应用 | 白名单（选装） |
+| ② 平台模块 | `DISABLED_PLATFORM_MODULES` | `meta/` 下的平台能力 | 黑名单（默认全开） |
+
+两条轴**互不依赖**：应用可以依赖被禁用的模块吗？**不允许** —— `app_loader` 的依赖校验（`_verify_dependencies`）须增补一条：若 app 声明的 `requires` 命中已禁用模块 ⇒ **启动期快速失败**（与"依赖 BO 缺失"的处理同级）。
+
+#### (5) 不采用"平台模块改造成 app 包"
+
+规则 / 任务是被**所有应用依赖**的平台能力。改造成 app 包会导致：① 变成"app 依赖 app"；② 与 §6.15「逻辑分层，不拆实例」冲突；③ 平台自身（无 app 时）反而没有这些能力。**保持 `meta/` + 黑名单开关**是改动面最小、语义最准的方案。
+
+#### (6) 已实现 + 实测（2026-10-13）
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | [meta/core/platform_modules.py](../../meta/core/platform_modules.py) | ✅ 已建 —— `is_module_enabled()` / `disabled_modules()` / `clear_cache()` + `KNOWN_PLATFORM_MODULES` |
+| 2 | [server.py](../../meta/server.py) 条件注册（作用点①） | ✅ 已接线 —— `tasks` 命中黑名单则 `task_api_bp` / `task_inbox_bp` / `task_decision_bp` **三个都不注册** |
+| 3 | [server.py](../../meta/server.py) 菜单种子同门（作用点②） | ✅ 已接线 —— 命中黑名单则跳过 `init_task_menus()` |
+| 4 | `app_loader` 依赖校验 | ⏸ **未做 —— 缺声明面**：`app.yaml` 的 `requires:` 段只有 `{bo, rules, column_version}`，**没有"依赖哪个平台模块"的字段**；`allowed_platform_modules` 是另一回事（Python import 路径白名单，供 AST 扫描用，不是 `tasks`/`rules` 这类模块 id）。要实现须先扩 `app.yaml` 声明面 —— 属新契约，未获批准前不动 |
+| 5 | 单测 | ✅ [test_platform_modules_20261013.py](../../meta/tests/test_platform_modules_20261013.py) **27 passed**（解析 10 + 常量 3 + 无效 id 探测 4 + 探活点 3 + 作用点① 3 + 作用点② 2 + 边界 2），全部用**真实 `create_app()`** 验证，非打桩 |
+| 6 | 探活点暴露开关状态 | ✅ `/health` 新增 `disabled_platform_modules` + `ineffective_platform_modules`（部署后能确认开关是否**真生效**） |
+
+**实机对照（真实 `create_app()`，独立临时库）**：
+
+| | 默认（未设） | `DISABLED_PLATFORM_MODULES=tasks` |
+|---|---|---|
+| task 相关路由数 | **8** | **0** ✅ 真 404 |
+| `/api/v2/meta` 路由数 | 12 | 12（其他平台能力不受影响）✅ |
+| 种子写入的 task 菜单 | 5 个（`task-management` / `task-definitions` / `task-queues` / `task-executions` / `ai-async-tasks`） | **0 个** ✅ |
+
+> **⚠️ 两处如实记录**：
+> ① **残留 4 个 `*-list` 菜单**（`scheduled_task-list` / `task_queue-list` / `task_execution-list` / `ai_async_task-list`）由 `menu_auto_generator` 生成、**不由本模块门控**；实测其恒为 `show_in_sidebar=0` ⇒ **侧栏不可见**（已实测确认），故不影响"前端看不到"的目标。若将来该生成器改为默认上侧栏，须回头补门控。
+> ② **种子门只挡新装、不回收存量**：对**已经跑过种子**的实例启用黑名单，`menus` 表里的旧行不会被删/隐藏 —— 须一次性执行 `UPDATE menus SET show_in_sidebar=0 WHERE menu_code IN ('task-management','task-definitions','task-queues','task-executions','ai-async-tasks')`。路由侧不受影响（blueprint 已不注册 ⇒ 旧菜单点进去也是 404）。
+
+#### (7) 复查发现的 5 个边界（2026-10-13，均为如实记录，非缺陷修复）
+
+实现完成后做了一轮复查，核实出以下 5 处边界。**其中 1 项已改代码，4 项如实记录**：
+
+| # | 发现 | 处理 |
+|---|---|---|
+| 1 | **`rules` 曾是"假承诺"** —— 首版把它登记进 `KNOWN_PLATFORM_MODULES` 会让人以为 `DISABLED_PLATFORM_MODULES=rules` 能关掉规则体系；实际它**无可关闭入口**（`meta/core/rule_*.py` 是平台核心库底层依赖，见 (2)） | ✅ **已改**：新增 `CLOSABLE_PLATFORM_MODULES = ('tasks',)` 固化边界 + `/health` 增`ineffective_platform_modules` 字段 |
+| 2 | **前端 5 条任务路由是硬编码静态路由** —— [src/router/modules/system.js](../../src/router/modules/system.js) L43-L76 定义了 `/system/task-management` 等 5 条**无条件存在**的静态路由，[dynamicRoutes.js](../../src/router/dynamicRoutes.js) L24/L33-34 也硬编码了这 5 个 code。⇒ 禁用后**从侧栏点不进去，但直接敲 URL 仍会渲染页面框架**（数据请求全部 404，用户看到空列表或报错提示） | ⏸ **如实记录，未改**：属**前端路由门控**问题，需要在前端消费模块开关（新增 `disabled_platform_modules` 到实例信息端点 + 路由守卫），属新机制。待用户确认是否纳入 —— **不影响"侧栏看不到"这一已达成目标** |
+| 3 | **`init_menu_permissions` 把5 个 task menu_code 硬编码进清理白名单**（[init_menu_permissions.py](../../meta/scripts/init_menu_permissions.py) L870/L890-894）⇒ 步骤 7.5/7.6 的"清理冗余条目"**不会**删掉它们 | ✅ **反向确认**：这恰好印证了上述② "存量必须手工清理" —— 若无此白名单，启动反而会自动清掉。该白名单与本开关**不冲突**，无需改动 |
+| 4 | **`task_scheduler` 上的 `platform_tick` 仍在跑** —— [platform_handlers.py](../../meta/handlers/platform_handlers.py) 每次调度会执行 `platform_tick`（派工 + 认领超时回收 + SLA 升级扫描），**直接读写 `task_*` 表**。⇒ 禁用任务体系后，**后台调度逻辑仍在运行**（只是 UI/API 不可见） | ⏸ **如实记录，未改**：调度器是**共享基础设施**（审计归档 / 导入队列 / DB 维护都挂在上面，关掉会连带停掉这些）。且"关模块 ≠ 关调度"是合理语义（scheduler 是平台机制，task_* 表是数据）。若需连后台一起停，须另设独立开关 |
+| 5 | **调度器仍会写 task 表数据** ⇒ 禁用实例的 `task_*` 表**仍在增长**（不是"完全冻结"） | ⏸ **如实记录**：同上，属 (4) 的必然结果。用户若只需"UI 不可见"，当前实现已满足；若要"数据停止增长"，须停调度 |
+
+> **落地成本**：默认全开 ⇒ **存量零风险**；要隐藏任务体系，在服务器 `.env` 加 `DISABLED_PLATFORM_MODULES=tasks` 并重启，再按上述② 一次性清理存量菜单。
 
 ### 6.3 启动流程
 
@@ -2640,3 +2770,4 @@ enum 迁移:            开始迁移枚举值到数据库: d:\filework\_mpp_prob
 | 2026-09-29 | **v1.29.8** | **单据流平台服务 S1–S7 入档（纯文档，零代码）**。**触发**：单据流数量语义研究二轮深度核验（W20）——行业一手证据（SAP Copy Control 三段式 Requirement/Data Transfer/Create + VOFM 客户命名空间 600–999 / ServiceNow `cmdb_rel_ci` + `cmdb_rel_type` / Palantir link type status 生命周期 / Dataverse 解决方案导入缺失依赖校验 / Salesforce 集成模式）+ 本仓库代码库对账。**核验修正 3 点**：① "消耗池"与"视图自动生成"未找到直接先例 ⇒ 如实标注为**自研扩展**（最近先例 = SAP EKPO 超交容差 UEBTO/UNTTO）；② **S5 跨实例镜像协调器已被 §七 V2-7 覆盖**（修正此前"新增"表述）；③ 死信人工处理无官方先例（自研，§6.14 已实现）。**净增量 = S6 / S7 两项**：**S6 安装期校验与契约演进**（落点 `app_registry` 安装链，行业最强先例 = Dataverse 解决方案导入校验）；**S7 一致性巡检 + 投影重建**（承接单据流文档 §14 R1 护栏，自研无先例）。**规则注册表设计收敛**：`rule_id` 从字符串标识升级为注册规则记录（`doc_flow_rule`：check / map / create 三段式钩子 + `pool` 声明 + `status` 生命周期 active / deprecated 停新不禁旧；"规则是数据、钩子是代码"）。完整设计见 [2026-09-08-doc-flow-quantity-semantics.md §9.5](file:///d:/filework/docs/superpowers/specs/2026-09-08-doc-flow-quantity-semantics.md)（该文档同步升至 v1.6：§9.5 + W20 核验行 + W20 来源块）。同步更新头部（状态 v1.29.8、最后更新 2026-09-29）/ §五（+S6/S7 补充小节）/ 附录 B（本行） |
 | 2026-10-03 | **v1.30.0** | **共享主数据层（foundation app）规范入档：Material / Location 归属定稿（零代码，纯文档；§6.15 新增 + 对标报告 §2.9 新增）**。**触发**：用户规划建设 `Material`（物料/产品主数据）与 `Location`（仓库/库位）主数据，提问"**这些算不算业务平台级别的？它不适合放在现有平台层，但在企业应用与底层平台之间是不是要构建这么一个平台**"；随后指示"**请继续研究一下头部产品的架构，确认好之后可以文档化**"。**研究方法**：委托子智能体做行业对标（SAP S/4HANA + MDG + MDI、Oracle EBS/Fusion、Odoo、Salesforce、ServiceNow CSDM、Microsoft D365/Dataverse、NetSuite、SAP ByD），并回溯本仓库既有结论（A4 跨应用只读视图零实现 / G2 `table_prefix` 列 backlog / §6.2.1 三条硬约束 / v1.27 撞表实测 / §6.14 事件机制 / §11 Q1 跨应用读=ATTACH 只读视图·写=事件）。**核心结论：该设"逻辑层"，但不该立即拆"独立实例"** —— 头部产品（SAP/Oracle/Odoo/Salesforce/ServiceNow/NetSuite）的**运行态主数据全部与消费方同库/同进程**，"独立层"是**逻辑归属与治理**上的分层（SAP 跨应用组件 CA（MDG 挂 `CA-MDG`，Material 域 `CA-MDG-APP-MM`，但 S/4 自身 Material/Business Partner 就住在核心、MDG 仅治理层）/ ServiceNow **CSDM Foundation 域**（明确含 Location）/ Odoo **被依赖模块**（manifest `depends`）/ Dataverse "business data platform"）；**物理拆分只在跨边界时发生**（跨系统 / 独立交付 / 外部权威源 ⇒ SAP **MDI** hub + distribution model / **Federated MDG** 两层实例 / D365 **dual-write 单向**且官方"不建议双向"）⇒ 与 PoC 3 的**触发式启动**写法同构。**⇒ 结论：它是"一类特殊应用"（foundation app），不是新的运行时层**；`product_binding.mode: multi`（§6.2 v1.3 已预留）正是为它准备；**不放 `platform.db`**（平台库 = 元模型+身份+权限+菜单，v1.28 刚确立"每 instance 一份平台库"隔离，主数据生命周期不同会破坏该边界）⇒ 独立库 + `ATTACH` 实时只读共享。**仓库 vs 库位（重要分界，行业一致）**：**仓库 = 组织/权限维度**（SAP `Plant`、Oracle `Inventory Org`（组织单位，映射 legal entity）、NetSuite location 做 role 访问限制、ServiceNow 归 CSDM Foundation）⇒ **权限命名空间挂仓库级**；**库位 = 仓库下的主数据**，**必须带复合键**（`location_id + warehouse_id`）—— 对齐 Oracle `INV_ITEM_LOCATIONS` 教训（key = `INVENTORY_LOCATION_ID + ORGANIZATION_ID`，locator id **仅 org 内唯一**，单独按 id 关联会**静默跨 org**）；形态 = 单表 `Location` + `location_type ∈ {WAREHOUSE, BIN}`（`WAREHOUSE` 行双身份、`BIN` 行 `parent_warehouse_id` 必填），对齐 SAP ByD（Location 在 Supply Chain Design Master Data + 3PL site 在 Organization Structure）。**对硬约束的三点修正/确认**：① "跨库不 JOIN / 不建外键"**是边界纪律而非技术限制**（SQLite `ATTACH` 单连接内技术上支持跨库 JOIN）——表述更正；② `ATTACH` 只读视图是**同进程实时读、零复制**，一致性上**等价于主流同库直读**，与 D365 dual-write 的"物理副本 + 映射维护"**不同构**（此前若被视为同类需更正）；③ 跨应用写走事件 + 最终一致**与 SAP MDI / D365 dual-write 完全同构，保留**。**我们独有的缺口（行业无此问题）**：**表名无应用前缀会静默冲突**（v1.27 实测 ⇒ `table_prefix` G2 必须在主数据落地**之前**实现）。**§6.15 六小节**：6.15.1 定位（逻辑分层不拆实例 + 不放 platform.db 的理由）/ 6.15.2 三条必须先定口径（权威归属=单写者·只读、标识契约=代理键 + `material_code`/`location_code` 语义键、读取方式=`ATTACH` 只读视图）+ 仓库 vs 库位分界 / 6.15.3 三个前置缺口（`table_prefix` → A4 只读视图 → 引用校验）/ 6.15.4 四条提升触发条件（跨 instance 共享 / 独立交付授权 / 独立伸缩故障域 / 平台外系统权威源）/ 6.15.5 落地顺序 Step 0~3（Step 0 = PM 确认本节即完成，与 Type 3 无关）/ 6.15.6 术语澄清（平台库 `products` 表 = 产品线 ≠ "产品主数据"）。**对标报告 §2.9 新增内容**：行业做法六维表（逻辑分层 / 单写者 / 跨模块读取 / 标识契约 / 生命周期 / 何时升级独立实例）+ 判定 + 与硬约束对照表 + 仓库 vs 库位五厂商表 + 来源清单（**已标注 4 项二手来源待一手确认**：SAP MDG Change Request/Edition/Validity Period 细节、Federated MDG 两层实例、ByD Location 双身份、NetSuite externalId 细节）。**同步更新**：§6.15（新增）/ 头部（状态 v1.30.0、最后更新 2026-10-03）/ 对标报告 §2.9（新增 + 附录来源待并入）/ 附录 B（本行）。**未做**：零代码改动、未创建任何新文件、未动 A4/G2 的 backlog 状态。 |
 | 2026-10-03 | **v1.31.0** | **库形态决策（选项 3）：`APP_DB_ROUTING` 是实例/拓扑属性，不是应用属性（零代码，纯文档；§6.2.3 新增 + 连带收窄 6 处）**。**触发**：用户对"App / 模块分层 / 分库"架构的反思 —— "**这感觉有点复杂，你再回来反思一下……这个架构设计是不是合理的？对比一下 SAP 跟 Oracle、Salesforce**"。**核实结论（推翻此前表述）**：① **分库今天不是默认行为** —— `APP_DB_ROUTING` 默认关闭（[server.py L628](../../meta/server.py#L628) / [test_app_db_routing.py L5](../../meta/tests/test_app_db_routing.py#L5) / [test_app_table_name_collision_probe.py L261](../../meta/tests/test_app_table_name_collision_probe.py#L261) "未创建任何应用库文件"）⇒ **今天实际是单库**，分库是"默认关闭的能力"；② 该开关是**实例级/环境变量级**（`setenv`），**不是 per-app 属性**；③ 行业对标：**没有任何头部厂商按应用/模块拆库** —— SAP（系统表 + 业务表同库，命名空间 `MARA`/`VBAK`）、Oracle EBS（单一 `APPS` schema，前缀 `MTL_`/`PO_`）、Salesforce（单库多租户，对象只是元数据）、Odoo（单 schema，模块 `depends`）、ServiceNow（CSDM）**全部单库**。⇒ 判定"**App / 模块分层本身合理，问题只在把'分库'设成了默认**"（分库唯一硬收益 = 应用包可独立交付成 instance（Type 3），其 4 条触发条件至今未触发）。**用户决策**：**选项 3 —— 按部署拓扑决定库形态**。**用户追问并确认（本轮新增结论）**：该决策与"今天部署哪些模块"**正交** —— 轴① 部署范围（装哪些 app / 是否只装平台，由部署清单决定、随时可变）与轴② 库形态（实例内部 app 表落哪，由实例拓扑决定）互不触碰；远程服务器只跑"架构数据服务管理"（平台范畴，**0 个 app ⇒ 无 app 数据 ⇒ 本问题不出现**），本地装 WMS/TMS（≥2 app ⇒ 同库，与选项 3 一致），**两者不矛盾**。**§6.2.3 新增内容**：决策表述（往已建实例加 app **不改变**库形态；仅"合并交付 ↔ 单应用独立交付"变化时才做一次**实例级**切换）+ 三行拓扑-形态映射表（仅平台 0 app ⇒ 只有 `platform.db`、开关无关 / 单应用独立交付 ⇒ `data/<app_id>.db`，`APP_DB_ROUTING=1` / 合并部署 ≥2 app ⇒ **同库 + `table_prefix`**，`APP_DB_ROUTING=0` 默认）+ **四条推论** + 正交性边框图 + **已确认（2026-10-03 用户"按这个方案"）**：三行全部有效、落地成本为零 —— Type 3 触发条件（§3.2）出现前一律保持 `APP_DB_ROUTING=0`，"单应用独立库"到点再开**。**连带收窄 6 处**：① §6.2.1 前提（加"适用范围"——三条硬约束**仅拆库形态生效**，合并形态同库可建外键/JOIN/DB 约束）；② §6.5.3 功能开关（补"开关语义 = 实例属性"、合并形态不生成 app 库文件、跨应用同库直读）；③ §6.11 工作量表（A4 跨应用只读视图 2d 标为**条件项、不计入排期**）；④ §6.15.1（更正"不放进 `platform.db`"为**逻辑归属 ≠ 物理单库**；合并形态同库直读无需视图；"应用包契约"中的"独立库"改为"库形态随部署拓扑"）；⑤ §6.15.3（标题改"缺口 1 无条件 / 缺口 2、3 为条件缺口"，缺口 1 补"合并形态下更关键"——v1.27 撞表实测**正是在 `APP_DB_ROUTING=0` 下发生**）；⑥ §6.15.5 Step 2（合并形态同库直读无动作）。**同步更新**：头部（状态 v1.31.0）/ §6.2.1 / §6.2.3（新增）/ §6.5.3 / §6.11 / §6.15.1 / §6.15.3 / §6.15.5 / 附录 B（本行）。**未做**：零代码改动、**未改 `APP_DB_ROUTING` 默认值（仍为关闭）**、未动 A4/G2 的 backlog 状态、未创建任何新文件。 |
+| 2026-10-13 | **v1.32.0** | **平台模块启用开关：规范 + 实现 + 实测（§6.2.4 新增）**。**触发**：用户在平台层新增两个模块（规则体系 / 任务体系），提问"**他们都是在平台层，对吧？但是我的部署……不希望在UI 层面上让前台前端能够看得到。是否在部署层面上可以有配置，启用或者不启用**"。**先核实归属（只读，零改动）**：两个模块全在 `meta/` 下（规则 = `rule_executor.py` / `rule_chain.py` / `rule_provider.py` / `index_rule_engine.py` / `permission_rule_api.py`；任务 = `task_scheduler.py` / `task_queue_manager.py` / `task_inbox.py` / `task_sla.py` 等 + `task_api.py` / `task_inbox_api.py` / `task_decision_api.py`）⇒ **属平台层，不经过 `app.yaml` / `app_loader`**。**核实结论：现有四类机制都管不住平台模块** —— ① `ENABLED_APPS`（部署层但**只管 app**）；② blueprint 注册（[server.py](../../meta/server.py) **无条件注册**，无开关）；③ 菜单种子（[init_task_menus.py](../../meta/scripts/init_task_menus.py) 只是**数据写入**）；④ `feature_flags.py`（6 个 flag 全是**行为**开关 —— 老/新逻辑切换）。**"隐藏菜单"可行但有 3 个副作用**：不跑种子或 `UPDATE menus SET show_in_sidebar=0`（先例 [v074](../../meta/migrations/v074__spec16_hide_legacy_org_menus_and_fix_dpr.py#L65-L80)）确实能让前端不可见（侧栏唯一判据 = `menus` 表 `is_active=1 AND show_in_sidebar=1`），但① **接口仍可直接调**；② **管理员通配权限挡不住**（持 `*` 仍可直连 API）；③ **重跑种子会恢复**。**§6.2.4 六小节**：(1) 现状四机制 + 隐藏菜单 3 副作用 + v074 先例；(2) 开关设计 —— **`DISABLED_PLATFORM_MODULES=tasks,rules`**、**黑名单、默认全开**（存量零配置）+ 模块 id 表（并记录**实测：两个种子脚本通读后未发现"规则"菜单项** ⇒ 今天真正需要开关的主要是 `tasks`）；(3) **两个作用点缺一不可**（`server.py` 条件注册 ⇒ 路由真 404+ 菜单种子同门 ⇒ 前端无数据）；(4) 与 `ENABLED_APPS` 的**两条正交轴**；(5) **不采用"平台模块改造成 app 包"**；(6) **实现 + 实测**。**代码（3 处 + 1 新文件 + 1 测试）**：新建 [platform_modules.py](../../meta/core/platform_modules.py)（`is_module_enabled` / `disabled_modules` / `clear_cache` / `KNOWN_PLATFORM_MODULES`）；[server.py](../../meta/server.py) 两处接线（三个 task blueprint 条件注册 + `init_task_menus` 同门）。**刻意未做**：① `init_task_seed_data` **不设门**（业务数据≠ 能力暴露，超出规范）；② **task_scheduler 不设门** —— 它是共享基础设施（审计归档 / 导入队列 / DB 维护都挂在上面），关掉会连带停掉这些；③ **`app_loader` 依赖校验未做** —— 核实后发现 `app.yaml` 的 `requires:` 段只有 `{bo, rules, column_version}`，**没有"依赖哪个平台模块"的声明面**；`allowed_platform_modules` 是另一回事（Python import 路径白名单、供 AST 扫描，非 `tasks`/`rules` 模块 id）⇒ 要实现须先扩 `app.yaml` 契约，**属新契约，未获批准前不动**。**实测（真实 `create_app()` + 独立临时库）**：task 路由 **8 → 0**（真 404）；`/api/v2/meta` 路由 **12 → 12**（证明是按模块关闭而非整体失败）；种子写入的 5 个 task 菜单 **→ 0**。**两处如实记录**：① 残留 4 个 `*-list` 菜单由 `menu_auto_generator` 生成、**不由本模块门控**，实测恒为 `show_in_sidebar=0` ⇒ 侧栏不可见；② **种子门只挡新装不回收存量** —— 已跑过种子的实例须一次性 `UPDATE menus SET show_in_sidebar=0 WHERE menu_code IN (...5 个)`。**过程中我自己犯的两个错（已修）**：① 单测误用 `SQLITE_DB_DIR` 隔离 —— `db_path.get_meta_db_path()` **只认 `SQLITE_DB_PATH`/`ARCH_DB_PATH`**，等于测试会写仓库内 `architecture.db`，已改为设 `SQLITE_DB_PATH`；② 首版作用点② 测试用打桩（只验"调用与否"）价值太低，已改为**真实 `create_app()` + 查 `menus` 表**。**验证**：[test_platform_modules_20261013.py](../../meta/tests/test_platform_modules_20261013.py) **27 passed**（全部真实 `create_app()`，非打桩）+ 回归 `test_app_loader.py` **15 passed** / `test_app_dependency.py` **50 passed** / `test_instance_display_name_20261013.py` **8 passed** / `test_health_apps_visibility_20260925.py` **6 passed**。**复查（用户要求"二次检查有什么遗漏"）**：实现完成后又做一轮系统性复查，核实出**5 个边界**，其中**1 项已改代码、4 项如实记录**（详见 §6.2.4 (7) 表）：① **`rules` 曾是"假承诺"** —— 核实发现它**根本没有可关闭入口**（`meta/core/rule_*.py` 被 `action_executor` / `models` / `index_management_service` / `cross_object_chain` 直接 import，是平台核心库底层依赖；且无专属 blueprint / 无专属菜单种子 —— 规则体系是"被复用的引擎"而非"有 UI+API 的模块"）⇒ **已改**：新增 `CLOSABLE_PLATFORM_MODULES = ('tasks',)` 固化边界 + `/health` 新增 `ineffective_platform_modules` 字段（写 `rules` 不报错但无效果，探活点如实报出，防误判"已关闭"）；另澄清易混淆项 [permission_rule_api.py](../../meta/api/permission_rule_api.py) 是**权限规则**（数据权限判定、权限矩阵依赖），**不是"规则体系"**，同属权限基础设施不可关。② **前端 5 条任务路由是硬编码静态路由**（[system.js](../../src/router/modules/system.js) L43-L76 + [dynamicRoutes.js](../../src/router/dynamicRoutes.js) L24/L33-34）⇒ 禁用后侧栏点不进去但**直敲 URL 仍渲染页面框架**（数据全404）⇒ 属前端路由门控，需新增机制，未获批准前未动。③ **`init_menu_permissions` 把 5 个 task menu_code 硬编码进清理白名单**（L870/L890-894）⇒ 启动的"清理冗余条目"不会删它们 —— 这恰好**反向印证**了"存量必须手工清理"。④ **`platform_tick` 仍在跑** —— [platform_handlers.py](../../meta/handlers/platform_handlers.py) 每次调度执行派工 + 认领超时回收 + SLA 升级扫描，**直接读写 `task_*` 表**；调度器是共享基础设施（审计归档 / 导入队列 / DB 维护都挂在上面）不可关，且"关模块 ≠ 关调度"是合理语义。⑤ **禁用实例的 `task_*` 表仍在增长**（④ 的必然结果）—— 若只需"UI 不可见"当前实现已满足；若要"数据停止增长"须另设开关停调度。**同步更新**：头部（状态 v1.32.0、最后更新 2026-10-13）/ §6.2.4（新增 + (2) 模块表补"可否关闭"列 + (6) 实现记录 + (7) 复查边界表）/ 附录 B（本行）。 |

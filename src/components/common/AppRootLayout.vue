@@ -4,7 +4,7 @@
     :show-tabs="true"
     :sidebar-items="navigationItems"
     :sidebar-active="currentRoute"
-    :logo-text="'BIP应用架构管理'"
+    :logo-text="displayName"
     :is-help-active="helpOpen"
     @sidebar-select="handleNavigation"
     @logo-click="goHome"
@@ -54,6 +54,7 @@ import { useTabStore } from '@/stores/tabStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
 import { useMenuCache } from '@/composables/useMetaCache'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 import { generateDynamicRoutes } from '@/router/dynamicRoutes'
 import { resolveRoutePath } from '@/utils/routeTemplate'
 
@@ -63,6 +64,7 @@ const tabStore = useTabStore()
 const authStore = useAuthStore()
 const { accessibleMenus, loadMenuPermissions, reset: resetMenuPermissions } = useMenuPermissions()
 const menuCache = useMenuCache()
+const { displayName, loadInstanceInfo } = useInstanceInfo()
 
 const showAccountDialog = ref(false)
 const menuLoadError = ref(null)
@@ -249,6 +251,7 @@ async function refreshMenu() {
 }
 
 onMounted(async () => {
+  await loadInstanceInfo()
   await loadMenuWithCache()
   await generateDynamicRoutes(router)
   // [FIX P3 2026-06-30] 启动时如果 URL 携带 help 参数, 自动打开 drawer

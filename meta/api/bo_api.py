@@ -234,6 +234,43 @@ def get_schema_version():
     })
 
 
+#: 未配置实例名且 app 数不为 1 时的兜底展示名（与前端 composable 的默认值一致）
+DEFAULT_DISPLAY_NAME = 'BIP应用架构管理'
+
+
+@meta_v2_bp.route('/instance', methods=['GET'])
+def get_instance_info():
+    """本实例的展示信息 —— 左上角名称 / 登录页标题的数据源。
+
+    display_name 取值优先级：
+      1. 环境变量 `PLATFORM_DISPLAY_NAME`（部署层配置，实例名）—— source='env'
+      2. 恰好加载了 1 个 app → 该 app 的 `app.yaml` name —— source='app'
+      3. 其余（0 个 / ≥2 个 app）→ DEFAULT_DISPLAY_NAME —— source='default'
+
+    不加鉴权：登录页在拿到 token 之前就要用它。
+    """
+    from meta.core.app_registry import get_loaded_apps
+
+    apps = get_loaded_apps()
+    env_name = (os.environ.get('PLATFORM_DISPLAY_NAME') or '').strip()
+
+    if env_name:
+        display_name, source = env_name, 'env'
+    elif len(apps) == 1:
+        display_name, source = apps[0]['name'], 'app'
+    else:
+        display_name, source = DEFAULT_DISPLAY_NAME, 'default'
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'display_name': display_name,
+            'source': source,
+            'apps': [{'id': a['id'], 'name': a['name']} for a in apps],
+        }
+    })
+
+
 def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
     """[FIX 2026-06-09] 为 v2 BO 读取响应附加 change_history (含子对象/关联操作)
 

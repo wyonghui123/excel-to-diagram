@@ -12,7 +12,7 @@
             <path d="M23 12V15L16 19" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
           </svg>
         </div>
-        <h2>BIP应用架构管理</h2>
+        <h2>{{ displayName }}</h2>
         <p class="login-subtitle">请登录以继续</p>
       </div>
 
@@ -57,17 +57,23 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+const { displayName, loadInstanceInfo } = useInstanceInfo()
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
+
+onMounted(() => {
+  loadInstanceInfo()
+})
 
 function clearError() {
   authStore.error = ''
