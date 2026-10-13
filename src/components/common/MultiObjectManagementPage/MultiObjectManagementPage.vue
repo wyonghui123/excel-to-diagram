@@ -327,7 +327,21 @@ const globalToolbarRef = ref(null)
 const initialBoIds = ref([])
 const initialRelationCodes = ref([])
 const scopeTreeKey = ref(0)  // remount RelationScopeTree after returning from chart, restore selection
-const sidebarCollapsed = ref(false)
+
+// [FIX 2026-10-13 移动端] 窄屏默认折叠左侧树。
+// 起因: MasterDetailLayout 在 ≤768px 时把侧栏设为 max-height:40vh，
+// 844px 视口下左树吃掉 337px，右侧列表只剩 145px —— 工具栏+分页器刚好
+// 占满，20 张卡片可见 0 张。窄屏首屏本就该是「先看数据」，树是筛选
+// 入口而非主内容，故默认折叠让列表占满整屏。
+// 直接读 matchMedia 而不用 useBreakpoints: 那个 composable 在 onMounted
+// 才同步，首帧 sidebarCollapsed 已是 false 会导致 40vh 先渲染一帧再收起。
+// PC 端不受影响（>768px 不折叠）。
+const NARROW_BREAKPOINT = 768
+const sidebarCollapsed = ref(
+  typeof window !== 'undefined' &&
+  window.matchMedia &&
+  window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`).matches
+)
 
 // [A7 2026-07-30] 嵌入式图表视图 toggle 状态
 //   - viewMode: 'list' | 'chart'，切换 detail 区显示 MetaListPage 还是 detailContent slot

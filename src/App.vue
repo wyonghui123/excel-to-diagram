@@ -105,7 +105,10 @@ body {
 }
 
 #app {
+  /* [FIX 2026-10-12 移动端] 100dvh 表示"地址栏展开时"的真实视口高度，
+     避免手机浏览器地址栏收放时布局跳动；100vh 作为老浏览器回退。 */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -114,6 +117,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100vh;
+  height: 100dvh;
   background: var(--color-bg-secondary);
 }
 

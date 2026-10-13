@@ -260,6 +260,25 @@ html :root {
   }
 }
 
+/* [FIX 2026-10-12 移动端] 窄屏弹窗宽度兜底。
+   业务弹窗普遍用 width="600px" 这类硬编码（分散在 10+ 个组件，逐个改动
+   成本高且易漏），Element Plus 会把它写成内联 style，普通选择器盖不住，
+   故必须 !important。
+   仅在 ≤768px 生效：PC 端宽度行为完全不变。 */
+@media screen and (max-width: 768px) {
+  .el-dialog {
+    width: 92vw !important;
+    max-width: 92vw !important;
+  }
+
+  /* 抽屉同理：固定 px 宽在窄屏会顶满甚至溢出 */
+  .el-drawer.rtl,
+  .el-drawer.ltr {
+    width: 92vw !important;
+    max-width: 92vw !important;
+  }
+}
+
 .el-message-box {
   border-radius: 8px !important;
 }

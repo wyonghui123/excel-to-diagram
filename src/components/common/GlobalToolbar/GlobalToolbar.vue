@@ -89,7 +89,15 @@
       </el-tooltip>
     </div>
 
-    <el-dialog v-model="showSwitchDialog" title="切换产品版本" width="440px" :close-on-click-modal="false">
+    <!-- [FIX 2026-10-12 移动端] width 用 min(440px, 92vw) 而非固定 440px：
+     Element Plus 的 dialog width 直接写到内联 style，scoped CSS 无法覆盖，
+     必须在绑定值上做视口约束，否则窄屏下弹窗两侧溢出屏幕。 -->
+    <el-dialog
+      v-model="showSwitchDialog"
+      title="切换产品版本"
+      width="min(440px, 92vw)"
+      :close-on-click-modal="false"
+    >
       <div class="gt-switch-dialog">
         <div class="gt-switch-field">
           <label class="gt-switch-label">产品 <span class="gt-required">*</span></label>
@@ -475,5 +483,51 @@ defineExpose({
 .gt-switch-footer-right {
   display: flex;
   gap: 8px;
+}
+
+/* ==========================================================================
+   [2026-10-12 移动端适配] ≤768px
+   问题：工具栏 width 计算约 600px+（两个 140px 选择器 + 多个 32px 按钮 +
+         90px 图表按钮），且 height:40px 固定 + flex 无 wrap，
+         375px 屏上必然溢出两倍。
+   方案：允许换行并放开固定高度；选择器改为弹性宽度；
+         弹窗宽度补max-width 兜底（440px > 屏宽会溢出）。
+   ========================================================================== */
+@media screen and (max-width: 768px) {
+  .global-toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 40px;
+    gap: 8px;
+    padding: 8px var(--spacing-sm, 12px);
+  }
+
+  .gt-context {
+    flex-wrap: wrap;
+    gap: 8px;
+    /* 选择器组独占一行，避免与按钮组挤在一起换行成锯齿状 */
+    flex: 1 1 100%;
+  }
+
+  /* 固定 140px 在窄屏占比过高，改为弹性宽度并允许收缩 */
+  .gt-select {
+    width: auto;
+    flex: 1 1 96px;
+    min-width: 80px;
+  }
+
+  .gt-sep {
+    display: none;
+  }
+
+  /* 按钮组换行后贴左边，不再靠 justify-content:flex-end 右对齐 */
+  .gt-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .gt-switch-dialog {
+    max-width: 92vw;
+  }
 }
 </style>

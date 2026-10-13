@@ -404,3 +404,6 @@ logs/*.png
 
 # L2 monitor violations (auto-written, do not track)
 .agent-violations.json
+
+# 第三方工具二进制 (cloudflared 等, 仅本机用于手机访问内网服务, 不入仓)
+.tools/

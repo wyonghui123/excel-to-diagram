@@ -16,6 +16,39 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendPort = process.env.BACKEND_PORT || String(PORTS.backend)
 
+  // [v3.3] 动态代理: 支持多 Agent worktree 自验证
+  // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
+  // [FIX BUG-V031 2026-08-28] localhost → 127.0.0.1
+  //   原因: Node.js 24 默认把 `localhost` 解析为 IPv6 `::1`,
+  //         后端 waitress 只绑 IPv4, proxy 连 `::1:3010` 被拒后 vite 包装为 500
+  // [2026-10-12] 抽出为变量，供 server.proxy 与 preview.proxy 共用
+  const proxyConfig = {
+    '/api': {
+      target: `http://127.0.0.1:${backendPort}`,
+      changeOrigin: true,
+      ws: true,
+      // [FIX BUG-V029 2026-06-28] 30s→180s
+      //   原因: Excel 导入预检测对 1.34MB / 23839 行文件需 63.7s,
+      //         30s proxy 超时强制断连导致前端报 ERR_EMPTY_RESPONSE
+      //   验证: 直连 3010 63.7s 成功, 经 3004 proxy 30.0s 报 RemoteDisconnected
+      //   选值: 180s (3 min) 留 2-3x headroom, 仍能在挂死时及时终止
+      timeout: 180000,      // 代理请求超时 180s (大文件上传 / Excel 导入预检测)
+      proxyTimeout: 180000, // 后端响应超时 180s
+      configure: (proxy) => {
+        proxy.on('error', (err) => {
+          // 代理连接错误日志 (不阻塞,仅输出)
+          // eslint-disable-next-line no-console
+          console.error('[Vite Proxy] Connection error:', err.message)
+        })
+      }
+    },
+    '/socket.io': {
+      target: `http://127.0.0.1:${backendPort}`,
+      changeOrigin: true,
+      ws: true,
+    }
+  }
+
 return {
   plugins: [
     vue(),
@@ -44,6 +77,16 @@ return {
         manualChunks(id) {
           if (id.includes('node_modules')) {
             // Vue + EP + @vueuse 合并 (避免循环依赖: EP 依赖 @vueuse, @vueuse 依赖 vue)
+            // [REVERT 2026-10-12] 曾补'/@vue/'、'/@popperjs/'、'/@floating-ui/'、
+            //   '/async-validator/'、'/dayjs/' 以修复分包漏判(@vue/shared 等 Vue
+            //   核心模块原落入默认桶 vendor-mermaid, 导致首屏拖入图表库)。
+            //   实测该改动引发运行时回归: 页面启动即抛
+            //   "TypeError: this.clear is not a function", #app 渲染为空 ——
+            //   直连与隧道均复现, 与隧道无关。@vue/* 移桶改变了模块初始化
+            //   顺序, 破坏了某个基类/单例的绑定。首屏 gzip 实测无收益
+            //   (1978KB vs 修复前 1981KB), 故整体回滚。
+            // 教训: manualChunks 改动影响模块初始化顺序, 属高风险变更,
+            //   必须配E2E 冒烟验证, 不能只看构建产物与体积数字。
             if (id.includes('/vue/') || id.includes('/vue-router/') || id.includes('/pinia/') || id.includes('pinia-plugin-persistedstate') || id.includes('/element-plus/') || id.includes('@element-plus/') || id.includes('@vueuse/')) {
               return 'vendor-vue-ep'
             }
@@ -51,6 +94,12 @@ return {
             if (id.includes('/echarts/') || id.includes('/zrender/')) {
               return 'vendor-echarts'
             }
+            // [REVERT 2026-10-12] lodash-es/core-js 曾被单独成vendor-utils 桶或
+            //   归入 vendor-vue-ep, 目的是摘出 vendor-mermaid 默认桶。
+            //   实测: 单独成桶触发 Circular chunk(vendor-utils <-> vendor-vue-ep);
+            //   归 EP 桶则与上述 @vue/* 移桶一同引发 "this.clear is not a
+            //   function" 运行时回归。两者首屏 gzip 均无变化。故全部回滚,
+            //   保持默认桶原样。
             // Mermaid + 全部子依赖 + misc (mermaid 与 misc 有循环依赖, 合并)
             if (id.includes('/mermaid/') || id.includes('/@mermaid-js/') || id.includes('/d3-') || id.includes('/dagre') || id.includes('/elkjs/') || id.includes('/katex/') || id.includes('/web-worker/') || id.includes('/stylis/') || id.includes('/cytoscape')) {
               return 'vendor-mermaid'
@@ -79,6 +128,10 @@ return {
   },
   server: {
     host: true,
+    // 允许内网穿透隧道域名访问 (Vite 6 Host 白名单)
+    // 前导点 = 匹配该域及其所有子域；每次重连域名会变，故用通配
+    // .trycloudflare.com = cloudflared 免费版 quick tunnel
+    allowedHosts: ['.lhr.life', '.serveousercontent.com', '.trycloudflare.com'],
     // [v3.3] 动态端口: 支持多 Agent worktree 自验证
     // [P0 2026-09-05] 默认读 scripts/ports.json (3006), VITE_PORT 环境变量可覆盖
     port: parseInt(process.env.VITE_PORT || String(PORTS.frontend), 10),
@@ -97,7 +150,9 @@ return {
       // Vite 6.4.1 的 WS HMR 服务器在 Node.js 24.14.0 上挂死，
       // 导致浏览器控制台持续报错。改用 polling 后浏览器通过 HTTP 长轮询
       // 接收文件变化通知，功能完全正常。
-      protocol: 'ws',
+      // [2026-10-12] 修正为真正的 polling：HTTPS 隧道下 ws:// 会被浏览器
+      // 以 Mixed Content 拦截，导致页面卡在白屏（Vite 连不上 → main.js 未就绪）。
+      protocol: 'polling',
       overlay: true,
       timeout: 30000,
     },
@@ -136,37 +191,15 @@ return {
         '**/logs/**',
       ],
     },
-    proxy: {
-      // [v3.3] 动态代理: 支持多 Agent worktree 自验证
-      // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
-      // [FIX BUG-V031 2026-08-28] localhost → 127.0.0.1
-      //   原因: Node.js 24 默认把 `localhost` 解析为 IPv6 `::1`,
-      //         后端 waitress 只绑 IPv4, proxy 连 `::1:3010` 被拒后 vite 包装为 500
-      '/api': {
-        target: `http://127.0.0.1:${backendPort}`,
-        changeOrigin: true,
-        ws: true,
-        // [FIX BUG-V029 2026-06-28] 30s→180s
-        //   原因: Excel 导入预检测对 1.34MB / 23839 行文件需 63.7s,
-        //         30s proxy 超时强制断连导致前端报 ERR_EMPTY_RESPONSE
-        //   验证: 直连 3010 63.7s 成功, 经 3004 proxy 30.0s 报 RemoteDisconnected
-        //   选值: 180s (3 min) 留 2-3x headroom, 仍能在挂死时及时终止
-        timeout: 180000,      // 代理请求超时 180s (大文件上传 / Excel 导入预检测)
-        proxyTimeout: 180000, // 后端响应超时 180s
-        configure: (proxy) => {
-          proxy.on('error', (err) => {
-            // 代理连接错误日志 (不阻塞,仅输出)
-            // eslint-disable-next-line no-console
-            console.error('[Vite Proxy] Connection error:', err.message)
-          })
-        }
-      },
-      '/socket.io': {
-        target: `http://127.0.0.1:${backendPort}`,
-        changeOrigin: true,
-        ws: true,
-      }
-    }
+    proxy: proxyConfig,
+  },
+  // [2026-10-12] preview 复用同一份代理：生产构建产物无 dev server，
+  //   若不配 proxy，所有 /api 请求会打到 preview 自身(404)，页面必白屏。
+  preview: {
+    host: true,
+    port: parseInt(process.env.VITE_PREVIEW_PORT || '4173', 10),
+    allowedHosts: ['.lhr.life', '.serveousercontent.com', '.trycloudflare.com'],
+    proxy: proxyConfig,
   },
   css: {
     preprocessorOptions: {

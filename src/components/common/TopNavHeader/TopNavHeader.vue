@@ -175,6 +175,15 @@ function handleUserCommand(key) {
   justify-content: flex-end;
 }
 
+/* [FIX 2026-10-13 移动端] logo 文字在窄屏被 flex 压成竖排。
+   与 UserMenu.__name 同因(缺 nowrap，中文逐字断行)。窄屏只保留图标，
+   文字信息量低且汉堡菜单里已有入口。 */
+@media screen and (max-width: 768px) {
+  .app-header__logo-text {
+    display: none;
+  }
+}
+
 .app-header__notification-btn {
   border: none;
   background: transparent;

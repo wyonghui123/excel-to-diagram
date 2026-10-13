@@ -154,4 +154,38 @@ function handleSelect(tab) {
 .sub-nav-tab--active .sub-nav-tab__badge {
   background: var(--yonyou-orange-600, #ea580c);
 }
+
+/* ==========================================================================
+   [2026-10-12 移动端适配] ≤768px：二级标签横向滚动
+   问题：.sub-nav-tabs 为 flex 且 tab 有 white-space:nowrap，
+         无 overflow-x，标签数量多时直接溢出视口且无法触达。
+   方案：容器开横向滚动 + tab 禁止收缩（否则会被压扁变形）。
+        隐藏滚动条但保留滚动能力，避免双层滚动条干扰触摸。
+   ========================================================================== */
+@media screen and (max-width: 768px) {
+  .sub-nav-tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .sub-nav-tab {
+    /* 关键：默认 flex-shrink:1 会被压缩导致文字换行/截断 */
+    flex-shrink: 0;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  }
+
+  /* compact 模式嵌在父级 flex 中，自身也需允许滚动而非撑破父容器 */
+  .sub-nav-tabs--compact {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+}
 </style>

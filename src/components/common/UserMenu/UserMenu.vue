@@ -112,6 +112,10 @@ function handleCommand(key) {
 .user-menu__name {
   font-size: var(--el-font-size-base, 14px);
   color: var(--el-text-color-regular, #606266);
+  /* [FIX 2026-10-13 移动端] 缺 nowrap 时，窄屏下 flex 收缩到十几px，
+     中文会逐字断行竖排成一行(实测 18x70 的盒子显示「系统管理员」)。
+     nowrap 保证用户名恒为单行；真放不下时由 .user-menu__trigger 省略。 */
+  white-space: nowrap;
 }
 
 .user-menu__arrow {

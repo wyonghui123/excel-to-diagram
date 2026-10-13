@@ -44,6 +44,11 @@
 
       <!-- ========== MetaListPage 模式（支持 inline-edit, batch 等高级功能） ========== -->
       <div v-if="useMetaListMode" class="ocs-metalist-wrapper">
+        <!-- [FIX 2026-10-13] display-mode 必须显式声明为 embedded，不能依赖默认
+             值。MetaListPage 在窄屏下只对 page 模式卡片化，而本组件依赖
+             row-dblclick(下方 L68) 打开详情；一旦被卡片化，双击入口即失效，
+             且卡片视图下没有替代入口 → 手机上无法进入详情。
+             语义上它也属于「详情页内的一块纵向切片」，与 embedded 一致。 -->
         <MetaListPage
           ref="metaListRef"
           :object-type="childObjectType"
@@ -52,6 +57,7 @@
           :initial-filters="computedInitialFilters"
           :enable-detail="enableDetail"
           :enable-auto-crud="enableAutoCrud"
+          display-mode="embedded"
           :row-mutability="effectiveRowMutability"
           :initial-filters-view-only="true"
           @create="handleMetaListCreate"

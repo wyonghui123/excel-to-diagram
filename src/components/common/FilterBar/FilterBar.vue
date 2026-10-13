@@ -375,6 +375,37 @@ onBeforeUnmount(() => {
   min-width: 180px;
 }
 
+/* ==========================================================================
+   [2026-10-12 移动端适配] ≤768px
+   问题：date-range 类字段 min-width:360px，而375px 手机扣掉容器 padding 后
+         可用宽度不足 360px，字段永远溢出一行。
+   方案：窄屏解除下限并让字段占满整行，让日期组件内部自行收缩。
+        FilterBar 本身已有 flex-wrap，这里只需解除硬性min-width。
+   ========================================================================== */
+@media screen and (max-width: 768px) {
+  .filter-bar__body {
+    gap: 12px;
+  }
+
+  .filter-bar__fields {
+    gap: 12px;
+  }
+
+  .filter-bar__field {
+    /* 占满整行，避免两个字段挤在半行宽度里难以点击 */
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .filter-bar__field--date-range,
+  .filter-bar__field--datetime-range,
+  .filter-bar__field--datetime {
+    /* 关键：覆盖 360px / 180px 硬下限 */
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 .filter-bar__label {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);

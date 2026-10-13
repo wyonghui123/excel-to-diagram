@@ -4,7 +4,12 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- [FIX 2026-10-12 移动端] 移除 maximum-scale=1.0 / user-scalable=no。
+         禁用缩放是无障碍反模式(WCAG 1.4.4 Resize Text), 手机端表格列多时
+         用户无法放大查看。viewport-fit=cover 保留, 供安全区补偿使用。
+         iOS 10+ 与 Android 浏览器均已忽略 user-scalable=no, 实际本就不生效,
+         删除只是让意图与行为一致。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />

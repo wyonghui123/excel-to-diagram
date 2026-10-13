@@ -903,7 +903,12 @@ function handleJumpPage() {
 .mt-table-wrap {
   background: var(--color-bg-primary);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* [FIX 2026-10-12 移动端] overflow-x:auto 而非 hidden：
+     原hidden 会把宽表格直接裁掉，数据不可见。overlay 方案在
+     Firefox 不支持，故窄屏下用 overflow-x:auto + 保留圆角
+     （圆角裁切对表格观感影响远小于数据被裁）。 */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mt-highlight {

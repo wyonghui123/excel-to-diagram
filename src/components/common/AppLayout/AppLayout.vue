@@ -1,5 +1,10 @@
 <template>
-  <AppShell :show-sidebar="showSidebar" :show-tabs="showTabs" :sidebar-width="sidebarVisible ? sidebarWidth : 0">
+  <AppShell
+    :show-sidebar="showSidebar"
+    :show-tabs="showTabs"
+    :sidebar-width="sidebarVisible ? sidebarWidth : 0"
+    @scrim-click="closeSidebar"
+  >
     <template #header>
       <TopNavHeader
         :logo-url="logoUrl"
@@ -141,6 +146,13 @@ const activeTabId = computed({
   set: (val) => tabStore.switchTab(val)
 })
 
+// [2026-10-12 移动端] 统一的关闭入口：遮罩点击 / 点外部 / 选中菜单后都走这里
+function closeSidebar() {
+  if (!sidebarVisible.value) return
+  sidebarVisible.value = false
+  emit('sidebar-collapse', false)
+}
+
 function handleOutsideClick(e) {
   if (!sidebarVisible.value) return
 
@@ -148,8 +160,7 @@ function handleOutsideClick(e) {
   const sidebar = e.target.closest('.app-shell__sidebar')
 
   if (!toggleBtn && !sidebar) {
-    sidebarVisible.value = false
-    emit('sidebar-collapse', false)
+    closeSidebar()
   }
 }
 
@@ -183,10 +194,9 @@ function handleSidebarSelect(key) {
     router.push(item.to)
   }
 
-  if (sidebarVisible.value) {
-    sidebarVisible.value = false
-    emit('sidebar-collapse', false)
-  }
+  // [2026-10-12 移动端] 移动端抽屉模式下，选中菜单后自动收起，
+  // 否则菜单会一直遮挡内容区
+  closeSidebar()
 }
 
 function findItemByKey(items, key) {

@@ -93,6 +93,14 @@ export function transformColumns(yamlColumns, options = {}) {
       column_priority: col.column_priority || null,
       position: col.position,
 
+      // [FIX 2026-10-12 移动端] 透传 importance。
+      // 后端 view-config 的 columns 带 importance(high/medium/low, 实测
+      // name=high / code=medium / created_at=low), 原先 transformColumns
+      // 没有把它复制到输出对象, 导致前端拿不到列权重(MetaListPage 的窄屏
+      // 列降级因此完全失效)。inferColumnPriority 虽然读 importance,
+      // 但生产代码从未调用, 只有单测在用, 不能依赖。
+      importance: col.importance || null,
+
       // [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
       //   例: column prop=category_label, api_param_key=category_type → 请求 ?category_type=xxx
       api_param_key: col.api_param_key || col.apiParamKey || ''

@@ -77,9 +77,15 @@
       </el-collapse-transition>
     </div>
 
+    <!-- [FIX 2026-10-13] display-mode 必须显式声明为 embedded，不能依赖默认值。
+         MetaListPage 默认 'page'，窄屏下会被卡片化，而本组件依赖 row-click /
+         row-dblclick 打开详情，并且用 cell-id / cell-object_id 等 slot 自定义
+         单元格 —— 卡片渲染不走 cell slot，这些自定义渲染会整体失效。
+         本文件 L496 的既有注释也早已声明「MetaListPage 是嵌入模式」。 -->
     <MetaListPage
       ref="metaListRef"
       object-type="audit_log"
+      display-mode="embedded"
       :options="{
         autoLoad: true,
         pageSize: 50,
