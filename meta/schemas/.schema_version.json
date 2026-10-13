@@ -178,11 +178,6 @@
       ],
       "table": "audit_logs"
     },
-    "": {
-      "hash": "1d516a0f1d9c45f8625df48553c09ddd",
-      "fields": [],
-      "table": ""
-    },
     "business_object": {
       "hash": "12ecddaecfd9bab6fee95febdf7724dd",
       "fields": [
@@ -244,7 +239,7 @@
       "table": "calc_details"
     },
     "calc_procedure": {
-      "hash": "a5f81ae2b7e42f88939e771cf72fadaf",
+      "hash": "d2a465954e0db40e6cb217c421f60b62",
       "fields": [
         "created_by",
         "updated_by",
@@ -254,13 +249,33 @@
         "procedure_type",
         "result_semantic",
         "currency",
-        "steps",
         "subtotal_keys",
         "description",
         "created_at",
         "updated_at"
       ],
       "table": "calc_procedures"
+    },
+    "calc_procedure_step": {
+      "hash": "72891a2037c291cf409d88e53a22d03c",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "calc_procedure_id",
+        "seq",
+        "element_type",
+        "rate_type_id",
+        "condition",
+        "params",
+        "rolling",
+        "base_step",
+        "subtotal_key",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "calc_procedure_steps"
     },
     "calc_result": {
       "hash": "5ad9d635ee9045ebb7e281d5d95b7a7d",
@@ -636,7 +651,7 @@
       "table": "item_attribute_values"
     },
     "item_group": {
-      "hash": "8303fda1ca34cc4bf4cf9761f8306aca",
+      "hash": "777712dc1fb765fbbb0fe1109b6c31e8",
       "fields": [
         "updated_at",
         "created_by",
@@ -644,6 +659,7 @@
         "id",
         "code",
         "name",
+        "status",
         "parent_id",
         "description",
         "created_at"
@@ -767,7 +783,7 @@
       "table": "menu_permissions"
     },
     "org": {
-      "hash": "56e6d2e0ae35de1cb92e1017ce15b76e",
+      "hash": "c7b3e419589676f4a51cb2e7d8e7c8cc",
       "fields": [
         "updated_at",
         "created_by",
@@ -777,6 +793,7 @@
         "code",
         "org_type",
         "org_scope",
+        "status",
         "parent_id",
         "manager_id",
         "description",
@@ -810,50 +827,72 @@
       "table": "org_members"
     },
     "party": {
-      "hash": "17433115775963a21bce9a47cecdedee",
+      "hash": "963f9f755c4d963c1f81916e4c4c98f2",
       "fields": [
         "id",
         "code",
         "name",
         "party_type",
         "source",
-        "org_id"
+        "org_id",
+        "status"
       ],
       "table": "parties"
     },
     "party_archive": {
-      "hash": "077d304d28348ff95a30322e362c8062",
+      "hash": "f4c9b1c1a76cf76e68598a6deccadd67",
       "fields": [
         "id",
         "code",
         "name",
         "party_type",
         "source",
-        "org_id"
+        "org_id",
+        "status"
       ],
       "table": "party_archive"
     },
+    "party_group": {
+      "hash": "1b2e6e00917fa4ecaced335e9aae1923",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "role_scope",
+        "status",
+        "parent_id",
+        "description",
+        "created_at"
+      ],
+      "table": "party_groups"
+    },
     "party_internal": {
-      "hash": "b441da6f64755d7232567d87439c1900",
+      "hash": "94f1355731d9629c25a80119f746c318",
       "fields": [
         "id",
         "code",
         "name",
         "party_type",
         "source",
-        "org_id"
+        "org_id",
+        "status"
       ],
       "table": "party_internal"
     },
     "party_relation": {
-      "hash": "d95dc6a5ed37c1d5f2a2c9bf2b8a40fb",
+      "hash": "d1b09112646fb2bf9dc44cddf68cb48c",
       "fields": [
         "id",
         "party1_id",
         "party2_id",
         "role",
         "internal_mark",
-        "le_org_id"
+        "le_org_id",
+        "group_id",
+        "status"
       ],
       "table": "party_relations"
     },
@@ -1513,19 +1552,7 @@
         "child_count"
       ],
       "table": "versions"
-    },
-    "new_object": {
-      "hash": "ac788cafdec31f72375398f1f47ae73a",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "description",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "new_objects"
     }
   },
-  "last_sync": "2026-10-07T15:25:45.864736"
+  "last_sync": "2026-10-13T23:59:26.701760"
 }
