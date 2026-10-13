@@ -203,7 +203,131 @@
 
     <slot name="table">
       <div class="table-section">
-        <div class="table-wrapper">
+        <!-- [2026-10-13 移动端] 窄屏改渲染卡片，见 cardColumns 处的说明。
+             与 el-table 互斥：卡片模式不含排序表头，故窄屏失去列排序能力
+             （排序入口仍在表头筛选与工具栏中）。 -->
+        <div v-if="isMobile" v-loading="loading" class="meta-card-list">
+          <div v-if="data.length === 0" class="list-empty-state">
+            <el-icon :size="32" class="list-empty-icon"><FolderOpened /></el-icon>
+            <div class="list-empty-title">{{ props.emptyText }}</div>
+            <div v-if="props.emptyHint" class="list-empty-hint">{{ props.emptyHint }}</div>
+          </div>
+
+          <article
+            v-for="row in data"
+            :key="row[props.rowKey || 'id']"
+            class="meta-card"
+            :class="{ 'is-selected': isCardSelected(row) }"
+          >
+            <header class="meta-card__head">
+              <el-checkbox
+                v-if="selectionConfig.enabled"
+                class="meta-card__check"
+                :model-value="isCardSelected(row)"
+                @click.stop
+                @change="(v) => toggleCardSelection(row, v)"
+              />
+              <!-- [FIX 2026-10-13] 详情入口收敛到标题，参照 Ant Design 数据展示
+                   规范：「By default, click on the title to navigate to the
+                   details」。原先整卡绑 row-click，用户点卡片空白处也会跳详情，
+                   误触成本高；且双击在触屏上不是可靠手势（可能与缩放冲突），
+                   故双击也一并移除。标题后加箭头明示可点。 -->
+              <component
+                :is="isBusinessKeyColumn(cardPrimaryColumn) ? 'button' : 'span'"
+                class="meta-card__title"
+                :class="{ 'meta-card__title--link': isBusinessKeyColumn(cardPrimaryColumn) }"
+                :type="isBusinessKeyColumn(cardPrimaryColumn) ? 'button' : undefined"
+                @click="isBusinessKeyColumn(cardPrimaryColumn) && handleBusinessKeyClick(row)"
+              >
+                <span class="meta-card__title-text">{{ cardPrimary(row) ?? '-' }}</span>
+                <el-icon
+                  v-if="isBusinessKeyColumn(cardPrimaryColumn)"
+                  class="meta-card__title-arrow"
+                  :size="12"
+                ><ArrowRight /></el-icon>
+              </component>
+              <el-dropdown
+                v-if="!inlineEditConfig?.enabled && hasRowActions"
+                trigger="click"
+                :teleported="false"
+                popper-class="row-action-popper"
+                class="meta-card__menu"
+                @click.stop
+                @command="(key) => handleDropdownCommand(key, row)"
+              >
+                <el-button size="small" link class="row-action-trigger">
+                  <el-icon :size="16"><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu class="row-action-menu">
+                    <el-dropdown-item
+                      v-for="action in getRowActions(row)"
+                      :key="action.key"
+                      :command="action.key"
+                      :disabled="action.disabled"
+                      :divided="action.divided"
+                    >
+                      <el-icon :size="14">
+                        <component :is="getActionIcon(action)" />
+                      </el-icon>
+                      {{ action.label }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </header>
+
+            <dl class="meta-card__body">
+              <div
+                v-for="col in cardColumns"
+                :key="col.prop"
+                class="meta-card__row"
+                @dblclick.stop
+              >
+                <dt class="meta-card__label">{{ col.label }}</dt>
+                <dd class="meta-card__value">
+                  <!-- [FIX 2026-10-13] 卡片值优先走 cell slot，与表格的
+                       自定义渲染保持一致。这里刻意不加 v-if：Vue 的具名
+                       插槽没有「未提供」的运行时判定，一旦用 slots 判断
+                       是否提供并据此跳过，该列的标签行会整行消失，
+                       变成只有标签没有值。靠 slot 的 fallback 兜底即可。 -->
+                  <slot
+                    :name="`cell-${col.prop}`"
+                    :row="row"
+                    :column="col"
+                    :value="getCellDisplayValue(row, col)"
+                  >
+                    <FkLinkField
+                      v-if="isFkColumn(col)"
+                      :value="getFkIdValue(row, col)"
+                      :display-value="getFkDisplayValue(row, col)"
+                      :target-object-type="getFkTargetObjectType(col)"
+                      :detail-mode="getFkDetailMode(col)"
+                      :link-disabled="isEmbeddedOrDialogMode"
+                      @navigate="handleFkNavigate"
+                    />
+                    <el-tag
+                      v-else-if="isBadgeColumn(col)"
+                      :type="getBadgeTagType(row, col) || 'primary'"
+                      size="small"
+                      effect="light"
+                    >{{ getBadgeDisplayValue(row, col) }}</el-tag>
+                    <span
+                      v-else-if="col.format === 'datetime' || col.type === 'datetime'"
+                    >{{ formatDate(getCellDisplayValue(row, col)) }}</span>
+                    <code
+                      v-else-if="col.format === 'code' && getCellDisplayValue(row, col)"
+                      class="cell-code-text"
+                    >{{ getCellDisplayValue(row, col) }}</code>
+                    <span v-else>{{ getCellDisplayValue(row, col) ?? '-' }}</span>
+                  </slot>
+                </dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div v-else class="table-wrapper">
           <el-table
             ref="tableRef"
             :key="tableKey"
@@ -230,7 +354,7 @@
             />
 
             <el-table-column
-              v-for="column in visibleColumns"
+              v-for="column in tableColumns"
               :key="column.prop"
               :prop="column.prop"
               :label="column.label"
@@ -265,7 +389,8 @@
                       </el-icon>
                     </span>
                   </el-tooltip>
-                  <!-- [FIX 2026-06-10] 自定义列头补回排序指示器 (Element Plus 自定义 #header 后内置 sort icon 丢失) -->
+                  <!-- [FIX 2026-06-10] 自定义列头补回排序指示器：Element Plus 自定义 header
+     插槽后内置 sort icon 丢失 -->
                   <span
                     v-if="column.sortable"
                     class="sort-indicator"
@@ -441,13 +566,14 @@
     />
 
     <slot name="pagination">
-      <div class="pagination-wrapper">
+      <div v-if="showPagination" class="pagination-wrapper">
         <el-pagination
           v-model:current-page="pagination.current"
           v-model:page-size="pagination.pageSize"
           :page-sizes="paginationConfig.pageSizes"
           :total="pagination.total"
-          :layout="paginationConfig.layout"
+          :layout="effectivePaginationLayout"
+          :pager-count="effectivePagerCount"
           :background="paginationConfig.background"
           @size-change="handlePageSizeChange"
           @current-change="handlePageChange"
@@ -511,9 +637,10 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort, FolderOpened } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, ArrowRight, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort, FolderOpened } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
+import { useBreakpoints } from '@/composables/useBreakpoints'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import TableHeaderFilter from '@/components/common/TableHeaderFilter/TableHeaderFilter.vue'
@@ -820,6 +947,117 @@ if (props.objectType === 'user') {
 function onTableSelectionChange(rows) {
   handleSelectionChange(rows)
   emit('selection-change', rows)
+}
+
+/* ==========================================================================
+   [2026-10-12 移动端] 表格列降级
+   窄屏下宽表格必须横向滚动才能读，390px 屏幕一次只能看到 1-2 列。
+   后端 view-config 的 columns 带importance 字段，实测取值 high/medium/low
+   (如 name=high、code=medium、created_at=low)，据此分级:
+     - high→ 始终保留
+     - medium / low → 窄屏隐藏
+   无importance 的列按 low 处理(保守隐藏)，若隐藏后一列不剩则放弃降级。
+   不改动 PC 端行为：isMobile 为 false 时原样返回。
+   ========================================================================== */
+const { isMobile } = useBreakpoints()
+
+const tableColumns = computed(() => {
+  if (!isMobile.value) return visibleColumns.value
+  const keep = visibleColumns.value.filter(c => c.importance === 'high')
+  // 无high 列时不降级，否则表格会被清空
+  return keep.length > 0 && keep.length < visibleColumns.value.length
+    ? keep
+    : visibleColumns.value
+})
+
+/* ==========================================================================
+   [2026-10-13 移动端] 卡片列表
+   为什么不用横向滚动：实测 el-table 在 390px 下 body-wrapper 的
+   scrollWidth 等于 clientWidth(可滑距离 0)，而内层<table>实际宽 1865px，
+   Element Plus 用 overflow:hidden 一刀切掉 → 11 列只能看到 2 列，且真机
+   拖拽 scrollLeft 恒为 0。给 .el-table 加 min-width 只能让表头可滚、
+   表体仍锁死(两者是独立 wrapper)，会出现表头与表体错位。故窄屏改渲染
+   卡片，彻底绕开列宽问题。
+   卡片结构: importance=high 的列作主标题，其余列作键值行。列集合仍取
+   visibleColumns 全量（不是 tableColumns），否则卡片只剩一个标题、
+   丢掉所有细节字段。
+
+   [FIX 2026-10-13 复用方回归] 只在 displayMode==='page' 时卡片化。
+   MetaListPage 有 3 类复用方，窄屏下只有整页列表该换成卡片:
+     - page     独立页面(GenericObjectList / TaskCenter 等)→ 卡片
+     - embedded 详情页内的关联区(ObjectPage/AssociationSection)→ 保持表格，
+                它是宽内容区里的一块纵向切片，卡片会把每行撑得很高，
+                且详情页本身在窄屏已是单列堆叠，再套卡片是双重放大
+     - dialog   SearchHelpDialog 内嵌选择列表 → 保持表格，
+                该弹窗自身已限宽到 92vw，且强依赖 el-table 的
+                row-click/row-dblclick 与多选交互
+   ========================================================================== */
+const useCardView = computed(() => isMobile.value && props.displayMode === 'page')
+
+/* ==========================================================================
+   [2026-10-13 移动端] 分页器布局
+   之前用 CSS 隐藏 .el-pagination__total/__sizes/__jump 来解决窄屏溢出，
+   代价是把「共 N 条」「每页条数」全藏了——用户只剩一个孤零零的页码，
+   既不知道总量也不知道自己在第几页(截图实测: 只剩 < 1 >)。
+   Element Plus 的 layout 是声明式的，窄屏直接换一份更短的布局即可，
+   不需要 display:none 副作用。
+   保留 total(唯一的信息来源) + prev/pager/next，
+   去掉 sizes(128px) 与 jumper(114px) —— 这两个是可选项，缺失不影响功能。
+   ========================================================================== */
+const effectivePaginationLayout = computed(() =>
+  useCardView.value ? 'total, prev, pager, next' : paginationConfig.value.layout
+)
+
+// 页码按钮个数: Element Plus 默认 7，窄屏放不下，收到 5
+const effectivePagerCount = computed(() => (useCardView.value ? 5 : 7))
+
+/* [FIX 2026-10-13] 内容不足一页时不显示分页器。
+   Ant Design 数据展示规范：「when the content of the page is less than one
+   page, the pager will not be displayed」。窄屏一屏仅能放 3 张卡片，分页条
+   白占约 64px 高度。只在卡片视图生效，PC 端分页器是重要的规模信息
+   （用户据此判断数据量），不应隐藏。
+   注意：useMetaList 返回的 pagination 是 reactive 对象（模板里直接用
+   pagination.current），不是 ref，写 pagination.value.total 会取到
+   undefined 并让整个列表区渲染中断。 */
+const showPagination = computed(() =>
+  useCardView.value ? pagination.total > pagination.pageSize : true
+)
+
+const cardPrimaryColumn = computed(() => {
+  // 主标题优先取 businessKey(语义最准)，退化到 importance=high，再退化到第一列
+  const highs = visibleColumns.value.filter(c => c.importance === 'high')
+  return visibleColumns.value.find(c => isBusinessKeyColumn(c)) ||
+    highs[0] ||
+    visibleColumns.value[0] || null
+})
+
+const cardColumns = computed(() => {
+  const primary = cardPrimaryColumn.value
+  if (!useCardView.value || !primary) return []
+  return visibleColumns.value.filter(c => c.prop !== primary.prop)
+})
+
+function cardPrimary(row) {
+  const primary = cardPrimaryColumn.value
+  return primary ? getCellDisplayValue(row, primary) : null
+}
+
+/* 卡片上的行选择：el-table 的 selection 列在卡片模式下不存在，
+   需手动维护并回写给 useMetaList 的 handleSelectionChange，
+   否则批量操作拿不到选中行。 */
+function isCardSelected(row) {
+  const key = props.rowKey || 'id'
+  return selectedIds.value.has(row[key])
+}
+
+function toggleCardSelection(row, checked) {
+  const key = props.rowKey || 'id'
+  const next = data.value.filter(r => {
+    if (r[key] === row[key]) return checked
+    return selectedIds.value.has(r[key])
+  })
+  handleSelectionChange(next)
+  emit('selection-change', next)
 }
 
 function handleRowClick(row, column, event) {
@@ -1725,9 +1963,13 @@ watch(() => props.externalEditing, (val) => {
 //     原代码用 row.id === row.value（巧合相等）能跑；但 rowKey 改为 'value' 后应保持一致
 watch([data, columns], () => {
   nextTick(() => {
-    if (tableRef.value) {
-      tableRef.value.doLayout()
-    }
+    // [FIX 2026-10-13] 卡片模式下 el-table 不渲染，tableRef 为 null。
+    // 原代码只对 doLayout 做了 null 判断，下面的 toggleRowSelection
+    // 是裸调用 —— 一旦卡片模式下有选中行且 data/columns 变化就会抛
+    // TypeError。此处统一 early return：卡片的选择态由 isCardSelected
+    // 直接读 selectedIds 渲染，不需要回写 el-table。
+    if (!tableRef.value) return
+    tableRef.value.doLayout()
     if (selectedIds.value.size === 0) return
     const rowKey = config.rowKey || 'id'
     data.value.forEach(row => {
@@ -1981,6 +2223,56 @@ defineExpose({
   flex-shrink: 0;
 }
 
+/* ==========================================================================
+   [2026-10-12 移动端适配] ≤768px
+   注意：.meta-list-page 的 overflow:hidden 与 .toolbar 的 flex-wrap:nowrap
+   是2026-06-09 为修PC 端工具栏漂移回归刻意保留的
+   (docs/lessons-learned/layout/toolbar-drift-recurrence.md)，
+   故本段只在窄屏断点内覆盖，不动 PC 行为。
+   问题：窄屏下 overflow:hidden 让宽表格被直接裁掉，数据不可见；
+         工具栏 nowrap 使按钮只能横滑，出货率低。
+   [FIX 2026-10-13] 本段原先写在 .toolbar 基础样式之前，同优先级下
+   被后面的 nowrap / flex:1 / flex-shrink:0 全部覆盖，实测 wrap 仍为
+   nowrap、按钮溢出屏幕。故移到基础样式之后定义。
+   ========================================================================== */
+@media screen and (max-width: 768px) {
+  .meta-list-page {
+    /* 表格需要横向滚动才能读，裁切比滚动更糟 */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .toolbar {
+    /* 窄屏允许换行，避免只能横滑发现隐藏按钮 */
+    flex-wrap: wrap;
+    height: auto;
+  }
+
+  /* 换行后两侧各占整行，按钮自然铺开。
+     flex 必须用简写整体覆盖：基础样式里 .toolbar-left 是 flex:1、
+     .toolbar-right 是 flex-shrink:0，只改单个子属性会被残留项
+     拉成 0 宽或禁收缩，故此处统一用 flex 简写重置。 */
+  .toolbar-left,
+  .toolbar-right {
+    flex: 1 1 100%;
+    /* 容器内部也要换行：搜索框 280px + 4 个按钮 ≈ 565px，
+       390px 屏放不下，nowrap 会挤成横滑 */
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* [FIX 2026-10-13] 分页器溢出到屏幕外。
+     实测 374px 容器里分页器自身宽 561px，父级 nowrap + 居中导致整块
+     溢出后 x=-195。改为窄屏换用更短的 layout(见 effectivePaginationLayout)，
+     这里只需允许换行并居中，不再需要隐藏子块 —— 隐藏会把「共 N 条」
+     也一起藏掉，用户就完全不知道总量了。 */
+  .pagination-wrapper {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+}
+
 .filter-toggle-icon {
   margin-left: 2px;
   transition: transform 0.25s ease;
@@ -2052,6 +2344,134 @@ defineExpose({
 .table-wrapper {
   flex: 1;
   min-height: 0;
+}
+
+/* ==========================================================================
+   [2026-10-13 移动端] 卡片列表
+   替代 el-table 在窄屏的渲染。键值行用 dl/dt/dd 语义(标题-值对)，
+   label 固定 88px 左对齐，value 占据剩余宽度并允许换行——长文本不再被
+   裁切或叠字。整卡可点区域留给标题与行菜单，不给整卡绑点击，避免与
+   勾选框、行内链接冲突。
+   ========================================================================== */
+.meta-card-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.meta-card {
+  background: var(--color-bg-container);
+  border: 1px solid var(--color-border-light, #ebeef5);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.meta-card.is-selected {
+  border-color: var(--color-primary, #409eff);
+  background: var(--color-primary-light-9, #ecf5ff);
+}
+
+.meta-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.meta-card__check {
+  flex-shrink: 0;
+}
+
+.meta-card__title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  /* 长名称换行显示而非裁切 */
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+/* [FIX 2026-10-13] 标题作为唯一详情入口，必须一眼可辨。
+   用 button 元素是为了天然具备键盘可达性与 focus 样式，
+   故需重置 UA 默认的边框/背景/字体对齐。 */
+.meta-card__title--link {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-primary, #409eff);
+  text-align: left;
+  cursor: pointer;
+}
+
+.meta-card__title-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* 箭头跟文字同色但更淡，暗示"可进入"而非独立控件 */
+.meta-card__title-arrow {
+  flex-shrink: 0;
+  margin-top: 4px;
+  opacity: 0.55;
+}
+
+.meta-card__title--link:hover .meta-card__title-arrow {
+  opacity: 1;
+}
+
+.meta-card__title--link:focus-visible {
+  outline: 2px solid var(--color-primary, #409eff);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.meta-card__menu {
+  flex-shrink: 0;
+}
+
+.meta-card__body {
+  margin: var(--spacing-sm) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+}
+
+.meta-card__label {
+  flex-shrink: 0;
+  width: 88px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: 20px;
+}
+
+.meta-card__value {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 20px;
+  /* 关键修复：表格模式下长内容会溢出并叠字，卡片里允许正常换行 */
+  word-break: break-word;
+  white-space: normal;
 }
 
 /* [MOMP 2026-08-30] 空态提示：未选择范围时给出明确指示 */
