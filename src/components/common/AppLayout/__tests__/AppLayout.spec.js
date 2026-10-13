@@ -61,8 +61,17 @@ const stubs = {
   },
   TopNavHeader: {
     name: 'TopNavHeader',
-    template: '<div class="top-nav-header-stub" />',
-    props: ['logoUrl', 'logoAlt', 'logoText', 'breadcrumbs'],
+    // [FIX 2026-10-13 移动端] 侧栏开关上移进头部后，stub 需承载该契约：
+    // 渲染汉堡按钮并透传 menu-toggle，否则 AppLayout 的 sidebar toggle 用例全部失效。
+    template: `
+      <div class="top-nav-header-stub">
+        <button v-if="showMenuButton" class="sidebar-toggle-btn" type="button"
+                :class="{ 'is-active': menuOpen }"
+                @click.stop="$emit('menu-toggle')">menu</button>
+      </div>
+    `,
+    props: ['logoUrl', 'logoAlt', 'logoText', 'breadcrumbs', 'showMenuButton', 'menuOpen'],
+    emits: ['menu-toggle'],
   },
   AppTabs: {
     name: 'AppTabs',

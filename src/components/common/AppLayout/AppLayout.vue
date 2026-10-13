@@ -12,6 +12,8 @@
         :logo-text="logoText"
         :breadcrumbs="breadcrumbs"
         :is-help-active="isHelpActive"
+        :show-menu-button="showSidebar"
+        :menu-open="sidebarVisible"
         @logo-click="handleLogoClick"
         @notification-click="$emit('notification-click')"
         @user-command="$emit('user-command', $event)"
@@ -19,22 +21,12 @@
         @favorites-click="$emit('favorites-click')"
         @recent-click="$emit('recent-click')"
         @help-click="handleHelpClick"
+        @menu-toggle="toggleSidebar"
       />
     </template>
 
     <template v-if="showTabs" #tabs>
       <div class="tabs-container" ref="tabsContainerRef">
-        <button
-          class="sidebar-toggle-btn"
-          :class="{ 'is-active': sidebarVisible }"
-          @click.stop="toggleSidebar"
-          type="button"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path v-if="!sidebarVisible" d="M3 4H13M3 8H13M3 12H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <path v-else d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
         <AppTabs
           :tabs="tabs"
           :model-value="activeTabId"
@@ -265,32 +257,5 @@ function handleTabClose(tabId) {
   align-items: center;
   flex: 1;
   height: 100%;
-}
-
-.sidebar-toggle-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  margin-right: var(--spacing-sm, 8px);
-  border: none;
-  background: transparent;
-  color: var(--el-text-color-secondary, #909399);
-  cursor: pointer;
-  transition: all 0.2s;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.sidebar-toggle-btn:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
-  color: var(--yonyou-orange-600, #ea580c);
-}
-
-.sidebar-toggle-btn.is-active {
-  background: var(--yonyou-orange-50, #fff7ed);
-  color: var(--yonyou-orange-600, #ea580c);
 }
 </style>
