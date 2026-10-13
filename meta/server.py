@@ -570,19 +570,25 @@ def create_app(db_path=None):
         name='background', priority=100, max_workers=2, timeout=600, enabled=True
     ))
 
-    # [P1 2026-10-13] 运维作业从遗留任务调度器解耦。
+    # [P1 2026-10-13] cron 作业与遗留任务调度器解耦（替换路径第 7 / 1 项）。
     #
-    # 背景: 遗留 TaskScheduler 上挂了 9 个 handler，但只有 platform_tick 属任务域
-    #       （A5 平台心跳）。其余 8 个是纯运维作业（DB 维护 / 审计运维 / 导入队列），
-    #       与任务模型无关，只是借调度器跑 cron，却被迫依赖 scheduled_tasks 等表。
-    #       这是替换遗留任务体系的隐性阻塞 —— 删任务域表会连带停掉 DB 维护。
+    # 背景: 遗留 TaskScheduler 原本挂 9 个 handler，且全部只是「借调度器跑 cron」：
+    #         - 8 个运维作业（DB 维护 / 审计运维 / 导入队列）—— 与任务模型无关，
+    #           却被迫依赖 scheduled_tasks / task_queues / task_executions 表；
+    #         - 1 个 platform_tick —— A5 平台心跳（派工 / 回收 / SLA 扫描 / 对账）。
+    #       「用任务体系背运维债」是替换遗留任务体系的隐性阻塞：删任务域表会
+    #       连带停掉 DB 维护与审计归档。
     #
-    # 处置: 8 个运维作业改挂独立 MaintenanceScheduler（调度配置内嵌代码，不落库）。
-    #       handler 实例在此处创建一次，两边复用同一实例（不重复 new）。
-    #       platform_tick 仍挂遗留调度器 —— 它写 task_events / task_slas 等任务域表，
-    #       且 task.v1 尚无独立调度进程，待其就位后再迁。
+    # 处置: 两类作业各挂独立的进程内调度器（调度配置内嵌代码，不落库）：
+    #         - 8 个运维作业 → MaintenanceScheduler（第 7 项）
+    #         - platform_tick  → PlatformScheduler（第 1 项，任务域）
+    #       handler 实例在此处创建一次。迁完后遗留 TaskScheduler 不再承载任何
+    #       cron 作业，仅保留队列与手工触发基础设施。
+    #       注：scheduled_tasks 的历史行清理属替换路径第 3 项，待新调度器稳定后
+    #       单独做；迁移期遗留调度器对未注册 handler 静默跳过（见 task_scheduler.py）。
     #
-    # 切换开关: MAINTENANCE_SCHEDULER_ENABLED=0 可临时退回旧路径（回滚用）。
+    # 切换开关: MAINTENANCE_SCHEDULER_ENABLED=0 可临时把两类作业全部退回遗留
+    #           调度器（回滚用）。
     _maintenance_handlers = {
         'db_analyze': DBAnalyzeHandler(),
         'db_vacuum': DBVacuumHandler(),
@@ -594,13 +600,15 @@ def create_app(db_path=None):
         'import_queue_processor': ImportQueueHandler(),
     }
 
-    _use_maintenance = os.environ.get(
+    _use_inproc = os.environ.get(
         'MAINTENANCE_SCHEDULER_ENABLED', '1') not in ('0', 'false', 'False')
 
-    task_scheduler.register_handler('platform_tick', PlatformTickHandler())
+    _platform_tick_handler = PlatformTickHandler()
 
-    if _use_maintenance:
+    if _use_inproc:
         from meta.core.maintenance_scheduler import MaintenanceScheduler
+        from meta.core.platform_scheduler import PlatformScheduler
+
         maintenance_scheduler = MaintenanceScheduler(
             data_source=data_source,
             config={'check_interval': 60},
@@ -609,15 +617,26 @@ def create_app(db_path=None):
             maintenance_scheduler.register_handler(_code, _handler)
         maintenance_scheduler.start()
         atexit.register(maintenance_scheduler.stop)
+
+        platform_scheduler = PlatformScheduler(
+            data_source=data_source,
+            config={'check_interval': 60},
+        )
+        platform_scheduler.register_handler('platform_tick', _platform_tick_handler)
+        platform_scheduler.start()
+        atexit.register(platform_scheduler.stop)
+
         logging.getLogger(__name__).info(
-            "[P1] MaintenanceScheduler started with %d ops jobs (decoupled from task domain)",
+            "[P1] in-process schedulers started: %d ops jobs + 1 platform_tick "
+            "(decoupled from legacy TaskScheduler)",
             len(_maintenance_handlers))
     else:
-        # 回滚路径: 运维作业退回遗留调度器
+        # 回滚路径: 两类作业全部退回遗留调度器
         for _code, _handler in _maintenance_handlers.items():
             task_scheduler.register_handler(_code, _handler)
+        task_scheduler.register_handler('platform_tick', _platform_tick_handler)
         logging.getLogger(__name__).warning(
-            "[P1] MaintenanceScheduler DISABLED — ops jobs fall back to legacy TaskScheduler")
+            "[P1] in-process schedulers DISABLED — all cron jobs fall back to legacy TaskScheduler")
 
     task_scheduler.start()
     set_task_scheduler(task_scheduler)

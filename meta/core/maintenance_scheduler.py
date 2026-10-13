@@ -20,10 +20,13 @@
   **不读写任何任务域表**。执行契约与原调度器完全一致（同一批 handler、同一套
   context 形状、cron 表达式照搬），故行为等价、运维 SLA 不变。
 
-与遗留调度器的分工（迁移期并存）:
-  - 运维 8 个 → 本调度器（已解耦）
-  - platform_tick → 仍挂遗留 TaskScheduler（它要写task_events / task_slas 等
-    任务域表，且 A5 尚未给 task.v1 建独立调度进程；task.v1 调度器就位后再迁）
+与遗留调度器的分工:
+  - 运维 8 个 → 本调度器
+  - platform_tick → `PlatformScheduler`（`meta/core/platform_scheduler.py`，替换路径第 1 项）
+
+  两类作业都迁出后，遗留 TaskScheduler 不再承载任何 cron 作业，仅保留队列与
+  手工触发基础设施；`scheduled_tasks` 的历史行清理属替换路径第 3 项，待新调度器
+  稳定运行后单独做。
 
 处置边界:
   - 本模块**不新增** handler，只复用既有 handler 实例（同一批类，不复制逻辑）。
@@ -77,9 +80,9 @@ DEFAULT_JOBS: List[Dict] = [
 ]
 
 #: 任务域专属作业 —— **不由本调度器管辖**。
-#: platform_tick 跑的是 A5 平台心跳（派工 / 认领超时回收 / SLA 升级），它写
-#: task_events / task_slas 等任务域表，且 task.v1 尚无独立调度进程，
-#: 故迁移期仍挂遗留 TaskScheduler。
+#: platform_tick（A5 平台心跳：派工 / 认领超时回收 / SLA 升级 / 对账）归
+#: `PlatformScheduler`（`meta/core/platform_scheduler.py`）。
+#: 本常量保留作「分工边界」的自检锚点：运维集合不得混入它。
 TASK_DOMAIN_CODES: frozenset = frozenset({'platform_tick'})
 
 OPS_JOB_CODES: frozenset = frozenset(j['code'] for j in DEFAULT_JOBS)

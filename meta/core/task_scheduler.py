@@ -77,6 +77,10 @@ class TaskScheduler:
         self._tasks: Dict[int, dict] = {}
         self._handlers: Dict[str, TaskHandler] = {}
         self._interval = self.config.get('check_interval', 60)
+        # [P1 2026-10-13] 迁移期：作业行仍在 scheduled_tasks，但 handler 可能已迁到
+        # 进程内调度器（MaintenanceScheduler / PlatformScheduler）。记录已告警过的
+        # 作业码，避免每分钟刷同一行 —— 见 _execute_task 的 handler 缺失分支。
+        self._unregistered_warned: set = set()
     
     def register_handler(self, name: str, handler: TaskHandler):
         self._handlers[name] = handler
@@ -193,7 +197,15 @@ class TaskScheduler:
         handler_name = task.get('handler')
         
         if handler_name not in self._handlers:
-            logger.error("Handler not found: %s", handler_name)
+            # [P1 2026-10-13] 迁移期：cron 作业已迁到进程内调度器
+            # （MaintenanceScheduler / PlatformScheduler），遗留表行仍在，但其 handler
+            # 不再在本调度器注册。静默跳过即可，不该每分钟刷 error 噪声。
+            # 注意：本判断在建执行记录之前，故不会留下 status='running' 的孤儿记录。
+            if handler_name not in self._unregistered_warned:
+                self._unregistered_warned.add(handler_name)
+                logger.info(
+                    "Scheduled task '%s' skipped: handler not registered "
+                    "(migrated to in-process scheduler)", handler_name)
             return
         
         execution_id = self._create_execution_record(task)
