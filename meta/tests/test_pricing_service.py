@@ -31,7 +31,7 @@ from meta.tests.factories._raw_sql_bridge import (  # noqa: E402
 #   注意此处填**对象 id**（单数），不是表名（复数）——registry.get() 按 id 取。
 TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
           "exclusion_group", "rate_table", "rate_record",
-          "calc_procedure", "calc_result", "calc_detail",
+          "calc_procedure", "calc_procedure_step", "calc_result", "calc_detail",
           "allocation_rule", "allocation_result"]
 
 
@@ -58,12 +58,26 @@ def ds():
     conn.close()
 
 
+def _set_steps(ds, steps):
+    """【方案① 2026-10-13】过程步骤已由 calc_procedures.steps json 列拆为子表
+    calc_procedure_steps（每步一行）。本助手用于测试改写：先清空该过程步骤，
+    再按给定列表逐条插入。
+
+    steps 元素须含 seq / element_type（均 NOT NULL），可选 params/subtotal_key/...
+    """
+    delete(ds, "calc_procedure_steps", calc_procedure_id=1)
+    now = "2026-10-06 00:00:00"
+    for s in steps:
+        insert(ds, "calc_procedure_steps", calc_procedure_id=1,
+               created_at=now, updated_at=now, **s)
+
+
 def _seed(ds):
     """种入一份最小可算配置：键(客户) + 序列(1 槽) + 价目表(approved) + 过程 + 3 条费率。
 
-    [两个序列分别配置 · 实施纠正]
-      lookup_sequences.steps  = 查找槽位 [{seq, key_schema_id}]
-      calc_procedures.steps   = 计算步骤 [{seq, element_type, ...}]
+    [两处步骤分别配置 · 实施纠正]
+      lookup_sequences.steps   = 查找槽位 [{seq, key_schema_id}]（仍是 json 列）
+      calc_procedure_steps 行  = 计算步骤（方案① 2026-10-13 由 json 列拆为子表）
     """
     now = "2026-10-06 00:00:00"
     insert(ds, "key_schemas", id=1, code='KEY_CUST', name='客户键',
@@ -81,12 +95,13 @@ def _seed(ds):
     # 过程：先 formula 取查表命中金额，再 round 产出展示值
     insert(ds, "calc_procedures", id=1, code='PROC_STD', name='标准过程',
            procedure_type='pricing', result_semantic='price', currency='CNY',
-           steps='[{"seq":1,"element_type":"formula",'
-                 '"params":{"expr":"lookup_amount"},'
-                 '"subtotal_key":"s1"},'
-                 '{"seq":2,"element_type":"round",'
-                 '"params":{"mode":"round","digits":2}}]',
            subtotal_keys='["s1"]', created_at=now, updated_at=now)
+    _set_steps(ds, [
+        {"seq": 1, "element_type": "formula",
+         "params": '{"expr":"lookup_amount"}', "subtotal_key": "s1"},
+        {"seq": 2, "element_type": "round",
+         "params": '{"mode":"round","digits":2}'},
+    ])
     # 三条候选：priority 1/2/3
     for rid, prio, rate in ((1, 1, 100.0), (2, 2, 200.0), (3, 3, 300.0)):
         insert(ds, "rate_records", code=f"RC_{rid}", id=rid, rate_table_id=1,
@@ -391,9 +406,8 @@ class TestWriteBack:
         self._mk_doc(ds, "so_doc7", fields=(("id", "integer"),
                                             ("unit_price", "float")))
         # 用一个直接给 amount 的过程：base=4，公式产出 400 -> rate=100
-        update(ds, "calc_procedures", {"code": 'PROC_STD'},
-               steps='[{"seq":1,"element_type":"formula",'
-                     '"params":{"expr":"base * 100"}}]')
+        _set_steps(ds, [{"seq": 1, "element_type": "formula",
+                         "params": '{"expr":"base * 100"}'}])
         _price(ds, document_type="so_doc7", document_id=1,
                document_line_id=3, level="line", base=4.0,
                sequence_code=None)
@@ -475,15 +489,14 @@ class TestErrorHandling:
 
     def test_empty_steps_raises(self, ds):
         _seed(ds)
-        update(ds, "calc_procedures", {"code": 'PROC_STD'}, steps='[]')
+        _set_steps(ds, [])   # 清空步骤 → 触发"未定义步骤"
         with pytest.raises(PricingError, match="未定义步骤"):
             _price(ds)
 
     def test_unregistered_operator_raises(self, ds):
         """C5：element_type 未注册 → 报错，不静默跳过"""
         _seed(ds)
-        update(ds, "calc_procedures", {"code": 'PROC_STD'},
-               steps='[{"seq":1,"element_type":"no_such_op"}]')
+        _set_steps(ds, [{"seq": 1, "element_type": "no_such_op"}])
         with pytest.raises(CalculationError, match="未注册的 element_type"):
             _price(ds)
 
@@ -561,9 +574,8 @@ class TestFR009阶梯链路:
         当金额。要验证 `费率 × 数量 == 金额` 的等价，过程须显式乘基数。
         """
         _seed(ds)
-        update(ds, "calc_procedures", {"code": 'PROC_STD'},
-               steps='[{"seq":1,"element_type":"formula",'
-                     '"params":{"expr":"lookup_amount * base"}}]')
+        _set_steps(ds, [{"seq": 1, "element_type": "formula",
+                         "params": '{"expr":"lookup_amount * base"}'}])
         delete(ds, "rate_records", id=[2, 3])
         # 分档记录的 rate/value 是**占位 0**：真实费率完全由命中的档位决定
         update(ds, "rate_records", {"id": 1}, scale=self._TIERS,
@@ -649,9 +661,8 @@ class TestRateQty端到端:
         当金额；要验证「每单位费率 × 数量 == 金额」，过程须显式乘基数。
         """
         _seed(ds)
-        update(ds, "calc_procedures", {"code": 'PROC_STD'},
-               steps='[{"seq":1,"element_type":"formula",'
-                     '"params":{"expr":"rate_1 * base"}}]')
+        _set_steps(ds, [{"seq": 1, "element_type": "formula",
+                         "params": '{"expr":"rate_1 * base"}'}])
         delete(ds, "rate_records", id=[2, 3])
         update(ds, "rate_records", {"id": 1}, rate=rate, rate_unit="PC",
                rate_qty=10, **extra)

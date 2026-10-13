@@ -87,6 +87,22 @@ class PricingError(Exception):
     """
 
 
+def _to_bool_or_none(v: Any) -> Optional[bool]:
+    """布尔列归一：sqlite 读回 0/1/None（或文本）统一成真正的 bool 或 None。
+
+    【为何必须归一】执行器判"跳过本步"用 `condition is False`（**严格身份**），
+    而 sqlite 的 0 不是 Python 的 False —— 不归一会让「显式 false 的条件行」
+    静默不跳过。拆表前 json.loads 给出的本就是真正的 False，此处保持等价。
+    """
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    return str(v).strip().lower() in ("1", "true", "yes", "y")
+
+
 def _loads(v: Any, default):
     """json 列可能是 str（sqlite 存文本）或已解析对象。"""
     if v is None or v == "":
@@ -123,9 +139,38 @@ class PricingService:
         )
 
     def get_procedure(self, code: str) -> Optional[Dict[str, Any]]:
-        """取定价过程定义（含 steps）。"""
+        """取定价过程定义（步骤在子表，见 get_procedure_steps）。"""
         rows = self._query("SELECT * FROM calc_procedures WHERE code = ?", (code,))
         return rows[0] if rows else None
+
+    def get_procedure_steps(self, procedure_id: int) -> List[Dict[str, Any]]:
+        """按 seq 升序装配过程的计算步骤 —— 方案① 后 steps 已由 json 列拆为子表。
+
+        返回结构即 `calc_procedure_executor.execute(steps=...)` 的入参：
+        [{seq, element_type, rate_type_id, condition, params, rolling,
+          base_step, subtotal_key}, ...]
+
+        【布尔口径】见 `_to_bool_or_none` —— condition 必须归一成真正的
+        bool/None，才能与执行器的 `is False` 判断对齐。
+        """
+        rows = self._query(
+            "SELECT * FROM calc_procedure_steps"
+            " WHERE calc_procedure_id = ? ORDER BY seq ASC",
+            (procedure_id,),
+        )
+        return [
+            {
+                "seq": r.get("seq"),
+                "element_type": r.get("element_type"),
+                "rate_type_id": r.get("rate_type_id"),
+                "condition": _to_bool_or_none(r.get("condition")),
+                "params": _loads(r.get("params"), {}),
+                "rolling": bool(r.get("rolling")),
+                "base_step": r.get("base_step"),
+                "subtotal_key": r.get("subtotal_key"),
+            }
+            for r in rows
+        ]
 
     def get_sequence(self, code: str) -> Optional[Dict[str, Any]]:
         rows = self._query("SELECT * FROM lookup_sequences WHERE code = ?", (code,))
@@ -309,14 +354,15 @@ class PricingService:
                 f"价目表 {rate_table_id} 不存在或未发布（仅 approved 参与取价）"
             )
 
-        steps = _loads(proc.get("steps"), [])
+        steps = self.get_procedure_steps(proc["id"])
         if not steps:
             raise PricingError(f"定价过程未定义步骤：{process_code}")
 
         # ---- 阶段一：查表（FR-004 / T2-1）----
         # 【实施纠正 2026-10-06】查找序列是**独立配置**，与计算步骤不同源：
-        #   lookup_sequence.steps[] = 查找槽位 {seq, key_schema_id}
-        #   calc_procedure.steps[]  = 计算步骤 {seq, element_type, ...}
+        #   lookup_sequence.steps[]      = 查找槽位 {seq, key_schema_id}
+        #   calc_procedure_step 行        = 计算步骤 {seq, element_type, ...}
+        #     （方案① 2026-10-13 前是本表的 steps json 列）
         # 早期实现把计算步骤直接喂给 lookup，报 KeyError: key_schema_id。
         lk = None
         lk_traces: List[Dict[str, Any]] = []

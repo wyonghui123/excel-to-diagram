@@ -96,7 +96,7 @@ fields:
     type: integer
     db_column: seq
     required: true
-    description: 步骤在过程中的次序（与 calc_procedure.steps[].seq 对应）
+    description: 步骤在过程中的次序（与 calc_procedure_step.seq 对应）
     semantics:
       meaning: 步骤序号；与 result_id 组成业务键
     ui:
@@ -226,7 +226,7 @@ fields:
     required: false
     nullable: true
     max_length: 50
-    description: 本步的小计键（对应 calc_procedure.steps[].subtotal_key）
+    description: 本步的小计键（对应 calc_procedure_step.subtotal_key）
     semantics:
       meaning: 本步的小计键
     ui:

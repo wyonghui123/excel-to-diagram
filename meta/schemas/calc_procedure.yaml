@@ -18,6 +18,11 @@
 #
 # 【C-T0-13】yaml 是唯一 SSOT；本表仅声明，MetaObject 只承载建表所需子集。
 #
+# 【步骤已拆出 · 方案① 2026-10-13】
+#   计算步骤原为本表的 `steps` json 列（有序数组），现已拆为**独立子对象**
+#   `calc_procedure_step`（每步一行，引用回挂本过程，见 calc_procedure_step.yaml）。
+#   本表只保留 `subtotal_keys`（小计键汇总声明）与下方 associations.steps 接线。
+#
 # 【零主数据依赖 · C-T0-6】无主数据外键引用。
 
 id: calc_procedure
@@ -202,27 +207,11 @@ fields:
     ui:
       widget: input
 
-  # 【C5】element_type 受控枚举，取值须落在 calc_procedure_executor.OPERATORS
-  - id: steps
-    name: 计算步骤
-    type: json
-    db_column: steps
-    required: true
-    description: >
-      有序步骤数组，元素形如
-      {"seq":1, "element_type":"list_price", "rate_type_id":1,
-        "condition":null, "params":{"rate_source":"rate_record"},
-        "rolling":false, "base_step":null, "subtotal_key":"s1_base"}。
-      【C5】element_type 必带，取值须在执行器算子注册表内，未注册即报错。
-      【步骤级控制项】rolling / base_step / subtotal_key / condition 写在
-      步骤对象顶层（不是 params 内）——见 T2-2 实施纠正记录。
-      【FR-006 互斥】rolling=true 与 base_step 同时给会报错。
-    semantics:
-      meaning: 计算步骤序列；执行器按 seq 升序逐步更新中间结果
-      display_detail: true
-    ui:
-      widget: json
-      editable: false
+  # 【方案① 2026-10-13 拆出】计算步骤已从本表的 steps json 列拆为独立子对象
+  #   `calc_procedure_step` —— 每步一行、可索引、可逐行增删改，见
+  #   calc_procedure_step.yaml 与下方 associations.steps。
+  #   读写路径：pricing_service.get_procedure_steps() 按 seq 升序装配成
+  #   list[dict] 喂给 calc_procedure_executor.execute()（执行器签名不变）。
 
   - id: subtotal_keys
     name: 小计键
@@ -231,7 +220,7 @@ fields:
     required: false
     nullable: true
     description: >
-      需要留存小计的步骤键名数组（须是 steps[].subtotal_key 的子集）。
+      需要留存小计的步骤键名数组（须是 calc_procedure_step.subtotal_key 的子集）。
       供报表与后续步骤引用（对标 SAP KZWI1..6）。
     semantics:
       meaning: 需留存小计的步骤键；执行器只在这些键上记小计
@@ -281,13 +270,53 @@ indexes:
 
 relations: []
 
+associations:
+  # 【方案① 2026-10-13】计算步骤子表 —— 过程详情页内联维护「有序步骤」。
+  #   动机: 步骤是过程的核心配置（"这个过程由哪些带类型的步骤组成"），
+  #     拆出后由 association 子表承载，配置人员在同一页即可增删改步骤，
+  #     不再受 json 列只读 popover 的限制。
+  #   载体: calc_procedure_step.calc_procedure_id（字段级 required）。
+  #   排序: 子表按 seq 展示（引擎也按 seq 升序执行），故 seq 是语义字段。
+  steps:
+    name: steps
+    label: 计算步骤
+    plural_label: 计算步骤列表
+    target_type: calc_procedure_step
+    type: one_to_many
+    source_key: id
+    target_key: calc_procedure_id
+    description: 本定价过程的有序计算步骤（执行器按 seq 升序执行）
+    display:
+      label: 计算步骤
+      plural_label: 计算步骤
+      target_display_field: element_type
+      columns:
+        - id: seq
+          label: 序号
+          width: 80
+        - id: element_type
+          label: 元素类型
+          width: 130
+        - id: rate_type_id
+          label: 费率类型
+          width: 110
+        - id: rolling
+          label: 滚动
+          width: 80
+        - id: base_step
+          label: 基步骤
+          width: 120
+        - id: subtotal_key
+          label: 小计键
+          width: 110
+
 ui_view_config:
   showChangeHistory: true
   list:
     # [PRICE-UI 2026-10-13] drawer → page: 定价过程详情需承载「计算步骤」子表
-    #   (steps 是整个引擎的核心配置, 见 L206-225 的 json 列 —— 它 editable: false,
-    #    独立页才有空间放可视化编辑器; 编辑器本体是独立待办, 本次只切形态)。
-    #   路由由既有 /detail/:objectType/:id 承接, 无需新增前端路由。
+    #   (步骤是整个引擎的核心配置, 方案① 已由 json 列拆为 calc_procedure_step,
+    #    见上方 associations.steps 与 calc_procedure_step.yaml)。
+    #   独立页才有空间放有序步骤子表; 路由由既有 /detail/:objectType/:id 承接。
     detail_mode: page
     title: 定价过程管理
     description: 可配置的有序计算序列
@@ -347,7 +376,8 @@ ui_view_config:
           - fields: [currency]
       - title: 计算定义
         columns:
-          - fields: [steps]
+          # 【方案① 2026-10-13】steps 已拆为子对象（见 associations.steps），
+          #   表单不再含该字段；步骤在详情页的步骤子表中增删改。
           - fields: [subtotal_keys]
       - title: 其他信息
         columns:
@@ -370,7 +400,8 @@ ui_view_config:
         label: 计算定义
         type: fields
         fields:
-          - steps
+          # 【方案① 2026-10-13】steps 已拆为子对象 —— 步骤子表
+          #   （associations.steps）由详情页自动追加为独立 tab，此处不再列字段。
           - subtotal_keys
       - id: other
         label: 其他信息

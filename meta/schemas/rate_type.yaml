@@ -9,7 +9,7 @@
 #   轴② rate_source（率载体）: rate_record / external_quote / formula
 #   轴③ result_semantic 落在 calc_procedure 上（见 calc_procedure）
 #   轴① 计算基来源（base_level / base_source / base_step / rolling）落在
-#        calc_procedure.steps[].params 上。
+#        calc_procedure_step.params 上。
 #
 # 【v1.6 收窄】本表 **承接** 由 key_schema 迁入的两项:
 #   display_scale + numeric_field —— 量级换算属"怎么算"，不属"按什么匹配"

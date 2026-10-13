@@ -29,11 +29,13 @@ import meta.services.auth_middleware as auth_mw  # noqa: E402
 
 from meta.core.models import registry  # noqa: E402
 from meta.core.schema_generator import SchemaGenerator  # noqa: E402
-from meta.tests.factories._raw_sql_bridge import insert, update  # noqa: E402
+from meta.tests.factories._raw_sql_bridge import (  # noqa: E402
+    delete, insert, update,
+)
 
 TABLES = ["factor_catalog", "key_schema", "lookup_sequence", "rate_type",
           "exclusion_group", "rate_table", "rate_record",
-          "calc_procedure", "calc_result", "calc_detail"]
+          "calc_procedure", "calc_procedure_step", "calc_result", "calc_detail"]
 
 AUTH = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
 
@@ -77,6 +79,17 @@ def ds():
     conn.close()
 
 
+def _set_steps(ds, steps):
+    """【方案① 2026-10-13】过程步骤已由 calc_procedures.steps json 列拆为子表
+    calc_procedure_steps（每步一行）。测试改写：先清空该过程步骤，再逐条插入。
+    """
+    delete(ds, "calc_procedure_steps", calc_procedure_id=1)
+    now = "2026-10-06 00:00:00"
+    for s in steps:
+        insert(ds, "calc_procedure_steps", calc_procedure_id=1,
+               created_at=now, updated_at=now, **s)
+
+
 def _seed(ds):
     """最小可算配置：客户键 + 单槽序列 + 已发布价目表 + 过程 + 3 条候选。"""
     now = "2026-10-06 00:00:00"
@@ -94,11 +107,13 @@ def _seed(ds):
            status='approved', created_at=now, updated_at=now)
     insert(ds, "calc_procedures", id=1, code='PROC_STD', name='标准过程',
            procedure_type='pricing', result_semantic='price', currency='CNY',
-           steps='[{"seq":1,"element_type":"formula",'
-                 '"params":{"expr":"lookup_amount"},"subtotal_key":"s1"},'
-                 '{"seq":2,"element_type":"round",'
-                 '"params":{"mode":"round","digits":2}}]',
            subtotal_keys='["s1"]', created_at=now, updated_at=now)
+    _set_steps(ds, [
+        {"seq": 1, "element_type": "formula",
+         "params": '{"expr":"lookup_amount"}', "subtotal_key": "s1"},
+        {"seq": 2, "element_type": "round",
+         "params": '{"mode":"round","digits":2}'},
+    ])
     for rid, prio, rate in ((1, 1, 100.0), (2, 2, 200.0), (3, 3, 300.0)):
         insert(ds, "rate_records", code=f"RC_{rid}", id=rid, rate_table_id=1,
                key_schema_id=1, keys='{"customer":1001}', rate_type_id=1,
@@ -244,8 +259,7 @@ class TestCalculateContract:
     def test_unknown_operator_is_422_calculation_error(self, client, ds):
         """配置本身矛盾（未注册算子）→ 422，与参数错(400)区分开"""
         _seed(ds)
-        update(ds, "calc_procedures", {"id": 1},
-               steps='[{"seq":1,"element_type":"no_such_op"}]')
+        _set_steps(ds, [{"seq": 1, "element_type": "no_such_op"}])
         resp = client.post("/api/v1/pricing/calculate", json=_calc_body(), headers=AUTH)
         assert resp.status_code == 422
         payload = resp.get_json()

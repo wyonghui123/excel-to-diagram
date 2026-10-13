@@ -1,0 +1,310 @@
+# 定价过程步骤（Calculation Procedure Step）— 定价元模型 T1-1a
+# 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
+#       §9.3.1 A 表 / FR-005 / FR-006 / C5 / C-T0-8
+# 定位: calc_procedure 的一条**有序计算步骤** —— "这个过程由哪些带类型的步骤组成"
+#       的结构化载体；亦为 meta/core/calc_procedure_executor.py 的**输入装配源**。
+#       对标 SAP V/08 条件行；Oracle Pricing Algorithm 的算法步骤行。
+#
+# 【方案① · 2026-10-13 由 JSON 列拆出】
+#   本对象原为 calc_procedure.steps 的一个 json 列（有序数组，元素形如
+#   {seq, element_type, rate_type_id, condition, params, rolling, base_step, subtotal_key}）。
+#   json 列不可索引、无外键、前端只能渲染只读 popover（editable: false），
+#   无法逐行编辑/增删 —— 故拆为独立子对象：**每步一行**，引用回挂父过程。
+#   读写路径：pricing_service 从本表按 seq 升序装配 list[dict] 喂给执行器
+#   （执行器签名 `execute(steps, base, initial_state)` 不变，纯函数性质保持）。
+#   拆出时父表 / 本表均 0 行 ⇒ **零数据迁移**。
+#
+# 【C5 硬约束 · 步骤须带类型】
+#   element_type 必带，取值须落在 calc_procedure_executor.OPERATORS 注册表内。
+#   本表把 element_type 做成**受控枚举**（提前暴露 / 供前端下拉），
+#   但**运行时仍以注册表为准**：未注册类型执行期直接报错，不静默跳过。
+#
+# 【步骤级控制项 · 顶层字段】
+#   rolling / base_step / subtotal_key / condition 写在**步骤对象顶层**
+#   （不是 params 内的键）—— 执行器从顶层读，见 T2-2 实施纠正记录。
+#   【FR-006 互斥】rolling=true 与 base_step 同时给会报错。
+#
+# 【零主数据依赖 · C-T0-6】rate_type_id 为可选引用（不建外键约束）。
+
+id: calc_procedure_step
+name: 定价过程步骤
+table_name: calc_procedure_steps
+description: 定价过程步骤 —— calc_procedure 的一条有序计算步骤
+display_name_field: element_type
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价过程的单条计算步骤
+  category: system_entity
+  # 步骤在**同一过程内**按 seq 唯一（过程的步骤序号）
+  business_key: [calc_procedure_id, seq]
+  display_name_field: element_type
+  aliases:
+    - 计算步骤
+    - 过程步骤
+    - calculation step
+    - pricing step
+
+deletion_policy:
+  # 从属于 calc_procedure：父过程删则步骤跟随（由业务层级联调用）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - calc_procedure_id
+      - seq
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - calc_procedure_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: calc_procedure_id
+    name: 所属过程
+    type: integer
+    db_column: calc_procedure_id
+    required: true
+    description: 所属定价过程 ID（calc_procedures.id）
+    semantics:
+      meaning: 所属过程行 ID；与 seq 组成业务键
+    ui:
+      widget: reference
+
+  - id: seq
+    name: 步骤序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 步骤在过程中的次序；执行器按 seq 升序逐步执行
+    semantics:
+      meaning: 步骤序号；与 calc_procedure_id 组成业务键
+    ui:
+      widget: number
+
+  # 【C5】element_type 受控枚举 —— 取值须落在执行器算子注册表内
+  - id: element_type
+    name: 元素类型
+    type: string
+    db_column: element_type
+    required: true
+    max_length: 50
+    description: 计算元素类型（对应 calc_procedure_executor.OPERATORS 注册表 key）
+    enum_values:
+      - value: list_price
+        label: 取价
+        color: primary
+        description: 直接用给定费率 × 基数
+      - value: tier
+        label: 阶梯
+        color: info
+        description: 按内联档位（total 整单取档 / incremental 逐档累进）定率算额
+      - value: attribute
+        label: 属性
+        color: info
+        description: 按基数比例取属性费率
+      - value: formula
+        label: 公式
+        color: warning
+        description: 白名单变量四则表达式（不用 eval）
+      - value: quality_premium
+        label: 质量溢价
+        color: warning
+        description: 质量等级对应的加价额
+      - value: manual
+        label: 手工
+        color: default
+        description: 人工录入金额
+      - value: round
+        label: 取整
+        color: success
+        description: 对当前累计值取整（只读，不改金额）
+      - value: aggregate
+        label: 聚合
+        color: success
+        description: 对已有中间结果做 sum/avg/min/max（只读）
+      - value: derived
+        label: 派生
+        color: success
+        description: 由既有结果派生（只读）
+      - value: track
+        label: 追踪
+        color: success
+        description: 记录中间值供回放（只读）
+    semantics:
+      meaning: 计算元素类型（C5：步骤必带类型）
+      filterable: true
+      filter_type: enum
+      filter_label: 元素类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: rate_type_id
+    name: 费率类型
+    type: integer
+    db_column: rate_type_id
+    required: false
+    nullable: true
+    description: 本步用到的费率类型 ID（rate_types.id）。可选；空 = 本步不绑定费率类型
+    semantics:
+      meaning: 本步的费率类型引用（可选）
+    ui:
+      widget: reference
+
+  - id: condition
+    name: 执行条件
+    type: boolean
+    db_column: condition
+    required: false
+    nullable: true
+    description: >
+      步骤执行条件。**显式为 false 时跳过本步**（执行器记 skip_reason=condition_false）；
+      留空 / true 均执行。对标 SAP 条件行的条件开关。
+    semantics:
+      meaning: 步骤是否执行（false = 跳过）
+    ui:
+      widget: switch
+
+  - id: params
+    name: 算子参数
+    type: json
+    db_column: params
+    required: false
+    nullable: true
+    description: >
+      传给算子的业务参数对象，如 {"rate_source":"rate_record"} /
+      {"mode":"round","digits":2} / {"expr":"lookup_amount"}。
+      **控制项（rolling / base_step / subtotal_key / condition）不写在这里**，走顶层。
+    semantics:
+      meaning: 算子业务参数字典
+    ui:
+      widget: json
+
+  - id: rolling
+    name: 滚动累加
+    type: boolean
+    db_column: rolling
+    required: true
+    default: false
+    description: >
+      true = 滚动覆盖（把当前值直接覆盖为累计净额，对标 Oracle Running Net Price
+      单一累加器）；false = 累加。**【FR-006 互斥】与 base_step 不可共存。**
+    semantics:
+      meaning: 是否为滚动步骤（覆盖而非累加）
+    ui:
+      widget: switch
+
+  - id: base_step
+    name: 基步骤
+    type: string
+    db_column: base_step
+    required: false
+    nullable: true
+    max_length: 50
+    description: 本步计算基数取自哪一前序步骤（步骤键）。为空 = 用全局计算基。与 rolling 互斥
+    semantics:
+      meaning: 计算基来源步骤（与 rolling=true 互斥）
+    ui:
+      widget: input
+
+  - id: subtotal_key
+    name: 小计键
+    type: string
+    db_column: subtotal_key
+    required: false
+    nullable: true
+    max_length: 50
+    description: 本步留存小计的键名（须是 calc_procedure.subtotal_keys 的元素）
+    semantics:
+      meaning: 本步的小计键
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 步骤业务说明（回放/维护时的人类可读注解）
+    semantics:
+      meaning: 步骤说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 【主路径】按过程取全部步骤（执行器装配 / 详情页子表都按此查询）
+  - fields: [calc_procedure_id, seq]
+    name: idx_calc_procedure_step_proc_seq
+  - fields: [element_type]
+    name: idx_calc_procedure_step_element
+
+relations: []
+
+ui_view_config:
+  # 步骤是**过程详情页内联编辑**的从属数据，不单列顶级菜单（避免导航噪音）
+  skip_auto_menu: true
+
+category_config:
+  create_permission: calc_procedure_step:create
+  update_permission: calc_procedure_step:update
+  delete_permission: calc_procedure_step:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  # 本表无 code 字段（从属行不独立编码）；upsert 锚点用业务键
+  conflict_key: calc_procedure_id, seq
