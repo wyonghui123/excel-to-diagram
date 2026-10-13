@@ -9,8 +9,8 @@
   scheduled_tasks 表。
 
   迁完后遗留 TaskScheduler 不再承载任何 cron 作业，仅保留队列与手工触发
-  基础设施；scheduled_tasks 表退化为历史行（其清理属替换路径第 3 项，
-  待新调度器稳定后单独做，本轮不动）。
+  基础设施；scheduled_tasks 表的历史行已由替换路径第 3 项清理（init_task_seed
+  不再播种、改为清理迁移作业行），遗留调度器不再有 cron 行可加载。
 
 本测试锁定:
   1. platform_tick 的 cron 与原表行等价（* * * * *，每分钟）；
@@ -137,3 +137,31 @@ class Test遗留调度器静默跳过:
         sched.register_handler('platform_tick', _H())
         assert 'platform_tick' in sched._handlers
         assert sched._unregistered_warned == set()
+
+
+@pytest.mark.unit
+class Test启动接线:
+    """[P1 替换路径 第 3 项] in-process 调度器是唯一 cron 路径
+
+    server.py 的接线属启动期胶水代码，难以在不拉起完整 Flask 应用的前提下
+    单测，故此处以源码级锁定（与 test_维护调度器::源码不查询任务域表 同一手法）：
+      - 遗留回滚分支 MAINTENANCE_SCHEDULER_ENABLED 已移除（无「退回遗留调度器」之路）；
+      - 新增不依赖任何数据表的暂停开关 CRON_JOBS_ENABLED（快速禁用安全网）。
+    """
+
+    @staticmethod
+    def _server_code() -> str:
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        src = (root / 'server.py').read_text(encoding='utf-8')
+        # 去掉纯注释行，避免注释里的历史说明干扰断言
+        return '\n'.join(ln for ln in src.splitlines()
+                         if not ln.strip().startswith('#'))
+
+    def test_不再有遗留回滚分支(self):
+        assert 'MAINTENANCE_SCHEDULER_ENABLED' not in self._server_code(), (
+            "回滚分支已移除：in-process 调度器为唯一 cron 路径")
+
+    def test_有数据表无关的暂停开关(self):
+        assert 'CRON_JOBS_ENABLED' in self._server_code(), (
+            "须有不依赖 scheduled_tasks 的快速禁用开关")

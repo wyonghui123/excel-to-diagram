@@ -570,7 +570,7 @@ def create_app(db_path=None):
         name='background', priority=100, max_workers=2, timeout=600, enabled=True
     ))
 
-    # [P1 2026-10-13] cron 作业与遗留任务调度器解耦（替换路径第 7 / 1 项）。
+    # [P1 2026-10-13] cron 作业与遗留任务调度器解耦（替换路径 第 7 / 1 / 3 项）。
     #
     # 背景: 遗留 TaskScheduler 原本挂 9 个 handler，且全部只是「借调度器跑 cron」：
     #         - 8 个运维作业（DB 维护 / 审计运维 / 导入队列）—— 与任务模型无关，
@@ -582,32 +582,30 @@ def create_app(db_path=None):
     # 处置: 两类作业各挂独立的进程内调度器（调度配置内嵌代码，不落库）：
     #         - 8 个运维作业 → MaintenanceScheduler（第 7 项）
     #         - platform_tick  → PlatformScheduler（第 1 项，任务域）
-    #       handler 实例在此处创建一次。迁完后遗留 TaskScheduler 不再承载任何
-    #       cron 作业，仅保留队列与手工触发基础设施。
-    #       注：scheduled_tasks 的历史行清理属替换路径第 3 项，待新调度器稳定后
-    #       单独做；迁移期遗留调度器对未注册 handler 静默跳过（见 task_scheduler.py）。
+    #       handler 实例在此处创建一次。第 3 项已把 scheduled_tasks 的历史行清理
+    #       （init_task_seed 不再播种、改为清理迁移作业行）；遗留 TaskScheduler
+    #       不再承载任何 cron 作业，仅保留队列与手工触发基础设施。
     #
-    # 切换开关: MAINTENANCE_SCHEDULER_ENABLED=0 可临时把两类作业全部退回遗留
-    #           调度器（回滚用）。
-    _maintenance_handlers = {
-        'db_analyze': DBAnalyzeHandler(),
-        'db_vacuum': DBVacuumHandler(),
-        'db_integrity_check': DBIntegrityCheckHandler(),
-        'db_checkpoint': DBCheckpointHandler(),
-        'audit_failure_retry': AuditFailureRetryHandler(),
-        'audit_log_cleanup': AuditLogCleanupHandler(),
-        'audit_log_archive': AuditLogArchiveHandler(),
-        'import_queue_processor': ImportQueueHandler(),
-    }
+    # 进程内调度器是**唯一** cron 路径 —— 没有「退回遗留调度器」的回滚分支。
+    # 暂停开关: CRON_JOBS_ENABLED=0 暂停全部 cron 作业（两个进程内调度器都不启动）。
+    #           该开关不依赖任何数据表，故历史行清理后仍可作「快速禁用」安全网。
+    _cron_enabled = os.environ.get(
+        'CRON_JOBS_ENABLED', '1') not in ('0', 'false', 'False')
 
-    _use_inproc = os.environ.get(
-        'MAINTENANCE_SCHEDULER_ENABLED', '1') not in ('0', 'false', 'False')
-
-    _platform_tick_handler = PlatformTickHandler()
-
-    if _use_inproc:
+    if _cron_enabled:
         from meta.core.maintenance_scheduler import MaintenanceScheduler
         from meta.core.platform_scheduler import PlatformScheduler
+
+        _maintenance_handlers = {
+            'db_analyze': DBAnalyzeHandler(),
+            'db_vacuum': DBVacuumHandler(),
+            'db_integrity_check': DBIntegrityCheckHandler(),
+            'db_checkpoint': DBCheckpointHandler(),
+            'audit_failure_retry': AuditFailureRetryHandler(),
+            'audit_log_cleanup': AuditLogCleanupHandler(),
+            'audit_log_archive': AuditLogArchiveHandler(),
+            'import_queue_processor': ImportQueueHandler(),
+        }
 
         maintenance_scheduler = MaintenanceScheduler(
             data_source=data_source,
@@ -622,21 +620,17 @@ def create_app(db_path=None):
             data_source=data_source,
             config={'check_interval': 60},
         )
-        platform_scheduler.register_handler('platform_tick', _platform_tick_handler)
+        platform_scheduler.register_handler('platform_tick', PlatformTickHandler())
         platform_scheduler.start()
         atexit.register(platform_scheduler.stop)
 
         logging.getLogger(__name__).info(
             "[P1] in-process schedulers started: %d ops jobs + 1 platform_tick "
-            "(decoupled from legacy TaskScheduler)",
+            "(the only cron path; decoupled from legacy TaskScheduler)",
             len(_maintenance_handlers))
     else:
-        # 回滚路径: 两类作业全部退回遗留调度器
-        for _code, _handler in _maintenance_handlers.items():
-            task_scheduler.register_handler(_code, _handler)
-        task_scheduler.register_handler('platform_tick', _platform_tick_handler)
         logging.getLogger(__name__).warning(
-            "[P1] in-process schedulers DISABLED — all cron jobs fall back to legacy TaskScheduler")
+            "[P1] cron jobs paused (CRON_JOBS_ENABLED=0) — in-process schedulers not started")
 
     task_scheduler.start()
     set_task_scheduler(task_scheduler)

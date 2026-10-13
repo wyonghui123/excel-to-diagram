@@ -241,20 +241,24 @@ class TestPlatformTickHandler:
         assert result.success is False
         assert result.data["errors"][0]["stage"] == "dispatch"
 
-    def test_TC_TICK_008_种子行可调度(self, ds):
+    def test_TC_TICK_008_平台心跳由调度器常量承载(self, ds):
+        """[P1 替换路径 第 3 项] platform_tick 的调度不再落 scheduled_tasks 行，
+        改由 PlatformScheduler.PLATFORM_JOBS 内嵌承载。"""
         from meta.core.cron_parser import CronParser
+        from meta.core.platform_scheduler import PLATFORM_JOBS
         from meta.scripts.init_task_seed import init_task_seed_data
 
         init_task_seed_data(ds)
 
+        # 第3项后：预制初始化不再往 scheduled_tasks 播种 platform_tick 行
         rows = ds.execute(
-            "SELECT handler, trigger_mode, schedule, enabled "
-            "FROM scheduled_tasks WHERE code = 'platform_tick'"
+            "SELECT COUNT(*) FROM scheduled_tasks WHERE code = 'platform_tick'"
         ).fetchall()
-        assert len(rows) == 1
-        handler, trigger_mode, schedule, enabled = rows[0]
-        assert handler == 'platform_tick'      # 与 server.py 注册名一致
-        assert trigger_mode == 'cron'
-        assert enabled == 1
-        # 调度表达式须能被实际调度器解析（否则加载时静默跳过）
-        assert CronParser().get_next(schedule, T0) is not None
+        assert rows[0][0] == 0
+
+        # cron 由调度器常量承载，表达式须能被实际调度器解析
+        job = next(j for j in PLATFORM_JOBS if j['code'] == 'platform_tick')
+        assert job['handler'] == 'platform_tick'   # 与 server.py 注册名一致
+        assert job['trigger_mode'] == 'cron'
+        assert job['enabled'] is True
+        assert CronParser().get_next(job['schedule'], T0) is not None

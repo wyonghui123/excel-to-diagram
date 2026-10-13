@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 def init_task_seed_data(data_source):
     _ensure_task_tables(data_source)
     init_task_queues(data_source)
-    init_scheduled_tasks(data_source)
+    cleanup_legacy_scheduled_tasks(data_source)
 
 
 def _ensure_task_tables(data_source):
@@ -148,171 +148,39 @@ def init_task_queues(data_source):
     logger.info("Task queues seeded: %d queues", count)
 
 
-def init_scheduled_tasks(data_source):
-    tasks = [
-        {
-            'code': 'db_analyze',
-            'name': '数据库统计信息更新',
-            'category': 'system',
-            'handler': 'db_analyze',
-            'trigger_mode': 'cron',
-            'schedule': '0 3 * * *',
-            'queue': 'background',
-            'priority': 100,
-            'timeout': 300,
-            'max_retries': 3,
-            'handler_config': '{}',
-            'description': '每天凌晨3点执行 ANALYZE 更新统计信息',
-            'enabled': True,
-        },
-        {
-            'code': 'db_vacuum',
-            'name': '数据库空间回收',
-            'category': 'system',
-            'handler': 'db_vacuum',
-            'trigger_mode': 'cron',
-            'schedule': '0 4 * * 0',
-            'queue': 'background',
-            'priority': 100,
-            'timeout': 600,
-            'max_retries': 2,
-            'handler_config': '{}',
-            'description': '每周日凌晨4点执行 VACUUM 回收空间',
-            'enabled': True,
-        },
-        {
-            'code': 'db_integrity_check',
-            'name': '数据库完整性检查',
-            'category': 'system',
-            'handler': 'db_integrity_check',
-            'trigger_mode': 'cron',
-            'schedule': '0 6 * * *',
-            'queue': 'background',
-            'priority': 100,
-            'timeout': 120,
-            'max_retries': 2,
-            'handler_config': '{}',
-            'description': '每天凌晨6点执行 PRAGMA integrity_check',
-            'enabled': True,
-        },
-        {
-            'code': 'db_checkpoint',
-            'name': 'WAL检查点',
-            'category': 'system',
-            'handler': 'db_checkpoint',
-            'trigger_mode': 'cron',
-            'schedule': '*/5 * * * *',
-            'queue': 'critical',
-            'priority': 10,
-            'timeout': 60,
-            'max_retries': 5,
-            'handler_config': '{}',
-            'description': '每5分钟执行 WAL checkpoint 防止WAL文件过大',
-            'enabled': True,
-        },
-        {
-            'code': 'audit_failure_retry',
-            'name': '审计日志失败重试',
-            'category': 'audit',
-            'handler': 'audit_failure_retry',
-            'trigger_mode': 'cron',
-            'schedule': '*/10 * * * *',
-            'queue': 'business',
-            'priority': 50,
-            'timeout': 120,
-            'max_retries': 3,
-            'handler_config': '{"batch_size": 100, "max_retries": 3}',
-            'description': '每10分钟重试写入失败的审计日志',
-            'enabled': True,
-        },
-        {
-            'code': 'audit_log_cleanup',
-            'name': '审计日志清理',
-            'category': 'audit',
-            'handler': 'audit_log_cleanup',
-            'trigger_mode': 'cron',
-            'schedule': '0 2 * * *',
-            'queue': 'background',
-            'priority': 100,
-            'timeout': 300,
-            'max_retries': 2,
-            'handler_config': '{"retention_days": {"business": 365, "security": 2555, "operation": 90, "performance": 30, "system": 90}}',
-            'description': '每天凌晨2点按分类清理过期审计日志',
-            'enabled': True,
-        },
-        {
-            'code': 'import_queue_processor',
-            'name': '导入队列处理器',
-            'category': 'business',
-            'handler': 'import_queue_processor',
-            'trigger_mode': 'cron',
-            'schedule': '*/2 * * * *',
-            'queue': 'business',
-            'priority': 50,
-            'timeout': 300,
-            'max_retries': 2,
-            'handler_config': '{}',
-            'description': '每2分钟检查导入队列并处理',
-            'enabled': True,
-        },
-        {
-            'code': 'platform_tick',
-            'name': '平台心跳（派工/回收/SLA扫描）',
-            'category': 'system',
-            'handler': 'platform_tick',
-            'trigger_mode': 'cron',
-            'schedule': '* * * * *',
-            'queue': 'business',
-            'priority': 50,
-            'timeout': 120,
-            'max_retries': 2,
-            'handler_config': '{}',
-            'description': '每分钟执行平台心跳：direct 派工 + 认领超时回收 + SLA 升级扫描',
-            'enabled': True,
-        },
-    ]
+def cleanup_legacy_scheduled_tasks(data_source):
+    """清理 scheduled_tasks 中已迁出的 cron 作业行（替换路径 第 3 项，幂等）。
 
-    count = 0
-    for task in tasks:
-        try:
-            existing = data_source.query(
-                "SELECT id FROM scheduled_tasks WHERE code = ?",
-                (task['code'],)
-            )
-            if existing:
-                data_source.execute(
-                    """UPDATE scheduled_tasks SET
-                        name = ?, category = ?, handler = ?,
-                        trigger_mode = ?, schedule = ?, queue = ?,
-                        priority = ?, timeout = ?, max_retries = ?,
-                        handler_config = ?, description = ?,
-                        enabled = ?
-                    WHERE code = ?""",
-                    [task['name'], task['category'], task['handler'],
-                     task['trigger_mode'], task['schedule'], task['queue'],
-                     task['priority'], task['timeout'], task['max_retries'],
-                     task['handler_config'], task['description'],
-                     1 if task['enabled'] else 0, task['code']]
-                )
-            else:
-                data_source.execute(
-                    """INSERT INTO scheduled_tasks
-                    (code, name, category, handler, trigger_mode,
-                     schedule, queue, priority, timeout, max_retries,
-                     handler_config, description, enabled,
-                     created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    datetime('now'))""",
-                    [task['code'], task['name'], task['category'],
-                     task['handler'], task['trigger_mode'],
-                     task['schedule'], task['queue'],
-                     task['priority'], task['timeout'],
-                     task['max_retries'], task['handler_config'],
-                     task['description'], 1 if task['enabled'] else 0]
-                )
-            count += 1
-        except Exception as e:
-            logger.error("Failed to init task %s: %s", task['code'], e)
+    替换路径 第 1 / 7 项已把 9 个 cron 作业全部迁到进程内调度器
+    （`MaintenanceScheduler` 8 个运维 + `PlatformScheduler` 的 platform_tick），
+    调度配置内嵌代码、不落库。此前这些作业在 `scheduled_tasks` 表各留一行；
+    遗留 `TaskScheduler` 现仅保留队列与手工触发基础设施，不再有 cron 作业行。
 
-    data_source.commit()
-    logger.info("Scheduled tasks seeded: %d tasks", count)
+    本函数把这些已迁出作业码对应的历史行删除（幂等：重复调用无副作用）。
+    只删「已迁出的作业码」（`maintenance_scheduler.JOB_CODES` 为唯一权威边界），
+    非迁移行（如遗留手工触发行）保持不变。
+    """
+    from meta.core.maintenance_scheduler import JOB_CODES
+
+    codes = sorted(JOB_CODES)
+    if not codes:
+        return
+
+    placeholders = ','.join('?' * len(codes))
+    try:
+        rows = data_source.query(
+            f"SELECT COUNT(*) AS cnt FROM scheduled_tasks "
+            f"WHERE code IN ({placeholders})",
+            tuple(codes)
+        )
+        removed = rows[0]['cnt'] if rows else 0
+        if not removed:
+            return
+        data_source.execute(
+            f"DELETE FROM scheduled_tasks WHERE code IN ({placeholders})",
+            tuple(codes)
+        )
+        data_source.commit()
+        logger.info("Legacy scheduled tasks cleaned: %d rows", removed)
+    except Exception as e:
+        logger.error("Failed to clean legacy scheduled tasks: %s", e)

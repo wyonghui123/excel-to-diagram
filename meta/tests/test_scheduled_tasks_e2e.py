@@ -92,99 +92,40 @@ class TestTaskSeedInit:
         assert 'ai_high' in queue_names
         assert 'ai_normal' in queue_names
     
-    def test_init_scheduled_tasks(self, data_source):
-        """测试预制任务初始化"""
+    def test_init_不再播种历史作业行(self, data_source):
+        """[P1 替换路径 第 3 项] 预制初始化不再往 scheduled_tasks 写迁移后的 cron 行"""
         init_task_seed_data(data_source)
+        init_task_seed_data(data_source)   # 幂等：重复调用仍为空
         
         rows = data_source.query("SELECT * FROM scheduled_tasks")
         
-        assert len(rows) == 8
-        
-        task_codes = {row['code'] for row in rows}
-        expected_codes = {
-            'db_analyze', 'db_vacuum', 'db_integrity_check', 'db_checkpoint',
-            'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor',
-            'platform_tick'
-        }
-        assert task_codes == expected_codes
+        assert rows == []
     
-    def test_init_db_analyze_task_config(self, data_source):
-        """测试 db_analyze 任务配置"""
-        init_task_seed_data(data_source)
+    def test_init_清理既有历史作业行(self, data_source):
+        """[P1 替换路径 第 3 项] 迁移后的 cron 行（含 platform_tick）被清理，
+        非迁移行保留（遗留手工触发行不受影响）。"""
+        init_task_seed_data(data_source)   # 建表
         
-        rows = data_source.query(
-            "SELECT * FROM scheduled_tasks WHERE code = ?",
-            ('db_analyze',)
+        for code in ('db_analyze', 'audit_failure_retry', 'platform_tick'):
+            data_source.execute(
+                "INSERT INTO scheduled_tasks "
+                "(code, name, handler, trigger_mode, schedule) "
+                "VALUES (?, ?, ?, 'cron', '* * * * *')",
+                (code, code, code)
+            )
+        data_source.execute(
+            "INSERT INTO scheduled_tasks "
+            "(code, name, handler, trigger_mode, schedule) "
+            "VALUES ('legacy_manual', 'Manual', 'db_analyze', 'manual', NULL)"
         )
+        data_source.commit()
         
-        assert len(rows) == 1
-        task = dict(rows[0])
-        assert task['name'] == '数据库统计信息更新'
-        assert task['category'] == 'system'
-        assert task['handler'] == 'db_analyze'
-        assert task['trigger_mode'] == 'cron'
-        assert task['schedule'] == '0 3 * * *'
-        assert task['queue'] == 'background'
-        assert task['enabled'] == 1
-    
-    def test_init_audit_failure_retry_config(self, data_source):
-        """测试 audit_failure_retry 任务配置"""
         init_task_seed_data(data_source)
         
-        rows = data_source.query(
-            "SELECT * FROM scheduled_tasks WHERE code = ?",
-            ('audit_failure_retry',)
-        )
-        
-        assert len(rows) == 1
-        task = dict(rows[0])
-        assert task['name'] == '审计日志失败重试'
-        assert task['category'] == 'audit'
-        assert task['handler'] == 'audit_failure_retry'
-        assert task['schedule'] == '*/10 * * * *'
-        assert task['queue'] == 'business'
-        assert 'batch_size' in task['handler_config']
-    
-    def test_init_audit_log_cleanup_config(self, data_source):
-        """测试 audit_log_cleanup 任务配置"""
-        init_task_seed_data(data_source)
-        
-        rows = data_source.query(
-            "SELECT * FROM scheduled_tasks WHERE code = ?",
-            ('audit_log_cleanup',)
-        )
-        
-        assert len(rows) == 1
-        task = dict(rows[0])
-        assert task['name'] == '审计日志清理'
-        assert task['handler'] == 'audit_log_cleanup'
-        assert task['schedule'] == '0 2 * * *'
-        assert task['queue'] == 'background'
-    
-    def test_init_db_checkpoint_config(self, data_source):
-        """测试 db_checkpoint 任务配置"""
-        init_task_seed_data(data_source)
-        
-        rows = data_source.query(
-            "SELECT * FROM scheduled_tasks WHERE code = ?",
-            ('db_checkpoint',)
-        )
-        
-        assert len(rows) == 1
-        task = dict(rows[0])
-        assert task['name'] == 'WAL检查点'
-        assert task['handler'] == 'db_checkpoint'
-        assert task['schedule'] == '*/5 * * * *'
-        assert task['queue'] == 'critical'
-    
-    def test_init_idempotent(self, data_source):
-        """测试初始化是幂等的（多次调用不会重复创建）"""
-        init_task_seed_data(data_source)
-        init_task_seed_data(data_source)
-        init_task_seed_data(data_source)
-        
-        rows = data_source.query("SELECT COUNT(*) as cnt FROM scheduled_tasks")
-        assert rows[0]['cnt'] == 8
+        codes = {row['code'] for row in data_source.query("SELECT code FROM scheduled_tasks")}
+        assert 'legacy_manual' in codes, "非迁移行不应被清理"
+        for code in ('db_analyze', 'audit_failure_retry', 'platform_tick'):
+            assert code not in codes, f"{code} 的历史行应被清理"
 
 
 class TestSchedulerLoadAndTrigger:
@@ -260,23 +201,31 @@ class TestSchedulerLoadAndTrigger:
         return get_data_source("sqlite", database=scheduler_db)
     
     def test_load_tasks_from_db(self, data_source):
-        """测试从数据库加载任务"""
-        init_task_seed_data(data_source)
+        """[P1 第 3 项] 预制初始化后表内无 cron 行；遗留调度器仍可加载手工/遗留行"""
+        init_task_seed_data(data_source)   # 建表 + 清理迁移作业行
+        
+        data_source.execute(
+            "INSERT INTO scheduled_tasks "
+            "(code, name, handler, trigger_mode, schedule) "
+            "VALUES ('manual_task', 'Manual', 'db_analyze', 'cron', '0 3 * * *')"
+        )
+        data_source.commit()
         
         scheduler = TaskScheduler(data_source=data_source)
         scheduler.load_tasks()
         
-        assert len(scheduler._tasks) == 8
-        
-        task_codes = {task['code'] for task in scheduler._tasks.values()}
-        expected = {'db_analyze', 'db_vacuum', 'db_integrity_check', 'db_checkpoint',
-                   'audit_failure_retry', 'audit_log_cleanup', 'import_queue_processor',
-                   'platform_tick'}
-        assert task_codes == expected
+        assert [task['code'] for task in scheduler._tasks.values()] == ['manual_task']
     
     def test_load_tasks_calculates_next_run(self, data_source):
         """测试加载任务时计算下次运行时间"""
-        init_task_seed_data(data_source)
+        init_task_seed_data(data_source)   # 建表
+        
+        data_source.execute(
+            "INSERT INTO scheduled_tasks "
+            "(code, name, handler, trigger_mode, schedule) "
+            "VALUES ('cron_row', 'Cron', 'db_analyze', 'cron', '0 3 * * *')"
+        )
+        data_source.commit()
         
         scheduler = TaskScheduler(data_source=data_source)
         scheduler.load_tasks()
