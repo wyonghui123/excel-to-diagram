@@ -45,3 +45,14 @@
 *.mp4           binary
 *.mp3           binary
 *.webm          binary
+
+# Office documents (zip containers; must not be treated as text)
+*.xlsx          binary
+*.xls           binary
+*.docx          binary
+*.doc           binary
+*.pptx          binary
+*.ppt           binary
+
+# Tabular text exports
+*.csv           text eol=lf
