@@ -54,6 +54,9 @@ const props = defineProps({
   },
   logoText: {
     type: String,
+    // 兜底默认值（与 useInstanceInfo.FALLBACK_NAME 保持一致）。
+    // 实际由 AppRootLayout 经 AppLayout 传入 useInstanceInfo().displayName（部署级可配），
+    // 此处默认值仅在独立使用本组件时生效。
     default: 'BIP应用架构管理'
   },
   breadcrumbs: {

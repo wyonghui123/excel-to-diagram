@@ -5,10 +5,12 @@ import { validateDetailRoute } from './detailRouteGuard'
 import { objectTypeService } from '@/services/objectTypeService'
 import { generateDynamicRoutes, isDynamicRouteRegistered, resetDynamicRoutes } from './dynamicRoutes'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 import { buildStaticRoutes, countRoutes } from './helpers'
 import { logger } from '@/utils/logger'
 
 let objectTypeServiceInitialized = false
+const instanceInfo = useInstanceInfo()
 
 async function ensureObjectTypeServiceReady() {
   if (!objectTypeServiceInitialized) {
@@ -132,7 +134,11 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
-  document.title = to.meta.title ? `${to.meta.title} - ArchWorkspace` : 'ArchWorkspace'
+  // 实例展示名（部署级 PLATFORM_DISPLAY_NAME）—— 标签页标题与左上角/页脚一致。
+  // 首次导航时数据可能还没回来，最多 await 一次；之后 module-level 缓存已就绪，零开销。
+  if (!instanceInfo.loaded.value) await instanceInfo.loadInstanceInfo()
+  const appTitle = instanceInfo.displayName.value
+  document.title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle
 
   if (to.name === 'ObjectDetail') {
     const valid = await validateDetailRoute(to, from, next)

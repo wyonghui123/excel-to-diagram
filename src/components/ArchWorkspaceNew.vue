@@ -3,7 +3,7 @@
     <div v-if="isDesktop" class="desktop-titlebar">
       <div class="titlebar-drag-area">
         <AppIcon name="enabled" size="sm" class="titlebar-icon" />
-        <span class="titlebar-text">BIP应用架构管理</span>
+        <span class="titlebar-text">{{ displayName }}</span>
       </div>
       <div class="titlebar-controls">
         <button class="titlebar-btn minimize" @click="minimizeWindow" title="最小化">
@@ -62,7 +62,7 @@
     </main>
 
     <footer class="workspace-footer">
-      <p>&copy; 2026 BIP应用架构管理</p>
+      <p>&copy; 2026 {{ displayName }}</p>
     </footer>
 
     <TaskDetailDrawer
@@ -86,6 +86,7 @@ import TaskDetailDrawer from '@/views/TaskCenter/TaskDetailDrawer.vue'
 import { useVersionContext } from '@/composables/useVersionContext'
 import { useAuthStore } from '@/stores/authStore'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 defineOptions({ name: 'ArchWorkspaceNew' })
 import {
@@ -160,6 +161,8 @@ function onTaskClaimed() {
 
 const { favoriteVersions, frequentLoading, loadFavoriteVersions } = useVersionContext()
 const { accessibleMenus, flatMenus, leafMenus, loading: menuLoading, loadMenuPermissions } = useMenuPermissions()
+// 实例展示名：桌面标题栏（Electron）+ 页脚共用（部署级PLATFORM_DISPLAY_NAME）
+const { displayName, loadInstanceInfo } = useInstanceInfo()
 
 const tileColorClass = (color) => `tile-icon--${color || 'warm-orange'}`
 
@@ -206,6 +209,8 @@ const checkDesktopMode = () => {
 onMounted(async () => {
   checkDesktopMode()
   loadFavoriteVersions()
+  // 实例展示名（页脚 + 桌面标题栏）；失败静默兜底，不阻塞工作台渲染
+  loadInstanceInfo()
   await loadMenuPermissions()
 })
 </script>
