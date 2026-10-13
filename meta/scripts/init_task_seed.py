@@ -159,6 +159,9 @@ def cleanup_legacy_scheduled_tasks(data_source):
     本函数把这些已迁出作业码对应的历史行删除（幂等：重复调用无副作用）。
     只删「已迁出的作业码」（`maintenance_scheduler.JOB_CODES` 为唯一权威边界），
     非迁移行（如遗留手工触发行）保持不变。
+
+    调用时机：`init_task_seed_data` 每次服务启动都会执行本函数 —— 故即便实例曾
+    遗留旧的作业行，启动后也会被清掉。
     """
     from meta.core.maintenance_scheduler import JOB_CODES
 

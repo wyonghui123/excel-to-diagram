@@ -4389,7 +4389,10 @@ def _init_task_scheduler(app, db_session):
 
 #### Step 4.3: 种子数据插入脚本 (1天)
 
-创建 `meta/scripts/init_task_data.py`:
+创建种子脚本（实际落地为 `meta/scripts/init_task_seed.py`）:
+
+> 注：当前实现只做「建表 + 播种 5 个队列 + 清理已迁出的 cron 作业行」，**不播种任务定义**。
+> 下例中的任务插入逻辑已随「运维/任务域作业迁移到进程内调度器」作废，保留仅为设计沿革记录。
 
 ```python
 # meta/scripts/init_task_data.py
@@ -4539,7 +4542,7 @@ if __name__ == '__main__':
     init_task_data(db_path)
 ```
 
-**验收**: 执行脚本后数据库有7条默认任务
+**验收**: 执行脚本后数据库队列已就绪（任务定义不再播种）
 
 ---
 
@@ -4550,7 +4553,7 @@ if __name__ == '__main__':
 | A4.1 | API返回调度器状态 | `GET /api/v2/task-scheduler/status` |
 | A4.2 | 手动触发任务 | `POST /api/v2/tasks/db_checkpoint/trigger` |
 | A4.3 | 服务启动时调度器自动启动 | 启动服务，检查日志 |
-| A4.4 | 默认任务自动插入 | 新DB执行 init_task_data.py |
+| A4.4 | 队列自动插入 | 新DB执行 init_task_seed.py |
 
 ---
 
@@ -5010,16 +5013,14 @@ API端点:
 
 | 文件 | 说明 | 状态 |
 |------|------|:----:|
-| `meta/scripts/init_task_seed.py` | 表创建 + 5个队列 + 7个任务 | 完成 |
+| `meta/scripts/init_task_seed.py` | 表创建 + 5个队列 + 清理遗留 cron 作业行 | 完成 |
 
-默认任务:
-1. `db_analyze` - 每天3:00 ANALYZE
-2. `db_vacuum` - 每周日4:00 VACUUM
-3. `db_integrity_check` - 每天6:00 integrity_check
-4. `db_checkpoint` - 每5分钟 WAL checkpoint
-5. `audit_failure_retry` - 每10分钟重试失败审计
-6. `audit_log_cleanup` - 每天2:00清理过期审计日志
-7. `import_queue_processor` - 每2分钟处理导入队列
+- `task_queues`：5 个队列（critical / ai_high / ai_normal / business / background）保留不变。
+- `scheduled_tasks`：**不再播种任务定义**。原先的 8 个运维作业 + `platform_tick` 已迁到
+  进程内调度器（`MaintenanceScheduler` / `PlatformScheduler`，调度配置内嵌代码、不落库），
+  其历史行由 `cleanup_legacy_scheduled_tasks()` 每次启动幂等清除。
+- 运维作业的权威定义见 `meta/core/maintenance_scheduler.py` 的 `DEFAULT_JOBS`；
+  `platform_tick` 见 `meta/core/platform_scheduler.py` 的 `PLATFORM_JOBS`。
 
 ### 测试验证结果
 
@@ -5028,7 +5029,7 @@ API端点:
 | 所有模块导入 | ✅ |
 | YAML schemas 加载 (4个BO) | ✅ |
 | 数据库表创建 (3张表) | ✅ |
-| 种子数据 (5队列+7任务) | ✅ |
+| 种子数据 (5队列 + 清理迁移作业行) | ✅ |
 | TaskScheduler 启动 | ✅ |
 | TaskScheduler 停止 (atexit) | ✅ |
 | Flask 蓝图注册 (292 routes) | ✅ |
@@ -5131,6 +5132,7 @@ API端点:
 | v1.3 | 2026-05-23 | Architecture Team | 添加实现状态 (Phase 1-6) |
 | v1.4 | 2026-05-23 | Architecture Team | 添加测试验证结果 (Phase 7) |
 | v1.5 | 2026-05-23 | Architecture Team | 添加 Phase 7 测试详情、总结与后续规划 |
+| v1.6 | 2026-10-13 | Architecture Team | 订正种子数据现状：`init_task_seed` 不再播种任务定义（8 运维作业 + platform_tick 已迁进程内调度器），改为清理遗留 `scheduled_tasks` 行；新增 `/api/v2/schedulers/*` 运维端点与 `CRON_JOBS_ENABLED` 开关 |
 
 ---
 

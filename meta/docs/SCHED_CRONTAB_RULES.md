@@ -1,7 +1,7 @@
 # SCHED_CRONTAB_RULES.md
 
 > **Scheduled Task Cron 表达式规则文档**
-> 版本: v1.0
+> 版本: v1.1
 > 创建: 2026-06-14
 > BMRD DEFER ID: SCHED-CRONTAB-VALIDATION
 
@@ -127,6 +127,31 @@ class CronParser:
 | `/api/v2/bo/scheduled_task/{id}` | GET | 任务详情 |
 | `/api/v2/bo/scheduled_task/{id}/run` | POST | 立即运行 |
 | `/api/v2/bo/scheduled_task/{id}/next` | GET | 下次执行时间 |
+
+### 6.1 进程内调度器运维端点
+
+运维作业（DB 维护 / 审计归档 / 导入队列）与任务域的 `platform_tick` 已迁到**进程内调度器**
+（调度配置内嵌代码，不落 `scheduled_tasks` 表）。其运维入口由 `scheduler_bp` 提供，
+**不受 `tasks` 模块开关影响，无条件注册**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v2/schedulers/status` | GET | 两个调度器的作业清单 / 下次触发 / handler 就绪 / `paused` |
+| `/api/v2/schedulers/{code}/run-now` | POST | 按需跑一次指定作业（未知 code → 404；无 handler → 409） |
+
+遗留 `/api/v2/tasks/{code}/trigger|enable|disable` 对**已迁移作业码**返回 **409**
+（`scheduled_tasks` 表已不承载其调度，改表改不动，不再假成功），提示改用上面的 `run-now`。
+
+### 6.2 全局暂停开关 `CRON_JOBS_ENABLED`
+
+| 取值 | 行为 |
+|------|------|
+| `1` / 未设置 | 正常：`MaintenanceScheduler` 与 `PlatformScheduler` 均启动 |
+| `0` / `false` / `False` | **暂停全部 cron 作业**：两个进程内调度器都不启动 |
+
+- 该开关**不依赖任何数据表**，故 `scheduled_tasks` 历史行清理后仍可作为「快速禁用」安全网。
+- 暂停态下 `/api/v2/schedulers/status` 返回 `200` 且 `data.paused=true`（两个调度器数据为 `null`）。
+- 部署用法：设环境变量 `CRON_JOBS_ENABLED=0`（如 `.env` 或进程环境）。
 
 ## 7. 校验规则
 

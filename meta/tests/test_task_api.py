@@ -28,10 +28,12 @@ class TestTaskAPI:
         expect(api_client, 'post', '/api/v2/tasks/nonexistent_task/trigger', NOT_FOUND_500)
 
     def test_enable_nonexistent_task(self, api_client):
-        expect(api_client, 'post', '/api/v2/tasks/nonexistent_task/enable', OK_500)
+        # [P1 2026-10-13] 0 行（未知码）→ 404，不再静默回 success:true（假成功）
+        expect(api_client, 'post', '/api/v2/tasks/nonexistent_task/enable', NOT_FOUND_500)
 
     def test_disable_nonexistent_task(self, api_client):
-        expect(api_client, 'post', '/api/v2/tasks/nonexistent_task/disable', OK_500)
+        # [P1 2026-10-13] 同上：0 行（未知码）→ 404
+        expect(api_client, 'post', '/api/v2/tasks/nonexistent_task/disable', NOT_FOUND_500)
 
     def test_retry_nonexistent_execution(self, api_client):
         expect(api_client, 'post', '/api/v2/task-executions/999999/retry', NOT_FOUND_500)

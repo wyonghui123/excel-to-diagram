@@ -166,6 +166,9 @@ from meta.handlers.audit_handlers import (
 from meta.handlers.import_handlers import ImportQueueHandler
 from meta.handlers.platform_handlers import PlatformTickHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
+from meta.api.scheduler_api import (
+    scheduler_bp, set_inprocess_schedulers,
+)
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
 from meta.core.platform_modules import is_module_enabled   # [roadmap v1.32.0 §6.2.4] 平台模块部署级启停
@@ -624,11 +627,16 @@ def create_app(db_path=None):
         platform_scheduler.start()
         atexit.register(platform_scheduler.stop)
 
+        # [P1 2026-10-13] 向运维端点暴露两个进程内调度器（只读状态 + 按需触发）
+        set_inprocess_schedulers(maintenance_scheduler, platform_scheduler)
+
         logging.getLogger(__name__).info(
             "[P1] in-process schedulers started: %d ops jobs + 1 platform_tick "
             "(the only cron path; decoupled from legacy TaskScheduler)",
             len(_maintenance_handlers))
     else:
+        # 暂停态：两个调度器均未启动 —— 端点仍需可答「已暂停」（paused=True）
+        set_inprocess_schedulers(None, None, paused=True)
         logging.getLogger(__name__).warning(
             "[P1] cron jobs paused (CRON_JOBS_ENABLED=0) — in-process schedulers not started")
 
@@ -865,6 +873,10 @@ def create_app(db_path=None):
             "[PlatformModules] tasks 已禁用 (DISABLED_PLATFORM_MODULES) "
             "→ task/task_inbox/task_decision 三个 blueprint 不注册"
         )
+    # [P1 2026-10-13] 进程内调度器运维端点（只读状态 + 按需触发）**无条件注册**：
+    #   运维作业是平台基础设施（DB 维护 / 审计归档 / 导入队列 + platform_tick），
+    #   与 tasks 模块开关无关 —— 故不放进上面被门控的 task_api_bp。
+    app.register_blueprint(scheduler_bp)
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)

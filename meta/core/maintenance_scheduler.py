@@ -25,15 +25,15 @@
   - platform_tick → `PlatformScheduler`（`meta/core/platform_scheduler.py`，替换路径第 1 项）
 
   两类作业都迁出后，遗留 TaskScheduler 不再承载任何 cron 作业，仅保留队列与
-  手工触发基础设施；`scheduled_tasks` 的历史行清理属替换路径第 3 项，待新调度器
-  稳定运行后单独做。
+  手工触发基础设施；`scheduled_tasks` 的历史行已由替换路径第 3 项清理
+  （`init_task_seed` 不再播种、改为清理迁移作业行）。
 
 处置边界:
   - 本模块**不新增** handler，只复用既有 handler 实例（同一批类，不复制逻辑）。
   - handler 签名 `execute(params, context)` 与既有 8 个实现完全兼容：它们只读
     `context['data_source']` 与可选 `context['handler_config']`。
-  - 不碰 `scheduled_tasks` 表的既有行（迁移期由 `init_task_seed` 保持幂等）；
-    待运维作业在新调度器上稳定运行后，再清理遗留表中的运维行。
+  - 不碰 `scheduled_tasks` 表（调度状态全在内存）；迁移作业的历史行由
+    `init_task_seed` 的清理函数删除（幂等，每次启动执行）。
 
 对应方案:
   docs/superpowers/specs/2026-09-07-task-model-design.md（§12.1A5/A9 与替换路径）

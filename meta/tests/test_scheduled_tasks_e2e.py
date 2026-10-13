@@ -4,11 +4,11 @@ pytestmark = pytest.mark.e2e
 
 # -*- coding: utf-8 -*-
 """
-预制任务端到端集成测试
+任务调度端到端集成测试
 
 测试覆盖：
-1. init_task_seed 初始化预制任务和队列
-2. TaskScheduler 从数据库加载预制任务
+1. init_task_seed 建表 + 播种队列 + 清理遗留 cron 作业行（不再播种任务定义）
+2. TaskScheduler 从数据库加载（由测试自行插入的）任务行
 3. Cron 表达式触发任务执行
 4. 完整的任务执行流程
 5. 任务执行记录跟踪
@@ -774,7 +774,7 @@ class TestScheduledTaskIntegration:
         return get_data_source("sqlite", database=integration_db)
     
     def test_full_preset_tasks_flow(self, data_source):
-        """完整预制任务流程测试"""
+        """调度器启动-停止冒烟（种子已不播任务定义，作业集可为空）"""
         try:
             init_task_seed_data(data_source)
             

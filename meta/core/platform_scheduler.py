@@ -8,8 +8,8 @@
   使其同样脱离 `scheduled_tasks` 表 —— 调度配置内嵌代码，不落库。
 
   迁完后遗留 TaskScheduler 不再承载任何 cron 作业，仅保留队列与手工触发
-  基础设施；`scheduled_tasks` 表退化为历史行（清理属替换路径第 3 项，
-  待本调度器稳定运行后单独做）。
+  基础设施；`scheduled_tasks` 表的历史行已由替换路径第 3 项清理
+  （`init_task_seed` 不再播种、改为清理迁移作业行）。
 
 复用而非重写:
   `PlatformScheduler` 直接继承 `MaintenanceScheduler` 的通用 in-process cron
