@@ -221,10 +221,21 @@ function handleUserCommand(key) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* [FIX 2026-10-13 移动端] 保底可读宽度：品牌名与面包屑竞争空间时，
+     宁可让名字省略，也不能压到 0 宽度完全消失（实测踩过）。
+     3.5em 约等于 3 个字符，保证「xAP…」这类可辨识的残留。 */
+  min-width: 3.5em;
 }
 
 .app-header__breadcrumb {
   margin-left: var(--spacing-md);
+  /* [FIX 2026-10-13 移动端] 面包屑是辅助信息，品牌名（部署级标识）不可让。
+     实测仅靠 flex:0 1 auto + min-width:0 仍会让两者同比例收缩，
+     414px 屏下品牌名被压到 0。故窄屏给面包屑一个硬上限，
+     让缩空间全部由它承担，品牌名保持完整。 */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
 }
 
 .app-header__right {
