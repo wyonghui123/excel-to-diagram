@@ -91,8 +91,19 @@ onMounted(reload)
 .task-center-content { flex: 1; overflow: auto; padding: var(--spacing-md); }
 .tc-table { width: 100%; border-collapse: collapse; }
 .tc-table th, .tc-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--color-border); }
+/* [FIX 2026-10-13 移动端] 表头恒为单行。此前缺 nowrap，窄屏下 7 列平分宽度
+   后中文被压成竖排：实测表头高度 414px 屏 65px、360px 屏 113px
+   （单行应约 33px），列宽被压到 36px 装不下 2 个汉字。 */
+.tc-table th { white-space: nowrap; }
 .tc-table tbody tr { cursor: pointer; }
 .tc-table tbody tr:hover { background: var(--color-bg-layout); }
 .tc-state { padding: 24px; text-align: center; color: var(--color-text-secondary); }
 .tc-error { color: #f56c6c; }
+
+/* [FIX 2026-10-13 移动端] 7 列在窄屏无法平分宽度，改由表格横向滚动。
+   min-width 保证列不被压到装不下内容；父容器已有 overflow: auto。
+   与 SubNavTabs 的「横向滚动」处理思路一致，不用隐藏列也不靠缩小字号。 */
+@media screen and (max-width: 768px) {
+  .tc-table { min-width: 640px; }
+}
 </style>
