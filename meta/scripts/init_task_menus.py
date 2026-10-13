@@ -4,6 +4,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+#遗留任务叶子菜单（P1 入口收敛：task.v1 直接接管 task-management，
+# 这些叶子指向旧 scheduled_task / task_queue / task_execution / ai_async_task）
+LEGACY_LEAF_MENU_CODES = (
+    'task-definitions', 'task-queues', 'task-executions', 'ai-async-tasks',
+)
+
 
 def init_task_menus(data_source):
     menus = [
@@ -26,99 +32,28 @@ def init_task_menus(data_source):
         },
         {
             'menu_code': 'task-management',
-            'menu_name': '任务调度',
+            'menu_name': '任务管理',
             'menu_path': '/system/task-management',
-            'page_type': 'multi_object_hub',
-            'primary_object_type': 'scheduled_task',
-            'object_types': ['scheduled_task', 'task_queue', 'task_execution', 'ai_async_task'],
-            'bo_bindings': [
-                {'bo_id': 'scheduled_task', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'task_queue', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'task_execution', 'role': 'primary', 'include_actions': ['read', 'delete', 'list']},
-                {'bo_id': 'ai_async_task', 'role': 'primary', 'include_actions': ['read', 'delete', 'list']},
-            ],
-            'required_permissions': [
-                'scheduled_task:create', 'scheduled_task:read', 'scheduled_task:update', 'scheduled_task:delete',
-                'task_queue:create', 'task_queue:read', 'task_queue:update', 'task_queue:delete',
-                'task_execution:read', 'task_execution:delete',
-                'ai_async_task:read', 'ai_async_task:delete',
-            ],
+            # P1入口收敛：task.v1 直接接管本页，页面由 TaskCenter.vue 自定义实现
+            # （监控 tab + 详情抽屉），故 page_type 须为 custom_page —— 若沿用
+            # multi_object_hub，dynamicRoutes 会按 GenericTabContainer 渲染，
+            # 与实际页面实现不符。
+            'page_type': 'custom_page',
+            # 遗留实体（scheduled_task / task_queue / task_execution / ai_async_task）
+            # 已随入口收敛下线：task.v1 的读路径走 /api/v1/tasks，不经 BO 泛型列表，
+            # 故不绑任何 object_types / bo_bindings / required_permissions。
+            'primary_object_type': '',
+            'object_types': [],
+            'bo_bindings': [],
+            'required_permissions': [],
             'parent_menu': 'system',
             'icon': 'Timer',
             'color': 'blue',
-            'description': '后台任务调度与执行管理',
+            'description': '任务收件箱与监控（task.v1）',
             'sort_order': 0,
             'show_in_sidebar': True,
             'auto_generated': False,
             'page_config': {},
-        },
-        {
-            'menu_code': 'task-definitions',
-            'menu_name': '任务定义',
-            'menu_path': '/system/task-definitions',
-            'page_type': 'object_list',
-            'primary_object_type': 'scheduled_task',
-            'object_types': ['scheduled_task'],
-            'bo_bindings': [{'bo_id': 'scheduled_task', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']}],
-            'required_permissions': [],
-            'parent_menu': 'task-management',
-            'icon': 'List',
-            'color': '',
-            'description': '管理所有定时任务的配置',
-            'sort_order': 1,
-            'show_in_sidebar': False,
-            'auto_generated': False,
-        },
-        {
-            'menu_code': 'task-queues',
-            'menu_name': '任务队列',
-            'menu_path': '/system/task-queues',
-            'page_type': 'object_list',
-            'primary_object_type': 'task_queue',
-            'object_types': ['task_queue'],
-            'bo_bindings': [{'bo_id': 'task_queue', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']}],
-            'required_permissions': [],
-            'parent_menu': 'task-management',
-            'icon': 'Rank',
-            'color': '',
-            'description': '查看任务队列状态与配置',
-            'sort_order': 2,
-            'show_in_sidebar': False,
-            'auto_generated': False,
-        },
-        {
-            'menu_code': 'task-executions',
-            'menu_name': '执行记录',
-            'menu_path': '/system/task-executions',
-            'page_type': 'object_list',
-            'primary_object_type': 'task_execution',
-            'object_types': ['task_execution'],
-            'bo_bindings': [{'bo_id': 'task_execution', 'role': 'primary', 'include_actions': ['read', 'delete', 'list']}],
-            'required_permissions': [],
-            'parent_menu': 'task-management',
-            'icon': 'Document',
-            'color': '',
-            'description': '查看任务执行历史记录',
-            'sort_order': 3,
-            'show_in_sidebar': False,
-            'auto_generated': False,
-        },
-        {
-            'menu_code': 'ai-async-tasks',
-            'menu_name': 'AI异步任务',
-            'menu_path': '/system/ai-async-tasks',
-            'page_type': 'object_list',
-            'primary_object_type': 'ai_async_task',
-            'object_types': ['ai_async_task'],
-            'bo_bindings': [{'bo_id': 'ai_async_task', 'role': 'primary', 'include_actions': ['read', 'delete', 'list']}],
-            'required_permissions': [],
-            'parent_menu': 'task-management',
-            'icon': 'Cpu',
-            'color': '',
-            'description': '查看AI Agent异步任务',
-            'sort_order': 4,
-            'show_in_sidebar': False,
-            'auto_generated': False,
         },
     ]
 
@@ -246,15 +181,18 @@ def init_task_menus(data_source):
         except Exception as e:
             logger.error("Failed to sync menu_permissions for %s: %s", menu['menu_code'], e)
 
-    for stale_code in ['task-definitions', 'task-queues', 'task-executions', 'ai-async-tasks']:
-        try:
-            data_source.execute(
-                "DELETE FROM menu_permissions WHERE menu_code = ?",
-                (stale_code,)
-            )
-            logger.info("Removed stale menu_permissions entry: %s", stale_code)
-        except Exception as e:
-            logger.error("Failed to remove stale menu_permissions %s: %s", stale_code, e)
+    # P1 入口收敛：清除遗留叶子菜单（menus + menu_permissions 两张表）。
+    # 只删种子不删历史行不够 —— 已升级过的库仍留着旧行，
+    # 配合前端静态路由会让 URL 直访落回遗留 GenericObjectList。
+    for stale_code in LEGACY_LEAF_MENU_CODES:
+        for table in ('menus', 'menu_permissions'):
+            try:
+                cur = data_source.execute(
+                    f"DELETE FROM {table} WHERE menu_code = ?", (stale_code,))
+                if cur.rowcount and cur.rowcount > 0:
+                    logger.info("Removed stale %s entry: %s", table, stale_code)
+            except Exception as e:
+                logger.error("Failed to remove stale %s entry %s: %s", table, stale_code, e)
 
     data_source.commit()
     logger.info("Task menu_permissions synced")

@@ -41,37 +41,13 @@ export default [
     }
   },
   {
+    // [P1 入口收敛] 本页已由 task.v1 直接接管（TaskCenter.vue：监控 tab + 详情抽屉），
+    // 读路径走 /api/v1/tasks。遗留的 task-definitions / task-queues /
+    // task-executions / ai-async-tasks 四条路由（scheduled_task 等旧实体泛型列表）
+    // 已随菜单收敛一并下线——保留会让 URL 直访落回旧任务体系。
     path: '/system/task-management',
     name: 'task-management',
     component: () => import('@/views/TaskCenter/TaskCenter.vue'),
     meta: { title: '任务管理', requiresAuth: true, requiresAdmin: true }
-  },
-  {
-    path: '/system/task-definitions',
-    name: 'task-definitions',
-    component: () => import('@/views/GenericObjectList.vue'),
-    props: { objectType: 'scheduled_task' },
-    meta: { title: '任务定义', requiresAuth: true }
-  },
-  {
-    path: '/system/task-queues',
-    name: 'task-queues',
-    component: () => import('@/views/GenericObjectList.vue'),
-    props: { objectType: 'task_queue' },
-    meta: { title: '任务队列', requiresAuth: true }
-  },
-  {
-    path: '/system/task-executions',
-    name: 'task-executions',
-    component: () => import('@/views/GenericObjectList.vue'),
-    props: { objectType: 'task_execution' },
-    meta: { title: '执行记录', requiresAuth: true }
-  },
-  {
-    path: '/system/ai-async-tasks',
-    name: 'ai-async-tasks',
-    component: () => import('@/views/GenericObjectList.vue'),
-    props: { objectType: 'ai_async_task' },
-    meta: { title: 'AI异步任务', requiresAuth: true }
   }
 ]

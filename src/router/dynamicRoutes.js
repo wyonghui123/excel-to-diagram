@@ -21,7 +21,9 @@ const STATIC_ROUTE_NAMES = new Set([
   'ObjectDetail', 'ObjectDetailCreate', 'PermissionSetDetail',
   'AccountSettings', 'PermissionSetCenter', 'PermissionSetDetailContent',
   'system-admin', 'ArchDataManagement',
-  'task-management', 'task-definitions', 'task-queues', 'task-executions', 'ai-async-tasks'
+  // [P1 入口收敛] 遗留 task-definitions / task-queues / task-executions /
+  // ai-async-tasks 已随菜单收敛下线，不再登记为静态路由。
+  'task-management'
 ])
 
 const STATIC_ROUTE_PATHS = new Set([
@@ -30,8 +32,7 @@ const STATIC_ROUTE_PATHS = new Set([
   '/detail/', '/system-admin', '/role/', '/org/',
   '/system/role-permission/', '/system/role-detail/',
   '/permission-set/', '/permission-bundle/',
-  '/system/task-management', '/system/task-definitions',
-  '/system/task-queues', '/system/task-executions', '/system/ai-async-tasks',
+  '/system/task-management',
 ])
 
 let _routesRegistered = false
