@@ -36,11 +36,11 @@
 
 <div class="tip">
   <b>怎么看结果</b><br>
-  · 全部绿色 → 网络没问题，白屏另有原因<br>
-  · 第 1 段红 → 连不上外网，检查手机是否能上网<br>
-  · 第 2 段红 → 域名解析被拦，换网络或改 DNS<br>
-  · 第 3 段红 → 隧道被拦，换网络（公司网常拦这类服务）<br>
-  · 第 4 段红 → 隧道通了但应用接口不通，后端问题<br>
+  · 全部绿→ 网络正常<br>
+  · <b>第 3 段红 → 最可能就是这个：</b>HTML 能开但 JS 拉不下来，
+    免费隧道带宽不够，界面就会一直空白。请开主页面后耐心等 60 秒再判断<br>
+  · 第 2 段红 → 后端不通，检查后端进程<br>
+  · 第 1 段红 → 隧道本身不通，换网络重试
 </div>
 
 <button onclick="run()">重新检测</button>
@@ -49,32 +49,23 @@
 const TUNNEL = location.origin;
 const results = [];
 const steps = [
-  { key: 'dns', name: '1. 域名解析',
-    desc: '把域名交给系统 DNS 解析',
-    run: () => new Promise((res) => {
-      const t = setTimeout(() => res({ ok: false, val: '解析超时（12秒）' }), 12000);
-      fetch('https://dns.google/resolve?name=' +
-            encodeURIComponent(location.hostname) + '&type=A', { mode: 'cors' })
-        .then(r => r.json()).then(j => {
-          clearTimeout(t);
-          const a = j.Answer && j.Answer.find(x => x.type === 1);
-          res(a ? { ok: true, val: a.data }
-                : { ok: false, val: '未返回 A 记录' });
-        }).catch(e => { clearTimeout(t); res({ ok: false, val: '请求失败: ' + e.message }); });
-    }) },
-  { key: 'home', name: '2. 隧道首页',
-    desc: '访问隧道地址能否拿到 HTML',
+  // [FIX 2026-10-13] 原第 1 段用 dns.google 的 DoH 查 A 记录，
+  // 该接口在国内不可达，必然超时 —— 造成「域名解析断」的误报，
+  // 而实际上页面能加载出来就说明域名已解析成功。
+  // 纯前端无法可靠探测 DNS(浏览器不暴露该能力)，故删除该段，
+  // 改为在开头用「页面能加载即说明解析成功」作为前提。
+  { key: 'home', name: '1. 隧道首页',
+    desc: '页面能打开即说明域名已解析成功（浏览器不暴露 DNS 状态，故不单测）',
     run: () => new Promise((res) => {
       const ctl = new AbortController();
       const t = setTimeout(() => { ctl.abort(); res({ ok: false, val: '超时（20秒）' }); }, 20000);
       fetch('/', { signal: ctl.signal }).then(r => {
         clearTimeout(t);
-        res({ ok: r.ok, val: 'HTTP ' + r.status + '，' +
-             (r.ok ? '隧道通' : '被服务端拒绝') });
+        res({ ok: r.ok, val: 'HTTP ' + r.status + '，域名解析 + 隧道均通' });
       }).catch(e => { clearTimeout(t);
         res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
     }) },
-  { key: 'api', name: '3. 后端接口',
+  { key: 'api', name: '2. 后端接口',
     desc: '验证 /api/v1/auth/dev-login 能否返回',
     run: () => new Promise((res) => {
       const ctl = new AbortController();
@@ -85,8 +76,30 @@ const steps = [
         .catch(e => { clearTimeout(t);
           res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
     }) },
+  // [ADD 2026-10-13] 白屏的真正原因通常在这里：HTML 只有 1.4KB，
+  // 界面全靠后续几十个 JS chunk 拉取。免费隧道带宽有限，
+  // 任一 chunk 卡住都会导致「HTML 能开但界面空白」。
+  { key: 'chunk', name: '3. JS 模块加载',
+    desc: '拉取主 chunk 并验证体积（白屏最常见原因）',
+    run: () => new Promise((res) => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => { ctl.abort();
+        res({ ok: false, val: '超时（40秒）—— 隧道带宽不足或 chunk 卡住' }); }, 40000);
+      fetch('/', { signal: ctl.signal }).then(r => r.text()).then(html => {
+        const m = html.match(/src="([^"]+\.js)"/);
+        if (!m) { clearTimeout(t); res({ ok: false, val: 'index.html 里找不到 JS 入口' }); return; }
+        return fetch(m[1], { signal: ctl.signal }).then(r2 => r2.arrayBuffer())
+          .then(buf => {
+            clearTimeout(t);
+            const kb = Math.round(buf.byteLength / 1024);
+            res({ ok: r2_ok(kb), val: '主 chunk ' + kb + ' KB' });
+          });
+      }).catch(e => { clearTimeout(t);
+        res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
+      function r2_ok(kb) { return kb > 1; }
+    }) },
   { key: 'page', name: '4. 应用页面',
-    desc: '加载主页面 HTML',
+    desc: '加载业务页面 HTML',
     run: () => new Promise((res) => {
       const ctl = new AbortController();
       const t = setTimeout(() => { ctl.abort(); res({ ok: false, val: '超时（25秒）' }); }, 25000);
