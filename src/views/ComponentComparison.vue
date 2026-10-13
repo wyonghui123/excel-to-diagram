@@ -4481,7 +4481,9 @@
                   </template>
 
                   <template #header-center>
-                    <BreadcrumbNav :items="demoBreadcrumbs" />
+                    <div class="cc-header-center">
+                      <BreadcrumbNav :items="demoBreadcrumbs" />
+                    </div>
                   </template>
 
                   <template #header-right>
@@ -6019,6 +6021,16 @@ const missingOther = [
 </script>
 
 <style scoped>
+/* [FIX 2026-10-13 移动端] AppShell 的 header-center 已由内置容器改为纯 slot
+   （原空 div 带 flex:2 白占 33% 宽度），中间区宽度改由调用方自行声明。 */
+.cc-header-center {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .component-comparison {
   max-width: 1400px;
   margin: 0 auto;

@@ -12,6 +12,10 @@ import { ref, computed } from 'vue'
 import { apiV2 } from '@/utils/httpClient'
 
 // 与后端 DEFAULT_DISPLAY_NAME 保持一致；请求失败时用这个兜底，不阻塞渲染
+// [FIX 2026-10-13] 此前 TopNavHeader.vue 与 AppLayout.vue 各自硬编码了
+// 不同的默认值（前者同此值、后者为 ArchWorkspace），部署改名时必然漏改。
+// 组件默认值统一改为空串：真实值一律由 AppRootLayout 经 useInstanceInfo 注入，
+// 组件不再持有任何品牌名，兜底责任唯一落在本模块。
 const FALLBACK_NAME = 'BIP应用架构管理'
 
 const displayName = ref(FALLBACK_NAME)

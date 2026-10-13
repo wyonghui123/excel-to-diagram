@@ -200,10 +200,10 @@ describe('AppLayout', () => {
     expect(header.props('logoText')).toBe('My App')
   })
 
-  it('默认 logoText=ArchWorkspace', () => {
+  it('默认 logoText 为空串（由 TopNavHeader 回落 useInstanceInfo）', () => {
     const wrapper = createWrapper()
     const header = wrapper.findComponent({ name: 'TopNavHeader' })
-    expect(header.props('logoText')).toBe('ArchWorkspace')
+    expect(header.props('logoText')).toBe('')
   })
 
   // --- 9. breadcrumbs ---

@@ -206,9 +206,9 @@
         <!-- 关于 -->
         <section v-if="currentMenu === 'about'" class="ss-section" aria-label="关于">
           <div class="about-content">
-            <h3>ArchWorkspace</h3>
+            <h3>{{ displayName }}</h3>
             <p class="version">版本 1.0.0</p>
-            <p>ArchWorkspace 是一款专业的架构设计工具。</p>
+            <p>{{ displayName }} 是一款专业的架构设计工具。</p>
           </div>
         </section>
 
@@ -244,6 +244,11 @@
 import { ref, reactive, onMounted } from 'vue'
 import AppIcon from '@/components/common/AppIcon/AppIcon.vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
+
+// [FIX 2026-10-13] 「关于」面板原硬编码 ArchWorkspace，部署改名后会与
+// 左上角实例展示名不一致，改为取同一数据源。
+const { displayName } = useInstanceInfo()
 
 const currentMenu = ref('ai')
 const saving = ref(false)

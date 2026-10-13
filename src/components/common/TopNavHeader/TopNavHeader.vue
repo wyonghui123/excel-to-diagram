@@ -25,7 +25,7 @@
           <path d="M23 12V15L16 19" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
         </svg>
         <img v-if="logoUrl" :src="logoUrl" :alt="logoAlt" class="app-header__logo-img" />
-        <span class="app-header__logo-text">{{ logoText }}</span>
+        <span class="app-header__logo-text">{{ resolvedLogoText }}</span>
       </div>
 
       <BreadcrumbNav
@@ -53,6 +53,7 @@ import { useAppStore } from '@/stores/appStore'
 import { useAuthStore } from '@/stores/authStore'
 import { BreadcrumbNav } from '@/components/common/BreadcrumbNav'
 import { UserMenu } from '@/components/common/UserMenu'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 const props = defineProps({
   logoUrl: {
@@ -65,10 +66,10 @@ const props = defineProps({
   },
   logoText: {
     type: String,
-    // 兜底默认值（与 useInstanceInfo.FALLBACK_NAME 保持一致）。
-    // 实际由 AppRootLayout 经 AppLayout 传入 useInstanceInfo().displayName（部署级可配），
-    // 此处默认值仅在独立使用本组件时生效。
-    default: 'BIP应用架构管理'
+    // [FIX 2026-10-13] 原默认值 'BIP应用架构管理' 是 useInstanceInfo.FALLBACK_NAME
+    // 的副本，改名需手工同步两处，且与 AppLayout 的 'ArchWorkspace' 相互矛盾。
+    // 现在不传时直接复用 useInstanceInfo 的兜底值，品牌名单一来源。
+    default: ''
   },
   breadcrumbs: {
     type: Array,
@@ -117,6 +118,11 @@ const emit = defineEmits([
 const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+
+// [FIX 2026-10-13] 未显式传入时回落 useInstanceInfo（唯一品牌名来源），
+// 避免组件各自硬编码默认值导致部署改名漏改。
+const { displayName: instanceDisplayName } = useInstanceInfo()
+const resolvedLogoText = computed(() => props.logoText || instanceDisplayName.value)
 
 const currentUser = computed(() => {
   const user = authStore.user

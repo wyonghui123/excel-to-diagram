@@ -178,8 +178,5 @@
     "saveFailed": "Save failed",
     "loadFailed": "{context} failed",
     "selectionLimitHit": "Selection exceeds limit of {limit} items, truncated. Please reduce or batch the operation."
-  },
-  "app": {
-    "title": "BIP Application Architecture Management"
   }
 }

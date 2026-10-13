@@ -119,7 +119,9 @@ describe('SystemSettings', () => {
       const menuItems = wrapper.findAll('.ss-nav-item')
       await menuItems[5].trigger('click')
 
-      expect(wrapper.find('.about-content h3').text()).toBe('ArchWorkspace')
+      // [FIX 2026-10-13] 关于面板改为取部署级实例展示名（useInstanceInfo），
+      // 测试环境下回落其 FALLBACK_NAME，不再是硬编码的 ArchWorkspace。
+      expect(wrapper.find('.about-content h3').text()).toBe('BIP应用架构管理')
     })
   })
 
@@ -317,7 +319,7 @@ describe('SystemSettings', () => {
       const menuItems = wrapper.findAll('.ss-nav-item')
       await menuItems[5].trigger('click')
 
-      expect(wrapper.find('.about-content h3').text()).toBe('ArchWorkspace')
+      expect(wrapper.find('.about-content h3').text()).toBe('BIP应用架构管理')
     })
 
     it('应该显示版本号', async () => {

@@ -7,9 +7,11 @@
             <slot name="logo" />
           </div>
         </slot>
-        <slot name="header-center">
-          <div class="app-shell__header-center" />
-        </slot>
+        <!-- [FIX 2026-10-13 移动端] 原 fallback 是空 div 却带 flex:2，
+             白占 33% 宽度，与 TopNavHeader 已删除的 .app-header__center 同源。
+             现改为纯 slot，宽度分配由调用方内容自身的 class 决定
+             （app-shell__header-center），不再由组件强加。 -->
+        <slot name="header-center" />
         <slot name="header-right">
           <div class="app-shell__header-right" />
         </slot>
@@ -97,21 +99,17 @@ defineEmits(['scrim-click'])
 }
 
 .app-shell__header-left,
-.app-shell__header-center,
 .app-shell__header-right {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  /* [FIX 2026-10-13 移动端] 允许收缩，否则内部长中文会撑破 header */
+  min-width: 0;
 }
 
 .app-shell__header-left {
   flex: 1;
   justify-content: flex-start;
-}
-
-.app-shell__header-center {
-  flex: 2;
-  justify-content: center;
 }
 
 .app-shell__header-right {

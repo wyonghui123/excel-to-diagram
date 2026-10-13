@@ -100,7 +100,11 @@ const props = defineProps({
   },
   logoText: {
     type: String,
-    default: 'ArchWorkspace'
+    // [FIX 2026-10-13] 原默认值 'ArchWorkspace' 与 TopNavHeader 的
+    // 'BIP应用架构管理' 相互矛盾，且两者都与 useInstanceInfo 的兜底值重复定义。
+    // 现在统一为空串，由 TopNavHeader 回落 useInstanceInfo —— 品牌名单一来源，
+    // 部署改名不会漏改。
+    default: ''
   },
   breadcrumbs: {
     type: Array,

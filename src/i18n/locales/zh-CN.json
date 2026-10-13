@@ -243,8 +243,5 @@
     "saveFailed": "保存失败",
     "loadFailed": "{context}失败",
     "selectionLimitHit": "选中数量超过上限 {limit} 条, 已截断。请减少选区或分批操作。"
-  },
-  "app": {
-    "title": "BIP应用架构管理"
   }
 }

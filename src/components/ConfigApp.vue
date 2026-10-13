@@ -316,15 +316,15 @@
 
           <!-- 关于 -->
           <div v-if="currentMenu === 'about'" class="config-section">
-            <h2 class="section-title">关于 ArchWorkspace</h2>
+            <h2 class="section-title">关于 {{ displayName }}</h2>
             <div class="about-content">
               <div class="about-logo">
                 <AppIcon name="enabled" size="md" class="logo-icon" />
-                <h3>ArchWorkspace</h3>
+                <h3>{{ displayName }}</h3>
                 <p class="version">版本 1.0.0</p>
               </div>
               <div class="about-info">
-                <p>ArchWorkspace 是一款专业的架构设计工具，提供业务对象关系图生成、数据验证等功能。</p>
+                <p>{{ displayName }} 是一款专业的架构设计工具，提供业务对象关系图生成、数据验证等功能。</p>
                 <div class="feature-list">
                   <div class="feature-item">
                     <span class="feature-icon"><AppIcon name="arrow-right" size="md" /></span>
@@ -366,6 +366,7 @@
 <script>
 import { AppIcon } from '@/components/common/AppIcon'
 import { useMessage } from '@/composables/useMessage'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 export default {
   name: 'ConfigApp',
@@ -373,6 +374,11 @@ export default {
     AppIcon
   },
   emits: ['back-to-landing'],
+  // [FIX 2026-10-13] 「关于」面板原硬编码 ArchWorkspace，部署改名后
+  // 用户会看到两个产品名，误以为装错了软件。改为取部署级实例展示名。
+  setup() {
+    return useInstanceInfo()
+  },
   data() {
     return {
       message: useMessage(),
