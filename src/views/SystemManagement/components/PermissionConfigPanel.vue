@@ -595,10 +595,12 @@ function handleClearActiveMenu() {
 const displayedMenu = computed<any>(() => activeMenu.value)
 
 /** [Phase 4] 当前菜单的 required_permissions code 前缀（bo_id）→ 与 yaml resourceTypeLabels 求并集
- *   - 菜单的 bo_id（如 scheduled_task）未必在 yaml 里有同名 resource_type
+ *   - 菜单的 bo_id未必在 yaml 里有同名 resource_type
  *   - [Phase 6 2026-08-25 FIX] 放宽匹配：即使 bo_id 不在 rtl 也展示（fallback label = bo_id）
  *     因为 ResourceActionMatrix 内部用 props.resourceTypeLabels[rt] || rt 作为 label。
- *   - 例: ["scheduled_task:create", "product:read"] → ["scheduled_task", "product"]
+ *   - 例: ["product:create", "product:read"] → ["product"]
+ *   - [P1 2026-10-13] 示例不再用 scheduled_task：任务管理入口已收敛为 task.v1
+ *     （custom_page + 无 BO 绑定），遗留任务 BO 仅存于其它菜单/权限码。
  *   - [Phase 6 2026-08-25] 子菜单聚合：选中父菜单时，聚合其所有后代的资源类型（按 menu_path 推断子菜单关系）
  */
 const activeMenuResourceTypes = computed<string[]>(() => {

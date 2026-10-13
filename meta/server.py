@@ -570,16 +570,54 @@ def create_app(db_path=None):
         name='background', priority=100, max_workers=2, timeout=600, enabled=True
     ))
 
-    task_scheduler.register_handler('db_analyze', DBAnalyzeHandler())
-    task_scheduler.register_handler('db_vacuum', DBVacuumHandler())
-    task_scheduler.register_handler('db_integrity_check', DBIntegrityCheckHandler())
-    task_scheduler.register_handler('db_checkpoint', DBCheckpointHandler())
-    task_scheduler.register_handler('audit_failure_retry', AuditFailureRetryHandler())
-    task_scheduler.register_handler('audit_log_cleanup', AuditLogCleanupHandler())
-    task_scheduler.register_handler('audit_log_archive', AuditLogArchiveHandler())
-    task_scheduler.register_handler('import_queue_processor', ImportQueueHandler())
-    # [A5 2026-10-02] 平台心跳：direct 派工 + 认领超时回收 + SLA 升级扫描
+    # [P1 2026-10-13] 运维作业从遗留任务调度器解耦。
+    #
+    # 背景: 遗留 TaskScheduler 上挂了 9 个 handler，但只有 platform_tick 属任务域
+    #       （A5 平台心跳）。其余 8 个是纯运维作业（DB 维护 / 审计运维 / 导入队列），
+    #       与任务模型无关，只是借调度器跑 cron，却被迫依赖 scheduled_tasks 等表。
+    #       这是替换遗留任务体系的隐性阻塞 —— 删任务域表会连带停掉 DB 维护。
+    #
+    # 处置: 8 个运维作业改挂独立 MaintenanceScheduler（调度配置内嵌代码，不落库）。
+    #       handler 实例在此处创建一次，两边复用同一实例（不重复 new）。
+    #       platform_tick 仍挂遗留调度器 —— 它写 task_events / task_slas 等任务域表，
+    #       且 task.v1 尚无独立调度进程，待其就位后再迁。
+    #
+    # 切换开关: MAINTENANCE_SCHEDULER_ENABLED=0 可临时退回旧路径（回滚用）。
+    _maintenance_handlers = {
+        'db_analyze': DBAnalyzeHandler(),
+        'db_vacuum': DBVacuumHandler(),
+        'db_integrity_check': DBIntegrityCheckHandler(),
+        'db_checkpoint': DBCheckpointHandler(),
+        'audit_failure_retry': AuditFailureRetryHandler(),
+        'audit_log_cleanup': AuditLogCleanupHandler(),
+        'audit_log_archive': AuditLogArchiveHandler(),
+        'import_queue_processor': ImportQueueHandler(),
+    }
+
+    _use_maintenance = os.environ.get(
+        'MAINTENANCE_SCHEDULER_ENABLED', '1') not in ('0', 'false', 'False')
+
     task_scheduler.register_handler('platform_tick', PlatformTickHandler())
+
+    if _use_maintenance:
+        from meta.core.maintenance_scheduler import MaintenanceScheduler
+        maintenance_scheduler = MaintenanceScheduler(
+            data_source=data_source,
+            config={'check_interval': 60},
+        )
+        for _code, _handler in _maintenance_handlers.items():
+            maintenance_scheduler.register_handler(_code, _handler)
+        maintenance_scheduler.start()
+        atexit.register(maintenance_scheduler.stop)
+        logging.getLogger(__name__).info(
+            "[P1] MaintenanceScheduler started with %d ops jobs (decoupled from task domain)",
+            len(_maintenance_handlers))
+    else:
+        # 回滚路径: 运维作业退回遗留调度器
+        for _code, _handler in _maintenance_handlers.items():
+            task_scheduler.register_handler(_code, _handler)
+        logging.getLogger(__name__).warning(
+            "[P1] MaintenanceScheduler DISABLED — ops jobs fall back to legacy TaskScheduler")
 
     task_scheduler.start()
     set_task_scheduler(task_scheduler)
