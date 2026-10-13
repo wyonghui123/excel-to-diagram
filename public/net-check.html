@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>网络诊断 · 手机访问自检</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; padding: 16px; background: #f5f5f5; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: #666; margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 14px;
+          margin-bottom: 10px; border-left: 4px solid #ccc; }
+  .card.ok { border-left-color: #67c23a; }
+  .card.fail { border-left-color: #f56c6c; }
+  .card.wait { border-left-color: #909399; }
+  .name { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .val { font-size: 13px; color: #444; word-break: break-all; }
+  .tag { float: right; font-size: 12px; padding: 2px 8px; border-radius: 10px;
+         background: #f0f0f0; color: #888; }
+  .card.ok .tag { background: #67c23a; color: #fff; }
+  .card.fail .tag { background: #f56c6c; color: #fff; }
+  .card.wait .tag { background: #909399; color: #fff; }
+  .tip { background: #fff9e6; border: 1px solid #ffe58f; border-radius: 6px;
+         padding: 12px; font-size: 13px; line-height: 1.7; margin-top: 12px; }
+  button { background: #409eff; color: #fff; border: 0; border-radius: 6px;
+           padding: 11px 18px; font-size: 15px; width: 100%; margin-top: 8px; }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>手机访问网络诊断</h1>
+<div class="sub">逐段测试，每一段独立发起请求。结果会自动更新。</div>
+
+<div id="list"></div>
+
+<div class="tip">
+  <b>怎么看结果</b><br>
+  · 全部绿色 → 网络没问题，白屏另有原因<br>
+  · 第 1 段红 → 连不上外网，检查手机是否能上网<br>
+  · 第 2 段红 → 域名解析被拦，换网络或改 DNS<br>
+  · 第 3 段红 → 隧道被拦，换网络（公司网常拦这类服务）<br>
+  · 第 4 段红 → 隧道通了但应用接口不通，后端问题<br>
+</div>
+
+<button onclick="run()">重新检测</button>
+
+<script>
+const TUNNEL = location.origin;
+const results = [];
+const steps = [
+  { key: 'dns', name: '1. 域名解析',
+    desc: '把域名交给系统 DNS 解析',
+    run: () => new Promise((res) => {
+      const t = setTimeout(() => res({ ok: false, val: '解析超时（12秒）' }), 12000);
+      fetch('https://dns.google/resolve?name=' +
+            encodeURIComponent(location.hostname) + '&type=A', { mode: 'cors' })
+        .then(r => r.json()).then(j => {
+          clearTimeout(t);
+          const a = j.Answer && j.Answer.find(x => x.type === 1);
+          res(a ? { ok: true, val: a.data }
+                : { ok: false, val: '未返回 A 记录' });
+        }).catch(e => { clearTimeout(t); res({ ok: false, val: '请求失败: ' + e.message }); });
+    }) },
+  { key: 'home', name: '2. 隧道首页',
+    desc: '访问隧道地址能否拿到 HTML',
+    run: () => new Promise((res) => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => { ctl.abort(); res({ ok: false, val: '超时（20秒）' }); }, 20000);
+      fetch('/', { signal: ctl.signal }).then(r => {
+        clearTimeout(t);
+        res({ ok: r.ok, val: 'HTTP ' + r.status + '，' +
+             (r.ok ? '隧道通' : '被服务端拒绝') });
+      }).catch(e => { clearTimeout(t);
+        res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
+    }) },
+  { key: 'api', name: '3. 后端接口',
+    desc: '验证 /api/v1/auth/dev-login 能否返回',
+    run: () => new Promise((res) => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => { ctl.abort(); res({ ok: false, val: '超时（20秒）' }); }, 20000);
+      fetch('/api/v1/auth/dev-login?username=admin', { signal: ctl.signal })
+        .then(r => { clearTimeout(t);
+          res({ ok: r.ok, val: 'HTTP ' + r.status + (r.ok ? '，后端正常' : '') }); })
+        .catch(e => { clearTimeout(t);
+          res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
+    }) },
+  { key: 'page', name: '4. 应用页面',
+    desc: '加载主页面 HTML',
+    run: () => new Promise((res) => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => { ctl.abort(); res({ ok: false, val: '超时（25秒）' }); }, 25000);
+      fetch('/org-management', { signal: ctl.signal }).then(r => {
+        clearTimeout(t);
+        res({ ok: r.ok, val: 'HTTP ' + r.status });
+      }).catch(e => { clearTimeout(t);
+        res({ ok: false, val: e.name === 'AbortError' ? '超时' : e.message }); });
+    }) },
+];
+
+function render() {
+  document.getElementById('list').innerHTML = results.map(r => `
+    <div class="card ${r.st}">
+      <span class="tag">${r.tag}</span>
+      <div class="name">${r.name}</div>
+      <div class="val">${r.desc}</div>
+      <div class="val"><b>${r.val}</b></div>
+    </div>`).join('');
+}
+
+async function run() {
+  results.length = 0;
+  steps.forEach(s => results.push({ name: s.name, desc: s.desc,
+    val: '检测中…', st: 'wait', tag: '等待' }));
+  render();
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i], r = results[i];
+    const out = await s.run();
+    r.val = out.val;
+    r.st = out.ok ? 'ok' : 'fail';
+    r.tag = out.ok ? '通' : '断';
+    render();
+  }
+  document.querySelector('button').textContent = '重新检测';
+}
+run();
+</script>
+</body>
+</html>
