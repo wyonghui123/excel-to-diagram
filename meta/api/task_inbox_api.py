@@ -129,7 +129,7 @@ def start_task_service(task_id: str, *, user, registry=None):
         outcome = start_task(_platform_ds(), str(task_id),
                              run_as='system', registry=registry)
     except ExecutorAdapterError as e:
-        # 任务不存在 / 未知类型 / 载体未实现（agent）→ 409 冲突（无副作用）
+        # 任务不存在 / 未知类型 → 409 冲突（无副作用）
         return {'success': False, 'message': str(e)}, 409
     except Exception as e:
         logger.error("[A5] 任务启动失败: %s", e)

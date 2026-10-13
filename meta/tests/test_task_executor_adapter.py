@@ -14,7 +14,7 @@ os.environ.setdefault('ALLOW_RAW_SQL', '1')
   1. system / cron → 委托 BOActionExecutor（B2 三态）
   2. human → awaiting_human，零写库（status 不变）
   3. webhook → awaiting_async，零写库
-  4. agent → fail-closed（未实现，§9.3）
+  4. agent → awaiting_agent，零写库（§9.3 Agent 运行时；不发明状态）
   5. 未知类型 / 任务不存在 → fail-closed
   6. 适配矩阵覆盖 §7.5 全枚举；停等信号判定
 """
@@ -25,6 +25,7 @@ from datetime import datetime
 from meta.core.task_executor_adapter import (
     ADAPTER_CARRIERS,
     EXECUTOR_TYPES,
+    OUTCOME_AWAITING_AGENT,
     OUTCOME_AWAITING_HUMAN,
     PAUSE_OUTCOMES,
     ExecutorAdapterError,
@@ -101,15 +102,16 @@ class TestMatrix:
         assert EXECUTOR_TYPES == ("human", "agent", "cron", "system", "webhook")
         assert set(ADAPTER_CARRIERS) == set(EXECUTOR_TYPES)
 
-    def test_TC_A5_002_仅agent未实现(self):
-        assert ADAPTER_CARRIERS["agent"] is None
-        for t in ("human", "system", "cron", "webhook"):
+    def test_TC_A5_002_五类载体均已声明(self):
+        for t in ("human", "agent", "system", "cron", "webhook"):
             assert ADAPTER_CARRIERS[t], t
 
     def test_TC_A5_003_停等信号判定(self):
         assert OUTCOME_AWAITING_HUMAN in PAUSE_OUTCOMES
+        assert OUTCOME_AWAITING_AGENT in PAUSE_OUTCOMES
         assert OUTCOME_ASYNC in PAUSE_OUTCOMES
         assert is_pause(OUTCOME_AWAITING_HUMAN) is True
+        assert is_pause(OUTCOME_AWAITING_AGENT) is True
         assert is_pause(OUTCOME_COMPLETED) is False
 
 
@@ -158,14 +160,15 @@ class TestDispatch:
         assert outcome["task_status"] == "ready"
         assert _status(ds, tid) == "ready"
 
-    def test_TC_A5_014_agent未实现fail_closed(self, ds, registry):
+    def test_TC_A5_014_agent停等且零写库(self, ds, registry):
         tid = _task(ds, executor_type="agent", status="ready", action_id="")
 
-        with pytest.raises(ExecutorAdapterError) as ei:
-            start_task(ds, tid, registry=registry)
+        outcome = start_task(ds, tid, registry=registry)
 
-        assert "agent" in str(ei.value)
-        assert _status(ds, tid) == "ready"
+        assert outcome["status"] == OUTCOME_AWAITING_AGENT
+        assert outcome["task_status"] == "ready"       # 未发明状态
+        assert outcome["executor_type"] == "agent"
+        assert _status(ds, tid) == "ready"             # 零写库
 
     def test_TC_A5_015_未知类型fail_closed(self, ds, registry):
         tid = _task(ds, executor_type="robot", status="ready", action_id="")
@@ -219,7 +222,21 @@ def test_TC_A5_021_服务函数非管理员被拒(ds, registry, monkeypatch):
     assert _status(ds, tid) == "ready"
 
 
-def test_TC_A5_022_服务函数未实现类型映射409(ds, registry, monkeypatch):
+def test_TC_A5_022_服务函数未知类型映射409(ds, registry, monkeypatch):
+    import meta.api.task_inbox_api as api
+
+    monkeypatch.setattr(api, "_platform_ds", lambda: ds)
+    tid = _task(ds, executor_type="robot", status="ready", action_id="")
+
+    payload, code = api.start_task_service(
+        tid, user={"user_id": "u-admin", "permissions": ["*"]}, registry=registry)
+
+    assert code == 409
+    assert payload["success"] is False
+    assert "robot" in payload["message"]
+
+
+def test_TC_A5_023_服务函数agent返回停等(ds, registry, monkeypatch):
     import meta.api.task_inbox_api as api
 
     monkeypatch.setattr(api, "_platform_ds", lambda: ds)
@@ -228,6 +245,7 @@ def test_TC_A5_022_服务函数未实现类型映射409(ds, registry, monkeypatc
     payload, code = api.start_task_service(
         tid, user={"user_id": "u-admin", "permissions": ["*"]}, registry=registry)
 
-    assert code == 409
-    assert payload["success"] is False
-    assert "agent" in payload["message"]
+    assert code == 200
+    assert payload["success"] is True
+    assert payload["data"]["status"] == OUTCOME_AWAITING_AGENT
+    assert _status(ds, tid) == "ready"

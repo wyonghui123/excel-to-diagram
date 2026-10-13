@@ -12,13 +12,18 @@
   system  → `BOActionExecutor`（B2 三态；自动继承 B4 写权单通道守卫）
   cron    → 同 system 通道（§9.5：复用 BO 引擎入口，不另建执行通道）
   webhook → HTTP 入口受理 + A7 `complete_async` 回调；本层只产出停等信号
-  agent   → **未实现**（§9.3 Agent Adapter 属 E 系列）→ fail-closed，显式报错
+  agent   → Agent 运行时（§9.3 LLM + 工具白名单 + eval）；本层只产出停等信号，**零写库**
 
 分层纪律:
 - **不发明状态**：A2 的 11 态无 waiting 态；等待以「既有状态 + 暂停信号」表达，
   本模块不代写状态列（归属由 A8 收件箱 / A7 回调裁决）。
 - **不越权**：system / cron 分支的写全部经 BO Action（B4 守卫在 B2 内生效）。
-- **不假装完成**：未实现的载体抛 `ExecutorAdapterError`，绝不静默返回成功。
+- **不假装完成**：未知 type 抛 `ExecutorAdapterError`，绝不静默返回成功。
+
+§9.3 缺口（诚实口径）:
+  `agent` 分支只做**派发即停等**（`awaiting_agent`），不含 LLM 推理 / 工具白名单 /
+  eval / checkpoint —— 那是 Agent 运行时（E 系列）的职责。A5 只保证「不发明状态、
+  零写库、停等信号归一」，使 `executor_type='agent'` 的任务不再 fail-closed。
 
 对应方案:
   docs/superpowers/specs/2026-09-07-task-model-design.md §7.1 / §7.5 / §9.2 / §9.5 / §12.1 A5
@@ -42,23 +47,26 @@ ADAPTER_CARRIERS: Dict[str, Optional[str]] = {
     "system": "BOActionExecutor（B2 三态）",
     "cron": "BOActionExecutor（复用 BO 引擎入口，§9.5）",
     "webhook": "HTTP 受理 + task_async.complete_async（A7）",
-    "agent": None,  # §9.3 Agent Adapter（LLM + 工具白名单 + eval）未实现
+    "agent": "Agent 运行时（§9.3；A5 只派发即停等，不含 LLM 推理）",
 }
 
 #: 委托 BOActionExecutor 的 type
 BO_BACKED_TYPES: FrozenSet[str] = frozenset({"system", "cron"})
 
-#: 停等信号（三个真实暂停点 + 人工）
+#: 停等信号（三个真实暂停点 + 人工 + Agent 运行）
 OUTCOME_AWAITING_HUMAN = "awaiting_human"
+
+#: Agent 任务派发后的停等信号（等待 §9.3 Agent 运行时回写 outputs）
+OUTCOME_AWAITING_AGENT = "awaiting_agent"
 
 #: B2 的 awaiting_async / needs_review 同属停等
 PAUSE_OUTCOMES: FrozenSet[str] = frozenset({
-    OUTCOME_AWAITING_HUMAN, "awaiting_async", "needs_review",
+    OUTCOME_AWAITING_HUMAN, OUTCOME_AWAITING_AGENT, "awaiting_async", "needs_review",
 })
 
 
 class ExecutorAdapterError(Exception):
-    """任务不存在 / executor_type 未知 / 载体未实现（fail-closed）。"""
+    """任务不存在 / executor_type 未知（fail-closed）。"""
 
 
 def is_pause(outcome: str) -> bool:
@@ -90,9 +98,10 @@ def start_task(
         system / cron → B2 结果 dict（补 `executor_type`）
         human         → {status: 'awaiting_human', task_status, task_id, executor_type, message}
         webhook       → {status: 'awaiting_async', task_status, task_id, executor_type, message}
+        agent         → {status: 'awaiting_agent', task_status, task_id, executor_type, message}
 
     Raises:
-        ExecutorAdapterError: 任务不存在 / 未知 type / 载体未实现（agent）
+        ExecutorAdapterError: 任务不存在 / 未知 type
     """
     executor_type, task_status = _load_executor_type(data_source, task_id)
 
@@ -125,9 +134,15 @@ def start_task(
         }
 
     if executor_type == "agent":
-        raise ExecutorAdapterError(
-            "agent executor 适配器未实现（§9.3 Agent Adapter 属 E 系列）"
-        )
+        # Agent 任务：派发给 Agent 运行时（§9.3）执行；本层零写库、不改状态。
+        # 推理 / 工具白名单 / eval / checkpoint 属运行时职责，不在 A5 内实现。
+        return {
+            "status": OUTCOME_AWAITING_AGENT,
+            "task_status": task_status,
+            "task_id": str(task_id),
+            "executor_type": executor_type,
+            "message": "Agent 任务：已派发 Agent 运行时（§9.3），等待其回写 outputs",
+        }
 
     raise ExecutorAdapterError(
         f"未知 executor_type：{executor_type!r}（§7.5 允许 {EXECUTOR_TYPES}）"
