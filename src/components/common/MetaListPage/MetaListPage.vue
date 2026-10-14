@@ -205,8 +205,16 @@
       <div class="table-section">
         <!-- [2026-10-13 移动端] 窄屏改渲染卡片，见 cardColumns 处的说明。
              与 el-table 互斥：卡片模式不含排序表头，故窄屏失去列排序能力
-             （排序入口仍在表头筛选与工具栏中）。 -->
-        <div v-if="isMobile" v-loading="loading" class="meta-card-list">
+             （排序入口仍在表头筛选与工具栏中）。
+
+             [FIX 2026-10-13 复用方回归] 此处曾用 v-if="isMobile"，导致
+             embedded / dialog 类复用方在窄屏下也被卡片化 —— 但卡片内容
+             由 useCardView（内含 displayMode==='page' 约束）驱动的
+             cardColumns / cardPrimary 决定，embedded 下二者返回 []，
+             于是渲染出「只有标题的 -、没有任何标签行」的空卡片列表，
+             而依赖的 el-table 被 v-else 顶掉。审计日志页（embedded）
+             实测中招。必须用 useCardView，与 v-else 严格互斥。 -->
+        <div v-if="useCardView" v-loading="loading" class="meta-card-list">
           <div v-if="data.length === 0" class="list-empty-state">
             <el-icon :size="32" class="list-empty-icon"><FolderOpened /></el-icon>
             <div class="list-empty-title">{{ props.emptyText }}</div>
