@@ -119,9 +119,16 @@ export function transformColumns(yamlColumns, options = {}) {
  * @returns {string} 'required' | 'default' | 'optional'
  */
 export function inferColumnPriority(col) {
-  // 优先使用后端返回的值
-  const backendPriority = col.importance || col.priority
-  if (backendPriority) return backendPriority
+  // [FIX 2026-10-13] 只在后端值确实是本函数的两档语义时才直接采用。
+  // 此前把 col.importance 与 col.priority 一并当 priority 返回，但 importance
+  // 是 high/medium/low 三档的「列重要度」（窄屏列降级用），与这里的
+  // required/default 两档语义不同。审计日志 13 列 importance 全为 medium，
+  // 直接返回后被 useMetaList 的 visibleColumns 过滤条件
+  // （只接受 required / default）全部滤掉，导致 el-table 收到空列集：
+  // colgroup 空、无 th、50 个空 tr —— PC 与窄屏都白板，且无任何 JS 报错。
+  const PRIORITIES = ['required', 'default', 'optional']
+  const backendPriority = col.priority !== undefined ? col.priority : col.importance
+  if (backendPriority && PRIORITIES.includes(backendPriority)) return backendPriority
   // Fallback: 推断逻辑
   const prop = (col.prop || col.key || '').toLowerCase()
   const type = (col.type || '').toLowerCase()
