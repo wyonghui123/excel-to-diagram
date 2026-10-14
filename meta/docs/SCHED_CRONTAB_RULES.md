@@ -100,6 +100,39 @@ class CronParser:
 
 **结论**: 实现**简化版 cron** (Vixie cron 风格), 不支持 Quartz 扩展。
 
+### 4.3 Workflow 定时触发的 `trigger_expr` 契约
+
+Workflow 定义中 `trigger_kind='schedule'` 时，`trigger_expr` **必须是 JSON 对象且含非空 `cron` 字段**（标准 5 字段 cron，口径同 §2 / §3）：
+
+```json
+{"cron": "0 9 * * 1-5"}
+```
+
+- **发布即校验**：`meta/core/workflow_trigger.py` 的 `parse_trigger_expr` → `_parse_schedule_expr` 负责解析；由 `publish_workflow` 的定义期闸门 `assert_trigger` 在**发布时**执行，非法即拒绝发布（不落定义行）。
+- `manual` / `api` 不解释 `trigger_expr`（由调用方直接唤起 Run）。
+- `event` 另有契约：JSON 对象 `{"event": "<事件名>", "when": "<可选条件>", "doc_ref": "<可选 payload 字段>"}`。
+
+发布期拒绝的错误码（`WorkflowDefinitionError` / `DefinitionFinding`）：
+
+| code | 触发条件 |
+|------|----------|
+| `TRIGGER_EXPR_MISSING` | `schedule` 但 `trigger_expr` 为空 |
+| `TRIGGER_EXPR_NOT_JSON` | `schedule` 但非合法 JSON |
+| `TRIGGER_EXPR_NOT_OBJECT` | `schedule` 但 JSON 非对象 |
+| `TRIGGER_CRON_MISSING` | 缺非空 `cron` |
+| `TRIGGER_CRON_INVALID` | `cron` 非法（`CronParser.parse` 抛 `ValueError`） |
+
+### 4.4 Workflow 定时调度器 (`meta/core/workflow_schedule_scheduler.py`)
+
+`WorkflowScheduleScheduler` 继承 `MaintenanceScheduler`，把**已发布** workflow 的 schedule 声明派生为 cron 作业并到点唤起 Run；作业集**从定义表派生**（非代码常量），与运维作业 / `platform_tick` 互不相交：
+
+- 作业集来源：`list_latest_workflows(data_source, trigger_kind='schedule')`（每个 `workflow_key` 的最新版）；作业形状 `code=workflow_key`、`schedule=trigger_expr.cron`、`handler='workflow_schedule'`。
+- `refresh_jobs(now)`：**增量**重派生 —— `schedule` 未变的 code 沿用旧 `_next_run`，新增 / 变更用 `CronParser.get_next(now)` 计算，消失的 code 删除；单条定义解析失败仅跳过并记 error，不拖垮整轮。
+- `tick(now)`：**先 `refresh_jobs` 再 `super().tick`** —— 定义的新增 / 改版 / 删除在每轮自动生效，无需重启。
+- `run_now(code)`：code 不在派生作业集 → `False`；否则调 `workflow_engine.start_run(data_source, workflow_key=code, trigger_kind='schedule')` 并返回 `True`。
+- `is_registered(code)` / `codes()`：按派生作业集判定（覆盖基类的 handler 判定）。
+- **调度状态（`_jobs` / `_next_run`）仅在内存**，不落 `scheduled_tasks` 表。
+
 ## 5. 数据库 Schema
 
 ### 5.1 scheduled_task 表 (`meta/schemas/scheduled_task.yaml`)
@@ -146,12 +179,21 @@ class CronParser:
 
 | 取值 | 行为 |
 |------|------|
-| `1` / 未设置 | 正常：`MaintenanceScheduler` 与 `PlatformScheduler` 均启动 |
-| `0` / `false` / `False` | **暂停全部 cron 作业**：两个进程内调度器都不启动 |
+| `1` / 未设置 | 正常：`MaintenanceScheduler`、`PlatformScheduler` 与 `WorkflowScheduleScheduler` 均启动 |
+| `0` / `false` / `False` | **暂停全部 cron 作业**：三个进程内调度器都不启动 |
 
 - 该开关**不依赖任何数据表**，故 `scheduled_tasks` 历史行清理后仍可作为「快速禁用」安全网。
-- 暂停态下 `/api/v2/schedulers/status` 返回 `200` 且 `data.paused=true`（两个调度器数据为 `null`）。
+- 暂停态下 `/api/v2/schedulers/status` 返回 `200` 且 `data.paused=true`（调度器数据为 `null`）；`/api/v2/workflows/scheduler/status` 同样返回 `200` 且 `paused=true`。
 - 部署用法：设环境变量 `CRON_JOBS_ENABLED=0`（如 `.env` 或进程环境）。
+
+### 6.3 Workflow 调度只读端点
+
+`WorkflowScheduleScheduler` 由 server.py 在 cron 启用时随进程内调度器一并创建 / 启动，其只读查询经 `meta/api/workflow_api.py` 的 `workflow_bp` 暴露（**随 `tasks` 模块门控注册**，未启用 `tasks` 时不可用）：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v2/workflows/schedules` | GET | 只读聚合：已发布 schedule 定义（`workflow_key` / `name` / `version` / `node_count`）+ 触发规则（`cron` / `cron_label` / `next_run_at` / `scheduler_registered`）+ 最近 Run 派生状态（`runs`） |
+| `/api/v2/workflows/scheduler/status` | GET | 调度器作业状态：未接线 `503`；暂停态 `200` + `paused=true`；正常 `200` + `{paused:false, jobs}` |
 
 ## 7. 校验规则
 

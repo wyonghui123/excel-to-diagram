@@ -49,5 +49,12 @@ export default [
     name: 'task-management',
     component: () => import('@/views/TaskCenter/TaskCenter.vue'),
     meta: { title: '任务管理', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 平台运维作业：进程内调度器状态 + 手动触发（只读/触发页，page_type=custom_page）
+    path: '/system/platform-ops-jobs',
+    name: 'platform-ops-jobs',
+    component: () => import('@/views/SystemManagement/PlatformOpsJobs.vue'),
+    meta: { title: '平台运维作业', requiresAuth: true, requiresAdmin: true }
   }
 ]

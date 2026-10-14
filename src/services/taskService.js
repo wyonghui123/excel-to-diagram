@@ -14,7 +14,7 @@
  * @module services/taskService
  */
 
-import { apiV1 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 
 // ============================================================================
 // 1. 常量 — 分区（顺序即优先级，与 A8 BUCKETS 对齐）
@@ -143,7 +143,13 @@ export async function fetchTasks({ status, type, appId, executorType, page, page
   })}`)
 }
 
+/** 编排调度聚合（只读）：定义 + 触发规则 + 最近运行（任务管理页「调度」tab 数据源） */
+export async function fetchWorkflowSchedules() {
+  return apiV2.get('/workflows/schedules')
+}
+
 export default {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow, normalizeInboxResponse,
-  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, fetchTasks
+  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, fetchTasks,
+  fetchWorkflowSchedules
 }

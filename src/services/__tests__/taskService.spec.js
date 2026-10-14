@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/utils/httpClient', () => ({
-  apiV1: { get: vi.fn(), post: vi.fn() }
+  apiV1: { get: vi.fn(), post: vi.fn() },
+  apiV2: { get: vi.fn(), post: vi.fn() }
 }))
 
-import { apiV1 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 import {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow,
   normalizeInboxResponse, fetchInbox, fetchInboxCounts, fetchTaskDetail,
-  fetchTaskEvents, claimTask, fetchTasks
+  fetchTaskEvents, claimTask, fetchTasks, fetchWorkflowSchedules
 } from '../taskService'
 
 describe('BUCKET 常量', () => {
@@ -116,5 +117,11 @@ describe('API 封装', () => {
     apiV1.get.mockResolvedValue({ success: true, data: { items: [], total: 0 } })
     await fetchTasks({ status: 'failed', page: 2, pageSize: 20 })
     expect(apiV1.get).toHaveBeenCalledWith('/tasks?status=failed&page=2&page_size=20')
+  })
+
+  it('fetchWorkflowSchedules 走 apiV2 打 /workflows/schedules', async () => {
+    apiV2.get.mockResolvedValue({ success: true, data: { items: [] } })
+    await fetchWorkflowSchedules()
+    expect(apiV2.get).toHaveBeenCalledWith('/workflows/schedules')
   })
 })

@@ -23,7 +23,9 @@ const STATIC_ROUTE_NAMES = new Set([
   'system-admin', 'ArchDataManagement',
   // [P1 入口收敛] 遗留 task-definitions / task-queues / task-executions /
   // ai-async-tasks 已随菜单收敛下线，不再登记为静态路由。
-  'task-management'
+  'task-management',
+  // 平台运维作业（custom_page，静态路由在 router/modules/system.js 注册）
+  'platform-ops-jobs'
 ])
 
 const STATIC_ROUTE_PATHS = new Set([
@@ -33,6 +35,7 @@ const STATIC_ROUTE_PATHS = new Set([
   '/system/role-permission/', '/system/role-detail/',
   '/permission-set/', '/permission-bundle/',
   '/system/task-management',
+  '/system/platform-ops-jobs',
 ])
 
 let _routesRegistered = false

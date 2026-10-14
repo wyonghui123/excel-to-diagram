@@ -15,9 +15,11 @@ export const tabGroupConfigs = {
   },
   'task-management': {
     title: '任务管理',
-    // P1：仅「监控」；「定义 / 编排」归 P3。旧 4 tab（scheduled_task 等遗留实体）已切挂下线。
+    // 「监控」= 任务实例视角；「调度」= 编排定义 + 触发规则 + 运行实例（只读）。
+    // 旧 4 tab（scheduled_task 等遗留实体）已切挂下线。
     tabs: [
       { key: 'monitor', label: '监控' },
+      { key: 'schedule', label: '调度' },
     ],
   },
 }

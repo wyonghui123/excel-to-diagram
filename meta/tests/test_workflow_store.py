@@ -160,8 +160,11 @@ class TestPublish:
                              nodes=_trunk_v1(), trigger_kind="bogus")
 
     def test_all_trigger_kinds_accepted(self, ds):
-        """TC-WFS-010: 值域内每种 trigger_kind 均可发布（event 需合法 trigger_expr）"""
-        exprs = {"event": json.dumps({"event": "outbound_completed"})}
+        """TC-WFS-010: 值域内每种 trigger_kind 均可发布（event/schedule 需合法 trigger_expr）"""
+        exprs = {
+            "event": json.dumps({"event": "outbound_completed"}),
+            "schedule": json.dumps({"cron": "0 3 * * *"}),
+        }
         for kind in TRIGGER_KINDS:
             result = publish_workflow(ds, workflow_key=f"wf-{kind}",
                                       name=f"流程{kind}", nodes=_trunk_v1(),
@@ -201,12 +204,20 @@ class TestPublish:
         assert exc.value.findings[0].code == "TRIGGER_WHEN_INVALID"
 
     def test_non_event_kind_needs_no_expr(self, ds):
-        """TC-WFS-014: manual / api / schedule 不要求 trigger_expr"""
-        for kind in ("manual", "api", "schedule"):
+        """TC-WFS-014: manual / api 不要求 trigger_expr"""
+        for kind in ("manual", "api"):
             result = publish_workflow(ds, workflow_key=f"wf-{kind}",
                                       name=f"流程{kind}", nodes=_trunk_v1(),
                                       trigger_kind=kind)
             assert result["published"] is True
+
+    def test_schedule_trigger_without_expr_rejected(self, ds):
+        """TC-WFS-015: kind=schedule 缺 trigger_expr → 定义期拒绝且不落版本行"""
+        with pytest.raises(WorkflowDefinitionError) as exc:
+            publish_workflow(ds, workflow_key="wf-s", name="流程S",
+                             nodes=_trunk_v1(), trigger_kind="schedule")
+        assert exc.value.findings[0].code == "TRIGGER_EXPR_MISSING"
+        assert latest_version(ds, "wf-s") == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

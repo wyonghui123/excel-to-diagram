@@ -144,12 +144,37 @@ def _set_status(ds, task_id, status):
 class TestParseTriggerExpr:
 
     def test_non_event_kinds_pass_through(self):
-        """TC-WFT-001: manual / api / schedule 不解释 expr"""
-        for kind in ("manual", "api", "schedule"):
+        """TC-WFT-001: manual / api 不解释 expr（schedule 已升为需 cron 的独立契约）"""
+        for kind in ("manual", "api"):
             spec = parse_trigger_expr(kind, "")
             assert spec.kind == kind
             assert spec.is_event is False
             assert spec.event_name == ""
+
+    def test_schedule_requires_cron(self):
+        """TC-WFT-001b: schedule 必须声明含非空 cron 的 JSON 对象"""
+        spec = parse_trigger_expr("schedule", _expr(cron="0 3 * * *"))
+        assert spec.kind == "schedule"
+        assert spec.is_schedule is True
+        assert spec.cron == "0 3 * * *"
+
+    @pytest.mark.parametrize("raw, code", [
+        ("", "TRIGGER_EXPR_MISSING"),
+        ("   ", "TRIGGER_EXPR_MISSING"),
+        ("not-json", "TRIGGER_EXPR_NOT_JSON"),
+        ("[1, 2]", "TRIGGER_EXPR_NOT_OBJECT"),
+        ('{"when": "x == 1"}', "TRIGGER_CRON_MISSING"),
+        ('{"cron": "   "}', "TRIGGER_CRON_MISSING"),
+        ('{"cron": 5}', "TRIGGER_CRON_MISSING"),
+        ('{"cron": "0 3 * *"}', "TRIGGER_CRON_INVALID"),
+        ('{"cron": "* * * * * *"}', "TRIGGER_CRON_INVALID"),
+        ('{"cron": "bad expr here"}', "TRIGGER_CRON_INVALID"),
+    ])
+    def test_schedule_invalid_expr_rejected(self, raw, code):
+        """TC-WFT-001c: schedule 非法 trigger_expr 的 finding code 逐项对位"""
+        with pytest.raises(Exception) as exc:
+            parse_trigger_expr("schedule", raw)
+        assert exc.value.findings[0].code == code
 
     def test_event_minimal(self):
         """TC-WFT-002: 只声明 event 名即可"""

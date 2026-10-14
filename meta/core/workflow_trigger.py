@@ -26,7 +26,9 @@
 - 只唤起 Run，不写对象表（「不越权」，综合缝合 §5.5）。
 
 边界（本项不做）:
-- `schedule`（cron）：不建调度器；`manual` / `api` 由调用方直接 `start_run`。
+- `manual` / `api` 由调用方直接 `start_run`。
+- `schedule`：本模块**只负责定义期校验**（要求 JSON 对象含非空 `cron`）；真正的到点
+  唤起归 `meta/core/workflow_schedule_scheduler.py` 的 `WorkflowScheduleScheduler`。
 - 跨应用 / 跨实例镜像（Q2 的「双记录镜像」）：归 C5。
 
 对应方案:
@@ -40,6 +42,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+from meta.core.cron_parser import CronParser
 from meta.core.event_outbox import EventContractError, evaluate_condition
 from meta.core.workflow_definition import DefinitionFinding, WorkflowDefinitionError
 from meta.core.workflow_engine import start_run
@@ -49,6 +52,9 @@ logger = logging.getLogger(__name__)
 
 #: 事件触发（C3 的唯一入口形态）
 TRIGGER_EVENT = "event"
+
+#: 定时触发（C 组编排完整：由 `WorkflowScheduleScheduler` 扫声明 → 到点 start_run）
+TRIGGER_SCHEDULE = "schedule"
 
 #: `trigger_expr` JSON 允许的键（白名单；未知键不报错但被忽略）
 _TRIGGER_KEYS = ("event", "when", "doc_ref")
@@ -92,16 +98,24 @@ class WorkflowTriggerError(RuntimeError):
 
 @dataclass(frozen=True)
 class TriggerSpec:
-    """解析后的触发声明。`event_name` / `condition` 仅 kind=event 时非空。"""
+    """解析后的触发声明。
+
+    `event_name` / `condition` 仅 kind=event 时非空；`cron` 仅 kind=schedule 时非空。
+    """
 
     kind: str
     event_name: str = ""
     condition: str = ""
     doc_ref_field: str = ""
+    cron: str = ""
 
     @property
     def is_event(self) -> bool:
         return self.kind == TRIGGER_EVENT
+
+    @property
+    def is_schedule(self) -> bool:
+        return self.kind == TRIGGER_SCHEDULE
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,18 +126,53 @@ def _invalid(code: str, detail: str) -> WorkflowDefinitionError:
     return WorkflowDefinitionError([DefinitionFinding(code, detail)])
 
 
+def _parse_schedule_expr(trigger_expr: Any) -> TriggerSpec:
+    """校验 schedule 的 `trigger_expr`（JSON：`{"cron": "<5 字段 cron>"}`）。"""
+    raw = trigger_expr.strip() if isinstance(trigger_expr, str) else ""
+    if not raw:
+        raise _invalid(
+            "TRIGGER_EXPR_MISSING",
+            "trigger_kind='schedule' 必须声明 trigger_expr"
+            '（JSON：{"cron": "0 3 * * *"}）')
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise _invalid("TRIGGER_EXPR_NOT_JSON",
+                       f"trigger_expr 非法 JSON: {e}（原文 {raw!r}）") from e
+    if not isinstance(data, dict):
+        raise _invalid("TRIGGER_EXPR_NOT_OBJECT",
+                       f"trigger_expr 需为 JSON 对象，实际 {type(data).__name__}")
+
+    cron = data.get("cron")
+    cron = cron.strip() if isinstance(cron, str) else ""
+    if not cron:
+        raise _invalid("TRIGGER_CRON_MISSING",
+                       "trigger_expr 缺少非空 'cron'（5 字段 cron 表达式）")
+    try:
+        CronParser().parse(cron)   # 只解析：字段数与值域校验
+    except ValueError as e:
+        raise _invalid("TRIGGER_CRON_INVALID",
+                       f"trigger_expr.cron 非法: {e}（原文 {cron!r}）") from e
+
+    return TriggerSpec(kind=TRIGGER_SCHEDULE, cron=cron)
+
+
 def parse_trigger_expr(trigger_kind: str, trigger_expr: Any) -> TriggerSpec:
     """解析 / 校验触发声明；非法抛 `WorkflowDefinitionError`。
 
     Raises:
         WorkflowDefinitionError: kind 未知 / event 缺 trigger_expr / 非 JSON 对象 /
-            event 名为空 / when 非字符串 / when 语法非法
+            event 名为空 / when 非字符串 / when 语法非法 /
+            schedule 缺 trigger_expr / cron 缺失或非法
     """
     if trigger_kind not in TRIGGER_KINDS:
         raise _invalid("TRIGGER_KIND_INVALID",
                        f"trigger_kind='{trigger_kind}' 不在 {TRIGGER_KINDS} 内")
+    if trigger_kind == TRIGGER_SCHEDULE:
+        # schedule：C 组编排完整 —— 声明 cron，由 WorkflowScheduleScheduler 到点唤起
+        return _parse_schedule_expr(trigger_expr)
     if trigger_kind != TRIGGER_EVENT:
-        # manual / api / schedule：本项不解释 expr（schedule 无调度器）
+        # manual / api：不解释 expr（由调用方直接 start_run）
         return TriggerSpec(kind=trigger_kind)
 
     raw = trigger_expr.strip() if isinstance(trigger_expr, str) else ""

@@ -169,6 +169,7 @@ from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.scheduler_api import (
     scheduler_bp, set_inprocess_schedulers,
 )
+from meta.api.workflow_api import workflow_bp, set_workflow_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
 from meta.core.platform_modules import is_module_enabled   # [roadmap v1.32.0 §6.2.4] 平台模块部署级启停
@@ -598,6 +599,7 @@ def create_app(db_path=None):
     if _cron_enabled:
         from meta.core.maintenance_scheduler import MaintenanceScheduler
         from meta.core.platform_scheduler import PlatformScheduler
+        from meta.core.workflow_schedule_scheduler import WorkflowScheduleScheduler
 
         _maintenance_handlers = {
             'db_analyze': DBAnalyzeHandler(),
@@ -630,13 +632,26 @@ def create_app(db_path=None):
         # [P1 2026-10-13] 向运维端点暴露两个进程内调度器（只读状态 + 按需触发）
         set_inprocess_schedulers(maintenance_scheduler, platform_scheduler)
 
+        # [C 组编排完整 2026-10-14] 第三类作业：workflow 定时触发 —— 作业集从
+        #   已发布定义表派生（trigger_kind='schedule'），与上面两个代码常量作业集
+        #   互不相交。定义增删在每轮 tick 自动生效，无需重启。
+        workflow_scheduler = WorkflowScheduleScheduler(
+            data_source=data_source,
+            config={'check_interval': 60},
+        )
+        workflow_scheduler.start()
+        atexit.register(workflow_scheduler.stop)
+        set_workflow_scheduler(workflow_scheduler)
+
         logging.getLogger(__name__).info(
             "[P1] in-process schedulers started: %d ops jobs + 1 platform_tick "
-            "(the only cron path; decoupled from legacy TaskScheduler)",
-            len(_maintenance_handlers))
+            "+ %d workflow schedules (the only cron path; decoupled from "
+            "legacy TaskScheduler)",
+            len(_maintenance_handlers), len(workflow_scheduler.codes()))
     else:
         # 暂停态：两个调度器均未启动 —— 端点仍需可答「已暂停」（paused=True）
         set_inprocess_schedulers(None, None, paused=True)
+        set_workflow_scheduler(None, paused=True)
         logging.getLogger(__name__).warning(
             "[P1] cron jobs paused (CRON_JOBS_ENABLED=0) — in-process schedulers not started")
 
@@ -868,10 +883,12 @@ def create_app(db_path=None):
         app.register_blueprint(task_inbox_bp)
         # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
         app.register_blueprint(task_decision_bp)
+        # [C 组编排完整 2026-10-14] 编排只读聚合（调度 tab 数据源），随 tasks 门控
+        app.register_blueprint(workflow_bp)
     else:
         logging.getLogger(__name__).info(
             "[PlatformModules] tasks 已禁用 (DISABLED_PLATFORM_MODULES) "
-            "→ task/task_inbox/task_decision 三个 blueprint 不注册"
+            "→ task/task_inbox/task_decision/workflow 四个 blueprint 不注册"
         )
     # [P1 2026-10-13] 进程内调度器运维端点（只读状态 + 按需触发）**无条件注册**：
     #   运维作业是平台基础设施（DB 维护 / 审计归档 / 导入队列 + platform_tick），

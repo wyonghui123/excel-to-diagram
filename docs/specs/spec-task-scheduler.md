@@ -2163,7 +2163,8 @@ POST   /api/v2/actions/{action_id}/schedule/{id}/resume  # 恢复调度
 ├── 业务配置 (business-config)         - sort_order: 52
 ├── 日志管理 (audit-log)               - sort_order: 53
 ├── 任务管理 (task-management)         - sort_order: 54  [新增]
-└── 队列管理 (queue-management)        - sort_order: 55  [新增]
+├── 队列管理 (queue-management)        - sort_order: 55  [新增]
+└── 平台运维作业 (platform-ops-jobs)   - sort_order: 56
 ```
 
 ### 13.2 菜单定义
@@ -2213,6 +2214,10 @@ POST   /api/v2/actions/{action_id}/schedule/{id}/resume  # 恢复调度
 },
 ```
 
+「平台运维作业」菜单同样加入 `system_menus` 列表（`menu_code='platform-ops-jobs'`、`menu_name='平台运维作业'`、`parent_menu='system'`、`page_type='custom_page'`、`menu_path='/system/platform-ops-jobs'`、`sort_order=56`、`required_permissions=["*"]`），**不放**在任务菜单种子里；它与任务 / 队列体系独立，页面数据来自既有运维端点 `GET/POST /api/v2/schedulers/*`，不绑定任何 BO。
+
+> **`required_permissions` 不可为空（2026-10-14 修正）**：`GET /api/v1/menu-permission/visible` 的 `_prune_empty_groups` 原先把「`page_type='custom_page'` 且无 `children`」的节点一律当空分组容器裁掉，导致这类**真页面叶子**（`custom_page` 由静态路由渲染、自身无子菜单，如 `task-management`、`platform-ops-jobs`）在侧边栏完全不可见。现改为按「是否设权限门槛」区分：`required_permissions` 为空的 `custom_page` 仍视为分组容器（无可见子菜单时隐藏，保住「非管理员看不到空系统管理分组」的既有契约）；显式设了权限门槛的 `custom_page` 视为独立页面，予以保留。故本菜单必须携带 `["*"]`（管理员门槛，与 `audit-log` 同口径、与路由 `meta.requiresAdmin` 一致）。
+
 ### 13.3 页面结构
 
 #### 任务管理页面 (multi_object_hub)
@@ -2220,7 +2225,7 @@ POST   /api/v2/actions/{action_id}/schedule/{id}/resume  # 恢复调度
 ```
 任务管理页面 (/task-management)
 ┌─────────────────────────────────────────────────────────────┐
-│  Tab: 任务定义 | 任务执行 | AI任务                           │
+│  Tab: 任务定义 | 任务执行 | AI任务 | 调度                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  [任务定义 Tab]                                              │
@@ -2249,6 +2254,24 @@ POST   /api/v2/actions/{action_id}/schedule/{id}/resume  # 恢复调度
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+「调度」tab 为**只读聚合视图**：编排定义 + 触发规则（`cron` / `next_run_at`）+ 运行实例（该 workflow 最近的 Run 派生状态），数据来自 `GET /api/v2/workflows/schedules`；不做任何调度动作。
+
+#### 平台运维作业页面 (custom_page)
+
+```
+平台运维作业页面 (/system/platform-ops-jobs)
+┌─────────────────────────────────────────────────────────────┐
+│  运维作业分组：maintenance / platform                        │
+├─────────────────────────────────────────────────────────────┤
+│  code   schedule   next_run_at   handler_registered  enabled │
+│  ─────────────────────────────────────────────────────────  │
+│  每行操作: 立即执行 → POST /api/v2/schedulers/{code}/run-now │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- 数据来源：`GET /api/v2/schedulers/status`（只读反映进程内调度器现状，含 `paused`）。
+- 行内「立即执行」：`POST /api/v2/schedulers/{code}/run-now`（未知 code → 404；无 handler → 409）。
 
 #### 队列管理页面 (object_list)
 
@@ -2382,6 +2405,7 @@ permissions:
 | v1.2 | 2026-05-23 | Architecture Team | **重大调整**：任务执行改为BO Object，复用BO Framework能力，移除独立日志系统 |
 | v1.3 | 2026-05-23 | Architecture Team | 新增：前端菜单配置，任务管理放至系统管理菜单下 |
 | v1.4 | 2026-05-23 | Architecture Team | 新增：细化实现方案与详细步骤 |
+| v1.5 | 2026-10-14 | Architecture Team | 前端菜单：系统管理下增「平台运维作业」菜单与视图；任务管理页增「调度」tab（只读聚合 workflow 调度） |
 
 ---
 

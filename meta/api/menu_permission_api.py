@@ -424,17 +424,26 @@ def get_visible_menu_tree():
                 else:
                     tree.append(m)
 
-        # [FIX 2026-06-14] 后置清理: 空 children 的 custom_page 父菜单 (分组节点/无内容页) 应当隐藏
-        #   否则 TEST888 这类没有 system 子菜单权限的用户会看到空的"系统管理"分组
-        #   判定条件: page_type='custom_page' + 没有可见 children → 隐藏
-        #   保留: 自身有 menu_path 且 page_type 不是 'custom_page' (如 'object_list' / 'multi_object_hub') 仍可点击
+        # [FIX 2026-06-14] 后置清理: 空 children 的 custom_page 分组容器 (分组节点) 应当隐藏
+        #   否则没有 system 子菜单权限的用户会看到空的"系统管理"分组
+        # [FIX 2026-10-14] 修正: 原判定把"所有"无 children 的 custom_page 一律裁掉,
+        #   但 custom_page 同样是"自实现页面"的标记 (如 task-management /
+        #   platform-ops-jobs, 页面由静态路由渲染, 不走 GenericTabContainer)。
+        #   这类"真页面叶子"会被误删, 侧边栏完全不可见。
+        #   区分准则: 空分组容器自身不设权限门槛 (required_permissions 为空), 由其子菜单
+        #   各自控权; 而显式设了权限门槛的 custom_page 是独立页面, 应保留。
+        def _is_group_container(n):
+            if n.get('page_type') != 'custom_page':
+                return False
+            return not n.get('required_permissions')
+
         def _prune_empty_groups(nodes):
             keep = []
             for n in nodes:
                 if n.get('children'):
                     n['children'] = _prune_empty_groups(n['children'])
-                # custom_page + 没有 children → 内容为空, 隐藏
-                if n.get('page_type') == 'custom_page' and not n.get('children'):
+                # 空分组容器 (custom_page + 无 children + 无权限门槛) → 隐藏
+                if _is_group_container(n) and not n.get('children'):
                     continue
                 keep.append(n)
             return keep

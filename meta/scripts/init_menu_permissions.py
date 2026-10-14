@@ -358,6 +358,33 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [C6 2026-10-14] 平台运维作业 —— 进程内调度器状态 + 手动触发页。
+            #   形态照抄 business-config / audit-log 等同父菜单(system)条目:
+            #     - page_type=custom_page ⇒ 无自动菜单, 由静态路由
+            #       /system/platform-ops-jobs 渲染 PlatformOpsJobs.vue
+            #     - 无 BO 绑定, object_types / bo_bindings 均空
+            #   required_permissions=["*"] : 平台运维 (调度器状态 / 手动触发) 属管理员
+            #   职责, 仅超级权限可见 —— 与 audit-log 同口径, 亦与前端路由
+            #   meta.requiresAdmin 一致。**不可为空**: get_visible_menu_tree 的
+            #   _prune_empty_groups 把"custom_page + 无 children + 无权限门槛"当空分组
+            #   裁掉(见 menu_permission_api.py); 设了权限门槛才会被识别为"真页面叶子"保留。
+            #   sort_order=56: 排在系统管理组 audit-log(53) 之后
+            #   （与设计文档 spec-task-scheduler.md §13.1 的序号一致）。
+            'menu_code': 'platform-ops-jobs',
+            'menu_name': '平台运维作业',
+            'menu_path': '/system/platform-ops-jobs',
+            'icon': 'Monitor',
+            'color': '#64748b',
+            'sort_order': 56,
+            'parent_menu': 'system',
+            'page_type': 'custom_page',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['*']),
+            'data_permission_hint': None
+        },
+        {
             # [MOMP 通用化 2026-08-30] 组织管理页（org 单类型 MOMP）
             #   - menu_path=/org-management 对应前端路由 name=OrgManagement
             #   - [FIX 2026-09-01 v2] 改为 user-permission 父菜单下的子菜单 (parent_menu='user-permission'),

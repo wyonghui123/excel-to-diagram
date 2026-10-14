@@ -27,6 +27,28 @@
       <div v-if="!loading && !error && !rows.length" data-test="empty" class="tc-state">暂无任务</div>
     </div>
 
+    <div v-show="activeTab === 'schedule'" class="task-center-content">
+      <div v-if="scheduleLoading" data-test="schedule-loading" class="tc-state">加载中…</div>
+      <div v-else-if="scheduleError" data-test="schedule-error" class="tc-state tc-error">{{ scheduleError }}</div>
+      <table v-else class="tc-table">
+        <thead>
+          <tr>
+            <th>流程</th><th>cron</th><th>下次运行</th><th>节点数</th><th>最近运行</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in scheduleRows" :key="s.workflow_key" data-test="schedule-row">
+            <td>{{ s.name || s.workflow_key }}</td>
+            <td>{{ s.cron_label || s.cron || '—' }}</td>
+            <td>{{ s.next_run_at ? formatTime(s.next_run_at) : '—' }}</td>
+            <td>{{ s.node_count }}</td>
+            <td>{{ latestRunText(s) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="!scheduleLoading && !scheduleError && !scheduleRows.length" data-test="schedule-empty" class="tc-state">暂无定时编排</div>
+    </div>
+
     <TaskDetailDrawer
       :visible="drawerVisible"
       :task-id="drawerTaskId"
@@ -38,16 +60,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { SubNavTabs } from '@/components/common'
 import TaskDetailDrawer from './TaskDetailDrawer.vue'
-import { fetchTasks } from '@/services/taskService'
+import { fetchTasks, fetchWorkflowSchedules } from '@/services/taskService'
 import { useAuthStore } from '@/stores/authStore'
 
 defineOptions({ name: 'TaskCenter' })
 
-// P1 只有「监控」；「定义 / 编排」归 P3（不塞占位 tab）
-const tabs = [{ key: 'monitor', label: '监控' }]
+// 「监控」= 任务实例视角；「调度」= 编排定义 + 触发规则 + 运行实例（只读）
+const tabs = [{ key: 'monitor', label: '监控' }, { key: 'schedule', label: '调度' }]
 const activeTab = ref('monitor')
 
 const rows = ref([])
@@ -55,6 +77,10 @@ const loading = ref(false)
 const error = ref('')
 const drawerVisible = ref(false)
 const drawerTaskId = ref('')
+
+const scheduleRows = ref([])
+const scheduleLoading = ref(false)
+const scheduleError = ref('')
 
 const authStore = useAuthStore()
 const currentActor = ref(authStore.user?.user_id || authStore.user?.username || '')
@@ -78,10 +104,47 @@ async function reload() {
   }
 }
 
+async function loadSchedules() {
+  scheduleLoading.value = true
+  scheduleError.value = ''
+  try {
+    const res = await fetchWorkflowSchedules()
+    if (res && res.success) {
+      scheduleRows.value = res.data?.items || []
+    } else {
+      scheduleError.value = res?.message || '加载失败'
+      scheduleRows.value = []
+    }
+  } catch (e) {
+    scheduleError.value = e?.message || String(e)
+    scheduleRows.value = []
+  } finally {
+    scheduleLoading.value = false
+  }
+}
+
+/** 最近一次运行的可读文本（无运行显示 —） */
+function latestRunText(item) {
+  const run = (item.runs || [])[0]
+  if (!run) return '—'
+  return `${run.status} ${run.done}/${run.total}`
+}
+
+/** 只取到分钟（后端返回 ISO 时间戳） */
+function formatTime(value) {
+  return String(value).replace('T', ' ').slice(0, 16)
+}
+
 function openDetail(taskId) {
   drawerTaskId.value = taskId
   drawerVisible.value = true
 }
+
+watch(activeTab, (tab) => {
+  if (tab === 'schedule' && !scheduleRows.value.length && !scheduleLoading.value) {
+    loadSchedules()
+  }
+})
 
 onMounted(reload)
 </script>
