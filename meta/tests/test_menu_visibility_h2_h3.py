@@ -126,18 +126,19 @@ class TestSystemMenuEmptyGroupCleanupH3:
     """H3 回归: 空 system 父菜单 (无子菜单权限) 应对业务用户隐藏"""
 
     def test_admin_sees_system_with_children(self, api_client, super_admin_headers):
-        """[H3] super_admin 可见 system 父菜单 + 4 个子菜单组"""
+        """[H3] super_admin 可见 system 父菜单 + 子菜单"""
         menus, _ = _get_visible_menus(api_client, super_admin_headers)
         system = _find_menu(menus, 'system')
         assert system is not None, '[H3] super_admin 应见 system 父菜单'
         children = system.get('children', [])
         assert len(children) > 0, '[H3] super_admin 应见 system 下的子菜单'
-        # 子菜单组应含 task-management, user-permission, business-config, audit-log
-        # task-management 是 multi_object_hub, 其叶子是 task-definitions 等
+        # 子菜单应含 task-management, business-config, audit-log, platform-ops-jobs
+        # 注: user-permission 已为顶级菜单（2026-06-20 顶栏重构）, 不再挂在 system 下
         child_codes = [c.get('menu_code') for c in children]
-        assert 'user-permission' in child_codes
         assert 'business-config' in child_codes
         assert 'audit-log' in child_codes
+        assert 'task-management' in child_codes
+        assert 'platform-ops-jobs' in child_codes
 
     def test_business_user_no_system_children_hides_system(self, api_client, business_user_headers):
         """[H3] 业务用户 (无 system 子菜单权限) 不可见 system 父菜单"""
@@ -182,9 +183,11 @@ class TestMenuVisibilityMatrixH2H3:
         codes = _collect_leaf_codes(menus)
         # audit-log 应在叶子菜单中
         assert 'audit-log' in codes, f'[H2] super_admin 缺 audit-log, 实际: {codes}'
-        # user-permission, business-config 也是 system 子菜单
-        assert 'user-permission' in codes
+        # business-config 是 system 子菜单
         assert 'business-config' in codes
+        # user-permission 已为顶级分组（2026-06-20 顶栏重构）, 其子叶子 user-management 可见
+        assert _find_menu(menus, 'user-permission') is not None, '[H2] super_admin 应见 user-permission'
+        assert 'user-management' in codes, f'[H2] super_admin 缺 user-management, 实际: {codes}'
         # 应有 dashboard, arch-data, product-management
         assert 'dashboard' in [m.get('menu_code') for m in menus]
 
@@ -197,9 +200,12 @@ class TestMenuVisibilityMatrixH2H3:
         # 关键契约 (H2/H3):
         assert 'system' not in top_codes, '[H3] system 父菜单应隐藏'
         assert 'audit-log' not in codes, '[H2] audit-log 应隐藏'
-        # business_user 没 system 权限, 子菜单都应隐藏
-        assert 'user-permission' not in codes, 'user-permission 应隐藏'
+        # business_user 没 system 权限, system 下的子菜单都应隐藏
+        # 注: user-permission 已为顶级自助菜单（2026-06-20 顶栏重构）, 不在 system 下,
+        #     业务用户可见属正常, 不再作为「system 子菜单应隐藏」的断言对象
         assert 'business-config' not in codes, 'business-config 应隐藏'
+        assert 'task-management' not in codes, 'task-management 应隐藏'
+        assert 'platform-ops-jobs' not in codes, 'platform-ops-jobs 应隐藏'
 
     def test_no_audit_user_sees_dashboard_only(self, api_client, no_audit_user_headers):
         """[H2+H3] 无权限用户仅见 dashboard"""

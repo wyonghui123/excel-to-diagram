@@ -41,11 +41,16 @@ def init_task_menus(data_source):
             'page_type': 'custom_page',
             # 遗留实体（scheduled_task / task_queue / task_execution / ai_async_task）
             # 已随入口收敛下线：task.v1 的读路径走 /api/v1/tasks，不经 BO 泛型列表，
-            # 故不绑任何 object_types / bo_bindings / required_permissions。
+            # 故不绑任何 object_types / bo_bindings。
+            # required_permissions 固定为 ['*']（管理员门槛）：menu_permission_api 的
+            # _prune_empty_groups 把「custom_page + 无 children + required_permissions 为空」
+            # 当空分组容器裁掉；本页是自实现页面叶子（有 menu_path、无子菜单），
+            # 若门槛为空会被误剪而不可见。设 ['*'] 即声明「这是独立页面」，同时
+            # 与路由 meta.requiresAdmin 同口径（仅管理员，业务用户不可见）。
             'primary_object_type': '',
             'object_types': [],
             'bo_bindings': [],
-            'required_permissions': [],
+            'required_permissions': ['*'],
             'parent_menu': 'system',
             'icon': 'Timer',
             'color': 'blue',

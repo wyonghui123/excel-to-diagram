@@ -79,3 +79,32 @@ class TestPlatformOpsJobsMenuVisibility:
         menus = _get_visible_tree(api_client, business_user_headers)
         assert _find_menu(menus, 'system') is None, \
             'business_user 不应见空的 system 分组 (H3 契约被破坏)'
+
+
+class TestTaskManagementMenuVisibility:
+    """任务管理菜单: 与 platform-ops-jobs 同口径 (required_permissions=['*'])"""
+
+    def test_super_admin_sees_task_management(self, api_client, super_admin_headers):
+        """super_admin 应见 task-management (custom_page 叶子不应被剪枝)"""
+        menus = _get_visible_tree(api_client, super_admin_headers)
+        node = _find_menu(menus, 'task-management')
+        assert node is not None, (
+            '[剪枝缺陷] super_admin 看不到 task-management —— '
+            'required_permissions 为空时被 _prune_empty_groups 误当空分组裁掉'
+        )
+        assert node.get('menu_path') == '/system/task-management'
+
+    def test_task_management_is_child_of_system(self, api_client, super_admin_headers):
+        """task-management 应挂在 system 分组下"""
+        menus = _get_visible_tree(api_client, super_admin_headers)
+        system = _find_menu(menus, 'system')
+        assert system is not None, 'super_admin 应见 system 分组'
+        child_codes = [c.get('menu_code') for c in system.get('children', [])]
+        assert 'task-management' in child_codes, \
+            f'system 子菜单缺 task-management, 实际: {child_codes}'
+
+    def test_business_user_does_not_see_task_management(self, api_client, business_user_headers):
+        """business_user 不应见 task-management (required_permissions=['*'])"""
+        menus = _get_visible_tree(api_client, business_user_headers)
+        assert _find_menu(menus, 'task-management') is None, \
+            'business_user 不应见任务管理菜单'

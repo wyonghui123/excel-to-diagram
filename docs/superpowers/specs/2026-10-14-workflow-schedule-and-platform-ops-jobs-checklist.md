@@ -48,6 +48,18 @@
 - [x] 附带数据清理：本地库残留的 `aa-diagram` 旧菜单行（其移除迁移因表名过时从未生效）随修正显形，
       已按迁移意图删除 `menus` / `menu_permissions` 残留行（仅数据，不改代码）。
 
+## 任务管理菜单可见性修正（同口径收口）
+
+- [x] `meta/scripts/init_task_menus.py`：`task-management` 的 `required_permissions` 由 `[]` 改为
+      `['*']`。该菜单同为「`custom_page` + 有 `menu_path` + 无子菜单」的真页面叶子，门槛为空时会被
+      `_prune_empty_groups` 误当空分组容器裁掉，导致管理员侧栏看不到「任务管理」；设 `['*']`
+      即声明其为独立页面，并与路由 `meta.requiresAdmin` 保持一致（业务用户不可见）。
+- [x] 重跑 `init_task_menus` 应用于 `architecture.db`：`menus` / `menu_permissions` 两表该行
+      `required_permissions` 均落为 `["*"]`。
+- [x] 扩展 `meta/tests/test_menu_platform_ops_jobs.py`（先红后绿，新增 3 用例）：super_admin 在
+      `system` 下可见 `task-management` 且路径为 `/system/task-management`；business_user 不可见。
+      该文件合计 7 用例全绿。
+
 ## 测试
 
 - [x] 后端：`test_workflow_schedule_scheduler.py`（12）、`test_workflow_api.py`（7）、`test_scheduler_api.py`（13）、
@@ -71,11 +83,19 @@
 - [x] 未新增 BO、未走 MetaTable；未调整 `/api/v2/schedulers/status` 暂停态语义；
       未改 `MaintenanceScheduler` / `PlatformScheduler` 既有行为与作业集；未引入第二套事件通道/表达式语言。
 
+## 菜单可见性测试陈旧断言修正（本次一并收口）
+
+- [x] `meta/tests/test_menu_visibility_h2_h3.py` 3 条陈旧断言已按现状更新（`user-permission` 自
+      2026-06-20 顶栏重构后为顶级节点，不再挂在 `system` 下）：
+      - `test_admin_sees_system_with_children`：`system` 子菜单改为断言
+        `task-management` / `business-config` / `audit-log` / `platform-ops-jobs`，去掉 `user-permission`。
+      - `test_super_admin_sees_full_tree`：改为断言 `user-permission` 节点存在且其子叶子
+        `user-management` 可见。
+      - `test_business_user_no_system_no_audit_log`：去掉 `user-permission` 断言（顶级自助菜单，
+        业务用户可见属正常），补齐 `task-management` / `platform-ops-jobs` 的隐藏断言。
+      该文件 14 用例全绿。
+
 ## 已知遗留（非本次引入，未处理）
 
-- [ ] `meta/tests/test_menu_visibility_h2_h3.py` 有 3 条陈旧断言失败（
-      `test_admin_sees_system_with_children`、`test_super_admin_sees_full_tree`、
-      `test_business_user_no_system_no_audit_log`），均断言 `user-permission` 是 `system` 子菜单；
-      实际 `user-permission.parent_menu=''`（顶级），系 2026-06-20 顶栏重构后未同步的测试断言。
 - [ ] `meta/migrations/remove_aa_diagram_menu_2026.py` 引用的 `role_menu_permissions` 表已不存在
       （更名为 `permission_set_menu_permissions`），脚本运行即报错；本次改用等价 SQL 直接清理数据。
