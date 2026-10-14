@@ -2743,8 +2743,16 @@ defineExpose({
     padding: var(--spacing-xs) var(--spacing-sm);
   }
 
+  /* [FIX 2026-10-14 embedded 模式分页器被顶出视口]
+     原 flex:none → table-section 取 el-table 的 max-height 固定 420px，
+     遇到同页还有其它固定高区块时必然放不下：审计日志页概览区 326~385px，
+     900px 视口下 768-326-420 = 22px 余量，meta-list-page 被压到 283px
+     而内容 513px → 溢出 230px 把 49px 分页器顶到视口外（360px 屏需下滚 173px）。
+     改 0 1 auto：仍不主动拉伸（保持 compact 紧凑观感），但允许在空间
+     不足时收缩，溢出归零、分页器常驻底部。min-height 保底避免被压成 0。 */
   .table-section {
-    flex: none;
+    flex: 0 1 auto;
+    min-height: 160px;
   }
 
   .pagination-wrapper {

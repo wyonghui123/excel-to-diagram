@@ -69,7 +69,18 @@ defineExpose({
 </script>
 
 <style scoped>
+/* [FIX 2026-10-14 分页器被顶出视口] 本容器只写了 height:100%，没声明
+   display:flex —— 子元素 MetaListPage 的 `flex:1` 因此完全失效（flex 属性
+   只在父为 flex 容器时生效），它退回按内容高度撑开。
+   实测 360x800 业务配置页: meta-list-page 撑到 4115px、卡片列表 3958px，
+   分页器被顶到 4212px 处，用户需下滚 3412px 才碰得到分页器，
+   看起来像「没有分页」；PC 端同样被顶出视口 263px。
+   改为 flex column + min-height:0 后约束链恢复:
+   meta-list-page 614px（=容器高）→ 卡片列表自己内部滚动 → 分页器常驻底部。 */
 .generic-object-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   height: 100%;
 }
 </style>
