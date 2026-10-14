@@ -277,6 +277,23 @@ html :root {
     width: 92vw !important;
     max-width: 92vw !important;
   }
+
+  /* [FIX 2026-10-14 详情抽屉 label 竖排] el-descriptions 是 table-layout:fixed，
+     未显式设宽时浏览器按内容分配列宽。抽屉收到 92vw (~331px) 后，值列遇到长
+     标识（如 enum_type:test_enum_1791901015）可 break-word 换行，
+     label 列却被挤到 38px —— 4 个中文字每个独占一行，高度 86~109px，
+     整张详情表被撑成竖排条带（用户手机端实测截图）。
+     修法: label 恢复 nowrap 并给保底宽度，符合响应式铁律 ②③
+     （关键标识不折行 + min-width 保底），值列继续允许折行。 */
+  .el-descriptions__label {
+    white-space: nowrap !important;
+    /* 固定表格布局下 min-width 不生效，必须给 width（首行单元格决定列宽） */
+    width: 6em !important;
+  }
+  .el-descriptions__content {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
 }
 
 .el-message-box {

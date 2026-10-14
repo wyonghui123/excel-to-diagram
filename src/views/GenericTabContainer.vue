@@ -96,11 +96,24 @@ const apiTabs = computed(() => {
   //   该 menu_code → 空容器 (tab 标题渲染了但内容空白, 用户实测)。
   //   注: org-management 不受影响, 它在 router/modules/business.js 有静态路由直连
   //   OrgManagement.vue, 不经本容器。
-  const list = children.length > 0 ? children : [node]
+  const isSelfPage = children.length === 0
+  const list = isSelfPage ? [node] : children
   return list.map(child => ({
     key: child.menu_code,
     label: child.menu_name,
-    objectType: child.page_type === 'object_list' ? child.primary_object_type : null,
+    // [FIX 2026-10-14 单页 hub 空白] 原判定只看 page_type === 'object_list'，
+    // 但 multi_object_hub 也可能「无 children + 自己带 primary_object_type」——
+    // 后端 business-config 就是这个形态 (type=multi_object_hub, pot=enum_type,
+    // kids=0)。此前 objectType 被置 null，而它又没有显式 component 映射，
+    // 模板里 isCustomComponent 与 tab.objectType 两个分支同时落空，
+    // .gtc-content 只剩一个 <!--v-if--> 注释 → 页签标题渲染了、内容整页空白
+    // （PC 与窄屏同症，非响应式问题）。
+    // 条件: 叶子 object_list，或「自身即页面」的 hub（isSelfPage）。
+    // 非自页 hub（arch-data / master-data 等有 children 的）仍须走 children 分支，
+    // 它们渲染的是聚合视图而非单个对象列表。
+    objectType: (child.page_type === 'object_list' || isSelfPage)
+      ? child.primary_object_type
+      : null,
     pageType: child.page_type,
     objectTypes: child.object_types,
   }))
