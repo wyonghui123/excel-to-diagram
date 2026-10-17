@@ -83,6 +83,8 @@ fields:
     ui:
       widget: input
 
+  # [v2.6 2026-10-17] 删去 person 枚举项：视图谓词 source='org' ⇒ 本面恒为
+  #   organization；列出 person 只会误导（对外个人的表现走 party_archive 面）。
   - id: party_type
     name: 身份类型
     type: string
@@ -95,9 +97,6 @@ fields:
       - value: organization
         label: 组织
         color: primary
-      - value: person
-        label: 个人
-        color: success
     semantics:
       meaning: 身份类型分类
     ui:
@@ -162,6 +161,9 @@ fields:
     ui:
       widget: select
 
+# [v2.6 2026-10-17] 面为 SQL 视图，不在面上建 FK：party→org 的外键口径落在基表
+#   party.yaml 的 party_to_org（source_field: org_id）；本面 org_id 引用同一底层列。
+#   口径由 test_f1_party_view_facets.py 的 test_org_reference_agreement 锁定。
 relations: []
 
 ui_view_config:

@@ -403,13 +403,27 @@ class TestEnumParity:
 
     @pytest.mark.parametrize('facet_id', VIEW_FACETS)
     def test_view_facet_enum_matches_base(self, facet_id):
-        """视图面枚举值 + 界面词与基表完全一致"""
+        """视图面枚举须为基表枚举的子集，且界面词一致
+
+        面可按视图谓词收窄可选值，但不允许出现基表没有的值或缺词/改词。
+        """
         for field_id in self.ENUM_FIELDS:
             base = self._enum_map(_load_raw('party'), field_id)
             facet = self._enum_map(_load_raw(facet_id), field_id)
-            assert facet == base, (
-                f'{facet_id}.{field_id} 枚举与基表 party 漂移: {facet} != {base}'
+            assert facet, f'{facet_id}.{field_id} 未声明 enum_values（选项为空）'
+            assert set(facet) <= set(base), (
+                f'{facet_id}.{field_id} 含基表未定义的值: {sorted(set(facet) - set(base))}'
             )
+            for value, label in facet.items():
+                assert label == base[value], (
+                    f'{facet_id}.{field_id} 界面词漂移: {value} -> {label} != {base[value]}'
+                )
+
+    def test_internal_facet_enum_is_org_only(self):
+        """party_internal 谓词 source='org' ⇒ 本面恒 organization，不得列 person"""
+        assert set(self._enum_map(_load_raw('party_internal'), 'party_type')) == {
+            'organization',
+        }
 
     @pytest.mark.parametrize('facet_id', VIEW_FACETS)
     def test_view_facet_default_matches_base(self, facet_id):
