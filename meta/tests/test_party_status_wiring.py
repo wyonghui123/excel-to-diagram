@@ -95,8 +95,10 @@ def pst_ds(tmp_path):
     sync_schema_from_meta(ds, objs)
     # 父行：内部表示行须有 orgs 行（parties.org_id → orgs.id 真外键）
     org_cols = [r[1] for r in ds.execute('PRAGMA table_info(orgs)').fetchall()]
+    # [FIX] orgs.parent_id 为真自引用外键（9018570a 落库）⇒ 探针父行该列须显式 NULL，
+    #   'PROBE' 会触发 FOREIGN KEY constraint failed 使整类 setup 报错
     sample = {'code': 'ORG-PROBE', 'name': '探针组织', 'org_type': 'company',
-              'org_scope': 'internal'}
+              'org_scope': 'internal', 'parent_id': None}
     ds.insert('orgs', {c: (1 if c == 'id' else sample.get(c, 'PROBE'))
                        for c in org_cols})
     yield ds
@@ -224,13 +226,20 @@ class TestIndexAndFacets:
             assert "source = 'org'" in vd
 
     @pytest.mark.parametrize('bo_id', _FACETS)
-    def test_facet_still_read_only(self, bo_id):
-        """两个面仍是只读面（不加写动作）"""
+    def test_facet_write_policy(self, bo_id):
+        """写策略分层：archive 有写锚（写转发基表 party）；internal 无写锚（只读）"""
         data = _load_raw(bo_id)
         assert data.get('object_type') == 'view'
         assert (data.get('import_export') or {}).get('auto_crud') is False
-        assert not any(a.get('method') in ('POST', 'PUT', 'DELETE')
-                       for a in (data.get('actions') or []))
+        has_write = any(a.get('method') in ('POST', 'PUT', 'DELETE')
+                        for a in (data.get('actions') or []))
+        if bo_id == 'party_archive':
+            # F1 §3.5 / §7.1-4：archive 为对外档案单入口，写经 write_anchor 转发锚
+            assert data.get('write_anchor') == 'party'
+            assert has_write, 'archive 应声明写动作（转发到 write_anchor）'
+        else:
+            # F1 §7.1-4：internal 无写锚 ⇒ 不得声明写动作
+            assert not has_write, 'internal 只读面不得声明写动作'
 
 
 # ────────────────────────────────────────
