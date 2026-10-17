@@ -1,7 +1,7 @@
 # 组织元模型 (原 user_group.yaml, Plan A 迁移 + Spec 16 §2.2/2.3 扩展)
 # 说明: 组织（Org），用于组织用户和实现委托管理。
 # 新增字段: org_type (department/team/division/company)
-# [v2.6 2026-10-17 I5 拍板 C] org_scope 废弃 (见字段本体登记); 列保留待 v095 硬删
+# [v3.5 2026-10-17 I5 拍板 C] org_scope 废弃 (见字段本体登记); 列保留待 v095 硬删
 # 表名: user_groups → orgs
 # 关联表: user_group_members → org_members, group_roles → org_permission_sets
 # [生命周期 2026-10-07] 补 status + activate/deactivate（蓝图 §5.4 最小约定 + D4 瞬时开关）
@@ -135,7 +135,8 @@ fields:
       widget: select
       filterable: true
 
-  # [v2.6 2026-10-17 I5 拍板 C] org_scope 废弃 (Foundation 蓝图 v2.5 I5=B → v2.6 I5=C).
+  # [v3.5 2026-10-17 I5 拍板 C] org_scope 废弃 (Foundation 蓝图 v2.5 I5=B → v3.5 I5=C;
+  #   v2.6 槽位已被 L1 职能域层砍除占用, 故本覆盖登记为 v3.5).
   #   依据: org 不承载外部对手档案 (同蓝图 S5); 该字段前端 src/ 零引用、后端无任何 SQL
   #         按此列过滤 (历史命中皆为 check_org_scope / expand_org_scope 方法名巧合)、
   #         全库 64 条 org 全为 internal ⇒ 无消费方; 且 I5=B 与 S5 及 B′ 自相矛盾.
@@ -149,7 +150,7 @@ fields:
     default: internal
     description: 组织范围（已废弃；org 不承载内外部档案分域）
     deprecated: true
-    deprecated_since: 'v2.6'
+    deprecated_since: 'v3.5'
     deprecated_message: 'org 不承载内外部档案分域；外部对手档案由 party 对外档案面承载'
     semantics:
       meaning: 组织所属范围
@@ -342,7 +343,7 @@ indexes:
     name: idx_org_parent
   - fields: [org_type]
     name: idx_org_type
-  # [v2.6 2026-10-17 I5=C] idx_org_scope 已撤 (列废弃且无消费方)
+  # [v3.5 2026-10-17 I5=C] idx_org_scope 已撤 (列废弃且无消费方)
   # [生命周期 2026-10-07] 状态筛选索引（停用组织不进入新引用候选）
   - fields: [status]
     name: idx_org_status
@@ -527,7 +528,7 @@ ui_view_config:
         width: 100
         filterable: true
         filter_type: select
-      # [v2.6 2026-10-17 I5=C] org_scope 废弃下线, 列表不再展示
+      # [v3.5 2026-10-17 I5=C] org_scope 废弃下线, 列表不再展示
       - field: parent_id
         width: 150
         filterable: true
@@ -620,7 +621,7 @@ ui_view_config:
         columns:
           - fields: [code, name]
           - fields: [org_type]
-          # [v2.6 2026-10-17 I5=C] org_scope 废弃下线, 表单不再展示
+          # [v3.5 2026-10-17 I5=C] org_scope 废弃下线, 表单不再展示
           # [FIX 2026-09-06 Spec 19 v084] manager_id 死功能下线, 表单不再展示
           - fields: [parent_id]
           - fields: [status]
@@ -639,7 +640,7 @@ ui_view_config:
           - code
           - name
           - org_type
-          # [v2.6 2026-10-17 I5=C] org_scope 废弃下线, 详情不再展示
+          # [v3.5 2026-10-17 I5=C] org_scope 废弃下线, 详情不再展示
           - parent_id
           # [FIX 2026-09-06 Spec 19 v084] manager_id 死功能下线, 详情不再展示
           - status
