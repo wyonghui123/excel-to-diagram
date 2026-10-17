@@ -18,6 +18,11 @@
 7. 注入不变量 : org 维度条件仅注入 internal; 基表 / archive 永不注入
 8. 动作策略  : 基表仅写动作（create/update/delete）; internal 仅读（read/list）§7.1-4;
                archive 读（read/list）+ 写（create/update/delete 转发锚）
+9. 枚举出口径: 视图面 party_type 枚举与默认值须与基表一致
+               （2026-10-12 缺陷防线: 视图面漏声明 enum_values ⇒ 编辑态下拉零选项）
+10. 恒定字段  : 谓词恒定字段须 ui.visible=false（防暴露可编辑噪声控件）;
+               面级 org_id 外键须绑 ui.relation（防退化为 el-input-number 数字框）
+               （2026-10-17 缺陷防线: 用户手机端实测报障）
 
 测试隔离:
 - temp DB（get_data_source）+ sync_schema_from_meta; 不触碰 architecture.db
@@ -364,3 +369,120 @@ class TestFrameActions:
         """
         ie = _load_raw(bo_id).get('import_export') or {}
         assert ie.get('auto_crud') is False
+
+
+# ────────────────────────────────────────
+# 9. 枚举出口径（2026-10-12 缺陷防线）
+# ────────────────────────────────────────
+class TestEnumParity:
+    """视图面枚举 / 默认值须与基表同列出口径（防人工同步漂移）
+
+    历史缺陷: party_archive / party_internal 的 party_type 漏声明 enum_values
+    ⇒ ObjectPageShell 取到 options=空 → 字段不入 enumFieldKeys
+      ⇒ 只读态退回显示原始英文、编辑态 el-select 零选项。
+    同一根因的另一面: 漏声明 default ⇒ 新建表单不预填（apply-defaults 读面字段）。
+    基表加枚举/默认值须同步视图面 —— 本组断言锁住该约束（纯 YAML 读取，不触库）。
+    """
+    VIEW_FACETS = ('party_archive', 'party_internal')
+    ENUM_FIELDS = ('party_type',)
+
+    @staticmethod
+    def _field(raw, field_id):
+        return next(x for x in raw['fields'] if x['id'] == field_id)
+
+    @classmethod
+    def _enum_map(cls, raw, field_id):
+        f = cls._field(raw, field_id)
+        return {e['value']: e['label'] for e in (f.get('enum_values') or [])}
+
+    def test_base_table_declares_enum(self):
+        """基表 party.party_type 必须声明 organization / person 两值"""
+        assert set(self._enum_map(_load_raw('party'), 'party_type')) == {
+            'organization', 'person',
+        }
+
+    @pytest.mark.parametrize('facet_id', VIEW_FACETS)
+    def test_view_facet_enum_matches_base(self, facet_id):
+        """视图面枚举值 + 界面词与基表完全一致"""
+        for field_id in self.ENUM_FIELDS:
+            base = self._enum_map(_load_raw('party'), field_id)
+            facet = self._enum_map(_load_raw(facet_id), field_id)
+            assert facet == base, (
+                f'{facet_id}.{field_id} 枚举与基表 party 漂移: {facet} != {base}'
+            )
+
+    @pytest.mark.parametrize('facet_id', VIEW_FACETS)
+    def test_view_facet_default_matches_base(self, facet_id):
+        """视图面默认值与基表一致（缺 default ⇒ 新建表单不预填该字段）"""
+        for field_id in self.ENUM_FIELDS:
+            expected = self._field(_load_raw('party'), field_id).get('default')
+            actual = self._field(_load_raw(facet_id), field_id).get('default')
+            assert actual == expected, (
+                f'{facet_id}.{field_id} 默认值与基表 party 漂移: {actual} != {expected}'
+            )
+
+
+# ────────────────────────────────────────
+# 10. 恒定字段出口径（2026-10-17 缺陷防线）
+# ────────────────────────────────────────
+class TestInvariantFieldExposure:
+    """视图面「谓词恒定字段」须隐藏；真外键须绑 ui.relation
+
+    历史缺陷: 谓词恒定字段（source/org_id）仍按普通字段渲染出可编辑控件 ——
+      source 是文本框（可改且写转发后真落库，把外部记录伪装成内部记录）;
+      org_id 是 el-input-number 数字框（缺 ui.relation ⇒ 退回按 type:integer
+      渲染，而非走 ObjectPageShell 的 BO 选择器，见其 L246-255）。
+    本组锁住: 恒空字段隐藏 + 真外键绑定 relation（纯 YAML 读取，不触库）。
+    """
+    # facet_id -> 该面上「谓词恒定、对用户无意义」的字段
+    INVARIANT_FIELDS = {
+        'party_archive': ('source', 'org_id'),   # 谓词已排除内部行 ⇒ 两列恒 NULL
+        'party_internal': ('source',),           # 谓词 source='org' ⇒ 恒定值
+    }
+    # 面上需显示的字段 -> 必须声明 ui.relation（否则退化为数字框）
+    REFERENCE_FIELDS = {
+        'party_archive': (),                     # org_id 已隐藏，无需绑定
+        'party_internal': ('org_id',),           # 本面非空 1:1，是真实业务数据
+    }
+
+    @staticmethod
+    def _field(raw, field_id):
+        return next(x for x in raw['fields'] if x['id'] == field_id)
+
+    @pytest.mark.parametrize('facet_id,field_ids', list(INVARIANT_FIELDS.items()))
+    def test_invariant_field_hidden(self, facet_id, field_ids):
+        """谓词恒定字段必须 ui.visible=false（否则暴露可编辑噪声控件）"""
+        raw = _load_raw(facet_id)
+        for field_id in field_ids:
+            ui = self._field(raw, field_id).get('ui') or {}
+            assert ui.get('visible') is False, (
+                f'{facet_id}.{field_id} 是谓词恒定字段，须 ui.visible=false；'
+                f'当前 ui={ui} —— 暴露后用户可编辑并经 write_anchor 真实落库'
+            )
+
+    @pytest.mark.parametrize('facet_id,field_ids', list(REFERENCE_FIELDS.items()))
+    def test_reference_field_binds_relation(self, facet_id, field_ids):
+        """需显示的外键字段必须声明 ui.relation（否则渲染成数字框而非选择器）"""
+        raw = _load_raw(facet_id)
+        for field_id in field_ids:
+            ui = self._field(raw, field_id).get('ui') or {}
+            assert ui.get('relation'), (
+                f'{facet_id}.{field_id} 是 orgs 外键，须 ui.relation 以走 BO 选择器；'
+                f'当前 ui={ui} —— 缺 relation 会按 type:integer 渲染成数字输入框'
+            )
+
+    @pytest.mark.parametrize('facet_id', list(INVARIANT_FIELDS) + ['party'])
+    def test_org_reference_agreement(self, facet_id):
+        """org_id 与 org 的关系口径三面一致：基表有 party_to_org relation，
+        且面级 org_id 的 ui.relation 指向同一目标（防关系漂移）"""
+        raw = _load_raw(facet_id)
+        rel = next(
+            (r for r in (raw.get('relations') or [])
+             if r.get('source_field') == 'org_id'), None
+        )
+        if rel is not None:
+            assert rel['target'] == 'org', f'{facet_id}.org_id relation 目标漂移: {rel}'
+        ui = self._field(raw, 'org_id').get('ui') or {}
+        assert ui.get('relation', 'org') == 'org', (
+            f'{facet_id}.org_id 的 ui.relation 应与基表 party_to_org 同指向 org'
+        )
