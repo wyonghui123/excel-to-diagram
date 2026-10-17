@@ -335,11 +335,16 @@ onUnmounted(() => {
   backdrop-filter: blur(2px);
 }
 
+/* [移动端 2026-10-14 键盘遮挡] 100vh 是「地址栏收起时」的视口高，
+   手机弹出软键盘时它不收缩，弹窗底部 footer（保存/取消）会被键盘盖住。
+   100dvh = 地址栏展开时的真实视口，随键盘联动。
+   保留 100vh 在前做老浏览器降级，与 AppShell 的既有写法保持一致。 */
 .app-modal__container {
   position: relative;
   width: 100%;
   max-width: calc(100vw - var(--spacing-xl));
   max-height: calc(100vh - var(--spacing-xl));
+  max-height: calc(100dvh - var(--spacing-xl));
   background: var(--color-bg-container);
   border-radius: var(--radius-modal);
   box-shadow: var(--shadow-lg);
@@ -406,8 +411,11 @@ onUnmounted(() => {
   position: relative;
 }
 
+/* [移动端 2026-10-14 键盘遮挡] 同步改用 dvh，理由同 .app-modal__container。
+   220px 是 header+footer+padding 的预留，键盘弹出时这部分会随视口一起压缩。 */
 .app-modal__body-scroll {
   max-height: calc(100vh - 220px);
+  max-height: calc(100dvh - 220px);
   padding: var(--spacing-lg);
   overflow-y: auto;
   overflow-x: visible;
@@ -465,12 +473,16 @@ onUnmounted(() => {
   .app-modal {
     padding: var(--spacing-sm);
     align-items: flex-end;
+    /* 刘海屏/底部小黑条避让：底部抽屉形态下 footer 紧贴屏幕下沿，
+       不加安全区会被 Home Indicator 压住。env() 无安全区时回退 0，可无条件书写。 */
+    padding-bottom: calc(var(--spacing-sm) + env(safe-area-inset-bottom, 0px));
   }
 
   .app-modal__container {
     width: 100%;
     max-width: 100%;
     max-height: calc(100vh - var(--spacing-lg));
+    max-height: calc(100dvh - var(--spacing-lg));
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     animation: app-modal-in-mobile 0.3s var(--ease-out);
   }
@@ -490,8 +502,12 @@ onUnmounted(() => {
     padding: var(--spacing-md);
   }
 
+  /* 窄屏下 body-scroll 已由 container 限高（container 是 flex column，
+     body 内部再限一次高会导致双滚动条）。这里只给底部安全区留白。 */
   .app-modal__body-scroll {
+    max-height: none;
     padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom, 0px));
   }
 
   .app-modal__footer {

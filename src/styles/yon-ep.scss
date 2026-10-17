@@ -278,6 +278,55 @@ html :root {
     max-width: 92vw !important;
   }
 
+  /* [FIX 2026-10-14 键盘遮挡] Element Plus 的 dialog/drawer 高度默认
+     走 100vh。手机弹出软键盘时 100vh 不收缩，弹窗底部 footer
+     （保存/取消/确定）会被键盘盖住 —— 这是移动端表单最典型的致命伤。
+     补 dvh 声明，后者在支持的浏览器上覆盖前者的计算结果。
+     自研 AppModal/Drawer 已各自处理，此处覆盖 13 处原生 el-dialog 场景。
+
+     限高必须减去 EP 的定位外边距：el-dialog.css 里 dialog 是
+     `margin: 15vh auto 50px`，即顶部固定留 15vh、底部留 50px。
+     360x720 实测：只写 calc(100dvh - spacing-xl) 时 dialog 顶到 108px、
+     高 688px，底边落在 796px，超出视口 76px，footer「保存/取消」点不到。
+     故这里减 15dvh + 50px，与 EP 的定位规则严格对齐。 */
+  .el-dialog {
+    max-height: calc(100dvh - 15dvh - 50px) !important;
+    /* 改为 flex 列布局，让 header/footer 按内容占位、body 自动吃掉剩余空间。
+       此前 body 用 calc(100dvh - 180px) 限高，180px 是 header+footer+padding
+       的估算值 —— 实测 360x720 下 footer 被挤出视口（footerBottom 超出 innerH），
+       因为真实 header/footer 高度随内容变化，与估算不符。
+       flex 方案把高度约束交给布局引擎，无需任何魔法数字。 */
+    display: flex;
+    flex-direction: column;
+  }
+
+  .el-dialog__body {
+    /* flex:1 + min-height:0 是关键：min-height:0 覆盖 flex 子项默认的
+       min-height:auto，否则长内容会把 body 撑破上限而不收缩。
+       min-height:0 缺失会产生「内容溢出但无法滚动」—— 这是 flex 布局最经典的陷阱。 */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .el-dialog__header,
+  .el-dialog__footer {
+    /* 不参与收缩，保证标题与按钮始终完整可见 */
+    flex: 0 0 auto;
+  }
+
+  .el-drawer__body {
+    /* 抽屉用 flex 布局，body 已 flex:1 撑开；仅在键盘场景下补 dvh 上限 */
+    max-height: calc(100dvh - var(--spacing-xl));
+    min-height: 0;
+  }
+
+  /* 底部抽屉形态的 footer 避让 Home Indicator */
+  .el-dialog__footer,
+  .el-drawer__footer {
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom, 0px));
+  }
+
   /* [FIX 2026-10-14 详情抽屉 label 竖排] el-descriptions 是 table-layout:fixed，
      未显式设宽时浏览器按内容分配列宽。抽屉收到 92vw (~331px) 后，值列遇到长
      标识（如 enum_type:test_enum_1791901015）可 break-word 换行，

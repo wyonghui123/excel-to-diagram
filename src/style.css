@@ -28,6 +28,49 @@ svg,
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ============================================================================
+ * [移动端 2026-10-14] 触摸设备基础适配（全局基线）
+ * ---------------------------------------------------------------------------
+ * 背景：全项目 140+ 处 :hover 未包在 @media (hover: hover) 内。触摸设备上
+ * :hover 会在点按后「粘住」，直到用户点击别处才消失 —— 在密集表格行、
+ * 菜单项、卡片列表上表现为一片灰蓝色残留块，视觉噪声明显。
+ * 同时 iOS/Android 的系统级点击高亮块在密集列表上同样刺眼。
+ *
+ * 这里做的是全局基线，而不是逐个组件改 140 处：
+ * 1) 关闭系统点击高亮
+ * 2) 触摸端补 :active 按压反馈 —— 触摸端本就没有 hover，
+ *    「点到了」的确认只能靠 :active，这是唯一的视觉信号
+ *
+ * 刻意不做的事：不试图全局「消除 hover」。用 @media (hover: hover) 包住
+ * 140 处 hover 规则是大改造且易错，正确做法是让具体交互组件自己声明
+ * @media (hover: hover)；本文件只提供 :active 基线，各组件按需补充。
+ * ============================================================================ */
+
+/* 关闭系统点击高亮。全局无脑关闭是有意的：Element Plus 的 hover
+   高亮本身已提供状态反馈，系统灰块只会叠加成双层噪声。 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 按压反馈。触摸端没有 hover，:active 是唯一的「点到了」确认信号。
+   统一用 opacity 而非改背景色 —— 背景色改写会与各组件既有 hover
+   规则冲突，opacity 叠加在任意背景上都成立。 */
+@media (hover: none) {
+  .el-button:active:not(.is-disabled),
+  .el-menu-item:active,
+  .el-tabs__item:active,
+  .el-pager li:active,
+  .el-pagination button:active {
+    opacity: 0.7;
+  }
+
+  /* 卡片与表格行是本项目移动端的主要交互面，按下需要更明确的反馈 */
+  .meta-card:active,
+  .el-table__body-wrapper .el-table__row:active {
+    opacity: 0.75;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;

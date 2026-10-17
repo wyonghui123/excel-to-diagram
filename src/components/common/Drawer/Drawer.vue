@@ -261,8 +261,13 @@ onUnmounted(() => {
     padding: var(--spacing-md);
   }
 
+  /* [移动端 2026-10-14 底部安全区] 窄屏抽屉全宽，footer 紧贴屏幕下沿，
+     刘海屏机型会被 Home Indicator 压住。
+     注：抽屉本身无需改动态视口 —— wrapper 用的是 top:0/bottom:0 而非
+     100vh，软键盘弹出时 fixed 定位会自动跟随可视视口。 */
   .drawer__footer {
     padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom, 0px));
   }
 }
 </style>
