@@ -39,7 +39,7 @@
             placeholder="请输入密码"
             autocomplete="current-password"
             :disabled="loading"
-            @focus="onFieldFocus"
+            @focus="clearError"
           />
         </div>
 
@@ -79,25 +79,6 @@ function clearError() {
   authStore.error = ''
 }
 
-/**
- * [FIX 2026-10-16 移动端键盘遮挡] 聚焦字段时把卡片滚入可视区。
- *
- * CSS 侧已用 dvh + overflow-y:auto 处理了大部分场景，但 iOS Safari 在
- * 聚焦 position:fixed 容器内的输入框时，滚动落点计算常不准 —— 结果是
- * 视口滚了、卡片却没跟着走。这里显式滚动卡片容器，绕开浏览器的自动滚动。
- *
- * 用 rAF 等一帧，等键盘引起的视口变化先落定，再决定滚到哪里。
- * block:'start' 而非 'center'：矮视口下居中会把顶部 logo 顶出可视区。
- */
-function onFieldFocus(event) {
-  clearError()
-  const card = event.target.closest('.login-card')
-  if (!card) return
-  requestAnimationFrame(() => {
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
-
 async function handleLogin() {
   if (!username.value || !password.value) return
   loading.value = true
@@ -113,24 +94,24 @@ async function handleLogin() {
 </script>
 
 <style scoped>
-/* [FIX 2026-10-16 移动端键盘遮挡]
-   问题：手机弹出软键盘后，密码框与登录按钮被键盘盖住，无法点击。
-   根因有三处叠加：
-   1) inset:0 锚定的是「布局视口」。Android 弹出软键盘时布局视口高度不变
-      （键盘是覆盖其上的浮层），所以这里仍是整屏高。
-   2) align-items:center 把卡片锁死在屏幕垂直正中。键盘弹起后可视区
-      只剩上半部分，居中的卡片下半截必然落在键盘覆盖区里 —— 用户实测
-      「密码框被挡住，但用户名框没挡住」，正是因为密码框和登录按钮
-      都在卡片下半部。
-   3) 无滚动兜底，压住的部分既看不到也滚不过去。
+/* [FIX 2026-10-16/17 移动端键盘遮挡]
+   问题：手机弹出软键盘后，密码框与登录按钮被键盘盖住。
 
-   修法：
-   - 改用 100dvh，跟随键盘联动收缩（100vh 留在前面做老浏览器降级，
-     与 AppShell / AppModal 的既有写法一致）。
-   - align-items 改 flex-start，配合 margin:auto 实现「空间够时居中、
-     空间不够时顶到上面且可滚动」。单用 margin:auto 无法在
-     overflow 场景下保证可滚动，故两者需并存。
-   - overflow-y:auto + 上下留白，保证矮视口下卡片能完整进入可视区。 */
+   根因最终定位在 index.html —— 缺 interactive-widget=resizes-content，
+   Chrome 80+ 默认键盘弹出时布局视口不收缩，dvh 只管地址栏不管键盘。
+   已在 index.html 修复，这才是根本手段。以下 CSS 是与之配套的布局约束，
+   在视口真正收缩后负责把卡片正确排布，三者缺一不可。
+
+   - 100dvh：视口收缩后 overlay 随之变矮（100vh 留作降级）
+   - align-items:flex-start + 卡片 margin:auto：
+     空间够时居中，空间不够时贴顶且可滚动。单靠 margin:auto
+     在 overflow 场景下不保证可滚，故两者需并存
+   - overflow-y:auto + 上下留白：极矮视口（如横屏）下仍可完整看到表单
+
+   此前加过 onFieldFocus 的 scrollIntoView 兜底，已移除：
+   视口能正确收缩后，浏览器不再需要滚动去「露出」输入框，
+   保留 JS 滚动反而会与浏览器原生行为叠加，造成用户看到的
+   「整页往上移了一下」+ 下方露白。 */
 .login-overlay {
   position: fixed;
   top: 0;
