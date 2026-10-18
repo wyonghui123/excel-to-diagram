@@ -187,7 +187,13 @@ class PlaywrightCLI:
         }
 
         browser_launcher = browser_map.get(self.browser_type, self._playwright.chromium)
-        self._browser = browser_launcher.launch(headless=self.headless)
+        try:
+            self._browser = browser_launcher.launch(headless=self.headless)
+        except Exception:
+            # bundled chromium 驱动异常时回退到本机 Chrome channel
+            self._browser = browser_launcher.launch(
+                headless=self.headless, channel='chrome'
+            )
         self._context = self._browser.new_context()
         self._page = self._context.new_page()
         self._cookies_set = False
