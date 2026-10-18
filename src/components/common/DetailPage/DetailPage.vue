@@ -864,27 +864,33 @@ const computedSections = computed(() => {
     facets
       .filter(f => f.type === 'association')
       .forEach(f => {
-        if (!shouldShowAssociation(f)) {
+        const assocName = f.association || f.id || f.title
+        // [自定义取数器 2026-10-17] 带 customFetcher 的分区不要求平台 association 定义。
+        //   原闸门只认 isCollectionAssociation（须在 associations 声明且 type 属集合类型），
+        //   但这类分区的取数完全由 AssociationSection 的自定义分支接管，与平台关联端点无关：
+        //   关联端点的过滤列写死 `{父}_id`，对「父对象不是该外键前缀」的场景（如 party →
+        //   party_relation 的两侧列 party1_id/party2_id）根本不适用。
+        //   放行条件：自定义取数器 → 只要编辑态可见性通过即可；否则仍走原两道闸门。
+        if (f.customFetcher) {
+          if (!shouldShowAssociation(f)) return
+        } else if (!isCollectionAssociation(assocName) || !shouldShowAssociation(f)) {
           return
         }
-        const assocName = f.association || f.id || f.title
-        if (isCollectionAssociation(assocName)) {
-          const assocDef = entityAssociations.find(a => a.name === assocName)
-          sections.push({
-            key: f.id || f.title || f.association,
-            label: f.label || f.title || f.association,
-            icon: 'link',
-            type: 'association',
-            association: assocDef?.target_type || assocDef?.target_entity || assocName || '',
-            assocName: assocName,
-            assocType: assocDef?.type,
-            pageSize: f.pageSize || 20,
-            display: f.display || 'inline',
-            actions: f.actions || ['assign', 'unassign', 'list'],
-            readonly: f.readonly || assocDef?.readonly || false,
-            customFetcher: f.customFetcher || assocDef?.customFetcher || null
-          })
-        }
+        const assocDef = entityAssociations.find(a => a.name === assocName)
+        sections.push({
+          key: f.id || f.title || f.association,
+          label: f.label || f.title || f.association,
+          icon: 'link',
+          type: 'association',
+          association: assocDef?.target_type || assocDef?.target_entity || assocName || '',
+          assocName: assocName,
+          assocType: assocDef?.type,
+          pageSize: f.pageSize || 20,
+          display: f.display || 'inline',
+          actions: f.actions || ['assign', 'unassign', 'list'],
+          readonly: f.readonly || assocDef?.readonly || false,
+          customFetcher: f.customFetcher || assocDef?.customFetcher || null
+        })
       })
 
     facets

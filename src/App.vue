@@ -72,7 +72,13 @@ const cachedRouteNames = [
   'GenericObjectList', // 通用对象列表
   'ObjectDetail',      // 详情查看 (不含编辑)
   'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
-  'RelationshipManagement', // 架构数据管理 (per-tab 实例 + v-show)
+  // [孤儿页清理 2026-10-17] 移除 'RelationshipManagement'（原第 75 行，注释写"架构数据管理"）:
+  //   该页是 ArchDataManagement 的遗留副本(相同 objectTypes / 相同 slots, 且缺嵌入式图表等
+  //   9 项能力), 路由早已切到 /system/archdata, /system/relationships 是纯 redirect,
+  //   全库无任何引用 —— 成因是 GenericTabContainer 的硬编码映射表漏登记。
+  //   注: 本条注释原先声称缓存"架构数据管理", 但承载该页的 ArchDataManagement 并不在白名单里,
+  //   即 /system/archdata 实际未被 keep-alive 缓存。此为既存状态, 此次不擅自补入
+  //   (ArchDataManagement 内含 Mermaid 命令式图表, 缓存有状态残留与内存开销风险, 需单独评估)。
   'OrgManagement',     // 组织管理 (MOMP 泛化页, 返回需保留列表状态)
   'MaterialManagement', // 物料管理 (MOMP 泛化页, 左树勾选状态需保留)
   'PartyManagement',   // 往来单位管理 (MOMP 泛化页, 左树勾选状态需保留)

@@ -41,6 +41,33 @@
       </div>
     </div>
 
+    <div v-else-if="isPartyRelations" class="op-merged-relations">
+      <el-table :data="partyRelationsData" v-loading="partyRelationsLoading" size="small" max-height="400">
+        <el-table-column label="方向" width="90">
+          <template #default="{ row }">
+            <span>{{ row._selfSide === 'party1' ? '我方侧' : '对手侧' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="_counterpart" label="对方" min-width="180" />
+        <el-table-column label="角色" width="100">
+          <template #default="{ row }">
+            <span>{{ ROLE_LABEL[row.role] || row.role || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="le_org_id_display" label="法人域" min-width="150" />
+        <el-table-column prop="group_id_display" label="往来单位组" min-width="150" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <span>{{ STATUS_LABEL[row.status] || row.status || '-' }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="op-empty-state" v-if="!partyRelationsLoading && partyRelationsData.length === 0">
+        <AppIcon name="link" size="lg" />
+        <p>暂无往来关系</p>
+      </div>
+    </div>
+
     <template v-else-if="isAnnotation">
       <MetaListPage
         v-if="objectType && hasRealObjectId"
@@ -217,6 +244,68 @@ const isManyToMany = computed(() => {
 const isMergedRelationships = computed(() => {
   return props.section.customFetcher === 'merged_bo_relationships'
 })
+
+// [关系分区 2026-10-17] 往来关系（party_relation）分区：两侧合并口径 C。
+//   不能走平台关联端点 —— associationFilters 把过滤列写死为 `{父对象类型}_id`，
+//   父对象是 party 时会得 `party_id`，而 party_relation 的列是 party1_id/party2_id。
+//   故在此做两次查询（party1_id = 本 id / party2_id = 本 id）后按 id 合并去重，
+//   并用 _selfSide 记「本单位在这次关系里站哪一侧」，供「方向」列展示。
+//   同一行不会两侧都命中（party1_id 恒为我方侧、party2_id 为对手侧），去重只为防御。
+const isPartyRelations = computed(() => {
+  return props.section.customFetcher === 'party_relations'
+})
+
+const ROLE_LABEL = Object.freeze({ customer: '客户', vendor: '供应商' })
+const STATUS_LABEL = Object.freeze({ active: '启用', inactive: '停用' })
+
+const partyRelationsData = ref([])
+const partyRelationsLoading = ref(false)
+let _partyRelationsVersion = 0
+
+function normalizeQueryItems(res) {
+  const items = res?.data?.items
+    || (Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []))
+  return Array.isArray(items) ? items : []
+}
+
+async function loadPartyRelations() {
+  if (!hasRealObjectId.value) {
+    partyRelationsData.value = []
+    partyRelationsLoading.value = false
+    return
+  }
+  const version = ++_partyRelationsVersion
+  partyRelationsLoading.value = true
+  try {
+    const selfId = props.objectId
+    // page_size 200: 单个往来单位的关系数量级远小于此（与桥接查询同口径的防御性上限）
+    const [r1, r2] = await Promise.all([
+      boService.query('party_relation', { party1_id: selfId, page_size: 200 }),
+      boService.query('party_relation', { party2_id: selfId, page_size: 200 })
+    ])
+    if (version !== _partyRelationsVersion) return
+    const byId = new Map()
+    for (const it of normalizeQueryItems(r1)) {
+      if (it?.id == null || byId.has(it.id)) continue
+      // 本单位为我方侧 ⇒ 对方看对手侧
+      byId.set(it.id, { ...it, _selfSide: 'party1', _counterpart: it.party2_id_display || it.party2_id })
+    }
+    for (const it of normalizeQueryItems(r2)) {
+      if (it?.id == null || byId.has(it.id)) continue
+      // 本单位为对手侧 ⇒ 对方看我方侧
+      byId.set(it.id, { ...it, _selfSide: 'party2', _counterpart: it.party1_id_display || it.party1_id })
+    }
+    partyRelationsData.value = [...byId.values()]
+  } catch (e) {
+    if (version !== _partyRelationsVersion) return
+    console.error('[AssociationSection] loadPartyRelations 失败:', e)
+    partyRelationsData.value = []
+  } finally {
+    if (version === _partyRelationsVersion) {
+      partyRelationsLoading.value = false
+    }
+  }
+}
 
 const isAnnotation = computed(() => {
   return props.section.type === 'annotation'
@@ -746,6 +835,8 @@ watch(() => props.objectId, (newVal, oldVal) => {
   if (newVal === oldVal) return
   if (isMergedRelationships.value) {
     loadMergedRelationships()
+  } else if (isPartyRelations.value) {
+    loadPartyRelations()
   }
 }, { immediate: true })
 

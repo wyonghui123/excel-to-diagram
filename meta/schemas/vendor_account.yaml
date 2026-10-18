@@ -112,6 +112,9 @@ fields:
       primary_key: true
 
   # 1:1 锚 → party_relation.id（role='vendor'）。照客户侧同款：无 DB 级 FK、无跨表守卫 ⇒ TBD-16
+  # [候选来源 2026-10-17] 显式声明 value_help（与 customer_account.relation_id 严格对称）：
+  #   target_bo = party_relation；display_field = party2_id_display；value_filter(role=vendor)。
+  #   成因同客户侧：party_relation 无 name 列，display 只能取平台生成的 *_display 虚列。
   - id: relation_id
     name: 关联供应商关系
     type: integer
@@ -122,8 +125,41 @@ fields:
     semantics:
       meaning: 关联的供应商关系实例（party_relation，role='vendor'）；1:1，仅作当前指向
       data_category: code
+      display:
+        type: association
+        target_type: party_relation
+        display_field: party2_id_display
+    value_help:
+      source:
+        type: bo
+        target_bo: party_relation
+        value_field: id
+        display_field: party2_id_display
+        apply_target_permissions: true
+        value_filter:
+          role: vendor
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{party2_id_display}"
+        columns:
+          - field: party2_id_display
+            label: 对手侧
+            width: 200
+          - field: role
+            label: 角色
+            width: 100
+          - field: status
+            label: 状态
+            width: 90
     ui:
       widget: select
+      relation: party_relation
+      multiple: false
 
   # 内外类型：对标 Oracle POZ_SUPPLIER_SITES_ALL_M_ 的 supplier traits 概念，
   # 与客户侧 customer_type 值域保持一致（同为「我方内部单位 / 外部单位」）

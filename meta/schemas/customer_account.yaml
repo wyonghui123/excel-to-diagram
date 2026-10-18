@@ -102,9 +102,17 @@ fields:
       meaning: 自增主键
       primary_key: true
 
-  # 1:1 锚 → party_relation.id。照 party.party_id / user.party_id / person_profile.party_id 先例：
+  # 1:1 锚 → party_relation.id。照 party.party_id / person_profile.party_id 先例：
   #   不建 DB 级 FK（跨库 / 演进友好），仅作「当前指向」。
-  # ⚠️ 无跨表类型守卫（仅 role='customer' 的 relation 可挂档案）—— 顶层 validations: 已废弃，本期不实现 ⇒ TBD-16
+  # [候选来源 2026-10-17] 显式声明 value_help（照 party_relation.party1_id 范式）：
+  #   target_bo = party_relation；display_field = party2_id_display（对手侧本体）。
+  # 成因: party_relation 无 name 列（字段只有两侧 party 引用 + role/le_org_id/group_id），
+  #   故不能照搬 {name} 口径；平台对 FK 字段生成的 *_display 虚列（PartyManagement 桥接
+  #   与 list 响应均可见）是唯一可显示口径。display_field 必须落在 *_display 上，
+  #   否则 _resolve_effective_fields 找不到字段、display 恒为空串。
+  # value_filter(role=customer): 在**选择层**收窄候选（不选到 vendor 关系）。
+  # ⚠️ 仍是「选择层」守卫，非写入守卫：直连 API 仍可写 role='vendor' 的 id（无 DB 级 FK /
+  #   无跨表类型校验，顶层 validations: 已废弃）⇒ 孤儿行仍可能 ⇒ TBD-16 保持开启。
   - id: relation_id
     name: 关联客户关系
     type: integer
@@ -115,8 +123,41 @@ fields:
     semantics:
       meaning: 关联的客户关系实例（party_relation，role='customer'）；1:1，仅作当前指向
       data_category: code
+      display:
+        type: association
+        target_type: party_relation
+        display_field: party2_id_display
+    value_help:
+      source:
+        type: bo
+        target_bo: party_relation
+        value_field: id
+        display_field: party2_id_display
+        apply_target_permissions: true
+        value_filter:
+          role: customer
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{party2_id_display}"
+        columns:
+          - field: party2_id_display
+            label: 对手侧
+            width: 200
+          - field: role
+            label: 角色
+            width: 100
+          - field: status
+            label: 状态
+            width: 90
     ui:
       widget: select
+      relation: party_relation
+      multiple: false
 
   # 客户分类轴：对标 Oracle HZ_CUST_ACCOUNTS.CUSTOMER_TYPE（Internal / External）
   # ⚠️ 与 SAP KTOKD（客户科目组）的差异：SAP 是**配置驱动**（决定该客户走哪些字段与校验），

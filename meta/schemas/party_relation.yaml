@@ -56,6 +56,19 @@ fields:
       primary_key: true
 
   # ── 两侧统一 party 引用（蓝图 §3.3：均为 party 引用，不落 org 轴）──
+  # [FK 目标修正 2026-10-17] 我方侧指向 party 基表（身份锚），不再指向 party_internal 视图。
+  #   起因（用户手机端实测报障「对方列显示 8 而不是名称」）：party_relation 存的是
+  #     parties.id 外键，但显示名解析走 enrichment_engine.enrich_fk_display_names ——
+  #     它按 value_help.source.target_bo 取 table_name 后直查该表（enrichment_engine.py:489-499）。
+  #     原 target_bo=party_internal ⇒ 直查 party_internal 视图（谓词 source='org'），
+  #     而库内不存在任何 source='org' 的 party 行（写入侧无 org→party 联动机制，
+  #     idx_party_org_unique 只是 DDL 约束、无满足它的代码路径）⇒ 视图恒 0 行 ⇒
+  #     party1_id_display 恒 null ⇒ 前端只能回退显示原始 id。
+  #   改指基表的理由：archive/internal 是**列表呈现口径**（谁能看见哪些行），
+  #     不是外键的解析目标；外键指向的是 parties.id，显示名应向身份锚取。
+  #   遗留（不在本批）：「我方侧恒为内部组织表示」这一原始约束因此放宽为「我方侧是某个 party」，
+  #     候选集不再收窄到内部面。待 org→party 联动机制落地后再收回（届时 target_bo 改回
+  #     party_internal，并同步 semantics.display / ui.relation / 列表列 target_type）。
   - id: party1_id
     name: 我方侧
     type: integer
@@ -66,12 +79,12 @@ fields:
       meaning: 关系我方侧身份（party 引用）
       display:
         type: association
-        target_type: party_internal
+        target_type: party
         display_field: name
     value_help:
       source:
         type: bo
-        target_bo: party_internal
+        target_bo: party
         value_field: id
         display_field: name
         apply_target_permissions: true
@@ -92,7 +105,7 @@ fields:
             width: 120
     ui:
       widget: select
-      relation: party_internal
+      relation: party
       multiple: false
 
   - id: party2_id
@@ -379,3 +392,120 @@ rules:
 
 ui_view_config:
   skip_auto_menu: true
+  # 列表列（[列表列 2026-10-17] 补回数据列）
+  #   背景：本文件此前只写 skip_auto_menu，未声明 list.columns；前端 useMetaList
+  #     只认 listConfig.tableColumns || listConfig.columns（缺则告警并留空、不回退字段自动生成），
+  #     故「往来单位关系」tab 只渲染勾选框列、无数据列。口径同 party_archive 的补列处理。
+  #   本对象无 name / code（F2 §10 D6：薄关系不建独立识别号、无 display_name_field）
+  #     ⇒ 起始列取「对手侧」作为主体列，其余按语义顺序排列。
+  #   FK 列沿用 party_group.yaml 的 association 写法（render_as: association + target_type +
+  #     display_field），目标面按字段自身的展示语义取：party1_id → party（身份锚，见字段头
+  #     [FK 目标修正] 说明）、party2_id → party_archive、le_org_id → org、group_id → party_group。
+  #   只补列，不动 selection/actions（MOMP 工具条由页面通用层提供）。
+  list:
+    detail_mode: drawer
+    title: 往来单位关系
+    columns:
+      - field: party2_id
+        width: 220
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party_archive
+        display_field: name
+      - field: role
+        width: 90
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: party1_id
+        width: 220
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party
+        display_field: name
+      - field: internal_mark
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: le_org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party_group
+        display_field: name
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+        render_as: tag
+    # [列表动作 2026-10-17] 补 actions —— 与 party_archive 同一缺陷的顺延修复。
+    #   起因：本表原先只补了 columns 没补 actions ⇒ useMetaList 走兜底 ⇒ 按钮文案只有裸
+    #     「新建」，而同页另两个 tab 是「新建往来单位」/「新建往来单位组」，三个 tab 文案不齐。
+    #   文案取「新建往来关系」而非「新建往来单位关系」：SAP Fiori UI Text Guidelines 要求
+    #     "starting with a verb, keep them as short as possible"，本表对应 tab 标签已是
+    #     「往来单位关系」，按钮再重复「单位」属冗余；实测 390px 窄屏下 6 字（96px）
+    #     按钮组需 96+8+48+8+48+8+69=285px ≤ 容器 310px，可与其它 tab 一样单行放下。
+    #   permission 用双段式（permissions 表实有 party_relation:party_relation_create）；
+    #     单段式在该表命中数为 0，写单段式会导致非 admin 看不到按钮。详见 party_archive.yaml 同段注释。
+    actions:
+      - id: create
+        label: 新建往来关系
+        icon: plus
+        type: primary
+        permission: party_relation:party_relation_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  # [表单/详情 2026-10-17] 补 form + detail（本文件此前只有 list）
+  #   报障：手机端点「新建往来关系」，抽屉里除了标题栏的「启用/保存/取消」外一片空白，
+  #     一个字段都没有 ⇒ 新建/编辑无从下手。
+  #   根因同 party_archive 编辑态空白：DetailPage 编辑态走 ui_view_config.form.sections
+  #     （只读态才走 detail.facets 的 fieldGroup）。本文件既没写 form 也没写 detail，
+  #     后端 UIConfigBuilder 的兜底推导只收 ui.editable 字段 —— 本表字段未声明 editable
+  #     ⇒ 兜底结果同样是空 sections，接口实测确认 `form.sections = `（空）。
+  #   分组依据（业务语义，非字母序）：两侧 party 先立住（谁对我方、谁是对手、什么角色），
+  #     再是内外标记与归属（法人域 / 往来单位组），最后生命周期状态。
+  #   layout: vertical —— 窄屏单列；party1_id/party2_id 都是 value_help 下拉，
+  #     两列并排会把两个长下拉挤到放不下 placeholder 的宽度，故两侧各自独占一行。
+  form:
+    title: 往来关系信息
+    layout: vertical
+    sections:
+      - title: 关系双方
+        columns:
+          - fields: [party1_id]
+          - fields: [party2_id]
+          - fields: [role]
+      - title: 归属与状态
+        columns:
+          - fields: [internal_mark]
+          - fields: [le_org_id]
+          - fields: [group_id]
+          - fields: [status]
+  detail:
+    facets:
+      - title: 关系双方
+        type: fieldGroup
+        fields:
+          - party1_id
+          - party2_id
+          - role
+      - title: 归属与状态
+        type: fieldGroup
+        fields:
+          - internal_mark
+          - le_org_id
+          - group_id
+          - status

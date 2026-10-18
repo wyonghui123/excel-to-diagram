@@ -434,6 +434,17 @@ def init_menu_permissions(db_path):
             #     往来单位组 tab 是 party_group 的维护入口; v093 下架了 party_group-list
             #     独立菜单 (同 v092 对 item_group 的处理)。
             #   GenericTabContainer 对该 menu_code 做精确映射 → PartyManagement.vue。
+            #
+            #   [三 tab 2026-10-17] 收入 party_relation 为第三 tab, 并下架其独立菜单
+            #   (party-relation-management, 见下方 deprecated_codes):
+            #     动机: 关系是连接两个 party 的边, 不是与 party 并列的主数据实体。
+            #     侧边栏仅两级 (AppSideNav 的 nav-children 不递归) + get_visible_menu_tree
+            #     的 child_rows 只捞一层 (sid=0 挂 sid=0 不会被捞), 故"挂在 party-management
+            #     之下"在导航层无法呈现 ⇒ 落点取本页 tab。
+            #     object_types 里登记 party_relation, 使 object_type_route_map['party_relation']
+            #     = '/party' (FK 链接 FkLinkField 仍可跳转)。
+            #     required_permissions 同步补 party_relation 5 条: 前端路由守卫用 every 判定,
+            #     漏声明会连 /party 一起拦下 (同 material-management 的 item_group 口径)。
             'menu_code': 'party-management',
             'menu_name': '往来单位',
             'menu_path': '/party',
@@ -443,11 +454,13 @@ def init_menu_permissions(db_path):
             'parent_menu': 'master-data',
             'page_type': 'multi_object_hub',
             'primary_object_type': 'party',
-            'object_types': json.dumps(['party', 'party_group']),
+            'object_types': json.dumps(['party', 'party_group', 'party_relation']),
             'bo_bindings': json.dumps([
                 {'bo_id': 'party', 'role': 'primary',
                  'include_actions': ['create', 'update', 'delete']},
                 {'bo_id': 'party_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'party_relation', 'role': 'primary',
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
@@ -464,35 +477,8 @@ def init_menu_permissions(db_path):
                 'party_group:party_group_update',
                 'party_group:party_group_delete',
                 'party_group:party_group_list',
-            ]),
-            'show_in_sidebar': 0,
-            'data_permission_hint': json.dumps({
-                'resource_types': ['party', 'party_group'],
-                'message': '建议分配往来单位与往来单位组数据权限'
-            })
-        },
-        {
-            # [MD-MENU 2026-10-11] 往来单位关系（party_relation）—— 与 party 严格对称
-            #   客户档案.relation_id 的直接指向对象, 不开菜单则该外键在前端无法选择。
-            #   icon=User: AppRootLayout.iconMap 与 AppSideNav.iconMap 的真实交集只有 13 个
-            #   (Bell/DataAnalysis/Document/Edit/FolderOpened/Grid/Home/Key/List/Lock/
-            #   Search/Setting/Star), Connection 只在 rootlayout 单侧注册会渲染空白。
-            #   语义上 party 与 party_relation 同属往来单位主体域, 用同一图标可接受。
-            'menu_code': 'party-relation-management',
-            'menu_name': '往来单位关系',
-            'menu_path': '/party-relation',
-            'icon': 'User',
-            'color': '#0ea5e9',
-            'sort_order': 60,
-            'parent_menu': 'master-data',
-            'page_type': 'object_list',
-            'primary_object_type': 'party_relation',
-            'object_types': json.dumps(['party_relation']),
-            'bo_bindings': json.dumps([
-                {'bo_id': 'party_relation', 'role': 'primary',
-                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-            ]),
-            'required_permissions': json.dumps([
+                # 往来单位关系 tab (v 三 tab 2026-10-17 下架 party-relation-management 菜单),
+                # 权限随迁至此 (5 条权限码见 party_relation.yaml actions)。
                 'party_relation:party_relation_create',
                 'party_relation:party_relation_read',
                 'party_relation:party_relation_update',
@@ -501,8 +487,8 @@ def init_menu_permissions(db_path):
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
-                'resource_types': ['party_relation'],
-                'message': '建议分配往来单位关系数据权限'
+                'resource_types': ['party', 'party_group', 'party_relation'],
+                'message': '建议分配往来单位 / 往来单位组 / 往来单位关系数据权限'
             })
         },
         {
@@ -1360,7 +1346,11 @@ def init_menu_permissions(db_path):
     ]
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
-    deprecated_codes = ['product-version']
+    # [三 tab 2026-10-17] party-relation-management 下架: 往来单位关系收入
+    #   party-management 的第三 tab（前端 PartyManagement.vue），不再作平级入口。
+    #   此处 DELETE 而非置 is_active=0 —— 该菜单是手工声明行 (非自动生成),
+    #   且步骤5/6 的 UPSERT 会把声明行强制 is_active=1, 留在库里反而会被重新激活。
+    deprecated_codes = ['product-version', 'party-relation-management']
     for code in deprecated_codes:
         cursor.execute("DELETE FROM menus WHERE menu_code = ?", [code])
         cursor.execute("DELETE FROM menu_permissions WHERE menu_code = ?", [code])

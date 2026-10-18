@@ -11,8 +11,18 @@
 /**
  * PartyManagement — 往来单位管理页（MOMP 配置注入）
  *
- * 形态：左树 = 往来单位组（勾选过滤往来单位），右表 = 两个 tab（往来单位 / 往来单位组）。
+ * 形态：左树 = 往来单位组（勾选过滤往来单位），右表 = 三个 tab
+ * （往来单位 / 往来单位组 / 往来单位关系）。
  * 与物料管理页（MaterialManagement.vue）同构，差异只在过滤链：
+ *
+ * [MOMP 三 tab 2026-10-17] 往来单位关系（party_relation）由独立菜单
+ *   （party-relation-management，原为主数据下的平级入口）收入本页第三 tab。
+ *   动机: 关系是连接两个 party 的边（party1_id 我方侧 / party2_id 对手侧），
+ *   不是与 party 并列的主数据实体 ⇒ 侧边栏同级入口属"放错层"。
+ *   侧边栏只渲染两级（AppSideNav 的 nav-children 不递归），挂在 party-management
+ *   之下无法显示, 故落点取本页 tab; 菜单层同时把 party_relation 登记进
+ *   party-management.object_types, 使 object_type_route_map['party_relation']
+ *   = '/party'（FK 链接仍可跳转）。
  *
  * - 物料: items.item_group_id 是直 FK，左树勾选 → item_group_id__in 一步到位。
  * - 往来单位: party 不直挂 group。分组关系在关系层 —— party_relations.group_id（N:1）
@@ -41,7 +51,7 @@ import { boService } from '@/services/boService'
 
 defineOptions({ name: 'PartyManagement' })
 
-const objectTypes = ['party_archive', 'party_group']
+const objectTypes = ['party_archive', 'party_group', 'party_relation']
 
 // 桥接结果: null = 未选组（不过滤, 全量）; 数组 = 选中组下伙伴 party2_id 集合（可空 → 哨兵）
 const bridgedPartyIds = ref(null)
@@ -51,7 +61,8 @@ const pageOptions = {
   defaultTab: 'party_archive',
   tabs: {
     party_archive: { label: '往来单位' },
-    party_group: { label: '往来单位组' }
+    party_group: { label: '往来单位组' },
+    party_relation: { label: '往来单位关系' }
   },
   // 左树：往来单位组（纯层级分类，parent_id 自引用）
   scopeTree: {
@@ -89,6 +100,11 @@ const pageOptions = {
     // 往来单位组 tab 不受左树影响 —— 它是管理页, 用户需要看到全部组才能新建/编辑。
     // 显式声明空策略, 防落 _buildRelationshipFilters 默认分支被注入 relationExtra 噪声。
     party_group(filters) {
+      return filters
+    },
+    // 往来单位关系 tab 同 party_group 口径: 全量台账（不随左树收窄）。
+    // 关系台账的作用是"全量可维护", 收窄反而看不见待维护的其他关系; 需按组查时用 tab 内筛选。
+    party_relation(filters) {
       return filters
     }
   }
