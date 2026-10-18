@@ -15,7 +15,7 @@
           <div v-if="searchFields.length > 0 && !hideToolbar" class="search-field">
             <el-input
               v-model="keyword"
-              :placeholder="`搜索 ${searchFields.map(f => f.label).join('/')}...`"
+              :placeholder="searchPlaceholder"
               clearable
               size="default"
               prefix-icon="Search"
@@ -522,7 +522,7 @@
               <template #default="{ row }">
                 <el-dropdown
                   trigger="click"
-                  :teleported="false"
+                  :teleported="true"
                   popper-class="row-action-popper"
                   @command="(key) => handleDropdownCommand(key, row)"
                 >
@@ -968,6 +968,23 @@ function onTableSelectionChange(rows) {
    不改动 PC 端行为：isMobile 为 false 时原样返回。
    ========================================================================== */
 const { isMobile } = useBreakpoints()
+
+/* ==========================================================================
+   [窄屏搜索框 placeholder 截断 2026-10-18]
+   根因：placeholder 直接把全部可搜索字段名拼进来
+        （`搜索 ${labels.join('/')}...`），字段数一多就顶破 280px 输入框 ——
+        实测 390x844 备注区为「搜索 分类/内容/关联对象类型/创建人...」，
+        文字尾部被裁掉，同时把 .toolbar 撑出多余横向滚动条、压住按钮。
+   为什么不用 CSS 截断：placeholder 渲染在原生 input::placeholder 上，
+        CSS 截断会连带裁掉用户已输入的文字，属功能受损。
+   改为按屏宽改文案：窄屏只留首个字段名 + 数量概括，PC 端原样不变。
+   ========================================================================== */
+const searchPlaceholder = computed(() => {
+  const labels = (searchFields.value || []).map(f => f.label)
+  if (!labels.length) return ''
+  if (!isMobile.value || labels.length <= 1) return `搜索 ${labels.join('/')}...`
+  return `搜索 ${labels[0]} 等 ${labels.length} 项...`
+})
 
 const tableColumns = computed(() => {
   if (!isMobile.value) return visibleColumns.value
@@ -2267,6 +2284,65 @@ defineExpose({
        390px 屏放不下，nowrap 会挤成横滑 */
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  /* [窄屏按钮行多余滚动条 2026-10-18] 关掉按钮行的横向滚动。
+     根因（实测 390x844 内嵌备注区）：上面已用 flex-wrap:wrap 让按钮换行，
+     但基础样式 .toolbar / .toolbar-left 上的 overflow-x:auto 没有被覆盖
+     （那段窄屏规则只改了 flex-wrap，漏了 overflow-x）⇒ 换行后浏览器仍判定
+     内容溢出，划出一条没有任何可滚动内容的滚动条。
+     典型症状：备注区只有「添加备注」1 个按钮（宽约 110px，容器 340px，
+     根本放不下），却出现横向滚动条并压住按钮下半部分。
+     为什么用 hidden 而非 visible：flex 容器上 overflow-x:visible 会连带把
+     overflow-y 变成 auto，可能在无意的纵向溢出时凭空多出滚动条。
+     注意：.meta-list-page 的 overflow-x:auto 必须保留 —— 它是表格横向
+     滚动的唯一来源（见上方注释），删了窄屏就读不到宽表格。 */
+  .toolbar,
+  .toolbar-left {
+    overflow-x: hidden;
+  }
+
+  /* [窄屏搜索框被裁 2026-10-18] 让输入框吃掉整行宽度，不再被裁掉右边框。
+     根因：模板给 el-input 写了内联 style="width:280px"，而基础样式
+     .search-field 又是 flex-shrink:0 —— 两者叠加使输入框既固定 280px
+     又拒绝收缩；390px 屏的备注区容器实测仅约 340px，扣掉工具栏 padding
+     后放不下，右侧边框被 overflow-x:hidden 直接裁掉。
+     为什么需要 !important：内联样式优先级高于任何非 !important 的类选择器，
+     不加则这条规则完全无效。
+     为什么给 min-width:0：flex 子项默认 min-width:auto，内容（el-input）过宽时
+     会拒绝收缩回容器宽度，即使设了 flex:1 也压不下来。 */
+  .toolbar .search-field {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .toolbar .search-field :deep(.el-input) {
+    width: 100% !important;
+  }
+
+  /* [窄屏按钮间距 2026-10-17] 去掉 Element Plus 相邻按钮的默认 margin-left。
+     根因：gap 与 EP 全局 `.el-button + .el-button { margin-left: 12px }` 叠加，
+     实测相邻按钮实际间距 = 8 + 12 = 20px（不是本规则声明的 8px）。
+     390px 屏下 toolbar-left 内容区实测 310px，「往来单位组」tab 的按钮组需
+     108(新建往来单位组) + 20 + 48(搜索) + 20 + 48(重置) + 20 + 69(更多) = 333px
+     ⇒ 「更多」被挤到第三行，同一页面里只有这一个 tab 多占一行（文案的锅被间距放大）。
+     去掉冗余 margin 后按 gap 8px 计：108+8+48+8+48+8+69 = 297 ≤ 310 ⇒ 一行放下。
+     仅在窄屏生效，桌面端保持原有间距。 */
+  .toolbar-left :deep(.el-button + .el-button),
+  .toolbar-right :deep(.el-button + .el-button) {
+    margin-left: 0;
+  }
+
+  /* [窄屏工具条底部空档 2026-10-17] 空 toolbar-right 不再占一整行。
+     根因（实测 390x844）：.toolbar-right 有 v-if 容器但内容可全空（inlineEditConfig 未启用
+       时其下所有按钮的 v-if 均不成立）。窄屏下它和 .toolbar-left 一样是 flex:1 1 100%，
+       高度为 0 却仍触发父级 gap:12px ⇒ toolbar 实测高 92px
+       = padding 8 + toolbar-left 64 + gap 12 + 空 right 0 + padding 8，
+       底部凭空多出 20px（12 gap + 8 padding），视觉上就是「tab 下方与列表区域距离很大」。
+     桌面端无需此修：那里 toolbar-right 是 flex-shrink:0 且父级 nowrap，空元素不换行、不占高。
+     :has() 不支持时规则整条失效，退回现状（仅多 12px，无功能影响）。 */
+  .toolbar-right:not(:has(> *)) {
+    display: none;
   }
 
   /* [FIX 2026-10-13] 分页器溢出到屏幕外。

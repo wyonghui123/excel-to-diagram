@@ -8,6 +8,59 @@
       'rst-active-layout': layoutExpanded
     }"
   >
+    <!-- [窄屏分组切换 · P0 2026-10-18] 把 4 个 CollapsiblePanel 收成一行 tab。
+         为什么值得做（窄屏实测，原文「树只剩 2~3 行」）：
+           原 chrome = 28(×让位) + 48(对象hdr) + 40(搜索) + 32(工具行)
+                      + 48(关系hdr) + 48(过滤hdr) = 244px，树只剩 ~127px ≈ 2.7 行；
+           收成 tab 后 chrome = 28 + 40(tab行) + 40 + 32 = 140px
+                      ⇒ 树 ~231px ≈ 5.8 行，2.1×。
+         为什么用「常驻 DOM + CSS 隐藏」而不是 v-if + matchMedia：
+           与 MasterDetailLayout 的 __scrim 同一手法 —— 不引入
+           第二套断点状态（避免 JS 判定与媒体查询不同步导致标题和 tab 同时消失），
+           桌面端 display:none 不占位、不拦截点击，DOM 差异仅一个空 div。
+         规范依据：Material Design 3 Lists「Layouts under 600dp wide may fill the
+           screen with a single level of content hierarchy」—— 同一时刻只展开一层；
+           现有 handleXxxToggle 本就是互斥语义，tab 只是把它显性化。 -->
+    <div class="rst-narrow-tabs">
+      <button
+        class="rst-narrow-tab"
+        :class="{ 'is-active': objectExpanded }"
+        type="button"
+        @click="handleObjectToggle(true)"
+      >
+        对象范围
+        <span v-if="selectedBoCount" class="rst-narrow-tab-badge">{{ selectedBoCount }}</span>
+      </button>
+      <button
+        class="rst-narrow-tab"
+        :class="{ 'is-active': relationExpanded }"
+        type="button"
+        @click="handleRelationToggle(true)"
+      >
+        关系范围
+        <span v-if="relationCodesCount" class="rst-narrow-tab-badge">{{ relationCodesCount }}</span>
+      </button>
+      <button
+        v-if="injectedViewMode !== 'chart'"
+        class="rst-narrow-tab"
+        :class="{ 'is-active': filterExpanded }"
+        type="button"
+        @click="handleFilterToggle(true)"
+      >
+        过滤条件
+        <span v-if="hasActiveFilter" class="rst-narrow-tab-dot" />
+      </button>
+      <button
+        v-if="hasChartData"
+        class="rst-narrow-tab"
+        :class="{ 'is-active': layoutExpanded }"
+        type="button"
+        @click="handleLayoutToggle(true)"
+      >
+        图表设置
+      </button>
+    </div>
+
     <CollapsiblePanel
       title="对象范围"
       :badge="selectedBoCount"
@@ -198,6 +251,14 @@ watch(hasChartData, (val) => {
   if (!val && layoutExpanded.value) {
     layoutExpanded.value = false
     diagramConfigStore.setLayoutPanelExpanded(false)
+    // [窄屏 tab · 2026-10-18] 收起布局 panel 后必须补一个展开项, 否则四个 panel 全折叠。
+      //   桌面端这只是「回到全折叠」的可接受静止态(用户点任一 header 即可展开);
+      //   窄屏端 header 已被 tab 行替代而隐藏, 全折叠 = 空面板且**无任何入口可展开**,
+      //   是无法自救的死角。故统一兜底展开对象范围(4 个 panel 本就是互斥单选,
+      //   "什么都不选" 是退化状态, 兜底到第一项与 radio 组的常规处理一致)。
+    if (!objectExpanded.value && !relationExpanded.value && !filterExpanded.value) {
+      objectExpanded.value = true
+    }
   }
 })
 
@@ -970,5 +1031,132 @@ defineExpose({
 }
 .rst-panel-relation:not(.is-collapsed) :deep(.collapsible-panel__container) {
   height: 100%;
+}
+
+/* ============================================================
+   [窄屏分组切换 · P0/P1 · 2026-10-18]
+   桌面端默认隐藏。与 MasterDetailLayout 的 __scrim 同一手法:
+   节点常驻 DOM、显隐完全交给 CSS —— 不引入第二套 JS 断点状态, 否则会出现
+   「JS 判定窄屏 / CSS 媒体查询宽屏」不同步, 导致 tab 行与 panel header 同时
+   消失或同时出现。桌面端 display:none, 不占位、不拦截点击, DOM 差异仅一个空 div。
+   ============================================================ */
+.rst-narrow-tabs {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* tab 行: 一行放不下时横向滚动(3~4 个 tab 在 320px 极窄屏会挤), 隐藏滚动条 */
+  .rst-narrow-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: stretch;
+    gap: 4px;
+    padding: 0 12px;
+    background: var(--color-bg-container);
+    border-bottom: 1px solid var(--color-border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rst-narrow-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rst-narrow-tab {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    padding: 0 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    /* 44px 命中区(Material 最小触控目标 48px, 这里受 tab 行总高限制取 44) */
+    min-height: 44px;
+  }
+
+  .rst-narrow-tab.is-active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: var(--font-weight-medium, 500);
+  }
+
+  .rst-narrow-tab-badge {
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-tertiary);
+    font-size: var(--font-size-xs, 11px);
+    line-height: 1.4;
+  }
+
+  .rst-narrow-tab.is-active .rst-narrow-tab-badge {
+    background: var(--color-primary-bg, #fff7ed);
+    color: var(--color-primary);
+  }
+
+  /* 过滤条件的激活态用小圆点, 不塞数字 —— 它的 badge 是「N 对象 · M 关系」双计数,
+     数字放进单行 tab 会撑破布局(这正是原来 header 里用 filter-badge-text 的原因)。 */
+  .rst-narrow-tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+  }
+
+  /* 隐藏 4 个 panel 的 header —— 标题语义已由上面的 tab 行承载。
+     折叠态 panel 本就只剩 header(content 被 v-show 置 false), header 一隐藏
+     即彻底归零高度; 展开态保留 content。这是 chrome 从 244px 降到 140px 的全部来源。
+     :deep() 必须 —— header 在 CollapsiblePanel 子组件内, scoped 选择器打不穿。 */
+  .relation-scope-tree :deep(.collapsible-panel__header) {
+    display: none;
+  }
+
+  /* [P1] 关键: 上面 .rst-panel-* 的 min-height: 48px 挂在 panel 自身而非 header,
+     header 隐藏后它仍在撑高 —— 3 个折叠 panel 照样各占 48px, tab 行就白做了。
+     collapsed 态必须显式清零(min-height 优先级高于纯 height:0 的自然收缩)。 */
+  .relation-scope-tree :deep(.collapsible-panel.is-collapsed) {
+    min-height: 0;
+    flex: 0 0 auto;
+    border-bottom: none;
+  }
+
+  /* header 没了以后 panel 之间残留的 border-bottom 会在 tab 行下方多画一条线,
+     收起该分隔, 改由 tab 行的 border-bottom 统一承担。 */
+  .relation-scope-tree :deep(.collapsible-panel) {
+    border-bottom: none;
+  }
+
+  /* [P0 补正 · 2026-10-18] 让展开的 panel 吃掉可用高度, 树区才能变高。
+     实测(390x844, YonBIP/V50): header 隐藏后 chrome 从 244px 降到 ~144px,
+     但 .oss-tree-container 的 min-height:150px 是给桌面端左树写的下限(避免树太矮),
+     在窄屏成了硬地板 —— 树区锁死 150px = 3.8 行, 最后一行仍被切一半(用户截图原问题)。
+
+     为什么不用 flex:1 1 0: 窄屏下面板是 position:absolute、高度自适应, 父级没有确定
+     高度, flex-basis:0 会把整条链路算成 0。实测踩过: 面板塌到 74px、三个 panel 全 h=0。
+     正确做法是解除树的硬地板、改由面板的 min-height 提供可用高度, 树再 flex:1 吃掉余量。 */
+  /* 窄屏给展开态一个可用高度: 桌面端 .rst-panel-*:not(.is-collapsed) 的
+     min-height:200px 在窄屏下太矮(树区只剩 3.8 行)。取 300px, 在 844px 机型上
+     减去 tab 行 45px 后树区约 255px ≈ 6.4 行, 且仍在面板 70vh 天花板之下。 */
+  .relation-scope-tree .rst-panel-object:not(.is-collapsed),
+  .relation-scope-tree .rst-panel-relation:not(.is-collapsed),
+  .relation-scope-tree .rst-panel-filter:not(.is-collapsed),
+  .relation-scope-tree .rst-panel-layout:not(.is-collapsed) {
+    min-height: 300px;
+  }
+
+  /* ObjectScopeSection / RelationScopeSection 的树容器解除下限, 让它 flex:1 吃满 panel。
+     :deep() 必须 —— 这两个是子组件。 */
+  .relation-scope-tree :deep(.oss-tree-container),
+  .relation-scope-tree :deep(.rss-tree-container),
+  .relation-scope-tree :deep(.rst-tree-container) {
+    min-height: 0;
+  }
 }
 </style>

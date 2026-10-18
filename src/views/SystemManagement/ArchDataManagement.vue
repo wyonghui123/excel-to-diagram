@@ -195,11 +195,22 @@ function handleChartRenderError(payload) {
   }
 }
 
+/* [A 方案 2026-10-18] 已生效过滤条件改为独立成行。
+   为什么：此前 chip 与 tab 按钮挤在同一行（.momp-tabs-row 内），窄屏 390px 下
+   「3 个 tab + 最多 4 个 chip + 清空」必然溢出，把清空按钮挤出屏幕。Ant Design /
+   Arco / Polaris / PatternFly 一致把已应用筛选条件独立成行，不与视图切换器混排。
+   flex-basis:100% 强制整组另起一行（而非零散换行导致 tab 与 chip 上下错位）。
+   为什么加 flex-wrap：chip 数量不定（0~4），换行高度需自适应。 */
 .rm-tabs-extra {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding-right: 16px;
+  /* 整组另起一行，避免与左侧 tab 同行争空间 */
+  flex-basis: 100%;
+  /* 允许在窄屏收缩，避免撑破 .momp-tabs-row */
+  min-width: 0;
+  padding: 4px 16px 0;
 }
 
 .rm-filter-tag {

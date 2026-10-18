@@ -328,6 +328,12 @@ defineExpose({
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
   height: 40px;
+  /* [移动端折叠按钮锚点 2026-10-17] 作为 MasterDetailLayout 折叠按钮 Teleport 的落点。
+     *   窄屏下该按钮（bottom:0/right:0）以本元素为定位基准，贴在工具栏右下角 ——
+     *   依据 Material Design 2 side sheets「开启入口放 top app bar」的指南。
+     *   加 relative 的安全性：全组件内无任何 position:absolute 子元素（已 grep 确认），
+     *   relative 不改变自身文档流位置，对内部 flex 布局零影响。 */
+  position: relative;
 }
 
 .gt-context {

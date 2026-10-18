@@ -1,6 +1,7 @@
 <template>
   <div class="multi-object-management">
     <GlobalToolbar
+      id="momp-global-toolbar"
       ref="globalToolbarRef"
       :compact="true"
       :action-disabled="actionDisabledMap"
@@ -39,6 +40,7 @@
       sidebar-width="320px"
       :sidebar-collapsible="true"
       :sidebar-collapsed="sidebarCollapsed"
+      :collapse-btn-teleport="isNarrowViewport && collapseAnchorEl ? collapseAnchorEl : ''"
       :min-width="240"
       :max-width="800"
       @collapse-change="handleSidebarCollapse"
@@ -249,7 +251,7 @@
  * [OK] 使用 isHierarchyType(hierarchyTypes, type) 判断层级对象
  */
 
-import { ref, watch, computed, reactive, onMounted, onActivated, provide } from 'vue'
+import { ref, watch, computed, reactive, onMounted, onActivated, onBeforeUnmount, provide } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { useChartArchDataStore } from '@/stores/chartArchDataStore'
@@ -342,6 +344,46 @@ const sidebarCollapsed = ref(
   window.matchMedia &&
   window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`).matches
 )
+
+// [Teleport 2026-10-17] 窄屏判定：决定折叠按钮是否 Teleport 到顶部 GlobalToolbar。
+//   窄屏 = 传 #momp-global-toolbar ⇒ 按钮落在 top app bar（Material Design 2 side sheets
+//   指南：覆盖式面板的开启入口应放 top app bar），侧栏收起态高度随之归零、空横条消失。
+//   宽屏 = 传空串 ⇒ MasterDetailLayout 内 :disabled，DOM 与引入前完全一致，零影响。
+//   为什么必须监听断点变化：Teleport 目标随视口宽度切换，若不监听，用户拖窗口跨过
+//   768px 后按钮会留在 GlobalToolbar 里却被桌面端 CSS 定位到侧栏中部（位置错乱）。
+//   onActivated 补一次同步：keep-alive 缓存的页面恢复时可能已跨断点，
+//   而 onMounted 只在首次挂载执行。
+const narrowMediaQuery = ref(null)
+const isNarrowViewport = ref(sidebarCollapsed.value)
+// 折叠按钮的 Teleport 落点：直接取 GlobalToolbar 的根 DOM 元素。
+//   为什么不用 CSS 选择器字符串：Teleport 在挂载那一刻才 querySelector 解析目标，
+//   而 GT 的 id 是本组件通过 fallthrough attrs 透传的，解析时序不可靠 —— 实测传
+//   '#momp-global-toolbar' 时按钮整体消失，且生产构建下 Vue 的 warning 被编译掉，
+//   控制台无任何线索，排查成本很高。传元素可完全绕开（详见 MasterDetailLayout 的 prop 注释）。
+//   onMounted 后才赋值：此时子组件已挂载、$el 可用；赋值前按钮保持 disabled 留在原容器内。
+const collapseAnchorEl = ref(null)
+let onNarrowChange = null
+
+onMounted(() => {
+  if (!window.matchMedia) return
+  const mql = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`)
+  narrowMediaQuery.value = mql
+  onNarrowChange = (e) => { isNarrowViewport.value = e.matches }
+  mql.addEventListener('change', onNarrowChange)
+  const inst = globalToolbarRef.value
+  if (inst && inst.$el) collapseAnchorEl.value = inst.$el
+})
+
+onActivated(() => {
+  if (!window.matchMedia) return
+  isNarrowViewport.value = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`).matches
+})
+
+onBeforeUnmount(() => {
+  if (narrowMediaQuery.value && onNarrowChange) {
+    narrowMediaQuery.value.removeEventListener('change', onNarrowChange)
+  }
+})
 
 // [A7 2026-07-30] 嵌入式图表视图 toggle 状态
 //   - viewMode: 'list' | 'chart'，切换 detail 区显示 MetaListPage 还是 detailContent slot
@@ -1054,7 +1096,13 @@ watch(() => page.combinedFilters, (newFilters) => {
 .momp-tabs-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* [A 方案 2026-10-18] 允许 tabsExtra 插槽（已生效过滤条件 chip）整体换到第二行。
+     为什么必须在这里开 wrap：子项用 flex-basis:100% 强制另起一行，父级不换行则该声明无效。
+     为什么不用 justify-content:space-between 配 wrap：换行后它会把 tab 与 chip 组推到
+     行首/行尾两端，出现大片中间空隙；改用 flex-start + 靠 chip 组自身的
+     margin-left:auto 保持"tab 靠左、chip 靠右"的一行布局。 */
+  flex-wrap: wrap;
+  justify-content: flex-start;
   background: var(--color-bg-container);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
@@ -1098,6 +1146,17 @@ watch(() => page.combinedFilters, (newFilters) => {
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   transition: color 0.2s, border-color 0.2s;
+  /* [点击区 2026-10-17] 撑满 .momp-tabs 的 40px 行高，把可点击区从 29px 提到 40px。
+   *   起因（移动端实测 390x844）：.momp-tabs 是 align-items:center，按钮只按内容+padding
+   *     撑到 29px（6+17+6），上下各留约 5px 死区。对照规范：WCAG 2.2 最小 24px 勉强达标，
+   *     但 Apple HIG 要 44pt、Material 要 48dp —— 29px 在触屏上明显偏小、难点中。
+   *   为什么用 stretch 而不是加 padding：加 padding 会把按钮撑到 40px 以上、顶破 .momp-tabs
+   *     固定 40px 的行高，进而把 tab 组与下方工具栏的间距一起拉大（那正是用户嫌"有缝"的地方）。
+   *   stretch 只把行内已存在的死区还给按钮，视觉间距一字未动，属纯增益。
+   *   纯几何调整，不影响点击判定与切换逻辑。 */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
 .momp-tab-btn:hover {
