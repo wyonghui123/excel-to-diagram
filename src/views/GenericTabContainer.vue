@@ -1,6 +1,17 @@
 <template>
   <div class="generic-tab-container">
+    <!-- [单 tab 不渲染二级导航 2026-10-17] 单页 hub（page_type=multi_object_hub 且无 children，
+         isSelfPage 分支 L99-100）时 tabs 恒为 1 项，SubNavTabs 退化成不可切换的单选控件：
+         既无导航作用，又占一整行，且标签常与内层 MOMP tab 组首项同名
+         （用户手机端报障：往来单位页「往来单位」标题与下方 tab 组首项重复出现）。
+         故 tabs.length === 1 时整块不渲染，内容区直接占满（.gtc-content flex:1）。
+         影响面仅限 GenericTabContainer 侧单 tab 的组：party-management / material-management /
+         business-config；多 tab 的 user-permission、master-data 不受影响。
+         注：SubNavTabs 组件本身保留 —— TaskCenter.vue:3 是独立消费方。
+         内容区渲染不依赖 SubNavTabs（各分支只判 isCustomComponent / tab.objectType / activeTab），
+         故跳过 nav 不影响内容。 -->
     <SubNavTabs
+      v-if="visibleTabs.length > 1"
       :tabs="visibleTabs"
       :model-value="activeTab"
       :aria-label="title"
@@ -289,5 +300,23 @@ onBeforeRouteLeave((_to, _from) => {
   overflow-y: auto;
   padding: var(--spacing-md);
   min-height: 0;
+}
+
+/* [窄屏内边距 2026-10-17] 移动端 padding 16 → 8。
+ *   报障：页签栏（app-tabs）与页面卡片之间有一条约 24px 的灰带，看着像多余空白
+ *     （用户手机端圈出反馈）。实测构成（390x844）：app-shell__content 的 padding-top:8px
+ *     + 本元素 padding:16px（--spacing-md），两段相加 = 24px，露出的是 layout 底色。
+ *   为什么只在窄屏改：16px 是照桌面端定的 —— 桌面端页签栏/工具栏本身有分隔，
+ *     卡片四周留宽一点不显空；移动端 390px 宽，24px 四边合计吃掉 12% 屏宽，
+ *     且列表/卡片内容被迫更早换行。业界移动端页面级留白普遍 8–12px
+ *     （Material 8dp、SAP Fiori 移动版 12px），故取 8px。
+ *   影响面：所有走本容器的页面（往来单位 / 物料 / 业务配置 / 用户权限 / 主数据…）
+ *     的**移动端**内边距一起变小；桌面端不受影响。
+ *   副作用（预期内）：卡片宽度增加约 32px，内容少一次换行 —— 移动端这是净收益。
+ *   功能零影响：纯布局留白，不涉及任何逻辑、交互与数据。 */
+@media (max-width: 768px) {
+  .gtc-content {
+    padding: var(--spacing-sm);
+  }
 }
 </style>

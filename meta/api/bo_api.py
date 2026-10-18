@@ -234,8 +234,11 @@ def get_schema_version():
     })
 
 
-#: 未配置实例名且 app 数不为 1 时的兜底展示名（与前端 composable 的默认值一致）
-DEFAULT_DISPLAY_NAME = 'BIP应用架构管理'
+#: 未配置实例名且 app 数不为 1 时的展示名。
+#: [去品牌兜底 2026-10-17] 由 'BIP应用架构管理' 改为空串 —— 品牌名只能来自部署层配置或
+#:   app 自带声明，后端不猜。与前端 useInstanceInfo.js 的 displayName 初始值（空串）保持一致，
+#:   两边同时改，避免出现「前端空、后端兜底名」的新闪烁路径。
+DEFAULT_DISPLAY_NAME = ''
 
 
 @meta_v2_bp.route('/instance', methods=['GET'])
@@ -245,7 +248,7 @@ def get_instance_info():
     display_name 取值优先级：
       1. 环境变量 `PLATFORM_DISPLAY_NAME`（部署层配置，实例名）—— source='env'
       2. 恰好加载了 1 个 app → 该 app 的 `app.yaml` name —— source='app'
-      3. 其余（0 个 / ≥2 个 app）→ DEFAULT_DISPLAY_NAME —— source='default'
+      3. 其余（0 个 / ≥2 个 app）→ DEFAULT_DISPLAY_NAME（空串）—— source='default'
 
     不加鉴权：登录页在拿到 token 之前就要用它。
     """

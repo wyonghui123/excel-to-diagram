@@ -25,7 +25,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="theme-color" content="#667eea" />
-    <title>AA Diagram</title>
+    <!-- [去品牌兜底 2026-10-17] 静态 title 留空，不再预置任何品牌名。
+         此前写死 'AA Diagram'，导致 JS 尚未加载完时（约 600ms）标签页先显示它、
+         随后才被 router/index.js 改成「页面名 - 实例名」——与左侧品牌名
+         「BIP应用架构管理 → xAPP」是同一类闪烁毛病。
+         取值原则同 useInstanceInfo.js：实例名只有一个真源（后端 /meta/instance），
+         取不到就留空（浏览器回退显示 URL），不在静态资源里猜品牌名。 -->
+    <title></title>
   </head>
   <body>
     <div id="app"></div>

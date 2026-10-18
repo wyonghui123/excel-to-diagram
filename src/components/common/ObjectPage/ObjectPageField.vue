@@ -544,9 +544,20 @@ function getFieldProps(key) {
   return fieldProps
 }
 
+// [下拉类 placeholder 2026-10-17] 按控件类型分流：选择类控件说「请选择」，输入类才说「请输入」。
+//   起因（用户手机端报障）：本函数原先对所有控件一律返回 `请输入${label}`，且被
+//   el-select 分支（L58）、code 自动管理分支（L81）、通用组件分支（L101）共用
+//   ⇒ 枚举下拉也显示「请输入角色」「请输入内外标记」，语义自相矛盾
+//   （截图里「角色」明明是带下拉箭头的选择控件，占位符却让人去「输入」）。
+//   与 MetaForm.vue L70 / L83 的既有口径对齐（选择类统一「请选择{label}」）。
+//   复用既有的 getFieldWidget（L510）而非另写一份判定：它已经把
+//   「有 options ⇒ el-select」和 widget 映射表都算进去了，另起一套会出现两处判定漂移。
+//   输入类控件保持原「请输入{label}」，不影响既有行为。
 function getFieldPlaceholder(key) {
   const def = props.fieldDefs[key]
-  return def?.placeholder || `请输入${def?.label || key}`
+  if (def?.placeholder) return def.placeholder
+  const label = def?.label || key
+  return getFieldWidget(key) === 'el-select' ? `请选择${label}` : `请输入${label}`
 }
 
 function getValueHelpConfig(key) {

@@ -138,7 +138,12 @@ router.beforeEach(async (to, from, next) => {
   // 首次导航时数据可能还没回来，最多 await 一次；之后 module-level 缓存已就绪，零开销。
   if (!instanceInfo.loaded.value) await instanceInfo.loadInstanceInfo()
   const appTitle = instanceInfo.displayName.value
-  document.title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle
+  // [去品牌兜底 2026-10-17] 实例名取不到时不要拼出「页面名 - 」这种悬空后缀。
+  //   displayName 初始值已改为空串（与 index.html 静态 title、后端 DEFAULT_DISPLAY_NAME 一致），
+  //   这里若无条件拼接，实例名缺失时标签页会变成「往来单位 - 」。
+  document.title = to.meta.title
+    ? (appTitle ? `${to.meta.title} - ${appTitle}` : to.meta.title)
+    : appTitle
 
   if (to.name === 'ObjectDetail') {
     const valid = await validateDetailRoute(to, from, next)
