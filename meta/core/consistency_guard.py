@@ -312,34 +312,53 @@ class CascadeGuard:
 
 class ComputedFieldHandler:
     """计算型字段处理器
-    
+
     处理需要根据其他字段计算得出的字段。
     与 WriteGuard 不同，这些字段不是简单的冗余字段，
     而是需要复杂计算逻辑的派生字段。
-    
-    当前状态：
-    - category_label/category_type 已改为 virtual 字段，查询时计算
-    - 此类保留作为未来计算型字段的扩展点
+
+    扩展方式：模块通过 :meth:`register_hook` 注册「对象类型 → 派生函数」，
+    派生函数签名为 ``hook(data_source, data) -> data``。
+
+    落点理由：_do_create / _do_update 是所有写路径的唯一汇聚点
+    （bo_framework 拦截器链、manage_api、Excel 导入），且本钩子在
+    required 校验之前执行 ⇒ 派生值可以直接满足必填约束。
     """
-    
+
+    #: 对象类型 → 派生函数（类级注册，进程内共享）
+    _hooks: Dict[str, Any] = {}
+
     def __init__(self, data_source):
         self.ds = data_source
-    
+
+    @classmethod
+    def register_hook(cls, object_type: str, hook) -> None:
+        """注册某对象类型的写前派生函数（重复注册以最后一次为准）。"""
+        cls._hooks[object_type] = hook
+
+    @classmethod
+    def clear_hooks(cls) -> None:
+        """清空已注册的派生函数（测试隔离用）。"""
+        cls._hooks.clear()
+
     def on_before_save(
         self,
         object_type: str,
         data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """保存前自动计算字段
-        
+
         Args:
             object_type: 对象类型
             data: 待保存的数据字典
-            
+
         Returns:
             计算后的数据字典
         """
-        return data
+        hook = self._hooks.get(object_type)
+        if hook is None:
+            return data
+        return hook(self.ds, data)
 
 
 class RedundancyAuditor:

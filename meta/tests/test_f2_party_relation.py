@@ -73,14 +73,16 @@ def pr_ds(tmp_path):
     ds = get_data_source("sqlite", database=str(tmp_path / 'f2_party_relation.db'))
     sync_schema_from_meta(ds, [obj])
     # 最小父表 + 父行（用例中 party 用 1–8、le_org 用 10/20/30/31）
+    # [internal_mark 派生] parties 需带 source 列：派生口径为 source='org' ⇒ internal。
     ds.execute("CREATE TABLE IF NOT EXISTS parties "
-               "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
+               "(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, source TEXT)")
     ds.execute("CREATE TABLE IF NOT EXISTS orgs "
                "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     ds.execute("CREATE TABLE IF NOT EXISTS party_groups "
                "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     for pid in range(1, 9):
-        insert(ds, 'parties', id=pid)
+        insert(ds, 'parties', id=pid, name='单位%d' % pid,
+               source='org' if pid == 1 else None)
     for oid in (10, 20, 30, 31):
         insert(ds, 'orgs', id=oid)
     yield ds
@@ -151,6 +153,63 @@ class TestEnums:
     def test_internal_mark_values(self):
         vals = {e['value'] for e in _fields()['internal_mark']['enum_values']}
         assert vals == {'internal', 'external'}
+
+
+# ────────────────────────────────────────
+# 3b. internal_mark 由系统派生（不人工录入）
+# ────────────────────────────────────────
+class TestInternalMarkDerived:
+    def test_not_in_create_form(self):
+        sections = _load_yaml()['ui_view_config']['form']['sections']
+        ids = [fid for s in sections
+               for c in (s.get('columns') or []) for fid in c.get('fields', [])]
+        assert 'internal_mark' not in ids
+
+    def test_readonly_display_kept(self):
+        facets = _load_yaml()['ui_view_config']['detail']['facets']
+        ids = [fid for fc in facets for fid in fc.get('fields', [])]
+        assert 'internal_mark' in ids
+        ui = _fields()['internal_mark']['ui']
+        assert ui['editable'] is False
+        assert ui['readonly'] is True
+        assert 'readonly_always' not in _fields()['internal_mark'].get('semantics', {})
+
+    def test_not_importable(self):
+        assert _fields()['internal_mark']['semantics']['import_visible'] is False
+
+    def test_derive_by_party_source(self, pr_ds):
+        from meta.services.party_relation_guard_service import PartyRelationGuardService
+        svc = PartyRelationGuardService(pr_ds)
+        # party 1 是 source='org' 的内部组织表示
+        assert svc.derive_internal_mark({'party2_id': 1})['internal_mark'] == 'internal'
+        # 其余 source 为 NULL ⇒ 对外
+        assert svc.derive_internal_mark({'party2_id': 2})['internal_mark'] == 'external'
+
+    def test_client_value_discarded(self, pr_ds):
+        from meta.services.party_relation_guard_service import PartyRelationGuardService
+        svc = PartyRelationGuardService(pr_ds)
+        data = svc.derive_internal_mark({'party2_id': 3, 'internal_mark': 'internal'})
+        assert data['internal_mark'] == 'external'
+
+    def test_no_party2_drops_client_value(self, pr_ds):
+        from meta.services.party_relation_guard_service import PartyRelationGuardService
+        data = PartyRelationGuardService(pr_ds).derive_internal_mark(
+            {'party1_id': 1, 'internal_mark': 'internal'})
+        assert 'internal_mark' not in data
+
+    def test_hook_applied_only_to_registered_object(self, pr_ds):
+        from meta.core.consistency_guard import ComputedFieldHandler
+        from meta.services.party_relation_guard_service import derive_internal_mark_hook
+        ComputedFieldHandler.register_hook('party_relation', derive_internal_mark_hook)
+        try:
+            out = ComputedFieldHandler(pr_ds).on_before_save(
+                'party_relation', {'party2_id': 1})
+            assert out['internal_mark'] == 'internal'
+            other = ComputedFieldHandler(pr_ds).on_before_save(
+                'party', {'party2_id': 1})
+            assert 'internal_mark' not in other
+        finally:
+            ComputedFieldHandler.clear_hooks()
 
 
 # ────────────────────────────────────────

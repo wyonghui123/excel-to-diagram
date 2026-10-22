@@ -133,6 +133,52 @@ class PartyRelationGuardService:
             return {}
         return {r.get('id'): r.get('name') for r in rows}
 
+    # ---------- 派生 ----------
+
+    def derive_internal_mark(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """按对手侧往来单位的来源派生内外标记（internal_mark）。
+
+        口径：对手侧 ``parties.source = 'org'`` ⇒ ``internal``，否则 ``external``。
+        标记非判定（I3-A），只是关系实例自身的分类标签；判定仍归 org / 法人关系。
+
+        仅当载荷含 ``party2_id`` 时改写：create 必含；update 仅在改对手侧时重新派生，
+        未改对手侧的更新保留库中原值（不无谓覆盖）。客户端自带的值一律丢弃。
+
+        Raises:
+            Exception: 来源查询失败（schema 异常须显式暴露，不得静默写 external）
+        """
+        data = dict(data)
+        party2_id = data.get('party2_id')
+        if party2_id is None:
+            # 未涉及对手侧：不猜值，也不接受客户端自带值（DB 保留原值）
+            data.pop('internal_mark', None)
+            return data
+
+        sources = self._party_sources([party2_id])
+        if party2_id not in sources:
+            # 对手侧不存在属输入错误，交由后续 FK 存在性校验给出标准错误；
+            # 此处不猜值，避免把无效输入静默标成 external。
+            logger.warning(
+                f'[party_relation_guard] 内外标记派生跳过: party2_id={party2_id} 不存在'
+            )
+            data.pop('internal_mark', None)
+            return data
+
+        data['internal_mark'] = (
+            'internal' if sources[party2_id] == 'org' else 'external'
+        )
+        return data
+
+    def _party_sources(self, party_ids) -> Dict[Any, Any]:
+        """按 id 批量取 party 来源（source='org' 为内部组织表示，其余为对外）。"""
+        ids = [i for i in party_ids if i is not None]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' for _ in ids)
+        sql = f"SELECT id, source FROM {self.PARTY_TABLE} WHERE id IN ({placeholders})"
+        rows = self.ds.query(sql, ids)
+        return {r.get('id'): r.get('source') for r in rows}
+
     def _build_message(self, party1_id: Any, party2_id: Any, role: Any) -> str:
         """构造面向用户的拒写消息（显式指出反向行，而非泛化「唯一性冲突」）。"""
         names = self._party_names([party1_id, party2_id])
@@ -150,3 +196,11 @@ class PartyRelationGuardService:
         """构造自反关系的拒写消息（我方侧与对手侧不能是同一个单位）。"""
         name = self._party_names([party_id]).get(party_id) or str(party_id)
         return f"我方侧与对手侧不能是同一个往来单位（{name}）"
+
+
+def derive_internal_mark_hook(data_source, data: Dict[str, Any]) -> Dict[str, Any]:
+    """写前派生钩子：供 ``ComputedFieldHandler.register_hook`` 注册。
+
+    薄封装以便测试覆写 :class:`PartyRelationGuardService` 的查询方法。
+    """
+    return PartyRelationGuardService(data_source).derive_internal_mark(data)

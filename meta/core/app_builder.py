@@ -241,6 +241,13 @@ class ApplicationBuilder:
         if is_module_enabled('party'):
             from meta.core.interceptors.party_relation_guard_interceptor import PartyRelationGuardInterceptor
             bo_framework.register_interceptor(PartyRelationGuardInterceptor())
+            # [internal_mark 派生 2026-10-22] 按对手侧 party 来源派生内外标记。
+            #   落 ComputedFieldHandler（_do_create/_do_update 的写前钩子）而非拦截器：
+            #   拦截器链只覆盖 bo_api 路径，manage_api 与 Excel 导入绕过拦截器链，
+            #   但三条路径都汇聚到 ActionExecutor ⇒ 钩子才能一次覆盖且先于 required 校验。
+            from meta.core.consistency_guard import ComputedFieldHandler
+            from meta.services.party_relation_guard_service import derive_internal_mark_hook
+            ComputedFieldHandler.register_hook('party_relation', derive_internal_mark_hook)
         bo_framework.register_interceptor(EnumProtectionInterceptor())
         bo_framework.register_interceptor(AssociationInterceptor())
 

@@ -234,7 +234,7 @@ fields:
     db_column: internal_mark
     required: true
     max_length: 30
-    description: 内｜外标记（internal 内部 / external 外部）；标记非判定，且不入唯一键（D5）；不设默认以免内部行被静默标为 external
+    description: 内｜外标记（internal 内部 / external 外部）；由系统按对手侧往来单位来源派生，不人工录入；标记非判定，且不入唯一键（D5）
     enum_values:
       - value: internal
         label: 内部
@@ -244,8 +244,16 @@ fields:
         color: default
     semantics:
       meaning: 关系的内外标记（标记非判定；判定归 org / 法人关系）
+      # 派生口径：对手侧 parties.source='org' ⇒ internal，否则 external。
+      # 落 ComputedFieldHandler 写前钩子，故不出现在录入表单与导入模板。
+      import_visible: false
     ui:
       widget: select
+      # 只用 ui 层的只读（展示只读、不进表单、不参与编辑），
+      # 不用 semantics.readonly_always —— 后者会让 update 跳过该字段不落库，
+      # 导致改对手侧时无法重新派生。
+      editable: false
+      readonly: true
 
   # ── 归属法人（条款挂点；粒度 = 法人，I4-A 已拍；界面词避免使用平台 domain 的「域」）──
   - id: le_org_id
@@ -575,7 +583,6 @@ ui_view_config:
           - fields: [role]
       - title: 归属与状态
         columns:
-          - fields: [internal_mark]
           - fields: [group_id]
           - fields: [status]
   detail:

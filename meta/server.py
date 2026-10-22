@@ -496,6 +496,11 @@ def create_app(db_path=None):
     if is_module_enabled('party'):
         from meta.core.interceptors.party_relation_guard_interceptor import PartyRelationGuardInterceptor
         bo_framework.register_interceptor(PartyRelationGuardInterceptor())
+        # [internal_mark 派生 2026-10-22] 与 app_builder.with_interceptors() 同位登记；
+        #   落 ComputedFieldHandler 以覆盖 manage_api / Excel 导入等绕过拦截器链的写路径。
+        from meta.core.consistency_guard import ComputedFieldHandler
+        from meta.services.party_relation_guard_service import derive_internal_mark_hook
+        ComputedFieldHandler.register_hook('party_relation', derive_internal_mark_hook)
     bo_framework.register_interceptor(EnumProtectionInterceptor())
     bo_framework.register_interceptor(AssociationInterceptor())
 
