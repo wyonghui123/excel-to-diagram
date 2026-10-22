@@ -261,9 +261,13 @@ class TestDisplayNameFieldYAMLIntegration:
         assert meta is not None
         assert meta.display_name_field == "name"
     
-    def test_yaml_display_name_field_user_group(self, service):
-        """TC-DNS-032: user_group的display_name_field配置"""
-        meta = registry.get("user_group")
+    def test_yaml_display_name_field_org(self, service):
+        """TC-DNS-032: org 的 display_name_field 配置
+
+        [迁移] 原 test_yaml_display_name_field_user_group：
+        user_groups → orgs（v072），user_group.yaml 已删除。
+        """
+        meta = registry.get("org")
         assert meta is not None
         assert meta.display_name_field == "name"
 

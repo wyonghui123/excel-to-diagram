@@ -1349,9 +1349,13 @@ class MetaRegistry:
     def get(self, object_id: str) -> Optional[MetaObject]:
         """获取元数据对象
 
-        [Spec 16 2026-08-29] 支持别名解析：如历史别名 user_group → org。
-        注册 id 优先精确匹配；未命中时按对象的 aliases 进行反向查找，
-        便于迁移后旧 object_type 仍能解析到新 id 的对象。
+        支持别名解析：注册 id 未命中时，按对象的 aliases 反向查找
+        （示例：中文别名「用户组」可解析到 org）。
+
+        注意：英文 ``user_group`` **不是** org 的别名——v072 虽把 user_groups
+        RENAME 为 orgs，但 org.yaml 只保留了中文 alias「用户组」，
+        英文名被移除以避免与 v089 DROP 后的 legacy user_group 表混淆。
+        故 ``registry.get('user_group')`` 返回 None，调用方须改用 'org'。
         """
         obj = self._objects.get(object_id)
         if obj is not None:

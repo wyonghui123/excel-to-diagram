@@ -35,11 +35,15 @@ class TestYAMLLoader:
         assert meta is not None
         assert meta.name is not None
 
-    def test_load_user_group_yaml(self):
-        """TC-BE-002-03: 加载user_group.yaml"""
+    def test_load_org_yaml(self):
+        """TC-BE-002-03: 加载 org.yaml
+
+        [迁移] 原 test_load_user_group_yaml：user_groups → orgs（v072），
+        user_group.yaml 已删除，legacy 表由 v089 DROP。
+        """
         from meta.core.models import registry
 
-        meta = registry.get('user_group')
+        meta = registry.get('org')
 
         assert meta is not None
 
@@ -148,8 +152,9 @@ class TestYAMLLoaderAssociations:
 
         groups = meta.associations['groups']
         assert groups.type == 'many_to_many'
-        assert groups.target_entity == 'user_group'
-        assert groups.through == 'user_group_members'
+        # [迁移 v072] target/through: user_group/user_group_members → org/org_members
+        assert groups.target_entity == 'org'
+        assert groups.through == 'org_members'
 
     def test_load_reference_association(self):
         """TC-BE-002-22: reference关联"""
@@ -260,7 +265,9 @@ class TestYAMLLoaderRegistry:
 
         assert 'user' in objects
         assert 'role' in objects
-        assert 'user_group' in objects
+        # [迁移 v072] user_group.yaml → org.yaml；英文 'user_group' 不是
+        # org 的 alias（org.yaml 只保留中文 alias「用户组」），故此处用 'org'。
+        assert 'org' in objects
 
     def test_registry_persistent_objects(self):
         """TC-BE-002-38: Registry持久化对象"""

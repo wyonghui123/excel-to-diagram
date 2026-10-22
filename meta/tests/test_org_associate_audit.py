@@ -33,6 +33,11 @@ def bo_framework():
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
     data_source = get_data_source('sqlite', database=db_path)
 
+    # [夹具补齐] 写路径经 bo_framework.commit → get_runtime_config()，
+    #   该单例只在 server 初始化时设置；测试直连库须显式补一次。
+    from meta.core.db_config_detector import detect_runtime_config
+    detect_runtime_config(db_path)
+
     framework = BOFramework(data_source)
     framework.register_interceptor(ContextInterceptor())
     framework.register_interceptor(PersistenceInterceptor())
@@ -210,7 +215,7 @@ class TestUserGroupAssociateAudit:
 
         cursor.execute('''
             SELECT * FROM org_members
-            WHERE user_id=? AND group_id=?
+            WHERE user_id=? AND org_id=?
         ''', [test_user_id, test_group_id])
 
         record = cursor.fetchone()

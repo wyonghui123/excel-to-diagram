@@ -560,80 +560,11 @@ class TestAuditDerivedFieldSorting:
             assert v is None or isinstance(v, str)
 
 
-class TestUserApiListUsersSort:
-    """user_api.py:list_users() 排序参数（/api/v1/users）。
-
-    背景 (FR-2026-06-08)：
-        - /api/v1/users 之前是 hardcoded ORDER BY id，根本不支持前端传 sort_by
-        - SELECT 也不包含 updated_at，前端展示列是空的
-        - 修复后：兼容 El-Table v2 (?sort_by=&order=) 和 Django (?ordering=-)
-          两种约定，物理字段直排，updated_at 走 audit_logs 子查询
-    """
-
-    def _client(self):
-        """构建带 admin 登录的 Flask test client。"""
-        from meta.tests.conftest import get_shared_app
-        app, client = get_shared_app()
-        # 走 dev-login 拿 httpOnly cookie
-        client.get('/api/v1/auth/dev-login?username=admin')
-        return app, client
-
-    def test_list_users_supports_sort_by_updated_at_desc(self):
-        """?sort_by=updated_at&order=desc 应能正确排序，updated_at 字段应被返回。"""
-        app, client = self._client()
-        resp = client.get(
-            '/api/v1/users?page=1&page_size=5&sort_by=updated_at&order=desc',
-        )
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-        items = body['data']
-        assert isinstance(items, list)
-        # 响应里应包含 updated_at 字段（即使值是 None）
-        if items:
-            for u in items:
-                assert 'updated_at' in u
-                assert u['updated_at'] is None or isinstance(u['updated_at'], str)
-
-    def test_list_users_supports_ordering_django_convention(self):
-        """Django 约定 ?ordering=-updated_at 应被正确解析为 desc。"""
-        app, client = self._client()
-        resp = client.get(
-            '/api/v1/users?page=1&page_size=5&ordering=-updated_at',
-        )
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-
-    def test_list_users_physical_column_sort_works(self):
-        """?sort_by=created_at&order=desc 走物理字段排序（应不报错）。"""
-        app, client = self._client()
-        resp = client.get(
-            '/api/v1/users?page=1&page_size=5&sort_by=created_at&order=desc',
-        )
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-
-    def test_list_users_invalid_sort_falls_back_to_id(self):
-        """非法列名应被白名单拒绝、回退到默认 id ASC（不抛 500）。"""
-        app, client = self._client()
-        resp = client.get(
-            '/api/v1/users?page=1&page_size=5&sort_by=DROP_TABLE_users',
-        )
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-        # 返回结果不应是空（说明回退到了 id 排序）
-        assert isinstance(body['data'], list)
-
-    def test_list_users_no_params_default_works(self):
-        """无 sort 参数时应使用默认 id ASC（保持向后兼容）。"""
-        app, client = self._client()
-        resp = client.get('/api/v1/users?page=1&page_size=5')
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
+# 注：原 TestUserApiListUsersSort（5 项）已删除。
+# 它打的是 /api/v1/users，该端点自 v1.4 P8 Sunset（2026-06-05）起被
+# server.py 的 V1_CRUD_MIGRATION 拦成 410（users 未列入 V1_SPECIAL_PREFIXES，
+# 单段路径走 410 拦截），user_api.list_users 早已不可达。
+# 用户列表排序现由 /api/v2/bo/user 提供，覆盖见本文件下方 v2 系列测试类。
 
 
 # ============================================================
@@ -1386,97 +1317,7 @@ class TestComputedSubqueriesMatrix:
         assert is_supported("count_planets", "domain") is False
 
 
-class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
-    """audit_logs 派生字段排序极端场景 (FR-2026-06-10)。
-
-    背景：
-        - updated_at 无 UPDATE 记录时 _audit_value = NULL
-        - NULL 在 SQL ORDER BY 中无序，导致 DESC 排序静默失效
-        - 修复：COALESCE(_audit_sort._audit_value, table.created_at)
-        - 本类测试制造"全无 UPDATE"场景验证修复是否生效
-
-    关键验证：即使 audit_logs 中无 UPDATE 记录，
-    排序仍应回退到 created_at 且顺序确定（不乱序）。
-    """
-
-    def _client(self):
-        """构建带 admin 登录的 Flask test client"""
-        from meta.tests.conftest import get_shared_app
-        _, client = get_shared_app()
-        client.get('/api/v1/auth/dev-login?username=admin')
-        return client
-
-    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
-    def test_updated_at_sort_works_without_any_audit_records(self, ordering):
-        """无任何 audit_logs 记录时，updated_at 排序仍应返回确定顺序（不报错）"""
-        client = self._client()
-        resp = client.get(
-            f'/api/v1/users?page=1&page_size=10&ordering={ordering}'
-        )
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-        items = body['data']
-        # updated_at 应为 None 或 ISO 字符串（不能抛异常）
-        for u in (items or []):
-            v = u.get('updated_at')
-            assert v is None or isinstance(v, str), (
-                f"updated_at has invalid type: {type(v)}"
-            )
-
-    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
-    def test_updated_at_sort_stable_without_audit(self, ordering):
-        """无 audit 场景下，同一请求两次结果应完全一致（顺序稳定）"""
-        client = self._client()
-        r1 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
-        r2 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
-        assert r1.status_code == 200
-        assert r2.status_code == 200
-        ids1 = [u['id'] for u in r1.get_json()['data']]
-        ids2 = [u['id'] for u in r2.get_json()['data']]
-        assert ids1 == ids2, (
-            f"updated_at sort not stable without audit records: "
-            f"request1={ids1} request2={ids2}"
-        )
-
-    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
-    def test_updated_at_sort_with_mixed_audit_data(self, ordering):
-        """混合场景（部分有 UPDATE，部分只有 CREATE）：排序应返回确定顺序"""
-        client = self._client()
-        resp = client.get(f'/api/v1/users?ordering={ordering}&page_size=20')
-        assert resp.status_code == 200, resp.data[:300]
-        body = resp.get_json()
-        assert body['success'] is True
-        for u in (body['data'] or []):
-            v = u.get('updated_at')
-            assert v is None or isinstance(v, str)
-
-    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
-    def test_updated_at_sort_pagination_stable(self, ordering):
-        """无 audit 场景下跨页顺序应稳定（page1 末 <= page2 首 for ASC）"""
-        client = self._client()
-        r1 = client.get(f'/api/v1/users?ordering={ordering}&page=1&page_size=5')
-        r2 = client.get(f'/api/v1/users?ordering={ordering}&page=2&page_size=5')
-        assert r1.status_code == 200 and r2.status_code == 200
-        p1_ids = [u['id'] for u in r1.get_json()['data']]
-        p2_ids = [u['id'] for u in r2.get_json()['data']]
-        # 无 audit 时回退到 id ASC → page1 的 id 应全小于 page2 的 id
-        if ordering == "updated_at":  # ASC
-            assert max(p1_ids) < min(p2_ids) or p1_ids == p2_ids, (
-                f"Pagination not stable for ASC: p1={p1_ids} p2={p2_ids}"
-            )
-
-    def test_updated_at_sort_rejects_sql_injection(self):
-        """SQL 注入尝试应被静默拒绝（不抛 500）"""
-        client = self._client()
-        payloads = [
-            "id; DROP TABLE users",
-            "-id OR 1=1",
-            "updated_at--",
-        ]
-        for payload in payloads:
-            resp = client.get(f'/api/v1/users?ordering={payload}&page_size=5')
-            # 应返回 200（fallback）或 400，不应 500
-            assert resp.status_code in (200, 400), (
-                f"Injection payload '{payload}' caused {resp.status_code}"
-            )
+# 注：原 TestAuditDerivedFieldSortingExtended（9 项）已删除，原因同上：
+# 打的是已 410 的 /api/v1/users。
+# 其守护的「无 UPDATE 记录时 updated_at 排序回退 created_at」这一行为，
+# 已由上方 TestAuditDerivedFieldSorting（直连 QueryService，走真实 SQL 路径）覆盖。
