@@ -1,5 +1,5 @@
 # ============================================
-# 往来单位组（party_group）— foundation · party 族分类对象（独立对象，不是 party_relation 的属性）
+# 业务伙伴组（party_group）— foundation · party 族分类对象（独立对象，不是 party_relation 的属性）
 # 依据: G2 泛化研究（2026-10-04-classification-objects-as-rule-factor-research.md）
 #       + 2026-10-07 拍板：统一分组（不拆客户组/供应商组），role_scope 标注适用范围
 # 定位: 树形分类; 被 party_relations.group_id 引用（N:1）; 挂载点 = 关系层（非账户层 / 非 party 层）
@@ -21,19 +21,19 @@
 # ============================================
 
 id: party_group
-name: 往来单位组
+name: 业务伙伴组
 table_name: party_groups
-description: 往来单位组（树形分类对象，被往来关系引用；role_scope 标注客户/供应商适用范围）
+description: 业务伙伴组（树形分类对象，被业务伙伴关系引用；role_scope 标注客户/供应商适用范围）
 display_name_field: name
 aspects: [audit_aspect]
 
 semantics:
-  meaning: 往来单位组
+  meaning: 业务伙伴组
   category: core_entity
   business_key: [code]
   display_name_field: name
   aliases:
-    - 往来单位组
+    - 业务伙伴组
     - 客户组
     - 供应商组
     - PartyGroup
@@ -87,16 +87,16 @@ fields:
       primary_key: true
 
   - id: code
-    name: 往来单位组编码
+    name: 业务伙伴组编码
     type: string
     db_column: code
     required: true
     unique: true
     max_length: 50
     pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
-    description: 往来单位组唯一编码（编码空间为全表共享，命名约定建议带角色前缀，如 C_/V_；通用组可不带）
+    description: 业务伙伴组唯一编码（编码空间为全表共享，命名约定建议带角色前缀，如 C_/V_；通用组可不带）
     semantics:
-      meaning: 往来单位组业务编码
+      meaning: 业务伙伴组业务编码
       business_key: true
       immutable: true
       data_category: code
@@ -104,14 +104,14 @@ fields:
       widget: input
 
   - id: name
-    name: 往来单位组名称
+    name: 业务伙伴组名称
     type: string
     db_column: name
     required: true
     max_length: 100
-    description: 往来单位组显示名称
+    description: 业务伙伴组显示名称
     semantics:
-      meaning: 往来单位组显示名称
+      meaning: 业务伙伴组显示名称
       display_name: true
       data_category: text
     ui:
@@ -171,7 +171,7 @@ fields:
     db_column: status
     required: true
     default: active
-    description: 往来单位组状态 active/inactive（生命周期约定 §5.4；停用=瞬时开关，D4 不加生效日列）
+    description: 业务伙伴组状态 active/inactive（生命周期约定 §5.4；停用=瞬时开关，D4 不加生效日列）
     enum_values:
       - value: active
         label: 启用
@@ -185,7 +185,7 @@ fields:
         category: inactive
         description: 停用，不进入新挂靠候选；已挂靠关系保留不受影响
     semantics:
-      meaning: 往来单位组启用状态
+      meaning: 业务伙伴组启用状态
       filterable: true
       filter_type: enum
       filter_label: 状态
@@ -252,9 +252,9 @@ fields:
     type: text
     db_column: description
     nullable: true
-    description: 往来单位组说明
+    description: 业务伙伴组说明
     semantics:
-      meaning: 往来单位组详细说明
+      meaning: 业务伙伴组详细说明
       searchable: true
     ui:
       widget: textarea
@@ -294,7 +294,7 @@ relations:
 #   仅两态两动作：不取 freeze/unfreeze（分类对象无"库存收发冻结"语义）
 rules:
   - id: activate_party_group
-    name: 启用往来单位组
+    name: 启用业务伙伴组
     type: state_transition
     action_ref: activate
     state_field: status
@@ -304,11 +304,11 @@ rules:
     ui_hints:
       label: 启用
       icon: check_circle
-      confirm_message: "确定要启用此往来单位组吗？启用后可被新往来关系挂靠。"
+      confirm_message: "确定要启用此业务伙伴组吗？启用后可被新往来关系挂靠。"
       highlight: true
 
   - id: deactivate_party_group
-    name: 停用往来单位组
+    name: 停用业务伙伴组
     type: state_transition
     action_ref: deactivate
     state_field: status
@@ -318,14 +318,14 @@ rules:
     ui_hints:
       label: 停用
       icon: pause_circle
-      confirm_message: "确定要停用此往来单位组吗？停用后不进入新挂靠候选，已挂靠关系不受影响。"
+      confirm_message: "确定要停用此业务伙伴组吗？停用后不进入新挂靠候选，已挂靠关系不受影响。"
 
 ui_view_config:
   showChangeHistory: true
   list:
     detail_mode: drawer
-    title: 往来单位组管理
-    description: 往来单位组（树形分类）
+    title: 业务伙伴组管理
+    description: 业务伙伴组（树形分类）
     columns:
       - field: name
         width: 220
@@ -363,7 +363,7 @@ ui_view_config:
       - name
     actions:
       - id: create
-        label: 新建往来单位组
+        label: 新建业务伙伴组
         icon: plus
         type: primary
         permission: party_group:create
@@ -376,7 +376,7 @@ ui_view_config:
       order: asc
 
   form:
-    title: 往来单位组信息
+    title: 业务伙伴组信息
     layout: vertical
     sections:
       - title: 基本信息

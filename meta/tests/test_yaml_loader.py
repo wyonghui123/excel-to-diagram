@@ -660,7 +660,7 @@ class TestObjectDefinitionFilter:
 class TestDetailTabActionParsing:
     """详情 tab 的 action 形态解析：与 facet 同一口径。
 
-    仅 org 的「往来关系」tab 用 dict 形态声明 create 入口（带 label/variant/
+    仅 org 的「业务伙伴关系」tab 用 dict 形态声明 create 入口（带 label/variant/
     permission）。若解析时被压平成 id/name 字符串，前端拿不到 label/permission，
     按钮静默消失。字符串形态（assign/unassign/list）必须保持原样。
     """
@@ -673,7 +673,7 @@ class TestDetailTabActionParsing:
             "type": "association",
             "actions": [{
                 "key": "create",
-                "label": "新建往来关系",
+                "label": "新建伙伴关系",
                 "variant": "primary",
                 "permission": "party_relation:party_relation_create",
             }],
@@ -681,7 +681,7 @@ class TestDetailTabActionParsing:
 
         assert tab.actions == [{
             "key": "create",
-            "label": "新建往来关系",
+            "label": "新建伙伴关系",
             "variant": "primary",
             "permission": "party_relation:party_relation_create",
         }]

@@ -9,13 +9,13 @@
 
 <script setup>
 /**
- * PartyManagement — 往来单位管理页（MOMP 配置注入）
+ * PartyManagement — 业务伙伴管理页（MOMP 配置注入）
  *
- * 形态：左树 = 往来单位组（勾选过滤往来单位），右表 = 三个 tab
- * （往来单位 / 往来单位组 / 往来单位关系）。
+ * 形态：左树 = 业务伙伴组（勾选过滤业务伙伴），右表 = 三个 tab
+ * （业务伙伴组 / 业务伙伴 / 业务伙伴关系）。
  * 与物料管理页（MaterialManagement.vue）同构，差异只在过滤链：
  *
- * [MOMP 三 tab 2026-10-17] 往来单位关系（party_relation）由独立菜单
+ * [MOMP 三 tab 2026-10-17] 业务伙伴关系（party_relation）由独立菜单
  *   （party-relation-management，原为主数据下的平级入口）收入本页第三 tab。
  *   动机: 关系是连接两个 party 的边（party1_id 我方侧 / party2_id 对手侧），
  *   不是与 party 并列的主数据实体 ⇒ 侧边栏同级入口属"放错层"。
@@ -25,7 +25,7 @@
  *   = '/party'（FK 链接仍可跳转）。
  *
  * - 物料: items.item_group_id 是直 FK，左树勾选 → item_group_id__in 一步到位。
- * - 往来单位: party 不直挂 group。分组关系在关系层 —— party_relations.group_id（N:1）
+ * - 业务伙伴: party 不直挂 group。分组关系在关系层 —— party_relations.group_id（N:1）
  *   指向 party_groups，伙伴侧是 party2_id（party1_id 恒为我方侧）。
  *   故左树勾选 → 先查 party_relation(group_id__in=选中组) 收集 party2_id，
  *   再用 id__in 过滤 party_archive —— 两段桥接（见 syncBridge）。
@@ -51,7 +51,7 @@ import { boService } from '@/services/boService'
 
 defineOptions({ name: 'PartyManagement' })
 
-const objectTypes = ['party_archive', 'party_group', 'party_relation']
+const objectTypes = ['party_group', 'party_archive', 'party_relation']
 
 // 桥接结果: null = 未选组（不过滤, 全量）; 数组 = 选中组下伙伴 party2_id 集合（可空 → 哨兵）
 const bridgedPartyIds = ref(null)
@@ -60,11 +60,11 @@ let bridgeSeq = 0
 const pageOptions = {
   defaultTab: 'party_archive',
   tabs: {
-    party_archive: { label: '往来单位' },
-    party_group: { label: '往来单位组' },
-    party_relation: { label: '往来单位关系' }
+    party_group: { label: '业务伙伴组' },
+    party_archive: { label: '业务伙伴' },
+    party_relation: { label: '业务伙伴关系' }
   },
-  // 左树：往来单位组（纯层级分类，parent_id 自引用）
+  // 左树：业务伙伴组（纯层级分类，parent_id 自引用）
   scopeTree: {
     component: PartyGroupScopeTree,
     props: {},
@@ -89,7 +89,7 @@ const pageOptions = {
     }
   },
   filterStrategies: {
-    // 勾选往来单位组 → 按桥接的伙伴集合过滤；未选组 → 不过滤（全量）
+    // 勾选业务伙伴组 → 按桥接的伙伴集合过滤；未选组 → 不过滤（全量）
     // 键 = objectType（当前为面 party_archive, 见 useMultiObjectPage filterStrategies[objectType]）
     party_archive(filters) {
       const ids = bridgedPartyIds.value
@@ -97,12 +97,12 @@ const pageOptions = {
       if (!ids.length) return { ...filters, id__in: '-1' }  // 空集哨兵, 防后端跳条件回退全量
       return { ...filters, id__in: ids.join(',') }
     },
-    // 往来单位组 tab 不受左树影响 —— 它是管理页, 用户需要看到全部组才能新建/编辑。
+    // 业务伙伴组 tab 不受左树影响 —— 它是管理页, 用户需要看到全部组才能新建/编辑。
     // 显式声明空策略, 防落 _buildRelationshipFilters 默认分支被注入 relationExtra 噪声。
     party_group(filters) {
       return filters
     },
-    // 往来单位关系 tab 同 party_group 口径: 全量台账（不随左树收窄）。
+    // 业务伙伴关系 tab 同 party_group 口径: 全量台账（不随左树收窄）。
     // 关系台账的作用是"全量可维护", 收窄反而看不见待维护的其他关系; 需按组查时用 tab 内筛选。
     party_relation(filters) {
       return filters

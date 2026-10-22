@@ -109,7 +109,7 @@ fields:
     required: true
     default: organization
     max_length: 30
-    description: 身份类型（organization 企业 / person 个人）——描述「往来单位自身是什么性质」，与我方内部组织对象（org）不是一回事
+    description: 身份类型（organization 企业 / person 个人）——描述「业务伙伴自身是什么性质」，与我方内部组织对象（org）不是一回事
     enum_values:
       - value: organization
         label: 企业
@@ -184,9 +184,9 @@ fields:
 
 relations: []
 
-# 详情分区（[关系分区 2026-10-17] 往来单位详情展示其参与的关系，两侧合并）
+# 详情分区（[关系分区 2026-10-17] 业务伙伴详情展示其参与的关系，两侧合并）
 #   动机：party_relation 是连接两个 party 的边（party1_id 我方侧 / party2_id 对手侧），
-#     归属「往来单位」这个域管辖 ⇒ 在往来单位详情里要能看到本单位的全部关系。
+#     归属「业务伙伴」这个域管辖 ⇒ 在业务伙伴详情里要能看到本单位的全部关系。
 #   口径 C（两侧都列）：party1_id = 本 id 的行（本单位为我方侧）+ party2_id = 本 id 的行
 #     （本单位为对手侧），合并去重后按「方向」列区分。理由：关系里同一个 party 可能是
 #     任一侧（对外伙伴常为对手侧，内部组织为我方侧），只列一侧会漏。
@@ -203,7 +203,7 @@ ui_view_config:
   #   口径对齐 party_group.yaml 的 list.columns 写法（field 键 + 宽度/筛选/展示形态）。
   list:
     detail_mode: drawer
-    title: 往来单位
+    title: 业务伙伴
     columns:
       - field: code
         width: 140
@@ -225,12 +225,12 @@ ui_view_config:
       - name
     # [列表动作 2026-10-17] 补 actions（用户手机端报障「新建按钮文案不一致」）
     #   起因：本面此前未声明 actions ⇒ useMetaList 走兜底 ⇒ 按钮文案只有裸「新建」，
-    #     而同页 party_group tab 是「新建往来单位组」，同一页面两套文案。
+    #     而同页 party_group tab 是「新建业务伙伴组」，同一页面两套文案。
     #   文案口径依据 SAP Fiori 官方 List Report Floorplan：
     #     "replace the generic tooltip Create Object with a more specific text,
     #      such as Create Purchase Order" —— 明确反对泛化文案，要求动词 + 对象名。
     #     配套 UI Text Guidelines: "starting with a verb, keep them as short as possible"。
-    #     故取「新建往来单位」：不取「新建」（泛化），也不取「新建往来单位组」（本面就是往来单位本身）。
+    #     故取「新建业务伙伴」：不取「新建」（泛化），也不取「新建业务伙伴组」（本面就是业务伙伴本身）。
     #   permission 用双段式，与 permissions 表实际值精确一致（实测该表只有双段式，
     #     单段式 party:create / party_group:create / item:create 命中数均为 0）。
     #     前端 authStore.hasPermission 是精确字符串匹配（perms.includes，无格式转换），
@@ -243,7 +243,7 @@ ui_view_config:
     #     后者控页面可达（路由门禁级），互不替代，不要混用。
     actions:
       - id: create
-        label: 新建往来单位
+        label: 新建业务伙伴
         icon: plus
         type: primary
         permission: party_archive:party_archive_create
@@ -256,7 +256,7 @@ ui_view_config:
   #     但编辑态走的是 ui_view_config.form.sections（DetailPage.vue:759/812 对 fieldGroup
   #     显式 `if (isEditing) continue`，L853 的 facets 分支也带 `&& !isEditing`）。
   #     本文件此前只声明了 detail.facets、未声明 form ⇒ 编辑态 formSections 为空
-  #     ⇒ 无任何字段可渲染，只剩标题栏「保存/取消」和只读的往来关系分区。
+  #     ⇒ 无任何字段可渲染，只剩标题栏「保存/取消」和只读的业务伙伴关系分区。
   #     注：后端 config_builder 虽有「form 为空则按字段推导」的兜底
   #     （UIConfigBuilder.build L70-75），但推导只收 ui.editable 的字段，
   #     本面字段未声明 editable ⇒ 推导结果同样是空 sections。
@@ -267,7 +267,7 @@ ui_view_config:
   #     （注：字段级只读无法在本链路表达 —— schema_loader._serialize_field_ui 的
   #     透传白名单里只有 read_only、没有 readonly，ui.readonly 不会到前端。）
   form:
-    title: 往来单位信息
+    title: 业务伙伴信息
     layout: vertical
     sections:
       - title: 基本信息
@@ -284,7 +284,7 @@ ui_view_config:
           - party_type
           - status
       # 自定义取数器的分区：无需平台 association 定义（DetailPage 已放开闸门，见该组件注释）
-      - title: 往来关系
+      - title: 业务伙伴关系
         type: association
         association: party_relation
         customFetcher: party_relations
@@ -299,6 +299,6 @@ ui_view_config:
         #     且编辑态可见性（shouldShowAssociation）依赖它；创建入口由 actions 单独承载。
         actions:
           - key: create
-            label: 新建往来关系
+            label: 新建伙伴关系
             variant: primary
             permission: party_relation:party_relation_create

@@ -42,7 +42,7 @@
     </div>
 
     <div v-else-if="isPartyRelations" class="op-merged-relations">
-      <!-- [入口 2026-10-20] 引导式新建：往来单位档案侧预绑对手侧，组织档案侧预绑我方侧 -->
+      <!-- [入口 2026-10-20] 引导式新建：业务伙伴档案侧预绑对手侧，组织档案侧预绑我方侧 -->
       <div v-if="partyRelationToolbarActions.length" class="op-party-relations-toolbar">
         <AppButton
           v-for="a in partyRelationToolbarActions"
@@ -53,13 +53,13 @@
       </div>
 
       <el-table :data="partyRelationsData" v-loading="partyRelationsLoading" size="small" max-height="400">
-        <!-- [列口径 2026-10-21] 本分区挂在「往来单位」档案上 ⇒ 当前对象恒为对手侧，
+        <!-- [列口径 2026-10-21] 本分区挂在「业务伙伴」档案上 ⇒ 当前对象恒为对手侧，
              「对方」列恒显示我方组织，词义与业务词「对方企业」打架且与归属法人撞脸。
              改为绝对口径：首列直接叫「我方组织」（= party1 侧的组织身份），
              删掉零信息量的「方向」列（本分区恒为对手侧）。组织名下补 org 编码副标题，
              与「归属法人」区分（同名时也能看出是两条不同 org 记录）。
              我方组织与归属法人相邻（与 party_relation.yaml 的「我方信息」分组同序）。
-             [组织侧 2026-10-21] 分区改挂组织档案时本对象即我方组织，首列换成「往来单位」，
+             [组织侧 2026-10-21] 分区改挂组织档案时本对象即我方组织，首列换成「业务伙伴」，
              否则该列整列重复显示当前对象、零信息量。 -->
         <el-table-column v-if="!isOrgPartyRelations" label="我方组织" min-width="200">
           <template #default="{ row }">
@@ -78,7 +78,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-else label="往来单位" min-width="200">
+        <el-table-column v-else label="业务伙伴" min-width="200">
           <template #default="{ row }">
             <FkLinkField
               :value="row.party2_id"
@@ -86,7 +86,7 @@
               target-object-type="party_archive"
               :link-object-type="row.party2_id_link_object_type"
               :link-id="row.party2_id_link_id"
-              target-object-label="往来单位"
+              target-object-label="业务伙伴"
             />
           </template>
         </el-table-column>
@@ -110,7 +110,7 @@
             <span>{{ ROLE_LABEL[row.role] || row.role || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="往来单位组" min-width="150">
+        <el-table-column label="业务伙伴组" min-width="150">
           <template #default="{ row }">
             <FkLinkField
               :value="row.group_id"
@@ -118,7 +118,7 @@
               target-object-type="party_group"
               :link-object-type="row.group_id_link_object_type"
               :link-id="row.group_id_link_id"
-              target-object-label="往来单位组"
+              target-object-label="业务伙伴组"
             />
           </template>
         </el-table-column>
@@ -336,7 +336,7 @@ const isMergedRelationships = computed(() => {
 //   父对象是 party 时会得 `party_id`，而 party_relation 的列是 party1_id/party2_id。
 //   故在此做两次查询（party1_id = 本 id / party2_id = 本 id）后按 id 合并去重。
 //   同一行不会两侧都命中（party1_id 恒为我方侧、party2_id 为对手侧），去重只为防御。
-// [列口径 2026-10-21] 表内不再展示「本对象站哪一侧」：本分区只挂在往来单位档案上，
+// [列口径 2026-10-21] 表内不再展示「本对象站哪一侧」：本分区只挂在业务伙伴档案上，
 //   那一侧恒为对手侧 ⇒ 该列零信息量。首列改为「我方组织」（party1 侧的组织身份）。
 const isPartyRelations = computed(() => {
   return props.section.customFetcher === 'party_relations'
@@ -344,8 +344,8 @@ const isPartyRelations = computed(() => {
 })
 
 // [组织侧分区 2026-10-21] 分区挂在「组织」档案上，本对象恒为我方侧。
-//   列集与往来单位侧相反：往来单位侧首列是「我方组织」（本对象是对手侧，那一列才有意义），
-//   组织侧本对象就是我方组织 ⇒ 首列换成「往来单位」（对手侧），不再重复显示自己。
+//   列集与业务伙伴侧相反：业务伙伴侧首列是「我方组织」（本对象是对手侧，那一列才有意义），
+//   组织侧本对象就是我方组织 ⇒ 首列换成「业务伙伴」（对手侧），不再重复显示自己。
 const isOrgPartyRelations = computed(() => {
   return props.section.customFetcher === 'org_party_relations'
 })
@@ -380,7 +380,7 @@ async function loadPartyRelations() {
   partyRelationsLoading.value = true
   try {
     const selfId = props.objectId
-    // page_size 200: 单个往来单位的关系数量级远小于此（与桥接查询同口径的防御性上限）
+    // page_size 200: 单个业务伙伴的关系数量级远小于此（与桥接查询同口径的防御性上限）
     let r1, r2
     if (isOrgPartyRelations.value) {
       // [组织侧 2026-10-21] 本对象是 orgs.id，而 party_relations.party1_id 存的是 parties.id
@@ -527,11 +527,11 @@ async function isLegalEntityAncestor(party1Id, leOrgId) {
 }
 
 // ===== [入口 2026-10-20] 往来关系「引导式新建」=====
-//   背景: 本分区此前是纯只读表（零按钮），用户实测报障「往来单位这边新增关系」。
+//   背景: 本分区此前是纯只读表（零按钮），用户实测报障「业务伙伴这边新增关系」。
 //     F3 §7 登记为延期项，前置「镜像防护先落地」已完成 ⇒ 只缺入口形态。
 //   方案: 工具条入口 + 自建 MetaDialog（annotation 分支同款先例），
 //     字段元取自 party_relation 的真实 ui-config（避免手写字段与 schema 漂移）。
-//   口径: 当前往来单位固定为「对手侧」(party2_id, 只读预填)，我方侧由用户选（D1）；
+//   口径: 当前业务伙伴固定为「对手侧」(party2_id, 只读预填)，我方侧由用户选（D1）；
 //     归属法人在本入口必填（D2，让镜像守卫 assert_no_mirror 真实生效）。
 const partyRelationFormVisible = ref(false)
 const partyRelationEntityData = ref(null)
@@ -604,7 +604,7 @@ const partyRelationMeta = computed(() => ({
   fields: (partyRelationFieldDefs.value || []).map(f => ({
     ...f,
     // D1: 预绑侧 = 当前打开的对象，预填 + 只读。
-    //   往来单位档案：本对象为对手侧（party2_id）；
+    //   业务伙伴档案：本对象为对手侧（party2_id）；
     //   组织档案：本对象经 party_internal 换出的内部表示为我方侧（party1_id）。
     ...(!isOrgPartyRelations.value && f.key === 'party2_id'
       ? { disabled: true, required: true } : {}),
@@ -670,7 +670,7 @@ async function handlePartyRelationToolbar(action) {
       return
     }
     if (selfPartyId == null) {
-      message.error('该组织不是我方主体（无内部往来单位记录），无法新建往来关系')
+      message.error('该组织不是我方主体（无内部业务伙伴记录），无法新建往来关系')
       return
     }
     entityData = { party1_id: selfPartyId }

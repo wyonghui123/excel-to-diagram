@@ -446,7 +446,7 @@ def init_menu_permissions(db_path):
             #     required_permissions 同步补 party_relation 5 条: 前端路由守卫用 every 判定,
             #     漏声明会连 /party 一起拦下 (同 material-management 的 item_group 口径)。
             'menu_code': 'party-management',
-            'menu_name': '往来单位',
+            'menu_name': '业务伙伴',
             'menu_path': '/party',
             'icon': 'User',
             'color': '#0ea5e9',
@@ -488,7 +488,7 @@ def init_menu_permissions(db_path):
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
                 'resource_types': ['party', 'party_group', 'party_relation'],
-                'message': '建议分配往来单位 / 往来单位组 / 往来单位关系数据权限'
+                'message': '建议分配业务伙伴 / 业务伙伴组 / 业务伙伴关系数据权限'
             })
         },
         {

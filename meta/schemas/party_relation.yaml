@@ -50,11 +50,11 @@
 id: party_relation
 # [界面词 2026-10-21] 原「身份关系」：与 party（往来单位）的「身份类型」字段撞脸，
 #   且不含「往来」二字，用户在权限矩阵 / 导入导出 / 对象选择器里认不出这是往来关系。
-#   统一到界面既有词「往来关系」（详情分区标题、列表 title「往来单位关系」、
+#   统一到界面既有词「往来关系」（详情分区标题、列表 title「业务伙伴关系」、
 #   新建按钮与弹窗标题均已用此词）。
 #   仅改显示名：权限资源码由对象 id 派生（menu_auto_generator.py L246 f"{bo_id}:{action}"）
 #   ⇒ 权限 / 菜单 / 表名一律不动，无需迁移。
-name: 往来关系
+name: 业务伙伴关系
 table_name: party_relations
 description: 客户 / 供应商关系实例（party₁ 我方 — party₂ 对手；单表 + role，一实例一角色）
 
@@ -301,15 +301,15 @@ fields:
       relation: org
       multiple: false
 
-  # ── 往来单位组（分类挂载点，可空；[FK 2026-10-07] 真外键）──
+  # ── 业务伙伴组（分类挂载点，可空；[FK 2026-10-07] 真外键）──
   - id: group_id
-    name: 往来单位组
+    name: 业务伙伴组
     type: integer
     db_column: group_id
     nullable: true
-    description: 所属往来单位组（分类；组侧 role_scope 标注客户/供应商/通用适用范围）
+    description: 所属业务伙伴组（分类；组侧 role_scope 标注客户/供应商/通用适用范围）
     semantics:
-      meaning: 往来单位组引用（分类标签）
+      meaning: 业务伙伴组引用（分类标签）
       display:
         type: association
         target_type: party_group
@@ -423,13 +423,13 @@ relations:
     cardinality: N:1
     description: 法人域引用（[FK 2026-10-07] 由展示语义升级为真外键；指向具备 legal_entity 职能的 org——候选集由 org_legal_entity 视图结构强制，"职能"属性由 org_function_service 维护，非 FK 职责）
   - id: party_relation_to_party_group
-    name: 往来单位组
+    name: 业务伙伴组
     type: reference
     target: party_group
     source_field: group_id
     target_field: id
     cardinality: "N:1"
-    description: 往来单位组引用（[FK 2026-10-07] 真外键，可空=未归类；加引号防御 YAML 1.1 六十进制解析）
+    description: 业务伙伴组引用（[FK 2026-10-07] 真外键，可空=未归类；加引号防御 YAML 1.1 六十进制解析）
 
 # 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
 #   inactive --activate--> active
@@ -469,7 +469,7 @@ ui_view_config:
   # 列表列（[列表列 2026-10-17] 补回数据列）
   #   背景：本文件此前只写 skip_auto_menu，未声明 list.columns；前端 useMetaList
   #     只认 listConfig.tableColumns || listConfig.columns（缺则告警并留空、不回退字段自动生成），
-  #     故「往来单位关系」tab 只渲染勾选框列、无数据列。口径同 party_archive 的补列处理。
+  #     故「业务伙伴关系」tab 只渲染勾选框列、无数据列。口径同 party_archive 的补列处理。
   #   本对象无 name / code（F2 §10 D6：薄关系不建独立识别号、无 display_name_field）
   #     ⇒ 起始列取「对手侧」作为主体列，其余按语义顺序排列。
   #   FK 列沿用 party_group.yaml 的 association 写法（render_as: association + target_type +
@@ -478,7 +478,7 @@ ui_view_config:
   #   只补列，不动 selection/actions（MOMP 工具条由页面通用层提供）。
   list:
     detail_mode: drawer
-    title: 往来单位关系
+    title: 业务伙伴关系
     columns:
       - field: party2_id
         width: 220
@@ -527,16 +527,16 @@ ui_view_config:
         render_as: tag
     # [列表动作 2026-10-17] 补 actions —— 与 party_archive 同一缺陷的顺延修复。
     #   起因：本表原先只补了 columns 没补 actions ⇒ useMetaList 走兜底 ⇒ 按钮文案只有裸
-    #     「新建」，而同页另两个 tab 是「新建往来单位」/「新建往来单位组」，三个 tab 文案不齐。
-    #   文案取「新建往来关系」而非「新建往来单位关系」：SAP Fiori UI Text Guidelines 要求
-    #     "starting with a verb, keep them as short as possible"，本表对应 tab 标签已是
-    #     「往来单位关系」，按钮再重复「单位」属冗余；实测 390px 窄屏下 6 字（96px）
-    #     按钮组需 96+8+48+8+48+8+69=285px ≤ 容器 310px，可与其它 tab 一样单行放下。
+    #     「新建」，而同页另两个 tab 是「新建往来单位」/「新建业务伙伴组」，三个 tab 文案不齐。
+    #   文案取「新建伙伴关系」：SAP Fiori UI Text Guidelines 要求 "starting with a verb,
+    #     keep them as short as possible"，本表对应 tab 标签已是「业务伙伴关系」，
+    #     按钮不重复对象全称属合理省略；实测 390px 窄屏容器 310px，6 字（96px）时
+    #     按钮组 96+8+48+8+48+8+69=285px 可单行放下，若写全 8 字则溢出。
     #   permission 用双段式（permissions 表实有 party_relation:party_relation_create）；
     #     单段式在该表命中数为 0，写单段式会导致非 admin 看不到按钮。详见 party_archive.yaml 同段注释。
     actions:
       - id: create
-        label: 新建往来关系
+        label: 新建伙伴关系
         icon: plus
         type: primary
         permission: party_relation:party_relation_create
@@ -562,7 +562,7 @@ ui_view_config:
   #   layout: vertical —— 窄屏单列；party1_id/party2_id 都是 value_help 下拉，
   #     两列并排会把两个长下拉挤到放不下 placeholder 的宽度，故两侧各自独占一行。
   form:
-    title: 往来关系信息
+    title: 业务伙伴关系信息
     layout: vertical
     sections:
       - title: 我方信息

@@ -3,7 +3,7 @@
     <div v-if="showSearch" class="pgst-search">
       <AppInput
         v-model="searchQuery"
-        placeholder="搜索往来单位组（编码/名称）"
+        placeholder="搜索业务伙伴组（编码/名称）"
         clearable
         size="sm"
         @update:model-value="handleSearch"
@@ -66,7 +66,7 @@
         </template>
       </el-tree>
       <div v-if="!loading && !treeData.length" class="pgst-empty">
-        <el-empty description="暂无往来单位组数据" :image-size="60" />
+        <el-empty description="暂无业务伙伴组数据" :image-size="60" />
       </div>
     </div>
   </div>
@@ -74,7 +74,7 @@
 
 <script setup>
 /**
- * PartyGroupScopeTree — 往来单位组范围树（MOMP 注入的 scope 树组件，供往来单位管理页使用）
+ * PartyGroupScopeTree — 业务伙伴组范围树（MOMP 注入的 scope 树组件，供业务伙伴管理页使用）
  *
  * 契约与 OrgScopeTree / ItemGroupScopeTree 一致，MOMP 侧无需特殊处理：
  *   - props.scopeIds: MOMP 传入 page.scopeIds，读 scopeIds['party_group'] = {selected, effective}
@@ -82,11 +82,11 @@
  *   - emit 'scope-change': { partyGroupIds, effectivePartyGroupIds }
  *   - expose clear / handleSelectAll（兼容 MOMP scopeTreeRef 调用）
  *
- * 与 ItemGroupScopeTree 的差异仅在对象与键名（party_group + 往来单位组文案）：
+ * 与 ItemGroupScopeTree 的差异仅在对象与键名（party_group + 业务伙伴组文案）：
  *   party_group 同样是 parent_id 自引用的纯层级分类，量级小（单次 page_size=500
  *   足够），不搬 OrgScopeTree 的循环分页与展开态持久化 hook（理由同 ItemGroupScopeTree）。
  *
- * [注明] 本项目左树勾选到"过滤往来单位"是两段桥接 —— party 不直挂 group，
+ * [注明] 本项目左树勾选到"过滤业务伙伴"是两段桥接 —— party 不直挂 group，
  *   分组关系在关系层 party_relations.group_id（伙伴侧 party2_id）。桥接查询在
  *   PartyManagement.vue 的 watcher 内执行，本组件只负责 emit 勾选集合。
  */
