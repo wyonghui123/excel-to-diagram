@@ -101,6 +101,20 @@ def pst_ds(tmp_path):
               'org_scope': 'internal', 'parent_id': None}
     ds.insert('orgs', {c: (1 if c == 'id' else sample.get(c, 'PROBE'))
                        for c in org_cols})
+    # [2026-10-20] party_internal 谓词补齐「org 具备 legal_entity 职能」⇒ 视图依赖
+    #   org_functions（v073 迁移建、不在 BO YAML 中）；SQLite 的 CREATE VIEW 不校验
+    #   引用表，不建它查询期会报 no such table。DML 走 raw_sql_bridge。
+    from meta.tests.factories._raw_sql_bridge import insert as _raw_insert
+    ds.execute(
+        'CREATE TABLE IF NOT EXISTS org_functions ('
+        '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+        '  org_id INTEGER NOT NULL,'
+        '  function_type TEXT NOT NULL,'
+        '  is_primary BOOLEAN DEFAULT 0,'
+        '  UNIQUE(org_id, function_type))'
+    )
+    _raw_insert(ds, 'org_functions',
+                rows=[{'org_id': 1, 'function_type': 'legal_entity'}])
     yield ds
     _clear_data_source_cache_for_testing()
 

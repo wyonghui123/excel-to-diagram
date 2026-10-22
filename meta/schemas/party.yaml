@@ -101,10 +101,10 @@ fields:
     required: true
     default: organization
     max_length: 30
-    description: 身份类型（organization 组织 / person 个人）；超类型 = 单表 + 类型字段（I7-A）
+    description: 身份类型（organization 企业 / person 个人）——描述「往来单位自身是什么性质」，与我方内部组织对象（org）不是一回事；超类型 = 单表 + 类型字段（I7-A）
     enum_values:
       - value: organization
-        label: 组织
+        label: 企业
         color: primary
       - value: person
         label: 个人

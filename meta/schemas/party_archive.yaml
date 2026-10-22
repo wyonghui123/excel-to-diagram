@@ -109,10 +109,10 @@ fields:
     required: true
     default: organization
     max_length: 30
-    description: 身份类型（organization 组织 / person 个人）
+    description: 身份类型（organization 企业 / person 个人）——描述「往来单位自身是什么性质」，与我方内部组织对象（org）不是一回事
     enum_values:
       - value: organization
-        label: 组织
+        label: 企业
         color: primary
       - value: person
         label: 个人
@@ -290,3 +290,15 @@ ui_view_config:
         customFetcher: party_relations
         readonly: true
         pageSize: 10
+        # [入口 2026-10-20] 声明创建入口（引导式）。AssociationSection 的
+        #   isPartyRelations 分支从 section.actions 里读 create（annotation 分支同款先例）。
+        #   DetailPage 已把 f.actions 透传（L890 `actions: f.actions || [...]`），故无需改 DetailPage。
+        #   permission 用双段式（permissions 表实有 party_relation:party_relation_create；
+        #     单段式命中 0，口径同 party_relation.yaml L485-486 注）。
+        #   readonly: true 保留 —— 语义是"本分区的行不可行内编辑"（两侧合并视图本就不该行内改），
+        #     且编辑态可见性（shouldShowAssociation）依赖它；创建入口由 actions 单独承载。
+        actions:
+          - key: create
+            label: 新建往来关系
+            variant: primary
+            permission: party_relation:party_relation_create

@@ -119,6 +119,9 @@ def resolve_value_help(source_type, source_id):
         source.value_field = request.args.get("value_field", "id")
         source.display_field = request.args.get("display_field", "name")
         source.code_field = request.args.get("code_field", "code")
+        # [F1 2026-10-20] 展示解析口径：候选集(target_bo)之外的存量值回显到身份锚取名。
+        #   留空 = 与 target_bo 同口径（向后兼容）。
+        source.display_target_bo = request.args.get("display_target_bo", "") or ""
         # [V1.2.1 2026-06-16] 从请求参数读取 apply_target_permissions
         atp = request.args.get("apply_target_permissions", None)
         if atp is not None:

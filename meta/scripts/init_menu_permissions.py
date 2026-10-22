@@ -1345,12 +1345,31 @@ def init_menu_permissions(db_path):
         },
     ]
 
+    # ========== 平台模块门控（meta/core/platform_modules.py） ==========
+    # party 轴（party / party_group / party_relation 三个 tab 的 /party hub）依赖 org
+    # 承载 BU/LE 业务职能（org_functions）——仅业务部署（xAPP）成立。BIP 应用架构管理
+    # 部署下 org 是应用架构节点，须设 DISABLED_PLATFORM_MODULES=party：
+    # 不种入菜单 ⇒ /party 为菜单驱动路由（dynamicRoutes 的 multi_object_hub），入口随之缺席。
+    # 本脚本可脱离应用独立执行，故直接读环境变量，不 import meta 包。
+    _disabled_modules = {
+        part.strip()
+        for part in (os.environ.get('DISABLED_PLATFORM_MODULES') or '').split(',')
+        if part.strip()
+    }
+    _party_enabled = 'party' not in _disabled_modules
+    if not _party_enabled:
+        system_menus = [m for m in system_menus if m.get('menu_code') != 'party-management']
+
     # ========== 步骤4.5：清理已废弃菜单 ==========
     # [三 tab 2026-10-17] party-relation-management 下架: 往来单位关系收入
     #   party-management 的第三 tab（前端 PartyManagement.vue），不再作平级入口。
     #   此处 DELETE 而非置 is_active=0 —— 该菜单是手工声明行 (非自动生成),
     #   且步骤5/6 的 UPSERT 会把声明行强制 is_active=1, 留在库里反而会被重新激活。
     deprecated_codes = ['product-version', 'party-relation-management']
+    # 模块关闭时同时回收存量声明行：步骤5/6 的 UPSERT 只写不删，留库会被强制 is_active=1
+    # 重新激活（同 party-relation-management 的处理口径）。
+    if not _party_enabled:
+        deprecated_codes.append('party-management')
     for code in deprecated_codes:
         cursor.execute("DELETE FROM menus WHERE menu_code = ?", [code])
         cursor.execute("DELETE FROM menu_permissions WHERE menu_code = ?", [code])

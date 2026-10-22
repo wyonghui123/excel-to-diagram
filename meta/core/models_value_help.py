@@ -45,6 +45,31 @@ class ValueHelpSource:
     value_field: str = "id"
     display_field: str = "name"
     code_field: str = "code"
+    # [F1 显示名解析口径 2026-10-20] 显示名向哪个 BO 取（FK 显示名解析目标）。
+    #   与 target_bo 的分工：
+    #     - target_bo  = **候选集口径**（下拉里能被选到哪些行）
+    #     - display_target_bo = **展示解析口径**（已存量行的显示名去哪取）
+    #   两者不同的典型场景：FK 存的是身份锚 id（parties.id），而候选集被收窄到某个视图
+    #   （party_internal / party_archive）。此时历史行可能指向视图外的行，
+    #   若显示名也按视图查 ⇒ 解析为 null ⇒ 前端只能回退显示技术 id。
+    #   声明 display_target_bo（=身份锚）后，两种口径解耦。
+    #   留空 = 与 target_bo 同口径（默认，向后兼容）。
+    display_target_bo: str = ""
+    # [FK 跳转落点口径 2026-10-22] FK 链接点击后落到哪个 BO 的详情页。
+    #   与上面两个口径的分工（三口径各管一件事）：
+    #     - target_bo         = **候选集口径**（下拉里能被选到哪些行）
+    #     - display_target_bo = **展示解析口径**（存量行的显示名去哪取）
+    #     - detail_target_bo  = **跳转落点口径**（点击链接打开哪个详情页）
+    #   为什么不直接复用 target_bo：target_bo 会被刻意收窄到只读视图
+    #   （party_internal / org_legal_entity 等），而那些视图只有一个基本信息分区，
+    #   落上去信息严格少于基表（org 的成员/权限集/操作日志/往来关系全都没有）。
+    #   留空 = 与 target_bo 同口径（默认，向后兼容；不声明的字段行为不变）。
+    detail_target_bo: str = ""
+    # 落点 id 的取值列，声明在**解析口径表**（display_target_bo || target_bo 对应表）上。
+    #   仅在 detail_target_bo 的 id 空间与 FK 存值不同时需要——典型如 FK 存 parties.id
+    #   而落点 org 用 orgs.id，声明 org_id 即"先取 parties.org_id 当落点 id"。
+    #   留空 = 直接拿 FK 原值当落点 id（id 空间同源时用）。
+    detail_target_id_field: str = ""
     hierarchy: Dict[str, Any] = field(default_factory=dict)
     apply_target_permissions: bool = True
     endpoint: str = ""

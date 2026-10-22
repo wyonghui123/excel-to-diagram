@@ -69,6 +69,24 @@ def _dataclass_to_dict(obj: Any) -> Any:
         return obj
 
 
+def _strip_party_detail_section(config: dict) -> None:
+    """party 模块关闭时移除 org 详情的「往来关系」分区（就地修改）。
+
+    只在 BIP 应用架构管理部署（DISABLED_PLATFORM_MODULES=party）时生效：
+    该部署的 org 是应用架构节点、不具备 BU/LE 业务职能 ⇒ 无 party 内部表示，
+    分区恒空。取数端点本身空集安全，这里只收敛无效入口。
+    """
+    detail = (config.get('ui_view_config') or {}).get('detail')
+    if not isinstance(detail, dict):
+        return
+    tabs = detail.get('tabs')
+    if isinstance(tabs, list):
+        detail['tabs'] = [
+            tab for tab in tabs
+            if not (isinstance(tab, dict) and tab.get('id') == 'party_relations')
+        ]
+
+
 @meta_bp.route('/objects', methods=['GET'])
 def list_objects():
     """获取所有对象类型列表"""
@@ -217,6 +235,10 @@ def get_ui_config(object_type: str):
                 'success': False,
                 'error': f'UI config not found for: {object_type}',
             }), 404
+        # [模块门控] party 关闭（BIP 应用架构管理部署）时 org 无「往来关系」分区
+        from meta.core.platform_modules import is_module_enabled
+        if object_type == 'org' and not is_module_enabled('party'):
+            _strip_party_detail_section(config)
         return jsonify({
             'success': True,
             'data': config,

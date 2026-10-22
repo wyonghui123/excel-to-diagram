@@ -9,7 +9,8 @@
 """
 from flask import Blueprint, request, jsonify
 from meta.services.auth_middleware import login_required, is_admin, get_current_user
-from meta.services.org_function_service import OrgFunctionService
+from meta.services.org_function_service import OrgFunctionService, SUBJECT_FUNCTIONS
+from meta.core.platform_modules import is_module_enabled
 from meta.core.datasource import get_data_source
 from meta.core.db_path import get_meta_db_path
 
@@ -56,6 +57,16 @@ def add_function(org_id):
 
     if not function_type:
         return jsonify({'success': False, 'message': 'function_type required'}), 400
+
+    # [模块门控] party 关闭（BIP 应用架构管理部署）时 org 是应用架构节点，
+    #   授予我方主体职能会把架构节点变成「法人/业务单元」（语义污染），且会让
+    #   party 轴半可用 —— 直接拒绝，口径与 DISABLED_PLATFORM_MODULES=party 一致。
+    if function_type in SUBJECT_FUNCTIONS and not is_module_enabled('party'):
+        return jsonify({
+            'success': False,
+            'message': '当前部署未启用往来关系（party 模块），'
+                       '不允许授予我方主体职能（legal_entity / management_unit）',
+        }), 409
 
     svc = _get_function_service()
     new_id = svc.add_function(org_id, function_type, is_primary)

@@ -479,6 +479,9 @@ def parse_value_help(data: Dict[str, Any]) -> Optional["ValueHelpConfig"]:
                 value_field=sd.get("value_field", "id"),
                 display_field=sd.get("display_field", "name"),
                 code_field=sd.get("code_field", "code"),
+                display_target_bo=sd.get("display_target_bo", ""),
+                detail_target_bo=sd.get("detail_target_bo", ""),
+                detail_target_id_field=sd.get("detail_target_id_field", ""),
                 hierarchy=sd.get("hierarchy", {}),
                 apply_target_permissions=sd.get("apply_target_permissions", True),
                 endpoint=sd.get("endpoint", ""),
@@ -812,10 +815,14 @@ def parse_ui_list_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]]
 
 def parse_ui_detail_facet(data: Dict[str, Any]) -> UIDetailFacet:
     """解析详情分区配置"""
+    # [入口 2026-10-20] dict 形态的 action 原样保留（含 id/label/variant/permission），
+    #   供前端做入口显隐与权限判定；字符串形态维持 str() 不变。
+    #   此前 dict 被压平成 id/name 字符串，permission 丢失 —— party_archive 的
+    #   「新建往来关系」入口依赖它（全库仅此一处用 dict 形态，改动向后兼容）。
     actions = []
     for a in data.get("actions", []):
         if isinstance(a, dict):
-            actions.append(a.get("id", a.get("name", "")))
+            actions.append(a)
         else:
             actions.append(str(a))
     
@@ -841,10 +848,14 @@ def parse_ui_detail_tab(data: Dict[str, Any]) -> 'UIDetailTab':
     """解析详情页 Tab 配置"""
     from meta.core.models import UIDetailTab
     
+    # [入口 2026-10-22] 与 parse_ui_detail_facet 对齐：dict 形态的 action 原样保留
+    #   （含 key/label/variant/permission），字符串形态维持 str() 不变。
+    #   此前 dict 被压平成 id/name 字符串 ⇒ org 的「往来关系」新建入口在前端拿不到
+    #   label/permission，按钮不出现（全库仅此一处 tab 用 dict 形态）。
     actions = []
     for a in data.get("actions", []):
         if isinstance(a, dict):
-            actions.append(a.get("id", a.get("name", "")))
+            actions.append(a)
         else:
             actions.append(str(a))
     
@@ -859,6 +870,10 @@ def parse_ui_detail_tab(data: Dict[str, Any]) -> 'UIDetailTab':
         endpoint=data.get("endpoint", ""),
         icon=data.get("icon", ""),
         props=data.get("props", {}),
+        customFetcher=data.get("customFetcher", ""),
+        readonly=data.get("readonly", False),
+        pageSize=data.get("pageSize", 20),
+        display=data.get("display", "inline"),
     )
 
 
@@ -878,6 +893,7 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
         facets=facets,
         tabs=tabs,
         title=data.get("title", ""),
+        description=data.get("description", ""),
         layout=data.get("layout", "tabs"),
         showChangeHistory=data.get("showChangeHistory", True),
         showRelations=data.get("showRelations", True),

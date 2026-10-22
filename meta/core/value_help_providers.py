@@ -100,7 +100,7 @@ class ValueHelpProvider(ABC):
         pass
 
     @abstractmethod
-    def resolve(self, value: Any, user_context: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+    def resolve(self, value: Any, user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         pass
 
 
@@ -212,6 +212,8 @@ class BoValueHelpProvider(ValueHelpProvider):
         self.hierarchy = source.hierarchy
         self.apply_target_permissions = source.apply_target_permissions
         self.value_filter = source.value_filter
+        # [F1 2026-10-20] 展示解析口径（缺省同 target_bo）
+        self.display_target_bo = getattr(source, 'display_target_bo', '') or ''
 
     def _resolve_effective_fields(self, meta_obj):
         effective_display = self.display_field
@@ -230,6 +232,25 @@ class BoValueHelpProvider(ValueHelpProvider):
                         effective_code = f.id
                         break
         return effective_display, effective_code
+
+    def _lookup_record(self, bo_id: str, value: Any):
+        """按指定 BO 取单行（value_field = value）。
+
+        Returns:
+            (record, meta_obj)：命中时 record 非空；未命中时 record 为 None，
+            meta_obj 仍可能非空（供调用方判定 BO 本身是否存在）。
+        """
+        from meta.core.yaml_loader import get_meta_object
+        from meta.core.bo_engine import BOEngine
+
+        meta_obj = get_meta_object(bo_id)
+        if not meta_obj:
+            return None, None
+
+        engine = BOEngine(meta_obj)
+        filters = [{"field": self.value_field, "op": "eq", "value": value}]
+        record = engine.get_record(value, filters=filters)
+        return record, meta_obj
 
     def search(self, query: str, search_fields: List[str],
                filters: Dict[str, Any], page: int, page_size: int,
@@ -317,6 +338,21 @@ class BoValueHelpProvider(ValueHelpProvider):
             skip_data_permission=not self.apply_target_permissions,
         )
 
+        # [2026-10-21 界面词] 枚举字段 → 界面词映射。value_help 候选行是 BO 原始记录，
+        #   presentation.display_columns 里的枚举列（如 party_relation 对手侧的 party_type）
+        #   若只给原始码会显示 organization / person，故按元数据 label 注入 display_values。
+        enum_label_map = {}
+        for field in (getattr(meta_obj, "fields", None) or []):
+            if not getattr(field, "enum_values", None):
+                continue
+            mapping = {}
+            for ev in field.enum_values:
+                if isinstance(ev, dict):
+                    mapping[ev.get("value")] = ev.get("label", str(ev.get("value")))
+                else:
+                    mapping[ev] = str(ev)
+            enum_label_map[field.id] = mapping
+
         data = []
         for record in results.get("data", []):
             item = dict(record)
@@ -324,6 +360,14 @@ class BoValueHelpProvider(ValueHelpProvider):
             item["display"] = record.get(effective_display, "")
             item["code"] = record.get(effective_code, "")
             item["extra"] = {}
+            if enum_label_map:
+                display_values = {}
+                for field_id, mapping in enum_label_map.items():
+                    raw = record.get(field_id)
+                    if raw in mapping:
+                        display_values[field_id] = mapping[raw]
+                if display_values:
+                    item["display_values"] = display_values
             if self.hierarchy and self.hierarchy.get("enabled"):
                 item["extra"]["parent_id"] = record.get(self.hierarchy.get("parent_field", "parent_id"))
                 item["extra"]["path"] = record.get(self.hierarchy.get("path_field", "hierarchy_path"), "")
@@ -335,21 +379,16 @@ class BoValueHelpProvider(ValueHelpProvider):
             "has_more": results.get("has_more", False),
         }
 
-    def resolve(self, value: Any, user_context: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
-        from meta.core.yaml_loader import get_meta_object
-        from meta.core.bo_engine import BOEngine
-
-        meta_obj = get_meta_object(self.target_bo)
-        if not meta_obj:
+    def resolve(self, value: Any, user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        record, meta_obj = self._lookup_record(self.target_bo, value)
+        if not record and self.display_target_bo and self.display_target_bo != self.target_bo:
+            # [F1 2026-10-20] 存量值落在候选集口径（视图）之外时，回身份锚取名，
+            #   避免编辑态下拉把技术 id 直接暴露给用户（与 enrichment 显示名同口径）。
+            record, meta_obj = self._lookup_record(self.display_target_bo, value)
+        if not record or not meta_obj:
             return None
 
         effective_display, effective_code = self._resolve_effective_fields(meta_obj)
-
-        engine = BOEngine(meta_obj)
-        filters = [{"field": self.value_field, "op": "eq", "value": value}]
-        record = engine.get_record(value, filters=filters)
-        if not record:
-            return None
 
         result = {
             "value": record.get(self.value_field),

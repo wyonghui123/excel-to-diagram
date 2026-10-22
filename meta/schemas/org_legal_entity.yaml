@@ -1,0 +1,229 @@
+# ============================================
+# 法人主体面（org_legal_entity）— F1 法人域候选集收窄
+# 依据: docs/superpowers/specs/2026-10-20-legal-entity-view-bo.md
+#
+# [为什么需要这个面]
+#   party_relation.le_org_id（法人域）的语义是「这条关系以哪个法人主体名义存在」，
+#   其候选集本应是「具备 legal_entity 职能的 org」。但 org 全表 64 行里仅 1 行是法人，
+#   直接 target_bo: org 会让下拉返回全部组织（部门 / Test Group / 测试用户组…）。
+#
+# [为什么用视图而不是 value_filter]
+#   value_filter 只支持单字段 eq（value_help_providers.py L313-315），而 legal_entity
+#   职能存于一对多子表 org_functions(org_id, function_type)，非 orgs 上的列 ⇒ eq 表达不了。
+#   退化到 org_type=company 会与内部表示判据分裂（org_party_mirror_service.py L17-18
+#   已拍板「判据取职能而非 org_type」）⇒ 本面谓词直接读 org_functions，与镜像服务同源。
+#
+# [与 party 轴 B′ 同构]
+#   party_internal 谓词 source='org' / party_archive 谓词 COALESCE(source,'') <> 'org'，
+#   本面谓词「存在 legal_entity 职能」——三者都是「用视图 SQL 结构强制收窄候选集」。
+#
+# [只读面]
+#   不设 write_anchor ⇒ 写请求由 READ_ONLY_VIEW 护栏拒绝（API 侧 400）。
+#   法人职能的增删走 OrgFunctionService.add_function / remove_function（meta/api/org_function_api.py），
+#   本面只是它的读面，不是写入口。
+#
+# [不挂 org 维度绑定]
+#   对齐 party_archive 的处理（明确不挂）。party_internal 挂 org 维度是因为它承载内部
+#   业务数据、需范围隔离；本面是「组织自己的法人身份」= 主数据，非业务数据行。
+#   故 dimension_object_mapping.yaml 的 org 维度 applies_to 不新增条目。
+# ============================================
+
+id: org_legal_entity
+name: 法人主体
+table_name: org_legal_entity
+description: 法人主体面：恒取具备 legal_entity 职能的 org（候选集口径由视图 SQL 结构强制）
+display_name_field: name
+object_type: view
+view_definition: |
+  SELECT o.id, o.code, o.name, o.org_type, o.parent_id, o.manager_id, o.status
+  FROM orgs o
+  WHERE EXISTS (
+    SELECT 1 FROM org_functions f
+    WHERE f.org_id = o.id AND f.function_type = 'legal_entity'
+  )
+
+# [F1 §7.1-4] 只读面：面不含写动作（仅 read / list）；auto_crud 关闭
+import_export:
+  auto_crud: false
+
+actions:
+  - id: org_legal_entity_read
+    name: 查询法人主体
+    type: crud
+    method: GET
+    path: "/api/v1/org_legal_entities/{id}"
+    description: 查询单个法人主体记录
+  - id: org_legal_entity_list
+    name: 查询法人主体列表
+    type: crud
+    method: GET
+    path: "/api/v1/org_legal_entities"
+    description: 查询法人主体列表
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键（继承自 orgs.id）
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 组织编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 50
+    description: 组织唯一编码（继承自 orgs.code；下拉 display_format "{code} - {name}" 消费）
+    semantics:
+      meaning: 组织业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 组织名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 组织名称（继承自 orgs.name；下拉 display 消费）
+    semantics:
+      meaning: 组织显示名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+
+  # [2026-10-20] 不在本面写死 org_type 枚举：职能（legal_entity）与组织类型（company）
+  #   是两个独立维度，org_type=company 不蕴含法人资格。当前全库仅 1 个法人且恰为 company，
+  #   那是数据巧合而非口径，写死枚举会在第二个法人出现时给出误导性约束。
+  - id: org_type
+    name: 组织类型
+    type: string
+    db_column: org_type
+    required: true
+    default: department
+    description: 组织类型（继承自 orgs.org_type；仅展示，不作判定依据——法人资格由职能决定）
+    enum_values:
+      - value: department
+        label: 部门
+        color: primary
+      - value: team
+        label: 团队
+        color: success
+      - value: division
+        label: 事业部
+        color: warning
+      - value: company
+        label: 公司
+        color: danger
+    semantics:
+      meaning: 组织类型分类（展示用，非法人判定依据）
+    ui:
+      widget: select
+      filterable: true
+
+  # [2026-10-21 可理解性] 补 value_help：此前只有 ui.relation ⇒ 后端 enrich_fk_display_names
+  #   （只认 value_help）不解析显示名 ⇒ 详情页「上级组织」显示裸 id。口径对齐 org.yaml 的 parent_id。
+  - id: parent_id
+    name: 上级组织
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级组织引用（继承自 orgs.parent_id；法人组织树上下文，供 hierarchy 能力预留）
+    semantics:
+      meaning: 上级组织
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+    ui:
+      relation: org
+      display_field: name
+
+  # [2026-10-21 口径对齐] orgs.manager_id 存的是**用户** id（管理员），不是 org id。
+  #   本面此前写 ui.relation: org ⇒ 解析到 orgs 表查用户 id ⇒ 永远查不到。
+  #   对齐 org.yaml 的 manager_id：target_bo: user / display_field: display_name。
+  - id: manager_id
+    name: 管理员
+    type: integer
+    db_column: manager_id
+    nullable: true
+    description: 管理员引用（继承自 orgs.manager_id，存的是用户 id）
+    semantics:
+      meaning: 组织管理员
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+    ui:
+      relation: user
+      display_field: display_name
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 30
+    description: 法人主体状态 active/inactive（继承自 orgs.status；停用法人不宜新建关系，但存量行须可回显）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 法人主体启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+# [对齐 party_internal] 视图上不建 FK：le_org_id → org 的外键口径留在基表侧
+#   party_relation.yaml 的 relations（party_relation_to_le_org，target: org）。
+#   本面与 orgs 同源同列（CREATE VIEW ... FROM orgs），id 空间一致。
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+  # [详情页 2026-10-21] 补 detail 声明（本面此前只有 skip_auto_menu）。
+  #   报障：手机端在往来关系详情点「归属法人」跳转失败。根因两层，本条治第二层：
+  #     一层是路由守卫白名单缺本类型（已改 detailRouteGuard.js）；
+  #     二层是即便路由放行，本面无 detail.facets ⇒ DetailPage.computedSections
+  #     的 facets/tabs/form 三个分支全空 ⇒ 返回空 sections ⇒ 跳过去是一片白。
+  #   parent_id / manager_id 已声明 ui.relation: org，点得进组织详情。
+  detail:
+    # [2026-10-21 自解释说明] 业务语言说明：回答「这个对象是什么」。
+    #   「法人主体」= 组织档案中具备签约资格的公司，是往来关系「归属法人」的候选来源。
+    description: 这是组织档案中具备法人资格、可以代表贵司对外签约的公司。往来关系里的「归属法人」指的就是这里的一条记录。
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - code
+          - name
+          - org_type
+          - parent_id
+          - manager_id
+          - status

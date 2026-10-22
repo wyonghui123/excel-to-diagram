@@ -1,7 +1,7 @@
 <template>
   <!-- drawer 模式：点击触发事件，由父组件在 drawer 中打开详情 -->
   <a
-    v-if="value && targetObjectType && !linkDisabled && detailMode === 'drawer'"
+    v-if="isClickable && detailMode === 'drawer'"
     class="fk-link"
     :title="linkTitle"
     @click.stop="handleClick"
@@ -11,7 +11,7 @@
   </a>
   <!-- page 模式：router-link 跳转到独立详情页 -->
   <router-link
-    v-else-if="value && targetRoute && !linkDisabled"
+    v-else-if="isClickable"
     :to="targetRoute"
     class="fk-link"
     :title="linkTitle"
@@ -80,25 +80,60 @@ const props = defineProps({
     type: String,
     default: 'page',
     validator: (v) => ['page', 'drawer'].includes(v)
+  },
+  /**
+   * [FK 2026-10-22] 跳转落点覆盖（value_help.source.detail_target_bo）。
+   * 非空时用它替代 targetObjectType 作为详情页 BO——让链接落到信息更完整的
+   * 基表而非只读视图。空 = 与 targetObjectType 同口径（向后兼容）。
+   */
+  linkObjectType: {
+    type: String,
+    default: ''
+  },
+  /**
+   * [FK 2026-10-22] 跳转落点 id（后端 enrichment 下发的 {field}_link_id）。
+   * 与 linkObjectType 配套：id 空间不同源时（如 FK 存 parties.id、落点 orgs.id）
+   * 由后端换算后下发。为 null 表示查不到对应落点行（历史脏数据）⇒ 渲染纯文本。
+   * 未传（undefined）时回退用 value。
+   */
+  linkId: {
+    type: [String, Number],
+    default: undefined
   }
 })
 
 const emit = defineEmits(['navigate'])
 
+// 落点 BO：优先 detail_target_bo，缺省与 targetObjectType 同口径
+const resolvedObjectType = computed(() => props.linkObjectType || props.targetObjectType || '')
+
+// 落点 id：linkId 为 null 时无落点（脏数据）；undefined 时回退用 value
+const resolvedId = computed(() => {
+  if (props.linkId === null) return null
+  return props.linkId !== undefined ? props.linkId : props.value
+})
+
 const targetRoute = computed(() => {
-  if (!props.value || !props.targetObjectType) return null
-  return { path: `/detail/${props.targetObjectType}/${props.value}` }
+  if (resolvedId.value == null || !resolvedObjectType.value) return null
+  return { path: `/detail/${resolvedObjectType.value}/${resolvedId.value}` }
+})
+
+const isClickable = computed(() => {
+  if (props.linkDisabled) return false
+  if (!props.value || !targetRoute.value) return false
+  return true
 })
 
 const linkTitle = computed(() => {
-  const label = props.targetObjectLabel || props.targetObjectType || '关联对象'
+  if (resolvedId.value == null) return '暂无对应落点记录'
+  const label = props.targetObjectLabel || resolvedObjectType.value || '关联对象'
   return `打开 ${label} 详情`
 })
 
 function handleClick() {
   emit('navigate', {
-    objectType: props.targetObjectType,
-    id: props.value,
+    objectType: resolvedObjectType.value,
+    id: resolvedId.value,
     displayValue: props.displayValue
   })
 }

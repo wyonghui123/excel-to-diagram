@@ -44,7 +44,14 @@ deletion_policy:
     - table: orgs
       foreign_key: parent_id
       message: 该组织下还有子组织，请先删除或迁移子组织后再删除
-  cascade_delete: []
+  # [2026-10-22 补漏] org_functions 建表时未建到 orgs 的外键 ⇒ 删除组织不会清理职能行，
+  #   会留下孤儿职能。而 party_internal 视图谓词是 EXISTS(org_functions ...) ⇒ 已删组织的
+  #   内部表示仍会出现在「我方组织」候选集中（幽灵主体），同 id 组织重建还会让旧职能复活。
+  #   本项由 CascadeInterceptor._cleanup_association_tables 处理（字符串形态经
+  #   _infer_fk_column 推导出 org_id）。parties 行仍按「不删除原则」保留：视图不再命中，
+  #   但存量关系引用不断。
+  cascade_delete:
+    - org_functions
 
 audit:
   enabled: true
@@ -667,6 +674,35 @@ ui_view_config:
         icon: lock
         type: readonly_aggregate
         endpoint: /api/v1/orgs/{id}/permission-config
+
+      # [往来关系分区 2026-10-21] 组织侧视图：与 party_archive 的「往来关系」分区对称。
+      #   为什么必须走 customFetcher: party_relations 无 org_id 列（party1_id 存的是
+      #   parties.id），平台关联端点把过滤列写死为 `{父对象类型}_id` ⇒ 会得 org_id 而查不到。
+      #   取数由 AssociationSection 的 org_party_relations 分支接管（org → party_internal
+      #   换 party id → 按 party1_id 单查），与 party_archive 侧同款先例。
+      #   只读: 行不可行内编辑（编辑权归「往来单位」侧入口）；本分区只提供**新建**入口。
+      #   新建: 本对象（组织）经 party_internal 换出内部表示，预绑为关系我方侧
+      #     （party1_id）；对手侧由用户选。与 party_archive 侧同一套引导式弹窗，
+      #     仅在 xAPP 业务部署有效（party 模块门控关闭时整个分区不出现）。
+      #   显示: 只有具备我方主体职能（BU/法人）的 org 才有 party_internal 内部表示；
+      #     无内部表示的普通组织此分区恒空 —— 这是正确口径，不是缺陷。
+      #   位置: 放在 tab 末尾（权限预览之后）—— 往来关系是低频查询入口，
+      #     且多数组织无内部表示而为空，放前面会挡住常用的权限类分区。
+      - id: party_relations
+        label: 往来关系
+        type: association
+        association: party_relation
+        customFetcher: org_party_relations
+        readonly: true
+        pageSize: 20
+        # 创建入口（引导式）：AssociationSection 的 isPartyRelations 分支从
+        #   section.actions 读 create，org 侧预绑 party1_id。
+        #   permission 用双段式（permissions 表实有 party_relation:party_relation_create）。
+        actions:
+          - key: create
+            label: 新建往来关系
+            variant: primary
+            permission: party_relation:party_relation_create
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)

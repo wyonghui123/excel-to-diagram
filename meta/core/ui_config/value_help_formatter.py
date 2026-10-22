@@ -14,6 +14,14 @@ def value_help_to_dict(vh):
                 "i18n_join_fields": vh.source.i18n_join_fields,
                 "default_value_code": vh.source.default_value_code,
                 "target_bo": vh.source.target_bo,
+                # [F1 2026-10-20] 展示解析口径（留空 = 与 target_bo 同口径）
+                #   前端需透传给 resolve 接口，否则编辑态回显会退化为技术 id。
+                "display_target_bo": getattr(vh.source, "display_target_bo", "") or "",
+                # [FK 2026-10-22] 跳转落点口径（留空 = 与 target_bo 同口径）
+                #   前端 getFkTargetObjectType 优先取它，缺省才回退 target_bo。
+                "detail_target_bo": getattr(vh.source, "detail_target_bo", "") or "",
+                # 落点 id 的取值列（id 空间不同源时用），留空 = FK 原值即落点 id
+                "detail_target_id_field": getattr(vh.source, "detail_target_id_field", "") or "",
                 "value_field": vh.source.value_field,
                 "display_field": vh.source.display_field,
                 "code_field": vh.source.code_field,

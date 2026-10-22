@@ -655,3 +655,44 @@ class TestObjectDefinitionFilter:
                 encoding="utf-8")
             objs = self._load_dir(schemas)
         assert objs == [], "无顶层 id 的配置字典不应产生对象"
+
+
+class TestDetailTabActionParsing:
+    """详情 tab 的 action 形态解析：与 facet 同一口径。
+
+    仅 org 的「往来关系」tab 用 dict 形态声明 create 入口（带 label/variant/
+    permission）。若解析时被压平成 id/name 字符串，前端拿不到 label/permission，
+    按钮静默消失。字符串形态（assign/unassign/list）必须保持原样。
+    """
+
+    def test_dict_action_is_preserved(self):
+        from meta.core.yaml_loader import parse_ui_detail_tab
+
+        tab = parse_ui_detail_tab({
+            "id": "party_relations",
+            "type": "association",
+            "actions": [{
+                "key": "create",
+                "label": "新建往来关系",
+                "variant": "primary",
+                "permission": "party_relation:party_relation_create",
+            }],
+        })
+
+        assert tab.actions == [{
+            "key": "create",
+            "label": "新建往来关系",
+            "variant": "primary",
+            "permission": "party_relation:party_relation_create",
+        }]
+
+    def test_string_actions_are_unchanged(self):
+        from meta.core.yaml_loader import parse_ui_detail_tab
+
+        tab = parse_ui_detail_tab({
+            "id": "members",
+            "type": "association",
+            "actions": ["assign", "unassign"],
+        })
+
+        assert tab.actions == ["assign", "unassign"]

@@ -81,7 +81,9 @@ class UIDetailFacet:
     readonly: bool = False
     pageSize: int = 20
     display: str = "inline"
-    actions: List[str] = field(default_factory=list)
+    # [入口 2026-10-20] 允许 dict 形态的 action（保留 id/label/variant/permission）。
+    #   历史上此处只放字符串（'assign'/'unassign'/'list'）；字符串形态仍照旧。
+    actions: List[Any] = field(default_factory=list)
     customFetcher: str = ""
 
 
@@ -94,11 +96,23 @@ class UIDetailTab:
     fields: List[str] = field(default_factory=list)
     association: str = ""
     widget: str = ""
-    actions: List[str] = field(default_factory=list)
+    # [入口 2026-10-22] 与 UIDetailFacet 对齐：允许 dict 形态的 action
+    #   （保留 key/label/variant/permission）；字符串形态照旧。
+    actions: List[Any] = field(default_factory=list)
     # [权限预览] readonly_aggregate 等扩展 tab 字段
     endpoint: str = ""
     icon: str = ""
     props: Dict[str, Any] = field(default_factory=dict)
+    # [自定义取数器 2026-10-21] 与 facets 的 UIDetailFacet.customFetcher 对齐。
+    #   此前只有 facets 承载该字段，tabs 形态的 tab（如 org 的「往来关系」）即使
+    #   在 YAML 里声明也会被 loader 丢弃 ⇒ 前端拿不到 → tab 被 DetailPage 静默跳过。
+    customFetcher: str = ""
+    # [2026-10-21] 与 facets 对齐的其余分区字段。DetailPage 的 tabs 分支本就会读
+    #   tab.readonly / tab.pageSize / tab.display，但 dataclass 缺这三个字段 ⇒
+    #   YAML 里声明的 readonly/pageSize 被 loader 静默丢弃（同 customFetcher 一类问题）。
+    readonly: bool = False
+    pageSize: int = 20
+    display: str = "inline"
 
 
 @dataclass
@@ -107,6 +121,11 @@ class UIDetailViewConfig:
     facets: List[UIDetailFacet] = field(default_factory=list)
     tabs: List[UIDetailTab] = field(default_factory=list)
     title: str = ""
+    # [2026-10-21 自解释说明] 详情页顶部的「这是什么」说明文案（业务语言）。
+    #   动机: 只读面（party_internal / org_legal_entity 等）的对象名是技术口径，
+    #   用户看到「内部治理台账详情 华东销售中心」无法自行推断这是自家公司还是外部单位。
+    #   该文案在详情页内容区顶部渲染成一条说明横幅。
+    description: str = ""
     layout: str = "tabs"
     showChangeHistory: bool = True
     showRelations: bool = True

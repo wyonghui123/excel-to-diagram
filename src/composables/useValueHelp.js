@@ -45,6 +45,9 @@ export function useValueHelp(valueHelpConfig, options = {}) {
     if (src.value_field) params.value_field = src.value_field
     if (src.display_field) params.display_field = src.display_field
     if (src.code_field) params.code_field = src.code_field
+    // [F1 2026-10-20] 展示解析口径（仅用于 resolve 回显；search 端点忽略此参数，
+    //   候选集口径仍由 target_bo 决定）。
+    if (src.display_target_bo) params.display_target_bo = src.display_target_bo
     if (src.value_filter && Object.keys(src.value_filter).length > 0) {
       params.value_filter = src.value_filter
     }

@@ -475,6 +475,13 @@ class EnrichmentEngine:
             if not target_bo or not fk_field_id:
                 continue
 
+            # [F1 显示名解析口径 2026-10-20] 解析目标 = display_target_bo（缺省同 target_bo）。
+            #   target_bo 是**候选集口径**（下拉可见范围），若历史行指向候选集之外
+            #   （如 party_internal 只含 source='org'，而 FK 存的是 parties.id），
+            #   按候选集查表 ⇒ 显示名 null ⇒ 前端回退显示技术 id。
+            #   声明 display_target_bo（身份锚）后，显示名一律向身份锚取。
+            resolve_bo = getattr(source, 'display_target_bo', '') or target_bo
+
             fk_values = {
                 record[fk_field_id]
                 for record in records
@@ -486,14 +493,22 @@ class EnrichmentEngine:
             target_table = None
             if meta_registry:
                 try:
-                    target_meta = meta_registry.get(target_bo)
+                    target_meta = meta_registry.get(resolve_bo)
                     if target_meta:
                         target_table = getattr(target_meta, 'table_name', None)
                 except Exception:
                     pass
             if not target_table:
-                target_table = f'{target_bo}s'
+                # [2026-10-22] 原兜底为 f'{resolve_bo}s'（party → partys），复数拼接不可靠。
+                #   取不到表名说明元数据未装配，静默拼表名只会换来一次 SQL 失败；
+                #   改为显式告警并跳过该字段（显示名与落点都不注入）。
+                logger.warning(
+                    f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id}->{resolve_bo}: '
+                    f'元数据未注册，跳过显示名与落点注入'
+                )
+                continue
 
+            display_map = None
             try:
                 placeholders = ','.join(['?'] * len(fk_values))
                 sql = f'SELECT id, {display_field} FROM {target_table} WHERE id IN ({placeholders})'
@@ -505,13 +520,86 @@ class EnrichmentEngine:
                     record[display_key] = display_map.get(fk_val) if fk_val is not None else None
                 enriched_count += 1
                 logger.info(
-                    f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id}->{target_bo}: '
+                    f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id}->{resolve_bo}: '
                     f'enriched {len(display_map)} values'
                 )
             except Exception as e:
                 logger.warning(
                     f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id}->{target_bo} failed: {e}'
                 )
+
+            # [FK 跳转落点 2026-10-22] 注入 {field}_link_object_type + {field}_link_id。
+            #   前端 FkLinkField 用这两个值拼 /detail/{type}/{id}，不再拿 target_bo
+            #   与 FK 原值硬拼（那会把链接落到只读视图上，且跨 id 空间时打不开）。
+            #   未声明 detail_target_bo 的字段不注入 ⇒ 前端保持原有行为。
+            detail_target_bo = getattr(source, 'detail_target_bo', '') or ''
+            if not detail_target_bo:
+                continue
+            link_type_key = f'{fk_field_id}_link_object_type'
+            link_id_key = f'{fk_field_id}_link_id'
+            detail_target_id_field = getattr(source, 'detail_target_id_field', '') or ''
+            if not detail_target_id_field:
+                # id 空间同源：FK 原值即落点 id。
+                # [2026-10-22 存在性校验] 前端只有拿到真实存在的落点才渲染链接；否则纯文本，
+                #   避免「名称能显示、点进去空白」（如 party2_id 指向 party_archive 之外的行）。
+                #   落点表 == 展示解析表时直接复用 display_map（零额外查询）；
+                #   不同表时（party2_id: 解析取 party、落点取 party_archive）补一次 id 存在性查询。
+                existing_ids = None
+                if detail_target_bo == resolve_bo:
+                    existing_ids = display_map
+                else:
+                    detail_table = None
+                    if meta_registry:
+                        try:
+                            detail_meta = meta_registry.get(detail_target_bo)
+                            if detail_meta:
+                                detail_table = getattr(detail_meta, 'table_name', None)
+                        except Exception:
+                            pass
+                    if detail_table:
+                        try:
+                            placeholders = ','.join(['?'] * len(fk_values))
+                            cursor = self.ds.execute(
+                                f'SELECT id FROM {detail_table} WHERE id IN ({placeholders})',
+                                list(fk_values),
+                            )
+                            existing_ids = {row[0] for row in cursor.fetchall()}
+                        except Exception as e:
+                            logger.warning(
+                                f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id} '
+                                f'落点存在性校验失败 {detail_table}: {e}'
+                            )
+                for record in records:
+                    fk_val = record.get(fk_field_id)
+                    record[link_type_key] = detail_target_bo
+                    if existing_ids is None:
+                        # 取不到落点表（元数据缺失）⇒ 维持原值，不制造假阴性
+                        record[link_id_key] = fk_val
+                    else:
+                        record[link_id_key] = fk_val if fk_val in existing_ids else None
+                continue
+            # id 空间不同源：先从解析口径表取中间列当落点 id（如 parties.org_id → orgs.id）
+            try:
+                placeholders = ','.join(['?'] * len(fk_values))
+                sql = (f'SELECT id, {detail_target_id_field} FROM {target_table} '
+                       f'WHERE id IN ({placeholders})')
+                cursor = self.ds.execute(sql, list(fk_values))
+                id_map = {row[0]: row[1] for row in cursor.fetchall()}
+                for record in records:
+                    fk_val = record.get(fk_field_id)
+                    record[link_type_key] = detail_target_bo
+                    # 查不到中间列（历史脏数据）⇒ link_id = None ⇒ 前端渲染纯文本不可点
+                    record[link_id_key] = id_map.get(fk_val) if fk_val is not None else None
+            except Exception as e:
+                logger.warning(
+                    f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id} link id '
+                    f'via {detail_target_id_field} failed: {e}'
+                )
+                # [2026-10-22] 换算失败时不能只记日志：link 字段整体缺失会让前端回退到
+                #   target_bo + 原始 FK 值（错跳只读视图）。显式置 null ⇒ 纯文本。
+                for record in records:
+                    record[link_type_key] = detail_target_bo
+                    record[link_id_key] = None
 
         if enriched_count > 0:
             logger.info(

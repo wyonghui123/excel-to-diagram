@@ -9,6 +9,15 @@
 
 import metaService from '@/services/metaService'
 
+// [party 族 2026-10-21] 补齐身份轴五个类型。
+//   起因（手机端报障「关系详情中往来单位/组织点击跳转失败」）：本白名单是硬编码的，
+//   此前只列了平台早期对象，party 族全部缺席。而 party_relation 详情页的
+//   往来单位(party2_id) / 我方组织(party1_id) / 归属法人(le_org_id) 三个字段都是
+//   ObjectPageField 渲染出的 FK 链接，落点分别是 party_archive / party_internal /
+//   org_legal_entity ⇒ 点击后 validateDetailRoute 判定类型不支持，
+//   next({ path:'/', reason:'unsupported_object_type' }) 把用户弹回首页 = "跳转失败"。
+//   口径说明: 这五个都是 party_relation 的 FK 落点或往来单位组，同属身份轴，
+//   属受管业务对象，加进来不是放开任意类型，而是补齐本来就该可导航的类型。
 const SUPPORTED_OBJECT_TYPES = [
   'user',
   'user_group',
@@ -25,7 +34,15 @@ const SUPPORTED_OBJECT_TYPES = [
   'version',
   'service_module',
   'business_object',
-  'relationship'
+  'relationship',
+  // 身份轴: 对外档案面 / 内部治理台账面 / 往来单位组 / 法人主体面
+  //   刻意不含 party（身份锚基表）：F1 §7.1-4 定其「只作唯一写入路径，常规读取走两个
+  //   只读面」，无 detail 配置；且全库无任何 FK 落点指向它（grep target_bo: party 仅命中
+  //   party_relation 的 display_target_bo）。放进白名单只会开出一个必然白屏的详情页。
+  'party_archive',
+  'party_internal',
+  'party_group',
+  'org_legal_entity'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -78,7 +95,13 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'version': '版本',
     'service_module': '服务模块',
     'business_object': '业务对象',
-    'relationship': '关联关系'
+    'relationship': '关联关系',
+    // [party 族 2026-10-21] 补身份轴标签：缺了会让面包屑回退显示英文 objectType id
+    'party': '身份主体',
+    'party_archive': '往来单位',
+    'party_internal': '内部治理台账',
+    'party_group': '往来单位组',
+    'org_legal_entity': '法人主体'
   }
 
   const label = typeLabels[normalizedType] || objectType

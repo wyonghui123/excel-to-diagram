@@ -234,6 +234,13 @@ class ApplicationBuilder:
         bo_framework.register_interceptor(FieldPolicyInterceptor())
         from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
         bo_framework.register_interceptor(ConstraintValidationInterceptor())
+        # [F3 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重，紧随约束校验之后
+        #   [模块门控] party 轴依赖 org 的 BU/LE 职能，BIP 应用架构管理部署设
+        #   DISABLED_PLATFORM_MODULES=party 时不注册（与 server.py create_app 同步）。
+        from meta.core.platform_modules import is_module_enabled
+        if is_module_enabled('party'):
+            from meta.core.interceptors.party_relation_guard_interceptor import PartyRelationGuardInterceptor
+            bo_framework.register_interceptor(PartyRelationGuardInterceptor())
         bo_framework.register_interceptor(EnumProtectionInterceptor())
         bo_framework.register_interceptor(AssociationInterceptor())
 
@@ -252,6 +259,13 @@ class ApplicationBuilder:
         bo_framework.register_interceptor(AuditInterceptor())
         bo_framework.register_interceptor(BusinessLogInterceptor())
         bo_framework.register_interceptor(PersistenceInterceptor())
+        # [2026-10-20] org → party 内部表示镜像（P94）：排队在 PersistenceInterceptor(P95)
+        #   之后执行（after 钩子按 priority 降序），覆盖 org 更名 / 状态变更。
+        #   与 server.py 的 create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        #   [模块门控] 同 P43。
+        if is_module_enabled('party'):
+            from meta.core.interceptors.org_party_mirror_interceptor import OrgPartyMirrorInterceptor
+            bo_framework.register_interceptor(OrgPartyMirrorInterceptor())
         bo_framework.register_interceptor(SecurityLogInterceptor())
         bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
         bo_framework.register_interceptor(OperationLogInterceptor())
@@ -450,6 +464,18 @@ class ApplicationBuilder:
             return self
         if file_size < 1024:
             return self
+
+        # [L0 视图依赖守卫] 依赖表缺失的视图从注册表摘除（正常部署零动作）。
+        #   放在空库判断之后：临时空库不触发，避免误摘共享单例里的对象。
+        if self._data_source is not None:
+            try:
+                from meta.core.view_dependency_guard import prune_unusable_views
+                pruned = prune_unusable_views(self._data_source)
+                if pruned:
+                    logger.warning(f"[AppBuilder] Unusable views pruned: {pruned}")
+            except Exception as e:
+                logger.error(f"[AppBuilder] view dependency guard failed (non-fatal): {e}")
+
         try:
             conn = sqlite3.connect(db_path, timeout=5)
             result = conn.execute("PRAGMA integrity_check").fetchone()[0]

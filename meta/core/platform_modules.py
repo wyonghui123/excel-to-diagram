@@ -45,11 +45,19 @@ KNOWN_PLATFORM_MODULES = (
     #   不是"规则体系"，且属权限基础设施，同样不可关。
     #   保留此 id 仅为将来规则体系获得独立入口时预留，届时需同时接线两个作用点。
     'rules',
+    # 往来关系（party 身份轴）: party / party_group / party_relation 三对象 + /party hub 菜单
+    #   + P43 镜像行守卫 / P94 org→party 内部表示镜像。
+    #   前置条件: **org 必须承载业务主体职能（BU/LE）**，由 org_functions 提供 ——
+    #   仅业务部署（xAPP）成立。BIP 应用架构管理部署下 org 是应用架构节点
+    #   （security_entity，用于组织用户/委托管理），不承载 BU/LE ⇒ party_internal
+    #   候选恒空、party_relation.party1_id（required）无法建单。
+    #   故该部署须设 DISABLED_PLATFORM_MODULES=party，关闭菜单种子与两个拦截器。
+    'party',
 )
 
 #: 当前**真正可关闭**的模块 id —— 与 KNOWN_PLATFORM_MODULES 的区别是"有无可关闭入口"。
 #: 写进黑名单但不在此集合里 = 无效果（不报错，属已知占位）。
-CLOSABLE_PLATFORM_MODULES = ('tasks',)
+CLOSABLE_PLATFORM_MODULES = ('tasks', 'party')
 
 _LOCK = Lock()
 _CACHE = {}

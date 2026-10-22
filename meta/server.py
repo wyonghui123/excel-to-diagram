@@ -389,6 +389,20 @@ def create_app(db_path=None):
 
     data_source = get_data_source("sqlite", database=db_path)
 
+    # [L0 视图依赖守卫] 依赖表缺失的视图从注册表摘除 ⇒ 请求得到确定的 4xx，
+    #   而不是 SELECT 时 no such table 的 500。正常部署零动作。
+    try:
+        from meta.core.view_dependency_guard import prune_unusable_views
+        _pruned_views = prune_unusable_views(data_source)
+        if _pruned_views:
+            logging.getLogger(__name__).warning(
+                "[PREFLIGHT] Unusable views pruned: %s", _pruned_views
+            )
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            "[PREFLIGHT] view dependency guard failed (non-fatal): %s", e
+        )
+
     # [P5 补充 2026-07-26] 启动时检测 SQLite 运行时配置 (WAL/busy_timeout/...)
     # 必须在任何 layer 调用 get_runtime_config() 之前完成
     # 解决: DEMO 用户创建 product 时 RuntimeError: DB config not detected yet
@@ -474,6 +488,14 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(FieldPolicyInterceptor())
     from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
     bo_framework.register_interceptor(ConstraintValidationInterceptor())
+    # [F3 2026-10-20 / 补注册 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 此前只注册在新 builder 路径，
+    #   而 waitress_server.py 走本函数（create_app）⇒ 运行时守卫缺失。
+    #   [模块门控] party 轴在 BIP 应用架构管理部署下不适用（org 无 BU/LE 职能），
+    #   该部署设 DISABLED_PLATFORM_MODULES=party 后不注册。
+    if is_module_enabled('party'):
+        from meta.core.interceptors.party_relation_guard_interceptor import PartyRelationGuardInterceptor
+        bo_framework.register_interceptor(PartyRelationGuardInterceptor())
     bo_framework.register_interceptor(EnumProtectionInterceptor())
     bo_framework.register_interceptor(AssociationInterceptor())
 
@@ -492,6 +514,15 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(AuditInterceptor())
     bo_framework.register_interceptor(BusinessLogInterceptor())
     bo_framework.register_interceptor(PersistenceInterceptor())
+    # [2026-10-20] org → party 内部表示镜像（P94）：排队在 PersistenceInterceptor(P95)
+    #   之后执行（after 钩子按 priority 降序），覆盖 org 更名 / 状态变更。
+    #   职能变更走 OrgFunctionService 直连路径，不在本拦截器覆盖范围（见该服务注释）。
+    #   与 app_builder.with_interceptors() 同位登记 —— 两条启动路径缺一会静默失效。
+    #   [模块门控] 同 P43：party 模块关闭（BIP 应用架构管理部署）时不注册，避免每次
+    #   org 保存空跑一次存在性检查。
+    if is_module_enabled('party'):
+        from meta.core.interceptors.org_party_mirror_interceptor import OrgPartyMirrorInterceptor
+        bo_framework.register_interceptor(OrgPartyMirrorInterceptor())
     # [多产品平台 §6.14.2] 跨应用事件：业务写成功后在同一事务内写 outbox。
     # 无事件契约时 should_execute 直接短路 → legacy 零影响。
     from meta.core.interceptors.outbox_interceptor import OutboxInterceptor

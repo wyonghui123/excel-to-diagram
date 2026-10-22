@@ -15,6 +15,7 @@
       :layout="formLayout"
       :label-position="labelPosition"
       :field-policy="fieldPolicy"
+      :field-dependencies="fieldDependencies"
       @update:model-value="handleDataChange"
     >
       <template v-for="field in slotFields" :key="field.key" #[`field-${field.key}`]="scope">
@@ -83,10 +84,17 @@ const props = defineProps({
     default: '取消'
   },
   saving: {
-        type: Boolean,
-        default: false
-      },
-      zIndex: {
+      type: Boolean,
+      default: false
+    },
+  // [2026-10-21] 字段联动透传：MetaForm 早已实现 fieldDependencies（onChange + setFieldValue），
+  //   但 MetaDialog 未向下传，导致弹窗类表单无法做「改A自动带B」。
+  //   本次为往来关系「我方组织 → 归属法人」自动带出所加；仅透传，缺省 {} 与原行为一致。
+  fieldDependencies: {
+    type: Object,
+    default: () => ({})
+  },
+  zIndex: {
         type: [String, Number],
         default: null
       }

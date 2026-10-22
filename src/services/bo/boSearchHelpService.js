@@ -42,6 +42,8 @@ export class BOSearchHelpService extends BOBaseService {
     if (params.value_field) queryParams.set('value_field', params.value_field)
     if (params.display_field) queryParams.set('display_field', params.display_field)
     if (params.code_field) queryParams.set('code_field', params.code_field)
+    // [F1 2026-10-20] 展示解析口径：候选集之外的存量值回显到身份锚取名
+    if (params.display_target_bo) queryParams.set('display_target_bo', params.display_target_bo)
 
     const path = `/value-help/${sourceType}/${sourceId}/resolve?${queryParams.toString()}`
     return this._request('GET', path)

@@ -275,7 +275,7 @@ describe('MetaListPage - FK字段链接 & BusinessKey 链接渲染', () => {
     })
 
     it('TC-ML-DISP-002: 无_display后缀时使用_name后缀', () => {
-      const row = { permission_set_id: 5, role_name: 'Editor' }
+      const row = { permission_set_id: 5, permission_set_name: 'Editor' }
       const column = defaultColumns.find(c => c.prop === 'permission_set_id')
       
       const nameKey = `${column.prop.replace(/_id$/, '')}_name`

@@ -548,6 +548,10 @@ function updateTabLabel() {
 .odp-title-bar {
   display: flex;
   align-items: center;
+  // 窄屏下标题与右侧动作按钮争宽会把标题压成单字竖排：允许换行，
+  // 空间不足时右侧按钮组整体落到第二行（右对齐）。
+  flex-wrap: wrap;
+  row-gap: 8px;
   padding: 8px var(--spacing-md);
   flex-shrink: 0;
 
@@ -555,24 +559,39 @@ function updateTabLabel() {
     display: flex;
     align-items: center;
     gap: 8px;
+    // flex-basis 既决定标题的起始宽度，也是换行门槛：
+    // 200 + 右侧按钮实测 214 > 容器可用宽度时触发换行。
+    flex: 1 1 200px;
+    min-width: 0;
   }
 
   &__sep {
     width: 1px;
     height: 14px;
     background: var(--color-border);
+    flex-shrink: 0;
   }
 
+  // 长名称（如「身份档案（对外）详情 深圳前海数科股份有限公司」）在窄屏下
+  // 若允许换行会被 flex 压成单字竖排，故固定单行 + 省略号（同 PageShell）
   &__title {
     font-size: 14px;
     font-weight: 600;
     color: var(--color-text-primary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__right {
     display: flex;
     align-items: center;
     gap: 12px;
+    // 换到第二行后仍按内容宽右对齐；动作按钮很多时允许内部再换行，避免溢出
+    flex-wrap: wrap;
+    row-gap: 8px;
+    max-width: 100%;
     flex: 0 0 auto;
     margin-left: auto;
   }
@@ -645,6 +664,7 @@ function updateTabLabel() {
   cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
+  flex-shrink: 0;
 
   &:hover {
     color: var(--color-primary);

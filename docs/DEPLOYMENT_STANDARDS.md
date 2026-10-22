@@ -400,8 +400,17 @@ d:\filework\excel-to-diagram\
 | `PLATFORM_DISPLAY_NAME` | 空 | **实例展示名** —— 前端 4 个渲染点（详见 §9.2.1） | 每次启动 |
 | `DISABLED_PLATFORM_MODULES` | 空（全开） | **平台模块**黑名单，逗号分隔 | 路由每次启动；菜单仅对未跑过种子的实例 |
 
-> **`DISABLED_PLATFORM_MODULES` 当前可关闭：仅 `tasks`（任务体系）。**
+> **`DISABLED_PLATFORM_MODULES` 当前可关闭：`tasks`（任务体系）、`party`（往来关系）。**
 > `rules`（规则体系）暂无可关闭入口 —— `meta/core/rule_*.py` 是平台核心库底层依赖，写了**不报错但无效果**，`/health` 的 `ineffective_platform_modules` 字段会如实报出，避免误判"已关闭"。
+>
+> **`party` 的适用边界（部署形态维度）**：party 轴（`/party` hub 的往来单位 / 往来单位组 / 往来关系三个 tab，以及 P43 镜像行守卫、P94 org→party 内部表示镜像）要求 `org` 承载**业务主体职能**（`org_functions` 的 `legal_entity` / `management_unit`），只有业务部署（xAPP）成立。BIP 应用架构管理部署下 `org` 是**应用架构节点**（`security_entity`，仅用于组织用户与委托管理），不承载 BU/LE ⇒ `party_internal` 候选恒空、`party_relation.party1_id`（required）无法建单。该部署须设 `DISABLED_PLATFORM_MODULES=party`，效果为：
+>
+> - 不种 `/party` 菜单，并回收存量声明行（`init_menu_permissions.py` 步骤 4.5）；
+> - 不注册 P43 / P94 两个拦截器（两条启动路径同步门控）；
+> - org 详情的「往来关系」分区不返回；
+> - 拒绝给 org 授予 `legal_entity` / `management_unit` 职能（409，避免把应用架构节点变成法人）。
+>
+> 注：`party` 之外的 party 族对象（`party_archive` 对外档案、`party_group` 往来单位组）随模块一起收敛入口；`customer_account` / `vendor_account` 的 `relation_id` 强绑 `party_relation`，其业务部署同样限于 xAPP。
 
 **验证开关是否真生效**（唯一存活的无鉴权探活点；`/api/v1/health` 已被 v1 sunset 接管返回 410，勿用）：
 
@@ -421,6 +430,8 @@ UPDATE menus SET show_in_sidebar=0 WHERE menu_code IN
 ```
 
 > 路由侧不受此影响 —— blueprint 已不注册，旧菜单点进去也是 404。
+>
+> `party` 例外：`init_menu_permissions.py` 在模块关闭时会**自动回收** `party-management` 声明行（步骤 4.5），无需手工 SQL；上式的 `tasks` 种子行仍须一次性清理。
 
 ### 9.3 部署级环境变量的落点（`PLATFORM_DISPLAY_NAME` 展开）
 

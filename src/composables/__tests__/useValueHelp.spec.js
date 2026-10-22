@@ -259,6 +259,47 @@ describe('useValueHelp', () => {
 
       expect(displayValue.value).toBe('test')
     })
+
+    // [F1 2026-10-20] 展示解析口径透传：resolve 端点按 URL 参数重建 source、
+    // 不读 YAML ⇒ 前端不带 display_target_bo，编辑态回显就退化为技术 id。
+    it('把 display_target_bo 透传给 resolveValueHelp', async () => {
+      boService.resolveValueHelp.mockResolvedValue({
+        success: true,
+        data: { display: '前端验证我方' },
+      })
+
+      const { resolveDisplay, displayValue } = useValueHelp({
+        source: {
+          type: 'bo',
+          target_bo: 'party_internal',
+          display_target_bo: 'party',
+        },
+      })
+
+      await resolveDisplay(8)
+
+      expect(boService.resolveValueHelp).toHaveBeenCalledWith(
+        'bo', 'party_internal', 8,
+        expect.objectContaining({ display_target_bo: 'party' })
+      )
+      expect(displayValue.value).toBe('前端验证我方')
+    })
+
+    it('未声明 display_target_bo 时不透传空值', async () => {
+      boService.resolveValueHelp.mockResolvedValue({
+        success: true,
+        data: { display: 'X' },
+      })
+
+      const { resolveDisplay } = useValueHelp({
+        source: { type: 'bo', target_bo: 'party_internal' },
+      })
+
+      await resolveDisplay(8)
+
+      const params = boService.resolveValueHelp.mock.calls[0][3]
+      expect(params.display_target_bo).toBeUndefined()
+    })
   })
 
   describe('validateInput', () => {

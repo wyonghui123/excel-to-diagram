@@ -265,6 +265,56 @@ describe('BOSearchHelpService', () => {
       const url = getCallUrl()
       expect(decodeURIComponent(url)).toContain('value=张三/李四')
     })
+
+    // [F1 2026-10-20] 展示解析口径透传：候选集(target_bo)之外的存量值
+    // 需回身份锚(display_target_bo)取名，否则编辑态回显退化为技术 id。
+    it('传 display_target_bo 时设置该参数', async () => {
+      await service.resolveValueHelp('bo', 'party_internal', '8', {
+        display_target_bo: 'party',
+      })
+
+      const url = getCallUrl()
+      expect(url).toContain('value=8')
+      expect(url).toContain('display_target_bo=party')
+    })
+
+    it('不传 display_target_bo 时 URL 不含该参数（与 target_bo 同口径）', async () => {
+      await service.resolveValueHelp('bo', 'party_internal', '8')
+
+      const url = getCallUrl()
+      expect(url).not.toContain('display_target_bo=')
+    })
+
+    it('display_target_bo 与 value_field 等参数共存', async () => {
+      await service.resolveValueHelp('bo', 'party_internal', '8', {
+        value_field: 'id',
+        display_field: 'name',
+        code_field: 'code',
+        display_target_bo: 'party',
+      })
+
+      const url = getCallUrl()
+      expect(url).toContain('value_field=id')
+      expect(url).toContain('display_field=name')
+      expect(url).toContain('code_field=code')
+      expect(url).toContain('display_target_bo=party')
+    })
+  })
+
+  // [F1 2026-10-20] 候选集口径必须与展示解析口径隔离：
+  // search 端点若也带上 display_target_bo，下拉可见范围会被展示口径污染。
+  describe('searchValueHelp - 不透传 display_target_bo', () => {
+    it('即使 params 带 display_target_bo，URL 也不含该参数', async () => {
+      await service.searchValueHelp('bo', 'party_internal', {
+        pageSize: 50,
+        display_target_bo: 'party',
+      })
+
+      const url = getCallUrl()
+      expect(url).toContain('/value-help/bo/party_internal')
+      expect(url).toContain('page_size=50')
+      expect(url).not.toContain('display_target_bo=')
+    })
   })
 
   describe('sourceType 支持', () => {

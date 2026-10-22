@@ -114,6 +114,12 @@ if ($SkipBuild) {
 # --- 3. 启动 preview ---
 Write-Host "[2/3] 启动 preview: http://127.0.0.1:$PreviewPort ..." -ForegroundColor Yellow
 $env:VITE_PREVIEW_PORT = "$PreviewPort"
+# [FIX 2026-10-19] 必须显式把本次探活的后端端口注入 preview 进程。
+#   历史: 进程环境里残留的 BACKEND_PORT (如被 setx 持久化的 3011) 会覆盖
+#   vite.config.js 读 ports.json 的默认值 → /api 代理全部 500 (3011 无监听)。
+#   此处注入与第 90 行探活端口一致的 $BackendPort, 消除对继承环境的依赖。
+#   (与 service_manager.py SERVICES.frontend.env 的 BACKEND_PORT 注入同理)
+$env:BACKEND_PORT = "$BackendPort"
 
 # stdout/stderr 必须分文件，同一文件 Start-Process 会报错
 $previewOut = Join-Path $runtimeDir 'mobile-preview.out.log'

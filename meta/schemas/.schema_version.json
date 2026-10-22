@@ -783,7 +783,7 @@
       "table": "menu_permissions"
     },
     "org": {
-      "hash": "c7b3e419589676f4a51cb2e7d8e7c8cc",
+      "hash": "5f8ee6d4cf40575e61f5c39e17bea2cd",
       "fields": [
         "updated_at",
         "created_by",
@@ -814,6 +814,19 @@
         "created_at"
       ],
       "table": "org_data_permissions"
+    },
+    "org_legal_entity": {
+      "hash": "ed7ac776af41b48fdae277b0c5562d36",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "org_type",
+        "parent_id",
+        "manager_id",
+        "status"
+      ],
+      "table": "org_legal_entity"
     },
     "org_member": {
       "hash": "44d225cd8100510d0409fe96dc8cdbae",
@@ -1554,5 +1567,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-13T23:59:26.701760"
+  "last_sync": "2026-10-20T23:38:15.900567"
 }

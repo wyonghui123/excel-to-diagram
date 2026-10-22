@@ -26,6 +26,10 @@
       </div>
 
       <div v-else class="dp-content">
+        <div v-if="detailDescription" class="dp-self-note">
+          <AppIcon name="info" size="sm" />
+          <span>{{ detailDescription }}</span>
+        </div>
         <slot name="default" :data="data" />
         <ObjectPage
           v-if="!$slots.default && metaLoaded"
@@ -89,6 +93,14 @@
     </div>
 
     <div v-else class="dp-content">
+      <!-- [2026-10-21 自解释说明] 「这是什么」说明横幅。
+           只读面（party_internal / org_legal_entity）的对象名是技术口径，
+           用户单看字段无法判断这是自家公司还是外部单位 → 详情页顶部给一句业务语言说明。
+           文案由 YAML 的 ui_view_config.detail.description 提供，缺省不渲染。 -->
+      <div v-if="detailDescription" class="dp-self-note">
+        <AppIcon name="info" size="sm" />
+        <span>{{ detailDescription }}</span>
+      </div>
       <slot name="default" :data="data" />
       <ObjectPage
         v-if="!$slots.default && metaLoaded"
@@ -543,6 +555,14 @@ const computedFieldDefs = computed(() => {
   return defs
 })
 
+// [2026-10-21 自解释说明] 详情页顶部「这是什么」说明文案。
+//   来源: YAML 的 ui_view_config.detail.description（业务语言，非技术口径）。
+//   用途: 只读面的对象名（内部治理台账 / 法人主体）是技术命名，用户单看标题与字段
+//         无法判断这是自家公司还是外部单位 → 用一句说明消除歧义。
+const detailDescription = computed(() => {
+  return entityMeta.value?.ui_view_config?.detail?.description || ''
+})
+
 const computedActions = computed(() => {
   if (props.readonly) return []
 
@@ -773,34 +793,41 @@ const computedSections = computed(() => {
           console.debug('[DetailPage] Skipping association tab:', tab.association, '(editing mode)')
           continue
         }
-        if (isCollectionAssociation(tab.association)) {
-          const assocDef = entityAssociations.find(a => a.name === tab.association)
-          console.debug('[DetailPage] Creating association section:', tab.association, 'assocDef:', assocDef)
-          // [FIX 2026-06-09] readonly 时强制把 unassign/assign 移除,
-          // 只保留 list（防止下游 manyToManyRowActions 锛宑hecked in section.readonly
-          // 解析失败后仍彻底出"移除"按钮）。
-          const isAssocReadonly = !!(tab.readonly || assocDef?.readonly)
-          const safeActions = isAssocReadonly
-            ? (tab.actions || ['list']).filter(a => {
-                const key = typeof a === 'string' ? a : (a.key || a.id)
-                return key === 'list'
-              })
-            : (tab.actions || ['assign', 'unassign', 'list'])
-          sections.push({
-            key: tab.id || tab.association,
-            label: tab.label || tab.association,
-            icon: tab.icon || 'link',
-            type: 'association',
-            association: assocDef?.target_type || assocDef?.target_entity || tab.association || '',
-            assocName: tab.association,
-            assocType: assocDef?.type,
-            pageSize: tab.pageSize || 20,
-            display: tab.display || 'inline',
-            actions: safeActions,
-            readonly: isAssocReadonly
-          })
-        } else {
+        // [自定义取数器 2026-10-21] 与下方 facets 分支同款放行：带 customFetcher 的 tab
+        //   取数由 AssociationSection 的自定义分支接管，不经平台关联端点，故不要求
+        //   在 associations 里声明集合类型（org → party_relation 即此场景：
+        //   party_relations 存的是 party1_id（parties.id），没有 org_id 列可过滤）。
+        if (!tab.customFetcher && !isCollectionAssociation(tab.association)) {
+          continue
         }
+        const assocDef = entityAssociations.find(a => a.name === tab.association)
+        console.debug('[DetailPage] Creating association section:', tab.association, 'assocDef:', assocDef)
+        // [FIX 2026-06-09] readonly 时强制把 unassign/assign 移除,
+        // 只保留 list（防止下游 manyToManyRowActions 锛宑hecked in section.readonly
+        // 解析失败后仍彻底出"移除"按钮）。
+        // [入口 2026-10-22] 另保留显式声明的 create（组织「往来关系」分区是只读行 +
+        //   只提供新建入口的场景）；默认动作集里不含 create，故不放开 assign/unassign。
+        const isAssocReadonly = !!(tab.readonly || assocDef?.readonly)
+        const safeActions = isAssocReadonly
+          ? (tab.actions || ['list']).filter(a => {
+              const key = typeof a === 'string' ? a : (a.key || a.id)
+              return key === 'list' || key === 'create'
+            })
+          : (tab.actions || ['assign', 'unassign', 'list'])
+        sections.push({
+          key: tab.id || tab.association,
+          label: tab.label || tab.association,
+          icon: tab.icon || 'link',
+          type: 'association',
+          association: assocDef?.target_type || assocDef?.target_entity || tab.association || '',
+          assocName: tab.association,
+          assocType: assocDef?.type,
+          pageSize: tab.pageSize || 20,
+          display: tab.display || 'inline',
+          actions: safeActions,
+          readonly: isAssocReadonly,
+          customFetcher: tab.customFetcher || assocDef?.customFetcher || null
+        })
       } else if (tab.type === 'history') {
         sections.push({
           key: tab.id || 'audit-log',
@@ -1699,6 +1726,25 @@ const showAuditDialog = ref(false)
   p {
     margin: 0;
     color: var(--color-text-tertiary);
+  }
+}
+
+/* [2026-10-21 自解释说明] 「这是什么」说明横幅：中性底 + 左侧信息图标，
+   不抢主内容焦点，但一眼可读。 */
+.dp-self-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin: 0 var(--spacing-md) var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-secondary, var(--color-fill-2, #f4f6f8));
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+
+  span {
+    min-width: 0;
   }
 }
 

@@ -1,7 +1,20 @@
 # ============================================
 # 内部治理台账面（party_internal）— foundation 步 2 · F1 治理分域 v1.1 §3.5
 # object_type: view（真 SQL 视图，只读面；写请求由 READ_ONLY_VIEW 护栏拒绝 → API 400）
-# 谓词: source = 'org'（全内部行，org_id 非空）
+# 谓词: source = 'org' AND EXISTS(该 org 具备我方主体职能 BU/LE)
+#   [2026-10-20 口径同源] 原谓词只有 source='org'，而 parties 行是由镜像服务「曾经」
+#   建出来的（不删除原则）⇒ org 失去法人职能后行仍在，本面仍暴露它作为我方主体候选，
+#   与法人域面（org_legal_entity，实时读 org_functions）口径分裂，产生「幽灵主体」。
+#   本谓词补齐 EXISTS 后，两个面读同一张职能表、同一判据（与
+#   org_party_mirror_service.is_subject_org / SUBJECT_FUNCTIONS 同源），结构上不再可能分裂。
+#   [2026-10-21 放宽] 判据从单一 legal_entity 放宽为 (legal_entity, management_unit)：
+#   法人是我方主体，管理单元（BU）也是 —— 后者不能独立签约，但可以作为关系的一方。
+#   这样 party1_id（我方侧）能选到 BU，而 le_org_id（法人域）仍只到法人，两字段才可分。
+#   失去全部主体职能的行仍在 parties 表（历史事实，可被存量关系引用），存量回显走
+#   party_relation.party1_id 的 display_target_bo=party 兜底，不依赖本面。
+# 状态: 谓词不滤 status —— 本面是台账面，status 是列上可筛的真实维度；
+#   候选集只取启用行由消费方 value_help.source.value_filter 表达（见 party_relation.yaml），
+#   而 resolve 不读 value_filter ⇒ 停用行的历史回显不受影响。
 # 绑定: 挂 org 维度（direct，字段 org_id）—— 全内部行 ⇒ 无条件 AND org_id IN (子树展开集)
 #       在面上恒成立；无范围用户自然得空集
 # [机制登记] dimension_object_mapping.yaml org 块 applies_to 同步登记本面
@@ -11,13 +24,18 @@
 id: party_internal
 name: 内部治理台账
 table_name: party_internal
-description: 内部治理台账面：恒取 source='org' 的内部组织表示（经 org 维度范围注入过滤）
+description: 内部治理台账面：取 source='org' 且该 org 当前具备我方主体职能（法人 / 管理单元）的内部组织表示（经 org 维度范围注入过滤）
 display_name_field: name
 object_type: view
 view_definition: |
-  SELECT id, code, name, party_type, source, org_id, status
-  FROM parties
-  WHERE source = 'org'
+  SELECT p.id, p.code, p.name, p.party_type, p.source, p.org_id, p.status
+  FROM parties p
+  WHERE p.source = 'org'
+    AND EXISTS (
+      SELECT 1 FROM org_functions f
+      WHERE f.org_id = p.org_id
+        AND f.function_type IN ('legal_entity', 'management_unit')
+    )
 
 # [F1 §3.2] 绑定只挂内部面（第二条声明路径；基表与 archive 面均不声明）
 dimension_bindings:
@@ -69,8 +87,11 @@ fields:
     ui:
       widget: input
 
+  # [2026-10-21 界面词] 本面谓词 source='org' ⇒ 每行都是**我方组织**在往来单位台账里的
+  #   身份记录（party_type 恒 organization）⇒ 叫「显示名」是系统术语，改为「组织名称」，
+  #   与 org_legal_entity.name 的界面词一致（同一概念两种叫法是理解障碍之一）。
   - id: name
-    name: 显示名
+    name: 组织名称
     type: string
     db_column: name
     required: true
@@ -85,6 +106,10 @@ fields:
 
   # [v3.5 2026-10-17] 删去 person 枚举项：视图谓词 source='org' ⇒ 本面恒为
   #   organization；列出 person 只会误导（对外个人的表现走 party_archive 面）。
+  # [2026-10-21 界面词] organization 的界面词由「组织」改为「企业」（与基表 party 同词）：
+  #   本面行恒为 source='org' 的内部表示，party_type 恒为 organization ⇒ 该列对本面
+  #   恒定且无区分度，故 ui.visible=false 隐藏（口径同 source 恒定列）。
+  #   界面词「企业」专指往来单位侧的主体性质，与平台内部组织对象（org）区分开。
   - id: party_type
     name: 身份类型
     type: string
@@ -92,15 +117,16 @@ fields:
     required: true
     default: organization
     max_length: 30
-    description: 身份类型（本面恒为 organization）
+    description: 身份类型（本面恒为 organization，即「企业」；恒定无区分度 ⇒ 隐藏）
     enum_values:
       - value: organization
-        label: 组织
+        label: 企业
         color: primary
     semantics:
       meaning: 身份类型分类
     ui:
       widget: select
+      visible: false
 
   # [F1 2026-10-17] 恒定字段隐藏 + relation 绑定修复（用户手机端实测报障）
   #   source: 谓词 source = 'org' ⇒ 本面恒为 'org'，它是"这行是内部记录"的
@@ -121,14 +147,26 @@ fields:
     ui:
       visible: false
 
+  # [2026-10-21 可理解性] 补 value_help：此前只有 ui.relation ⇒ 后端 enrich_fk_display_names
+  #   （只认 value_help）不解析显示名 ⇒ 详情页「组织引用」显示裸 id（318），
+  #   用户无法把本行与「组织」档案对应起来。补齐后显示「华东销售中心」并可点击跳组织详情。
+  #   口径与 org.yaml 的 parent_id 同款（target_bo: org / display_field: name）。
   - id: org_id
-    name: 组织引用
+    name: 所属组织
     type: integer
     db_column: org_id
     nullable: true
     description: orgs 外键（本面非空且 1:1；org 维度注入字段）
     semantics:
       meaning: 对应组织
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
     ui:
       relation: org
       display_field: name
@@ -168,3 +206,24 @@ relations: []
 
 ui_view_config:
   skip_auto_menu: true
+  # [详情页 2026-10-21] 补 detail 声明（本面此前只有 skip_auto_menu）。
+  #   报障：手机端在往来关系详情点「我方组织」跳转失败。根因两层，本条治第二层：
+  #     一层是路由守卫白名单缺本类型（已改 detailRouteGuard.js）；
+  #     二层是即便路由放行，本面无 detail.facets ⇒ DetailPage.computedSections
+  #     的 facets/tabs/form 三个分支全空 ⇒ 返回空 sections ⇒ 跳过去是一片白。
+  #   字段集与 party_archive 详情页的「基本信息」对齐（code/name/status），
+  #     另带上本面特有的组织引用 org_id（ui.relation: org 已声明，点得进组织详情）。
+  #   party_type / source 已被视图谓词恒定化并 ui.visible: false，不进 facets。
+  detail:
+    # [2026-10-21 自解释说明] 业务语言说明：回答「这个对象是什么、为什么有两个号」。
+    #   用户单看「内部治理台账详情 华东销售中心」+ 字段「身份主体编号 PATY-…」
+    #   无法判断这是自家公司还是外部单位，也无法理解它与「组织」档案的关系。
+    description: 这是贵司内部组织在「往来单位」名录中的记录。往来关系里的「我方组织」指的就是这里的一条记录；「所属组织」是它在组织档案中的对应条目。
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - code
+          - name
+          - org_id
+          - status

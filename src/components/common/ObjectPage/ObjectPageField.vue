@@ -8,6 +8,8 @@
         :value="formData[fieldKey]"
         :display-value="getFieldDisplayValue(fieldKey)"
         :target-object-type="getFkTargetObjectType(fieldKey)"
+        :link-object-type="getFkLinkObjectType(fieldKey)"
+        :link-id="getFkLinkId(fieldKey)"
       />
       <el-tag
         v-else-if="enumFieldKeys.has(fieldKey) && formData[fieldKey] != null && formData[fieldKey] !== ''"
@@ -349,6 +351,19 @@ function getFkTargetObjectType(key) {
   const fieldDef = props.fieldDefs[key]
   if (!fieldDef?.valueHelp?.source) return null
   return fieldDef.valueHelp.source.target_bo || null
+}
+
+// [FK 2026-10-22 跳转落点口径] 优先 detail_target_bo（配置了才落到基表），
+//   缺省回退 target_bo —— 与旧行为一致。
+function getFkLinkObjectType(key) {
+  const fieldDef = props.fieldDefs[key]
+  return fieldDef?.valueHelp?.source?.detail_target_bo || ''
+}
+
+// [FK 2026-10-22] 落点 id 由后端换算下发（{field}_link_id）；未下发时传 undefined
+//   让 FkLinkField 回退用 FK 原值。
+function getFkLinkId(key) {
+  return props.formData?.[`${key}_link_id`]
 }
 
 function _isEnumMatch(optValue, dataValue, isBoolean) {

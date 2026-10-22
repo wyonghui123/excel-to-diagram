@@ -50,8 +50,15 @@ def insert(ds, table, rows=None, **values):
             for key in row:
                 if key not in cols:
                     cols.append(key)
-        sql = "INSERT INTO {0} ({1}) VALUES ({2})".format(
-            table, ", ".join(cols), ", ".join("?" for _ in cols))
+        # [2026-10-20 修] VALUES 占位符组数须等于行数 —— 原实现只按列数生成
+        # 一组 (len(cols) 个 "?"), 却按 行数×列数 传参 ⇒ sqlite3 报
+        # "Incorrect number of bindings supplied" (5 used, 15 supplied)。
+        # 该路径此前无测试覆盖(全库仅本文件用到 rows=), 故一直潜伏。
+        sql = "INSERT INTO {0} ({1}) VALUES {2}".format(
+            table, ", ".join(cols),
+            ", ".join(
+                "({0})".format(", ".join("?" for _ in cols))
+                for _ in rows))
         params = []
         for row in rows:
             params.extend(row.get(c) for c in cols)

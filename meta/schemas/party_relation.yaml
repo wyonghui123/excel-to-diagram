@@ -36,10 +36,25 @@
 #         停用 = 该法人范围内冻结/复通（只补关系层，账户层 customer_account 不重复建 status）;
 #         历史单据读单据自身快照（S20）不依赖停用语义 ⇒ 停用不破坏历史;
 #         只取 activate / deactivate 两动作——不取 freeze/unfreeze（同动作池的 freeze 预留他域）。
+#
+# [F3 2026-10-20] role 轴字典化: 内联 enum_values 保留作静态回退（列表列配色），
+#   另挂 value_help（source.type=enum, enum_type_id=party_relation_role）作动态真源
+#   —— 角色枚举可在「系统管理 > 枚举类型管理」自助扩张（如 carrier），无需改 schema + 重启。
+#   字典 mutability=extensible（可加不可改预置）；预置值 customer/vendor 由 is_system=1 保护
+#   （EnumProtectionInterceptor 的 AND 严格矩阵：is_system=1 在任何 mutability 下都禁改/删）。
+#   [依赖登记] 本 role 字典与 party_group.role_scope 字典**独立**: 后者的 both 是分组侧专有值，
+#     不得并入本轴（否则破坏「一实例一角色」语义）。
+#     详见 spec docs/superpowers/specs/2026-10-20-party-relation-role-dictionary-and-mirror-guard.md §4.3。
 # ============================================
 
 id: party_relation
-name: 身份关系
+# [界面词 2026-10-21] 原「身份关系」：与 party（往来单位）的「身份类型」字段撞脸，
+#   且不含「往来」二字，用户在权限矩阵 / 导入导出 / 对象选择器里认不出这是往来关系。
+#   统一到界面既有词「往来关系」（详情分区标题、列表 title「往来单位关系」、
+#   新建按钮与弹窗标题均已用此词）。
+#   仅改显示名：权限资源码由对象 id 派生（menu_auto_generator.py L246 f"{bo_id}:{action}"）
+#   ⇒ 权限 / 菜单 / 表名一律不动，无需迁移。
+name: 往来关系
 table_name: party_relations
 description: 客户 / 供应商关系实例（party₁ 我方 — party₂ 对手；单表 + role，一实例一角色）
 
@@ -56,25 +71,30 @@ fields:
       primary_key: true
 
   # ── 两侧统一 party 引用（蓝图 §3.3：均为 party 引用，不落 org 轴）──
-  # [FK 目标修正 2026-10-17] 我方侧指向 party 基表（身份锚），不再指向 party_internal 视图。
-  #   起因（用户手机端实测报障「对方列显示 8 而不是名称」）：party_relation 存的是
-  #     parties.id 外键，但显示名解析走 enrichment_engine.enrich_fk_display_names ——
-  #     它按 value_help.source.target_bo 取 table_name 后直查该表（enrichment_engine.py:489-499）。
-  #     原 target_bo=party_internal ⇒ 直查 party_internal 视图（谓词 source='org'），
-  #     而库内不存在任何 source='org' 的 party 行（写入侧无 org→party 联动机制，
-  #     idx_party_org_unique 只是 DDL 约束、无满足它的代码路径）⇒ 视图恒 0 行 ⇒
-  #     party1_id_display 恒 null ⇒ 前端只能回退显示原始 id。
-  #   改指基表的理由：archive/internal 是**列表呈现口径**（谁能看见哪些行），
-  #     不是外键的解析目标；外键指向的是 parties.id，显示名应向身份锚取。
-  #   遗留（不在本批）：「我方侧恒为内部组织表示」这一原始约束因此放宽为「我方侧是某个 party」，
-  #     候选集不再收窄到内部面。待 org→party 联动机制落地后再收回（届时 target_bo 改回
-  #     party_internal，并同步 semantics.display / ui.relation / 列表列 target_type）。
+  # [FK 口径分离 2026-10-20] 两侧的「候选集口径」与「展示解析口径」显式拆开：
+  #   - value_help.source.target_bo      = **候选集口径**（下拉里能被选到哪些行）
+  #   - value_help.source.display_target_bo = **展示解析口径**（已存量行的显示名去哪取）
+  #   历史脉络（两次同款报障）：
+  #     [2026-10-17] 当时 target_bo=party_internal，而库内不存在任何 source='org' 的
+  #       party 行（无 org→party 联动写入机制）⇒ 视图恒 0 行 ⇒ party1_id_display 恒 null
+  #       ⇒ 前端「对方」列只能回退显示原始 id（用户手机端报障「对方列显示 8 而不是名称」）。
+  #       当时把 target_bo 改指基表 party，治好了显示，但把「我方侧下拉只见内部主体」
+  #       这个业务约束一起弄丢了。
+  #     [2026-10-20 回收] org→party 内部表示写入机制落地（org_party_mirror_service +
+  #       OrgPartyMirrorInterceptor，v096 迁移回填）⇒ party_internal 不再是恒空视图
+  #       ⇒ 候选集口径收回 party_internal（我方侧下拉只见内部主体）。
+  #       但显示名解析与候选集共用 target_bo ⇒ 历史行（指向 source≠'org' 的 party）
+  #       仍解析不出名称 ⇒ 同一报障复现。
+  #     [本次] 引入 display_target_bo：候选集继续收窄在视图，展示解析一律回身份锚
+  #       party（FK 存的就是 parties.id，显示名应向身份锚取）。
+  #       ⇒ 两侧同时满足：「我方侧下拉只见内部主体」+「历史行的对方列显示名称」。
   - id: party1_id
-    name: 我方侧
+    name: 我方组织
     type: integer
     db_column: party1_id
     required: true
-    description: 我方侧的 party 引用（B′：我方 org 的 organization 面，恒为内部组织表示）
+    # [B′] 我方 org 的 organization 面，恒为内部组织表示（party_internal 视图，BU/LE 职能）。
+    description: 我方以哪个组织身份与对方建立关系（法人，或法人下的管理单元/业务单元）
     semantics:
       meaning: 关系我方侧身份（party 引用）
       display:
@@ -84,7 +104,18 @@ fields:
     value_help:
       source:
         type: bo
-        target_bo: party
+        target_bo: party_internal
+        display_target_bo: party
+        # [FK 2026-10-22 跳转落点口径] 候选集收窄在只读视图是业务约束，但点击链接
+        #   应落到信息完整的组织基表（成员/权限集/操作日志/往来关系五个分区），
+        #   而不是只有一个基本信息分区的内部治理台账。
+        #   落点 id 需换算：FK 存 parties.id，org 用 orgs.id ⇒ 先取 parties.org_id。
+        detail_target_bo: org
+        detail_target_id_field: org_id
+        # [2026-10-20 停用主体] 候选集只取启用行。视图谓词不滤 status（台账面保留状态列
+        #   可筛），候选集收窄在此表达；resolve 不读 value_filter ⇒ 停用行的存量回显不受影响。
+        value_filter:
+          status: active
         value_field: id
         display_field: name
         apply_target_permissions: true
@@ -96,13 +127,12 @@ fields:
       presentation:
         result_type: dropdown
         display_format: "{name}"
-        columns:
+        # [2026-10-21 界面词] 候选集恒为 party_internal 面（谓词 source='org' ⇒ party_type 恒为
+        #   organization），身份类型列无区分度 ⇒ 不再进下拉列，只留名称。
+        display_columns:
           - field: name
             label: 显示名
             width: 200
-          - field: party_type
-            label: 身份类型
-            width: 120
     ui:
       widget: select
       relation: party
@@ -124,6 +154,16 @@ fields:
       source:
         type: bo
         target_bo: party_archive
+        display_target_bo: party
+        # [2026-10-22] 落点显式化：与回退口径一致（= target_bo），声明出来是为了让
+        #   「候选集 / 展示解析 / 跳转落点」三口径在同一字段上都是可读的显式声明。
+        #   落点存在性由 enrichment 校验：若目标行不在 party_archive 视图内（如指向
+        #   source='org' 的内部行），link_id 下发 null ⇒ 前端渲染纯文本，不落空白页。
+        detail_target_bo: party_archive
+        # [2026-10-20 停用主体] 同 party1_id：停用的对外主体不再作为新关系的候选，
+        #   存量行回显经 display_target_bo=party 兜底。
+        value_filter:
+          status: active
         value_field: id
         display_field: name
         apply_target_permissions: true
@@ -135,7 +175,10 @@ fields:
       presentation:
         result_type: dropdown
         display_format: "{name}"
-        columns:
+        # [2026-10-21 生效键] 原写 columns:，而 value_help presentation 只解析 display_columns
+        #   （meta/core/yaml_loader.py L545）⇒ 死配置。身份类型列在此真正生效，
+        #   标签由 provider 注入 display_values 后映射为界面词（企业 / 个人）。
+        display_columns:
           - field: name
             label: 显示名
             width: 200
@@ -162,6 +205,23 @@ fields:
       - value: vendor
         label: 供应商
         color: success
+    # [F3 2026-10-20] 双轨: 内联 enum_values 作静态回退; value_help 指向平台字典作动态真源
+    #   （先例 user.yaml 的 status 字段）。前端 ObjectPageShell 见 valueHelp.source.type='enum'
+    #   即注册进 ValueHelpField ⇒ 下拉从字典加载，无需改 ui.widget。
+    value_help:
+      source:
+        type: enum
+        enum_type_id: party_relation_role
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          customer: primary
+          vendor: success
     semantics:
       meaning: 角色层角色分类（仅作枚举值，不作 BO / 表名，D7）
     ui:
@@ -187,23 +247,37 @@ fields:
     ui:
       widget: select
 
-  # ── 法人域（条款挂点；粒度 = 法人，I4-A 已拍；命名避与平台 domain 维度同名）──
+  # ── 归属法人（条款挂点；粒度 = 法人，I4-A 已拍；界面词避免使用平台 domain 的「域」）──
   - id: le_org_id
-    name: 法人域
+    name: 归属法人
     type: integer
     db_column: le_org_id
     nullable: true
-    description: 域（商务条款 / 角色数据生效层）；粒度 = 法人（I4-A），指向具备 legal_entity 职能的 org；非空参与唯一键
+    # [F2 §10 D5] 商务条款 / 角色数据生效层；粒度 = 法人（I4-A）；非空参与四元组唯一键。
+    description: 这份关系的商务条款归属哪个法人——同一对手在不同法人下各是一条独立关系（各自启停、各自档案）
     semantics:
       meaning: 商务条款 / 角色数据生效的域（法人粒度）
       display:
         type: association
+        # 展示解析口径 = 组织身份锚（与 value_help.display_target_bo 同向，非遗漏）。
         target_type: org
         display_field: name
     value_help:
       source:
         type: bo
-        target_bo: org
+        # [2026-10-20 法人域候选集收窄] target_bo = 候选集口径（法人视图，仅 legal_entity 职能 org）；
+        #   display_target_bo = 展示解析口径（组织身份锚）——某法人失去职能后存量行仍能回显名称，
+        #   不会退化成显示技术 id。与 party1_id 的 party_internal/party 口径分离同构。
+        #   详见 spec docs/superpowers/specs/2026-10-20-legal-entity-view-bo.md。
+        target_bo: org_legal_entity
+        display_target_bo: org
+        # [FK 2026-10-22 跳转落点口径] 同 party1_id：落到组织基表而非法人主体视图。
+        #   无需 detail_target_id_field —— org_legal_entity 与 org 同为 orgs.id 空间。
+        detail_target_bo: org
+        # [2026-10-20 停用主体] 同两侧 party：候选集只取启用法人；停用法人（orgs.status）
+        #   不再可选，存量行回显经 display_target_bo=org 兜底。
+        value_filter:
+          status: active
         value_field: id
         display_field: name
         code_field: code
@@ -325,13 +399,13 @@ indexes:
 
 relations:
   - id: party_relation_to_party1
-    name: 我方侧
+    name: 我方组织
     type: reference
     target: party
     source_field: party1_id
     target_field: id
     cardinality: N:1
-    description: 我方侧身份引用（[FK 2026-10-07] 由展示语义升级为真外键；展示面走 party_internal 视图，物理列存 parties.id，故 FK 指向真表 parties）
+    description: 我方组织身份引用（[FK 2026-10-07] 由展示语义升级为真外键；展示面走 party_internal 视图，物理列存 parties.id，故 FK 指向真表 parties）
   - id: party_relation_to_party2
     name: 对手侧
     type: reference
@@ -341,13 +415,13 @@ relations:
     cardinality: N:1
     description: 对手侧身份引用（[FK 2026-10-07] 由展示语义升级为真外键；展示面走 party_archive 视图，物理列存 parties.id，故 FK 指向真表 parties）
   - id: party_relation_to_le_org
-    name: 法人域
+    name: 归属法人
     type: reference
     target: org
     source_field: le_org_id
     target_field: id
     cardinality: N:1
-    description: 法人域引用（[FK 2026-10-07] 由展示语义升级为真外键；指向具备 legal_entity 职能的 org，"职能"属性由 org_function_service 校验，非 FK 职责）
+    description: 法人域引用（[FK 2026-10-07] 由展示语义升级为真外键；指向具备 legal_entity 职能的 org——候选集由 org_legal_entity 视图结构强制，"职能"属性由 org_function_service 维护，非 FK 职责）
   - id: party_relation_to_party_group
     name: 往来单位组
     type: reference
@@ -413,11 +487,8 @@ ui_view_config:
         render_as: association
         target_type: party_archive
         display_field: name
-      - field: role
-        width: 90
-        filterable: true
-        filter_type: enum
-        render_as: tag
+      # 我方组织与归属法人相邻（与 form/detail 的「我方信息」分组同序），
+      #   中间不插角色/内外标记，便于直接对照「Business Unit → 其所属法人」。
       - field: party1_id
         width: 220
         filterable: true
@@ -425,11 +496,6 @@ ui_view_config:
         render_as: association
         target_type: party
         display_field: name
-      - field: internal_mark
-        width: 100
-        filterable: true
-        filter_type: enum
-        render_as: tag
       - field: le_org_id
         width: 160
         filterable: true
@@ -437,6 +503,16 @@ ui_view_config:
         render_as: association
         target_type: org
         display_field: name
+      - field: role
+        width: 90
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: internal_mark
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
       - field: group_id
         width: 180
         filterable: true
@@ -475,37 +551,48 @@ ui_view_config:
   #     （只读态才走 detail.facets 的 fieldGroup）。本文件既没写 form 也没写 detail，
   #     后端 UIConfigBuilder 的兜底推导只收 ui.editable 字段 —— 本表字段未声明 editable
   #     ⇒ 兜底结果同样是空 sections，接口实测确认 `form.sections = `（空）。
-  #   分组依据（业务语义，非字母序）：两侧 party 先立住（谁对我方、谁是对手、什么角色），
-  #     再是内外标记与归属（法人域 / 往来单位组），最后生命周期状态。
+  #   分组依据（业务语义，非字母序）：
+  #     [2026-10-21 重排] 原分组把 party1_id 放「关系双方」、le_org_id 放「归属与状态」，
+  #       两者相隔且 label 抽象 ⇒ 使用者看不出「我方侧」与「法人域」的区别，
+  #       误以为是重复字段。现按「我方 / 对方 / 关系属性」分组：
+  #       我方信息 = 我方侧（谁）+ 法人域（在哪个法人账下），二者同组相邻；
+  #       对手侧信息 = 对手侧 + 角色；其余归属与生命周期。
+  #   [2026-10-21 措辞统一] 分组名「对方信息」→「对手侧信息」，与字段界面词
+  #     「对手侧」一致（同一屏出现两种叫法会让人怀疑是两个东西）。
   #   layout: vertical —— 窄屏单列；party1_id/party2_id 都是 value_help 下拉，
   #     两列并排会把两个长下拉挤到放不下 placeholder 的宽度，故两侧各自独占一行。
   form:
     title: 往来关系信息
     layout: vertical
     sections:
-      - title: 关系双方
+      - title: 我方信息
         columns:
           - fields: [party1_id]
+          - fields: [le_org_id]
+      - title: 对手侧信息
+        columns:
           - fields: [party2_id]
           - fields: [role]
       - title: 归属与状态
         columns:
           - fields: [internal_mark]
-          - fields: [le_org_id]
           - fields: [group_id]
           - fields: [status]
   detail:
     facets:
-      - title: 关系双方
+      - title: 我方信息
         type: fieldGroup
         fields:
           - party1_id
+          - le_org_id
+      - title: 对手侧信息
+        type: fieldGroup
+        fields:
           - party2_id
           - role
       - title: 归属与状态
         type: fieldGroup
         fields:
           - internal_mark
-          - le_org_id
           - group_id
           - status

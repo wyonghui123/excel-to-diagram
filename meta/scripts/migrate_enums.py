@@ -300,6 +300,73 @@ def seed_user_status(ds) -> tuple:
     return type_created, value_created
 
 
+# ── [F3 2026-10-20] 往来关系角色轴字典化（party_relation.role）──
+# 值来源: meta/schemas/party_relation.yaml 的 role 字段内联 enum_values。
+# 与 user_status 同构：内联 enum_values 作静态回退（保列表列配色），
+#   字典作动态真源（枚举管理页可自助新增 → 角色轴可扩张，无需改 schema + 重启）。
+# mutability=extensible: 可加不可改预置（预置值由 is_system=1 兜底保护，
+#   见 EnumProtectionInterceptor 的 AND 严格矩阵：is_system=1 在任何 mutability 下都禁改/删）。
+PARTY_RELATION_ROLE_ENUM_ID = 'party_relation_role'
+PARTY_RELATION_ROLE_VALUES = [
+    ('customer', '客户', 0),
+    ('vendor', '供应商', 1),
+]
+
+
+def seed_party_relation_role(ds) -> tuple:
+    """注册 party_relation.role 枚举类型及其值（幂等）。
+
+    值来源: meta/schemas/party_relation.yaml 的 role 字段内联 enum_values。
+    category=system（角色轴为平台级语义）+ mutability=extensible（可扩张角色）。
+    """
+    type_created = 0
+    value_created = 0
+    if not check_enum_type_exists(ds, PARTY_RELATION_ROLE_ENUM_ID):
+        create_enum_type(ds, PARTY_RELATION_ROLE_ENUM_ID,
+                         name='往来关系角色',
+                         description='往来关系角色（来自 party_relation.yaml 内联定义）',
+                         category='system', mutability='extensible')
+        type_created = 1
+    for code, name, sort_order in PARTY_RELATION_ROLE_VALUES:
+        if not check_enum_value_exists(ds, PARTY_RELATION_ROLE_ENUM_ID, code):
+            create_enum_value(ds, PARTY_RELATION_ROLE_ENUM_ID, code, name, sort_order=sort_order)
+            value_created += 1
+    return type_created, value_created
+
+
+# ── [F3 2026-10-20] 往来单位组适用范围字典（party_group.role_scope）──
+# 值来源: meta/schemas/party_group.yaml 的 role_scope 字段内联 enum_values。
+# 依赖登记（不技术强制）: 其 customer / vendor 取值必须是 party_relation_role 的**子集**；
+#   both 为分组侧专有值，不进入角色轴 ⇒ 不可与 party_relation_role 合并。
+PARTY_GROUP_ROLE_SCOPE_ENUM_ID = 'party_group_role_scope'
+PARTY_GROUP_ROLE_SCOPE_VALUES = [
+    ('customer', '客户', 0),
+    ('vendor', '供应商', 1),
+    ('both', '通用', 2),
+]
+
+
+def seed_party_group_role_scope(ds) -> tuple:
+    """注册 party_group.role_scope 枚举类型及其值（幂等）。
+
+    值来源: meta/schemas/party_group.yaml 的 role_scope 字段内联 enum_values。
+    与 party_relation_role **独立**（both 为分组侧专有值，见上方依赖登记）。
+    """
+    type_created = 0
+    value_created = 0
+    if not check_enum_type_exists(ds, PARTY_GROUP_ROLE_SCOPE_ENUM_ID):
+        create_enum_type(ds, PARTY_GROUP_ROLE_SCOPE_ENUM_ID,
+                         name='往来单位组适用范围',
+                         description='往来单位组适用范围（来自 party_group.yaml 内联定义）',
+                         category='system', mutability='extensible')
+        type_created = 1
+    for code, name, sort_order in PARTY_GROUP_ROLE_SCOPE_VALUES:
+        if not check_enum_value_exists(ds, PARTY_GROUP_ROLE_SCOPE_ENUM_ID, code):
+            create_enum_value(ds, PARTY_GROUP_ROLE_SCOPE_ENUM_ID, code, name, sort_order=sort_order)
+            value_created += 1
+    return type_created, value_created
+
+
 def migrate_enum_class(ds, enum_class: type) -> tuple:
     """迁移单个枚举类，返回 (类型创建数, 值创建数)"""
     enum_type_id = get_enum_type_name(enum_class)
@@ -494,7 +561,18 @@ def migrate_enums(db_path: str = None) -> dict:
     us_type, us_value = seed_user_status(ds)
     total_types_created += us_type
     total_values_created += us_value
-    
+
+    # [C] [F3 2026-10-20] party_relation.role / party_group.role_scope 内联枚举落库
+    for _enum_id, _seed, _src in (
+        (PARTY_RELATION_ROLE_ENUM_ID, seed_party_relation_role, 'party_relation.yaml'),
+        (PARTY_GROUP_ROLE_SCOPE_ENUM_ID, seed_party_group_role_scope, 'party_group.yaml'),
+    ):
+        print(f"\n处理枚举: {_enum_id}（来自 {_src} 内联定义）")
+        print("-" * 40)
+        _t, _v = _seed(ds)
+        total_types_created += _t
+        total_values_created += _v
+
     removed = cleanup_orphan_enum_values(ds)
     total_values_removed += removed
     

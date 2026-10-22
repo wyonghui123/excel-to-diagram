@@ -1335,6 +1335,17 @@ class MetaRegistry:
             self._rule_chain_cache.pop(meta_object.id, None)
             self._ui_config_cache.pop(meta_object.id, None)
 
+    def unregister(self, object_id: str) -> None:
+        """移除元数据对象
+
+        与 register() 对称：摘除对象的同时清掉两类缓存，避免摘除后仍命中原对象的
+        规则链 / UI 配置。当前唯一调用方是视图依赖守卫（依赖表缺失的视图不注册）。
+        """
+        with self._instance_lock:
+            self._objects.pop(object_id, None)
+            self._rule_chain_cache.pop(object_id, None)
+            self._ui_config_cache.pop(object_id, None)
+
     def get(self, object_id: str) -> Optional[MetaObject]:
         """获取元数据对象
 

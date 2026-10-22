@@ -42,20 +42,86 @@
     </div>
 
     <div v-else-if="isPartyRelations" class="op-merged-relations">
+      <!-- [入口 2026-10-20] 引导式新建：往来单位档案侧预绑对手侧，组织档案侧预绑我方侧 -->
+      <div v-if="partyRelationToolbarActions.length" class="op-party-relations-toolbar">
+        <AppButton
+          v-for="a in partyRelationToolbarActions"
+          :key="a.key"
+          :variant="a.variant || 'primary'"
+          @click="handlePartyRelationToolbar(a)"
+        >{{ a.label }}</AppButton>
+      </div>
+
       <el-table :data="partyRelationsData" v-loading="partyRelationsLoading" size="small" max-height="400">
-        <el-table-column label="方向" width="90">
+        <!-- [列口径 2026-10-21] 本分区挂在「往来单位」档案上 ⇒ 当前对象恒为对手侧，
+             「对方」列恒显示我方组织，词义与业务词「对方企业」打架且与归属法人撞脸。
+             改为绝对口径：首列直接叫「我方组织」（= party1 侧的组织身份），
+             删掉零信息量的「方向」列（本分区恒为对手侧）。组织名下补 org 编码副标题，
+             与「归属法人」区分（同名时也能看出是两条不同 org 记录）。
+             我方组织与归属法人相邻（与 party_relation.yaml 的「我方信息」分组同序）。
+             [组织侧 2026-10-21] 分区改挂组织档案时本对象即我方组织，首列换成「往来单位」，
+             否则该列整列重复显示当前对象、零信息量。 -->
+        <el-table-column v-if="!isOrgPartyRelations" label="我方组织" min-width="200">
           <template #default="{ row }">
-            <span>{{ row._selfSide === 'party1' ? '我方侧' : '对手侧' }}</span>
+            <div class="op-relation-cell">
+              <!-- [2026-10-22] 改用 FkLinkField：与列表/详情一致可跳；
+                   落点口径由后端 {field}_link_object_type / {field}_link_id 下发。 -->
+              <FkLinkField
+                :value="row.party1_id"
+                :display-value="row._selfOrgName || row.party1_id_display || ''"
+                target-object-type="party_internal"
+                :link-object-type="row.party1_id_link_object_type"
+                :link-id="row.party1_id_link_id"
+                target-object-label="我方组织"
+              />
+              <span v-if="row._selfOrgCode" class="op-relation-cell__code">{{ row._selfOrgCode }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="_counterpart" label="对方" min-width="180" />
+        <el-table-column v-else label="往来单位" min-width="200">
+          <template #default="{ row }">
+            <FkLinkField
+              :value="row.party2_id"
+              :display-value="row.party2_id_display || ''"
+              target-object-type="party_archive"
+              :link-object-type="row.party2_id_link_object_type"
+              :link-id="row.party2_id_link_id"
+              target-object-label="往来单位"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="归属法人" min-width="200">
+          <template #default="{ row }">
+            <div class="op-relation-cell">
+              <FkLinkField
+                :value="row.le_org_id"
+                :display-value="row.le_org_id_display || ''"
+                target-object-type="org_legal_entity"
+                :link-object-type="row.le_org_id_link_object_type"
+                :link-id="row.le_org_id_link_id"
+                target-object-label="归属法人"
+              />
+              <span v-if="row._leOrgCode" class="op-relation-cell__code">{{ row._leOrgCode }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="100">
           <template #default="{ row }">
             <span>{{ ROLE_LABEL[row.role] || row.role || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="le_org_id_display" label="法人域" min-width="150" />
-        <el-table-column prop="group_id_display" label="往来单位组" min-width="150" />
+        <el-table-column label="往来单位组" min-width="150">
+          <template #default="{ row }">
+            <FkLinkField
+              :value="row.group_id"
+              :display-value="row.group_id_display || ''"
+              target-object-type="party_group"
+              :link-object-type="row.group_id_link_object_type"
+              :link-id="row.group_id_link_id"
+              target-object-label="往来单位组"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <span>{{ STATUS_LABEL[row.status] || row.status || '-' }}</span>
@@ -66,6 +132,21 @@
         <AppIcon name="link" size="lg" />
         <p>暂无往来关系</p>
       </div>
+
+      <!-- [2026-10-20] 显式传标题：本入口为预绑对手侧必传 entityData，MetaDialog 的
+           新增/编辑判态（entityData 是否为空）会因此误判为编辑，故不依赖该判态。 -->
+      <MetaDialog
+        :visible="partyRelationFormVisible"
+        :meta="partyRelationMeta"
+        :entity-data="partyRelationEntityData"
+        :title="partyRelationDialogTitle"
+        :saving="partyRelationSaving"
+        :field-dependencies="partyRelationFieldDependencies"
+        :z-index="9990"
+        @close="handlePartyRelationDialogClose"
+        @save="handlePartyRelationSave"
+        @update:visible="partyRelationFormVisible = $event"
+      />
     </div>
 
     <template v-else-if="isAnnotation">
@@ -126,8 +207,12 @@ import { ref, computed, watch, shallowRef, inject, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import MetaListPage from '../MetaListPage/MetaListPage.vue'
 import AppIcon from '../AppIcon/AppIcon.vue'
+import AppButton from '../AppButton/AppButton.vue'
 import MetaDialog from '../MetaDialog.vue'
+import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import boService from '@/services/boService'
+import metaService from '@/services/metaService'
+import { useAuthStore } from '@/stores/authStore'
 import { CATEGORY_CONFIG } from '@/composables/useMermaid/annotation/annotationConfig'
 import * as annotationService from '@/services/annotationService'
 import EnumService from '@/services/enumService'
@@ -159,6 +244,7 @@ const props = defineProps({
 const emit = defineEmits(['request-edit', 'open-assign', 'refresh', 'embedded-action'])
 
 const message = useCrudMessage()
+const authStore = useAuthStore()
 
 // [FIX 2026-06-29] 前端兜底 enum 映射
 //   之前后端 relationship 序列化时没 join enum_values 表, relation_type_name 总是 null
@@ -248,11 +334,20 @@ const isMergedRelationships = computed(() => {
 // [关系分区 2026-10-17] 往来关系（party_relation）分区：两侧合并口径 C。
 //   不能走平台关联端点 —— associationFilters 把过滤列写死为 `{父对象类型}_id`，
 //   父对象是 party 时会得 `party_id`，而 party_relation 的列是 party1_id/party2_id。
-//   故在此做两次查询（party1_id = 本 id / party2_id = 本 id）后按 id 合并去重，
-//   并用 _selfSide 记「本单位在这次关系里站哪一侧」，供「方向」列展示。
+//   故在此做两次查询（party1_id = 本 id / party2_id = 本 id）后按 id 合并去重。
 //   同一行不会两侧都命中（party1_id 恒为我方侧、party2_id 为对手侧），去重只为防御。
+// [列口径 2026-10-21] 表内不再展示「本对象站哪一侧」：本分区只挂在往来单位档案上，
+//   那一侧恒为对手侧 ⇒ 该列零信息量。首列改为「我方组织」（party1 侧的组织身份）。
 const isPartyRelations = computed(() => {
   return props.section.customFetcher === 'party_relations'
+    || props.section.customFetcher === 'org_party_relations'
+})
+
+// [组织侧分区 2026-10-21] 分区挂在「组织」档案上，本对象恒为我方侧。
+//   列集与往来单位侧相反：往来单位侧首列是「我方组织」（本对象是对手侧，那一列才有意义），
+//   组织侧本对象就是我方组织 ⇒ 首列换成「往来单位」（对手侧），不再重复显示自己。
+const isOrgPartyRelations = computed(() => {
+  return props.section.customFetcher === 'org_party_relations'
 })
 
 const ROLE_LABEL = Object.freeze({ customer: '客户', vendor: '供应商' })
@@ -268,6 +363,13 @@ function normalizeQueryItems(res) {
   return Array.isArray(items) ? items : []
 }
 
+// [组织侧 2026-10-21] orgs.id → parties.id：org 的内部表示是 1:1（镜像服务按 org 逐个建），
+//   取首行即可；无内部表示的普通组织返回 null。
+async function resolveOrgInternalPartyId(orgId) {
+  const res = await boService.query('party_internal', { org_id: orgId, page_size: 10 })
+  return normalizeQueryItems(res).find(it => it?.id != null)?.id ?? null
+}
+
 async function loadPartyRelations() {
   if (!hasRealObjectId.value) {
     partyRelationsData.value = []
@@ -279,23 +381,37 @@ async function loadPartyRelations() {
   try {
     const selfId = props.objectId
     // page_size 200: 单个往来单位的关系数量级远小于此（与桥接查询同口径的防御性上限）
-    const [r1, r2] = await Promise.all([
-      boService.query('party_relation', { party1_id: selfId, page_size: 200 }),
-      boService.query('party_relation', { party2_id: selfId, page_size: 200 })
-    ])
+    let r1, r2
+    if (isOrgPartyRelations.value) {
+      // [组织侧 2026-10-21] 本对象是 orgs.id，而 party_relations.party1_id 存的是 parties.id
+      //   ⇒ 先经 party_internal（org → 其内部表示）换出 party id，再按我方侧单查。
+      //   org → party 内部表示是 1:1（org_party_mirror_service 按 org 逐个建），故取首行即可。
+      //   组织恒为我方侧（对外主体不会出现在 party1 侧），故不做两侧合并。
+      const selfPartyId = await resolveOrgInternalPartyId(selfId)
+      r1 = selfPartyId != null
+        ? await boService.query('party_relation', { party1_id: selfPartyId, page_size: 200 })
+        : { data: [] }
+      r2 = { data: [] }
+    } else {
+      [r1, r2] = await Promise.all([
+        boService.query('party_relation', { party1_id: selfId, page_size: 200 }),
+        boService.query('party_relation', { party2_id: selfId, page_size: 200 })
+      ])
+    }
     if (version !== _partyRelationsVersion) return
     const byId = new Map()
     for (const it of normalizeQueryItems(r1)) {
       if (it?.id == null || byId.has(it.id)) continue
-      // 本单位为我方侧 ⇒ 对方看对手侧
-      byId.set(it.id, { ...it, _selfSide: 'party1', _counterpart: it.party2_id_display || it.party2_id })
+      byId.set(it.id, { ...it })
     }
     for (const it of normalizeQueryItems(r2)) {
       if (it?.id == null || byId.has(it.id)) continue
-      // 本单位为对手侧 ⇒ 对方看我方侧
-      byId.set(it.id, { ...it, _selfSide: 'party2', _counterpart: it.party1_id_display || it.party1_id })
+      byId.set(it.id, { ...it })
     }
-    partyRelationsData.value = [...byId.values()]
+    const rows = [...byId.values()]
+    await fillPartyRelationOrgCodes(rows)
+    if (version !== _partyRelationsVersion) return
+    partyRelationsData.value = rows
   } catch (e) {
     if (version !== _partyRelationsVersion) return
     console.error('[AssociationSection] loadPartyRelations 失败:', e)
@@ -304,6 +420,329 @@ async function loadPartyRelations() {
     if (version === _partyRelationsVersion) {
       partyRelationsLoading.value = false
     }
+  }
+}
+
+// [列口径 2026-10-21] 补 org 编码副标题。
+//   「我方组织」= party1 侧：party1 是我方组织的内部表示（party_internal 面，source='org'），
+//     该面带 org_id ⇒ 可经它取到 org 行的 name / code。
+//   「归属法人」= le_org_id：本身就是 org.id ⇒ 直接取 org 行。
+//   两次批量查询（id__in），不逐行打接口。
+async function fillPartyRelationOrgCodes(rows) {
+  if (!rows.length) return
+  const party1Ids = [...new Set(rows.map(r => r.party1_id).filter(v => v != null))]
+  const leOrgIds = [...new Set(rows.map(r => r.le_org_id).filter(v => v != null))]
+
+  // party1 → org_id（party_internal 面；非 org 来源的存量行查不到 ⇒ 无编码）
+  const partyOrgMap = {}
+  if (party1Ids.length) {
+    const res = await boService.query('party_internal', {
+      id__in: party1Ids.join(','), page_size: 200
+    })
+    for (const it of normalizeQueryItems(res)) {
+      if (it?.id != null && it?.org_id != null) partyOrgMap[it.id] = it.org_id
+    }
+  }
+
+  const orgIds = [...new Set([...leOrgIds, ...Object.values(partyOrgMap)])]
+  const orgMap = {}
+  if (orgIds.length) {
+    const res = await boService.query('org', { id__in: orgIds.join(','), page_size: 200 })
+    for (const it of normalizeQueryItems(res)) {
+      if (it?.id != null) orgMap[it.id] = it
+    }
+  }
+
+  for (const row of rows) {
+    const selfOrgId = partyOrgMap[row.party1_id]
+    const selfOrg = selfOrgId != null ? orgMap[selfOrgId] : null
+    row._selfOrgName = (selfOrg && selfOrg.name) || row.party1_id_display || row.party1_id || ''
+    row._selfOrgCode = (selfOrg && selfOrg.code) || ''
+    const leOrg = row.le_org_id != null ? orgMap[row.le_org_id] : null
+    row._leOrgCode = (leOrg && leOrg.code) || ''
+  }
+}
+
+// ===== [默认带出 2026-10-21] 我方组织 → 归属法人 =====
+//   口径: 归属法人默认取「我方组织自身（若它是法人）否则沿组织树上溯的第一个法人」。
+//   依据: 组织是单亲树（orgs.parent_id 单值），一个组织沿链上溯的最近法人唯一 ⇒ 默认值可确定。
+//   仍可改: le_org_id 是独立字段（同一我方组织可在多个法人下各有一条关系，
+//   见 party_relation.yaml 头注 D5 四元组唯一键），故只做默认带出、不做强制。
+//   落点: 建关系弹窗的 fieldDependencies（改我方组织即重算），
+//     MetaForm 的 setFieldValue 只在字段已存在时写入 ⇒ 不会凭空造字段。
+const ORG_TREE_MAX_DEPTH = 20
+
+// 查一个 org 自身及其所有祖先 org（自近及远），返回 [{id, name, code, parent_id}]
+async function loadOrgAncestorChain(orgId) {
+  const chain = []
+  const seen = new Set()
+  let curId = orgId
+  let depth = 0
+  while (curId != null && !seen.has(curId) && depth < ORG_TREE_MAX_DEPTH) {
+    seen.add(curId)
+    const res = await boService.query('org', { id: curId, page_size: 1 })
+    const row = normalizeQueryItems(res)[0]
+    if (!row || row.id == null) break
+    chain.push(row)
+    curId = row.parent_id
+    depth += 1
+  }
+  return chain
+}
+
+// 我方组织的 party1_id（party 引用）→ 其 org 行的 id；非 org 来源的存量行返回 null
+async function resolveSelfOrgId(party1Id) {
+  if (party1Id == null || party1Id === '') return null
+  const res = await boService.query('party_internal', { id: party1Id, page_size: 1 })
+  const row = normalizeQueryItems(res)[0]
+  return row?.org_id ?? null
+}
+
+// 默认归属法人 = 自身或最近法人祖先；查不到返回 null（不猜，交由人工选）
+async function resolveDefaultLegalEntityOrgId(party1Id) {
+  const orgId = await resolveSelfOrgId(party1Id)
+  if (orgId == null) return null
+  const chain = await loadOrgAncestorChain(orgId)
+  const chainIds = chain.map(r => r.id).filter(id => id != null)
+  if (!chainIds.length) return null
+  // [2026-10-21 收窄] 只回查祖先链上的 id，不拉法人面全表：
+  //   法人数量随组织增长，全量拉（原 page_size 200）在法人超过上限时会静默漏判。
+  const leRes = await boService.query('org_legal_entity', {
+    id__in: chainIds.join(','), page_size: chainIds.length
+  })
+  const legalEntityIds = new Set(normalizeQueryItems(leRes).map(r => r.id))
+  const hit = chain.find(r => legalEntityIds.has(r.id))
+  return hit ? hit.id : null
+}
+
+// 归属法人是否落在我方组织的祖先链上（含自身）。
+//   合法例外: 共享服务 / 集中采购等组织，业务上确实会在多个法人下分别立关系
+//   ⇒ 判为 false 时只提示确认，不阻断。
+async function isLegalEntityAncestor(party1Id, leOrgId) {
+  if (party1Id == null || leOrgId == null) return true
+  const orgId = await resolveSelfOrgId(party1Id)
+  if (orgId == null) return true
+  const chain = await loadOrgAncestorChain(orgId)
+  return chain.some(r => String(r.id) === String(leOrgId))
+}
+
+// ===== [入口 2026-10-20] 往来关系「引导式新建」=====
+//   背景: 本分区此前是纯只读表（零按钮），用户实测报障「往来单位这边新增关系」。
+//     F3 §7 登记为延期项，前置「镜像防护先落地」已完成 ⇒ 只缺入口形态。
+//   方案: 工具条入口 + 自建 MetaDialog（annotation 分支同款先例），
+//     字段元取自 party_relation 的真实 ui-config（避免手写字段与 schema 漂移）。
+//   口径: 当前往来单位固定为「对手侧」(party2_id, 只读预填)，我方侧由用户选（D1）；
+//     归属法人在本入口必填（D2，让镜像守卫 assert_no_mirror 真实生效）。
+const partyRelationFormVisible = ref(false)
+const partyRelationEntityData = ref(null)
+const partyRelationSaving = ref(false)
+const partyRelationFieldDefs = ref(null)
+
+// 工具条：从 section.actions 取 create，并按 action.permission 做显隐（与平台 action 级权限同源）
+const partyRelationToolbarActions = computed(() => {
+  if (!hasRealObjectId.value) return []
+  const create = (props.section.actions || []).find(
+    a => (typeof a === 'string' ? a : (a.key || a.id)) === 'create'
+  )
+  if (!create) return []
+  const perm = typeof create === 'string' ? null : create.permission
+  if (perm && !authStore.hasPermission(perm)) return []
+  return [{
+    key: 'create',
+    label: (typeof create === 'string' ? null : create.label) || '新建往来关系',
+    variant: (typeof create === 'string' ? null : create.variant) || 'primary'
+  }]
+})
+
+// 取 party_relation 的真实字段元并归一为 MetaForm 形态
+//   （id→key / name→label / enum_values→options / value_help 原形直传）。
+//   参考实现：DetailPage.computedFieldDefs。
+async function loadPartyRelationFieldDefs() {
+  if (partyRelationFieldDefs.value) return partyRelationFieldDefs.value
+  const res = await metaService.getUIConfig('party_relation')
+  if (!res?.success) throw new Error(res?.message || '加载往来关系字段失败')
+  const formSections = res.data?.ui_view_config?.form?.sections || []
+  const order = []
+  for (const s of formSections) {
+    if (Array.isArray(s.fields) && s.fields.length) { order.push(...s.fields); continue }
+    for (const c of (s.columns || [])) {
+      if (Array.isArray(c.fields)) order.push(...c.fields)
+    }
+  }
+  const all = res.data?.fields || []
+  const byId = new Map(all.map(f => [f.id, f]))
+  const picked = (order.length ? order : all.map(f => f.id))
+    .map(id => byId.get(id))
+    .filter(Boolean)
+  partyRelationFieldDefs.value = picked.map(f => {
+    const hasOptions = !!(f.enum_values?.length || f.options?.length)
+    return {
+      key: f.id,
+      label: f.name || f.id,
+      type: (f.type === 'integer' || f.value_help)
+        ? 'value_help'
+        : (hasOptions ? 'select' : (f.type || 'text')),
+      required: f.required === true,
+      defaultValue: f.default ?? undefined,
+      options: hasOptions
+        ? (f.enum_values || f.options).map(o => ({ label: o.label, value: o.value }))
+        : undefined,
+      value_help: f.value_help || undefined,
+      placeholder: f.ui?.placeholder || ''
+    }
+  })
+  return partyRelationFieldDefs.value
+}
+
+// [2026-10-20] 本入口永远是新建，故显式给标题：
+//   MetaDialog 的新增/编辑判态依据 entityData 是否为空，而本入口为预绑对手侧
+//   必传 entityData，会被误判为编辑态（标题显示"编辑…"）。故不依赖该判态。
+const partyRelationDialogTitle = computed(() => '新建往来关系')
+
+const partyRelationMeta = computed(() => ({
+  label: '往来关系',
+  fields: (partyRelationFieldDefs.value || []).map(f => ({
+    ...f,
+    // D1: 预绑侧 = 当前打开的对象，预填 + 只读。
+    //   往来单位档案：本对象为对手侧（party2_id）；
+    //   组织档案：本对象经 party_internal 换出的内部表示为我方侧（party1_id）。
+    ...(!isOrgPartyRelations.value && f.key === 'party2_id'
+      ? { disabled: true, required: true } : {}),
+    ...(isOrgPartyRelations.value && f.key === 'party1_id'
+      ? { disabled: true, required: true } : {}),
+    // D2: 本入口归属法人必填（UI 层收窄；schema 仍可空）
+    ...(f.key === 'le_org_id' ? { required: true } : {})
+  }))
+}))
+
+// [2026-10-21] 选我方组织后自动带出默认归属法人（用户仍可改）。
+//   MetaForm 的 fieldDependencies 语义：key 为被监听字段，onChange(newVal, allValues, ctx)
+//   在该字段值变化时触发一次；ctx.setFieldValue 写入目标字段。
+// [竞态守卫 2026-10-21] onChange 是异步的（要查 party_internal + 组织祖先链）：
+//   ① 期间用户又改了我方组织 ⇒ 旧请求的结果不得覆盖新选择（序号守卫）；
+//   ② 期间用户手选了归属法人 ⇒ 不得覆盖用户的选择（手动值守卫）。
+let _leOrgResolveSeq = 0
+let _lastAutoLeOrgId = null
+
+const partyRelationFieldDependencies = {
+  party1_id: {
+    onChange: async (newPartyId, _allValues, ctx) => {
+      const seq = ++_leOrgResolveSeq
+      try {
+        const leOrgId = await resolveDefaultLegalEntityOrgId(newPartyId)
+        if (seq !== _leOrgResolveSeq) return
+        // 查不到祖先法人时保持原值不动（不猜、不清空用户已填的内容）
+        if (leOrgId == null) return
+        const currentLe = ctx.getFormData?.()?.le_org_id
+        const hasManualValue = currentLe != null && currentLe !== ''
+          && String(currentLe) !== String(_lastAutoLeOrgId ?? '')
+        if (hasManualValue) return
+        _lastAutoLeOrgId = leOrgId
+        ctx.setFieldValue('le_org_id', leOrgId)
+      } catch (e) {
+        console.warn('[AssociationSection] 默认归属法人带出失败:', e)
+      }
+    }
+  }
+}
+
+async function handlePartyRelationToolbar(action) {
+  if (action?.key !== 'create') return
+  try {
+    await loadPartyRelationFieldDefs()
+  } catch (e) {
+    message.error(e?.message || '加载往来关系字段失败')
+    return
+  }
+  // 每次开新弹窗重置联动状态：上次的"自动带出值"不得影响本次的手动选择判定
+  _leOrgResolveSeq = 0
+  _lastAutoLeOrgId = null
+
+  let entityData
+  if (isOrgPartyRelations.value) {
+    // 组织档案侧：本对象是我方侧，但 party1_id 存的是 parties.id ⇒ 先换内部表示。
+    //   无内部表示 = 该组织不是我方主体（无 BU/LE 职能），不能作为关系一方。
+    let selfPartyId = null
+    try {
+      selfPartyId = await resolveOrgInternalPartyId(props.objectId)
+    } catch (e) {
+      message.error(e?.message || '查询组织内部表示失败')
+      return
+    }
+    if (selfPartyId == null) {
+      message.error('该组织不是我方主体（无内部往来单位记录），无法新建往来关系')
+      return
+    }
+    entityData = { party1_id: selfPartyId }
+    // 归属法人默认取自身或最近法人祖先（与档案侧选完我方组织后的联动同口径）
+    try {
+      const leOrgId = await resolveDefaultLegalEntityOrgId(selfPartyId)
+      if (leOrgId != null) {
+        entityData.le_org_id = leOrgId
+        _lastAutoLeOrgId = leOrgId
+      }
+    } catch (e) {
+      console.warn('[AssociationSection] 默认归属法人带出失败:', e)
+    }
+  } else {
+    entityData = { party2_id: props.objectId } // 预绑对手侧（D1）
+  }
+
+  partyRelationEntityData.value = entityData
+  partyRelationFormVisible.value = true
+}
+
+function handlePartyRelationDialogClose() {
+  partyRelationFormVisible.value = false
+  partyRelationEntityData.value = null
+}
+
+async function handlePartyRelationSave(formData) {
+  partyRelationSaving.value = true
+  try {
+    // 共享组件 MetaDialog 在创建态会把每个未设值字段初始化为 ''，
+    // 直接提交会让后端把可空 FK（如 group_id）当 '' 解析成无效引用。
+    // 在本入口出口剔除空值，避免改动共享组件。
+    const payload = {}
+    for (const [k, v] of Object.entries(formData || {})) {
+      if (v === '' || v === null || v === undefined) continue
+      payload[k] = v
+    }
+    // [2026-10-20] 防自反关系：两侧都不得指向同一个 party。
+    //   后端镜像守卫对 A==B 是盲的（镜像 SQL 查反向行，A==B 时查不到），
+    //   故前端在出口拦截给出可读提示；后端守卫另补判定兜底（第三 tab 同样漏）。
+    //   [组织侧 2026-10-21] 比较两侧 party id，不依赖当前对象 id（组织侧当前对象是 orgs.id，
+    //   而我方侧存的是 parties.id，两者不可直接比较）。
+    if (payload.party1_id != null && payload.party2_id != null
+      && String(payload.party1_id) === String(payload.party2_id)) {
+      message.error('我方组织不能与对手侧相同')
+      return
+    }
+    // [2026-10-21] 归属法人不在我方组织祖先链上 → 软提示（可确认继续，不阻断）。
+    //   合法例外确实存在（共享服务 / 集中采购：同一组织在多个法人下各立关系），
+    //   故不能硬拦；此处只把「非常规选择」显式化，避免脏数据无声入库。
+    if (payload.le_org_id != null && !(await isLegalEntityAncestor(payload.party1_id, payload.le_org_id))) {
+      const confirmed = await ElMessageBox.confirm(
+        '所选归属法人不在该我方组织的上级链上。共享服务、集中采购等场景确实会在多个法人下分别建立关系，' +
+        '若本次确属此情形请继续；否则建议改选该组织自身或其上级法人。',
+        '归属法人与组织层级不一致',
+        { confirmButtonText: '仍然保存', cancelButtonText: '返回修改', type: 'warning' }
+      ).then(() => true).catch(() => false)
+      if (!confirmed) return
+    }
+    const res = await boService.create('party_relation', payload)
+    if (!res?.success) throw new Error(res?.message || '创建失败')
+    message.success('往来关系已创建')
+    partyRelationFormVisible.value = false
+    partyRelationEntityData.value = null
+    // 本分区不能用 refresh()（其只调 metaListRef，对该分支是空操作）
+    await loadPartyRelations()
+    emit('refresh')
+  } catch (e) {
+    // 镜像守卫的 MirrorRowError 可读消息在此展示
+    message.error(e?.message || '创建往来关系失败')
+  } finally {
+    partyRelationSaving.value = false
   }
 }
 
@@ -841,12 +1280,12 @@ watch(() => props.objectId, (newVal, oldVal) => {
 }, { immediate: true })
 
 function refresh() {
-  if (metaListRef.value?.refresh) {
-    metaListRef.value.refresh()
-  }
+  if (isPartyRelations.value) { loadPartyRelations(); return }
+  if (isMergedRelationships.value) { loadMergedRelationships(); return }
+  metaListRef.value?.refresh?.()
 }
 
-defineExpose({ refresh, loadMergedRelationships })
+defineExpose({ refresh, loadMergedRelationships, loadPartyRelations })
 </script>
 
 <style scoped>
@@ -867,5 +1306,30 @@ defineExpose({ refresh, loadMergedRelationships })
 
 .op-merged-relations {
   padding: var(--spacing-sm) 0;
+}
+
+.op-party-relations-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+/* [列口径 2026-10-21] 组织名 + org 编码副标题：两列都是组织名时靠编码区分 */
+.op-relation-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.op-relation-cell__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.op-relation-cell__code {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
 }
 </style>

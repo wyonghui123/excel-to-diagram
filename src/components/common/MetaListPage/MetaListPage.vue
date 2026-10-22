@@ -241,15 +241,15 @@
                    误触成本高；且双击在触屏上不是可靠手势（可能与缩放冲突），
                    故双击也一并移除。标题后加箭头明示可点。 -->
               <component
-                :is="isBusinessKeyColumn(cardPrimaryColumn) ? 'button' : 'span'"
+                :is="cardTitleOpensDetail ? 'button' : 'span'"
                 class="meta-card__title"
-                :class="{ 'meta-card__title--link': isBusinessKeyColumn(cardPrimaryColumn) }"
-                :type="isBusinessKeyColumn(cardPrimaryColumn) ? 'button' : undefined"
-                @click="isBusinessKeyColumn(cardPrimaryColumn) && handleBusinessKeyClick(row)"
+                :class="{ 'meta-card__title--link': cardTitleOpensDetail }"
+                :type="cardTitleOpensDetail ? 'button' : undefined"
+                @click="cardTitleOpensDetail && handleBusinessKeyClick(row)"
               >
                 <span class="meta-card__title-text">{{ cardPrimary(row) ?? '-' }}</span>
                 <el-icon
-                  v-if="isBusinessKeyColumn(cardPrimaryColumn)"
+                  v-if="cardTitleOpensDetail"
                   class="meta-card__title-arrow"
                   :size="12"
                 ><ArrowRight /></el-icon>
@@ -310,6 +310,8 @@
                       :value="getFkIdValue(row, col)"
                       :display-value="getFkDisplayValue(row, col)"
                       :target-object-type="getFkTargetObjectType(col)"
+                      :link-object-type="getFkLinkObjectType(col)"
+                      :link-id="getFkLinkId(row, col)"
                       :detail-mode="getFkDetailMode(col)"
                       :link-disabled="isEmbeddedOrDialogMode"
                       @navigate="handleFkNavigate"
@@ -455,6 +457,8 @@
                   :value="getFkIdValue(row, column)"
                   :display-value="getFkDisplayValue(row, column)"
                   :target-object-type="getFkTargetObjectType(column)"
+                  :link-object-type="getFkLinkObjectType(column)"
+                  :link-id="getFkLinkId(row, column)"
                   :detail-mode="getFkDetailMode(column)"
                   :link-disabled="isEmbeddedOrDialogMode"
                   @navigate="handleFkNavigate"
@@ -546,6 +550,27 @@
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
+              </template>
+            </el-table-column>
+
+            <!-- [2026-10-20] 兜底详情入口列：对象无业务键列时渲染（party_relation 等薄关系
+                 对象全部列 business_key=false ⇒ 表格里没有任何可点进详情的列），否则不渲染、
+                 对有业务键列的对象零影响。复用 bk-link 样式与 handleBusinessKeyClick 既有分派。 -->
+            <el-table-column
+              v-if="showDetailEntryColumn"
+              label=""
+              :width="70"
+              fixed="right"
+              header-align="center"
+              align="center"
+              class-name="detail-entry-column"
+            >
+              <template #default="{ row }">
+                <span
+                  class="bk-link bk-link--primary"
+                  title="查看本对象详情"
+                  @click.stop="handleBusinessKeyClick(row)"
+                >详情</span>
               </template>
             </el-table-column>
 
@@ -1137,6 +1162,31 @@ const enableDetailPage = computed(() => {
   return props.enableDetail
 })
 
+/* [2026-10-20] 无业务键列对象的兜底详情入口。
+   背景：详情抽屉的唯一入口原先挂在业务键列上（表格 bk-link / 移动卡片标题）；对
+   party_relation 这类"薄关系"对象（F2 §10 D6：无 name/code ⇒ 全部列 business_key=false），
+   列表里没有任何可点进详情的列，抽屉内的「编辑」按钮因此永远到不了
+   （用户报障"第三个 tab 没有看到可编辑"）。
+   处置：无业务键列时补一个固定的行尾「详情」链接列，并让移动端卡片标题一律可点。
+   有业务键列的对象行为完全不变。
+   注意：不可用 `semantics.business_key` 来"造"入口 —— 该标记同时驱动
+   action_executor._validate_business_key_uniqueness，会误加唯一约束。 */
+const hasBusinessKeyColumn = computed(() =>
+  visibleColumns.value.some(c => isBusinessKeyColumn(c))
+)
+
+const showDetailEntryColumn = computed(() =>
+  enableDetailPage.value &&
+  !inlineEditConfig?.enabled &&
+  !hasBusinessKeyColumn.value &&
+  visibleColumns.value.length > 0
+)
+
+const cardTitleOpensDetail = computed(() =>
+  enableDetailPage.value &&
+  (isBusinessKeyColumn(cardPrimaryColumn.value) || !hasBusinessKeyColumn.value)
+)
+
 const importContext = computed(() => ({
   version_id: contextFilters.value?.version_id || null,
   product_id: contextFilters.value?.product_id || null
@@ -1341,6 +1391,21 @@ function isFkColumn(column) {
 function getFkTargetObjectType(column) {
   if (!isFkColumn(column)) return null
   return column.valueHelpConfig.source.target_bo || null
+}
+
+// [FK 2026-10-22 跳转落点口径] 优先 detail_target_bo（配置了才落到基表），
+//   缺省回退 target_bo —— 与旧行为一致。
+function getFkLinkObjectType(column) {
+  if (!isFkColumn(column)) return ''
+  return column.valueHelpConfig.source.detail_target_bo || ''
+}
+
+// [FK 2026-10-22] 落点 id 由后端 enrichment 下发（{列名}_link_id）；
+//   未下发时传 undefined，让 FkLinkField 回退用 FK 原值。
+function getFkLinkId(row, column) {
+  const prop = column.prop
+  if (!prop) return undefined
+  return row[`${prop}_link_id`]
 }
 
 /**

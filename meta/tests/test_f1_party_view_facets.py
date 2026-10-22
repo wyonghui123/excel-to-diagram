@@ -138,6 +138,21 @@ def facets_env(tmp_path, party_objs):
     ds.execute("CREATE TABLE IF NOT EXISTS orgs "
                "(id INTEGER PRIMARY KEY AUTOINCREMENT)")
     ds.insert("orgs", {"id": 1})
+    # [2026-10-20] party_internal 谓词补齐「org 具备 legal_entity 职能」（与
+    # org_legal_entity 同源）⇒ 视图依赖 org_functions；该表由 v073 迁移建、
+    # 不在任何 BO YAML 中，且 SQLite 的 CREATE VIEW 不校验引用表 ⇒ 不建它
+    # 查询期会报 no such table。DML 走 raw_sql_bridge（未注册进 table_name_validator）。
+    from meta.tests.factories._raw_sql_bridge import insert as _raw_insert
+    ds.execute(
+        'CREATE TABLE IF NOT EXISTS org_functions ('
+        '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+        '  org_id INTEGER NOT NULL,'
+        '  function_type TEXT NOT NULL,'
+        '  is_primary BOOLEAN DEFAULT 0,'
+        '  UNIQUE(org_id, function_type))'
+    )
+    _raw_insert(ds, 'org_functions',
+                rows=[{'org_id': 1, 'function_type': 'legal_entity'}])
     yield ds
     _clear_data_source_cache_for_testing()
 
@@ -221,6 +236,74 @@ class TestSamplingRealSchema:
             "SELECT id, source FROM party_internal").fetchall()
         assert {r[0] for r in internal_rows} == {3}
         assert all(r[1] == 'org' for r in internal_rows)
+
+
+class TestInternalPredicateHomology:
+    """[2026-10-20] party_internal 谓词与法人判据同源
+
+    缺陷背景: 原谓词只有 source='org'，而 parties 行由镜像服务「曾经」建出且按
+    不删除原则保留 ⇒ org 失去 legal_entity 职能后行仍在视图内 ⇒ 我方侧下拉出现
+    「幽灵主体」，与法人域面（org_legal_entity 实时读 org_functions）口径分裂。
+    修复: 谓词补 EXISTS(org_functions)，两面读同一张表、同一判据来源。
+
+    [2026-10-21 放宽] 内部台账面判据扩为 (legal_entity, management_unit)：
+    我方主体可以是法人，也可以是法人下的管理单元（BU）。法人域面**不放宽**
+    （条款只能挂法人）⇒ 两面不再是同一字符串，而是「同一判据源的子集关系」：
+    法人面 ⊂ 内部台账面，且内部台账面不得混入运营职能（sales/warehouse）。
+    """
+
+    def test_predicate_reads_org_functions(self):
+        vd = ' '.join((_load_raw('party_internal').get('view_definition') or '').split())
+        assert 'org_functions' in vd, \
+            'party_internal 谓词须与法人判据同源（读职能表），否则口径会再次分裂'
+        assert "'legal_entity'" in vd
+
+    def test_predicate_is_superset_of_legal_entity_view(self):
+        """内部台账面 = 主体职能集合；法人面仍只认 legal_entity（子集）"""
+        internal = ' '.join(
+            (_load_raw('party_internal')['view_definition'] or '').split())
+        legal = ' '.join(
+            (_load_raw('org_legal_entity')['view_definition'] or '').split())
+        assert "f.function_type = 'legal_entity'" in legal, \
+            '法人域面只认法人职能，不得放宽（条款只能挂法人）'
+        assert "f.function_type IN ('legal_entity', 'management_unit')" in internal, \
+            '内部台账面判据须为 BU/LE 主体职能集合'
+        assert "'sales'" not in internal and "'warehouse'" not in internal, \
+            '运营职能属条款/库存粒度，不是关系的一方，不得混入我方主体'
+
+    def test_revoking_function_hides_row_without_deleting(self, facets_env):
+        """撤职能 ⇒ 行退出视图，但 parties 物理行保留（不删除原则）
+
+        存量关系仍指向该 party id，删除会破坏外键；隐藏由视图谓词完成，
+        存量回显走 display_target_bo=party 兜底。
+        """
+        from meta.tests.factories._raw_sql_bridge import delete
+
+        ds = facets_env
+        ds.insert("parties", {"id": 3, "name": "总部", "code": "PATY-00000003",
+                              "party_type": "organization",
+                              "source": "org", "org_id": 1})
+        assert [r[0] for r in ds.execute(
+            "SELECT id FROM party_internal").fetchall()] == [3], \
+            '前提：org 具备 legal_entity 职能 ⇒ 行可见'
+
+        delete(ds, 'org_functions', org_id=1)
+
+        assert ds.execute("SELECT id FROM party_internal").fetchall() == [], \
+            '失去职能后行须退出候选面'
+        assert ds.execute(
+            "SELECT id FROM parties WHERE id=3").fetchall() == [(3,)], \
+            '物理行必须保留（历史关系可能引用，全库 FK 均 NO ACTION）'
+
+    def test_non_legal_org_row_never_visible(self, facets_env):
+        """不具备 legal_entity 职能的 org 行（如历史残留）不得进入本面"""
+        ds = facets_env
+        ds.insert("orgs", {"id": 2})
+        ds.insert("parties", {"id": 4, "name": "部门", "code": "PATY-00000004",
+                              "party_type": "organization",
+                              "source": "org", "org_id": 2})
+        assert ds.execute("SELECT id FROM party_internal").fetchall() == [], \
+            'org_id=2 无 any 职能行 ⇒ 本面须为空'
 
 
 class TestOrgOneToOneConstraint:

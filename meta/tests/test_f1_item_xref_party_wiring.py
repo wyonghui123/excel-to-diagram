@@ -71,13 +71,21 @@ class TestPartnerIdValueHelpWiring:
         target = (field.get('value_help') or {}).get('source', {}).get('target_bo')
         assert target not in ('party', 'party_internal')
 
-    def test_target_face_is_readonly_view_excluding_org(self):
-        """目标面确为对外档案：真视图 + NULL 安全排除 source='org' + 仅读动作。"""
+    def test_target_face_is_view_excluding_org_with_anchor_writes(self):
+        """目标面确为对外档案：真视图 + NULL 安全排除 source='org'。
+
+        写动作不是本面自写：`write_anchor: party` 使 create/update/delete 转发到身份锚，
+        故动作集为读 + 写转发（F1 §7.1-6；对齐 test_f1_party_view_facets 的动作策略）。
+        """
         archive = _load_raw('party_archive')
         assert archive.get('object_type') == 'view'
         view_def = archive.get('view_definition') or ''
         assert 'parties' in view_def
         assert "COALESCE(source, '') <> 'org'" in view_def
+        assert archive.get('write_anchor') == 'party'
         action_ids = {a.get('id') for a in (archive.get('actions') or [])}
-        assert action_ids == {'party_archive_read', 'party_archive_list'}
+        assert action_ids == {
+            'party_archive_read', 'party_archive_list',
+            'party_archive_create', 'party_archive_update',
+            'party_archive_delete'}
         assert archive.get('import_export', {}).get('auto_crud') is False

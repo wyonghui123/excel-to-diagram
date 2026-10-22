@@ -117,6 +117,12 @@ fields:
     ui:
       widget: input
 
+  # [F3 2026-10-20] 本字段值域与 party_relation.role 的字典（party_relation_role）**独立**:
+  #   依赖登记（不技术强制，跨对象子集校验当前引擎无此能力）——
+  #   其 customer / vendor 取值必须是 party_relation_role 的**子集**
+  #   （role 轴新增角色时，本字段若需适用，应同步评估是否追加）；
+  #   而 both 为分组侧**专有值**，不进入角色轴 ⇒ 两个字典不可合并。
+  #   详见 spec docs/superpowers/specs/2026-10-20-party-relation-role-dictionary-and-mirror-guard.md §4.3。
   - id: role_scope
     name: 适用范围
     type: string
@@ -134,6 +140,25 @@ fields:
       - value: both
         label: 通用
         color: info
+    # [F3 2026-10-20] 双轨: 内联 enum_values 作静态回退; value_help 指向平台字典
+    #   party_group_role_scope 作动态真源（对称 party_relation.role 的写法）。
+    #   前端 ObjectPageShell 见 valueHelp.source.type='enum' 即注册进 ValueHelpField
+    #   ⇒ 下拉从字典加载，无需改 ui.widget。
+    value_help:
+      source:
+        type: enum
+        enum_type_id: party_group_role_scope
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          customer: primary
+          vendor: success
+          both: info
     semantics:
       meaning: 组的角色适用范围（候选过滤与使用提示；不强制挂靠校验）
     ui:
