@@ -603,3 +603,44 @@ ui_view_config:
           - internal_mark
           - group_id
           - status
+      # ── [档案分区 2026-10-22] 客户档案 / 供应商档案 ─────────────────────
+      # 落点裁定：这两个档案从「主数据下的独立菜单」收进本页的关联分区。
+      #   理由：档案挂在本对象之上 1:1（relation_id 唯一），是「本条关系侧的属性」，
+      #   不是与party 并列的主体实体；本对象自己的独立菜单也已于 2026-10-17 下架
+      #   （理由：关系是连接两个 party 的边，平级入口属放错层），比关系更下一层的
+      #   档案平级更说不通。
+      # 两个分区恒显示、按 role 二选一可见：
+      #   本行 role='customer' → 客户档案分区有值、供应商档案恒空，反之亦然。
+      #   两侧都渲染（不按 role 隐藏）—— role 是可编辑字段（value_help 字典化可扩张），
+      #   改role 后档案归属会漂移；若把分区按 role 隐藏，改完 role 那一侧分区会
+      #   立刻消失、用户失去入口。空分区显示「暂无」比隐藏更可解释。
+      # customFetcher = relation_accounts：平台关联端点不可用 —— associationFilters
+      #   把过滤列写死为 `{父对象类型}_id`，本对象是 party_relation 会得
+      #   `party_relation_id`，而两个档案表的列名是 `relation_id`（不匹配 ⇒ 后端忽略
+      #   条件返回全量，一个关系详情页会列出所有人的档案）。故走自定义取数器，
+      #   前端按 relation_id 精确查（AssociationSection 的 isRelationAccounts 分支）。
+      #   DetailPage 侧对带 customFetcher 的 facet 已放行闸门（见其L895-905 注释）。
+      - title: 客户档案
+        id: customer_account_section
+        type: association
+        association: customer_account
+        customFetcher: relation_accounts
+        readonly: true
+        pageSize: 5
+        actions:
+          - key: create
+            label: 新建客户档案
+            variant: primary
+            permission: customer_account:customer_account_create
+      - title: 供应商档案
+        id: vendor_account_section
+        type: association
+        association: vendor_account
+        customFetcher: relation_accounts
+        readonly: true
+        pageSize: 5
+        actions:
+          - key: create
+            label: 新建供应商档案
+            variant: primary
+            permission: vendor_account:vendor_account_create

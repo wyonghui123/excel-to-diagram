@@ -571,71 +571,15 @@ def init_menu_permissions(db_path):
                 'message': '建议分配物料与物料组数据权限'
             })
         },
-        {
-            # [MD-MENU 2026-10-11] 客户档案 —— 用户拍板开独立菜单
-            #   yaml `ui_view_config.skip_auto_menu: true` 保持不变 (角色层档案不参与
-            #   menu_auto_generator 自动生成的口径不动); 菜单在此手工声明, 与
-            #   org-management / user-management 同一套路.
-            #   show_in_sidebar=0 : 与同组 10 条自动菜单口径统一 —— 只在侧边栏展开可见,
-            #   不进 landing 卡片区 (landing 留给工作台/快捷入口).
-            'menu_code': 'customer-account-management',
-            'menu_name': '客户档案',
-            'menu_path': '/customer-account',
-            'icon': 'User',
-            'color': '#0ea5e9',
-            'sort_order': 61,
-            'parent_menu': 'master-data',
-            'page_type': 'object_list',
-            'primary_object_type': 'customer_account',
-            'object_types': json.dumps(['customer_account']),
-            'bo_bindings': json.dumps([
-                {'bo_id': 'customer_account', 'role': 'primary',
-                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-            ]),
-            # 权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
-            # 与 menu_auto_generator._derive_permissions_from_bindings 的口径一致
-            'required_permissions': json.dumps([
-                'customer_account:customer_account_create',
-                'customer_account:customer_account_read',
-                'customer_account:customer_account_update',
-                'customer_account:customer_account_delete',
-                'customer_account:customer_account_list',
-            ]),
-            'show_in_sidebar': 0,
-            'data_permission_hint': json.dumps({
-                'resource_types': ['customer_account'],
-                'message': '建议分配客户档案数据权限'
-            })
-        },
-        {
-            # [MD-MENU 2026-10-11] 供应商档案 —— 与 customer_account 严格对称
-            'menu_code': 'vendor-account-management',
-            'menu_name': '供应商档案',
-            'menu_path': '/vendor-account',
-            'icon': 'User',
-            'color': '#0ea5e9',
-            'sort_order': 62,
-            'parent_menu': 'master-data',
-            'page_type': 'object_list',
-            'primary_object_type': 'vendor_account',
-            'object_types': json.dumps(['vendor_account']),
-            'bo_bindings': json.dumps([
-                {'bo_id': 'vendor_account', 'role': 'primary',
-                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-            ]),
-            'required_permissions': json.dumps([
-                'vendor_account:vendor_account_create',
-                'vendor_account:vendor_account_read',
-                'vendor_account:vendor_account_update',
-                'vendor_account:vendor_account_delete',
-                'vendor_account:vendor_account_list',
-            ]),
-            'show_in_sidebar': 0,
-            'data_permission_hint': json.dumps({
-                'resource_types': ['vendor_account'],
-                'message': '建议分配供应商档案数据权限'
-            })
-        },
+        # === [档案下架 2026-10-22] 客户档案 / 供应商档案独立菜单已移除 ===
+        #   这两条菜单 2026-10-11 由用户拍板开为独立入口, 现按方案 A 下架, 落点改为
+        #   party_relation 详情页的两个关联分区（party_relation.yaml 的 detail.facets
+        #   声明 customFetcher = relation_accounts）。
+        #   下架理由：档案挂在 party_relation 之上 1:1（relation_id 唯一），是「关系侧
+        #   属性」而非与 party 并列的主体实体。party_relation 自己已于 2026-10-17 下架
+        #   独立菜单、收进业务伙伴页第三 tab，其理由同款（关系是连接两个 party 的边，
+        #   平级入口属放错层）；比关系更下一层的档案平级更说不通。
+        #   存量菜单行由迁移 v098 清理（init_menu_permissions 的 UPSERT 不会删行）。
         # === [PRICE-MENU 2026-10-13] 定价域菜单接线 ===
         #   15 个对象分 3 组, 每组一个 multi_object_hub 聚合页 + N 个 object_list 子菜单.
         #   不挂 external_rate_source / pricing_period (M8 未开工, 挂了会误导「能配但配了不生效」).

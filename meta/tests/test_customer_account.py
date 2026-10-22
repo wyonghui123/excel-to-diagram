@@ -215,6 +215,80 @@ class TestActionCodes:
 
 
 # ────────────────────────────────────────
+# 3b. [分区落点 2026-10-22] 不作独立菜单, ui_view_config 齐备
+# ────────────────────────────────────────
+class TestNoStandaloneMenuButConfigComplete:
+    """档案从独立菜单收进 party_relation 详情页分区（方案 A）
+
+    背景：2026-10-11 曾按用户拍板开过独立菜单 customer-account-management，
+    2026-10-22 按方案 A 下架 —— 档案挂 party_relation 之上 1:1，是关系侧属性
+    而非与 party 并列的主体实体（party_relation 自己已于 2026-10-17 同款下架）。
+
+    但下架菜单不等于可以没有 UI 配置：本次同时补齐 list/form/detail，
+    修掉两处真实缺陷：
+      ① 裸 ID 列 —— 此前只写 skip_auto_menu，未声明 list.columns ⇒ /ui-config
+         走 config_builder 兜底推导（按 ui.visible 收全部字段），把技术主键 id、
+         created_at、审计字段全渲染成列，用户看到的就是一列裸 id。
+      ② 编辑态空白 —— DetailPage 编辑态走 form.sections，此前既无 form 也无
+         detail ⇒ 新建/编辑抽屉零字段。
+    """
+
+    def test_still_skip_auto_menu(self):
+        """下架菜单后 skip_auto_menu 仍为 true（无自动菜单，也不再新开手工菜单）"""
+        assert _raw()['ui_view_config']['skip_auto_menu'] is True
+
+    def test_not_in_init_menu_declarations(self):
+        """init_menu_permissions.py 不得再声明该独立菜单"""
+        init_path = os.path.join(_META_DIR, 'scripts', 'init_menu_permissions.py')
+        with open(init_path, 'r', encoding='utf-8') as f:
+            src = f.read()
+        assert "'menu_code': 'customer-account-management'" not in src
+        assert '/customer-account' not in src
+
+    def test_list_columns_declared(self):
+        cols = _raw()['ui_view_config']['list']['columns']
+        assert [c['field'] for c in cols] == [
+            'name', 'customer_type', 'description', 'created_at']
+
+    def test_list_columns_exclude_technical_id(self):
+        """裸 ID 缺陷的回归锁：技术主键不得进列集合"""
+        fields = [c['field'] for c in _raw()['ui_view_config']['list']['columns']]
+        assert 'id' not in fields
+
+    def test_list_columns_exclude_relation_id(self):
+        """relation_id 恒等于父 id（1:1 明细面）⇒ 冗余列，不进列集合"""
+        fields = [c['field'] for c in _raw()['ui_view_config']['list']['columns']]
+        assert 'relation_id' not in fields
+
+    def test_form_sections_declared(self):
+        """编辑态空白缺陷的回归锁：form.sections 必须存在且含 name"""
+        sections = _raw()['ui_view_config']['form']['sections']
+        ids = [fid for s in sections
+               for c in (s.get('columns') or []) for fid in c.get('fields', [])]
+        assert 'name' in ids
+        assert 'customer_type' in ids
+
+    def test_form_excludes_relation_id(self):
+        """relation_id 由分区入口预绑，用户无从选择 ⇒ 不进表单"""
+        sections = _raw()['ui_view_config']['form']['sections']
+        ids = [fid for s in sections
+               for c in (s.get('columns') or []) for fid in c.get('fields', [])]
+        assert 'relation_id' not in ids
+
+    def test_detail_facets_declared(self):
+        """只读态走 detail.facets（此前两态皆无 ⇒ 抽屉空）"""
+        facets = _raw()['ui_view_config']['detail']['facets']
+        ids = [fid for fc in facets for fid in fc.get('fields', [])]
+        assert 'name' in ids
+
+    def test_create_action_permission_is_two_segment(self):
+        """权限码取 permissions 表实际值（双段式 {bo}:{bo}_{action}）"""
+        actions = _raw()['ui_view_config']['list']['actions']
+        create = next(a for a in actions if a['id'] == 'create')
+        assert create['permission'] == 'customer_account:customer_account_create'
+
+
+# ────────────────────────────────────────
 # ④ 删除保护
 # ────────────────────────────────────────
 class TestDeletionPolicy:

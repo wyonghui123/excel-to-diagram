@@ -270,6 +270,46 @@ class TestSymmetryWithCustomerAccount:
         assert _raw()['ui_view_config']['skip_auto_menu'] is True
         assert _raw(_CUSTOMER_YAML_PATH)['ui_view_config']['skip_auto_menu'] is True
 
+    def test_same_ui_view_config_shape(self):
+        """[分区落点 2026-10-22] 两侧 UI 配置对称（独立菜单下架后仍须有完整配置）"""
+        v = _raw()['ui_view_config']
+        c = _raw(_CUSTOMER_YAML_PATH)['ui_view_config']
+        assert set(v) == set(c) == {
+            'skip_auto_menu', 'list', 'form', 'detail'}
+        # 列集合对称：vendor_type → customer_type（对供应侧做前缀替换后与客户侧比对）
+        assert [x['field'].replace('vendor_', 'customer_')
+                for x in v['list']['columns']] == \
+            [x['field'] for x in c['list']['columns']]
+
+    def test_list_columns_exclude_technical_id_and_relation_id(self):
+        """裸 ID 缺陷 + relation_id 冗余列的回归锁（两侧同时）"""
+        for path in (_YAML_PATH, _CUSTOMER_YAML_PATH):
+            fields = [x['field']
+                      for x in _raw(path)['ui_view_config']['list']['columns']]
+            assert 'id' not in fields, path
+            assert 'relation_id' not in fields, path
+
+    def test_form_and_detail_declared_both_sides(self):
+        """编辑态空白缺陷的回归锁（两侧同时）"""
+        for path in (_YAML_PATH, _CUSTOMER_YAML_PATH):
+            cfg = _raw(path)['ui_view_config']
+            form_ids = [fid for s in cfg['form']['sections']
+                        for c in (s.get('columns') or [])
+                        for fid in c.get('fields', [])]
+            detail_ids = [fid for fc in cfg['detail']['facets']
+                          for fid in fc.get('fields', [])]
+            assert 'name' in form_ids, path
+            assert 'name' in detail_ids, path
+            assert 'relation_id' not in form_ids, path
+
+    def test_neither_side_in_init_menu_declarations(self):
+        """两条独立菜单均已从 init_menu_permissions.py 移除"""
+        init_path = os.path.join(_META_DIR, 'scripts', 'init_menu_permissions.py')
+        with open(init_path, 'r', encoding='utf-8') as f:
+            src = f.read()
+        assert "'menu_code': 'vendor-account-management'" not in src
+        assert "'menu_code': 'customer-account-management'" not in src
+
     def test_customer_side_has_no_vendor_fields(self):
         """反向锁定：客户侧不得被本次改动污染"""
         cf = {f['id'] for f in (_raw(_CUSTOMER_YAML_PATH).get('fields') or [])}

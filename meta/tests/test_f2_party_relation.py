@@ -244,6 +244,56 @@ class TestUniqueKey:
 
 
 # ────────────────────────────────────────
+# 7. [分区落点 2026-10-22] 客户档案 / 供应商档案进本详情页
+# ────────────────────────────────────────
+class TestAccountSections:
+    """档案从独立菜单收进本详情页的关联分区（方案 A）
+
+    落点理由：档案挂 party_relation 之上 1:1（relation_id 唯一），是关系侧属性
+    而非与 party 并列的主体实体；本对象自己的独立菜单已于 2026-10-17 同款下架。
+    """
+
+    def _sections(self):
+        facets = _load_yaml()['ui_view_config']['detail']['facets']
+        return [f for f in facets if f.get('type') == 'association']
+
+    def test_two_account_sections_declared(self):
+        assert {s['association'] for s in self._sections()} == {
+            'customer_account', 'vendor_account'}
+
+    def test_use_custom_fetcher_not_platform_assoc(self):
+        """必须走自定义取数器：associationFilters 过滤列写死 `{父对象类型}_id`，
+        本对象会得 party_relation_id，而两个档案表的列名是 relation_id；
+        列名不匹配时后端忽略条件返回全量 ⇒ 一个关系页列出所有人的档案。"""
+        for s in self._sections():
+            assert s['customFetcher'] == 'relation_accounts'
+
+    def test_no_platform_association_declared(self):
+        """分区不依赖 associations 声明（走自定义取数器，不占平台关联名）"""
+        names = {a['name'] for a in (_load_yaml().get('associations') or [])}
+        assert 'customer_account' not in names
+        assert 'vendor_account' not in names
+
+    def test_readonly_with_create_action(self):
+        """行只读（1:1 明细，编辑走弹窗），但保留 create 入口"""
+        for s in self._sections():
+            assert s['readonly'] is True
+            keys = {a['key'] for a in s['actions']}
+            assert keys == {'create'}
+
+    def test_create_permission_is_two_segment(self):
+        for s in self._sections():
+            create = next(a for a in s['actions'] if a['key'] == 'create')
+            assert create['permission'] == \
+                f"{s['association']}:{s['association']}_create"
+
+    def test_both_sections_always_rendered(self):
+        """两侧分区恒声明（不按父行 role 隐藏）—— role 可编辑，
+        隐藏会让改完 role 后该侧分区立刻消失、用户失去入口。"""
+        assert len(self._sections()) == 2
+
+
+# ────────────────────────────────────────
 # 6. 建表与唯一约束强制（端到端）
 # ────────────────────────────────────────
 class TestUniqueEnforced:

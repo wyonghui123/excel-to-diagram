@@ -284,5 +284,77 @@ indexes:
 
 relations: []
 
+# ============================================
+# [分区落点 2026-10-22] 档案不再作独立菜单，进party_relation 详情页的关联分区
+#   理由：customer_account 挂在 party_relation(role='customer') 之上 1:1，是「关系侧
+#   属性」而非与party 并列的主体实体。party_relation 自己已于 2026-10-17 下架独立菜单、
+#   收进业务伙伴页第三 tab（理由同款：关系是连接两个 party 的边，平级入口属放错层），
+#   比关系再下一层的档案平级更说不通。
+#   落点：party_relation.yaml 的 detail.facets 声明两个关联分区
+#   （客户档案 / 供应商档案），由 AssociationSection 的 customFetcher
+#   = relation_accounts 分支按 relation_id 取数（平台关联端点的过滤列写死
+#   `{父对象类型}_id`，本对象会得 party_relation_id，而本表列名是 relation_id）。
+#
+# [ui_view_config 2026-10-22] 补 list/form/detail —— 修掉两处缺陷：
+#   ① 裸 ID 列：此前本文件只写 skip_auto_menu，未声明 list.columns；/ui-config 端点
+#      走 config_builder 的兜底推导（config_builder.py L70-75 → view_config_service
+#      .build_list_view_from_fields），该推导按 ui.visible 收全部字段⇒ 把技术主键 id、
+#      created_at、审计字段全渲染成列。分区里每行都显示 id、看不出是谁。
+#      同 party_archive / party_relation 2026-10-17 的同类修复。
+#   ② 编辑态空白：DetailPage 编辑态走 form.sections，只读态才走 detail.facets 的
+#      fieldGroup（DetailPage.vue L759/812 对 fieldGroup 显式 if (isEditing) continue）。
+#      此前既无 form 也无 detail ⇒ 新建/编辑抽屉里一个字段都没有。
+#   列集合刻意不含 relation_id：本分区是 1:1 明细面，当前行所属关系已由所在分区
+#      表达，该列恒等于父 id，是纯冗余（对照 excludedColumnKeys 对 product→version
+#      剔冗余列的同款口径）。
+# ============================================
 ui_view_config:
   skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 客户档案
+    columns:
+      - field: name
+        width: 220
+      - field: customer_type
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: description
+        width: 240
+      - field: created_at
+        width: 170
+    searchFields:
+      - name
+    # 动作权限用双段式（permissions 表实有 customer_account:customer_account_create；
+    # 单段式 customer_account:create 命中数为 0，非 admin 会看不到按钮）。
+    actions:
+      - id: create
+        label: 新建客户档案
+        icon: plus
+        type: primary
+        permission: customer_account:customer_account_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 客户档案信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [name]
+          - fields: [customer_type]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    facets:
+      - title: 客户档案信息
+        type: fieldGroup
+        fields:
+          - name
+          - customer_type
+          - description

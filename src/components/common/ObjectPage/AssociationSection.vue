@@ -149,6 +149,49 @@
       />
     </div>
 
+    <template v-else-if="isRelationAccounts">
+      <div class="op-party-relations-toolbar">
+        <AppButton
+          v-for="a in relationAccountToolbarActions"
+          :key="a.key"
+          :variant="a.variant || 'primary'"
+          @click="handleRelationAccountToolbar"
+        >{{ a.label }}</AppButton>
+      </div>
+
+      <el-table :data="relationAccountsData" v-loading="relationAccountsLoading" size="small" max-height="400">
+        <el-table-column prop="name" label="档案名称" min-width="200" />
+        <el-table-column :label="relationAccountTypeTitle" width="130">
+          <template #default="{ row }">
+            <span>{{ relationAccountTypeText(row[relationAccountTypeKey]) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="说明" min-width="200" />
+        <el-table-column prop="created_at" label="创建时间" width="170" />
+        <el-table-column label="操作" width="80" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="handleRelationAccountRowAction(row)">编辑</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="op-empty-state" v-if="!relationAccountsLoading && relationAccountsData.length === 0">
+        <AppIcon name="link" size="lg" />
+        <p>{{ emptyRelationAccountText }}</p>
+      </div>
+
+      <MetaDialog
+        :visible="relationAccountFormVisible"
+        :meta="relationAccountMeta"
+        :entity-data="relationAccountEntityData"
+        :title="relationAccountDialogTitle"
+        :saving="relationAccountSaving"
+        :z-index="9990"
+        @close="handleRelationAccountDialogClose"
+        @save="handleRelationAccountSave"
+        @update:visible="relationAccountFormVisible = $event"
+      />
+    </template>
+
     <template v-else-if="isAnnotation">
       <MetaListPage
         v-if="objectType && hasRealObjectId"
@@ -750,6 +793,200 @@ const isAnnotation = computed(() => {
   return props.section.type === 'annotation'
 })
 
+// [档案分区 2026-10-22] 客户档案 / 供应商档案分区（挂在 party_relation 详情页）。
+//   走自定义取数器而非平台关联端点：associationFilters 把过滤列写死
+//   `{父对象类型}_id`，本分区父对象是 party_relation ⇒ 会得 `party_relation_id`，
+//   而两个档案表的列名是 `relation_id`。列名不匹配时后端忽略该条件返回全量
+//   ⇒ 一个关系详情页会列出所有人的档案。故此处按 relation_id 精确查。
+const isRelationAccounts = computed(() => {
+  return props.section.customFetcher === 'relation_accounts'
+})
+
+// 分区所属对象：section.association 由 DetailPage 下发（customer_account / vendor_account）
+const relationAccountObjectType = computed(() => {
+  return props.section.association || props.section.assocName || ''
+})
+
+const isCustomerAccountSection = computed(() => {
+  return relationAccountObjectType.value === 'customer_account'
+})
+
+const relationAccountTypeKey = computed(() => {
+  return isCustomerAccountSection.value ? 'customer_type' : 'vendor_type'
+})
+
+const relationAccountTypeTitle = computed(() => {
+  return isCustomerAccountSection.value ? '客户类型' : '供应商类型'
+})
+
+const relationAccountTypeText = (val) => {
+  if (val == null || val === '') return '-'
+  const map = isCustomerAccountSection.value
+    ? { internal: '内部客户', external: '外部客户' }
+    : { internal: '内部供应方', external: '外部供应方' }
+  return map[val] || val
+}
+
+// 空态文案：两个分区恒渲染（不按父行 role 隐藏 —— role 可编辑，隐藏会让改完 role
+// 后该侧分区立刻消失、用户失去入口），故不匹配的一侧只会显示「暂无档案」。
+const emptyRelationAccountText = computed(() => '暂无档案')
+
+const relationAccountsData = ref([])
+const relationAccountsLoading = ref(false)
+let _relationAccountsVersion = 0
+
+async function loadRelationAccounts() {
+  if (!hasRealObjectId.value || !relationAccountObjectType.value) {
+    relationAccountsData.value = []
+    relationAccountsLoading.value = false
+    return
+  }
+  const version = ++_relationAccountsVersion
+  relationAccountsLoading.value = true
+  try {
+    const res = await boService.query(relationAccountObjectType.value, {
+      relation_id: props.objectId,
+      page_size: 50
+    })
+    if (version !== _relationAccountsVersion) return
+    relationAccountsData.value = normalizeQueryItems(res)
+  } catch (e) {
+    if (version !== _relationAccountsVersion) return
+    console.error('[AssociationSection] loadRelationAccounts 失败:', e)
+    relationAccountsData.value = []
+  } finally {
+    if (version === _relationAccountsVersion) {
+      relationAccountsLoading.value = false
+    }
+  }
+}
+
+const relationAccountFormVisible = ref(false)
+const relationAccountEntityData = ref(null)
+const relationAccountSaving = ref(false)
+const relationAccountFieldDefs = ref(null)
+
+// 工具条：从 section.actions 取 create，按 action.permission 做显隐（与往来关系分区同源）
+const relationAccountToolbarActions = computed(() => {
+  if (!hasRealObjectId.value) return []
+  const create = (props.section.actions || []).find(
+    a => (typeof a === 'string' ? a : (a.key || a.id)) === 'create'
+  )
+  if (!create) return []
+  const perm = typeof create === 'string' ? null : create.permission
+  if (perm && !authStore.hasPermission(perm)) return []
+  return [{
+    key: 'create',
+    label: (typeof create === 'string' ? null : create.label) || '新建档案',
+    variant: (typeof create === 'string' ? null : create.variant) || 'primary'
+  }]
+})
+
+// 字段元取自档案对象真实 ui-config（避免手写字段与 schema 漂移，同往来关系分区口径）。
+// relation_id 不进表单：本分区恒 1:1，创建时必填且由入口预绑，用户无从选择。
+async function loadRelationAccountFieldDefs() {
+  if (relationAccountFieldDefs.value) return relationAccountFieldDefs.value
+  const objectType = relationAccountObjectType.value
+  const res = await metaService.getUIConfig(objectType)
+  if (!res?.success) throw new Error(res?.message || '加载档案字段失败')
+  const formSections = res.data?.ui_view_config?.form?.sections || []
+  const order = []
+  for (const s of formSections) {
+    if (Array.isArray(s.fields) && s.fields.length) { order.push(...s.fields); continue }
+    for (const c of (s.columns || [])) {
+      if (Array.isArray(c.fields)) order.push(...c.fields)
+    }
+  }
+  const all = res.data?.fields || []
+  const byId = new Map(all.map(f => [f.id, f]))
+  relationAccountFieldDefs.value = (order.length ? order : all.map(f => f.id))
+    .map(id => byId.get(id))
+    .filter(f => f && f.id !== 'relation_id')
+    .map(f => {
+      const hasOptions = !!(f.enum_values?.length || f.options?.length)
+      return {
+        key: f.id,
+        label: f.name || f.id,
+        type: hasOptions ? 'select' : (f.type || 'text'),
+        required: f.required === true,
+        defaultValue: f.default ?? undefined,
+        options: hasOptions
+          ? (f.enum_values || f.options).map(o => ({ label: o.label, value: o.value }))
+          : undefined,
+        placeholder: f.ui?.placeholder || ''
+      }
+    })
+  return relationAccountFieldDefs.value
+}
+
+const relationAccountDialogTitle = computed(() => {
+  const base = isCustomerAccountSection.value ? '客户档案' : '供应商档案'
+  return relationAccountEntityData.value?.id ? `编辑${base}` : `新建${base}`
+})
+
+const relationAccountMeta = computed(() => ({
+  label: isCustomerAccountSection.value ? '客户档案' : '供应商档案',
+  fields: relationAccountFieldDefs.value || []
+}))
+
+async function handleRelationAccountToolbar() {
+  try {
+    await loadRelationAccountFieldDefs()
+  } catch (e) {
+    message.error(e?.message || '加载档案字段失败')
+    return
+  }
+  // 预绑 relation_id：本分区是 1:1 明细面，父 id 由所在分区唯一决定
+  relationAccountEntityData.value = { relation_id: props.objectId }
+  relationAccountFormVisible.value = true
+}
+
+async function handleRelationAccountRowAction(row) {
+  try {
+    await loadRelationAccountFieldDefs()
+  } catch (e) {
+    message.error(e?.message || '加载档案字段失败')
+    return
+  }
+  relationAccountEntityData.value = { ...row }
+  relationAccountFormVisible.value = true
+}
+
+function handleRelationAccountDialogClose() {
+  relationAccountFormVisible.value = false
+  relationAccountEntityData.value = null
+}
+
+async function handleRelationAccountSave(formData) {
+  const objectType = relationAccountObjectType.value
+  relationAccountSaving.value = true
+  try {
+    // MetaDialog 创建态会把每个未设值字段初始化为 ''，直接提交会让后端把
+    // 可空字段当 '' 解析（同往来关系分区 L703-710 的处理）。
+    const payload = {}
+    for (const [k, v] of Object.entries(formData || {})) {
+      if (v === '' || v === null || v === undefined) continue
+      payload[k] = v
+    }
+    // 不信任前端传来的 relation_id：恒取当前所在关系，杜绝跨关系改挂
+    payload.relation_id = props.objectId
+    const isEdit = !!relationAccountEntityData.value?.id
+    const res = isEdit
+      ? await boService.update(objectType, relationAccountEntityData.value.id, payload)
+      : await boService.create(objectType, payload)
+    if (!res?.success) throw new Error(res?.message || '保存失败')
+    message.success(isEdit ? '档案已更新' : '档案已创建')
+    relationAccountFormVisible.value = false
+    relationAccountEntityData.value = null
+    await loadRelationAccounts()
+    emit('refresh')
+  } catch (e) {
+    message.error(e?.message || '保存档案失败')
+  } finally {
+    relationAccountSaving.value = false
+  }
+}
+
 const targetType = computed(() => {
   return getAssociationTargetType(props.section.assocName)
 })
@@ -1276,16 +1513,19 @@ watch(() => props.objectId, (newVal, oldVal) => {
     loadMergedRelationships()
   } else if (isPartyRelations.value) {
     loadPartyRelations()
+  } else if (isRelationAccounts.value) {
+    loadRelationAccounts()
   }
 }, { immediate: true })
 
 function refresh() {
   if (isPartyRelations.value) { loadPartyRelations(); return }
+  if (isRelationAccounts.value) { loadRelationAccounts(); return }
   if (isMergedRelationships.value) { loadMergedRelationships(); return }
   metaListRef.value?.refresh?.()
 }
 
-defineExpose({ refresh, loadMergedRelationships, loadPartyRelations })
+defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelationAccounts })
 </script>
 
 <style scoped>
