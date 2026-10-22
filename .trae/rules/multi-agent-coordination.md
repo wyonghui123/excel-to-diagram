@@ -36,6 +36,11 @@ description: 多Agent协作规范 - worktree隔离、端口隔离、沙箱检测
 
 ## L5: 沙箱隔离检测
 
+> **[!] 2026-10-22 订正：本节只覆盖「沙箱隔离」（命令执行后 exit 0/7、写入被吞）。**
+> 若所有命令**执行前**即被拒（报错 `Toolhost terminal commands must be routed through the agent runtime`、exit -1、shell 从未创建），
+> 那是 **RunCommand 工具已退役**导致的**终端通道故障**，**重启 IDE 无效**，应改用 `Shell` 工具通道。
+> → 全局规范：`d:\filework\.trae\rules\scenarios\8-meta-trae\terminal-channel-failure.md`
+
 > **2026-06-20 发现：Trae IDE 沙箱可能完全隔离文件系统写入。**
 > **Agent 执行 `git commit` 返回 exit 0 但主机 HEAD 不变，`echo > file` exit 0 但文件不存在。**
 > **沙箱状态不可预测（同一 session 前半段隔离，后半段可能解封）。**

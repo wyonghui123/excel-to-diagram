@@ -5,6 +5,12 @@ description: "Sandbox-Safe 调试规范 V1 (v2026.06.21) - 应对 Trae IDE L5 sa
 
 # Sandbox-Safe 调试规范 (V1)
 
+> **[!] 2026-10-22 订正：本文覆盖的是「沙箱隔离」（stdout 被吞 / 写入被阻止）。**
+> 若**所有终端命令执行前即被拒**（报错 `Toolhost terminal commands must be routed through the agent runtime`、
+> exit -1、shell 从未创建），那是 **RunCommand 工具已退役**导致的**终端通道故障**，
+> **重启 Trae IDE 无效**（已实测），应改用 `Shell` 工具通道。
+> → 全局规范：`d:\filework\.trae\rules\scenarios\8-meta-trae\terminal-channel-failure.md`
+
 > **背景**：2026-06-21 排查供应链系统关系列表问题时，SOLO Agent 遭遇严重 sandbox 故障：
 > - PowerShell stdout 被吞 → Python stdout 被吞 → Python 文件写入被阻止 → MCP Filesystem 写入也被吞
 > - Agent 在 6+ 种输出方式全部失败后放弃调试

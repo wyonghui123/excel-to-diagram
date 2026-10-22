@@ -6,6 +6,16 @@
 
 ---
 
+## 2026-10
+
+| 日期 | 主题 | 文档 | 核心要点 |
+|------|------|------|---------|
+| 10-23 | **客户/供应商档案落点裁定** | [2026-10-23-account-profile-placement.md](2026-10-23-account-profile-placement.md) | 1:1 明细面不做平级菜单（三层链路裁定）/ 顺带修裸 ID 列 + 编辑态空白 / customFetcher 过滤列不匹配=跨行数据泄漏 / init 脚本清理假成功（commit 位置）|
+| 10-22 | **终端工具通道故障 (RunCommand 已退役)** | [2026-10-22-terminal-channel-retired.md](2026-10-22-terminal-channel-retired.md) | "执行前失败 + exit -1" = 工具通道故障，与沙箱 deadlock 不同构 / 重启 IDE 无效 / 换 `Shell` 工具通道 / 沙箱状态机补第 4 态 |
+| 10-22 | **元数据迁移后测试整片失效** | [lessons-learned/testing/metadata-migration-test-cleanup.md](../lessons-learned/testing/metadata-migration-test-cleanup.md) | user_group→org：7 类失效点 / 临时库夹具自建 DB config 单例 + `v_audit_all` 视图 / 410 sunset / 英文 alias 陷阱 |
+
+---
+
 ## 2026-09
 
 | 日期 | 主题 | 文档 | 核心要点 |
@@ -46,6 +56,7 @@
 ## 按主题分类
 
 ### 🐛 Bug 复盘
+- [2026-10-22-terminal-channel-retired.md](2026-10-22-terminal-channel-retired.md) — 终端通道故障（RunCommand 已退役）
 - [2026-09-13-deploy-topology-generalization.md](2026-09-13-deploy-topology-generalization.md) — 部署拓扑通用化 (双发反复栽)
 - [2026-09-05-staging-meta-shadow-tree.md](2026-09-05-staging-meta-shadow-tree.md) — meta 包影子树
 - [2026-09-05-env-port-drift.md](2026-09-05-env-port-drift.md) — port 漂移
@@ -62,8 +73,11 @@
 
 ### 🔧 测试方法论
 - [2026-06-15-mermaid-test-methodology.md](2026-06-15-mermaid-test-methodology.md) — Mermaid 图 AI 自动化测试
+- [../lessons-learned/testing/metadata-migration-test-cleanup.md](../lessons-learned/testing/metadata-migration-test-cleanup.md) — 元数据迁移后测试整片失效的排查套路
+- [../lessons-learned/testing/account-profile-placement-and-config.md](../lessons-learned/testing/account-profile-placement-and-config.md) — 元数据档案落点裁定与配置缺陷排查
 
 ### 📐 架构决策
+- [2026-10-23-account-profile-placement.md](2026-10-23-account-profile-placement.md) — 档案落点：独立菜单 → 关系详情页分区
 - [2026-09-13-deploy-topology-generalization.md](2026-09-13-deploy-topology-generalization.md) — DeployTarget + PathResolver + ResourceType 三层抽象
 - [2026-09-05-staging-meta-shadow-tree.md](2026-09-05-staging-meta-shadow-tree.md) — meta 包解析路径真相
 

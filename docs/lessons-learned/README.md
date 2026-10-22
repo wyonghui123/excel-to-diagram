@@ -1,6 +1,6 @@
 # 💡 经验记录索引
 
-> **最后更新**: 2026-08-28  
+> **最后更新**: 2026-10-23  
 > **维护者**: 开发团队
 
 ---
@@ -50,6 +50,17 @@ Element Plus UI 组件库的踩坑与解决方案
 |------|---------|---------|---------|
 | [mermaid-debugging.md](./debugging/mermaid-debugging.md) | Mermaid 渲染问题 | DOM 结构分析 | console.log + DevTools |
 
+### [测试相关经验](./testing/)
+
+测试失效排查、假阳性、夹具规范
+
+| 文档 | 问题 | 解决方案 | 关键点 |
+|------|------|---------|---------|
+| [metadata-migration-test-cleanup.md](./testing/metadata-migration-test-cleanup.md) | user_group→org 迁移后测试整片失效 | 先查注册 id / YAML 现状再改断言 | 7 类失效点 / 临时库夹具自建启动期基础设施 / 410 sunset / alias 陷阱 |
+| [account-profile-placement-and-config.md](./testing/account-profile-placement-and-config.md) | 档案对象做独立菜单不合适 + 裸 ID 列 + 编辑态空白 | 三层链路裁定 + 补齐 list/form/detail 三态 + customFetcher | 1:1 明细面不做平级菜单 / 下架菜单≠无 UI 配置 / 过滤列不匹配=跨行数据泄漏 / init 脚本清理是假成功 |
+| [testability-iron-rules.md](./testing/testability-iron-rules.md) | 测试"通过"但实际 UI 不可见 | 多维度交叉验证 | UI + DB + 网络三方一致 |
+| [permission-save-false-positive.md](./testing/permission-save-false-positive.md) | 探针假阳性 | 走真实 UI 事件链 | 不直接改 setupState / props |
+
 ---
 
 ## 🔍 按问题类型查找
@@ -66,6 +77,8 @@ Element Plus UI 组件库的踩坑与解决方案
 | staging 反复栽在"路径解析"上 (symlink 双发) | [deploy-topology.md](./deploy-topology.md) |
 | 测试"通过"但实际 UI 不可见 | [testing/testability-iron-rules.md](./testing/testability-iron-rules.md) |
 | 反勾选保存 bug 探针假阳性 / Vue 响应式状态依赖 | [testing/permission-save-false-positive.md](./testing/permission-save-false-positive.md) |
+| 元数据对象迁移后测试整片失效 | [testing/metadata-migration-test-cleanup.md](./testing/metadata-migration-test-cleanup.md) |
+| 档案对象该不该做独立菜单 / 列表显示裸 ID / 编辑抽屉空白 | [testing/account-profile-placement-and-config.md](./testing/account-profile-placement-and-config.md) |
 
 ---
 

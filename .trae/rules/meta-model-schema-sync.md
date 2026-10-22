@@ -206,6 +206,28 @@ ui_view_config:
 
 ---
 
+## 视图配置与菜单生命周期（2026-10-23 补充）
+
+> **完整规范在全局规则**（不在本文件展开，避免双份漂移）：
+> - [meta-ui-view-config.md](file:///d:/filework/.trae/rules/scenarios/5-development/meta-ui-view-config.md)
+>   —— ui_view_config 三态必填、兜底推导导致裸 ID 列与编辑态空白的根因、
+>   customFetcher 判据、动作权限码双段式。
+> - [meta-menu-retirement.md](file:///d:/filework/.trae/rules/scenarios/5-development/meta-menu-retirement.md)
+>   —— 独立菜单是否合适的判据、init 脚本清理假成功、migration 退役存量菜单行。
+
+### 硬规则速记
+
+| # | 规则 |
+|---|------|
+| 1 | 对象出现在任何 UI 面上 ⇒ `list` / `form` / `detail` 三态**必须成组声明** |
+| 2 | 验证判据是 `_ui_view_config_has_renderable_form(raw) == True`（为 True 才不走兜底推导），**不是「yaml 写了」** |
+| 3 | 列表列集合**不含** `id` / 审计字段；1:1 明细面**不含**父级外键列（恒等于父 id，纯冗余） |
+| 4 | 关联分区：子表外键列名 != `{父对象类型}_id` ⇒ **必须 `customFetcher`**，否则是**跨行数据泄漏** |
+| 5 | 动作权限码用**双段式** `{bo}:{bo}_{action}`（单段式命中数为 0 ⇒ 非 admin 看不到按钮） |
+| 6 | 1:1 明细面**不做独立菜单**；下架菜单**不等于**可以不补 UI 配置 |
+| 7 | 退役存量菜单行靠 **migration**（`is_active=0` + 清 `menu_permissions` 孤儿 + verify 断言 + 幂等）；init 脚本 UPSERT 不删行 |
+| 8 | 脚本输出 ≠ 事实：DB 事务未提交会被回滚，清理类操作**必须直接查库验证** |
+
 ## 变更流程
 
 ### 新增业务对象
