@@ -11,12 +11,15 @@
 /**
  * MaterialManagement — 物料管理页（MOMP 配置注入）
  *
- * 形态：左树 = 物料组（勾选过滤物料），右表 = 两个 tab（物料 / 物料组）。
+ * 形态：左树 = 物料组（勾选过滤物料），右表 = 两个 tab（物料组 / 物料）。
  * 配置注入模式与组织管理页一致，本页不触碰 MOMP 本体。
  *
- * - objectTypes=['item','item_group']：右表两个 tab
- *   · 物料 tab：受左树勾选过滤（查物料的主路径是"先定位到组"）
+ * - objectTypes=['item_group','item']：右表两个 tab，顺序与业务伙伴页一致
+ *   （PartyManagement 也是分类 tab 在前：业务伙伴组 / 业务伙伴 / 业务伙伴关系）。
+ *   tab 渲染顺序 = objectTypes 数组顺序（MOMP page.tabs 按此构建），
+ *   2026-10-23 按用户要求把物料组提到第一位；默认激活仍是物料（defaultTab）。
  *   · 物料组 tab：全量不受左树影响（它是管理页，用户要看到全部组才能新建/编辑）
+ *   · 物料 tab：受左树勾选过滤（查物料的主路径是"先定位到组"）
  *   物料组同时出现在左树与右表 tab 是有意的：左树用于过滤导航，右表 tab 用于维护。
  *   v092 下架了 item-group-list 独立菜单，若不做这个 tab 物料组将没有编辑入口。
  *
@@ -42,7 +45,7 @@ import ItemGroupScopeTree from '@/components/common/ItemGroupScopeTree/ItemGroup
 
 defineOptions({ name: 'MaterialManagement' })
 
-const objectTypes = ['item', 'item_group']
+const objectTypes = ['item_group', 'item']
 
 const pageOptions = {
   defaultTab: 'item',

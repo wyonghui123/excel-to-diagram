@@ -20,7 +20,7 @@
     <div class="object-page__header-right">
       <span v-if="status" :class="['status-badge', `status-badge--${statusType}`]">{{ status }}</span>
       <div
-        v-if="showStateTransitions && objectType && objectId && objectId !== 'new' && !editing"
+        v-if="showStateTransitionGroup"
         class="op-state-transitions"
       >
         <StateTransitionButtons
@@ -30,8 +30,7 @@
           @refresh="(payload) => handleStateTransitionRefresh(payload)"
         />
       </div>
-      <span v-if="showStateTransitions && objectType && objectId && objectId !== 'new' && !editing && actions && actions.length > 0" class="op-group-sep"></span>
-      <div v-if="actions && actions.length > 0" class="op-actions">
+      <div v-if="actions && actions.length > 0" :class="['op-actions', { 'op-actions--with-sep': showStateTransitionGroup }]">
         <AppButton v-for="act in visibleActions" :key="act.key" :variant="act.variant" size="sm" :loading="act.key === 'save' && saving" class="op-action-btn" @click="handleAction(act)">
           {{ act.label }}
         </AppButton>
@@ -73,6 +72,16 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['back', 'navigate', 'action', 'update:editing', 'refresh'])
+
+/* [FIX 2026-10-23 窄屏操作区裁切] 状态流转组的显示条件原先在模板里写了两遍，
+   分隔线还要再叠一层 `actions.length` —— 抽成 computed，避免三处判据漂移。 */
+const showStateTransitionGroup = computed(() =>
+  props.showStateTransitions &&
+  !!props.objectType &&
+  !!props.objectId &&
+  props.objectId !== 'new' &&
+  !props.editing
+)
 
 const ACTION_SEMANTIC_MAP = {
   'edit': 'start_edit', 'create': 'start_edit', 'update': 'start_edit', 'modify': 'start_edit',
@@ -192,11 +201,24 @@ function handleStateTransitionRefresh(payload = {}) {
   margin: 0 var(--spacing-md);
 }
 
+/* [FIX 2026-10-23 窄屏操作区裁切]
+   现象: 411px 抽屉里头部操作区「删除」只剩一半（用户报移动端截断）。
+   根因: header-right 是 flex: 0 0 auto（不许收缩）+ 子项都没有 wrap。而它的直接子项
+         是「状态 tag / 状态流转组 / 分隔线 / 表单动作组」四个盒子, 状态流转组内部虽然
+         有 flex-wrap, 但父级不许换行 ⇒ 这层wrap 永远用不上。两个组都被当成不可拆的
+         整体硬塞一行, 超出容器即被裁。
+   为什么改成 wrap 就够、且换行点是对的: 加 wrap 后换行只发生在四个盒子之间, 也就是
+         恰好沿用既有的语义分组边界 ⇒「已签发 停用 冻结」一行、「编辑 删除」一行,
+         不会出现「删除被单独甩到第二行」。两个组都完整可见。
+   桌面端: 空间充足不触发 wrap, 像素级零变化。 */
 .object-page__header-right {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;/* 原 0 0 auto: 允许收缩 */
+  min-width: 0;         /* 允许收缩到内容宽度以下, 否则 wrap 不生效 */
+  flex-wrap: wrap;       /* 空间不足时按分组换行, 永不裁切 */
+  row-gap: var(--spacing-sm);
   padding-left: var(--spacing-md);
 }
 
@@ -204,6 +226,29 @@ function handleStateTransitionRefresh(payload = {}) {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;       /* 表单动作本身很多时（如 4 个）组内也能兜底 */
+}
+
+/* [FIX 2026-10-23] 分隔线从独立 span 改成 op-actions 的 ::before。
+   独立 span 在换行时会留在上一行行尾, 变成一根悬空的竖线; 作为 ::before 它永远
+   紧贴「编辑」, 换行前后都保持"状态流转组 | 表单动作组"的边界语义。
+   宽度口径与原 .op-group-sep 一致(gap 12 + margin 4 + 1px + margin 4 + gap 12)。 */
+.op-actions--with-sep::before {
+  content: '';
+  width: 1px;
+  height: 16px;
+  background: var(--color-border, #d4d4d8);
+  margin: 0 var(--spacing-xs);
+  flex-shrink: 0;
+}
+
+/* [FIX 2026-10-23] 窄屏(<=768px, 与 ObjectPageShell/Content 同口径)隐藏分隔线。
+   此时两个组已经各占一行, 换行本身就表达了分组边界; 而分隔线会跑成第二行行首的
+   一根孤立竖线(411px 实测可见), 属于视觉噪点。 */
+@media (max-width: 768px) {
+  .op-actions--with-sep::before {
+    display: none;
+  }
 }
 
 .op-action-btn {
@@ -220,7 +265,8 @@ function handleStateTransitionRefresh(payload = {}) {
 
 /* [FIX 2026-09-13] state-transition buttons group:
      1) 统一内部按钮 padding/height, 跟 op-actions 一致 (避免"大小不同")
-     2) 加分组分隔条, 跟 op-actions 之间形成视觉 group 边界 (避免"组间 vs 组内间隔不一致")
+     2) 分组边界: 原为独立的 .op-group-sep span, 2026-10-23 改为
+        .op-actions--with-sep::before（见上方注释）
 */
 .op-state-transitions {
   display: flex;
@@ -249,15 +295,8 @@ function handleStateTransitionRefresh(payload = {}) {
   margin-left: 0;  /* 覆盖 Element Plus 默认 ml 8px, 让 gap 12px 完全控制 */
 }
 
-/* [FIX 2026-09-13] group 分隔: 竖线 + 双倍间距, 跟组内 gap 形成视觉差 */
-.op-group-sep {
-  display: inline-block;
-  width: 1px;
-  height: 16px;
-  background: var(--color-border, #d4d4d8);
-  margin: 0 4px;
-  flex-shrink: 0;
-}
+/* [FIX 2026-10-23] 原 .op-group-sep 已删除: 分隔线改由 .op-actions--with-sep::before
+   承担（见上方注释），换行时不会在上一行行尾留下悬空竖线。 */
 
 .object-page__breadcrumb {
   display: flex;

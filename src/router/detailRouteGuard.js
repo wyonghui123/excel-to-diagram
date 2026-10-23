@@ -42,7 +42,33 @@ const SUPPORTED_OBJECT_TYPES = [
   'party_archive',
   'party_internal',
   'party_group',
-  'org_legal_entity'
+  'org_legal_entity',
+  // 物料轴 2026-10-23: 物料详情页的「物料组」(items.item_group_id) 与
+  //   「基本单位」(items.base_uom) 都是 ObjectPageField 渲染的 FK 链接，落点分别是
+  //   item_group / uom，此前同样不在白名单 ⇒ 点击后弹回首页
+  //   (reason=unsupported_object_type)，用户报「物料组点击跳转失败」。
+  //   item 自身也是落点（item_xref / item_uom_conversion / item_attribute_values 的
+  //   target_bo: item）。三者都声明了 ui_view_config.detail，进去不会白屏。
+  'item',
+  'item_group',
+  'uom',
+  // 基础数据轴 2026-10-23: 把「全库 FK 落点 ⊆ 白名单」一次性补齐。
+  //   取口径 = grep `target_bo:` / `detail_target_bo:`（display_target_bo 只管显示名
+  //   解析、不产生跳转，见 models_value_help.py 三口径分工），与白名单求差集得到这五个：
+  //     region     ← address 的省/市/区 FK
+  //     location   ← item / address 的库位 FK
+  //     calendar   ← item 的计划发货日 + party_relation 的日历 FK
+  //     address    ← party_internal 的地址 FK
+  //     party_relation ← 身份轴落点（本次一并纳入）
+  //   前四个都是"地址/时间/仓储"这类基础数据，没有它们，地址详情与物料详情里的
+  //   FK 会成片弹回首页。五个都声明了 ui_view_config.detail 且有物理表
+  //   (regions / locations / calendars / addresses / party_relations)，
+  //   read_bo 只做 login_required + dim scope、不校验按对象 read 权限 ⇒ 不会 403。
+  'region',
+  'location',
+  'calendar',
+  'address',
+  'party_relation'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -101,7 +127,17 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'party_archive': '业务伙伴',
     'party_internal': '内部治理台账',
     'party_group': '业务伙伴组',
-    'org_legal_entity': '法人主体'
+    'org_legal_entity': '法人主体',
+    // [物料轴 2026-10-23] 与 SUPPORTED_OBJECT_TYPES 同步补齐，缺了面包屑会回退显示英文 id
+    'item': '物料',
+    'item_group': '物料组',
+    'uom': '计量单位',
+    // [基础数据轴 2026-10-23] 同上，与白名单一一对应
+    'region': '行政区域',
+    'location': '库位',
+    'calendar': '日历',
+    'address': '地址',
+    'party_relation': '业务伙伴关系'
   }
 
   const label = typeLabels[normalizedType] || objectType
