@@ -142,7 +142,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     // compact mode: 'page' | 'embedded' | 'dialog'
     displayMode: options.displayMode || 'page',
     // 列定义覆盖（embedded/dialog 生效，传入后跳过 metaService）
-    columnsOverride: options.columnsOverride || null,
+    // [FIX 2026-10-23] 原为 `options.columnsOverride || null`。但 JS 中 `[]` 是 truthy，
+    // 上游若传了空数组（如 value_help 的 display_columns 写错键名被解析成 []），
+    // 会被当成"有列定义"而覆盖掉元数据列 ⇒ 表格渲染 0 列，只剩 selection 复选框。
+    // 改为按长度判断，空数组归一化成 null，语义才是"调用方未提供列定义"。
+    columnsOverride: (options.columnsOverride?.length ? options.columnsOverride : null),
     // [FIX 2026-06-14] 排除的列 key 列表（page 模式生效，传入后从 meta columns 过滤掉指定 key）
     // 适用场景: 子对象页的 children 列表 (如 product → version) 隐藏冗余的父对象列 (product_name 等)
     excludeColumnKeys: options.excludeColumnKeys || [],
@@ -274,7 +278,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       return filtered
     }
 
-    const columnsFromProp = !!config.columnsOverride
+    const columnsFromProp = !!config.columnsOverride?.length
     if (columnsFromProp) {
       return filtered
     }
@@ -405,7 +409,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     boService._clearCache(objectTypeRef.value)
     metaService.clearCache(objectTypeRef.value)
     try {
-      const effectiveColumns = columnsOverride || config.columnsOverride
+      const effectiveColumns = columnsOverride?.length ? columnsOverride : config.columnsOverride
       if (effectiveColumns) {
         // [FIX 2026-06-14] 先按 excludeColumnKeys 过滤再 transform,
         //   避免上游传了 columnsOverride + excludeColumnKeys 时两条规则相互干扰

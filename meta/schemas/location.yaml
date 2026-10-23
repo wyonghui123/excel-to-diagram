@@ -230,7 +230,7 @@ fields:
       presentation:
         result_type: dialog
         display_format: "{formatted_address}"
-        columns:
+        display_columns:
           - field: code
             label: 编码
             width: 140
