@@ -294,3 +294,135 @@ class TestBuildAndConstraints:
             "WHERE a.code = 'ADDR-00000004'"
         ).fetchone()
         assert row == ('CN', '中国')
+
+
+# ────────────────────────────────────────
+# 6. 地址全文派生（2026-10-23）
+#    formatted_address 由 省/市/区/街道/门牌/邮编 拼接，不人工录入；
+#    required 约束保留（它同时是 display_name_field）。
+# ────────────────────────────────────────
+class TestFormattedAddressDerived:
+    def test_not_in_create_form(self):
+        sections = _load_yaml()['ui_view_config']['form']['sections']
+        ids = [fid for s in sections
+               for c in (s.get('columns') or []) for fid in c.get('fields', [])]
+        assert 'formatted_address' not in ids
+
+    def test_readonly_display_kept(self):
+        """只读展示保留在详情、且不进表单（口径同 party_relation.internal_mark）"""
+        detail = _load_yaml()['ui_view_config']['detail']
+        ids = [fid for t in detail['tabs'] for fid in t.get('fields', [])]
+        assert 'formatted_address' in ids
+        ui = _fields()['formatted_address']['ui']
+        assert ui['editable'] is False
+        assert ui['readonly'] is True
+
+    def test_not_importable(self):
+        assert _fields()['formatted_address']['semantics']['import_visible'] is False
+
+    def test_still_required(self):
+        """必填保留 —— 它是 display_name_field，为空会让列表出现空白行"""
+        assert _fields()['formatted_address']['required'] is True
+
+    def test_derive_concatenates_in_order(self, addr_ds):
+        """区划层级链 + 街道 + 门牌 + 邮编，按序拼接"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 2, 'code': 'SH', 'name': '上海市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        addr_ds.insert('regions', {
+            'id': 3, 'code': 'PD', 'name': '浦东新区', 'level': 'district',
+            'parent_id': 2, 'status': 'active'})
+        data = AddressDeriveService(addr_ds).derive_formatted_address({
+            'country_id': 1, 'province_id': 2, 'district_id': 3,
+            'street': '世纪大道', 'street_number': '1号',
+            'postal_code': '200120',
+        })
+        assert data['formatted_address'] == '中国上海市浦东新区世纪大道1号200120'
+
+    def test_duplicate_region_ids_not_repeated(self, addr_ds):
+        """同一 id 传多次不重复拼接（层级链只走一遍）"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 2, 'code': 'SH', 'name': '上海市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        data = AddressDeriveService(addr_ds).derive_formatted_address({
+            'country_id': 1, 'province_id': 2, 'city_id': 2, 'district_id': 2,
+            'street': '世纪大道',
+        })
+        assert data['formatted_address'] == '中国上海市世纪大道'
+
+    def test_municipality_no_duplicate_province(self, addr_ds):
+        """直辖市：省与市同一个「北京市」，不得拼成「北京市北京市」"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 10, 'code': '110000', 'name': '北京市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        addr_ds.insert('regions', {
+            'id': 11, 'code': '110100', 'name': '北京市', 'level': 'city',
+            'parent_id': 10, 'status': 'active'})
+        data = AddressDeriveService(addr_ds).derive_formatted_address({
+            'country_id': 1, 'province_id': 10, 'city_id': 11,
+            'street': '东长安街', 'street_number': '1号',
+        })
+        assert data['formatted_address'] == '中国北京市北京市东长安街1号'
+
+    def test_empty_segments_skipped(self, addr_ds):
+        """缺失的中间级不产生连续空格"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 2, 'code': 'SH', 'name': '上海市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        data = AddressDeriveService(addr_ds).derive_formatted_address({
+            'province_id': 2, 'street': '世纪大道', 'street_number': None,
+        })
+        assert data['formatted_address'] == '中国上海市世纪大道'
+
+    def test_client_value_discarded(self, addr_ds):
+        """客户端自带值一律丢弃，避免绕过派生口径"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 2, 'code': 'SH', 'name': '上海市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        data = AddressDeriveService(addr_ds).derive_formatted_address({
+            'province_id': 2, 'street': '世纪大道',
+            'formatted_address': '手工乱填的地址',
+        })
+        assert data['formatted_address'] == '中国上海市世纪大道'
+
+    def test_all_blank_drops_field(self, addr_ds):
+        """结构化字段全空时不写空串 —— 交给 required 校验给标准错误"""
+        from meta.services.address_derive_service import AddressDeriveService
+        data = AddressDeriveService(addr_ds).derive_formatted_address(
+            {'formatted_address': '手工乱填的地址'})
+        assert 'formatted_address' not in data
+
+    def test_update_merges_existing_fields(self, addr_ds):
+        """只改街道时，未改的省/市须从库中原值补齐（否则全文丢前缀）"""
+        from meta.services.address_derive_service import AddressDeriveService
+        addr_ds.insert('regions', {
+            'id': 2, 'code': 'SH', 'name': '上海市', 'level': 'province',
+            'parent_id': 1, 'status': 'active'})
+        addr_ds.insert('addresses', {
+            'id': 700, 'code': 'ADDR-00000700', 'country_id': 1,
+            'province_id': 2, 'street': '旧路', 'street_number': '1号',
+            'formatted_address': '中国上海市旧路1号',
+        })
+        data = AddressDeriveService(addr_ds).derive_formatted_address(
+            {'id': 700, 'street': '新路'})
+        assert data['formatted_address'] == '中国上海市新路1号'
+    def test_hook_applied_only_to_registered_object(self, addr_ds):
+        from meta.core.consistency_guard import ComputedFieldHandler
+        from meta.services.address_derive_service import (
+            derive_formatted_address_hook,
+        )
+        ComputedFieldHandler.register_hook('address', derive_formatted_address_hook)
+        try:
+            out = ComputedFieldHandler(addr_ds).on_before_save(
+                'address', {'street': '世纪大道'})
+            assert out['formatted_address'] == '世纪大道'
+            other = ComputedFieldHandler(addr_ds).on_before_save(
+                'party', {'street': '世纪大道'})
+            assert 'formatted_address' not in other
+        finally:
+            ComputedFieldHandler.clear_hooks()

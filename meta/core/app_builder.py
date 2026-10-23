@@ -248,6 +248,12 @@ class ApplicationBuilder:
             from meta.core.consistency_guard import ComputedFieldHandler
             from meta.services.party_relation_guard_service import derive_internal_mark_hook
             ComputedFieldHandler.register_hook('party_relation', derive_internal_mark_hook)
+        # [formatted_address 派生 2026-10-23] 地址全文由 省/市/区/街道/门牌/邮编 拼接。
+        #   与 internal_mark 同理落 ComputedFieldHandler：先于 required 校验，
+        #   故派生值可满足必填；且覆盖 bo_api / manage_api / Excel 导入三条写路径。
+        from meta.core.consistency_guard import ComputedFieldHandler
+        from meta.services.address_derive_service import derive_formatted_address_hook
+        ComputedFieldHandler.register_hook('address', derive_formatted_address_hook)
         bo_framework.register_interceptor(EnumProtectionInterceptor())
         bo_framework.register_interceptor(AssociationInterceptor())
 

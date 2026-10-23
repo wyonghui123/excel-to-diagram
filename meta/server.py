@@ -501,6 +501,12 @@ def create_app(db_path=None):
         from meta.core.consistency_guard import ComputedFieldHandler
         from meta.services.party_relation_guard_service import derive_internal_mark_hook
         ComputedFieldHandler.register_hook('party_relation', derive_internal_mark_hook)
+    # [formatted_address 派生 2026-10-23] 与 app_builder.with_interceptors() 同位登记；
+    #   落 ComputedFieldHandler 以覆盖 manage_api / Excel 导入等绕过拦截器链的写路径。
+    #   address 无模块门控（不在 DISABLED_PLATFORM_MODULES 语义内）。
+    from meta.core.consistency_guard import ComputedFieldHandler
+    from meta.services.address_derive_service import derive_formatted_address_hook
+    ComputedFieldHandler.register_hook('address', derive_formatted_address_hook)
     bo_framework.register_interceptor(EnumProtectionInterceptor())
     bo_framework.register_interceptor(AssociationInterceptor())
 

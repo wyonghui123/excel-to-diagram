@@ -346,8 +346,18 @@ fields:
       meaning: 展示用格式化地址全文
       display_name: true
       searchable: true
+      # 派生口径：区划部分走层级链（取最深 id 沿 parent_id 上溯到根，
+      # 拼「国家→省→市→区」完整路径），街道 → 门牌依次接在后面，
+      # 邮编并入末尾，空片段跳过（不产生连续空格）。
+      # 落 ComputedFieldHandler 写前钩子，故不出现在录入表单与导入模板。
+      import_visible: false
     ui:
       widget: textarea
+      # 只用 ui 层的只读（展示只读、不进表单、不参与编辑），
+      # 不用 semantics.readonly_always —— 后者会让 update 跳过该字段不落库，
+      # 导致改动结构化字段后无法重新派生（口径同 party_relation.internal_mark）。
+      editable: false
+      readonly: true
 
   - id: status
     name: 状态
@@ -553,9 +563,9 @@ ui_view_config:
           - fields: [city_id, district_id]
           - fields: [street, street_number]
           - fields: [postal_code]
-      - title: 地址全文
-        columns:
-          - fields: [formatted_address]
+# [2026-10-23] 原「地址全文」section 已移除 —— 该字段改由写前钩子派生
+  # （见 meta/services/address_derive_service.py），不再人工录入。
+  # 展示仍在 detail.tabs.basic 内，只读回显。
 
   detail:
     layout: tabs
