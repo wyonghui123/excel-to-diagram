@@ -617,6 +617,42 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [ADDR-MENU 2026-10-23] 地址管理 —— 由自动生成菜单升级为手工声明
+            #   背景: address-list 原先是 menu_auto_generator 自动生成的 object_list 菜单
+            #   (auto_generated=1, menu_path='/address')。地址是扁平列表 (结构化字段 +
+            #   格式化全文), 无层级树 ⇒ page_type 保持 object_list, 只把手声明接管
+            #   (auto_generated=0): 入库后生成器的 INSERT OR IGNORE 不会再覆盖它。
+            #   required_permissions 收敛为 permissions 表真实存在的 5 条: 自动生成行里的
+            #   address:import / address:export 在 permissions 表并不存在 ⇒ 前端路由守卫
+            #   (every 判定) 会因缺失码把整页拦下。存量行由迁移 v101 改写。
+            'menu_code': 'address-list',
+            'menu_name': '地址管理',
+            'menu_path': '/address',
+            'icon': 'Box',
+            'color': '#14b8a6',
+            'sort_order': 68,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'address',
+            'object_types': json.dumps(['address']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'address', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'address:address_create',
+                'address:address_read',
+                'address:address_update',
+                'address:address_delete',
+                'address:address_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['address'],
+                'message': '建议分配地址数据权限'
+            })
+        },
+        {
             # [REGION-MENU 2026-10-23] 行政区划管理 —— 同位置管理, 由自动生成的 object_list
             #   菜单升级为「左树 + 列表」MOMP 页。region 是国/省/市/区四级自引用树
             #   (parent_id + level 枚举), 具备左树条件; 原光板列表与组织/物料/位置不一致。
