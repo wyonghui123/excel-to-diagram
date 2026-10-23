@@ -470,23 +470,22 @@ ui_view_config:
           - day_mask_fri
           - day_mask_sat
           - day_mask_sun
-      - id: days
-        label: 例外日
-        type: nested
-        relation: calendar
-        parent_field: calendar_id
-        order_by: date
-        order_asc: true
-        columns:
-          - field: date
-            width: 130
-            sortable: true
-          - field: day_type
-            width: 110
-            filterable: true
-            filter_type: select
-          - field: note
-            width: 220
+
+  # 例外日子对象列表（calendar_day，parent_field=calendar_id）
+  #   历史沿革: 原先写成 detail.tabs 的 `type: nested` 页签，但前端 DetailPage /
+  #   ObjectPage 从未实现 nested 分支（全仓仅此一处使用）⇒ 配置存在但永不渲染。
+  #   改用平台已有的 child_sections 通用机制（同 product→version / enum_type→enum_value），
+  #   由 AssociationSection 的 parent_child 分支按 calendar_id 取数。
+  #   display: tab —— 与 基本信息 / 操作日志 平级，独立页签展示，不挤占基本信息。
+  child_sections:
+    - child_object: calendar_day
+      title: 例外日
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
 
 category_config:
   create_permission: calendar:create
