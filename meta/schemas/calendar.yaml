@@ -151,7 +151,8 @@ fields:
         # 自引用防环: 编辑态排除当前记录自身
         exclude_self: true
       presentation:
-        result_type: dropdown
+        result_type: dialog
+        display_mode: tree
         display_format: "{name}"
         columns:
           - field: code

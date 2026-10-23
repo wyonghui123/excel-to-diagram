@@ -21,6 +21,16 @@ hierarchy:
   enabled: true
   parent_field: calendar_id
 
+# [CAL-AUDIT 2026-10-23] 接入 audit_aspect（对齐 calendar / region / location 三个同类对象）
+#   背景: calendar_day 原先未声明 aspects ⇒ 元模型里既无 created_at 也无 updated_at 字段，
+#   而 POST /api/v2/bo/<type>/list 的默认 order_by='-created_at' 会直接拼
+#   "ORDER BY created_at" ⇒ sqlite3.OperationalError: no such column: created_at（500）
+#   同时 ui_view_config.list.columns 里声明的 updated_at 列无字段可渲染（列表页空列）
+#   落地: aspects 提供 created_at / updated_by / created_by / updated_at 四个字段，
+#        其中 created_at / created_by / updated_by 为 STORED（落物理列），
+#        updated_at 为 virtual（从 audit_logs 实时派生，不落物理表）
+aspects: [audit_aspect]
+
 fields:
   - id: id
     name: ID
@@ -122,6 +132,15 @@ fields:
       data_category: text
     ui:
       widget: input
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
 
 deletion_policy:
   # 例外日子表: 随父日历一并管理，不设独立 restrict（无其他对象引用例外日）

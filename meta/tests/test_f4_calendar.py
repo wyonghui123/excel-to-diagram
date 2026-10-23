@@ -191,6 +191,19 @@ class TestStructure:
         assert cc['delete_permission'] == 'calendar:delete'
         assert cc['owner_auto_permission'] is False
 
+    def test_calendar_day_uses_audit_aspect(self):
+        """[CAL-AUDIT 2026-10-23] 例外日接入 audit_aspect（对齐 calendar/region/location）
+
+        未接 aspects ⇒ 元模型既无 created_at 也无 updated_at ⇒
+        POST /bo/calendar_day/list 默认 order_by='-created_at' 打到不存在的列 ⇒ 500；
+        且 list.columns 里声明的 updated_at 列无字段可渲染。
+        """
+        day = _load_yaml('calendar_day.yaml')
+        assert day['aspects'] == ['audit_aspect']
+        f = _fields('calendar_day.yaml')
+        assert f['created_at']['type'] == 'datetime'
+        assert f['created_at']['db_column'] == 'created_at'
+
 
 # ────────────────────────────────────────
 # 3. 继承语义（FR-002）
@@ -288,6 +301,16 @@ class TestBuild:
         """audit_aspect 的 updated_at 为 virtual，不落物理表（region 教训）"""
         cols = {r[1] for r in cal_ds.execute("PRAGMA table_info('calendars')").fetchall()}
         assert 'created_at' in cols
+        assert 'updated_at' not in cols
+
+    def test_calendar_day_audit_columns(self, cal_ds):
+        """[CAL-AUDIT 2026-10-23] 例外日接 audit_aspect 后的物理列形态
+
+        created_at / created_by / updated_by 冗余落表（ORDER BY created_at 有列可排），
+        updated_at 为 virtual 不落表。
+        """
+        cols = {r[1] for r in cal_ds.execute("PRAGMA table_info('calendar_days')").fetchall()}
+        assert {'created_at', 'created_by', 'updated_by'} <= cols
         assert 'updated_at' not in cols
 
     def test_unique_index_created(self, cal_ds):

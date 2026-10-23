@@ -686,6 +686,77 @@ def init_menu_permissions(db_path):
                 'message': '建议分配行政区划数据权限'
             })
         },
+        {
+            # [CAL-MENU 2026-10-23] 作业日历管理 —— 由自动生成菜单升级为手工声明
+            #   背景: calendar-list 原先是 menu_auto_generator 自动生成的 object_list 菜单
+            #   (auto_generated=1, menu_path='/calendar')。自动生成行按 yaml
+            #   import_export 默认值推导了 export/import 两个动作, 但 calendar.yaml
+            #   根本没配 import_export 段 ⇒ permissions 表里不存在
+            #   calendar:export / calendar:import ⇒ 前端路由守卫 (every 判定) 会因
+            #   缺失码把整页拦下 (同 v099 location / v100 region / v101 address)。
+            #   required_permissions 收敛为 permissions 表真实存在的 5 条。
+            #   page_type 保持 object_list: 日历本身是「基准 + 派生子日历」两层,
+            #   不像 region/address 那样需要左树右表; 父子关系由表单里的父日历
+            #   选择器 (tree 弹窗) 表达。
+            #   menu_name / menu_path / icon / color / sort_order 保持存量行原值, 避免外观变化。
+            'menu_code': 'calendar-list',
+            'menu_name': '作业日历管理',
+            'menu_path': '/calendar',
+            'icon': 'Box',
+            'color': '',
+            'sort_order': 71,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'calendar',
+            'object_types': json.dumps(['calendar']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calendar', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calendar:calendar_create',
+                'calendar:calendar_read',
+                'calendar:calendar_update',
+                'calendar:calendar_delete',
+                'calendar:calendar_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calendar'],
+                'message': '建议分配作业日历数据权限'
+            })
+        },
+        {
+            # [CAL-MENU 2026-10-23] 日历例外日管理 —— 同上, 权限码收敛
+            #   自动生成行里的 calendar_day:export / calendar_day:import 在
+            #   permissions 表并不存在, 路由守卫 every 判定会把整页拦下。
+            'menu_code': 'calendar_day-list',
+            'menu_name': '日历例外日管理',
+            'menu_path': '/calendar-day',
+            'icon': 'Box',
+            'color': '',
+            'sort_order': 72,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'calendar_day',
+            'object_types': json.dumps(['calendar_day']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calendar_day', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calendar_day:calendar_day_create',
+                'calendar_day:calendar_day_read',
+                'calendar_day:calendar_day_update',
+                'calendar_day:calendar_day_delete',
+                'calendar_day:calendar_day_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calendar_day'],
+                'message': '建议分配日历例外日数据权限'
+            })
+        },
         # === [档案下架 2026-10-22] 客户档案 / 供应商档案独立菜单已移除 ===
         #   这两条菜单 2026-10-11 由用户拍板开为独立入口, 现按方案 A 下架, 落点改为
         #   party_relation 详情页的两个关联分区（party_relation.yaml 的 detail.facets
