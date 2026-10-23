@@ -192,6 +192,39 @@ class TestManageAPI:
         body = resp.get_json()
         assert body.get('success') is True
 
+    @pytest.mark.parametrize('object_type', [
+        'employee_data_scopes',
+        'item_attribute_values',
+        'item_uom_conversions',
+        'item_xrefs',
+        'org_members',
+        'parties',
+        'party_relations',
+        'role_dimension_scopes',
+        'test_objects',
+        'test_table',
+    ])
+    def test_v2_list_post_default_order_by_missing_created_at(
+        self, api_client, admin_headers, object_type
+    ):
+        """[FIX 2026-10-23] 元模型无 created_at 的对象 POST /list 不得 500
+
+        POST /list 默认 order_by=-created_at，这些对象的物理表没有 created_at 列，
+        修复前会拼出 `ORDER BY created_at DESC` → SQLite "no such column" → 500。
+        QueryBuilder.build_sql 现在会跳过不存在的排序列。
+        """
+        resp = api_client.post(
+            f'/api/v2/bo/{object_type}/list',
+            json={'page': 1, 'pageSize': 5, 'keyword': ''},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, (
+            f'{object_type} POST /list 返回 {resp.status_code}: '
+            f'{resp.get_data(as_text=True)[:300]}'
+        )
+        body = resp.get_json()
+        assert body.get('success') is True
+
     def test_v2_batch_create_users(self, api_client, admin_headers):
         """POST /api/v2/bo/user/batch-create 批量创建 (v2 端点已补齐)"""
         import time

@@ -154,6 +154,29 @@ class TestSiteRefWiring:
             assert fid in form_fields, f'{fid} 未进表单'
             assert fid in detail_fields, f'{fid} 未进详情'
 
+    def test_list_column_calendar_renders_as_association(self):
+        """[FIX 2026-10-23] 日历列必须在列表中按关联列渲染
+
+        只落字段定义（semantics.display / value_help）不足以让列表显示可读值，
+        ui_view_config.list.columns 必须显式声明该列，否则列表看不到「日历」列。
+        写法对齐同文件 parent_id 与 calendar.yaml parent_calendar_id。
+
+        注: address_id 未进列表列（列已足够宽, 地址走详情查看）, 不在本用例范围。
+        """
+        target, display = _SITE_REFS['calendar_id']
+        data = _load_raw('location')
+        cols = {
+            c['field']: c
+            for c in data['ui_view_config']['list']['columns']
+        }
+        assert 'calendar_id' in cols, 'calendar_id 未进列表列'
+        col = cols['calendar_id']
+        assert col.get('render_as') == 'association'
+        assert col.get('target_type') == target
+        assert col.get('display_field') == display
+        assert col.get('filterable') is True
+        assert col.get('filter_type') == 'value_help'
+
 
 # ────────────────────────────────────────
 # 2. 建表落地（可空引用列 + 非 site 恒空）

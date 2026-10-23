@@ -421,6 +421,14 @@ ui_view_config:
         target_type: location
         display_field: name
         placeholder: "无上级"
+      - field: calendar_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: calendar
+        display_field: name
+        placeholder: "无日历"
       - field: status
         width: 90
         filterable: true

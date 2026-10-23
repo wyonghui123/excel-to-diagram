@@ -69,6 +69,11 @@ class QueryBuilder:
         self.meta_object = meta_object
         self._spec = QuerySpec(table_name=meta_object.table_name)
         self._field_map = {f.id: f for f in meta_object.fields}
+        # [FIX 2026-10-23] 主表实际列名缓存, 用于在 build_sql 生成 ORDER BY 前
+        # 校验排序列是否存在。None 表示尚未探测; 空 set 表示探测失败/无列信息,
+        # 此时不做校验（保持原行为, 避免误伤）。
+        self._available_columns_cache: Optional[set] = None
+        self._columns_probed = False
     
     def where(self, field: str, operator: Union[str, QueryOperator], 
               value: Any = None) -> "QueryBuilder":
@@ -512,9 +517,27 @@ class QueryBuilder:
             parts.append("GROUP BY {0}".format(", ".join(self._spec.group_by)))
         
         all_sorts = []
-        all_sorts.extend(["{0} {1}".format(f, d.upper()) for f, d in self._spec.sorts])
+        skipped_sorts = []
+        available_columns = self._get_available_columns()
+        for sort_field, sort_direction in self._spec.sorts:
+            # [FIX 2026-10-23] 排序列必须真实存在于主表, 否则跳过该段。
+            # 典型场景: 元模型未声明 created_at 的对象 (POST /list 默认 order_by=-created_at),
+            # 若直接拼出 `ORDER BY created_at DESC` 会触发 SQLite "no such column" 500。
+            # 语义与 sql_adapters.SQLDataSource.find() 的既有防护保持一致。
+            if available_columns is not None and sort_field not in available_columns:
+                skipped_sorts.append(sort_field)
+                continue
+            all_sorts.append("{0} {1}".format(sort_field, sort_direction.upper()))
+        # sort_expressions 是原始 SQL 表达式（可能含函数/子查询）, 无法按列名校验, 原样保留
         all_sorts.extend(self._spec.sort_expressions)
-        
+
+        if skipped_sorts:
+            logger.warning(
+                "[QueryBuilder] build_sql(%s) skipping ORDER BY for non-existent "
+                "columns: %s (likely missing from schema)",
+                self._spec.table_name, skipped_sorts,
+            )
+
         if all_sorts:
             parts.append("ORDER BY {0}".format(", ".join(all_sorts)))
         
@@ -657,6 +680,32 @@ class QueryBuilder:
             "total_pages": total_pages,
         }
     
+    def _get_available_columns(self) -> Optional[set]:
+        """返回主表实际存在的列名集合。
+
+        [FIX 2026-10-23] 用于在生成 ORDER BY 前校验排序列是否存在。
+        返回 None 表示无法确定（数据源不支持/探测失败/未返回列信息），
+        此时调用方不做任何过滤，保持原有行为。
+
+        结果按实例缓存：一次查询里 build_sql() 会被调用多次
+        （execute / count_all），避免重复探测表结构。
+        """
+        if self._columns_probed:
+            return self._available_columns_cache
+        self._columns_probed = True
+        self._available_columns_cache = None
+        try:
+            columns = self.ds.get_table_columns(self._spec.table_name)
+        except Exception as exc:
+            logger.debug(
+                "[QueryBuilder] get_table_columns(%s) failed, skip ORDER BY validation: %s",
+                self._spec.table_name, exc,
+            )
+            return None
+        if isinstance(columns, dict) and columns:
+            self._available_columns_cache = set(columns.keys())
+        return self._available_columns_cache
+
     def _get_db_column(self, field: str) -> str:
         """获取数据库列名"""
         if field in self._field_map:

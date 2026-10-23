@@ -275,6 +275,116 @@ class TestQueryBuilderBuildSQL:
         assert "SELECT DISTINCT" in sql
 
 
+class TestQueryBuilderOrderByColumnValidation:
+    """[FIX 2026-10-23] ORDER BY 排序列存在性校验
+
+    背景: POST /api/v2/bo/<type>/list 默认 order_by=-created_at, 而部分对象的
+    元模型/物理表并没有 created_at 列, 直接拼 ORDER BY 会触发 SQLite
+    "no such column: created_at" -> 接口 500。修复语义对齐
+    sql_adapters.SQLDataSource.find(): 列不存在则跳过该排序段并告警。
+    """
+
+    @staticmethod
+    def _fake_ds(columns):
+        """构造只实现 get_table_columns 的假数据源"""
+
+        class _FakeDataSource:
+            def __init__(self, cols):
+                self._cols = cols
+
+            def get_table_columns(self, table_name):
+                if isinstance(self._cols, Exception):
+                    raise self._cols
+                return self._cols
+
+        return _FakeDataSource(columns)
+
+    def test_skips_non_existent_order_column(self, mock_meta_object):
+        ds = self._fake_ds({"id": {}, "name": {}, "status": {}})
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by("created_at", "desc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY" not in sql
+        # spec 本身不被改写, 只是不落到 SQL
+        assert builder._spec.sorts == [("created_at", "desc")]
+
+    def test_keeps_existing_order_column(self, mock_meta_object):
+        ds = self._fake_ds({"id": {}, "name": {}, "status": {}})
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by("name", "asc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY name ASC" in sql
+
+    def test_mixed_columns_keeps_only_existing(self, mock_meta_object):
+        ds = self._fake_ds({"id": {}, "name": {}})
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by("name", "asc").order_by("created_at", "desc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY name ASC" in sql
+        assert "created_at" not in sql
+
+    def test_existing_column_maps_through_db_column(self, mock_meta_object):
+        """count -> count_val 这类映射仍按真实列名校验"""
+        ds = self._fake_ds({"id": {}, "count_val": {}})
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by("count", "desc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY count_val DESC" in sql
+
+    def test_probe_failure_falls_back_to_no_filtering(self, mock_meta_object):
+        """探测失败时不过滤, 保持原有行为（不引入新的静默偏差）"""
+        ds = self._fake_ds(RuntimeError("probe failed"))
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by("created_at", "desc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY created_at DESC" in sql
+
+    def test_non_dict_columns_falls_back_to_no_filtering(self, mock_meta_object):
+        """数据源返回非 dict（如 MagicMock）时不做校验"""
+        builder = QueryBuilder(MagicMock(), mock_meta_object)
+        builder.order_by("created_at", "desc")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY created_at DESC" in sql
+
+    def test_sort_expressions_never_filtered(self, mock_meta_object):
+        """sort_expressions 是原始 SQL 表达式, 不参与列名校验"""
+        ds = self._fake_ds({"id": {}})
+        builder = QueryBuilder(ds, mock_meta_object)
+        builder.order_by_expr("CASE WHEN id > 0 THEN 1 ELSE 2 END ASC")
+
+        sql, _ = builder.build_sql()
+
+        assert "ORDER BY CASE WHEN id > 0 THEN 1 ELSE 2 END ASC" in sql
+
+    def test_columns_probed_only_once(self, mock_meta_object):
+        """execute + count_all 会多次调用 build_sql, 探测只应发生一次"""
+        calls = []
+
+        class _CountingDs:
+            def get_table_columns(self, table_name):
+                calls.append(table_name)
+                return {"id": {}, "name": {}}
+
+        builder = QueryBuilder(_CountingDs(), mock_meta_object)
+        builder.order_by("name", "asc")
+        builder.build_sql()
+        builder.build_sql()
+
+        assert len(calls) == 1
+
+
 class TestQueryBuilderTypeConversion:
     """测试类型转换"""
 
