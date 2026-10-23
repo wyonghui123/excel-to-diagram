@@ -62,9 +62,11 @@ Step 1  跑一条最简命令，记录：报错文本 / 退出码 / 耗时
 Step 2  看失败时机
         执行前 + exit -1  ⇒ 走 Step 3（通道故障）
         执行后 + exit 7/0 ⇒ 走 Step 4（沙箱隔离）
-Step 3  查当前会话挂载了哪些工具（ALL_TOOLS）
+Step 3  查当前会话挂载了哪些工具（以运行时 ALL_TOOLS 为准）
+        ALL_TOOLS.map(t => t.name)
         有 Shell ⇒ 换用 Shell
-        只有 RunCommand ⇒ 本轮构建彻底无终端通道，只能用 Read/Write/Edit/MCP，
+        Shell 不在直接工具清单里 ⇒ 经 MCP Exec 调 tools.Shell({command, cwd})
+        ALL_TOOLS 里真没有 Shell ⇒ 本轮构建彻底无终端通道，只能用 Read/Write/Edit/MCP，
                           并明确告知用户「本轮无终端通道」
 Step 4  沙箱隔离路径：跑 scripts/check_sandbox_status.py → isolated ⇒ 切 Read-First
 ```
@@ -100,6 +102,47 @@ Step 4  沙箱隔离路径：跑 scripts/check_sandbox_status.py → isolated �
 4. `SESSION_REMINDER.md` 踩坑表补一条「命令全失败就重启 IDE」。
 5. `START_HERE.md` 决策树补入口行「⛔ 所有终端命令一律失败」。
 6. 废弃档 `multi-agent-infrastructure-v20260620-v2.md` 加订正横幅，防止后续再被误用。
+
+---
+
+## 复发记录
+
+### 2026-10-23（复发，原因同根）
+
+现象与 10-22 完全一致（报错逐字相同）。**不是新问题**，是同一根因的重犯：
+
+| 项 | 内容 |
+|---|---|
+| 触发 | 会话中连续多次调用 **`RunCommand`**（该工具已退役，且不在当前工具集里） |
+| 表现 | 每条命令 0–2ms 返回 `Toolhost terminal commands must be routed through the agent runtime`，`exit -1` |
+| 误判 | 据此向用户断言「终端坏了、构建和验证都跑不了」，并连续两轮让用户自己手动 `npm run build` |
+| 纠正 | 按本文档处置铁律改调 **`Shell`** ⇒ 首条命令即通（`shell-ok` / PS 5.1.26100.9711） |
+| 后续 | 一次 `npm run build`（49.7s，93 chunk 无环）、隧道验证 200、411px 浏览器实测全部完成 |
+
+**新增教训**：
+
+7. **报错原文就是线索**。`terminal commands must be routed through the agent runtime` 直指工具通道，不该被读成"终端服务挂了"。本文档第 2 条已写明「报错逐字相同 ⇒ 确定性工具/路由层问题」，复发时仍未据此定位。
+8. **不要用"通道坏了"解释不了的现象去阻塞交付**。本次实际耗时全花在反复重试与绕过上，而换 `Shell` 只需一次调用。**先换通道试一条 `echo`，再谈阻塞**。
+
+### 2026-10-23（第二次复发，**差异点在"我看到什么工具"**）
+
+现象仍是逐字相同的报错，但**触发根因与前两次不同**——这次不是"直接调了已退役的 `RunCommand`"，而是：
+
+| 项 | 10-22 / 10-23 第一次复发 | **本次（第二次复发）** |
+|---|---|---|
+| 我直接调用的工具 | `RunCommand`（已退役，不在工具集里） | `RunCommand`（仍在我的**直接工具清单**里，被我当唯一入口） |
+| `Shell` 在我的直接工具清单中 | ✅ 可见，直接调即可 | ❌ **不可见**（上下文压缩后未暴露给我） |
+| `Shell` 在运行时 `ALL_TOOLS` 中 | ✅ | ✅ **完好** |
+| 正确入口 | 直接调 `Shell` | **必须经 MCP `integrated_code_mode` 的 `Exec` 调 `tools.Shell`** |
+
+**新判据（第 9 条教训）**：
+
+9. **「直接工具清单」≠「运行时 `ALL_TOOLS`」**。上下文被压缩后，我这一轮拿到的直接工具清单可能只剩 `RunCommand`，
+   而 `Shell` 仍在运行时 `ALL_TOOLS` 里。此时**不要因为清单里没有 `Shell` 就断定"本轮无终端通道"**——
+   先用 MCP `Exec` 查 `ALL_TOOLS`（`ALL_TOOLS.map(t => t.name)`），再经 `Exec` 调 `tools.Shell({command, cwd})` 绕行。
+   本次经此路径首条即通（`git status` 正常返回 11 个改动文件），后续全量测试、stash 对照、提交全部完成。
+   **推论**：上表 Step 3 里「只有 RunCommand ⇒ 本轮构建彻底无终端通道」这条判据**不成立**——
+   必须以运行时 `ALL_TOOLS` 为准，而不是以你眼前看到的工具清单为准。
 
 ---
 
