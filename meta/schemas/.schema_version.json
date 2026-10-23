@@ -435,7 +435,6 @@
         "updated_by",
         "id",
         "relation_id",
-        "customer_type",
         "name",
         "description",
         "created_at"
@@ -1539,7 +1538,6 @@
         "updated_by",
         "id",
         "relation_id",
-        "vendor_type",
         "name",
         "description",
         "created_at"

@@ -85,6 +85,16 @@ class UIDetailFacet:
     #   历史上此处只放字符串（'assign'/'unassign'/'list'）；字符串形态仍照旧。
     actions: List[Any] = field(default_factory=list)
     customFetcher: str = ""
+    # [B 2026-10-23] 关联基数：'one' = 1:1 明细面（渲染为内联表单，不渲染表格）；
+    #   'many' = 集合面（默认，渲染表格）。1:1 由子表外键唯一约束兜底
+    #   （customer_accounts.relation_id / vendor_accounts.relation_id 均为 UNIQUE）。
+    cardinality: str = "many"
+    # [B 2026-10-23] 分区条件显示：按父行字段值决定是否渲染该分区。
+    #   形如 {"field": "role", "equals": "customer"} 或 {"field": "x", "in": [...]}。
+    #   用途：party_relation 的「一实例一角色」—— role 决定该关系只可能挂
+    #   客户档案或供应商档案之一，故两个分区互斥渲染；不按 role 隐藏会让 UI
+    #   允许 DB 禁止的状态（一条关系同时挂两类档案）。
+    visibleWhen: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

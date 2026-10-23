@@ -150,34 +150,96 @@
     </div>
 
     <template v-else-if="isRelationAccounts">
-      <div class="op-party-relations-toolbar">
-        <AppButton
-          v-for="a in relationAccountToolbarActions"
-          :key="a.key"
-          :variant="a.variant || 'primary'"
-          @click="handleRelationAccountToolbar"
-        >{{ a.label }}</AppButton>
-      </div>
+      <!-- [B 2026-10-23] 1:1 明细面：字段组表单，不是表格。
+           依据：customer_accounts.relation_id / vendor_accounts.relation_id 均为
+           UNIQUE NOT NULL ⇒ 一条关系最多一条档案；表格形态（含 pageSize）是错的。
+           形态对齐 SAP S/4 的角色页签字段组 / D365 CustTable 表单页签。 -->
+      <template v-if="isSingletonAccount">
+        <div class="op-party-relations-toolbar">
+          <template v-if="singletonEditing">
+            <AppButton variant="default" @click="cancelSingletonEdit">取消</AppButton>
+            <AppButton variant="primary" :loading="singletonSaving" @click="saveSingleton">
+              {{ singletonRecord ? '保存' : '创建' }}
+            </AppButton>
+          </template>
+          <template v-else-if="singletonRecord">
+            <AppButton variant="default" @click="startSingletonEdit">编辑</AppButton>
+          </template>
+          <template v-else>
+            <AppButton
+              v-for="a in relationAccountToolbarActions"
+              :key="a.key"
+              :variant="a.variant || 'primary'"
+              @click="startSingletonCreate"
+            >{{ a.label }}</AppButton>
+          </template>
+        </div>
 
-      <el-table :data="relationAccountsData" v-loading="relationAccountsLoading" size="small" max-height="400">
-        <el-table-column prop="name" label="档案名称" min-width="200" />
-        <el-table-column :label="relationAccountTypeTitle" width="130">
-          <template #default="{ row }">
-            <span>{{ relationAccountTypeText(row[relationAccountTypeKey]) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="description" label="说明" min-width="200" />
-        <el-table-column prop="created_at" label="创建时间" width="170" />
-        <el-table-column label="操作" width="80" align="center">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="handleRelationAccountRowAction(row)">编辑</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="op-empty-state" v-if="!relationAccountsLoading && relationAccountsData.length === 0">
-        <AppIcon name="link" size="lg" />
-        <p>{{ emptyRelationAccountText }}</p>
-      </div>
+        <div v-loading="relationAccountsLoading">
+          <MetaForm
+            v-if="singletonEditing"
+            :fields="relationAccountFields"
+            v-model="singletonDraft"
+            layout="vertical"
+          />
+          <!-- [窄屏 2026-10-23] 写死 :column="2" 在手机抽屉里会把 label/value 挤成两半、
+               右侧留大片空白 ⇒ 窄屏降为单列。口径与 DetailSection 的 ds-grid 一致。 -->
+          <el-descriptions
+            v-else-if="singletonRecord"
+            :column="isMobile ? 1 : 2"
+            border
+            size="small"
+          >
+            <el-descriptions-item
+              v-for="f in relationAccountFields"
+              :key="f.key"
+              :label="f.label"
+            >
+              <!-- [风格 2026-10-23] 枚举字段渲染 el-tag（取 enum_values.color），
+                   与「状态 启用」的绿色 tag 同风格；此前走纯文本，同一抽屉内两种风格。 -->
+              <el-tag
+                v-if="singletonIsEnumFilled(f, singletonRecord)"
+                :type="singletonTagType(f, singletonRecord)"
+                size="small"
+              >{{ singletonDisplayValue(f, singletonRecord) }}</el-tag>
+              <span v-else :class="{ 'op-singleton-value--empty': singletonIsEmpty(f, singletonRecord) }">
+                {{ singletonDisplayValue(f, singletonRecord) }}
+              </span>
+            </el-descriptions-item>
+          </el-descriptions>
+          <div v-else class="op-empty-state">
+            <AppIcon name="link" size="lg" />
+            <p>{{ emptyRelationAccountText }}</p>
+          </div>
+        </div>
+      </template>
+
+      <!-- 集合面兜底（cardinality != one）：保留原表格，避免影响既有配置 -->
+      <template v-else>
+        <div class="op-party-relations-toolbar">
+          <AppButton
+            v-for="a in relationAccountToolbarActions"
+            :key="a.key"
+            :variant="a.variant || 'primary'"
+            @click="handleRelationAccountToolbar"
+          >{{ a.label }}</AppButton>
+        </div>
+
+        <el-table :data="relationAccountsData" v-loading="relationAccountsLoading" size="small" max-height="400">
+          <el-table-column prop="name" label="档案名称" min-width="200" />
+          <el-table-column prop="description" label="说明" min-width="200" />
+          <el-table-column prop="created_at" label="创建时间" width="170" />
+          <el-table-column label="操作" width="80" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="handleRelationAccountRowAction(row)">编辑</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="op-empty-state" v-if="!relationAccountsLoading && relationAccountsData.length === 0">
+          <AppIcon name="link" size="lg" />
+          <p>{{ emptyRelationAccountText }}</p>
+        </div>
+      </template>
 
       <MetaDialog
         :visible="relationAccountFormVisible"
@@ -252,6 +314,7 @@ import MetaListPage from '../MetaListPage/MetaListPage.vue'
 import AppIcon from '../AppIcon/AppIcon.vue'
 import AppButton from '../AppButton/AppButton.vue'
 import MetaDialog from '../MetaDialog.vue'
+import MetaForm from '../MetaForm.vue'
 import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import boService from '@/services/boService'
 import metaService from '@/services/metaService'
@@ -260,6 +323,7 @@ import { CATEGORY_CONFIG } from '@/composables/useMermaid/annotation/annotationC
 import * as annotationService from '@/services/annotationService'
 import EnumService from '@/services/enumService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
+import { useBreakpoints } from '@/composables/useBreakpoints'
 
 const props = defineProps({
   section: {
@@ -288,6 +352,7 @@ const emit = defineEmits(['request-edit', 'open-assign', 'refresh', 'embedded-ac
 
 const message = useCrudMessage()
 const authStore = useAuthStore()
+const { isMobile } = useBreakpoints()
 
 // [FIX 2026-06-29] 前端兜底 enum 映射
 //   之前后端 relationship 序列化时没 join enum_values 表, relation_type_name 总是 null
@@ -802,6 +867,12 @@ const isRelationAccounts = computed(() => {
   return props.section.customFetcher === 'relation_accounts'
 })
 
+// [B 2026-10-23] 1:1 明细面判定：档案与关系是 UNIQUE 关系，一条关系最多一条档案。
+//   为 true 时渲染内联字段组表单（新建/编辑/保存），不渲染集合表格。
+const isSingletonAccount = computed(() => {
+  return isRelationAccounts.value && props.section.cardinality === 'one'
+})
+
 // 分区所属对象：section.association 由 DetailPage 下发（customer_account / vendor_account）
 const relationAccountObjectType = computed(() => {
   return props.section.association || props.section.assocName || ''
@@ -810,22 +881,6 @@ const relationAccountObjectType = computed(() => {
 const isCustomerAccountSection = computed(() => {
   return relationAccountObjectType.value === 'customer_account'
 })
-
-const relationAccountTypeKey = computed(() => {
-  return isCustomerAccountSection.value ? 'customer_type' : 'vendor_type'
-})
-
-const relationAccountTypeTitle = computed(() => {
-  return isCustomerAccountSection.value ? '客户类型' : '供应商类型'
-})
-
-const relationAccountTypeText = (val) => {
-  if (val == null || val === '') return '-'
-  const map = isCustomerAccountSection.value
-    ? { internal: '内部客户', external: '外部客户' }
-    : { internal: '内部供应方', external: '外部供应方' }
-  return map[val] || val
-}
 
 // 空态文案：两个分区恒渲染（不按父行 role 隐藏 —— role 可编辑，隐藏会让改完 role
 // 后该侧分区立刻消失、用户失去入口），故不匹配的一侧只会显示「暂无档案」。
@@ -850,6 +905,12 @@ async function loadRelationAccounts() {
     })
     if (version !== _relationAccountsVersion) return
     relationAccountsData.value = normalizeQueryItems(res)
+    // 1:1 明细面的只读展示也依赖字段元（label / options），故与取数一并加载
+    if (isSingletonAccount.value) {
+      loadRelationAccountFieldDefs().catch(e => {
+        console.error('[AssociationSection] 档案字段加载失败:', e)
+      })
+    }
   } catch (e) {
     if (version !== _relationAccountsVersion) return
     console.error('[AssociationSection] loadRelationAccounts 失败:', e)
@@ -907,11 +968,18 @@ async function loadRelationAccountFieldDefs() {
       return {
         key: f.id,
         label: f.name || f.id,
-        type: hasOptions ? 'select' : (f.type || 'text'),
+        // MetaForm 只认 text / number / textarea / select 等控件类型，不认 schema 的
+        // 'string'（落不到任何分支 ⇒ 只渲染 label、没有输入框）⇒ 归一化为 text。
+        type: hasOptions ? 'select' : (f.type === 'string' ? 'text' : (f.type || 'text')),
         required: f.required === true,
         defaultValue: f.default ?? undefined,
         options: hasOptions
-          ? (f.enum_values || f.options).map(o => ({ label: o.label, value: o.value }))
+          ? (f.enum_values || f.options).map(o => ({
+              label: o.label,
+              value: o.value,
+              // [风格 2026-10-23] 只读态要拿 color 渲 el-tag，与 DetailSection.getEnumTagType 同源
+              color: o.color || o.tagType || o.tag_type || ''
+            }))
           : undefined,
         placeholder: f.ui?.placeholder || ''
       }
@@ -986,6 +1054,107 @@ async function handleRelationAccountSave(formData) {
     relationAccountSaving.value = false
   }
 }
+
+// ── [B 2026-10-23] 1:1 明细面：内联字段组表单 ─────────────────────────
+// 形态依据：DB 层 relation_id UNIQUE ⇒ 0..1 条；表格无法表达 1:1 语义。
+const relationAccountFields = computed(() => relationAccountFieldDefs.value || [])
+
+const singletonRecord = computed(() => relationAccountsData.value[0] || null)
+const singletonEditing = ref(false)
+const singletonDraft = ref({})
+const singletonSaving = ref(false)
+
+// 按字段元取显示值：有 options（枚举/字典）则映射为中文标签，否则原值
+function singletonDisplayValue(field, row) {
+  const raw = row?.[field?.key]
+  if (raw === undefined || raw === null || raw === '') return '—'
+  const opt = (field.options || []).find(o => String(o.value) === String(raw))
+  return opt ? opt.label : String(raw)
+}
+
+// 空值判定：供只读态套用灰色占位样式（与 DetailSection.ds-value--empty 同口径）
+function singletonIsEmpty(field, row) {
+  const raw = row?.[field?.key]
+  return raw === undefined || raw === null || raw === ''
+}
+
+// 枚举字段且有值 ⇒ 渲 el-tag（否则渲纯文本，与详情其他分区的枚举呈现不一致）
+function singletonIsEnumFilled(field, row) {
+  return !!field.options?.length && !singletonIsEmpty(field, row)
+}
+
+// tag 配色取自 enum_values.color；未配色的枚举回退 info，避免默认灰底与普通文本混淆
+function singletonTagType(field, row) {
+  const raw = row?.[field?.key]
+  const opt = (field.options || []).find(o => String(o.value) === String(raw))
+  return opt?.color || 'info'
+}
+
+async function startSingletonCreate() {
+  try {
+    await loadRelationAccountFieldDefs()
+  } catch (e) {
+    message.error(e?.message || '加载档案字段失败')
+    return
+  }
+  singletonDraft.value = {}
+  singletonEditing.value = true
+}
+
+async function startSingletonEdit() {
+  try {
+    await loadRelationAccountFieldDefs()
+  } catch (e) {
+    message.error(e?.message || '加载档案字段失败')
+    return
+  }
+  const src = singletonRecord.value || {}
+  const draft = {}
+  for (const f of relationAccountFields.value) draft[f.key] = src[f.key] ?? ''
+  singletonDraft.value = draft
+  singletonEditing.value = true
+}
+
+function cancelSingletonEdit() {
+  singletonEditing.value = false
+  singletonDraft.value = {}
+}
+
+async function saveSingleton() {
+  const objectType = relationAccountObjectType.value
+  if (!objectType) return
+  singletonSaving.value = true
+  try {
+    // 空串/空值不提交，避免后端把可空字段解析成 ''（与抽屉保存同口径）
+    const payload = {}
+    for (const [k, v] of Object.entries(singletonDraft.value || {})) {
+      if (v === '' || v === null || v === undefined) continue
+      payload[k] = v
+    }
+    // 不信任前端：relation_id 恒取当前所在关系，杜绝跨关系改挂
+    payload.relation_id = props.objectId
+    const current = singletonRecord.value
+    const res = current
+      ? await boService.update(objectType, current.id, payload)
+      : await boService.create(objectType, payload)
+    if (!res?.success) throw new Error(res?.message || '保存失败')
+    message.success(current ? '档案已更新' : '档案已创建')
+    singletonEditing.value = false
+    singletonDraft.value = {}
+    await loadRelationAccounts()
+    emit('refresh')
+  } catch (e) {
+    message.error(e?.message || '保存档案失败')
+  } finally {
+    singletonSaving.value = false
+  }
+}
+
+// 父对象切换时退出编辑态，防止把 A 关系的草稿写到 B 关系
+watch(() => props.objectId, () => {
+  singletonEditing.value = false
+  singletonDraft.value = {}
+})
 
 const targetType = computed(() => {
   return getAssociationTargetType(props.section.assocName)
@@ -1571,5 +1740,10 @@ defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelatio
 .op-relation-cell__code {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
+}
+
+/* [窄屏 2026-10-23] 只读态空值占位灰字，与 DetailSection.ds-value--empty 同口径 */
+.op-singleton-value--empty {
+  color: var(--color-text-placeholder);
 }
 </style>

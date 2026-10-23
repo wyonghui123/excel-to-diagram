@@ -275,7 +275,8 @@ class TestAccountSections:
         assert 'vendor_account' not in names
 
     def test_readonly_with_create_action(self):
-        """行只读（1:1 明细，编辑走弹窗），但保留 create 入口"""
+        """分区本身只读（不经平台关联端点增删行），保留 create 入口；
+        实际编辑走 1:1 内联表单，见 test_cardinality_is_one"""
         for s in self._sections():
             assert s['readonly'] is True
             keys = {a['key'] for a in s['actions']}
@@ -287,10 +288,46 @@ class TestAccountSections:
             assert create['permission'] == \
                 f"{s['association']}:{s['association']}_create"
 
-    def test_both_sections_always_rendered(self):
-        """两侧分区恒声明（不按父行 role 隐藏）—— role 可编辑，
-        隐藏会让改完 role 后该侧分区立刻消失、用户失去入口。"""
-        assert len(self._sections()) == 2
+    # ── [B 2026-10-23] 形态修订：1:1 内联表单 + 按 role 互斥 ──────────
+    def test_cardinality_is_one(self):
+        """档案与关系是 1:1（DB: relation_id UNIQUE NOT NULL）⇒ 必须声明
+        cardinality: one，前端渲染内联字段组表单而非集合表格。
+        此前按集合面配 pageSize: 5 是错的（表格永远最多 1 行）。"""
+        for s in self._sections():
+            assert s.get('cardinality') == 'one', s['association']
+
+    def test_no_pagination_on_singleton(self):
+        """1:1 面不得携带分页语义"""
+        for s in self._sections():
+            assert 'pageSize' not in s, s['association']
+
+    def test_sections_role_mutually_exclusive(self):
+        """两个分区必须按 role 互斥渲染，不得两侧恒显示。
+        本对象「一实例一角色」（role 是唯一键四元组的一部分）：role='customer'
+        的关系只可能挂客户档案；两侧恒显示会让 UI 允许 DB 模型禁止的状态。"""
+        expected = {'customer_account': 'customer', 'vendor_account': 'vendor'}
+        for s in self._sections():
+            cond = s.get('visibleWhen') or {}
+            assert cond.get('field') == 'role', s['association']
+            assert cond.get('equals') == expected[s['association']]
+
+    def test_loader_parses_new_fields(self):
+        """解析层必须把 cardinality / visibleWhen 下发到 UI 模型，
+        否则前端拿不到（DetailPage 条件过滤与 AssociationSection 形态切换均依赖）。"""
+        from meta.core.yaml_loader import parse_ui_detail_facet
+        m = parse_ui_detail_facet({
+            'title': '客户档案',
+            'type': 'association',
+            'association': 'customer_account',
+            'cardinality': 'one',
+            'visibleWhen': {'field': 'role', 'equals': 'customer'},
+        })
+        assert m.cardinality == 'one'
+        assert m.visibleWhen == {'field': 'role', 'equals': 'customer'}
+        # 默认值不得改变既有集合分区行为
+        d = parse_ui_detail_facet({'title': 'x', 'type': 'association'})
+        assert d.cardinality == 'many'
+        assert d.visibleWhen == {}
 
 
 # ────────────────────────────────────────

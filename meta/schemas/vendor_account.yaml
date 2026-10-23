@@ -161,32 +161,13 @@ fields:
       relation: party_relation
       multiple: false
 
-  # 内外类型：对标 Oracle POZ_SUPPLIER_SITES_ALL_M_ 的 supplier traits 概念，
-  # 与客户侧 customer_type 值域保持一致（同为「我方内部单位 / 外部单位」）
-  # ⚠️ 不建采购分类轴（SAP LFKNR 供应商科目组 / LFM1.EKGRP 采购组 / KDGRP 客户组）
-  #    —— 那些是**配置驱动的分类**且影响校验，本字段是纯标签（同客户侧 D6 留痕）
-  - id: vendor_type
-    name: 供应商类型
-    type: string
-    db_column: vendor_type
-    nullable: true
-    max_length: 30
-    description: 供应商类型 internal/external（内部供应方 / 外部供应方）
-    enum_values:
-      - value: internal
-        label: 内部供应方
-        color: info
-      - value: external
-        label: 外部供应方
-        color: default
-    semantics:
-      meaning: 供应商内外类型（纯标签，非配置驱动）
-      filterable: true
-      filter_type: enum
-      filter_label: 供应商类型
-      filter_scope: local
-    ui:
-      widget: select
+  # [字段删除 2026-10-23] 原 vendor_type（内部供应方/外部供应方）已删，理由与客户侧
+  #   customer_type 完全相同（对称口径，详见 customer_account.yaml 同处注释与
+  #   spec 2026-10-06 §3.1.2「无消费者的字段是负债」）：
+  #   ① 与 party_relation.internal_mark 同值域且语义重复（后者为系统派生，正源）；
+  #   ② 零消费者；③ 对标失败（纯标签，无配置驱动能力）；
+  #   ④ 零消费却必填。
+  #   ⚠️ DB 列 vendor_type 保留不 DROP（避免迁移风险），只是不再展示与录入。
 
   - id: name
     name: 供应商档案名称
@@ -302,11 +283,6 @@ ui_view_config:
     columns:
       - field: name
         width: 220
-      - field: vendor_type
-        width: 110
-        filterable: true
-        filter_type: enum
-        render_as: tag
       - field: description
         width: 240
       - field: created_at
@@ -330,7 +306,6 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [name]
-          - fields: [vendor_type]
       - title: 其他
         columns:
           - fields: [description]
@@ -340,5 +315,4 @@ ui_view_config:
         type: fieldGroup
         fields:
           - name
-          - vendor_type
           - description

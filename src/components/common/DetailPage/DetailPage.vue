@@ -768,6 +768,21 @@ const computedSections = computed(() => {
     return false
   }
 
+  // [B 2026-10-23] 分区条件显示：按父行字段值过滤 facet。
+  //   场景：party_relation「一实例一角色」—— role 是唯一键四元组的一部分，
+  //   role='customer' 的关系只可能挂客户档案，故客户/供应商档案两个分区必须互斥渲染。
+  //   此前解析器无条件下发全部 facet，UI 因此能表达 DB 模型禁止的状态。
+  //   equals：单值相等；in：多值命中；无 field 视为无条件（全部显示）。
+  function matchesVisibleWhen(facet) {
+    const cond = facet?.visibleWhen
+    if (!cond || !cond.field) return true
+    const cur = data.value?.[cond.field]
+    if (cur === undefined || cur === null || cur === '') return false
+    if (cond.equals !== undefined) return String(cur) === String(cond.equals)
+    if (Array.isArray(cond.in)) return cond.in.map(String).includes(String(cur))
+    return true
+  }
+
   function getAssociationType(assocName) {
     const assoc = entityAssociations.find(a => a.name === assocName)
     return assoc?.type || null
@@ -892,6 +907,8 @@ const computedSections = computed(() => {
       .filter(f => f.type === 'association')
       .forEach(f => {
         const assocName = f.association || f.id || f.title
+        // [B 2026-10-23] 先按父行字段值做条件过滤（如 role 决定展示客户档案还是供应商档案）
+        if (!matchesVisibleWhen(f)) return
         // [自定义取数器 2026-10-17] 带 customFetcher 的分区不要求平台 association 定义。
         //   原闸门只认 isCollectionAssociation（须在 associations 声明且 type 属集合类型），
         //   但这类分区的取数完全由 AssociationSection 的自定义分支接管，与平台关联端点无关：
@@ -916,7 +933,10 @@ const computedSections = computed(() => {
           display: f.display || 'inline',
           actions: f.actions || ['assign', 'unassign', 'list'],
           readonly: f.readonly || assocDef?.readonly || false,
-          customFetcher: f.customFetcher || assocDef?.customFetcher || null
+          customFetcher: f.customFetcher || assocDef?.customFetcher || null,
+          // [B 2026-10-23] 1:1 明细面（如 party_relation 的客户/供应商档案）：
+          //   渲染内联字段组表单，不渲染表格。默认 'many' 保持既有集合分区行为不变。
+          cardinality: f.cardinality || 'many'
         })
       })
 

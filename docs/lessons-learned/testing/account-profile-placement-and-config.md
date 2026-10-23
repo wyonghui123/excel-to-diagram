@@ -60,7 +60,8 @@ if not _ui_view_config_has_renderable_form(config.get('ui_view_config')):
 此前两个 yaml 只写了 `skip_auto_menu: true`，**没有 `list.columns`** ⇒ 触发兜底推导
 ⇒ 该推导按 `ui.visible` 收**全部字段** ⇒ 把技术主键 `id`、`created_at`、审计字段全渲染成列。
 
-**修法**：显式声明 `list.columns`（4 列：`name` / `customer_type` / `description` / `created_at`）。
+**修法**：显式声明 `list.columns`（当时 4 列：`name` / `customer_type` / `description` / `created_at`；
+[2026-10-23] `customer_type` 已删 ⇒ 现为 3 列 `name` / `description` / `created_at`）。
 
 > **判据不是「yaml 写了」**，而是 `_ui_view_config_has_renderable_form(raw) == True`
 > （为 True 就不再走兜底）。实测两个对象均为 `True`，裸 `id` 未混入列集合。
@@ -158,14 +159,23 @@ customer_account:create                    ❌ 命中数 0 ⇒ 非 admin 看不�
 |----|------|
 | `test_customer_account.py` | 48 passed |
 | `test_vendor_account.py` | 58 passed |
-| `test_f2_party_relation.py` | 28 passed（含新增 6 个） |
+| `test_f2_party_relation.py` | 31 passed（含新增 9 个：含 cardinality/visibleWhen/loader 解析） |
 | `test_menu_auto_generator.py` / `test_field_policy.py` | 11 / 51 passed |
 | `useMetaList.scenarios.spec.js` | passed |
-| `npx eslint AssociationSection.vue` | 0 errors / 5 warnings（均在我改动之外的既有代码） |
-| 配置下发链路静态验证 | 两个对象 `has_renderable_form == True`；列集合正确；裸 `id` 未混入；两个 facet 的 `type/association/customFetcher/readonly/actions` 原样保留 |
+| `npx eslint AssociationSection.vue DetailPage.vue` | 2 errors / 16 warnings，**全部为既有**（DetailPage 的 `fetch` 直调与未使用变量），非本次改动 |
+| 配置下发链路静态验证 | 两个对象 `has_renderable_form == True`；列集合正确；裸 `id` 未混入；两个 facet 的 `cardinality/visibleWhen/customFetcher/actions` 经 `_make_json_safe` 原样下发 |
 
-**未做**：浏览器端到端验证（尚未起服务用 PlaywrightCLI 实测「业务伙伴页 → 往来关系 tab → 行详情 → 两个档案分区渲染 + 新建/编辑」）。
-静态链路（yaml → loader → 模型 → `_make_json_safe` → DetailPage 闸门 → AssociationSection 分支）已逐段核对通过。
+**浏览器端到端验证（PlaywrightCLI，生产构建 preview）**：
+
+| 场景 | 实测结果 |
+|------|---------|
+| 关系 role=客户（有档案） | 详情抽屉只出现「客户档案」分区，无「供应商档案」；渲染为描述列表 + 「编辑」，**无表格** |
+| 关系 role=供应商（无档案） | 只出现「供应商档案」分区，空态「暂无档案」+「新建供应商档案」 |
+| 客户档案编辑保存 | 内联表单（名称/类型/描述）→ 改名保存 → DB `customer_accounts.name` 变更 → 详情回显；改回后 DB 复原 |
+| 供应商档案新建表单 | 字段齐全（名称/类型/描述）+「取消/创建」；取消后回到空态 |
+
+> 前端拿到 `cardinality` / `visibleWhen` 依赖**后端进程重启**（Python 模块在启动时加载）；
+> yaml 改完若只重建前端，抽屉仍会按旧形状渲染两侧表格 —— 这是本轮实际踩到的第一个坑。
 
 ---
 
@@ -179,6 +189,24 @@ customer_account:create                    ❌ 命中数 0 ⇒ 非 admin 看不�
 6. **init 脚本 UPSERT 不删行** —— 存量菜单退役必须靠 migration（下架 `is_active=0` + 清孤儿权限行 + verify 断言）。
 7. **权限码双段式** —— 单段式静默失效，非 admin 看不到按钮。
 8. **`detail.tabs` 与 `detail.facets` 闸门不同** —— 声明前先确认父对象走哪个分支。
+9. **1:1 明细面必须渲染为表单，不是表格** —— 子表外键 `UNIQUE` 时声明 `cardinality: one`；
+   配 `pageSize` + `el-table` 是对基数的错误表达（表格永远最多一行）。行业惯例一致：
+   SAP S/4 的客户/供应商角色数据是 BP 事务内的角色页签字段组，D365 `CustTable/VendTable`
+   是表单页签，Oracle `HZ_CUST_ACCOUNTS` 是档案表单。
+10. **父对象「一实例一角色」⇒ 关联分区必须按 role 互斥渲染** —— 用
+    `visibleWhen: {field: role, equals: X}`；两侧恒显示等于让 UI 允许 DB 模型禁止的状态。
+    「role 可编辑」不构成恒显示的理由，role 漂移带来的孤儿数据属一致性校验职责。
+11. **同一对象族的基数口径要查 DB，不要照抄外部产品** —— Oracle `HZ_CUST_ACCOUNTS`
+    对 party 是 **N:1**（一个 party 可多账户），而本项目 `customer_accounts.relation_id`
+    是 `UNIQUE`（严格 1:1）；对标时不能把「业务关系明细」这个定性直接换算成同一基数。
+12. **跨组件复用字段元必须做控件类型归一化** —— schema 的 `type: string` 不是 `MetaForm`
+    认识的控件类型（它只认 `text` / `number` / `textarea` / `select` / `value_help` 等）。
+    直接把 `/ui-config` 的 `fields[].type` 喂给 `MetaForm`，`string` 字段会**只渲染 label、
+    没有输入框**（落不到任何 `v-else-if` 分支且无兜底）。凡是把字段元转成表单字段的地方，
+    都要显式映射一次（本轮：`string → text`）。
+13. **yaml 改动 = 后端重启 + 前端重建，两件事** —— `UIDetailFacet` 新字段由 Python 在
+    进程启动时加载；只重建前端时 API 仍下发旧形状（无 `cardinality` / `visibleWhen`），
+    前端只能落回默认分支，看起来像「代码没生效」。
 
 ---
 

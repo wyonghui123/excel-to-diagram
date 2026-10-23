@@ -841,6 +841,9 @@ def parse_ui_detail_facet(data: Dict[str, Any]) -> UIDetailFacet:
         display=data.get("display", "inline"),
         actions=actions,
         customFetcher=data.get("customFetcher", ""),
+        # [B 2026-10-23] 1:1 明细面与条件显示：见 UIDetailFacet 同名字段注释。
+        cardinality=data.get("cardinality", "many"),
+        visibleWhen=data.get("visibleWhen") or {},
     )
 
 

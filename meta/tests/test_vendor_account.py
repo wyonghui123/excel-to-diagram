@@ -75,9 +75,10 @@ class TestStructure:
         assert 'name' in _field_ids()
 
     def test_field_set_exactly_symmetric(self):
-        """字段集 = id / relation_id / vendor_type / name / description / created_at"""
+        """字段集 = id / relation_id / name / description / created_at
+        [2026-10-23] vendor_type 已删（对称口径，见 test_vendor_type_removed）。"""
         assert _field_ids() == {
-            'id', 'relation_id', 'name', 'vendor_type', 'description', 'created_at',
+            'id', 'relation_id', 'name', 'description', 'created_at',
         }
 
     def test_id_field(self):
@@ -99,11 +100,16 @@ class TestStructure:
         assert f['required'] is True
         assert f['max_length'] == 200
 
-    def test_vendor_type_enum(self):
-        f = _fields()['vendor_type']
-        assert f['nullable'] is True
-        assert f['max_length'] == 30
-        assert {e['value'] for e in f['enum_values']} == {'internal', 'external'}
+    def test_vendor_type_removed(self):
+        """[删除回归锁 2026-10-23] vendor_type 已删，不得复活（与客户侧 customer_type 同理由）。"""
+        assert 'vendor_type' not in _fields()
+        v = _raw()['ui_view_config']
+        assert 'vendor_type' not in {x['field'] for x in v['list']['columns']}
+        assert 'vendor_type' not in {
+            fid for s in v['form']['sections']
+            for c in (s.get('columns') or []) for fid in c.get('fields', [])}
+        assert 'vendor_type' not in {
+            f for facet in v['detail']['facets'] for f in facet.get('fields', [])}
 
     def test_description_nullable_text(self):
         f = _fields()['description']
@@ -142,11 +148,11 @@ class TestRelationUniqueEnforced:
         sync_schema_from_meta(ds, [obj])
 
         ds.insert('vendor_accounts', {
-            'relation_id': 1, 'name': 'A', 'vendor_type': 'external',
+            'relation_id': 1, 'name': 'A',
         })
         with pytest.raises(Exception):
             ds.insert('vendor_accounts', {
-                'relation_id': 1, 'name': 'B', 'vendor_type': 'internal',
+                'relation_id': 1, 'name': 'B',
             })
 
     def test_different_relation_id_allowed(self, tmp_path):
@@ -276,7 +282,7 @@ class TestSymmetryWithCustomerAccount:
         c = _raw(_CUSTOMER_YAML_PATH)['ui_view_config']
         assert set(v) == set(c) == {
             'skip_auto_menu', 'list', 'form', 'detail'}
-        # 列集合对称：vendor_type → customer_type（对供应侧做前缀替换后与客户侧比对）
+        # 列集合对称：供应侧对客户侧做前缀替换后比对（两侧同为name/description/created_at）
         assert [x['field'].replace('vendor_', 'customer_')
                 for x in v['list']['columns']] == \
             [x['field'] for x in c['list']['columns']]
@@ -317,12 +323,13 @@ class TestSymmetryWithCustomerAccount:
             assert bad not in cf
 
     def test_loaded_field_count_symmetric(self):
-        """目录级加载：两侧都是 6 显式 + 3 aspect 净增 = 9"""
+        """目录级加载：两侧都是 5 显式 + 3 aspect 净增 = 8
+        （[2026-10-23] 删 customer_type / vendor_type 后由 9 降为 8）"""
         from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
         vo = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
         co = load_yaml_file(_CUSTOMER_YAML_PATH, aspects_defs=aspects)
-        assert len(vo.fields) == len(co.fields) == 9
+        assert len(vo.fields) == len(co.fields) == 8
 
 
 # ────────────────────────────────────────
@@ -496,7 +503,7 @@ class TestPrerequisites:
         assert 'created_at' in cols
 
         ds.insert('vendor_accounts', {
-            'relation_id': 1, 'name': '供应商甲', 'vendor_type': 'external',
+            'relation_id': 1, 'name': '供应商甲',
         })
         rows = ds.query('SELECT relation_id, name, created_at FROM vendor_accounts')
         assert len(rows) == 1

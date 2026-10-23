@@ -71,13 +71,14 @@ class TestStructure:
         assert d['display_name_field'] == 'name'
         assert 'name' in _field_ids()
 
-    def test_field_set_is_exactly_four_business_fields(self):
-        """业务字段集 = id / relation_id / name / customer_type / description / created_at
+    def test_field_set_is_exactly_three_business_fields(self):
+        """业务字段集 = id / relation_id / name / description / created_at
 
         本期是结构占位，字段集刻意极小（spec §3.1.2）。
+        [2026-10-23] customer_type 已删（见 test_customer_type_removed）。
         """
         assert _field_ids() == {
-            'id', 'relation_id', 'name', 'customer_type', 'description', 'created_at',
+            'id', 'relation_id', 'name', 'description', 'created_at',
         }
 
     def test_id_field(self):
@@ -99,13 +100,23 @@ class TestStructure:
         assert f['type'] == 'string'
         assert f['required'] is True
 
-    def test_customer_type_enum(self):
-        """客户类型 = internal / external（Oracle CUSTOMER_TYPE 值域）"""
-        f = _fields()['customer_type']
-        assert f['nullable'] is True
-        assert f['max_length'] == 30
-        values = {e['value'] for e in f['enum_values']}
-        assert values == {'internal', 'external'}
+    def test_customer_type_removed(self):
+        """[删除回归锁 2026-10-23] customer_type 已删，不得复活。
+
+        删除依据：与 party_relation.internal_mark 同值域重复（后者为系统派生，正源）、
+        零消费者、对标失败（Oracle 是派生结果 / SAP 是配置驱动，我们只拿到壳）、
+        且是零消费的必填项。内外展示统一取 internal_mark。
+        """
+        assert 'customer_type' not in _fields()
+        raw = _raw()
+        list_fields = {c['field'] for c in raw['ui_view_config']['list']['columns']}
+        form_ids = {fid for s in raw['ui_view_config']['form']['sections']
+                    for c in (s.get('columns') or []) for fid in c.get('fields', [])}
+        detail_ids = {f for facet in raw['ui_view_config']['detail']['facets']
+                      for f in facet.get('fields', [])}
+        assert 'customer_type' not in list_fields
+        assert 'customer_type' not in form_ids
+        assert 'customer_type' not in detail_ids
 
     def test_description_nullable_text(self):
         f = _fields()['description']
@@ -147,11 +158,11 @@ class TestRelationUniqueEnforced:
         sync_schema_from_meta(ds, [obj])
 
         ds.insert('customer_accounts', {
-            'relation_id': 1, 'name': 'A', 'customer_type': 'external',
+            'relation_id': 1, 'name': 'A',
         })
         with pytest.raises(Exception):
             ds.insert('customer_accounts', {
-                'relation_id': 1, 'name': 'B', 'customer_type': 'internal',
+                'relation_id': 1, 'name': 'B',
             })
 
     def test_different_relation_id_allowed(self, tmp_path):
@@ -248,7 +259,7 @@ class TestNoStandaloneMenuButConfigComplete:
     def test_list_columns_declared(self):
         cols = _raw()['ui_view_config']['list']['columns']
         assert [c['field'] for c in cols] == [
-            'name', 'customer_type', 'description', 'created_at']
+            'name', 'description', 'created_at']
 
     def test_list_columns_exclude_technical_id(self):
         """裸 ID 缺陷的回归锁：技术主键不得进列集合"""
@@ -266,7 +277,6 @@ class TestNoStandaloneMenuButConfigComplete:
         ids = [fid for s in sections
                for c in (s.get('columns') or []) for fid in c.get('fields', [])]
         assert 'name' in ids
-        assert 'customer_type' in ids
 
     def test_form_excludes_relation_id(self):
         """relation_id 由分区入口预绑，用户无从选择 ⇒ 不进表单"""
@@ -444,7 +454,7 @@ class TestNamingDecision:
         assert obj is not None
         loaded = {f.id for f in obj.fields}
         assert {
-            'id', 'relation_id', 'name', 'customer_type', 'description',
+            'id', 'relation_id', 'name', 'description',
             'created_at',
         } <= loaded, f'显式字段缺失：{loaded}'
 
@@ -455,8 +465,8 @@ class TestNamingDecision:
         # aspect 展开的 actor 字段
         assert 'created_by' in loaded and 'updated_by' in loaded, (
             f'audit_aspect 应展开 created_by / updated_by，实际：{loaded}')
-        # 总数 = 6 显式 + 3 净增
-        assert len(obj.fields) == 9, f'实际展开 {len(obj.fields)} 个字段'
+        # 总数 = 5 显式 + 3 净增（[2026-10-23] 删 customer_type 后由 6 降为 5）
+        assert len(obj.fields) == 8, f'实际展开 {len(obj.fields)} 个字段'
 
     def test_updated_at_not_writable(self, tmp_path):
         """updated_at 为 virtual ⇒ INSERT 不得写该列（region / person_profile 同教训）"""

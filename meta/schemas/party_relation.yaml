@@ -603,17 +603,26 @@ ui_view_config:
           - internal_mark
           - group_id
           - status
-      # ── [档案分区 2026-10-22] 客户档案 / 供应商档案 ─────────────────────
+      # ── [档案分区 2026-10-22 / 形态修订 2026-10-23] 客户档案 / 供应商档案 ──
       # 落点裁定：这两个档案从「主数据下的独立菜单」收进本页的关联分区。
       #   理由：档案挂在本对象之上 1:1（relation_id 唯一），是「本条关系侧的属性」，
       #   不是与party 并列的主体实体；本对象自己的独立菜单也已于 2026-10-17 下架
       #   （理由：关系是连接两个 party 的边，平级入口属放错层），比关系更下一层的
       #   档案平级更说不通。
-      # 两个分区恒显示、按 role 二选一可见：
-      #   本行 role='customer' → 客户档案分区有值、供应商档案恒空，反之亦然。
-      #   两侧都渲染（不按 role 隐藏）—— role 是可编辑字段（value_help 字典化可扩张），
-      #   改role 后档案归属会漂移；若把分区按 role 隐藏，改完 role 那一侧分区会
-      #   立刻消失、用户失去入口。空分区显示「暂无」比隐藏更可解释。
+      # 【基数 = 1:1，渲染为内联表单而非表格】
+      #   两个档案表的 relation_id 均为 UNIQUE NOT NULL（DB 层强制），一条关系
+      #   最多一条档案 ⇒ cardinality: one，前端渲染字段组表单 + 新建/编辑/保存。
+      #   此前按集合面配 pageSize: 5 是错的（表格永远最多 1 行）。
+      #   行业惯例一致：SAP S/4 的客户/供应商角色数据是 BP 事务内的角色页签字段组，
+      #   D365 的 CustTable/VendTable 是表单页签，Oracle HZ_CUST_ACCOUNTS 是档案表单，
+      #   均不以数据网格呈现 1:1 的业务关系明细。
+      # 【按 role 互斥显示，不是两侧恒显示】
+      #   本对象「一实例一角色」（见文件头）：role 是唯一键四元组的一部分，
+      #   role='customer' 的关系只可能挂客户档案。故两个分区用 visibleWhen 按当前
+      #   行 role 二选一渲染。此前注释写的「两侧恒显示」是错的 —— 它让 UI 允许了
+      #   DB 模型禁止的状态（一条关系同时挂两类档案）。
+      #   role 可编辑带来的孤儿风险：role 改动后原档案会脱离可见分区，由
+      #   「档案与关系 role 一致性」校验项兜住（遗留项 TBD-16），不靠 UI 表达。
       # customFetcher = relation_accounts：平台关联端点不可用 —— associationFilters
       #   把过滤列写死为 `{父对象类型}_id`，本对象是 party_relation 会得
       #   `party_relation_id`，而两个档案表的列名是 `relation_id`（不匹配 ⇒ 后端忽略
@@ -625,8 +634,11 @@ ui_view_config:
         type: association
         association: customer_account
         customFetcher: relation_accounts
+        cardinality: one
+        visibleWhen:
+          field: role
+          equals: customer
         readonly: true
-        pageSize: 5
         actions:
           - key: create
             label: 新建客户档案
@@ -637,8 +649,11 @@ ui_view_config:
         type: association
         association: vendor_account
         customFetcher: relation_accounts
+        cardinality: one
+        visibleWhen:
+          field: role
+          equals: vendor
         readonly: true
-        pageSize: 5
         actions:
           - key: create
             label: 新建供应商档案

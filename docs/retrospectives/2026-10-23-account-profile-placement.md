@@ -61,6 +61,13 @@
 ⇒ 脚本退出时未提交改动被 SQLite 回滚，但照样打印「清理了 N 条冗余导航菜单」。
 ⇒ **全系统所有 stale 菜单/权限清理都不生效**（不只本次这两个）。
 
+### 5. 字段元直接复用进表单 —— `type: string` 没有控件
+
+1:1 内联表单直接拿 `/ui-config` 的 `fields[].type` 喂 `MetaForm`，而 `MetaForm` 只认
+`text` / `number` / `textarea` / `select` / `value_help` 等控件类型；schema 里 `name` 是
+`type: string` ⇒ 落不到任何 `v-else-if` 分支且无兜底 ⇒ **只渲染 label、没有输入框**。
+修法：字段元转表单字段时显式归一化（`string → text`）。
+
 ---
 
 ## 调试方法论：什么有效，什么无效
@@ -84,15 +91,17 @@
   （skip_auto_menu 仍 true / init 声明中不得再出现 menu_code 与 path / list.columns 精确四列 /
   排除 `id` / 排除 `relation_id` / form.sections / form 排除 relation_id / detail.facets / 权限双段式）
 - `test_vendor_account.py` — 对称性 4 个
-- `test_f2_party_relation.py` — `TestAccountSections` 6 个
+- `test_f2_party_relation.py` — `TestAccountSections` 9 个
   （两个分区已声明 / 必须用 customFetcher / 未声明平台 association / readonly + 仅 create /
-  权限双段式 / 两侧恒渲染）
+  权限双段式 / cardinality=one / 无 pageSize / 按 role 互斥 / loader 解析新字段）
 
-**缺口**：
+**验证结果与遗留缺口**：
 
-1. **未做浏览器端到端验证** —— 尚未起服务用 PlaywrightCLI 实测
-   「业务伙伴页 → 往来关系 tab → 行详情 → 两个档案分区渲染 + 新建/编辑」。
-   静态链路（yaml → loader → 模型 → `_make_json_safe` → DetailPage 闸门 → AssociationSection 分支）已逐段核对。
+1. **浏览器端到端验证（已补，PlaywrightCLI + 生产构建 preview）**：
+   - role=客户的关系详情：只出现「客户档案」分区（描述列表 + 编辑），无「供应商档案」，分区内**无表格**；
+   - role=供应商的关系详情：只出现「供应商档案」分区，空态「暂无档案」+「新建供应商档案」；
+   - 客户档案编辑保存：改名 → DB `customer_accounts.name` 变更 → 详情回显 → 改回复原；
+   - 供应商档案新建表单：字段齐全 +「取消/创建」，取消后回到空态。
 2. **init 脚本的清理假成功未修** —— 全系统级缺陷，属共享脚本，本次刻意不动（避免全系统 stale 菜单被物理删除的连带影响）。
 3. **`fetcher.spec.js` F1.3 / F2.2 两条断言已与实现脱节** —— 对 HEAD 版本做同一正则匹配**同样为 False**
    ⇒ 既有失败，不在本次范围内。
@@ -125,7 +134,7 @@
 | 5 | `v098` migration 退役存量菜单行 | ✅ 完成 |
 | 6 | 补 19 个测试用例 + 回归 | ✅ 完成 |
 | 7 | 经验沉淀（全局 2 份规范 + 项目 1 份经验档） | ✅ 完成 |
-| 8 | 浏览器端到端验证 | ⏳ 未做 |
+| 8 | 浏览器端到端验证 | ✅ 完成（PlaywrightCLI + 生产构建 preview） |
 | 9 | 修 `init_menu_permissions.py` 步骤 7.5/7.6 的 commit 位置 | ⏳ 未做（共享脚本，需 PM 决策） |
 | 10 | 修 `fetcher.spec.js` F1.3 / F2.2 陈旧断言 | ⏳ 未做（既有问题，另行处理） |
 

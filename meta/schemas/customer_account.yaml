@@ -27,8 +27,11 @@
 #      [生命周期 2026-10-07 修订注] 停用语义已落关系层（party_relation.status，两态瞬时开关 §5.4/D4），
 #      account 属其后 1:1 明细面，不重复建 status。原理由不成立：「与 internal_mark 重叠」否 ——
 #      internal_mark 是内｜外标记（非启停）；「无生效期则启停无意义」否 —— D4 已判停用=瞬时开关。
-#   ⑤ **customer_type 是纯标签，非配置驱动** —— SAP KTOKD（客户科目组）可驱动字段分派与校验，本对象不可
-#      ⇒ 不得宣称具备「按客户类型分派行为」能力;
+#   ⑤ ~~**customer_type 是纯标签，非配置驱动**~~ —— [字段删除 2026-10-23] 该字段已整体删除。
+#      它与 party_relation.internal_mark 同值域重复（后者是系统派生的正源）、零消费者、
+#      对标失败（Oracle 是派生结果、SAP 是配置驱动，取并集后只拿到壳）、
+#      且是零消费的必填项 ⇒ 按spec §3.1.2「无消费者的字段是负债」删除。
+#      内外展示统一取 internal_mark。
 #   ⑥ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 可写入孤儿行 ⇒ TBD-16;
 #   ⑦ 不挂任何权限维度（与 party_internal 的 org 维度绑定先例不同）⇒ 跨法人数据范围无法收窄;
 #   ⑧ 供应商侧（role='vendor'）已由同批第二步落地 —— 见 vendor_account.yaml（对称结构）⇒ TBD-15 关闭。
@@ -159,31 +162,18 @@ fields:
       relation: party_relation
       multiple: false
 
-  # 客户分类轴：对标 Oracle HZ_CUST_ACCOUNTS.CUSTOMER_TYPE（Internal / External）
-  # ⚠️ 与 SAP KTOKD（客户科目组）的差异：SAP 是**配置驱动**（决定该客户走哪些字段与校验），
-  #    本字段是**纯标签** ⇒ 不得宣称具备「按类型分派字段/校验」能力（spec D6 留痕）
-  - id: customer_type
-    name: 客户类型
-    type: string
-    db_column: customer_type
-    nullable: true
-    max_length: 30
-    description: 客户类型 internal/external（内部客户 / 外部客户）
-    enum_values:
-      - value: internal
-        label: 内部客户
-        color: info
-      - value: external
-        label: 外部客户
-        color: default
-    semantics:
-      meaning: 客户内外类型（纯标签，非配置驱动）
-      filterable: true
-      filter_type: enum
-      filter_label: 客户类型
-      filter_scope: local
-    ui:
-      widget: select
+  # [字段删除 2026-10-23] 原customer_type（内部客户/外部客户）已删。
+  #   删除依据（spec 2026-10-06 §3.1.2 的既定原则「无消费者的字段是负债」）：
+  #   ① 语义重复 —— internal/external 与 party_relation.internal_mark 同值域，而后者才是
+  #      正源（由系统按对手侧 parties.source 派生，ui.editable:false，人工改不了）。
+  #      一派生一手填 ⇒ 可不一致且无任何约束。
+  #   ② 零消费者 —— 全库检索无任何业务逻辑读它，仅出现在 schema / 测试 / 前端列名映射。
+  #   ③ 立项理由本身是对标失败 —— Oracle CUSTOMER_TYPE 语义是「是否关联方」（派生结果），
+  #      SAP KTOKD 语义是「归哪一类」（配置驱动，值域非 internal/external）；spec 把两者
+  #      取并集后只拿到壳，既无 Oracle 的派生逻辑，也无 SAP 的配置能力（§6缺口6 已登记）。
+  #   ④ 它是必填项 —— 零消费的必填项等于每次建档案都要用户为无意义的选择费心。
+  #   内外展示统一取父关系 party_relation.internal_mark。
+  #   ⚠️ DB 列 customer_type 保留不DROP（避免迁移风险），只是不再展示与录入。
 
   - id: name
     name: 客户档案名称
@@ -316,11 +306,6 @@ ui_view_config:
     columns:
       - field: name
         width: 220
-      - field: customer_type
-        width: 110
-        filterable: true
-        filter_type: enum
-        render_as: tag
       - field: description
         width: 240
       - field: created_at
@@ -346,7 +331,6 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [name]
-          - fields: [customer_type]
       - title: 其他
         columns:
           - fields: [description]
@@ -356,5 +340,4 @@ ui_view_config:
         type: fieldGroup
         fields:
           - name
-          - customer_type
           - description
