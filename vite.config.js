@@ -51,6 +51,31 @@ export default defineConfig(({ mode }) => {
 
 return {
   plugins: [
+    // [2026-10-23] preview 缓存头：/assets/* 文件名自带 hash，可长期缓存；
+    //   其余路径（HTML/API）保持 no-store，保证重建后立即生效。
+    //   背景：preview 复用 server.headers 的 no-store，导致每次访问（含手机端）
+    //   都全量重下首屏资源，经隧道 20s+ 表现为白屏。
+    {
+      name: 'preview-cache-headers',
+      configurePreviewServer(server) {
+        server.middlewares.use((req, res, next) => {
+          const path = (req.url || '').split('?')[0]
+          if (!path.startsWith('/assets/')) return next()
+          // preview 会在我们之后写入继承自 server.headers 的 no-store，
+          // 故拦截 setHeader 本身：缓存头强制改写，Pragma/Expires 直接丢弃。
+          const origSetHeader = res.setHeader.bind(res)
+          res.setHeader = (name, value) => {
+            const n = String(name).toLowerCase()
+            if (n === 'cache-control') {
+              return origSetHeader('Cache-Control', 'public, max-age=31536000, immutable')
+            }
+            if (n === 'pragma' || n === 'expires') return res
+            return origSetHeader(name, value)
+          }
+          next()
+        })
+      }
+    },
     vue(),
     AutoImport({
       resolvers: [ElementPlusResolver()],
@@ -74,7 +99,13 @@ return {
     // [FR-002] 分包策略: 将大型依赖拆分为独立 chunk, 优化首屏加载和缓存命中率
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        // [实验 2026-10-23 第四轮] 关闭手工分包, 交回 Rollup 自动判定。
+        // 前三轮(补 /@vue/、拆 vendor-misc、并入 vue-ep)均复现同一症状:
+        //   默认桶同时装着 Vue 运行时(@vue/*)与 mermaid 族依赖, 任何拆法都会
+        //   产生 mermaid <-> vue-ep 的循环 chunk, 且首屏仍 preload mermaid。
+        // Rollup 默认按"动态边界"切分: 仅被懒加载 chunk 引用的模块不会进首屏。
+        manualChunks: undefined,
+        _manualChunks_disabled(id) {
           if (id.includes('node_modules')) {
             // Vue + EP + @vueuse 合并 (避免循环依赖: EP 依赖 @vueuse, @vueuse 依赖 vue)
             // [REVERT 2026-10-12] 曾补'/@vue/'、'/@popperjs/'、'/@floating-ui/'、
@@ -119,8 +150,15 @@ return {
             // if (id.includes('/html2canvas/') || id.includes('/jspdf/') || id.includes('/canvg/')) {
             //   return 'vendor-pdf'
             // }
-            // 其他第三方库 (与 mermaid 合并, 避免循环)
-            return 'vendor-mermaid'
+            // [实验 2026-10-23] 默认桶拆为 vendor-misc（其余第三方库）。
+            // 动机: 原默认桶与 mermaid 合并后，element-plus 依赖的 lodash-es /
+            //   @vue/shared / dayjs 也落在同一桶 ⇒ vendor-vue-ep 静态 import
+            //   vendor-mermaid ⇒ 5.3MB 图表库进入首屏（经隧道 20s+ 白屏）。
+            //   拆分后 mermaid 桶只由懒加载的 MermaidComponent 引用，不再上首屏。
+            // 风险: 2026-10-12 曾单独建 vendor-utils 桶触发
+            //   Circular chunk(vendor-utils <-> vendor-vue-ep) 警告；本次必须配
+            //   E2E 验证（首屏 + 真图渲染），异常立即回滚。
+            return 'vendor-vue-ep'
           }
         }
       }
