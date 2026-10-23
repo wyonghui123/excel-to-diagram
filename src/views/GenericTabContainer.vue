@@ -159,6 +159,13 @@ const LOCATION_MANAGEMENT_LOADER = () => import('@/views/MasterData/LocationMana
 // 与位置管理同步改为单页 hub：左树 = 国/省/市/区四级区划树，右表 = 区划列表。
 const REGION_MANAGEMENT_LOADER = () => import('@/views/MasterData/RegionManagement.vue')
 
+// [2026-10-23] "作业日历管理"（calendar-list）升级为单页 hub：
+//   object_types 由 ['calendar'] 扩为 ['calendar','calendar_day']，渲染
+//   CalendarManagement.vue —— 左树 = 日历树（基准/派生），右表 = 作业日历 / 日历例外日。
+//   calendar_day 原有一条平级菜单 calendar_day-list（v103 下架），它挂在
+//   calendar 之下（parent_object=calendar / calendar_id），平级属「放错层」。
+const CALENDAR_MANAGEMENT_LOADER = () => import('@/views/MasterData/CalendarManagement.vue')
+
 function decorateComponentTab(tab) {
   if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
     return { ...tab, component: ORG_MANAGEMENT_LOADER }
@@ -174,6 +181,9 @@ function decorateComponentTab(tab) {
   }
   if (tab.key === 'region-list' || tab.menu_code === 'region-list') {
     return { ...tab, component: REGION_MANAGEMENT_LOADER }
+  }
+  if (tab.key === 'calendar-list' || tab.menu_code === 'calendar-list') {
+    return { ...tab, component: CALENDAR_MANAGEMENT_LOADER }
   }
   return tab
 }
