@@ -150,6 +150,11 @@ const MATERIAL_MANAGEMENT_LOADER = () => import('@/views/MasterData/MaterialMana
 // 与物料管理的差异: party 不直挂 group, 左树→右表的过滤在 PartyManagement 内做两段桥接。
 const PARTY_MANAGEMENT_LOADER = () => import('@/views/MasterData/PartyManagement.vue')
 
+// [2026-10-23] "位置管理"原为自动生成的 object_list 菜单（location-list），
+// 与组织/物料不一致（无左侧树）。改为单页 hub 后渲染 LocationManagement.vue ——
+// 左树注入位置树（site/warehouse/zone/bin），右表位置列表。映射方式同物料管理。
+const LOCATION_MANAGEMENT_LOADER = () => import('@/views/MasterData/LocationManagement.vue')
+
 function decorateComponentTab(tab) {
   if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
     return { ...tab, component: ORG_MANAGEMENT_LOADER }
@@ -159,6 +164,9 @@ function decorateComponentTab(tab) {
   }
   if (tab.key === 'party-management' || tab.menu_code === 'party-management') {
     return { ...tab, component: PARTY_MANAGEMENT_LOADER }
+  }
+  if (tab.key === 'location-list' || tab.menu_code === 'location-list') {
+    return { ...tab, component: LOCATION_MANAGEMENT_LOADER }
   }
   return tab
 }

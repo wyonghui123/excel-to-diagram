@@ -571,6 +571,51 @@ def init_menu_permissions(db_path):
                 'message': '建议分配物料与物料组数据权限'
             })
         },
+        {
+            # [LOC-MENU 2026-10-23] 位置管理 —— 由自动生成菜单升级为「左树 + 列表」的 MOMP 页
+            #   背景: location-list 原先是 menu_auto_generator 自动生成的 object_list 菜单
+            #   (auto_generated=1, 无左树), 与组织管理 / 物料管理形态不一致。location 本身
+            #   就是统一自引用树 (site → warehouse → zone → bin), 完全具备左树条件。
+            #   page_type=multi_object_hub + menu_path 保持 '/location':
+            #     - dynamicRoutes 按 multi_object_hub 注册 /location → GenericTabContainer
+            #     - GenericTabContainer 对 menu_code='location-list' 精确映射
+            #       → LocationManagement.vue (MOMP 泛化页, 左树 = 位置树)
+            #     - 路径不变 ⇒ object_type_route_map['location'] 仍为 '/location',
+            #       FK 链接 (FkLinkField) 落点不受影响, 存量书签也不失效
+            #   primary_object_type/object_types 仍为 location (单类型页, 同 org-management)。
+            #   本页为手工声明 (auto_generated=0): 一旦入库, 生成器的 INSERT OR IGNORE
+            #   不会覆盖它; 存量行由迁移 v099 改写 (生成器只插不改, init 的 UPSERT 会改)。
+            'menu_code': 'location-list',
+            'menu_name': '位置管理',
+            'menu_path': '/location',
+            'icon': 'Box',
+            'color': '#0ea5e9',
+            'sort_order': 67,
+            'parent_menu': 'master-data',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'location',
+            'object_types': json.dumps(['location']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'location', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                # 只声明 permissions 表里真实存在的 5 条 (双段式 {bo}:{bo}_{action})。
+                # 自动生成的老行里带 location:import / location:export, 但这两个权限码
+                # 在 permissions 表并不存在 ⇒ 前端路由守卫 (every 判定) 会因缺失码
+                # 把整页拦下。故此处按实际存在的权限码收敛。
+                'location:location_create',
+                'location:location_read',
+                'location:location_update',
+                'location:location_delete',
+                'location:location_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['location'],
+                'message': '建议分配位置数据权限'
+            })
+        },
         # === [档案下架 2026-10-22] 客户档案 / 供应商档案独立菜单已移除 ===
         #   这两条菜单 2026-10-11 由用户拍板开为独立入口, 现按方案 A 下架, 落点改为
         #   party_relation 详情页的两个关联分区（party_relation.yaml 的 detail.facets
