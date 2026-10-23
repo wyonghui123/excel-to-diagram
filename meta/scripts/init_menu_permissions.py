@@ -616,6 +616,40 @@ def init_menu_permissions(db_path):
                 'message': '建议分配位置数据权限'
             })
         },
+        {
+            # [REGION-MENU 2026-10-23] 行政区划管理 —— 同位置管理, 由自动生成的 object_list
+            #   菜单升级为「左树 + 列表」MOMP 页。region 是国/省/市/区四级自引用树
+            #   (parent_id + level 枚举), 具备左树条件; 原光板列表与组织/物料/位置不一致。
+            #   page_type=multi_object_hub, menu_path 保持 '/region' ⇒ FK 落点与书签不变。
+            'menu_code': 'region-list',
+            'menu_name': '行政区划管理',
+            'menu_path': '/region',
+            'icon': 'Box',
+            'color': '#6366f1',
+            'sort_order': 69,
+            'parent_menu': 'master-data',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'region',
+            'object_types': json.dumps(['region']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'region', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                # 同 location-list: 老行里的 region:import / region:export 在 permissions
+                # 表并不存在, 路由守卫 every 判定会把整页拦下, 故收敛为真实存在的 5 条。
+                'region:region_create',
+                'region:region_read',
+                'region:region_update',
+                'region:region_delete',
+                'region:region_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['region'],
+                'message': '建议分配行政区划数据权限'
+            })
+        },
         # === [档案下架 2026-10-22] 客户档案 / 供应商档案独立菜单已移除 ===
         #   这两条菜单 2026-10-11 由用户拍板开为独立入口, 现按方案 A 下架, 落点改为
         #   party_relation 详情页的两个关联分区（party_relation.yaml 的 detail.facets

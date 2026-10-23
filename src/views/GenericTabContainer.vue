@@ -155,6 +155,10 @@ const PARTY_MANAGEMENT_LOADER = () => import('@/views/MasterData/PartyManagement
 // 左树注入位置树（site/warehouse/zone/bin），右表位置列表。映射方式同物料管理。
 const LOCATION_MANAGEMENT_LOADER = () => import('@/views/MasterData/LocationManagement.vue')
 
+// [2026-10-23] "行政区划管理"同为自动生成的 object_list 菜单（region-list），
+// 与位置管理同步改为单页 hub：左树 = 国/省/市/区四级区划树，右表 = 区划列表。
+const REGION_MANAGEMENT_LOADER = () => import('@/views/MasterData/RegionManagement.vue')
+
 function decorateComponentTab(tab) {
   if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
     return { ...tab, component: ORG_MANAGEMENT_LOADER }
@@ -167,6 +171,9 @@ function decorateComponentTab(tab) {
   }
   if (tab.key === 'location-list' || tab.menu_code === 'location-list') {
     return { ...tab, component: LOCATION_MANAGEMENT_LOADER }
+  }
+  if (tab.key === 'region-list' || tab.menu_code === 'region-list') {
+    return { ...tab, component: REGION_MANAGEMENT_LOADER }
   }
   return tab
 }

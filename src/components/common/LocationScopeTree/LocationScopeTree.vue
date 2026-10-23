@@ -68,7 +68,6 @@
               :type="typeTagOf(data.locationType)"
               disable-transitions
             >{{ typeLabelOf(data.locationType) }}</el-tag>
-            <span v-if="data.code" class="lst-node-code">{{ data.code }}</span>
           </span>
         </template>
       </el-tree>
@@ -423,11 +422,6 @@ defineExpose({
   flex-shrink: 0;
   transform: scale(0.9);
   transform-origin: right center;
-}
-.lst-node-code {
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
 }
 .lst-loading,
 .lst-empty {

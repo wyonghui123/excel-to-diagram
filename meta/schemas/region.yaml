@@ -308,9 +308,6 @@ ui_view_config:
         width: 90
         filterable: true
         filter_type: select
-      - field: updated_at
-        width: 160
-        format: datetime
     selection:
       enabled: true
       mode: multiple
