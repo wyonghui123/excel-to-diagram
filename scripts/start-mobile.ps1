@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+﻿﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     启动手机可访问的生产预览 + cloudflared 公网隧道。
@@ -113,6 +113,26 @@ if ($SkipBuild) {
 
 # --- 3. 启动 preview ---
 Write-Host "[2/3] 启动 preview: http://127.0.0.1:$PreviewPort ..." -ForegroundColor Yellow
+
+# [FIX 2026-10-24] 先清理端口占用。
+#   历史故障：旧 preview 仍占 4173 时，新进程静默失败，而探活打到旧进程上，
+#   脚本误报"就绪"，实际服务的还是上一次构建 —— 本轮排查中就踩到过一次，
+#   表现为"改完代码但页面行为没变"，白费一整轮构建与验证。
+$busy = Get-NetTCPConnection -LocalPort $PreviewPort -State Listen -ErrorAction SilentlyContinue
+if ($busy) {
+    foreach ($c in $busy) {
+        Write-Host "  [清理] 端口 $PreviewPort 被 PID $($c.OwningProcess) 占用，先终止" -ForegroundColor Yellow
+        Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue
+    }
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 500
+        if (-not (Get-NetTCPConnection -LocalPort $PreviewPort -State Listen -ErrorAction SilentlyContinue)) { break }
+    }
+    if (Get-NetTCPConnection -LocalPort $PreviewPort -State Listen -ErrorAction SilentlyContinue) {
+        throw "端口 $PreviewPort 清理失败，仍有进程监听，请手工处理后重试。"
+    }
+}
+
 $env:VITE_PREVIEW_PORT = "$PreviewPort"
 # [FIX 2026-10-19] 必须显式把本次探活的后端端口注入 preview 进程。
 #   历史: 进程环境里残留的 BACKEND_PORT (如被 setx 持久化的 3011) 会覆盖
@@ -122,22 +142,33 @@ $env:VITE_PREVIEW_PORT = "$PreviewPort"
 $env:BACKEND_PORT = "$BackendPort"
 
 # stdout/stderr 必须分文件，同一文件 Start-Process 会报错
-$previewOut = Join-Path $runtimeDir 'mobile-preview.out.log'
-$previewErr = Join-Path $runtimeDir 'mobile-preview.err.log'
+# [FIX 2026-10-24] 日志名带本次运行时间戳。
+#   历史问题：固定文件名会被上一轮 cloudflared/preview 进程占着，launch_detached
+#   只能回退到带时间戳的新文件；但本脚本仍会去读旧的固定文件，于是把**上一次**
+#   的隧道地址当成这次的地址打印出来（本轮实测连打三次同一个旧域名）。
+#   让两边都用同一个带时间戳的名字，朗读路径与实际输出路径就一致了。
+$runStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$previewOut = Join-Path $runtimeDir "mobile-preview.$runStamp.out.log"
+$previewErr = Join-Path $runtimeDir "mobile-preview.$runStamp.err.log"
 
-$previewProc = Start-Process -FilePath 'npm.cmd' `
-                              -ArgumentList 'run', 'preview' `
-                              -WorkingDirectory $RepoRoot `
-                              -RedirectStandardOutput $previewOut `
-                              -RedirectStandardError $previewErr `
-                              -PassThru -WindowStyle Hidden
+# [FIX 2026-10-24] 改用 launch_detached.ps1 拉起，而不是本进程内的 Start-Process。
+#   原因：Trae 终端工具在 agent-tool-host.exe 的 job object 下派生进程，并等待
+#   **整棵后代进程树** 退出才判定本次调用完成。Start-Process 出的子进程父级仍是
+#   当前 powershell.exe，仍在同一个 job 内，于是 preview / cloudflared 这类长驻
+#   进程会把终端调用一直拖住（实测单次最长 1353.8 分钟，累计滞留 9146 分钟）。
+#   launch_detached.ps1 走 WMI Win32_Process.Create，父进程为 WmiPrvSE.exe
+#   （系统服务），完全脱离 job，终端调用立即返回。
+$launchDetached = Join-Path $RepoRoot 'scripts/launch_detached.ps1'
+
+$previewCmd = 'npm.cmd run preview'
+$previewProcId = & $launchDetached -CommandLine $previewCmd -WorkingDirectory $RepoRoot `
+    -StdOut $previewOut -StdErr $previewErr -PassThruPid | Select-Object -Last 1
 
 $ready = $false
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
-    if ($previewProc.HasExited) {
+    if (-not (Get-Process -Id $previewProcId -ErrorAction SilentlyContinue)) {
         $err = Get-Content $previewErr -Raw -ErrorAction SilentlyContinue
-        Stop-Process -Id $previewProc.Id -Force -ErrorAction SilentlyContinue
         throw "preview 进程已退出。stderr: $err"
     }
     try {
@@ -146,23 +177,63 @@ for ($i = 0; $i -lt 30; $i++) {
     } catch { }
 }
 if (-not $ready) {
-    Stop-Process -Id $previewProc.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $previewProcId -Force -ErrorAction SilentlyContinue
     throw "preview 未在 30s 内就绪。日志: $previewErr"
 }
-Write-Host "preview 就绪 (PID $($previewProc.Id))" -ForegroundColor Green
+Write-Host "preview 就绪 (PID $previewProcId)" -ForegroundColor Green
+
+# [FIX 2026-10-24] 校验「服务的确实是本次构建」。
+#   仅凭端口 200 无法区分新旧进程（见上一步注释）。dist/index.html 里引用的
+#   入口 JS 文件名带内容哈希，逐轮构建都会变；若对外返回的 HTML 里找不到它，
+#   就说明命中的是旧服务，必须直接失败，不能继续浪费一轮验证。
+$distIndexPath = Join-Path $RepoRoot 'dist/index.html'
+$distIndex = [System.IO.File]::ReadAllText($distIndexPath, [System.Text.UTF8Encoding]::new($false))
+$servedHtml = (Invoke-WebRequest -Uri "http://127.0.0.1:$PreviewPort/" -UseBasicParsing -TimeoutSec 5).Content
+if ($distIndex -match 'assets/(index-[A-Za-z0-9_-]+\.js)') {
+    $entryAsset = $matches[1]
+    if ($servedHtml -notmatch [regex]::Escape($entryAsset)) {
+        throw "preview 返回的不是最新构建（缺少入口 $entryAsset）。请检查端口占用后重试。"
+    }
+    Write-Host "  [校验] 服务端已是本次构建 ($entryAsset)" -ForegroundColor DarkGray
+}
 
 # --- 4. 启动 cloudflared 隧道 ---
-$tunnelOut = Join-Path $runtimeDir 'mobile-tunnel.out.log'
-$tunnelErr = Join-Path $runtimeDir 'mobile-tunnel.err.log'
-Remove-Item $tunnelOut, $tunnelErr -ErrorAction SilentlyContinue
+# [FIX 2026-10-24] 启动前清理本项目遗留的 cloudflared 进程。
+#   为什么必须自动做：脚本现在脱离 job 运行，进程不会随终端调用结束而退出，
+#   每次重跑都会多留一条隧道（实测 20 分钟内累积 4 条）。旧隧道指向同一个
+#   localhost 端口，仍能访问、仍在占用免费隧道带宽，且地址已不再打印，
+#   留在机器上只会造成「到底哪个链接才是当前环境」的混乱。
+#   只清理 CommandLine 里带本项目 cloudflared 路径的进程，不碰其他项目/系统的隧道。
+$staleTunnels = @(Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$CloudflaredPath*" -and $_.CommandLine -like '*--url*' })
+if ($staleTunnels.Count -gt 0) {
+    foreach ($p in $staleTunnels) {
+        $tpid = [int]$p.ProcessId
+        Write-Host "  [清理] 遗留隧道 PID $tpid，先终止" -ForegroundColor Yellow
+        Stop-Process -Id $tpid -Force -ErrorAction SilentlyContinue
+    }
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Milliseconds 300
+        $still = @(Get-Process -Id ($staleTunnels | ForEach-Object { [int]$_.ProcessId }) -ErrorAction SilentlyContinue)
+        if ($still.Count -eq 0) { break }
+    }
+    $still = @(Get-Process -Id ($staleTunnels | ForEach-Object { [int]$_.ProcessId }) -ErrorAction SilentlyContinue)
+    if ($still.Count -gt 0) {
+        Write-Warning "有 $($still.Count) 个遗留隧道未能终止（PID: $($still.Id -join ', ')），继续启动新隧道。"
+    }
+}
+
+# [FIX 2026-10-24] 同 preview：隧道日志也必须带本次运行时间戳。
+#   否则上一轮 cloudflared 还占着固定名文件时，本次输出会被写到新文件，
+#   而这里读的仍是旧文件 → 把上一次的域名当成这次的地址打印出去。
+$tunnelOut = Join-Path $runtimeDir "mobile-tunnel.$runStamp.out.log"
+$tunnelErr = Join-Path $runtimeDir "mobile-tunnel.$runStamp.err.log"
 
 Write-Host '[3/3] 启动 cloudflared 隧道 ...' -ForegroundColor Yellow
-$tunnelProc = Start-Process -FilePath $CloudflaredPath `
-                              -ArgumentList 'tunnel', '--url', "http://localhost:$PreviewPort", '--no-autoupdate' `
-                              -WorkingDirectory $RepoRoot `
-                              -RedirectStandardOutput $tunnelOut `
-                              -RedirectStandardError $tunnelErr `
-                              -PassThru -WindowStyle Hidden
+# [FIX 2026-10-24] 同 preview：走脱离 job 的启动方式，避免隧道进程把终端调用拖住。
+$tunnelCmd = '& ''' + $CloudflaredPath + ''' tunnel --url http://localhost:' + $PreviewPort + ' --no-autoupdate'
+$tunnelProcId = & $launchDetached -CommandLine $tunnelCmd -WorkingDirectory $RepoRoot `
+    -StdOut $tunnelOut -StdErr $tunnelErr -PassThruPid | Select-Object -Last 1
 
 # quick tunnel 的分配地址打在 stderr，形如
 #   https://carpet-accounting-critics-citations.trycloudflare.com
@@ -172,10 +243,10 @@ Write-Host '等待隧道分配地址 ...' -ForegroundColor Yellow
 $publicUrl = $null
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 2
-    if ($tunnelProc.HasExited) {
+    if (-not (Get-Process -Id $tunnelProcId -ErrorAction SilentlyContinue)) {
         $e = Get-Content $tunnelErr -Raw -ErrorAction SilentlyContinue
-        Stop-Process -Id $previewProc.Id -Force -ErrorAction SilentlyContinue
-        throw "cloudflared 已退出 (exit=$($tunnelProc.ExitCode))。stderr: $e"
+        Stop-Process -Id $previewProcId -Force -ErrorAction SilentlyContinue
+        throw "cloudflared 已退出。stderr: $e"
     }
     $log = Get-Content $tunnelErr -Raw -ErrorAction SilentlyContinue
     if ($log) {
@@ -185,8 +256,8 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if (-not $publicUrl) {
-    Stop-Process -Id $previewProc.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $tunnelProc.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $previewProcId -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $tunnelProcId -Force -ErrorAction SilentlyContinue
     throw "60s 内未解析到公网地址。日志: $tunnelErr"
 }
 
@@ -239,18 +310,17 @@ Write-Host ' 需要先登录账号，隧道不会自动登录。' -ForegroundCol
 Write-Host ' 首次加载需 30-60 秒(隧道带宽限制)，请勿提前刷新。' -ForegroundColor Yellow
 Write-Host ' 生产构建，无热更新：改代码后需重跑本脚本。' -ForegroundColor Yellow
 Write-Host ' 地址每次重启都会变，不要保存到书签。' -ForegroundColor Yellow
-Write-Host ' 这是公网地址，拿到链接的人都能访问，调试完请 Ctrl+C。' -ForegroundColor Red
+Write-Host ' 这是公网地址，拿到链接的人都能访问，调试完请停掉隧道进程。' -ForegroundColor Red
 Write-Host ''
-Write-Host " preview PID=$($previewProc.Id)   tunnel PID=$($tunnelProc.Id)" -ForegroundColor DarkGray
+Write-Host " preview PID=$previewProcId   tunnel PID=$tunnelProcId" -ForegroundColor DarkGray
 Write-Host " 日志: $tunnelErr" -ForegroundColor DarkGray
 Write-Host ''
 
-# --- 7. 常驻，Ctrl+C 清理 ---
-try {
-    while (-not $tunnelProc.HasExited) { Start-Sleep -Seconds 3 }
-    Write-Warning "隧道进程已退出 (exit=$($tunnelProc.ExitCode))"
-} finally {
-    Write-Host '正在清理 ...'
-    Stop-Process -Id $previewProc.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $tunnelProc.Id -Force -ErrorAction SilentlyContinue
-}
+# --- 7. 退出（不阻塞常驻）---
+# [FIX 2026-10-24] 原来这里 while (-not $tunnelProc.HasExited) 常驻阻塞，
+#   脚本要等隧道退出才返回。隧道现在是脱离 job 的独立进程，脚本无需再等；
+#   常驻等待会把终端调用拖住（实测单次最长 1353.8 分钟）。
+#   清理方式：按上面打印的 PID 手动 Stop-Process，或跑 scripts/stop-*.ps1。
+Write-Host ' preview 与隧道已在后台运行，本脚本直接返回。' -ForegroundColor DarkGray
+Write-Host ' 需要停止时按上面的 PID 执行 Stop-Process，或运行 scripts/service_manager.ps1。' -ForegroundColor DarkGray
+Write-Host ''

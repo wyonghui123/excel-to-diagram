@@ -1,4 +1,4 @@
-# service_manager.ps1
+﻿﻿# service_manager.ps1
 # 统一服务管理器 - PowerShell 版本
 # 用法: .\scripts\service_manager.ps1 [status|start|stop|restart|force-restart] [-Port <3010-3019>]
 # 用法: python scripts/service_manager.py [status|start|stop|restart] [--port <port>]
@@ -111,7 +111,9 @@ if (-not (Test-Path $viteBinPath)) {
 
 $services = @{
     # 🆕 v3.20: 改用 node 直接启动 (was: cmd.exe /c npm run dev = cmd 弹窗源!)
-    frontend = @{ port=$vitePort;  name='Frontend (Vite)';     cmd=$nodeExe; args=@($viteBinPath, '--port', $vitePort.ToString(), '--host', '0.0.0.0'); wait=8 }
+    # [FIX 2026-10-24] wait 8 -> 20 秒: vite 冷启动要重新 optimize dependencies,
+    #   实测首次监听需 12 秒 (日志 "Re-optimizing dependencies"), 8 秒必然误判启动失败。
+    frontend = @{ port=$vitePort;  name='Frontend (Vite)';     cmd=$nodeExe; args=@($viteBinPath, '--port', $vitePort.ToString(), '--host', '0.0.0.0'); wait=20 }
     # 🆕 v3.9 备选: gevent_server.py (真流式 SSE, 但 SQLite 锁问题)
     # 当前: waitress_server.py (8 线程, 稳定)
     # 可手动切换: 改 backend 行的 cmd 和 args
@@ -586,7 +588,10 @@ function Start-Service($svcName) {
     Kill-AllOrphanBackends
 
     Write-Log "Starting $($cfg.name)..."
-    $argStr = ($cfg.args -join ' ')
+    # [FIX 2026-10-24] 参数逐个加引号：原先 -join ' ' 后交给 Start-Process 的
+    #   -ArgumentList，路径含空格会被拆开；现在交给 launch_detached.ps1 走
+    #   PowerShell 调用运算符，参数需自带引号才能保住空格。
+    $argStr = (($cfg.args | ForEach-Object { '"' + $_ + '"' }) -join ' ')
 
     try {
         # 🆕 v3.8: waitress 模式 - FLASK_DEBUG 必须 false (生产模式)
@@ -603,10 +608,19 @@ function Start-Service($svcName) {
         # 🆕 v3.18: 注入 AGENT_PORT 给 waitress_server.py 用
         $env:AGENT_PORT = $port.ToString()
 
-        $proc = Start-Process -FilePath $cfg.cmd -ArgumentList $argStr `
-            -WorkingDirectory $root -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-            -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle on Windows)
+        # [FIX 2026-10-24] 用 launch_detached.ps1 启动，而不是本进程内的 Start-Process。
+        #   Trae 终端工具在 agent-tool-host.exe 的 job object 下派生进程，并等待
+        #   **整棵后代进程树** 退出才判定调用完成。Start-Process 出的子进程父级仍是
+        #   当前 powershell.exe，仍在同一个 job 内，于是 waitress / vite 这类长驻服务
+        #   会把终端调用一直拖住（实测单次最长 1353.8 分钟，累计滞留 9146 分钟）。
+        #   launch_detached.ps1 走 WMI Win32_Process.Create，父进程为 WmiPrvSE.exe
+        #   （系统服务），完全脱离 job，终端调用立即返回。
+        $launchDetached = Join-Path $root 'scripts/launch_detached.ps1'
+        $svcOut = "$root\scripts\logs\$svcName.out"
+        $svcErr = "$root\scripts\logs\$svcName.err"
+        $svcCmd = '& ''' + $cfg.cmd + ''' ' + $argStr
+        $procId = & $launchDetached -CommandLine $svcCmd -WorkingDirectory $root `
+            -StdOut $svcOut -StdErr $svcErr -PassThruPid | Select-Object -Last 1
 
         # wait for port
         $ready = $false
@@ -616,16 +630,24 @@ function Start-Service($svcName) {
         }
 
         if ($ready) {
+            # [FIX 2026-10-24] status.json 记「实际监听端口的进程 PID」，而不是
+            #   launch_detached 返回的 wrapper PID。脱离启动后 wrapper 会再派生出
+            #   真正的服务进程（如 pythonw.exe），两者不是同一个 PID；
+            #   记错会导致 status 报 LISTENER MISMATCH / ORPHAN 误判。
+            $listenerPid = (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                            Select-Object -First 1).OwningProcess
+            $recordPid = if ($listenerPid) { $listenerPid } else { $procId }
+
             # Update status file
             $data = Get-StatusData
             if (-not $data) { $data = @{} }
             $data | Add-Member -NotePropertyName $svcName -NotePropertyValue @{
                 port = $port
-                pid = $proc.Id
+                pid = $recordPid
                 started_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             } -Force
             Set-StatusData $data
-            Write-Log "  $($cfg.name) started (PID=$($proc.Id), port=$port)"
+            Write-Log "  $($cfg.name) started (PID=$recordPid, port=$port)"
             return $true
         } else {
             Write-Log "  $($cfg.name) process spawned but port $port not responding"
@@ -652,12 +674,16 @@ function Start-Watchdog {
     }
     Write-Log "Starting Watchdog..."
     try {
-        $wp = Start-Process -FilePath 'powershell' `
-            -ArgumentList "-File `"$watchdogScript`" -Interval 30" `
-            -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        # [FIX 2026-10-24] 同上：watchdog.ps1 是 while ($true) 死循环，用
+        #   Start-Process 留在本 job 内会永远拖住终端调用。改用脱离启动。
+        $launchDetachedWd = Join-Path $root 'scripts/launch_detached.ps1'
+        $wdCmd = '& ''powershell'' -File "' + $watchdogScript + '" -Interval 30'
+        $wpId = & $launchDetachedWd -CommandLine $wdCmd -WorkingDirectory $root `
+            -StdOut "$root\scripts\logs\watchdog.out" -StdErr "$root\scripts\logs\watchdog.err" `
+            -PassThruPid | Select-Object -Last 1
         Start-Sleep -Seconds 1
-        if ($wp -and -not $wp.HasExited) {
-            Write-Log "  Watchdog started (PID=$($wp.Id))"
+        if ($wpId -and (Get-Process -Id $wpId -ErrorAction SilentlyContinue)) {
+            Write-Log "  Watchdog started (PID=$wpId)"
             return $true
         } else {
             Write-Log "  Watchdog failed to start"
