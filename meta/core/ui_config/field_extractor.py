@@ -11,10 +11,19 @@ class FieldExtractor:
             hasattr(field, 'field_type') and hasattr(field.field_type, 'value')
         ) else 'string'
 
+        # [date 语义 2026-10-23] yaml 里 `type: date` 与 `type: datetime` 在存储层是同一个
+        # FieldType.DATETIME（DB 列都是 DATETIME，日期串直接落 'YYYY-MM-DD'）。但 ui-config
+        # 必须把两者区分开，否则前端按 datetime 渲染纯日期字段：
+        #   列表 → 走 formatDate → 时区换算后显示「2027年1月1日 08:00」
+        #   详情/录入 → 弹日期时间选择器，把 00:00:00 一并写回
+        # 因此这里只在声明为 date 时把 ui 侧 type 回写为 'date'（其它类型保持 field_type）。
+        declared_type = getattr(field, 'declared_type', '') or ''
+        ui_type = 'date' if declared_type == 'date' else ft
+
         info = {
             'id': field.id,
             'name': field.name,
-            'type': ft,
+            'type': ui_type,
             'required': getattr(field, 'required', False),
             'unique': getattr(field, 'unique', False),
         }
