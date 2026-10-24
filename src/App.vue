@@ -81,9 +81,10 @@ const cachedRouteNames = [
   //   (ArchDataManagement 内含 Mermaid 命令式图表, 缓存有状态残留与内存开销风险, 需单独评估)。
   // 主数据 hub 页（物料/区划/位置/计量单位/日历/业务伙伴/组织）统一由 MultiObjectHubPage 渲染。
   // 该组件被多页共用，keep-alive 按组件名缓存只会命中同一个实例 ⇒ 跨页串状态，故不纳入白名单。
-  // 已知代价（2026-10-24）：左树勾选/过滤状态是内存态，只有「跳图表 → 返回」这一条路径会用
-  // MOMP 的 stateKey 写 sessionStorage 快照并恢复；普通页面间来回切换不保留勾选。
-  // 若后续要求保留，按 stateKey 在 scopeIds 变化时做快照 + 挂载时恢复（不要退回按组件名缓存）。
+  // 状态保留不依赖 keep-alive：MOMP 在 onBeforeRouteLeave 用 hub.state_key 写 sessionStorage 快照，
+  // 返回时在 onMounted 恢复 scopeIds（树 watch 回写勾选）与 activeTab。7 个 hub 页各有独立
+  // state_key，互不覆盖；实测 SPA 往返后勾选与右表过滤均保持。
+  // 边界：整页刷新（F5 / 新标签）不保留，因离开时未经过路由守卫写快照。
 ]
 
 // [FR-007] 明确排除的组件名
