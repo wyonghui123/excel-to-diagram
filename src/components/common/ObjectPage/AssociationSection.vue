@@ -290,7 +290,7 @@
       :enable-detail="section.enableDetail !== undefined ? section.enableDetail : true"
       :enable-auto-crud="section.enableAutoCrud !== undefined ? section.enableAutoCrud : !section.readonly"
       :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fullEditable')"
-      :external-editing="editing"
+      :external-editing="editing ? true : null"
       :exclude-column-keys="excludedColumnKeys"
       @request-edit="$emit('request-edit')"
     />

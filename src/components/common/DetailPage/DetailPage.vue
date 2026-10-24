@@ -192,7 +192,9 @@ const props = defineProps({
   showDelete: { type: Boolean, default: true },
   showHistory: { type: Boolean, default: true },
   standalone: { type: Boolean, default: false },
-  hideHeader: { type: Boolean, default: false }
+  hideHeader: { type: Boolean, default: false },
+  // 新建模式下的初始值（如从父对象关联分区进入时预填父外键）
+  initialData: { type: Object, default: () => ({}) }
 })
 
 // [L1 2026-06-18] 注入 refreshCoordinator，详情页与列表页共享刷新信号
@@ -372,6 +374,13 @@ function _applyFieldDefaults() {
   if (!isAddMode || !entityMeta.value?.fields) return
   if (!data.value) data.value = {}
   let changed = false
+  // 先合并调用方传入的初始值（预填父外键等），再让字段 default 兜底，避免默认值覆盖显式初始值
+  for (const [key, val] of Object.entries(props.initialData || {})) {
+    if (val !== undefined && val !== null && val !== '' && data.value[key] === undefined) {
+      data.value[key] = val
+      changed = true
+    }
+  }
   for (const f of entityMeta.value.fields) {
     if (f.default !== undefined && f.default !== null && data.value[f.id] === undefined) {
       data.value[f.id] = f.default

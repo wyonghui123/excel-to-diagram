@@ -322,7 +322,7 @@ const genericTreeLoading = ref(false)
 const genericItems = ref([])
 const genericSearchQuery = ref('')
 
-/** 扁平 value-help 行 → 嵌套树 (extra.parent_id 组装; 悬空父/自引用 → 根, 同 OrgScopeTree 语义) */
+/** 扁平 value-help 行 → 嵌套树 (extra.parent_id 组装; 悬空父/自引用 → 根, 同 HierarchyScopeTree 语义) */
 function buildGenericTree(items) {
   const byValue = new Map()
   const nodes = items.map(item => ({ ...item, children: [] }))
@@ -356,7 +356,7 @@ const genericTreeData = computed(() => {
 })
 
 /** 全量拉取: value-help 无独立树端点, 循环分页拉全
- *  (后端 bo_api MAX_USER_PAGE_SIZE=500, orgs 900+ 行; 参照 OrgScopeTree 2026-09-04 修复) */
+ *  (后端 bo_api MAX_USER_PAGE_SIZE=500, orgs 900+ 行; 同 HierarchyScopeTree paginateAll 的 2026-09-04 修复) */
 async function loadGenericTreeData() {
   if (genericTreeLoading.value) return
   genericTreeLoading.value = true
