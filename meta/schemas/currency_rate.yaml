@@ -1,0 +1,323 @@
+# 汇率 (Currency Rate) — 币种子表 · 单向存储的按日切片事实
+# 依据: docs/superpowers/specs/2026-10-24-currency-rate-domain/spec.md §3 / §9.3
+#       SAP TCURR（KURST × FCURR × TCURR × GDATU → UKURS）/ Oracle GL_DAILY_RATES 的单向存储口径
+# 语义: 唯一读法 —— 「1 个 currency_id 等于 rate 个 to_currency_id，自 valid_from 起生效」。
+#       方向写死，不提供报价方向开关；反向由读侧取倒数（1/rate）。
+#       同一 (rate_type, valid_from) 下无序币对 {A,B} 只允许存一行 —— 由守卫 R2 强制
+#       （DB 唯一索引只能表达有向四元组，无法表达无序对）。
+# 定位: currency 的附属明细（child_sections，见 currency.yaml），不单独成菜单/聚合页。
+# 边界: 只存不算。折算引擎（直接 → 倒数 → 经本位币三角）已在 spec §3 FR-011 冻结语义，
+#       本期不交付；金额舍入按 currencies.decimal_places 由消费方执行，本表不承载舍入规则。
+
+id: currency_rate
+name: 汇率
+table_name: currency_rates
+description: 汇率（单向存储：1 个源币种 = rate 个目标币种，自生效日起）
+parent_object: currency
+hierarchy:
+  enabled: true
+  parent_field: currency_id
+
+deletion_policy:
+  # 汇率是事实数据：录错直接删除（审计留痕），不设状态机；子表内部无下游引用
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # ⚠️ 本字段是子表的父键推断依据（metaService.getParentIdField 取首个 ui.relation=currency 的字段）。
+  #    to_currency_id 必须**不写** ui.relation，否则父键会被推断成目标币种。
+  - id: currency_id
+    name: 源币种
+    type: integer
+    db_column: currency_id
+    required: true
+    description: 汇率源币种（1 个源币种 = rate 个目标币种）
+    semantics:
+      meaning: 汇率源币种
+      display:
+        type: association
+        target_type: currency
+        display_field: code
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 币种代码
+            width: 110
+          - field: name
+            label: 名称
+            width: 180
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+
+  - id: to_currency_id
+    name: 目标币种
+    type: integer
+    db_column: to_currency_id
+    required: true
+    description: 汇率目标币种（不得与源币种相同）
+    semantics:
+      meaning: 汇率目标币种
+      display:
+        type: association
+        target_type: currency
+        display_field: code
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 币种代码
+            width: 110
+          - field: name
+            label: 名称
+            width: 180
+    ui:
+      widget: select
+      multiple: false
+
+  # 值集对齐 SAP TCURV / Oracle GL_DAILY_CONVERSION_TYPES 的标准四类。
+  # 升格条件与迁移配方见 spec §10 TBD-3：出现客户自定义类型、或类型需要携带行为属性时，
+  # 才建 currency_rate_type 独立对象并把本列回填为 FK（本次不做）。
+  - id: rate_type
+    name: 汇率类型
+    type: string
+    db_column: rate_type
+    required: true
+    default: spot
+    description: 汇率类型 spot=即期 / corporate=企业 / user=用户指定 / fixed=固定
+    enum_values:
+      - value: spot
+        label: 即期
+        color: primary
+        is_initial: true
+      - value: corporate
+        label: 企业
+        color: success
+      - value: user
+        label: 用户指定
+        color: warning
+      - value: fixed
+        label: 固定
+        color: info
+    semantics:
+      meaning: 汇率类型（取数口径与校验策略的标签）
+      filterable: true
+      filter_type: enum
+      filter_label: 汇率类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 按日切片：一条切片的结束 = 下一条切片的开始，因此不设截止日字段
+  #   （平台级生效期机制缺失，登记 TBD-CURR-02，不在本对象单独加列成孤例）。
+  - id: valid_from
+    name: 生效日期
+    type: date
+    db_column: valid_from
+    required: true
+    description: 生效日期（YYYY-MM-DD；同类型同日同币对唯一）
+    semantics:
+      meaning: 汇率生效日期（时间切片起点）
+      filterable: true
+      filter_type: date
+      filter_label: 生效日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  # 精度取 12 位小数（SAP UKURS 9 位 + TCURX 因子的现代替代；不引入小数移位表，见 FR-014）
+  - id: rate
+    name: 汇率
+    type: float
+    db_column: rate
+    required: true
+    description: 汇率（1 个源币种 = rate 个目标币种；须大于 0，最多 12 位小数）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 12
+    semantics:
+      meaning: 汇率值（1 个源币种折合的目标币种数）
+      hint: 例：1 USD = 7.08 CNY 时填 7.08；1 JPY = 0.048 CNY 时填 0.048（不配 100 因子）
+    ui:
+      widget: input
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 汇率说明（如取数来源）
+    semantics:
+      meaning: 汇率备注
+    ui:
+      widget: textarea
+
+indexes:
+  # 有向键唯一；无序对的同日镜像行由守卫 R2 承担（DB 无法表达）
+  - fields: [rate_type, currency_id, to_currency_id, valid_from]
+    unique: true
+    name: idx_currency_rate_key
+  - fields: [currency_id]
+    name: idx_currency_rate_from
+  - fields: [to_currency_id]
+    name: idx_currency_rate_to
+
+relations:
+  - id: currency_rate_to_source
+    name: 源币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 源币种引用（由 relations 生成真外键；删除币种时 restrict）
+  - id: currency_rate_to_target
+    name: 目标币种
+    type: reference
+    target: currency
+    source_field: to_currency_id
+    target_field: id
+    cardinality: N:1
+    description: 目标币种引用（由 relations 生成真外键；删除币种时 restrict）
+
+ui_view_config:
+  # 只作为币种详情的子表出现，不生成侧边栏菜单
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 汇率
+    description: 汇率（1 个源币种 = N 个目标币种）
+    columns:
+      - field: to_currency_id
+        width: 140
+        render_as: association
+        target_type: currency
+        display_field: code
+      - field: rate_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: valid_from
+        width: 130
+        sortable: true
+      - field: rate
+        width: 140
+        type: number
+        align: right
+      - field: description
+        width: 240
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    actions:
+      - id: create
+        label: 新增汇率
+        icon: plus
+        type: primary
+        permission: currency_rate:create
+    defaultSort:
+      field: valid_from
+      order: desc
+
+  form:
+    title: 汇率信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [currency_id, to_currency_id]
+          - fields: [rate_type, valid_from]
+          - fields: [rate]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "汇率详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - currency_id
+          - to_currency_id
+          - rate_type
+          - valid_from
+          - rate
+          - description
+
+category_config:
+  create_permission: currency_rate:create
+  update_permission: currency_rate:update
+  delete_permission: currency_rate:delete
+  owner_auto_permission: false

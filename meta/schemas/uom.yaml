@@ -1,9 +1,11 @@
 # 计量单位主数据 (UoM) — foundation 步 1 · item 族引用基础
 # 依据: docs/superpowers/specs/2026-10-04-foundation-object-model-and-architecture.md §3.4.2 / §7 步 1
 #       docs/superpowers/specs/2026-10-03-item-structure-and-attribute-list-plan.md §4.3
-# 定位: item.base_uom / purchase_uom / sales_uom 与 item_uom_conversion 的引用前提
-# 一期 = 最小集 (code / name / decimal_places / status; 蓝图 §3.4.2 行: code/名称/精度〔小数位〕/状态)
-#       另附 uom_type(计量类别, 便于分类检索); 精度(小数位)随本对象定义
+#       docs/superpowers/specs/2026-10-24-uom-group-tier-upgrade/spec.md §3.3（两层模型改造）
+# 定位: item.base_uom / purchase_uom / sales_uom 与两层换算（uom_conversion / item_uom_conversion）的引用前提
+# [两层模型 2026-10-24] 原 uom_type 枚举由 uom_group_id 取代 —— 「类」升级为独立主对象
+#   uom_group（含组基本单位 base_uom_id 与组内换算 uom_conversion）。
+#   注: uom_type 物理列因平台不支持删列而残留于 uoms 表（drift 已容忍），YAML 不再声明、不再读写。
 
 id: uom
 name: 计量单位
@@ -33,6 +35,12 @@ deletion_policy:
     - table: item_uom_conversions
       foreign_key: uom_id
       message: 该单位存在物料单位换算记录，请先删除换算记录后再删除
+    - table: uom_conversions
+      foreign_key: uom_id
+      message: 该单位存在组内标准换算记录，请先删除换算记录后再删除
+    - table: uom_groups
+      foreign_key: base_uom_id
+      message: 该单位是计量单位组的基本单位，请先更换组基本单位后再删除
   cascade_delete: []
 
 audit:
@@ -102,40 +110,46 @@ fields:
     ui:
       widget: input
 
-  - id: uom_type
-    name: 计量类别
-    type: string
-    db_column: uom_type
+  - id: uom_group_id
+    name: 计量单位组
+    type: integer
+    db_column: uom_group_id
     required: true
-    default: quantity
-    description: 计量类别（数量/重量/体积/长度/面积/时间/包装）
-    enum_values:
-      - value: quantity
-        label: 数量
-        color: primary
-      - value: weight
-        label: 重量
-        color: warning
-      - value: volume
-        label: 体积
-        color: info
-      - value: length
-        label: 长度
-        color: success
-      - value: area
-        label: 面积
-        color: success
-      - value: time
-        label: 时间
-        color: info
-      - value: packaging
-        label: 包装
-        color: default
+    description: 所属计量单位组（决定组基本单位与组内标准换算）
     semantics:
-      meaning: 计量单位的物理类别
+      meaning: 计量单位所属组
+      display:
+        type: association
+        target_type: uom_group
+        display_field: name
+      hint: 单位一律归属某个组；组内换算以该组的基本单位为基准
+    value_help:
+      source:
+        type: bo
+        target_bo: uom_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
     ui:
       widget: select
-      filterable: true
+      relation: uom_group
+      multiple: false
 
   - id: decimal_places
     name: 小数位数
@@ -144,8 +158,12 @@ fields:
     required: true
     default: 0
     description: 该单位的精度（小数位数）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 10
     semantics:
-      meaning: 单位精度，决定数量计算与显示的小数位
+      meaning: 单位精度；数量一律按基本单位存储与计算，仅在展示与单据落值时按目标单位的小数位四舍五入（HALF_UP），中间换算链路不取整
     ui:
       widget: input
 
@@ -229,15 +247,48 @@ indexes:
   - fields: [code]
     unique: true
     name: idx_uom_code
-  - fields: [uom_type]
-    name: idx_uom_type
+  - fields: [uom_group_id]
+    name: idx_uom_group
   - fields: [status]
     name: idx_uom_status
 
-relations: []
+relations:
+  - id: uom_to_uom_group
+    name: 计量单位组
+    type: reference
+    target: uom_group
+    source_field: uom_group_id
+    target_field: id
+    cardinality: N:1
+    description: 所属计量单位组引用（由 relations 生成真外键）
 
 ui_view_config:
   showChangeHistory: true
+  # [单页 hub 声明 2026-10-24] 见 items.yaml 同名注释；本块是该页形态的唯一真源。
+  #   组同时出现在左树与右表 tab 是有意的：左树用于过滤导航，右表 tab 用于维护。
+  hub:
+    object_types: [uom, uom_group]
+    default_tab: uom
+    tabs:
+      uom: 计量单位
+      uom_group: 计量单位组
+    state_key: uomManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: uom_group
+      scope_key: uom
+      parent_field: parent_id
+      # 组为扁平分类（无 parent 自引用）⇒ 平铺，不组树、不渲染展开/收起
+      flat: true
+      order_by: ''
+      empty_text: 暂无计量单位组数据
+      search_placeholder: 搜索计量单位组（编码/名称）
+    filters:
+      uom:
+        field: uom_group_id
+      uom_group:
+        mode: none
   list:
     detail_mode: drawer
     title: 计量单位管理
@@ -249,8 +300,11 @@ ui_view_config:
       - field: name
         width: 160
         sortable: true
-      - field: uom_type
-        width: 100
+      - field: uom_group_id
+        width: 150
+        render_as: association
+        target_type: uom_group
+        display_field: name
         filterable: true
         filter_type: select
       - field: decimal_places
@@ -294,7 +348,7 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [code, name]
-          - fields: [uom_type, decimal_places]
+          - fields: [uom_group_id, decimal_places]
           - fields: [status]
       - title: 其他信息
         columns:
@@ -310,7 +364,7 @@ ui_view_config:
         fields:
           - code
           - name
-          - uom_type
+          - uom_group_id
           - decimal_places
           - status
           - description

@@ -12,11 +12,13 @@
 - FK 存在性校验
 - business_key 组合唯一性
 - indexes 复合唯一索引
+- 数值范围 / 小数位（YAML 字段级 `constraints: [{type: numeric_range, ...}]`）
 """
 
 import json
 import re
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from meta.core.validation_messages import ValidationDetail, ValidationMessageRegistry
@@ -46,6 +48,7 @@ class MetadataDrivenValidator:
             errors.extend(self._check_unique(field, field_value, field_name, meta_object))
             errors.extend(self._check_pattern(field, field_value, field_name))
             errors.extend(self._check_max_length(field, field_value, field_name))
+            errors.extend(self._check_numeric_range(field, field_value, field_name))
             errors.extend(self._check_enum_values(field, field_value, field_name))
             errors.extend(self._check_fk_existence(field, field_value, field_name, data))
             errors.extend(self._check_value_set(field, field_value, field_name))
@@ -75,6 +78,7 @@ class MetadataDrivenValidator:
                                                       meta_object, exclude_id=exclude_id))
                     errors.extend(self._check_pattern(field, field_value, self._get_field_name(meta_object, field)))
                     errors.extend(self._check_max_length(field, field_value, self._get_field_name(meta_object, field)))
+                    errors.extend(self._check_numeric_range(field, field_value, self._get_field_name(meta_object, field)))
                     errors.extend(self._check_enum_values(field, field_value, self._get_field_name(meta_object, field)))
                     errors.extend(self._check_fk_existence(field, field_value,
                                                             self._get_field_name(meta_object, field), data))
@@ -204,6 +208,68 @@ class MetadataDrivenValidator:
                 params={"field_name": field_name, "max_length": max_length}
             )]
         return []
+
+    def _check_numeric_range(self, field: 'MetaField', value: Any,
+                             field_name: str) -> List[ValidationDetail]:
+        """数值范围 / 小数位校验（只对 YAML 显式声明的 `numeric_range` 生效）。
+
+        [UOM 2026-10-24] 首个消费方：`item_uom_conversion.factor`
+        （必须 > 0，且最多 10 位小数）。此前 `MetaField.constraints` 已被
+        `parse_field` 收集、但全链路无消费者 —— 声明了也不生效。
+
+        支持的键（每个 constraint 可各自组合）：
+          `gt` / `gte` / `lt` / `lte` —— 边界（数值）
+          `decimal_places`          —— 允许的最大小数位
+        """
+        constraints = getattr(field, 'constraints', None) or []
+        rules = [c for c in constraints
+                 if isinstance(c, dict) and c.get('type') == 'numeric_range']
+        if not rules:
+            return []
+
+        try:
+            num = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return [self._numeric_detail(field, field_name, 'not_a_number',
+                                         f"{field_name}必须是数值")]
+        if not num.is_finite():
+            return [self._numeric_detail(field, field_name, 'not_a_number',
+                                         f"{field_name}必须是有限数值")]
+
+        errors: List[ValidationDetail] = []
+        for rule in rules:
+            gt, gte = rule.get('gt'), rule.get('gte')
+            lt, lte = rule.get('lt'), rule.get('lte')
+            if gt is not None and num <= Decimal(str(gt)):
+                errors.append(self._numeric_detail(
+                    field, field_name, 'gt', f"{field_name}必须大于 {gt}"))
+            if gte is not None and num < Decimal(str(gte)):
+                errors.append(self._numeric_detail(
+                    field, field_name, 'gte', f"{field_name}不能小于 {gte}"))
+            if lt is not None and num >= Decimal(str(lt)):
+                errors.append(self._numeric_detail(
+                    field, field_name, 'lt', f"{field_name}必须小于 {lt}"))
+            if lte is not None and num > Decimal(str(lte)):
+                errors.append(self._numeric_detail(
+                    field, field_name, 'lte', f"{field_name}不能大于 {lte}"))
+
+            max_dp = rule.get('decimal_places')
+            if max_dp is not None:
+                # `1E+2` 的 exponent 为正 ⇒ 小数位按 0 计（不是 -2）
+                dp = max(0, -num.as_tuple().exponent)
+                if dp > int(max_dp):
+                    errors.append(self._numeric_detail(
+                        field, field_name, 'decimal_places',
+                        f"{field_name}最多允许 {max_dp} 位小数（当前 {dp} 位）"))
+        return errors
+
+    def _numeric_detail(self, field: 'MetaField', field_name: str,
+                        rule: str, message: str) -> ValidationDetail:
+        return ValidationDetail(
+            field_id=field.id, field_name=field_name, rule=f"numeric_range.{rule}",
+            message=message, i18n_key="",
+            params={"field_name": field_name},
+        )
 
     def _check_enum_values(self, field: 'MetaField', value: Any, field_name: str) -> List[ValidationDetail]:
         enum_values = getattr(field, 'enum_values', None)

@@ -488,6 +488,14 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(FieldPolicyInterceptor())
     from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
     bo_framework.register_interceptor(ConstraintValidationInterceptor())
+    # [UOM 2026-10-24] 单位换算跨对象守卫（V2/V4/V5/V7/V8）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.uom_conversion_guard_interceptor import UomConversionGuardInterceptor
+    bo_framework.register_interceptor(UomConversionGuardInterceptor())
+    # [CURRENCY 2026-10-24] 汇率单向存储守卫（R1/R2/R3）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.currency_rate_guard_interceptor import CurrencyRateGuardInterceptor
+    bo_framework.register_interceptor(CurrencyRateGuardInterceptor())
     # [F3 2026-10-20 / 补注册 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重。
     #   与 app_builder.with_interceptors() 同位补齐 —— 此前只注册在新 builder 路径，
     #   而 waitress_server.py 走本函数（create_app）⇒ 运行时守卫缺失。

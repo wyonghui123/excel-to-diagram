@@ -1,0 +1,257 @@
+# 计量单位组换算 (UoM Conversion) — 计量单位两层模型的「类层」标准换算
+# 依据: docs/superpowers/specs/2026-10-24-uom-group-tier-upgrade/spec.md §3.2
+#       Oracle INV_UOM_CLASS_CONVERSIONS / SAP T006 全局换算的对标对象
+# 语义: 组内标准换算率, 唯一读法 —— 「1 个 uom_id 等于 factor 个该组的基本单位 base_uom_id」
+#       方向写死（与一期 item_uom_conversion 同向）; 组内单位之间不直连，一律经 base 中转，
+#       图深恒 1，结构上不可能成环。
+# 键: 唯一 (uom_group_id, uom_id)。factor = 1 个 uom_id 折合多少个组基本单位
+# 存储: factor 落 REAL（SQLite 8 字节双精度），> 0 与 ≤10 位小数由字段 constraints 强制
+# 定位: 类级标准换算 ≠ 物料例外。item_uom_conversion 允许跨组（如 KG ↔ PC），本表只做组内。
+
+id: uom_conversion
+name: 计量单位组换算
+table_name: uom_conversions
+description: 计量单位组换算（组内单位与组基本单位的标准换算率）
+parent_object: uom_group
+hierarchy:
+  enabled: true
+  parent_field: uom_group_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: uom_group_id
+    name: 计量单位组
+    type: integer
+    db_column: uom_group_id
+    required: true
+    description: 所属计量单位组引用
+    semantics:
+      meaning: 所属计量单位组
+      display:
+        type: association
+        target_type: uom_group
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: uom_group
+      multiple: false
+
+  - id: uom_id
+    name: 换算单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 换算目标单位引用（须属于本组、启用，且不能等于组基本单位）
+    semantics:
+      meaning: 换算目标计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name} ({code})"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  - id: factor
+    name: 换算率
+    type: float
+    db_column: factor
+    required: true
+    description: 换算率（1 个换算单位 = factor 个组基本单位；须大于 0，最多 10 位小数）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 10
+    semantics:
+      meaning: 组内标准换算系数（1 个换算单位折合的组基本单位数）
+      hint: 例：组基本单位为「个」，1 箱 = 12 个时填 12；组基本单位为「千克」，1 件 = 0.6 千克时填 0.6
+    ui:
+      widget: input
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 换算说明
+    semantics:
+      meaning: 换算备注
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [uom_group_id, uom_id]
+    unique: true
+    name: idx_uom_conv_group_uom_unique
+  - fields: [uom_group_id]
+    name: idx_uom_conv_group
+  - fields: [uom_id]
+    name: idx_uom_conv_uom
+
+relations:
+  - id: uom_conversion_to_group
+    name: 计量单位组
+    type: reference
+    target: uom_group
+    source_field: uom_group_id
+    target_field: id
+    cardinality: N:1
+    description: 所属计量单位组引用（由 relations 生成真外键）
+  - id: uom_conversion_to_uom
+    name: 换算单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 换算目标单位引用（由 relations 生成真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 组内换算
+    description: 组内换算率（1 个换算单位 = N 个组基本单位）
+    columns:
+      - field: uom_id
+        width: 200
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: factor
+        width: 120
+        type: number
+        align: right
+      - field: description
+        width: 240
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    actions:
+      - id: create
+        label: 新增换算
+        icon: plus
+        type: primary
+        permission: uom_conversion:create
+    defaultSort:
+      field: id
+      order: asc
+
+  form:
+    title: 组内换算信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [uom_group_id, uom_id]
+          - fields: [factor]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "组内换算详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - uom_group_id
+          - uom_id
+          - factor
+          - description
+
+category_config:
+  create_permission: uom_conversion:create
+  update_permission: uom_conversion:update
+  delete_permission: uom_conversion:delete
+  owner_auto_permission: false

@@ -1,0 +1,335 @@
+# 计量单位组 (UoM Group) — 计量单位两层模型的「类层」主对象
+# 依据: docs/superpowers/specs/2026-10-24-uom-group-tier-upgrade/spec.md §3.1
+#       SAP T006D（dimension）/ Oracle UOM_CLASS 的对标对象
+# 定位: uom 的天然分类与换算基准。组内单位共用同一基本单位（base_uom_id），
+#       组内标准换算落在 uom_conversion（1 个 uom = factor 个基本单位，只经 base 中转）。
+#       item_uom_conversion 是物料级例外，不受本组换算约束（可跨组，如 KG ↔ PC）。
+# base_uom_id 可空: 组与单位互为前后置 —— 先建组（无基本单位）→ 建单位 →
+#       回填基本单位，避免循环必填 FK 导致无法起步。有类级换算后基本单位锁定（V11）。
+
+id: uom_group
+name: 计量单位组
+table_name: uom_groups
+description: 计量单位组（类层主对象，定义组内换算基准）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 计量单位组
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 计量单位组
+    - 单位组
+    - 计量类别
+    - UoM Group
+
+deletion_policy:
+  # 主数据禁止物理删除；组下还有单位或类级换算时 restrict
+  mode: restrict
+  restrict_on:
+    - table: uoms
+      foreign_key: uom_group_id
+      message: 该组下还有计量单位，请先迁移单位后再删除
+    - table: uom_conversions
+      foreign_key: uom_group_id
+      message: 该组存在类级换算记录，请先删除换算记录后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 20
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 计量单位组唯一编码（如 QTY / WGT / VOL）
+    semantics:
+      meaning: 计量单位组业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 计量单位组显示名称（如 数量 / 重量 / 体积）
+    semantics:
+      meaning: 计量单位组显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: base_uom_id
+    name: 基本单位
+    type: integer
+    db_column: base_uom_id
+    nullable: true
+    description: 组内换算基准单位（须属于本组；有类级换算后不可变更）
+    semantics:
+      meaning: 组基本计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+      hint: 组内所有换算率都以本单位为基准；留空表示尚未确定基准
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name} ({code})"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 组状态 active/inactive（生命周期约定 §5.4）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 计量单位组启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 组说明
+    semantics:
+      meaning: 计量单位组详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_uom_group
+    name: 启用单位组
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此计量单位组吗？"
+      highlight: true
+
+  - id: deactivate_uom_group
+    name: 停用单位组
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此计量单位组吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_uom_group_code
+  - fields: [status]
+    name: idx_uom_group_status
+
+relations:
+  - id: uom_group_to_base_uom
+    name: 基本单位
+    type: reference
+    target: uom
+    source_field: base_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 组内换算基准单位引用（[FK] 由 relations 生成；可空）
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 计量单位组
+    description: 计量单位组列表（组内换算的基准）
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: base_uom_id
+        width: 160
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建单位组
+        icon: plus
+        type: primary
+        permission: uom_group:create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 计量单位组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [base_uom_id, status]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - base_uom_id
+          - status
+          - description
+
+  # 组详情两个子表：组内单位清单 + 组内标准换算
+  #   与 items→item_uom_conversion、enum_type→enum_value 同一套 child_sections 机制，
+  #   父字段由子对象外键的 ui.relation=uom_group 推断（见 metaService.getParentIdField）。
+  child_sections:
+    - child_object: uom
+      title: 组内单位
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    - child_object: uom_conversion
+      title: 组内换算
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: uom_group:create
+  update_permission: uom_group:update
+  delete_permission: uom_group:delete
+  owner_auto_permission: false

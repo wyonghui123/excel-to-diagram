@@ -234,6 +234,15 @@ class ApplicationBuilder:
         bo_framework.register_interceptor(FieldPolicyInterceptor())
         from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
         bo_framework.register_interceptor(ConstraintValidationInterceptor())
+        # [UOM 2026-10-24] 单位换算跨对象守卫（V2/V4/V5/V7/V8）：
+        #   换算行写入、物料改基本单位、单位停用三处入口共用一套判定。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.uom_conversion_guard_interceptor import UomConversionGuardInterceptor
+        bo_framework.register_interceptor(UomConversionGuardInterceptor())
+        # [CURRENCY 2026-10-24] 汇率单向存储守卫（R1/R2/R3）：自反、同日镜像行、双币种启用。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.currency_rate_guard_interceptor import CurrencyRateGuardInterceptor
+        bo_framework.register_interceptor(CurrencyRateGuardInterceptor())
         # [F3 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重，紧随约束校验之后
         #   [模块门控] party 轴依赖 org 的 BU/LE 职能，BIP 应用架构管理部署设
         #   DISABLED_PLATFORM_MODULES=party 时不注册（与 server.py create_app 同步）。

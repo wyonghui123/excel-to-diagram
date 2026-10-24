@@ -7,8 +7,9 @@
 # key_template: 不启用（业务键 = ISO 4217 代码，无需自动编码；同 region 先例）
 #
 # ⚠️ 能力边界（禁止越界宣称）
-#   本对象仅交付「币种字典」。**不交付任何换算 / 折算 / 舍入能力**：
-#   ① 汇率域（currency_rate）不建 —— SAP TCURR/TCURF/TCURV · Oracle GL_DAILY_RATES · SF DatedConversionRate 三家全部独立成域（TBD-1）
+#   本对象交付「币种字典」。**不交付任何折算 / 舍入能力**：
+#   ① 汇率域已落地为子表 currency_rate（2026-10-24，TBD-CURR-01 已实施；只存不算，折算引擎未建）——
+#      SAP TCURR/TCURF/TCURV · Oracle GL_DAILY_RATES · SF DatedConversionRate 三家均为按日切片事实
 #   ② 功能货币 / 账簿货币 / 报告货币三元未建模（SFAS #52 / IAS 21；Remeasurement ≠ Translation）（TBD-8，与 D1 会计处置同一挂起决策）
 #   ③ 币种生效期不建（Oracle Start/End Date · SAP GDATU）（TBD-2）
 #   ④ decimal_places 本期**无执行消费者**（平台无精度引擎，金额为裸 double）—— 不宣称「已实现按币种精度舍入」
@@ -38,11 +39,18 @@ semantics:
 
 deletion_policy:
   # S19: 主数据禁止物理删除
-  # restrict_on 本期留空：币种当前**零引用方** —— doc_flow.currency 是裸 STRING（不构成 FK 引用），
-  # 无任何 schema 字段引用它。保留结构供未来接上后补条目（不改骨架）。
+  # 2026-10-24 起汇率域落地（currency_rates），币种不再是零引用方：
+  #   源币种 / 目标币种两个 FK 各一条 restrict（同一张表两条规则，deletion_service 逐条 COUNT）。
+  # doc_flow.currency 仍是裸 STRING，不构成引用（TBD-CURR-05 不变）。
   # 对比：uom 列 2 条（items.base_uom / item_uom_conversions.uom_id）、region 列 5 条（自引用 + addresses 四 FK）
   mode: restrict
-  restrict_on: []
+  restrict_on:
+    - table: currency_rates
+      foreign_key: currency_id
+      message: 该币种被汇率记录引用（作为源币种），请先删除汇率后再删除币种
+    - table: currency_rates
+      foreign_key: to_currency_id
+      message: 该币种被汇率记录引用（作为目标币种），请先删除汇率后再删除币种
   cascade_delete: []
 
 audit:
@@ -321,6 +329,19 @@ ui_view_config:
           - symbol
           - decimal_places
           - status
+
+  # 汇率子表（2026-10-24）：与 uom_group → uom_conversion 同型的两层挂载。
+  #   父字段由子对象外键的 ui.relation=currency 推断（metaService.getParentIdField）；
+  #   因此 currency_rate 的 to_currency_id 不得写 ui.relation，否则父键会被推断错。
+  child_sections:
+    - child_object: currency_rate
+      title: 汇率
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
 
 category_config:
   create_permission: currency:create

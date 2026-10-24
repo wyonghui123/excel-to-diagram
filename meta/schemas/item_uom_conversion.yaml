@@ -1,7 +1,11 @@
 # 物料单位换算 (Item UoM Conversion) — foundation 步 1 · item 族子表（一期）
 # 依据: 蓝图 §3.4.8 / 规划 §2.5 / §4.3 C7
-# 语义: 基本单位 → 采购/销售/库存单位的换算率（对标 Oracle UOM Conversions / SAP 转换因子）
-# 键: 唯一 (item_id, uom_id)。factor = 1 个 uom_id 折合多少个基本单位（或反向，一期由域约定；不塞进主表）
+#       设计: docs/superpowers/specs/2026-10-24-uom-conversion-model-design.md §4.1
+# 语义: 物料级换算率, 唯一读法 —— 「1 个 uom_id 等于 factor 个该物料的基本单位 base_uom」
+#       方向写死 (与 SAP UMREZ/UMREN 商、Oracle 1 DZ = 12 EA 同向), 不存在「反向」写法;
+#       换算单位之间不直连, 一律经 base_uom 中转 (图深恒 1, 结构上不可能成环)
+# 键: 唯一 (item_id, uom_id)。factor = 1 个 uom_id 折合多少个 base_uom
+# 存储: factor 落 REAL (SQLite 8 字节双精度), > 0 与 ≤10 位小数由字段 constraints 强制
 
 id: item_uom_conversion
 name: 物料单位换算
@@ -69,7 +73,7 @@ fields:
     type: integer
     db_column: uom_id
     required: true
-    description: 换算目标单位引用
+    description: 换算目标单位引用（须为启用状态，且不能等于该物料的基本单位）
     semantics:
       meaning: 换算目标计量单位
       display:
@@ -109,9 +113,14 @@ fields:
     type: float
     db_column: factor
     required: true
-    description: 换算率（1 个换算单位折合的基本单位数）
+    description: 换算率（1 个换算单位 = factor 个基本单位；须大于 0，最多 10 位小数）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 10
     semantics:
-      meaning: 单位换算系数
+      meaning: 单位换算系数（1 个换算单位折合的基本单位数）
+      hint: 例：1 箱 = 12 个、基本单位为「个」时填 12；基本单位为「千克」而 1 件 = 0.6 千克时填 0.6
     ui:
       widget: input
 
@@ -155,8 +164,67 @@ relations:
 
 ui_view_config:
   skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 单位换算
+    description: 该物料的换算率（1 个换算单位 = N 个基本单位）
+    columns:
+      - field: uom_id
+        width: 200
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: factor
+        width: 120
+        type: number
+        align: right
+      - field: description
+        width: 240
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    actions:
+      - id: create
+        label: 新增换算
+        icon: plus
+        type: primary
+        permission: item_uom_conversion:create
+    defaultSort:
+      field: id
+      order: asc
+
+  form:
+    title: 单位换算信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [item_id, uom_id]
+          - fields: [factor]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "单位换算详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - item_id
+          - uom_id
+          - factor
+          - description
 
 nested:
+  # [2026-10-24] 此段无任何消费者（全仓 grep `nested` 仅命中事务/查询类代码）。
+  #   子表入口已改由 items.yaml 的 ui_view_config.child_sections 声明，
+  #   本段保留仅为与 item_xref / item_attribute_values 两个兄弟子表保持同形，
+  #   待三张子表一并清理时删除。
   enabled: true
   parent: item
   children: []
