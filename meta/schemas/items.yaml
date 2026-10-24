@@ -147,13 +147,15 @@ fields:
     db_column: item_type
     required: true
     default: goods
-    description: 物料本体性质（物料/服务；互斥，签发冻结）
+    # 标签用「实物物料 / 服务物料」（SAP 中文口径），避免与对象名「物料」同名造成的
+    # 同义反复（旧标签下列表会显示「物料类型 = 物料」）。存储值 goods/service 不变。
+    description: 物料本体性质（实物物料/服务物料；互斥，签发冻结）
     enum_values:
       - value: goods
-        label: 物料
+        label: 实物物料
         color: primary
       - value: service
-        label: 服务
+        label: 服务物料
         color: info
     semantics:
       meaning: 物料本体性质
@@ -459,6 +461,33 @@ relations:
 
 ui_view_config:
   showChangeHistory: true
+  # [单页 hub 声明 2026-10-24] 菜单 page_type=multi_object_hub 且无 children 时，
+  #   GenericTabContainer 渲染通用 MultiObjectHubPage，后者读本块构建「左树 + 多 tab」，
+  #   不再需要一对象一个 Vue 壳。契约见 MultiObjectHubPage/hubOptions.js。
+  #   filters 缺省（未列出的 tab）= 不受左树影响；mode: none 显式表达同一语义。
+  hub:
+    object_types: [item_group, item]
+    default_tab: item
+    tabs:
+      item: 物料/服务
+      item_group: 物料组
+    state_key: materialManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: item_group
+      # 写入 scopeIds 的键，须与 object_types 中「受过滤」的 tab 同名
+      scope_key: item
+      parent_field: parent_id
+      # 空串 = 保持后端返回顺序（不做客户端按 code 排序）
+      order_by: ''
+      empty_text: 暂无物料组数据
+      search_placeholder: 搜索物料组（编码/名称）
+    filters:
+      item:
+        field: item_group_id
+      item_group:
+        mode: none
   list:
     detail_mode: drawer
     title: 物料管理
@@ -529,8 +558,8 @@ ui_view_config:
         label: 物料类型
         type: select
         options:
-          - { value: goods, label: 物料 }
-          - { value: service, label: 服务 }
+          - { value: goods, label: 实物物料 }
+          - { value: service, label: 服务物料 }
 
   form:
     title: 物料信息
@@ -568,6 +597,21 @@ ui_view_config:
           - gross_weight
           - status
           - description
+
+  # 单位换算子表（item_uom_conversion，parent_field=item_id）
+  #   与 calendar→calendar_day / product→version / enum_type→enum_value 同一套
+  #   child_sections 机制，由 AssociationSection 的 parent_child 分支按 item_id 取数。
+  #   勿再写 detail.tabs 的 `type: nested` —— 前端从未实现该分支（同 calendar.yaml 注），
+  #   item_uom_conversion 里的 `nested:` 因此一直是死声明。
+  child_sections:
+    - child_object: item_uom_conversion
+      title: 单位换算
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
 
 category_config:
   create_permission: item:create

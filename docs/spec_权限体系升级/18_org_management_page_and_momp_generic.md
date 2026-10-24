@@ -1,6 +1,6 @@
 # Spec：Org 管理页面 + MultiObjectManagementPage(MOMP) 通用化改造
 
-> 文档编号: 18 | 状态: 草案 | 更新: 2026-08-30
+> 文档编号: 18 | 状态: 已实施（实现形态见 §1.5）| 更新: 2026-10-24
 > 主题: 复用 MOMP 范式新建「组织(org) 管理页面」，并因此把 MOMP 从"架构数据专用"泛化为"通用多对象管理框架"
 > 前置: `13_organization_model_integration.md` / `14_org_management_dimension_and_migration.md`
 > 范围裁剪(本期不做): org_relationship 右 Tab（架构预留）; user / position / user_org_assignment（架构预留）; org 运行实例不做字段扩展（对齐 14 号路线 A）
@@ -27,12 +27,25 @@
 | 项 | 本期 | 说明 |
 |----|------|------|
 | MOMP 通用化（左树注入 + 每 Tab 过滤策略接口） | ✅ 做 | 是拿到 org 页面的前提 |
-| OrgScopeTree 组件（单类型自引用级联多选） | ✅ 做 | 组织树左栏 |
+| 组织树左栏（单类型自引用级联多选） | ✅ 做 | 由通用 `HierarchyScopeTree` 承载，形态在 `org.yaml` 声明（见 §1.5）|
 | 右 Tab「org」列表（**CRUD + 导入导出维护**）| ✅ 做 | 复用 MetaListPage + 现有 `v2/bo/user_group` 管理端点，**无需新后端** |
 | 右 Tab「org_relationship」（范围=from/to 命中选中 org） | ❌ 本期不做 | **不作真实 Tab**（后端未建表，见 §1.4a），仅**过滤策略接口预留** |
 | 右 Tab「user」 | ❌ 本期不暴露 | 已决策形态(b)：仅 `filterStrategies` 接口预留，objectTypes 不含 user（见 FR-007）|
 
 > **§1.4a org_relationship 为何不能作真实 Tab**：org_relationship 在 13 号文档为"待建（Phase A）"、16 号明确"不引入留二期"，后端**无该对象 schema**。若强行加入 `objectTypes`，MetaListPage 调 manage_api 会因找不到 schema 而空态/报错。故预留只在**过滤策略接口**层面（§9.6），不加入本期 objectTypes。
+
+### 1.5 实现形态（现行）
+
+页面形态不再由「一对象一个 Vue 壳」注入，而是下沉到对象 YAML 的 `ui_view_config.hub`，前端由 `MultiObjectHubPage` 取配置渲染：
+
+| 落点 | 现行实现 |
+|------|---------|
+| 页面形态 | `meta/schemas/org.yaml` 的 `ui_view_config.hub`（`object_types` / `default_tab` / `scope` / `filters` / `disable_version_context` / `state_key`）|
+| 左树 | 统一 `HierarchyScopeTree`（`scope.type: hierarchy`，`paginate_all: true` 绕后端单页 500 上限，`node_icon: office`）|
+| 菜单 | `org-management`，`page_type=multi_object_hub`，`primary_object_type=org`，权限码收敛为真实双段式 5 条（`org:org_create/read/update/delete/list`），由 `v105__org_momp_page` 迁移 |
+| 路由 | `/org-management` 静态路由指向 `MultiObjectHubPage` |
+
+因此 §3 FR-004 / §9.3 中「新建 `OrgScopeTree`」属当时的建设方案，**以本节为准**：专用壳与专用树均已删除，页面差异只进 YAML，不进组件。
 
 ---
 
@@ -85,8 +98,8 @@
 - **Type Mapping**: Solution/Functional
 - **Source**: useMultiObjectPage.js L282-298 / L348-412
 
-### FR-004: OrgScopeTree 组件（单类型自引用级联多选）
-- **Description**: 新建 `src/components/common/OrgScopeTree/`，渲染组织树（`org.parent_id` 单类型自引用）。采用 `show-checkbox + check-strictly=false`（勾父含子 = 级联多选），复用 ObjectScopeSection 的工程资产（expand 持久化 `store.setData` 钩子、collectLeafKeys/collectInitialExpandedKeys 防卡顿、搜索过滤/全选/清空/silent 刷新不丢选中）。
+### FR-004: 组织范围树（单类型自引用级联多选）
+- **Description**: 组织树（`org.parent_id` 单类型自引用）采用 `show-checkbox + check-strictly=false`（勾父含子 = 级联多选），需具备展开态持久化、搜索过滤/全选/清空/silent 刷新不丢选中。**现行实现**：由通用 `HierarchyScopeTree` 承载（`scope.type: hierarchy` + `paginate_all` + `node_icon: office`），不新建专用树组件，见 §1.5。
 - **node 模型**: 无 type 前缀（全为 org），id 即 org.id；顶层节点为 `parent_id is null` 的根组织；children 由 `parent_id` 组装。
 - **事件**: `emit('scope-change', { orgIds, effectiveOrgIds })`：
   - `orgIds` = 被勾选的节点 id（含父节点本身，不含其子孙——因级联勾选父时子树都进 `effective` 表达，但为与 MetaListPage 的 `id__in` 精确语义对齐，此处取"实际勾选叶/父集合"）。
@@ -286,13 +299,13 @@
 ### 9.3 详细设计（Detailed Design）
 
 **组件设计**
-- `OrgScopeTree.vue`（新建，`src/components/common/OrgScopeTree/`）：
-  - props: `initialOrgIds`, `scopeIds`(仅 `{org:{selected,effective}}`), 可选 `filterDisabled`。
-  - 数据: 调 `OrgService.get_org_tree()`（返回嵌套 children）→ 直接作为 `treeData`（无需前端组装）；节点 `{id, name, parent_id, children}`。
+- 组织树（现行：通用 `HierarchyScopeTree`，不再新建 `OrgScopeTree`）：
+  - 形态由 `org.yaml` 的 `ui_view_config.hub.scope` 声明：`type: hierarchy` / `object: org` / `scope_key: org` / `parent_field: parent_id` / `order_by: code` / `node_icon: office` / `paginate_all: true`。
+  - 数据: 调 `OrgService.get_org_tree()`（返回嵌套 children）；`paginate_all` 用于组织数超后端单页上限（500）时循环拉全量。
   - 树: `show-checkbox + check-strictly=false`，`node-key='id'`（无前缀，纯 org id）。
-  - emit `scope-change`：`{ orgIds, effectiveOrgIds }`（effective=选中∪子孙，复用 collectLeafKeys/递归 descendant 收集）。
-  - UI: 工具栏(展开/收起/全选/清空/刷新) + 搜索 + 计数，对齐 ObjectScopeSection。
-- 复用资产：把 ObjectScopeSection 的扩展开销逻辑**抽离或复制**为 OrgScopeTree 用（评估：ObjectScopeSection 强绑 versionId + 4级业务树 + type 前缀，**不适合直接复用**，新建单类型版本）。
+  - emit `scope-change`：`{ orgIds, effectiveOrgIds }`（effective=选中∪子孙）。
+  - UI: 工具栏(展开/收起、全选、清空、刷新) + 搜索 + 计数。
+- 不再保留专用树：`OrgScopeTree.vue` 已删除，其独有能力（`paginate_all` / `office` 图标）已并入 `HierarchyScopeTree`。
 
 **数据模型**
 - `scopeIds.org = { selected: orgIds, effective: effectiveOrgIds }`。

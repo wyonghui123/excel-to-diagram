@@ -79,9 +79,11 @@ const cachedRouteNames = [
   //   注: 本条注释原先声称缓存"架构数据管理", 但承载该页的 ArchDataManagement 并不在白名单里,
   //   即 /system/archdata 实际未被 keep-alive 缓存。此为既存状态, 此次不擅自补入
   //   (ArchDataManagement 内含 Mermaid 命令式图表, 缓存有状态残留与内存开销风险, 需单独评估)。
-  'OrgManagement',     // 组织管理 (MOMP 泛化页, 返回需保留列表状态)
-  'MaterialManagement', // 物料管理 (MOMP 泛化页, 左树勾选状态需保留)
-  'PartyManagement',   // 往来单位管理 (MOMP 泛化页, 左树勾选状态需保留)
+  // 主数据 hub 页（物料/区划/位置/计量单位/日历/业务伙伴/组织）统一由 MultiObjectHubPage 渲染。
+  // 该组件被多页共用，keep-alive 按组件名缓存只会命中同一个实例 ⇒ 跨页串状态，故不纳入白名单。
+  // 已知代价（2026-10-24）：左树勾选/过滤状态是内存态，只有「跳图表 → 返回」这一条路径会用
+  // MOMP 的 stateKey 写 sessionStorage 快照并恢复；普通页面间来回切换不保留勾选。
+  // 若后续要求保留，按 stateKey 在 scopeIds 变化时做快照 + 挂载时恢复（不要退回按组件名缓存）。
 ]
 
 // [FR-007] 明确排除的组件名

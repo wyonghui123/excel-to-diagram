@@ -521,6 +521,32 @@ security:
 ui_view_config:
   showChangeHistory: true
 
+  # 页面形态：单页 hub（左树 = 组织层级，右表 = 组织列表）
+  #   组织与左树是同一对象（自指范围）：勾选节点 → 右表 id__in = 勾选 ∪ 全部子孙；
+  #   未勾选 = 不过滤（后端全量），符合「默认看全部组织」的业务预期。
+  hub:
+    object_types: [org]
+    default_tab: org
+    tabs:
+      org: 组织
+    state_key: orgManagerStateBeforeDiagram
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: org
+      scope_key: org
+      parent_field: parent_id
+      # 空串 = 保持后端返回顺序（与改造前一致）
+      order_by: ''
+      # orgs 959 行 > 后端单次 500 行上限，逐页拉全量，否则树缺节点
+      paginate_all: true
+      node_icon: office
+      empty_text: 暂无组织数据
+      search_placeholder: 搜索组织（编码/名称）
+    filters:
+      org:
+        field: id
+
   list:
     detail_mode: drawer
     title: 组织管理

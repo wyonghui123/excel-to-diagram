@@ -447,8 +447,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    */
   function handleScopeChange(scope) {
     // [MOMP 通用化 2026-08-30] scopeAdapter.handleScopeChange 覆盖默认处理：
-    //   组织页注入 OrgScopeTree 专用 scope 语义（orgIds/effectiveOrgIds），与 archdata 的
-    //   selected*Ids/effective*Ids 映射解耦，保证组织语义只进 adapter、不进本通用逻辑。
+    //   页面把「树 emit 的键」映射成 scopeIds 的 selected/effective（默认分支只认
+    //   archdata 的 selected*Ids/effective*Ids 约定）。语义只进 adapter、不进本通用逻辑。
     if (config.scopeAdapter?.handleScopeChange) {
       return config.scopeAdapter.handleScopeChange(scope, {
         scopeIds,

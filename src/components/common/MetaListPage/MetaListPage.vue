@@ -649,6 +649,7 @@
       :title="detailTitle"
       :edit-mode="detailEditMode"
       :create-mode="detailCreateMode"
+      :initial-data="detailCreateMode ? createInitialValues : {}"
       :show-delete="enableAutoDelete"
       @delete="handleDetailDelete"
       @close="handleDetailClose"
@@ -1234,6 +1235,19 @@ const selectedDetailId = ref(null)
 const detailEditMode = ref(false)
 const detailCreateMode = ref(false)
 const tableKey = ref(0)
+
+// 新建抽屉的初始值：把列表固定的父外键过滤条件（如 * _id）带入表单，
+// 让「组内换算」这类关联分区的新增无需重复选择所属父对象。
+const createInitialValues = computed(() => {
+  const out = {}
+  if (!props.initialFilters) return out
+  for (const [key, val] of Object.entries(props.initialFilters)) {
+    if (key.endsWith('_id') && val !== undefined && val !== null && val !== '') {
+      out[key] = val
+    }
+  }
+  return out
+})
 
 async function forceRefresh() {
   await refresh()
@@ -2419,6 +2433,42 @@ defineExpose({
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
+  }
+
+  /* [FIX 2026-10-24 窄屏分页器左侧被裁]
+     实测 390 宽：el-pagination 实宽 362px（total 58 + prev 32/左距 16 + pager 216
+     + next 32/左距 4），容器仅 358px；360 宽机型容器 328px ⇒ 居中溢出后
+     左侧「共 282 条」被卡片裁成「2 条」。
+     收紧按钮尺寸与间距（32→28、li 左右 2px→0、prev 左距 16→0、total 12px），
+     实测 390 宽降到 306px、360 宽 296px（容器 328px），均可一行放下；
+     320 宽再靠下面的 el-pagination 自身换行兜底。 */
+  .pagination-wrapper :deep(.el-pagination) {
+    /* ≤320 宽（容器 288px）时整条仍差 18px，允许自身换行并限宽，
+       total 独占一行，页码组落到第二行，不再溢出到卡片外被裁。 */
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 4px;
+    max-width: 100%;
+  }
+
+  .pagination-wrapper :deep(.el-pagination__total) {
+    font-size: 12px;
+  }
+
+  .pagination-wrapper :deep(.btn-prev) {
+    margin-left: 0;
+  }
+
+  .pagination-wrapper :deep(.btn-prev),
+  .pagination-wrapper :deep(.btn-next),
+  .pagination-wrapper :deep(.el-pager li) {
+    min-width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .pagination-wrapper :deep(.el-pager li) {
+    margin: 0;
   }
 }
 

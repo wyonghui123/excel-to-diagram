@@ -80,8 +80,12 @@ export default [
   },
   {
     path: '/org-management',
-    name: 'OrgManagement',
-    component: () => import('@/views/SystemManagement/OrgManagement.vue'),
+    // [模型驱动 2026-10-24] 组织管理页不再有独立 Vue 壳：页面形态取自 org.yaml 的
+    //   ui_view_config.hub（左树 = 组织层级，右表 = 组织列表），由通用 hub 页渲染。
+    //   name 与 menu_code 对齐，使 dynamicRoutes 的 hasRoute 去重生效（不再重复注册）。
+    name: 'org-management',
+    component: () => import('@/components/common/MultiObjectHubPage/MultiObjectHubPage.vue'),
+    props: { objectType: 'org', menuCode: 'org-management' },
     meta: { title: '组织管理', requiresAuth: true }
   },
   {

@@ -229,3 +229,8 @@ class UIViewConfig:
     filter: UIFilterViewConfig = field(default_factory=UIFilterViewConfig)
     change_notification: Optional[ChangeNotificationConfig] = None
     child_sections: List[Dict[str, Any]] = field(default_factory=_M_LIST)
+    # [HUB 2026-10-24] 页面聚合形态声明（左树 + 多对象 tab）。
+    #   此前每个对象页在 src/views 下各有一个 ~100 行 Vue 壳承载 objectTypes/tabs/树参数/
+    #   过滤映射；收敛为通用页面后，这些差异改为本字段声明，由前端 MultiObjectHubPage
+    #   解析为 MOMP options（见 src/components/common/MultiObjectHubPage/hubOptions.js）。
+    hub: Dict[str, Any] = field(default_factory=dict)

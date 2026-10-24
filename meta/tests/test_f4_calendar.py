@@ -11,7 +11,10 @@
   6. TestValueHelp    country_id 锁定 level=country                 FR-003
   7. TestFallback     未挂日历兜底口径                              FR-009
 
-v2.0 关键决策: date 用既有 type: datetime（ISO 8601 字符串），零平台改造。
+v2.0 关键决策: 例外日 date 声明为 type: date（纯日期，无时间分量）。
+平台存储层把 date 与 datetime 归一为同一个 FieldType.DATETIME（列仍是 DATETIME、
+值落 'YYYY-MM-DD'），差异只体现在 ui-config：type=date ⇒ 列表原样输出日期串、
+详情走日期格式、录入弹日期选择器。
 """
 
 import os
@@ -346,10 +349,15 @@ class TestCalendarDay:
         assert [e['value'] for e in f['enum_values']] == ['holiday', 'workday']
         assert f['required'] is True
 
-    def test_date_required_and_note_optional(self):
+    def test_date_declared_as_pure_date(self):
+        """例外日是纯日期（SAP 工厂日历假日 / Oracle 工作日历例外日同口径）
+
+        yaml 声明 type: date；存储层仍归一为 DATETIME 列（见 TestBuild:
+        test_date_column_is_datetime），ui 侧 type=date 由 FieldExtractor 回写。
+        """
         f = _fields('calendar_day.yaml')
         assert f['date']['required'] is True
-        assert f['date']['type'] == 'datetime'
+        assert f['date']['type'] == 'date'
         assert f['note'].get('nullable') is True
         assert f['note']['max_length'] == 200
 

@@ -72,7 +72,13 @@ class UIConfigBuilder:
             from meta.services.view_config_service import view_config_service
             _built = view_config_service.get_or_build_view_config(object_type, view_name)
             if _built:
-                config['ui_view_config'] = _make_json_safe(_built)
+                _built_safe = _make_json_safe(_built)
+                # [HUB 2026-10-24] 整体替换时保留 yaml 显式声明的 hub：页面形态与表单推导无关，
+                #   不能被「form 不可渲染 → 推导一份」顺手抹掉 (party 只声明了 skip_auto_menu + hub)
+                _declared_hub = (config.get('ui_view_config') or {}).get('hub')
+                if _declared_hub:
+                    _built_safe['hub'] = _declared_hub
+                config['ui_view_config'] = _built_safe
 
         fields_info = []
         field_constraints = []

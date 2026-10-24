@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed, reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 
 const {
   mockSelectedVersionId,
@@ -132,6 +133,9 @@ function mountPage(propsOverrides = {}, slots = {}) {
 
 describe('MultiObjectManagementPage', () => {
   beforeEach(() => {
+    // MOMP 的 setup 里会 useTabStore / useChartArchDataStore（[v32] 单一数据源），
+    // 缺 Pinia 实例会在 mount 阶段直接抛 getActivePinia()，整文件用例全红。
+    setActivePinia(createPinia())
     mockSelectedVersionId.value = 1
     mockCombinedFilters.value = { version_id: 1 }
     mockActiveTab.value = 'domain'
@@ -177,10 +181,12 @@ describe('MultiObjectManagementPage', () => {
   describe('Tabs 渲染', () => {
     it('渲染 2 个 Tab', () => {
       const wrapper = mountPage()
-      const panes = wrapper.findAll('.tab-pane-stub')
-      expect(panes).toHaveLength(2)
-      expect(panes[0].text()).toBe('领域')
-      expect(panes[1].text()).toBe('子领域')
+      // [FIX 2026-10-24] 组件自 2026-08-21 起弃用 <el-tabs>（EP unregisterPane 崩溃），
+      // 改为 .momp-tab-btn 按钮式 nav；原断言找 .tab-pane-stub 恒为 0。
+      const buttons = wrapper.findAll('.momp-tab-btn')
+      expect(buttons).toHaveLength(2)
+      expect(buttons[0].text()).toBe('领域')
+      expect(buttons[1].text()).toBe('子领域')
     })
 
     it('渲染 momp-tabs-row', () => {

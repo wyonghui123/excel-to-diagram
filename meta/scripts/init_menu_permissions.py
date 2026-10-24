@@ -386,10 +386,12 @@ def init_menu_permissions(db_path):
         },
         {
             # [MOMP 通用化 2026-08-30] 组织管理页（org 单类型 MOMP）
-            #   - menu_path=/org-management 对应前端路由 name=OrgManagement
+            #   - menu_path=/org-management 对应前端路由 name=org-management
             #   - [FIX 2026-09-01 v2] 改为 user-permission 父菜单下的子菜单 (parent_menu='user-permission'),
             #     与 user-management / permission-set-management 并列作为独立 landing 卡片.
-            #   - page_type=object_list (非 multi_object_hub), 避免被 line 491-494 排除.
+            #   - [模型驱动 2026-10-24] page_type 由 object_list 改为 multi_object_hub:
+            #     页面形态（左树 + 单 tab）取自 org.yaml 的 ui_view_config.hub，
+            #     与 location-list 同型 ⇒ 前端不需要按菜单码硬编码组件。
             #   - [Plan D 2026-08-29 Spec16] user_group → org
             'menu_code': 'org-management',
             'menu_name': '组织管理',
@@ -398,15 +400,19 @@ def init_menu_permissions(db_path):
             'color': '#0ea5e9',
             'sort_order': 53,
             'parent_menu': 'user-permission',
-            'page_type': 'object_list',
+            'page_type': 'multi_object_hub',
             'primary_object_type': 'org',
             'object_types': json.dumps(['org']),
+            # [权限码收敛 2026-10-24] 原声明用单段式 org:create/read/update/delete/list/import/export,
+            #   其中 delete/list/import/export 在 permissions 表**并不存在**(真实码是双段式
+            #   org:org_*)。同 v099–v104 对 location/region/calendar/uom 的处理: 收敛为真实存在的
+            #   5 条, 去掉 import/export 的动作绑定 —— 否则角色配置界面出现永远授不了的"假权限"。
             'bo_bindings': json.dumps([
-                {'bo_id': 'org', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'import', 'export']},
+                {'bo_id': 'org', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'org:create', 'org:read', 'org:update', 'org:delete',
-                'org:list', 'org:import', 'org:export',
+                'org:org_create', 'org:org_read', 'org:org_update',
+                'org:org_delete', 'org:org_list',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['org'],
@@ -430,10 +436,10 @@ def init_menu_permissions(db_path):
             #   右表 = 往来单位 / 往来单位组 两个 tab。
             #     动机: party 不直挂 group, 分组关系在关系层 (party_relations.group_id
             #     → party2_id), 查某组伙伴的主路径收敛成"左树选组 → 右表看该组伙伴"
-            #     (前端 PartyManagement.vue 做两段桥接)。
+            #     (形态取自 party.yaml 的 ui_view_config.hub，伙伴 tab 用 bridge 声明两段桥接)。
             #     往来单位组 tab 是 party_group 的维护入口; v093 下架了 party_group-list
             #     独立菜单 (同 v092 对 item_group 的处理)。
-            #   GenericTabContainer 对该 menu_code 做精确映射 → PartyManagement.vue。
+            #   GenericTabContainer 对该单页 hub 统一渲染 MultiObjectHubPage。
             #
             #   [三 tab 2026-10-17] 收入 party_relation 为第三 tab, 并下架其独立菜单
             #   (party-relation-management, 见下方 deprecated_codes):
@@ -528,11 +534,12 @@ def init_menu_permissions(db_path):
             #   物料组是物料的天然分类维度 (items.item_group_id 直 FK), 把「组」从并列
             #   菜单升格为左侧导航树, 查物料的主路径收敛成"左树定位 → 右表看该组物料"。
             #   page_type=multi_object_hub + menu_path='/material-management':
-            #     dynamicRoutes 按 multi_object_hub 注册, GenericTabContainer 里对该
-            #     menu_code 做精确映射 (见 src/views/GenericTabContainer.vue),
-            #     渲染 MaterialManagement.vue 而非 tab 容器。
-            #   object_types=['item'] : 右表只有物料一个 tab; 物料组不做并列 tab
-            #     (用户决策: 只做物料), 而是作为左树存在。
+            #     dynamicRoutes 按 multi_object_hub 注册, GenericTabContainer 对带
+            #     primary_object_type 的单页 hub 统一渲染 MultiObjectHubPage,
+            #     后者读 items.yaml 的 ui_view_config.hub 构建「左树 + tab」
+            #     (页面形态不再以 Vue 壳表达)。
+            #   object_types=['item_group','item'] : 右表物料 / 物料组 两个 tab,
+            #     默认激活物料; 物料组同时作左树 (查物料的主路径 = 左树定位 → 右表看该组物料)。
             #   sort_order=64 : 占用原物料的位置 (item-list 原 so=64), 物料组菜单下架后
             #     该序号空出, 物料组的入口即本页左树。
             'menu_code': 'material-management',
@@ -578,8 +585,9 @@ def init_menu_permissions(db_path):
             #   就是统一自引用树 (site → warehouse → zone → bin), 完全具备左树条件。
             #   page_type=multi_object_hub + menu_path 保持 '/location':
             #     - dynamicRoutes 按 multi_object_hub 注册 /location → GenericTabContainer
-            #     - GenericTabContainer 对 menu_code='location-list' 精确映射
-            #       → LocationManagement.vue (MOMP 泛化页, 左树 = 位置树)
+            #     - GenericTabContainer 对带 primary_object_type 的单页 hub 统一渲染
+            #       MultiObjectHubPage, 形态取自 location.yaml 的 ui_view_config.hub
+            #       (左树 = 位置树, 右表 = 位置列表)
             #     - 路径不变 ⇒ object_type_route_map['location'] 仍为 '/location',
             #       FK 链接 (FkLinkField) 落点不受影响, 存量书签也不失效
             #   primary_object_type/object_types 仍为 location (单类型页, 同 org-management)。
@@ -699,7 +707,8 @@ def init_menu_permissions(db_path):
             #   menu_path 保持 /calendar ⇒ object_type_route_map['calendar'] 与存量
             #   书签不变; object_types 登记 calendar_day, 使
             #   route_map['calendar_day'] = '/calendar' (FK 链接仍可跳转)。
-            #   GenericTabContainer 对该 menu_code 精确映射 → CalendarManagement.vue。
+            #   GenericTabContainer 对带 primary_object_type 的单页 hub 统一渲染
+            #   MultiObjectHubPage, 形态取自 calendar.yaml 的 ui_view_config.hub。
             #   存量 calendar_day-list 行由迁移 v103 删除 (UPSERT 不删行)。
             #   required_permissions 双对象 5+5 条 —— 前端路由守卫 every 判定,
             #   漏声明会连 /calendar 一起拦下 (同 v099/v100/v101/v102 的
@@ -737,6 +746,56 @@ def init_menu_permissions(db_path):
             'data_permission_hint': json.dumps({
                 'resource_types': ['calendar', 'calendar_day'],
                 'message': '建议分配作业日历 / 日历例外日数据权限'
+            })
+        },
+        {
+            # [UOM-MOMP 2026-10-24] 计量单位管理 —— 由自动生成的 object_list 升级为
+            #   「左树(计量单位组) + 右表(计量单位/计量单位组)」MOMP 页。
+            #   两层模型: uom_group（类层主对象, 含组基本单位）+ uom_conversion（组内换算）
+            #             + item_uom_conversion（物料例外, 仍在物料详情子表）。
+            #   page_type=multi_object_hub + menu_path 保持 '/uom':
+            #     - dynamicRoutes 按 multi_object_hub 注册 /uom → GenericTabContainer
+            #     - GenericTabContainer 对带 primary_object_type 的单页 hub 统一渲染
+            #       MultiObjectHubPage, 形态取自 uom.yaml 的 ui_view_config.hub
+            #     - 路径不变 ⇒ object_type_route_map['uom'] 仍为 '/uom', FK 落点与书签不变
+            #   object_types 登记 uom_group ⇒ route_map['uom_group'] = '/uom'（组详情可跳转）。
+            #   required_permissions 收敛为 permissions 表真实存在的 5+5 条:
+            #     自动生成的老行带 uom:import / uom:export, 但这两个权限码在 permissions
+            #     表并不存在 ⇒ 前端路由守卫 (every 判定) 会把整页拦下 (同 v099–v103 问题)。
+            #   本页为手工声明 (auto_generated=0): 入库后生成器的 INSERT OR IGNORE
+            #   不会覆盖它; 存量行由迁移 v104 改写。
+            'menu_code': 'uom-list',
+            'menu_name': '计量单位管理',
+            'menu_path': '/uom',
+            'icon': 'Box',
+            'color': '#0ea5e9',
+            'sort_order': 66,
+            'parent_menu': 'master-data',
+            'page_type': 'multi_object_hub',
+            'primary_object_type': 'uom',
+            'object_types': json.dumps(['uom', 'uom_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'uom', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                {'bo_id': 'uom_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'uom:uom_create',
+                'uom:uom_read',
+                'uom:uom_update',
+                'uom:uom_delete',
+                'uom:uom_list',
+                'uom_group:uom_group_create',
+                'uom_group:uom_group_read',
+                'uom_group:uom_group_update',
+                'uom_group:uom_group_delete',
+                'uom_group:uom_group_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['uom', 'uom_group'],
+                'message': '建议分配计量单位与计量单位组数据权限'
             })
         },
         # === [CAL-MOMP 2026-10-23] calendar_day-list 菜单已下架 ===
@@ -1477,11 +1536,12 @@ def init_menu_permissions(db_path):
 
     # ========== 步骤4.5：清理已废弃菜单 ==========
     # [三 tab 2026-10-17] party-relation-management 下架: 往来单位关系收入
-    #   party-management 的第三 tab（前端 PartyManagement.vue），不再作平级入口。
+    #   party-management 的第三 tab（形态取自 party.yaml 的 ui_view_config.hub），不再作平级入口。
     #   此处 DELETE 而非置 is_active=0 —— 该菜单是手工声明行 (非自动生成),
     #   且步骤5/6 的 UPSERT 会把声明行强制 is_active=1, 留在库里反而会被重新激活。
     # [CAL-MOMP 2026-10-23] calendar_day-list 下架: 日历例外日收入 calendar-list 的
-    #   第二个 tab（前端 CalendarManagement.vue），不再作平级入口。删除理由同上。
+    #   第二个 tab（形态取自 calendar.yaml 的 ui_view_config.hub），不再作平级入口。
+    #   删除理由同上。
     deprecated_codes = ['product-version', 'party-relation-management',
                         'calendar_day-list']
     # 模块关闭时同时回收存量声明行：步骤5/6 的 UPSERT 只写不删，留库会被强制 is_active=1

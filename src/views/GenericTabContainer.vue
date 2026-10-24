@@ -29,6 +29,7 @@
           v-else-if="isCustomComponent(tab.key) && shouldRender(tab.key)"
           v-show="activeTab === tab.key"
           :is="resolvedComponents[tab.key]"
+          v-bind="tab.props || {}"
         />
         <GenericObjectList
           v-else-if="tab.objectType && shouldRender(tab.key)"
@@ -102,11 +103,9 @@ const apiTabs = computed(() => {
   // [FIX 2026-10-11] 无 children 时把节点自身当作唯一 tab。
   //   背景: multi_object_hub 菜单有两种形态 ——
   //     (a) 聚合容器 (user-permission / master-data): 有 children, children 即 tabs
-  //     (b) 单页hub (material-management): 无 children, 自己就是要渲染的那一页
+  //     (b) 单页hub (material-management / org-management): 无 children, 自己就是要渲染的那一页
   //   原实现只认 (a), (b) 时 apiTabs=null → 落到 getGroupTabs 配置兜底 → 配置里没有
   //   该 menu_code → 空容器 (tab 标题渲染了但内容空白, 用户实测)。
-  //   注: org-management 不受影响, 它在 router/modules/business.js 有静态路由直连
-  //   OrgManagement.vue, 不经本容器。
   const isSelfPage = children.length === 0
   const list = isSelfPage ? [node] : children
   return list.map(child => ({
@@ -127,6 +126,8 @@ const apiTabs = computed(() => {
       : null,
     pageType: child.page_type,
     objectTypes: child.object_types,
+    // [模型驱动 2026-10-24] 单页 hub 的被查对象：MultiObjectHubPage 据此读 YAML 的 ui_view_config.hub
+    primaryObjectType: child.primary_object_type,
   }))
 })
 
@@ -135,55 +136,24 @@ const title = computed(() => {
   return getGroupTitle(props.group)
 })
 
-// [2026-08-30 Spec16] "组织管理"为 user-permission 组下的子 tab（menu_code=org-management）。
-// 它是 multi_object_hub 页面类型（非 object_list），需用组件渲染而非 GenericObjectList，
-// 因此精确映射该 tab 渲染 OrgManagement.vue（MOMP 泛化页）。
-const ORG_MANAGEMENT_LOADER = () => import('@/views/SystemManagement/OrgManagement.vue')
-
-// [2026-10-11] "物料管理"是 master-data 组下的子菜单（menu_code=material-management）。
-// 同样是 multi_object_hub 页面类型，但渲染的是 MaterialManagement.vue ——
-// 左树注入物料组树、右表物料，MOMP 泛化页。与组织管理页同构的映射方式。
-const MATERIAL_MANAGEMENT_LOADER = () => import('@/views/MasterData/MaterialManagement.vue')
-
-// [2026-10-11] "往来单位"同为 master-data 组下的单页 hub（menu_code=party-management），
-// 渲染 PartyManagement.vue —— 左树注入往来单位组树、右表往来单位/往来单位组两个 tab。
-// 与物料管理的差异: party 不直挂 group, 左树→右表的过滤在 PartyManagement 内做两段桥接。
-const PARTY_MANAGEMENT_LOADER = () => import('@/views/MasterData/PartyManagement.vue')
-
-// [2026-10-23] "位置管理"原为自动生成的 object_list 菜单（location-list），
-// 与组织/物料不一致（无左侧树）。改为单页 hub 后渲染 LocationManagement.vue ——
-// 左树注入位置树（site/warehouse/zone/bin），右表位置列表。映射方式同物料管理。
-const LOCATION_MANAGEMENT_LOADER = () => import('@/views/MasterData/LocationManagement.vue')
-
-// [2026-10-23] "行政区划管理"同为自动生成的 object_list 菜单（region-list），
-// 与位置管理同步改为单页 hub：左树 = 国/省/市/区四级区划树，右表 = 区划列表。
-const REGION_MANAGEMENT_LOADER = () => import('@/views/MasterData/RegionManagement.vue')
-
-// [2026-10-23] "作业日历管理"（calendar-list）升级为单页 hub：
-//   object_types 由 ['calendar'] 扩为 ['calendar','calendar_day']，渲染
-//   CalendarManagement.vue —— 左树 = 日历树（基准/派生），右表 = 作业日历 / 日历例外日。
-//   calendar_day 原有一条平级菜单 calendar_day-list（v103 下架），它挂在
-//   calendar 之下（parent_object=calendar / calendar_id），平级属「放错层」。
-const CALENDAR_MANAGEMENT_LOADER = () => import('@/views/MasterData/CalendarManagement.vue')
+// [模型驱动 2026-10-24] 单页 hub（无 children 且带 primary_object_type）统一渲染
+// MultiObjectHubPage：页面形态来自对象 YAML 的 ui_view_config.hub，不再一对象一个 Vue 壳
+// （组织管理页也已收口到此，见 org.yaml）。
+// 未声明 hub 的单页 hub（架构数据 / 定价 / 业务配置等）由该组件回退 GenericObjectList，
+// 与改造前的通用分支行为一致。
+const HUB_PAGE_LOADER = () => import('@/components/common/MultiObjectHubPage/MultiObjectHubPage.vue')
 
 function decorateComponentTab(tab) {
-  if (tab.key === 'org-management' || tab.menu_code === 'org-management') {
-    return { ...tab, component: ORG_MANAGEMENT_LOADER }
-  }
-  if (tab.key === 'material-management' || tab.menu_code === 'material-management') {
-    return { ...tab, component: MATERIAL_MANAGEMENT_LOADER }
-  }
-  if (tab.key === 'party-management' || tab.menu_code === 'party-management') {
-    return { ...tab, component: PARTY_MANAGEMENT_LOADER }
-  }
-  if (tab.key === 'location-list' || tab.menu_code === 'location-list') {
-    return { ...tab, component: LOCATION_MANAGEMENT_LOADER }
-  }
-  if (tab.key === 'region-list' || tab.menu_code === 'region-list') {
-    return { ...tab, component: REGION_MANAGEMENT_LOADER }
-  }
-  if (tab.key === 'calendar-list' || tab.menu_code === 'calendar-list') {
-    return { ...tab, component: CALENDAR_MANAGEMENT_LOADER }
+  if (tab.pageType === 'multi_object_hub' && tab.primaryObjectType) {
+    return {
+      ...tab,
+      component: HUB_PAGE_LOADER,
+      props: {
+        objectType: tab.primaryObjectType,
+        objectTypes: tab.objectTypes || [],
+        menuCode: tab.key
+      }
+    }
   }
   return tab
 }

@@ -377,6 +377,36 @@ relations:
 
 ui_view_config:
   showChangeHistory: true
+  # [单页 hub 声明 2026-10-24] 见 items.yaml 同名注释；本块是该页形态的唯一真源。
+  #   口径 B（聚合，含派生子孙）：勾中基准日历 → 基准 + 其派生日历的记录。
+  #   不是「继承」语义：派生日历不会自动继承父日历的例外日。
+  hub:
+    object_types: [calendar, calendar_day]
+    default_tab: calendar
+    tabs:
+      calendar: 作业日历
+      calendar_day: 日历例外日
+    state_key: calendarManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: calendar
+      scope_key: calendar
+      # 日历的父字段是 parent_calendar_id，不是默认的 parent_id
+      parent_field: parent_calendar_id
+      # 「基准/派生」标签：badge_field 取树节点的派生父值键（= parent_field 归一化后的值）
+      badge_field: parentId
+      badge_map:
+        __root__: { label: 基准, type: primary }
+        __fallback__: { label: 派生, type: info }
+      node_icon: none
+      empty_text: 暂无日历数据
+      search_placeholder: 搜索日历（编码/名称）
+    filters:
+      calendar:
+        field: id
+      calendar_day:
+        field: calendar_id
   list:
     detail_mode: drawer
     title: 作业日历管理

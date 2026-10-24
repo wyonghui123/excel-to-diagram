@@ -399,6 +399,34 @@ relations:
 
 ui_view_config:
   showChangeHistory: true
+  # [单页 hub 声明 2026-10-24] 见 items.yaml 同名注释；本块是该页形态的唯一真源。
+  hub:
+    object_types: [location]
+    default_tab: location
+    tabs:
+      location: 位置
+    state_key: locationManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: location
+      scope_key: location
+      parent_field: parent_id
+      # 类型标签：location_type 枚举 → 中文标签 / 标签色（与下方 enum_values 对齐）
+      badge_field: location_type
+      badge_map:
+        site: { label: 场地, type: primary }
+        warehouse: { label: 仓库, type: success }
+        zone: { label: 区域, type: warning }
+        bin: { label: 库位, type: info }
+      node_icon: location
+      order_by: ''
+      empty_text: 暂无位置数据
+      search_placeholder: 搜索位置（编码/名称）
+    filters:
+      # 位置是自引用树：勾中场地须连带仓库/区域/库位 ⇒ effective（勾选 ∪ 多级子孙）。
+      location:
+        field: id
   list:
     detail_mode: drawer
     title: 位置管理

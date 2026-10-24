@@ -270,6 +270,12 @@ def _serialize_ui_view_config(cfg) -> dict:
             result[view_name] = sub
         else:
             result[view_name] = sub
+    # [FIX 2026-10-24] child_sections 此前被丢弃：DetailPage.vue:978 从
+    #   entityMeta.ui_view_config.child_sections 取子表分区，但 ui-config 端点
+    #   只序列化 list/detail/form，导致 YAML 声明的 child_sections 恒为空。
+    result['child_sections'] = list(getattr(cfg, 'child_sections', None) or [])
+    # [HUB 2026-10-24] 页面聚合形态（同 child_sections，此前未序列化会丢失）
+    result['hub'] = dict(getattr(cfg, 'hub', None) or {})
     return result
 
 

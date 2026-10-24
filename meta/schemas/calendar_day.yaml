@@ -85,10 +85,13 @@ fields:
 
   - id: date
     name: 日期
-    type: datetime
+    # 纯日期（无时间分量）。与 SAP 工厂日历假日 / Oracle 工作日历例外日同口径：
+    #   例外是「一整天」的属性，时间粒度属于班次 / 工作时段对象，不在例外日上携带。
+    # 存储仍落 DATETIME 列（平台 date 与 datetime 归一），值为 'YYYY-MM-DD'。
+    type: date
     db_column: date
     required: true
-    description: 例外日期（ISO 8601 日期串 YYYY-MM-DD）
+    description: 例外日期（YYYY-MM-DD，无时间分量）
     semantics:
       meaning: 例外生效日期
       filterable: true

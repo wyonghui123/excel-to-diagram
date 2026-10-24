@@ -48,7 +48,7 @@
       <template #master>
         <div v-if="showVersionScopedContent" class="momp-sidebar">
           <!-- [MOMP 通用化 2026-08-30] 动态注入 scope 树组件：默认 RelationScopeTree（archdata 零回归），
-               组织页注入 OrgScopeTree。props/events 由 scopeTreeProps/scopeTreeEvents 组装 -->
+               主数据页注入 HierarchyScopeTree。props/events 由 scopeTreeProps/scopeTreeEvents 组装 -->
           <component
             :is="scopeTreeComponent"
             ref="scopeTreeRef"
@@ -292,7 +292,7 @@ const menuCode = computed(() => {
 })
 
 // [MOMP 通用化 2026-08-30] scopeTree 注入：默认 RelationScopeTree（archdata 零回归），
-//   组织页注入 OrgScopeTree。org 语义只经由 options.scopeTree 传入，组件本体零硬编码。
+//   主数据页注入 HierarchyScopeTree。页面语义只经由 options.scopeTree 传入，组件本体零硬编码。
 const scopeTreeComponent = computed(() => props.options?.scopeTree?.component || RelationScopeTree)
 const scopeTreeProps = computed(() => {
   if (page.disableVersionContext) {

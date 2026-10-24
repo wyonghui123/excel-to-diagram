@@ -1055,6 +1055,8 @@ def parse_ui_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]] = No
         filter=filter_config,
         change_notification=change_notification_config,
         child_sections=data.get("child_sections", []),
+        # [HUB 2026-10-24] 页面聚合形态（object_types/tabs/scope/filters），原样透传。
+        hub=data.get("hub", {}) or {},
     )
 
 
@@ -1466,6 +1468,7 @@ def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
         name=data.get("name", ""),
         field_type=field_type,
         db_column=data.get("db_column", data.get("id", "")),
+        declared_type=field_type_str,
         required=data.get("required", False),
         unique=data.get("unique", False),
         default=data.get("default"),

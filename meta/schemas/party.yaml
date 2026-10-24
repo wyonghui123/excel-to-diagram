@@ -240,3 +240,40 @@ rules:
 
 ui_view_config:
   skip_auto_menu: true
+  # [HUB 2026-10-24] 页面形态声明（左树 + 三 tab），取代 PartyManagement.vue 壳。
+  #   树 = 业务伙伴组；伙伴与组不是直挂 FK —— 分组关系在关系层
+  #   （party_relations.group_id → party2_id，party1_id 恒为我方侧），故伙伴 tab 走两段桥接：
+  #   树勾选 → 查 party_relation(group_id__in) → 取 party2_id 集合 → 过滤 party_archive(id__in)。
+  #   右表伙伴 tab 用面 party_archive 而非基表 party：读 = 对外档案视图（恒排除 source='org'），
+  #   写经 write_anchor 转发到锚 party（基表只声明写动作、无 read 动作）。
+  hub:
+    object_types: [party_group, party_archive, party_relation]
+    default_tab: party_archive
+    tabs:
+      party_group: 业务伙伴组
+      party_archive: 业务伙伴
+      party_relation: 业务伙伴关系
+    state_key: partyManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: party_group
+      scope_key: party_group
+      parent_field: parent_id
+      order_by: ''
+      empty_text: 暂无业务伙伴组数据
+      search_placeholder: 搜索业务伙伴组（编码/名称）
+    filters:
+      party_archive:
+        bridge:
+          through: party_relation
+          match_field: group_id
+          collect_field: party2_id
+          target_field: id
+          page_size: 500
+          empty_sentinel: '-1'
+      # 组 / 关系两个 tab 是全量台账（不随左树收窄），显式声明防空策略落入关系过滤默认分支
+      party_group:
+        mode: none
+      party_relation:
+        mode: none

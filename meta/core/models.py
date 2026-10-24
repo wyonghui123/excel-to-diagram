@@ -425,6 +425,11 @@ class MetaField:
     name: str
     field_type: FieldType
     db_column: str
+    # [date 语义 2026-10-23] YAML 顶层声明的原始类型串（如 date / datetime / number）。
+    # 为什么要单独留一份: FIELD_TYPE_MAP 把 date 与 datetime 归一为同一个 FieldType.DATETIME
+    # （存储层确实只需一种），但 ui-config 需要把「纯日期」与「日期时间」区分开，
+    # 否则前端一律按 datetime 渲染 —— 纯日期字段会显示 00:00/08:00，录入也弹日期时间选择器。
+    declared_type: str = ""
     required: bool = False
     unique: bool = False
     default: Any = None
