@@ -43,6 +43,9 @@ deletion_policy:
     - table: item_attribute_values
       foreign_key: item_id
       message: 该物料存在分层参数值记录，请先删除后再删除
+    - table: sales_order_lines
+      foreign_key: item_id
+      message: 该物料被销售订单行引用，请先处理订单后再删除
   cascade_delete: []
 
 audit:
@@ -167,6 +170,90 @@ fields:
     ui:
       widget: radio
 
+  # 结构角色：组件类型由本字段推导，不另设 component_type 派生列
+  - id: structure_role
+    name: 结构角色
+    type: string
+    db_column: structure_role
+    required: true
+    default: 'none'
+    max_length: 20
+    description: 物料在 BOM / 选配结构中的角色（标准件 / 模型 / 选项类）
+    enum_values:
+      - value: none
+        label: 标准件
+        color: info
+      - value: model
+        label: 模型
+        color: primary
+      - value: option_class
+        label: 选项类
+        color: warning
+    semantics:
+      meaning: 结构角色
+      filterable: true
+      filter_type: enum
+      filter_label: 结构角色
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 选配结果的物料化策略；P1 只存不用，P4 定价与物化时启用
+  - id: config_match_policy
+    name: 配置匹配策略
+    type: string
+    db_column: config_match_policy
+    required: true
+    default: 'no'
+    max_length: 30
+    description: 选配结果如何匹配物料（不变式 / 一次性标准件 / 一次性用户自定义）
+    enum_values:
+      - value: 'no'
+        label: 不变式
+        color: info
+      - value: one_time_standard
+        label: 一次性标准件
+        color: primary
+      - value: one_time_user_defined
+        label: 一次性用户自定义
+        color: warning
+    semantics:
+      meaning: 配置匹配策略
+      filterable: true
+      filter_type: enum
+      filter_label: 配置匹配策略
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 配置结果的物料化策略；与 config_match_policy 正交（匹配回答「要不要复用实例」，物化回答「要不要生成变式物料」）
+  - id: config_materialize_policy
+    name: 配置物化策略
+    type: string
+    db_column: config_materialize_policy
+    required: true
+    default: 'off'
+    max_length: 20
+    description: 选配结果是否固化为变式物料（关闭 / 手工 / 自动）
+    enum_values:
+      - value: 'off'
+        label: 不物化
+        color: info
+      - value: manual
+        label: 手工物化
+        color: primary
+      - value: auto
+        label: 自动物化
+        color: warning
+    semantics:
+      meaning: 配置物化策略
+      filterable: true
+      filter_type: enum
+      filter_label: 配置物化策略
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: item_group_id
     name: 物料组
     type: integer
@@ -209,6 +296,54 @@ fields:
     ui:
       widget: select
       relation: item_group
+      multiple: false
+      clearable: true
+
+  # 税务分类挂点（tax_classification，用途轴=item）：决定该物料的默认税码。
+  #   候选集在「选择层」按 applicable_to=item 常量收窄（parameter_bindings），
+  #   不会选到客户/供应商分类；可空 = 未指定，按平台默认税码推导。
+  - id: tax_classification_id
+    name: 税务分类
+    type: integer
+    db_column: tax_classification_id
+    nullable: true
+    description: 该物料的默认税务分类（决定默认税码；可空表示按平台默认）
+    semantics:
+      meaning: 默认税务分类引用
+      display:
+        type: association
+        target_type: tax_classification
+        display_field: name
+        placeholder: "未指定（按平台默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_classification
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 仅返回物料用途的分类（常量锁定，见文件注释）
+        parameter_bindings:
+          - target_field: applicable_to
+            constant: item
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 分类编码
+            width: 120
+          - field: name
+            label: 分类名称
+            width: 200
+    ui:
+      widget: select
+      relation: tax_classification
       multiple: false
       clearable: true
 
@@ -440,6 +575,8 @@ indexes:
     name: idx_item_base_uom
   - fields: [barcode]
     name: idx_item_barcode
+  - fields: [tax_classification_id]
+    name: idx_item_tax_classification
 
 relations:
   - id: item_to_item_group
@@ -458,6 +595,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 物料基本计量单位引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: item_to_tax_classification
+    name: 税务分类
+    type: reference
+    target: tax_classification
+    source_field: tax_classification_id
+    target_field: id
+    cardinality: N:1
+    description: 物料默认税务分类引用（可空；用于推导默认税码）
 
 ui_view_config:
   showChangeHistory: true
@@ -574,6 +719,9 @@ ui_view_config:
         columns:
           - fields: [base_uom, barcode]
           - fields: [net_weight, gross_weight]
+      - title: 税务
+        columns:
+          - fields: [tax_classification_id]
       - title: 其他信息
         columns:
           - fields: [status, description]
@@ -595,6 +743,7 @@ ui_view_config:
           - barcode
           - net_weight
           - gross_weight
+          - tax_classification_id
           - status
           - description
 

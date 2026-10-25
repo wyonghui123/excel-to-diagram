@@ -16,6 +16,7 @@ from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
 from meta.api._audit_helper import write_permission_config_audit
 from meta.core.db_path import get_meta_db_path
+from meta.core.number_sequence_engine import NumberSequenceEngine, NumberSequenceError
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,110 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 
 # ── CRUD ──
 
+SALES_ORDER_OBJECT = 'sales_order'
+
+
+def _apply_sales_order_defaults(object_type: str, data: dict) -> dict:
+    """销售订单商务默认值：客户账户默认 → 单据类型控制参数 → 留空（§2.4）。
+
+    只在调用方未显式给值时补，已给值一律不覆盖（用户可改）。
+    解析失败不阻断保存：主数据查询异常降级为「不补默认」。
+    """
+    if object_type != SALES_ORDER_OBJECT:
+        return data
+
+    payload = dict(data)
+    ds = _get_data_source()
+
+    account = {}
+    customer_id = payload.get('customer_account_id')
+    if customer_id not in (None, ''):
+        try:
+            rows = ds.query(
+                'SELECT default_payment_term_id, default_incoterm_code '
+                'FROM customer_accounts WHERE id = ?', [customer_id])
+            account = rows[0] if rows else {}
+        except Exception as e:
+            logger.warning('[bo_api] 读取客户账户默认值失败: %s', e)
+
+    if payload.get('payment_term_id') in (None, '') \
+            and account.get('default_payment_term_id') not in (None, ''):
+        payload['payment_term_id'] = account.get('default_payment_term_id')
+    if not payload.get('incoterm_code') and account.get('default_incoterm_code'):
+        payload['incoterm_code'] = account.get('default_incoterm_code')
+
+    wanted = []
+    if payload.get('payment_term_id') in (None, ''):
+        wanted.append('default_payment_term')
+    if not payload.get('incoterm_code'):
+        wanted.append('default_incoterm')
+    if not wanted:
+        return payload
+
+    try:
+        from meta.services.control_parameter_service import (
+            get_control_parameter_resolver,
+        )
+        resolved = get_control_parameter_resolver().resolve_many(
+            wanted,
+            {
+                'org_id': payload.get('sales_org_id'),
+                'document_type_id': payload.get('order_type_id'),
+            },
+            domain='sales')
+    except Exception as e:
+        logger.warning('[bo_api] 控制参数兜底失败（不阻断保存）: %s', e)
+        return payload
+
+    if payload.get('payment_term_id') in (None, '') \
+            and resolved.get('default_payment_term') not in (None, ''):
+        payload['payment_term_id'] = resolved.get('default_payment_term')
+    if not payload.get('incoterm_code') \
+            and resolved.get('default_incoterm') not in (None, ''):
+        payload['incoterm_code'] = resolved.get('default_incoterm')
+    return payload
+
+
+def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
+    """销售订单编号：按单据类型指向的序列取号（波次 0 §2.3 / W0-R1）。
+
+    取号必须独立成事务（NumberSequenceEngine.allocate 的硬约束：嵌入调用方
+    事务会退化为「锁持有到 COMMIT + 回滚把号一并回滚」），而 BOFramework 对
+    crud_create 自动包裹事务 ⇒ 只能在 API 层、进入 `bo.create()` 之前完成。
+
+    已带 order_no、或缺少单据类型/订单日期时不取号，交由字段必填校验兜底；
+    单据类型未挂序列（number_sequence_id 为空）时同样不取号。
+    """
+    if object_type != SALES_ORDER_OBJECT or data.get('order_no'):
+        return data
+
+    order_type_id = data.get('order_type_id')
+    order_date = data.get('order_date')
+    if order_type_id in (None, '') or order_date in (None, ''):
+        return data
+
+    ds = _get_data_source()
+    rows = ds.query(
+        'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
+        [order_type_id])
+    sequence_id = rows[0].get('number_sequence_id') if rows else None
+    if sequence_id in (None, ''):
+        return data
+
+    configs = ds.query(
+        'SELECT code, pattern, scope_fields, date_field, start_value, on_exhaust '
+        'FROM number_sequences WHERE id = ?', [sequence_id])
+    if not configs:
+        return data
+
+    allocated = NumberSequenceEngine(ds).allocate(
+        dict(configs[0]), {}, {'order_date': order_date})
+    payload = dict(data)
+    payload['order_no'] = allocated
+    logger.info('[bo_api] allocated order_no=%s (type=%s)', allocated, order_type_id)
+    return payload
+
+
 @bo_bp.route('/<object_type>', methods=['POST'])
 @login_required
 def create_bo(object_type):
@@ -175,6 +280,8 @@ def create_bo(object_type):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     try:
+        data = _apply_sales_order_defaults(object_type, data)
+        data = _allocate_sales_order_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
         status_code = 201 if result.success else (result.status_code or 400)
@@ -201,6 +308,9 @@ def create_bo(object_type):
                 logger.warning(f"[bo_api] auto_grant failed (non-fatal): {e}")
 
         return jsonify({'success': result.success, 'data': result.data, 'message': result.message}), status_code
+    except NumberSequenceError as e:
+        logger.warning(f"[bo_api] allocate order_no failed: {e}")
+        return jsonify({'success': False, 'message': f'销售订单取号失败：{e}'}), 400
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] create error: {e}\n{traceback.format_exc()}")

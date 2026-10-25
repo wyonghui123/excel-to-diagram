@@ -62,7 +62,16 @@ deletion_policy:
   # （relation_id 是本对象向外的引用，不是入向引用）。
   # 保留结构供未来接上后补条目（不改骨架）。对比：uom 列 2 条、region 列 5 条。
   mode: restrict
-  restrict_on: []
+  restrict_on:
+    - table: sales_orders
+      foreign_key: customer_account_id
+      message: 该客户档案被销售订单引用（售达方），请先处理订单后再删除
+    - table: sales_orders
+      foreign_key: bill_to_account_id
+      message: 该客户档案被销售订单引用（收票方），请先处理订单后再删除
+    - table: sales_orders
+      foreign_key: payer_account_id
+      message: 该客户档案被销售订单引用（付款方），请先处理订单后再删除
   cascade_delete: []
 
 audit:
@@ -201,6 +210,152 @@ fields:
     ui:
       widget: textarea
 
+  # 税务分类挂点（tax_classification，用途轴=customer）：决定该客户的默认税码。
+  #   候选集在选择层按 applicable_to=customer 常量收窄；可空 = 按平台默认税码推导。
+  - id: tax_classification_id
+    name: 税务分类
+    type: integer
+    db_column: tax_classification_id
+    nullable: true
+    description: 该客户的默认税务分类（决定默认税码；可空表示按平台默认）
+    semantics:
+      meaning: 默认税务分类引用
+      display:
+        type: association
+        target_type: tax_classification
+        display_field: name
+        placeholder: "未指定（按平台默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_classification
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - target_field: applicable_to
+            constant: customer
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 分类编码
+            width: 120
+          - field: name
+            label: 分类名称
+            width: 200
+    ui:
+      widget: select
+      relation: tax_classification
+      multiple: false
+      clearable: true
+
+  # 账户级默认账期（波次 0 商务条件的唯一落点）
+  #   解析链：本字段 → 单据类型控制参数 default_payment_term → 留空（不阻断保存）
+  #   组织级覆盖（同一客户在同一法人下按销售组织细分）推迟到波次 1，届时另建
+  #   customer_sales_org 并落差异值；本字段保持"账户默认"语义不变。
+  - id: default_payment_term_id
+    name: 默认付款条件
+    type: integer
+    db_column: default_payment_term_id
+    nullable: true
+    description: 账户级默认账期；新建订单时带出，可改
+    semantics:
+      meaning: 该客户档案的默认付款条件引用
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+        placeholder: "未指定（按单据类型默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        # 候选只取启用行；resolve 不读 value_filter ⇒ 已停用条件的存量回显不受影响
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 条件编码
+            width: 140
+          - field: name
+            label: 条件名称
+            width: 200
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
+  # 账户级默认贸易条款（字符串存 code，不建 FK 对象）
+  #   incoterm 的业务键是 (code, edition)，字符串列无法表达版本 ⇒ 候选固定取 2020 版
+  #   （现役版本）。订单侧存同一 code 口径；将来需要"单据锁旧版"时再升级为
+  #   incoterm_id（随波次 1 定价/贸易条件一起改，属新增 nullable 列，不动本列）。
+  - id: default_incoterm_code
+    name: 默认贸易条款
+    type: string
+    db_column: default_incoterm_code
+    nullable: true
+    max_length: 10
+    description: 账户级默认贸易条款代码（Incoterms 2020）
+    semantics:
+      meaning: 该客户档案的默认国际贸易术语代码
+      data_category: code
+      display:
+        type: association
+        target_type: incoterm
+        display_field: name
+        placeholder: "未指定（按单据类型默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: incoterm
+        value_field: code
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          edition: '2020'
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 术语
+            width: 90
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: incoterm
+      multiple: false
+      clearable: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -272,7 +427,24 @@ indexes:
     unique: true
     name: idx_customer_account_relation_unique
 
-relations: []
+relations:
+  - id: customer_account_to_tax_classification
+    name: 税务分类
+    type: reference
+    target: tax_classification
+    source_field: tax_classification_id
+    target_field: id
+    cardinality: N:1
+    description: 客户默认税务分类引用（可空；用于推导默认税码）
+
+  - id: customer_account_to_payment_term
+    name: 默认付款条件
+    type: reference
+    target: payment_term
+    source_field: default_payment_term_id
+    target_field: id
+    cardinality: N:1
+    description: 账户级默认账期引用（可空；订单带出的第一优先级）
 
 # ============================================
 # [分区落点 2026-10-22] 档案不再作独立菜单，进party_relation 详情页的关联分区
@@ -331,6 +503,12 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [name]
+      - title: 商务默认
+        columns:
+          - fields: [default_payment_term_id, default_incoterm_code]
+      - title: 税务
+        columns:
+          - fields: [tax_classification_id]
       - title: 其他
         columns:
           - fields: [description]
@@ -340,4 +518,7 @@ ui_view_config:
         type: fieldGroup
         fields:
           - name
+          - default_payment_term_id
+          - default_incoterm_code
+          - tax_classification_id
           - description

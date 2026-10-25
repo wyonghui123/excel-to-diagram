@@ -1,0 +1,231 @@
+# 模型特征声明 (Item Structure Attribute) — 这一版模型用哪些可配置特征
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §5.2
+# 定位: item_structure 的附属明细（child_sections），不单独成菜单。
+#
+# 口径:
+#   ① 特征挂在结构版本上而不是物料分类上 —— "这一版模型用哪些特征"是模型定义的一部分。
+#   ② attribute_code 只指向平台层（tenant_id = 0）的定义，租户私有定义不进结构版本。
+#   ③ 只有 structure_role = model 的结构可以声明特征；选项类只用行选择表达。
+#   ④ 引用的属性必须 is_configurable = true、status = active、
+#      data_type ∈ string / number / integer / boolean。
+#   ⑤ default_value_text 按 data_type 解析，并落在值域内：
+#      list 必须是枚举清单成员，range 必须落在区间内（table 域待接入目标对象）。
+#
+# 字段级约束表达不了的由服务层守卫强制（item_structure_guard_service）:
+#   父结构角色必须是 model；属性可配置且已启用；默认值与类型 / 值域一致。
+
+id: item_structure_attribute
+name: 模型特征声明
+table_name: item_structure_attributes
+description: 模型版本声明使用的可配置特征（编码 / 必填 / 默认值 / 展示顺序）
+parent_object: item_structure
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: structure_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: structure_id
+    name: 结构版本
+    type: integer
+    db_column: structure_id
+    required: true
+    description: 声明特征的模型版本
+    semantics:
+      meaning: 所属结构版本
+      display:
+        type: association
+        target_type: item_structure
+        display_field: revision
+    ui:
+      widget: select
+      relation: item_structure
+      multiple: false
+
+  - id: attribute_code
+    name: 特征编码
+    type: string
+    db_column: attribute_code
+    required: true
+    max_length: 60
+    description: 平台层属性定义编码（tenant_id = 0）
+    semantics:
+      meaning: 可配置特征编码
+      data_category: code
+      display_name: true
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: code
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: input
+
+  - id: required_flag
+    name: 必填
+    type: boolean
+    db_column: required_flag
+    required: true
+    default: false
+    description: 该特征在配置时是否必须给出取值
+    semantics:
+      meaning: 特征是否必填
+    ui:
+      widget: switch
+
+  - id: default_value_text
+    name: 默认值
+    type: string
+    db_column: default_value_text
+    max_length: 255
+    nullable: true
+    description: 特征的默认取值文本；按属性 data_type 解析
+    semantics:
+      meaning: 特征默认值
+    ui:
+      widget: input
+
+  - id: seq
+    name: 展示顺序
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 配置界面的特征排列顺序，数值小者在前
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 特征展示顺序
+      filterable: true
+      filter_type: number
+      filter_label: 展示顺序
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: ui_widget
+    name: 控件覆盖
+    type: string
+    db_column: ui_widget
+    max_length: 30
+    nullable: true
+    description: 可选覆盖配置界面控件；空 = 按属性定义推导
+    enum_values:
+      - value: select
+        label: 下拉
+      - value: radio
+        label: 单选
+      - value: number
+        label: 数字
+      - value: switch
+        label: 开关
+      - value: date
+        label: 日期
+    semantics:
+      meaning: 配置界面控件
+    ui:
+      widget: select
+
+indexes:
+  - fields: [structure_id, attribute_code]
+    unique: true
+    name: uidx_item_structure_attribute_code
+  - fields: [attribute_code]
+    name: idx_item_structure_attribute_ref
+
+relations:
+  - id: item_structure_attribute_to_structure
+    name: 结构版本
+    type: reference
+    target: item_structure
+    source_field: structure_id
+    target_field: id
+    cardinality: N:1
+    description: 所属模型版本引用（真外键）
+
+ui_view_config:
+  # 作为结构头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 模型特征
+    columns:
+      - field: seq
+        width: 80
+        sortable: true
+      - field: attribute_code
+        width: 200
+      - field: required_flag
+        width: 90
+      - field: default_value_text
+        width: 160
+      - field: ui_widget
+        width: 100
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 模型特征信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [attribute_code, seq]
+          - fields: [required_flag, default_value_text]
+          - fields: [ui_widget]

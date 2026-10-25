@@ -798,6 +798,330 @@ def init_menu_permissions(db_path):
                 'message': '建议分配计量单位与计量单位组数据权限'
             })
         },
+        {
+            # [SRC-MENU 2026-10-24] 供应来源规则 —— 供应计划域头对象的主数据子页
+            #   形态: 扁平规则列表 (object_list), 来源行 / 作用域分配是规则详情内的
+            #     子表 (sourcing_rule_line / sourcing_rule_assignment 的 ui_view_config
+            #     声明 skip_auto_menu: true), 不单独建菜单, 故 object_types 只登记头对象。
+            #   落位: parent_menu='master-data', show_in_sidebar=0 —— 与 party / material /
+            #     location / address / region / calendar / uom 同款(父 hub 的子页)。
+            #   sort_order=72: 主数据组现存最大值 71(calendar-list), 顺延取 72。
+            #   required_permissions 用双段式真实权限码 {bo}:{bo}_{action}; 这 10 条
+            #     权限由迁移 v107 写入 permissions 表, 漏声明会被前端路由守卫拦下。
+            'menu_code': 'sourcing-rule-management',
+            'menu_name': '供应来源规则',
+            'menu_path': '/sourcing-rules',
+            'icon': 'Share',
+            'color': '#0ea5e9',
+            'sort_order': 72,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'sourcing_rule',
+            'object_types': json.dumps(['sourcing_rule']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'sourcing_rule', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'sourcing_rule:sourcing_rule_create',
+                'sourcing_rule:sourcing_rule_read',
+                'sourcing_rule:sourcing_rule_update',
+                'sourcing_rule:sourcing_rule_delete',
+                'sourcing_rule:sourcing_rule_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['sourcing_rule'],
+                'message': '建议分配供应来源规则数据权限'
+            })
+        },
+        {
+            # [SRC-MENU 2026-10-24] 供应方式策略 —— 供应计划域的独立基线配置页
+            #   形态: 扁平列表 (object_list), 一行 = 物料组(可下探物料) × 组织的供应方式。
+            #   落位同上: parent_menu='master-data', show_in_sidebar=0;
+            #   sort_order=73 (紧接供应来源规则, 该组 72 已被占用)。
+            'menu_code': 'sourcing-mode-policy-management',
+            'menu_name': '供应方式策略',
+            'menu_path': '/sourcing-mode-policies',
+            'icon': 'Share',
+            'color': '#0ea5e9',
+            'sort_order': 73,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'sourcing_mode_policy',
+            'object_types': json.dumps(['sourcing_mode_policy']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'sourcing_mode_policy', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'sourcing_mode_policy:sourcing_mode_policy_create',
+                'sourcing_mode_policy:sourcing_mode_policy_read',
+                'sourcing_mode_policy:sourcing_mode_policy_update',
+                'sourcing_mode_policy:sourcing_mode_policy_delete',
+                'sourcing_mode_policy:sourcing_mode_policy_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['sourcing_mode_policy'],
+                'message': '建议分配供应方式策略数据权限'
+            })
+        },
+        {
+            # [TYPE-DEF 2026-10-25] 类型字典 —— 单据类型 / 行类型的统一管理页
+            #   原「销售单据类型」「销售行类型」两页已降级为只读视图（兼容面），
+            #     菜单由迁移 v110 停用；本页是唯一可写入口。
+            #   required_permissions 用单段式 {object}:{action}（PermissionSyncService
+            #     按 YAML 动作自动生成的码就是这一形态），与按钮权限码一致。
+            'menu_code': 'type-definition-management',
+            'menu_name': '类型字典',
+            'menu_path': '/type-definitions',
+            'icon': 'List',
+            'color': '#0ea5e9',
+            'sort_order': 74,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'type_definition',
+            'object_types': json.dumps(['type_definition']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'type_definition', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'type_definition:create',
+                'type_definition:read',
+                'type_definition:update',
+                'type_definition:delete',
+                'type_definition:list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['type_definition'],
+                'message': '建议分配类型字典数据权限'
+            })
+        },
+        {
+            # [SALES-CFG 2026-10-25] 控制参数 —— 行为开关与业务默认值的两表配置页
+            #   形态: 扁平列表 (object_list); 维度取值 (control_parameter_value) 是
+            #     详情内的子表 (该子对象声明 skip_auto_menu: true), 不单独建菜单。
+            #   解释: control_parameter_service 按 org/单据类型/行类型/物料组匹配,
+            #     故本页是「行为参数化」的唯一维护入口。sort_order 顺延 76。
+            'menu_code': 'control-parameter-management',
+            'menu_name': '控制参数',
+            'menu_path': '/control-parameters',
+            'icon': 'Setting',
+            'color': '#0ea5e9',
+            'sort_order': 76,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'control_parameter_def',
+            'object_types': json.dumps(['control_parameter_def']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'control_parameter_def', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'control_parameter_def:control_parameter_def_create',
+                'control_parameter_def:control_parameter_def_read',
+                'control_parameter_def:control_parameter_def_update',
+                'control_parameter_def:control_parameter_def_delete',
+                'control_parameter_def:control_parameter_def_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['control_parameter_def'],
+                'message': '建议分配控制参数数据权限'
+            })
+        },
+        {
+            # [SALES-CFG 2026-10-25] 付款条件 —— 上一批已建对象, 当时漏了菜单入口
+            #   形态: 扁平列表 (object_list); 分期/折扣行 (payment_term_line) 是详情
+            #     内的子表。被控制参数 default_payment_term 引用, 是销售域主数据。
+            #   sort_order 顺延 77。
+            'menu_code': 'payment-term-management',
+            'menu_name': '付款条件',
+            'menu_path': '/payment-terms',
+            'icon': 'Timer',
+            'color': '#0ea5e9',
+            'sort_order': 77,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'payment_term',
+            'object_types': json.dumps(['payment_term']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'payment_term', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'payment_term:payment_term_create',
+                'payment_term:payment_term_read',
+                'payment_term:payment_term_update',
+                'payment_term:payment_term_delete',
+                'payment_term:payment_term_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['payment_term'],
+                'message': '建议分配付款条件数据权限'
+            })
+        },
+        {
+            # [INCOTERM 2026-10-25] 国际贸易术语 —— Incoterms 2020 字典
+            #   形态: 扁平列表 (object_list); 术语是纯字典, 无子表。
+            #   对象 self 声明 skip_auto_menu, 菜单仅由本声明 + 迁移 v109 落地。
+            #   sort_order 顺延 78。
+            'menu_code': 'incoterm-management',
+            'menu_name': '国际贸易术语',
+            'menu_path': '/incoterms',
+            'icon': 'List',
+            'color': '#0ea5e9',
+            'sort_order': 78,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'incoterm',
+            'object_types': json.dumps(['incoterm']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'incoterm', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'incoterm:incoterm_create',
+                'incoterm:incoterm_read',
+                'incoterm:incoterm_update',
+                'incoterm:incoterm_delete',
+                'incoterm:incoterm_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['incoterm'],
+                'message': '建议分配国际贸易术语数据权限'
+            })
+        },
+        {
+            # [ATTRIBUTE 2026-10-25] 属性定义 —— 可扩展属性字典（v110 落地）
+            #   形态: 扁平列表 (object_list); 属性字典本身无子表。
+            #   对象 self 声明 skip_auto_menu, 菜单仅由本声明 + 迁移 v110 落地。
+            #   sort_order 顺延 79（该组 78 = incoterm-management）。
+            #   注意: 缺本声明时，步骤 7.6 会在启动时把该手工菜单当冗余删除。
+            'menu_code': 'attribute-definition-management',
+            'menu_name': '属性定义',
+            'menu_path': '/attribute-definitions',
+            'icon': 'Tags',
+            'color': '#0ea5e9',
+            'sort_order': 79,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'attribute_definition',
+            'object_types': json.dumps(['attribute_definition']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'attribute_definition', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'attribute_definition:attribute_definition_create',
+                'attribute_definition:attribute_definition_read',
+                'attribute_definition:attribute_definition_update',
+                'attribute_definition:attribute_definition_delete',
+                'attribute_definition:attribute_definition_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['attribute_definition'],
+                'message': '建议分配属性定义数据权限'
+            })
+        },
+        {
+            # [ATTRIBUTE 2026-10-25] 属性适用范围 —— 属性作用于哪些对象/物料分类
+            #   sort_order 顺延 80。
+            'menu_code': 'attribute-scope-management',
+            'menu_name': '属性适用范围',
+            'menu_path': '/attribute-scopes',
+            'icon': 'Sliders',
+            'color': '#0ea5e9',
+            'sort_order': 80,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'attribute_scope',
+            'object_types': json.dumps(['attribute_scope']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'attribute_scope', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'attribute_scope:attribute_scope_create',
+                'attribute_scope:attribute_scope_read',
+                'attribute_scope:attribute_scope_update',
+                'attribute_scope:attribute_scope_delete',
+                'attribute_scope:attribute_scope_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['attribute_scope'],
+                'message': '建议分配属性适用范围数据权限'
+            })
+        },
+        {
+            # [TAX 2026-10-25] 税码管理 —— 波次 0 税务主数据
+            #   形态: 扁平列表 (object_list); 税率是税码子表, 在详情页内联维护
+            #   (tax_code.yaml 的 ui_view_config.child_sections), 不建独立菜单。
+            #   对象声明 skip_auto_menu; 菜单仅由本声明 + 迁移 v111 落地。
+            #   sort_order 顺延 81 / 82（该组现最大值 80 = v110 属性字典）。
+            'menu_code': 'tax-management',
+            'menu_name': '税码管理',
+            'menu_path': '/tax-codes',
+            'icon': 'Tickets',
+            'color': '#0ea5e9',
+            'sort_order': 81,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'tax_code',
+            'object_types': json.dumps(['tax_code']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'tax_code', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'tax_code:tax_code_create',
+                'tax_code:tax_code_read',
+                'tax_code:tax_code_update',
+                'tax_code:tax_code_delete',
+                'tax_code:tax_code_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['tax_code'],
+                'message': '建议分配税码数据权限'
+            })
+        },
+        {
+            # [TAX 2026-10-25] 税务分类 —— 按客户/供应商/物料三个用途轴给出的默认税码口径
+            'menu_code': 'tax-classification-management',
+            'menu_name': '税务分类',
+            'menu_path': '/tax-classifications',
+            'icon': 'CollectionTag',
+            'color': '#0ea5e9',
+            'sort_order': 82,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'tax_classification',
+            'object_types': json.dumps(['tax_classification']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'tax_classification', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'tax_classification:tax_classification_create',
+                'tax_classification:tax_classification_read',
+                'tax_classification:tax_classification_update',
+                'tax_classification:tax_classification_delete',
+                'tax_classification:tax_classification_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['tax_classification'],
+                'message': '建议分配税务分类数据权限'
+            })
+        },
         # === [CAL-MOMP 2026-10-23] calendar_day-list 菜单已下架 ===
         #   例外日收进 calendar-list 第二个 tab (同 party_relation 口径)。
         #   存量行由迁移 v103 删除 (init_menu_permissions 的 UPSERT 不删行)。
@@ -1517,6 +1841,91 @@ def init_menu_permissions(db_path):
                 'message': '建议分配条件更新组数据权限'
             })
         },
+        {
+            # [SALES-ORDER 2026-10-25] 销售域顶层分组容器 —— 无页面、无路径, 仅承载子菜单
+            #   与迁移 v121 的声明保持一致; 缺本声明时步骤 7.6 会在启动时把该手工菜单
+            #   当冗余删除 (同 payment_term / incoterm / attribute 的历史踩坑)。
+            'menu_code': 'sales',
+            'menu_name': '销售',
+            'menu_path': '',
+            'icon': 'Tickets',
+            'color': '#f59e0b',
+            'sort_order': 30,
+            'parent_menu': '',
+            'page_type': '',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps([]),
+            'description': '销售域：销售订单及其后续履约单据',
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({})
+        },
+        {
+            # [SALES-ORDER 2026-10-25] 销售订单 —— 抬头 + 可编辑行子表 (波次 0)
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   show_in_sidebar=0: 随父分组在侧边栏展开可见, 不进 landing 卡片区.
+            'menu_code': 'sales-order-management',
+            'menu_name': '销售订单',
+            'menu_path': '/sales-orders',
+            'icon': 'List',
+            'color': '#f59e0b',
+            'sort_order': 1,
+            'parent_menu': 'sales',
+            'page_type': 'object_list',
+            'primary_object_type': 'sales_order',
+            'object_types': json.dumps(['sales_order']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'sales_order', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'sales_order:sales_order_create',
+                'sales_order:sales_order_read',
+                'sales_order:sales_order_update',
+                'sales_order:sales_order_delete',
+                'sales_order:sales_order_list',
+            ]),
+            'description': '销售订单：抬头 + 可编辑行子表，按销售组织做数据范围',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['sales_order'],
+                'message': '建议分配销售订单数据权限（按销售组织）'
+            })
+        },
+        {
+            # [ITEM-STRUCTURE 2026-10-25] 物料结构（BOM / 选配模型）—— v112 交付,
+            #   与 v112__item_structure_menu 的声明保持一致; 缺本声明时步骤 7.6 会
+            #   把该手工菜单当冗余删除 (BOM 页入口随之消失)。
+            'menu_code': 'item-structure-management',
+            'menu_name': '物料结构管理',
+            'menu_path': '/item-structures',
+            'icon': 'Connection',
+            'color': '#0ea5e9',
+            'sort_order': 83,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'item_structure',
+            'object_types': json.dumps(['item_structure']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'item_structure', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'item_structure:item_structure_create',
+                'item_structure:item_structure_read',
+                'item_structure:item_structure_update',
+                'item_structure:item_structure_delete',
+                'item_structure:item_structure_list',
+            ]),
+            'description': '物料结构（BOM / 选配模型）：按物料、用途、替代结构与版本维护组件行',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['item_structure'],
+                'message': '建议分配物料结构数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========
@@ -1914,6 +2323,11 @@ def init_menu_permissions(db_path):
     print("[OK] 菜单权限表 & 导航表初始化完成！")
     print("=" * 60)
 
+    # [FIX 2026-10-25] 步骤 7.5–7.8 的 DELETE / INSERT 此前从未提交:
+    #   sqlite3 默认隔离级别下 DML 会开隐式事务, 而 conn.close() 会回滚未提交事务
+    #   —— 导致「清理冗余菜单」「展开权限到角色」「绑定 admin 菜单」每次都只打印
+    #   日志、不落库。此处统一提交, 使四步真正生效。
+    conn.commit()
     conn.close()
 
 

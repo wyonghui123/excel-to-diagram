@@ -1,0 +1,357 @@
+# 付款条件分期行 (Payment Term Line) — 一头多行，描述"什么时候付多少"
+# 依据: Oracle AP_TERMS_LINES（SEQ_NUM / PERCENT / DAYS / DAY_OF_MONTH / DISCOUNT_PERCENT / DISCOUNT_DAYS）
+#       Oracle Fusion Payment Terms 行（Days / Months / Day of Month / Discount）
+#       SAP T052（ZBD1T-3T 折扣天数 / ZPRZ1-2 折扣率 / ZTAG1-2 天数 / ZTAGG 固定日）
+# 定位: payment_term 的附属明细（child_sections），不单独成菜单。
+#
+# 到期日计算口径（写死，消费方不得自行解释；实现见
+# meta/services/payment_term_schedule_service.py 的 compute_schedule）:
+#   1. 基准日 = 头的 basis_date_rule 指向的日期（invoice_date / delivery_date / order_date / month_end）
+#      若头的 cutoff_day 非空且单据日 > cutoff_day ⇒ 基准月顺延一个月
+#   2. 先加 offset_months；若 fixed_day_of_month 非空 ⇒ 落到该月第 N 天（超过当月天数取月末）
+#   3. 再加 offset_days ⇒ 该行到期日
+#   4. 折扣到期日 = 基准日 + discount_days（**不经过**第 2、3 步；对齐 SAP 折扣天数的 baseline 口径）
+#
+# 跨行不变量（字段级约束表达不了，由守卫强制: meta/services/payment_term_guard_service.py）:
+#   G1  Σ percentage = 100 —— 写时只硬拦「合计 > 100」（`validate_line_write`）；
+#       「合计 = 100」是完整性条件，由 `assert_term_complete(term_id)` 在使用前校验。
+#       原因：子表逐行保存，若每次写都要求合计=100，两期各 50% 的第二行无法落库。
+#   G2  (payment_term_id, seq) 唯一 —— 唯一索引 idx_payment_term_line_seq + 校验器复合唯一
+#   G3  discount_percent 与 discount_days 必须同时为空或同时有值
+#   G4  discount_days 必须早于该行到期天数（fixed_day_of_month 非空时写时不可判定，跳过）
+#   G5  percentage 全为正 —— 字段级 constraints: numeric_range gt 0
+
+id: payment_term_line
+name: 付款条件分期
+table_name: payment_term_lines
+description: 付款条件分期行（百分比 / 月偏移 / 固定日 / 天偏移 / 现金折扣）
+parent_object: payment_term
+hierarchy:
+  enabled: true
+  parent_field: payment_term_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation=payment_term 的字段）
+  - id: payment_term_id
+    name: 付款条件
+    type: integer
+    db_column: payment_term_id
+    required: true
+    description: 所属付款条件
+    semantics:
+      meaning: 所属付款条件
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 分期序号（1 起，同一付款条件内唯一）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 99
+        decimal_places: 0
+    semantics:
+      meaning: 分期顺序
+      filterable: true
+      filter_type: number
+      filter_label: 序号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: percentage
+    name: 占比(%)
+    type: float
+    db_column: percentage
+    required: true
+    default: 100
+    description: 该期占全额的比例（%），同一付款条件各行合计必须为 100
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lte: 100
+        decimal_places: 4
+    semantics:
+      meaning: 该期应付金额占比（百分比）
+      hint: 例：三期各 33.3333；单期填 100
+    ui:
+      widget: input
+
+  - id: offset_months
+    name: 月偏移
+    type: integer
+    db_column: offset_months
+    required: true
+    default: 0
+    description: 在基准日所在月上再加的月数（0 = 当月）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 60
+        decimal_places: 0
+    semantics:
+      meaning: 到期日计算的月偏移
+    ui:
+      widget: input
+
+  - id: fixed_day_of_month
+    name: 固定日
+    type: integer
+    db_column: fixed_day_of_month
+    nullable: true
+    description: 落到该月第几天（1-31）；空 = 保持基准日的日；超过当月天数取月末
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 31
+        decimal_places: 0
+    semantics:
+      meaning: 到期日的固定日（月结 / 固定 15 日付款场景）
+      hint: 例：次月 15 日付款 ⇒ offset_months=1, fixed_day_of_month=15, offset_days=0
+    ui:
+      widget: input
+
+  - id: offset_days
+    name: 天偏移
+    type: integer
+    db_column: offset_days
+    required: true
+    default: 0
+    description: 在（月偏移 + 固定日）之后的日历天数（0 = 不加天）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 到期日的天偏移
+      hint: 例：净 30 天 ⇒ offset_months=0, fixed_day_of_month 空, offset_days=30
+    ui:
+      widget: input
+
+  - id: discount_percent
+    name: 折扣率(%)
+    type: float
+    db_column: discount_percent
+    nullable: true
+    description: 现金折扣率（%）；与 discount_days 必须同时有值或同时为空
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lt: 100
+        decimal_places: 4
+    semantics:
+      meaning: 提前付款享受的折扣百分比
+      hint: 例：2/10 净 30 ⇒ 折扣率 2
+    ui:
+      widget: input
+
+  - id: discount_days
+    name: 折扣天数
+    type: integer
+    db_column: discount_days
+    nullable: true
+    description: 折扣到期天数（从基准日起算，不经过月偏移与固定日）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 折扣期天数
+      hint: 例：2/10 净 30 ⇒ 折扣天数 10
+    ui:
+      widget: input
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 分期行说明（如 首付款 / 验收款 / 质保金）
+    semantics:
+      meaning: 分期行备注
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [payment_term_id, seq]
+    unique: true
+    name: idx_payment_term_line_seq
+  - fields: [payment_term_id]
+    name: idx_payment_term_line_term
+
+relations:
+  - id: payment_term_line_to_term
+    name: 所属付款条件
+    type: reference
+    target: payment_term
+    source_field: payment_term_id
+    target_field: id
+    cardinality: N:1
+    description: 付款条件引用（由 relations 生成真外键；删除付款条件时 restrict）
+
+ui_view_config:
+  # 只作为付款条件详情的子表出现，不生成侧边栏菜单
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 分期与折扣
+    description: 付款条件的分期与折扣
+    columns:
+      - field: seq
+        width: 70
+        sortable: true
+      - field: percentage
+        width: 110
+        type: number
+        align: right
+      - field: offset_months
+        width: 90
+        type: number
+        align: right
+      - field: fixed_day_of_month
+        width: 90
+        type: number
+        align: right
+      - field: offset_days
+        width: 90
+        type: number
+        align: right
+      - field: discount_percent
+        width: 100
+        type: number
+        align: right
+      - field: discount_days
+        width: 100
+        type: number
+        align: right
+      - field: description
+        width: 220
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    actions:
+      - id: create
+        label: 新增分期
+        icon: plus
+        type: primary
+        permission: payment_term_line:create
+    defaultSort:
+      field: seq
+      order: asc
+
+  form:
+    title: 分期信息
+    layout: vertical
+    sections:
+      - title: 到期规则
+        columns:
+          - fields: [seq, percentage]
+          - fields: [offset_months, fixed_day_of_month]
+          - fields: [offset_days]
+      - title: 现金折扣
+        columns:
+          - fields: [discount_percent, discount_days]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "分期详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - payment_term_id
+          - seq
+          - percentage
+          - offset_months
+          - fixed_day_of_month
+          - offset_days
+          - discount_percent
+          - discount_days
+          - description
+
+category_config:
+  create_permission: payment_term_line:create
+  update_permission: payment_term_line:update
+  delete_permission: payment_term_line:delete
+  owner_auto_permission: false

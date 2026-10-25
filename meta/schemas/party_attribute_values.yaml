@@ -1,0 +1,268 @@
+# 业务伙伴属性值（Party Attribute Values）— 属性字典的首张落值表
+# 依据: _attribute_value_template.yaml（列口径、互斥填值、索引模式均按模板）
+# 定位: 承载 party 对象上的描述性 / 分析性属性值。定义在 attribute_definitions，值在这里。
+#
+# 设计边界（重要）:
+#   - 不承载参与计算、需索引、被引用、有生命周期、切权限的属性。这类属性必须提为 parties 上的物理列，
+#     走 attribute_promotion 通道。
+#   - 归属列用真外键（party_id）而非多态 owner_type，因此本表不与其他对象的值表合并。
+#   - seq 承载多值。单值属性恒为 1，多值属性从 1 递增。
+#   - 一行只允许一列值非空。互斥与「类型 ↔ 列」对应由值服务强制；DSL 无 CHECK。
+#   - 组织级覆盖不在这里做。需要按组织取不同值 → 走组织级对象；只是必填差异 → 走 attribute_scope
+#     或运行期规则。
+
+id: party_attribute_value
+name: 业务伙伴属性值
+table_name: party_attribute_values
+description: 业务伙伴属性值——描述性/分析性属性的类型化值列（一行一列非空，多值用 seq 区分）
+parent_object: party
+hierarchy:
+  enabled: true
+  parent_field: party_id
+
+semantics:
+  meaning: 业务伙伴的可扩展属性值
+  category: core_entity
+  business_key: [tenant_id, party_id, attribute_id, seq]
+  aliases:
+    - 业务伙伴属性值
+    - Party Attribute Value
+
+deletion_policy:
+  # 值行可删（业务行为），按主数据口径仍禁止物理删除以留审计
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: tenant_id
+    name: 租户
+    type: integer
+    db_column: tenant_id
+    required: true
+    default: 0
+    description: 数据归属租户；0 = 平台层数据
+    semantics:
+      meaning: 值行归属租户
+      immutable: true
+      data_category: code
+    ui:
+      widget: number
+
+  - id: party_id
+    name: 业务伙伴
+    type: integer
+    db_column: party_id
+    required: true
+    description: 归属业务伙伴
+    semantics:
+      meaning: 所属业务伙伴
+      display:
+        type: association
+        target_type: party
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+
+  - id: attribute_id
+    name: 属性
+    type: integer
+    db_column: attribute_id
+    required: true
+    description: 属性定义引用（决定本行用哪一列承载值）
+    semantics:
+      meaning: 属性定义引用
+      display:
+        type: association
+        target_type: attribute_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 180
+          - field: name
+            label: 名称
+            width: 180
+    ui:
+      widget: select
+      relation: attribute_definition
+      multiple: false
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 多值序号；单值属性恒为 1
+    semantics:
+      meaning: 同一属性的值序号
+    ui:
+      widget: number
+
+  - id: value_text
+    name: 属性值（文本）
+    type: text
+    db_column: value_text
+    required: false
+    nullable: true
+    description: 文本类值（data_type = string）
+    semantics:
+      meaning: 文本类属性值
+    ui:
+      widget: input
+
+  - id: value_number
+    name: 属性值（数值）
+    type: float
+    db_column: value_number
+    required: false
+    nullable: true
+    description: 数值类值（data_type ∈ number/integer，REAL 承载）
+    semantics:
+      meaning: 数值类属性值
+    ui:
+      widget: number
+
+  - id: value_boolean
+    name: 属性值（布尔）
+    type: boolean
+    db_column: value_boolean
+    required: false
+    nullable: true
+    description: 布尔类值（data_type = boolean）
+    semantics:
+      meaning: 布尔类属性值
+    ui:
+      widget: switch
+
+  - id: value_date
+    name: 属性值（日期）
+    type: date
+    db_column: value_date
+    required: false
+    nullable: true
+    description: 纯日期值（data_type = date）
+    semantics:
+      meaning: 日期类属性值
+    ui:
+      widget: date
+
+  - id: value_datetime
+    name: 属性值（日期时间）
+    type: datetime
+    db_column: value_datetime
+    required: false
+    nullable: true
+    description: 日期时间值（data_type = datetime）
+    semantics:
+      meaning: 日期时间类属性值
+    ui:
+      widget: datetime
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    required: false
+    nullable: true
+    description: 值备注
+    semantics:
+      meaning: 属性值备注
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  # 四列均非空 ⇒ 普通唯一索引即可，无需 partial unique
+  - fields: [tenant_id, party_id, attribute_id, seq]
+    unique: true
+    name: uidx_party_attr_value
+  # 供影响预览与引用计数；不作为业务范围查询入口
+  - fields: [attribute_id]
+    name: idx_party_attr_value_attr
+
+relations:
+  - id: party_attribute_value_to_party
+    name: 业务伙伴
+    type: reference
+    target: party
+    source_field: party_id
+    target_field: id
+    cardinality: N:1
+    description: 所属业务伙伴引用（真外键）
+  - id: party_attribute_value_to_attribute_definition
+    name: 属性
+    type: reference
+    target: attribute_definition
+    source_field: attribute_id
+    target_field: id
+    cardinality: N:1
+    description: 属性定义引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+
+nested:
+  enabled: true
+  parent: party
+  children: []

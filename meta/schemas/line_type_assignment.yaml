@@ -1,0 +1,325 @@
+# 销售行类型确定 (Sales Line Type Assignment) — 订单类型 × 物料组 → 行类型
+# 依据: SAP 行项目类别确定（订单类型 + 物料组 → 行类别）/ Oracle Line Type 分配
+# 定位: document_type 的附属明细（child_sections），不单独成菜单。
+#
+# 为什么不做成控制参数:
+#   这是"结构选择"（决定单据行怎么拆、走哪条执行逻辑），不是行为开关；
+#   专用表能让实施在订单类型详情里一眼看清"哪类物料走哪条行类型"。
+#
+# 命中规则（实现见 meta/services/sales_config_guard_service.py 与后续确定服务）:
+#   ① 行匹配 = 物料组等于单据行的物料组（物料组为空的记录视为通配）；
+#   ② 候选按 specificity_rank 升序、id 升序，首个命中获胜；
+#   ③ 全不命中回落 document_type.default_line_type_id；
+#   ④ 同一单据类型下「物料组 + specificity_rank」必须唯一 —— SQLite 中 NULL 不参与唯一约束，
+#      由 guard 服务按 NULL 归一化后判重。
+
+id: line_type_assignment
+name: 销售行类型确定
+table_name: line_type_assignments
+description: 销售行类型确定（单据类型 + 物料组 → 行类型）
+parent_object: document_type
+hierarchy:
+  enabled: true
+  parent_field: document_type_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（getParentIdField 取首个 ui.relation=document_type 的字段）
+  - id: document_type_id
+    name: 单据类型
+    type: integer
+    db_column: document_type_id
+    required: true
+    description: 所属销售单据类型
+    semantics:
+      meaning: 所属销售单据类型
+      display:
+        type: association
+        target_type: document_type
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: document_type
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: document_type
+      multiple: false
+
+  - id: item_group_id
+    name: 物料组
+    type: integer
+    db_column: item_group_id
+    nullable: true
+    description: 物料组；空 = 通配（兜底行）
+    semantics:
+      meaning: 命中的物料组
+      display:
+        type: association
+        target_type: item_group
+        display_field: name
+      hint: 空表示通配，只在没有更具体的记录时生效
+    value_help:
+      source:
+        type: bo
+        target_bo: item_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: item_group
+      multiple: false
+
+  - id: specificity_rank
+    name: 具体度
+    type: integer
+    db_column: specificity_rank
+    required: true
+    default: 100
+    description: 数小优先；通配行给大值（如 900），具体物料组给小值
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 命中优先级（数小优先）
+    ui:
+      widget: input
+
+  - id: line_type_id
+    name: 行类型
+    type: integer
+    db_column: line_type_id
+    required: true
+    description: 命中后使用的行类型
+    semantics:
+      meaning: 目标销售行类型
+      display:
+        type: association
+        target_type: line_type
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: line_type
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: line_type
+      multiple: false
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 停用后不参与确定
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 确定规则启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 确定规则说明
+    semantics:
+      meaning: 确定规则备注
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [document_type_id]
+    name: idx_line_type_assignment_doc_type
+  - fields: [document_type_id, specificity_rank]
+    name: idx_line_type_assignment_rank
+
+relations:
+  - id: line_type_assignment_to_doc_type
+    name: 所属单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（删除时 restrict；指向 type_definitions 的 header 行）
+  - id: line_type_assignment_to_item_group
+    name: 物料组
+    type: reference
+    target: item_group
+    source_field: item_group_id
+    target_field: id
+    cardinality: N:1
+    description: 物料组维度引用（可空）
+  - id: line_type_assignment_to_line_type
+    name: 行类型
+    type: reference
+    target: type_definition
+    source_field: line_type_id
+    target_field: id
+    cardinality: N:1
+    description: 目标行类型引用（删除时 restrict；指向 type_definitions 的 line 行）
+
+ui_view_config:
+  # 只作为单据类型详情的子表出现，不生成侧边栏菜单
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 行类型确定
+    description: 单据类型下行类型的确定规则
+    columns:
+      - field: item_group_id
+        width: 180
+        render_as: association
+        target_type: item_group
+        display_field: name
+      - field: specificity_rank
+        width: 90
+        type: number
+        align: right
+      - field: line_type_id
+        width: 160
+        render_as: association
+        target_type: line_type
+        display_field: name
+      - field: status
+        width: 80
+      - field: description
+        width: 220
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    actions:
+      - id: create
+        label: 新增确定规则
+        icon: plus
+        type: primary
+        permission: line_type_assignment:create
+    defaultSort:
+      field: specificity_rank
+      order: asc
+
+  form:
+    title: 行类型确定
+    layout: vertical
+    sections:
+      - title: 匹配维度
+        columns:
+          - fields: [item_group_id, specificity_rank]
+      - title: 结果
+        columns:
+          - fields: [line_type_id, status]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: 行类型确定详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [document_type_id, item_group_id, specificity_rank,
+                 line_type_id, status, description]
+
+category_config:
+  create_permission: line_type_assignment:create
+  update_permission: line_type_assignment:update
+  delete_permission: line_type_assignment:delete
+  owner_auto_permission: false

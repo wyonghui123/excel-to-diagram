@@ -1,0 +1,242 @@
+# 行类型（只读切片）— type_definition 的 line 面
+# 依据: docs/superpowers/specs/2026-10-25-type-definition-generalization-spec.md §5 / §8
+#
+# [对象级泛化 2026-10-25] 本对象由 sales_line_type 更名为 line_type，
+#   切片条件收窄为 level = 'line'（不再钉死 scope_bo，随类型字典的归属域扩展）。
+# 写面只有 type_definition 管理页；本面无写动作，写请求由 READ_ONLY_VIEW 护栏拒绝。
+#
+# 列名口径（Phase 2 保留，不是遗留）: category 是 line_category 的别名。
+#
+# 设计边界（重要）:
+#   行为参数（pricing_relevant / billing_relevance / inventory_effect / cost_relevant 等）
+#   一律不进本表 —— 统一走控制参数（control_parameter_def + control_parameter_value）。
+
+id: line_type
+name: 行类型（只读）
+table_name: line_types
+description: 行类型（type_definitions 的 line 切片，只读）
+display_name_field: name
+object_type: view
+view_definition: |
+  SELECT id, code, name,
+         line_category AS category,
+         status, description, created_at
+  FROM type_definitions
+  WHERE level = 'line'
+
+# 只读面：不声明写动作；auto_crud 关闭
+import_export:
+  auto_crud: false
+
+actions:
+  - id: line_type_read
+    name: 查询销售行类型
+    type: crud
+    method: GET
+    path: "/api/v1/line_types/{id}"
+    description: 查询单个销售行类型（只读）
+  - id: line_type_list
+    name: 查询销售行类型列表
+    type: crud
+    method: GET
+    path: "/api/v1/line_types"
+    description: 查询销售行类型列表（只读）
+
+semantics:
+  meaning: 销售行类型
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 销售行类型
+    - 行项目类别
+    - Line Type
+    - Item Category
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 行类型编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 10
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 行类型唯一编码（如 STD / SVC / RET / FOC / TXT）
+    semantics:
+      meaning: 行类型业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 行类型名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 行类型显示名称
+    semantics:
+      meaning: 行类型显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: category
+    name: 行类别
+    type: string
+    db_column: category
+    required: true
+    default: material
+    description: 行的性质，决定默认方向（退货行入库、文本行不定价）
+    enum_values:
+      - value: material
+        label: 物料行
+        color: primary
+        category: active
+        is_initial: true
+      - value: service
+        label: 服务行
+        color: success
+      - value: return
+        label: 退货行
+        color: warning
+      - value: free_of_charge
+        label: 免费行
+        color: info
+      - value: text
+        label: 文本行
+        color: info
+    semantics:
+      meaning: 行类型的性质分类
+      filterable: true
+      filter_type: enum
+      filter_label: 行类别
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 行类型状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 行类型启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 行类型说明
+    semantics:
+      meaning: 行类型详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 销售行类型
+    description: 销售行类型（行级身份）
+    columns:
+      - field: code
+        width: 100
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: category
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 260
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    # 只读面：不声明新建按钮，写操作统一走 type_definition 管理页
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 销售行类型
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [category, status]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, category, status, description]
+
+category_config:
+  create_permission: line_type:create
+  update_permission: line_type:update
+  delete_permission: line_type:delete
+  owner_auto_permission: false

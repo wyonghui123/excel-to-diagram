@@ -1,0 +1,387 @@
+# 配置规则条件项 (Config Rule Term) — 结构化的条件 / 结论项
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §5.4 / §5.5 / §9 R8
+# 定位: config_rule 的附属明细（二级 child_sections），不单独成菜单。
+#
+# 为什么不做一列 JSON:
+#   ① 按目标反查「这条结构行被哪些规则引用」；
+#   ② 冲突时按 source_rule_id 反查「是哪几条规则造成的」；
+#   ③ 删行前检查「有没有规则挂在我身上」。
+#
+# 口径:
+#   ① 三个 target_* 列恰好一列非空（R8）。
+#   ② target_line_id / target_class_item_id 必须落在规则所属结构版本
+#      （含其选项类子结构）内（R16，服务层校验）。
+#   ③ attribute_code 必须是该结构版本 item_structure_attribute 已声明的特征。
+#   ④ operator 与 target_type / rule_type 必须相容（§5.5 形状表）。
+
+id: config_rule_term
+name: 配置规则条件项
+table_name: config_rule_terms
+description: 规则的条件项（if / then，目标 + 算子 + 取值）
+parent_object: config_rule
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: rule_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: rule_id
+    name: 所属规则
+    type: integer
+    db_column: rule_id
+    required: true
+    description: 条件项所属规则
+    semantics:
+      meaning: 所属规则
+      display:
+        type: association
+        target_type: config_rule
+        display_field: message
+    ui:
+      widget: select
+      relation: config_rule
+      multiple: false
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 条件项序号；(rule_id, seq) 唯一
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 条件项序号
+      filterable: true
+      filter_type: number
+      filter_label: 序号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: clause
+    name: 子句
+    type: string
+    db_column: clause
+    required: true
+    description: if = 条件；then = 结论
+    enum_values:
+      - value: if
+        label: 条件
+        color: info
+      - value: then
+        label: 结论
+        color: primary
+    semantics:
+      meaning: 条件项子句
+      filterable: true
+      filter_type: enum
+      filter_label: 子句
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: target_type
+    name: 目标类型
+    type: string
+    db_column: target_type
+    required: true
+    description: 目标对象类型；三列中对应一列必填
+    enum_values:
+      - value: structure_line
+        label: 结构行
+        color: primary
+      - value: option_class
+        label: 选项类
+        color: info
+      - value: characteristic
+        label: 特征
+        color: warning
+    semantics:
+      meaning: 目标对象类型
+      filterable: true
+      filter_type: enum
+      filter_label: 目标类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: target_line_id
+    name: 目标结构行
+    type: integer
+    db_column: target_line_id
+    nullable: true
+    description: target_type = structure_line 时必填
+    semantics:
+      meaning: 目标结构行
+      display:
+        type: association
+        target_type: item_structure_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: item_structure_line
+      multiple: false
+
+  - id: target_class_item_id
+    name: 目标选项类
+    type: integer
+    db_column: target_class_item_id
+    nullable: true
+    description: target_type = option_class 时必填
+    semantics:
+      meaning: 目标选项类物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: attribute_code
+    name: 目标特征
+    type: string
+    db_column: attribute_code
+    max_length: 60
+    nullable: true
+    description: target_type = characteristic 时必填；必须是该结构已声明的特征
+    semantics:
+      meaning: 目标特征编码
+      data_category: code
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: code
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: input
+
+  - id: operator
+    name: 算子
+    type: string
+    db_column: operator
+    required: true
+    description: 与 target_type / rule_type 相容（§5.5）
+    enum_values:
+      - value: selected
+        label: 已选中
+      - value: not_selected
+        label: 未选中
+      - value: equals
+        label: 等于
+      - value: not_equals
+        label: 不等于
+      - value: in
+        label: 属于集合
+      - value: qty_ge
+        label: 数量大于等于
+      - value: qty_le
+        label: 数量小于等于
+      - value: qty_between
+        label: 数量区间
+      - value: enabled
+        label: 可选
+      - value: disabled
+        label: 不可选
+    semantics:
+      meaning: 条件项算子
+      filterable: true
+      filter_type: enum
+      filter_label: 算子
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: value_text
+    name: 文本值
+    type: string
+    db_column: value_text
+    max_length: 255
+    nullable: true
+    description: 文本类取值（equals / not_equals）
+    semantics:
+      meaning: 条件项文本值
+    ui:
+      widget: input
+
+  - id: value_number
+    name: 数值
+    type: number
+    db_column: value_number
+    nullable: true
+    description: 数值 / 数量下界（equals / qty_ge / qty_le / qty_between）
+    semantics:
+      meaning: 条件项数值
+    ui:
+      widget: input
+
+  - id: value_number_to
+    name: 数值上界
+    type: number
+    db_column: value_number_to
+    nullable: true
+    description: 数量区间上界（qty_between）
+    semantics:
+      meaning: 条件项数值上界
+    ui:
+      widget: input
+
+  - id: value_list
+    name: 值集合
+    type: json
+    db_column: value_list
+    nullable: true
+    description: 多值枚举清单（in）
+    semantics:
+      meaning: 条件项多值集合
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [rule_id, seq]
+    unique: true
+    name: uidx_config_rule_term_seq
+  - fields: [target_line_id]
+    name: idx_config_rule_term_line
+  - fields: [attribute_code]
+    name: idx_config_rule_term_attribute
+
+relations:
+  - id: config_rule_term_to_rule
+    name: 所属规则
+    type: reference
+    target: config_rule
+    source_field: rule_id
+    target_field: id
+    cardinality: N:1
+    description: 所属规则引用（真外键）
+  - id: config_rule_term_to_line
+    name: 目标结构行
+    type: reference
+    target: item_structure_line
+    source_field: target_line_id
+    target_field: id
+    cardinality: N:1
+    description: 目标结构行引用（真外键，同时承担删除守卫）
+  - id: config_rule_term_to_class_item
+    name: 目标选项类
+    type: reference
+    target: item
+    source_field: target_class_item_id
+    target_field: id
+    cardinality: N:1
+    description: 目标选项类物料引用（真外键）
+
+ui_view_config:
+  # 作为规则详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 条件项
+    columns:
+      - field: seq
+        width: 80
+        sortable: true
+      - field: clause
+        width: 90
+      - field: target_type
+        width: 120
+      - field: operator
+        width: 140
+      - field: value_text
+        width: 140
+      - field: value_number
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 条件项信息
+    layout: vertical
+    sections:
+      - title: 目标
+        columns:
+          - fields: [seq, clause]
+          - fields: [target_type]
+          - fields: [target_line_id, target_class_item_id]
+          - fields: [attribute_code]
+      - title: 判定
+        columns:
+          - fields: [operator]
+          - fields: [value_text]
+          - fields: [value_number, value_number_to]
+          - fields: [value_list]

@@ -1,0 +1,376 @@
+# 税务登记（Party Tax Registration）— 业务伙伴在各国/各税种下的登记号
+# 依据: docs/superpowers/specs/2026-10-25-tax-wave0-implementation-spec.md §3.4
+# 定位: party_archive 的附属明细（child_sections，见 party_archive.yaml），不单独成菜单。
+#
+# 关键口径:
+#   1. parent_object 写 party（真实外键指向 parties），但 ui.relation 写 party_archive ——
+#      业务伙伴在 UI 上的详情面是视图 party_archive（恒排除 source='org' 的内部组织表示），
+#      child_sections 挂在它下面；前端 metaService.getParentIdField 靠 ui.relation 推断父键，
+#      写 party 会导致回退 party_archive_id（该列不存在）。先例 item_xref.party_id 同款。
+#   2. 一个伙伴在同一国家、同一税种下允许多个登记号（历史号 / 多分支机构），
+#      但**至多一个主号**（is_primary）—— DB 唯一索引表达不了「条件唯一」，
+#      由守卫 TaxGuardService.validate_party_tax_registration_write 的 G5 强制。
+#   3. 登记号 immutable：号段变更应为「停用旧号 + 新建新号」，不做原地改号
+#      （否则历史单据的税号快照对不上）。
+#   4. 不做税号格式校验（各国规则差异过大且会变），格式由外部税系统或人工把关。
+
+id: party_tax_registration
+name: 税务登记
+table_name: party_tax_registrations
+description: 业务伙伴税务登记号（按国家 + 税种，至多一个主号）
+parent_object: party
+hierarchy:
+  enabled: true
+  parent_field: party_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: party_id
+    name: 业务伙伴
+    type: integer
+    db_column: party_id
+    required: true
+    description: 所属业务伙伴（真实外键指向 parties；UI 父面为 party_archive）
+    semantics:
+      meaning: 所属业务伙伴引用
+      display:
+        type: association
+        target_type: party_archive
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party_archive
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 伙伴编码
+            width: 140
+          - field: name
+            label: 伙伴名称
+            width: 200
+          - field: party_type
+            label: 身份类型
+            width: 120
+    ui:
+      # 必须是 party_archive：child_sections 挂在 party_archive 下（见文件头第 1 条）
+      widget: select
+      relation: party_archive
+      multiple: false
+
+  - id: country_id
+    name: 国家/地区
+    type: integer
+    db_column: country_id
+    required: true
+    description: 登记号所属国家/地区（引用 region 国家级节点）
+    semantics:
+      meaning: 登记号所属国家地区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - target_field: level
+            constant: country
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 国家代码
+            width: 100
+          - field: name
+            label: 国家名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+
+  - id: tax_type
+    name: 税种
+    type: string
+    db_column: tax_type
+    required: true
+    description: 该登记号对应的税种
+    enum_values:
+      - value: vat
+        label: 增值税
+        color: primary
+      - value: gst
+        label: 商品服务税
+        color: primary
+      - value: sales_tax
+        label: 销售税
+        color: warning
+      - value: excise
+        label: 消费税
+        color: warning
+      - value: customs_duty
+        label: 关税
+        color: danger
+      - value: other
+        label: 其他税种
+        color: info
+    semantics:
+      meaning: 登记号对应税种
+      filterable: true
+      filter_type: enum
+      filter_label: 税种
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: registration_number
+    name: 税务登记号
+    type: string
+    db_column: registration_number
+    required: true
+    max_length: 60
+    description: 税务登记号 / 增值税号 / 纳税人识别号
+    semantics:
+      meaning: 税务登记号（immutable：号段变更应停用旧号并新建）
+      immutable: true
+      searchable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: is_primary
+    name: 主登记号
+    type: boolean
+    db_column: is_primary
+    required: true
+    default: false
+    description: 是否为该伙伴在该国家该税种下的主号（唯一，由守卫强制）
+    semantics:
+      meaning: 主登记号标记
+      filterable: true
+      filter_type: enum
+      filter_label: 主号
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: valid_from
+    name: 生效起始日
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 登记号生效起始日（含当日；为空表示不限定）
+    semantics:
+      meaning: 生效起始日
+      filterable: true
+      filter_type: date
+      filter_label: 生效起始日
+      filter_scope: local
+    ui:
+      widget: date
+      clearable: true
+
+  - id: valid_to
+    name: 生效截止日
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 登记号生效截止日（不含当日；为空表示至今有效）
+    semantics:
+      meaning: 生效截止日
+      filterable: true
+      filter_type: date
+      filter_label: 生效截止日
+      filter_scope: local
+    ui:
+      widget: date
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 登记号状态 active/inactive
+    enum_values:
+      - value: active
+        label: 有效
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 失效
+        color: info
+        category: inactive
+    semantics:
+      meaning: 登记号状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_party_tax_registration
+    name: 启用税务登记
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此税务登记号吗？"
+
+  - id: deactivate_party_tax_registration
+    name: 停用税务登记
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后该号不再用于新单据，历史单据的税号快照不受影响。"
+
+indexes:
+  # 同伙伴 + 同国家 + 同税种 + 同号只允许一行
+  - fields: [party_id, country_id, tax_type, registration_number]
+    unique: true
+    name: idx_party_tax_reg_unique
+  - fields: [party_id]
+    name: idx_party_tax_reg_party
+
+relations:
+  - id: ptr_to_party
+    name: 业务伙伴
+    type: reference
+    target: party
+    source_field: party_id
+    target_field: id
+    cardinality: N:1
+    description: 所属业务伙伴引用（真实外键指向 parties）
+  - id: ptr_to_region
+    name: 国家/地区
+    type: reference
+    target: region
+    source_field: country_id
+    target_field: id
+    cardinality: N:1
+    description: 登记号所属国家引用
+
+ui_view_config:
+  # 子表在业务伙伴详情的「税务登记」页签内联展示，不单独成菜单
+  skip_auto_menu: true
+  list:
+    title: 税务登记
+    columns:
+      - field: country_id
+        width: 130
+      - field: tax_type
+        width: 110
+        render_as: tag
+      - field: registration_number
+        width: 200
+      - field: is_primary
+        width: 100
+        render_as: tag
+      - field: valid_from
+        width: 120
+        format: date
+      - field: valid_to
+        width: 120
+        format: date
+      - field: status
+        width: 80
+    actions:
+      - id: create
+        label: 新增税务登记
+        icon: plus
+        type: primary
+        permission: party_tax_registration:party_tax_registration_create
+    defaultSort:
+      field: is_primary
+      order: desc
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v110 落库）
+  create_permission: party_tax_registration:party_tax_registration_create
+  update_permission: party_tax_registration:party_tax_registration_update
+  delete_permission: party_tax_registration:party_tax_registration_delete
+  owner_auto_permission: false

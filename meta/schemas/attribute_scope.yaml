@@ -1,0 +1,302 @@
+# 属性适用范围（Attribute Scope）— 属性的适用性与必填性声明
+# 定位: 回答「这个属性作用于哪些对象 / 哪些物料分类、在那里是否必填」。
+#
+# 为什么独立成表（而不是在 attribute_definition 上放两列）:
+#   必填性是「属性 × 对象 × 租户」的属性，不是属性自身的属性。同一属性可以作用于多个对象，
+#   在 A 对象必填、在 B 对象可选。放定义表就得用逗号串或 JSON，等于把关系塞进标量。
+#
+# 解析优先级（四档，就近覆盖、不累加）:
+#   (租户, 具体分类) > (租户, 对象) > (平台, 具体分类) > (平台, 对象)
+#   只取最具体的一条，不把多档规则叠加 —— 叠加会让「上层必填、下层可选」无法表达。
+#
+# 设计边界:
+#   - 组织 / 工厂级差异不进本表。要按组织取不同值，走组织级对象；只是必填或可见性不同，
+#     走运行期规则。SAP 用 class type 与字段状态承载颗粒度，Oracle 用 usage / category / context，
+#     三家都不把组织做成定义维度。
+#   - scope_ref 为多态引用：scope_type = object 时填对象编码，scope_type = item_group 时填物料分类编码。
+#     DSL 无法表达多态外键，存在性由应用层 lint 校验。
+
+id: attribute_scope
+name: 属性适用范围
+table_name: attribute_scopes
+description: 属性适用范围——属性作用于哪些对象或物料分类，以及是否必填
+display_name_field: scope_ref
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 属性适用范围与必填性
+  category: core_entity
+  business_key: [tenant_id, attribute_id, scope_type, scope_ref]
+  display_name_field: scope_ref
+  aliases:
+    - 属性适用范围
+    - 属性必填范围
+    - Attribute Scope
+
+deletion_policy:
+  # 范围行可删（调整适用面不破坏值），但仍按主数据口径禁止物理删除以留审计
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: tenant_id
+    name: 租户
+    type: integer
+    db_column: tenant_id
+    required: true
+    default: 0
+    description: 数据归属租户；0 = 平台层范围，非 0 = 租户私有范围
+    semantics:
+      meaning: 范围归属层级（0 为平台层）
+      immutable: true
+      data_category: code
+    ui:
+      widget: number
+
+  - id: attribute_id
+    name: 属性
+    type: integer
+    db_column: attribute_id
+    required: true
+    description: 所属属性定义
+    semantics:
+      meaning: 适用范围的属性引用
+      display:
+        type: association
+        target_type: attribute_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 180
+          - field: name
+            label: 名称
+            width: 180
+    ui:
+      widget: select
+      relation: attribute_definition
+      multiple: false
+
+  - id: scope_type
+    name: 范围类型
+    type: string
+    db_column: scope_type
+    required: true
+    default: object
+    max_length: 20
+    description: 范围粒度——object（按对象）/ item_group（按物料分类）
+    enum_values:
+      - value: object
+        label: 对象
+        color: primary
+        is_initial: true
+        description: 作用于整个对象的所有记录
+      - value: item_group
+        label: 物料分类
+        color: info
+        description: 仅作用于该分类下的物料
+    semantics:
+      meaning: 适用范围粒度
+      filterable: true
+      filter_type: enum
+      filter_label: 范围类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: scope_ref
+    name: 范围引用
+    type: string
+    db_column: scope_ref
+    required: true
+    max_length: 120
+    description: scope_type = object 时为对象编码（如 party / item）；= item_group 时为物料分类编码
+    semantics:
+      meaning: 适用范围的具体对象或分类编码
+      searchable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: required_flag
+    name: 必填
+    type: boolean
+    db_column: required_flag
+    required: true
+    default: false
+    description: 在该范围内是否必填
+    semantics:
+      meaning: 该范围内是否强制填值
+    ui:
+      widget: switch
+
+  - id: seq
+    name: 顺序
+    type: integer
+    db_column: seq
+    required: true
+    default: 10
+    description: 展示与比较顺序
+    semantics:
+      meaning: 范围行排序号
+    ui:
+      widget: number
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 20
+    description: 范围行状态；inactive 的适用范围不参与解析
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 范围行启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    required: false
+    nullable: true
+    description: 适用范围说明
+    semantics:
+      meaning: 范围说明
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_attribute_scope
+    name: 启用范围
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此适用范围吗？"
+
+  - id: deactivate_attribute_scope
+    name: 停用范围
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后该范围不再参与解析。确定停用？"
+
+indexes:
+  # 同一属性在同一租户内的同一范围只允许一行；四列均非空 ⇒ 普通唯一约束即可生效
+  - fields: [tenant_id, attribute_id, scope_type, scope_ref]
+    unique: true
+    name: idx_attribute_scope_tenant_attr_scope
+  # 反查：某对象 / 某分类下声明了哪些属性
+  - fields: [tenant_id, scope_type, scope_ref]
+    name: idx_attribute_scope_lookup
+
+relations:
+  - id: attribute_scope_to_attribute_definition
+    name: 属性
+    type: reference
+    target: attribute_definition
+    source_field: attribute_id
+    target_field: id
+    cardinality: N:1
+    description: 所属属性定义引用
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 属性适用范围
+    description: 属性作用于哪些对象或物料分类
+    columns:
+      - field: attribute_id
+        width: 180
+      - field: scope_type
+        width: 110
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: scope_ref
+        width: 180
+      - field: required_flag
+        width: 90
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+        render_as: tag

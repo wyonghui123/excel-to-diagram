@@ -1,0 +1,340 @@
+# 付款条件 (Payment Term) — 销售 / 采购共用的收付款账期规则（头）
+# 依据: Oracle EBS AP_TERMS + AP_TERMS_LINES（头 + 分期行）
+#       Oracle Fusion Payment Terms（Due Date Basis / Cut-off Day / 分期 / 折扣）
+#       SAP T052（ZTERM / ZTAGG / ZTAG1-2 / ZPRZ1-2 / ZBD1T-3T）
+# 定位: 主数据（账期规则）。被 sales_order.payment_term_id、customer_account（账户默认）引用。
+# 模型: 头存"从哪天起算 + 截止日顺延"，行存"什么时候付多少"（分期 / 折扣）。
+#       —— 头不存天数与折扣率，避免单行场景把行表架空；行不存基准日，避免同一条件重复。
+# 边界（禁止越界宣称）:
+#   ① 只描述"何时应付多少"，不执行催收、不做信用占用、不生成应收凭证；
+#   ② 不建模现金折扣的会计处理（是否入财务费用、是否冲收入）—— 归财务相邻项；
+#   ③ 不建模付款方式（银行转账 / 票据 / 信用证）—— 属支付域；
+#   ④ 无生效期列（与 currency / uom 先例一致），停用 = 瞬时开关。
+
+id: payment_term
+name: 付款条件
+table_name: payment_terms
+description: 付款条件（账期规则头：基准日 + 截止日顺延；分期与折扣见行）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 付款条件
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 付款条件
+    - 账期
+    - Payment Term
+    - Terms of Payment
+
+deletion_policy:
+  # 主数据禁止物理删除；有分期行时 restrict（与 uom_group → uoms 同口径）
+  mode: restrict
+  restrict_on:
+    - table: payment_term_lines
+      foreign_key: payment_term_id
+      message: 该付款条件还有分期行，请先删除分期行后再删除
+    - table: sales_orders
+      foreign_key: payment_term_id
+      message: 该付款条件被销售订单引用，请先调整订单付款条件后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 付款条件编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 30
+    pattern: "^[A-Za-z0-9][A-Za-z0-9_\\-]*$"
+    description: 付款条件唯一编码（如 NET30 / 2-10-NET30 / M30）
+    semantics:
+      meaning: 付款条件业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 付款条件名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 付款条件显示名称（如 月结 30 天 / 2/10 净 30）
+    semantics:
+      meaning: 付款条件显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 基准日口径：所有行的时间偏移都从这里起算（行不重复存）
+  # Oracle 对应 Due Date Basis；SAP 对应 baseline date（ZFBDT，默认取发票日）
+  - id: basis_date_rule
+    name: 基准日口径
+    type: string
+    db_column: basis_date_rule
+    required: true
+    default: invoice_date
+    description: 基准日口径 invoice_date=开票日 / delivery_date=发货日 / order_date=订单日 / month_end=月末
+    enum_values:
+      - value: invoice_date
+        label: 开票日
+        color: primary
+        category: active
+        is_initial: true
+        description: 以发票日期为基准（最常用）
+      - value: delivery_date
+        label: 发货日
+        color: success
+        description: 以实际发货日期为基准
+      - value: order_date
+        label: 订单日
+        color: warning
+        description: 以订单日期为基准（预付款场景）
+      - value: month_end
+        label: 月末
+        color: info
+        description: 以触发日期所在月的最后一天为基准（月结场景）
+    semantics:
+      meaning: 账期起算的基准日口径
+      filterable: true
+      filter_type: enum
+      filter_label: 基准日
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 截止日顺延：单据日期晚于该日 ⇒ 基准月顺延一个月（Oracle DUE_CUTOFF_DAY）
+  # 空 = 不顺延。取值 1-31；31 在小月按当月最后一天处理（消费方负责，本表不折算）
+  - id: cutoff_day
+    name: 结算截止日
+    type: integer
+    db_column: cutoff_day
+    nullable: true
+    description: 结算截止日（1-31）：单据日期超过该日则基准月顺延一个月；空 = 不顺延
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 31
+        decimal_places: 0
+    semantics:
+      meaning: 结算截止日（跨过则顺延到下个月）
+      hint: 例：截止日 25 日 ⇒ 26 日之后的单据按次月起算
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 付款条件状态 active/inactive（停用 = 瞬时开关，已引用单据读自身快照）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+        description: 启用，进入新单据候选
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，不进入新单据候选；已引用单据不受影响
+    semantics:
+      meaning: 付款条件启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 付款条件说明
+    semantics:
+      meaning: 付款条件详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+# 生命周期：复用平台标准 activate / deactivate（同 currency / uom / item_group）
+rules:
+  - id: activate_payment_term
+    name: 启用付款条件
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此付款条件吗？"
+
+  - id: deactivate_payment_term
+    name: 停用付款条件
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此付款条件吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_payment_term_code
+
+relations: []
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 付款条件管理
+    description: 付款条件（账期规则）
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: basis_date_rule
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: cutoff_day
+        width: 100
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建付款条件
+        icon: plus
+        type: primary
+        permission: payment_term:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 付款条件信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [basis_date_rule, cutoff_day]
+          - fields: [status]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - basis_date_rule
+          - cutoff_day
+          - status
+          - description
+
+  # 分期行子表：父字段由 payment_term_line.payment_term_id 的 ui.relation=payment_term 推断
+  child_sections:
+    - child_object: payment_term_line
+      title: 分期与折扣
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: payment_term:create
+  update_permission: payment_term:update
+  delete_permission: payment_term:delete
+  owner_auto_permission: false

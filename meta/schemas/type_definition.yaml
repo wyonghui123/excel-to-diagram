@@ -1,0 +1,512 @@
+# 类型字典（Type Definition）— 单据类型 / 行类型的统一载体
+# 依据: docs/superpowers/specs/2026-10-25-type-definition-generalization-spec.md
+#
+# 设计边界（重要）:
+#   ① 一张表用 level（header / line）判别层级，用 scope_bo（消费方 BO 的 YAML id）
+#      判别归属域。不为每个业务域复制一套强类型 BO。
+#   ② 行为参数（pricing_relevant / billing_relevance / inventory_effect 等）
+#      一律不进本表 —— 走 control_parameter_def + control_parameter_value。
+#      本表只回答"这是什么类型"，不回答"这种类型怎么执行"。
+#   ③ code 的唯一性是 (scope_bo, level, code) 复合唯一，不再全局唯一。
+#   ④ 旧名已收口：document_type / line_type 是 level 切片视图（见各自 YAML），
+#      写面只有本对象的管理页。
+#   ⑤ scope_bo / level 创建后不可变（服务层守卫）；default_type_id 必须同 scope
+#      且 level=line（服务层守卫）。
+#
+# 层级与字段适用:
+#   header: document_category 必填；line_category 必须为空；可用 default_type_id /
+#           number_sequence_id
+#   line  : line_category 必填；document_category / default_type_id /
+#           number_sequence_id 必须为空
+
+id: type_definition
+name: 类型字典
+table_name: type_definitions
+description: 类型字典（单据类型 / 行类型的统一载体，按 scope_bo + level 判别）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 类型字典
+  category: core_entity
+  business_key: [scope_bo, level, code]
+  display_name_field: name
+  aliases:
+    - 类型字典
+    - 单据类型
+    - 行类型
+    - Document Type
+    - Line Type
+    - Item Category
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: control_parameter_values
+      foreign_key: line_type_id
+      message: 该类型仍被控制参数取值引用，请先调整参数取值
+    - table: line_type_assignments
+      foreign_key: line_type_id
+      message: 该类型仍被行类型确定表引用，请先调整确定表
+    - table: control_parameter_values
+      foreign_key: document_type_id
+      message: 该类型仍被控制参数取值引用，请先调整参数取值
+    - table: line_type_assignments
+      foreign_key: document_type_id
+      message: 该类型仍被行类型确定表引用，请先调整确定表
+    - table: type_definitions
+      foreign_key: default_type_id
+      message: 该类型仍被其他类型用作默认行类型，请先调整引用
+    - table: sales_orders
+      foreign_key: order_type_id
+      message: 该类型仍被销售订单引用，请先调整订单类型后再删除
+    - table: sales_order_lines
+      foreign_key: line_type_id
+      message: 该类型仍被销售订单行引用，请先调整行类型后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 唯一性靠复合索引 idx_type_definition_scope_code，不在此处声明 unique
+  - id: code
+    name: 类型编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 10
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 类型唯一编码（同一 scope_bo + level 内唯一，如 TA / RE / STD）
+    semantics:
+      meaning: 类型业务编码（scope_bo + level 内唯一）
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 类型名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 类型显示名称
+    semantics:
+      meaning: 类型显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 归属域：消费方 BO 的 YAML id（如 sales_order）。将来元模型入库后可升级为 bo_id
+  - id: scope_bo
+    name: 归属对象
+    type: string
+    db_column: scope_bo
+    required: true
+    max_length: 40
+    description: 消费方 BO 的 YAML id（如 sales_order），决定该类型属于哪个业务对象
+    semantics:
+      meaning: 类型的归属业务对象
+      immutable: true
+      data_category: code
+      hint: 填 BO 的 YAML id，不填表名；创建后不可修改
+    ui:
+      widget: input
+
+  - id: level
+    name: 层级
+    type: string
+    db_column: level
+    required: true
+    description: 类型层级 header=单据头 / line=单据行
+    enum_values:
+      - value: header
+        label: 单据头
+        color: primary
+        category: active
+        is_initial: true
+        description: 单据级身份（单据类型 / 订单类型）
+      - value: line
+        label: 单据行
+        color: success
+        description: 行级身份（行类型 / 行项目类别）
+    semantics:
+      meaning: 类型层级
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 层级
+      filter_scope: local
+      hint: 创建后不可修改
+    ui:
+      widget: select
+
+  # 仅 header 使用
+  - id: document_category
+    name: 单据类别
+    type: string
+    db_column: document_category
+    nullable: true
+    default: standard
+    description: 单据的性质，决定方向与后续流程分支（仅 header 使用）
+    enum_values:
+      - value: standard
+        label: 标准订单
+        color: primary
+        category: active
+        is_initial: true
+      - value: rush
+        label: 紧急订单
+        color: warning
+      - value: return
+        label: 退货
+        color: danger
+      - value: credit_memo
+        label: 贷项凭证
+        color: info
+      - value: debit_memo
+        label: 借项凭证
+        color: info
+      - value: consignment
+        label: 寄售
+        color: success
+      - value: loan
+        label: 借出
+        color: success
+    semantics:
+      meaning: 单据类型的方向与流程分类（仅 header）
+      filterable: true
+      filter_type: enum
+      filter_label: 单据类别
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 仅 header 使用；目标必须同 scope_bo 且 level=line（服务层校验）
+  - id: default_type_id
+    name: 默认行类型
+    type: integer
+    db_column: default_type_id
+    nullable: true
+    description: 行类型确定表未命中时使用的兜底行类型（仅 header 使用）
+    semantics:
+      meaning: 单据默认行类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+      hint: 只能选同一归属对象下 level=line 的类型
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+      clearable: true
+
+  # 仅 header 使用
+  - id: number_sequence_id
+    name: 编号序列
+    type: integer
+    db_column: number_sequence_id
+    nullable: true
+    description: 该类型的取号规则（保存单据时按此规则取号，仅 header 使用）
+    semantics:
+      meaning: 单据类型绑定的编号序列
+      display:
+        type: association
+        target_type: number_sequence
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: number_sequence
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: number_sequence
+      multiple: false
+      clearable: true
+
+  # 仅 line 使用
+  - id: line_category
+    name: 行类别
+    type: string
+    db_column: line_category
+    nullable: true
+    default: material
+    description: 行的性质，决定默认方向（退货行入库、文本行不定价，仅 line 使用）
+    enum_values:
+      - value: material
+        label: 物料行
+        color: primary
+        category: active
+        is_initial: true
+      - value: service
+        label: 服务行
+        color: success
+      - value: return
+        label: 退货行
+        color: warning
+      - value: free_of_charge
+        label: 免费行
+        color: info
+      - value: text
+        label: 文本行
+        color: info
+    semantics:
+      meaning: 行类型的性质分类（仅 line）
+      filterable: true
+      filter_type: enum
+      filter_label: 行类别
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 类型状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 类型启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 类型说明（适用场景、流程差异）
+    semantics:
+      meaning: 类型详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_type_definition
+    name: 启用类型
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此类型吗？"
+
+  - id: deactivate_type_definition
+    name: 停用类型
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不能再新建此类单据。确定停用吗？"
+
+indexes:
+  - fields: [scope_bo, level, code]
+    unique: true
+    name: idx_type_definition_scope_code
+  - fields: [scope_bo, level, status]
+    name: idx_type_definition_scope_status
+
+relations:
+  - id: type_definition_to_default_type
+    name: 默认行类型
+    type: reference
+    target: type_definition
+    source_field: default_type_id
+    target_field: id
+    cardinality: N:1
+    description: 默认行类型引用（自引用，可空；目标须同 scope_bo 且 level=line）
+  - id: type_definition_to_number_sequence
+    name: 编号序列
+    type: reference
+    target: number_sequence
+    source_field: number_sequence_id
+    target_field: id
+    cardinality: N:1
+    description: 类型的取号规则引用（可空）
+
+ui_view_config:
+  # 菜单由 v110__type_definition_menu.py 显式声明，避免自动菜单产生孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 类型字典
+    description: 单据类型 / 行类型的统一字典（按归属对象 + 层级判别）
+    columns:
+      - field: scope_bo
+        width: 140
+        sortable: true
+        filterable: true
+        filter_type: input
+      - field: level
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: code
+        width: 110
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: document_category
+        width: 120
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: line_category
+        width: 120
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+        render_as: tag
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建类型
+        icon: plus
+        type: primary
+        permission: type_definition:create
+    defaultSort:
+      field: scope_bo
+      order: asc
+
+  form:
+    title: 类型字典
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [scope_bo, level]
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [status]
+      - title: 单据头
+        columns:
+          - fields: [document_category]
+          - fields: [default_type_id]
+          - fields: [number_sequence_id]
+      - title: 单据行
+        columns:
+          - fields: [line_category]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [scope_bo, level, code, name, document_category,
+                 default_type_id, number_sequence_id, line_category,
+                 status, description]
+
+category_config:
+  create_permission: type_definition:create
+  update_permission: type_definition:update
+  delete_permission: type_definition:delete
+  owner_auto_permission: false

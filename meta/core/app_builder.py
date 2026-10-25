@@ -239,10 +239,57 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.uom_conversion_guard_interceptor import UomConversionGuardInterceptor
         bo_framework.register_interceptor(UomConversionGuardInterceptor())
+        # [SOURCING 2026-10-24] 供应来源写前守卫（P43）：来源行类型—引用 / 职能 /
+        #   rank 分摊合计、分配作用域与 specificity_rank、策略启用态唯一、规则启用须有行。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.sourcing_guard_interceptor import SourcingGuardInterceptor
+        bo_framework.register_interceptor(SourcingGuardInterceptor())
         # [CURRENCY 2026-10-24] 汇率单向存储守卫（R1/R2/R3）：自反、同日镜像行、双币种启用。
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.currency_rate_guard_interceptor import CurrencyRateGuardInterceptor
         bo_framework.register_interceptor(CurrencyRateGuardInterceptor())
+        # [PAYMENT_TERM 2026-10-25] 付款条件分期守卫（G1 上限 / G3 / G4）：折扣成对、
+        #   折扣早于到期、占比合计不超 100。与 server.py create_app() 同位登记 ——
+        #   两条启动路径缺一会静默失效。
+        from meta.core.interceptors.payment_term_guard_interceptor import PaymentTermGuardInterceptor
+        bo_framework.register_interceptor(PaymentTermGuardInterceptor())
+        # [SALES_CONF 2026-10-25] 销售配置守卫（P46）：控制参数定义/取值、行类型确定
+        #   的一致性与唯一性；删除时扫描 ref 型参数的悬空引用。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.sales_config_guard_interceptor import SalesConfigGuardInterceptor
+        bo_framework.register_interceptor(SalesConfigGuardInterceptor())
+        # [TYPE_DEF 2026-10-25] 类型字典守卫（P47）：header/line 层级与字段适用（I1–I3）、
+        #   默认行类型同归属且 level=line（I4）、归属对象/层级不可变（I6）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.type_definition_guard_interceptor import TypeDefinitionGuardInterceptor
+        bo_framework.register_interceptor(TypeDefinitionGuardInterceptor())
+        # [TAX 2026-10-25] 税务守卫（P46）：税码 C1/C2、税率区间 G1–G4、税号 G5/G6。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.tax_guard_interceptor import TaxGuardInterceptor
+        bo_framework.register_interceptor(TaxGuardInterceptor())
+        # [ATTRIBUTE] 属性字典守卫（P45）：扩展准入的五道否决项与租户命名空间。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.attribute_guard_interceptor import AttributeGuardInterceptor
+        bo_framework.register_interceptor(AttributeGuardInterceptor())
+        # [ITEM_STRUCTURE 2026-10-25] 物料结构守卫（P46）：生效版本唯一性（S1）、
+        #   结构行自引用/成环（R1）、用量互斥（R3）、可选数量区间（R5）、默认选中（R6）、
+        #   角色矩阵（R7）、替代组锚点（R8）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.item_structure_guard_interceptor import ItemStructureGuardInterceptor
+        bo_framework.register_interceptor(ItemStructureGuardInterceptor())
+        # [CONFIG_RULE 2026-10-25] 配置规则守卫（P47）：模型专属（R9）、目标列互斥（R8）、
+        #   规则作用域（R16）与六种规则形状。
+        from meta.core.interceptors.config_rule_guard_interceptor import ConfigRuleGuardInterceptor
+        bo_framework.register_interceptor(ConfigRuleGuardInterceptor())
+        # [CONFIG_RESULT 2026-10-25] 配置结果层守卫（P48）：实例状态锁（R10）、
+        #   hash 不可改（R11）、明细只在 draft 可编辑、组件键形态与父键存在性。
+        from meta.core.interceptors.configuration_guard_interceptor import ConfigurationGuardInterceptor
+        bo_framework.register_interceptor(ConfigurationGuardInterceptor())
+        # [SALES_ORDER 2026-10-25] 销售订单守卫（P49）：抬头/行的 W0-R1~R10 写前校验，
+        #   以及行写入后的金额重算与抬头汇总回写（W0-R7/R11/R12）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.sales_order_guard_interceptor import SalesOrderGuardInterceptor
+        bo_framework.register_interceptor(SalesOrderGuardInterceptor())
         # [F3 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重，紧随约束校验之后
         #   [模块门控] party 轴依赖 org 的 BU/LE 职能，BIP 应用架构管理部署设
         #   DISABLED_PLATFORM_MODULES=party 时不注册（与 server.py create_app 同步）。
@@ -348,7 +395,9 @@ class ApplicationBuilder:
         from meta.api.db_admin_api import db_admin_bp
         from meta.api.task_api import task_api_bp
         from meta.api.pricing_api import pricing_bp
+        from meta.api.configuration_api import configuration_bp
         from meta.api.allocation_api import allocation_bp
+        from meta.api.sourcing_api import sourcing_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -404,9 +453,13 @@ class ApplicationBuilder:
         app.register_blueprint(db_admin_bp)
         app.register_blueprint(task_api_bp)
         app.register_blueprint(pricing_bp)
+        # [配置域 P4 2026-10-25] 配置出价 / 复用 / 求解串接。
+        app.register_blueprint(configuration_bp)
         # [分摊 IF-004 2026-10-07] 分摊是平台级能力（算法零业务耦合、
         #   留痕已拆出 allocation_results 独立表），故独立蓝图。
         app.register_blueprint(allocation_bp)
+        # [SOURCING 2026-10-24] 供应来源求值 / 规则校验独立蓝图。
+        app.register_blueprint(sourcing_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

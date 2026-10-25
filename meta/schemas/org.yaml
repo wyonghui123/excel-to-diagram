@@ -44,6 +44,12 @@ deletion_policy:
     - table: orgs
       foreign_key: parent_id
       message: 该组织下还有子组织，请先删除或迁移子组织后再删除
+    - table: sales_orders
+      foreign_key: org_id
+      message: 该组织被销售订单引用（业务实体），请先处理订单后再删除
+    - table: sales_orders
+      foreign_key: sales_org_id
+      message: 该组织被销售订单引用（销售组织），请先处理订单后再删除
   # [2026-10-22 补漏] org_functions 建表时未建到 orgs 的外键 ⇒ 删除组织不会清理职能行，
   #   会留下孤儿职能。而 party_internal 视图谓词是 EXISTS(org_functions ...) ⇒ 已删组织的
   #   内部表示仍会出现在「我方组织」候选集中（幽灵主体），同 id 组织重建还会让旧职能复活。

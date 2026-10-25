@@ -302,3 +302,17 @@ ui_view_config:
             label: 新建伙伴关系
             variant: primary
             permission: party_relation:party_relation_create
+
+  # 税务登记子表（party_tax_registration，parent_field=party_id）
+  #   与 calendar→calendar_day / items→item_uom_conversion 同一套 child_sections 机制，
+  #   由 AssociationSection 的 parent_child 分支按 party_id 取数。
+  #   父键推断依赖子对象 party_id 的 ui.relation=party_archive（前端 getParentIdField 口径），
+  #   不要改成 party —— 挂载面是视图 party_archive，写 party 会回退 party_archive_id 而取不到数。
+  child_sections:
+    - child_object: party_tax_registration
+      title: 税务登记
+      display: tab
+      useMetaList: true
+      enableDetail: false
+      enableAutoCrud: false
+      pageSize: 20

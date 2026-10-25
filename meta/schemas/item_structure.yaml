@@ -1,0 +1,466 @@
+# 物料结构头 (Item Structure) — 一版结构 = 一个可冻结的模型版本
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §4.2 / §4.4 / §4.5
+# 定位: 物料结构（BOM）头；行见 item_structure_line。一版结构 = (item_id, usage, alternative_no, revision)。
+#
+# 设计口径:
+#   ① revision 就是模型版本，不另建「模型」对象；特征、规则、配置实例都锚在 structure_id 上。
+#   ② alternative_no 表达同一物料的相似结构（试产版 / 量产版），不承担配置。
+#   ③ 一期只有 usage = production 参与展开；其余用途可存不启用。
+#   ④ min_select / max_select 只对 structure_role = option_class 有效；非选项类结构填值即拒。
+#   ⑤ 发布日期区间用 valid_from / valid_to 表达，不建变更单（ECO 后置）。
+#      平台 YAML 的 type: date 物理归一为 DATETIME，比较按日期截断，不按时刻。
+#   ⑥ 父项必须是实物物料（item_type = goods）；服务不得作为结构根（R12）。
+#      usage = sales 时组件可为服务（R11），服务行只承载次数（R16，见行对象）。
+#
+# 生效版本唯一性（服务层强制）:
+#   同一 (item_id, usage, alternative_no) 在任一日期上只能有一个 status = active 的版本；
+#   发布新版本时旧版本必须置 inactive 或填 valid_to。
+
+id: item_structure
+name: 物料结构
+table_name: item_structures
+description: 物料结构头（一版结构；行见 item_structure_line）
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 物料结构版本
+  category: core_entity
+  business_key: [item_id, usage, alternative_no, revision]
+  aliases:
+    - 物料结构
+    - BOM 头
+    - Item Structure
+
+deletion_policy:
+  # 结构是版本化主数据，禁止物理删除；仍有结构行时 restrict
+  mode: restrict
+  restrict_on:
+    - table: item_structure_lines
+      foreign_key: structure_id
+      message: 该结构版本还有结构行，请先删除结构行后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: item_id
+    name: 父项物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 结构所属物料（父项）
+    semantics:
+      meaning: 结构所属物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: usage
+    name: 结构用途
+    type: string
+    db_column: usage
+    required: true
+    default: production
+    description: 结构用途（生产 / 工程 / 销售 / 成本）；一期只有生产参与展开
+    enum_values:
+      - value: production
+        label: 生产
+        color: primary
+      - value: engineering
+        label: 工程
+        color: info
+      - value: sales
+        label: 销售
+        color: info
+      - value: costing
+        label: 成本
+        color: info
+    semantics:
+      meaning: 结构用途
+      filterable: true
+      filter_type: enum
+      filter_label: 结构用途
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: alternative_no
+    name: 替代结构号
+    type: integer
+    db_column: alternative_no
+    required: true
+    default: 1
+    description: 相似结构的版本号（如试产版 1 / 量产版 2）；不承担配置
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 替代结构号
+      filterable: true
+      filter_type: number
+      filter_label: 替代结构号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: revision
+    name: 版本号
+    type: string
+    db_column: revision
+    required: true
+    max_length: 20
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    description: 结构版本号；同一 (物料, 用途, 替代结构号) 下唯一；发布后即模型版本
+    semantics:
+      meaning: 结构版本号
+      data_category: code
+      immutable: false
+    ui:
+      widget: input
+
+  - id: base_qty
+    name: 基准数量
+    type: number
+    db_column: base_qty
+    required: true
+    default: 1
+    description: 结构用量的基准数量（组件用量相对此数量）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 基准数量
+      hint: 例：基准 100 件，组件用量 5 表示每 100 件用 5
+    ui:
+      widget: input
+
+  - id: base_uom_id
+    name: 基准单位
+    type: integer
+    db_column: base_uom_id
+    required: true
+    description: 基准数量对应的计量单位
+    semantics:
+      meaning: 基准计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  # 选项类结构的最少 / 最多选择数；非选项类结构填值由守卫拒绝
+  - id: min_select
+    name: 最少选择数
+    type: integer
+    db_column: min_select
+    nullable: true
+    description: 仅选项类结构有效：至少选几项
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 选项类最少选择数
+    ui:
+      widget: input
+
+  - id: max_select
+    name: 最多选择数
+    type: integer
+    db_column: max_select
+    nullable: true
+    description: 仅选项类结构有效：至多选几项，1 即单选
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 999
+        decimal_places: 0
+    semantics:
+      meaning: 选项类最多选择数
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 结构版本状态（草稿 / 生效 / 停用）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+      - value: active
+        label: 生效
+        color: success
+      - value: inactive
+        label: 停用
+        color: info
+    semantics:
+      meaning: 结构版本状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: valid_from
+    name: 生效起
+    type: date
+    db_column: valid_from
+    required: true
+    description: 生效起始日（含当日）
+    semantics:
+      meaning: 生效起始日
+      filterable: true
+      filter_type: date
+      filter_label: 生效起
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 生效止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 生效截止日（含当日）；空 = 长期有效
+    semantics:
+      meaning: 生效截止日
+      filterable: true
+      filter_type: date
+      filter_label: 生效止
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: description
+    name: 说明
+    type: text
+    db_column: description
+    nullable: true
+    description: 结构版本说明
+    semantics:
+      meaning: 结构说明
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [item_id, usage, alternative_no, revision]
+    unique: true
+    name: uidx_item_structure_version
+  - fields: [item_id, usage, status]
+    name: idx_item_structure_item_status
+
+relations:
+  - id: item_structure_to_item
+    name: 父项物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 结构所属物料引用（真外键）
+  - id: item_structure_to_uom
+    name: 基准单位
+    type: reference
+    target: uom
+    source_field: base_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 基准数量对应的计量单位引用（真外键）
+
+ui_view_config:
+  # 菜单由迁移手工声明；本对象不参与自动菜单生成
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 物料结构
+    description: 物料结构版本（BOM 头）
+    columns:
+      - field: item_id
+        width: 200
+        sortable: true
+      - field: usage
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: alternative_no
+        width: 110
+      - field: revision
+        width: 120
+        sortable: true
+      - field: base_qty
+        width: 100
+      - field: base_uom_id
+        width: 110
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: valid_from
+        width: 120
+        format: date
+      - field: valid_to
+        width: 120
+        format: date
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - revision
+    actions:
+      - id: create
+        label: 新建结构
+        icon: plus
+        type: primary
+        permission: item_structure:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: updated_at
+      order: desc
+  form:
+    title: 物料结构信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [item_id, usage]
+          - fields: [alternative_no, revision]
+          - fields: [base_qty, base_uom_id]
+      - title: 有效期与状态
+        columns:
+          - fields: [status]
+          - fields: [valid_from, valid_to]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  # 结构行子表：父字段由 item_structure_line.structure_id 的 ui.relation=item_structure 推断
+  child_sections:
+    - child_object: item_structure_line
+      title: 结构行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    # 模型特征：只有 structure_role = model 的结构可声明，写入由守卫拒绝非法声明
+    - child_object: item_structure_attribute
+      title: 模型特征
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    # 配置规则：只有 structure_role = model 的结构可声明，写入由守卫拒绝非法规则
+    - child_object: config_rule
+      title: 配置规则
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable

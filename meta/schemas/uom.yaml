@@ -41,6 +41,9 @@ deletion_policy:
     - table: uom_groups
       foreign_key: base_uom_id
       message: 该单位是计量单位组的基本单位，请先更换组基本单位后再删除
+    - table: sales_order_lines
+      foreign_key: uom_id
+      message: 该单位被销售订单行引用，请先处理订单后再删除
   cascade_delete: []
 
 audit:

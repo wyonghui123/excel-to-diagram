@@ -1,0 +1,353 @@
+# 供应来源规则作用域分配（Sourcing Rule Assignment）— 供应计划域子对象
+# 定位: 一条规则在什么范围内生效（全局 / 物料组 / 物料），以及可选的目标组织与目标位置；
+#       一条规则可有多条分配，按 specificity_rank 由细到粗匹配。
+# 从属: rule_id 回挂 sourcing_rules；父规则删除由 restrict_on 拦截。
+# 说明: scope_ref_id 为多态引用（item_group / item），不建外键；唯一性由迁移中的
+#       部分唯一索引（status='active'）承担。
+
+id: sourcing_rule_assignment
+name: 供应来源规则分配
+table_name: sourcing_rule_assignments
+description: 供应来源规则作用域分配——规则在全局/物料组/物料范围的生效声明
+display_name_field: scope_type
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 供应来源规则的作用域分配
+  category: system_entity
+  business_key: [rule_id, scope_type, scope_ref_id, dest_org_id]
+  display_name_field: scope_type
+  aliases:
+    - 来源规则分配
+    - 作用域分配
+    - sourcing rule assignment
+    - 供应范围
+
+deletion_policy:
+  # 从属于 sourcing_rule：父规则删则分配跟随（业务层级联调用）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - rule_id
+      - specificity_rank
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - rule_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: rule_id
+    name: 所属规则
+    type: integer
+    db_column: rule_id
+    required: true
+    description: 所属供应来源规则 ID（sourcing_rules.id）
+    semantics:
+      meaning: 所属规则 ID
+    ui:
+      widget: reference
+
+  - id: scope_type
+    name: 作用域类型
+    type: string
+    db_column: scope_type
+    required: true
+    max_length: 20
+    description: 分配的作用域层级（全局 / 物料组 / 物料）
+    enum_values:
+      - value: global
+        label: 全局
+        color: default
+        description: 全局生效，scope_ref_id 必须为空
+      - value: item_group
+        label: 物料组
+        color: primary
+        description: 按物料组生效，scope_ref_id 填物料组 ID
+      - value: item
+        label: 物料
+        color: info
+        description: 按物料生效，scope_ref_id 填物料 ID
+    semantics:
+      meaning: 作用域层级
+      filterable: true
+      filter_type: enum
+      filter_label: 作用域类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: scope_ref_id
+    name: 作用域引用
+    type: integer
+    db_column: scope_ref_id
+    required: false
+    nullable: true
+    description: >
+      多态引用：scope_type=global 时必须为空；scope_type=item / item_group 时
+      分别填物料 ID / 物料组 ID。多态引用不建外键。
+    semantics:
+      meaning: 作用域引用 ID（多态，按 scope_type 解释）
+    ui:
+      widget: input
+
+  - id: dest_org_id
+    name: 目标组织
+    type: integer
+    db_column: dest_org_id
+    required: false
+    nullable: true
+    description: 目标组织 ID（orgs.id）；空 = 不限组织
+    semantics:
+      meaning: 目标组织限定（空 = 不限）
+    ui:
+      widget: select
+      relation: org
+      display_field: name
+      clearable: true
+
+  - id: dest_location_id
+    name: 目标位置
+    type: integer
+    db_column: dest_location_id
+    required: false
+    nullable: true
+    description: 目标位置 ID（locations.id）；空 = 不限位置；一期 UI 不开放
+    semantics:
+      meaning: 目标位置限定（空 = 不限；一期 UI 不开放）
+    ui:
+      widget: select
+      relation: location
+      display_field: name
+      clearable: true
+
+  - id: specificity_rank
+    name: 匹配优先级
+    type: integer
+    db_column: specificity_rank
+    required: false
+    nullable: true
+    default: 60
+    description: >
+      作用域由细到粗的匹配优先级（10 物料 / 20 物料组 / 30 物料+组织 /
+      40 物料组+组织 / 50 全局+组织 / 60 全局）。服务端派生，禁止前端传入。
+    semantics:
+      meaning: 作用域匹配优先级（服务端派生）
+    ui:
+      widget: number
+      readonly: true
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 同优先级内的次序
+    semantics:
+      meaning: 同优先级内次序
+    ui:
+      widget: number
+
+  - id: effectivity_start
+    name: 生效日期
+    type: date
+    db_column: effectivity_start
+    required: true
+    description: 分配生效日期
+    semantics:
+      meaning: 生效日期
+    ui:
+      widget: date
+
+  - id: effectivity_end
+    name: 失效日期
+    type: date
+    db_column: effectivity_end
+    required: false
+    nullable: true
+    description: 分配失效日期；空 = 长期有效
+    semantics:
+      meaning: 失效日期（空 = 永久）
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 分配状态（启用 / 停用）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        is_initial: true
+        description: 参与求值
+      - value: inactive
+        label: 停用
+        color: info
+        description: 暂停使用，保留配置
+    semantics:
+      meaning: 分配状态
+      filterable: true
+      filter_type: select
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [rule_id]
+    name: idx_sourcing_assign_rule
+  - fields: [scope_type, scope_ref_id, dest_org_id, dest_location_id, status]
+    name: idx_sourcing_assign_scope
+  - fields: [specificity_rank, seq]
+    name: idx_sourcing_assign_rank
+
+relations:
+  - id: sourcing_rule_assignment_to_rule
+    name: 所属规则
+    type: reference
+    target: sourcing_rule
+    source_field: rule_id
+    target_field: id
+    cardinality: N:1
+    description: 所属供应来源规则（删规则受 restrict_on 拦截）
+  - id: sourcing_rule_assignment_to_org
+    name: 目标组织
+    type: reference
+    target: org
+    source_field: dest_org_id
+    target_field: id
+    cardinality: N:1
+    description: 目标组织限定（空 = 不限）
+  - id: sourcing_rule_assignment_to_location
+    name: 目标位置
+    type: reference
+    target: location
+    source_field: dest_location_id
+    target_field: id
+    cardinality: N:1
+    description: 目标位置限定（空 = 不限）
+
+ui_view_config:
+  # 分配在规则详情页内联编辑，不单列顶级菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 作用域分配
+    description: 规则的作用域与目标限定
+    columns:
+      - field: scope_type
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: scope_ref_id
+        width: 140
+        render_as: text
+      - field: dest_org_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: dest_location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: specificity_rank
+        width: 110
+        editable: false
+      - field: seq
+        width: 80
+        sortable: true
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: effectivity_start
+        width: 130
+        format: date
+    searchFields: []
+  form:
+    title: 作用域分配信息
+    layout: vertical
+    sections:
+      - title: 作用域
+        columns:
+          - fields: [scope_type, scope_ref_id]
+          - fields: [seq]
+      - title: 目标
+        columns:
+          - fields: [dest_org_id, dest_location_id]
+      - title: 有效期与状态
+        columns:
+          - fields: [effectivity_start, effectivity_end]
+          - fields: [status]
+
+category_config:
+  create_permission: sourcing_rule_assignment:sourcing_rule_assignment_create
+  update_permission: sourcing_rule_assignment:sourcing_rule_assignment_update
+  delete_permission: sourcing_rule_assignment:sourcing_rule_assignment_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: rule_id, scope_type, scope_ref_id, dest_org_id

@@ -1,0 +1,512 @@
+# 国际贸易术语（Incoterm）— ICC Incoterms 规则的字典化对象
+# 依据: ICC Incoterms 2020（11 条术语，两组运输方式规则）
+# 定位: 回答「这一笔贸易按哪条术语成交」——身份 + 分类 + 风险转移点 + 责任划分。
+#
+# 设计边界（重要）:
+#   1. 本表是字典，不是单据字段。单据上只存 incoterm_id + 指定地点（named place），
+#      后者随订单变化，不进本表（SAP INCO1/INCO2 同口径）。
+#   2. 不编码逐条义务清单（谁订舱、谁付码头费等）。只保留 ICC 规则里有区分度的
+#      六个判据：风险转移点 / 出口清关 / 进口清关 / 主运费 / 卸货 / 保险覆盖。
+#      其余细节留给合同文本。
+#   3. 版本（edition）是复合业务键的一部分：同一三字码在不同版本中语义可能变化
+#      （例 2010 DAT → 2020 DPU），旧单据必须仍能引用旧版本记录，故不做
+#      单列唯一。字段名不用 version —— 平台 lock_interceptor 按 id='version'
+#      识别乐观锁字段，会误判。
+
+id: incoterm
+name: 国际贸易术语
+table_name: incoterms
+description: 国际贸易术语（Incoterms）字典——风险转移点与买卖双方责任划分
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 国际贸易术语
+  category: core_entity
+  # 同一术语在 2010 / 2020 版本中各占一行，故为复合业务键
+  business_key: [code, edition]
+  display_name_field: name
+  aliases:
+    - 国际贸易术语
+    - 贸易术语
+    - Incoterm
+    - Incoterms
+    - 交货条件
+
+deletion_policy:
+  # 主数据禁止物理删除（与 currency / payment_term 同口径）；
+  # 当前无下游引用，restrict_on 留空，后续单据表引用时在此补充。
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 术语代码
+    type: string
+    db_column: code
+    required: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: ICC 三字码（EXW / FCA / CPT / CIP / DAP / DPU / DDP / FAS / FOB / CFR / CIF）
+    semantics:
+      meaning: 术语业务代码；与 edition 组成业务键
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 术语名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 术语中文名称
+    semantics:
+      meaning: 术语中文显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: name_en
+    name: 英文名称
+    type: string
+    db_column: name_en
+    required: true
+    max_length: 80
+    description: 术语英文名称（ICC 官方表述）
+    semantics:
+      meaning: 术语英文名称
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: edition
+    name: 版本
+    type: string
+    db_column: edition
+    required: true
+    default: '2020'
+    max_length: 10
+    description: 所属 ICC 版本（Incoterms 2020 / 2010）；与 code 组成业务键
+    enum_values:
+      - value: '2020'
+        label: Incoterms 2020
+        color: primary
+        is_initial: true
+        description: 现行版本，11 条术语
+      - value: '2010'
+        label: Incoterms 2010
+        color: info
+        description: 历史版本，DAT 在 2020 中改为 DPU
+    semantics:
+      meaning: 术语所属 ICC 版本
+      business_key: true
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 版本
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: transport_mode
+    name: 适用运输方式
+    type: string
+    db_column: transport_mode
+    required: true
+    max_length: 30
+    description: ICC 官方两分法——任一运输方式 / 仅海运及内河运输
+    enum_values:
+      - value: any_mode
+        label: 任一运输方式
+        color: primary
+        description: 适用于多式联运、公路、铁路、航空
+      - value: sea_and_inland
+        label: 海运及内河运输
+        color: info
+        description: 仅适用于海运与内河运输（FAS / FOB / CFR / CIF）
+    semantics:
+      meaning: 术语适用的运输方式分组
+      filterable: true
+      filter_type: enum
+      filter_label: 运输方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: risk_transfer_point
+    name: 风险转移点
+    type: string
+    db_column: risk_transfer_point
+    required: true
+    max_length: 30
+    description: 货物灭失或损坏风险由卖方转移给买方的时点
+    enum_values:
+      - value: seller_premises
+        label: 卖方场所
+        color: warning
+        description: 货物在卖方场所交由买方处置时（未装车）
+      - value: carrier
+        label: 承运人接管
+        color: primary
+        description: 货物交付给买方指定或卖方选定的承运人时
+      - value: alongside_ship
+        label: 船边
+        color: info
+        description: 货物置于指定装运港船边时
+      - value: on_board
+        label: 装上船
+        color: success
+        description: 货物装上指定船舶时
+      - value: destination_ready
+        label: 目的地待卸
+        color: primary
+        description: 货物运抵指定目的地、可卸货时（未卸货）
+      - value: destination_unloaded
+        label: 目的地卸毕
+        color: success
+        description: 货物在指定目的地卸货完成时
+    semantics:
+      meaning: 风险转移时点
+      filterable: true
+      filter_type: enum
+      filter_label: 风险转移点
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: export_clearance_by
+    name: 出口清关责任方
+    type: string
+    db_column: export_clearance_by
+    required: true
+    max_length: 10
+    description: 办理出口清关手续并承担费用的一方
+    enum_values:
+      - value: seller
+        label: 卖方
+        color: primary
+      - value: buyer
+        label: 买方
+        color: info
+    semantics:
+      meaning: 出口清关责任方
+      filterable: true
+      filter_type: enum
+      filter_label: 出口清关
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: import_clearance_by
+    name: 进口清关责任方
+    type: string
+    db_column: import_clearance_by
+    required: true
+    max_length: 10
+    description: 办理进口清关手续并承担税费的一方（仅 DDP 为卖方）
+    enum_values:
+      - value: seller
+        label: 卖方
+        color: primary
+      - value: buyer
+        label: 买方
+        color: info
+    semantics:
+      meaning: 进口清关责任方
+      filterable: true
+      filter_type: enum
+      filter_label: 进口清关
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: main_carriage_by
+    name: 主运费责任方
+    type: string
+    db_column: main_carriage_by
+    required: true
+    max_length: 10
+    description: 订立主运输合同并支付主运费的一方
+    enum_values:
+      - value: seller
+        label: 卖方
+        color: primary
+      - value: buyer
+        label: 买方
+        color: info
+    semantics:
+      meaning: 主运费责任方
+      filterable: true
+      filter_type: enum
+      filter_label: 主运费
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: unloading_by
+    name: 目的地卸货责任方
+    type: string
+    db_column: unloading_by
+    required: true
+    max_length: 10
+    description: 在目的地卸货的一方（DAP 买方卸，DPU 卖方卸）
+    enum_values:
+      - value: seller
+        label: 卖方
+        color: primary
+      - value: buyer
+        label: 买方
+        color: info
+    semantics:
+      meaning: 目的地卸货责任方
+      filterable: true
+      filter_type: enum
+      filter_label: 卸货
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: insurance_cover
+    name: 保险覆盖
+    type: string
+    db_column: insurance_cover
+    required: true
+    max_length: 20
+    description: 卖方投保义务及其最低覆盖范围（CIF 为 ICC C，CIP 为 ICC A）
+    enum_values:
+      - value: none
+        label: 无强制保险
+        color: info
+        description: 任何一方均无投保义务
+      - value: icc_c
+        label: 最低险（ICC C）
+        color: warning
+        description: 卖方须投保协会货物条款 C，最低保额 110%
+      - value: icc_a
+        label: 一切险（ICC A）
+        color: success
+        description: 卖方须投保协会货物条款 A，最低保额 110%
+    semantics:
+      meaning: 卖方强制投保义务与最低覆盖
+      filterable: true
+      filter_type: enum
+      filter_label: 保险
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 术语状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 术语启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 术语说明与使用提示
+    semantics:
+      meaning: 术语详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_incoterm
+    name: 启用术语
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此贸易术语吗？"
+
+  - id: deactivate_incoterm
+    name: 停用术语
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此贸易术语吗？"
+
+indexes:
+  # 同一三字码在同一版本内唯一；跨版本可重复
+  - fields: [code, edition]
+    unique: true
+    name: idx_incoterm_code_edition
+
+relations: []
+
+ui_view_config:
+  # 菜单由迁移 v109 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 国际贸易术语
+    description: Incoterms 术语字典（风险转移与责任划分）
+    columns:
+      - field: code
+        width: 80
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: edition
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: transport_mode
+        width: 140
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: risk_transfer_point
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: insurance_cover
+        width: 130
+      - field: status
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - name_en
+    actions:
+      - id: create
+        label: 新建术语
+        icon: plus
+        type: primary
+        permission: incoterm:incoterm_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 国际贸易术语
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [name_en, edition]
+          - fields: [transport_mode, status]
+      - title: 风险与责任划分
+        columns:
+          - fields: [risk_transfer_point, insurance_cover]
+          - fields: [export_clearance_by, import_clearance_by]
+          - fields: [main_carriage_by, unloading_by]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, name_en, edition, transport_mode, status, description]
+      - id: obligations
+        label: 风险与责任划分
+        type: fields
+        fields:
+          - risk_transfer_point
+          - insurance_cover
+          - export_clearance_by
+          - import_clearance_by
+          - main_carriage_by
+          - unloading_by
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v109 落库）
+  create_permission: incoterm:incoterm_create
+  update_permission: incoterm:incoterm_update
+  delete_permission: incoterm:incoterm_delete
+  owner_auto_permission: false

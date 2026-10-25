@@ -195,6 +195,52 @@ fields:
     ui:
       widget: textarea
 
+  # 税务分类挂点（tax_classification，用途轴=supplier）：决定该供应商的默认税码。
+  #   候选集在选择层按 applicable_to=supplier 常量收窄；可空 = 按平台默认税码推导。
+  - id: tax_classification_id
+    name: 税务分类
+    type: integer
+    db_column: tax_classification_id
+    nullable: true
+    description: 该供应商的默认税务分类（决定默认税码；可空表示按平台默认）
+    semantics:
+      meaning: 默认税务分类引用
+      display:
+        type: association
+        target_type: tax_classification
+        display_field: name
+        placeholder: "未指定（按平台默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_classification
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - target_field: applicable_to
+            constant: supplier
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 分类编码
+            width: 120
+          - field: name
+            label: 分类名称
+            width: 200
+    ui:
+      widget: select
+      relation: tax_classification
+      multiple: false
+      clearable: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -263,7 +309,15 @@ indexes:
     unique: true
     name: idx_vendor_account_relation_unique
 
-relations: []
+relations:
+  - id: vendor_account_to_tax_classification
+    name: 税务分类
+    type: reference
+    target: tax_classification
+    source_field: tax_classification_id
+    target_field: id
+    cardinality: N:1
+    description: 供应商默认税务分类引用（可空；用于推导默认税码）
 
 # ============================================
 # [分区落点 2026-10-22] 与customer_account 严格对称：同样不作独立菜单，
@@ -306,6 +360,9 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [name]
+      - title: 税务
+        columns:
+          - fields: [tax_classification_id]
       - title: 其他
         columns:
           - fields: [description]
@@ -315,4 +372,5 @@ ui_view_config:
         type: fieldGroup
         fields:
           - name
+          - tax_classification_id
           - description

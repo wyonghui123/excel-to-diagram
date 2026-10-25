@@ -1,0 +1,362 @@
+# 单据类型（只读切片）— type_definition 的 header 面
+# 依据: docs/superpowers/specs/2026-10-25-type-definition-generalization-spec.md §5 / §8
+#
+# [对象级泛化 2026-10-25] 本对象由 sales_document_type 更名为 document_type，
+#   切片条件收窄为 level = 'header'（不再钉死 scope_bo，随类型字典的归属域扩展）。
+# 写面只有 type_definition 管理页；本面无写动作，POST/PUT/DELETE 由
+# READ_ONLY_VIEW 护栏拒绝 → API 400。
+#
+# 列名口径（Phase 2 保留，不是遗留）:
+#   category 是 document_category 的别名；default_line_type_id 是
+#   default_type_id 的别名 —— 既有报告/前端按此列名取数，视图作为稳定出口保留。
+#
+# 设计边界（重要）:
+#   行为参数一律不进本表 —— 统一走控制参数（domain=sales）。
+
+id: document_type
+name: 单据类型（只读）
+table_name: document_types
+description: 单据类型（type_definitions 的 header 切片，只读）
+display_name_field: name
+object_type: view
+view_definition: |
+  SELECT id, code, name,
+         document_category AS category,
+         default_type_id AS default_line_type_id,
+         number_sequence_id,
+         status, description, created_at
+  FROM type_definitions
+  WHERE level = 'header'
+
+# 只读面：不声明写动作；auto_crud 关闭
+import_export:
+  auto_crud: false
+
+actions:
+  - id: document_type_read
+    name: 查询销售单据类型
+    type: crud
+    method: GET
+    path: "/api/v1/document_types/{id}"
+    description: 查询单个销售单据类型（只读）
+  - id: document_type_list
+    name: 查询销售单据类型列表
+    type: crud
+    method: GET
+    path: "/api/v1/document_types"
+    description: 查询销售单据类型列表（只读）
+
+semantics:
+  meaning: 单据类型
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 销售单据类型
+    - 订单类型
+    - 销售凭证类型
+    - Sales Document Type
+    - Order Type
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 单据类型编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 10
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 单据类型唯一编码（如 OR / RE / CM / RUSH）
+    semantics:
+      meaning: 单据类型业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 单据类型名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 单据类型显示名称
+    semantics:
+      meaning: 单据类型显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: category
+    name: 单据类别
+    type: string
+    db_column: category
+    required: true
+    default: standard
+    description: 单据的性质，决定方向与后续流程分支
+    enum_values:
+      - value: standard
+        label: 标准订单
+        color: primary
+        category: active
+        is_initial: true
+      - value: rush
+        label: 紧急订单
+        color: warning
+      - value: return
+        label: 退货
+        color: danger
+        description: 数量仍存正数，方向由类别决定
+      - value: credit_memo
+        label: 贷项凭证
+        color: info
+      - value: debit_memo
+        label: 借项凭证
+        color: info
+      - value: consignment
+        label: 寄售
+        color: success
+      - value: loan
+        label: 借出
+        color: success
+    semantics:
+      meaning: 单据类型的方向与流程分类
+      filterable: true
+      filter_type: enum
+      filter_label: 单据类别
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 结构指向：未命中行类型确定表时的兜底
+  - id: default_line_type_id
+    name: 默认行类型
+    type: integer
+    db_column: default_line_type_id
+    nullable: true
+    description: 行类型确定表未命中时使用的兜底行类型
+    semantics:
+      meaning: 单据默认行类型
+      display:
+        type: association
+        target_type: line_type
+        display_field: name
+      hint: 具体物料组命中优先于本兜底值
+    value_help:
+      source:
+        type: bo
+        target_bo: line_type
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: line_type
+      multiple: false
+
+  # 取号规则指向：保存单据时按该序列取号
+  # 必须 nullable —— document_types 已有数据，NOT NULL 会导致存量迁移失败；
+  # 业务必填在订单创建时由服务层校验。
+  - id: number_sequence_id
+    name: 编号序列
+    type: integer
+    db_column: number_sequence_id
+    nullable: true
+    description: 该单据类型的取号规则（保存单据时按此规则取号）
+    semantics:
+      meaning: 单据类型绑定的编号序列
+      display:
+        type: association
+        target_type: number_sequence
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: number_sequence
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: number_sequence
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 单据类型状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 单据类型启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 单据类型说明（适用场景、流程差异）
+    semantics:
+      meaning: 单据类型详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+relations:
+  - id: document_type_to_default_line_type
+    name: 默认行类型
+    type: reference
+    target: line_type
+    source_field: default_line_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据默认行类型引用（可空）
+  - id: document_type_to_number_sequence
+    name: 编号序列
+    type: reference
+    target: number_sequence
+    source_field: number_sequence_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型的取号规则引用（可空）
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 销售单据类型
+    description: 销售单据类型（订单 / 退货 / 贷项等）
+    columns:
+      - field: code
+        width: 110
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: category
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: default_line_type_id
+        width: 150
+        render_as: association
+        target_type: line_type
+        display_field: name
+      - field: number_sequence_id
+        width: 150
+        render_as: association
+        target_type: number_sequence
+        display_field: name
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    # 只读面：不声明新建按钮，写操作统一走 type_definition 管理页
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 销售单据类型
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [category, default_line_type_id]
+          - fields: [number_sequence_id]
+          - fields: [status]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, category, default_line_type_id, number_sequence_id, status, description]
+
+  # 行类型确定子表：父字段由 document_type_id 的 ui.relation=document_type 推断
+  child_sections:
+    - child_object: line_type_assignment
+      title: 行类型确定
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: document_type:create
+  update_permission: document_type:update
+  delete_permission: document_type:delete
+  owner_auto_permission: false

@@ -1,0 +1,358 @@
+# 税务分类（Tax Classification）— 税码归组与默认税码的选择依据
+# 依据: docs/superpowers/specs/2026-10-25-tax-wave0-implementation-spec.md §3.1
+# 定位: 回答「这个客户 / 供应商 / 物料按哪一类计税」——同一套税码按用途轴归组，
+#       物料、客户档案、供应商档案各挂一个 tax_classification_id，用于推导默认税码。
+#
+# 设计边界（重要）:
+#   1. 本表是字典，不承载税率。税率在 tax_rates（税码子表），生效期切片由守卫保证不重叠。
+#   2. 用途轴 applicable_to 是业务键的一部分：客户 / 供应商 / 物料三类分类互不混用，
+#      同名 code 允许在两类下各存一行（对标 SAP 税率分类按用途分表族的做法）。
+#   3. 国家归属 country_id 只作信息与筛选维度，**不进业务键**：可空列放进唯一索引在
+#      SQLite / 多数库中对 NULL 不去重，会得到「同 code 可重复插入」的假约束。
+#      唯一性由 (code, applicable_to) 承担。
+#   4. 不做层级、不做组合税（tax_group）、不做预提税 —— 均属后续波次。
+
+id: tax_classification
+name: 税务分类
+table_name: tax_classifications
+description: 税务分类字典（按客户 / 供应商 / 物料用途轴归组，决定默认税码）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 税务分类
+  category: core_entity
+  # 国家归属不进业务键（见文件头第 3 条）
+  business_key: [code, applicable_to]
+  display_name_field: name
+  aliases:
+    - 税务分类
+    - 税率分类
+    - 税收分类
+    - tax classification
+    - tax class
+
+deletion_policy:
+  # 主数据禁止物理删除（与 currency / payment_term 同口径）
+  # 三个挂点均以 tax_classification_id 引用本表，引用存在时禁止删除
+  mode: restrict
+  restrict_on:
+    - table: items
+      foreign_key: tax_classification_id
+      message: 该税务分类被物料引用，请先解除引用后再删除
+    - table: customer_accounts
+      foreign_key: tax_classification_id
+      message: 该税务分类被客户档案引用，请先解除引用后再删除
+    - table: vendor_accounts
+      foreign_key: tax_classification_id
+      message: 该税务分类被供应商档案引用，请先解除引用后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 分类编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 30
+    description: 税务分类业务编码（如 VAT_STD_CUST）
+    semantics:
+      meaning: 税务分类业务编码；与 applicable_to 组成业务键
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 分类名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 税务分类中文名称
+    semantics:
+      meaning: 税务分类显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: applicable_to
+    name: 适用对象
+    type: string
+    db_column: applicable_to
+    required: true
+    description: 分类适用的对象类型（决定挂在哪类主体上；与 code 组成业务键）
+    enum_values:
+      - value: customer
+        label: 客户
+        color: primary
+        description: 适用于客户档案，用于推导销售侧默认税码
+      - value: supplier
+        label: 供应商
+        color: success
+        description: 适用于供应商档案，用于推导采购侧默认税码
+      - value: item
+        label: 物料
+        color: warning
+        description: 适用于物料主数据，用于推导物料默认税码
+    semantics:
+      meaning: 分类适用的对象类型
+      business_key: true
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 适用对象
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: country_id
+    name: 国家/地区
+    type: integer
+    db_column: country_id
+    nullable: true
+    description: 所属国家/地区（引用 region 国家级节点；为空表示通用分类）
+    semantics:
+      meaning: 分类所属国家地区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "通用分类（不限定地区）"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        # 仅返回国家级节点（level=country 常量锁定），同 calendar.country_id 口径
+        parameter_bindings:
+          - target_field: level
+            constant: country
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 国家代码
+            width: 100
+          - field: name
+            label: 国家名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 分类说明与使用提示
+    semantics:
+      meaning: 税务分类详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 分类状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 税务分类启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_tax_classification
+    name: 启用税务分类
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此税务分类吗？"
+
+  - id: deactivate_tax_classification
+    name: 停用税务分类
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不再作为默认税码推导依据，已引用它的物料与档案不受影响。"
+
+indexes:
+  # 用途轴 + 编码唯一；country_id 不进索引（见文件头第 3 条）
+  - fields: [code, applicable_to]
+    unique: true
+    name: idx_tax_classification_code_applicable
+  - fields: [status]
+    name: idx_tax_classification_status
+
+relations:
+  - id: tax_classification_to_region
+    name: 国家/地区
+    type: reference
+    target: region
+    source_field: country_id
+    target_field: id
+    cardinality: N:1
+    description: 国家/地区引用（NULL=通用分类）
+
+ui_view_config:
+  # 菜单由迁移 v110 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 税务分类
+    description: 税务分类字典（客户 / 供应商 / 物料用途轴）
+    columns:
+      - field: code
+        width: 170
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: applicable_to
+        width: 110
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: country_id
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建税务分类
+        icon: plus
+        type: primary
+        permission: tax_classification:tax_classification_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 税务分类
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [applicable_to, status]
+      - title: 适用范围
+        columns:
+          - fields: [country_id]
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, applicable_to, country_id, status, description]
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v110 落库）
+  create_permission: tax_classification:tax_classification_create
+  update_permission: tax_classification:tax_classification_update
+  delete_permission: tax_classification:tax_classification_delete
+  owner_auto_permission: false

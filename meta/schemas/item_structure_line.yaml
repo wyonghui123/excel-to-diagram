@@ -1,0 +1,482 @@
+# 物料结构行 (Item Structure Line) — 一头多行，描述"用什么、用多少、能不能不选"
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §4.3 / §4.6
+# 定位: item_structure 的附属明细（child_sections），不单独成菜单。
+#
+# 行级不变量（字段级约束表达不了的，由服务层守卫强制）:
+#   R1 component_item_id 不得等于所属结构的 item_id；多层展开整条链不得成环。
+#   R2 (structure_id, line_no) 唯一 —— 唯一索引 uidx_item_structure_line_no。
+#   R3 qty_per 与 fixed_qty 恰填一个（互斥）；fixed_qty 不随父件数量缩放。
+#   R4 optional_flag = false 的行忽略 min_qty / max_qty / default_qty。
+#   R5 min_qty <= max_qty，default_qty 落在区间内。
+#   R6 default_flag = true 必须 optional_flag = true。
+#   R7 组件角色必须符合合法组合矩阵（组件类型由 component_item.structure_role 推导）。
+#   R8 同一 substitute_group_code 同组最多一行 optional_flag = false（必选锚点）。
+#   R9 组件停用不阻断保存，展开时进入告警集（warning）。
+#   R10 included_in_base_price / bom_price 只作报价参考，不参与计算。
+#   R11 服务类组件只在 usage = sales 的商务结构中允许（用途取自结构头）；生产 /
+#       工程 / 成本用途仍只收实物物料。
+#   R16 sales 用途的服务行只承载「次数」：损耗率须 0、禁替代组 / 虚拟件 /
+#       工序号 / 单位用量（只接受 fixed_qty）。
+
+id: item_structure_line
+name: 物料结构行
+table_name: item_structure_lines
+description: 物料结构行（组件 / 用量 / 可选性 / 有效期）
+parent_object: item_structure
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: structure_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = item_structure 的字段）
+  - id: structure_id
+    name: 结构版本
+    type: integer
+    db_column: structure_id
+    required: true
+    description: 所属结构版本
+    semantics:
+      meaning: 所属结构版本
+      display:
+        type: association
+        target_type: item_structure
+        display_field: revision
+    value_help:
+      source:
+        type: bo
+        target_bo: item_structure
+        value_field: id
+        display_field: revision
+        code_field: revision
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{revision}"
+        columns:
+          - field: revision
+            label: 版本号
+            width: 160
+    ui:
+      widget: select
+      relation: item_structure
+      multiple: false
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 结构内行号（同一结构内唯一）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 结构行号
+      filterable: true
+      filter_type: number
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: component_item_id
+    name: 组件物料
+    type: integer
+    db_column: component_item_id
+    required: true
+    description: 组件物料（行指向的子件）
+    semantics:
+      meaning: 组件物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: qty_per
+    name: 单位用量
+    type: number
+    db_column: qty_per
+    nullable: true
+    description: 相对结构 base_qty 的单位用量；与 fixed_qty 互斥
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 单位用量
+      hint: 例：base_qty = 100 时，qty_per = 5 表示每 100 件用 5
+    ui:
+      widget: input
+
+  - id: fixed_qty
+    name: 固定用量
+    type: number
+    db_column: fixed_qty
+    nullable: true
+    description: 每父件的固定用量，不随 base_qty 缩放；与 qty_per 互斥
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 固定用量
+    ui:
+      widget: input
+
+  - id: scrap_rate
+    name: 损耗率
+    type: number
+    db_column: scrap_rate
+    required: true
+    default: 0
+    description: 组件损耗率（0 到 1 之间，如 0.02 表示 2%）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lt: 1
+        decimal_places: 4
+    semantics:
+      meaning: 组件损耗率
+      hint: 只影响建议用量展示，不改变结构事实
+    ui:
+      widget: input
+
+  - id: optional_flag
+    name: 可选
+    type: boolean
+    db_column: optional_flag
+    required: true
+    default: false
+    description: 是否可选；false = 必选件
+    semantics:
+      meaning: 是否可选组件
+      filterable: true
+      filter_type: enum
+      filter_label: 可选
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: default_flag
+    name: 默认选中
+    type: boolean
+    db_column: default_flag
+    required: true
+    default: false
+    description: 是否默认选中；仅可选行可置 true
+    semantics:
+      meaning: 是否默认选中
+    ui:
+      widget: switch
+
+  - id: default_qty
+    name: 默认数量
+    type: number
+    db_column: default_qty
+    nullable: true
+    description: 默认数量；仅可选行使用，须落在 [min_qty, max_qty]
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 可选组件默认数量
+    ui:
+      widget: input
+
+  - id: min_qty
+    name: 最少数量
+    type: number
+    db_column: min_qty
+    nullable: true
+    description: 客户可改数量的下限；仅可选行使用
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 可选组件数量下限
+    ui:
+      widget: input
+
+  - id: max_qty
+    name: 最多数量
+    type: number
+    db_column: max_qty
+    nullable: true
+    description: 客户可改数量的上限；仅可选行使用
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 可选组件数量上限
+    ui:
+      widget: input
+
+  - id: valid_from
+    name: 行生效起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 行级生效起始日（工程变更用）；空 = 随结构版本
+    semantics:
+      meaning: 行级生效起始日
+      filterable: true
+      filter_type: date
+      filter_label: 行生效起
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 行生效止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 行级生效截止日；空 = 长期
+    semantics:
+      meaning: 行级生效截止日
+      filterable: true
+      filter_type: date
+      filter_label: 行生效止
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: operation_seq
+    name: 工序号
+    type: integer
+    db_column: operation_seq
+    nullable: true
+    description: 工序号占位；一期不展开
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 工序号
+    ui:
+      widget: input
+
+  - id: phantom_flag
+    name: 虚拟件
+    type: boolean
+    db_column: phantom_flag
+    required: true
+    default: false
+    description: 虚拟件不产生订单行，其子项上提到父键
+    semantics:
+      meaning: 是否虚拟件
+      filterable: true
+      filter_type: enum
+      filter_label: 虚拟件
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: substitute_group_code
+    name: 替代料组
+    type: string
+    db_column: substitute_group_code
+    max_length: 40
+    nullable: true
+    description: 替代料组标识；同组可互替，最多一行必选锚点
+    semantics:
+      meaning: 替代料组标识
+      data_category: code
+    ui:
+      widget: input
+
+  - id: included_in_base_price
+    name: 已含基础价
+    type: boolean
+    db_column: included_in_base_price
+    required: true
+    default: false
+    description: 该行价值是否已含在父项基础价内；仅报价参考，不参与计算
+    semantics:
+      meaning: 是否已含在父项基础价
+    ui:
+      widget: switch
+
+  - id: bom_price
+    name: 行参考价
+    type: number
+    db_column: bom_price
+    nullable: true
+    description: 该行自身标价；仅报价参考，不参与计算
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 结构行参考价
+    ui:
+      widget: input
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    max_length: 255
+    nullable: true
+    description: 行备注
+    semantics:
+      meaning: 行备注
+    ui:
+      widget: input
+
+indexes:
+  - fields: [structure_id, line_no]
+    unique: true
+    name: uidx_item_structure_line_no
+  - fields: [component_item_id]
+    name: idx_item_structure_line_component
+
+relations:
+  - id: item_structure_line_to_structure
+    name: 结构版本
+    type: reference
+    target: item_structure
+    source_field: structure_id
+    target_field: id
+    cardinality: N:1
+    description: 所属结构版本引用（真外键）
+  - id: item_structure_line_to_item
+    name: 组件物料
+    type: reference
+    target: item
+    source_field: component_item_id
+    target_field: id
+    cardinality: N:1
+    description: 组件物料引用（真外键）
+
+ui_view_config:
+  # 作为结构头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 结构行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: component_item_id
+        width: 220
+      - field: qty_per
+        width: 100
+      - field: fixed_qty
+        width: 100
+      - field: optional_flag
+        width: 80
+      - field: phantom_flag
+        width: 90
+      - field: valid_from
+        width: 110
+        format: date
+      - field: valid_to
+        width: 110
+        format: date
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 结构行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, component_item_id]
+          - fields: [qty_per, fixed_qty]
+          - fields: [scrap_rate]
+      - title: 可选性
+        columns:
+          - fields: [optional_flag, default_flag]
+          - fields: [default_qty, min_qty, max_qty]
+      - title: 其他信息
+        columns:
+          - fields: [valid_from, valid_to]
+          - fields: [operation_seq, phantom_flag]
+          - fields: [substitute_group_code]
+          - fields: [included_in_base_price, bom_price]
+          - fields: [note]

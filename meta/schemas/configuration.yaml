@@ -1,0 +1,396 @@
+# 配置实例 (Configuration) — 一次求解的产物，冻结后只读
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §6.1 / §6.4 / §8.4
+# 定位: 结果层头对象；特征值见 configuration_value，组件见 configuration_component。
+#
+# 口径:
+#   ① 实例锚在 structure_id（冻结的模型版本）上，不锚在物料上；回读直接定位到那一版结构。
+#   ② config_hash 仅在 solved / frozen 有值；solved 后不可改，要改只能生成新实例。
+#   ③ status = frozen 后除 status（转 superseded）外任何字段不得修改（R10）。
+#   ④ revision 只做域内审计，不外泄给订单侧；订单只看 id。
+#   ⑤ 对外 DTO 的 status 只有 solved / invalid：draft / invalid → invalid，
+#      solved / frozen / superseded → solved。
+
+id: configuration
+name: 配置实例
+table_name: configurations
+description: 配置实例头（模型版本 / 状态 / hash / 求解上下文）
+aspects: [audit_aspect]
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键；即订单侧 config_id
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: model_item_id
+    name: 模型物料
+    type: integer
+    db_column: model_item_id
+    required: true
+    description: structure_role = model 的物料；其 code 即 config_model_code
+    semantics:
+      meaning: 模型物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: structure_id
+    name: 结构版本
+    type: integer
+    db_column: structure_id
+    required: true
+    description: 冻结的模型版本；其 revision 即 config_model_version
+    semantics:
+      meaning: 配置锚定的结构版本
+      display:
+        type: association
+        target_type: item_structure
+        display_field: revision
+    ui:
+      widget: select
+      relation: item_structure
+      multiple: false
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 域内五态；对外折叠为 solved / invalid
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+      - value: solved
+        label: 已求解
+        color: success
+      - value: invalid
+        label: 不合法
+        color: danger
+      - value: frozen
+        label: 已冻结
+        color: primary
+      - value: superseded
+        label: 已被替代
+        color: info
+    semantics:
+      meaning: 配置实例状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: config_hash
+    name: 配置指纹
+    type: string
+    db_column: config_hash
+    max_length: 64
+    nullable: true
+    description: 仅 solved / frozen 有值；规范化拼接后取 sha256
+    semantics:
+      meaning: 配置内容指纹
+      data_category: code
+    ui:
+      widget: input
+
+  - id: revision
+    name: 修订号
+    type: integer
+    db_column: revision
+    required: true
+    default: 1
+    description: 域内修订号；匹配复用时递增，不外泄给订单侧
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 999999
+        decimal_places: 0
+    semantics:
+      meaning: 域内修订号
+    ui:
+      widget: input
+
+  - id: reused_from_id
+    name: 复用来源
+    type: integer
+    db_column: reused_from_id
+    nullable: true
+    description: 配置匹配命中时的源实例
+    semantics:
+      meaning: 复用来源实例
+      display:
+        type: association
+        target_type: configuration
+        display_field: config_hash
+    ui:
+      widget: select
+      relation: configuration
+      multiple: false
+
+  - id: match_policy_used
+    name: 匹配策略
+    type: string
+    db_column: match_policy_used
+    required: true
+    default: no
+    description: 求解时实际使用的匹配策略
+    enum_values:
+      - value: no
+        label: 不匹配
+      - value: one_time_standard
+        label: 一次性标准
+      - value: one_time_user_defined
+        label: 一次性用户定义
+    semantics:
+      meaning: 配置匹配策略
+      filterable: true
+      filter_type: enum
+      filter_label: 匹配策略
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source_level
+    name: 能力等级
+    type: string
+    db_column: source_level
+    required: true
+    default: L2
+    description: 求解时启用的能力等级
+    enum_values:
+      - value: L0
+        label: 无配置
+      - value: L1
+        label: 配置存根
+      - value: L2
+        label: 结构接入
+      - value: L3
+        label: 完整接入
+    semantics:
+      meaning: 求解能力等级
+      filterable: true
+      filter_type: enum
+      filter_label: 能力等级
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: context_json
+    name: 求解上下文
+    type: json
+    db_column: context_json
+    nullable: true
+    description: org_id / currency_code / order_date 等；不参与 hash
+    semantics:
+      meaning: 求解上下文
+    ui:
+      widget: textarea
+
+  - id: validation_result_json
+    name: 校验结果
+    type: json
+    db_column: validation_result_json
+    nullable: true
+    description: 求解失败时的错误码与最小冲突清单
+    semantics:
+      meaning: 校验结果
+    ui:
+      widget: textarea
+
+  - id: solved_at
+    name: 求解时间
+    type: datetime
+    db_column: solved_at
+    nullable: true
+    description: 最近一次成功求解时间
+    semantics:
+      meaning: 求解时间
+    ui:
+      widget: datetime
+
+  - id: frozen_at
+    name: 冻结时间
+    type: datetime
+    db_column: frozen_at
+    nullable: true
+    description: 冻结时间；冻结后实例只读
+    semantics:
+      meaning: 冻结时间
+    ui:
+      widget: datetime
+
+  # M2 物料变式；P4 只留位置，不产生值
+  - id: variant_item_id
+    name: 变式物料
+    type: integer
+    db_column: variant_item_id
+    nullable: true
+    description: 配置物化后生成的变式物料；未物化时为空
+    semantics:
+      meaning: 变式物料
+      display:
+        type: association
+        target_type: item
+        display_field: code
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+indexes:
+  - fields: [structure_id, config_hash]
+    name: idx_configuration_structure_hash
+  - fields: [model_item_id, status]
+    name: idx_configuration_model_status
+
+relations:
+  - id: configuration_to_model_item
+    name: 模型物料
+    type: reference
+    target: item
+    source_field: model_item_id
+    target_field: id
+    cardinality: N:1
+    description: 模型物料引用（真外键）
+  - id: configuration_to_structure
+    name: 结构版本
+    type: reference
+    target: item_structure
+    source_field: structure_id
+    target_field: id
+    cardinality: N:1
+    description: 冻结的模型版本引用（真外键）
+  - id: configuration_to_reused_from
+    name: 复用来源
+    type: reference
+    target: configuration
+    source_field: reused_from_id
+    target_field: id
+    cardinality: N:1
+    description: 复用来源实例引用（真外键）
+  - id: configuration_to_variant_item
+    name: 变式物料
+    type: reference
+    target: item
+    source_field: variant_item_id
+    target_field: id
+    cardinality: N:1
+    description: 物化生成的变式物料引用（真外键，可空）
+
+ui_view_config:
+  # 结果层由求解服务写入，不参与自动菜单生成
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 配置实例
+    columns:
+      - field: model_item_id
+        width: 200
+      - field: structure_id
+        width: 160
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: config_hash
+        width: 240
+      - field: revision
+        width: 90
+      - field: solved_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: solved_at
+      order: desc
+  form:
+    title: 配置实例信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [model_item_id, structure_id]
+          - fields: [status, revision]
+          - fields: [config_hash]
+      - title: 上下文
+        columns:
+          - fields: [context_json]
+          - fields: [validation_result_json]
+
+  child_sections:
+    - child_object: configuration_value
+      title: 特征值
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    - child_object: configuration_component
+      title: 配置组件
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable

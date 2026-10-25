@@ -142,6 +142,49 @@
       ],
       "table": "annotations"
     },
+    "attribute_definition": {
+      "hash": "3ff95058c3359fa4c5d7d5427915dbfd",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "tenant_id",
+        "code",
+        "name",
+        "data_type",
+        "usage_class",
+        "value_domain_type",
+        "value_domain_ref",
+        "multi_value_flag",
+        "uom_code",
+        "is_configurable",
+        "status",
+        "revision",
+        "description",
+        "created_at"
+      ],
+      "table": "attribute_definitions"
+    },
+    "attribute_scope": {
+      "hash": "7922ab1f97c12ce6f624879952f241a3",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "tenant_id",
+        "attribute_id",
+        "scope_type",
+        "scope_ref",
+        "required_flag",
+        "seq",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "attribute_scopes"
+    },
     "audit_log": {
       "hash": "134e1311c8a91de738760aad14ae9634",
       "fields": [
@@ -344,13 +387,17 @@
       "table": "calendars"
     },
     "calendar_day": {
-      "hash": "356e3fe20cfe53f33cdc196be5f77e40",
+      "hash": "e45b4f67cebb1813b219185d7099ed2d",
       "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
         "id",
         "calendar_id",
         "date",
         "day_type",
-        "note"
+        "note",
+        "created_at"
       ],
       "table": "calendar_days"
     },
@@ -392,6 +439,151 @@
       ],
       "table": "change_subscriptions"
     },
+    "configuration": {
+      "hash": "56e04f327eb6fd4ede8db73ea0071374",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "model_item_id",
+        "structure_id",
+        "status",
+        "config_hash",
+        "revision",
+        "reused_from_id",
+        "match_policy_used",
+        "source_level",
+        "context_json",
+        "validation_result_json",
+        "solved_at",
+        "frozen_at",
+        "variant_item_id"
+      ],
+      "table": "configurations"
+    },
+    "configuration_component": {
+      "hash": "2b51514e004239db77f306215c6a351f",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "configuration_id",
+        "component_key",
+        "structure_line_id",
+        "component_item_id",
+        "qty",
+        "uom_code",
+        "parent_component_key",
+        "selection_source",
+        "source_rule_id",
+        "child_configuration_id",
+        "substitute_for_key",
+        "seq"
+      ],
+      "table": "configuration_components"
+    },
+    "configuration_value": {
+      "hash": "2d8ea59169d1956f311e0aaa355826a9",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "configuration_id",
+        "attribute_code",
+        "seq",
+        "value_text",
+        "value_number",
+        "value_boolean",
+        "source",
+        "source_rule_id"
+      ],
+      "table": "configuration_values"
+    },
+    "config_rule": {
+      "hash": "cad38155b0d97abfa0d25f5b5ccdb281",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "structure_id",
+        "code",
+        "rule_type",
+        "severity",
+        "priority",
+        "message",
+        "status",
+        "description"
+      ],
+      "table": "config_rules"
+    },
+    "config_rule_term": {
+      "hash": "30ed1b03bbfb84f55e04ab866dbed1db",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "rule_id",
+        "seq",
+        "clause",
+        "target_type",
+        "target_line_id",
+        "target_class_item_id",
+        "attribute_code",
+        "operator",
+        "value_text",
+        "value_number",
+        "value_number_to",
+        "value_list"
+      ],
+      "table": "config_rule_terms"
+    },
+    "control_parameter_def": {
+      "hash": "bd3d3d11970c37a374e3f055ce663bc5",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "domain",
+        "value_type",
+        "enum_type_id",
+        "target_bo",
+        "default_value",
+        "description",
+        "status",
+        "created_at"
+      ],
+      "table": "control_parameter_defs"
+    },
+    "control_parameter_value": {
+      "hash": "adf7903c782de71c77e0e6f8f06500d0",
+      "fields": [
+        "id",
+        "control_parameter_id",
+        "org_id",
+        "document_type_id",
+        "line_type_id",
+        "item_group_id",
+        "specificity_rank",
+        "value",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "control_parameter_values"
+    },
     "cumulative_usage": {
       "hash": "f82ec514ec8af60aac58add8490ca10f",
       "fields": [
@@ -427,8 +619,21 @@
       ],
       "table": "currencies"
     },
+    "currency_rate": {
+      "hash": "a7d2b84c2e6f742f18fc9547435a889d",
+      "fields": [
+        "id",
+        "currency_id",
+        "to_currency_id",
+        "rate_type",
+        "valid_from",
+        "rate",
+        "description"
+      ],
+      "table": "currency_rates"
+    },
     "customer_account": {
-      "hash": "7477429f58448a96f58bb9773449038a",
+      "hash": "8b01704d908df27d84808c364a2ad5d1",
       "fields": [
         "updated_at",
         "created_by",
@@ -437,6 +642,9 @@
         "relation_id",
         "name",
         "description",
+        "tax_classification_id",
+        "default_payment_term_id",
+        "default_incoterm_code",
         "created_at"
       ],
       "table": "customer_accounts"
@@ -457,6 +665,21 @@
       "hash": "1d516a0f1d9c45f8625df48553c09ddd",
       "fields": [],
       "table": ""
+    },
+    "document_type": {
+      "hash": "c8f128aa6fe12bf888140aa80ce27c6f",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "category",
+        "default_line_type_id",
+        "number_sequence_id",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "document_types"
     },
     "domain": {
       "hash": "8228aadca036c1e1bba2d057ee4525e5",
@@ -613,8 +836,32 @@
       "fields": [],
       "table": ""
     },
+    "incoterm": {
+      "hash": "6850233618e46aa5857b113bbda3785c",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "name_en",
+        "edition",
+        "transport_mode",
+        "risk_transfer_point",
+        "export_clearance_by",
+        "import_clearance_by",
+        "main_carriage_by",
+        "unloading_by",
+        "insurance_cover",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "incoterms"
+    },
     "item": {
-      "hash": "91780329cf9c38fa57ef843c563cd24f",
+      "hash": "07dd37539d03af1b95978c25bd07f12e",
       "fields": [
         "updated_at",
         "created_by",
@@ -625,7 +872,11 @@
         "spec",
         "description",
         "item_type",
+        "structure_role",
+        "config_match_policy",
+        "config_materialize_policy",
         "item_group_id",
+        "tax_classification_id",
         "base_uom",
         "net_weight",
         "gross_weight",
@@ -636,15 +887,18 @@
       "table": "items"
     },
     "item_attribute_value": {
-      "hash": "edc4bd10cfb351cd560bbc92dac4f393",
+      "hash": "a3e9a87108d57e557e3fb39de8354934",
       "fields": [
         "id",
         "item_id",
+        "attribute_id",
         "attr_code",
         "org_id",
         "value_text",
         "value_number",
         "value_boolean",
+        "value_date",
+        "value_datetime",
         "description"
       ],
       "table": "item_attribute_values"
@@ -664,6 +918,76 @@
         "created_at"
       ],
       "table": "item_groups"
+    },
+    "item_structure": {
+      "hash": "3bcd9465f49ab506808469bf6e55e5cb",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "item_id",
+        "usage",
+        "alternative_no",
+        "revision",
+        "base_qty",
+        "base_uom_id",
+        "min_select",
+        "max_select",
+        "status",
+        "valid_from",
+        "valid_to",
+        "description"
+      ],
+      "table": "item_structures"
+    },
+    "item_structure_attribute": {
+      "hash": "f39fac999fc7875df26d5872aa9401d4",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "structure_id",
+        "attribute_code",
+        "required_flag",
+        "default_value_text",
+        "seq",
+        "ui_widget"
+      ],
+      "table": "item_structure_attributes"
+    },
+    "item_structure_line": {
+      "hash": "758460458851506310d5529df00f8496",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "structure_id",
+        "line_no",
+        "component_item_id",
+        "qty_per",
+        "fixed_qty",
+        "scrap_rate",
+        "optional_flag",
+        "default_flag",
+        "default_qty",
+        "min_qty",
+        "max_qty",
+        "valid_from",
+        "valid_to",
+        "operation_seq",
+        "phantom_flag",
+        "substitute_group_code",
+        "included_in_base_price",
+        "bom_price",
+        "note"
+      ],
+      "table": "item_structure_lines"
     },
     "item_uom_conversion": {
       "hash": "4cbd95af2bc2508e368796df7517a859",
@@ -702,6 +1026,33 @@
         "updated_at"
       ],
       "table": "key_schemas"
+    },
+    "line_type": {
+      "hash": "66b958121f968961608dde74f8665d13",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "category",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "line_types"
+    },
+    "line_type_assignment": {
+      "hash": "ba0b762509009a18e8b75520398ab9bf",
+      "fields": [
+        "id",
+        "document_type_id",
+        "item_group_id",
+        "specificity_rank",
+        "line_type_id",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "line_type_assignments"
     },
     "location": {
       "hash": "85ee0c0e889d5fc0c46404358d532bc5",
@@ -780,6 +1131,27 @@
         "updated_at"
       ],
       "table": "menu_permissions"
+    },
+    "number_sequence": {
+      "hash": "dc8be6917b2d05bd01fefbea72ba340f",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "pattern",
+        "scope_fields",
+        "date_field",
+        "start_value",
+        "on_exhaust",
+        "preview",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "number_sequences"
     },
     "org": {
       "hash": "5f8ee6d4cf40575e61f5c39e17bea2cd",
@@ -864,6 +1236,24 @@
       ],
       "table": "party_archive"
     },
+    "party_attribute_value": {
+      "hash": "73d78b8c03c8f6d7486fdbc322bf6c45",
+      "fields": [
+        "id",
+        "tenant_id",
+        "party_id",
+        "attribute_id",
+        "seq",
+        "value_text",
+        "value_number",
+        "value_boolean",
+        "value_date",
+        "value_datetime",
+        "description",
+        "created_at"
+      ],
+      "table": "party_attribute_values"
+    },
     "party_group": {
       "hash": "1b2e6e00917fa4ecaced335e9aae1923",
       "fields": [
@@ -907,6 +1297,55 @@
         "status"
       ],
       "table": "party_relations"
+    },
+    "party_tax_registration": {
+      "hash": "08c24b37602850ea37a5e7f1e37b71d3",
+      "fields": [
+        "id",
+        "party_id",
+        "country_id",
+        "tax_type",
+        "registration_number",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "status",
+        "created_at"
+      ],
+      "table": "party_tax_registrations"
+    },
+    "payment_term": {
+      "hash": "e8493582e9e18b66c0720c4afcc70dfc",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "basis_date_rule",
+        "cutoff_day",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "payment_terms"
+    },
+    "payment_term_line": {
+      "hash": "9709952e466eb831e9c9992934bfb59a",
+      "fields": [
+        "id",
+        "payment_term_id",
+        "seq",
+        "percentage",
+        "offset_months",
+        "fixed_day_of_month",
+        "offset_days",
+        "discount_percent",
+        "discount_days",
+        "description"
+      ],
+      "table": "payment_term_lines"
     },
     "permission": {
       "hash": "bdc5439db2bd0eb34d49fa7af7896a3c",
@@ -1312,6 +1751,68 @@
       ],
       "table": "role_permissions"
     },
+    "sales_order": {
+      "hash": "9fabb95b200ddcbfa35c0426162d5d03",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "order_no",
+        "order_type_id",
+        "order_date",
+        "status",
+        "customer_account_id",
+        "bill_to_account_id",
+        "payer_account_id",
+        "ship_to_party_id",
+        "org_id",
+        "sales_org_id",
+        "division_code",
+        "currency_id",
+        "exchange_rate",
+        "payment_term_id",
+        "incoterm_code",
+        "customer_po_no",
+        "requested_date",
+        "confirmed_date",
+        "net_amount",
+        "tax_amount",
+        "gross_amount",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sales_orders"
+    },
+    "sales_order_line": {
+      "hash": "649818654cc6f3d68fc153aa12204fa4",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "order_id",
+        "line_no",
+        "line_type_id",
+        "item_id",
+        "customer_item_code",
+        "description",
+        "qty",
+        "uom_id",
+        "unit_price",
+        "net_amount",
+        "tax_code_id",
+        "tax_base_amount",
+        "tax_rate_percent",
+        "tax_amount",
+        "gross_amount",
+        "requested_date",
+        "plant_location_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sales_order_lines"
+    },
     "scheduled_task": {
       "hash": "54811dd5356875de6dbe138a68c376af",
       "fields": [
@@ -1366,6 +1867,85 @@
         "bo_density"
       ],
       "table": "service_modules"
+    },
+    "sourcing_mode_policy": {
+      "hash": "9f9c047584b487a4b05f6e07699d0675",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "item_group_id",
+        "item_id",
+        "org_id",
+        "mode",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sourcing_mode_policies"
+    },
+    "sourcing_rule": {
+      "hash": "32f27f63766392eb1b758d694c8c86ba",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "rule_usage",
+        "effectivity_start",
+        "effectivity_end",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sourcing_rules"
+    },
+    "sourcing_rule_assignment": {
+      "hash": "1d136ddf52a1f51a7b10aafba4c59775",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "rule_id",
+        "scope_type",
+        "scope_ref_id",
+        "dest_org_id",
+        "dest_location_id",
+        "specificity_rank",
+        "seq",
+        "effectivity_start",
+        "effectivity_end",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sourcing_rule_assignments"
+    },
+    "sourcing_rule_line": {
+      "hash": "8ae19249ac38a6554a18953f5b0526d4",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "rule_id",
+        "seq",
+        "source_type",
+        "source_org_id",
+        "source_location_id",
+        "supplier_party_id",
+        "rank",
+        "allocation_pct",
+        "blocked",
+        "fixed",
+        "effectivity_start",
+        "effectivity_end",
+        "note",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sourcing_rule_lines"
     },
     "sub_domain": {
       "hash": "e41dfae5c11f8a07c3fb70a83b9f07b7",
@@ -1444,6 +2024,61 @@
       ],
       "table": "task_queues"
     },
+    "tax_classification": {
+      "hash": "b52c92d1f009cdc6c6402a03022726d5",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "applicable_to",
+        "country_id",
+        "description",
+        "status",
+        "created_at"
+      ],
+      "table": "tax_classifications"
+    },
+    "tax_code": {
+      "hash": "bad0eaab2d801fe49529c680a9ea9db0",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "country_id",
+        "tax_type",
+        "direction",
+        "tax_treatment",
+        "rate_source",
+        "rounding_mode",
+        "exemption_reason",
+        "external_tax_system",
+        "description",
+        "status",
+        "created_at"
+      ],
+      "table": "tax_codes"
+    },
+    "tax_rate": {
+      "hash": "915e7e09a356117d514ee04e9999dc84",
+      "fields": [
+        "id",
+        "tax_code_id",
+        "effective_from",
+        "effective_to",
+        "rate_percent",
+        "is_provisional",
+        "legal_basis",
+        "description",
+        "created_at"
+      ],
+      "table": "tax_rates"
+    },
     "test_objects": {
       "hash": "2d2d56fb599621697d67bfe91ec4db6a",
       "fields": [
@@ -1465,8 +2100,8 @@
       ],
       "table": "test_table"
     },
-    "uom": {
-      "hash": "180f690ca6de6a589e757cae174d0a2c",
+    "type_definition": {
+      "hash": "b64b3e56cbf0cc1042b95fe9ffe55d03",
       "fields": [
         "updated_at",
         "created_by",
@@ -1474,13 +2109,61 @@
         "id",
         "code",
         "name",
-        "uom_type",
+        "scope_bo",
+        "level",
+        "document_category",
+        "default_type_id",
+        "number_sequence_id",
+        "line_category",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "type_definitions"
+    },
+    "uom": {
+      "hash": "cc64e619284d15fa58bf2e39bd6b962f",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "uom_group_id",
         "decimal_places",
         "status",
         "description",
         "created_at"
       ],
       "table": "uoms"
+    },
+    "uom_conversion": {
+      "hash": "ede136e668b65b801d48559b7b21e2e0",
+      "fields": [
+        "id",
+        "uom_group_id",
+        "uom_id",
+        "factor",
+        "description"
+      ],
+      "table": "uom_conversions"
+    },
+    "uom_group": {
+      "hash": "0eb4f59d6ba2a18bd4cbdb653d0c9bb0",
+      "fields": [
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "base_uom_id",
+        "status",
+        "description",
+        "created_at"
+      ],
+      "table": "uom_groups"
     },
     "usage_group": {
       "hash": "18ffe918e6cfd3be756b0c84e132b739",
@@ -1531,7 +2214,7 @@
       "table": "users"
     },
     "vendor_account": {
-      "hash": "bba45172af9abcef7c7dd322798d6d07",
+      "hash": "7593daed0d22b37b1e6948a962930c8d",
       "fields": [
         "updated_at",
         "created_by",
@@ -1540,6 +2223,7 @@
         "relation_id",
         "name",
         "description",
+        "tax_classification_id",
         "created_at"
       ],
       "table": "vendor_accounts"
@@ -1565,5 +2249,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-20T23:38:15.900567"
+  "last_sync": "2026-10-25T16:42:07.937044"
 }

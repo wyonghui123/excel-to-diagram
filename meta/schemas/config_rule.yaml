@@ -1,0 +1,298 @@
+# 配置规则 (Config Rule) — 一版模型上的跨行 / 跨特征约束
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §5.3 / §5.5 / §5.6
+# 定位: item_structure 的附属明细（child_sections），条件项见 config_rule_term。
+#
+# 口径:
+#   ① 规则挂 structure_id，即「规则随结构版本冻结」；改规则 = 出新版本。
+#   ② rule_class 不建列：rule_type = default 即默认类，其余为约束类。
+#      默认类只在求解的默认阶段生效；约束类全程生效。
+#   ③ 六种类型：require（单向必需）/ bind（双向绑定）/ exclude（互斥）/
+#      negate（取反）/ default（默认值）/ condition（可选集收缩）。
+#   ④ severity = warning 时不阻断求解，保留先生效结果并写入告警。
+#   ⑤ 同优先级内 default 类最后应用；priority 数值小者先应用。
+#
+# 服务层守卫（config_rule_guard_service）:
+#   R9  只有 structure_role = model 的结构可以声明规则；
+#   R16 条件项只能引用同一结构版本（含其选项类子结构）内的行 / 选项类 / 特征。
+
+id: config_rule
+name: 配置规则
+table_name: config_rules
+description: 模型版本的配置规则头（类型 / 严重度 / 优先级 / 解释文案）
+parent_object: item_structure
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: structure_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = item_structure 的字段）
+  - id: structure_id
+    name: 结构版本
+    type: integer
+    db_column: structure_id
+    required: true
+    description: 规则所属模型版本；跨版本不复用
+    semantics:
+      meaning: 规则所属结构版本
+      display:
+        type: association
+        target_type: item_structure
+        display_field: revision
+    ui:
+      widget: select
+      relation: item_structure
+      multiple: false
+
+  - id: code
+    name: 规则编码
+    type: string
+    db_column: code
+    max_length: 40
+    nullable: true
+    description: 便于排查引用的规则编码；析取场景可多条规则共用同一编码
+    semantics:
+      meaning: 规则编码
+      data_category: code
+    ui:
+      widget: input
+
+  - id: rule_type
+    name: 规则类型
+    type: string
+    db_column: rule_type
+    required: true
+    description: 六种规则类型；default 为默认类，其余为约束类
+    enum_values:
+      - value: require
+        label: 单向必需
+        color: primary
+      - value: bind
+        label: 双向绑定
+        color: primary
+      - value: exclude
+        label: 互斥
+        color: danger
+      - value: negate
+        label: 取反
+        color: warning
+      - value: default
+        label: 默认值
+        color: info
+      - value: condition
+        label: 可选集条件
+        color: info
+    semantics:
+      meaning: 规则类型
+      filterable: true
+      filter_type: enum
+      filter_label: 规则类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: severity
+    name: 严重度
+    type: string
+    db_column: severity
+    required: true
+    default: blocking
+    description: blocking 冲突即阻断求解；warning 只告警不阻断
+    enum_values:
+      - value: blocking
+        label: 阻断
+        color: danger
+      - value: warning
+        label: 告警
+        color: warning
+    semantics:
+      meaning: 规则严重度
+      filterable: true
+      filter_type: enum
+      filter_label: 严重度
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 100
+    description: 数值小者先应用；同优先级内 default 类最后应用
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 规则应用顺序
+      filterable: true
+      filter_type: number
+      filter_label: 优先级
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: message
+    name: 解释文案
+    type: string
+    db_column: message
+    required: true
+    max_length: 255
+    description: 面向用户的规则说明；冲突回显直接使用
+    semantics:
+      meaning: 规则解释文案
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 规则状态；只有 active 参与求解
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+      - value: active
+        label: 生效
+        color: success
+      - value: inactive
+        label: 停用
+        color: info
+    semantics:
+      meaning: 规则状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 建模备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 建模者备注，不参与求解
+    semantics:
+      meaning: 规则备注
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [structure_id, status]
+    name: idx_config_rule_structure_status
+  - fields: [structure_id, priority]
+    name: idx_config_rule_structure_priority
+
+relations:
+  - id: config_rule_to_structure
+    name: 结构版本
+    type: reference
+    target: item_structure
+    source_field: structure_id
+    target_field: id
+    cardinality: N:1
+    description: 规则所属模型版本引用（真外键）
+
+ui_view_config:
+  # 作为结构头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 配置规则
+    columns:
+      - field: priority
+        width: 80
+        sortable: true
+      - field: code
+        width: 140
+      - field: rule_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: severity
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: message
+        width: 260
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: priority
+      order: asc
+  form:
+    title: 配置规则信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, rule_type]
+          - fields: [severity, priority]
+          - fields: [status]
+      - title: 解释与备注
+        columns:
+          - fields: [message]
+          - fields: [description]
+
+  # 条件项子表：规则详情内维护
+  child_sections:
+    - child_object: config_rule_term
+      title: 条件项
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable

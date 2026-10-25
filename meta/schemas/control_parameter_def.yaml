@@ -1,0 +1,416 @@
+# 控制参数定义 (Control Parameter Def) — 行为参数的"参数名"字典
+# 依据: SAP 配置表 / Oracle 属性配置的通用化做法；平台已试点的规则模型（items.yaml default 规则）
+#       + sourcing_rule 三件套（维度 + 具体度 + 首命中）
+# 定位: 把"会按组织 / 物料组 / 单据类型分化"的行为参数从强类型字段里抽出来，
+#       统一成「参数定义 + 参数取值」两表。类型对象只保留身份与结构指向。
+#
+# 进入门槛（防止变成垃圾抽屉）:
+#   ① 参数会按 ≥2 个维度分化，或未来肯定会（单一维度且永不变的默认值 -> 留在对象列上）；
+#   ② 参数是"行为开关/业务默认值"，不是结构选择（结构选择如行类型确定，走专用确定表）；
+#   ③ sales 域首期参数 ≤ 12 个，超出说明该建专用对象。
+#
+# 解析口径（实现见 meta/services/control_parameter_service.py）:
+#   一次装载全部 active 定义与取值 -> 内存按维度精确匹配 -> specificity_rank 升序、id 升序首个命中
+#   -> 全不命中回落 def.default_value。禁止逐参数、逐行发 SQL。
+
+id: control_parameter_def
+name: 控制参数定义
+table_name: control_parameter_defs
+description: 控制参数定义（参数名字典，含值类型与兜底默认值）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 控制参数定义
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 控制参数
+    - 参数定义
+    - Control Parameter
+    - Parameter Definition
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: control_parameter_values
+      foreign_key: control_parameter_id
+      message: 该参数还有取值记录，请先删除取值后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 参数编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 60
+    pattern: "^[a-z][a-z0-9_]*$"
+    description: 参数唯一编码（如 allow_partial_delivery / default_payment_term）
+    semantics:
+      meaning: 参数业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+      hint: 有取值后不可改编码
+    ui:
+      widget: input
+
+  - id: name
+    name: 参数名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 参数显示名称
+    semantics:
+      meaning: 参数显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: domain
+    name: 所属域
+    type: string
+    db_column: domain
+    required: true
+    default: sales
+    description: 所属业务域，解析时按域隔离
+    enum_values:
+      - value: sales
+        label: 销售
+        color: primary
+        category: active
+        is_initial: true
+      - value: procurement
+        label: 采购
+        color: success
+      - value: inventory
+        label: 库存
+        color: warning
+      - value: platform
+        label: 平台
+        color: info
+    semantics:
+      meaning: 参数字典的作用域
+      filterable: true
+      filter_type: enum
+      filter_label: 所属域
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: value_type
+    name: 值类型
+    type: string
+    db_column: value_type
+    required: true
+    default: string
+    description: 取值类型 bool / enum / int / decimal / string / ref；写入时按此校验
+    enum_values:
+      - value: bool
+        label: 布尔
+        color: success
+        is_initial: true
+      - value: enum
+        label: 枚举
+        color: primary
+      - value: int
+        label: 整数
+      - value: decimal
+        label: 小数
+      - value: string
+        label: 文本
+      - value: ref
+        label: 引用
+        color: warning
+        description: 引用另一业务对象的主键（target_bo 指定对象）
+    semantics:
+      meaning: 参数取值的类型
+      filterable: true
+      filter_type: enum
+      filter_label: 值类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  # value_type=enum 时必填：值集走 enum_type（与平台档案载体选型口诀一致）
+  - id: enum_type_id
+    name: 枚举类型
+    type: integer
+    db_column: enum_type_id
+    nullable: true
+    description: 值类型为 enum 时指定的枚举类型
+    semantics:
+      meaning: 参数可选值集
+      display:
+        type: association
+        target_type: enum_type
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: enum_type
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name} ({code})"
+    ui:
+      widget: select
+      relation: enum_type
+      multiple: false
+
+  # value_type=ref 时必填：目标对象 id（如 payment_term / line_type）
+  - id: target_bo
+    name: 引用对象
+    type: string
+    db_column: target_bo
+    nullable: true
+    max_length: 60
+    description: 值类型为 ref 时指定的目标业务对象 id（如 payment_term）
+    semantics:
+      meaning: 引用型参数的目标对象
+      hint: 取值存目标对象主键；写入时校验存在性
+    ui:
+      widget: input
+
+  - id: default_value
+    name: 默认值
+    type: text
+    db_column: default_value
+    nullable: true
+    description: 所有维度都不命中时的兜底值；建议必填，避免漏配导致行为静默变化
+    semantics:
+      meaning: 参数兜底默认值（按值类型解析）
+    ui:
+      widget: input
+
+  - id: description
+    name: 用途说明
+    type: text
+    db_column: description
+    nullable: true
+    description: 参数用途、影响面与取值约定（必填项，防止参数池变垃圾抽屉）
+    semantics:
+      meaning: 参数用途说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 停用后不再参与解析（已快照到单据的值不受影响）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 参数启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_control_parameter_def
+    name: 启用参数
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此参数吗？"
+
+  - id: deactivate_control_parameter_def
+    name: 停用参数
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后新单据不再读取此参数，已快照的历史单据不受影响。确定停用吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_control_parameter_def_code
+  - fields: [domain]
+    name: idx_control_parameter_def_domain
+
+relations:
+  - id: control_parameter_def_to_enum_type
+    name: 枚举类型
+    type: reference
+    target: enum_type
+    source_field: enum_type_id
+    target_field: id
+    cardinality: N:1
+    description: enum 型参数的值集引用（可空）
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 控制参数
+    description: 控制参数定义（行为开关与业务默认值）
+    columns:
+      - field: code
+        width: 220
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: domain
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: value_type
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: default_value
+        width: 140
+        type: ellipsis
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建参数
+        icon: plus
+        type: primary
+        permission: control_parameter_def:create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 控制参数信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [domain, value_type]
+          - fields: [enum_type_id, target_bo]
+      - title: 值与说明
+        columns:
+          - fields: [default_value]
+          - fields: [description]
+      - title: 状态
+        columns:
+          - fields: [status]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - domain
+          - value_type
+          - enum_type_id
+          - target_bo
+          - default_value
+          - description
+          - status
+
+  # 参数取值子表：父字段由 control_parameter_id 的 ui.relation=control_parameter_def 推断
+  child_sections:
+    - child_object: control_parameter_value
+      title: 参数取值
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: control_parameter_def:create
+  update_permission: control_parameter_def:update
+  delete_permission: control_parameter_def:delete
+  owner_auto_permission: false

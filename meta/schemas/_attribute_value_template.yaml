@@ -1,0 +1,86 @@
+# 属性值表模板（Attribute Value Table Template）
+# 本文件不是对象定义：无顶层 id、文件名带 _ 前缀，加载器两道都会跳过，不会生成表。
+# 用途：给「每个可扩展属性收口的业务对象建一张值表」提供唯一模板，供 lint / 测试做结构比对。
+#
+# 为什么要一对象一张值表，而不是一张 (owner_type, owner_id) 大表:
+#   大表失去外键（owner_type 是多态，建不了 FK）、索引退化、权限切不开。一对象一张表可以
+#   用真外键指向归属对象，也让权限体系按对象授权继续生效。
+#
+# 值列互斥：一行只能有一列非空，哪一列由 attribute_definition.data_type 决定。
+# DSL 没有 CHECK，互斥与类型对应由值服务在写入时强制，不靠数据库。
+
+template_name: attribute_value_table
+template_version: 1
+
+# 归属与技术列（每张值表都必须有）
+required_columns:
+  - column: id
+    type: integer
+    note: 技术主键
+  - column: tenant_id
+    type: integer
+    required: true
+    default: 0
+    note: 数据归属租户；0 = 平台层
+  - column: "<owner>_id"
+    type: integer
+    required: true
+    note: 归属对象主键；列名随对象变化（party_id / item_id / ...），并建真外键
+  - column: attribute_id
+    type: integer
+    required: true
+    note: 属性定义引用；建真外键指向 attribute_definitions
+  - column: seq
+    type: integer
+    required: true
+    default: 1
+    note: 多值序号；单值属性恒为 1
+  - column: description
+    type: text
+    nullable: true
+    note: 值备注
+
+# 类型化值列（固定五列，按 data_type 互斥填充）
+value_columns:
+  - column: value_text
+    type: text
+    nullable: true
+    for_data_types: [string]
+  - column: value_number
+    type: float
+    nullable: true
+    for_data_types: [number, integer]
+  - column: value_boolean
+    type: boolean
+    nullable: true
+    for_data_types: [boolean]
+  - column: value_date
+    type: date
+    nullable: true
+    for_data_types: [date]
+  - column: value_datetime
+    type: datetime
+    nullable: true
+    for_data_types: [datetime]
+
+# 时间列
+timestamp_columns:
+  - column: created_at
+    type: datetime
+
+# 索引口径：四列全非空 ⇒ 普通唯一索引即可，不需要 partial unique
+indexes:
+  - fields: [tenant_id, "<owner>_id", attribute_id, seq]
+    unique: true
+    name_pattern: "uidx_<owner>_attr_value"
+  - fields: [attribute_id]
+    name_pattern: "idx_<owner>_attr_value_attr"
+    note: 供影响预览与引用计数，不作为业务范围查询入口
+
+relations:
+  - source_field: "<owner>_id"
+    target: "<owner>"
+    note: N:1 真外键
+  - source_field: attribute_id
+    target: attribute_definition
+    note: N:1 真外键

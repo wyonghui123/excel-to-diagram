@@ -1,0 +1,363 @@
+# 配置组件 (Configuration Component) — 一次配置展开出的组件树
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §6.3 / §9 R13 / R14
+# 定位: configuration 的附属明细（child_sections），不单独成菜单。
+#
+# 口径:
+#   ① component_key 用结构行号路径：顶层 L<line_no>，嵌套 L0012.L0003；
+#      幻影件自身不出键，其子项取父路径再加一段。同一次求解内唯一，
+#      即订单契约的 component_no。
+#   ② 幻影行不生成组件（R13）。
+#   ③ 同物料可出现在多个 component_key 上，禁止按物料合并（R14）。
+#   ④ 替代料用 substitute_for_key 指向原组件键，锚点行本身保留。
+#   ⑤ qty 是展开后数量（已含 base_qty 与损耗），不是 qty_per。
+
+id: configuration_component
+name: 配置组件
+table_name: configuration_components
+description: 一次配置展开出的组件（键 / 来源行 / 用量 / 来源规则）
+parent_object: configuration
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: configuration_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: configuration_id
+    name: 配置实例
+    type: integer
+    db_column: configuration_id
+    required: true
+    description: 所属配置实例
+    semantics:
+      meaning: 所属配置实例
+      display:
+        type: association
+        target_type: configuration
+        display_field: config_hash
+    ui:
+      widget: select
+      relation: configuration
+      multiple: false
+
+  - id: component_key
+    name: 组件键
+    type: string
+    db_column: component_key
+    required: true
+    max_length: 80
+    description: 行号路径语义键；同一次求解内唯一，即订单侧 component_no
+    semantics:
+      meaning: 组件语义键
+      data_category: code
+      display_name: true
+    ui:
+      widget: input
+
+  - id: structure_line_id
+    name: 来源结构行
+    type: integer
+    db_column: structure_line_id
+    required: true
+    description: 该组件来自哪一条结构行
+    semantics:
+      meaning: 来源结构行
+      display:
+        type: association
+        target_type: item_structure_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: item_structure_line
+      multiple: false
+
+  - id: component_item_id
+    name: 组件物料
+    type: integer
+    db_column: component_item_id
+    required: true
+    description: 组件物料（替代料已解析后）
+    semantics:
+      meaning: 组件物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: qty
+    name: 用量
+    type: number
+    db_column: qty
+    required: true
+    description: 展开后数量（已含 base_qty 与损耗）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 展开后用量
+    ui:
+      widget: input
+
+  - id: uom_code
+    name: 单位
+    type: string
+    db_column: uom_code
+    required: true
+    max_length: 20
+    description: 用量对应的计量单位编码
+    semantics:
+      meaning: 用量单位
+      data_category: code
+    ui:
+      widget: input
+
+  - id: parent_component_key
+    name: 父组件键
+    type: string
+    db_column: parent_component_key
+    max_length: 80
+    nullable: true
+    description: 多层表达；顶层为空
+    semantics:
+      meaning: 父组件键
+    ui:
+      widget: input
+
+  - id: selection_source
+    name: 选择来源
+    type: string
+    db_column: selection_source
+    required: true
+    default: auto
+    description: auto = 必选或默认；user = 用户显式；rule = 规则推出
+    enum_values:
+      - value: auto
+        label: 必选 / 默认
+        color: info
+      - value: user
+        label: 用户选择
+        color: primary
+      - value: rule
+        label: 规则推出
+        color: warning
+    semantics:
+      meaning: 组件选择来源
+      filterable: true
+      filter_type: enum
+      filter_label: 选择来源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source_rule_id
+    name: 来源规则
+    type: integer
+    db_column: source_rule_id
+    nullable: true
+    description: selection_source = rule 时指向推导它的规则
+    semantics:
+      meaning: 推导该组件的规则
+      display:
+        type: association
+        target_type: config_rule
+        display_field: message
+    ui:
+      widget: select
+      relation: config_rule
+      multiple: false
+
+  - id: child_configuration_id
+    name: 子模型实例
+    type: integer
+    db_column: child_configuration_id
+    nullable: true
+    description: 子模型实例引用；一期只留字段，不启用
+    semantics:
+      meaning: 子模型配置实例
+    ui:
+      widget: select
+      relation: configuration
+      multiple: false
+
+  - id: substitute_for_key
+    name: 替代原键
+    type: string
+    db_column: substitute_for_key
+    max_length: 80
+    nullable: true
+    description: 替代料时指向原组件键
+    semantics:
+      meaning: 替代的组件键
+    ui:
+      widget: input
+
+  - id: seq
+    name: 展示顺序
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 展示与回显顺序
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 999999
+        decimal_places: 0
+    semantics:
+      meaning: 组件展示顺序
+      filterable: true
+      filter_type: number
+      filter_label: 展示顺序
+      filter_scope: local
+    ui:
+      widget: input
+
+indexes:
+  - fields: [configuration_id, component_key]
+    unique: true
+    name: uidx_configuration_component_key
+  - fields: [structure_line_id]
+    name: idx_configuration_component_line
+  - fields: [component_item_id]
+    name: idx_configuration_component_item
+
+relations:
+  - id: configuration_component_to_configuration
+    name: 配置实例
+    type: reference
+    target: configuration
+    source_field: configuration_id
+    target_field: id
+    cardinality: N:1
+    description: 所属配置实例引用（真外键）
+  - id: configuration_component_to_line
+    name: 来源结构行
+    type: reference
+    target: item_structure_line
+    source_field: structure_line_id
+    target_field: id
+    cardinality: N:1
+    description: 来源结构行引用（真外键）
+  - id: configuration_component_to_item
+    name: 组件物料
+    type: reference
+    target: item
+    source_field: component_item_id
+    target_field: id
+    cardinality: N:1
+    description: 组件物料引用（真外键）
+  - id: configuration_component_to_rule
+    name: 来源规则
+    type: reference
+    target: config_rule
+    source_field: source_rule_id
+    target_field: id
+    cardinality: N:1
+    description: 推导该组件的规则引用（真外键）
+  - id: configuration_component_to_child_configuration
+    name: 子模型实例
+    type: reference
+    target: configuration
+    source_field: child_configuration_id
+    target_field: id
+    cardinality: N:1
+    description: 子模型配置实例引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 配置组件
+    columns:
+      - field: component_key
+        width: 180
+        sortable: true
+      - field: component_item_id
+        width: 200
+      - field: qty
+        width: 100
+      - field: uom_code
+        width: 90
+      - field: parent_component_key
+        width: 160
+      - field: selection_source
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 配置组件信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [component_key, seq]
+          - fields: [component_item_id, structure_line_id]
+          - fields: [qty, uom_code]
+          - fields: [parent_component_key]
+      - title: 来源
+        columns:
+          - fields: [selection_source, source_rule_id]
+          - fields: [substitute_for_key, child_configuration_id]

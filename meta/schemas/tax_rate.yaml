@@ -1,0 +1,263 @@
+# 税率（Tax Rate）— 税码的生效期切片
+# 依据: docs/superpowers/specs/2026-10-25-tax-wave0-implementation-spec.md §3.3
+# 定位: tax_code 的附属明细（child_sections，见 tax_code.yaml），不单独成菜单/聚合页。
+#
+# 语义（唯一读法，消费方不得自行解释）:
+#   在 [effective_from, effective_to) 半开区间内，该税码的税率等于 rate_percent。
+#   effective_to 为空 = 开放结束（至今仍有效）。相邻区间允许首尾相接
+#   （前一段 to == 后一段 from），不算重叠；同一税码下任意两段不得真正的重叠 ——
+#   由守卫 TaxGuardService.validate_tax_rate_write 的 G2 强制。
+#
+# 为什么区间不重叠要放在服务层而不是唯一索引:
+#   唯一索引只能约束 (tax_code_id, effective_from)，表达不了「区间交集为空」。
+#   与 currency_rate 的 R2（无序币对）同因：DB 表达不了，必须服务层守卫。
+#
+# 边界:
+#   1. 只存不算。税率取用（按基准日选段）与税额计算属消费方（订单 / 结算），本期不交付。
+#   2. 金额舍入按币种小数位由消费方执行；本表只按 tax_code.rounding_mode 给方式，不承载精度。
+#   3. 无状态机：税率是事实数据，录错直接删除（审计留痕），不做 activate/deactivate。
+
+id: tax_rate
+name: 税率
+table_name: tax_rates
+description: 税率（税码的生效期切片，半开区间 [effective_from, effective_to)）
+parent_object: tax_code
+hierarchy:
+  enabled: true
+  parent_field: tax_code_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: tax_code_id
+    name: 税码
+    type: integer
+    db_column: tax_code_id
+    required: true
+    description: 所属税码
+    semantics:
+      meaning: 所属税码引用
+      display:
+        type: association
+        target_type: tax_code
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_code
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 税码
+            width: 140
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: tax_code
+      multiple: false
+
+  - id: effective_from
+    name: 生效起始日
+    type: date
+    db_column: effective_from
+    required: true
+    description: 税率生效起始日（含当日；YYYY-MM-DD）
+    semantics:
+      meaning: 区间起点（含）
+      business_key: true
+      immutable: true
+      filterable: true
+      filter_type: date
+      filter_label: 生效起始日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: effective_to
+    name: 生效截止日
+    type: date
+    db_column: effective_to
+    nullable: true
+    description: 税率生效截止日（不含当日；为空表示至今有效）
+    semantics:
+      meaning: 区间终点（不含）；空=开放结束
+      filterable: true
+      filter_type: date
+      filter_label: 生效截止日
+      filter_scope: local
+    ui:
+      widget: date
+      clearable: true
+
+  - id: rate_percent
+    name: 税率(%)
+    type: float
+    db_column: rate_percent
+    required: true
+    description: 税率百分比（13 表示 13%；须在 [0, 100) 区间，最多 4 位小数）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lt: 100
+        decimal_places: 4
+    semantics:
+      meaning: 税率百分比数值（13 = 13%）
+      hint: 免税 / 零税率填 0；不要把 13% 写成 0.13
+    ui:
+      widget: input
+
+  - id: is_provisional
+    name: 暂定税率
+    type: boolean
+    db_column: is_provisional
+    required: true
+    default: false
+    description: 是否为暂定税率（法定税率未定或过渡期适用，供引擎区分取用优先级）
+    semantics:
+      meaning: 暂定税率标记
+      filterable: true
+      filter_type: enum
+      filter_label: 暂定
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: legal_basis
+    name: 法规依据
+    type: string
+    db_column: legal_basis
+    nullable: true
+    max_length: 120
+    description: 税率来源的法规文号或公告编号
+    semantics:
+      meaning: 税率法定依据
+      searchable: true
+    ui:
+      widget: input
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 税率说明
+    semantics:
+      meaning: 税率备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  # 同一税码同一起始日只允许一行（区间重叠由守卫 G2 另判）
+  - fields: [tax_code_id, effective_from]
+    unique: true
+    name: idx_tax_rate_code_from
+  - fields: [tax_code_id, effective_from, effective_to]
+    name: idx_tax_rate_code_window
+
+relations:
+  - id: tax_rate_to_tax_code
+    name: 税码
+    type: reference
+    target: tax_code
+    source_field: tax_code_id
+    target_field: id
+    cardinality: N:1
+    description: 所属税码引用
+
+ui_view_config:
+  # 子表在税码详情的「生效税率」页签内联展示，不单独成菜单
+  skip_auto_menu: true
+  list:
+    title: 生效税率
+    columns:
+      - field: effective_from
+        width: 130
+        format: date
+      - field: effective_to
+        width: 130
+        format: date
+      - field: rate_percent
+        width: 110
+      - field: is_provisional
+        width: 100
+        render_as: tag
+      - field: legal_basis
+        width: 180
+      - field: description
+        width: 200
+    actions:
+      - id: create
+        label: 新增税率
+        icon: plus
+        type: primary
+        permission: tax_rate:tax_rate_create
+    defaultSort:
+      field: effective_from
+      order: desc
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v110 落库）
+  create_permission: tax_rate:tax_rate_create
+  update_permission: tax_rate:tax_rate_update
+  delete_permission: tax_rate:tax_rate_delete
+  owner_auto_permission: false

@@ -1,0 +1,267 @@
+# 配置特征值 (Configuration Value) — 这一次配置的特征取值
+# 依据: docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md §6.2
+# 定位: configuration 的附属明细（child_sections），不单独成菜单。
+#
+# 口径:
+#   ① 存储位置与 item_attribute_values 严格分离：这里是「这一次配置」的值，
+#      不是物料主数据参数。
+#   ② (configuration_id, attribute_code, seq) 唯一；三列值恰好一列非空。
+#   ③ 值列只覆盖可配置特征的四种类型：string / number / integer / boolean。
+#   ④ source ∈ {default, rule} 时必须带 source_rule_id，用于解释「为什么是这个值」。
+
+id: configuration_value
+name: 配置特征值
+table_name: configuration_values
+description: 一次配置求解的特征取值（按属性定义的数据类型填充对应值列）
+parent_object: configuration
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: configuration_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: configuration_id
+    name: 配置实例
+    type: integer
+    db_column: configuration_id
+    required: true
+    description: 所属配置实例
+    semantics:
+      meaning: 所属配置实例
+      display:
+        type: association
+        target_type: configuration
+        display_field: config_hash
+    ui:
+      widget: select
+      relation: configuration
+      multiple: false
+
+  - id: attribute_code
+    name: 特征编码
+    type: string
+    db_column: attribute_code
+    required: true
+    max_length: 60
+    description: 平台层（tenant_id = 0）属性定义的 code
+    semantics:
+      meaning: 特征编码
+      data_category: code
+      display_name: true
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: code
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: input
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 多值特征的序号；单值恒为 1
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 9999
+        decimal_places: 0
+    semantics:
+      meaning: 特征值序号
+    ui:
+      widget: input
+
+  - id: value_text
+    name: 文本值
+    type: string
+    db_column: value_text
+    max_length: 255
+    nullable: true
+    description: data_type = string 时填充
+    semantics:
+      meaning: 文本取值
+    ui:
+      widget: input
+
+  - id: value_number
+    name: 数值
+    type: number
+    db_column: value_number
+    nullable: true
+    description: data_type = number / integer 时填充
+    semantics:
+      meaning: 数值取值
+    ui:
+      widget: input
+
+  - id: value_boolean
+    name: 布尔值
+    type: boolean
+    db_column: value_boolean
+    nullable: true
+    description: data_type = boolean 时填充
+    semantics:
+      meaning: 布尔取值
+    ui:
+      widget: switch
+
+  - id: source
+    name: 取值来源
+    type: string
+    db_column: source
+    required: true
+    default: user
+    description: 该值是用户给的、默认带出的、规则推出的，还是派生的
+    enum_values:
+      - value: user
+        label: 用户输入
+        color: primary
+      - value: default
+        label: 默认值
+        color: info
+      - value: rule
+        label: 规则推出
+        color: warning
+      - value: derived
+        label: 派生计算
+        color: info
+    semantics:
+      meaning: 特征值来源
+      filterable: true
+      filter_type: enum
+      filter_label: 取值来源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source_rule_id
+    name: 来源规则
+    type: integer
+    db_column: source_rule_id
+    nullable: true
+    description: source ∈ {default, rule} 时必填，用于解释取值
+    semantics:
+      meaning: 推导该值的规则
+      display:
+        type: association
+        target_type: config_rule
+        display_field: message
+    ui:
+      widget: select
+      relation: config_rule
+      multiple: false
+
+indexes:
+  - fields: [configuration_id, attribute_code, seq]
+    unique: true
+    name: uidx_configuration_value_code
+  - fields: [attribute_code]
+    name: idx_configuration_value_attribute
+
+relations:
+  - id: configuration_value_to_configuration
+    name: 配置实例
+    type: reference
+    target: configuration
+    source_field: configuration_id
+    target_field: id
+    cardinality: N:1
+    description: 所属配置实例引用（真外键）
+  - id: configuration_value_to_rule
+    name: 来源规则
+    type: reference
+    target: config_rule
+    source_field: source_rule_id
+    target_field: id
+    cardinality: N:1
+    description: 推导该值的规则引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 特征值
+    columns:
+      - field: seq
+        width: 70
+        sortable: true
+      - field: attribute_code
+        width: 200
+      - field: value_text
+        width: 160
+      - field: value_number
+        width: 110
+      - field: value_boolean
+        width: 90
+      - field: source
+        width: 100
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: attribute_code
+      order: asc
+  form:
+    title: 特征值信息
+    layout: vertical
+    sections:
+      - title: 取值
+        columns:
+          - fields: [attribute_code, seq]
+          - fields: [value_text]
+          - fields: [value_number, value_boolean]
+      - title: 来源
+        columns:
+          - fields: [source, source_rule_id]

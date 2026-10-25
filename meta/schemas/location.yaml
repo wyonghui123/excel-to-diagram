@@ -47,6 +47,9 @@ deletion_policy:
     - table: locations
       foreign_key: parent_id
       message: 该位置下还有子位置，请先删除或迁移子位置后再删除
+    - table: sales_order_lines
+      foreign_key: plant_location_id
+      message: 该位置被销售订单行引用（发货点），请先处理订单后再删除
   cascade_delete: []
 
 audit:

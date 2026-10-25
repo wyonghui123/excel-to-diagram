@@ -316,6 +316,7 @@ class PricingService:
         measure: Optional[str] = None,
         valid_on: Optional[str] = None,
         persist: bool = True,
+        result_code: Optional[str] = None,
     ) -> Dict[str, Any]:
         """对一行执行定价：查表 → 算过程 → （可选）落结果与明细。
 
@@ -333,6 +334,7 @@ class PricingService:
                             否则内核报「绝不隐式默认」——不透传则 best 永不可达
             valid_on:       有效期（含下不含上）
             persist:        False = 只算不落库（dry-run / 预览）
+            result_code:    调用方指定的结果编码（幂等键）；留空自动生成
 
         Returns:
             {"net_amount", "subtotals", "step_results", "traces", "result_id"}
@@ -424,6 +426,7 @@ class PricingService:
                 calc=calc,
                 lk=lk,
                 valid_on=valid_on,
+                result_code=result_code,
             )
 
         return {
@@ -453,6 +456,7 @@ class PricingService:
         calc: Dict[str, Any],
         lk,
         valid_on: Optional[str],
+        result_code: Optional[str] = None,
     ) -> int:
         """作废旧结果 + 落新结果 + 落明细 + 累计用量（FR-016），**整体一个事务**。
 
@@ -473,6 +477,7 @@ class PricingService:
                 rid = self._invalidate_and_persist_inner(
                     process, level, document_type, document_id,
                     document_line_id, net, base, calc, lk, valid_on,
+                    result_code,
                 )
                 self._accumulate_usage(lk, base=base, net=net)
                 return rid
@@ -486,6 +491,7 @@ class PricingService:
             rid = self._invalidate_and_persist_inner(
                 process, level, document_type, document_id,
                 document_line_id, net, base, calc, lk, valid_on,
+                result_code,
             )
             self._accumulate_usage(lk, base=base, net=net)
             self.ds.execute(f"RELEASE SAVEPOINT {sp}")
@@ -507,6 +513,7 @@ class PricingService:
         calc: Dict[str, Any],
         lk,
         valid_on: Optional[str],
+        result_code: Optional[str] = None,
     ) -> int:
         # 【2026-10-07 拆表 · TBD-18】此处曾加过
         #   `AND allocation_rule_id IS NULL` 以防误伤分摊留痕，现已**移除**。
@@ -531,6 +538,7 @@ class PricingService:
         return self._persist_inner(
             process, level, document_type, document_id,
             document_line_id, net, base, calc, lk, valid_on,
+            result_code,
         )
 
     def _persist_inner(
@@ -545,9 +553,10 @@ class PricingService:
         calc: Dict[str, Any],
         lk,
         valid_on: Optional[str],
+        result_code: Optional[str] = None,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
-        code = f"CR_{uuid.uuid4().hex[:16]}"
+        code = result_code or f"CR_{uuid.uuid4().hex[:16]}"
 
         # 逐槽位的回放信息并入明细（LookupTrace 与 StepResult 序号不对齐，
         # 故按 slot_seq 建索引，明细行用其所在槽位的 trace）

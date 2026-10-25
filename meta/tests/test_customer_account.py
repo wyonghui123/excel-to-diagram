@@ -11,7 +11,7 @@
   ① 结构（字段集 / 类型 / 必填 / 唯一 / 命名 / 表名）
   ② relation_id 1:1 唯一约束生效
   ③ 5 动作码齐备 + path 正确
-  ④ 删除保护 restrict + restrict_on 空
+  ④ 删除保护 restrict（波次 0 起覆盖销售订单三处引用）
   ⑤ 负向：无财务语义字段（D3 锁定）
   ⑥ 负向：无生效期字段（D2 / TBD-14 锁定）
   ⑦ 负向：无 status 字段（D4 锁定）
@@ -54,6 +54,16 @@ def _field_ids():
     return set(_fields().keys())
 
 
+def _create_fk_target_stubs(ds):
+    """补齐本对象 FK 指向的目标表（临时库只建了 customer_accounts）。
+
+    SQLite 允许建表时引用不存在的表，但 INSERT 的准备阶段会报
+    `no such table: main.payment_terms` ⇒ 直接落库类测试需先建桩表。
+    """
+    for table in ('payment_terms', 'tax_classifications'):
+        ds.execute(f'CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY)')
+
+
 # ────────────────────────────────────────
 # ① 结构
 # ────────────────────────────────────────
@@ -71,14 +81,18 @@ class TestStructure:
         assert d['display_name_field'] == 'name'
         assert 'name' in _field_ids()
 
-    def test_field_set_is_exactly_three_business_fields(self):
-        """业务字段集 = id / relation_id / name / description / created_at
+    def test_field_set_is_exactly_declared_business_fields(self):
+        """业务字段集 = 骨架 5 字段 + 波次 0 新增 3 字段
 
-        本期是结构占位，字段集刻意极小（spec §3.1.2）。
+        骨架（spec §3.1.2）：id / relation_id / name / description / created_at
+        波次 0（销售订单详细方案 §8 步 1）新增：
+          tax_classification_id / default_payment_term_id / default_incoterm_code
         [2026-10-23] customer_type 已删（见 test_customer_type_removed）。
         """
         assert _field_ids() == {
             'id', 'relation_id', 'name', 'description', 'created_at',
+            'tax_classification_id', 'default_payment_term_id',
+            'default_incoterm_code',
         }
 
     def test_id_field(self):
@@ -156,6 +170,7 @@ class TestRelationUniqueEnforced:
         ds = get_data_source('sqlite',
                              database=str(tmp_path / 'ca_unique.db'))
         sync_schema_from_meta(ds, [obj])
+        _create_fk_target_stubs(ds)
 
         ds.insert('customer_accounts', {
             'relation_id': 1, 'name': 'A',
@@ -176,6 +191,7 @@ class TestRelationUniqueEnforced:
         ds = get_data_source('sqlite',
                              database=str(tmp_path / 'ca_multi.db'))
         sync_schema_from_meta(ds, [obj])
+        _create_fk_target_stubs(ds)
 
         for rid in (1, 2, 3):
             ds.insert('customer_accounts', {
@@ -306,11 +322,18 @@ class TestDeletionPolicy:
         dp = _raw()['deletion_policy']
         assert dp['mode'] == 'restrict'
 
-    def test_restrict_on_empty_but_present(self):
-        """restrict_on 留空但**保留结构**（零引用方，供未来补条目）"""
+    def test_restrict_on_covers_sales_order_references(self):
+        """波次 0 起被销售订单三处引用（售达/收票/付款）⇒ restrict_on 必须挡住
+
+        历史：建模前本对象零引用方，restrict_on 留空占位（结构保留）。
+        """
         dp = _raw()['deletion_policy']
-        assert dp['restrict_on'] == []
-        assert 'restrict_on' in dp
+        pairs = {(r['table'], r['foreign_key']) for r in dp['restrict_on']}
+        assert pairs == {
+            ('sales_orders', 'customer_account_id'),
+            ('sales_orders', 'bill_to_account_id'),
+            ('sales_orders', 'payer_account_id'),
+        }
 
 
 # ────────────────────────────────────────
@@ -388,9 +411,18 @@ class TestNoSiteUseFields:
         """法人粒度由 party_relation.le_org_id 承载，档案不重复落列"""
         assert 'le_org_id' not in _field_ids()
 
-    def test_no_relations_declared(self):
-        """不建声明式关系（platform 关系引擎用于多态关联，本场景是强 1:1 引用）"""
-        assert (_raw().get('relations') or []) == []
+    def test_only_tax_and_payment_term_relations(self):
+        """波次 0 只新增两条引用关系（税务分类 / 默认付款条件）
+
+        本对象仍不建用途类（site_use）声明式关系。
+        """
+        rels = _raw().get('relations') or []
+        assert {r['id'] for r in rels} == {
+            'customer_account_to_tax_classification',
+            'customer_account_to_payment_term',
+        }
+        for bad in ('site_use', 'bill_to', 'ship_to', 'sold_to'):
+            assert not any(bad in r['id'] for r in rels), bad
 
 
 # ────────────────────────────────────────
@@ -440,11 +472,11 @@ class TestNamingDecision:
             assert bad not in fids
 
     def test_directory_registration_no_side_effects(self):
-        """目录级加载：显式 6 字段 + audit_aspect 展开 3 字段
+        """目录级加载：显式 8 字段 + audit_aspect 展开 3 字段
 
         实测（v1.2 纠错）：audit_aspect 展开 4 个字段 ——
           updated_at (VIRTUAL，不落列) · created_by · updated_by · created_at
-        其中 created_at 与本对象显式声明的同 id ⇒ 去重后净增 3 个 ⇒ 6 + 3 = 9。
+        其中 created_at 与本对象显式声明的同 id ⇒ 去重后净增 3 个 ⇒ 8 + 3 = 11。
         （aspect 字段清单见 aspects.yaml: audit_aspect.fields 共 5 项，
           本对象显式声明 created_at 覆盖其中 1 项）
         """
@@ -455,7 +487,8 @@ class TestNamingDecision:
         loaded = {f.id for f in obj.fields}
         assert {
             'id', 'relation_id', 'name', 'description',
-            'created_at',
+            'created_at', 'tax_classification_id',
+            'default_payment_term_id', 'default_incoterm_code',
         } <= loaded, f'显式字段缺失：{loaded}'
 
         by_id = {f.id: f for f in obj.fields}
@@ -465,8 +498,8 @@ class TestNamingDecision:
         # aspect 展开的 actor 字段
         assert 'created_by' in loaded and 'updated_by' in loaded, (
             f'audit_aspect 应展开 created_by / updated_by，实际：{loaded}')
-        # 总数 = 5 显式 + 3 净增（[2026-10-23] 删 customer_type 后由 6 降为 5）
-        assert len(obj.fields) == 8, f'实际展开 {len(obj.fields)} 个字段'
+        # 总数 = 8 显式 + 3 净增
+        assert len(obj.fields) == 11, f'实际展开 {len(obj.fields)} 个字段'
 
     def test_updated_at_not_writable(self, tmp_path):
         """updated_at 为 virtual ⇒ INSERT 不得写该列（region / person_profile 同教训）"""
@@ -478,6 +511,7 @@ class TestNamingDecision:
         obj = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
         ds = get_data_source('sqlite', database=str(tmp_path / 'ca_va.db'))
         sync_schema_from_meta(ds, [obj])
+        _create_fk_target_stubs(ds)
 
         raw = ds.get_table_columns('customer_accounts')
         # 实现返回 Dict[str, Dict]；若被包装成别的形态则退回直接查 PRAGMA

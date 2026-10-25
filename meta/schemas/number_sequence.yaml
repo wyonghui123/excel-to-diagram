@@ -1,0 +1,358 @@
+# 编号序列（Number Sequence）— 单据编号规则（配置对象，薄）
+# 依据: docs/superpowers/specs/2026-10-25-number-sequence-implementation-spec.md
+#       docs/superpowers/specs/2026-10-24-sales-order-wave0-detailed-plan.md §2.3
+# 对标: SAP 号段（VOV8 挂在销售凭证类型）+ SAP Note 504875 缓冲取号
+#       Oracle Fusion 序列（草稿即取号、允许空号）+ Oracle EBS document sequence（挂 order transaction type）
+#
+# 设计边界（重要）:
+#   ① 本表只存规则，不存当前值 —— 运行时状态存平台 `_sequences`
+#      （键 code:scope:period）。同一序列启用分段时需要 N 个当前值，单行承载不了。
+#   ② pattern 是编号的唯一真源：前缀、分隔符、日期段、流水位数全在它里面。
+#      不设 prefix / date_pattern / separator / width —— 冗余投影会与 pattern 漂移。
+#   ③ 不设 reset_policy：周期隔离由日期令牌派生（含 {DATE:yyyymm} 即按月、
+#      含 {DATE:yyyy} 即按年、无日期令牌则永不复位），日期取自业务日期而非系统时钟。
+#   ④ 取号即提交、允许空号、不回填（等同 SAP buffer=1 / Oracle 序列）。
+#      唯一性由调用表（如 sales_orders.order_no）的唯一索引兜底。
+#   ⑤ 本表暂不建菜单 / 权限码 / 管理页，由 ui_view_config.skip_auto_menu 关闭自动菜单。
+
+id: number_sequence
+name: 编号序列
+table_name: number_sequences
+description: 单据编号规则（pattern 单一真源；当前值存平台 _sequences）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 编号序列
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 编号序列
+    - 取号规则
+    - 单据编号规则
+    - Number Sequence
+    - Number Range
+
+deletion_policy:
+  # 主数据禁止物理删除；被单据类型引用时 restrict
+  mode: restrict
+  restrict_on:
+    - table: type_definitions
+      foreign_key: number_sequence_id
+      message: 该编号序列仍被类型字典引用，请先解除引用后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 序列编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 30
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 编号序列唯一编码（如 SO_STD / SO_RET）
+    semantics:
+      meaning: 编号序列业务编码，同时作为 _sequences 的键前缀
+      business_key: true
+      immutable: true
+      data_category: code
+      hint: 需与既有 key_template 序列名不重名，避免共用 _sequences 时键冲突
+    ui:
+      widget: input
+
+  - id: name
+    name: 序列名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 50
+    description: 编号序列显示名称
+    semantics:
+      meaning: 编号序列显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 编号模式的唯一真源
+  # 令牌: {SEQ:n} 流水（n = 位数，必须恰好一个）
+  #       {field} 字段引用（取值转大写；缺值报错，不生成裸号）
+  #       {DATE:yyyy|yyyymm|yyyymmdd} 日期令牌（取 date_field 指向的业务日期）
+  #       _ - . / : 分隔符，其余为字面量
+  - id: pattern
+    name: 编号模式
+    type: string
+    db_column: pattern
+    required: true
+    max_length: 80
+    description: 编号模式（如 SO-{DATE:yyyymm}-{SEQ:6}）
+    semantics:
+      meaning: 编号生成的唯一真源
+      data_category: code
+      hint: 例：SO-{DATE:yyyymm}-{SEQ:6} → SO-202610-000001
+    ui:
+      widget: input
+
+  # 分段字段：空 = 该序列全局唯一。
+  # 波次 0 一律为空；仅在多法人需要独立法定序列时启用，届时用 org_id（业务实体），
+  # 不用 sales_org_id —— 销售组织会因组织调整而变动，号段历史会断裂。
+  - id: scope_fields
+    name: 分段字段
+    type: json
+    db_column: scope_fields
+    nullable: true
+    description: 序列分段字段列表（如 ["org_id"]）；空 = 全局唯一
+    semantics:
+      meaning: 决定 _sequences 键中 scope 段的字段清单
+      hint: 字段取值须由调用方在取号时提供，缺失即报错
+    ui:
+      widget: input
+
+  - id: date_field
+    name: 日期字段
+    type: string
+    db_column: date_field
+    nullable: true
+    default: order_date
+    max_length: 30
+    description: 日期令牌的取值来源字段名（默认 order_date）
+    semantics:
+      meaning: 编号模式中 {DATE:...} 的取值来源
+      hint: 取业务日期，不用系统时钟
+    ui:
+      widget: input
+
+  - id: start_value
+    name: 起始值
+    type: integer
+    db_column: start_value
+    required: true
+    default: 1
+    description: 流水的起始值（对齐 Oracle Initial Value）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 每个周期 / 分段的第一个流水号
+    ui:
+      widget: number
+
+  - id: on_exhaust
+    name: 位耗尽处理
+    type: string
+    db_column: on_exhaust
+    required: true
+    default: error
+    description: 流水超出模式位数时的处理 error=报错 / extend=允许溢出
+    enum_values:
+      - value: error
+        label: 报错
+        color: danger
+        is_initial: true
+        description: 超出位数即拒绝取号（默认，避免编号长度失控）
+      - value: extend
+        label: 允许溢出
+        color: warning
+        description: 超出位数继续递增，编号长度随之变长
+    semantics:
+      meaning: 流水位数耗尽时的行为
+      filterable: true
+      filter_type: enum
+      filter_label: 位耗尽
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: preview
+    name: 预览
+    type: string
+    db_column: preview
+    nullable: true
+    max_length: 40
+    description: 界面预览的下一个编号（由取号内核 peek 生成后回填，仅作展示）
+    semantics:
+      meaning: 编号模式的可读预览
+      hint: 仅供界面展示，不参与取号
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 编号序列状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用后不得被新单据类型绑定（服务层校验）
+    semantics:
+      meaning: 编号序列启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 编号序列说明（适用单据、号段约定）
+    semantics:
+      meaning: 编号序列详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_number_sequence
+    name: 启用编号序列
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此编号序列吗？"
+
+  - id: deactivate_number_sequence
+    name: 停用编号序列
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不可再被新单据类型绑定，已绑定的单据类型不受影响。确定停用吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_number_sequence_code
+
+relations: []
+
+ui_view_config:
+  # 本步不建菜单、不建权限码、不做迁移
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 编号序列
+    description: 单据编号规则（pattern 单一真源）
+    columns:
+      - field: code
+        width: 130
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: pattern
+        width: 230
+      - field: start_value
+        width: 100
+      - field: on_exhaust
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - pattern
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 编号序列
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [pattern]
+          - fields: [start_value, on_exhaust]
+          - fields: [status]
+      - title: 分段与其他
+        columns:
+          - fields: [scope_fields, date_field]
+          - fields: [preview]
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, pattern, scope_fields, date_field, start_value,
+                 on_exhaust, preview, status, description]

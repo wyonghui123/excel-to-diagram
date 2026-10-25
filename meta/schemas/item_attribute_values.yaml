@@ -9,6 +9,13 @@
 #   L1 空档不再启用，保留 L0/L2 编号不重排。）
 # 只装 hybrid 参数（可人工覆盖、缺失时逐层回退）; stored 锚属性在主表 items; derived 不落列。
 #
+# [字典桥接] 本表原以自由文本 attr_code 标识参数，现与属性字典对接：
+#   · `attribute_id` 为真外键（→ attribute_definitions），承载类型、值域与状态口径；
+#   · `attr_code` 仍是物理唯一键（L0/L2 的 partial unique 依赖它），写入时须与字典 `code` 一致
+#     （应用层守卫校验，DSL 无跨表 CHECK）；
+#   · 存量行由 v111 迁移按 code 回填 attribute_id，无法匹配的编码输出对账清单，不自动造定义。
+#   · 保留 attr_code 而非直接换键，是为了不动 L0/L2 两段式唯一约束（换键须重建索引，收益不足以抵消风险）。
+#
 # [未决/不阻塞]
 #  1. ~~值列承载（类型化列 vs JSON）待 §8.3 值存储规范核对后定~~ —— **已定（2026-10-07 核对落定）：
 #     **类型化列**。核对依据：平台 DSL 标量类型体系（`FieldType`：string/integer/float/boolean/datetime/
@@ -98,13 +105,54 @@ fields:
       relation: item
       multiple: false
 
+  - id: attribute_id
+    name: 属性定义
+    type: integer
+    db_column: attribute_id
+    nullable: true
+    description: 参数字典引用（→ attribute_definitions）；与 attr_code 并存，attr_code 为物理唯一键，本列承载类型口径
+    semantics:
+      meaning: 参数字典引用
+      display:
+        type: association
+        target_type: attribute_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 160
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: attribute_definition
+      multiple: false
+      clearable: true
+
   - id: attr_code
     name: 参数编码
     type: string
     db_column: attr_code
     required: true
     max_length: 60
-    description: 参数编码（如 safety_stock / lead_time_days / purchase_uom / lot_control）
+    description: 参数编码（物理唯一键；须与 attribute_id 指向的定义 code 一致，应用层校验）
     semantics:
       meaning: 分层参数标识
     ui:
@@ -183,6 +231,28 @@ fields:
     ui:
       widget: switch
 
+  - id: value_date
+    name: 参数值（日期）
+    type: date
+    db_column: value_date
+    nullable: true
+    description: 日期类参数值（对应 data_type=date；一行仅一列非空）
+    semantics:
+      meaning: 分层参数的日期类值
+    ui:
+      widget: date
+
+  - id: value_datetime
+    name: 参数值（日期时间）
+    type: datetime
+    db_column: value_datetime
+    nullable: true
+    description: 日期时间类参数值（对应 data_type=datetime；一行仅一列非空）
+    semantics:
+      meaning: 分层参数的日期时间类值
+    ui:
+      widget: datetime
+
   - id: description
     name: 备注
     type: text
@@ -227,6 +297,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 所属物料引用（[FK 2026-10-07] 由展示语义升级为真外键；org_id 按平台惯例（组织维弱引用）不建 FK）
+  - id: item_attribute_value_to_attribute
+    name: 属性定义
+    type: reference
+    target: attribute_definition
+    source_field: attribute_id
+    target_field: id
+    cardinality: N:1
+    description: 参数字典引用（字典桥接：attr_code 仍是物理唯一键，attribute_id 提供外键与类型口径；存量由 v111 回填）
 
 ui_view_config:
   skip_auto_menu: true

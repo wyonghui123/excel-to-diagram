@@ -1,0 +1,385 @@
+# 供应来源行（Sourcing Rule Line）— 供应计划域子对象
+# 定位: 一条供应来源规则下的一个来源候选（库存组织 / 仓库位置 / 供应商 / 生产），
+#       携带优先级与有效期；执行型排序以 fixed + rank 为唯一依据。
+# 从属: rule_id 回挂 sourcing_rules；父规则删除由 restrict_on 拦截。
+# 说明: allocation_pct 只是计划期分摊提示，不得用于拆单。
+
+id: sourcing_rule_line
+name: 供应来源行
+table_name: sourcing_rule_lines
+description: 供应来源行——规则下的一条来源候选（组织/位置/供应商/生产）
+display_name_field: source_type
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 供应来源规则下的一条来源候选
+  category: system_entity
+  # 同一规则内按行号唯一
+  business_key: [rule_id, seq]
+  display_name_field: source_type
+  aliases:
+    - 来源行
+    - 供应来源行
+    - sourcing rule line
+    - 来源候选
+
+deletion_policy:
+  # 从属于 sourcing_rule：父规则删则来源行跟随（业务层级联调用）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - rule_id
+      - seq
+      - created_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - rule_id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: rule_id
+    name: 所属规则
+    type: integer
+    db_column: rule_id
+    required: true
+    description: 所属供应来源规则 ID（sourcing_rules.id）
+    semantics:
+      meaning: 所属规则行 ID；与 seq 组成业务键
+    ui:
+      widget: reference
+
+  - id: seq
+    name: 行号
+    type: integer
+    db_column: seq
+    required: true
+    description: 规则内行号（与 rule_id 组成业务键）
+    semantics:
+      meaning: 规则内行号
+    ui:
+      widget: number
+
+  - id: source_type
+    name: 来源类型
+    type: string
+    db_column: source_type
+    required: true
+    max_length: 30
+    description: 来源候选类型（库存组织 / 仓库位置 / 供应商 / 生产）
+    enum_values:
+      - value: internal_org
+        label: 库存组织
+        color: primary
+        description: 由内部库存组织供货
+      - value: internal_location
+        label: 仓库位置
+        color: info
+        description: 由内部仓库/位置供货
+      - value: supplier
+        label: 供应商
+        color: warning
+        description: 由外部供应商供货
+      - value: production
+        label: 生产
+        color: success
+        description: 由内部生产供货
+    semantics:
+      meaning: 来源候选类型
+      filterable: true
+      filter_type: enum
+      filter_label: 来源类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source_org_id
+    name: 来源组织
+    type: integer
+    db_column: source_org_id
+    required: false
+    nullable: false
+    description: 内部来源组织 ID（orgs.id）；source_type=internal_org 时填写
+    semantics:
+      meaning: 内部来源组织引用
+    ui:
+      widget: select
+      relation: org
+      display_field: name
+      clearable: true
+
+  - id: source_location_id
+    name: 来源位置
+    type: integer
+    db_column: source_location_id
+    required: false
+    nullable: true
+    description: 内部来源位置 ID（locations.id）；source_type=internal_location 时填写
+    semantics:
+      meaning: 内部来源位置引用（仓库及以下）
+    ui:
+      widget: select
+      relation: location
+      display_field: name
+      clearable: true
+
+  - id: supplier_party_id
+    name: 供应商
+    type: integer
+    db_column: supplier_party_id
+    required: false
+    nullable: true
+    description: 供应商 ID（parties.id）；source_type=supplier 时填写
+    semantics:
+      meaning: 供应商引用
+    ui:
+      widget: select
+      relation: party
+      display_field: name
+      clearable: true
+
+  - id: rank
+    name: 优先级
+    type: integer
+    db_column: rank
+    required: true
+    default: 1
+    description: 优先级序号（升序优先）；执行型排序的唯一依据
+    semantics:
+      meaning: 来源优先级（升序优先）
+    ui:
+      widget: number
+
+  - id: allocation_pct
+    name: 分摊比例
+    type: number
+    db_column: allocation_pct
+    required: true
+    default: 100
+    description: 计划期分摊提示比例（0-100）；仅作计划参考，不得用于拆单
+    semantics:
+      meaning: 计划期分摊比例（不参与拆单）
+    ui:
+      widget: number
+
+  - id: blocked
+    name: 冻结
+    type: boolean
+    db_column: blocked
+    required: true
+    default: false
+    description: 冻结后该来源不参与求值
+    semantics:
+      meaning: 来源是否冻结（true = 不参与求值）
+    ui:
+      widget: switch
+
+  - id: fixed
+    name: 固定来源
+    type: boolean
+    db_column: fixed
+    required: true
+    default: false
+    description: 固定来源优先于 rank（true = 强制优先）
+    semantics:
+      meaning: 是否为固定来源（优先于 rank）
+    ui:
+      widget: switch
+
+  - id: effectivity_start
+    name: 生效日期
+    type: date
+    db_column: effectivity_start
+    required: true
+    description: 来源行生效日期
+    semantics:
+      meaning: 生效日期
+    ui:
+      widget: date
+
+  - id: effectivity_end
+    name: 失效日期
+    type: date
+    db_column: effectivity_end
+    required: false
+    nullable: true
+    description: 来源行失效日期；空 = 长期有效
+    semantics:
+      meaning: 失效日期（空 = 永久）
+    ui:
+      widget: date
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    required: false
+    nullable: true
+    max_length: 200
+    description: 来源行备注
+    semantics:
+      meaning: 来源行备注
+      searchable: true
+    ui:
+      widget: input
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [rule_id, seq]
+    name: idx_sourcing_line_rule_seq
+    unique: true
+  - fields: [rule_id, rank, seq]
+    name: idx_sourcing_line_rule_rank
+  - fields: [rule_id, source_type]
+    name: idx_sourcing_line_rule_type
+  - fields: [source_org_id]
+    name: idx_sourcing_line_source_org
+  - fields: [supplier_party_id]
+    name: idx_sourcing_line_supplier
+
+relations:
+  - id: sourcing_rule_line_to_rule
+    name: 所属规则
+    type: reference
+    target: sourcing_rule
+    source_field: rule_id
+    target_field: id
+    cardinality: N:1
+    description: 所属供应来源规则（删规则受 restrict_on 拦截）
+  - id: sourcing_rule_line_to_org
+    name: 来源组织
+    type: reference
+    target: org
+    source_field: source_org_id
+    target_field: id
+    cardinality: N:1
+    description: 内部来源组织（须具备 inventory / manufacturing 职能）
+  - id: sourcing_rule_line_to_location
+    name: 来源位置
+    type: reference
+    target: location
+    source_field: source_location_id
+    target_field: id
+    cardinality: N:1
+    description: 内部来源位置（仓库及以下）
+  - id: sourcing_rule_line_to_supplier
+    name: 供应商
+    type: reference
+    target: party
+    source_field: supplier_party_id
+    target_field: id
+    cardinality: N:1
+    description: 供应商（须存在 role='vendor' 的业务伙伴关系）
+
+ui_view_config:
+  # 来源行在规则详情页内联编辑，不单列顶级菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 来源行
+    description: 规则下的来源候选列表
+    columns:
+      - field: seq
+        width: 80
+        sortable: true
+      - field: source_type
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: rank
+        width: 90
+        sortable: true
+      - field: allocation_pct
+        width: 110
+      - field: blocked
+        width: 80
+      - field: fixed
+        width: 90
+      - field: effectivity_start
+        width: 130
+        format: date
+      - field: effectivity_end
+        width: 130
+        format: date
+      - field: note
+        width: 220
+        type: ellipsis
+    searchFields: [note]
+  form:
+    title: 供应来源行信息
+    layout: vertical
+    sections:
+      - title: 来源
+        columns:
+          - fields: [source_type, source_org_id]
+          - fields: [source_location_id, supplier_party_id]
+          - fields: [note]
+      - title: 优先级
+        columns:
+          - fields: [rank, allocation_pct]
+          - fields: [blocked, fixed]
+      - title: 有效期
+        columns:
+          - fields: [effectivity_start, effectivity_end]
+
+category_config:
+  create_permission: sourcing_rule_line:sourcing_rule_line_create
+  update_permission: sourcing_rule_line:sourcing_rule_line_update
+  delete_permission: sourcing_rule_line:sourcing_rule_line_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  # 子行无独立编码；upsert 锚点用业务键
+  conflict_key: rule_id, seq

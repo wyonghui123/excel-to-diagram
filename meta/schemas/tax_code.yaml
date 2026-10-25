@@ -1,0 +1,548 @@
+# 税码（Tax Code）— 计税口径的唯一定义入口
+# 依据: docs/superpowers/specs/2026-10-25-tax-wave0-implementation-spec.md §3.2
+# 定位: 回答「这一笔按什么税、什么方向、标准/免税/零税率、税率从哪来、怎么舍入」。
+#
+# 设计边界（重要）:
+#   1. 本表只定口径，不含税率数字。税率在子表 tax_rates（半开区间 [effective_from, effective_to)），
+#      由守卫保证同一税码下区间不重叠；空 effective_to 表示开放结束。
+#   2. 税种（tax_type）是枚举，不单独建 tax_type 对象 —— 税种无属性、无层级、值集稳定，
+#      按平台选型口诀（无属性/无层级/值稳定 → enum_type / 内联枚举）落枚举。
+#   3. 税务处理方式 tax_treatment 是四值枚举，不复用「是否免税」单布尔：
+#      零税率（zero_rated，可抵扣进项）与免税（exempt，不可抵扣）在税法上不同，
+#      未纳入范围（out_of_scope）与前三者又不同；压成布尔会丢失抵扣语义。
+#   4. 税不进定价引擎：定价算净价，税额由单据侧按本表口径计算，本表不参与 calc_procedure。
+#   5. 不做组合税 / 预提税 / 税务管辖区对象 —— 均属后续波次。
+
+id: tax_code
+name: 税码
+table_name: tax_codes
+description: 税码字典（税种 / 方向 / 税务处理方式 / 税率取数方式 / 舍入方式）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 税码
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 税码
+    - 税率码
+    - 税收代码
+    - tax code
+    - tax rate code
+
+deletion_policy:
+  # 主数据禁止物理删除；存在税率子行时 restrict
+  mode: restrict
+  restrict_on:
+    - table: tax_rates
+      foreign_key: tax_code_id
+      message: 该税码存在税率记录，请先删除税率后再删除
+    - table: sales_order_lines
+      foreign_key: tax_code_id
+      message: 该税码被销售订单行引用，请先处理订单后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 税码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 30
+    description: 税码业务编码（如 CN_VAT_13）
+    semantics:
+      meaning: 税码业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 税码名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 税码中文名称（如 增值税 13%）
+    semantics:
+      meaning: 税码显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: country_id
+    name: 国家/地区
+    type: integer
+    db_column: country_id
+    nullable: true
+    description: 税码所属国家/地区（引用 region 国家级节点；为空表示跨地区通用税码）
+    semantics:
+      meaning: 税码所属国家地区
+      display:
+        type: association
+        target_type: region
+        display_field: name
+        placeholder: "通用税码（不限定地区）"
+    value_help:
+      source:
+        type: bo
+        target_bo: region
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - target_field: level
+            constant: country
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 国家代码
+            width: 100
+          - field: name
+            label: 国家名称
+            width: 160
+    ui:
+      widget: select
+      relation: region
+      multiple: false
+      clearable: true
+
+  - id: tax_type
+    name: 税种
+    type: string
+    db_column: tax_type
+    required: true
+    description: 税种分类（增值税 / 商品服务税 / 销售税 / 消费税 / 关税 / 其他 / 无税）
+    enum_values:
+      - value: vat
+        label: 增值税
+        color: primary
+        description: 流转环节增值额征收（中国增值税 / 欧盟 VAT）
+      - value: gst
+        label: 商品服务税
+        color: primary
+        description: 澳新加等地的商品与服务税
+      - value: sales_tax
+        label: 销售税
+        color: warning
+        description: 美国州级销售税（价外税，按地址判定）
+      - value: excise
+        label: 消费税
+        color: warning
+        description: 特定消费品从量或从价征收
+      - value: customs_duty
+        label: 关税
+        color: danger
+        description: 进出口环节关税
+      - value: other
+        label: 其他税种
+        color: info
+        description: 未归入上述类别的税费
+      - value: none
+        label: 无税
+        color: info
+        description: 明确不征税（与免税语义不同）
+    semantics:
+      meaning: 税种分类
+      filterable: true
+      filter_type: enum
+      filter_label: 税种
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: direction
+    name: 适用方向
+    type: string
+    db_column: direction
+    required: true
+    default: both
+    description: 税码适用的业务方向（销售 / 采购 / 双向）
+    enum_values:
+      - value: sales
+        label: 销售
+        color: primary
+        description: 仅用于销售侧（销项税）
+      - value: purchase
+        label: 采购
+        color: success
+        description: 仅用于采购侧（进项税）
+      - value: both
+        label: 双向
+        color: info
+        is_initial: true
+        description: 销售与采购通用
+    semantics:
+      meaning: 税码适用业务方向
+      filterable: true
+      filter_type: enum
+      filter_label: 方向
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: tax_treatment
+    name: 税务处理方式
+    type: string
+    db_column: tax_treatment
+    required: true
+    default: standard
+    description: 标准计税 / 零税率 / 免税 / 未纳入范围
+    enum_values:
+      - value: standard
+        label: 标准计税
+        color: primary
+        is_initial: true
+        description: 按税率计算税额，进项可抵扣
+      - value: zero_rated
+        label: 零税率
+        color: success
+        description: 税率 0%，但仍属应税行为，进项可抵扣（区别于免税）
+      - value: exempt
+        label: 免税
+        color: warning
+        description: 法定免税，不计算税额，进项不可抵扣；须填写免税依据
+      - value: out_of_scope
+        label: 未纳入范围
+        color: info
+        description: 不属于该税种管辖范围；须填写依据
+    semantics:
+      meaning: 税务处理方式
+      filterable: true
+      filter_type: enum
+      filter_label: 处理方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: rate_source
+    name: 税率取数方式
+    type: string
+    db_column: rate_source
+    required: true
+    default: internal
+    description: 税率取自平台税率表，还是取自外部税系统
+    enum_values:
+      - value: internal
+        label: 平台税率表
+        color: primary
+        is_initial: true
+        description: 从 tax_rates 子表按生效日取税率
+      - value: external
+        label: 外部税系统
+        color: warning
+        description: 税率由外部税引擎（如 Vertex / Avalara）返回，须填写外部系统标识
+    semantics:
+      meaning: 税率取数方式
+      filterable: true
+      filter_type: enum
+      filter_label: 取数方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: rounding_mode
+    name: 税额舍入方式
+    type: string
+    db_column: rounding_mode
+    required: true
+    default: round
+    description: 税额舍入到币种小数位时采用的方式（四舍五入 / 向上 / 向下）
+    enum_values:
+      - value: round
+        label: 四舍五入
+        color: primary
+        is_initial: true
+        description: 标准四舍五入（half-up）
+      - value: ceil
+        label: 向上进位
+        color: warning
+        description: 一律向上进位（部分国家法定要求）
+      - value: floor
+        label: 向下舍去
+        color: info
+        description: 一律向下舍去
+    semantics:
+      meaning: 税额舍入方式
+      filterable: true
+      filter_type: enum
+      filter_label: 舍入方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: exemption_reason
+    name: 减免依据
+    type: text
+    db_column: exemption_reason
+    nullable: true
+    description: 免税 / 未纳入范围的法定依据（税务处理方式为 exempt / out_of_scope 时必填）
+    semantics:
+      meaning: 免税或不征税的法定依据
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: external_tax_system
+    name: 外部税系统
+    type: string
+    db_column: external_tax_system
+    nullable: true
+    max_length: 60
+    description: 外部税引擎标识（税率取数方式为 external 时必填，如 VERTEX / AVALARA）
+    semantics:
+      meaning: 外部税系统标识
+      searchable: true
+    ui:
+      widget: input
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 税码说明与使用提示
+    semantics:
+      meaning: 税码详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 税码状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 税码启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_tax_code
+    name: 启用税码
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此税码吗？启用后可被单据与默认税码推导引用。"
+
+  - id: deactivate_tax_code
+    name: 停用税码
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不再被新的单据引用，历史单据不受影响。"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_tax_code_code
+  - fields: [country_id]
+    name: idx_tax_code_country
+  - fields: [status]
+    name: idx_tax_code_status
+
+relations:
+  - id: tax_code_to_region
+    name: 国家/地区
+    type: reference
+    target: region
+    source_field: country_id
+    target_field: id
+    cardinality: N:1
+    description: 国家/地区引用（NULL=通用税码）
+
+ui_view_config:
+  # 菜单由迁移 v110 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 税码
+    description: 税码字典（税种 / 方向 / 处理方式 / 税率取数）
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: tax_type
+        width: 110
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: direction
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: tax_treatment
+        width: 120
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: rate_source
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建税码
+        icon: plus
+        type: primary
+        permission: tax_code:tax_code_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 税码
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [country_id, status]
+      - title: 税制属性
+        columns:
+          - fields: [tax_type, direction]
+          - fields: [tax_treatment, exemption_reason]
+      - title: 税率取数
+        columns:
+          - fields: [rate_source, external_tax_system]
+          - fields: [rounding_mode]
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, country_id, tax_type, direction, status]
+      - id: tax_rules
+        label: 计税口径
+        type: fields
+        fields:
+          - tax_treatment
+          - exemption_reason
+          - rate_source
+          - external_tax_system
+          - rounding_mode
+          - description
+
+  # 税率子表：父字段由 tax_rate.tax_code_id 的 ui.relation=tax_code 推断
+  child_sections:
+    - child_object: tax_rate
+      title: 生效税率
+      display: tab
+      useMetaList: true
+      enableDetail: false
+      enableAutoCrud: false
+      pageSize: 20
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v110 落库）
+  create_permission: tax_code:tax_code_create
+  update_permission: tax_code:tax_code_update
+  delete_permission: tax_code:tax_code_delete
+  owner_auto_permission: false

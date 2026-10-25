@@ -1,0 +1,430 @@
+# 属性定义（Attribute Definition）— 属性字典的定义层
+# 定位: 平台元模型对象。回答「平台上有哪些可扩展属性」，并作为「字典属性 → 物理字段」单向提升通道的入口。
+# 分层: 定义层(本表) / 字典层(本表) / 值层(<对象>_attribute_values) / 投影层(只读导出)
+#
+# 设计边界（重要）:
+#   1. 本表只装「描述性 / 分析性」属性。参与计算、需索引、被引用、有生命周期、切权限的属性
+#      一律走 attribute_promotion 提为物理字段，不在本表落地。
+#   2. tenant_id = 0 表示平台层定义（全租户可见）；> 0 表示租户私有定义。
+#      唯一键含 tenant_id ⇒ 跨租户可重名，平台层与租户层不可重名。
+#   3. 命名空间三段：平台层属性码不得与任一已注册对象的字段名重名；租户层不得与平台层重名。
+#      跨表比对 DSL 表达不了，由应用层 lint 强制（见 attribute lint 服务）。
+#   4. data_type 一经写入不可变更 —— 改类型视为新属性，换 code 重开。历史值语义会断裂。
+#   5. 停用等同删除（status = inactive），不做物理删除；值行与引用可能仍在。
+
+id: attribute_definition
+name: 属性定义
+table_name: attribute_definitions
+description: 属性字典定义层——租户级/平台级可扩展属性的类型、值域与使用分级
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 可扩展属性定义
+  category: core_entity
+  # 平台层与租户层各自独立编号，故为复合业务键
+  business_key: [tenant_id, code]
+  display_name_field: name
+  aliases:
+    - 属性字典
+    - 扩展属性
+    - 自定义属性
+    - Attribute
+    - Attribute Definition
+
+deletion_policy:
+  # 元模型对象禁止物理删除：值行、适用范围、提升记录都可能仍指向它
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: tenant_id
+    name: 租户
+    type: integer
+    db_column: tenant_id
+    required: true
+    default: 0
+    description: 数据归属租户；0 = 平台层定义（全租户可见），非 0 = 租户私有定义
+    semantics:
+      meaning: 定义归属层级（0 为平台层）
+      immutable: true
+      data_category: code
+    ui:
+      widget: number
+
+  - id: code
+    name: 属性编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 60
+    pattern: "^[a-z][a-z0-9_]*$"
+    description: 属性业务编码（小写蛇形，如 paint_color / shelf_life_days）；与 tenant_id 组成业务键
+    semantics:
+      meaning: 属性稳定标识，值表按此编码定位定义
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 属性名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 属性显示名称
+    semantics:
+      meaning: 属性中文显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: data_type
+    name: 数据类型
+    type: string
+    db_column: data_type
+    required: true
+    default: string
+    max_length: 20
+    description: 值的数据类型；决定值表用哪一列承载（互斥填充）。一经写入不可变更
+    enum_values:
+      - value: string
+        label: 文本
+        color: primary
+        is_initial: true
+        description: 短文本 / 枚举码（承载列 value_text）
+      - value: number
+        label: 数值
+        color: info
+        description: 浮点数值（承载列 value_number）
+      - value: integer
+        label: 整数
+        color: info
+        description: 整数（承载列 value_number）
+      - value: boolean
+        label: 布尔
+        color: success
+        description: 是/否（承载列 value_boolean）
+      - value: date
+        label: 日期
+        color: warning
+        description: 纯日期（承载列 value_date）
+      - value: datetime
+        label: 日期时间
+        color: warning
+        description: 日期时间（承载列 value_datetime）
+    semantics:
+      meaning: 属性值的数据类型
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 数据类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: usage_class
+    name: 使用分级
+    type: string
+    db_column: usage_class
+    required: true
+    default: descriptive
+    max_length: 20
+    description: 属性用途分级；只有 descriptive / analytic 允许 status = active，其余必须提为物理字段
+    enum_values:
+      - value: descriptive
+        label: 描述性
+        color: primary
+        is_initial: true
+        description: 仅展示与检索，不参与计算、不建索引
+      - value: analytic
+        label: 分析性
+        color: success
+        description: 允许等值过滤与分组，但仍不做范围扫描与排序
+      - value: indexed
+        label: 索引型
+        color: warning
+        description: 需要索引做范围查询 / 排序 / 聚合 —— 禁止，须提为物理字段
+      - value: computed
+        label: 计算型
+        color: danger
+        description: 参与定价 / ATP / 成本 / 税额等业务计算 —— 禁止，须提为物理字段
+      - value: referential
+        label: 引用型
+        color: danger
+        description: 被其它对象以外键或展示字段引用 —— 禁止，须提为物理字段
+      - value: stateful
+        label: 状态型
+        color: danger
+        description: 有独立生命周期或状态机 —— 禁止，须提为物理字段
+      - value: secured
+        label: 权限型
+        color: danger
+        description: 用于权限或数据域切分 —— 禁止，须提为物理字段
+    semantics:
+      meaning: 属性用途分级（把否决项落成可执行声明）
+      filterable: true
+      filter_type: enum
+      filter_label: 使用分级
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: value_domain_type
+    name: 值域类型
+    type: string
+    db_column: value_domain_type
+    required: true
+    default: none
+    max_length: 20
+    description: 取值约束的承载方式
+    enum_values:
+      - value: none
+        label: 无约束
+        color: info
+        is_initial: true
+        description: 自由值
+      - value: list
+        label: 枚举清单
+        color: primary
+        description: 固定取值清单，由 value_domain_ref 指向
+      - value: table
+        label: 表引用
+        color: primary
+        description: 取值来自另一对象的记录，由 value_domain_ref 指向目标对象
+      - value: range
+        label: 数值区间
+        color: warning
+        description: 上下界约束，由 value_domain_ref 描述区间表达式
+    semantics:
+      meaning: 属性取值域的承载方式
+      filterable: true
+      filter_type: enum
+      filter_label: 值域类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: value_domain_ref
+    name: 值域引用
+    type: string
+    db_column: value_domain_ref
+    required: false
+    nullable: true
+    max_length: 200
+    description: 值域指向：枚举清单（enum_type 编码）/ 目标对象（业务对象编码）/ 区间表达式（如 "[0, 99999]"）
+    semantics:
+      meaning: 取值约束的具体指向
+    ui:
+      widget: input
+
+  - id: multi_value_flag
+    name: 多值
+    type: boolean
+    db_column: multi_value_flag
+    required: true
+    default: false
+    description: 是否允许同一对象上有多个值（用值表 seq 区分）
+    semantics:
+      meaning: 属性是否可多值
+    ui:
+      widget: switch
+
+  - id: uom_code
+    name: 计量单位
+    type: string
+    db_column: uom_code
+    required: false
+    nullable: true
+    max_length: 30
+    description: 数值型属性的计量单位编码（仅 data_type ∈ number/integer 时有意义）
+    semantics:
+      meaning: 属性值的计量单位
+      data_category: code
+    ui:
+      widget: input
+
+  - id: is_configurable
+    name: 可配置特征
+    type: boolean
+    db_column: is_configurable
+    required: true
+    default: false
+    description: 是否为选配特征属性；为真时必须覆盖物料对象，且 data_type 不含日期类型
+    semantics:
+      meaning: 属性是否参与选配
+    ui:
+      widget: switch
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 20
+    description: 属性状态；inactive 等同删除，deprecated 保留历史语义
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+      - value: deprecated
+        label: 已废弃
+        color: warning
+        description: 仍可读历史值，禁止新增写入
+    semantics:
+      meaning: 属性启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: revision
+    name: 定义版本
+    type: integer
+    db_column: revision
+    required: true
+    default: 1
+    description: 定义修订号；每次语义变更递增，供审计与消费方缓存失效
+    semantics:
+      meaning: 属性定义修订号
+    ui:
+      widget: number
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    required: false
+    nullable: true
+    description: 属性说明与取值指引
+    semantics:
+      meaning: 属性详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+rules:
+  - id: activate_attribute_definition
+    name: 启用属性
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此属性吗？"
+
+  - id: deactivate_attribute_definition
+    name: 停用属性
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active, deprecated]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不可新增写入，历史值仍可读。确定停用？"
+
+indexes:
+  # 平台层与租户层各自独立编号；跨租户允许重名
+  - fields: [tenant_id, code]
+    unique: true
+    name: idx_attribute_definition_tenant_code
+  - fields: [tenant_id, status]
+    name: idx_attribute_definition_tenant_status
+
+relations: []
+
+ui_view_config:
+  # 菜单由迁移手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 属性定义
+    description: 可扩展属性字典（定义层）
+    columns:
+      - field: code
+        width: 180
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: data_type
+        width: 110
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: usage_class
+        width: 110
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: value_domain_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: is_configurable
+        width: 100
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+        render_as: tag

@@ -51,6 +51,9 @@ deletion_policy:
     - table: currency_rates
       foreign_key: to_currency_id
       message: 该币种被汇率记录引用（作为目标币种），请先删除汇率后再删除币种
+    - table: sales_orders
+      foreign_key: currency_id
+      message: 该币种被销售订单引用，请先处理订单后再删除
   cascade_delete: []
 
 audit:

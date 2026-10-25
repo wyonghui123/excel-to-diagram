@@ -213,6 +213,82 @@ class MetadataValidator:
             self._validate_field(meta_obj, field, report)
         
         self._validate_derivations(meta_obj, report)
+
+        # [TYPE_DEF 2026-10-25] 类型字典的层级互斥与不可变声明（I1–I3 设计期部分）
+        if meta_obj.id == 'type_definition':
+            self._validate_type_definition(meta_obj, report)
+
+    #: [TYPE_DEF 2026-10-25] 只在单一层级使用的字段 → 该层级
+    _LEVEL_ONLY_FIELDS = {
+        'document_category': 'header',
+        'default_type_id': 'header',
+        'number_sequence_id': 'header',
+        'line_category': 'line',
+    }
+
+    def _validate_type_definition(self, meta_obj: MetaObject,
+                                  report: ValidationReport):
+        """校验类型字典的层级互斥字段与不可变声明。
+
+        I1–I3 要求：header 与 line 各自只填自己的字段，另一层级的字段必须可空；
+        故这些字段一旦声明 required，就必然有一层级无法录入。
+        I6 要求 scope_bo / level 创建后不可变（服务层执行），设计期只检查声明。
+        """
+        fields = {f.id: f for f in meta_obj.fields}
+
+        for fid in ('scope_bo', 'level'):
+            field = fields.get(fid)
+            if field is None:
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    object_id=meta_obj.id,
+                    field_id=fid,
+                    message=f"类型字典缺少必需字段 '{fid}'",
+                    details={'object_id': meta_obj.id, 'field_id': fid},
+                ))
+            elif not getattr(field.semantics, 'immutable', False):
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.WARNING,
+                    object_id=meta_obj.id,
+                    field_id=fid,
+                    message=f"字段 '{fid}' 应声明 semantics.immutable（创建后不可变）",
+                    details={'object_id': meta_obj.id, 'field_id': fid},
+                ))
+
+        level_field = fields.get('level')
+        if level_field is not None:
+            values = {str((v or {}).get('value', '')).strip()
+                      for v in (level_field.enum_values or [])}
+            missing = {'header', 'line'} - values
+            if missing:
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    object_id=meta_obj.id,
+                    field_id='level',
+                    message="字段 'level' 必须同时声明 header 与 line 两个枚举值",
+                    details={'object_id': meta_obj.id,
+                             'missing_values': sorted(missing)},
+                ))
+
+        for fid, owner in self._LEVEL_ONLY_FIELDS.items():
+            field = fields.get(fid)
+            if field is None:
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    object_id=meta_obj.id,
+                    field_id=fid,
+                    message=f"类型字典缺少层级字段 '{fid}'",
+                    details={'object_id': meta_obj.id, 'level': owner},
+                ))
+            elif field.required:
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    object_id=meta_obj.id,
+                    field_id=fid,
+                    message=(f"字段 '{fid}' 只在 level={owner} 时使用，"
+                             "另一层级必须留空，不能声明 required"),
+                    details={'object_id': meta_obj.id, 'level': owner},
+                ))
     
     def _validate_field(
         self, 

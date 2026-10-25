@@ -1,0 +1,356 @@
+# 供应来源规则（Sourcing Rule）— 供应计划域头对象
+# 定位: 「需求组织 + 物料」到「库存组织 / 仓库 / 供应商」的路由规则头；
+#       具体来源候选按行维护（sourcing_rule_lines），作用域按分配维护
+#       （sourcing_rule_assignments）。
+# 关系: 本表无外键；下游两张子表以 rule_id 回挂，删除受 restrict_on 拦截。
+# 生命周期: draft --activate--> active --deactivate--> inactive（复用平台标准动作池）。
+
+id: sourcing_rule
+name: 供应来源规则
+table_name: sourcing_rules
+description: 供应来源规则——需求组织与物料到库存组织/仓库/供应商的路由规则
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 供应来源路由规则头
+  category: system_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 供应来源规则
+    - 来源规则
+    - sourcing rule
+    - 供应路由规则
+
+deletion_policy:
+  # 平台解析器只消费 restrict_on 列表（mode 字段不参与判断）：
+  #   仍有来源行 / 作用域分配时禁止删除，先删子行或改为停用。
+  mode: restrict
+  restrict_on:
+    - table: sourcing_rule_lines
+      foreign_key: rule_id
+      message: 该来源规则下仍有来源行，请先删除来源行或将规则停用
+    - table: sourcing_rule_assignments
+      foreign_key: rule_id
+      message: 该来源规则下仍有作用域分配，请先删除分配或将规则停用
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 规则编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 供应来源规则唯一编码（字母开头，仅字母/数字/下划线，最长 50）
+    semantics:
+      meaning: 供应来源规则业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 规则名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 供应来源规则显示名称
+    semantics:
+      meaning: 供应来源规则显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: rule_usage
+    name: 规则用途
+    type: string
+    db_column: rule_usage
+    required: true
+    default: all
+    description: 规则适用范围（仅履约 / 仅采购 / 全部）
+    enum_values:
+      - value: fulfillment
+        label: 履约
+        color: primary
+        description: 仅用于订单履约求值
+      - value: purchasing
+        label: 采购
+        color: info
+        description: 仅用于采购寻源求值
+      - value: all
+        label: 全部
+        color: success
+        is_initial: true
+        description: 履约与采购均参与求值
+    semantics:
+      meaning: 规则用途
+      filterable: true
+      filter_type: enum
+      filter_label: 规则用途
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: effectivity_start
+    name: 生效日期
+    type: date
+    db_column: effectivity_start
+    required: true
+    description: 规则生效日期（必填；未到期前不参与求值）
+    semantics:
+      meaning: 生效日期
+    ui:
+      widget: date
+
+  - id: effectivity_end
+    name: 失效日期
+    type: date
+    db_column: effectivity_end
+    required: false
+    nullable: true
+    description: 规则失效日期；空 = 长期有效
+    semantics:
+      meaning: 失效日期（空 = 永久）
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 规则生命周期状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: default
+        is_initial: true
+        description: 编辑中，不参与求值
+      - value: active
+        label: 启用
+        color: success
+        description: 参与来源求值
+      - value: inactive
+        label: 停用
+        color: info
+        description: 暂停使用，保留配置
+    semantics:
+      meaning: 生命周期状态
+      filterable: true
+      filter_type: select
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 供应来源规则业务说明
+    semantics:
+      meaning: 规则说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_sourcing_rule_code
+  - fields: [status, rule_usage]
+    name: idx_sourcing_rule_status_usage
+
+relations: []
+
+# 生命周期: 复用平台标准动作
+#   draft/inactive --activate--> active
+#   active --deactivate--> inactive
+rules:
+  - id: activate_sourcing_rule
+    name: 启用供应来源规则
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [draft, inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此供应来源规则吗？启用后其来源行与作用域分配将参与供应求值。"
+      highlight: true
+
+  - id: deactivate_sourcing_rule
+    name: 停用供应来源规则
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此供应来源规则吗？停用后不再参与供应求值，已有配置保留。"
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 供应来源规则
+    description: 需求组织 + 物料 → 库存组织 / 仓库 / 供应商 的路由规则
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 220
+      - field: rule_usage
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: effectivity_start
+        width: 130
+        format: date
+      - field: effectivity_end
+        width: 130
+        format: date
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建供应来源规则
+        icon: plus
+        type: primary
+        permission: sourcing_rule:sourcing_rule_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 供应来源规则信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [rule_usage, status]
+          - fields: [effectivity_start, effectivity_end]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+  detail:
+    page_route: SourcingRuleDetailContent
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, rule_usage, effectivity_start, effectivity_end, status, description]
+  child_sections:
+    - child_object: sourcing_rule_line
+      title: 来源行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    - child_object: sourcing_rule_assignment
+      title: 作用域分配
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: sourcing_rule:sourcing_rule_create
+  update_permission: sourcing_rule:sourcing_rule_update
+  delete_permission: sourcing_rule:sourcing_rule_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: true
+  cascade_import: true
+  conflict_strategy: upsert
+  conflict_key: code

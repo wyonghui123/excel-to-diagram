@@ -1,0 +1,952 @@
+# 销售订单头 (Sales Order) — 波次 0
+# 依据: docs/superpowers/specs/2026-10-24-sales-order-wave0-detailed-plan.md v1.5 §1
+#       docs/superpowers/specs/2026-10-24-sales-order-specification.md v0.4
+#
+# 定位: 销售域第一张事实单据（订单头）。行见 sales_order_line。
+#
+# 设计口径:
+#   ① 单据类型复用 type_definitions（scope_bo='sales_order' + level='header'），
+#      不另建对象；编号由 type_definition.number_sequence_id 指向的序列取号。
+#   ② 金额三项（net/tax/gross）是快照，由服务层按行汇总回写，界面只读。
+#   ③ 退货方向由单据类型的 document_category 决定，行内不自带方向（W0-R2/R3）。
+#   ④ org_id（财务归属）与 sales_org_id（数据范围/取价）分列，不合并。
+#   ⑤ 波次 0 不落 pricing_* / customer_sales_org / 地址角色层等字段，
+#      随各自波次以 nullable 列追加。
+#
+# 服务层不变量（YAML 表达不了的，由 sales_order_guard_service 强制）:
+#   W0-R1  order_no 生成后不可改；取号失败不回退（允许跳号）
+#   W0-R2  qty > 0；方向由抬头单据类型决定
+#   W0-R3  退货单 net/tax/gross 必须为负；非退货单必须 >= 0
+#   W0-R4  order_type 必须 scope_bo='sales_order' + level='header'；
+#          行 line_type 必须 level='line'
+#   W0-R5  order_type.default_type_id 与行的 line_type 必须同 scope_bo
+#   W0-R6  行 item_id 为空时 description 必填；uom_id 恒必填
+#   W0-R7  抬头合计恒等于行合计（任一行变更后重算回写）
+#   W0-R8  status != draft 后禁止删除行；禁止改 order_no / order_type_id / currency_id
+#   W0-R9  确认时冻结 exchange_rate / tax_rate_percent / unit_price
+#   W0-R10 sales_org_id 必须存在 org_functions.function_type='sales' 的行
+#   W0-R11 行级先按币种精度舍入，再汇总
+#   W0-R12 金额由服务层计算并落快照，界面不提供自动定价
+
+id: sales_order
+name: 销售订单
+table_name: sales_orders
+description: 销售订单头（行见 sales_order_line）
+display_name_field: order_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 销售订单
+  category: business_document
+  business_key: [order_no]
+  aliases:
+    - 销售订单
+    - 订单
+    - Sales Order
+
+deletion_policy:
+  # 订单是事实单据：非草稿禁止删除（守卫拦截器强制度）；草稿删除时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - sales_order_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号由创建拦截器按 order_type.number_sequence_id 取号后回填；
+  # 界面只读（ui.editable: false），用户不手工录入。
+  - id: order_no
+    name: 订单编号
+    type: string
+    db_column: order_no
+    required: true
+    max_length: 30
+    description: 订单编号（业务键，取号生成后不可修改）
+    semantics:
+      meaning: 订单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: order_type_id
+    name: 订单类型
+    type: integer
+    db_column: order_type_id
+    required: true
+    description: 订单类型（type_definitions，scope_bo='sales_order' + level='header'）
+    semantics:
+      meaning: 订单单据类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: sales_order
+          level: header
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 类型编码
+            width: 120
+          - field: name
+            label: 类型名称
+            width: 200
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: order_date
+    name: 订单日期
+    type: date
+    db_column: order_date
+    required: true
+    description: 单据日期；汇率快照与编号日期段的基准日
+    semantics:
+      meaning: 订单业务日期
+      filterable: true
+      filter_type: date
+      filter_label: 订单日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 订单状态（草稿 / 已提交 / 已确认 / 已关闭 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: primary
+        category: active
+      - value: confirmed
+        label: 已确认
+        color: success
+        category: active
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 订单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: customer_account_id
+    name: 售达方
+    type: integer
+    db_column: customer_account_id
+    required: true
+    description: 售达方客户档案（商务默认值的来源）
+    semantics:
+      meaning: 售达方客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+
+  - id: bill_to_account_id
+    name: 收票方
+    type: integer
+    db_column: bill_to_account_id
+    nullable: true
+    description: 收票方客户档案；空 = 同售达方
+    semantics:
+      meaning: 收票方客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+        placeholder: "同售达方"
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+      clearable: true
+
+  - id: payer_account_id
+    name: 付款方
+    type: integer
+    db_column: payer_account_id
+    nullable: true
+    description: 付款方客户档案；空 = 同售达方
+    semantics:
+      meaning: 付款方客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+        placeholder: "同售达方"
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+      clearable: true
+
+  - id: ship_to_party_id
+    name: 送达方
+    type: integer
+    db_column: ship_to_party_id
+    nullable: true
+    description: 送达方往来单位；空 = 售达方对应的往来单位
+    semantics:
+      meaning: 送达方往来单位
+      display:
+        type: association
+        target_type: party
+        display_field: name
+        placeholder: "同售达方"
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 往来单位
+            width: 220
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+      clearable: true
+
+  - id: org_id
+    name: 业务实体
+    type: integer
+    db_column: org_id
+    required: true
+    description: 业务实体（法人 / BU），财务归属口径
+    semantics:
+      meaning: 订单的业务实体
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: sales_org_id
+    name: 销售组织
+    type: integer
+    db_column: sales_org_id
+    required: true
+    description: 销售组织（须具备 sales 职能）；数据范围与报表主过滤维度
+    semantics:
+      meaning: 订单的销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  # SAP 销售区域的产品组切片（扁平字符串，不建对象）；≠ item_group
+  - id: division_code
+    name: 产品组
+    type: string
+    db_column: division_code
+    nullable: true
+    max_length: 10
+    description: 产品组切片代码（SAP division 语义；非物料分类 item_group）
+    semantics:
+      meaning: 销售产品组切片
+      data_category: code
+    ui:
+      widget: input
+
+  - id: currency_id
+    name: 订单币种
+    type: integer
+    db_column: currency_id
+    required: true
+    description: 订单币种（金额精度来源）
+    semantics:
+      meaning: 订单币种
+      display:
+        type: association
+        target_type: currency
+        display_field: code
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 币种
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+
+  - id: exchange_rate
+    name: 汇率
+    type: number
+    db_column: exchange_rate
+    required: true
+    default: 1
+    description: 汇率快照（1 订单币种 = exchange_rate 本位币）；确认时冻结
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 12
+    semantics:
+      meaning: 订单汇率快照
+    ui:
+      widget: input
+
+  - id: payment_term_id
+    name: 付款条件
+    type: integer
+    db_column: payment_term_id
+    nullable: true
+    description: 付款条件（默认取客户档案，可改）
+    semantics:
+      meaning: 订单付款条件
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 条件编码
+            width: 140
+          - field: name
+            label: 条件名称
+            width: 200
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
+  # 字符串存 code，不建 FK 对象（incoterm 业务键是 (code, edition)）
+  - id: incoterm_code
+    name: 贸易条款
+    type: string
+    db_column: incoterm_code
+    nullable: true
+    max_length: 10
+    description: 国际贸易术语代码（Incoterms 2020）
+    semantics:
+      meaning: 订单贸易条款代码
+      data_category: code
+      display:
+        type: association
+        target_type: incoterm
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: incoterm
+        value_field: code
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          edition: '2020'
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 术语
+            width: 90
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: incoterm
+      multiple: false
+      clearable: true
+
+  - id: customer_po_no
+    name: 客户订单号
+    type: string
+    db_column: customer_po_no
+    nullable: true
+    max_length: 50
+    description: 客户方订单号
+    semantics:
+      meaning: 客户订单号
+      searchable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: requested_date
+    name: 要求交货日
+    type: date
+    db_column: requested_date
+    nullable: true
+    description: 客户要求交货日
+    semantics:
+      meaning: 客户要求交货日
+      filterable: true
+      filter_type: date
+      filter_label: 要求交货日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: confirmed_date
+    name: 承诺交货日
+    type: date
+    db_column: confirmed_date
+    nullable: true
+    description: 承诺交货日（波次 0 手工填，无 ATP 推算）
+    semantics:
+      meaning: 我方承诺交货日
+    ui:
+      widget: date
+
+  - id: net_amount
+    name: 不含税合计
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    description: 不含税合计（行汇总快照，服务层回写）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 订单不含税合计
+    ui:
+      widget: input
+      editable: false
+
+  - id: tax_amount
+    name: 税额合计
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    description: 税额合计（行汇总快照，服务层回写）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 订单税额合计
+    ui:
+      widget: input
+      editable: false
+
+  - id: gross_amount
+    name: 含税合计
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    description: 含税合计（行汇总快照，服务层回写）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 订单含税合计
+    ui:
+      widget: input
+      editable: false
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    nullable: true
+    description: 订单备注
+    semantics:
+      meaning: 订单备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# 状态机（波次 0）：draft → submitted → confirmed → closed；任意态可 cancelled
+# 迁移由平台状态接口按 PUT status 执行；本波次不引入额外 action 权限码，
+# 写权限仍由 sales_order:update 收口。
+rules:
+  - id: submit_sales_order
+    name: 提交订单
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后将进入待确认状态，确定要提交吗？"
+
+  - id: confirm_sales_order
+    name: 确认订单
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: confirmed
+    triggers: [before_update]
+    ui_hints:
+      label: 确认
+      icon: check_circle
+      highlight: true
+      confirm_message: "确认后汇率、税率与单价将冻结，确定要确认吗？"
+
+  - id: close_sales_order
+    name: 关闭订单
+    type: state_transition
+    state_field: status
+    from_states: [confirmed]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后订单只读，确定要关闭吗？"
+
+  - id: cancel_sales_order
+    name: 取消订单
+    type: state_transition
+    state_field: status
+    from_states: [draft, submitted, confirmed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后订单不再参与履约，确定要取消吗？"
+
+indexes:
+  - fields: [order_no]
+    unique: true
+    name: uidx_sales_order_no
+  - fields: [customer_account_id, order_date]
+    name: idx_sales_order_customer_date
+  - fields: [sales_org_id, order_date]
+    name: idx_sales_order_sales_org_date
+  - fields: [status]
+    name: idx_sales_order_status
+  - fields: [order_type_id]
+    name: idx_sales_order_type
+
+relations:
+  - id: sales_order_to_type_definition
+    name: 订单类型
+    type: reference
+    target: type_definition
+    source_field: order_type_id
+    target_field: id
+    cardinality: N:1
+    description: 订单单据类型引用（真外键，限定 header 层）
+  - id: sales_order_to_customer_account
+    name: 售达方
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 售达方客户档案引用（真外键）
+  - id: sales_order_to_bill_to_account
+    name: 收票方
+    type: reference
+    target: customer_account
+    source_field: bill_to_account_id
+    target_field: id
+    cardinality: N:1
+    description: 收票方客户档案引用（可空）
+  - id: sales_order_to_payer_account
+    name: 付款方
+    type: reference
+    target: customer_account
+    source_field: payer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 付款方客户档案引用（可空）
+  - id: sales_order_to_party
+    name: 送达方
+    type: reference
+    target: party
+    source_field: ship_to_party_id
+    target_field: id
+    cardinality: N:1
+    description: 送达方往来单位引用（可空）
+  - id: sales_order_to_org
+    name: 业务实体
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 业务实体引用（真外键）
+  - id: sales_order_to_sales_org
+    name: 销售组织
+    type: reference
+    target: org
+    source_field: sales_org_id
+    target_field: id
+    cardinality: N:1
+    description: 销售组织引用（真外键，须具备 sales 职能）
+  - id: sales_order_to_currency
+    name: 订单币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 订单币种引用（真外键）
+  - id: sales_order_to_payment_term
+    name: 付款条件
+    type: reference
+    target: payment_term
+    source_field: payment_term_id
+    target_field: id
+    cardinality: N:1
+    description: 付款条件引用（可空）
+
+ui_view_config:
+  # 菜单由波次 0 迁移手工声明
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    # 详情需承载可编辑行子表，抽屉放不下
+    detail_mode: page
+    title: 销售订单
+    description: 销售订单（草稿 / 已提交 / 已确认 / 已关闭 / 已取消）
+    columns:
+      - field: order_no
+        width: 180
+        sortable: true
+      - field: order_type_id
+        width: 120
+      - field: order_date
+        width: 120
+        format: date
+        sortable: true
+      - field: customer_account_id
+        width: 200
+      - field: sales_org_id
+        width: 160
+      - field: currency_id
+        width: 90
+      - field: gross_amount
+        width: 130
+      - field: requested_date
+        width: 120
+        format: date
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - order_no
+      - customer_po_no
+    actions:
+      - id: create
+        label: 新建订单
+        icon: plus
+        type: primary
+        permission: sales_order:sales_order_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: order_date
+      order: desc
+  form:
+    title: 销售订单信息
+    layout: vertical
+    sections:
+      - title: 单据信息
+        columns:
+          - fields: [order_no, order_type_id]
+          - fields: [order_date, status]
+      - title: 客户与组织
+        columns:
+          - fields: [customer_account_id, ship_to_party_id]
+          - fields: [bill_to_account_id, payer_account_id]
+          - fields: [org_id, sales_org_id]
+          - fields: [division_code]
+      - title: 商务条件
+        columns:
+          - fields: [currency_id, exchange_rate]
+          - fields: [payment_term_id, incoterm_code]
+          - fields: [customer_po_no]
+          - fields: [requested_date, confirmed_date]
+      - title: 金额合计
+        columns:
+          - fields: [net_amount, tax_amount, gross_amount]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
+  child_sections:
+    - child_object: sales_order_line
+      title: 订单行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable

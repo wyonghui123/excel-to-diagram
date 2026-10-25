@@ -1,0 +1,277 @@
+# 供应方式策略（Sourcing Mode Policy）— 供应计划域对象
+# 定位: 「物料组（可下探到物料）× 组织」的供应方式基线（自制 / 采购 / 调拨）。
+#       物料组为必填基线；item_id 非空表示物料级覆盖；org_id 为目标组织。
+# 说明: 同一 (item_group_id, item_id, org_id) 在 status='active' 时唯一，
+#       由迁移中的部分唯一索引承担（停用记录可并存）。
+
+id: sourcing_mode_policy
+name: 供应方式策略
+table_name: sourcing_mode_policies
+description: 供应方式策略——物料组/物料在目标组织上的自制、采购或调拨基线
+display_name_field: mode
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 供应方式基线策略
+  category: system_entity
+  business_key: [item_group_id, item_id, org_id]
+  display_name_field: mode
+  aliases:
+    - 供应方式策略
+    - 供应方式
+    - sourcing mode policy
+    - make or buy
+
+deletion_policy:
+  # 无下游引用者；restrict_on 留空（mode 字段不参与平台判断）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: item_group_id
+    name: 物料组
+    type: integer
+    db_column: item_group_id
+    required: true
+    description: 物料组 ID（item_groups.id）——供应方式基线
+    semantics:
+      meaning: 物料组基线
+    ui:
+      widget: select
+      relation: item_group
+      display_field: name
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: false
+    nullable: true
+    description: 物料 ID（items.id）；非空 = 物料级覆盖，空 = 物料组基线
+    semantics:
+      meaning: 物料级覆盖（空 = 物料组基线）
+    ui:
+      widget: select
+      relation: item
+      display_field: name
+      clearable: true
+
+  - id: org_id
+    name: 目标组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 目标组织 ID（orgs.id）
+    semantics:
+      meaning: 策略适用的目标组织
+    ui:
+      widget: select
+      relation: org
+      display_field: name
+
+  - id: mode
+    name: 供应方式
+    type: string
+    db_column: mode
+    required: true
+    max_length: 20
+    description: 供应方式（自制 / 采购 / 调拨）
+    enum_values:
+      - value: make
+        label: 自制
+        color: success
+        description: 由内部生产供货
+      - value: buy
+        label: 采购
+        color: primary
+        description: 由外部采购供货
+      - value: transfer
+        label: 调拨
+        color: info
+        description: 由内部组织调拨供货
+    semantics:
+      meaning: 供应方式
+      filterable: true
+      filter_type: enum
+      filter_label: 供应方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 策略状态（启用 / 停用）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        is_initial: true
+        description: 参与供应方式求值
+      - value: inactive
+        label: 停用
+        color: info
+        description: 暂停使用，保留配置
+    semantics:
+      meaning: 策略状态
+      filterable: true
+      filter_type: select
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [item_group_id, item_id, org_id]
+    name: idx_sourcing_mode_key
+  - fields: [org_id]
+    name: idx_sourcing_mode_org
+
+relations:
+  - id: sourcing_mode_policy_to_item_group
+    name: 物料组
+    type: reference
+    target: item_group
+    source_field: item_group_id
+    target_field: id
+    cardinality: N:1
+    description: 物料组基线引用
+  - id: sourcing_mode_policy_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料级覆盖引用（空 = 物料组基线）
+  - id: sourcing_mode_policy_to_org
+    name: 目标组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 目标组织引用
+
+ui_view_config:
+  # 策略作为独立维护页可从规则页签进入；此处不单列顶级菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 供应方式策略
+    description: 物料组/物料在目标组织上的供应方式
+    columns:
+      - field: item_group_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item_group
+        display_field: name
+      - field: item_id
+        width: 160
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: mode
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    searchFields: []
+  form:
+    title: 供应方式策略信息
+    layout: vertical
+    sections:
+      - title: 作用域
+        columns:
+          - fields: [item_group_id, item_id]
+          - fields: [org_id]
+      - title: 方式
+        columns:
+          - fields: [mode]
+      - title: 状态
+        columns:
+          - fields: [status]
+
+category_config:
+  create_permission: sourcing_mode_policy:sourcing_mode_policy_create
+  update_permission: sourcing_mode_policy:sourcing_mode_policy_update
+  delete_permission: sourcing_mode_policy:sourcing_mode_policy_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: item_group_id, item_id, org_id
