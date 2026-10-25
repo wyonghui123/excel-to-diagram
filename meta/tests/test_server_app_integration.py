@@ -39,6 +39,30 @@ class TestLegacyModeIntegration:
         assert client.get("/health").status_code == 200
 
 
+class TestDomainCommandRoutesNotSunset:
+    """域内命令端点（非 BO CRUD）不能被 deprecate_v1_crud 中间件拦截为 410。
+
+    这些端点由独立 Blueprint 提供，路径形如 /api/v1/<segment>/*，
+    若未列入 server.py 的 V1_SPECIAL_PREFIXES 会被误判为"已迁移的 v1 CRUD"。
+    请求体故意留空：只要不是 410，说明中间件已放行（400/401 属正常参数/认证错误）。
+    """
+
+    @pytest.mark.parametrize("path", [
+        "/api/v1/config/solve",
+        "/api/v1/config/price",
+        "/api/v1/config/match",
+        "/api/v1/sales-orders/1/lines/1/expand",
+    ])
+    def test_route_not_blocked(self, path):
+        _, client = get_shared_app()
+        client.get("/api/v1/auth/dev-login?username=admin")
+        resp = client.post(path, json={})
+        body = resp.get_data(as_text=True)
+        assert resp.status_code != 410, (
+            f"{path} 被 deprecate_v1_crud 拦截: {body[:200]}"
+        )
+
+
 class TestEnabledAppIntegration:
     """ENABLED_APPS=hello_world → 应用路由可达且平台路由不受影响"""
 
