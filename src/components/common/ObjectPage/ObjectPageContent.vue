@@ -64,6 +64,7 @@
                     @request-edit="$emit('update:editing', true)"
                     @open-assign="$emit('open-assign', $event)"
                     @refresh="(payload) => $emit('refresh', payload)"
+                    @embedded-action="(payload, section) => $emit('row-action', { ...payload, section })"
                   />
 
                   <HistorySection
@@ -134,6 +135,7 @@
             @request-edit="$emit('update:editing', true)"
             @open-assign="$emit('open-assign', $event)"
             @refresh="(payload) => $emit('refresh', payload)"
+            @embedded-action="(payload, section) => $emit('row-action', { ...payload, section })"
           />
 
           <FieldGroupSection
@@ -251,7 +253,8 @@ const emit = defineEmits([
   'update:editing',
   'refresh',
   'open-assign',
-  'request-edit'
+  'request-edit',
+  'row-action'
 ])
 
 const instance = getCurrentInstance()

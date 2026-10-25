@@ -156,6 +156,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     rowKey: options.rowKey || 'id',
     // 自定义行操作按钮（embedded/dialog 生效）
     rowActionsOverride: options.rowActionsOverride || null,
+    // 追加行操作按钮（与内置动作合并，不覆盖，embedded/dialog 生效）
+    extraRowActions: options.extraRowActions || null,
     // 自定义工具栏操作按钮（embedded/dialog 生效）
     toolbarActionsOverride: options.toolbarActionsOverride || null,
     // 自定义批量操作按钮（embedded/dialog 生效）
@@ -1044,7 +1046,10 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    * @returns {Array} 可用的行级操作
    */
   function getRowActions(row) {
-    return _filterRowActionsSvc(rowActions.value, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
+    const builtin = _filterRowActionsSvc(rowActions.value, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
+    if (!config.extraRowActions || config.extraRowActions.length === 0) return builtin
+    const extras = _filterRowActionsSvc(config.extraRowActions, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
+    return [...extras, ...builtin]
   }
 
   // ======== 内部方法 ======

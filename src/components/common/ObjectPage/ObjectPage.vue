@@ -16,6 +16,7 @@
     @delete="$emit('delete')"
     @action="$emit('action', $event)"
     @refresh="$emit('refresh')"
+    @row-action="$emit('row-action', $event)"
   >
     <template v-for="(_, name) in $slots" :key="name" #[name]="slotData">
       <slot :name="name" v-bind="slotData || {}" />
@@ -69,7 +70,7 @@ const props = defineProps({
 })
 
 defineEmits(['back', 'navigate', 'tab-change', 'field-update', 'field-display-update',
-  'update:editing', 'save', 'cancel', 'delete', 'action', 'refresh'])
+  'update:editing', 'save', 'cancel', 'delete', 'action', 'refresh', 'row-action'])
 
 /**
  * 判断字段是否为 FK（外键/关联）字段。

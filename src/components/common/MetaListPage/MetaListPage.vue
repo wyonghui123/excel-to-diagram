@@ -832,6 +832,10 @@ const props = defineProps({
     type: Array,
     default: null
   },
+  extraRowActions: {
+    type: Array,
+    default: null
+  },
   toolbarActionsOverride: {
     type: Array,
     default: null
@@ -961,6 +965,7 @@ const {
   excludeIds: props.excludeIds,
   rowKey: props.rowKey,
   rowActionsOverride: props.rowActionsOverride,
+  extraRowActions: props.extraRowActions,
   toolbarActionsOverride: props.toolbarActionsOverride,
   batchActionsOverride: props.batchActionsOverride,
   fetcher: props.options.fetcher,

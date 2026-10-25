@@ -61,6 +61,7 @@
           @out-mapping="handleOutMapping"
           @update:editing="internalEditing = $event"
           @action="handleObjectPageAction"
+          @row-action="handleRowAction"
         >
           <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]>
             <slot :name="`section-${section.key}`" :data="data" />
@@ -132,6 +133,7 @@
         @out-mapping="handleOutMapping"
         @update:editing="internalEditing = $event"
         @action="handleObjectPageAction"
+        @row-action="handleRowAction"
       >
         <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]="sectionData">
           <!-- Always render slot if provided by parent -->
@@ -152,6 +154,16 @@
     :permission-set-id="id"
     @close="showAuditDialog = false"
   />
+
+  <!-- [P1 UI 2026-10-25] 订单行展开：子表自定义行操作触发选配弹窗 -->
+  <SalesOrderExpandDialog
+    v-if="expandDialogState"
+    :visible="expandDialogState.visible"
+    :order-id="data?.id"
+    :line="expandDialogState.row"
+    @success="handleExpandSuccess"
+    @update:visible="(val) => { if (!val) expandDialogState = null }"
+  />
 </template>
 
 <script setup>
@@ -167,6 +179,7 @@ import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
+import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -1022,7 +1035,8 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fullEditable'
+        rowMutability: cs.rowMutability || 'fullEditable',
+        extraRowActions: cs.extraRowActions || null
       })
     } else if (cs.child_object) {
       sections.push({
@@ -1042,7 +1056,8 @@ const computedSections = computed(() => {
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
         rowMutability: cs.rowMutability || 'fullEditable',
         inlineEdit: cs.inlineEdit || null,
-        columns: cs.columns || null
+        columns: cs.columns || null,
+        extraRowActions: cs.extraRowActions || null
       })
     }
   }
@@ -1575,6 +1590,20 @@ async function handleObjectPageAction({ action }) {
 
     default:
   }
+}
+
+// [P1 UI 2026-10-25] 子表自定义行操作（当前仅订单行 expand）
+const expandDialogState = ref(null)
+
+function handleRowAction({ action, row } = {}) {
+  if (action?.key === 'expand') {
+    expandDialogState.value = { visible: true, row }
+  }
+}
+
+function handleExpandSuccess() {
+  expandDialogState.value = null
+  handleRefresh()
 }
 
 const SYSTEM_FIELDS = new Set([

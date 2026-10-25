@@ -48,6 +48,7 @@
       @update:editing="val => { internalEditing = val; $emit('update:editing', val) }"
       @refresh="$emit('refresh')"
       @open-assign="openAssignDialog"
+      @row-action="$emit('row-action', $event)"
     >
       <template #headerContent><slot name="headerContent" /></template>
       <template #info><slot name="info" /></template>
@@ -135,7 +136,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['back', 'navigate', 'tab-change', 'field-update', 'field-display-update',
-  'update:editing', 'save', 'cancel', 'delete', 'action', 'refresh', 'apply-defaults'])
+  'update:editing', 'save', 'cancel', 'delete', 'action', 'refresh', 'apply-defaults', 'row-action'])
 
 const internalEditing = ref(props.editing)
 

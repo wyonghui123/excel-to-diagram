@@ -290,9 +290,11 @@
       :enable-detail="section.enableDetail !== undefined ? section.enableDetail : true"
       :enable-auto-crud="section.enableAutoCrud !== undefined ? section.enableAutoCrud : !section.readonly"
       :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fullEditable')"
+      :extra-row-actions="section.extraRowActions || null"
       :external-editing="editing ? true : null"
       :exclude-column-keys="excludedColumnKeys"
       @request-edit="$emit('request-edit')"
+      @action="handleEmbeddedAction($event, props.section)"
     />
 
     <div v-else-if="!objectId || objectId === 'new'" class="op-empty-state">
