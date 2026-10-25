@@ -11,6 +11,11 @@
 #      gross = net + tax。行级先按币种精度舍入再上卷（W0-R11）。
 #   ④ item_id 为空（服务行 / 文本行）时 description 必填；uom_id 恒必填。
 #   ⑤ status 极简：open / closed / cancelled，不复制抬头状态机。
+#   ⑥ 结构展开（P1）：父行由 configuration_id 指向一次配置求解，子行由
+#      parent_line_id + component_no 挂在父行下。层级只用 parent_line_id 表达，
+#      line_no 仍是纯数字（^[0-9]{1,6}$），component_no 只是与配置实例对账的键。
+#   ⑦ pricing_mode 决定金额落在哪一层：父行含价 / 子行含价 / 基准加选项；
+#      standalone 表示未展开的普通行。P1 只表达归属，取价仍由定价波次提供。
 
 id: sales_order_line
 name: 销售订单行
@@ -490,6 +495,87 @@ fields:
       multiple: false
       clearable: true
 
+  # ---- 结构展开（P1）----
+  # 四个字段全部由展开服务写入，前端只读；手工新建的行保持
+  # configuration_id / parent_line_id / component_no 为空、pricing_mode = standalone。
+  - id: configuration_id
+    name: 配置实例
+    type: integer
+    db_column: configuration_id
+    nullable: true
+    description: 展开来源的配置实例（只有父行有值）
+    semantics:
+      meaning: 本行由哪次配置求解展开
+      display:
+        type: association
+        target_type: configuration
+        display_field: config_hash
+    ui:
+      widget: input
+      editable: false
+
+  - id: parent_line_id
+    name: 父行
+    type: integer
+    db_column: parent_line_id
+    nullable: true
+    description: 上级订单行（只有展开出的子行有值）
+    semantics:
+      meaning: 展开层级的父订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: component_no
+    name: 组件号
+    type: string
+    db_column: component_no
+    nullable: true
+    max_length: 200
+    description: 配置实例内的组件路径键（如 L0010.L0020），同一父行内唯一
+    semantics:
+      meaning: 展开组件与配置实例的对账键
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  # 定价归属：只在父行有意义；子行继承父行的模式但不参与判定
+  - id: pricing_mode
+    name: 行定价模式
+    type: string
+    db_column: pricing_mode
+    required: true
+    default: standalone
+    max_length: 30
+    description: 行与子行的金额归属方式（独立 / 打包价 / 组件价 / 基准加选项）
+    enum_values:
+      - value: standalone
+        label: 独立计价
+        color: info
+      - value: bundle_price
+        label: 打包价
+        color: primary
+      - value: component_price
+        label: 组件价
+        color: primary
+      - value: base_plus_option
+        label: 基准加选项
+        color: warning
+    semantics:
+      meaning: 展开行的定价归属
+      filterable: true
+      filter_type: enum
+      filter_label: 定价模式
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: status
     name: 行状态
     type: string
@@ -546,6 +632,14 @@ indexes:
     name: idx_sales_order_line_item
   - fields: [order_id, status]
     name: idx_sales_order_line_order_status
+  - fields: [parent_line_id]
+    name: idx_sales_order_line_parent
+  - fields: [configuration_id]
+    name: idx_sales_order_line_configuration
+  # 同一父行内组件号唯一；parent_line_id 为空的行（未展开行）不参与唯一约束
+  - fields: [parent_line_id, component_no]
+    unique: true
+    name: uidx_sales_order_line_component
 
 relations:
   - id: sales_order_line_to_order
@@ -596,6 +690,22 @@ relations:
     target_field: id
     cardinality: N:1
     description: 发货点位置引用（可空）
+  - id: sales_order_line_to_parent_line
+    name: 父行
+    type: reference
+    target: sales_order_line
+    source_field: parent_line_id
+    target_field: id
+    cardinality: N:1
+    description: 展开层级父行引用（自引用，可空）
+  - id: sales_order_line_to_configuration
+    name: 配置实例
+    type: reference
+    target: configuration
+    source_field: configuration_id
+    target_field: id
+    cardinality: N:1
+    description: 展开来源配置实例引用（可空）
 
 ui_view_config:
   # 作为订单头详情页的子表，不单独成菜单
@@ -654,6 +764,11 @@ ui_view_config:
           - fields: [tax_code_id, tax_rate_percent]
           - fields: [tax_base_amount, tax_amount]
           - fields: [gross_amount]
+      # 展开相关字段只读：由展开服务写入，手工可改的只有 pricing_mode
+      - title: 结构展开
+        columns:
+          - fields: [pricing_mode, component_no]
+          - fields: [parent_line_id, configuration_id]
       - title: 交期与其他
         columns:
           - fields: [requested_date, plant_location_id]

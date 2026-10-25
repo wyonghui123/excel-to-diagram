@@ -88,6 +88,9 @@ _PARAM_VALUES = [
     ('price_required', 'TXT', 'false', '文本行无单价'),
     ('price_required', 'FOC', 'false', '免费行单价为 0'),
     ('pricing_relevant', 'TXT', 'false', '文本行不参与定价'),
+    # 结构展开 P1：服务行与文本行不产生库存移动（行类型描述的口径落地）
+    ('inventory_effect', 'SVC', 'false', '服务行不产生库存移动'),
+    ('inventory_effect', 'TXT', 'false', '文本行不影响库存'),
 ]
 
 

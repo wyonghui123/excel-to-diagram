@@ -1003,6 +1003,9 @@ def create_app(db_path=None):
     # [供应来源 2026-10-24] 求值 / 规则校验端点；与 app_builder.with_blueprints() 同位补齐。
     from meta.api.sourcing_api import sourcing_bp
     app.register_blueprint(sourcing_bp)
+    # [销售订单 P1 2026-10-25] 行结构展开端点；与 app_builder 同位补齐。
+    from meta.api.sales_order_expand_api import sales_order_expand_bp
+    app.register_blueprint(sales_order_expand_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)

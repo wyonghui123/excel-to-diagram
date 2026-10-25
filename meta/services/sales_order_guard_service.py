@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""销售订单守卫 —— 波次 0 不变量 W0-R1 ~ W0-R10 的写前校验。
+"""销售订单守卫 —— 波次 0 不变量 W0-R1 ~ W0-R10 与结构展开 W2-R1 ~ W2-R6。
 
 依据: meta/schemas/sales_order.yaml / sales_order_line.yaml 头注释
       docs/superpowers/specs/2026-10-24-sales-order-wave0-detailed-plan.md §1.4
@@ -17,6 +17,16 @@
   W0-R9  确认后冻结 exchange_rate（行侧由「行只能在 draft 维护」覆盖）
   W0-R10 sales_org_id 须具备 org_functions.function_type='sales'
 
+结构展开（P1）:
+  W2-R1  configuration_id / parent_line_id / component_no 由展开服务写入，
+         手工写入路径不得新建或修改（表单回传原值放行）
+  W2-R2  子行（parent_line_id 非空）的 item_id 不可改，否则与 component_no 失配
+  W2-R3  component_no 须符合配置实例的组件键格式 Ldddd(.Ldddd)*
+  W2-R4  pricing_mode 只能是 standalone / bundle_price / component_price /
+         base_plus_option
+  W2-R5  服务行（line_type.code='SVC'）不指定发货点，与不可发货行同口径
+  W2-R6  有展开子行的父行不可直接删除，须先删子行
+
 行的写入门槛取「父单必须是 draft」一条：
   R8 只明文限制删除，但 submitted / confirmed 已是下游读取的快照态，
   允许追加或改行会让 R7 的汇总回写改动已确认金额，故创建 / 更新 / 删除
@@ -28,10 +38,12 @@
 缺失引用由数据库外键约束兜底。
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
-本守卫对这两条路径不生效（与其他守卫同一限制）。
+本守卫对这两条路径不生效（与其他守卫同一限制）。展开服务同样绕过拦截器链，
+其不变量由 SalesOrderExpandService 自行保证。
 """
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -45,6 +57,14 @@ DRAFT = 'draft'
 _FROZEN_AFTER_DRAFT = ('order_no', 'order_type_id', 'currency_id')
 # W0-R9：确认后冻结的汇率
 _CONFIRMED_STATES = ('confirmed', 'closed')
+
+# W2-R1：只由展开服务写入的行字段
+_EXPAND_FIELDS = ('configuration_id', 'parent_line_id', 'component_no')
+# W2-R4：定价模式枚举
+PRICING_MODES = ('standalone', 'bundle_price', 'component_price', 'base_plus_option')
+# W2-R3：配置实例组件键（L0010 / L0010.L0020）
+_COMPONENT_NO_RE = re.compile(r'^L\d{4}(\.L\d{4})*$')
+SERVICE_LINE_CODE = 'SVC'
 
 
 class SalesOrderGuardError(ValueError):
@@ -196,12 +216,69 @@ class SalesOrderGuardService:
                 '未选物料的行必须填写行描述', field_name='description',
                 rule='description_required')
 
+        # W2-R1：展开字段只读（表单回传原值放行）
+        self._validate_expand_fields(data, old_data, is_create)
+
+        # W2-R2：子行的物料不可改
+        old = old_data or {}
+        if (not _is_blank(old.get('parent_line_id')) and 'item_id' in data
+                and str(data.get('item_id')) != str(old.get('item_id'))):
+            raise SalesOrderGuardError(
+                '展开子行的物料不可修改，请先移除子行后重新展开',
+                field_name='item_id', rule='component_item_immutable')
+
+        # W2-R3：组件号格式
+        component_no = data.get('component_no')
+        if not _is_blank(component_no) \
+                and not _COMPONENT_NO_RE.match(str(component_no)):
+            raise SalesOrderGuardError(
+                f'组件号 {component_no} 不符合配置实例的组件键格式'
+                '（如 L0010 或 L0010.L0020）',
+                field_name='component_no', rule='component_no_format')
+
+        # W2-R4：定价模式枚举
+        pricing_mode = data.get('pricing_mode')
+        if not _is_blank(pricing_mode) and str(pricing_mode) not in PRICING_MODES:
+            raise SalesOrderGuardError(
+                f'定价模式 {pricing_mode} 不属于 '
+                f'{"/".join(PRICING_MODES)}',
+                field_name='pricing_mode', rule='pricing_mode_invalid')
+
+        # W2-R5：服务行不指定发货点
+        if line_type and line_type.get('code') == SERVICE_LINE_CODE \
+                and not _is_blank(data.get('plant_location_id')):
+            raise SalesOrderGuardError(
+                '服务行不产生库存移动，不能指定发货点',
+                field_name='plant_location_id', rule='service_line_no_location')
+
     def validate_line_delete(self, line_id: Any) -> None:
-        """非草稿订单下禁止删除行（R8）。"""
+        """非草稿订单下禁止删除行（R8）；有展开子行的父行须先删子行（W2-R6）。"""
         if _is_blank(line_id):
             return
         line = self._load_line(line_id) or {}
         self._require_parent_draft(line.get('order_id'), 'line_delete')
+        if self._has_children(line_id):
+            raise SalesOrderGuardError(
+                '该行存在展开子行，请先删除子行再删除父行',
+                field_name='parent_line_id', rule='line_has_children')
+
+    # ---------------- 展开字段（W2-R1） ----------------
+
+    @staticmethod
+    def _validate_expand_fields(data: Dict[str, Any],
+                                old_data: Optional[Dict[str, Any]],
+                                is_create: bool) -> None:
+        old = old_data or {}
+        for field in _EXPAND_FIELDS:
+            new_value = data.get(field)
+            if _is_blank(new_value):
+                continue
+            old_value = old.get(field)
+            if is_create or _is_blank(old_value) \
+                    or str(new_value) != str(old_value):
+                raise SalesOrderGuardError(
+                    f'{field} 由结构展开服务写入，不能在手工维护路径设置',
+                    field_name=field, rule='expand_field_readonly')
 
     # ---------------- 查询（可覆写，便于单测注入） ----------------
 
@@ -241,12 +318,24 @@ class SalesOrderGuardService:
     def _load_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
-                'SELECT id, order_id, line_no, line_type_id FROM sales_order_lines '
-                'WHERE id = ?', [line_id])
+                'SELECT id, order_id, line_no, line_type_id, item_id, '
+                '       parent_line_id, component_no, configuration_id, '
+                '       pricing_mode FROM sales_order_lines WHERE id = ?',
+                [line_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取订单行 {line_id} 失败: {e}')
             return None
         return rows[0] if rows else None
+
+    def _has_children(self, line_id: Any) -> bool:
+        try:
+            rows = self.ds.query(
+                'SELECT 1 FROM sales_order_lines WHERE parent_line_id = ? LIMIT 1',
+                [line_id])
+        except Exception as e:  # 查询失败 → fail-open（不因读侧异常阻断删除）
+            logger.warning(f'[sales_order_guard] 读取子行 {line_id} 失败: {e}')
+            return False
+        return bool(rows)
 
     def _org_has_function(self, org_id: Any, function_type: str) -> bool:
         try:

@@ -398,6 +398,7 @@ class ApplicationBuilder:
         from meta.api.configuration_api import configuration_bp
         from meta.api.allocation_api import allocation_bp
         from meta.api.sourcing_api import sourcing_bp
+        from meta.api.sales_order_expand_api import sales_order_expand_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -460,6 +461,8 @@ class ApplicationBuilder:
         app.register_blueprint(allocation_bp)
         # [SOURCING 2026-10-24] 供应来源求值 / 规则校验独立蓝图。
         app.register_blueprint(sourcing_bp)
+        # [销售订单 P1 2026-10-25] 行结构展开端点。
+        app.register_blueprint(sales_order_expand_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

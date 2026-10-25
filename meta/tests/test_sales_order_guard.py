@@ -48,6 +48,10 @@ class _FakeDS:
         if 'FROM sales_orders WHERE id' in sql:
             row = self.orders.get(p[0])
             return [row] if row else []
+        if 'FROM sales_order_lines WHERE parent_line_id' in sql:
+            hit = any(str(v.get('parent_line_id')) == str(p[0])
+                      for v in self.lines.values())
+            return [{'ok': 1}] if hit else []
         if 'FROM sales_order_lines WHERE id' in sql:
             row = self.lines.get(p[0])
             return [row] if row else []
@@ -222,6 +226,90 @@ class TestLineWrite:
         with pytest.raises(SalesOrderGuardError) as e:
             svc.validate_line_delete(101)
         assert e.value.rule == 'line_delete_parent_not_draft'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 结构展开守卫（W2-R1 ~ W2-R6）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExpandLineWrite:
+
+    def test_rejects_expand_fields_on_create(self):
+        for field, value in (('configuration_id', 901),
+                             ('parent_line_id', 100),
+                             ('component_no', 'L0010')):
+            with pytest.raises(SalesOrderGuardError) as e:
+                SalesOrderGuardService(_ds()).validate_line_write(
+                    {**BASE_LINE, field: value}, is_create=True)
+            assert e.value.rule == 'expand_field_readonly'
+            assert e.value.field_name == field
+
+    def test_rejects_changed_expand_field_on_update(self):
+        old = dict(BASE_LINE, id=100, order_id=10, parent_line_id=100)
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'component_no': 'L0020'}, old_data=old)
+        assert e.value.rule == 'expand_field_readonly'
+
+    def test_allows_same_expand_field_on_update(self):
+        old = dict(BASE_LINE, id=100, order_id=10, parent_line_id=100,
+                   component_no='L0010')
+        SalesOrderGuardService(_ds()).validate_line_write(
+            {**BASE_LINE, 'component_no': 'L0010', 'parent_line_id': 100},
+            old_data=old)
+
+    def test_rejects_component_item_change(self):
+        old = dict(BASE_LINE, id=100, order_id=10, parent_line_id=100)
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'item_id': 3}, old_data=old)
+        assert e.value.rule == 'component_item_immutable'
+
+    def test_rejects_component_no_format(self):
+        old = dict(BASE_LINE, id=100, order_id=10, parent_line_id=100,
+                   component_no='X0010')
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'component_no': 'X0010', 'parent_line_id': 100},
+                old_data=old)
+        assert e.value.rule == 'component_no_format'
+
+    def test_rejects_unknown_pricing_mode(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'pricing_mode': 'gift'}, is_create=True)
+        assert e.value.rule == 'pricing_mode_invalid'
+
+    def test_accepts_known_pricing_mode(self):
+        for mode in ('standalone', 'bundle_price', 'component_price',
+                     'base_plus_option'):
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'pricing_mode': mode}, is_create=True)
+
+    def test_rejects_location_on_service_line(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'line_type_id': 102, 'plant_location_id': 7},
+                is_create=True)
+        assert e.value.rule == 'service_line_no_location'
+
+    def test_delete_rejects_parent_with_children(self):
+        lines = dict(LINES)
+        lines[200] = {'id': 200, 'order_id': 10, 'line_no': '2',
+                      'line_type_id': 101, 'parent_line_id': 100}
+        ds = _FakeDS(types=TYPES, orders=ORDERS, lines=lines,
+                     org_functions={(318, 'sales')})
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(ds).validate_line_delete(100)
+        assert e.value.rule == 'line_has_children'
+
+    def test_delete_child_ok(self):
+        lines = dict(LINES)
+        lines[200] = {'id': 200, 'order_id': 10, 'line_no': '2',
+                      'line_type_id': 101, 'parent_line_id': 100}
+        ds = _FakeDS(types=TYPES, orders=ORDERS, lines=lines,
+                     org_functions={(318, 'sales')})
+        SalesOrderGuardService(ds).validate_line_delete(200)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
