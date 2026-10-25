@@ -72,6 +72,7 @@ const cachedRouteNames = [
   'GenericObjectList', // 通用对象列表
   'ObjectDetail',      // 详情查看 (不含编辑)
   'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
+  'SourcingRuleDetailContent', // 供应来源规则试算（切换路由后试算结果与 explain 保留）
   // [孤儿页清理 2026-10-17] 移除 'RelationshipManagement'（原第 75 行，注释写"架构数据管理"）:
   //   该页是 ArchDataManagement 的遗留副本(相同 objectTypes / 相同 slots, 且缺嵌入式图表等
   //   9 项能力), 路由早已切到 /system/archdata, /system/relationships 是纯 redirect,

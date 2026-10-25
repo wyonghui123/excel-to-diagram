@@ -21,6 +21,8 @@ const STATIC_ROUTE_NAMES = new Set([
   'ObjectDetail', 'ObjectDetailCreate', 'PermissionSetDetail',
   'AccountSettings', 'PermissionSetCenter', 'PermissionSetDetailContent',
   'system-admin', 'ArchDataManagement',
+  // 供应来源规则试算（静态路由在 router/modules/masterData.js 注册）
+  'SourcingRuleDetailContent',
   // [P1 入口收敛] 遗留 task-definitions / task-queues / task-executions /
   // ai-async-tasks 已随菜单收敛下线，不再登记为静态路由。
   'task-management',
@@ -34,6 +36,7 @@ const STATIC_ROUTE_PATHS = new Set([
   '/detail/', '/system-admin', '/role/', '/org/',
   '/system/role-permission/', '/system/role-detail/',
   '/permission-set/', '/permission-bundle/',
+  '/sourcing-rules/calc/',
   '/system/task-management',
   '/system/platform-ops-jobs',
 ])

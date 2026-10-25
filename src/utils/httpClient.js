@@ -23,7 +23,7 @@ import { logger } from '@/utils/logger'
 // ---------------------------------------------------------------------------
 // ErrorCode 枚举 —— HTTP 传输层错误（注意：与业务错误不同源）
 // ---------------------------------------------------------------------------
-// ⚠️ 本枚举仅用于 httpClient 内部构造 transport 错误响应（NETWORK/TIMEOUT/4xx/5xx）。
+// 注意：本枚举仅用于 httpClient 内部构造 transport 错误响应（NETWORK/TIMEOUT/4xx/5xx）。
 // 业务错误（如 token_expired、action_failed 等）请用 '@/composables/errorCodes' 的
 // ErrorCodes（auto-generated from meta/core/error_codes.py），其值风格为 lowercase snake_case。
 // 本枚举与 ErrorCodes 故意保持值风格不同（UPPER_SNAKE vs lowercase）以体现分层。
@@ -409,6 +409,14 @@ async function _doRequest(method, url, options, traceId, startTime) {
     }
     // [P1-Base-03] 透传后端结构化错误码（如 400 {"error":"SCOPE_CODE_INVALID", ...}），
     //   供 permissionService 识别 scopeCode 匹配失败并抛 ScopeCodeInvalidError（5.5.4 P0 红线）
+    // 业务错误码与错误明细（契约响应 {success:false, code, message, details}）:
+    //   `code` 已被本次映射覆盖为 HTTP 状态码，故另存 businessCode 供调用方分流。
+    if (body.code) {
+      result.businessCode = body.code
+    }
+    if (body.details) {
+      result.details = body.details
+    }
     if (body.error) {
       result.error = body.error
     }

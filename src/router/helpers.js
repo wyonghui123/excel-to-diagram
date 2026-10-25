@@ -3,14 +3,15 @@
  */
 import publicRoutes from './modules/public'
 import businessRoutes from './modules/business'
+import masterDataRoutes from './modules/masterData'
 import systemRoutes from './modules/system'
 import devRoutes from './modules/dev'
 
 /**
  * 合并所有静态路由
- * 顺序敏感: public → business → system → dev
+ * 顺序敏感: public → business → masterData → system → dev
  *  - public 必须有 / 兜底路由
- *  - 业务/系统路由在动态路由加载前作为兜底
+ *  - 业务/主数据/系统路由在动态路由加载前作为兜底
  *  - dev 路由在生产环境可被剔除
  */
 export function buildStaticRoutes(options = {}) {
@@ -18,6 +19,7 @@ export function buildStaticRoutes(options = {}) {
   const routes = [
     ...publicRoutes,
     ...businessRoutes,
+    ...masterDataRoutes,
     ...systemRoutes
   ]
   if (includeDev) {
