@@ -10,6 +10,7 @@
   建表与播种的 DML 放在 factories 助手，保证本文件默认口径即运行。
 """
 from pathlib import Path
+import json
 import sqlite3
 
 import pytest
@@ -429,3 +430,67 @@ class TestDetermineLine:
         assert out['reason'] == REASON_NO_CANDIDATE
         assert out['unit_price'] is None
         assert out['trace']['reason'] == REASON_NO_CANDIDATE
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# W2-F：按查找序列构造槽位键值
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _seed_two_slot_sequence(db_path):
+    """把 LK_ITEM_STD 改成两槽位：客户×物料 → 物料。"""
+    ks_item = seed_row(db_path, 'key_schemas', code='KS_ITEM',
+                       key_fields=json.dumps(['item_id']))
+    ks_cust = seed_row(db_path, 'key_schemas', code='KS_ITEM_CUST',
+                       key_fields=json.dumps(['customer_account_id', 'item_id']))
+    steps = [{'seq': 1, 'key_schema_id': ks_cust},
+             {'seq': 2, 'key_schema_id': ks_item}]
+    update_row(db_path, 'lookup_sequences', 1, steps=json.dumps(steps))
+
+
+class TestSlotKeys:
+    """R-KEY-1~3：首槽客户价、次槽物料兜底、客户空跳过首槽。"""
+
+    def test_two_slot_sequence_builds_customer_slot_first(self, db_path):
+        seed_rule(db_path)
+        _seed_two_slot_sequence(db_path)
+        stub = _StubPricing()
+        adapter, service = _with_stub(db_path, stub)
+        try:
+            service.determine_line(
+                item_id=2, qty=1, customer_account_id=4, currency='CNY',
+                price_date='2026-10-25', sales_org_id=318, order_type_id=1)
+        finally:
+            adapter.disconnect()
+
+        assert stub.calls[0]['slot_keys'] == [
+            {'customer_account_id': 4, 'item_id': 2},
+            {'item_id': 2},
+        ]
+
+    def test_empty_customer_skips_first_slot(self, db_path):
+        seed_rule(db_path)
+        _seed_two_slot_sequence(db_path)
+        stub = _StubPricing()
+        adapter, service = _with_stub(db_path, stub)
+        try:
+            service.determine_line(
+                item_id=2, qty=1, currency='CNY', price_date='2026-10-25',
+                sales_org_id=318, order_type_id=1)
+        finally:
+            adapter.disconnect()
+
+        assert stub.calls[0]['slot_keys'] == [None, {'item_id': 2}]
+
+    def test_single_slot_sequence_ignores_customer(self, db_path):
+        """单槽序列（LK_ITEM_STD）零改动：带客户也只传物料键（R-KEY-3）。"""
+        seed_rule(db_path)
+        stub = _StubPricing()
+        adapter, service = _with_stub(db_path, stub)
+        try:
+            service.determine_line(
+                item_id=2, qty=1, customer_account_id=4, currency='CNY',
+                price_date='2026-10-25', sales_org_id=318, order_type_id=1)
+        finally:
+            adapter.disconnect()
+
+        assert stub.calls[0]['slot_keys'] == [{'item_id': 2}]

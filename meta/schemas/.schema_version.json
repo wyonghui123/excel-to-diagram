@@ -898,7 +898,7 @@
       "table": "incoterms"
     },
     "item": {
-      "hash": "07dd37539d03af1b95978c25bd07f12e",
+      "hash": "65d879edd1dabf0e61efdc689606007b",
       "fields": [
         "updated_at",
         "created_by",
@@ -909,6 +909,11 @@
         "spec",
         "description",
         "item_type",
+        "billing_method_default",
+        "required_resource_type",
+        "standard_duration",
+        "duration_type",
+        "is_field_service",
         "structure_role",
         "config_match_policy",
         "config_materialize_policy",
@@ -1856,7 +1861,7 @@
       "table": "salespersons"
     },
     "sales_order": {
-      "hash": "78aa955cc23f9bc72b7e789b7ba51717",
+      "hash": "06ed737412a6a233ba6ef3981afb92df",
       "fields": [
         "created_by",
         "updated_by",
@@ -1871,6 +1876,8 @@
         "ship_to_party_id",
         "ship_to_address_id",
         "bill_to_address_id",
+        "ship_to_address_text",
+        "bill_to_address_text",
         "salesperson_id",
         "org_id",
         "sales_org_id",
@@ -1896,7 +1903,7 @@
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "7d780832076597c9c86ca5daf33ca4e6",
+      "hash": "e533dd241d4d4bcb75cce91752bf89e7",
       "fields": [
         "created_by",
         "updated_by",
@@ -1918,6 +1925,12 @@
         "gross_amount",
         "requested_date",
         "plant_location_id",
+        "service_start_date",
+        "service_end_date",
+        "billing_method",
+        "required_resource_type",
+        "service_duration",
+        "duration_type",
         "configuration_id",
         "parent_line_id",
         "component_no",
@@ -2366,5 +2379,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-25T20:06:14.542096"
+  "last_sync": "2026-10-25T22:41:10.340947"
 }

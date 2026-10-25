@@ -1,0 +1,418 @@
+# 区域（Territory）—— 销售区域树
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave2-detailed-plan.md
+#       §7.2 对象 / §7.3 菜单与权限 / §7.4 不变量 R-TER-1
+#
+# 定位: 销售组织的区域划分，按 parent_id 自引用成树。销售员通过
+#   salesperson_territory_assignment 归属到区域；本对象不含客户绑定。
+#
+# 口径:
+#   ① code 全局唯一，是外部系统对接与展示的稳定键。
+#   ② parent_id 是自引用真外键；成环由服务层递归校验（R-TER-1），
+#      直连自引用同时由 value_help.exclude_self 拦截。
+#   ③ 停用区域不影响既有分配，但不再被新的分配引用（R-TER-3，服务层校验）。
+#   ④ 本波不做树视图组件，列表页 + parent_id 即可（TBD-W2-5）。
+
+id: territory
+name: 区域
+table_name: territories
+description: 销售区域树——按 parent_id 自引用分层
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 销售区域
+  category: core_entity
+  aliases:
+    - 区域
+    - 销售区域
+    - territory
+    - sales territory
+
+deletion_policy:
+  # 主数据禁止物理删除；有子区域或被销售员分配引用时拒绝
+  mode: restrict
+  restrict_on:
+    - table: territories
+      foreign_key: parent_id
+      message: 该区域下仍有子区域，请先处理子区域后再删除
+    - table: salesperson_territory_assignments
+      foreign_key: territory_id
+      message: 该区域仍被销售员区域分配引用，请先解除分配后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 区域编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 32
+    description: 区域编码（全局唯一）
+    semantics:
+      meaning: 区域业务代码
+      business_key: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: name
+    name: 区域名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 区域名称
+    semantics:
+      meaning: 区域显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: parent_id
+    name: 上级区域
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级区域ID，支持层级结构
+    semantics:
+      meaning: 上级区域引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: territory
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: territory
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 140
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: territory
+      multiple: false
+      clearable: true
+
+  - id: level
+    name: 层级
+    type: integer
+    db_column: level
+    nullable: true
+    description: 区域在树中的层级（1 起）
+    semantics:
+      meaning: 区域层级序号
+      filterable: true
+      filter_type: number
+      filter_label: 层级
+      filter_scope: local
+    ui:
+      widget: number
+
+  # 归属销售组织（真外键 → orgs；候选取具备销售职能的组织）
+  - id: owner_org_id
+    name: 归属组织
+    type: integer
+    db_column: owner_org_id
+    nullable: true
+    description: 归属销售组织；空表示不限定组织
+    semantics:
+      meaning: 区域归属的销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "不限组织"
+    value_help:
+      source:
+        type: bo
+        target_bo: org_sales_org
+        display_target_bo: org
+        detail_target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再被新的销售员分配引用，R-TER-3）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 区域启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 说明
+    semantics:
+      meaning: 区域说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: deactivate_territory
+    name: 停用区域
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后该区域将不再被新的销售员分配引用，确定继续吗？"
+
+  - id: activate_territory
+    name: 启用区域
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此区域吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_territory_code
+  - fields: [parent_id]
+    name: idx_territory_parent
+  - fields: [owner_org_id]
+    name: idx_territory_owner_org
+  - fields: [status]
+    name: idx_territory_status
+
+relations:
+  - id: territory_to_parent
+    name: 上级区域
+    type: reference
+    target: territory
+    source_field: parent_id
+    target_field: id
+    cardinality: N:1
+    description: 上级区域引用（自引用树；真外键，restrict）
+  - id: territory_to_owner_org
+    name: 归属组织
+    type: reference
+    target: org
+    source_field: owner_org_id
+    target_field: id
+    cardinality: N:1
+    description: 归属销售组织引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v132 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 区域
+    description: 销售区域树：编码、名称与上级区域
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 220
+        sortable: true
+      - field: parent_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: territory
+        display_field: name
+        placeholder: "无上级"
+      - field: owner_org_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+        placeholder: "不限组织"
+      - field: level
+        width: 90
+        sortable: true
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建区域
+        icon: plus
+        type: primary
+        permission: territory:territory_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 区域
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [parent_id, level]
+          - fields: [owner_org_id]
+          - fields: [status]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, parent_id, level, owner_org_id, status, description]
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v132 落库）
+  create_permission: territory:territory_create
+  update_permission: territory:territory_update
+  delete_permission: territory:territory_delete
+  owner_auto_permission: false

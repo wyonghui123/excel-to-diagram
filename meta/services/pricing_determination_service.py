@@ -15,6 +15,7 @@
 失败一律不抛异常（W1-R3）：返回 `pricing_status='failed'` + `reason`，
 由调用方决定是否降级保存。
 """
+import json
 import logging
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -32,6 +33,12 @@ REASON_NO_RATE_TABLE = 'NO_RATE_TABLE'
 REASON_CURRENCY_MISMATCH = 'CURRENCY_MISMATCH'
 REASON_NO_CANDIDATE = 'NO_CANDIDATE'
 REASON_ZERO_QTY = 'ZERO_QTY'
+#: 折扣后金额为负（W2-C · R-DSC-1）；为负即失败并降级保存
+REASON_NEGATIVE_AMOUNT = 'NEGATIVE_AMOUNT'
+
+#: 折扣 / 附加费的费率类型编码（W2-C），用于在回放里汇总调整金额
+RATE_TYPE_DISCOUNT = 'RT_DISC_LINE'
+RATE_TYPE_SURCHARGE = 'RT_SURCHARGE_LINE'
 
 #: 单价保留位数（本期只做 CNY / USD，两者均为 2 位）
 PRICE_SCALE = Decimal('0.01')
@@ -189,6 +196,7 @@ class PricingDeterminationService:
         *,
         item_id: Any,
         qty: Any,
+        customer_account_id: Any = None,
         price_date: Any = None,
         currency: Optional[str] = None,
         sales_org_id: Optional[int] = None,
@@ -198,6 +206,10 @@ class PricingDeterminationService:
         persist: bool = False,
     ) -> Dict[str, Any]:
         """对一行取价，返回单价与回放留痕（不抛异常）。
+
+        槽位键值按命中的查找序列逐槽构造（W2-F）：序列若含「客户 × 物料」
+        首槽、本行又带客户时，先按客户价查，未命中自然落「物料」次槽；
+        客户为空时**跳过**首槽（不构造 `None` 键值），不影响物料兜底。
 
         Returns:
             {"pricing_status": "determined"|"failed",
@@ -242,7 +254,8 @@ class PricingDeterminationService:
         common = dict(
             process_code=resolved['procedure_code'],
             rate_table_id=table['id'],
-            slot_keys=[{'item_id': item_id}],
+            slot_keys=self._slot_keys(
+                resolved['sequence_code'], item_id, customer_account_id),
             base=qty_num,
             sequence_code=resolved['sequence_code'],
             document_type='sales_order',
@@ -257,6 +270,11 @@ class PricingDeterminationService:
                 trace['reason'] = REASON_NO_CANDIDATE
                 return self._failed(REASON_NO_CANDIDATE, rule=resolved['rule'],
                                     trace=trace)
+            # 【W2-C · R-DSC-1】折扣/附加费算完为负即失败，不落结果行
+            if float(dry['net_amount']) < 0:
+                trace['reason'] = REASON_NEGATIVE_AMOUNT
+                return self._failed(REASON_NEGATIVE_AMOUNT,
+                                    rule=resolved['rule'], trace=trace)
 
             result = dry
             if persist and document_id is not None:
@@ -270,6 +288,8 @@ class PricingDeterminationService:
         amount = float(result['net_amount'])
         trace['hit_ids'] = list(result['hit_ids'])
         trace['result_id'] = result['result_id']
+        # 【W2-C】行级折扣/附加费汇总（json 内新增两个键，不改表结构）
+        trace.update(self._adjustment_amounts(result.get('step_results') or []))
 
         unit_price = float(
             (Decimal(str(amount)) / Decimal(str(qty_num))).quantize(
@@ -286,6 +306,78 @@ class PricingDeterminationService:
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
+    def _slot_keys(self, sequence_code: Optional[str], item_id: Any,
+                   customer_account_id: Any) -> List[Optional[Dict[str, Any]]]:
+        """按查找序列逐槽构造键值（W2-F · R-KEY-1~3）。
+
+        每槽按其 `key_schema.key_fields` 填因子值；任一因子在本行无值时该槽位置
+        `None`（查找引擎跳过该槽，顺序不变）。无法解析序列/键表时退回单槽物料键，
+        与波次 1 的既有权口径一致（R-KEY-3）。
+        """
+        fallback: List[Optional[Dict[str, Any]]] = [{'item_id': item_id}]
+        if not sequence_code:
+            return fallback
+        row = self._one(
+            'SELECT steps FROM lookup_sequences WHERE code = ?', [sequence_code])
+        steps = self._json_list((row or {}).get('steps'))
+        if not steps:
+            return fallback
+
+        values = {'item_id': item_id, 'customer_account_id': customer_account_id}
+        slots: List[Optional[Dict[str, Any]]] = []
+        for step in sorted(steps, key=lambda s: self._int(
+                (s or {}).get('seq'), 10 ** 9)):
+            schema = self._one(
+                'SELECT key_fields FROM key_schemas WHERE id = ?',
+                [(step or {}).get('key_schema_id')])
+            fields = self._json_list((schema or {}).get('key_fields'))
+            keys: Optional[Dict[str, Any]] = {}
+            for field in fields:
+                value = values.get(field)
+                if value is None or value == '':
+                    keys = None
+                    break
+                keys[field] = value
+            # 空键表或未知因子 → 该槽无从比对，与"无值"同处理
+            slots.append(keys or None)
+        return slots or fallback
+
+    @staticmethod
+    def _adjustment_amounts(step_results: List[Dict[str, Any]]) -> Dict[str, float]:
+        """按步骤的净额变化汇总折扣 / 附加费金额（W2-C）。
+
+        折扣/附加费步骤用 `rolling=true`，其 `running_net_amount` 已是**应用后**
+        的净额，故调整额 = 与上一步净额的差；符号由步骤落在哪一侧决定。
+        """
+        discount = surcharge = 0.0
+        prev = 0.0
+        for sr in step_results:
+            if sr.get('skipped'):
+                continue
+            net = float(sr.get('running_net_amount') or 0.0)
+            rate_type = sr.get('rate_type')
+            if rate_type == RATE_TYPE_DISCOUNT:
+                discount += prev - net
+            elif rate_type == RATE_TYPE_SURCHARGE:
+                surcharge += net - prev
+            prev = net
+        return {
+            'discount_amount': round(discount, 2),
+            'surcharge_amount': round(surcharge, 2),
+        }
+
+    @staticmethod
+    def _json_list(raw: Any) -> List[Any]:
+        if isinstance(raw, list):
+            return raw
+        if not raw:
+            return []
+        try:
+            loaded = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        return loaded if isinstance(loaded, list) else []
+
     @staticmethod
     def _int(value: Any, default: int) -> int:
         try:

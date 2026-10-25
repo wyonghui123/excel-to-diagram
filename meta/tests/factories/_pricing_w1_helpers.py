@@ -45,7 +45,14 @@ CREATE TABLE calc_procedures (
 CREATE TABLE lookup_sequences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT,
-    name TEXT
+    name TEXT,
+    steps TEXT
+);
+CREATE TABLE key_schemas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT,
+    name TEXT,
+    key_fields TEXT
 );
 CREATE TABLE rate_tables (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +164,19 @@ def update_row(path, table, row_id, **values):
     try:
         params = [values[c] for c in values] + [row_id]
         cur = conn.execute(sql, params)
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def delete_row(path, table, **where):
+    """按等值条件删除行；列名与表名来自本仓清单，非外部输入。"""
+    sql = 'DELETE FROM {0} WHERE {1}'.format(
+        table, ' AND '.join('{0} = ?'.format(c) for c in where))
+    conn = sqlite3.connect(str(path))
+    try:
+        cur = conn.execute(sql, [where[c] for c in where])
         conn.commit()
         return cur.rowcount
     finally:

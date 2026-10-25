@@ -495,6 +495,114 @@ fields:
       multiple: false
       clearable: true
 
+  # ---- 服务行属性（W2-A）----
+  # 口径: 只有 item_id 指向 item_type='service' 的物料时才允许填写；
+  #   默认值由物料服务属性带出（billing_method / required_resource_type /
+  #   service_duration / duration_type），服务层负责校验，界面只读默认值可改。
+  - id: service_start_date
+    name: 服务开始日
+    type: date
+    db_column: service_start_date
+    nullable: true
+    description: 服务开始日期（服务行专用）
+    semantics:
+      meaning: 服务行开始日
+    ui:
+      widget: date
+
+  - id: service_end_date
+    name: 服务结束日
+    type: date
+    db_column: service_end_date
+    nullable: true
+    description: 服务结束日期（不得早于开始日）
+    semantics:
+      meaning: 服务行结束日
+    ui:
+      widget: date
+
+  - id: billing_method
+    name: 计费方式
+    type: string
+    db_column: billing_method
+    nullable: true
+    max_length: 30
+    description: 行级计费方式快照（默认取物料服务属性）
+    enum_values:
+      - value: fixed_price
+        label: 固定价
+        color: primary
+      - value: time_and_material
+        label: 工时材料
+        color: warning
+      - value: milestone
+        label: 里程碑
+        color: info
+    semantics:
+      meaning: 服务行计费方式
+      filterable: true
+      filter_type: enum
+      filter_label: 计费方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: required_resource_type
+    name: 资源类型
+    type: string
+    db_column: required_resource_type
+    nullable: true
+    max_length: 30
+    description: 行级所需资源类型（默认取物料服务属性）
+    enum_values:
+      - value: technician
+        label: 技师
+        color: primary
+      - value: engineer
+        label: 工程师
+        color: info
+      - value: consultant
+        label: 顾问
+        color: warning
+    semantics:
+      meaning: 服务行所需资源类型
+    ui:
+      widget: select
+
+  - id: service_duration
+    name: 服务时长
+    type: number
+    db_column: service_duration
+    nullable: true
+    description: 行级服务时长（与时长单位配套）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 2
+    semantics:
+      meaning: 服务行作业时长
+    ui:
+      widget: input
+
+  - id: duration_type
+    name: 时长单位
+    type: string
+    db_column: duration_type
+    nullable: true
+    max_length: 10
+    description: 服务时长的计量单位（小时 / 天 / 周）
+    enum_values:
+      - value: hour
+        label: 小时
+      - value: day
+        label: 天
+      - value: week
+        label: 周
+    semantics:
+      meaning: 服务时长计量单位
+    ui:
+      widget: select
+
   # ---- 结构展开（P1）----
   # 四个字段全部由展开服务写入，前端只读；手工新建的行保持
   # configuration_id / parent_line_id / component_no 为空、pricing_mode = standalone。
@@ -807,6 +915,12 @@ ui_view_config:
           - fields: [tax_base_amount, tax_amount]
           - fields: [gross_amount]
           - fields: [price_trace]
+      # 服务行属性：仅服务物料行可填，默认值由物料带出
+      - title: 服务信息
+        columns:
+          - fields: [service_start_date, service_end_date]
+          - fields: [billing_method, required_resource_type]
+          - fields: [service_duration, duration_type]
       # 展开相关字段只读：由展开服务写入，手工可改的只有 pricing_mode
       - title: 结构展开
         columns:

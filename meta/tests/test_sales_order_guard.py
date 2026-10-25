@@ -29,12 +29,15 @@ class _FakeDS:
     """按 SQL 特征片段分流，只覆盖守卫与删除引用检查用到的查询。"""
 
     def __init__(self, types=None, orders=None, lines=None,
-                 org_functions=None, refs=None, raise_on_query=False):
+                 org_functions=None, refs=None, items=None,
+                 addresses=None, raise_on_query=False):
         self.types = types or {}
         self.orders = orders or {}
         self.lines = lines or {}
         self.org_functions = org_functions or set()
         self.refs = refs or {}
+        self.items = items or {}
+        self.addresses = addresses or {}
         self.raise_on_query = raise_on_query
 
     def query(self, sql, params=None):
@@ -44,6 +47,12 @@ class _FakeDS:
 
         if 'FROM type_definitions WHERE id' in sql:
             row = self.types.get(p[0])
+            return [row] if row else []
+        if 'FROM items WHERE id' in sql:
+            row = self.items.get(p[0])
+            return [row] if row else []
+        if 'FROM addresses WHERE id' in sql:
+            row = self.addresses.get(p[0])
             return [row] if row else []
         if 'FROM sales_orders WHERE id' in sql:
             row = self.orders.get(p[0])
@@ -82,7 +91,8 @@ ORDERS = {
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25'},
     11: {'id': 11, 'order_no': 'SO-202610-000002', 'order_type_id': 1,
          'status': 'submitted', 'currency_id': 8, 'exchange_rate': 1,
-         'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25'},
+         'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
+         'ship_to_address_id': 301, 'bill_to_address_id': 302},
     12: {'id': 12, 'order_no': 'SO-202610-000003', 'order_type_id': 1,
          'status': 'confirmed', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25'},
@@ -96,9 +106,26 @@ LINES = {
     101: {'id': 101, 'order_id': 11, 'line_no': '1', 'line_type_id': 101},
 }
 
+ITEMS = {
+    2: {'id': 2, 'item_type': 'goods', 'status': 'active'},
+    3: {'id': 3, 'item_type': 'service', 'status': 'active',
+        'billing_method_default': 'fixed_price',
+        'required_resource_type': 'engineer',
+        'standard_duration': 8,
+        'duration_type': 'hour'},
+    4: {'id': 4, 'item_type': 'service', 'status': 'draft'},
+}
+
+
+ADDRESSES = {
+    301: {'id': 301, 'formatted_address': '上海市浦东新区世纪大道 100 号'},
+    302: {'id': 302, 'formatted_address': '上海市静安区南京西路 200 号'},
+}
+
 
 def _ds(**kwargs):
-    return _FakeDS(types=TYPES, orders=ORDERS, lines=LINES,
+    return _FakeDS(types=TYPES, orders=ORDERS, lines=LINES, items=ITEMS,
+                   addresses=ADDRESSES,
                    org_functions={(318, 'sales')}, **kwargs)
 
 
@@ -313,6 +340,138 @@ class TestExpandLineWrite:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# W2-A 服务行属性
+# ─────────────────────────────────────────────────────────────────────────────
+
+SERVICE_LINE = {**BASE_LINE, 'line_type_id': 102, 'item_id': 3}
+
+
+class TestServiceLine:
+
+    def test_service_line_ok(self):
+        SalesOrderGuardService(_ds()).validate_line_write(
+            {**SERVICE_LINE, 'service_start_date': '2026-11-01',
+             'service_end_date': '2026-11-02', 'billing_method': 'fixed_price',
+             'service_duration': 4, 'duration_type': 'hour'}, is_create=True)
+
+    def test_goods_item_rejects_service_fields(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'billing_method': 'fixed_price'}, is_create=True)
+        assert e.value.rule == 'service_field_non_service_item'
+
+    def test_no_item_rejects_service_fields(self):
+        data = {k: v for k, v in BASE_LINE.items() if k != 'item_id'}
+        data.update({'description': '咨询', 'service_start_date': '2026-11-01'})
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(data, is_create=True)
+        assert e.value.rule == 'service_field_non_service_item'
+
+    def test_service_item_must_be_active(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**SERVICE_LINE, 'item_id': 4}, is_create=True)
+        assert e.value.rule == 'service_item_not_sellable'
+
+    def test_end_before_start_rejected(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**SERVICE_LINE, 'service_start_date': '2026-11-02',
+                 'service_end_date': '2026-11-01'}, is_create=True)
+        assert e.value.rule == 'service_date_range'
+
+    def test_duration_must_be_positive(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**SERVICE_LINE, 'service_duration': 0, 'duration_type': 'hour'},
+                is_create=True)
+        assert e.value.rule == 'service_duration_invalid'
+
+    def test_duration_requires_duration_type(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**SERVICE_LINE, 'service_duration': 2}, is_create=True)
+        assert e.value.rule == 'duration_type_required'
+
+    def test_enum_must_be_whitelisted(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**SERVICE_LINE, 'billing_method': 'free'}, is_create=True)
+        assert e.value.rule == 'service_enum_invalid'
+
+    def test_item_missing_is_fail_open(self):
+        data = {**SERVICE_LINE, 'item_id': 999, 'billing_method': 'fixed_price'}
+        SalesOrderGuardService(_ds()).validate_line_write(data, is_create=True)
+
+    def test_defaults_from_item(self):
+        defaults = SalesOrderGuardService(_ds()).service_line_defaults({'item_id': 3})
+        assert defaults == {'billing_method': 'fixed_price',
+                            'required_resource_type': 'engineer',
+                            'service_duration': 8, 'duration_type': 'hour'}
+
+    def test_defaults_do_not_override_explicit_values(self):
+        defaults = SalesOrderGuardService(_ds()).service_line_defaults(
+            {'item_id': 3, 'billing_method': 'milestone'})
+        assert 'billing_method' not in defaults
+        assert defaults['duration_type'] == 'hour'
+
+    def test_defaults_empty_for_goods(self):
+        assert SalesOrderGuardService(_ds()).service_line_defaults(
+            {'item_id': 2}) == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# W2-D 地址文本快照
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAddressSnapshot:
+
+    def test_snapshot_filled_on_confirm(self):
+        snapshot = SalesOrderGuardService(_ds()).snapshot_address_text(
+            {'status': 'confirmed', 'ship_to_address_id': 301,
+             'bill_to_address_id': 302}, ORDERS[11])
+        assert snapshot == {
+            'ship_to_address_text': '上海市浦东新区世纪大道 100 号',
+            'bill_to_address_text': '上海市静安区南京西路 200 号'}
+
+    def test_snapshot_skipped_when_already_confirmed(self):
+        assert SalesOrderGuardService(_ds()).snapshot_address_text(
+            {'status': 'confirmed', 'ship_to_address_id': 301}, ORDERS[12]) == {}
+
+    def test_snapshot_skipped_without_address(self):
+        assert SalesOrderGuardService(_ds()).snapshot_address_text(
+            {'status': 'confirmed'}, ORDERS[11]) == {}
+
+    def test_snapshot_fail_open_on_query_error(self):
+        svc = SalesOrderGuardService(_ds(raise_on_query=True))
+        assert svc.snapshot_address_text(
+            {'status': 'confirmed', 'ship_to_address_id': 301}, ORDERS[11]) == {}
+
+    def test_frozen_after_non_draft(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_order_write(
+                {'ship_to_address_text': '改过的地址'}, old_data=ORDERS[12])
+        assert e.value.rule == 'address_snapshot_locked'
+        assert e.value.field_name == 'ship_to_address_text'
+
+    def test_confirm_allows_snapshot_write(self):
+        SalesOrderGuardService(_ds()).validate_order_write(
+            {'status': 'confirmed', 'ship_to_address_text': '快照值'},
+            old_data=ORDERS[11])
+
+    def test_confirm_cannot_clear_snapshot(self):
+        old = {**ORDERS[11], 'ship_to_address_text': '原快照'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_order_write(
+                {'status': 'confirmed', 'ship_to_address_text': ''}, old_data=old)
+        assert e.value.rule == 'address_snapshot_locked'
+
+    def test_draft_can_edit_snapshot(self):
+        SalesOrderGuardService(_ds()).validate_order_write(
+            {'ship_to_address_text': '草稿手工填写'}, old_data=ORDERS[10])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 拦截器接线
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -358,6 +517,26 @@ class TestGuardInterceptor:
                         {'id': 100}, old_data=LINES[100])
         it.before_action(ctx)
         assert ctx.extra['so_parent_order_id'] == 10
+
+    def test_create_fills_service_line_defaults(self):
+        it = SalesOrderGuardInterceptor()
+        ctx = self._ctx('sales_order_line', 'crud_create',
+                        {'order_id': 10, 'line_no': '1', 'line_type_id': 102,
+                         'item_id': 3, 'qty': 1, 'uom_id': 2})
+        it.before_action(ctx)
+        assert ctx.params['billing_method'] == 'fixed_price'
+        assert ctx.params['service_duration'] == 8
+        assert ctx.params['duration_type'] == 'hour'
+
+    def test_confirm_update_fills_address_snapshot(self):
+        it = SalesOrderGuardInterceptor()
+        ctx = self._ctx('sales_order', 'crud_update',
+                        {'id': 11, 'status': 'confirmed'}, old_data=ORDERS[11])
+        it.before_action(ctx)
+        assert ctx.params['ship_to_address_text'] == \
+            '上海市浦东新区世纪大道 100 号'
+        assert ctx.params['bill_to_address_text'] == \
+            '上海市静安区南京西路 200 号'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

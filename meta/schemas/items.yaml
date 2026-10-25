@@ -170,6 +170,99 @@ fields:
     ui:
       widget: radio
 
+  # ---- 服务属性（仅 item_type='service' 有意义；订单行按此带出默认值）----
+  # 决策: 不建 item_service_profile 独立表 —— 服务属性是物料本体的 1:1 属性，
+  #   拆表只增加一次 join 与一套权限域；Oracle / SAP / Salesforce 均无此表。
+  - id: billing_method_default
+    name: 默认计费方式
+    type: string
+    db_column: billing_method_default
+    nullable: true
+    max_length: 30
+    description: 服务物料的默认计费方式（固定价 / 工时材料 / 里程碑）；非服务物料留空
+    enum_values:
+      - value: fixed_price
+        label: 固定价
+        color: primary
+      - value: time_and_material
+        label: 工时材料
+        color: warning
+      - value: milestone
+        label: 里程碑
+        color: info
+    semantics:
+      meaning: 服务物料默认计费方式
+    ui:
+      widget: select
+
+  - id: required_resource_type
+    name: 默认资源类型
+    type: string
+    db_column: required_resource_type
+    nullable: true
+    max_length: 30
+    description: 服务物料的默认执行资源类型；非服务物料留空
+    enum_values:
+      - value: technician
+        label: 技师
+        color: primary
+      - value: engineer
+        label: 工程师
+        color: info
+      - value: consultant
+        label: 顾问
+        color: warning
+    semantics:
+      meaning: 服务物料默认所需资源类型
+    ui:
+      widget: select
+
+  - id: standard_duration
+    name: 标准时长
+    type: number
+    db_column: standard_duration
+    nullable: true
+    description: 服务物料的标准作业时长（与时长单位配套）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 2
+    semantics:
+      meaning: 服务物料标准作业时长
+    ui:
+      widget: input
+
+  - id: duration_type
+    name: 时长单位
+    type: string
+    db_column: duration_type
+    nullable: true
+    max_length: 10
+    description: 标准时长的计量单位（小时 / 天 / 周）
+    enum_values:
+      - value: hour
+        label: 小时
+      - value: day
+        label: 天
+      - value: week
+        label: 周
+    semantics:
+      meaning: 服务时长计量单位
+    ui:
+      widget: select
+
+  - id: is_field_service
+    name: 现场服务
+    type: boolean
+    db_column: is_field_service
+    nullable: true
+    default: false
+    description: 是否需要到客户现场执行（影响后续派工与资源排程）
+    semantics:
+      meaning: 服务是否现场执行
+    ui:
+      widget: switch
+
   # 结构角色：组件类型由本字段推导，不另设 component_type 派生列
   - id: structure_role
     name: 结构角色
@@ -722,6 +815,11 @@ ui_view_config:
       - title: 税务
         columns:
           - fields: [tax_classification_id]
+      - title: 服务属性（仅服务物料填写）
+        columns:
+          - fields: [billing_method_default, required_resource_type]
+          - fields: [standard_duration, duration_type]
+          - fields: [is_field_service]
       - title: 其他信息
         columns:
           - fields: [status, description]
@@ -744,6 +842,11 @@ ui_view_config:
           - net_weight
           - gross_weight
           - tax_classification_id
+          - billing_method_default
+          - required_resource_type
+          - standard_duration
+          - duration_type
+          - is_field_service
           - status
           - description
 

@@ -519,7 +519,9 @@ def lookup(
     Args:
         candidates: 全部候选（引擎内部按 steps 筛）
         steps:      有序槽位 [{"seq": 1, "key_schema_id": 1}, ...]
-        slot_keys:  与 steps 等长的槽位键值 [{"customer": 1001}, ...]
+        slot_keys:  与 steps 等长的槽位键值 [{"customer": 1001}, ...]；
+                    某项为 `None` 表示该槽位无可用因子值，**跳过此槽**
+                    （顺序不变，不会错位到下一槽）
         resolution: FR-008 消解范式
         measure:    best 范式度量
         scale_qty:  **阶梯基数（数量）** —— FR-009。命中带 `scale` 的记录时按此定档；
@@ -533,8 +535,13 @@ def lookup(
     # 【修 2026-10-06】槽位与键值必须成对排序。原实现只对 steps 排序、slot_keys
     # 保持原序 → 键值与槽位错配（steps 顺序变了，slot_keys 没跟着变）。
     # 正确做法：把 (step, keys) 打成对一起按 seq 排序。
+    #
+    # 【W2-F】`slot_keys` 中为 `None` 的项 = 该槽位无可用因子值（如订单无客户），
+    # 直接剔除该对。**不可**把后面的键值往前挪：`zip` 是按位置配对的，
+    # 少一项就会让第 2 槽用上第 1 槽的键值。
     pairs = sorted(
-        zip(steps, slot_keys),
+        ((step, wanted) for step, wanted in zip(steps, slot_keys)
+         if wanted is not None),
         key=lambda p: p[0]["seq"],
     )  # 槽位按 seq 升序，忽略调用方顺序
 

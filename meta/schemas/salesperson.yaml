@@ -365,6 +365,17 @@ ui_view_config:
         type: fields
         fields: [code, name, party_id, user_id, status, description]
 
+  # 负责区域（W2-E）—— 与 party_archive → party_tax_registration 同一套 child_sections 机制，
+  #   父键由子对象 salesperson_id 的 ui.relation=salesperson 推断。
+  child_sections:
+    - child_object: salesperson_territory_assignment
+      title: 负责区域
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      pageSize: 20
+
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v127 落库）
   create_permission: salesperson:salesperson_create

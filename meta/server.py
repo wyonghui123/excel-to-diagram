@@ -544,6 +544,11 @@ def create_app(db_path=None):
     # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
     from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor
     bo_framework.register_interceptor(CustomerSalesOrgGuardInterceptor())
+    # [TERRITORY 2026-10-25] 区域守卫（P50）：区域树成环（R-TER-1）与
+    #   销售员区域分配的区域启用态（R-TER-3）/ 有效期。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.territory_guard_interceptor import TerritoryGuardInterceptor
+    bo_framework.register_interceptor(TerritoryGuardInterceptor())
     # [F3 2026-10-20 / 补注册 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重。
     #   与 app_builder.with_interceptors() 同位补齐 —— 此前只注册在新 builder 路径，
     #   而 waitress_server.py 走本函数（create_app）⇒ 运行时守卫缺失。

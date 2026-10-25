@@ -1,0 +1,267 @@
+# 销售员区域分配（Salesperson Territory Assignment）
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave2-detailed-plan.md
+#       §7.2 对象 / §7.4 不变量 R-TER-2 / R-TER-3
+#
+# 定位: salesperson 的附属明细（child_sections），不单独成菜单。
+#   一个销售员可负责多个区域，按生效日期区分历史与当前归属。
+#
+# 约束:
+#   ① (salesperson_id, territory_id, effective_from) 唯一，防重复分配。
+#   ② 同一销售员在同一 effective_from 上至多一条主区域（R-TER-2，部分唯一索引）。
+#      SQLite 的唯一索引把 NULL 视为互不相等，effective_from 为空的行不受此约束。
+#   ③ 停用区域不影响既有分配，但不再被新的分配引用（R-TER-3，服务层校验）。
+
+id: salesperson_territory_assignment
+name: 销售员区域分配
+table_name: salesperson_territory_assignments
+description: 销售员与区域的分配关系（按生效日期区分，可设主区域）
+parent_object: salesperson
+display_name_field: territory_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 销售员区域分配
+  category: core_entity
+  aliases:
+    - 销售员区域
+    - 销售员区域分配
+    - salesperson territory assignment
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: salesperson_id
+    name: 销售员
+    type: integer
+    db_column: salesperson_id
+    required: true
+    description: 所属销售员（真外键；UI 父面为销售员详情）
+    semantics:
+      meaning: 所属销售员引用
+      display:
+        type: association
+        target_type: salesperson
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: salesperson
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 销售员编码
+            width: 140
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      # 必须是 salesperson：child_sections 挂在销售员详情下
+      widget: select
+      relation: salesperson
+      multiple: false
+
+  - id: territory_id
+    name: 区域
+    type: integer
+    db_column: territory_id
+    required: true
+    description: 分配到的区域
+    semantics:
+      meaning: 区域引用
+      display:
+        type: association
+        target_type: territory
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: territory
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 区域编码
+            width: 140
+          - field: name
+            label: 区域名称
+            width: 220
+    ui:
+      widget: select
+      relation: territory
+      multiple: false
+
+  - id: effective_from
+    name: 生效日
+    type: date
+    db_column: effective_from
+    nullable: true
+    description: 生效起始日（含）；空表示立即生效
+    semantics:
+      meaning: 分配生效起始日
+    ui:
+      widget: date
+
+  - id: effective_to
+    name: 失效日
+    type: date
+    db_column: effective_to
+    nullable: true
+    description: 失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 分配失效日
+    ui:
+      widget: date
+
+  - id: is_primary
+    name: 主区域
+    type: boolean
+    db_column: is_primary
+    required: true
+    default: false
+    description: 主区域（同一销售员同一生效日至多一个，R-TER-2）
+    semantics:
+      meaning: 主区域标记
+      filterable: true
+      filter_type: enum
+      filter_label: 主区域
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 同一销售员、同一区域、同一生效日只分配一次
+  - fields: [salesperson_id, territory_id, effective_from]
+    unique: true
+    name: uq_sta_triple
+  # 主区域：同一销售员同一生效日至多一条（R-TER-2）
+  - fields: [salesperson_id, effective_from]
+    unique: true
+    type: partial
+    condition: "is_primary = 1"
+    name: uq_sta_primary
+
+relations:
+  - id: salesperson_territory_to_salesperson
+    name: 销售员
+    type: reference
+    target: salesperson
+    source_field: salesperson_id
+    target_field: id
+    cardinality: N:1
+    description: 所属销售员引用（真外键）
+  - id: salesperson_territory_to_territory
+    name: 区域
+    type: reference
+    target: territory
+    source_field: territory_id
+    target_field: id
+    cardinality: N:1
+    description: 区域引用（真外键）
+
+ui_view_config:
+  # 作为销售员详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 销售员区域分配
+    columns:
+      - field: territory_id
+        width: 220
+        render_as: association
+        target_type: territory
+        display_field: name
+      - field: effective_from
+        width: 120
+      - field: effective_to
+        width: 120
+      - field: is_primary
+        width: 100
+    defaultSort:
+      field: effective_from
+      order: desc
+  form:
+    title: 销售员区域分配
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [territory_id]
+          - fields: [is_primary]
+      - title: 有效期
+        columns:
+          - fields: [effective_from, effective_to]

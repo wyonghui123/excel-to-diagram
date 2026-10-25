@@ -294,6 +294,11 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor
         bo_framework.register_interceptor(CustomerSalesOrgGuardInterceptor())
+        # [TERRITORY 2026-10-25] 区域守卫（P50）：区域树成环（R-TER-1）与
+        #   销售员区域分配的区域启用态（R-TER-3）/ 有效期。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.territory_guard_interceptor import TerritoryGuardInterceptor
+        bo_framework.register_interceptor(TerritoryGuardInterceptor())
         # [F3 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重，紧随约束校验之后
         #   [模块门控] party 轴依赖 org 的 BU/LE 职能，BIP 应用架构管理部署设
         #   DISABLED_PLATFORM_MODULES=party 时不注册（与 server.py create_app 同步）。

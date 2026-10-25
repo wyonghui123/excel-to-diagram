@@ -1991,6 +1991,38 @@ def init_menu_permissions(db_path):
                 'message': '建议分配销售员数据权限'
             })
         },
+        {
+            # [SALES-W2 2026-10-25] 区域 —— 主数据组
+            #   与 v132__territory 的声明保持一致；缺本声明时步骤 7.6 会把该手工菜单
+            #   当冗余删除（区域页入口随之消失）。
+            'menu_code': 'territory-list',
+            'menu_name': '区域',
+            'menu_path': '/territories',
+            'icon': 'MapLocation',
+            'color': '#0ea5e9',
+            'sort_order': 85,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'territory',
+            'object_types': json.dumps(['territory']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'territory', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'territory:territory_create',
+                'territory:territory_read',
+                'territory:territory_update',
+                'territory:territory_delete',
+                'territory:territory_list',
+            ]),
+            'description': '销售区域树：编码、名称与上级区域',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['territory'],
+                'message': '建议分配区域数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========

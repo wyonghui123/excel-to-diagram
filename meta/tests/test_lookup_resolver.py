@@ -338,6 +338,25 @@ class TestFR004命中策略:
         assert r.amount == 0.0
         assert r.hit is False
 
+    def test_none_slot_keys_skips_slot_without_shifting(self):
+        """某槽键值为 None → 跳过该槽，后续槽仍用自己的键值（W2-F）。
+
+        客户为空时不得把物料键错位到客户槽：若按位置硬配对，第 1 槽会用
+        `{"item": "M1"}` 命中客户槽的候选，客户价被当成物料价。
+        """
+        cands = [
+            Candidate(id=1, key_schema_id=1,
+                      keys={"customer": 1001, "item": "M1"}, value=10.0),
+            Candidate(id=2, key_schema_id=2, keys={"item": "M1"}, value=20.0),
+        ]
+        r = lookup(
+            candidates=cands,
+            steps=[{"seq": 1, "key_schema_id": 1}, {"seq": 2, "key_schema_id": 2}],
+            slot_keys=[None, {"item": "M1"}],
+        )
+        assert r.hit_ids == [2]
+        assert r.amount == 20.0
+
 
 class TestFR004槽位与回放:
     """FR-004 AC：命中后可回答"命中哪一行 / 为什么其它行被跳过"。"""

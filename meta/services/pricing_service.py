@@ -150,12 +150,18 @@ class PricingService:
         [{seq, element_type, rate_type_id, condition, params, rolling,
           base_step, subtotal_key}, ...]
 
+        【W2-C】一并带出该步费率类型的 `code`（`rate_type`）与 `rate_class`：
+        编排层据此判定「价格类沿用确定规则序列、折扣/附加费类按自身序列独立查找」，
+        明细落库也能记下步骤的费率类型编码。
+
         【布尔口径】见 `_to_bool_or_none` —— condition 必须归一成真正的
         bool/None，才能与执行器的 `is False` 判断对齐。
         """
         rows = self._query(
-            "SELECT * FROM calc_procedure_steps"
-            " WHERE calc_procedure_id = ? ORDER BY seq ASC",
+            "SELECT s.*, rt.code AS rt_code, rt.rate_class AS rt_class"
+            "  FROM calc_procedure_steps s"
+            "  LEFT JOIN rate_types rt ON rt.id = s.rate_type_id"
+            " WHERE s.calc_procedure_id = ? ORDER BY s.seq ASC",
             (procedure_id,),
         )
         return [
@@ -163,6 +169,8 @@ class PricingService:
                 "seq": r.get("seq"),
                 "element_type": r.get("element_type"),
                 "rate_type_id": r.get("rate_type_id"),
+                "rate_type": r.get("rt_code"),
+                "rate_type_class": r.get("rt_class"),
                 "condition": _to_bool_or_none(r.get("condition")),
                 "params": _loads(r.get("params"), {}),
                 "rolling": bool(r.get("rolling")),
@@ -189,6 +197,7 @@ class PricingService:
         rate_table_id: int,
         key_schema_id: Optional[int] = None,
         valid_on: Optional[str] = None,
+        rate_type_id: Optional[int] = None,
     ) -> List[Candidate]:
         """装载候选费率记录。
 
@@ -196,6 +205,11 @@ class PricingService:
         故这里只能先按 `rate_table_id`（+ `key_schema_id`）**收窄**，
         走 `idx_rate_record_lookup`，再由 lookup 引擎在结果集内比对键值。
         这是 C-T0-12「结构冻结」的既定代价。
+
+        【W2-C · `rate_type_id` 过滤】同一价目表可同时存价格、折扣、附加费记录，
+        且它们的 `keys{}` 完全相同（都按物料 / 客户匹配）。若不按费率类型过滤，
+        价格步骤会命中折扣记录（费率 5 被当成单价），反之亦然。故编排层必须
+        **按步骤声明的费率类型分别装载**，本参数即该收窄手段。
 
         【FR-016 条件更新】装载阶段即剔除**累计用量已触顶**的费率记录
         （对标 SAP Condition Update `KOUPD`：条件记录跨单累计，用满即失效）。
@@ -207,6 +221,9 @@ class PricingService:
         if key_schema_id is not None:
             sql += " AND key_schema_id = ?"
             params.append(key_schema_id)
+        if rate_type_id is not None:
+            sql += " AND rate_type_id = ?"
+            params.append(rate_type_id)
         if valid_on:
             # 有效期过滤：区间含下不含上，空值表示无限
             sql += (" AND (valid_from IS NULL OR valid_from <= ?)"
@@ -370,6 +387,7 @@ class PricingService:
         lk_traces: List[Dict[str, Any]] = []
         hit_ids: List[int] = []
         initial_state: Dict[str, Any] = {}
+        step_lookups: Dict[int, Any] = {}
 
         if sequence_code:
             lk_seq = self.get_sequence(sequence_code)
@@ -378,8 +396,12 @@ class PricingService:
             slots = _loads(lk_seq.get("steps"), [])
             if not slots:
                 raise PricingError(f"查找序列未定义槽位：{sequence_code}")
+            # 【W2-C】主查表只装**价格类**候选：同表内的折扣/附加费记录
+            # 键值相同，混装会让价格步骤命中折扣费率（5 被当单价）。
+            price_rate_type_id = self._price_rate_type_id(steps)
             candidates = self.load_candidates(
-                rate_table_id, valid_on=valid_on
+                rate_table_id, valid_on=valid_on,
+                rate_type_id=price_rate_type_id,
             )
             lk = lookup(
                 candidates=candidates,
@@ -408,6 +430,17 @@ class PricingService:
                 initial_state[f"rate_{c.id}"] = lk.rates.get(
                     c.id, c.per_unit_rate())
 
+        # 【W2-C】折扣/附加费各自按费率类型的查找序列**独立查表**，并把命中
+        # 值按步注入（不共用价格查表结果）。价格类与未声明费率类型的步骤
+        # 仍走主查表，保持波次 1 的既有口径。
+        steps = self._bind_step_lookups(
+            steps, rate_table_id=rate_table_id, slot_keys=slot_keys,
+            base=base, valid_on=valid_on, resolution=resolution,
+            measure=measure, primary=lk, primary_rate_type_id=(
+                self._price_rate_type_id(steps) if sequence_code else None),
+            out=step_lookups,
+        )
+
         # ---- 阶段二：算过程（FR-005/006/007 / T2-2）----
         calc = execute(steps=steps, base=base, initial_state=initial_state)
         net = float(calc["amount"])
@@ -425,6 +458,7 @@ class PricingService:
                 base=base,
                 calc=calc,
                 lk=lk,
+                step_lookups=step_lookups,
                 valid_on=valid_on,
                 result_code=result_code,
             )
@@ -441,6 +475,134 @@ class PricingService:
         }
 
     # ------------------------------------------------------------------
+    # 多费率类型查找（W2-C）
+    # ------------------------------------------------------------------
+    def _price_rate_type_id(self, steps: List[Dict[str, Any]]) -> Optional[int]:
+        """过程里「价格类」步骤的费率类型 ID（主查表用）。
+
+        价格类（`rate_class='price'`）沿用确定规则给的查找序列；没有价格类步骤
+        （如纯公式过程）时返回 None，主查表不按费率类型收窄，保持旧口径。
+        """
+        for s in steps:
+            if s.get("rate_type_id") is not None \
+                    and s.get("rate_type_class") == "price":
+                return s["rate_type_id"]
+        return None
+
+    def _bind_step_lookups(
+        self,
+        steps: List[Dict[str, Any]],
+        *,
+        rate_table_id: int,
+        slot_keys: List[Dict[str, Any]],
+        base: float,
+        valid_on: Optional[str],
+        resolution: str,
+        measure: Optional[str],
+        primary,
+        primary_rate_type_id: Optional[int],
+        out: Dict[int, Any],
+    ) -> List[Dict[str, Any]]:
+        """为声明了费率类型的步骤绑定该步的查表结果，并注入 `lookup_amount`。
+
+        - 价格类 / 未声明费率类型 → 复用主查表结果（`primary`）
+        - 其余类型（折扣、附加费…） → 按其 `rate_type.lookup_sequence_id`
+          在同一价目表内**独立查找**，且只装该费率类型的候选
+        - 非价格类但未配查找序列 → 显式注入 0，**杜绝**拿价格命中值当百分比
+        """
+        values = self._factor_values(slot_keys)
+        bound: List[Dict[str, Any]] = []
+        for s in steps:
+            rid = s.get("rate_type_id")
+            step = dict(s)
+            if rid is None or rid == primary_rate_type_id:
+                if primary is not None:
+                    out[step["seq"]] = primary
+                    step["lookup_amount"] = float(primary.amount)
+            else:
+                slk = self._lookup_for_rate_type(
+                    rate_type_id=rid, rate_table_id=rate_table_id,
+                    values=values, base=base, valid_on=valid_on,
+                    resolution=resolution, measure=measure,
+                )
+                out[step["seq"]] = slk
+                step["lookup_amount"] = (
+                    float(slk.amount) if slk is not None else 0.0)
+            bound.append(step)
+        return bound
+
+    def _lookup_for_rate_type(
+        self,
+        *,
+        rate_type_id: int,
+        rate_table_id: int,
+        values: Dict[str, Any],
+        base: float,
+        valid_on: Optional[str],
+        resolution: str,
+        measure: Optional[str],
+    ):
+        """按单个费率类型的查找序列查一次，返回 LookupResult；无序列返回 None。"""
+        rt = self._one(
+            "SELECT lookup_sequence_id FROM rate_types WHERE id = ?",
+            (rate_type_id,))
+        seq_id = (rt or {}).get("lookup_sequence_id")
+        if seq_id is None:
+            return None
+        seq = self._one(
+            "SELECT steps FROM lookup_sequences WHERE id = ?", (seq_id,))
+        slots = _loads((seq or {}).get("steps"), [])
+        if not slots:
+            return None
+        return lookup(
+            candidates=self.load_candidates(
+                rate_table_id, valid_on=valid_on, rate_type_id=rate_type_id),
+            steps=slots,
+            slot_keys=self._slot_keys_for(slots, values),
+            resolution=resolution,
+            measure=measure,
+            scale_qty=base,
+        )
+
+    @staticmethod
+    def _factor_values(slot_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """把各槽位的键值合并成因子取值表，供其他查找序列重新组槽。"""
+        values: Dict[str, Any] = {}
+        for keys in slot_keys or []:
+            if isinstance(keys, dict):
+                values.update(keys)
+        return values
+
+    def _slot_keys_for(
+        self,
+        slots: List[Dict[str, Any]],
+        values: Dict[str, Any],
+    ) -> List[Optional[Dict[str, Any]]]:
+        """按给定查找序列的槽位与 `key_schemas.key_fields` 逐槽组键。
+
+        任一因子取不到值即该槽位置 `None`（引擎跳过该槽，顺序不变）。
+        """
+        out: List[Optional[Dict[str, Any]]] = []
+        for step in sorted(slots, key=lambda s: (s or {}).get("seq") or 0):
+            schema = self._one(
+                "SELECT key_fields FROM key_schemas WHERE id = ?",
+                ((step or {}).get("key_schema_id"),))
+            fields = _loads((schema or {}).get("key_fields"), [])
+            keys: Optional[Dict[str, Any]] = {}
+            for field in fields:
+                value = values.get(field)
+                if value is None or value == "":
+                    keys = None
+                    break
+                keys[field] = value
+            out.append(keys or None)
+        return out
+
+    def _one(self, sql: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
+        rows = self._query(sql, params)
+        return rows[0] if rows else None
+
+    # ------------------------------------------------------------------
     # 落库
     # ------------------------------------------------------------------
     def _persist_with_invalidate(
@@ -455,7 +617,8 @@ class PricingService:
         base: float,
         calc: Dict[str, Any],
         lk,
-        valid_on: Optional[str],
+        step_lookups: Optional[Dict[int, Any]] = None,
+        valid_on: Optional[str] = None,
         result_code: Optional[str] = None,
     ) -> int:
         """作废旧结果 + 落新结果 + 落明细 + 累计用量（FR-016），**整体一个事务**。
@@ -476,8 +639,8 @@ class PricingService:
             with tx():
                 rid = self._invalidate_and_persist_inner(
                     process, level, document_type, document_id,
-                    document_line_id, net, base, calc, lk, valid_on,
-                    result_code,
+                    document_line_id, net, base, calc, lk,
+                    step_lookups, valid_on, result_code,
                 )
                 self._accumulate_usage(lk, base=base, net=net)
                 return rid
@@ -490,8 +653,8 @@ class PricingService:
         try:
             rid = self._invalidate_and_persist_inner(
                 process, level, document_type, document_id,
-                document_line_id, net, base, calc, lk, valid_on,
-                result_code,
+                document_line_id, net, base, calc, lk,
+                step_lookups, valid_on, result_code,
             )
             self._accumulate_usage(lk, base=base, net=net)
             self.ds.execute(f"RELEASE SAVEPOINT {sp}")
@@ -512,7 +675,8 @@ class PricingService:
         base: float,
         calc: Dict[str, Any],
         lk,
-        valid_on: Optional[str],
+        step_lookups: Optional[Dict[int, Any]] = None,
+        valid_on: Optional[str] = None,
         result_code: Optional[str] = None,
     ) -> int:
         # 【2026-10-07 拆表 · TBD-18】此处曾加过
@@ -537,8 +701,8 @@ class PricingService:
         )
         return self._persist_inner(
             process, level, document_type, document_id,
-            document_line_id, net, base, calc, lk, valid_on,
-            result_code,
+            document_line_id, net, base, calc, lk,
+            step_lookups, valid_on, result_code,
         )
 
     def _persist_inner(
@@ -552,7 +716,8 @@ class PricingService:
         base: float,
         calc: Dict[str, Any],
         lk,
-        valid_on: Optional[str],
+        step_lookups: Optional[Dict[int, Any]] = None,
+        valid_on: Optional[str] = None,
         result_code: Optional[str] = None,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
@@ -605,11 +770,29 @@ class PricingService:
         # 需重放一遍以拿到每步的净额快照。
         running = 0.0
         step_meta = {sr["seq"]: sr for sr in calc["step_results"]}
+        by_step = step_lookups or {}
         for sr in calc["step_results"]:
             seq_no = sr["seq"]
             meta = step_meta[seq_no]
             running = float(meta.get("running_net_amount", running))
-            trace = trace_by_seq.get(seq_no)
+            # 【W2-C】优先用「按步绑定」的查表结果（折扣/附加费各有独立查找），
+            # 无绑定时退回旧的按槽位序号匹配（波次 1 口径）。
+            step_lk = by_step.get(seq_no)
+            if step_lk is not None:
+                hit_json = json.dumps(list(step_lk.hit_ids))
+                skip_json = json.dumps(
+                    [{"candidate_id": c, "reason": r}
+                     for t in step_lk.traces for c, r in t.skipped])
+                scales = [s for t in step_lk.traces for s in t.scales]
+                lookup_amount = float(step_lk.amount)
+            else:
+                trace = trace_by_seq.get(seq_no)
+                hit_json = json.dumps(trace.hit_ids) if trace else None
+                skip_json = json.dumps(
+                    [{"candidate_id": c, "reason": r}
+                     for c, r in trace.skipped]) if trace else None
+                scales = list(trace.scales) if trace else []
+                lookup_amount = None
             self.ds.execute(
                 """INSERT INTO calc_details
                    (result_id, seq, element_type, rate_type_code, label,
@@ -620,22 +803,24 @@ class PricingService:
                     factor_snapshot, created_at, updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
-                    result_id, seq_no, sr["element_type"], None,
+                    result_id, seq_no, sr["element_type"],
+                    sr.get("rate_type"),
                     f"{seq_no}.{sr['element_type']}",
                     None, sr["amount"], running,
                     bool(meta.get("subtotal_key")), bool(meta.get("skip_running_price")),
                     meta.get("subtotal_key"),
                     "line", "pricing_quantity", False, base,
                     bool(sr.get("skipped")), sr.get("skip_reason"),
-                    json.dumps(trace.hit_ids) if trace else None,
-                    json.dumps([{"candidate_id": c, "reason": r}
-                                for c, r in trace.skipped]) if trace else None,
+                    hit_json, skip_json,
                     json.dumps(
                         {"valid_on": valid_on, "base": base,
+                         # 【W2-C】该步查表命中值（折扣/附加费的百分比、价格的费率），
+                         # 是"为什么是这个值"的直接依据。
+                         "lookup_amount": lookup_amount,
                          # 【FR-009】定档留痕（落到哪一档 / 定出什么费率）。FR-010 要求
                          # 能回答"为什么是这个值"，分档记录的"为什么"含"哪一档"。
                          # 复用既有 json 列承载，**零 schema 改动**。
-                         "scales": list(trace.scales) if trace else []},
+                         "scales": scales},
                         ensure_ascii=False),
                     now, now,
                 ],

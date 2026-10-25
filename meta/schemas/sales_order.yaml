@@ -445,6 +445,31 @@ fields:
       multiple: false
       clearable: true
 
+  # 地址文本快照（W2-D）：确认时按 address.formatted_address 写入；确认后由守卫冻结
+  - id: ship_to_address_text
+    name: 收货地址快照
+    type: text
+    db_column: ship_to_address_text
+    nullable: true
+    description: 送达地址文本快照；确认订单时按地址库 formatted_address 写入，确认后只读
+    semantics:
+      meaning: 订单收货地址文本快照
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: bill_to_address_text
+    name: 收票地址快照
+    type: text
+    db_column: bill_to_address_text
+    nullable: true
+    description: 开票地址文本快照；确认订单时按地址库 formatted_address 写入，确认后只读
+    semantics:
+      meaning: 订单开票地址文本快照
+      searchable: true
+    ui:
+      widget: textarea
+
   - id: salesperson_id
     name: 销售员
     type: integer
@@ -1237,6 +1262,9 @@ ui_view_config:
           - fields: [salesperson_id]
           - fields: [org_id, sales_org_id]
           - fields: [division_code]
+      - title: 地址快照（确认时写入）
+        columns:
+          - fields: [ship_to_address_text, bill_to_address_text]
       - title: 商务条件
         columns:
           - fields: [currency_id, exchange_rate]

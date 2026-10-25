@@ -70,6 +70,12 @@ class SalesOrderGuardInterceptor(Interceptor):
                     guard.validate_order_delete(context.object_id)
                     return
                 data, old_data = self._effective_data(context)
+                # W2-D：确认动作同一请求内回填地址文本快照（只补/覆盖自地址库全文）
+                snapshot = guard.snapshot_address_text(data, old_data)
+                if snapshot:
+                    data.update(snapshot)
+                    if isinstance(context.params, dict):
+                        context.params.update(snapshot)
                 guard.validate_order_write(
                     data, old_data=old_data,
                     is_create=context.action == 'crud_create')
@@ -83,10 +89,17 @@ class SalesOrderGuardInterceptor(Interceptor):
                 return
 
             data, old_data = self._effective_data(context)
+            is_create = context.action == 'crud_create'
+            # W2-A：服务行默认值（计费方式 / 资源类型 / 时长 / 时长单位）随创建写入
+            if is_create:
+                defaults = guard.service_line_defaults(data)
+                if defaults:
+                    data.update(defaults)
+                    if isinstance(context.params, dict):
+                        context.params.update(defaults)
             context.extra[_ORDER_ID_KEY] = data.get('order_id')
             guard.validate_line_write(
-                data, old_data=old_data,
-                is_create=context.action == 'crud_create')
+                data, old_data=old_data, is_create=is_create)
         except SalesOrderGuardError as e:
             self._raise_validation(e)
 

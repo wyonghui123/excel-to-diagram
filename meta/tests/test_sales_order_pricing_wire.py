@@ -135,6 +135,16 @@ class TestPriceLine:
         assert ds.orders[10]['price_list_id'] == 1
         assert ds.orders[10]['pricing_procedure_id'] == 1
 
+    def test_customer_account_forwarded_for_customer_price(self):
+        """W2-F：客户维度取自行所属抬头，透传给定价确定服务。"""
+        ds = _FakeDS(orders={10: _order(customer_account_id=4)},
+                     lines={100: _line()})
+        det = _StubDet()
+        _service(ds, det).price_line(100)
+
+        calls = [k for kind, k in det.calls if kind == 'determine_line']
+        assert calls and calls[0]['customer_account_id'] == 4
+
     def test_manual_line_untouched_without_force(self):
         ds = _FakeDS(orders={10: _order()},
                      lines={100: _line(unit_price=99, price_source='manual')})

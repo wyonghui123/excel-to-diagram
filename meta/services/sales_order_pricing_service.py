@@ -132,7 +132,8 @@ class SalesOrderPricingService:
             resolved = self.det.resolve(**dims)
 
         result = self.det.determine_line(
-            item_id=line.get('item_id'), qty=qty, **dims,
+            item_id=line.get('item_id'), qty=qty,
+            customer_account_id=order.get('customer_account_id'), **dims,
             document_id=order.get('id'), document_line_id=line_id,
             persist=True,
         )
@@ -254,7 +255,8 @@ class SalesOrderPricingService:
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT id, status, order_type_id, order_date, price_date, currency_id, '
-            'sales_org_id, pricing_status FROM sales_orders WHERE id = ?', [order_id])
+            'sales_org_id, customer_account_id, pricing_status '
+            'FROM sales_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
 
     def _lines_for_order(self, order_id: Any) -> List[Dict[str, Any]]:

@@ -27,6 +27,18 @@
   W2-R5  服务行（line_type.code='SVC'）不指定发货点，与不可发货行同口径
   W2-R6  有展开子行的父行不可直接删除，须先删子行
 
+服务行（W2-A）:
+  W2-SVC-1  非服务物料行不得填写服务属性
+  W2-SVC-2  服务物料必须 active（未签发 / 停用不可下单）
+  W2-SVC-3  服务结束日不得早于开始日
+  W2-SVC-4  服务时长 > 0，且必须与时长单位成对
+  W2-SVC-5  计费方式 / 资源类型 / 时长单位必须在枚举内
+
+地址快照（W2-D）:
+  R-ADR-1  订单离开草稿后两列只读（唯一例外：确认动作同一请求内由系统回填）
+  R-ADR-2  已非空的快照不得被清空
+  R-ADR-3  快照值只取自 address.formatted_address，不拼接、不格式化
+
 行的写入门槛取「父单必须是 draft」一条：
   R8 只明文限制删除，但 submitted / confirmed 已是下游读取的快照态，
   允许追加或改行会让 R7 的汇总回写改动已确认金额，故创建 / 更新 / 删除
@@ -65,6 +77,18 @@ PRICING_MODES = ('standalone', 'bundle_price', 'component_price', 'base_plus_opt
 # W2-R3：配置实例组件键（L0010 / L0010.L0020）
 _COMPONENT_NO_RE = re.compile(r'^L\d{4}(\.L\d{4})*$')
 SERVICE_LINE_CODE = 'SVC'
+SERVICE_ITEM = 'service'
+# W2-A：服务行字段与受控枚举
+_SERVICE_LINE_FIELDS = ('service_start_date', 'service_end_date', 'billing_method',
+                        'required_resource_type', 'service_duration', 'duration_type')
+_BILLING_METHODS = ('fixed_price', 'time_and_material', 'milestone')
+_RESOURCE_TYPES = ('technician', 'engineer', 'consultant')
+_DURATION_TYPES = ('hour', 'day', 'week')
+# W2-D：地址文本快照（文本列 ← 地址引用列）
+_ADDRESS_SNAPSHOT_PAIRS = (('ship_to_address_text', 'ship_to_address_id'),
+                           ('bill_to_address_text', 'bill_to_address_id'))
+_ADDRESS_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _ADDRESS_SNAPSHOT_PAIRS)
+CONFIRMED = 'confirmed'
 
 
 class SalesOrderGuardError(ValueError):
@@ -142,6 +166,26 @@ class SalesOrderGuardService:
                     '订单已确认，汇率已冻结，不可修改', field_name='exchange_rate',
                     rule='exchange_rate_frozen')
 
+        # W2-D R-ADR-1 / R-ADR-2：地址快照离开草稿后冻结，仅确认动作允许系统回填
+        if old_status and old_status != DRAFT:
+            confirming = (str(data.get('status') or '') == CONFIRMED
+                          and str(old_status) != CONFIRMED)
+            for field in _ADDRESS_SNAPSHOT_FIELDS:
+                if field not in data:
+                    continue
+                new_value, old_value = data.get(field), old.get(field)
+                if str(new_value) == str(old_value):
+                    continue
+                if confirming and not _is_blank(new_value):
+                    continue
+                if confirming:
+                    raise SalesOrderGuardError(
+                        '已确认的地址快照不得清空',
+                        field_name=field, rule='address_snapshot_locked')
+                raise SalesOrderGuardError(
+                    f'订单已离开草稿态（{old_status}），地址快照只读',
+                    field_name=field, rule='address_snapshot_locked')
+
         # R4：单据类型必须 header 层且属销售订单作用域
         type_id = data.get('order_type_id')
         if not _is_blank(type_id):
@@ -172,8 +216,32 @@ class SalesOrderGuardService:
                 f'订单处于 {status} 状态，只有草稿可删除',
                 field_name='status', rule='order_delete_not_draft')
 
-    # ---------------- 行 ----------------
+    def snapshot_address_text(self, data: Dict[str, Any],
+                              old_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """R-ADR-3：订单转为 confirmed 时按地址库回填两列文本快照。
 
+        只在该次请求内返回待写入值，由拦截器并入写入参数（同一次事务）。
+        地址为空 / 查询失败 / 地址库无全文时跳过该列，不阻断确认。
+        """
+        old = old_data or {}
+        if str(data.get('status') or '') != CONFIRMED:
+            return {}
+        if str(old.get('status') or '') == CONFIRMED:
+            return {}
+        snapshot = {}
+        for text_field, id_field in _ADDRESS_SNAPSHOT_PAIRS:
+            address_id = data.get(id_field)
+            if _is_blank(address_id):
+                continue
+            address = self._load_address(address_id)
+            if not address:
+                continue
+            text = address.get('formatted_address')
+            if not _is_blank(text):
+                snapshot[text_field] = text
+        return snapshot
+
+    # ---------------- 行 ----------------
     def validate_line_write(self, data: Dict[str, Any],
                             old_data: Optional[Dict[str, Any]] = None,
                             is_create: bool = False) -> None:
@@ -251,6 +319,86 @@ class SalesOrderGuardService:
                 '服务行不产生库存移动，不能指定发货点',
                 field_name='plant_location_id', rule='service_line_no_location')
 
+        # W2-A：服务行属性（W2-SVC-1~5）
+        self._validate_service_line(data)
+
+    # ---------------- 服务行（W2-A） ----------------
+
+    def _validate_service_line(self, data: Dict[str, Any]) -> None:
+        """服务属性校验；物料读不到时 fail-open。"""
+        filled = [f for f in _SERVICE_LINE_FIELDS if not _is_blank(data.get(f))]
+        item_id = data.get('item_id')
+        if _is_blank(item_id):
+            if filled:
+                raise SalesOrderGuardError(
+                    '未选物料的行不能填写服务属性',
+                    field_name=filled[0], rule='service_field_non_service_item')
+            return
+
+        item = self._load_item(item_id)
+        if not item:
+            return  # fail-open：物料缺失交给外键 / 必填校验兜底
+
+        if item.get('item_type') != SERVICE_ITEM:
+            if filled:
+                raise SalesOrderGuardError(
+                    '只有服务物料行可以填写服务属性',
+                    field_name=filled[0], rule='service_field_non_service_item')
+            return
+
+        # 服务物料必须已签发且启用
+        if (item.get('status') or 'active') != 'active':
+            raise SalesOrderGuardError(
+                f'服务物料 {item_id} 未签发或已停用，不能下单',
+                field_name='item_id', rule='service_item_not_sellable')
+
+        start = data.get('service_start_date')
+        end = data.get('service_end_date')
+        if not _is_blank(start) and not _is_blank(end) and str(end) < str(start):
+            raise SalesOrderGuardError(
+                '服务结束日不得早于开始日',
+                field_name='service_end_date', rule='service_date_range')
+
+        if not _is_blank(data.get('service_duration')):
+            duration = _num(data.get('service_duration'))
+            if duration is None or duration <= 0:
+                raise SalesOrderGuardError(
+                    '服务时长必须大于 0',
+                    field_name='service_duration', rule='service_duration_invalid')
+            if _is_blank(data.get('duration_type')):
+                raise SalesOrderGuardError(
+                    '填写服务时长时必须选择时长单位',
+                    field_name='duration_type', rule='duration_type_required')
+
+        for field, allowed in (('billing_method', _BILLING_METHODS),
+                               ('required_resource_type', _RESOURCE_TYPES),
+                               ('duration_type', _DURATION_TYPES)):
+            value = data.get(field)
+            if not _is_blank(value) and str(value) not in allowed:
+                raise SalesOrderGuardError(
+                    f'{field} 取值 {value} 不在 {"/".join(allowed)} 内',
+                    field_name=field, rule='service_enum_invalid')
+
+    def service_line_defaults(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """按物料服务属性补行级默认值（只补空字段；读不到物料返回空）。
+
+        由拦截器在创建前并入写入参数，故默认值与真实写入同一次事务。
+        """
+        item_id = data.get('item_id')
+        if _is_blank(item_id):
+            return {}
+        item = self._load_item(item_id)
+        if not item or item.get('item_type') != SERVICE_ITEM:
+            return {}
+        mapping = {
+            'billing_method': item.get('billing_method_default'),
+            'required_resource_type': item.get('required_resource_type'),
+            'service_duration': item.get('standard_duration'),
+            'duration_type': item.get('duration_type'),
+        }
+        return {k: v for k, v in mapping.items()
+                if _is_blank(data.get(k)) and not _is_blank(v)}
+
     def validate_line_delete(self, line_id: Any) -> None:
         """非草稿订单下禁止删除行（R8）；有展开子行的父行须先删子行（W2-R6）。"""
         if _is_blank(line_id):
@@ -315,6 +463,16 @@ class SalesOrderGuardService:
             return None
         return rows[0] if rows else None
 
+    def _load_address(self, address_id: Any) -> Optional[Dict[str, Any]]:
+        try:
+            rows = self.ds.query(
+                'SELECT id, formatted_address FROM addresses WHERE id = ?',
+                [address_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(f'[sales_order_guard] 读取地址 {address_id} 失败: {e}')
+            return None
+        return rows[0] if rows else None
+
     def _load_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
@@ -324,6 +482,17 @@ class SalesOrderGuardService:
                 [line_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取订单行 {line_id} 失败: {e}')
+            return None
+        return rows[0] if rows else None
+
+    def _load_item(self, item_id: Any) -> Optional[Dict[str, Any]]:
+        try:
+            rows = self.ds.query(
+                'SELECT id, item_type, status, billing_method_default, '
+                '       required_resource_type, standard_duration, duration_type '
+                'FROM items WHERE id = ?', [item_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(f'[sales_order_guard] 读取物料 {item_id} 失败: {e}')
             return None
         return rows[0] if rows else None
 

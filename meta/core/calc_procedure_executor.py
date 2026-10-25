@@ -218,9 +218,14 @@ def _op_formula(ctx: StepContext, params: Dict[str, Any]) -> float:
     # （无查找序列）则 lookup_amount 缺失，公式报"变量不在白名单"——
     # 但那是"没查表"的正常情形，不该是安全错误。
     # 注：lookup_hit_ids 是列表，_safe_eval 只接受数值，故不放进白名单。
+    #
+    # 【W2-C】`params["lookup_amount"]` 优先于共享 state：同一过程里的折扣/附加费
+    # 步骤各自的费率类型有独立查找序列，命中值**按步注入**，不能共用价格步骤
+    # 的查表结果（否则折扣步骤会拿到单价当百分比）。
     amount = _safe_eval(expr, {
-        "lookup_amount": ctx.state.get("lookup_amount", 0.0),
         **ctx.state,
+        "lookup_amount": params.get(
+            "lookup_amount", ctx.state.get("lookup_amount", 0.0)),
         "base": ctx.base,
         "running_net_amount": ctx.running_net_amount,
     })
@@ -430,7 +435,11 @@ def execute(
         et = st.get("element_type")
         seq = st.get("seq")
         rate_type = st.get("rate_type")
-        params = st.get("params") or {}
+        params = dict(st.get("params") or {})
+        # 【W2-C】步骤级查表命中：由编排层按该步费率类型的查找序列算好后
+        # 挂在步骤上（不写进 params 配置，避免把运行时结果固化进配置）。
+        if "lookup_amount" in st:
+            params["lookup_amount"] = st["lookup_amount"]
 
         # element_type 必须在注册表中 —— 未知类型即报错，不静默跳过
         # （C5：步骤须带类型，未注册的类型说明配置漏了算子实现）
