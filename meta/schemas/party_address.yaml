@@ -1,0 +1,329 @@
+# 往来单位地址（Party Address）— 业务伙伴 × 地址库 × 地址角色的桥接
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §5
+#
+# 定位: 往来单位的附属明细（child_sections，见 party_archive.yaml），不单独成菜单。
+#
+# 为什么需要桥接:
+#   address 是纯地址库（只被引用、不承载用途/角色），「某往来单位的收货地址」
+#   不能塞进 address，必须用本表承载「地址 × 往来单位 × 角色」这层语义。
+#
+# 关键口径:
+#   1. parent_object 写 party（真实外键指向 parties），但 ui.relation 写 party_archive ——
+#      业务伙伴在 UI 上的详情面是视图 party_archive，child_sections 挂在它下面；
+#      前端 getParentIdField 靠 ui.relation 推断父键（先例 party_tax_registration）。
+#   2. 同一 (party, address, role) 只登记一次；同一 (party, role) 至多一条 active 默认地址，
+#      由部分唯一索引强制（W1-R13）。
+#   3. 订单侧默认地址解析只认 is_default=1 且 status='active' 的行（W1-R14）。
+#   4. 地址可空引用：订单不做文本快照（TBD-W1-3），历史订单不随地址变更回溯。
+
+id: party_address
+name: 往来单位地址
+table_name: party_addresses
+description: 往来单位在特定地址角色下引用的地址（收货 / 收票 / 售达）
+parent_object: party
+display_name_field: address_id
+hierarchy:
+  enabled: true
+  parent_field: party_id
+
+semantics:
+  meaning: 往来单位地址
+  category: core_entity
+  aliases:
+    - 往来单位地址
+    - 业务伙伴地址
+    - party address
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: party_id
+    name: 业务伙伴
+    type: integer
+    db_column: party_id
+    required: true
+    description: 所属业务伙伴（真实外键指向 parties；UI 父面为 party_archive）
+    semantics:
+      meaning: 所属业务伙伴引用
+      display:
+        type: association
+        target_type: party_archive
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party_archive
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 伙伴编码
+            width: 140
+          - field: name
+            label: 伙伴名称
+            width: 220
+    ui:
+      # 必须是 party_archive：child_sections 挂在 party_archive 下（见文件头第 1 条）
+      widget: select
+      relation: party_archive
+      multiple: false
+
+  - id: address_id
+    name: 地址
+    type: integer
+    db_column: address_id
+    required: true
+    description: 引用的地址库记录
+    semantics:
+      meaning: 地址库引用
+      display:
+        type: association
+        target_type: address
+        display_field: formatted_address
+    value_help:
+      source:
+        type: bo
+        target_bo: address
+        value_field: id
+        display_field: formatted_address
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} {formatted_address}"
+        columns:
+          - field: code
+            label: 地址编码
+            width: 140
+          - field: formatted_address
+            label: 地址全文
+            width: 320
+    ui:
+      widget: select
+      relation: address
+      multiple: false
+
+  - id: role
+    name: 地址角色
+    type: string
+    db_column: role
+    required: true
+    description: 该地址在此往来单位下的用途
+    enum_values:
+      - value: sold_to
+        label: 售达方
+        color: primary
+        category: active
+      - value: ship_to
+        label: 收货地址
+        color: success
+        category: active
+        is_initial: true
+      - value: bill_to
+        label: 收票地址
+        color: warning
+        category: active
+    semantics:
+      meaning: 地址角色（售达 / 收货 / 收票）
+      filterable: true
+      filter_type: enum
+      filter_label: 地址角色
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: is_default
+    name: 默认地址
+    type: boolean
+    db_column: is_default
+    required: true
+    default: false
+    description: 该角色下的默认地址（同一角色至多一条，由部分唯一索引强制）
+    semantics:
+      meaning: 角色内默认地址标记
+      filterable: true
+      filter_type: enum
+      filter_label: 默认
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再作为默认地址来源）
+    enum_values:
+      - value: active
+        label: 启用
+        color: primary
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 记录启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 200
+    description: 说明
+    semantics:
+      meaning: 该地址角色的说明
+      searchable: true
+    ui:
+      widget: input
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 同一往来单位同一地址同一角色只登记一次
+  - fields: [party_id, address_id, role]
+    unique: true
+    name: uidx_party_address_party_addr_role
+  # 同一往来单位同一角色至多一条启用中的默认地址（W1-R13）
+  - fields: [party_id, role]
+    unique: true
+    type: partial
+    condition: "is_default = 1 AND status = 'active'"
+    name: uidx_party_address_default
+  - fields: [address_id]
+    name: idx_party_address_address
+  - fields: [status]
+    name: idx_party_address_status
+
+relations:
+  - id: party_address_to_party
+    name: 业务伙伴
+    type: reference
+    target: party
+    source_field: party_id
+    target_field: id
+    cardinality: N:1
+    description: 所属业务伙伴引用（真外键）
+  - id: party_address_to_address
+    name: 地址
+    type: reference
+    target: address
+    source_field: address_id
+    target_field: id
+    cardinality: N:1
+    description: 地址库引用（真外键）
+
+ui_view_config:
+  # 作为业务伙伴详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 往来单位地址
+    columns:
+      - field: address_id
+        width: 320
+        render_as: association
+        target_type: address
+        display_field: formatted_address
+      - field: role
+        width: 110
+      - field: is_default
+        width: 90
+      - field: status
+        width: 90
+    defaultSort:
+      field: role
+      order: asc
+  form:
+    title: 往来单位地址信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [address_id]
+          - fields: [role, is_default]
+          - fields: [status]
+      - title: 其他
+        columns:
+          - fields: [description]

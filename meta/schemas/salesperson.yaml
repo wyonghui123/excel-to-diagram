@@ -1,0 +1,373 @@
+# 销售员（Salesperson）—— 订单销售员的字典对象
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §6.2
+#
+# 定位: 回答「谁负责这个客户 / 这张单」中的「谁」。
+#   - 本表只承载销售员身份（编码 / 姓名 / 可选的人员与账号绑定），不含客户分配；
+#     客户与销售员的分配在 customer_salesperson_assignment（客户档案子表）。
+#   - 区域（territory）按 Spec §6.1 推迟，本对象不含区域字段。
+#
+# 口径:
+#   ① code 全局唯一，是外部系统对接与展示的稳定键。
+#   ② party_id / user_id 均可空：「销售员」允许只是名字（尚未绑定人员或账号）。
+#   ③ status != active 时不被订单自动带出（W1-R17，由解析服务过滤）。
+
+id: salesperson
+name: 销售员
+table_name: salespersons
+description: 销售员字典——编码、姓名及可选的人员 / 账号绑定
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 销售员
+  category: core_entity
+  aliases:
+    - 销售员
+    - 业务员
+    - salesperson
+    - sales rep
+
+deletion_policy:
+  # 主数据禁止物理删除；被客户分配或订单引用时拒绝删除
+  mode: restrict
+  restrict_on:
+    - table: customer_salesperson_assignments
+      foreign_key: salesperson_id
+      message: 该销售员仍被客户销售员分配引用，请先解除分配后再删除
+    - table: sales_orders
+      foreign_key: salesperson_id
+      message: 该销售员被销售订单引用，请先处理订单后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 销售员编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 30
+    description: 销售员编码（全局唯一）
+    semantics:
+      meaning: 销售员业务代码
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: name
+    name: 姓名
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 销售员姓名
+    semantics:
+      meaning: 销售员显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 可选：内部人员对应的业务伙伴（source='org' 的内部表示或 person 类型）
+  - id: party_id
+    name: 对应业务伙伴
+    type: integer
+    db_column: party_id
+    nullable: true
+    description: 内部人员对应的业务伙伴；空表示尚未绑定
+    semantics:
+      meaning: 销售员对应的业务伙伴引用
+      display:
+        type: association
+        target_type: party_archive
+        display_field: name
+        placeholder: "未绑定"
+    value_help:
+      source:
+        type: bo
+        target_bo: party_archive
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 伙伴编码
+            width: 140
+          - field: name
+            label: 伙伴名称
+            width: 220
+    ui:
+      widget: select
+      relation: party_archive
+      multiple: false
+      clearable: true
+
+  # 可选：平台登录账号；供「我的客户」类过滤，不参与默认值解析
+  - id: user_id
+    name: 登录账号
+    type: integer
+    db_column: user_id
+    nullable: true
+    description: 平台登录用户；空表示未绑定账号
+    semantics:
+      meaning: 销售员绑定的登录用户
+      display:
+        type: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未绑定"
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 1
+      presentation:
+        result_type: dropdown
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再被订单自动带出，W1-R17）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 销售员启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 说明
+    semantics:
+      meaning: 销售员说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: deactivate_salesperson
+    name: 停用销售员
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后该销售员将不再被新订单自动带出，确定继续吗？"
+
+  - id: activate_salesperson
+    name: 启用销售员
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play_circle
+      confirm_message: "确定要启用此销售员吗？"
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uidx_salesperson_code
+  - fields: [user_id]
+    name: idx_salesperson_user
+
+relations:
+  - id: salesperson_to_party
+    name: 对应业务伙伴
+    type: reference
+    target: party
+    source_field: party_id
+    target_field: id
+    cardinality: N:1
+    description: 业务伙伴引用（可空；真外键）
+  - id: salesperson_to_user
+    name: 登录账号
+    type: reference
+    target: user
+    source_field: user_id
+    target_field: id
+    cardinality: N:1
+    description: 登录账号引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v127 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 销售员
+    description: 销售员字典：编码、姓名及人员 / 账号绑定
+    columns:
+      - field: code
+        width: 140
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: party_id
+        width: 180
+      - field: user_id
+        width: 160
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建销售员
+        icon: plus
+        type: primary
+        permission: salesperson:salesperson_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 销售员
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [status]
+      - title: 人员与账号
+        columns:
+          - fields: [party_id]
+          - fields: [user_id]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, party_id, user_id, status, description]
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v127 落库）
+  create_permission: salesperson:salesperson_create
+  update_permission: salesperson:salesperson_update
+  delete_permission: salesperson:salesperson_delete
+  owner_auto_permission: false

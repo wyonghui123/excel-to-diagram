@@ -522,3 +522,21 @@ ui_view_config:
           - default_incoterm_code
           - tax_classification_id
           - description
+
+  # 组织级商务差异：只在字段非空时覆盖账户级默认值（逐字段回退）
+  child_sections:
+    - child_object: customer_sales_org
+      title: 销售组织差异
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+    - child_object: customer_salesperson_assignment
+      title: 客户销售员
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

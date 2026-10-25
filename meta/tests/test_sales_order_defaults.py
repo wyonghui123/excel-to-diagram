@@ -15,6 +15,8 @@ class _FakeDS:
 
     def query(self, sql, params=None):
         self.queries.append((sql, params))
+        if 'FROM customer_sales_orgs' in sql:
+            return []          # 未配置组织差异 = 沿用账户级（零回归）
         if 'FROM customer_accounts' in sql:
             return [self.account] if self.account else []
         raise AssertionError('unexpected sql: %s' % sql)

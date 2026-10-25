@@ -1,0 +1,161 @@
+# ============================================
+# 销售组织面（org_sales_org）— 销售域候选集收窄
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §3.5
+#
+# [为什么需要这个面]
+#   销售组织 = 「具备 sales 职能的 org」。职能存于一对多子表
+#   org_functions(org_id, function_type)，不是 orgs 上的列 ⇒ value_filter 的
+#   单字段 eq 表达不了（同 org_legal_entity 的结论）。
+#   org 全表含部门 / 团队 / 测试组，直接 target_bo: org 会让下拉混入非销售组织。
+#
+# [谓词与守卫同源]
+#   本面谓词直接读 org_functions.function_type='sales'，与
+#   sales_order_guard_service._org_has_function(sales_org_id, 'sales') 同一判据
+#   （W0-R10），不引入第二套口径。
+#
+# [只读面]
+#   不设 write_anchor ⇒ 写请求由 READ_ONLY_VIEW 护栏拒绝（API 侧 400）。
+#   职能增删仍走 OrgFunctionService。
+# ============================================
+
+id: org_sales_org
+name: 销售组织
+table_name: org_sales_org
+description: 销售组织面：恒取具备 sales 职能的 org（候选集口径由视图 SQL 结构强制）
+display_name_field: name
+object_type: view
+view_definition: |
+  SELECT o.id, o.code, o.name, o.org_type, o.status
+  FROM orgs o
+  WHERE EXISTS (
+    SELECT 1 FROM org_functions f
+    WHERE f.org_id = o.id AND f.function_type = 'sales'
+  )
+
+# 只读面：仅 read / list；auto_crud 关闭
+import_export:
+  auto_crud: false
+
+actions:
+  - id: org_sales_org_read
+    name: 查询销售组织
+    type: crud
+    method: GET
+    path: "/api/v1/org_sales_orgs/{id}"
+    description: 查询单个销售组织记录
+  - id: org_sales_org_list
+    name: 查询销售组织列表
+    type: crud
+    method: GET
+    path: "/api/v1/org_sales_orgs"
+    description: 查询销售组织列表
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键（继承自 orgs.id）
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 组织编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 50
+    description: 组织唯一编码（继承自 orgs.code；下拉 display_format "{code} - {name}" 消费）
+    semantics:
+      meaning: 组织业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 组织名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 组织名称（继承自 orgs.name；下拉 display 消费）
+    semantics:
+      meaning: 组织显示名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+
+  - id: org_type
+    name: 组织类型
+    type: string
+    db_column: org_type
+    required: true
+    default: department
+    description: 组织类型（继承自 orgs.org_type；仅展示，销售资格由职能决定）
+    enum_values:
+      - value: department
+        label: 部门
+        color: primary
+      - value: team
+        label: 团队
+        color: success
+      - value: division
+        label: 事业部
+        color: warning
+      - value: company
+        label: 公司
+        color: danger
+    semantics:
+      meaning: 组织类型分类（展示用）
+    ui:
+      widget: select
+      filterable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 30
+    description: 组织状态 active/inactive（继承自 orgs.status）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 销售组织启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+# 视图上不建 FK：引用口径留在基表侧（同 org_legal_entity / party_internal）
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+  detail:
+    description: 这是组织档案中具备销售职能、可用于承接销售订单与价目表作用域的组织。
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - code
+          - name
+          - org_type
+          - status

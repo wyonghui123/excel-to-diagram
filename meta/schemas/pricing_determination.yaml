@@ -1,0 +1,614 @@
+# ============================================
+# 定价确定规则（pricing_determination）— 销售订单波次 1 / W1-A
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §3.4 / §3.6
+#
+# [定位]
+#   把「销售组织 + 单据类型 + 基准日」映射到「价目表 + 定价过程 + 查找序列」。
+#   原清单的「价目表↔销售组织」与「定价过程确定」两件事在这一层合并为一条规则：
+#   订单取价前先解析规则，再拿规则给出的表/过程/序列去调 PricingService。
+#
+# [为什么不自带 is_default]
+#   (sales_org_id=NULL, order_type_id=NULL) 且 seq 最大的那条，天然就是兜底规则。
+#   再引入 is_default 会形成两套默认语义，且两者冲突时无判据。
+#
+# [为什么 rate_table_id 可空]
+#   空 = 按「组织 + 币种」自动选最新 approved 价目表（§3.6 第 3 步）；
+#   非空 = 显式钉住某张表，但仍须通过 approved + 币种校验（W1-R9 / W1-R5）。
+#
+# [匹配次序]
+#   score = (sales_org_id 为空 ? 1 : 0) + (order_type_id 为空 ? 1 : 0)
+#   ORDER BY score ASC, seq ASC, id ASC，取第一条命中即停。
+#   ⇒ 组织精确 > 类型精确 > 序列号小者。
+#
+# [同维度不并列]
+#   uq_pd_dimension 用 COALESCE 把 NULL 折叠成占位值后做唯一索引：
+#   同一 (销售组织, 单据类型, 生效日) 只允许一条，避免「两条规则都命中、谁生效说不清」。
+# ============================================
+
+id: pricing_determination
+name: 定价确定规则
+table_name: pricing_determinations
+description: 定价确定规则——按销售组织 / 单据类型 / 基准日决定价目表、定价过程与查找序列
+display_name_field: code
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 定价确定规则
+  category: system_entity
+  business_key: [code]
+  display_name_field: code
+  aliases:
+    - 定价确定规则
+    - 定价规则
+    - pricing determination
+
+deletion_policy:
+  # 纯配置对象，无下游事实数据引用；删后当期取价回落到底规则或未命中
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 规则编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 规则唯一编码（如 PD_STD / PD_EAST_CONTRACT）
+    semantics:
+      meaning: 定价确定规则业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 规则名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 规则显示名称
+    semantics:
+      meaning: 定价确定规则显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 空 = 任意销售组织；非空 = 仅该组织命中
+  - id: sales_org_id
+    name: 销售组织
+    type: integer
+    db_column: sales_org_id
+    required: false
+    nullable: true
+    description: 规则适用的销售组织；空 = 任意销售组织
+    semantics:
+      meaning: 规则作用的销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "任意销售组织"
+    value_help:
+      source:
+        type: bo
+        # 候选集收窄到「具备 sales 职能的组织」，与订单守卫 W0-R10 同源
+        target_bo: org_sales_org
+        display_target_bo: org
+        detail_target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  # 空 = 任意单据类型（scope_bo='sales_order' + level='header'）
+  - id: order_type_id
+    name: 订单类型
+    type: integer
+    db_column: order_type_id
+    required: false
+    nullable: true
+    description: 规则适用的订单类型；空 = 任意订单类型
+    semantics:
+      meaning: 规则作用的订单单据类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+        placeholder: "任意订单类型"
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: sales_order
+          level: header
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 类型编码
+            width: 120
+          - field: name
+            label: 类型名称
+            width: 200
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+      clearable: true
+
+  # 空 = 按组织+币种自动选最新 approved
+  - id: rate_table_id
+    name: 价目表
+    type: integer
+    db_column: rate_table_id
+    required: false
+    nullable: true
+    description: 规则指定的价目表；空 = 按销售组织与币种自动选最新已发布价目表
+    semantics:
+      meaning: 命中的价目表
+      display:
+        type: association
+        target_type: rate_table
+        display_field: name
+        placeholder: "自动选择"
+    value_help:
+      source:
+        type: bo
+        target_bo: rate_table
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: approved
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 价目表编码
+            width: 160
+          - field: name
+            label: 名称
+            width: 200
+          - field: currency
+            label: 币种
+            width: 90
+    ui:
+      widget: select
+      relation: rate_table
+      multiple: false
+      clearable: true
+
+  - id: calc_procedure_id
+    name: 定价过程
+    type: integer
+    db_column: calc_procedure_id
+    required: true
+    description: 规则指定的定价过程（过程步骤见 calc_procedure_steps）
+    semantics:
+      meaning: 取价所用的定价过程
+      display:
+        type: association
+        target_type: calc_procedure
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: calc_procedure
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 过程编码
+            width: 160
+          - field: name
+            label: 过程名称
+            width: 200
+    ui:
+      widget: select
+      relation: calc_procedure
+      multiple: false
+
+  # 空 = 跳过查表，直接按过程步骤出结果
+  - id: lookup_sequence_id
+    name: 查找序列
+    type: integer
+    db_column: lookup_sequence_id
+    required: false
+    nullable: true
+    description: 规则指定的查找序列；空 = 跳过查表，直接按过程步骤计算
+    semantics:
+      meaning: 取价时使用的槽位次序
+      display:
+        type: association
+        target_type: lookup_sequence
+        display_field: name
+        placeholder: "不查表"
+    value_help:
+      source:
+        type: bo
+        target_bo: lookup_sequence
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 序列编码
+            width: 160
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: lookup_sequence
+      multiple: false
+      clearable: true
+
+  # 空 = 跟随订单币种；非空 = 必须与订单币种一致，否则 CURRENCY_MISMATCH
+  - id: currency
+    name: 规则币种
+    type: string
+    db_column: currency
+    required: false
+    nullable: true
+    max_length: 3
+    pattern: "^[A-Z]{3}$"
+    description: 规则限定的币种；空 = 跟随订单币种
+    semantics:
+      meaning: 规则限定的 ISO 4217 币种代码
+      data_category: code
+    ui:
+      widget: input
+      clearable: true
+
+  # 匹配次序，小者优先；仅在 score 相同时生效
+  - id: seq
+    name: 匹配次序
+    type: integer
+    db_column: seq
+    required: true
+    default: 100
+    description: 匹配次序（小者优先）；仅在组织/类型精确度相同时比较
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 规则匹配次序
+      filterable: true
+      filter_type: number
+      filter_label: 次序
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: valid_from
+    name: 生效日
+    type: date
+    db_column: valid_from
+    required: false
+    nullable: true
+    description: 规则生效日（含）；空 = 立即生效
+    semantics:
+      meaning: 规则生效起始日
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 失效日
+    type: date
+    db_column: valid_to
+    required: false
+    nullable: true
+    description: 规则失效日（不含）；空 = 长期有效
+    semantics:
+      meaning: 规则生效截止日
+    ui:
+      widget: date
+
+  # 仅 active 参与解析；draft 便于先配后启用
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 规则状态。仅 active 参与解析
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: default
+        category: draft
+        is_initial: true
+        description: 未启用，不参与解析
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        description: 启用，参与解析
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 停用，不参与解析但保留数据
+    semantics:
+      meaning: 规则启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 规则业务说明
+    semantics:
+      meaning: 定价确定规则说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_pd_code
+  # 解析查询主路径
+  - fields: [sales_org_id, order_type_id, status, seq]
+    name: idx_pd_lookup
+  # 同维度同生效日不允许并列（NULL 折叠为占位值后再比对）
+  - name: uq_pd_dimension
+    type: partial
+    unique: true
+    condition: "1 = 1"
+    db_columns:
+      - "COALESCE(sales_org_id, 0)"
+      - "COALESCE(order_type_id, 0)"
+      - "COALESCE(valid_from, '')"
+
+relations:
+  - id: pricing_determination_to_sales_org
+    name: 销售组织
+    type: reference
+    target: org
+    source_field: sales_org_id
+    target_field: id
+    cardinality: N:1
+    description: 规则适用的销售组织（可空，空 = 任意）
+  - id: pricing_determination_to_order_type
+    name: 订单类型
+    type: reference
+    target: type_definition
+    source_field: order_type_id
+    target_field: id
+    cardinality: N:1
+    description: 规则适用的订单单据类型（可空，空 = 任意）
+  - id: pricing_determination_to_rate_table
+    name: 价目表
+    type: reference
+    target: rate_table
+    source_field: rate_table_id
+    target_field: id
+    cardinality: N:1
+    description: 规则指定的价目表（可空 = 自动选择）
+  - id: pricing_determination_to_calc_procedure
+    name: 定价过程
+    type: reference
+    target: calc_procedure
+    source_field: calc_procedure_id
+    target_field: id
+    cardinality: N:1
+    description: 规则指定的定价过程（必填）
+  - id: pricing_determination_to_lookup_sequence
+    name: 查找序列
+    type: reference
+    target: lookup_sequence
+    source_field: lookup_sequence_id
+    target_field: id
+    cardinality: N:1
+    description: 规则指定的查找序列（可空 = 不查表）
+
+ui_view_config:
+  # 菜单由波次 1 迁移手工声明
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 定价确定规则
+    description: 按销售组织 / 单据类型 / 基准日决定价目表与定价过程
+    columns:
+      - field: code
+        width: 160
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: sales_org_id
+        width: 150
+      - field: order_type_id
+        width: 120
+      - field: rate_table_id
+        width: 150
+      - field: calc_procedure_id
+        width: 140
+      - field: seq
+        width: 90
+        align: center
+      - field: valid_from
+        width: 120
+        format: date
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+      - description
+    actions:
+      - id: create
+        label: 新建规则
+        icon: plus
+        type: primary
+        permission: pricing_determination:pricing_determination_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: seq
+      order: asc
+
+  form:
+    title: 定价确定规则
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [status, seq]
+      - title: 匹配维度
+        columns:
+          - fields: [sales_org_id, order_type_id]
+          - fields: [currency]
+          - fields: [valid_from, valid_to]
+      - title: 取价配置
+        columns:
+          - fields: [rate_table_id]
+          - fields: [calc_procedure_id]
+          - fields: [lookup_sequence_id]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+category_config:
+  create_permission: pricing_determination:pricing_determination_create
+  update_permission: pricing_determination:pricing_determination_update
+  delete_permission: pricing_determination:pricing_determination_delete
+  owner_auto_permission: false

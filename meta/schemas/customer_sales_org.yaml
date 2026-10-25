@@ -1,0 +1,475 @@
+# 客户销售组织（Customer Sales Org）— 账户级默认值的组织段覆盖
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §4
+#
+# 定位: customer_account 的附属明细（child_sections），不单独成菜单。
+#   同一客户在同一法人下按销售组织细分商务条件，只补「差异字段」，
+#   其余字段继续沿用账户级默认值（逐字段回退，禁止整行覆盖）。
+#
+# 解析链:
+#   默认值(field) = 本行该字段非空 ? 本行该字段 : customer_account 对应字段
+#
+# 字段口径:
+#   ① sales_org_id 必须具备 sales 职能（服务层拦截，不只靠前端下拉收窄）。
+#   ② 覆盖字段只在非空时生效；NULL 即「该字段沿用账户级」。
+#   ③ currency_id 仅作默认值来源，不含汇率；订单侧汇率仍由用户/后续引擎给。
+#   ④ (customer_account_id, sales_org_id) 唯一，重复配置由唯一索引兜底。
+
+id: customer_sales_org
+name: 客户销售组织
+table_name: customer_sales_orgs
+description: 客户在特定销售组织下的商务条件差异（覆盖账户级默认值）
+parent_object: customer_account
+display_name_field: sales_org_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 客户销售组织
+  category: core_entity
+  aliases:
+    - 客户销售组织
+    - customer sales org
+
+deletion_policy:
+  mode: restrict
+  # 当前零引用方（订单只引用 customer_account），保留结构供未来接上后补条目。
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: customer_account_id
+    name: 所属客户档案
+    type: integer
+    db_column: customer_account_id
+    required: true
+    description: 所属客户档案
+    semantics:
+      meaning: 所属客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+
+  # 候选集收窄到具备 sales 职能的组织（org_sales_org 视图），与订单守卫同源。
+  - id: sales_org_id
+    name: 销售组织
+    type: integer
+    db_column: sales_org_id
+    required: true
+    description: 销售组织（须具备 sales 职能）
+    semantics:
+      meaning: 该组商务条件适用的销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org_sales_org
+        display_target_bo: org
+        detail_target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  # 以下四个字段为「差异值」。NULL = 该字段沿用客户档案的账户级默认值。
+  - id: tax_classification_id
+    name: 税务分类
+    type: integer
+    db_column: tax_classification_id
+    nullable: true
+    description: 覆盖账户级税务分类；空表示沿用客户档案
+    semantics:
+      meaning: 该销售组织下的默认税务分类引用
+      display:
+        type: association
+        target_type: tax_classification
+        display_field: name
+        placeholder: "未指定（沿用客户档案）"
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_classification
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+        parameter_bindings:
+          - target_field: applicable_to
+            constant: customer
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 分类编码
+            width: 120
+          - field: name
+            label: 分类名称
+            width: 200
+    ui:
+      widget: select
+      relation: tax_classification
+      multiple: false
+      clearable: true
+
+  - id: payment_term_id
+    name: 付款条件
+    type: integer
+    db_column: payment_term_id
+    nullable: true
+    description: 覆盖账户级默认账期；空表示沿用客户档案
+    semantics:
+      meaning: 该销售组织下的默认付款条件引用
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+        placeholder: "未指定（沿用客户档案）"
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 条件编码
+            width: 140
+          - field: name
+            label: 条件名称
+            width: 200
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
+  - id: incoterm_code
+    name: 贸易条款
+    type: string
+    db_column: incoterm_code
+    nullable: true
+    max_length: 10
+    description: 覆盖账户级默认贸易条款代码；空表示沿用客户档案
+    semantics:
+      meaning: 该销售组织下的默认国际贸易术语代码
+      data_category: code
+      display:
+        type: association
+        target_type: incoterm
+        display_field: name
+        placeholder: "未指定（沿用客户档案）"
+    value_help:
+      source:
+        type: bo
+        target_bo: incoterm
+        value_field: code
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          edition: '2020'
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 术语
+            width: 90
+          - field: name
+            label: 名称
+            width: 220
+    ui:
+      widget: select
+      relation: incoterm
+      multiple: false
+      clearable: true
+
+  - id: currency_id
+    name: 默认币种
+    type: integer
+    db_column: currency_id
+    nullable: true
+    description: 该销售组织下的默认币种（仅作默认值来源，不含汇率）
+    semantics:
+      meaning: 该销售组织下的默认订单币种
+      display:
+        type: association
+        target_type: currency
+        display_field: name
+        placeholder: "未指定（沿用客户档案/用户选择）"
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 币种代码
+            width: 110
+          - field: name
+            label: 币种名称
+            width: 200
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再作为默认值来源）
+    enum_values:
+      - value: active
+        label: 启用
+        color: primary
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 记录启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    description: 说明
+    semantics:
+      meaning: 该组织差异的说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 同一客户同一组织只允许一行差异配置
+  - fields: [customer_account_id, sales_org_id]
+    unique: true
+    name: uidx_customer_sales_org_account_org
+  - fields: [sales_org_id]
+    name: idx_customer_sales_org_org
+
+relations:
+  - id: customer_sales_org_to_account
+    name: 所属客户档案
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 所属客户档案引用（真外键）
+  - id: customer_sales_org_to_org
+    name: 销售组织
+    type: reference
+    target: org
+    source_field: sales_org_id
+    target_field: id
+    cardinality: N:1
+    description: 销售组织引用（真外键）
+  - id: customer_sales_org_to_tax_classification
+    name: 税务分类
+    type: reference
+    target: tax_classification
+    source_field: tax_classification_id
+    target_field: id
+    cardinality: N:1
+    description: 税务分类覆盖引用（可空）
+  - id: customer_sales_org_to_payment_term
+    name: 付款条件
+    type: reference
+    target: payment_term
+    source_field: payment_term_id
+    target_field: id
+    cardinality: N:1
+    description: 付款条件覆盖引用（可空）
+  - id: customer_sales_org_to_currency
+    name: 默认币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 默认币种引用（可空）
+
+ui_view_config:
+  # 作为客户档案详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 客户销售组织
+    columns:
+      - field: sales_org_id
+        width: 200
+      - field: payment_term_id
+        width: 160
+      - field: incoterm_code
+        width: 110
+      - field: currency_id
+        width: 110
+      - field: status
+        width: 90
+    defaultSort:
+      field: sales_org_id
+      order: asc
+  form:
+    title: 客户销售组织信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [sales_org_id, status]
+      - title: 商务覆盖
+        columns:
+          - fields: [payment_term_id, incoterm_code]
+          - fields: [currency_id, tax_classification_id]
+      - title: 其他
+        columns:
+          - fields: [description]

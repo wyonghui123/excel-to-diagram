@@ -1414,6 +1414,39 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [SALES-W1] 定价确定规则 —— 定价域/价目与取价组
+            #   权限码取自 permissions 表实际值 `{bo}:{bo}_{action}` (双段式),
+            #     与 menu_auto_generator._derive_permissions_from_bindings 口径一致.
+            #   父节点 pricing-price 是 multi_object_hub, tab 由 children 渲染,
+            #     故本菜单只作其子项, 不改父 hub 的 object_types / bo_bindings.
+            'menu_code': 'pricing-determination-list',
+            'menu_name': '定价确定规则',
+            'menu_path': '/pricing-determination',
+            'icon': 'List',
+            'color': '#8b5cf6',
+            'sort_order': 96,
+            'parent_menu': 'pricing-price',
+            'page_type': 'object_list',
+            'primary_object_type': 'pricing_determination',
+            'object_types': json.dumps(['pricing_determination']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'pricing_determination', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'pricing_determination:pricing_determination_create',
+                'pricing_determination:pricing_determination_read',
+                'pricing_determination:pricing_determination_update',
+                'pricing_determination:pricing_determination_delete',
+                'pricing_determination:pricing_determination_list',
+            ]),
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['pricing_determination'],
+                'message': '建议分配定价确定规则数据权限'
+            })
+        },
+        {
             # [PRICE-MENU 2026-10-13] 计算过程 —— 定价域 计算过程 组聚合页
             #   背景: 定价域 15 个对象的自动菜单 (rate-table-list / calc-result-list 等)
             #     此前 parent_menu='' 且 show_in_sidebar=0, 既不在侧边栏、也没挂任何父节点
@@ -1924,6 +1957,38 @@ def init_menu_permissions(db_path):
             'data_permission_hint': json.dumps({
                 'resource_types': ['item_structure'],
                 'message': '建议分配物料结构数据权限'
+            })
+        },
+        {
+            # [SALES-W1] 销售员 —— 主数据组
+            #   与 v127__salesperson_and_assignment 的声明保持一致；缺本声明时
+            #   步骤 7.6 会把该手工菜单当冗余删除（销售员页入口随之消失）。
+            'menu_code': 'salesperson-list',
+            'menu_name': '销售员',
+            'menu_path': '/salespersons',
+            'icon': 'List',
+            'color': '#0ea5e9',
+            'sort_order': 84,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'salesperson',
+            'object_types': json.dumps(['salesperson']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'salesperson', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'salesperson:salesperson_create',
+                'salesperson:salesperson_read',
+                'salesperson:salesperson_update',
+                'salesperson:salesperson_delete',
+                'salesperson:salesperson_list',
+            ]),
+            'description': '销售员字典：编码、姓名及人员 / 账号绑定',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['salesperson'],
+                'message': '建议分配销售员数据权限'
             })
         },
     ]

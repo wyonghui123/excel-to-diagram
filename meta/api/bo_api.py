@@ -170,11 +170,53 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 # ── CRUD ──
 
 SALES_ORDER_OBJECT = 'sales_order'
+#: 抬头变更后需要重算商务默认值的维度（客户 / 销售组织变化）
+_SALES_ORDER_PARTY_FIELDS = ('customer_account_id', 'sales_org_id')
+#: 订单抬头地址字段（收货 / 收票）
+_SALES_ORDER_ADDRESS_FIELDS = ('ship_to_address_id', 'bill_to_address_id')
+#: 抬头变更后需要重算地址的维度（客户 / 送达方 / 收票方）
+_SALES_ORDER_ADDRESS_TRIGGERS = ('customer_account_id', 'ship_to_party_id',
+                                 'bill_to_account_id')
+#: 抬头变更后需要重算销售员的维度（客户 / 销售组织 / 基准日）
+_SALES_ORDER_SALESPERSON_TRIGGERS = ('customer_account_id', 'sales_org_id',
+                                     'price_date')
+#: 商务默认值字段 → 单据类型控制参数键（解析链最后一段兜底）
+_CONTROL_DEFAULT_KEYS = {
+    'payment_term_id': 'default_payment_term',
+    'incoterm_code': 'default_incoterm',
+}
+
+
+def _same_value(a, b) -> bool:
+    """宽松比较：空值等同；数字/文本按字符串比对（库内可能有文本存储）。"""
+    if a in (None, '') and b in (None, ''):
+        return True
+    return str(a).strip() == str(b).strip()
+
+
+def _resolve_sales_order_control_defaults(context: dict) -> dict:
+    """单据类型控制参数兜底；解析失败返回空字典（不阻断保存）。"""
+    try:
+        from meta.services.control_parameter_service import (
+            get_control_parameter_resolver,
+        )
+        return get_control_parameter_resolver().resolve_many(
+            list(_CONTROL_DEFAULT_KEYS.values()),
+            {
+                'org_id': context.get('sales_org_id'),
+                'document_type_id': context.get('order_type_id'),
+            },
+            domain='sales')
+    except Exception as e:
+        logger.warning('[bo_api] 控制参数兜底失败（不阻断保存）: %s', e)
+        return {}
 
 
 def _apply_sales_order_defaults(object_type: str, data: dict) -> dict:
-    """销售订单商务默认值：客户账户默认 → 单据类型控制参数 → 留空（§2.4）。
+    """销售订单商务默认值：组织差异 → 客户账户默认 → 单据类型控制参数 → 留空。
 
+    解析链（W1-B §4.3）：`customer_sales_org(客户, 销售组织)` 的字段非空时覆盖
+    客户档案的账户级默认值，其余字段继续沿用账户级（逐字段回退）。
     只在调用方未显式给值时补，已给值一律不覆盖（用户可改）。
     解析失败不阻断保存：主数据查询异常降级为「不补默认」。
     """
@@ -184,52 +226,239 @@ def _apply_sales_order_defaults(object_type: str, data: dict) -> dict:
     payload = dict(data)
     ds = _get_data_source()
 
-    account = {}
-    customer_id = payload.get('customer_account_id')
-    if customer_id not in (None, ''):
-        try:
-            rows = ds.query(
-                'SELECT default_payment_term_id, default_incoterm_code '
-                'FROM customer_accounts WHERE id = ?', [customer_id])
-            account = rows[0] if rows else {}
-        except Exception as e:
-            logger.warning('[bo_api] 读取客户账户默认值失败: %s', e)
-
-    if payload.get('payment_term_id') in (None, '') \
-            and account.get('default_payment_term_id') not in (None, ''):
-        payload['payment_term_id'] = account.get('default_payment_term_id')
-    if not payload.get('incoterm_code') and account.get('default_incoterm_code'):
-        payload['incoterm_code'] = account.get('default_incoterm_code')
-
-    wanted = []
-    if payload.get('payment_term_id') in (None, ''):
-        wanted.append('default_payment_term')
-    if not payload.get('incoterm_code'):
-        wanted.append('default_incoterm')
-    if not wanted:
-        return payload
-
+    defaults = {}
     try:
-        from meta.services.control_parameter_service import (
-            get_control_parameter_resolver,
+        from meta.services.customer_sales_org_service import (
+            ORDER_DEFAULT_FIELDS,
+            CustomerSalesOrgService,
         )
-        resolved = get_control_parameter_resolver().resolve_many(
-            wanted,
-            {
-                'org_id': payload.get('sales_org_id'),
-                'document_type_id': payload.get('order_type_id'),
-            },
-            domain='sales')
+        defaults = CustomerSalesOrgService(ds).resolve(
+            payload.get('customer_account_id'), payload.get('sales_org_id'),
+            fields=ORDER_DEFAULT_FIELDS)
     except Exception as e:
-        logger.warning('[bo_api] 控制参数兜底失败（不阻断保存）: %s', e)
-        return payload
+        logger.warning('[bo_api] 读取客户默认值失败: %s', e)
 
     if payload.get('payment_term_id') in (None, '') \
-            and resolved.get('default_payment_term') not in (None, ''):
-        payload['payment_term_id'] = resolved.get('default_payment_term')
-    if not payload.get('incoterm_code') \
-            and resolved.get('default_incoterm') not in (None, ''):
-        payload['incoterm_code'] = resolved.get('default_incoterm')
+            and defaults.get('payment_term_id') not in (None, ''):
+        payload['payment_term_id'] = defaults.get('payment_term_id')
+    if not payload.get('incoterm_code') and defaults.get('incoterm_code'):
+        payload['incoterm_code'] = defaults.get('incoterm_code')
+
+    wanted = [f for f in ORDER_DEFAULT_FIELDS if payload.get(f) in (None, '')]
+    if wanted:
+        resolved = _resolve_sales_order_control_defaults(payload)
+        for field in wanted:
+            value = resolved.get(_CONTROL_DEFAULT_KEYS[field])
+            if value not in (None, ''):
+                payload[field] = value
+    return _apply_sales_order_address_defaults(payload)
+
+
+def _reapply_sales_order_defaults(object_type: str, obj_id, data: dict) -> dict:
+    """客户 / 销售组织变更时重算商务默认值（W1-B §4.3）。
+
+    只在三件事同时成立时改写字段：调用方未显式给该字段值、库中现值仍等于
+    「变更前解析结果」（用户手改过的值不动）、变更后解析结果确实不同。
+    目标值解析为空则写 None，让其回退到账户级/控制参数/留空。
+    """
+    if object_type != SALES_ORDER_OBJECT:
+        return data
+
+    payload = dict(data)
+    if not any(f in payload for f in _SALES_ORDER_PARTY_FIELDS):
+        return payload
+
+    ds = _get_data_source()
+    try:
+        from meta.services.customer_sales_org_service import (
+            ORDER_DEFAULT_FIELDS,
+            CustomerSalesOrgService,
+        )
+        rows = ds.query(
+            'SELECT customer_account_id, sales_org_id, order_type_id, '
+            'payment_term_id, incoterm_code FROM sales_orders WHERE id = ?',
+            [obj_id])
+    except Exception as e:
+        logger.warning('[bo_api] 读取订单现值失败（不重算默认值）: %s', e)
+        return payload
+    if not rows:
+        return payload
+
+    current = rows[0]
+    if not any(not _same_value(payload.get(f), current.get(f))
+               for f in _SALES_ORDER_PARTY_FIELDS if f in payload):
+        return payload
+
+    service = CustomerSalesOrgService(ds)
+    old_defaults = service.resolve(
+        current.get('customer_account_id'), current.get('sales_org_id'),
+        fields=ORDER_DEFAULT_FIELDS)
+    new_defaults = service.resolve(
+        payload.get('customer_account_id', current.get('customer_account_id')),
+        payload.get('sales_org_id', current.get('sales_org_id')),
+        fields=ORDER_DEFAULT_FIELDS)
+
+    auto_fields = []
+    for field in ORDER_DEFAULT_FIELDS:
+        if field in payload:  # 调用方显式给值（含显式清空），不覆盖
+            continue
+        if _same_value(new_defaults.get(field), old_defaults.get(field)):
+            continue
+        if not _same_value(current.get(field), old_defaults.get(field)):
+            continue  # 用户手改过，保持原值
+        payload[field] = new_defaults.get(field)
+        auto_fields.append(field)
+
+    empty_auto = [f for f in auto_fields if payload.get(f) in (None, '')]
+    if empty_auto:
+        merged = {**current, **payload}
+        resolved = _resolve_sales_order_control_defaults(merged)
+        for field in empty_auto:
+            value = resolved.get(_CONTROL_DEFAULT_KEYS[field])
+            if value not in (None, ''):
+                payload[field] = value
+    return payload
+
+
+def _apply_sales_order_address_defaults(payload: dict) -> dict:
+    """创建时带出收货 / 收票地址（W1-C §5.3）。
+
+    只在调用方未给该字段值时补；解析不到保持空白（W1-R15：留空不构成校验失败）。
+    """
+    if all(payload.get(f) not in (None, '') for f in _SALES_ORDER_ADDRESS_FIELDS):
+        return payload
+    try:
+        from meta.services.party_address_service import (
+            ADDRESS_FIELDS, PartyAddressService,
+        )
+        resolved = PartyAddressService(_get_data_source()).resolve(payload)
+    except Exception as e:
+        logger.warning('[bo_api] 解析默认地址失败（不阻断保存）: %s', e)
+        return payload
+    for field in ADDRESS_FIELDS:
+        if payload.get(field) in (None, '') and resolved.get(field) not in (None, ''):
+            payload[field] = resolved.get(field)
+    return payload
+
+
+def _reapply_sales_order_addresses(object_type: str, obj_id, data: dict) -> dict:
+    """客户 / 送达方 / 收票方变更时重算订单地址（W1-C §5.3）。
+
+    判定口径与商务默认值一致：调用方未显式给地址、库中现值仍等于变更前解析结果
+    （用户手选过的地址不动）、变更后解析结果确实不同，三者同时成立才改写。
+    """
+    if object_type != SALES_ORDER_OBJECT:
+        return data
+
+    payload = dict(data)
+    if not any(f in payload for f in _SALES_ORDER_ADDRESS_TRIGGERS):
+        return payload
+
+    ds = _get_data_source()
+    try:
+        from meta.services.party_address_service import (
+            ADDRESS_FIELDS, PartyAddressService,
+        )
+        rows = ds.query(
+            'SELECT customer_account_id, ship_to_party_id, bill_to_account_id, '
+            'ship_to_address_id, bill_to_address_id FROM sales_orders WHERE id = ?',
+            [obj_id])
+    except Exception as e:
+        logger.warning('[bo_api] 读取订单地址现值失败（不重算）: %s', e)
+        return payload
+    if not rows:
+        return payload
+
+    current = rows[0]
+    if not any(not _same_value(payload.get(f), current.get(f))
+               for f in _SALES_ORDER_ADDRESS_TRIGGERS if f in payload):
+        return payload
+
+    service = PartyAddressService(ds)
+    old_defaults = service.resolve(current)
+    new_defaults = service.resolve({**current, **payload})
+
+    for field in ADDRESS_FIELDS:
+        if field in payload:  # 调用方显式给值（含显式清空），不覆盖
+            continue
+        if _same_value(new_defaults.get(field), old_defaults.get(field)):
+            continue
+        if not _same_value(current.get(field), old_defaults.get(field)):
+            continue  # 用户手选过，保持原值
+        payload[field] = new_defaults.get(field)
+    return payload
+
+
+def _apply_sales_order_salesperson(object_type: str, payload: dict) -> dict:
+    """创建时带出主销售员（W1-D §6.3）。
+
+    只在调用方未给值时补；解析不到保持空白（销售员可空，不构成校验失败）。
+    """
+    if object_type != SALES_ORDER_OBJECT:
+        return payload
+    if payload.get('salesperson_id') not in (None, ''):
+        return payload
+    try:
+        from meta.services.salesperson_service import SalespersonService
+        value = SalespersonService(_get_data_source()).resolve(
+            payload.get('customer_account_id'), payload.get('sales_org_id'),
+            payload.get('price_date'))
+    except Exception as e:
+        logger.warning('[bo_api] 解析主销售员失败（不阻断保存）: %s', e)
+        return payload
+    if value not in (None, ''):
+        payload['salesperson_id'] = value
+    return payload
+
+
+def _reapply_sales_order_salesperson(object_type: str, obj_id, data: dict) -> dict:
+    """客户 / 销售组织 / 基准日变更时重算订单销售员（W1-D §6.3 / W1-R18）。
+
+    判定口径与商务默认值、地址一致：调用方未显式给销售员、库中现值仍等于
+    变更前解析结果（用户手选过的不动）、变更后解析结果确实不同，三者同时
+    成立才改写；解析为空则写 None。
+    """
+    if object_type != SALES_ORDER_OBJECT:
+        return data
+
+    payload = dict(data)
+    if not any(f in payload for f in _SALES_ORDER_SALESPERSON_TRIGGERS):
+        return payload
+
+    ds = _get_data_source()
+    try:
+        from meta.services.salesperson_service import SalespersonService
+        rows = ds.query(
+            'SELECT customer_account_id, sales_org_id, price_date, salesperson_id '
+            'FROM sales_orders WHERE id = ?',
+            [obj_id])
+    except Exception as e:
+        logger.warning('[bo_api] 读取订单销售员现值失败（不重算）: %s', e)
+        return payload
+    if not rows:
+        return payload
+
+    current = rows[0]
+    if not any(not _same_value(payload.get(f), current.get(f))
+               for f in _SALES_ORDER_SALESPERSON_TRIGGERS if f in payload):
+        return payload
+
+    service = SalespersonService(ds)
+    old_default = service.resolve(
+        current.get('customer_account_id'), current.get('sales_org_id'),
+        current.get('price_date'))
+    new_default = service.resolve(
+        payload.get('customer_account_id', current.get('customer_account_id')),
+        payload.get('sales_org_id', current.get('sales_org_id')),
+        payload.get('price_date', current.get('price_date')))
+
+    if 'salesperson_id' in payload:  # 调用方显式给值（含显式清空），不覆盖
+        return payload
+    if _same_value(new_default, old_default):
+        return payload
+    if not _same_value(current.get('salesperson_id'), old_default):
+        return payload  # 用户手选过，保持原值
+    payload['salesperson_id'] = new_default
     return payload
 
 
@@ -281,6 +510,7 @@ def create_bo(object_type):
     data = request.get_json(silent=True) or {}
     try:
         data = _apply_sales_order_defaults(object_type, data)
+        data = _apply_sales_order_salesperson(object_type, data)
         data = _allocate_sales_order_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
@@ -927,6 +1157,9 @@ def deep_insert_bo(object_type):
 def update_bo(object_type, obj_id):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
+    data = _reapply_sales_order_defaults(object_type, obj_id, data)
+    data = _reapply_sales_order_addresses(object_type, obj_id, data)
+    data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -938,6 +1171,9 @@ def update_bo(object_type, obj_id):
 def update_bo_by_string_id(object_type, obj_id):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
+    data = _reapply_sales_order_defaults(object_type, obj_id, data)
+    data = _reapply_sales_order_addresses(object_type, obj_id, data)
+    data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})

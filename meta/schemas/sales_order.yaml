@@ -356,6 +356,139 @@ fields:
       multiple: false
       clearable: true
 
+  # 地址角色：默认取往来单位在该角色下的默认地址；留空不构成校验失败（W1-R15）
+  - id: ship_to_address_id
+    name: 收货地址
+    type: integer
+    db_column: ship_to_address_id
+    nullable: true
+    description: 收货地址；默认取送达方的 ship_to 默认地址，可手工改选
+    semantics:
+      meaning: 订单收货地址引用
+      display:
+        type: association
+        target_type: address
+        display_field: formatted_address
+        placeholder: "默认取送达方收货地址"
+    value_help:
+      source:
+        type: bo
+        target_bo: address
+        value_field: id
+        display_field: formatted_address
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} {formatted_address}"
+        columns:
+          - field: code
+            label: 地址编码
+            width: 140
+          - field: formatted_address
+            label: 地址全文
+            width: 320
+    ui:
+      widget: select
+      relation: address
+      multiple: false
+      clearable: true
+
+  - id: bill_to_address_id
+    name: 收票地址
+    type: integer
+    db_column: bill_to_address_id
+    nullable: true
+    description: 收票地址；默认取收票方的 bill_to 默认地址，可手工改选
+    semantics:
+      meaning: 订单收票地址引用
+      display:
+        type: association
+        target_type: address
+        display_field: formatted_address
+        placeholder: "默认取收票方收票地址"
+    value_help:
+      source:
+        type: bo
+        target_bo: address
+        value_field: id
+        display_field: formatted_address
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} {formatted_address}"
+        columns:
+          - field: code
+            label: 地址编码
+            width: 140
+          - field: formatted_address
+            label: 地址全文
+            width: 320
+    ui:
+      widget: select
+      relation: address
+      multiple: false
+      clearable: true
+
+  - id: salesperson_id
+    name: 销售员
+    type: integer
+    db_column: salesperson_id
+    nullable: true
+    description: 销售员；默认取客户在该销售组织下的主销售员，可手工改选（W1-R18）
+    semantics:
+      meaning: 订单销售员引用
+      display:
+        type: association
+        target_type: salesperson
+        display_field: name
+        placeholder: "默认取客户主销售员"
+    value_help:
+      source:
+        type: bo
+        target_bo: salesperson
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 销售员编码
+            width: 140
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      widget: select
+      relation: salesperson
+      multiple: false
+      clearable: true
+
   - id: org_id
     name: 业务实体
     type: integer
@@ -642,6 +775,137 @@ fields:
     ui:
       widget: date
 
+  # ---- 定价快照（由取价服务回写，界面只读）----
+  - id: price_date
+    name: 取价基准日
+    type: date
+    db_column: price_date
+    nullable: true
+    description: 取价基准日；空 = 取 order_date
+    semantics:
+      meaning: 定价生效日基准
+    ui:
+      widget: date
+
+  - id: pricing_status
+    name: 定价状态
+    type: string
+    db_column: pricing_status
+    required: true
+    default: pending
+    description: 抬头定价状态（未取价 / 已取价 / 手工价 / 取价失败）
+    enum_values:
+      - value: pending
+        label: 未取价
+        color: info
+        category: draft
+        is_initial: true
+      - value: determined
+        label: 已取价
+        color: success
+        category: active
+      - value: manual
+        label: 手工价
+        color: warning
+        category: active
+      - value: failed
+        label: 取价失败
+        color: danger
+        category: active
+    semantics:
+      meaning: 抬头定价状态
+      filterable: true
+      filter_type: enum
+      filter_label: 定价状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: price_list_id
+    name: 价目表
+    type: integer
+    db_column: price_list_id
+    nullable: true
+    description: 命中的价目表快照（取价服务回写）
+    semantics:
+      meaning: 命中的价目表
+      display:
+        type: association
+        target_type: rate_table
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: rate_table
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: approved
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 价目表编码
+            width: 160
+          - field: name
+            label: 价目表名称
+            width: 220
+    ui:
+      widget: select
+      relation: rate_table
+      multiple: false
+      editable: false
+
+  - id: pricing_procedure_id
+    name: 定价过程
+    type: integer
+    db_column: pricing_procedure_id
+    nullable: true
+    description: 命中的定价过程快照（取价服务回写）
+    semantics:
+      meaning: 命中的定价过程
+      display:
+        type: association
+        target_type: calc_procedure
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: calc_procedure
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 过程编码
+            width: 160
+          - field: name
+            label: 过程名称
+            width: 220
+    ui:
+      widget: select
+      relation: calc_procedure
+      multiple: false
+      editable: false
+
   - id: net_amount
     name: 不含税合计
     type: number
@@ -827,6 +1091,30 @@ relations:
     target_field: id
     cardinality: N:1
     description: 送达方往来单位引用（可空）
+  - id: sales_order_to_ship_to_address
+    name: 收货地址
+    type: reference
+    target: address
+    source_field: ship_to_address_id
+    target_field: id
+    cardinality: N:1
+    description: 收货地址引用（可空；默认取送达方默认地址）
+  - id: sales_order_to_bill_to_address
+    name: 收票地址
+    type: reference
+    target: address
+    source_field: bill_to_address_id
+    target_field: id
+    cardinality: N:1
+    description: 收票地址引用（可空；默认取收票方默认地址）
+  - id: sales_order_to_salesperson
+    name: 销售员
+    type: reference
+    target: salesperson
+    source_field: salesperson_id
+    target_field: id
+    cardinality: N:1
+    description: 销售员引用（可空；默认取客户主销售员）
   - id: sales_order_to_org
     name: 业务实体
     type: reference
@@ -859,6 +1147,22 @@ relations:
     target_field: id
     cardinality: N:1
     description: 付款条件引用（可空）
+  - id: sales_order_to_price_list
+    name: 价目表
+    type: reference
+    target: rate_table
+    source_field: price_list_id
+    target_field: id
+    cardinality: N:1
+    description: 命中价目表引用（可空，取价快照）
+  - id: sales_order_to_pricing_procedure
+    name: 定价过程
+    type: reference
+    target: calc_procedure
+    source_field: pricing_procedure_id
+    target_field: id
+    cardinality: N:1
+    description: 命中定价过程引用（可空，取价快照）
 
 ui_view_config:
   # 菜单由波次 0 迁移手工声明
@@ -885,6 +1189,10 @@ ui_view_config:
         width: 160
       - field: currency_id
         width: 90
+      - field: pricing_status
+        width: 110
+        filterable: true
+        filter_type: select
       - field: gross_amount
         width: 130
       - field: requested_date
@@ -925,6 +1233,8 @@ ui_view_config:
         columns:
           - fields: [customer_account_id, ship_to_party_id]
           - fields: [bill_to_account_id, payer_account_id]
+          - fields: [ship_to_address_id, bill_to_address_id]
+          - fields: [salesperson_id]
           - fields: [org_id, sales_org_id]
           - fields: [division_code]
       - title: 商务条件
@@ -933,6 +1243,10 @@ ui_view_config:
           - fields: [payment_term_id, incoterm_code]
           - fields: [customer_po_no]
           - fields: [requested_date, confirmed_date]
+      - title: 定价信息
+        columns:
+          - fields: [price_date, pricing_status]
+          - fields: [price_list_id, pricing_procedure_id]
       - title: 金额合计
         columns:
           - fields: [net_amount, tax_amount, gross_amount]
@@ -950,3 +1264,8 @@ ui_view_config:
       enableDetail: true
       enableAutoCrud: true
       rowMutability: fullEditable
+      extraRowActions:
+        - key: expand
+          label: 展开
+          icon: expand
+          condition: "row.parent_line_id == null"

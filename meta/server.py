@@ -541,6 +541,9 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.sales_order_guard_interceptor import SalesOrderGuardInterceptor
     bo_framework.register_interceptor(SalesOrderGuardInterceptor())
+    # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
+    from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor
+    bo_framework.register_interceptor(CustomerSalesOrgGuardInterceptor())
     # [F3 2026-10-20 / 补注册 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重。
     #   与 app_builder.with_interceptors() 同位补齐 —— 此前只注册在新 builder 路径，
     #   而 waitress_server.py 走本函数（create_app）⇒ 运行时守卫缺失。
@@ -1006,6 +1009,9 @@ def create_app(db_path=None):
     # [销售订单 P1 2026-10-25] 行结构展开端点；与 app_builder 同位补齐。
     from meta.api.sales_order_expand_api import sales_order_expand_bp
     app.register_blueprint(sales_order_expand_bp)
+    # [销售订单 W1-A 2026-10-25] 重新取价端点。
+    from meta.api.sales_order_pricing_api import sales_order_pricing_bp
+    app.register_blueprint(sales_order_pricing_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)

@@ -1,0 +1,354 @@
+# 客户销售员分配（Customer Salesperson Assignment）
+# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave1-detailed-plan.md §6.2
+#
+# 定位: customer_account 的附属明细（child_sections），不单独成菜单。
+#   一个客户可配多名销售员；按销售组织区分，未指定组织时对所有组织通用。
+#
+# 解析链（订单抬头 salesperson_id）:
+#   主销售员 = assignment(客户, 销售组织, active, 有效期覆盖基准日, is_primary=1)
+#              ?? assignment(客户, NULL,    active, 有效期覆盖基准日, is_primary=1)
+#              ?? NULL
+#   且销售员本身 status='active'（W1-R17）。
+#
+# 约束:
+#   ① (customer_account_id, sales_org_id, salesperson_id) 唯一，防重复分配。
+#   ② 同一 (客户, 销售组织) 至多一条主销售员（W1-R16，部分唯一索引）。
+#      SQLite 的唯一索引把 NULL 视为互不相等，故「所有组织通用」另用一条
+#      sales_org_id IS NULL 的部分唯一索引兜底，否则可以配出两个通用主销售员。
+
+id: customer_salesperson_assignment
+name: 客户销售员分配
+table_name: customer_salesperson_assignments
+description: 客户与销售员的分配关系（可按销售组织区分，可设主销售员）
+parent_object: customer_account
+display_name_field: salesperson_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 客户销售员分配
+  category: core_entity
+  aliases:
+    - 客户销售员
+    - 客户销售员分配
+    - customer salesperson assignment
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: customer_account_id
+    name: 所属客户档案
+    type: integer
+    db_column: customer_account_id
+    required: true
+    description: 所属客户档案
+    semantics:
+      meaning: 所属客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+
+  # 空 = 对所有销售组织通用
+  - id: sales_org_id
+    name: 销售组织
+    type: integer
+    db_column: sales_org_id
+    nullable: true
+    description: 适用的销售组织；空表示所有组织通用
+    semantics:
+      meaning: 该分配适用的销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "所有组织通用"
+    value_help:
+      source:
+        type: bo
+        target_bo: org_sales_org
+        display_target_bo: org
+        detail_target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: salesperson_id
+    name: 销售员
+    type: integer
+    db_column: salesperson_id
+    required: true
+    description: 分配到的销售员
+    semantics:
+      meaning: 销售员引用
+      display:
+        type: association
+        target_type: salesperson
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: salesperson
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 销售员编码
+            width: 140
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      widget: select
+      relation: salesperson
+      multiple: false
+
+  - id: is_primary
+    name: 主销售员
+    type: boolean
+    db_column: is_primary
+    required: true
+    default: false
+    description: 主销售员（同一客户同一组织至多一个，W1-R16）
+    semantics:
+      meaning: 主销售员标记
+      filterable: true
+      filter_type: enum
+      filter_label: 主销售员
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: valid_from
+    name: 生效日
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 生效起始日（含）；空表示立即生效
+    semantics:
+      meaning: 分配生效起始日
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 失效日
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 分配失效日
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再作为订单默认值来源）
+    enum_values:
+      - value: active
+        label: 启用
+        color: primary
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 分配启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 同一客户、同一销售组织下同一销售员只分配一次
+  - fields: [customer_account_id, sales_org_id, salesperson_id]
+    unique: true
+    name: uidx_customer_salesperson_assign
+  # 主销售员：同一客户同一组织至多一条（W1-R16）
+  - fields: [customer_account_id, sales_org_id]
+    unique: true
+    type: partial
+    condition: "is_primary = 1 AND status = 'active'"
+    name: uidx_customer_salesperson_primary
+  # 「所有组织通用」的主销售员：唯一索引把 NULL 视为互不相等，单独兜底
+  - fields: [customer_account_id]
+    unique: true
+    type: partial
+    condition: "sales_org_id IS NULL AND is_primary = 1 AND status = 'active'"
+    name: uidx_customer_salesperson_primary_all_org
+  - fields: [salesperson_id]
+    name: idx_customer_salesperson_salesperson
+
+relations:
+  - id: customer_salesperson_to_account
+    name: 所属客户档案
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 所属客户档案引用（真外键）
+  - id: customer_salesperson_to_org
+    name: 销售组织
+    type: reference
+    target: org
+    source_field: sales_org_id
+    target_field: id
+    cardinality: N:1
+    description: 销售组织引用（可空；真外键）
+  - id: customer_salesperson_to_salesperson
+    name: 销售员
+    type: reference
+    target: salesperson
+    source_field: salesperson_id
+    target_field: id
+    cardinality: N:1
+    description: 销售员引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 客户销售员分配
+    columns:
+      - field: salesperson_id
+        width: 180
+      - field: sales_org_id
+        width: 180
+      - field: is_primary
+        width: 100
+      - field: valid_from
+        width: 120
+      - field: valid_to
+        width: 120
+      - field: status
+        width: 90
+    defaultSort:
+      field: salesperson_id
+      order: asc
+  form:
+    title: 客户销售员分配
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [salesperson_id, sales_org_id]
+          - fields: [is_primary, status]
+      - title: 有效期
+        columns:
+          - fields: [valid_from, valid_to]

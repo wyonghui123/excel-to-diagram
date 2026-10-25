@@ -576,6 +576,43 @@ fields:
     ui:
       widget: select
 
+  # ---- 取价结果（由取价服务回写，界面只读）----
+  - id: price_source
+    name: 单价来源
+    type: string
+    db_column: price_source
+    nullable: true
+    max_length: 20
+    description: 单价来源（价目表 / 手工录入）；空 = 尚未定价
+    enum_values:
+      - value: rate_table
+        label: 价目表
+        color: success
+      - value: manual
+        label: 手工录入
+        color: warning
+    semantics:
+      meaning: 订单行单价来源
+      filterable: true
+      filter_type: enum
+      filter_label: 单价来源
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: price_trace
+    name: 取价轨迹
+    type: json
+    db_column: price_trace
+    nullable: true
+    description: 取价轨迹（命中规则、价目表、过程、候选数与失败原因码）
+    semantics:
+      meaning: 单价取价过程的可回放记录
+    ui:
+      widget: textarea
+      editable: false
+
   - id: status
     name: 行状态
     type: string
@@ -730,6 +767,10 @@ ui_view_config:
         width: 90
       - field: unit_price
         width: 110
+      - field: price_source
+        width: 110
+        filterable: true
+        filter_type: select
       - field: net_amount
         width: 120
       - field: tax_amount
@@ -760,10 +801,12 @@ ui_view_config:
           - fields: [qty, uom_id]
       - title: 价格与金额
         columns:
-          - fields: [unit_price, net_amount]
+          - fields: [unit_price, price_source]
+          - fields: [net_amount]
           - fields: [tax_code_id, tax_rate_percent]
           - fields: [tax_base_amount, tax_amount]
           - fields: [gross_amount]
+          - fields: [price_trace]
       # 展开相关字段只读：由展开服务写入，手工可改的只有 pricing_mode
       - title: 结构展开
         columns:

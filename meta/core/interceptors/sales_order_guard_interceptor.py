@@ -28,6 +28,10 @@ from meta.services.sales_order_guard_service import (
     SalesOrderGuardError,
     SalesOrderGuardService,
 )
+from meta.services.sales_order_pricing_service import (
+    SalesOrderPricingError,
+    SalesOrderPricingService,
+)
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -38,6 +42,10 @@ ORDER_OBJECT = 'sales_order'
 LINE_OBJECT = 'sales_order_line'
 _WRITE_ACTIONS = ('crud_create', 'crud_update', 'crud_delete')
 _ORDER_ID_KEY = 'so_parent_order_id'
+# 抬头变更触发重取价的维度（§3.7 触发时点 3）
+_PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'order_type_id')
+# 行变更触发重取价的维度（§3.7 触发时点 2）
+_PRICE_LINE_FIELDS = ('item_id', 'qty', 'uom_id')
 
 
 class SalesOrderGuardInterceptor(Interceptor):
@@ -84,9 +92,14 @@ class SalesOrderGuardInterceptor(Interceptor):
 
     def after_action(self, context: 'ActionContext') -> None:
         object_id = getattr(context.meta_object, 'id', None)
-        if object_id != LINE_OBJECT:
-            # 抬头建单 / 改单不改变行，合计无需在此重算
+        if object_id == ORDER_OBJECT:
+            self._after_order_write(context)
             return
+        if object_id != LINE_OBJECT:
+            return
+
+        pricing = SalesOrderPricingService(context.data_source)
+        self._apply_line_pricing(context, pricing)
 
         amount = SalesOrderAmountService(context.data_source)
         try:
@@ -104,8 +117,61 @@ class SalesOrderGuardInterceptor(Interceptor):
                 return
             totals = amount.recompute_order(order_id)
             self._merge_result(context, totals)
+            status = pricing.refresh_order_pricing_status(order_id)
+            if status and context.result and context.result.data is not None:
+                context.result.data['pricing_status'] = status
         except SalesOrderAmountError as e:
             self._raise_validation(e)
+
+    # ---------------- 定价接线 ----------------
+
+    def _apply_line_pricing(self, context: 'ActionContext',
+                            pricing: SalesOrderPricingService) -> None:
+        """按 §3.7 触发时点对行取价；手工改价只打标记不重取。"""
+        line_id = context.object_id
+        if line_id in (None, ''):
+            return
+        params = dict(context.params or {})
+
+        if context.action == 'crud_create':
+            manual = params.get('unit_price') not in (None, '')
+        elif context.action == 'crud_update':
+            if 'unit_price' in params and params.get('unit_price') is not None:
+                pricing.mark_manual(line_id)
+                return
+            if not (set(params) & set(_PRICE_LINE_FIELDS)):
+                return
+            manual = False
+        else:
+            return
+
+        if manual:
+            pricing.mark_manual(line_id)
+            return
+        pricing.price_line(line_id)
+
+    def _after_order_write(self, context: 'ActionContext') -> None:
+        """抬头定价维度变更 → 重解析并重取全部非手工行（§3.7 触发时点 3）。"""
+        if context.action != 'crud_update':
+            return
+        if not (set(dict(context.params or {})) & set(_PRICE_HEADER_FIELDS)):
+            return
+
+        pricing = SalesOrderPricingService(context.data_source)
+        try:
+            summary = pricing.reprice_order(context.object_id, force=False,
+                                            strict=False)
+        except SalesOrderPricingError as e:
+            self._raise_validation(e)
+            return
+        if not summary or not context.result or context.result.data is None:
+            return
+        context.result.data['pricing_status'] = summary['pricing_status']
+        self._merge_result(context, {
+            'net_amount': summary.get('net_amount'),
+            'tax_amount': summary.get('tax_amount'),
+            'gross_amount': summary.get('gross_amount'),
+        })
 
     # ---------------- 内部 ----------------
 

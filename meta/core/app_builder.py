@@ -290,6 +290,10 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.sales_order_guard_interceptor import SalesOrderGuardInterceptor
         bo_framework.register_interceptor(SalesOrderGuardInterceptor())
+        # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor
+        bo_framework.register_interceptor(CustomerSalesOrgGuardInterceptor())
         # [F3 2026-10-20] 镜像行守卫（P43）：party_relation 无序去重，紧随约束校验之后
         #   [模块门控] party 轴依赖 org 的 BU/LE 职能，BIP 应用架构管理部署设
         #   DISABLED_PLATFORM_MODULES=party 时不注册（与 server.py create_app 同步）。
@@ -399,6 +403,7 @@ class ApplicationBuilder:
         from meta.api.allocation_api import allocation_bp
         from meta.api.sourcing_api import sourcing_bp
         from meta.api.sales_order_expand_api import sales_order_expand_bp
+        from meta.api.sales_order_pricing_api import sales_order_pricing_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -463,6 +468,8 @@ class ApplicationBuilder:
         app.register_blueprint(sourcing_bp)
         # [销售订单 P1 2026-10-25] 行结构展开端点。
         app.register_blueprint(sales_order_expand_bp)
+        # [销售订单 W1-A 2026-10-25] 重新取价端点。
+        app.register_blueprint(sales_order_pricing_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

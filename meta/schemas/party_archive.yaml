@@ -316,3 +316,10 @@ ui_view_config:
       enableDetail: false
       enableAutoCrud: false
       pageSize: 20
+    - child_object: party_address
+      title: 往来单位地址
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      pageSize: 20

@@ -649,6 +649,43 @@
       ],
       "table": "customer_accounts"
     },
+    "customer_salesperson_assignment": {
+      "hash": "eddd0daf1b8131093f8001331fed981d",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "customer_account_id",
+        "sales_org_id",
+        "salesperson_id",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "customer_salesperson_assignments"
+    },
+    "customer_sales_org": {
+      "hash": "5d828ec58a9ddf2f9044bcccf67b9371",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "customer_account_id",
+        "sales_org_id",
+        "tax_classification_id",
+        "payment_term_id",
+        "incoterm_code",
+        "currency_id",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "customer_sales_orgs"
+    },
     "data_permission": {
       "hash": "dc898f07a2b10a059de5dff46a5ead64",
       "fields": [
@@ -1210,6 +1247,17 @@
       ],
       "table": "org_members"
     },
+    "org_sales_org": {
+      "hash": "ee62e40ede911ca4588936fbd21392b8",
+      "fields": [
+        "id",
+        "code",
+        "name",
+        "org_type",
+        "status"
+      ],
+      "table": "org_sales_org"
+    },
     "party": {
       "hash": "963f9f755c4d963c1f81916e4c4c98f2",
       "fields": [
@@ -1222,6 +1270,21 @@
         "status"
       ],
       "table": "parties"
+    },
+    "party_address": {
+      "hash": "b49497caeed0adb9a022ca91eb0027d5",
+      "fields": [
+        "id",
+        "party_id",
+        "address_id",
+        "role",
+        "is_default",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "party_addresses"
     },
     "party_archive": {
       "hash": "f4c9b1c1a76cf76e68598a6deccadd67",
@@ -1515,6 +1578,30 @@
       ],
       "table": "person_profiles"
     },
+    "pricing_determination": {
+      "hash": "3b5eb4a184dd271578fc38bf359ecc76",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "sales_org_id",
+        "order_type_id",
+        "rate_table_id",
+        "calc_procedure_id",
+        "lookup_sequence_id",
+        "currency",
+        "seq",
+        "valid_from",
+        "valid_to",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "pricing_determinations"
+    },
     "pricing_period": {
       "hash": "950678513626520b79bee98b410de235",
       "fields": [
@@ -1751,8 +1838,25 @@
       ],
       "table": "role_permissions"
     },
+    "salesperson": {
+      "hash": "db0a1f5adf4c0420e5ccec93bc1b0b7b",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "party_id",
+        "user_id",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "salespersons"
+    },
     "sales_order": {
-      "hash": "9fabb95b200ddcbfa35c0426162d5d03",
+      "hash": "78aa955cc23f9bc72b7e789b7ba51717",
       "fields": [
         "created_by",
         "updated_by",
@@ -1765,6 +1869,9 @@
         "bill_to_account_id",
         "payer_account_id",
         "ship_to_party_id",
+        "ship_to_address_id",
+        "bill_to_address_id",
+        "salesperson_id",
         "org_id",
         "sales_org_id",
         "division_code",
@@ -1775,6 +1882,10 @@
         "customer_po_no",
         "requested_date",
         "confirmed_date",
+        "price_date",
+        "pricing_status",
+        "price_list_id",
+        "pricing_procedure_id",
         "net_amount",
         "tax_amount",
         "gross_amount",
@@ -1785,7 +1896,7 @@
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "649818654cc6f3d68fc153aa12204fa4",
+      "hash": "7d780832076597c9c86ca5daf33ca4e6",
       "fields": [
         "created_by",
         "updated_by",
@@ -1807,6 +1918,12 @@
         "gross_amount",
         "requested_date",
         "plant_location_id",
+        "configuration_id",
+        "parent_line_id",
+        "component_no",
+        "pricing_mode",
+        "price_source",
+        "price_trace",
         "status",
         "created_at",
         "updated_at"
@@ -2249,5 +2366,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-25T16:42:07.937044"
+  "last_sync": "2026-10-25T20:06:14.542096"
 }
