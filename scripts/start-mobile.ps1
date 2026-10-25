@@ -1,4 +1,4 @@
-﻿﻿#Requires -Version 5.1
+﻿﻿﻿﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     启动手机可访问的生产预览 + cloudflared 公网隧道。

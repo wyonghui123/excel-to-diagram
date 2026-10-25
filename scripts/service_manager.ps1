@@ -1,4 +1,4 @@
-﻿﻿# service_manager.ps1
+﻿# service_manager.ps1
 # 统一服务管理器 - PowerShell 版本
 # 用法: .\scripts\service_manager.ps1 [status|start|stop|restart|force-restart] [-Port <3010-3019>]
 # 用法: python scripts/service_manager.py [status|start|stop|restart] [--port <port>]
@@ -618,7 +618,12 @@ function Start-Service($svcName) {
         $launchDetached = Join-Path $root 'scripts/launch_detached.ps1'
         $svcOut = "$root\scripts\logs\$svcName.out"
         $svcErr = "$root\scripts\logs\$svcName.err"
-        $svcCmd = '& ''' + $cfg.cmd + ''' ' + $argStr
+        # [FIX 2026-10-25] launch_detached 用 Win32_Process.Create（WMI）派生进程，
+        #   子进程继承的是 WmiPrvSE.exe 的环境，不是本 PowerShell 的环境 ⇒
+        #   上面设置的 $env:AGENT_PORT 传不过去，waitress_server.py 回落到默认 3010，
+        #   -Port 3011 实际监听在 3010（实测：本进程 PID 27412 监听 3010）。
+        #   故把端口直接写进被执行的命令行，不依赖环境继承。
+        $svcCmd = '$env:AGENT_PORT=' + "'" + $port + "'; & '" + $cfg.cmd + "' " + $argStr
         $procId = & $launchDetached -CommandLine $svcCmd -WorkingDirectory $root `
             -StdOut $svcOut -StdErr $svcErr -PassThruPid | Select-Object -Last 1
 
