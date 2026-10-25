@@ -122,7 +122,7 @@ fields:
     db_column: usage
     required: true
     default: production
-    description: 结构用途（生产 / 工程 / 销售 / 成本）；一期只有生产参与展开
+    description: 结构用途（生产 / 工程 / 销售 / 成本）；销售用途已接入订单展开，其余用途的消费方待建
     enum_values:
       - value: production
         label: 生产

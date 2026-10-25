@@ -317,11 +317,26 @@ def test_rejects_structure_missing_for_sales_usage():
     assert exc.value.rule == 'item_structure_not_found_for_sales'
 
 
-def test_rejects_ambiguous_active_structures():
-    structures = [STRUCTURE, dict(STRUCTURE, id=901, revision='B')]
-    with pytest.raises(SalesOrderExpandError) as exc:
-        _service(_FakeDS(structures=structures)).expand(10, 100)
-    assert exc.value.rule == 'item_structure_version_ambiguous'
+def test_picks_lowest_alternative_no_as_default():
+    structures = [
+        dict(STRUCTURE, id=902, alternative_no=2, revision='B'),
+        dict(STRUCTURE, id=901, alternative_no=1, revision='A'),
+    ]
+    cfg = _FakeConfig()
+    result = _service(_FakeDS(structures=structures), cfg).expand(10, 100)
+    assert cfg.calls[0]['structure_id'] == 901
+    assert result['component_count'] == 2
+
+
+def test_prefers_latest_valid_from_within_same_alternative():
+    structures = [
+        dict(STRUCTURE, id=903, alternative_no=1, revision='B',
+             valid_from='2026-06-01'),
+        dict(STRUCTURE, id=901, alternative_no=1, revision='A'),
+    ]
+    cfg = _FakeConfig()
+    _service(_FakeDS(structures=structures), cfg).expand(10, 100)
+    assert cfg.calls[0]['structure_id'] == 903
 
 
 def test_rejects_structure_outside_validity():

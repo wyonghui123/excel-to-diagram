@@ -15,8 +15,8 @@
   E1 前提：订单必须是 draft；行属于该订单、有 item_id、status=open、
      本身不是子行（parent_line_id 为空）；同一父行不允许重复展开。
   E2 结构：同 item_id + usage='sales' 下 status='active' 且生效日期覆盖
-     订单日期的版本必须唯一命中；0 条报 item_structure_not_found_for_sales，
-     多条报 item_structure_version_ambiguous（与展开服务同口径）。
+     订单日期的版本中取默认一条：替代结构号最小者优先，同号取生效日期最新
+     的版本；0 条报 item_structure_not_found_for_sales。
   E3 求解：selections / quantities / attribute_values 原样转交 solve，
      根需求数量取父行 qty，故组件数量已按父行数量缩放。
   E4 落行：组件按 component_key 生成子行；line_no 从该订单当前最大行号
@@ -226,12 +226,16 @@ class SalesOrderExpandService:
             raise SalesOrderExpandError(
                 f'物料 {item_id} 没有 {as_of} 生效的销售用途结构',
                 field_name='item_id', rule='item_structure_not_found_for_sales')
-        if len(rows) > 1:
-            raise SalesOrderExpandError(
-                f'物料 {item_id} 在 {as_of} 命中 {len(rows)} 版生效销售结构，'
-                '无法确定唯一版本；请先停用多余版本',
-                field_name='item_id', rule='item_structure_version_ambiguous')
-        return rows[0]
+        # 同用途多版本按替代结构号取默认一条（E2）：号最小者优先；
+        # 同号并存时取生效日期最新、版本号最大的那条。
+        default_alt = min(int(r.get('alternative_no') or 1) for r in rows)
+        candidates = [r for r in rows
+                      if int(r.get('alternative_no') or 1) == default_alt]
+        candidates.sort(
+            key=lambda r: (str(r.get('valid_from') or ''),
+                           str(r.get('revision') or '')),
+            reverse=True)
+        return candidates[0]
 
     def _load_active_structures(self, item_id: Any, as_of: str) -> List[Dict[str, Any]]:
         return self.ds.query(
@@ -241,7 +245,7 @@ class SalesOrderExpandService:
             "WHERE item_id = ? AND usage = ? AND status = 'active' "
             "  AND (valid_from IS NULL OR valid_from <= ?) "
             "  AND (valid_to IS NULL OR valid_to >= ?) "
-            "ORDER BY valid_from DESC, revision DESC",
+            "ORDER BY alternative_no ASC, valid_from DESC, revision DESC",
             [item_id, SALES_USAGE, as_of, as_of])
 
     # ---------------- E3 求解 ----------------
