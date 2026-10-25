@@ -97,10 +97,14 @@ const lineLabel = computed(() => {
   return parts.length > 0 ? parts.join(' / ') : '-'
 })
 
+const EXPAND_PRICING_MODES = ['bundle_price', 'component_price', 'base_plus_option']
+
 watch(() => props.visible, (val) => {
   if (!val) return
+  // 行上未展开时为 standalone，不在展开三档内 ⇒ 回落到默认整包价
+  const current = props.line?.pricing_mode
   form.value = {
-    pricingMode: props.line?.pricing_mode || 'bundle_price',
+    pricingMode: EXPAND_PRICING_MODES.includes(current) ? current : 'bundle_price',
     selections: '',
     quantities: '',
     attributeValues: ''

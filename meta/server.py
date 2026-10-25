@@ -1124,6 +1124,9 @@ def create_app(db_path=None):
         # [供应来源 2026-10-24] 独立 Blueprint（非 BO 资源）；不列入会被本中间件
         # 按"其他 v1 路径"误判为 410。
         'sourcing',     # /api/v1/sourcing/* — 求值 / 规则校验
+        # [销售订单 P1 2026-10-25] 展开 / 取价是独立 Blueprint 的域内命令端点，
+        # 不列入会被本中间件按"其他 v1 路径"误判为 410（它不是 BO CRUD）。
+        'sales-orders', # /api/v1/sales-orders/*/expand、/*/reprice
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

@@ -525,6 +525,7 @@
             >
               <template #default="{ row }">
                 <el-dropdown
+                  v-if="getRowActions(row).length > 0"
                   trigger="click"
                   :teleported="true"
                   popper-class="row-action-popper"
@@ -1211,7 +1212,9 @@ const enableAutoDelete = computed(() => {
 })
 
 const hasRowActions = computed(() => {
-  return rowActions.value?.length > 0
+  // 追加行操作与内置动作合并后才决定是否显示操作列（extraRowActions 可为子表唯一动作源）
+  return (rowActions.value?.length || 0) > 0
+    || (props.extraRowActions?.length || 0) > 0
 })
 
 const PRIMARY_ACTION_SEMANTICS = ['create', 'new', 'add', 'insert', 'assign']

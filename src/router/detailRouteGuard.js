@@ -68,7 +68,12 @@ const SUPPORTED_OBJECT_TYPES = [
   'location',
   'calendar',
   'address',
-  'party_relation'
+  'party_relation',
+  // 销售轴 2026-10-25: 销售订单详情页承载订单行子表（含展开行操作），
+  //   list.detail_mode = page 却未列入白名单 ⇒ 行点击 / 展开入口一律弹回首页。
+  //   sales_order 自身声明了 ui_view_config.detail（child_sections 订单行），
+  //   加进来不是放开任意类型，而是补齐 list 已声明 page 详情的对象。
+  'sales_order'
 ]
 
 export async function validateDetailRoute(to, from, next) {
