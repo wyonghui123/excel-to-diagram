@@ -11,6 +11,7 @@
 """
 
 from contextlib import contextmanager
+from decimal import Decimal
 from types import SimpleNamespace
 
 import os
@@ -48,6 +49,8 @@ STRUCTURE = {
 }
 
 ITEMS = {
+    500: {'id': 500, 'code': 'MODEL', 'name': '模型', 'item_type': 'goods',
+          'base_uom': 1},
     501: {'id': 501, 'code': 'C1', 'name': '组件一', 'item_type': 'goods'},
     502: {'id': 502, 'code': 'SVC1', 'name': '安装服务', 'item_type': 'service'},
 }
@@ -70,7 +73,9 @@ class _FakeDS:
     """内存订单行表 + 按 SQL 片段分流的只读查询。"""
 
     def __init__(self, orders=None, lines=None, structures=None,
-                 items=None, uoms=None, types=None, fail_on_insert=None):
+                 items=None, uoms=None, types=None, fail_on_insert=None,
+                 item_conversions=None, group_conversions=None,
+                 uoms_by_id=None, uom_groups=None):
         self.orders = {row['id']: dict(row) for row in (orders or [ORDER])}
         self.lines = {row['id']: dict(row) for row in (lines or [PARENT_LINE])}
         self.structures = list(structures if structures is not None else [STRUCTURE])
@@ -78,6 +83,10 @@ class _FakeDS:
         self.uoms = uoms or UOMS
         self.types = types or TYPES
         self.fail_on_insert = fail_on_insert
+        self.item_conversions = item_conversions or {}
+        self.group_conversions = group_conversions or {}
+        self.uoms_by_id = uoms_by_id or {}
+        self.uom_groups = uom_groups or {}
         self._next_id = max(self.lines.keys() or [0]) + 1
 
     def query(self, sql, params=None):
@@ -110,9 +119,23 @@ class _FakeDS:
                 and (s.get('valid_to') in (None, '') or s['valid_to'] >= as_of)]
         if 'FROM items WHERE id IN' in sql:
             return [self.items[i] for i in p if i in self.items]
+        if 'FROM items WHERE id' in sql:
+            row = self.items.get(p[0])
+            return [row] if row else []
         if 'FROM uoms WHERE code' in sql:
             uom_id = self.uoms.get(p[0])
             return [{'id': uom_id}] if uom_id is not None else []
+        if 'FROM item_uom_conversions' in sql:
+            factor = self.item_conversions.get((p[0], p[1]))
+            return [{'factor': factor}] if factor is not None else []
+        if 'FROM uom_conversions' in sql:
+            factor = self.group_conversions.get((p[0], p[1]))
+            return [{'factor': factor}] if factor is not None else []
+        if 'FROM uoms WHERE id IN' in sql:
+            return [self.uoms_by_id[i] for i in p if i in self.uoms_by_id]
+        if 'FROM uom_groups WHERE id' in sql:
+            row = self.uom_groups.get(p[0])
+            return [row] if row else []
         if 'FROM type_definitions' in sql:
             type_id = self.types.get(p[-1])
             return [{'id': type_id}] if type_id is not None else []
@@ -398,6 +421,69 @@ def test_rejects_orphan_component_reference():
     with pytest.raises(SalesOrderExpandError) as exc:
         _service(_FakeDS(), _FakeConfig(components)).expand(10, 100)
     assert exc.value.rule == 'component_parent_unknown'
+
+
+# ---------------------------------------------------------------- E3 数量换算
+
+
+def _conversion_ds(structure, line, uoms_by_id=None, **kwargs):
+    """父项 500（基本单位 FEA = 1），订单行换成非基本单位 3（DZ）。"""
+    return _FakeDS(
+        lines=[line], structures=[structure],
+        uoms_by_id=uoms_by_id or {
+            1: {'id': 1, 'uom_group_id': 1},
+            3: {'id': 3, 'uom_group_id': 1},
+        },
+        uom_groups={1: {'id': 1, 'base_uom_id': 1}},
+        **kwargs)
+
+
+def test_converts_line_qty_by_item_conversion():
+    structure = dict(STRUCTURE, base_uom_id=1)
+    line = dict(PARENT_LINE, qty=2, uom_id=3)   # 2 DZ
+    ds = _conversion_ds(structure, line, item_conversions={(500, 3): 12})
+    cfg = _FakeConfig()
+
+    _service(ds, cfg).expand(10, 100)
+
+    # 1 DZ = 12 FEA ⇒ 根需求 24 FEA，再按 base_qty 缩放
+    assert cfg.calls[0]['qty'] == Decimal('24')
+
+
+def test_converts_line_qty_by_group_conversion():
+    structure = dict(STRUCTURE, base_uom_id=1)
+    line = dict(PARENT_LINE, qty=2, uom_id=3)
+    ds = _conversion_ds(structure, line, group_conversions={(1, 3): 12})
+    cfg = _FakeConfig()
+
+    _service(ds, cfg).expand(10, 100)
+
+    assert cfg.calls[0]['qty'] == Decimal('24')
+
+
+def test_skips_conversion_when_units_match():
+    structure = dict(STRUCTURE, base_uom_id=1)   # 与订单行 uom_id = 1 相同
+    cfg = _FakeConfig()
+
+    # 任何多余的换算查询都会让 FakeDS 抛 AssertionError
+    _service(_FakeDS(structures=[structure]), cfg).expand(10, 100)
+
+    assert cfg.calls[0]['qty'] == 2
+
+
+def test_reports_unconvertible_line_uom():
+    structure = dict(STRUCTURE, base_uom_id=1)
+    line = dict(PARENT_LINE, qty=2, uom_id=3)
+    ds = _conversion_ds(
+        structure, line,
+        uoms_by_id={1: {'id': 1, 'uom_group_id': 1},
+                    3: {'id': 3, 'uom_group_id': 2}})
+
+    with pytest.raises(SalesOrderExpandError) as exc:
+        _service(ds).expand(10, 100)
+    assert (exc.value.rule, exc.value.field_name) == (
+        'uom_conversion_not_found', 'uom_id')
+
 
 
 def test_line_no_continues_after_existing_lines():

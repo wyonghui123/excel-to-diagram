@@ -25,6 +25,10 @@
       —— `validate_structure_write`
   R16 sales 用途的服务行只承载「次数」：禁损耗率（须 0）、替代组、虚拟件、
       工序号、单位用量 —— `validate_line_write`
+  R17 结构基准单位必须能与父项物料的基本单位换算（同单位 / 同组 / 物料级例外）
+      —— `validate_structure_write`（`UomQuantityService.is_compatible`）
+  R18 组件物料必须维护基本单位 —— `validate_line_write`
+      （展开时子行单位取组件基本单位，不静默回退父行单位）
 
   S1  同一 (item_id, usage, alternative_no) 在任一日期上只能有一个 status = active 的版本
       —— `validate_structure_write`（item_structure.yaml 头注释「生效版本唯一性」）
@@ -54,6 +58,8 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
+
+from meta.services.uom_quantity_service import UomQuantityService
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +174,7 @@ class ItemStructureGuardService:
 
     def __init__(self, data_source):
         self.ds = data_source
+        self._uom = UomQuantityService(data_source)
 
     # ---------- 公开入口 ----------
 
@@ -194,6 +201,7 @@ class ItemStructureGuardService:
                 rule='item_structure_parent_requires_goods')
         self._validate_validity_window(data)
         self._validate_select_bounds(data)
+        self._validate_base_uom(data)
 
         if data.get('status') != 'active':
             return
@@ -306,6 +314,7 @@ class ItemStructureGuardService:
                     rule='item_structure_component_service_item')
             self._validate_service_line(data)
         self._validate_role_matrix(parent_item_id, component_item_id)
+        self._validate_component_uom(component_item_id)
 
     def _validate_service_line(self, data: Dict[str, Any]) -> None:
         """R16：sales 用途的服务行只承载「次数」，不承载实物语义。"""
@@ -449,6 +458,40 @@ class ItemStructureGuardService:
                     f'最多选择数 {max_select} 超过现有结构行数 {line_count}',
                     field_name='max_select',
                     rule='item_structure_select_exceeds_children')
+
+    def _validate_base_uom(self, data: Dict[str, Any]) -> None:
+        """R17：结构基准单位必须能与父项物料的基本单位换算。
+
+        结构基准数量（`base_qty` + `base_uom_id`）是组件用量的分母，展开时
+        订单数量先要折成基准单位；两侧不可换算会让数量整体错标。允许同单位、
+        同组组内换算、以及物料级例外（跨组换算）。数据不足（物料缺失 /
+        查询失败 / 换算链未维护）一律 fail-open，不阻断维护。
+        """
+        base_uom_id = data.get('base_uom_id')
+        item_id = data.get('item_id')
+        if _is_blank(base_uom_id) or _is_blank(item_id):
+            return  # 缺必填交给必填校验兜底
+        item_uom = self._fetch_item_base_uom(item_id)
+        if item_uom is _QUERY_FAILED or _is_blank(item_uom):
+            return  # 查询失败 / 物料缺基本单位 → 物料侧兜底
+        if self._uom.is_compatible(item_id, base_uom_id, item_uom) is False:
+            raise ItemStructureGuardError(
+                '结构基准单位与父项物料的基本单位不可换算；'
+                '请选择同一计量单位组内的单位，或先为该物料维护单位换算',
+                field_name='base_uom_id',
+                rule='item_structure_base_uom_incompatible')
+
+    def _validate_component_uom(self, component_item_id: Any) -> None:
+        """R18：组件物料必须维护基本单位（展开时子行单位取它）。"""
+        item_uom = self._fetch_item_base_uom(component_item_id)
+        if item_uom is _QUERY_FAILED or item_uom is None:
+            return  # 查询失败 / 物料不存在 → fail-open
+        if _is_blank(item_uom):
+            raise ItemStructureGuardError(
+                '组件物料未维护基本单位；结构行用量以组件基本单位计量，'
+                '请先在物料主数据上补齐「基本单位」',
+                field_name='component_item_id',
+                rule='item_structure_component_uom_missing')
 
     def _validate_optional_qty(self, data: Dict[str, Any]) -> None:
         """R5：min_qty <= max_qty，default_qty 落在区间内。"""
@@ -597,6 +640,23 @@ class ItemStructureGuardService:
         if not rows:
             return ''
         return str(rows[0].get('item_type') or '')
+
+    def _fetch_item_base_uom(self, item_id: Any):
+        """读取物料基本单位（`uoms.id`）。
+
+        查询失败 → `_QUERY_FAILED`；无此物料行 → `None`；
+        物料存在但未维护基本单位 → 空串（供 R18 与「物料缺失」区分）。
+        """
+        try:
+            rows = self.ds.query(
+                "SELECT base_uom FROM items WHERE id = ?", [item_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(f'[item_structure_guard] 读取物料基本单位失败: {e}')
+            return _QUERY_FAILED
+        if not rows:
+            return None
+        value = rows[0].get('base_uom')
+        return '' if value is None else value
 
     def _fetch_attribute_definition(self, code: str):
         """A2：平台层（tenant_id = 0）属性定义；查询失败返回 `_QUERY_FAILED`。"""

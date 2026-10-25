@@ -17,8 +17,9 @@
   E2 结构：同 item_id + usage='sales' 下 status='active' 且生效日期覆盖
      订单日期的版本中取默认一条：替代结构号最小者优先，同号取生效日期最新
      的版本；0 条报 item_structure_not_found_for_sales。
-  E3 求解：selections / quantities / attribute_values 原样转交 solve，
-     根需求数量取父行 qty，故组件数量已按父行数量缩放。
+  E3 求解：selections / quantities / attribute_values 原样转交 solve；
+     根需求数量取父行 qty，先按父项物料的换算链折成结构基准单位
+     （base_qty 的计量单位），再交给求解器按 base_qty 缩放。
   E4 落行：组件按 component_key 生成子行；line_no 从该订单当前最大行号
      +10 递增（保持纯数字），层级只由 parent_line_id 表达。
   E5 定价归属：pricing_mode 取入参，未给则沿用行上值，行上为 standalone
@@ -46,6 +47,7 @@ from meta.services.item_structure_config_service import (
     ItemStructureConfigService,
 )
 from meta.services.sales_order_amount_service import SalesOrderAmountService
+from meta.services.uom_quantity_service import UomQuantityService
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,7 @@ class SalesOrderExpandService:
         self.ds = data_source
         self._config = config_service or ItemStructureConfigService(data_source)
         self._amount = amount_service or SalesOrderAmountService(data_source)
+        self._uom = UomQuantityService(data_source)
         self._line_type_cache: Dict[str, Any] = {}
 
     # ---------------- 入口 ----------------
@@ -240,7 +243,7 @@ class SalesOrderExpandService:
     def _load_active_structures(self, item_id: Any, as_of: str) -> List[Dict[str, Any]]:
         return self.ds.query(
             "SELECT id, item_id, revision, usage, alternative_no, base_qty, "
-            "       status, valid_from, valid_to "
+            "       base_uom_id, status, valid_from, valid_to "
             f"FROM {STRUCTURE_TABLE} "
             "WHERE item_id = ? AND usage = ? AND status = 'active' "
             "  AND (valid_from IS NULL OR valid_from <= ?) "
@@ -249,6 +252,29 @@ class SalesOrderExpandService:
             [item_id, SALES_USAGE, as_of, as_of])
 
     # ---------------- E3 求解 ----------------
+
+    def _resolve_root_qty(self, structure: Dict[str, Any],
+                          line: Dict[str, Any]) -> Any:
+        """把父行数量折成结构基准单位（`base_qty` 对应的单位）。
+
+        结构基准单位缺失或与订单行单位相同时原样返回（不引入额外查询）；
+        需要换算但换算链缺失时直接报错 —— 静默用原始数量会让整棵子树的
+        用量按错误倍率落库。
+        """
+        qty = line.get('qty') or 1
+        base_uom_id = structure.get('base_uom_id')
+        line_uom_id = line.get('uom_id')
+        if _is_blank(base_uom_id) or _is_blank(line_uom_id) \
+                or str(base_uom_id) == str(line_uom_id):
+            return qty
+        converted = self._uom.convert(
+            structure.get('item_id'), qty, line_uom_id, base_uom_id)
+        if converted is None:
+            raise SalesOrderExpandError(
+                f'订单行单位（uom_id={line_uom_id}）无法换算为结构基准单位'
+                f'（base_uom_id={base_uom_id}）；请先维护该物料的单位换算',
+                field_name='uom_id', rule='uom_conversion_not_found')
+        return converted
 
     def _solve(self, structure: Dict[str, Any], line: Dict[str, Any],
                selections: Any, quantities: Optional[Mapping[Any, Any]],
@@ -260,7 +286,7 @@ class SalesOrderExpandService:
                 selections=selections,
                 quantities=quantities,
                 attribute_values=attribute_values or {},
-                qty=line.get('qty') or 1,
+                qty=self._resolve_root_qty(structure, line),
                 as_of=as_of,
                 max_depth=max_depth,
                 context={

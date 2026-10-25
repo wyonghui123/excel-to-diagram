@@ -87,7 +87,8 @@ def _new_db():
 
 
 def _add_item(conn, item_id, role='none', item_type='goods', status='active'):
-    conn.execute('INSERT INTO items VALUES (?, ?, ?, ?)',
+    conn.execute('INSERT INTO items (id, structure_role, item_type, status) '
+                 'VALUES (?, ?, ?, ?)',
                  (item_id, role, item_type, status))
 
 
@@ -407,6 +408,89 @@ class TestStructureGuard:
              'status': 'active', 'valid_from': '2026-01-01'})
         svc.validate_structure_delete(10)
         svc.validate_item_write({'item_type': 'service', 'structure_role': 'none'})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 计量单位守卫（R17 / R18）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _new_uom_db():
+    """基础内存库 + 物料基本单位列、结构基准单位列与两张换算表。"""
+    conn = _new_db()
+    conn.execute('ALTER TABLE items ADD COLUMN base_uom INTEGER')
+    conn.execute('ALTER TABLE item_structures ADD COLUMN base_uom_id INTEGER')
+    conn.execute('CREATE TABLE uoms (id INTEGER PRIMARY KEY, code TEXT, '
+                 'name TEXT, uom_group_id INTEGER, status TEXT)')
+    conn.execute('CREATE TABLE uom_groups (id INTEGER PRIMARY KEY, code TEXT, '
+                 'base_uom_id INTEGER)')
+    conn.execute('CREATE TABLE uom_conversions (id INTEGER PRIMARY KEY, '
+                 'uom_group_id INTEGER, uom_id INTEGER, factor REAL)')
+    conn.execute('CREATE TABLE item_uom_conversions (id INTEGER PRIMARY KEY, '
+                 'item_id INTEGER, uom_id INTEGER, factor REAL)')
+    conn.executemany('INSERT INTO uoms VALUES (?, ?, ?, ?, ?)', [
+        (1, 'FEA', '个', 1, 'active'),
+        (15, 'BOX', '箱', 1, 'active'),
+        (12, 'KG', '千克', 2, 'active'),
+    ])
+    conn.executemany('INSERT INTO uom_groups VALUES (?, ?, ?)', [
+        (1, 'QTY', 1),
+        (2, 'WGT', 12),
+    ])
+    conn.execute('INSERT INTO uom_conversions VALUES (1, 1, 15, 12)')
+    return conn
+
+
+class TestUomGuards:
+    def setup_method(self):
+        self.conn = _new_uom_db()
+        _add_item(self.conn, 1)   # 父项，基本单位 FEA
+        _add_item(self.conn, 2)   # 组件，已维护基本单位
+        _add_item(self.conn, 7)   # 组件，未维护基本单位
+        self.conn.execute('UPDATE items SET base_uom = 1 WHERE id IN (1, 2)')
+        _add_structure(self.conn, 10, 1)
+        self.svc = ItemStructureGuardService(_SqliteDS(self.conn))
+
+    def _write_structure(self, **data):
+        payload = {'item_id': 1, 'usage': 'production', 'alternative_no': 1,
+                   'status': 'draft', 'valid_from': '2026-01-01'}
+        payload.update(data)
+        self.svc.validate_structure_write(payload)
+
+    def test_r17_same_uom_passes(self):
+        self._write_structure(base_uom_id=1)
+
+    def test_r17_same_group_conversion_passes(self):
+        # 1 箱 = 12 个，组内标准换算
+        self._write_structure(base_uom_id=15)
+
+    def test_r17_cross_group_rejected(self):
+        with pytest.raises(ItemStructureGuardError) as e:
+            self._write_structure(base_uom_id=12)
+        assert (e.value.rule, e.value.field_name) == (
+            'item_structure_base_uom_incompatible', 'base_uom_id')
+
+    def test_r17_item_level_exception_passes(self):
+        # 物料级例外允许跨组：该物料 1 千克按 1 个折算
+        self.conn.execute(
+            'INSERT INTO item_uom_conversions VALUES (1, 1, 12, 1)')
+        self._write_structure(base_uom_id=12)
+
+    def test_r17_missing_base_uom_skipped(self):
+        self._write_structure()
+        self._write_structure(base_uom_id=None)
+
+    def test_r18_component_without_base_uom_rejected(self):
+        with pytest.raises(ItemStructureGuardError) as e:
+            self.svc.validate_line_write(
+                {'structure_id': 10, 'component_item_id': 7,
+                 'line_no': 2, 'qty_per': 1})
+        assert (e.value.rule, e.value.field_name) == (
+            'item_structure_component_uom_missing', 'component_item_id')
+
+    def test_r18_component_with_base_uom_passes(self):
+        self.svc.validate_line_write(
+            {'structure_id': 10, 'component_item_id': 2,
+             'line_no': 2, 'qty_per': 1})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
