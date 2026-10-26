@@ -1860,6 +1860,22 @@
       ],
       "table": "salespersons"
     },
+    "salesperson_territory_assignment": {
+      "hash": "5a414ccc2102f43dc3830be7fd180f18",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "salesperson_id",
+        "territory_id",
+        "effective_from",
+        "effective_to",
+        "is_primary",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "salesperson_territory_assignments"
+    },
     "sales_order": {
       "hash": "06ed737412a6a233ba6ef3981afb92df",
       "fields": [
@@ -2209,6 +2225,43 @@
       ],
       "table": "tax_rates"
     },
+    "territory": {
+      "hash": "e96742be5b5d037b16e5a1b5c3cf528d",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "parent_id",
+        "level",
+        "owner_org_id",
+        "territory_type",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "territories"
+    },
+    "territory_account_assignment": {
+      "hash": "5a55098ebbc4c7cb2dd2f88beb279364",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "customer_account_id",
+        "territory_id",
+        "effective_from",
+        "effective_to",
+        "is_primary",
+        "priority",
+        "assignment_source",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "territory_account_assignments"
+    },
     "test_objects": {
       "hash": "2d2d56fb599621697d67bfe91ec4db6a",
       "fields": [
@@ -2379,5 +2432,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-25T22:41:10.340947"
+  "last_sync": "2026-10-26T08:11:51.337095"
 }

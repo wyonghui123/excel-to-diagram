@@ -135,6 +135,25 @@ dimension_object_mappings:
         field: org_id
         filter_type: direct
 
+  # [TER-M4 2026-10-26] territory 维度激活（generic，销售责任田）:
+  #   选中区域自动含其子区域（territories.parent_id 自引用树 BFS 展开，防环）。
+  #   与 org 正交: org 管组织边界, territory 管客户/订单的责任归属;
+  #   订单侧走抬头快照列 sales_orders.territory_id, 不回查客户分配。
+  #   客户分配面一并登记: 按区域管客户分配数据本身（如按区域审计分配）。
+  - dimension_code: territory
+    dimension_type: generic
+    description: 销售区域维度（责任田）
+    value_table: territories
+    value_field: id
+    filter_through_hierarchy: true   # 选父区域自动含子区域
+    applies_to:
+      - bo: sales_order
+        field: territory_id
+        filter_type: fk
+      - bo: territory_account_assignment
+        field: territory_id
+        filter_type: fk
+
   # ────────────────────────────────────────
   # 通用维度示例 (region / department / business_line 预留)
   # 启用方法: 取消注释并配置对应字段
@@ -186,6 +205,7 @@ dimension_priority:
   domain: 30
   sub_domain: 40
   org: 50            # [P4-Org-01 已激活] 组织维度（generic，数据范围维度）
+  territory: 60      # [TER-M4 已激活] 销售区域维度（generic，责任田）
   # region: 5       # 通用维度优先级通常更高
   # department: 6
 

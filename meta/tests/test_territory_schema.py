@@ -114,7 +114,7 @@ class TestDeclaration:
 
     def test_required_and_optional_fields(self):
         ter = _load_raw("territory")
-        for field_id in ("code", "name", "status"):
+        for field_id in ("code", "name", "territory_type", "status"):
             assert _field(ter, field_id)["required"] is True
         for field_id in ("parent_id", "level", "owner_org_id", "description"):
             assert _field(ter, field_id).get("nullable") is True
@@ -128,6 +128,31 @@ class TestDeclaration:
         status = _field(_load_raw("territory"), "status")
         assert status["default"] == "active"
         assert [v["value"] for v in status["enum_values"]] == ["active", "inactive"]
+
+    def test_display_name_is_sales_territory(self):
+        # 中文名收口：区域 → 销售区域（对象标识 / 表名 / 权限码不变）
+        ter = _load_raw("territory")
+        assert ter["name"] == "销售区域"
+        assert ter["description"].startswith("销售区域")
+        assert "区域" in ter["semantics"]["aliases"]
+
+    def test_territory_type_enum(self):
+        typ = _field(_load_raw("territory"), "territory_type")
+        assert typ["required"] is True
+        assert typ["default"] == "geographic"
+        assert [v["value"] for v in typ["enum_values"]] == [
+            "geographic", "industry", "account", "channel"]
+
+    def test_level_is_derived_not_editable(self):
+        schema = _load_raw("territory")
+        level = _field(schema, "level")
+        assert level["ui"]["editable"] is False
+        assert level["ui"]["readonly"] is True
+        form_fields = []
+        for section in schema["ui_view_config"]["form"]["sections"]:
+            for column in section["columns"]:
+                form_fields.extend(column["fields"])
+        assert "level" not in form_fields, "level 不应进入录入表单"
 
     def test_hierarchy_and_exclude_self(self):
         parent = _field(_load_raw("territory"), "parent_id")
@@ -198,7 +223,7 @@ class TestTable:
 
     def test_not_null_and_nullable(self, conn):
         ter = {r[1]: r for r in conn.execute("PRAGMA table_info(territories)")}
-        for column in ("code", "name", "status"):
+        for column in ("code", "name", "territory_type", "status"):
             assert ter[column][3] == 1
         for column in ("parent_id", "level", "owner_org_id", "description"):
             assert ter[column][3] == 0

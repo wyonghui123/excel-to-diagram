@@ -1,21 +1,24 @@
-# 区域（Territory）—— 销售区域树
-# 依据: docs/superpowers/specs/2026-10-25-sales-order-wave2-detailed-plan.md
-#       §7.2 对象 / §7.3 菜单与权限 / §7.4 不变量 R-TER-1
+# 销售区域（Territory）—— 责任田树
+# 依据: docs/superpowers/specs/2026-10-26-sales-territory-design.md
+#       §2 组织不可覆盖 / §3 命名 / §4 对象模型 / §5 不变量
 #
-# 定位: 销售组织的区域划分，按 parent_id 自引用成树。销售员通过
-#   salesperson_territory_assignment 归属到区域；本对象不含客户绑定。
+# 定位: 销售侧的责任划分，按 parent_id 自引用成树。销售员与客户分别通过
+#   salesperson_territory_assignment / territory_account_assignment 归属到区域；
+#   订单抬头持有 territory_id 快照，供数据范围与汇总消费。
 #
 # 口径:
 #   ① code 全局唯一，是外部系统对接与展示的稳定键。
 #   ② parent_id 是自引用真外键；成环由服务层递归校验（R-TER-1），
 #      直连自引用同时由 value_help.exclude_self 拦截。
-#   ③ 停用区域不影响既有分配，但不再被新的分配引用（R-TER-3，服务层校验）。
-#   ④ 本波不做树视图组件，列表页 + parent_id 即可（TBD-W2-5）。
+#   ③ 停用区域不影响既有分配，但不再被新的分配引用（R-TER-3 / R-TER-6）。
+#   ④ level 由服务层按父链自动派生（R-TER-4），前端不提供手工编辑；
+#      父节点变更时服务层级联重算整棵子树。
+#   ⑤ 本对象不是行政区划（region）：划分依据可以是地理、行业、客户群或渠道。
 
 id: territory
-name: 区域
+name: 销售区域
 table_name: territories
-description: 销售区域树——按 parent_id 自引用分层
+description: 销售区域树——按 parent_id 自引用分层，表达客户与订单的责任归属
 display_name_field: name
 aspects: [audit_aspect]
 
@@ -24,7 +27,9 @@ semantics:
   category: core_entity
   aliases:
     - 区域
-    - 销售区域
+    - 销售辖区
+    - 辖区
+    - 片区
     - territory
     - sales territory
 
@@ -38,6 +43,10 @@ deletion_policy:
     - table: salesperson_territory_assignments
       foreign_key: territory_id
       message: 该区域仍被销售员区域分配引用，请先解除分配后再删除
+    # [TER-M2 2026-10-26] 客户侧分配同样阻塞区域删除
+    - table: territory_account_assignments
+      foreign_key: territory_id
+      message: 该区域仍被客户区域分配引用，请先解除分配后再删除
   cascade_delete: []
 
 audit:
@@ -157,7 +166,7 @@ fields:
     type: integer
     db_column: level
     nullable: true
-    description: 区域在树中的层级（1 起）
+    description: 区域在树中的层级（根为 1）；由服务层按父链自动派生，父节点变更时级联重算子树
     semantics:
       meaning: 区域层级序号
       filterable: true
@@ -166,6 +175,8 @@ fields:
       filter_scope: local
     ui:
       widget: number
+      editable: false
+      readonly: true
 
   # 归属销售组织（真外键 → orgs；候选取具备销售职能的组织）
   - id: owner_org_id
@@ -214,13 +225,44 @@ fields:
       multiple: false
       clearable: true
 
+  # 划分依据：说明这块责任田按什么切分；仅作说明与展示，不参与归属判定
+  - id: territory_type
+    name: 划分依据
+    type: string
+    db_column: territory_type
+    required: true
+    default: geographic
+    description: 区域划分依据（地理/行业/客户群/渠道），仅用于说明与展示
+    enum_values:
+      - value: geographic
+        label: 地理
+        color: primary
+        is_initial: true
+      - value: industry
+        label: 行业
+        color: success
+      - value: account
+        label: 客户群
+        color: warning
+      - value: channel
+        label: 渠道
+        color: info
+    semantics:
+      meaning: 区域划分依据
+      filterable: true
+      filter_type: enum
+      filter_label: 划分依据
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: status
     name: 状态
     type: string
     db_column: status
     required: true
     default: active
-    description: 启用状态（停用后不再被新的销售员分配引用，R-TER-3）
+    description: 启用状态（停用后不再被新的销售员分配或客户分配引用，R-TER-3 / R-TER-6）
     enum_values:
       - value: active
         label: 启用
@@ -331,10 +373,32 @@ ui_view_config:
   # 菜单由迁移 v132 手工声明（挂 master-data），不让自动生成器产出孤儿行
   skip_auto_menu: true
   showChangeHistory: true
+
+  # [TER-M4 2026-10-26] 左树右表：树 = 销售区域层级（自引用），右表 = 区域列表
+  #   勾选节点 → 右表 id__in = 勾选 ∪ 全部子孙（HierarchyScopeTree 已算好 effective）；
+  #   未勾选 = 不过滤（看全部），与组织管理页同口径（设计 §8 / D-TER-7）。
+  hub:
+    object_types: [territory]
+    default_tab: territory
+    tabs:
+      territory: 销售区域
+    state_key: territoryManagerState
+    scope:
+      type: hierarchy
+      object: territory
+      scope_key: territory
+      parent_field: parent_id
+      node_icon: folder
+      empty_text: 暂无销售区域数据
+      search_placeholder: 搜索销售区域（编码/名称）
+    filters:
+      territory:
+        field: id
+
   list:
     detail_mode: drawer
-    title: 区域
-    description: 销售区域树：编码、名称与上级区域
+    title: 销售区域
+    description: 销售区域树：编码、名称、划分依据与上级区域
     columns:
       - field: code
         width: 140
@@ -342,6 +406,10 @@ ui_view_config:
       - field: name
         width: 220
         sortable: true
+      - field: territory_type
+        width: 100
+        filterable: true
+        filter_type: select
       - field: parent_id
         width: 180
         filterable: true
@@ -388,18 +456,19 @@ ui_view_config:
       order: asc
 
   form:
-    title: 区域
+    title: 销售区域
     layout: vertical
     sections:
       - title: 基本信息
         columns:
           - fields: [code, name]
-          - fields: [parent_id, level]
+          - fields: [parent_id, territory_type]
           - fields: [owner_org_id]
           - fields: [status]
       - title: 其他
         columns:
           - fields: [description]
+      # level 由服务层派生（R-TER-4），不进入录入表单
 
   detail:
     layout: tabs
@@ -408,7 +477,7 @@ ui_view_config:
       - id: basic
         label: 基本信息
         type: fields
-        fields: [code, name, parent_id, level, owner_org_id, status, description]
+        fields: [code, name, parent_id, level, territory_type, owner_org_id, status, description]
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v132 落库）

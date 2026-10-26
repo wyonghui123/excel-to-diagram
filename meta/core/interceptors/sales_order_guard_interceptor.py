@@ -70,6 +70,13 @@ class SalesOrderGuardInterceptor(Interceptor):
                     guard.validate_order_delete(context.object_id)
                     return
                 data, old_data = self._effective_data(context)
+                # TER-M3：新建订单按客户主区域带出销售区域（手工已填不覆盖）
+                if context.action == 'crud_create':
+                    territory = guard.territory_default(data)
+                    if territory:
+                        data.update(territory)
+                        if isinstance(context.params, dict):
+                            context.params.update(territory)
                 # W2-D：确认动作同一请求内回填地址文本快照（只补/覆盖自地址库全文）
                 snapshot = guard.snapshot_address_text(data, old_data)
                 if snapshot:

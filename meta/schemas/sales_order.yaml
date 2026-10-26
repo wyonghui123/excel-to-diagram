@@ -514,6 +514,53 @@ fields:
       multiple: false
       clearable: true
 
+  # [TER-M3 2026-10-26] 销售区域快照 —— 抬头唯一持有，不做行级快照
+  #   创建时按客户主区域带出（§6.1 判定），可手工改（候选限 active）；
+  #   确认后冻结（R-TER-8），此后客户分配变化不影响本单。
+  - id: territory_id
+    name: 销售区域
+    type: integer
+    db_column: territory_id
+    nullable: true
+    description: 销售区域（责任田）；创建时按客户主区域带出，确认后冻结
+    semantics:
+      meaning: 订单责任销售区域
+      display:
+        type: association
+        target_type: territory
+        display_field: name
+        placeholder: "未分配"
+    value_help:
+      source:
+        type: bo
+        target_bo: territory
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 区域编码
+            width: 140
+          - field: name
+            label: 区域名称
+            width: 220
+    ui:
+      widget: select
+      relation: territory
+      multiple: false
+      clearable: true
+
   - id: org_id
     name: 业务实体
     type: integer
@@ -598,7 +645,8 @@ fields:
       relation: org
       multiple: false
 
-  # SAP 销售区域的产品组切片（扁平字符串，不建对象）；≠ item_group
+  # SAP Sales Area（销售组织 + 分销渠道 + 产品组）中的产品组切片（扁平字符串，不建对象）；
+  # ≠ item_group；与本平台的「销售区域」（territory，责任田）无关，勿同名混用。
   - id: division_code
     name: 产品组
     type: string
@@ -1074,6 +1122,9 @@ indexes:
     name: idx_sales_order_status
   - fields: [order_type_id]
     name: idx_sales_order_type
+  # [TER-M3] 区域维度过滤（列表按区域 / 数据范围）走快照列
+  - fields: [territory_id]
+    name: idx_sales_order_territory
 
 relations:
   - id: sales_order_to_type_definition
@@ -1140,6 +1191,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 销售员引用（可空；默认取客户主销售员）
+  - id: sales_order_to_territory
+    name: 销售区域
+    type: reference
+    target: territory
+    source_field: territory_id
+    target_field: id
+    cardinality: N:1
+    description: 销售区域引用（可空；默认按客户主区域带出，确认后冻结）
   - id: sales_order_to_org
     name: 业务实体
     type: reference
@@ -1212,6 +1271,15 @@ ui_view_config:
         width: 200
       - field: sales_org_id
         width: 160
+      # [TER-M3] 区域列：未分配显示「未分配」，支持按区域过滤
+      - field: territory_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: territory
+        display_field: name
+        placeholder: "未分配"
       - field: currency_id
         width: 90
       - field: pricing_status
@@ -1259,7 +1327,7 @@ ui_view_config:
           - fields: [customer_account_id, ship_to_party_id]
           - fields: [bill_to_account_id, payer_account_id]
           - fields: [ship_to_address_id, bill_to_address_id]
-          - fields: [salesperson_id]
+          - fields: [salesperson_id, territory_id]
           - fields: [org_id, sales_org_id]
           - fields: [division_code]
       - title: 地址快照（确认时写入）

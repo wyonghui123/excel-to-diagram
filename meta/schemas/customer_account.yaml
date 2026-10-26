@@ -72,6 +72,10 @@ deletion_policy:
     - table: sales_orders
       foreign_key: payer_account_id
       message: 该客户档案被销售订单引用（付款方），请先处理订单后再删除
+    # [TER-M2 2026-10-26] 客户区域分配的父面：有分配行时禁止删除客户
+    - table: territory_account_assignments
+      foreign_key: customer_account_id
+      message: 该客户档案还挂有客户区域分配，请先解除分配后再删除
   cascade_delete: []
 
 audit:
@@ -535,6 +539,13 @@ ui_view_config:
       rowMutability: fullEditable
     - child_object: customer_salesperson_assignment
       title: 客户销售员
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+    - child_object: territory_account_assignment
+      title: 客户区域分配
       display: tab
       pageSize: 10
       useMetaList: true

@@ -152,6 +152,34 @@ def seed_org_tree(ds) -> None:
         )
 
 
+def seed_territory_tree(ds) -> None:
+    """种子: territories 自引用树 + 防环用例 (TER-M4 territory 维度子树展开).
+
+    干净树: 1(华东) → 2(上海) → 3(浦东); 1 → 4(江苏)
+    防环环: 201 → 202 → 203 → 201 (BFS 必须终止且全覆盖)
+    """
+    ds.execute(
+        "CREATE TABLE IF NOT EXISTS territories ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "code TEXT, name TEXT, parent_id INTEGER)"
+    )
+    rows = [
+        (1, 'CN-EAST', '华东', None),
+        (2, 'CN-EAST-SH', '上海', 1),
+        (3, 'CN-EAST-SH-PD', '浦东', 2),
+        (4, 'CN-EAST-JS', '江苏', 1),
+        (201, 'LOOP-A', '环A', 203),
+        (202, 'LOOP-B', '环B', 201),
+        (203, 'LOOP-C', '环C', 202),
+    ]
+    for territory_id, code, name, parent_id in rows:
+        ds.execute(
+            "INSERT INTO territories (id, code, name, parent_id) "
+            "VALUES (?, ?, ?, ?)",
+            [territory_id, code, name, parent_id],
+        )
+
+
 def seed_v101_upward_expansion(ds) -> None:
     """种子: ps=1803, version=[2,11,12] (复刻 v1.0.1 向上/向下展开测试拓扑).
 

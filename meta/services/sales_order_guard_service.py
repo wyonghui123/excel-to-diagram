@@ -39,6 +39,11 @@
   R-ADR-2  已非空的快照不得被清空
   R-ADR-3  快照值只取自 address.formatted_address，不拼接、不格式化
 
+销售区域（M3）:
+  R-TER-8  订单确认后 territory_id 冻结；未确认可改
+  §6.1     新建时按客户主区域带出（当日有效 → 主区域优先 → priority 升序
+           → effective_from 最新）；客户无分配则留空，不阻断下单（fail-open）
+
 行的写入门槛取「父单必须是 draft」一条：
   R8 只明文限制删除，但 submitted / confirmed 已是下游读取的快照态，
   允许追加或改行会让 R7 的汇总回写改动已确认金额，故创建 / 更新 / 删除
@@ -166,6 +171,13 @@ class SalesOrderGuardService:
                     '订单已确认，汇率已冻结，不可修改', field_name='exchange_rate',
                     rule='exchange_rate_frozen')
 
+        # R-TER-8：确认后销售区域冻结（此后客户分配变化不影响本单）
+        if old_status in _CONFIRMED_STATES and 'territory_id' in data \
+                and str(data.get('territory_id')) != str(old.get('territory_id')):
+            raise SalesOrderGuardError(
+                '订单已确认，销售区域已冻结，不可修改',
+                field_name='territory_id', rule='order_territory_locked')
+
         # W2-D R-ADR-1 / R-ADR-2：地址快照离开草稿后冻结，仅确认动作允许系统回填
         if old_status and old_status != DRAFT:
             confirming = (str(data.get('status') or '') == CONFIRMED
@@ -204,6 +216,45 @@ class SalesOrderGuardService:
             raise SalesOrderGuardError(
                 f'组织 {sales_org_id} 不具备销售职能（sales），不能作为销售组织',
                 field_name='sales_org_id', rule='sales_org_not_sales')
+
+    # ---------------- 销售区域带出（M3, §6.1） ----------------
+
+    def territory_default(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """新建订单时按客户主区域带出 `territory_id`；无分配 / 读侧异常返回空。
+
+        判定顺序（§6.1）：当日有效（effective_from ≤ 今天 ≤ effective_to）
+        → 主区域优先 → priority 升序（空视为最大）→ effective_from 最新
+        → id 最新。手工已填时不覆盖；客户无分配则留空（fail-open）。
+        """
+        if not _is_blank(data.get('territory_id')):
+            return {}
+        customer_id = data.get('customer_account_id')
+        if _is_blank(customer_id):
+            return {}
+        try:
+            rows = self.ds.query(
+                'SELECT territory_id FROM territory_account_assignments '
+                'WHERE customer_account_id = ? '
+                '  AND (effective_from IS NULL OR effective_from <= ?) '
+                '  AND (effective_to IS NULL OR effective_to >= ?) '
+                'ORDER BY CASE WHEN is_primary = 1 THEN 0 ELSE 1 END, '
+                '         CASE WHEN priority IS NULL THEN 2147483647 ELSE priority END, '
+                '         effective_from DESC, id DESC LIMIT 1',
+                [customer_id, self._today(), self._today()])
+        except Exception as e:  # 查询失败 → fail-open（不阻断下单）
+            logger.warning(
+                f'[sales_order_guard] 读取客户区域分配 {customer_id} 失败: {e}')
+            return {}
+        if not rows:
+            return {}
+        territory_id = rows[0].get('territory_id')
+        return {} if _is_blank(territory_id) else {'territory_id': territory_id}
+
+    @staticmethod
+    def _today() -> str:
+        """带出判定基准日；独立方法便于单测固定日期。"""
+        from datetime import date
+        return date.today().isoformat()
 
     def validate_order_delete(self, order_id: Any) -> None:
         """非草稿订单不可删除（§1.3 事实单据口径）。"""

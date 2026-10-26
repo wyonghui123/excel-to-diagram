@@ -1992,17 +1992,22 @@ def init_menu_permissions(db_path):
             })
         },
         {
-            # [SALES-W2 2026-10-25] 区域 —— 主数据组
+            # [SALES-W2 2026-10-25] 销售区域 —— 主数据组
             #   与 v132__territory 的声明保持一致；缺本声明时步骤 7.6 会把该手工菜单
-            #   当冗余删除（区域页入口随之消失）。
+            #   当冗余删除（销售区域页入口随之消失）。
+            #   [TER-M1 2026-10-26] 中文名收口：区域 → 销售区域（对象标识/表名/权限码不变，
+            #   见 docs/superpowers/specs/2026-10-26-sales-territory-design.md §3）。
+            #   [TER-M4 2026-10-26] page_type 由 object_list 改为 multi_object_hub:
+            #   页面形态（左树 + 单 tab）取自 territory.yaml 的 ui_view_config.hub，
+            #   与组织管理页同型（设计 §8 / D-TER-7）。
             'menu_code': 'territory-list',
-            'menu_name': '区域',
+            'menu_name': '销售区域',
             'menu_path': '/territories',
             'icon': 'MapLocation',
             'color': '#0ea5e9',
             'sort_order': 85,
             'parent_menu': 'master-data',
-            'page_type': 'object_list',
+            'page_type': 'multi_object_hub',
             'primary_object_type': 'territory',
             'object_types': json.dumps(['territory']),
             'bo_bindings': json.dumps([
