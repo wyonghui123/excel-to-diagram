@@ -18,10 +18,26 @@
  * 辅助函数: e2e/helpers/auth.js
  */
 import { defineConfig, devices } from '@playwright/test'
+import fs from 'fs'
 import path from 'path'
 
+// [端口单一真源] scripts/ports.json 是所有消费方（vite / 后端 / CLI / 本文件）的默认端口来源。
+//   进程环境变量 APP_URL 仍可覆盖（多实例场景）；文件缺失时回落到历史默认 3004。
+function resolveFrontendPort() {
+  try {
+    const file = path.join(process.cwd(), 'scripts', 'ports.json')
+    const ports = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    if (Number.isInteger(ports.frontend) && ports.frontend > 0) return ports.frontend
+  } catch (e) {
+    console.warn(`[playwright.config] 读取 scripts/ports.json 失败: ${e.message}`)
+  }
+  return 3004
+}
+
+const FRONTEND_PORT = resolveFrontendPort()
+
 const baseUse = {
-  baseURL: 'http://localhost:3004',
+  baseURL: process.env.APP_URL || `http://localhost:${FRONTEND_PORT}`,
   trace: 'on',
   screenshot: 'only-on-failure',
   video: 'retain-on-failure',

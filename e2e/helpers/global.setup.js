@@ -34,6 +34,7 @@
  */
 
 import { test as setup, expect } from '@playwright/test'
+import fsSync from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -43,6 +44,24 @@ const __dirname = path.dirname(__filename)
 // 用 process.cwd() 作为基准（Playwright 总是从项目根运行）
 const PROJECT_ROOT = process.cwd()
 const AUTH_DIR = path.join(PROJECT_ROOT, 'e2e', '.auth')
+
+// [端口单一真源] 与 playwright.config.js 同源读取 scripts/ports.json，
+//   避免硬编码端口与真实服务漂移（setup 连错端口会让所有用例 ERR_CONNECTION_REFUSED）。
+function resolvePorts() {
+  try {
+    const file = path.join(PROJECT_ROOT, 'scripts', 'ports.json')
+    const ports = JSON.parse(fsSync.readFileSync(file, 'utf-8'))
+    return {
+      frontend: Number.isInteger(ports.frontend) ? ports.frontend : 3004,
+      backend: Number.isInteger(ports.backend) ? ports.backend : 3010
+    }
+  } catch (e) {
+    console.warn(`[SETUP] 读取 scripts/ports.json 失败: ${e.message}`)
+    return { frontend: 3004, backend: 3010 }
+  }
+}
+
+const PORTS = resolvePorts()
 const ADMIN_AUTH_FILE = path.join(AUTH_DIR, 'admin.json')
 const USER_AUTH_FILE = path.join(AUTH_DIR, 'user.json')
 
@@ -59,8 +78,8 @@ setup('authenticate as admin', async ({ page, request }) => {
   setup.info().annotations.push({ type: 'auth', description: 'admin login via dev-login' })
 
   // 2. 优先用 API dev-login（更稳定）
-  const baseURL = process.env.TEST_BASE_URL || 'http://localhost:3010'
-  const appURL = process.env.APP_URL || 'http://localhost:3004'
+  const baseURL = process.env.TEST_BASE_URL || `http://localhost:${PORTS.backend}`
+  const appURL = process.env.APP_URL || `http://localhost:${PORTS.frontend}`
 
   // 2.1 先 navigate 到 frontend origin（让 page 处于正确的 origin）
   await page.goto(appURL, { waitUntil: 'domcontentloaded' })
@@ -153,8 +172,8 @@ setup('authenticate as admin', async ({ page, request }) => {
  * 用于测试权限隔离场景
  */
 setup('authenticate as readonly user', async ({ page, request }) => {
-  const baseURL = process.env.TEST_BASE_URL || 'http://localhost:3010'
-  const appURL = process.env.APP_URL || 'http://localhost:3004'
+  const baseURL = process.env.TEST_BASE_URL || `http://localhost:${PORTS.backend}`
+  const appURL = process.env.APP_URL || `http://localhost:${PORTS.frontend}`
 
   // 先 navigate 到 frontend origin
   await page.goto(appURL, { waitUntil: 'domcontentloaded' })

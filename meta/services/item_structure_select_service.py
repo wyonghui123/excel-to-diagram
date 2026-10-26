@@ -64,13 +64,30 @@ def _covers(as_of: str, valid_from: Any, valid_to: Any) -> bool:
     return True
 
 
+def _coerce_line_key(value: Any) -> Any:
+    """HTTP 层 JSON 对象的 key 恒为字符串，统一成整型后才与结构行 id 可比对。"""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    return value
+
+
 def _normalize_selections(selections: Any) -> Dict[Any, bool]:
     """接受【行 id 集合】或【{行 id: 是否选中}】两种入参。"""
     if not selections:
         return {}
     if isinstance(selections, Mapping):
-        return {key: bool(value) for key, value in selections.items()}
-    return {line_id: True for line_id in selections}
+        return {_coerce_line_key(key): bool(value)
+                for key, value in selections.items()}
+    return {_coerce_line_key(line_id): True for line_id in selections}
+
+
+def _normalize_quantities(quantities: Optional[Mapping[Any, Any]]) -> Dict[Any, Any]:
+    """`{行 id: 显式数量}` 的行 id 同样来自 JSON key，需与 selections 一并对齐。"""
+    if not quantities or not isinstance(quantities, Mapping):
+        return {}
+    return {_coerce_line_key(key): value for key, value in quantities.items()}
 
 
 class ItemStructureSelectService:
@@ -103,7 +120,7 @@ class ItemStructureSelectService:
                 field_name='structure_id')
 
         selected = _normalize_selections(selections)
-        quantities = dict(quantities or {})
+        quantities = _normalize_quantities(quantities)
         consumed: set = set()
 
         result: Dict[str, Any] = {
