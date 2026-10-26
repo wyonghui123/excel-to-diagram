@@ -57,6 +57,20 @@
 读侧守卫不应因一次瞬时查询异常把整条写入路径打死。取不到行时不做判定，
 缺失引用由数据库外键约束兜底。
 
+计划行（R-SCH-0 ~ R-SCH-10，依据 docs/superpowers/specs/
+2026-10-26-sales-order-schedule-line-spec.md）:
+  R-SCH-0  order_id 必须等于 line_id 所属订单
+  R-SCH-1  promised_date 必填
+  R-SCH-2  billing 不承诺数量（promised_qty 必须为空）
+  R-SCH-3  delivery 承诺量必填且 > 0；同一行 delivery 合计 ≤ 行 qty
+  R-SCH-4  service 必须填写 service_visit_no（行内唯一由部分唯一索引兜底）
+  R-SCH-5  订单非 draft 禁止新增 / 删除，只允许改期 / 改量 / 改发货点
+  R-SCH-6  milestone_code 长度 ≤ 64，不做存在性校验
+  R-SCH-7  delivery 必须有发货点（默认继承订单行，行为空时要求本行显式填写）
+  R-SCH-8  物理删除：仅 draft 且未被派生边引用时允许
+  R-SCH-9  状态流转须符合 §2.3 图，终态不可回退 / 复活
+  R-SCH-10 kind 门控：本波只有 SCHEDULE_KINDS_ENABLED（delivery）可写
+
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
 本守卫对这两条路径不生效（与其他守卫同一限制）。展开服务同样绕过拦截器链，
 其不变量由 SalesOrderExpandService 自行保证。
@@ -99,6 +113,24 @@ _ADDRESS_SNAPSHOT_PAIRS = (('ship_to_address_text', 'ship_to_address_id'),
                            ('bill_to_address_text', 'bill_to_address_id'))
 _ADDRESS_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _ADDRESS_SNAPSHOT_PAIRS)
 CONFIRMED = 'confirmed'
+
+# ---------------- 计划行（R-SCH） ----------------
+SCHEDULE_OBJECT = 'sales_order_schedule'
+SCHEDULE_TABLE = 'sales_order_schedules'
+# R-SCH-10：三 kind 一次声明，本波只启用 delivery
+SCHEDULE_KINDS = ('delivery', 'billing', 'service')
+SCHEDULE_KINDS_ENABLED = ('delivery',)
+SCHEDULE_STATUSES = ('planned', 'confirmed', 'completed', 'cancelled')
+# §2.3：completed / cancelled 为终态，不可回退、不可复活
+SCHEDULE_TERMINAL = ('completed', 'cancelled')
+SCHEDULE_TRANSITIONS = {
+    'planned': ('confirmed', 'cancelled'),
+    'confirmed': ('completed', 'cancelled'),
+}
+SCHEDULE_MILESTONE_MAX = 64
+# R-SCH-5：订单离开草稿后仍可改的列。status 不在冻结范围（状态流转由 R-SCH-9 管）。
+SCHEDULE_EDITABLE_AFTER_DRAFT = ('promised_date', 'promised_qty',
+                                 'plant_location_id', 'status')
 
 
 class SalesOrderGuardError(ValueError):
@@ -648,4 +680,210 @@ class SalesOrderGuardService:
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取组织职能 {org_id} 失败: {e}')
             return True
+        return bool(rows)
+
+    # ---------------- 计划行（R-SCH-0 ~ R-SCH-10） ----------------
+
+    def validate_schedule_write(self, data: Dict[str, Any],
+                                old_data: Optional[Dict[str, Any]] = None,
+                                is_create: bool = True) -> None:
+        """计划行创建 / 更新前校验。
+
+        `data` 是「写入后的有效行」（更新场景 = 旧行 ∪ 本次参数）。
+        读侧异常一律 fail-open：取不到订单 / 订单行时不做判定，
+        缺失引用交给外键与必填校验兜底。
+        """
+        old = old_data or {}
+        kind = data.get('schedule_kind')
+
+        # R-SCH-10：kind 门控（三值已声明，本波只启用 delivery）
+        if not _is_blank(kind) and str(kind) not in SCHEDULE_KINDS_ENABLED:
+            raise SalesOrderGuardError(
+                f'计划类型 {kind} 尚未启用（当前可用：'
+                f'{"/".join(SCHEDULE_KINDS_ENABLED)}）',
+                field_name='schedule_kind', rule='SCHEDULE_KIND_NOT_ENABLED')
+
+        # R-SCH-1：承诺日期必填
+        if _is_blank(data.get('promised_date')):
+            raise SalesOrderGuardError(
+                '计划行必须填写承诺日期',
+                field_name='promised_date', rule='SCHEDULE_DATE_REQUIRED')
+
+        # R-SCH-6：里程碑码长度上限（本波只是自由字符串，不做存在性校验）
+        milestone = data.get('milestone_code')
+        if not _is_blank(milestone) and len(str(milestone)) > SCHEDULE_MILESTONE_MAX:
+            raise SalesOrderGuardError(
+                f'里程碑码长度不得超过 {SCHEDULE_MILESTONE_MAX} 个字符',
+                field_name='milestone_code', rule='MILESTONE_CODE_TOO_LONG')
+
+        line_id = data.get('line_id')
+        order_id = data.get('order_id')
+        line = self._load_line_schedule_context(line_id) \
+            if not _is_blank(line_id) else None
+
+        # R-SCH-0：计划行所属订单必须与订单行一致
+        if line and not _is_blank(order_id) \
+                and str(order_id) != str(line.get('order_id')):
+            raise SalesOrderGuardError(
+                f'计划行所属订单（{order_id}）与订单行所属订单'
+                f'（{line.get("order_id")}）不一致',
+                field_name='order_id', rule='SCHEDULE_ORDER_MISMATCH')
+
+        # R-SCH-5：订单离开草稿后禁止新增，只允许改期 / 改量 / 改发货点
+        parent_order_id = order_id if not _is_blank(order_id) \
+            else (line or {}).get('order_id')
+        order = self._load_order(parent_order_id) \
+            if not _is_blank(parent_order_id) else {}
+        parent_status = (order or {}).get('status')
+        if parent_status and parent_status != DRAFT:
+            if is_create:
+                raise SalesOrderGuardError(
+                    f'订单处于 {parent_status} 状态，不允许新增计划行',
+                    field_name='status', rule='SCHEDULE_LOCKED')
+            changed = [f for f in data
+                       if f not in SCHEDULE_EDITABLE_AFTER_DRAFT
+                       and str(data.get(f)) != str(old.get(f))]
+            if changed:
+                raise SalesOrderGuardError(
+                    f'订单处于 {parent_status} 状态，计划行只允许修改 '
+                    f'{"/".join(SCHEDULE_EDITABLE_AFTER_DRAFT)}',
+                    field_name=changed[0], rule='SCHEDULE_LOCKED')
+
+        if str(kind) == 'billing':
+            # R-SCH-2：billing 不承诺数量
+            if not _is_blank(data.get('promised_qty')):
+                raise SalesOrderGuardError(
+                    'billing 计划行不承诺数量，promised_qty 必须留空',
+                    field_name='promised_qty', rule='BILLING_QTY_NOT_ALLOWED')
+
+        elif str(kind) == 'delivery':
+            qty = _num(data.get('promised_qty'))
+            # R-SCH-3：承诺量必填且 > 0
+            if qty is None or qty <= 0:
+                raise SalesOrderGuardError(
+                    'delivery 计划行必须填写大于 0 的承诺数量',
+                    field_name='promised_qty', rule='DELIVERY_QTY_INVALID')
+            # R-SCH-3：同一行 delivery 合计 ≤ 行 qty（作废行不占量）
+            line_qty = _num((line or {}).get('qty'))
+            if not _is_blank(line_id) and line_qty is not None:
+                consumed = self._sum_delivery_qty(line_id, exclude_id=data.get('id'))
+                if consumed + qty > line_qty + 1e-9:
+                    raise SalesOrderGuardError(
+                        f'本行 delivery 承诺量合计（{consumed + qty:g}）'
+                        f'超过订单行数量（{line_qty:g}）',
+                        field_name='promised_qty', rule='DELIVERY_QTY_EXCEEDED')
+            # R-SCH-7：发货点必填（默认继承订单行）
+            if _is_blank(data.get('plant_location_id')) \
+                    and _is_blank((line or {}).get('plant_location_id')):
+                raise SalesOrderGuardError(
+                    'delivery 计划行必须指定发货点（订单行未指定时请本行显式填写）',
+                    field_name='plant_location_id', rule='SCHEDULE_PLANT_REQUIRED')
+
+        elif str(kind) == 'service':
+            # R-SCH-4：服务次数必填（行内唯一由部分唯一索引兜底）
+            if _is_blank(data.get('service_visit_no')):
+                raise SalesOrderGuardError(
+                    'service 计划行必须填写服务次数',
+                    field_name='service_visit_no',
+                    rule='SERVICE_VISIT_NO_REQUIRED')
+
+        # R-SCH-9：状态流转须符合 §2.3 图，终态不可回退 / 复活
+        new_status = data.get('status')
+        if not _is_blank(new_status) and str(new_status) not in SCHEDULE_STATUSES:
+            raise SalesOrderGuardError(
+                f'计划行状态 {new_status} 不属于 {"/".join(SCHEDULE_STATUSES)}',
+                field_name='status', rule='SCHEDULE_STATUS_INVALID')
+        if not is_create and not _is_blank(new_status):
+            old_status = old.get('status')
+            if old_status and str(new_status) != str(old_status):
+                if str(old_status) in SCHEDULE_TERMINAL:
+                    raise SalesOrderGuardError(
+                        f'计划行已处于终态 {old_status}，不可再变更状态',
+                        field_name='status', rule='SCHEDULE_STATUS_INVALID')
+                allowed = SCHEDULE_TRANSITIONS.get(str(old_status), ())
+                if str(new_status) not in allowed:
+                    raise SalesOrderGuardError(
+                        f'计划行状态不允许从 {old_status} 变为 {new_status}'
+                        f'（允许：{"/".join(allowed) or "无"}）',
+                        field_name='status', rule='SCHEDULE_STATUS_INVALID')
+
+    def validate_schedule_delete(self, schedule_id: Any) -> None:
+        """R-SCH-8：仅 draft 且未被任何派生边引用时允许物理删除。
+
+        作废请改 `status=cancelled`，不要物理删。
+        """
+        if _is_blank(schedule_id):
+            return
+        schedule = self._load_schedule(schedule_id) or {}
+        order_id = schedule.get('order_id')
+        order = self._load_order(order_id) if not _is_blank(order_id) else {}
+        status = (order or {}).get('status')
+        if status and status != DRAFT:
+            raise SalesOrderGuardError(
+                f'订单处于 {status} 状态，计划行不可删除（请改 status=cancelled 作废）',
+                field_name='status', rule='SCHEDULE_DELETE_FORBIDDEN')
+        if self._has_schedule_derivation_refs(schedule_id):
+            raise SalesOrderGuardError(
+                '该计划行已被派生单据引用，不可物理删除（请作废）',
+                field_name='id', rule='SCHEDULE_DELETE_FORBIDDEN')
+
+    def _load_schedule(self, schedule_id: Any) -> Optional[Dict[str, Any]]:
+        try:
+            rows = self.ds.query(
+                f'SELECT id, order_id, line_id, schedule_no, schedule_kind, '
+                f'       promised_date, promised_qty, plant_location_id, '
+                f'       milestone_code, service_visit_no, status '
+                f'FROM {SCHEDULE_TABLE} WHERE id = ?', [schedule_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取计划行 {schedule_id} 失败: {e}')
+            return None
+        return rows[0] if rows else None
+
+    def _load_line_schedule_context(self, line_id: Any) -> Optional[Dict[str, Any]]:
+        """计划行判定所需的订单行上下文（订单归属 / 数量 / 发货点）。
+
+        独立于 `_load_line`（后者被 12+ 处既有规则复用，不改其列集）。
+        """
+        try:
+            rows = self.ds.query(
+                'SELECT id, order_id, qty, uom_id, plant_location_id '
+                'FROM sales_order_lines WHERE id = ?', [line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取计划行上下文（订单行 {line_id}）失败: {e}')
+            return None
+        return rows[0] if rows else None
+
+    def _sum_delivery_qty(self, line_id: Any, exclude_id: Any = None) -> float:
+        """同一行已承诺的 delivery 数量合计（作废行不占量）。"""
+        sql = (f'SELECT COALESCE(SUM(promised_qty), 0) AS qty '
+               f'FROM {SCHEDULE_TABLE} '
+               f"WHERE line_id = ? AND schedule_kind = 'delivery' "
+               f"  AND status <> 'cancelled'")
+        params = [line_id]
+        if not _is_blank(exclude_id):
+            sql += ' AND id <> ?'
+            params.append(exclude_id)
+        try:
+            rows = self.ds.query(sql, params)
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 汇总计划行数量（订单行 {line_id}）失败: {e}')
+            return 0.0
+        if not rows:
+            return 0.0
+        return _num(rows[0].get('qty')) or 0.0
+
+    def _has_schedule_derivation_refs(self, schedule_id: Any) -> bool:
+        """计划行是否已被派生边引用（doc_flow_edges.source_bo + source_id）。"""
+        try:
+            rows = self.ds.query(
+                'SELECT 1 FROM doc_flow_edges '
+                'WHERE source_bo = ? AND source_id = ? LIMIT 1',
+                [SCHEDULE_OBJECT, str(schedule_id)])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取计划行派生边 {schedule_id} 失败: {e}')
+            return False
         return bool(rows)

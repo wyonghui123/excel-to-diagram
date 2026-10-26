@@ -1399,3 +1399,13 @@ ui_view_config:
           label: 展开
           icon: expand
           condition: "row.parent_line_id == null"
+
+    # 计划行子表：父字段由 sales_order_schedule.order_id 的 ui.relation=sales_order 推断
+    # 依据: docs/superpowers/specs/2026-10-26-sales-order-schedule-line-spec.md §5
+    - child_object: sales_order_schedule
+      title: 计划行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

@@ -1,0 +1,432 @@
+# 销售订单计划行 (Sales Order Schedule)
+# 依据: docs/superpowers/specs/2026-10-26-sales-order-schedule-line-spec.md v1.1
+#
+# 定位: sales_order_lines 的附属计划层（相对订单是第三层）。
+#   注册为独立 BO（有 PK、可被 registry 寻址、可作派生源），
+#   UI 折叠在订单内（child_sections 第二段），无独立菜单。
+#
+# 本波口径:
+#   ① 三种 schedule_kind 一次声明，但只启用 delivery；
+#      billing / service 由守卫规则 SCHEDULE_KIND_NOT_ENABLED 拒绝。
+#   ② 不建任何 DOC_FLOW 规则（交货单 BO 尚未存在）。
+#   ③ 数量只有一个量 promised_qty（承诺量），单位 = 订单行 uom_id；
+#      已交量靠派生边聚合，不放 shipped_qty。
+#   ④ 分单键 plant_location_id 必须长在源 BO 上（引擎 split_key 约束）；
+#      送达方不冗余，交货单抬头从订单取。
+#   ⑤ 编号不复用: cancelled 的 schedule_no 仍占号，新建顺延。
+
+id: sales_order_schedule
+name: 订单计划行
+table_name: sales_order_schedules
+description: 销售订单计划行（承诺交期 / 承诺量，一行多批次）
+parent_object: sales_order
+display_name_field: schedule_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: order_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = sales_order 的字段）
+  # line_id 不配 ui.relation，避免双父键歧义。
+  - id: order_id
+    name: 所属订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 所属销售订单（由 line_id 反查填充，一致性由 R-SCH-0 保证）
+    semantics:
+      meaning: 所属销售订单
+      display:
+        type: association
+        target_type: sales_order
+        display_field: order_no
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order
+        value_field: id
+        display_field: order_no
+        code_field: order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{order_no}"
+        columns:
+          - field: order_no
+            label: 订单编号
+            width: 180
+    ui:
+      widget: select
+      relation: sales_order
+      multiple: false
+
+  - id: line_id
+    name: 订单行
+    type: integer
+    db_column: line_id
+    required: true
+    description: 所属订单行（真外键，restrict）
+    semantics:
+      meaning: 所属订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order_line
+        value_field: id
+        display_field: line_no
+        code_field: line_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "行 {line_no}"
+        columns:
+          - field: line_no
+            label: 行号
+            width: 100
+    ui:
+      widget: select
+      multiple: false
+
+  - id: plant_location_id
+    name: 发货点
+    type: integer
+    db_column: plant_location_id
+    nullable: true
+    description: 发货点 / 工厂（限定 site 类型位置）；delivery kind 必填，默认继承订单行
+    semantics:
+      meaning: 计划行发货点位置
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          location_type: site
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: schedule_no
+    name: 序号
+    type: integer
+    db_column: schedule_no
+    required: true
+    description: 行内序号（按 kind 各自从 1 递增；作废后仍占号）
+    semantics:
+      meaning: 计划行序号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 序号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: schedule_kind
+    name: 计划类型
+    type: string
+    db_column: schedule_kind
+    required: true
+    max_length: 20
+    description: 计划类型（本波只启用 delivery）
+    enum_values:
+      - value: delivery
+        label: 交货计划
+        color: primary
+        category: active
+        is_initial: true
+      - value: billing
+        label: 开票计划
+        color: info
+        category: inactive
+      - value: service
+        label: 服务计划
+        color: warning
+        category: inactive
+    semantics:
+      meaning: 计划行的业务类型
+      filterable: true
+      filter_type: enum
+      filter_label: 计划类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: promised_date
+    name: 承诺日期
+    type: date
+    db_column: promised_date
+    required: true
+    description: 承诺日期（交货日 / 收款日 / 服务日，语义由 kind 限定）
+    semantics:
+      meaning: 对客户的承诺日期
+      filterable: true
+      filter_type: date
+      filter_label: 承诺日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: promised_qty
+    name: 承诺数量
+    type: number
+    db_column: promised_qty
+    nullable: true
+    description: 承诺量（单位 = 订单行 uom_id）；delivery 必填，billing 必须为空
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 4
+    semantics:
+      meaning: 承诺交付数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: milestone_code
+    name: 里程碑码
+    type: string
+    db_column: milestone_code
+    nullable: true
+    max_length: 64
+    description: 里程碑码（billing 用；本波自由字符串，不做字典校验）
+    semantics:
+      meaning: 开票计划的里程碑码
+    ui:
+      widget: input
+
+  - id: service_visit_no
+    name: 服务次数
+    type: integer
+    db_column: service_visit_no
+    nullable: true
+    description: 服务次数（service 用；行内唯一，由部分唯一索引兜底）
+    semantics:
+      meaning: 服务计划的第几次上门
+    ui:
+      widget: number
+
+  - id: status
+    name: 计划状态
+    type: string
+    db_column: status
+    required: true
+    default: planned
+    description: 计划状态（内排 / 已确认 / 已兑现 / 已作废）
+    enum_values:
+      - value: planned
+        label: 内排
+        color: info
+        category: active
+        is_initial: true
+      - value: confirmed
+        label: 已确认
+        color: primary
+        category: active
+      - value: completed
+        label: 已兑现
+        color: success
+        category: inactive
+      - value: cancelled
+        label: 已作废
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 计划行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 计划状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 同一订单行内，同一 kind 的序号唯一
+  - fields: [line_id, schedule_kind, schedule_no]
+    unique: true
+    name: uq_schedule_line_kind_no
+  # 服务次数在一行内唯一；仅 service 且已填时才参与
+  - fields: [line_id, service_visit_no]
+    type: partial
+    unique: true
+    condition: "schedule_kind = 'service' AND service_visit_no IS NOT NULL"
+    name: uq_schedule_service_visit
+  - fields: [order_id]
+    name: idx_schedule_order
+  - fields: [line_id]
+    name: idx_schedule_line
+
+relations:
+  - id: sales_order_schedule_to_order
+    name: 所属订单
+    type: reference
+    target: sales_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属销售订单引用（真外键）
+  - id: sales_order_schedule_to_line
+    name: 订单行
+    type: reference
+    target: sales_order_line
+    source_field: line_id
+    target_field: id
+    cardinality: N:1
+    description: 所属订单行引用（真外键）
+  - id: sales_order_schedule_to_location
+    name: 发货点
+    type: reference
+    target: location
+    source_field: plant_location_id
+    target_field: id
+    cardinality: N:1
+    description: 发货点位置引用（可空）
+
+ui_view_config:
+  # 作为订单抬头详情页的第二段子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 计划行
+    columns:
+      - field: schedule_no
+        width: 80
+        sortable: true
+      - field: line_id
+        width: 100
+      - field: schedule_kind
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: plant_location_id
+        width: 140
+      - field: promised_date
+        width: 130
+        sortable: true
+      - field: promised_qty
+        width: 110
+      - field: milestone_code
+        width: 140
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: schedule_no
+      order: asc
+  form:
+    title: 计划行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_id, schedule_kind]
+          - fields: [schedule_no, status]
+      - title: 计划
+        columns:
+          - fields: [promised_date, promised_qty]
+      - title: 发货与标识
+        columns:
+          - fields: [plant_location_id]
+          - fields: [milestone_code, service_visit_no]

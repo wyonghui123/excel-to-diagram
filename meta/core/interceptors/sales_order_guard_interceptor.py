@@ -8,8 +8,10 @@ PersistenceInterceptor 95 之前）：
     优先级 49 低于 PersistenceInterceptor 的 95，故重算时行已落库、新行 id 已回填。
 
 受管范围：
-  sales_order       —— 创建 / 更新 / 删除
-  sales_order_line  —— 创建 / 更新 / 删除
+  sales_order          —— 创建 / 更新 / 删除
+  sales_order_line     —— 创建 / 更新 / 删除
+  sales_order_schedule —— 创建 / 更新 / 删除（R-SCH-0 ~ R-SCH-10，
+                          不参与金额 / 定价回写）
 其余对象与动作零开销短路。
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 ORDER_OBJECT = 'sales_order'
 LINE_OBJECT = 'sales_order_line'
+SCHEDULE_OBJECT = 'sales_order_schedule'
 _WRITE_ACTIONS = ('crud_create', 'crud_update', 'crud_delete')
 _ORDER_ID_KEY = 'so_parent_order_id'
 # 抬头变更触发重取价的维度（§3.7 触发时点 3）
@@ -57,7 +60,7 @@ class SalesOrderGuardInterceptor(Interceptor):
 
     def should_execute(self, context: 'ActionContext') -> bool:
         object_id = getattr(context.meta_object, 'id', None)
-        if object_id not in (ORDER_OBJECT, LINE_OBJECT):
+        if object_id not in (ORDER_OBJECT, LINE_OBJECT, SCHEDULE_OBJECT):
             return False
         return context.action in _WRITE_ACTIONS
 
@@ -88,6 +91,16 @@ class SalesOrderGuardInterceptor(Interceptor):
                     is_create=context.action == 'crud_create')
                 return
 
+            if object_id == SCHEDULE_OBJECT:
+                if context.action == 'crud_delete':
+                    guard.validate_schedule_delete(context.object_id)
+                    return
+                data, old_data = self._effective_data(context)
+                guard.validate_schedule_write(
+                    data, old_data=old_data,
+                    is_create=context.action == 'crud_create')
+                return
+
             # 订单行
             if context.action == 'crud_delete':
                 # 删除前先记下父单（after_action 时行已不在了）
@@ -112,6 +125,9 @@ class SalesOrderGuardInterceptor(Interceptor):
 
     def after_action(self, context: 'ActionContext') -> None:
         object_id = getattr(context.meta_object, 'id', None)
+        if object_id == SCHEDULE_OBJECT:
+            # 计划行不参与行金额 / 定价回写
+            return
         if object_id == ORDER_OBJECT:
             self._after_order_write(context)
             return
