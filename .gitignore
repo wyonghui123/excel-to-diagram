@@ -175,6 +175,7 @@ meta/architecture.db.pre_*
 
 # IDE/agent runtime state
 .startup_state.json
+.startup_state_slot*.json
 .trae/debug/
 
 # Ad-hoc auto-commit / restart batch scripts
@@ -374,6 +375,9 @@ probe_out.txt
 
 # Playwright 测试日志 (注意是 hyphen 不是下划线)
 test-results/
+
+# E2E 登录态快照 (运行时产物, 含 token/cookie, 由 global.setup.js 重新生成)
+e2e/.auth/
 
 # ===== v2026.08.28: Phase 0 快照文件 (Plan A 权限集重构) =====
 meta/architecture.db.snapshot_20260828
