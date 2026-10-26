@@ -181,8 +181,14 @@ from meta.scripts.init_task_seed import init_task_seed_data
 from meta.scripts.init_region_seed import init_region_seed_data
 from meta.scripts.init_menu_permissions import init_menu_permissions
 
+_LOG_LEVEL = getattr(
+    logging,
+    os.environ.get('META_LOG_LEVEL', 'INFO').upper(),
+    logging.INFO,
+)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format='%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)

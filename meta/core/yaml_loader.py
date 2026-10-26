@@ -890,8 +890,8 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
     tabs_data = data.get("tabs", [])
     tabs = [parse_ui_detail_tab(t) for t in tabs_data]
     
-    logger.info(f"[YAML Loader] parse_ui_detail_view_config: tabs_data={tabs_data}")
-    logger.info(f"[YAML Loader] parse_ui_detail_view_config: tabs={tabs}")
+    logger.debug(f"[YAML Loader] parse_ui_detail_view_config: tabs_data={tabs_data}")
+    logger.debug(f"[YAML Loader] parse_ui_detail_view_config: tabs={tabs}")
     
     return UIDetailViewConfig(
         facets=facets,
@@ -2436,7 +2436,7 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
             }
             new_action = parse_action(action_data)
             missing_actions.append(new_action)
-            print(f"[YAML Loader] Auto-added missing action '{action_id}' for object '{obj.id}'")
+            logger.debug(f"[YAML Loader] Auto-added missing action '{action_id}' for object '{obj.id}'")
     
     if missing_actions:
         obj.actions = obj.actions + missing_actions
