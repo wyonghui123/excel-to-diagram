@@ -65,6 +65,21 @@ class TestSalesOrderDefaults:
         assert out['payment_term_id'] == 99
         assert out['incoterm_code'] == 'FOB'
 
+    def test_exchange_rate_date_filled_from_order_date(self, ds):
+        out = bo_api._apply_sales_order_defaults(
+            'sales_order', dict(BASE, exchange_rate=7.08))
+        assert out['exchange_rate_date'] == '2026-10-25'
+
+    def test_exchange_rate_date_kept_when_given(self, ds):
+        out = bo_api._apply_sales_order_defaults(
+            'sales_order',
+            dict(BASE, exchange_rate=7.08, exchange_rate_date='2026-10-20'))
+        assert out['exchange_rate_date'] == '2026-10-20'
+
+    def test_exchange_rate_date_blank_for_local_currency(self, ds):
+        out = bo_api._apply_sales_order_defaults('sales_order', dict(BASE))
+        assert out.get('exchange_rate_date') is None
+
     def test_control_parameter_fallback(self, monkeypatch):
         from meta.services import control_parameter_service as cps
         fake = _FakeDS(account={})

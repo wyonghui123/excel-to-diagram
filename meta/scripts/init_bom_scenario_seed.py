@@ -529,50 +529,52 @@ _CLEANUP_SQL = [
     # 订单行先解绑配置与父子关系，否则删 configurations 时被子行 / 父行引用
     ('sales_order_lines.unlink',
      "UPDATE sales_order_lines SET configuration_id = NULL, parent_line_id = NULL "
-     "WHERE order_id IN (SELECT id FROM sales_orders WHERE order_no LIKE 'SCN-%')"),
+     f"WHERE order_id IN (SELECT id FROM sales_orders WHERE order_no = '{ORDER_NO}')"),
     # 配置实例（结构上的求解结果）
     ('configuration_components',
      "DELETE FROM configuration_components WHERE configuration_id IN ("
      "SELECT c.id FROM configurations c JOIN item_structures s ON s.id = c.structure_id "
-     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%')"),
+     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     ('configuration_values',
      "DELETE FROM configuration_values WHERE configuration_id IN ("
      "SELECT c.id FROM configurations c JOIN item_structures s ON s.id = c.structure_id "
-     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%')"),
+     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     ('configurations',
      "DELETE FROM configurations WHERE structure_id IN ("
      "SELECT s.id FROM item_structures s JOIN items i ON i.id = s.item_id "
-     "WHERE i.code LIKE 'SCN-%')"),
+     "WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     # 规则与特征
     ('config_rule_terms',
      "DELETE FROM config_rule_terms WHERE rule_id IN ("
      "SELECT r.id FROM config_rules r JOIN item_structures s ON s.id = r.structure_id "
-     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%')"),
+     "JOIN items i ON i.id = s.item_id WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     ('config_rules',
      "DELETE FROM config_rules WHERE structure_id IN ("
      "SELECT s.id FROM item_structures s JOIN items i ON i.id = s.item_id "
-     "WHERE i.code LIKE 'SCN-%')"),
+     "WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     ('item_structure_attributes',
      "DELETE FROM item_structure_attributes WHERE structure_id IN ("
      "SELECT s.id FROM item_structures s JOIN items i ON i.id = s.item_id "
-     "WHERE i.code LIKE 'SCN-%')"),
+     "WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     # 结构与行
     ('item_structure_lines',
      "DELETE FROM item_structure_lines WHERE structure_id IN ("
      "SELECT s.id FROM item_structures s JOIN items i ON i.id = s.item_id "
-     "WHERE i.code LIKE 'SCN-%')"),
+     "WHERE i.code LIKE 'SCN-%' AND i.code NOT LIKE 'SCN-SO-%')"),
     ('item_structures',
-     "DELETE FROM item_structures WHERE item_id IN (SELECT id FROM items WHERE code LIKE 'SCN-%')"),
+     "DELETE FROM item_structures WHERE item_id IN (SELECT id FROM items "
+     "WHERE code LIKE 'SCN-%' AND code NOT LIKE 'SCN-SO-%')"),
     # 订单与行
     ('sales_order_lines',
      "DELETE FROM sales_order_lines WHERE order_id IN ("
-     "SELECT id FROM sales_orders WHERE order_no LIKE 'SCN-%')"),
-    ('sales_orders', "DELETE FROM sales_orders WHERE order_no LIKE 'SCN-%'"),
+     f"SELECT id FROM sales_orders WHERE order_no = '{ORDER_NO}')"),
+    ('sales_orders',
+     f"DELETE FROM sales_orders WHERE order_no = '{ORDER_NO}'"),
     # 物料与换算
     ('item_uom_conversions',
      "DELETE FROM item_uom_conversions WHERE item_id IN ("
-     "SELECT id FROM items WHERE code LIKE 'SCN-%')"),
-    ('items', "DELETE FROM items WHERE code LIKE 'SCN-%'"),
+     "SELECT id FROM items WHERE code LIKE 'SCN-%' AND code NOT LIKE 'SCN-SO-%')"),
+    ('items', "DELETE FROM items WHERE code LIKE 'SCN-%' AND code NOT LIKE 'SCN-SO-%'"),
     # 属性定义与范围
     ('attribute_scopes',
      "DELETE FROM attribute_scopes WHERE attribute_id IN ("

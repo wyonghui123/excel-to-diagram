@@ -27,6 +27,7 @@ pytestmark = pytest.mark.unit
 
 from meta.tests.factories._dimension_scope_engine_helpers import (
     make_dim_scope_engine_ds,
+    seed_org_tree,
     seed_territory_tree,
 )
 from meta.tests.factories._spec20_bizkey_helpers import add_scope
@@ -252,6 +253,43 @@ class TestDeriveDataConditionsTerritoryBinding:
             conditions = engine.derive_data_conditions(1)
 
         assert 'sales_order' not in conditions
+
+    def test_org_and_territory_same_role_and(self, mock_ds):
+        """跨维度护栏（D-TER-3）：同角色内 org + territory 命中同一 BO 取 AND
+
+        生产映射中 org 只绑 party_internal、territory 只绑 sales_order，两套承载面
+        不相交；此处用测试桩给 org 注入 sales_order 绑定，锁定引擎的跨维度 AND
+        语义，防止后续 org 纳入管理维度时被无意改成 OR。
+        """
+        import unittest.mock as mock
+        from meta.core.dimension_object_mapping_loader import (
+            get_dimension_object_mapping_loader,
+        )
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+
+        seed_org_tree(mock_ds)
+        engine = DimensionScopeEngine(mock_ds)
+        add_scope(mock_ds, 1, 'org', [1])
+        add_scope(mock_ds, 1, 'territory', [1])
+
+        loader = get_dimension_object_mapping_loader()
+        real_get_bindings = loader.get_bindings_for_bo
+
+        def stub_bindings(dim_code, bo_id):
+            if dim_code == 'org' and bo_id == 'sales_order':
+                return [{'bo': 'sales_order', 'field': 'org_id',
+                         'filter_type': 'fk'}]
+            return real_get_bindings(dim_code, bo_id)
+
+        with mock.patch.object(loader, 'get_bindings_for_bo',
+                               side_effect=stub_bindings), \
+                mock.patch.object(engine, '_get_all_resource_types',
+                                  return_value=['sales_order']):
+            conditions = engine.derive_data_conditions(1)
+
+        parts = set(conditions.get('sales_order', '').split(' AND '))
+        assert parts == {'org_id IN (1,2,3,4,5)',
+                         'territory_id IN (1,2,3,4)'}
 
 
 # ────────────────────────────────────────

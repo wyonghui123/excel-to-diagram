@@ -251,7 +251,21 @@ def _apply_sales_order_defaults(object_type: str, data: dict) -> dict:
             value = resolved.get(_CONTROL_DEFAULT_KEYS[field])
             if value not in (None, ''):
                 payload[field] = value
-    return _apply_sales_order_address_defaults(payload)
+
+    payload = _apply_sales_order_address_defaults(payload)
+
+    # W0-R13：存在折算（rate != 1）时汇率日期默认取订单日期；已有值不覆盖
+    if payload.get('exchange_rate_date') in (None, ''):
+        rate = payload.get('exchange_rate')
+        converted = False
+        if rate not in (None, ''):
+            try:
+                converted = float(rate) != 1
+            except (TypeError, ValueError):
+                converted = False
+        if converted and payload.get('order_date'):
+            payload['exchange_rate_date'] = payload.get('order_date')
+    return payload
 
 
 def _reapply_sales_order_defaults(object_type: str, obj_id, data: dict) -> dict:
