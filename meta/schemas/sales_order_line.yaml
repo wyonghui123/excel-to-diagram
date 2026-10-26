@@ -16,6 +16,8 @@
 #      line_no 仍是纯数字（^[0-9]{1,6}$），component_no 只是与配置实例对账的键。
 #   ⑦ pricing_mode 决定金额落在哪一层：父行含价 / 子行含价 / 基准加选项；
 #      standalone 表示未展开的普通行。P1 只表达归属，取价仍由定价波次提供。
+#   ⑧ 退货引用（E6）：退货行可用 reference_line_id 回指原销售订单行；
+#      无源退货留空。合法性由守卫 R-RET-1~9 校验，被引用行禁止删除。
 
 id: sales_order_line
 name: 销售订单行
@@ -30,7 +32,11 @@ hierarchy:
 
 deletion_policy:
   mode: restrict
-  restrict_on: []
+  restrict_on:
+    # E6 / R-RET-9：退货行回指原行后，原行禁止删除
+    - table: sales_order_lines
+      foreign_key: reference_line_id
+      message: 该订单行已被退货行引用，请先删除退货行后再删除
   cascade_delete: []
 
 audit:
@@ -638,6 +644,47 @@ fields:
       widget: input
       editable: false
 
+  # ---- 退货引用（E6 / P1）----
+  # 退货行可回指原销售订单行；无源退货留空。选择器无法跨表按原单状态过滤，
+  # 草稿原单行也会出现在候选里，合法性由守卫 R-RET-1~8 在写入时兜底。
+  - id: reference_line_id
+    name: 原订单行
+    type: integer
+    db_column: reference_line_id
+    nullable: true
+    description: 退货行引用的原销售订单行（无源退货留空）
+    semantics:
+      meaning: 退货行回指的原销售订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order_line
+        value_field: id
+        display_field: line_no
+        apply_target_permissions: true
+        value_filter:
+          status__in: open,closed
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{line_no}"
+        columns:
+          - field: line_no
+            label: 原行号
+            width: 100
+    ui:
+      widget: select
+      relation: sales_order_line_to_reference_line
+      multiple: false
+
   - id: component_no
     name: 组件号
     type: string
@@ -779,6 +826,9 @@ indexes:
     name: idx_sales_order_line_order_status
   - fields: [parent_line_id]
     name: idx_sales_order_line_parent
+  # E6：退货行按原行反查（删除保护 / 累计退货量）
+  - fields: [reference_line_id]
+    name: idx_sales_order_line_reference
   - fields: [configuration_id]
     name: idx_sales_order_line_configuration
   # 同一父行内组件号唯一；parent_line_id 为空的行（未展开行）不参与唯一约束
@@ -843,6 +893,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 展开层级父行引用（自引用，可空）
+  - id: sales_order_line_to_reference_line
+    name: 原订单行
+    type: reference
+    target: sales_order_line
+    source_field: reference_line_id
+    target_field: id
+    cardinality: N:1
+    description: 退货行引用原销售订单行（自引用，可空）
   - id: sales_order_line_to_configuration
     name: 配置实例
     type: reference
@@ -866,6 +924,9 @@ ui_view_config:
         width: 120
       - field: item_id
         width: 200
+      # E6：退货行回指的原行；非退货行恒为空
+      - field: reference_line_id
+        width: 110
       - field: description
         width: 220
         type: ellipsis
@@ -926,6 +987,10 @@ ui_view_config:
         columns:
           - fields: [pricing_mode, component_no]
           - fields: [parent_line_id, configuration_id]
+      # 退货行引用原行；仅退货单 + 退货行可填，守卫兜底
+      - title: 退货引用
+        columns:
+          - fields: [reference_line_id]
       - title: 交期与其他
         columns:
           - fields: [requested_date, plant_location_id]

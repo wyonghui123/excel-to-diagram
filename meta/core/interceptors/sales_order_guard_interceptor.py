@@ -110,6 +110,13 @@ class SalesOrderGuardInterceptor(Interceptor):
 
             data, old_data = self._effective_data(context)
             is_create = context.action == 'crud_create'
+            # E6：退货行按引用行补空字段（先于服务行默认值，后者可继续补单位）
+            if is_create:
+                ref_defaults = guard.return_line_defaults(data)
+                if ref_defaults:
+                    data.update(ref_defaults)
+                    if isinstance(context.params, dict):
+                        context.params.update(ref_defaults)
             # W2-A：服务行默认值（计费方式 / 资源类型 / 时长 / 时长单位）随创建写入
             if is_create:
                 defaults = guard.service_line_defaults(data)

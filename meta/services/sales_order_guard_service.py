@@ -34,6 +34,19 @@
   W2-SVC-4  服务时长 > 0，且必须与时长单位成对
   W2-SVC-5  计费方式 / 资源类型 / 时长单位必须在枚举内
 
+退货引用（E6 / R-RET，依据 docs/superpowers/specs/
+2026-10-26-sales-order-master-data-gap-spec.md §10）:
+  R-RET-1  仅退货单（document_category=return）+ 退货行（line_category=return）
+           可填引用；无源退货留空放行
+  R-RET-2  引用行必须存在
+  R-RET-3  引用行不得属于当前订单（含自身）
+  R-RET-4  被引用行及其所属订单都不得是退货
+  R-RET-5  被引用行所属订单须为 confirmed / closed
+  R-RET-6  退货单客户须等于原单客户
+  R-RET-7  行的 item_id 须等于被引用行（双方都有值时）
+  R-RET-8  累计退货量（不含当前行、排除已取消行 / 单）+ 本次 ≤ 原行 qty
+  R-RET-9  被引用行禁止删除
+
 地址快照（W2-D）:
   R-ADR-1  订单离开草稿后两列只读（唯一例外：确认动作同一请求内由系统回填）
   R-ADR-2  已非空的快照不得被清空
@@ -91,6 +104,8 @@ DRAFT = 'draft'
 
 # W0-R8：非 draft 后不可变的抬头字段
 _FROZEN_AFTER_DRAFT = ('order_no', 'order_type_id', 'currency_id')
+#: 确认后冻结的汇率快照字段（W0-R9）
+_EXCHANGE_SNAPSHOT_FIELDS = ('exchange_rate', 'exchange_rate_type', 'exchange_rate_date')
 # W0-R9：确认后冻结的汇率
 _CONFIRMED_STATES = ('confirmed', 'closed')
 
@@ -108,6 +123,15 @@ _SERVICE_LINE_FIELDS = ('service_start_date', 'service_end_date', 'billing_metho
 _BILLING_METHODS = ('fixed_price', 'time_and_material', 'milestone')
 _RESOURCE_TYPES = ('technician', 'engineer', 'consultant')
 _DURATION_TYPES = ('hour', 'day', 'week')
+
+# ---------------- 退货引用链（E6 / R-RET） ----------------
+RETURN_CATEGORY = 'return'
+RETURN_REFERENCE_FIELD = 'reference_line_id'
+#: R-RET-8：累计退货量比较容差（数量允许小数）
+_QTY_TOLERANCE = 1e-9
+#: 从原行复制的空值字段；不复制 qty / unit_price / plant_location_id
+_RETURN_REF_COPY_FIELDS = ('item_id', 'customer_item_code', 'description',
+                           'uom_id', 'tax_code_id')
 # W2-D：地址文本快照（文本列 ← 地址引用列）
 _ADDRESS_SNAPSHOT_PAIRS = (('ship_to_address_text', 'ship_to_address_id'),
                            ('bill_to_address_text', 'bill_to_address_id'))
@@ -117,9 +141,9 @@ CONFIRMED = 'confirmed'
 # ---------------- 计划行（R-SCH） ----------------
 SCHEDULE_OBJECT = 'sales_order_schedule'
 SCHEDULE_TABLE = 'sales_order_schedules'
-# R-SCH-10：三 kind 一次声明，本波只启用 delivery
+# R-SCH-10：三 kind 一次声明，本波启用 delivery / billing
 SCHEDULE_KINDS = ('delivery', 'billing', 'service')
-SCHEDULE_KINDS_ENABLED = ('delivery',)
+SCHEDULE_KINDS_ENABLED = ('delivery', 'billing')
 SCHEDULE_STATUSES = ('planned', 'confirmed', 'completed', 'cancelled')
 # §2.3：completed / cancelled 为终态，不可回退、不可复活
 SCHEDULE_TERMINAL = ('completed', 'cancelled')
@@ -200,13 +224,33 @@ class SalesOrderGuardService:
                         f'订单已离开草稿态（{old_status}），不允许修改 {field}',
                         field_name=field, rule='field_frozen_after_draft')
 
-        # R9：确认后汇率冻结
-        if old_status in _CONFIRMED_STATES and 'exchange_rate' in data:
-            new_rate, old_rate = _num(data.get('exchange_rate')), _num(old.get('exchange_rate'))
-            if new_rate is not None and old_rate is not None and new_rate != old_rate:
+        # R9：确认后汇率快照冻结（汇率 / 汇率类型 / 汇率日期）
+        if old_status in _CONFIRMED_STATES:
+            new_rate = _num(data.get('exchange_rate'))
+            old_rate = _num(old.get('exchange_rate'))
+            if 'exchange_rate' in data and new_rate is not None \
+                    and old_rate is not None and new_rate != old_rate:
                 raise SalesOrderGuardError(
-                    '订单已确认，汇率已冻结，不可修改', field_name='exchange_rate',
+                    '订单已确认，汇率快照已冻结，不可修改', field_name='exchange_rate',
                     rule='exchange_rate_frozen')
+            for field in _EXCHANGE_SNAPSHOT_FIELDS:
+                if field == 'exchange_rate' or field not in data:
+                    continue
+                if str(data.get(field) or '') != str(old.get(field) or ''):
+                    raise SalesOrderGuardError(
+                        '订单已确认，汇率快照已冻结，不可修改',
+                        field_name=field, rule='exchange_rate_frozen')
+
+        # W0-R13：存在折算（exchange_rate != 1）时汇率日期必填；本币 rate = 1 允许留空
+        effective_rate = _num(data.get('exchange_rate')) if 'exchange_rate' in data \
+            else _num(old.get('exchange_rate'))
+        effective_date = data.get('exchange_rate_date', old.get('exchange_rate_date'))
+        if effective_rate is not None and effective_rate != 1 \
+                and _is_blank(effective_date):
+            raise SalesOrderGuardError(
+                '存在汇率折算（exchange_rate != 1）时，汇率日期必填',
+                field_name='exchange_rate_date',
+                rule='exchange_rate_date_required')
 
         # R-TER-8：确认后销售区域冻结（此后客户分配变化不影响本单）
         if old_status in _CONFIRMED_STATES and 'territory_id' in data \
@@ -363,9 +407,10 @@ class SalesOrderGuardService:
                 f'（须 scope_bo=sales_order / level=line）',
                 field_name='line_type_id', rule='line_type_scope')
 
-        # R5：行类型与抬头单据类型同 scope_bo
-        if line_type and order.get('order_type_id'):
-            order_type = self._load_type(order.get('order_type_id')) or {}
+        # R5：行类型与抬头单据类型同 scope_bo；抬头类型同时供 R-RET-1 判定
+        order_type = (self._load_type(order.get('order_type_id'))
+                      if not _is_blank(order.get('order_type_id')) else None)
+        if line_type and order_type:
             order_scope = order_type.get('scope_bo')
             if order_scope and order_scope != line_type.get('scope_bo'):
                 raise SalesOrderGuardError(
@@ -427,6 +472,10 @@ class SalesOrderGuardService:
 
         # W2-A：服务行属性（W2-SVC-1~5）
         self._validate_service_line(data)
+
+        # E6 / R-RET-1~8：退货行引用原行（引用为空直接放行）
+        self._validate_return_reference(
+            data, old_data, is_create, line_type, order_type, order)
 
     # ---------------- 行单位可换算（V-SU-3 / R-SU-5） ----------------
 
@@ -550,6 +599,27 @@ class SalesOrderGuardService:
                              if _is_blank(data.get(k)) and not _is_blank(v)})
         return defaults
 
+    def return_line_defaults(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """退货引用默认值：按原行补空字段（E6 / R-RET）。
+
+        只复制 `item_id` / `customer_item_code` / `description` / `uom_id` /
+        `tax_code_id`；不复制 `qty`（避免整行全退）、`unit_price`（定价仍由
+        定价引擎取当前价）与 `plant_location_id`（退货收货点可能不同）。
+        引用为空 / 原行读不到时返回空，不阻断写入。
+        """
+        reference_line_id = data.get(RETURN_REFERENCE_FIELD)
+        if _is_blank(reference_line_id):
+            return {}
+        found, ref = self._load_reference_line(reference_line_id)
+        if not found or not ref:
+            return {}
+
+        defaults: Dict[str, Any] = {}
+        for field in _RETURN_REF_COPY_FIELDS:
+            if _is_blank(data.get(field)) and not _is_blank(ref.get(field)):
+                defaults[field] = ref.get(field)
+        return defaults
+
     def validate_line_delete(self, line_id: Any) -> None:
         """非草稿订单下禁止删除行（R8）；有展开子行的父行须先删子行（W2-R6）。"""
         if _is_blank(line_id):
@@ -560,6 +630,10 @@ class SalesOrderGuardService:
             raise SalesOrderGuardError(
                 '该行存在展开子行，请先删除子行再删除父行',
                 field_name='parent_line_id', rule='line_has_children')
+        if self._has_return_refs(line_id):
+            raise SalesOrderGuardError(
+                '该订单行已被退货行引用，请先删除退货行再删除原行',
+                field_name=RETURN_REFERENCE_FIELD, rule='line_has_return_refs')
 
     # ---------------- 展开字段（W2-R1） ----------------
 
@@ -596,8 +670,8 @@ class SalesOrderGuardService:
     def _load_type(self, type_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
-                'SELECT id, code, scope_bo, level, document_category '
-                'FROM type_definitions WHERE id = ?', [type_id])
+                'SELECT id, code, scope_bo, level, document_category, '
+                'line_category FROM type_definitions WHERE id = ?', [type_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取类型 {type_id} 失败: {e}')
             return None
@@ -607,8 +681,8 @@ class SalesOrderGuardService:
         try:
             rows = self.ds.query(
                 'SELECT id, order_no, order_type_id, order_date, status, '
-                'sales_org_id, org_id, currency_id, exchange_rate '
-                'FROM sales_orders WHERE id = ?', [order_id])
+                'sales_org_id, org_id, currency_id, exchange_rate, '
+                'customer_account_id FROM sales_orders WHERE id = ?', [order_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取订单 {order_id} 失败: {e}')
             return None
@@ -642,6 +716,8 @@ class SalesOrderGuardService:
         try:
             rows = self.ds.query(
                 'SELECT id, order_id, line_no, line_type_id, item_id, '
+                '       qty, uom_id, tax_code_id, customer_item_code, '
+                '       description, reference_line_id, '
                 '       parent_line_id, component_no, configuration_id, '
                 '       pricing_mode FROM sales_order_lines WHERE id = ?',
                 [line_id])
@@ -649,6 +725,30 @@ class SalesOrderGuardService:
             logger.warning(f'[sales_order_guard] 读取订单行 {line_id} 失败: {e}')
             return None
         return rows[0] if rows else None
+
+    def _load_reference_line(self, line_id: Any):
+        """读取退货引用行及其订单上下文。
+
+        返回 `(found, row)`：`found=False` 表示查询失败（fail-open，不判定）；
+        `found=True, row=None` 表示引用行确实不存在（R-RET-2 拒绝）。
+        独立于 `_load_line`，避免把「不存在」与「查询失败」混为一谈。
+        """
+        try:
+            rows = self.ds.query(
+                'SELECT l.id, l.order_id, l.qty, l.item_id, l.line_type_id, '
+                '       l.customer_item_code, l.description, l.uom_id, '
+                '       l.tax_code_id, '
+                '       o.order_type_id AS ref_order_type_id, '
+                '       o.status AS ref_order_status, '
+                '       o.customer_account_id AS ref_customer_account_id '
+                'FROM sales_order_lines l '
+                'JOIN sales_orders o ON o.id = l.order_id '
+                'WHERE l.id = ?', [line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取退货引用行 {line_id} 失败: {e}')
+            return False, None
+        return True, (rows[0] if rows else None)
 
     def _load_item(self, item_id: Any) -> Optional[Dict[str, Any]]:
         try:
@@ -671,6 +771,144 @@ class SalesOrderGuardService:
             logger.warning(f'[sales_order_guard] 读取子行 {line_id} 失败: {e}')
             return False
         return bool(rows)
+
+    # ---------------- 退货引用（E6 / R-RET） ----------------
+
+    def _validate_return_reference(self, data: Dict[str, Any],
+                                   old_data: Optional[Dict[str, Any]],
+                                   is_create: bool,
+                                   line_type: Optional[Dict[str, Any]],
+                                   order_type: Optional[Dict[str, Any]],
+                                   order: Dict[str, Any]) -> None:
+        """R-RET-1~8：退货行引用原行的合法性。引用为空直接放行。"""
+        old = old_data or {}
+        reference_line_id = data.get(RETURN_REFERENCE_FIELD)
+        if RETURN_REFERENCE_FIELD not in data and not is_create:
+            reference_line_id = old.get(RETURN_REFERENCE_FIELD)
+        if _is_blank(reference_line_id):
+            return
+
+        # R-RET-1：引用只属于「退货订单 + 退货行」
+        if (order_type or {}).get('document_category') != RETURN_CATEGORY \
+                or (line_type or {}).get('line_category') != RETURN_CATEGORY:
+            raise SalesOrderGuardError(
+                '只有退货订单的退货行可以填写原订单行',
+                field_name=RETURN_REFERENCE_FIELD, rule='return_ref_not_allowed')
+
+        # R-RET-2：引用行必须存在（读失败不判定）
+        found, ref = self._load_reference_line(reference_line_id)
+        if not found:
+            return
+        if not ref:
+            raise SalesOrderGuardError(
+                f'原订单行 {reference_line_id} 不存在',
+                field_name=RETURN_REFERENCE_FIELD, rule='return_ref_not_found')
+
+        # R-RET-3：不得引用本单（含自身）
+        order_id = data.get('order_id')
+        if _is_blank(order_id):
+            order_id = order.get('id')
+        if str(ref.get('order_id')) == str(order_id):
+            raise SalesOrderGuardError(
+                '退货行不能引用当前订单内的行，请选择其他订单的原行',
+                field_name=RETURN_REFERENCE_FIELD, rule='return_ref_same_order')
+
+        # R-RET-4：原行及其订单都不得是退货
+        ref_line_type = (self._load_type(ref.get('line_type_id'))
+                         if not _is_blank(ref.get('line_type_id')) else None)
+        ref_order_type = (self._load_type(ref.get('ref_order_type_id'))
+                          if not _is_blank(ref.get('ref_order_type_id')) else None)
+        if (ref_line_type or {}).get('line_category') == RETURN_CATEGORY \
+                or (ref_order_type or {}).get('document_category') == RETURN_CATEGORY:
+            raise SalesOrderGuardError(
+                '原订单行属于退货单 / 退货行，不能再被退货引用',
+                field_name=RETURN_REFERENCE_FIELD, rule='return_ref_not_return')
+
+        # R-RET-5：原单须已确认 / 关闭，避免对未生效订单预开退货
+        ref_status = ref.get('ref_order_status')
+        if not _is_blank(ref_status) and ref_status not in _CONFIRMED_STATES:
+            raise SalesOrderGuardError(
+                f'原订单处于 {ref_status} 状态，只有 confirmed / closed 可开退货',
+                field_name=RETURN_REFERENCE_FIELD,
+                rule='return_ref_order_not_confirmed')
+
+        # R-RET-6：退货单客户须与原单客户一致
+        customer_id = order.get('customer_account_id')
+        ref_customer_id = ref.get('ref_customer_account_id')
+        if not _is_blank(customer_id) and not _is_blank(ref_customer_id) \
+                and str(customer_id) != str(ref_customer_id):
+            raise SalesOrderGuardError(
+                '退货单客户与原订单客户不一致',
+                field_name=RETURN_REFERENCE_FIELD,
+                rule='return_ref_customer_mismatch')
+
+        # R-RET-7：双方都有物料时须一致
+        item_id = data.get('item_id')
+        if item_id is None and not is_create:
+            item_id = old.get('item_id')
+        if not _is_blank(item_id) and not _is_blank(ref.get('item_id')) \
+                and str(item_id) != str(ref.get('item_id')):
+            raise SalesOrderGuardError(
+                '退货行物料与原订单行不一致',
+                field_name=RETURN_REFERENCE_FIELD,
+                rule='return_ref_item_mismatch')
+
+        # R-RET-8：累计退货量不得超过原行数量（当前行按 id 排除）
+        qty = _num(data.get('qty'))
+        if qty is None and not is_create:
+            qty = _num(old.get('qty'))
+        original_qty = _num(ref.get('qty'))
+        if qty is None or original_qty is None:
+            return
+        current_id = data.get('id')
+        if _is_blank(current_id) and not is_create:
+            current_id = old.get('id')
+        returned = self._sum_returned_qty(
+            reference_line_id, exclude_line_id=current_id)
+        if returned is None:
+            return
+        if returned + qty > original_qty + _QTY_TOLERANCE:
+            raise SalesOrderGuardError(
+                f'累计退货量 {returned + qty:g} 超过原行数量 {original_qty:g}',
+                field_name='qty', rule='return_qty_exceeded')
+
+    def _has_return_refs(self, line_id: Any) -> bool:
+        """原行是否被退货行引用（R-RET-9）；查询失败 fail-open。"""
+        try:
+            rows = self.ds.query(
+                'SELECT 1 FROM sales_order_lines '
+                'WHERE reference_line_id = ? LIMIT 1', [line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取退货引用 {line_id} 失败: {e}')
+            return False
+        return bool(rows)
+
+    def _sum_returned_qty(self, reference_line_id: Any,
+                          exclude_line_id: Any = None):
+        """原行已发生的退货数量合计；排除当前行与已取消行 / 单。
+
+        返回 None 表示查询失败（fail-open，R-RET-8 不判定）。
+        """
+        sql = ('SELECT COALESCE(SUM(rl.qty), 0) AS qty '
+               'FROM sales_order_lines rl '
+               'JOIN sales_orders ro ON ro.id = rl.order_id '
+               'WHERE rl.reference_line_id = ? '
+               "  AND rl.status <> 'cancelled' "
+               "  AND ro.status <> 'cancelled'")
+        params = [reference_line_id]
+        if not _is_blank(exclude_line_id):
+            sql += ' AND rl.id <> ?'
+            params.append(exclude_line_id)
+        try:
+            rows = self.ds.query(sql, params)
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 汇总退货数量 {reference_line_id} 失败: {e}')
+            return None
+        if not rows:
+            return 0.0
+        return _num(rows[0].get('qty')) or 0.0
 
     def _org_has_function(self, org_id: Any, function_type: str) -> bool:
         try:
