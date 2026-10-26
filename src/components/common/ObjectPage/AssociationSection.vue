@@ -282,7 +282,7 @@
     </template>
 
     <MetaListPage
-      v-else-if="targetType && objectType && objectId"
+      v-else-if="targetType && objectType && objectId && parentFieldReady"
       :ref="setMetaListRef"
       :object-type="targetType || section.association"
       :options="associationOptions"
@@ -296,6 +296,10 @@
       @request-edit="$emit('request-edit')"
       @action="handleEmbeddedAction($event, props.section)"
     />
+
+    <div v-else-if="targetType && objectType && objectId" class="op-empty-state">
+      <p>加载中...</p>
+    </div>
 
     <div v-else-if="!objectId || objectId === 'new'" class="op-empty-state">
       <AppIcon name="link" size="lg" />
@@ -1281,12 +1285,36 @@ const manyToManyBatchActions = computed(() => {
   }]
 })
 
+// [FIX2026-10-26] 子表的过滤父键不能写死 `${objectType}_id`：
+//   子对象可在 schema 里用 hierarchy.parent_field 声明非常规父键
+//   （如 sales_order_line.order_id）。写死约定时后端会静默忽略该过滤条件，
+//   子表退化为全量行（订单详情里能看到别的订单的行）。
+const declaredParentField = ref('')
+// 父键解析完成前不渲染子表，避免先按错误键拉一次全量数据（视觉闪一下无关行）
+const parentFieldReady = ref(props.section?.assocType !== 'parent_child')
+
+async function resolveParentField() {
+  if (props.section?.assocType !== 'parent_child') {
+    parentFieldReady.value = true
+    return
+  }
+  const childType = props.section?.assocName || props.section?.association
+  if (!childType) {
+    parentFieldReady.value = true
+    return
+  }
+  const res = await metaService.getSchema(childType).catch(() => null)
+  const parentField = res?.success ? res.data?.hierarchy?.parent_field : ''
+  if (parentField) declaredParentField.value = parentField
+  parentFieldReady.value = true
+}
+
 const associationFilters = computed(() => {
   const section = props.section
   if (section.assocType === 'many_to_many' || section.assocType === 'reverse_many_to_many') {
     return {}
   }
-  const parentKey = `${props.objectType}_id`
+  const parentKey = declaredParentField.value || `${props.objectType}_id`
   return { [parentKey]: props.objectId }
 })
 
@@ -1676,6 +1704,7 @@ async function handleEmbeddedAction({ action, row }, section) {
 
 onMounted(() => {
   loadAnnotationCategories()
+  resolveParentField()
 })
 
 watch(() => props.objectId, (newVal, oldVal) => {

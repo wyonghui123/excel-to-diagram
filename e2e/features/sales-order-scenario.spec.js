@@ -15,6 +15,11 @@
  *   FE-08 W2-A 服务行默认值只补空（4 项默认值 / 已填不覆盖）
  *   FE-09 W1-A 取价失败码（NO_CANDIDATE / CURRENCY_MISMATCH）+ 手工价保护
  *   FE-10 销售单位默认：行不填单位 → 取物料销售单位 / 显式单位不被覆盖 / 无销售单位回落基本单位
+ *   FE-11 W1-A 新建订单自动取价（price_source=rate_table + 抬头 determined）
+ *   FE-12 W1-A 取价轨迹回放（无 explain 端点，用行 price_trace 替代）
+ *   FE-13 W0 确认后改行数量被守卫拦截（W1-R7）
+ *   FE-14 W2-A 服务属性反例（goods 行填服务列 / 停用服务物料）
+ *   FE-15 W2-D 确认时地址文本快照 + 离草稿只读
  *
  * v2 铁律: import 自 auto-fixtures.js / 用 navigateTo / 不用 page.goto + waitForTimeout
  */
@@ -30,11 +35,15 @@ const ORDER_NOCAND = 'SCN-SO-W1-NOCAND-1'
 const ORDER_CCY = 'SCN-SO-W1-CCY-1'
 const ORDER_MANUAL = 'SCN-SO-W1-MANUAL-1'
 const ORDER_SVC = 'SCN-SO-W2-SVC-1'
+const ORDER_ADDR = 'SCN-SO-W9-E2E-ADDR-1'
+const ADDR_SHIP = 6
+const ADDR_BILL = 7
 
 const ORG_EAST = 318          // 华东销售中心（org_functions.function_type='sales'）
 const ORDER_TYPE_STD = 1      // TA 标准销售订单
 const LINE_TYPE_STD = 101     // STD
 const LINE_TYPE_SVC = 102     // SVC
+const TAX_13 = 1              // CN_VAT_13
 const TAX_6 = 3               // CN_VAT_6
 const UOM_FEA = 2             // 前端验证单位
 
@@ -55,6 +64,11 @@ async function findOrder(page, orderNo) {
   const order = items.find(o => o.order_no === orderNo)
   expect(order, `应存在场景订单 ${orderNo}（先跑种子脚本）`).toBeTruthy()
   return order
+}
+
+async function findOrderOrNull(page, orderNo) {
+  const data = await fetchJson(page, '/api/v2/bo/sales_order?page_size=200')
+  return (data?.items || []).find(o => o.order_no === orderNo) || null
 }
 
 async function openDetail(page, navigateTo, waitForApiFn, order, testInfo) {
@@ -217,6 +231,13 @@ test.describe('SO-SCN: 详情', () => {
       const data = body?.data ?? body
       expect(data?.repriced, '至少重取 1 行').toBeGreaterThan(0)
       expect(data?.pricing_status, '抬头定价状态应为已取价').toBe('determined')
+    })
+
+    await withStep(page, testInfo, '行取价来源复位为价目表', async () => {
+      const lines = await fetchOrderLines(page, order.id)
+      const priced = lines.find(l => blankToNull(l.unit_price) !== null)
+      expect(priced, '应存在已取价行').toBeTruthy()
+      expect(priced.price_source, '重取后来源应为 rate_table').toBe('rate_table')
     })
 
     await openDetail(page, navigateTo, waitForApiFn, order, testInfo)
@@ -508,5 +529,235 @@ test.describe('SO-SCN: 定价与行默认值', () => {
         await dropBo(page, 'sales_order', order.id)
       }
     }
+  })
+
+  test('FE-11 W1-A 新建订单行自动取价', async ({ page }, testInfo) => {
+    const cust = await findByField(page, 'customer_account', 'name', 'SCN-SO-客户A')
+    const item = await findByField(page, 'item', 'code', 'SCN-SO-ITEM-CPU')
+    const stamp = Date.now().toString().slice(-6)
+
+    let order = null
+    const createdLines = []
+    try {
+      await withStep(page, testInfo, '建单（客户 A / 2026-10-26 / 华东）', async () => {
+        order = await createBo(page, 'sales_order', {
+          order_no: `SCN-SO-W9-E2E-PRC-${stamp}`,
+          order_type_id: ORDER_TYPE_STD,
+          order_date: '2026-10-26',
+          org_id: ORG_EAST,
+          sales_org_id: ORG_EAST,
+          currency_id: 8,
+          customer_account_id: cust.id,
+          price_date: '2026-10-26',
+        })
+      })
+
+      await withStep(page, testInfo, '建行不填单价 → 自动取价 74.16', async () => {
+        const line = await createBo(page, 'sales_order_line', {
+          order_id: order.id,
+          line_no: '10',
+          line_type_id: LINE_TYPE_STD,
+          item_id: item.id,
+          qty: 5,
+          uom_id: UOM_FEA,
+          tax_code_id: TAX_13,
+        })
+        createdLines.push(line.id)
+
+        const fresh = await readBo(page, 'sales_order_line', line.id)
+        expect(Number(fresh.unit_price).toFixed(2), '客户价 80 → 9 折 → 3% 附加费')
+          .toBe('74.16')
+        expect(fresh.price_source, '来源应为价目表').toBe('rate_table')
+      })
+
+      await withStep(page, testInfo, '抬头定价状态回写 determined', async () => {
+        const fresh = await readBo(page, 'sales_order', order.id)
+        expect(fresh.pricing_status, '抬头定价状态应为已取价').toBe('determined')
+      })
+    } finally {
+      for (const id of createdLines) {
+        await dropBo(page, 'sales_order_line', id)
+      }
+      if (order) {
+        await dropBo(page, 'sales_order', order.id)
+      }
+    }
+  })
+
+  test('FE-12 W1-A 取价轨迹回放', async ({ page }, testInfo) => {
+    // 当前无独立 explain 端点，以行上持久化的 price_trace 回放命中轨迹
+    const order = await findOrder(page, ORDER_PRICE)
+
+    await withStep(page, testInfo, '重取价并回放行轨迹', async () => {
+      const resp = await page.request.post(
+        `/api/v1/sales-orders/${order.id}/reprice`)
+      expect(resp.ok(), `POST reprice 应 200, 实际 ${resp.status()}`).toBe(true)
+
+      const lines = await fetchOrderLines(page, order.id)
+      const priced = lines.find(l => blankToNull(l.unit_price) !== null)
+      expect(priced, '应存在已取价行').toBeTruthy()
+
+      const trace = typeof priced.price_trace === 'string'
+        ? JSON.parse(priced.price_trace)
+        : priced.price_trace
+      expect(trace, '应写入取价轨迹').toBeTruthy()
+      expect(blankToNull(trace.reason), '成功轨迹无失败原因').toBeNull()
+      expect(trace.hit_ids?.length, '轨迹应记录命中价目行').toBeGreaterThan(0)
+    })
+  })
+
+  test('FE-13 W0 确认后改行数量被守卫拦截', async ({ page }, testInfo) => {
+    const order = await findOrder(page, ORDER_CONF)
+    const lines = await fetchOrderLines(page, order.id)
+    expect(lines.length, '确认单应含订单行').toBeGreaterThan(0)
+
+    await withStep(page, testInfo, 'PUT qty=99 → 400 行写父单非草稿', async () => {
+      const resp = await page.request.put(
+        `/api/v2/bo/sales_order_line/${lines[0].id}`, { data: { qty: 99 } })
+      expect(resp.status(), '确认后改数量应 400').toBe(400)
+      const body = await resp.json()
+      expect(body.success).toBe(false)
+      expect(body.errors?.[0]?.rule, '规则码').toBe('line_write_parent_not_draft')
+    })
+  })
+
+  test('FE-14 W2-A 服务属性反例', async ({ page }, testInfo) => {
+    const cust = await findByField(page, 'customer_account', 'name', 'SCN-SO-客户A')
+    const goods = await findByField(page, 'item', 'code', 'SCN-SO-ITEM-CPU')
+    const svcOff = await findByField(page, 'item', 'code', 'SCN-SO-ITEM-SVC-OFF')
+    const stamp = Date.now().toString().slice(-6)
+
+    let order = null
+    try {
+      order = await createBo(page, 'sales_order', {
+        order_no: `SCN-SO-W9-E2E-SVC-${stamp}`,
+        order_type_id: ORDER_TYPE_STD,
+        order_date: '2026-10-26',
+        org_id: ORG_EAST,
+        sales_org_id: ORG_EAST,
+        currency_id: 8,
+        customer_account_id: cust.id,
+      })
+
+      await withStep(page, testInfo, 'goods 行填计费方式被拒', async () => {
+        const resp = await page.request.post('/api/v2/bo/sales_order_line', {
+          data: {
+            order_id: order.id,
+            line_no: '10',
+            line_type_id: LINE_TYPE_STD,
+            item_id: goods.id,
+            qty: 1,
+            uom_id: UOM_FEA,
+            unit_price: 10,
+            tax_code_id: TAX_13,
+            billing_method: 'fixed_price',
+          },
+        })
+        expect(resp.status(), 'goods 行带服务列应 400').toBe(400)
+        const body = await resp.json()
+        // 创建接口（POST /api/v2/bo/<type>）只回 success/data/message，不回 errors，故按守卫文案断言
+        expect(body.success, '应返回失败').toBe(false)
+        expect(body.message, '拒绝原因').toContain('只有服务物料行可以填写服务属性')
+      })
+
+      await withStep(page, testInfo, '停用服务物料被拒', async () => {
+        const resp = await page.request.post('/api/v2/bo/sales_order_line', {
+          data: {
+            order_id: order.id,
+            line_no: '20',
+            line_type_id: LINE_TYPE_SVC,
+            item_id: svcOff.id,
+            qty: 1,
+            uom_id: UOM_FEA,
+            unit_price: 200,
+            tax_code_id: TAX_6,
+          },
+        })
+        expect(resp.status(), '停用服务物料应 400').toBe(400)
+        const body = await resp.json()
+        expect(body.success, '应返回失败').toBe(false)
+        expect(body.message, '拒绝原因').toContain('未签发或已停用，不能下单')
+      })
+    } finally {
+      if (order) {
+        await dropBo(page, 'sales_order', order.id)
+      }
+    }
+  })
+
+  test('FE-15 W2-D 确认时地址文本快照', async ({ page }, testInfo) => {
+    const cust = await findByField(page, 'customer_account', 'name', 'SCN-SO-客户A')
+    const ship = await fetchJson(page, `/api/v2/bo/address/${ADDR_SHIP}`)
+    const bill = await fetchJson(page, `/api/v2/bo/address/${ADDR_BILL}`)
+
+    // 确认单不可删除，用固定单号幂等复用
+    let order = await findOrderOrNull(page, ORDER_ADDR)
+    if (!order) {
+      order = await createBo(page, 'sales_order', {
+        order_no: ORDER_ADDR,
+        order_type_id: ORDER_TYPE_STD,
+        order_date: '2026-10-26',
+        org_id: ORG_EAST,
+        sales_org_id: ORG_EAST,
+        currency_id: 8,
+        customer_account_id: cust.id,
+        ship_to_address_id: ADDR_SHIP,
+        bill_to_address_id: ADDR_BILL,
+      })
+    }
+
+    await withStep(page, testInfo, '推进到已确认', async () => {
+      let fresh = await readBo(page, 'sales_order', order.id)
+      if (fresh.status === 'draft') {
+        const resp = await page.request.put(
+          `/api/v2/bo/sales_order/${order.id}`, { data: { status: 'submitted' } })
+        expect(resp.ok(), `提交应成功, 实际 ${resp.status()}`).toBe(true)
+        fresh = await readBo(page, 'sales_order', order.id)
+      }
+      if (fresh.status === 'submitted') {
+        const resp = await page.request.put(
+          `/api/v2/bo/sales_order/${order.id}`, { data: { status: 'confirmed' } })
+        expect(resp.ok(), `确认应成功, 实际 ${resp.status()}`).toBe(true)
+      }
+      fresh = await readBo(page, 'sales_order', order.id)
+      expect(fresh.status, '订单应为已确认').toBe('confirmed')
+    })
+
+    await withStep(page, testInfo, '两列快照等于地址库全文', async () => {
+      const fresh = await readBo(page, 'sales_order', order.id)
+      expect(fresh.ship_to_address_text, '收货地址快照').toBe(ship.formatted_address)
+      expect(fresh.bill_to_address_text, '收票地址快照').toBe(bill.formatted_address)
+    })
+
+    const originalStreet = ship.street
+    try {
+      await withStep(page, testInfo, '改地址库 street → 快照不变', async () => {
+        const resp = await page.request.put(
+          `/api/v2/bo/address/${ADDR_SHIP}`,
+          { data: { street: `${originalStreet ?? ''}-E2E` } })
+        expect(resp.ok(), `改地址库应成功, 实际 ${resp.status()}`).toBe(true)
+
+        const addrAfter = await fetchJson(page, `/api/v2/bo/address/${ADDR_SHIP}`)
+        expect(addrAfter.formatted_address, '地址库全文应变化')
+          .not.toBe(ship.formatted_address)
+
+        const fresh = await readBo(page, 'sales_order', order.id)
+        expect(fresh.ship_to_address_text, '快照不随地址库变化')
+          .toBe(ship.formatted_address)
+      })
+    } finally {
+      const resp = await page.request.put(
+        `/api/v2/bo/address/${ADDR_SHIP}`, { data: { street: originalStreet } })
+      expect(resp.ok(), `还原地址库应成功, 实际 ${resp.status()}`).toBe(true)
+    }
+
+    await withStep(page, testInfo, '确认后改快照文本被拒', async () => {
+      const resp = await page.request.put(
+        `/api/v2/bo/sales_order/${order.id}`,
+        { data: { ship_to_address_text: '试图覆盖快照' } })
+      expect(resp.status(), '确认后改快照应 400').toBe(400)
+      const body = await resp.json()
+      expect(body.errors?.[0]?.rule, '规则码').toBe('address_snapshot_locked')
+    })
   })
 })
