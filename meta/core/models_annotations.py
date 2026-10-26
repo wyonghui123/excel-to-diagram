@@ -254,6 +254,7 @@ class UIAnnotation:
     readonly_in_create: bool = False
     order: int = 100
     width: str = ""
+    placeholder: str = ""
     i18n_key: str = ""
     relation: str = ""
     display_field: str = ""

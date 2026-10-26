@@ -645,8 +645,9 @@ fields:
       relation: org
       multiple: false
 
-  # SAP Sales Area（销售组织 + 分销渠道 + 产品组）中的产品组切片（扁平字符串，不建对象）；
-  # ≠ item_group；与本平台的「销售区域」（territory，责任田）无关，勿同名混用。
+  # 产品组：SAP Sales Area（销售组织 + 分销渠道 + 产品组）中的产品组切片，
+  # 由薄主数据 division（code / name / status）承载；无层级、无带出链、不参与定价。
+  # ≠ item_group（物料分类）；与本平台的「销售区域」（territory，责任田）无关，勿同名混用。
   - id: division_code
     name: 产品组
     type: string
@@ -657,8 +658,41 @@ fields:
     semantics:
       meaning: 销售产品组切片
       data_category: code
+      display:
+        type: association
+        target_type: division
+        display_field: name
+        placeholder: "未指定"
+    value_help:
+      source:
+        type: bo
+        target_bo: division
+        value_field: code
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 产品组编码
+            width: 120
+          - field: name
+            label: 产品组名称
+            width: 200
     ui:
-      widget: input
+      widget: select
+      relation: division
+      multiple: false
+      clearable: true
 
   - id: currency_id
     name: 订单币种

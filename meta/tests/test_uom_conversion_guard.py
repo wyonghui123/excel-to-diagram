@@ -367,6 +367,7 @@ class TestInterceptorWiring:
         ds = _FakeDS()
         assert self.itc.should_execute(_ctx('item_uom_conversion', 'crud_create', {}, ds=ds))
         assert self.itc.should_execute(_ctx('uom_conversion', 'crud_create', {}, ds=ds))
+        assert self.itc.should_execute(_ctx('item', 'crud_create', {}, ds=ds))
         assert self.itc.should_execute(_ctx('item', 'crud_update', {}, ds=ds))
         assert self.itc.should_execute(_ctx('uom', 'crud_update', {}, ds=ds))
         assert self.itc.should_execute(_ctx('uom_group', 'crud_update', {}, ds=ds))
@@ -374,7 +375,7 @@ class TestInterceptorWiring:
     def test_other_objects_and_reads_short_circuit(self):
         ds = _FakeDS()
         assert not self.itc.should_execute(_ctx('party', 'crud_create', {}, ds=ds))
-        assert not self.itc.should_execute(_ctx('item', 'crud_create', {}, ds=ds))
+        assert not self.itc.should_execute(_ctx('item', 'crud_read', {}, ds=ds))
         assert not self.itc.should_execute(_ctx('uom', 'crud_read', {}, ds=ds))
         assert not self.itc.should_execute(_ctx('uom_group', 'crud_create', {}, ds=ds))
 

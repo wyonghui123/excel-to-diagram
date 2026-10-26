@@ -703,6 +703,21 @@
       "fields": [],
       "table": ""
     },
+    "division": {
+      "hash": "3c0d35d45ce144fe239167d8d2b3fe6b",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "status",
+        "description"
+      ],
+      "table": "divisions"
+    },
     "document_type": {
       "hash": "c8f128aa6fe12bf888140aa80ce27c6f",
       "fields": [
@@ -898,7 +913,7 @@
       "table": "incoterms"
     },
     "item": {
-      "hash": "65d879edd1dabf0e61efdc689606007b",
+      "hash": "90516d1bda342dae668b240a28617df3",
       "fields": [
         "updated_at",
         "created_by",
@@ -920,6 +935,7 @@
         "item_group_id",
         "tax_classification_id",
         "base_uom",
+        "sales_uom",
         "net_weight",
         "gross_weight",
         "barcode",
@@ -1877,7 +1893,7 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "06ed737412a6a233ba6ef3981afb92df",
+      "hash": "5d78a8c962bf92bc18b8591c895b0bd4",
       "fields": [
         "created_by",
         "updated_by",
@@ -1895,6 +1911,7 @@
         "ship_to_address_text",
         "bill_to_address_text",
         "salesperson_id",
+        "territory_id",
         "org_id",
         "sales_org_id",
         "division_code",
@@ -2432,5 +2449,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-26T08:11:51.337095"
+  "last_sync": "2026-10-26T15:42:57.107316"
 }

@@ -593,6 +593,7 @@ def parse_ui_annotation(data: Dict[str, Any]) -> UIAnnotation:
         hidden_in_form=data.get("hidden_in_form", False),
         hidden_in_list=data.get("hidden_in_list", False),
         width=data.get("width", "auto"),
+        placeholder=data.get("placeholder", ""),
         i18n_key=data.get("i18n_key", ""),
         relation=data.get("relation", ""),
         display_field=data.get("display_field", ""),

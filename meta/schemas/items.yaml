@@ -484,6 +484,51 @@ fields:
       multiple: false
       clearable: false
 
+  - id: sales_uom
+    name: 销售单位
+    type: integer
+    db_column: sales_uom
+    nullable: true
+    description: 物料默认销售计量单位；空 = 使用基本单位
+    semantics:
+      meaning: 物料默认销售计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "未指定（使用基本单位）"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 120
+          - field: name
+            label: 单位名称
+            width: 180
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      placeholder: "未指定（使用基本单位）"
+
   - id: net_weight
     name: 净重
     type: float
@@ -666,6 +711,8 @@ indexes:
     name: idx_item_status
   - fields: [base_uom]
     name: idx_item_base_uom
+  - fields: [sales_uom]
+    name: idx_item_sales_uom
   - fields: [barcode]
     name: idx_item_barcode
   - fields: [tax_classification_id]
@@ -688,6 +735,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 物料基本计量单位引用（[FK 2026-10-07] 由展示语义升级为真外键）
+  - id: item_to_sales_uom
+    name: 销售单位
+    type: reference
+    target: uom
+    source_field: sales_uom
+    target_field: id
+    cardinality: N:1
+    description: 物料默认销售计量单位引用（可空；空 = 使用基本单位）
   - id: item_to_tax_classification
     name: 税务分类
     type: reference
@@ -755,6 +810,11 @@ ui_view_config:
         render_as: association
         target_type: uom
         display_field: name
+      - field: sales_uom
+        width: 110
+        render_as: association
+        target_type: uom
+        display_field: name
       - field: status
         width: 100
         filterable: true
@@ -810,7 +870,8 @@ ui_view_config:
           - fields: [item_group_id]
       - title: 计量信息
         columns:
-          - fields: [base_uom, barcode]
+          - fields: [base_uom, sales_uom]
+          - fields: [barcode]
           - fields: [net_weight, gross_weight]
       - title: 税务
         columns:
@@ -838,6 +899,7 @@ ui_view_config:
           - item_type
           - item_group_id
           - base_uom
+          - sales_uom
           - barcode
           - net_weight
           - gross_weight

@@ -44,6 +44,9 @@
   §6.1     新建时按客户主区域带出（当日有效 → 主区域优先 → priority 升序
            → effective_from 最新）；客户无分配则留空，不阻断下单（fail-open）
 
+产品组（B）:
+  R-DIV-1  division_code 须存在于 division 且为启用态（创建或值变更时校验）
+
 行的写入门槛取「父单必须是 draft」一条：
   R8 只明文限制删除，但 submitted / confirmed 已是下游读取的快照态，
   允许追加或改行会让 R7 的汇总回写改动已确认金额，故创建 / 更新 / 删除
@@ -62,6 +65,8 @@
 import logging
 import re
 from typing import Any, Dict, Optional
+
+from meta.services.uom_quantity_service import UomQuantityService
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +222,22 @@ class SalesOrderGuardService:
                 f'组织 {sales_org_id} 不具备销售职能（sales），不能作为销售组织',
                 field_name='sales_org_id', rule='sales_org_not_sales')
 
+        # R-DIV-1：产品组须存在于 division 且为启用态（严格绑定）
+        # 平台 _validate_value_helps 只读顶层已废弃的 validation 且固定按 id 查找，
+        # 对 code 型 value_help 不生效，故在此补齐写侧校验。
+        division_code = data.get('division_code')
+        if not _is_blank(division_code) \
+                and (is_create or str(division_code) != str(old.get('division_code'))):
+            found, division = self._load_division(division_code)
+            if found and division is None:
+                raise SalesOrderGuardError(
+                    f'产品组 {division_code} 不存在',
+                    field_name='division_code', rule='division_not_found')
+            if found and division.get('status') != 'active':
+                raise SalesOrderGuardError(
+                    f'产品组 {division_code} 已停用，不能用于新订单',
+                    field_name='division_code', rule='division_inactive')
+
     # ---------------- 销售区域带出（M3, §6.1） ----------------
 
     def territory_default(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -330,6 +351,8 @@ class SalesOrderGuardService:
         if _is_blank(data.get('uom_id')):
             raise SalesOrderGuardError(
                 '订单行必须填写计量单位', field_name='uom_id', rule='uom_required')
+        # V-SU-3 / R-SU-5：行单位须可换算到物料基本单位（仅创建或单位/物料变化时）
+        self._validate_line_uom(data, old_data, is_create)
         if _is_blank(data.get('item_id')) and _is_blank(data.get('description')):
             raise SalesOrderGuardError(
                 '未选物料的行必须填写行描述', field_name='description',
@@ -372,6 +395,38 @@ class SalesOrderGuardService:
 
         # W2-A：服务行属性（W2-SVC-1~5）
         self._validate_service_line(data)
+
+    # ---------------- 行单位可换算（V-SU-3 / R-SU-5） ----------------
+
+    def _validate_line_uom(self, data: Dict[str, Any],
+                           old_data: Optional[Dict[str, Any]],
+                           is_create: bool) -> None:
+        """行单位必须能换算到物料基本单位；判定不足（None）放行。
+
+        R-SU-5：更新时 `item_id` / `uom_id` 都未变化则跳过，避免存量行被
+        非单位字段的更新「顺手」打回；创建时必校验。
+        """
+        item_id = data.get('item_id')
+        uom_id = data.get('uom_id')
+        if _is_blank(item_id) or _is_blank(uom_id):
+            return
+        if not is_create:
+            old = old_data or {}
+            if old \
+                    and str(item_id) == str(old.get('item_id')) \
+                    and str(uom_id) == str(old.get('uom_id')):
+                return
+
+        item = self._load_item(item_id)
+        if not item:
+            return  # R-SU-3：物料读不到不判定（由外键 / 必填兜底）
+
+        compatible = UomQuantityService(self.ds).is_compatible(
+            item_id, uom_id, item.get('base_uom'))
+        if compatible is False:
+            raise SalesOrderGuardError(
+                '订单行计量单位与物料基本单位不可换算',
+                field_name='uom_id', rule='item_uom_incompatible')
 
     # ---------------- 服务行（W2-A） ----------------
 
@@ -431,7 +486,11 @@ class SalesOrderGuardService:
                     field_name=field, rule='service_enum_invalid')
 
     def service_line_defaults(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """按物料服务属性补行级默认值（只补空字段；读不到物料返回空）。
+        """按物料属性补行级默认值（只补空字段；读不到物料返回空）。
+
+        默认单位（R-SU-1）：`uom_id` 为空时取 `item.sales_uom`，再退
+        `item.base_uom`；显式给值不覆盖（R-SU-2）。
+        服务字段（W2-A）只在 `item_type == service` 时补，映射不变。
 
         由拦截器在创建前并入写入参数，故默认值与真实写入同一次事务。
         """
@@ -439,16 +498,25 @@ class SalesOrderGuardService:
         if _is_blank(item_id):
             return {}
         item = self._load_item(item_id)
-        if not item or item.get('item_type') != SERVICE_ITEM:
+        if not item:
             return {}
-        mapping = {
-            'billing_method': item.get('billing_method_default'),
-            'required_resource_type': item.get('required_resource_type'),
-            'service_duration': item.get('standard_duration'),
-            'duration_type': item.get('duration_type'),
-        }
-        return {k: v for k, v in mapping.items()
-                if _is_blank(data.get(k)) and not _is_blank(v)}
+
+        defaults: Dict[str, Any] = {}
+        if _is_blank(data.get('uom_id')):
+            uom = item.get('sales_uom') or item.get('base_uom')
+            if not _is_blank(uom):
+                defaults['uom_id'] = uom
+
+        if item.get('item_type') == SERVICE_ITEM:
+            mapping = {
+                'billing_method': item.get('billing_method_default'),
+                'required_resource_type': item.get('required_resource_type'),
+                'service_duration': item.get('standard_duration'),
+                'duration_type': item.get('duration_type'),
+            }
+            defaults.update({k: v for k, v in mapping.items()
+                             if _is_blank(data.get(k)) and not _is_blank(v)})
+        return defaults
 
     def validate_line_delete(self, line_id: Any) -> None:
         """非草稿订单下禁止删除行（R8）；有展开子行的父行须先删子行（W2-R6）。"""
@@ -514,6 +582,20 @@ class SalesOrderGuardService:
             return None
         return rows[0] if rows else None
 
+    def _load_division(self, code: Any):
+        """按 code 读产品组。
+
+        返回 `(found, row)`：`found=False` 表示查询失败（fail-open，不拦截）；
+        `found=True, row=None` 表示确无该产品组。
+        """
+        try:
+            rows = self.ds.query(
+                'SELECT code, status FROM divisions WHERE code = ?', [code])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(f'[sales_order_guard] 读取产品组 {code} 失败: {e}')
+            return False, None
+        return True, (rows[0] if rows else None)
+
     def _load_address(self, address_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
@@ -539,7 +621,8 @@ class SalesOrderGuardService:
     def _load_item(self, item_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
-                'SELECT id, item_type, status, billing_method_default, '
+                'SELECT id, item_type, status, base_uom, sales_uom, '
+                '       billing_method_default, '
                 '       required_resource_type, standard_duration, duration_type '
                 'FROM items WHERE id = ?', [item_id])
         except Exception as e:  # 查询失败 → fail-open

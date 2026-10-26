@@ -27,6 +27,8 @@
 import logging
 from typing import Any, Dict, Optional
 
+from meta.services.uom_quantity_service import UomQuantityService
+
 logger = logging.getLogger(__name__)
 
 #: 物料「已签发」口径：draft = 未签发；active / frozen / inactive 均为已签发过的物料
@@ -131,7 +133,12 @@ class UomConversionGuardService:
     # ---------- 公开入口：物料 / 单位 / 组更新 ----------
 
     def validate_item_update(self, item_id: Any, new_base_uom: Any) -> None:
-        """物料更新前校验 V7：已有换算行时禁止变更基本单位。"""
+        """物料更新前校验 V7 与 V-SU-2。
+
+        V7：已有换算行时禁止变更基本单位；
+        V-SU-2：已有 `sales_uom` 时，新基本单位必须与其可换算。
+        查询失败 / 数据不足一律放行（fail-open）。
+        """
         if item_id is None or new_base_uom is None:
             return
         item = self._fetch_item(item_id)
@@ -145,6 +152,41 @@ class UomConversionGuardService:
             raise UomConversionGuardError(
                 f'该物料已维护 {count} 条单位换算，变更基本单位会使全部换算失效，请先清理换算记录',
                 field_name='基本单位', rule='base_uom_locked')
+
+        sales_uom = item.get('sales_uom')
+        if sales_uom is None or str(sales_uom) == str(new_base_uom):
+            return
+        compatible = UomQuantityService(self.ds).is_compatible(
+            item_id, sales_uom, new_base_uom)
+        if compatible is False:
+            raise UomConversionGuardError(
+                '物料销售单位与基本单位不可换算',
+                field_name='销售单位',
+                rule='sales_uom_incompatible_with_base')
+
+    def validate_item_sales_uom(self, item_id: Any, sales_uom: Any,
+                                base_uom: Any = None) -> None:
+        """物料写入 `sales_uom` 前校验 V-SU-1。
+
+        `sales_uom` 为空或等于基本单位时通过；否则必须可换算到基本单位。
+        创建时可传 `item_id=None`（此时仅做组内换算判定）。
+        查询失败 / 数据不足（`is_compatible` 返回 None）放行。
+        """
+        if sales_uom is None:
+            return
+        if base_uom is None and item_id is not None:
+            item = self._fetch_item(item_id)
+            if item is None:
+                return
+            base_uom = item.get('base_uom')
+        if base_uom is None or str(sales_uom) == str(base_uom):
+            return
+        compatible = UomQuantityService(self.ds).is_compatible(
+            item_id, sales_uom, base_uom)
+        if compatible is False:
+            raise UomConversionGuardError(
+                '物料销售单位与基本单位不可换算',
+                field_name='销售单位', rule='sales_uom_incompatible')
 
     def validate_uom_update(self, uom_id: Any, new_status: Any) -> None:
         """单位更新前校验 V8 / V14：被引用的单位禁止停用。"""
@@ -236,7 +278,7 @@ class UomConversionGuardService:
 
     def _fetch_item(self, item_id: Any) -> Optional[Dict[str, Any]]:
         return self._one(
-            f"SELECT id, base_uom, status FROM {self.ITEM_TABLE} WHERE id = ?",
+            f"SELECT id, base_uom, sales_uom, status FROM {self.ITEM_TABLE} WHERE id = ?",
             [item_id])
 
     def _fetch_uom(self, uom_id: Any) -> Optional[Dict[str, Any]]:

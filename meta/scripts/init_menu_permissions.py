@@ -2028,6 +2028,38 @@ def init_menu_permissions(db_path):
                 'message': '建议分配区域数据权限'
             })
         },
+        {
+            # [SALES-B 2026-10-26] 产品组 —— 主数据组
+            #   与 v137__division 的声明保持一致；缺本声明时步骤 7.6 会把该手工菜单
+            #   当冗余删除（产品组页入口随之消失）。
+            'menu_code': 'division-list',
+            'menu_name': '产品组',
+            'menu_path': '/divisions',
+            'icon': 'List',
+            'color': '#0ea5e9',
+            'sort_order': 86,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'division',
+            'object_types': json.dumps(['division']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'division', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'division:division_create',
+                'division:division_read',
+                'division:division_update',
+                'division:division_delete',
+                'division:division_list',
+            ]),
+            'description': '产品组字典：编码、名称与启用状态',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['division'],
+                'message': '建议分配产品组数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========

@@ -42,6 +42,7 @@
       :value-help-config="getValueHelpConfigWithFallback(fieldKey)"
       :form-values="formData"
       :field-key="fieldKey"
+      :placeholder="getFieldPlaceholder(fieldKey)"
       :disabled="isFieldReadonly(fieldKey)"
       @update:model-value="val => emit('field-update', { key: fieldKey, value: val })"
       @update:display-value="val => emit('field-display-update', { key: fieldKey, displayValue: val })"
@@ -571,6 +572,7 @@ function getFieldProps(key) {
 function getFieldPlaceholder(key) {
   const def = props.fieldDefs[key]
   if (def?.placeholder) return def.placeholder
+  if (def?.ui?.placeholder) return def.ui.placeholder
   const label = def?.label || key
   return getFieldWidget(key) === 'el-select' ? `请选择${label}` : `请输入${label}`
 }

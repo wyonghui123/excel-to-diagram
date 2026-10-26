@@ -1,0 +1,214 @@
+# 产品组（Division）— SAP Sales Area 中的产品组切片
+# 依据: docs/superpowers/specs/2026-10-26-sales-order-master-data-gap-spec.md §3.2
+# 定位: 回答「这笔订单归到哪个产品组切片」——只做扁平受控值集，
+#       与订单抬头 sales_order.division_code 通过 value_help 严格绑定。
+#
+# 设计边界（重要）:
+#   1. 薄主数据：仅 code / name / status / description，无层级、无带出链、
+#      不参与定价。对标 SAP TSPA（产品组主表，销售区域三要素之一）。
+#   2. **产品组 ≠ 物料分类 item_group**：前者是销售侧的切片维度，
+#      后者是物料主数据的分类体系，两者不共用编码、也不互为父子。
+#   3. 与本平台的「销售区域」（territory，责任田）无关，勿同名混用。
+#   4. code 保持 string（不改成 enum_type）：订单抬头也存 code，
+#      避免存量列类型迁移；删除由迁移 v137 回填存量值。
+
+id: division
+name: 产品组
+table_name: divisions
+description: 产品组（SAP division 语义的扁平受控值集；非物料分类 item_group）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 产品组
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 产品组
+    - division
+    - product division
+
+deletion_policy:
+  # 主数据禁止物理删除（与 incoterm / currency 同口径）；
+  # 订单抬头只存 code，无 FK 引用，restrict_on 留空。
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 产品组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 10
+    pattern: "^[A-Za-z0-9_]{1,10}$"
+    description: 产品组业务编码（1-10 位字母 / 数字 / 下划线）
+    semantics:
+      meaning: 产品组业务编码；业务键
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 产品组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 产品组显示名称
+    semantics:
+      meaning: 产品组显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 产品组状态 active/inactive
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 产品组启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 产品组说明与使用提示
+    semantics:
+      meaning: 产品组详细说明
+      searchable: true
+    ui:
+      widget: textarea
+
+indexes:
+  # 编码唯一（与 field.unique 同口径显式命名，便于迁移 v137 校验 / 回滚）
+  - fields: [code]
+    unique: true
+    name: uidx_division_code
+  - fields: [status]
+    name: idx_division_status
+
+relations: []
+
+ui_view_config:
+  # 菜单由迁移 v137 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 产品组
+    description: 产品组字典（SAP division 语义的扁平受控值集）
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 220
+        sortable: true
+      - field: status
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - code
+      - name
+    actions:
+      - id: create
+        label: 新建产品组
+        icon: plus
+        type: primary
+        permission: division:division_create
+    defaultSort:
+      field: code
+      order: asc
+
+  form:
+    title: 产品组
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [status]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, status, description]
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v137 落库）
+  create_permission: division:division_create
+  update_permission: division:division_update
+  delete_permission: division:division_delete
+  owner_auto_permission: false

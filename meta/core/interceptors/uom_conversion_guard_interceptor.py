@@ -6,8 +6,9 @@
   docs/superpowers/specs/2026-10-24-uom-group-tier-upgrade/spec.md §4（二期）
 
 优先级 43（在 ConstraintValidationInterceptor 42 之后、HierarchyValidationInterceptor 45 之前）；
-仅对 item_uom_conversion / uom_conversion（创建/更新）、item / uom / uom_group（更新）生效，
-其余对象 / 动作零开销短路。判定口径见 meta/services/uom_conversion_guard_service.py。
+仅对 item_uom_conversion / uom_conversion（创建/更新）、item（创建/更新）、
+uom / uom_group（更新）生效，其余对象 / 动作零开销短路。判定口径见
+meta/services/uom_conversion_guard_service.py。
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
 本守卫对这两条路径不生效（与 party_relation 镜像行守卫同一限制）。
@@ -33,7 +34,7 @@ GUARDED_ITEM = 'item'
 GUARDED_UOM = 'uom'
 GUARDED_GROUP = 'uom_group'
 _CONVERSION_OBJECTS = (GUARDED_ITEM_CONVERSION, GUARDED_GROUP_CONVERSION)
-_UPDATE_ONLY_OBJECTS = (GUARDED_ITEM, GUARDED_UOM, GUARDED_GROUP)
+_UPDATE_ONLY_OBJECTS = (GUARDED_UOM, GUARDED_GROUP)
 _WRITE_ACTIONS = ('crud_create', 'crud_update')
 
 
@@ -48,6 +49,9 @@ class UomConversionGuardInterceptor(Interceptor):
         object_id = getattr(context.meta_object, 'id', None)
         action = context.action
         if object_id in _CONVERSION_OBJECTS:
+            return action in _WRITE_ACTIONS
+        if object_id == GUARDED_ITEM:
+            # item：创建校验 sales_uom（V-SU-1），更新校验 base_uom / sales_uom
             return action in _WRITE_ACTIONS
         if object_id in _UPDATE_ONLY_OBJECTS:
             return action == 'crud_update'
@@ -71,8 +75,17 @@ class UomConversionGuardInterceptor(Interceptor):
                 else:
                     service.validate_group_conversion_write(data)
             elif object_id == GUARDED_ITEM:
-                if 'base_uom' in params:
-                    service.validate_item_update(context.object_id, params.get('base_uom'))
+                if context.action == 'crud_create':
+                    # V-SU-1：创建时 item_id 尚不可用，仅按传入值做组内换算判定
+                    service.validate_item_sales_uom(
+                        None, params.get('sales_uom'), params.get('base_uom'))
+                else:
+                    if 'base_uom' in params:
+                        service.validate_item_update(
+                            context.object_id, params.get('base_uom'))
+                    if 'sales_uom' in params:
+                        service.validate_item_sales_uom(
+                            context.object_id, params.get('sales_uom'))
             elif object_id == GUARDED_UOM:
                 if 'status' in params:
                     service.validate_uom_update(context.object_id, params.get('status'))

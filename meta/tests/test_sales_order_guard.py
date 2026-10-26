@@ -30,7 +30,7 @@ class _FakeDS:
 
     def __init__(self, types=None, orders=None, lines=None,
                  org_functions=None, refs=None, items=None,
-                 addresses=None, raise_on_query=False):
+                 addresses=None, divisions=None, raise_on_query=False):
         self.types = types or {}
         self.orders = orders or {}
         self.lines = lines or {}
@@ -38,6 +38,7 @@ class _FakeDS:
         self.refs = refs or {}
         self.items = items or {}
         self.addresses = addresses or {}
+        self.divisions = divisions or {}
         self.raise_on_query = raise_on_query
 
     def query(self, sql, params=None):
@@ -53,6 +54,9 @@ class _FakeDS:
             return [row] if row else []
         if 'FROM addresses WHERE id' in sql:
             row = self.addresses.get(p[0])
+            return [row] if row else []
+        if 'FROM divisions WHERE code' in sql:
+            row = self.divisions.get(p[0])
             return [row] if row else []
         if 'FROM sales_orders WHERE id' in sql:
             row = self.orders.get(p[0])
@@ -122,10 +126,15 @@ ADDRESSES = {
     302: {'id': 302, 'formatted_address': '上海市静安区南京西路 200 号'},
 }
 
+DIVISIONS = {
+    'DEFAULT': {'code': 'DEFAULT', 'status': 'active'},
+    'OLD': {'code': 'OLD', 'status': 'inactive'},
+}
+
 
 def _ds(**kwargs):
     return _FakeDS(types=TYPES, orders=ORDERS, lines=LINES, items=ITEMS,
-                   addresses=ADDRESSES,
+                   addresses=ADDRESSES, divisions=DIVISIONS,
                    org_functions={(318, 'sales')}, **kwargs)
 
 
@@ -150,6 +159,37 @@ class TestOrderWrite:
             SalesOrderGuardService(_ds()).validate_order_write(
                 {'order_type_id': 1, 'sales_org_id': 1}, is_create=True)
         assert e.value.rule == 'sales_org_not_sales'
+
+    def test_division_ok_on_create(self):
+        SalesOrderGuardService(_ds()).validate_order_write(
+            {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'DEFAULT'},
+            is_create=True)
+
+    def test_division_not_found(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_order_write(
+                {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
+                is_create=True)
+        assert e.value.rule == 'division_not_found'
+        assert e.value.field_name == 'division_code'
+
+    def test_division_inactive(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_order_write(
+                {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'OLD'},
+                is_create=True)
+        assert e.value.rule == 'division_inactive'
+
+    def test_division_unchanged_on_update_ok(self):
+        """存量订单已带停用产品组时，改其他字段不因历史值被拦。"""
+        SalesOrderGuardService(_ds()).validate_order_write(
+            {'division_code': 'OLD', 'note': '改备注'},
+            old_data={'division_code': 'OLD'})
+
+    def test_division_query_failure_fail_open(self):
+        SalesOrderGuardService(_ds(raise_on_query=True)).validate_order_write(
+            {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
+            is_create=True)
 
     def test_order_no_immutable(self):
         with pytest.raises(SalesOrderGuardError) as e:
