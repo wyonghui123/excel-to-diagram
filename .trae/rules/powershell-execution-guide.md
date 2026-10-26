@@ -1,13 +1,17 @@
 ---
-alwaysApply: true
-description: "Trae IDE trae-sandbox + PowerShell 完整执行规范。涵盖沙箱行为、编码陷阱、Git 兼容、AI 工具替代方案。所有 AI 智能体必须了解。"
-globs: "**/*"
+alwaysApply: false
+description: "AI 在 PowerShell 终端执行命令、写 PowerShell 脚本、操作 trae-sandbox 或遇到命令假成功/stdout 被吞等沙箱陷阱时查阅此规则。涵盖沙箱行为、编码陷阱、Git 兼容、AI 工具替代方案。"
 ---
 
 # Trae IDE trae-sandbox + PowerShell 完整执行规范 (v2026.06.20)
 
 > **整合自 trae-sandbox-behavior.md + powershell-rules.md**
 > **本规则涵盖：沙箱行为 + AI 工具策略 + PowerShell 编码陷阱 + Git 兼容性 + 自动执行工作流**
+
+> **[!] 2026-10-22 补：本文件假设 `RunCommand` 可用。若所有命令一律失败
+> （报错 `Toolhost terminal commands must be routed through the agent runtime`、exit -1、执行前即拒），
+> 那是**终端通道故障**，不是本文描述的沙箱问题，**重启 IDE 无效**。
+> → [terminal-channel-failure.md](./terminal-channel-failure.md)**
 
 ---
 

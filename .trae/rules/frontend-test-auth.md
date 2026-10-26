@@ -17,7 +17,7 @@ globs: "meta/tests/**/*,tests/e2e/**/*"
 > **DOM 存在 ≠ 视觉可见**
 >
 > 任何前端 UI 测试，必须用 `assert_visible` 做 5 步视觉验证，不能只看 DOM 存在。
-> 详见 [可测试性铁律完整文档](../../docs/lessons-learned/testing/testability-iron-rules.md)
+> 详见 [可测试性铁律完整文档](../../excel-to-diagram/docs/lessons-learned/testing/testability-iron-rules.md)
 
 ### 5 步视觉验证（缺一不可）
 
@@ -265,6 +265,7 @@ mcp: click → 操作页面元素
 | 5 | **重复调用 dev-login 设置 cookie** | 浪费，cookie 有效期 7 天 | 整个测试 session 只需一次 |
 | 6 | **遗忘等待 store 就绪就 router.push** | 路由守卫仍可能未通过 | 必须等 `sessionReady && user` |
 | 7 | **页面白屏后盲猜原因或盲等** | 错误被忽略，Agent 进入无限推断循环 | 先 `cli.check_health()`，`PageHealthError` 出现即 Fail-Fast |
+| 8 | **用整页 `goto` 验证「页面状态是否保留」** | 假阴性：整页导航不经过 router 守卫，`onBeforeRouteLeave` 不触发 ⇒ 快照从不写入，必然看到状态丢失 | 用 `router.push` 或点击菜单做 **SPA 内往返**，再对比勾选数 / 右表行数 |
 
 ---
 
@@ -274,6 +275,7 @@ mcp: click → 操作页面元素
 |------|------|------|
 | 采用后端 dev-login 端点而非 JWT 注入 | 2026-06-01 | 更简单、不依赖 JWT secret、cookie 由后端规范设置 |
 | `router.push` 而非 `page.goto` 用于受保护页面导航 | 2026-06-01 | 避免 SPA 整页刷新导致的竞态 |
+| 验证「状态保留 / 往返恢复」必须用 SPA 内导航 | 2026-10-24 | 整页 `goto` 不触发 `onBeforeRouteLeave`，快照不写 ⇒ 会把「本来正常」误判为「状态丢失」 |
 | `authenticated_page` 使用异步上下文管理器 | 2026-06-01 | 自动管理 browser 生命周期，防止资源泄漏 |
 | 等待 `sessionReady && user` 而非仅 `isLoggedIn` | 2026-06-01 | `sessionReady` 标志位确保 `restoreSession()` 已完成 |
 | PlaywrightCLI 自动监听 pageerror/console/crash + _guard_health() Fail-Fast | 2026-06-02 | 四层可观测性体系，页面崩溃时立即终止而非盲猜 |

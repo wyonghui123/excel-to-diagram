@@ -61,6 +61,8 @@ grep -rn '#1677ff\|#1890ff' src/styles/
 
 - **Context7**：实时获取库文档，prompt末尾加 `use context7`
 - **SQLite**：直接查询 architecture.db 元模型数据
+  - 真实库文件是 `meta/architecture.db`；`data/app.db` 是另一套库，连错时表现为
+    表为空、`no such table: schema_migrations`，据此可直接排除「查不到数据」的假故障
 
 ## CHANGELOG
 
