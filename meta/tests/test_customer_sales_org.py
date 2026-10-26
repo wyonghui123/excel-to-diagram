@@ -107,6 +107,23 @@ class TestResolve:
         # 账户级无币种来源 → 未配置组织行时不输出该字段
         assert 'currency_id' not in service.resolve(1, 999)
 
+    def test_rate_table_override_wins_over_account(self, ds, conn):
+        seed_account(conn, default_rate_table_id=7)
+        seed_override(conn, rate_table_id=9)
+
+        out = CustomerSalesOrgService(ds).resolve(
+            1, 318, fields=('rate_table_id',))
+
+        assert out == {'rate_table_id': 9}
+
+    def test_rate_table_falls_back_to_account(self, ds, conn):
+        seed_account(conn, default_rate_table_id=7)
+
+        out = CustomerSalesOrgService(ds).resolve(
+            1, 999, fields=('rate_table_id',))
+
+        assert out == {'rate_table_id': 7}
+
     def test_only_order_fields(self, ds, conn):
         seed_account(conn, tax_classification_id=5)
         seed_override(conn, payment_term_id=2, currency_id=8)

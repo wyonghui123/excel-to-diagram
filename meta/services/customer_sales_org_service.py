@@ -19,6 +19,7 @@
     payment_term_id        → default_payment_term_id
     incoterm_code          → default_incoterm_code
     tax_classification_id  → tax_classification_id
+    rate_table_id          → default_rate_table_id
     currency_id            → （账户无此字段）
 """
 
@@ -32,6 +33,7 @@ OVERRIDE_FIELDS = (
     'payment_term_id',
     'incoterm_code',
     'tax_classification_id',
+    'rate_table_id',
     'currency_id',
 )
 
@@ -43,6 +45,7 @@ _ACCOUNT_SOURCE: Dict[str, Optional[str]] = {
     'payment_term_id': 'default_payment_term_id',
     'incoterm_code': 'default_incoterm_code',
     'tax_classification_id': 'tax_classification_id',
+    'rate_table_id': 'default_rate_table_id',
     'currency_id': None,
 }
 
@@ -107,7 +110,8 @@ class CustomerSalesOrgService:
         try:
             rows = self.ds.query(
                 'SELECT default_payment_term_id, default_incoterm_code, '
-                'tax_classification_id FROM customer_accounts WHERE id = ?',
+                'tax_classification_id, default_rate_table_id '
+                'FROM customer_accounts WHERE id = ?',
                 [customer_account_id])
         except Exception as e:  # 读侧异常 → fail-open
             logger.warning('[customer_sales_org] 读取客户档案默认值失败: %s', e)

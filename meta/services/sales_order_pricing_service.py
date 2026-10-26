@@ -25,6 +25,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from meta.services.customer_sales_org_service import CustomerSalesOrgService
 from meta.services.pricing_determination_service import (
     PricingDeterminationService,
     _date_key,
@@ -92,6 +93,7 @@ class SalesOrderPricingService:
         self.ds = data_source
         self.det = determination or PricingDeterminationService(data_source)
         self.amount = amount_service or SalesOrderAmountService(data_source)
+        self.cso = CustomerSalesOrgService(data_source)
 
     # ------------------------------------------------------------------
     # 行级
@@ -127,6 +129,7 @@ class SalesOrderPricingService:
             order_type_id=order.get('order_type_id'),
             price_date=price_date,
             currency=currency,
+            preferred_rate_table_id=self._preferred_rate_table_id(order),
         )
         if resolved is None:
             resolved = self.det.resolve(**dims)
@@ -188,6 +191,7 @@ class SalesOrderPricingService:
             order_type_id=order.get('order_type_id'),
             price_date=price_date,
             currency=currency,
+            preferred_rate_table_id=self._preferred_rate_table_id(order),
         )
 
         repriced = 0
@@ -201,6 +205,24 @@ class SalesOrderPricingService:
             self.amount.recompute_line(line.get('id'))
 
         totals = self.amount.recompute_order(order_id) or {}
+
+        # §4.6 触发时机：行净额刚变 → 按新基额重摊抬头折扣 / 附加费，
+        # 再二次汇总取最终 totals（apply 内部写行调整列并重算，
+        # 第一次汇总已过期）。非草稿在上方提前返回，故仍只作用于草稿；
+        # strict 报错语义不变。
+        # 比例均为 0 时不调用：无钱可摊，apply 只会给每张重取价订单写一遍
+        # PRICE_STD_HDR_DISC 头级结果（V-B10 存量单据零回归）；比例改回 0
+        # 后残留调整额的清理由显式重算 Action 收口。
+        disc_pct = _num(order.get('header_discount_percent')) or 0.0
+        sur_pct = _num(order.get('header_surcharge_percent')) or 0.0
+        if disc_pct or sur_pct:
+            from meta.services.sales_order_header_discount_service import (
+                SalesOrderHeaderDiscountService,
+            )
+            SalesOrderHeaderDiscountService(
+                self.ds, amount_service=self.amount).apply(order_id)
+            totals = self.amount.recompute_order(order_id) or {}
+
         status = self.refresh_order_pricing_status(order_id)
         self._write_order_snapshot(order_id, resolved)
         return {
@@ -255,9 +277,21 @@ class SalesOrderPricingService:
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT id, status, order_type_id, order_date, price_date, currency_id, '
-            'sales_org_id, customer_account_id, pricing_status '
+            'sales_org_id, customer_account_id, pricing_status, '
+            'header_discount_percent, header_surcharge_percent '
             'FROM sales_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
+
+    def _preferred_rate_table_id(self, order: Dict[str, Any]) -> Optional[int]:
+        """客户档案 / 销售组织指定的价目表；未配置或读取失败返回 None。"""
+        try:
+            resolved = self.cso.resolve(
+                order.get('customer_account_id'), order.get('sales_org_id'),
+                fields=('rate_table_id',))
+        except Exception as e:  # noqa: BLE001 - 默认值补全不应阻断取价
+            logger.warning('[sales_order_pricing] 读取客户价目表失败: %s', e)
+            return None
+        return resolved.get('rate_table_id')
 
     def _lines_for_order(self, order_id: Any) -> List[Dict[str, Any]]:
         return self.ds.query(

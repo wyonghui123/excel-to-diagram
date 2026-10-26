@@ -333,6 +333,51 @@ fields:
       multiple: false
       clearable: true
 
+  # 组织级价目表差异（E1）：非空则优先于客户档案的 default_rate_table_id
+  - id: rate_table_id
+    name: 价目表
+    type: integer
+    db_column: rate_table_id
+    nullable: true
+    description: 该销售组织下的价目表差异值（为空则回退客户档案默认价目表）
+    semantics:
+      meaning: 该客户在该销售组织下的优选价目表
+      display:
+        type: association
+        target_type: rate_table
+        display_field: name
+        placeholder: "未指定（沿用客户档案默认价目表）"
+    value_help:
+      source:
+        type: bo
+        target_bo: rate_table
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: approved
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 价目表编码
+            width: 160
+          - field: name
+            label: 价目表名称
+            width: 200
+    ui:
+      widget: select
+      relation: rate_table
+      multiple: false
+      clearable: true
+
   - id: status
     name: 状态
     type: string
@@ -439,6 +484,15 @@ relations:
     cardinality: N:1
     description: 默认币种引用（可空）
 
+  - id: customer_sales_org_to_rate_table
+    name: 价目表
+    type: reference
+    target: rate_table
+    source_field: rate_table_id
+    target_field: id
+    cardinality: N:1
+    description: 组织级价目表引用（可空；为空回退客户档案默认价目表）
+
 ui_view_config:
   # 作为客户档案详情页的子表，不单独成菜单
   skip_auto_menu: true
@@ -470,6 +524,7 @@ ui_view_config:
         columns:
           - fields: [payment_term_id, incoterm_code]
           - fields: [currency_id, tax_classification_id]
+          - fields: [rate_table_id]
       - title: 其他
         columns:
           - fields: [description]

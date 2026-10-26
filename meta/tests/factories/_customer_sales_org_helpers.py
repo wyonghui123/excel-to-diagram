@@ -22,7 +22,8 @@ CREATE TABLE customer_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     default_payment_term_id INTEGER,
     default_incoterm_code TEXT,
-    tax_classification_id INTEGER
+    tax_classification_id INTEGER,
+    default_rate_table_id INTEGER
 );
 CREATE TABLE customer_sales_orgs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +33,7 @@ CREATE TABLE customer_sales_orgs (
     payment_term_id INTEGER,
     incoterm_code TEXT,
     currency_id INTEGER,
+    rate_table_id INTEGER,
     status TEXT NOT NULL DEFAULT 'active',
     description TEXT
 );
@@ -54,6 +56,7 @@ ACCOUNT_DEFAULTS = {
     'default_payment_term_id': None,
     'default_incoterm_code': None,
     'tax_classification_id': None,
+    'default_rate_table_id': None,
 }
 
 OVERRIDE_DEFAULTS = {
@@ -63,6 +66,7 @@ OVERRIDE_DEFAULTS = {
     'payment_term_id': None,
     'incoterm_code': None,
     'currency_id': None,
+    'rate_table_id': None,
     'status': 'active',
     'description': None,
 }

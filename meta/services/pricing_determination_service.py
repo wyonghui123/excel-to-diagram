@@ -80,8 +80,13 @@ class PricingDeterminationService:
         order_type_id: Optional[int] = None,
         price_date: Any = None,
         currency: Optional[str] = None,
+        preferred_rate_table_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """返回命中规则与价目表/过程/序列；未命中时给 `reason`。
+
+        `preferred_rate_table_id` 为客户档案/销售组织指定的价目表：仅当
+        approved、币种相符且在组织作用域内时优先采用；否则静默回退既有定表
+        规则（客户配置错误不阻断取价，零回归）。
 
         Returns:
             {"matched": bool, "reason": str|None, "rule": dict|None,
@@ -132,7 +137,8 @@ class PricingDeterminationService:
                 [rule.get('lookup_sequence_id')])
             sequence_code = sequence.get('code') if sequence else None
 
-        table, reason = self._resolve_rate_table(rule, sales_org_id, order_currency)
+        table, reason = self._resolve_rate_table(
+            rule, sales_org_id, order_currency, preferred_rate_table_id)
         if table is None:
             return self._miss(reason, rule=rule)
 
@@ -150,8 +156,18 @@ class PricingDeterminationService:
         rule: Dict[str, Any],
         sales_org_id: Optional[int],
         order_currency: str,
+        preferred_rate_table_id: Optional[int] = None,
     ):
-        """定表（§3.6 第 3 步）。返回 (rate_table|None, reason|None)。"""
+        """定表（§3.6 第 3 步）。返回 (rate_table|None, reason|None)。
+
+        客户价目表只作「优选」：approved / 币种相符 / 组织作用域内三者
+        全部满足才采用，任一不满足即静默回退既有规则（零回归）。
+        """
+        preferred = self._load_preferred_table(
+            preferred_rate_table_id, sales_org_id, order_currency)
+        if preferred is not None:
+            return preferred, None
+
         pinned_id = rule.get('rate_table_id')
         if pinned_id is not None:
             table = self._one(
@@ -179,6 +195,25 @@ class PricingDeterminationService:
             return None, REASON_NO_RATE_TABLE
         return rows[0], None
 
+    def _load_preferred_table(
+        self,
+        table_id: Optional[int],
+        sales_org_id: Optional[int],
+        order_currency: str,
+    ) -> Optional[Dict[str, Any]]:
+        """客户指定价目表：仅返回合法表，非法一律视为未指定（回退既有规则）。"""
+        if table_id in (None, ''):
+            return None
+        table = self._one('SELECT * FROM rate_tables WHERE id = ?', [table_id])
+        if not table or table.get('status') != 'approved':
+            return None
+        table_currency = (table.get('currency') or '').strip().upper()
+        if order_currency and table_currency and table_currency != order_currency:
+            return None
+        if not self._table_in_scope(table, sales_org_id):
+            return None
+        return table
+
     @staticmethod
     def _table_in_scope(table: Dict[str, Any], sales_org_id: Optional[int]) -> bool:
         owner = table.get('owner_org_id')
@@ -199,6 +234,7 @@ class PricingDeterminationService:
         customer_account_id: Any = None,
         price_date: Any = None,
         currency: Optional[str] = None,
+        preferred_rate_table_id: Optional[int] = None,
         sales_org_id: Optional[int] = None,
         order_type_id: Optional[int] = None,
         document_id: Optional[int] = None,
@@ -229,6 +265,7 @@ class PricingDeterminationService:
             order_type_id=order_type_id,
             price_date=price_date,
             currency=currency,
+            preferred_rate_table_id=preferred_rate_table_id,
         )
         if not resolved['matched']:
             return self._failed(resolved['reason'], rule=resolved.get('rule'))

@@ -33,7 +33,7 @@ SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
 # 建表顺序：先 FK 目标表，再子表
 TABLES = ["currency", "payment_term", "tax_classification", "org",
-          "customer_account", "customer_sales_org"]
+          "rate_table", "customer_account", "customer_sales_org"]
 
 # (源列, 目标表, 目标列) —— 逐条断言
 EXPECTED_FKS = [
@@ -42,6 +42,7 @@ EXPECTED_FKS = [
     ("tax_classification_id", "tax_classifications", "id"),
     ("payment_term_id", "payment_terms", "id"),
     ("currency_id", "currencies", "id"),
+    ("rate_table_id", "rate_tables", "id"),
 ]
 
 pytestmark = pytest.mark.unit
@@ -105,7 +106,7 @@ class TestDeclaration:
         for field_id in ("customer_account_id", "sales_org_id"):
             assert _field(schema, field_id)["required"] is True
         for field_id in ("tax_classification_id", "payment_term_id",
-                         "incoterm_code", "currency_id"):
+                         "incoterm_code", "currency_id", "rate_table_id"):
             assert _field(schema, field_id)["nullable"] is True
 
     def test_sales_org_candidate_set_narrowed(self):
@@ -160,7 +161,7 @@ class TestTable:
         assert info["customer_account_id"][3] == 1
         assert info["sales_org_id"][3] == 1
         for field_id in ("tax_classification_id", "payment_term_id",
-                         "incoterm_code", "currency_id"):
+                         "incoterm_code", "currency_id", "rate_table_id"):
             assert info[field_id][3] == 0
 
     def test_dangling_reference_rejected(self, fk_conn):

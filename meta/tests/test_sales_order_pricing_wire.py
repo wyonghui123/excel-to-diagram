@@ -96,6 +96,18 @@ class _StubDet:
         return self.result
 
 
+class _StubCSO:
+    """桩「客户销售组织默认值」：返回预设价目表引用。"""
+
+    def __init__(self, values=None):
+        self.values = values if values is not None else {}
+        self.calls = []
+
+    def resolve(self, customer_account_id, sales_org_id, fields=None):
+        self.calls.append((customer_account_id, sales_org_id, fields))
+        return dict(self.values)
+
+
 def _order(**overrides):
     base = {'id': 10, 'status': 'draft', 'order_type_id': 1,
             'order_date': '2026-10-25', 'price_date': None, 'currency_id': 8,
@@ -144,6 +156,23 @@ class TestPriceLine:
 
         calls = [k for kind, k in det.calls if kind == 'determine_line']
         assert calls and calls[0]['customer_account_id'] == 4
+
+    def test_customer_rate_table_forwarded_as_preferred(self):
+        """E1：客户档案 / 销售组织的价目表透传给 resolve 与行取价。"""
+        ds = _FakeDS(orders={10: _order(customer_account_id=4)},
+                     lines={100: _line()})
+        det = _StubDet()
+        service = _service(ds, det)
+        cso = _StubCSO({'rate_table_id': 7})
+        service.cso = cso
+
+        service.price_line(100)
+
+        assert cso.calls == [(4, 318, ('rate_table_id',))]
+        resolves = [k for kind, k in det.calls if kind == 'resolve']
+        lines = [k for kind, k in det.calls if kind == 'determine_line']
+        assert resolves and resolves[0]['preferred_rate_table_id'] == 7
+        assert lines and lines[0]['preferred_rate_table_id'] == 7
 
     def test_manual_line_untouched_without_force(self):
         ds = _FakeDS(orders={10: _order()},

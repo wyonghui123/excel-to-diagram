@@ -360,6 +360,54 @@ fields:
       multiple: false
       clearable: true
 
+  # 账户级默认价目表（E1 销售订单主数据补齐）
+  #   解析：本字段 → 销售组织差异（customer_sales_org.rate_table_id）逐字段回退。
+  #   仅作定价「优选」：须 approved、币种相符且在组织作用域内，否则静默回退既有
+  #   定表规则（客户配置不阻断取价）。
+  - id: default_rate_table_id
+    name: 默认价目表
+    type: integer
+    db_column: default_rate_table_id
+    nullable: true
+    description: 账户级默认价目表引用；订单取价时优先使用
+    semantics:
+      meaning: 该客户档案的默认价目表引用
+      display:
+        type: association
+        target_type: rate_table
+        display_field: name
+        placeholder: "未指定（按定价确定规则）"
+    value_help:
+      source:
+        type: bo
+        target_bo: rate_table
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: approved
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 价目表编码
+            width: 160
+          - field: name
+            label: 价目表名称
+            width: 200
+    ui:
+      widget: select
+      relation: rate_table
+      multiple: false
+      clearable: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -450,6 +498,15 @@ relations:
     cardinality: N:1
     description: 账户级默认账期引用（可空；订单带出的第一优先级）
 
+  - id: customer_account_to_rate_table
+    name: 默认价目表
+    type: reference
+    target: rate_table
+    source_field: default_rate_table_id
+    target_field: id
+    cardinality: N:1
+    description: 账户级默认价目表引用（可空；订单取价的优选来源）
+
 # ============================================
 # [分区落点 2026-10-22] 档案不再作独立菜单，进party_relation 详情页的关联分区
 #   理由：customer_account 挂在 party_relation(role='customer') 之上 1:1，是「关系侧
@@ -509,7 +566,7 @@ ui_view_config:
           - fields: [name]
       - title: 商务默认
         columns:
-          - fields: [default_payment_term_id, default_incoterm_code]
+          - fields: [default_payment_term_id, default_incoterm_code, default_rate_table_id]
       - title: 税务
         columns:
           - fields: [tax_classification_id]
@@ -524,6 +581,7 @@ ui_view_config:
           - name
           - default_payment_term_id
           - default_incoterm_code
+          - default_rate_table_id
           - tax_classification_id
           - description
 

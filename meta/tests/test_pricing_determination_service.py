@@ -263,6 +263,79 @@ class TestResolveRateTable:
         assert out['reason'] == REASON_NO_RATE_TABLE
 
 
+class TestPreferredRateTable:
+    """E1：客户价目表只作优选，任一条件不满足即静默回退既有定表规则。"""
+
+    def test_preferred_table_wins_over_pinned(self, db_path, ds):
+        pinned = seed_rate_table(db_path, code='PL_PINNED')
+        seed_rule(db_path, rate_table_id=pinned)
+        preferred = seed_rate_table(db_path, code='PL_PREFERRED')
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=preferred)
+
+        assert out['matched'] is True
+        assert out['rate_table']['code'] == 'PL_PREFERRED'
+
+    def test_preferred_wins_over_auto_candidate(self, db_path, ds):
+        seed_rate_table(db_path, code='PL_ORG', owner_org_id=318)
+        seed_rule(db_path, rate_table_id=None)
+        preferred = seed_rate_table(db_path, code='PL_PREF_ONLY')
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=preferred)
+
+        assert out['rate_table']['code'] == 'PL_PREF_ONLY'
+
+    def test_preferred_draft_falls_back_to_pinned(self, db_path, ds):
+        pinned = seed_rate_table(db_path, code='PL_PINNED')
+        seed_rule(db_path, rate_table_id=pinned)
+        preferred = seed_rate_table(
+            db_path, code='PL_PREF_DRAFT', status='draft')
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=preferred)
+
+        assert out['rate_table']['code'] == 'PL_PINNED'
+
+    def test_preferred_currency_mismatch_falls_back(self, db_path, ds):
+        pinned = seed_rate_table(db_path, code='PL_PINNED')
+        seed_rule(db_path, rate_table_id=pinned)
+        preferred = seed_rate_table(
+            db_path, code='PL_PREF_USD', currency='USD')
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=preferred)
+
+        assert out['rate_table']['code'] == 'PL_PINNED'
+
+    def test_preferred_out_of_scope_falls_back(self, db_path, ds):
+        pinned = seed_rate_table(db_path, code='PL_PINNED')
+        seed_rule(db_path, rate_table_id=pinned)
+        preferred = seed_rate_table(
+            db_path, code='PL_PREF_FOREIGN', owner_org_id=999)
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=preferred)
+
+        assert out['rate_table']['code'] == 'PL_PINNED'
+
+    def test_missing_preferred_falls_back(self, db_path, ds):
+        pinned = seed_rate_table(db_path, code='PL_PINNED')
+        seed_rule(db_path, rate_table_id=pinned)
+
+        out = _service(ds).resolve(
+            sales_org_id=318, order_type_id=1, price_date='2026-10-25',
+            currency='CNY', preferred_rate_table_id=99999)
+
+        assert out['rate_table']['code'] == 'PL_PINNED'
+
+
 class TestResolveCodes:
 
     def test_procedure_and_sequence_codes(self, db_path, ds):
