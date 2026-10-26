@@ -804,6 +804,78 @@ fields:
       widget: date
       clearable: true
 
+  # 抬头折扣 / 附加费百分比：整单级调整率，可手工录入（0..100）。
+  # 确认后由守卫冻结（R-DSC-H3）；实际分摊金额由
+  # sales_order_header_discount_service 按各行净额分摊写回行级调整列。
+  - id: header_discount_percent
+    name: 抬头折扣率
+    type: number
+    db_column: header_discount_percent
+    nullable: true
+    description: 整单折扣百分比（空或 0 表示无折扣；折扣时为负向下调整）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 100
+        decimal_places: 4
+    semantics:
+      meaning: 抬头折扣百分比
+      hint: 例：5 表示整单下浮 5%
+    ui:
+      widget: input
+      editable: true
+
+  - id: header_surcharge_percent
+    name: 抬头附加费率
+    type: number
+    db_column: header_surcharge_percent
+    nullable: true
+    description: 整单附加费百分比（空或 0 表示无附加费；附加费为正向上调整）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 100
+        decimal_places: 4
+    semantics:
+      meaning: 抬头附加费百分比
+      hint: 例：2 表示整单上浮 2%
+    ui:
+      widget: input
+      editable: true
+
+  # 抬头金额快照：由分摊服务写回（折扣 ≤ 0 / 附加费 ≥ 0），非人工录入。
+  - id: header_discount_amount
+    name: 抬头折扣额
+    type: number
+    db_column: header_discount_amount
+    required: true
+    default: 0
+    description: 整单折扣金额快照（负值表示下浮；由分摊服务写回）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头折扣金额快照
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_surcharge_amount
+    name: 抬头附加费额
+    type: number
+    db_column: header_surcharge_amount
+    required: true
+    default: 0
+    description: 整单附加费金额快照（正值表示上浮；由分摊服务写回）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头附加费金额快照
+    ui:
+      widget: number
+      editable: false
+
   - id: payment_term_id
     name: 付款条件
     type: integer
@@ -1374,6 +1446,10 @@ ui_view_config:
         filter_type: select
       - field: gross_amount
         width: 130
+      - field: header_discount_percent
+        width: 120
+      - field: header_surcharge_percent
+        width: 120
       - field: requested_date
         width: 120
         format: date
@@ -1426,6 +1502,10 @@ ui_view_config:
           - fields: [payment_term_id, incoterm_code]
           - fields: [customer_po_no]
           - fields: [requested_date, confirmed_date]
+      - title: 抬头折扣与附加费
+        columns:
+          - fields: [header_discount_percent, header_surcharge_percent]
+          - fields: [header_discount_amount, header_surcharge_amount]
       - title: 定价信息
         columns:
           - fields: [price_date, pricing_status]

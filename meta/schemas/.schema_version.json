@@ -633,7 +633,7 @@
       "table": "currency_rates"
     },
     "customer_account": {
-      "hash": "8b01704d908df27d84808c364a2ad5d1",
+      "hash": "e0597c70a9859f991b1997b6bb4c432a",
       "fields": [
         "updated_at",
         "created_by",
@@ -645,6 +645,7 @@
         "tax_classification_id",
         "default_payment_term_id",
         "default_incoterm_code",
+        "default_rate_table_id",
         "created_at"
       ],
       "table": "customer_accounts"
@@ -668,7 +669,7 @@
       "table": "customer_salesperson_assignments"
     },
     "customer_sales_org": {
-      "hash": "5d828ec58a9ddf2f9044bcccf67b9371",
+      "hash": "5b61d4fc0d2d82685b3c4d7f30c94f75",
       "fields": [
         "created_by",
         "updated_by",
@@ -679,6 +680,7 @@
         "payment_term_id",
         "incoterm_code",
         "currency_id",
+        "rate_table_id",
         "status",
         "description",
         "created_at",
@@ -1893,7 +1895,7 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "5d78a8c962bf92bc18b8591c895b0bd4",
+      "hash": "f83dee60f2b481973e2af8b34be4ab79",
       "fields": [
         "created_by",
         "updated_by",
@@ -1917,6 +1919,12 @@
         "division_code",
         "currency_id",
         "exchange_rate",
+        "exchange_rate_type",
+        "exchange_rate_date",
+        "header_discount_percent",
+        "header_surcharge_percent",
+        "header_discount_amount",
+        "header_surcharge_amount",
         "payment_term_id",
         "incoterm_code",
         "customer_po_no",
@@ -1936,7 +1944,7 @@
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "e533dd241d4d4bcb75cce91752bf89e7",
+      "hash": "513e62627c8bc63c0f12276da19ad4bd",
       "fields": [
         "created_by",
         "updated_by",
@@ -1951,6 +1959,8 @@
         "uom_id",
         "unit_price",
         "net_amount",
+        "header_discount_amount",
+        "header_surcharge_amount",
         "tax_code_id",
         "tax_base_amount",
         "tax_rate_percent",
@@ -1966,6 +1976,7 @@
         "duration_type",
         "configuration_id",
         "parent_line_id",
+        "reference_line_id",
         "component_no",
         "pricing_mode",
         "price_source",
@@ -1975,6 +1986,29 @@
         "updated_at"
       ],
       "table": "sales_order_lines"
+    },
+    "sales_order_schedule": {
+      "hash": "5a38f10e5a231b2dbb64702d887b21ac",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "order_id",
+        "line_id",
+        "plant_location_id",
+        "schedule_no",
+        "schedule_kind",
+        "promised_date",
+        "promised_qty",
+        "billing_percent",
+        null,
+        "milestone_code",
+        "service_visit_no",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sales_order_schedules"
     },
     "scheduled_task": {
       "hash": "54811dd5356875de6dbe138a68c376af",
@@ -2449,5 +2483,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-26T15:42:57.107316"
+  "last_sync": "2026-10-27T07:09:54.795358"
 }

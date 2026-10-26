@@ -6,8 +6,8 @@
 #   UI 折叠在订单内（child_sections 第二段），无独立菜单。
 #
 # 本波口径:
-#   ① 三种 schedule_kind 一次声明，但只启用 delivery；
-#      billing / service 由守卫规则 SCHEDULE_KIND_NOT_ENABLED 拒绝。
+#   ① 三种 schedule_kind 一次声明，启用 delivery 与 billing；
+#      service 由守卫规则 SCHEDULE_KIND_NOT_ENABLED 拒绝。
 #   ② 不建任何 DOC_FLOW 规则（交货单 BO 尚未存在）。
 #   ③ 数量只有一个量 promised_qty（承诺量），单位 = 订单行 uom_id；
 #      已交量靠派生边聚合，不放 shipped_qty。
@@ -208,7 +208,7 @@ fields:
     db_column: schedule_kind
     required: true
     max_length: 20
-    description: 计划类型（本波只启用 delivery）
+    description: 计划类型（本波启用 delivery / billing，service 未启用）
     enum_values:
       - value: delivery
         label: 交货计划
@@ -218,7 +218,7 @@ fields:
       - value: billing
         label: 开票计划
         color: info
-        category: inactive
+        category: active
       - value: service
         label: 服务计划
         color: warning
@@ -262,6 +262,45 @@ fields:
       filterable: false
     ui:
       widget: number
+
+  - id: billing_percent
+    name: 收款比例(%)
+    type: number
+    db_column: billing_percent
+    required: false
+    nullable: true
+    description: |
+      仅 schedule_kind = billing 使用。该期应收金额占所属行**分摊后净额**的比例。
+      不落金额，金额 = billing_percent / 100 × 行净额（派生展示）。
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lte: 100
+        decimal_places: 2
+    semantics:
+      meaning: 收款计划比例（0 < p ≤ 100）
+      filterable: false
+    ui:
+      widget: number
+
+  - id: billing_amount
+    name: 收款金额(派生)
+    type: number
+    db_column: null
+    computed: true
+    description: |
+      只读派生展示：仅 schedule_kind = billing 时输出
+      billing_percent / 100 × 所属订单行分摊后净额（sales_order_line.net_amount）。
+      不落库；billing_percent 为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
+    semantics:
+      meaning: 收款计划派生金额
+      virtual: true
+    computation:
+      type: formula
+      formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
+    ui:
+      widget: number
+      editable: false
 
   - id: milestone_code
     name: 里程碑码
@@ -403,6 +442,14 @@ ui_view_config:
         sortable: true
       - field: promised_qty
         width: 110
+      - field: billing_percent
+        width: 120
+      - field: billing_amount
+        width: 130
+        computed: true
+        computation:
+          type: formula
+          formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
       - field: milestone_code
         width: 140
       - field: status
@@ -425,7 +472,7 @@ ui_view_config:
           - fields: [schedule_no, status]
       - title: 计划
         columns:
-          - fields: [promised_date, promised_qty]
+          - fields: [promised_date, promised_qty, billing_percent]
       - title: 发货与标识
         columns:
           - fields: [plant_location_id]

@@ -115,10 +115,10 @@ def _rule(excinfo):
 # ---------------- 单条规则 ----------------
 
 def test_kind_not_enabled():
-    """R-SCH-10：billing 已声明但本波未启用。"""
+    """R-SCH-10：service 已声明但本波未启用。"""
     with pytest.raises(SalesOrderGuardError) as exc:
         SalesOrderGuardService(_ds()).validate_schedule_write(
-            _create(schedule_kind='billing'))
+            _create(schedule_kind='service'))
     assert _rule(exc) == 'SCHEDULE_KIND_NOT_ENABLED'
 
 

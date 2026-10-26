@@ -18,6 +18,7 @@ BO Action 注册模块
 - 4 个 v3.4 function (function.value_help.resolve, function.aggregate.*, function.subscription.list)
 - 3 个 v3.5 enum_type CRUD
 - 2 个 v2.0 allocation (allocation.apply, allocation.split)
+- 1 个 sales_order (sales_order.recalc_header_discount)
 
 [B1 2026-10-02] 注册尾部执行「注册契约机器校验」（见 meta/core/bo_action_contract.py）：
   idempotent / 前置条件 preconditions / 参数 schema / 返回契约四要件的固化与校验。
@@ -75,6 +76,11 @@ def register_all_bo_actions(registry=None):
     from meta.services.allocation_apply import (
         allocation_apply_handler,
         allocation_split_handler,
+    )
+
+    # 抬头折扣 / 附加费: 显式重算（spec §4.6）
+    from meta.services.sales_order_header_discount_apply import (
+        sales_order_recalc_header_discount_handler,
     )
 
     # ==================== 1-5: 用户认证 (auth) ====================
@@ -523,6 +529,32 @@ def register_all_bo_actions(registry=None):
         requires_auth=True,
         requires_admin=True,
         idempotent=False,
+    )
+
+    # ==================== 22: 抬头折扣重算 (sales_order) ====================
+    registry.register(
+        'sales_order.recalc_header_discount',
+        sales_order_recalc_header_discount_handler,
+        description='按当前行基额重摊抬头折扣 / 附加费（非草稿也允许手动重算）',
+        object_type='sales_order',
+        category='allocation',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            }
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'data': {'type': 'object'},
+                'message': {'type': 'string'},
+            }
+        },
+        requires_auth=True,
+        idempotent=True,
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")

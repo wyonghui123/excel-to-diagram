@@ -335,6 +335,40 @@ fields:
       widget: input
       editable: false
 
+  # 抬头折扣/附加费的分摊调整额：由分摊服务按行净额写回，金额服务只读叠加，
+  # 不直接改 unit_price（否则任何行重算都会把折扣覆盖掉）。
+  - id: header_discount_amount
+    name: 抬头折扣分摊额
+    type: number
+    db_column: header_discount_amount
+    required: true
+    default: 0
+    description: 抬头折扣按行净额比例分摊到本行的调整额（负=减少净额，退货行为正；0 表示无折扣）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头折扣分摊调整额
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_surcharge_amount
+    name: 抬头附加费分摊额
+    type: number
+    db_column: header_surcharge_amount
+    required: true
+    default: 0
+    description: 抬头附加费按行净额比例分摊到本行的调整额（正=增加净额，退货行为负；0 表示无附加费）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头附加费分摊调整额
+    ui:
+      widget: number
+      editable: false
+
   - id: tax_code_id
     name: 税码
     type: integer

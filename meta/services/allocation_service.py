@@ -862,6 +862,8 @@ class AllocationService:
         currency: str = 'CNY',
         parent_id: Any = None, basis_field: str = None,
         group_by: str = None, rounding: str = None, floor: Any = None,
+        line_parent_id: Any = None, origin: str = 'unplanned',
+        line_sign: str = None,
     ) -> Dict[str, Any]:
         """把分摊结果落 `allocation_results`：**头记总额 + 行记摊得额**。
 
@@ -892,11 +894,21 @@ class AllocationService:
             parent_id: 被分摊的父记录 id（留痕锚点，区别于宿主行）
             basis_field / group_by / rounding / floor: 当次配置快照
             currency: 仅金额场景有意义；非金额分摊传 None 即可
+            line_parent_id: 行级留痕的 `parent_id`；None 时沿用 `parent_id`
+                （2026-10-26 抬头折扣：头行挂定价结果 id、行行挂头行留痕 id，
+                两层挂接需要行级与头级用不同的父记录）
+            origin: 来源性质 `planned` / `unplanned`；默认 `unplanned`，
+                保持 2026-10-07 拆表以来的既有行为
+            line_sign: 显式指定正负号，**头行与行行都用它**；None 时仍按
+                `total` 方向推导
 
-        【sign 由总额方向推导，不接受外部传入】`plan()` 允许负总额
-        （红字 / 冲销），此时各行摊得额同为负。若由调用方传 sign，负金额
-        配上 `'+'` 就会让留痕的「分摊方向」与实际摊销方向相反——故此处
+        【sign 默认由总额方向推导】`plan()` 允许负总额
+        （红字 / 冲销），此时各行摊得额同为负。若改由调用方传 sign，负金额
+        配上 `'+'` 就会让留痕的「分摊方向」与实际摊销方向相反——故默认
         从 `total` 推导，保证 `sign` 与 `amount` 符号恒一致。
+        【例外：抬头折扣/附加费】该场景的 `amount` 一律存**绝对值**，方向
+        由费用性质决定（折扣 `'-'`、附加费 `'+'`），与 `total` 的符号无关，
+        故由调用方显式传 `line_sign`。
 
         Returns:
             {'header_result_id': int, 'line_result_ids': [int, ...]}
@@ -905,7 +917,8 @@ class AllocationService:
         basis = rule.get('basis') or BASIS_EQUAL
         target = target or rule.get('target') or 'expense'
         floor_val = _to_decimal(floor) if floor is not None else None
-        sign = '-' if _to_decimal(total) < 0 else '+'
+        sign = line_sign or ('-' if _to_decimal(total) < 0 else '+')
+        line_parent = parent_id if line_parent_id is None else line_parent_id
 
         header_code = f"AR_{uuid.uuid4().hex[:16]}"
         cur = self.ds.execute(
@@ -922,7 +935,7 @@ class AllocationService:
                 'header', 0, float(total), float(total), currency, sign,
                 rule.get('id'), basis, basis_field,
                 group_by, rounding,
-                None if floor_val is None else float(floor_val), 'unplanned',
+                None if floor_val is None else float(floor_val), origin,
                 charge_source, source_document_type, source_document_id,
                 target, 'active', now, now,
             ],
@@ -943,11 +956,11 @@ class AllocationService:
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     line_code, document_type, document_id,
-                    row.get('id'), parent_id, 'line', seq,
+                    row.get('id'), line_parent, 'line', seq,
                     float(value), float(value), currency, sign,
                     rule.get('id'), basis, basis_field,
                     group_by, rounding,
-                    None if floor_val is None else float(floor_val), 'unplanned',
+                    None if floor_val is None else float(floor_val), origin,
                     charge_source, source_document_type, source_document_id,
                     target, 'active', now, now,
                 ],

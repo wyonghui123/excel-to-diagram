@@ -60,6 +60,18 @@
 产品组（B）:
   R-DIV-1  division_code 须存在于 division 且为启用态（创建或值变更时校验）
 
+抬头折扣 / 附加费（R-DSC-H，依据 docs/superpowers/specs/
+2026-10-26-sales-order-billing-and-header-discount-spec.md §4.8）:
+  R-DSC-H1  折扣率 / 附加费率须在 0..100             —— HEADER_DISCOUNT_RANGE
+  R-DSC-H2  分摊后整单净额不得为负；抬头快照符号须为
+            折扣 ≤ 0 / 附加费 ≥ 0                    —— HEADER_DISCOUNT_NEGATIVE_AMOUNT
+  R-DSC-H3  非 draft 冻结两个百分比                  —— HEADER_DISCOUNT_LOCKED
+  R-DSC-H4  确认时抬头快照与行分摊额须等于按当前行基额
+            回算的 D / S（含 Σ 行调整额守恒）         —— HEADER_DISCOUNT_NOT_APPLIED
+  R-DSC-H5  置了比例但整单行基额为 0（确认时校验）   —— HEADER_DISCOUNT_ZERO_BASE
+  R-DSC-H6  行已手工改价（price_source='manual'）不排斥，
+            抬头折扣仍按折后净额比例摊（不设错误码）
+
 行的写入门槛取「父单必须是 draft」一条：
   R8 只明文限制删除，但 submitted / confirmed 已是下游读取的快照态，
   允许追加或改行会让 R7 的汇总回写改动已确认金额，故创建 / 更新 / 删除
@@ -82,7 +94,12 @@
   R-SCH-7  delivery 必须有发货点（默认继承订单行，行为空时要求本行显式填写）
   R-SCH-8  物理删除：仅 draft 且未被派生边引用时允许
   R-SCH-9  状态流转须符合 §2.3 图，终态不可回退 / 复活
-  R-SCH-10 kind 门控：本波只有 SCHEDULE_KINDS_ENABLED（delivery）可写
+  R-SCH-10 kind 门控：本波只有 SCHEDULE_KINDS_ENABLED（delivery / billing）可写
+  R-SCH-11 billing 收款比例必填且在 0..100                 —— BILLING_PERCENT_*
+  R-SCH-12 billing 不得填写 plant_location_id / service_visit_no
+  R-SCH-13 同一订单行 billing 比例合计 ≤ 100
+  R-SCH-14 billing 收款日（promised_date）必填
+  R-SCH-15 非草稿订单冻结 billing_percent
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
 本守卫对这两条路径不生效（与其他守卫同一限制）。展开服务同样绕过拦截器链，
@@ -91,6 +108,7 @@
 
 import logging
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, Optional
 
 from meta.services.uom_quantity_service import UomQuantityService
@@ -138,6 +156,19 @@ _ADDRESS_SNAPSHOT_PAIRS = (('ship_to_address_text', 'ship_to_address_id'),
 _ADDRESS_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _ADDRESS_SNAPSHOT_PAIRS)
 CONFIRMED = 'confirmed'
 
+# ---------------- 抬头折扣 / 附加费（R-DSC-H） ----------------
+HEADER_DISCOUNT_PERCENT = 'header_discount_percent'
+HEADER_SURCHARGE_PERCENT = 'header_surcharge_percent'
+HEADER_DISCOUNT_AMOUNT = 'header_discount_amount'
+HEADER_SURCHARGE_AMOUNT = 'header_surcharge_amount'
+_HEADER_RATE_MIN = 0.0
+_HEADER_RATE_MAX = 100.0
+# 币种精度 2 位时，回算 D/S 与落库快照允许 1 分的四舍五入差异
+_AMOUNT_TOLERANCE = 0.01
+_DEFAULT_DECIMALS = 2
+_ZERO_DEC = Decimal('0')
+_ONE_HUNDRED = Decimal('100')
+
 # ---------------- 计划行（R-SCH） ----------------
 SCHEDULE_OBJECT = 'sales_order_schedule'
 SCHEDULE_TABLE = 'sales_order_schedules'
@@ -155,6 +186,11 @@ SCHEDULE_MILESTONE_MAX = 64
 # R-SCH-5：订单离开草稿后仍可改的列。status 不在冻结范围（状态流转由 R-SCH-9 管）。
 SCHEDULE_EDITABLE_AFTER_DRAFT = ('promised_date', 'promised_qty',
                                  'plant_location_id', 'status')
+# R-SCH-5 对 billing 收窄：无发货点 / 无承诺量，只余收款日与状态。
+# billing_percent 不在其中，由 R-SCH-15 单独判定（避免报错码串味）。
+SCHEDULE_BILLING_EDITABLE_AFTER_DRAFT = ('promised_date', 'status')
+# R-SCH-11 / R-SCH-13 / R-SCH-15：比例比较与合计上限的浮点容差
+BILLING_PERCENT_TOLERANCE = 1e-6
 
 
 class SalesOrderGuardError(ValueError):
@@ -181,6 +217,21 @@ def _num(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_decimal(value: Any) -> Decimal:
+    if value is None or value == '':
+        return _ZERO_DEC
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return _ZERO_DEC
+
+
+def _round_amount(value: Decimal, decimals: int) -> Decimal:
+    return value.quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
 
 
 class SalesOrderGuardService:
@@ -313,6 +364,127 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     f'产品组 {division_code} 已停用，不能用于新订单',
                     field_name='division_code', rule='division_inactive')
+
+        # R-DSC-H1 ~ H6：抬头折扣 / 附加费（spec §4.8）
+        self.validate_header_discount(data, old_data=old)
+
+    # ---------------- 抬头折扣 / 附加费（R-DSC-H1 ~ H6, §4.8） ----------------
+
+    def validate_header_discount(self, data: Dict[str, Any],
+                                 old_data: Optional[Dict[str, Any]] = None,
+                                 is_create: bool = False) -> None:
+        """抬头折扣 / 附加费的写前校验。
+
+        `data` 是「写入后的有效行」。H1 / H3 与 H2 的符号检查在每次抬头写入
+        都执行；H2 的整单净额、H4 的「确认前未重算」、H5 的零基额都取决于
+        行金额与分摊结果，故只在比例非零时读行（读侧异常 fail-open）。
+        R-DSC-H6 是「允许项」：手工改价的行不排斥抬头折扣，无需校验。
+        """
+        old = old_data or {}
+        disc_pct = _num(data.get(HEADER_DISCOUNT_PERCENT))
+        sur_pct = _num(data.get(HEADER_SURCHARGE_PERCENT))
+
+        # R-DSC-H1：折扣率 / 附加费率须在 0..100
+        for field, value in ((HEADER_DISCOUNT_PERCENT, disc_pct),
+                             (HEADER_SURCHARGE_PERCENT, sur_pct)):
+            if value is not None \
+                    and (value < _HEADER_RATE_MIN or value > _HEADER_RATE_MAX):
+                raise SalesOrderGuardError(
+                    f'{field} 须在 0..100 之间（当前 {value}）',
+                    field_name=field, rule='HEADER_DISCOUNT_RANGE')
+
+        # R-DSC-H2 前置：抬头快照符号（折扣 ≤ 0 / 附加费 ≥ 0）
+        disc_adj = _num(data.get(HEADER_DISCOUNT_AMOUNT))
+        sur_adj = _num(data.get(HEADER_SURCHARGE_AMOUNT))
+        if (disc_adj is not None and disc_adj > 0) \
+                or (sur_adj is not None and sur_adj < 0):
+            raise SalesOrderGuardError(
+                '抬头折扣金额须 ≤ 0 且附加费金额须 ≥ 0',
+                field_name=HEADER_DISCOUNT_AMOUNT,
+                rule='HEADER_DISCOUNT_NEGATIVE_AMOUNT')
+
+        old_status = old.get('status')
+
+        # R-DSC-H3：非 draft 冻结两个百分比
+        if old_status and old_status != DRAFT:
+            for field in (HEADER_DISCOUNT_PERCENT, HEADER_SURCHARGE_PERCENT):
+                if field not in data:
+                    continue
+                new_value = _num(data.get(field)) or 0.0
+                old_value = _num(old.get(field)) or 0.0
+                if new_value != old_value:
+                    raise SalesOrderGuardError(
+                        f'订单已离开草稿态（{old_status}），{field} 已冻结',
+                        field_name=field, rule='HEADER_DISCOUNT_LOCKED')
+
+        if not disc_pct and not sur_pct:
+            return
+
+        order_id = data.get('id')
+        if _is_blank(order_id):
+            order_id = old.get('id')
+        if _is_blank(order_id):
+            return
+        base_info = self._header_discount_base(order_id)
+        if base_info is None:  # 读侧异常 → fail-open
+            return
+        base, abs_base = base_info
+
+        currency_id = data.get('currency_id')
+        if _is_blank(currency_id):
+            currency_id = old.get('currency_id')
+        decimals = self._currency_decimals(currency_id)
+        discount = _round_amount(
+            base * _to_decimal(disc_pct) / _ONE_HUNDRED, decimals)
+        surcharge = _round_amount(
+            base * _to_decimal(sur_pct) / _ONE_HUNDRED, decimals)
+
+        # R-DSC-H2：分摊后整单净额不得为负（Σ net_final = base − D + S）
+        if float(base - discount + surcharge) < -_AMOUNT_TOLERANCE:
+            raise SalesOrderGuardError(
+                '抬头折扣 / 附加费分摊后整单净额为负',
+                field_name=HEADER_DISCOUNT_PERCENT,
+                rule='HEADER_DISCOUNT_NEGATIVE_AMOUNT')
+
+        confirming = (str(data.get('status') or '') == CONFIRMED
+                      and str(old_status or '') != CONFIRMED)
+        if not confirming:
+            return
+
+        # R-DSC-H5：置了比例但整单行基额为 0
+        if abs_base == 0:
+            raise SalesOrderGuardError(
+                '整单行基额为 0，抬头折扣 / 附加费无法按行分摊',
+                field_name=HEADER_DISCOUNT_PERCENT,
+                rule='HEADER_DISCOUNT_ZERO_BASE')
+
+        # R-DSC-H4：抬头快照须等于按当前行基额回算的 D / S（未重算即确认）
+        header_disc = disc_adj
+        if header_disc is None:
+            header_disc = _num(old.get(HEADER_DISCOUNT_AMOUNT)) or 0.0
+        header_sur = sur_adj
+        if header_sur is None:
+            header_sur = _num(old.get(HEADER_SURCHARGE_AMOUNT)) or 0.0
+        expected_disc = -float(discount)
+        expected_sur = float(surcharge)
+        if (abs(header_disc - expected_disc) > _AMOUNT_TOLERANCE
+                or abs(header_sur - expected_sur) > _AMOUNT_TOLERANCE):
+            raise SalesOrderGuardError(
+                '抬头折扣 / 附加费未按当前基额重算，不能确认订单',
+                field_name=HEADER_DISCOUNT_AMOUNT,
+                rule='HEADER_DISCOUNT_NOT_APPLIED')
+
+        # 守恒：Σ 行调整额须等于抬头快照（§4.1 / §4.10）
+        sums = self._header_discount_sums(order_id)
+        if sums is None:  # 读侧异常 → fail-open
+            return
+        sum_disc, sum_sur = sums
+        if (abs(float(sum_disc) - header_disc) > _AMOUNT_TOLERANCE
+                or abs(float(sum_sur) - header_sur) > _AMOUNT_TOLERANCE):
+            raise SalesOrderGuardError(
+                '行分摊额合计与抬头折扣 / 附加费快照不一致，不能确认订单',
+                field_name=HEADER_DISCOUNT_AMOUNT,
+                rule='HEADER_DISCOUNT_NOT_APPLIED')
 
     # ---------------- 销售区域带出（M3, §6.1） ----------------
 
@@ -688,6 +860,68 @@ class SalesOrderGuardService:
             return None
         return rows[0] if rows else None
 
+    def _header_discount_lines(self, order_id: Any):
+        """读订单行的净额与两调整列；查询失败返回 None（fail-open）。"""
+        try:
+            return self.ds.query(
+                'SELECT id, net_amount, header_discount_amount, '
+                'header_surcharge_amount FROM sales_order_lines '
+                'WHERE order_id = ?', [order_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单 {order_id} 的行金额失败: {e}')
+            return None
+
+    def _header_discount_base(self, order_id: Any):
+        """返回 `(Σ 行基额, Σ |行基额|)`；查询失败返回 None。
+
+        行基额 = net_amount − header_discount_amount − header_surcharge_amount，
+        与 `SalesOrderHeaderDiscountService._base_of` 同一口径。
+        """
+        rows = self._header_discount_lines(order_id)
+        if rows is None:
+            return None
+        base = _ZERO_DEC
+        abs_base = _ZERO_DEC
+        for row in rows:
+            base_i = (_to_decimal(row.get('net_amount'))
+                      - _to_decimal(row.get('header_discount_amount'))
+                      - _to_decimal(row.get('header_surcharge_amount')))
+            base += base_i
+            abs_base += abs(base_i)
+        return base, abs_base
+
+    def _header_discount_sums(self, order_id: Any):
+        """返回 `(Σ 行折扣调整额, Σ 行附加费调整额)`；查询失败返回 None。"""
+        rows = self._header_discount_lines(order_id)
+        if rows is None:
+            return None
+        discount = _ZERO_DEC
+        surcharge = _ZERO_DEC
+        for row in rows:
+            discount += _to_decimal(row.get('header_discount_amount'))
+            surcharge += _to_decimal(row.get('header_surcharge_amount'))
+        return discount, surcharge
+
+    def _currency_decimals(self, currency_id: Any) -> int:
+        """币种小数位；缺币种 / 查询失败按 2 位（与金额服务同口径）。"""
+        if _is_blank(currency_id):
+            return _DEFAULT_DECIMALS
+        try:
+            rows = self.ds.query(
+                'SELECT decimal_places FROM currencies WHERE id = ?',
+                [currency_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取币种精度 {currency_id} 失败: {e}')
+            return _DEFAULT_DECIMALS
+        raw = rows[0].get('decimal_places') if rows else None
+        try:
+            decimals = int(raw)
+        except (TypeError, ValueError):
+            return _DEFAULT_DECIMALS
+        return decimals if 0 <= decimals <= 8 else _DEFAULT_DECIMALS
+
     def _load_division(self, code: Any):
         """按 code 读产品组。
 
@@ -941,8 +1175,12 @@ class SalesOrderGuardService:
                 f'{"/".join(SCHEDULE_KINDS_ENABLED)}）',
                 field_name='schedule_kind', rule='SCHEDULE_KIND_NOT_ENABLED')
 
-        # R-SCH-1：承诺日期必填
+        # R-SCH-1 / R-SCH-14：承诺日期必填（billing 的承诺日期即收款日）
         if _is_blank(data.get('promised_date')):
+            if str(kind) == 'billing':
+                raise SalesOrderGuardError(
+                    'billing 计划行必须填写收款日期',
+                    field_name='promised_date', rule='BILLING_DATE_REQUIRED')
             raise SalesOrderGuardError(
                 '计划行必须填写承诺日期',
                 field_name='promised_date', rule='SCHEDULE_DATE_REQUIRED')
@@ -968,6 +1206,7 @@ class SalesOrderGuardService:
                 field_name='order_id', rule='SCHEDULE_ORDER_MISMATCH')
 
         # R-SCH-5：订单离开草稿后禁止新增，只允许改期 / 改量 / 改发货点
+        #        （billing 收窄为改收款日 / 改状态，比例由 R-SCH-15 判定）
         parent_order_id = order_id if not _is_blank(order_id) \
             else (line or {}).get('order_id')
         order = self._load_order(parent_order_id) \
@@ -978,13 +1217,20 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     f'订单处于 {parent_status} 状态，不允许新增计划行',
                     field_name='status', rule='SCHEDULE_LOCKED')
-            changed = [f for f in data
-                       if f not in SCHEDULE_EDITABLE_AFTER_DRAFT
-                       and str(data.get(f)) != str(old.get(f))]
+            if str(kind) == 'billing':
+                editable = SCHEDULE_BILLING_EDITABLE_AFTER_DRAFT
+                # billing_percent 不参与本规则的冻结比对（R-SCH-15 专管）
+                frozen = [f for f in data
+                          if f not in editable and f != 'billing_percent']
+            else:
+                editable = SCHEDULE_EDITABLE_AFTER_DRAFT
+                frozen = [f for f in data if f not in editable]
+            changed = [f for f in frozen
+                       if str(data.get(f)) != str(old.get(f))]
             if changed:
                 raise SalesOrderGuardError(
                     f'订单处于 {parent_status} 状态，计划行只允许修改 '
-                    f'{"/".join(SCHEDULE_EDITABLE_AFTER_DRAFT)}',
+                    f'{"/".join(editable)}',
                     field_name=changed[0], rule='SCHEDULE_LOCKED')
 
         if str(kind) == 'billing':
@@ -993,6 +1239,46 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     'billing 计划行不承诺数量，promised_qty 必须留空',
                     field_name='promised_qty', rule='BILLING_QTY_NOT_ALLOWED')
+
+            # R-SCH-12：billing 不涉及发货点 / 服务次数
+            for field in ('plant_location_id', 'service_visit_no'):
+                if not _is_blank(data.get(field)):
+                    raise SalesOrderGuardError(
+                        f'billing 计划行不得填写 {field}',
+                        field_name=field, rule='BILLING_FIELD_NOT_ALLOWED')
+
+            old_pct = _num(old.get('billing_percent'))
+            new_pct = _num(data.get('billing_percent'))
+            # R-SCH-15：非草稿订单冻结收款比例（旧值非空且本次变更）
+            if not is_create and parent_status and parent_status != DRAFT \
+                    and old_pct is not None and 'billing_percent' in data:
+                if new_pct is None \
+                        or abs(new_pct - old_pct) > BILLING_PERCENT_TOLERANCE:
+                    raise SalesOrderGuardError(
+                        f'订单处于 {parent_status} 状态，billing_percent 已冻结',
+                        field_name='billing_percent',
+                        rule='BILLING_PERCENT_LOCKED')
+
+            # R-SCH-11：收款比例必填且 0 < p ≤ 100
+            if _is_blank(data.get('billing_percent')):
+                raise SalesOrderGuardError(
+                    'billing 计划行必须填写收款比例',
+                    field_name='billing_percent', rule='BILLING_PERCENT_REQUIRED')
+            if new_pct is None or new_pct <= 0 or new_pct > 100:
+                raise SalesOrderGuardError(
+                    f'收款比例须大于 0 且不超过 100（当前 {new_pct}）',
+                    field_name='billing_percent', rule='BILLING_PERCENT_RANGE')
+
+            # R-SCH-13：同一订单行的 billing 比例合计 ≤ 100（作废行不占）
+            if not _is_blank(line_id):
+                planned = self._sum_billing_percent(
+                    line_id, exclude_id=data.get('id'))
+                total = planned + new_pct
+                if total > 100 + BILLING_PERCENT_TOLERANCE:
+                    raise SalesOrderGuardError(
+                        f'本行 billing 收款比例合计（{total:g}）超过 100',
+                        field_name='billing_percent',
+                        rule='BILLING_PERCENT_SUM_EXCEEDED')
 
         elif str(kind) == 'delivery':
             qty = _num(data.get('promised_qty'))
@@ -1112,6 +1398,27 @@ class SalesOrderGuardService:
         if not rows:
             return 0.0
         return _num(rows[0].get('qty')) or 0.0
+
+    def _sum_billing_percent(self, line_id: Any,
+                             exclude_id: Any = None) -> float:
+        """同一行已排的 billing 收款比例合计（作废行不占比例）。"""
+        sql = (f'SELECT COALESCE(SUM(billing_percent), 0) AS pct '
+               f'FROM {SCHEDULE_TABLE} '
+               f"WHERE line_id = ? AND schedule_kind = 'billing' "
+               f"  AND status <> 'cancelled'")
+        params = [line_id]
+        if not _is_blank(exclude_id):
+            sql += ' AND id <> ?'
+            params.append(exclude_id)
+        try:
+            rows = self.ds.query(sql, params)
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 汇总计划行比例（订单行 {line_id}）失败: {e}')
+            return 0.0
+        if not rows:
+            return 0.0
+        return _num(rows[0].get('pct')) or 0.0
 
     def _has_schedule_derivation_refs(self, schedule_id: Any) -> bool:
         """计划行是否已被派生边引用（doc_flow_edges.source_bo + source_id）。"""

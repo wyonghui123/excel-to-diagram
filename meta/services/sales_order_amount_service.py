@@ -5,7 +5,8 @@
       docs/superpowers/specs/2026-10-24-sales-order-wave0-detailed-plan.md §1.4
 
 口径:
-  · 行：net = qty × unit_price，按订单币种 decimal_places 四舍五入（R11）；
+  · 行：net = qty × unit_price + 抬头折扣/附加费分摊额，按订单币种
+        decimal_places 四舍五入（R11）；
         tax_base = net；tax = round(tax_base × tax_rate_percent / 100, 精度)；
         gross = net + tax。税率按订单日期从 tax_rates 的生效区间取（R12）。
   · 符号（R3）：订单抬头 order_type.document_category = 'return' 时，
@@ -87,7 +88,11 @@ class SalesOrderAmountService:
 
         qty = _dec(line.get('qty'))
         unit_price = _dec(line.get('unit_price'))
-        net = _round(qty * unit_price * sign, decimals)
+        base = _round(qty * unit_price * sign, decimals)
+        # 抬头折扣/附加费分摊额由分摊服务写回，这里只叠加，不改 unit_price
+        net = _round(base
+                     + _dec(line.get('header_discount_amount'))
+                     + _dec(line.get('header_surcharge_amount')), decimals)
 
         tax_rate_percent: Optional[Decimal] = None
         tax = _ZERO
@@ -138,7 +143,8 @@ class SalesOrderAmountService:
 
     def _load_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            'SELECT id, order_id, qty, unit_price, tax_code_id '
+            'SELECT id, order_id, qty, unit_price, tax_code_id, '
+            'header_discount_amount, header_surcharge_amount '
             'FROM sales_order_lines WHERE id = ?', [line_id])
         return rows[0] if rows else None
 
