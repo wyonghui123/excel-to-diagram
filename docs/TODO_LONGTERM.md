@@ -170,6 +170,7 @@
 
 | 日期 | 变更人 | 变更内容 |
 |------|--------|----------|
+| 2026-10-26 | AI Assistant | **新增 L18 元模型驱动架构治理**: 按「YAML → registry → DDL → 菜单/权限/UI」四段链路评估出 9 项（P0 2 项 / P1 5 项 / P2 2 项），含证据基线（drift_report 陈旧、table_prefix 未实现、菜单双写入者、DDL 双通道、死声明、设计态/运行态双轨、模块约束无执行点、无对象继承、规则型 BO 口径不一致）与推进顺序 |
 | 2026-07-13 16:40 | 协调智能体 | **审计恢复方向确认 + multipart 污染修复 + P0 升级** (TODO_LONGTERM.md v2)<br/>- 创建 `docs/HANDOFF_object_recovery.md` 接手文档 (L13 阶段 1-3)<br/>- 实测: AM-ROLE audit_logs 主实体 100% 完整, 关联 26/28 (缺 2)<br/>- 实测: 4 个 audit 缺口 (role_menu + role_dim_scope 完全无 audit)<br/>- **L8.5 紧急 P0 (新)**: multipart 污染 bug, 影响今天 4 个文件 (2 zip + monitor_prod.py + verify_deployment.py)<br/>- 临时修复 3 个文件 (移除 multipart 头), v002 zip 清理后 82286200 字节<br/>- **L11.3 升级**: DELETE 二次确认 + L13 强绑定<br/>- **新增 L15 (监控) L16 (SSH) L17 (部署前检查)**<br/>- L8.2 observability /api/upload_multi 待二次确认 (可能与 L8.5 是同一个 bug) |
 | 2026-07-13 15:30 | AI Assistant | **3 个 P0 小步完成** (V007.49-B):<br/>- `5e750ba` fix(tools): rebuild_zip.py V007.49-B 自动同步 meta/ + git HEAD 对账<br/>- `3e3c202` fix(tools): rebuild_zip.py ROOT 自适应 (deploy_bundle 路径下向上 2 层)<br/>- `a6aaee0` feat(core_service): /api/upload 增加契约校验 (verified_size + md5)<br/>- `71db29b` feat(tools): post_deploy_check.py - 3 层对账 (HEAD vs bundle vs zip vs remote)<br/>首次 post_deploy_check.py 运行发现 deploy_bundle/ vs git HEAD 3 文件 drift |
 | 2026-07-13 14:00 | AI Assistant | **基础设施深度分析** + 新增长期 TODO (本文 L8-L13) |
@@ -394,11 +395,56 @@
 
 ---
 
+## L18: 元模型驱动架构治理 (工作日: 6-10d)
+
+**目标**: 让「YAML 声明 → registry → DDL 物化 → 菜单/权限/UI 派生」四段链路可度量、可校验、单一权威
+
+> 评估口径: 以元模型驱动架构的四段链路为基准，逐段检查「声明是否生效、是否有唯一权威、是否可自动发现漂移」。
+
+| 子任务 | 工作量 | 优先级 | 状态 |
+|--------|--------|--------|------|
+| 18.1 漂移可度量: drift_check 常态化 (CI/启动自检 + 报告入库) | 1d | P0 | TODO |
+| 18.2 撞表检测: `table_prefix` 落地或显式断言「单库裸表名」约束 | 1d | P0 | TODO |
+| 18.3 死声明清理: `data_quality_rules` / `skip_auto_menu` 二选一（实现或删除） | 0.5d | P1 | TODO |
+| 18.4 菜单单一权威: 收敛 `menu_auto_generator` 与 `init_menu_permissions` 双写入者 | 1.5d | P1 | TODO |
+| 18.5 平台模块约束执行点: `allowed_platform_modules` 落到加载期断言 | 0.5d | P1 | TODO |
+| 18.6 DDL 权威收敛: 启动 sync 与冻结迁移二选一（迁移优先，sync 降级为校验） | 2d | P1 | TODO |
+| 18.7 设计态/运行态同步契约: `business_objects` 表与 BO YAML 的字段对齐规则 | 1d | P1 | TODO |
+| 18.8 对象继承/组合: `aspects` 之外评估 `extends`，消 138 对象重复声明 | 2d | P2 | TODO |
+| 18.9 规则型 BO 暴露口径统一: 菜单/权限策略按对象类别收敛 | 0.5d | P2 | TODO |
+
+**关键证据（评估基线）**:
+
+- **18.1**: `meta/schemas/.drift_report.json` 为 git 跟踪的静态快照，`yaml_objects_scanned: 79` / `yaml_objects_with_drift: 36`，mtime 2026-10-11；而 `meta/schemas` 当前已有 138 个 YAML —— 报告本身已陈旧。`meta/tools/drift_check.py` 仅手动 CLI，无 CI/启动调用；`meta/tests/test_yaml_single_source_of_truth.py` 只断言 `export_visible` 默认值、字段语义、associations、detail tabs，**不是** yaml↔DB↔UI↔菜单↔权限 全链路 conformance。
+- **18.2**: `table_prefix` 全仓未实现（仅 `sql_adapters.py:244` 同名无关参数 + `init_menu_permissions.py:1141` 注释），多应用默认同库裸表名，撞表只能事后发现。
+- **18.3**: `meta/core/models.py:530 data_quality_rules` 全仓唯一引用；`skip_auto_menu` 在 `menu_auto_generator.py:290` 被读取，但 `parse_ui_view_config` 不写入、`UIViewConfig` 无该字段 → 恒 False。
+- **18.4**: 启动序列 `meta/server.py:618 menu_auto_generator.persist_to_db()` + `:623 init_menu_permissions()` 两个写入者写同一批 `menus` / `menu_permissions`（`app_builder.py:356`、`:625-626` 同模式），写入用 `INSERT OR IGNORE`，冲突时无告警。`init_menu_permissions.py` 约 2481 行 / 54 个 menu_code / 25 个 `-list`。
+- **18.5**: `allowed_platform_modules` 在 `app_loader.py:194` 声明、`:533` 解析，**无任何消费点**；模块越界无断言。
+- **18.6**: DDL 双通道 —— 启动自动 `sync_schema_from_meta`（`app_registry.py:381`、`manage_api.py:50-54`、`schema_generator.py:471-474`）+ 100 个 .py 迁移（另有 3 个 .sql）。
+- **18.7**: `business_objects` 表存在 YAML 未声明的 12 列（`updated_at/product_code/version_code/service_module_code/domain_name/sub_domain_name/service_module_name/version_name/relation_count/bo_category/bo_sub_category/category_config`），`menu` 表多 4 列；另有 `party_archive`/`party_internal` 在报告中 `exists: false`、`missing_columns` 全字段。
+- **18.8**: `meta/schemas` 全量 `extends/inherits` 0 命中；`_action_groups.yaml` 的 `includes:` 是操作组组合而非对象继承；复用仅靠 `aspects`（约 60 个对象用 `audit_aspect`）。
+- **18.9**: 同类「规则型」对象菜单策略不一致 —— `permission_rule` 有表无菜单，`rate_type` / `allocation_rule` 有菜单。
+
+**建议推进顺序**:
+
+1. 18.1（漂移可度量）→ 18.2（撞表检测）—— 先让问题可见
+2. 18.3（死声明清理）+ 18.4（菜单单一权威）—— 低风险高收益
+3. 18.5（模块越界断言）→ 18.6（DDL 权威收敛）→ 18.7（同步契约）
+4. 18.8 / 18.9 —— 登记待评估
+
+**收益**:
+- 元模型声明与运行时事实可自动对账，不再依赖人工复查
+- 消除双写入者 / 双通道导致的不确定性
+- 死声明与无执行点的约束不再误导后续开发
+
+---
+
 ## 跟踪 / 提醒
 
 - [ ] 每月回顾进度 (推荐在月度 ops 会议)
 - [ ] 每次类似 bug 复盘后, 检查是否需要新增 L 条目
 - [ ] 标注 P0/L1 = 季度计划, P2/L2-3 = 半年计划, L4-7 = 明年计划
 - [ ] **新增长期**: L8-L14 来自 2026-07-13 部署事件复盘, 建议下次 sprint 评估
+- [ ] **新增长期**: L18 来自元模型驱动架构评估（P0 优先 18.1/18.2）
 
 ---
