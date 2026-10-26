@@ -23,10 +23,13 @@
 #   W0-R6  行 item_id 为空时 description 必填；uom_id 恒必填
 #   W0-R7  抬头合计恒等于行合计（任一行变更后重算回写）
 #   W0-R8  status != draft 后禁止删除行；禁止改 order_no / order_type_id / currency_id
-#   W0-R9  确认时冻结 exchange_rate / tax_rate_percent / unit_price
+#   W0-R9  确认时冻结 exchange_rate / exchange_rate_type / exchange_rate_date
+#          / tax_rate_percent / unit_price
 #   W0-R10 sales_org_id 必须存在 org_functions.function_type='sales' 的行
 #   W0-R11 行级先按币种精度舍入，再汇总
 #   W0-R12 金额由服务层计算并落快照，界面不提供自动定价
+#   W0-R13 汇率折算快照：exchange_rate != 1 时 exchange_rate_date 必填
+#          （本币无折算，rate=1 允许留空）
 
 id: sales_order
 name: 销售订单
@@ -752,6 +755,55 @@ fields:
     ui:
       widget: input
 
+  # 汇率类型与汇率日期构成「折算快照口径」（对标 SAP VBAK-KURST / Oracle
+  # CurrencyConversionType+ConversionDate）：记录该汇率取自哪条 currency_rates
+  # 的哪个 rate_type 与哪个有效日切片，便于事后追溯与审计复算。
+  # rate_type 值集与 currency_rate.rate_type 对齐；空值由守卫按 spot 推导。
+  - id: exchange_rate_type
+    name: 汇率类型
+    type: string
+    db_column: exchange_rate_type
+    required: true
+    default: spot
+    description: 汇率类型快照（即期 / 公司 / 用户 / 固定）
+    enum_values:
+      - value: spot
+        label: 即期汇率
+        color: primary
+        is_initial: true
+      - value: corporate
+        label: 公司汇率
+        color: info
+      - value: user
+        label: 用户汇率
+        color: warning
+      - value: fixed
+        label: 固定汇率
+        color: success
+    semantics:
+      meaning: 订单汇率类型快照
+      filterable: true
+    ui:
+      widget: select
+
+  # 折算日期：仅 exchange_rate != 1（存在折算）时必填，由守卫在创建/更新时
+  # 默认取 order_date（W0-R13）。本币 rate=1 允许留空。
+  - id: exchange_rate_date
+    name: 汇率日期
+    type: date
+    db_column: exchange_rate_date
+    nullable: true
+    description: 汇率有效日快照（空 = 无折算或未指定，创建时默认取订单日期）
+    semantics:
+      meaning: 订单汇率有效日期快照
+      filterable: true
+      filter_type: date
+      filter_label: 汇率日期
+      filter_scope: local
+    ui:
+      widget: date
+      clearable: true
+
   - id: payment_term_id
     name: 付款条件
     type: integer
@@ -1370,6 +1422,7 @@ ui_view_config:
       - title: 商务条件
         columns:
           - fields: [currency_id, exchange_rate]
+          - fields: [exchange_rate_type, exchange_rate_date]
           - fields: [payment_term_id, incoterm_code]
           - fields: [customer_po_no]
           - fields: [requested_date, confirmed_date]
