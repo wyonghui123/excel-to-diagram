@@ -313,6 +313,49 @@ PARTY_RELATION_ROLE_VALUES = [
 ]
 
 
+# ── [2026-10-27 D 项] 舍入方式字典（rounding_mode）──
+# 值来源: 5 处舍入字段的内联 enum_values 统一后的集合
+#   （allocation_rule.rounding / allocation_result.rounding / rate_type.rounding /
+#    pricing_period.rounding / tax_code.rounding）。
+# 【单一真源】本字典是「舍入方向」的唯一动态真源；5 处 YAML 的内联 enum_values
+#   仅为静态回退（保列表列配色），二者必须逐值一致 —— 由
+#   meta/tests/test_rounding_unification.py 断言锁死。
+# 【mutability=locked】4 值（none/round/ceil/floor）覆盖主流集合；锁死是为了防止
+#   管理员在字典侧新增取值、而 5 处 YAML 未同步 ⇒ 取值域分叉（违反 NFR-001）。
+#   新增取整方式（如 half_even 银行家舍入）走正常发版：改字典 + 改 5 处 YAML。
+# 【精度不在本字典】精度（位数）唯一真源 = currency.decimal_places；
+#   本字典只管方向。两者分工见
+#   docs/superpowers/specs/2026-10-27-sales-order-business-type-and-rounding-spec.md FR-010。
+ROUNDING_MODE_ENUM_ID = 'rounding_mode'
+ROUNDING_MODE_VALUES = [
+    ('none', '不取整', 0),
+    ('round', '四舍五入', 1),
+    ('ceil', '向上取整', 2),
+    ('floor', '向下取整', 3),
+]
+
+
+def seed_rounding_mode(ds) -> tuple:
+    """注册 rounding_mode 枚举类型及其值（幂等）。
+
+    值来源: 5 处舍入字段的内联 enum_values（统一后的 4 值集合）。
+    category=system（平台级语义）+ mutability=locked（防取值域分叉）。
+    """
+    type_created = 0
+    value_created = 0
+    if not check_enum_type_exists(ds, ROUNDING_MODE_ENUM_ID):
+        create_enum_type(ds, ROUNDING_MODE_ENUM_ID,
+                         name='舍入方式',
+                         description='舍入/取整方向唯一真源（精度取 currency.decimal_places）',
+                         category='system', mutability='locked')
+        type_created = 1
+    for code, name, sort_order in ROUNDING_MODE_VALUES:
+        if not check_enum_value_exists(ds, ROUNDING_MODE_ENUM_ID, code):
+            create_enum_value(ds, ROUNDING_MODE_ENUM_ID, code, name, sort_order=sort_order)
+            value_created += 1
+    return type_created, value_created
+
+
 def seed_party_relation_role(ds) -> tuple:
     """注册 party_relation.role 枚举类型及其值（幂等）。
 
@@ -572,6 +615,13 @@ def migrate_enums(db_path: str = None) -> dict:
         _t, _v = _seed(ds)
         total_types_created += _t
         total_values_created += _v
+
+    # [D] [2026-10-27] rounding_mode 舍入方式字典落库（5 处舍入字段的唯一动态真源）
+    print(f"\n处理枚举: {ROUNDING_MODE_ENUM_ID}（舍入方式统一字典）")
+    print("-" * 40)
+    _t, _v = seed_rounding_mode(ds)
+    total_types_created += _t
+    total_values_created += _v
 
     removed = cleanup_orphan_enum_values(ds)
     total_values_removed += removed

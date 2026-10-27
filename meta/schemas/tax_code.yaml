@@ -289,27 +289,48 @@ fields:
     ui:
       widget: select
 
-  - id: rounding_mode
+  - id: rounding
     name: 税额舍入方式
     type: string
-    db_column: rounding_mode
+    db_column: rounding
     required: true
     default: round
-    description: 税额舍入到币种小数位时采用的方式（四舍五入 / 向上 / 向下）
+    # [D 2026-10-27] 字段改名: rounding_mode → rounding，与其余 4 处舍入字段同名。
+    #   统一口径：精度（位数）唯一真源 = currency.decimal_places；本字段只管**方向**。
+    #   本字段的消费方 = sales_order_amount_service 的**税额**舍入
+    #   （此前为死字段：税额一律 ROUND_HALF_UP，配了不生效且静默失效）。
+    description: 税额舍入到币种小数位时采用的方式（none / round / ceil / floor）；精度取币种 decimal_places，本字段只管方向
     enum_values:
+      - value: none
+        label: 不取整
+        color: default
+        description: 不额外舍入（税率本身为精确货币值时等价）
       - value: round
         label: 四舍五入
         color: primary
         is_initial: true
         description: 标准四舍五入（half-up）
       - value: ceil
-        label: 向上进位
+        label: 向上取整
         color: warning
-        description: 一律向上进位（部分国家法定要求）
+        description: 一律向上取整（部分国家法定要求进位）
       - value: floor
-        label: 向下舍去
+        label: 向下取整
         color: info
-        description: 一律向下舍去
+        description: 一律向下取整
+    # [D 2026-10-27] 双轨: 内联 enum_values 作静态回退; value_help 指向平台字典
+    #   rounding_mode 作动态真源（先例 party_relation.yaml role）。
+    value_help:
+      source:
+        type: enum
+        enum_type_id: rounding_mode
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
     semantics:
       meaning: 税额舍入方式
       filterable: true
@@ -508,7 +529,7 @@ ui_view_config:
       - title: 税率取数
         columns:
           - fields: [rate_source, external_tax_system]
-          - fields: [rounding_mode]
+          - fields: [rounding]
           - fields: [description]
 
   detail:
@@ -527,7 +548,7 @@ ui_view_config:
           - exemption_reason
           - rate_source
           - external_tax_system
-          - rounding_mode
+          - rounding
           - description
 
   # 税率子表：父字段由 tax_rate.tax_code_id 的 ui.relation=tax_code 推断

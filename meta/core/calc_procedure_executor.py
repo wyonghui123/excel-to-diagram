@@ -23,9 +23,18 @@
 [FR-006 互斥校验]
   `rolling = true` 与 `base_step` **互斥**——滚动时不指定具体前序步骤
   （对标 Oracle Running Net Price 是单一累加器对象）。
+
+[D 2026-10-27] 取整方式的取值域校验改用平台级单一映射源
+  `meta/core/rounding.py`（ROUNDING_MODES = none/round/ceil/floor），
+  并让 `round` 算子在 `params.mode` 缺省时回落步骤所属费率类型的
+  `rate_type.rounding`（此前该字段是死字段，与文档声称不符）。
+  依据: docs/superpowers/specs/2026-10-27-sales-order-business-type-and-rounding-spec.md
+        FR-006 / NFR-001
 """
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+from meta.core.rounding import ROUNDING_MODES, is_valid_rounding_mode
 
 # 计算基来源（FR-006 轴① · 通用化轴①）
 BASE_PRICING_QUANTITY = "pricing_quantity"   # 定价数量（默认）
@@ -240,8 +249,26 @@ def _op_round(ctx: StepContext, params: Dict[str, Any]) -> float:
     [设计要点] 取整算子返回 **0.0** —— 它只**改 state['rounded']**（展示/入账值），
     **不参与累加**。否则会双重计入：净额已经含未取整值，再加一次取整差。
     对标 Oracle：取整发生在结果呈现层，不是累加器层。
+
+    [D 2026-10-27] 取整方式的来源优先级（三级）：
+        1. `params['mode']` —— 步骤显式配置（最高优先，与既有行为一致）
+        2. `params['rate_type_rounding']` —— 步骤所属费率类型的 `rate_type.rounding`
+           （此前是死字段：算子实际只读 params.mode，文档声称按 rate_type.rounding，
+            与实现不符 —— 现由编排层 pricing_service 透传并真正消费）
+        3. `'none'` —— 两者都缺省
+    非法值 → 抛 CalculationError（取整步骤**不静默**按 none 处理；
+    额度/税额等金额侧则回落默认 + WARNING，两侧口径不同见 Spec FR-006 / FR-009）。
     """
-    mode = params.get("mode", "none")
+    mode = params.get("mode")
+    if mode in (None, ""):
+        mode = params.get("rate_type_rounding")
+    if mode in (None, ""):
+        mode = "none"
+    mode = str(mode).strip().lower()
+    if not is_valid_rounding_mode(mode):
+        raise CalculationError(
+            f"取整方式非法：{mode!r}；合法值：{sorted(ROUNDING_MODES)}"
+        )
     value = float(params.get("value", ctx.running_net_amount) or 0.0)
     digits = int(params.get("digits", 0) or 0)
     if mode == "round":
@@ -440,6 +467,11 @@ def execute(
         # 挂在步骤上（不写进 params 配置，避免把运行时结果固化进配置）。
         if "lookup_amount" in st:
             params["lookup_amount"] = st["lookup_amount"]
+        # 【D 2026-10-27】步骤所属费率类型的舍入方式：由编排层（pricing_service）
+        # 从 rate_types.rounding 带出并挂在步骤顶层，透传给 `round` 算子作为
+        # `params.mode` 缺省时的回落值（显式 mode 优先）。
+        if "rate_type_rounding" in st:
+            params["rate_type_rounding"] = st["rate_type_rounding"]
 
         # element_type 必须在注册表中 —— 未知类型即报错，不静默跳过
         # （C5：步骤须带类型，未注册的类型说明配置漏了算子实现）

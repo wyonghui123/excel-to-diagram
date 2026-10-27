@@ -200,7 +200,13 @@ fields:
     required: false
     nullable: true
     max_length: 20
-    description: 计价结果的取整方式（none / round / ceil / floor），空 = 不取整
+    # [D 2026-10-27] 统一口径：精度（位数）唯一真源 = currency.decimal_places；
+    #   本字段只管**方向**，不承载精度。空 = 不取整。
+    # [D 2026-10-27] 【当前无消费方】计价期均价计算路径尚未落地（calc_result
+    #   .pricing_period_id 目前仅为引用列），故本字段**配了暂不生效**——按
+    #   「无消费者字段是负债」原则显式标注，避免静默失效。接入时按本字段执行。
+    #   触发条件：计价期均价取价落地（见 spec §10 TBD-1）。
+    description: 计价结果的取整方式（none / round / ceil / floor），空 = 不取整；精度取币种 decimal_places；当前无消费方（计价期均价计算未落地）
     enum_values:
       - value: none
         label: 不取整
@@ -214,6 +220,19 @@ fields:
       - value: floor
         label: 向下取整
         color: info
+    # [D 2026-10-27] 双轨: 内联 enum_values 作静态回退; value_help 指向平台字典
+    #   rounding_mode 作动态真源（先例 party_relation.yaml role）。
+    value_help:
+      source:
+        type: enum
+        enum_type_id: rounding_mode
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
     semantics:
       meaning: 计价结果取整方式
     ui:

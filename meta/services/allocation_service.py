@@ -18,13 +18,14 @@
     分摊规则会被当成校验静默执行, 爆炸半径大。
 """
 
-from decimal import (
-    Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP,
-)
+from decimal import Decimal, InvalidOperation
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 import uuid
+
+from meta.core.rounding import ROUNDING_MODES as _PLATFORM_ROUNDING_MODES
+from meta.core.rounding import resolve_rounding_mode
 
 
 _IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
@@ -51,7 +52,9 @@ BASIS_FROM_FIELD = frozenset({
 #: allocation_rule.rounding 的取整方式。`none` = 保持 plan() 原样（四舍五入到
 #: scale 位，最大余数法保证 Σ 守恒），其余三种是**先按方向取整总额**再分摊，
 #: 故 Σ 仍守恒（总额本身就是取整后的值），只是总额与未取整源值可能差 ≤1 单位。
-ROUNDING_MODES = frozenset({'none', 'round', 'ceil', 'floor'})
+#: [D 2026-10-27] 取值域改由平台级单一真源 meta/core/rounding.py 提供
+#:   （与平台字典 rounding_mode 一致，避免各处各写一份导致口径漂移）。
+ROUNDING_MODES = _PLATFORM_ROUNDING_MODES
 
 
 def _require_ident(name: str, label: str) -> str:
@@ -144,9 +147,8 @@ def plan(total: Any, weights: Sequence[Any], scale: int = 2,
 
     # 转整数最小单位。`none`/`round` 走四舍五入（原有行为）；
     # `ceil`/`floor` 按配置方向取整总额 —— 守恒仍成立，因为分摊基数就是取整后的 t。
-    mode = ROUND_HALF_UP if rounding in ('none', 'round') else (
-        ROUND_CEILING if rounding == 'ceil' else ROUND_FLOOR
-    )
+    # [D 2026-10-27] 映射改用平台级单一真源 meta/core/rounding.py（值域已在上方校验）。
+    mode = resolve_rounding_mode(rounding)
     t = int((total_dec * factor).to_integral_value(rounding=mode))
 
     bases: List[int] = []

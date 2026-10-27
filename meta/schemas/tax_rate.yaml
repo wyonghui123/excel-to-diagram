@@ -14,7 +14,9 @@
 #
 # 边界:
 #   1. 只存不算。税率取用（按基准日选段）与税额计算属消费方（订单 / 结算），本期不交付。
-#   2. 金额舍入按币种小数位由消费方执行；本表只按 tax_code.rounding_mode 给方式，不承载精度。
+#   2. 金额舍入按币种小数位由消费方执行；本表只按 tax_code.rounding 给方式，不承载精度。
+#      [D 2026-10-27] tax_code.rounding_mode 已改名 tax_code.rounding（与其余 4 处舍入字段同名），
+#      且消费方 sales_order_amount_service 已接上该方式（此前为死字段）。
 #   3. 无状态机：税率是事实数据，录错直接删除（审计留痕），不做 activate/deactivate。
 
 id: tax_rate

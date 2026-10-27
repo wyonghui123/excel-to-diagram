@@ -154,11 +154,16 @@ class PricingService:
         编排层据此判定「价格类沿用确定规则序列、折扣/附加费类按自身序列独立查找」，
         明细落库也能记下步骤的费率类型编码。
 
+        【D 2026-10-27】另带出 `rate_type.rounding`（`rt_rounding`）：供执行器的
+        `round` 算子在步骤 `params.mode` 缺省时回落使用 —— 该字段此前是死字段
+        （算子实际只读 `params.mode`，文档声称按 rate_type.rounding，与实现不符）。
+
         【布尔口径】见 `_to_bool_or_none` —— condition 必须归一成真正的
         bool/None，才能与执行器的 `is False` 判断对齐。
         """
         rows = self._query(
-            "SELECT s.*, rt.code AS rt_code, rt.rate_class AS rt_class"
+            "SELECT s.*, rt.code AS rt_code, rt.rate_class AS rt_class, "
+            "       rt.rounding AS rt_rounding "
             "  FROM calc_procedure_steps s"
             "  LEFT JOIN rate_types rt ON rt.id = s.rate_type_id"
             " WHERE s.calc_procedure_id = ? ORDER BY s.seq ASC",
@@ -171,6 +176,7 @@ class PricingService:
                 "rate_type_id": r.get("rate_type_id"),
                 "rate_type": r.get("rt_code"),
                 "rate_type_class": r.get("rt_class"),
+                "rate_type_rounding": r.get("rt_rounding"),
                 "condition": _to_bool_or_none(r.get("condition")),
                 "params": _loads(r.get("params"), {}),
                 "rolling": bool(r.get("rolling")),

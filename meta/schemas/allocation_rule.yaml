@@ -183,7 +183,9 @@ fields:
     required: false
     nullable: true
     max_length: 20
-    description: 分摊结果取整方式（none / round / ceil / floor），空 = 不取整
+    # [D 2026-10-27] 统一口径：精度（位数）唯一真源 = currency.decimal_places；
+    #   本字段只管**方向**，不承载精度。空 = 不取整。
+    description: 分摊结果取整方式（none / round / ceil / floor），空 = 不取整；精度取币种 decimal_places，本字段只管方向
     enum_values:
       - value: none
         label: 不取整
@@ -197,6 +199,19 @@ fields:
       - value: floor
         label: 向下取整
         color: info
+    # [D 2026-10-27] 双轨: 内联 enum_values 作静态回退（保列表列配色）;
+    #   value_help 指向平台字典 rounding_mode 作动态真源（先例 party_relation.yaml role）。
+    value_help:
+      source:
+        type: enum
+        enum_type_id: rounding_mode
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
     semantics:
       meaning: 分摊结果取整方式
     ui:

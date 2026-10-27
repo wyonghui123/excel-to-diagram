@@ -27,7 +27,7 @@ class _FakeDS:
 
     def __init__(self, line=None, order=None, rows=None, decimals=2,
                  category='standard', rate='13', no_rate=False,
-                 raise_on_rate=False):
+                 raise_on_rate=False, tax_rounding='round'):
         self.line = line
         self.order = order
         self.rows = rows or []
@@ -36,6 +36,8 @@ class _FakeDS:
         self.rate = rate
         self.no_rate = no_rate
         self.raise_on_rate = raise_on_rate
+        # [D 2026-10-27] 税码舍入方式（tax_code.rounding）——税额舍入按此执行
+        self.tax_rounding = tax_rounding
         self.executed = []
 
     def query(self, sql, params=None):
@@ -53,6 +55,9 @@ class _FakeDS:
             if self.raise_on_rate:
                 raise RuntimeError('db down')
             return [] if self.no_rate else [{'rate_percent': self.rate}]
+        # [D 2026-10-27] 税码舍入方式
+        if 'FROM tax_codes WHERE id' in sql:
+            return [{'rounding': self.tax_rounding}]
         raise AssertionError('unexpected sql: %s' % sql)
 
     def execute(self, sql, params=None):

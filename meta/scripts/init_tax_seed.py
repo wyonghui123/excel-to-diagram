@@ -92,7 +92,7 @@ def _upsert_tax_codes(ds, country_id):
             ds.execute(
                 "UPDATE tax_codes SET name = ?, country_id = ?, tax_type = ?, "
                 "direction = ?, tax_treatment = ?, rate_source = 'internal', "
-                "rounding_mode = 'round', exemption_reason = ?, description = ? "
+                "rounding = 'round', exemption_reason = ?, description = ? "
                 "WHERE code = ?",
                 [name, country_id, tax_type, direction, treatment,
                  exemption_reason, desc, code])
@@ -101,7 +101,7 @@ def _upsert_tax_codes(ds, country_id):
             ds.execute(
                 "INSERT INTO tax_codes "
                 "(code, name, country_id, tax_type, direction, tax_treatment, "
-                " rate_source, rounding_mode, exemption_reason, description, "
+                " rate_source, rounding, exemption_reason, description, "
                 " status, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'internal', 'round', ?, ?, 'active', datetime('now'))",
                 [code, name, country_id, tax_type, direction, treatment,
