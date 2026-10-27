@@ -35,6 +35,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATUS_FILE = PROJECT_ROOT / ".service_status.json"
 BACKEND_PORT = 3010
 
+# [P1 2026-10-27] wmic 已从本机 Windows 移除, 进程查询复用 service_manager 实现
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from service_manager import process_snapshot  # noqa: E402
+
 
 def _log(msg: str, level: str = "INFO"):
     icons = {"OK": "[OK]", "FAIL": "[X]", "WARN": "[!]", "INFO": "[i]"}
@@ -52,19 +56,27 @@ def _run(cmd, timeout=15):
 
 
 def get_status_pid() -> int:
-    """从 .service_status.json 读取 backend PID"""
-    if not STATUS_FILE.exists():
-        return 0
-    try:
-        for encoding in ("utf-8-sig", "utf-8"):
-            try:
-                with open(STATUS_FILE, "r", encoding=encoding) as f:
-                    data = json.load(f)
-                return data.get("backend", {}).get("pid", 0)
-            except UnicodeDecodeError:
-                continue
-    except Exception:
-        pass
+    """读取 backend PID
+
+    M8 起真相源是 per-port 文件 .service_status_<port>.json; 裸 .service_status.json
+    是历史 watchdog 遗留, 内容会过期 → 先读 per-port, 没有再回落裸文件。
+    """
+    per_port = PROJECT_ROOT / f".service_status_{BACKEND_PORT}.json"
+    for path in (per_port, STATUS_FILE):
+        if not path.exists():
+            continue
+        try:
+            for encoding in ("utf-8-sig", "utf-8"):
+                try:
+                    with open(path, "r", encoding=encoding) as f:
+                        data = json.load(f)
+                    pid = data.get("backend", {}).get("pid", 0)
+                    if pid:
+                        return pid
+                except UnicodeDecodeError:
+                    continue
+        except Exception:
+            continue
     return 0
 
 
@@ -87,54 +99,29 @@ def get_port_listening_pid(port: int = BACKEND_PORT) -> int:
 
 
 def get_all_backend_pids() -> list:
-    """找出所有 waitress_server.py 启动的 python 进程 PID"""
+    """找出所有 waitress_server.py 启动的 python 进程 PID
+
+    [P1 2026-10-27] wmic 已从本机 Windows 移除 → 改用 service_manager 的进程快照。
+    """
     if sys.platform != "win32":
         return []
-
-    result = _run(
-        ["wmic", "process", "where",
-         "name='python.exe' or name='pythonw.exe'",
-         "get", "ProcessId,CommandLine", "/format:csv"],
-        timeout=15
-    )
-    if not result or result.returncode != 0:
-        return []
-
     pids = []
-    for line in result.stdout.splitlines():
-        if "waitress_server.py" not in line:
+    for pid, info in process_snapshot().items():
+        if "waitress_server.py" not in (info.get("cmdline") or ""):
             continue
-        parts = line.strip().split(",")
-        if len(parts) < 3:
-            continue
-        try:
-            pid = int(parts[-1].strip())
-            if pid != os.getpid():
-                pids.append(pid)
-        except ValueError:
-            continue
+        if pid != os.getpid():
+            pids.append(pid)
     return pids
 
 
 def get_pid_command(pid: int) -> str:
-    """获取指定 PID 的命令行"""
+    """获取指定 PID 的命令行
+
+    [P1 2026-10-27] wmic 已从本机 Windows 移除 → 改用 service_manager 的进程快照。
+    """
     if sys.platform != "win32":
         return ""
-
-    result = _run(
-        ["wmic", "process", "where", f"ProcessId={pid}",
-         "get", "CommandLine", "/format:csv"],
-        timeout=10
-    )
-    if not result or result.returncode != 0:
-        return ""
-
-    for line in result.stdout.splitlines():
-        if "waitress_server.py" in line or "python" in line.lower():
-            parts = line.strip().split(",")
-            if len(parts) >= 2:
-                return parts[1]
-    return ""
+    return (process_snapshot().get(pid) or {}).get("cmdline", "")
 
 
 def kill_pid(pid: int) -> bool:
@@ -208,7 +195,7 @@ def cmd_verify(args):
 
     print()
     if result["consistent"]:
-        _log("后端进程所有者一致 ✓", "OK")
+        _log("后端进程所有者一致", "OK")
         return 0
 
     _log(f"发现 {len(result['issues'])} 个一致性问题:", "FAIL")

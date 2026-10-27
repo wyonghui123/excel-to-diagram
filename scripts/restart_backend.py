@@ -21,6 +21,10 @@ from pathlib import Path
 REPO_DIR = Path(r"d:\filework\excel-to-diagram")
 BACKEND_PORT = 3010
 
+# [P1 2026-10-27] wmic 已从本机 Windows 移除, 进程查询复用 service_manager 实现
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from service_manager import process_snapshot  # noqa: E402
+
 
 def is_port_listening(port):
     """Check if a port is listening"""
@@ -66,20 +70,10 @@ def find_existing_backend():
             continue
 
     # 对每个候选 PID，验证命令行是否包含 waitress_server.py
-    pids = []
-    for pid in all_pids:
-        try:
-            wmic = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}",
-                 "get", "CommandLine", "/VALUE"],
-                capture_output=True, text=True, timeout=5,
-                encoding="utf-8", errors="replace"
-            )
-            if "waitress_server" in wmic.stdout:
-                pids.append(pid)
-        except Exception:
-            continue
-    return pids
+    # [P1 2026-10-27] wmic 已从本机 Windows 移除 → 改用进程快照
+    snap = process_snapshot()
+    return [pid for pid in all_pids
+            if "waitress_server" in (snap.get(pid) or {}).get("cmdline", "")]
 
 
 def kill_existing_backend():

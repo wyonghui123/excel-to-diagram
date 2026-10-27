@@ -49,6 +49,10 @@ BACKEND_ERR = PROJECT_ROOT / "scripts/logs/backend.err"
 BACKEND_HEALTH_URL = "http://localhost:3010/health"  # 注意：不是 /api/v1/health（已弃用）
 FRONTEND_HEALTH_URL = "http://localhost:3004/"
 
+# [P1 2026-10-27] wmic 已从本机 Windows 移除, 进程查询复用 service_manager 实现
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from service_manager import process_snapshot  # noqa: E402
+
 # 关键代码文件（修改后必须重启才能生效）
 CRITICAL_FILES = [
     "meta/core/action_executor.py",
@@ -168,26 +172,13 @@ def check_process_ownership() -> dict:
     # 所有 waitress_server.py 启动的 python 进程
     all_pids = []
     if sys.platform == "win32":
+        # [P1 2026-10-27] wmic 已从本机 Windows 移除 → 改用进程快照
         try:
-            result = _run(
-                ["wmic", "process", "where",
-                 "name='python.exe' or name='pythonw.exe'",
-                 "get", "ProcessId,CommandLine", "/format:csv"],
-                timeout=15
-            )
-            if result:
-                for line in result.stdout.splitlines():
-                    if "waitress_server.py" not in line:
-                        continue
-                    parts = line.strip().split(",")
-                    if len(parts) < 3:
-                        continue
-                    try:
-                        pid = int(parts[-1].strip())
-                        if pid != os.getpid():
-                            all_pids.append(pid)
-                    except ValueError:
-                        continue
+            for pid, info in process_snapshot().items():
+                if "waitress_server.py" not in (info.get("cmdline") or ""):
+                    continue
+                if pid != os.getpid():
+                    all_pids.append(pid)
         except Exception:
             pass
 

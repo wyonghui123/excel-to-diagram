@@ -381,11 +381,23 @@ def _read_status() -> dict:
 
     M8 [V2026-07-22]: 真相源迁移到 per-port 文件 .service_status_<port>.json
     这里仍读取裸文件作为 fallback, 兼容历史 watchdog 写的旧数据。
+
+    [P1 2026-10-27] 修复多端口并存时按服务名覆盖撞车:
+    同一服务在 3006(共享) 与 3026(私有槽) 各有一份记录, 旧实现 merged.update
+    会让后扫到的覆盖前者 → doctor 误报 "frontend status 记录 port=3026 ≠ 真源"。
+    改为: 端口与当前 SERVICES 真源一致的记录优先, 其余仅在无真源记录时占位。
     """
     # 优先 per-port 汇总
     merged = {}
     for port_str, info in _scan_per_port_status().items():
-        merged.update(info)
+        for svc_name, svc_info in info.items():
+            if not isinstance(svc_info, dict):
+                continue
+            real_port = SERVICES.get(svc_name, {}).get("port")
+            if real_port is not None and svc_info.get("port") == real_port:
+                merged[svc_name] = svc_info              # 真源端口记录优先
+            else:
+                merged.setdefault(svc_name, svc_info)    # 私有槽记录占位
     if merged:
         return merged
     # fallback: 裸文件
@@ -562,46 +574,28 @@ def _kill_all_backend_processes(exclude: set | None = None) -> int:
 
     protected = exclude or set()
 
-    # 用 wmic 找所有带 waitress_server.py 的 python 进程
-    try:
-        result = subprocess.run(
-            ["wmic", "process", "where",
-             "name='python.exe' or name='pythonw.exe'",
-             "get", "ProcessId,CommandLine", "/format:csv"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            return 0
-
-        killed = 0
-        for line in result.stdout.splitlines():
-            if "waitress_server.py" not in line:
-                continue
-            # CSV 格式: Node,CommandLine,ProcessId
-            parts = line.strip().split(",")
-            if len(parts) < 3:
-                continue
-            pid_str = parts[-1].strip()
-            try:
-                pid = int(pid_str)
-                if pid == os.getpid():  # 避免杀自己
-                    continue
-                # [P0 2026-09-06] 多会话保护: pid 本身或其祖先是活跃会话登记的 pid → 跳过
-                if any(pid == p or _is_descendant_or_self(pid, p) for p in protected):
-                    _log(f"  SKIP waitress PID {pid}: protected by active session registry")
-                    continue
-                taskkill = subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True, timeout=10,
-                )
-                if taskkill.returncode == 0:
-                    _log(f"Killed stale backend PID {pid} (waitress_server.py)")
-                    killed += 1
-            except (ValueError, subprocess.SubprocessError):
-                pass
-        return killed
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return 0
+    # [P1 2026-10-27] wmic 已移除 → 改用进程快照按 cmdline 匹配 waitress_server.py
+    killed = 0
+    for pid, info in process_snapshot().items():
+        if "waitress_server.py" not in (info.get("cmdline") or ""):
+            continue
+        if pid == os.getpid():  # 避免杀自己
+            continue
+        # [P0 2026-09-06] 多会话保护: pid 本身或其祖先是活跃会话登记的 pid → 跳过
+        if any(pid == p or _is_descendant_or_self(pid, p) for p in protected):
+            _log(f"  SKIP waitress PID {pid}: protected by active session registry")
+            continue
+        try:
+            taskkill = subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=10,
+            )
+            if taskkill.returncode == 0:
+                _log(f"Killed stale backend PID {pid} (waitress_server.py)")
+                killed += 1
+        except subprocess.SubprocessError:
+            pass
+    return killed
 
 
 def _get_listener_pid(port: int) -> int | None:
@@ -630,21 +624,102 @@ KEEP_ORPHANS = False
 FORCE = False
 
 
-def _parent_pid(pid: int) -> int | None:
-    """查询进程父 PID (wmic), 失败返回 None"""
+# [P1 2026-10-27] wmic 已从本机 Windows 移除 → 进程查询改 psutil (优先) + PowerShell CIM (兜底)
+#   背景: _parent_pid 恒返回 None → 后代链判定恒 False → doctor 把受管 vite
+#   (npm.cmd → cmd → node 4 层后代) 误判成孤儿并杀掉。
+_PROC_CACHE_TTL = 3.0
+_proc_cache: dict | None = None
+_proc_cache_at: float = 0.0
+
+
+def _clear_proc_cache() -> None:
+    """作废进程快照缓存 (启停后调用, 避免拿到过期父子关系)"""
+    global _proc_cache, _proc_cache_at
+    _proc_cache, _proc_cache_at = None, 0.0
+
+
+def _snapshot_via_psutil() -> dict | None:
+    """psutil 全量进程快照; 未安装返回 None"""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        snap = {}
+        for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline"]):
+            info = proc.info
+            cmdline = info.get("cmdline") or []
+            snap[info["pid"]] = {
+                "ppid": info.get("ppid"),
+                "name": info.get("name") or "",
+                "cmdline": " ".join(cmdline) if isinstance(cmdline, (list, tuple)) else str(cmdline),
+            }
+        return snap
+    except Exception:
+        return None
+
+
+def _snapshot_via_cim() -> dict:
+    """PowerShell CIM 全量进程快照 (Get-CimInstance 已取代 wmic)"""
+    ps = (
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+        "Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,ParentProcessId,Name,CommandLine | "
+        "ConvertTo-Json -Compress"
+    )
     try:
         r = subprocess.run(
-            ["wmic", "process", "where", f"ProcessId={pid}",
-             "get", "ParentProcessId", "/format:csv"],
-            capture_output=True, text=True, timeout=10,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            if line and not line.startswith("Node,"):
-                return int(line.rsplit(",", 1)[-1])
-    except (subprocess.SubprocessError, ValueError, OSError):
-        pass
-    return None
+        if r.returncode != 0 or not r.stdout.strip():
+            return {}
+        raw = json.loads(r.stdout)
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        return {}
+    if isinstance(raw, dict):
+        raw = [raw]
+    snap = {}
+    for item in raw:
+        try:
+            pid = int(item.get("ProcessId"))
+        except (TypeError, ValueError):
+            continue
+        snap[pid] = {
+            "ppid": item.get("ParentProcessId"),
+            "name": item.get("Name") or "",
+            "cmdline": item.get("CommandLine") or "",
+        }
+    return snap
+
+
+def process_snapshot() -> dict:
+    """{pid: {ppid, name, cmdline}} — 3 秒 TTL 缓存, 一次查询服务全轮判定
+
+    公开给 scripts/ 下其他进程审计脚本复用 (verify_backend_owner / debug_backend /
+    restart_backend), 避免各自再写一份 wmic/CIM 查询。
+    """
+    global _proc_cache, _proc_cache_at
+    now = time.time()
+    if _proc_cache is not None and now - _proc_cache_at < _PROC_CACHE_TTL:
+        return _proc_cache
+    snap = _snapshot_via_psutil()
+    if snap is None:
+        snap = _snapshot_via_cim()
+    _proc_cache, _proc_cache_at = snap, now
+    return snap
+
+
+def _parent_pid(pid: int) -> int | None:
+    """查询进程父 PID (psutil / PowerShell CIM), 失败返回 None"""
+    info = process_snapshot().get(pid)
+    if not info:
+        return None
+    ppid = info.get("ppid")
+    try:
+        return int(ppid) if ppid else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_descendant_or_self(pid: int, ancestor: int, max_depth: int = 8) -> bool:
@@ -772,19 +847,8 @@ def _db_lock_probe() -> dict:
     pid = int(first)
     if _is_pid_alive(pid):
         # 可读但 PID 活着: 锁未生效或已被释放, 保守按活跃持有者报告
-        cmdline = ""
-        try:
-            r = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}",
-                 "get", "CommandLine", "/format:csv"],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in r.stdout.splitlines():
-                if line.strip() and not line.startswith(("Node",)):
-                    cmdline = line.strip()[:120]
-                    break
-        except subprocess.SubprocessError:
-            pass
+        # [P1 2026-10-27] wmic 已移除 → 从进程快照取 cmdline
+        cmdline = ((process_snapshot().get(pid) or {}).get("cmdline") or "")[:120]
         return {"state": "pid_alive", "pid": pid, "cmdline": cmdline}
     return {"state": "stale", "pid": pid}  # 可读 + 持有者已死 = 可安全删除
 
@@ -1241,6 +1305,8 @@ def start_command(name: str = None):
                 _log(f"  V4.0: Check {PROJECT_ROOT / 'scripts' / 'logs' / f'{config['service_name']}.err'}")
 
         _write_status(status)
+        # [P1 2026-10-27] 启动后作废进程快照, 让后续孤儿判定看到新的父子关系
+        _clear_proc_cache()
         # [P0 2026-09-06] 本会话端口归属登记 (孤儿对账/stop 保护的数据基础)
         if registered:
             _registry_register(registered)
