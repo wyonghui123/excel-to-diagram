@@ -16,6 +16,7 @@
 """
 
 import os
+from contextlib import contextmanager
 from decimal import Decimal
 
 # 本文件的 INSERT / UPDATE / DELETE 仅出现在内存 fake data_source 里，
@@ -71,6 +72,30 @@ class _FakeDS:
         self._calc_id = 0
         self._alloc_id = 0
 
+    # ---------------- transaction ----------------
+
+    in_transaction = False
+
+    @contextmanager
+    def transaction(self):
+        """内存 fake 无真实事务语义：只提供可用的上下文协议。"""
+        self.begin_transaction()
+        try:
+            yield
+            self.commit()
+        except Exception:
+            self.rollback()
+            raise
+
+    def begin_transaction(self):
+        self.in_transaction = True
+
+    def commit(self):
+        self.in_transaction = False
+
+    def rollback(self):
+        self.in_transaction = False
+
     # ---------------- query ----------------
 
     def query(self, sql, params=None):
@@ -97,6 +122,9 @@ class _FakeDS:
             return [{'result_semantic': 'price'}]
         if 'FROM allocation_rules WHERE code' in sql:
             return [dict(RULE)]
+        if 'SELECT id FROM calc_results WHERE code' in sql:
+            return [{'id': r['id']} for r in self.calc_results
+                    if r['code'] == p[0]][:1]
         if 'SELECT id, sequence FROM calc_results' in sql:
             rows = [{'id': r['id'], 'sequence': r['sequence']}
                     for r in self.calc_results
@@ -128,6 +156,22 @@ class _FakeDS:
                 'origin': p[19],
             })
             return _WriteResult(lastrowid=self._calc_id, rowcount=1)
+
+        if head.startswith('UPDATE CALC_RESULTS'):
+            target = next((r for r in self.calc_results if r['id'] == p[22]), None)
+            if target is not None:
+                target.update({
+                    'document_type': p[0],
+                    'document_id': p[1],
+                    'level': p[3],
+                    'process_code': p[4],
+                    'amount': p[13],
+                    'net_amount': p[14],
+                    'sign': p[16],
+                    'sequence': p[17],
+                    'origin': p[18],
+                })
+            return _WriteResult(rowcount=1 if target else 0)
 
         if head.startswith('DELETE FROM CALC_RESULTS'):
             before = len(self.calc_results)

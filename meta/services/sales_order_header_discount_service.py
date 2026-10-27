@@ -164,9 +164,9 @@ class SalesOrderHeaderDiscountService:
                               net_before_round, net_final) -> List[Any]:
         """按 `PRICE_STD_HDR_DISC` 4 步各落一行头级 `calc_results`。
 
-        【code 确定性 + 先删后插】code 取 `CR_HD_{order_id}_{seq}`，重算时
-        先按 (document_type, document_id, level, process_code) 删除旧头级结果
-        再插入——与 spec §4.6 P1「删除重建」一致；确定性 code 保证可反查。
+        【code 确定性 + 就地 upsert】code 取 `CR_HD_{order_id}_{seq}`，
+        已存在则 UPDATE、不存在则 INSERT——与 spec §4.3「可 upsert/替换而非
+        堆叠」一致；主键得以稳定，留痕 `parent_id` 不再随重算漂移。
         """
         steps = [
             {'seq': _STEP_BASE, 'element_type': 'formula',
@@ -191,31 +191,49 @@ class SalesOrderHeaderDiscountService:
         ]
 
         semantic = self._procedure_semantic()
-        self._delete_header_results(order_id)
 
         now = datetime.now().isoformat(timespec='seconds')
         result_ids = []
         for step in steps:
-            cur = self.ds.execute(
-                """INSERT INTO calc_results
-                   (code, document_type, document_id, document_line_id, level,
-                    process_code, result_semantic, rate_type_code, element_type,
-                    base_level, base_source, rolling, rate, base, amount,
-                    net_amount, currency, sign, sequence, origin, status,
-                    description, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                [
-                    f'CR_HD_{order_id}_{step["seq"]}', DOCUMENT_TYPE, order_id,
-                    None, 'header', PROCESS_CODE, semantic,
-                    step['rate_type_code'], step['element_type'],
-                    'header', 'value', 1, _float_or_none(step['rate']),
-                    float(step['base']), float(step['amount']),
-                    float(step['net_amount']), currency, step['sign'],
-                    step['seq'], 'planned', 'active',
-                    step['description'], now, now,
-                ],
-            )
-            result_ids.append(cur.lastrowid)
+            code = f'CR_HD_{order_id}_{step["seq"]}'
+            values = [
+                DOCUMENT_TYPE, order_id, None, 'header',
+                PROCESS_CODE, semantic,
+                step['rate_type_code'], step['element_type'],
+                'header', 'value', 1, _float_or_none(step['rate']),
+                float(step['base']), float(step['amount']),
+                float(step['net_amount']), currency, step['sign'],
+                step['seq'], 'planned', 'active',
+                step['description'],
+            ]
+            existing = self.ds.query(
+                'SELECT id FROM calc_results WHERE code = ?', [code])
+            if existing:
+                # 就地更新：保留主键 → allocation_results.parent_id 不随重算漂移
+                self.ds.execute(
+                    """UPDATE calc_results SET
+                       document_type=?, document_id=?, document_line_id=?, level=?,
+                       process_code=?, result_semantic=?, rate_type_code=?,
+                       element_type=?, base_level=?, base_source=?, rolling=?,
+                       rate=?, base=?, amount=?, net_amount=?, currency=?,
+                       sign=?, sequence=?, origin=?, status=?, description=?,
+                       updated_at=?
+                       WHERE id=?""",
+                    values + [now, existing[0].get('id')],
+                )
+                result_ids.append(existing[0].get('id'))
+            else:
+                cur = self.ds.execute(
+                    """INSERT INTO calc_results
+                       (code, document_type, document_id, document_line_id, level,
+                        process_code, result_semantic, rate_type_code, element_type,
+                        base_level, base_source, rolling, rate, base, amount,
+                        net_amount, currency, sign, sequence, origin, status,
+                        description, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    [code] + values + [now, now],
+                )
+                result_ids.append(cur.lastrowid)
         return result_ids
 
     def _procedure_semantic(self) -> str:
@@ -228,17 +246,20 @@ class SalesOrderHeaderDiscountService:
             return 'price'
         return (rows[0].get('result_semantic') if rows else None) or 'price'
 
-    def _delete_header_results(self, order_id: Any) -> None:
-        self.ds.execute(
-            "DELETE FROM calc_results"
-            " WHERE document_type = ? AND document_id = ?"
-            "   AND level = 'header' AND process_code = ?",
-            [DOCUMENT_TYPE, order_id, PROCESS_CODE])
-
     # ------------------------------------------------------------------
     # apply：分摊写回行 + 抬头快照 + 分摊留痕
     # ------------------------------------------------------------------
     def apply(self, order_id: Any) -> Dict[str, Any]:
+        """事务边界：compute（落 4 步结果）+ apply（行/抬头快照 + 留痕）原子提交。
+
+        spec §4.6 要求「删除重建在同一事务内」——数据源为自动提交模式，
+        故整段包事务；中途异常一律回滚，不留「留痕删了没重建」的半状态。
+        嵌套调用时 `transaction()` 自动并入外层事务（datasource 的嵌套守卫）。
+        """
+        with self.ds.transaction():
+            return self._apply(order_id)
+
+    def _apply(self, order_id: Any) -> Dict[str, Any]:
         """把抬头折扣/附加费按行基额分摊到行，并写抬头快照与留痕。
 
         【零额短路】D == S == 0 时清零行/抬头调整列并重算，返回 applied=0：
