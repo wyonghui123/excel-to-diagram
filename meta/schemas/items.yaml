@@ -529,6 +529,40 @@ fields:
       clearable: true
       placeholder: "未指定（使用基本单位）"
 
+  - id: min_order_qty
+    name: 最小订单量
+    type: float
+    db_column: min_order_qty
+    nullable: true
+    description: 订单行数量的下限，按销售单位计（销售单位为空时按基本单位）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 物料最小订单量
+    ui:
+      widget: input
+      placeholder: "未指定（不限制）"
+      unit_hint: 数量
+
+  - id: order_multiple
+    name: 订单倍数
+    type: float
+    db_column: order_multiple
+    nullable: true
+    description: 订单行数量须为该值的整数倍，按销售单位计（销售单位为空时按基本单位）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 物料订单倍数
+    ui:
+      widget: input
+      placeholder: "未指定（不限制）"
+      unit_hint: 数量
+
   - id: net_weight
     name: 净重
     type: float
@@ -873,6 +907,9 @@ ui_view_config:
           - fields: [base_uom, sales_uom]
           - fields: [barcode]
           - fields: [net_weight, gross_weight]
+      - title: 销售参数
+        columns:
+          - fields: [min_order_qty, order_multiple]
       - title: 税务
         columns:
           - fields: [tax_classification_id]
@@ -900,6 +937,8 @@ ui_view_config:
           - item_group_id
           - base_uom
           - sales_uom
+          - min_order_qty
+          - order_multiple
           - barcode
           - net_weight
           - gross_weight

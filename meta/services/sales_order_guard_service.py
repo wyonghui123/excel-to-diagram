@@ -60,6 +60,16 @@
 产品组（B）:
   R-DIV-1  division_code 须存在于 division 且为启用态（创建或值变更时校验）
 
+最小订单量 / 订单倍数（E9 / R-QTY，依据 docs/superpowers/specs/
+2026-10-26-sales-order-master-data-gap-spec.md §11）:
+  R-QTY-1  限制值以 item.sales_uom 为锚（空则 base_uom），用
+           UomQuantityService.convert(item_id, limit, 锚单位, 行单位) 换算到行单位
+  R-QTY-2  小于最小订单量拒绝                       —— qty_below_min_order（字段 qty）
+  R-QTY-3  非订单倍数整数倍拒绝                     —— qty_not_order_multiple（字段 qty）
+  R-QTY-4  创建必校验；更新仅在 qty / item_id / uom_id 任一变化时校验
+  R-QTY-5  退货单 / 退货行 / 服务物料 / 两限制都为空 → 豁免
+  R-QTY-6  物料读不到、锚单位为空、convert 返回 None → fail-open
+
 抬头折扣 / 附加费（R-DSC-H，依据 docs/superpowers/specs/
 2026-10-26-sales-order-billing-and-header-discount-spec.md §4.8）:
   R-DSC-H1  折扣率 / 附加费率须在 0..100             —— HEADER_DISCOUNT_RANGE
@@ -147,6 +157,8 @@ RETURN_CATEGORY = 'return'
 RETURN_REFERENCE_FIELD = 'reference_line_id'
 #: R-RET-8：累计退货量比较容差（数量允许小数）
 _QTY_TOLERANCE = 1e-9
+#: R-QTY-3：订单倍数整数倍判定容差（qty / 折算倍数 的小数偏差）
+_QTY_MULTIPLE_TOLERANCE = Decimal('1e-6')
 #: 从原行复制的空值字段；不复制 qty / unit_price / plant_location_id
 _RETURN_REF_COPY_FIELDS = ('item_id', 'customer_item_code', 'description',
                            'uom_id', 'tax_code_id')
@@ -602,6 +614,8 @@ class SalesOrderGuardService:
                 '订单行必须填写计量单位', field_name='uom_id', rule='uom_required')
         # V-SU-3 / R-SU-5：行单位须可换算到物料基本单位（仅创建或单位/物料变化时）
         self._validate_line_uom(data, old_data, is_create)
+        # E9 / R-QTY-1~6：最小订单量 / 订单倍数（只校验不舍入）
+        self._validate_item_qty_rules(data, old_data, is_create, line_type, order_type)
         if _is_blank(data.get('item_id')) and _is_blank(data.get('description')):
             raise SalesOrderGuardError(
                 '未选物料的行必须填写行描述', field_name='description',
@@ -680,6 +694,59 @@ class SalesOrderGuardService:
             raise SalesOrderGuardError(
                 '订单行计量单位与物料基本单位不可换算',
                 field_name='uom_id', rule='item_uom_incompatible')
+
+    # ---------------- 最小订单量 / 订单倍数（E9 / R-QTY） ----------------
+
+    def _validate_item_qty_rules(self, data: Dict[str, Any],
+                                 old_data: Optional[Dict[str, Any]],
+                                 is_create: bool, line_type: Optional[Dict[str, Any]],
+                                 order_type: Optional[Dict[str, Any]]) -> None:
+        """R-QTY-1~6：物料最小订单量 / 订单倍数（只校验不舍入）。"""
+        if (order_type or {}).get('document_category') == RETURN_CATEGORY \
+                or (line_type or {}).get('line_category') == RETURN_CATEGORY:
+            return
+        item_id = data.get('item_id')
+        uom_id = data.get('uom_id')
+        if _is_blank(item_id) or _is_blank(uom_id):
+            return
+        qty = _to_decimal(data.get('qty'))
+        if qty is None:
+            return
+        if not is_create:
+            old = old_data or {}
+            if old:
+                qty_changed = 'qty' in data and _to_decimal(data.get('qty')) != _to_decimal(old.get('qty'))
+                item_changed = str(item_id) != str(old.get('item_id'))
+                uom_changed = str(uom_id) != str(old.get('uom_id'))
+                if not (qty_changed or item_changed or uom_changed):
+                    return
+        item = self._load_item(item_id)
+        if not item or item.get('item_type') == SERVICE_ITEM:
+            return
+        min_qty = _to_decimal(item.get('min_order_qty'))
+        multiple = _to_decimal(item.get('order_multiple'))
+        if min_qty is None and multiple is None:
+            return
+        anchor = item.get('sales_uom') if not _is_blank(item.get('sales_uom')) else item.get('base_uom')
+        if _is_blank(anchor):
+            return
+        service = UomQuantityService(self.ds)
+        if min_qty is not None and min_qty > 0:
+            converted_min = service.convert(item_id, min_qty, anchor, uom_id)
+            if converted_min is not None and qty < converted_min - Decimal('1e-9'):
+                raise SalesOrderGuardError(
+                    f'订单行数量 {qty} 低于物料最小订单量 {min_qty}'
+                    f'（按锚单位 {anchor} 折算为 {converted_min} {uom_id}）',
+                    field_name='qty', rule='qty_below_min_order')
+        if multiple is not None and multiple > 0:
+            converted_multiple = service.convert(item_id, multiple, anchor, uom_id)
+            if converted_multiple is not None and converted_multiple > 0:
+                ratio = qty / converted_multiple
+                if abs(ratio - ratio.to_integral_value(rounding=ROUND_HALF_UP)) > _QTY_MULTIPLE_TOLERANCE:
+                    raise SalesOrderGuardError(
+                        f'订单行数量 {qty} 不是物料订单倍数 {multiple} 的整数倍'
+                        f'（按锚单位 {anchor} 折算为 {converted_multiple} {uom_id}）',
+                        field_name='qty', rule='qty_not_order_multiple')
 
     # ---------------- 服务行（W2-A） ----------------
 
@@ -988,6 +1055,7 @@ class SalesOrderGuardService:
         try:
             rows = self.ds.query(
                 'SELECT id, item_type, status, base_uom, sales_uom, '
+                '       min_order_qty, order_multiple, '
                 '       billing_method_default, '
                 '       required_resource_type, standard_duration, duration_type '
                 'FROM items WHERE id = ?', [item_id])
