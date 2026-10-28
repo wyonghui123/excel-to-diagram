@@ -140,6 +140,21 @@ def _get_data_source():
     return resolve_data_source(_data_source)
 
 
+def _validate_value_helps(object_type: str, data: dict) -> list:
+    """写入口 value_help 校验（manage_api / bo_api / Excel 批量共用同一判据）。
+
+    判据解释在 `meta.core.value_help_accessor`，这里只负责定位对象与数据源。
+    视图面写入会转发到锚对象执行，因此按锚对象的字段声明校验。
+    """
+    from meta.core.value_help_accessor import validate_value_helps
+
+    meta_obj = registry.get(object_type)
+    if meta_obj is None:
+        return []
+    anchor = resolve_write_anchor(meta_obj) or meta_obj
+    return validate_value_helps(_get_data_source(), anchor, data)
+
+
 # ── [R0-2 2026-06-11] 422 ComputationNotSupportedError 统一拦截 ──
 from meta.core.computed_field_query import ComputationNotSupportedError
 
@@ -525,6 +540,15 @@ def create_bo(object_type):
     try:
         data = _apply_sales_order_defaults(object_type, data)
         data = _apply_sales_order_salesperson(object_type, data)
+        # value_help 校验放在取号之前：校验失败不消耗订单号
+        errors = _validate_value_helps(object_type, data)
+        if errors:
+            return jsonify({
+                'success': False,
+                'error_code': 'VALUE_HELP_VALIDATION_FAILED',
+                'message': '值校验失败: ' + '; '.join(errors),
+                'errors': errors,
+            }), 400
         data = _allocate_sales_order_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
@@ -1174,6 +1198,14 @@ def update_bo(object_type, obj_id):
     data = _reapply_sales_order_defaults(object_type, obj_id, data)
     data = _reapply_sales_order_addresses(object_type, obj_id, data)
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
+    errors = _validate_value_helps(object_type, data)
+    if errors:
+        return jsonify({
+            'success': False,
+            'error_code': 'VALUE_HELP_VALIDATION_FAILED',
+            'message': '值校验失败: ' + '; '.join(errors),
+            'errors': errors,
+        }), 400
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -1188,6 +1220,14 @@ def update_bo_by_string_id(object_type, obj_id):
     data = _reapply_sales_order_defaults(object_type, obj_id, data)
     data = _reapply_sales_order_addresses(object_type, obj_id, data)
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
+    errors = _validate_value_helps(object_type, data)
+    if errors:
+        return jsonify({
+            'success': False,
+            'error_code': 'VALUE_HELP_VALIDATION_FAILED',
+            'message': '值校验失败: ' + '; '.join(errors),
+            'errors': errors,
+        }), 400
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
