@@ -176,68 +176,15 @@ class ManageService:
             )
 
     def _validate_value_helps(self, meta_obj: MetaObject, data: Dict[str, Any]) -> List[str]:
-        """验证启用了 value_help 写入层校验的字段值是否有效
+        """验证启用了 value_help 写入层校验的字段值是否有效。
 
-        判据唯一来源 = 字段的 `value_help`：`source.value_field`（按哪个键查）
-        + `source.value_filter`（必须满足的条件）。读写两侧共用
-        `parse_value_filter_conditions`，保证「下拉里能选到的 = 保存时能接受的」。
-
-        [FR-007] 使用 value_help_accessor.get_value_help 统一获取 value_help，
-        兼容 field.value_help 和 field.ui.value_help 两种定义方式；
-        校验开关走 get_validation_flag（读 behavior.validation）。
-
-        [覆盖边界] 本校验只覆盖 manage_api 的 create / update 路径。
-        bo_api 写路径与 Excel 批量导入若绕过 manage_service 则不生效
-        （与 item_structure_guard_interceptor 记录的既有边界同一性质）。
+        实现已抽到 `meta.core.value_help_accessor.validate_value_helps`，
+        由 manage_api / bo_api / Excel 批量导入三条写路径共用同一判据。
+        本方法保留为薄封装（既有调用方与测试契约不变）。
         """
-        from meta.core.value_help_accessor import (
-            get_value_help as _get_vh,
-            get_validation_flag as _get_validation_flag,
-            parse_value_filter_conditions as _parse_conditions,
-        )
-        from meta.core.query_builder import QueryBuilder
+        from meta.core.value_help_accessor import validate_value_helps
 
-        errors = []
-        for field in meta_obj.fields:
-            vh = _get_vh(field)
-            if not vh:
-                continue
-            if not _get_validation_flag(vh):
-                continue
-            field_value = data.get(field.id)
-            if field_value is None or field_value == "":
-                continue
-            # 获取关联对象信息：优先 field.ui.relation，其次从 vh.source 解析
-            relation_meta = None
-            if field.ui and field.ui.relation:
-                relation_meta = registry.get(field.ui.relation)
-            elif vh.source and getattr(vh.source, 'type', None) == 'bo':
-                target_bo = getattr(vh.source, 'target_bo', None)
-                if target_bo:
-                    relation_meta = registry.get(target_bo)
-            if not relation_meta:
-                continue
-            source = getattr(vh, 'source', None)
-            value_field = getattr(source, 'value_field', None) or "id"
-            conditions = [(value_field, 'eq', field_value)]
-            conditions.extend(_parse_conditions(getattr(source, 'value_filter', None) or {}))
-            try:
-                builder = QueryBuilder(self.data_source, relation_meta)
-                for cond_field, op, cond_value in conditions:
-                    if op == 'in':
-                        builder.where_in(cond_field, cond_value)
-                    elif op == 'not_in':
-                        builder.where_not_in(cond_field, cond_value)
-                    elif op == 'is_null':
-                        builder.where_null(cond_field)
-                    else:
-                        builder.where(cond_field, op, cond_value)
-                if builder.count_all() == 0:
-                    msg = vh.validation_message or f"字段 {field.name} 的值 '{field_value}' 不在有效选项中"
-                    errors.append(msg)
-            except Exception as e:
-                errors.append(f"验证字段 {field.name} 时出错: {str(e)}")
-        return errors
+        return validate_value_helps(self.data_source, meta_obj, data)
 
     def _resolve_parent_context(self, meta_obj: MetaObject, data: Dict[str, Any]) -> Dict[str, Any]:
         parent_data = {}
