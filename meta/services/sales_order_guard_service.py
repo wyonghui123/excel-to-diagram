@@ -110,6 +110,13 @@
   R-SCH-13 同一订单行 billing 比例合计 ≤ 100
   R-SCH-14 billing 收款日（promised_date）必填
   R-SCH-15 非草稿订单冻结 billing_percent
+  R-SCH-16 行类型 delivery_relevant=false 的订单行禁止建 delivery 计划行
+           —— SCHEDULE_NOT_DELIVERY_RELEVANT
+
+履约状态（§4.6 Close 前置，依据 docs/superpowers/specs/
+2026-10-28-sales-order-fulfillment-status-writeback-spec.md）:
+  ORDER_NOT_FULFILLED  订单关闭前 fulfillment_status 须为 fulfilled
+                       （读值失败 fail-open）
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
 本守卫对这两条路径不生效（与其他守卫同一限制）。展开服务同样绕过拦截器链，
@@ -129,6 +136,12 @@ ORDER_OBJECT = 'sales_order'
 LINE_OBJECT = 'sales_order_line'
 SALES_SCOPE = 'sales_order'
 DRAFT = 'draft'
+#: 订单关闭态（§4.6 Close 前置判定用）
+CLOSED = 'closed'
+#: 履约完成态（见 docs/superpowers/specs/2026-10-28-sales-order-fulfillment-status-writeback-spec.md §4.3）
+FULFILLMENT_FULFILLED = 'fulfilled'
+#: 允许关闭的履约状态（FR-006：无待履约事实即可关闭；not_applicable 为纯服务 / 文本单）
+CLOSE_ALLOWED_FULFILLMENT = (FULFILLMENT_FULFILLED, 'voided', 'not_applicable')
 
 # W0-R8：非 draft 后不可变的抬头字段
 _FROZEN_AFTER_DRAFT = ('order_no', 'order_type_id', 'currency_id')
@@ -166,6 +179,12 @@ _RETURN_REF_COPY_FIELDS = ('item_id', 'customer_item_code', 'description',
 _ADDRESS_SNAPSHOT_PAIRS = (('ship_to_address_text', 'ship_to_address_id'),
                            ('bill_to_address_text', 'bill_to_address_id'))
 _ADDRESS_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _ADDRESS_SNAPSHOT_PAIRS)
+# W1-C：联系人快照（文本列 ← 引用列）；电话快照走 person_profiles.mobile
+_CONTACT_SNAPSHOT_PAIRS = (('contact_name_text', 'contact_party_id'),
+                           ('contact_phone_text', 'contact_party_id'))
+_CONTACT_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _CONTACT_SNAPSHOT_PAIRS)
+# W1-C：改客户即清空时涉及的列（引用 + 两张快照）
+_CONTACT_CLEAR_FIELDS = ('contact_party_id',) + _CONTACT_SNAPSHOT_FIELDS
 CONFIRMED = 'confirmed'
 
 # ---------------- 抬头折扣 / 附加费（R-DSC-H） ----------------
@@ -277,6 +296,17 @@ class SalesOrderGuardService:
 
         old_status = old.get('status')
 
+        # §4.6 Close 前置：履约未完成的订单不得关闭（FR-013 的消费方）
+        # 只拦「本次由非 closed 转为 closed」；已是 closed 的更新不重复判定。
+        if not is_create and str(data.get('status') or '') == CLOSED \
+                and str(old_status or '') != CLOSED:
+            current = self._load_fulfillment_status(data.get('id'))
+            if current is not None and current not in CLOSE_ALLOWED_FULFILLMENT:
+                raise SalesOrderGuardError(
+                    f'订单尚未履约完成（当前 {current}），不能关闭',
+                    field_name='fulfillment_status',
+                    rule='ORDER_NOT_FULFILLED')
+
         # R8：非草稿后禁止改 order_no / order_type_id / currency_id
         if old_status and old_status != DRAFT:
             for field in _FROZEN_AFTER_DRAFT:
@@ -341,6 +371,26 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     f'订单已离开草稿态（{old_status}），地址快照只读',
                     field_name=field, rule='address_snapshot_locked')
+
+        # W1-C R-CNT-1 / R-CNT-2：联系人快照离开草稿后冻结，仅确认动作允许系统回填
+        if old_status and old_status != DRAFT:
+            confirming = (str(data.get('status') or '') == CONFIRMED
+                          and str(old_status) != CONFIRMED)
+            for field in _CONTACT_SNAPSHOT_FIELDS:
+                if field not in data:
+                    continue
+                new_value, old_value = data.get(field), old.get(field)
+                if str(new_value) == str(old_value):
+                    continue
+                if confirming and not _is_blank(new_value):
+                    continue
+                if confirming:
+                    raise SalesOrderGuardError(
+                        '已确认的联系人快照不得清空',
+                        field_name=field, rule='contact_snapshot_locked')
+                raise SalesOrderGuardError(
+                    f'订单已离开草稿态（{old_status}），联系人快照只读',
+                    field_name=field, rule='contact_snapshot_locked')
 
         # R4：单据类型必须 header 层且属销售订单作用域
         type_id = data.get('order_type_id')
@@ -572,6 +622,55 @@ class SalesOrderGuardService:
             if not _is_blank(text):
                 snapshot[text_field] = text
         return snapshot
+
+    def snapshot_contact_text(self, data: Dict[str, Any],
+                              old_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """W1-C R-CNT-3：订单转为 confirmed 时回填联系人姓名 / 电话快照。
+
+        只在该次请求内返回待写入值，由拦截器并入写入参数（同一次事务）。
+        未指定联系人 / 无 person_profile / 手机号为空 / 查询失败 → 跳过对应列，
+        不阻断确认（fail-open）。
+        """
+        old = old_data or {}
+        if str(data.get('status') or '') != CONFIRMED:
+            return {}
+        if str(old.get('status') or '') == CONFIRMED:
+            return {}
+        contact_id = data.get('contact_party_id')
+        if _is_blank(contact_id):
+            return {}
+        contact = self._load_contact(contact_id)
+        if not contact:
+            return {}
+        snapshot = {}
+        name = contact.get('name')
+        if not _is_blank(name):
+            snapshot['contact_name_text'] = name
+        mobile = contact.get('mobile')
+        if not _is_blank(mobile):
+            snapshot['contact_phone_text'] = mobile
+        return snapshot
+
+    def contact_clear_on_customer_change(self, data: Dict[str, Any],
+                                         old_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """W1-C R-CNT-4：草稿期改客户 ⇒ 清空联系人引用与两张快照列。
+
+        联系人属于旧客户；草稿期换客户后必须重选，否则会把旧客户的人带到新单上。
+        已离开草稿的订单**不清空**（冻结优先，NFR-004）：已成立订单的联系人是
+        该单的既有事实，不随客户变更而改写。
+
+        返回待清空的列（值统一 None），由拦截器并入写入参数（同一次事务）。
+        """
+        old = old_data or {}
+        if not old:
+            return {}
+        if str(old.get('status') or '') != DRAFT:
+            return {}
+        if 'customer_account_id' not in data:
+            return {}
+        if str(old.get('customer_account_id')) == str(data.get('customer_account_id')):
+            return {}
+        return {field: None for field in _CONTACT_CLEAR_FIELDS}
 
     # ---------------- 行 ----------------
     def validate_line_write(self, data: Dict[str, Any],
@@ -927,6 +1026,25 @@ class SalesOrderGuardService:
             return None
         return rows[0] if rows else None
 
+    def _load_fulfillment_status(self, order_id: Any) -> Optional[str]:
+        """读订单当前的派生履约状态（§4.6 Close 前置）。
+
+        读不到 / 查询失败返回 None，由调用方按 fail-open 放行。
+        """
+        if _is_blank(order_id):
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT fulfillment_status FROM sales_orders WHERE id = ?',
+                [order_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单 {order_id} 履约状态失败: {e}')
+            return None
+        if not rows:
+            return None
+        return rows[0].get('fulfillment_status')
+
     def _header_discount_lines(self, order_id: Any):
         """读订单行的净额与两调整列；查询失败返回 None（fail-open）。"""
         try:
@@ -1010,6 +1128,25 @@ class SalesOrderGuardService:
                 [address_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取地址 {address_id} 失败: {e}')
+            return None
+        return rows[0] if rows else None
+
+    def _load_contact(self, party_id: Any) -> Optional[Dict[str, Any]]:
+        """W1-C：按 party_id 取联系人姓名与手机号。
+
+        parties 表无联系方式列 ⇒ 手机号取 person_profiles.mobile（party_id 1:1 锚）。
+        LEFT JOIN：联系人无 person_profile 档案时仍返回姓名，仅手机号为空。
+        查询失败 → fail-open（不阻断确认）。
+        """
+        try:
+            rows = self.ds.query(
+                'SELECT p.name AS name, pp.mobile AS mobile '
+                'FROM parties p '
+                'LEFT JOIN person_profiles pp ON pp.party_id = p.id '
+                'WHERE p.id = ?',
+                [party_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(f'[sales_order_guard] 读取联系人 {party_id} 失败: {e}')
             return None
         return rows[0] if rows else None
 
@@ -1349,6 +1486,14 @@ class SalesOrderGuardService:
                         rule='BILLING_PERCENT_SUM_EXCEEDED')
 
         elif str(kind) == 'delivery':
+            # R-SCH-16：交货不相关的订单行（行类型 delivery_relevant=false）
+            # 不允许建 delivery 计划行。取不到行时 fail-open（列缺失由迁移兜底）。
+            relevant = (line or {}).get('delivery_relevant')
+            if relevant is not None and not int(relevant):
+                raise SalesOrderGuardError(
+                    '该订单行的行类型为「不交货相关」，不允许创建交货计划行',
+                    field_name='schedule_kind',
+                    rule='SCHEDULE_NOT_DELIVERY_RELEVANT')
             qty = _num(data.get('promised_qty'))
             # R-SCH-3：承诺量必填且 > 0
             if qty is None or qty <= 0:
@@ -1433,14 +1578,18 @@ class SalesOrderGuardService:
         return rows[0] if rows else None
 
     def _load_line_schedule_context(self, line_id: Any) -> Optional[Dict[str, Any]]:
-        """计划行判定所需的订单行上下文（订单归属 / 数量 / 发货点）。
+        """计划行判定所需的订单行上下文（订单归属 / 数量 / 发货点 / 交货相关性）。
 
         独立于 `_load_line`（后者被 12+ 处既有规则复用，不改其列集）。
+        `delivery_relevant` 取自行类型级配置（等价 SAP TVAP-LFREL）。
         """
         try:
             rows = self.ds.query(
-                'SELECT id, order_id, qty, uom_id, plant_location_id '
-                'FROM sales_order_lines WHERE id = ?', [line_id])
+                'SELECT l.id, l.order_id, l.qty, l.uom_id, l.plant_location_id, '
+                '       COALESCE(t.delivery_relevant, 1) AS delivery_relevant '
+                'FROM sales_order_lines l '
+                'LEFT JOIN type_definitions t ON t.id = l.line_type_id '
+                'WHERE l.id = ?', [line_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(
                 f'[sales_order_guard] 读取计划行上下文（订单行 {line_id}）失败: {e}')

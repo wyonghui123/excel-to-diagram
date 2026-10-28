@@ -1290,86 +1290,13 @@ class ActionExecutor:
         return None
 
     def _check_deletion_policy_restrict(self, meta_object: MetaObject, id_value: Any) -> List[str]:
-        """检查 deletion_policy.restrict_on 规则
+        """检查 deletion_policy.restrict_on 规则（委托 ReferenceRestrictChecker）
 
-        [FIX 2026-06-12] 兼容两种 rule 格式:
-        - RestrictRule dataclass（yaml_loader.parse_deletion_policy 解析出的格式）:
-            table / foreign_key / message
-        - dict 格式（老格式，向后兼容）:
-            target_object/target + fk_field/field + message
-        也支持直接从 dict 读取 table/foreign_key 键。
-
-        之前 bug：YAML 里的 restrict_on 规则被解析为 RestrictRule dataclass，
-        旧代码只识别 dict 格式，导致规则被静默跳过 → 删 product（含 versions）不报错
-        → SQL FK 违反被吞，删除看似"成功"实际未删。
+        保留方法名与签名，供既有调用方 / 测试使用；实现已收口为唯一一份：
+        与 `DeletionService.check_restrict_rules`、状态转换前置检查共用同一 Checker。
         """
-        errors = []
-        deletion_policy = getattr(meta_object, 'deletion_policy', None)
-        if not deletion_policy:
-            return errors
-
-        restrict_rules = []
-        if isinstance(deletion_policy, dict):
-            restrict_rules = deletion_policy.get('restrict_on', [])
-        elif hasattr(deletion_policy, 'restrict_on'):
-            restrict_rules = deletion_policy.restrict_on or []
-
-        for rule in restrict_rules:
-            # 兼容 RestrictRule dataclass + dict
-            if hasattr(rule, 'table') and hasattr(rule, 'foreign_key'):
-                target_table = rule.table
-                fk_field = rule.foreign_key
-                message = getattr(rule, 'message', '') or ''
-            elif isinstance(rule, dict):
-                target_table = rule.get('table')
-                target_object = rule.get('target_object') or rule.get('target')
-                target_table = target_table or target_object
-                fk_field = rule.get('foreign_key') or rule.get('fk_field') or rule.get('field')
-                message = rule.get('message', '') or ''
-            else:
-                continue
-            if not target_table or not fk_field:
-                continue
-            try:
-                query = f"SELECT COUNT(*) FROM {target_table} WHERE {fk_field} = ?"
-                cursor = self.ds.execute(query, (id_value,))
-                row = cursor.fetchone()
-                count = row[0] if row else 0
-                if count > 0:
-                    # 将技术表名/FK字段名解析为用户友好的名称
-                    from meta import get_meta_object
-                    from meta.core.models import registry as _model_registry
-                    child_obj = None
-                    # 尝试从 target_object 或 target_table 反查 MetaObject
-                    target_object_id = (rule.get('target_object') or rule.get('target')) if isinstance(rule, dict) else getattr(rule, 'target_object', None) or getattr(rule, 'target', None)
-                    if target_object_id:
-                        child_obj = get_meta_object(target_object_id)
-                    if not child_obj:
-                        # 尝试用 target_table 反查
-                        for obj_id in _model_registry._objects:
-                            mo = _model_registry.get(obj_id)
-                            if mo and getattr(mo, 'table_name', '') == target_table:
-                                child_obj = mo
-                                break
-                    child_name = child_obj.name if child_obj else target_table
-                    # FK 字段名解析
-                    fk_field_name = fk_field
-                    if child_obj:
-                        for f in child_obj.fields:
-                            if getattr(f, 'db_column', None) == fk_field or f.id == fk_field:
-                                fk_field_name = f.name or f.id
-                                break
-                    msg = message or ValidationMessageRegistry.get(
-                        "validation.object.restrict_on_delete",
-                        child_name=child_name, field_name=fk_field_name, count=count
-                    )
-                    errors.append(msg)
-            except Exception as e:
-                logger.warning(
-                    f"[_check_deletion_policy_restrict] table={target_table} "
-                    f"fk={fk_field} 查询失败: {e}"
-                )
-        return errors
+        from meta.core.reference_restrict_checker import ReferenceRestrictChecker
+        return ReferenceRestrictChecker.check(self.ds, meta_object, id_value)
 
     def _cleanup_m2m_tables(self, meta_object: MetaObject, id_value: Any):
         """删除记录时自动清理 M2M 中间表中的关联行

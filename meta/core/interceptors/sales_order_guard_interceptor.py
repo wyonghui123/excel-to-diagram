@@ -11,7 +11,7 @@ PersistenceInterceptor 95 之前）：
   sales_order          —— 创建 / 更新 / 删除
   sales_order_line     —— 创建 / 更新 / 删除
   sales_order_schedule —— 创建 / 更新 / 删除（R-SCH-0 ~ R-SCH-10，
-                          不参与金额 / 定价回写）
+                          不参与金额 / 定价回写，只触发履约状态回写）
 其余对象与动作零开销短路。
 
 已知边界：拦截器链只覆盖 bo_api 写路径；manage_api 与 Excel 导入绕过拦截器链，
@@ -25,6 +25,9 @@ from meta.core.interceptors.base import Interceptor
 from meta.services.sales_order_amount_service import (
     SalesOrderAmountError,
     SalesOrderAmountService,
+)
+from meta.services.sales_order_fulfillment_service import (
+    SalesOrderFulfillmentService,
 )
 from meta.services.sales_order_guard_service import (
     SalesOrderGuardError,
@@ -49,6 +52,8 @@ _ORDER_ID_KEY = 'so_parent_order_id'
 _PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'order_type_id')
 # 行变更触发重取价的维度（§3.7 触发时点 2）
 _PRICE_LINE_FIELDS = ('item_id', 'qty', 'uom_id')
+# FR-014：抬头取消 → 订单行 / delivery 计划行级联
+_ORDER_STATUS_CANCELLED = 'cancelled'
 
 
 class SalesOrderGuardInterceptor(Interceptor):
@@ -80,12 +85,25 @@ class SalesOrderGuardInterceptor(Interceptor):
                         data.update(territory)
                         if isinstance(context.params, dict):
                             context.params.update(territory)
+                # W1-C：草稿期改客户即清空联系人引用与快照（联系人属旧客户）
+                #   必须在快照回填之前执行：清空后无联系人可快照
+                contact_clear = guard.contact_clear_on_customer_change(data, old_data)
+                if contact_clear:
+                    data.update(contact_clear)
+                    if isinstance(context.params, dict):
+                        context.params.update(contact_clear)
                 # W2-D：确认动作同一请求内回填地址文本快照（只补/覆盖自地址库全文）
                 snapshot = guard.snapshot_address_text(data, old_data)
                 if snapshot:
                     data.update(snapshot)
                     if isinstance(context.params, dict):
                         context.params.update(snapshot)
+                # W1-C：确认动作同一请求内回填联系人姓名 / 电话快照
+                contact_snapshot = guard.snapshot_contact_text(data, old_data)
+                if contact_snapshot:
+                    data.update(contact_snapshot)
+                    if isinstance(context.params, dict):
+                        context.params.update(contact_snapshot)
                 guard.validate_order_write(
                     data, old_data=old_data,
                     is_create=context.action == 'crud_create')
@@ -133,10 +151,12 @@ class SalesOrderGuardInterceptor(Interceptor):
     def after_action(self, context: 'ActionContext') -> None:
         object_id = getattr(context.meta_object, 'id', None)
         if object_id == SCHEDULE_OBJECT:
-            # 计划行不参与行金额 / 定价回写
+            # 计划行不参与行金额 / 定价回写，只触发履约状态派生（§4.4）
+            self._after_schedule_write(context)
             return
         if object_id == ORDER_OBJECT:
             self._after_order_write(context)
+            self._after_order_cancel(context)
             return
         if object_id != LINE_OBJECT:
             return
@@ -145,11 +165,11 @@ class SalesOrderGuardInterceptor(Interceptor):
         self._apply_line_pricing(context, pricing)
 
         amount = SalesOrderAmountService(context.data_source)
+        fulfill = SalesOrderFulfillmentService(context.data_source)
         try:
-            if context.action in ('crud_create', 'crud_update'):
-                line_id = context.object_id
-                if line_id in (None, ''):
-                    return
+            line_id = context.object_id \
+                if context.action in ('crud_create', 'crud_update') else None
+            if line_id not in (None, ''):
                 values = amount.recompute_line(line_id)
                 self._merge_result(context, values)
 
@@ -160,11 +180,62 @@ class SalesOrderGuardInterceptor(Interceptor):
                 return
             totals = amount.recompute_order(order_id)
             self._merge_result(context, totals)
+
+            # §4.4：订单行 status 变更 → 该 order_id 派生（行先写、抬头后写）
+            if line_id not in (None, ''):
+                self._merge_status(context, fulfill.recompute_line(line_id))
+            fulfill.recompute_order(order_id)
+
             status = pricing.refresh_order_pricing_status(order_id)
             if status and context.result and context.result.data is not None:
                 context.result.data['pricing_status'] = status
         except SalesOrderAmountError as e:
             self._raise_validation(e)
+
+    # ---------------- 履约状态接线 ----------------
+
+    def _after_schedule_write(self, context: 'ActionContext') -> None:
+        """§4.4：计划行写入 → 该 line_id → 该 order_id 履约派生。"""
+        line_id, order_id = self._schedule_scope(context)
+        if line_id in (None, '') and order_id in (None, ''):
+            return
+        fulfill = SalesOrderFulfillmentService(context.data_source)
+        if line_id not in (None, ''):
+            fulfill.recompute_line(line_id)
+        if order_id in (None, ''):
+            return
+        fulfill.recompute_order(order_id)
+
+    def _after_order_cancel(self, context: 'ActionContext') -> None:
+        """FR-014：抬头取消 → 未终态行 / delivery 计划行 cascade，再派生一次。"""
+        if context.action != 'crud_update':
+            return
+        params = dict(context.params or {})
+        if str(params.get('status') or '') != _ORDER_STATUS_CANCELLED:
+            return
+        old_status = (context.old_data or {}).get('status')
+        if str(old_status or '') == _ORDER_STATUS_CANCELLED:
+            return
+
+        result = SalesOrderFulfillmentService(
+            context.data_source).cascade_cancel(context.object_id)
+        if result and context.result and context.result.data is not None:
+            context.result.data['fulfillment_status'] = \
+                result.get('fulfillment_status')
+
+    @staticmethod
+    def _schedule_scope(context: 'ActionContext') -> tuple:
+        """计划行的回写目标：删除走 old_data，其余走响应体（缺则退回入参）。"""
+        data = {}
+        if context.result and context.result.data:
+            data = dict(context.result.data)
+        if context.action == 'crud_delete':
+            data.update(context.old_data or {})
+        else:
+            merged = dict(context.params or {})
+            merged.update(data)
+            data = merged
+        return data.get('line_id'), data.get('order_id')
 
     # ---------------- 定价接线 ----------------
 
@@ -236,6 +307,13 @@ class SalesOrderGuardInterceptor(Interceptor):
         for key, value in values.items():
             context.result.data[key] = (
                 None if value is None else float(value))
+
+    @staticmethod
+    def _merge_status(context: 'ActionContext', status) -> None:
+        """把履约状态（字符串）并回响应体，不走 _merge_result 的 float 转换。"""
+        if status is None or not context.result or not context.result.data:
+            return
+        context.result.data['fulfillment_status'] = status
 
     @staticmethod
     def _raise_validation(error) -> None:

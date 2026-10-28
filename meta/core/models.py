@@ -311,6 +311,9 @@ class MetaStateTransition(MetaRule):
     validation_message: str = ""
     side_effects: List[StateTransitionSideEffect] = field(default_factory=list)
     ui_hints: Optional[StateTransitionUIHints] = None
+    # 转换前置条件（引擎按名字分派，业务判据由 YAML 声明）。
+    # 当前唯一取值：reference_restrict —— 走 deletion_policy.restrict_on 的引用检查。
+    preconditions: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         if not self.triggers:

@@ -1090,12 +1090,13 @@
       "table": "key_schemas"
     },
     "line_type": {
-      "hash": "66b958121f968961608dde74f8665d13",
+      "hash": "ee525c9e5b700f4459ab85192bcce0b1",
       "fields": [
         "id",
         "code",
         "name",
         "category",
+        "delivery_relevant",
         "status",
         "description",
         "created_at"
@@ -1897,7 +1898,7 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "f83dee60f2b481973e2af8b34be4ab79",
+      "hash": "91e47df8182c4dc58853e108a38fdd61",
       "fields": [
         "created_by",
         "updated_by",
@@ -1914,6 +1915,9 @@
         "bill_to_address_id",
         "ship_to_address_text",
         "bill_to_address_text",
+        "contact_party_id",
+        "contact_name_text",
+        "contact_phone_text",
         "salesperson_id",
         "territory_id",
         "org_id",
@@ -1941,12 +1945,14 @@
         "gross_amount",
         "description",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "fulfillment_status",
+        "fulfillment_derived_at"
       ],
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "513e62627c8bc63c0f12276da19ad4bd",
+      "hash": "a5c11d3257fe5aaa1d3093a06ed187d7",
       "fields": [
         "created_by",
         "updated_by",
@@ -1985,7 +1991,9 @@
         "price_trace",
         "status",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "fulfillment_status",
+        "fulfillment_derived_at"
       ],
       "table": "sales_order_lines"
     },
@@ -2337,7 +2345,7 @@
       "table": "test_table"
     },
     "type_definition": {
-      "hash": "b64b3e56cbf0cc1042b95fe9ffe55d03",
+      "hash": "32062459c67f498940faa1f8d8f4ccf7",
       "fields": [
         "updated_at",
         "created_by",
@@ -2351,6 +2359,7 @@
         "default_type_id",
         "number_sequence_id",
         "line_category",
+        "delivery_relevant",
         "status",
         "description",
         "created_at"
@@ -2485,5 +2494,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-27T12:54:19.851747"
+  "last_sync": "2026-10-28T08:47:33.118070"
 }

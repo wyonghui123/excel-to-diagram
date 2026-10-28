@@ -317,6 +317,20 @@ fields:
     ui:
       widget: select
 
+  # M1（2026-10-28）：交货相关性（SAP TVAP-LFREL 等价物）
+  # false 的行不允许建 delivery 计划行（守卫 R-SCH-16），履约状态固定 not_applicable
+  - id: delivery_relevant
+    name: 交货相关
+    type: boolean
+    db_column: delivery_relevant
+    required: true
+    default: true
+    description: 该行类型是否需要交付实物；false 的行不允许建交货计划行（仅 line 使用）
+    semantics:
+      meaning: 行类别的交付相关性默认值（仅 line 使用）
+    ui:
+      widget: switch
+
   - id: status
     name: 状态
     type: string

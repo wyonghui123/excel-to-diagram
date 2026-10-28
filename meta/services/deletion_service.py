@@ -60,35 +60,23 @@ class DeletionService:
     
     def check_restrict_rules(self, entity_type: str, entity_id: int, policy) -> List[Dict]:
         """
-        检查 RESTRICT 规则
+        检查 RESTRICT 规则（委托 ReferenceRestrictChecker，唯一实现）
         
         Returns:
             违规列表，每个元素包含 {table, foreign_key, message, count}
         """
-        violations = []
+        from meta.core.reference_restrict_checker import ReferenceRestrictChecker
         
-        if not policy or not getattr(policy, 'restrict_on', None):
-            return violations
+        meta_object = None
+        if self.schema_registry and hasattr(self.schema_registry, 'get'):
+            try:
+                meta_object = self.schema_registry.get(entity_type)
+            except Exception:
+                meta_object = None
         
-        for rule in policy.restrict_on:
-            sql = f"SELECT COUNT(*) as cnt FROM {rule.table} WHERE {rule.foreign_key} = ?"
-            
-            if rule.custom_check_sql:
-                sql = rule.custom_check_sql.format(entity_id=entity_id)
-            
-            cursor = self.data_source.execute(sql, [entity_id])
-            row = cursor.fetchone()
-            count = row['cnt'] if row else 0
-            
-            if count > 0:
-                violations.append({
-                    'table': rule.table,
-                    'foreign_key': rule.foreign_key,
-                    'message': rule.message,
-                    'count': count,
-                })
-        
-        return violations
+        return ReferenceRestrictChecker.check_details(
+            self.data_source, meta_object, entity_id, policy
+        )
     
     def _get_foreign_key_column(self, table_name: str, entity_type: str, entity_id: int) -> str:
         """智能检测外键列名"""

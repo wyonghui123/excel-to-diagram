@@ -967,7 +967,30 @@ class StateTransitionExecutor(RuleExecutor):
                     rule_name=rule.name,
                     message="Condition not met, skipped",
                 )
-        
+
+        # 转换前置条件（声明层决定做哪些检查，引擎只按枚举值分派）
+        if rule.preconditions:
+            for check in rule.preconditions:
+                if check == 'reference_restrict':
+                    from meta.core.reference_restrict_checker import ReferenceRestrictChecker
+                    record_id = context.data.get('id') or (context.original_data or {}).get('id')
+                    if record_id is None:
+                        # 记录尚未入库（create 路径）或取不到主键：不可能被引用，放行
+                        logger.warning(
+                            "[StateTransition] rule=%s 未取到 record_id，跳过 reference_restrict",
+                            rule.id,
+                        )
+                        continue
+                    violations = ReferenceRestrictChecker.check(
+                        context.data_source, context.meta_object, record_id)
+                    if violations:
+                        return RuleResult(
+                            success=False,
+                            rule_id=rule.id,
+                            rule_name=rule.name,
+                            message=violations[0],
+                        )
+
         context.set_field_value(rule.state_field, rule.to_state)
         
         entered_at_field = f"{rule.state_field}_entered_at"

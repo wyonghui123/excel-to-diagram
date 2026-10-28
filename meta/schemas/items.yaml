@@ -45,7 +45,9 @@ deletion_policy:
       message: 该物料存在分层参数值记录，请先删除后再删除
     - table: sales_order_lines
       foreign_key: item_id
-      message: 该物料被销售订单行引用，请先处理订单后再删除
+      # 只统计未完成的订单行（已完成/已取消的行不阻止停用）
+      condition: "status NOT IN ('closed', 'cancelled')"
+      message: 该物料被未完成的销售订单行引用，请先处理订单后再停用
   cascade_delete: []
 
 audit:
@@ -676,6 +678,8 @@ rules:
     from_states: [active, frozen]
     to_state: inactive
     triggers: [before_update]
+    # 停用前检查：存在未完成单据引用时拒绝（判据来自 deletion_policy.restrict_on）
+    preconditions: [reference_restrict]
     ui_hints:
       label: 停用
       icon: pause_circle

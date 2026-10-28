@@ -59,6 +59,10 @@ audit:
   create:
     enabled: true
     fields: all
+    # W1-C：联系人快照列不进审计（contact_phone_text 为 PII）
+    exclude:
+      - contact_name_text
+      - contact_phone_text
   update:
     enabled: true
     fields: changed_only
@@ -66,6 +70,12 @@ audit:
       - id
       - created_at
       - updated_at
+      # M1：派生字段不重复记账（事实源在计划行审计）
+      - fulfillment_status
+      # FR-011：派生时间戳同理，不重复记账
+      - fulfillment_derived_at
+      - contact_name_text
+      - contact_phone_text
   delete:
     enabled: true
     fields: business_only
@@ -73,6 +83,8 @@ audit:
       - id
       - created_at
       - updated_at
+      - contact_name_text
+      - contact_phone_text
   associate:
     enabled: true
   dissociate:
@@ -472,6 +484,81 @@ fields:
       searchable: true
     ui:
       widget: textarea
+
+  # ── 订单联系人（W1-C）：引用 + 确认时快照并置 ──
+  # 候选集 = 全库自然人（party_type='person' 且 status='active'）。
+  #   收窄为「当前客户名下的人」在平台可达（party_relation 关系基座 + 可扩展 role 字典
+  #   + 读视图 BO），但需先有 role='contact' 关系数据与动态候选集机制 ⇒ 见
+  #   spec docs/superpowers/specs/2026-10-27-sales-order-contact-spec.md §9.1.5 / TBD-2。
+  - id: contact_party_id
+    name: 订单联系人
+    type: integer
+    db_column: contact_party_id
+    nullable: true
+    description: 本单联系人（自然人）；空 = 未指定
+    semantics:
+      meaning: 订单履约联系人
+      display:
+        type: association
+        target_type: party
+        display_field: name
+        placeholder: "未指定"
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+        value_filter:
+          status: active
+          party_type: person
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        display_columns:
+          - field: name
+            label: 联系人
+            width: 180
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+      clearable: true
+
+  # 联系人姓名快照（W1-C）：确认时写入；确认后由守卫冻结
+  - id: contact_name_text
+    name: 联系人姓名快照
+    type: string
+    db_column: contact_name_text
+    nullable: true
+    max_length: 200
+    description: 联系人姓名文本快照；确认订单时写入，确认后只读
+    semantics:
+      meaning: 订单联系人姓名快照
+      searchable: true
+    ui:
+      widget: input
+
+  # 联系人电话快照（W1-C）：确认时写入；确认后由守卫冻结（PII —— 不入审计）
+  - id: contact_phone_text
+    name: 联系人电话快照
+    type: string
+    db_column: contact_phone_text
+    nullable: true
+    max_length: 32
+    description: 联系人电话文本快照；确认订单时写入，确认后只读（PII —— 不入审计）
+    semantics:
+      meaning: 订单联系人电话快照
+      searchable: true
+    ui:
+      widget: input
 
   - id: salesperson_id
     name: 销售员
@@ -1215,6 +1302,59 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+  # M1 履约状态：由订单行聚合派生，服务层单入口回写
+  # 元模型定位见 docs/superpowers/specs/2026-10-28-sales-order-fulfillment-status-writeback-spec.md §4.7
+  - id: fulfillment_status
+    name: 履约状态
+    type: string
+    db_column: fulfillment_status
+    required: true
+    default: not_started
+    max_length: 20
+    description: 由所有订单行聚合派生，只读，不可人工编辑
+    enum_values:
+      - value: not_applicable
+        label: 不适用
+        color: default
+        category: active
+      - value: not_started
+        label: 未完成
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分完成
+        color: warning
+        category: active
+      - value: fulfilled
+        label: 已完成
+        color: success
+        category: active
+      - value: voided
+        label: 已作废
+        color: danger
+        category: active
+    semantics:
+      meaning: 交付进度（由订单行聚合），与订单状态 status 正交
+      filterable: true
+      filter_type: enum
+      filter_label: 履约状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  # FR-011 派生时间戳：最近一次履约状态派生确认时间（UTC）
+  # 用途：巡检判定「陈旧数据」（派生后输入变了但没重算）
+  - id: fulfillment_derived_at
+    name: 履约派生时间
+    type: datetime
+    db_column: fulfillment_derived_at
+    nullable: true
+    description: 最近一次履约状态派生确认时间（UTC），只读，不可见
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+
 # 状态机（波次 0）：draft → submitted → confirmed → closed；任意态可 cancelled
 # 迁移由平台状态接口按 PUT status 执行；本波次不引入额外 action 权限码，
 # 写权限仍由 sales_order:update 收口。
@@ -1427,6 +1567,9 @@ ui_view_config:
         sortable: true
       - field: customer_account_id
         width: 200
+      # [W1-C] 订单联系人姓名快照：发货场景直接看联系人
+      - field: contact_name_text
+        width: 120
       - field: sales_org_id
         width: 160
       # [TER-M3] 区域列：未分配显示「未分配」，支持按区域过滤
@@ -1489,12 +1632,17 @@ ui_view_config:
           - fields: [customer_account_id, ship_to_party_id]
           - fields: [bill_to_account_id, payer_account_id]
           - fields: [ship_to_address_id, bill_to_address_id]
-          - fields: [salesperson_id, territory_id]
+          # [W1-C] 订单联系人（引用）随抬头伙伴同段；3 字段行形态有先例（customer_account.yaml L569）
+          - fields: [contact_party_id, salesperson_id, territory_id]
           - fields: [org_id, sales_org_id]
           - fields: [division_code]
       - title: 地址快照（确认时写入）
         columns:
           - fields: [ship_to_address_text, bill_to_address_text]
+      # [W1-C] 联系人快照（确认时写入）
+      - title: 联系人快照（确认时写入）
+        columns:
+          - fields: [contact_name_text, contact_phone_text]
       - title: 商务条件
         columns:
           - fields: [currency_id, exchange_rate]

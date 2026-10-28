@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from meta.core.models import ValueHelpSource
 from meta.core.hierarchy_loader import get_table_map
+from meta.core.value_help_accessor import parse_value_filter_conditions
 
 
 # [R23 2026-07-24] 详情页字段反推: 一次性返回 path (展示用) 和 ids (回填用)
@@ -286,33 +287,16 @@ class BoValueHelpProvider(ValueHelpProvider):
         sort_parts = [f"{s['field']}:{s.get('direction', 'asc')}" for s in sort]
         query_params["sort"] = ",".join(sort_parts)
 
-        filter_conditions = []
-        for key, val in filters.items():
-            if val is None:
-                filter_conditions.append({"field": key, "op": "is_null", "value": None})
-            elif key.endswith('__in'):
-                field = key[:-4]
-                values = [v.strip() for v in str(val).split(',') if v.strip()] if isinstance(val, str) else list(val)
-                filter_conditions.append({"field": field, "op": "in", "value": values})
-            elif key.endswith('__notin'):
-                field = key[:-7]
-                values = [v.strip() for v in str(val).split(',') if v.strip()] if isinstance(val, str) else list(val)
-                filter_conditions.append({"field": field, "op": "not_in", "value": values})
-            elif key.endswith('__like'):
-                field = key[:-6]
-                filter_conditions.append({"field": field, "op": "like", "value": val})
-            elif key.endswith('__gte'):
-                field = key[:-5]
-                filter_conditions.append({"field": field, "op": "gte", "value": val})
-            elif key.endswith('__lte'):
-                field = key[:-5]
-                filter_conditions.append({"field": field, "op": "lte", "value": val})
-            else:
-                filter_conditions.append({"field": key, "op": "eq", "value": val})
-
-        if self.value_filter:
-            for vf_key, vf_val in self.value_filter.items():
-                filter_conditions.append({"field": vf_key, "op": "eq", "value": vf_val})
+        # 候选过滤条件：入参 filters 与声明的 value_filter 走**同一个**翻译器
+        # （后缀剥离 + 操作符归一只有一处实现，见 value_help_accessor）
+        filter_conditions = [
+            {"field": f, "op": op, "value": val}
+            for f, op, val in parse_value_filter_conditions(filters)
+        ]
+        filter_conditions.extend(
+            {"field": f, "op": op, "value": val}
+            for f, op, val in parse_value_filter_conditions(self.value_filter or {})
+        )
 
         if self.apply_target_permissions and user_context and not user_context.get("is_admin", False):
             try:

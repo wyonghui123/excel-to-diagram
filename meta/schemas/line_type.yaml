@@ -20,6 +20,7 @@ object_type: view
 view_definition: |
   SELECT id, code, name,
          line_category AS category,
+         COALESCE(delivery_relevant, 1) AS delivery_relevant,
          status, description, created_at
   FROM type_definitions
   WHERE level = 'line'
@@ -129,6 +130,21 @@ fields:
       filter_scope: local
     ui:
       widget: select
+
+  # M1：交货相关性（配置在 type_definitions，视图只读暴露）
+  - id: delivery_relevant
+    name: 交货相关
+    type: boolean
+    db_column: delivery_relevant
+    description: 是否需要交付实物；false 的行不允许建交货计划行
+    semantics:
+      meaning: 交付相关性默认值
+      filterable: true
+      filter_type: boolean
+      filter_label: 交货相关
+      filter_scope: local
+    ui:
+      readonly: true
 
   - id: status
     name: 状态

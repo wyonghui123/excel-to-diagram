@@ -51,6 +51,10 @@ audit:
       - id
       - created_at
       - updated_at
+      # M1：派生字段不重复记账（事实源在计划行审计）
+      - fulfillment_status
+      # FR-011：派生时间戳同理，不重复记账
+      - fulfillment_derived_at
   delete:
     enabled: true
     fields: business_only
@@ -849,6 +853,103 @@ fields:
     semantics:
       meaning: 记录更新时间
       audit_field: true
+
+  # M1 履约状态：由 delivery 计划行聚合派生，服务层单入口回写
+  # 元模型定位（为何不用 redundancy / 计算字段）见
+  # docs/superpowers/specs/2026-10-28-sales-order-fulfillment-status-writeback-spec.md §4.7
+  - id: fulfillment_status
+    name: 履约状态
+    type: string
+    db_column: fulfillment_status
+    required: true
+    default: not_started
+    max_length: 20
+    description: 由 delivery 计划行聚合派生，只读，不可人工编辑
+    enum_values:
+      - value: not_applicable
+        label: 不适用
+        color: default
+        category: active
+      - value: not_started
+        label: 未完成
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分完成
+        color: warning
+        category: active
+      - value: fulfilled
+        label: 已完成
+        color: success
+        category: active
+    semantics:
+      meaning: 交付进度（由计划行聚合），与行状态 status 正交
+      filterable: true
+      filter_type: enum
+      filter_label: 履约状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  # FR-011 派生时间戳：最近一次履约状态派生确认时间（UTC）
+  # 用途：巡检判定「陈旧数据」（派生后输入变了但没重算）
+  - id: fulfillment_derived_at
+    name: 履约派生时间
+    type: datetime
+    db_column: fulfillment_derived_at
+    nullable: true
+    description: 最近一次履约状态派生确认时间（UTC），只读，不可见
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+
+# 状态机（C3 小改，独立验收）：open → closed；open / closed → cancelled
+# 与抬头 sales_order 的 4 条状态机刻意不同 —— 行状态极简，不复制抬头状态机。
+# 合法单向边只 3 条：
+#   open   → closed     人工关闭行
+#   open   → cancelled  取消未关闭行
+#   closed → cancelled  取消已关闭行（与 FR-014 级联口径一致：未终态行含 closed 一律置 cancelled）
+# cancelled 为终态，无出边；closed → open（重开）本轮不声明。
+# 迁移由平台状态接口按 PUT status 执行，写权限仍由 sales_order_line:update 收口。
+# 注意：fulfillment_status 是 delivery 计划行的聚合派生字段，禁止纳入 state_transition
+#      （Spec §4.8 INV：派生字段纳入状态机会导致人工转移与事实回写互相覆盖）。
+rules:
+  - id: close_sales_order_line
+    name: 关闭订单行
+    type: state_transition
+    state_field: status
+    from_states: [open]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后该行不再参与履约推进，确定要关闭吗？"
+
+  - id: cancel_sales_order_line
+    name: 取消订单行
+    type: state_transition
+    state_field: status
+    from_states: [open]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后该行作废且不可恢复，确定要取消吗？"
+
+  - id: cancel_closed_sales_order_line
+    name: 取消已关闭订单行
+    type: state_transition
+    state_field: status
+    from_states: [closed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消已关闭的行后，该行作废且不可恢复，确定要取消吗？"
 
 indexes:
   - fields: [order_id, line_no]

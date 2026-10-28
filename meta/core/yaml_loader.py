@@ -20,11 +20,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RestrictRule:
-    """强依赖检查规则"""
+    """强依赖检查规则
+
+    condition 语义：与 `<foreign_key> = ?` 用 AND 拼接的 WHERE 附加片段，
+    空 = 任何引用行都算命中。它只是声明层常量，引擎不解释其中的业务值。
+    """
     table: str
     foreign_key: str
     message: str
-    custom_check_sql: Optional[str] = None
+    condition: Optional[str] = None
 
 @dataclass
 class CascadeRule:
@@ -1102,7 +1106,7 @@ def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
                 table=r.get("table", ""),
                 foreign_key=r.get("foreign_key", ""),
                 message=r.get("message", ""),
-                custom_check_sql=r.get("custom_check_sql"),
+                condition=r.get("condition"),
             ))
     
     cascade_tables = dp.get("cascade_delete") or []
@@ -1674,6 +1678,7 @@ def parse_state_transition(data: Dict[str, Any]) -> MetaStateTransition:
         validation_message=data.get("validation_message", ""),
         side_effects=side_effects,
         ui_hints=parse_state_transition_ui_hints(data),
+        preconditions=data.get("preconditions", []),
         semantics=parse_semantics(data.get("semantics", {})),
     )
 

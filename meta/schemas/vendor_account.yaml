@@ -39,7 +39,11 @@
 #   ② **不建 site / site 级档案** —— Oracle supplier_site 的粒度含 PARTY_SITE_ID + PRC_BU_ID，
 #      我方无采购业务单元（PRC_BU）概念，且 site 级字段全是交易/采购控制项 ⇒ 本期只在 account 级;
 #   ③ **不建生效期** —— Oracle 供应商侧同样有 EFFECTIVE_*（与客户侧同一 TBD-14，不重复登记）;
-#   ④ **不建 status**（同 D4：无生效期则启停无意义，且与 party_relation.internal_mark 重叠）;
+#   ④ ~~**不建 status**（同 D4：无生效期则启停无意义，且与 party_relation.internal_mark 重叠）~~;
+#      [生命周期 2026-10-07 修订注] 与 customer_account ④ 同口径：停用语义已落关系层
+#      （party_relation.status，两态瞬时开关 §5.4/D4），account 属其后 1:1 明细面，不重复建 status。
+#      原理由不成立：「与 internal_mark 重叠」否 —— internal_mark 是内｜外标记（非启停）；
+#      「无生效期则启停无意义」否 —— D4 已判停用=瞬时开关。
 #   ⑤ relation_id 无 DB 级 FK、无跨表类型守卫（顶层 validations: 已废弃）⇒ 与客户侧同一 TBD-16;
 #   ⑥ **不挂权限维度**（同客户侧）⇒ 跨法人数据范围无法收窄。
 #
