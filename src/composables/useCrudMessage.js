@@ -109,7 +109,11 @@ export function useCrudMessage() {
     if (isPermissionDenied(err)) {
       permissionDenied(action, err, actionRef)
     } else {
-      message.error(`${action}失败`, err)
+      // [FIX 2026-10-28 T4.4-B] 透出后端具体拒绝原因（如 restrict_on.message：
+      // 「该物料被未完成的销售订单行引用，请先处理订单后再停用」）。
+      // 此前只显示「停用失败」，formatErrorMessage 仅附加 traceId，业务原因丢失。
+      const backendMsg = extractErrorMessage(err, '')
+      message.error(backendMsg ? `${action}失败：${backendMsg}` : `${action}失败`, err)
     }
   }
 

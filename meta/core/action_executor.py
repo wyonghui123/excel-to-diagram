@@ -21,7 +21,7 @@ import string
 
 logger = logging.getLogger(__name__)
 
-from meta.core.models import MetaObject, MetaField, MetaAction, ActionType, FieldType, RuleTrigger, ObjectType
+from meta.core.models import MetaObject, MetaField, MetaAction, ActionType, FieldType, RuleTrigger, ObjectType, ValidationSeverity
 from meta.core.datasource import DataSource
 from meta.core.query_builder import QueryBuilder
 from meta.core.rule_executor import RuleEngine, RuleExecutionReport
@@ -37,6 +37,19 @@ from meta.core.validation_messages import ValidationMessageRegistry
 #   ↔ persistence_interceptor ↔ action_executor 循环导入
 # 所有拦截器符号在 _check_write_scope 内部 lazy import
 from meta.core.action_context import ActionContext
+
+
+def _first_rule_failure_message(report: RuleExecutionReport, fallback: str) -> str:
+    """取规则报告中首个 ERROR 级别失败结果的业务消息，回落 fallback
+
+    [FIX 2026-10-28 T4.4-B] 原写路径一律返回 "Before update validation failed"，
+    导致 StateTransition 前置条件（reference_restrict）的 restrict_on.message
+    无法到达前端（前端只能显示「停用失败」）。这里把具体拒绝原因透出。
+    """
+    for r in getattr(report, 'results', None) or []:
+        if not r.success and r.severity == ValidationSeverity.ERROR and r.message:
+            return r.message
+    return fallback
 
 
 # [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
@@ -469,7 +482,14 @@ class ActionExecutor:
     def __init__(self, data_source: DataSource, rule_engine: Optional[RuleEngine] = None,
                  audit_enabled: bool = True):
         self.ds = data_source
-        self.rule_engine = rule_engine or RuleEngine()
+        # [FIX 2026-10-28 T4.4-B] 必须把 data_source 注入 RuleEngine：
+        # 生产写路径 PersistenceInterceptor._get_registry -> ActionRegistry(data_source)
+        # 不传 rule_engine ⇒ 这里走缺省分支。若用 RuleEngine()（data_source=None），
+        # RuleContext.data_source 为 None，StateTransitionExecutor 的
+        # preconditions[reference_restrict] 会让 ReferenceRestrictChecker.check(None, ...)
+        # 在 data_source.execute 抛 AttributeError，被 checker 的 except 吞成 warning
+        # 后返回空违规列表 ⇒ 停用/删除的强依赖检查静默失效（实测 item 2 停用放行）。
+        self.rule_engine = rule_engine or RuleEngine(data_source)
         self.audit_logger = AuditLogger(data_source, enabled=audit_enabled)
         self._pseudo_resolver = PseudoVariableResolver(self.audit_logger._current_user)
         self._request_context: Dict[str, Any] = {}
@@ -1922,7 +1942,8 @@ class ActionExecutor:
             if not report.success:
                 result = ActionResult.fail(
                     error="VALIDATION_FAILED",
-                    message="Before update validation failed"
+                    message=_first_rule_failure_message(
+                        report, "Before update validation failed")
                 )
                 result.rule_report = report
                 return result
@@ -1940,7 +1961,8 @@ class ActionExecutor:
             if not report.success:
                 result = ActionResult.fail(
                     error="VALIDATION_FAILED",
-                    message="Before save validation failed"
+                    message=_first_rule_failure_message(
+                        report, "Before save validation failed")
                 )
                 result.rule_report = report
                 return result
