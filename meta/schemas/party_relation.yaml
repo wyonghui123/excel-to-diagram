@@ -439,6 +439,23 @@ relations:
     cardinality: "N:1"
     description: 业务伙伴组引用（[FK 2026-10-07] 真外键，可空=未归类；加引号防御 YAML 1.1 六十进制解析）
 
+# 删除策略（[P1-5 2026-10-28] 补齐）：关系是两类档案的 1:1 锚，
+#   客户 / 供应商档案的 relation_id 指向本表 id。
+#   检索列名必须取档案表的实际 db_column `relation_id`：平台按
+#   `{父对象类型}_id` 派生的 `party_relation_id` 在两张档案表里都不存在
+#   （同 §ui_view_config 里 customFetcher 段落的说明），而
+#   ReferenceRestrictChecker 直接按声明的 foreign_key 拼 SQL，不做事后映射。
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: customer_accounts
+      foreign_key: relation_id
+      message: 该关系仍被客户档案引用，请先删除客户档案或改挂其他关系后再删除
+    - table: vendor_accounts
+      foreign_key: relation_id
+      message: 该关系仍被供应商档案引用，请先删除供应商档案或改挂其他关系后再删除
+  cascade_delete: []
+
 # 生命周期: 复用平台标准动作（蓝图 §5.4 最小约定 / D4 瞬时开关）
 #   inactive --activate--> active
 #   active   --deactivate--> inactive
