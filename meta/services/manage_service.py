@@ -589,13 +589,28 @@ class ManageService:
             logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
             return False
 
+    def _validate_batch_value_helps(self, meta_obj: MetaObject,
+                                    rows: List[Dict[str, Any]]) -> Dict[int, str]:
+        """批量写入前逐行校验 value_help，返回 {1-based 行号: 错误消息}。"""
+        row_errors: Dict[int, str] = {}
+        for idx, row in enumerate(rows, start=1):
+            errors = self._validate_value_helps(meta_obj, row)
+            if errors:
+                row_errors[idx] = f"第 {idx} 行: " + "; ".join(errors)
+        return row_errors
+
     def batch_create(self, object_type: str, data_list: List[Dict[str, Any]],
                      skip_validation: bool = False,
                      all_or_none: bool = True) -> BatchOperationResult:
         batch_result = BatchOperationResult()
         meta_obj = self._get_meta_object(object_type)
-        
+        row_errors = self._validate_batch_value_helps(meta_obj, data_list)
+
         if all_or_none:
+            if row_errors:
+                batch_result.failed_count = len(data_list)
+                batch_result.errors.extend(row_errors[idx] for idx in sorted(row_errors))
+                return batch_result
             try:
                 with self.data_source.transaction():
                     for data in data_list:
@@ -611,7 +626,11 @@ class ManageService:
                 batch_result.failed_count = len(data_list) - batch_result.success_count
                 batch_result.errors.append(str(e))
         else:
-            for data in data_list:
+            for idx, data in enumerate(data_list, start=1):
+                if idx in row_errors:
+                    batch_result.failed_count += 1
+                    batch_result.errors.append(row_errors[idx])
+                    continue
                 try:
                     with self.data_source.transaction():
                         result = self.executor.execute(
@@ -634,8 +653,13 @@ class ManageService:
                      all_or_none: bool = True) -> BatchOperationResult:
         batch_result = BatchOperationResult()
         meta_obj = self._get_meta_object(object_type)
-        
+        row_errors = self._validate_batch_value_helps(meta_obj, updates)
+
         if all_or_none:
+            if row_errors:
+                batch_result.failed_count = len(updates)
+                batch_result.errors.extend(row_errors[idx] for idx in sorted(row_errors))
+                return batch_result
             try:
                 with self.data_source.transaction():
                     for update_data in updates:
@@ -653,7 +677,11 @@ class ManageService:
                 batch_result.failed_count = len(updates) - batch_result.success_count
                 batch_result.errors.append(str(e))
         else:
-            for update_data in updates:
+            for idx, update_data in enumerate(updates, start=1):
+                if idx in row_errors:
+                    batch_result.failed_count += 1
+                    batch_result.errors.append(row_errors[idx])
+                    continue
                 if "id" not in update_data:
                     batch_result.failed_count += 1
                     batch_result.errors.append("Update data missing 'id' field")
