@@ -34,6 +34,7 @@ from meta.core.models import (
     RuleType, RuleTrigger
 )
 from meta.core.safe_expr_evaluator import safe_evaluate
+from meta.core.state_side_effects import apply_state_side_effects
 
 logger = logging.getLogger(__name__)
 
@@ -789,6 +790,25 @@ class ImplicitRuleChainExecutor:
             new_state=new_value,
             source_rule=rule.id
         )
+
+        # 状态转换 side_effects（声明式）：与状态字段同一次 context 写入。
+        # 与 flat 侧 StateTransitionExecutor 共用 apply_state_side_effects，
+        # 避免两条执行路径的副作用语义分叉。
+        if rule.side_effects:
+            for target, old_v, new_v in apply_state_side_effects(
+                rule,
+                context.get_field_value,
+                context.set_field_value,
+                valid_fields={f.id for f in self.meta_object.fields},
+            ):
+                if old_v != new_v:
+                    context.mark_changed(target, old_v, new_v)
+                    result['changes'].append(FieldChange(
+                        field_id=target,
+                        old_value=old_v,
+                        new_value=new_v,
+                        source_rule=rule.id
+                    ))
         
         # [G11 修复 2026-10-03] 同一 state_field 上的其它 STATE_TRANSITION 是
         # **互斥替代项**，不是下游依赖。若把它们拉进传播循环，会在同一批次内

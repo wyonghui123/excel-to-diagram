@@ -14,6 +14,7 @@ from meta.core.models import registry
 from meta.services.view_config_service import view_config_service
 from meta.services.i18n_service import i18n_service
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
+from meta.core.state_side_effects import validate_schema_dir_side_effects
 
 meta_bp = Blueprint('meta', __name__, url_prefix='/api/v1/meta')
 
@@ -385,6 +386,9 @@ def reload_meta():
     """重新加载元数据"""
     try:
         schema_dir = get_yaml_schema_dir()
+        # side_effects 声明预校验：非法表达式在 registry.reload 之前失败，
+        # 保证 reload 报错时内存中的元模型仍是旧的（不留半截状态）。
+        validate_schema_dir_side_effects(schema_dir)
         registry._schema_dir = schema_dir
         count = registry.reload(schema_dir)
         view_config_service.invalidate_cache()

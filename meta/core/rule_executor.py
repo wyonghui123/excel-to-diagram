@@ -29,6 +29,7 @@ from meta.core.models import (
 from meta.core.formula_functions import FormulaFunctionRegistry
 from meta.core.cross_object_resolver import build_cross_object_locals
 from meta.core.rule_provider import get_rule_provider
+from meta.core.state_side_effects import apply_state_side_effects
 
 
 @dataclass
@@ -1000,6 +1001,16 @@ class StateTransitionExecutor(RuleExecutor):
         )
         if has_entered_at:
             context.set_field_value(entered_at_field, datetime.now())
+
+        # 状态转换 side_effects（声明式）：与状态字段同一次 context 写入，
+        # 由调用方一次性持久化 ⇒ 同事务内生效。
+        if rule.side_effects:
+            apply_state_side_effects(
+                rule,
+                context.get_field_value,
+                context.set_field_value,
+                valid_fields={f.id for f in context.meta_object.fields},
+            )
         
         return RuleResult(
             success=True,
