@@ -29,7 +29,8 @@
 
 服务行（W2-A）:
   W2-SVC-1  非服务物料行不得填写服务属性
-  W2-SVC-2  服务物料必须 active（未签发 / 停用不可下单）
+  W2-SVC-2  服务物料须处于可售状态（判定来源 = sales_order_line.item_id 的
+            value_help.value_filter.status，未声明时回落 active）
   W2-SVC-3  服务结束日不得早于开始日
   W2-SVC-4  服务时长 > 0，且必须与时长单位成对
   W2-SVC-5  计费方式 / 资源类型 / 时长单位必须在枚举内
@@ -164,6 +165,33 @@ _SERVICE_LINE_FIELDS = ('service_start_date', 'service_end_date', 'billing_metho
 _BILLING_METHODS = ('fixed_price', 'time_and_material', 'milestone')
 _RESOURCE_TYPES = ('technician', 'engineer', 'consultant')
 _DURATION_TYPES = ('hour', 'day', 'week')
+
+#: W2-SVC-2 兜底可售状态：schema 未声明 / registry 未加载时沿用历史口径
+_DEFAULT_SELLABLE_STATUS = 'active'
+
+
+def _sellable_statuses() -> tuple:
+    """服务物料可售状态的唯一来源 = `sales_order_line.item_id` 的 value_help 过滤。
+
+    manage_api 侧由 value_help 本身校验；bo_api 侧拦截器链不读 value_help，
+    故此处从同一 schema 声明取值，避免在 Python 里重复写一份状态列表。
+    读不到（registry 未加载 / 未声明 status 过滤）→ 回落 `active`。
+    """
+    try:
+        from meta.core.models import registry
+        obj = registry.get(LINE_OBJECT)
+        for field in getattr(obj, 'fields', None) or []:
+            if getattr(field, 'id', '') != 'item_id':
+                continue
+            value_help = getattr(field, 'value_help', None)
+            source = getattr(value_help, 'source', None)
+            value_filter = getattr(source, 'value_filter', None) or {}
+            status = value_filter.get('status')
+            if status:
+                return (str(status),)
+    except Exception as e:  # schema 不可读 → fail-open，不因读侧异常阻断下单
+        logger.warning(f'[sales_order_guard] 读取 item_id value_help 失败: {e}')
+    return (_DEFAULT_SELLABLE_STATUS,)
 
 # ---------------- 退货引用链（E6 / R-RET） ----------------
 RETURN_CATEGORY = 'return'
@@ -871,8 +899,8 @@ class SalesOrderGuardService:
                     field_name=filled[0], rule='service_field_non_service_item')
             return
 
-        # 服务物料必须已签发且启用
-        if (item.get('status') or 'active') != 'active':
+        # 服务物料必须处于 schema 声明的可售状态（默认 active）
+        if str(item.get('status') or _DEFAULT_SELLABLE_STATUS) not in _sellable_statuses():
             raise SalesOrderGuardError(
                 f'服务物料 {item_id} 未签发或已停用，不能下单',
                 field_name='item_id', rule='service_item_not_sellable')

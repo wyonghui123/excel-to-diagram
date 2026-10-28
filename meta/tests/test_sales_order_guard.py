@@ -509,6 +509,30 @@ class TestServiceLine:
                 {**SERVICE_LINE, 'item_id': 4}, is_create=True)
         assert e.value.rule == 'service_item_not_sellable'
 
+    def test_sellable_status_follows_schema(self, monkeypatch):
+        """W2-SVC-2 的判据来自 schema 的 value_help 过滤，不在 Python 里另写一份。"""
+        import meta.services.sales_order_guard_service as guard_service
+        monkeypatch.setattr(guard_service, '_sellable_statuses',
+                            lambda: ('active', 'issued'))
+        items = dict(ITEMS)
+        items[5] = {'id': 5, 'item_type': 'service', 'status': 'issued'}
+        ds = _FakeDS(types=TYPES, orders=ORDERS, lines=LINES, items=items,
+                     org_functions={(318, 'sales')})
+        SalesOrderGuardService(ds).validate_line_write(
+            {**SERVICE_LINE, 'item_id': 5}, is_create=True)
+
+    def test_status_outside_schema_rejected(self, monkeypatch):
+        import meta.services.sales_order_guard_service as guard_service
+        monkeypatch.setattr(guard_service, '_sellable_statuses', lambda: ('active',))
+        items = dict(ITEMS)
+        items[5] = {'id': 5, 'item_type': 'service', 'status': 'issued'}
+        ds = _FakeDS(types=TYPES, orders=ORDERS, lines=LINES, items=items,
+                     org_functions={(318, 'sales')})
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(ds).validate_line_write(
+                {**SERVICE_LINE, 'item_id': 5}, is_create=True)
+        assert e.value.rule == 'service_item_not_sellable'
+
     def test_end_before_start_rejected(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_line_write(
