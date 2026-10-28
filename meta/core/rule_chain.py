@@ -35,6 +35,7 @@ from meta.core.models import (
 )
 from meta.core.safe_expr_evaluator import safe_evaluate
 from meta.core.state_side_effects import apply_state_side_effects
+from meta.core.reference_restrict_checker import ReferenceRestrictChecker
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,9 @@ class RuleChainContext:
     changed_states: Dict[str, Tuple[Any, Any]] = field(default_factory=dict)
     user_info: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # `preconditions: [reference_restrict]` 需要查询引用表；与 flat 侧
+    # `RuleContext.data_source` 同口径。缺省 None 时 Checker 内部静默放行。
+    data_source: Any = None
     _field_values: Dict[str, Any] = field(default_factory=dict)
     
     def get_field_value(self, field_id: str) -> Any:
@@ -565,7 +569,8 @@ class ImplicitRuleChainExecutor:
         original_data: Optional[Dict[str, Any]] = None,
         changed_fields: Optional[Set[str]] = None,
         trigger: RuleTrigger = RuleTrigger.BEFORE_SAVE,
-        executors: Optional[Dict[RuleNodeType, Callable]] = None
+        executors: Optional[Dict[RuleNodeType, Callable]] = None,
+        data_source: Any = None
     ) -> RuleChainResult:
         """
         执行规则链
@@ -576,6 +581,7 @@ class ImplicitRuleChainExecutor:
             changed_fields: 已变更的字段（可选，会自动检测）
             trigger: 触发时机
             executors: 自定义执行器（可选）
+            data_source: 数据源（可选，`preconditions: [reference_restrict]` 查询引用表用）
             
         Returns:
             RuleChainResult 执行结果
@@ -584,7 +590,8 @@ class ImplicitRuleChainExecutor:
         context = RuleChainContext(
             data=data,
             original_data=original_data or data.copy(),
-            changed_fields=changed_fields or set()
+            changed_fields=changed_fields or set(),
+            data_source=data_source
         )
         
         if changed_fields is None and original_data:
@@ -769,6 +776,39 @@ class ImplicitRuleChainExecutor:
         # Case 4: 规则自身 condition
         if rule.condition and not self._evaluate_condition(rule.condition, context):
             return result
+        
+        # 状态转换前置条件：声明层决定做哪些检查，引擎只按枚举值分派。
+        # 与 flat 侧 `StateTransitionExecutor._do_execute`（rule_executor.py）
+        # 逐条对齐 —— 修复前 chain 侧完全不消费 `preconditions`，同一份 YAML
+        # 声明在两条执行路径上语义不一致。
+        if rule.preconditions:
+            for check in rule.preconditions:
+                if check == 'reference_restrict':
+                    record_id = context.data.get('id') or (context.original_data or {}).get('id')
+                    if record_id is None:
+                        # 记录尚未入库（create 路径）或取不到主键：不可能被引用，放行
+                        logger.warning(
+                            "[StateTransition] rule=%s 未取到 record_id，跳过 reference_restrict",
+                            rule.id,
+                        )
+                        continue
+                    violations = ReferenceRestrictChecker.check(
+                        context.data_source, self.meta_object, record_id)
+                    if violations:
+                        # 不写状态、不进传播。违规消息走既有 `validation` 通道：
+                        # `_process_rule_result` 只消费 validation，不认 success / message。
+                        return {
+                            'success': False,
+                            'message': violations[0],
+                            'changes': [],
+                            'triggered_rules': [],
+                            'validation': ValidationResult(
+                                rule_id=rule.id,
+                                success=False,
+                                message=violations[0],
+                                severity='error',
+                            ),
+                        }
         
         old_value = effective_state
         new_value = rule.to_state
