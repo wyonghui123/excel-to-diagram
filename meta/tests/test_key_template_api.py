@@ -107,13 +107,22 @@ class TestKeyTemplateAPI:
         """
         POST /preview/business_object with service_module_id → 200 正常生成 code
 
-        这是 BUG 的回归测试：正常传 service_module_id 后应生成正确编码。
+        这是 BUG 的回归测试：正常传父级参数后应生成正确编码。
+        注: 契约要求 parent_params 传父级 *_id (不是 *_code);
+        后端 _resolve_parent_fields_for_preview 用 id 反查 code 后填 field_values。
         """
+        resp = api_client.get('/api/v2/bo/service_module?page=1&page_size=1',
+                              headers=admin_headers)
+        items = (resp.get_json() or {}).get('data', {}).get('items') or []
+        if not items or not items[0].get('code') or items[0].get('id') is None:
+            pytest.skip('无可用 service_module 种子数据 (需要至少 1 条带 code 的记录)')
+        service_module_id = items[0]['id']
+
         resp = api_client.post(
             f'{KT_URL}/preview/business_object',
             json={
                 'field_values': {},
-                'parent_params': {'service_module_id': 1},
+                'parent_params': {'service_module_id': service_module_id},
                 'generate': True,
             },
             headers=admin_headers,
@@ -231,9 +240,15 @@ class TestVersionCodePattern:
         pytest.skip('无可用 product')
 
     def _try_create(self, api_client, admin_headers, name, product_id):
-        """创建 version，name 作为业务键（code 字段已删除）"""
+        """创建 version，name 作为业务键（code 字段已删除）
+
+        数据隔离: version.name 是全局业务键 (与 product 无关), 固定名字会撞上
+        并行 worker / 历史残留数据 → 400 编号『版本名称』值已存在。这里追加
+        纳秒后缀, 被测前缀形态 (大小写/点/连字符/下划线) 原样保留。
+        """
+        unique_name = f'{name}_{time.time_ns() % 10 ** 12}'
         payload = {
-            'name': name,  # 2026-06-13: code 字段已删除，直接用 name 作为业务键
+            'name': unique_name,  # 2026-06-13: code 字段已删除，直接用 name 作为业务键
             'product_id': product_id,
         }
         resp = api_client.post('/api/v2/bo/version', json=payload, headers=admin_headers)
@@ -422,11 +437,6 @@ class TestVersionUniqueKey:
         # 不同 name，分别在不同 product 下创建
         success1, resp1, _ = self._create_version(api_client, admin_headers, f'DIFFPROD_V1_{ts}', pid1)
         success2, resp2, _ = self._create_version(api_client, admin_headers, f'DIFFPROD_V2_{ts}', pid2)
-
-        if not success1:
-            print(f"[T3-DBG] pid1={pid1} 失败: status={resp1.status_code} body={resp1.get_data(as_text=True)[:200]}")
-        if not success2:
-            print(f"[T3-DBG] pid2={pid2} 失败: status={resp2.status_code} body={resp2.get_data(as_text=True)[:200]}")
 
         assert success1 and success2, f"不同 product 应能独立创建版本, 实际: p1={success1} p2={success2}"
 
