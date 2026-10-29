@@ -458,6 +458,24 @@ fields:
     semantics:
       meaning: 关联同一业务事务的多条审计记录
 
+  - id: change_set_id
+    name: 变更集ID
+    type: string
+    db_column: change_set_id
+    description: 一次保存产生的多条审计记录共享的变更集标识
+    semantics:
+      meaning: 业务变更集标识（一次保存一个）
+      filterable: true
+
+  - id: reason_code
+    name: 变更原因码
+    type: string
+    db_column: reason_code
+    description: 变更原因码（原因码必填字段被修改时写入）
+    semantics:
+      meaning: 变更原因码
+      filterable: true
+
   - id: status
     name: 审计状态
     type: string
@@ -765,6 +783,8 @@ ui_view_config:
           - field_name
           - old_value
           - new_value
+          - reason_code
+          - change_set_id
           - extra_data
       - id: trace
         label: 追踪信息
@@ -772,6 +792,7 @@ ui_view_config:
         fields:
           - trace_id
           - transaction_id
+          - change_set_id
           - agent_id
           - agent_session_id
           - tool_call_id
@@ -819,6 +840,10 @@ indexes:
   - fields: [transaction_id]
     name: idx_audit_txn
     description: 按事务ID索引
+
+  - fields: [change_set_id]
+    name: idx_audit_change_set
+    description: 按变更集ID索引
 
   - fields: [status]
     name: idx_audit_status

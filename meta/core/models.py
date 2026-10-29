@@ -918,6 +918,40 @@ class AuditConfig:
 
 
 @dataclass
+class RevisionFieldPolicy:
+    """revision_policy.fields[] 单行：字段级三开关（白名单制，见 spec D4）"""
+    field: str = ""
+    editable: bool = False
+    diff: bool = False
+    audit: bool = True  # 仅对"已列出的字段"生效；未列出字段不受影响
+
+
+@dataclass
+class MetaRevisionPolicy:
+    """对象级 revision 策略（M1 只解析，不启用版本能力）"""
+    enabled: bool = False
+    scope: str = "header"
+    revision_field: str = "revision_no"
+    generate_on: List[str] = field(default_factory=lambda: ["content_update"])
+    require_reason: bool = False
+    reason_required_fields: List[str] = field(default_factory=list)
+    editable_in_states: List[str] = field(default_factory=list)
+    editable_when: str = ""
+    fields: List[RevisionFieldPolicy] = field(default_factory=list)
+
+    def reason_fields_hit(self, changed_fields) -> List[str]:
+        """返回本次变更命中的原因码必填字段（去重保序）"""
+        if not self.enabled or not self.reason_required_fields:
+            return []
+        changed = set(changed_fields or [])
+        return [f for f in self.reason_required_fields if f in changed]
+
+    def audit_excluded_fields(self) -> Set[str]:
+        """返回 audit:false 的字段集合（仅已列出的字段）"""
+        return {f.field for f in self.fields if f.field and not f.audit}
+
+
+@dataclass
 class MetaObject:
     """元数据对象"""
     id: str
@@ -1002,6 +1036,9 @@ class MetaObject:
 
     # ── 新增：数据权限维度声明 ──
     data_permission_dimensions: List[DataPermissionDimension] = field(default_factory=list)
+
+    # ── 新增：变更策略（M1 只解析，不启用版本） ──
+    revision_policy: Optional[MetaRevisionPolicy] = None
 
     def __post_init__(self):
         """初始化时自动应用分类模板"""

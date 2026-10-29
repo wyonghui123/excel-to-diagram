@@ -11,7 +11,7 @@ Action 执行器 - 基于元模型定义执行 CRUD 操作
 - 审计日志自动记录
 """
 
-from typing import List, Dict, Any, Optional, Type
+from typing import List, Dict, Any, Optional, Type, Set
 from datetime import datetime
 import uuid
 import json
@@ -219,7 +219,8 @@ class AuditLogger:
             trace_id: str = None, transaction_id: str = None,
             parent_object_type: str = None, parent_object_id: Any = None,
             user_id: Any = None, user_name: str = None,
-            ip_address: str = None, user_agent: str = None) -> bool:
+            ip_address: str = None, user_agent: str = None,
+            change_set_id: str = None, reason_code: str = None) -> bool:
         if not self.enabled:
             return True
 
@@ -287,6 +288,8 @@ class AuditLogger:
                 ip_address=effective_ip,
                 user_agent=effective_ua,
                 outcome=outcome,  # 自动 derive (success/blocked/failure/retry)
+                change_set_id=change_set_id,
+                reason_code=reason_code,
             )
         except Exception as e:
             logger.error("AuditLogger failed to log: %s", str(e))
@@ -296,7 +299,8 @@ class AuditLogger:
                    trace_id: str = None, transaction_id: str = None,
                    parent_object_type: str = None, parent_object_id: Any = None,
                    user_id: Any = None, user_name: str = None,
-                   ip_address: str = None, user_agent: str = None) -> bool:
+                   ip_address: str = None, user_agent: str = None,
+                   change_set_id: str = None, reason_code: str = None) -> bool:
         self.log(
             object_type=object_type,
             object_id=object_id,
@@ -310,6 +314,8 @@ class AuditLogger:
             user_name=user_name,
             ip_address=ip_address,
             user_agent=user_agent,
+            change_set_id=change_set_id,
+            reason_code=reason_code,
         )
         for key, value in data.items():
             if key in ("updated_at", "updated_by", "id", "created_at", "created_by",
@@ -330,6 +336,8 @@ class AuditLogger:
                 user_name=user_name,
                 ip_address=ip_address,
                 user_agent=user_agent,
+                change_set_id=change_set_id,
+                reason_code=reason_code,
             )
         return True
 
@@ -338,15 +346,19 @@ class AuditLogger:
                    trace_id: str = None, transaction_id: str = None,
                    parent_object_type: str = None, parent_object_id: Any = None,
                    user_id: Any = None, user_name: str = None,
-                   ip_address: str = None, user_agent: str = None) -> bool:
+                   ip_address: str = None, user_agent: str = None,
+                   change_set_id: str = None, reason_code: str = None,
+                   exclude_fields: Optional[Set[str]] = None) -> bool:
         changes = self._detect_changes(old_data, new_data)
-        
-        for field, (old_val, new_val) in changes.items():
+
+        for field_name, (old_val, new_val) in changes.items():
+            if exclude_fields and field_name in exclude_fields:
+                continue
             self.log(
                 object_type=object_type,
                 object_id=object_id,
                 action="UPDATE",
-                field_name=field,
+                field_name=field_name,
                 old_value=old_val,
                 new_value=new_val,
                 trace_id=trace_id,
@@ -357,6 +369,8 @@ class AuditLogger:
                 user_name=user_name,
                 ip_address=ip_address,
                 user_agent=user_agent,
+                change_set_id=change_set_id,
+                reason_code=reason_code,
             )
 
         return True
@@ -365,7 +379,8 @@ class AuditLogger:
                    trace_id: str = None, transaction_id: str = None,
                    parent_object_type: str = None, parent_object_id: Any = None,
                    user_id: Any = None, user_name: str = None,
-                   ip_address: str = None, user_agent: str = None) -> bool:
+                   ip_address: str = None, user_agent: str = None,
+                   change_set_id: str = None, reason_code: str = None) -> bool:
         return self.log(
             object_type=object_type,
             object_id=object_id,
@@ -379,6 +394,8 @@ class AuditLogger:
             user_name=user_name,
             ip_address=ip_address,
             user_agent=user_agent,
+            change_set_id=change_set_id,
+            reason_code=reason_code,
         )
     
     def _detect_changes(self, old_data: Dict[str, Any], new_data: Dict[str, Any]) -> Dict[str, tuple]:
@@ -1646,7 +1663,8 @@ class ActionExecutor:
                     )
             
             parent_type, parent_id = self._resolve_parent_info(meta_object, data)
-            def _audit_create(trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None):
+            def _audit_create(trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None,
+                              change_set_id=None, reason_code=None, exclude_fields=None):
                 return self.audit_logger.log_create(
                     object_type=meta_object.id,
                     object_id=last_id,
@@ -1659,6 +1677,8 @@ class ActionExecutor:
                     user_name=user_name,
                     ip_address=ip_address,
                     user_agent=user_agent,
+                    change_set_id=change_set_id,
+                    reason_code=reason_code,
                 )
             self._write_audit_log_v2(_audit_create)
 
@@ -1916,7 +1936,26 @@ class ActionExecutor:
             original_data = self.ds.find_by_id(meta_object.table_name, id_value)
         except:
             pass
-        
+
+        # [M1] 变更策略校验（reason_code 必填 / audit 排除字段）
+        # 必须在 ds.update 之前拦截，保证被拒时既不落库也不写审计。
+        revision_policy = getattr(meta_object, 'revision_policy', None)
+        reason_code = None
+        exclude_fields = None
+        if revision_policy is not None and revision_policy.enabled:
+            reason_code = (params.get('reason_code') or '').strip() or None
+            changed_fields = {
+                k for k, v in data.items()
+                if (original_data or {}).get(k) != v
+            }
+            missing = revision_policy.reason_fields_hit(changed_fields)
+            if missing and not reason_code:
+                return ActionResult.fail(
+                    error="REASON_CODE_REQUIRED",
+                    message="以下字段变更必须提供原因码: %s" % ", ".join(missing),
+                )
+            exclude_fields = revision_policy.audit_excluded_fields() or None
+
         if original_data:
             hierarchy_result = validate_update(
                 meta_object.id, original_data, data, self.ds
@@ -2003,7 +2042,7 @@ class ActionExecutor:
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
                 self._write_audit_log_v2(
-                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_update(
+                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None, change_set_id=None, reason_code=None, exclude_fields=None: self.audit_logger.log_update(
                         object_type=meta_object.id,
                         object_id=id_value,
                         old_data=original_data,
@@ -2015,8 +2054,13 @@ class ActionExecutor:
                         user_id=user_id,
                         user_name=user_name,
                         ip_address=ip_address,
-                        user_agent=user_agent
-                    )
+                        user_agent=user_agent,
+                        change_set_id=change_set_id,
+                        reason_code=reason_code,
+                        exclude_fields=exclude_fields
+                    ),
+                    reason_code=reason_code,
+                    exclude_fields=exclude_fields,
                 )
             
             updated_data = self.ds.find_by_id(meta_object.table_name, id_value)
@@ -2060,7 +2104,7 @@ class ActionExecutor:
         try:
             parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
             self._write_audit_log_v2(
-                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log(
+                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None, change_set_id=None, reason_code=None, exclude_fields=None: self.audit_logger.log(
                     object_type=meta_object.id,
                     object_id=id_value,
                     action=action_label,
@@ -2078,6 +2122,8 @@ class ActionExecutor:
                     user_name=user_name,
                     ip_address=ip_address,
                     user_agent=user_agent,
+                    change_set_id=change_set_id,
+                    reason_code=reason_code,
                 )
             )
         except Exception as audit_err:
@@ -2328,7 +2374,7 @@ class ActionExecutor:
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
                 self._write_audit_log_v2(
-                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_delete(
+                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None, change_set_id=None, reason_code=None, exclude_fields=None: self.audit_logger.log_delete(
                         object_type=meta_object.id,
                         object_id=id_value,
                         data=original_data,
@@ -2339,7 +2385,9 @@ class ActionExecutor:
                         user_id=user_id,
                         user_name=user_name,
                         ip_address=ip_address,
-                        user_agent=user_agent
+                        user_agent=user_agent,
+                        change_set_id=change_set_id,
+                        reason_code=reason_code
                     )
                 )
                 self._trigger_aggregate_refresh(meta_object.id, id_value, "deleted")
@@ -2376,7 +2424,7 @@ class ActionExecutor:
                 message="Batch action '{0}' is not supported".format(action.id)
             )
     
-    def _write_audit_log_v2(self, audit_fn):
+    def _write_audit_log_v2(self, audit_fn, reason_code=None, exclude_fields=None):
         """V2 审计日志写入 — 参考 SAP V2 Update 模式
 
         业务事务提交后，审计日志通过 AsyncAuditWriter 异步写入。
@@ -2395,6 +2443,12 @@ class ActionExecutor:
             if os.environ.get('PYTEST_CURRENT_TEST') is not None:
                 logger.debug("[AuditLog] Skipping audit log write in pytest mode")
                 return
+
+            # [M1] 业务「一次保存」语义的变更集 ID：每次审计写入动作生成一个，
+            # 同一次保存扇出的多条审计行共享同一 change_set_id。
+            # 与 transaction_id（事务级归组）解耦，不能放在 AuditLogger 实例属性上
+            # （异步 worker 线程会串号）。
+            change_set_id = f"cs_{uuid.uuid4().hex[:16]}"
 
             trace_id = None
             transaction_id = None
@@ -2469,6 +2523,9 @@ class ActionExecutor:
                         user_name=user_name,
                         ip_address=ip_address,
                         user_agent=user_agent,
+                        change_set_id=change_set_id,
+                        reason_code=reason_code,
+                        exclude_fields=exclude_fields,
                     )
                 except Exception as e:
                     logger.warning(
@@ -2484,6 +2541,9 @@ class ActionExecutor:
                     user_name=user_name,
                     ip_address=ip_address,
                     user_agent=user_agent,
+                    change_set_id=change_set_id,
+                    reason_code=reason_code,
+                    exclude_fields=exclude_fields,
                 )
             else:
                 with audit_ds.transaction():
@@ -2494,6 +2554,9 @@ class ActionExecutor:
                         user_name=user_name,
                         ip_address=ip_address,
                         user_agent=user_agent,
+                        change_set_id=change_set_id,
+                        reason_code=reason_code,
+                        exclude_fields=exclude_fields,
                     )
         except Exception as e:
             logger.warning("Audit log V2 write failed: %s", str(e))
@@ -2532,7 +2595,7 @@ class ActionExecutor:
             result.affected_rows = count
             
             self._write_audit_log_v2(
-                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_create(
+                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None, change_set_id=None, reason_code=None, exclude_fields=None: self.audit_logger.log_create(
                     object_type=meta_object.id,
                     object_id=0,
                     data={'batch_inserted_count': count, 'object_type': meta_object.id},
@@ -2541,7 +2604,9 @@ class ActionExecutor:
                     user_id=user_id,
                     user_name=user_name,
                     ip_address=ip_address,
-                    user_agent=user_agent
+                    user_agent=user_agent,
+                    change_set_id=change_set_id,
+                    reason_code=reason_code
                 )
             )
             

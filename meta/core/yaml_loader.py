@@ -158,6 +158,8 @@ from meta.core.models import (
     IndexSource,
     IndexHint,
     CascadeSelectConfig,
+    RevisionFieldPolicy,
+    MetaRevisionPolicy,
 )
 
 
@@ -1125,6 +1127,77 @@ def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
         cascade_delete=cascade_tables,
         soft_delete=soft_del,
         post_delete=dp.get("post_delete", []),
+    )
+
+
+# 派生字段：由系统计算得到，禁止参与 revision 的 editable/diff（spec D5 / FR-011）
+_REVISION_DERIVED_FIELDS = frozenset({'fulfillment_status', 'fulfillment_derived_at'})
+
+
+def parse_revision_policy(data: Dict[str, Any], fields: List[str]) -> Optional[MetaRevisionPolicy]:
+    """解析变更策略配置（M1 只解析，不启用版本能力）
+
+    Args:
+        data: 对象 YAML 的原始 dict
+        fields: 该对象已声明的字段 id 列表，用于校验引用合法性
+    """
+    if not data or not data.get("revision_policy"):
+        return None
+
+    rp = data["revision_policy"]
+    obj_id = data.get("id", "")
+
+    field_policies: List[RevisionFieldPolicy] = []
+    for raw in rp.get("fields") or []:
+        if isinstance(raw, str):
+            field_id, editable, diff, audit = raw, False, False, True
+        else:
+            field_id = raw.get("field", "")
+            editable = bool(raw.get("editable", False))
+            diff = bool(raw.get("diff", False))
+            audit = bool(raw.get("audit", True))
+
+        if field_id not in fields:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.fields 引用了未声明字段 '{field_id}'"
+            )
+        if field_id in _REVISION_DERIVED_FIELDS and (editable or diff):
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.fields 中 '{field_id}' 是派生字段，"
+                f"不能声明 editable/diff"
+            )
+
+        field_policies.append(RevisionFieldPolicy(
+            field=field_id,
+            editable=editable,
+            diff=diff,
+            audit=audit,
+        ))
+
+    scope = rp.get("scope", "header")
+    enabled = bool(rp.get("enabled", False))
+    if enabled and scope != "header":
+        raise ValueError(
+            f"对象 '{obj_id}' 的 revision_policy.scope='{scope}' 不受支持（当前仅支持 header）"
+        )
+
+    reason_required_fields = list(rp.get("reason_required_fields") or [])
+    for f in reason_required_fields:
+        if f not in fields:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.reason_required_fields 引用了未声明字段 '{f}'"
+            )
+
+    return MetaRevisionPolicy(
+        enabled=enabled,
+        scope=scope,
+        revision_field=rp.get("revision_field", "revision_no"),
+        generate_on=list(rp.get("generate_on") or ["content_update"]),
+        require_reason=bool(rp.get("require_reason", False)),
+        reason_required_fields=reason_required_fields,
+        editable_in_states=list(rp.get("editable_in_states") or []),
+        editable_when=rp.get("editable_when", ""),
+        fields=field_policies,
     )
 
 
@@ -2236,6 +2309,7 @@ def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)
     obj.deletion_policy = parse_deletion_policy(data)
+    obj.revision_policy = parse_revision_policy(data, [f.id for f in fields])
     obj.hierarchy = parse_hierarchy(data)
     obj.context = parse_context(data)
     obj.cascade_select = parse_cascade_select(data)

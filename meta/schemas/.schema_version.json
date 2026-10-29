@@ -186,7 +186,7 @@
       "table": "attribute_scopes"
     },
     "audit_log": {
-      "hash": "134e1311c8a91de738760aad14ae9634",
+      "hash": "19ab0905d8b3fe17af576d028fea7a70",
       "fields": [
         "updated_at",
         "created_by",
@@ -210,6 +210,8 @@
         "extra_data",
         "trace_id",
         "transaction_id",
+        "change_set_id",
+        "reason_code",
         "status",
         "status_entered_at",
         "retry_count",
@@ -2494,5 +2496,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-28T08:47:33.118070"
+  "last_sync": "2026-10-28T23:27:06.211696"
 }

@@ -166,7 +166,8 @@ class AsyncAuditWriter:
     def submit(self, audit_fn: Callable, trace_id: str = None,
                transaction_id: str = None, user_id: Any = None,
                user_name: str = None, ip_address: str = None,
-               user_agent: str = None) -> bool:
+               user_agent: str = None, change_set_id: str = None,
+               reason_code: str = None, exclude_fields=None) -> bool:
         if not callable(audit_fn):
             logger.error(
                 "[CRITICAL] submit() received non-callable audit_fn: type=%s, value=%s, trace_id=%s. "
@@ -185,6 +186,8 @@ class AsyncAuditWriter:
                 audit_fn, trace_id, transaction_id,
                 user_id=user_id, user_name=user_name,
                 ip_address=ip_address, user_agent=user_agent,
+                change_set_id=change_set_id, reason_code=reason_code,
+                exclude_fields=exclude_fields,
             )
 
         task = {
@@ -195,6 +198,9 @@ class AsyncAuditWriter:
             'user_name': user_name,
             'ip_address': ip_address,
             'user_agent': user_agent,
+            'change_set_id': change_set_id,
+            'reason_code': reason_code,
+            'exclude_fields': exclude_fields,
             'submitted_at': time.time(),
         }
 
@@ -209,16 +215,21 @@ class AsyncAuditWriter:
                 audit_fn, trace_id, transaction_id,
                 user_id=user_id, user_name=user_name,
                 ip_address=ip_address, user_agent=user_agent,
+                change_set_id=change_set_id, reason_code=reason_code,
+                exclude_fields=exclude_fields,
             )
 
     def _write_sync(self, audit_fn: Callable, trace_id: str = None,
                     transaction_id: str = None, user_id: Any = None,
                     user_name: str = None, ip_address: str = None,
-                    user_agent: str = None) -> bool:
+                    user_agent: str = None, change_set_id: str = None,
+                    reason_code: str = None, exclude_fields=None) -> bool:
         result = self._write_with_retry(
             audit_fn, trace_id, transaction_id,
             user_id=user_id, user_name=user_name,
             ip_address=ip_address, user_agent=user_agent,
+            change_set_id=change_set_id, reason_code=reason_code,
+            exclude_fields=exclude_fields,
             is_fallback=True,
         )
         return result
@@ -244,6 +255,9 @@ class AsyncAuditWriter:
                     user_name=task.get('user_name'),
                     ip_address=task.get('ip_address'),
                     user_agent=task.get('user_agent'),
+                    change_set_id=task.get('change_set_id'),
+                    reason_code=task.get('reason_code'),
+                    exclude_fields=task.get('exclude_fields'),
                 )
             except Exception as e:
                 logger.error("Audit worker unexpected error: %s", str(e))
@@ -253,7 +267,9 @@ class AsyncAuditWriter:
     def _write_with_retry(self, audit_fn: Callable, trace_id: str = None,
                           transaction_id: str = None, is_fallback: bool = False,
                           user_id: Any = None, user_name: str = None,
-                          ip_address: str = None, user_agent: str = None) -> bool:
+                          ip_address: str = None, user_agent: str = None,
+                          change_set_id: str = None, reason_code: str = None,
+                          exclude_fields=None) -> bool:
         """
         带重试的审计日志写入
 
@@ -312,7 +328,9 @@ class AsyncAuditWriter:
                     logger.debug("Already in transaction, executing audit_fn directly")
                     audit_fn(trace_id=trace_id, transaction_id=transaction_id,
                              user_id=user_id, user_name=user_name,
-                             ip_address=ip_address, user_agent=user_agent)
+                             ip_address=ip_address, user_agent=user_agent,
+                             change_set_id=change_set_id, reason_code=reason_code,
+                             exclude_fields=exclude_fields)
                 elif hasattr(thread_ds, 'begin_transaction'):
                     thread_ds.begin_transaction()
                     try:
@@ -326,7 +344,9 @@ class AsyncAuditWriter:
                             return False
                         audit_fn(trace_id=trace_id, transaction_id=transaction_id,
                                  user_id=user_id, user_name=user_name,
-                                 ip_address=ip_address, user_agent=user_agent)
+                                 ip_address=ip_address, user_agent=user_agent,
+                                 change_set_id=change_set_id, reason_code=reason_code,
+                                 exclude_fields=exclude_fields)
                         thread_ds.commit()
                     except Exception:
                         try:
@@ -346,7 +366,9 @@ class AsyncAuditWriter:
                         return False
                     audit_fn(trace_id=trace_id, transaction_id=transaction_id,
                              user_id=user_id, user_name=user_name,
-                             ip_address=ip_address, user_agent=user_agent)
+                             ip_address=ip_address, user_agent=user_agent,
+                             change_set_id=change_set_id, reason_code=reason_code,
+                             exclude_fields=exclude_fields)
 
                 with self._stats_lock:
                     if is_fallback:
