@@ -261,6 +261,60 @@ class BatchAuditContext:
         return False  # 不吞异常
 
 
+#: extra_data 中承载「整行快照」的键（log_create 的 data / log_delete 的 deleted_data）
+_WHOLE_ROW_KEYS = ('data', 'deleted_data')
+
+
+def _mask_audit_payload(object_type: str, field_logs: list, extra_data: Any):
+    """审计落库前统一脱敏（PII 审计旁路修复，方案 1）
+
+    `AuditService.log` 是全部审计写入的唯一汇聚点（AuditInterceptor / AuditLogger /
+    auth_api 等直插路径都经此），在此一次性补齐三类历史缺口：
+
+      1. `field_name` 分支的 old_value / new_value（`log_update` 逐字段，此前明文）；
+      2. `extra_data` 的整行快照 `data`（log_create）/ `deleted_data`（log_delete）；
+      3. `field_name` 为中文名的情况（AuditInterceptor 写 `field.name`）。
+
+    脱敏规则与读面共用 `field_masking_service`（`sensitivity` + `LOG_REDACT_IDS`），
+    保证「审计里看到的」与「接口返回的」口径一致；未命中的字段一律原样。
+    """
+    if not object_type:
+        return field_logs, extra_data
+
+    # lazy import：field_masking_service 反向依赖本模块的 _mask_phone，顶层导入会成环
+    from meta.services.field_masking_service import (
+        _build_plan, _mask_value, mask_record, mask_records,
+    )
+
+    plan = _build_plan(object_type)
+    if not plan:
+        return field_logs, extra_data
+
+    masked_logs = []
+    for entry in (field_logs or []):
+        category = plan.get((entry.get('field_name') or '').strip())
+        if not category:
+            masked_logs.append(entry)
+            continue
+        new_entry = dict(entry)
+        for key in ('old_value', 'new_value'):
+            if new_entry.get(key):
+                new_entry[key] = _mask_value(category, new_entry[key])
+        masked_logs.append(new_entry)
+
+    if isinstance(extra_data, dict) and extra_data:
+        masked_extra = dict(extra_data)
+        for key in _WHOLE_ROW_KEYS:
+            payload = masked_extra.get(key)
+            if isinstance(payload, dict):
+                masked_extra[key] = mask_record(object_type, payload)
+            elif isinstance(payload, list):
+                masked_extra[key] = mask_records(object_type, payload)
+        extra_data = masked_extra
+
+    return masked_logs, extra_data
+
+
 class AuditService:
 
     AUDIT_TABLE = "audit_logs"
@@ -752,6 +806,13 @@ class AuditService:
                     'new_value': action,
                 })
             
+            # [PII 审计旁路 2026-10-29] 落库前统一脱敏（方案 1）
+            # CREATE/UPDATE/DELETE 的整行快照与逐字段 old/new 此前原样入库：
+            # `_SYSTEM_FIELDS` 只过滤噪音字段（且不含 mobile/email），yaml 的
+            # `audit.*.exclude` 仅被 AuditInterceptor 消费，ActionExecutor 直连路径不读。
+            # 这里复用读面同一套 sensitivity 规则（field_masking_service），一处收口。
+            field_logs, extra_data = _mask_audit_payload(object_type, field_logs, extra_data)
+
             for field_log in field_logs:
                 record = {
                     'object_type': object_type or '_unknown',

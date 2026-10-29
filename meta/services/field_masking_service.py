@@ -84,6 +84,11 @@ def _build_plan(object_type: str) -> Dict[str, str]:
         db_column = getattr(meta_field, 'db_column', '') or ''
         if db_column and db_column != field_id:
             plan[db_column] = category
+        # [审计旁路 2026-10-29] AuditInterceptor 以 field.name（中文名）写 field_name，
+        # 只按 id / db_column 建映射会漏掉这类日志，故一并纳入。
+        field_name = getattr(meta_field, 'name', '') or ''
+        if field_name and field_name not in plan:
+            plan[field_name] = category
     return plan
 
 
