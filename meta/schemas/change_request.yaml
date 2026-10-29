@@ -5,7 +5,7 @@
 #   ① target_object_type + target_object_id + target_revision_no 在提交时冻结，
 #     目标已被他人修改则拒绝提交（FR-010 乐观锁预检）。
 #   ② status 是唯一状态列：draft → submitted → approved → applied；
-#     旁支 submitted → rejected、approved → failed。
+#     旁支 submitted → rejected、submitted → cancelled、approved → failed。
 #   ③ 审批复用 tasks 模型（type=approval），不新建审批引擎（D1/D2）。
 
 id: change_request
@@ -98,6 +98,10 @@ fields:
       - value: failed
         label: 生效失败
         color: danger
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: warning
         category: inactive
     semantics:
       meaning: 变更申请状态
@@ -322,6 +326,23 @@ rules:
     ui_hints:
       label: 标记生效失败（内部）
       icon: warning
+      hidden: true
+      confirm_message: "系统内部使用"
+
+  # [G3 审批闭环] 审批任务取消 / 超时 / 死信时由系统内部推进，消灭 submitted 悬挂态。
+  # 不面向用户：ui_hints.hidden，且不在任何前端动作条露出。
+  - id: cancel_change_request
+    name: 取消申请
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: cancelled
+    triggers: [before_update]
+    action_ref: "change_request:cancel"
+    description: 审批任务取消 / 超时 / 死信时由系统内部推进，不面向用户
+    ui_hints:
+      label: 取消申请（内部）
+      icon: cancel
       hidden: true
       confirm_message: "系统内部使用"
 

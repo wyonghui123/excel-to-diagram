@@ -5,9 +5,9 @@ M3 T6：变更申请 YAML 契约（FR-007 头/行表 + FR-008 状态机 + FR-011
 
 覆盖：
   S1 change_request.yaml / change_request_line.yaml 可解析（不依赖 registry / DB）
-  S2 5 条 state_transition 边：state_field == status、triggers 含 before_update、
+  S2 6 条 state_transition 边：state_field == status、triggers 含 before_update、
      action_ref 非空且与边一一对应、ui_hints 三要素齐备（label/icon/confirm_message）
-  S3 fail 边 ui_hints.hidden == True（仅系统内部使用）
+  S3 fail / cancel 边 ui_hints.hidden == True（仅系统内部使用）
   S4 draft→submitted / submitted→{approved,rejected} 三条边无 side_effects
   S5 FR-011：派生字段 fulfillment_status 作为 state_field ⇒ 加载期 ValueError
      （state_field == status 的对照 yaml 可正常解析）
@@ -38,6 +38,7 @@ EDGES = [
     ('reject_change_request', 'submitted', 'rejected', 'change_request:reject'),
     ('apply_change_request', 'approved', 'applied', 'change_request:apply'),
     ('fail_change_request', 'approved', 'failed', 'change_request:apply'),
+    ('cancel_change_request', 'submitted', 'cancelled', 'change_request:cancel'),
 ]
 
 
@@ -76,7 +77,7 @@ class TestSchemaLoads:
                 'old_value', 'new_value'} <= ids
 
 
-# ---------------------------------------------------------------- S2 5 条边
+# ---------------------------------------------------------------- S2 6 条边
 
 class TestStateTransitions:
     @pytest.mark.parametrize('rule_id,from_state,to_state,action_ref', EDGES)
@@ -94,12 +95,13 @@ class TestStateTransitions:
         assert hints.icon, '%s 缺 ui_hints.icon' % rule_id
         assert hints.confirm_message, '%s 缺 ui_hints.confirm_message' % rule_id
 
-    def test_s2_five_edges_only(self):
+    def test_s2_six_edges_only(self):
         assert set(_rules(_load('change_request.yaml'))) == {e[0] for e in EDGES}
 
-    def test_s3_fail_edge_hidden(self):
-        rule = _rules(_load('change_request.yaml'))['fail_change_request']
-        assert rule.ui_hints.hidden is True
+    def test_s3_system_edges_hidden(self):
+        rules = _rules(_load('change_request.yaml'))
+        assert rules['fail_change_request'].ui_hints.hidden is True
+        assert rules['cancel_change_request'].ui_hints.hidden is True
 
     def test_s4_no_side_effects(self):
         """draft→submitted / submitted→approved / submitted→rejected 均无副作用声写。"""

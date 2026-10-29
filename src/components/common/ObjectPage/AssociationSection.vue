@@ -254,6 +254,42 @@
       />
     </template>
 
+    <!-- [G1 审批闭环 2026-10-29] 变更申请只读分区：BO 详情页的「审批中」可见性。
+         数据由 target_object_type + target_object_id 精确过滤（见下方自定义取数器），
+         不复用平台 associationFilters（其过滤列写死 `{父对象类型}_id`，会返回全量）。 -->
+    <div v-else-if="isTargetChangeRequests" class="op-merged-relations">
+      <el-table :data="changeRequestsData" v-loading="changeRequestsLoading" size="small" max-height="400">
+        <el-table-column label="申请编号" width="100">
+          <template #default="{ row }">#{{ row.id }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="crStatusTagType(row.status)" size="small">
+              {{ crStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="summary" label="申请说明" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="submitted_by" label="提交人" width="120" />
+        <el-table-column prop="submitted_at" label="提交时间" width="170" />
+        <el-table-column label="审批结果" min-width="180">
+          <template #default="{ row }">
+            <span v-if="row.status === 'approved' || row.status === 'applied'">
+              {{ row.approved_by || '-' }} {{ row.approved_at || '' }}
+            </span>
+            <span v-else-if="row.status === 'rejected' || row.status === 'cancelled' || row.status === 'failed'">
+              {{ row.fail_reason || '-' }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="op-empty-state" v-if="!changeRequestsLoading && changeRequestsData.length === 0">
+        <AppIcon name="link" size="lg" />
+        <p>暂无变更申请</p>
+      </div>
+    </div>
+
     <template v-else-if="isAnnotation">
       <MetaListPage
         v-if="objectType && hasRealObjectId"
@@ -924,6 +960,92 @@ async function loadRelationAccounts() {
   } finally {
     if (version === _relationAccountsVersion) {
       relationAccountsLoading.value = false
+    }
+  }
+}
+
+// [G1 审批闭环 2026-10-29] 变更申请分区（挂 BO 详情页，表达「审批中」可见性）。
+//   平台关联端点过滤列写死 `{父对象类型}_id`（本对象会得 sales_order_id），而
+//   change_requests 的列是 target_object_type / target_object_id；列名不匹配时
+//   后端忽略条件返回全量（跨单据数据泄漏）⇒ 必须走自定义取数器按 target 精确查。
+const isTargetChangeRequests = computed(() => {
+  return props.section.customFetcher === 'target_change_requests'
+})
+
+const changeRequestsData = ref([])
+const changeRequestsLoading = ref(false)
+let _changeRequestsVersion = 0
+
+// 状态标签：优先读 change_request.yaml 的 enum_values（单一真源），取不到时回退静态映射。
+const CR_STATUS_FALLBACK = Object.freeze({
+  draft: { label: '草稿', color: 'info' },
+  submitted: { label: '已提交', color: 'primary' },
+  approved: { label: '已通过', color: 'success' },
+  rejected: { label: '已驳回', color: 'danger' },
+  applied: { label: '已生效', color: 'success' },
+  failed: { label: '生效失败', color: 'danger' },
+  cancelled: { label: '已取消', color: 'warning' }
+})
+const crStatusMeta = ref(null)
+
+async function ensureCrStatusMeta() {
+  if (crStatusMeta.value) return crStatusMeta.value
+  const map = { ...CR_STATUS_FALLBACK }
+  try {
+    const res = await metaService.getUIConfig('change_request')
+    const statusField = (res?.data?.fields || []).find(f => f.id === 'status')
+    for (const option of (statusField?.enum_values || [])) {
+      if (option?.value) {
+        map[option.value] = {
+          label: option.label || option.value,
+          color: option.color || ''
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[AssociationSection] 变更申请状态枚举加载失败:', e)
+  }
+  crStatusMeta.value = map
+  return map
+}
+
+function crStatusLabel(status) {
+  return (crStatusMeta.value?.[status]?.label) || status || '-'
+}
+
+// el-tag 只认 success/info/warning/danger；primary 用默认主题色（空字符串）。
+const EL_TAG_TYPES = new Set(['success', 'info', 'warning', 'danger'])
+function crStatusTagType(status) {
+  const color = crStatusMeta.value?.[status]?.color || ''
+  return EL_TAG_TYPES.has(color) ? color : ''
+}
+
+async function loadTargetChangeRequests() {
+  if (!hasRealObjectId.value || !props.objectType) {
+    changeRequestsData.value = []
+    changeRequestsLoading.value = false
+    return
+  }
+  const version = ++_changeRequestsVersion
+  changeRequestsLoading.value = true
+  try {
+    await ensureCrStatusMeta()
+    const res = await boService.query('change_request', {
+      target_object_type: props.objectType,
+      target_object_id: String(props.objectId),
+      page_size: 50
+    })
+    if (version !== _changeRequestsVersion) return
+    const rows = normalizeQueryItems(res)
+    rows.sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    changeRequestsData.value = rows
+  } catch (e) {
+    if (version !== _changeRequestsVersion) return
+    console.error('[AssociationSection] loadTargetChangeRequests 失败:', e)
+    changeRequestsData.value = []
+  } finally {
+    if (version === _changeRequestsVersion) {
+      changeRequestsLoading.value = false
     }
   }
 }
@@ -1715,17 +1837,20 @@ watch(() => props.objectId, (newVal, oldVal) => {
     loadPartyRelations()
   } else if (isRelationAccounts.value) {
     loadRelationAccounts()
+  } else if (isTargetChangeRequests.value) {
+    loadTargetChangeRequests()
   }
 }, { immediate: true })
 
 function refresh() {
   if (isPartyRelations.value) { loadPartyRelations(); return }
   if (isRelationAccounts.value) { loadRelationAccounts(); return }
+  if (isTargetChangeRequests.value) { loadTargetChangeRequests(); return }
   if (isMergedRelationships.value) { loadMergedRelationships(); return }
   metaListRef.value?.refresh?.()
 }
 
-defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelationAccounts })
+defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelationAccounts, loadTargetChangeRequests })
 </script>
 
 <style scoped>

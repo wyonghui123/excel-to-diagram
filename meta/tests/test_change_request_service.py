@@ -12,6 +12,10 @@ M3 T6：变更申请提交钩子 + 状态迁移单测（FR-007 / FR-008 / FR-010
   C5 正常提交 ⇒ tasks 表 1 行，字段口径（type/status/assign_policy/
      decision_actions 成对 / inputs 4 键 / doc_ref / attempt）
   C6 transition 非法边 ⇒ INVALID_TRANSITION (409)；合法边写 approved_by/approved_at
+  C7 同目标已有 submitted 在途申请 ⇒ TARGET_HAS_PENDING_REQUEST (409)，且不建审批任务
+  C7b 同目标已有 approved 在途申请 ⇒ 同上（approved 仍在途）
+  C8 同目标仅有终态申请（rejected / applied）⇒ 允许提交并建审批任务
+  C9 cancelled 合法边写 fail_reason（显式 / 默认两种）；draft → cancelled 非法
 
 设计取舍：
   - 临时 SQLite（SQLiteAdapter）+ register_table_name，绝不动 meta/architecture.db；
@@ -319,3 +323,79 @@ class TestTransition:
         assert fresh['status'] == 'approved'
         assert fresh['approved_by'] == 'u-appr'
         assert fresh['approved_at'] == updates['approved_at']
+
+    def test_c9_cancel_writes_fail_reason(self, ds):
+        cr_id = _make_cr(ds, status='submitted')
+        row = ds.find_by_id(CR_TABLE, cr_id)
+
+        updates = transition(ds, row, 'cancelled', 'system',
+                             {'fail_reason': '审批任务超时'})
+
+        assert updates['status'] == 'cancelled'
+        assert updates['fail_reason'] == '审批任务超时'
+        fresh = ds.find_by_id(CR_TABLE, cr_id)
+        assert fresh['status'] == 'cancelled'
+        assert fresh['fail_reason'] == '审批任务超时'
+
+    def test_c9b_cancel_default_reason(self, ds):
+        cr_id = _make_cr(ds, status='submitted')
+        row = ds.find_by_id(CR_TABLE, cr_id)
+
+        updates = transition(ds, row, 'cancelled')
+
+        assert updates['fail_reason'] == '审批任务终止，变更申请自动取消'
+
+    def test_c9c_draft_cannot_cancel(self, ds):
+        cr_id = _make_cr(ds, status='draft')
+        row = ds.find_by_id(CR_TABLE, cr_id)
+
+        with pytest.raises(ChangeRequestError) as ei:
+            transition(ds, row, 'cancelled')
+
+        assert ei.value.code == 'INVALID_TRANSITION'
+        assert ei.value.status_code == 409
+
+
+# ---------------------------------------------------------------- 在途唯一（G2）
+
+class TestPendingUnique:
+    def test_c7_submitted_in_flight_blocks_submit(self, ds):
+        _insert_order(ds)
+        _make_cr(ds, status='submitted')  # 同目标已有在途申请
+        cr_id = _make_cr(ds)
+        _add_line(ds, cr_id, 'total_amount')
+
+        with pytest.raises(ChangeRequestError) as ei:
+            _submit(ds, cr_id)
+
+        assert ei.value.code == 'TARGET_HAS_PENDING_REQUEST'
+        assert ei.value.status_code == 409
+        assert '在途变更申请' in ei.value.message
+        # 不得产生第二条审批任务
+        assert ds.find('tasks') == []
+
+    def test_c7b_approved_in_flight_blocks_submit(self, ds):
+        _insert_order(ds)
+        _make_cr(ds, status='approved')
+        cr_id = _make_cr(ds)
+        _add_line(ds, cr_id, 'total_amount')
+
+        with pytest.raises(ChangeRequestError) as ei:
+            _submit(ds, cr_id)
+
+        assert ei.value.code == 'TARGET_HAS_PENDING_REQUEST'
+        assert ei.value.status_code == 409
+        assert ds.find('tasks') == []
+
+    def test_c8_terminal_requests_do_not_block(self, ds):
+        _insert_order(ds)
+        for status in ('rejected', 'applied'):
+            _make_cr(ds, status=status)
+        cr_id = _make_cr(ds)
+        _add_line(ds, cr_id, 'total_amount')
+
+        _submit(ds, cr_id)
+
+        tasks = ds.find('tasks')
+        assert len(tasks) == 1
+        assert tasks[0]['doc_ref'] == str(cr_id)

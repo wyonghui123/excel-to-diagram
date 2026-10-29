@@ -21,14 +21,19 @@ CR_TABLE = 'change_requests'
 CRL_TABLE = 'change_request_lines'
 TASKS_TABLE = 'tasks'
 
-# 与 meta/schemas/change_request.yaml 的 5 条 state_transition 同源
+# 与 meta/schemas/change_request.yaml 的 6 条 state_transition 同源
 _TRANSITIONS = {
     'submitted': ('draft',),
     'approved': ('submitted',),
     'rejected': ('submitted',),
     'applied': ('approved',),
     'failed': ('approved',),
+    # G3：审批任务取消 / 超时 / 死信时由系统内部推进，消灭 submitted 悬挂态
+    'cancelled': ('submitted',),
 }
+
+# G3：只有这些任务终态的审批任务会回写变更申请（正常通过/驳回时 CR 已先离开 submitted）
+_TASK_TERMINAL_FOR_CR = ('cancelled', 'skipped', 'dead', 'failed')
 
 _TABLES_READY = False
 
@@ -193,6 +198,21 @@ def after_status_change(ds, before: Dict[str, Any], after: Dict[str, Any],
                 target_row.get('revision_no'), target_revision_no),
         )
 
+    # ③' 同目标仅一条在途申请（G2）：submitted / approved 都算在途
+    #     idx_cr_target(target_object_type, target_object_id, status) 已覆盖本查询
+    pending_rows = ds.execute(
+        "SELECT id FROM change_requests "
+        "WHERE target_object_type = ? AND target_object_id = ? "
+        "AND status IN ('submitted', 'approved') AND id <> ?",
+        (target_type, str(target_id), cr_id),
+    ).fetchall()
+    if pending_rows:
+        raise ChangeRequestError(
+            'TARGET_HAS_PENDING_REQUEST',
+            '目标单据已有在途变更申请 #%s，请先完成或取消后再提交' % pending_rows[0][0],
+            409,
+        )
+
     # ④ 创建审批任务（平台无创建 API，直插 tasks）
     #    code 留 None：tasks.code 的唯一索引 + ^T-[0-9]+$ 人读编号约束不适用于审批类任务，
     #    与 workflow_engine 建任务时一致（NULL 不参与唯一冲突）。
@@ -255,9 +275,65 @@ def transition(ds, cr_row: Dict[str, Any], to_status: str,
         updates['approved_at'] = _now_iso()
     elif to_status == 'applied':
         updates['applied_at'] = _now_iso()
+    elif to_status == 'cancelled':
+        updates['fail_reason'] = (extra or {}).get('fail_reason') \
+            or '审批任务终止，变更申请自动取消'
     if extra:
         updates.update(extra)
 
     _ensure_tables(ds)
     ds.update(CR_TABLE, cr_row['id'], updates)
     return updates
+
+
+def on_approval_task_terminal(ds, task_id: str, to_status: str,
+                              actor: Any = '', reason: str = '') -> Optional[Dict[str, Any]]:
+    """审批类任务终止 → 回写仍停在 submitted 的变更申请为 cancelled（幂等 no-op）。
+
+    由 A3 事件账统一入口 `task_event_schema.record_transition` 挂钩调用：
+      - 决策链是「先 BO 生效（CR→approved/rejected），后任务归位」，正常通过/驳回时
+        CR 已离开 submitted，本函数返回 None；
+      - 只有「任务终止但 BO 未生效」（取消 / 超时 / 死信 / 执行失败）才会真正写 cancelled，
+        消灭 `change_requests.status = submitted` 的悬挂态。
+
+    纪律：本函数不建表、不吞业务异常以外的错误；调用方负责不阻断任务迁移。
+    """
+    if to_status not in _TASK_TERMINAL_FOR_CR:
+        return None
+
+    try:
+        rows = ds.execute(
+            "SELECT type, doc_ref, inputs FROM tasks WHERE id = ?",
+            (str(task_id),),
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - 库未启用 tasks 表 → 无审批任务可回写
+        return None
+    if not rows:
+        return None
+
+    task_type, doc_ref, inputs_raw = rows[0]
+    if task_type not in ('approval', 'review'):
+        return None
+
+    cr_id = doc_ref
+    if cr_id in (None, ''):
+        try:
+            inputs = json.loads(inputs_raw) if isinstance(inputs_raw, str) else (inputs_raw or {})
+            cr_id = (inputs or {}).get('change_request_id')
+        except (TypeError, ValueError):
+            cr_id = None
+    if cr_id in (None, ''):
+        return None
+
+    # change_requests.id 是 INTEGER，doc_ref / inputs 存的是字符串 → 数字串转回 int，
+    # 否则 SQLite 的 1 != '1' 会让回写静默失效。
+    cr_key = int(cr_id) if str(cr_id).isdigit() else cr_id
+    try:
+        cr_row = ds.find_by_id(CR_TABLE, cr_key)
+    except Exception:  # noqa: BLE001 - 库未启用 change_requests 表 → no-op
+        return None
+    if not cr_row or cr_row.get('status') != 'submitted':
+        return None
+
+    fail_reason = (reason or '审批任务 %s，变更申请自动取消' % to_status)[:200]
+    return transition(ds, cr_row, 'cancelled', actor, {'fail_reason': fail_reason})

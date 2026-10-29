@@ -407,6 +407,40 @@ def _active_task_doc_refs(data_source) -> set:
     return {r[0] for r in rows if r[0]}
 
 
+def _change_request_without_task_findings(
+    data_source, stale_hours: Optional[float], now_dt: datetime,
+) -> List[Dict[str, Any]]:
+    """方向 4：`change_requests.status='submitted'` 但无活跃审批任务（悬挂态）。
+
+    表不存在（该库未启用 M3）→ 返回空清单。`submitted_at` 可解析且未超
+    `stale_hours` 的任务视为刚提交、暂时不告警；无时间戳视为悬挂。
+    """
+    try:
+        rows = data_source.execute(
+            "SELECT id, submitted_at, target_object_type, target_object_id "
+            "FROM change_requests WHERE status = 'submitted'"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - 未启用变更申请的库无此表
+        return []
+
+    active = _active_task_doc_refs(data_source)
+    findings: List[Dict[str, Any]] = []
+    for cr_id, submitted_at, target_type, target_id in rows:
+        if str(cr_id) in active:
+            continue
+        since = _parse_time(submitted_at)
+        if since is not None and stale_hours is not None:
+            if (now_dt - since) < timedelta(hours=float(stale_hours)):
+                continue
+        findings.append({
+            "kind": "change_request_without_approval_task",
+            "task_id": "", "doc_ref": str(cr_id),
+            "detail": "变更申请 #%s（%s#%s）处于 submitted 但无活跃审批任务" % (
+                cr_id, target_type, target_id),
+        })
+    return findings
+
+
 def reconcile_effects(
     data_source,
     *,
@@ -424,6 +458,8 @@ def reconcile_effects(
       2. `effect_mismatch`      — 回执 `new_status` 与单据现状不一致（需注入 `current_statuses`）
       3. `pending_without_task` — 单据等待审批超 `stale_hours` 但无活跃审批任务
                                   （需注入 `pending_docs`，元素为 doc_ref 或 {doc_ref, since}）
+      4. `change_request_without_approval_task` — 变更申请停在 submitted 但无活跃审批任务
+                                  （审批任务取消/超时/死信后的悬挂态兜底；表不存在则跳过）
 
     本函数只读、不写库；告警进入统一收件箱属 A8，`bo.status_changed` 反向事件属 D3。
     """
@@ -488,5 +524,9 @@ def reconcile_effects(
                 "kind": "pending_without_task", "task_id": "", "doc_ref": doc_ref,
                 "detail": f"单据等待审批超 {stale_hours}h 但无活跃审批任务",
             })
+
+    # 方向 4：变更申请悬挂态（审批任务取消/超时/死信后 CR 停在 submitted）
+    findings.extend(_change_request_without_task_findings(
+        data_source, stale_hours, now_dt))
 
     return findings

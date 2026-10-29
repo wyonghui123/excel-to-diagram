@@ -1678,6 +1678,22 @@ ui_view_config:
         columns:
           - fields: [description]
 
+  # [G1 审批闭环 2026-10-29] 变更申请分区：BO 详情页的「审批中」可见性。
+  #   不走平台关联端点：AssociationSection.associationFilters 把过滤列写死
+  #   `{父对象类型}_id`（本对象会得 sales_order_id），而 change_requests 的列是
+  #   target_object_type / target_object_id；列名不匹配时后端会忽略条件返回全量
+  #   ⇒ 跨单据数据泄漏。故用 customFetcher=target_change_requests 按 target 精确取数。
+  #   只读：审批处理仍走任务收件箱（/api/v1/tasks/{id}/decision），不在详情页重复造审批 UI。
+  detail:
+    facets:
+      - title: 变更申请
+        id: change_request_section
+        type: association
+        association: change_request
+        customFetcher: target_change_requests
+        readonly: true
+        pageSize: 10
+
   # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
   child_sections:
     - child_object: sales_order_line

@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,6 +33,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from meta.core.models import (
     FieldType, IndexSource, MetaField, MetaIndex, MetaObject,
 )
+
+logger = logging.getLogger(__name__)
+
+# [G3 审批闭环] 审批类任务终止态 → 回写仍停在 submitted 的 change_request。
+# 正常通过/驳回时 CR 已先由 BO 生效链路离开 submitted，回写为 no-op。
+_APPROVAL_TASK_TERMINAL = ("cancelled", "skipped", "dead", "failed")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 表名与值域常量
@@ -358,6 +365,23 @@ def record_transition(
             doc_ref or None, trace_id or None, ts, _now_iso(),
         ),
     )
+
+    # [G3 审批闭环] 审批类任务终止 → 回写仍停在 submitted 的 change_request。
+    # 失败只告警、不阻断任务迁移；悬挂态由 reconcile_effects 方向 4 兜底暴露。
+    if to_status in _APPROVAL_TASK_TERMINAL:
+        try:
+            from meta.services.change_request_service import (
+                on_approval_task_terminal,
+            )
+            on_approval_task_terminal(
+                data_source, task_id, to_status, actor=actor, reason=reason,
+            )
+        except Exception:  # noqa: BLE001 - 回写失败不阻断任务迁移
+            logger.warning(
+                "审批任务终止回写 change_request 失败: task=%s to=%s",
+                task_id, to_status, exc_info=True,
+            )
+
     return event_id, worklog_id
 
 
