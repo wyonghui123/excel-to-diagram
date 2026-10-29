@@ -87,8 +87,34 @@ def event_env(tmp_path_factory):
     from meta.core.event_outbox import stop_event_dispatcher
     stop_event_dispatcher()
 
+    # [FIX 2026-10-29] outbound_order 的 item_id / warehouse_id 声明了
+    # ui.widget: select + relation，yaml_loader 据此推导出 validation=True 的
+    # value_help；bo_api.create_bo 写入前会校验值必须在有效选项中。
+    # 原用例用临时空库且写死 item_id=101 / warehouse_id=1，库里没有任何主数据
+    # ⇒ 6 个跨应用用例全部 400 VALUE_HELP_VALIDATION_FAILED。
+    # 这里在冻结投递线程后一次性建好主数据（module 级），供 _create_order 使用。
+    seed_client = app.test_client()
+    seed_client.get("/api/v1/auth/dev-login?username=admin")
+    wh_resp = seed_client.post("/api/v2/bo/warehouse", json={
+        "code": "WH_POC4", "name": "PoC4 发货仓库",
+    })
+    assert wh_resp.status_code in (200, 201), wh_resp.get_data(as_text=True)[:400]
+    warehouse_id = wh_resp.get_json()["data"]["id"]
+
+    item_resp = seed_client.post("/api/v2/bo/stock_item", json={
+        "code": "ITEM_POC4", "name": "PoC4 物料",
+        "warehouse_id": warehouse_id, "quantity": 100.0,
+    })
+    assert item_resp.status_code in (200, 201), item_resp.get_data(as_text=True)[:400]
+    item_id = item_resp.get_json()["data"]["id"]
+
     try:
-        yield {"app": app, "app_dir": app_dir}
+        yield {
+            "app": app,
+            "app_dir": app_dir,
+            "warehouse_id": warehouse_id,
+            "item_id": item_id,
+        }
     finally:
         _restore_env(previous)
 
@@ -97,6 +123,11 @@ def event_env(tmp_path_factory):
 def client(event_env):
     c = event_env["app"].test_client()
     c.get("/api/v1/auth/dev-login?username=admin")
+    # 主数据 id 由 event_env（module 级）一次性建好，这里只做传递
+    c.poc4_seed = {
+        "item_id": event_env["item_id"],
+        "warehouse_id": event_env["warehouse_id"],
+    }
     return c
 
 
@@ -505,10 +536,12 @@ def _dispatch(event_env, max_attempts=3):
     return dispatcher.dispatch_once()
 
 
-def _create_order(client, order_no, quantity=5.0, item_id=101, warehouse_id=1):
+def _create_order(client, order_no, quantity=5.0):
+    # item_id / warehouse_id 必须是已存在的主数据: outbound_order 对两者声明了
+    # value_help.validation=True，写入口会拒绝不在有效选项中的值（原写死 101/1 已失效）
     resp = client.post(BO_URL_OUTBOUND, json={
-        "order_no": order_no, "item_id": item_id, "quantity": quantity,
-        "warehouse_id": warehouse_id,
+        "order_no": order_no, "item_id": client.poc4_seed["item_id"],
+        "quantity": quantity, "warehouse_id": client.poc4_seed["warehouse_id"],
     })
     assert resp.status_code in (200, 201), resp.get_data(as_text=True)[:400]
     body = resp.get_json()
