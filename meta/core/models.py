@@ -1133,39 +1133,49 @@ class MetaObject:
         return None
     
     def get_rules_by_type(self, rule_type: RuleType) -> List[MetaRule]:
-        """按类型获取规则"""
-        return [r for r in self.rules if r.rule_type == rule_type]
+        """按类型获取规则
+
+        [S5 收敛 2026-10-29] 判据统一为 rule_type，实现委托 RuleProvider
+        （唯一读取门面）。本地 import 规避 models <-> rule_provider 循环依赖。
+        """
+        from meta.core.rule_provider import get_rule_provider
+        return get_rule_provider().get_rules_by_type(self, rule_type)
     
     def get_rules_by_trigger(self, trigger: RuleTrigger) -> List[MetaRule]:
-        """按触发时机获取规则"""
-        return [r for r in self.rules if trigger in r.triggers and r.enabled]
+        """按触发时机获取规则（仅已启用）
+
+        [S5 收敛 2026-10-29] 委托 RuleProvider，语义不变。
+        """
+        from meta.core.rule_provider import get_rule_provider
+        return get_rule_provider().get_rules_by_trigger(self, trigger)
     
     def get_constraints(self) -> List[MetaConstraint]:
         """获取所有约束规则"""
-        return [r for r in self.rules if isinstance(r, MetaConstraint)]
+        return self.get_rules_by_type(RuleType.CONSTRAINT)
     
     def get_computations(self) -> List[MetaComputation]:
         """获取所有计算规则"""
-        return [r for r in self.rules if isinstance(r, MetaComputation)]
+        return self.get_rules_by_type(RuleType.COMPUTATION)
 
     def get_defaults(self) -> List['MetaDefaultRule']:
         """获取所有属性确定规则（默认值规则）
 
         [规则模型 T-06 2026-10-03]
+        [S5 收敛 2026-10-29] 判据改为 rule_type，与 RuleProvider 同源。
         """
-        return [r for r in self.rules if isinstance(r, MetaDefaultRule)]
+        return self.get_rules_by_type(RuleType.DEFAULT)
     
     def get_state_transitions(self) -> List[MetaStateTransition]:
         """获取所有状态转换规则"""
-        return [r for r in self.rules if isinstance(r, MetaStateTransition)]
+        return self.get_rules_by_type(RuleType.STATE_TRANSITION)
     
     def get_triggers(self) -> List[MetaTrigger]:
         """获取所有触发规则"""
-        return [r for r in self.rules if isinstance(r, MetaTrigger)]
+        return self.get_rules_by_type(RuleType.TRIGGER)
     
     def get_derivations(self) -> List['MetaDerivation']:
         """获取所有派生规则"""
-        return [r for r in self.rules if isinstance(r, MetaDerivation)]
+        return self.get_rules_by_type(RuleType.DERIVATION)
     
     def get_function(self, function_id: str) -> Optional[MetaFunction]:
         """获取函数"""
