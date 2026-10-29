@@ -16,6 +16,7 @@ from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
 from meta.services import revision_service
 from meta.services.revision_service import RevisionError
+from meta.services.field_masking_service import mask_record, mask_records
 from meta.api._audit_helper import write_permission_config_audit
 from meta.core.db_path import get_meta_db_path
 from meta.core.number_sequence_engine import NumberSequenceEngine, NumberSequenceError
@@ -701,7 +702,9 @@ def read_bo(object_type, obj_id):
     result = bo.read(object_type, obj_id)
     if result.success:
         _attach_change_history(result.data, object_type, obj_id)
-        return jsonify({'success': True, 'data': result.data})
+        # [P2 2026-10-29] 读面脱敏：restricted / secret 字段直出前替换
+        data = mask_record(object_type, result.data)
+        return jsonify({'success': True, 'data': data})
     return jsonify({'success': False, 'message': result.message}), 404
 
 
@@ -929,7 +932,9 @@ def read_bo_by_string_id(object_type, obj_id):
     result = bo.read(object_type, obj_id)
     if result.success:
         _attach_change_history(result.data, object_type, obj_id)
-        return jsonify({'success': True, 'data': result.data})
+        # [P2 2026-10-29] 读面脱敏（与 read_bo 同口径）
+        data = mask_record(object_type, result.data)
+        return jsonify({'success': True, 'data': data})
     return jsonify({'success': False, 'message': result.message}), 404
 
 
@@ -1021,6 +1026,8 @@ def query_bo(object_type):
             # 都能直接展示"删除对象完整明细" JSON + 中英文标签, 跟 v1 /audit/logs 接口对齐.
             if object_type == 'audit_log':
                 _enrich_audit_log_items(raw_data)
+            # [P2 2026-10-29] 列表读脱敏（与单条读同口径）
+            raw_data = mask_records(object_type, raw_data)
             # 返回 { items: [], total: 20, filters: [] } 格式
             return jsonify({
                 'success': True,
@@ -1037,6 +1044,9 @@ def query_bo(object_type):
             # 已经是正确格式
             if object_type == 'audit_log' and isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
                 _enrich_audit_log_items(result.data['items'])
+            if isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
+                # [P2 2026-10-29] 列表读脱敏（与单条读同口径）
+                result.data['items'] = mask_records(object_type, result.data['items'])
             return jsonify({'success': True, 'data': result.data, 'message': result.message})
     else:
         logger.error(f"[query_bo] Error: {result.message}")
