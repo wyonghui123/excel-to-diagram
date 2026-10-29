@@ -646,6 +646,81 @@ def _verify_dependencies(manifests: List[AppManifest]) -> None:
     raise AppRegistrationError(f"依赖校验失败: {detail}")
 
 
+def _resolve_bo_status_state_field(app_id: str, decl: Any) -> str:
+    """[Spec 2026-10-29] 解析 `bo.status_changed` 的状态字段。
+
+    优先级（自高到低）：
+      ① 契约显式声明 `state_field`
+      ② 元模型唯一推导：该实体的 `state_transition` 规则 `state_field` 去重后唯一
+      ③ 兼容回落 `status`（记 WARNING）；对象连 `status` 都没有 → 启动期 ERROR
+
+    多值歧义不猜：抛 `AppRegistrationError`，要求契约显式声明。
+    非保留事件返回空串（不做任何解析）。
+    """
+    from meta.core.bo_status_event import BO_STATUS_CHANGED, STATUS_FIELD
+    from meta.core.models import MetaStateTransition
+    from meta.core.models import registry as meta_registry
+
+    if decl.name != BO_STATUS_CHANGED:
+        return ""
+
+    entity = decl.entity
+    obj = meta_registry.get(entity)
+    if obj is None:
+        raise AppRegistrationError(
+            f"app '{app_id}': 发布 '{decl.name}' 的 entity '{entity}' 未在元模型注册表中找到"
+        )
+
+    fields = {f.id for f in getattr(obj, "fields", [])}
+    declared = (getattr(decl, "state_field", "") or "").strip()
+
+    if declared:
+        if declared not in fields:
+            raise AppRegistrationError(
+                f"app '{app_id}': entity '{entity}' 声明的 state_field='{declared}' 不是该对象字段"
+            )
+        resolved = declared
+        source = "declared"
+    else:
+        derived = {
+            getattr(r, "state_field", "")
+            for r in getattr(obj, "rules", [])
+            if isinstance(r, MetaStateTransition) and getattr(r, "state_field", "")
+        }
+        if len(derived) == 1:
+            resolved = next(iter(derived))
+            source = "derived"
+        elif len(derived) > 1:
+            raise AppRegistrationError(
+                f"app '{app_id}': entity '{entity}' 存在多个 state_field {sorted(derived)}，"
+                f"无法唯一确定；请在 events.publish 显式声明 state_field"
+            )
+        elif STATUS_FIELD in fields:
+            resolved = STATUS_FIELD
+            source = "default"
+            logger.warning(
+                "[events] app '%s' entity '%s' 未声明 state_field 且无状态机规则，回落 '%s'",
+                app_id, entity, STATUS_FIELD,
+            )
+        else:
+            raise AppRegistrationError(
+                f"app '{app_id}': entity '{entity}' 无法确定状态字段"
+                f"（无 state_transition 规则、无 '{STATUS_FIELD}' 字段、契约也未声明 state_field）"
+            )
+
+    missing_payload = [name for name in decl.payload if name not in fields]
+    if missing_payload:
+        raise AppRegistrationError(
+            f"app '{app_id}': '{decl.name}' 的 payload 字段 {missing_payload} 不存在于 entity '{entity}'"
+        )
+
+    logger.info(
+        "[events] app '%s' entity '%s' bo.status_changed state_field=%s (来源=%s)",
+        app_id, entity, resolved, source,
+    )
+    return resolved
+
+
 def _register_event_contracts(manifests: List[AppManifest]) -> int:
     """登记 app.yaml 的 events 契约并做启动期校验（roadmap §6.14.4 ④）。
 
@@ -661,6 +736,9 @@ def _register_event_contracts(manifests: List[AppManifest]) -> int:
     count = 0
     for manifest in manifests:
         for decl in manifest.events_publish:
+            resolved = _resolve_bo_status_state_field(manifest.app_id, decl)
+            if resolved:
+                decl.state_field = resolved
             registry.register_publish(manifest.app_id, decl)
             count += 1
         for decl in manifest.events_subscribe:

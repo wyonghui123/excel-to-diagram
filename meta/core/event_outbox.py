@@ -102,6 +102,9 @@ class PublisherContract:
     trigger: str
     condition: str = ""
     payload: Tuple[str, ...] = ()
+    # [Spec 2026-10-29] 保留事件 bo.status_changed 比较的状态字段（启动期由
+    # app_registry 解析后写入：契约声明 > 元模型唯一推导 > 回落 status）
+    state_field: str = "status"
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,7 @@ class EventContractRegistry:
             trigger=decl.trigger,
             condition=decl.condition,
             payload=tuple(decl.payload),
+            state_field=getattr(decl, "state_field", "") or "status",
         )
 
     def register_subscribe(self, app_id: str, decl: Any, app_dir: str = "") -> None:

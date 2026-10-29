@@ -42,10 +42,10 @@ def ds(tmp_path):
     with source.transaction():
         source.execute(
             "CREATE TABLE outbound_order "
-            "(id INTEGER PRIMARY KEY, order_no TEXT, status TEXT)")
+            "(id INTEGER PRIMARY KEY, order_no TEXT, status TEXT, is_active INTEGER)")
         source.execute(
-            "INSERT INTO outbound_order (id, order_no, status) "
-            "VALUES (1, 'SO-1', 'submitted')")
+            "INSERT INTO outbound_order (id, order_no, status, is_active) "
+            "VALUES (1, 'SO-1', 'submitted', 1)")
         ensure_outbox_table(source)
     yield source
 
@@ -61,19 +61,22 @@ def registry():
 
 
 def _declare(registry, *, name=BO_STATUS_CHANGED, entity=ENTITY,
-             trigger="after_update", payload=("order_no", "status")):
+             trigger="after_update", payload=("order_no", "status"),
+             state_field=""):
     registry.register_publish(APP, SimpleNamespace(
         name=name, entity=entity, trigger=trigger,
-        condition="", payload=list(payload)))
+        condition="", payload=list(payload), state_field=state_field))
 
 
-def _ctx(ds, *, action="crud_update", old_status="submitted"):
+def _ctx(ds, *, action="crud_update", old_status="submitted",
+         meta_object=None, old_data=None):
     return ActionContext(
-        meta_object=SimpleNamespace(id=ENTITY, table_name=ENTITY),
+        meta_object=meta_object or SimpleNamespace(id=ENTITY, table_name=ENTITY),
         action=action,
         params={"id": 1},
         data_source=ds,
-        old_data=({"status": old_status} if old_status is not None else None),
+        old_data=(old_data if old_data is not None
+                  else ({"status": old_status} if old_status is not None else None)),
         transaction_id="txn-1",
     )
 
@@ -145,3 +148,23 @@ class TestBoStatusInterceptor:
         OutboxInterceptor().after_action(ctx)
 
         assert _count(ds) == 0          # 让位：保留事件不由 OutboxInterceptor 发
+
+    def test_TC_BSI_006_is_active布尔状态维度(self, ds, registry):
+        """[Spec 2026-10-29] 契约 state_field=is_active 时按布尔维度比较并归一。"""
+        _declare(registry, payload=("order_no", "is_active"), state_field="is_active")
+        meta_object = SimpleNamespace(
+            id=ENTITY, table_name=ENTITY,
+            fields=[SimpleNamespace(id="is_active",
+                                    field_type=SimpleNamespace(value="boolean"))],
+        )
+        ctx = _ctx(ds, old_data={"is_active": 1}, meta_object=meta_object)
+        ctx.result = ActionResult(success=True)
+        ds.execute("UPDATE outbound_order SET is_active = 0 WHERE id = 1")
+
+        BoStatusInterceptor().after_action(ctx)
+
+        rows = ds.execute("SELECT payload FROM event_outbox").fetchall()
+        assert len(rows) == 1
+        payload = json.loads(rows[0][0])
+        assert payload["state_field"] == "is_active"
+        assert (payload["from_status"], payload["to_status"]) == ("true", "false")

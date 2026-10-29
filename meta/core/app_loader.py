@@ -73,6 +73,7 @@ class EventPublishDecl:
           trigger: after_update
           condition: "status == 'shipped'"   # 可选
           payload: [order_no, quantity]      # 只带必要字段
+          state_field: is_active             # 可选：仅 bo.status_changed 使用
     ```
     """
 
@@ -81,6 +82,8 @@ class EventPublishDecl:
     trigger: str
     condition: str = ""
     payload: List[str] = field(default_factory=list)
+    # [Spec 2026-10-29] 保留事件 bo.status_changed 的状态字段；空=由元模型推导/回落 status
+    state_field: str = ""
 
 
 @dataclass
@@ -290,6 +293,7 @@ def _parse_events(raw: Dict[str, Any]) -> tuple:
             trigger=_require_str(item, "trigger", ctx),
             condition=_optional_str(item, "condition"),
             payload=_str_list(item, "payload"),
+            state_field=_optional_str(item, "state_field"),
         )
         if decl.trigger not in EVENT_TRIGGERS:
             raise AppManifestError(

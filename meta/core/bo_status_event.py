@@ -42,25 +42,48 @@ STATUS_FIELD = "status"
 FROM_FIELD = "from_status"
 TO_FIELD = "to_status"
 KEY_FIELD = "event_key"
+#: [Spec 2026-10-29] 载荷中说明「比较的是哪个状态字段」，供订阅方区分多状态维度
+FIELD_KEY = "state_field"
+
+_TRUTHY = frozenset({"1", "true", "yes", "y", "on", "t"})
+
+
+def normalize_state_value(value: Any, boolean_field: bool = False) -> Optional[str]:
+    """把状态值归一为可断言的稳定文本（fail-closed：None 原样返回 None）。
+
+    [Spec 2026-10-29] SQLite 无 BOOLEAN 类型，同一布尔字段在不同数据源可能读成
+    `True/False`、`1/0` 或 `"1"/"true"`。事件契约不允许出现两态，故按目标字段
+    类型归一：布尔 → `"true"/"false"`；其余 → 原样 `str()`（枚举/码值不翻译）。
+    """
+    if value is None:
+        return None
+    if boolean_field:
+        if isinstance(value, str):
+            return "true" if value.strip().lower() in _TRUTHY else "false"
+        return "true" if bool(value) else "false"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def detect_status_change(
     old_row: Optional[Dict[str, Any]],
     new_row: Optional[Dict[str, Any]],
     field: str = STATUS_FIELD,
+    boolean_field: bool = False,
 ) -> Optional[Tuple[str, str]]:
-    """比较写前 / 写后的 `status`；变化返回 `(from, to)`，否则 None（fail-closed）。
+    """比较写前 / 写后的 `field`；变化返回 `(from, to)`，否则 None（fail-closed）。
 
     任一侧缺失（None / 无该字段）都不发事件 —— 宁可漏发，不可乱发。
+    `field` 由契约解析（见 spec 2026-10-29）；默认 `status` 仅为兼容缺省。
     """
-    old = (old_row or {}).get(field)
-    new = (new_row or {}).get(field)
+    old = normalize_state_value((old_row or {}).get(field), boolean_field)
+    new = normalize_state_value((new_row or {}).get(field), boolean_field)
     if old is None or new is None:
         return None
-    old_text, new_text = str(old), str(new)
-    if old_text == new_text:
+    if old == new:
         return None
-    return old_text, new_text
+    return old, new
 
 
 def build_status_payload(
@@ -69,12 +92,14 @@ def build_status_payload(
     to_status: str,
     payload_fields: Iterable[str],
     event_key: str,
+    state_field: str = STATUS_FIELD,
 ) -> Dict[str, Any]:
-    """构造事件载荷：契约声明字段（只带必要字段）+ from/to + event_key。"""
+    """构造事件载荷：契约声明字段（只带必要字段）+ from/to + event_key + state_field。"""
     payload = {name: (row or {}).get(name) for name in payload_fields}
     payload[FROM_FIELD] = from_status
     payload[TO_FIELD] = to_status
     payload[KEY_FIELD] = event_key
+    payload[FIELD_KEY] = state_field
     return payload
 
 
@@ -87,6 +112,7 @@ def enqueue_bo_status_changed(
     from_status: str,
     to_status: str,
     transaction_id: str = "",
+    state_field: str = STATUS_FIELD,
 ) -> Optional[str]:
     """把一次状态变更写入 outbox（**同事务**；不自行提交）。
 
@@ -98,6 +124,6 @@ def enqueue_bo_status_changed(
     """
     event_key = f"{contract.entity}:{entity_id}:{from_status}->{to_status}"
     payload = build_status_payload(
-        row, from_status, to_status, contract.payload, event_key)
+        row, from_status, to_status, contract.payload, event_key, state_field)
     return enqueue_event(
         data_source, contract, entity_id, payload, transaction_id)

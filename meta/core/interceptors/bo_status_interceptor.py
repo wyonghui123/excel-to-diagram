@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """[D3 2026-10-03] BO 写入链 → bo.status_changed 反向事件（§9.7 规范 4）。
 
-挂点: BO `crud_update` 写后拦截器 —— 比较写前 `context.old_data.status`
-      与写后行 `status`（`BOFramework._load_old_data` 在写前载入 old_data），
+挂点: BO `crud_update` 写后拦截器 —— 比较写前 `context.old_data[state_field]`
+      与写后行 `state_field`（`BOFramework._load_old_data` 在写前载入 old_data），
       变化即经 `bo_status_event.enqueue_bo_status_changed()` **同事务**入队。
+
+      [Spec 2026-10-29] `state_field` 不再硬编码为 `status`：由契约解析
+      （契约声明 > 元模型唯一推导 > 回落 status），见 app_registry。
 
 为何独立于 OutboxInterceptor:
     `OutboxInterceptor` 按契约 `condition` 对**写后行**做字段比较
@@ -68,14 +71,33 @@ class BoStatusInterceptor(Interceptor):
             return
 
         row = OutboxInterceptor._load_row(context)
-        change = detect_status_change(context.old_data, row, STATUS_FIELD)
-        if change is None:
-            return
-        from_status, to_status = change
-
+        # [Spec 2026-10-29] 状态字段由契约决定：declared > 元模型唯一推导 > status。
+        # 同一字段只比较一次（多条契约可能共用同一状态维度）。
+        cache: dict = {}
         for contract in self._contracts(context):
+            field = contract.state_field or STATUS_FIELD
+            boolean_field = self._is_boolean_field(context, field)
+            key = (field, boolean_field)
+            if key not in cache:
+                cache[key] = detect_status_change(
+                    context.old_data, row, field, boolean_field=boolean_field)
+            change = cache[key]
+            if change is None:
+                continue
+            from_status, to_status = change
+
             enqueue_bo_status_changed(
                 context.data_source, contract, entity_id=context.object_id,
                 row=row, from_status=from_status, to_status=to_status,
                 transaction_id=context.transaction_id or "",
+                state_field=field,
             )
+
+    @staticmethod
+    def _is_boolean_field(context: ActionContext, field_id: str) -> bool:
+        """目标字段是否为布尔类型（决定事件取值归一为 true/false）。"""
+        for field in getattr(context.meta_object, "fields", None) or []:
+            if getattr(field, "id", None) == field_id:
+                ft = getattr(field, "field_type", None)
+                return getattr(ft, "value", ft) == "boolean"
+        return False
