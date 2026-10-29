@@ -297,7 +297,9 @@ class MetaStateTransition(MetaRule):
     用于定义状态机的状态转换规则。
     """
     rule_type: RuleType = field(default=RuleType.STATE_TRANSITION)
-    state_field: str = "status"
+    # [S7 收敛 2026-10-29] 核心模型不得内置业务域字面量。state_field 必须由
+    # YAML / 调用方显式声明；空值在构造期即报错，避免"默认 status"这条隐式真相。
+    state_field: str = ""
     from_states: List[str] = field(default_factory=list)
     to_state: str = ""
     # [Spec 22 FR-002 2026-09-13] 引用 _standard_actions.yaml 的 action_id（权限码）
@@ -315,6 +317,11 @@ class MetaStateTransition(MetaRule):
     preconditions: List[str] = field(default_factory=list)
     
     def __post_init__(self):
+        if not self.state_field:
+            raise ValueError(
+                f"MetaStateTransition '{self.id}' 缺少 state_field："
+                "状态字段必须显式声明（核心模型不再默认 'status'）"
+            )
         if not self.triggers:
             self.triggers = [RuleTrigger.BEFORE_UPDATE]
 

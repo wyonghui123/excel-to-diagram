@@ -1740,7 +1740,9 @@ def parse_state_transition(data: Dict[str, Any]) -> MetaStateTransition:
         priority=data.get("priority", 100),
         enabled=data.get("enabled", True),
         description=data.get("description", ""),
-        state_field=data.get("state_field", "status"),
+        # [S7 收敛 2026-10-29] 去掉 "status" 兜底：缺失交由 MetaStateTransition
+        # 的 __post_init__ 显式报错，不再有第二处隐式真相。
+        state_field=data.get("state_field", ""),
         from_states=data.get("from_states", []),
         to_state=data.get("to_state", ""),
         # [Spec 22 FR-002 2026-09-13] 引用通用 action 池的 action_id（权限码）
