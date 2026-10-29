@@ -102,7 +102,18 @@ class SemanticAnnotation:
     category: str = ""
     hierarchy_level: int = 0
     custom: Dict[str, Any] = field(default_factory=dict)
-    
+
+    # [P3 2026-10-29] 敏感度分级（PII 字段级安全域 Spec v0.1 §5）
+    # 取值：public | internal | confidential | restricted（空串 = 未标注）
+    # 唯一消费点：import_export_service._should_export_field（restricted/confidential 不导出）
+    # 注意：sensitivity 不是权限位，不改变写面脱敏 / UI 可见性 / 日志脱敏
+    sensitivity: str = ""
+
+    # [P3 2026-10-29] 字段级权限位（可选，缺省空串 = 不受限，行为与未声明完全一致）
+    # 当前无任何消费点（D3b 不做 / TBD-9）；仅作声明位，禁止据此宣称已实现字段级鉴权
+    read_permission: str = ""
+    write_permission: str = ""
+
     # 导入导出相关字段（借鉴 SAP Fiori "所见即所导" 原则）
     data_category: str = ""           # 数据类别：text | code | date | number | timestamp | amount | quantity | boolean
     import_visible: bool = True       # 导入时是否可见

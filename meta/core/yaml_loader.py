@@ -335,6 +335,13 @@ def parse_semantics(data: Dict[str, Any]) -> SemanticAnnotation:
         category=data.get("category", ""),
         hierarchy_level=data.get("hierarchy_level", 0),
         custom=data.get("custom", {}),
+        # [P3 2026-10-29] 敏感度分级 + 字段级权限位（缺省空串 = 未标注 / 不受限）
+        # 此前这两类键只在 YAML 里"写了"，parse_semantics 未透传 ⇒
+        # import_export_service 的 getattr(field.semantics, 'sensitivity', None)
+        # 恒为 None（死标记）。此处补齐透传，标记才真正生效。
+        sensitivity=data.get("sensitivity", ""),
+        read_permission=data.get("read_permission", ""),
+        write_permission=data.get("write_permission", ""),
         data_category=data.get("data_category", ""),
         import_visible=data.get("import_visible", True),
         export_visible=data.get("export_visible", True),

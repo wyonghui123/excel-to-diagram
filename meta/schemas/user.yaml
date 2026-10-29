@@ -121,6 +121,9 @@ fields:
     semantics:
       meaning: 初始密码：admin 创建用户时可填，留空则后端自动生成 12 位强随机密码，首次登录强制改密
       virtual: true
+      # [P3 2026-10-29] 与 password_hash 口径一致（restricted ⇒ 导出排除）
+      # 该字段本身 virtual + hidden_in_list，导出侧此前已被排除，此项为口径对齐
+      sensitivity: restricted
     ui:
       hidden_in_detail: true
       hidden_in_list: true

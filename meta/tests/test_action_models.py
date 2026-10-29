@@ -141,5 +141,37 @@ class TestSensitiveFieldSingleSource:
             assert key not in field_ids
 
 
+class TestSensitivityAnnotationParsing:
+    """[P3 2026-10-29] sensitivity / 字段级权限位必须真正进入 semantics
+
+    背景：`user.yaml` 早就写了 `sensitivity: restricted`，但 parse_semantics
+    未透传、SemanticAnnotation 无该字段 ⇒ `_should_export_field` 的
+    getattr 恒为 None，标记是"死"的（TBD-10 同类坑）。本组锁定解析链路，
+    防止再次出现"写了不生效"。
+    """
+
+    def test_parse_semantics_carries_sensitivity(self):
+        from meta.core.yaml_loader import parse_semantics
+        ann = parse_semantics({'meaning': 'x', 'sensitivity': 'restricted'})
+        assert ann.sensitivity == 'restricted'
+
+    def test_parse_semantics_carries_permission_bits(self):
+        from meta.core.yaml_loader import parse_semantics
+        ann = parse_semantics({
+            'meaning': 'x',
+            'read_permission': 'person_profile_read',
+            'write_permission': 'person_profile_update',
+        })
+        assert ann.read_permission == 'person_profile_read'
+        assert ann.write_permission == 'person_profile_update'
+
+    def test_parse_semantics_defaults_are_empty(self):
+        from meta.core.yaml_loader import parse_semantics
+        ann = parse_semantics({'meaning': 'x'})
+        assert ann.sensitivity == ''
+        assert ann.read_permission == ''
+        assert ann.write_permission == ''
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

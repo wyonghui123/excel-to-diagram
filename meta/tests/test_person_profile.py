@@ -133,10 +133,20 @@ class TestStructure:
         assert data.get('aspects') == ['audit_aspect']
         assert 'semantics' not in data
 
-    def test_no_sensitivity_marking(self):
-        """§0.1 错误 1：敏感级不落在任何平台字段（data_category 是数据类型非敏感度）"""
-        for fid, f in _fields().items():
-            sem = f.get('semantics') or {}
+    def test_sensitivity_marking_for_pii_fields(self):
+        """[P3 2026-10-29 口径变更] PII 字段显式声明 sensitivity: restricted
+
+        原口径（负向锁定）：断言所有字段『无』sensitivity（平台无敏感度概念）。
+        P3 后：sensitivity 成为字段级安全域的唯一声明位，PII 必须标注。
+        影响面：仅导出链路（restricted ⇒ 不导出）；不改变写面脱敏 / UI / 日志。
+        非 PII 字段（id / party_id）仍不得标注。
+        """
+        fields = _fields()
+        for fid in ('mobile', 'email'):
+            sem = fields[fid].get('semantics') or {}
+            assert sem.get('sensitivity') == 'restricted', fid
+        for fid in ('id', 'party_id'):
+            sem = fields[fid].get('semantics') or {}
             assert 'sensitivity' not in sem, fid
 
     def test_unique_index_declared(self):
@@ -306,33 +316,63 @@ class TestActionCodes:
 # ────────────────────────────────────────
 # 7. AC-7 负向：PII 当前不会被自动脱敏（如实固定，防误判已实现）
 # ────────────────────────────────────────
-class TestNoPiiRedaction:
-    def test_not_in_sensitive_fields_action_models(self):
+class TestPiiDeclaredWithoutMasking:
+    """[P3 2026-10-29 口径变更] 由「否定 PII 存在」转为「PII 已声明，但脱敏域不变」
+
+    原口径（负向锁定）：断言 mobile/email 不在任何脱敏集合 —— 隐含前提是
+    「平台没有 PII 概念」。
+    P3 后：PII 通过 YAML 的 sensitivity 声明（字段级安全域），但写面脱敏集合
+    （action_models.SENSITIVE_FIELDS）与 UI 隐藏集合（config_constants.SENSITIVE_FIELDS）
+    仍不含它们 —— 三者语义不同，sensitivity 只服务导出排除，不承担掩码职责。
+    """
+
+    def test_pii_declared_as_restricted_sensitivity(self):
+        fields = _fields()
+        for fid in ('mobile', 'email'):
+            sem = fields[fid].get('semantics') or {}
+            assert sem.get('sensitivity') == 'restricted', fid
+
+    def test_still_not_in_write_side_redaction_set(self):
         from meta.core.action_models import SENSITIVE_FIELDS
         assert 'mobile' not in SENSITIVE_FIELDS
         assert 'email' not in SENSITIVE_FIELDS
 
-    def test_not_in_sensitive_fields_config_constants(self):
+    def test_still_not_in_ui_hidden_set(self):
         from meta.core.ui_config.config_constants import SENSITIVE_FIELDS
         assert 'mobile' not in SENSITIVE_FIELDS
         assert 'email' not in SENSITIVE_FIELDS
 
 
 # ────────────────────────────────────────
-# 8. AC-9 负向：平台元模型无字段级权限位（对象级隔离的上限如实固定）
+# 8. AC-9 口径变更：字段级权限位存在但缺省不受限（对象级隔离的上限如实固定）
 # ────────────────────────────────────────
-class TestNoFieldLevelPermission:
+class TestFieldLevelPermissionDefaults:
+    """[P3 2026-10-29 口径变更] 由「无字段级权限位」转为「有声明位、缺省不受限」
+
+    原口径（负向锁定）：断言 SemanticAnnotation 不存在任何 permission 类字段
+    （D3b 不做 / TBD-9）。
+    P3 后：追加 read_permission / write_permission 两个可选声明位，缺省空串
+    ⇒ 默认放开，行为与 P1 完成时完全一致。当前无任何消费点（谁都不读它们），
+    因此仍不得宣称「已实现字段级鉴权」。
+    """
     _PERMISSION_LIKE = (
         'permission', 'security_level', 'security_domain', 'access_level',
         'access_control', 'read_permission', 'write_permission',
         'field_level_security',
     )
 
-    def test_semantic_annotation_has_no_permission_field(self):
+    def test_permission_fields_exist_but_default_empty(self):
         from meta.core.models_annotations import SemanticAnnotation
+        ann = SemanticAnnotation()
+        assert ann.read_permission == ''
+        assert ann.write_permission == ''
+
+    def test_no_other_permission_like_fields(self):
+        from meta.core.models_annotations import SemanticAnnotation
+        allowed = {'read_permission', 'write_permission'}
         names = {f.name for f in dataclasses.fields(SemanticAnnotation)}
         hit = {n for n in names
-               if any(p in n for p in self._PERMISSION_LIKE)}
+               if any(p in n for p in self._PERMISSION_LIKE) and n not in allowed}
         assert hit == set(), (
-            '元模型出现字段级权限位，需重估 D3b / TBD-9: %s' % sorted(hit)
+            '元模型出现额外的字段级权限位，需重估 D3b / TBD-9: %s' % sorted(hit)
         )

@@ -124,6 +124,9 @@ fields:
     description: 手机号（简位：临置于档案，Contact 立项时迁出；PII —— 不入审计）
     semantics:
       meaning: 手机号（PII；简位登记见头部注释）
+      # [P3 2026-10-29] PII 字段级安全域：restricted ⇒ 导出链路排除该列
+      # 仅声明敏感度，不改变写面脱敏 / UI 可见性 / 日志脱敏（三者语义不同）
+      sensitivity: restricted
 
   - id: email
     name: 电子邮箱
@@ -134,6 +137,8 @@ fields:
     description: 电子邮箱（简位：临置于档案，Contact 立项时迁出；PII —— 不入审计）
     semantics:
       meaning: 电子邮箱（PII；简位登记见头部注释）
+      # [P3 2026-10-29] 同上：restricted ⇒ 导出排除；不影响写面 / UI / 日志
+      sensitivity: restricted
 
 indexes:
   # [D2-A] 1:1 强制：party_id 全局唯一（无部分条件 —— 档案表恒为 person）
