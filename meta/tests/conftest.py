@@ -26,6 +26,13 @@ import pytest
 # 在任何测试导入之前设置环境变量，确保 rate_limiter 被禁用
 os.environ['DISABLE_RATE_LIMIT'] = 'true'
 
+# [NEW 2026-10-29] 排除脚本型伪测试:
+# test_export_e2e.py 模块顶层即连 http://localhost:3011 做 dev-login, 服务未起时
+# 在 import 阶段抛 ConnectionRefusedError, 导致整个 pytest 收集期 exit 2,
+# 连 --failed 的 PRECHECK 都无法通过。它不是 pytest 用例 (0 个 def test_*),
+# 仅供手工 `python meta/tests/test_export_e2e.py` 执行, 故排除出收集面。
+collect_ignore = ['test_export_e2e.py']
+
 logger = logging.getLogger(__name__)
 
 # ─── 提前定义 get_shared_app（解决循环导入问题）───
