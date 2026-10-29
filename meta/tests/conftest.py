@@ -1057,6 +1057,23 @@ class FakeApp:
 
 def _safe_create_app_wrapper(original_func):
     def wrapper(*args, **kwargs):
+        # [P4 2026-10-29] 无参 create_app() 全进程复用一个实例。
+        # 事故: bo_framework / 拦截器链 / 事件契约注册表都是进程级单例,
+        # 第二次 create_app() 只会向同一单例追加第二个 PersistenceInterceptor
+        # ⇒ 同一次 create 被持久化两遍 ⇒ 第二遍撞业务键, 返回 400「值已存在」
+        # (典型现场: test_date_format_api 与 test_key_template_api 同进程运行时,
+        #  version 名称唯一却报「编号「版本名称」值已存在」)。
+        # 带 db_path 等参数的调用 (临时库/多 app 探针) 不走复用, 保持原语义。
+        global _SHARED_APP
+        if not args and not kwargs:
+            if _SHARED_APP is not None:
+                return _SHARED_APP
+            try:
+                _SHARED_APP = original_func()
+                return _SHARED_APP
+            except Exception as e:
+                logger.error("create_app() failed: %s", e, exc_info=True)
+                return FakeApp(e)
         try:
             return original_func(*args, **kwargs)
         except Exception as e:
@@ -1148,11 +1165,23 @@ _SMOKE_LAST_RUN_FILE = os.path.join(_PROJECT_ROOT, 'e2e', 'smoke', '.last_smoke_
 _SMOKE_FRESH_SECONDS = 600  # 10 分钟
 
 
-def _is_raw_sql_allowed(filepath: str) -> bool:
-    """raw SQL 白名单: factory 文件 + 紧急 escape"""
-    if os.environ.get('ALLOW_RAW_SQL') == '1':
+# [P4 2026-10-29] 快照 conftest 导入时刻的 ALLOW_RAW_SQL。
+# 事故: 多个测试模块在文件头无条件写 os.environ['ALLOW_RAW_SQL']='1'
+# (或 setdefault), import 期就把 env 改成全局放行; 而守卫在
+# pytest_collection_modifyitems 里才执行 (此时全部模块已 import) →
+# --failed/--all 单进程收集时整个 raw-SQL 守卫被静默失效, 大量本应 skip
+# 的用例真跑并撞旧 schema (no such column: permission_set_id/org_id 等假失败)。
+# 修复: 只看导入期基线 + 文件自身声明放行 (模块级声明仅豁免自己)。
+_RAW_SQL_ALLOWED_AT_IMPORT = os.environ.get('ALLOW_RAW_SQL') == '1'
+
+
+def _is_raw_sql_allowed(filepath: str, content: str = '') -> bool:
+    """raw SQL 白名单: 启动期显式放行 + factory 文件 + 文件自身声明放行"""
+    if _RAW_SQL_ALLOWED_AT_IMPORT:
         return True
     if _FACTORIES_DIR in filepath:
+        return True
+    if content and 'ALLOW_RAW_SQL' in content:
         return True
     return False
 
@@ -1170,12 +1199,12 @@ def _check_raw_sql_in_tests(items):
         fpath = str(item.fspath)
         if not os.path.isfile(fpath):
             continue
-        if _is_raw_sql_allowed(fpath):
-            continue
         try:
             with open(fpath, 'r', encoding='utf-8') as f:
                 content = f.read()
         except (OSError, UnicodeDecodeError):
+            continue
+        if _is_raw_sql_allowed(fpath, content):
             continue
         if not _RAW_SQL_PATTERN.search(content):
             continue
@@ -1313,7 +1342,7 @@ def shared_app():
     return _SHARED_APP
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def shared_client(shared_app):
     """Session 级别共享 Flask test_client"""
     global _SHARED_CLIENT

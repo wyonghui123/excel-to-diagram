@@ -6,13 +6,15 @@ import pytest
 from meta.tests.shared.assertions import expect, HTTPStatus
 
 # 状态码域
-OK_AUTH = HTTPStatus.OK_AUTH_FORBIDDEN
-VALIDATION = HTTPStatus.VALIDATION_AUTH_FORBIDDEN
-EFFECTIVE = HTTPStatus.OK_AUTH_FORBIDDEN
-SELF = HTTPStatus.OK_AUTH
-CREATE_OK = (201, 200, 401, 400, 403, 500)
-DELETE_OK = (200, 401, 400, 403, 500)
-BATCH_OK = (200, 401, 400, 403, 500)
+# [P3 2026-10-29] /api/v1/data-permissions 已 sunset (410 Gone), 期望域纳入 410;
+# 保留原 200/400/403 语义 (回滚端点后仍可继续工作), 只放宽不收紧。
+OK_AUTH = [200, 401, 403, 410, 500]
+VALIDATION = [400, 401, 403, 410, 500]
+EFFECTIVE = [200, 401, 403, 410, 500]
+SELF = [200, 401, 410, 500]
+CREATE_OK = (201, 200, 401, 400, 403, 410, 500)
+DELETE_OK = (200, 401, 400, 403, 410, 500)
+BATCH_OK = (200, 401, 400, 403, 410, 500)
 
 
 # 4 个 add 校验场景 → 参数化
