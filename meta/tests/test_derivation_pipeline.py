@@ -191,7 +191,7 @@ def pipeline_db():
         -- Layer 2: 统一规则表
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -205,7 +205,7 @@ def pipeline_db():
         -- Layer 1: 事实表
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -214,7 +214,7 @@ def pipeline_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 层级表
@@ -230,13 +230,13 @@ def pipeline_db():
 
         CREATE TABLE permission_set_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER, dimension_code TEXT, scope_mode TEXT,
+            permission_set_id INTEGER, dimension_code TEXT, scope_mode TEXT,
             dimension_values TEXT, inherit_children INTEGER DEFAULT 1
         );
 
         CREATE TABLE data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
+            permission_set_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
             resource_type VARCHAR(200), dimension_code VARCHAR(200),
             condition TEXT, scope_mode VARCHAR(50) DEFAULT 'include',
             permission_level VARCHAR(50) DEFAULT 'read',
@@ -273,7 +273,7 @@ class TestPermissionDerivationPipeline:
         # 插入规则
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps([{'field': 'domain_id', 'op': 'IN', 'value': [1, 2]}])]
         )
@@ -281,7 +281,7 @@ class TestPermissionDerivationPipeline:
         conn.close()
 
         # 执行推导
-        result = self.pipeline.derive(role_id=100)
+        result = self.pipeline.derive(permission_set_id=100)
 
         # 验证 Intent 数量 (read 展开为 read+list+export = 3)
         intents = self.dao.list_for_role(100)
@@ -295,14 +295,14 @@ class TestPermissionDerivationPipeline:
         """write 级别展开包含 create + update"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (101, 'product', 'write', ?)",
             [json.dumps([])]  # 空 include = all
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=101)
+        self.pipeline.derive(permission_set_id=101)
 
         intents = self.dao.list_for_role(101)
         action_names = {i['action_name'] for i in intents}
@@ -314,14 +314,14 @@ class TestPermissionDerivationPipeline:
         """admin 级别展开包含 delete"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (102, 'product', 'admin', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=102)
+        self.pipeline.derive(permission_set_id=102)
 
         intents = self.dao.list_for_role(102)
         action_names = {i['action_name'] for i in intents}
@@ -331,7 +331,7 @@ class TestPermissionDerivationPipeline:
         """exclude_conditions 写入 data_scope.exclude"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, "
             "include_conditions, exclude_conditions) "
             "VALUES (103, 'product', 'read', ?, ?)",
             [
@@ -342,7 +342,7 @@ class TestPermissionDerivationPipeline:
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=103)
+        self.pipeline.derive(permission_set_id=103)
 
         intents = self.dao.list_for_role(103)
         for intent in intents:
@@ -359,14 +359,14 @@ class TestPermissionDerivationPipeline:
             {'field': 'risk_level', 'op': '<=', 'value': 3},
         ])
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (104, 'product', 'read', ?)",
             [conditions]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=104)
+        self.pipeline.derive(permission_set_id=104)
 
         intents = self.dao.list_for_role(104)
         for intent in intents:
@@ -379,14 +379,14 @@ class TestPermissionDerivationPipeline:
         """空 include_conditions → data_scope.include = [] (表示 all)"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (105, 'product', 'read', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=105)
+        self.pipeline.derive(permission_set_id=105)
 
         intents = self.dao.list_for_role(105)
         for intent in intents:
@@ -397,14 +397,14 @@ class TestPermissionDerivationPipeline:
         """推导结果返回摘要"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (106, 'product', 'write', ?)",
             [json.dumps([{'field': 'domain_id', 'op': 'IN', 'value': [1]}])]
         )
         conn.commit()
         conn.close()
 
-        result = self.pipeline.derive(role_id=106)
+        result = self.pipeline.derive(permission_set_id=106)
 
         assert 'intent_count' in result
         assert result['intent_count'] > 0
@@ -416,20 +416,20 @@ class TestPermissionDerivationPipeline:
         conn = sqlite3.connect(self.db_path)
         # 规则1: read
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (107, 'product', 'read', ?)",
             [json.dumps([{'field': 'domain_id', 'op': 'IN', 'value': [1]}])]
         )
         # 规则2: admin (不同条件)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (107, 'product', 'admin', ?)",
             [json.dumps([{'field': 'owner_id', 'op': '=', 'value': '${user.id}'}])]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=107)
+        self.pipeline.derive(permission_set_id=107)
 
         intents = self.dao.list_for_role(107)
         action_names = {i['action_name'] for i in intents}
@@ -448,7 +448,7 @@ class TestPermissionDerivationPipeline:
         """推导后清除 stale 标记"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (108, 'product', 'read', ?)",
             [json.dumps([])]
         )
@@ -459,7 +459,7 @@ class TestPermissionDerivationPipeline:
         self.dao.mark_stale(108)
 
         # 推导后应清除 stale
-        self.pipeline.derive(role_id=108)
+        self.pipeline.derive(permission_set_id=108)
 
         intents = self.dao.list_for_role(108)
         for intent in intents:
@@ -467,7 +467,7 @@ class TestPermissionDerivationPipeline:
 
     def test_no_rules_produces_no_intents(self):
         """无规则 → 无 Intent"""
-        result = self.pipeline.derive(role_id=999)
+        result = self.pipeline.derive(permission_set_id=999)
         assert result['intent_count'] == 0
         assert len(self.dao.list_for_role(999)) == 0
 
@@ -489,7 +489,7 @@ class TestCartesianProductInPipeline:
         # 模拟维度范围: domain=all + sub_domain=[101]
         conn = sqlite3.connect(pipeline_db)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, "
             "include_conditions, derivation_mode) "
             "VALUES (200, 'sub_domain', 'read', ?, 'dynamic')",
             [json.dumps([
@@ -499,7 +499,7 @@ class TestCartesianProductInPipeline:
         conn.commit()
         conn.close()
 
-        pipeline.derive(role_id=200)
+        pipeline.derive(permission_set_id=200)
 
         intents = dao.list_for_role(200)
         for intent in intents:
@@ -540,8 +540,8 @@ class TestDataMigrationToV2:
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- 源表1: role_dimension_scopes
-            CREATE TABLE permission_set_dimension_scopes (
+            -- 源表1: role_dimension_scopes (迁移脚本读取的旧表名)
+            CREATE TABLE role_dimension_scopes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role_id INTEGER, dimension_code TEXT, scope_mode TEXT,
                 dimension_values TEXT, inherit_children INTEGER DEFAULT 1
@@ -560,7 +560,7 @@ class TestDataMigrationToV2:
             );
 
             -- 测试数据: 维度范围
-            INSERT INTO permission_set_dimension_scopes
+            INSERT INTO role_dimension_scopes
                 (role_id, dimension_code, scope_mode, dimension_values)
             VALUES
                 (1, 'domain', 'include', '[1, 2]'),
