@@ -5,9 +5,9 @@ M3 T6：变更申请生效编排（FR-009 / FR-010 / NFR-003 / NFR-004）
 
 覆盖：
   A1 正常生效（头 + 行各 1 字段）：
-       revision_no +1（头/行各一版本行）、change_request_id 落版本行、
-       change_set_id 与审计行一致、申请 status=='applied' 且回写 applied_revision_no、
-       返回 {status, revision_no, applied_at}
+      [M4] 父单据 revision_no 统一 +1（仅一条父单据版本行）、行差异以 line_key 记录、
+      change_request_id 落版本行、change_set_id 与审计行一致、
+      申请 status=='applied' 且回写 applied_revision_no、返回 {status, revision_no, applied_at}
   A2 partial 目标放行（via_change_request=True，RevisionGuard 不拦）
   A3 fulfilled 目标拒绝 ⇒ REVISION_NOT_ALLOWED (409)，申请落 failed，无新版本行
   A4 乐观锁冲突（目标 revision_no 已被推进）⇒ REVISION_CONFLICT (409) +
@@ -40,8 +40,10 @@ from meta.core.models import (
     MetaAction,
     MetaField,
     MetaObject,
+    MetaRevisionLines,
     MetaRevisionPolicy,
     RevisionFieldPolicy,
+    RevisionLineDefaultPolicy,
 )
 from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.table_name_validator import register_table_name
@@ -183,6 +185,14 @@ def _order_obj():
         fields=[
             RevisionFieldPolicy(field='total_amount', editable=True, diff=True),
         ],
+        # [M4] 行级策略：版本归父单据，行按 line_key 记差异
+        lines=MetaRevisionLines(
+            child_object=LINE_TABLE,
+            parent_field='order_id',
+            line_type_field='line_type',
+            default=RevisionLineDefaultPolicy(
+                editable=['qty'], via_change_request=['unit_price']),
+        ),
     )
     return obj
 
@@ -209,10 +219,8 @@ def _line_obj():
         ],
     )
     obj.hierarchy = {'enabled': True, 'parent_field': 'order_id'}
-    obj.revision_policy = MetaRevisionPolicy(
-        enabled=True,
-        fields=[RevisionFieldPolicy(field='qty', editable=True, diff=True)],
-    )
+    # [M4] 行对象自身无 revision_policy：版本归属由父单据 revision_policy.lines 决定
+    obj.revision_policy = None
     return obj
 
 
@@ -314,23 +322,25 @@ class TestApplySuccess:
         assert header['revision_no'] == 2
         line = ds.find_by_id(LINE_TABLE, line_id)
         assert line['qty'] == 5
-        assert line['revision_no'] == 2
 
+        # [M4] 头 + 行统一版本：父单据只 +1，只有父单据一条版本行
         revs = ds.find(REVISIONS_TABLE)
-        assert len(revs) == 2
-        by_type = {r['object_type']: r for r in revs}
-        assert set(by_type) == {ORDER_TABLE, LINE_TABLE}
-        for rev in revs:
-            assert rev['revision_no'] == 2
-            assert str(rev['change_request_id']) == str(cr_id)
-            assert rev['change_set_id'] == CS_ID
-        assert by_type[ORDER_TABLE]['object_id'] == str(order_id)
-        assert by_type[LINE_TABLE]['object_id'] == str(line_id)
+        assert len(revs) == 1
+        rev = revs[0]
+        assert rev['object_type'] == ORDER_TABLE
+        assert rev['object_id'] == str(order_id)
+        assert rev['revision_no'] == 2
+        assert str(rev['change_request_id']) == str(cr_id)
+        assert rev['change_set_id'] == CS_ID
 
-        # 头部版本行只记 total_amount 差异
-        changes = ds.find(CHANGES_TABLE, {'revision_id': by_type[ORDER_TABLE]['id']})
-        assert [(c['field_name'], c['old_value'], c['new_value']) for c in changes] == [
-            ('total_amount', '100', '200')]
+        # 同一版本内：头字段 line_key=NULL，行字段 line_key=<行主键>
+        changes = ds.find(CHANGES_TABLE, {'revision_id': rev['id']})
+        triples = {(c['line_key'], c['field_name'], c['old_value'], c['new_value'])
+                   for c in changes}
+        assert triples == {
+            (None, 'total_amount', '100', '200'),
+            (str(line_id), 'qty', '3', '5'),
+        }
 
         # 版本行 / 审计行共享同一 change_set_id（NFR-004 可追溯）
         assert len(spy_audit) == 2

@@ -131,13 +131,52 @@ def after_status_change(ds, before: Dict[str, Any], after: Dict[str, Any],
             '目标对象不存在: %s' % (target_type or '(空)'),
         )
     editable_columns = _editable_db_columns(meta_object)
+    # [M4] 行级申请：字段白名单按父 policy.lines 的行类型分档；line_key 必须属于该父单据
+    lines_cfg = getattr(getattr(meta_object, 'revision_policy', None), 'lines', None)
+    line_object = registry.get(lines_cfg.child_object) if lines_cfg is not None else None
     for line in lines:
         field_name = (line.get('field_name') or '').strip()
-        if not field_name or field_name not in editable_columns:
+        line_key = line.get('line_key')
+        if line_key in (None, ''):
+            if not field_name or field_name not in editable_columns:
+                raise ChangeRequestError(
+                    'INVALID_CHANGE_FIELD',
+                    '字段 %s 不在目标对象 %s 的可变更白名单（editable 且非派生字段）' % (
+                        field_name or '(空)', meta_object.id),
+                )
+            continue
+
+        if line_object is None:
             raise ChangeRequestError(
                 'INVALID_CHANGE_FIELD',
-                '字段 %s 不在目标对象 %s 的可变更白名单（editable 且非派生字段）' % (
-                    field_name or '(空)', meta_object.id),
+                '目标对象 %s 未声明行级策略，不能提交行变更' % meta_object.id,
+            )
+        line_row = None
+        try:
+            line_row = ds.find_by_id(line_object.table_name, line_key)
+        except Exception:  # noqa: BLE001 - 表不存在按行不存在处理
+            line_row = None
+        # 父字段在行表是 INTEGER、change_requests.target_object_id 是 TEXT，
+        # 直接比较会 1 != '1' 而误拒合法行；统一转 str 比较
+        if not line_row or str(line_row.get(lines_cfg.parent_field)) != str(target_id):
+            raise ChangeRequestError(
+                'INVALID_LINE_KEY',
+                '变更行 %s#%s 不存在或不属于目标单据 %s' % (
+                    line_object.id, line_key, target_id),
+            )
+        tier = lines_cfg.policy_for(line_row)
+        allowed_columns = {field.id for field in line_object.get_persistent_fields()
+                           if field.id in set(tier.editable or ())
+                           or field.id in set(tier.via_change_request or ())}
+        allowed_columns |= {field.db_column or field.id
+                            for field in line_object.get_persistent_fields()
+                            if field.id in set(tier.editable or ())
+                            or field.id in set(tier.via_change_request or ())}
+        if not field_name or field_name not in allowed_columns:
+            raise ChangeRequestError(
+                'INVALID_CHANGE_FIELD',
+                '行字段 %s 不在行对象 %s 的可变更白名单（行类型分档未列出）' % (
+                    field_name or '(空)', line_object.id),
             )
 
     # ③ 目标存在且版本仍是提交时冻结的版本（FR-010 乐观锁预检）

@@ -1724,3 +1724,22 @@ revision_policy:
     - {field: header_discount_percent, editable: true, diff: true, audit: true}
     - {field: status,               editable: false, diff: true,  audit: true}
     - {field: fulfillment_status,   editable: false, diff: false, audit: false}
+
+  # [M4 行级变更] 行级策略独立，但行级版本归父单据（spec 2026-10-29-m4 §3）
+  #   editable           -> 过父单据状态闸门后可直接改并记版本
+  #   via_change_request -> 只能经变更申请修改
+  #   两者都不在          -> REVISION_NOT_ALLOWED（申请内也拒）
+  lines:
+    child_object: sales_order_line
+    parent_field: order_id
+    line_type_field: line_type_id
+    default:
+      editable: [qty, requested_date, description, plant_location_id]
+      via_change_request: [unit_price, gross_amount, tax_code_id, tax_rate_percent]
+    by_type:
+      - when: "line_type_id == 1"      # 物料行
+        editable: [qty, requested_date, plant_location_id]
+        via_change_request: [unit_price, gross_amount, tax_code_id]
+      - when: "line_type_id == 3"      # 服务行
+        editable: [service_start_date, service_end_date, description]
+        via_change_request: [unit_price, gross_amount, service_duration, billing_method]

@@ -32,17 +32,25 @@ class RevisionGuard:
         self._evaluator = evaluator or ConditionEvaluator()
 
     def check(self, meta_object, record: Dict[str, Any],
-              changed_fields=None, via_change_request: bool = False) -> None:
+              changed_fields=None, via_change_request: bool = False,
+              policy=None, line_fields=None,
+              gate_record: Dict[str, Any] = None) -> None:
         """不通过即抛 RevisionError；通过则静默返回。
 
         via_change_request: 变更申请生效链路（M3）放行 `partial` 状态——
         被申请修改的单据本就处于部分履约，`fulfilled/voided` 仍拒绝。
         默认 False，保持 M2 逐条行为一致。
+
+        [M4] 行写路径：
+          policy       —— 父单据 policy（行对象自身无 revision_policy）
+          gate_record  —— 状态闸门取值记录（父单据行，而非当前行）
+          line_fields  —— 命中的行类型分档 {'editable': [...], 'via_change_request': [...]}
+        字段三态：editable 放行 / via_change_request 需申请 / 其余拒绝。
         """
-        policy = getattr(meta_object, 'revision_policy', None)
+        policy = policy or getattr(meta_object, 'revision_policy', None)
         if policy is None or not policy.enabled:
             return
-        record = record or {}
+        record = (gate_record or record or {})
 
         allowed_states = list(policy.editable_in_states or [])
         if allowed_states:
@@ -74,3 +82,22 @@ class RevisionGuard:
                 NOT_ALLOWED_FULFILLED,
                 '单据已履约（%s），不允许修改' % fulfillment,
             )
+
+        # [M4] 行级字段三态（父单据 policy.fields 管不到行字段）
+        if line_fields is not None:
+            editable = set(line_fields.get('editable') or ())
+            via = set(line_fields.get('via_change_request') or ())
+            for field_name in sorted(changed_fields or ()):
+                if field_name in editable:
+                    continue
+                if field_name in via:
+                    if via_change_request:
+                        continue
+                    raise RevisionError(
+                        REQUIRES_CHANGE_REQUEST,
+                        "行字段 '%s' 必须走变更申请" % field_name,
+                    )
+                raise RevisionError(
+                    NOT_ALLOWED,
+                    "行字段 '%s' 不允许修改（行类型分档未列出）" % field_name,
+                )

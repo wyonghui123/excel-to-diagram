@@ -160,6 +160,9 @@ from meta.core.models import (
     CascadeSelectConfig,
     RevisionFieldPolicy,
     MetaRevisionPolicy,
+    MetaRevisionLines,
+    RevisionLineDefaultPolicy,
+    RevisionLineTypePolicy,
 )
 
 
@@ -1152,6 +1155,138 @@ def _validate_derived_state_field(rules, obj_id: str,
             )
 
 
+def _parse_revision_field_lists(raw, obj_id: str, label: str,
+                                suffix: str) -> "tuple[list, list]":
+    """解析 editable / via_change_request 两个字段清单（M4 加载期校验 3/4）"""
+    editable = list((raw or {}).get("editable") or [])
+    via = list((raw or {}).get("via_change_request") or [])
+    for field_id in editable + via:
+        if field_id in _REVISION_DERIVED_FIELDS:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.lines.{label} 中 '{field_id}' "
+                f"是派生字段，不能声明 editable/via_change_request{suffix}"
+            )
+    overlap = set(editable) & set(via)
+    if overlap:
+        raise ValueError(
+            f"对象 '{obj_id}' 的 revision_policy.lines.{label} 中字段 "
+            f"{sorted(overlap)} 同时出现在 editable 与 via_change_request{suffix}"
+        )
+    return editable, via
+
+
+def parse_revision_lines(rp: Dict[str, Any], obj_id: str, enabled: bool,
+                         source_file: str = "") -> Optional[MetaRevisionLines]:
+    """解析 revision_policy.lines（M4）
+
+    加载期校验（spec §3）：
+      1. 父对象未 enabled 时出现 lines ⇒ 报错
+      2/3. child_object / parent_field / line_type_field 必填（子对象字段归属由
+           validate_line_policies 做跨对象校验）
+      3/4. 字段清单不得含派生字段、同一档内两清单不得交叉
+    """
+    raw = (rp or {}).get("lines")
+    if not raw:
+        return None
+    suffix = "（文件: {0}）".format(source_file) if source_file else ""
+
+    if not enabled:
+        raise ValueError(
+            f"对象 '{obj_id}' 声明了 revision_policy.lines，但 revision_policy.enabled "
+            f"不为 true（行受控要求头级策略同时启用）{suffix}"
+        )
+
+    child_object = (raw.get("child_object") or "").strip()
+    parent_field = (raw.get("parent_field") or "").strip()
+    line_type_field = (raw.get("line_type_field") or "").strip()
+    for name, value in (("child_object", child_object),
+                        ("parent_field", parent_field),
+                        ("line_type_field", line_type_field)):
+        if not value:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.lines 缺少 {name}{suffix}"
+            )
+
+    default_editable, default_via = _parse_revision_field_lists(
+        raw.get("default") or {}, obj_id, "default", suffix)
+
+    by_type: List[RevisionLineTypePolicy] = []
+    seen_when = set()
+    for item in raw.get("by_type") or []:
+        when = (item.get("when") or "").strip()
+        if not when:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.lines.by_type 存在空的 when{suffix}"
+            )
+        if when in seen_when:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 revision_policy.lines.by_type 中 when 重复: {when}{suffix}"
+            )
+        seen_when.add(when)
+        editable, via = _parse_revision_field_lists(
+            item, obj_id, "by_type[when={0}]".format(when), suffix)
+        by_type.append(RevisionLineTypePolicy(
+            when=when, editable=editable, via_change_request=via))
+
+    return MetaRevisionLines(
+        child_object=child_object,
+        parent_field=parent_field,
+        line_type_field=line_type_field,
+        default=RevisionLineDefaultPolicy(
+            editable=default_editable, via_change_request=default_via),
+        by_type=by_type,
+    )
+
+
+def validate_line_policies(objects) -> None:
+    """跨对象校验 revision_policy.lines（M4 加载期校验 1/2/3）
+
+    Args:
+        objects: MetaObject 列表或 id → MetaObject 字典
+
+    校验：
+      1. child_object 存在，且子对象声明了 parent_field 列
+      2. parent_field 同时存在于父对象字段表
+      3. 所有清单字段存在于子对象
+    """
+    if isinstance(objects, dict):
+        by_id = dict(objects)
+    else:
+        by_id = {getattr(o, 'id', ''): o for o in (objects or [])}
+
+    for parent in by_id.values():
+        policy = getattr(parent, 'revision_policy', None)
+        lines = getattr(policy, 'lines', None) if policy else None
+        if lines is None:
+            continue
+        parent_id = getattr(parent, 'id', '')
+        suffix = "（父对象: {0}）".format(parent_id)
+        child = by_id.get(lines.child_object)
+        if child is None:
+            raise ValueError(
+                f"对象 '{parent_id}' 的 revision_policy.lines.child_object "
+                f"'{lines.child_object}' 不存在{suffix}"
+            )
+        child_fields = {getattr(f, 'id', '') for f in (child.fields or [])}
+        if lines.parent_field not in child_fields:
+            raise ValueError(
+                f"对象 '{parent_id}' 的 revision_policy.lines.parent_field "
+                f"'{lines.parent_field}' 不是子对象 '{lines.child_object}' 的字段{suffix}"
+            )
+        parent_fields = {getattr(f, 'id', '') for f in (parent.fields or [])}
+        if 'id' not in parent_fields:
+            raise ValueError(
+                f"对象 '{parent_id}' 的 revision_policy.lines 需要父对象声明主键字段 "
+                f"'id'（parent_field '{lines.parent_field}' 指向父单据主键）{suffix}"
+            )
+        missing = sorted(lines.all_fields() - child_fields)
+        if missing:
+            raise ValueError(
+                f"对象 '{parent_id}' 的 revision_policy.lines 引用了子对象 "
+                f"'{lines.child_object}' 未声明的字段 {missing}{suffix}"
+            )
+
+
 def parse_revision_policy(data: Dict[str, Any], fields: List[str],
                           source_file: str = "") -> Optional[MetaRevisionPolicy]:
     """解析变更策略配置（M1 只解析，不启用版本能力）
@@ -1219,6 +1354,7 @@ def parse_revision_policy(data: Dict[str, Any], fields: List[str],
         editable_in_states=list(rp.get("editable_in_states") or []),
         editable_when=rp.get("editable_when", ""),
         fields=field_policies,
+        lines=parse_revision_lines(rp, obj_id, enabled, source_file=source_file),
     )
 
 
@@ -2605,7 +2741,10 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
             continue
         objects.append(obj)
         print("[YAML Loader] Loaded: {0} from {1}".format(obj.id, yaml_file.name))
-    
+
+    # [M4] 行级策略的跨对象校验（child_object / parent_field / 清单字段）
+    validate_line_policies(objects)
+
     return objects
 
 

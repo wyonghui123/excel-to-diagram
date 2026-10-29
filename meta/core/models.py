@@ -933,6 +933,58 @@ class RevisionFieldPolicy:
 
 
 @dataclass
+class RevisionLineTypePolicy:
+    """revision_policy.lines.by_type[]：按行类型分档的字段清单（M4）"""
+    when: str = ""
+    editable: List[str] = field(default_factory=list)
+    via_change_request: List[str] = field(default_factory=list)
+
+
+@dataclass
+class RevisionLineDefaultPolicy:
+    """revision_policy.lines.default：未命中 by_type 时的字段清单（M4）"""
+    editable: List[str] = field(default_factory=list)
+    via_change_request: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MetaRevisionLines:
+    """行级策略（M4）：子对象 + 归属字段 + 分档字段清单"""
+    child_object: str = ""
+    parent_field: str = ""
+    line_type_field: str = ""
+    default: RevisionLineDefaultPolicy = field(default_factory=RevisionLineDefaultPolicy)
+    by_type: List[RevisionLineTypePolicy] = field(default_factory=list)
+
+    def policy_for(self, record: Dict[str, Any]):
+        """按 line_type_field 匹配 by_type（首个命中），否则回落 default"""
+        if self.by_type:
+            from meta.core.condition_evaluator import ConditionEvaluator
+            evaluator = ConditionEvaluator()
+            for rule in self.by_type:
+                if rule.when and evaluator.evaluate(rule.when, dict(record or {})):
+                    return rule
+        return self.default
+
+    def editable_for(self, record) -> List[str]:
+        return list(self.policy_for(record).editable)
+
+    def via_change_request_for(self, record) -> List[str]:
+        return list(self.policy_for(record).via_change_request)
+
+    def allowed_for(self, record) -> Set[str]:
+        policy = self.policy_for(record)
+        return set(policy.editable or ()) | set(policy.via_change_request or ())
+
+    def all_fields(self) -> Set[str]:
+        result = set(self.default.editable or ()) | set(self.default.via_change_request or ())
+        for rule in self.by_type:
+            result |= set(rule.editable or ())
+            result |= set(rule.via_change_request or ())
+        return result
+
+
+@dataclass
 class MetaRevisionPolicy:
     """对象级 revision 策略（M1 只解析，不启用版本能力）"""
     enabled: bool = False
@@ -944,6 +996,7 @@ class MetaRevisionPolicy:
     editable_in_states: List[str] = field(default_factory=list)
     editable_when: str = ""
     fields: List[RevisionFieldPolicy] = field(default_factory=list)
+    lines: Optional['MetaRevisionLines'] = None
 
     def reason_fields_hit(self, changed_fields) -> List[str]:
         """返回本次变更命中的原因码必填字段（去重保序）"""

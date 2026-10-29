@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
 
@@ -95,6 +96,83 @@ def _user_ref(user: Any) -> Optional[str]:
     return str(user)
 
 
+@dataclass
+class RevisionOwner:
+    """行写路径的版本归属（M4）：版本挂父单据，行信息只落 line_key"""
+    object_type: str = ""            # 父对象 id（版本归属）
+    object_id: Any = None            # 父单据主键
+    object: Any = None               # 父 MetaObject（取表名 / 快照用）
+    policy: Any = None               # 父 revision_policy
+    line_key: Any = None             # 子对象时 = 行主键
+    line_object: str = ""            # 子对象 id
+    editable: List[str] = field(default_factory=list)
+    via_change_request: List[str] = field(default_factory=list)
+    gate_record: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def line_fields(self) -> Dict[str, List[str]]:
+        return {
+            'editable': list(self.editable),
+            'via_change_request': list(self.via_change_request),
+        }
+
+
+def resolve_owner(ds, metas, object_type: str,
+                  record: Dict[str, Any]) -> Optional[RevisionOwner]:
+    """行写路径的父析取（spec §4）。
+
+    遍历所有声明了 `revision_policy.lines` 且 `child_object == object_type`
+    的对象，按 `parent_field` 取父 id → 读父行 → 按 `line_type_field` 分档。
+    未命中（无父策略 / 父 id 为空 / 父行不存在）返回 None（行为不变）。
+    """
+    if not record:
+        return None
+    candidates = metas.values() if isinstance(metas, dict) else (metas or [])
+    for parent in candidates:
+        policy = getattr(parent, 'revision_policy', None)
+        lines = getattr(policy, 'lines', None) if policy else None
+        if lines is None or not getattr(policy, 'enabled', False):
+            continue
+        if lines.child_object != object_type:
+            continue
+        parent_id = record.get(lines.parent_field)
+        if parent_id in (None, ''):
+            return None
+        try:
+            gate_record = ds.find_by_id(parent.table_name, parent_id)
+        except Exception:  # noqa: BLE001 - 表不存在按无归属处理
+            gate_record = None
+        if not gate_record:
+            return None
+        tier = lines.policy_for(record)
+        return RevisionOwner(
+            object_type=parent.id,
+            object_id=parent_id,
+            object=parent,
+            policy=policy,
+            line_key=record.get('id'),
+            line_object=object_type,
+            editable=list(tier.editable or []),
+            via_change_request=list(tier.via_change_request or []),
+            gate_record=gate_record,
+        )
+    return None
+
+
+def find_revision_by_change_set(ds, object_type: str, object_id: Any,
+                                change_set_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """同一 change_set 内已写的版本行（M4 合并单版本用）"""
+    if not change_set_id:
+        return None
+    ensure_table_names_registered()
+    rows = ds.find(REVISIONS_TABLE, {
+        'object_type': object_type,
+        'object_id': str(object_id),
+        'change_set_id': change_set_id,
+    }) or []
+    return rows[0] if rows else None
+
+
 def collect_snapshot(ds, meta_object, object_id: Any) -> Dict[str, Any]:
     """整单快照：抬头 + 全部子行（按「子对象 relations 指向本对象」自动发现）"""
     header = ds.find_by_id(meta_object.table_name, object_id) or {}
@@ -138,36 +216,63 @@ def record(
     user: Any = None,
     snapshot: Optional[Dict[str, Any]] = None,
     change_request_id: Optional[int] = None,
+    owner_object_type: Optional[str] = None,
+    owner_object_id: Any = None,
+    line_key: Any = None,
 ) -> int:
     """写入一个版本 + 该版本的字段级差异行，返回 revision_no。
 
     调用方负责把目标行的 revision_no 推进到 `revision_no`（同一事务内）。
+
+    [M4] owner_* 参数用于行写路径：版本行归属父单据（`document_revisions`），
+    行差异以 `line_key` 区分（头字段 `line_key = NULL`）。默认 None ⇒ 行为不变。
+    同一 `change_set_id` 内已存在版本行时，**不新建版本**，只追加差异并把快照
+    刷新为最新状态（父单据 `revision_no` 只 +1，见 spec §4）。
     """
     policy = getattr(meta_object, 'revision_policy', None)
-    if policy is None or not policy.enabled:
+    if (policy is None or not policy.enabled) and owner_object_type is None:
         return revision_no
 
     ensure_table_names_registered()
+    object_type = owner_object_type or meta_object.id
+    object_id_value = owner_object_id if owner_object_type else object_id
     payload = snapshot if snapshot is not None else collect_snapshot(
         ds, meta_object, object_id)
 
-    revision_id = ds.insert(REVISIONS_TABLE, {
-        'object_type': meta_object.id,
-        'object_id': str(object_id),
-        'revision_no': int(revision_no),
-        'snapshot': json.dumps(payload, ensure_ascii=False),
-        'change_request_id': change_request_id,
-        'reason_code': reason_code,
-        'change_set_id': change_set_id,
-        'created_by': _user_ref(user),
-        'created_at': _now(),
-    })
+    existing = find_revision_by_change_set(
+        ds, object_type, object_id_value, change_set_id)
+    if existing is not None:
+        revision_id = existing['id']
+        revision_no = existing.get('revision_no') or revision_no
+        try:
+            ds.update(REVISIONS_TABLE, revision_id, {
+                'snapshot': json.dumps(payload, ensure_ascii=False),
+            })
+        except Exception:  # noqa: BLE001 - 同一版本的快照刷新失败不影响差异入库
+            pass
+    else:
+        revision_id = ds.insert(REVISIONS_TABLE, {
+            'object_type': object_type,
+            'object_id': str(object_id_value),
+            'revision_no': int(revision_no),
+            'snapshot': json.dumps(payload, ensure_ascii=False),
+            'change_request_id': change_request_id,
+            'reason_code': reason_code,
+            'change_set_id': change_set_id,
+            'created_by': _user_ref(user),
+            'created_at': _now(),
+        })
 
-    wanted = diff_fields(meta_object) & set(changed_fields or ())
+    if line_key is not None:
+        # 行写路径：差异字段来自行对象自身（父 policy.fields 不含行字段）；
+        # 行主键本身不是内容变更，必须剔除（payload 里 id 常以字符串回传）
+        wanted = set(content_changed(changed_fields)) - {'id'}
+    else:
+        wanted = diff_fields(meta_object) & set(changed_fields or ())
     for field_name in sorted(wanted):
         ds.insert(CHANGES_TABLE, {
             'revision_id': revision_id,
-            'line_key': None,
+            'line_key': None if line_key is None else str(line_key),
             'field_name': field_name,
             'old_value': _as_text((before or {}).get(field_name)),
             'new_value': _as_text((after or {}).get(field_name)),

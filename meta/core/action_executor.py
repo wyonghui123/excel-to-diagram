@@ -1974,9 +1974,18 @@ class ActionExecutor:
         except:
             pass
 
+        # [M4] 行写路径：行对象自身无 revision_policy 时，按父单据 policy 归属版本
+        owner = None
+        revision_policy = getattr(meta_object, 'revision_policy', None)
+        if (revision_policy is None or not revision_policy.enabled) and original_data:
+            from meta.core.models import registry as _registry
+            owner = revision_service.resolve_owner(
+                self.ds, _registry.all(), meta_object.id, original_data)
+            if owner is not None:
+                revision_policy = owner.policy
+
         # [M1] 变更策略校验（reason_code 必填 / audit 排除字段）
         # 必须在 ds.update 之前拦截，保证被拒时既不落库也不写审计。
-        revision_policy = getattr(meta_object, 'revision_policy', None)
         reason_code = None
         exclude_fields = None
         if revision_policy is not None and revision_policy.enabled:
@@ -1994,20 +2003,38 @@ class ActionExecutor:
                 )
             exclude_fields = revision_policy.audit_excluded_fields() or None
 
-        # [M2] 版本跟踪前提：策略开启 + 目标行已有 revision_no 列（存量库/测试库无该列时自动降级）
-        revision_tracking = bool(
-            revision_policy is not None and revision_policy.enabled
-            and original_data and 'revision_no' in original_data
-        )
-        expected_revision = original_data.get('revision_no') if revision_tracking else None
+        # [M2] 版本跟踪前提：策略开启 + 版本归属行已有 revision_no 列
+        # （存量库/测试库无该列时自动降级）；[M4] 行写路径以父单据的 revision_no 为准
+        if owner is not None:
+            gate_record = owner.gate_record or {}
+            revision_tracking = bool(
+                revision_policy is not None and revision_policy.enabled
+                and 'revision_no' in gate_record
+            )
+            expected_revision = gate_record.get('revision_no') if revision_tracking else None
+        else:
+            revision_tracking = bool(
+                revision_policy is not None and revision_policy.enabled
+                and original_data and 'revision_no' in original_data
+            )
+            expected_revision = original_data.get('revision_no') if revision_tracking else None
 
         # [M2 FR-006] 修订闸门：状态 / editable_when / 履约分档；不通过则既不落库也不写审计
         # [M3] 变更申请生效路径放行 partial（fulfilled/voided 仍拒）
+        # [M4] 行写路径闸门取值用父单据记录 + 行类型分档字段清单
         if revision_tracking:
+            guard_changed = revision_service.content_changed({
+                k for k, v in data.items()
+                if k != 'revision_no' and (original_data or {}).get(k) != v
+            })
             try:
                 RevisionGuard().check(
                     meta_object, original_data,
+                    changed_fields=guard_changed,
                     via_change_request=bool(cr_ctx.get('change_request_id')),
+                    policy=revision_policy,
+                    line_fields=(owner.line_fields if owner is not None else None),
+                    gate_record=(owner.gate_record if owner is not None else None),
                 )
             except RevisionError as e:
                 return ActionResult.fail(error=e.code, message=e.message)
@@ -2077,20 +2104,51 @@ class ActionExecutor:
                 )
                 new_revision_no = None
 
-                if tracked_change:
+                # [M4] 同一 change_set 内已写过版本 ⇒ 复用该版本号（父单据只 +1）
+                existing_revision = None
+                if tracked_change and change_set_id:
+                    existing_revision = revision_service.find_revision_by_change_set(
+                        self.ds,
+                        owner.object_type if owner is not None else meta_object.id,
+                        owner.object_id if owner is not None else id_value,
+                        change_set_id,
+                    )
+
+                if tracked_change and owner is not None:
+                    # [M4] 行写路径：版本号推进到父单据，行本身无 revision_no
+                    if existing_revision is not None:
+                        new_revision_no = int(existing_revision.get('revision_no') or 0)
+                        self.ds.update(meta_object.table_name, id_value, data)
+                    else:
+                        new_revision_no = int(expected_revision or 1) + 1
+                        if not revision_service.update_with_revision(
+                            self.ds, owner.object.table_name, owner.object_id,
+                            {'revision_no': new_revision_no},
+                            expected_revision=expected_revision,
+                        ):
+                            raise RevisionError(
+                                'REVISION_CONFLICT',
+                                '单据已被他人修改（期望版本 %s）' % expected_revision,
+                            )
+                        self.ds.update(meta_object.table_name, id_value, data)
+                elif tracked_change:
                     # FR-010（M2 等价实现）：UPDATE ... WHERE id=? AND revision_no=?
-                    new_revision_no = int(expected_revision or 1) + 1
-                    update_data = dict(data)
-                    update_data['revision_no'] = new_revision_no
-                    if not revision_service.update_with_revision(
-                        self.ds, meta_object.table_name, id_value,
-                        update_data, expected_revision=expected_revision,
-                    ):
-                        raise RevisionError(
-                            'REVISION_CONFLICT',
-                            '单据已被他人修改（期望版本 %s）' % expected_revision,
-                        )
-                    data = update_data
+                    if existing_revision is not None:
+                        new_revision_no = int(existing_revision.get('revision_no') or 0)
+                        self.ds.update(meta_object.table_name, id_value, data)
+                    else:
+                        new_revision_no = int(expected_revision or 1) + 1
+                        update_data = dict(data)
+                        update_data['revision_no'] = new_revision_no
+                        if not revision_service.update_with_revision(
+                            self.ds, meta_object.table_name, id_value,
+                            update_data, expected_revision=expected_revision,
+                        ):
+                            raise RevisionError(
+                                'REVISION_CONFLICT',
+                                '单据已被他人修改（期望版本 %s）' % expected_revision,
+                            )
+                        data = update_data
                 elif version is not None and hasattr(self.ds, 'update_with_version'):
                     self.ds.update_with_version(
                         meta_object.table_name, id_value, data,
@@ -2126,6 +2184,10 @@ class ActionExecutor:
                         if k != 'revision_no' and original_data.get(k) != v
                     })
                     if content_fields:
+                        snapshot = None
+                        if owner is not None:
+                            snapshot = revision_service.collect_snapshot(
+                                self.ds, owner.object, owner.object_id)
                         revision_service.record(
                             self.ds, meta_object, id_value,
                             before=original_data,
@@ -2136,6 +2198,10 @@ class ActionExecutor:
                             change_set_id=change_set_id,
                             user=cr_ctx.get('user') or _current_actor(),
                             change_request_id=cr_ctx.get('change_request_id'),
+                            owner_object_type=(owner.object_type if owner is not None else None),
+                            owner_object_id=(owner.object_id if owner is not None else None),
+                            line_key=(owner.line_key if owner is not None else None),
+                            snapshot=snapshot,
                         )
 
                 # [M3 D4] 变更申请提交钩子：draft→submitted 时校验行内容 + 建审批任务，
@@ -2311,8 +2377,10 @@ class ActionExecutor:
                     if not header_result.success:
                         raise _FunnelAbort(header_result)
                 else:
+                    # [M4] 行级变更会推进父单据 revision_no，回执必须取落库后的当前行
+                    current = self.ds.find_by_id(meta_object.table_name, object_id) or original
                     header_result = ActionResult.ok(
-                        data=original,
+                        data=current,
                         message="{0} unchanged (line-only change request)".format(
                             meta_object.name),
                     )
