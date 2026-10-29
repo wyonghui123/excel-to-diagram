@@ -16,6 +16,7 @@
 from typing import List, Dict, Any, Optional, Set, Tuple, Callable
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
+from datetime import datetime
 from enum import Enum
 import logging
 import re
@@ -814,6 +815,14 @@ class ImplicitRuleChainExecutor:
         new_value = rule.to_state
         
         context.set_field_value(state_field, new_value)
+
+        # 状态进入时间：仅当对象声明了 `{state_field}_entered_at` 字段时写入。
+        # 与 flat 侧 `StateTransitionExecutor._do_execute`（rule_executor.py）
+        # 逐条对齐 —— 修复前 chain 侧不写该字段，同一份 YAML 在两条执行路径
+        # 上语义不一致。
+        entered_at_field = f"{state_field}_entered_at"
+        if any(f.id == entered_at_field for f in self.meta_object.fields):
+            context.set_field_value(entered_at_field, datetime.now())
         
         if old_value != new_value:
             context.mark_changed(state_field, old_value, new_value)

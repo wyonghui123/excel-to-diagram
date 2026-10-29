@@ -185,6 +185,47 @@ class TestChainExecutorSideEffects:
         assert "delivered_at" in changed
 
 
+# ---- chain 执行器：状态进入时间 ----
+
+class TestChainExecutorStateEnteredAt:
+
+    def _make_obj(self, with_entered_at=True):
+        fields = [
+            MetaField(id="id", name="ID", field_type=FieldType.INTEGER, db_column="id"),
+            MetaField(id="status", name="状态", field_type=FieldType.STRING, db_column="status"),
+        ]
+        if with_entered_at:
+            fields.append(MetaField(id="status_entered_at", name="状态进入时间",
+                                    field_type=FieldType.DATETIME, db_column="status_entered_at"))
+        return MetaObject(id="st_events", name="事件（进入时间测试）", table_name="st_events",
+                          fields=fields)
+
+    def _execute(self, obj, data, original_data):
+        rule = MetaStateTransition(
+            id="start_event", name="开始", state_field="status",
+            from_states=["draft"], to_state="processing")
+        obj.rules = [rule]
+        executor = ImplicitRuleChainExecutor(obj)
+        node = executor.graph.nodes[rule.id]
+        ctx = RuleChainContext(data=dict(data), original_data=dict(original_data))
+        return executor._execute_state_transition(node, ctx), ctx
+
+    def test_written_when_field_declared(self):
+        result, ctx = self._execute(
+            self._make_obj(), {"id": 1, "status": "processing"}, {"id": 1, "status": "draft"})
+
+        assert result["success"] is True
+        assert isinstance(ctx.data["status_entered_at"], datetime)
+
+    def test_skipped_when_field_not_declared(self):
+        result, ctx = self._execute(
+            self._make_obj(with_entered_at=False),
+            {"id": 1, "status": "processing"}, {"id": 1, "status": "draft"})
+
+        assert result["success"] is True
+        assert "status_entered_at" not in ctx.data
+
+
 # ---- reload 前置校验 ----
 
 class TestReloadValidation:
