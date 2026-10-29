@@ -51,6 +51,18 @@ class RuleProvider:
         return [rule for rule in self.get_rules(meta_object)
                 if getattr(rule, 'rule_type', None) == rule_type]
 
+    def get_rules_by_trigger(self, meta_object: Optional[MetaObject],
+                             trigger: Any) -> List[MetaRule]:
+        """按触发时机过滤，且仅取已启用规则（保持原顺序）
+
+        [SSOT 2026-10-29] 语义与 ``MetaObject.get_rules_by_trigger`` 完全一致
+        （``trigger in rule.triggers and rule.enabled``），抽到本入口是为了让
+        BO 保存热路径 ``RuleEngine.execute_rules`` 也走统一读取门面。
+        """
+        return [rule for rule in self.get_rules(meta_object)
+                if trigger in getattr(rule, 'triggers', [])
+                and getattr(rule, 'enabled', True)]
+
     def get_default_rules(self, meta_object: Optional[MetaObject]) -> List[MetaRule]:
         """仅属性确定（默认值）类规则（保持原顺序）
 

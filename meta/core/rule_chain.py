@@ -2,6 +2,17 @@
 """
 隐式规则链执行器 - 数据流驱动的规则链执行
 
+[B1 2026-10-29] 定位声明（见 docs/superpowers/specs/2026-10-29-flat-chain-convergence-inventory.md）
+------------------------------------------------------------------
+**生产语义基准 = flat `RuleEngine.execute_rules`（rule_executor.py）**。
+本模块是实验性实现：`ImplicitRuleChainExecutor` / `build_rule_chain` 当前
+零生产调用方（仅 meta/tests 与 cross_object_chain.py 使用）。
+
+因此：
+- **禁止新增生产调用方**，除非先完成清单中的 B3/B4（判定口径对齐 + 能力补齐）；
+- 两侧行为不一致时，**一律以 flat 为准**，本模块不得反向定义语义；
+- 已确认的分叉点见下方 `[B-INVENTORY D*]` 注释。
+
 核心概念：
 1. 规则链不只是计算规则，还包括状态转换、校验、触发器
 2. 规则之间通过数据流形成隐式依赖
@@ -891,6 +902,9 @@ class ImplicitRuleChainExecutor:
         if not isinstance(rule, MetaValidation):
             return {'success': False}
         
+        # [B-INVENTORY D2 2026-10-29] 与 flat 不一致：此处判定取 `rule.condition`，
+        # flat（validation_executor）判定取 `rule.action`、condition 仅作前置过滤。
+        # 本模块不得直接上位生产，详见 flat-chain-convergence-inventory.md §2 D2。
         try:
             is_valid = self._evaluate_condition(rule.condition, context)
             
@@ -924,6 +938,9 @@ class ImplicitRuleChainExecutor:
         if not isinstance(rule, MetaTrigger):
             return {'success': False}
         
+        # [B-INVENTORY D5 2026-10-29] 与 flat 不一致：此处只记账（executed=True），
+        # **不调用任何 handler**；flat 有 merge_dispatcher 注册表并同步调用。
+        # 详见 flat-chain-convergence-inventory.md §2 D5。
         return {
             'success': True,
             'trigger': TriggerResult(
@@ -942,6 +959,9 @@ class ImplicitRuleChainExecutor:
         if not isinstance(rule, MetaConstraint):
             return {'success': False}
         
+        # [B-INVENTORY D3 2026-10-29] 与 flat 不一致：此处判定取 `rule.condition` 且
+        # severity 恒为 "error"；flat 复用 ValidationExecutor（判定取 action、severity 取 rule.severity）。
+        # 详见 flat-chain-convergence-inventory.md §2 D3。
         try:
             is_valid = self._evaluate_condition(rule.condition, context)
             
@@ -983,6 +1003,9 @@ class ImplicitRuleChainExecutor:
         if not isinstance(rule, MetaDerivation):
             return {'success': False}
         
+        # [B-INVENTORY D6 2026-10-29] 与 flat 不一致：此处只组装 {'status': 'pending'}
+        # 描述字典，**不做任何执行**；flat 的 DerivationExecutor 真执行（聚合/转换/过滤/富化）。
+        # 详见 flat-chain-convergence-inventory.md §2 D6。
         result = {'success': True, 'changes': [], 'triggered_rules': [], 'derivation': None}
         
         if rule.derivation_type.value == "aggregation":

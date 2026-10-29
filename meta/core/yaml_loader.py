@@ -1797,6 +1797,15 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
     根据规则类型自动选择对应的解析函数
     """
     rule_type_str = data.get("type", data.get("rule_type", "validation")).lower()
+    # [SSOT 2026-10-29] 未知 type 不再静默降级成 VALIDATION（拼错时会被
+    # parse_validation 吞掉字段、按校验执行）。保留原文供追溯 + 显式告警。
+    unknown_type = rule_type_str not in RULE_TYPE_MAP
+    if unknown_type:
+        logger.warning(
+            "parse_rule: 未知规则类型 '%s'（rule id=%s, name=%s），暂按 validation 解析；"
+            "请修正 YAML 或在 RULE_TYPE_MAP 登记",
+            rule_type_str, data.get("id", ""), data.get("name", ""),
+        )
     rule_type = RULE_TYPE_MAP.get(rule_type_str, RuleType.VALIDATION)
     
     if rule_type == RuleType.VALIDATION:
@@ -1812,6 +1821,13 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
     elif rule_type == RuleType.DEFAULT:
         rule = parse_default_rule(data)
     else:
+        # [SSOT 2026-10-29] 已登记但无专用解析器的类型（当前仅 PERMISSION）：
+        # 只能落基类 MetaRule，且 RuleEngine 侧无执行器 —— 必须告警，不能静默。
+        logger.warning(
+            "parse_rule: 规则类型 '%s' 无专用解析器与执行器（rule id=%s），"
+            "执行时将被判为 RULE_TYPE_NOT_IMPLEMENTED",
+            rule_type_str, data.get("id", ""),
+        )
         rule = MetaRule(
             id=data.get("id", ""),
             name=data.get("name", ""),
@@ -1828,6 +1844,9 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
         )
     # [G1 修复 2026-10-03] 显式依赖统一在此注入，避免逐个 parse_* 重复。
     rule.depends_on = list(data.get("depends_on", []) or [])
+    if unknown_type:
+        # [SSOT 2026-10-29] 保留 YAML 原文，便于日志/排障追溯（rule_type 已降级为 VALIDATION）
+        rule.custom["raw_rule_type"] = rule_type_str
     return rule
 
 

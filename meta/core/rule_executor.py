@@ -1316,7 +1316,9 @@ class RuleEngine:
         context = RuleContext(meta_object, data, original_data,
                               data_source=self.data_source)
         
-        rules = meta_object.get_rules_by_trigger(trigger)
+        # [SSOT 2026-10-29] 读取走统一门面 RuleProvider（与其余 9 处调用点一致），
+        # 语义等价于 meta_object.get_rules_by_trigger(trigger)：trigger 命中且 enabled。
+        rules = get_rule_provider().get_rules_by_trigger(meta_object, trigger)
         # [规则模型 2026-10-03] 属性确定（DEFAULT）规则**不得**在此执行：
         # 它有专用求值入口 default_by_priority / apply_defaults（按 target_field 分组 +
         # 组内首个命中获胜 + change_source 感知）。若混入此处，会退化为「全局排序 +
@@ -1355,11 +1357,17 @@ class RuleEngine:
         elif rule.rule_type == RuleType.DEFAULT:
             return self.default_executor.execute(rule, context)
         else:
+            # [SSOT 2026-10-29] 未知/未实现规则类型**不得静默通过**。
+            # 历史行为返回 success=True，导致 `type: permission`（枚举与 yaml 映射都存在，
+            # 但无 MetaPermission 类与执行器）被当成"已通过"，属假成功。
+            # 现改为失败（ERROR）：未知类型必须显式暴露，而不是悄悄放行。
             return RuleResult(
-                success=True,
+                success=False,
                 rule_id=rule.id,
                 rule_name=rule.name,
                 message="Rule type '{0}' not implemented".format(rule.rule_type.value),
+                severity=ValidationSeverity.ERROR,
+                data={"error_code": "RULE_TYPE_NOT_IMPLEMENTED"},
             )
     
     def _order_rules_by_dependency(self, meta_object: MetaObject,
