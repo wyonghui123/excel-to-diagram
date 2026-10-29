@@ -21,7 +21,6 @@ class MetaStateTransition(MetaRule):
     from_states: List[str] = []        # 允许的源状态 (空=任意)
     to_state: str = ""                 # 目标状态
     allowed_roles: List[str] = []      # 允许执行的角色 (空=不限制)
-    auto_actions: List[str] = []       # 状态转换后自动执行的动作
     validation_expression: str = ""    # 前置验证表达式
     validation_message: str = ""       # 验证失败提示
     side_effects: List[StateTransitionSideEffect] = []  # 副作用
@@ -36,7 +35,6 @@ class MetaStateTransition(MetaRule):
 | `from_states` | 否 | 源状态列表, 空表示允许任意状态 |
 | `to_state` | 是 | 目标状态 |
 | `allowed_roles` | 否 | 允许执行此转换的角色, 空表示不限制 |
-| `auto_actions` | 否 | 转换后自动执行的动作列表 |
 | `validation_expression` | 否 | 前置验证表达式 (例: "amount < 10000") |
 | `validation_message` | 否 | 验证失败时显示给用户 |
 | `side_effects` | 否 | 副作用列表 (发通知/调外部 API) |
@@ -159,7 +157,6 @@ rules:
     from_states: [draft]
     to_state: pending
     allowed_roles: [sales, manager]
-    auto_actions: [notify_manager]
     validation_expression: amount > 0
     validation_message: 订单金额必须大于 0
     side_effects:
@@ -177,7 +174,6 @@ rules:
     from_states: [pending]
     to_state: approved
     allowed_roles: [manager]
-    auto_actions: [notify_sales, update_inventory]
     ui_hints:
       label: 批准
       color: success

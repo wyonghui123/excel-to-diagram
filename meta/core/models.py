@@ -306,7 +306,6 @@ class MetaStateTransition(MetaRule):
     # 空字符串 = 自定义 transition，向后兼容旧 yaml
     action_ref: str = ""
     allowed_roles: List[str] = field(default_factory=list)
-    auto_actions: List[str] = field(default_factory=list)
     validation_expression: str = ""
     validation_message: str = ""
     side_effects: List[StateTransitionSideEffect] = field(default_factory=list)

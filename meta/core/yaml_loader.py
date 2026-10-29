@@ -1746,7 +1746,6 @@ def parse_state_transition(data: Dict[str, Any]) -> MetaStateTransition:
         # [Spec 22 FR-002 2026-09-13] 引用通用 action 池的 action_id（权限码）
         action_ref=data.get("action_ref", ""),
         allowed_roles=data.get("allowed_roles", []),
-        auto_actions=data.get("auto_actions", []),
         validation_expression=data.get("validation_expression", ""),
         validation_message=data.get("validation_message", ""),
         side_effects=side_effects,
