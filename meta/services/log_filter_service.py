@@ -10,12 +10,10 @@ import logging
 from typing import Any
 
 
-SENSITIVE_KEYS = {
-    'password', 'passwd', 'pwd', 'secret', 'token', 'api_key', 'apikey',
-    'access_token', 'refresh_token', 'authorization', 'auth_token',
-    'old_password', 'new_password', 'password_hash', 'passwordHash',
-    'session_id', 'sessionid', 'cookie', 'ssn', 'id_number'
-}
+# [P1 2026-10-29] 敏感字段单一声明（PII 字段级安全域 Spec v0.1）
+# 字段 id 部分来自 meta/core/security/sensitive_fields.py 的声明表，
+# 非字段名的日志键（authorization/session/cookie/ssn/id_number 等）留在 EXTRA_LOG_KEYS。
+from meta.core.security.sensitive_fields import LOG_TEXT_KEYS as SENSITIVE_KEYS  # noqa: E402
 
 SENSITIVE_VALUE_PATTERNS = [
     (re.compile(r'Bearer\s+[a-zA-Z0-9\-_.~+/]+=*'), 'Bearer [TOKEN]'),

@@ -62,7 +62,10 @@ class ActionMeta:
 
 # 默认配置常量
 DEFAULT_RETENTION_DAYS = 180  # FR-LOG-008: Stripe 模式 6 个月保留
-SENSITIVE_FIELDS = {"password", "token", "secret", "api_key", "private_key"}  # TBD-5
+# [P1 2026-10-29] 敏感字段单一声明（PII 字段级安全域 Spec v0.1）
+# 明细表与三条派生视图见 meta/core/security/sensitive_fields.py；
+# 此处 re-export 保持调用方零改动（action_dispatcher L190/L203）。
+from meta.core.security.sensitive_fields import LOG_REDACT_IDS as SENSITIVE_FIELDS  # noqa: E402
 
 # 预定义 action verb 列表（与 auditLogMeta.js L79-84 同步）
 ACTION_VERBS = {
