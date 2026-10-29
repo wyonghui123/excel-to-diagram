@@ -25,6 +25,7 @@
 
 from typing import List, Dict, Any, Optional, Set
 import logging
+import re
 
 from meta.core.redundancy_registry import (
     RedundancyRegistry,
@@ -34,6 +35,31 @@ from meta.core.redundancy_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 显示格式模板的占位符（`{名字}`）
+_DISPLAY_FORMAT_TOKEN_RE = re.compile(r'\{(\w+)\}')
+
+
+def _apply_single_token_display_format(display_value, display_field, fmt):
+    """套用「单占位符型」显示格式，否则原样返回 display_value。
+
+    只处理占位符集合 == {display_field} 的模板（如 `"行 {line_no}"`），
+    即模板只引用显示字段本身、其余全是字面量。
+    `"{code} - {name}"` 这类多字段模板、空模板、占位符缺失/异常一律不套用，
+    保证「前缀型」格式之外的显示行为零变化。
+    """
+    if display_value is None:
+        return None
+    if not fmt or not isinstance(fmt, str):
+        return display_value
+    field_name = display_field or 'name'
+    tokens = set(_DISPLAY_FORMAT_TOKEN_RE.findall(fmt))
+    if tokens != {field_name}:
+        return display_value
+    try:
+        return fmt.format(**{field_name: display_value})
+    except (KeyError, ValueError, IndexError, TypeError):
+        return display_value
 
 
 class EnrichmentEngine:
@@ -515,9 +541,21 @@ class EnrichmentEngine:
                 cursor = self.ds.execute(sql, list(fk_values))
                 display_map = {row[0]: row[1] for row in cursor.fetchall()}
                 display_key = f'{fk_field_id}_display'
+                # [B9 行号友好显示] 前缀型 display_format 套用（如 "行 {line_no}"）。
+                #   仅当模板占位符集合 == {display_field} 时套用；多字段模板
+                #   （"{code} - {name}"）保持现状，把回归面压到「单字段前缀」。
+                display_format = ''
+                presentation = getattr(value_help, 'presentation', None)
+                if presentation is not None:
+                    display_format = getattr(presentation, 'display_format', '') or ''
                 for record in records:
                     fk_val = record.get(fk_field_id)
-                    record[display_key] = display_map.get(fk_val) if fk_val is not None else None
+                    if fk_val is None:
+                        record[display_key] = None
+                        continue
+                    record[display_key] = _apply_single_token_display_format(
+                        display_map.get(fk_val), display_field, display_format
+                    )
                 enriched_count += 1
                 logger.info(
                     f'[EnrichmentEngine.enrich_fk_display_names] {fk_field_id}->{resolve_bo}: '

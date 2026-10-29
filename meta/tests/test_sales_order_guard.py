@@ -40,6 +40,15 @@ class _FakeDS:
         self.addresses = addresses or {}
         self.divisions = divisions or {}
         self.raise_on_query = raise_on_query
+        # B7：直连 UPDATE 记录（freeze_line_address_text 用）
+        self.executed = []
+        self.rowcount = 1
+
+    def execute(self, sql, params=None):
+        if self.raise_on_query:
+            raise RuntimeError('db down')
+        self.executed.append((sql, list(params or [])))
+        return SimpleNamespace(rowcount=self.rowcount)
 
     def query(self, sql, params=None):
         if self.raise_on_query:
@@ -629,6 +638,77 @@ class TestAddressSnapshot:
     def test_draft_can_edit_snapshot(self):
         SalesOrderGuardService(_ds()).validate_order_write(
             {'ship_to_address_text': '草稿手工填写'}, old_data=ORDERS[10])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B7 行级地址文本快照（确认时逐行冻结 + 手工路径禁写）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLineAddressSnapshot:
+
+    SNAPSHOT = {'ship_to_address_text': '上海市浦东新区世纪大道 100 号',
+                'bill_to_address_text': '上海市静安区南京西路 200 号'}
+
+    def test_freeze_writes_both_fields(self):
+        ds = _ds()
+        affected = SalesOrderGuardService(ds).freeze_line_address_text(
+            11, self.SNAPSHOT)
+        assert affected == 1
+        sql, params = ds.executed[0]
+        assert 'UPDATE sales_order_lines' in sql
+        assert 'ship_to_address_text' in sql and 'bill_to_address_text' in sql
+        # 取消行不写
+        assert "status <> 'cancelled'" in sql
+        assert params == [self.SNAPSHOT['ship_to_address_text'],
+                          self.SNAPSHOT['bill_to_address_text'], 11]
+
+    def test_freeze_skips_empty_snapshot(self):
+        ds = _ds()
+        assert SalesOrderGuardService(ds).freeze_line_address_text(11, {}) == 0
+        assert ds.executed == []
+
+    def test_freeze_ignores_blank_field(self):
+        ds = _ds()
+        SalesOrderGuardService(ds).freeze_line_address_text(
+            11, {'ship_to_address_text': '  ', 'bill_to_address_text': '苏州街 1 号'})
+        sql, params = ds.executed[0]
+        assert 'ship_to_address_text' not in sql
+        assert params == ['苏州街 1 号', 11]
+
+    def test_freeze_fail_open_on_write_error(self):
+        svc = SalesOrderGuardService(_ds(raise_on_query=True))
+        assert svc.freeze_line_address_text(11, self.SNAPSHOT) == 0
+
+    def test_manual_set_rejected_on_create(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'ship_to_address_text': '手工地址'}, is_create=True)
+        assert e.value.rule == 'line_address_snapshot_readonly'
+        assert e.value.field_name == 'ship_to_address_text'
+
+    def test_manual_change_rejected_on_update(self):
+        old = dict(BASE_LINE, id=100, ship_to_address_text='原快照')
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'bill_to_address_text': '改过的账单地址'},
+                old_data=old)
+        assert e.value.rule == 'line_address_snapshot_readonly'
+        assert e.value.field_name == 'bill_to_address_text'
+
+    def test_same_value_echo_allowed_on_update(self):
+        old = dict(BASE_LINE, id=100,
+                   ship_to_address_text='原快照', bill_to_address_text='原账单')
+        SalesOrderGuardService(_ds()).validate_line_write(
+            {**BASE_LINE, 'ship_to_address_text': '原快照',
+             'bill_to_address_text': '原账单'}, old_data=old)
+
+    def test_confirmed_order_line_write_rejected(self):
+        # 父单非草稿 → 行写入整体拒绝（确认后行地址快照天然不可改）
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                {**BASE_LINE, 'order_id': 12,
+                 'ship_to_address_text': '确认后改地址'}, old_data=dict(BASE_LINE, id=200))
+        assert e.value.rule == 'line_write_parent_not_draft'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

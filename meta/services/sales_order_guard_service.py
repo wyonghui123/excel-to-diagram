@@ -153,6 +153,8 @@ _CONFIRMED_STATES = ('confirmed', 'closed')
 
 # W2-R1：只由展开服务写入的行字段
 _EXPAND_FIELDS = ('configuration_id', 'parent_line_id', 'component_no')
+# B7：只由确认动作系统回填的行地址文本快照字段
+_LINE_ADDRESS_SNAPSHOT_FIELDS = ('ship_to_address_text', 'bill_to_address_text')
 # W2-R4：定价模式枚举
 PRICING_MODES = ('standalone', 'bundle_price', 'component_price', 'base_plus_option')
 # W2-R3：配置实例组件键（L0010 / L0010.L0020）
@@ -651,6 +653,33 @@ class SalesOrderGuardService:
                 snapshot[text_field] = text
         return snapshot
 
+    def freeze_line_address_text(self, order_id: Any,
+                                 snapshot: Dict[str, Any]) -> int:
+        """B7：确认动作同一请求内按抬头快照逐行写入地址文本。
+
+        直连 SQL 更新（绕开 bo_api 的「父单须草稿」限制），取消行不写。
+        查询/写入失败 → 记 warning 返回 0，不阻断确认（与抬头快照 fail-open 一致）。
+        """
+        if _is_blank(order_id) or not snapshot:
+            return 0
+        fields = [f for f in _LINE_ADDRESS_SNAPSHOT_FIELDS
+                  if not _is_blank(snapshot.get(f))]
+        if not fields:
+            return 0
+        assignments = ', '.join(f'{f} = ?' for f in fields)
+        values = [snapshot[f] for f in fields]
+        try:
+            cursor = self.ds.execute(
+                f"UPDATE sales_order_lines SET {assignments}, "
+                "updated_at = datetime('now') "
+                "WHERE order_id = ? AND status <> 'cancelled'",
+                values + [order_id])
+        except Exception as e:  # 快照回填失败不阻断确认
+            logger.warning(
+                f'[sales_order_guard] 回填行地址快照 {order_id} 失败: {e}')
+            return 0
+        return getattr(cursor, 'rowcount', 0) or 0
+
     def snapshot_contact_text(self, data: Dict[str, Any],
                               old_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """W1-C R-CNT-3：订单转为 confirmed 时回填联系人姓名 / 电话快照。
@@ -750,6 +779,8 @@ class SalesOrderGuardService:
 
         # W2-R1：展开字段只读（表单回传原值放行）
         self._validate_expand_fields(data, old_data, is_create)
+        # B7：行地址文本快照只由确认动作回填，手工路径不可设置
+        self._validate_line_address_snapshot(data, old_data, is_create)
 
         # W2-R2：子行的物料不可改
         old = old_data or {}
@@ -1018,6 +1049,23 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     f'{field} 由结构展开服务写入，不能在手工维护路径设置',
                     field_name=field, rule='expand_field_readonly')
+
+    @staticmethod
+    def _validate_line_address_snapshot(data: Dict[str, Any],
+                                        old_data: Optional[Dict[str, Any]],
+                                        is_create: bool) -> None:
+        """B7：行地址文本快照只读（确认动作的系统回填走直连 SQL，不经本守卫）。"""
+        old = old_data or {}
+        for field in _LINE_ADDRESS_SNAPSHOT_FIELDS:
+            new_value = data.get(field)
+            if _is_blank(new_value):
+                continue
+            old_value = old.get(field)
+            if is_create or _is_blank(old_value) \
+                    or str(new_value) != str(old_value):
+                raise SalesOrderGuardError(
+                    '行地址文本为确认时冻结的地址快照，不能手工修改',
+                    field_name=field, rule='line_address_snapshot_readonly')
 
     # ---------------- 查询（可覆写，便于单测注入） ----------------
 

@@ -98,6 +98,9 @@ class SalesOrderGuardInterceptor(Interceptor):
                     data.update(snapshot)
                     if isinstance(context.params, dict):
                         context.params.update(snapshot)
+                    # B7：确认瞬间把抬头快照逐行落到订单行（下行单据引用行级地址）
+                    if context.action == 'crud_update':
+                        guard.freeze_line_address_text(context.object_id, snapshot)
                 # W1-C：确认动作同一请求内回填联系人姓名 / 电话快照
                 contact_snapshot = guard.snapshot_contact_text(data, old_data)
                 if contact_snapshot:

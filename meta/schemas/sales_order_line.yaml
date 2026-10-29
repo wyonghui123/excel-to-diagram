@@ -373,6 +373,34 @@ fields:
       widget: number
       editable: false
 
+  # B7：行级地址文本快照。行本身不存地址引用列，确认瞬间由守卫服务
+  # 按抬头地址快照逐行写入；已确认订单禁止改（父单非草稿禁写行兜底）。
+  - id: ship_to_address_text
+    name: 收货地址(快照)
+    type: string
+    db_column: ship_to_address_text
+    nullable: true
+    max_length: 512
+    description: 订单确认时从抬头收货地址快照逐行写入的文本快照；下行单据直接引用
+    semantics:
+      meaning: 行收货地址文本快照（确认后只读）
+    ui:
+      widget: input
+      editable: false
+
+  - id: bill_to_address_text
+    name: 账单地址(快照)
+    type: string
+    db_column: bill_to_address_text
+    nullable: true
+    max_length: 512
+    description: 订单确认时从抬头账单地址快照逐行写入的文本快照；下行单据直接引用
+    semantics:
+      meaning: 行账单地址文本快照（确认后只读）
+    ui:
+      widget: input
+      editable: false
+
   - id: tax_code_id
     name: 税码
     type: integer

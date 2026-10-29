@@ -425,6 +425,43 @@
       ],
       "table": "change_events"
     },
+    "change_request": {
+      "hash": "6c3e145270ae141427ed5f29c545baf7",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "target_object_type",
+        "target_object_id",
+        "target_revision_no",
+        "status",
+        "reason_code",
+        "summary",
+        "submitted_by",
+        "submitted_at",
+        "approved_by",
+        "approved_at",
+        "applied_at",
+        "applied_revision_no",
+        "fail_reason",
+        "change_set_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "change_requests"
+    },
+    "change_request_line": {
+      "hash": "c9d634bb204ce9e2280139f8fa7c1b93",
+      "fields": [
+        "id",
+        "change_request_id",
+        "line_key",
+        "field_name",
+        "old_value",
+        "new_value"
+      ],
+      "table": "change_request_lines"
+    },
     "change_subscription": {
       "hash": "bfc15cceddeecce0a38deab424bfcc42",
       "fields": [
@@ -1955,7 +1992,7 @@
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "a5c11d3257fe5aaa1d3093a06ed187d7",
+      "hash": "124e7c1c8da65a8c9fc8c134ea069395",
       "fields": [
         "created_by",
         "updated_by",
@@ -1972,6 +2009,8 @@
         "net_amount",
         "header_discount_amount",
         "header_surcharge_amount",
+        "ship_to_address_text",
+        "bill_to_address_text",
         "tax_code_id",
         "tax_base_amount",
         "tax_rate_percent",
@@ -2495,44 +2534,7 @@
         "child_count"
       ],
       "table": "versions"
-    },
-    "change_request": {
-      "hash": "6c3e145270ae141427ed5f29c545baf7",
-      "fields": [
-        "created_by",
-        "updated_by",
-        "id",
-        "target_object_type",
-        "target_object_id",
-        "target_revision_no",
-        "status",
-        "reason_code",
-        "summary",
-        "submitted_by",
-        "submitted_at",
-        "approved_by",
-        "approved_at",
-        "applied_at",
-        "applied_revision_no",
-        "fail_reason",
-        "change_set_id",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "change_requests"
-    },
-    "change_request_line": {
-      "hash": "c9d634bb204ce9e2280139f8fa7c1b93",
-      "fields": [
-        "id",
-        "change_request_id",
-        "line_key",
-        "field_name",
-        "old_value",
-        "new_value"
-      ],
-      "table": "change_request_lines"
     }
   },
-  "last_sync": "2026-10-29T14:18:09.531600"
+  "last_sync": "2026-10-29T22:40:28.735438"
 }

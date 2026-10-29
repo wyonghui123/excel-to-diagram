@@ -40,6 +40,14 @@ class _FakeDS:
         if 'FROM sales_order_schedules WHERE id' in sql:
             row = self.schedules.get(p[0])
             return [row] if row else []
+        if 'FROM sales_order_lines l' in sql:
+            # 计划行上下文查询（JOIN type_definitions 取行类型交货相关性）
+            row = self.lines.get(p[0])
+            if not row:
+                return []
+            row = dict(row)
+            row.setdefault('delivery_relevant', 1)  # 同 COALESCE(t.delivery_relevant, 1)
+            return [row]
         if 'FROM sales_order_lines WHERE id' in sql:
             row = self.lines.get(p[0])
             return [row] if row else []
