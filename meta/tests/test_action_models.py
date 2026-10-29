@@ -96,5 +96,50 @@ class TestConstants:
         assert "secret" in SENSITIVE_FIELDS
 
 
+class TestSensitiveFieldSingleSource:
+    """[P1 2026-10-29] 敏感字段单一声明的一致性锁定
+
+    依据: docs/superpowers/specs/2026-10-29-pii-field-level-security-spec.md §7
+    三处调用点（写面脱敏 / UI 隐藏 / 日志文本匹配）均为同一张声明表的派生视图，
+    任一派生集合漂移即由本组断言拦截。
+    """
+
+    def test_declaration_ids_unique(self):
+        from meta.core.security.sensitive_fields import SECRET_FIELD_DECLARATIONS
+        ids = [d.id for d in SECRET_FIELD_DECLARATIONS]
+        assert len(ids) == len(set(ids))
+
+    def test_derived_views_match_declarations(self):
+        from meta.core.security import sensitive_fields as sf
+        assert sf.LOG_REDACT_IDS == frozenset(
+            d.id for d in sf.SECRET_FIELD_DECLARATIONS if d.log_redact)
+        assert sf.UI_HIDDEN_IDS == frozenset(
+            d.id for d in sf.SECRET_FIELD_DECLARATIONS if d.ui_hidden)
+
+    def test_three_call_sites_are_derived_views(self):
+        """三处 re-export 必须是同一对象，不得各自维护副本"""
+        from meta.core.action_models import SENSITIVE_FIELDS as write_side
+        from meta.core.ui_config.config_constants import SENSITIVE_FIELDS as ui_side
+        from meta.services.log_filter_service import SENSITIVE_KEYS as log_side
+        from meta.core.security import sensitive_fields as sf
+        assert write_side is sf.LOG_REDACT_IDS
+        assert ui_side is sf.UI_HIDDEN_IDS
+        assert log_side is sf.LOG_TEXT_KEYS
+
+    def test_password_visible_in_ui_but_redacted_in_log(self):
+        """`password` 是 virtual 输入字段：UI 必须可见，写面/日志必须脱敏"""
+        from meta.core.security import sensitive_fields as sf
+        assert 'password' in sf.LOG_REDACT_IDS
+        assert 'password' not in sf.UI_HIDDEN_IDS
+
+    def test_non_field_log_keys_not_promoted_to_field_ids(self):
+        """日志键（cookie/ssn 等）不是字段 id，不得混入派生的字段集合"""
+        from meta.core.security import sensitive_fields as sf
+        field_ids = {d.id for d in sf.SECRET_FIELD_DECLARATIONS}
+        for key in ('cookie', 'ssn', 'id_number'):
+            assert key in sf.LOG_TEXT_KEYS
+            assert key not in field_ids
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
