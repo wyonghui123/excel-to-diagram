@@ -14,6 +14,8 @@ from meta.services.auth_middleware import login_required, get_current_user
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
+from meta.services import revision_service
+from meta.services.revision_service import RevisionError
 from meta.api._audit_helper import write_permission_config_audit
 from meta.core.db_path import get_meta_db_path
 from meta.core.number_sequence_engine import NumberSequenceEngine, NumberSequenceError
@@ -1806,6 +1808,65 @@ def v2_get_state_history(object_type, obj_id):
 def v2_get_stage_metrics(object_type, obj_id):
     """状态停留统计 — 委托给 v1 manage_api"""
     return _v1_handlers()['get_stage_metrics'](object_type, obj_id)
+
+
+def _revision_policy(object_type):
+    """取对象级版本策略；未知名对象 / 未配置策略返回 None"""
+    meta_obj = registry.get(object_type)
+    if meta_obj is None:
+        return None
+    return getattr(meta_obj, 'revision_policy', None)
+
+
+def _revision_not_enabled():
+    return jsonify({
+        'success': False,
+        'code': 'REVISION_NOT_ENABLED',
+        'message': '对象未启用版本管理',
+    }), 404
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/revisions', methods=['GET'])
+@login_required
+def v2_list_object_revisions(object_type, obj_id):
+    """文档版本列表（IF-001，spec §8）
+
+    契约：200 → {'success': True, 'data': [{revision_no, created_at,
+    created_by, reason_code, change_set_id, summary}]}
+    对象未启用版本管理 → 404 REVISION_NOT_ENABLED
+    """
+    policy = _revision_policy(object_type)
+    if policy is None or not getattr(policy, 'enabled', False):
+        return _revision_not_enabled()
+
+    rows = revision_service.list_revisions(
+        _get_data_source(), object_type, obj_id)
+    return jsonify({'success': True, 'data': rows})
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/revisions/<int:rev_a>/diff/<int:rev_b>',
+             methods=['GET'])
+@login_required
+def v2_object_revision_diff(object_type, obj_id, rev_a, rev_b):
+    """两个版本的结构化差异（IF-002，spec §8）
+
+    契约：200 → {'success': True, 'data': {'header': [...], 'lines': [...]}}
+    任一版本不存在 → 404 REVISION_NOT_FOUND；a == b → 空差异
+    """
+    policy = _revision_policy(object_type)
+    if policy is None or not getattr(policy, 'enabled', False):
+        return _revision_not_enabled()
+
+    try:
+        data = revision_service.diff(
+            _get_data_source(), object_type, obj_id, rev_a, rev_b)
+    except RevisionError as e:
+        return jsonify({
+            'success': False,
+            'code': e.code,
+            'message': e.message,
+        }), 404
+    return jsonify({'success': True, 'data': data})
 
 
 # ── Architecture Preview ──

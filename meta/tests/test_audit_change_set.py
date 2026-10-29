@@ -101,8 +101,9 @@ def spy_audit(monkeypatch):
     """替换 _write_audit_log_v2，记录 reason_code / exclude_fields。"""
     calls = []
 
-    def spy(self, audit_fn, reason_code=None, exclude_fields=None):
-        calls.append({'reason_code': reason_code, 'exclude_fields': exclude_fields})
+    def spy(self, audit_fn, reason_code=None, exclude_fields=None, change_set_id=None):
+        calls.append({'reason_code': reason_code, 'exclude_fields': exclude_fields,
+                      'change_set_id': change_set_id})
 
     monkeypatch.setattr(ActionExecutor, '_write_audit_log_v2', spy)
     return calls

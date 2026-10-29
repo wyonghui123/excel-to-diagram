@@ -1355,6 +1355,19 @@ fields:
       meaning: 派生确认时间，非人工维护
       audit_field: true
 
+  # M2 文档版本（FR-003）：内容变更计数，平台写入，界面不可编辑
+  - id: revision_no
+    name: 版本号
+    type: integer
+    db_column: revision_no
+    required: true
+    default: 1
+    description: 文档内容版本号（乐观锁），系统维护
+    semantics:
+      meaning: 每次内容变更 +1，用于版本快照与并发冲突检测
+    ui:
+      editable: false
+
 # 状态机（波次 0）：draft → submitted → confirmed → closed；任意态可 cancelled
 # 迁移由平台状态接口按 PUT status 执行；本波次不引入额外 action 权限码，
 # 写权限仍由 sales_order:update 收口。
@@ -1690,3 +1703,24 @@ ui_view_config:
       useMetaList: true
       enableDetail: true
       enableAutoCrud: true
+
+# M2 文档版本（FR-011 / FR-003）：抬头级变更策略
+# 字段引用按本文件原始 fields: 声明校验（不做 includes 展开）：
+#   customer_id       -> customer_account_id（售达方）
+#   total_amount      -> gross_amount（含税合计，订单总额口径）
+#   discount_rate     -> header_discount_percent（抬头折扣率）
+revision_policy:
+  enabled: true             # TR-003：2026-10-29 PM 批准开启
+  scope: header
+  revision_field: revision_no
+  generate_on: [content_update]
+  require_reason: true
+  reason_required_fields: [gross_amount, header_discount_percent, customer_account_id]
+  editable_in_states: [draft, submitted, confirmed]
+  editable_when: "fulfillment_status == 'not_started' or fulfillment_status == 'not_applicable'"
+  fields:
+    - {field: customer_account_id,  editable: true,  diff: true,  audit: true}
+    - {field: gross_amount,         editable: true,  diff: true,  audit: true}
+    - {field: header_discount_percent, editable: true, diff: true, audit: true}
+    - {field: status,               editable: false, diff: true,  audit: true}
+    - {field: fulfillment_status,   editable: false, diff: false, audit: false}

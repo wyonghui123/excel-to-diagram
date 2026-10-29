@@ -27,6 +27,11 @@ from meta.core.query_builder import QueryBuilder
 from meta.core.rule_executor import RuleEngine, RuleExecutionReport
 from meta.core.exceptions import ConcurrentModificationError
 from meta.services.hierarchy_validation_service import validate_update, validate_delete
+# [M2 文档版本] FR-003/004/005/006：版本记录（唯一写入口）+ 修订闸门
+# revision_service 不写目标表（D3），模块级无 meta.core 依赖，安全
+from meta.services import revision_service
+from meta.services.revision_guard import RevisionGuard
+from meta.services.revision_service import NON_CONTENT_FIELDS, RevisionError
 from meta.core.metadata_driven_validator import MetadataDrivenValidator
 from meta.core.validation_messages import ValidationMessageRegistry
 # [FIX v1.2.20 2026-06-20] 写路径 dim scope 校验: 防止 ManageService 绕过 BOFramework 拦截器链
@@ -50,6 +55,18 @@ def _first_rule_failure_message(report: RuleExecutionReport, fallback: str) -> s
         if not r.success and r.severity == ValidationSeverity.ERROR and r.message:
             return r.message
     return fallback
+
+
+def _current_actor() -> Optional[Dict[str, Any]]:
+    """当前操作者（Flask g.current_user）；无请求上下文时返回 None"""
+    try:
+        from flask import g
+        current_user = getattr(g, 'current_user', None)
+        if isinstance(current_user, dict):
+            return current_user
+    except (ImportError, RuntimeError):
+        pass
+    return None
 
 
 # [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
@@ -1911,6 +1928,9 @@ class ActionExecutor:
                 message="Parameter 'id' is required"
             )
 
+        # [M2 D4] 变更集 ID 前移到入口：同一次保存的版本记录与审计行共享同一 change_set_id
+        change_set_id = f"cs_{uuid.uuid4().hex[:16]}"
+
         fields = meta_object.get_persistent_fields()
         data = self._prepare_data(fields, params, for_update=True)
 
@@ -1955,6 +1975,20 @@ class ActionExecutor:
                     message="以下字段变更必须提供原因码: %s" % ", ".join(missing),
                 )
             exclude_fields = revision_policy.audit_excluded_fields() or None
+
+        # [M2] 版本跟踪前提：策略开启 + 目标行已有 revision_no 列（存量库/测试库无该列时自动降级）
+        revision_tracking = bool(
+            revision_policy is not None and revision_policy.enabled
+            and original_data and 'revision_no' in original_data
+        )
+        expected_revision = original_data.get('revision_no') if revision_tracking else None
+
+        # [M2 FR-006] 修订闸门：状态 / editable_when / 履约分档；不通过则既不落库也不写审计
+        if revision_tracking:
+            try:
+                RevisionGuard().check(meta_object, original_data)
+            except RevisionError as e:
+                return ActionResult.fail(error=e.code, message=e.message)
 
         if original_data:
             hierarchy_result = validate_update(
@@ -2011,7 +2045,31 @@ class ActionExecutor:
         try:
             version = params.get('version')
             with self.ds.transaction():
-                if version is not None and hasattr(self.ds, 'update_with_version'):
+                # [M2] FR-012：状态 / 履约派生字段变更不产生版本，也不推进 revision_no
+                content_candidates = {
+                    k for k, v in data.items()
+                    if k != 'revision_no' and original_data.get(k) != v
+                } if original_data else set()
+                tracked_change = bool(revision_tracking) and bool(
+                    revision_service.content_changed(content_candidates)
+                )
+                new_revision_no = None
+
+                if tracked_change:
+                    # FR-010（M2 等价实现）：UPDATE ... WHERE id=? AND revision_no=?
+                    new_revision_no = int(expected_revision or 1) + 1
+                    update_data = dict(data)
+                    update_data['revision_no'] = new_revision_no
+                    if not revision_service.update_with_revision(
+                        self.ds, meta_object.table_name, id_value,
+                        update_data, expected_revision=expected_revision,
+                    ):
+                        raise RevisionError(
+                            'REVISION_CONFLICT',
+                            '单据已被他人修改（期望版本 %s）' % expected_revision,
+                        )
+                    data = update_data
+                elif version is not None and hasattr(self.ds, 'update_with_version'):
                     self.ds.update_with_version(
                         meta_object.table_name, id_value, data,
                         expected_version=version
@@ -2038,6 +2096,24 @@ class ActionExecutor:
                             meta_object.id, id_value, changed_fields
                         )
                         self._trigger_aggregate_refresh(meta_object.id, id_value, "updated")
+
+                # [M2 FR-004] 版本记录：整单快照取更新后状态，与业务写入同事务
+                if tracked_change:
+                    content_fields = revision_service.content_changed({
+                        k for k, v in data.items()
+                        if k != 'revision_no' and original_data.get(k) != v
+                    })
+                    if content_fields:
+                        revision_service.record(
+                            self.ds, meta_object, id_value,
+                            before=original_data,
+                            after=self.ds.find_by_id(meta_object.table_name, id_value) or {},
+                            changed_fields=content_fields,
+                            revision_no=new_revision_no,
+                            reason_code=reason_code,
+                            change_set_id=change_set_id,
+                            user=_current_actor(),
+                        )
             
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
@@ -2061,6 +2137,7 @@ class ActionExecutor:
                     ),
                     reason_code=reason_code,
                     exclude_fields=exclude_fields,
+                    change_set_id=change_set_id,
                 )
             
             updated_data = self.ds.find_by_id(meta_object.table_name, id_value)
@@ -2076,6 +2153,9 @@ class ActionExecutor:
                 error="CONCURRENT_MODIFICATION",
                 message=str(e)
             )
+        except RevisionError as e:
+            # [M2] 乐观锁冲突 / 修订闸门拦截：错误码直接透传给前端
+            return ActionResult.fail(error=e.code, message=e.message)
         except Exception as e:
             return ActionResult.fail(
                 error="UPDATE_FAILED",
@@ -2424,7 +2504,8 @@ class ActionExecutor:
                 message="Batch action '{0}' is not supported".format(action.id)
             )
     
-    def _write_audit_log_v2(self, audit_fn, reason_code=None, exclude_fields=None):
+    def _write_audit_log_v2(self, audit_fn, reason_code=None, exclude_fields=None,
+                            change_set_id=None):
         """V2 审计日志写入 — 参考 SAP V2 Update 模式
 
         业务事务提交后，审计日志通过 AsyncAuditWriter 异步写入。
@@ -2448,7 +2529,9 @@ class ActionExecutor:
             # 同一次保存扇出的多条审计行共享同一 change_set_id。
             # 与 transaction_id（事务级归组）解耦，不能放在 AuditLogger 实例属性上
             # （异步 worker 线程会串号）。
-            change_set_id = f"cs_{uuid.uuid4().hex[:16]}"
+            # [M2 D4] 调用方（_do_update）可传入入口生成的 ID，使版本记录与审计行同组。
+            if not change_set_id:
+                change_set_id = f"cs_{uuid.uuid4().hex[:16]}"
 
             trace_id = None
             transaction_id = None

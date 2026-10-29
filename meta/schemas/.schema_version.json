@@ -1900,7 +1900,7 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "91e47df8182c4dc58853e108a38fdd61",
+      "hash": "948bb57e50ea1dedefc99fdf7c286835",
       "fields": [
         "created_by",
         "updated_by",
@@ -1949,7 +1949,8 @@
         "created_at",
         "updated_at",
         "fulfillment_status",
-        "fulfillment_derived_at"
+        "fulfillment_derived_at",
+        "revision_no"
       ],
       "table": "sales_orders"
     },
@@ -2496,5 +2497,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-28T23:27:06.211696"
+  "last_sync": "2026-10-29T09:16:18.047601"
 }

@@ -1134,18 +1134,21 @@ def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
 _REVISION_DERIVED_FIELDS = frozenset({'fulfillment_status', 'fulfillment_derived_at'})
 
 
-def parse_revision_policy(data: Dict[str, Any], fields: List[str]) -> Optional[MetaRevisionPolicy]:
+def parse_revision_policy(data: Dict[str, Any], fields: List[str],
+                          source_file: str = "") -> Optional[MetaRevisionPolicy]:
     """解析变更策略配置（M1 只解析，不启用版本能力）
 
     Args:
         data: 对象 YAML 的原始 dict
         fields: 该对象已声明的字段 id 列表，用于校验引用合法性
+        source_file: 来源 YAML 文件路径（FR-011 加载期校验报错需含文件名）
     """
     if not data or not data.get("revision_policy"):
         return None
 
     rp = data["revision_policy"]
     obj_id = data.get("id", "")
+    suffix = "（文件: {0}）".format(source_file) if source_file else ""
 
     field_policies: List[RevisionFieldPolicy] = []
     for raw in rp.get("fields") or []:
@@ -1159,12 +1162,12 @@ def parse_revision_policy(data: Dict[str, Any], fields: List[str]) -> Optional[M
 
         if field_id not in fields:
             raise ValueError(
-                f"对象 '{obj_id}' 的 revision_policy.fields 引用了未声明字段 '{field_id}'"
+                f"对象 '{obj_id}' 的 revision_policy.fields 引用了未声明字段 '{field_id}'{suffix}"
             )
         if field_id in _REVISION_DERIVED_FIELDS and (editable or diff):
             raise ValueError(
                 f"对象 '{obj_id}' 的 revision_policy.fields 中 '{field_id}' 是派生字段，"
-                f"不能声明 editable/diff"
+                f"不能声明 editable/diff{suffix}"
             )
 
         field_policies.append(RevisionFieldPolicy(
@@ -1178,14 +1181,14 @@ def parse_revision_policy(data: Dict[str, Any], fields: List[str]) -> Optional[M
     enabled = bool(rp.get("enabled", False))
     if enabled and scope != "header":
         raise ValueError(
-            f"对象 '{obj_id}' 的 revision_policy.scope='{scope}' 不受支持（当前仅支持 header）"
+            f"对象 '{obj_id}' 的 revision_policy.scope='{scope}' 不受支持（当前仅支持 header）{suffix}"
         )
 
     reason_required_fields = list(rp.get("reason_required_fields") or [])
     for f in reason_required_fields:
         if f not in fields:
             raise ValueError(
-                f"对象 '{obj_id}' 的 revision_policy.reason_required_fields 引用了未声明字段 '{f}'"
+                f"对象 '{obj_id}' 的 revision_policy.reason_required_fields 引用了未声明字段 '{f}'{suffix}"
             )
 
     return MetaRevisionPolicy(
@@ -2251,7 +2254,7 @@ def _resolve_includes_compat(data: Dict[str, Any], shared_props: Dict[str, List[
 _resolve_includes = _resolve_includes_compat
 
 
-def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
+def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject:
     fields = [parse_field(f, included_from=f.get("included_from", "")) for f in data.get("fields", [])]
     relations = [parse_relation(r) for r in data.get("relations", [])]
     actions = [parse_action(a) for a in data.get("actions", [])]
@@ -2329,7 +2332,7 @@ def parse_meta_object(data: Dict[str, Any]) -> MetaObject:
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)
     obj.deletion_policy = parse_deletion_policy(data)
-    obj.revision_policy = parse_revision_policy(data, [f.id for f in fields])
+    obj.revision_policy = parse_revision_policy(data, [f.id for f in fields], source_file=source_file)
     obj.hierarchy = parse_hierarchy(data)
     obj.context = parse_context(data)
     obj.cascade_select = parse_cascade_select(data)
@@ -2432,7 +2435,7 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
         elif shared_props:
             data = _resolve_includes(data, shared_props)
 
-        obj = parse_meta_object(data)
+        obj = parse_meta_object(data, source_file=file_path)
 
         obj = ensure_crud_actions(obj)
         
