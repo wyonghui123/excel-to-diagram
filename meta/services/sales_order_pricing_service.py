@@ -23,6 +23,7 @@
 
 import json
 import logging
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from meta.services.customer_sales_org_service import CustomerSalesOrgService
@@ -132,13 +133,42 @@ class SalesOrderPricingService:
             preferred_rate_table_id=self._preferred_rate_table_id(order),
         )
         if resolved is None:
-            resolved = self.det.resolve(**dims)
+            # allow_currency_conversion=True：跨币种时照常拿到价目表，
+            # 由本层解析汇率后交给定价确定服务折算（C2）
+            resolved = self.det.resolve(**dims, allow_currency_conversion=True)
+
+        # 【C2】价目表币种 vs 订单币种：不同才需要汇率折算
+        table_currency = (
+            ((resolved or {}).get('rate_table') or {}).get('currency') or '')
+        table_currency = str(table_currency).strip().upper()
+        order_currency = (currency or '').strip().upper()
+        cross_currency = bool(
+            table_currency and order_currency
+            and table_currency != order_currency)
+        exchange_rate = exchange_rate_type = exchange_rate_date = None
+        if cross_currency:
+            rate, rate_type, rate_date, from_snapshot = (
+                self._resolve_exchange_rate(order, table_currency, price_date))
+            exchange_rate, exchange_rate_type, exchange_rate_date = (
+                rate, rate_type, rate_date)
+            if exchange_rate and not from_snapshot:
+                # 取价时冻结汇率快照（草稿首次取价：exchange_rate 为空/1）
+                frozen = {
+                    'exchange_rate': exchange_rate,
+                    'exchange_rate_type': exchange_rate_type,
+                    'exchange_rate_date': exchange_rate_date,
+                }
+                self._write_order(order.get('id'), frozen)
+                order.update(frozen)
 
         result = self.det.determine_line(
             item_id=line.get('item_id'), qty=qty,
             customer_account_id=order.get('customer_account_id'), **dims,
             document_id=order.get('id'), document_line_id=line_id,
             persist=True,
+            exchange_rate=exchange_rate,
+            exchange_rate_type=exchange_rate_type,
+            exchange_rate_date=exchange_rate_date,
         )
 
         values: Dict[str, Any] = {'price_trace': result['trace']}
@@ -192,6 +222,7 @@ class SalesOrderPricingService:
             price_date=price_date,
             currency=currency,
             preferred_rate_table_id=self._preferred_rate_table_id(order),
+            allow_currency_conversion=True,
         )
 
         repriced = 0
@@ -278,7 +309,8 @@ class SalesOrderPricingService:
         rows = self.ds.query(
             'SELECT id, status, order_type_id, order_date, price_date, currency_id, '
             'sales_org_id, customer_account_id, pricing_status, '
-            'header_discount_percent, header_surcharge_percent '
+            'header_discount_percent, header_surcharge_percent, '
+            'exchange_rate, exchange_rate_type, exchange_rate_date '
             'FROM sales_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
 
@@ -308,6 +340,62 @@ class SalesOrderPricingService:
             logger.warning(f'[sales_order_pricing] 读取币种失败: {e}')
             return None
         return (rows[0].get('code') or '').strip().upper() if rows else None
+
+    def _currency_id(self, code: Optional[str]) -> Optional[int]:
+        """币种编码 → 币种 id；查询失败 / 不存在返回 None。"""
+        if code in (None, ''):
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT id FROM currencies WHERE code = ?', [code])
+        except Exception as e:  # noqa: BLE001 - 查询失败按无币种降级
+            logger.warning(f'[sales_order_pricing] 读取币种 id 失败: {e}')
+            return None
+        return rows[0].get('id') if rows else None
+
+    def _resolve_exchange_rate(self, order: Dict[str, Any],
+                               table_currency: str,
+                               price_date: Any):
+        """【C2】解析订单 → 价目表币种的汇率。
+
+        返回 `(rate, rate_type, rate_date, from_snapshot)`：
+
+          · 抬头已有快照（`exchange_rate` > 0 且 != 1）→ 直接复用，from_snapshot=True
+            （草稿首次取价后汇率冻结，后续重取价不跟随汇率波动）
+          · 否则查 `currency_rates`（源=订单币种、目标=价目表币种、rate_type='spot'、
+            `valid_from <= 取价日` 取最新一条），from_snapshot=False
+          · 查不到 → `(None, None, None, False)`，由定价确定服务返回 CURRENCY_MISMATCH
+        """
+        snapshot = _num(order.get('exchange_rate'))
+        if snapshot is not None and snapshot > 0 and snapshot != 1:
+            return (snapshot,
+                    order.get('exchange_rate_type') or 'spot',
+                    _date_key(order.get('exchange_rate_date')) or _date_key(price_date),
+                    True)
+
+        target_id = self._currency_id(table_currency)
+        source_id = order.get('currency_id')
+        if source_id in (None, '') or target_id in (None, ''):
+            return None, None, None, False
+
+        on_date = _date_key(price_date) or date.today().isoformat()
+        try:
+            rows = self.ds.query(
+                'SELECT rate, rate_type, valid_from FROM currency_rates'
+                " WHERE currency_id = ? AND to_currency_id = ? AND rate_type = 'spot'"
+                ' AND valid_from <= ?'
+                ' ORDER BY valid_from DESC, id DESC LIMIT 1',
+                [source_id, target_id, on_date])
+        except Exception as e:  # noqa: BLE001 - 查询失败按无汇率降级
+            logger.warning(f'[sales_order_pricing] 读取汇率失败: {e}')
+            return None, None, None, False
+        if not rows:
+            return None, None, None, False
+        row = rows[0]
+        rate = _num(row.get('rate'))
+        if rate is None or rate <= 0:
+            return None, None, None, False
+        return rate, (row.get('rate_type') or 'spot'), on_date, False
 
     def _write_line(self, line_id: Any, values: Dict[str, Any]) -> None:
         sets, params = [], []

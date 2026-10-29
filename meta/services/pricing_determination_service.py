@@ -81,12 +81,16 @@ class PricingDeterminationService:
         price_date: Any = None,
         currency: Optional[str] = None,
         preferred_rate_table_id: Optional[int] = None,
+        allow_currency_conversion: bool = False,
     ) -> Dict[str, Any]:
         """返回命中规则与价目表/过程/序列；未命中时给 `reason`。
 
         `preferred_rate_table_id` 为客户档案/销售组织指定的价目表：仅当
         approved、币种相符且在组织作用域内时优先采用；否则静默回退既有定表
         规则（客户配置错误不阻断取价，零回归）。
+
+        `allow_currency_conversion=True` 时，规则币种 / 价目表币种与订单币种
+        不符不再返回 CURRENCY_MISMATCH，照常返回价目表，由上层按汇率折算（C2）。
 
         Returns:
             {"matched": bool, "reason": str|None, "rule": dict|None,
@@ -121,7 +125,9 @@ class PricingDeterminationService:
         # 规则级币种为空 = 跟随订单币种
         rule_currency = (rule.get('currency') or '').strip().upper()
         order_currency = (currency or '').strip().upper()
-        if rule_currency and order_currency and rule_currency != order_currency:
+        if (not allow_currency_conversion
+                and rule_currency and order_currency
+                and rule_currency != order_currency):
             return self._miss(REASON_CURRENCY_MISMATCH, rule=rule)
 
         procedure = self._one(
@@ -138,7 +144,8 @@ class PricingDeterminationService:
             sequence_code = sequence.get('code') if sequence else None
 
         table, reason = self._resolve_rate_table(
-            rule, sales_org_id, order_currency, preferred_rate_table_id)
+            rule, sales_org_id, order_currency, preferred_rate_table_id,
+            allow_currency_conversion)
         if table is None:
             return self._miss(reason, rule=rule)
 
@@ -157,14 +164,17 @@ class PricingDeterminationService:
         sales_org_id: Optional[int],
         order_currency: str,
         preferred_rate_table_id: Optional[int] = None,
+        allow_currency_conversion: bool = False,
     ):
         """定表（§3.6 第 3 步）。返回 (rate_table|None, reason|None)。
 
         客户价目表只作「优选」：approved / 币种相符 / 组织作用域内三者
         全部满足才采用，任一不满足即静默回退既有规则（零回归）。
+        `allow_currency_conversion=True` 时跳过币种相符校验（C2 折算场景）。
         """
         preferred = self._load_preferred_table(
-            preferred_rate_table_id, sales_org_id, order_currency)
+            preferred_rate_table_id, sales_org_id, order_currency,
+            allow_currency_conversion)
         if preferred is not None:
             return preferred, None
 
@@ -175,7 +185,9 @@ class PricingDeterminationService:
             if not table or table.get('status') != 'approved':
                 return None, REASON_NO_RATE_TABLE
             table_currency = (table.get('currency') or '').strip().upper()
-            if order_currency and table_currency and table_currency != order_currency:
+            if (not allow_currency_conversion
+                    and order_currency and table_currency
+                    and table_currency != order_currency):
                 return None, REASON_CURRENCY_MISMATCH
             if not self._table_in_scope(table, sales_org_id):
                 return None, REASON_NO_RATE_TABLE
@@ -200,6 +212,7 @@ class PricingDeterminationService:
         table_id: Optional[int],
         sales_org_id: Optional[int],
         order_currency: str,
+        allow_currency_conversion: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """客户指定价目表：仅返回合法表，非法一律视为未指定（回退既有规则）。"""
         if table_id in (None, ''):
@@ -208,7 +221,9 @@ class PricingDeterminationService:
         if not table or table.get('status') != 'approved':
             return None
         table_currency = (table.get('currency') or '').strip().upper()
-        if order_currency and table_currency and table_currency != order_currency:
+        if (not allow_currency_conversion
+                and order_currency and table_currency
+                and table_currency != order_currency):
             return None
         if not self._table_in_scope(table, sales_org_id):
             return None
@@ -240,12 +255,22 @@ class PricingDeterminationService:
         document_id: Optional[int] = None,
         document_line_id: Optional[int] = None,
         persist: bool = False,
+        exchange_rate: Optional[float] = None,
+        exchange_rate_type: Optional[str] = None,
+        exchange_rate_date: Any = None,
     ) -> Dict[str, Any]:
         """对一行取价，返回单价与回放留痕（不抛异常）。
 
         槽位键值按命中的查找序列逐槽构造（W2-F）：序列若含「客户 × 物料」
         首槽、本行又带客户时，先按客户价查，未命中自然落「物料」次槽；
         客户为空时**跳过**首槽（不构造 `None` 键值），不影响物料兜底。
+
+        【C2 多币种】价目表币种 ≠ 订单币种时，`exchange_rate`（1 订单币种 =
+        exchange_rate 价目表币种）用于把价目表金额折算成订单币种：
+        `amount_order = amount_table / exchange_rate`（2 位 ROUND_HALF_UP），
+        `unit_price` 由折算后金额重算。汇率缺失则返回 CURRENCY_MISMATCH，
+        绝不按 1:1 静默折算。`exchange_rate_type` / `exchange_rate_date` 仅供
+        回放留痕（不参与计算）。
 
         Returns:
             {"pricing_status": "determined"|"failed",
@@ -267,11 +292,37 @@ class PricingDeterminationService:
             currency=currency,
             preferred_rate_table_id=preferred_rate_table_id,
         )
+        if (not resolved['matched']
+                and resolved['reason'] == REASON_CURRENCY_MISMATCH
+                and _num(exchange_rate) is not None):
+            # 币种不符但有可折算汇率：按「允许折算」重解析，照常拿到价目表
+            resolved = self.resolve(
+                sales_org_id=sales_org_id,
+                order_type_id=order_type_id,
+                price_date=price_date,
+                currency=currency,
+                preferred_rate_table_id=preferred_rate_table_id,
+                allow_currency_conversion=True,
+            )
         if not resolved['matched']:
             return self._failed(resolved['reason'], rule=resolved.get('rule'))
 
         table = resolved['rate_table']
         on_date = _date_key(price_date) or date.today().isoformat()
+        table_currency = (table.get('currency') or '').strip().upper()
+        order_currency = (currency or '').strip().upper()
+        cross_currency = bool(
+            table_currency and order_currency
+            and table_currency != order_currency)
+        rate = _num(exchange_rate)
+        if cross_currency and (rate is None or rate <= 0):
+            # 汇率缺失：不得按 1:1 静默折算（W1-R3 降级保存）
+            return self._failed(REASON_CURRENCY_MISMATCH,
+                                rule=resolved['rule'], trace={
+                                    'rate_table_code': table.get('code'),
+                                    'procedure_code': resolved['procedure_code'],
+                                    'price_currency': table_currency,
+                                   })
         trace = {
             'matched_rule_code': (resolved['rule'] or {}).get('code'),
             'rate_table_code': table.get('code'),
@@ -292,7 +343,8 @@ class PricingDeterminationService:
             process_code=resolved['procedure_code'],
             rate_table_id=table['id'],
             slot_keys=self._slot_keys(
-                resolved['sequence_code'], item_id, customer_account_id),
+                resolved['sequence_code'], item_id, customer_account_id,
+                sales_org_id),
             base=qty_num,
             sequence_code=resolved['sequence_code'],
             document_type='sales_order',
@@ -327,6 +379,26 @@ class PricingDeterminationService:
         trace['result_id'] = result['result_id']
         # 【W2-C】行级折扣/附加费汇总（json 内新增两个键，不改表结构）
         trace.update(self._adjustment_amounts(result.get('step_results') or []))
+        # 【SO Wave3 · B3】把查表留痕的分档信息汇总进 trace（只补传参，不改算法）
+        trace['scales'] = [s for t in (result.get('traces') or [])
+                           for s in (t.get('scales') or [])]
+
+        if cross_currency:
+            # 【C2】价目表金额 → 订单币种金额；保留 2 位 ROUND_HALF_UP
+            table_amount = amount
+            amount = float(
+                (Decimal(str(table_amount)) / Decimal(str(rate))).quantize(
+                    PRICE_SCALE, rounding=ROUND_HALF_UP))
+            trace.update({
+                'exchange_rate': rate,
+                'exchange_rate_type': exchange_rate_type,
+                'exchange_rate_date': _date_key(exchange_rate_date),
+                'currency_converted': True,
+                'price_currency': table_currency,
+                'table_amount': table_amount,
+            })
+        else:
+            trace['exchange_rate'] = None
 
         unit_price = float(
             (Decimal(str(amount)) / Decimal(str(qty_num))).quantize(
@@ -344,12 +416,21 @@ class PricingDeterminationService:
     # 内部
     # ------------------------------------------------------------------
     def _slot_keys(self, sequence_code: Optional[str], item_id: Any,
-                   customer_account_id: Any) -> List[Optional[Dict[str, Any]]]:
-        """按查找序列逐槽构造键值（W2-F · R-KEY-1~3）。
+                   customer_account_id: Any,
+                   sales_org_id: Any = None) -> List[Optional[Dict[str, Any]]]:
+        """按查找序列逐槽构造键值（W2-F · R-KEY-1~3；v152 增组织维度）。
 
         每槽按其 `key_schema.key_fields` 填因子值；任一因子在本行无值时该槽位置
         `None`（查找引擎跳过该槽，顺序不变）。无法解析序列/键表时退回单槽物料键，
         与波次 1 的既有权口径一致（R-KEY-3）。
+
+        【v152】`sales_org_id` 以因子名 `org_id` 注入 —— 序列首槽若声明了
+        `org_id`（KS_ORG_ITEM / KS_ORG_CUST_ITEM），按组织精确匹配；本行无
+        销售组织时该槽为 `None` 被跳过，落回物料/客户槽（零回归）。
+
+        【v153 / B4】`customer_group_id` 以同名字段注入 —— 组槽（KS_GROUP_ITEM）
+        声明了 `customer_group_id`；客户不属于任何组时该槽为 `None` 被跳过，
+        落回客户 / 物料槽（零回归）。
         """
         fallback: List[Optional[Dict[str, Any]]] = [{'item_id': item_id}]
         if not sequence_code:
@@ -360,7 +441,10 @@ class PricingDeterminationService:
         if not steps:
             return fallback
 
-        values = {'item_id': item_id, 'customer_account_id': customer_account_id}
+        values = {'item_id': item_id, 'customer_account_id': customer_account_id,
+                  'org_id': sales_org_id,
+                  'customer_group_id': self._customer_group_id(
+                      customer_account_id)}
         slots: List[Optional[Dict[str, Any]]] = []
         for step in sorted(steps, key=lambda s: self._int(
                 (s or {}).get('seq'), 10 ** 9)):
@@ -378,6 +462,27 @@ class PricingDeterminationService:
             # 空键表或未知因子 → 该槽无从比对，与"无值"同处理
             slots.append(keys or None)
         return slots or fallback
+
+    def _customer_group_id(self, customer_account_id: Any) -> Optional[int]:
+        """客户账户 → 业务伙伴组（T2.3 / B4）。
+
+        组的唯一挂载点是关系层（`party_relations.group_id`），账户经
+        `relation_id` 指向关系行。无账户 / 无关系 / 无组 / 查询失败
+        （如表未建）一律返回 `None` —— 该槽位被跳过，不阻断取价。
+        """
+        if customer_account_id is None or customer_account_id == '':
+            return None
+        try:
+            row = self._one(
+                'SELECT pr.group_id FROM customer_accounts ca'
+                ' JOIN party_relations pr ON pr.id = ca.relation_id'
+                ' WHERE ca.id = ?', [customer_account_id])
+        except Exception:       # 表未建 / 查询失败 → 该槽跳过（不阻断取价）
+            return None
+        group_id = (row or {}).get('group_id')
+        if group_id is None or group_id == '':
+            return None
+        return group_id
 
     @staticmethod
     def _adjustment_amounts(step_results: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -443,6 +548,7 @@ class PricingDeterminationService:
         out_trace.setdefault('candidates', 0)
         out_trace.setdefault('hit_ids', [])
         out_trace.setdefault('result_id', None)
+        out_trace.setdefault('scales', [])
         out_trace['reason'] = reason
         return {
             'pricing_status': 'failed',
