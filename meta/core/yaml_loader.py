@@ -18,6 +18,26 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+
+def _verbose() -> bool:
+    """是否输出 YAML 加载过程信息（逐文件 Loaded / Skipped）。
+
+    [2026-10-29] 测试入口（TEST_ENTRY=1）默认静默：每次 pytest 进程都要全量
+    加载约 150 个 yaml，逐文件 print 会产出约 150 行 / 12KB 终端噪音；一旦用例
+    失败，pytest 还会把捕获的 stdout 整段回显，进一步放大。需要排查时设
+    META_YAML_VERBOSE=1 打开。
+    """
+    if os.environ.get('META_YAML_VERBOSE'):
+        return True
+    return os.environ.get('TEST_ENTRY') != '1'
+
+
+def _info(msg: str) -> None:
+    """加载过程信息输出（受 _verbose 控制）；错误类输出仍走 print，不受影响。"""
+    if _verbose():
+        print(msg)
+
+
 @dataclass
 class RestrictRule:
     """强依赖检查规则
@@ -2665,7 +2685,7 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     # 检查是否禁用自动添加 CRUD actions
     if hasattr(obj, 'import_export') and obj.import_export:
         if hasattr(obj.import_export, 'auto_crud') and obj.import_export.auto_crud is False:
-            print(f"[YAML Loader] Auto-crud disabled for object '{obj.id}', skipping automatic action addition")
+            _info(f"[YAML Loader] Auto-crud disabled for object '{obj.id}', skipping automatic action addition")
             return obj
     
     existing_ids = {action.id for action in obj.actions}
@@ -2678,11 +2698,11 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     has_legacy_crud = any(cid in existing_ids for cid in legacy_crud_ids)
     
     if has_any_crud:
-        print(f"[YAML Loader] Object '{obj.id}' already has {obj.id}_* CRUD actions defined, skipping automatic addition")
+        _info(f"[YAML Loader] Object '{obj.id}' already has {obj.id}_* CRUD actions defined, skipping automatic addition")
         return obj
     
     if has_legacy_crud:
-        print(f"[YAML Loader] Object '{obj.id}' uses legacy crud_* naming, keeping existing actions")
+        _info(f"[YAML Loader] Object '{obj.id}' uses legacy crud_* naming, keeping existing actions")
         return obj
     
     missing_actions = []
@@ -2738,16 +2758,16 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     # 无 id；_template.yaml 有 id 但按约定是模板），故改为按语义判据而非文件名清单。
     for yaml_file in dir_path.glob("*.yaml"):
         if yaml_file.name.startswith("_"):
-            print("[YAML Loader] Skipped ('_' prefix, not an object definition): {0}".format(yaml_file.name))
+            _info("[YAML Loader] Skipped ('_' prefix, not an object definition): {0}".format(yaml_file.name))
             continue
         obj = load_yaml_file(str(yaml_file), shared_props=shared_props, aspects_defs=aspects_defs if aspects_defs else None)
         if obj is None:
             continue
         if not obj.id:
-            print("[YAML Loader] Skipped (no top-level 'id', not an object definition): {0}".format(yaml_file.name))
+            _info("[YAML Loader] Skipped (no top-level 'id', not an object definition): {0}".format(yaml_file.name))
             continue
         objects.append(obj)
-        print("[YAML Loader] Loaded: {0} from {1}".format(obj.id, yaml_file.name))
+        _info("[YAML Loader] Loaded: {0} from {1}".format(obj.id, yaml_file.name))
 
     # [M4] 行级策略的跨对象校验（child_object / parent_field / 清单字段）
     validate_line_policies(objects)
@@ -2786,7 +2806,7 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
     if target is None and canonical_dir in _dir_registry_cache and not MetaRegistry.__force_reload__:
         if registry._objects:
             cached_count = _dir_registry_cache[canonical_dir]
-            print("[YAML Loader] Using cached registration for directory: {0} ({1} objects)".format(
+            _info("[YAML Loader] Using cached registration for directory: {0} ({1} objects)".format(
                 canonical_dir, cached_count))
             return cached_count
     
