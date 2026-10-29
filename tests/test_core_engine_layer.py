@@ -323,6 +323,10 @@ class TestCompositeBusinessKeyEngine(TestEngineBase):
         self._create_test_data()
         
         rel_obj = meta_registry.get('relationship')
+        # [FIX 2026-10-29] relationship 的唯一索引是 uidx_relationships_version_code
+        # = (version_id, code)；_check_unique_indexes 对缺失/空值字段直接跳过校验。
+        # 原用例两条数据都没传 code ⇒ 唯一校验根本没触发，第二次 create 也成功。
+        # 这里显式给相同 code，让 (version_id, code) 复合唯一键真正生效。
         rel_data1 = {
             'source_bo_id': 1,
             'target_bo_id': 2,
@@ -330,6 +334,7 @@ class TestCompositeBusinessKeyEngine(TestEngineBase):
             'target_code': 'BO_B',
             'relation_code': 'CALLS',
             'version_id': 1,
+            'code': 'BO_A-BO_B-CALLS',
         }
         result1 = self.executor.create(rel_obj, rel_data1)
         assert result1.success
@@ -341,6 +346,7 @@ class TestCompositeBusinessKeyEngine(TestEngineBase):
             'target_code': 'BO_B',
             'relation_code': 'CALLS',
             'version_id': 1,
+            'code': 'BO_A-BO_B-CALLS',
         }
         result2 = self.executor.create(rel_obj, rel_data2)
         

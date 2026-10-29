@@ -57,7 +57,19 @@ class TestRuleBase:
                 indexes = generator.generate_create_index(obj)
                 for idx_sql in indexes:
                     self.ds.execute(idx_sql)
-        
+
+        # [FIX 2026-10-29] domain / sub_domain / service_module / business_object 的 version_id
+        # 是 schema_generator 由 domain_to_version 生成的真 FK。本套件每个用例都写死
+        # version_id=1，但建表后从无父行 ⇒ create 直接 FOREIGN KEY constraint failed，
+        # 与规则引擎断言无关。这里先准备 product → version 父行。
+        self.ds.execute(
+            "INSERT INTO products (id, name, code, visibility) "
+            "VALUES (1, '规则测试产品', 'RULE_TEST_PRODUCT', 'private')"
+        )
+        self.ds.execute(
+            "INSERT INTO versions (id, product_id, name) VALUES (1, 1, 'v1.0')"
+        )
+
         self.ds.commit()
 
 
