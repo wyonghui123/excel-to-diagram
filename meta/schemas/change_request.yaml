@@ -1,0 +1,332 @@
+# 变更申请（Change Request）— M3 / FR-007
+# 依据: docs/superpowers/specs/2026-10-29-m3-change-request/spec.md §3.1 / §4
+#
+# 定位: 通用单据内容变更申请（头 + 行一字段一行，禁止 JSON blob）。
+#   ① target_object_type + target_object_id + target_revision_no 在提交时冻结，
+#     目标已被他人修改则拒绝提交（FR-010 乐观锁预检）。
+#   ② status 是唯一状态列：draft → submitted → approved → applied；
+#     旁支 submitted → rejected、approved → failed。
+#   ③ 审批复用 tasks 模型（type=approval），不新建审批引擎（D1/D2）。
+
+id: change_request
+name: 变更申请
+table_name: change_requests
+description: 通用单据内容变更申请（审批通过后经统一写漏斗生效）
+display_name_field: id
+aspects: [audit_aspect]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: target_object_type
+    name: 目标对象
+    type: string
+    db_column: target_object_type
+    required: true
+    max_length: 60
+    description: 目标 BO id（如 sales_order）
+    semantics:
+      meaning: 被申请变更的业务对象
+    ui:
+      widget: input
+      editable: false
+
+  - id: target_object_id
+    name: 目标记录
+    type: string
+    db_column: target_object_id
+    required: true
+    max_length: 64
+    description: 目标主键（字符串化，兼容非自增主键）
+    semantics:
+      meaning: 被申请变更的记录主键
+    ui:
+      widget: input
+      editable: false
+
+  - id: target_revision_no
+    name: 目标版本
+    type: integer
+    db_column: target_revision_no
+    required: true
+    description: 提交时锁定的目标版本（FR-010）
+    semantics:
+      meaning: 提交时冻结的目标 revision_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 变更申请状态（唯一状态列）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: primary
+        category: active
+      - value: approved
+        label: 已通过
+        color: success
+        category: active
+      - value: rejected
+        label: 已驳回
+        color: danger
+        category: inactive
+      - value: applied
+        label: 已生效
+        color: success
+        category: inactive
+      - value: failed
+        label: 生效失败
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 变更申请状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: reason_code
+    name: 变更原因
+    type: string
+    db_column: reason_code
+    nullable: true
+    max_length: 40
+    description: 变更原因码（透传审计与版本记录）
+    semantics:
+      meaning: 变更原因码
+      filterable: true
+      filter_type: text
+      filter_label: 变更原因
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: summary
+    name: 申请说明
+    type: text
+    db_column: summary
+    nullable: true
+    description: 申请说明
+    semantics:
+      meaning: 申请人填写的变更说明
+    ui:
+      widget: textarea
+
+  - id: submitted_by
+    name: 提交人
+    type: string
+    db_column: submitted_by
+    nullable: true
+    max_length: 60
+    description: 提交人
+    semantics:
+      meaning: 提交申请的账号
+    ui:
+      widget: input
+      editable: false
+
+  - id: submitted_at
+    name: 提交时间
+    type: datetime
+    db_column: submitted_at
+    nullable: true
+    description: 提交时间
+    semantics:
+      meaning: 申请进入 submitted 的时间
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: approved_by
+    name: 审批人
+    type: string
+    db_column: approved_by
+    nullable: true
+    max_length: 60
+    description: 审批人（来自任务决策的 actor）
+    semantics:
+      meaning: 审批决策人
+    ui:
+      widget: input
+      editable: false
+
+  - id: approved_at
+    name: 审批时间
+    type: datetime
+    db_column: approved_at
+    nullable: true
+    description: 审批时间
+    semantics:
+      meaning: 审批决策时间
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: applied_at
+    name: 生效时间
+    type: datetime
+    db_column: applied_at
+    nullable: true
+    description: 生效时间
+    semantics:
+      meaning: 变更写入目标单据的时间
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: applied_revision_no
+    name: 生效版本
+    type: integer
+    db_column: applied_revision_no
+    nullable: true
+    description: 生效后的目标新版本号（幂等回执）
+    semantics:
+      meaning: 生效后目标单据的 revision_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: fail_reason
+    name: 失败原因
+    type: string
+    db_column: fail_reason
+    nullable: true
+    max_length: 200
+    description: failed 原因
+    semantics:
+      meaning: 生效失败原因
+    ui:
+      widget: input
+      editable: false
+
+  - id: change_set_id
+    name: 变更集
+    type: string
+    db_column: change_set_id
+    nullable: true
+    max_length: 40
+    description: 与审计 / revision 同值（M2 D4 口径）
+    semantics:
+      meaning: 生效写路径生成的变更集 ID
+    ui:
+      widget: input
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# 状态机（FR-008）：5 条边，全部 before_update + state_field=status
+# 推进由框架按 PUT status 执行；fail 边仅系统内部使用（ui_hints.hidden）
+rules:
+  - id: submit_change_request
+    name: 提交审批
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    action_ref: "change_request:submit"
+    ui_hints:
+      label: 提交审批
+      icon: send
+      confirm_message: "提交后将创建审批任务，申请内容不可再修改，确定要提交吗？"
+
+  - id: approve_change_request
+    name: 通过
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: approved
+    triggers: [before_update]
+    action_ref: "change_request:approve"
+    ui_hints:
+      label: 通过
+      icon: check_circle
+      highlight: true
+      confirm_message: "通过后申请可被执行生效，确定要通过吗？"
+
+  - id: reject_change_request
+    name: 驳回
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: rejected
+    triggers: [before_update]
+    action_ref: "change_request:reject"
+    ui_hints:
+      label: 驳回
+      icon: cancel
+      confirm_message: "驳回后该申请不再生效，确定要驳回吗？"
+
+  - id: apply_change_request
+    name: 生效
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: applied
+    triggers: [before_update]
+    action_ref: "change_request:apply"
+    ui_hints:
+      label: 生效
+      icon: play
+      confirm_message: "生效后将写入目标单据并产生新版本，确定要生效吗？"
+
+  - id: fail_change_request
+    name: 标记生效失败
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: failed
+    triggers: [before_update]
+    action_ref: "change_request:apply"
+    description: 生效链路失败时由系统内部推进（冲突 / 不可修改），不面向用户
+    ui_hints:
+      label: 标记生效失败（内部）
+      icon: warning
+      hidden: true
+      confirm_message: "系统内部使用"
+
+indexes:
+  - fields: [target_object_type, target_object_id, status]
+    name: idx_cr_target
+  - fields: [status]
+    name: idx_cr_status

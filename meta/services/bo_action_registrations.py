@@ -19,6 +19,7 @@ BO Action 注册模块
 - 3 个 v3.5 enum_type CRUD
 - 2 个 v2.0 allocation (allocation.apply, allocation.split)
 - 1 个 sales_order (sales_order.recalc_header_discount)
+- 3 个 M3 change_request (change_request.approve / .reject / .apply)
 
 [B1 2026-10-02] 注册尾部执行「注册契约机器校验」（见 meta/core/bo_action_contract.py）：
   idempotent / 前置条件 preconditions / 参数 schema / 返回契约四要件的固化与校验。
@@ -81,6 +82,13 @@ def register_all_bo_actions(registry=None):
     # 抬头折扣 / 附加费: 显式重算（spec §4.6）
     from meta.services.sales_order_header_discount_apply import (
         sales_order_recalc_header_discount_handler,
+    )
+
+    # M3 变更申请: 审批决策 + 生效（docs/superpowers/specs/2026-10-29-m3-change-request §5.3/§6.3）
+    from meta.services.change_request_decision import (
+        change_request_approve_handler,
+        change_request_reject_handler,
+        change_request_apply_handler,
     )
 
     # ==================== 1-5: 用户认证 (auth) ====================
@@ -553,6 +561,74 @@ def register_all_bo_actions(registry=None):
                 'message': {'type': 'string'},
             }
         },
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 23-25: 变更申请（M3 T5） ====================
+    # 决策-生效协议（decision_effect）按 executor_config.decision_actions 调 approve/reject；
+    # apply 由 POST /bo/change_request/{id}/actions/change_request.apply 触发。
+    _cr_output_schema = {
+        'type': 'object',
+        'properties': {
+            'success': {'type': 'boolean'},
+            'data': {'type': 'object'},
+            'message': {'type': 'string'},
+        }
+    }
+    registry.register(
+        'change_request.approve',
+        change_request_approve_handler,
+        description='变更申请审批通过（submitted → approved，回执 new_status=approved）',
+        object_type='change_request',
+        category='business',
+        permission_required='change_request:approve',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'change_request_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'comment': {'type': 'string'},
+            }
+        },
+        output_schema=_cr_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'change_request.reject',
+        change_request_reject_handler,
+        description='变更申请审批驳回（submitted → rejected，回执 new_status=rejected）',
+        object_type='change_request',
+        category='business',
+        permission_required='change_request:reject',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'change_request_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'comment': {'type': 'string'},
+            }
+        },
+        output_schema=_cr_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'change_request.apply',
+        change_request_apply_handler,
+        description='变更申请生效（approved → applied，经唯一写漏斗写目标单据）',
+        object_type='change_request',
+        category='business',
+        permission_required='change_request:apply',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'change_request_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            }
+        },
+        output_schema=_cr_output_schema,
         requires_auth=True,
         idempotent=True,
     )

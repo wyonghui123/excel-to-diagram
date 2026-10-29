@@ -305,6 +305,8 @@ class DecisionEffectProtocol:
             )
 
         # 2) BO 生效（BO 侧守卫独立校验、互不信任；effect_key 供 BO 去重）
+        # [M3 T5] 审核权限事实（`reviewer_permission`，v1 取 is_admin ⇒ '*' 通配）
+        # 需透传给 BO 侧：绑定 `permission_required` 的生效动作据此放行。
         context = {
             "run_as": run_as or actor or "system",
             "actor": actor or "system",
@@ -317,6 +319,9 @@ class DecisionEffectProtocol:
             "effect_key": effect_key,
             "decision": decision,
             "comment": comment,
+            "permissions": (
+                ["*"] if getattr(ctx, "actor_has_review_permission", False) else []
+            ),
         }
         try:
             result = self.registry.call(action_id, task["inputs"] or {}, context)

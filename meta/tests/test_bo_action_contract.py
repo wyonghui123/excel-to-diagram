@@ -324,18 +324,20 @@ class TestCallInterception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 真实 21 个 action 全合规（B1 不破坏既有注册；P7 新增 allocation.* 2 个）
+# 真实注册表全合规（B1 不破坏既有注册；P7 新增 allocation.* 2 个）
+# 数量随注册表增长同步：21 → 22（sales_order.recalc_header_discount）
+# → 25（M3 change_request.approve / .reject / .apply）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestRealRegistryContract:
     """TC-B1-070~071 真实注册表契约"""
 
-    def test_TC_B1_070_真实19个action全合规(self):
+    def test_TC_B1_070_真实action全合规(self):
         """注册全部真实 action 后，契约校验零违规（既有注册形状达标）"""
         def _run():
             from meta.services.bo_action_registrations import register_all_bo_actions
             register_all_bo_actions(bo_action_registry)
-            assert len(bo_action_registry.list_ids()) == 21
+            assert len(bo_action_registry.list_ids()) == 25
             assert validate_registry(bo_action_registry) == {}
         _with_isolated_registry(_run)
 

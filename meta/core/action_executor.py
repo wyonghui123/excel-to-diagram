@@ -504,6 +504,14 @@ class ActionResult:
         # [FIX v1.2.21 2026-06-20] 支持 status_code kwarg
         return cls(success=False, error=error, message=message, errors=errors, status_code=status_code)
 
+class _FunnelAbort(Exception):
+    """[M3] 漏斗内部信号：某一步返回失败，需要回滚外层事务并沿用其 ActionResult"""
+
+    def __init__(self, result: "ActionResult"):
+        super().__init__(getattr(result, 'message', '') or '')
+        self.result = result
+
+
 class ActionExecutor:
     """
     Action 执行器
@@ -1911,8 +1919,14 @@ class ActionExecutor:
             )
     
     def _do_update(self, meta_object: MetaObject, params: Dict[str, Any],
-                    skip_rules: bool = False) -> ActionResult:
-        """执行更新操作"""
+                    skip_rules: bool = False,
+                    change_request_ctx: Optional[Dict[str, Any]] = None) -> ActionResult:
+        """执行更新操作
+
+        change_request_ctx: [M3] 变更申请生效上下文（可选）——
+            {change_request_id, reason_code, change_set_id, user}。
+            仅供 `update_via_change_request` 透传，普通 PUT 路径为 None，行为零变化。
+        """
         # [FIX v1.2.35 2026-06-21] 预解析 FK，确保 params 中包含 FK 字段
         self._pre_resolve_foreign_keys(meta_object, params)
 
@@ -1929,7 +1943,10 @@ class ActionExecutor:
             )
 
         # [M2 D4] 变更集 ID 前移到入口：同一次保存的版本记录与审计行共享同一 change_set_id
-        change_set_id = f"cs_{uuid.uuid4().hex[:16]}"
+        # [M3] 变更申请生效路径由调用方带同一个 change_set_id，保证 revision / 审计 / 申请同组
+        cr_ctx = change_request_ctx or {}
+        change_set_id = (cr_ctx.get('change_set_id')
+                         or f"cs_{uuid.uuid4().hex[:16]}")
 
         fields = meta_object.get_persistent_fields()
         data = self._prepare_data(fields, params, for_update=True)
@@ -1963,7 +1980,8 @@ class ActionExecutor:
         reason_code = None
         exclude_fields = None
         if revision_policy is not None and revision_policy.enabled:
-            reason_code = (params.get('reason_code') or '').strip() or None
+            reason_code = (params.get('reason_code')
+                           or cr_ctx.get('reason_code') or '').strip() or None
             changed_fields = {
                 k for k, v in data.items()
                 if (original_data or {}).get(k) != v
@@ -1984,9 +2002,13 @@ class ActionExecutor:
         expected_revision = original_data.get('revision_no') if revision_tracking else None
 
         # [M2 FR-006] 修订闸门：状态 / editable_when / 履约分档；不通过则既不落库也不写审计
+        # [M3] 变更申请生效路径放行 partial（fulfilled/voided 仍拒）
         if revision_tracking:
             try:
-                RevisionGuard().check(meta_object, original_data)
+                RevisionGuard().check(
+                    meta_object, original_data,
+                    via_change_request=bool(cr_ctx.get('change_request_id')),
+                )
             except RevisionError as e:
                 return ActionResult.fail(error=e.code, message=e.message)
 
@@ -2112,7 +2134,29 @@ class ActionExecutor:
                             revision_no=new_revision_no,
                             reason_code=reason_code,
                             change_set_id=change_set_id,
-                            user=_current_actor(),
+                            user=cr_ctx.get('user') or _current_actor(),
+                            change_request_id=cr_ctx.get('change_request_id'),
+                        )
+
+                # [M3 D4] 变更申请提交钩子：draft→submitted 时校验行内容 + 建审批任务，
+                # 与状态写入同事务（失败整体回滚，不出现「已提交但无审批任务」）；
+                # 其余对象零开销（不 import、不调用）。
+                if meta_object.id == 'change_request' and original_data:
+                    before_status = original_data.get('status')
+                    after_status = data.get('status')
+                    if before_status == 'draft' and after_status == 'submitted':
+                        from meta.services.change_request_service import (
+                            after_status_change,
+                        )
+                        after_row = dict(original_data)
+                        after_row.update(data)
+                        after_status_change(
+                            self.ds, original_data, after_row,
+                            {
+                                'actor': cr_ctx.get('user') or _current_actor(),
+                                'user': cr_ctx.get('user') or _current_actor(),
+                                'change_set_id': change_set_id,
+                            },
                         )
             
             if original_data:
@@ -2157,11 +2201,152 @@ class ActionExecutor:
             # [M2] 乐观锁冲突 / 修订闸门拦截：错误码直接透传给前端
             return ActionResult.fail(error=e.code, message=e.message)
         except Exception as e:
+            # [M3] 变更申请提交钩子抛出的业务码（INVALID_CHANGE_FIELD / ...）直接透传，
+            # 事务已因异常整体回滚（状态未落库、审批任务未创建）
+            if e.__class__.__name__ == 'ChangeRequestError':
+                return ActionResult.fail(
+                    error=getattr(e, 'code', 'CHANGE_REQUEST_INVALID'),
+                    message=getattr(e, 'message', str(e)),
+                )
             return ActionResult.fail(
                 error="UPDATE_FAILED",
                 message=translate_error_message(str(e), meta_object)
             )
     
+    def update_via_change_request(
+        self,
+        object_type: str,
+        object_id: Any,
+        payload: Dict[str, Any],
+        expected_revision: Optional[int] = None,
+        change_request_id: Optional[int] = None,
+        reason_code: Optional[str] = None,
+        change_set_id: Optional[str] = None,
+        user: Any = None,
+        line_object_type: Optional[str] = None,
+    ) -> ActionResult:
+        """[M3 D5] 变更申请生效的唯一写入口：复用 `_do_update` 漏斗。
+
+        与普通 PUT 的差别只有两点：
+          ① `RevisionGuard.check(..., via_change_request=True)`（partial 放行）；
+          ② 版本记录 / 审计带上 `change_request_id` 与同一个 `change_set_id`。
+        不新写第二条写目标表的 SQL 路径（guard / 乐观锁 / 版本 / 审计仍在 _do_update）。
+
+        payload:
+          扁平 dict = 头字段（key 可为 field id 或 db_column）；
+          或 {'header': {...}, 'lines': {line_id: {...}}}（line_id 为目标行主键）。
+
+        expected_revision: 提交时冻结的目标 revision_no，不匹配直接返回
+          `REVISION_CONFLICT`（不写任何版本）。
+
+        Returns: ActionResult；成功时附 `change_set_id` / `change_request_id`。
+        """
+        from meta.core.models import registry
+
+        meta_object = registry.get(object_type)
+        if meta_object is None:
+            return ActionResult.fail(
+                error="OBJECT_NOT_FOUND",
+                message="未知对象类型: %s" % object_type,
+            )
+
+        header_payload, line_payloads = self._split_change_payload(payload)
+        line_object = None
+        if line_payloads:
+            line_object = self._resolve_line_object(object_type, line_object_type)
+            if line_object is None:
+                return ActionResult.fail(
+                    error="LINE_OBJECT_NOT_FOUND",
+                    message="无法定位 %s 的行对象，请显式传 line_object_type" % object_type,
+                )
+
+        original = self.ds.find_by_id(meta_object.table_name, object_id)
+        if not original:
+            return ActionResult.fail(
+                error="NOT_FOUND",
+                message="记录不存在: %s#%s" % (object_type, object_id),
+            )
+        if expected_revision is not None \
+                and original.get('revision_no') != expected_revision:
+            return ActionResult.fail(
+                error="REVISION_CONFLICT",
+                message="单据已被他人修改（期望版本 %s，当前 %s）" % (
+                    expected_revision, original.get('revision_no')),
+                status_code=409,
+            )
+
+        # 行存在性预检：必须在事务前完成，避免事务中途 return 造成部分提交
+        for line_id in sorted(line_payloads, key=str):
+            if not self.ds.find_by_id(line_object.table_name, line_id):
+                return ActionResult.fail(
+                    error="LINE_NOT_FOUND",
+                    message="目标行不存在: %s#%s" % (line_object.id, line_id),
+                    status_code=400,
+                )
+
+        ctx = {
+            'change_request_id': change_request_id,
+            'reason_code': reason_code,
+            'change_set_id': change_set_id or f"cs_{uuid.uuid4().hex[:16]}",
+            'user': user,
+        }
+
+        try:
+            with self.ds.transaction():
+                for line_id in sorted(line_payloads, key=str):
+                    line_result = self._do_update(
+                        line_object, {'id': line_id, **line_payloads[line_id]},
+                        change_request_ctx=ctx,
+                    )
+                    if not line_result.success:
+                        raise _FunnelAbort(line_result)
+
+                # [M3 T5] 仅行级变更的申请（header_payload 为空）跳过抬头写入，
+                # 否则 `_do_update` 会以 `NO_DATA_TO_UPDATE` 让整次生效失败。
+                if header_payload:
+                    header_result = self._do_update(
+                        meta_object, {'id': object_id, **header_payload},
+                        change_request_ctx=ctx,
+                    )
+                    if not header_result.success:
+                        raise _FunnelAbort(header_result)
+                else:
+                    header_result = ActionResult.ok(
+                        data=original,
+                        message="{0} unchanged (line-only change request)".format(
+                            meta_object.name),
+                    )
+                    header_result.affected_rows = 0
+        except _FunnelAbort as abort:
+            return abort.result
+
+        header_result.change_set_id = ctx['change_set_id']
+        header_result.change_request_id = change_request_id
+        return header_result
+
+    @staticmethod
+    def _split_change_payload(payload: Dict[str, Any]):
+        """把生效 payload 拆成 (头字段 dict, {line_id: 行字段 dict})"""
+        payload = payload or {}
+        if 'header' in payload or 'lines' in payload:
+            header = dict(payload.get('header') or {})
+            lines = {k: dict(v or {}) for k, v in (payload.get('lines') or {}).items()}
+            return header, lines
+        return dict(payload), {}
+
+    @staticmethod
+    def _resolve_line_object(header_object_type: str, line_object_type=None):
+        """定位头对象的行对象（显式指定优先；否则仅当唯一子对象时自动推断）"""
+        from meta.core.models import registry
+
+        if line_object_type:
+            return registry.get(line_object_type)
+        children = [
+            obj for obj in registry.all()
+            if getattr(obj, 'parent_object', '') == header_object_type
+        ]
+        return children[0] if len(children) == 1 else None
+
     def _write_delete_blocked_audit(
         self,
         meta_object: MetaObject,

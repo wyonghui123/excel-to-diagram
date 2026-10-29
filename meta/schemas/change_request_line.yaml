@@ -1,0 +1,98 @@
+# 变更申请行（Change Request Line）— M3 / FR-007 §3.2
+# 依据: docs/superpowers/specs/2026-10-29-m3-change-request/spec.md §3.2
+#
+# 口径:
+#   ① 一行 = 目标对象的一个字段变更（field_name + old/new），禁止 JSON blob；
+#   ② line_key 为 NULL = 头级字段；非空 = 行级字段（行主键字符串）；
+#   ③ 唯一 (change_request_id, line_key, field_name)；
+#   ④ 字段白名单（目标对象 revision_policy.fields 中 editable 且非派生）由
+#      change_request_service 在提交期校验（FR-011），不在本表声明。
+
+id: change_request_line
+name: 变更申请行
+table_name: change_request_lines
+description: 变更申请明细（一行 = 目标对象的一个字段变更）
+parent_object: change_request
+display_name_field: field_name
+hierarchy:
+  enabled: true
+  parent_field: change_request_id
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: change_request_id
+    name: 所属申请
+    type: integer
+    db_column: change_request_id
+    required: true
+    description: 所属变更申请（弱引用，平台无 FK 习惯）
+    semantics:
+      meaning: 所属变更申请
+      display:
+        type: association
+        target_type: change_request
+        display_field: id
+    ui:
+      widget: input
+      editable: false
+
+  - id: line_key
+    name: 行键
+    type: string
+    db_column: line_key
+    nullable: true
+    max_length: 64
+    description: 头级变更为空；行级为行主键字符串
+    semantics:
+      meaning: 目标行主键（NULL = 头级）
+    ui:
+      widget: input
+
+  - id: field_name
+    name: 字段
+    type: string
+    db_column: field_name
+    required: true
+    max_length: 60
+    description: 目标字段 db 列名
+    semantics:
+      meaning: 目标对象的字段 db 列名
+    ui:
+      widget: input
+
+  - id: old_value
+    name: 原值
+    type: text
+    db_column: old_value
+    nullable: true
+    description: 原值（字符串化，展示 / 审计比对用）
+    semantics:
+      meaning: 变更前取值
+    ui:
+      widget: textarea
+
+  - id: new_value
+    name: 新值
+    type: text
+    db_column: new_value
+    nullable: true
+    description: 新值（字符串化，生效时按此覆盖）
+    semantics:
+      meaning: 变更后取值
+    ui:
+      widget: textarea
+
+indexes:
+  - fields: [change_request_id, line_key, field_name]
+    unique: true
+    name: uq_crl_cr_line_field

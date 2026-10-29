@@ -2495,7 +2495,44 @@
         "child_count"
       ],
       "table": "versions"
+    },
+    "change_request": {
+      "hash": "6c3e145270ae141427ed5f29c545baf7",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "target_object_type",
+        "target_object_id",
+        "target_revision_no",
+        "status",
+        "reason_code",
+        "summary",
+        "submitted_by",
+        "submitted_at",
+        "approved_by",
+        "approved_at",
+        "applied_at",
+        "applied_revision_no",
+        "fail_reason",
+        "change_set_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "change_requests"
+    },
+    "change_request_line": {
+      "hash": "c9d634bb204ce9e2280139f8fa7c1b93",
+      "fields": [
+        "id",
+        "change_request_id",
+        "line_key",
+        "field_name",
+        "old_value",
+        "new_value"
+      ],
+      "table": "change_request_lines"
     }
   },
-  "last_sync": "2026-10-29T09:16:18.047601"
+  "last_sync": "2026-10-29T14:18:09.531600"
 }

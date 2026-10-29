@@ -32,8 +32,13 @@ class RevisionGuard:
         self._evaluator = evaluator or ConditionEvaluator()
 
     def check(self, meta_object, record: Dict[str, Any],
-              changed_fields=None) -> None:
-        """不通过即抛 RevisionError；通过则静默返回。"""
+              changed_fields=None, via_change_request: bool = False) -> None:
+        """不通过即抛 RevisionError；通过则静默返回。
+
+        via_change_request: 变更申请生效链路（M3）放行 `partial` 状态——
+        被申请修改的单据本就处于部分履约，`fulfilled/voided` 仍拒绝。
+        默认 False，保持 M2 逐条行为一致。
+        """
         policy = getattr(meta_object, 'revision_policy', None)
         if policy is None or not policy.enabled:
             return
@@ -59,11 +64,12 @@ class RevisionGuard:
 
         fulfillment = record.get('fulfillment_status')
         if fulfillment in _PARTIAL_STATES:
-            raise RevisionError(
-                REQUIRES_CHANGE_REQUEST,
-                '单据已部分履约，修改必须走变更申请',
-            )
-        if fulfillment in _FULFILLED_STATES:
+            if not via_change_request:
+                raise RevisionError(
+                    REQUIRES_CHANGE_REQUEST,
+                    '单据已部分履约，修改必须走变更申请',
+                )
+        elif fulfillment in _FULFILLED_STATES:
             raise RevisionError(
                 NOT_ALLOWED_FULFILLED,
                 '单据已履约（%s），不允许修改' % fulfillment,

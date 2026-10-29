@@ -6,6 +6,7 @@
   · diff(...)             —— 两个版本之间的结构化差异
   · restore_payload(...)  —— 由快照还原「内容字段」（永不还原 status / 履约派生字段）
   · update_with_revision(...) —— FR-010 的 M2 等价实现：UPDATE ... WHERE id=? AND revision_no=?
+  · apply(...)            —— M3 变更申请生效编排（只编排，目标表仍经 ActionExecutor 写）
 
 约束：
   · 不写目标对象表（目标表仍由 ActionExecutor._do_update 写，见 spec D3）
@@ -136,6 +137,7 @@ def record(
     change_set_id: Optional[str] = None,
     user: Any = None,
     snapshot: Optional[Dict[str, Any]] = None,
+    change_request_id: Optional[int] = None,
 ) -> int:
     """写入一个版本 + 该版本的字段级差异行，返回 revision_no。
 
@@ -154,7 +156,7 @@ def record(
         'object_id': str(object_id),
         'revision_no': int(revision_no),
         'snapshot': json.dumps(payload, ensure_ascii=False),
-        'change_request_id': None,
+        'change_request_id': change_request_id,
         'reason_code': reason_code,
         'change_set_id': change_set_id,
         'created_by': _user_ref(user),
@@ -279,6 +281,204 @@ def restore_payload(snapshot, diff_field_names: Optional[Iterable[str]] = None) 
         header = {k: v for k, v in header.items() if k in allowed}
 
     return {k: v for k, v in header.items() if k not in NON_CONTENT_FIELDS}
+
+
+def _mark_change_request_failed(ds, cr_row: Dict[str, Any], reason: str) -> None:
+    """把变更申请落 `failed`（best-effort，不改目标表）。
+
+    优先走 `change_request_service.transition`（校验 approved → failed 合法边）；
+    任何异常再退化为直接 `UPDATE`，保证「生效失败」这件事本身不被静默丢掉。
+    """
+    cr_id = (cr_row or {}).get('id')
+    if cr_id is None:
+        return
+    reason = (reason or '')[:200]
+    try:
+        from meta.services.change_request_service import CR_TABLE, transition
+        transition(ds, cr_row, 'failed', '', {'fail_reason': reason})
+        return
+    except Exception:  # noqa: BLE001 - 兜底落库，避免失败态丢失
+        pass
+    try:
+        from meta.services.change_request_service import CR_TABLE
+        ds.update(CR_TABLE, cr_id, {'status': 'failed', 'fail_reason': reason})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def apply(ds, cr_row: Dict[str, Any], *, actor: str = '') -> Dict[str, Any]:
+    """[M3 T5] 变更申请生效编排（只编排，不写目标表）。
+
+    步骤（docs/superpowers/specs/2026-10-29-m3-change-request/spec.md §6.1）：
+      ① 幂等短路：`status == 'applied'` 且 `applied_revision_no` 非空 → 返回首次回执；
+      ② 状态守卫：`status != 'approved'` → CHANGE_REQUEST_NOT_APPROVED(409)；
+      ③ 行 → payload：`line_key` 为空 = 头字段，非空 = 目标行字段；
+      ④ 乐观锁预检：目标当前 `revision_no` != `target_revision_no` → 落 failed + 409；
+      ⑤ 调用漏斗：`ActionExecutor.update_via_change_request`（D5 唯一写路径）；
+      ⑥ 回写申请：`applied` / `applied_at` / `applied_revision_no` / `change_set_id`；
+      ⑦ 返回回执 `{'status','revision_no','applied_at'}`。
+
+    约束：本函数**不写目标对象表**（目标表只经 ActionExecutor 漏斗写，见 spec D5）。
+    """
+    from meta.core.models import registry
+    from meta.services.change_request_service import (
+        CRL_TABLE,
+        ChangeRequestError,
+        _ensure_tables,
+        transition,
+    )
+
+    if not cr_row or cr_row.get('id') is None:
+        raise ChangeRequestError('CHANGE_REQUEST_NOT_FOUND', '变更申请不存在', 404)
+
+    # ① 幂等短路：已生效且回执版本存在 → 不再写任何版本
+    if cr_row.get('status') == 'applied' \
+            and cr_row.get('applied_revision_no') not in (None, ''):
+        try:
+            revision_no = int(cr_row['applied_revision_no'])
+        except (TypeError, ValueError):
+            revision_no = cr_row['applied_revision_no']
+        return {
+            'status': 'applied',
+            'revision_no': revision_no,
+            'applied_at': cr_row.get('applied_at'),
+        }
+
+    # ② 状态守卫：只有 approved 才能生效
+    if cr_row.get('status') != 'approved':
+        raise ChangeRequestError(
+            'CHANGE_REQUEST_NOT_APPROVED',
+            '变更申请未审批通过（当前状态 %s），不能生效' % (cr_row.get('status') or '(空)'),
+            409,
+        )
+
+    _ensure_tables(ds)
+
+    target_type = (cr_row.get('target_object_type') or '').strip()
+    target_id = cr_row.get('target_object_id')
+    target_revision_no = cr_row.get('target_revision_no')
+
+    meta_object = registry.get(target_type) if target_type else None
+    if meta_object is None:
+        reason = '目标对象不存在: %s' % (target_type or '(空)')
+        _mark_change_request_failed(ds, cr_row, reason)
+        raise ChangeRequestError('INVALID_TARGET_OBJECT', reason, 400)
+
+    # ③ 行 → payload（头字段 / 行字段两段式，禁止 JSON blob）
+    rows = ds.find(CRL_TABLE, {'change_request_id': cr_row['id']}) or []
+    header_payload: Dict[str, Any] = {}
+    line_payloads: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        field_name = (row.get('field_name') or '').strip()
+        if not field_name:
+            continue
+        line_key = row.get('line_key')
+        if line_key in (None, ''):
+            header_payload[field_name] = row.get('new_value')
+        else:
+            line_payloads.setdefault(str(line_key), {})[field_name] = row.get('new_value')
+
+    if not header_payload and not line_payloads:
+        reason = '变更申请没有可生效的变更明细'
+        _mark_change_request_failed(ds, cr_row, reason)
+        raise ChangeRequestError('INVALID_CHANGE_REQUEST', reason, 400)
+
+    # ④ 乐观锁预检：目标版本必须仍是提交时冻结的版本（不写任何版本）
+    try:
+        target_row = ds.find_by_id(meta_object.table_name, target_id)
+    except Exception:  # noqa: BLE001 - 表不存在 / 目标非法
+        target_row = None
+    if not target_row:
+        reason = '目标单据不存在: %s#%s' % (meta_object.id, target_id)
+        _mark_change_request_failed(ds, cr_row, reason)
+        raise ChangeRequestError('TARGET_NOT_FOUND', reason, 400)
+
+    if target_row.get('revision_no') != target_revision_no:
+        reason = '目标已被他人修改，请重新提交申请'
+        _mark_change_request_failed(ds, cr_row, reason)
+        raise ChangeRequestError('REVISION_CONFLICT', reason, 409)
+
+    from meta.core.action_executor import ActionExecutor
+
+    # 行主键存在性预检：line_key 必须能定位到目标行（缺失 → INVALID_LINE_KEY）
+    if line_payloads:
+        line_object = None
+        try:
+            line_object = ActionExecutor._resolve_line_object(target_type)
+        except Exception:  # noqa: BLE001
+            line_object = None
+        if line_object is not None:
+            for line_id in sorted(line_payloads, key=str):
+                try:
+                    exists = ds.find_by_id(line_object.table_name, line_id)
+                except Exception:  # noqa: BLE001
+                    exists = None
+                if not exists:
+                    reason = '变更行主键不存在: %s#%s' % (line_object.id, line_id)
+                    _mark_change_request_failed(ds, cr_row, reason)
+                    raise ChangeRequestError('INVALID_LINE_KEY', reason, 400)
+
+    # ⑤ 调用漏斗（RevisionGuard → 乐观锁 → 版本 → 审计，全部在 _do_update 内）
+    payload: Dict[str, Any] = {'header': header_payload, 'lines': line_payloads} \
+        if line_payloads else dict(header_payload)
+    try:
+        result = ActionExecutor(ds).update_via_change_request(
+            target_type,
+            target_id,
+            payload,
+            expected_revision=target_revision_no,
+            change_request_id=cr_row['id'],
+            reason_code=cr_row.get('reason_code'),
+            change_set_id=cr_row.get('change_set_id'),
+            user=actor,
+        )
+    except Exception as e:  # noqa: BLE001 - 漏斗意外异常按生效失败处理
+        reason = '变更生效异常: %s' % e
+        _mark_change_request_failed(ds, cr_row, reason)
+        raise ChangeRequestError('APPLY_FAILED', reason, 400)
+
+    if not getattr(result, 'success', False):
+        code = getattr(result, 'error', '') or 'APPLY_FAILED'
+        message = getattr(result, 'message', '') or '变更生效失败'
+        if code in ('REVISION_CONFLICT', 'CONCURRENT_MODIFICATION'):
+            reason = '目标已被他人修改，请重新提交申请'
+            _mark_change_request_failed(ds, cr_row, reason)
+            raise ChangeRequestError('REVISION_CONFLICT', reason, 409)
+        if str(code).startswith('REVISION_'):
+            _mark_change_request_failed(ds, cr_row, message)
+            raise ChangeRequestError('REVISION_NOT_ALLOWED', message, 409)
+        if code in ('LINE_NOT_FOUND', 'INVALID_LINE_KEY'):
+            reason = message or '变更行不存在'
+            _mark_change_request_failed(ds, cr_row, reason)
+            raise ChangeRequestError('INVALID_LINE_KEY', reason, 400)
+        _mark_change_request_failed(ds, cr_row, message)
+        raise ChangeRequestError(
+            str(code), message,
+            getattr(result, 'status_code', None) or 400,
+        )
+
+    # ⑥ 回写申请：新版本号取漏斗落库后的目标行 revision_no
+    data = getattr(result, 'data', None) or {}
+    new_revision_no = data.get('revision_no') if isinstance(data, dict) else None
+    if new_revision_no is None:
+        new_revision_no = int(target_revision_no or 0) + 1
+    try:
+        new_revision_no = int(new_revision_no)
+    except (TypeError, ValueError):
+        pass
+
+    change_set_id = getattr(result, 'change_set_id', None) or cr_row.get('change_set_id')
+    extra: Dict[str, Any] = {'applied_revision_no': new_revision_no}
+    if change_set_id:
+        extra['change_set_id'] = change_set_id
+    updates = transition(ds, cr_row, 'applied', actor, extra)
+
+    # ⑦ 回执（幂等键：status + applied_revision_no）
+    return {
+        'status': 'applied',
+        'revision_no': new_revision_no,
+        'applied_at': updates.get('applied_at'),
+    }
 
 
 def update_with_revision(ds, table_name: str, id_value: Any,

@@ -200,10 +200,13 @@ class BoActionRegistry:
             }
 
         # 简单权限检查
+        # [M3 T5] `'*'` 通配（is_admin 口径：拥有 '*' 即管理员）同样放行，
+        # 否则 admin 兜底的 action 在 HTTP 端点/决策链路会被永久 403。
         if meta.permission_required:
             ctx = context or {}
             user_perms = ctx.get('permissions', []) or []
-            if meta.permission_required not in user_perms:
+            if meta.permission_required not in user_perms \
+                    and '*' not in user_perms:
                 return {
                     'success': False,
                     'data': None,

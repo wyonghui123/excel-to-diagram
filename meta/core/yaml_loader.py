@@ -1134,6 +1134,24 @@ def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
 _REVISION_DERIVED_FIELDS = frozenset({'fulfillment_status', 'fulfillment_derived_at'})
 
 
+def _validate_derived_state_field(rules, obj_id: str,
+                                  source_file: str = "") -> None:
+    """[M3 FR-011 2026-10-29] 派生字段不得作为状态机的 state_field。
+
+    与 parse_revision_policy 的派生字段校验同一口径，扩展到 state_transition：
+    派生字段只能由系统回写，一旦被当成状态列，状态推进会绕过派生单一入口。
+    """
+    suffix = "（文件: {0}）".format(source_file) if source_file else ""
+    for rule in rules or []:
+        state_field = getattr(rule, 'state_field', '') or ''
+        if state_field and state_field in _REVISION_DERIVED_FIELDS:
+            raise ValueError(
+                f"对象 '{obj_id}' 的 rules 中 state_transition "
+                f"'{getattr(rule, 'id', '')}' 的 state_field '{state_field}' "
+                f"是派生字段，不能作为状态字段{suffix}"
+            )
+
+
 def parse_revision_policy(data: Dict[str, Any], fields: List[str],
                           source_file: str = "") -> Optional[MetaRevisionPolicy]:
     """解析变更策略配置（M1 只解析，不启用版本能力）
@@ -2260,6 +2278,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
     actions = [parse_action(a) for a in data.get("actions", [])]
     queries = [parse_query(q) for q in data.get("queries", [])]
     rules = [parse_rule(r) for r in data.get("rules", [])]
+    # [M3 FR-011 2026-10-29] 派生字段禁止作为 state_transition.state_field
+    _validate_derived_state_field(rules, data.get("id", ""), source_file)
     indexes = [parse_index(i) for i in data.get("indexes", [])]
     functions = [parse_function(f) for f in data.get("functions", [])]
     
