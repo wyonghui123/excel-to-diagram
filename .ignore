@@ -1,0 +1,19 @@
+# 工作区搜索忽略规则 (excel-to-diagram)
+# 2026-10-29: AI 规则 / 上下文文档不参与 Glob/Grep 批量检索, 一律用 Read 精读。
+# 背景: 关键词命中 .trae/rules 会把整篇规则 (单篇可达数千行) 注入上下文。
+
+# === AI 规则 / 上下文文档 ===
+.trae/rules/
+.trae/context/
+.trae/prompts/
+.trae/backlog/
+.trae/memory/
+.trae/agents/
+.trae/roles/
+.trae/commands/
+.trae/templates/
+
+# === 既有内部状态 / 规格目录 ===
+.trae/specs/
+.trae/state/
+.trae/skills/
