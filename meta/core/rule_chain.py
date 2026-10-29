@@ -264,9 +264,38 @@ class RuleDependencyAnalyzer:
         
         return graph
     
+    # [S6 收敛 2026-10-29] 单一判据：依赖图节点分派只看 ``rule.rule_type``（与 flat
+    # 执行器一致）。isinstance 降级为一致性断言——不一致时显式告警并跳过，不再静默
+    # 返回 None。DEFAULT / PERMISSION 本就不参与拓扑，属设计内行为，不告警。
+    _NODE_SPECS = {
+        RuleType.COMPUTATION: (RuleNodeType.COMPUTATION, MetaComputation),
+        RuleType.STATE_TRANSITION: (RuleNodeType.STATE_TRANSITION, MetaStateTransition),
+        RuleType.VALIDATION: (RuleNodeType.VALIDATION, MetaValidation),
+        RuleType.TRIGGER: (RuleNodeType.TRIGGER, MetaTrigger),
+        RuleType.CONSTRAINT: (RuleNodeType.CONSTRAINT, MetaConstraint),
+        RuleType.DERIVATION: (RuleNodeType.DERIVATION, MetaDerivation),
+    }
+
     @staticmethod
     def _create_node(rule: MetaRule) -> Optional[RuleNode]:
-        if rule.rule_type == RuleType.COMPUTATION and isinstance(rule, MetaComputation):
+        spec = RuleDependencyAnalyzer._NODE_SPECS.get(rule.rule_type)
+        if spec is None:
+            if rule.rule_type not in (RuleType.DEFAULT, RuleType.PERMISSION):
+                logger.warning(
+                    "规则 '%s' 的 rule_type=%s 不参与依赖图拓扑，"
+                    "其 depends_on 依赖边会被忽略",
+                    getattr(rule, 'id', ''), getattr(rule.rule_type, 'value', rule.rule_type))
+            return None
+
+        node_type, expected_cls = spec
+        if not isinstance(rule, expected_cls):
+            logger.warning(
+                "规则 '%s' 的 rule_type=%s 与实例类型 %s 不一致，"
+                "已跳过依赖图节点（判据=rule_type）",
+                getattr(rule, 'id', ''), rule.rule_type.value, type(rule).__name__)
+            return None
+
+        if node_type == RuleNodeType.COMPUTATION:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.COMPUTATION,
@@ -274,8 +303,8 @@ class RuleDependencyAnalyzer:
                 target_fields={rule.target_field} if rule.target_field else set(),
                 priority=rule.priority
             )
-        
-        elif rule.rule_type == RuleType.STATE_TRANSITION and isinstance(rule, MetaStateTransition):
+
+        elif node_type == RuleNodeType.STATE_TRANSITION:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.STATE_TRANSITION,
@@ -284,8 +313,8 @@ class RuleDependencyAnalyzer:
                 condition_fields=set(rule.from_states),
                 priority=rule.priority
             )
-        
-        elif rule.rule_type == RuleType.VALIDATION and isinstance(rule, MetaValidation):
+
+        elif node_type == RuleNodeType.VALIDATION:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.VALIDATION,
@@ -293,8 +322,8 @@ class RuleDependencyAnalyzer:
                 target_fields=set(),
                 priority=rule.priority
             )
-        
-        elif rule.rule_type == RuleType.TRIGGER and isinstance(rule, MetaTrigger):
+
+        elif node_type == RuleNodeType.TRIGGER:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.TRIGGER,
@@ -302,8 +331,8 @@ class RuleDependencyAnalyzer:
                 target_fields=set(),
                 priority=rule.priority
             )
-        
-        elif rule.rule_type == RuleType.CONSTRAINT and isinstance(rule, MetaConstraint):
+
+        elif node_type == RuleNodeType.CONSTRAINT:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.CONSTRAINT,
@@ -311,8 +340,8 @@ class RuleDependencyAnalyzer:
                 target_fields=set(),
                 priority=rule.priority
             )
-        
-        elif rule.rule_type == RuleType.DERIVATION and isinstance(rule, MetaDerivation):
+
+        elif node_type == RuleNodeType.DERIVATION:
             return RuleNode(
                 rule=rule,
                 node_type=RuleNodeType.DERIVATION,
@@ -320,7 +349,7 @@ class RuleDependencyAnalyzer:
                 target_fields=set(rule.get_target_fields()),
                 priority=rule.priority
             )
-        
+
         return None
     
     @staticmethod
