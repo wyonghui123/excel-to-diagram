@@ -51,8 +51,11 @@ WORKLOG_ID = "task_worklog"
 WORKLOG_TABLE = "task_worklogs"
 
 # 事件类型：created（进入 pending，非状态间迁移）/ status_changed（§7.2 迁移）/
-# hold、release（Q3 行级阻塞事件化，不改状态列）
-EVENT_TYPES: Tuple[str, ...] = ("created", "status_changed", "hold", "release")
+# hold、release（Q3 行级阻塞事件化，不改状态列）/
+# legacy_execution（Gen1 task_executions 历史行投影，账本统一 Phase 2b）
+EVENT_TYPES: Tuple[str, ...] = (
+    "created", "status_changed", "hold", "release", "legacy_execution",
+)
 
 # WORKLOG 记录类型：迁移配对 / BO 调用 / Agent 工具调用 / 长任务心跳 / 人工备注（审核意见）
 WORKLOG_ENTRY_TYPES: Tuple[str, ...] = (
@@ -89,7 +92,7 @@ def _build_task_event_meta() -> MetaObject:
         _f("workflow_run_id", FieldType.STRING,
            description="所属 Run（弱引用无 FK；OCED 关联）"),
         _f("event_type", FieldType.STRING, required=True, default="status_changed",
-           description="created / status_changed / hold / release"),
+           description="created / status_changed / hold / release / legacy_execution"),
         _f("from_status", FieldType.STRING,
            description="迁移前状态（created / hold / release 事件为空）"),
         _f("to_status", FieldType.STRING,

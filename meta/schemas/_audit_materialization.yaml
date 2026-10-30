@@ -207,11 +207,6 @@ audit_materialization:
     object_type: role_permission
     notes: 中间表
 
-  - name: task_executions
-    strategy: none
-    object_type: task_execution
-    notes: 执行历史表，通过 created_at 排序
-
   - name: task_queues
     strategy: none
     object_type: task_queue

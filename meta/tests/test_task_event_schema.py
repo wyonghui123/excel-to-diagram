@@ -60,8 +60,10 @@ class TestMetaObjects:
         assert [o.table_name for o in objs] == [TASK_EVENT_TABLE, WORKLOG_TABLE]
 
     def test_event_type_value_set(self):
-        """TC-TEV-002: 事件类型值域 = created/status_changed/hold/release"""
-        assert EVENT_TYPES == ("created", "status_changed", "hold", "release")
+        """TC-TEV-002: 事件类型值域 = created/status_changed/hold/release/legacy_execution"""
+        assert EVENT_TYPES == (
+            "created", "status_changed", "hold", "release", "legacy_execution",
+        )
         assert set(WORKLOG_ENTRY_TYPES) == {
             "transition", "bo_call", "agent_tool", "heartbeat", "note"}
 

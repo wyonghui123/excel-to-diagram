@@ -60,6 +60,13 @@
 
 ## 范围外（另立 spec）
 
-- [ ] 账本统一（`task_executions` → `task_events` 投影/归档）
+- [x] 账本统一（`task_executions` → `task_events` 投影/归档）
+      （2026-10-31 完成：`v165__freeze_task_executions.py` 冻结 pending/running →
+      `cancelled`；`meta/tools/task_execution_ledger_migrate.py` 把
+      `task_executions` + `task_execution_archive` 投影为 `task_events`
+      （`event_type=legacy_execution`，ID 前缀 `gen1-*`，幂等/`--dry-run`/`--strict`）；
+      `v166__retire_task_execution_ledger.py` 物理退役两表（有行需
+      `ALLOW_TASK_LEDGER_DROP_WITH_ROWS=1`）。单测 14 例 + 任务域 338 例全绿；
+      真实库执行待 PM 确认后按 v165 → 投影 → v166 顺序执行。）
 - [ ] 队列配置双份收敛（DB 5 行 vs 代码 5 个 QueueConfig）
 - [ ] `ai_async_tasks`（0 行）退役评估

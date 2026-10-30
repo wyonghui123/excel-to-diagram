@@ -328,12 +328,12 @@ meta/schemas/*.yaml (140)
 
 | 代别 | 载体 | 调度代码 | 是否在 registry |
 |---|---|---|---|
-| 第一代（执行底座） | 无 YAML：`task_queues` / `task_executions` 由 `meta/core/task_infra_schema.py` 代码建表（v156）；`scheduled_tasks` 已物理退役（v155） | `task_scheduler.py`（仅队列消费 + `task_executions` 账本）、`task_queue_manager.py` | 否（代码建表） |
+| 第一代（执行底座） | 无 YAML：`task_queues` 由 `meta/core/task_infra_schema.py` 代码建表（v156）；`task_executions` / `task_execution_archive` 已物理退役（v165 冻结 + 投影 + v166 删表）；`scheduled_tasks` 已物理退役（v155） | `task_scheduler.py`（队列消费；执行账本改走 Gen2 `task_events`）、`task_queue_manager.py` | 否（代码建表） |
 | 第二代（任务领域） | `tasks` / `task_templates` / `workflows` / `workflow_runs` / `task_events` / `task_worklogs` 由 `task_schema.py` / `task_event_schema.py` 代码建表（v154） | `task_inbox.py`、`task_assignment.py`、`task_hold.py`、`task_sla.py`、`task_idempotency.py`、`task_state_machine.py` | 否（代码建表） |
 
 - cron 调度唯一真源：进程内调度器 `platform_scheduler.py` / `maintenance_scheduler.py` / `workflow_schedule_scheduler.py`（手工触发入口 `POST /api/v2/schedulers/<job_code>/run-now`，全局暂停 `CRON_JOBS_ENABLED=0`）。`meta/schemas/` 中不再有 `scheduled_task.yaml` / `task_queue.yaml` / `task_execution.yaml`。
 - 执行器适配：`task_executor_adapter.py`、`task_handler.py`、`task_async.py`、`task_write_guard.py`、`task_event_schema.py`、`task_schema.py`、`task_query.py`。
-- API：`scheduler_api.py`、`task_api.py`（仅队列/账本只读+重试）、`task_inbox_api.py`、`task_decision_api.py`。
+- API：`scheduler_api.py`、`task_api.py`（队列只读；重试/取消路由已随账本退役删除）、`task_inbox_api.py`、`task_decision_api.py`。
 
 #### [计划]
 
@@ -344,7 +344,8 @@ meta/schemas/*.yaml (140)
 #### [缺口]
 
 - ~~两代模型收敛未完成~~ → **已收敛（v3.11）**：`scheduled_tasks` 退役（v155，实测 0 行）、Gen2 六表 provisioning 迁移化（v154）、Gen1 队列/账本统一为代码建表（`task_infra_schema.py` + v156）、三份 YAML 删除、遗留 `trigger/enable/disable` 路由删除。
-- 剩余（另立 spec）：账本统一（`task_executions` 25642 行 → `task_events` 投影/归档）、队列配置双份（DB `task_queues` 5 行 vs 代码 5 个 `QueueConfig`）、`ai_async_tasks`（0 行）退役评估。
+- ~~账本统一（`task_executions` 25642 行 → `task_events` 投影/归档）~~ → **已完成（2026-10-31）**：v165 把 pending/running 冻结为 `cancelled`，`task_execution_ledger_migrate.py` 把两表投影为 `task_events`（`event_type=legacy_execution`），v166 物理退役两表。
+- 剩余（另立 spec）：队列配置双份（DB `task_queues` 5 行 vs 代码 5 个 `QueueConfig`）、`ai_async_tasks`（0 行）退役评估。
 
 ---
 

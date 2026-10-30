@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 import logging
 
-from meta.core.task_infra_schema import ensure_task_infra_tables
+from meta.core.task_infra_schema import ensure_task_queue_table
 
 logger = logging.getLogger(__name__)
 
 
 def init_task_seed_data(data_source):
-    # 建表唯一真源：meta/core/task_infra_schema.py（task_queues / task_executions）
-    ensure_task_infra_tables(data_source)
+    # 建表唯一真源：meta/core/task_infra_schema.py。
+    # [账本统一 Phase 2c] 启动只建 task_queues；task_executions 已由 v165/v166
+    # 退役，启动侧重建会让退役失效。
+    ensure_task_queue_table(data_source)
     init_task_queues(data_source)
 
 

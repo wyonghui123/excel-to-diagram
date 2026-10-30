@@ -8,8 +8,10 @@
   两处 DDL 一旦漂移，就会「YAML 建的表和种子建的表字段不同」。
 
   YAML 双轨已在本 change 删除，因此把 DDL 收敛到本模块：
-    - `init_task_seed` 启动时调用 `ensure_task_infra_tables()`（幂等建表）
-    - `meta/migrations/v156__adopt_task_infra_tables.py` 存量库同样调用它
+    - `init_task_seed` 启动时调用 `ensure_task_queue_table()`（只建队列；
+      `task_executions` 已由 v165/v166 退役，启动侧不得重建）
+    - `meta/migrations/v156__adopt_task_infra_tables.py` 存量库仍调用
+      `ensure_task_infra_tables()`（历史 provisioning，需建齐两表）
 
   注意：这两张表属于「作业执行基础设施」，不是 Gen2 任务域六表
   （tasks/task_templates/workflows/workflow_runs/task_events/task_worklogs，
@@ -78,8 +80,22 @@ INFRA_TABLES = (
 )
 
 
+def ensure_task_queue_table(data_source) -> None:
+    """幂等只建 `task_queues`（启动种子用；`task_executions` 已退役）。"""
+    from meta.core.table_name_validator import register_table_name
+
+    register_table_name(TASK_QUEUE_TABLE)
+    data_source.execute(TASK_QUEUE_DDL)
+    data_source.commit()
+    logger.info("Task queue table ensured")
+
+
 def ensure_task_infra_tables(data_source) -> None:
-    """幂等建 task_queues / task_executions，并登记表名白名单。"""
+    """幂等建 task_queues / task_executions，并登记表名白名单。
+
+    保留给 v156（存量库 provisioning）使用；启动种子改走
+    `ensure_task_queue_table()`，不得在已退役后重建执行账本。
+    """
     from meta.core.table_name_validator import register_table_name
 
     for name, ddl, _cols in INFRA_TABLES:

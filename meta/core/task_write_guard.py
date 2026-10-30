@@ -40,10 +40,10 @@ TASK_OWNED_TABLES: FrozenSet[str] = frozenset({
     # A9 SLA 与 hold 派生视图
     "task_slas", "task_hold_current",
     # 遗留执行底座（task_handler / task_queue_manager / task_scheduler）：
-    # task_queues 队列配置 + task_executions 执行账本（DDL 真源
-    # meta/core/task_infra_schema.py）。scheduled_tasks 已于 v155 退役，表名保留
-    # 以兼容尚未跑迁移的旧库。
-    "scheduled_tasks", "task_executions", "task_queues",
+    # task_queues 队列配置（DDL 真源 meta/core/task_infra_schema.py）。
+    # scheduled_tasks（v155）/ task_executions（v166 账本统一）已退役，表名保留
+    # 以兼容尚未跑迁移的旧库；迁移执行后这些名字不再可写。
+    "scheduled_tasks", "task_queues",
 })
 
 #: 从 DML 语句识别目标表：INSERT [OR ...] INTO t / UPDATE [OR ...] t / DELETE FROM t

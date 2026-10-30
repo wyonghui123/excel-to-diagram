@@ -107,9 +107,11 @@ role:
 # 背景: v070 之前这些 rt 直接写在 permissions.resource_type (例 task_queue:task_queue_read),
 #   但 resource_types.yaml 未声明, _build_role_matrices 通过 extra_rts 兜底显示 (无标签无维度).
 # 现在 yaml 是 SSOT, 这些 BO 正式进入资源矩阵管理, 可勾选动作 + 范围条件.
-# 仍在的表 (已验证存在): task_queues / task_executions / enum_types
+# 仍在的表 (已验证存在): task_queues / enum_types
 # [task-two-generation 2026-10-30] scheduled_tasks (v155) / ai_async_tasks (v157)
 #   已物理退役, 对应 rt 声明一并移除.
+# [账本统一 2026-10-31] task_executions (v166) 已物理退役, task_execution rt 移除;
+#   历史执行事件改由平台库 task_events 承载.
 #
 # 不在矩阵中的相关 rt (走专用管理界面):
 #   - menu:            菜单管理 (系统级 UI 入口, 走专用菜单权限 Tab)
@@ -120,15 +122,6 @@ task_queue:
   type: independent
   table: task_queues
   actions: [read, create, update, delete, manage, export]
-
-task_execution:
-  # [FIX Spec16 Phase7 2026-09-02] 任务执行记录 是独立资源, 不是 subordinate.
-  # DB schema (task_executions 33 cols) 无 parent_type/parent_id 字段, 只有 trigger_source 字符串.
-  # user_id 字段表示"执行人" (谁触发的), 不是 inherit owner 关系.
-  # 早期误判为 subordinate (依赖 scheduled_task/ai_async_task) 已修正.
-  type: independent
-  table: task_executions
-  actions: [read, delete, export]
 
 enum_type:
   type: independent
