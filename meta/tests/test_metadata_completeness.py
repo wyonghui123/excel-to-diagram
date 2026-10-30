@@ -90,15 +90,23 @@ class TestMetadataCompleteness:
                     continue
 
                 action = next(a for a in obj.actions if a.id == action_id)
-                expected_path_snake = f"/api/v1/{obj.id}"
-                expected_path_kebab = f"/api/v1/{obj.id.replace('_', '-')}"
 
-                if expected_path_snake not in action.path and expected_path_kebab not in action.path:
+                # 路径前缀候选：对象 id 本身（规则复数 +s 天然含该子串）
+                # + y→ies 不规则复数（如 org_legal_entity → org_legal_entities）
+                stems = [obj.id]
+                if obj.id.endswith('y'):
+                    stems.append(obj.id[:-1] + 'ies')
+                expected_paths = []
+                for stem in stems:
+                    expected_paths.append(f"/api/v1/{stem}")
+                    expected_paths.append(f"/api/v1/{stem.replace('_', '-')}")
+
+                if not any(p in action.path for p in expected_paths):
                     invalid_paths.append({
                         'object': obj.id,
                         'action': action_id,
                         'path': action.path,
-                        'expected': f"应包含 {expected_path_snake} 或 {expected_path_kebab}"
+                        'expected': '应包含 ' + ' 或 '.join(expected_paths)
                     })
 
         if invalid_paths:

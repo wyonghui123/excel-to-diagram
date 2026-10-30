@@ -41,7 +41,10 @@ P2_OBJECTS = ["allocation_rule", "adjustment", "usage_group",
               "cumulative_usage", "external_rate_source", "pricing_period"]
 
 # 建表清单: 六对象 + calc_result(被 adjustment 引用) + 三张 FK 目标表
-TABLES = P2_OBJECTS + ["calc_result", "rate_record", "calendar"]
+# 2026-10-07 拆表: allocation_result 承接 calc_result 的分摊列, 须随建
+# calendar.country_id 已升级为指向 regions 的真外键, region 须随建
+TABLES = P2_OBJECTS + ["calc_result", "rate_record", "calendar",
+                       "allocation_result", "region"]
 
 EXPECTED_TABLES = {
     "allocation_rule": "allocation_rules",
@@ -54,10 +57,13 @@ EXPECTED_TABLES = {
 
 # (源列, 目标表, 目标列) —— 逐条断言, 不是"有 FK 就行"
 EXPECTED_FKS = {
+    # allocation_rule_id 已于 2026-10-07 迁至 allocation_results（见 calc_result.yaml 注记）
     "calc_result": [
-        ("allocation_rule_id", "allocation_rules", "id"),
         ("external_rate_source_id", "external_rate_sources", "id"),
         ("pricing_period_id", "pricing_periods", "id"),
+    ],
+    "allocation_result": [
+        ("allocation_rule_id", "allocation_rules", "id"),
     ],
     "adjustment": [
         ("original_result_id", "calc_results", "id"),
@@ -297,7 +303,8 @@ class TestDeletionGuardBackfill:
     """
 
     @pytest.mark.parametrize("bo_id,ref_table,ref_col", [
-        ("allocation_rule", "calc_results", "allocation_rule_id"),
+        # 2026-10-07 拆表: 分摊规则被 allocation_results 引用, 不再是 calc_results
+        ("allocation_rule", "allocation_results", "allocation_rule_id"),
         ("external_rate_source", "calc_results", "external_rate_source_id"),
         ("pricing_period", "calc_results", "pricing_period_id"),
         ("usage_group", "cumulative_usages", "usage_group_id"),
@@ -311,7 +318,7 @@ class TestDeletionGuardBackfill:
             "{0} 缺删除保护 {1}.{2}".format(bo_id, ref_table, ref_col)
 
     @pytest.mark.parametrize("bo_id,ref_table,ref_col", [
-        ("allocation_rule", "calc_results", "allocation_rule_id"),
+        ("allocation_rule", "allocation_results", "allocation_rule_id"),
         ("external_rate_source", "calc_results", "external_rate_source_id"),
         ("pricing_period", "calc_results", "pricing_period_id"),
     ])
