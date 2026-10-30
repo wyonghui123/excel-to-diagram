@@ -116,18 +116,18 @@ class _FakeDataSource:
         return table_name in self.fallback_tables
 
 
-_ALL_VIEWS = ('party_internal', 'org_legal_entity')
+_ALL_VIEWS = ('party_internal', 'org_legal_entity', 'org_sales_org')
 _ALL_TABLES = ('parties', 'orgs', 'org_functions')
 
 
-def test_guard_prunes_both_views_when_org_functions_missing():
+def test_guard_prunes_all_views_when_org_functions_missing():
     from meta.core.view_dependency_guard import prune_unusable_views
     reg = _FakeRegistry(_ALL_VIEWS)
     ds = _FakeDataSource(tables=('parties', 'orgs'))
 
     pruned = prune_unusable_views(ds, reg=reg)
 
-    assert pruned == ['party_internal', 'org_legal_entity']
+    assert pruned == ['party_internal', 'org_legal_entity', 'org_sales_org']
     assert reg.unregistered == pruned
 
 

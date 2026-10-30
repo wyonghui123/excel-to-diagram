@@ -26,6 +26,8 @@ VIEW_DEPENDENCIES: Dict[str, Tuple[str, ...]] = {
     'party_internal': ('parties', 'orgs', 'org_functions'),
     # 谓词: EXISTS(org_functions 具备 legal_entity 职能)
     'org_legal_entity': ('orgs', 'org_functions'),
+    # 谓词: EXISTS(org_functions 具备 sales 职能)
+    'org_sales_org': ('orgs', 'org_functions'),
 }
 
 
