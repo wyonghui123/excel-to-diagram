@@ -85,7 +85,7 @@ CREATE TABLE change_events (
 );
 """
 
-#: 与迁移 v158 种子一致的 4 条默认规则
+#: 与迁移 v164 种子一致的 4 条默认规则
 _DEFAULT_RULES = (
     (10, None, 'stock', None, None, WORKFLOW_STOCK, 1),
     (20, None, 'make', None, None, WORKFLOW_MTO, 1),

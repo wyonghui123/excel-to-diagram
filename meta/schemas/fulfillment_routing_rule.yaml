@@ -3,7 +3,7 @@
 #
 # 定位: 路由判定策略表（批次 4）。匹配键 = item_type / procurement_type /
 #       delivery_mode / site_id → workflow_key；**不做通用规则引擎**，
-#       先 4 条默认规则（迁移 v158 种子）+ 表覆盖（§10.18.3）。
+#       先 4 条默认规则（迁移 v164 种子）+ 表覆盖（§10.18.3）。
 #
 # 匹配口径（由 fulfillment_routing_service 强制）:
 #   · 规则字段为 NULL = 通配（不参与匹配）；全部为 NULL 的规则兜底全部输入。

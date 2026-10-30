@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v155] 服务工单 / SLA 地基（6 张表）
+"""[v161] 服务工单 / SLA 地基（6 张表）
 
 依据:
   docs/superpowers/specs/2026-10-29-so-wave3/spec.md
@@ -200,11 +200,11 @@ def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print(f'[v155] DB 不存在: {db_path}')
+        print(f'[v161] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v155] 开始: 服务工单 / SLA 地基')
+        print('[v161] 开始: 服务工单 / SLA 地基')
 
         for name, ddl in TABLES:
             if _table_exists(conn, name):
@@ -221,11 +221,11 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
                 print(f'  - [ADD] 索引 {name}')
 
         conn.commit()
-        print('[v155] 迁移提交完成')
+        print('[v161] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v155] 失败: %s' % e)
+        print('[v161] 失败: %s' % e)
         return False
     finally:
         conn.close()
@@ -233,7 +233,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v155 verify] DB 不存在: %s' % db_path)
+        print('[v161 verify] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -264,21 +264,21 @@ def verify(db_path: Path) -> bool:
 
         for table, columns in required_columns.items():
             if not _table_exists(conn, table):
-                print('[v155 verify] FAIL: 缺表 %s' % table)
+                print('[v161 verify] FAIL: 缺表 %s' % table)
                 ok = False
                 continue
             have = _columns(conn, table)
             for col in columns:
                 if col not in have:
-                    print('[v155 verify] FAIL: 缺列 %s.%s' % (table, col))
+                    print('[v161 verify] FAIL: 缺列 %s.%s' % (table, col))
                     ok = False
 
         for name, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print('[v155 verify] FAIL: 缺索引 %s' % name)
+                print('[v161 verify] FAIL: 缺索引 %s' % name)
                 ok = False
 
-        print('[v155 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v161 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -286,7 +286,7 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v155 rollback] DB 不存在: %s' % db_path)
+        print('[v161 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -307,11 +307,11 @@ def rollback(db_path: Path) -> bool:
                 print(f'  - [SKIP] 表 {table} 不存在')
 
         conn.commit()
-        print('[v155 rollback] 完成')
+        print('[v161 rollback] 完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v155 rollback] 失败: %s' % e)
+        print('[v161 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()

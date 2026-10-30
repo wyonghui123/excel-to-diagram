@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v154] 交货单地基（shipments / shipment_lines）+ 计划行交付列
+"""[v160] 交货单地基（shipments / shipment_lines）+ 计划行交付列
 
 依据:
   docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.2 对象模型 / §10.8 迁移
@@ -120,11 +120,11 @@ def _ensure_column(conn: sqlite3.Connection, table: str, name: str, ddl: str) ->
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print(f'[v154] DB 不存在: {db_path}')
+        print(f'[v160] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v154] 开始: 交货单地基')
+        print('[v160] 开始: 交货单地基')
 
         if _table_exists(conn, SHIPMENTS_TABLE):
             print(f'  - [SKIP] 表 {SHIPMENTS_TABLE} 已存在')
@@ -155,11 +155,11 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
             _ensure_column(conn, SCHEDULE_TABLE, name, ddl)
 
         conn.commit()
-        print('[v154] 迁移提交完成')
+        print('[v160] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v154] 失败: %s' % e)
+        print('[v160] 失败: %s' % e)
         return False
     finally:
         conn.close()
@@ -167,14 +167,14 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v154 verify] DB 不存在: %s' % db_path)
+        print('[v160 verify] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
         ok = True
         for table in (SHIPMENTS_TABLE, LINES_TABLE):
             if not _table_exists(conn, table):
-                print('[v154 verify] FAIL: 缺表 %s' % table)
+                print('[v160 verify] FAIL: 缺表 %s' % table)
                 ok = False
 
         if _table_exists(conn, SHIPMENTS_TABLE):
@@ -182,7 +182,7 @@ def verify(db_path: Path) -> bool:
             for col in ('delivery_no', 'order_id', 'ship_from_location_id',
                         'ship_to_address_text', 'status', 'source'):
                 if col not in have:
-                    print('[v154 verify] FAIL: 缺列 %s.%s' % (SHIPMENTS_TABLE, col))
+                    print('[v160 verify] FAIL: 缺列 %s.%s' % (SHIPMENTS_TABLE, col))
                     ok = False
 
         if _table_exists(conn, LINES_TABLE):
@@ -190,25 +190,25 @@ def verify(db_path: Path) -> bool:
             for col in ('delivery_id', 'schedule_id', 'order_line_id',
                         'item_id', 'uom_id', 'qty', 'status'):
                 if col not in have:
-                    print('[v154 verify] FAIL: 缺列 %s.%s' % (LINES_TABLE, col))
+                    print('[v160 verify] FAIL: 缺列 %s.%s' % (LINES_TABLE, col))
                     ok = False
 
         if not _table_exists(conn, SCHEDULE_TABLE):
-            print('[v154 verify] FAIL: 缺表 %s' % SCHEDULE_TABLE)
+            print('[v160 verify] FAIL: 缺表 %s' % SCHEDULE_TABLE)
             ok = False
         else:
             have = _columns(conn, SCHEDULE_TABLE)
             for name, _ddl in SCHEDULE_COLUMNS:
                 if name not in have:
-                    print('[v154 verify] FAIL: 缺列 %s.%s' % (SCHEDULE_TABLE, name))
+                    print('[v160 verify] FAIL: 缺列 %s.%s' % (SCHEDULE_TABLE, name))
                     ok = False
 
         for name, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print('[v154 verify] FAIL: 缺索引 %s' % name)
+                print('[v160 verify] FAIL: 缺索引 %s' % name)
                 ok = False
 
-        print('[v154 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v160 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -216,7 +216,7 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v154 rollback] DB 不存在: %s' % db_path)
+        print('[v160 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -249,11 +249,11 @@ def rollback(db_path: Path) -> bool:
             print(f'  - [SKIP] 表 {SCHEDULE_TABLE} 不存在')
 
         conn.commit()
-        print('[v154 rollback] 完成')
+        print('[v160 rollback] 完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v154 rollback] 失败: %s' % e)
+        print('[v160 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()

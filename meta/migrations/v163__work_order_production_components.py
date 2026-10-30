@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v157] 生产工单需求追溯 + 工单组件表
+"""[v163] 生产工单需求追溯 + 工单组件表
 
 依据:
   docs/superpowers/specs/2026-10-29-so-wave3/spec.md
@@ -46,7 +46,7 @@ NEW_COLUMNS = (
 REBUILD_COLUMNS = ('schedule_id', 'severity')
 
 #: 重建时的临时表名
-REBUILD_TEMP_TABLE = 'work_orders__v157'
+REBUILD_TEMP_TABLE = 'work_orders__v163'
 
 COMPONENTS_DDL = """
 CREATE TABLE IF NOT EXISTS work_order_components (
@@ -176,15 +176,15 @@ def _relax_notnull(conn: sqlite3.Connection) -> None:
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print(f'[v157] DB 不存在: {db_path}')
+        print(f'[v163] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v157] 开始: 生产工单需求追溯 + 工单组件表')
+        print('[v163] 开始: 生产工单需求追溯 + 工单组件表')
 
         if not _table_exists(conn, WORK_ORDERS_TABLE):
             conn.rollback()
-            print(f'  - [FAIL] 缺依赖表 {WORK_ORDERS_TABLE}（需先执行 v155）')
+            print(f'  - [FAIL] 缺依赖表 {WORK_ORDERS_TABLE}（需先执行 v161）')
             return False
 
         for name, definition in NEW_COLUMNS:
@@ -206,11 +206,11 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
                 print(f'  - [ADD] 索引 {name}')
 
         conn.commit()
-        print('[v157] 迁移提交完成')
+        print('[v163] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v157] 失败: %s' % e)
+        print('[v163] 失败: %s' % e)
         return False
     finally:
         conn.close()
@@ -218,29 +218,29 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v157 verify] DB 不存在: %s' % db_path)
+        print('[v163 verify] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
         ok = True
         if not _table_exists(conn, WORK_ORDERS_TABLE):
-            print('[v157 verify] FAIL: 缺表 %s' % WORK_ORDERS_TABLE)
+            print('[v163 verify] FAIL: 缺表 %s' % WORK_ORDERS_TABLE)
             ok = False
         else:
             have = _columns(conn, WORK_ORDERS_TABLE)
             for name, _definition in NEW_COLUMNS:
                 if name not in have:
-                    print('[v157 verify] FAIL: 缺列 %s.%s'
+                    print('[v163 verify] FAIL: 缺列 %s.%s'
                           % (WORK_ORDERS_TABLE, name))
                     ok = False
             for column in REBUILD_COLUMNS:
                 if column in have and _notnull(conn, WORK_ORDERS_TABLE, column):
-                    print('[v157 verify] FAIL: 列 %s.%s 仍 NOT NULL'
+                    print('[v163 verify] FAIL: 列 %s.%s 仍 NOT NULL'
                           % (WORK_ORDERS_TABLE, column))
                     ok = False
 
         if not _table_exists(conn, COMPONENTS_TABLE):
-            print('[v157 verify] FAIL: 缺表 %s' % COMPONENTS_TABLE)
+            print('[v163 verify] FAIL: 缺表 %s' % COMPONENTS_TABLE)
             ok = False
         else:
             required = ('work_order_id', 'structure_id', 'structure_line_id',
@@ -249,16 +249,16 @@ def verify(db_path: Path) -> bool:
             have = _columns(conn, COMPONENTS_TABLE)
             for column in required:
                 if column not in have:
-                    print('[v157 verify] FAIL: 缺列 %s.%s'
+                    print('[v163 verify] FAIL: 缺列 %s.%s'
                           % (COMPONENTS_TABLE, column))
                     ok = False
 
         for name, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print('[v157 verify] FAIL: 缺索引 %s' % name)
+                print('[v163 verify] FAIL: 缺索引 %s' % name)
                 ok = False
 
-        print('[v157 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v163 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -266,11 +266,11 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v157 rollback] DB 不存在: %s' % db_path)
+        print('[v163 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v157 rollback] 开始回滚')
+        print('[v163 rollback] 开始回滚')
         for name, _sql in INDEXES:
             if _index_exists(conn, name):
                 conn.execute(f'DROP INDEX {name}')
@@ -295,11 +295,11 @@ def rollback(db_path: Path) -> bool:
                 print(f'  - [KEEP] 列 {WORK_ORDERS_TABLE}.{name} 无法删除（SQLite 限制），保留残留列')
 
         conn.commit()
-        print('[v157 rollback] 完成')
+        print('[v163 rollback] 完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v157 rollback] 失败: %s' % e)
+        print('[v163 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()

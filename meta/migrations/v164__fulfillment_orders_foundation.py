@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v158] 履约单 + 履约路由规则（含 4 条默认路由种子）
+"""[v164] 履约单 + 履约路由规则（含 4 条默认路由种子）
 
 依据:
   docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.18.3 / §10.18.6
@@ -141,11 +141,11 @@ def _seed_default_rules(conn: sqlite3.Connection) -> None:
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print(f'[v158] DB 不存在: {db_path}')
+        print(f'[v164] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v158] 开始: 履约单 + 履约路由规则')
+        print('[v164] 开始: 履约单 + 履约路由规则')
 
         for name, ddl in TABLES:
             if _table_exists(conn, name):
@@ -164,11 +164,11 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
         _seed_default_rules(conn)
 
         conn.commit()
-        print('[v158] 迁移提交完成')
+        print('[v164] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v158] 失败: %s' % e)
+        print('[v164] 失败: %s' % e)
         return False
     finally:
         conn.close()
@@ -176,7 +176,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v158 verify] DB 不存在: %s' % db_path)
+        print('[v164 verify] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -193,18 +193,18 @@ def verify(db_path: Path) -> bool:
 
         for table, columns in required_columns.items():
             if not _table_exists(conn, table):
-                print('[v158 verify] FAIL: 缺表 %s' % table)
+                print('[v164 verify] FAIL: 缺表 %s' % table)
                 ok = False
                 continue
             have = _columns(conn, table)
             for column in columns:
                 if column not in have:
-                    print('[v158 verify] FAIL: 缺列 %s.%s' % (table, column))
+                    print('[v164 verify] FAIL: 缺列 %s.%s' % (table, column))
                     ok = False
 
         for name, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print('[v158 verify] FAIL: 缺索引 %s' % name)
+                print('[v164 verify] FAIL: 缺索引 %s' % name)
                 ok = False
 
         if _table_exists(conn, RULES_TABLE):
@@ -214,10 +214,10 @@ def verify(db_path: Path) -> bool:
                     f'SELECT id FROM {RULES_TABLE} WHERE workflow_key = ?',
                     (workflow_key,)).fetchone()
                 if not row:
-                    print('[v158 verify] FAIL: 缺种子规则 %s' % workflow_key)
+                    print('[v164 verify] FAIL: 缺种子规则 %s' % workflow_key)
                     ok = False
 
-        print('[v158 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v164 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -225,11 +225,11 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v158 rollback] DB 不存在: %s' % db_path)
+        print('[v164 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v158 rollback] 开始回滚')
+        print('[v164 rollback] 开始回滚')
         for name, _sql in INDEXES:
             if _index_exists(conn, name):
                 conn.execute(f'DROP INDEX {name}')
@@ -245,11 +245,11 @@ def rollback(db_path: Path) -> bool:
                 print(f'  - [SKIP] 表 {name} 不存在')
 
         conn.commit()
-        print('[v158 rollback] 完成')
+        print('[v164 rollback] 完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v158 rollback] 失败: %s' % e)
+        print('[v164 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()
