@@ -1,0 +1,323 @@
+# SLA 里程碑 (SLA Milestone) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6
+#
+# 定位: 单工单的 SLA 计时实例（首响 / 解决），由 service_events 推进
+#       （R-ST-5：工单状态不得直写里程碑）。
+#
+# 状态: Pending → Running → Warned → Met / Breached；Running ↔ Paused。
+# 唯一性: (work_order_id, milestone_type) 唯一。
+
+id: sla_milestone
+name: SLA 里程碑
+table_name: sla_milestones
+description: SLA 里程碑（首响 / 解决计时实例）
+display_name_field: id
+parent_object: work_order
+
+hierarchy:
+  parent_field: work_order_id
+
+semantics:
+  meaning: SLA 里程碑
+  category: core_entity
+  business_key: []
+  aliases:
+    - SLA 里程碑
+    - SLA Milestone
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_order_id
+    name: 工单
+    type: integer
+    db_column: work_order_id
+    required: true
+    description: 所属工单（父字段）
+    semantics:
+      meaning: 所属工单
+      display:
+        type: association
+        target_type: work_order
+        display_field: work_order_no
+    ui:
+      widget: select
+      relation: work_order
+      hidden_in_form: true
+
+  - id: milestone_type
+    name: 里程碑类型
+    type: string
+    db_column: milestone_type
+    required: true
+    max_length: 20
+    description: 里程碑类型（first_response 首响 / resolution 解决）
+    enum_values:
+      - value: first_response
+        label: 首次响应
+        color: primary
+        category: active
+        is_initial: true
+      - value: resolution
+        label: 解决
+        color: success
+        category: active
+    semantics:
+      meaning: 里程碑类型
+      filterable: true
+      filter_type: enum
+      filter_label: 里程碑类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: state
+    name: 里程碑状态
+    type: string
+    db_column: state
+    required: true
+    default: Pending
+    description: 里程碑状态（Pending → Running → Warned → Met / Breached；Running ↔ Paused）
+    enum_values:
+      - value: Pending
+        label: 待开始
+        color: info
+        category: draft
+        is_initial: true
+      - value: Running
+        label: 计时中
+        color: primary
+        category: active
+      - value: Paused
+        label: 已暂停
+        color: warning
+        category: active
+      - value: Warned
+        label: 已警告
+        color: warning
+        category: active
+      - value: Met
+        label: 已达成
+        color: success
+        category: inactive
+      - value: Breached
+        label: 已超期
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 里程碑状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: due_at
+    name: 到期时间
+    type: datetime
+    db_column: due_at
+    nullable: true
+    description: 到期时间（业务日历推进，禁自然日）
+    semantics:
+      meaning: 里程碑到期时间
+      filterable: true
+      filter_type: date
+      filter_label: 到期时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: warn_at
+    name: 警告时间
+    type: datetime
+    db_column: warn_at
+    nullable: true
+    description: 警告时间（到期前 N 分钟，业务日历推进）
+    semantics:
+      meaning: 里程碑警告时间
+    ui:
+      widget: datetime
+
+  - id: started_at
+    name: 开始时间
+    type: datetime
+    db_column: started_at
+    nullable: true
+    description: 计时开始时间（= 工单起算点）
+    semantics:
+      meaning: 里程碑开始计时时间
+    ui:
+      widget: datetime
+
+  - id: paused_total_minutes
+    name: 累计暂停（分钟）
+    type: integer
+    db_column: paused_total_minutes
+    required: true
+    default: 0
+    description: 累计暂停分钟数（R-ST-4 恢复时累加并顺延 due_at）
+    semantics:
+      meaning: 累计暂停业务分钟
+    ui:
+      widget: number
+
+  - id: completed_at
+    name: 完成时间
+    type: datetime
+    db_column: completed_at
+    nullable: true
+    description: 达成时间（Met / Breached 时写入）
+    semantics:
+      meaning: 里程碑完成时间
+    ui:
+      widget: datetime
+
+  - id: warned_at
+    name: 警告时间点
+    type: datetime
+    db_column: warned_at
+    nullable: true
+    description: 实际触发警告的时间
+    semantics:
+      meaning: 首次触发警告的时间
+    ui:
+      widget: datetime
+
+  - id: breached_at
+    name: 超期时间点
+    type: datetime
+    db_column: breached_at
+    nullable: true
+    description: 实际判定超期的时间
+    semantics:
+      meaning: 判定超期的时间
+    ui:
+      widget: datetime
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [work_order_id]
+    name: idx_sla_milestone_work_order
+  - fields: [work_order_id, milestone_type]
+    unique: true
+    name: uq_sla_milestone
+
+relations:
+  - id: sla_milestone_to_work_order
+    name: 所属工单
+    type: reference
+    target: work_order
+    source_field: work_order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属工单引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: SLA 里程碑
+    columns:
+      - field: milestone_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: state
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: due_at
+        width: 150
+      - field: warn_at
+        width: 150
+      - field: paused_total_minutes
+        width: 130
+      - field: completed_at
+        width: 150
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: due_at
+      order: asc
+  form:
+    title: SLA 里程碑
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [milestone_type, state]
+      - title: 计时
+        columns:
+          - fields: [due_at, warn_at]
+          - fields: [started_at, paused_total_minutes]
+      - title: 结算
+        columns:
+          - fields: [completed_at, warned_at, breached_at]
+  detail:
+    facets:
+      - title: 里程碑信息
+        id: sla_milestone_basic
+        type: fieldGroup
+        fields:
+          - milestone_type
+          - state
+          - due_at
+          - warn_at
+          - started_at
+          - paused_total_minutes
+          - completed_at
+          - warned_at
+          - breached_at
+          - created_at
+          - updated_at

@@ -6,8 +6,8 @@
 #   UI 折叠在订单内（child_sections 第二段），无独立菜单。
 #
 # 本波口径:
-#   ① 三种 schedule_kind 一次声明，启用 delivery 与 billing；
-#      service 由守卫规则 SCHEDULE_KIND_NOT_ENABLED 拒绝。
+#   ① 三种 schedule_kind 全部启用（delivery / billing / service）；
+#      service 计划行由 B6 服务工单（work_orders）接线，必填 service_visit_no。
 #   ② 不建任何 DOC_FLOW 规则（交货单 BO 尚未存在）。
 #   ③ 数量只有一个量 promised_qty（承诺量），单位 = 订单行 uom_id；
 #      已交量靠派生边聚合，不放 shipped_qty。
@@ -208,7 +208,7 @@ fields:
     db_column: schedule_kind
     required: true
     max_length: 20
-    description: 计划类型（本波启用 delivery / billing，service 未启用）
+    description: 计划类型（delivery 交货 / billing 开票 / service 服务，三种均已启用）
     enum_values:
       - value: delivery
         label: 交货计划
@@ -222,7 +222,7 @@ fields:
       - value: service
         label: 服务计划
         color: warning
-        category: inactive
+        category: active
     semantics:
       meaning: 计划行的业务类型
       filterable: true

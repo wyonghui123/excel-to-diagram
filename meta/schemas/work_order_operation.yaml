@@ -1,0 +1,286 @@
+# 工单工序 (Work Order Operation) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.15
+#
+# 定位: work_order 内部工序（1:N，用于多次上门 / 多道处置）。
+#       与批次 4 的 tasks（跨单据编排节点）区分：本表一定消耗资源、
+#       按工单模板顺序执行，不参与跨单据依赖。
+#
+# 父字段: work_order_id（挂 work_orders，子表通过 work_order.yaml 的 child_sections 挂载）。
+# 唯一性: (work_order_id, seq) 唯一。
+
+id: work_order_operation
+name: 工单工序
+table_name: work_order_operations
+description: 工单内部工序（多次上门 / 多道处置）
+display_name_field: id
+parent_object: work_order
+
+hierarchy:
+  parent_field: work_order_id
+
+semantics:
+  meaning: 工单工序
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 工单工序
+    - 作业工序
+    - Work Order Operation
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_order_id
+    name: 工单
+    type: integer
+    db_column: work_order_id
+    required: true
+    description: 所属工单（父字段）
+    semantics:
+      meaning: 所属工单
+      display:
+        type: association
+        target_type: work_order
+        display_field: work_order_no
+    ui:
+      widget: select
+      relation: work_order
+      hidden_in_form: true
+
+  - id: seq
+    name: 工序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 工序顺序号（同一工单内唯一）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 0
+    semantics:
+      meaning: 工序顺序
+      filterable: true
+      filter_type: number
+      filter_label: 工序号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: work_center_id
+    name: 工作中心
+    type: integer
+    db_column: work_center_id
+    nullable: true
+    description: 工作中心（批次 5 建表前可空）
+    semantics:
+      meaning: 工作中心
+      display:
+        type: association
+        target_type: work_center
+        display_field: name
+    ui:
+      widget: select
+      relation: work_center
+      clearable: true
+
+  - id: operation_name
+    name: 工序名称
+    type: string
+    db_column: operation_name
+    required: true
+    max_length: 100
+    description: 工序名称（如 上门诊断 / 更换配件）
+    semantics:
+      meaning: 工序名称
+      data_category: text
+    ui:
+      widget: input
+
+  - id: setup_minutes
+    name: 准备工时
+    type: number
+    db_column: setup_minutes
+    nullable: true
+    description: 准备工时（分钟）
+    semantics:
+      meaning: 工序准备工时
+    ui:
+      widget: number
+
+  - id: run_minutes
+    name: 执行工时
+    type: number
+    db_column: run_minutes
+    nullable: true
+    description: 执行工时（分钟）
+    semantics:
+      meaning: 工序执行工时
+    ui:
+      widget: number
+
+  - id: required_skill
+    name: 所需技能
+    type: string
+    db_column: required_skill
+    nullable: true
+    max_length: 100
+    description: 所需技能（technician / engineer / consultant 等）
+    semantics:
+      meaning: 工序所需技能
+      data_category: text
+
+  - id: status
+    name: 工序状态
+    type: string
+    db_column: status
+    required: true
+    default: pending
+    description: 工序状态
+    enum_values:
+      - value: pending
+        label: 待开始
+        color: info
+        category: draft
+        is_initial: true
+      - value: running
+        label: 进行中
+        color: primary
+        category: active
+      - value: completed
+        label: 已完成
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 工序状态
+      filterable: true
+      filter_type: enum
+      filter_label: 工序状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [work_order_id]
+    name: idx_work_order_operation_work_order
+  - fields: [work_order_id, seq]
+    unique: true
+    name: uq_work_order_operation_seq
+
+relations:
+  - id: work_order_operation_to_work_order
+    name: 所属工单
+    type: reference
+    target: work_order
+    source_field: work_order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属工单引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 工单工序
+    columns:
+      - field: seq
+        width: 90
+      - field: operation_name
+        width: 180
+      - field: work_center_id
+        width: 140
+      - field: setup_minutes
+        width: 110
+      - field: run_minutes
+        width: 110
+      - field: required_skill
+        width: 130
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 工序信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [seq, operation_name, status]
+      - title: 资源与工时
+        columns:
+          - fields: [work_center_id, required_skill]
+          - fields: [setup_minutes, run_minutes]
+  detail:
+    facets:
+      - title: 工序信息
+        id: work_order_operation_basic
+        type: fieldGroup
+        fields:
+          - seq
+          - operation_name
+          - work_center_id
+          - required_skill
+          - setup_minutes
+          - run_minutes
+          - status
+          - created_at
+          - updated_at

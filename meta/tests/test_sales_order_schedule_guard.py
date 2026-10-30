@@ -122,12 +122,21 @@ def _rule(excinfo):
 
 # ---------------- 单条规则 ----------------
 
-def test_kind_not_enabled():
-    """R-SCH-10：service 已声明但本波未启用。"""
+def test_kind_not_enabled(monkeypatch):
+    """R-SCH-10：未启用的 kind 直接拒绝（回退门控到仅 delivery/billing）。"""
+    monkeypatch.setattr(guard_module, 'SCHEDULE_KINDS_ENABLED',
+                        ('delivery', 'billing'))
     with pytest.raises(SalesOrderGuardError) as exc:
         SalesOrderGuardService(_ds()).validate_schedule_write(
             _create(schedule_kind='service'))
     assert _rule(exc) == 'SCHEDULE_KIND_NOT_ENABLED'
+
+
+def test_all_kinds_enabled():
+    """R-SCH-10：三 kind 全部启用，service 不再被门控拒绝。"""
+    SalesOrderGuardService(_ds()).validate_schedule_write(
+        _create(schedule_kind='service', promised_qty=None,
+                service_visit_no=1))
 
 
 def test_promised_date_required():
@@ -219,10 +228,8 @@ def test_plant_inherited_from_line():
         _create(line_id=102, order_id=10, plant_location_id=None))
 
 
-def test_service_visit_no_required(monkeypatch):
+def test_service_visit_no_required():
     """R-SCH-4：service 计划行必须填写服务次数。"""
-    monkeypatch.setattr(guard_module, 'SCHEDULE_KINDS_ENABLED',
-                        ('delivery', 'billing', 'service'))
     with pytest.raises(SalesOrderGuardError) as exc:
         SalesOrderGuardService(_ds()).validate_schedule_write(
             _create(schedule_kind='service', promised_qty=None,

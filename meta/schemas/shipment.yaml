@@ -1,0 +1,673 @@
+# 交货单头 (Shipment / Delivery Note) — 销售订单波次 3 / B1
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.2 / §10.3 / §10.4
+#       docs/superpowers/specs/2026-10-29-so-wave3/batch3_fulfillment_research.md §2
+#
+# 定位: 交付事实单据（交货单头）。行见 shipment_line；行唯一挂载点是
+#       sales_order_schedules（schedule_kind='delivery'），不直接挂订单行。
+#
+# 设计口径:
+#   ① 单据类型复用 type_definitions（scope_bo='shipment' + level='header'），
+#      不另建对象；delivery_no 由 shipment_service 取号（无独立编号服务）。
+#   ② 地址 / 承运商为创建时快照（R-DN-6），主数据变更不回写。
+#   ③ delivered_qty 落在 sales_order_schedules（累计交付量），
+#      shipment 侧不留冗余合计，避免双写事实。
+#   ④ fulfillment_status 仍由 sales_order_fulfillment_service 唯一派生（INV-1），
+#      本对象不写该字段。
+#
+# 服务层不变量（YAML 表达不了的，由 shipment_service 强制）:
+#   R-DN-0 行 schedule_id 必填，且计划行 schedule_kind='delivery'、
+#          状态 ∈ {planned, confirmed}；否则 DN_SCHEDULE_INVALID
+#   R-DN-1 行 qty > 0 且 <= promised_qty - delivered_qty；否则 DN_QTY_EXCEED
+#   R-DN-2 仅 staged 可 ship confirm；仅 draft/released 可取消；否则 DN_STATE_INVALID
+#   R-DN-3 ship confirm 幂等：已 shipped 再次确认直接返回成功，不重复累加
+#   R-DN-4 空单据（0 行）禁止 ship confirm；否则 DN_EMPTY
+#   R-DN-5 同一计划行可挂多张交货单（不做唯一约束）
+#   R-DN-6 头/行地址、承运商创建时快照，主数据变更不回写
+#   R-DN-7 已 shipped / delivered 的行禁改 qty / schedule_id；否则 DN_LINE_LOCKED
+#   R-DN-8 已发运单据不可删除；否则 DN_DELETE_FORBIDDEN
+
+id: shipment
+name: 交货单
+table_name: shipments
+description: 交货单头（交货行见 shipment_line）
+display_name_field: delivery_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 交货单
+  category: business_document
+  business_key: [delivery_no]
+  aliases:
+    - 交货单
+    - 送货单
+    - 发运单
+    - Delivery Note
+    - Shipment
+
+deletion_policy:
+  # 事实单据：已发运不可删（R-DN-8 服务层强制）；草稿删除时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - shipment_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号由 shipment_service._next_delivery_no() 生成后回填；
+  # 界面只读，用户不手工录入（W0-R1 同口径：生成后不可修改）。
+  - id: delivery_no
+    name: 交货单号
+    type: string
+    db_column: delivery_no
+    required: true
+    max_length: 32
+    description: 交货单编号（业务键，格式 <ORG>-DN-<yyyyMM>-<seq>，生成后不可修改）
+    semantics:
+      meaning: 交货单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: order_id
+    name: 来源订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 来源销售订单（创建时必填，发运后不可改）
+    semantics:
+      meaning: 来源销售订单
+      display:
+        type: association
+        target_type: sales_order
+        display_field: order_no
+      filterable: true
+      filter_type: relation
+      filter_label: 来源订单
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order
+        value_field: id
+        display_field: order_no
+        code_field: order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{order_no}"
+        columns:
+          - field: order_no
+            label: 订单编号
+            width: 160
+          - field: order_date
+            label: 订单日期
+            width: 120
+    ui:
+      widget: value_help
+      relation: sales_order
+      multiple: false
+
+  - id: ship_from_location_id
+    name: 发货库位
+    type: integer
+    db_column: ship_from_location_id
+    required: true
+    description: 发货库位（默认取计划行 plant_location_id）
+    semantics:
+      meaning: 发货库位
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 库位编码
+            width: 140
+          - field: name
+            label: 库位名称
+            width: 200
+    ui:
+      widget: value_help
+      relation: location
+      multiple: false
+
+  - id: ship_to_party_id
+    name: 收货方
+    type: integer
+    db_column: ship_to_party_id
+    nullable: true
+    description: 收货方往来单位；空 = 订单抬头送达方
+    semantics:
+      meaning: 收货方往来单位
+      display:
+        type: association
+        target_type: party
+        display_field: name
+        placeholder: "同订单送达方"
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 往来单位
+            width: 220
+    ui:
+      widget: value_help
+      relation: party
+      multiple: false
+      clearable: true
+
+  # R-DN-6：创建时固化，主数据后续变更不回写
+  - id: ship_to_address_text
+    name: 收货地址快照
+    type: string
+    db_column: ship_to_address_text
+    required: true
+    max_length: 500
+    description: 收货地址文本快照（创建时固化，不随主数据变更）
+    semantics:
+      meaning: 收货地址文本快照
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: carrier_name
+    name: 承运商
+    type: string
+    db_column: carrier_name
+    nullable: true
+    max_length: 100
+    description: 承运商名称快照
+    semantics:
+      meaning: 承运商名称快照
+      data_category: text
+
+  - id: tracking_no
+    name: 运单号
+    type: string
+    db_column: tracking_no
+    nullable: true
+    max_length: 64
+    description: 承运商运单号
+    semantics:
+      meaning: 承运商运单号
+      data_category: code
+      searchable: true
+
+  - id: waybill_no
+    name: 发货单号
+    type: string
+    db_column: waybill_no
+    nullable: true
+    max_length: 64
+    description: 内部发货/装箱单号
+    semantics:
+      meaning: 内部发货单号
+      data_category: code
+
+  - id: planned_ship_date
+    name: 计划发运日
+    type: date
+    db_column: planned_ship_date
+    nullable: true
+    description: 计划发运日期；默认取最早计划行 promised_date
+    semantics:
+      meaning: 计划发运日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划发运日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: actual_ship_date
+    name: 实际发运时间
+    type: datetime
+    db_column: actual_ship_date
+    nullable: true
+    description: 实际发运时间（ship confirm 时写入）
+    semantics:
+      meaning: 实际发运时间
+      filterable: true
+      filter_type: date
+      filter_label: 实际发运时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: actual_arrival_date
+    name: 签收时间
+    type: datetime
+    db_column: actual_arrival_date
+    nullable: true
+    description: 签收时间（receive 时写入）
+    semantics:
+      meaning: 签收时间
+      filterable: true
+      filter_type: date
+      filter_label: 签收时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: signature_ref
+    name: 签收凭证
+    type: string
+    db_column: signature_ref
+    nullable: true
+    max_length: 200
+    description: 签收凭证引用（图片/单号/链接）
+    semantics:
+      meaning: 签收凭证引用
+      data_category: text
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 交货单状态（见 spec §10.3 状态机）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: released
+        label: 已释放
+        color: primary
+        category: active
+      - value: staged
+        label: 待发运
+        color: warning
+        category: active
+      - value: shipped
+        label: 已发运
+        color: success
+        category: active
+      - value: delivered
+        label: 已签收
+        color: success
+        category: active
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 交货单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source
+    name: 来源方式
+    type: string
+    db_column: source
+    required: true
+    default: manual
+    description: 手工建单 / 由计划行批量生成
+    enum_values:
+      - value: manual
+        label: 手工
+        color: info
+        category: active
+        is_initial: true
+      - value: auto
+        label: 自动
+        color: primary
+        category: active
+    semantics:
+      meaning: 交货单来源方式
+      filterable: true
+      filter_type: enum
+      filter_label: 来源方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 500
+    description: 备注
+    semantics:
+      meaning: 交货单备注
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# 状态机（B1）：draft → released → staged → shipped → delivered → closed；
+# shipped 之前可 cancelled。迁移由平台状态接口按 PUT status 执行；
+# 带跨表副作用的三段（shipped / delivered / cancelled）由
+# shipment_guard_interceptor 委托 shipment_service 执行（delivered_qty 唯一写入口）。
+rules:
+  - id: release_shipment
+    name: 释放交货单
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: released
+    triggers: [before_update]
+    ui_hints:
+      label: 释放
+      icon: send
+      confirm_message: "释放后交货行进入拣货流程，确定要释放吗？"
+
+  - id: stage_shipment
+    name: 拣货确认
+    type: state_transition
+    state_field: status
+    from_states: [released]
+    to_state: staged
+    triggers: [before_update]
+    ui_hints:
+      label: 拣货确认
+      icon: check
+      confirm_message: "确认拣货完成并装箱，确定继续吗？"
+
+  - id: ship_shipment
+    name: 发运确认
+    type: state_transition
+    state_field: status
+    from_states: [staged]
+    to_state: shipped
+    triggers: [before_update]
+    ui_hints:
+      label: 发运确认
+      icon: send
+      highlight: true
+      confirm_message: "发运确认将回写计划行已交付量且不可撤销，确定发运吗？"
+
+  - id: receive_shipment
+    name: 签收
+    type: state_transition
+    state_field: status
+    from_states: [shipped]
+    to_state: delivered
+    triggers: [before_update]
+    ui_hints:
+      label: 签收
+      icon: check_circle
+      confirm_message: "确认客户已签收，确定吗？"
+
+  - id: close_shipment
+    name: 关闭交货单
+    type: state_transition
+    state_field: status
+    from_states: [delivered]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: check_circle
+      confirm_message: "关闭后单据归档，确定关闭吗？"
+
+  - id: cancel_shipment
+    name: 取消交货单
+    type: state_transition
+    state_field: status
+    from_states: [draft, released]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后交货单与交货行一并作废，确定取消吗？"
+
+indexes:
+  - fields: [delivery_no]
+    unique: true
+    name: uq_shipment_delivery_no
+  # 列表按订单 + 状态筛选的主路径
+  - fields: [order_id, status]
+    name: idx_shipment_order_status
+
+relations:
+  - id: shipment_to_order
+    name: 来源订单
+    type: reference
+    target: sales_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 来源销售订单引用（真外键）
+  - id: shipment_to_location
+    name: 发货库位
+    type: reference
+    target: location
+    source_field: ship_from_location_id
+    target_field: id
+    cardinality: N:1
+    description: 发货库位引用
+  - id: shipment_to_party
+    name: 收货方
+    type: reference
+    target: party
+    source_field: ship_to_party_id
+    target_field: id
+    cardinality: N:1
+    description: 收货方往来单位引用（可空）
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 交货单
+    columns:
+      - field: delivery_no
+        width: 160
+        sortable: true
+      - field: order_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: ship_to_party_id
+        width: 180
+      - field: planned_ship_date
+        width: 130
+        sortable: true
+      - field: actual_ship_date
+        width: 150
+      - field: carrier_name
+        width: 140
+      - field: tracking_no
+        width: 150
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: source
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: delivery_no
+      order: desc
+    actions:
+      - id: create
+        label: 新建交货单
+        icon: plus
+        type: primary
+        permission: shipment:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+      - id: print
+        label: 打印
+        icon: print
+        type: default
+  form:
+    title: 交货单信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [delivery_no, order_id, status]
+          - fields: [source, ship_from_location_id]
+      - title: 收货信息
+        columns:
+          - fields: [ship_to_party_id]
+          - fields: [ship_to_address_text]
+      - title: 发运信息
+        columns:
+          - fields: [planned_ship_date, actual_ship_date]
+          - fields: [carrier_name, tracking_no]
+          - fields: [waybill_no, actual_arrival_date]
+          - fields: [signature_ref]
+      - title: 备注
+        columns:
+          - fields: [remark]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    facets:
+      - title: 基本信息
+        id: shipment_basic
+        type: fieldGroup
+        fields:
+          - delivery_no
+          - order_id
+          - status
+          - source
+          - ship_from_location_id
+      - title: 收货与发运
+        id: shipment_logistics
+        type: fieldGroup
+        fields:
+          - ship_to_party_id
+          - ship_to_address_text
+          - planned_ship_date
+          - actual_ship_date
+          - actual_arrival_date
+          - carrier_name
+          - tracking_no
+          - waybill_no
+          - signature_ref
+          - remark
+      - title: 系统信息
+        id: shipment_system
+        type: fieldGroup
+        fields:
+          - created_at
+          - updated_at
+
+  # 交货行子表：父字段由 shipment_line.delivery_id 承载
+  # （spec 固定列名 delivery_id，与平台默认 {父对象}_id 不同，
+  #  子表列因此在 list 里显式声明 delivery_id，不依赖平台推导）
+  child_sections:
+    - child_object: shipment_line
+      title: 交货行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

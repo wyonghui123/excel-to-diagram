@@ -225,12 +225,12 @@ def test_billing_percent_sum_60_plus_50_rejected():
 
 # ---------------- V-A1 同一行 delivery + billing + service ----------------
 
-def test_same_line_delivery_billing_enabled_service_still_blocked():
-    """V-A1：同一订单行可同时排 delivery 与 billing，service 仍未启用。
+def test_same_line_delivery_billing_service_all_enabled():
+    """V-A1：同一订单行可同时排 delivery / billing / service（三 kind 全启用）。
 
     delivery：promised_qty=3（行 qty=10）、显式发货点；
     billing：收款比例 30、收款日；
-    service：kind 门控先于服务次数字段校验，直接 SCHEDULE_KIND_NOT_ENABLED。
+    service：服务次数 1，门控已解禁，合法通过。
     """
     guard = SalesOrderGuardService(_ds())
     line_id = 100
@@ -266,6 +266,4 @@ def test_same_line_delivery_billing_enabled_service_still_blocked():
         'milestone_code': None,
         'status': 'planned',
     }
-    with pytest.raises(SalesOrderGuardError) as exc:
-        guard.validate_schedule_write(service)
-    assert _rule(exc) == 'SCHEDULE_KIND_NOT_ENABLED'
+    guard.validate_schedule_write(service)

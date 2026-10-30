@@ -9,7 +9,8 @@
         无 delivery 计划行 → 行类型 `delivery_relevant` 为真则 `not_started`，
         否则 `not_applicable`（事实优先于配置，仅作历史数据兜底）；
         有 completed 且无 planned/confirmed → `fulfilled`；
-        有 planned/confirmed 且无 completed → `not_started`；两者都有 → `partial`。
+        有 planned/confirmed 且无 completed → `not_started`；两者都有 → `partial`；
+        无 completed 但存在 delivered_qty > 0（部分交付未兑现）→ `partial`（§10.4 D10）。
   · 抬头：只看 active 行（`status IN ('open','closed')`）。
         无任何行 → `not_started`；无 active 行 → `voided`；
         active 行全为 `not_applicable` → `not_applicable`；
@@ -275,6 +276,9 @@ class SalesOrderFulfillmentService:
             return FULFILL_NOT_STARTED if row.get('delivery_relevant', 1) \
                 else FULFILL_NA
         if not row.get('done_cnt'):
+            # §10.4：存在交付量但计划行未 completed（部分交付）→ partial
+            if row.get('delivered_any'):
+                return FULFILL_PARTIAL
             return FULFILL_NOT_STARTED
         if not row.get('pending_cnt'):
             return FULFILL_DONE
@@ -319,7 +323,9 @@ class SalesOrderFulfillmentService:
             '       COALESCE(SUM(CASE WHEN s.status IN (?, ?) THEN 1 ELSE 0 END), 0) '
             '           AS pending_cnt, '
             '       COALESCE(SUM(CASE WHEN s.status <> ? THEN 1 ELSE 0 END), 0) '
-            '           AS active_cnt '
+            '           AS active_cnt, '
+            '       COALESCE(MAX(CASE WHEN COALESCE(s.delivered_qty, 0) > 0 '
+            '                    THEN 1 ELSE 0 END), 0) AS delivered_any '
             'FROM %s l '
             'LEFT JOIN %s t ON t.id = l.line_type_id '
             'LEFT JOIN %s s ON s.line_id = l.id AND s.schedule_kind = \'delivery\' '

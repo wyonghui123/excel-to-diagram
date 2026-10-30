@@ -1,0 +1,258 @@
+# SLA 覆盖 (SLA Coverage) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6
+#
+# 定位: SLA 覆盖模板（生效区间 + 组织 + 业务日历）。阈值规则落子表
+#       sla_coverage_rules；里程碑实例落 sla_milestones。
+#       `org_id` 为空 = 全局覆盖；`calendar_id` 为空 = 标准周（周一至周五）。
+
+id: sla_coverage
+name: SLA 覆盖
+table_name: sla_coverages
+description: SLA 覆盖模板（生效区间 / 组织 / 业务日历）
+display_name_field: name
+
+semantics:
+  meaning: SLA 覆盖
+  category: core_entity
+  business_key: [name]
+  aliases:
+    - SLA 覆盖
+    - 服务等级覆盖
+    - SLA Coverage
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: sla_coverage_rules
+      foreign_key: coverage_id
+      message: 该覆盖存在 SLA 规则，请先删除规则后再删除
+    - table: work_orders
+      foreign_key: coverage_id
+      message: 该覆盖已被工单引用，不能删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: name
+    name: 覆盖名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 覆盖名称（如 标准服务 SLA / 金牌客户 SLA）
+    semantics:
+      meaning: 覆盖显示名称
+      display_name: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 空 = 全局覆盖（对所有组织生效）
+  - id: org_id
+    name: 组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 适用组织（空 = 全局）
+    semantics:
+      meaning: 适用组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "全局（不限组织）"
+    ui:
+      widget: select
+      relation: org
+      clearable: true
+
+  # 空 = 标准周（周一至周五，无例外日）
+  - id: calendar_id
+    name: 业务日历
+    type: integer
+    db_column: calendar_id
+    nullable: true
+    description: 业务日历（空 = 标准周模式，禁自然日推进）
+    semantics:
+      meaning: SLA 计时使用的业务日历
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+        placeholder: "标准周（周一至周五）"
+    ui:
+      widget: select
+      relation: calendar
+      clearable: true
+
+  - id: start_date
+    name: 生效开始日
+    type: date
+    db_column: start_date
+    nullable: true
+    description: 生效开始日期（空 = 不设下界）
+    semantics:
+      meaning: 覆盖生效开始日期
+      filterable: true
+      filter_type: date
+      filter_label: 生效开始日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: end_date
+    name: 生效结束日
+    type: date
+    db_column: end_date
+    nullable: true
+    description: 生效结束日期（空 = 不设上界）
+    semantics:
+      meaning: 覆盖生效结束日期
+      filterable: true
+      filter_type: date
+      filter_label: 生效结束日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: active
+    name: 启用
+    type: boolean
+    db_column: active
+    required: true
+    default: true
+    description: 是否启用（停用的覆盖不参与命中）
+    semantics:
+      meaning: 覆盖启用状态
+      filterable: true
+      filter_type: boolean
+      filter_label: 启用
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [org_id]
+    name: idx_sla_coverage_org
+  - fields: [active]
+    name: idx_sla_coverage_active
+
+relations:
+  - id: sla_coverage_to_org
+    name: 组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 适用组织引用（可空 = 全局）
+  - id: sla_coverage_to_calendar
+    name: 业务日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 业务日历引用（可空 = 标准周）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: SLA 覆盖
+    columns:
+      - field: name
+        width: 220
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: calendar_id
+        width: 160
+      - field: start_date
+        width: 130
+      - field: end_date
+        width: 130
+      - field: active
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: name
+      order: asc
+  form:
+    title: SLA 覆盖
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [name, org_id]
+          - fields: [calendar_id, active]
+      - title: 生效区间
+        columns:
+          - fields: [start_date, end_date]
+  detail:
+    facets:
+      - title: 基本信息
+        id: sla_coverage_basic
+        type: fieldGroup
+        fields:
+          - name
+          - org_id
+          - calendar_id
+          - start_date
+          - end_date
+          - active
+          - created_at
+          - updated_at

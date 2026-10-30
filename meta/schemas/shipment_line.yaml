@@ -1,0 +1,358 @@
+# 交货行 (Shipment Line) — 销售订单波次 3 / B1
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.2 / §10.3
+#
+# 定位: 交货单行，唯一挂载点是计划行（schedule_kind='delivery'）。
+#       order_line_id / item_id / uom_id 为冗余列（由 schedule_id 反查），
+#       写入时由 shipment_service 校验一致性，不一致直接拒绝。
+#
+# 父字段: delivery_id（spec 固定列名，非平台默认 shipment_id）。
+#   子表通过 shipment.yaml 的 child_sections 挂载，本对象不单独成菜单。
+#
+# 服务层不变量（由 shipment_service 强制）:
+#   R-DN-0 schedule_id 必填且计划行 schedule_kind='delivery'、
+#          状态 ∈ {planned, confirmed}
+#   R-DN-1 qty > 0 且 <= promised_qty - delivered_qty（超交拒绝 DN_QTY_EXCEED）
+#   R-DN-7 已 shipped / delivered 的行禁改 qty / schedule_id（DN_LINE_LOCKED）
+
+id: shipment_line
+name: 交货行
+table_name: shipment_lines
+description: 交货单行（挂载计划行）
+display_name_field: id
+parent_object: shipment
+
+hierarchy:
+  parent_field: delivery_id
+
+semantics:
+  meaning: 交货单行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 交货行
+    - 发货行
+    - Delivery Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: delivery_id
+    name: 交货单
+    type: integer
+    db_column: delivery_id
+    required: true
+    description: 所属交货单（父字段）
+    semantics:
+      meaning: 所属交货单
+      display:
+        type: association
+        target_type: shipment
+        display_field: delivery_no
+    ui:
+      widget: select
+      relation: shipment
+      hidden_in_form: true
+
+  # 唯一挂载点：只认 schedule_kind='delivery' 的计划行（R-DN-0）
+  - id: schedule_id
+    name: 计划行
+    type: integer
+    db_column: schedule_id
+    required: true
+    description: 计划行引用（必须 schedule_kind='delivery'，状态 planned/confirmed）
+    semantics:
+      meaning: 交付计划行
+      display:
+        type: association
+        target_type: sales_order_schedule
+        display_field: schedule_no
+      filterable: true
+      filter_type: relation
+      filter_label: 计划行
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order_schedule
+        value_field: id
+        display_field: schedule_no
+        code_field: schedule_no
+        apply_target_permissions: true
+        value_filter:
+          schedule_kind: delivery
+          status: planned,confirmed
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{schedule_no}"
+        columns:
+          - field: schedule_no
+            label: 计划行号
+            width: 120
+          - field: promised_date
+            label: 承诺日期
+            width: 130
+          - field: promised_qty
+            label: 承诺数量
+            width: 120
+    ui:
+      widget: value_help
+      relation: sales_order_schedule
+      multiple: false
+
+  - id: order_line_id
+    name: 订单行
+    type: integer
+    db_column: order_line_id
+    required: true
+    description: 冗余：由 schedule_id 反查的计划行所属订单行（不一致拒绝）
+    semantics:
+      meaning: 所属订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: sales_order_line
+      hidden_in_form: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 冗余：由订单行带出
+    semantics:
+      meaning: 物料/服务
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    ui:
+      widget: select
+      relation: item
+      hidden_in_form: true
+
+  - id: uom_id
+    name: 计量单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 冗余：由订单行带出
+    semantics:
+      meaning: 计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    ui:
+      widget: select
+      relation: uom
+      hidden_in_form: true
+
+  - id: qty
+    name: 交货数量
+    type: number
+    db_column: qty
+    required: true
+    description: 本单交付量（> 0，且不超过计划行剩余可交付量）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 本单交付数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: lot_no
+    name: 批次号
+    type: string
+    db_column: lot_no
+    nullable: true
+    max_length: 64
+    description: 批次号
+    semantics:
+      meaning: 批次号
+      data_category: code
+
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 64
+    description: 序列号
+    semantics:
+      meaning: 序列号
+      data_category: code
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 交货行状态（随头状态联动）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: staged
+        label: 待发运
+        color: warning
+        category: active
+      - value: shipped
+        label: 已发运
+        color: success
+        category: active
+      - value: delivered
+        label: 已签收
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 交货行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [delivery_id]
+    name: idx_shipment_line_delivery
+  # R-DN-5：同一计划行可挂多张交货单，故 schedule_id 不唯一
+  - fields: [schedule_id]
+    name: idx_shipment_line_schedule
+
+relations:
+  - id: shipment_line_to_delivery
+    name: 所属交货单
+    type: reference
+    target: shipment
+    source_field: delivery_id
+    target_field: id
+    cardinality: N:1
+    description: 所属交货单引用（真外键）
+  - id: shipment_line_to_schedule
+    name: 计划行
+    type: reference
+    target: sales_order_schedule
+    source_field: schedule_id
+    target_field: id
+    cardinality: N:1
+    description: 唯一挂载点（schedule_kind='delivery'）
+  - id: shipment_line_to_order_line
+    name: 订单行
+    type: reference
+    target: sales_order_line
+    source_field: order_line_id
+    target_field: id
+    cardinality: N:1
+    description: 冗余订单行引用
+
+ui_view_config:
+  # 作为交货单详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 交货行
+    columns:
+      - field: schedule_id
+        width: 140
+      - field: order_line_id
+        width: 120
+      - field: item_id
+        width: 160
+      - field: qty
+        width: 110
+      - field: uom_id
+        width: 100
+      - field: lot_no
+        width: 120
+      - field: serial_no
+        width: 120
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: id
+      order: asc
+  form:
+    title: 交货行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [schedule_id, status]
+          - fields: [qty]
+      - title: 批次与序列
+        columns:
+          - fields: [lot_no, serial_no]

@@ -290,6 +290,11 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.sales_order_guard_interceptor import SalesOrderGuardInterceptor
         bo_framework.register_interceptor(SalesOrderGuardInterceptor())
+        # [SHIPMENT 2026-10-30] 交货单守卫（P51）：抬头状态迁移委托服务（计划行
+        #   delivered_qty 回写 / 行级联）、行冗余列校验回填、删除保护；after 派生履约状态。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
+        bo_framework.register_interceptor(ShipmentGuardInterceptor())
         # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor

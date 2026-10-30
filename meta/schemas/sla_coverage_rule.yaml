@@ -1,0 +1,308 @@
+# SLA 覆盖规则 (SLA Coverage Rule) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6
+#
+# 定位: 覆盖下的阈值规则（条件列 severity / channel + 4 个阈值）。
+#       同一覆盖内 (severity, channel) 唯一（保存时校验；SQLite 唯一索引对 NULL
+#       不生效，服务层兜底），否则命中歧义 SLA_RULE_AMBIGUOUS。
+#       channel 为空 = 通配任意渠道。
+
+id: sla_coverage_rule
+name: SLA 覆盖规则
+table_name: sla_coverage_rules
+description: SLA 覆盖规则（严重度 / 渠道条件 + 首响与解决阈值）
+display_name_field: id
+parent_object: sla_coverage
+
+hierarchy:
+  parent_field: coverage_id
+
+semantics:
+  meaning: SLA 覆盖规则
+  category: core_entity
+  business_key: []
+  aliases:
+    - SLA 规则
+    - SLA Coverage Rule
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: coverage_id
+    name: SLA 覆盖
+    type: integer
+    db_column: coverage_id
+    required: true
+    description: 所属覆盖（父字段）
+    semantics:
+      meaning: 所属 SLA 覆盖
+      display:
+        type: association
+        target_type: sla_coverage
+        display_field: name
+    ui:
+      widget: select
+      relation: sla_coverage
+      hidden_in_form: true
+
+  # R-ST-1：条件列 severity 必填
+  - id: severity
+    name: 严重度
+    type: string
+    db_column: severity
+    required: true
+    max_length: 20
+    description: 适用的严重度（条件列）
+    enum_values:
+      - value: critical
+        label: 严重
+        color: danger
+        category: active
+      - value: high
+        label: 高
+        color: warning
+        category: active
+      - value: medium
+        label: 中
+        color: primary
+        category: active
+      - value: low
+        label: 低
+        color: info
+        category: inactive
+    semantics:
+      meaning: 规则适用的严重度
+      filterable: true
+      filter_type: enum
+      filter_label: 严重度
+      filter_scope: local
+    ui:
+      widget: select
+
+  # R-ST-1：channel 可空 = 通配
+  - id: channel
+    name: 渠道
+    type: string
+    db_column: channel
+    nullable: true
+    max_length: 20
+    description: 适用渠道（空 = 通配任意渠道）
+    enum_values:
+      - value: phone
+        label: 电话
+        color: info
+        category: active
+      - value: email
+        label: 邮件
+        color: info
+        category: active
+      - value: web
+        label: 门户
+        color: info
+        category: active
+      - value: onsite
+        label: 现场
+        color: info
+        category: active
+    semantics:
+      meaning: 规则适用渠道
+      filterable: true
+      filter_type: enum
+      filter_label: 渠道
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  - id: first_response_minutes
+    name: 首响时限（分钟）
+    type: integer
+    db_column: first_response_minutes
+    required: true
+    description: 首次响应时限（业务分钟）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 0
+    semantics:
+      meaning: 首次响应时限（业务分钟）
+    ui:
+      widget: number
+
+  - id: first_response_warn_minutes
+    name: 首响警告阈值（分钟）
+    type: integer
+    db_column: first_response_warn_minutes
+    nullable: true
+    description: 首响警告阈值（距到期前 N 分钟触发 Warned）
+    semantics:
+      meaning: 首次响应警告提前量
+    ui:
+      widget: number
+
+  - id: resolution_minutes
+    name: 解决时限（分钟）
+    type: integer
+    db_column: resolution_minutes
+    required: true
+    description: 解决时限（业务分钟）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 0
+    semantics:
+      meaning: 解决时限（业务分钟）
+    ui:
+      widget: number
+
+  - id: resolution_warn_minutes
+    name: 解决警告阈值（分钟）
+    type: integer
+    db_column: resolution_warn_minutes
+    nullable: true
+    description: 解决警告阈值（距到期前 N 分钟触发 Warned）
+    semantics:
+      meaning: 解决警告提前量
+    ui:
+      widget: number
+
+  - id: seq
+    name: 排序
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 规则排序（同条件多规则时展示顺序）
+    semantics:
+      meaning: 规则展示顺序
+      filterable: true
+      filter_type: number
+      filter_label: 排序
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [coverage_id]
+    name: idx_sla_coverage_rule_coverage
+  # 同一覆盖内 (severity, channel) 唯一（channel 为 NULL 时服务层兜底校验）
+  - fields: [coverage_id, severity, channel]
+    unique: true
+    name: uq_sla_coverage_rule
+
+relations:
+  - id: sla_coverage_rule_to_coverage
+    name: 所属覆盖
+    type: reference
+    target: sla_coverage
+    source_field: coverage_id
+    target_field: id
+    cardinality: N:1
+    description: 所属 SLA 覆盖引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: SLA 覆盖规则
+    columns:
+      - field: severity
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: channel
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: first_response_minutes
+        width: 140
+      - field: first_response_warn_minutes
+        width: 150
+      - field: resolution_minutes
+        width: 130
+      - field: resolution_warn_minutes
+        width: 140
+      - field: seq
+        width: 80
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: SLA 规则
+    layout: vertical
+    sections:
+      - title: 命中条件
+        columns:
+          - fields: [severity, channel]
+      - title: 阈值
+        columns:
+          - fields: [first_response_minutes, first_response_warn_minutes]
+          - fields: [resolution_minutes, resolution_warn_minutes]
+          - fields: [seq]
+  detail:
+    facets:
+      - title: 规则信息
+        id: sla_coverage_rule_basic
+        type: fieldGroup
+        fields:
+          - severity
+          - channel
+          - first_response_minutes
+          - first_response_warn_minutes
+          - resolution_minutes
+          - resolution_warn_minutes
+          - seq
+          - created_at
+          - updated_at

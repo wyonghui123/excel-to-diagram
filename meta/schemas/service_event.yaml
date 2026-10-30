@@ -1,0 +1,241 @@
+# 服务事件 (Service Event) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6 / §10.7
+#
+# 定位: 只追加的事件流（append-only），SLA 里程碑只由本表事件推进（R-ST-5）。
+#       事件 → work_orders.resolved_at → sla_milestones 结算 →
+#       sales_order_schedules.status='completed'（§10.7）。
+#
+# 索引: (work_order_id, occurred_at)。
+# 约束: 本对象没有状态迁移规则；服务层禁止改写历史事件。
+
+id: service_event
+name: 服务事件
+table_name: service_events
+description: 服务事件流（只追加，驱动 SLA 里程碑）
+display_name_field: id
+parent_object: work_order
+
+hierarchy:
+  parent_field: work_order_id
+
+semantics:
+  meaning: 服务事件
+  category: system_entity
+  business_key: []
+  aliases:
+    - 服务事件
+    - Service Event
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: false
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_order_id
+    name: 工单
+    type: integer
+    db_column: work_order_id
+    required: true
+    description: 所属工单（父字段）
+    semantics:
+      meaning: 所属工单
+      display:
+        type: association
+        target_type: work_order
+        display_field: work_order_no
+    ui:
+      widget: select
+      relation: work_order
+      hidden_in_form: true
+
+  - id: event_type
+    name: 事件类型
+    type: string
+    db_column: event_type
+    required: true
+    max_length: 32
+    description: 事件类型（create / accept / start / hold / resume / resolve / close / cancel / sla_trace）
+    enum_values:
+      - value: create
+        label: 创建
+        color: info
+        category: active
+      - value: accept
+        label: 受理
+        color: primary
+        category: active
+      - value: start
+        label: 开始
+        color: primary
+        category: active
+      - value: hold
+        label: 挂起
+        color: warning
+        category: active
+      - value: resume
+        label: 恢复
+        color: success
+        category: active
+      - value: resolve
+        label: 解决
+        color: success
+        category: active
+      - value: close
+        label: 关闭
+        color: info
+        category: inactive
+      - value: cancel
+        label: 取消
+        color: danger
+        category: inactive
+      - value: sla_trace
+        label: SLA 轨迹
+        color: info
+        category: active
+    semantics:
+      meaning: 服务事件类型
+      filterable: true
+      filter_type: enum
+      filter_label: 事件类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: occurred_at
+    name: 发生时间
+    type: datetime
+    db_column: occurred_at
+    required: true
+    description: 事件发生时间（SLA 计时事实源）
+    semantics:
+      meaning: 事件发生时间
+      filterable: true
+      filter_type: date
+      filter_label: 发生时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: actor
+    name: 操作人
+    type: string
+    db_column: actor
+    nullable: true
+    max_length: 100
+    description: 事件操作人
+    semantics:
+      meaning: 事件操作人
+      data_category: text
+
+  - id: payload
+    name: 事件载荷
+    type: json
+    db_column: payload
+    nullable: true
+    description: 事件附加数据（SLA 命中轨迹等）
+    semantics:
+      meaning: 事件附加上下文
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    nullable: true
+    max_length: 500
+    description: 备注
+    semantics:
+      meaning: 事件备注
+      data_category: text
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [work_order_id, occurred_at]
+    name: idx_service_event_work_order
+
+relations:
+  - id: service_event_to_work_order
+    name: 所属工单
+    type: reference
+    target: work_order
+    source_field: work_order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属工单引用（真外键）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 服务事件
+    columns:
+      - field: occurred_at
+        width: 150
+      - field: event_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: actor
+        width: 130
+      - field: note
+        width: 260
+    selection:
+      enabled: false
+      mode: single
+    defaultSort:
+      field: occurred_at
+      order: desc
+  form:
+    title: 服务事件
+    layout: vertical
+    sections:
+      - title: 事件信息
+        columns:
+          - fields: [event_type, occurred_at]
+          - fields: [actor, note]
+      - title: 载荷
+        columns:
+          - fields: [payload]
+  detail:
+    facets:
+      - title: 事件信息
+        id: service_event_basic
+        type: fieldGroup
+        fields:
+          - event_type
+          - occurred_at
+          - actor
+          - note
+          - payload
+          - created_at

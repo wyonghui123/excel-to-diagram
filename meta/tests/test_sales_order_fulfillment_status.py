@@ -75,6 +75,7 @@ CREATE TABLE sales_order_schedules (
     schedule_kind TEXT,
     promised_date TEXT,
     promised_qty REAL,
+    delivered_qty REAL DEFAULT 0,
     status TEXT,
     updated_at TEXT
 );
@@ -133,12 +134,13 @@ def _add_line(conn, lid, order_id, type_id=1, status='open',
 
 
 def _add_schedule(conn, sid, order_id, line_id, kind='delivery',
-                  status='planned', qty=1.0, date='2026-11-01'):
+                  status='planned', qty=1.0, date='2026-11-01',
+                  delivered=0.0):
     conn.execute(
         'INSERT INTO sales_order_schedules (id, order_id, line_id, '
-        'schedule_kind, promised_date, promised_qty, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [sid, order_id, line_id, kind, date, qty, status])
+        'schedule_kind, promised_date, promised_qty, delivered_qty, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [sid, order_id, line_id, kind, date, qty, delivered, status])
 
 
 def _value(conn, sql, params=None):
@@ -207,6 +209,28 @@ def test_cancelled_and_billing_schedules_not_counted():
     _add_line(conn, 100, 10)
     _add_schedule(conn, 1, 10, 100, status='cancelled')
     _add_schedule(conn, 2, 10, 100, kind='billing', status='completed')
+    assert SalesOrderFulfillmentService(_MemDS(conn)).recompute_line(100) \
+        == FULFILL_NOT_STARTED
+
+
+def test_line_partially_delivered_is_partial():
+    """§10.4 D10：无 completed 但 delivered_qty > 0 → partial。"""
+    conn = _db()
+    _add_line(conn, 100, 10)
+    _add_schedule(conn, 1, 10, 100, status='confirmed', qty=100.0,
+                  delivered=60.0)
+    assert SalesOrderFulfillmentService(_MemDS(conn)).recompute_line(100) \
+        == FULFILL_PARTIAL
+    assert _value(conn, 'SELECT fulfillment_status FROM sales_order_lines '
+                        'WHERE id = 100') == FULFILL_PARTIAL
+
+
+def test_line_zero_delivered_stays_not_started():
+    """§10.4 D10 回归：delivered_qty 为 0 / 空 → 仍 not_started。"""
+    conn = _db()
+    _add_line(conn, 100, 10)
+    _add_schedule(conn, 1, 10, 100, status='planned', qty=100.0,
+                  delivered=0.0)
     assert SalesOrderFulfillmentService(_MemDS(conn)).recompute_line(100) \
         == FULFILL_NOT_STARTED
 

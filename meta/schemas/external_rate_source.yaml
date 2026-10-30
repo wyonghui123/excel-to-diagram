@@ -180,6 +180,69 @@ fields:
     ui:
       widget: input
 
+  # [C1/M3 2026-10-29] 手工覆盖字段组 —— 外部取数接口占位期的唯一可用取价方式。
+  #   全组可空：空 = 不覆盖（走外部取价）；取数适配器见
+  #   meta/services/external_rate_source_stub.py（不接入 pricing_determination_service）。
+  - id: override_rate
+    name: 手工覆盖价
+    type: float
+    db_column: override_rate
+    required: false
+    nullable: true
+    description: 手工覆盖价（空 = 不覆盖，走外部取价）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 人工录入的覆盖价格
+    ui:
+      widget: input
+
+  - id: override_valid_from
+    name: 覆盖生效日
+    type: date
+    db_column: override_valid_from
+    required: false
+    nullable: true
+    description: 覆盖生效日期（YYYY-MM-DD；空 = 无起始限制）
+    semantics:
+      meaning: 手工覆盖生效日期
+      filterable: true
+      filter_type: date
+      filter_label: 覆盖生效日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: override_valid_to
+    name: 覆盖失效日
+    type: date
+    db_column: override_valid_to
+    required: false
+    nullable: true
+    description: 覆盖失效日期（YYYY-MM-DD；空 = 无结束限制）
+    semantics:
+      meaning: 手工覆盖失效日期
+      filterable: true
+      filter_type: date
+      filter_label: 覆盖失效日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: override_reason
+    name: 覆盖原因
+    type: string
+    db_column: override_reason
+    required: false
+    nullable: true
+    max_length: 200
+    description: 手工覆盖的原因说明（空 = 未填）
+    semantics:
+      meaning: 手工覆盖原因
+    ui:
+      widget: input
+
   - id: description
     name: 描述
     type: text
@@ -250,6 +313,10 @@ ui_view_config:
       - field: calendar_id
         width: 120
         type: number
+      - field: override_rate
+        width: 120
+        type: number
+        align: right
       - field: updated_at
         width: 160
         format: datetime
@@ -286,6 +353,10 @@ ui_view_config:
       - title: 取价
         columns:
           - fields: [calendar_id, fallback_rule]
+      - title: 手工覆盖
+        columns:
+          - fields: [override_rate, override_valid_from]
+          - fields: [override_valid_to, override_reason]
       - title: 其他信息
         columns:
           - fields: [description]
@@ -305,6 +376,10 @@ ui_view_config:
           - calendar_id
           - fallback_rule
           - description
+          - override_rate
+          - override_valid_from
+          - override_valid_to
+          - override_reason
 
 category_config:
   create_permission: external_rate_source:create

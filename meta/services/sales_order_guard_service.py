@@ -105,7 +105,7 @@
   R-SCH-7  delivery 必须有发货点（默认继承订单行，行为空时要求本行显式填写）
   R-SCH-8  物理删除：仅 draft 且未被派生边引用时允许
   R-SCH-9  状态流转须符合 §2.3 图，终态不可回退 / 复活
-  R-SCH-10 kind 门控：本波只有 SCHEDULE_KINDS_ENABLED（delivery / billing）可写
+  R-SCH-10 kind 门控：SCHEDULE_KINDS_ENABLED（delivery / billing / service）可写
   R-SCH-11 billing 收款比例必填且在 0..100                 —— BILLING_PERCENT_*
   R-SCH-12 billing 不得填写 plant_location_id / service_visit_no
   R-SCH-13 同一订单行 billing 比例合计 ≤ 100
@@ -233,9 +233,9 @@ _ONE_HUNDRED = Decimal('100')
 # ---------------- 计划行（R-SCH） ----------------
 SCHEDULE_OBJECT = 'sales_order_schedule'
 SCHEDULE_TABLE = 'sales_order_schedules'
-# R-SCH-10：三 kind 一次声明，本波启用 delivery / billing
+# R-SCH-10：三 kind 全部启用（service 由 B6 服务工单接线解禁）
 SCHEDULE_KINDS = ('delivery', 'billing', 'service')
-SCHEDULE_KINDS_ENABLED = ('delivery', 'billing')
+SCHEDULE_KINDS_ENABLED = ('delivery', 'billing', 'service')
 SCHEDULE_STATUSES = ('planned', 'confirmed', 'completed', 'cancelled')
 # §2.3：completed / cancelled 为终态，不可回退、不可复活
 SCHEDULE_TERMINAL = ('completed', 'cancelled')
@@ -1449,7 +1449,7 @@ class SalesOrderGuardService:
         old = old_data or {}
         kind = data.get('schedule_kind')
 
-        # R-SCH-10：kind 门控（三值已声明，本波只启用 delivery）
+        # R-SCH-10：kind 门控（三 kind 全部启用；service 由 B6 服务工单接线解禁）
         if not _is_blank(kind) and str(kind) not in SCHEDULE_KINDS_ENABLED:
             raise SalesOrderGuardError(
                 f'计划类型 {kind} 尚未启用（当前可用：'

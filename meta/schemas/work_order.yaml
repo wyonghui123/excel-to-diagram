@@ -1,0 +1,727 @@
+# 服务工单头 (Work Order) — 销售订单波次 3 / B6
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6 / §10.7 / §10.15
+#
+# 定位: 服务执行单据（作业层统一契约）。`order_type` 本波只实现 service，
+#       其余值预留给生产 / 维修 / 安装 / 保养（§10.15）。
+#       与架构元模型的 service_module（服务模块，三级业务分类）无关，勿混淆。
+#
+# 挂载点: `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）。
+#
+# 服务层不变量（YAML 表达不了的，由 work_order_service 强制）:
+#   R-ST-0 schedule_id 必填且计划行 schedule_kind='service'；否则 ST_SCHEDULE_INVALID
+#   R-ST-1 severity 必填、channel 可空通配；阈值由 sla_coverage_rules 提供
+#   R-ST-2 同一工单必须恰好命中 1 条 SLA 规则；0 / 多条不生成里程碑，
+#          写 trace 并提示 SLA_RULE_AMBIGUOUS
+#   R-ST-3 里程碑 due_at 按业务日历推进（calendars / calendar_days），禁自然日
+#   R-ST-4 进入 Waiting → 里程碑 Paused；恢复累加 paused_total_minutes 并顺延 due_at
+#   R-ST-5 里程碑只由 service_events 推进，工单状态不得直写里程碑
+#   R-ST-6 resolve 事件 → 解决里程碑 Met；超期未完成 → Breached
+#   R-ST-7 服务完成 → service 计划行 completed → service_status 重算，
+#           **不写** fulfillment_status（INV-1 唯一写入口仍归履约服务）
+#   R-ST-8 取消工单需同时把计划行置 cancelled 或改约；否则 ST_SCHEDULE_DESYNC
+
+id: work_order
+name: 服务工单
+table_name: work_orders
+description: 服务工单头（SLA 里程碑见 sla_milestone，服务事件见 service_event）
+display_name_field: work_order_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 服务工单
+  category: business_document
+  business_key: [work_order_no]
+  aliases:
+    - 服务工单
+    - 售后工单
+    - Work Order
+    - Service Order
+
+deletion_policy:
+  # 事实单据：删除时级联清工序、里程碑与服务事件（均为工单从属数据）
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - work_order_operations
+    - sla_milestones
+    - service_events
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号由 work_order_service._next_work_order_no() 生成后回填；
+  # 界面只读，用户不手工录入。
+  - id: work_order_no
+    name: 工单编号
+    type: string
+    db_column: work_order_no
+    required: true
+    unique: true
+    max_length: 32
+    description: 工单编号（业务键，格式 WO-<yyyyMM>-<seq>，生成后不可修改）
+    semantics:
+      meaning: 工单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  # §10.15：本波只实现 service，其余值预留给生产 / 维修 / 安装 / 保养
+  - id: order_type
+    name: 工单类型
+    type: string
+    db_column: order_type
+    required: true
+    default: service
+    description: 工单类型（本波启用 service，其余预留给生产作业层）
+    enum_values:
+      - value: service
+        label: 服务
+        color: primary
+        category: active
+        is_initial: true
+      - value: production
+        label: 生产
+        color: info
+        category: inactive
+      - value: repair
+        label: 维修
+        color: info
+        category: inactive
+      - value: install
+        label: 安装
+        color: info
+        category: inactive
+      - value: maintenance
+        label: 保养
+        color: info
+        category: inactive
+    semantics:
+      meaning: 工单类型（作业层统一入口）
+      filterable: true
+      filter_type: enum
+      filter_label: 工单类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  # R-ST-0：唯一挂载点，仅接受 schedule_kind='service' 的计划行
+  - id: schedule_id
+    name: 服务计划行
+    type: integer
+    db_column: schedule_id
+    required: true
+    description: 服务计划行引用（必须 schedule_kind='service'）
+    semantics:
+      meaning: 服务承诺计划行
+      display:
+        type: association
+        target_type: sales_order_schedule
+        display_field: schedule_no
+      filterable: true
+      filter_type: relation
+      filter_label: 服务计划行
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: sales_order_schedule
+        value_field: id
+        display_field: schedule_no
+        code_field: schedule_no
+        apply_target_permissions: true
+        value_filter:
+          schedule_kind: service
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{schedule_no}"
+        columns:
+          - field: schedule_no
+            label: 计划行号
+            width: 120
+          - field: promised_date
+            label: 承诺日期
+            width: 130
+    ui:
+      widget: value_help
+      relation: sales_order_schedule
+      multiple: false
+
+  - id: order_id
+    name: 来源订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 冗余：由 schedule_id 反查的来源销售订单（不一致拒绝）
+    semantics:
+      meaning: 来源销售订单
+      display:
+        type: association
+        target_type: sales_order
+        display_field: order_no
+      filterable: true
+      filter_type: relation
+      filter_label: 来源订单
+      filter_scope: local
+    ui:
+      widget: select
+      relation: sales_order
+      hidden_in_form: true
+
+  - id: order_line_id
+    name: 订单行
+    type: integer
+    db_column: order_line_id
+    required: true
+    description: 冗余：由 schedule_id 反查的计划行所属订单行
+    semantics:
+      meaning: 所属订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: sales_order_line
+      hidden_in_form: true
+
+  - id: customer_account_id
+    name: 客户
+    type: integer
+    db_column: customer_account_id
+    nullable: true
+    description: 服务客户（用于 SLA 覆盖按客户匹配，可空）
+    semantics:
+      meaning: 服务客户
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 客户
+      filter_scope: local
+    ui:
+      widget: select
+      relation: customer_account
+      clearable: true
+
+  # R-ST-1：条件列必填；阈值命中见 sla_coverage_rules
+  - id: severity
+    name: 严重度
+    type: string
+    db_column: severity
+    required: true
+    max_length: 20
+    description: 严重度（SLA 规则命中的条件列，必填）
+    enum_values:
+      - value: critical
+        label: 严重
+        color: danger
+        category: active
+      - value: high
+        label: 高
+        color: warning
+        category: active
+      - value: medium
+        label: 中
+        color: primary
+        category: active
+        is_initial: true
+      - value: low
+        label: 低
+        color: info
+        category: inactive
+    semantics:
+      meaning: 工单严重度
+      filterable: true
+      filter_type: enum
+      filter_label: 严重度
+      filter_scope: local
+    ui:
+      widget: select
+
+  # R-ST-1：channel 可空（空 = 通配，匹配任意渠道规则）
+  - id: channel
+    name: 来源渠道
+    type: string
+    db_column: channel
+    nullable: true
+    max_length: 20
+    description: 来源渠道（可空 = 通配）
+    enum_values:
+      - value: phone
+        label: 电话
+        color: info
+        category: active
+      - value: email
+        label: 邮件
+        color: info
+        category: active
+      - value: web
+        label: 门户
+        color: info
+        category: active
+      - value: onsite
+        label: 现场
+        color: info
+        category: active
+    semantics:
+      meaning: 工单来源渠道
+      filterable: true
+      filter_type: enum
+      filter_label: 来源渠道
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: "New"
+    description: 工单状态（New → In Progress → Waiting → Resolved → Closed；旁支 Cancelled）
+    enum_values:
+      - value: "New"
+        label: 新建
+        color: info
+        category: draft
+        is_initial: true
+      - value: "In Progress"
+        label: 处理中
+        color: primary
+        category: active
+      - value: "Waiting"
+        label: 等待
+        color: warning
+        category: active
+      - value: "Resolved"
+        label: 已解决
+        color: success
+        category: active
+      - value: "Closed"
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: "Cancelled"
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 工单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: coverage_id
+    name: SLA 覆盖
+    type: integer
+    db_column: coverage_id
+    nullable: true
+    description: 命中的 SLA 覆盖（R-ST-2 恰好命中 1 条时回填；空 = 未命中）
+    semantics:
+      meaning: 命中的 SLA 覆盖
+      display:
+        type: association
+        target_type: sla_coverage
+        display_field: name
+    ui:
+      widget: select
+      relation: sla_coverage
+      clearable: true
+
+  - id: asset_ref
+    name: 资产引用
+    type: string
+    db_column: asset_ref
+    nullable: true
+    max_length: 200
+    description: 服务资产引用（设备号 / 序列号，可空）
+    semantics:
+      meaning: 服务资产引用
+      data_category: code
+
+  - id: opened_at
+    name: 受理时间
+    type: datetime
+    db_column: opened_at
+    nullable: true
+    description: 工单创建（起算）时间，SLA 起算点
+    semantics:
+      meaning: 工单起算时间
+      filterable: true
+      filter_type: date
+      filter_label: 受理时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: first_response_at
+    name: 首次响应时间
+    type: datetime
+    db_column: first_response_at
+    nullable: true
+    description: 首次响应时间（受理时写入）
+    semantics:
+      meaning: 首次响应时间
+      filterable: true
+      filter_type: date
+      filter_label: 首次响应时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: resolved_at
+    name: 解决时间
+    type: datetime
+    db_column: resolved_at
+    nullable: true
+    description: 解决时间（resolve 事件写入）
+    semantics:
+      meaning: 解决时间
+      filterable: true
+      filter_type: date
+      filter_label: 解决时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: closed_at
+    name: 关闭时间
+    type: datetime
+    db_column: closed_at
+    nullable: true
+    description: 关闭时间
+    semantics:
+      meaning: 关闭时间
+      filterable: true
+      filter_type: date
+      filter_label: 关闭时间
+      filter_scope: local
+    ui:
+      widget: datetime
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# 状态机（B6）：New → In Progress → Waiting → Resolved → Closed；旁支 Cancelled。
+# 受理（accept）与开始（start）都从 New 进入 In Progress：
+#   · 受理 = 客服/调度登记并产生首次响应（side_effect 回填 first_response_at）
+#   · 开始 = 技术员进场开始作业（不重复改写首次响应）
+# Waiting ↔ In Progress 由 hold / resume 承担；SLA 里程碑随等待暂停 / 顺延。
+rules:
+  - id: accept_work_order
+    name: 受理工单
+    type: state_transition
+    state_field: status
+    from_states: ["New"]
+    to_state: "In Progress"
+    triggers: [before_update]
+    side_effects:
+      - type: set_field
+        target: first_response_at
+        value: "NOW()"
+    ui_hints:
+      label: 受理
+      icon: check
+      highlight: true
+      confirm_message: "受理后将开始 SLA 首响计时，确定受理吗？"
+
+  - id: start_work_order
+    name: 开始作业
+    type: state_transition
+    state_field: status
+    from_states: ["New"]
+    to_state: "In Progress"
+    triggers: [before_update]
+    ui_hints:
+      label: 开始
+      icon: play
+      confirm_message: "确定开始处理该工单吗？"
+
+  - id: hold_work_order
+    name: 挂起工单
+    type: state_transition
+    state_field: status
+    from_states: ["In Progress"]
+    to_state: "Waiting"
+    triggers: [before_update]
+    ui_hints:
+      label: 挂起
+      icon: pause_circle
+      confirm_message: "挂起后 SLA 计时暂停，确定挂起吗？"
+
+  - id: resume_work_order
+    name: 恢复工单
+    type: state_transition
+    state_field: status
+    from_states: ["Waiting"]
+    to_state: "In Progress"
+    triggers: [before_update]
+    ui_hints:
+      label: 恢复
+      icon: play
+      confirm_message: "恢复后 SLA 按暂停时长顺延，确定恢复吗？"
+
+  - id: resolve_work_order
+    name: 解决工单
+    type: state_transition
+    state_field: status
+    from_states: ["In Progress", "Waiting"]
+    to_state: "Resolved"
+    triggers: [before_update]
+    ui_hints:
+      label: 解决
+      icon: check_circle
+      highlight: true
+      confirm_message: "解决后将结算 SLA 里程碑并回写服务计划行，确定解决吗？"
+
+  - id: close_work_order
+    name: 关闭工单
+    type: state_transition
+    state_field: status
+    from_states: ["Resolved"]
+    to_state: "Closed"
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: check_circle
+      confirm_message: "关闭后工单归档，确定关闭吗？"
+
+  - id: cancel_work_order
+    name: 取消工单
+    type: state_transition
+    state_field: status
+    from_states: ["New", "In Progress", "Waiting"]
+    to_state: "Cancelled"
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消工单需同时作废或改约服务计划行，确定取消吗？"
+
+indexes:
+  - fields: [work_order_no]
+    unique: true
+    name: uq_work_order_no
+  # 列表 / 计划行反查的主路径（R-ST-0）
+  - fields: [schedule_id]
+    name: idx_work_order_schedule
+  - fields: [status]
+    name: idx_work_order_status
+
+relations:
+  - id: work_order_to_schedule
+    name: 服务计划行
+    type: reference
+    target: sales_order_schedule
+    source_field: schedule_id
+    target_field: id
+    cardinality: N:1
+    description: 唯一挂载点（schedule_kind='service'）
+  - id: work_order_to_order
+    name: 来源订单
+    type: reference
+    target: sales_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 来源销售订单引用
+  - id: work_order_to_order_line
+    name: 订单行
+    type: reference
+    target: sales_order_line
+    source_field: order_line_id
+    target_field: id
+    cardinality: N:1
+    description: 冗余订单行引用
+  - id: work_order_to_customer_account
+    name: 客户
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 服务客户引用（可空）
+  - id: work_order_to_coverage
+    name: SLA 覆盖
+    type: reference
+    target: sla_coverage
+    source_field: coverage_id
+    target_field: id
+    cardinality: N:1
+    description: 命中的 SLA 覆盖引用（可空）
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 服务工单
+    columns:
+      - field: work_order_no
+        width: 160
+        sortable: true
+      - field: order_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: schedule_id
+        width: 140
+        filterable: true
+        filter_type: select
+      - field: severity
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: channel
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: opened_at
+        width: 150
+      - field: resolved_at
+        width: 150
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: work_order_no
+      order: desc
+    actions:
+      - id: create
+        label: 新建服务工单
+        icon: plus
+        type: primary
+        permission: work_order:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 服务工单信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [work_order_no, order_type, status]
+          - fields: [schedule_id, order_id]
+          - fields: [customer_account_id]
+      - title: 服务与 SLA
+        columns:
+          - fields: [severity, channel]
+          - fields: [coverage_id, asset_ref]
+      - title: 处理时间
+        columns:
+          - fields: [opened_at, first_response_at]
+          - fields: [resolved_at, closed_at]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    facets:
+      - title: 基本信息
+        id: work_order_basic
+        type: fieldGroup
+        fields:
+          - work_order_no
+          - order_type
+          - status
+          - order_id
+          - order_line_id
+          - schedule_id
+          - customer_account_id
+      - title: 服务与 SLA
+        id: work_order_sla
+        type: fieldGroup
+        fields:
+          - severity
+          - channel
+          - coverage_id
+          - asset_ref
+      - title: 处理时间
+        id: work_order_timeline
+        type: fieldGroup
+        fields:
+          - opened_at
+          - first_response_at
+          - resolved_at
+          - closed_at
+      - title: 系统信息
+        id: work_order_system
+        type: fieldGroup
+        fields:
+          - created_at
+          - updated_at
+
+  # 工序子表：父字段由 work_order_operation.work_order_id 承载
+  child_sections:
+    - child_object: work_order_operation
+      title: 工单工序
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

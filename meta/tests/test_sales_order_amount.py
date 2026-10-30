@@ -58,6 +58,11 @@ class _FakeDS:
         # [D 2026-10-27] 税码舍入方式
         if 'FROM tax_codes WHERE id' in sql:
             return [{'rounding': self.tax_rounding}]
+        # [M1 2026-10-30] 履约派生统计 SQL（sales_order_fulfillment_service
+        #   ._fetch_line_stats，含 delivered_any）——本用例只关心金额回算，
+        #   履约统计按空集处理（不触发行级状态回写）。
+        if 'LEFT JOIN sales_order_schedules' in sql:
+            return []
         raise AssertionError('unexpected sql: %s' % sql)
 
     def execute(self, sql, params=None):
