@@ -355,7 +355,7 @@ fields:
       widget: select
 
   # [Variant Item Materialization v1.1 2026-10-31] 变式物料溯源（物化服务写入）
-  # 唯一键 = (variant_of_item_id, variant_config_hash)，部分唯一索引由 v160 落库。
+  # 唯一键 = (variant_of_item_id, variant_config_hash)，部分唯一索引由 v167 落库。
   - id: variant_of_item_id
     name: 变式来源物料
     type: integer

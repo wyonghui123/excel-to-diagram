@@ -1,6 +1,6 @@
 # 变式物料化（Variant Item Materialization）Spec
 
-> 版本 v1.2 · 2026-10-31 · 二次对标决策已落地（auto 改 `frozen` 触发、auto 产物 `active`、v160 provenance 迁移 + 唯一索引 + 权限点）
+> 版本 v1.2 · 2026-10-31 · 二次对标决策已落地（auto 改 `frozen` 触发、auto 产物 `active`、v167 provenance 迁移 + 唯一索引 + 权限点）
 > 上游：`docs/specs/p2-master-data-pricing-variant/spec.md` §3.4（Phase 1 边界）
 > 定位：把「配置实例（configuration）」固化为「可交易物料（items 新行）」，即 `items.config_materialize_policy` 的消费端 + `configurations.variant_item_id` 的写入端。
 > 一句话：**物料化是主数据动作，不是订单动作**——`manual` 产物是 `draft`（须签发），`auto` 在配置冻结时产出 `active`。
@@ -120,7 +120,7 @@
 
 `configuration` solved 后不可改（R10），改配置只能生成新实例 → 新 `config_hash` → 新物料；旧物料保留，需要时手工置 `inactive`（对齐 Oracle delink 语义，但不做自动替换动作）。
 
-### D10 新增一次迁移（v160）承载溯源与唯一性
+### D10 新增一次迁移（v167）承载溯源与唯一性
 
 `items` 新增两列，作为幂等键的**真源**（不再靠 join `configurations` 反查）：
 
@@ -129,7 +129,7 @@
 
 并建**部分唯一索引** `ux_items_variant_identity ON items(variant_of_item_id, variant_config_hash) WHERE variant_of_item_id IS NOT NULL`（普通物料两列为 NULL，不参与唯一）。
 
-迁移 `meta/migrations/v160__variant_item_provenance_and_permissions.py`：加列 → 从 `configurations.variant_item_id` 回填 → 重复检查（有重复即失败）+ 建索引 → 种权限 `configuration:configuration_materialize`。`downgrade()` 保留列与数据（只回滚索引/权限种子可选）。
+迁移 `meta/migrations/v167__variant_item_provenance_and_permissions.py`：加列 → 从 `configurations.variant_item_id` 回填 → 重复检查（有重复即失败）+ 建索引 → 种权限 `configuration:configuration_materialize`。`downgrade()` 保留列与数据（只回滚索引/权限种子可选）。
 
 > 原 v1.1 的「本期不新增迁移」已被本条取代：无 DB 级唯一约束时，并发重复只能靠应用层事务兜底（见 §12.2 #1/#7）。
 
@@ -147,7 +147,7 @@ class VariantItemMaterializeService:
 ```
 
 - UI：`configuration` 的 `actions` 段新增 `materialize`（custom，`visible_when: status in [solved, frozen]`，`confirm: true`），成功后 toast 展示 `item_code` + 跳转链接。自动菜单仍关闭（`skip_auto_menu: true` 不动）。
-- 权限：action 权限点 `configuration:configuration_materialize`（DB 码，双段式），由 v160 种入；端点 `POST /api/v2/configuration/materialize` 用 `@require_permission('configuration:configuration_materialize')`；无权限 → 403 `FORBIDDEN`。
+- 权限：action 权限点 `configuration:configuration_materialize`（DB 码，双段式），由 v167 种入；端点 `POST /api/v2/configuration/materialize` 用 `@require_permission('configuration:configuration_materialize')`；无权限 → 403 `FORBIDDEN`。
 - 不做批量物化、不做定时批处理（Phase 2）。
 
 ---
@@ -224,7 +224,7 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 - [x] `python d:\filework\test.py --single meta/tests/test_variant_item_materialize_service.py` 全绿（17 passed）
 - [x] `test_configuration_materialize_inert.py` 按 §6.3 改写后全绿（3 passed）
 - [x] `test_sales_order_pricing_e2e.py` 4 passed、`test_configuration_price.py` 41 passed 无回归
-- [x] v160 迁移在真实库副本上 migrate + verify 通过（provenance 2 列 / `ux_items_variant_identity` / 权限码）
+- [x] v167 迁移在真实库副本上 migrate + verify 通过（provenance 2 列 / `ux_items_variant_identity` / 权限码）
 - [x] `config_materialize_policy='off'` 时调用物化 → 明确错误码（`MATERIALIZE_DISABLED`，不再静默）
 - [x] 物化产出物料 `status='draft'`，在订单行引用被拒；签发（`active`）后可引用
 - [x] 同 `(model, config_hash)` 两次调用只产生 1 行 items（第二次 `created=False` 复用）
@@ -287,7 +287,7 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 
 ### 11.3 测试
 
-`meta/tests/test_variant_item_materialize_service.py` 新增 5 条 auto 用例（freeze 触发 active / 仅 solved 不触发 / 非 auto 跳过 / 失败不抛 / 同 hash 复用），文件合计 17 passed；`test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed 无回归。v160 迁移在真实库副本上 migrate + verify 均 PASS。
+`meta/tests/test_variant_item_materialize_service.py` 新增 5 条 auto 用例（freeze 触发 active / 仅 solved 不触发 / 非 auto 跳过 / 失败不抛 / 同 hash 复用），文件合计 17 passed；`test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed 无回归。v167 迁移在真实库副本上 migrate + verify 均 PASS。
 
 ---
 
@@ -315,8 +315,8 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 | 3 | auto 挂在 `solve()` → 售前试配 / 草稿订单展开即物化 | `solve()` 被 `sales_order_expand_service._solve()` 调用 | P1 | **已修**：改到 `frozen` 由拦截器触发，`solve()` 不再物化 |
 | 4 | draft 必须签发 + 列表过滤未实现 → 死物料 | `src/` 无 `variant_item` 过滤 | P1 | **部分已修**：auto 产物直出 `active`，不再制造自动 draft；**列表过滤仍遗留**（仅 manual 产物受影响） |
 | 5 | auto 失败仅 warning，不可观测 | `materialize_on_freeze` 全吞异常 | P1 | 遗留：落失败标记或在配置列表暴露「auto 未物化」 |
-| 6 | 权限点缺失（§3 要求，实现仅 `login_required`） | `meta/api/configuration_api.py` | P1 | **已修**：`require_permission('configuration:configuration_materialize')` + v160 种入权限 |
-| 7 | 无 provenance / 无唯一索引 | `items` 原无 variant 列；`configurations` 无 `(model, hash)` 唯一 | P2 | **已修**：v160 加 `variant_of_item_id` / `variant_config_hash` + 部分唯一索引 |
+| 6 | 权限点缺失（§3 要求，实现仅 `login_required`） | `meta/api/configuration_api.py` | P1 | **已修**：`require_permission('configuration:configuration_materialize')` + v167 种入权限 |
+| 7 | 无 provenance / 无唯一索引 | `items` 原无 variant 列；`configurations` 无 `(model, hash)` 唯一 | P2 | **已修**：v167 加 `variant_of_item_id` / `variant_config_hash` + 部分唯一索引 |
 | 8 | 无价格/成本载体 | 无 `rate_record` | P2 | Phase 3 |
 | 9 | 删除保护未业务化 | `items.deletion_policy.restrict_on` 不含 `configurations` | P2 | 补 restrict + 友好错误 |
 | 10 | 命名摘要按 `attribute_code` 排序 | `_variant_summary` | P2 | 改用 `seq` + 属性名 |
@@ -327,7 +327,7 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 
 1. auto 触发点从 `solve()` 改为 `frozen`（拦截器 `after_action`）。
 2. auto 产物直接 `active`；`manual` 保持 `draft`（D8）。
-3. v160 迁移：`items.variant_of_item_id` / `variant_config_hash` + 部分唯一索引 + 权限种子。
+3. v167 迁移：`items.variant_of_item_id` / `variant_config_hash` + 部分唯一索引 + 权限种子。
 4. 端点权限点 `configuration:configuration_materialize`（DB 双层码）。
 5. P0 并发查重入事务；D4 序号 `COUNT(DISTINCT)`。
 

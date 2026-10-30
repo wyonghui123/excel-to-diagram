@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v160 2026-10-31] 变式物料 provenance + 唯一索引 + 物化权限
+"""[v167 2026-10-31] 变式物料 provenance + 唯一索引 + 物化权限
 
 背景:
   二次对标头部产品后收紧 auto 物化的并发与溯源（spec
@@ -143,11 +143,11 @@ def _do_permissions(conn: sqlite3.Connection) -> None:
 
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     if not db_path.exists():
-        print(f'[v160] DB 不存在: {db_path}')
+        print(f'[v167] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path))
     try:
-        print('[v160] 开始: 变式物料 provenance + 唯一索引 + 权限')
+        print('[v167] 开始: 变式物料 provenance + 唯一索引 + 权限')
         conn.execute('BEGIN')
         _do_columns(conn)
         _do_backfill(conn)
@@ -157,7 +157,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
         return True
     except Exception as e:
         conn.rollback()
-        print(f'[v160] migrate 失败: {e}')
+        print(f'[v167] migrate 失败: {e}')
         raise
     finally:
         conn.close()
@@ -166,35 +166,35 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 def verify(db_path: Path) -> bool:
     """断言两列、唯一索引、权限码与「无重复身份」四项。"""
     if not db_path.exists():
-        print('[v160 verify] FAIL: DB 不存在')
+        print('[v167 verify] FAIL: DB 不存在')
         return False
     conn = sqlite3.connect(str(db_path))
     try:
         if not _table_exists(conn, 'items'):
-            print('[v160 verify] FAIL: items 表不存在')
+            print('[v167 verify] FAIL: items 表不存在')
             return False
         info = _columns(conn, 'items')
         for _table, column, _definition in COLUMNS:
             if column not in info:
-                print(f'[v160 verify] FAIL: 缺列 items.{column}')
+                print(f'[v167 verify] FAIL: 缺列 items.{column}')
                 return False
 
         if not _index_exists(conn, INDEX_NAME):
-            print(f'[v160 verify] FAIL: 缺唯一索引 {INDEX_NAME}')
+            print(f'[v167 verify] FAIL: 缺唯一索引 {INDEX_NAME}')
             return False
 
         duplicates = conn.execute(DUPLICATES_SQL).fetchall()
         if duplicates:
-            print(f'[v160 verify] FAIL: 重复变式身份 {duplicates[:5]}')
+            print(f'[v167 verify] FAIL: 重复变式身份 {duplicates[:5]}')
             return False
 
         if _table_exists(conn, 'permissions') and not conn.execute(
                 'SELECT 1 FROM permissions WHERE code = ?',
                 (PERMISSION[0],)).fetchone():
-            print(f'[v160 verify] FAIL: 缺权限码 {PERMISSION[0]}')
+            print(f'[v167 verify] FAIL: 缺权限码 {PERMISSION[0]}')
             return False
 
-        print(f'[v160 verify] OK: provenance 2 列 + {INDEX_NAME} + 权限码齐备')
+        print(f'[v167 verify] OK: provenance 2 列 + {INDEX_NAME} + 权限码齐备')
         return True
     finally:
         conn.close()
@@ -202,7 +202,7 @@ def verify(db_path: Path) -> bool:
 
 def downgrade(db_path: Path, skip_backup: bool = False) -> bool:
     """列、索引、permissions 行保留（删列需重建表；权限可能已授予角色）。"""
-    print('[v160] downgrade: 列 / 索引 / permissions 行保留，无删除动作')
+    print('[v167] downgrade: 列 / 索引 / permissions 行保留，无删除动作')
     return True
 
 
@@ -211,6 +211,6 @@ if __name__ == '__main__':
     _db = Path(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith('-') \
         else Path(__file__).resolve().parents[1] / 'architecture.db'
     _ok = migrate(_db)
-    print(f'[v160] migrate: {"OK" if _ok else "FAIL"}')
+    print(f'[v167] migrate: {"OK" if _ok else "FAIL"}')
     _v = verify(_db)
-    print(f'[v160] verify: {"PASS" if _v else "FAIL"}')
+    print(f'[v167] verify: {"PASS" if _v else "FAIL"}')

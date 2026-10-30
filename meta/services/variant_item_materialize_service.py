@@ -161,7 +161,7 @@ class VariantItemMaterializeService:
                         item_status: str) -> Dict[str, Any]:
         """D5：继承模型字段 + 强制字段（防递归物化 / 不参与匹配）。
 
-        provenance 两列是 D3 幂等键的物理落点，也是 v160 唯一索引的一半。
+        provenance 两列是 D3 幂等键的物理落点，也是 v167 唯一索引的一半。
         """
         return {
             'code': '',
