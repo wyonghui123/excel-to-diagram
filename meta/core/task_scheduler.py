@@ -65,7 +65,14 @@ def _retry_db_write(func, *args, **kwargs):
 
 
 class TaskScheduler:
-    
+    """遗留任务执行基础设施：队列消费 + `task_executions` 账本。
+
+    [task-two-generation 2026-10-30] `scheduled_tasks` 已退役（v155）：
+    cron 调度的唯一真源是进程内调度器（MaintenanceScheduler /
+    PlatformScheduler / WorkflowScheduleScheduler）。本类不再从 DB 加载
+    定时任务，也不再起调度线程。
+    """
+
     def __init__(self, data_source=None, config: dict = None):
         self.data_source = data_source
         self.config = config or {}
@@ -77,9 +84,9 @@ class TaskScheduler:
         self._tasks: Dict[int, dict] = {}
         self._handlers: Dict[str, TaskHandler] = {}
         self._interval = self.config.get('check_interval', 60)
-        # [P1 2026-10-13] 迁移期：作业行仍在 scheduled_tasks，但 handler 可能已迁到
-        # 进程内调度器（MaintenanceScheduler / PlatformScheduler）。记录已告警过的
-        # 作业码，避免每分钟刷同一行 —— 见 _execute_task 的 handler 缺失分支。
+        # [task-two-generation 2026-10-30] scheduled_tasks 已退役（v155），cron
+        # 调度全部在进程内调度器。此处仅保留「handler 未注册 → 静默跳过且只记一次」
+        # 的防御：_execute_task 仍可被直接调用（测试 / 手工补跑）。
         self._unregistered_warned: set = set()
     
     def register_handler(self, name: str, handler: TaskHandler):
@@ -90,38 +97,6 @@ class TaskScheduler:
     def register_queue(self, config: QueueConfig):
         self.queue_manager.register_queue(config)
     
-    def load_tasks(self):
-        if not self.data_source:
-            logger.warning("No data_source, cannot load tasks")
-            return
-        
-        try:
-            rows = self.data_source.query(
-                "SELECT * FROM scheduled_tasks WHERE enabled = 1"
-            )
-            self._tasks.clear()
-            for row in rows:
-                self._tasks[row['id']] = dict(row)
-            
-            logger.info("Loaded %d tasks from database", len(self._tasks))
-            self._calculate_next_run()
-            
-        except Exception as e:
-            logger.error("Failed to load tasks: %s", e)
-    
-    def _calculate_next_run(self):
-        now = datetime.now()
-        for task_id, task in self._tasks.items():
-            if task.get('trigger_mode') != 'cron':
-                continue
-            schedule = task.get('schedule')
-            if not schedule:
-                continue
-            
-            next_run = self.cron_parser.get_next(schedule, now)
-            if next_run:
-                task['next_run_at'] = next_run.isoformat()
-    
     def start(self):
         if DISABLE_TASK_SCHEDULER:
             logger.info("TaskScheduler disabled (test mode)")
@@ -129,16 +104,9 @@ class TaskScheduler:
         logger.info("TaskScheduler starting...")
         
         self.queue_manager.load_queues_from_db()
-        self.load_tasks()
         
         self._running = True
-        self._thread = threading.Thread(
-            target=self._scheduler_loop,
-            name="task-scheduler",
-            daemon=True
-        )
-        self._thread.start()
-        logger.info("TaskScheduler started")
+        logger.info("TaskScheduler started (queue-only, no cron loop)")
     
     def stop(self):
         logger.info("TaskScheduler stopping...")
@@ -150,56 +118,14 @@ class TaskScheduler:
         self.queue_manager.shutdown()
         logger.info("TaskScheduler stopped")
     
-    def _scheduler_loop(self):
-        while self._running:
-            try:
-                now = datetime.now()
-                
-                for task_id, task in list(self._tasks.items()):
-                    if task.get('trigger_mode') != 'cron':
-                        continue
-                    if not task.get('enabled'):
-                        continue
-                    
-                    next_run_str = task.get('next_run_at')
-                    if not next_run_str:
-                        continue
-                    
-                    try:
-                        next_run = datetime.fromisoformat(next_run_str)
-                    except (ValueError, TypeError):
-                        continue
-                    
-                    if next_run <= now:
-                        self._execute_task(task_id, task)
-                        
-                        schedule = task.get('schedule')
-                        new_next = self.cron_parser.get_next(schedule, now)
-                        if new_next:
-                            task['next_run_at'] = new_next.isoformat()
-                            try:
-                                self.data_source.execute(
-                                    "UPDATE scheduled_tasks SET "
-                                    "last_run_at = ?, next_run_at = ? "
-                                    "WHERE id = ?",
-                                    (now.isoformat(), new_next.isoformat(), task_id)
-                                )
-                                self.data_source.commit()
-                            except Exception as e:
-                                logger.warning("Failed to update next_run: %s", e)
-                
-            except Exception as e:
-                logger.error("Scheduler loop error: %s", e)
-            
-            time.sleep(self._interval)
-    
     def _execute_task(self, task_id: int, task: dict):
         handler_name = task.get('handler')
         
         if handler_name not in self._handlers:
-            # [P1 2026-10-13] 迁移期：cron 作业已迁到进程内调度器
-            # （MaintenanceScheduler / PlatformScheduler），遗留表行仍在，但其 handler
-            # 不再在本调度器注册。静默跳过即可，不该每分钟刷 error 噪声。
+            # [task-two-generation 2026-10-30] cron 作业全部在进程内调度器
+            # （MaintenanceScheduler / PlatformScheduler / WorkflowScheduleScheduler）。
+            # 遗留调度器只保留队列与执行账本，未注册 handler 一律静默跳过，
+            # 不该刷 error 噪声。
             # 注意：本判断在建执行记录之前，故不会留下 status='running' 的孤儿记录。
             if handler_name not in self._unregistered_warned:
                 self._unregistered_warned.add(handler_name)
@@ -430,27 +356,15 @@ class TaskScheduler:
                 execution_id, e
             )
     
-    def trigger_task(self, task_code: str, params: dict = None):
-        task = None
-        for t in self._tasks.values():
-            if t.get('code') == task_code:
-                task = t
-                break
-        
-        if not task:
-            raise ValueError(f"Task not found: {task_code}")
-        
-        self._execute_task(task['id'], task)
-    
     def get_status(self) -> dict:
         return {
             'running': self._running,
-            'task_count': len(self._tasks),
+            'task_count': 0,  # scheduled_tasks 已退役（v155），无 cron 任务行
             'queue_stats': self.queue_manager.get_queue_stats(),
         }
     
     def reload(self):
-        self.load_tasks()
+        self.queue_manager.load_queues_from_db()
         logger.info("Task scheduler reloaded")
     
     def is_running(self) -> bool:

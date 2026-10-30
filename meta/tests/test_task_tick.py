@@ -250,11 +250,12 @@ class TestPlatformTickHandler:
 
         init_task_seed_data(ds)
 
-        # 第3项后：预制初始化不再往 scheduled_tasks 播种 platform_tick 行
-        rows = ds.execute(
-            "SELECT COUNT(*) FROM scheduled_tasks WHERE code = 'platform_tick'"
+        # 第3项后：预制初始化不再建 scheduled_tasks 表（v155 已退役）
+        tables = ds.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name = 'scheduled_tasks'"
         ).fetchall()
-        assert rows[0][0] == 0
+        assert not tables, "scheduled_tasks 已退役（v155），seed 不应再建表"
 
         # cron 由调度器常量承载，表达式须能被实际调度器解析
         job = next(j for j in PLATFORM_JOBS if j['code'] == 'platform_tick')

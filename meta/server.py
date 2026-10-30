@@ -697,7 +697,10 @@ def create_app(db_path=None):
     #         - platform_tick  → PlatformScheduler（第 1 项，任务域）
     #       handler 实例在此处创建一次。第 3 项已把 scheduled_tasks 的历史行清理
     #       （init_task_seed 不再播种、改为清理迁移作业行）；遗留 TaskScheduler
-    #       不再承载任何 cron 作业，仅保留队列与手工触发基础设施。
+    #       不再承载任何 cron 作业，仅保留队列与执行账本基础设施。
+    #       [task-two-generation 2026-10-30] scheduled_tasks 已由 v155 物理退役，
+    #       对应的 trigger/enable/disable 手工接口一并删除 —— cron 唯一入口是
+    #       /api/v2/schedulers/<job_code>/run-now。
     #
     # 进程内调度器是**唯一** cron 路径 —— 没有「退回遗留调度器」的回滚分支。
     # 暂停开关: CRON_JOBS_ENABLED=0 暂停全部 cron 作业（两个进程内调度器都不启动）。

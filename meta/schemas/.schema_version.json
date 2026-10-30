@@ -1846,63 +1846,6 @@
       ],
       "table": "relationships"
     },
-    "role": {
-      "hash": "f75da5b628beb5056cf1ceee69313d77",
-      "fields": [
-        "updated_at",
-        "created_by",
-        "updated_by",
-        "id",
-        "code",
-        "name",
-        "description",
-        "is_active",
-        "is_system",
-        "created_at",
-        "user_count",
-        "menu_count",
-        "permission_count",
-        "data_perm_count"
-      ],
-      "table": "roles"
-    },
-    "role_data_permission": {
-      "hash": "1f4976bccba836ac42bd448dea8311bb",
-      "fields": [
-        "id",
-        "role_id",
-        "resource_type",
-        "resource_id",
-        "permission_level",
-        "inherit_to_children",
-        "created_at",
-        "created_by"
-      ],
-      "table": "role_data_permissions"
-    },
-    "role_dimension_scope": {
-      "hash": "a7a77c4ea0f0c1e328869eb8dee7bd67",
-      "fields": [
-        "id",
-        "role_id",
-        "dimension_code",
-        "dimension_values",
-        "inherit_children",
-        "scope_mode"
-      ],
-      "table": "role_dimension_scopes"
-    },
-    "role_permission": {
-      "hash": "04187e7ed1d40498307d7b14037bf7f1",
-      "fields": [
-        "id",
-        "role_id",
-        "permission_id",
-        "granted",
-        "created_at"
-      ],
-      "table": "role_permissions"
-    },
     "salesperson": {
       "hash": "db0a1f5adf4c0420e5ccec93bc1b0b7b",
       "fields": [
@@ -2062,35 +2005,6 @@
       ],
       "table": "sales_order_schedules"
     },
-    "scheduled_task": {
-      "hash": "54811dd5356875de6dbe138a68c376af",
-      "fields": [
-        "id",
-        "code",
-        "name",
-        "description",
-        "category",
-        "handler",
-        "handler_config",
-        "trigger_mode",
-        "schedule",
-        "trigger_config",
-        "queue",
-        "priority",
-        "timeout",
-        "max_retries",
-        "retry_delay",
-        "retry_backoff",
-        "tenant_scope",
-        "enabled",
-        "last_run_at",
-        "next_run_at",
-        "ai_config",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "scheduled_tasks"
-    },
     "service_module": {
       "hash": "cf94002c4684db127c3ec96e0c0cbceb",
       "fields": [
@@ -2219,59 +2133,6 @@
         "bo_density"
       ],
       "table": "sub_domains"
-    },
-    "task_execution": {
-      "hash": "154096acad76a6dd37036323d3b3e3ce",
-      "fields": [
-        "id",
-        "name",
-        "task_id",
-        "task_type",
-        "handler",
-        "status",
-        "attempt",
-        "trigger_type",
-        "trigger_source",
-        "queue",
-        "priority",
-        "params",
-        "result",
-        "error_message",
-        "error_traceback",
-        "timeout",
-        "max_retries",
-        "retry_count",
-        "worker_id",
-        "queued_at",
-        "started_at",
-        "completed_at",
-        "duration_ms",
-        "tokens_used",
-        "cost",
-        "model_used",
-        "ai_session_id",
-        "agent_id",
-        "ai_context",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "task_executions"
-    },
-    "task_queue": {
-      "hash": "aa2e72474417526b2f461fe2e7011e6b",
-      "fields": [
-        "id",
-        "name",
-        "description",
-        "priority",
-        "max_workers",
-        "timeout",
-        "enabled",
-        "current_workers",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "task_queues"
     },
     "tax_classification": {
       "hash": "b52c92d1f009cdc6c6402a03022726d5",
@@ -2536,5 +2397,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-29T22:40:28.735438"
+  "last_sync": "2026-10-30T14:09:45.178775"
 }

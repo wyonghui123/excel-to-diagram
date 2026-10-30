@@ -1,74 +1,15 @@
 # -*- coding: utf-8 -*-
 import logging
 
+from meta.core.task_infra_schema import ensure_task_infra_tables
+
 logger = logging.getLogger(__name__)
 
 
 def init_task_seed_data(data_source):
-    _ensure_task_tables(data_source)
+    # 建表唯一真源：meta/core/task_infra_schema.py（task_queues / task_executions）
+    ensure_task_infra_tables(data_source)
     init_task_queues(data_source)
-    cleanup_legacy_scheduled_tasks(data_source)
-
-
-def _ensure_task_tables(data_source):
-    data_source.execute("""
-        CREATE TABLE IF NOT EXISTS task_queues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name VARCHAR(200) UNIQUE NOT NULL,
-            description TEXT,
-            priority INTEGER NOT NULL DEFAULT 50,
-            max_workers INTEGER NOT NULL DEFAULT 3,
-            timeout INTEGER NOT NULL DEFAULT 300,
-            enabled INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    data_source.execute("""
-        CREATE TABLE IF NOT EXISTS scheduled_tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code VARCHAR(200) UNIQUE NOT NULL,
-            name VARCHAR(200) NOT NULL,
-            category VARCHAR(100) DEFAULT 'business',
-            handler VARCHAR(200) NOT NULL,
-            trigger_mode VARCHAR(50) DEFAULT 'cron',
-            schedule VARCHAR(200),
-            queue VARCHAR(100) DEFAULT 'business',
-            priority INTEGER DEFAULT 50,
-            timeout INTEGER DEFAULT 300,
-            max_retries INTEGER DEFAULT 3,
-            handler_config TEXT DEFAULT '{}',
-            description TEXT,
-            enabled INTEGER DEFAULT 1,
-            last_run_at DATETIME,
-            next_run_at DATETIME,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    data_source.execute("""
-        CREATE TABLE IF NOT EXISTS task_executions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name VARCHAR(500),
-            task_id INTEGER,
-            task_type VARCHAR(100),
-            handler VARCHAR(200),
-            status VARCHAR(50) DEFAULT 'pending',
-            trigger_type VARCHAR(50) DEFAULT 'cron',
-            queue VARCHAR(100) DEFAULT 'business',
-            priority INTEGER DEFAULT 50,
-            timeout INTEGER DEFAULT 300,
-            max_retries INTEGER DEFAULT 3,
-            started_at DATETIME,
-            completed_at DATETIME,
-            duration_ms INTEGER,
-            error_message TEXT,
-            retry_count INTEGER DEFAULT 0,
-            result TEXT,
-            queued_at DATETIME,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    data_source.commit()
-    logger.info("Task tables ensured")
 
 
 def init_task_queues(data_source):
@@ -148,42 +89,3 @@ def init_task_queues(data_source):
     logger.info("Task queues seeded: %d queues", count)
 
 
-def cleanup_legacy_scheduled_tasks(data_source):
-    """清理 scheduled_tasks 中已迁出的 cron 作业行（替换路径 第 3 项，幂等）。
-
-    替换路径 第 1 / 7 项已把 9 个 cron 作业全部迁到进程内调度器
-    （`MaintenanceScheduler` 8 个运维 + `PlatformScheduler` 的 platform_tick），
-    调度配置内嵌代码、不落库。此前这些作业在 `scheduled_tasks` 表各留一行；
-    遗留 `TaskScheduler` 现仅保留队列与手工触发基础设施，不再有 cron 作业行。
-
-    本函数把这些已迁出作业码对应的历史行删除（幂等：重复调用无副作用）。
-    只删「已迁出的作业码」（`maintenance_scheduler.JOB_CODES` 为唯一权威边界），
-    非迁移行（如遗留手工触发行）保持不变。
-
-    调用时机：`init_task_seed_data` 每次服务启动都会执行本函数 —— 故即便实例曾
-    遗留旧的作业行，启动后也会被清掉。
-    """
-    from meta.core.maintenance_scheduler import JOB_CODES
-
-    codes = sorted(JOB_CODES)
-    if not codes:
-        return
-
-    placeholders = ','.join('?' * len(codes))
-    try:
-        rows = data_source.query(
-            f"SELECT COUNT(*) AS cnt FROM scheduled_tasks "
-            f"WHERE code IN ({placeholders})",
-            tuple(codes)
-        )
-        removed = rows[0]['cnt'] if rows else 0
-        if not removed:
-            return
-        data_source.execute(
-            f"DELETE FROM scheduled_tasks WHERE code IN ({placeholders})",
-            tuple(codes)
-        )
-        data_source.commit()
-        logger.info("Legacy scheduled tasks cleaned: %d rows", removed)
-    except Exception as e:
-        logger.error("Failed to clean legacy scheduled tasks: %s", e)
