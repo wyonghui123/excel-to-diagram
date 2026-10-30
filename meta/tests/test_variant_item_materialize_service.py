@@ -115,7 +115,8 @@ def ds():
             code TEXT UNIQUE, name TEXT, spec TEXT, structure_role TEXT,
             item_type TEXT, status TEXT, item_group_id INTEGER,
             base_uom INTEGER, sales_uom INTEGER, tax_classification_id INTEGER,
-            config_match_policy TEXT, config_materialize_policy TEXT);
+            config_match_policy TEXT, config_materialize_policy TEXT,
+            variant_of_item_id INTEGER, variant_config_hash TEXT);
         CREATE TABLE configurations (id INTEGER PRIMARY KEY AUTOINCREMENT,
             model_item_id INTEGER, structure_id INTEGER, status TEXT,
             config_hash TEXT, revision INTEGER, reused_from_id INTEGER,
@@ -242,6 +243,9 @@ def test_materialize_creates_draft_item(ds):
     assert len(row['name']) <= 60
     # 回写
     assert _config(ds, SOLVED)['variant_item_id'] == result['item_id']
+    # provenance：幂等键物理落点
+    assert row['variant_of_item_id'] == MODEL_ITEM
+    assert row['variant_config_hash'] == 'H-A'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -329,6 +333,18 @@ def test_sequence_increments_per_model(ds):
     assert second['item_code'] == 'MODEL-A-0002'
     assert second['created'] is True
     assert second['item_id'] != first['item_id']
+
+
+def test_sequence_does_not_skip_when_configs_share_variant(ds):
+    """D3 复用不得让序号跳号：两个配置共用一个物料后，下一个新物料仍是 0002。"""
+    service = VariantItemMaterializeService(ds)
+    first = service.materialize(SOLVED)
+    reused = service.materialize(SAME_HASH)
+    third = service.materialize(OTHER_HASH)
+
+    assert reused['created'] is False
+    assert reused['item_id'] == first['item_id']
+    assert third['item_code'] == 'MODEL-A-0002'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -422,7 +438,7 @@ def test_code_conflict_recomputes_sequence_without_overwrite(ds):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 11. auto（Phase 2）：求解后按模型策略自动物化
+# 11. auto（§12）：配置冻结后按模型策略自动物化，产物直接 active
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _set_policy(data_source, model_item_id, policy):
@@ -431,34 +447,52 @@ def _set_policy(data_source, model_item_id, policy):
     data_source.commit()
 
 
-def test_auto_policy_materializes_on_solve(ds):
+def _freeze(data_source, config_id):
+    data_source.update('configurations', config_id, {'status': 'frozen'})
+    data_source.commit()
+
+
+def test_auto_policy_materializes_on_freeze_as_active(ds):
     _set_policy(ds, MODEL_ITEM, 'auto')
 
-    result = VariantItemMaterializeService(ds).materialize_on_solve(SOLVED)
+    result = VariantItemMaterializeService(ds).materialize_on_freeze(FROZEN)
 
     assert result is not None
     assert result['created'] is True
     assert result['item_code'] == 'MODEL-A-0001'
-    assert _item(ds, result['item_id'])['status'] == 'draft'
-    assert _config(ds, SOLVED)['variant_item_id'] == result['item_id']
+    assert _item(ds, result['item_id'])['status'] == 'active'
+    assert _config(ds, FROZEN)['variant_item_id'] == result['item_id']
 
 
-def test_auto_policy_skips_when_model_policy_not_auto(ds):
+def test_auto_policy_ignores_solved_configuration(ds):
+    """承诺点语义：solved（未冻结）不触发，避免售前试配产生主数据。"""
+    _set_policy(ds, MODEL_ITEM, 'auto')
     before = _items_count(ds)
 
-    result = VariantItemMaterializeService(ds).materialize_on_solve(SOLVED)
+    result = VariantItemMaterializeService(ds).materialize_on_freeze(SOLVED)
 
     assert result is None
     assert _items_count(ds) == before
     assert _config(ds, SOLVED)['variant_item_id'] is None
 
 
+def test_auto_policy_skips_when_model_policy_not_auto(ds):
+    before = _items_count(ds)
+
+    result = VariantItemMaterializeService(ds).materialize_on_freeze(FROZEN)
+
+    assert result is None
+    assert _items_count(ds) == before
+    assert _config(ds, FROZEN)['variant_item_id'] is None
+
+
 def test_auto_policy_swallows_failure_without_raising(ds):
     _set_policy(ds, MODEL_DRAFT, 'auto')
+    _freeze(ds, NOT_TRADABLE_CFG)
     before = _items_count(ds)
 
     # MODEL_DRAFT 状态 draft → MODEL_NOT_TRADABLE，属于可预期拒绝
-    result = VariantItemMaterializeService(ds).materialize_on_solve(
+    result = VariantItemMaterializeService(ds).materialize_on_freeze(
         NOT_TRADABLE_CFG)
 
     assert result is None
@@ -468,10 +502,12 @@ def test_auto_policy_swallows_failure_without_raising(ds):
 
 def test_auto_policy_reuses_variant_for_same_hash(ds):
     _set_policy(ds, MODEL_ITEM, 'auto')
+    _freeze(ds, SOLVED)
+    _freeze(ds, SAME_HASH)
     service = VariantItemMaterializeService(ds)
 
-    first = service.materialize_on_solve(SOLVED)
-    second = service.materialize_on_solve(SAME_HASH)
+    first = service.materialize_on_freeze(SOLVED)
+    second = service.materialize_on_freeze(SAME_HASH)
 
     assert first is not None and first['created'] is True
     assert second is not None and second['created'] is False

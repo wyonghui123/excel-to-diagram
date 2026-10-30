@@ -1,9 +1,9 @@
 # 变式物料化（Variant Item Materialization）Spec
 
-> 版本 v1.0 · 2026-10-30 · 状态：待评审（decision-complete）
+> 版本 v1.2 · 2026-10-31 · 二次对标决策已落地（auto 改 `frozen` 触发、auto 产物 `active`、v160 provenance 迁移 + 唯一索引 + 权限点）
 > 上游：`docs/specs/p2-master-data-pricing-variant/spec.md` §3.4（Phase 1 边界）
 > 定位：把「配置实例（configuration）」固化为「可交易物料（items 新行）」，即 `items.config_materialize_policy` 的消费端 + `configurations.variant_item_id` 的写入端。
-> 一句话：**物料化是主数据动作，不是订单动作**——它产出的是 `draft` 物料，必须走签发才能被单据引用。
+> 一句话：**物料化是主数据动作，不是订单动作**——`manual` 产物是 `draft`（须签发），`auto` 在配置冻结时产出 `active`。
 
 ---
 
@@ -53,10 +53,11 @@
 
 ## 2. 决策（decision-complete）
 
-### D1 触发时机 = 只做 manual
+### D1 触发时机 = manual 手动 / auto 冻结触发
 
-- `manual`：用户在配置实例详情/列表点「物化为物料」，同步调用服务。
-- `auto`：Phase 1 只留 hook 注释位；**Phase 2 已落地**（见 §11）。实现方式为「求解提交后同步调用」，不引入事件/订阅者；产物仍为 `draft`，**不自动签发**（D8 不变量不变）。
+- `manual`：用户在配置实例详情/列表点「物化为物料」，同步调用服务；产物 `draft`，须签发。
+- `auto`：**配置冻结（`frozen`）时触发**——`ConfigurationGuardInterceptor.after_action` 检测到 `status` 更新为 `frozen` 后同步调用服务；产物直接 `active`（对齐 Oracle「生成即可用」，见 §11 / §12.1）。
+- 不再挂在 `solve()`：`solve()` 同时被配置 UI 与**草稿订单展开**调用，售前试配不应产生主数据。
 - 明确不做「下单即物化」：订单行只持 `config_id`，下单不应产生主数据。
 
 ### D2 前置条件（任一不满足则抛 `MaterializeRejected(code)`，不静默）
@@ -78,7 +79,8 @@
 
 ### D4 编码规则 = `{model_code}-{seq:04d}`
 
-- `seq` = 该模型下已物化变式物料数 + 1（`SELECT COUNT(*) FROM configurations WHERE model_item_id=? AND variant_item_id IS NOT NULL`），从 `0001` 起，左补零 4 位。
+- `seq` = 该模型下**不重复的变式物料数** + 1（`SELECT COUNT(DISTINCT variant_item_id) FROM configurations WHERE model_item_id=? AND variant_item_id IS NOT NULL`），从 `0001` 起，左补零 4 位。
+- **[2026-10-31 修正]** 原实现按 configuration 行计数；多个配置复用同一物料（D3）时会跳号（0001、0003…），已改 `COUNT(DISTINCT variant_item_id)`。
 - 例：模型 `LAPTOP-X1` → `LAPTOP-X1-0001`。
 - 满足 `items.code` 约束（`pattern ^[A-Za-z0-9][A-Za-z0-9_\-]*$`、`max_length 40`）；拼接后超 40 字符 → 抛 `ITEM_CODE_TOO_LONG`，提示缩短模型编码，**不截断**。
 - 并发重号：交给 `items.code` 唯一约束兜底，捕获唯一冲突后**重算序号并重试 1 次**，仍冲突则 `CODE_CONFLICT`。不新增序号表。
@@ -93,31 +95,43 @@
 | `structure_role` | 强制 `none`（变式物料是标准件，不再是 model，**防递归物化**） |
 | `config_materialize_policy` | 强制 `off`（同上） |
 | `config_match_policy` | 强制 `no`（变式物料不参与配置匹配） |
-| `status` | 强制 `draft`（走签发） |
+| `status` | `manual` → `draft`（走签发）；`auto` → `active`（冻结即承诺，直接可交易） |
 | 其余（`purchase_uom`/`min_order_qty`/重量等） | 不继承，按 `items.yaml` 默认或空 |
 
 ### D6 事务与写入顺序
 
-单事务（沿用 `ConfigurationMatchService` 的连接获取方式，见 §5 T0-1）：
-1. 校验 D2；2. `INSERT items`（走元模型 BO 写入路径，自动写审计）；3. `UPDATE configurations SET variant_item_id=?`；4. commit。
+单事务（`BEGIN IMMEDIATE`，沿用 `data_source.transaction()`）：
+1. 校验 D2；2. **事务内**按 `(variant_of_item_id, variant_config_hash)` 查重（命中即回写并返回）；3. `INSERT items`（含 provenance 两列）；4. `UPDATE configurations SET variant_item_id=?`；5. commit。
 任一步失败 → rollback + raise。审计由 BO 层自动产生（`aspects: [audit_aspect]` 两者均有）。
+查重必须与写入同事务：否则两个并发请求会同时查不到再各插一行（P0，见 §12.2 #1）。
 
 ### D7 不复制 BOM、不复制价格
 
 - `item_structure` 不复制：configuration 已锚定 `structure_id`，复制会产生两份真源。
 - `rate_record` 不复制：定价仍按模型/父物料维度；变式物料成为价格载体是 Phase 3 议题。
 
-### D8 生命周期 = `draft`，且不绕过项 5 的不变量
+### D8 生命周期 = 按策略分化，且不绕过项 5 的不变量
 
-物化成功 ≠ 可下单。新物料必须经签发（`draft → active`）才能被单据行引用；这正是「draft 不可引用」不变量的正向应用。生产者也因此拿不到「半成品主数据」。
+- `manual`：产物 `draft`，必须经签发（`draft → active`）才能被单据行引用——「draft 不可引用」不变量的正向应用。
+- `auto`：触发点已是 `frozen`（承诺点），产物直接 `active`；若仍为 `draft`，auto 只会制造待签发死物料（见 §12.2 #4）。
+- 两者都不绕过不变量：`db` 里不会有被单据引用的 draft。
 
 ### D9 变更管理 = 新配置实例 → 新变式物料
 
 `configuration` solved 后不可改（R10），改配置只能生成新实例 → 新 `config_hash` → 新物料；旧物料保留，需要时手工置 `inactive`（对齐 Oracle delink 语义，但不做自动替换动作）。
 
-### D10 不新增数据库迁移
+### D10 新增一次迁移（v160）承载溯源与唯一性
 
-溯源双向可达：`configuration → variant_item_id`，`items ← configurations.model_item_id` join 即可回答「这是哪个模型的第几个变式」。**本期不新增列、不新增表**（v160 保留）。
+`items` 新增两列，作为幂等键的**真源**（不再靠 join `configurations` 反查）：
+
+- `items.variant_of_item_id INTEGER REFERENCES items(id)`
+- `items.variant_config_hash TEXT`（存物化时的 `config_hash`）
+
+并建**部分唯一索引** `ux_items_variant_identity ON items(variant_of_item_id, variant_config_hash) WHERE variant_of_item_id IS NOT NULL`（普通物料两列为 NULL，不参与唯一）。
+
+迁移 `meta/migrations/v160__variant_item_provenance_and_permissions.py`：加列 → 从 `configurations.variant_item_id` 回填 → 重复检查（有重复即失败）+ 建索引 → 种权限 `configuration:configuration_materialize`。`downgrade()` 保留列与数据（只回滚索引/权限种子可选）。
+
+> 原 v1.1 的「本期不新增迁移」已被本条取代：无 DB 级唯一约束时，并发重复只能靠应用层事务兜底（见 §12.2 #1/#7）。
 
 ---
 
@@ -133,7 +147,7 @@ class VariantItemMaterializeService:
 ```
 
 - UI：`configuration` 的 `actions` 段新增 `materialize`（custom，`visible_when: status in [solved, frozen]`，`confirm: true`），成功后 toast 展示 `item_code` + 跳转链接。自动菜单仍关闭（`skip_auto_menu: true` 不动）。
-- 权限：新增 action 权限点 `configuration:materialize`，授予配置管理角色；无权限 → 403。
+- 权限：action 权限点 `configuration:configuration_materialize`（DB 码，双段式），由 v160 种入；端点 `POST /api/v2/configuration/materialize` 用 `@require_permission('configuration:configuration_materialize')`；无权限 → 403 `FORBIDDEN`。
 - 不做批量物化、不做定时批处理（Phase 2）。
 
 ---
@@ -144,7 +158,7 @@ class VariantItemMaterializeService:
 
 | # | 用例 | 断言 |
 |---|---|---|
-| 1 | 正常物化 | 新增 1 行 items；`code='{model}-0001'`；`status='draft'`；`structure_role='none'`；`config_materialize_policy='off'`；`variant_item_id` 回写；`created=True` |
+| 1 | 正常物化（manual） | 新增 1 行 items；`code='{model}-0001'`；`status='draft'`；`structure_role='none'`；`config_materialize_policy='off'`；`variant_of_item_id` / `variant_config_hash` 已写；`variant_item_id` 回写；`created=True` |
 | 2 | 幂等复用 | 同 hash 第二个配置 → `created=False`，items 不新增，两个 configuration 都指向同一 item |
 | 3 | policy=off | 抛 `MATERIALIZE_DISABLED`，items 与 configuration 均无变化 |
 | 4 | 配置未 solved | draft/invalid → `CONFIG_NOT_SOLVED` |
@@ -154,6 +168,11 @@ class VariantItemMaterializeService:
 | 8 | 联动不变量 | 新变式物料 `draft` 在 `sales_order_lines` 引用被 `value_filter` 拒绝；置 `active` 后放行 |
 | 9 | 审计 | items 新增审计 1 条；configuration 更新审计 1 条 |
 | 10 | 编码冲突 | 预置同 code 行 → 重试后成功或 `CODE_CONFLICT`（不静默覆盖） |
+| 11 | auto + frozen | 冻结触发物化，产物 `status='active'` |
+| 12 | auto + solved | 仅 solved 不触发（返回 `None`） |
+| 13 | auto + 模型策略非 auto | 跳过不物化 |
+| 14 | auto 失败 | 不抛给调用方（拦截器吞异常，回滚本次物化） |
+| 15 | auto 同 hash 复用 | 冻结第二个同 hash 配置 → 不新增 items，复用同一物料 |
 
 ### 4.2 回归
 
@@ -202,9 +221,10 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 
 ## 7. 验收标准
 
-- [x] `python d:\filework\test.py --single meta/tests/test_variant_item_materialize_service.py` 全绿（11 passed）
+- [x] `python d:\filework\test.py --single meta/tests/test_variant_item_materialize_service.py` 全绿（17 passed）
 - [x] `test_configuration_materialize_inert.py` 按 §6.3 改写后全绿（3 passed）
 - [x] `test_sales_order_pricing_e2e.py` 4 passed、`test_configuration_price.py` 41 passed 无回归
+- [x] v160 迁移在真实库副本上 migrate + verify 通过（provenance 2 列 / `ux_items_variant_identity` / 权限码）
 - [x] `config_materialize_policy='off'` 时调用物化 → 明确错误码（`MATERIALIZE_DISABLED`，不再静默）
 - [x] 物化产出物料 `status='draft'`，在订单行引用被拒；签发（`active`）后可引用
 - [x] 同 `(model, config_hash)` 两次调用只产生 1 行 items（第二次 `created=False` 复用）
@@ -228,7 +248,7 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 |---|---|---|
 | 物料爆炸（每配置一物料） | 主数据膨胀 | 只 manual 触发 + 幂等键复用 + 后续可选 inactive 策略 |
 | 序号在并发下重号 | 编码冲突 | 唯一约束 + 重算重试 1 次 + 明确错误码 |
-| 物化后无人签发 → 死物料 | 数据垃圾 | 列表默认过滤 `draft` 变式物料；文档写明必须签发 |
+| 物化后无人签发 → 死物料 | 数据垃圾 | `auto` 产物直接 `active`（§11.2），不再产生自动 draft；`manual` 产物仍需签发，列表过滤属遗留项（§12.2 #4） |
 | config_hash 与选项变更 | 同配置不同 hash | solved 后不可改已保证 hash 稳定；跨实例差异是预期行为 |
 | 与价格链耦合 | 变式物料无价格 | 本期不承诺价格，定价继续走模型维度 |
 
@@ -239,7 +259,7 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 | 阶段 | 内容 | 前置 |
 |---|---|---|
 | Phase 1（已完成） | manual 物化 + 幂等 + 编码 + 审计 + UI 动作 | 无 |
-| Phase 2（已完成，见 §11） | auto：solved 后同步触发物化；**不做自动签发**（draft 保留，签发走 `activate`） | 无 |
+| Phase 2（已完成，见 §11） | auto：配置 `frozen` 后由拦截器同步触发物化；产物直接 `active`（不再产生待签发 draft） | 无 |
 | Phase 3 | 变式物料作为价格/成本载体（rate_record 复制或继承、成本汇总） | Phase 1 稳定运行 |
 
 ---
@@ -250,23 +270,74 @@ python d:\filework\test.py --single meta/tests/test_sales_order_pricing_e2e.py
 
 | 项 | 落地 |
 |---|---|
-| 触发点 | `ItemStructureConfigService.solve()` 写入事务 **提交之后**（`meta/services/item_structure_config_service.py`） |
-| 判定 | 调用 `VariantItemMaterializeService.materialize_on_solve(configuration_id)`，内部读模型 `config_materialize_policy`，仅 `auto` 才物化 |
-| 失败处理 | 全异常吞掉（`MaterializeError` → warning 日志，其它 → `logger.exception`），**不回滚、不抛给求解** |
-| 响应 | auto 成功时 `solve()` 返回值追加 `variant_item_id`；失败/跳过不追加，字段集合不变 |
-| 幂等 | 复用 Phase 1 的 `(model_item_id, config_hash)` 幂等键，重试安全 |
+| 触发点 | `ConfigurationGuardInterceptor.after_action`：`configuration` 的 `crud_update` 且 `params.status == 'frozen'` 时调用（`meta/core/interceptors/configuration_guard_interceptor.py`） |
+| 判定 | 调用 `VariantItemMaterializeService.materialize_on_freeze(configuration_id)`：重读配置，仅 `status='frozen'` 且模型 `config_materialize_policy='auto'` 才物化 |
+| 失败处理 | 全异常吞掉（`MaterializeError` → warning 日志，其它 → `logger.exception`），**不回滚配置冻结、不抛给更新请求** |
+| 响应 | 不再向 `solve()` 追加 `variant_item_id`（§12.2 #3 已修）；物化结果只在审计/日志可见 |
+| 幂等 | 复用 `(variant_of_item_id, variant_config_hash)`：应用层事务内查重 + DB 部分唯一索引双保险 |
+| 生命周期 | `auto` 产物 `status='active'`（见 D8）；`manual` 仍为 `draft` |
 
-不采用事件驱动（outbox + dispatcher + `app.yaml` 订阅契约）：solve 需要内聚返回、避免引入线程/死信/契约校验的运维面；幂等键已保证同步重试等价。
+不采用事件驱动（outbox + dispatcher + `app.yaml` 订阅契约）：`after_action` 同步调用即可满足「冻结后物化」，且失败不影响主流程；幂等键与唯一索引已保证重试安全。
 
-### 11.2 产品决策（保守默认，可改）
+### 11.2 产品决策（已拍板）
 
-**auto 只物化，不自动签发**：产物 `status='draft'`，仍需 `items.yaml` 的 `activate` 动作签发后才可被单据行引用（D8 不变量）。副作用是 auto 实例会产生待签发 draft，需人工（或后续批量签发）清理，否则等于 D8 风险表里的「死物料」。
+**auto 直接产出 `active`**：触发点已收窄到 `frozen`（承诺点），此时物料应立即可交易（对齐 Oracle / Fusion「生成即可用」）。因此不再有「待签发 draft 死物料」的自动产物；`manual` 保留 `draft`，作为人工确认闸门。
 
-若要改为「auto 直接签发为 active」，需同时补：签发审计、失败回滚语义、死物料率监控——属独立变更，不在本期。
+配套要求：`auto` 失败只记录日志属可接受（配置冻结必须成功）；可观测性见 §12.2 #5 遗留项。
 
 ### 11.3 测试
 
-`meta/tests/test_variant_item_materialize_service.py` 新增 4 条 auto 用例（策略命中物化 / 非 auto 跳过 / 失败不抛 / 同 hash 复用），文件合计 15 passed；`test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed 无回归。
+`meta/tests/test_variant_item_materialize_service.py` 新增 5 条 auto 用例（freeze 触发 active / 仅 solved 不触发 / 非 auto 跳过 / 失败不抛 / 同 hash 复用），文件合计 17 passed；`test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed 无回归。v160 迁移在真实库副本上 migrate + verify 均 PASS。
+
+---
+
+## 12. 二次对标与审视（2026-10-31）
+
+### 12.1 头部产品横向对照（配置记在哪 / 物料何时生成 / 生成后是否即可用）
+
+| 产品 | 配置记录 | 变式物料生成时机 | 生成后可用 | 成本/价格载体 |
+|---|---|---|---|---|
+| Oracle EBS CTO | 订单行 | booking 后 `Create Configuration Item` | 是 | 是（成本 rollup） |
+| Oracle Fusion | 订单行 | 订单提交时 item generation；`Match Configuration` 复用 | 是 | 是 |
+| SAP VC / AVC | KMAT + 订单/计划行配置 | 默认不建物料；material variant 另立（手动/可配置自动） | 是 | 是（标准成本） |
+| D365 | 销售/报价/采购/生产/项目行，每配置一个 configuration ID | 按需 `Create item` | 是（released product） | 是 |
+| Odoo | 产品模板 + 属性组合 | Instant / **Dynamic（加入销售订单时）** / Never | 是 | 是 |
+| Salesforce CPQ / Revenue Cloud | 报价行（QuoteLineItem → Product2/PricebookEntry） | **不生成物料主数据** | 不适用 | 由 ERP 承担 |
+
+结论：没有头部产品在「售前求解」阶段自动建物料主数据；我们的 `auto` 触发点比所有对标产品都早。
+
+### 12.2 偏离项与处置
+
+| # | 偏离 | 证据 | 级别 | 处置 |
+|---|---|---|---|---|
+| 1 | 事务外查重 → 并发可产生重复变式物料 | 原 `materialize()` 在事务外 `_find_variant_item`，`_create_variant` 才开事务 | P0 | **已修**：查重移入 `BEGIN IMMEDIATE` 事务（datasource / WriteQueue 均为 IMMEDIATE） |
+| 2 | 序号按 configuration 计数 → 复用后跳号 | `_next_sequence` 原为 `COUNT(*)` | P1 | **已修**：`COUNT(DISTINCT variant_item_id)` |
+| 3 | auto 挂在 `solve()` → 售前试配 / 草稿订单展开即物化 | `solve()` 被 `sales_order_expand_service._solve()` 调用 | P1 | **已修**：改到 `frozen` 由拦截器触发，`solve()` 不再物化 |
+| 4 | draft 必须签发 + 列表过滤未实现 → 死物料 | `src/` 无 `variant_item` 过滤 | P1 | **部分已修**：auto 产物直出 `active`，不再制造自动 draft；**列表过滤仍遗留**（仅 manual 产物受影响） |
+| 5 | auto 失败仅 warning，不可观测 | `materialize_on_freeze` 全吞异常 | P1 | 遗留：落失败标记或在配置列表暴露「auto 未物化」 |
+| 6 | 权限点缺失（§3 要求，实现仅 `login_required`） | `meta/api/configuration_api.py` | P1 | **已修**：`require_permission('configuration:configuration_materialize')` + v160 种入权限 |
+| 7 | 无 provenance / 无唯一索引 | `items` 原无 variant 列；`configurations` 无 `(model, hash)` 唯一 | P2 | **已修**：v160 加 `variant_of_item_id` / `variant_config_hash` + 部分唯一索引 |
+| 8 | 无价格/成本载体 | 无 `rate_record` | P2 | Phase 3 |
+| 9 | 删除保护未业务化 | `items.deletion_policy.restrict_on` 不含 `configurations` | P2 | 补 restrict + 友好错误 |
+| 10 | 命名摘要按 `attribute_code` 排序 | `_variant_summary` | P2 | 改用 `seq` + 属性名 |
+
+### 12.3 决策落地与剩余动作
+
+**已落地（v1.2 变更集）**
+
+1. auto 触发点从 `solve()` 改为 `frozen`（拦截器 `after_action`）。
+2. auto 产物直接 `active`；`manual` 保持 `draft`（D8）。
+3. v160 迁移：`items.variant_of_item_id` / `variant_config_hash` + 部分唯一索引 + 权限种子。
+4. 端点权限点 `configuration:configuration_materialize`（DB 双层码）。
+5. P0 并发查重入事务；D4 序号 `COUNT(DISTINCT)`。
+
+**剩余（不阻塞本期）**
+
+1. **可观测性（P1）**：auto 失败落标记或在配置列表暴露「auto 未物化」。
+2. **列表过滤（P1）**：`src/` 默认过滤 manual 产出的 draft 变式物料 / 待签发队列。
+3. **删除保护（P2）**：`items.deletion_policy.restrict_on` 补 `configurations`，给业务化错误。
+4. **命名摘要（P2）**：`_variant_summary` 改用 `seq` + 属性名排序。
+5. **Phase 3 前** `config_materialize_policy` 保持默认 `off`（无价格载体的主数据不自动产生）。
 
 ---
 

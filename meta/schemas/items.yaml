@@ -323,9 +323,10 @@ fields:
 
   # 配置结果的物料化策略；与 config_match_policy 正交（匹配回答「要不要复用实例」，物化回答「要不要生成变式物料」）
   # 消费端：meta/services/variant_item_materialize_service.py
-  #   manual = 用户点「物化为物料」；auto = configuration solved 后由
-  #   ItemStructureConfigService.solve() 自动触发（产物仍为 draft，需签发）；
-  #   off = 调用物化被拒。见 spec 2026-10-30-variant-item-materialization §11
+  #   manual = 用户点「物化为物料」，产物为 draft，需签发；
+  #   auto   = configuration 冻结（frozen）后由
+  #            ConfigurationGuardInterceptor.after_action 自动触发，产物直接 active；
+  #   off    = 调用物化被拒。见 spec 2026-10-30-variant-item-materialization §12
   - id: config_materialize_policy
     name: 配置物化策略
     type: string
@@ -333,7 +334,7 @@ fields:
     required: true
     default: 'off'
     max_length: 20
-    description: 选配结果是否固化为变式物料（关闭 / 手工 / 自动）；manual 由用户触发，auto 在配置 solved 后自动触发，两者产物均为 draft 需签发。见 2026-10-30-variant-item-materialization-spec
+    description: 选配结果是否固化为变式物料（关闭 / 手工 / 自动）；manual 由用户触发，auto 在配置冻结后自动触发且产物直接 active，manual 产物为 draft 需签发。见 2026-10-30-variant-item-materialization-spec
     enum_values:
       - value: 'off'
         label: 不物化
@@ -352,6 +353,23 @@ fields:
       filter_scope: local
     ui:
       widget: select
+
+  # [Variant Item Materialization v1.1 2026-10-31] 变式物料溯源（物化服务写入）
+  # 唯一键 = (variant_of_item_id, variant_config_hash)，部分唯一索引由 v160 落库。
+  - id: variant_of_item_id
+    name: 变式来源物料
+    type: integer
+    db_column: variant_of_item_id
+    description: 变式物料所属的模型物料（系统写入，与 variant_config_hash 组成幂等键）
+    semantics:
+      meaning: 变式来源模型
+
+  - id: variant_config_hash
+    name: 变式配置哈希
+    type: string
+    db_column: variant_config_hash
+    max_length: 64
+    description: 物化时的 config_hash（系统写入，幂等键后半段）
 
   - id: item_group_id
     name: 物料组

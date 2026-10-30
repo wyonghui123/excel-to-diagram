@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
-"""变式物料化服务（manual 链路）
+"""变式物料化服务
 
 依据: docs/superpowers/specs/2026-10-30-variant-item-materialization-spec.md
   - D2 前置校验：任一不满足抛 MaterializeError(code)，不静默
-  - D3 幂等键 (model_item_id, config_hash)：命中已有变式物料即复用
-  - D4 编码 {model_code}-{seq:04d}：超 40 字符不截断，抛 ITEM_CODE_TOO_LONG
-  - D5 新物料继承 + 强制字段（structure_role='none' / status='draft' 等）
-  - D6 单事务：INSERT items → UPDATE configurations.variant_item_id → commit
-  - D7 不复制 BOM、不复制价格；D10 不新增迁移
+  - D3 幂等键 (model_item_id, config_hash)：真源为 items.variant_of_item_id /
+    variant_config_hash（部分唯一索引兜底），命中即复用
+  - D4 编码 {model_code}-{seq:04d}：seq 取不重复变式物料数；超 40 字符不截断，
+    抛 ITEM_CODE_TOO_LONG
+  - D5 新物料继承 + 强制字段（structure_role='none' 等）；status 依策略：
+    manual → draft（须签发），auto → active（§12 决策）
+  - D6 单事务：查重 + INSERT items + UPDATE configurations.variant_item_id
+  - D7 不复制 BOM、不复制价格
 
-一句话：把「已求解 / 已冻结的配置实例」固化为 draft 物料，并回写
-`configurations.variant_item_id`。物化成功 ≠ 可下单，新物料必须走签发。
+一句话：把「已求解 / 已冻结的配置实例」固化为变式物料，并回写
+`configurations.variant_item_id`。manual 产物是 draft，必须走签发；
+auto 产物在配置冻结时触发，直接 active。
 """
 
 import logging
@@ -92,21 +96,29 @@ class VariantItemMaterializeService:
                 f'模型物料 config_materialize_policy={policy}，不允许物化',
                 'MATERIALIZE_DISABLED', configuration_id)
 
-        existing = self._find_variant_item(
-            configuration.get('model_item_id'), config_hash)
-        if existing:
-            self._link_variant(configuration, existing['id'])
-            return {'item_id': existing['id'],
-                    'item_code': existing.get('code'),
-                    'created': False}
+        # [§12 2026-10-31] manual 产物 draft（须签发）；auto 产物直接 active。
+        item_status = 'active' if policy == 'auto' else 'draft'
 
-        return self._create_variant(configuration, model)
+        # [P0 2026-10-31] 查重与写入必须落在同一个 BEGIN IMMEDIATE 事务内。
+        # 若在事务外查重，两个并发 solve 都查不到已有物料，各插一行同组合物料。
+        with self.ds.transaction():
+            existing = self._find_variant_item(
+                configuration.get('model_item_id'), config_hash)
+            if existing:
+                self._link_variant(configuration, existing['id'])
+                return {'item_id': existing['id'],
+                        'item_code': existing.get('code'),
+                        'created': False}
+
+            return self._create_variant(
+                configuration, model, config_hash, item_status)
 
     # ------------------------------------------------------------------
     # 新建
     # ------------------------------------------------------------------
     def _create_variant(self, configuration: Dict[str, Any],
-                        model: Dict[str, Any]) -> Dict[str, Any]:
+                        model: Dict[str, Any], config_hash: str,
+                        item_status: str) -> Dict[str, Any]:
         configuration_id = configuration.get('id')
         model_item_id = configuration.get('model_item_id')
         model_code = str(model.get('code') or '')
@@ -114,7 +126,8 @@ class VariantItemMaterializeService:
         sequence = self._next_sequence(model_item_id)
         self._check_code_length(model_code, sequence, configuration_id)
 
-        row = self._build_item_row(configuration, model)
+        row = self._build_item_row(
+            configuration, model, config_hash, item_status)
 
         for attempt in range(2):
             code = self._build_code(model_code, sequence)
@@ -144,8 +157,12 @@ class VariantItemMaterializeService:
             'CODE_CONFLICT', configuration_id)
 
     def _build_item_row(self, configuration: Dict[str, Any],
-                        model: Dict[str, Any]) -> Dict[str, Any]:
-        """D5：继承模型字段 + 强制字段（防递归物化 / 不参与匹配 / draft）。"""
+                        model: Dict[str, Any], config_hash: str,
+                        item_status: str) -> Dict[str, Any]:
+        """D5：继承模型字段 + 强制字段（防递归物化 / 不参与匹配）。
+
+        provenance 两列是 D3 幂等键的物理落点，也是 v160 唯一索引的一半。
+        """
         return {
             'code': '',
             'name': self._build_name(configuration, model),
@@ -157,7 +174,9 @@ class VariantItemMaterializeService:
             'tax_classification_id': model.get('tax_classification_id'),
             'config_match_policy': 'no',
             'config_materialize_policy': 'off',
-            'status': 'draft',
+            'variant_of_item_id': model.get('id'),
+            'variant_config_hash': config_hash,
+            'status': item_status,
         }
 
     def _build_name(self, configuration: Dict[str, Any],
@@ -181,16 +200,18 @@ class VariantItemMaterializeService:
     # ------------------------------------------------------------------
     # auto 入口（Phase 2）
     # ------------------------------------------------------------------
-    def materialize_on_solve(self, configuration_id: Any) -> Optional[Dict[str, Any]]:
-        """求解后自动物化入口。
+    def materialize_on_freeze(self, configuration_id: Any) -> Optional[Dict[str, Any]]:
+        """配置冻结后的自动物化入口（§12：auto 只在承诺点触发）。
 
-        仅当模型 `config_materialize_policy='auto'` 时物化；其余策略静默跳过。
-        失败只记 warning，**绝不抛出** —— 物化是主数据副作用，不能拖垮配置求解。
-        产物仍是 `draft`，须签发才可被单据引用（D8 不变量不变）。
+        仅当实例 `status='frozen'` 且模型 `config_materialize_policy='auto'` 时物化；
+        其余情况静默跳过。失败只记 warning，**绝不抛出** —— 物化是主数据副作用，
+        不能拖垮冻结。产物为 active（§12），无需再签发。
         """
         try:
             configuration = self._fetch_configuration(configuration_id)
             if not configuration:
+                return None
+            if str(configuration.get('status') or '') != 'frozen':
                 return None
             model = self._fetch_item(configuration.get('model_item_id')) or {}
             policy = str(model.get('config_materialize_policy') or 'off')
@@ -202,7 +223,7 @@ class VariantItemMaterializeService:
                 '[variant-materialize-auto] 配置 %s 自动物化被拒: %s (%s)',
                 configuration_id, exc, exc.code)
             return None
-        except Exception:  # noqa: BLE001 - 主数据副作用失败不阻断求解
+        except Exception:  # noqa: BLE001 - 主数据副作用失败不阻断冻结
             logger.exception(
                 '[variant-materialize-auto] 配置 %s 自动物化异常', configuration_id)
             return None
@@ -222,13 +243,11 @@ class VariantItemMaterializeService:
 
     def _find_variant_item(self, model_item_id: Any,
                            config_hash: str) -> Dict[str, Any]:
-        """D3：任一 configuration 的 variant_item_id 指向的物料即映射真源。"""
+        """D3：items 上的 provenance 两列即幂等真源（唯一索引兜底）。"""
         rows = self.ds.query(
-            f"SELECT i.id AS id, i.code AS code FROM {_CONFIG_TABLE} c"
-            f" JOIN {_ITEM_TABLE} i ON i.id = c.variant_item_id"
-            " WHERE c.model_item_id = ? AND c.config_hash = ?"
-            "   AND c.variant_item_id IS NOT NULL"
-            " ORDER BY c.id LIMIT 1",
+            f"SELECT id, code FROM {_ITEM_TABLE}"
+            " WHERE variant_of_item_id = ? AND variant_config_hash = ?"
+            " ORDER BY id LIMIT 1",
             [model_item_id, config_hash])
         return rows[0] if rows else {}
 
@@ -236,8 +255,13 @@ class VariantItemMaterializeService:
     # 序号与编码（D4）
     # ------------------------------------------------------------------
     def _next_sequence(self, model_item_id: Any) -> int:
+        """序号 = 该模型下**不重复**的变式物料数 + 1。
+
+        多个 configuration 可复用同一物料（D3），若按 configuration 行计数，
+        复用会让序号跳号；这里必须 COUNT(DISTINCT variant_item_id)。
+        """
         rows = self.ds.query(
-            f"SELECT COUNT(*) AS n FROM {_CONFIG_TABLE}"
+            f"SELECT COUNT(DISTINCT variant_item_id) AS n FROM {_CONFIG_TABLE}"
             " WHERE model_item_id = ? AND variant_item_id IS NOT NULL",
             [model_item_id])
         return int(rows[0]['n'] if rows else 0) + 1

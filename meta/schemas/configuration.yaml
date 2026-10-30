@@ -298,18 +298,19 @@ fields:
 # ────────────────────────────────────────────
 # 操作定义
 # ────────────────────────────────────────────
-# [Variant Item Materialization Phase 1 2026-10-30]
-# manual 物化：把已求解 / 已冻结的实例固化为 draft 变式物料（幂等键
-# (model_item_id, config_hash)）。依据 docs/superpowers/specs/
-# 2026-10-30-variant-item-materialization-spec.md §3。本期不新增权限点迁移
-# （D10），端点仅 login_required。
+# [Variant Item Materialization v1.1 2026-10-31]
+# 物化：把已求解 / 已冻结的实例固化为变式物料（幂等键
+# (model_item_id, config_hash)，真源 items.variant_of_item_id / variant_config_hash）。
+# 依据 docs/superpowers/specs/2026-10-30-variant-item-materialization-spec.md。
+# 权限点 configuration:configuration_materialize 由 v160 落库。
 actions:
   - id: materialize
     name: 物化为物料
     type: custom
     method: POST
     path: /api/v1/config/materialize
-    description: 把已求解/已冻结的配置实例固化为 draft 变式物料（幂等复用）
+    permission: configuration:configuration_materialize
+    description: manual 产物为 draft（须签发）；auto 产物在配置冻结时直接 active（幂等复用）
 
 indexes:
   - fields: [structure_id, config_hash]

@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional
 from flask import Blueprint, request
 
 from meta.api._response_contract import error_response, ok
+from meta.api.decorators import require_permission
 from meta.services.auth_middleware import login_required
 from meta.services.configuration_match_service import ConfigurationMatchService
 from meta.services.configuration_price_service import ConfigurationPriceService
@@ -359,15 +360,16 @@ def solve():
 # ----------------------------------------------------------------------
 @configuration_bp.route('/materialize', methods=['POST'])
 @login_required
+@require_permission('configuration:configuration_materialize')
 def materialize():
-    """把已求解 / 已冻结的配置实例固化为 draft 变式物料（manual 链路）。
+    """把已求解 / 已冻结的配置实例固化为变式物料。
 
     请求体：
         configuration_id  必填  配置实例 id
 
     返回 `{item_id, item_code, created}`；`created=False` 表示命中幂等键
     `(model_item_id, config_hash)`，复用了已有变式物料。
-    新物料 `status='draft'`，必须签发后才能被单据行引用。
+    产物状态依模型策略：manual → draft（须签发），auto → active。
     """
     try:
         body = _json_body()

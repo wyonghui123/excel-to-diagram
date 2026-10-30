@@ -81,7 +81,31 @@ class ConfigurationGuardInterceptor(Interceptor):
             )
 
     def after_action(self, context: 'ActionContext') -> None:
-        pass
+        """auto 物化的承诺点：配置状态更新为 frozen 后触发（spec §12）。
+
+        仅当本次更新把 status 置为 frozen 时尝试；服务内部再判
+        模型 `config_materialize_policy='auto'`，失败只记 warning 不抛出。
+        """
+        if getattr(context.meta_object, 'id', None) != HEAD_OBJECT:
+            return
+        if context.action != 'crud_update':
+            return
+        params = dict(context.params or {})
+        if str(params.get('status') or '') != 'frozen':
+            return
+        configuration_id = context.object_id or params.get('id')
+        if not configuration_id:
+            return
+        try:
+            from meta.services.variant_item_materialize_service import (
+                VariantItemMaterializeService,
+            )
+            VariantItemMaterializeService(
+                context.data_source).materialize_on_freeze(configuration_id)
+        except Exception:  # noqa: BLE001 - 主数据副作用不得拖垮冻结
+            logger.exception(
+                '[configuration_guard] 配置 %s 冻结后自动物化失败',
+                configuration_id)
 
     @staticmethod
     def _effective_data(context: 'ActionContext') -> tuple:
