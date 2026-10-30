@@ -68,9 +68,9 @@
 | L1 元模型 | YAML → registry → DDL → facade；类型/视图/属性/权限/动作 | L0 | 已闭环，但存在「声明有、执行无」的缝 |
 | L2 主体与主数据 | `org`/`party`/`items`/字典/UoM/结构 | L1 | 基本完整，生命周期消费端待修 |
 | L3 事实单据 | `sales_order` 族、状态机、变更、`doc_flow_edges` | L1 + L2（只读引用） | 主链可用，跨 instance 与矩阵未收口 |
-| L4 派生与结算 | 履约状态、`calc_result`、`allocation_result`、库存应用 | L3（只读事实） | 定价/税务链路尚未在真实单据跑通 |
+| L4 派生与结算 | 履约状态、`calc_result`、`allocation_result`、库存应用 | L3（只读事实） | 履约已落地；价格/税务真实单据链路已验证（2026-10-30，`test_sales_order_pricing_e2e.py` 4 passed） |
 
-**依赖必须单向向下。** 反向只能走显式「派生/回写」通道 —— 履约已按此落地（`sales_order_fulfillment_service` 是 `fulfillment_status` 的唯一写入口，含漂移巡检）；价格/税务尚未在真实单据上端到端验证，是 L4 目前的主要空白。
+**依赖必须单向向下。** 反向只能走显式「派生/回写」通道 —— 履约已按此落地（`sales_order_fulfillment_service` 是 `fulfillment_status` 的唯一写入口，含漂移巡检）；价格/税务也已按此落地（2026-10-30 实测）：`SalesOrderPricingService.price_line` → `PricingDeterminationService.determine_line(persist=True)` 把结果写入 `calc_results`，`level` 一律由 `document_line_id` 推导、不可手填；税务金额由 `SalesOrderAmountService.recompute_line` 按 `tax_rates` 生效区间写快照（不走 `calc_result`）。
 
 ### 0.4.3 六个成对的核心抽象
 
@@ -122,10 +122,10 @@
 | 排序 | 张力 | 为什么排这个位置 |
 |---|---|---|
 | 1 | 物理隔离缺位（`table_prefix`） | 决定「多应用能否同库交付」，是商业形态问题，不是代码洁癖 |
-| 2 | 价格/税务链路未在真实单据端到端跑通 | L4 代码在、链路未验，决定「能算」还是「能用」 |
+| 2 | ~~价格/税务链路未在真实单据端到端跑通~~ **已偿还（2026-10-30）** | 原判：L4 代码在、链路未验，决定「能算」还是「能用」；现证：e2e 真链路 4 passed，`level` 推导修正 + v159 修正存量 28 行；剩余 `pricing_period` 仍无计算路径（§2.10、§5.7） |
 | 3 | 两代任务 / 权限双轨 | 决定元模型是否「只有一个真源」，影响所有后续扩展 |
 | 4 | 类型 / 视图 / 属性三套机制并行 | 认知成本，容易让新对象选错承载方式 |
-| 5 | 声明与消费脱节（主数据生命周期、`allowed_platform_modules`、`pricing_period`、`config_materialize_policy`、`external_rate_source`） | 同一类病：YAML 写对了，代码没读 |
+| 5 | 声明与消费脱节（`allowed_platform_modules`、`pricing_period`、`external_rate_source`） | 同一类病：YAML 写对了，代码没读；主数据生命周期消费端已于 2026-10-30 核对（缺口 0，§0.5.1 检查 4）；`config_materialize_policy` 已由 `variant_item_materialize_service` 消费（2026-10-30，§4.1/§5.6），故移出本清单 |
 
 **结论：当前架构「抽象正确、落地半程」。** 最危险的不是缺功能，而是**声明与消费脱节** —— 文档/元数据承诺了行为，运行期没有执行点。这类问题不会报错，只会静默偏离。
 
@@ -152,7 +152,7 @@
 | 1 | 类型视图只读 | 扫描 `object_type: view` 的对象，断言无 create/update/delete 路由与写拦截器；断言 `document_type` / `line_type` 在 API 层无写端点 | 已确认：两者 `object_type: view` + `auto_crud: false`，未见写端点 | 类型被复制成表 → 双写、单据类型改不动 |
 | 2 | 数量只走边 | 静态扫描对下游单据行 `qty` 的 `UPDATE`；集成测试：建单 → 派生 → 断言 `doc_flow_edges` 与未结量视图一致 | 扫描：**未见**对 `qty` 的原生 UPDATE（仅 seed/测试）；存在 5 处受控直连 SQL（`sales_order_{pricing,amount,header_discount,expand,guard}_service`），只写派生金额、价格追溯、`configuration_id` 与地址快照，属允许写入 | 绕过数量账 → 未结量失真、冲销无法追溯 |
 | 3 | 状态与履约分离 | 断言 `fulfillment_status` 的写点只出现在派生/回写模块；断言写入语句不含 `status` 列 | 已确认：`sales_order_fulfillment_service` 自述 INV-1 为唯一写入口，含 `check_drift`；刷新 `fulfillment_derived_at` 不改 `updated_at` | 派生覆盖人工状态 → 审计断链 |
-| 4 | draft 不可引用 / inactive 可结算 | 集成测试：引用 draft 物料应失败；引用 inactive 物料建单应成功、老单据结算应成功 | YAML 已声明，消费端待核（§4.2） | 生命周期承诺落空 → 主数据治理失效 |
+| 4 | draft 不可引用 / inactive 可结算 | 集成测试：引用 draft 物料应失败；引用 inactive 物料建单应成功、老单据结算应成功 | **已核（2026-10-30）**：`test_master_data_lifecycle_consumption.py` 5 passed（台账缺口 0 / draft 引用被拒 / inactive 老单据结算成功） | 生命周期承诺落空 → 主数据治理失效 |
 | 5 | 默认形态禁止同名 `table_name` | **启动期**对所有已注册 BO（含应用 BO）做 `table_name` 冲突检测并 fail fast；应用内表名重复单独拦截 | **已实现**：`app_registry._assert_app_registration_safe` 在注册后、建表前抛 `AppRegistrationError`（同归属放行）；应用内表名重复在 `_register_app_schemas` 抛错。**G2 校验层已落地**：`app_loader` 解析 `table_prefix`（缺省 `app.id`）并校验格式/长度、`discover_apps` 校验跨应用前缀唯一；物理表名改写仍未启用 | 静默合列/丢列（P0） |
 | 6 | 归属与命名空间不可绕过 | 启动期断言 BO id 全局唯一 + `permission_namespace == app.id`；运行期断言 CRUD 走 `_bo_to_app` 反查 | **已补**：BO id 跨归属重复同样 fail fast；`permission_namespace` 已在 `app_loader` 强制 | 归属错判、应用间越权 |
 | 7 | 仲裁必须显式 | 静态断言控制参数 / `rate_record` / `sourcing_rule_*` 的查询均带 `specificity_rank` / `priority` / `seq` 排序，且不存在「无排序取第一条」 | 服务已消费（`control_parameter_service` 等 4 处）；缺统一文档（§2.4、§5.4） | 同层「最后写入赢」→ 结果不可复现 |
@@ -570,7 +570,7 @@ meta/schemas/*.yaml (140)
 | `fulfillment_status` | 事情做到了什么（履约事实派生） | 派生 + 回写（`fulfillment_derived_at`） |
 
 `[事实]` 履约回写**已落地**，不是待确认状态：`sales_order_fulfillment_service.py` 自述 INV-1「本服务是 `fulfillment_status` 的唯一写入方」，提供 `recompute_line` / `recompute_order` / `recompute_all`、`check_drift` 漂移巡检、`cascade_cancel` 级联取消；迁移 v145 / v147；测试 `test_sales_order_fulfillment_status.py`。按 FR-011，刷新 `fulfillment_derived_at` 不改 `fulfillment_status`，也不动 `updated_at`。
-`[缺口]` 端到端仍有空白：价格/税务结果尚未在真实单据上跑通（§5.7）。
+`[事实]` 价格/税务已在真实单据跑通（2026-10-30）：`SalesOrderPricingService.price_line` 走 `PricingDeterminationService.determine_line(persist=True)` 落 `calc_results`，`level` 由 `document_line_id` 推导；税务由 `SalesOrderAmountService.recompute_line` 写金额快照（不走 `calc_result`）。证据：`test_sales_order_pricing_e2e.py` 4 passed，回归 `test_sales_order_pricing_wire.py` 27 / `test_pricing_service.py` 65。
 
 ### 2.10 定价接入点
 
@@ -582,10 +582,10 @@ meta/schemas/*.yaml (140)
 
 | 优先级 | 缺口 | 说明 |
 |---|---|---|
-| P2 | 价格/税务未在真实单据端到端验证 | 履约已落地；`calc_result` 链未跑通真实单据 |
+| 已收口 | ~~价格/税务未在真实单据端到端验证~~ | **2026-10-30**：e2e 真链路 4 passed；`level` 按 `document_line_id` 推导 + v159 修正存量 28 行 |
 | P2 | 控制参数仲裁实现有、规范无 | `control_parameter_service` 已实现 `(rank,id)` 升序仲裁 |
 | P2 | 跨 instance 派生仅 schema 预留 | Phase 1 范围 |
-| P3 | 定价表实测 0 行（2026-10-13） | 定价引擎尚未在真实单据上跑过 |
+| 已闭环 | ~~定价表实测 0 行（2026-10-13）~~ | **2026-10-30**：副本 `calc_results` 实测 36 行（28 反例 + 8 合规表头）；真链路 e2e 4 passed，原口径失效 |
 
 ## 第 3 篇 组织体系与业务伙伴
 
@@ -682,7 +682,7 @@ meta/schemas/*.yaml (140)
 | 物流属性 | `net_weight`、`gross_weight` |
 
 `[事实]` 两个策略列**正交**：`config_match_policy`（是否复用已有配置实例）已被 `configuration_match_service` / `item_structure_config_service` 消费。
-`[缺口]` `config_materialize_policy`（是否生成变式物料）在 `meta/services` 中**无消费者**，`configuration.variant_item_id` 也无写入点 —— 只有列与迁移（v117），物料化未实现。
+`[事实]` `config_materialize_policy`（是否生成变式物料）已由 `variant_item_materialize_service` 消费（Phase 1 manual，2026-10-30）：`POST /api/v1/config/materialize` 把 solved / frozen 实例固化为 `draft` 物料并回写 `configuration.variant_item_id`；幂等键 `(model_item_id, config_hash)`、编码 `{model_code}-{seq:04d}`、`off` 时明确拒绝（`MATERIALIZE_DISABLED`，不再静默）。新物料强制 `status='draft'` / `structure_role='none'` / `config_materialize_policy='off'`，必须签发后才能被单据引用。`auto` 仍未实现（本 spec D1 仅在 solved 写入路径留 hook 注释），由 `meta/tests/test_variant_item_materialize_service.py`（11 passed）与改写后的 `meta/tests/test_configuration_materialize_inert.py`（3 passed）覆盖。
 
 ### 4.2 主数据生命周期：四个状态、四类动作
 
@@ -699,8 +699,10 @@ meta/schemas/*.yaml (140)
 
 `[计划]` [2026-10-28-master-data-lifecycle-state-machine-spec](file:///d:/filework/docs/superpowers/specs/2026-10-28-master-data-lifecycle-state-machine-spec.md) 已定稿，结论是**不新增元模型机制**：D1 修消费通路（零新增机制）/ D2 结构化前置检查（复用 `deletion_policy.restrict_on`）/ D3 文档口径统一。一句话结论 —— 三条 P0 都落在「声明已写对、消费端读错/没读」这一层，修完后 `status` 四值的 description 才第一次有代码承载。
 
+`[事实]` D1 消费端已核对（2026-10-30）：单据/明细对象的主数据引用字段全部声明 `value_filter.status: active` 且写校验开启，台账缺口 0；「draft 引用被拒 / inactive 老单据可结算」由 `test_master_data_lifecycle_consumption.py`（5 passed）覆盖。D2/D3 仍为 `[计划]`。
+
 `[事实]` `deletion_policy.restrict_on` 已有通用消费：`reference_restrict_checker.py`（按「谁引用我」拦截）+ `action_executor._check_deletion_policy_restrict`（物理删除），即 D2 的**基础设施已存在**。
-`[缺口]` 三条 P0 是否全部接入未逐条取证；D1（状态引用校验）的消费点仍需核对，引用时按「方案已定稿」而非「已实现」表述。
+`[计划]` 三条 P0 中 D2/D3 尚未逐条接入取证；D1（状态引用校验）消费端已核对（2026-10-30，台账缺口 0），D2 基础设施已存在，引用时按「方案已定稿」而非「已实现」表述。
 
 ### 4.3 产品与版本（≠ 可交易物料）
 
@@ -855,7 +857,7 @@ meta/schemas/*.yaml (140)
 `[事实]` **「服务能不能进结构，取决于结构用途，不取决于服务本身」** —— `usage` 是判据：制造结构不收服务（合约制造除外），商务与保修结构收服务（[configuration-and-structure-spec](file:///d:/filework/docs/superpowers/specs/2026-10-25-configuration-and-structure-spec.md) 一句话结论）。
 
 `[事实]` 配置复用由 `items.config_match_policy` 驱动：`configuration_match_service` 按 `config_hash` 复用实例，并把实际策略写入 `configuration.match_policy_used`。
-`[缺口]` 变式物料化未实现：`config_materialize_policy` 无服务消费，`configuration.variant_item_id` 无写入点（§4.1、§5.7）。
+`[事实]` 变式物料化已实现（2026-10-30）：`variant_item_materialize_service` 消费 `config_materialize_policy`，把 solved / frozen 实例固化为 `draft` 物料并回写 `configuration.variant_item_id`；幂等键 `(model_item_id, config_hash)`。Phase 2 的 `auto` 由 `ItemStructureConfigService.solve()` 在事务提交后同步触发（失败只记 warning，不阻断求解），产物仍为 `draft`、不自动签发。`meta/tests/test_variant_item_materialize_service.py` 15 passed。
 
 `[计划]` 该 spec 状态为**草案**：范围与骨架待拍板，字段级契约可直接用于建表评审。
 
@@ -863,10 +865,10 @@ meta/schemas/*.yaml (140)
 
 | 优先级 | 缺口 | 说明 |
 |---|---|---|
-| P2 | 定价 12 张表实测 0 行（2026-10-13） | 引擎未在真实单据上跑过，复活验证待做 |
+| 已闭环 | ~~定价 12 张表实测 0 行（2026-10-13）~~ | **2026-10-30**：副本 `calc_results` 实测 36 行（28 反例 + 8 合规表头）；真链路 e2e 4 passed |
 | P2 | `pricing_period` 无计算路径 | `calc_result.pricing_period_id` 仅引用列；且 `pricing_period.rounding` 配了不生效、静默失效（v144 迁移注释自述） |
 | P2 | 配置与结构 spec 仍为草案 | 范围/骨架待拍板，字段契约可用 |
-| P2 | 变式物料化未实现 | `config_materialize_policy` 无消费者，`variant_item_id` 无写入点 |
+| 已闭环 | ~~变式物料化（Phase 0 明确未实现，排期外）~~ | **2026-10-30**：Phase 1 manual + Phase 2 auto 均已实现（`variant_item_materialize_service` + `POST /api/v1/config/materialize` + `solve()` 后置钩子）；`test_variant_item_materialize_service.py` 15 passed、`test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed；auto 不自动签发（draft 需走 `activate`） |
 | P3 | `external_rate_source` 无消费代码取证 | 仅 `meta/services` 无引用，表与 `fallback_rule` 字段存在 |
 | P3 | `item_structure.revision` 与 `items.status` 联动未文档化 | 结构版本与物料生命周期无显式约束 |
 
@@ -881,17 +883,32 @@ meta/schemas/*.yaml (140)
 | P2 | BO id 冲突不检查 | §1.1 | 已补：启动期 fail fast（与表名冲突同一守卫） |
 | P2 | 派生下推矩阵无总表 | §1.6 | 待补 |
 | P2 | 手机端/双端验证无清单 | §1.8 | 待补 |
-| P2 | 价格/税务未在真实单据端到端验证 | §2.9 / §5.7 | 履约已落地（唯一写入口 + 漂移巡检） |
+| 已收口 | ~~价格/税务未在真实单据端到端验证~~ | §2.9 / §5.7 | **2026-10-30**：e2e 真链路 4 passed；`level` 按 `document_line_id` 推导 + v159 修正存量 28 行 |
 | P2 | 控制参数仲裁实现有、规范无 | §2.4 | 服务已实现，缺统一文档 |
 | P2 | 跨 instance 派生仅 schema 预留 | §2.8 | Phase 1 范围 |
 | P1 | 删除组织不清理职能行 → 幽灵主体（F-01） | §3.6 | 仅测试调用点 |
 | P1 | `party2_id` 三口径不完整（F-02） | §3.6 | 缺 `detail_target_bo` |
-| P1 | 主数据生命周期 P0 部分待核 | §4.2 | D2 基础设施（`restrict_on` 检查器）已存在；D1 消费点待核 |
+| 已核 | 主数据生命周期 D1 消费端 | §4.2 | **2026-10-30**：台账缺口 0，`test_master_data_lifecycle_consumption.py` 5 passed；D2 基础设施（`restrict_on` 检查器）已存在，D3 待统一文档口径 |
 | P2 | `product` / `version` 与 `items` 无关联列 | §4.3 | 映射无 schema 承载 |
 | P2 | 仓储域对象跨包无统一索引 | §4.6 | 应用包内 |
 | P2 | 配置与结构 spec 仍为草案 | §5.6 | 范围/骨架待拍板 |
-| P3 | 定价 12 张表实测 0 行（2026-10-13 取证） | §5.7 | 待复活验证 |
+| 已闭环 | ~~定价 12 张表实测 0 行（2026-10-13 取证）~~ | §5.7 | **2026-10-30**：副本 `calc_results` 实测 36 行；真链路 e2e 4 passed |
 | P3 | `external_rate_source` 无消费代码取证 | §5.7 | 仅有表与 `fallback_rule` |
+
+### A.1 P2 三项收口对照（2026-10-30 实测）
+
+| 能力 | 定性 | 证据 | 后续 |
+|---|---|---|---|
+| 主数据生命周期消费（draft 不可引用 / inactive 可结算） | **已实现** | `value_help_accessor.validate_value_helps` 按字段 `value_filter` 生效；`sales_order_line` 7 处引用字段已声明；`test_master_data_lifecycle_consumption.py` 5 passed（台账缺口 0） | 无；D2/D3 仍为 `[计划]` |
+| `calc_result` 行级结果 `level` 推导 | **已实现** | `pricing_service.determine` 按 `document_line_id` 推导，显式不一致抛 `PricingError`；`test_sales_order_pricing_e2e.py` 4 passed | 无 |
+| 价格在真实单据上端到端落库 | **已实现** | `SalesOrderPricingService.price_line` → `determine_line(persist=True)` → `calc_results`；行级 `level='line'`、重算作废旧结果 | 无 |
+| 税务在真实单据上端到端 | **已实现（金额快照，非 calc_result）** | `SalesOrderAmountService.recompute_line` 按 `tax_rates` 生效区间写 net/tax_base/tax_rate_percent/tax_amount/gross；确认后快照不可变 | `pricing_period` 仍无计算路径（§5.7） |
+| 存量 `calc_results.level` 与 `document_line_id` 一致 | **已实现（v159 迁移）** | 副本实测反例 28 行 → migrate 修正 28 / verify PASS / rollback 可还原 / 二次执行 0 行（幂等） | 目标环境需执行 v159 |
+| `config_materialize_policy` 消费 | **已实现** | `variant_item_materialize_service` 读取 `manual` / `auto`；`off` → `MATERIALIZE_DISABLED`（不再静默）；`auto` 由 `ItemStructureConfigService.solve()` 提交后触发；`test_variant_item_materialize_service.py` 15 passed | 无；auto 不自动签发（draft 需 `activate`） |
+| `configuration.variant_item_id` 写入 | **已实现** | 物化在同一事务内回写该列；幂等复用把多个配置实例指向同一物料；`test_variant_item_materialize_service.py` 覆盖幂等/回写 | 无 |
+| 变式物料生成（新 `items` 行 + 回写） | **已实现** | `items` 新行 `status='draft'` / `structure_role='none'` / `config_materialize_policy='off'`，编码 `{model_code}-{seq:04d}`；`POST /api/v1/config/materialize` + `solve()` auto 钩子；15 passed | 批量/定时物化仍属后续 |
+
+> 口径：**已实现** = 有代码且有测试/迁移证据；**存在但未接线** = 字段/迁移已落、无运行期消费；**缺失** = 连写入点都没有。本表只覆盖 P2 三项，其余缺口仍见上表。
 
 ## 附录 B：近两个月 spec 索引
 
@@ -926,6 +943,10 @@ meta/schemas/*.yaml (140)
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-30 | v3.15 变式物料化 **Phase 2（auto）落地**：`VariantItemMaterializeService.materialize_on_solve()`（仅 `policy='auto'` 物化，异常全吞只记 warning）；`ItemStructureConfigService.solve()` 在写入事务提交后调用（auto 成功时返回值追加 `variant_item_id`）；**不自动签发**，产物仍 `draft` 走 `activate`。新增 4 条 auto 用例（`test_variant_item_materialize_service.py` 15 passed），回归 `test_configuration_materialize_inert.py` 3 passed、`test_item_structure_config.py` 63 passed；spec 补 §11 落地记录，`items.yaml` 策略描述更新 |
+| 2026-10-30 | v3.14 变式物料化 Phase 1（manual）落地：新增 `meta/services/variant_item_materialize_service.py` + `POST /api/v1/config/materialize`（`configuration.yaml` 声明 `materialize` 动作）；`configuration.yaml`/`items.yaml` 描述同步；§4.1 / §5.6 `[计划]` → `[事实]`，§0.4.7 与 §5.7、附录 A.1 三行改「已实现」；改写 `test_configuration_materialize_inert.py`（3 passed）、新增 `test_variant_item_materialize_service.py`（11 passed）；回归 `test_sales_order_pricing_e2e.py` 4 passed、`test_configuration_price.py` 41 passed。`auto` 仍为 Phase 2（仅留 hook 注释） |
+| 2026-10-30 | v3.13 | 附录 A 补 P2 三项收口对照（已实现 / 存在但未接线 / 缺失） |
+| 2026-10-30 | v3.12 P2 收口：项 5 生命周期消费端核对（5 passed，台账缺口 0）、项 6 真实单据定价链路验证（e2e 4 passed + v159 修正存量 28 行）、项 7 变式物料化缺口 → 计划（Phase 0 由 3 passed 固化） |
 | 2026-10-30 | v3.11 **任务体系两代收口**：Gen2 六表（`tasks`/`task_templates`/`workflows`/`workflow_runs`/`task_events`/`task_worklogs`）由 `v154__provision_task_domain_tables.py` 幂等 provisioning（启动期 `ensure_task_tables` + `ensure_task_event_tables` 显式兜底）；Gen1 定时配置层 `scheduled_tasks` 退役（`v155__retire_scheduled_tasks.py`，实测 0 行），`task_api` 的 `trigger/enable/disable` 路由删除，cron 唯一入口收敛到进程内调度器；Gen1 队列/账本 `task_queues`/`task_executions` 交由 `meta/core/task_infra_schema.py` + `v156__adopt_task_infra_tables.py` 代码建表；删除 `scheduled_task.yaml` / `task_queue.yaml` / `task_execution.yaml`；`generated_schema.sql` / `.schema_version.json` 重新生成。回归：`test_task_scheduler.py`(13 passed/2 skipped)、`test_task_tick.py`(11 passed)、`test_scheduler_api.py`(10 passed)、`test_task_api.py`(5 passed)、`test_platform_scheduler.py`(13 passed)、`test_maintenance_scheduler.py`(10 passed) |
 | 2026-10-30 | v3.10 **权限双轨收口**：删除 `role.yaml` / `role_permission.yaml` / `role_data_permission.yaml` / `role_dimension_scope.yaml`（停止再生成旧表）；新增 `v138__retire_legacy_role_tables.py`（`roles` 按 code 并入 `permission_sets`、子表按 id 映射并入 `permission_set_*`，核对后 RENAME→DROP，幂等 + rollback）；`table_name_validator` 白名单移除旧表名；`action_executor` 角色级联删除条件补 `permission_set`；`generated_schema.sql` 重新生成。实测：旧表仅在 DB 层残留、运行时引擎（`permission_set_service` / `dimension_scope_engine`）与前端（`/api/v2/bo/permission_set`）均只走新表；DB 副本跑 v138 后 `verify PASS` 且二次执行幂等；`test_yaml_loader.py`(46 passed)、`test_app_loader.py`(24 passed)、`test_permission_set_api.py`(20 passed) 回归通过；`test_unified_permission_api.py` 修正 2 个被 owner 直通干扰的 simulate 用例（24 passed / 2 常红来自 P3.1 `permission_rules_v2` 隐轨，见 §1.3 缺口） |
 | 2026-10-30 | v3.9 **G2 校验层落地**：`AppManifest.table_prefix`（缺省 `app.id`）+ 格式/长度校验（`TABLE_PREFIX_PATTERN`）、`discover_apps` 跨应用前缀唯一校验、`app_registry` 应用内表名重复拦截；`test_app_loader.py` 新增 `TestTablePrefix`（24 passed），`test_app_registry.py`（11 passed）、`test_warehouse_app_poc2.py`（17 passed）回归通过。物理表名改写按 roadmap v1.27 单向门保持未启用 |

@@ -322,6 +322,10 @@ fields:
       widget: select
 
   # 配置结果的物料化策略；与 config_match_policy 正交（匹配回答「要不要复用实例」，物化回答「要不要生成变式物料」）
+  # 消费端：meta/services/variant_item_materialize_service.py
+  #   manual = 用户点「物化为物料」；auto = configuration solved 后由
+  #   ItemStructureConfigService.solve() 自动触发（产物仍为 draft，需签发）；
+  #   off = 调用物化被拒。见 spec 2026-10-30-variant-item-materialization §11
   - id: config_materialize_policy
     name: 配置物化策略
     type: string
@@ -329,7 +333,7 @@ fields:
     required: true
     default: 'off'
     max_length: 20
-    description: 选配结果是否固化为变式物料（关闭 / 手工 / 自动）
+    description: 选配结果是否固化为变式物料（关闭 / 手工 / 自动）；manual 由用户触发，auto 在配置 solved 后自动触发，两者产物均为 draft 需签发。见 2026-10-30-variant-item-materialization-spec
     enum_values:
       - value: 'off'
         label: 不物化

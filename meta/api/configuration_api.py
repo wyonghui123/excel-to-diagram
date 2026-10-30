@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-"""配置域 API（Configuration Price / Match / Solve）
-====================================================
+"""配置域 API（Configuration Price / Match / Solve / Materialize）
+================================================================
 
-把 P4 的三条能力暴露为 HTTP 端点：
+把 P4 的四条能力暴露为 HTTP 端点：
 
-    POST /api/v1/config/price    配置实例出价（PriceRequest → PriceResult）
-    POST /api/v1/config/match    `one_time_standard` 复用入口
-    POST /api/v1/config/solve    求解并串接复用（solve → match）
+    POST /api/v1/config/price        配置实例出价（PriceRequest → PriceResult）
+    POST /api/v1/config/match        `one_time_standard` 复用入口
+    POST /api/v1/config/solve        求解并串接复用（solve → match）
+    POST /api/v1/config/materialize  把已求解/已冻结的实例固化为 draft 变式物料
 
 [分层] api 层**只做参数校验与响应包装**，业务在
 `configuration_price_service` / `configuration_match_service` /
-`item_structure_config_service`。故本模块测试属"契约测试"：断言状态码、
+`item_structure_config_service` / `variant_item_materialize_service`。故本模块测试属"契约测试"：断言状态码、
 字段名与类型，不重复测业务正确性。
 
 [solve → match] `solve` 服务自身行为与状态保持不变（P3 基线零回归），
@@ -41,6 +42,10 @@ from meta.services.item_structure_config_service import (
     ItemStructureConfigError,
     ItemStructureConfigService,
 )
+from meta.services.variant_item_materialize_service import (
+    MaterializeError,
+    VariantItemMaterializeService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,28 +58,44 @@ _NOT_FOUND_RULES = frozenset({
 
 _CLIENT_CODES = frozenset({'CONFIG_INVALID_VALUE'})
 
+#: 物化错误码 → HTTP 状态（spec §2 D2 / D4）
+_MATERIALIZE_STATUS = {
+    'CONFIG_NOT_FOUND': 404,
+    'MODEL_NOT_FOUND': 404,
+    'CONFIG_NOT_SOLVED': 409,
+    'MATERIALIZE_DISABLED': 409,
+    'MODEL_NOT_TRADABLE': 409,
+    'CONFIG_HASH_MISSING': 422,
+    'ITEM_CODE_TOO_LONG': 422,
+    'CODE_CONFLICT': 422,
+}
+
 _price_service: Optional[ConfigurationPriceService] = None
 _match_service: Optional[ConfigurationMatchService] = None
 _config_service: Optional[ItemStructureConfigService] = None
+_materialize_service: Optional[VariantItemMaterializeService] = None
 
 
 def init_services(data_source=None) -> ConfigurationPriceService:
-    """初始化三个服务。测试传入内存数据源；生产懒取 meta 库。
+    """初始化四个服务。测试传入内存数据源；生产懒取 meta 库。
 
     [WARNING] 数据库路径必须走 `get_meta_db_path()`，禁止相对路径。
     """
-    global _price_service, _match_service, _config_service
+    global _price_service, _match_service, _config_service, _materialize_service
     if data_source is not None:
         _price_service = ConfigurationPriceService(data_source)
         _match_service = ConfigurationMatchService(data_source)
         _config_service = ItemStructureConfigService(data_source)
-    elif _price_service is None or _match_service is None or _config_service is None:
+        _materialize_service = VariantItemMaterializeService(data_source)
+    elif (_price_service is None or _match_service is None
+          or _config_service is None or _materialize_service is None):
         from meta.core.datasource import get_data_source
         from meta.core.db_path import get_meta_db_path
         data_source = get_data_source('sqlite', database=get_meta_db_path())
         _price_service = ConfigurationPriceService(data_source)
         _match_service = ConfigurationMatchService(data_source)
         _config_service = ItemStructureConfigService(data_source)
+        _materialize_service = VariantItemMaterializeService(data_source)
     return _price_service
 
 
@@ -91,6 +112,11 @@ def _get_match_service() -> ConfigurationMatchService:
 def _get_config_service() -> ItemStructureConfigService:
     init_services()
     return _config_service
+
+
+def _get_materialize_service() -> VariantItemMaterializeService:
+    init_services()
+    return _materialize_service
 
 
 # ----------------------------------------------------------------------
@@ -189,6 +215,13 @@ def _fail(exc: Exception):
             details['conflicts'] = exc.conflicts
         if exc.warnings:
             details['warnings'] = exc.warnings
+        return error_response(str(exc), code=exc.code, status=status,
+                              details=details)
+    if isinstance(exc, MaterializeError):
+        status = _MATERIALIZE_STATUS.get(exc.code, 422)
+        details: Dict[str, Any] = {'code': exc.code}
+        if exc.configuration_id is not None:
+            details['configuration_id'] = exc.configuration_id
         return error_response(str(exc), code=exc.code, status=status,
                               details=details)
     raise exc
@@ -319,3 +352,27 @@ def solve():
     except Exception as exc:
         return _fail(exc)
     return ok({'configuration': configuration, 'match': matched})
+
+
+# ----------------------------------------------------------------------
+# 变式物料化
+# ----------------------------------------------------------------------
+@configuration_bp.route('/materialize', methods=['POST'])
+@login_required
+def materialize():
+    """把已求解 / 已冻结的配置实例固化为 draft 变式物料（manual 链路）。
+
+    请求体：
+        configuration_id  必填  配置实例 id
+
+    返回 `{item_id, item_code, created}`；`created=False` 表示命中幂等键
+    `(model_item_id, config_hash)`，复用了已有变式物料。
+    新物料 `status='draft'`，必须签发后才能被单据行引用。
+    """
+    try:
+        body = _json_body()
+        configuration_id = _req_int(body, 'configuration_id')
+        data = _get_materialize_service().materialize(configuration_id)
+    except Exception as exc:
+        return _fail(exc)
+    return ok(data)
