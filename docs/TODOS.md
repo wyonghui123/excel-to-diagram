@@ -122,6 +122,20 @@
 - **状态**: 待评估
 - **优先级**: 中
 
+### 14. 导出/导入权限旁路与全局 is_admin 口径不一致
+- **问题**: `_check_export_permission` 仅在 `username == 'admin'` 时放行，其余一律走
+  `PermissionService.check_permission_unified`（org → permission_set 查库）；
+  而全局 `is_admin()` 判定为 `'*' in permissions`。同一份 token 在导出端点被判无权限，
+  在别处被判管理员 —— 口径分叉。
+- **现状**: 2026-10-30 基线测试侧已规避（`test_meta_api.py` fixture 改 `username='admin'`，
+  commit f0d9bea7 之后），产品侧逻辑未动。
+- **方向**: `_check_export_permission` 改用 `is_admin(user)`，与全局口径统一；并确认导出权限
+  是否应认 token claims 的 `*`，而非只走组织授权路径。
+- **文件**: `meta/api/export_import_api.py` (L129-165), `meta/services/auth_middleware.py`,
+  `meta/services/permission_service.py`
+- **状态**: 待处理（测试侧已规避，产品侧未改）
+- **优先级**: 中
+
 ---
 
 ## P3 - 前端迁移 (v1 → v2)

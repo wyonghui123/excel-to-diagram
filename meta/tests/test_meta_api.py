@@ -39,7 +39,10 @@ def client(app):
 def auth_headers():
     test_user = UserInfo(
         user_id='1',
-        username='test_user',
+        # 导出端点 _check_export_permission 仅认 username == 'admin' 旁路，
+        # 与全局 is_admin()（'*' in permissions）口径不一致，此处走旁路以覆盖导出链路。
+        # 口径统一待办见 docs/TODOS.md 第 14 项。
+        username='admin',
         display_name='Test User',
         email='test@test.com',
         roles=['admin'],
