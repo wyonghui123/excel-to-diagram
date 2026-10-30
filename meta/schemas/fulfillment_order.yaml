@@ -1,0 +1,389 @@
+# 履约单 (Fulfillment Order) — 销售订单波次 3 / 批次 4a
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.18.6
+#
+# 定位: **业务分组单据**（面向客户 / 站点 / 交付方式），不是执行引擎。
+#       `workflow_runs` 是执行实例（正常 1:1，返工 1:N），`tasks` 是执行节点；
+#       履约单不能自己跑，必须由 Run 驱动（§10.18.6）。
+#
+# 边界（批次 4a）:
+#   · 只建表 + 建单服务（编号 FO-<yyyyMM>-<seq>）；**不建任务、不写 workflow_runs**。
+#   · `site_id` 为整数列，暂不加 relation（站点对象批次 5 才落地，避免依赖不存在的对象）。
+#   · 不写 `fulfillment_status`（INV-1 唯一写入口仍归 sales_order_fulfillment_service）。
+
+id: fulfillment_order
+name: 履约单
+table_name: fulfillment_orders
+description: 履约业务分组单据（按客户 / 站点 / 交付方式分组；执行由 workflow_run 驱动）
+display_name_field: fulfillment_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 履约单
+  category: business_document
+  business_key: [fulfillment_no]
+  aliases:
+    - 履约单
+    - 履约分组
+    - Fulfillment Order
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号由 fulfillment_order_service._next_fulfillment_no() 生成后回填；
+  # 界面只读，用户不手工录入。
+  - id: fulfillment_no
+    name: 履约单号
+    type: string
+    db_column: fulfillment_no
+    required: true
+    unique: true
+    max_length: 32
+    description: 履约单编号（业务键，格式 FO-<yyyyMM>-<seq>，生成后不可修改）
+    semantics:
+      meaning: 履约单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: order_id
+    name: 来源订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 来源销售订单（创建时校验存在性）
+    semantics:
+      meaning: 来源销售订单
+      display:
+        type: association
+        target_type: sales_order
+        display_field: order_no
+      filterable: true
+      filter_type: relation
+      filter_label: 来源订单
+      filter_scope: local
+    ui:
+      widget: select
+      relation: sales_order
+
+  - id: customer_account_id
+    name: 客户
+    type: integer
+    db_column: customer_account_id
+    nullable: true
+    description: 履约客户（空 = 取来源订单抬头客户）
+    semantics:
+      meaning: 履约客户
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 客户
+      filter_scope: local
+    ui:
+      widget: select
+      relation: customer_account
+      clearable: true
+
+  # 批次 5 站点对象落地前不加 relation（避免依赖不存在的对象）
+  - id: site_id
+    name: 履约站点
+    type: integer
+    db_column: site_id
+    nullable: true
+    description: 履约站点（批次 5 站点对象落地前仅存整数，可空）
+    semantics:
+      meaning: 履约站点
+      filterable: true
+      filter_type: number
+      filter_label: 履约站点
+      filter_scope: local
+    ui:
+      widget: number
+      clearable: true
+
+  - id: fulfillment_type
+    name: 履约类型
+    type: string
+    db_column: fulfillment_type
+    required: true
+    default: delivery
+    description: 履约方式（决定路由判定的 delivery_mode 输入）
+    enum_values:
+      - value: delivery
+        label: 送货上门
+        color: primary
+        category: active
+        is_initial: true
+      - value: pickup
+        label: 客户自提
+        color: info
+        category: active
+      - value: onsite
+        label: 现场服务
+        color: warning
+        category: active
+      - value: remote
+        label: 远程交付
+        color: info
+        category: active
+    semantics:
+      meaning: 履约类型
+      filterable: true
+      filter_type: enum
+      filter_label: 履约类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 履约单状态（业务锚状态，非执行状态）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: planned
+        label: 已计划
+        color: primary
+        category: active
+      - value: in_progress
+        label: 进行中
+        color: warning
+        category: active
+      - value: completed
+        label: 已完成
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 履约单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 由 4b 编排批次回填；本批只留字段，不写 workflow_runs
+  - id: workflow_run_id
+    name: 编排实例
+    type: integer
+    db_column: workflow_run_id
+    nullable: true
+    description: 驱动的 workflow_runs 主键（4b 编排批次回填，可空）
+    semantics:
+      meaning: 编排执行实例
+      display:
+        type: association
+        target_type: workflow_run
+        display_field: id
+    ui:
+      widget: number
+      editable: false
+
+  - id: planned_date
+    name: 计划履约日
+    type: date
+    db_column: planned_date
+    nullable: true
+    description: 计划履约日期
+    semantics:
+      meaning: 计划履约日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划履约日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: notes
+    name: 备注
+    type: string
+    db_column: notes
+    nullable: true
+    max_length: 500
+    description: 履约备注
+    semantics:
+      meaning: 履约备注
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [fulfillment_no]
+    unique: true
+    name: uq_fulfillment_no
+  - fields: [order_id]
+    name: idx_fulfillment_order_order
+  - fields: [status]
+    name: idx_fulfillment_order_status
+
+relations:
+  - id: fulfillment_order_to_sales_order
+    name: 来源订单
+    type: reference
+    target: sales_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 来源销售订单引用
+  - id: fulfillment_order_to_customer_account
+    name: 客户
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 履约客户引用（可空）
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 履约单
+    columns:
+      - field: fulfillment_no
+        width: 160
+        sortable: true
+      - field: order_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: customer_account_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: fulfillment_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: planned_date
+        width: 130
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: fulfillment_no
+      order: desc
+    actions:
+      - id: create
+        label: 新建履约单
+        icon: plus
+        type: primary
+        permission: fulfillment_order:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 履约单信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [fulfillment_no, order_id, status]
+          - fields: [customer_account_id, site_id]
+          - fields: [fulfillment_type, planned_date]
+      - title: 编排
+        columns:
+          - fields: [workflow_run_id]
+      - title: 备注
+        columns:
+          - fields: [notes]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    facets:
+      - title: 基本信息
+        id: fulfillment_order_basic
+        type: fieldGroup
+        fields:
+          - fulfillment_no
+          - order_id
+          - customer_account_id
+          - site_id
+          - fulfillment_type
+          - status
+          - planned_date
+      - title: 编排
+        id: fulfillment_order_execution
+        type: fieldGroup
+        fields:
+          - workflow_run_id
+      - title: 系统信息
+        id: fulfillment_order_system
+        type: fieldGroup
+        fields:
+          - notes
+          - created_at
+          - updated_at

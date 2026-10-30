@@ -863,7 +863,7 @@
       "table": "exclusion_groups"
     },
     "external_rate_source": {
-      "hash": "665967a7206f68da00b7d31beb423eac",
+      "hash": "bd1b17748c737081abcd3db5bfb3393e",
       "fields": [
         "created_by",
         "updated_by",
@@ -874,6 +874,10 @@
         "quote_code",
         "calendar_id",
         "fallback_rule",
+        "override_rate",
+        "override_valid_from",
+        "override_valid_to",
+        "override_reason",
         "description",
         "created_at",
         "updated_at"
@@ -910,6 +914,44 @@
         "updated_at"
       ],
       "table": "filter_variants"
+    },
+    "fulfillment_order": {
+      "hash": "3ca9ec00c98d9a4346586d371ef3b19b",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "fulfillment_no",
+        "order_id",
+        "customer_account_id",
+        "site_id",
+        "fulfillment_type",
+        "status",
+        "workflow_run_id",
+        "planned_date",
+        "notes",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "fulfillment_orders"
+    },
+    "fulfillment_routing_rule": {
+      "hash": "3e90ff429dbd69dee01663c5f90208cd",
+      "fields": [
+        "id",
+        "priority",
+        "item_type",
+        "procurement_type",
+        "delivery_mode",
+        "site_id",
+        "workflow_key",
+        "is_default",
+        "enabled",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "fulfillment_routing_rules"
     },
     "group_data_permission": {
       "hash": "dd130824d1d7a4a2db021c4d32061bc9",
@@ -2091,6 +2133,20 @@
       ],
       "table": "scheduled_tasks"
     },
+    "service_event": {
+      "hash": "d58119aa25b2d64cf5b412471e2ff37b",
+      "fields": [
+        "id",
+        "work_order_id",
+        "event_type",
+        "occurred_at",
+        "actor",
+        "payload",
+        "note",
+        "created_at"
+      ],
+      "table": "service_events"
+    },
     "service_module": {
       "hash": "cf94002c4684db127c3ec96e0c0cbceb",
       "fields": [
@@ -2116,6 +2172,101 @@
         "bo_density"
       ],
       "table": "service_modules"
+    },
+    "shipment": {
+      "hash": "d5714bc63f021503ee43a76d06ff51ef",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "delivery_no",
+        "order_id",
+        "ship_from_location_id",
+        "ship_to_party_id",
+        "ship_to_address_text",
+        "carrier_name",
+        "tracking_no",
+        "waybill_no",
+        "planned_ship_date",
+        "actual_ship_date",
+        "actual_arrival_date",
+        "signature_ref",
+        "status",
+        "source",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "shipments"
+    },
+    "shipment_line": {
+      "hash": "cd63577eae4f0ca7f629ae89a5deccaa",
+      "fields": [
+        "id",
+        "delivery_id",
+        "schedule_id",
+        "order_line_id",
+        "item_id",
+        "uom_id",
+        "qty",
+        "lot_no",
+        "serial_no",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "shipment_lines"
+    },
+    "sla_coverage": {
+      "hash": "6150faf056b72e5afc41429c93b11676",
+      "fields": [
+        "id",
+        "name",
+        "org_id",
+        "calendar_id",
+        "start_date",
+        "end_date",
+        "active",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sla_coverages"
+    },
+    "sla_coverage_rule": {
+      "hash": "c32ff92cd8a72a19b83089adc18aa87c",
+      "fields": [
+        "id",
+        "coverage_id",
+        "severity",
+        "channel",
+        "first_response_minutes",
+        "first_response_warn_minutes",
+        "resolution_minutes",
+        "resolution_warn_minutes",
+        "seq",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sla_coverage_rules"
+    },
+    "sla_milestone": {
+      "hash": "1a3b26e62638d12b6cee28835a95ad97",
+      "fields": [
+        "id",
+        "work_order_id",
+        "milestone_type",
+        "state",
+        "due_at",
+        "warn_at",
+        "started_at",
+        "paused_total_minutes",
+        "completed_at",
+        "warned_at",
+        "breached_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "sla_milestones"
     },
     "sourcing_mode_policy": {
       "hash": "9f9c047584b487a4b05f6e07699d0675",
@@ -2534,7 +2685,71 @@
         "child_count"
       ],
       "table": "versions"
+    },
+    "work_order": {
+      "hash": "ba981fcaa66d7898e0e1b0ecda845478",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "work_order_no",
+        "order_type",
+        "schedule_id",
+        "source_demand_type",
+        "source_demand_id",
+        "order_id",
+        "order_line_id",
+        "customer_account_id",
+        "severity",
+        "channel",
+        "status",
+        "coverage_id",
+        "asset_ref",
+        "opened_at",
+        "first_response_at",
+        "resolved_at",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_orders"
+    },
+    "work_order_component": {
+      "hash": "07287e9095179edf11569ca0b5db700f",
+      "fields": [
+        "id",
+        "work_order_id",
+        "structure_id",
+        "structure_line_id",
+        "component_item_id",
+        "line_no",
+        "qty_per",
+        "fixed_qty",
+        "scrap_rate",
+        "qty_required",
+        "optional_flag",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_order_components"
+    },
+    "work_order_operation": {
+      "hash": "0d4890b9c37198f780aa645c16c7c01f",
+      "fields": [
+        "id",
+        "work_order_id",
+        "seq",
+        "work_center_id",
+        "operation_name",
+        "setup_minutes",
+        "run_minutes",
+        "required_skill",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_order_operations"
     }
   },
-  "last_sync": "2026-10-29T22:40:28.735438"
+  "last_sync": "2026-10-30T20:28:01.924953"
 }

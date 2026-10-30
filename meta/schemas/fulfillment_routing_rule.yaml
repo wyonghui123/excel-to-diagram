@@ -1,0 +1,351 @@
+# 履约路由规则 (Fulfillment Routing Rule) — 销售订单波次 3 / 批次 4a
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.18.3
+#
+# 定位: 路由判定策略表（批次 4）。匹配键 = item_type / procurement_type /
+#       delivery_mode / site_id → workflow_key；**不做通用规则引擎**，
+#       先 4 条默认规则（迁移 v158 种子）+ 表覆盖（§10.18.3）。
+#
+# 匹配口径（由 fulfillment_routing_service 强制）:
+#   · 规则字段为 NULL = 通配（不参与匹配）；全部为 NULL 的规则兜底全部输入。
+#   · 按 priority ASC, id ASC 取第一条命中；`is_default=1` 仅标记种子/兜底用途。
+#   · 无任何 enabled 规则或全部不命中且无 is_default 规则 → DEFAULT_ROUTING_MISS。
+
+id: fulfillment_routing_rule
+name: 履约路由规则
+table_name: fulfillment_routing_rules
+description: 履约路由判定策略（匹配键 → workflow_key，按 priority 优先）
+display_name_field: workflow_key
+
+semantics:
+  meaning: 履约路由规则
+  category: configuration
+  business_key: []
+  aliases:
+    - 履约路由规则
+    - 路由判定
+    - Fulfillment Routing Rule
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 100
+    description: 优先级（数字越小越先命中）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 匹配优先级
+      filterable: true
+      filter_type: number
+      filter_label: 优先级
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: item_type
+    name: 物料类型
+    type: string
+    db_column: item_type
+    nullable: true
+    max_length: 20
+    description: 匹配键：物料类型（空 = 通配）
+    enum_values:
+      - value: goods
+        label: 实物
+        color: primary
+        category: active
+      - value: service
+        label: 服务
+        color: info
+        category: active
+    semantics:
+      meaning: 物料类型匹配键
+      filterable: true
+      filter_type: enum
+      filter_label: 物料类型
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  - id: procurement_type
+    name: 供应类型
+    type: string
+    db_column: procurement_type
+    nullable: true
+    max_length: 20
+    description: 匹配键：供应类型（make / buy / stock / service；空 = 通配）
+    enum_values:
+      - value: make
+        label: 自制
+        color: primary
+        category: active
+      - value: buy
+        label: 采购
+        color: info
+        category: active
+      - value: stock
+        label: 库存
+        color: success
+        category: active
+      - value: service
+        label: 服务
+        color: warning
+        category: active
+    semantics:
+      meaning: 供应类型匹配键
+      filterable: true
+      filter_type: enum
+      filter_label: 供应类型
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  - id: delivery_mode
+    name: 交付方式
+    type: string
+    db_column: delivery_mode
+    nullable: true
+    max_length: 20
+    description: 匹配键：交付方式（空 = 通配）
+    enum_values:
+      - value: delivery
+        label: 送货上门
+        color: primary
+        category: active
+      - value: pickup
+        label: 客户自提
+        color: info
+        category: active
+      - value: onsite
+        label: 现场服务
+        color: warning
+        category: active
+      - value: remote
+        label: 远程交付
+        color: info
+        category: active
+    semantics:
+      meaning: 交付方式匹配键
+      filterable: true
+      filter_type: enum
+      filter_label: 交付方式
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  # 批次 5 站点对象落地前不加 relation（避免依赖不存在的对象）
+  - id: site_id
+    name: 站点
+    type: integer
+    db_column: site_id
+    nullable: true
+    description: 匹配键：履约站点（空 = 通配）
+    semantics:
+      meaning: 履约站点匹配键
+    ui:
+      widget: number
+      clearable: true
+
+  - id: workflow_key
+    name: 编排模板
+    type: string
+    db_column: workflow_key
+    required: true
+    max_length: 64
+    description: 命中后使用的编排模板键（如 wf-fulfill-stock）
+    semantics:
+      meaning: 编排模板键
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: is_default
+    name: 默认规则
+    type: boolean
+    db_column: is_default
+    required: true
+    default: false
+    description: 默认规则标记（种子 / 兜底用途；匹配仍按 priority）
+    semantics:
+      meaning: 默认规则标记
+    ui:
+      widget: switch
+
+  - id: enabled
+    name: 启用
+    type: boolean
+    db_column: enabled
+    required: true
+    default: true
+    description: 是否启用（停用规则不参与匹配）
+    semantics:
+      meaning: 规则启用标记
+      filterable: true
+      filter_type: enum
+      filter_label: 启用
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 200
+    description: 备注
+    semantics:
+      meaning: 规则备注
+      data_category: text
+    ui:
+      widget: input
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [enabled, priority]
+    name: idx_fulfillment_routing_lookup
+  - fields: [workflow_key]
+    name: idx_fulfillment_routing_workflow
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 履约路由规则
+    columns:
+      - field: priority
+        width: 90
+        sortable: true
+      - field: item_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: procurement_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: delivery_mode
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: site_id
+        width: 100
+      - field: workflow_key
+        width: 200
+      - field: is_default
+        width: 100
+      - field: enabled
+        width: 90
+    defaultSort:
+      field: priority
+      order: asc
+    actions:
+      - id: create
+        label: 新建路由规则
+        icon: plus
+        type: primary
+        permission: fulfillment_routing_rule:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 履约路由规则
+    layout: vertical
+    sections:
+      - title: 匹配条件
+        columns:
+          - fields: [priority, item_type]
+          - fields: [procurement_type, delivery_mode]
+          - fields: [site_id]
+      - title: 路由结果
+        columns:
+          - fields: [workflow_key]
+          - fields: [is_default, enabled]
+      - title: 备注
+        columns:
+          - fields: [remark]
+  detail:
+    facets:
+      - title: 匹配条件
+        id: fulfillment_routing_match
+        type: fieldGroup
+        fields:
+          - priority
+          - item_type
+          - procurement_type
+          - delivery_mode
+          - site_id
+      - title: 路由结果
+        id: fulfillment_routing_result
+        type: fieldGroup
+        fields:
+          - workflow_key
+          - is_default
+          - enabled
+      - title: 系统信息
+        id: fulfillment_routing_system
+        type: fieldGroup
+        fields:
+          - remark
+          - created_at
+          - updated_at

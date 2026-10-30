@@ -1,14 +1,16 @@
 # 服务工单头 (Work Order) — 销售订单波次 3 / B6
 # 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6 / §10.7 / §10.15
 #
-# 定位: 服务执行单据（作业层统一契约）。`order_type` 本波只实现 service，
-#       其余值预留给生产 / 维修 / 安装 / 保养（§10.15）。
+# 定位: 作业层统一单据（作业层统一契约）。`order_type` 已启用 service / production，
+#       repair / install / maintenance 预留给后续批次（§10.15）。
 #       与架构元模型的 service_module（服务模块，三级业务分类）无关，勿混淆。
 #
-# 挂载点: `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）。
+# 挂载点（按 order_type 分流，服务层强制）:
+#   · service    → `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）
+#   · production → `source_demand_type` + `source_demand_id` 必填（计划行 / 订单行）
 #
-# 服务层不变量（YAML 表达不了的，由 work_order_service 强制）:
-#   R-ST-0 schedule_id 必填且计划行 schedule_kind='service'；否则 ST_SCHEDULE_INVALID
+# 服务层不变量（YAML 表达不了的，由 work_order_service 强制；R-ST-* 为 service 专属）:
+#   R-ST-0（service 专属）schedule_id 必填且计划行 schedule_kind='service'；否则 ST_SCHEDULE_INVALID
 #   R-ST-1 severity 必填、channel 可空通配；阈值由 sla_coverage_rules 提供
 #   R-ST-2 同一工单必须恰好命中 1 条 SLA 规则；0 / 多条不生成里程碑，
 #          写 trace 并提示 SLA_RULE_AMBIGUOUS
@@ -19,6 +21,13 @@
 #   R-ST-7 服务完成 → service 计划行 completed → service_status 重算，
 #           **不写** fulfillment_status（INV-1 唯一写入口仍归履约服务）
 #   R-ST-8 取消工单需同时把计划行置 cancelled 或改约；否则 ST_SCHEDULE_DESYNC
+#
+# 生产工单（批次 4a，§10.15 / §10.16）:
+#   P-1 source_demand_type ∈ {sales_order_schedule, sales_order_line} 且 source_demand_id 必填；
+#       否则 ST_SOURCE_DEMAND_REQUIRED / ST_SOURCE_DEMAND_INVALID
+#   P-2 禁 asset_ref（ST_ASSET_NOT_ALLOWED）、禁 coverage_id（ST_SLA_NOT_ALLOWED）、
+#       禁挂 schedule_kind='service' 的计划行（ST_SCHEDULE_INVALID）
+#   P-3 不匹配 SLA 覆盖、不生成里程碑、不写 service_events（只写 change_events 一条 state_change）
 
 id: work_order
 name: 服务工单
@@ -43,6 +52,7 @@ deletion_policy:
   restrict_on: []
   cascade_delete:
     - work_order_operations
+    - work_order_components
     - sla_milestones
     - service_events
 
@@ -109,7 +119,7 @@ fields:
     db_column: order_type
     required: true
     default: service
-    description: 工单类型（本波启用 service，其余预留给生产作业层）
+    description: 工单类型（service / production 已启用；repair / install / maintenance 预留）
     enum_values:
       - value: service
         label: 服务
@@ -118,8 +128,8 @@ fields:
         is_initial: true
       - value: production
         label: 生产
-        color: info
-        category: inactive
+        color: primary
+        category: active
       - value: repair
         label: 维修
         color: info
@@ -141,13 +151,15 @@ fields:
     ui:
       widget: select
 
-  # R-ST-0：唯一挂载点，仅接受 schedule_kind='service' 的计划行
+  # R-ST-0（service 专属）：service 工单的唯一挂载点，仅接受 schedule_kind='service' 的计划行；
+  # production 走 source_demand_type/id，本字段可空。
   - id: schedule_id
     name: 服务计划行
     type: integer
     db_column: schedule_id
-    required: true
-    description: 服务计划行引用（必须 schedule_kind='service'）
+    required: false
+    nullable: true
+    description: 服务计划行引用（service 必填且 schedule_kind='service'；production 可空）
     semantics:
       meaning: 服务承诺计划行
       display:
@@ -187,6 +199,49 @@ fields:
       widget: value_help
       relation: sales_order_schedule
       multiple: false
+
+  # production 需求追溯（§10.15 校验矩阵 / §10.16 对象链）
+  - id: source_demand_type
+    name: 需求来源类型
+    type: string
+    db_column: source_demand_type
+    nullable: true
+    max_length: 40
+    default: null
+    description: 生产工单的需求来源类型（service 为空）
+    enum_values:
+      - value: sales_order_schedule
+        label: 计划行
+        color: primary
+        category: active
+      - value: sales_order_line
+        label: 订单行
+        color: info
+        category: active
+    semantics:
+      meaning: 生产需求来源类型
+      filterable: true
+      filter_type: enum
+      filter_label: 需求来源类型
+      filter_scope: local
+    ui:
+      widget: select
+      clearable: true
+
+  - id: source_demand_id
+    name: 需求来源 ID
+    type: integer
+    db_column: source_demand_id
+    nullable: true
+    description: 需求来源主键（配合 source_demand_type；service 为空）
+    semantics:
+      meaning: 生产需求来源主键
+      filterable: true
+      filter_type: number
+      filter_label: 需求来源 ID
+      filter_scope: local
+    ui:
+      widget: number
 
   - id: order_id
     name: 来源订单
@@ -247,14 +302,15 @@ fields:
       relation: customer_account
       clearable: true
 
-  # R-ST-1：条件列必填；阈值命中见 sla_coverage_rules
+  # R-ST-1（service 专属）：条件列必填；阈值命中见 sla_coverage_rules。
+  # production 无 SLA，本字段可空（避免生产工单被条件列空转阻塞）。
   - id: severity
     name: 严重度
     type: string
     db_column: severity
-    required: true
+    nullable: true
     max_length: 20
-    description: 严重度（SLA 规则命中的条件列，必填）
+    description: 严重度（SLA 条件列；service 由服务层强制必填，production 可空）
     enum_values:
       - value: critical
         label: 严重
@@ -570,6 +626,9 @@ indexes:
     name: idx_work_order_schedule
   - fields: [status]
     name: idx_work_order_status
+  # production 需求追溯反查（§10.16 R5：计划行 → 生产工单 1:N）
+  - fields: [source_demand_type, source_demand_id]
+    name: idx_work_order_source_demand
 
 relations:
   - id: work_order_to_schedule
@@ -621,6 +680,10 @@ ui_view_config:
       - field: work_order_no
         width: 160
         sortable: true
+      - field: order_type
+        width: 100
+        filterable: true
+        filter_type: select
       - field: order_id
         width: 160
         filterable: true
@@ -669,6 +732,7 @@ ui_view_config:
         columns:
           - fields: [work_order_no, order_type, status]
           - fields: [schedule_id, order_id]
+          - fields: [source_demand_type, source_demand_id]
           - fields: [customer_account_id]
       - title: 服务与 SLA
         columns:
@@ -692,6 +756,8 @@ ui_view_config:
           - order_id
           - order_line_id
           - schedule_id
+          - source_demand_type
+          - source_demand_id
           - customer_account_id
       - title: 服务与 SLA
         id: work_order_sla
@@ -725,3 +791,11 @@ ui_view_config:
       useMetaList: true
       enableDetail: true
       enableAutoCrud: true
+    # 组件由 BOM 展开生成（expand_components），界面只读
+    - child_object: work_order_component
+      title: 工单组件
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false

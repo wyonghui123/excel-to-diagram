@@ -1,0 +1,319 @@
+# 工单组件 (Work Order Component) — 销售订单波次 3 / 批次 4a
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.15 / §10.16
+#
+# 定位: 生产工单的投料明细，由 `work_order_service.expand_components()` 按
+#       `item_structures(usage='production')` 展开生成（幂等重建，界面只读）。
+#       服务工单的备件消耗批次 5 再启用；本表先只服务 production。
+#
+# 父字段: work_order_id（挂 work_orders，子表通过 work_order.yaml 的 child_sections 挂载）。
+#
+# 服务层口径（YAML 表达不了的，由 work_order_service 强制）:
+#   · qty_required = (qty_per × 工单数量 + fixed_qty) × (1 + scrap_rate)，
+#     ROUND_HALF_UP 保留 4 位小数
+#   · optional 行取 default_qty（缺省 min_qty），并按 min_qty / max_qty 夹紧
+#   · 结构选择 alternative_no ASC, revision DESC, id DESC 取第一条
+
+id: work_order_component
+name: 工单组件
+table_name: work_order_components
+description: 生产工单投料明细（按 BOM 展开生成）
+display_name_field: id
+parent_object: work_order
+
+hierarchy:
+  parent_field: work_order_id
+
+semantics:
+  meaning: 工单组件
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 工单组件
+    - 投料明细
+    - Work Order Component
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_order_id
+    name: 工单
+    type: integer
+    db_column: work_order_id
+    required: true
+    description: 所属工单（父字段）
+    semantics:
+      meaning: 所属工单
+      display:
+        type: association
+        target_type: work_order
+        display_field: work_order_no
+    ui:
+      widget: select
+      relation: work_order
+      hidden_in_form: true
+
+  - id: structure_id
+    name: BOM 结构
+    type: integer
+    db_column: structure_id
+    nullable: true
+    description: 展开来源的 item_structures 主键
+    semantics:
+      meaning: BOM 结构头
+      display:
+        type: association
+        target_type: item_structure
+        display_field: id
+    ui:
+      widget: select
+      relation: item_structure
+      hidden_in_form: true
+
+  - id: structure_line_id
+    name: BOM 结构行
+    type: integer
+    db_column: structure_line_id
+    nullable: true
+    description: 展开来源的 item_structure_lines 主键
+    semantics:
+      meaning: BOM 结构行
+      display:
+        type: association
+        target_type: item_structure_line
+        display_field: id
+    ui:
+      widget: number
+      hidden_in_form: true
+
+  - id: component_item_id
+    name: 组件物料
+    type: integer
+    db_column: component_item_id
+    required: true
+    description: 投料物料
+    semantics:
+      meaning: 投料物料
+      display:
+        type: association
+        target_type: item
+        display_field: item_no
+      filterable: true
+      filter_type: relation
+      filter_label: 组件物料
+      filter_scope: local
+    ui:
+      widget: select
+      relation: item
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    nullable: true
+    description: 结构行行号（继承 item_structure_lines.line_no）
+    semantics:
+      meaning: 组件行号
+      filterable: true
+      filter_type: number
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: qty_per
+    name: 单位用量
+    type: number
+    db_column: qty_per
+    nullable: true
+    decimal_places: 6
+    description: 每工单数量的用量（快照自结构行）
+    semantics:
+      meaning: 单位用量
+    ui:
+      widget: number
+
+  - id: fixed_qty
+    name: 固定用量
+    type: number
+    db_column: fixed_qty
+    nullable: true
+    decimal_places: 6
+    description: 与数量无关的固定用量（快照自结构行）
+    semantics:
+      meaning: 固定用量
+    ui:
+      widget: number
+
+  - id: scrap_rate
+    name: 损耗率
+    type: number
+    db_column: scrap_rate
+    nullable: true
+    decimal_places: 4
+    description: 损耗率（快照自结构行，0~1）
+    semantics:
+      meaning: 损耗率
+    ui:
+      widget: number
+
+  - id: qty_required
+    name: 需求量
+    type: number
+    db_column: qty_required
+    nullable: true
+    decimal_places: 4
+    description: 需求量（含损耗，4 位小数；由服务层计算）
+    semantics:
+      meaning: 组件需求量
+      filterable: true
+      filter_type: number
+      filter_label: 需求量
+      filter_scope: local
+    ui:
+      widget: number
+      editable: false
+
+  - id: optional_flag
+    name: 可选组件
+    type: boolean
+    db_column: optional_flag
+    required: true
+    default: false
+    description: 是否可选组件（结构行 optional_flag 快照）
+    semantics:
+      meaning: 可选组件标记
+    ui:
+      widget: switch
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [work_order_id]
+    name: idx_work_order_component_work_order
+  - fields: [component_item_id]
+    name: idx_work_order_component_item
+
+relations:
+  - id: work_order_component_to_work_order
+    name: 所属工单
+    type: reference
+    target: work_order
+    source_field: work_order_id
+    target_field: id
+    cardinality: N:1
+    description: 生产工单引用
+  - id: work_order_component_to_item
+    name: 组件物料
+    type: reference
+    target: item
+    source_field: component_item_id
+    target_field: id
+    cardinality: N:1
+    description: 投料物料引用
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: 工单组件
+    columns:
+      - field: line_no
+        width: 80
+      - field: component_item_id
+        width: 180
+      - field: qty_per
+        width: 110
+      - field: fixed_qty
+        width: 110
+      - field: scrap_rate
+        width: 100
+      - field: qty_required
+        width: 120
+      - field: optional_flag
+        width: 100
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 工单组件
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [component_item_id, line_no, optional_flag]
+      - title: 用量
+        columns:
+          - fields: [qty_per, fixed_qty, scrap_rate]
+          - fields: [qty_required]
+  detail:
+    facets:
+      - title: 基本信息
+        id: work_order_component_basic
+        type: fieldGroup
+        fields:
+          - component_item_id
+          - line_no
+          - optional_flag
+      - title: 用量
+        id: work_order_component_qty
+        type: fieldGroup
+        fields:
+          - qty_per
+          - fixed_qty
+          - scrap_rate
+          - qty_required
+      - title: 系统信息
+        id: work_order_component_system
+        type: fieldGroup
+        fields:
+          - structure_id
+          - structure_line_id
+          - created_at
+          - updated_at

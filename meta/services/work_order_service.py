@@ -1,6 +1,17 @@
 # -*- coding: utf-8 -*-
 """服务工单 / SLA 服务 —— B6：工单创建、SLA 覆盖命中、业务日历计时与事件结算。
 
+批次 4a 增补：`order_type=production` 分支（需求追溯 + 组件展开）。
+  · service 路径行为不变（R-ST-0..R-ST-8 全部收窄为 service 专属）。
+  · production 走 `source_demand_type` + `source_demand_id`（计划行 / 订单行），
+    禁 `asset_ref` / `coverage_id` / `schedule_kind='service'`；
+    不匹配 SLA、不生成里程碑、不写 service_events（只写 change_events 一条）。
+  · `expand_components()` 按 `item_structures(usage='production')` 展开组件，
+    幂等重建 `work_order_components`（先 DELETE 再 INSERT）。
+  · 物料与数量由需求来源**自动推导**（计划行 → 订单行 item_id + promised_qty，
+    未承诺时回退订单行 qty；订单行 → 自身 item_id / qty），payload 显式值优先；
+    推导不出时记 `no_structure(missing_item_or_qty)`，不阻断建单。
+
 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md
       §10.5 对象模型 / §10.6 状态机与 SLA 规则 / §10.7 接线 / §10.10 B6 验收
 
@@ -22,22 +33,38 @@
 import json
 import logging
 from datetime import datetime, time, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 WORK_ORDER_TABLE = 'work_orders'
 OPERATION_TABLE = 'work_order_operations'
+COMPONENT_TABLE = 'work_order_components'
 COVERAGE_TABLE = 'sla_coverages'
 COVERAGE_RULE_TABLE = 'sla_coverage_rules'
 MILESTONE_TABLE = 'sla_milestones'
 EVENT_TABLE = 'service_events'
 SCHEDULE_TABLE = 'sales_order_schedules'
+ORDER_LINE_TABLE = 'sales_order_lines'
+SALES_ORDER_TABLE = 'sales_orders'
+STRUCTURE_TABLE = 'item_structures'
+STRUCTURE_LINE_TABLE = 'item_structure_lines'
 CALENDAR_TABLE = 'calendars'
 CALENDAR_DAY_TABLE = 'calendar_days'
 CHANGE_EVENT_TABLE = 'change_events'
 
 SCHEDULE_KIND_SERVICE = 'service'
+
+ORDER_TYPE_SERVICE = 'service'
+ORDER_TYPE_PRODUCTION = 'production'
+
+SOURCE_DEMAND_SCHEDULE = 'sales_order_schedule'
+SOURCE_DEMAND_LINE = 'sales_order_line'
+SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE)
+
+STRUCTURE_USAGE_PRODUCTION = 'production'
+STRUCTURE_STATUS_ACTIVE = 'active'
 
 MILESTONE_FIRST_RESPONSE = 'first_response'
 MILESTONE_RESOLUTION = 'resolution'
@@ -125,6 +152,21 @@ def _int_minutes(value: Any, default: int = 0) -> int:
                              rule='SLA_MINUTES_INVALID')
 
 
+def _num(value: Any) -> Optional[float]:
+    if _blank(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _round4(value: float) -> float:
+    """ROUND_HALF_UP 保留 4 位小数（组件需求量口径）。"""
+    return float(Decimal(str(value)).quantize(Decimal('0.0001'),
+                                              rounding=ROUND_HALF_UP))
+
+
 class WorkOrderService:
     """服务工单创建、SLA 覆盖命中、业务日历计时与事件结算。"""
 
@@ -134,8 +176,19 @@ class WorkOrderService:
     # ------------------------------------------------------------------ 创建
 
     def create_work_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """创建服务工单并生成 SLA 里程碑；返回 `{'id', 'work_order_no', 'status', 'sla'}`。"""
+        """按 order_type 分流：service（SLA 路径，行为不变）/ production（需求追溯 + 组件展开）。"""
         payload = dict(payload or {})
+        order_type = payload.get('order_type') or ORDER_TYPE_SERVICE
+        if order_type == ORDER_TYPE_PRODUCTION:
+            return self._create_production(payload)
+        if order_type != ORDER_TYPE_SERVICE:
+            raise WorkOrderError(
+                '工单类型 %s 尚未启用（仅支持 service / production）' % order_type,
+                field_name='order_type', rule='ST_ORDER_TYPE_UNSUPPORTED')
+        return self._create_service(payload)
+
+    def _create_service(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """创建服务工单并生成 SLA 里程碑；返回 `{'id', 'work_order_no', 'status', 'sla'}`。"""
         schedule = self._require_service_schedule(payload.get('schedule_id'))
 
         order_id = payload.get('order_id')
@@ -175,6 +228,8 @@ class WorkOrderService:
             'status': payload.get('status') or STATUS_NEW,
             'coverage_id': None,
             'asset_ref': payload.get('asset_ref'),
+            'source_demand_type': None,
+            'source_demand_id': None,
             'opened_at': opened_at,
             'first_response_at': payload.get('first_response_at'),
             'resolved_at': payload.get('resolved_at'),
@@ -240,6 +295,302 @@ class WorkOrderService:
             'schedule_id': schedule.get('id'),
             'sla': sla,
         }
+
+    # -------------------------------------------------------- 生产工单（批次 4a）
+
+    def _create_production(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """创建生产工单：需求追溯 + 可选组件展开；不匹配 SLA、不写 service_events。"""
+        demand_type = payload.get('source_demand_type')
+        demand_id = payload.get('source_demand_id')
+        if _blank(demand_type) or _blank(demand_id) \
+                or str(demand_type) not in SOURCE_DEMAND_TYPES:
+            raise WorkOrderError(
+                '生产工单必须提供有效需求来源（source_demand_type / source_demand_id）',
+                field_name='source_demand_id', rule='ST_SOURCE_DEMAND_REQUIRED')
+
+        if not _blank(payload.get('asset_ref')):
+            raise WorkOrderError('生产工单不允许填写资产引用',
+                                 field_name='asset_ref',
+                                 rule='ST_ASSET_NOT_ALLOWED')
+        if not _blank(payload.get('coverage_id')):
+            raise WorkOrderError('生产工单不允许绑定 SLA 覆盖',
+                                 field_name='coverage_id',
+                                 rule='ST_SLA_NOT_ALLOWED')
+
+        demand = self._resolve_demand(str(demand_type), demand_id)
+
+        schedule_id = payload.get('schedule_id')
+        if not _blank(schedule_id):
+            self._reject_service_schedule(schedule_id)
+
+        order_line_id = payload.get('order_line_id')
+        if not _blank(order_line_id) \
+                and str(order_line_id) != str(demand.get('order_line_id')):
+            raise WorkOrderError('订单行与需求来源反查结果不一致',
+                                 field_name='order_line_id',
+                                 rule='ST_SOURCE_DEMAND_INVALID')
+        order_line_id = order_line_id if not _blank(order_line_id) \
+            else demand.get('order_line_id')
+
+        # 组件展开的物料与数量：payload 显式优先，缺省由需求来源自动推导（T4.2）
+        item_id = payload.get('item_id')
+        if _blank(item_id):
+            item_id = demand.get('item_id')
+        qty = payload.get('qty')
+        if _blank(qty):
+            qty = demand.get('qty')
+
+        customer_account_id = payload.get('customer_account_id')
+        if _blank(customer_account_id):
+            customer_account_id = demand.get('customer_account_id')
+
+        opened_at = payload.get('opened_at') or _now()
+        _parse_dt(opened_at)  # 格式校验（非法直接拒绝）
+
+        work_order_no = payload.get('work_order_no') or self._next_work_order_no()
+        now = _now()
+        row = {
+            'work_order_no': work_order_no,
+            'order_type': ORDER_TYPE_PRODUCTION,
+            'schedule_id': None if _blank(schedule_id) else schedule_id,
+            'order_id': demand.get('order_id'),
+            'order_line_id': order_line_id,
+            'customer_account_id': customer_account_id,
+            'severity': payload.get('severity'),
+            'channel': payload.get('channel'),
+            'status': payload.get('status') or STATUS_NEW,
+            'coverage_id': None,
+            'asset_ref': None,
+            'source_demand_type': str(demand_type),
+            'source_demand_id': demand_id,
+            'opened_at': opened_at,
+            'first_response_at': payload.get('first_response_at'),
+            'resolved_at': None,
+            'closed_at': None,
+            'created_at': now,
+            'updated_at': now,
+        }
+        work_order_id = self._insert(WORK_ORDER_TABLE, row)
+
+        # 生产工单无 SLA：只写 change_events 一条 state_change（P-3）
+        self._append_change_event(work_order_id, 'state_change',
+                                  {'status': (None, row['status'])})
+
+        expansion = self._maybe_expand_components(work_order_id, item_id, qty)
+        return {
+            'id': work_order_id,
+            'work_order_no': work_order_no,
+            'status': row['status'],
+            'order_type': ORDER_TYPE_PRODUCTION,
+            'schedule_id': row['schedule_id'],
+            'source_demand_type': row['source_demand_type'],
+            'source_demand_id': row['source_demand_id'],
+            'item_id': item_id,
+            'qty': qty,
+            'component_expansion': expansion,
+            'sla': None,
+        }
+
+    def _maybe_expand_components(self, work_order_id: int, item_id: Any,
+                                 qty: Any) -> Dict[str, Any]:
+        """由需求来源推导 item_id / qty 后自动展开组件；无结构不阻断建单。"""
+        if _blank(item_id) or _blank(qty):
+            return {'code': 'no_structure', 'count': 0, 'structure_id': None,
+                    'reason': 'missing_item_or_qty'}
+        result = self.expand_components(work_order_id, item_id, qty)
+        return {'code': result.get('code'),
+                'count': len(result.get('components') or []),
+                'structure_id': result.get('structure_id')}
+
+    def expand_components(self, work_order_id: Any, item_id: Any, qty: Any,
+                          as_of: Any = None) -> Dict[str, Any]:
+        """按 active `item_structures(usage='production')` 展开组件（幂等重建）。
+
+        口径:
+          · 结构选择：alternative_no ASC, revision DESC, id DESC 取第一条；
+            valid_from / valid_to 以业务日为界（NULL = 不限）。
+          · qty_required = (qty_per × qty + fixed_qty) × (1 + scrap_rate)，ROUND_HALF_UP 4 位。
+          · optional 行取 default_qty（缺省 min_qty），并按 min_qty / max_qty 夹紧。
+          · 先 DELETE 再 INSERT（重复调用结果一致）；无结构返回 no_structure 且不动既有行。
+        """
+        if _blank(work_order_id) or _blank(item_id):
+            raise WorkOrderError('组件展开需工单与物料', field_name='item_id',
+                                 rule='ST_COMPONENT_INPUT_INVALID')
+        quantity = _num(qty)
+        if quantity is None:
+            raise WorkOrderError('工单数量必须是数字：%s' % qty,
+                                 rule='ST_COMPONENT_INPUT_INVALID')
+        day = str(as_of or _now())[:10]
+
+        try:
+            structures = self.ds.query(
+                "SELECT id, item_id, usage, alternative_no, revision, base_qty, "
+                "status, valid_from, valid_to FROM %s "
+                "WHERE item_id = ? AND usage = ? AND status = ? "
+                "AND (valid_from IS NULL OR substr(valid_from, 1, 10) <= ?) "
+                "AND (valid_to IS NULL OR substr(valid_to, 1, 10) >= ?) "
+                "ORDER BY alternative_no ASC, revision DESC, id DESC LIMIT 1"
+                % STRUCTURE_TABLE,
+                [item_id, STRUCTURE_USAGE_PRODUCTION, STRUCTURE_STATUS_ACTIVE,
+                 day, day])
+        except Exception as e:  # 结构表未就绪 → 视为无结构（不阻断建单）
+            logger.warning('[work_order] 读取 production 结构失败: %s', e)
+            structures = []
+
+        if not structures:
+            return {'code': 'no_structure', 'structure_id': None, 'components': []}
+
+        structure_id = structures[0].get('id')
+        try:
+            lines = self.ds.query(
+                "SELECT id, structure_id, line_no, component_item_id, qty_per, "
+                "fixed_qty, scrap_rate, optional_flag, default_qty, min_qty, max_qty "
+                "FROM %s WHERE structure_id = ? "
+                "AND (valid_from IS NULL OR substr(valid_from, 1, 10) <= ?) "
+                "AND (valid_to IS NULL OR substr(valid_to, 1, 10) >= ?) "
+                "ORDER BY line_no, id" % STRUCTURE_LINE_TABLE,
+                [structure_id, day, day])
+        except Exception as e:  # 结构行表未就绪 → 视为无组件
+            logger.warning('[work_order] 读取 production 结构行失败: %s', e)
+            lines = []
+
+        self.ds.execute('DELETE FROM %s WHERE work_order_id = ?'
+                        % COMPONENT_TABLE, [work_order_id])
+
+        now = _now()
+        created: List[Dict[str, Any]] = []
+        for line in lines:
+            qty_required = self._component_qty_required(line, quantity)
+            self._insert(COMPONENT_TABLE, {
+                'work_order_id': work_order_id,
+                'structure_id': structure_id,
+                'structure_line_id': line.get('id'),
+                'component_item_id': line.get('component_item_id'),
+                'line_no': line.get('line_no'),
+                'qty_per': line.get('qty_per'),
+                'fixed_qty': line.get('fixed_qty'),
+                'scrap_rate': line.get('scrap_rate'),
+                'qty_required': qty_required,
+                'optional_flag': 1 if bool(line.get('optional_flag')) else 0,
+                'created_at': now,
+                'updated_at': now,
+            })
+            created.append({
+                'structure_line_id': line.get('id'),
+                'component_item_id': line.get('component_item_id'),
+                'line_no': line.get('line_no'),
+                'qty_required': qty_required,
+            })
+
+        return {'code': 'expanded', 'structure_id': structure_id,
+                'components': created}
+
+    @staticmethod
+    def _component_qty_required(line: Dict[str, Any],
+                                quantity: float) -> float:
+        scrap = _num(line.get('scrap_rate')) or 0.0
+        if bool(line.get('optional_flag')):
+            base = _num(line.get('default_qty'))
+            if base is None:
+                base = _num(line.get('min_qty')) or 0.0
+            minimum = _num(line.get('min_qty'))
+            maximum = _num(line.get('max_qty'))
+            value = base
+            if minimum is not None:
+                value = max(value, minimum)
+            if maximum is not None:
+                value = min(value, maximum)
+            value = value * (1 + scrap)
+        else:
+            value = ((_num(line.get('qty_per')) or 0.0) * quantity
+                     + (_num(line.get('fixed_qty')) or 0.0)) * (1 + scrap)
+        return _round4(value)
+
+    def _resolve_demand(self, demand_type: str,
+                        demand_id: Any) -> Dict[str, Any]:
+        """回查需求来源，冗余 order_id / order_line_id / customer_account_id / item_id / qty。"""
+        if demand_type == SOURCE_DEMAND_SCHEDULE:
+            rows = self.ds.query(
+                'SELECT id, order_id, line_id, schedule_kind, promised_qty '
+                'FROM %s WHERE id = ?' % SCHEDULE_TABLE, [demand_id])
+            if not rows:
+                raise WorkOrderError('需求来源计划行不存在',
+                                     field_name='source_demand_id',
+                                     rule='ST_SOURCE_DEMAND_INVALID')
+            schedule = rows[0]
+            # P-2：生产工单禁止追溯服务计划行
+            if str(schedule.get('schedule_kind')) == SCHEDULE_KIND_SERVICE:
+                raise WorkOrderError('生产工单不能追溯到服务计划行',
+                                     field_name='source_demand_id',
+                                     rule='ST_SCHEDULE_INVALID')
+            line_info = self._line_item_qty(schedule.get('line_id'))
+            qty = schedule.get('promised_qty')
+            if _blank(qty):
+                qty = line_info.get('qty')  # 未承诺数量时回退订单行数量
+            return {
+                'order_id': schedule.get('order_id'),
+                'order_line_id': schedule.get('line_id'),
+                'customer_account_id': self._order_customer(
+                    schedule.get('order_id')),
+                'item_id': line_info.get('item_id'),
+                'qty': qty,
+            }
+
+        rows = self.ds.query(
+            'SELECT id, order_id, item_id, qty FROM %s WHERE id = ?'
+            % ORDER_LINE_TABLE, [demand_id])
+        if not rows:
+            raise WorkOrderError('需求来源订单行不存在',
+                                 field_name='source_demand_id',
+                                 rule='ST_SOURCE_DEMAND_INVALID')
+        line = rows[0]
+        return {
+            'order_id': line.get('order_id'),
+            'order_line_id': line.get('id'),
+            'customer_account_id': self._order_customer(line.get('order_id')),
+            'item_id': line.get('item_id'),
+            'qty': line.get('qty'),
+        }
+
+    def _line_item_qty(self, line_id: Any) -> Dict[str, Any]:
+        """从订单行取 item_id / qty（列缺失或行不存在时 fail-open 返回空）。"""
+        if _blank(line_id):
+            return {'item_id': None, 'qty': None}
+        try:
+            rows = self.ds.query(
+                'SELECT id, item_id, qty FROM %s WHERE id = ?' % ORDER_LINE_TABLE,
+                [line_id])
+        except Exception as e:
+            logger.warning('[work_order] 读取订单行物料失败: %s', e)
+            return {'item_id': None, 'qty': None}
+        if not rows:
+            return {'item_id': None, 'qty': None}
+        return {'item_id': rows[0].get('item_id'), 'qty': rows[0].get('qty')}
+
+    def _order_customer(self, order_id: Any) -> Any:
+        """从销售订单头取客户；主表 / 列缺失时 fail-open 返回 None。"""
+        if _blank(order_id):
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT customer_account_id FROM %s WHERE id = ?'
+                % SALES_ORDER_TABLE, [order_id])
+        except Exception as e:
+            logger.warning('[work_order] 读取订单客户失败: %s', e)
+            return None
+        return rows[0].get('customer_account_id') if rows else None
+
+    def _reject_service_schedule(self, schedule_id: Any) -> None:
+        rows = self.ds.query(
+            'SELECT id, schedule_kind FROM %s WHERE id = ?' % SCHEDULE_TABLE,
+            [schedule_id])
+        if not rows:
+            raise WorkOrderError('计划行不存在', field_name='schedule_id',
+                                 rule='ST_SCHEDULE_INVALID')
+        if str(rows[0].get('schedule_kind')) == SCHEDULE_KIND_SERVICE:
+            raise WorkOrderError('生产工单不能挂载服务计划行',
+                                 field_name='schedule_id',
+                                 rule='ST_SCHEDULE_INVALID')
 
     # -------------------------------------------------------------- 覆盖命中
 

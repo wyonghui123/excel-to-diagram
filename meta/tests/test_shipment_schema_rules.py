@@ -58,6 +58,15 @@ def test_rule_transitions_match_state_machine(schema):
         assert rule['to_state'] == to_state
 
 
+def test_status_enum_contains_staged(schema):
+    """批次 4a T4.4：拣货确认态 `staged` 必须在状态枚举内（否则规则空转）。"""
+    status_field = next(f for f in schema['fields'] if f['id'] == 'status')
+    values = {item['value']: item for item in status_field['enum_values']}
+    assert 'staged' in values
+    assert values['staged']['label'] == '待发运'
+    assert values['staged']['category'] == 'active'
+
+
 def test_list_actions(schema):
     actions = schema['ui_view_config']['list']['actions']
     assert {action['id'] for action in actions} == _ACTION_IDS

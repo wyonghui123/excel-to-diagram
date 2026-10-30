@@ -98,6 +98,8 @@ CREATE TABLE work_orders (
     status TEXT,
     coverage_id INTEGER,
     asset_ref TEXT,
+    source_demand_type TEXT,
+    source_demand_id INTEGER,
     opened_at TEXT,
     first_response_at TEXT,
     resolved_at TEXT,
