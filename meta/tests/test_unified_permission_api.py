@@ -621,17 +621,22 @@ class TestPermissionSimulate:
         assert data['data']['allowed'] is True
 
     def test_simulate_deny_no_intent(self, client):
-        """POST /api/v2/permissions/simulate → 无 Intent 拒绝"""
+        """POST /api/v2/permissions/simulate → 无 Intent 拒绝
+
+        [注] user_id=1 非 product#1 的 owner；默认 current_user=999 命中 owner 直通
+        （P4 owner-first 设计），会绕过本用例要验证的 no-intent 分支。
+        """
         resp = client.post('/api/v2/permissions/simulate', json={
             'role_ids': [999],
             'bo_id': 'product',
             'action_name': 'read',
             'record_id': 1,
+            'user_id': 1,
         })
         assert resp.status_code == 200
         data = resp.get_json()
         assert data['data']['allowed'] is False
-        assert data['data']['source'] == 'default_deny'
+        assert data['data']['source'] == 'no_intent_allows_all'
 
     def test_simulate_deny_exclude(self, client, app_with_db):
         """POST /api/v2/permissions/simulate → exclude 命中拒绝"""
@@ -649,11 +654,13 @@ class TestPermissionSimulate:
         conn.close()
 
         # product 1 owner_id=999 → exclude 命中
+        # [注] user_id=1 非 owner，否则 P4 owner-first 会先直通放行
         resp = client.post('/api/v2/permissions/simulate', json={
             'role_ids': [100],
             'bo_id': 'product',
             'action_name': 'read',
             'record_id': 1,
+            'user_id': 1,
         })
         assert resp.status_code == 200
         data = resp.get_json()

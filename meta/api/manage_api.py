@@ -56,16 +56,17 @@ def init_services(data_source=None):
         import logging
         logging.getLogger(__name__).warning("Schema sync skipped: %s", str(e))
 
-    # [A1 2026-10-02] 统一任务运行时底座四表（Task/TaskTemplate/Workflow/Run）
-    # 落平台库（task-model-design §12.1 Q1 拍板）；MetaObject 驱动、幂等；
-    # 失败只告警不阻断启动（与上方 Schema sync 同一容错口径）。
+    # [兜底 2026-10-30] 统一任务运行时底座四表（Task/TaskTemplate/Workflow/Run）：
+    # 启动期 meta/server.py 已 ensure（迁移 v154 亦可交付）；此处保留以覆盖
+    # headless 直接调用 manage API（未走 server 启动序）的场景。
     try:
         from meta.core.task_schema import ensure_task_tables
         ensure_task_tables(_data_source)
     except Exception as e:
         logger.warning("Task schema ensure skipped: %s", str(e))
 
-    # [A3 2026-10-02] 任务事件账两表（TASK_EVENT + WORKLOG），同落平台库、append-only
+    # [兜底 2026-10-30] 任务事件账两表（TASK_EVENT + WORKLOG）：启动期
+    # meta/server.py 已 ensure；此处保留以覆盖 headless 直接调用 manage API 的场景。
     try:
         from meta.core.task_event_schema import ensure_task_event_tables
         ensure_task_event_tables(_data_source)

@@ -277,7 +277,7 @@ fields:
     ui:
       widget: datetime
 
-  # M2 物料变式；P4 只留位置，不产生值
+  # M2 物料变式；Phase 1 manual 物化写入（spec: 2026-10-30-variant-item-materialization）
   - id: variant_item_id
     name: 变式物料
     type: integer
@@ -294,6 +294,22 @@ fields:
       widget: select
       relation: item
       multiple: false
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
+# [Variant Item Materialization Phase 1 2026-10-30]
+# manual 物化：把已求解 / 已冻结的实例固化为 draft 变式物料（幂等键
+# (model_item_id, config_hash)）。依据 docs/superpowers/specs/
+# 2026-10-30-variant-item-materialization-spec.md §3。本期不新增权限点迁移
+# （D10），端点仅 login_required。
+actions:
+  - id: materialize
+    name: 物化为物料
+    type: custom
+    method: POST
+    path: /api/v1/config/materialize
+    description: 把已求解/已冻结的配置实例固化为 draft 变式物料（幂等复用）
 
 indexes:
   - fields: [structure_id, config_hash]

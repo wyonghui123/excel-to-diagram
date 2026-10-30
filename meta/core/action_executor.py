@@ -2538,7 +2538,9 @@ class ActionExecutor:
             #       permission_rules / permission_set_data_permissions / permission_set_dimension_scopes)
             #       schema 中均无 relations 节, 导致删除角色永远卡在 FK check.
             # 修复: role 删除前先清空所有引用此 role 的中间表, 再走 FK check.
-            if meta_object.id == 'role':
+            # [v138 2026-10-30] 权限双轨收口：删除对象从 'role' 改为 'permission_set'
+            # （role.yaml 已退役，级联清理目标表本来就是 permission_set_*）
+            if meta_object.id in ('permission_set', 'role'):
                 self._cascade_pre_delete_role(id_value)
 
             ref_errors = self._check_reverse_fk_references(meta_object, id_value)

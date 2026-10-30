@@ -621,7 +621,10 @@ class ItemStructureConfigService:
                     **component,
                 })
 
-        return {
+        # [Variant Item Materialization Phase 2 2026-10-30] 求解提交后按模型策略
+        # 自动物化（仅 policy='auto'）。失败只记 warning，不影响求解结果；产物为
+        # draft，签发仍走标准 activate 动作，不自动签发。
+        response = {
             'configuration_id': configuration_id,
             'config_hash': config_hash,
             'model_item_id': head.get('item_id'),
@@ -635,6 +638,22 @@ class ItemStructureConfigService:
             'components': result['components'],
             'warnings': result['warnings'],
         }
+        auto = self._auto_materialize(configuration_id)
+        if auto:
+            response['variant_item_id'] = auto.get('item_id')
+        return response
+
+    def _auto_materialize(self, configuration_id: Any) -> Optional[Dict[str, Any]]:
+        """auto 物化钩子；任何异常都吞掉（主数据副作用不得拖垮求解）。"""
+        try:
+            from meta.services.variant_item_materialize_service import (
+                VariantItemMaterializeService,
+            )
+            return VariantItemMaterializeService(self.ds).materialize_on_solve(
+                configuration_id)
+        except Exception:  # noqa: BLE001 - 兜底：导入失败等也不阻断求解
+            logger.exception('[item_structure_config] auto 物化钩子异常')
+            return None
 
     def _insert_invalid(self, structure_id: Any, result: Dict[str, Any],
                         context: Optional[Mapping[str, Any]]) -> Any:

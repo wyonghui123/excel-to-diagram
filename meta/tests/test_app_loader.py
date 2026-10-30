@@ -152,3 +152,32 @@ class TestProductBinding:
     def test_absent_binding_is_none(self, tmp_path):
         app_dir = _write_app(tmp_path, "app_none")
         assert load_manifest(app_dir).product_binding is None
+
+
+class TestTablePrefix:
+    """表前缀声明与校验（roadmap §6.2.2 / G2，仅校验层，不改写物理表名）"""
+
+    def test_default_prefix_is_app_id(self, tmp_path):
+        app_dir = _write_app(tmp_path, "prefix_app")
+        assert load_manifest(app_dir).table_prefix == "prefix_app"
+
+    def test_explicit_prefix_parsed(self, tmp_path):
+        app_dir = _write_app(tmp_path, "prefix_app2", table_prefix="wh_ops")
+        assert load_manifest(app_dir).table_prefix == "wh_ops"
+
+    @pytest.mark.parametrize("bad", ["Bad", "1abc", "abc_", "a__b", "a-b"])
+    def test_invalid_prefix_rejected(self, tmp_path, bad):
+        app_dir = _write_app(tmp_path, "prefix_bad", table_prefix=bad)
+        with pytest.raises(AppManifestError, match="table_prefix"):
+            load_manifest(app_dir)
+
+    def test_too_long_prefix_rejected(self, tmp_path):
+        app_dir = _write_app(tmp_path, "prefix_long", table_prefix="a" + "b" * 32)
+        with pytest.raises(AppManifestError, match="table_prefix"):
+            load_manifest(app_dir)
+
+    def test_duplicate_prefix_across_apps_rejected(self, tmp_path):
+        _write_app(tmp_path, "dup_a", table_prefix="dup")
+        _write_app(tmp_path, "dup_b", table_prefix="dup")
+        with pytest.raises(AppManifestError, match="重复声明"):
+            discover_apps(tmp_path)

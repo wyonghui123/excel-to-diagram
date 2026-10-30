@@ -30,6 +30,11 @@ class TaskQueueManager:
     def register_queue(self, config: QueueConfig):
         with self._lock:
             self._queues[config.name] = config
+            # 同名队列重复注册（例如先由启动代码注册、随后又从 DB 加载）时，
+            # 先关闭旧线程池，避免替换后旧 ThreadPoolExecutor 泄漏。
+            old_executor = self._executors.pop(config.name, None)
+            if old_executor is not None:
+                old_executor.shutdown(wait=False)
             if config.enabled:
                 self._executors[config.name] = ThreadPoolExecutor(
                     max_workers=config.max_workers,

@@ -59,7 +59,7 @@ class TestV00752MaterializationSSOT:
         assert registry.get_strategy("users") == STRATEGY_AUDIT_CALLBACK
 
         # application_explicit
-        assert registry.get_strategy("ai_async_tasks") == STRATEGY_APPLICATION_EXPLICIT
+        assert registry.get_strategy("ai_async_tasks") is None  # [v157] 已退役，不在注册表
         assert registry.get_strategy("filter_variants") == STRATEGY_APPLICATION_EXPLICIT
 
         # audit_derived
@@ -78,7 +78,7 @@ class TestV00752MaterializationSSOT:
         assert registry.is_materialized("enum_types") is True
         assert registry.is_materialized("users") is True
         assert registry.is_materialized("roles") is True
-        assert registry.is_materialized("ai_async_tasks") is True
+        assert registry.is_materialized("ai_async_tasks") is False  # [v157] 已退役，不在注册表
 
         # False: audit_derived / none / 未注册
         assert registry.is_materialized("products") is False

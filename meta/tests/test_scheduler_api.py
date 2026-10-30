@@ -18,8 +18,7 @@
   3. POST /api/v2/schedulers/<code>/run-now 命中运维作业真派发；
   4. platform_tick 走平台调度器；
   5. 未知 job code → 404；
-  6. 遗留 trigger 对迁移码 → 409（不再静默成功）；
-  7. 遗留 enable/disable 对迁移码 → 409；未知码 → 404。
+  6. 遗留 trigger/enable/disable 路由已随 scheduled_tasks 退役（v155）删除 → 404。
 """
 import pytest
 from flask import Flask
@@ -166,37 +165,20 @@ def _legacy_client(scheduler):
 
 
 @pytest.mark.unit
-class Test遗留端点不再假成功:
-    def test_trigger_迁移码返回409(self):
+class Test遗留端点随表退役:
+    """[task-two-generation 2026-10-30] scheduled_tasks 退役（v155）后，
+    trigger/enable/disable 三条遗留路由已从 task_api_bp 删除 —— 请求应得 404。
+    cron 的唯一入口是 /api/v2/schedulers/*（run-now / status）。"""
+
+    def test_trigger_路由已删除(self):
         client = _legacy_client(_LegacySchedulerStub())
-        resp = client.post('/api/v2/tasks/db_analyze/trigger')
-        assert resp.status_code == 409
-        assert 'run-now' in resp.get_json()['message']
+        assert client.post('/api/v2/tasks/db_analyze/trigger').status_code == 404
 
-    def test_trigger_未知码仍404(self):
-        client = _legacy_client(_LegacySchedulerStub())
-        resp = client.post('/api/v2/tasks/not_a_job/trigger')
-        assert resp.status_code == 404
-
-    def test_enable_迁移码返回409(self):
-        client = _legacy_client(_LegacySchedulerStub(rowcount=0))
-        resp = client.post('/api/v2/tasks/db_analyze/enable')
-        assert resp.status_code == 409
-
-    def test_disable_迁移码返回409(self):
-        client = _legacy_client(_LegacySchedulerStub(rowcount=0))
-        resp = client.post('/api/v2/tasks/db_analyze/disable')
-        assert resp.status_code == 409
-        assert 'CRON_JOBS_ENABLED' in resp.get_json()['message']
-
-    def test_disable_未知码返回404(self):
-        client = _legacy_client(_LegacySchedulerStub(rowcount=0))
-        resp = client.post('/api/v2/tasks/not_a_job/disable')
-        assert resp.status_code == 404
-
-    def test_enable_真实行仍成功(self):
-        """非迁移码且命中 1 行 → 维持既有成功语义（不误伤遗留手工行）"""
+    def test_enable_路由已删除(self):
         client = _legacy_client(_LegacySchedulerStub(rowcount=1))
-        resp = client.post('/api/v2/tasks/some_legacy_job/enable')
-        assert resp.status_code == 200
-        assert resp.get_json()['success'] is True
+        assert client.post('/api/v2/tasks/some_legacy_job/enable').status_code == 404
+
+    def test_disable_路由已删除(self):
+        client = _legacy_client(_LegacySchedulerStub(rowcount=1))
+        assert client.post('/api/v2/tasks/not_a_job/disable').status_code == 404
+

@@ -334,7 +334,7 @@ class PricingService:
         document_type: Optional[str] = None,
         document_id: Optional[int] = None,
         document_line_id: Optional[int] = None,
-        level: str = "header",
+        level: Optional[str] = None,
         resolution: str = RESOLUTION_PRECEDENCE,
         measure: Optional[str] = None,
         valid_on: Optional[str] = None,
@@ -351,7 +351,10 @@ class PricingService:
                             **同时用作 FR-009 阶梯基数**（命中带 `scale` 的费率记录时按此定档）
             sequence_code:  查找序列编码。**留空则跳过 FR-004 查表**，
                             直接由 calc_procedure 的计算步骤出结果
-            document_*:     泛化宿主（FR-011）；本期只挂头级故 line 可空
+            document_*:     泛化宿主（FR-011）；`level` 留空则按
+                            `document_line_id` 推导（有行 → line，无行 → header），
+                            显式传入且与推导值不一致时抛 PricingError
+                            （`calc_result.yaml` 不变量：level 与 document_line_id 空值一致）
             resolution:     候选消解范式（FR-008）
             measure:        `best` 范式的度量（如 min_amount）。**best 必填**，
                             否则内核报「绝不隐式默认」——不透传则 best 永不可达
@@ -454,9 +457,18 @@ class PricingService:
         # ---- 阶段三：落结果与明细（FR-010 / FR-011）----
         result_id = None
         if persist and document_type and document_id is not None:
+            # 【P2 项 6】不变量：`calc_result.level` 与 `document_line_id` 的空值一致。
+            # 内部明细路径（determine_line）此前不透传 level，行级结果被落成
+            # `header` + 非空 line_id，违反 yaml 约束。此处统一按宿主导出。
+            derived_level = 'line' if document_line_id is not None else 'header'
+            if level is not None and level != derived_level:
+                raise PricingError(
+                    f"level={level!r} 与宿主不一致：document_line_id="
+                    f"{document_line_id!r} 要求 level={derived_level!r}"
+                )
             result_id = self._persist_with_invalidate(
                 process=proc,
-                level=level,
+                level=derived_level,
                 document_type=document_type,
                 document_id=document_id,
                 document_line_id=document_line_id,

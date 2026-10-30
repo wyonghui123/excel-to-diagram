@@ -47,7 +47,12 @@
 
 ### ③ 事务对象
 
-`task_queue` · `task_execution` · `scheduled_task` · `ai_async_task` · `change_event` · `change_subscription` · `audit_log` · `annotation`
+`change_event` · `change_subscription` · `audit_log` · `annotation`
+
+> [task-two-generation 2026-10-30] `task_queue` / `task_execution` 已收敛为
+> 代码建表（唯一 DDL 真源 `meta/core/task_infra_schema.py`，迁移 v156）；
+> `scheduled_task` 已退役（v155）、`ai_async_task` 已退役（v157），
+> cron 调度配置内嵌进程内调度器。
 
 ### ④ 平台元数据自身（维度链 + 权限 + 基础设施）
 
@@ -59,7 +64,8 @@
 > **本目录其他文件不应重复定义层级关系。**
 
 其余平台元数据文件：
-- **权限**（20 个）：`user` / `org_member` / `role` / `role_permission` / `role_data_permission` / `role_dimension_scope` / `permission` / `permission_rule` / `permission_bundle` / `permission_resource` / `menu` / `menu_permission` 等
+- **权限**（16 个）：`user` / `org_member` / `permission_set` / `permission_set_permission` / `permission_set_data_permission` / `permission_set_dimension_scope` / `permission` / `permission_rule` / `permission_bundle` / `permission_resource` / `menu` / `menu_permission` 等
+  - [v138 2026-10-30] 旧 `role` / `role_permission` / `role_data_permission` / `role_dimension_scope` 已删除；权限唯一真源 = `permission_set_*`
 - **元模型基础设施**：`enum_type` / `enum_value` / `hierarchies` / `dimension_object_mapping` / `resource_types` / `aspects` / `shared_properties` / `filter_variant` / `audit_log_expectations` / `_standard_actions` / `_action_groups` / `_audit_materialization` / `_template`
 - **测试**：`test_objects` / `test_table`
 
