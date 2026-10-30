@@ -264,7 +264,8 @@ class TestYAMLLoaderRegistry:
         objects = registry.list_objects()
 
         assert 'user' in objects
-        assert 'role' in objects
+        # [v138 2026-10-30] role.yaml 已退役（权限双轨收口），授权主体唯一真源 = permission_set
+        assert 'permission_set' in objects
         # [迁移 v072] user_group.yaml → org.yaml；英文 'user_group' 不是
         # org 的 alias（org.yaml 只保留中文 alias「用户组」），故此处用 'org'。
         assert 'org' in objects

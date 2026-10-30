@@ -277,6 +277,47 @@ def _register_blueprints(app, manifest: AppManifest) -> int:
     return registered
 
 
+_PLATFORM_OWNER = "__platform__"
+
+
+def _assert_app_registration_safe(
+    declared_by_app: Dict[str, List[str]],
+    tables_by_app: Dict[str, List[str]],
+    platform_bo_ids: List[str],
+    platform_table_names: List[str],
+) -> None:
+    """[ARCH-V3 §0.4.5 不变量 5/6] 归属与物理表冲突的启动期 fail fast。
+
+    - BO id 跨归属重复：`_bo_to_app` 会被后注册方覆盖，归属判断静默错误。
+    - `table_name` 跨归属重复：`APP_DB_ROUTING=0`（默认）下应用表以裸表名
+      落平台库，同名表会静默合列/丢列（roadmap G2 未实现，见
+      `test_app_table_name_collision_probe.py`）。
+    同归属（同一应用内部，或平台内部历史同名）不拦。
+    """
+    bo_owner = {bo_id: _PLATFORM_OWNER for bo_id in platform_bo_ids}
+    table_owner = {t: _PLATFORM_OWNER for t in platform_table_names}
+
+    for app_id in sorted(declared_by_app):
+        for bo_id in declared_by_app[app_id]:
+            prev = bo_owner.get(bo_id)
+            if prev is not None and prev != app_id:
+                raise AppRegistrationError(
+                    f"BO id '{bo_id}' 跨归属重复: 已由 '{prev}' 注册, "
+                    f"app '{app_id}' 又声明; 归属索引会被覆盖"
+                )
+            bo_owner[bo_id] = app_id
+
+        for table in tables_by_app.get(app_id) or []:
+            prev = table_owner.get(table)
+            if prev is not None and prev != app_id:
+                raise AppRegistrationError(
+                    f"table_name '{table}' 跨归属重复: '{prev}' 与 app "
+                    f"'{app_id}' 同名; APP_DB_ROUTING=0 时会物理撞表"
+                    "（静默合列/丢列）"
+                )
+            table_owner[table] = app_id
+
+
 def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
     """把应用 schema 目录累加注册到平台 YAML registry。
 
@@ -297,6 +338,16 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
     from meta.services.view_config_service import view_config_service
 
     declared_by_app: Dict[str, List[str]] = {}
+    tables_by_app: Dict[str, List[str]] = {}
+
+    # 平台侧快照必须在注册前取：`_bo_to_app` 之外的才是平台自有对象。
+    # 第二次 create_app() 时应用对象已在 registry 中，靠归属索引排除，避免误判。
+    platform_bo_ids = [bo for bo in registry.list_types() if bo not in _bo_to_app]
+    platform_table_names = [
+        obj.table_name for obj in registry.all()
+        if obj.id not in _bo_to_app and getattr(obj, "table_name", None)
+    ]
+
     for manifest in manifests:
         schema_dir = manifest.app_dir / "schemas"
         if not schema_dir.is_dir():
@@ -312,9 +363,23 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
         # 而非"本次新增的 BO" —— register_from_directory 有目录级缓存，重复调用
         # 不产生新增，若按"新增"建映射会在 registry 已预热的场景下得到空映射，
         # 后果是应用请求静默读写平台库（数据错库）。
-        declared = sorted(
-            obj.id for obj in load_yaml_directory(str(schema_dir)) if obj is not None
-        )
+        yaml_objects = [
+            obj for obj in load_yaml_directory(str(schema_dir)) if obj is not None
+        ]
+        declared = sorted(obj.id for obj in yaml_objects)
+        declared_tables = [
+            obj.table_name for obj in yaml_objects
+            if getattr(obj, "table_name", None)
+        ]
+        # [G2 / roadmap §6.2.2] 应用内 BO 表名不得重复：同库下两个对象共用一张
+        # 物理表会导致静默合列/丢列，必须在注册期就拒绝。
+        duplicated = sorted({t for t in declared_tables if declared_tables.count(t) > 1})
+        if duplicated:
+            raise AppRegistrationError(
+                f"app '{manifest.app_id}': 应用内 BO 表名重复 {duplicated}"
+                "（同一应用的两个对象不能共用物理表, roadmap §6.2.2）"
+            )
+        tables_by_app[manifest.app_id] = sorted(set(declared_tables))
         for bo_id in declared:
             _bo_to_app[bo_id] = manifest.app_id
 
@@ -325,6 +390,11 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
             "[AppRegistry] app '%s': 注册 schema 目录 %s, 声明 BO: %s, 本次新增: %s",
             manifest.app_id, schema_dir, declared, added,
         )
+
+    # [ARCH-V3 §0.4.5 不变量 5/6] 跨归属冲突在启动期中止，而不是留到运行期静默损坏。
+    _assert_app_registration_safe(
+        declared_by_app, tables_by_app, platform_bo_ids, platform_table_names,
+    )
 
     # 应用 schema 是新注册的, 必须失效两个缓存, 否则后续建表会被表名白名单拒绝:
     #   "Invalid table name: 'xxx'. Must be one of registered tables from YAML schemas."

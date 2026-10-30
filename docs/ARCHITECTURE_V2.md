@@ -6,9 +6,11 @@ status: 活跃
 audience: 架构师、AI Agent、开发者
 ---
 
-# 元数据驱动统一架构文档 (Metadata-Driven Unified Architecture)
+# [历史快照] 元数据驱动统一架构文档 (v3.0.2)
 
-> **版本**: v3.0.2
+> **状态**: 历史快照，自 2026-10-30 起不再维护，当前口径见 [ARCHITECTURE_V3.md](./ARCHITECTURE_V3.md)。
+> **保留原因**: 记录 2026-06 时点的元数据驱动口径与前后端实现基线。文中数字（18 拦截器 / 35+ 引擎 / 61 服务 / 49 API / 35+ 业务对象）均已过时，**勿作现状引用**。
+> **原版本**: v3.0.2
 > **更新日期**: 2026-06-07
 > **架构状态**: Phase 4+ 交付 — 18 拦截器 · 35+ 引擎/执行器 · 61 服务 · 49 API · 31 composables · 103+ 组件 · 异步执行模式 · DRE 监控子系统 · display_values 全链路 · useFieldPolicy 完整实现
 > **测试通过率**: 249 测试文件 / ~4855 测试用例, ~91% 覆盖率, 18/18 拦截器独立测试, KeyTemplate+Loader+Interceptor 85/85 全部通过

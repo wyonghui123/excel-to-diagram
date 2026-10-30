@@ -29,6 +29,11 @@ import yaml
 # 该 ID 会同时用作: 目录名 / 路由前缀 / DB 文件名 / 权限命名空间前缀
 APP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 
+# 应用表前缀规范 (roadmap §6.2.2 / G2):
+# 小写字母开头, 仅含小写字母/数字/下划线, 不以下划线结尾、无连续下划线
+TABLE_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+TABLE_PREFIX_MAX_LEN = 32
+
 # 产品绑定模式 (roadmap §6.2)
 PRODUCT_BINDING_MODES = ("fixed", "multi")
 
@@ -192,6 +197,8 @@ class AppManifest:
     menu_internal_root: str = ""
     menu_portal_mount: Dict[str, Any] = field(default_factory=dict)
     permission_namespace: str = ""
+    # [G2] 应用物理表前缀（缺省 = app_id；目前仅声明与校验，不改写物理表名）
+    table_prefix: str = ""
     product_binding: Optional[ProductBinding] = None
     database_file: str = ""
     allowed_platform_modules: List[str] = field(default_factory=list)
@@ -481,6 +488,16 @@ def load_manifest(app_dir: Path) -> AppManifest:
             "（保证权限点前缀与路由前缀一致, roadmap §6.6）"
         )
 
+    # [G2 / roadmap §6.2.2] 表前缀：缺省 = app.id。此处只做命名空间声明与合法性
+    # 校验；物理表名改写（<prefix>_<bo_id>）尚未启用（v1.27 决策推迟）。
+    table_prefix = _optional_str(raw, "table_prefix") or app_id
+    if (len(table_prefix) > TABLE_PREFIX_MAX_LEN
+            or not TABLE_PREFIX_PATTERN.match(table_prefix)):
+        raise AppManifestError(
+            f"table_prefix '{table_prefix}' 不符合规范 {TABLE_PREFIX_PATTERN.pattern}"
+            f"（小写字母开头, 仅含小写字母/数字/下划线, 长度 ≤ {TABLE_PREFIX_MAX_LEN}）"
+        )
+
     platform = raw.get("platform") or {}
     if not isinstance(platform, dict):
         raise AppManifestError("platform 需为对象")
@@ -532,6 +549,7 @@ def load_manifest(app_dir: Path) -> AppManifest:
         menu_internal_root=_optional_str(menu, "internal_root"),
         menu_portal_mount=menu.get("portal_mount") or {},
         permission_namespace=namespace,
+        table_prefix=table_prefix,
         product_binding=_parse_product_binding(raw, app_id),
         database_file=_optional_str(database, "file"),
         allowed_platform_modules=_str_list(raw, "allowed_platform_modules"),
@@ -561,6 +579,14 @@ def discover_apps(apps_root: Optional[Path] = None) -> Dict[str, AppManifest]:
         manifest = load_manifest(child)
         if manifest.app_id in manifests:
             raise AppManifestError(f"应用 ID 重复: {manifest.app_id}")
+        # [G2] 前缀唯一性：APP_DB_ROUTING=0 时各应用表共用一库，同前缀会互相覆盖
+        for prev in manifests.values():
+            if prev.table_prefix == manifest.table_prefix:
+                raise AppManifestError(
+                    f"table_prefix '{manifest.table_prefix}' 被应用 "
+                    f"'{prev.app_id}' 与 '{manifest.app_id}' 重复声明"
+                    "（roadmap §6.2.2）"
+                )
         manifests[manifest.app_id] = manifest
     return manifests
 

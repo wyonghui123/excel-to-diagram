@@ -9,21 +9,23 @@ _SAFE_TABLE_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 _VALID_TABLES_CACHE = None
 _EXTRA_TABLES = set()
 
-# [Spec 16 2026-08-29] 新表名（permsission_sets/orgs 等）已由 registry.all() 动态加入
-# 旧表名保留在 LEGACY_TABLES 中仅用于历史兼容, 不再是默认安全白名单
+# [Spec 16 2026-08-29] 新表名（permission_sets/orgs 等）已由 registry.all() 动态加入
+# [v138 2026-10-30] 权限双轨收口：roles / role_permissions / role_data_permissions /
+#   role_dimension_scopes / role_menu 已退役（YAML 删除 + 迁移 v138 落库），
+#   不再出现在静态白名单；permission_set_* 由 registry 动态加入。
 _SYSTEM_TABLES = frozenset({
-    'users', 'roles', 'permissions', 'role_permissions',
+    'users', 'permissions',
     # [Spec 19 2026-09-15] user_group_members / group_roles / user_groups 已 DROP (v089)
     # 由 org_members / org_permission_sets / orgs 替代
     'annotations', 'audit_logs',
     'change_events', 'change_subscriptions', 'filter_variants',
-    'menu', 'menu_permissions', 'role_menu',
+    'menu', 'menu_permissions',
     'permission_rules', 'permission_bundles',
     'enum_values', 'enum_types',
     'hierarchies', 'hierarchy_scopes',
     'data_permissions',
     'orgs', 'org_members', 'org_permission_sets',
-    'employee_data_scopes', 'role_dimension_scopes',
+    'employee_data_scopes',
     'sqlite_master', 'sqlite_sequence',
 })
 
