@@ -47,11 +47,12 @@
 
 ### ③ 事务对象
 
-`ai_async_task` · `change_event` · `change_subscription` · `audit_log` · `annotation`
+`change_event` · `change_subscription` · `audit_log` · `annotation`
 
 > [task-two-generation 2026-10-30] `task_queue` / `task_execution` 已收敛为
 > 代码建表（唯一 DDL 真源 `meta/core/task_infra_schema.py`，迁移 v156）；
-> `scheduled_task` 已退役（v155），cron 调度配置内嵌进程内调度器。
+> `scheduled_task` 已退役（v155）、`ai_async_task` 已退役（v157），
+> cron 调度配置内嵌进程内调度器。
 
 ### ④ 平台元数据自身（维度链 + 权限 + 基础设施）
 

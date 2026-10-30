@@ -51,12 +51,7 @@ audit_materialization:
   # ─── 策略: application_explicit ──────────────────────────
   # 物理列存在但不是审计派生。Application 层显式写。
   # 读时直接 SELECT column。
-  # 示例: ai_async_tasks, filter_variants, scheduled_tasks, ...
-  - name: ai_async_tasks
-    strategy: application_explicit
-    object_type: ai_async_task
-    notes: 应用层任务调度时更新，不走审计派生
-
+  # 示例: filter_variants, scheduled_tasks, ...
   - name: filter_variants
     strategy: application_explicit
     object_type: filter_variant

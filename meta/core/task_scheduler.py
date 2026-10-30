@@ -104,6 +104,13 @@ class TaskScheduler:
         logger.info("TaskScheduler starting...")
         
         self.queue_manager.load_queues_from_db()
+        if not self.queue_manager.get_queue_stats():
+            # 队列配置唯一源 = DB `task_queues`（init_task_seed 播种）。
+            # 无已启用队列通常意味着种子未执行或 task_queues 为空；仅告警，
+            # 不 raise（CRON_JOBS_ENABLED=0 / 精简部署不应因队列缺失启动失败）。
+            logger.warning(
+                "TaskScheduler started with no enabled queue (task_queues empty?)"
+            )
         
         self._running = True
         logger.info("TaskScheduler started (queue-only, no cron loop)")

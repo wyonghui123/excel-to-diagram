@@ -38,38 +38,6 @@
       ],
       "table": "adjustments"
     },
-    "ai_async_task": {
-      "hash": "5451ba9a9e0cfb6236ef504ec7a736dd",
-      "fields": [
-        "id",
-        "task_type",
-        "session_id",
-        "agent_id",
-        "parent_task_id",
-        "request",
-        "context",
-        "priority",
-        "queue",
-        "status",
-        "worker_id",
-        "started_at",
-        "completed_at",
-        "duration_ms",
-        "result",
-        "error_message",
-        "tokens_used",
-        "cost",
-        "model_used",
-        "retry_count",
-        "max_retries",
-        "timeout",
-        "tenant_id",
-        "user_id",
-        "created_at",
-        "updated_at"
-      ],
-      "table": "ai_async_tasks"
-    },
     "allocation_result": {
       "hash": "9571cafd5daa71be2e23993a933119c6",
       "fields": [
@@ -2397,5 +2365,5 @@
       "table": "versions"
     }
   },
-  "last_sync": "2026-10-30T14:09:45.178775"
+  "last_sync": "2026-10-30T15:58:55.732906"
 }

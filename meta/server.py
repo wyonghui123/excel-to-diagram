@@ -154,7 +154,6 @@ from meta.core.migration_runner import init_change_notification_tables
 from meta.services.view_config_service import view_config_service
 from meta.services.menu_auto_generator import menu_auto_generator
 from meta.core.task_scheduler import TaskScheduler
-from meta.core.task_queue_manager import QueueConfig
 from meta.handlers.system_handlers import (
     DBAnalyzeHandler, DBVacuumHandler,
     DBIntegrityCheckHandler, DBCheckpointHandler
@@ -666,22 +665,9 @@ def create_app(db_path=None):
         data_source=data_source,
         config={'check_interval': 60}
     )
-
-    task_scheduler.register_queue(QueueConfig(
-        name='critical', priority=10, max_workers=2, timeout=600, enabled=True
-    ))
-    task_scheduler.register_queue(QueueConfig(
-        name='ai_high', priority=20, max_workers=3, timeout=1200, enabled=True
-    ))
-    task_scheduler.register_queue(QueueConfig(
-        name='ai_normal', priority=30, max_workers=5, timeout=1800, enabled=True
-    ))
-    task_scheduler.register_queue(QueueConfig(
-        name='business', priority=50, max_workers=3, timeout=300, enabled=True
-    ))
-    task_scheduler.register_queue(QueueConfig(
-        name='background', priority=100, max_workers=2, timeout=600, enabled=True
-    ))
+    # [task-two-generation 2026-10-30] 队列配置唯一源 = DB `task_queues`
+    # （由 init_task_seed_data 播种）。不再在此处逐条注册 QueueConfig，
+    # 避免与 DB 重复注册导致同名 executor 被替换。
 
     # [P1 2026-10-13] cron 作业与遗留任务调度器解耦（替换路径 第 7 / 1 / 3 项）。
     #

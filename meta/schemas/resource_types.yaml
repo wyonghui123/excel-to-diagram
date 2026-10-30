@@ -103,23 +103,19 @@ role:
   actions: [read, create, update, delete, export]
 
 # ============================================
-# [v43 2026-09-02 Spec16 Phase7] 补 5 个真业务 BO 声明
-# 背景: v070 之前这些 rt 直接写在 permissions.resource_type (例 scheduled_task:scheduled_task_read),
+# [v43 2026-09-02 Spec16 Phase7] 补真业务 BO 声明
+# 背景: v070 之前这些 rt 直接写在 permissions.resource_type (例 task_queue:task_queue_read),
 #   但 resource_types.yaml 未声明, _build_role_matrices 通过 extra_rts 兜底显示 (无标签无维度).
 # 现在 yaml 是 SSOT, 这些 BO 正式进入资源矩阵管理, 可勾选动作 + 范围条件.
-# 5 个表均已验证存在 (probe_rt_table_exists.py): scheduled_tasks/task_queues/
-#   task_executions/ai_async_tasks/enum_types
+# 仍在的表 (已验证存在): task_queues / task_executions / enum_types
+# [task-two-generation 2026-10-30] scheduled_tasks (v155) / ai_async_tasks (v157)
+#   已物理退役, 对应 rt 声明一并移除.
 #
 # 不在矩阵中的相关 rt (走专用管理界面):
 #   - menu:            菜单管理 (系统级 UI 入口, 走专用菜单权限 Tab)
 #   - enum_value:      枚举值 (随 enum_type inherit owner, 但管理走 enum_type 详情页)
 #   - filter_variant:  过滤变体 (用户级, 按 user_id 隔离, 不该进 PS 矩阵)
 # ============================================
-scheduled_task:
-  type: independent
-  table: scheduled_tasks
-  actions: [read, create, update, delete, execute, export, import]
-
 task_queue:
   type: independent
   table: task_queues
@@ -133,11 +129,6 @@ task_execution:
   type: independent
   table: task_executions
   actions: [read, delete, export]
-
-ai_async_task:
-  type: independent
-  table: ai_async_tasks
-  actions: [read, create, update, delete, execute, export, import]
 
 enum_type:
   type: independent

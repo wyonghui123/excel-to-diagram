@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-10-30 14:08:28.971457
+-- 生成时间: 2026-10-30 15:58:14.266807
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -37,36 +37,6 @@ CREATE TABLE IF NOT EXISTS adjustments (
     created_at DATETIME,
     updated_at DATETIME,
     FOREIGN KEY (original_result_id) REFERENCES calc_results(id)
-)
-
--- AI异步任务: AI Agent异步执行的长期任务队列，支持优先级调度和成本追踪
-CREATE TABLE IF NOT EXISTS ai_async_tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_type VARCHAR(200) NOT NULL,
-    session_id VARCHAR(200),
-    agent_id VARCHAR(200),
-    parent_task_id INTEGER,
-    request TEXT NOT NULL,
-    context TEXT,
-    priority INTEGER DEFAULT 50,
-    queue VARCHAR(200) DEFAULT 'ai_normal',
-    status VARCHAR(200) DEFAULT 'pending',
-    worker_id VARCHAR(200),
-    started_at DATETIME,
-    completed_at DATETIME,
-    duration_ms INTEGER,
-    result TEXT,
-    error_message TEXT,
-    tokens_used INTEGER,
-    cost REAL,
-    model_used VARCHAR(200),
-    retry_count INTEGER DEFAULT 0,
-    max_retries INTEGER DEFAULT 3,
-    timeout INTEGER DEFAULT 300,
-    tenant_id INTEGER,
-    user_id INTEGER,
-    created_at DATETIME,
-    updated_at DATETIME
 )
 
 -- 分摊结果: 分摊结果留痕——头记待摊总额、行记各行摊得额，含来源单据与分摊规则
@@ -2189,13 +2159,6 @@ CREATE INDEX IF NOT EXISTS idx_addresses_formatted_address ON addresses(formatte
 CREATE INDEX IF NOT EXISTS idx_adjustment_original_result ON adjustments(original_result_id)
 CREATE INDEX IF NOT EXISTS idx_adjustment_type ON adjustments(adjustment_type)
 CREATE INDEX IF NOT EXISTS idx_adjustments_created_at ON adjustments(created_at)
-
--- Indexes for AI异步任务
-CREATE INDEX IF NOT EXISTS idx_ai_async_task_status ON ai_async_tasks(status)
-CREATE INDEX IF NOT EXISTS idx_ai_async_task_session ON ai_async_tasks(session_id)
-CREATE INDEX IF NOT EXISTS idx_ai_async_task_tenant ON ai_async_tasks(tenant_id)
-CREATE INDEX IF NOT EXISTS idx_ai_async_task_priority ON ai_async_tasks(priority)
-CREATE INDEX IF NOT EXISTS idx_ai_async_task_time ON ai_async_tasks(created_at)
 
 -- Indexes for 分摊结果
 CREATE UNIQUE INDEX IF NOT EXISTS idx_allocation_result_code ON allocation_results(code)
