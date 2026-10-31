@@ -1928,8 +1928,8 @@ def init_menu_permissions(db_path):
             })
         },
         {
-            # [PROJECT-P1 2026-11-01] 项目 —— 商务层归集对象（v169 交付）,
-            #   与 v169__project_object_p1 的菜单声明保持一致; 缺本声明时步骤 7.6
+            # [PROJECT-P1 2026-11-01] 项目 —— 商务层归集对象（v171 交付）,
+            #   与 v171__project_object_p1 的菜单声明保持一致; 缺本声明时步骤 7.6
             #   会把该手工菜单当冗余删除 (项目入口随之消失)。
             'menu_code': 'project-management',
             'menu_name': '项目',

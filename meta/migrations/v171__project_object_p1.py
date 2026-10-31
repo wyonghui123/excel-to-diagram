@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v169 2026-11-01] 项目对象地基（项目侧 P1）
+"""[v171 2026-11-01] 项目对象地基（项目侧 P1）
 
 依据:
   docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §0.1 P1
@@ -245,22 +245,22 @@ def _do_menu(conn: sqlite3.Connection) -> None:
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print(f'[v169] DB 不存在: {db_path}')
+        print(f'[v171] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v169] 开始: 项目对象地基（P1）')
+        print('[v171] 开始: 项目对象地基（P1）')
         _do_table(conn)
         _do_mount_columns(conn)
         _do_indexes(conn)
         _do_permissions(conn)
         _do_menu(conn)
         conn.commit()
-        print('[v169] 迁移提交完成')
+        print('[v171] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v169] 失败: %s' % e)
+        print('[v171] 失败: %s' % e)
         raise
     finally:
         conn.close()
@@ -268,7 +268,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v169 verify] FAIL: DB 不存在')
+        print('[v171 verify] FAIL: DB 不存在')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -284,18 +284,18 @@ def verify(db_path: Path) -> bool:
         }
         for table, cols in required_cols.items():
             if not _table_exists(conn, table):
-                print(f'[v169 verify] FAIL: 缺表 {table}')
+                print(f'[v171 verify] FAIL: 缺表 {table}')
                 ok = False
                 continue
             have = _columns(conn, table)
             for col in cols:
                 if col not in have:
-                    print(f'[v169 verify] FAIL: 缺列 {table}.{col}')
+                    print(f'[v171 verify] FAIL: 缺列 {table}.{col}')
                     ok = False
 
         for name, _table, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print(f'[v169 verify] FAIL: 缺索引 {name}')
+                print(f'[v171 verify] FAIL: 缺索引 {name}')
                 ok = False
 
         if _table_exists(conn, 'permissions'):
@@ -303,7 +303,7 @@ def verify(db_path: Path) -> bool:
                 if not conn.execute(
                         'SELECT 1 FROM permissions WHERE code=?', (code,)
                 ).fetchone():
-                    print(f'[v169 verify] FAIL: 缺权限 {code}')
+                    print(f'[v171 verify] FAIL: 缺权限 {code}')
                     ok = False
 
         if _table_exists(conn, 'menus'):
@@ -312,13 +312,13 @@ def verify(db_path: Path) -> bool:
                 (PROJECT_MENU['menu_code'],)
             ).fetchone()
             if not row:
-                print(f"[v169 verify] FAIL: 缺菜单 {PROJECT_MENU['menu_code']}")
+                print(f"[v171 verify] FAIL: 缺菜单 {PROJECT_MENU['menu_code']}")
                 ok = False
             elif row[0] != 1:
-                print(f"[v169 verify] FAIL: 菜单 {PROJECT_MENU['menu_code']} 未启用")
+                print(f"[v171 verify] FAIL: 菜单 {PROJECT_MENU['menu_code']} 未启用")
                 ok = False
 
-        print('[v169 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v171 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -326,7 +326,7 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print(f'[v169 rollback] DB 不存在: {db_path}')
+        print(f'[v171 rollback] DB 不存在: {db_path}')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -351,11 +351,11 @@ def rollback(db_path: Path) -> bool:
             print(f'  - [DROP] 表 {PROJECT_TABLE}')
 
         conn.commit()
-        print('[v169 rollback] 完成（permissions 行与 project_id 列保留）')
+        print('[v171 rollback] 完成（permissions 行与 project_id 列保留）')
         return True
     except Exception as e:
         conn.rollback()
-        print(f'[v169 rollback] 失败: %s' % e)
+        print(f'[v171 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()
