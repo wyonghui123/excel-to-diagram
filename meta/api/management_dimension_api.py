@@ -11,6 +11,7 @@ from functools import wraps
 from typing import Any, Dict, List, Optional, Set
 
 from flask import Blueprint, g, jsonify, request
+from meta.core.query_spec import parse_query_spec
 
 from meta.core.datasource import get_data_source
 from meta.core.db_path import get_meta_db_path
@@ -406,16 +407,9 @@ def get_dimension_instances(dimension_id: str):
     try:
         engine = _get_engine()
 
-        search = request.args.get("search", "").strip()
-        page = request.args.get("page", 1, type=int)
-        page_size = request.args.get("page_size", 20, type=int)
-
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 100:
-            page_size = 20
-
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args, max_page_size=100)
+        search = spec.search
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         table_name = RESOURCE_TABLE_MAP.get(dimension_id)
         if not table_name:

@@ -1,4 +1,6 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, g
+from meta.api._response_contract import ok, ok_message, error_response, json_response
+from meta.core.query_spec import parse_query_spec
 from meta.services.manage_service import ManageService, CreateRequest, UpdateRequest, DeleteRequest
 from meta.services.query_service import QueryService, SearchRequest, QueryCondition
 from meta.services.audit_service import AuditService, AuditQuery
@@ -196,7 +198,7 @@ def _api_error(message, error_code='INTERNAL_ERROR', status_code=400, detail=Non
     }
     if detail and os.environ.get('FLASK_DEBUG') == '1':
         response['detail'] = detail
-    return jsonify(response), status_code
+    return json_response(response, status_code)
 
 
 def _api_success(data=None, message='Success', **kwargs):
@@ -207,12 +209,12 @@ def _api_success(data=None, message='Success', **kwargs):
     if data is not None:
         response['data'] = data
     response.update(kwargs)
-    return jsonify(response)
+    return json_response(response)
 
 
 def _get_page_params():
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('pageSize', request.args.get('page_size', 20, type=int), type=int)
+    spec = parse_query_spec(request.args)
+    page, page_size = spec.page, spec.page_size
     keyword = request.args.get('keyword', '')
     order_by = request.args.get('order_by', '') or request.args.get('sort_by', '')
     sort_order = request.args.get('sort_order', request.args.get('order', 'desc'))
@@ -239,15 +241,8 @@ def _check_permission(object_type: str, action: str):
         return True
     if not AUTH_ENABLED:
         return True
-    user = get_current_user()
-    if not user:
-        return False
-    user_permissions = user.get('permissions', [])
-    if '*' in user_permissions:
-        return True
-    if perm_code in user_permissions:
-        return True
-    return False
+    from meta.core.permission_gate import evaluate_code
+    return evaluate_code(get_current_user(), perm_code)
 
 
 def _apply_scope_filter(object_type: str, conditions):
@@ -420,7 +415,7 @@ def _apply_data_permission_filter(object_type, conditions):
 @_auth_required
 def create_record(object_type):
     if not _check_permission(object_type, "create"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}, 403)
     _set_audit_user()
     data = request.get_json(silent=True) or {}
     
@@ -441,10 +436,7 @@ def create_record(object_type):
                 (product_id,)
             ).fetchone()
             if existing:
-                return jsonify({
-                    'success': False,
-                    'message': '每个产品只能有一个当前版本，请先将其他版本设为非当前版本',
-                }), 400
+                return error_response('每个产品只能有一个当前版本，请先将其他版本设为非当前版本', status=400)
     
     skip_validation = data.pop('_skip_validation', False)
     skip_audit = data.pop('_skip_audit', False)
@@ -470,11 +462,9 @@ def create_record(object_type):
                 inherit_to_children=True
             )
     
-    return jsonify({
-        'success': result.success,
-        'data': result.data,
-        'message': result.message,
-    }), 201 if result.success else 400
+    if result.success:
+        return ok(result.data, message=result.message), 201
+    return json_response({'success': False, 'data': result.data, 'message': result.message}, 400)
 
 
 @manage_bp.route('/<object_type>/deep', methods=['POST'])
@@ -503,43 +493,39 @@ def deep_insert(object_type):
     }
     """
     if not _check_permission(object_type, "create"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}, 403)
     
     _set_audit_user()
     body = request.get_json(silent=True) or {}
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
     
     from meta.core.deep_insert_engine import DeepInsertEngine
     engine = DeepInsertEngine()
     result = engine.execute(object_type, body, _get_data_source())
     
     if result.success:
-        return jsonify({
-            'success': True,
-            'data': result.data,
-            'message': result.message,
-        }), 201
+        return ok(result.data, message=result.message), 201
     else:
         status_code = 400
         if result.data and result.data.get('rolled_back'):
             status_code = 409
-        return jsonify({
+        return json_response({
             'success': False,
             'message': result.message,
             'error_code': 'TRANSACTION_ROLLBACK' if (result.data and result.data.get('rolled_back')) else 'DEEP_INSERT_FAILED',
             'data': result.data,
             'errors': result.errors,
-        }), status_code
+        }, status_code)
 
 
 @manage_bp.route('/<object_type>/<id>', methods=['GET'])
 @_auth_required
 def get_record(object_type, id):
     if not _check_permission(object_type, "read"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
     conditions = [
         QueryCondition(field='id', operator='eq', value=int(id) if str(id).isdigit() else id)
     ]
@@ -573,8 +559,8 @@ def get_record(object_type, id):
             record['change_history'] = change_history
         except Exception as e:
             record['change_history'] = []
-        return jsonify({'success': True, 'data': record})
-    return jsonify({'success': False, 'data': None, 'message': 'Not found'}), 404
+        return ok(record)
+    return error_response('Not found', status=404)
 
 
 def _batch_load_names(table, ids, ds):
@@ -624,7 +610,7 @@ def _get_single_record(table_name, record_id):
 @_auth_required
 def list_records(object_type):
     if not _check_permission(object_type, "read"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
     if object_type == 'relationship':
         return list_relationships()
 
@@ -705,7 +691,7 @@ def list_records(object_type):
         for item in result.data:
             item['can_delete'] = _get_manage_service().check_can_delete(normalized_type, item)
 
-    return jsonify({
+    return json_response({
         'success': True,
         'data': result.data,
         'total': result.total,
@@ -719,7 +705,7 @@ def list_records(object_type):
 def list_records_post(object_type):
     """POST 方式的列表查询，用于参数过多导致 URL 过长的情况"""
     if not _check_permission(object_type, "read"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
     if object_type == 'relationship':
         return list_relationships()
 
@@ -812,7 +798,7 @@ def list_records_post(object_type):
         for item in result.data:
             item['can_delete'] = _get_manage_service().check_can_delete(normalized_type, item)
 
-    return jsonify({
+    return json_response({
         'success': True,
         'data': result.data,
         'total': result.total,
@@ -825,7 +811,7 @@ def list_records_post(object_type):
 @_auth_required
 def update_record(object_type, id):
     if not _check_permission(object_type, "update"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}, 403)
     _set_audit_user()
     data = request.get_json(silent=True) or {}
     
@@ -837,10 +823,7 @@ def update_record(object_type, id):
                 (product_id, id)
             ).fetchone()
             if existing:
-                return jsonify({
-                    'success': False,
-                    'message': '每个产品只能有一个当前版本，请先将其他版本设为非当前版本',
-                }), 400
+                return error_response('每个产品只能有一个当前版本，请先将其他版本设为非当前版本', status=400)
     
     from meta.services.hierarchy_validation_service import validate_update
     meta_obj = registry.get(object_type)
@@ -850,12 +833,12 @@ def update_record(object_type, id):
         if original_data:
             validation_result = validate_update(object_type, original_data, data, _data_source)
             if not validation_result.valid:
-                return jsonify({
-                    'success': False,
-                    'message': validation_result.message,
-                    'error_code': validation_result.error_code,
-                    'details': validation_result.details,
-                }), 400
+                return error_response(
+                    validation_result.message,
+                    error_code=validation_result.error_code,
+                    status=400,
+                    details=validation_result.details,
+                )
     
     skip_validation = data.pop('_skip_validation', False)
     skip_audit = data.pop('_skip_audit', False)
@@ -867,18 +850,16 @@ def update_record(object_type, id):
         skip_audit=skip_audit,
     )
     result = _get_manage_service().update(req)
-    return jsonify({
-        'success': result.success,
-        'data': result.data,
-        'message': result.message,
-    }), 200 if result.success else 400
+    if result.success:
+        return ok(result.data, message=result.message)
+    return json_response({'success': False, 'data': result.data, 'message': result.message}, 400)
 
 
 @manage_bp.route('/<object_type>/<id>', methods=['DELETE'])
 @_auth_required
 def delete_record(object_type, id):
     if not _check_permission(object_type, "delete"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "delete")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "delete")}', 'code': 'FORBIDDEN'}, 403)
     _set_audit_user()
     force = request.args.get('force', 'false').lower() in ('true', '1', 'yes')
     cascade = request.args.get('cascade', 'false').lower() in ('true', '1', 'yes')
@@ -887,12 +868,12 @@ def delete_record(object_type, id):
         from meta.services.hierarchy_validation_service import validate_delete
         validation_result = validate_delete(object_type, id, _data_source)
         if not validation_result.valid:
-            return jsonify({
-                'success': False,
-                'message': validation_result.message,
-                'error_code': validation_result.error_code,
-                'details': validation_result.details,
-            }), 400
+            return error_response(
+                validation_result.message,
+                error_code=validation_result.error_code,
+                status=400,
+                details=validation_result.details,
+            )
     
     delete_annotations_by_target(object_type, id)
     
@@ -903,10 +884,9 @@ def delete_record(object_type, id):
         cascade=cascade,
     )
     result = _get_manage_service().delete(req)
-    return jsonify({
-        'success': result.success,
-        'message': result.message,
-    }), 200 if result.success else 400
+    if result.success:
+        return ok_message(result.message)
+    return error_response(result.message, status=400)
 
 
 @manage_bp.route('/<object_type>/<id>/recover', methods=['POST'])
@@ -914,22 +894,22 @@ def delete_record(object_type, id):
 def recover_from_log(object_type, id):
     """从 audit_log 恢复已删除的记录"""
     if not _check_permission(object_type, "update"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}, 403)
     
     _set_audit_user()
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
     
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'ID 无效'}), 400
+        return error_response('ID 无效', status=400)
     
     existing = _data_source.find_by_id(meta_obj.table_name, object_id)
     if existing:
-        return jsonify({'success': False, 'message': '记录已存在，无需恢复'}), 400
+        return error_response('记录已存在，无需恢复', status=400)
     
     old_data = None
     try:
@@ -967,7 +947,7 @@ def recover_from_log(object_type, id):
             logger.warning(f"[Recover] Failed to query audit_log: {e}")
     
     if not old_data:
-        return jsonify({'success': False, 'message': '未找到删除记录，可能已被审计日志清理'}), 404
+        return error_response('未找到删除记录，可能已被审计日志清理', status=404)
     
     clean_data = {k: v for k, v in old_data.items() if k != 'id'}
     clean_data['id'] = object_id
@@ -975,13 +955,9 @@ def recover_from_log(object_type, id):
     try:
         _data_source.insert(meta_obj.table_name, clean_data)
     except Exception as e:
-        return jsonify({'success': False, 'message': f'恢复失败: {str(e)}'}), 500
+        return error_response(f'恢复失败: {str(e)}', status=500)
     
-    return jsonify({
-        'success': True,
-        'message': f'已从审计日志恢复 {object_type}#{object_id}',
-        'data': clean_data,
-    })
+    return ok(clean_data, message=f'已从审计日志恢复 {object_type}#{object_id}')
 
 
 @manage_bp.route('/<object_type>/deleted', methods=['GET'])
@@ -989,10 +965,10 @@ def recover_from_log(object_type, id):
 def list_deleted_objects(object_type):
     """从 audit_log 查询已删除对象列表"""
     if not _check_permission(object_type, "read"):
-        return jsonify({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}), 403
+        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
     
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    spec = parse_query_spec(request.args)
+    page, per_page = spec.page, spec.page_size
     deleted_by = request.args.get('deleted_by')
     deleted_after = request.args.get('deleted_after')
     deleted_before = request.args.get('deleted_before')
@@ -1068,14 +1044,11 @@ def list_deleted_objects(object_type):
     except Exception as e:
         logger.warning(f"[Deleted] Failed to query: {e}")
     
-    return jsonify({
-        'success': True,
-        'data': {
-            'items': items,
-            'total': total,
-            'page': page,
-            'per_page': per_page,
-        }
+    return ok({
+        'items': items,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
     })
 
 
@@ -1087,13 +1060,13 @@ def batch_create(object_type):
     data_list = body.get('data_list', [])
     skip_validation = body.get('skip_validation', False)
     result = _get_manage_service().batch_create(object_type, data_list, skip_validation)
-    return jsonify({
+    return json_response({
         'success': result.failed_count == 0,
         'success_count': result.success_count,
         'failed_count': result.failed_count,
         'results': [r.to_dict() if hasattr(r, 'to_dict') else {'success': r.success, 'data': r.data, 'message': r.message, 'error': r.error} for r in result.results],
         'errors': result.errors,
-    }), 200 if result.failed_count == 0 else 207
+    }, 200 if result.failed_count == 0 else 207)
 
 
 @manage_bp.route('/<object_type>/batch-update', methods=['POST'])
@@ -1104,13 +1077,13 @@ def batch_update(object_type):
     updates = body.get('updates', [])
     skip_validation = body.get('skip_validation', False)
     result = _get_manage_service().batch_update(object_type, updates, skip_validation)
-    return jsonify({
+    return json_response({
         'success': result.failed_count == 0,
         'success_count': result.success_count,
         'failed_count': result.failed_count,
         'results': [r.to_dict() if hasattr(r, 'to_dict') else {'success': r.success, 'data': r.data, 'message': r.message, 'error': r.error} for r in result.results],
         'errors': result.errors,
-    }), 200 if result.failed_count == 0 else 207
+    }, 200 if result.failed_count == 0 else 207)
 
 
 @manage_bp.route('/<object_type>/batch-delete', methods=['POST'])
@@ -1121,13 +1094,13 @@ def batch_delete(object_type):
     ids = body.get('ids', [])
     force = body.get('force', False)
     result = _get_manage_service().batch_delete(object_type, ids, force)
-    return jsonify({
+    return json_response({
         'success': result.failed_count == 0,
         'success_count': result.success_count,
         'failed_count': result.failed_count,
         'results': [r.to_dict() if hasattr(r, 'to_dict') else {'success': r.success, 'data': r.data, 'message': r.message, 'error': r.error} for r in result.results],
         'errors': result.errors,
-    }), 200 if result.failed_count == 0 else 207
+    }, 200 if result.failed_count == 0 else 207)
 def _ensure_default_permissions(ds):
     DEFAULT_PERMISSIONS = [
         ('product', '产品'),
@@ -1175,7 +1148,7 @@ def list_actions(object_type, id):
     """获取对象可执行的 Action 列表"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
 
     record = None
     try:
@@ -1184,7 +1157,7 @@ def list_actions(object_type, id):
         pass
 
     if not record:
-        return jsonify({'success': False, 'message': '记录不存在'}), 404
+        return error_response('记录不存在', status=404)
 
     from meta.core.condition_evaluator import ConditionEvaluator
     evaluator = ConditionEvaluator()
@@ -1215,12 +1188,9 @@ def list_actions(object_type, id):
 
     can_delete = _get_manage_service().check_can_delete(object_type, record)
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'actions': actions,
-            'can_delete': can_delete,
-        },
+    return ok({
+        'actions': actions,
+        'can_delete': can_delete,
     })
 
 
@@ -1230,11 +1200,11 @@ def execute_action(object_type, id, action_id):
     """执行自定义 Action"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
 
     action = meta_obj.get_action(action_id)
     if not action:
-        return jsonify({'success': False, 'message': f'Action not found: {action_id}'}), 404
+        return error_response(f'Action not found: {action_id}', status=404)
 
     _set_audit_user()
     body = request.get_json(silent=True) or {}
@@ -1243,12 +1213,12 @@ def execute_action(object_type, id, action_id):
 
     result = _get_manage_service().executor.execute(meta_obj, action_id, params)
 
-    return jsonify({
+    return json_response({
         'success': result.success,
         'data': result.data,
         'message': result.message,
         'error': result.error,
-    }), 200 if result.success else 400
+    }, 200 if result.success else 400)
 
 
 
@@ -1261,16 +1231,16 @@ def get_state_transitions(object_type, id):
     """获取当前可用的状态转换规则"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
     
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'ID 无效'}), 400
+        return error_response('ID 无效', status=400)
     
     record = _data_source.find_by_id(meta_obj.table_name, object_id)
     if not record:
-        return jsonify({'success': False, 'message': '记录不存在'}), 404
+        return error_response('记录不存在', status=404)
     
     state_transitions = []
     for rule in get_rule_provider().get_rules(meta_obj):
@@ -1305,10 +1275,7 @@ def get_state_transitions(object_type, id):
         if not transition_info['hidden']:
             state_transitions.append(transition_info)
     
-    return jsonify({
-        'success': True,
-        'data': state_transitions,
-    })
+    return ok(state_transitions)
 
 
 @manage_bp.route('/<object_type>/<id>/state_history', methods=['GET'])
@@ -1319,14 +1286,14 @@ def get_state_history(object_type, id):
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
     
     field = request.args.get('field', 'status')
     
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'ID 无效'}), 400
+        return error_response('ID 无效', status=400)
     
     sql = """
         SELECT id, old_value, new_value, user_name, created_at, action
@@ -1387,7 +1354,7 @@ def get_state_history(object_type, id):
         
         result.append(record)
     
-    return jsonify({'success': True, 'data': result})
+    return ok(result)
 
 
 @manage_bp.route('/<object_type>/<id>/stage_metrics', methods=['GET'])
@@ -1398,18 +1365,18 @@ def get_stage_metrics(object_type, id):
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
     
     field = request.args.get('field', 'status')
     
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'ID 无效'}), 400
+        return error_response('ID 无效', status=400)
     
     record = _data_source.find_by_id(meta_obj.table_name, object_id)
     if not record:
-        return jsonify({'success': False, 'message': '记录不存在'}), 404
+        return error_response('记录不存在', status=404)
     
     current_state = record.get(field)
     # [FIX 2026-06-09] 不再从 record.get(f'{field}_entered_at') 读, 改为从 audit_logs 派生
@@ -1511,14 +1478,11 @@ def get_stage_metrics(object_type, id):
         else:
             stage['percentage'] = 0
     
-    return jsonify({
-        'success': True,
-        'data': {
-            'current_state': current_state,
-            'current_state_label': current_state_label,
-            'current_state_entered_at': str(current_state_entered_at) if current_state_entered_at else None,
-            'current_state_duration_days': current_duration_days,
-            'total_lifecycle_days': round(total_days, 2),
-            'stage_breakdown': stage_list,
-        },
+    return ok({
+        'current_state': current_state,
+        'current_state_label': current_state_label,
+        'current_state_entered_at': str(current_state_entered_at) if current_state_entered_at else None,
+        'current_state_duration_days': current_duration_days,
+        'total_lifecycle_days': round(total_days, 2),
+        'stage_breakdown': stage_list,
     })

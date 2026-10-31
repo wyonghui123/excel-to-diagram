@@ -6,6 +6,8 @@
 """
 
 from flask import Blueprint, request, jsonify, g
+from meta.api._response_contract import ok, error_response
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, require_permission, is_admin, get_current_user
 from meta.services.user_group_service import UserGroupService
 from meta.services.data_permission_service import DataPermissionService
@@ -119,7 +121,7 @@ def get_group_members(group_id):
         members = service.get_group_members(group_id)
         return jsonify({'success': True, 'data': members, '_deprecated': True})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/members', methods=['POST'])
@@ -143,7 +145,7 @@ def add_group_member(group_id):
             user_ids = [user_id]
 
         if not user_ids:
-            return jsonify({'success': False, 'message': 'user_id is required'}), 400
+            return error_response('user_id is required', status=400)
 
         current_user = get_current_user()
         _set_user_context()
@@ -168,11 +170,11 @@ def add_group_member(group_id):
             if result.success:
                 added_count += 1
 
-        return jsonify({'success': True, 'data': {'added_count': added_count}})
+        return ok({'added_count': added_count})
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/members', methods=['PUT'])
@@ -224,17 +226,14 @@ def set_group_members(group_id):
                 if result.success:
                     added_count += 1
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'added_count': added_count,
-                'removed_count': removed_count
-            }
+        return ok({
+            'added_count': added_count,
+            'removed_count': removed_count
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/members/<int:user_id>', methods=['DELETE'])
@@ -257,9 +256,9 @@ def remove_group_member(group_id, user_id):
         
         if result.success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 500
+        return error_response(result.message, status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions', methods=['GET'])
@@ -278,7 +277,7 @@ def get_group_data_permissions(group_id):
         return jsonify({'success': True, 'data': perms, '_deprecated': True,
                         '_hint': '建议使用 /user-groups/{id}/roles 接口通过角色间接分配数据权限'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions', methods=['POST'])
@@ -300,14 +299,14 @@ def add_group_data_permission(group_id):
         inherit_to_children = data.get('inherit_to_children', True)
 
         if not resource_type or not resource_id:
-            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
+            return error_response('资源类型和资源 ID 不能为空', status=400)
 
         perm_id = service.add_group_data_permission(group_id, resource_type, resource_id, permission_level, inherit_to_children)
         if perm_id:
             return jsonify({'success': True, 'data': {'id': perm_id}, '_deprecated': True})
-        return jsonify({'success': False, 'message': 'Failed to add permission'}), 500
+        return error_response('Failed to add permission', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions/<int:perm_id>', methods=['DELETE'])
@@ -322,9 +321,9 @@ def remove_group_data_permission(group_id, perm_id):
         success = service.remove_group_data_permission(perm_id)
         if success:
             return jsonify({'success': True, '_deprecated': True})
-        return jsonify({'success': False, 'message': 'Failed to delete permission'}), 500
+        return error_response('Failed to delete permission', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/roles', methods=['GET'])
@@ -346,7 +345,7 @@ def get_group_roles(group_id):
         roles = service.get_group_roles(group_id)
         return jsonify({'success': True, 'data': roles, '_deprecated': True})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/roles', methods=['PUT'])
@@ -398,17 +397,14 @@ def set_group_roles(group_id):
                 if result.success:
                     added_count += 1
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'added_count': added_count,
-                'removed_count': removed_count
-            }
+        return ok({
+            'added_count': added_count,
+            'removed_count': removed_count
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/roles/<int:role_id>', methods=['POST'])
@@ -431,9 +427,9 @@ def add_group_role(group_id, role_id):
         
         if result.success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message, status=400)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/roles/<int:role_id>', methods=['DELETE'])
@@ -456,9 +452,9 @@ def remove_group_role(group_id, role_id):
         
         if result.success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 500
+        return error_response(result.message, status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/roles/available', methods=['GET'])
@@ -469,9 +465,9 @@ def get_available_roles_for_group(group_id):
     try:
         service = _get_group_service()
         roles = service.get_roles_not_in_group(group_id)
-        return jsonify({'success': True, 'data': roles})
+        return ok(roles)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/system/migrate-group-permissions-to-roles', methods=['POST'])
@@ -482,13 +478,12 @@ def migrate_group_permissions():
     try:
         service = _get_group_service()
         migrated_count = service.migrate_group_data_permissions_to_roles()
-        return jsonify({
-            'success': True,
-            'data': {'migrated_group_count': migrated_count},
-            'message': f'成功迁移 {migrated_count} 个用户组的直接数据权限到对应角色'
-        })
+        return ok(
+            {'migrated_group_count': migrated_count},
+            message=f'成功迁移 {migrated_count} 个用户组的直接数据权限到对应角色',
+        )
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_group_bp.route('/user-groups/<int:group_id>/logs', methods=['GET'])
@@ -499,12 +494,10 @@ def get_user_group_logs(group_id):
         cursor = _data_source.execute("SELECT id, name FROM orgs WHERE id = ?", [group_id])
         group = cursor.fetchone()
         if not group:
-            return jsonify({'success': False, 'message': '用户组不存在'}), 404
+            return error_response('用户组不存在', status=404)
 
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
-
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args)
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         cursor = _data_source.execute("""
             SELECT * FROM audit_logs
@@ -534,4 +527,4 @@ def get_user_group_logs(group_id):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

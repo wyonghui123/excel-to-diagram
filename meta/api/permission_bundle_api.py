@@ -16,6 +16,7 @@ from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import ok, ok_message, error_response
 
 def admin_required(f):
     @wraps(f)
@@ -23,7 +24,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -55,10 +56,7 @@ def get_bundles():
         service = _get_bundle_service()
         bundles = service.get_all_bundles()
         
-        return jsonify({
-            'success': True,
-            'data': bundles
-        })
+        return ok(bundles)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -80,10 +78,7 @@ def get_bundle(bundle_code):
                 'error': f'权限包不存在: {bundle_code}'
             }), 404
         
-        return jsonify({
-            'success': True,
-            'data': bundle
-        })
+        return ok(bundle)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -122,10 +117,7 @@ def assign_bundle():
         )
         
         if result['success']:
-            return jsonify({
-                'success': True,
-                'data': result
-            })
+            return ok(result)
         else:
             return jsonify({
                 'success': False,
@@ -146,10 +138,7 @@ def get_user_bundles(user_id):
         service = _get_bundle_service()
         bundles = service.get_user_bundles(user_id)
         
-        return jsonify({
-            'success': True,
-            'data': bundles
-        })
+        return ok(bundles)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -182,10 +171,7 @@ def create_bundle():
         bundle_id = service.create_bundle(data)
         
         if bundle_id:
-            return jsonify({
-                'success': True,
-                'data': {'id': bundle_id}
-            })
+            return ok({'id': bundle_id})
         else:
             return jsonify({
                 'success': False,
@@ -215,10 +201,7 @@ def update_bundle(bundle_code):
         success = service.update_bundle(bundle_code, data)
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': '更新成功'
-            })
+            return ok_message('更新成功')
         else:
             return jsonify({
                 'success': False,
@@ -240,10 +223,7 @@ def delete_bundle(bundle_code):
         success = service.delete_bundle(bundle_code)
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': '删除成功'
-            })
+            return ok_message('删除成功')
         else:
             return jsonify({
                 'success': False,

@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from flask import Blueprint, request, jsonify, g, Response, current_app
 
 from meta.api._messages import MSG_ADMIN_REQUIRED, MSG_SESSION_EXPIRED, MSG_TOKEN_INVALID, MSG_AUTH_SERVICE_ERROR
+from meta.api._response_contract import ok, error_response
 from meta.core.bo_action_registry import bo_action_registry
 from meta.services.auth_middleware import login_required, get_current_user
 
@@ -105,7 +106,7 @@ def execute_action(action_id: str):
     # [DECORATIVE] v3.1: 从 registry 读 requires_auth
     meta = bo_action_registry.get(action_id)
     if not meta:
-        return jsonify({'success': False, 'data': None, 'message': f'Unknown action: {action_id}'}), 404
+        return error_response(f'Unknown action: {action_id}', status=404)
 
     # 1. 鉴权
     if meta.requires_auth:
@@ -114,22 +115,22 @@ def execute_action(action_id: str):
         from meta.services.token_blacklist_service import token_blacklist_service
         token = _extract_token()
         if not token:
-            return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+            return error_response('未登录', status=401)
         try:
             if token_blacklist_service.is_blacklisted(token):
-                return jsonify({'success': False, 'data': None, 'message': '登录状态已失效，请重新登录'}), 401
+                return error_response('登录状态已失效，请重新登录', status=401)
         except Exception:
-            return jsonify({'success': False, 'data': None, 'message': '认证服务异常，请稍后重试'}), 401
+            return error_response('认证服务异常，请稍后重试', status=401)
         user_info = TokenService.verify_token(token)
         if not user_info:
-            return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+            return error_response('会话已过期，请重新登录', status=401)
         g.current_user = user_info
 
         # [DECORATIVE] v3.1: admin 鉴权
         if meta.requires_admin:
             from meta.api.auth_api import is_admin
             if not is_admin():
-                return jsonify({'success': False, 'data': None, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+                return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     # 2. 提取参数
     if request.method == 'GET':
@@ -248,14 +249,10 @@ def list_action_schemas():
     - 文档生成
     """
     schemas = bo_action_registry.list_schemas()
-    return jsonify({
-        'success': True,
-        'data': {
-            'count': len(schemas),
-            'actions': schemas,
-        },
-        'message': f'Returned {len(schemas)} action schemas',
-    })
+    return ok({
+        'count': len(schemas),
+        'actions': schemas,
+    }, message=f'Returned {len(schemas)} action schemas')
 
 
 @bo_action_bp.route('/_chain', methods=['POST'])
@@ -273,15 +270,15 @@ def execute_subflow_endpoint():
 
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     try:
         if token_blacklist_service.is_blacklisted(token):
-            return jsonify({'success': False, 'data': None, 'message': '登录状态已失效，请重新登录'}), 401
+            return error_response('登录状态已失效，请重新登录', status=401)
     except Exception:
-        return jsonify({'success': False, 'data': None, 'message': '认证服务异常，请稍后重试'}), 401
+        return error_response('认证服务异常，请稍后重试', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
     g.current_user = user_info
     user_info['ip_address'] = _extract_token.__module__ and g.get('_remote_addr')
 
@@ -309,12 +306,11 @@ def execute_subflow_endpoint():
         from meta.services.subflow_template_store import SubflowTemplateStore
         rendered = SubflowTemplateStore.render_template(template_name, template_params)
         if not rendered:
-            return jsonify({
-                'success': False,
-                'data': None,
-                'message': f'模板 {template_name} 不存在',
-                'code': 'subflow_template_not_found',
-            }), 200
+            return error_response(
+                f'模板 {template_name} 不存在',
+                error_code='subflow_template_not_found',
+                status=200,
+            )
         steps = rendered
 
     from meta.services.subflow_engine import execute_subflow
@@ -351,15 +347,15 @@ def execute_subflow_stream_endpoint():
 
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录', 'code': ErrorCode.UNAUTHORIZED.value}), 401
+        return error_response('未登录', error_code=ErrorCode.UNAUTHORIZED.value, status=401)
     try:
         if token_blacklist_service.is_blacklisted(token):
-            return jsonify({'success': False, 'data': None, 'message': '登录状态已失效，请重新登录', 'code': ErrorCode.TOKEN_BLACKLISTED.value}), 401
+            return error_response('登录状态已失效，请重新登录', error_code=ErrorCode.TOKEN_BLACKLISTED.value, status=401)
     except Exception:
-        return jsonify({'success': False, 'data': None, 'message': '认证服务异常，请稍后重试', 'code': ErrorCode.AUTH_SERVICE_ERROR.value}), 401
+        return error_response('认证服务异常，请稍后重试', error_code=ErrorCode.AUTH_SERVICE_ERROR.value, status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录', 'code': ErrorCode.TOKEN_EXPIRED.value}), 401
+        return error_response('会话已过期，请重新登录', error_code=ErrorCode.TOKEN_EXPIRED.value, status=401)
 
     from flask import request
     if hasattr(g, 'cached_body') and g.cached_body is not None:
@@ -425,18 +421,14 @@ def list_subflow_templates():
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     templates = SubflowTemplateStore.list_templates()
-    return jsonify({
-        'success': True,
-        'data': {'count': len(templates), 'templates': templates},
-        'message': f'Returned {len(templates)} templates',
-    })
+    return ok({'count': len(templates), 'templates': templates}, message=f'Returned {len(templates)} templates')
 
 
 @bo_action_bp.route('/_subflow_template/<name>', methods=['PUT'])
@@ -446,10 +438,10 @@ def upsert_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
 
     from flask import request
     body = request.get_json(force=True, silent=True) or {}
@@ -457,7 +449,7 @@ def upsert_subflow_template(name):
     steps = body.get('steps', [])
 
     if not steps:
-        return jsonify({'success': False, 'data': None, 'message': '执行步骤不能为空'}), 400
+        return error_response('执行步骤不能为空', status=400)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     result = SubflowTemplateStore.set(
@@ -476,10 +468,10 @@ def delete_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     result = SubflowTemplateStore.delete(name)
@@ -493,20 +485,16 @@ def get_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     steps = SubflowTemplateStore.get(name)
     if not steps:
-        return jsonify({'success': False, 'data': None, 'message': f'模板 {name} 不存在'}), 404
-    return jsonify({
-        'success': True,
-        'data': {'name': name, 'steps': steps, 'step_count': len(steps)},
-        'message': 'OK',
-    })
+        return error_response(f'模板 {name} 不存在', status=404)
+    return ok({'name': name, 'steps': steps, 'step_count': len(steps)}, message='OK')
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -519,21 +507,17 @@ def subflow_metrics():
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return jsonify({'success': False, 'data': None, 'message': '未登录'}), 401
+        return error_response('未登录', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return jsonify({'success': False, 'data': None, 'message': '会话已过期，请重新登录'}), 401
+        return error_response('会话已过期，请重新登录', status=401)
 
     from meta.services.subflow_metrics import SubflowMetrics
-    return jsonify({
-        'success': True,
-        'data': {
-            'summary': SubflowMetrics.get_summary(),
-            'by_action': SubflowMetrics.get_by_action(),
-            'recent': SubflowMetrics.get_recent(20),
-        },
-        'message': 'OK',
-    })
+    return ok({
+        'summary': SubflowMetrics.get_summary(),
+        'by_action': SubflowMetrics.get_by_action(),
+        'recent': SubflowMetrics.get_recent(20),
+    }, message='OK')
 
 
 # [DECORATIVE] [NEW] v1.2 / FR-2.1: 提取为独立函数（可被 FR-2.4 全量 OpenAPI 端点复用）
@@ -753,23 +737,16 @@ def list_actions():
             'async_supported': m.async_supported,
             'category': m.category,
         })
-    return jsonify({
-        'success': True,
-        'data': {
-            'count': len(items),
-            'actions': items,
-        },
+    return ok({
+        'count': len(items),
+        'actions': items,
     })
 
 
 @bo_action_bp.route('/_health', methods=['GET'])
 def health():
     """健康检查"""
-    return jsonify({
-        'success': True,
-        'data': {
-            'registered': len(bo_action_registry.list_ids()),
-            'action_ids': bo_action_registry.list_ids(),
-        },
-        'message': 'bo_action_api healthy',
-    })
+    return ok({
+        'registered': len(bo_action_registry.list_ids()),
+        'action_ids': bo_action_registry.list_ids(),
+    }, message='bo_action_api healthy')

@@ -9,6 +9,8 @@ import os
 import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
+from meta.api._response_contract import ok, ok_message, error_response
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, require_permission, get_current_user, is_admin
 from meta.services.query.virtual_sort import _build_audit_derived_order_join
 from meta.services.permission_service import PermissionService
@@ -191,10 +193,10 @@ def list_users():
     has_group_permission = _get_perm_service().has_permission(user_id, 'user:manage:group')
     
     if not has_all_permission and not has_group_permission:
-        return jsonify({'success': False, 'message': '需要用户管理权限'}), 403
+        return error_response('需要用户管理权限', status=403)
 
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 20, type=int)
+    spec = parse_query_spec(request.args)
+    page, page_size = spec.page, spec.page_size
     keyword = request.args.get('keyword', '').strip()
     org_id = request.args.get('org_id', type=int)
 
@@ -335,7 +337,7 @@ def create_user():
         or 'user:manage:group' in user_permissions
     )
     if not is_super and not is_delegate:
-        return jsonify({'success': False, 'message': '需要管理员权限或组织管理委托'}), 403
+        return error_response('需要管理员权限或组织管理委托', status=403)
 
     data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
@@ -344,10 +346,10 @@ def create_user():
     display_name = data.get('display_name', '').strip()
 
     if not username:
-        return jsonify({'success': False, 'message': '用户名不能为空'}), 400
+        return error_response('用户名不能为空', status=400)
 
     if password and len(password) < 6:
-        return jsonify({'success': False, 'message': '密码长度不能少于6位'}), 400
+        return error_response('密码长度不能少于6位', status=400)
 
     # [Spec 19 M2 FR-004] 归属组织与行级范围校验（钥匙二）
     raw_org_ids = data.get('org_ids') or []
@@ -356,12 +358,11 @@ def create_user():
         try:
             org_ids.append(int(v))
         except (TypeError, ValueError):
-            return jsonify({'success': False, 'message': f'org_ids 含非法值: {v}'}), 400
+            return error_response(f'org_ids 含非法值: {v}', status=400)
 
     if not is_super:
         if not org_ids:
-            return jsonify({'success': False,
-                            'message': '受托管理员创建用户必须指定 org_ids（归属组织）'}), 400
+            return error_response('受托管理员创建用户必须指定 org_ids（归属组织）', status=400)
         from meta.services.org_admin_scope_service import OrgAdminScopeService
         from meta.core.bo_framework import bo_framework as _bof
         scope_svc = OrgAdminScopeService(_bof._data_source)
@@ -376,12 +377,11 @@ def create_user():
                     reason=f'create user with org#{oid}: {reason}',
                     interceptor='user_api.create_user',
                 )
-                return jsonify({'success': False,
-                                'message': f'组织 #{oid} 不在受托范围内（{reason}）'}), 403
+                return error_response(f'组织 #{oid} 不在受托范围内（{reason}）', status=403)
 
     cursor = _data_source.execute("SELECT id FROM users WHERE username = ?", [username])
     if cursor.fetchone():
-        return jsonify({'success': False, 'message': '用户名已存在'}), 400
+        return error_response('用户名已存在', status=400)
 
     # [NEW] 2026-06-08: 留空时由 BO Framework 自动生成 12 位强随机临时密码
     user_payload = {
@@ -400,7 +400,7 @@ def create_user():
         result = bo.create('user', user_payload)
 
         if not result.success:
-            return jsonify({'success': False, 'message': result.message}), 400
+            return error_response(result.message, status=400)
 
         user_id = result.data['id']
         generated_temp_password = result.data.get('generated_temp_password')
@@ -439,7 +439,7 @@ def get_current_user_profile():
     row = cursor.fetchone()
     
     if not row:
-        return jsonify({'success': False, 'message': '用户不存在'}), 404
+        return error_response('用户不存在', status=404)
     
     cols = [d[0] for d in cursor.description]
     user = dict(zip(cols, row))
@@ -454,7 +454,7 @@ def get_current_user_profile():
     user['permissions'] = perm_service.get_user_permissions(user_id)
     user['is_admin'] = is_admin()
 
-    return jsonify({'success': True, 'data': user})
+    return ok(user)
 
 
 @user_bp.route('/me', methods=['PUT'])
@@ -468,11 +468,11 @@ def update_current_user_profile():
     # [FIX 2026-06-09] status 字段只能通过 state_transition 操作修改, 普通 PUT 拒绝
     # 与 /<int:user_id> PUT 端点保持一致 (admin 和 self 都不允许通过 PUT 改 status)
     if 'status' in data:
-        return jsonify({
-            'success': False,
-            'message': '状态变更必须通过 state_transition 操作, 请使用相关按钮',
-            'error_code': 'STATUS_CHANGE_VIA_PUT_NOT_ALLOWED'
-        }), 400
+        return error_response(
+            '状态变更必须通过 state_transition 操作, 请使用相关按钮',
+            error_code='STATUS_CHANGE_VIA_PUT_NOT_ALLOWED',
+            status=400,
+        )
 
     profile_fields = ['display_name', 'email']
     preference_fields = ['locale', 'timezone', 'date_style', 'time_style', 'hour_cycle']
@@ -481,7 +481,7 @@ def update_current_user_profile():
     update_data = {k: v for k, v in data.items() if k in allowed_fields}
 
     if not update_data:
-        return jsonify({'success': False, 'message': '没有可更新的字段'}), 400
+        return error_response('没有可更新的字段', status=400)
 
     _set_user_context()
     bo = _get_bo_framework()
@@ -489,9 +489,9 @@ def update_current_user_profile():
     result = bo.update('user', user_id, update_data)
     
     if not result.success:
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message, status=400)
 
-    return jsonify({'success': True, 'message': '个人信息更新成功'})
+    return ok_message('个人信息更新成功')
 
 
 @user_bp.route('/<int:user_id>', methods=['GET'])
@@ -500,7 +500,7 @@ def get_user(user_id):
     """获取用户详情"""
     try:
         if not is_admin() and get_current_user().get('user_id') != user_id:
-            return jsonify({'success': False, 'message': '无权查看'}), 403
+            return error_response('无权查看', status=403)
 
         _set_user_context()
         bo = _get_bo_framework()
@@ -508,7 +508,7 @@ def get_user(user_id):
         result = bo.read('user', user_id)
         
         if not result.success:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return error_response('用户不存在', status=404)
 
         user = result.data
         user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
@@ -516,11 +516,11 @@ def get_user(user_id):
         user['groups'] = _get_org_service().get_orgs(user_id)
         user['data_permissions'] = _get_data_perm_service().get_all_user_data_permissions_with_groups(user_id)
 
-        return jsonify({'success': True, 'data': user})
+        return ok(user)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': f'获取用户详情失败: {str(e)}'}), 500
+        return error_response(f'获取用户详情失败: {str(e)}', status=500)
 
 
 @user_bp.route('/<int:user_id>/permission-preview', methods=['GET'])
@@ -530,9 +530,9 @@ def get_user_permission_preview(user_id):
     """权限预览：user 有效权限全集（经所属 org 继承链聚合，含来源追溯）"""
     try:
         service = _get_org_service()
-        return jsonify({'success': True, 'data': service.get_permission_preview('user', user_id)})
+        return ok(service.get_permission_preview('user', user_id))
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_bp.route('/<int:user_id>/permission-config', methods=['GET'])
@@ -542,11 +542,11 @@ def get_user_permission_config(user_id):
     """融合权限配置：user 下所有有效权限集合并为「完整的一份」（菜单+矩阵+数据范围）"""
     try:
         service = _get_org_service()
-        return jsonify({'success': True, 'data': service.get_fused_permission_config('user', user_id)})
+        return ok(service.get_fused_permission_config('user', user_id))
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_bp.route('/<int:user_id>', methods=['PUT'])
@@ -568,11 +568,11 @@ def update_user(user_id):
     is_self = operator_id == user_id
     
     if not has_all_permission and not has_group_permission and not is_self:
-        return jsonify({'success': False, 'message': '无权修改'}), 403
+        return error_response('无权修改', status=403)
     
     if not has_all_permission and not is_self:
         if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
-            return jsonify({'success': False, 'message': '无权修改该用户'}), 403
+            return error_response('无权修改该用户', status=403)
 
     data = request.get_json(silent=True) or {}
 
@@ -580,11 +580,11 @@ def update_user(user_id):
     # 避免 admin 误用 PUT 接口直接传 status='locked' 旁路 state_transition rule
     # (state_transition rule 里有 from_states 校验 + audit log + 业务校验, 普通 PUT 没有)
     if 'status' in data:
-        return jsonify({
-            'success': False,
-            'message': '状态变更必须通过 state_transition 操作, 请使用相关按钮',
-            'error_code': 'STATUS_CHANGE_VIA_PUT_NOT_ALLOWED'
-        }), 400
+        return error_response(
+            '状态变更必须通过 state_transition 操作, 请使用相关按钮',
+            error_code='STATUS_CHANGE_VIA_PUT_NOT_ALLOWED',
+            status=400,
+        )
 
     update_data = {}
     for field in ['email', 'display_name']:
@@ -600,12 +600,12 @@ def update_user(user_id):
                 result = bo.update('user', user_id, update_data)
 
                 if not result.success:
-                    return jsonify({'success': False, 'message': result.message}), 400
+                    return error_response(result.message, status=400)
 
             if (has_all_permission or has_group_permission) and 'role_ids' in data:
                 if not has_all_permission:
                     if not _get_org_service().can_manage_user(operator_id, user_id, has_all_permission=False):
-                        return jsonify({'success': False, 'message': '无权修改该用户角色'}), 403
+                        return error_response('无权修改该用户角色', status=403)
                 
                 current_roles = {r['id'] for r in _get_perm_service().get_user_permission_sets(user_id)}
                 new_roles = set(data['role_ids'])
@@ -615,7 +615,7 @@ def update_user(user_id):
 
                 for permission_set_id in added_roles:
                     if not _get_data_perm_service().can_assign_role(operator_id, permission_set_id):
-                        return jsonify({'success': False, 'message': '无权分配该角色，可能导致权限提升'}), 403
+                        return error_response('无权分配该角色，可能导致权限提升', status=403)
                     _get_perm_service().assign_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_associate(
                         object_type='user',
@@ -630,7 +630,7 @@ def update_user(user_id):
                     # [Spec 19 M2 V4] 移除权限集同样受 can_assign_role 约束：
                     # 优先级低于目标权限集的操作者不可移除（防破坏受托配置）
                     if not _get_data_perm_service().can_assign_role(operator_id, permission_set_id):
-                        return jsonify({'success': False, 'message': '无权移除该角色（角色优先级不足）'}), 403
+                        return error_response('无权移除该角色（角色优先级不足）', status=403)
                     _get_perm_service().remove_role(user_id, permission_set_id)
                     _get_svc_audit_interceptor().log_dissociate(
                         object_type='user',
@@ -642,7 +642,7 @@ def update_user(user_id):
                         user_name=operator_name,
                     )
 
-    return jsonify({'success': True, 'message': '用户更新成功'})
+    return ok_message('用户更新成功')
 
 
 @user_bp.route('/<int:user_id>', methods=['DELETE'])
@@ -650,7 +650,7 @@ def update_user(user_id):
 def delete_user(user_id):
     """删除用户"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return error_response('需要管理员权限', status=403)
     
     _set_user_context()
     bo = _get_bo_framework()
@@ -659,10 +659,10 @@ def delete_user(user_id):
     
     if not result.success:
         if '不存在' in result.message:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
-        return jsonify({'success': False, 'message': result.message}), 400
+            return error_response('用户不存在', status=404)
+        return error_response(result.message, status=400)
 
-    return jsonify({'success': True, 'message': '用户删除成功'})
+    return ok_message('用户删除成功')
 
 
 @user_bp.route('/batch-delete', methods=['POST'])
@@ -670,13 +670,13 @@ def delete_user(user_id):
 def batch_delete_users():
     """批量删除用户"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return error_response('需要管理员权限', status=403)
     
     data = request.get_json(silent=True) or {}
     ids = data.get('ids', [])
     
     if not ids:
-        return jsonify({'success': False, 'message': '请选择要删除的记录'}), 400
+        return error_response('请选择要删除的记录', status=400)
     
     _set_user_context()
     bo = _get_bo_framework()
@@ -707,7 +707,7 @@ def batch_delete_users():
             }), 400
     except Exception as e:
         logger.error(f'批量删除用户失败: {str(e)}')
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_bp.route('/<int:user_id>/reset-password', methods=['POST'])
@@ -724,7 +724,7 @@ def reset_password(user_id):
     if not is_admin():
         delegate_codes = {'user:update', 'user:manage:group', 'org_member:manage'}
         if not (delegate_codes & set(user_permissions)):
-            return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+            return error_response('需要管理员权限', status=403)
         from meta.services.org_admin_scope_service import OrgAdminScopeService
         from meta.core.bo_framework import bo_framework as _bof
         scope_svc = OrgAdminScopeService(_bof._data_source)
@@ -737,21 +737,20 @@ def reset_password(user_id):
                 decision='deny', reason=reason,
                 interceptor='user_api.reset_password',
             )
-            return jsonify({'success': False,
-                            'message': f'用户 #{user_id} 不在受托范围内（{reason}）'}), 403
+            return error_response(f'用户 #{user_id} 不在受托范围内（{reason}）', status=403)
 
     data = request.get_json(silent=True) or {}
     new_password = data.get('new_password', '')
 
     if not new_password or len(new_password) < 6:
-        return jsonify({'success': False, 'message': '新密码长度不能少于6位'}), 400
+        return error_response('新密码长度不能少于6位', status=400)
 
     cursor = _data_source.execute(
         "SELECT username FROM users WHERE id = ?", [user_id]
     )
     row = cursor.fetchone()
     if not row:
-        return jsonify({'success': False, 'message': '用户不存在'}), 404
+        return error_response('用户不存在', status=404)
 
     password_hash = _hash_password_pbdkdf2(new_password)
 
@@ -770,13 +769,14 @@ def reset_password(user_id):
     if ',' in ip_addr:
         ip_addr = ip_addr.split(',')[0].strip()
 
-    # [FIX 2026-06-20 P2.3] 改用 AuditLogger (audit-compliance.md §1.3 禁止直接 INSERT)
+    # [FR-004] 审计写入统一走 AuditService.log
     try:
-        from meta.core.action_executor import AuditLogger
-        audit_logger = AuditLogger(_data_source)
-        audit_logger.log_update(
+        from meta.core.datasource import resolve_audit_data_source
+        from meta.services.audit_service import AuditService
+        AuditService(resolve_audit_data_source(_data_source)).log(
             object_type='user',
             object_id=user_id,
+            action='UPDATE',
             old_data={'password_hash': '***'},
             new_data={'password_hash': f'reset by {operator_name}'},
             user_id=operator_id,
@@ -787,7 +787,7 @@ def reset_password(user_id):
         import logging
         logging.getLogger(__name__).warning(f"[Audit] user reset password audit failed: {e}")
 
-    return jsonify({'success': True, 'message': '密码重置成功，用户下次登录需修改密码'})
+    return ok_message('密码重置成功，用户下次登录需修改密码')
 
 
 @user_bp.route('/batch-data-permissions', methods=['POST'])
@@ -795,7 +795,7 @@ def reset_password(user_id):
 def batch_add_user_data_permissions():
     """批量添加用户数据权限"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return error_response('需要管理员权限', status=403)
 
     try:
         data = request.get_json()
@@ -806,15 +806,15 @@ def batch_add_user_data_permissions():
         inherit_to_children = data.get('inherit_to_children', True)
 
         if not user_ids or not resource_type or not resource_id:
-            return jsonify({'success': False, 'message': 'user_ids, resource_type, resource_id are required'}), 400
+            return error_response('user_ids, resource_type, resource_id are required', status=400)
 
         result = _get_data_perm_service().add_batch_user_data_permissions(
             user_ids, resource_type, resource_id, permission_level, inherit_to_children
         )
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_bp.route('/self', methods=['GET'])
@@ -829,13 +829,13 @@ def get_current_user_detail():
     result = bo.read('user', user_id)
     
     if not result.success:
-        return jsonify({'success': False, 'message': 'User not found'}), 404
+        return error_response('User not found', status=404)
 
     user = result.data
     user['roles'] = _get_perm_service().get_user_permission_sets(user_id)
     user['permissions'] = _get_perm_service().get_user_permissions(user_id)
 
-    return jsonify({'success': True, 'data': user})
+    return ok(user)
 
 
 @user_bp.route('/self', methods=['PUT'])
@@ -853,7 +853,7 @@ def update_user_self():
     update_data = {k: v for k, v in data.items() if k in allowed_fields}
 
     if not update_data:
-        return jsonify({'success': False, 'message': '没有可更新的字段'}), 400
+        return error_response('没有可更新的字段', status=400)
 
     _set_user_context()
     bo = _get_bo_framework()
@@ -861,9 +861,9 @@ def update_user_self():
     result = bo.update('user', user_id, update_data)
 
     if not result.success:
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message, status=400)
 
-    return jsonify({'success': True, 'message': '个人信息更新成功'})
+    return ok_message('个人信息更新成功')
 
 
 @user_bp.route('/<int:user_id>/menus', methods=['GET'])
@@ -876,7 +876,7 @@ def get_user_menus(user_id):
         cursor = ds.execute("SELECT id, username FROM users WHERE id = ?", [user_id])
         user = cursor.fetchone()
         if not user:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return error_response('用户不存在', status=404)
         
         cursor = ds.execute("""
             SELECT DISTINCT mp.menu_code, mp.menu_name, mp.menu_path, mp.icon
@@ -896,14 +896,11 @@ def get_user_menus(user_id):
             menu['assigned'] = True
             menus.append(menu)
         
-        return jsonify({
-            'success': True,
-            'data': menus
-        })
+        return ok(menus)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @user_bp.route('/<int:user_id>/logs', methods=['GET'])
@@ -916,12 +913,10 @@ def get_user_logs(user_id):
         cursor = ds.execute("SELECT id, username FROM users WHERE id = ?", [user_id])
         user = cursor.fetchone()
         if not user:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return error_response('用户不存在', status=404)
         
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
-        
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args)
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
         
         cursor = ds.execute("""
             SELECT * FROM v_audit_all
@@ -951,4 +946,4 @@ def get_user_logs(user_id):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

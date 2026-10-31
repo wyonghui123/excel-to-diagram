@@ -6,6 +6,7 @@ Schema 管理 API
 """
 
 from flask import Blueprint, request, jsonify
+from meta.api._response_contract import ok, error_response
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.schema_generator import SchemaGenerator
@@ -51,8 +52,8 @@ def sync_schema():
                     # 生成 CREATE TABLE 语句
                     sql = generator.generate_create_table(obj)
                     if sql:
-                        ds.execute(sql)
-                        ds.commit()
+                        with ds.transaction():
+                            ds.execute(sql)
                         results['created'].append({
                             'object': obj_id,
                             'table': obj.table_name
@@ -70,8 +71,8 @@ def sync_schema():
                                 sql = "ALTER TABLE {0} ADD COLUMN {1}".format(
                                     obj.table_name, col_def
                                 )
-                                ds.execute(sql)
-                                ds.commit()
+                                with ds.transaction():
+                                    ds.execute(sql)
                                 results['updated'].append({
                                     'object': obj_id,
                                     'table': obj.table_name,
@@ -91,11 +92,7 @@ def sync_schema():
                     'error': str(e)
                 })
         
-        return jsonify({
-            'success': True,
-            'message': 'Schema 同步完成',
-            'data': results
-        })
+        return ok(results, message='Schema 同步完成')
         
     except Exception as e:
         return jsonify({
@@ -112,10 +109,7 @@ def list_tables():
         ds = _get_data_source()
         tables = ds.list_tables()
         
-        return jsonify({
-            'success': True,
-            'data': tables
-        })
+        return ok(tables)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -131,19 +125,13 @@ def get_table_schema(table_name):
         ds = _get_data_source()
         
         if not ds.table_exists(table_name):
-            return jsonify({
-                'success': False,
-                'message': '表不存在: {0}'.format(table_name)
-            }), 404
+            return error_response('表不存在: {0}'.format(table_name), status=404)
         
         columns = ds.get_table_columns(table_name)
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'table_name': table_name,
-                'columns': columns
-            }
+        return ok({
+            'table_name': table_name,
+            'columns': columns
         })
     except Exception as e:
         return jsonify({
@@ -167,39 +155,26 @@ def create_table(table_name):
         
         obj = registry.get(object_id)
         if not obj:
-            return jsonify({
-                'success': False,
-                'message': '元数据对象不存在: {0}'.format(object_id)
-            }), 404
+            return error_response('元数据对象不存在: {0}'.format(object_id), status=404)
         
         ds = _get_data_source()
         generator = SchemaGenerator(dialect="sqlite")
         
         if ds.table_exists(obj.table_name):
-            return jsonify({
-                'success': False,
-                'message': '表已存在: {0}'.format(obj.table_name)
-            }), 409
+            return error_response('表已存在: {0}'.format(obj.table_name), status=409)
         
         sql = generator.generate_create_table(obj)
         if not sql:
-            return jsonify({
-                'success': False,
-                'message': '无法生成建表语句'
-            }), 400
+            return error_response('无法生成建表语句')
         
-        ds.execute(sql)
-        ds.commit()
+        with ds.transaction():
+            ds.execute(sql)
         
-        return jsonify({
-            'success': True,
-            'message': '表创建成功',
-            'data': {
-                'object_id': object_id,
-                'table_name': obj.table_name,
-                'sql': sql
-            }
-        })
+        return ok({
+            'object_id': object_id,
+            'table_name': obj.table_name,
+            'sql': sql
+        }, message='表创建成功')
         
     except Exception as e:
         return jsonify({
@@ -315,10 +290,7 @@ def get_schema_status():
                     'table': obj.table_name
                 })
         
-        return jsonify({
-            'success': True,
-            'data': status
-        })
+        return ok(status)
         
     except Exception as e:
         return jsonify({
@@ -337,10 +309,7 @@ def get_index_report():
         service = IndexManagementService(ds)
         reports = service.get_all_derivation_reports()
         
-        return jsonify({
-            'success': True,
-            'data': reports
-        })
+        return ok(reports)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -359,15 +328,9 @@ def get_object_index_report(object_id):
         report = service.get_derivation_report(object_id)
         
         if not report:
-            return jsonify({
-                'success': False,
-                'message': '元数据对象不存在: {0}'.format(object_id)
-            }), 404
+            return error_response('元数据对象不存在: {0}'.format(object_id), status=404)
         
-        return jsonify({
-            'success': True,
-            'data': report
-        })
+        return ok(report)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -397,10 +360,7 @@ def create_indexes():
             from meta.core.models import registry
             meta_obj = registry.get(object_id)
             if not meta_obj:
-                return jsonify({
-                    'success': False,
-                    'message': '元数据对象不存在: {0}'.format(object_id)
-                }), 404
+                return error_response('元数据对象不存在: {0}'.format(object_id), status=404)
             results = service.create_indexes_for_object(meta_obj, priority)
         else:
             results = service.create_all_indexes(priority)
@@ -408,26 +368,22 @@ def create_indexes():
         success_count = sum(1 for r in results if r.success)
         fail_count = sum(1 for r in results if not r.success)
         
-        return jsonify({
-            'success': True,
-            'message': '索引创建完成: 成功 {0}, 失败 {1}'.format(success_count, fail_count),
-            'data': {
-                'total': len(results),
-                'success': success_count,
-                'failed': fail_count,
-                'results': [
-                    {
-                        'index_name': r.index_name,
-                        'table_name': r.table_name,
-                        'success': r.success,
-                        'sql': r.sql,
-                        'error': r.error,
-                        'duration_ms': r.duration_ms,
-                    }
-                    for r in results
-                ]
-            }
-        })
+        return ok({
+            'total': len(results),
+            'success': success_count,
+            'failed': fail_count,
+            'results': [
+                {
+                    'index_name': r.index_name,
+                    'table_name': r.table_name,
+                    'success': r.success,
+                    'sql': r.sql,
+                    'error': r.error,
+                    'duration_ms': r.duration_ms,
+                }
+                for r in results
+            ]
+        }, message='索引创建完成: 成功 {0}, 失败 {1}'.format(success_count, fail_count))
     except Exception as e:
         return jsonify({
             'success': False,
@@ -449,44 +405,38 @@ def get_index_stats():
             try:
                 table_name = validate_table_name(table_name)
             except ValueError as e:
-                return jsonify({
-                    'success': False,
-                    'message': str(e),
-                }), 400
+                return error_response(str(e))
         stats = service.get_index_stats(table_name)
         missing = service.get_missing_indexes()
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'total_indexes': len(stats),
-                'existing': sum(1 for s in stats if s.exists),
-                'missing': sum(1 for s in stats if not s.exists),
-                'missing_indexes': [
-                    {
-                        'name': s.name,
-                        'table': s.table_name,
-                        'columns': s.columns,
-                        'unique': s.unique,
-                        'priority': s.priority,
-                        'source': s.source,
-                    }
-                    for s in missing
-                ],
-                'all_indexes': [
-                    {
-                        'name': s.name,
-                        'table': s.table_name,
-                        'columns': s.columns,
-                        'unique': s.unique,
-                        'type': s.index_type,
-                        'priority': s.priority,
-                        'source': s.source,
-                        'exists': s.exists,
-                    }
-                    for s in stats
-                ]
-            }
+        return ok({
+            'total_indexes': len(stats),
+            'existing': sum(1 for s in stats if s.exists),
+            'missing': sum(1 for s in stats if not s.exists),
+            'missing_indexes': [
+                {
+                    'name': s.name,
+                    'table': s.table_name,
+                    'columns': s.columns,
+                    'unique': s.unique,
+                    'priority': s.priority,
+                    'source': s.source,
+                }
+                for s in missing
+            ],
+            'all_indexes': [
+                {
+                    'name': s.name,
+                    'table': s.table_name,
+                    'columns': s.columns,
+                    'unique': s.unique,
+                    'type': s.index_type,
+                    'priority': s.priority,
+                    'source': s.source,
+                    'exists': s.exists,
+                }
+                for s in stats
+            ]
         })
     except Exception as e:
         return jsonify({

@@ -18,6 +18,7 @@ import os
 
 from flask import Blueprint, request, jsonify
 
+from meta.api._response_contract import ok
 from meta.core.intent_resolver import (
     get_intent_permission_checker,
     get_role_intent_dao,
@@ -104,7 +105,7 @@ def check_intent_permission():
             parameters=parameters,
             context=context,
         )
-        return jsonify({"success": True, "data": result})
+        return ok(result)
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to check intent permission: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -204,7 +205,7 @@ def get_bo_action(bo_id, action_name):
                 ),
                 404,
             )
-        return jsonify({"success": True, "data": action})
+        return ok(action)
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to get BO action: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -267,12 +268,12 @@ def grant_or_deny_intent(permission_set_id, bo_id, action_name):
 
         dao = get_role_intent_dao()
         # [P1-B4 修复 2026-07-26] 移除 bo_framework.transaction() 包装
-        # 背景: DAO 已改用 sqlite3.connect() 直连 + conn.commit() (与 EffectiveIntentDAO 一致)
+        # 背景: DAO 已改用 sqlite3.connect() 直连 + 自行提交 (与 EffectiveIntentDAO 一致)
         #       bo_framework.transaction() 不会在新 sqlite3 连接上设置 tx_state,
         #       反而导致 safe_connect_for_write 探测失败 (已移除)
         # 修复: 检查 DAO 返回值, 失败时返回 500 (避免静默 success)
         if granted:
-            ok = dao.grant(
+            succeeded = dao.grant(
                 permission_set_id=int(permission_set_id),
                 bo_id=bo_id,
                 action_name=action_name,
@@ -280,14 +281,14 @@ def grant_or_deny_intent(permission_set_id, bo_id, action_name):
                 source=source,
             )
         else:
-            ok = dao.deny(
+            succeeded = dao.deny(
                 permission_set_id=int(permission_set_id),
                 bo_id=bo_id,
                 action_name=action_name,
                 parameters=parameters,
             )
 
-        if not ok:
+        if not succeeded:
             return jsonify({
                 "success": False,
                 "error": f"DAO {'grant' if granted else 'deny'} failed (see server logs)",
@@ -318,13 +319,10 @@ def grant_or_deny_intent(permission_set_id, bo_id, action_name):
                 f'failed (non-fatal): {derive_err}'
             )
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "granted": granted,
-                "bo_id": bo_id,
-                "action_name": action_name,
-            },
+        return ok({
+            "granted": granted,
+            "bo_id": bo_id,
+            "action_name": action_name,
         })
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to grant/deny intent: %s", e)
@@ -347,13 +345,13 @@ def revoke_intent(permission_set_id, bo_id, action_name):
     """
     try:
         dao = get_role_intent_dao()
-        ok = dao.revoke(
+        succeeded = dao.revoke(
             permission_set_id=int(permission_set_id),
             bo_id=bo_id,
             action_name=action_name,
         )
 
-        if not ok:
+        if not succeeded:
             return jsonify({
                 "success": False,
                 "error": "DAO revoke failed (see server logs)",
@@ -382,13 +380,10 @@ def revoke_intent(permission_set_id, bo_id, action_name):
                 f'failed (non-fatal): {derive_err}'
             )
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "revoked": True,
-                "bo_id": bo_id,
-                "action_name": action_name,
-            },
+        return ok({
+            "revoked": True,
+            "bo_id": bo_id,
+            "action_name": action_name,
         })
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to revoke intent: %s", e)

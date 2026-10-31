@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, g
+from meta.api._response_contract import ok, ok_message, ok_list, error_response, json_response
+from meta.core.query_spec import parse_query_spec
+from meta.core.permission_gate import declare_permission
 
 # 用户输入 page_size 的上限（防止 DoS 攻击）
 # 注：内部硬编码调用（如预览端点 page_size=5000）不受此限制
@@ -10,7 +13,7 @@ MAX_USER_PAGE_SIZE = 500
 from meta.core.bo_framework import bo_framework
 from meta.core.models import registry, resolve_write_anchor
 from meta.core.rule_provider import get_rule_provider
-from meta.services.auth_middleware import login_required, get_current_user
+from meta.services.auth_middleware import login_required, get_current_user, require_permission
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
@@ -86,15 +89,8 @@ def _get_bo():
 _data_source = None
 
 
-# 关联查询保留参数（这些 key 不应该作为过滤条件透传）
-_ASSOC_RESERVED_KEYS = {
-    'page', 'page_size', 'pageSize', 'ordering', 'search', 'keyword',
-    '_order_by', '_limit', '_offset',
-}
-
-
 def _extract_assoc_query_params(args):
-    """从 request.args 中提取关联查询的过滤/排序/搜索参数。
+    """从 request.args 中提取关联查询的过滤/排序/搜索参数（FR-006 统一解析）。
 
     返回 (filters, ordering, search)：
     - filters: dict，key 为字段名（含 __in/__like/__gte/__lte/_start/_end 后缀），
@@ -102,29 +98,10 @@ def _extract_assoc_query_params(args):
     - ordering: 字符串（可能为 '-field' 形式），空字符串表示未指定
     - search: 搜索关键词字符串
     """
-    filters = {}
-    ordering = ''
-    search = ''
-
-    ordering_raw = args.get('ordering') or args.get('_order_by') or ''
-    if isinstance(ordering_raw, str):
-        ordering = ordering_raw.strip()
-
-    for raw in (args.get('search'), args.get('keyword')):
-        if raw and not search:
-            search = str(raw).strip()
-
-    for key, value in args.items():
-        if key in _ASSOC_RESERVED_KEYS:
-            continue
-        if key.startswith('filters[') or key == 'filters':
-            # 形如 filters[name]=value 或 filters[name][in]=v — 不在 SQL 层解析
-            continue
-        if value is None or value == '':
-            continue
-        filters[key] = value
-
-    return filters, ordering, search
+    spec = parse_query_spec(args)
+    filters = {k: v for k, v in spec.raw_filters.items()
+               if not k.startswith('filters[') and k != 'filters'}
+    return filters, spec.ordering, spec.search
 
 
 def _get_data_source():
@@ -173,16 +150,16 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
         f"[bo_api] ComputationNotSupported: comp_type={e.comp_type} "
         f"object_type={e.object_type} scope={e.scope}"
     )
-    return jsonify({
-        'success': False,
-        'error_code': 'COMPUTATION_NOT_SUPPORTED',
-        'message': str(e),
-        'details': {
+    return error_response(
+        str(e),
+        error_code='COMPUTATION_NOT_SUPPORTED',
+        status=422,
+        details={
             'comp_type': e.comp_type,
             'object_type': e.object_type,
             'scope': e.scope,
-        }
-    }), 422
+        },
+    )
 
 
 # ── CRUD ──
@@ -536,6 +513,7 @@ def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
 
 @bo_bp.route('/<object_type>', methods=['POST'])
 @login_required
+@declare_permission('crud_create')
 def create_bo(object_type):
     logger.info(f"[bo_api] create_bo START: object_type={object_type}")
     bo = _get_bo()
@@ -546,12 +524,12 @@ def create_bo(object_type):
         # value_help 校验放在取号之前：校验失败不消耗订单号
         errors = _validate_value_helps(object_type, data)
         if errors:
-            return jsonify({
+            return json_response({
                 'success': False,
                 'error_code': 'VALUE_HELP_VALIDATION_FAILED',
                 'message': '值校验失败: ' + '; '.join(errors),
                 'errors': errors,
-            }), 400
+            }, 400)
         data = _allocate_sales_order_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
@@ -578,14 +556,16 @@ def create_bo(object_type):
             except Exception as e:
                 logger.warning(f"[bo_api] auto_grant failed (non-fatal): {e}")
 
-        return jsonify({'success': result.success, 'data': result.data, 'message': result.message}), status_code
+        if result.success:
+            return ok(result.data, message=result.message), status_code
+        return json_response({'success': False, 'data': result.data, 'message': result.message}, status_code)
     except NumberSequenceError as e:
         logger.warning(f"[bo_api] allocate order_no failed: {e}")
-        return jsonify({'success': False, 'message': f'销售订单取号失败：{e}'}), 400
+        return error_response(f'销售订单取号失败：{e}', status=400)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] create error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @meta_v2_bp.route('/schema-version', methods=['GET'])
@@ -606,12 +586,9 @@ def get_schema_version():
         logger.warning(f"[schema-version] failed to hash schemas: {e}")
         hasher.update(str(datetime.now().date()).encode())
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'schema_version': hasher.hexdigest()[:12],
-            'timestamp': datetime.now().isoformat()
-        }
+    return ok({
+        'schema_version': hasher.hexdigest()[:12],
+        'timestamp': datetime.now().isoformat()
     })
 
 
@@ -645,13 +622,10 @@ def get_instance_info():
     else:
         display_name, source = DEFAULT_DISPLAY_NAME, 'default'
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'display_name': display_name,
-            'source': source,
-            'apps': [{'id': a['id'], 'name': a['name']} for a in apps],
-        }
+    return ok({
+        'display_name': display_name,
+        'source': source,
+        'apps': [{'id': a['id'], 'name': a['name']} for a in apps],
     })
 
 
@@ -696,7 +670,7 @@ def read_bo(object_type, obj_id):
     #       己 SQL, 不走 BO 单条 get, 不受此限制 (符合 SAP 风格字段级授权)
     _deny = _check_single_bo_in_dim_scope(object_type, obj_id)
     if _deny:
-        return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
+        return error_response('对象不存在或无访问权限', status=404)
 
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
@@ -704,8 +678,8 @@ def read_bo(object_type, obj_id):
         _attach_change_history(result.data, object_type, obj_id)
         # [P2 2026-10-29] 读面脱敏：restricted / secret 字段直出前替换
         data = mask_record(object_type, result.data)
-        return jsonify({'success': True, 'data': data})
-    return jsonify({'success': False, 'message': result.message}), 404
+        return ok(data)
+    return error_response(result.message, status=404)
 
 
 def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
@@ -837,7 +811,7 @@ def _read_audit_log_via_v1(obj_id):
         """, [obj_id])
         row = cursor.fetchone()
         if not row:
-            return jsonify({'success': False, 'message': '审计日志不存在'}), 404
+            return error_response('审计日志不存在', status=404)
         columns = [d[0] for d in cursor.description]
         log = dict(zip(columns, row))
         for k, v in list(log.items()):
@@ -859,11 +833,11 @@ def _read_audit_log_via_v1(obj_id):
                 log['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
         except Exception:
             pass
-        return jsonify({'success': True, 'data': log})
+        return ok(log)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _data_source_default():
@@ -882,7 +856,7 @@ def get_state_transition_actions(object_type):
     """[Spec 22 FR-005] 列出对象类型所有 state_transition 引用的 instance 级 action_ref"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
 
     # 从 _standard_actions.yaml 加载 action 池，按 id 索引找 instance_scope
     try:
@@ -914,10 +888,7 @@ def get_state_transition_actions(object_type):
             'to_state': rule.to_state,
         })
 
-    return jsonify({
-        'success': True,
-        'data': action_refs,
-    })
+    return ok(action_refs)
 
 
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['GET'])
@@ -934,8 +905,8 @@ def read_bo_by_string_id(object_type, obj_id):
         _attach_change_history(result.data, object_type, obj_id)
         # [P2 2026-10-29] 读面脱敏（与 read_bo 同口径）
         data = mask_record(object_type, result.data)
-        return jsonify({'success': True, 'data': data})
-    return jsonify({'success': False, 'message': result.message}), 404
+        return ok(data)
+    return error_response(result.message, status=404)
 
 
 @bo_bp.route('/<object_type>', methods=['GET'])
@@ -943,17 +914,12 @@ def read_bo_by_string_id(object_type, obj_id):
 def query_bo(object_type):
     bo = _get_bo()
     request_filters = dict(request.args)
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', request.args.get('pageSize', 20)))
-    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
-    ordering = request.args.get('ordering', '')
+    spec = parse_query_spec(request.args)
+    page, page_size, offset, ordering = spec.page, spec.page_size, spec.offset, spec.ordering
 
     # 移除分页和排序参数，只保留过滤参数
     clean_filters = {k: v for k, v in request_filters.items()
                      if k not in ('page', 'page_size', 'pageSize', 'ordering', '_limit', '_offset', '_order_by')}
-
-    # 计算offset
-    offset = (page - 1) * page_size
 
     # [FIX 2026-06-10] relationship 对象对 category_label / category_type 排序需要
     # 内联子查询计算层级 scope, 因为 DB 中这 2 列大多为 NULL (enrichment 发生在 SQL 后).
@@ -1029,17 +995,13 @@ def query_bo(object_type):
             # [P2 2026-10-29] 列表读脱敏（与单条读同口径）
             raw_data = mask_records(object_type, raw_data)
             # 返回 { items: [], total: 20, filters: [] } 格式
-            return jsonify({
-                'success': True,
-                'data': {
-                    'items': raw_data,
-                    'total': total,
-                    'page': page,
-                    'page_size': page_size,
-                    'filters': filters
-                },
-                'message': result.message
-            })
+            return ok({
+                'items': raw_data,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'filters': filters
+            }, message=result.message)
         else:
             # 已经是正确格式
             if object_type == 'audit_log' and isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
@@ -1047,11 +1009,11 @@ def query_bo(object_type):
             if isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
                 # [P2 2026-10-29] 列表读脱敏（与单条读同口径）
                 result.data['items'] = mask_records(object_type, result.data['items'])
-            return jsonify({'success': True, 'data': result.data, 'message': result.message})
+            return ok(result.data, message=result.message)
     else:
         logger.error(f"[query_bo] Error: {result.message}")
         status_code = result.status_code or 400
-        return jsonify({'success': False, 'message': result.message}), status_code
+        return error_response(result.message, status=status_code)
 
 
 # [SPR-08 T-S14-01] relationship 过滤白名单数据化
@@ -1175,35 +1137,34 @@ def _query_relationship_with_scope(page, page_size, offset, clean_filters, scope
     except Exception as e:
         logger.warning(f"[_query_relationship_with_scope] Failed to get filters: {e}")
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'items': raw_data,
-            'total': total,
-            'page': page,
-            'page_size': page_size,
-            'filters': filters
-        }
+    return ok({
+        'items': raw_data,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'filters': filters
     })
 
 
 @bo_bp.route('/<object_type>/deep', methods=['POST'])
 @login_required
+@declare_permission('crud_create')
 def deep_insert_bo(object_type):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     try:
         result = bo.deep_insert(object_type, data)
         if result.success:
-            return jsonify({'success': True, 'data': result.data, 'message': result.message}), 201
-        return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), (result.status_code or 400)
+            return ok(result.data, message=result.message), 201
+        return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
     except Exception as e:
         logger.error(f"[bo_api] deep_insert error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['PUT'])
 @login_required
+@declare_permission('crud_update')
 def update_bo(object_type, obj_id):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
@@ -1212,20 +1173,21 @@ def update_bo(object_type, obj_id):
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     errors = _validate_value_helps(object_type, data)
     if errors:
-        return jsonify({
+        return json_response({
             'success': False,
             'error_code': 'VALUE_HELP_VALIDATION_FAILED',
             'message': '值校验失败: ' + '; '.join(errors),
             'errors': errors,
-        }), 400
+        }, 400)
     result = bo.update(object_type, obj_id, data)
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), (result.status_code or 400)
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
 
 
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['PUT'])
 @login_required
+@declare_permission('crud_update')
 def update_bo_by_string_id(object_type, obj_id):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
@@ -1234,64 +1196,68 @@ def update_bo_by_string_id(object_type, obj_id):
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     errors = _validate_value_helps(object_type, data)
     if errors:
-        return jsonify({
+        return json_response({
             'success': False,
             'error_code': 'VALUE_HELP_VALIDATION_FAILED',
             'message': '值校验失败: ' + '; '.join(errors),
             'errors': errors,
-        }), 400
+        }, 400)
     result = bo.update(object_type, obj_id, data)
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), (result.status_code or 400)
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['DELETE'])
 @login_required
+@declare_permission('crud_delete')
 def delete_bo(object_type, obj_id):
     bo = _get_bo()
     result = bo.delete(object_type, obj_id)
     if result.success:
-        return jsonify({'success': True, 'message': result.message})
+        return ok_message(result.message)
     if hasattr(result, 'error') and result.error == 'NOT_FOUND':
-        return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), 404
+        return error_response(result.message, status=404, errors=result.errors)
     if '不存在' in result.message or 'NOT_FOUND' in result.message:
-        return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), 404
-    return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), (result.status_code or 400)
+        return error_response(result.message, status=404, errors=result.errors)
+    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
 
 
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['DELETE'])
 @login_required
+@declare_permission('crud_delete')
 def delete_bo_by_string_id(object_type, obj_id):
     bo = _get_bo()
     result = bo.delete(object_type, obj_id)
     if result.success:
-        return jsonify({'success': True, 'message': result.message})
+        return ok_message(result.message)
     if hasattr(result, 'error') and result.error == 'NOT_FOUND':
-        return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), 404
+        return error_response(result.message, status=404, errors=result.errors)
     if '不存在' in result.message or 'NOT_FOUND' in result.message:
-        return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), 404
-    return jsonify({'success': False, 'message': result.message, 'errors': result.errors}), (result.status_code or 400)
+        return error_response(result.message, status=404, errors=result.errors)
+    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
 
 
 # ── Action ──
 
 @bo_bp.route('/<object_type>/<int:obj_id>/actions/<action_id>', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def execute_action(object_type, obj_id, action_id):
     bo = _get_bo()
     params = request.get_json(silent=True) or {}
     params['id'] = obj_id
     result = bo.execute_action(object_type, action_id, params)
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 # ── Association ──
 
 @bo_bp.route('/<object_type>/<int:obj_id>/associations/<association_name>', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def associate_bo(object_type, obj_id, association_name):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
@@ -1300,7 +1266,7 @@ def associate_bo(object_type, obj_id, association_name):
     metadata = data.get('metadata', {})
 
     if not target_id:
-        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
+        return error_response('目标 ID 不能为空', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1315,12 +1281,13 @@ def associate_bo(object_type, obj_id, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok_message(result.message)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/associations/<association_name>', methods=['DELETE'])
 @login_required
+@declare_permission('crud_update')
 def dissociate_bo(object_type, obj_id, association_name):
     bo = _get_bo()
     target_id = request.args.get('target_id')
@@ -1332,7 +1299,7 @@ def dissociate_bo(object_type, obj_id, association_name):
         target_type = target_type or data.get('target_type') or data.get('tgt_type')
 
     if not target_id:
-        return jsonify({'success': False, 'message': 'target_id is required (via query param or JSON body)'}), 400
+        return error_response('target_id is required (via query param or JSON body)', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1346,17 +1313,16 @@ def dissociate_bo(object_type, obj_id, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok_message(result.message)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/associations/<association_name>', methods=['GET'])
 @login_required
 def query_associations_bo(object_type, obj_id, association_name):
     bo = _get_bo()
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', request.args.get('pageSize', 50)))
-    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
+    spec = parse_query_spec(request.args, default_page_size=50)
+    page, page_size = spec.page, spec.page_size
 
     filters, ordering, search = _extract_assoc_query_params(request.args)
 
@@ -1372,9 +1338,9 @@ def query_associations_bo(object_type, obj_id, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data})
+        return ok(result.data)
     logger.error(f"[bo_api] query_associations failed: type={object_type}, id={obj_id}, assoc={association_name}, message={result.message}")
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 # ── Association v2 ($associations 路由) ──
@@ -1384,8 +1350,8 @@ def query_associations_bo(object_type, obj_id, association_name):
 def query_associations_v2(object_type, obj_id, association_name):
     """查询关联列表 - v2 API"""
     bo = _get_bo()
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', request.args.get('pageSize', 50)))
+    spec = parse_query_spec(request.args, default_page_size=50)
+    page, page_size = spec.page, spec.page_size
 
     filters, ordering, search = _extract_assoc_query_params(request.args)
 
@@ -1401,8 +1367,8 @@ def query_associations_v2(object_type, obj_id, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/count', methods=['GET'])
@@ -1421,12 +1387,13 @@ def count_associations_v2(object_type, obj_id, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/assign', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def assign_association_v2(object_type, obj_id, association_name):
     """分配单个关联 - v2 API (返回 204)"""
     bo = _get_bo()
@@ -1436,7 +1403,7 @@ def assign_association_v2(object_type, obj_id, association_name):
     metadata = data.get('metadata', {})
 
     if not target_id:
-        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
+        return error_response('目标 ID 不能为空', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1456,15 +1423,16 @@ def assign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[assign_association_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
 
     if result.success:
         return '', 204
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/unassign', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def unassign_association_v2(object_type, obj_id, association_name):
     """取消分配单个关联 - v2 API (返回 204)"""
     bo = _get_bo()
@@ -1474,7 +1442,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
     target_type = data.get('target_type') or data.get('tgt_type')
 
     if not target_id and not association_record_id:
-        return jsonify({'success': False, 'message': 'target_id or association_record_id is required'}), 400
+        return error_response('target_id or association_record_id is required', status=400)
 
     if association_record_id:
         from meta.core.yaml_loader import get_meta_object
@@ -1488,25 +1456,25 @@ def unassign_association_v2(object_type, obj_id, association_name):
                 cursor = ds.execute(sql, [int(association_record_id)])
                 row = cursor.fetchone()
                 if not row:
-                    return jsonify({'success': False, 'message': 'Association record not found'}), 404
+                    return error_response('Association record not found', status=404)
                 columns = [desc[0] for desc in cursor.description]
                 record = dict(zip(columns, row))
                 src_key = assoc_def.source_key if hasattr(assoc_def, 'source_key') else 'source_id'
                 tgt_key = assoc_def.target_key if hasattr(assoc_def, 'target_key') else 'target_id'
                 target_id = record.get(tgt_key)
                 if not target_id:
-                    return jsonify({'success': False, 'message': 'Cannot resolve target_id from association record'}), 400
+                    return error_response('Cannot resolve target_id from association record', status=400)
                 if not target_type:
                     target_type = getattr(assoc_def, 'target_entity', None) or getattr(assoc_def, 'target_object', None)
             else:
-                return jsonify({'success': False, 'message': 'Association does not use through table'}), 400
+                return error_response('Association does not use through table', status=400)
         else:
-            return jsonify({'success': False, 'message': 'Cannot resolve association definition'}), 400
+            return error_response('Cannot resolve association definition', status=400)
     else:
         target_id = int(target_id) if target_id else None
 
     if not target_id:
-        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
+        return error_response('目标 ID 不能为空', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1523,15 +1491,16 @@ def unassign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[unassign_association_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
 
     if result.success:
         return '', 204
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/batch_assign', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def batch_assign_associations_v2(object_type, obj_id, association_name):
     """批量分配关联 - v2 API"""
     bo = _get_bo()
@@ -1541,7 +1510,7 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
     metadata = data.get('metadata', {})
 
     if not target_ids:
-        return jsonify({'success': False, 'message': 'target_ids is required'}), 400
+        return error_response('target_ids is required', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1562,15 +1531,16 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_assign_associations_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/batch_unassign', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def batch_unassign_associations_v2(object_type, obj_id, association_name):
     """批量取消分配关联 - v2 API"""
     bo = _get_bo()
@@ -1593,17 +1563,17 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
                 rows = cursor.fetchall()
                 resolved_ids = [row[1] for row in rows if row[1] is not None]
                 if not resolved_ids:
-                    return jsonify({'success': False, 'message': 'No valid target IDs found'}), 400
+                    return error_response('No valid target IDs found', status=400)
                 target_ids = list(set(resolved_ids + target_ids))
                 if not target_type:
                     target_type = assoc_def.target_entity
             else:
-                return jsonify({'success': False, 'message': 'Association does not use through table'}), 400
+                return error_response('Association does not use through table', status=400)
         else:
-            return jsonify({'success': False, 'message': 'Cannot resolve association definition'}), 400
+            return error_response('Cannot resolve association definition', status=400)
 
     if not target_ids:
-        return jsonify({'success': False, 'message': 'target_ids or association_record_ids is required'}), 400
+        return error_response('target_ids or association_record_ids is required', status=400)
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1623,15 +1593,16 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_unassign_associations_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/$associations/<association_name>/batch-query', methods=['POST'])
 @login_required
+@declare_permission('crud_read')
 def batch_query_associations(object_type, association_name):
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
@@ -1645,7 +1616,7 @@ def batch_query_associations(object_type, association_name):
     search = data.get('search', '')
 
     if not source_ids:
-        return jsonify({'success': True, 'data': {'items': [], 'total': 0, 'counts': {}}})
+        return ok({'items': [], 'total': 0, 'counts': {}})
 
     result = bo.batch_query_associations(
         src_type=object_type,
@@ -1657,8 +1628,8 @@ def batch_query_associations(object_type, association_name):
     )
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data})
-    return jsonify({'success': False, 'message': result.message}), (result.status_code or 400)
+        return ok(result.data)
+    return error_response(result.message, status=(result.status_code or 400))
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/retrieve', methods=['GET'])
@@ -1672,7 +1643,7 @@ def retrieve_with_associations(object_type, obj_id):
     depth = int(request.args.get('depth', 1))
 
     if depth > 2:
-        return jsonify({'success': False, 'message': '深度限制为2，防止循环引用'}), 400
+        return error_response('深度限制为2，防止循环引用', status=400)
 
     result = bo.retrieve_with_associations(
         object_type=object_type,
@@ -1682,12 +1653,13 @@ def retrieve_with_associations(object_type, obj_id):
     )
 
     if result.success:
-        return jsonify({'success': True, 'data': result.data, 'message': result.message})
-    return jsonify({'success': False, 'message': result.message}), 404
+        return ok(result.data, message=result.message)
+    return error_response(result.message, status=404)
 
 
 @bo_bp.route('/<object_type>/batch-delete', methods=['POST'])
 @login_required
+@declare_permission('crud_delete')
 def batch_delete_bo(object_type):
     """批量删除记录"""
     from meta.services.manage_service import ManageService
@@ -1697,7 +1669,7 @@ def batch_delete_bo(object_type):
     force = body.get('force', False)
     
     if not ids:
-        return jsonify({'success': False, 'message': '请提供要删除的记录ID'}), 400
+        return error_response('请提供要删除的记录ID', status=400)
     
     try:
         bo = _get_bo()
@@ -1713,17 +1685,17 @@ def batch_delete_bo(object_type):
         
         result = manage_service.batch_delete(object_type, ids, force)
 
-        return jsonify({
+        return json_response({
             'success': result.failed_count == 0,
             'success_count': result.success_count,
             'failed_count': result.failed_count,
             'results': [r.to_dict() if hasattr(r, 'to_dict') else {'success': r.success, 'data': r.data, 'message': r.message, 'error': r.error} for r in result.results],
             'errors': result.errors,
-        }), 200 if result.failed_count == 0 else 207
+        }, 200 if result.failed_count == 0 else 207)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] batch-delete error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1759,6 +1731,7 @@ def _v1_handlers():
 
 @bo_bp.route('/<object_type>/list', methods=['POST'])
 @login_required
+@declare_permission('crud_read')
 def v2_list_records_post(object_type):
     """POST 列表查询 (URL 过长场景) — 委托给 v1 manage_api"""
     return _v1_handlers()['list_records_post'](object_type)
@@ -1766,6 +1739,7 @@ def v2_list_records_post(object_type):
 
 @bo_bp.route('/<object_type>/batch-create', methods=['POST'])
 @login_required
+@declare_permission('crud_create')
 def v2_batch_create(object_type):
     """批量创建 — 委托给 v1 manage_api"""
     return _v1_handlers()['batch_create'](object_type)
@@ -1773,6 +1747,7 @@ def v2_batch_create(object_type):
 
 @bo_bp.route('/<object_type>/batch-update', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def v2_batch_update(object_type):
     """批量更新 — 委托给 v1 manage_api"""
     return _v1_handlers()['batch_update'](object_type)
@@ -1794,6 +1769,7 @@ def v2_list_actions_string(object_type, obj_id):
 
 @bo_bp.route('/<object_type>/<int:obj_id>/recover', methods=['POST'])
 @login_required
+@declare_permission('crud_update')
 def v2_recover_from_log(object_type, obj_id):
     """从 audit_log 恢复已删除 — 委托给 v1 manage_api"""
     return _v1_handlers()['recover_from_log'](object_type, obj_id)
@@ -1829,11 +1805,7 @@ def _revision_policy(object_type):
 
 
 def _revision_not_enabled():
-    return jsonify({
-        'success': False,
-        'code': 'REVISION_NOT_ENABLED',
-        'message': '对象未启用版本管理',
-    }), 404
+    return error_response('对象未启用版本管理', error_code='REVISION_NOT_ENABLED', status=404)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/revisions', methods=['GET'])
@@ -1851,7 +1823,7 @@ def v2_list_object_revisions(object_type, obj_id):
 
     rows = revision_service.list_revisions(
         _get_data_source(), object_type, obj_id)
-    return jsonify({'success': True, 'data': rows})
+    return ok(rows)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/revisions/<int:rev_a>/diff/<int:rev_b>',
@@ -1871,12 +1843,8 @@ def v2_object_revision_diff(object_type, obj_id, rev_a, rev_b):
         data = revision_service.diff(
             _get_data_source(), object_type, obj_id, rev_a, rev_b)
     except RevisionError as e:
-        return jsonify({
-            'success': False,
-            'code': e.code,
-            'message': e.message,
-        }), 404
-    return jsonify({'success': True, 'data': data})
+        return error_response(e.message, error_code=e.code, status=404)
+    return ok(data)
 
 
 # ── Architecture Preview ──
@@ -2537,21 +2505,18 @@ def get_architecture_preview():
                 d.setdefault('annotation_contents', [])
                 d.setdefault('annotation_categories', [])
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'domains': domains,
-                'sub_domains': sub_domains,
-                'service_modules': modules,
-                'business_objects': business_objects,
-                'relationships': relationships,
-                'center_scope': center_scope
-            }
+        return ok({
+            'domains': domains,
+            'sub_domains': sub_domains,
+            'service_modules': modules,
+            'business_objects': business_objects,
+            'relationships': relationships,
+            'center_scope': center_scope
         })
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] architecture preview error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/state_transitions', methods=['GET'])
@@ -2559,12 +2524,12 @@ def get_architecture_preview():
 def get_state_transitions(object_type, obj_id):
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
 
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if not result or not result.success:
-        return jsonify({'success': False, 'message': '记录不存在'}), 404
+        return error_response('记录不存在', status=404)
 
     record = result.data if hasattr(result, 'data') else result
 
@@ -2605,10 +2570,7 @@ def get_state_transitions(object_type, obj_id):
         if not transition_info['hidden']:
             state_transitions.append(transition_info)
 
-    return jsonify({
-        'success': True,
-        'data': state_transitions,
-    })
+    return ok(state_transitions)
 
 
 @bo_bp.route('/<object_type>/<path:obj_id>/state_transitions', methods=['GET'])
@@ -2617,12 +2579,12 @@ def get_state_transitions_by_string_id(object_type, obj_id):
     """支持字符串ID的状态转换路由"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
+        return error_response(f'Object type not found: {object_type}', status=404)
 
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if not result or not result.success:
-        return jsonify({'success': False, 'message': '记录不存在'}), 404
+        return error_response('记录不存在', status=404)
 
     record = result.data if hasattr(result, 'data') else result
 
@@ -2662,10 +2624,7 @@ def get_state_transitions_by_string_id(object_type, obj_id):
         if not transition_info['hidden']:
             state_transitions.append(transition_info)
 
-    return jsonify({
-        'success': True,
-        'data': state_transitions,
-    })
+    return ok(state_transitions)
 
 
 # ────────────────────────────────────────────
@@ -2682,12 +2641,12 @@ def get_ui_config(object_type):
         config = bo.get_ui_config(object_type)
         if config:
             json_safe_config = _make_json_safe(config)
-            return jsonify({'success': True, 'data': json_safe_config})
-        return jsonify({'success': False, 'message': f'Unknown object type: {object_type}'}), 404
+            return ok(json_safe_config)
+        return error_response(f'Unknown object type: {object_type}', status=404)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] ui-config error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _make_json_safe(obj):
@@ -2710,7 +2669,7 @@ def get_object_schema(object_type):
         bo = _get_bo()
         schema = bo.get_schema(object_type)
         if not schema:
-            return jsonify({'success': False, 'message': f'Unknown object type: {object_type}'}), 404
+            return error_response(f'Unknown object type: {object_type}', status=404)
 
         meta_obj = registry.get(object_type)
         if meta_obj:
@@ -2750,11 +2709,11 @@ def get_object_schema(object_type):
                         'categories': annotation_categories
                     }
 
-        return jsonify({'success': True, 'data': schema})
+        return ok(schema)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] schema error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @meta_v2_bp.route('/<object_type>/full', methods=['GET'])
@@ -2786,18 +2745,15 @@ def get_meta_full(object_type):
                     'required': engine.is_field_required(f.id, policy_context),
                 }
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'ui_config': _make_json_safe(ui_config) if ui_config else {},
-                'schema': schema,
-                'field_policies': field_policies,
-            }
+        return ok({
+            'ui_config': _make_json_safe(ui_config) if ui_config else {},
+            'schema': schema,
+            'field_policies': field_policies,
         })
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] meta-full error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2841,14 +2797,14 @@ def get_full_openapi():
         spec['info']['version'] = 'v2.0'
         spec['info']['description'] = '全量 OpenAPI 规范（Action + BO CRUD + Meta）'
 
-        return jsonify(spec)
+        return json_response(spec)
     except Exception as e:
         import traceback
-        return jsonify({
+        return json_response({
             'error': type(e).__name__,
             'message': str(e),
             'traceback': traceback.format_exc(),
-        }), 500
+        }, 500)
 
 
 @meta_v2_bp.route('/<object_type>/field-policies', methods=['GET'])
@@ -2861,7 +2817,7 @@ def get_field_policies(object_type):
 
         meta_obj = registry.get(object_type)
         if not meta_obj:
-            return jsonify({'success': False, 'message': f'Object type {object_type} not found'}), 404
+            return error_response(f'Object type {object_type} not found', status=404)
 
         engine = FieldPolicyEngine(meta_object=meta_obj)
 
@@ -2905,14 +2861,11 @@ def get_field_policies(object_type):
                 'conditional_required': conditional_required,  # [DECORATIVE] FR-4.5a
             }
 
-        return jsonify({
-            'success': True,
-            'data': policies
-        })
+        return ok(policies)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] field-policies error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _load_scope_rules():
@@ -2974,7 +2927,7 @@ def get_view_config(object_type, view_name='default'):
         config = view_config_service.get_or_build_view_config(object_type, view_name)
         
         if not config:
-            return jsonify({'success': False, 'message': f'View config not found for: {object_type}'}), 404
+            return error_response(f'View config not found for: {object_type}', status=404)
         
         logger.info(f"[bo_api] config.list.actions: {config.list.actions}")
         logger.info(f"[bo_api] config.list.actions length: {len(config.list.actions)}")
@@ -2996,11 +2949,11 @@ def get_view_config(object_type, view_name='default'):
         logger.info(f"[bo_api] data['list']['actions']: {data['list']['actions']}")
         logger.info(f"[bo_api] data['list']['actions'] length: {len(data['list']['actions'])}")
         
-        return jsonify({'success': True, 'data': data})
+        return ok(data)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] view-config error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @meta_v2_bp.route('/<object_type>/views', methods=['GET'])
@@ -3009,7 +2962,7 @@ def list_view_configs(object_type):
     try:
         meta_obj = registry.get(object_type)
         if not meta_obj:
-            return jsonify({'success': False, 'message': f'Unknown object type: {object_type}'}), 404
+            return error_response(f'Unknown object type: {object_type}', status=404)
 
         views = [{'name': 'default', 'label': '默认视图'}]
 
@@ -3031,11 +2984,11 @@ def list_view_configs(object_type):
                         'label': config.get('label', name)
                     })
 
-        return jsonify({'success': True, 'data': {'views': views}})
+        return ok({'views': views})
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] list views error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _to_json_dict(obj) -> dict:
@@ -3096,17 +3049,14 @@ def get_hierarchy_tree():
             include_relation_counts=include_relation_counts
         )
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'tree': tree,
-                'levels': svc.get_levels()
-            }
+        return ok({
+            'tree': tree,
+            'levels': svc.get_levels()
         })
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] hierarchy tree error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @meta_v2_bp.route('/hierarchy/levels', methods=['GET'])
@@ -3117,12 +3067,9 @@ def get_hierarchy_levels():
         from meta.services.hierarchy_service import HierarchyService
         svc = HierarchyService()
         levels = svc.get_levels()
-        return jsonify({
-            'success': True,
-            'data': {'levels': levels}
-        })
+        return ok({'levels': levels})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _infer_target_type(src_type: str, association_name: str) -> str:
@@ -3369,23 +3316,21 @@ def get_role_unified_permissions(permission_set_id):
         if role_row:
             role_info = {'id': role_row[0], 'code': role_row[1], 'name': role_row[2]}
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'role': role_info,
-                'menus': menus,
-                'total_count': len(menus),
-                'assigned_count': len(assigned_menus)
-            }
+        return ok({
+            'role': role_info,
+            'menus': menus,
+            'total_count': len(menus),
+            'assigned_count': len(assigned_menus)
         })
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] unified-permissions error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_v2_bp.route('/<int:permission_set_id>/menu-permissions', methods=['PUT'])
 @login_required
+@require_permission('user:update')
 def update_permission_set_menu_permissions(permission_set_id):
     """更新角色的菜单权限和功能权限
 
@@ -3407,9 +3352,9 @@ def update_permission_set_menu_permissions(permission_set_id):
         cursor = ds.execute("SELECT is_system FROM permission_sets WHERE id = ?", [permission_set_id])
         role_row = cursor.fetchone()
         if not role_row:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
         if role_row[0]:
-            return jsonify({'success': False, 'message': '系统内置角色不能修改'}), 400
+            return error_response('系统内置角色不能修改', status=400)
 
         data = request.get_json(silent=True) or {}
         menu_codes = data.get('menu_codes', [])
@@ -3447,14 +3392,11 @@ def update_permission_set_menu_permissions(permission_set_id):
             parent_object_id=permission_set_id,
         )
 
-        return jsonify({
-            'success': True,
-            'message': f'已更新 {len(menu_codes)} 个菜单权限和 {len(permissions)} 个功能权限'
-        })
+        return ok_message(f'已更新 {len(menu_codes)} 个菜单权限和 {len(permissions)} 个功能权限')
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] update-menu-permissions error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ── Permission Rules (v2) ──
@@ -3483,38 +3425,38 @@ def list_permission_sets_v2():
     try:
         svc = _get_permission_set_service()
         items = svc.list_all()
-        return jsonify({'success': True, 'data': items})
+        return ok(items)
     except Exception as e:
         import traceback
         logger.error(f"[P13-T4] list-permission-sets error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('', methods=['POST'])
 @login_required
+@require_permission('user:update')
 def create_permission_set_v2():
     """[P13-T4] POST /api/v2/permission-sets - 创建 Permission Set"""
     try:
         svc = _get_permission_set_service()
         data = request.get_json(silent=True) or {}
         if not data.get('code') or not data.get('name'):
-            return jsonify({'success': False, 'message': 'code 和 name 是必填字段'}), 400
+            return error_response('code 和 name 是必填字段', status=400)
         ps_id = svc.create({
             'code': data['code'],
             'name': data['name'],
             'description': data.get('description', ''),
         })
         if ps_id is None:
-            return jsonify({'success': False, 'message': '创建 Permission Set 失败'}), 500
-        return jsonify({
-            'success': True,
-            'data': {'id': ps_id, 'code': data['code']},
-            'message': 'Permission Set 创建成功'
-        }), 201
+            return error_response('创建 Permission Set 失败', status=500)
+        return ok(
+            {'id': ps_id, 'code': data['code']},
+            message='Permission Set 创建成功',
+        ), 201
     except Exception as e:
         import traceback
         logger.error(f"[P13-T4] create-permission-set error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>', methods=['GET'])
@@ -3525,44 +3467,47 @@ def get_permission_set_v2(ps_id):
         svc = _get_permission_set_service()
         ps = svc.get_by_id(ps_id)
         if ps is None:
-            return jsonify({'success': False, 'message': '未找到'}), 404
-        return jsonify({'success': True, 'data': ps})
+            return error_response('未找到', status=404)
+        return ok(ps)
     except Exception as e:
         logger.error(f"[P13-T4] get-permission-set error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>', methods=['PUT'])
 @login_required
+@require_permission('user:update')
 def update_permission_set_v2(ps_id):
     """[P13-T4] PUT /api/v2/permission-sets/{id} - 更新 Permission Set"""
     try:
         svc = _get_permission_set_service()
         data = request.get_json(silent=True) or {}
         if svc.update(ps_id, data):
-            return jsonify({'success': True, 'message': '更新成功'})
-        return jsonify({'success': False, 'message': '更新失败'}), 400
+            return ok_message('更新成功')
+        return error_response('更新失败', status=400)
     except Exception as e:
         logger.error(f"[P13-T4] update-permission-set error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>', methods=['DELETE'])
 @login_required
+@require_permission('user:update')
 def delete_permission_set_v2(ps_id):
     """[P13-T4] DELETE /api/v2/permission-sets/{id} - 删除 Permission Set"""
     try:
         svc = _get_permission_set_service()
         if svc.delete(ps_id):
-            return jsonify({'success': True, 'message': '删除成功'})
-        return jsonify({'success': False, 'message': '删除失败'}), 400
+            return ok_message('删除成功')
+        return error_response('删除失败', status=400)
     except Exception as e:
         logger.error(f"[P13-T4] delete-permission-set error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>/assign', methods=['POST'])
 @login_required
+@require_permission('user:update')
 def assign_permission_set_v2(ps_id):
     """[P13-T4] POST /api/v2/permission-sets/{id}/assign - 分配给用户"""
     try:
@@ -3570,17 +3515,18 @@ def assign_permission_set_v2(ps_id):
         data = request.get_json(silent=True) or {}
         user_id = data.get('user_id')
         if not user_id:
-            return jsonify({'success': False, 'message': 'user_id 是必填字段'}), 400
+            return error_response('user_id 是必填字段', status=400)
         if svc.assign_to_user(user_id, ps_id):
-            return jsonify({'success': True, 'message': '分配成功'}), 201
-        return jsonify({'success': False, 'message': '分配失败'}), 400
+            return ok_message('分配成功'), 201
+        return error_response('分配失败', status=400)
     except Exception as e:
         logger.error(f"[P13-T4] assign-permission-set error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>/unassign', methods=['POST'])
 @login_required
+@require_permission('user:update')
 def unassign_permission_set_v2(ps_id):
     """[P13-T4] POST /api/v2/permission-sets/{id}/unassign - 取消分配"""
     try:
@@ -3588,13 +3534,13 @@ def unassign_permission_set_v2(ps_id):
         data = request.get_json(silent=True) or {}
         user_id = data.get('user_id')
         if not user_id:
-            return jsonify({'success': False, 'message': 'user_id 是必填字段'}), 400
+            return error_response('user_id 是必填字段', status=400)
         if svc.unassign_from_user(user_id, ps_id):
-            return jsonify({'success': True, 'message': '取消分配成功'})
-        return jsonify({'success': False, 'message': '取消分配失败'}), 400
+            return ok_message('取消分配成功')
+        return error_response('取消分配失败', status=400)
     except Exception as e:
         logger.error(f"[P13-T4] unassign-permission-set error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_set_v2_bp.route('/<int:ps_id>/permissions', methods=['GET'])
@@ -3604,10 +3550,10 @@ def list_set_permissions_v2(ps_id):
     try:
         svc = _get_permission_set_service()
         perms = svc.get_set_permissions(ps_id)
-        return jsonify({'success': True, 'data': perms})
+        return ok(perms)
     except Exception as e:
         logger.error(f"[P13-T4] list-set-permissions error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # [Spec 16 2026-08-29] alias: /api/v2/permission-sets/<id>/unified-permissions
@@ -3627,10 +3573,10 @@ def list_user_permission_sets_v2(user_id):
     try:
         svc = _get_permission_set_service()
         items = svc.get_user_permission_sets(user_id)
-        return jsonify({'success': True, 'data': items})
+        return ok(items)
     except Exception as e:
         logger.error(f"[P13-T4] list-user-permission-sets error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_v2_bp.route('', methods=['GET'])
@@ -3661,15 +3607,16 @@ def list_permission_rules_v2():
         else:
             rules = service.get_all_unified_rules(rule_type=rule_type)
 
-        return jsonify({'success': True, 'data': rules})
+        return ok(rules)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] list-permission-rules-v2 error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_v2_bp.route('', methods=['POST'])
 @login_required
+@require_permission('user:update')
 def create_permission_rule_v2():
     """创建权限规则
 
@@ -3694,7 +3641,7 @@ def create_permission_rule_v2():
         wildcard_err = check_condition_wildcard(
             data.get('resource_type'), data.get('condition'))
         if wildcard_err:
-            return jsonify({'success': False, 'message': wildcard_err}), 400
+            return error_response(wildcard_err, status=400)
 
         # 必填字段校验 (visibility 规则可无 condition)
         required_fields = ['permission_set_id', 'resource_type']
@@ -3705,7 +3652,7 @@ def create_permission_rule_v2():
                 # condition 允许空字符串 (visibility 规则)
                 if field == 'condition' and data.get(field) == '':
                     continue
-                return jsonify({'success': False, 'message': f'{field} 是必填字段'}), 400
+                return error_response(f'{field} 是必填字段', status=400)
 
         # 获取当前用户
         current_user = getattr(g, 'current_user', None) or {}
@@ -3728,21 +3675,21 @@ def create_permission_rule_v2():
         rule_id = service.create_unified_rule(rule_data)
 
         if rule_id is None:
-            return jsonify({'success': False, 'message': '创建权限规则失败'}), 500
+            return error_response('创建权限规则失败', status=500)
 
-        return jsonify({
-            'success': True,
-            'data': {'id': rule_id, 'rule_type': rule_type},
-            'message': '权限规则创建成功'
-        }), 201
+        return ok(
+            {'id': rule_id, 'rule_type': rule_type},
+            message='权限规则创建成功',
+        ), 201
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] create-permission-rule-v2 error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_v2_bp.route('/<int:rule_id>', methods=['PUT'])
 @login_required
+@require_permission('user:update')
 def update_permission_rule_v2(rule_id):
     """更新权限规则
 
@@ -3766,7 +3713,7 @@ def update_permission_rule_v2(rule_id):
                 wildcard_err = check_condition_wildcard(
                     data.get('resource_type'), data.get('condition'))
                 if wildcard_err:
-                    return jsonify({'success': False, 'message': wildcard_err}), 400
+                    return error_response(wildcard_err, status=400)
 
         # 先尝试统一表更新
         success = service.update_unified_rule(rule_id, data)
@@ -3775,16 +3722,17 @@ def update_permission_rule_v2(rule_id):
             success = service.update_rule(rule_id, data)
 
         if success:
-            return jsonify({'success': True, 'message': '权限规则更新成功'})
-        return jsonify({'success': False, 'message': '更新失败'}), 400
+            return ok_message('权限规则更新成功')
+        return error_response('更新失败', status=400)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] update-permission-rule-v2 error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_v2_bp.route('/<int:rule_id>', methods=['DELETE'])
 @login_required
+@require_permission('user:update')
 def delete_permission_rule_v2(rule_id):
     """删除权限规则
 
@@ -3803,12 +3751,12 @@ def delete_permission_rule_v2(rule_id):
             success = service.delete_rule(rule_id)
 
         if success:
-            return jsonify({'success': True, 'message': '权限规则删除成功'})
-        return jsonify({'success': False, 'message': '删除失败'}), 400
+            return ok_message('权限规则删除成功')
+        return error_response('删除失败', status=400)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] delete-permission-rule-v2 error: {e}\n{traceback.format_exc()}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

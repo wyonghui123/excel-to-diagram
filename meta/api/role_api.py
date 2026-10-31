@@ -7,6 +7,8 @@
 
 from flask import Blueprint, request, jsonify
 from meta.api._messages import MSG_ADMIN_REQUIRED, MSG_ROLE_NOT_FOUND, MSG_SYSTEM_ROLE_IMMUTABLE
+from meta.api._response_contract import error_response, ok, ok_message
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, require_permission, is_admin, get_current_user
 from meta.services.permission_service import PermissionService
 from meta.services.condition_permission_service import ConditionPermissionService
@@ -124,7 +126,7 @@ def list_roles():
     """
     # [FIX 2026-06-08] 非管理员不能访问角色列表（避免 OperationalError 500）
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
     roles = _get_perm_service().get_all_roles()
 
     # [FR-006] 批量获取权限和更新时间, 避免 N+1 查询
@@ -168,7 +170,7 @@ def list_roles():
             role['permissions'] = []
             role['updated_at'] = None
 
-    return jsonify({'success': True, 'data': roles})
+    return ok(roles)
 
 
 @role_bp.route('', methods=['POST'])
@@ -176,7 +178,7 @@ def list_roles():
 def create_role():
     """创建角色"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     data = request.get_json(silent=True) or {}
     code = data.get('code', '').strip()
@@ -184,11 +186,11 @@ def create_role():
     description = data.get('description', '').strip()
 
     if not code or not name:
-        return jsonify({'success': False, 'message': '角色编码和名称不能为空'}), 400
+        return error_response('角色编码和名称不能为空')
 
     cursor = _data_source.execute("SELECT id FROM roles WHERE code = ?", [code])
     if cursor.fetchone():
-        return jsonify({'success': False, 'message': '角色编码已存在'}), 400
+        return error_response('角色编码已存在')
 
     _set_user_context()
     bo = _get_bo_framework()
@@ -201,13 +203,9 @@ def create_role():
     })
     
     if not result.success:
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message)
 
-    return jsonify({
-        'success': True,
-        'data': result.data,
-        'message': '角色创建成功',
-    }), 201
+    return ok(result.data, message='角色创建成功'), 201
 
 
 @role_bp.route('/<int:role_id>', methods=['GET'])
@@ -223,12 +221,12 @@ def get_role(role_id):
     result = bo.read('role', role_id)
     
     if not result.success:
-        return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+        return error_response('角色不存在，请检查后重试', status=404)
     
     role = result.data
     role['updated_at'] = _get_latest_change_time('role', role_id)
     
-    return jsonify({'success': True, 'data': role})
+    return ok(role)
 
 
 @role_bp.route('/<int:role_id>/users', methods=['POST'])
@@ -236,19 +234,19 @@ def get_role(role_id):
 def assign_role_to_users(role_id):
     """分配角色给用户（通过用户组路径）"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     try:
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         data = request.get_json(silent=True) or {}
         user_ids = data.get('user_ids', [])
 
         if not user_ids:
-            return jsonify({'success': False, 'message': '用户ID列表不能为空'}), 400
+            return error_response('用户ID列表不能为空')
 
         current_user = get_current_user()
         operator_id = current_user.get('user_id', 0) if current_user else 0
@@ -263,11 +261,10 @@ def assign_role_to_users(role_id):
         failed_count = len(results) - success_count
 
         if success_count == len(results):
-            return jsonify({
-                'success': True,
-                'message': f'成功分配 {success_count} 个用户到角色',
-                'data': {'assigned': success_count, 'failed': failed_count}
-            })
+            return ok_message(
+                f'成功分配 {success_count} 个用户到角色',
+                data={'assigned': success_count, 'failed': failed_count}
+            )
         elif success_count > 0:
             return jsonify({
                 'success': False,
@@ -280,7 +277,7 @@ def assign_role_to_users(role_id):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/<int:role_id>/users/<int:user_id>', methods=['DELETE'])
@@ -288,29 +285,28 @@ def assign_role_to_users(role_id):
 def remove_user_from_role(role_id, user_id):
     """从角色移除用户（通过用户组路径）"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     try:
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         success = _get_perm_service().remove_role(user_id, role_id)
 
         if success:
-            return jsonify({
-                'success': True,
-                'message': f'已从角色移除用户 {user_id}',
-                'data': {'success': True}
-            })
+            return ok_message(
+                f'已从角色移除用户 {user_id}',
+                data={'success': True}
+            )
         else:
-            return jsonify({'success': False, 'message': '移除失败'}), 400
+            return error_response('移除失败')
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/<int:role_id>', methods=['PUT'])
@@ -318,15 +314,15 @@ def remove_user_from_role(role_id, user_id):
 def update_role(role_id):
     """更新角色"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     cursor = _data_source.execute("SELECT is_system FROM roles WHERE id = ?", [role_id])
     row = cursor.fetchone()
     if not row:
-        return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+        return error_response('角色不存在，请检查后重试', status=404)
 
     if row[0]:
-        return jsonify({'success': False, 'message': '系统内置角色不能修改'}), 400
+        return error_response('系统内置角色不能修改')
 
     data = request.get_json(silent=True) or {}
 
@@ -336,7 +332,7 @@ def update_role(role_id):
             update_data[field] = data[field]
 
     if not update_data:
-        return jsonify({'success': False, 'message': '没有可更新的字段'}), 400
+        return error_response('没有可更新的字段')
 
     _set_user_context()
     bo = _get_bo_framework()
@@ -344,9 +340,9 @@ def update_role(role_id):
     result = bo.update('role', role_id, update_data)
     
     if not result.success:
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message)
 
-    return jsonify({'success': True, 'message': '角色更新成功'})
+    return ok_message('角色更新成功')
 
 
 @role_bp.route('/<int:role_id>', methods=['DELETE'])
@@ -354,15 +350,15 @@ def update_role(role_id):
 def delete_role(role_id):
     """删除角色"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     cursor = _data_source.execute("SELECT is_system FROM roles WHERE id = ?", [role_id])
     row = cursor.fetchone()
     if not row:
-        return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+        return error_response('角色不存在，请检查后重试', status=404)
 
     if row[0]:
-        return jsonify({'success': False, 'message': '系统角色不可删除'}), 400
+        return error_response('系统角色不可删除')
 
     _set_user_context()
     bo = _get_bo_framework()
@@ -370,9 +366,9 @@ def delete_role(role_id):
     result = bo.delete('role', role_id)
     
     if not result.success:
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message)
 
-    return jsonify({'success': True, 'message': '角色删除成功'})
+    return ok_message('角色删除成功')
 
 
 @role_bp.route('/<int:role_id>/permissions', methods=['PUT'])
@@ -380,7 +376,7 @@ def delete_role(role_id):
 def set_role_permissions(role_id):
     """设置角色权限"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     data = request.get_json(silent=True) or {}
     permission_ids = data.get('permission_ids', [])
@@ -389,7 +385,7 @@ def set_role_permissions(role_id):
         success = _get_perm_service().set_role_permissions(role_id, permission_ids)
 
     if not success:
-        return jsonify({'success': False, 'message': '权限配置失败'}), 400
+        return error_response('权限配置失败')
 
     # [FIX 2026-06-12] 角色权限操作审计日志: 关联到角色对象 (角色详情"操作日志" tab 归集)
     write_permission_config_audit(
@@ -401,7 +397,7 @@ def set_role_permissions(role_id):
         parent_object_id=role_id,
     )
 
-    return jsonify({'success': True, 'message': '权限配置成功'})
+    return ok_message('权限配置成功')
 
 
 @role_bp.route('/<int:role_id>/permissions', methods=['GET'])
@@ -412,14 +408,14 @@ def get_role_permissions(role_id):
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         permissions = _get_perm_service().get_role_permissions(role_id)
-        return jsonify({'success': True, 'data': permissions})
+        return ok(permissions)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/<int:role_id>/menus', methods=['GET'])
@@ -430,7 +426,7 @@ def get_role_menus(role_id):
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         cursor = _data_source.execute("""
             SELECT menu_code, created_at FROM role_menu_permissions
@@ -446,11 +442,11 @@ def get_role_menus(role_id):
                 'created_at': row[1]
             })
 
-        return jsonify({'success': True, 'data': menu_permissions})
+        return ok(menu_permissions)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/<int:role_id>/data-permissions', methods=['GET'])
@@ -461,15 +457,15 @@ def get_role_data_permissions(role_id):
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         rules = _get_condition_perm_service().get_rules_by_role(role_id)
 
-        return jsonify({'success': True, 'data': rules})
+        return ok(rules)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/<int:role_id>/data-permissions', methods=['POST'])
@@ -477,23 +473,23 @@ def get_role_data_permissions(role_id):
 def add_role_data_permission(role_id):
     """为角色添加数据权限规则"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     try:
         cursor = _data_source.execute("SELECT id, name, is_system FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
         if role[2]:
-            return jsonify({'success': False, 'message': '系统内置角色不能修改'}), 400
+            return error_response('系统内置角色不能修改')
 
         data = request.get_json(silent=True) or {}
 
         required_fields = ['resource_type', 'condition']
         for field in required_fields:
             if not data.get(field):
-                return jsonify({'success': False, 'message': f'缺少必填字段: {field}'}), 400
+                return error_response(f'缺少必填字段: {field}')
 
         current_user = get_current_user()
         user_id = current_user.get('id') if current_user else None
@@ -531,16 +527,12 @@ def add_role_data_permission(role_id):
             parent_object_id=role_id,
         )
 
-        return jsonify({
-            'success': True,
-            'message': '数据权限规则添加成功',
-            'data': {'id': cursor.lastrowid}
-        }), 201
+        return ok_message('数据权限规则添加成功', data={'id': cursor.lastrowid}), 201
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_bp.route('/permissions', methods=['GET'])
@@ -563,12 +555,10 @@ def get_role_logs(role_id):
         cursor = _data_source.execute("SELECT id, name FROM roles WHERE id = ?", [role_id])
         role = cursor.fetchone()
         if not role:
-            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
+            return error_response('角色不存在，请检查后重试', status=404)
 
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
-
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args)
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         cursor = _data_source.execute("""
             SELECT * FROM audit_logs
@@ -598,4 +588,4 @@ def get_role_logs(role_id):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

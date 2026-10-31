@@ -5,10 +5,13 @@
 提供枚举类型和枚举值的 CRUD 操作。
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 import os
 import logging
 from datetime import datetime
+
+from meta.api._response_contract import json_response
+from meta.core.query_spec import parse_query_spec
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +137,7 @@ def _api_error(message, error_code='INTERNAL_ERROR', status_code=400, detail=Non
     }
     if detail and os.environ.get('FLASK_DEBUG') == '1':
         response['detail'] = detail
-    return jsonify(response), status_code
+    return json_response(response, status_code)
 
 
 def _api_success(data=None, message='Success', **kwargs):
@@ -145,7 +148,7 @@ def _api_success(data=None, message='Success', **kwargs):
     if data is not None:
         response['data'] = data
     response.update(kwargs)
-    return jsonify(response)
+    return json_response(response)
 
 
 def _auth_required(f):
@@ -223,8 +226,8 @@ def list_enum_types():
     """获取枚举类型列表"""
     try:
         ds = _get_data_source()
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', request.args.get('pageSize', 20, type=int), type=int)
+        spec = parse_query_spec(request.args)
+        page, page_size = spec.page, spec.page_size
         keyword = request.args.get('keyword', '')
         category = request.args.get('category', '')
         mutability = request.args.get('mutability', '')
@@ -377,8 +380,8 @@ def create_enum_type():
             INSERT INTO enum_types (id, name, category, mutability, dimension_schema, description, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        ds.execute(sql, [enum_type_id, name, category, mutability, dimension_schema_str, description, now])
-        ds.commit()
+        with ds.transaction():
+            ds.execute(sql, [enum_type_id, name, category, mutability, dimension_schema_str, description, now])
         
         user_id = None
         user_name = 'system'
@@ -446,8 +449,8 @@ def update_enum_type(enum_type_id):
             SET name = ?, mutability = ?, dimension_schema = ?, description = ?
             WHERE id = ?
         """
-        ds.execute(sql, [name, mutability, dimension_schema_str, description, enum_type_id])
-        ds.commit()
+        with ds.transaction():
+            ds.execute(sql, [name, mutability, dimension_schema_str, description, enum_type_id])
         
         changes = {}
         if name != existing.get('name'):
@@ -525,8 +528,8 @@ def delete_enum_type(enum_type_id):
             user_name=user_name,
         )
         
-        ds.execute("DELETE FROM enum_types WHERE id = ?", [enum_type_id])
-        ds.commit()
+        with ds.transaction():
+            ds.execute("DELETE FROM enum_types WHERE id = ?", [enum_type_id])
         
         return _api_success(message='删除成功')
     except Exception as e:
@@ -546,8 +549,8 @@ def get_enum_type_history(enum_type_id):
         if not enum_type_row:
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
         
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', request.args.get('pageSize', 20), type=int)
+        spec = parse_query_spec(request.args)
+        page, page_size = spec.page, spec.page_size
         
         cursor = ds.execute("""
             SELECT * FROM v_audit_all 
@@ -596,7 +599,8 @@ def get_enum_options(enum_type_id):
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
 
         is_active = request.args.get('is_active', '')
-        page_size = request.args.get('pageSize', 1000, type=int)
+        page_size = parse_query_spec(request.args, default_page_size=1000,
+                                     max_page_size=1000).page_size
 
         sql = "SELECT code, name FROM enum_values WHERE enum_type_id = ?"
         params = [enum_type_id]
@@ -632,8 +636,8 @@ def list_enum_values(enum_type_id):
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
         enum_type = _row_to_dict(cursor, enum_type_row)
         
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 50, type=int)
+        spec = parse_query_spec(request.args, default_page_size=50)
+        page, page_size = spec.page, spec.page_size
         keyword = request.args.get('keyword', '')
         is_active = request.args.get('is_active', '')
         
@@ -802,11 +806,11 @@ def create_enum_value(enum_type_id):
             (enum_type_id, code, name, name_en, dimensions, sort_order, is_active, is_system, parent_code, metadata, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        ds.execute(sql, [
-            enum_type_id, code, name, name_en, dimensions_str, sort_order, 
-            1 if is_active else 0, 1 if is_system else 0, parent_code, metadata_str, now
-        ])
-        ds.commit()
+        with ds.transaction():
+            ds.execute(sql, [
+                enum_type_id, code, name, name_en, dimensions_str, sort_order, 
+                1 if is_active else 0, 1 if is_system else 0, parent_code, metadata_str, now
+            ])
         
         return _api_success({'code': code}, '创建成功')
     except Exception as e:
@@ -867,10 +871,10 @@ def update_enum_value(value_id):
             SET name = ?, name_en = ?, dimensions = ?, sort_order = ?, is_active = ?, parent_code = ?, metadata = ?
             WHERE id = ?
         """
-        ds.execute(sql, [
-            name, name_en, dimensions_str, sort_order, 1 if is_active else 0, parent_code, metadata_str, value_id
-        ])
-        ds.commit()
+        with ds.transaction():
+            ds.execute(sql, [
+                name, name_en, dimensions_str, sort_order, 1 if is_active else 0, parent_code, metadata_str, value_id
+            ])
         
         return _api_success({'id': value_id}, '更新成功')
     except Exception as e:
@@ -938,8 +942,8 @@ def delete_enum_value(value_id):
         except Exception as audit_err:
             _logging.getLogger(__name__).warning(f"[EnumHardDelete] Audit log failed: {audit_err}")
 
-        ds.execute("DELETE FROM enum_values WHERE id = ?", [value_id])
-        ds.commit()
+        with ds.transaction():
+            ds.execute("DELETE FROM enum_values WHERE id = ?", [value_id])
 
         return _api_success(message='删除成功')
     except Exception as e:
@@ -1018,8 +1022,8 @@ def query_enum_values():
                 if key != 'dimension' and key != 'value':
                     dimension_filters[key] = request.args.get(key)
         
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 100, type=int)
+        spec = parse_query_spec(request.args, default_page_size=100)
+        page, page_size = spec.page, spec.page_size
         keyword = request.args.get('keyword', '')
         is_active = request.args.get('is_active', '')
         

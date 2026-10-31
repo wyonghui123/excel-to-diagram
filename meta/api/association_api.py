@@ -17,6 +17,7 @@ import os
 
 from meta.api._deprecation import v1_deprecated
 from meta.api._response_contract import ok, ok_message, error_response
+from meta.core.query_spec import parse_query_spec
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import registry
 from meta.services.deletion_service import DeletionService
@@ -96,10 +97,7 @@ def assign_association(source_type, source_id, association_name, target_type, ta
         return jsonify(result), status_code
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'分配失败: {str(e)}'
-        }), 500
+        return error_response(f'分配失败: {str(e)}', status=500)
 
 
 @association_bp.route('/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>',
@@ -134,10 +132,7 @@ def unassign_association(source_type, source_id, association_name, target_type, 
         return jsonify(result), status_code
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'取消分配失败: {str(e)}'
-        }), 500
+        return error_response(f'取消分配失败: {str(e)}', status=500)
 
 
 @association_bp.route('/<source_type>/<int:source_id>/<association_name>', methods=['GET'])
@@ -159,8 +154,8 @@ def list_association_members(source_type, source_id, association_name):
     try:
         ds = _get_data_source()
         
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
+        spec = parse_query_spec(request.args)
+        page, page_size = spec.page, spec.page_size
         
         service = AssociationService(ds, registry)
         result = service.list_members(
@@ -222,10 +217,7 @@ def delete_entity(entity_type, entity_id):
             return jsonify(result), 400
             
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'删除失败: {str(e)}'
-        }), 500
+        return error_response(f'删除失败: {str(e)}', status=500)
 
 
 @association_bp.route('/<entity_type>/deletion-policy', methods=['GET'])
@@ -275,7 +267,4 @@ def get_deletion_policy(entity_type):
         }), 200
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'获取策略失败: {str(e)}',
-        }), 500
+        return error_response(f'获取策略失败: {str(e)}', status=500)

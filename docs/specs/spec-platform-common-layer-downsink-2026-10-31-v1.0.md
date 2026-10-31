@@ -490,8 +490,86 @@
 | ID | 事项 | 决议 | 触发/后续 |
 |---|---|---|---|
 | TBD-1 | `table_prefix` 物理改写 | **推迟物理改写**（与 v1.27 决策一致），升级为运行时门禁：同一 DB 被 ≥2 个 app 共享时告警 | 触发条件：多应用共享 DB、表名冲突、按应用隔离审计；触发后另立 Spec |
-| TBD-2 | 响应契约迁移范围 | **Tier 1/2/3 + ratchet**：Tier 1 为 8 个核心 CRUD 文件；Tier 3 冻结并登记；基线 1266 只降不升 | Tier 1 清零后全局目标 ≤400；文件流响应先分类再迁移 |
+| TBD-2 | 响应契约迁移范围 | **Tier 1/2/3 + ratchet**：Tier 1 为 8 个核心 CRUD 文件；Tier 3 冻结并登记；基线 1266 只降不升。**落地状态（2026-10-31）**：已完成主体迁移，全局 750 → **371（≤400 已达成）**；Tier 1 六个模块清零，剩余 2 个文件 18 处为非标准结构已冻结；Tier 2 两批 26 个文件迁移完成；基线同步下调，详见 §10.1 | Tier 1 清零后全局目标 ≤400；文件流响应先分类再迁移 |
 | TBD-3 | 权限双保险 | **两层保留、单次判定**：装饰器声明权限码并快速失败，core gate 单次解析，service 只做数据范围 | 验收：单请求权限解析次数 = 1；403 结构统一 |
 | TBD-4 | 审计异步队列直 INSERT | **允许批量 INSERT，仅限审计模块内部**；业务调用方统一走 `AuditService.log` | CI 检查：审计模块外 `INSERT INTO audit_logs` = 0 |
 | TBD-5 | 前端权限 evaluator 归属 | **`permissionService` 提供纯函数 `can(action, context, permissions)`**；`useMetaList` 只编排 | 组件层统一调用 `can()`；禁止页面直调 `authStore.hasPermission` |
 | TBD-6 | 应用 migrations / `column_version` | **本阶段不实现，登记 P2**；先定义 schema hash 契约，再定执行语义 | 触发条件：首个自带 schema 的应用上线或应用升级需数据迁移 |
+
+### 10.1 TBD-2 执行清单（2026-10-31 实测）
+
+计数口径：`meta/api/*.py`（不含 `_response_contract.py`）中 `jsonify(` 出现次数，由 `scripts/check_architecture.py` 统计。
+
+**执行结果：1266 → 750 → 371**（Tier 1 剩余 + Tier 2 共 26 个文件迁移），全局 ≤400 目标已达成；基线文件同步下调为 371。
+
+**Tier 1（8 个核心 CRUD 文件）**
+
+| 文件 | 迁移前 | 迁移后 | 状态 |
+|---|---|---|---|
+| `meta/api/bo_api.py` | 0 | 0 | ✅ |
+| `meta/api/manage_api.py` | 0 | 0 | ✅ |
+| `meta/api/audit_api.py` | 0 | 0 | ✅ |
+| `meta/api/task_inbox_api.py` | 0 | 0 | ✅ |
+| `meta/api/enum_api.py` | 0 | 0 | ✅ |
+| `meta/api/decorators.py` | 0 | 0 | ✅ |
+| `meta/api/bo_action_api.py` | 8 | 8 | 冻结（6 处 `make_response(jsonify(...))`/变量 payload + 2 处变量 `success`；改 helper 会变结构） |
+| `meta/api/association_api.py` | 14 | 10 | 迁移 4 处；其余 payload 为变量或带额外顶层字段，冻结 |
+
+**Tier 2（12 个高计数文件）**
+
+| 文件 | 迁移前 | 迁移后 |
+|---|---|---|
+| `meta/api/notification_api.py` | 42 | 3 |
+| `meta/api/export_import_api.py` | 38 | 11 |
+| `meta/api/permission_rule_api.py` | 37 | 7 |
+| `meta/api/unified_permission_api.py` | 37 | 2 |
+| `meta/api/stats_api.py` | 36 | 8 |
+| `meta/api/permission_dimension_api.py` | 35 | 3 |
+| `meta/api/meta_api.py` | 30 | 23 |
+| `meta/api/schema_api.py` | 29 | 13 |
+| `meta/api/menu_permission_api.py` | 25 | 15 |
+| `meta/api/permission_bundle_api.py` | 25 | 17 |
+| `meta/api/database_api.py` | 22 | 22（全部无 `success` 包装，冻结） |
+| `meta/api/value_help_api.py` | 20 | 14 |
+
+**第二批（为达成 ≤400 追加的 15 个文件）**
+
+| 文件 | 迁移前 → 迁移后 | 文件 | 迁移前 → 迁移后 |
+|---|---|---|---|
+| `data_permission_api.py` | 18 → 3 | `owner_transfer_api.py` | 13 → 1 |
+| `intent_api.py` | 18 → 14 | `permission_sync_api.py` | 13 → 5 |
+| `filter_variant_api.py` | 14 → 1 | `permission_set_menu_api.py` | 12 → 5 |
+| `auth_api.py` | 16 → 4 | `m8_api.py` | 11 → 11（冻结） |
+| `annotation_routes_api.py` | 16 → 4 | `user_group_api.py` | 10 → 10（冻结） |
+| `object_identity_api.py` | 15 → 0 | `key_template_api.py` | 10 → 2 |
+| `permission_set_dimension_scope_api.py` | 14 → 3 | | |
+| `permission_audit_api.py` | 14 → 7 | | |
+| `db_admin_api.py` | 14 → 1 | | |
+
+**冻结原因（剩余的合法 `jsonify`，不得新增）**
+
+1. payload 本身是扁平列表（非 `items/total/page/page_size` 四键，`ok_list` 会改变结构）。
+2. 含 `error` 键的错误体（`error_response` 无对应字段，映射会丢 `error`）。
+3. 额外顶层字段（`_deprecated`、`has_more`、`where_sql`、`warnings`、`skipped_types` 等）。
+4. payload 是变量或 `make_response(jsonify(...))` 链（如设置 cookie 的登录/登出）。
+5. `success` 由运行时变量决定（如 `result.success`）。
+6. 无 `success` 包装的历史结构（`database_api.py` 的 `{"data": ...}` / `{"error": ...}`）。
+
+**Tier 3（冻结登记，不迁移；不得新增）**
+
+`_response_contract.py`（契约自身）、`_problem_details.py`、`_messages.py`、`_deprecation.py`、`API_TEMPLATE.py`、`meta/graphql/__init__.py`、`meta/ops_server.py`、`meta/server.py`、`meta/core/app_builder.py`、`meta/core/auth_helpers.py`、`meta/core/interceptors/*`。
+
+**迁移规则（结构不变优先）**
+
+1. `{'success': True, 'data': X}` → `ok(X)`；带 `message` → `ok(X, message=M)`。
+2. `{'success': True, 'message': M}` → `ok_message(M)`。
+3. `{'success': False, 'message': M}` → `error_response(M, status=S)`。
+4. `{'success': False, 'message': M, 'code': C}` → `error_response(M, code=C, status=S)`（新增 `error_code` 为契约允许的附加字段）。
+5. 无法无损映射的结构 → **保持原 `jsonify` 不动**（不使用 `json_response` 兜底）。
+6. 状态码通过返回值元组或 `status=` 原样保留；不得改变控制流。
+
+**验证（2026-10-31）**
+
+- `python scripts/check_architecture.py`：`jsonify_total=371`，其余 9 项计数不变，ratchet PASS。
+- `python d:\filework\test.py --file ...`（覆盖 25 个迁移文件的 API 测试）：两批共 331 passed；失败项均为**预先存在**的 v1 端点 410 下线断言（`@v1_deprecated` / legacy 注册表）与 `PermissionRuleV2DAO` 列缺失（`role_id`/`permission_set_id`），与本次响应迁移无关。
+- 所有改动文件 `python -m compileall` 通过。

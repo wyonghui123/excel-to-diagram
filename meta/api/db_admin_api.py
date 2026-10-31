@@ -29,6 +29,7 @@ from flask import current_app, g  # noqa: E402
 from meta.services.auth_middleware import get_current_user, is_admin  # noqa: E402
 from meta.core.datasource import get_data_source  # noqa: E402
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import error_response, ok  # noqa: E402
 
 db_admin_bp = Blueprint('db_admin', __name__, url_prefix='/api/v2/action')
 
@@ -115,7 +116,7 @@ def db_health():
     - status: healthy / warning / critical
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', code='E010', status=403)
 
     result = {
         'success': True,
@@ -239,7 +240,7 @@ def db_backup():
     返回: filename, size, duration_ms
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', code='E010', status=403)
 
     db_path = _get_db_path()
     backup_dir = _get_backup_dir()
@@ -271,30 +272,22 @@ def db_backup():
         if integrity != 'ok':
             # 删除损坏的备份
             os.remove(backup_path)
-            return jsonify({
-                'success': False,
-                'message': f'备份后 integrity_check 失败: {integrity}',
-                'code': 'E030',
-            }), 500
+            return error_response(
+                f'备份后 integrity_check 失败: {integrity}',
+                code='E030',
+                status=500,
+            )
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'filename': backup_name,
-                'path': backup_path,
-                'size': _format_size(size),
-                'duration_ms': round(duration_ms, 1),
-                'integrity': integrity,
-                'created_at': start.isoformat(),
-            },
-            'message': 'backup created',
-        })
+        return ok({
+            'filename': backup_name,
+            'path': backup_path,
+            'size': _format_size(size),
+            'duration_ms': round(duration_ms, 1),
+            'integrity': integrity,
+            'created_at': start.isoformat(),
+        }, message='backup created')
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'备份失败: {e}',
-            'code': 'E030',
-        }), 500
+        return error_response(f'备份失败: {e}', code='E030', status=500)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -308,28 +301,20 @@ def db_recover():
     可选: dry_run=true (仅检查, 不执行)
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', code='E010', status=403)
 
     body = request.get_json(silent=True) or {}
     backup_filename = body.get('backup_filename')
     dry_run = body.get('dry_run', False)
 
     if not backup_filename:
-        return jsonify({
-            'success': False,
-            'message': 'backup_filename 必填',
-            'code': 'E001',
-        }), 400
+        return error_response('backup_filename 必填', code='E001')
 
     backup_dir = _get_backup_dir()
     backup_path = os.path.join(backup_dir, backup_filename)
 
     if not os.path.exists(backup_path):
-        return jsonify({
-            'success': False,
-            'message': f'备份文件不存在: {backup_filename}',
-            'code': 'E030',
-        }), 404
+        return error_response(f'备份文件不存在: {backup_filename}', code='E030', status=404)
 
     # 验证备份完整性
     try:
@@ -339,29 +324,17 @@ def db_recover():
         finally:
             check_conn.close()
         if integrity != 'ok':
-            return jsonify({
-                'success': False,
-                'message': f'备份 integrity_check 失败: {integrity}',
-                'code': 'E030',
-            }), 400
+            return error_response(f'备份 integrity_check 失败: {integrity}', code='E030')
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'备份验证失败: {e}',
-            'code': 'E030',
-        }), 500
+        return error_response(f'备份验证失败: {e}', code='E030', status=500)
 
     if dry_run:
-        return jsonify({
-            'success': True,
-            'data': {
-                'dry_run': True,
-                'backup_filename': backup_filename,
-                'integrity': integrity,
-                'would_recover_to': _get_db_path(),
-            },
-            'message': 'dry run OK - 备份有效, 可执行实际恢复',
-        })
+        return ok({
+            'dry_run': True,
+            'backup_filename': backup_filename,
+            'integrity': integrity,
+            'would_recover_to': _get_db_path(),
+        }, message='dry run OK - 备份有效, 可执行实际恢复')
 
     # 实际恢复: 备份当前 DB 到 .recover-backup, 然后从指定备份恢复
     db_path = _get_db_path()
@@ -387,19 +360,11 @@ def db_recover():
             source.close()
             dest.close()
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'recovered_from': backup_filename,
-                'recovered_to': db_path,
-                'previous_state_backup': recover_backup_name,
-                'integrity_after': integrity,
-            },
-            'message': 'recovery completed - 之前状态已备份到 ' + recover_backup_name,
-        })
+        return ok({
+            'recovered_from': backup_filename,
+            'recovered_to': db_path,
+            'previous_state_backup': recover_backup_name,
+            'integrity_after': integrity,
+        }, message='recovery completed - 之前状态已备份到 ' + recover_backup_name)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'恢复失败: {e}',
-            'code': 'E030',
-        }), 500
+        return error_response(f'恢复失败: {e}', code='E030', status=500)

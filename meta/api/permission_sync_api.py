@@ -19,6 +19,7 @@ from meta.services.permission_sync_service import get_permission_sync_service
 from meta.services.auth_middleware import is_admin, login_required
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import ok, error_response
 
 
 def admin_required(f):
@@ -27,7 +28,7 @@ def admin_required(f):
         from meta.api.user_api import get_current_user
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -82,24 +83,13 @@ def sync_permissions():
         if scope == 'object':
             object_id = data.get('object_id')
             if not object_id:
-                return jsonify({
-                    'success': False,
-                    'message': '缺少 object_id 参数'
-                }), 400
+                return error_response('缺少 object_id 参数')
             
             result = svc.sync_for_object(object_id)
-            return jsonify({
-                'success': True,
-                'data': result,
-                'message': f"已同步 {result.get('total', 0)} 项权限，新建 {len(result.get('created', []))} 项"
-            })
+            return ok(result, message=f"已同步 {result.get('total', 0)} 项权限，新建 {len(result.get('created', []))} 项")
         else:
             result = svc.sync_all()
-            return jsonify({
-                'success': True,
-                'data': result,
-                'message': f"同步完成：新建 {result['summary']['created_count']} 项，更新 {result['summary']['updated_count']} 项"
-            })
+            return ok(result, message=f"同步完成：新建 {result['summary']['created_count']} 项，更新 {result['summary']['updated_count']} 项")
             
     except Exception as e:
         import traceback
@@ -134,10 +124,7 @@ def validate_permissions():
         svc = _get_sync_service()
         result = svc.validate_consistency()
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return ok(result)
         
     except Exception as e:
         import traceback
@@ -168,10 +155,7 @@ def get_permission_report():
         svc = _get_sync_service()
         result = svc.get_permission_report()
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return ok(result)
         
     except Exception as e:
         import traceback
@@ -202,13 +186,10 @@ def get_orphan_permissions():
         
         orphans = validation.get('extra_permissions', [])
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'orphans': orphans,
-                'count': len(orphans),
-                'grouped_by_object': validation.get('details', {}).get('extra_by_object', {})
-            }
+        return ok({
+            'orphans': orphans,
+            'count': len(orphans),
+            'grouped_by_object': validation.get('details', {}).get('extra_by_object', {})
         })
         
     except Exception as e:
@@ -262,14 +243,10 @@ def cleanup_orphan_permissions():
             except Exception as e:
                 print(f"Failed to delete permission {code}: {e}")
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'deleted': deleted,
-                'deleted_count': len(deleted)
-            },
-            'message': f"已删除 {len(deleted)} 项孤儿权限"
-        })
+        return ok({
+            'deleted': deleted,
+            'deleted_count': len(deleted)
+        }, message=f"已删除 {len(deleted)} 项孤儿权限")
         
     except Exception as e:
         import traceback

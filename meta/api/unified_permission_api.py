@@ -21,6 +21,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, current_app, g, jsonify, request
+from meta.api._response_contract import error_response, ok
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def list_unified_rules():
         return jsonify({'success': True, 'data': rules})
     except Exception as e:
         logger.error(f'[list_unified_rules] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route('/unified-permission-rules', methods=['POST'])
@@ -83,10 +84,9 @@ def create_unified_rule():
         permission_set_id = body.get('permission_set_id')
         resource_type = body.get('resource_type')
         if not permission_set_id or not resource_type:
-            return jsonify({
-                'success': False,
-                'message': 'permission_set_id and resource_type are required',
-            }), 400
+            return error_response(
+                'permission_set_id and resource_type are required'
+            )
 
         dao = PermissionRuleV2DAO(_get_db_path())
         rule_id = dao.create(
@@ -98,10 +98,10 @@ def create_unified_rule():
             derivation_mode=body.get('derivation_mode', 'static'),
             source=body.get('source', 'manual'),
         )
-        return jsonify({'success': True, 'data': {'id': rule_id}}), 201
+        return ok({'id': rule_id}), 201
     except Exception as e:
         logger.error(f'[create_unified_rule] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route('/unified-permission-rules/<int:rule_id>', methods=['GET'])
@@ -113,11 +113,11 @@ def get_unified_rule(rule_id: int):
         dao = PermissionRuleV2DAO(_get_db_path())
         rule = dao.get(rule_id)
         if not rule:
-            return jsonify({'success': False, 'message': 'Rule not found'}), 404
-        return jsonify({'success': True, 'data': rule})
+            return error_response('Rule not found', status=404)
+        return ok(rule)
     except Exception as e:
         logger.error(f'[get_unified_rule] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route('/unified-permission-rules/<int:rule_id>', methods=['PUT'])
@@ -131,7 +131,7 @@ def update_unified_rule(rule_id: int):
 
         # 先检查存在
         if not dao.get(rule_id):
-            return jsonify({'success': False, 'message': 'Rule not found'}), 404
+            return error_response('Rule not found', status=404)
 
         affected = dao.update(
             rule_id,
@@ -141,10 +141,10 @@ def update_unified_rule(rule_id: int):
             derivation_mode=body.get('derivation_mode'),
             source=body.get('source'),
         )
-        return jsonify({'success': True, 'data': {'affected': affected}})
+        return ok({'affected': affected})
     except Exception as e:
         logger.error(f'[update_unified_rule] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route('/unified-permission-rules/<int:rule_id>', methods=['DELETE'])
@@ -156,11 +156,11 @@ def delete_unified_rule(rule_id: int):
         dao = PermissionRuleV2DAO(_get_db_path())
         affected = dao.delete(rule_id)
         if affected == 0:
-            return jsonify({'success': False, 'message': 'Rule not found'}), 404
-        return jsonify({'success': True, 'data': {'affected': affected}})
+            return error_response('Rule not found', status=404)
+        return ok({'affected': affected})
     except Exception as e:
         logger.error(f'[delete_unified_rule] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -188,7 +188,7 @@ def list_effective_intents(permission_set_id: int):
         return jsonify({'success': True, 'data': intents})
     except Exception as e:
         logger.error(f'[list_effective_intents] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route(
@@ -200,7 +200,7 @@ def update_effective_intent(permission_set_id: int, intent_id: int):
         body = request.get_json(silent=True) or {}
         data_scope = body.get('data_scope')
         if data_scope is None:
-            return jsonify({'success': False, 'message': 'data_scope is required'}), 400
+            return error_response('data_scope is required')
 
         db_path = _get_db_path()
         with sqlite3.connect(db_path) as conn:
@@ -210,14 +210,13 @@ def update_effective_intent(permission_set_id: int, intent_id: int):
                    WHERE id = ? AND permission_set_id = ?''',
                 [json.dumps(data_scope, ensure_ascii=False), intent_id, permission_set_id],
             )
-            conn.commit()
             if cursor.rowcount == 0:
-                return jsonify({'success': False, 'message': 'Intent not found'}), 404
+                return error_response('Intent not found', status=404)
 
-        return jsonify({'success': True, 'data': {'affected': cursor.rowcount}})
+        return ok({'affected': cursor.rowcount})
     except Exception as e:
         logger.error(f'[update_effective_intent] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @unified_permission_bp.route(
@@ -232,14 +231,13 @@ def delete_effective_intent(permission_set_id: int, intent_id: int):
                 'DELETE FROM permission_set_effective_intents WHERE id = ? AND permission_set_id = ?',
                 [intent_id, permission_set_id],
             )
-            conn.commit()
             if cursor.rowcount == 0:
-                return jsonify({'success': False, 'message': 'Intent not found'}), 404
+                return error_response('Intent not found', status=404)
 
-        return jsonify({'success': True, 'data': {'affected': cursor.rowcount}})
+        return ok({'affected': cursor.rowcount})
     except Exception as e:
         logger.error(f'[delete_effective_intent] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -257,10 +255,10 @@ def trigger_derivation(permission_set_id: int):
         pipeline = PermissionDerivationPipeline(db_path=db_path, dao=dao)
         result = pipeline.derive(permission_set_id=permission_set_id)
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         logger.error(f'[trigger_derivation] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -275,7 +273,7 @@ def sql_preview(permission_set_id: int):
         bo_id = request.args.get('bo_id')
         action_name = request.args.get('action', 'read')
         if not bo_id:
-            return jsonify({'success': False, 'message': 'bo_id is required'}), 400
+            return error_response('bo_id is required')
 
         user_id = _current_user_id()
         db_path = _get_db_path()
@@ -289,19 +287,16 @@ def sql_preview(permission_set_id: int):
 
         if result is None:
             # 无 Intent → 默认拒绝
-            return jsonify({
-                'success': True,
-                'data': {
-                    'cond_expr': '1=0',
-                    'params': [],
-                    'sources': ['default_deny'],
-                },
+            return ok({
+                'cond_expr': '1=0',
+                'params': [],
+                'sources': ['default_deny'],
             })
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         logger.error(f'[sql_preview] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -331,17 +326,14 @@ def completeness_check(permission_set_id: int):
         else:
             status = 'green'
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'status': status,
-                'intent_count': intent_count,
-                'stale_count': stale_count,
-            },
+        return ok({
+            'status': status,
+            'intent_count': intent_count,
+            'stale_count': stale_count,
         })
     except Exception as e:
         logger.error(f'[completeness_check] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -356,10 +348,7 @@ def role_diff():
         role_a = request.args.get('role_a', type=int)
         role_b = request.args.get('role_b', type=int)
         if not role_a or not role_b:
-            return jsonify({
-                'success': False,
-                'message': 'role_a and role_b are required',
-            }), 400
+            return error_response('role_a and role_b are required')
 
         db_path = _get_db_path()
         dao = EffectiveIntentDAO(db_path)
@@ -379,17 +368,14 @@ def role_diff():
         common_keys = set_a & set_b
         common = [i for i in intents_a if _key(i) in common_keys]
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'only_in_a': only_in_a,
-                'only_in_b': only_in_b,
-                'common': common,
-            },
+        return ok({
+            'only_in_a': only_in_a,
+            'only_in_b': only_in_b,
+            'common': common,
         })
     except Exception as e:
         logger.error(f'[role_diff] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -420,10 +406,7 @@ def permission_simulate():
         user_id = body.get('user_id') or _current_user_id()
 
         if not role_ids or not bo_id or not action_name or record_id is None:
-            return jsonify({
-                'success': False,
-                'message': 'role_ids, bo_id, action_name, record_id are required',
-            }), 400
+            return error_response('role_ids, bo_id, action_name, record_id are required')
 
         db_path = _get_db_path()
         adapter = IntentScopeAdapter(db_path)
@@ -435,7 +418,7 @@ def permission_simulate():
             user_id=user_id or 0,
         )
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         logger.error(f'[permission_simulate] {e}', exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

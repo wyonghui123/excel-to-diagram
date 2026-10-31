@@ -10,6 +10,7 @@ from flask import Blueprint, request, jsonify
 from dataclasses import asdict
 from typing import Any
 
+from meta.api._response_contract import ok, ok_message, error_response
 from meta.core.models import registry
 from meta.services.view_config_service import view_config_service
 from meta.services.i18n_service import i18n_service
@@ -393,10 +394,7 @@ def reload_meta():
         count = registry.reload(schema_dir)
         view_config_service.invalidate_cache()
 
-        return jsonify({
-            'success': True,
-            'message': f'Reloaded {count} meta objects',
-        })
+        return ok_message(f'Reloaded {count} meta objects')
     except Exception as e:
         return jsonify({
             'success': False,
@@ -424,13 +422,10 @@ def get_i18n_text(key: str):
 
     text = i18n_service.get_text_with_fallback(key, default, locale)
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'key': key,
-            'text': text,
-            'locale': locale,
-        },
+    return ok({
+        'key': key,
+        'text': text,
+        'locale': locale,
     })
 
 
@@ -457,7 +452,7 @@ def get_enums_batch():
     """
     types_param = request.args.get('types', '')
     if not types_param:
-        return jsonify({'success': False, 'message': 'types parameter required'}), 400
+        return error_response('types parameter required')
 
     enum_types = [t.strip() for t in types_param.split(',') if t.strip()]
 
@@ -468,7 +463,7 @@ def get_enums_batch():
 
     # [FR-006] 批量查询替代逐类型查询, 避免 N+1
     if not enum_types:
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
 
     # 批量存在性检查
     placeholders = ','.join(['?'] * len(enum_types))
@@ -505,10 +500,7 @@ def get_enums_batch():
                 'data': values_by_type.get(enum_type, [])
             }
 
-    return jsonify({
-        'success': True,
-        'data': result
-    })
+    return ok(result)
 
 
 @meta_bp.route('/<object_type>/filter-config', methods=['GET'])
@@ -595,10 +587,7 @@ def get_filter_tree_data(object_type: str, filter_key: str):
 
     view_config = meta_object.ui_view_config
     if not view_config or not hasattr(view_config, 'filter'):
-        return jsonify({
-            'success': True,
-            'data': [],
-        })
+        return ok([])
 
     filter_config = view_config.filter
     target_filter = None
@@ -609,10 +598,7 @@ def get_filter_tree_data(object_type: str, filter_key: str):
                 break
 
     if not target_filter:
-        return jsonify({
-            'success': True,
-            'data': [],
-        })
+        return ok([])
 
     tree_structure = target_filter.tree_structure if hasattr(target_filter, 'tree_structure') else ''
     tree_levels = target_filter.tree_levels if hasattr(target_filter, 'tree_levels') else []

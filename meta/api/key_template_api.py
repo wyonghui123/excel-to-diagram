@@ -2,6 +2,7 @@
 import re
 import logging
 from flask import Blueprint, request, jsonify, g
+from meta.api._response_contract import ok, error_response
 from meta.services.auth_middleware import login_required
 
 from meta.core.models import registry, resolve_write_anchor
@@ -155,10 +156,7 @@ def _resolve_physical_table_name(object_type):
 def get_config(object_type):
     meta_object = registry.get(object_type)
     if not meta_object:
-        return jsonify({
-            'success': False,
-            'message': f'Unknown object type: {object_type}'
-        }), 404
+        return error_response(f'Unknown object type: {object_type}', status=404)
 
     # [DEBUG_MARK_20260615_1625] 用以验证后端是否使用最新代码
     import sys as _sys
@@ -173,11 +171,10 @@ def get_config(object_type):
         object_type = _anchor.id
     key_template_raw = getattr(meta_object, 'key_template', None)
     if not key_template_raw:
-        return jsonify({
-            'success': True,
-            'data': {'enabled': False},
-            'message': 'No key_template configured for this object'
-        })
+        return ok(
+            {'enabled': False},
+            message='No key_template configured for this object'
+        )
 
     config = KeyTemplateConfig.from_dict(object_type, key_template_raw)
 
@@ -189,26 +186,17 @@ def get_config(object_type):
     if config.sequence:
         result['key_template']['sequence'] = config.sequence.to_dict()
 
-    return jsonify({
-        'success': True,
-        'data': result
-    })
+    return ok(result)
 
 
 @key_template_bp.route('/preview/<object_type>', methods=['POST'])
 def preview_code(object_type):
     if not _engine:
-        return jsonify({
-            'success': False,
-            'message': 'KeyTemplateEngine not available'
-        }), 500
+        return error_response('KeyTemplateEngine not available', status=500)
 
     meta_object = registry.get(object_type)
     if not meta_object:
-        return jsonify({
-            'success': False,
-            'message': f'Unknown object type: {object_type}'
-        }), 404
+        return error_response(f'Unknown object type: {object_type}', status=404)
 
     # [F1 write_anchor 2026-10-11] 面=入口、锚=执行：视图面按锚生成编码
     _anchor = resolve_write_anchor(meta_object)
@@ -267,22 +255,16 @@ def preview_code(object_type):
                                     prefix_filter=prefix_filter)
 
     if not code:
-        return jsonify({
-            'success': False,
-            'message': 'Failed to generate code'
-        }), 500
+        return error_response('Failed to generate code', status=500)
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'code': code,
-            'object_type': object_type,
-            'generated': generate,
-            # [NEW v1.1 2026-06-11] 返回 user_editable 等元信息，前端用于差异化 UI 提示
-            'user_editable': config.user_editable,
-            'pattern': config.pattern,
-            'preview': config.preview or code,
-        }
+    return ok({
+        'code': code,
+        'object_type': object_type,
+        'generated': generate,
+        # [NEW v1.1 2026-06-11] 返回 user_editable 等元信息，前端用于差异化 UI 提示
+        'user_editable': config.user_editable,
+        'pattern': config.pattern,
+        'preview': config.preview or code,
     })
 
 
@@ -305,7 +287,4 @@ def list_objects():
                 entry['sequence'] = config.sequence.to_dict()
             objects_with_kt.append(entry)
 
-    return jsonify({
-        'success': True,
-        'data': objects_with_kt
-    })
+    return ok(objects_with_kt)
