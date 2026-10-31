@@ -256,6 +256,7 @@ def validate_definition(nodes: Any,
 
     findings.extend(_validate_edges(normalized, edges))
     findings.extend(_validate_no_cross_branch_merge(normalized, edges))
+    findings.extend(_validate_cycles(normalized, edges))
     return findings
 
 
@@ -331,6 +332,56 @@ def _validate_no_cross_branch_merge(nodes: Sequence[Dict[str, Any]],
             "MULTI_PARENT_NOT_ALLOWED",
             f"node '{target}' 有多条入边 {sorted(sources)}，但来源不属同一分支块"
             f"（非法：通用 DAG 的跨块合并）"))
+    return findings
+
+
+def _validate_cycles(nodes: Sequence[Dict[str, Any]],
+                     edges: Optional[Iterable[Any]],
+                     ) -> List[DefinitionFinding]:
+    """G1: 定义期无环检测（DFS 三色）。
+
+    自环已由 `_validate_edges` 报 `EDGE_SELF_LOOP`，此处跳过，避免重复报错。
+    只对已知节点之间的边建图；非法边已由 `_validate_edges` 单独报告。
+    """
+    findings: List[DefinitionFinding] = []
+    known = node_index(nodes)
+    if not known or not edges:
+        return findings
+
+    adjacency: Dict[str, List[str]] = {nid: [] for nid in known}
+    for edge in edges:
+        source = _edge_endpoint(edge, "from")
+        target = _edge_endpoint(edge, "to")
+        if not source or not target or source == target:
+            continue
+        if source in known and target in known and target not in adjacency[source]:
+            adjacency[source].append(target)
+
+    # 0 = 未访问 / 1 = 在栈中 / 2 = 已完成
+    colors: Dict[str, int] = {}
+    reported: set = set()
+
+    def walk(node_id: str, stack: List[str]) -> None:
+        colors[node_id] = 1
+        stack.append(node_id)
+        for nxt in adjacency[node_id]:
+            color = colors.get(nxt, 0)
+            if color == 1:
+                path = stack[stack.index(nxt):] + [nxt]
+                key = tuple(path)
+                if key not in reported:
+                    reported.add(key)
+                    findings.append(DefinitionFinding(
+                        "CYCLE_DETECTED", "环路: " + " → ".join(path)))
+            elif color == 0:
+                walk(nxt, stack)
+        stack.pop()
+        colors[node_id] = 2
+
+    for node_id in known:
+        if colors.get(node_id, 0) == 0:
+            walk(node_id, [])
+
     return findings
 
 

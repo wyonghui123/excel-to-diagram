@@ -134,8 +134,12 @@ class ApplicationBuilder:
         立即执行（不延迟到 build），因为 Action 注册是模块级操作。
         """
         from meta.services.bo_action_registrations import register_all_bo_actions
+        from meta.services.fulfillment_action_registrations import (
+            register_fulfillment_actions,
+        )
         from meta.core.bo_action_registry import bo_action_registry
         register_all_bo_actions(bo_action_registry)
+        register_fulfillment_actions(bo_action_registry)
         logger.info(f"[AppBuilder] BO actions registered: {len(bo_action_registry.list_ids())}")
         return self
 

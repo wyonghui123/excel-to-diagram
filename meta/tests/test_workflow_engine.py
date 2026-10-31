@@ -184,14 +184,25 @@ class TestStartRun:
         assert {t["doc_ref"] for t in tasks} == {"SO-9"}
         assert {t["app_id"] for t in tasks} == {"waybill"}
 
-    def test_inputs_and_variables_persisted(self, ds):
-        """TC-WFE-008: Run 入参 / 变量以 JSON 往返"""
+    def test_line_refs_propagated_to_tasks_and_run_meta(self, ds):
+        """TC-WFE-009a: G2 line_refs 透传到克隆任务 + run meta"""
         _publish(ds)
-        result = start_run(ds, workflow_key="wf-a",
-                           inputs={"doc_ref": "SO-1"}, variables={"k": 1})
+        result = start_run(ds, workflow_key="wf-a", doc_ref="SO-9",
+                           line_refs=["SO-9-L10", "SO-9-L20"])
+        tasks = list_run_tasks(ds, result["run_id"])
+        assert {tuple(t["line_refs"]) for t in tasks} == {
+            ("SO-9-L10", "SO-9-L20")}
         run = get_run(ds, result["run_id"])
-        assert run["inputs"] == {"doc_ref": "SO-1"}
-        assert run["variables"] == {"k": 1}
+        assert run["meta"]["line_refs"] == ["SO-9-L10", "SO-9-L20"]
+        assert run["meta"]["doc_ref"] == "SO-9"
+
+    def test_line_refs_default_none_keeps_behavior(self, ds):
+        """TC-WFE-010a: 不传 line_refs → 任务列为空 / run meta 保持 None"""
+        _publish(ds)
+        result = start_run(ds, workflow_key="wf-a")
+        tasks = list_run_tasks(ds, result["run_id"])
+        assert {t["line_refs"] for t in tasks} == {None}
+        assert get_run(ds, result["run_id"])["meta"] is None
 
     def test_unknown_workflow_raises(self, ds):
         """TC-WFE-009: 定义不存在 → WorkflowStoreError"""

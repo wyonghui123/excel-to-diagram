@@ -1055,6 +1055,12 @@ def create_app(db_path=None):
     from meta.services.bo_action_registrations import register_all_bo_actions
     register_all_bo_actions()
 
+    # [批次 4b] 履约编排节点 handler（8 业务 action + 1 返工控制动作）
+    from meta.services.fulfillment_action_registrations import (
+        register_fulfillment_actions,
+    )
+    register_fulfillment_actions()
+
     # [多产品平台 v1.8] 应用包注册（roadmap §6.3 / §6.4.1 方案甲）
     # ENABLED_APPS 未设置 → legacy 模式, 不加载任何应用, 零行为变化
     try:

@@ -170,6 +170,7 @@ def start_run(
     variables: Any = None,
     trigger_kind: str = "manual",
     doc_ref: str = "",
+    line_refs: Any = None,
     app_id: str = "",
     created_by: str = "",
 ) -> Dict[str, Any]:
@@ -191,6 +192,11 @@ def start_run(
     node_to_task = {node["node_id"]: uuid.uuid4().hex for node in nodes}
     incoming = incoming_edges(nodes, edges)
     snapshot = _deep_copy({"workflow": workflow, "nodes": nodes, "edges": edges})
+    run_meta: Dict[str, Any] = {}
+    if doc_ref:
+        run_meta["doc_ref"] = doc_ref
+    if line_refs is not None:
+        run_meta["line_refs"] = _deep_copy(line_refs)
 
     with data_source.transaction():
         data_source.execute(
@@ -201,7 +207,7 @@ def start_run(
                 workflow["version"], name or workflow["name"], trigger_kind,
                 _json_text(snapshot), _json_text(variables), _json_text(inputs),
                 None, created_by or None, ts, ts, None,
-                _json_text({"doc_ref": doc_ref} if doc_ref else None), ts,
+                _json_text(run_meta or None), ts,
             ),
         )
 
@@ -232,7 +238,7 @@ def start_run(
                     _json_text(node.get("inputs_schema")), None,
                     _json_text(node.get("outputs_schema")),
                     _json_text(node.get("acceptance")), 1, None, None,
-                    doc_ref or None, None, created_by or None, ts, None, None,
+                    doc_ref or None, _json_text(line_refs), created_by or None, ts, None, None,
                     None, _json_text(node.get("meta")), ts,
                 ),
             )
