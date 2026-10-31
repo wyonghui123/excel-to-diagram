@@ -24,6 +24,7 @@ import {
   findEnumValues,
   findSystemEnumValue
 } from '../helpers/enum-finder.js'
+import { isMobileViewport } from '../helpers/responsive.js'
 
 // ============================================================
 // E31-E34: 持久化/多 tab/深链/i18n
@@ -126,7 +127,10 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
     })
 
     await withStep(page, testInfo, '验证中文表头', async () => {
-      const headerText = await page.locator('.el-table__header').textContent()
+      // 窄屏列表为卡片形态，没有表头，用卡片字段标签做等价断言
+      const headerText = isMobileViewport(page)
+        ? (await page.locator('.meta-card__label').allTextContents()).join(' ')
+        : await page.locator('.el-table__header').textContent()
       expect(headerText, 'should contain 名称').toMatch(/名称/)
       expect(headerText, 'should contain 分类').toMatch(/分类/)
     })

@@ -12,6 +12,7 @@
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
+import { listRows, listText, waitForList, isMobileViewport } from '../helpers/responsive.js'
 
 const ITEM_STRUCTURES_URL = '/item-structures'
 const ORDER_NO = 'SCN-SO-BOM-1'
@@ -47,14 +48,12 @@ test.describe('BOM-SCN: 物料结构列表', () => {
     })
 
     await withStep(page, testInfo, '表格就绪且行数 > 0', async () => {
-      const table = page.locator('.el-table').first()
-      await expect(table).toBeVisible()
-      const rows = page.locator('.el-table__body tr')
-      expect(await rows.count(), '物料结构列表应有数据').toBeGreaterThan(0)
+      await waitForList(page)
+      await expect.poll(() => listRows(page).count(), { timeout: 10000 }).toBeGreaterThan(0)
     })
 
     await withStep(page, testInfo, '场景结构出现在第一页（默认 updated_at 倒序）', async () => {
-      const bodyText = (await page.locator('.el-table__body').first().textContent()) || ''
+      const bodyText = await listText(page)
       expect(
         MODEL_ITEM_TEXT.test(bodyText),
         `第一页应含场景模型结构，实际: ${bodyText.slice(0, 300)}`
@@ -88,7 +87,7 @@ test.describe('BOM-SCN: 销售订单行展开', () => {
     })
 
     await withStep(page, testInfo, '行操作菜单 →「展开」', async () => {
-      const row = page.locator('.el-table__body tr', { hasText: MODEL_ITEM_TEXT }).first()
+      const row = listRows(page).filter({ hasText: MODEL_ITEM_TEXT }).first()
       await row.waitFor({ state: 'visible', timeout: 10000 })
       await row.locator('.row-action-trigger').first().click()
       const menuItem = page.locator('.row-action-popper:visible .el-dropdown-menu__item', { hasText: '展开' }).first()
@@ -104,7 +103,7 @@ test.describe('BOM-SCN: 销售订单行展开', () => {
     })
 
     await withStep(page, testInfo, '提交展开 → 成功或幂等提示', async () => {
-      const rowsBefore = await page.locator('.el-table__body tr').count()
+      const rowsBefore = await listRows(page).count()
       const dialog = page.locator('.el-dialog.sales-order-expand-dialog')
       await dialog.locator('button:has-text("展开")').click()
 
@@ -121,14 +120,16 @@ test.describe('BOM-SCN: 销售订单行展开', () => {
       await expect(message).toContainText('已展开')
       // 详情页刷新后子行落位（10 → 3 个组件行）
       await expect.poll(
-        async () => await page.locator('.el-table__body tr').count(),
+        async () => await listRows(page).count(),
         { timeout: 15000 }
       ).toBeGreaterThan(rowsBefore)
     })
 
     if (!alreadyExpanded) {
       await withStep(page, testInfo, '子行内容符合求解结果', async () => {
-        const bodyText = (await page.locator('.el-table__body').first().textContent()) || ''
+        const bodyText = isMobileViewport(page)
+          ? (await page.locator('.meta-card:visible').allTextContents()).join(' ')
+          : (await page.locator('.el-table__body').first().textContent()) || ''
         expect(bodyText, '应出现必选组件 CPU').toMatch(/SCN-COMP-CPU|场景组件-CPU/)
         expect(bodyText, '应出现默认选项 RED').toMatch(/SCN-OPT-RED|场景选项-红色/)
         expect(bodyText, '应出现服务行 INSTALL').toMatch(/SCN-SVC-INSTALL|场景服务-上门安装/)
