@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from functools import wraps
-from flask import g, jsonify, request
+from flask import g, request
 import logging
+
+from meta.api._response_contract import json_response
+from meta.core.permission_gate import declare_permission, evaluate_code
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +16,8 @@ def require_permission(permission_code):
     在 @login_required 之后使用，确保当前用户拥有指定权限。
     无权限时返回 403 Forbidden。
 
+    [FR-005] 判定统一走 meta.core.permission_gate（与 BO 拦截器共用同一解析）。
+
     Usage:
         @app.route('/api/v1/users')
         @login_required
@@ -23,36 +28,29 @@ def require_permission(permission_code):
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            user_id = g.get('user_id')
-            if not user_id:
-                return jsonify({
+            user_info = g.get('current_user')
+            if not user_info:
+                return json_response({
                     'success': False,
                     'error': 'UNAUTHORIZED',
                     'message': '请先登录后再操作'
-                }), 401
+                }, 401)
 
-            if not _check_permission(user_id, permission_code):
+            if not evaluate_code(user_info, permission_code):
                 logger.warning(
-                    f"[require_permission] Denied: user_id={user_id}, "
+                    f"[require_permission] Denied: user_id={user_info.get('user_id')}, "
                     f"permission={permission_code}, "
                     f"path={request.path}"
                 )
-                return jsonify({
+                return json_response({
                     'success': False,
                     'error': 'FORBIDDEN',
                     'message': f'Permission denied: {permission_code}'
-                }), 403
+                }, 403)
 
             return f(*args, **kwargs)
         return wrapper
     return decorator
 
 
-def _check_permission(user_id, permission_code):
-    try:
-        from meta.services.permission_sync_service import PermissionSyncService
-        svc = PermissionSyncService()
-        return svc.check_user_permission(user_id, permission_code)
-    except Exception as e:
-        logger.error(f"[require_permission] Permission check failed: {e}")
-        return False
+__all__ = ['require_permission', 'declare_permission']

@@ -28,7 +28,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from meta.core.app_loader import AppManifest, get_apps_root, load_apps
+from meta.core.app_loader import (
+    AppManifest, AppManifestError, get_apps_root, load_apps,
+    validate_platform_imports,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -716,6 +719,19 @@ def _verify_dependencies(manifests: List[AppManifest]) -> None:
     raise AppRegistrationError(f"依赖校验失败: {detail}")
 
 
+def _verify_platform_imports(manifests: List[AppManifest]) -> None:
+    """[FR-011] 平台模块 import 门禁 —— 越界引用即拒绝启用（启动中止）。
+
+    校验逻辑在 `app_loader.validate_platform_imports`（纯 AST 静态扫描）；
+    此处只负责把 `AppManifestError` 转成注册期错误，统一启动失败口径。
+    """
+    try:
+        for manifest in manifests:
+            validate_platform_imports(manifest)
+    except AppManifestError as e:
+        raise AppRegistrationError(f"平台模块 import 门禁失败: {e}") from e
+
+
 def _resolve_bo_status_state_field(app_id: str, decl: Any) -> str:
     """[Spec 2026-10-29] 解析 `bo.status_changed` 的状态字段。
 
@@ -944,6 +960,8 @@ def register_apps(
     _verify_installed(data_source, manifests)
     # [S6 / G5] 依赖校验（平台版本区间 + requires 的 BO / 规则）→ 缺失拒绝启用
     _verify_dependencies(manifests)
+    # [FR-011] 平台模块 import 门禁（allowed_platform_modules 的执行点）
+    _verify_platform_imports(manifests)
 
     declared_by_app: Dict[str, List[str]] = {}
     if register_schemas:

@@ -1,22 +1,18 @@
 # -*- coding: utf-8 -*-
-"""[多产品平台·探针实测 2] APP_DB_ROUTING=0 下, 两应用同名/同表 BO 会不会真撞表
+"""跨归属冲突探针: 注册期 fail fast，且失败前未创建物理表
 
-问题: 默认关闭分流时, 两个应用包各自定义一个**同名 BO**（或不同 BO 名但同
-      `table_name`），平台建表时会发生什么？三选一:
-        A. 报错 / 启动失败
-        B. 静默覆盖或共用一张表
-        C. 各自建不同名的表（有前缀 / 命名空间）
+背景: `meta/core/app_registry.py::_register_app_schemas()` 在补建表
+      (`_sync_app_tables`) 之前调用 `_assert_app_registration_safe()`。
+      跨归属的 BO id 重复、或 `table_name` 重复，都会在**注册期**抛
+      `AppRegistrationError`（fail fast）；由于异常发生在 DDL 之前，
+      物理表不会被创建（不会出现静默合列/丢列）。
 
-本文件用**临时应用包 + 真实 register_apps + 真实平台库**做最小复现, 两个场景:
+本文件用**临时应用包 + 真实 register_apps + 真实平台库**做最小复现，两个场景:
 
   场景 diff_id: 两个 BO id 不同, 但 `table_name` 相同 (= `probe_items_shared`)
-                → 观察是否共用同一物理表 / 是否合并列
+                → 注册期拒绝，报 `table_name ... 跨归属重复`
   场景 same_id : 两个 BO **id 完全相同** (= `probe_dup_bo`) 且 table_name 相同
-                → 观察注册表行为 + 最终表结构
-
-`table_name` 直接来自 schema YAML 的 `table_name:` 字段（见
-`meta/core/yaml_loader.py` 的 `table_name=data.get("table_name", "")`），
-`meta/core/app_registry.py::_sync_app_tables()` 不派生任何应用前缀。
+                → 注册期拒绝，报 `BO id 'probe_dup_bo' 跨归属重复`
 
 运行（铁律入口）:
   python d:\\filework\\test.py --file meta/tests/test_app_table_name_collision_probe.py
@@ -112,24 +108,6 @@ def _table_names(db_path) -> set:
         conn.close()
 
 
-def _table_count(db_path, table) -> int:
-    conn = sqlite3.connect(str(db_path))
-    try:
-        return conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-            (table,)).fetchone()[0]
-    finally:
-        conn.close()
-
-
-def _columns(db_path, table) -> set:
-    conn = sqlite3.connect(str(db_path))
-    try:
-        return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-    finally:
-        conn.close()
-
-
 def _keep_env(keys):
     return {k: os.environ.get(k) for k in keys}
 
@@ -204,55 +182,33 @@ def collision_env(tmp_path_factory):
 
 
 class TestDiffBoIdSameTableName:
+    """不同 BO id / 同名 table_name → 注册期拒绝"""
 
-    def test_no_error_raised(self, collision_env):
-        """A 选项排除: register_apps 未报错（无表名冲突检测）。"""
-        assert collision_env["errors"]["diff_id"] is None, \
-            f"register_apps 抛异常: {collision_env['errors']['diff_id']}"
+    def test_registration_rejected(self, collision_env):
+        """fail fast: 注册期抛 AppRegistrationError（表名跨归属重复）"""
+        error = collision_env["errors"]["diff_id"]
+        assert error is not None, "同名 table_name 应在注册期被拒绝"
+        assert 'AppRegistrationError' in error, error
+        assert SHARED_TABLE in error, error
 
-    def test_single_shared_physical_table(self, collision_env):
-        """B 选项: 两个不同 BO 落到**同一张物理表**（只有 1 个对象）。"""
-        db = collision_env["platform_db"]
-        assert _table_count(db, SHARED_TABLE) == 1, \
-            "同名 table_name 应仅建出 1 张表"
-        assert SHARED_TABLE in _table_names(db)
-
-    def test_columns_merged_into_one_table(self, collision_env):
-        """共用证据: 两个应用各自独有的列被并进同一张表（无隔离）。"""
-        cols = _columns(collision_env["platform_db"], SHARED_TABLE)
-        assert "only_a" in cols and "only_b" in cols, \
-            f"两个 BO 的独有列未合并到同表 (实际列: {sorted(cols)})"
-
-    def test_no_prefixed_namespace_tables(self, collision_env):
-        """C 选项排除: 不存在任何带应用前缀的同名表。"""
-        tables = _table_names(collision_env["platform_db"])
-        prefixed = [t for t in tables
-                    if t.endswith(SHARED_TABLE) and t != SHARED_TABLE]
-        assert not prefixed, f"出现疑似命名空间表: {prefixed}"
+    def test_table_not_created_before_fail(self, collision_env):
+        """失败发生在 DDL 之前: 平台库里不应出现该物理表"""
+        assert SHARED_TABLE not in _table_names(collision_env["platform_db"])
 
 
 class TestSameBoId:
+    """相同 BO id → 注册期拒绝"""
 
-    def test_no_error_raised(self, collision_env):
-        """同名 BO id 也未报错（注册表静默覆盖, 见下）。"""
-        assert collision_env["errors"]["same_id"] is None, \
-            f"register_apps 抛异常: {collision_env['errors']['same_id']}"
+    def test_registration_rejected(self, collision_env):
+        """fail fast: 注册期抛 AppRegistrationError（BO id 跨归属重复）"""
+        error = collision_env["errors"]["same_id"]
+        assert error is not None, "重复 BO id 应在注册期被拒绝"
+        assert 'AppRegistrationError' in error, error
+        assert 'probe_dup_bo' in error, error
 
-    def test_registry_silently_overwritten(self, collision_env):
-        """同名 BO id: registry 只保留后注册的一方（silent overwrite）。"""
-        obj = collision_env["registry"].get("probe_dup_bo")
-        assert obj is not None, "同名 BO 未注册"
-        field_ids = {f.id for f in obj.fields}
-        assert "only_y" in field_ids and "only_x" not in field_ids, \
-            f"registry 应被后注册的 probey 覆盖, 实际字段: {sorted(field_ids)}"
-
-    def test_single_table_keeps_last_writer_columns(self, collision_env):
-        """同名 BO: 最终表只含后一方列（only_x 丢失）→ 静默覆盖, 非报错。"""
-        db = collision_env["platform_db"]
-        assert _table_count(db, DUP_TABLE) == 1
-        cols = _columns(db, DUP_TABLE)
-        assert "only_y" in cols, f"表应含后注册方列 only_y: {sorted(cols)}"
-        assert "only_x" not in cols, f"先注册方列 only_x 应被覆盖丢失: {sorted(cols)}"
+    def test_table_not_created_before_fail(self, collision_env):
+        """失败发生在 DDL 之前: 平台库里不应出现该物理表"""
+        assert DUP_TABLE not in _table_names(collision_env["platform_db"])
 
 
 class TestRoutingOffNoAppDbs:

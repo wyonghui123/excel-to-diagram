@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -600,3 +601,87 @@ def load_apps(app_ids: List[str], apps_root: Optional[Path] = None) -> List[AppM
             f"未找到应用: {missing}; 可用应用: {sorted(available)}"
         )
     return [available[a] for a in app_ids]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [FR-011 2026-10-31] 平台模块 import 门禁
+#
+# `allowed_platform_modules` 此前只有声明、没有执行点（ARCHITECTURE_V3 §0.4.7）。
+# 本段在应用加载期做静态 AST 扫描：应用目录下任何 `import meta.*` /
+# `from meta.* import ...` 都必须命中白名单，否则拒绝启用。
+#
+# 已知边界：只覆盖静态 import 语句；`importlib` / `__import__` 动态加载
+# 不在扫描范围内（不引入运行时 import hook，避免污染平台进程与测试）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 平台模块命名空间根：应用只允许引用这里之下的模块（且须在白名单内）。
+PLATFORM_MODULE_ROOT = "meta"
+
+
+def _iter_platform_imports(py_file: Path) -> List[tuple]:
+    """按 import 语句收集该文件对平台模块的引用。
+
+    Returns:
+        [(行号, 候选全名列表), ...]；候选只包含 `meta` / `meta.*`，
+        同一语句的多个候选（如 ``from meta.core import datasource`` →
+        ['meta.core', 'meta.core.datasource']）保留在同一个元组内，
+        调用方按"任一命中白名单即通过"判定。
+    """
+    tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+    statements: List[tuple] = []
+    for node in ast.walk(tree):
+        candidates: List[str] = []
+        if isinstance(node, ast.Import):
+            candidates = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            candidates = [node.module]
+            candidates += [
+                f"{node.module}.{alias.name}"
+                for alias in node.names
+                if alias.name != "*"
+            ]
+        platform = [
+            name for name in candidates
+            if name == PLATFORM_MODULE_ROOT or name.startswith(PLATFORM_MODULE_ROOT + ".")
+        ]
+        if platform:
+            statements.append((getattr(node, "lineno", 0), platform))
+    return statements
+
+
+def is_platform_module_allowed(module: str, allowed_modules: List[str]) -> bool:
+    """白名单匹配：精确命中，或 `<白名单项>.` 前缀（允许其子模块）。"""
+    return any(
+        module == entry or module.startswith(entry + ".")
+        for entry in (allowed_modules or [])
+    )
+
+
+def validate_platform_imports(manifest: AppManifest) -> None:
+    """[FR-011] 应用加载期 import 门禁。
+
+    扫描应用目录下全部 `*.py`，任何未在白名单内的平台模块引用即失败。
+    错误信息包含 app 名、相对文件名、模块名与已声明的白名单。
+
+    Raises:
+        AppManifestError: 越界 import / 应用源码无法解析
+    """
+    whitelist = manifest.allowed_platform_modules or []
+    for py_file in sorted(manifest.app_dir.rglob("*.py")):
+        try:
+            statements = _iter_platform_imports(py_file)
+        except (SyntaxError, UnicodeDecodeError) as e:
+            raise AppManifestError(
+                f"app '{manifest.app_id}': 源码无法解析 {py_file.name}: {e}"
+            ) from e
+        for lineno, candidates in statements:
+            if any(is_platform_module_allowed(m, whitelist) for m in candidates):
+                continue
+            # 报最具体的模块名（最长候选），便于定位真实越界引用
+            offending = max(candidates, key=len)
+            rel = py_file.relative_to(manifest.app_dir).as_posix()
+            raise AppManifestError(
+                f"app '{manifest.app_id}': {rel}:{lineno} 导入了未授权平台模块 "
+                f"'{offending}'（app.yaml 的 allowed_platform_modules 未声明；"
+                f"已声明: {whitelist or '无'}）"
+            )

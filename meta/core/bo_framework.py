@@ -20,10 +20,39 @@ from meta.core.sqlite_tx_state import get_tx_state, TxState
 from meta.core.db_config_detector import get_runtime_config
 from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
 from meta.core.db_path import get_meta_db_path
+from meta.core.platform_flags import OFF, STRICT, tx_guard_mode
 
 logger = logging.getLogger(__name__)
 
 BO_INTERCEPTOR_MODE = os.environ.get('BO_INTERCEPTOR_MODE', 'sync')
+
+
+class TransactionBoundaryError(RuntimeError):
+    """写动作未在事务上下文执行（PLATFORM_TX_GUARD=strict）。"""
+
+
+def _check_write_tx_scope(object_type: str, action: str, data_source) -> None:
+    """[FR-002 / NFR-005] 写动作事务边界守卫。
+
+    调用点只在 `bo_framework` 没有自动包裹事务时（如
+    `DISABLE_AUTO_TRANSACTION=1` 或数据源无 `in_transaction`）：
+    - 调用方已开事务 → 通过（事务归属由外层负责）
+    - strict → 抛 `TransactionBoundaryError`
+    - shadow（默认）→ 记 warning，不改变行为
+    - off → 不动作
+    """
+    mode = tx_guard_mode()
+    if mode == OFF:
+        return
+    if getattr(data_source, 'in_transaction', False):
+        return
+    message = (
+        f"[TX-GUARD] 写动作 {object_type}:{action} 未在事务中执行"
+        "（应经 bo_framework.transaction() 或 DataSource.transaction() 包裹）"
+    )
+    if mode == STRICT:
+        raise TransactionBoundaryError(message)
+    logger.warning(message)
 
 
 class BOFramework:
@@ -175,6 +204,10 @@ class BOFramework:
                 and hasattr(ds, 'in_transaction')
                 and not ds.in_transaction
             )
+
+            # [FR-002 / NFR-005] 写动作未被自动包裹 → 事务边界守卫（默认 shadow 仅告警）
+            if not _should_wrap and action in _AUTO_TXN_ACTIONS:
+                _check_write_tx_scope(meta_object.id, action, ds)
 
             if _should_wrap:
                 # 复用现有 bo_framework.transaction() context（生成 transaction_id）
