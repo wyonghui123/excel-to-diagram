@@ -15,6 +15,8 @@
  * [OK] 兼容 Element Plus 2.x checkbox inner span 点击
  */
 
+import { isMobileViewport } from './responsive.js'
+
 const CHECKBOX_RETRY_TIMEOUT = 1000
 
 /**
@@ -38,35 +40,62 @@ const CHECKBOX_RETRY_TIMEOUT = 1000
  *   - 验证: 通过 "等批量删除按钮出现" 间接验证 (它在 totalSelectedCount > 0 时才渲染)
  */
 export async function selectFirstRow(page) {
-  const firstRow = page.locator('.el-table__body tr.el-table__row').first()
-  await firstRow.waitFor({ state: 'visible', timeout: 10000 })
-  await firstRow.scrollIntoViewIfNeeded()
+  // 手机端为卡片列表 (.meta-card), 桌面端为表格行
+  const mobile = isMobileViewport(page)
+  const buildRow = () => mobile
+    ? page.locator('.meta-card:visible').first()
+    : page.locator('.el-table__body tr.el-table__row:visible').first()
 
-  // 用 inner span (Element Plus 2.x 的可见点击区域)
-  const innerSpan = firstRow.locator('span.el-checkbox__inner').first()
-  await innerSpan.waitFor({ state: 'visible', timeout: 5000 })
-  await innerSpan.click({ force: true })
+  // [2026-10-31] 搜索后列表会重渲染, 旧 row locator 可能 detached → 重试取新 row
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const firstRow = buildRow()
+    await firstRow.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+    try {
+      await firstRow.scrollIntoViewIfNeeded({ timeout: 2000 })
+    } catch (e) {
+      console.log(`[selectFirstRow] 行重渲染, 重试 ${attempt + 1}: ${e.message.split('\n')[0]}`)
+      await page.waitForTimeout(400)
+      continue
+    }
 
-  // 等 Vue 响应式更新 (selectedIds Set)
-  await page.waitForTimeout(600)
+    // 用 inner span (Element Plus 2.x 的可见点击区域); 卡片端 checkbox 在 .meta-card__check
+    const innerSpan = mobile
+      ? firstRow.locator('.meta-card__check .el-checkbox__inner').first()
+      : firstRow.locator('span.el-checkbox__inner').first()
+    try {
+      await innerSpan.waitFor({ state: 'visible', timeout: 5000 })
+      await innerSpan.click({ force: true, timeout: 2000 })
+    } catch (e) {
+      await page.waitForTimeout(300)
+      continue
+    }
 
-  // 二次保险: 如果没生效, 重新点 label 触发 (input 本身 display:none 不能直接 click)
-  const batchBtnCheck = await page
-    .locator('button.el-button--danger:has-text("批量删除")')
-    .first()
-    .isVisible({ timeout: CHECKBOX_RETRY_TIMEOUT })
-    .catch(() => false)
+    // 等 Vue 响应式更新 (selectedIds Set)
+    await page.waitForTimeout(600)
 
-  if (!batchBtnCheck) {
+    // 二次保险: 如果没生效, 重新点 label 触发 (input 本身 display:none 不能直接 click)
+    const batchBtnCheck = await page
+      .locator('button.el-button--danger:has-text("批量删除")')
+      .first()
+      .isVisible({ timeout: CHECKBOX_RETRY_TIMEOUT })
+      .catch(() => false)
+
+    if (batchBtnCheck) return
+
     console.log('[selectFirstRow] click inner 未生效, 改用 JS dispatchEvent')
     // [FIX 2026-06-12] 不能用 .check() — input display:none 在 viewport 外
     // 改用 page.evaluate 直接调 input.click() (Vue @change 会响应)
     await firstRow.evaluate((row) => {
       const input = row.querySelector('input.el-checkbox__original')
       if (input) input.click()
-    })
+    }).catch(() => {})
     await page.waitForTimeout(600)
+
+    if (await page.locator('button.el-button--danger:has-text("批量删除")').first()
+      .isVisible({ timeout: CHECKBOX_RETRY_TIMEOUT }).catch(() => false)) return
   }
+
+  throw new Error('selectFirstRow: 3 次尝试仍未选中首行')
 }
 
 /**

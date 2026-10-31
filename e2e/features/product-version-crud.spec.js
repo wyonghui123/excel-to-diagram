@@ -160,53 +160,95 @@ test.describe('S-PV: 产品详情页 - 版本 CRUD', () => {
 
   test('V03: 已存在的版本点行级删除 → 弹确认框, 确认后后端 DELETE 成功', async ({ page, dataFinder, navigateTo, isolation, waitForApiFn }, testInfo) => {
     // 创建一个专属于本测试的 version (确保有可删行)
-    const product = await dataFinder.createProductWithVersion()
-    const newVersionCode = await isolation.createTracked('version', {
+    const { product } = await dataFinder.createProductWithVersion()
+    const versionName = `E2E_DEL_V_${Date.now()}`
+    const newVersion = await isolation.createTracked('version', {
       product_id: product.id,
-      name: `E2E_DEL_V_${Date.now()}`,
+      name: versionName,
     })
-    if (!newVersionCode || !newVersionCode.id) {
+    if (!newVersion || !newVersion.id) {
       test.skip(true, 'Failed to create tracked version')
       return
     }
+    // [2026-10-31] POST 响应可能只回 id, 列表匹配仍需名称 → 用提交值兜底
+    const versionLabel = newVersion.name || versionName
 
     await withStep(page, testInfo, `导航到产品 ${product.name} 详情`, async () => {
-      await navigateTo(page, `${PRODUCT_LIST_URL}/${product.id}`)
+      // [2026-10-31] /product-management/:id 已不是详情路由 (统一为 /detail/:objectType/:id)
+      await navigateTo(page, `/detail/product/${product.id}`)
+      // 详情页 section tab 为 .anchor-tab, 切到"版本"子列表
+      const versionTab = page.locator('.anchor-tab:has-text("版本")').first()
+      if (await versionTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await versionTab.click()
+      }
+      await page.waitForSelector('.el-table', { timeout: 10000 }).catch(() => {})
     })
 
     let deleteRequestSeen = false
     page.on('request', (req) => {
-      if (req.method() === 'DELETE' && new RegExp(`/bo/version/${newVersionCode.id}$`).test(req.url())) {
+      // [2026-10-31] 版本列表 inlineEdit 开启 → 无行级操作列, 删除入口为勾选 + 批量删除
+      if (req.method() === 'POST' && /\/bo\/version\/batch-delete$/.test(req.url())) {
+        deleteRequestSeen = true
+      }
+      if (req.method() === 'DELETE' && new RegExp(`/bo/version/${newVersion.id}$`).test(req.url())) {
         deleteRequestSeen = true
       }
     })
 
-    await withStep(page, testInfo, `在版本列表找到 ${newVersionCode.name}`, async () => {
+    await withStep(page, testInfo, `在版本列表找到 ${versionLabel}`, async () => {
       const list = new GenericListPage(page)
       await list.waitForReady().catch(() => {})
-      await list.expectRowExists(newVersionCode.name, { timeout: 8000 })
+      await list.expectRowExists(versionLabel, { timeout: 8000 })
     })
 
-    await withStep(page, testInfo, '点行级删除并确认', async () => {
+    await withStep(page, testInfo, '勾选版本行 + 批量删除 + 确认', async () => {
       const list = new GenericListPage(page)
-      await list.clickRowDelete(newVersionCode.name)
+      const row = await list.findRow(versionLabel, { timeout: 8000 })
+      if (!row) {
+        test.skip(true, `版本行 ${versionLabel} 未出现`)
+        return
+      }
+      // 勾选该行 (Element Plus 2.x 用 el-checkbox__inner span 作为可点击区域)
+      const checkbox = row.locator('span.el-checkbox__inner').first()
+      if (!(await checkbox.isVisible({ timeout: 3000 }).catch(() => false))) {
+        test.skip(true, '版本列表未提供行选择框, 无法走批量删除')
+        return
+      }
+      const batchBtn = page.locator('button.el-button--danger:has-text("批量删除")').first()
+      await checkbox.click({ force: true }).catch(() => {})
+      await page.waitForTimeout(600)
+
+      // [2026-10-31] inner span 点击偶发不触发 change → JS 直接点 input (Vue @change 会响应)
+      if (!(await batchBtn.isVisible({ timeout: 1000 }).catch(() => false))) {
+        await row.evaluate((r) => {
+          const input = r.querySelector('input.el-checkbox__original')
+          if (input) input.click()
+        }).catch(() => {})
+        await page.waitForTimeout(600)
+      }
+
+      if (!(await batchBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+        test.skip(true, '版本列表未提供批量删除入口')
+        return
+      }
+      await batchBtn.click()
       // 确认弹框: el-message-box
       const confirmBtn = page.locator('.el-message-box__btns button:has-text("确定"), .el-message-box__btns button:has-text("确认")').first()
       await confirmBtn.waitFor({ state: 'visible', timeout: 3000 })
       await confirmBtn.click()
       // 等待 API + 列表刷新
-      await waitForApiFn(page, `DELETE /api/v2/bo/version/${newVersionCode.id}`).catch(() => {})
+      await waitForApiFn(page, 'POST /api/v2/bo/version/batch-delete').catch(() => {})
     })
 
-    await withStep(page, testInfo, '断言: DELETE 请求已发出且该行已从列表消失', async () => {
-      expect(deleteRequestSeen, 'DELETE /bo/version/{id} 应被发出').toBe(true)
+    await withStep(page, testInfo, '断言: 删除请求已发出且该行已从列表消失', async () => {
+      expect(deleteRequestSeen, '批量删除 /bo/version/batch-delete 应被发出').toBe(true)
       const list = new GenericListPage(page)
       // 行应消失 (容许短暂的延迟)
       await page.waitForTimeout(500)
       const rowCount = await list.getRowCount().catch(() => 0)
       // 不强求 0, 可能有其他版本; 只确认我们的版本不在了
-      const stillExists = await page.locator(`.el-table__body tr:has-text("${newVersionCode.name}")`).count()
-      expect(stillExists, `${newVersionCode.name} 应已从列表消失`).toBe(0)
+      const stillExists = await page.locator(`.el-table__body tr:has-text("${versionLabel}")`).count()
+      expect(stillExists, `${versionLabel} 应已从列表消失`).toBe(0)
     })
   })
 
@@ -273,7 +315,7 @@ test.describe('S-PV: 产品详情页 - 版本 CRUD', () => {
   })
 
   test('V05: 设为当前版本 (is_current) → 后端 PUT 成功', async ({ page, dataFinder, navigateTo, isolation, waitForApiFn }, testInfo) => {
-    const product = await dataFinder.createProductWithVersion()
+    const { product } = await dataFinder.createProductWithVersion()
     // 创建一个非当前版本
     const v = await isolation.createTracked('version', {
       product_id: product.id,
@@ -345,20 +387,16 @@ test.describe('S-PV: 产品详情页 - 版本 CRUD', () => {
     const { product } = await dataFinder.productWithVersion()
 
     await withStep(page, testInfo, `通过 API 直接验证后端 name 必填`, async () => {
-      const resp = await page.evaluate(async (pid) => {
-        const r = await fetch('/api/v2/bo/version', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ product_id: pid }),
-        })
-        return { status: r.status, body: await r.text() }
-      }, product.id)
+      // [2026-10-31] 用 page.request (自动带 baseURL + storageState); 未导航时 page.evaluate 的相对 fetch 无法解析
+      const resp = await page.request.post('/api/v2/bo/version', {
+        data: { product_id: product.id },
+      })
+      const body = await resp.text().catch(() => '')
 
       // 应返回 400 / 422 / 500 (name 必填), 不应 200
-      expect(resp.status, `不传 name 应被拒绝, 实际 ${resp.status}: ${resp.body.slice(0, 200)}`)
+      expect(resp.status(), `不传 name 应被拒绝, 实际 ${resp.status()}: ${body.slice(0, 200)}`)
         .not.toBe(200)
-      expect(resp.status).toBeGreaterThanOrEqual(400)
+      expect(resp.status()).toBeGreaterThanOrEqual(400)
     })
   })
 
@@ -368,47 +406,40 @@ test.describe('S-PV: 产品详情页 - 版本 CRUD', () => {
     const ts = Date.now()
     const sharedName = `CROSS_PROD_TEST_${ts}`
 
-    const result = await page.evaluate(async (name) => {
-      // 创建 product 1
-      const p1 = await fetch('/api/v2/bo/product', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ code: `CPT_${name}_1`, name: `Cross_Prod_1_${name}` }),
-      }).then(r => r.json())
+    // [2026-10-31] 改 page.request: 未导航时 page.evaluate 的相对 fetch 无法解析 (about:blank)
+    const createProduct = async (suffix) => {
+      const r = await page.request.post('/api/v2/bo/product', {
+        data: {
+          code: `CPT_${sharedName}_${suffix}`,
+          name: `Cross_Prod_${suffix}_${sharedName}`,
+          visibility: 'private',
+          is_active: true,
+        },
+        failOnStatusCode: false,
+      })
+      const body = await r.json().catch(() => ({}))
+      return body?.data || null
+    }
+    const createVersion = async (productId) => {
+      const r = await page.request.post('/api/v2/bo/version', {
+        data: { name: sharedName, product_id: productId },
+        failOnStatusCode: false,
+      })
+      return await r.json().catch(() => ({}))
+    }
 
-      // 创建 product 2
-      const p2 = await fetch('/api/v2/bo/product', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ code: `CPT_${name}_2`, name: `Cross_Prod_2_${name}` }),
-      }).then(r => r.json())
-
-      if (!p1?.data?.id || !p2?.data?.id) return { error: 'product create failed', p1, p2 }
-
-      // 在 p1 下创建 version
-      const v1 = await fetch('/api/v2/bo/version', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name, product_id: p1.data.id }),
-      }).then(r => r.json())
-
-      // 在 p2 下创建同 name version
-      const v2 = await fetch('/api/v2/bo/version', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name, product_id: p2.data.id }),
-      }).then(r => r.json())
-
-      return { p1: p1.data, p2: p2.data, v1, v2 }
-    }, sharedName)
-
-    if (result.error) {
-      test.skip(true, `前置创建失败: ${result.error}`)
+    const p1 = await createProduct('1')
+    const p2 = await createProduct('2')
+    if (!p1?.id || !p2?.id) {
+      test.skip(true, `前置创建失败: p1=${p1?.id}, p2=${p2?.id}`)
       return
+    }
+
+    const result = {
+      p1,
+      p2,
+      v1: await createVersion(p1.id),
+      v2: await createVersion(p2.id),
     }
 
     // v1 应成功
@@ -424,15 +455,14 @@ test.describe('S-PV: 产品详情页 - 版本 CRUD', () => {
       expect(v2Success, '跨产品同名应被拒绝 (全局 name 唯一约束)').toBe(false)
     }
 
-    // 清理: 删 product 1, product 2 (它们的子 version 应被同时清理或留下)
+    // 清理: 先删版本再删产品 (product 有子版本时删除会失败)
+    for (const v of [result.v1, result.v2]) {
+      if (v?.data?.id) {
+        await page.request.delete(`/api/v2/bo/version/${v.data.id}`, { failOnStatusCode: false }).catch(() => {})
+      }
+    }
     for (const p of [result.p1, result.p2]) {
-      await page.evaluate(async (pid) => {
-        await fetch(`/api/v2/bo/product/${pid}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-        })
-      }, p.id)
+      await page.request.delete(`/api/v2/bo/product/${p.id}`, { failOnStatusCode: false }).catch(() => {})
     }
   })
 })

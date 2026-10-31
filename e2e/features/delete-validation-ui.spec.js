@@ -20,6 +20,7 @@
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
 import { performBatchDeleteFlow, waitForNotification, selectFirstRow } from '../helpers/delete-flow.js'
+import { listRows } from '../helpers/responsive.js'
 
 // ============================================================
 // Parametrize 数据: 3 个删除校验场景
@@ -32,9 +33,12 @@ const SCENARIOS = [
     description: '删含 versions 的 product → 弹"删除失败"通知, 含"版本"',
     apiDeletePattern: '/api/v2/bo/product/batch-delete',
     navigatePath: '/product-management',
-    searchTerm: (pv) => pv.product.name || pv.product.code,
-    expectedTitleMatch: '删除失败',
-    expectedContentMatch: /版本|子元素/,
+    // setupData 返回 { pv }, 此处接收的是 ctx
+    searchTerm: (ctx) => ctx.pv.product.name || ctx.pv.product.code,
+    // [2026-10-31] ElNotification 标题统一为"删除", 成功/失败信息在 content
+    expectedTitleMatch: '删除',
+    // [2026-10-31] 后端已把裸 SQL 报错替换为友好提示: "删除失败（数据库约束）: xxx 仍被其他对象引用，无法删除"
+    expectedContentMatch: /仍被其他对象引用|无法删除/,
     setupData: async (page, dataFinder) => {
       const pv = await dataFinder.productWithVersion()
       expect(pv, '需要有含 version 的 product').toBeTruthy()
@@ -45,16 +49,60 @@ const SCENARIOS = [
     id: 'C02',
     name: 'user_group_with_members',
     description: '删含成员的 user_group → 弹"删除失败"通知, 含"成员"',
-    apiDeletePattern: '/api/v2/bo/user_group/batch-delete',
-    navigatePath: '/user-permission/user-groups',
-    searchTerm: (ug) => ug.group.name || ug.group.code,
-    expectedTitleMatch: '删除失败',
+    apiDeletePattern: '/api/v2/bo/org/batch-delete',
+    // [2026-10-31] tab 路由是 org-management (v075), /user-permission/orgs 不存在 → 会落到默认"用户"tab
+    navigatePath: '/user-permission/org-management',
+    searchTerm: (ctx) => ctx.group.name || ctx.group.code,
+    // [2026-10-31] ElNotification 标题统一为"删除", 成功/失败信息在 content
+    expectedTitleMatch: '删除',
     expectedContentMatch: '成员',
-    setupData: async (page, dataFinder) => {
-      const ug = await dataFinder.userGroupWithMember({ createIfNone: true })
-      expect(ug, '需要有含成员的 user_group').toBeTruthy()
-      expect(ug.member_count, 'user_group 应有成员').toBeGreaterThanOrEqual(1)
-      return { ug }
+    setupData: async (page, _dataFinder, isolation) => {
+      // [v072 迁移] user_group 已并入 org, 自建团队成员 + 关联一个 user
+      const groupCode = isolation.generateCode('DVU').toLowerCase()
+      const groupName = `删除校验组织_${isolation.generateId('dvu')}`
+      const created = await isolation.createTracked('org', {
+        // [2026-10-31] org code 正则 ^[a-z][a-z0-9_]*$ 且 max_length=50;
+        // generateId 会拼上 testRunId+uuid, 总长超 50 → 改用短 code
+        code: groupCode,
+        name: groupName,
+        org_type: 'team',
+      })
+      // [2026-10-31] POST 响应通常只回 id, 搜索仍需要名称/编码 → 用提交值兜底
+      const group = { ...created, name: created?.name || groupName, code: created?.code || groupCode }
+      expect(group?.id, 'org 应有 id').toBeTruthy()
+
+      const usersResp = await page.request.get('/api/v2/bo/user?page_size=1')
+      const usersBody = await usersResp.json().catch(() => ({}))
+      const user = usersBody?.data?.items?.[0] || usersBody?.items?.[0]
+      expect(user?.id, '需要有可加入组织的 user').toBeTruthy()
+
+      const assocResp = await page.request.post(
+        `/api/v2/bo/org/${group.id}/associations/members`,
+        { data: { target_id: user.id, target_type: 'user' }, failOnStatusCode: false }
+      )
+      expect(assocResp.ok(), `关联成员失败 (${assocResp.status()})`).toBe(true)
+
+      // 校验成员数 (详情可能不回 member_count, 兜底查关联列表)
+      const detailResp = await page.request.get(`/api/v2/bo/org/${group.id}`)
+      const detailBody = await detailResp.json().catch(() => ({}))
+      let memberCount = detailBody?.data?.member_count ?? 0
+      if (!memberCount) {
+        const assocListResp = await page.request.get(
+          `/api/v2/bo/org/${group.id}/associations/members`
+        )
+        const assocListBody = await assocListResp.json().catch(() => ({}))
+        memberCount = (assocListBody?.data?.items || assocListBody?.items || []).length
+      }
+      expect(memberCount, 'org 应有成员').toBeGreaterThanOrEqual(1)
+
+      return { group, user, memberCount }
+    },
+    cleanup: async (page, ctx) => {
+      // 解除关联, 保证 isolation 清理时能删掉自建 org
+      await page.request.delete(
+        `/api/v2/bo/org/${ctx.group.id}/associations/members?target_id=${ctx.user.id}`,
+        { failOnStatusCode: false }
+      ).catch(() => {})
     }
   },
   {
@@ -64,13 +112,15 @@ const SCENARIOS = [
     apiDeletePattern: '/api/v2/bo/product/batch-delete',
     navigatePath: '/product-management',
     searchTerm: (ctx) => ctx.testId,
-    expectedTitleMatch: '删除成功',
-    expectedContentMatch: '成功',
+    // [2026-10-31] ElNotification 标题统一为"删除", 成功信息在 content
+    expectedTitleMatch: '删除',
+    expectedContentMatch: /成功删除|删除成功|成功/,
     setupData: async (page, _dataFinder, isolation) => {
       // [Phase 6] 用 isolation.generateId() 替代 Date.now() 命名
       const testId = `DVU_C03_${isolation.generateId()}`
       const product = await isolation.createTracked('product', {
-        code: testId,
+        // [2026-10-31] 产品编码后端正则 ^[A-Z][A-Z0-9_]*$; generateId 含小写/连字符
+        code: isolation.generateCode('DVU_C03'),
         name: `删除校验空产品_${testId}`,
         description: 'Created by S-DVU C03 for UI notification assertion',
         is_active: true
@@ -106,7 +156,7 @@ test.describe('S-DVU: 删除校验 UI 通知 (盲区 5)', () => {
         await search.fill('')
         await search.fill(scenario.searchTerm(ctx))
         await search.press('Enter')
-        await page.locator('.el-table__body tr.el-table__row').first().waitFor({ state: 'visible', timeout: 10000 })
+        await listRows(page).first().waitFor({ state: 'visible', timeout: 10000 })
       })
 
       // 4. 执行删除流程
@@ -145,6 +195,10 @@ test.describe('S-DVU: 删除校验 UI 通知 (盲区 5)', () => {
           expect(content, '消息内容').toContain(scenario.expectedContentMatch)
         }
       })
+
+      if (scenario.cleanup) {
+        await scenario.cleanup(page, ctx).catch(() => {})
+      }
     })
   }
 })

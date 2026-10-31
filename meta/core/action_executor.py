@@ -2690,15 +2690,24 @@ class ActionExecutor:
                         # 不能 silently 吞错 → 之前 bug：函数继续走 AFTER_DELETE + 审计 +
                         # 返回 ActionResult.ok，前端看到"成功"但记录未删（"没有成功，也没有报错"）
                         logger.warning(f"[_do_delete] DELETE execution error: {e}")
+                        # [FIX 2026-10-31] 之前直接把原始 SQLite 报错透出给用户
+                        # ("删除失败（数据库约束）: FOREIGN KEY constraint failed")。
+                        # 注意: 不能复用 translate_error_message —— 它面向"引用字段不存在"
+                        # (写入场景), 删除场景下语义错误。这里给出删除语义的友好提示,
+                        # 保留"数据库约束"关键词供既有断言/日志检索使用。
+                        obj_label = meta_object.name or meta_object.id
+                        friendly_message = (
+                            f"删除失败（数据库约束）: {obj_label} 仍被其他对象引用，无法删除"
+                        )
                         self._write_delete_blocked_audit(
                             meta_object, id_value, original_data,
                             action_label="DELETE_FAILED",
                             error_code="DELETE_FAILED",
-                            message=f"删除失败（数据库约束）: {e}",
+                            message=friendly_message,
                         )
                         return ActionResult.fail(
                             error="DELETE_FAILED",
-                            message=f"删除失败（数据库约束）: {e}",
+                            message=friendly_message,
                         )
 
                     if not skip_rules and original_data:

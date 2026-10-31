@@ -37,7 +37,8 @@ export class DetailDrawerPage {
    */
   constructor(page, options = {}) {
     this.page = page
-    this.drawerSelector = options.drawerSelector || '.el-drawer.open'
+    // [2026-10-31] Element Plus 2.x 的 el-drawer 不再带 .open 类, 用 :visible 判断
+    this.drawerSelector = options.drawerSelector || '.el-drawer:visible, .drawer-panel:visible'
     this.actionsSelector = options.actionsSelector || '.op-actions'
   }
 

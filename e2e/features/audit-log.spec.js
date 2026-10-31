@@ -70,10 +70,14 @@ async function collectAuditFieldFromAPI(page, field) {
     '/api/v2/audit/logs?page=1&page_size=200'
   ]
   for (const url of urls) {
-    const resp = await page.request.get(url)
+    // [2026-10-31] 全局 actionTimeout=10s, 200 条日志的查询偶发超时; 显式放宽
+    const resp = await page.request.get(url, { timeout: 30000 })
     if (resp.ok()) {
       const data = await resp.json()
-      const items = data.data?.items || data.data?.records || data.data?.list || []
+      // [2026-10-31] /audit/logs 实际返回 data: [...] 平铺数组 (非 items 包裹)
+      const items = Array.isArray(data.data)
+        ? data.data
+        : (data.data?.items || data.data?.records || data.data?.list || [])
       items.forEach(log => {
         if (log[field]) found.add(log[field])
       })
@@ -91,14 +95,17 @@ async function switchToAuditLogTabAndAssertLogs(page, testInfo, opts = {}) {
 
   await withStep(page, testInfo, '点击"操作日志" tab', async () => {
     const tabCandidates = [
-      'text=操作日志',
+      // [2026-08] 详情页 tab 已改为 ObjectPageContent 的 .anchor-tab 按钮
+      '.anchor-tab:has-text("操作日志")',
+      // [2026-10-31] 移动端详情页 tab 是裸 button (nav 容器), 且渲染较慢 → 带超时等待
+      'button:has-text("操作日志")',
       '.el-tabs__item:has-text("操作日志")',
       '.tab-item:has-text("操作日志")'
     ]
     let clicked = false
     for (const sel of tabCandidates) {
       const tab = page.locator(sel).first()
-      if (await tab.isVisible().catch(() => false)) {
+      if (await tab.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)) {
         await tab.click()
         clicked = true
         break
@@ -289,16 +296,34 @@ test.describe('S09-F: 审计日志 - 分类/级别/详情页', () => {
 
   // 三个详情页 test 改为 parametrize
   const detailPageScenarios = [
-    { name: 'role',     urlPath: (id) => `/system/role-detail/${id}`,  apiPath: '/api/v1/roles?page=1&page_size=1' },
-    { name: 'product',  urlPath: (id) => `/product-management/${id}`,  apiPath: '/api/v2/bo/product?page_size=1' },
+    // [2026-10-31] 统一详情路由 /detail/:objectType/:id (旧 role-detail / product-management/:id 已不存在)
+    { name: 'role',     urlPath: (id) => `/detail/role/${id}`,  apiPath: '/api/v1/roles?page=1&page_size=1' },
+    { name: 'product',  urlPath: (id) => `/detail/product/${id}`,  apiPath: '/api/v2/bo/product?page_size=1' },
     { name: 'version',  urlPath: (id) => null,  // 版本路径需要 productId+versionId, 单独处理
+    },
   ]
 
   for (const scenario of detailPageScenarios) {
-    test(`F07-F09 [${scenario.name}]: 详情页"操作日志" tab 可见`, async ({ page }, testInfo) => {
+    test(`F07-F09 [${scenario.name}]: 详情页"操作日志" tab 可见`, async ({ page, isolation }, testInfo) => {
       let url, requiresProductVersion = false
 
-      if (scenario.name === 'version') {
+      if (scenario.name === 'role') {
+        // [2026-10-31] /api/v1/roles 实际查不到可用 role (迁移到 permission_set 后为空/无审计记录),
+        // 改为自建 role 并 PUT 更新一次, 确保产生 CREATE/UPDATE 审计记录后进入详情页
+        const role = await isolation.createTracked('role', {
+          code: isolation.generateCode('RAUD').toLowerCase(),
+          name: `E2E_Audit_Role_${isolation.generateId('ra')}`,
+        })
+        if (!role?.id) {
+          test.skip(true, 'role 创建失败 (前置数据缺失)')
+          return
+        }
+        await page.request.put(`/api/v2/bo/role/${role.id}`, {
+          data: { name: `E2E_Audit_Role_Updated_${Date.now()}` },
+          failOnStatusCode: false,
+        }).catch(() => {})
+        url = scenario.urlPath(role.id)
+      } else if (scenario.name === 'version') {
         // 版本需要 productId + versionId
         const ids = await page.evaluate(async () => {
           await fetch('/api/v1/auth/dev-login?username=admin', { credentials: 'include' })
@@ -317,7 +342,7 @@ test.describe('S09-F: 审计日志 - 分类/级别/详情页', () => {
           test.skip(true, `系统无可用产品/版本数据 (前置数据缺失)`)
           return
         }
-        url = `/product-management/${ids.productId}/version/${ids.versionId}`
+        url = `/detail/version/${ids.versionId}`
       } else {
         const id = await page.evaluate(async (api) => {
           await fetch('/api/v1/auth/dev-login?username=admin', { credentials: 'include' })
@@ -335,7 +360,7 @@ test.describe('S09-F: 审计日志 - 分类/级别/详情页', () => {
 
       await withStep(page, testInfo, `进入 ${scenario.name} 详情页`, async () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
-        await page.waitForSelector('.object-page', { timeout: 10000 }).catch(() => {})
+        await page.waitForSelector('.object-detail-page, .anchor-tab', { timeout: 10000 }).catch(() => {})
       })
 
       await switchToAuditLogTabAndAssertLogs(page, testInfo, { minLogCount: 1 })
