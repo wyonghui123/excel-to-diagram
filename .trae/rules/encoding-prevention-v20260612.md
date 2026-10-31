@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "编码问题防护 v20260612：mojibake 修复和预防措施"
+globs: "scripts/*.ps1,*.py"
 ---
 
 # Encoding Corruption Prevention Guide (v20260612)

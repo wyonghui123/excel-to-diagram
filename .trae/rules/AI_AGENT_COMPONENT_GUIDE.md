@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "AI Agent 组件开发指南：组件接口、生命周期、状态管理"
+globs: "src/**"
 ---
 
 # [ROBOT] AI 智能体组件开发遵循指南

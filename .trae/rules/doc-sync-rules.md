@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "文档同步和一致性检查规则"
+globs: "docs/**"
 ---
 
 # 文档同步规则

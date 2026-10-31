@@ -1,5 +1,6 @@
 ---
 description: "远端 DB 同步工具规则 — 何时用 pull_db / push_db，dev 工作第一时间知道有这个工具"
+globs: "tools/pull_db.py,tools/push_db.py,tools/REMOTE_DB_OPS.md,scripts/sync-integration-db.ps1"
 ---
 
 # 远端 DB 同步 Rule (remote-db-sync)

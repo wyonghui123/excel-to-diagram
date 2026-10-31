@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "E2E 测试简化策略：减少测试步骤、提升执行效率"
+globs: "tests/e2e/**/*,meta/tests/e2e/**/*,e2e/**/*"
 ---
 
 # 前端 E2E 测试简化方案 - 强制规范 [NEW 2026-06-05]

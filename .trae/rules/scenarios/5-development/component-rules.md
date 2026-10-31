@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "组件治理规则 + 使用统计 + 迁移指南"
+globs: "src/**"
 ---
 
 # 组件治理规则（v4.0 拆分）

@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "项目启动初始化：依赖安装、环境配置、首次运行"
+globs: "scripts/start.ps1,scripts/watchdog.ps1,package.json,requirements*.txt"
 ---
 
 # 项目启动规则

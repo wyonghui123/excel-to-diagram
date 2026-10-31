@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "前端测试数据管理：fixtures/factories/ensureProductWithVersion/runCleanup"
+globs: "src/test/**,src/**/__tests__/**,src/**/*.test.js,src/**/*.test.ts,src/**/*.spec.js,src/**/*.spec.ts,tests/e2e/**,e2e/**"
+---
+
 # 前端测试数据管理规范
 
 > **智能体编写前端测试（单元测试 / E2E 测试）时必须遵循的测试数据管理规范。**

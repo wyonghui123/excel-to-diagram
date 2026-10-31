@@ -3,6 +3,9 @@ title: 双端自适应基础设施规范
 scenario: 5-development
 status: 活跃
 last_updated: 2026-10-13
+alwaysApply: false
+description: "双端自适应基础设施：断点/安全区/隧道/品牌名/CSS 五铁律/验收标准"
+globs: "src/**"
 ---
 
 # 双端自适应基础设施规范
