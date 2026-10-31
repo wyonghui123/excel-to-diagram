@@ -1928,6 +1928,38 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [PROJECT-P1 2026-11-01] 项目 —— 商务层归集对象（v169 交付）,
+            #   与 v169__project_object_p1 的菜单声明保持一致; 缺本声明时步骤 7.6
+            #   会把该手工菜单当冗余删除 (项目入口随之消失)。
+            'menu_code': 'project-management',
+            'menu_name': '项目',
+            'menu_path': '/projects',
+            'icon': 'Folder',
+            'color': '#8b5cf6',
+            'sort_order': 2,
+            'parent_menu': 'sales',
+            'page_type': 'object_list',
+            'primary_object_type': 'project',
+            'object_types': json.dumps(['project']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'project', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'project:project_create',
+                'project:project_read',
+                'project:project_update',
+                'project:project_delete',
+                'project:project_list',
+            ]),
+            'description': '项目：商务层归集对象，挂载销售订单 / 订单行 / 计划行',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['project'],
+                'message': '项目暂不进入权限维度链（D8），沿用业务实体（org）维度'
+            })
+        },
+        {
             # [ITEM-STRUCTURE 2026-10-25] 物料结构（BOM / 选配模型）—— v112 交付,
             #   与 v112__item_structure_menu 的声明保持一致; 缺本声明时步骤 7.6 会
             #   把该手工菜单当冗余删除 (BOM 页入口随之消失)。

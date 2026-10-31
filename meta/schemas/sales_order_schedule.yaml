@@ -106,6 +106,49 @@ fields:
       relation: sales_order
       multiple: false
 
+  # 项目挂载（P1，可空）：商务里程碑（billing）/ 交付计划（delivery）按项目归集
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 计划行所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
   - id: line_id
     name: 订单行
     type: integer
@@ -392,6 +435,9 @@ indexes:
     name: idx_schedule_order
   - fields: [line_id]
     name: idx_schedule_line
+  # P1：项目 360 聚合
+  - fields: [project_id]
+    name: idx_schedule_project
 
 relations:
   - id: sales_order_schedule_to_order

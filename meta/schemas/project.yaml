@@ -1,0 +1,574 @@
+# 项目 (Project) — 项目侧 P1
+# 依据:
+#   docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §0.1 P1
+#   docs/specs/spec-project-type-object-model-research-2026-10-31.md §2.1 / §5 Phase 1 / §6 AC-01~AC-03
+#
+# 定位: 商务层一等对象（项目可先于订单存在）。项目只做归集与上下文，不持有合同金额。
+#
+# 设计口径:
+#   ① 项目类型走 type_definitions(scope_bo='project' + level='header')，不新增枚举列（D2）
+#   ② 金额只在 SO / line / schedule；本对象仅 budget_amount（预算），不做金额冗余（I1）
+#   ③ sales_order.project_id / sales_order_line.project_id / sales_order_schedule.project_id
+#      均为可空挂载；为空时旧链路行为不变（AC-02）
+#   ④ 项目 360 聚合只读：销售订单走 child_sections（外键 project_id，平台按 {父对象}_id 过滤），
+#      订单行 / 计划行 / 履约由只读聚合接口 GET /api/v1/projects/<id>/overview 返回（AC-03）
+#   ⑤ 项目暂不进入权限维度链（D8），沿用 org 维度
+#
+# 状态机（服务层只做枚举校验，不做强制流转）:
+#   draft(草稿) → active(进行中) → inactive(已停用) / closed(已关闭)
+#   cancelled(已取消) 仅从 draft / active 进入
+
+id: project
+name: 项目
+table_name: projects
+description: 项目（商务层归集对象；挂载销售订单 / 订单行 / 计划行）
+display_name_field: name
+
+semantics:
+  meaning: 项目
+  category: business_object
+  business_key: [project_no]
+  aliases:
+    - 项目
+    - Project
+    - 工程
+
+deletion_policy:
+  # 项目被单据引用后禁止删除（restrict 由平台外键校验）；草稿可删
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # P1 不做自动取号：项目可在订单之前独立立项，编号由用户录入（创建后不可改）
+  - id: project_no
+    name: 项目编号
+    type: string
+    db_column: project_no
+    required: true
+    unique: true
+    max_length: 30
+    description: 项目编号（业务键，创建后不可修改）
+    semantics:
+      meaning: 项目业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: name
+    name: 项目名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 项目名称
+    semantics:
+      meaning: 项目名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+
+  - id: project_type_id
+    name: 项目类型
+    type: integer
+    db_column: project_type_id
+    required: true
+    description: 项目类型（type_definitions，scope_bo='project' + level='header'）
+    semantics:
+      meaning: 项目类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: project
+          level: header
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 类型编码
+            width: 120
+          - field: name
+            label: 类型名称
+            width: 200
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 项目状态（草稿 / 进行中 / 已停用 / 已关闭 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: active
+        label: 进行中
+        color: success
+        category: active
+      - value: inactive
+        label: 已停用
+        color: warning
+        category: inactive
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 项目状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: org_id
+    name: 业务实体
+    type: integer
+    db_column: org_id
+    required: true
+    description: 业务实体（法人 / BU），项目的财务归属口径
+    semantics:
+      meaning: 项目的业务实体
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 200
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: customer_account_id
+    name: 客户档案
+    type: integer
+    db_column: customer_account_id
+    nullable: true
+    description: 客户档案；空 = 内部项目
+    semantics:
+      meaning: 项目的客户档案
+      display:
+        type: association
+        target_type: customer_account
+        display_field: name
+        placeholder: "内部项目"
+    value_help:
+      source:
+        type: bo
+        target_bo: customer_account
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 客户档案
+            width: 220
+    ui:
+      widget: select
+      relation: customer_account
+      multiple: false
+      clearable: true
+
+  - id: manager_user_id
+    name: 项目经理
+    type: integer
+    db_column: manager_user_id
+    nullable: true
+    description: 项目经理（平台登录用户）；空表示未指定
+    semantics:
+      meaning: 项目经理
+      display:
+        type: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定"
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 1
+      presentation:
+        result_type: dropdown
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+
+  - id: start_date
+    name: 计划开始
+    type: date
+    db_column: start_date
+    nullable: true
+    description: 计划开始日期
+    semantics:
+      meaning: 项目计划开始日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划开始
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: end_date
+    name: 计划结束
+    type: date
+    db_column: end_date
+    nullable: true
+    description: 计划结束日期
+    semantics:
+      meaning: 项目计划结束日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划结束
+      filter_scope: local
+    ui:
+      widget: date
+
+  # I1：项目只保留预算额度，不含合同金额 / 税额 / 折扣
+  - id: budget_amount
+    name: 项目预算
+    type: number
+    db_column: budget_amount
+    nullable: true
+    description: 项目预算额度（计划值，非合同金额）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 项目预算额度
+    ui:
+      widget: input
+
+  - id: currency_id
+    name: 预算币种
+    type: integer
+    db_column: currency_id
+    nullable: true
+    description: 预算币种；填预算时建议一并填写
+    semantics:
+      meaning: 项目预算币种
+      display:
+        type: association
+        target_type: currency
+        display_field: code
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 币种
+            width: 100
+          - field: name
+            label: 名称
+            width: 160
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 项目说明
+    semantics:
+      meaning: 项目说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [project_no]
+    unique: true
+    name: uidx_project_no
+  - fields: [project_type_id]
+    name: idx_project_type
+  - fields: [org_id, status]
+    name: idx_project_org_status
+  - fields: [customer_account_id]
+    name: idx_project_customer
+  - fields: [manager_user_id]
+    name: idx_project_manager
+
+relations:
+  - id: project_to_type_definition
+    name: 项目类型
+    type: reference
+    target: type_definition
+    source_field: project_type_id
+    target_field: id
+    cardinality: N:1
+    description: 项目类型引用（type_definitions，scope_bo=project）
+  - id: project_to_org
+    name: 业务实体
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 业务实体引用（真外键）
+  - id: project_to_customer_account
+    name: 客户档案
+    type: reference
+    target: customer_account
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 客户档案引用（可空）
+  - id: project_to_manager_user
+    name: 项目经理
+    type: reference
+    target: user
+    source_field: manager_user_id
+    target_field: id
+    cardinality: N:1
+    description: 项目经理引用（可空）
+
+ui_view_config:
+  # 菜单由迁移 v169 手工声明（挂 sales 分组），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 项目
+    description: 项目主数据：编号、类型、客户与预算
+    columns:
+      - field: project_no
+        width: 140
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: project_type_id
+        width: 140
+      - field: customer_account_id
+        width: 180
+      - field: org_id
+        width: 160
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: start_date
+        width: 120
+        format: date
+      - field: end_date
+        width: 120
+        format: date
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - project_no
+      - name
+    actions:
+      - id: create
+        label: 新建项目
+        icon: plus
+        type: primary
+        permission: project:project_create
+    defaultSort:
+      field: project_no
+      order: asc
+
+  form:
+    title: 项目
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [project_no, name]
+          - fields: [project_type_id, status]
+      - title: 归属
+        columns:
+          - fields: [org_id, customer_account_id]
+          - fields: [manager_user_id, currency_id]
+      - title: 计划与预算
+        columns:
+          - fields: [start_date, end_date]
+          - fields: [budget_amount]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [project_no, name, project_type_id, status, org_id,
+                 customer_account_id, manager_user_id, start_date, end_date,
+                 budget_amount, currency_id, description]
+
+  # 项目 360（只读）：销售订单按 sales_orders.project_id 过滤
+  #   （AssociationSection 取父键 = `<父对象类型>_id` = project_id，无需 customFetcher）
+  #   订单行 / 计划行 / 履约的聚合由 GET /api/v1/projects/<id>/overview 提供
+  child_sections:
+    - child_object: sales_order
+      title: 销售订单（360）
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false
+      readonly: true
+      pageSize: 20
+
+category_config:
+  # 双段式权限码，与 permissions 表实际行一致（v169 落库）
+  create_permission: project:project_create
+  update_permission: project:project_update
+  delete_permission: project:project_delete
+  owner_auto_permission: false

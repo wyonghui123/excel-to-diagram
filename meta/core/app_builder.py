@@ -414,6 +414,7 @@ class ApplicationBuilder:
         from meta.api.sourcing_api import sourcing_bp
         from meta.api.sales_order_expand_api import sales_order_expand_bp
         from meta.api.sales_order_pricing_api import sales_order_pricing_bp
+        from meta.api.project_overview_api import project_overview_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -480,6 +481,8 @@ class ApplicationBuilder:
         app.register_blueprint(sales_order_expand_bp)
         # [销售订单 W1-A 2026-10-25] 重新取价端点。
         app.register_blueprint(sales_order_pricing_bp)
+        # [项目 P1 2026-11-01] 项目 360 只读聚合端点。
+        app.register_blueprint(project_overview_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

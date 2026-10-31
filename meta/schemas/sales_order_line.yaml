@@ -117,6 +117,49 @@ fields:
       relation: sales_order
       multiple: false
 
+  # 项目挂载（P1，可空）：只做归集，不改变订单行既有链路（AC-02 / AC-03）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 订单行所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
   # 行号用字符串（10/20/30 留插入空间），同一订单内唯一
   - id: line_no
     name: 行号
@@ -998,6 +1041,9 @@ indexes:
   - fields: [parent_line_id, component_no]
     unique: true
     name: uidx_sales_order_line_component
+  # P1：项目 360 聚合
+  - fields: [project_id]
+    name: idx_sales_order_line_project
 
 relations:
   - id: sales_order_line_to_order
