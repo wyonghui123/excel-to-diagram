@@ -274,7 +274,7 @@ Trae 同时支持 `.agents/skills/`（AgentSkills.io 规范）：
 > "你可以通过 AI 一键总结仓库变更，然后生成 Git Commit 消息的初稿。"
 
 **应用**：
-- 已在 [git-commit-message.md](file:///d:/filework/.tae/rules/scenarios/4-git/git-commit-message.md) 设置 `scene: git_message`
+- 已在 [git-commit-message.md](file:///d:/filework/excel-to-diagram/.trae/rules/git-commit-message.md) 设置 `scene: git_message`
 - Trae IDE 在生成 commit 时会自动应用该规则
 
 ---

@@ -194,7 +194,7 @@ v3.18 (AI Coding Agent 友好)  ← 现在
 
 - [SPEC V2 (TBD 已澄清)](file:///d:/filework/excel-to-diagram/docs/specs/spec-ai-agent-test-infra-v3.17.md)
 - [SESSION_REMINDER.md](file:///d:/filework/.trae/rules/SESSION_REMINDER.md) (v3.18 已更新)
-- [multi-agent-coordination.md](file:///d:/filework/.trae/rules/multi-agent-coordination.md) (新建)
+- [multi-agent-coordination.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md) (新建)
 - [test-observability-rules.md](file:///d:/filework/.trae/rules/test-observability-rules.md) (新建)
 - [test-data-rules.md](file:///d:/filework/.trae/rules/test-data-rules.md) (新建)
 - [v3-bo-action-main-summary.md](file:///d:/filework/excel-to-diagram/docs/archive/progress/v3-bo-action-main-summary.md) (需更新)

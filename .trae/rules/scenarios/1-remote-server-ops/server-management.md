@@ -18,7 +18,7 @@ powershell -File scripts/start.ps1
 powershell -File scripts/start.ps1 -Force
 ```
 
-详见: [.trae/rules/project_startup.md](../../project_startup.md)
+详见: [.trae/rules/scenarios/3-local-server-mgmt/project_startup.md](../3-local-server-mgmt/project_startup.md)
 
 ### 1.2 服务生命周期（service_manager）
 
@@ -38,7 +38,7 @@ powershell -File scripts/service_manager.ps1 restart
 
 `scripts/watchdog.ps1` 每 30s 健康检查 + 自动修复。
 
-详见: [project_startup.md](../../project_startup.md) §[CLIPBOARD]
+详见: [project_startup.md](../3-local-server-mgmt/project_startup.md) §[CLIPBOARD]
 
 ### 1.4 禁止行为
 
@@ -106,7 +106,7 @@ disown
 bash /opt/app/staging/bin/staging_watchdog.sh stop
 ```
 
-详见: [staging-process-guardian.md](../staging-process-guardian.md)
+详见: [staging-process-guardian.md](./staging-process-guardian.md)
 
 ### 2.4 健康检查（staging_health_check.sh）
 
@@ -119,7 +119,7 @@ bash /opt/app/staging/tools/staging_health_check.sh
 
 ### 2.5 远程运维安全
 
-详见: [remote-server-alert-avoidance.md](../remote-server-alert-avoidance.md)
+详见: [remote-server-alert-avoidance.md](./remote-server-alert-avoidance.md)
 
 **铁律**：
 - ❌ 禁止 SUID 提权 / chmod 4755 / cp /bin/bash /tmp/
@@ -131,7 +131,7 @@ bash /opt/app/staging/tools/staging_health_check.sh
 
 ## 三、核心服务架构冻结
 
-详见: [core-service-architecture.md](../core-service-architecture.md)
+详见: [core-service-architecture.md](../3-local-server-mgmt/core-service-architecture.md)
 
 | 服务 | 端口 (prod/staging) | 端点数 | 状态 |
 |---|---|---|---|

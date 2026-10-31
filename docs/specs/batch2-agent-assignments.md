@@ -20,7 +20,7 @@
 > - [spec-batch2-detailed-plan-v2.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-batch2-detailed-plan-v2.md) — 详细实施 v2（**实施权威**）
 > - [spec-batch2-backend-capabilities.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-batch2-backend-capabilities.md) — 12 任务详细实施
 > - [spec-pre-deployment-optimization.md (v1.1.0)](file:///d:/filework/excel-to-diagram/docs/specs/spec-pre-deployment-optimization.md) — 原始规格
-> - [.trae/rules/multi-agent-coordination.md](file:///d:/filework/.trae/rules/multi-agent-coordination.md) — 协作铁律
+> - [.trae/rules/multi-agent-coordination.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md) — 协作铁律
 
 ---
 
@@ -410,7 +410,7 @@ curl.exe -s -o /dev/null -w "%{http_code}" http://localhost:3010/api/v2/action/_
 
 - v1 规格: [spec-pre-deployment-optimization.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-pre-deployment-optimization.md) (v1.1.0)
 - 批次 2 实施细节: [spec-batch2-backend-capabilities.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-batch2-backend-capabilities.md)
-- 协作铁律: [.trae/rules/multi-agent-coordination.md](file:///d:/filework/.trae/rules/multi-agent-coordination.md)
+- 协作铁律: [.trae/rules/multi-agent-coordination.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md)
 - 服务管理: `d:\filework\excel-to-diagram\scripts\service_manager.ps1`
 
 ### 9.2 端口速查

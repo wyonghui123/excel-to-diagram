@@ -175,5 +175,5 @@ last_updated: "2026-09-02"
 
 - [docs.trae.cn/ide/solo-coder](https://docs.trae.cn/ide/solo-coder) —— SOLO Agent
 - [docs.trae.cn/ide/solo-mode](https://docs.trae.cn/ide/solo-mode) —— SOLO 模式概览
-- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../excel-to-diagram/docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
+- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../../docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
 - spec-rfc Skill：`excel-to-diagram/.trae/skills/spec-rfc/SKILL.md`（如存在）

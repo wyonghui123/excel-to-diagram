@@ -279,6 +279,9 @@ def check_duplicates() -> List[Tuple[str, List[Path], Set[str]]]:
         # 排除标记为 deprecated 的文件 (其内容差异是有意的历史保留)
         if name in DEPRECATED_FILES:
             continue
+        # 排除 README.md: 每个场景目录的 README 是独立索引, 同名但内容不同属正常
+        if name == "README.md":
+            continue
         # 排除 .trae/rules/active/ 和 archive/ 是有意版本控制
         rel_paths = [p.relative_to(PROJECT_ROOT) for p in paths]
         if any(".trae/rules/active" in str(p) or ".trae/rules/archive" in str(p) for p in rel_paths):

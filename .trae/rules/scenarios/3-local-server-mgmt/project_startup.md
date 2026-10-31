@@ -118,9 +118,9 @@ bash /opt/app/staging/bin/staging_watchdog.sh status
 
 ### 详见
 
-- [.trae/rules/staging-process-guardian.md](./staging-process-guardian.md) - 守护铁律（必读）
-- [docs/STAGING_GUIDE.md](../../excel-to-diagram/docs/STAGING_GUIDE.md) - staging 5 分钟上手
-- [.trae/rules/remote-server-alert-avoidance.md](./remote-server-alert-avoidance.md) - 远程运维安全（必读）
+- [.trae/rules/staging-process-guardian.md](../1-remote-server-ops/staging-process-guardian.md) - 守护铁律（必读）
+- [docs/STAGING_GUIDE.md](../../../../docs/STAGING_GUIDE.md) - staging 5 分钟上手
+- [.trae/rules/remote-server-alert-avoidance.md](../1-remote-server-ops/remote-server-alert-avoidance.md) - 远程运维安全（必读）
 
 ---
 
@@ -169,12 +169,12 @@ Get-Content .watchdog.log -Tail 20
 
 | 文件 | 用途 |
 |------|------|
-| [scripts/start.ps1](../../excel-to-diagram/scripts/start.ps1) | **统一启动包装器（唯一入口）** |
-| [scripts/service_manager.ps1](../../excel-to-diagram/scripts/service_manager.ps1) | 服务生命周期管理器 |
-| [scripts/watchdog.ps1](../../excel-to-diagram/scripts/watchdog.ps1) | 服务守护进程（健康监控+自动修复） |
+| [scripts/start.ps1](../../../../scripts/start.ps1) | **统一启动包装器（唯一入口）** |
+| [scripts/service_manager.ps1](../../../../scripts/service_manager.ps1) | 服务生命周期管理器 |
+| [scripts/watchdog.ps1](../../../../scripts/watchdog.ps1) | 服务守护进程（健康监控+自动修复） |
 | [package.json](../../package.json) | `dev:full` → start.ps1 |
-| [dev.py](../../excel-to-diagram/dev.py) | Flask 后端启动（含启动守卫） |
-| [meta/server.py](../../excel-to-diagram/meta/server.py) | Flask 应用入口（含启动守卫） |
+| [dev.py](../../../../dev.py) | Flask 后端启动（含启动守卫） |
+| [meta/server.py](../../../../meta/server.py) | Flask 应用入口（含启动守卫） |
 | `.env` (注: 当前不存在) | 端口等环境变量配置 |
 
 ---

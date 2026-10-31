@@ -15,7 +15,7 @@ description: "项目通用规则：技术栈、目录结构、开发约定"
 1. [SESSION_REMINDER.md](./SESSION_REMINDER.md) - 会话开始提醒
 2. [./core/ui-standards.md](./core/ui-standards.md) - UI/样式规范
 3. [./core/coding-standards.md](./core/coding-standards.md) - AI 编码规范
-4. [./core/server-management.md](./core/server-management.md) - 服务器管理
+4. [./scenarios/1-remote-server-ops/server-management.md](./scenarios/1-remote-server-ops/server-management.md) - 服务器管理
 5. [./core/e2e-testing.md](./core/e2e-testing.md) - E2E 测试规范
 6. [./core/form-debugging.md](./core/form-debugging.md) - 表单渲染问题排查
 
@@ -34,7 +34,7 @@ description: "项目通用规则：技术栈、目录结构、开发约定"
 | 强制检查清单 | [./core/checklist.md](./core/checklist.md) | *** 必读 |
 | UI 规范 | [./core/ui-standards.md](./core/ui-standards.md) | *** 必读 |
 | 编码规范 | [./core/coding-standards.md](./core/coding-standards.md) | *** 必读 |
-| 服务器管理 | [./core/server-management.md](./core/server-management.md) | ** 推荐 |
+| 服务器管理 | [./scenarios/1-remote-server-ops/server-management.md](./scenarios/1-remote-server-ops/server-management.md) | ** 推荐 |
 | E2E 测试 | [./core/e2e-testing.md](./core/e2e-testing.md) | *** 必读 |
 | 表单调试 | [./core/form-debugging.md](./core/form-debugging.md) | *** 必读 |
 | 组件分层 | [./core/component-layers.md](./core/component-layers.md) | ** 参考 |

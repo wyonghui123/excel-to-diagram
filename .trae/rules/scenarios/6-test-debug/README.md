@@ -25,10 +25,10 @@ icon: "6."
 
 ## 必读文件（按重要性排序）
 
-1. **[test_rules.md](./test_rules.md)** — Test 规则总览 (test.py 详细)
-1. **[e2e-testing.md](./e2e-testing.md)** — E2E 测试 (Playwright + 浏览器)
-1. **[e2e-simplification.md](./e2e-simplification.md)** — E2E 简化 (Phase E 收敛)
-1. **[frontend-testing-standards.md](./frontend-testing-standards.md)** — 前端测试标准入口 (拆分 ↓)
+1. **[test_rules.md](../../test_rules.md)** — Test 规则总览 (test.py 详细)
+1. **[e2e-testing.md](../../core/e2e-testing.md)** — E2E 测试 (Playwright + 浏览器)
+1. **[e2e-simplification.md](../../e2e-simplification.md)** — E2E 简化 (Phase E 收敛)
+1. **[frontend-testing-standards.md](../../frontend-testing-standards.md)** — 前端测试标准入口 (拆分 ↓)
 1. **[frontend-test-auth.md](../../frontend-test-auth.md)** — 前端测试认证 (dev-login)
 
 ---
@@ -37,16 +37,16 @@ icon: "6."
 
 | 文件 | 用途 |
 |------|------|
-| [test_rules.md](./test_rules.md) | Test 规则总览 (test.py 详细) |
-| [e2e-testing.md](./e2e-testing.md) | E2E 测试 (Playwright + 浏览器) |
-| [e2e-simplification.md](./e2e-simplification.md) | E2E 简化 (Phase E 收敛) |
-| [frontend-testing-standards.md](./frontend-testing-standards.md) | 前端测试标准入口 (拆分 ↓) |
+| [test_rules.md](../../test_rules.md) | Test 规则总览 (test.py 详细) |
+| [e2e-testing.md](../../core/e2e-testing.md) | E2E 测试 (Playwright + 浏览器) |
+| [e2e-simplification.md](../../e2e-simplification.md) | E2E 简化 (Phase E 收敛) |
+| [frontend-testing-standards.md](../../frontend-testing-standards.md) | 前端测试标准入口 (拆分 ↓) |
 | [frontend-test-auth.md](../../frontend-test-auth.md) | 前端测试认证 (dev-login) |
 | [browser-test-verification.md](../../browser-test-verification.md) | 浏览器测试验证 (5 步验证) |
 | [page-health-rules.md](../../page-health-rules.md) | 页面健康规则 (404/500 监控) |
 | [debug-infrastructure-onboarding.md](./debug-infrastructure-onboarding.md) | 调试基础设施接入 |
 | [debug-infrastructure-v20260621.md](../../debug-infrastructure-v20260621.md) | 调试基础设施 v2 (7 大工具) |
-| [test-case-standards.md](./test-case-standards.md) | 测试用例标准入口 (拆分 ↓) |
+| [test-case-standards.md](../../test-case-standards.md) | 测试用例标准入口 (拆分 ↓) |
 | [test-case-design.md](./test-case-design.md) | 测试用例设计 (全局状态隔离) |
 | [test-case-runtime.md](./test-case-runtime.md) | 测试用例运行时 (共享 App) |
 | [test-case-excel.md](./test-case-excel.md) | 测试用例 Excel 文件规范 |
@@ -59,7 +59,7 @@ icon: "6."
 | [vitest-debugging.md](./vitest-debugging.md) | Vitest 调试 |
 | [form-debugging.md](../../core/form-debugging.md) | 表单调试 |
 | [scope-tree-debugging.md](./scope-tree-debugging.md) | Scope Tree 调试 |
-| [e2e-testing.md](./e2e-testing.md) | 核心 E2E 测试 |
+| [e2e-testing.md](../../core/e2e-testing.md) | 核心 E2E 测试 |
 
 ---
 

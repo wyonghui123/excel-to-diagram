@@ -35,7 +35,7 @@
 | **理解 dev-agent 完整工作流** | `d:\filework\.trae\rules\development-workflow.md` |
 | **跑并行 + 集成 (8 阶段 SOP)** | `PARALLEL_DEV_SOP.md` (项目根) |
 | **写 HANDOVER 文档** | `.trae/templates/DEPLOY_HANDOVER.template.md` |
-| **了解 spec.md 白名单** | `.trae/rules/multi-agent-coordination.md` § L4 |
+| **了解 spec.md 白名单** | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` § L4 |
 | **学习编码规范** | `.trae/rules/core/coding-standards.md` |
 | **UI 样式规范** | `.trae/rules/core/ui-standards.md` |
 | **了解项目设计原则** | `.trae/rules/core/agent-roles.md` |
@@ -48,7 +48,7 @@
 |------|----------|
 | **SOP 阶段 4-6 (integration + 主服务)** | `PARALLEL_DEV_SOP.md` § 4-6 (项目根) |
 | **服务管理命令** | `.trae/rules/service-management-rules.md` |
-| **核心 server 管理规范** | `.trae/rules/core/server-management.md` |
+| **核心 server 管理规范** | `.trae/rules/scenarios/1-remote-server-ops/server-management.md` |
 | **了解 release 工作流** | `d:\filework\.trae\rules\release-sync-workflow.md` |
 | **写 HANDOVER (开发智能体)** | `.trae/templates/DEPLOY_HANDOVER.template.md` |
 | **看 HANDOVER 历史案例 (PM)** | `DEPLOY_HANDOVER_BUG_V043.md`, `DEPLOY_HANDOVER_BUG_V044.md` (项目根) |
@@ -68,7 +68,7 @@
 
 | 任务 | 必读文档 |
 |------|----------|
-| **调试铁律 (4 必跑 + 5 禁止 + 5 必做)** | `.trae/rules/debug-infrastructure-onboarding.md` |
+| **调试铁律 (4 必跑 + 5 禁止 + 5 必做)** | `.trae/rules/scenarios/6-test-debug/debug-infrastructure-onboarding.md` |
 | **完整调试规范** | `.trae/rules/debug-infrastructure-v20260621.md` |
 | **sandbox 安全调试** | `.trae/rules/sandbox-safe-debugging.md` |
 | **表单渲染问题排查 (7 铁律)** | `.trae/rules/core/form-debugging.md` |
@@ -88,10 +88,10 @@
 
 | 任务 | 必读文档 |
 |------|----------|
-| **L1-L6 沙箱检测** | `.trae/rules/multi-agent-coordination.md` |
+| **L1-L6 沙箱检测** | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` |
 | **基础设施 V2.1 (13 铁律)** | `.trae/rules/multi-agent-infrastructure-v20260620-v2.md` |
 | **E2E 简化方案** | `.trae/rules/e2e-simplification.md` |
-| **Agent Bootstrap 5 步** | `.trae/rules/agent-bootstrap.md` |
+| **Agent Bootstrap 5 步** | `.trae/rules/scenarios/5-development/agent-bootstrap.md` |
 
 **铁律速查**:
 - **L1** Worktree: 必须 `agent_bootstrap.ps1`

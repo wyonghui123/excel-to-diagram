@@ -192,7 +192,7 @@ last_updated: "2026-09-02"
 ### 7.1 现状（v5.2）
 
 项目已有：
-- [delta-deployment-safety.md](../../../filework/.trae/rules/scenarios/2-deploy/delta-deployment-safety.md) —— 部署沙箱白名单
+- [delta-deployment-safety.md](../2-deploy/delta-deployment-safety.md) —— 部署沙箱白名单
 - service_manager.ps1 —— 服务管理脚本（管理沙箱白名单）
 
 ### 7.2 与 sandbox.json 的关系
@@ -264,4 +264,4 @@ python tools/test.py
 - [docs.trae.cn/ide/sandbox](https://docs.trae.cn/ide/sandbox)
 - [docs.trae.cn/ide/auto-run-and-security](https://docs.trae.cn/ide/auto-run-and-security)
 - [docs.trae.cn/ide_permission-and-approval](https://docs.trae.cn/ide_permission-and-approval)
-- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../excel-to-diagram/docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
+- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../../docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)

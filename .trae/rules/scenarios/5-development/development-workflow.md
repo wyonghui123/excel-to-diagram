@@ -106,7 +106,7 @@ git log --oneline -1   # 或 Read .git/logs/HEAD
 
 ## 4. [v4.0 新增] Worktree 治理与寿命铁律
 
-> 完整规范见 [worktree-governance.md](./worktree-governance.md)
+> 完整规范见 [worktree-governance.md](../4-git/worktree-governance.md)
 
 ### 4.1 寿命红线
 
@@ -220,7 +220,7 @@ git push -u origin fix/<ID>-<short-name>
 
 > 与 v3.x 相同
 
-详见 [release-sync-workflow.md](./release-sync-workflow.md)
+详见 [release-sync-workflow.md](../2-deploy/release-sync-workflow.md)
 
 ### 7.1 [v4.0 新增] 两端对齐铁律
 
