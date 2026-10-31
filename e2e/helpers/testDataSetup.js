@@ -41,7 +41,8 @@ async function apiRequest(page, method, url, data = null) {
     headers: { ...headers, 'Content-Type': 'application/json' }
   }
   if (data) {
-    options.body = JSON.stringify(data)
+    // Playwright APIRequestContext.fetch 的请求体字段是 data（body 会被忽略 → 后端收到空 body）
+    options.data = data
   }
   return await page.request.fetch(url, options)
 }
@@ -52,6 +53,14 @@ async function apiPost(page, url, data) {
 
 async function apiDelete(page, url) {
   return apiRequest(page, 'DELETE', url)
+}
+
+// 删除失败不能静默：DELETE 返回 400（如被引用限制）时数据会残留，逐次累积污染测试版本
+async function deleteAndLog(page, objectType, id) {
+  const resp = await apiDelete(page, `/api/v2/bo/${objectType}/${id}`)
+  if (!resp.ok()) {
+    console.warn(`[testData] ${objectType} ${id} delete failed: ${resp.status()} ${await resp.text().catch(() => '')}`)
+  }
 }
 
 // =============================================================================
@@ -240,7 +249,7 @@ export async function setupHierarchyData(page, testData) {
   // Create domain
   const domainData = {
     name: `Test Domain ${timestamp}`,
-    code: `test_domain_${timestamp}`,
+    code: `E2E_DOMAIN_${timestamp}`,
     version_id: version.id,
     description: 'E2E test domain'
   }
@@ -248,13 +257,15 @@ export async function setupHierarchyData(page, testData) {
   if (domainResp.ok()) {
     const json = await domainResp.json()
     result.domain = json.data
+  } else {
+    console.warn(`[testData] domain create failed: ${domainResp.status()} ${await domainResp.text().catch(() => '')}`)
   }
 
   // Create sub_domain
   if (result.domain) {
     const subDomainData = {
       name: `Test SubDomain ${timestamp}`,
-      code: `test_subdomain_${timestamp}`,
+      code: `E2E_SUBDOMAIN_${timestamp}`,
       domain_id: result.domain.id,
       version_id: version.id,
       description: 'E2E test subdomain'
@@ -263,6 +274,8 @@ export async function setupHierarchyData(page, testData) {
     if (subDomainResp.ok()) {
       const json = await subDomainResp.json()
       result.subDomain = json.data
+    } else {
+      console.warn(`[testData] sub_domain create failed: ${subDomainResp.status()} ${await subDomainResp.text().catch(() => '')}`)
     }
   }
 
@@ -270,7 +283,7 @@ export async function setupHierarchyData(page, testData) {
   if (result.subDomain) {
     const smData = {
       name: `Test ServiceModule ${timestamp}`,
-      code: `test_sm_${timestamp}`,
+      code: `E2E_SM_${timestamp}`,
       sub_domain_id: result.subDomain.id,
       version_id: version.id,
       description: 'E2E test service module'
@@ -279,19 +292,21 @@ export async function setupHierarchyData(page, testData) {
     if (smResp.ok()) {
       const json = await smResp.json()
       result.serviceModule = json.data
+    } else {
+      console.warn(`[testData] service_module create failed: ${smResp.status()} ${await smResp.text().catch(() => '')}`)
     }
   }
 
   // Register cleanup
   registerCleanup(async () => {
     if (result.serviceModule?.id) {
-      await apiDelete(page, `/api/v2/bo/service_module/${result.serviceModule.id}`).catch(() => {})
+      await deleteAndLog(page, 'service_module', result.serviceModule.id)
     }
     if (result.subDomain?.id) {
-      await apiDelete(page, `/api/v2/bo/sub_domain/${result.subDomain.id}`).catch(() => {})
+      await deleteAndLog(page, 'sub_domain', result.subDomain.id)
     }
     if (result.domain?.id) {
-      await apiDelete(page, `/api/v2/bo/domain/${result.domain.id}`).catch(() => {})
+      await deleteAndLog(page, 'domain', result.domain.id)
     }
   })
 
@@ -323,7 +338,7 @@ export async function setupCompleteArchData(page) {
   if (hierarchy.serviceModule) {
     const boData = {
       name: `Test BO ${timestamp}`,
-      code: `test_bo_${timestamp}`,
+      code: `E2E_BO_${timestamp}`,
       service_module_id: hierarchy.serviceModule.id,
       version_id: pv.version.id,
       description: 'E2E test business object'
@@ -334,6 +349,13 @@ export async function setupCompleteArchData(page) {
       bo = json.data
     }
   }
+
+  // business_object 引用 service_module，必须先删，否则下游层级删除会被 400 拒绝导致数据残留
+  registerCleanup(async () => {
+    if (bo?.id) {
+      await deleteAndLog(page, 'business_object', bo.id)
+    }
+  })
 
   return {
     ...pv,

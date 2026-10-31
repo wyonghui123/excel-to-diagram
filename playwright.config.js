@@ -145,6 +145,32 @@ export default defineConfig({
         storageState: ADMIN_AUTH
       },
       dependencies: ['setup']
+    },
+
+    // ============================================================
+    // Mobile projects - 手机端整体回归 (Pixel 5 / Chromium 移动视口)
+    // 与桌面 project 共用同一批用例，用于验证双端自适应
+    // ============================================================
+    {
+      name: 'mobile-smoke',
+      testDir: './e2e/smoke',
+      testMatch: '*.smoke.spec.js',
+      use: {
+        ...baseUse,
+        ...devices['Pixel 5'],
+        storageState: ADMIN_AUTH
+      },
+      dependencies: ['setup']
+    },
+    {
+      name: 'mobile-features',
+      testDir: './e2e/features',
+      use: {
+        ...baseUse,
+        ...devices['Pixel 5'],
+        storageState: ADMIN_AUTH
+      },
+      dependencies: ['setup']
     }
   ]
 })

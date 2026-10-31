@@ -30,6 +30,7 @@
  */
 
 import { expect } from '@playwright/test'
+import { isMobileViewport } from '../helpers/responsive.js'
 
 export class GenericListPage {
   /**
@@ -49,10 +50,22 @@ export class GenericListPage {
   }
 
   /**
+   * 实际渲染形态：窄屏 MetaListPage 用卡片（.meta-card-list / .meta-card）替代表格。
+   * 桌面端原样返回 options 里的选择器，行为零变化。
+   */
+  get tableSelectorNow() {
+    return isMobileViewport(this.page) ? '.meta-card-list' : this.tableSelector
+  }
+
+  get rowSelectorNow() {
+    return isMobileViewport(this.page) ? '.meta-card' : this.rowSelector
+  }
+
+  /**
    * 等待表格加载完成
    */
   async waitForReady(timeout = 15000) {
-    const table = this.page.locator(this.tableSelector).first()
+    const table = this.page.locator(this.tableSelectorNow).first()
     await table.waitFor({ state: 'visible', timeout })
     return this
   }
@@ -61,14 +74,23 @@ export class GenericListPage {
    * 获取所有行数
    */
   async getRowCount() {
-    return await this.page.locator(this.rowSelector).count()
+    return await this.page.locator(this.rowSelectorNow).count()
   }
 
   /**
-   * 获取表头列名
+   * 获取表头列名（窄屏卡片没有表头，用卡片标签名作为列名）
    */
   async getColumnHeaders() {
     const headers = []
+    if (isMobileViewport(this.page)) {
+      const labels = this.page.locator('.meta-card__label')
+      const count = await labels.count()
+      for (let i = 0; i < count; i++) {
+        const text = await labels.nth(i).textContent()
+        if (text && !headers.includes(text.trim())) headers.push(text.trim())
+      }
+      return headers
+    }
     const cells = this.page.locator(`${this.tableSelector} .el-table__header th .cell`)
     const count = await cells.count()
     for (let i = 0; i < count; i++) {
@@ -94,7 +116,7 @@ export class GenericListPage {
 
     while (Date.now() - start < timeout) {
       attempts++
-      const rows = this.page.locator(this.rowSelector)
+      const rows = this.page.locator(this.rowSelectorNow)
       const count = await rows.count()
       for (let i = 0; i < count; i++) {
         const rowText = await rows.nth(i).textContent()
