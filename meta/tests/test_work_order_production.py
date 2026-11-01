@@ -98,6 +98,7 @@ CREATE TABLE work_orders (
     order_id INTEGER,
     order_line_id INTEGER,
     customer_account_id INTEGER,
+    project_id INTEGER,
     severity TEXT,
     channel TEXT,
     status TEXT,
@@ -156,6 +157,7 @@ CREATE TABLE item_structure_lines (
 CREATE TABLE sla_milestones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_order_id INTEGER,
+    project_id INTEGER,
     milestone_type TEXT,
     state TEXT,
     due_at TEXT,
@@ -314,10 +316,11 @@ def test_service_path_behavior_unchanged():
     assert len(result['sla']['milestones']) == 2
     row = _row(conn, 'SELECT * FROM work_orders WHERE id = ?', [result['id']])[0]
     columns = ('id', 'work_order_no', 'order_type', 'schedule_id', 'order_id',
-               'order_line_id', 'customer_account_id', 'severity', 'channel',
-               'status', 'coverage_id', 'asset_ref', 'source_demand_type',
-               'source_demand_id', 'opened_at', 'first_response_at',
-               'resolved_at', 'closed_at', 'created_at', 'updated_at')
+               'order_line_id', 'customer_account_id', 'project_id', 'severity',
+               'channel', 'status', 'coverage_id', 'asset_ref',
+               'source_demand_type', 'source_demand_id', 'opened_at',
+               'first_response_at', 'resolved_at', 'closed_at', 'created_at',
+               'updated_at')
     record = dict(zip(columns, row))
     assert record['order_type'] == 'service'
     assert record['schedule_id'] == 1
@@ -386,10 +389,11 @@ def test_production_creates_without_sla_side_effects():
 
     row = _row(conn, 'SELECT * FROM work_orders WHERE id = ?', [result['id']])[0]
     columns = ('id', 'work_order_no', 'order_type', 'schedule_id', 'order_id',
-               'order_line_id', 'customer_account_id', 'severity', 'channel',
-               'status', 'coverage_id', 'asset_ref', 'source_demand_type',
-               'source_demand_id', 'opened_at', 'first_response_at',
-               'resolved_at', 'closed_at', 'created_at', 'updated_at')
+               'order_line_id', 'customer_account_id', 'project_id', 'severity',
+               'channel', 'status', 'coverage_id', 'asset_ref',
+               'source_demand_type', 'source_demand_id', 'opened_at',
+               'first_response_at', 'resolved_at', 'closed_at', 'created_at',
+               'updated_at')
     record = dict(zip(columns, row))
     assert record['order_type'] == 'production'
     assert record['order_id'] == 10

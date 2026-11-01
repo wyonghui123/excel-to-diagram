@@ -12,11 +12,12 @@
   但 sales_order_line / sales_order_schedule 的父键仍是 order_id（订单页签不能破坏），
   故行 / 计划行的项目归集走本接口，由前端只读展示。
 
-口径（P1）:
+口径:
   · sales_orders            按 sales_orders.project_id
   · sales_order_lines       按 sales_order_lines.project_id
   · sales_order_schedules   按 sales_order_schedules.project_id
-  · work_order / shipment   其 project_id 属 P2，本阶段不返回
+  · work_orders             按 work_orders.project_id（P2 B1 新增列）
+  · shipment                其 project_id 尚未落地（G6），本阶段不返回
 """
 
 from typing import Any, Dict, List, Optional
@@ -67,6 +68,16 @@ SECTION_SPECS = {
         'columns': ('id', 'order_id', 'line_id', 'schedule_no', 'schedule_kind',
                     'promised_date', 'promised_qty', 'billing_percent', 'status'),
     },
+    'work_orders': {
+        'table': 'work_orders',
+        'sql': (
+            "SELECT id, work_order_no, order_type, status, severity, "
+            "schedule_id, opened_at, resolved_at FROM work_orders "
+            "WHERE project_id = ? ORDER BY opened_at DESC, id DESC LIMIT ?"
+        ),
+        'columns': ('id', 'work_order_no', 'order_type', 'status', 'severity',
+                    'schedule_id', 'opened_at', 'resolved_at'),
+    },
 }
 
 
@@ -75,7 +86,7 @@ class ProjectNotFound(Exception):
 
 
 class ProjectOverviewService:
-    """按项目 id 汇总三处销售侧单据的只读投影。"""
+    """按项目 id 汇总销售侧单据与工单的只读投影。"""
 
     def __init__(self, data_source):
         self.ds = data_source
@@ -111,5 +122,6 @@ class ProjectOverviewService:
             'sales_orders': sections['sales_orders'],
             'sales_order_lines': sections['sales_order_lines'],
             'sales_order_schedules': sections['sales_order_schedules'],
+            'work_orders': sections['work_orders'],
             'readonly': True,
         }

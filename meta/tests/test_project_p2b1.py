@@ -9,6 +9,8 @@
   B1-1 work_order 声明可空 project_id（与 P1 三处挂载同构：字段 + 索引，不声明真外键）
   B1-2 项目 360 增加只读「工单」段，按 project_id 原生过滤
   B1-3 v175 迁移对存量库补列 + 补索引，幂等；回滚只删索引、保留列
+  P2-1 sla_milestone 补可空 project_id（D3 里程碑归集），v176 幂等迁移
+  P2-2 售后三值（repair / install / maintenance）转 active（G9）
 
 建库一律走 factories 的 create_tables / seed_row（conftest 的裸 SQL 守卫
 会把含裸 DML 的测试文件整体 skip）。
@@ -34,6 +36,7 @@ from meta.migrations.v175__work_order_project_id import (  # noqa: E402
     rollback,
     verify,
 )
+from meta.migrations import v176__sla_milestone_project_id as v176  # noqa: E402
 
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
@@ -205,3 +208,75 @@ class TestMigration:
         assert _index_count(db, PROJECT_INDEX) == 0
         assert PROJECT_COLUMN in _columns(db, WORK_ORDER_TABLE)
         assert verify(db) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P2：SLA 里程碑项目锚点（D3）+ 售后类型启用（G9）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSlaMilestoneProjectAnchor:
+
+    def test_project_id_declared_nullable_without_fk(self):
+        field = _field(_load_raw('sla_milestone'), 'project_id')
+        assert field is not None
+        assert field['nullable'] is True
+        assert field['semantics']['display']['target_type'] == 'project'
+        indexes = {i['name'] for i in _load_raw('sla_milestone')['indexes']}
+        assert v176.PROJECT_INDEX in indexes
+        relations = {r['id'] for r in _load_raw('sla_milestone')['relations']}
+        assert 'sla_milestone_to_project' not in relations
+
+    def test_migration_adds_column_and_index(self, tmp_path):
+        db = tmp_path / 'p2_sla.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'work_order_id INTEGER)'.format(v176.MILESTONE_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v176.verify(db) is False
+        assert v176.migrate(db) is True
+        assert v176.verify(db) is True
+        assert v176.PROJECT_COLUMN in _columns(db, v176.MILESTONE_TABLE)
+        assert _index_count(db, v176.PROJECT_INDEX) == 1
+
+    def test_migration_is_idempotent(self, tmp_path):
+        db = tmp_path / 'p2_sla_twice.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'work_order_id INTEGER)'.format(v176.MILESTONE_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v176.migrate(db) is True
+        assert v176.migrate(db) is True
+        assert v176.verify(db) is True
+        assert _index_count(db, v176.PROJECT_INDEX) == 1
+
+    def test_rollback_drops_index_keeps_column(self, tmp_path):
+        db = tmp_path / 'p2_sla_rollback.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'work_order_id INTEGER)'.format(v176.MILESTONE_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v176.migrate(db) is True
+        assert v176.rollback(db) is True
+        assert _index_count(db, v176.PROJECT_INDEX) == 0
+        assert v176.PROJECT_COLUMN in _columns(db, v176.MILESTONE_TABLE)
+
+
+class TestAfterSalesOrderTypes:
+
+    def test_repair_install_maintenance_are_active(self):
+        """G9：售后三值转 active；project 仍不启用（待 project_task 落地）。"""
+        field = _field(_load_raw('work_order'), 'order_type')
+        active = {e['value'] for e in field['enum_values']
+                  if e['category'] == 'active'}
+        assert active == {'service', 'production', 'repair', 'install',
+                          'maintenance'}
+        assert 'project' not in {e['value'] for e in field['enum_values']}

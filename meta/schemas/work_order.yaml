@@ -1,12 +1,14 @@
 # 服务工单头 (Work Order) — 销售订单波次 3 / B6
 # 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.5 / §10.6 / §10.7 / §10.15
 #
-# 定位: 作业层统一单据（作业层统一契约）。`order_type` 已启用 service / production，
-#       repair / install / maintenance 预留给后续批次（§10.15）。
+# 定位: 作业层统一单据（作业层统一契约）。`order_type` 已启用 service / production /
+#       repair / install / maintenance（售后三值按 service 路径复用，P2 G9）。
+#       `project` 待 project_task 计划层落地后再启用（需先放开 order_id/order_line_id 必填）。
 #       与架构元模型的 service_module（服务模块，三级业务分类）无关，勿混淆。
 #
 # 挂载点（按 order_type 分流，服务层强制）:
-#   · service    → `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）
+#   · service / repair / install / maintenance
+#                → `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）
 #   · production → `source_demand_type` + `source_demand_id` 必填（计划行 / 订单行）
 #
 # 服务层不变量（YAML 表达不了的，由 work_order_service 强制；R-ST-* 为 service 专属）:
@@ -119,7 +121,7 @@ fields:
     db_column: order_type
     required: true
     default: service
-    description: 工单类型（service / production 已启用；repair / install / maintenance 预留）
+    description: 工单类型（service / production / repair / install / maintenance 已启用）
     enum_values:
       - value: service
         label: 服务
@@ -133,15 +135,15 @@ fields:
       - value: repair
         label: 维修
         color: info
-        category: inactive
+        category: active
       - value: install
         label: 安装
         color: info
-        category: inactive
+        category: active
       - value: maintenance
         label: 保养
         color: info
-        category: inactive
+        category: active
     semantics:
       meaning: 工单类型（作业层统一入口）
       filterable: true

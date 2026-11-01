@@ -57,6 +57,9 @@ CHANGE_EVENT_TABLE = 'change_events'
 SCHEDULE_KIND_SERVICE = 'service'
 
 ORDER_TYPE_SERVICE = 'service'
+# 售后变体（维修 / 安装 / 保养）按 service 路径复用：同挂 service 计划行、同走 SLA
+# （P2 G9；R-ST-* 对这四个值一致生效）
+ORDER_TYPE_SERVICE_LIKE = ('service', 'repair', 'install', 'maintenance')
 ORDER_TYPE_PRODUCTION = 'production'
 
 SOURCE_DEMAND_SCHEDULE = 'sales_order_schedule'
@@ -176,14 +179,15 @@ class WorkOrderService:
     # ------------------------------------------------------------------ 创建
 
     def create_work_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """按 order_type 分流：service（SLA 路径，行为不变）/ production（需求追溯 + 组件展开）。"""
+        """按 order_type 分流：service 族（SLA 路径）/ production（需求追溯 + 组件展开）。"""
         payload = dict(payload or {})
         order_type = payload.get('order_type') or ORDER_TYPE_SERVICE
         if order_type == ORDER_TYPE_PRODUCTION:
             return self._create_production(payload)
-        if order_type != ORDER_TYPE_SERVICE:
+        if order_type not in ORDER_TYPE_SERVICE_LIKE:
             raise WorkOrderError(
-                '工单类型 %s 尚未启用（仅支持 service / production）' % order_type,
+                '工单类型 %s 尚未启用（支持 service / repair / install / '
+                'maintenance / production）' % order_type,
                 field_name='order_type', rule='ST_ORDER_TYPE_UNSUPPORTED')
         return self._create_service(payload)
 
@@ -223,6 +227,7 @@ class WorkOrderService:
             'order_id': order_id,
             'order_line_id': order_line_id,
             'customer_account_id': payload.get('customer_account_id'),
+            'project_id': payload.get('project_id'),
             'severity': severity,
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -262,7 +267,7 @@ class WorkOrderService:
                 % WORK_ORDER_TABLE, [coverage.get('id'), now, work_order_id])
             milestones = self._create_milestones(
                 work_order_id, match['rule'], coverage.get('calendar_id'),
-                opened_at)
+                opened_at, row.get('project_id'))
             sla = {
                 'code': None,
                 'reason': None,
@@ -356,6 +361,7 @@ class WorkOrderService:
             'order_id': demand.get('order_id'),
             'order_line_id': order_line_id,
             'customer_account_id': customer_account_id,
+            'project_id': payload.get('project_id'),
             'severity': payload.get('severity'),
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -871,7 +877,8 @@ class WorkOrderService:
 
     def _create_milestones(self, work_order_id: int, rule: Dict[str, Any],
                            calendar_id: Any,
-                           started_at: Any) -> List[Dict[str, Any]]:
+                           started_at: Any,
+                           project_id: Any = None) -> List[Dict[str, Any]]:
         now = _now()
         pairs = (
             (MILESTONE_FIRST_RESPONSE,
@@ -892,6 +899,7 @@ class WorkOrderService:
                     calendar_id)
             self._insert(MILESTONE_TABLE, {
                 'work_order_id': work_order_id,
+                'project_id': project_id,
                 'milestone_type': milestone_type,
                 'state': MILESTONE_RUNNING,
                 'due_at': due_at,

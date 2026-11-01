@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 12:37:58.713644
+-- 生成时间: 2026-11-01 14:21:55.744141
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -2021,6 +2021,7 @@ CREATE TABLE IF NOT EXISTS sla_coverage_rules (
 CREATE TABLE IF NOT EXISTS sla_milestones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_order_id INTEGER NOT NULL,
+    project_id INTEGER,
     milestone_type VARCHAR(200) NOT NULL,
     state VARCHAR(200) NOT NULL DEFAULT 'Pending',
     due_at DATETIME,
@@ -3052,6 +3053,7 @@ CREATE INDEX IF NOT EXISTS idx_sla_coverage_rules_seq ON sla_coverage_rules(seq)
 
 -- Indexes for SLA 里程碑
 CREATE INDEX IF NOT EXISTS idx_sla_milestone_work_order ON sla_milestones(work_order_id)
+CREATE INDEX IF NOT EXISTS idx_sla_milestone_project ON sla_milestones(project_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sla_milestone ON sla_milestones(work_order_id, milestone_type)
 CREATE INDEX IF NOT EXISTS idx_sla_milestones_due_at ON sla_milestones(due_at)
 

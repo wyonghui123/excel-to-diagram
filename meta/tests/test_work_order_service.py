@@ -93,6 +93,7 @@ CREATE TABLE work_orders (
     order_id INTEGER,
     order_line_id INTEGER,
     customer_account_id INTEGER,
+    project_id INTEGER,
     severity TEXT,
     channel TEXT,
     status TEXT,
@@ -110,6 +111,7 @@ CREATE TABLE work_orders (
 CREATE TABLE sla_milestones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_order_id INTEGER,
+    project_id INTEGER,
     milestone_type TEXT,
     state TEXT,
     due_at TEXT,
@@ -280,6 +282,44 @@ def test_severity_required():
     with pytest.raises(WorkOrderError) as exc:
         _create(_svc(conn), severity=None)
     assert exc.value.rule == 'SLA_SEVERITY_REQUIRED'
+
+
+# ---------------- P2：售后类型复用 service 路径 + 项目归集 ----------------
+
+@pytest.mark.parametrize('order_type', ['repair', 'install', 'maintenance'])
+def test_after_sales_types_use_service_path(order_type):
+    """G9：维修 / 安装 / 保养按 service 路径复用（同挂计划行、同走 SLA）。"""
+    conn = _db()
+    _with_rule(conn)
+    result = _create(_svc(conn), order_type=order_type)
+    assert _value(conn, 'SELECT order_type FROM work_orders WHERE id = ?',
+                  [result['id']]) == order_type
+    assert len(result['sla']['milestones']) == 2
+
+
+def test_project_id_snapshots_into_work_order_and_milestones():
+    """D3：工单 project_id 落库，并快照进 SLA 里程碑（供项目 360 / SLA 汇总）。"""
+    conn = _db()
+    _with_rule(conn)
+    result = _create(_svc(conn), project_id=7)
+    assert _value(conn, 'SELECT project_id FROM work_orders WHERE id = ?',
+                  [result['id']]) == 7
+    rows = conn.execute(
+        'SELECT project_id FROM sla_milestones WHERE work_order_id = ?',
+        [result['id']]).fetchall()
+    assert {row[0] for row in rows} == {7}
+
+
+def test_project_id_stays_null_when_not_provided():
+    conn = _db()
+    _with_rule(conn)
+    result = _create(_svc(conn))
+    assert _value(conn, 'SELECT project_id FROM work_orders WHERE id = ?',
+                  [result['id']]) is None
+    rows = conn.execute(
+        'SELECT project_id FROM sla_milestones WHERE work_order_id = ?',
+        [result['id']]).fetchall()
+    assert {row[0] for row in rows} == {None}
 
 
 # ---------------- 1. 单规则命中 ----------------

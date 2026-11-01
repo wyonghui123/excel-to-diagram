@@ -432,7 +432,7 @@ def _build_project_db(path):
     conn = sqlite3.connect(str(path))
     try:
         create_tables(conn, ['project', 'sales_order', 'sales_order_line',
-                             'sales_order_schedule'])
+                             'sales_order_schedule', 'work_order'])
         seed_row(conn, 'projects', id=1, project_no='PRJ-001', name='项目甲',
                  project_type_id=7, status='active', org_id=3,
                  customer_account_id=5, budget_amount=1000.5)
@@ -467,6 +467,20 @@ def _build_project_db(path):
                  schedule_no='S1', schedule_kind='delivery',
                  promised_date='2026-02-20', promised_qty=1,
                  billing_percent=100, project_id=None)
+
+        # P2 B1：工单按 project_id 进入 360（空值不归集）
+        seed_row(conn, 'work_orders', id=41, work_order_no='WO-001',
+                 order_type='service', order_id=11, order_line_id=21,
+                 status='New', severity='high', project_id=1,
+                 opened_at='2026-02-02 09:00:00')
+        seed_row(conn, 'work_orders', id=42, work_order_no='WO-002',
+                 order_type='production', order_id=11, order_line_id=21,
+                 status='New', project_id=1,
+                 opened_at='2026-01-20 09:00:00')
+        seed_row(conn, 'work_orders', id=43, work_order_no='WO-003',
+                 order_type='service', order_id=13, order_line_id=23,
+                 status='New', severity='low', project_id=None,
+                 opened_at='2026-02-10 09:00:00')
         conn.commit()
     finally:
         conn.close()
@@ -519,18 +533,30 @@ class TestProjectOverview:
         assert 'billing_amount' not in schedules['items'][0]
 
     def test_unmounted_documents_excluded(self, overview):
-        """AC-02: project_id 为空的订单 / 行 / 计划行不出现在项目 360。"""
+        """AC-02: project_id 为空的订单 / 行 / 计划行 / 工单不出现在项目 360。"""
         svc, _path = overview
         data = svc.overview(1)
         assert 13 not in {o['id'] for o in data['sales_orders']['items']}
         assert 23 not in {l['id'] for l in data['sales_order_lines']['items']}
         assert 32 not in {s['id'] for s in data['sales_order_schedules']['items']}
+        assert 43 not in {w['id'] for w in data['work_orders']['items']}
+
+    def test_work_orders_filtered_by_project_and_sorted(self, overview):
+        """P2 B1：工单段按 project_id 归集，opened_at 倒序，金额字段一个都不透传。"""
+        svc, _path = overview
+        section = svc.overview(1)['work_orders']
+        assert section['total'] == 2
+        assert [w['work_order_no'] for w in section['items']] == ['WO-001', 'WO-002']
+        for item in section['items']:
+            assert set(item) == {'id', 'work_order_no', 'order_type', 'status',
+                                 'severity', 'schedule_id', 'opened_at', 'resolved_at'}
 
     def test_project_without_documents_returns_empty_sections(self, overview):
         svc, _path = overview
         data = svc.overview(2)
         assert data['project']['project_no'] == 'PRJ-002'
-        for key in ('sales_orders', 'sales_order_lines', 'sales_order_schedules'):
+        for key in ('sales_orders', 'sales_order_lines', 'sales_order_schedules',
+                    'work_orders'):
             assert data[key] == {'items': [], 'total': 0}
 
     def test_limit_truncates_items_but_keeps_total(self, overview):
