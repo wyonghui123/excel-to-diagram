@@ -393,6 +393,21 @@ class ManageService:
         except Exception:
             pass
 
+        # [G7 2026-11-02] 通用更新路径 status 迁移守卫（对象声明 requires_state_machine）
+        if meta_obj.requires_state_machine() and isinstance(params, dict) and "status" in params:
+            try:
+                from meta.core.task_state_machine import (
+                    TaskTransitionError,
+                    check_meta_object_status_update,
+                )
+                check_meta_object_status_update(meta_obj, old_data, params)
+            except TaskTransitionError as e:
+                return ActionResult.fail(
+                    error="STATE_MACHINE_VIOLATION",
+                    message=str(e),
+                    status_code=400,
+                )
+
         if request.skip_audit:
             self.executor.enable_audit(False)
         skip_rules = request.skip_validation

@@ -30,6 +30,26 @@ bo_bp = Blueprint('bo_v2', __name__, url_prefix='/api/v2/bo')
 meta_v2_bp = Blueprint('meta_v2', __name__, url_prefix='/api/v2/meta')
 
 
+@bo_bp.before_request
+def _reject_skip_generic_api_objects():
+    """[G7 2026-11-02] 平台机制对象（skip_generic_api=True）不开放通用 BO API。
+
+    路径形如 /api/v2/bo/<object_type>；仅对已注册且声明了该开关的对象返回 404。
+    （/api/v2/bo/architecture/... 等非对象路径 registry 查不到，直接放行。）
+    """
+    parts = (request.path or '').split('/')
+    if len(parts) >= 5 and parts[1] == 'api' and parts[2] == 'v2' and parts[3] == 'bo':
+        obj = registry.get(parts[4])
+        if obj is not None and getattr(obj, 'skip_generic_api', False):
+            return error_response(
+                f'对象 {parts[4]} 未开放通用 BO API',
+                error_code='GENERIC_API_DISABLED',
+                status=404,
+            )
+    return None
+
+
+
 def _enrich_audit_log_items(items):
     """[FIX 2026-06-12] audit_log 列表通用 enrich.
     1. 把 extra_data 字符串解析为 extra_data_parsed (前端 deleted-data-section 用)

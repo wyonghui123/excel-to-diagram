@@ -2529,6 +2529,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         deletability=parse_deletability(data),
         addability=parse_addability(data),
         display_name_field=data.get("display_name_field"),
+        skip_generic_api=data.get("skip_generic_api", False),
+        state_machine_required=data.get("requires_state_machine", False),
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)
@@ -2698,6 +2700,10 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     如果对象已经明确定义了某些actions（通过检查 import_export.auto_crud 配置），则不自动添加。
     """
     if not obj.persistent:
+        return obj
+
+    # [G7 2026-11-02] 平台机制对象：不自动补通用 CRUD actions（写入口归专属服务）。
+    if getattr(obj, 'skip_generic_api', False):
         return obj
     
     # 检查是否禁用自动添加 CRUD actions

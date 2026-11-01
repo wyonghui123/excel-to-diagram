@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 23:05:36.170223
+-- 生成时间: 2026-11-02 01:56:19.328555
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -2618,6 +2618,121 @@ CREATE TABLE IF NOT EXISTS sourcing_rule_lines (
     FOREIGN KEY (supplier_party_id) REFERENCES parties(id)
 )
 
+-- 任务: 统一任务实例（11 态唯一状态列；executor 为维度；对业务对象仅弱引用）
+CREATE TABLE IF NOT EXISTS tasks (
+    id VARCHAR(200) PRIMARY KEY,
+    code VARCHAR(200),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    type VARCHAR(200) NOT NULL DEFAULT 'story',
+    status VARCHAR(200) NOT NULL DEFAULT 'pending',
+    priority VARCHAR(200) DEFAULT 'P2',
+    app_id VARCHAR(200),
+    executor_type VARCHAR(200) NOT NULL,
+    executor_assignee VARCHAR(200),
+    executor_candidates TEXT,
+    assign_policy VARCHAR(200) DEFAULT 'direct',
+    executor_config TEXT,
+    executor_fallback TEXT,
+    claim_timeout_seconds INTEGER DEFAULT 300,
+    timeout_seconds INTEGER,
+    retry_policy TEXT,
+    due_at DATETIME,
+    sla TEXT,
+    parent_task_id VARCHAR(200),
+    workflow_run_id VARCHAR(200),
+    workflow_node_id VARCHAR(200),
+    deps TEXT,
+    inputs TEXT,
+    inputs_schema TEXT,
+    outputs TEXT,
+    outputs_schema TEXT,
+    acceptance TEXT,
+    attempt INTEGER DEFAULT 1,
+    trace_id VARCHAR(200),
+    agent_session_id VARCHAR(200),
+    doc_ref VARCHAR(200),
+    line_refs TEXT,
+    created_by VARCHAR(200),
+    created_at DATETIME,
+    started_at DATETIME,
+    finished_at DATETIME,
+    fail_reason VARCHAR(200),
+    meta TEXT,
+    updated_at DATETIME
+)
+
+-- 任务事件: 任务生命周期事件账（append-only，不可删；≈ OCED 底座；兼 hold/release）
+CREATE TABLE IF NOT EXISTS task_events (
+    id VARCHAR(200) PRIMARY KEY,
+    task_id VARCHAR(200) NOT NULL,
+    workflow_run_id VARCHAR(200),
+    event_type VARCHAR(200) NOT NULL DEFAULT 'status_changed',
+    from_status VARCHAR(200),
+    to_status VARCHAR(200),
+    actor VARCHAR(200),
+    actor_kind VARCHAR(200),
+    reason VARCHAR(200),
+    payload TEXT,
+    doc_ref VARCHAR(200),
+    line_refs TEXT,
+    agent_session_id VARCHAR(200),
+    trace_id VARCHAR(200),
+    occurred_at DATETIME NOT NULL,
+    created_at DATETIME
+)
+
+-- 任务模板节点: Workflow 静态节点定义（定义层无状态；Run 启动时按版本克隆为 Task）
+CREATE TABLE IF NOT EXISTS task_templates (
+    id VARCHAR(200) PRIMARY KEY,
+    workflow_id VARCHAR(200) NOT NULL,
+    workflow_version INTEGER NOT NULL,
+    node_id VARCHAR(200) NOT NULL,
+    step_number INTEGER,
+    parent_step_number INTEGER,
+    group_name VARCHAR(200),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    type VARCHAR(200) NOT NULL DEFAULT 'story',
+    priority VARCHAR(200) DEFAULT 'P2',
+    executor_type VARCHAR(200) NOT NULL,
+    executor_assignee VARCHAR(200),
+    executor_candidates TEXT,
+    assign_policy VARCHAR(200) DEFAULT 'direct',
+    executor_config TEXT,
+    executor_fallback TEXT,
+    claim_timeout_seconds INTEGER DEFAULT 300,
+    timeout_seconds INTEGER,
+    retry_policy TEXT,
+    inputs_schema TEXT,
+    outputs_schema TEXT,
+    acceptance TEXT,
+    sla TEXT,
+    meta TEXT,
+    created_at DATETIME,
+    updated_at DATETIME
+)
+
+-- 任务执行记录: 任务执行记录 / 审计日志（append-only，不可删；每次迁移与事件配对）
+CREATE TABLE IF NOT EXISTS task_worklogs (
+    id VARCHAR(200) PRIMARY KEY,
+    task_id VARCHAR(200) NOT NULL,
+    workflow_run_id VARCHAR(200),
+    event_id VARCHAR(200),
+    entry_type VARCHAR(200) NOT NULL DEFAULT 'transition',
+    actor VARCHAR(200),
+    actor_kind VARCHAR(200),
+    summary VARCHAR(200),
+    detail TEXT,
+    inputs_hash VARCHAR(200),
+    outputs_hash VARCHAR(200),
+    progress_pct INTEGER,
+    doc_ref VARCHAR(200),
+    trace_id VARCHAR(200),
+    occurred_at DATETIME NOT NULL,
+    created_at DATETIME
+)
+
 -- 税务分类: 税务分类字典（按客户 / 供应商 / 物料用途轴归组，决定默认税码）
 CREATE TABLE IF NOT EXISTS tax_classifications (
     created_by VARCHAR(200),
@@ -2857,6 +2972,44 @@ CREATE TABLE IF NOT EXISTS vendor_accounts (
     tax_classification_id INTEGER,
     created_at DATETIME,
     FOREIGN KEY (tax_classification_id) REFERENCES tax_classifications(id)
+)
+
+-- 工作流定义: 编排定义层（版本化；定义层无状态——节点/边只描述主干与分支块）
+CREATE TABLE IF NOT EXISTS workflows (
+    id VARCHAR(200) PRIMARY KEY,
+    workflow_key VARCHAR(200) NOT NULL,
+    version INTEGER NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    owner VARCHAR(200),
+    trigger_kind VARCHAR(200) DEFAULT 'manual',
+    trigger_expr VARCHAR(200),
+    edges TEXT,
+    sla TEXT,
+    meta TEXT,
+    created_by VARCHAR(200),
+    created_at DATETIME,
+    updated_at DATETIME
+)
+
+-- 工作流运行实例: 编排实例层（无独立状态列；进度由子任务状态派生聚合）
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id VARCHAR(200) PRIMARY KEY,
+    workflow_id VARCHAR(200) NOT NULL,
+    workflow_key VARCHAR(200),
+    workflow_version INTEGER NOT NULL,
+    name VARCHAR(200),
+    trigger_kind VARCHAR(200),
+    definition_snapshot TEXT,
+    variables TEXT,
+    inputs TEXT,
+    outputs TEXT,
+    created_by VARCHAR(200),
+    created_at DATETIME,
+    started_at DATETIME,
+    finished_at DATETIME,
+    meta TEXT,
+    updated_at DATETIME
 )
 
 -- 作业定义: 标准作业定义——工艺路线（routing）/ 服务模板（service_template）
@@ -3804,6 +3957,31 @@ CREATE INDEX IF NOT EXISTS idx_sourcing_line_rule_type ON sourcing_rule_lines(ru
 CREATE INDEX IF NOT EXISTS idx_sourcing_line_source_org ON sourcing_rule_lines(source_org_id)
 CREATE INDEX IF NOT EXISTS idx_sourcing_line_supplier ON sourcing_rule_lines(supplier_party_id)
 
+-- Indexes for 任务
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_code ON tasks(code)
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, priority)
+CREATE INDEX IF NOT EXISTS idx_tasks_inbox ON tasks(app_id, status)
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(executor_type, executor_assignee, status)
+CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(workflow_run_id)
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)
+CREATE INDEX IF NOT EXISTS idx_tasks_doc ON tasks(doc_ref)
+
+-- Indexes for 任务事件
+CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, occurred_at)
+CREATE INDEX IF NOT EXISTS idx_task_events_run ON task_events(workflow_run_id)
+CREATE INDEX IF NOT EXISTS idx_task_events_type ON task_events(event_type, occurred_at)
+CREATE INDEX IF NOT EXISTS idx_task_events_doc ON task_events(doc_ref)
+CREATE INDEX IF NOT EXISTS idx_task_events_trace ON task_events(trace_id)
+
+-- Indexes for 任务模板节点
+CREATE UNIQUE INDEX IF NOT EXISTS uq_task_template_node ON task_templates(workflow_id, workflow_version, node_id)
+CREATE INDEX IF NOT EXISTS idx_task_template_wf ON task_templates(workflow_id, workflow_version)
+
+-- Indexes for 任务执行记录
+CREATE INDEX IF NOT EXISTS idx_task_worklogs_task ON task_worklogs(task_id, occurred_at)
+CREATE INDEX IF NOT EXISTS idx_task_worklogs_run ON task_worklogs(workflow_run_id)
+CREATE INDEX IF NOT EXISTS idx_task_worklogs_event ON task_worklogs(event_id)
+
 -- Indexes for 税务分类
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_classification_code_applicable ON tax_classifications(code, applicable_to)
 CREATE INDEX IF NOT EXISTS idx_tax_classification_status ON tax_classifications(status)
@@ -3885,6 +4063,14 @@ CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name)
 CREATE INDEX IF NOT EXISTS idx_vendor_accounts_tax_classification_id ON vendor_accounts(tax_classification_id)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_account_relation_unique ON vendor_accounts(relation_id)
 CREATE INDEX IF NOT EXISTS idx_vendor_accounts_name ON vendor_accounts(name)
+
+-- Indexes for 工作流定义
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_key_version ON workflows(workflow_key, version)
+CREATE INDEX IF NOT EXISTS idx_workflow_key ON workflows(workflow_key)
+
+-- Indexes for 工作流运行实例
+CREATE INDEX IF NOT EXISTS idx_run_workflow ON workflow_runs(workflow_id)
+CREATE INDEX IF NOT EXISTS idx_run_key ON workflow_runs(workflow_key)
 
 -- Indexes for 作业定义
 CREATE UNIQUE INDEX IF NOT EXISTS uq_work_definition_code_revision ON work_definitions(code, revision)

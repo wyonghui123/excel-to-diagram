@@ -1,6 +1,6 @@
 # G12 / G13 执行边界 —— 任务单（2026-11-01）
 
-> 状态：**P1 已落，P2–P4 待评审**。依据：
+> 状态：**P1 / P2（G7）已落，P3–P4 待评审**。依据：
 > `spec-project-type-object-model-research-2026-10-31.md` §3 G12 / G13、§4 D4 / D10 / D14、§8.2 四条硬规则；
 > `spec-unified-resource-model-2026-11-01-v1.0.md` §9.3（`work_definition` 作业定义）；
 > `docs/specs/task-two-generation-convergence/spec.md` §2.1 轨③。
@@ -38,13 +38,13 @@
 - [x] **P1-4** 测试 `meta/tests/test_work_order_operation_trace.py` 8 passed：字段声明 / 无真外键 / 红线（无 `project_task_id`）/ UI 表单详情 / DDL / 迁移幂等 / 回滚。
 - [ ] **P1-5 定名**（`工序` vs `上门步骤`）：等 `order_type` 文案统一时一起改，本阶段不动。
 
-### Phase 2 G7 元模型化（阻塞，待评审）
+### Phase 2 G7 元模型化（已落 2026-11-02）
 
-- [ ] **P2-1** 设计「平台机制对象」注册豁免：YAML 标记（如 `system_object: true`）→ loader 只解析、不注册进 BO registry / 不生成菜单 / 不暴露 BO API；或反向：把 `build_task_meta_objects()` 迁为 YAML 并删除代码定义。
-- [ ] **P2-2** 六表 YAML（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task_events` / `task_worklogs`），字段与代码 MetaObject 逐列对齐。
-- [ ] **P2-3** 迁移切入口：v154 继续兜底；新增迁移校验 YAML 与代码 DDL 一致性（列差集为空）。
-- [ ] **P2-4** 切换后删除 `ensure_task_tables()` / `ensure_task_event_tables()` 的 DDL 职责（保留表名白名单登记）。
-- 阻断原因：P2-1 属平台启动路径改动，需单独评审；未决前不动，避免双 DDL 源。
+- [x] **P2-1** 对象级开关 `skip_generic_api`（`MetaObject` 字段 + YAML 同名键，替代原设想的 `system_object` 专项豁免）：对象仍注册进统一 registry、仍进 DDL，但 ① `meta_api.list_objects` 不暴露；② agent `/tools`、`/schema` 不生成工具；③ `ensure_crud_actions()` 不补通用 CRUD 动作；④ `manage_api`（`/api/v1/<object_type>`）与 `bo_api`（`/api/v2/bo/<object_type>`）在 `before_request` 拦截，返回 404 `GENERIC_API_DISABLED`。
+- [x] **P2-2** 六表 YAML：`meta/schemas/workflow.yaml` / `task_template.yaml` / `workflow_run.yaml` / `task.yaml` / `task_event.yaml` / `task_worklog.yaml`；`id` / `table_name` 与代码常量一致，字段 / 索引逐列平移，统一带 `skip_auto_menu: true` + `skip_generic_api: true`，`task.yaml` 另带 `requires_state_machine: true`。
+- [x] **P2-3** 迁移切入口：`v154__provision_task_domain_tables.py` 改为从 `get_task_meta_objects()`（registry，YAML 兜底）取六对象建表，幂等 `[SKIP]`、编号未变；`sync_schema --generate` 重建 `generated_schema.sql`。DDL 等价已验收：六表列名 / 类型 / 可空 / 默认值 / 列序 / 索引名与改动前代码定义逐列逐索引一致（基线比对零差异）。
+- [x] **P2-4** 删除 `task_schema.py` / `task_event_schema.py` 的 `_build_*_meta()` / `build_*_meta_objects()`；保留表名 / 对象 id 常量、状态机 import、`register_table_name` 白名单；新增 `get_task_meta_objects()` / `get_task_event_meta_objects()` 从 registry 按 id 取；`ensure_task_tables()` / `ensure_task_event_tables()` 改为 YAML 驱动，返回 SQL 列表签名与幂等性不变。
+- [x] **P2-5** 测试：`meta/tests/test_g7_task_domain_meta_migration.py` 15 passed（YAML 加载 / `skip_generic_api` 生效 / v154 幂等 / 六表与 21 索引 / DDL 逐列等价 / 状态机合法与非法各一例）；回归任务域 195 passed、工作流 / 项目 / 工单域 284 passed。
 
 ### Phase 3 G13 双通道定界（待 G7 元模型化）
 
@@ -59,13 +59,13 @@
 - [x] G12：工序可按 `work_definition_id` / `work_definition_operation_id` 回溯；手填工序留空合法。
 - [x] §8.2 红线 2 未破：`work_order_operation` 无 `project_task_id`（测试守护）。
 - [ ] G13：同一动作只在一处留痕；`tasks.line_refs` 能反查工序。
-- [ ] G7：六表 DDL 单一真源（YAML），启动期不再懒建表。
+- [x] G7：六表 DDL 单一真源（YAML）；`ensure_task_tables()` 仅保留 YAML 驱动的幂等兜底，启动期不再由代码 MetaObject 建表。
 
 ## 5. 风险
 
 | 风险 | 处理 |
 |---|---|
-| YAML 与代码 MetaObject 字段漂移 | P2-3 一致性迁移（列差集为空才通过） |
-| 对象进 BO registry 后绕过任务状态机 | P2-1 注册豁免，默认禁止 |
+| YAML 与代码 MetaObject 字段漂移 | 已收敛：六表 DDL 列 / 索引基线比对零差异（`test_g7_task_domain_meta_migration`） |
+| 对象进 BO registry 后绕过任务状态机 | `skip_generic_api` 关闭通用 CRUD / agent 工具；通用更新路径遇 `requires_state_machine` 调 `require_transition`，非法迁移返回 400 `STATE_MACHINE_VIOLATION` |
 | 工序状态停写影响存量前端 / API 调用方 | P3-1 先投影只读，观察一轮再删写路径 |
 | 工时口径被再次分裂 | 复用 `time_entry` + `v_resource_labor_daily`，不新增 actual 列 |

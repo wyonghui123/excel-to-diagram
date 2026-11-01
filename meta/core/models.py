@@ -1099,6 +1099,15 @@ class MetaObject:
     # ── 新增：变更策略（M1 只解析，不启用版本） ──
     revision_policy: Optional[MetaRevisionPolicy] = None
 
+    # [G7 2026-11-02] 平台机制对象开关：True = 对象仍注册进 registry / 进 DDL，
+    # 但不生成通用 CRUD API、不生成 agent 工具、不自动补 CRUD actions。
+    # 用于 tasks / task_events 等必须由专属服务与状态机写入口的对象。
+    skip_generic_api: bool = False
+
+    # [G7 2026-11-02] YAML 显式声明「需要状态机」：优先于分类模板的
+    # default_state_machine；供通用更新路径做 status 迁移守卫。
+    state_machine_required: bool = False
+
     def __post_init__(self):
         """初始化时自动应用分类模板"""
         # 自动填充 category_config
@@ -1326,7 +1335,9 @@ class MetaObject:
         return self.bo_category == BusinessObjectCategory.CONFIGURATION
     
     def requires_state_machine(self) -> bool:
-        """是否需要状态机"""
+        """是否需要状态机（YAML 显式声明优先于分类模板默认值）"""
+        if self.state_machine_required:
+            return True
         if self.category_config:
             return self.category_config.default_state_machine
         return False

@@ -1,6 +1,6 @@
 # 研究：项目类型的四层对象模型（商务层 / 履约层 / 主数据层 / 结构配置层）
 
-> 文档编号：研究稿 v1.0 | 日期：2026-10-31 | 状态：待评审（仅研究，未改代码）
+> 文档编号：研究稿 v2.1 | 日期：2026-10-31（更新 2026-11-02） | 状态：已评审，G1–G14 按 §3 推进
 > 命题：以「项目」为业务主线，审视现有四套统一对象体系（任务 / 商务订单 / 结构主数据 / 履约），
 > 给出项目类型的四层主数据结构与挂载方案。
 > 取证基线：`meta/schemas/` 当前 YAML 与 `docs/superpowers/specs/` 现有 spec。
@@ -28,7 +28,7 @@
 
 | 事实 | 证据 |
 |---|---|
-| Gen2 六表 `tasks / task_templates / workflows / workflow_runs / task_events / task_worklogs` 由代码 MetaObject + 运行时 sync 建表，**不在 `meta/schemas/*.yaml` 元模型体系内** | `meta/core/task_schema.py`；`docs/specs/task-two-generation-convergence/spec.md` §2.1 轨③ |
+| Gen2 六表 `tasks / task_templates / workflows / workflow_runs / task_events / task_worklogs` **已进 `meta/schemas/*.yaml`（2026-11-02）**，但带 `skip_generic_api: true`（不暴露通用 CRUD / agent 工具） | `meta/schemas/task.yaml` 等 6 份 YAML；`meta/core/task_schema.py`（常量 + 兼容入口） |
 | Gen1（`task_queues / task_executions`）仍在生产运行，作为队列 + 执行账本基础设施 | 同上 §1、§2.2 |
 | 与业务单据无外键关联：`work_order` 无 `task_id`，任务域与履约域当前**未接线** | `work_order.yaml` 字段清单（无 task 字段） |
 
@@ -154,7 +154,7 @@
 | G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销） | P0 | 工程变更与项目实例化 BOM 不可表达 |
 | G5 | ~~资源只有 3 值枚举，无实例/日历/技能/费率~~ **已落（P2，v175 / v176 / v180）** | P1 | `resource` / `resource_group` / `resource_capability` / `skill` / `shift` / `calendar_shift` / `resource_rate` 已落库 |
 | G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` **已落 v177**，`fulfillment_order.project_id` **已落 v183**） | P1 | 三条履约链均可按 `project_id` 归集；项目 360 仍为五段（未新增履约分组段） |
-| G7 | Gen2 任务六表不在 YAML 元模型内 | P1 | 四层对象无法统一治理（与 L18 治理项同源） |
+| G7 | ~~Gen2 任务六表不在 YAML 元模型内~~ **已落（2026-11-02）** | P1 | 六表进 `meta/schemas/*.yaml` + `skip_generic_api` 屏蔽通用 CRUD / agent 工具，不改运行时语义 |
 | G8 | ~~三套里程碑（billing / SLA / 计划行）无统一项目外键~~ **已落（P1 / P2）** | P1 | `sla_milestone.project_id`、`sales_order_schedule.project_id` 已落；三套里程碑可按项目归集 |
 | G9 | ~~`order_type=repair/install/maintenance` inactive~~ **已落（P2 收尾）** | P2 | 售后三值已启用，复用 service 路径 |
 | G10 | ~~`configuration` 无 `project_id`~~ **已落（v178，P3）** | P2 | 项目级选配可归集；物化链路不感知项目标签（AC-06 已测） |
@@ -187,7 +187,7 @@
 | D16 | 产能利用率不写 SQL 视图，服务层复用 `resource_matching_service.available_minutes()` | 日历继承 + 例外日 + 跨天班次是 Python 逻辑，SQL 重写等于第二套口径 |
 | D17 | 成本归集放阶段二：`time_entry` 写入时解析 `resource_rate` 并快照 `rate_id` / `cost_amount`；首期只做工时 | 避免视图内做多行费率择优；快照不是汇总表，符合 D11 |
 | D18 | G12 溯源列用软引用（可空、无真外键），删除保护沿用 `work_definition_operation.deletion_policy` | SQLite 不支持对存量表 ALTER 加 FK；工序仍是参数表 |
-| D19 | G7 元模型化需先引入「平台机制对象」注册豁免（`system_object`），再迁六表 YAML | 直接注册会暴露通用 BO API，绕过任务状态机；且与运行时 `ensure_task_tables()` 形成双 DDL 源 |
+| D19 | G7 = 六表进 YAML + 对象级 `skip_generic_api`，**不改运行时语义**；不新增 `system_object` 注册分支 | 对象仍注册进 registry / 进 DDL，但屏蔽通用 BO API / agent 工具 / 自动菜单 / CRUD actions；`requires_state_machine: true` 由通用更新路径调 `require_transition`，非法迁移 400 `STATE_MACHINE_VIOLATION` |
 | D20 | G13 按 D10 方案 A 实现：工序只存参数，动作流转走 `tasks`，`tasks.line_refs` 指向工序 | `tasks.line_refs` 列已存在，结构前提具备 |
 
 ---
@@ -313,3 +313,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.8：G14 闭环——`time_entry`（`time_entries`，v182）+ 三张派生视图 + 查询服务 / API；补 D13-D17；D11 明确工时视图载体不回读 Gen2 `worklogs`；§2.5 红线 3 与 §8.2 红线 1 / 2 确认未破（G7 仍为治理项，不再是 G14 前置） |
 | 2026-11-01 | v1.9：G6 收尾——`fulfillment_order.project_id`（v183，可空 + `idx_fulfillment_order_project`），三条履约链（工单 / 交货单 / 履约分组单）共用项目锚点；G1 / G2 / G5 / G8 / G9 缺口表按代码实况回填为已落；项目 360 仍为五段（未新增履约分组段） |
 | 2026-11-01 | v2.0：G12 溯源落地——`work_order_operation` 补 `work_definition_id` / `work_definition_operation_id`（v184，软引用 + 2 索引）；补 D18–D20；核出 routing 已以 `work_definition` 落地（v176）、Gen2 六表迁移兜底已由 v154 完成，G7 剩余为「注册豁免 + YAML」治理项；G13 待 G7 |
+| 2026-11-02 | v2.1：G7 落地——六表进 `meta/schemas/*.yaml`（`workflow` / `task_template` / `workflow_run` / `task` / `task_event` / `task_worklog`）+ `skip_generic_api` 屏蔽通用 CRUD / agent 工具 / 自动菜单；`task_schema` / `task_event_schema` 删除代码 MetaObject 定义、改 YAML 驱动，v154 改从 registry 取对象；六表 DDL 基线比对零差异；D19 改写为「不改运行时语义」，并推翻 `task-two-generation-convergence/spec.md` D3「不引入元模型 YAML」的历史裁决 |

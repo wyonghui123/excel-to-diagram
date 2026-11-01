@@ -1,0 +1,111 @@
+# 任务执行记录 / 审计日志（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_event_schema.py::_build_worklog_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象（append-only）—— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+id: task_worklog
+name: 任务执行记录
+table_name: task_worklogs
+description: 任务执行记录 / 审计日志（append-only，不可删；每次迁移与事件配对）
+skip_auto_menu: true
+skip_generic_api: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: 记录 ID（uuid4 hex，主键）
+  - id: task_id
+    name: 任务 ID
+    type: string
+    db_column: task_id
+    required: true
+    description: 所属任务 ID（弱引用无 FK）
+  - id: workflow_run_id
+    name: 运行实例 ID
+    type: string
+    db_column: workflow_run_id
+    description: 所属 Run（弱引用无 FK）
+  - id: event_id
+    name: 事件 ID
+    type: string
+    db_column: event_id
+    description: 配对的 TASK_EVENT ID（迁移类记录；弱引用无 FK）
+  - id: entry_type
+    name: 记录类型
+    type: string
+    db_column: entry_type
+    required: true
+    default: transition
+    description: transition / bo_call / agent_tool / heartbeat / note
+  - id: actor
+    name: 操作者
+    type: string
+    db_column: actor
+    description: who：操作者
+  - id: actor_kind
+    name: 操作者类型
+    type: string
+    db_column: actor_kind
+    description: human / agent / system
+  - id: summary
+    name: 摘要
+    type: string
+    db_column: summary
+    description: what：人读摘要
+  - id: detail
+    name: 明细
+    type: json
+    db_column: detail
+    description: what 明细（审核意见、BO 调用参数等）
+  - id: inputs_hash
+    name: 入参哈希
+    type: string
+    db_column: inputs_hash
+    description: 入参哈希（防篡改 / 幂等比对）
+  - id: outputs_hash
+    name: 出参哈希
+    type: string
+    db_column: outputs_hash
+    description: 出参哈希（防篡改 / 幂等比对）
+  - id: progress_pct
+    name: 进度
+    type: integer
+    db_column: progress_pct
+    description: 心跳进度（长任务；驱动超时判定）
+  - id: doc_ref
+    name: 单据引用
+    type: string
+    db_column: doc_ref
+    description: 业务对象弱引用；无 FK
+  - id: trace_id
+    name: Trace ID
+    type: string
+    db_column: trace_id
+    description: OTel trace id
+  - id: occurred_at
+    name: 业务发生时间
+    type: datetime
+    db_column: occurred_at
+    required: true
+    description: 业务发生时间
+  - id: created_at
+    name: 落账时间
+    type: datetime
+    db_column: created_at
+    description: 落账时间
+
+indexes:
+  - name: idx_task_worklogs_task
+    fields: [task_id, occurred_at]
+    description: 按任务取执行记录（含 claim→done 时长统计）
+  - name: idx_task_worklogs_run
+    fields: [workflow_run_id]
+    description: 按 Run 聚合审计
+  - name: idx_task_worklogs_event
+    fields: [event_id]
+    description: 与事件配对回溯
+
+ui_view_config:
+  skip_auto_menu: true

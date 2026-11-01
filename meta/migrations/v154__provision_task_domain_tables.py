@@ -11,9 +11,9 @@
 本迁移做什么
   1. 用最小 sqlite3 data_source 适配器包住 `sqlite3.Connection`；
   2. 把六表名登记进表名安全白名单（table_name_validator）；
-  3. 直接复用 `task_schema.build_task_meta_objects()` +
-     `task_event_schema.build_task_event_meta_objects()` 的 MetaObject 定义，
-     走 `sync_schema_from_meta()` 建表 + 补列 + 建索引。
+  3. 从 YAML（meta/schemas/workflow.yaml / task_template.yaml / workflow_run.yaml /
+     task.yaml / task_event.yaml / task_worklog.yaml）经 `get_task_meta_objects()`
+     取 MetaObject，走 `sync_schema_from_meta()` 建表 + 补列 + 建索引。
 
 幂等
   - 表已存在 → 跳过建表；缺列 → ALTER TABLE ADD COLUMN；索引
@@ -39,12 +39,11 @@ from meta.core.task_schema import (  # noqa: E402
     TASK_TEMPLATE_TABLE,
     WORKFLOW_RUN_TABLE,
     WORKFLOW_TABLE,
-    build_task_meta_objects,
+    get_task_meta_objects,
 )
 from meta.core.task_event_schema import (  # noqa: E402
     TASK_EVENT_TABLE,
     WORKLOG_TABLE,
-    build_task_event_meta_objects,
 )
 
 # 六表名（顺序：定义层 → 实例层 → 事件账）
@@ -100,8 +99,8 @@ class _SqliteConnAdapter:
 
 
 def _all_meta_objects():
-    """六表 MetaObject（4 定义/实例 + 2 事件账）。"""
-    return build_task_meta_objects() + build_task_event_meta_objects()
+    """六表 MetaObject（4 定义/实例 + 2 事件账），定义唯一来源 = YAML。"""
+    return get_task_meta_objects()
 
 
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:

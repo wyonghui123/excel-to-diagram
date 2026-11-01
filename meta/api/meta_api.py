@@ -97,7 +97,8 @@ def list_objects():
 
     for obj_id in registry.list_objects():
         obj = registry.get(obj_id)
-        if obj and obj.persistent:
+        # [G7 2026-11-02] 平台机制对象不对外暴露通用对象元数据入口
+        if obj and obj.persistent and not getattr(obj, 'skip_generic_api', False):
             objects.append({
                 'id': obj.id,
                 'name': obj.name,
