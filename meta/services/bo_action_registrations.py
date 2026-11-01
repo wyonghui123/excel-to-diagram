@@ -104,6 +104,10 @@ def register_all_bo_actions(registry=None):
         purchase_order_approve_handler,
         purchase_order_reject_handler,
     )
+    # M3 采购订单: 需求转单（同 spec §14 步 23）
+    from meta.services.requisition_po_conversion import (
+        create_from_requisition_handler,
+    )
 
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
@@ -742,6 +746,37 @@ def register_all_bo_actions(registry=None):
         output_schema=_demand_output_schema,
         requires_auth=True,
         idempotent=True,
+    )
+
+    # ==================== 32: 采购订单需求转单（M3） ====================
+    registry.register(
+        'purchase_order.create_from_requisition',
+        create_from_requisition_handler,
+        description='采购申请转采购订单（approved 申请 → 草稿 PO + 需求分配）',
+        object_type='purchase_order',
+        category='business',
+        permission_required='purchase_order:purchase_order_create',
+        input_schema={
+            'type': 'object',
+            'required': ['requisition_id'],
+            'properties': {
+                'requisition_id': {'type': 'integer'},
+                'supplier_party_id': {'type': 'integer'},
+                'document_type_id': {'type': 'integer'},
+                'purchase_org_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'order_date': {'type': 'string'},
+                'requested_date': {'type': 'string'},
+                'deliver_to_location_id': {'type': 'integer'},
+                'description': {'type': 'string'},
+                'supplier_reference_no': {'type': 'string'},
+                'lines': {'type': 'array'},
+            },
+        },
+        output_schema=_demand_output_schema,
+        requires_auth=True,
+        idempotent=False,
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")

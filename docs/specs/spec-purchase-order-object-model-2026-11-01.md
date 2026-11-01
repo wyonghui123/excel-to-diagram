@@ -773,7 +773,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 |---|---|
 | 头列表列 | `order_no`、`document_type_id`、`order_date`、`supplier_party_id`、`purchase_org_id`、`org_id`、`currency_id`、`net_amount`、`status`、`approval_status`、`fulfillment_status` |
 | 头表单分区 | 基本信息（`order_no / document_type_id / order_date / status`）；供应商与组织（`supplier_party_id / supplier_account_id / supplier_reference_no / purchase_org_id / org_id / division_code`）；交付与条款（`deliver_to_location_id / requested_date / confirmed_date / payment_term_id / incoterm_code / currency_id / exchange_rate / exchange_rate_type / exchange_rate_date`）；金额（4 个头折扣 / 附加字段 + `net / tax / gross`）；说明（`description`） |
-| 详情子表 | `child_sections`：`purchase_order_line`（行）、`purchase_order_schedule`（到货计划）、`demand_allocation`（需求分配，只读 tab，通过服务维护） |
+| 详情子表 | `child_sections`：`purchase_order_line`（行）、`purchase_order_schedule`（到货计划）。**落库后回写（D-PO-23）**：`demand_allocation` 是多态分配表（`target_bo` + `target_id` 可指向任意载体，没有单一父字段），M3 不放进 `child_sections`，由服务 / API 维护；等 M6 派生只读视图就位后再做「需求分配」tab，不为单载体写前端特例 |
 | 行列表列 | `line_no / line_type_id / item_id / supplier_item_code / description / qty / uom_id / unit_price / net_amount / tax_amount / gross_amount / requested_date / deliver_to_location_id / status / fulfillment_status` |
 | 计划行列表列 | `schedule_no / line_id / schedule_kind / deliver_to_location_id / promised_date / promised_qty / received_qty / status` |
 | 行表单分区 | 基本信息（`line_no / line_type_id`）；物料（`item_id / supplier_item_code / description`）；数量与价格（`qty / uom_id / unit_price / net_amount`）；税（`tax_code_id / tax_rate_percent / tax_amount / gross_amount`）；交付（`requested_date / deliver_to_location_id`）；服务（`service_start_date / service_end_date`，仅服务行）；价格来源（`price_source`，只读 `price_trace`） |
@@ -814,6 +814,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 20 | `meta/migrations/v181__purchase_order_menu_reconcile.py`（新建） | 幂等补 `procurement`（顶层分组，`menu_path=''`）+ `purchase-order-management`（`/purchase-orders`）+ `menu_permissions` + 授权 `admin`（`default` 集不存在则跳过）+ 清理 `purchase_order-list` 等自动生成孤儿 | 迁移 `verify OK`；`/purchase-orders` 路由可渲染 |
 | 21 | `src/router/detailRouteGuard.js`（修改） | `SUPPORTED_OBJECT_TYPES` 补 `purchase_order`、`typeLabels` 补「采购订单」 | 手拼 `/detail/purchase_order/<id>` 不再 `reason=unsupported_object_type` |
 | 22 | `meta/tests/test_purchase_pricing_service.py`（新建） | 协议阶梯（1-99 ¥10 / 100+ ¥9）、边界 100 件、本地未命中回落全局、多档覆盖报错、无来源落 manual | `python d:\filework\test.py --single meta/tests/test_purchase_pricing_service.py` |
+| 23 | `meta/services/requisition_po_conversion.py`（新建）+ `meta/services/bo_action_registrations.py`（修改） | approved 申请 → 草稿 PO（头 + 行 + 分配，单事务）；行类型 `goods→PO_GOODS` / `service→PO_SERVICE`；剩余量 = 行 `qty` − active 分配合计，超量直接拒绝；注册 `purchase_order.create_from_requisition` | `--single meta/tests/test_requisition_po_conversion.py`；action 契约校验无告警 |
 
 ### 14.1 守卫不变量（R-PO-0 ~ R-PO-18）
 
@@ -865,11 +866,14 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 明细页 | `/detail/purchase_order/2` 7 个表单分区（单据信息 / 供应商与组织 / 交付与条款 / 抬头折扣与附加费 / 定价信息 / 金额合计 / 其他信息）+ 2 个子表各 2 行（订单行 / 到货计划） |
 | API 冒烟 | `.trae/debug/po_smoke.py` 46/46 全绿（含 `last_po` 取价、手工改价、审批通过 / 驳回、分配上限、确认冻结、关闭 / 取消不可逆） |
 | 取价单测 | `test_purchase_pricing_service.py` 6 passed（50 件→¥10 / 150 件→¥9 / 边界 100 件→¥9、本地未命中回落全局、多档覆盖报错、无来源落 manual） |
+| 需求转单（单测） | `test_requisition_po_conversion.py` 10 passed（全量 / 分批 / 剩余量扣减 / 超量拒绝 / 未审批拒绝 / 关闭行拒绝 / 缺参 / 行创建失败整单回滚）；`purchase_order.create_from_requisition` 注册成功（契约校验通过，共 32 个 action） |
+| 需求转单（真实 DB + BO 框架） | `.trae/debug/po_convert_smoke.py` 7/7 全绿：approved 申请 7 的开放行 → PO 23（`PO-202611-000024`，draft，`approval_status=not_required`，供应商 8 / 币种 8 / 组织 315）→ 行 22（qty 10，单价 0，金额 0）→ 分配 9（`demand_line_id=2` ↔ `target_line_id=22`，`status=active`）；再请求 5 件被 `QTY_EXCEEDS_REMAINING` 拒绝且 PO 计数不变（23） |
+| 需求转单（本轮修复） | 冒烟暴露并修复 3 处：① `RequisitionToPoService.ds` 懒加载未带 `sqlite` 参数（真实进程直接 `TypeError`）；② 转单走 BO Action 不经 `bo_api`，`order_no` 未取号（落库后回执为空）→ 改为 `_build_header` 在开事务前用 `NumberSequenceEngine` 独立取号；③ 回执不含 `order_no` → 取入参兜底 |
 | 销售轴回归 | `sales_order` / `sales_order_line` / `sales_order_schedule` 列表可读（19 / 20 / 1 行）；视图配置、明细、动作接口均 200 |
 | 测试基线 | 本模块 5 个测试文件 93 passed + 新增取价 6 passed；`--failed` 余量为既有环境失败，本模块零新增 |
-| 已知缺口 | 环境无 `default` 权限集（v177 授权段跳过），E10「非 admin 可见按钮」未取证；未擅自动 `editor / viewer` 授权 |
+| 已知缺口 | ① 环境无 `default` 权限集（v177 授权段跳过），E10「非 admin 可见按钮」未取证，未擅自动 `editor / viewer` 授权；② 转单 action 的 HTTP 暴露已确认（后端重启后 `GET /api/v2/action/` 返回 32 个 action，含 `purchase_order.create_from_requisition`），未做写调用 API 冒烟（需先有新的开放需求行）；写路径由真实 DB + BO 框架进程内端到端冒烟覆盖（取号 / 守卫 / 金额回写 / 整单回滚） |
 
-脚本统一落在 `.trae/debug/`：`po_smoke.py`（API 冒烟）、`po_ui_check.py`（UI 冒烟，结果 `po_ui_check_result.json`，截图由 `PlaywrightCLI` 落到 `test_output/.trae/debug/po_ui_list.png` / `po_ui_detail.png`）、`po_sales_regression.py`（销售轴回归）、`po_env_probe.py`（环境探测）。
+脚本统一落在 `.trae/debug/`：`po_smoke.py`（API 冒烟）、`po_convert_smoke.py`（转单端到端，结果 `po_convert_smoke.json`）、`po_ui_check.py`（UI 冒烟，结果 `po_ui_check_result.json`，截图由 `PlaywrightCLI` 落到 `test_output/.trae/debug/po_ui_list.png` / `po_ui_detail.png`）、`po_sales_regression.py`（销售轴回归）、`po_env_probe.py`（环境探测）。
 
 ---
 
@@ -890,6 +894,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | E11 | 取价：协议价格阶梯按数量取对档、多档命中取最低价；`last_po` 命中上一张已确认 PO；无来源时允许人工价 | 取价用例 + 冒烟 |
 | E12 | 行类型 5 种均可建档；`component_issue_required` / `pricing_mode` 非法组合被守卫拒绝 | 守卫用例 |
 | E13 | 审批策略按对象字段求值：同字段不同对象互不干扰；策略变更不回溯在途单据（快照生效） | 审批用例 |
+| E14 | 需求转采购订单：approved 申请的开放行按剩余量转成草稿 PO 并写 `demand_allocation` 锚点；超量 / 未审批 / 已关闭行一律拒绝；任一行写失败整单回滚 | 转单用例 + 真实 DB / BO 框架冒烟 |
 
 ---
 
@@ -968,6 +973,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | D-PO-20 | **成套计价复用 SO 的 `pricing_mode` / `parent_line_id` / `component_no`**；`configuration_id` 只读追溯 | 供应商整包报价是真实场景；选配求解仍只在销售侧 |
 | D-PO-21 | **委外采用 SAP 式整单模型，不用 Oracle OSP 式工序服务行** | OSP 依赖 WIP 工单 / 工艺路线 / outside resource，本系统均未建；结构已预留迁移点（§4.4.1） |
 | D-PO-22 | **价格阶梯必须显式配置累计 / 非累计口径**，同条件多档命中取最低价 | 对齐 Oracle BPA 价格阶梯行为；不设隐式默认，避免「为什么取这一档」说不清 |
+| D-PO-23 | **`demand_allocation` 不进 PO 详情 `child_sections`（M3）**，由服务 / API 维护 | 该表多态（`target_bo` + `target_id`），无单一父字段，子表组件按单父字段过滤；为一家载体写特例会让 UI 出现第二套父字段口径，留给 M6 派生只读视图 |
 
 ---
 
