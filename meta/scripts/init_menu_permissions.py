@@ -2565,6 +2565,36 @@ def init_menu_permissions(db_path):
                 'message': '建议分配资源可用性例外数据权限'
             })
         },
+        {
+            # [RESOURCE-P3 2026-11-01] 员工 —— 主数据组（v185 交付）
+            # employee_shift_assignment 是关系对象 ⇒ 不做独立菜单（收进员工详情页分区）
+            'menu_code': 'employee-list',
+            'menu_name': '员工',
+            'menu_path': '/master-data/employee',
+            'icon': 'User',
+            'color': '#0ea5e9',
+            'sort_order': 102,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'employee',
+            'object_types': json.dumps(['employee']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'employee', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'employee:employee_create',
+                'employee:employee_read',
+                'employee:employee_update',
+                'employee:employee_delete',
+            ]),
+            'description': '员工薄主数据（雇佣组织 / 地点 / 岗位 / 在职区间）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['employee'],
+                'message': '建议分配员工数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========

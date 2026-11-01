@@ -1,9 +1,9 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.9
+- 文档版本：v1.11
 - 日期：2026-11-01
-- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（22 passed，含多口径产能与例外求交），架构门禁 10 项全 OK；**P3 员工主数据（FR-015）方案已细化，未实施**
-- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.2）
+- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（24 passed，含多口径产能、例外求交与 HR 分支），架构门禁 10 项全 OK；**P3 员工主数据已完成（v185，`employees` + `employee_shift_assignments`，schema 23 / migration 7 / 服务 11 全绿）**
+- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
 ## 1. 背景与目标
@@ -287,16 +287,20 @@
 
   ⇒ 结论：平台只有"自然人（person_profile）+ 登录（user）+ 角色（salesperson）"，**缺"雇佣关系"这一层**。
 - **为什么是"薄"**：P3 只解决排班与可用性推导所需的字段；薪酬、个税、社保、考勤打卡、请假余额、绩效、培训、劳动合同附件、招聘候选人均**不做**（另立 HR 域）。避免把 `employee` 做成第二个 `party`。
+- **Oracle 对标结论（v1.10，2026-11-01 补充研究）**：详见 `spec-resource-model-benchmark-oracle-sap-2026-11-01.md` §2.5。
+  1. Oracle HCM 是三层：**Person → Work Relationship（person ↔ 法人雇主）→ Assignment（岗位/组织/地点/职级/排班）**；`employee` 只是 `assignment_type` 的一个取值，**不是独立主数据**。
+  2. Oracle 制造：**Labor Resource Instance 关联 TCA `person`**（关联在**工厂内唯一**），而不是关联 employee/assignment；工作中心可用性通过 HCM Workforce Scheduling 取"部门 + 排班组"的 person 排班。
+  3. ⇒ **本平台结论**：`employee` 定位为**雇佣关系（薄 assignment）**，指向 `person_profile`；`resource.person_ref` 继续指向 `person_profile`；**资源到 person，不到 employee**，不建 `employee.resource_id` 外键。
+  4. ⇒ 由此产生的两条修正：同一人可在多个工厂/组织各有一个人资源实例（不再做 resource 1:1 唯一约束）；员工号在 Oracle 中**再入职沿用原号**，故 `employee_no` 只在 `status='active'` 时唯一。
 - **`employee` 字段**（表 `employees`）：
 
 | 字段 | 说明 | 约束 |
 |---|---|---|
-| `employee_no` | 工号 | 全局唯一，必填 |
+| `employee_no` | 工号（再入职沿用原号） | 必填；**部分唯一** `WHERE status='active'` |
 | `name` | 姓名（展示冗余，来源 `person_profile` 对应 party 名称） | 必填 |
 | `person_profile_id` | 自然人档案 | 必填，FK `person_profiles` restrict |
 | `user_id` | 登录账号（可后绑） | 可空，FK `users` |
-| `resource_id` | 调度资源桥（见下） | 可空，FK `resources` |
-| `org_id` | 所属组织 | 必填，FK `orgs` |
+| `org_id` | 所属组织（雇佣组织，即 Oracle 的 legal employer/work relationship 简化） | 必填，FK `orgs` |
 | `location_id` | 工作地点 | 可空，FK `locations` |
 | `position` | 岗位名称（首期自由文本，不建岗位主数据） | 可空 |
 | `job_grade` | 职级 | 可空 |
@@ -307,13 +311,13 @@
 | `manager_employee_id` | 直属主管（自引用） | 可空，无环 |
 
 - **唯一性与完整性**：
-  - `employee_no` 唯一；
+  - 部分唯一索引 `employees(employee_no) WHERE status='active'`：在职期间工号唯一；再入职沿用原号（历史行 `terminated` 可与在职行同号）；
   - 部分唯一索引 `employees(person_profile_id) WHERE status='active'`：同一自然人在同一时刻只能有一条在职雇佣记录（再入职走新行 + 旧行 `terminated`）；
-  - 部分唯一索引 `employees(resource_id) WHERE resource_id IS NOT NULL AND status='active'`：一个调度资源只能被一个在职员工占用；
-  - `termination_date >= hire_date`；`manager_employee_id` 不得成环（服务层校验）。
-- **与 `resource` 的桥接**（关键决策）：`employee.resource_id` 可选 1:1 指向 `resource(resource_kind=person)`。
-  - 理由：调度/产能侧只认 `resource`，HR 侧只认 `employee`；显式桥接避免每次排程都走 `resource → person_profile ← employee` 三跳 join；不建资源岗（纯办公室员工）留空即可。
-  - 反向不建 `resource.employee_id`：`resource` 保持与 HR 解耦（外协/设备不需要员工概念）。
+  - `termination_date >= hire_date`；`status=terminated` 时 `termination_date` 必填；`manager_employee_id` 不得成环（服务层校验）。
+- **与 `resource` 的关系（关键决策，v1.10 修正）**：**不建 `employee.resource_id`，资源与员工都指向 person，按 person 求交。**
+  - 求交方式：`resource.person_ref = employees.person_profile_id AND employees.status='active'`；服务层提供 `resolve_resource_employee(conn, resource_id)` 封装（一处 join，其他调用方不再各写 SQL）。
+  - 理由（Oracle 依据）：① 劳动资源实例关联的是 **person**，不是 employee；② 关联在**工厂内唯一**，同一个人跨厂/跨组织可有多个 person 资源实例 —— 若做 1:1 外键，第二实例无法表达；③ 员工历史行（离职/再入职/调岗）会让资源指向失效，而 person 不变。
+  - 代价：每次排程多一次 `employees(person_profile_id)` 索引 join（可忽略）；收益是**单一真源**，不会出现"资源指向 A、person 指向 B"的双写不一致。
 - **`employee_shift_assignment` 字段**（表 `employee_shift_assignments`，P3）：
   - `employee_id`（必填）/ `shift_id`（必填，复用 FR-014 的 `shift` 时段模板）
   - `day_mask_mon` ~ `day_mask_sun`（默认 true）/ `seq`（默认 1）
@@ -322,20 +326,22 @@
   - `note`；唯一 `(employee_id, shift_id, seq, effective_from)`
   - **与 `calendar_shift` 的差异**：`calendar_shift` 回答"哪个日历哪天开哪个班"（产能侧）；`employee_shift_assignment` 回答"谁上哪个班"（人员侧）。两者共用 `shift`，不复制时段定义。
 - **可用性推导规则**（`available_minutes` 的 HR 分支，P3 实施）：
-  1. 若资源被在职员工占用且该员工当日有生效排班 ⇒ 以**员工排班窗口**为准，**不再叠加**资源日历（避免双轨重复计数）；
-  2. 若该员工当日无排班 ⇒ 回退到资源日历（空岗/未排班）；
-  3. `resource_availability` 例外在**两个分支上都生效**（请假优先于排班，检修覆盖设备）；
-  4. 同一员工同日多段排班允许；时间窗重叠时返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库。
+  1. 先 `resolve_resource_employee(resource_id)`：由 `resource.person_ref` 找 `status='active'` 的员工；找不到 ⇒ 纯日历资源，走原逻辑；
+  2. 员工当日有生效排班 ⇒ 以**员工排班窗口**为准，**不再叠加**资源日历（避免双轨重复计数）；
+  3. 员工当日无排班 ⇒ 回退到资源日历（空岗/未排班）；
+  4. `resource_availability` 例外在**两个分支上都生效**（请假优先于排班，检修覆盖设备）；
+  5. 同一员工同日多段排班允许；时间窗重叠时返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库。
 - **验收**：
   - 同一 `person_profile` 新建第二条 `status=active` 员工时保存失败（部分唯一索引）；
-  - 同一 `resource_id` 被第二个在职员工占用时保存失败；
+  - 同一 `employee_no` 在职期间建第二条 `status=active` 时保存失败；历史 `terminated` 行可复用同号（再入职）；
   - 员工离职（`status=terminated`）缺 `termination_date` 时保存失败；
-  - 员工可无 `resource_id`（不参与调度），也可有（立即进入资源匹配候选）；
-  - HR 排班窗口与资源日历冲突时，按上述规则以 HR 排班为准，且结果可解释（返回命中的 assignment id）。
+  - 员工不建资源也能存在（纯办公室岗）；建了 person 资源即自动进入匹配候选，**无需人工绑 employee↔resource**；
+  - 同一 person 在两个组织各有一个人资源实例时，两实例都能解析到同一条在职员工记录（Oracle 工厂内唯一语义）；
+  - HR 排班窗口与资源日历冲突时，以 HR 排班为准，且结果可解释（返回命中的 `employee_shift_assignment` id）。
 - **UI/菜单**：`employee` 是**主体实体** ⇒ 独立菜单；`employee_shift_assignment` 是**关系对象** ⇒ **不做独立菜单**，收进员工详情页分区，但必须补齐 `ui_view_config` 三态（list/form/detail），避免裸 ID 列与空表单（遵循 `meta-menu-retirement`）。
 - **优先级**：Should（P3，依赖 P2b `shift`）
 - **类型映射**：功能
-- **来源**：用户 2026-11-01 提出"Employee 主数据是否还没有"的核查 + 对标 §3.3（HR Work Schedule Rule / Shift Group）
+- **来源**：用户 2026-11-01 提出"Employee 主数据是否还没有"的核查 + Oracle 对标 §2.5（Person / Work Relationship / Assignment / Labor Resource Instance）+ 对标 §3.3（HR Work Schedule Rule / Shift Group）
 
 ## 4. 非功能需求
 
@@ -523,7 +529,7 @@
 | `resource_assignments` | `work_order_operation_id` / `resource_id` / `planned_start` / `planned_end` / `planned_qty` / `status` / `source` | 计划量 ≤ 工序量；同一资源时间窗不重叠（显式超产标记例外） |
 | `resource_territory_assignments` | `resource_id`（或 `resource_group_id`）/ `territory_id` / `coverage_level` / `effective_from` / `effective_to` | 唯一 `(resource_id, territory_id, effective_from)`；允许重叠 |
 | `resource_availabilities` | `resource_id` / `availability_type`（available/unavailable/overtime）/ `start_at` / `end_at` / `reason` / `source`（manual/hr/maintenance/other）/ `org_id` | **不建唯一键**（同一资源允许重叠例外）；`end_at > start_at`；例外与班次窗口按**绝对时间**求交，见 FR-005 |
-| `employees`（P3） | 见 FR-015 | `employee_no` 全局唯一；部分唯一 `(person_profile_id) WHERE status='active'`；部分唯一 `(resource_id) WHERE resource_id IS NOT NULL AND status='active'`；`termination_date >= hire_date`；主管自引用无环 |
+| `employees`（P3） | 见 FR-015（不含 `resource_id`，资源按 person 求交） | 部分唯一 `(employee_no) WHERE status='active'`；部分唯一 `(person_profile_id) WHERE status='active'`；`termination_date >= hire_date`；主管自引用无环 |
 | `employee_shift_assignments`（P3） | `employee_id` / `shift_id` / 7 日掩码 / `seq` / `effective_from` / `effective_to` / `work_center_id` / `note` | 唯一 `(employee_id, shift_id, seq, effective_from)`；复用 `shifts` 时段模板，不复制时段定义；不做独立菜单 |
 
 **修改表**
@@ -605,6 +611,9 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | TBD-9 | `employee.name` 是否冗余 | 姓名可从 `person_profile` → `party` 取，但通用列表页不支持 join 展示 | **建议冗余 + 保存时由服务同步**；若后续列表页支持 relation 展示可去列 |
 | TBD-10 | 外协/派遣人员是否入 `employees` | `employment_type=dispatched` 与 `resource_kind=external` 语义交叉 | **建议**：派遣入 `employees`（工时/排班归我方），外协主体仍走 `party` + `resource(external)`，不建员工行 |
 | TBD-11 | 一人多组织 | 兼职/矩阵汇报需要一人挂多组织 | **首期不支持**：`employee` 单 `org_id`；多组织用 `employee_org_assignment` 另立（P4），避免首期做成都市 |
+| TBD-12 | 多法人 / 多分配（Oracle 三层） | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **首期用两层简化**（`employee` 即一条在职雇佣）；P4 若出现多法人/多岗并行，再拆 `employments`（法人/雇佣段）+ `employee_assignments`（岗位/班次），`employee` 降级为兼容视图；不提前建表 |
+| TBD-13 | 员工排班是否受工厂日历节假日约束 | P3 实现为"有员工排班即不叠加日历"（FR-015 原文），故 `calendar_day.day_type=holiday` 不作用于员工排班 | **P4 定**：建议用 `employee_shift_assignment.work_center_id` → 该工作中心/地点的日历**仅取 holiday 关闭**（不取产能），避免节假日仍排班；需与 HR 确认"节假日值班"是否例外 |
+| TBD-14 | 同日多段排班重叠告警 | FR-015 验收要求返回 `ASSIGNMENT_OVERLAP` 告警 | **P4 实现**：`employee_shift_windows` 已按 `seq,id` 返回全部窗口，告警只需在排班校验函数里做区间求交（当前未写该校验函数） |
 
 ---
 
@@ -726,3 +735,5 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.7 | FR-005 多口径补齐：新增 `capacity_by_category`（同一类别取有效期最新行；labor_hours/machine_hours 由日历推导，工具数/载重/体积/场地按声明值展开；支持资源与组两种主体）；服务测试 19 passed |
 | 2026-11-01 | v1.8 | P2c 可用性例外落地：新增 `resource_availability`（枚举 available/unavailable/overtime × manual/hr/maintenance/other，绝对时间窗，不建唯一键）+ 迁移 v180（1 菜单 / 4 权限 / 2 枚举 / 2 索引）；服务层 `availability_overrides` 与 `available_minutes` 按**绝对时间**把例外与班次窗口求交（请假扣减、加班加成、检修等同不可用）；schema 16 + migration 6 + 服务 22 passed |
 | 2026-11-01 | v1.9 | P3 方案细化：新增 FR-015「员工主数据（薄）」（现状盘点确认 `person_profile`/`party_internal`/`user`/`salesperson` 均不承载雇佣关系；`employee` 14 字段 + `employee.resource_id` 1:1 桥接 + 两个部分唯一索引；`employee_shift_assignment` 复用 `shift` 时段模板、不做独立菜单；HR 排班优先于资源日历的可用性推导规则）；新增 M5（P3）、§9.3 两行、TBD-9~11；**仅方案，未实施** |
+| 2026-11-01 | v1.10 | Oracle 对标修正 FR-015：Oracle HCM 为 Person → Work Relationship → Assignment（employee 只是 assignment_type），制造 Labor Resource Instance 关联 TCA **person** 且工厂内唯一 ⇒ **资源到 person，不到 employee**；删除 `employee.resource_id` 桥接，改为 `resolve_resource_employee` 按 person 求交；`employee_no` 由全局唯一改为 `status='active'` 部分唯一（再入职沿用原号）；§9.3 同步；新增 TBD-12（多法人/多分配，首期两层简化）；研究稿升 v0.3 并补 §2.5 与 5 条官方来源 |
+| 2026-11-01 | v1.11 | P3 实施完成（迁移 **v185**，避开并行会话占用的 v181-v184）：`employees`（2 条部分唯一索引：在职工号 / 在职 person）、`employee_shift_assignments`（唯一 `(employee_id, shift_id, seq, effective_from)`，不做独立菜单）；`employee_service`（`resolve_resource_employee` / `validate_employee` / `employee_shift_windows`）；`resource_matching_service._resource_windows` 接入 HR 分支（有排班覆盖日历、无排班回退、例外照常扣减）；schema 23 + migration 7 + 服务 11 + 资源服务 24 passed，架构门禁 10 项 OK；新增 TBD-13（节假日是否约束员工排班）、TBD-14（重叠告警） |

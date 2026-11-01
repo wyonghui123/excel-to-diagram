@@ -260,6 +260,40 @@ def shift_windows_for_date(conn, calendar_id: int,
 
 
 # ============================================================================
+# 可用性基准窗口 (P3 / FR-015 HR 分支)
+# ============================================================================
+
+def _resource_windows(conn, resource_id: int, the_date: Any,
+                      default_calendar_id: Optional[int] = None,
+                      ) -> List[Dict[str, Any]]:
+    """资源当日可用性基准窗口(HR 排班优先, 否则回退资源日历)。
+
+    FR-015 优先级:
+      ① 人资源能解析到**在职**员工, 且当日有生效排班 ⇒ 以员工排班窗口为准,
+        **不叠加**资源日历(避免双轨重复计数);
+      ② 员工当日无排班(空岗/未排班) ⇒ 回退 `resolve_resource_calendar`
+        + `shift_windows_for_date`;
+      ③ 非人资源 / 未建雇佣关系 ⇒ 回退日历, 与原口径完全一致。
+    返回项键与 `shift_windows_for_date` 一致, 可直接供例外求交复用。
+    """
+    from meta.services.employee_service import (
+        employee_shift_windows,
+        resolve_resource_employee,
+    )
+
+    employee = resolve_resource_employee(conn, resource_id, as_of=the_date)
+    if employee:
+        windows = employee_shift_windows(conn, employee['id'], the_date)
+        if windows:
+            return windows
+
+    calendar_id = resolve_resource_calendar(
+        conn, resource_id, default_calendar_id, as_of=the_date)
+    return shift_windows_for_date(conn, calendar_id, the_date) \
+        if calendar_id else []
+
+
+# ============================================================================
 # 可用性例外 (FR-005)
 # ============================================================================
 
@@ -339,15 +373,20 @@ def _availability_entries(conn, resource_id: int,
 
 
 def _availability_effect(conn, resource_id: int, date_str: str,
-                         calendar_id: Optional[int]) -> Dict[str, Any]:
+                         calendar_id: Optional[int],
+                         windows: Optional[List[Dict[str, Any]]] = None
+                         ) -> Dict[str, Any]:
     """按绝对时间求交, 汇总当天例外对班次窗口的扣减 / 加成。
 
     · unavailable: 与窗口的重叠分钟扣减(× 该窗口 capacity_factor);
     · overtime: 窗口内重叠分钟加成(× factor), 窗口外部分也全部计入加班分钟;
     · available: 只记录, 不加成。
+    · windows 为空时按日历展开(保持 P2c 旧口径); 传入时按调用方给的基准窗口
+      (P3 员工排班分支)求交, 例外规则不变。
     """
-    windows = shift_windows_for_date(conn, calendar_id, date_str) \
-        if calendar_id else []
+    if windows is None:
+        windows = shift_windows_for_date(conn, calendar_id, date_str) \
+            if calendar_id else []
     entries = _availability_entries(conn, resource_id, date_str)
 
     bounds = [_window_bounds(date_str, window) for window in windows]
@@ -400,7 +439,9 @@ def availability_overrides(conn, resource_id: int,
             '资源不存在: {0}'.format(resource_id), 'RESOURCE_NOT_FOUND')
 
     calendar_id = resolve_resource_calendar(conn, resource_id, None, as_of=date_str)
-    effect = _availability_effect(conn, resource_id, date_str, calendar_id)
+    windows = _resource_windows(conn, resource_id, date_str)
+    effect = _availability_effect(conn, resource_id, date_str, calendar_id,
+                                  windows)
     units = float(resource['capacity_units'] or 1)
     utilization = float(resource['utilization_pct']
                         if resource['utilization_pct'] is not None else 100)
@@ -430,6 +471,8 @@ def available_minutes(conn, resource_id: int, the_date: Any = None,
 
     显式传入 calendar_id 时跳过优先级解析(用于"临时日历"模拟)。
     None / 无日历且无例外时返回 0.0。
+    · P3(FR-015): 人资源有在职员工且当日有排班 ⇒ 排班窗口优先、不叠加日历;
+      员工无排班 ⇒ 回退资源日历(原 P2c 口径)。
     """
     the_date = _normalize_date(the_date)
     resource = _fetch_one(
@@ -443,8 +486,14 @@ def available_minutes(conn, resource_id: int, the_date: Any = None,
     if calendar_id is None:
         calendar_id = resolve_resource_calendar(
             conn, resource_id, default_calendar_id, as_of=the_date)
+        windows = _resource_windows(conn, resource_id, the_date,
+                                    default_calendar_id)
+    else:
+        windows = shift_windows_for_date(conn, calendar_id, the_date) \
+            if calendar_id else []
 
-    effect = _availability_effect(conn, resource_id, the_date, calendar_id)
+    effect = _availability_effect(conn, resource_id, the_date, calendar_id,
+                                  windows)
     units = float(resource['capacity_units'] or 1)
     utilization = float(resource['utilization_pct']
                         if resource['utilization_pct'] is not None else 100)
@@ -507,6 +556,9 @@ def capacity_by_category(conn, resource_id: Optional[int] = None,
     if resource_id is not None:
         calendar_id = resolve_resource_calendar(
             conn, resource_id, default_calendar_id, as_of=the_date)
+        # P3(FR-015): TIME 口径以「员工排班优先 / 回退日历」的实际窗口算开机时长
+        windows = _resource_windows(conn, resource_id, the_date,
+                                    default_calendar_id)
     else:
         group = _fetch_one(
             conn,
@@ -514,9 +566,8 @@ def capacity_by_category(conn, resource_id: Optional[int] = None,
             (group_id,))
         calendar_id = group['calendar_id'] if group and group['calendar_id'] \
             else default_calendar_id
-
-    windows = shift_windows_for_date(conn, calendar_id, the_date) \
-        if calendar_id else []
+        windows = shift_windows_for_date(conn, calendar_id, the_date) \
+            if calendar_id else []
     window_minutes = float(sum(w['effective_minutes'] for w in windows))
 
     categories: Dict[str, Dict[str, Any]] = {}

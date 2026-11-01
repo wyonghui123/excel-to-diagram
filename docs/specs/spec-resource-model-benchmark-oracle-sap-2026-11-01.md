@@ -1,7 +1,7 @@
 # 研究：统一资源模型（对标 Oracle / SAP，覆盖生产、服务、物流）
 
 - 日期：2026-11-01
-- 版本：v0.2（细化对象模型 + 待确认问题）
+- 版本：v0.3（补 Oracle 雇佣模型 / 劳动资源绑定：资源到 person 还是 employee）
 - 状态：研究稿（不涉及代码改动）
 - 关联：`spec-work-center-resource-capability-research-2026-11-01.md`（资源域三层模型、命名裁决）、`spec-unified-resource-model-2026-11-01-v1.0.md`（v1.3，正式 Spec）
 - 说明：下文使用各产品公开的**对象/术语**做结构对齐，不引用具体物理表名；不同版本命名有差异，以结构语义为准。来源见文末。
@@ -17,6 +17,7 @@
 5. **产能是公式，不是数字**：SAP 可用能力 = 运行时间 × 班次数 × 单个产能数量 × 利用率（再叠加工厂日历与班次序列版本）；Oracle 在"分配到工作中心"时给 Default Units Available + 24h 开关 + 逐班次单元分配 + override calendar + 资源/班次例外。
 6. **费率有基准**：Oracle 资源费率支持"每次使用固定成本（Setup cost）"；SAP 走"成本中心 + 作业类型"。裸 `rate` 数字不够，至少需要 `rate_basis`（每小时/每次/每单位/每公里/每公斤）。
 7. 我们的两层模型（`resource_group` → `resource`）方向正确，但需要补 4 个字段级能力：**资源单元数**、**利用率**、**收尾工时**、**费率基准**；其余（类型层 vs 个体层、备选工艺、瓶颈标记）作为待确认项。
+8. **资源到 person，不到 employee**（v0.3 补）：Oracle 劳动资源实例关联 TCA **person**（且每工厂唯一）；HCM 的 Employee 只是 assignment_type 的一个取值。我们应让 `resource.person_ref → person_profile`、`employee.person_profile_id → person_profile`，**不建 employee↔resource 外键**，调度时按 person 求交。
 
 ---
 
@@ -91,6 +92,26 @@
 | Resource Classification（OPM） | 资源分类（如"炉具类"），可分组用于成本/报表，资源可泛化（OVENS）或具体（OVEN 1） |
 
 要点：**同一资源可"泛化定义 + 具体实例"**（OVENS vs OVEN 1），再次印证类型层/个体层；运价必须带基准。
+
+### 2.5 Oracle 雇佣模型与劳动资源绑定（2026-11-01 补，回答"资源到 person 还是 employee"）
+
+**结论：Oracle 制造资源绑 `Person`，不绑 `Employee`；`Employee` 只是 `Assignment` 的一个类型取值，不是独立主数据。**
+
+| 层 | Oracle 实体 | 语义 | 关键事实 |
+|---|---|---|---|
+| L1 身份 | `Person`（TCA person party / HCM Person，EBS `PER_PEOPLE_F`） | 自然人，全企业唯一 | 员工号、person number 挂在 person 上；**再入职沿用同一员工号** |
+| L2 雇佣关系 | `Work Relationship`（EBS 由 `PER_ALL_ASSIGNMENTS_M` 的 Level 2 承载） | person ↔ 法人雇主 | 一个 person 可有多条（多法人），其中一条 primary |
+| L3 分配 | `Assignment`（`PER_ALL_ASSIGNMENTS_M` Level 3） | 岗位/组织/地点/职级/排班 | 每条 WR 至少一条；`assignment_type` 区分 employee / contingent worker / applicant / benefits |
+| 制造资源 | `Labor Resource Instance` | 车间里"真实的人" | **可选**关联 TCA 的 **person**；关联在**工厂（plant）内唯一** |
+| 排班 | HCM Workforce Scheduling | 工作中心 ↔ HCM 部门/排班组 | 制造侧"View Persons"看到的是 HCM **person**；排班与可用性来自 HCM，不来自制造资源主数据 |
+
+要点（对本平台的直接推论）：
+
+1. **不要建"Employee 主数据"作为第二套身份**：Oracle 里 employee = person + assignment(type='E')。我们的 `employee` 应定位为**雇佣关系（薄 assignment）**，指向 `person_profile`；字段只放雇佣上下文（组织/岗位/职级/入离职/用工类型），身份信息留在 person。
+2. **`resource(person)` 指向 person，不指向 employee**：Oracle 的劳动资源实例关联 TCA person，且"每工厂唯一" —— 同一个人在不同工厂可以有多个劳动资源实例。若我们让 resource→employee 1:1，会同时踩两个坑：跨厂第二实例无法表达、员工历史行（再入职/调岗）会让资源指向失效。
+3. **员工号连续**：Oracle 再入职沿用原员工号 ⇒ 我们的 `employee_no` 不能全局唯一（历史行会复用），正确口径是 **`status='active'` 时唯一**，再入职由服务层复制上一段的号码。
+4. **多分配留口**：Oracle 是三层的（WR + 多 assignment）；我们首期用单条 `employee` 是**两层简化**（person + 一条在职雇佣），多法人/多组织调岗留 P4 扩展（见 TBD-12），不在首期做成都市。
+5. **排班归属**：制造侧的可用性来自 HCM 排班，不来自资源日历；与 FR-014/FR-015 的"HR 排班优先于资源日历"一致。
 
 ---
 
@@ -424,6 +445,11 @@
 - [Oracle Fusion: How Work Orders Are Scheduled（班次、覆盖日历、例外）](http://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26c/faumf/how-work-orders-are-scheduled.html)
 - [Oracle OPM: Defining Generic Resources（资源分类/泛化资源）](https://docs.oracle.com/cd/E26401_01/doc.122/e49065/T476871T476877.htm)
 - [Oracle Production Scheduling: Resource Costs（Setup 固定成本）](http://docs.oracle.com/cd/E18727_01/doc.121/e27241/T581889T581987.htm)
+- [Oracle Fusion HCM：Person / Work Relationship / Assignment（雇佣模型）](http://docs.oracle.com/en/applications/fusion-apps/fusion-human-capital-management/hcmintegration/index.html)
+- [Oracle HCM 表 `PER_ALL_ASSIGNMENTS_M`（3-Tier Model、assignment_type）](http://docs.oracle.com/en/cloud/saas/human-resources/oedmh/perallassignmentsm-30304.html)
+- [Oracle EBS HRMS：员工号生成规则（再入职沿用同一员工号）](https://docs.oracle.com/cd/A60725_05/html/comnls/us/per/empnf04.htm)
+- [Oracle Manufacturing：劳动资源实例关联 TCA person（工厂内唯一）](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26d/faims/how-you-manage-resources.html)
+- [Oracle Manufacturing × HCM Workforce Scheduling（工作中心 → 部门/排班组）](http://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26c/faims/use-workforce-scheduling-to-manage-shifts-and-operator-assignments.html)
 - [SAP PP Work Center（可用能力公式 / 产能类别）](https://sap.gugulii.com/docs/s4-pp/pp-a03-01/)
 - [SAP Work Center 标准值（Setup / Machine / Labor / Teardown）](https://www.learntosap.com/pptutorialmmsc.html)
 - [SAP S/4HANA PP/DS（有限排产、瓶颈资源、Mode）](https://www.bestonlinecareer.com/blog/sap-s4-hana-ppds-complete-guide-to-embedded-ppds-in-2026)
@@ -436,3 +462,4 @@
 |---|---|---|
 | 2026-11-01 | v0.1 | 首版：Oracle（EBS/Fusion/FSM/TM）与 SAP（PP/S4/PM-CS/TM/FSM）模型拆解、8 维对比、7 条共同抽象、统一对象模型、基数约束、场景矩阵、分期与风险 |
 | 2026-11-01 | v0.2 | 细化对象模型：Oracle 三层实体（Work Area / Work Center / Resource + Instance）、分配单元的班次单元数与覆盖日历、SAP 可用能力公式与工时四要素、排程三时间、费率基准与成本中心/作业类型、PP/DS Mode 与瓶颈；对比扩到 11 维、共同抽象扩到 10 条；模型补 `capacity_units` / `utilization_pct` / `teardown_minutes` / `rate_basis` / `is_bottleneck`；§9 关闭 4 个旧问题并新增 8 个确认问题；补参考来源 |
+| 2026-11-01 | v0.3 | 补 §2.5「Oracle 雇佣模型与劳动资源绑定」：Person → Work Relationship → Assignment 三层、employee 只是 assignment_type、制造劳动资源实例关联 TCA person（工厂内唯一）、工作中心 ↔ HCM 部门/排班组；结论：资源绑 person 不绑 employee，`employee_no` 仅在职唯一（再入职沿用号）；补 5 条官方来源 |

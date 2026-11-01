@@ -80,6 +80,7 @@ CREATE TABLE resources (
     code TEXT,
     name TEXT,
     resource_kind TEXT DEFAULT 'person',
+    person_ref INTEGER,
     calendar_id INTEGER,
     location_id INTEGER,
     capacity_units REAL DEFAULT 1,
@@ -148,6 +149,39 @@ CREATE TABLE resource_availabilities (
     end_at TEXT,
     reason TEXT,
     source TEXT DEFAULT 'manual'
+);
+CREATE TABLE employees (
+    id INTEGER PRIMARY KEY,
+    employee_no TEXT,
+    name TEXT,
+    person_profile_id INTEGER,
+    user_id INTEGER,
+    org_id INTEGER,
+    location_id INTEGER,
+    position TEXT,
+    job_grade TEXT,
+    employment_type TEXT DEFAULT 'full_time',
+    status TEXT DEFAULT 'active',
+    hire_date TEXT,
+    termination_date TEXT,
+    manager_employee_id INTEGER
+);
+CREATE TABLE employee_shift_assignments (
+    id INTEGER PRIMARY KEY,
+    employee_id INTEGER,
+    shift_id INTEGER,
+    day_mask_mon INTEGER DEFAULT 1,
+    day_mask_tue INTEGER DEFAULT 1,
+    day_mask_wed INTEGER DEFAULT 1,
+    day_mask_thu INTEGER DEFAULT 1,
+    day_mask_fri INTEGER DEFAULT 1,
+    day_mask_sat INTEGER DEFAULT 1,
+    day_mask_sun INTEGER DEFAULT 1,
+    seq INTEGER DEFAULT 1,
+    effective_from TEXT,
+    effective_to TEXT,
+    work_center_id INTEGER,
+    note TEXT
 );
 """
 
@@ -608,3 +642,52 @@ def test_capacity_by_category_group_scope_and_argument_check():
     with pytest.raises(ResourceMatchingError) as exc:
         capacity_by_category(conn)
     assert exc.value.code == 'INVALID_ARGUMENT'
+
+
+# ============================================================================
+# HR 可用性分支 (FR-015 / P3)
+# ============================================================================
+
+def test_employee_shift_overrides_resource_calendar():
+    """人资源有在职员工且当日有排班 ⇒ 以员工排班窗口为准，不叠加日历。"""
+    conn = _connect()
+    _calendar(conn, 60)
+    calendar_shift = _insert(conn, 'shifts', code='CAL_DAY', name='日历白班',
+                             start_time='08:00', end_time='16:00',
+                             break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=60, shift_id=calendar_shift)
+
+    employee_shift = _insert(conn, 'shifts', code='EMP_EARLY', name='员工早班',
+                             start_time='06:00', end_time='10:00')
+    employee_id = _insert(conn, 'employees', employee_no='E60', name='张三',
+                          person_profile_id=160, status='active',
+                          hire_date='2026-01-01')
+    _insert(conn, 'employee_shift_assignments', employee_id=employee_id,
+            shift_id=employee_shift, effective_from='2026-01-01')
+    _insert(conn, 'resources', id=60, code='R60', person_ref=160,
+            calendar_id=60)
+
+    # 日历 420 分钟, 员工排班 240 分钟 ⇒ 取员工排班
+    assert available_minutes(conn, 60, '2026-11-03') == 240.0
+    result = capacity_by_category(conn, resource_id=60,
+                                  the_date='2026-11-03')
+    assert result['calendar_id'] == 60
+    assert result['calendar_minutes'] == 240.0
+
+
+def test_employee_without_shift_falls_back_to_resource_calendar():
+    """在职员工当日无排班 ⇒ 回退资源日历；无 person_ref 同样回退。"""
+    conn = _connect()
+    _calendar(conn, 61)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='16:00', break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=61, shift_id=shift_id)
+    _insert(conn, 'employees', employee_no='E61', name='李四',
+            person_profile_id=161, status='active', hire_date='2026-01-01')
+    _insert(conn, 'resources', id=61, code='R61', person_ref=161,
+            calendar_id=61)
+    _insert(conn, 'resources', id=62, code='R62', person_ref=999,
+            calendar_id=61)
+
+    assert available_minutes(conn, 61, '2026-11-03') == 420.0
+    assert available_minutes(conn, 62, '2026-11-03') == 420.0
