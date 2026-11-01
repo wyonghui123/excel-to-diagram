@@ -10,7 +10,7 @@
   · 编号在「创建」时生成（业务键校验要求非空），格式 `{前缀}-{YYYYMMDD}-{6 位流水}`；
     提交时若仍缺号再补（兼容直接提交的调用方）。取号跟随调用方事务：极少数并发
     提交可能撞唯一约束，由数据库唯一索引兜底报错，不做独立事务取号
-    （见 bo_api._allocate_sales_order_no 的硬约束说明）。
+    （见 bo_api._allocate_document_no 的硬约束说明）。
   · 审批策略为空即免审批：service_request 行引用的目录项
     `requires_approval = false` 且 `approval_policy` 为空/空对象时，提交直接落 approved。
   · requisition 在本里程碑没有治理配置载体（审批开关属 M3 的法人对/组织对配置），

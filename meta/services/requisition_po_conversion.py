@@ -242,7 +242,7 @@ class RequisitionToPoService:
     def _allocate_order_no(self, document_type_id: Any, order_date: Any) -> Any:
         """按单据类型指向的序列取号（spec U12）。
 
-        BO Action 路径不经 `bo_api.create_bo`，故 `_allocate_sales_order_no`
+        BO Action 路径不经 `bo_api.create_bo`，故 `_allocate_document_no`
         不会执行；取号须在此完成，且必须早于外层事务（序列引擎要求独立事务，
         嵌入调用方事务会退化为「锁持有到 COMMIT + 回滚把号一并回滚」）。
         """
