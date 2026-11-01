@@ -33,7 +33,7 @@ class _FakeResolver:
 
 
 BASE = {
-    'order_type_id': 1,
+    'document_type_id': 1,
     'order_date': '2026-10-25',
     'customer_account_id': 4,
     'org_id': 318,

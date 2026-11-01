@@ -295,6 +295,16 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
         bo_framework.register_interceptor(ShipmentGuardInterceptor())
+        # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
+        #   服务请求行 / 请购行的行级必填。与 server.py create_app() 同位登记 ——
+        #   两条启动路径缺一会静默失效。
+        from meta.core.interceptors.demand_entry_guard_interceptor import DemandEntryGuardInterceptor
+        bo_framework.register_interceptor(DemandEntryGuardInterceptor())
+        # [DOCUMENT_TYPE 2026-11-01] 单据类型守卫（T-D20，平台层）：对所有声明
+        #   document_type_id 的业务单据头生效，新增单据只需引用 document_type_aspect。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.document_type_guard_interceptor import DocumentTypeGuardInterceptor
+        bo_framework.register_interceptor(DocumentTypeGuardInterceptor())
         # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor

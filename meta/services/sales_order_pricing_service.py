@@ -127,7 +127,7 @@ class SalesOrderPricingService:
         price_date = _date_key(order.get('price_date')) or _date_key(order.get('order_date'))
         dims = dict(
             sales_org_id=order.get('sales_org_id'),
-            order_type_id=order.get('order_type_id'),
+            order_type_id=order.get('document_type_id'),
             price_date=price_date,
             currency=currency,
             preferred_rate_table_id=self._preferred_rate_table_id(order),
@@ -218,7 +218,7 @@ class SalesOrderPricingService:
         price_date = _date_key(order.get('price_date')) or _date_key(order.get('order_date'))
         resolved = self.det.resolve(
             sales_org_id=order.get('sales_org_id'),
-            order_type_id=order.get('order_type_id'),
+            order_type_id=order.get('document_type_id'),
             price_date=price_date,
             currency=currency,
             preferred_rate_table_id=self._preferred_rate_table_id(order),
@@ -307,7 +307,7 @@ class SalesOrderPricingService:
 
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            'SELECT id, status, order_type_id, order_date, price_date, currency_id, '
+            'SELECT id, status, document_type_id, order_date, price_date, currency_id, '
             'sales_org_id, customer_account_id, pricing_status, '
             'header_discount_percent, header_surcharge_percent, '
             'exchange_rate, exchange_rate_type, exchange_rate_date '

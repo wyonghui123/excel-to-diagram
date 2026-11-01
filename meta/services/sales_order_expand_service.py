@@ -417,7 +417,7 @@ class SalesOrderExpandService:
 
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            "SELECT id, order_no, order_type_id, order_date, status, currency_id "
+            "SELECT id, order_no, document_type_id, order_date, status, currency_id "
             f"FROM {ORDER_TABLE} WHERE id = ?", [order_id])
         return rows[0] if rows else None
 

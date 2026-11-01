@@ -7,6 +7,7 @@ from functools import wraps
 from flask import request, g, jsonify, make_response, current_app
 from meta.services.token_service import TokenService
 from meta.services.token_blacklist_service import token_blacklist_service
+from meta.core.permission_gate import evaluate_code
 
 
 SELF_SERVICE_WHITELIST = {
@@ -85,13 +86,9 @@ def require_permission(permission_code: str):
         def decorated(*args, **kwargs):
             if is_self_service():
                 return f(*args, **kwargs)
-            
-            user_permissions = g.current_user.get('permissions', [])
 
-            if '*' in user_permissions:
-                return f(*args, **kwargs)
-
-            if permission_code not in user_permissions:
+            # [FR-005] 功能权限判定统一走 PermissionGate
+            if not evaluate_code(g.current_user, permission_code):
                 return jsonify({
                     'error': f'需要权限: {permission_code}',
                     'code': 'FORBIDDEN',
@@ -117,12 +114,8 @@ def require_permission_any(*permission_codes):
             if is_self_service():
                 return f(*args, **kwargs)
 
-            user_permissions = g.current_user.get('permissions', [])
-
-            if '*' in user_permissions:
-                return f(*args, **kwargs)
-
-            if not any(code in user_permissions for code in permission_codes):
+            # [FR-005] 功能权限判定统一走 PermissionGate
+            if not any(evaluate_code(g.current_user, code) for code in permission_codes):
                 return jsonify({
                     'error': f'需要权限之一: {", ".join(permission_codes)}',
                     'code': 'FORBIDDEN',
@@ -151,15 +144,9 @@ def require_permission_unified(resource_type: str, action_code: str):
             
             # 构建权限编码
             permission_code = f"{resource_type}:{action_code}"
-            
-            user_permissions = g.current_user.get('permissions', [])
 
-            # 超级管理员
-            if '*' in user_permissions:
-                return f(*args, **kwargs)
-
-            # 检查权限
-            if permission_code not in user_permissions:
+            # [FR-005] 功能权限判定统一走 PermissionGate
+            if not evaluate_code(g.current_user, permission_code):
                 return jsonify({
                     'error': f'需要权限: {permission_code}',
                     'code': 'FORBIDDEN',
@@ -203,10 +190,6 @@ def is_admin(user_info=None):
         info = user_info
     if not info:
         return False
-    perms = info.get('permissions', [])
-    if not isinstance(perms, (set, list, tuple)):
-        try:
-            perms = set(perms)
-        except TypeError:
-            return False
-    return '*' in perms
+    # [FR-005] 通配判定收敛到 PermissionGate
+    from meta.core.permission_gate import is_admin_user
+    return is_admin_user(info)

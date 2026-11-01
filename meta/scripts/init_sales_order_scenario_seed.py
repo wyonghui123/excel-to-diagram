@@ -184,7 +184,7 @@ _RATE_RECORDS: List[Dict[str, Any]] = [
 
 _ORDERS: List[Dict[str, Any]] = [
     # ---- S1 / S3 / S4：W0 标准单与守卫
-    {'order_no': 'SCN-SO-W0-1', 'customer': 'A', 'order_type_id': ORDER_TYPE_STD,
+    {'order_no': 'SCN-SO-W0-1', 'customer': 'A', 'document_type_id': ORDER_TYPE_STD,
      'status': 'draft', 'currency_id': CURRENCY_CNY,
      'description': 'W0 标准单：行级舍入 + 抬头汇总',
      'head': {'payment_term_id': PAYMENT_TERM_NET30, 'incoterm_code': 'FOB'},
@@ -198,7 +198,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S2：W0 退货单
     {'order_no': 'SCN-SO-W0-RET-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_RET, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_RET, 'status': 'draft',
      'currency_id': CURRENCY_CNY,
      'description': 'W0 退货单：整行金额取负',
      'lines': [
@@ -207,7 +207,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S5 / S7：W1-A 定价链（客户价优先 + 折扣 / 附加费）
     {'order_no': 'SCN-SO-W1-PRICE-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_CNY, 'price_date': ORDER_DATE,
      'head': {'payment_term_id': PAYMENT_TERM_NET30, 'incoterm_code': 'FOB',
               'ship_to_address_id': ADDR_SH, 'bill_to_address_id': ADDR_BJ,
@@ -219,7 +219,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S5：物料价兜底（客户无客户价）
     {'order_no': 'SCN-SO-W1-CUSTB-1', 'customer': 'B',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_CNY, 'price_date': ORDER_DATE,
      'description': 'W1-A 客户无客户价 → 落物料次槽（100）',
      'lines': [
@@ -228,7 +228,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S6：无候选 / 币种不符
     {'order_no': 'SCN-SO-W1-NOCAND-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_CNY, 'price_date': ORDER_DATE,
      'description': 'W1-A 物料无价目行 → NO_CANDIDATE（失败不阻保存）',
      'lines': [
@@ -236,7 +236,7 @@ _ORDERS: List[Dict[str, Any]] = [
           'qty': 2.0, 'unit_price': None, 'tax_code_id': TAX_13},
      ]},
     {'order_no': 'SCN-SO-W1-CCY-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_USD, 'price_date': ORDER_DATE,
      'description': 'W1-A 订单币种与价目表不一致 → CURRENCY_MISMATCH',
      'lines': [
@@ -245,7 +245,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S7：手工价保护
     {'order_no': 'SCN-SO-W1-MANUAL-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_CNY, 'price_date': ORDER_DATE,
      'description': 'W1-A 手工价不被自动覆盖（force=True 才重取）',
      'lines': [
@@ -255,7 +255,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S11：W2-A 服务行
     {'order_no': 'SCN-SO-W2-SVC-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'draft',
      'currency_id': CURRENCY_CNY,
      'description': 'W2-A 服务行：默认值只补空',
      'lines': [
@@ -265,7 +265,7 @@ _ORDERS: List[Dict[str, Any]] = [
      ]},
     # ---- S4 / S12：已确认单（冻结 + 地址快照）
     {'order_no': 'SCN-SO-W2-CONF-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_STD, 'status': 'confirmed',
+     'document_type_id': ORDER_TYPE_STD, 'status': 'confirmed',
      'currency_id': CURRENCY_CNY, 'confirmed_date': ORDER_DATE,
      'head': {'payment_term_id': PAYMENT_TERM_NET30, 'incoterm_code': 'FOB',
               'salesperson': 'SCN-SO-SP-1',
@@ -282,7 +282,7 @@ _ORDERS: List[Dict[str, Any]] = [
     # 原行复用上一张已确认标准单 SCN-SO-W2-CONF-1/10（CPU，qty=1.0）；
     # 草稿原单复用 SCN-SO-W0-1/10，仅供自检的「原单未确认 → 拒绝」负向断言。
     {'order_no': 'SCN-SO-W6-RET-1', 'customer': 'A',
-     'order_type_id': ORDER_TYPE_RET, 'status': 'draft',
+     'document_type_id': ORDER_TYPE_RET, 'status': 'draft',
      'currency_id': CURRENCY_CNY,
      'description': 'E6 退货引用：引用 SCN-SO-W2-CONF-1/10，数量不超原行',
      'lines': [
@@ -454,7 +454,7 @@ def _upsert_order(ds, spec: Dict[str, Any], ids: Dict[str, Any]) -> Any:
     amounts = spec.get('amounts') or (0.0, 0.0, 0.0)
     data = {
         'order_no': spec['order_no'],
-        'order_type_id': spec['order_type_id'],
+        'document_type_id': spec['document_type_id'],
         'order_date': ORDER_DATE,
         'status': spec['status'],
         'customer_account_id': customer_id,
@@ -576,6 +576,17 @@ def seed_sales_order_scenario_data(ds) -> Dict[str, Any]:
                                          reference['line_no']))
                 line = dict(line, reference_line_id=ref_row['id'])
             _upsert_order_line(ds, order_id, line)
+
+    # 金额落库：recompute_line 按「退货单据取负 + 税码税率」计算并写入行金额，
+    # recompute_order 按行合计回写抬头（R7）。缺这一步时种子行金额为 NULL，
+    # 详情页金额列显示 '-'，FE-02（行级舍入）与 FE-03（退货取负）无法验证。
+    from meta.services.sales_order_amount_service import SalesOrderAmountService
+    amount_service = SalesOrderAmountService(ds)
+    for order_id in orders.values():
+        for row in ds.query(
+                'SELECT id FROM sales_order_lines WHERE order_id = ?', [order_id]):
+            amount_service.recompute_line(row['id'])
+        amount_service.recompute_order(order_id)
 
     ds.commit()
     return {'items': items, 'customers': customers, 'salespeople': people,
@@ -1017,12 +1028,12 @@ def _run_checks(ds) -> List[Tuple[str, bool, str]]:
             '       refot.document_category AS ref_doc_category '
             'FROM sales_order_lines rl '
             'JOIN sales_orders ro ON ro.id = rl.order_id '
-            'JOIN type_definitions rot ON rot.id = ro.order_type_id '
+            'JOIN type_definitions rot ON rot.id = ro.document_type_id '
             'JOIN type_definitions rlt ON rlt.id = rl.line_type_id '
             'LEFT JOIN sales_order_lines ref ON ref.id = rl.reference_line_id '
             'LEFT JOIN sales_orders refo ON refo.id = ref.order_id '
             'LEFT JOIN type_definitions reflt ON reflt.id = ref.line_type_id '
-            'LEFT JOIN type_definitions refot ON refot.id = refo.order_type_id '
+            'LEFT JOIN type_definitions refot ON refot.id = refo.document_type_id '
             'WHERE ro.order_no = ? AND rl.line_no = ?',
             [ret_no, ret_line_no])
         assert row, '退货行不存在: %s / %s' % (ret_no, ret_line_no)

@@ -98,7 +98,7 @@ class _FakeDS:
                 return []
             order = self.orders.get(row.get('order_id')) or {}
             merged = dict(row)
-            merged['ref_order_type_id'] = order.get('order_type_id')
+            merged['ref_document_type_id'] = order.get('document_type_id')
             merged['ref_order_status'] = order.get('status')
             merged['ref_customer_account_id'] = order.get('customer_account_id')
             return [merged]
@@ -134,32 +134,32 @@ TYPES = {
 }
 
 ORDERS = {
-    10: {'id': 10, 'order_no': 'SO-202610-000001', 'order_type_id': 1,
+    10: {'id': 10, 'order_no': 'SO-202610-000001', 'document_type_id': 1,
          'status': 'draft', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 501},
-    11: {'id': 11, 'order_no': 'SO-202610-000002', 'order_type_id': 1,
+    11: {'id': 11, 'order_no': 'SO-202610-000002', 'document_type_id': 1,
          'status': 'submitted', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'ship_to_address_id': 301, 'bill_to_address_id': 302,
          'customer_account_id': 501},
-    12: {'id': 12, 'order_no': 'SO-202610-000003', 'order_type_id': 1,
+    12: {'id': 12, 'order_no': 'SO-202610-000003', 'document_type_id': 1,
          'status': 'confirmed', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 501},
-    13: {'id': 13, 'order_no': 'SO-202610-000004', 'order_type_id': 5,
+    13: {'id': 13, 'order_no': 'SO-202610-000004', 'document_type_id': 5,
          'status': 'draft', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 501},
-    14: {'id': 14, 'order_no': 'SO-202610-000005', 'order_type_id': 2,
+    14: {'id': 14, 'order_no': 'SO-202610-000005', 'document_type_id': 2,
          'status': 'draft', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 501},
-    15: {'id': 15, 'order_no': 'SO-202610-000006', 'order_type_id': 2,
+    15: {'id': 15, 'order_no': 'SO-202610-000006', 'document_type_id': 2,
          'status': 'draft', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 502},
-    16: {'id': 16, 'order_no': 'SO-202610-000007', 'order_type_id': 2,
+    16: {'id': 16, 'order_no': 'SO-202610-000007', 'document_type_id': 2,
          'status': 'draft', 'currency_id': 8, 'exchange_rate': 1,
          'sales_org_id': 318, 'org_id': 318, 'order_date': '2026-10-25',
          'customer_account_id': 501},
@@ -214,29 +214,29 @@ class TestOrderWrite:
 
     def test_create_ok(self):
         SalesOrderGuardService(_ds()).validate_order_write(
-            {'order_type_id': 1, 'sales_org_id': 318, 'order_no': 'SO-X'}, is_create=True)
+            {'document_type_id': 1, 'sales_org_id': 318, 'order_no': 'SO-X'}, is_create=True)
 
     def test_order_type_must_be_header_scope(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(
-                {'order_type_id': 101, 'sales_org_id': 318}, is_create=True)
-        assert e.value.rule == 'order_type_scope'
+                {'document_type_id': 101, 'sales_org_id': 318}, is_create=True)
+        assert e.value.rule == 'document_type_scope'
 
     def test_sales_org_requires_sales_function(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(
-                {'order_type_id': 1, 'sales_org_id': 1}, is_create=True)
+                {'document_type_id': 1, 'sales_org_id': 1}, is_create=True)
         assert e.value.rule == 'sales_org_not_sales'
 
     def test_division_ok_on_create(self):
         SalesOrderGuardService(_ds()).validate_order_write(
-            {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'DEFAULT'},
+            {'document_type_id': 1, 'sales_org_id': 318, 'division_code': 'DEFAULT'},
             is_create=True)
 
     def test_division_not_found(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(
-                {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
+                {'document_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
                 is_create=True)
         assert e.value.rule == 'division_not_found'
         assert e.value.field_name == 'division_code'
@@ -244,7 +244,7 @@ class TestOrderWrite:
     def test_division_inactive(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(
-                {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'OLD'},
+                {'document_type_id': 1, 'sales_org_id': 318, 'division_code': 'OLD'},
                 is_create=True)
         assert e.value.rule == 'division_inactive'
 
@@ -256,7 +256,7 @@ class TestOrderWrite:
 
     def test_division_query_failure_fail_open(self):
         SalesOrderGuardService(_ds(raise_on_query=True)).validate_order_write(
-            {'order_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
+            {'document_type_id': 1, 'sales_org_id': 318, 'division_code': 'NOPE'},
             is_create=True)
 
     def test_order_no_immutable(self):
@@ -271,7 +271,7 @@ class TestOrderWrite:
             {'order_no': 'SO-202610-000001'}, old_data=ORDERS[10])
 
     def test_frozen_fields_after_draft(self):
-        for field, value in (('currency_id', 9), ('order_type_id', 2)):
+        for field, value in (('currency_id', 9), ('document_type_id', 2)):
             with pytest.raises(SalesOrderGuardError) as e:
                 SalesOrderGuardService(_ds()).validate_order_write(
                     {field: value}, old_data=ORDERS[11])
@@ -307,7 +307,7 @@ class TestOrderWrite:
     def test_exchange_rate_date_required_on_create(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(
-                {'order_type_id': 1, 'sales_org_id': 318, 'exchange_rate': 7.08},
+                {'document_type_id': 1, 'sales_org_id': 318, 'exchange_rate': 7.08},
                 is_create=True)
         assert e.value.rule == 'exchange_rate_date_required'
 
@@ -334,7 +334,7 @@ class TestOrderWrite:
 
     def test_fail_open_on_query_error(self):
         svc = SalesOrderGuardService(_ds(raise_on_query=True))
-        svc.validate_order_write({'order_type_id': 1, 'sales_org_id': 1}, is_create=True)
+        svc.validate_order_write({'document_type_id': 1, 'sales_org_id': 1}, is_create=True)
         svc.validate_order_delete(11)
 
 
@@ -740,7 +740,7 @@ class TestGuardInterceptor:
     def test_before_action_converts_to_validation_error(self):
         it = SalesOrderGuardInterceptor()
         ctx = self._ctx('sales_order', 'crud_create',
-                        {'order_type_id': 1, 'sales_org_id': 1})
+                        {'document_type_id': 1, 'sales_org_id': 1})
         with pytest.raises(ValidationFailedError) as e:
             it.before_action(ctx)
         assert e.value.details[0]['rule'] == 'sales_org_not_sales'

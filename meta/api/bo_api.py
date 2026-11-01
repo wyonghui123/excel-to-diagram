@@ -199,7 +199,7 @@ def _resolve_sales_order_control_defaults(context: dict) -> dict:
             list(_CONTROL_DEFAULT_KEYS.values()),
             {
                 'org_id': context.get('sales_org_id'),
-                'document_type_id': context.get('order_type_id'),
+                'document_type_id': context.get('document_type_id'),
             },
             domain='sales')
     except Exception as e:
@@ -284,7 +284,7 @@ def _reapply_sales_order_defaults(object_type: str, obj_id, data: dict) -> dict:
             CustomerSalesOrgService,
         )
         rows = ds.query(
-            'SELECT customer_account_id, sales_org_id, order_type_id, '
+            'SELECT customer_account_id, sales_org_id, document_type_id, '
             'payment_term_id, incoterm_code FROM sales_orders WHERE id = ?',
             [obj_id])
     except Exception as e:
@@ -484,15 +484,15 @@ def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
     if object_type != SALES_ORDER_OBJECT or data.get('order_no'):
         return data
 
-    order_type_id = data.get('order_type_id')
+    document_type_id = data.get('document_type_id')
     order_date = data.get('order_date')
-    if order_type_id in (None, '') or order_date in (None, ''):
+    if document_type_id in (None, '') or order_date in (None, ''):
         return data
 
     ds = _get_data_source()
     rows = ds.query(
         'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
-        [order_type_id])
+        [document_type_id])
     sequence_id = rows[0].get('number_sequence_id') if rows else None
     if sequence_id in (None, ''):
         return data
@@ -507,7 +507,7 @@ def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
         dict(configs[0]), {}, {'order_date': order_date})
     payload = dict(data)
     payload['order_no'] = allocated
-    logger.info('[bo_api] allocated order_no=%s (type=%s)', allocated, order_type_id)
+    logger.info('[bo_api] allocated order_no=%s (type=%s)', allocated, document_type_id)
     return payload
 
 

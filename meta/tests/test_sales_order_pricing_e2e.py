@@ -139,7 +139,7 @@ def env():
             effective_from TEXT, effective_to TEXT);
 
         CREATE TABLE sales_orders (
-            id INTEGER PRIMARY KEY, status TEXT, order_type_id INTEGER,
+            id INTEGER PRIMARY KEY, status TEXT, document_type_id INTEGER,
             order_date TEXT, price_date TEXT, currency_id INTEGER,
             sales_org_id INTEGER, customer_account_id INTEGER,
             pricing_status TEXT, header_discount_percent REAL,
@@ -225,7 +225,7 @@ def _seed(ds):
            effective_to=None)
 
     # ---- 草稿订单 + 一行 ----
-    insert(ds, 'sales_orders', id=ORDER_ID, status='draft', order_type_id=1,
+    insert(ds, 'sales_orders', id=ORDER_ID, status='draft', document_type_id=1,
            order_date=ORDER_DATE, price_date=None, currency_id=CURRENCY_ID,
            sales_org_id=None, customer_account_id=None,
            pricing_status='pending', header_discount_percent=0,

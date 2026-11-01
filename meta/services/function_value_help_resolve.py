@@ -9,6 +9,7 @@ import logging
 from typing import Any, Dict
 
 from flask import g
+from meta.core.permission_gate import is_admin_user
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ def function_value_help_resolve_handler(params: Dict[str, Any], context: Dict[st
     user_context = {
         'user_id': user_info.get('user_id'),
         'roles': user_info.get('roles', []),
-        'is_admin': 'admin' in user_info.get('roles', []),
+        # [FR-005] 管理员判定统一走 PermissionGate（'*' 通配），不再按角色名硬编码
+        'is_admin': is_admin_user(user_info),
     }
 
     try:

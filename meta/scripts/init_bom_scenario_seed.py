@@ -257,7 +257,7 @@ _RULES = [
 
 _ORDER = {
     'order_no': ORDER_NO,
-    'order_type_id': 1,
+    'document_type_id': 1,
     'order_date': ORDER_DATE,
     'status': 'draft',
     'customer_account_id': 4,

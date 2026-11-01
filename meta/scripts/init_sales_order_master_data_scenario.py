@@ -166,7 +166,7 @@ def _draft_guard(ds):
     class _DraftGuard(SalesOrderGuardService):
         def _load_order(self, order_id):
             return {'id': order_id, 'status': 'draft',
-                    'order_type_id': ORDER_TYPE_STD}
+                    'document_type_id': ORDER_TYPE_STD}
 
     return _DraftGuard(ds)
 

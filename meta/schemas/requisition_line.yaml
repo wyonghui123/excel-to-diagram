@@ -1,0 +1,571 @@
+# 采购申请行（Requisition Line）— 统一需求入口 / M1
+# 依据: docs/specs/spec-procurement-task-object-model-2026-10-31.md §3.2 / T-D13 / T-D13a / T-D17 / T-D18 / T-D19
+#       docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §2 M1（A4）
+#
+# 定位: requisition 的附属明细（child_sections），不单独成菜单。
+#
+# 行级口径:
+#   ① line_type ∈ {goods, service}：goods 用 item_id + qty；service 用服务规格描述
+#      （item_id 可空），买 / 做由 sourcing 判定（T-D17）。
+#   ② qty 必填（承诺型）；uom_id 对 goods 行由服务层要求必填，service 行可空。
+#   ③ 承接方分两列，不得合并（A4）：
+#        requested_source_org_id —— 人工指定，用户可填；
+#        resolved_source_org_id  —— sourcing 回填，只读，人工不得直改。
+#      二者都是行级字段：载体决策在行级（§3.2.2）。
+#   ④ 行不携带价格；成本 / 内部转移价由采购与内部交易里程碑处理。
+#   ⑤ fulfilled_qty 由执行单据派生（M2+），本里程碑不落列（§3.2.3）。
+
+id: requisition_line
+name: 采购申请行
+table_name: requisition_lines
+description: 采购申请行（实物 / 服务需求项）
+parent_object: requisition
+display_name_field: line_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: requisition_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      # 派生字段不重复记账（事实源在 sourcing 求值）
+      - resolved_source_org_id
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: requisition_id
+    name: 所属申请
+    type: integer
+    db_column: requisition_id
+    required: true
+    description: 所属采购申请（父字段）
+    semantics:
+      meaning: 所属采购申请
+      display:
+        type: association
+        target_type: requisition
+        display_field: requisition_no
+    ui:
+      widget: select
+      relation: requisition
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: string
+    db_column: line_no
+    required: true
+    max_length: 6
+    pattern: "^[0-9]{1,6}$"
+    description: 行号（同一申请内唯一，如 10 / 20 / 30）
+    semantics:
+      meaning: 申请行号
+      data_category: code
+      filterable: true
+      filter_type: text
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: line_type
+    name: 行类型
+    type: string
+    db_column: line_type
+    required: true
+    default: goods
+    max_length: 20
+    description: 行类型（实物 / 服务）
+    enum_values:
+      - value: goods
+        label: 实物
+        color: primary
+        category: active
+        is_initial: true
+        description: 以物料 + 数量为需求对象
+      - value: service
+        label: 服务
+        color: warning
+        category: active
+        description: 以服务规格为需求对象，买 / 做由 sourcing 判定
+    semantics:
+      meaning: 申请行类型
+      filterable: true
+      filter_type: enum
+      filter_label: 行类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 物料（goods 行必填；service 行可空，用 description 描述规格）
+    semantics:
+      meaning: 申请行物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+        placeholder: "服务行可留空"
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 140
+          - field: name
+            label: 物料名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 行描述
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 300
+    description: 行描述 / 服务规格；item_id 为空时由服务层要求必填
+    semantics:
+      meaning: 申请行描述或服务规格
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    required: true
+    description: 数量（承诺型必填，须 > 0）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 申请行数量
+    ui:
+      widget: input
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 计量单位（goods 行必填；service 行可空，如按次）
+    semantics:
+      meaning: 申请行计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "服务行可留空"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 120
+          - field: name
+            label: 单位名称
+            width: 180
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+
+  - id: need_date
+    name: 行需求日期
+    type: date
+    db_column: need_date
+    nullable: true
+    description: 行级期望交付日期；空 = 取申请头 need_date
+    semantics:
+      meaning: 行级期望交付日期
+      filterable: true
+      filter_type: date
+      filter_label: 行需求日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: deliver_to_location_id
+    name: 送达地点
+    type: integer
+    db_column: deliver_to_location_id
+    nullable: true
+    description: 行级送达地点；空 = 取申请头 deliver_to_location_id
+    semantics:
+      meaning: 行级送达地点
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "取申请头"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  # A4：人工指定承接方。sourcing 求值时不直接覆盖本列。
+  - id: requested_source_org_id
+    name: 指定承接组织
+    type: integer
+    db_column: requested_source_org_id
+    nullable: true
+    description: 人工指定的承接组织（可空；sourcing 求值不改写本列）
+    semantics:
+      meaning: 人工指定的承接组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "留空由 sourcing 求值"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  # A4：sourcing 回填承接方。只读；人工不得直改，二者不得合并。
+  - id: resolved_source_org_id
+    name: 求值承接组织
+    type: integer
+    db_column: resolved_source_org_id
+    nullable: true
+    description: sourcing 求值回填的承接组织（只读，人工不得直改）
+    semantics:
+      meaning: sourcing 求值结果中的承接组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "尚未求值"
+    ui:
+      widget: select
+      relation: org
+      readonly: true
+      editable: false
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    max_length: 20
+    description: 行状态（开放 / 已关闭 / 已取消）
+    enum_values:
+      - value: open
+        label: 开放
+        color: primary
+        category: active
+        is_initial: true
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 申请行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [requisition_id, line_no]
+    unique: true
+    name: uidx_requisition_line_no
+  - fields: [item_id]
+    name: idx_requisition_line_item
+  - fields: [requisition_id, status]
+    name: idx_requisition_line_requisition_status
+  - fields: [requested_source_org_id]
+    name: idx_requisition_line_requested_source
+  - fields: [resolved_source_org_id]
+    name: idx_requisition_line_resolved_source
+
+relations:
+  - id: requisition_line_to_requisition
+    name: 所属申请
+    type: reference
+    target: requisition
+    source_field: requisition_id
+    target_field: id
+    cardinality: N:1
+    description: 所属采购申请引用（真外键）
+  - id: requisition_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（可空）
+  - id: requisition_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 计量单位引用（可空）
+  - id: requisition_line_to_location
+    name: 送达地点
+    type: reference
+    target: location
+    source_field: deliver_to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 送达地点引用（可空）
+  - id: requisition_line_to_requested_source_org
+    name: 指定承接组织
+    type: reference
+    target: org
+    source_field: requested_source_org_id
+    target_field: id
+    cardinality: N:1
+    description: 人工指定承接组织引用（可空）
+  - id: requisition_line_to_resolved_source_org
+    name: 求值承接组织
+    type: reference
+    target: org
+    source_field: resolved_source_org_id
+    target_field: id
+    cardinality: N:1
+    description: sourcing 求值承接组织引用（可空）
+
+rules:
+  - id: close_requisition_line
+    name: 关闭申请行
+    type: state_transition
+    state_field: status
+    from_states: [open]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后该行不再参与 sourcing / 履约，确定要关闭吗？"
+
+  - id: cancel_requisition_line
+    name: 取消申请行
+    type: state_transition
+    state_field: status
+    from_states: [open, closed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后该行作废且不可恢复，确定要取消吗？"
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 申请行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: line_type
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: item_id
+        width: 180
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: qty
+        width: 100
+      - field: uom_id
+        width: 90
+      - field: need_date
+        width: 120
+        format: date
+      - field: requested_source_org_id
+        width: 150
+      - field: resolved_source_org_id
+        width: 150
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 申请行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, line_type]
+          - fields: [item_id, description]
+      - title: 数量与交期
+        columns:
+          - fields: [qty, uom_id]
+          - fields: [need_date, deliver_to_location_id]
+      - title: 承接方
+        columns:
+          - fields: [requested_source_org_id, resolved_source_org_id]
+      - title: 状态
+        columns:
+          - fields: [status]

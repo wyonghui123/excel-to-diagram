@@ -31,7 +31,7 @@ name: 交货单
 table_name: shipments
 description: 交货单头（交货行见 shipment_line）
 display_name_field: delivery_no
-aspects: [audit_aspect]
+aspects: [audit_aspect, document_type_aspect]
 
 semantics:
   meaning: 交货单
@@ -527,8 +527,18 @@ indexes:
   # 列表按订单 + 状态筛选的主路径
   - fields: [order_id, status]
     name: idx_shipment_order_status
+  - fields: [document_type_id]
+    name: idx_shipment_document_type
 
 relations:
+  - id: shipment_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
   - id: shipment_to_order
     name: 来源订单
     type: reference

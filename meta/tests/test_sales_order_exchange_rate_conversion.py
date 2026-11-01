@@ -123,7 +123,7 @@ class _StubDet:
 
 
 def _order(**overrides):
-    base = {'id': 10, 'status': 'draft', 'order_type_id': 1,
+    base = {'id': 10, 'status': 'draft', 'document_type_id': 1,
             'order_date': '2026-10-25', 'price_date': None, 'currency_id': USD_ID,
             'sales_org_id': 318, 'pricing_status': 'pending',
             'exchange_rate': None, 'exchange_rate_type': None,

@@ -179,7 +179,7 @@ class _InactiveItemAmountService(SalesOrderAmountService):
     def __init__(self):
         super().__init__(data_source=None)
         self.order = {
-            'id': 10, 'order_type_id': 1, 'order_date': '2026-10-15',
+            'id': 10, 'document_type_id': 1, 'order_date': '2026-10-15',
             'currency_id': 8,
         }
         self.line = {
@@ -206,7 +206,7 @@ class _InactiveItemAmountService(SalesOrderAmountService):
     def _currency_decimals(self, currency_id):
         return 2
 
-    def _document_category(self, order_type_id):
+    def _document_category(self, document_type_id):
         return 'standard'
 
     def _lookup_rate_percent(self, tax_code_id, order_date):

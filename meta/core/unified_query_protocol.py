@@ -30,6 +30,19 @@ _FIELD_OP_SUFFIXES = ("__like", "__ilike", "__in", "__not_in", "__gte", "__lte",
                        "__func_year", "__func_month", "__func_day", "__date_diff")
 
 
+#: 分页/排序/搜索等保留键（不得作为过滤条件）。各 API 统一从这里取，不再自建清单。
+RESERVED_QUERY_KEYS = {
+    'page', 'pageSize', 'page_size', 'per_page', '_limit', '_offset',
+    'ordering', '_order_by', 'search', 'keyword', 'context_type', 'filters',
+    # [M4] cursor pagination
+    'cursor', 'cursor_field', 'cursor_direction',
+    # [M4.2] date_diff
+    'func_arg',
+    # [M6.4] 关联 expand
+    'expand', '_expand',
+}
+
+
 def split_field_op(raw_field: str) -> Tuple[str, str]:
     """拆分 `field__op` 形式，返回 (field, op)。
 
@@ -204,7 +217,7 @@ class UnifiedQueryRequest(BaseModel):
         search = str(args.get('search') or args.get('keyword') or '').strip()
 
         # 归一化 filters
-        filters = _parse_url_filters(args)
+        filters = parse_url_filters(args)
 
         # context_type: 用于 analytics 端点识别
         context_type = str(args.get('context_type') or 'list').strip()
@@ -227,7 +240,7 @@ class UnifiedQueryRequest(BaseModel):
         )
 
 
-def _parse_url_filters(args: Dict[str, Any]) -> Dict[str, FilterValue]:
+def parse_url_filters(args: Dict[str, Any]) -> Dict[str, FilterValue]:
     """解析 URL 参数中的 filter 形式：
     - `?name=admin` -> FilterValue(eq, 'admin')
     - `?name__like=%admin%` -> FilterValue(like, '%admin%')
@@ -235,23 +248,12 @@ def _parse_url_filters(args: Dict[str, Any]) -> Dict[str, FilterValue]:
     - `?member_count__gte=1` -> FilterValue(gte, 1)
     - `?filters[name]=admin` -> FilterValue(eq, 'admin')
 
-    跳过保留键：page / pageSize / page_size / _limit / _offset / ordering /
-    _order_by / search / keyword / context_type / filters
+    跳过保留键（见 `RESERVED_QUERY_KEYS`）。
     """
-    RESERVED = {
-        'page', 'pageSize', 'page_size', '_limit', '_offset',
-        'ordering', '_order_by', 'search', 'keyword', 'context_type', 'filters',
-        # [M4] cursor pagination
-        'cursor', 'cursor_field', 'cursor_direction',
-        # [M4.2] date_diff
-        'func_arg',
-        # [M6.4] 关联 expand
-        'expand', '_expand',
-    }
     out: Dict[str, FilterValue] = {}
 
     for key, raw_value in args.items():
-        if key in RESERVED:
+        if key in RESERVED_QUERY_KEYS:
             continue
         if raw_value is None or raw_value == '':
             continue

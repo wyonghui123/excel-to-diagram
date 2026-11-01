@@ -69,7 +69,7 @@ class _FakeDS:
         self.executed.append((sql, list(params or [])))
 
 
-ORDER = {'id': 5, 'order_type_id': 1, 'order_date': '2026-10-25', 'currency_id': 8}
+ORDER = {'id': 5, 'document_type_id': 1, 'order_date': '2026-10-25', 'currency_id': 8}
 
 
 def _ds(**kwargs):
