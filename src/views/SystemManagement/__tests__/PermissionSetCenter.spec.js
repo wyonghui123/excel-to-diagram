@@ -105,11 +105,11 @@ describe('PermissionSetCenter - 4区域布局', () => {
       await router.isReady()
       await flushPromises()
       
-      const saveButton = wrapper.find('button:has(.el-icon) + button:has(.el-icon)')
-      expect(saveButton.exists()).toBe(true)
-      
-      const resetButton = wrapper.find('button:has(.el-icon)')
-      expect(resetButton.exists()).toBe(true)
+      // 头部按钮已迁移到 AppButton + AppIcon（不再有 .el-icon 类），改按文本断言
+      const headerButtons = wrapper.findAll('.rpc-header__right button')
+      expect(headerButtons.length).toBe(2)
+      expect(headerButtons[0].text()).toContain('重置')
+      expect(headerButtons[1].text()).toContain('保存')
       
       wrapper.unmount()
     })

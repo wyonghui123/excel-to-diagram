@@ -2353,6 +2353,21 @@ def parse_aspects_yaml(schema_dir: str) -> Dict[str, Dict]:
     return result
 
 
+def _substitute_object_placeholders(value: Any, object_id: str) -> Any:
+    """递归替换切面字段中的 `$object_id` 占位符。
+
+    切面定义是静态复用的，但部分字段（如单据类型的 `value_help.scope_bo`）
+    必须指向「引用该切面的对象」；加载时把占位符替换为对象 id。
+    """
+    if isinstance(value, str):
+        return object_id if value == "$object_id" else value
+    if isinstance(value, dict):
+        return {k: _substitute_object_placeholders(v, object_id) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute_object_placeholders(v, object_id) for v in value]
+    return value
+
+
 def _resolve_aspects(
     data: Dict[str, Any],
     aspects_defs: Dict[str, Dict],
@@ -2369,6 +2384,7 @@ def _resolve_aspects(
     for f in data.get("fields", []):
         local_field_ids.add(f.get("id", ""))
 
+    object_id = str(data.get("id") or "")
     merged_fields = []
     merged_rules = []
     seen_field_ids: Dict[str, str] = {}
@@ -2387,6 +2403,8 @@ def _resolve_aspects(
         aspect_fields = aspect_def.get("fields", [])
         for sf in aspect_fields:
             sf_copy = dict(sf)
+            if object_id:
+                sf_copy = _substitute_object_placeholders(sf_copy, object_id)
             sf_id = sf_copy.get("id", "")
             if sf_id in seen_field_ids:
                 print("[YAML Loader] Warning: field '{0}' from aspect '{1}' overrides aspect '{2}'".format(

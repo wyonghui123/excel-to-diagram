@@ -359,3 +359,69 @@ owner_aspect:
       audit:
         log: true
         fields: [owner_id, old_owner_id]
+
+# ============================================
+# 单据类型切面（平台层规范 T-D20）
+# 所有业务单据头必备：引用 type_definitions 的 header 行。
+# 只承载编号 / 审批 / 打印 / 权限等治理语义；
+# 不编码载体方向（采购 / 内部由 sourcing 派生，T-D13a），
+# 也不承担行级分类（行级走 line_type，level='line'）。
+#
+# `$object_id` 为平台占位符：加载时替换为引用该切面的对象 id，
+# 从而把类型字典按「本单据的归属域」自动隔离，无需每张单据手写 scope_bo。
+# ============================================
+
+document_type_aspect:
+  description: 单据类型切面 - 业务单据头必备的类型挂载点
+  fields:
+    - id: document_type_id
+      name: 单据类型
+      type: integer
+      db_column: document_type_id
+      nullable: true
+      description: 单据类型（type_definitions 的 header 行；创建时必填，离开草稿后不可修改）
+      semantics:
+        meaning: 单据类型（编号 / 审批 / 打印 / 权限的治理挂载点）
+        display:
+          type: association
+          target_type: type_definition
+          display_field: name
+        filterable: true
+        filter_type: foreign_key
+        filter_label: 单据类型
+        filter_scope: local
+        filter_operator: eq
+      value_help:
+        source:
+          type: bo
+          target_bo: type_definition
+          value_field: id
+          display_field: name
+          code_field: code
+          apply_target_permissions: true
+          value_filter:
+            scope_bo: $object_id
+            level: header
+            status: active
+        behavior:
+          multiple: false
+          validation: true
+          binding_strength: strict
+          min_search_length: 0
+        presentation:
+          result_type: dropdown
+          display_format: "{code} - {name}"
+          columns:
+            - field: code
+              label: 类型编码
+              width: 120
+            - field: name
+              label: 类型名称
+              width: 200
+      ui:
+        visible: true
+        editable: true
+        widget: select
+        relation: type_definition
+        multiple: false
+        fieldGroup: 基本信息

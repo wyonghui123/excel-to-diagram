@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/authStore'
 
 // Mock factories: vi.fn() 必须在 factory 内部创建以避免 hoist 问题
 vi.mock('@/services/metaService', () => ({
@@ -65,6 +67,9 @@ describe('ExportDialog Component', () => {
   }
 
   beforeEach(() => {
+    // ExportDialog 在 setup 内调用 useAuthStore()，必须先激活 pinia
+    setActivePinia(createPinia())
+    useAuthStore().user = { permissions: ['*'] }
     vi.clearAllMocks()
   })
 

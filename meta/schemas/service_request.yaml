@@ -1,0 +1,593 @@
+# 服务请求（Service Request）— 统一需求入口 / M1
+# 依据: docs/specs/spec-shared-service-center-object-model-2026-10-31.md §3 / S2 / S4 / S-D1 / S-D3 / S-D5
+#       docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §2 M1（S2 / S4 / S7）
+#
+# 定位: 事件型需求单（服务型共享）。与 requesition（承诺型，见 requisition）同属
+#       「需求层」，共享 demand_allocation / source_demand 抽象但不合并实体。
+#
+# 结构口径:
+#   ① 请求头不带价格与开票字段；计价只在 sales_order / 合同层（S-D6）。
+#   ② 双组织必填（S4）：requester_org_id 决定数据权限；provider_org_id 决定派工范围。
+#       provider_org_id 可由 service_catalog_item.default_provider_org_id 带出。
+#   ③ 请求行承载 goods / service 两类（service_request_line），请求头不复制行内容。
+#   ④ 审批复用 tasks(type=approval)，不新建审批表（S-D5）；请求头只保留状态机。
+#      目录项 requires_approval=false 且 approval_policy 为空时，提交即免审批。
+#   ⑤ 取消不回滚已生成下游：下游单据关系由 doc_flow_edges 记录，取消只改本条状态。
+#
+# 生命周期: draft → submitted → approved → completed → closed；submitted 可 rejected；
+#            draft / submitted / approved 可 cancelled。
+
+id: service_request
+name: 服务请求
+table_name: service_requests
+description: 服务请求头（事件型需求单；行见 service_request_line）
+display_name_field: title
+aspects: [audit_aspect, document_type_aspect]
+
+semantics:
+  meaning: 服务请求
+  category: business_document
+  business_key: [request_no]
+  display_name_field: title
+  aliases:
+    - 服务请求
+    - 服务请求单
+    - 请求单
+    - Service Request
+    - SR
+
+deletion_policy:
+  # 事实单据：仅草稿可删；删除时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - service_request_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号在创建时由需求入口守卫生成；提交时若仍缺号再补（null 不参与唯一冲突判断）
+  - id: request_no
+    name: 请求编号
+    type: string
+    db_column: request_no
+    nullable: true
+    unique: true
+    max_length: 40
+    description: 请求编号（业务键，创建时生成后不可修改）
+    semantics:
+      meaning: 服务请求业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: title
+    name: 请求标题
+    type: string
+    db_column: title
+    required: true
+    max_length: 200
+    description: 请求标题（列表与详情的主显示文本）
+    semantics:
+      meaning: 请求标题
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 请求状态（草稿 / 已提交 / 已批准 / 已驳回 / 已完成 / 已关闭 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: primary
+        category: active
+      - value: approved
+        label: 已批准
+        color: success
+        category: active
+        description: 审批通过，可进入履约（可用）
+      - value: rejected
+        label: 已驳回
+        color: danger
+        category: inactive
+      - value: completed
+        label: 已完成
+        color: success
+        category: active
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 请求状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: priority
+    name: 优先级
+    type: string
+    db_column: priority
+    required: true
+    default: medium
+    max_length: 20
+    description: 请求优先级（默认取目录项 default_priority）
+    enum_values:
+      - value: low
+        label: 低
+        color: info
+      - value: medium
+        label: 中
+        color: primary
+        is_initial: true
+      - value: high
+        label: 高
+        color: warning
+      - value: urgent
+        label: 紧急
+        color: danger
+    semantics:
+      meaning: 请求优先级
+      filterable: true
+      filter_type: enum
+      filter_label: 优先级
+      filter_scope: local
+    ui:
+      widget: select
+
+  # S4 双组织：请求方组织（权限判据）
+  - id: requester_org_id
+    name: 请求方组织
+    type: integer
+    db_column: requester_org_id
+    required: true
+    description: 请求方组织（数据权限按 org 维度判定，S-D8）
+    semantics:
+      meaning: 请求方组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  # S4 双组织：承接方组织（派工范围判据）
+  - id: provider_org_id
+    name: 承接方组织
+    type: integer
+    db_column: provider_org_id
+    required: true
+    description: 承接方组织（派工范围按队列 / 组判定，S-D8）
+    semantics:
+      meaning: 承接方组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: requester_party_id
+    name: 请求人
+    type: integer
+    db_column: requester_party_id
+    nullable: true
+    description: 请求人（内部员工档案）；空 = 由请求方组织代提
+    semantics:
+      meaning: 请求发起人
+      display:
+        type: association
+        target_type: party_internal
+        display_field: name
+        placeholder: "组织代提"
+    value_help:
+      source:
+        type: bo
+        target_bo: party_internal
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      widget: select
+      relation: party_internal
+      multiple: false
+      clearable: true
+
+  - id: need_date
+    name: 需求日期
+    type: date
+    db_column: need_date
+    nullable: true
+    description: 期望完成日期；事件型请求可空（空 = 尽快处理）
+    semantics:
+      meaning: 期望完成日期
+      filterable: true
+      filter_type: date
+      filter_label: 需求日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: description
+    name: 请求说明
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 2000
+    description: 请求背景与补充说明
+    semantics:
+      meaning: 请求说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: closed_at
+    name: 关闭时间
+    type: datetime
+    db_column: closed_at
+    nullable: true
+    description: 请求关闭时间（completed / closed / cancelled 时写入）
+    semantics:
+      meaning: 请求终态时间
+      audit_field: true
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [request_no]
+    unique: true
+    name: uidx_service_request_no
+  - fields: [status, requester_org_id]
+    name: idx_service_request_status_requester
+  - fields: [provider_org_id, status]
+    name: idx_service_request_provider_status
+  - fields: [need_date]
+    name: idx_service_request_need_date
+  - fields: [document_type_id]
+    name: idx_service_request_document_type
+
+relations:
+  - id: service_request_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
+  - id: service_request_to_requester_org
+    name: 请求方组织
+    type: reference
+    target: org
+    source_field: requester_org_id
+    target_field: id
+    cardinality: N:1
+    description: 请求方组织引用（真外键）
+  - id: service_request_to_provider_org
+    name: 承接方组织
+    type: reference
+    target: org
+    source_field: provider_org_id
+    target_field: id
+    cardinality: N:1
+    description: 承接方组织引用（真外键）
+  - id: service_request_to_requester_party
+    name: 请求人
+    type: reference
+    target: party_internal
+    source_field: requester_party_id
+    target_field: id
+    cardinality: N:1
+    description: 请求人引用（可空）
+
+# 状态机:
+#   draft → submitted → approved → completed → closed
+#                       submitted → rejected
+#   draft / submitted / approved → cancelled
+# 审批执行复用 tasks(type=approval)；本状态机只描述单据自身状态。
+rules:
+  - id: submit_service_request
+    name: 提交服务请求
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后将进入审批；若目录项未配置审批策略则直接可用。确定要提交吗？"
+
+  - id: approve_service_request
+    name: 批准服务请求
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: approved
+    triggers: [before_update]
+    ui_hints:
+      label: 批准
+      icon: check_circle
+      highlight: true
+      confirm_message: "批准后请求进入可履约状态，确定要批准吗？"
+
+  - id: reject_service_request
+    name: 驳回服务请求
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: rejected
+    triggers: [before_update]
+    ui_hints:
+      label: 驳回
+      icon: close_circle
+      confirm_message: "驳回后请求终止，确定要驳回吗？"
+
+  - id: complete_service_request
+    name: 完成服务请求
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: completed
+    triggers: [before_update]
+    ui_hints:
+      label: 完成
+      icon: check
+      confirm_message: "确认所有请求行已履约完成，确定要完成吗？"
+
+  - id: close_service_request
+    name: 关闭服务请求
+    type: state_transition
+    state_field: status
+    from_states: [completed]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后请求只读，确定要关闭吗？"
+
+  - id: cancel_service_request
+    name: 取消服务请求
+    type: state_transition
+    state_field: status
+    from_states: [draft, submitted, approved]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消只终止本次请求，不回滚已生成的下游单据。确定要取消吗？"
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 服务请求
+    description: 事件型需求单（服务型共享）
+    columns:
+      - field: request_no
+        width: 150
+        sortable: true
+      - field: title
+        width: 260
+      - field: priority
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: requester_org_id
+        width: 140
+      - field: provider_org_id
+        width: 140
+      - field: requester_party_id
+        width: 110
+      - field: need_date
+        width: 120
+        format: date
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [request_no, title, description]
+    defaultSort:
+      field: need_date
+      order: asc
+    actions:
+      - id: create
+        label: 新建服务请求
+        icon: plus
+        type: primary
+        permission: service_request:service_request_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 服务请求信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [title, priority]
+          - fields: [requester_org_id, provider_org_id]
+          - fields: [requester_party_id, need_date]
+      - title: 说明
+        columns:
+          - fields: [description]
+  detail:
+    page_route: ServiceRequestDetailContent
+    layout: tabs
+    title: "{record.title} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [request_no, title, status, priority, requester_org_id, provider_org_id, requester_party_id, need_date, closed_at, description]
+  child_sections:
+    - child_object: service_request_line
+      title: 请求行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: service_request:service_request_create
+  update_permission: service_request:service_request_update
+  delete_permission: service_request:service_request_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: false
+  export_enabled: true
+  cascade_export: true
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: request_no

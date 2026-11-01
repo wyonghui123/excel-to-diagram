@@ -8,6 +8,7 @@ import { useMenuPermissions } from '@/composables/useMenuPermissions'
 import { useInstanceInfo } from '@/composables/useInstanceInfo'
 import { buildStaticRoutes, countRoutes } from './helpers'
 import { logger } from '@/utils/logger'
+import { can } from '@/services/permissionService'
 
 let objectTypeServiceInitialized = false
 const instanceInfo = useInstanceInfo()
@@ -222,10 +223,12 @@ router.beforeEach(async (to, from, next) => {
     }
 
     if (to.meta.requiredPermissions && to.meta.requiredPermissions.length > 0) {
-      const hasPermission = to.meta.requiredAny
-        ? to.meta.requiredPermissions.some(p => authStore.hasPermission(p))
-        : to.meta.requiredPermissions.every(p => authStore.hasPermission(p))
-      if (!hasPermission) {
+      const allowed = can(null, {
+        permission: to.meta.requiredPermissions,
+        mode: to.meta.requiredAny ? 'any' : 'all',
+        authStore,
+      })
+      if (!allowed) {
         logger.warn(
           `[RouterGuard] Permission denied for ${to.path}:`,
           `required=${to.meta.requiredPermissions}, any=${to.meta.requiredAny}`

@@ -260,10 +260,10 @@ def _dec(value):
     return Decimal(str(value))
 
 
-def _order(order_id=5, *, order_type_id=1, discount=0, surcharge=0):
+def _order(order_id=5, *, document_type_id=1, discount=0, surcharge=0):
     return {
         'id': order_id,
-        'order_type_id': order_type_id,
+        'document_type_id': document_type_id,
         'order_date': '2026-10-25',
         'currency_id': 8,
         'header_discount_percent': discount,

@@ -132,7 +132,7 @@ def _seed():
                   'level': 'line', 'document_category': None},
         },
         orders={
-            10: {'id': 10, 'order_no': 'SO-202610-000001', 'order_type_id': 1,
+            10: {'id': 10, 'order_no': 'SO-202610-000001', 'document_type_id': 1,
                  'order_date': '2026-10-26', 'status': 'draft',
                  'sales_org_id': 318, 'org_id': 318, 'currency_id': 8,
                  'exchange_rate': 1},

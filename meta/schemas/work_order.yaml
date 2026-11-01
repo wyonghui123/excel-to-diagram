@@ -34,7 +34,7 @@ name: 服务工单
 table_name: work_orders
 description: 服务工单头（SLA 里程碑见 sla_milestone，服务事件见 service_event）
 display_name_field: work_order_no
-aspects: [audit_aspect]
+aspects: [audit_aspect, document_type_aspect]
 
 semantics:
   meaning: 服务工单
@@ -629,8 +629,18 @@ indexes:
   # production 需求追溯反查（§10.16 R5：计划行 → 生产工单 1:N）
   - fields: [source_demand_type, source_demand_id]
     name: idx_work_order_source_demand
+  - fields: [document_type_id]
+    name: idx_work_order_document_type
 
 relations:
+  - id: work_order_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键；与 order_type 的作业分类正交）
   - id: work_order_to_schedule
     name: 服务计划行
     type: reference

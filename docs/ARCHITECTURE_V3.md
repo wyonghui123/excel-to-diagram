@@ -475,7 +475,7 @@ meta/schemas/*.yaml (140)
 | `line_type.yaml` | `object_type: view`，「type_definitions 的 line 切片，只读」 | `code`、`name`、`category`、`delivery_relevant` |
 | `line_type_assignment.yaml` | 实体表 `line_type_assignments` | `document_type_id` + `item_group_id` + `specificity_rank` → `line_type_id` |
 
-`[事实]` 行类型不是销售订单专属字段，而是全局类型定义的两个切片；订单只引用 `order_type_id` / `line_type_id`。
+`[事实]` 行类型不是销售订单专属字段，而是全局类型定义的两个切片；订单只引用 `document_type_id` / `line_type_id`。
 
 `[事实]` 行类型确定规则 = 「单据类型 + 物料组 → 行类型」，同维度多条时按 `specificity_rank` 取最具体的一条。
 
@@ -506,7 +506,7 @@ meta/schemas/*.yaml (140)
 
 | 族 | 字段 |
 |---|---|
-| 标识/状态 | `order_no`、`order_type_id`、`order_date`、`status`、`description` |
+| 标识/状态 | `order_no`、`document_type_id`、`order_date`、`status`、`description` |
 | 伙伴四方（单值） | `customer_account_id`（售达）、`bill_to_account_id`（收票）、`payer_account_id`（付款）、`ship_to_party_id`（送达） |
 | 地址 | `ship_to_address_id` / `bill_to_address_id` + 快照文本 `*_address_text` |
 | 联系人 | `contact_party_id`、`contact_name_text`、`contact_phone_text` |

@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 description: "并行开发SOP v3.3 - 自验证+PM Gate模型 (指针文件)"
-globs: "PARALLEL_DEV_SOP*,DEPLOY_HANDOVER*,scripts/self_verify*,scripts/_wt_service*,scripts/_wt_lifecycle*,scripts/_events*,scripts/_coord_log*,scripts/_config_backup*,scripts/_session_cleanup*,scripts/_sync_scripts*"
+globs: "docs/DEPLOY_HANDOVER*,scripts/self_verify*,scripts/_wt_service*,scripts/_wt_lifecycle*,scripts/_events*,scripts/_coord_log*,scripts/_config_backup*,scripts/_session_cleanup*,scripts/_sync_scripts*"
 ---
 
 # 并行开发 SOP v3.3 (指针文件)

@@ -312,7 +312,7 @@ test.describe('SO-SCN: 默认值解析', () => {
         await withStep(page, testInfo, `客户 ${c.key} 新建订单默认带出`, async () => {
           const order = await createBo(page, 'sales_order', {
             order_no: `SCN-SO-W9-E2E-${c.key}-${stamp}`,
-            order_type_id: ORDER_TYPE_STD,
+            document_type_id: ORDER_TYPE_STD,
             order_date: '2026-10-26',
             org_id: ORG_EAST,
             sales_org_id: ORG_EAST,
@@ -481,7 +481,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
       await withStep(page, testInfo, '建单并建行（不填单位）', async () => {
         order = await createBo(page, 'sales_order', {
           order_no: `SCN-SO-MD-E2E-UOM-${stamp}`,
-          order_type_id: ORDER_TYPE_STD,
+          document_type_id: ORDER_TYPE_STD,
           order_date: '2026-10-26',
           org_id: ORG_EAST,
           sales_org_id: ORG_EAST,
@@ -563,7 +563,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
       await withStep(page, testInfo, '建单（客户 A / 2026-10-26 / 华东）', async () => {
         order = await createBo(page, 'sales_order', {
           order_no: `SCN-SO-W9-E2E-PRC-${stamp}`,
-          order_type_id: ORDER_TYPE_STD,
+          document_type_id: ORDER_TYPE_STD,
           order_date: '2026-10-26',
           org_id: ORG_EAST,
           sales_org_id: ORG_EAST,
@@ -652,7 +652,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
     try {
       order = await createBo(page, 'sales_order', {
         order_no: `SCN-SO-W9-E2E-SVC-${stamp}`,
-        order_type_id: ORDER_TYPE_STD,
+        document_type_id: ORDER_TYPE_STD,
         order_date: '2026-10-26',
         org_id: ORG_EAST,
         sales_org_id: ORG_EAST,
@@ -718,7 +718,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
     if (!order) {
       order = await createBo(page, 'sales_order', {
         order_no: ORDER_ADDR,
-        order_type_id: ORDER_TYPE_STD,
+        document_type_id: ORDER_TYPE_STD,
         order_date: '2026-10-26',
         org_id: ORG_EAST,
         sales_org_id: ORG_EAST,

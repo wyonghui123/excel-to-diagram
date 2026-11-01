@@ -276,7 +276,7 @@ class TestReapply:
     def test_org_change_applies_new_override(self, monkeypatch):
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 1,
+                   'document_type_id': 1, 'payment_term_id': 1,
                    'incoterm_code': 'EXW'},
             overrides={320: {'payment_term_id': 2, 'incoterm_code': 'FOB'}},
             account=ACC)
@@ -290,7 +290,7 @@ class TestReapply:
     def test_org_change_falls_back_to_account(self, monkeypatch):
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 2,
+                   'document_type_id': 1, 'payment_term_id': 2,
                    'incoterm_code': 'FOB'},
             overrides={318: {'payment_term_id': 2, 'incoterm_code': 'FOB'}},
             account=ACC)
@@ -304,7 +304,7 @@ class TestReapply:
     def test_manual_value_not_overwritten(self, monkeypatch):
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 99,
+                   'document_type_id': 1, 'payment_term_id': 99,
                    'incoterm_code': 'EXW'},
             overrides={320: {'payment_term_id': 2, 'incoterm_code': 'FOB'}},
             account=ACC)
@@ -318,7 +318,7 @@ class TestReapply:
     def test_explicit_payload_value_wins(self, monkeypatch):
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 1,
+                   'document_type_id': 1, 'payment_term_id': 1,
                    'incoterm_code': 'EXW'},
             overrides={320: {'payment_term_id': 2, 'incoterm_code': 'FOB'}},
             account=ACC)
@@ -333,7 +333,7 @@ class TestReapply:
     def test_unchanged_party_returns_as_is(self, monkeypatch):
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 1,
+                   'document_type_id': 1, 'payment_term_id': 1,
                    'incoterm_code': 'EXW'},
             overrides={318: {'payment_term_id': 2, 'incoterm_code': 'FOB'}},
             account=ACC)
@@ -379,7 +379,7 @@ class TestReapply:
 
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 1,
+                   'document_type_id': 1, 'payment_term_id': 1,
                    'incoterm_code': 'EXW'},
             overrides={318: {'payment_term_id': 1, 'incoterm_code': 'EXW'}},
             account=None)
@@ -402,7 +402,7 @@ class TestReapply:
 
         fake = _OrderDS(
             order={'customer_account_id': 1, 'sales_org_id': 318,
-                   'order_type_id': 1, 'payment_term_id': 1,
+                   'document_type_id': 1, 'payment_term_id': 1,
                    'incoterm_code': 'EXW'},
             overrides={318: {'payment_term_id': 1, 'incoterm_code': 'EXW'}},
             account=None)

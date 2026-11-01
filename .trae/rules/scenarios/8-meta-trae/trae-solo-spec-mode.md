@@ -1,6 +1,6 @@
 ---
 description: Trae SOLO Spec 模式使用指南 - 涉及 3 阶段文档生成(SPEC/TASKS/CHECKLIST)、系统级重构、复杂任务规划时加载。封装 spec.md/tasks.md/checklist.md 模板 + 与项目已有 spec 流程关系。
-globs: ["**/.trae/specs/**", "**/spec.md", "**/tasks.md", "**/checklist.md"]
+globs: "**/.trae/specs/**,**/spec.md,**/tasks.md,**/checklist.md"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"

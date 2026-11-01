@@ -35,10 +35,12 @@ logger = logging.getLogger(__name__)
 
 _LEVELS = ('header', 'line')
 
-#: (引用表, 引用列, 中文说明) —— D1 删除前引用检查
+#: (引用表, 引用列, 中文说明) —— D1 删除前引用检查的**兜底值**。
+#: 正常情况下由 document_type_guard_service.type_reference_tables() 扫描注册表得出，
+#: 新增单据无需再改这里。
 _REFERENCE_TABLES = (
-    ('sales_orders', 'order_type_id', '销售订单'),
     ('sales_order_lines', 'line_type_id', '销售订单行'),
+    ('requisitions', 'document_type_id', '采购申请'),
     ('type_definitions', 'default_type_id', '其他类型的默认行类型'),
 )
 
@@ -153,19 +155,39 @@ class TypeDefinitionGuardService:
     # ------------------------------------------------------------------
 
     def validate_delete(self, type_id: Any) -> None:
-        """被订单 / 订单行 / 其他类型引用时禁止删除。
+        """被业务单据 / 单据行 / 其他类型的默认行类型引用时禁止删除。
 
         物理库未启用 PRAGMA foreign_keys（外键声明存在但不拦截），
-        若不做此检查，删除会静默成功并留下悬空引用。
+        若不做此检查，删除会静默成功并留下悬空引用。引用表由注册表扫描得出，
+        新增单据沿用同一保护，无需改代码。
         """
         if _is_blank(type_id):
             return
-        for table, column, label in _REFERENCE_TABLES:
+        for table, column, label in self._reference_tables():
             count = self._count_refs(table, column, type_id)
             if count:
                 raise TypeDefinitionGuardError(
                     f'该类型已被 {count} 条{label}引用，不能删除',
                     field_name='id', rule='referenced_in_use')
+
+    @staticmethod
+    def _reference_tables():
+        """扫描注册表 + 静态兜底合并（去重）。
+
+        扫描能自动覆盖所有声明 `document_type_id` / `line_type_id` / `default_type_id`
+        的对象；静态兜底只保留扫描可能漏掉的表（如尚未建模的对象）。
+        """
+        tables = []
+        try:
+            from meta.services.document_type_guard_service import type_reference_tables
+            tables = list(type_reference_tables())
+        except Exception as e:
+            logger.warning(f'[type_definition_guard] 扫描引用表失败: {e}')
+        seen = {(table, column) for table, column, _label in tables}
+        for table, column, label in _REFERENCE_TABLES:
+            if (table, column) not in seen:
+                tables.append((table, column, label))
+        return tables
 
     # ------------------------------------------------------------------
     # I4

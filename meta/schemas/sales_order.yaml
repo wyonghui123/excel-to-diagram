@@ -17,12 +17,12 @@
 #   W0-R1  order_no 生成后不可改；取号失败不回退（允许跳号）
 #   W0-R2  qty > 0；方向由抬头单据类型决定
 #   W0-R3  退货单 net/tax/gross 必须为负；非退货单必须 >= 0
-#   W0-R4  order_type 必须 scope_bo='sales_order' + level='header'；
+#   W0-R4  document_type 必须 scope_bo='sales_order' + level='header'；
 #          行 line_type 必须 level='line'
-#   W0-R5  order_type.default_type_id 与行的 line_type 必须同 scope_bo
+#   W0-R5  document_type.default_type_id 与行的 line_type 必须同 scope_bo
 #   W0-R6  行 item_id 为空时 description 必填；uom_id 恒必填
 #   W0-R7  抬头合计恒等于行合计（任一行变更后重算回写）
-#   W0-R8  status != draft 后禁止删除行；禁止改 order_no / order_type_id / currency_id
+#   W0-R8  status != draft 后禁止删除行；禁止改 order_no / document_type_id / currency_id
 #   W0-R9  确认时冻结 exchange_rate / exchange_rate_type / exchange_rate_date
 #          / tax_rate_percent / unit_price
 #   W0-R10 sales_org_id 必须存在 org_functions.function_type='sales' 的行
@@ -121,14 +121,14 @@ fields:
       widget: input
       editable: false
 
-  - id: order_type_id
-    name: 订单类型
+  - id: document_type_id
+    name: 单据类型
     type: integer
-    db_column: order_type_id
+    db_column: document_type_id
     required: true
-    description: 订单类型（type_definitions，scope_bo='sales_order' + level='header'）
+    description: 单据类型（type_definitions，scope_bo='sales_order' + level='header'）
     semantics:
-      meaning: 订单单据类型
+      meaning: 销售订单单据类型（编号 / 审批 / 打印 / 权限的治理挂载点）
       display:
         type: association
         target_type: type_definition
@@ -1474,8 +1474,8 @@ indexes:
     name: idx_sales_order_sales_org_date
   - fields: [status]
     name: idx_sales_order_status
-  - fields: [order_type_id]
-    name: idx_sales_order_type
+  - fields: [document_type_id]
+    name: idx_sales_order_document_type
   # [TER-M3] 区域维度过滤（列表按区域 / 数据范围）走快照列
   - fields: [territory_id]
     name: idx_sales_order_territory
@@ -1485,13 +1485,13 @@ indexes:
 
 relations:
   - id: sales_order_to_type_definition
-    name: 订单类型
+    name: 单据类型
     type: reference
     target: type_definition
-    source_field: order_type_id
+    source_field: document_type_id
     target_field: id
     cardinality: N:1
-    description: 订单单据类型引用（真外键，限定 header 层）
+    description: 销售订单单据类型引用（真外键，限定 header 层）
   - id: sales_order_to_customer_account
     name: 售达方
     type: reference
@@ -1618,7 +1618,7 @@ ui_view_config:
       - field: order_no
         width: 180
         sortable: true
-      - field: order_type_id
+      - field: document_type_id
         width: 120
       - field: order_date
         width: 120
@@ -1684,7 +1684,7 @@ ui_view_config:
     sections:
       - title: 单据信息
         columns:
-          - fields: [order_no, order_type_id]
+          - fields: [order_no, document_type_id]
           - fields: [order_date, status]
       - title: 客户与组织
         columns:

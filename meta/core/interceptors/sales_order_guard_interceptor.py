@@ -49,7 +49,7 @@ SCHEDULE_OBJECT = 'sales_order_schedule'
 _WRITE_ACTIONS = ('crud_create', 'crud_update', 'crud_delete')
 _ORDER_ID_KEY = 'so_parent_order_id'
 # 抬头变更触发重取价的维度（§3.7 触发时点 3）
-_PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'order_type_id')
+_PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'document_type_id')
 # 行变更触发重取价的维度（§3.7 触发时点 2）
 _PRICE_LINE_FIELDS = ('item_id', 'qty', 'uom_id')
 # FR-014：抬头取消 → 订单行 / delivery 计划行级联

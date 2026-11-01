@@ -15,7 +15,7 @@ name: 履约单
 table_name: fulfillment_orders
 description: 履约业务分组单据（按客户 / 站点 / 交付方式分组；执行由 workflow_run 驱动）
 display_name_field: fulfillment_no
-aspects: [audit_aspect]
+aspects: [audit_aspect, document_type_aspect]
 
 semantics:
   meaning: 履约单
@@ -284,8 +284,18 @@ indexes:
     name: idx_fulfillment_order_order
   - fields: [status]
     name: idx_fulfillment_order_status
+  - fields: [document_type_id]
+    name: idx_fulfillment_order_document_type
 
 relations:
+  - id: fulfillment_order_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
   - id: fulfillment_order_to_sales_order
     name: 来源订单
     type: reference

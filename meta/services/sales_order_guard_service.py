@@ -8,12 +8,12 @@
   W0-R1  order_no 生成后不可改                        —— 抬头更新
   W0-R2  qty > 0；方向由抬头 document_category 决定    —— 行写入
   W0-R3  退货单金额为负（符号由金额服务施加，本服务只保证方向来源唯一）
-  W0-R4  order_type 须 scope_bo='sales_order' + level='header'；
+  W0-R4  document_type 须 scope_bo='sales_order' + level='header'；
          行 line_type 须 level='line'
-  W0-R5  行 line_type 与抬头 order_type 同 scope_bo
+  W0-R5  行 line_type 与抬头 document_type 同 scope_bo
   W0-R6  item_id 为空时 description 必填；uom_id 恒必填
   W0-R7  抬头合计 = 行合计                            —— 金额服务回写（不在本服务）
-  W0-R8  非 draft 禁删行；非 draft 禁改 order_no / order_type_id / currency_id
+  W0-R8  非 draft 禁删行；非 draft 禁改 order_no / document_type_id / currency_id
   W0-R9  确认后冻结 exchange_rate（行侧由「行只能在 draft 维护」覆盖）
   W0-R10 sales_org_id 须具备 org_functions.function_type='sales'
 
@@ -145,7 +145,7 @@ FULFILLMENT_FULFILLED = 'fulfilled'
 CLOSE_ALLOWED_FULFILLMENT = (FULFILLMENT_FULFILLED, 'voided', 'not_applicable')
 
 # W0-R8：非 draft 后不可变的抬头字段
-_FROZEN_AFTER_DRAFT = ('order_no', 'order_type_id', 'currency_id')
+_FROZEN_AFTER_DRAFT = ('order_no', 'document_type_id', 'currency_id')
 #: 确认后冻结的汇率快照字段（W0-R9）
 _EXCHANGE_SNAPSHOT_FIELDS = ('exchange_rate', 'exchange_rate_type', 'exchange_rate_date')
 # W0-R9：确认后冻结的汇率
@@ -337,7 +337,7 @@ class SalesOrderGuardService:
                     field_name='fulfillment_status',
                     rule='ORDER_NOT_FULFILLED')
 
-        # R8：非草稿后禁止改 order_no / order_type_id / currency_id
+        # R8：非草稿后禁止改 order_no / document_type_id / currency_id
         if old_status and old_status != DRAFT:
             for field in _FROZEN_AFTER_DRAFT:
                 if field not in data:
@@ -423,7 +423,7 @@ class SalesOrderGuardService:
                     field_name=field, rule='contact_snapshot_locked')
 
         # R4：单据类型必须 header 层且属销售订单作用域
-        type_id = data.get('order_type_id')
+        type_id = data.get('document_type_id')
         if not _is_blank(type_id):
             type_row = self._load_type(type_id)
             if type_row and (type_row.get('scope_bo') != SALES_SCOPE
@@ -431,7 +431,7 @@ class SalesOrderGuardService:
                 raise SalesOrderGuardError(
                     f'订单类型 {type_id} 不是销售订单抬头类型'
                     f'（须 scope_bo=sales_order / level=header）',
-                    field_name='order_type_id', rule='order_type_scope')
+                    field_name='document_type_id', rule='document_type_scope')
 
         # R10：销售组织必须具备 sales 职能
         sales_org_id = data.get('sales_org_id')
@@ -748,8 +748,8 @@ class SalesOrderGuardService:
                 field_name='line_type_id', rule='line_type_scope')
 
         # R5：行类型与抬头单据类型同 scope_bo；抬头类型同时供 R-RET-1 判定
-        order_type = (self._load_type(order.get('order_type_id'))
-                      if not _is_blank(order.get('order_type_id')) else None)
+        order_type = (self._load_type(order.get('document_type_id'))
+                      if not _is_blank(order.get('document_type_id')) else None)
         if line_type and order_type:
             order_scope = order_type.get('scope_bo')
             if order_scope and order_scope != line_type.get('scope_bo'):
@@ -1094,7 +1094,7 @@ class SalesOrderGuardService:
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
-                'SELECT id, order_no, order_type_id, order_date, status, '
+                'SELECT id, order_no, document_type_id, order_date, status, '
                 'sales_org_id, org_id, currency_id, exchange_rate, '
                 'customer_account_id FROM sales_orders WHERE id = ?', [order_id])
         except Exception as e:  # 查询失败 → fail-open
@@ -1252,7 +1252,7 @@ class SalesOrderGuardService:
                 'SELECT l.id, l.order_id, l.qty, l.item_id, l.line_type_id, '
                 '       l.customer_item_code, l.description, l.uom_id, '
                 '       l.tax_code_id, '
-                '       o.order_type_id AS ref_order_type_id, '
+                '       o.document_type_id AS ref_document_type_id, '
                 '       o.status AS ref_order_status, '
                 '       o.customer_account_id AS ref_customer_account_id '
                 'FROM sales_order_lines l '
@@ -1331,8 +1331,8 @@ class SalesOrderGuardService:
         # R-RET-4：原行及其订单都不得是退货
         ref_line_type = (self._load_type(ref.get('line_type_id'))
                          if not _is_blank(ref.get('line_type_id')) else None)
-        ref_order_type = (self._load_type(ref.get('ref_order_type_id'))
-                          if not _is_blank(ref.get('ref_order_type_id')) else None)
+        ref_order_type = (self._load_type(ref.get('ref_document_type_id'))
+                          if not _is_blank(ref.get('ref_document_type_id')) else None)
         if (ref_line_type or {}).get('line_category') == RETURN_CATEGORY \
                 or (ref_order_type or {}).get('document_category') == RETURN_CATEGORY:
             raise SalesOrderGuardError(

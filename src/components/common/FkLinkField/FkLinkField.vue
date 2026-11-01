@@ -42,6 +42,7 @@
 <script setup>
 import { computed } from 'vue'
 import { Promotion } from '@element-plus/icons-vue'
+import { resolveDetailPath } from '@/router/detailPathResolver'
 
 const props = defineProps({
   value: {
@@ -115,7 +116,7 @@ const resolvedId = computed(() => {
 
 const targetRoute = computed(() => {
   if (resolvedId.value == null || !resolvedObjectType.value) return null
-  return { path: `/detail/${resolvedObjectType.value}/${resolvedId.value}` }
+  return { path: resolveDetailPath(resolvedObjectType.value, resolvedId.value) }
 })
 
 const isClickable = computed(() => {

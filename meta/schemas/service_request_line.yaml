@@ -1,0 +1,529 @@
+# 服务请求行（Service Request Line）— 统一需求入口 / M1
+# 依据: docs/specs/spec-shared-service-center-object-model-2026-10-31.md §3.2
+#       docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §2 M1（A2）
+#
+# 定位: service_request 的附属明细（child_sections），不单独成菜单。
+#
+# 行级口径:
+#   ① line_type ∈ {goods, service}：service 行以 catalog_item_id 为必填依据；
+#      goods 行以 item_id + qty 为必填依据。合法性由服务层校验（A2）。
+#   ② 事件型请求的 qty 可空（不承诺数量）；goods 行落履约时由服务层要求 qty。
+#   ③ 行状态极简：open / closed / cancelled，不复制请求头状态机。
+#   ④ 行不携带价格；计价只在 sales_order / 合同层。
+
+id: service_request_line
+name: 服务请求行
+table_name: service_request_lines
+description: 服务请求行（服务 / 实物请求项）
+parent_object: service_request
+display_name_field: line_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: request_id
+
+deletion_policy:
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: request_id
+    name: 所属请求
+    type: integer
+    db_column: request_id
+    required: true
+    description: 所属服务请求（父字段）
+    semantics:
+      meaning: 所属服务请求
+      display:
+        type: association
+        target_type: service_request
+        display_field: request_no
+    ui:
+      widget: select
+      relation: service_request
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: string
+    db_column: line_no
+    required: true
+    max_length: 6
+    pattern: "^[0-9]{1,6}$"
+    description: 行号（同一请求内唯一，如 10 / 20 / 30）
+    semantics:
+      meaning: 请求行号
+      data_category: code
+      filterable: true
+      filter_type: text
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: line_type
+    name: 行类型
+    type: string
+    db_column: line_type
+    required: true
+    default: service
+    max_length: 20
+    description: 行类型（服务 / 实物）
+    enum_values:
+      - value: service
+        label: 服务
+        color: primary
+        category: active
+        is_initial: true
+        description: 以目录项为请求对象，履约落 work_order / tasks
+      - value: goods
+        label: 实物
+        color: warning
+        category: active
+        description: 以 item + 数量为请求对象，履约落 sourcing → 调拨 / 采购 / 生产
+    semantics:
+      meaning: 请求行类型
+      filterable: true
+      filter_type: enum
+      filter_label: 行类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: catalog_item_id
+    name: 目录项
+    type: integer
+    db_column: catalog_item_id
+    nullable: true
+    description: 服务目录项（service 行必填；goods 行可空）
+    semantics:
+      meaning: 请求服务目录项
+      display:
+        type: association
+        target_type: service_catalog_item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: service_catalog_item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 目录项编码
+            width: 150
+          - field: name
+            label: 目录项名称
+            width: 220
+    ui:
+      widget: select
+      relation: service_catalog_item
+      multiple: false
+      clearable: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 实物物料（goods 行必填；service 行可空）
+    semantics:
+      meaning: 请求行物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+        placeholder: "服务行可留空"
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 140
+          - field: name
+            label: 物料名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 行描述
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 300
+    description: 行描述；目录项与物料都为空时由服务层要求必填
+    semantics:
+      meaning: 请求行描述
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  # 事件型请求不承诺数量；goods 行落履约时由服务层要求 qty
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    nullable: true
+    description: 数量（事件型请求可空；goods 行履约时必填，须 > 0）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 请求行数量
+    ui:
+      widget: input
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 计量单位（service 行可空；goods 行随 qty 必填）
+    semantics:
+      meaning: 请求行计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 120
+          - field: name
+            label: 单位名称
+            width: 180
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+
+  - id: need_date
+    name: 行需求日期
+    type: date
+    db_column: need_date
+    nullable: true
+    description: 行级期望完成日期；空 = 取请求头 need_date
+    semantics:
+      meaning: 行级期望完成日期
+      filterable: true
+      filter_type: date
+      filter_label: 行需求日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: deliver_to_location_id
+    name: 送达地点
+    type: integer
+    db_column: deliver_to_location_id
+    nullable: true
+    description: 实物行的送达地点（service 行可空）
+    semantics:
+      meaning: 请求行送达地点
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "服务行可留空"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    max_length: 20
+    description: 行状态（开放 / 已关闭 / 已取消）
+    enum_values:
+      - value: open
+        label: 开放
+        color: primary
+        category: active
+        is_initial: true
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 请求行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [request_id, line_no]
+    unique: true
+    name: uidx_service_request_line_no
+  - fields: [catalog_item_id]
+    name: idx_service_request_line_catalog
+  - fields: [item_id]
+    name: idx_service_request_line_item
+  - fields: [request_id, status]
+    name: idx_service_request_line_request_status
+
+relations:
+  - id: service_request_line_to_request
+    name: 所属请求
+    type: reference
+    target: service_request
+    source_field: request_id
+    target_field: id
+    cardinality: N:1
+    description: 所属服务请求引用（真外键）
+  - id: service_request_line_to_catalog_item
+    name: 目录项
+    type: reference
+    target: service_catalog_item
+    source_field: catalog_item_id
+    target_field: id
+    cardinality: N:1
+    description: 服务目录项引用（可空）
+  - id: service_request_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（可空）
+  - id: service_request_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 计量单位引用（可空）
+  - id: service_request_line_to_location
+    name: 送达地点
+    type: reference
+    target: location
+    source_field: deliver_to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 送达地点引用（可空）
+
+rules:
+  - id: close_service_request_line
+    name: 关闭请求行
+    type: state_transition
+    state_field: status
+    from_states: [open]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后该行不再参与履约推进，确定要关闭吗？"
+
+  - id: cancel_service_request_line
+    name: 取消请求行
+    type: state_transition
+    state_field: status
+    from_states: [open, closed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后该行作废且不可恢复，确定要取消吗？"
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 请求行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: line_type
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: catalog_item_id
+        width: 200
+      - field: item_id
+        width: 180
+      - field: description
+        width: 240
+        type: ellipsis
+      - field: qty
+        width: 100
+      - field: uom_id
+        width: 90
+      - field: need_date
+        width: 120
+        format: date
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 请求行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, line_type]
+          - fields: [catalog_item_id, item_id]
+          - fields: [description]
+      - title: 数量与交期
+        columns:
+          - fields: [qty, uom_id]
+          - fields: [need_date, deliver_to_location_id]
+      - title: 状态
+        columns:
+          - fields: [status]

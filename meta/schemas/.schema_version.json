@@ -884,10 +884,11 @@
       "table": "filter_variants"
     },
     "fulfillment_order": {
-      "hash": "3ca9ec00c98d9a4346586d371ef3b19b",
+      "hash": "4f2c5014b3de6bd5cdf5442a306906a5",
       "fields": [
         "created_by",
         "updated_by",
+        "document_type_id",
         "id",
         "fulfillment_no",
         "order_id",
@@ -964,7 +965,7 @@
       "table": "incoterms"
     },
     "item": {
-      "hash": "b44f6e6084027dc1d056c96db1f2ea48",
+      "hash": "a4bd5bef76f0ccc14d9cd8015c653ede",
       "fields": [
         "updated_at",
         "created_by",
@@ -983,6 +984,8 @@
         "structure_role",
         "config_match_policy",
         "config_materialize_policy",
+        "variant_of_item_id",
+        "variant_config_hash",
         "item_group_id",
         "tax_classification_id",
         "base_uom",
@@ -1856,6 +1859,51 @@
       ],
       "table": "relationships"
     },
+    "requisition": {
+      "hash": "f08859d5efa2532bce77f410faebbe97",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "requisition_no",
+        "status",
+        "priority",
+        "requester_org_id",
+        "deliver_to_org_id",
+        "deliver_to_location_id",
+        "need_date",
+        "requested_by_party_id",
+        "description",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "requisitions"
+    },
+    "requisition_line": {
+      "hash": "0a786e78fd22819b6841eb7f6ea7f2f9",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "requisition_id",
+        "line_no",
+        "line_type",
+        "item_id",
+        "description",
+        "qty",
+        "uom_id",
+        "need_date",
+        "deliver_to_location_id",
+        "requested_source_org_id",
+        "resolved_source_org_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "requisition_lines"
+    },
     "salesperson": {
       "hash": "db0a1f5adf4c0420e5ccec93bc1b0b7b",
       "fields": [
@@ -1890,13 +1938,13 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "948bb57e50ea1dedefc99fdf7c286835",
+      "hash": "cfe1f4cb440f1d95199a9d773f221eb0",
       "fields": [
         "created_by",
         "updated_by",
         "id",
         "order_no",
-        "order_type_id",
+        "document_type_id",
         "order_date",
         "status",
         "customer_account_id",
@@ -2015,6 +2063,25 @@
       ],
       "table": "sales_order_schedules"
     },
+    "service_catalog_item": {
+      "hash": "0a3431ad5bde104ebfb40aacab34a6a3",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "status",
+        "default_priority",
+        "default_provider_org_id",
+        "requires_approval",
+        "approval_policy",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_catalog_items"
+    },
     "service_event": {
       "hash": "d58119aa25b2d64cf5b412471e2ff37b",
       "fields": [
@@ -2055,11 +2122,56 @@
       ],
       "table": "service_modules"
     },
-    "shipment": {
-      "hash": "d5714bc63f021503ee43a76d06ff51ef",
+    "service_request": {
+      "hash": "1fb9b926d02bda61ff44a8cc60b87d69",
       "fields": [
         "created_by",
         "updated_by",
+        "document_type_id",
+        "id",
+        "request_no",
+        "title",
+        "status",
+        "priority",
+        "requester_org_id",
+        "provider_org_id",
+        "requester_party_id",
+        "need_date",
+        "description",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_requests"
+    },
+    "service_request_line": {
+      "hash": "089343a7ddc0301d42cf09b1a239ec90",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "request_id",
+        "line_no",
+        "line_type",
+        "catalog_item_id",
+        "item_id",
+        "description",
+        "qty",
+        "uom_id",
+        "need_date",
+        "deliver_to_location_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_request_lines"
+    },
+    "shipment": {
+      "hash": "52621350cb018e554cf804a54765dd86",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
         "id",
         "delivery_no",
         "order_id",
@@ -2516,10 +2628,11 @@
       "table": "versions"
     },
     "work_order": {
-      "hash": "ba981fcaa66d7898e0e1b0ecda845478",
+      "hash": "dab28e22d891871d116a0cd8e8bff30f",
       "fields": [
         "created_by",
         "updated_by",
+        "document_type_id",
         "id",
         "work_order_no",
         "order_type",
@@ -2580,5 +2693,5 @@
       "table": "work_order_operations"
     }
   },
-  "last_sync": "2026-10-31T03:41:17.469740"
+  "last_sync": "2026-11-01T08:01:03.660938"
 }

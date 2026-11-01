@@ -32,6 +32,7 @@ const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && windo
 const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
 // [P0-4 2026-07-25] 接入 authStore.hasPermission, 替代 _checkPermission 占位实现
 import { useAuthStore } from '@/stores/authStore'
+import { can } from '@/services/permissionService'
 import {
   isInternalProp,
   transformFilters,
@@ -1533,14 +1534,14 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   }
 
   /**
-   * 权限检查 (接入 authStore.hasPermission)
+   * 权限检查 (统一走 permissionService.can)
    * @private
    * @param {Object} action - 操作配置 (含 .permission 权限字符串, 如 'user:delete')
    * @returns {Boolean} 是否有权限
    *
-   * [P0-4 2026-07-25] 替代占位实现, 接入 authStore.hasPermission
+   * [P0-4 2026-07-25] 替代占位实现；[FR-009 2026-10-31] 收敛到统一判定入口
    *   - 优先级 1: action 无配置 permission → 视为公开操作, 返回 true
-   *   - 优先级 2: authStore 已加载 → 调用 authStore.hasPermission(action.permission)
+   *   - 优先级 2: authStore 已加载 → 调用 can(null, { permission, authStore })
    *   - 优先级 3: authStore 未加载 (非 setup 上下文) → 降级返回 true (兼容旧测试)
    *
    * 安全策略:
@@ -1554,11 +1555,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       return true
     }
     // 支持权限字符串或数组 (数组时任意一项满足即可)
-    const perm = action.permission
-    if (Array.isArray(perm)) {
-      return perm.some(p => _authStore.hasPermission(p))
-    }
-    return _authStore.hasPermission(perm)
+    return can(null, { permission: action.permission, authStore: _authStore })
   }
 
   /**

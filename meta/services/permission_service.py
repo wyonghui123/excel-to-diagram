@@ -104,7 +104,8 @@ class PermissionService:
 
     def has_permission(self, user_id: int, permission_code: str) -> bool:
         permissions = self.get_user_permissions(user_id)
-        return '*' in permissions or permission_code in permissions
+        from meta.core.permission_gate import user_has_permission
+        return user_has_permission(permissions, permission_code)
 
     def assign_permission_set(self, user_id: int, permission_set_id: int) -> bool:
         """分配角色给用户（通过个人组织）"""
@@ -247,9 +248,10 @@ class PermissionService:
         
         # 查询用户权限
         user_permissions = self.get_user_permissions(user_id)
-        
-        # 检查权限
-        if permission_code in user_permissions or '*' in user_permissions:
+
+        # 检查权限（[FR-005] 通配/成员判定统一走 PermissionGate）
+        from meta.core.permission_gate import user_has_permission
+        if user_has_permission(user_permissions, permission_code):
             if resource_id:
                 # 检查实例级权限
                 return self._check_instance_permission(user_id, resource_id, permission_code)

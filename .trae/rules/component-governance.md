@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 description: "组件治理规范：组件拆分、命名、复用、依赖管理"
-globs: "src/**/*.vue,src/**/*.ts,src/**/*.tsx"
+globs: "src/components/common/**"
 ---
 
 # 组件治理规范 (Component Governance)

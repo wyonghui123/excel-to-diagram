@@ -113,12 +113,12 @@ def enum_type_create_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         _set_bo_context(admin['user_id'], admin['user_name'])
 
         # 写库
-        ds.execute(
-            """INSERT INTO enum_types (id, name, category, mutability, dimension_schema, description, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            [enum_type_id, name, category, mutability, dimension_schema_str, description, datetime.now().isoformat()]
-        )
-        ds.commit()
+        with ds.transaction():
+            ds.execute(
+                """INSERT INTO enum_types (id, name, category, mutability, dimension_schema, description, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [enum_type_id, name, category, mutability, dimension_schema_str, description, datetime.now().isoformat()]
+            )
 
         return {
             'success': True,
@@ -192,13 +192,13 @@ def enum_type_update_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         admin = _get_admin_info(context)
         _set_bo_context(admin['user_id'], admin['user_name'])
 
-        ds.execute(
-            """UPDATE enum_types
-               SET name = ?, mutability = ?, dimension_schema = ?, description = ?
-               WHERE id = ?""",
-            [name, mutability, dimension_schema_str, description, enum_type_id]
-        )
-        ds.commit()
+        with ds.transaction():
+            ds.execute(
+                """UPDATE enum_types
+                   SET name = ?, mutability = ?, dimension_schema = ?, description = ?
+                   WHERE id = ?""",
+                [name, mutability, dimension_schema_str, description, enum_type_id]
+            )
 
         return {
             'success': True,
@@ -260,8 +260,8 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         admin = _get_admin_info(context)
         _set_bo_context(admin['user_id'], admin['user_name'])
 
-        ds.execute("DELETE FROM enum_types WHERE id = ?", [enum_type_id])
-        ds.commit()
+        with ds.transaction():
+            ds.execute("DELETE FROM enum_types WHERE id = ?", [enum_type_id])
 
         return {
             'success': True,

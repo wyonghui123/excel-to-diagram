@@ -29,7 +29,7 @@ from meta.services.sales_order_expand_service import (
 )
 
 ORDER = {
-    'id': 10, 'order_no': 'SO-202610-000001', 'order_type_id': 1,
+    'id': 10, 'order_no': 'SO-202610-000001', 'document_type_id': 1,
     'order_date': '2026-10-25', 'status': 'draft', 'currency_id': 8,
 }
 

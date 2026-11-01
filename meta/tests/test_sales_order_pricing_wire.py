@@ -109,7 +109,7 @@ class _StubCSO:
 
 
 def _order(**overrides):
-    base = {'id': 10, 'status': 'draft', 'order_type_id': 1,
+    base = {'id': 10, 'status': 'draft', 'document_type_id': 1,
             'order_date': '2026-10-25', 'price_date': None, 'currency_id': 8,
             'sales_org_id': 318, 'pricing_status': 'pending'}
     base.update(overrides)

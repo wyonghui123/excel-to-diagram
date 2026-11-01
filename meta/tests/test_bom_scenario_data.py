@@ -69,7 +69,7 @@ def _components(result):
 def _new_order(ds, order_no, status='draft'):
     order_id = ds.insert('sales_orders', {
         'order_no': order_no,
-        'order_type_id': 1,
+        'document_type_id': 1,
         'order_date': AS_OF,
         'status': status,
         'customer_account_id': 4,

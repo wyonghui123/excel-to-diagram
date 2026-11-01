@@ -116,7 +116,7 @@ class ImportExportService:
                           mapping: Optional[Dict[str, str]] = None) -> BatchOperationResult:
         """[DEPRECATED 2026-06-08] 旧的单表导入入口
 
-        ⚠️ 此方法不推荐使用，功能不完整：
+        [WARNING] 此方法不推荐使用，功能不完整：
         - 不支持 operation_mode（"操作模式"列）
         - 不支持 parent_key_headers（父对象 FK 列被静默忽略）
         - 不支持 resolve_from_field / resolve_to_object（多态 FK 解析失败）
@@ -201,7 +201,7 @@ class ImportExportService:
                         fields: Optional[List[str]] = None) -> str:
         """[DEPRECATED 2026-06-08] 旧的单表导出入口
 
-        ⚠️ 此方法不推荐使用，功能不完整：
+        [WARNING] 此方法不推荐使用，功能不完整：
         - 不走 _get_export_headers_with_editable → 没有 parent FK 编码/名称列
         - 不写"操作模式"列 → 用户无法区分 create/update
         - 不加 BUSINESS_KEY_FILL / REQUIRED_FILL 等底色 → 视觉无提示
@@ -1205,11 +1205,11 @@ class ImportExportService:
                 # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
                 # 优先用 thread-local user (兼容线程池/无Flask上下文场景)
                 from meta.services.query_service import _get_thread_user
+                from meta.services.auth_middleware import get_current_user, is_admin
                 user = _get_thread_user()
                 if not user:
-                    from meta.services.auth_middleware import get_current_user
                     user = get_current_user()
-                if user and user.get('username') != 'admin':
+                if user and not is_admin(user):
                     from meta.services.permission_service import PermissionService
                     perm_service = PermissionService(self.data_source)
                     filtered_child_map = {}
@@ -5665,12 +5665,12 @@ class ImportExportService:
 
             # [H15.2 FIX] 添加导入权限检查
             from meta.services.permission_service import PermissionService
+            from meta.services.auth_middleware import get_current_user, is_admin
             from meta.services.query_service import _get_thread_user
             user = _get_thread_user()
             if not user:
-                from meta.services.auth_middleware import get_current_user
                 user = get_current_user()
-            if user and user.get('username') != 'admin':
+            if user and not is_admin(user):
                 perm_service = PermissionService(self.data_source)
                 has_permission = perm_service.check_permission_unified(
                     user['user_id'],

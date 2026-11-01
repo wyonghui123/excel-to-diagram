@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "AI 组件参考 - 核心原则 + 标准组件库速查 + UI 规范"
-globs: "src/**"
 ---
 
 # AI 组件参考（v4.0 拆分）

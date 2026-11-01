@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 description: "前端测试数据管理：fixtures/factories/ensureProductWithVersion/runCleanup"
-globs: "src/test/**,src/**/__tests__/**,src/**/*.test.js,src/**/*.test.ts,src/**/*.spec.js,src/**/*.spec.ts,tests/e2e/**,e2e/**"
+globs: "src/test/**,src/**/__tests__/**,src/**/*.test.js,src/**/*.spec.js,tests/e2e/**,e2e/**"
 ---
 
 # 前端测试数据管理规范

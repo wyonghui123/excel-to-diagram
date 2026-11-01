@@ -1,0 +1,621 @@
+# 采购申请（Requisition）— 统一需求入口 / M1
+# 依据: docs/specs/spec-procurement-task-object-model-2026-10-31.md §3.2 / T1 / T-D13 / T-D13a / T-D18
+#       docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §2 M1（T1 / A4）
+#
+# 定位: 承诺型需求单（PR / IR 合一）。只表达「要什么、多少、何时、送到哪」，
+#       不预判载体；外部 / 内部、采购 / 自供均由 sourcing 求值后派生（T-D13a）。
+#
+# 结构口径:
+#   ① 不设 requisition_type：内部 / 外部、采购 / 调拨 / 自制都是 sourcing 的结果，
+#      提前写死类型会与 sourcing 冲突（T-D13a）。
+#   ② 双组织：requester_org_id 是发出组织；deliver_to_org_id 是送达组织。
+#   ③ 行级载体：承接方的人工指定与规则回填分列在行上（requested_source_org_id /
+#      resolved_source_org_id），二者不得合并（A4）。
+#   ④ 审批复用 tasks(type=approval)，不新建审批表（S-D5）；策略为空即免审批。
+#      审批通过只表示「可用」，不产生任何执行单据；无来源时停在需求态。
+#   ⑤ 取消不回滚已生成下游：下游单据关系由 doc_flow_edges 记录，取消只改本条状态。
+#   ⑥ 单据类型规范（所有业务单据头必备）：document_type_id → type_definitions 的
+#      header 行（scope_bo='requisition'），只承载编号 / 审批 / 打印 / 权限等治理语义；
+#      不编码 purchase / internal —— 内外仍由 sourcing 派生（T-D13a）。
+#
+# 生命周期: draft → submitted → approved → closed；submitted 可 rejected；
+#            draft / submitted / approved 可 cancelled。
+
+id: requisition
+name: 采购申请
+table_name: requisitions
+description: 采购申请头（承诺型需求单；行见 requisition_line）
+display_name_field: requisition_no
+aspects: [audit_aspect, document_type_aspect]
+
+semantics:
+  meaning: 采购申请
+  category: business_document
+  business_key: [requisition_no]
+  display_name_field: requisition_no
+  aliases:
+    - 采购申请
+    - 需求单
+    - 请购单
+    - Requisition
+    - Purchase Requisition
+    - PR
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - requisition_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 编号在提交时由编号服务生成；草稿允许为空（null 不参与唯一冲突判断）
+  - id: requisition_no
+    name: 申请编号
+    type: string
+    db_column: requisition_no
+    nullable: true
+    unique: true
+    max_length: 40
+    description: 申请编号（业务键，创建时生成后不可修改）
+    semantics:
+      meaning: 采购申请业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  # 单据类型由切面 document_type_aspect 提供（平台层规范 T-D20）：
+  # 字段 document_type_id → type_definitions 的 header 行，只承载编号 / 审批 /
+  # 打印 / 权限等治理语义；不编码 purchase / internal（内外由 sourcing 派生，
+  # T-D13a）。切面中的 value_help.scope_bo 由加载器按本对象 id 注入。
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 申请状态（草稿 / 已提交 / 已批准 / 已驳回 / 已关闭 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: primary
+        category: active
+      - value: approved
+        label: 已批准
+        color: success
+        category: active
+        description: 审批通过，可进入 sourcing；无来源时停在此态
+      - value: rejected
+        label: 已驳回
+        color: danger
+        category: inactive
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 申请状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: priority
+    name: 优先级
+    type: string
+    db_column: priority
+    required: true
+    default: medium
+    max_length: 20
+    description: 申请优先级
+    enum_values:
+      - value: low
+        label: 低
+        color: info
+      - value: medium
+        label: 中
+        color: primary
+        is_initial: true
+      - value: high
+        label: 高
+        color: warning
+      - value: urgent
+        label: 紧急
+        color: danger
+    semantics:
+      meaning: 申请优先级
+      filterable: true
+      filter_type: enum
+      filter_label: 优先级
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 发出组织：需求归属与数据权限判据
+  - id: requester_org_id
+    name: 发出组织
+    type: integer
+    db_column: requester_org_id
+    required: true
+    description: 需求发出组织（数据权限与需求归属口径）
+    semantics:
+      meaning: 需求发出组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  # 送达组织：sourcing 需求侧输入之一（dest_org_id），不是承接方
+  - id: deliver_to_org_id
+    name: 送达组织
+    type: integer
+    db_column: deliver_to_org_id
+    required: true
+    description: 送达组织（sourcing 需求侧 dest_org_id；非承接方）
+    semantics:
+      meaning: 需求送达组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: deliver_to_location_id
+    name: 送达地点
+    type: integer
+    db_column: deliver_to_location_id
+    nullable: true
+    description: 送达地点（sourcing 需求侧 dest_location_id；空 = 由送达组织默认地点）
+    semantics:
+      meaning: 需求送达地点
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "由送达组织默认"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: need_date
+    name: 需求日期
+    type: date
+    db_column: need_date
+    required: true
+    description: 期望交付日期（承诺型必填）
+    semantics:
+      meaning: 期望交付日期
+      filterable: true
+      filter_type: date
+      filter_label: 需求日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: requested_by_party_id
+    name: 申请人
+    type: integer
+    db_column: requested_by_party_id
+    nullable: true
+    description: 申请人（内部员工档案）；空 = 由发出组织代提
+    semantics:
+      meaning: 需求发起人
+      display:
+        type: association
+        target_type: party_internal
+        display_field: name
+        placeholder: "组织代提"
+    value_help:
+      source:
+        type: bo
+        target_bo: party_internal
+        value_field: id
+        display_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      widget: select
+      relation: party_internal
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 申请说明
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 2000
+    description: 申请背景与用途说明
+    semantics:
+      meaning: 申请说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: closed_at
+    name: 关闭时间
+    type: datetime
+    db_column: closed_at
+    nullable: true
+    description: 申请关闭时间（closed / cancelled 时写入）
+    semantics:
+      meaning: 申请终态时间
+      audit_field: true
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [requisition_no]
+    unique: true
+    name: uidx_requisition_no
+  - fields: [document_type_id]
+    name: idx_requisition_document_type
+  - fields: [status, requester_org_id]
+    name: idx_requisition_status_requester
+  - fields: [deliver_to_org_id, need_date]
+    name: idx_requisition_deliver_need_date
+
+relations:
+  - id: requisition_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
+  - id: requisition_to_requester_org
+    name: 发出组织
+    type: reference
+    target: org
+    source_field: requester_org_id
+    target_field: id
+    cardinality: N:1
+    description: 需求发出组织引用（真外键）
+  - id: requisition_to_deliver_org
+    name: 送达组织
+    type: reference
+    target: org
+    source_field: deliver_to_org_id
+    target_field: id
+    cardinality: N:1
+    description: 送达组织引用（真外键）
+  - id: requisition_to_deliver_location
+    name: 送达地点
+    type: reference
+    target: location
+    source_field: deliver_to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 送达地点引用（可空）
+  - id: requisition_to_requested_by_party
+    name: 申请人
+    type: reference
+    target: party_internal
+    source_field: requested_by_party_id
+    target_field: id
+    cardinality: N:1
+    description: 申请人引用（可空）
+
+# 状态机:
+#   draft → submitted → approved → closed
+#            submitted → rejected
+#   draft / submitted / approved → cancelled
+# 审批执行复用 tasks(type=approval)；审批通过不产生执行单据。
+rules:
+  - id: submit_requisition
+    name: 提交采购申请
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后进入审批；审批策略为空时直接批准。确定要提交吗？"
+
+  - id: approve_requisition
+    name: 批准采购申请
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: approved
+    triggers: [before_update]
+    ui_hints:
+      label: 批准
+      icon: check_circle
+      highlight: true
+      confirm_message: "批准后申请进入可寻源状态，确定要批准吗？"
+
+  - id: reject_requisition
+    name: 驳回采购申请
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: rejected
+    triggers: [before_update]
+    ui_hints:
+      label: 驳回
+      icon: close_circle
+      confirm_message: "驳回后申请终止，确定要驳回吗？"
+
+  - id: close_requisition
+    name: 关闭采购申请
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后申请只读，确定要关闭吗？"
+
+  - id: cancel_requisition
+    name: 取消采购申请
+    type: state_transition
+    state_field: status
+    from_states: [draft, submitted, approved]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消只终止本次申请，不回滚已生成的下游单据。确定要取消吗？"
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 采购申请
+    description: 承诺型需求单（审批通过后进入 sourcing）
+    columns:
+      - field: requisition_no
+        width: 150
+        sortable: true
+      - field: priority
+        width: 100
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: requester_org_id
+        width: 140
+      - field: deliver_to_org_id
+        width: 140
+      - field: deliver_to_location_id
+        width: 140
+      - field: need_date
+        width: 120
+        format: date
+      - field: requested_by_party_id
+        width: 110
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [requisition_no, description]
+    defaultSort:
+      field: need_date
+      order: asc
+    actions:
+      - id: create
+        label: 新建采购申请
+        icon: plus
+        type: primary
+        permission: requisition:requisition_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 采购申请信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [priority, need_date]
+          - fields: [requester_org_id, requested_by_party_id]
+          - fields: [deliver_to_org_id, deliver_to_location_id]
+      - title: 说明
+        columns:
+          - fields: [description]
+  detail:
+    page_route: RequisitionDetailContent
+    layout: tabs
+    title: "{record.requisition_no} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [requisition_no, status, priority, requester_org_id, deliver_to_org_id, deliver_to_location_id, need_date, requested_by_party_id, closed_at, description]
+  child_sections:
+    - child_object: requisition_line
+      title: 申请行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+category_config:
+  create_permission: requisition:requisition_create
+  update_permission: requisition:requisition_update
+  delete_permission: requisition:requisition_delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: false
+  export_enabled: true
+  cascade_export: true
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: requisition_no

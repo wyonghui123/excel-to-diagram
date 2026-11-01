@@ -8,6 +8,7 @@
  */
 
 import metaService from '@/services/metaService'
+import { resolveDetailPath } from '@/router/detailPathResolver'
 
 // [party 族 2026-10-21] 补齐身份轴五个类型。
 //   起因（手机端报障「关系详情中业务伙伴/组织点击跳转失败」）：本白名单是硬编码的，
@@ -193,7 +194,7 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
   }
 
   breadcrumbs.push({
-    path: `/detail/${objectType}/${id}`,
+    path: resolveDetailPath(objectType, id),
     title: objectName || `${label}详情`,
     active: true
   })

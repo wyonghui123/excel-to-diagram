@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "测试脚本质量分析：效率优化、Token 消耗、执行时间"
-globs: "meta/tests/**,tests/**,scripts/**"
 ---
 
 # 测试脚本质量分析报告
