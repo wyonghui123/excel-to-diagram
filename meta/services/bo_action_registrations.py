@@ -91,6 +91,14 @@ def register_all_bo_actions(registry=None):
         change_request_apply_handler,
     )
 
+    # M1 需求入口: 审批决策（service_request / requisition 复用 tasks(type=approval)）
+    from meta.services.demand_entry_decision import (
+        service_request_approve_handler,
+        service_request_reject_handler,
+        requisition_approve_handler,
+        requisition_reject_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -632,6 +640,61 @@ def register_all_bo_actions(registry=None):
         requires_auth=True,
         idempotent=True,
     )
+
+    # ==================== 26-29: 需求入口审批（M1） ====================
+    # 提交时按目录项审批策略落 tasks(type=approval)，decision_effect 按
+    # executor_config.decision_actions 调 approve / reject，回执 new_status 为归位依据。
+    _demand_output_schema = {
+        'type': 'object',
+        'properties': {
+            'success': {'type': 'boolean'},
+            'data': {'type': 'object'},
+            'message': {'type': 'string'},
+        }
+    }
+    _demand_decision_actions = (
+        ('service_request', 'service_request_approve_handler', 'service_request_reject_handler'),
+        ('requisition', 'requisition_approve_handler', 'requisition_reject_handler'),
+    )
+    _demand_handlers = {
+        'service_request_approve_handler': service_request_approve_handler,
+        'service_request_reject_handler': service_request_reject_handler,
+        'requisition_approve_handler': requisition_approve_handler,
+        'requisition_reject_handler': requisition_reject_handler,
+    }
+    for object_type, approve_name, reject_name in _demand_decision_actions:
+        label = '服务请求' if object_type == 'service_request' else '采购申请'
+        id_key = '{0}_id'.format(object_type)
+        registry.register(
+            '{0}.approve'.format(object_type),
+            _demand_handlers[approve_name],
+            description='{0}审批通过（submitted → approved，回执 new_status=approved）'.format(label),
+            object_type=object_type,
+            category='business',
+            permission_required='{0}:approve'.format(object_type),
+            input_schema={
+                'type': 'object',
+                'properties': {id_key: {'type': 'integer'}, 'id': {'type': 'integer'}}
+            },
+            output_schema=_demand_output_schema,
+            requires_auth=True,
+            idempotent=True,
+        )
+        registry.register(
+            '{0}.reject'.format(object_type),
+            _demand_handlers[reject_name],
+            description='{0}驳回（submitted → rejected，回执 new_status=rejected）'.format(label),
+            object_type=object_type,
+            category='business',
+            permission_required='{0}:reject'.format(object_type),
+            input_schema={
+                'type': 'object',
+                'properties': {id_key: {'type': 'integer'}, 'id': {'type': 'integer'}}
+            },
+            output_schema=_demand_output_schema,
+            requires_auth=True,
+            idempotent=True,
+        )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")
 

@@ -15,16 +15,45 @@
     `requires_approval = false` 且 `approval_policy` 为空/空对象时，提交直接落 approved。
   · requisition 在本里程碑没有治理配置载体（审批开关属 M3 的法人对/组织对配置），
     一律视为免审批。
-  · 本服务不发写 SQL，只回答「要不要转 approved」；实际状态由状态机规则落库。
+  · 需要审批时落 `tasks(type=approval)`（S7 / S-D5），决策回写走
+    `demand_entry_decision`；任务与单据状态迁移分开：本服务只建待办，不改单据状态。
 """
 
+import json
 import logging
+import uuid
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 SERVICE_REQUEST_OBJECT = 'service_request'
 REQUISITION_OBJECT = 'requisition'
+
+#: 对象 → (表名, 任务标题前缀)
+_APPROVAL_TASK_SPEC = {
+    SERVICE_REQUEST_OBJECT: ('service_requests', '服务请求审批'),
+    REQUISITION_OBJECT: ('requisitions', '采购申请审批'),
+}
+
+#: 任务决策 → BO Action（成对配置，decision_effect 机器校验）
+_APPROVAL_DECISION_ACTIONS = {
+    SERVICE_REQUEST_OBJECT: {
+        'approve': 'service_request.approve',
+        'reject': 'service_request.reject',
+    },
+    REQUISITION_OBJECT: {
+        'approve': 'requisition.approve',
+        'reject': 'requisition.reject',
+    },
+}
+
+#: 审批任务的终止态（这些状态不再算在途，可重新建任务）
+_TASK_TERMINAL_STATUSES = ('done', 'failed', 'cancelled', 'skipped', 'dead')
+
+#: 控制参数编码（维度：org_id / document_type_id / line_type_id / item_group_id）
+_APPROVAL_REQUIRED_PARAM = 'demand_approval_required'
+_APPROVAL_POLICY_PARAM = 'demand_approval_policy'
 
 #: 对象 → (表名, 单号列, 单号前缀)
 _DOC_NO_SPEC = {
@@ -80,15 +109,94 @@ class DemandEntryService:
     # ---------------- 免审批判定 ----------------
 
     def is_approval_exempt(self, object_type: str, record_id: Any) -> bool:
-        """提交后是否可直接落 approved（免审批）。"""
-        if object_type == REQUISITION_OBJECT:
-            # M1 无审批策略载体 → 免审批
-            return True
-        if object_type != SERVICE_REQUEST_OBJECT:
+        """提交后是否可直接落 approved（免审批）。
+
+        口径：
+          ① 先读控制参数 `demand_approval_required` / `demand_approval_policy`；
+          ② 参数未配置（resolve 返回 None）时回退单据固有口径
+             —— service_request 看目录项，requisition 视为免审批。
+        """
+        if object_type not in _APPROVAL_TASK_SPEC:
             return True
         if record_id in (None, ''):
             return False
-        return not self._request_needs_approval(record_id)
+        if self._control_param_needs_approval(object_type, record_id):
+            return False
+        if object_type == SERVICE_REQUEST_OBJECT:
+            return not self._request_needs_approval(record_id)
+        return True
+
+    def _control_param_needs_approval(self, object_type: str, record_id: Any) -> bool:
+        """按控制参数判定：单据头维度 + 每个未取消行维度，任一命中即需审批。"""
+        from meta.services.control_parameter_service import ControlParameterResolver
+
+        spec = _APPROVAL_TASK_SPEC.get(object_type)
+        if not spec:
+            return False
+        table = spec[0]
+        rows = self._ds.query(
+            'SELECT document_type_id, requester_org_id AS org_id '
+            'FROM {0} WHERE id = ?'.format(table), [record_id])
+        if not rows:
+            return False
+        header_dims = {
+            'org_id': rows[0].get('org_id'),
+            'document_type_id': rows[0].get('document_type_id'),
+        }
+        header_dims = {k: v for k, v in header_dims.items() if v not in (None, '')}
+        resolver = ControlParameterResolver(self._ds)
+        if self._param_requires_approval(resolver, header_dims):
+            return True
+        return any(self._param_requires_approval(resolver, dims)
+                   for dims in self._line_dims(object_type, record_id, header_dims))
+
+    def _line_dims(self, object_type: str, record_id: Any,
+                   header_dims: Dict[str, Any]) -> list:
+        """行的匹配维度：头部维度 + line_type_id + item_group_id（能解析才带）。"""
+        if object_type == SERVICE_REQUEST_OBJECT:
+            rows = self._ds.query(
+                "SELECT line_type, item_id FROM service_request_lines "
+                "WHERE request_id = ? AND status <> 'cancelled'", [record_id])
+        elif object_type == REQUISITION_OBJECT:
+            rows = self._ds.query(
+                "SELECT line_type, item_id FROM requisition_lines "
+                "WHERE requisition_id = ? AND status <> 'cancelled'", [record_id])
+        else:
+            return []
+        result = []
+        for row in rows:
+            dims = dict(header_dims)
+            line_type_id = self._line_type_id(object_type, row.get('line_type'))
+            if line_type_id not in (None, ''):
+                dims['line_type_id'] = line_type_id
+            item_id = row.get('item_id')
+            if item_id not in (None, ''):
+                items = self._ds.query(
+                    'SELECT item_group_id FROM items WHERE id = ?', [item_id])
+                if items and items[0].get('item_group_id') not in (None, ''):
+                    dims['item_group_id'] = items[0]['item_group_id']
+            result.append(dims)
+        return result
+
+    def _line_type_id(self, object_type: str, line_type: Any) -> Optional[int]:
+        if line_type in (None, ''):
+            return None
+        rows = self._ds.query(
+            "SELECT id FROM type_definitions WHERE scope_bo = ? AND level = 'line' "
+            "AND code = ? AND status = 'active'", [object_type, line_type])
+        return rows[0]['id'] if rows else None
+
+    @staticmethod
+    def _param_requires_approval(resolver, dims: Dict[str, Any]) -> bool:
+        """参数未定义（None）视为不干预，交由单据固有口径处理。"""
+        if resolver.resolve(_APPROVAL_REQUIRED_PARAM, dims) is True:
+            return True
+        policy = resolver.resolve(_APPROVAL_POLICY_PARAM, dims)
+        if policy is None:
+            return False
+        if isinstance(policy, str):
+            return policy.strip() not in _EMPTY_POLICY_TEXTS
+        return bool(policy)
 
     def _request_needs_approval(self, request_id: Any) -> bool:
         """任一行引用的目录项要求审批即需审批（goods 行 / 无目录项视为免审批）。"""
@@ -126,3 +234,59 @@ class DemandEntryService:
             qty = payload.get('qty')
             if qty in (None, '') or float(qty) <= 0:
                 raise ValueError('服务请求行（goods）数量必须大于 0')
+
+    # ---------------- 审批任务（S7 / S-D5） ----------------
+
+    def create_approval_task(self, object_type: str, record_id: Any,
+                             actor: str = '') -> Optional[str]:
+        """提交且需审批 → 落一条审批待办；已有在途任务则不重复建。
+
+        返回任务 id；不适用（免审批 / 缺 id）返回 None。
+        """
+        spec = _APPROVAL_TASK_SPEC.get(object_type)
+        if not spec or record_id in (None, ''):
+            return None
+        _, title_prefix = spec
+
+        placeholders = ', '.join('?' * len(_TASK_TERMINAL_STATUSES))
+        active = self._ds.query(
+            "SELECT id FROM tasks WHERE type = 'approval' AND doc_ref = ? "
+            'AND status NOT IN ({0})'.format(placeholders),
+            [str(record_id)] + list(_TASK_TERMINAL_STATUSES),
+        )
+        if active:
+            return None
+
+        task_id = uuid.uuid4().hex
+        id_key = '{0}_id'.format(object_type)
+        row = {
+            'id': task_id,
+            'code': None,
+            'title': '{0} #{1}'.format(title_prefix, record_id),
+            'type': 'approval',
+            'status': 'waiting_approval',
+            'priority': 'P1',
+            'app_id': '',
+            'executor_type': 'human',
+            'assign_policy': 'claim',
+            'executor_candidates': json.dumps([], ensure_ascii=False),
+            'executor_config': json.dumps(
+                {'decision_actions': _APPROVAL_DECISION_ACTIONS[object_type]},
+                ensure_ascii=False),
+            'inputs': json.dumps(
+                {'id': record_id, id_key: record_id},
+                ensure_ascii=False, default=str),
+            'doc_ref': str(record_id),
+            'created_by': actor or 'system',
+            'created_at': datetime.now().isoformat(timespec='seconds'),
+            'attempt': 1,
+        }
+        columns = ', '.join(row.keys())
+        values = ', '.join('?' * len(row))
+        self._ds.execute(
+            'INSERT INTO tasks ({0}) VALUES ({1})'.format(columns, values),
+            list(row.values()),
+        )
+        logger.info('[DemandEntry] %s id=%s 建审批任务 %s',
+                    object_type, record_id, task_id)
+        return task_id
