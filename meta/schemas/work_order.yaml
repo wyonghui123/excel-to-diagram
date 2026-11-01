@@ -281,6 +281,49 @@ fields:
       relation: sales_order_line
       hidden_in_form: true
 
+  # 项目 360 履约聚合的唯一挂载列：工单按 project_id 归集（可空；空 = 未归集到项目）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
   - id: customer_account_id
     name: 客户
     type: integer
@@ -631,6 +674,9 @@ indexes:
     name: idx_work_order_source_demand
   - fields: [document_type_id]
     name: idx_work_order_document_type
+  # 项目 360 履约段按 project_id 原生过滤（AssociationSection 父键）
+  - fields: [project_id]
+    name: idx_work_order_project
 
 relations:
   - id: work_order_to_document_type
@@ -682,6 +728,9 @@ relations:
     cardinality: N:1
     description: 命中的 SLA 覆盖引用（可空）
 
+# 注：project_id 与 P1 的三处挂载同构，只声明字段 + 索引，不声明 reference 关系
+#     （避免存量库 ALTER 补列与全新建库 DDL 出现「有/无真外键」的双源漂移）
+
 ui_view_config:
   list:
     detail_mode: drawer
@@ -696,6 +745,10 @@ ui_view_config:
         filter_type: select
       - field: order_id
         width: 160
+        filterable: true
+        filter_type: select
+      - field: project_id
+        width: 180
         filterable: true
         filter_type: select
       - field: schedule_id
@@ -743,7 +796,7 @@ ui_view_config:
           - fields: [work_order_no, order_type, status]
           - fields: [schedule_id, order_id]
           - fields: [source_demand_type, source_demand_id]
-          - fields: [customer_account_id]
+          - fields: [customer_account_id, project_id]
       - title: 服务与 SLA
         columns:
           - fields: [severity, channel]
@@ -769,6 +822,7 @@ ui_view_config:
           - source_demand_type
           - source_demand_id
           - customer_account_id
+          - project_id
       - title: 服务与 SLA
         id: work_order_sla
         type: fieldGroup

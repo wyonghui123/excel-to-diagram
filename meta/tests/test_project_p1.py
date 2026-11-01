@@ -13,6 +13,7 @@
         project_id 可空 + 索引声明；为空时旧链路行为不变（不进入任一聚合段）
   AC-03 项目 360 只读聚合: ProjectOverviewService 原样返回三处金额，不重算、
         不复制；订单行的 hierarchy.parent_field 仍是 order_id（不被项目改写）
+        360 页签共四段（销售订单 / 订单行 / 计划行 / 工单，工单段由 P2 B1 追加）
 
 迁移用例另起一组：v172 建表 / 补列 / 建索引 / 权限 / 菜单，复跑幂等，回滚可逆。
 
@@ -182,10 +183,10 @@ class TestProjectDeclaration:
         ]
         assert 'project_no' in form_fields and 'budget_amount' in form_fields
 
-        # 360 三段均按 project_id 原生过滤，零前端组件（AC-03）
+        # 360 四段均按 project_id 原生过滤，零前端组件（AC-03；工单段由 P2 B1 追加）
         children = ui['child_sections']
         assert [c['child_object'] for c in children] == [
-            'sales_order', 'sales_order_line', 'sales_order_schedule']
+            'sales_order', 'sales_order_line', 'sales_order_schedule', 'work_order']
         for child in children:
             assert child['readonly'] is True
             assert child['enableAutoCrud'] is False

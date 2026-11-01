@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 11:01:18.649618
+-- 生成时间: 2026-11-01 12:37:58.713644
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -2346,6 +2346,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
     source_demand_id INTEGER,
     order_id INTEGER NOT NULL,
     order_line_id INTEGER NOT NULL,
+    project_id INTEGER,
     customer_account_id INTEGER,
     severity VARCHAR(200),
     channel VARCHAR(200),
@@ -3157,6 +3158,7 @@ CREATE INDEX IF NOT EXISTS idx_work_order_schedule ON work_orders(schedule_id)
 CREATE INDEX IF NOT EXISTS idx_work_order_status ON work_orders(status)
 CREATE INDEX IF NOT EXISTS idx_work_order_source_demand ON work_orders(source_demand_type, source_demand_id)
 CREATE INDEX IF NOT EXISTS idx_work_order_document_type ON work_orders(document_type_id)
+CREATE INDEX IF NOT EXISTS idx_work_order_project ON work_orders(project_id)
 
 -- Indexes for 工单组件
 CREATE INDEX IF NOT EXISTS idx_work_order_component_work_order ON work_order_components(work_order_id)
