@@ -34,18 +34,13 @@ G7（Gen2 六表进元模型）只影响任务六表的治理口径；本视图�
 
 ### Phase 0 前置（阻断，必须先做）
 
-- [ ] **P0-1 合并 / 变基到 main**
-  - 主工作树 main 已到 `v181`；`p2b1-work-order-project` 的 `v175`–`v179` 与 main 的 `v175`–`v181` **号段重叠**。
-  - 推荐：以 main 新建分支，重新落 P1.5 三笔提交（`c4723446` / `4939316f` 与 P3 `ef5f35c9`），把项目侧迁移重编号到 `v182` 起：
-    - `v175__work_order_project_id.py` → `v182`
-    - `v176__sla_milestone_project_id.py` → `v183`
-    - `v177__shipment_project_id.py` → `v184`
-    - `v178__configuration_project_id.py` → `v185`
-    - `v179__project_task_p15.py` → `v186`
-  - 重编号时同步：迁移内部打印前缀、`test_project_p15.py` 的 `from meta.migrations import v179__...`、spec / tasks 文档引用。
-  - 注意：`migration_runner` 以**完整文件名**记录，重号不会互相跳过，但排序会乱；不能靠「文件名不同」蒙混。
-- [ ] **P0-2 确认资源域可用**：上表 10 张资源相关表存在；`resource_matching_service.available_minutes()` 在当前 DB 可返回非 0。
-- [ ] **P0-3 确认项目侧可用**：`project_tasks` / `project_task_dependencies` 已随 P1.5 合并。
+- [x] **P0-1 合并完成**（merge commit `5d63d94d`，main 已并入本分支）
+  - 决策：**保留 v175–v179 号段，不重编号**。`migration_runner.schema_migrations` 以**完整文件名**为唯一键，同号不同名的文件都会执行并各自记录；与 main 的 v175–v181 无同名文件、无依赖冲突。
+  - 原因：PO 智能体正在主工作树开发（未提交 `requisition_po_conversion.py` 等），把项目侧迁移改号到 v182 反而会占用它下一个号段；保留原号段，后续新迁移从 **v182** 起。
+  - 合并结果：`meta/scripts/init_menu_permissions.py` 自动合并成功（项目菜单与资源/采购菜单并存）；`generated_schema.sql` 保持「只含 project_tasks、不含资源/采购表」的既有状态（main 侧本来也未生成）。
+  - 回归已验证：项目 P1.5 21、P1 35、P2b1 25、work_order production 15 / service 17、resource_matching 22、资源迁移 4 + 6，全部通过。
+- [x] **P0-2 资源域可用**：v175 / v176 / v180 已随 main 合并，`resource_matching_service.available_minutes()` 测试 22 项通过。
+- [x] **P0-3 项目侧可用**：`project_tasks` / `project_task_dependencies` 已存在，P1.5 测试 21 项通过。
 
 ### Phase 1 实际工时对象 `time_entry`
 
