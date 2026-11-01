@@ -1,0 +1,512 @@
+# 项目活动 (Project Task) — 项目侧 P1.5 计划层 / WBS 节点
+# 依据:
+#   docs/specs/spec-project-type-object-model-research-2026-10-31.md §2.5 / §5 Phase 1.5 / AC-09
+#   docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §0.1 P1.5（Q3 / G11）
+#
+# 定位: 计划层节点（阶段 / 工作包 / 活动），只回答「做什么、何时、依赖谁」，不产动作。
+#   ① 不生成 `tasks`、不挂 `work_order_operation`（§8.2 硬规则 1 / 2）；
+#   ② 需求入口只走 `source_demand_type='project_task'` + `source_demand_id`，落在单据头 / 行；
+#   ③ 工时只记在 tasks / worklogs，回聚 project_task → project 用派生视图（D11，待 G7）。
+#
+# 状态机（声明式 rules: state_transition，state_field=status；服务层不硬编码状态判断）:
+#   draft → planned → in_progress → done
+#   cancelled 仅从 draft / planned / in_progress 进入
+
+id: project_task
+name: 项目活动
+table_name: project_tasks
+description: 项目活动（计划层 WBS 节点；只产需求不产动作）
+display_name_field: task_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 项目活动
+  category: business_object
+  business_key: [project_id, task_no]
+  aliases:
+    - 项目活动
+    - 项目任务
+    - WBS
+    - Project Task
+
+deletion_policy:
+  # 被依赖边引用时禁止删除；任务本身不承载执行事实
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    required: true
+    description: 所属项目（必填；项目内 task_no 唯一）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+
+  # WBS 层级：父活动可空；不建真外键（自引用，仅索引）
+  - id: parent_task_id
+    name: 上级活动
+    type: integer
+    db_column: parent_task_id
+    nullable: true
+    description: 上级活动（可空，WBS 层级）
+    semantics:
+      meaning: 上级活动
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+        placeholder: "无（顶层节点）"
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+      clearable: true
+
+  - id: task_no
+    name: 活动编号
+    type: string
+    db_column: task_no
+    required: true
+    max_length: 30
+    description: 活动编号（项目内唯一，建议 WBS 编码如 1.2.3）
+    semantics:
+      meaning: 活动业务编号（项目内唯一）
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: name
+    name: 活动名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 活动名称
+    semantics:
+      meaning: 活动名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+
+  - id: task_type
+    name: 活动类型
+    type: string
+    db_column: task_type
+    required: true
+    default: activity
+    description: 活动类型（阶段 / 工作包 / 活动）
+    enum_values:
+      - value: phase
+        label: 阶段
+        color: primary
+        category: active
+      - value: work_package
+        label: 工作包
+        color: info
+        category: active
+      - value: activity
+        label: 活动
+        color: info
+        category: active
+        is_initial: true
+    semantics:
+      meaning: 活动类型
+      filterable: true
+      filter_type: enum
+      filter_label: 活动类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 活动状态（草稿 / 已计划 / 进行中 / 已完成 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: planned
+        label: 已计划
+        color: primary
+        category: active
+      - value: in_progress
+        label: 进行中
+        color: warning
+        category: active
+      - value: done
+        label: 已完成
+        color: success
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 活动状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: planned_start
+    name: 计划开始
+    type: date
+    db_column: planned_start
+    nullable: true
+    description: 计划开始日期
+    semantics:
+      meaning: 活动计划开始日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划开始
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: planned_end
+    name: 计划结束
+    type: date
+    db_column: planned_end
+    nullable: true
+    description: 计划结束日期
+    semantics:
+      meaning: 活动计划结束日期
+      filterable: true
+      filter_type: date
+      filter_label: 计划结束
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: percent_complete
+    name: 完成百分比
+    type: number
+    db_column: percent_complete
+    nullable: true
+    default: 0
+    description: 完成百分比（0-100，计划进度，不等于实际工时）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 100
+        decimal_places: 2
+    semantics:
+      meaning: 活动计划完成百分比
+    ui:
+      widget: number
+
+  - id: owner_user_id
+    name: 负责人
+    type: integer
+    db_column: owner_user_id
+    nullable: true
+    description: 负责人（平台登录用户）；空表示未指定
+    semantics:
+      meaning: 活动负责人
+      display:
+        type: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定"
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 1
+      presentation:
+        result_type: dropdown
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 活动说明
+    semantics:
+      meaning: 活动说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# ────────────────────────────────────────────
+# 状态流转（声明式；对象原则 7.3）
+# ────────────────────────────────────────────
+rules:
+  - id: plan_task
+    name: 计划活动
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: planned
+    triggers: [before_update]
+    ui_hints:
+      label: 计划
+      icon: calendar
+      confirm_message: "确认该活动进入已计划状态？"
+
+  - id: start_task
+    name: 开始活动
+    type: state_transition
+    state_field: status
+    from_states: [planned]
+    to_state: in_progress
+    triggers: [before_update]
+    ui_hints:
+      label: 开始
+      icon: play
+      confirm_message: "确认开始该活动？"
+
+  - id: complete_task
+    name: 完成活动
+    type: state_transition
+    state_field: status
+    from_states: [in_progress]
+    to_state: done
+    triggers: [before_update]
+    ui_hints:
+      label: 完成
+      icon: check
+      confirm_message: "确认该活动已完成？"
+
+  - id: cancel_task
+    name: 取消活动
+    type: state_transition
+    state_field: status
+    from_states: [draft, planned, in_progress]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后不可恢复，确定要取消吗？"
+
+indexes:
+  - fields: [project_id, task_no]
+    unique: true
+    name: uidx_project_task_no
+  - fields: [project_id, status]
+    name: idx_project_task_project_status
+  - fields: [parent_task_id]
+    name: idx_project_task_parent
+  - fields: [owner_user_id]
+    name: idx_project_task_owner
+
+relations:
+  - id: project_task_to_project
+    name: 所属项目
+    type: reference
+    target: project
+    source_field: project_id
+    target_field: id
+    cardinality: N:1
+    description: 所属项目引用（真外键；新表无存量漂移）
+
+ui_view_config:
+  # 菜单由迁移 v179 手工声明（挂 sales 分组）
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 项目活动
+    description: 计划层 WBS 节点：阶段 / 工作包 / 活动
+    columns:
+      - field: task_no
+        width: 140
+        sortable: true
+      - field: name
+        width: 220
+        sortable: true
+      - field: project_id
+        width: 160
+      - field: task_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: owner_user_id
+        width: 130
+      - field: planned_start
+        width: 120
+        format: date
+      - field: planned_end
+        width: 120
+        format: date
+      - field: percent_complete
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - task_no
+      - name
+    actions:
+      - id: create
+        label: 新建活动
+        icon: plus
+        type: primary
+        permission: project:project_task_create
+    defaultSort:
+      field: task_no
+      order: asc
+
+  form:
+    title: 项目活动
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [project_id, parent_task_id]
+          - fields: [task_no, name]
+          - fields: [task_type, status]
+      - title: 计划与进度
+        columns:
+          - fields: [planned_start, planned_end]
+          - fields: [percent_complete, owner_user_id]
+      - title: 其他
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.task_no} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [project_id, parent_task_id, task_no, name, task_type, status,
+                 planned_start, planned_end, percent_complete, owner_user_id,
+                 description]
+
+category_config:
+  create_permission: project:project_task_create
+  update_permission: project:project_task_update
+  delete_permission: project:project_task_delete
+  owner_auto_permission: false

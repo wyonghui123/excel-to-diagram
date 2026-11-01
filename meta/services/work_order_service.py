@@ -64,7 +64,9 @@ ORDER_TYPE_PRODUCTION = 'production'
 
 SOURCE_DEMAND_SCHEDULE = 'sales_order_schedule'
 SOURCE_DEMAND_LINE = 'sales_order_line'
-SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE)
+SOURCE_DEMAND_PROJECT_TASK = 'project_task'
+SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE,
+                       SOURCE_DEMAND_PROJECT_TASK)
 
 STRUCTURE_USAGE_PRODUCTION = 'production'
 STRUCTURE_STATUS_ACTIVE = 'active'
@@ -324,6 +326,17 @@ class WorkOrderService:
 
         demand = self._resolve_demand(str(demand_type), demand_id)
 
+        # AC-09：project_task 来源时工单与任务必须归属同一项目（缺省则回填任务项目）
+        project_id = payload.get('project_id')
+        demand_project_id = demand.get('project_id')
+        if not _blank(demand_project_id):
+            if not _blank(project_id) \
+                    and str(project_id) != str(demand_project_id):
+                raise WorkOrderError(
+                    '工单项目与项目任务归属不一致',
+                    field_name='project_id', rule='ST_PROJECT_MISMATCH')
+            project_id = project_id if not _blank(project_id) else demand_project_id
+
         schedule_id = payload.get('schedule_id')
         if not _blank(schedule_id):
             self._reject_service_schedule(schedule_id)
@@ -361,7 +374,7 @@ class WorkOrderService:
             'order_id': demand.get('order_id'),
             'order_line_id': order_line_id,
             'customer_account_id': customer_account_id,
-            'project_id': payload.get('project_id'),
+            'project_id': project_id,
             'severity': payload.get('severity'),
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -515,6 +528,23 @@ class WorkOrderService:
     def _resolve_demand(self, demand_type: str,
                         demand_id: Any) -> Dict[str, Any]:
         """回查需求来源，冗余 order_id / order_line_id / customer_account_id / item_id / qty。"""
+        if demand_type == SOURCE_DEMAND_PROJECT_TASK:
+            # 计划层只产需求：项目任务不提供单据 / 物料 / 数量，仅锚定 project_id
+            rows = self.ds.query(
+                'SELECT id, project_id FROM project_tasks WHERE id = ?', [demand_id])
+            if not rows:
+                raise WorkOrderError('需求来源项目任务不存在',
+                                     field_name='source_demand_id',
+                                     rule='ST_SOURCE_DEMAND_INVALID')
+            return {
+                'order_id': None,
+                'order_line_id': None,
+                'customer_account_id': None,
+                'item_id': None,
+                'qty': None,
+                'project_id': rows[0].get('project_id'),
+            }
+
         if demand_type == SOURCE_DEMAND_SCHEDULE:
             rows = self.ds.query(
                 'SELECT id, order_id, line_id, schedule_kind, promised_qty '

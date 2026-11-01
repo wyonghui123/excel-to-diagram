@@ -190,7 +190,7 @@
 |---|---|---|
 | Phase 0 | 一手产品口径核验（SAP PS / Oracle PPM / 用友项目云 / Dynamics PSA / NetSuite project）；字段与不变量评审 | 无 |
 | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + SO/line/schedule 挂载 + 项目 360 只读视图 | 新增对象，旧单据可空 |
-| Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图 | 新增计划层对象，执行链路不变 |
+| Phase 1.5 | `project_task` + `project_task_dependency`（**已落，v179**）；`source_demand_type` 扩 `project_task`（**已落**）；工时回聚派生视图（**待 G7**） | 新增计划层对象，执行链路不变 |
 | Phase 2 | `work_center / resource / resource_capability / routing(+operation)`；`work_order.project_id`；工序溯源 | 新增主数据，工单可空挂载 |
 | Phase 3 | `configuration.project_id`（**已落，v178**）+ `context_json` 承载项目上下文；项目配置物化联动（**不建项目级 BOM 快照**，D5 撤销） | 配置层挂载，履约链路不变 |
 | Phase 4 | 项目预算/收入确认；`project` generic 权限维度评估 | 按需 |
@@ -301,3 +301,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.4：P3 裁决——撤销 D5，不建 `project_structure_snapshot`（AC-07 已由 `work_order_components` 工单级展开快照满足）；§2.3 / §3 G4 / Phase 3 / AC-07 / D5 / §8.4 同步；P3 范围收缩为 `configuration.project_id` + 物化联动 |
 | 2026-11-01 | v1.5：G6 落地——`shipment.project_id`（v177）+ 360 第五段「交货单」，AC-03 的 shipment 聚合闭环；AC-07 补断言测试；G6 只剩 `fulfillment_order` |
 | 2026-11-01 | v1.6：G10 落地——`configuration.project_id`（v178，可空 + `(project_id, status)` 索引 + 列表/表单 UI）；AC-06 由测试闭环（有项目标签的配置物化结果不变，`project_id` 留在配置实例不写进 items） |
+| 2026-11-01 | v1.7：P1.5 落地——`project_task` / `project_task_dependency`（v179，含状态机、四类依赖 + lag、项目内唯一索引、手工菜单）；`work_order.source_demand_type` 扩 `project_task`（G11）；AC-09 四点由 `meta/tests/test_project_p15.py` 闭环；工时回聚派生视图因 G7（Gen2 任务六表未进元模型）标注「待 G7」 |

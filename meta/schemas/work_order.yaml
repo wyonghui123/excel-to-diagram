@@ -9,7 +9,7 @@
 # 挂载点（按 order_type 分流，服务层强制）:
 #   · service / repair / install / maintenance
 #                → `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）
-#   · production → `source_demand_type` + `source_demand_id` 必填（计划行 / 订单行）
+#   · production → `source_demand_type` + `source_demand_id` 必填（计划行 / 订单行 / 项目任务）
 #
 # 服务层不变量（YAML 表达不了的，由 work_order_service 强制；R-ST-* 为 service 专属）:
 #   R-ST-0（service 专属）schedule_id 必填且计划行 schedule_kind='service'；否则 ST_SCHEDULE_INVALID
@@ -25,7 +25,8 @@
 #   R-ST-8 取消工单需同时把计划行置 cancelled 或改约；否则 ST_SCHEDULE_DESYNC
 #
 # 生产工单（批次 4a，§10.15 / §10.16）:
-#   P-1 source_demand_type ∈ {sales_order_schedule, sales_order_line} 且 source_demand_id 必填；
+#   P-1 source_demand_type ∈ {sales_order_schedule, sales_order_line, project_task}
+#       且 source_demand_id 必填；project_task 时工单须与任务同一 project_id（AC-09）；
 #       否则 ST_SOURCE_DEMAND_REQUIRED / ST_SOURCE_DEMAND_INVALID
 #   P-2 禁 asset_ref（ST_ASSET_NOT_ALLOWED）、禁 coverage_id（ST_SLA_NOT_ALLOWED）、
 #       禁挂 schedule_kind='service' 的计划行（ST_SCHEDULE_INVALID）
@@ -218,6 +219,10 @@ fields:
         category: active
       - value: sales_order_line
         label: 订单行
+        color: info
+        category: active
+      - value: project_task
+        label: 项目任务
         color: info
         category: active
     semantics:

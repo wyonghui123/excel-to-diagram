@@ -25,7 +25,7 @@
 | 里程碑 | 对应 project spec | 内容 | 依赖 |
 |---|---|---|---|
 | **P1** | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + `sales_order.project_id` / 行 / 计划行挂载 + 项目 360 只读视图（D1 / D2） | M0 |
-| **P1.5** | Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图（Q3 / G11 / G14 / D11） | P1 |
+| **P1.5** | Phase 1.5 | `project_task` + `project_task_dependency`（**已落，v179**）；`source_demand_type` 扩 `project_task`（**已落**，G11）；工时回聚派生视图（**待 G7**）（Q3 / G11 / G14 / D11） | P1 |
 | **P2** | Phase 2 | `work_center` / `resource` / `resource_capability` / `routing(+operation)`；`work_order.project_id`；工序溯源（D4 / D10） | M4（共用工序语义） |
 | **P3** | Phase 3 | `configuration.project_id`（已落，v178）+ `context_json`；配置物化联动（D6 / D11）；**不建项目级 BOM 快照（D5 撤销）** | P2 |
 | **P4** | Phase 4 | 项目预算 / 收入确认；`project` 权限维度（D8） | 按需，不承诺 |
@@ -167,3 +167,4 @@
 | 2026-11-01 | v0.4 | P3 裁决：D5 撤销，P3 收缩为 `configuration.project_id` + 物化联动，不建项目级 BOM 快照（对齐 project spec v1.4） |
 | 2026-11-01 | v0.5 | G6 部分落地：`shipment.project_id`（v177）+ 项目 360 交货单段；缺口映射拆出 G6→P2 |
 | 2026-11-01 | v0.6 | G10 落地：`configuration.project_id`（v178）+ 缺口映射把 G10 从 P2/P3/M5 拆出为 P3（对齐 project spec v1.6） |
+| 2026-11-01 | v0.7 | P1.5 落地：`project_task` / `project_task_dependency`（v179）+ `source_demand_type` 扩 `project_task`（G11）；工时回聚派生视图待 G7（对齐 project spec v1.7） |

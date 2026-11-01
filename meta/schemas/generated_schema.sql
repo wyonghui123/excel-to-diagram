@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 15:59:35.111114
+-- 生成时间: 2026-11-01 17:09:16.658363
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1541,6 +1541,42 @@ CREATE TABLE IF NOT EXISTS projects (
     FOREIGN KEY (manager_user_id) REFERENCES users(id)
 )
 
+-- 项目活动: 项目活动（计划层 WBS 节点；只产需求不产动作）
+CREATE TABLE IF NOT EXISTS project_tasks (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    parent_task_id INTEGER,
+    task_no VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    task_type VARCHAR(200) NOT NULL DEFAULT 'activity',
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    planned_start DATETIME,
+    planned_end DATETIME,
+    percent_complete REAL DEFAULT 0,
+    owner_user_id INTEGER,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+)
+
+-- 项目活动依赖: 项目活动依赖边（FS / SS / FF / SF + lag）
+CREATE TABLE IF NOT EXISTS project_task_dependencies (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    predecessor_task_id INTEGER NOT NULL,
+    successor_task_id INTEGER NOT NULL,
+    dependency_type VARCHAR(200) NOT NULL DEFAULT 'FS',
+    lag_minutes INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (predecessor_task_id) REFERENCES project_tasks(id),
+    FOREIGN KEY (successor_task_id) REFERENCES project_tasks(id)
+)
+
 -- 费率记录: 费率记录（业务别名：价目行 · 条件记录）——键组合下的费率值
 CREATE TABLE IF NOT EXISTS rate_records (
     created_by VARCHAR(200),
@@ -2921,6 +2957,18 @@ CREATE INDEX IF NOT EXISTS idx_project_org_status ON projects(org_id, status)
 CREATE INDEX IF NOT EXISTS idx_project_customer ON projects(customer_account_id)
 CREATE INDEX IF NOT EXISTS idx_project_manager ON projects(manager_user_id)
 CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)
+
+-- Indexes for 项目活动
+CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks(project_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_project_task_no ON project_tasks(project_id, task_no)
+CREATE INDEX IF NOT EXISTS idx_project_task_project_status ON project_tasks(project_id, status)
+CREATE INDEX IF NOT EXISTS idx_project_task_parent ON project_tasks(parent_task_id)
+CREATE INDEX IF NOT EXISTS idx_project_task_owner ON project_tasks(owner_user_id)
+CREATE INDEX IF NOT EXISTS idx_project_tasks_name ON project_tasks(name)
+
+-- Indexes for 项目活动依赖
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_ptd_edge ON project_task_dependencies(predecessor_task_id, successor_task_id, dependency_type)
+CREATE INDEX IF NOT EXISTS idx_ptd_successor ON project_task_dependencies(successor_task_id)
 
 -- Indexes for 费率记录
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_record_code ON rate_records(code)

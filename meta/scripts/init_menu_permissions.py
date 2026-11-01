@@ -1960,6 +1960,38 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [PROJECT-P15 2026-11-01] 项目活动 —— 计划层 WBS 节点（v179 交付）,
+            #   与 v179__project_task_p15 的菜单声明保持一致; 缺本声明时步骤 7.6
+            #   会把该手工菜单当冗余删除 (计划层入口随之消失)。
+            'menu_code': 'project-task',
+            'menu_name': '项目活动',
+            'menu_path': '/project-tasks',
+            'icon': 'ListChecks',
+            'color': '#8b5cf6',
+            'sort_order': 3,
+            'parent_menu': 'sales',
+            'page_type': 'object_list',
+            'primary_object_type': 'project_task',
+            'object_types': json.dumps(['project_task']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'project_task', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'project:project_task_create',
+                'project:project_task_read',
+                'project:project_task_update',
+                'project:project_task_delete',
+                'project:project_task_list',
+            ]),
+            'description': '项目活动：计划层 WBS 节点（阶段 / 工作包 / 活动），只产需求不产动作',
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['project'],
+                'message': '项目活动沿用项目的业务实体（org）数据权限口径'
+            })
+        },
+        {
             # [ITEM-STRUCTURE 2026-10-25] 物料结构（BOM / 选配模型）—— v112 交付,
             #   与 v112__item_structure_menu 的声明保持一致; 缺本声明时步骤 7.6 会
             #   把该手工菜单当冗余删除 (BOM 页入口随之消失)。
