@@ -1,7 +1,6 @@
 ---
 description: "Trae 官方论坛（forum.trae.cn）FAQ 实战经验汇总（2026-06-20）。遇到性能问题、MCP 工具加载失败、规则失效、模型降智时查阅此规则。"
-globs: "**/*"
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Trae 官方论坛 FAQ 实战经验汇总（v2026.06.20）

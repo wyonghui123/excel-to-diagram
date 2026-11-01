@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "测试用例设计原则：核心原则 + 全局状态隔离 + Fixture + 数据管理"
-globs: "meta/tests/**/*,tests/**/*"
 ---
 
 # 测试用例设计原则

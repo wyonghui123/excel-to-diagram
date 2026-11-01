@@ -1,5 +1,5 @@
 ---
-alwaysApply: true
+alwaysApply: false
 description: "[DEPRECATED 2026-06-21] 多 Agent 并行工作基础设施 V1 - 已被 V2.1 替代"
 ---
 

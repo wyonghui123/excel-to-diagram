@@ -1,6 +1,6 @@
 ---
 description: Trae IDE Subagent 创建指南 - 在 UI 中创建可被其他智能体调用的 Subagent 时加载。说明真实 Subagent 路径、必填字段、与 .md 文件的关系。
-globs: ["**/.trae/agents/**", "**/.trae/agents/*.md"]
+globs: "**/.trae/agents/**,**/.trae/agents/*.md"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"

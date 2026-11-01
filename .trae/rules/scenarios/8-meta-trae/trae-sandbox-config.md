@@ -1,6 +1,6 @@
 ---
 description: Trae IDE 沙箱 v2 配置指南 - 涉及 sandbox.json 自定义、网络控制、白名单、高风险命令拦截时加载。封装沙箱 5 大机制 + 与项目白名单机制的关系。
-globs: ["**/.trae-cn/sandbox.json", "**/sandbox.json"]
+globs: "**/.trae-cn/sandbox.json,**/sandbox.json"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"

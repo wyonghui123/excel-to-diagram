@@ -1,5 +1,5 @@
 ---
-alwaysApply: true
+alwaysApply: false
 description: "多 Agent 并行工作基础设施规范 V2 (v2026.06.20) - 基于沙箱 terminal 死锁 2.5 小时事故。沙箱状态机感知、Read-First 工作流、工具降级顺序、Agent Status 心跳、多 Agent 互相感知。"
 ---
 

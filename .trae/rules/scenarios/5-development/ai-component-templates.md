@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "AI 组件开发模板 - Vue 3 Composition API + Element Plus"
-globs: "src/**"
 ---
 
 # AI 组件开发模板（v4.0 拆分）
