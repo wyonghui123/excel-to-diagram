@@ -153,7 +153,7 @@
 | G3 | 无 `routing` 工艺路线主数据 | P0 | 工序只能工单级手填，标准工时不可复用 |
 | G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销） | P0 | 工程变更与项目实例化 BOM 不可表达 |
 | G5 | 资源只有 3 值枚举，无实例/日历/技能/费率 | P1 | 派工、资源排程、成本核算缺主数据 |
-| G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点 | P1 | 项目 360 视图需跨链拼接 |
+| G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` 已落，`fulfillment_order` 待补） | P1 | 项目 360 已能跨链聚合交货单；业务分组单仍缺锚点 |
 | G7 | Gen2 任务六表不在 YAML 元模型内 | P1 | 四层对象无法统一治理（与 L18 治理项同源） |
 | G8 | 三套里程碑（billing / SLA / 计划行）无统一项目外键 | P1 | 项目进度与收款视图割裂 |
 | G9 | `order_type=repair/install/maintenance` inactive | P2 | 项目售后场景受限 |
@@ -296,6 +296,7 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 |---|---|
 | 2026-10-31 | 初版研究稿 v1.0（仅取证与设计建议，未改代码、未提交） |
 | 2026-10-31 | v1.1：并入「对象与关系复审」（§8）；补 G11-G14、D9-D12；Q3 改为已决；证据清单顺延为 §9 |
+| 2026-10-31 | v1.2：命名口径复核——只改 `work_order`，撤销 `fulfillment_order` 改名与「活动」对象改名；D12 与 §8.3 同步 |
 | 2026-11-01 | v1.3：补 §2.5 计划层对象契约与 Phase 1.5 排期；新增 AC-09；修正 P1–P4 未覆盖 `project_task` 的里程碑漏项 |
 | 2026-11-01 | v1.4：P3 裁决——撤销 D5，不建 `project_structure_snapshot`（AC-07 已由 `work_order_components` 工单级展开快照满足）；§2.3 / §3 G4 / Phase 3 / AC-07 / D5 / §8.4 同步；P3 范围收缩为 `configuration.project_id` + 物化联动 |
-| 2026-10-31 | v1.2：命名口径复核——只改 `work_order`，撤销 `fulfillment_order` 改名与「活动」对象改名；D12 与 §8.3 同步 |
+| 2026-11-01 | v1.5：G6 落地——`shipment.project_id`（v177）+ 360 第五段「交货单」，AC-03 的 shipment 聚合闭环；AC-07 补断言测试；G6 只剩 `fulfillment_order` |

@@ -10,7 +10,7 @@
 #   ② 金额只在 SO / line / schedule；本对象仅 budget_amount（预算），不做金额冗余（I1）
 #   ③ sales_order.project_id / sales_order_line.project_id / sales_order_schedule.project_id
 #      均为可空挂载；为空时旧链路行为不变（AC-02）
-#   ④ 项目 360 聚合只读：销售订单 / 订单行 / 计划行 / 工单均由 child_sections 按 project_id
+#   ④ 项目 360 聚合只读：销售订单 / 订单行 / 计划行 / 工单 / 交货单均由 child_sections 按 project_id
 #      原生过滤（AssociationSection 父键 = `{父对象类型}_id` = project_id），不需要前端组件
 #   ⑤ 项目暂不进入权限维度链（D8），沿用 org 维度
 #
@@ -611,9 +611,10 @@ ui_view_config:
                  customer_account_id, manager_user_id, start_date, end_date,
                  budget_amount, currency_id, description]
 
-  # 项目 360（只读）：四段子对象均按 project_id 原生过滤
+  # 项目 360（只读）：五段子对象均按 project_id 原生过滤
   #   （AssociationSection 取父键 = `<父对象类型>_id` = project_id，无需 customFetcher）
   #   工单（履约）段由 work_order.project_id 归集（P2 B1），空值不进入任何项目
+  #   交货单段由 shipment.project_id 归集（G6），空值不进入任何项目
   child_sections:
     - child_object: sales_order
       title: 销售订单（360）
@@ -641,6 +642,14 @@ ui_view_config:
       pageSize: 20
     - child_object: work_order
       title: 工单（360）
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false
+      readonly: true
+      pageSize: 20
+    - child_object: shipment
+      title: 交货单（360）
       display: tab
       useMetaList: true
       enableDetail: true

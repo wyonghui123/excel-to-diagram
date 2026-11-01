@@ -150,6 +150,53 @@ fields:
       relation: sales_order
       multiple: false
 
+  # G6：项目锚点（与 work_order / sales_order 的 project_id 同构；
+  # 只声明字段 + 索引，不加 reference 关系/真外键，避免存量库 ALTER 与新建库 DDL 双源漂移）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+      filterable: true
+      filter_type: relation
+      filter_label: 所属项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 150
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      clearable: true
+
   - id: ship_from_location_id
     name: 发货库位
     type: integer
@@ -529,6 +576,9 @@ indexes:
     name: idx_shipment_order_status
   - fields: [document_type_id]
     name: idx_shipment_document_type
+  # 项目 360 归集路径（G6）
+  - fields: [project_id]
+    name: idx_shipment_project
 
 relations:
   - id: shipment_to_document_type
@@ -576,6 +626,10 @@ ui_view_config:
         width: 160
         filterable: true
         filter_type: select
+      - field: project_id
+        width: 180
+        filterable: true
+        filter_type: select
       - field: ship_to_party_id
         width: 180
       - field: planned_ship_date
@@ -621,7 +675,8 @@ ui_view_config:
     sections:
       - title: 基本信息
         columns:
-          - fields: [delivery_no, order_id, status]
+          - fields: [delivery_no, order_id]
+          - fields: [project_id, status]
           - fields: [source, ship_from_location_id]
       - title: 收货信息
         columns:
@@ -646,6 +701,7 @@ ui_view_config:
         fields:
           - delivery_no
           - order_id
+          - project_id
           - status
           - source
           - ship_from_location_id

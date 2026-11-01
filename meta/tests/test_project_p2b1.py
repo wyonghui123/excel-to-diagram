@@ -11,6 +11,7 @@
   B1-3 v175 迁移对存量库补列 + 补索引，幂等；回滚只删索引、保留列
   P2-1 sla_milestone 补可空 project_id（D3 里程碑归集），v176 幂等迁移
   P2-2 售后三值（repair / install / maintenance）转 active（G9）
+  P2-3 shipment 补可空 project_id（G6），v177 幂等迁移
 
 建库一律走 factories 的 create_tables / seed_row（conftest 的裸 SQL 守卫
 会把含裸 DML 的测试文件整体 skip）。
@@ -37,6 +38,7 @@ from meta.migrations.v175__work_order_project_id import (  # noqa: E402
     verify,
 )
 from meta.migrations import v176__sla_milestone_project_id as v176  # noqa: E402
+from meta.migrations import v177__shipment_project_id as v177  # noqa: E402
 
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
@@ -120,11 +122,12 @@ class TestWorkOrderProjectMount:
 
 class TestProjectWorkOrderSection:
 
-    def test_work_order_is_fourth_readonly_tab(self):
+    def test_work_order_and_shipment_are_readonly_tabs(self):
         children = _load_raw('project')['ui_view_config']['child_sections']
         assert [c['child_object'] for c in children] == [
-            'sales_order', 'sales_order_line', 'sales_order_schedule', 'work_order']
-        section = children[-1]
+            'sales_order', 'sales_order_line', 'sales_order_schedule', 'work_order',
+            'shipment']
+        section = children[3]
         assert section['title'] == '工单（360）'
         assert section['display'] == 'tab'
         assert section['useMetaList'] is True
@@ -132,6 +135,11 @@ class TestProjectWorkOrderSection:
         assert section['enableAutoCrud'] is False
         assert section['readonly'] is True
         assert section['pageSize'] == 20
+
+        shipment = children[4]
+        assert shipment['title'] == '交货单（360）'
+        assert shipment['readonly'] is True and shipment['enableAutoCrud'] is False
+        assert shipment['useMetaList'] is True and shipment['pageSize'] == 20
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,3 +288,60 @@ class TestAfterSalesOrderTypes:
         assert active == {'service', 'production', 'repair', 'install',
                           'maintenance'}
         assert 'project' not in {e['value'] for e in field['enum_values']}
+
+
+class TestShipmentProjectAnchor:
+    """G6：交货单按 project_id 归集（项目 360 发货段的数据前提）。"""
+
+    def test_project_id_declared_nullable_without_fk(self):
+        field = _field(_load_raw('shipment'), 'project_id')
+        assert field is not None
+        assert field['nullable'] is True
+        assert field['semantics']['display']['target_type'] == 'project'
+        indexes = {i['name'] for i in _load_raw('shipment')['indexes']}
+        assert v177.PROJECT_INDEX in indexes
+        relations = {r['id'] for r in _load_raw('shipment')['relations']}
+        assert 'shipment_to_project' not in relations
+
+    def test_migration_adds_column_and_index(self, tmp_path):
+        db = tmp_path / 'p2_shipment.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'order_id INTEGER)'.format(v177.SHIPMENT_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v177.verify(db) is False
+        assert v177.migrate(db) is True
+        assert v177.verify(db) is True
+        assert v177.PROJECT_COLUMN in _columns(db, v177.SHIPMENT_TABLE)
+        assert _index_count(db, v177.PROJECT_INDEX) == 1
+
+    def test_migration_is_idempotent(self, tmp_path):
+        db = tmp_path / 'p2_shipment_twice.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'order_id INTEGER)'.format(v177.SHIPMENT_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v177.migrate(db) is True
+        assert v177.migrate(db) is True
+        assert v177.verify(db) is True
+        assert _index_count(db, v177.PROJECT_INDEX) == 1
+
+    def test_rollback_drops_index_keeps_column(self, tmp_path):
+        db = tmp_path / 'p2_shipment_rollback.db'
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, '
+                         'order_id INTEGER)'.format(v177.SHIPMENT_TABLE))
+            conn.commit()
+        finally:
+            conn.close()
+        assert v177.migrate(db) is True
+        assert v177.rollback(db) is True
+        assert _index_count(db, v177.PROJECT_INDEX) == 0
+        assert v177.PROJECT_COLUMN in _columns(db, v177.SHIPMENT_TABLE)

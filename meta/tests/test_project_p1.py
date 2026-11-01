@@ -183,10 +183,12 @@ class TestProjectDeclaration:
         ]
         assert 'project_no' in form_fields and 'budget_amount' in form_fields
 
-        # 360 四段均按 project_id 原生过滤，零前端组件（AC-03；工单段由 P2 B1 追加）
+        # 360 五段均按 project_id 原生过滤，零前端组件（AC-03；工单段由 P2 B1 追加，
+        # 交货单段由 G6 追加）
         children = ui['child_sections']
         assert [c['child_object'] for c in children] == [
-            'sales_order', 'sales_order_line', 'sales_order_schedule', 'work_order']
+            'sales_order', 'sales_order_line', 'sales_order_schedule', 'work_order',
+            'shipment']
         for child in children:
             assert child['readonly'] is True
             assert child['enableAutoCrud'] is False
@@ -432,7 +434,7 @@ def _build_project_db(path):
     conn = sqlite3.connect(str(path))
     try:
         create_tables(conn, ['project', 'sales_order', 'sales_order_line',
-                             'sales_order_schedule', 'work_order'])
+                             'sales_order_schedule', 'work_order', 'shipment'])
         seed_row(conn, 'projects', id=1, project_no='PRJ-001', name='项目甲',
                  project_type_id=7, status='active', org_id=3,
                  customer_account_id=5, budget_amount=1000.5)
@@ -481,6 +483,14 @@ def _build_project_db(path):
                  order_type='service', order_id=13, order_line_id=23,
                  status='New', severity='low', project_id=None,
                  opened_at='2026-02-10 09:00:00')
+
+        # G6：交货单按 project_id 进入 360（空值不归集），planned_ship_date 倒序
+        seed_row(conn, 'shipments', id=51, delivery_no='DN-001', order_id=11,
+                 project_id=1, status='planned', planned_ship_date='2026-02-10')
+        seed_row(conn, 'shipments', id=52, delivery_no='DN-002', order_id=11,
+                 project_id=1, status='shipped', planned_ship_date='2026-01-15')
+        seed_row(conn, 'shipments', id=53, delivery_no='DN-003', order_id=13,
+                 project_id=None, status='planned', planned_ship_date='2026-03-05')
         conn.commit()
     finally:
         conn.close()
@@ -533,13 +543,14 @@ class TestProjectOverview:
         assert 'billing_amount' not in schedules['items'][0]
 
     def test_unmounted_documents_excluded(self, overview):
-        """AC-02: project_id 为空的订单 / 行 / 计划行 / 工单不出现在项目 360。"""
+        """AC-02: project_id 为空的订单 / 行 / 计划行 / 工单 / 交货单不出现在项目 360。"""
         svc, _path = overview
         data = svc.overview(1)
         assert 13 not in {o['id'] for o in data['sales_orders']['items']}
         assert 23 not in {l['id'] for l in data['sales_order_lines']['items']}
         assert 32 not in {s['id'] for s in data['sales_order_schedules']['items']}
         assert 43 not in {w['id'] for w in data['work_orders']['items']}
+        assert 53 not in {s['id'] for s in data['shipments']['items']}
 
     def test_work_orders_filtered_by_project_and_sorted(self, overview):
         """P2 B1：工单段按 project_id 归集，opened_at 倒序，金额字段一个都不透传。"""
@@ -551,12 +562,22 @@ class TestProjectOverview:
             assert set(item) == {'id', 'work_order_no', 'order_type', 'status',
                                  'severity', 'schedule_id', 'opened_at', 'resolved_at'}
 
+    def test_shipments_filtered_by_project_and_sorted(self, overview):
+        """G6：交货单段按 project_id 归集，planned_ship_date 倒序，金额一个都不透传。"""
+        svc, _path = overview
+        section = svc.overview(1)['shipments']
+        assert section['total'] == 2
+        assert [s['delivery_no'] for s in section['items']] == ['DN-001', 'DN-002']
+        for item in section['items']:
+            assert set(item) == {'id', 'delivery_no', 'order_id', 'status',
+                                 'planned_ship_date', 'actual_ship_date', 'tracking_no'}
+
     def test_project_without_documents_returns_empty_sections(self, overview):
         svc, _path = overview
         data = svc.overview(2)
         assert data['project']['project_no'] == 'PRJ-002'
         for key in ('sales_orders', 'sales_order_lines', 'sales_order_schedules',
-                    'work_orders'):
+                    'work_orders', 'shipments'):
             assert data[key] == {'items': [], 'total': 0}
 
     def test_limit_truncates_items_but_keeps_total(self, overview):

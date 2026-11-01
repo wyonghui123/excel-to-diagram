@@ -126,7 +126,8 @@
 | project | G11 | P1.5 / M1 |
 | project | G2、G3、G4、G12、G13 | M4 |
 | project | G14 | P1.5 |
-| project | G5、G6、G8、G9、G10 | P2 / P3 / M5 |
+| project | G5、G8、G9、G10 | P2 / P3 / M5 |
+| project | G6（`shipment` 已落，`fulfillment_order` 待补） | P2 |
 
 ### 8.1 项目侧决策归位
 
@@ -163,3 +164,4 @@
 | 2026-10-31 | v0.2 | 补项目侧并行轨 P1-P4（对齐 project spec 的 Phase 0-4，Phase 0 并入 M0）；`project` 对象从 M6 移到 P1；新增 §8.1 项目侧 D1-D12 决策归位；补 P1 出口判据（AC-02 / AC-03） |
 | 2026-11-01 | v0.3 | 补 P1.5（`project_task` 计划层，Q3 / G11 / G14）；缺口映射拆分 G1→P1、G11→P1.5；售后三值启用与 `sla_milestone.project_id` 归入已实施的 P2 收尾 |
 | 2026-11-01 | v0.4 | P3 裁决：D5 撤销，P3 收缩为 `configuration.project_id` + 物化联动，不建项目级 BOM 快照（对齐 project spec v1.4） |
+| 2026-11-01 | v0.5 | G6 部分落地：`shipment.project_id`（v177）+ 项目 360 交货单段；缺口映射拆出 G6→P2 |

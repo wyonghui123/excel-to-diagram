@@ -17,7 +17,7 @@
   · sales_order_lines       按 sales_order_lines.project_id
   · sales_order_schedules   按 sales_order_schedules.project_id
   · work_orders             按 work_orders.project_id（P2 B1 新增列）
-  · shipment                其 project_id 尚未落地（G6），本阶段不返回
+  · shipments               按 shipments.project_id（G6 新增列）
 """
 
 from typing import Any, Dict, List, Optional
@@ -78,6 +78,16 @@ SECTION_SPECS = {
         'columns': ('id', 'work_order_no', 'order_type', 'status', 'severity',
                     'schedule_id', 'opened_at', 'resolved_at'),
     },
+    'shipments': {
+        'table': 'shipments',
+        'sql': (
+            "SELECT id, delivery_no, order_id, status, planned_ship_date, "
+            "actual_ship_date, tracking_no FROM shipments "
+            "WHERE project_id = ? ORDER BY planned_ship_date DESC, id DESC LIMIT ?"
+        ),
+        'columns': ('id', 'delivery_no', 'order_id', 'status',
+                    'planned_ship_date', 'actual_ship_date', 'tracking_no'),
+    },
 }
 
 
@@ -86,7 +96,7 @@ class ProjectNotFound(Exception):
 
 
 class ProjectOverviewService:
-    """按项目 id 汇总销售侧单据与工单的只读投影。"""
+    """按项目 id 汇总销售侧单据、工单与交货单的只读投影。"""
 
     def __init__(self, data_source):
         self.ds = data_source
@@ -123,5 +133,6 @@ class ProjectOverviewService:
             'sales_order_lines': sections['sales_order_lines'],
             'sales_order_schedules': sections['sales_order_schedules'],
             'work_orders': sections['work_orders'],
+            'shipments': sections['shipments'],
             'readonly': True,
         }

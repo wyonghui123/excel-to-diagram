@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 14:21:55.744141
+-- 生成时间: 2026-11-01 15:31:48.531893
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1946,6 +1946,7 @@ CREATE TABLE IF NOT EXISTS shipments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     delivery_no VARCHAR(200) NOT NULL,
     order_id INTEGER NOT NULL,
+    project_id INTEGER,
     ship_from_location_id INTEGER NOT NULL,
     ship_to_party_id INTEGER,
     ship_to_address_text VARCHAR(200) NOT NULL,
@@ -3034,6 +3035,7 @@ CREATE INDEX IF NOT EXISTS idx_service_request_line_request_status ON service_re
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shipment_delivery_no ON shipments(delivery_no)
 CREATE INDEX IF NOT EXISTS idx_shipment_order_status ON shipments(order_id, status)
 CREATE INDEX IF NOT EXISTS idx_shipment_document_type ON shipments(document_type_id)
+CREATE INDEX IF NOT EXISTS idx_shipment_project ON shipments(project_id)
 
 -- Indexes for 交货行
 CREATE INDEX IF NOT EXISTS idx_shipment_line_delivery ON shipment_lines(delivery_id)
