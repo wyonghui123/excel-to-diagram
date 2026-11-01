@@ -166,12 +166,20 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 
 SALES_ORDER_OBJECT = 'sales_order'
 PURCHASE_ORDER_OBJECT = 'purchase_order'
+RECEIPT_OBJECT = 'receipt'
 #: 需要按「单据类型 → number_sequence_id」自动取号的对象
-_NUMBERED_OBJECTS = (SALES_ORDER_OBJECT, PURCHASE_ORDER_OBJECT)
+_NUMBERED_OBJECTS = (SALES_ORDER_OBJECT, PURCHASE_ORDER_OBJECT, RECEIPT_OBJECT)
 #: 取号异常文案里的单据名
 _NUMBER_SEQ_LABELS = {
     SALES_ORDER_OBJECT: '销售订单',
     PURCHASE_ORDER_OBJECT: '采购订单',
+    RECEIPT_OBJECT: '收货单',
+}
+#: 对象 → (编号列, 取号用的日期列)
+_NUMBER_SEQ_FIELDS = {
+    SALES_ORDER_OBJECT: ('order_no', 'order_date'),
+    PURCHASE_ORDER_OBJECT: ('order_no', 'order_date'),
+    RECEIPT_OBJECT: ('receipt_no', 'receipt_date'),
 }
 #: 抬头变更后需要重算商务默认值的维度（客户 / 销售组织变化）
 _SALES_ORDER_PARTY_FIELDS = ('customer_account_id', 'sales_org_id')
@@ -479,22 +487,25 @@ def _reapply_sales_order_salesperson(object_type: str, obj_id, data: dict) -> di
     return payload
 
 
-def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
-    """单据编号：按单据类型指向的序列取号（销售订单 / 采购订单）。
+def _allocate_document_no(object_type: str, data: dict) -> dict:
+    """单据编号：按单据类型指向的序列取号（销售订单 / 采购订单 / 收货单）。
 
     取号必须独立成事务（NumberSequenceEngine.allocate 的硬约束：嵌入调用方
     事务会退化为「锁持有到 COMMIT + 回滚把号一并回滚」），而 BOFramework 对
     crud_create 自动包裹事务 ⇒ 只能在 API 层、进入 `bo.create()` 之前完成。
 
-    已带 order_no、或缺少单据类型/订单日期时不取号，交由字段必填校验兜底；
+    已带单号、或缺少单据类型/单据日期时不取号，交由字段必填校验兜底；
     单据类型未挂序列（number_sequence_id 为空）时同样不取号。
     """
-    if object_type not in _NUMBERED_OBJECTS or data.get('order_no'):
+    if object_type not in _NUMBERED_OBJECTS:
+        return data
+    no_field, date_field = _NUMBER_SEQ_FIELDS[object_type]
+    if data.get(no_field):
         return data
 
     document_type_id = data.get('document_type_id')
-    order_date = data.get('order_date')
-    if document_type_id in (None, '') or order_date in (None, ''):
+    doc_date = data.get(date_field)
+    if document_type_id in (None, '') or doc_date in (None, ''):
         return data
 
     ds = _get_data_source()
@@ -512,10 +523,11 @@ def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
         return data
 
     allocated = NumberSequenceEngine(ds).allocate(
-        dict(configs[0]), {}, {'order_date': order_date})
+        dict(configs[0]), {}, {date_field: doc_date})
     payload = dict(data)
-    payload['order_no'] = allocated
-    logger.info('[bo_api] allocated order_no=%s (type=%s)', allocated, document_type_id)
+    payload[no_field] = allocated
+    logger.info('[bo_api] allocated %s=%s (type=%s)', no_field, allocated,
+                document_type_id)
     return payload
 
 
@@ -538,7 +550,7 @@ def create_bo(object_type):
                 'message': '值校验失败: ' + '; '.join(errors),
                 'errors': errors,
             }, 400)
-        data = _allocate_sales_order_no(object_type, data)
+        data = _allocate_document_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
         status_code = 201 if result.success else (result.status_code or 400)

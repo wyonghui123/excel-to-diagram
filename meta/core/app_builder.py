@@ -295,6 +295,12 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
         bo_framework.register_interceptor(ShipmentGuardInterceptor())
+        # [RECEIPT 2026-11-01] 收货单守卫（P52）：抬头创建归一化与取号、状态迁移委托
+        #   receipt_service（计划行 received_qty / rejected_qty 回写、分配拆分、履约派生）、
+        #   行冗余列校验回填、posted 后冻结（R-RC-0~R-RC-18）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.receipt_guard_interceptor import ReceiptGuardInterceptor
+        bo_framework.register_interceptor(ReceiptGuardInterceptor())
         # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
         #   服务请求行 / 请购行的行级必填。与 server.py create_app() 同位登记 ——
         #   两条启动路径缺一会静默失效。

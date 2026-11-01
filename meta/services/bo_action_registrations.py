@@ -109,6 +109,14 @@ def register_all_bo_actions(registry=None):
         create_from_requisition_handler,
     )
 
+    # M3 收货单: 建单 / 过账 / 整单红冲 / 取消（spec-receipt-object-model §13 步 7）
+    from meta.services.receipt_actions import (
+        create_from_schedule_handler,
+        post_handler as receipt_post_handler,
+        reverse_handler as receipt_reverse_handler,
+        cancel_handler as receipt_cancel_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -777,6 +785,108 @@ def register_all_bo_actions(registry=None):
         output_schema=_demand_output_schema,
         requires_auth=True,
         idempotent=False,
+    )
+
+    # ==================== 33-36: 收货单（M3） ====================
+    # 权限码双段式 `receipt:receipt_{action}`（与 v186 权限种子一致）
+    _receipt_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'receipt_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'idempotent': {'type': 'boolean'},
+            'order_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            'reversal_receipt_id': {'type': 'integer'},
+            'reversal_receipt_no': {'type': 'string'},
+        }
+    }
+    registry.register(
+        'receipt.create_from_schedule',
+        create_from_schedule_handler,
+        description='由采购订单计划行批量生成草稿收货单（取号 + 收货行冗余列反查）',
+        object_type='receipt',
+        category='business',
+        permission_required='receipt:receipt_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'source_doc_id': {'type': 'integer'},
+                'purchase_order_id': {'type': 'integer'},
+                'document_type_id': {'type': 'integer'},
+                'receipt_date': {'type': 'string'},
+                'actual_arrival_date': {'type': 'string'},
+                'supplier_party_id': {'type': 'integer'},
+                'supplier_delivery_no': {'type': 'string'},
+                'org_id': {'type': 'integer'},
+                'purchase_org_id': {'type': 'integer'},
+                'deliver_to_location_id': {'type': 'integer'},
+                'project_id': {'type': 'integer'},
+                'received_by': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array'},
+            },
+        },
+        output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'receipt.post',
+        receipt_post_handler,
+        description='收货单过账（draft → posted：分配 / 计划行回写 / 履约派生）',
+        object_type='receipt',
+        category='business',
+        permission_required='receipt:receipt_post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'receipt_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'actual_arrival_date': {'type': 'string'},
+            },
+        },
+        output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'receipt.reverse',
+        receipt_reverse_handler,
+        description='收货单整单红冲（posted → reversed，新建红字单并过账）',
+        object_type='receipt',
+        category='business',
+        permission_required='receipt:receipt_reverse',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'receipt_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'receipt_date': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'receipt.cancel',
+        receipt_cancel_handler,
+        description='收货单取消（draft → cancelled，行一并取消）',
+        object_type='receipt',
+        category='business',
+        permission_required='receipt:receipt_cancel',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'receipt_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=True,
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")

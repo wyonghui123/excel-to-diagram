@@ -78,7 +78,10 @@ const SUPPORTED_OBJECT_TYPES = [
   // 采购轴 2026-11-01: purchase_order 与 sales_order 同构（ui_view_config.detail 的
   //   child_sections 承载订单行 / 到货计划子表）。未列入白名单时，列表行点击 /
   //   手拼 /detail/purchase_order/<id> 一律 reason=unsupported_object_type 弹回首页。
-  'purchase_order'
+  'purchase_order',
+  // 收货轴 2026-11-01: receipt 的 list.detail_mode=page，detail 子表为收货行；
+  //   与 purchase_order 同口径纳入白名单。
+  'receipt'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -149,7 +152,8 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'address': '地址',
     'party_relation': '业务伙伴关系',
     // [采购轴 2026-11-01] 与 SUPPORTED_OBJECT_TYPES 同步，缺了面包屑会回退英文 id
-    'purchase_order': '采购订单'
+    'purchase_order': '采购订单',
+    'receipt': '收货单'
   }
 
   const label = typeLabels[normalizedType] || objectType

@@ -2865,9 +2865,16 @@ def init_menu_permissions(db_path):
     conn.commit()
 
     # ========== 步骤7.5：清理 menu_permissions 表中不属于白名单的条目 ==========
+    # [FIX 2026-11-01] 迁移拥有的菜单不在此脚本声明（由 migration 建/维护），
+    #   若按本脚本白名单清理，每次 init（含测试 setup）都会把它们当 stale 删掉，
+    #   收货单菜单曾因此在跑测试后被清空。下架须走 migration 置 is_active=0（见
+    #   .trae/rules/scenarios/5-development/meta-menu-retirement.md），不能靠本步骤物理删除。
+    MIGRATION_OWNED_MENUS = ('procurement', 'goods-receipt-management')
+
     print("\n[步骤7.5] 清理 menu_permissions 表冗余条目...")
     valid_perm_codes = {m['menu_code'] for m in system_menus}
     valid_perm_codes.add('task-management')
+    valid_perm_codes.update(MIGRATION_OWNED_MENUS)
 
     cursor.execute("SELECT menu_code, menu_name FROM menu_permissions")
     all_perm_entries = cursor.fetchall()
@@ -2891,6 +2898,7 @@ def init_menu_permissions(db_path):
     valid_nav_codes.add('task-queues')
     valid_nav_codes.add('task-executions')
     valid_nav_codes.add('ai-async-tasks')
+    valid_nav_codes.update(MIGRATION_OWNED_MENUS)
 
     cursor.execute("SELECT menu_code, menu_name, auto_generated FROM menus WHERE auto_generated = 0")
     all_manual_menus = cursor.fetchall()
