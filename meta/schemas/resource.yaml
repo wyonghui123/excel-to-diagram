@@ -52,6 +52,9 @@ deletion_policy:
     - table: resource_territory_assignments
       foreign_key: resource_id
       message: 该资源仍有区域覆盖记录，请先处理区域分配后再删除
+    - table: resource_availabilities
+      foreign_key: resource_id
+      message: 该资源仍有可用性例外记录，请先处理例外后再删除
   cascade_delete: []
 
 audit:

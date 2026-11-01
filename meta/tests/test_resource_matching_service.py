@@ -23,6 +23,7 @@ from meta.services.resource_matching_service import (
     ACTIVE_ASSIGNMENT_STATUSES,
     TIME_CAPACITY_CATEGORIES,
     ResourceMatchingError,
+    availability_overrides,
     available_minutes,
     capacity_by_category,
     match_resources,
@@ -137,6 +138,15 @@ CREATE TABLE resource_assignments (
     planned_end TEXT,
     planned_qty REAL,
     status TEXT DEFAULT 'planned',
+    source TEXT DEFAULT 'manual'
+);
+CREATE TABLE resource_availabilities (
+    id INTEGER PRIMARY KEY,
+    resource_id INTEGER,
+    availability_type TEXT DEFAULT 'unavailable',
+    start_at TEXT,
+    end_at TEXT,
+    reason TEXT,
     source TEXT DEFAULT 'manual'
 );
 """
@@ -316,6 +326,71 @@ def test_available_minutes_unknown_resource_raises():
     with pytest.raises(ResourceMatchingError) as exc:
         available_minutes(conn, 404, '2026-11-03')
     assert exc.value.code == 'RESOURCE_NOT_FOUND'
+
+
+# ============================================================================
+# 可用性例外 (FR-005 / P2c)
+# ============================================================================
+
+def test_availability_unavailable_leave_deducts_capacity():
+    """请假 4 小时落在班次内 ⇒ 扣减 240 分钟。"""
+    conn = _connect()
+    _calendar(conn, 14)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='16:00', break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=14, shift_id=shift_id)
+    _insert(conn, 'resources', id=40, code='R40', calendar_id=14)
+    _insert(conn, 'resource_availabilities', resource_id=40,
+            availability_type='unavailable',
+            start_at='2026-11-03 09:00:00', end_at='2026-11-03 13:00:00',
+            reason='请假', source='hr')
+
+    result = availability_overrides(conn, 40, '2026-11-03')
+    assert result['unavailable_minutes'] == 240.0
+    assert result['overtime_minutes'] == 0.0
+    assert len(result['entries']) == 1
+    assert result['entries'][0]['availability_type'] == 'unavailable'
+    # 班次净 420 分钟 - 240 = 180
+    assert result['available_minutes'] == 180.0
+    assert available_minutes(conn, 40, '2026-11-03') == 180.0
+
+
+def test_availability_overtime_outside_shift_counts():
+    """加班 2 小时全部落在班次外 ⇒ 加班分钟计入, 产能不变。"""
+    conn = _connect()
+    _calendar(conn, 15)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='16:00')
+    _insert(conn, 'calendar_shifts', calendar_id=15, shift_id=shift_id)
+    _insert(conn, 'resources', id=41, code='R41', calendar_id=15)
+    _insert(conn, 'resource_availabilities', resource_id=41,
+            availability_type='overtime',
+            start_at='2026-11-03T18:00:00', end_at='2026-11-03T20:00:00',
+            reason='赶工', source='manual')
+
+    result = availability_overrides(conn, 41, '2026-11-03')
+    assert result['overtime_minutes'] == 120.0
+    assert result['unavailable_minutes'] == 0.0
+    assert result['available_minutes'] == 480.0
+    assert available_minutes(conn, 41, '2026-11-03') == 480.0
+
+
+def test_available_minutes_unchanged_without_availability_entries():
+    """无例外行时与 P2b 旧口径完全一致(净 480 × 2 单元 × 150%)。"""
+    conn = _connect()
+    _calendar(conn, 16)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='09:00', end_time='18:00', break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=16, shift_id=shift_id)
+    _insert(conn, 'resources', id=42, code='R42', calendar_id=16,
+            capacity_units=2, utilization_pct=150)
+
+    assert available_minutes(conn, 42, '2026-11-03') == 1440.0
+    result = availability_overrides(conn, 42, '2026-11-03')
+    assert result['entries'] == []
+    assert result['unavailable_minutes'] == 0.0
+    assert result['overtime_minutes'] == 0.0
+    assert result['available_minutes'] == 1440.0
 
 
 # ============================================================================

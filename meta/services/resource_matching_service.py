@@ -15,9 +15,12 @@
   · 例外日(calendar_days):
       day_type='holiday' 当日全部班次失效;
       day_type='workday' 无视周掩码强制开工(中国调休)。
+  · 可用性例外(resource_availabilities, P2c):
+      按绝对时间与班次窗口求交; unavailable 扣减、overtime 加成
+      (窗口外加班分钟单独计入 overtime_minutes), available 只记录。
   · 无日历 = 无可用时间(返回 0), 不做"缺省 24 小时"猜测。
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 WEEKDAY_FIELDS = (
@@ -256,15 +259,177 @@ def shift_windows_for_date(conn, calendar_id: int,
     return windows
 
 
+# ============================================================================
+# 可用性例外 (FR-005)
+# ============================================================================
+
+#: 例外类型: 可用(仅记录) / 不可用(扣减) / 加班(加成)
+AVAILABILITY_TYPES = ('available', 'unavailable', 'overtime')
+
+#: 例外时间兼容 `YYYY-MM-DD HH:MM:SS` 与 ISO `T` 分隔
+_AVAILABILITY_FORMATS = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S')
+
+
+def _parse_availability_datetime(value: Any, label: str) -> datetime:
+    text = str(value or '').strip()
+    if not text:
+        raise ResourceMatchingError('{0} 不能为空'.format(label), 'INVALID_WINDOW')
+    for fmt in _AVAILABILITY_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ResourceMatchingError(
+        '{0} 时间格式非法: {1!r}'.format(label, value), 'INVALID_WINDOW')
+
+
+def _window_bounds(date_str: str, window: Dict[str, Any]):
+    """班次窗口的绝对时间边界: 起点 = 日期 + start_time, 终点 = 起点 + gross。"""
+    day = date.fromisoformat(date_str)
+    start = datetime(day.year, day.month, day.day) + timedelta(
+        minutes=_minutes_from_time(window['start_time'], 'start_time'))
+    return start, start + timedelta(minutes=int(window['gross_minutes']))
+
+
+def _overlap_minutes(a_start: datetime, a_end: datetime,
+                     b_start: datetime, b_end: datetime) -> float:
+    start = max(a_start, b_start)
+    end = min(a_end, b_end)
+    if end <= start:
+        return 0.0
+    return (end - start).total_seconds() / 60.0
+
+
+def _availability_entries(conn, resource_id: int,
+                          date_str: str) -> List[Dict[str, Any]]:
+    """读取与当天有交集的例外行(resource_availabilities)。"""
+    day_start = datetime.strptime(date_str, '%Y-%m-%d')
+    day_end = day_start + timedelta(days=1)
+    rows = _fetch_all(
+        conn,
+        """
+        SELECT id, resource_id, availability_type, start_at, end_at, reason, source
+        FROM resource_availabilities
+        WHERE resource_id = ?
+          AND substr(start_at, 1, 19) < ?
+          AND substr(end_at, 1, 19) > ?
+        ORDER BY start_at, id
+        """,
+        (resource_id, day_end.strftime('%Y-%m-%d %H:%M:%S'),
+         day_start.strftime('%Y-%m-%d %H:%M:%S')))
+    entries: List[Dict[str, Any]] = []
+    for row in rows:
+        start = _parse_availability_datetime(row['start_at'], 'start_at')
+        end = _parse_availability_datetime(row['end_at'], 'end_at')
+        if end <= start:
+            raise ResourceMatchingError(
+                '例外结束必须晚于开始: {0} -> {1}'.format(
+                    row['start_at'], row['end_at']), 'INVALID_WINDOW')
+        entries.append({
+            'id': row['id'],
+            'availability_type': row['availability_type'],
+            'start_at': row['start_at'],
+            'end_at': row['end_at'],
+            'reason': row['reason'],
+            'source': row['source'],
+            'start': start,
+            'end': end,
+        })
+    return entries
+
+
+def _availability_effect(conn, resource_id: int, date_str: str,
+                         calendar_id: Optional[int]) -> Dict[str, Any]:
+    """按绝对时间求交, 汇总当天例外对班次窗口的扣减 / 加成。
+
+    · unavailable: 与窗口的重叠分钟扣减(× 该窗口 capacity_factor);
+    · overtime: 窗口内重叠分钟加成(× factor), 窗口外部分也全部计入加班分钟;
+    · available: 只记录, 不加成。
+    """
+    windows = shift_windows_for_date(conn, calendar_id, date_str) \
+        if calendar_id else []
+    entries = _availability_entries(conn, resource_id, date_str)
+
+    bounds = [_window_bounds(date_str, window) for window in windows]
+    unavailable_minutes = 0.0
+    capacity_minutes = 0.0
+    for window, (w_start, w_end) in zip(windows, bounds):
+        factor = window['capacity_factor']
+        unavailable = 0.0
+        overtime = 0.0
+        for entry in entries:
+            overlap = _overlap_minutes(entry['start'], entry['end'], w_start, w_end)
+            if entry['availability_type'] == 'unavailable':
+                unavailable += overlap
+            elif entry['availability_type'] == 'overtime':
+                overtime += overlap
+        unavailable_minutes += unavailable
+        capacity_minutes += (window['effective_minutes']
+                             - unavailable * factor + overtime * factor)
+
+    overtime_minutes = 0.0
+    for entry in entries:
+        if entry['availability_type'] != 'overtime':
+            continue
+        # 窗口外部分也算加班: 整段计入(窗口内重叠已在上面的 capacity 里加成)
+        overtime_minutes += (entry['end'] - entry['start']).total_seconds() / 60.0
+
+    return {
+        'windows': windows,
+        'entries': entries,
+        'unavailable_minutes': unavailable_minutes,
+        'overtime_minutes': overtime_minutes,
+        'capacity_minutes': max(0.0, capacity_minutes),
+    }
+
+
+def availability_overrides(conn, resource_id: int,
+                           the_date: Any = None) -> Dict[str, Any]:
+    """资源当天的可用性例外汇总(纯只读)。
+
+    available_minutes 与 `available_minutes()` 同口径(含 units × util%);
+    overtime_minutes 含班次外的加班段。
+    """
+    date_str = _normalize_date(the_date)
+    resource = _fetch_one(
+        conn,
+        'SELECT id, capacity_units, utilization_pct FROM resources WHERE id = ?',
+        (resource_id,))
+    if not resource:
+        raise ResourceMatchingError(
+            '资源不存在: {0}'.format(resource_id), 'RESOURCE_NOT_FOUND')
+
+    calendar_id = resolve_resource_calendar(conn, resource_id, None, as_of=date_str)
+    effect = _availability_effect(conn, resource_id, date_str, calendar_id)
+    units = float(resource['capacity_units'] or 1)
+    utilization = float(resource['utilization_pct']
+                        if resource['utilization_pct'] is not None else 100)
+    entries = [
+        {key: value for key, value in entry.items() if key not in ('start', 'end')}
+        for entry in effect['entries']
+    ]
+    return {
+        'resource_id': resource_id,
+        'as_of': date_str,
+        'calendar_id': calendar_id,
+        'unavailable_minutes': effect['unavailable_minutes'],
+        'overtime_minutes': effect['overtime_minutes'],
+        'available_minutes': effect['capacity_minutes'] * units * utilization / 100.0,
+        'entries': entries,
+    }
+
+
 def available_minutes(conn, resource_id: int, the_date: Any = None,
                       default_calendar_id: Optional[int] = None,
                       calendar_id: Optional[int] = None) -> float:
     """资源当日可用分钟(FR-005 产能公式)。
 
-    = Σ 班次净工时 × resource.capacity_units × utilization_pct / 100
+    = Σ (班次净工时 - 窗口内 unavailable 重叠 × factor
+                    + 窗口内 overtime 重叠 × factor)
+      × resource.capacity_units × utilization_pct / 100
 
     显式传入 calendar_id 时跳过优先级解析(用于"临时日历"模拟)。
-    None / 无日历时返回 0.0。
+    None / 无日历且无例外时返回 0.0。
     """
     the_date = _normalize_date(the_date)
     resource = _fetch_one(
@@ -278,15 +443,12 @@ def available_minutes(conn, resource_id: int, the_date: Any = None,
     if calendar_id is None:
         calendar_id = resolve_resource_calendar(
             conn, resource_id, default_calendar_id, as_of=the_date)
-    if calendar_id is None:
-        return 0.0
 
-    windows = shift_windows_for_date(conn, calendar_id, the_date)
+    effect = _availability_effect(conn, resource_id, the_date, calendar_id)
     units = float(resource['capacity_units'] or 1)
     utilization = float(resource['utilization_pct']
                         if resource['utilization_pct'] is not None else 100)
-    return sum(window['effective_minutes'] for window in windows) * units \
-        * utilization / 100.0
+    return effect['capacity_minutes'] * units * utilization / 100.0
 
 
 # ============================================================================

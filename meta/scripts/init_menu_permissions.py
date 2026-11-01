@@ -2504,6 +2504,35 @@ def init_menu_permissions(db_path):
                 'message': '建议分配资源区域分配数据权限'
             })
         },
+        {
+            # [RESOURCE-P2C 2026-11-01] 资源可用性例外 —— 主数据组（v180 交付）
+            'menu_code': 'resource-availability-list',
+            'menu_name': '资源可用性例外',
+            'menu_path': '/master-data/resource-availability',
+            'icon': 'Clock',
+            'color': '#f97316',
+            'sort_order': 101,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_availability',
+            'object_types': json.dumps(['resource_availability']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_availability', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_availability:resource_availability_create',
+                'resource_availability:resource_availability_read',
+                'resource_availability:resource_availability_update',
+                'resource_availability:resource_availability_delete',
+            ]),
+            'description': '资源可用性例外（加班 / 请假 / 检修的绝对时间窗 + 来源）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_availability'],
+                'message': '建议分配资源可用性例外数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========

@@ -1,8 +1,8 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.7
+- 文档版本：v1.8
 - 日期：2026-11-01
-- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；服务层 `resource_matching_service` 已落地（19 passed，含多口径产能），架构门禁 10 项全 OK
+- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（22 passed，含多口径产能与例外求交），架构门禁 10 项全 OK
 - 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.2）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
@@ -454,6 +454,7 @@
 | `operation_resource_requirements` | `operation_id` / `resource_group_id` / `resource_id` / `role` / `qty` / `required_skill_id` / `min_level` / `is_primary` / `priority` / `lead_time_days` | 同工序内 `is_primary` 同 `role` 至多一条；组与资源二者其一必填 |
 | `resource_assignments` | `work_order_operation_id` / `resource_id` / `planned_start` / `planned_end` / `planned_qty` / `status` / `source` | 计划量 ≤ 工序量；同一资源时间窗不重叠（显式超产标记例外） |
 | `resource_territory_assignments` | `resource_id`（或 `resource_group_id`）/ `territory_id` / `coverage_level` / `effective_from` / `effective_to` | 唯一 `(resource_id, territory_id, effective_from)`；允许重叠 |
+| `resource_availabilities` | `resource_id` / `availability_type`（available/unavailable/overtime）/ `start_at` / `end_at` / `reason` / `source`（manual/hr/maintenance/other）/ `org_id` | **不建唯一键**（同一资源允许重叠例外）；`end_at > start_at`；例外与班次窗口按**绝对时间**求交，见 FR-005 |
 
 **修改表**
 
@@ -650,3 +651,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.5 | P2b 定稿：新增 FR-014「班次模型」（`shift` 时段模板 + `calendar_shift` 日历×星期×班次×产能系数，全部 `resource_kind` 同构，HR 复用）；§9.3 补 8 张 P2b 表与约束；关闭 TBD-2、TBD-4；迁移号 v176 |
 | 2026-11-01 | v1.6 | 服务层落地：新增 `meta/services/resource_matching_service.py`（日历优先级解析 / 班次按日展开 / 可用分钟（产能公式）/ 技能+组匹配 / 分配校验），对应 FR-003 / FR-005 / FR-008 验收；`meta/tests/test_resource_matching_service.py` 16 passed，架构门禁 10 项全 OK |
 | 2026-11-01 | v1.7 | FR-005 多口径补齐：新增 `capacity_by_category`（同一类别取有效期最新行；labor_hours/machine_hours 由日历推导，工具数/载重/体积/场地按声明值展开；支持资源与组两种主体）；服务测试 19 passed |
+| 2026-11-01 | v1.8 | P2c 可用性例外落地：新增 `resource_availability`（枚举 available/unavailable/overtime × manual/hr/maintenance/other，绝对时间窗，不建唯一键）+ 迁移 v180（1 菜单 / 4 权限 / 2 枚举 / 2 索引）；服务层 `availability_overrides` 与 `available_minutes` 按**绝对时间**把例外与班次窗口求交（请假扣减、加班加成、检修等同不可用）；schema 16 + migration 6 + 服务 22 passed |
