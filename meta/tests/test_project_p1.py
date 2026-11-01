@@ -14,7 +14,7 @@
   AC-03 项目 360 只读聚合: ProjectOverviewService 原样返回三处金额，不重算、
         不复制；订单行的 hierarchy.parent_field 仍是 order_id（不被项目改写）
 
-迁移用例另起一组：v171 建表 / 补列 / 建索引 / 权限 / 菜单，复跑幂等，回滚可逆。
+迁移用例另起一组：v172 建表 / 补列 / 建索引 / 权限 / 菜单，复跑幂等，回滚可逆。
 
 建库一律走 factories 的 create_tables / seed_row（conftest 的裸 SQL 守卫
 会把含裸 DML 的测试文件整体 skip）。
@@ -33,7 +33,7 @@ sys.path.insert(0, ROOT)
 from meta.core.datasource import get_data_source  # noqa: E402
 from meta.core.models import registry  # noqa: E402
 from meta.core.schema_generator import SchemaGenerator  # noqa: E402
-from meta.migrations.v171__project_object_p1 import (  # noqa: E402
+from meta.migrations.v172__project_object_p1 import (  # noqa: E402
     INDEXES,
     MOUNT_TABLES,
     PERMISSIONS,
@@ -232,7 +232,7 @@ class TestMountDeclaration:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 迁移 v171
+# 迁移 v172
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 最小骨架表: 模拟 P1 之前（没有 project_id 列）的存量库
