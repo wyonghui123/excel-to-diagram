@@ -139,7 +139,7 @@
 - 红线三条（与 §8.2 一致）：
   1. 计划只产需求，不产动作；
   2. 桥只两个键：`project_id` + `project_task_id`，只允许落在单据头 / 行，不允许落在 `work_order_operation`；
-  3. 工时只记在 `tasks` / `worklogs`，回聚 `project_task → project` 用派生视图（D11），不落汇总表。
+  3. 实际工时唯一载体 = `time_entry`（`time_entries`，v182）；Gen2 `task_worklogs` 仍是 append-only 审计账，不加 `minutes` / `resource_id`；回聚 `project_task → project` 用派生视图（D11），不落汇总表。
 - 暂不做：关键路径落表（`project_schedule_result`）、`project_milestone` 独立表（Q5），先算不存 / 由 billing schedule 承载。
 
 ---
@@ -161,7 +161,7 @@
 | G11 | `source_demand_type` 无 `project_task` 枚举 | P0 | 项目无法产生执行需求（扩 1 个枚举值即可） |
 | G12 | 生产履约「有壳无骨」：`work_order_operation` 只有 `(work_order_id, seq)`，无工作中心 / 标准工时 / routing 溯源 | P0 | `production` 仅类型校验通过，工序不具备制造语义 |
 | G13 | 双执行通道未定界（`workflow_run + tasks` 与 `work_order_operation` 并存） | P0 | 同一动作两处留痕，报工口径分裂 |
-| G14 | 工时 / 消耗无回聚载体（`worklogs` 只挂 `tasks`，无支出项对象） | P1 | 「工时回聚 project_task → project」无落点 |
+| G14 | ~~工时 / 消耗无回聚载体（`worklogs` 只挂 `tasks`，无支出项对象）~~ **已落（v182，P1.5）** | P1 | `time_entry` 补实际工时载体；`v_project_task_labor` / `v_project_labor` / `v_resource_labor_daily` 回聚，不落汇总表；G7 降为治理项 |
 
 ---
 
@@ -179,8 +179,13 @@
 | D8 | 项目暂不进入权限维度链（沿用 org 维度）；Phase 4 评估 `project` generic 维度 | 与 Spec 23 的 org 维度保持正交，避免权限体系短期复杂化 |
 | D9 | 需求层不新建 `demand` / `planned_order` 表，只扩 `source_demand_type` 枚举 | 「一个活动拆多张执行单」尚无真实诉求，建表是为假设付费 |
 | D10 | 双通道采纳 A：`work_order_operation` 只存工序参数，动作流转统一走 `tasks`，`tasks.line_refs` 指向工序 | 避免两套报工口径；单据内顺序是参数，不是执行引擎 |
-| D11 | 成本回聚用派生视图（按 `doc_ref` / `line_refs` 聚合 worklogs），不落汇总表 | 先满足视图需求，等对账 / 结账出现再固化 |
+| D11 | 成本回聚用派生视图，不落汇总表。工时视图载体 = `time_entries`（v182，D13），不回读 Gen2 `worklogs`；产能利用率由服务层复用 `available_minutes()`（D16），不写第二套日历 / 班次 SQL | 先满足视图需求，等对账 / 结账出现再固化 |
 | D12 | 命名修正只做一处：`work_order` 语义改「工单」（显示按 `order_type`），旧称「服务工单」降为 `aliases`；`fulfillment_order` **不改名**；「活动 / 待办」只作评审口语，不改对象 `name` | 唯一真实混淆是「服务工单含生产」；全仓 9 处引用中 8 处是注释，改 1 处元数据即可；改「履约分组单」会破坏 SO wave3 spec 既有术语，且「分组」易与库存批次混用 |
+| D13 | 新建 `time_entry`（`time_entries`）作为唯一实际工时载体；不给 `task_worklogs` 加 `minutes` / `resource_id` | `task_worklogs` 是 append-only 审计账，加字段会污染账本语义；`resource_assignment` 只有计划量，无第三个现成落点 |
+| D14 | 工时行可挂 `project_task_id` / `work_order_id` / `work_order_operation_id` / `resource_assignment_id`；**不给** `work_order_operation` 加 `project_task_id` | 延续 §8.2 红线 1 / 2：工时属「行」，工序只存参数；桥不落到工序 |
+| D15 | 回聚用视图 `v_project_task_labor` / `v_project_labor` / `v_resource_labor_daily`，不落汇总表 | 延续 D11 |
+| D16 | 产能利用率不写 SQL 视图，服务层复用 `resource_matching_service.available_minutes()` | 日历继承 + 例外日 + 跨天班次是 Python 逻辑，SQL 重写等于第二套口径 |
+| D17 | 成本归集放阶段二：`time_entry` 写入时解析 `resource_rate` 并快照 `rate_id` / `cost_amount`；首期只做工时 | 避免视图内做多行费率择优；快照不是汇总表，符合 D11 |
 
 ---
 
@@ -190,7 +195,7 @@
 |---|---|---|
 | Phase 0 | 一手产品口径核验（SAP PS / Oracle PPM / 用友项目云 / Dynamics PSA / NetSuite project）；字段与不变量评审 | 无 |
 | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + SO/line/schedule 挂载 + 项目 360 只读视图 | 新增对象，旧单据可空 |
-| Phase 1.5 | `project_task` + `project_task_dependency`（**已落，v179**）；`source_demand_type` 扩 `project_task`（**已落**）；工时回聚派生视图（**待 G7**） | 新增计划层对象，执行链路不变 |
+| Phase 1.5 | `project_task` + `project_task_dependency`（**已落，v179**）；`source_demand_type` 扩 `project_task`（**已落**）；工时回聚派生视图（**已落，v182**：`time_entry` + 三视图 + 查询 API） | 新增计划层对象，执行链路不变 |
 | Phase 2 | `work_center / resource / resource_capability / routing(+operation)`；`work_order.project_id`；工序溯源 | 新增主数据，工单可空挂载 |
 | Phase 3 | `configuration.project_id`（**已落，v178**）+ `context_json` 承载项目上下文；项目配置物化联动（**不建项目级 BOM 快照**，D5 撤销） | 配置层挂载，履约链路不变 |
 | Phase 4 | 项目预算/收入确认；`project` generic 权限维度评估 | 按需 |
@@ -302,3 +307,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.5：G6 落地——`shipment.project_id`（v177）+ 360 第五段「交货单」，AC-03 的 shipment 聚合闭环；AC-07 补断言测试；G6 只剩 `fulfillment_order` |
 | 2026-11-01 | v1.6：G10 落地——`configuration.project_id`（v178，可空 + `(project_id, status)` 索引 + 列表/表单 UI）；AC-06 由测试闭环（有项目标签的配置物化结果不变，`project_id` 留在配置实例不写进 items） |
 | 2026-11-01 | v1.7：P1.5 落地——`project_task` / `project_task_dependency`（v179，含状态机、四类依赖 + lag、项目内唯一索引、手工菜单）；`work_order.source_demand_type` 扩 `project_task`（G11）；AC-09 四点由 `meta/tests/test_project_p15.py` 闭环；工时回聚派生视图因 G7（Gen2 任务六表未进元模型）标注「待 G7」 |
+| 2026-11-01 | v1.8：G14 闭环——`time_entry`（`time_entries`，v182）+ 三张派生视图 + 查询服务 / API；补 D13-D17；D11 明确工时视图载体不回读 Gen2 `worklogs`；§2.5 红线 3 与 §8.2 红线 1 / 2 确认未破（G7 仍为治理项，不再是 G14 前置） |

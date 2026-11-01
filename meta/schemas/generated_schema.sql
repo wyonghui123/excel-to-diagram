@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 17:09:16.658363
+-- 生成时间: 2026-11-01 18:56:53.273996
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -318,6 +318,30 @@ CREATE TABLE IF NOT EXISTS calendar_days (
     note VARCHAR(200),
     created_at DATETIME,
     FOREIGN KEY (calendar_id) REFERENCES calendars(id)
+)
+
+-- 日历班次: 日历 × 星期 × 班次 × 产能系数（班次挂日历，全部资源类型同构）
+CREATE TABLE IF NOT EXISTS calendar_shifts (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    calendar_id INTEGER NOT NULL,
+    shift_id INTEGER NOT NULL,
+    day_mask_mon INTEGER NOT NULL DEFAULT 1,
+    day_mask_tue INTEGER NOT NULL DEFAULT 1,
+    day_mask_wed INTEGER NOT NULL DEFAULT 1,
+    day_mask_thu INTEGER NOT NULL DEFAULT 1,
+    day_mask_fri INTEGER NOT NULL DEFAULT 1,
+    day_mask_sat INTEGER NOT NULL DEFAULT 1,
+    day_mask_sun INTEGER NOT NULL DEFAULT 1,
+    seq INTEGER NOT NULL DEFAULT 1,
+    capacity_factor REAL NOT NULL DEFAULT 1.0,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id),
+    FOREIGN KEY (shift_id) REFERENCES shifts(id)
 )
 
 -- 变更事件: 变更事件记录所有业务对象的变更事件，支持事件驱动架构和通知分发
@@ -649,6 +673,37 @@ CREATE TABLE IF NOT EXISTS data_permissions (
     permission_level VARCHAR(200) NOT NULL,
     inherit_to_children INTEGER DEFAULT 1,
     created_at DATETIME
+)
+
+-- 需求分配: 需求分配行（需求行与执行行之间的数量分配与成本归属）
+CREATE TABLE IF NOT EXISTS demand_allocations (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    demand_bo VARCHAR(200) NOT NULL,
+    demand_id INTEGER NOT NULL,
+    demand_line_id INTEGER NOT NULL,
+    demand_line_no VARCHAR(200),
+    demand_need_date DATETIME,
+    project_id INTEGER,
+    project_task_id INTEGER,
+    target_bo VARCHAR(200) NOT NULL,
+    target_id INTEGER NOT NULL,
+    target_line_id INTEGER NOT NULL,
+    target_schedule_id INTEGER,
+    qty REAL NOT NULL,
+    uom_id INTEGER,
+    allocated_amount REAL,
+    cost_center_id INTEGER,
+    expense_account_code VARCHAR(200),
+    asset_category_code VARCHAR(200),
+    charge_basis VARCHAR(200) NOT NULL DEFAULT 'inventory',
+    status VARCHAR(200) NOT NULL DEFAULT 'active',
+    reversed_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (project_id) REFERENCES projects(id),
+    FOREIGN KEY (uom_id) REFERENCES uoms(id)
 )
 
 -- 产品组: 产品组（SAP division 语义的扁平受控值集；非物料分类 item_group）
@@ -1136,6 +1191,29 @@ CREATE TABLE IF NOT EXISTS number_sequences (
     created_at DATETIME
 )
 
+-- 工序资源要求: 工序的资源要求（组/资源 + 角色 + 数量 + 技能等级 + 提前期）
+CREATE TABLE IF NOT EXISTS operation_resource_requirements (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id INTEGER NOT NULL,
+    resource_group_id INTEGER,
+    resource_id INTEGER,
+    role VARCHAR(200) NOT NULL DEFAULT 'labor',
+    qty REAL NOT NULL DEFAULT 1,
+    required_skill_id INTEGER,
+    min_level INTEGER,
+    is_primary INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 1,
+    lead_time_days INTEGER,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (operation_id) REFERENCES work_definition_operations(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (required_skill_id) REFERENCES skills(id)
+)
+
 -- 组织: 组织（Org），用于组织用户和实现委托管理
 CREATE TABLE IF NOT EXISTS orgs (
     created_by VARCHAR(200),
@@ -1577,6 +1655,145 @@ CREATE TABLE IF NOT EXISTS project_task_dependencies (
     FOREIGN KEY (successor_task_id) REFERENCES project_tasks(id)
 )
 
+-- 采购订单: 采购订单头（行见 purchase_order_line）
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    document_type_id INTEGER,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_no VARCHAR(200) UNIQUE NOT NULL,
+    order_date DATETIME NOT NULL,
+    project_id INTEGER,
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    supplier_party_id INTEGER NOT NULL,
+    supplier_account_id INTEGER,
+    supplier_reference_no VARCHAR(200),
+    contact_party_id INTEGER,
+    contact_name_text VARCHAR(200),
+    contact_phone_text VARCHAR(200),
+    org_id INTEGER NOT NULL,
+    purchase_org_id INTEGER NOT NULL,
+    division_code VARCHAR(200),
+    deliver_to_location_id INTEGER,
+    currency_id INTEGER NOT NULL,
+    exchange_rate REAL NOT NULL DEFAULT 1,
+    exchange_rate_type VARCHAR(200) NOT NULL DEFAULT 'spot',
+    exchange_rate_date DATETIME,
+    payment_term_id INTEGER,
+    incoterm_code VARCHAR(200),
+    requested_date DATETIME,
+    confirmed_date DATETIME,
+    price_date DATETIME,
+    header_discount_percent REAL NOT NULL DEFAULT 0,
+    header_surcharge_percent REAL NOT NULL DEFAULT 0,
+    header_discount_amount REAL NOT NULL DEFAULT 0,
+    header_surcharge_amount REAL NOT NULL DEFAULT 0,
+    price_list_id INTEGER,
+    pricing_procedure_id INTEGER,
+    net_amount REAL NOT NULL DEFAULT 0,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    gross_amount REAL NOT NULL DEFAULT 0,
+    approval_status VARCHAR(200) NOT NULL DEFAULT 'not_required',
+    fulfillment_status VARCHAR(200),
+    fulfillment_derived_at DATETIME,
+    description TEXT,
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (document_type_id) REFERENCES type_definitions(id),
+    FOREIGN KEY (supplier_party_id) REFERENCES parties(id),
+    FOREIGN KEY (supplier_account_id) REFERENCES vendor_accounts(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (purchase_org_id) REFERENCES orgs(id),
+    FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id),
+    FOREIGN KEY (currency_id) REFERENCES currencies(id),
+    FOREIGN KEY (payment_term_id) REFERENCES payment_terms(id),
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+)
+
+-- 采购订单行: 采购订单行（物料 / 服务 / 资产 / 费用 / 委外行）
+CREATE TABLE IF NOT EXISTS purchase_order_lines (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    line_no VARCHAR(200) NOT NULL,
+    line_type_id INTEGER NOT NULL,
+    item_id INTEGER,
+    supplier_item_code VARCHAR(200),
+    description VARCHAR(200),
+    qty REAL NOT NULL,
+    uom_id INTEGER,
+    unit_price REAL,
+    net_amount REAL NOT NULL DEFAULT 0,
+    header_discount_amount REAL NOT NULL DEFAULT 0,
+    header_surcharge_amount REAL NOT NULL DEFAULT 0,
+    tax_code_id INTEGER,
+    tax_base_amount REAL NOT NULL DEFAULT 0,
+    tax_rate_percent REAL,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    tax_recoverable INTEGER NOT NULL DEFAULT 1,
+    non_recoverable_tax_amount REAL NOT NULL DEFAULT 0,
+    gross_amount REAL NOT NULL DEFAULT 0,
+    requested_date DATETIME,
+    deliver_to_location_id INTEGER,
+    service_start_date DATETIME,
+    service_end_date DATETIME,
+    subcontract_fee_basis VARCHAR(200),
+    component_issue_required INTEGER NOT NULL DEFAULT 0,
+    asset_category_code VARCHAR(200),
+    capitalization_flag INTEGER,
+    capitalization_date DATETIME,
+    service_acceptance_required INTEGER NOT NULL DEFAULT 1,
+    expense_account_code VARCHAR(200),
+    cost_center_id INTEGER,
+    price_source VARCHAR(200),
+    price_trace TEXT,
+    sourcing_rule_line_id INTEGER,
+    pricing_mode VARCHAR(200) NOT NULL DEFAULT 'standalone',
+    parent_line_id INTEGER,
+    component_no VARCHAR(200),
+    configuration_id INTEGER,
+    source_structure_id INTEGER,
+    source_structure_line_id INTEGER,
+    status VARCHAR(200) NOT NULL DEFAULT 'open',
+    fulfillment_status VARCHAR(200),
+    fulfillment_derived_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (order_id) REFERENCES purchase_orders(id),
+    FOREIGN KEY (line_type_id) REFERENCES type_definitions(id),
+    FOREIGN KEY (item_id) REFERENCES items(id),
+    FOREIGN KEY (uom_id) REFERENCES uoms(id),
+    FOREIGN KEY (tax_code_id) REFERENCES tax_codes(id),
+    FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id),
+    FOREIGN KEY (parent_line_id) REFERENCES purchase_order_lines(id),
+    FOREIGN KEY (configuration_id) REFERENCES configurations(id),
+    FOREIGN KEY (source_structure_id) REFERENCES item_structures(id),
+    FOREIGN KEY (source_structure_line_id) REFERENCES item_structure_lines(id)
+)
+
+-- 到货计划行: 采购订单到货计划行（承诺到货日 / 承诺量，一行多批次）
+CREATE TABLE IF NOT EXISTS purchase_order_schedules (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    line_id INTEGER NOT NULL,
+    schedule_no INTEGER NOT NULL,
+    schedule_kind VARCHAR(200) NOT NULL DEFAULT 'delivery',
+    deliver_to_location_id INTEGER,
+    promised_date DATETIME NOT NULL,
+    promised_qty REAL NOT NULL,
+    status VARCHAR(200) NOT NULL DEFAULT 'planned',
+    received_qty REAL,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (order_id) REFERENCES purchase_orders(id),
+    FOREIGN KEY (line_id) REFERENCES purchase_order_lines(id),
+    FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id)
+)
+
 -- 费率记录: 费率记录（业务别名：价目行 · 条件记录）——键组合下的费率值
 CREATE TABLE IF NOT EXISTS rate_records (
     created_by VARCHAR(200),
@@ -1700,6 +1917,7 @@ CREATE TABLE IF NOT EXISTS requisition_lines (
     uom_id INTEGER,
     need_date DATETIME,
     deliver_to_location_id INTEGER,
+    cost_center_id INTEGER,
     requested_source_org_id INTEGER,
     resolved_source_org_id INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'open',
@@ -1711,6 +1929,211 @@ CREATE TABLE IF NOT EXISTS requisition_lines (
     FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id),
     FOREIGN KEY (requested_source_org_id) REFERENCES orgs(id),
     FOREIGN KEY (resolved_source_org_id) REFERENCES orgs(id)
+)
+
+-- 资源: 资源主数据——可被占用、调度、消耗的主体（人/设备/车辆/工具/场地/站点/外协）
+CREATE TABLE IF NOT EXISTS resources (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    resource_kind VARCHAR(200) NOT NULL DEFAULT 'person',
+    resource_role VARCHAR(200),
+    org_id INTEGER,
+    location_id INTEGER,
+    cost_center_id INTEGER,
+    party_id INTEGER,
+    person_ref INTEGER,
+    capacity_uom_id INTEGER,
+    capacity_per_day REAL,
+    capacity_units REAL NOT NULL DEFAULT 1,
+    utilization_pct REAL NOT NULL DEFAULT 100,
+    calendar_id INTEGER,
+    timezone VARCHAR(200),
+    is_active INTEGER NOT NULL DEFAULT 1,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (party_id) REFERENCES parties(id),
+    FOREIGN KEY (person_ref) REFERENCES person_profiles(id),
+    FOREIGN KEY (capacity_uom_id) REFERENCES uoms(id),
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id)
+)
+
+-- 资源分配: 工单工序的资源分配（资源 + 计划时间窗 + 计划量 + 状态 + 来源）
+CREATE TABLE IF NOT EXISTS resource_assignments (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_order_operation_id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL,
+    planned_start DATETIME,
+    planned_end DATETIME,
+    planned_qty REAL,
+    status VARCHAR(200) NOT NULL DEFAULT 'planned',
+    source VARCHAR(200) NOT NULL DEFAULT 'manual',
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (work_order_operation_id) REFERENCES work_order_operations(id),
+    FOREIGN KEY (resource_id) REFERENCES resources(id)
+)
+
+-- 资源可用性例外: 资源可用性例外（资源 + 绝对时间窗 + 例外类型 + 来源）
+CREATE TABLE IF NOT EXISTS resource_availabilities (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER NOT NULL,
+    availability_type VARCHAR(200) NOT NULL DEFAULT 'unavailable',
+    start_at DATETIME NOT NULL,
+    end_at DATETIME NOT NULL,
+    reason VARCHAR(200),
+    source VARCHAR(200) NOT NULL DEFAULT 'manual',
+    org_id INTEGER,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id)
+)
+
+-- 资源能力: 资源持有技能的能力记录（等级 / 有效期 / 认证 / 核实信息）
+CREATE TABLE IF NOT EXISTS resource_capabilities (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER NOT NULL,
+    skill_id INTEGER NOT NULL,
+    level INTEGER NOT NULL DEFAULT 1,
+    valid_from DATETIME NOT NULL,
+    valid_to DATETIME,
+    certification_ref VARCHAR(200),
+    verified_by VARCHAR(200),
+    verified_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (skill_id) REFERENCES skills(id)
+)
+
+-- 资源产能: 资源/资源组的多口径产能（类别 + 单位 + 日产能 + 单元数 + 利用率 + 有效期）
+CREATE TABLE IF NOT EXISTS resource_capacities (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER,
+    resource_group_id INTEGER,
+    capacity_category VARCHAR(200) NOT NULL DEFAULT 'labor_hours',
+    capacity_uom_id INTEGER,
+    capacity_per_day REAL,
+    capacity_units REAL NOT NULL DEFAULT 1,
+    utilization_pct REAL NOT NULL DEFAULT 100,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (capacity_uom_id) REFERENCES uoms(id)
+)
+
+-- 资源组: 资源聚合对象——工作中心 / 服务班组 / 资源池 / 车队 / 场地组，支持多层级产能聚合
+CREATE TABLE IF NOT EXISTS resource_groups (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    group_kind VARCHAR(200) NOT NULL DEFAULT 'work_center',
+    org_id INTEGER,
+    org_unit_id INTEGER,
+    location_id INTEGER,
+    calendar_id INTEGER,
+    cost_center_id INTEGER,
+    capacity_aggregation VARCHAR(200) NOT NULL DEFAULT 'sum',
+    membership_mode VARCHAR(200) NOT NULL DEFAULT 'members',
+    parent_group_id INTEGER,
+    is_bottleneck INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (parent_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (org_unit_id) REFERENCES orgs(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id)
+)
+
+-- 资源组成员: 资源组与资源的成员关系（可设角色、优先级、分配比例与数量）
+CREATE TABLE IF NOT EXISTS resource_group_members (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL,
+    role VARCHAR(200),
+    priority INTEGER DEFAULT 0,
+    allocation_pct REAL NOT NULL DEFAULT 100,
+    quantity REAL NOT NULL DEFAULT 1,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (resource_id) REFERENCES resources(id)
+)
+
+-- 资源费率: 资源/资源组的费率（用途、基准、有效期、组织/地点/币种/单位）
+CREATE TABLE IF NOT EXISTS resource_rates (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER,
+    resource_group_id INTEGER,
+    rate_purpose VARCHAR(200) NOT NULL DEFAULT 'cost',
+    rate_basis VARCHAR(200) NOT NULL DEFAULT 'per_hour',
+    org_id INTEGER,
+    location_id INTEGER,
+    currency_id INTEGER,
+    rate REAL NOT NULL,
+    rate_uom_id INTEGER,
+    valid_from DATETIME NOT NULL,
+    valid_to DATETIME,
+    priority INTEGER NOT NULL DEFAULT 0,
+    rate_source VARCHAR(200) NOT NULL DEFAULT 'internal',
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (currency_id) REFERENCES currencies(id),
+    FOREIGN KEY (rate_uom_id) REFERENCES uoms(id)
+)
+
+-- 资源区域分配: 资源/资源组的服务区域覆盖（区域 + 覆盖级别 + 生效区间）
+CREATE TABLE IF NOT EXISTS resource_territory_assignments (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER,
+    resource_group_id INTEGER,
+    territory_id INTEGER NOT NULL,
+    coverage_level VARCHAR(200) NOT NULL DEFAULT 'primary',
+    effective_from DATETIME,
+    effective_to DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (territory_id) REFERENCES territories(id)
 )
 
 -- 销售员: 销售员字典——编码、姓名及可选的人员 / 账号绑定
@@ -1975,6 +2398,27 @@ CREATE TABLE IF NOT EXISTS service_request_lines (
     FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id)
 )
 
+-- 班次: 班次时段模板（开始/结束时间、跨天标记、休息扣减、班次类型）
+CREATE TABLE IF NOT EXISTS shifts (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    start_time VARCHAR(200) NOT NULL,
+    end_time VARCHAR(200) NOT NULL,
+    crosses_midnight INTEGER NOT NULL DEFAULT 0,
+    break_minutes INTEGER NOT NULL DEFAULT 0,
+    shift_type VARCHAR(200) NOT NULL DEFAULT 'regular',
+    org_id INTEGER,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (org_id) REFERENCES orgs(id)
+)
+
 -- 交货单: 交货单头（交货行见 shipment_line）
 CREATE TABLE IF NOT EXISTS shipments (
     created_by VARCHAR(200),
@@ -2022,6 +2466,24 @@ CREATE TABLE IF NOT EXISTS shipment_lines (
     FOREIGN KEY (delivery_id) REFERENCES shipments(id),
     FOREIGN KEY (schedule_id) REFERENCES sales_order_schedules(id),
     FOREIGN KEY (order_line_id) REFERENCES sales_order_lines(id)
+)
+
+-- 技能: 技能主数据——能力持有（resource_capability）与工序要求（required_skill_id）的共同字典
+CREATE TABLE IF NOT EXISTS skills (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    category VARCHAR(200) NOT NULL DEFAULT 'trade',
+    parent_id INTEGER,
+    requires_certification INTEGER NOT NULL DEFAULT 0,
+    default_validity_months INTEGER,
+    status VARCHAR(200) NOT NULL DEFAULT 'active',
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (parent_id) REFERENCES skills(id)
 )
 
 -- SLA 覆盖: SLA 覆盖模板（生效区间 / 组织 / 业务日历）
@@ -2259,6 +2721,30 @@ CREATE TABLE IF NOT EXISTS test_table (
     status VARCHAR(200) DEFAULT 'pending'
 )
 
+-- 工时记录: 实际工时记录（资源 × 日期 × 分钟 + 任务/工单工序锚点）
+CREATE TABLE IF NOT EXISTS time_entries (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_date DATETIME NOT NULL,
+    resource_id INTEGER NOT NULL,
+    minutes INTEGER NOT NULL,
+    project_task_id INTEGER,
+    work_order_id INTEGER,
+    work_order_operation_id INTEGER,
+    resource_assignment_id INTEGER,
+    entry_type VARCHAR(200) NOT NULL DEFAULT 'manual',
+    billable INTEGER NOT NULL DEFAULT 1,
+    note VARCHAR(200),
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (resource_id) REFERENCES resources(id),
+    FOREIGN KEY (project_task_id) REFERENCES project_tasks(id),
+    FOREIGN KEY (work_order_id) REFERENCES work_orders(id),
+    FOREIGN KEY (work_order_operation_id) REFERENCES work_order_operations(id),
+    FOREIGN KEY (resource_assignment_id) REFERENCES resource_assignments(id)
+)
+
 -- 类型字典: 类型字典（单据类型 / 行类型的统一载体，按 scope_bo + level 判别）
 CREATE TABLE IF NOT EXISTS type_definitions (
     created_by VARCHAR(200),
@@ -2372,6 +2858,48 @@ CREATE TABLE IF NOT EXISTS vendor_accounts (
     FOREIGN KEY (tax_classification_id) REFERENCES tax_classifications(id)
 )
 
+-- 作业定义: 标准作业定义——工艺路线（routing）/ 服务模板（service_template）
+CREATE TABLE IF NOT EXISTS work_definitions (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    definition_kind VARCHAR(200) NOT NULL DEFAULT 'routing',
+    item_id INTEGER,
+    revision VARCHAR(200) NOT NULL DEFAULT 'A',
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    org_id INTEGER,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (item_id) REFERENCES items(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id)
+)
+
+-- 作业定义工序: 作业定义下的工序（顺序、工时、产量倍数、资源组）
+CREATE TABLE IF NOT EXISTS work_definition_operations (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    definition_id INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    operation_name VARCHAR(200) NOT NULL,
+    resource_group_id INTEGER,
+    setup_minutes INTEGER NOT NULL DEFAULT 0,
+    teardown_minutes INTEGER NOT NULL DEFAULT 0,
+    run_minutes INTEGER NOT NULL DEFAULT 0,
+    queue_minutes INTEGER NOT NULL DEFAULT 0,
+    move_minutes INTEGER NOT NULL DEFAULT 0,
+    travel_minutes INTEGER NOT NULL DEFAULT 0,
+    qty_per REAL NOT NULL DEFAULT 1,
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (definition_id) REFERENCES work_definitions(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id)
+)
+
 -- 服务工单: 服务工单头（SLA 里程碑见 sla_milestone，服务事件见 service_event）
 CREATE TABLE IF NOT EXISTS work_orders (
     created_by VARCHAR(200),
@@ -2430,15 +2958,19 @@ CREATE TABLE IF NOT EXISTS work_order_operations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_order_id INTEGER NOT NULL,
     seq INTEGER NOT NULL,
-    work_center_id INTEGER,
+    resource_group_id INTEGER,
     operation_name VARCHAR(200) NOT NULL,
     setup_minutes REAL,
     run_minutes REAL,
+    teardown_minutes INTEGER DEFAULT 0,
+    required_skill_id INTEGER,
     required_skill VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'pending',
     created_at DATETIME,
     updated_at DATETIME,
-    FOREIGN KEY (work_order_id) REFERENCES work_orders(id)
+    FOREIGN KEY (work_order_id) REFERENCES work_orders(id),
+    FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
+    FOREIGN KEY (required_skill_id) REFERENCES skills(id)
 )
 
 -- 产品线: 产品线是业务系统的顶层分类，代表一个独立的产品或产品系列。一个产品线可以包含多个版本。
@@ -2643,6 +3175,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_day_unique ON calendar_days(calen
 CREATE INDEX IF NOT EXISTS idx_calendar_day_date ON calendar_days(date)
 CREATE INDEX IF NOT EXISTS idx_calendar_day_type ON calendar_days(day_type)
 
+-- Indexes for 日历班次
+CREATE INDEX IF NOT EXISTS idx_calendar_shift_calendar ON calendar_shifts(calendar_id)
+CREATE INDEX IF NOT EXISTS idx_calendar_shift_shift ON calendar_shifts(shift_id)
+CREATE INDEX IF NOT EXISTS idx_calendar_shift_validity ON calendar_shifts(valid_from)
+CREATE INDEX IF NOT EXISTS idx_calendar_shifts_seq ON calendar_shifts(seq)
+
 -- Indexes for 变更事件
 CREATE INDEX IF NOT EXISTS idx_change_events_object_type ON change_events(object_type)
 CREATE INDEX IF NOT EXISTS idx_change_events_object_id ON change_events(object_id)
@@ -2734,6 +3272,18 @@ CREATE INDEX IF NOT EXISTS idx_customer_sales_orgs_currency_id ON customer_sales
 CREATE INDEX IF NOT EXISTS idx_customer_sales_orgs_rate_table_id ON customer_sales_orgs(rate_table_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_customer_sales_org_account_org ON customer_sales_orgs(customer_account_id, sales_org_id)
 CREATE INDEX IF NOT EXISTS idx_customer_sales_org_org ON customer_sales_orgs(sales_org_id)
+
+-- Indexes for 需求分配
+CREATE INDEX IF NOT EXISTS idx_demand_allocations_project_id ON demand_allocations(project_id)
+CREATE INDEX IF NOT EXISTS idx_demand_allocations_uom_id ON demand_allocations(uom_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_demand_alloc_target ON demand_allocations(demand_bo, demand_line_id, target_bo, target_line_id) WHERE target_schedule_id IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_demand_alloc_target_schedule ON demand_allocations(demand_bo, demand_line_id, target_bo, target_line_id, target_schedule_id) WHERE target_schedule_id IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_demand_alloc_target_line ON demand_allocations(target_bo, target_line_id)
+CREATE INDEX IF NOT EXISTS idx_demand_alloc_target_schedule ON demand_allocations(target_bo, target_schedule_id)
+CREATE INDEX IF NOT EXISTS idx_demand_alloc_demand ON demand_allocations(demand_bo, demand_id)
+CREATE INDEX IF NOT EXISTS idx_demand_alloc_project ON demand_allocations(project_id, project_task_id)
+CREATE INDEX IF NOT EXISTS idx_demand_alloc_cost ON demand_allocations(cost_center_id, expense_account_code)
+CREATE INDEX IF NOT EXISTS idx_demand_allocations_demand_need_date ON demand_allocations(demand_need_date)
 
 -- Indexes for 产品组
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_division_code ON divisions(code)
@@ -2865,6 +3415,13 @@ CREATE INDEX IF NOT EXISTS idx_lookup_sequences_name ON lookup_sequences(name)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_number_sequence_code ON number_sequences(code)
 CREATE INDEX IF NOT EXISTS idx_number_sequences_name ON number_sequences(name)
 
+-- Indexes for 工序资源要求
+CREATE INDEX IF NOT EXISTS idx_operation_resource_requirement_operation ON operation_resource_requirements(operation_id)
+CREATE INDEX IF NOT EXISTS idx_operation_resource_requirement_group ON operation_resource_requirements(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_operation_resource_requirement_resource ON operation_resource_requirements(resource_id)
+CREATE INDEX IF NOT EXISTS idx_operation_resource_requirement_skill ON operation_resource_requirements(required_skill_id)
+CREATE INDEX IF NOT EXISTS idx_operation_resource_requirements_priority ON operation_resource_requirements(priority)
+
 -- Indexes for 组织
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_code ON orgs(code)
 CREATE INDEX IF NOT EXISTS idx_org_parent ON orgs(parent_id)
@@ -2970,6 +3527,37 @@ CREATE INDEX IF NOT EXISTS idx_project_tasks_name ON project_tasks(name)
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_ptd_edge ON project_task_dependencies(predecessor_task_id, successor_task_id, dependency_type)
 CREATE INDEX IF NOT EXISTS idx_ptd_successor ON project_task_dependencies(successor_task_id)
 
+-- Indexes for 采购订单
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_org_id ON purchase_orders(org_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_currency_id ON purchase_orders(currency_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_payment_term_id ON purchase_orders(payment_term_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_purchase_order_no ON purchase_orders(order_no)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_supplier_date ON purchase_orders(supplier_party_id, order_date)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_purchase_org_date ON purchase_orders(purchase_org_id, order_date)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_status ON purchase_orders(status)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_approval_status ON purchase_orders(approval_status)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_document_type ON purchase_orders(document_type_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_project ON purchase_orders(project_id)
+
+-- Indexes for 采购订单行
+CREATE INDEX IF NOT EXISTS idx_purchase_order_lines_uom_id ON purchase_order_lines(uom_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_lines_tax_code_id ON purchase_order_lines(tax_code_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_lines_configuration_id ON purchase_order_lines(configuration_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_purchase_order_line_no ON purchase_order_lines(order_id, line_no)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_line_item ON purchase_order_lines(item_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_line_order_status ON purchase_order_lines(order_id, status)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_line_sourcing ON purchase_order_lines(sourcing_rule_line_id)
+CREATE INDEX IF NOT EXISTS idx_purchase_order_line_parent ON purchase_order_lines(parent_line_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_purchase_order_line_component ON purchase_order_lines(parent_line_id, component_no) WHERE parent_line_id IS NOT NULL AND component_no IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_purchase_order_line_source_structure ON purchase_order_lines(source_structure_line_id)
+
+-- Indexes for 到货计划行
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_po_schedule_line_kind_no ON purchase_order_schedules(line_id, schedule_kind, schedule_no)
+CREATE INDEX IF NOT EXISTS idx_po_schedule_order ON purchase_order_schedules(order_id)
+CREATE INDEX IF NOT EXISTS idx_po_schedule_line ON purchase_order_schedules(line_id)
+CREATE INDEX IF NOT EXISTS idx_po_schedule_promised_date ON purchase_order_schedules(promised_date)
+CREATE INDEX IF NOT EXISTS idx_po_schedule_location ON purchase_order_schedules(deliver_to_location_id)
+
 -- Indexes for 费率记录
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_record_code ON rate_records(code)
 CREATE INDEX IF NOT EXISTS idx_rate_record_table ON rate_records(rate_table_id)
@@ -3010,6 +3598,73 @@ CREATE INDEX IF NOT EXISTS idx_requisition_line_item ON requisition_lines(item_i
 CREATE INDEX IF NOT EXISTS idx_requisition_line_requisition_status ON requisition_lines(requisition_id, status)
 CREATE INDEX IF NOT EXISTS idx_requisition_line_requested_source ON requisition_lines(requested_source_org_id)
 CREATE INDEX IF NOT EXISTS idx_requisition_line_resolved_source ON requisition_lines(resolved_source_org_id)
+CREATE INDEX IF NOT EXISTS idx_requisition_line_cost_center ON requisition_lines(cost_center_id)
+
+-- Indexes for 资源
+CREATE INDEX IF NOT EXISTS idx_resources_calendar_id ON resources(calendar_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_code ON resources(code)
+CREATE INDEX IF NOT EXISTS idx_resource_kind ON resources(resource_kind)
+CREATE INDEX IF NOT EXISTS idx_resource_org ON resources(org_id)
+CREATE INDEX IF NOT EXISTS idx_resource_location ON resources(location_id)
+CREATE INDEX IF NOT EXISTS idx_resource_party ON resources(party_id)
+CREATE INDEX IF NOT EXISTS idx_resource_person ON resources(person_ref)
+CREATE INDEX IF NOT EXISTS idx_resource_active ON resources(is_active)
+CREATE INDEX IF NOT EXISTS idx_resources_name ON resources(name)
+
+-- Indexes for 资源分配
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_assignment ON resource_assignments(work_order_operation_id, resource_id, planned_start)
+CREATE INDEX IF NOT EXISTS idx_resource_assignment_resource ON resource_assignments(resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_assignment_operation ON resource_assignments(work_order_operation_id)
+
+-- Indexes for 资源可用性例外
+CREATE INDEX IF NOT EXISTS idx_resource_availabilities_org_id ON resource_availabilities(org_id)
+CREATE INDEX IF NOT EXISTS idx_resource_availability_resource ON resource_availabilities(resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_availability_window ON resource_availabilities(start_at)
+
+-- Indexes for 资源能力
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_capability ON resource_capabilities(resource_id, skill_id, valid_from)
+CREATE INDEX IF NOT EXISTS idx_resource_capability_resource ON resource_capabilities(resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_capability_skill ON resource_capabilities(skill_id)
+
+-- Indexes for 资源产能
+CREATE INDEX IF NOT EXISTS idx_resource_capacities_resource_id ON resource_capacities(resource_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_capacity ON resource_capacities(resource_id, resource_group_id, capacity_category, valid_from)
+CREATE INDEX IF NOT EXISTS idx_resource_capacity_group ON resource_capacities(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_resource_capacity_uom ON resource_capacities(capacity_uom_id)
+CREATE INDEX IF NOT EXISTS idx_resource_capacity_validity ON resource_capacities(valid_from)
+
+-- Indexes for 资源组
+CREATE INDEX IF NOT EXISTS idx_resource_groups_location_id ON resource_groups(location_id)
+CREATE INDEX IF NOT EXISTS idx_resource_groups_calendar_id ON resource_groups(calendar_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_group_code ON resource_groups(code)
+CREATE INDEX IF NOT EXISTS idx_resource_group_parent ON resource_groups(parent_group_id)
+CREATE INDEX IF NOT EXISTS idx_resource_group_org ON resource_groups(org_id)
+CREATE INDEX IF NOT EXISTS idx_resource_group_kind ON resource_groups(group_kind)
+CREATE INDEX IF NOT EXISTS idx_resource_group_active ON resource_groups(is_active)
+CREATE INDEX IF NOT EXISTS idx_resource_groups_name ON resource_groups(name)
+
+-- Indexes for 资源组成员
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_group_member ON resource_group_members(group_id, resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_group_member_resource ON resource_group_members(resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_group_member_group ON resource_group_members(group_id)
+CREATE INDEX IF NOT EXISTS idx_resource_group_members_priority ON resource_group_members(priority)
+
+-- Indexes for 资源费率
+CREATE INDEX IF NOT EXISTS idx_resource_rates_resource_id ON resource_rates(resource_id)
+CREATE INDEX IF NOT EXISTS idx_resource_rates_resource_group_id ON resource_rates(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_resource_rates_location_id ON resource_rates(location_id)
+CREATE INDEX IF NOT EXISTS idx_resource_rates_currency_id ON resource_rates(currency_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_rate_resource ON resource_rates(resource_id, rate_purpose, valid_from)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_rate_group ON resource_rates(resource_group_id, rate_purpose, valid_from)
+CREATE INDEX IF NOT EXISTS idx_resource_rate_purpose ON resource_rates(rate_purpose)
+CREATE INDEX IF NOT EXISTS idx_resource_rate_org ON resource_rates(org_id)
+CREATE INDEX IF NOT EXISTS idx_resource_rate_validity ON resource_rates(valid_from, valid_to)
+
+-- Indexes for 资源区域分配
+CREATE INDEX IF NOT EXISTS idx_resource_territory_assignments_resource_id ON resource_territory_assignments(resource_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_territory_assignment ON resource_territory_assignments(resource_id, resource_group_id, territory_id, effective_from)
+CREATE INDEX IF NOT EXISTS idx_resource_territory_assignment_group ON resource_territory_assignments(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_resource_territory_assignment_territory ON resource_territory_assignments(territory_id)
 
 -- Indexes for 销售员
 CREATE INDEX IF NOT EXISTS idx_salespersons_party_id ON salespersons(party_id)
@@ -3081,6 +3736,12 @@ CREATE INDEX IF NOT EXISTS idx_service_request_line_catalog ON service_request_l
 CREATE INDEX IF NOT EXISTS idx_service_request_line_item ON service_request_lines(item_id)
 CREATE INDEX IF NOT EXISTS idx_service_request_line_request_status ON service_request_lines(request_id, status)
 
+-- Indexes for 班次
+CREATE UNIQUE INDEX IF NOT EXISTS uq_shift_code ON shifts(code)
+CREATE INDEX IF NOT EXISTS idx_shift_org ON shifts(org_id)
+CREATE INDEX IF NOT EXISTS idx_shift_validity ON shifts(valid_from)
+CREATE INDEX IF NOT EXISTS idx_shifts_name ON shifts(name)
+
 -- Indexes for 交货单
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shipment_delivery_no ON shipments(delivery_no)
 CREATE INDEX IF NOT EXISTS idx_shipment_order_status ON shipments(order_id, status)
@@ -3091,6 +3752,13 @@ CREATE INDEX IF NOT EXISTS idx_shipment_project ON shipments(project_id)
 CREATE INDEX IF NOT EXISTS idx_shipment_line_delivery ON shipment_lines(delivery_id)
 CREATE INDEX IF NOT EXISTS idx_shipment_line_schedule ON shipment_lines(schedule_id)
 CREATE INDEX IF NOT EXISTS idx_shipment_lines_id ON shipment_lines(id)
+
+-- Indexes for 技能
+CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_code ON skills(code)
+CREATE INDEX IF NOT EXISTS idx_skill_parent ON skills(parent_id)
+CREATE INDEX IF NOT EXISTS idx_skill_category ON skills(category)
+CREATE INDEX IF NOT EXISTS idx_skill_status ON skills(status)
+CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)
 
 -- Indexes for SLA 覆盖
 CREATE INDEX IF NOT EXISTS idx_sla_coverages_calendar_id ON sla_coverages(calendar_id)
@@ -3167,6 +3835,15 @@ CREATE INDEX IF NOT EXISTS idx_test_objects_name ON test_objects(name)
 -- Indexes for 测试表
 CREATE INDEX IF NOT EXISTS idx_test_table_name ON test_table(name)
 
+-- Indexes for 工时记录
+CREATE INDEX IF NOT EXISTS idx_time_entries_resource_id ON time_entries(resource_id)
+CREATE INDEX IF NOT EXISTS idx_time_entries_project_task_id ON time_entries(project_task_id)
+CREATE INDEX IF NOT EXISTS idx_time_entry_task_date ON time_entries(project_task_id, work_date)
+CREATE INDEX IF NOT EXISTS idx_time_entry_resource_date ON time_entries(resource_id, work_date)
+CREATE INDEX IF NOT EXISTS idx_time_entry_wo ON time_entries(work_order_id)
+CREATE INDEX IF NOT EXISTS idx_time_entry_operation ON time_entries(work_order_operation_id)
+CREATE INDEX IF NOT EXISTS idx_time_entry_assignment ON time_entries(resource_assignment_id)
+
 -- Indexes for 类型字典
 CREATE INDEX IF NOT EXISTS idx_type_definitions_number_sequence_id ON type_definitions(number_sequence_id)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_type_definition_scope_code ON type_definitions(scope_bo, level, code)
@@ -3205,6 +3882,19 @@ CREATE INDEX IF NOT EXISTS idx_vendor_accounts_tax_classification_id ON vendor_a
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_account_relation_unique ON vendor_accounts(relation_id)
 CREATE INDEX IF NOT EXISTS idx_vendor_accounts_name ON vendor_accounts(name)
 
+-- Indexes for 作业定义
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_definition_code_revision ON work_definitions(code, revision)
+CREATE INDEX IF NOT EXISTS idx_work_definition_item ON work_definitions(item_id)
+CREATE INDEX IF NOT EXISTS idx_work_definition_org ON work_definitions(org_id)
+CREATE INDEX IF NOT EXISTS idx_work_definition_status ON work_definitions(status)
+CREATE INDEX IF NOT EXISTS idx_work_definitions_name ON work_definitions(name)
+
+-- Indexes for 作业定义工序
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_definition_operation_seq ON work_definition_operations(definition_id, seq)
+CREATE INDEX IF NOT EXISTS idx_work_definition_operation_group ON work_definition_operations(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_work_definition_operation_status ON work_definition_operations(status)
+CREATE INDEX IF NOT EXISTS idx_work_definition_operations_operation_name ON work_definition_operations(operation_name)
+
 -- Indexes for 服务工单
 CREATE INDEX IF NOT EXISTS idx_work_orders_customer_account_id ON work_orders(customer_account_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_work_order_no ON work_orders(work_order_no)
@@ -3222,6 +3912,8 @@ CREATE INDEX IF NOT EXISTS idx_work_order_components_line_no ON work_order_compo
 -- Indexes for 工单工序
 CREATE INDEX IF NOT EXISTS idx_work_order_operation_work_order ON work_order_operations(work_order_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_work_order_operation_seq ON work_order_operations(work_order_id, seq)
+CREATE INDEX IF NOT EXISTS idx_work_order_operation_resource_group ON work_order_operations(resource_group_id)
+CREATE INDEX IF NOT EXISTS idx_work_order_operation_required_skill ON work_order_operations(required_skill_id)
 
 -- Indexes for 产品线
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)

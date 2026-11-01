@@ -1,0 +1,524 @@
+# 工时记录 (Time Entry) —— 项目侧 G14 / 统一资源模型 FR-004
+# 依据:
+#   docs/specs/tasks-project-g14-labor-view-2026-11-01.md §3 Phase 1 / Phase 2
+#   docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md FR-001 / FR-004 / FR-008
+#
+# 定位: 唯一的「实际工时」载体。一行 = 某资源在某日（或时间窗）为
+#   项目任务 / 工单工序投入的分钟数，可选挂资源分配与单据归属。
+#   ① 不写 `tasks` / `task_worklogs`（G7 未落地，且 worklogs 是 append-only 审计账）；
+#   ② `resource_assignment` 只有计划量，实际工时只落本表（D13）；
+#   ③ 回聚用派生视图 `v_project_task_labor` / `v_project_labor` /
+#      `v_resource_labor_daily`，不落汇总表（D11 / D15）；
+#   ④ 成本字段（rate_id / cost_amount）留阶段二（D17），首期只做工时。
+#
+# 约束口径（服务层 labor_service.py 实现）:
+#   R-TE-1 project_task_id 与 work_order_operation_id 至少一个
+#   R-TE-2 两者都在时任务与工单 project_id 必须一致（工单为空以任务为准）
+#   R-TE-3 传工序时由工序反查 work_order_id 并回填；显式值不得冲突
+#   R-TE-4 传资源分配时须与工序、资源一致
+#   R-TE-5 minutes 1–1440 整数；work_date 不得晚于今天
+#   R-TE-6 资源必须 is_active=1
+
+id: time_entry
+name: 工时记录
+table_name: time_entries
+description: 实际工时记录（资源 × 日期 × 分钟 + 任务/工单工序锚点）
+display_name_field: id
+aspects: [audit_aspect]
+skip_auto_menu: true
+
+semantics:
+  meaning: 实际工时记录
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 工时
+    - 工时记录
+    - 实际工时
+    - Time Entry
+    - Labor
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_date
+    name: 工作日期
+    type: date
+    db_column: work_date
+    required: true
+    description: 工时发生的日期（不得晚于今天，补录允许过去）
+    semantics:
+      meaning: 工时日期
+      filterable: true
+      filter_type: date
+      filter_label: 工作日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 投入工时的资源（人 / 外协班组等；必须启用）
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 资源
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          is_active: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+
+  - id: minutes
+    name: 工时分钟
+    type: integer
+    db_column: minutes
+    required: true
+    description: 实际工时（分钟，1–1440）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lte: 1440
+        decimal_places: 0
+    semantics:
+      meaning: 实际投入分钟数
+    ui:
+      widget: number
+
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 归属的项目任务（与工单工序至少填一个）
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+    value_help:
+      source:
+        type: bo
+        target_bo: project_task
+        value_field: id
+        display_field: task_no
+        code_field: task_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{task_no}"
+        columns:
+          - field: task_no
+            label: 活动编号
+            width: 140
+          - field: name
+            label: 活动名称
+            width: 220
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+      clearable: true
+
+  - id: work_order_id
+    name: 工单
+    type: integer
+    db_column: work_order_id
+    nullable: true
+    description: 归属工单（传工序时由工序反查回填）
+    semantics:
+      meaning: 工单引用
+      display:
+        type: association
+        target_type: work_order
+        display_field: work_order_no
+    value_help:
+      source:
+        type: bo
+        target_bo: work_order
+        value_field: id
+        display_field: work_order_no
+        code_field: work_order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{work_order_no}"
+        columns:
+          - field: work_order_no
+            label: 工单号
+            width: 160
+    ui:
+      widget: select
+      relation: work_order
+      multiple: false
+      clearable: true
+
+  - id: work_order_operation_id
+    name: 工单工序
+    type: integer
+    db_column: work_order_operation_id
+    nullable: true
+    description: 归属的工单工序（与项目任务至少填一个）
+    semantics:
+      meaning: 工单工序引用
+      display:
+        type: association
+        target_type: work_order_operation
+        display_field: operation_name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_order_operation
+        value_field: id
+        display_field: operation_name
+        code_field: operation_name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{operation_name}"
+        columns:
+          - field: operation_name
+            label: 工序名称
+            width: 200
+          - field: seq
+            label: 工序号
+            width: 90
+    ui:
+      widget: select
+      relation: work_order_operation
+      multiple: false
+      clearable: true
+
+  - id: resource_assignment_id
+    name: 资源分配
+    type: integer
+    db_column: resource_assignment_id
+    nullable: true
+    description: 关联的资源分配（可选；须与工序、资源一致）
+    semantics:
+      meaning: 资源分配引用
+      display:
+        type: association
+        target_type: resource_assignment
+        display_field: id
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_assignment
+        value_field: id
+        display_field: id
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id}"
+        columns:
+          - field: id
+            label: 分配ID
+            width: 100
+          - field: planned_qty
+            label: 计划量
+            width: 110
+    ui:
+      widget: select
+      relation: resource_assignment
+      multiple: false
+      clearable: true
+
+  - id: entry_type
+    name: 录入方式
+    type: string
+    db_column: entry_type
+    required: true
+    default: manual
+    description: 工时录入来源（手工 / 计时器 / 导入）
+    enum_values:
+      - value: manual
+        label: 手工
+        color: primary
+        category: active
+        is_initial: true
+      - value: timer
+        label: 计时器
+        color: info
+        category: active
+      - value: import
+        label: 导入
+        color: warning
+        category: active
+    semantics:
+      meaning: 工时录入方式
+      filterable: true
+      filter_type: enum
+      filter_label: 录入方式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: billable
+    name: 可计费
+    type: boolean
+    db_column: billable
+    required: true
+    default: true
+    description: 是否可计费工时
+    semantics:
+      meaning: 可计费标记
+      filterable: true
+      filter_type: boolean
+      filter_label: 可计费
+      filter_scope: local
+    ui:
+      widget: switch
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    nullable: true
+    max_length: 500
+    description: 工时备注
+    semantics:
+      meaning: 工时备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [project_task_id, work_date]
+    name: idx_time_entry_task_date
+  - fields: [resource_id, work_date]
+    name: idx_time_entry_resource_date
+  - fields: [work_order_id]
+    name: idx_time_entry_wo
+  - fields: [work_order_operation_id]
+    name: idx_time_entry_operation
+  - fields: [resource_assignment_id]
+    name: idx_time_entry_assignment
+
+relations:
+  - id: time_entry_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（真外键）
+  - id: time_entry_to_project_task
+    name: 项目任务
+    type: reference
+    target: project_task
+    source_field: project_task_id
+    target_field: id
+    cardinality: N:1
+    description: 项目任务引用（可空；真外键）
+  - id: time_entry_to_work_order
+    name: 工单
+    type: reference
+    target: work_order
+    source_field: work_order_id
+    target_field: id
+    cardinality: N:1
+    description: 工单引用（可空；真外键）
+  - id: time_entry_to_work_order_operation
+    name: 工单工序
+    type: reference
+    target: work_order_operation
+    source_field: work_order_operation_id
+    target_field: id
+    cardinality: N:1
+    description: 工单工序引用（可空；真外键）
+  - id: time_entry_to_resource_assignment
+    name: 资源分配
+    type: reference
+    target: resource_assignment
+    source_field: resource_assignment_id
+    target_field: id
+    cardinality: N:1
+    description: 资源分配引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v182 手工声明（挂 sales 分组）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 工时记录
+    description: 资源 × 日期 × 分钟，挂项目任务 / 工单工序
+    columns:
+      - field: work_date
+        width: 120
+        format: date
+        sortable: true
+      - field: resource_id
+        width: 180
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: minutes
+        width: 100
+      - field: project_task_id
+        width: 150
+        render_as: association
+        target_type: project_task
+        display_field: task_no
+      - field: work_order_operation_id
+        width: 160
+        render_as: association
+        target_type: work_order_operation
+        display_field: operation_name
+      - field: billable
+        width: 90
+      - field: entry_type
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [note]
+    actions:
+      - id: create
+        label: 新建工时
+        icon: plus
+        type: primary
+        permission: project:time_entry_create
+    defaultSort:
+      field: work_date
+      order: desc
+  form:
+    title: 工时记录
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [work_date, resource_id]
+          - fields: [minutes, billable]
+      - title: 归属
+        columns:
+          - fields: [project_task_id, work_order_id]
+          - fields: [work_order_operation_id, resource_assignment_id]
+      - title: 其他
+        columns:
+          - fields: [entry_type, note]
+  detail:
+    layout: tabs
+    title: "工时记录 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [work_date, resource_id, minutes, project_task_id, work_order_id,
+                 work_order_operation_id, resource_assignment_id, entry_type,
+                 billable, note]
+
+category_config:
+  create_permission: project:time_entry_create
+  update_permission: project:time_entry_update
+  delete_permission: project:time_entry_delete
+  owner_auto_permission: false

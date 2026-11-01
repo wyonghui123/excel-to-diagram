@@ -44,7 +44,7 @@ G7（Gen2 六表进元模型）只影响任务六表的治理口径；本视图�
 
 ### Phase 1 实际工时对象 `time_entry`
 
-- [ ] **P1-1 新建 `meta/schemas/time_entry.yaml`**
+- [x] **P1-1 新建 `meta/schemas/time_entry.yaml`**
   - `id: time_entry`，`table_name: time_entries`，`display_name_field: id`，`aspects: [audit_aspect]`，`skip_auto_menu: true`（菜单由迁移手工声明）。
   - 字段：
     - `work_date`（date / required）
@@ -60,73 +60,74 @@ G7（Gen2 六表进元模型）只影响任务六表的治理口径；本视图�
     - `created_at` / `updated_at`
   - 索引：`idx_time_entry_task_date(project_task_id, work_date)`、`idx_time_entry_resource_date(resource_id, work_date)`、`idx_time_entry_wo(work_order_id)`、`idx_time_entry_operation(work_order_operation_id)`、`idx_time_entry_assignment(resource_assignment_id)`。
   - 关系（真外键）：→ `resource`、`project_task`、`work_order`、`work_order_operation`、`resource_assignment`；均 `nullable`，删除 restrict。
-- [ ] **P1-2 服务层校验 `meta/services/labor_service.py`**（新建）
+- [x] **P1-2 服务层校验 `meta/services/labor_service.py`**（新建）
   - `R-TE-1` `project_task_id` 与 `work_order_operation_id` 至少填一个，否则 `ST_TIME_ENTRY_ANCHOR_REQUIRED`。
   - `R-TE-2` 两者都填时，任务 `project_id` 必须等于工单 `project_id`（工单为空时以任务为准），否则 `ST_PROJECT_MISMATCH`。
   - `R-TE-3` 传 `work_order_operation_id` 时，`work_order_id` 由工序反查并回填；显式值不一致抛 `ST_WORK_ORDER_MISMATCH`。
   - `R-TE-4` 传 `resource_assignment_id` 时，必须与 `work_order_operation_id`、`resource_id` 一致，否则 `ST_ASSIGNMENT_MISMATCH`。
   - `R-TE-5` `minutes` 必须 1–1440 的整数；`work_date` 不得晚于今天（补录允许过去）。
   - `R-TE-6` 资源必须 `is_active=1`；不限制 `resource_kind`（人 / 外协班组都可记工时），UI 默认筛 `person`。
-- [ ] **P1-3 迁移 `v187__time_entry_labor_view.py`**（重编号后实际号为准）
+- [x] **P1-3 迁移 `v182__time_entry_labor_view.py`**（实际落地号）
   - 建表 + 索引 + 权限 `project:time_entry_{create,read,update,delete,list}`（`resource_type=project`，不新增资源类型）。
   - 手工菜单 `time-entry`：`menu_path=/time-entries`，`parent_menu=sales`，`sort_order=4`，`skip_auto_menu` 配套声明写入 `meta/scripts/init_menu_permissions.py`。
   - 幂等 `[SKIP]`；`verify` 校验表 / 索引 / 权限 / 菜单 / **视图可 SELECT**；`rollback` 删视图 → 删表 → 删菜单，权限保留。
-- [ ] **P1-4 `python -m meta.tools.sync_schema --generate`**，确认 `generated_schema.sql` 含 `time_entries` 与 5 条索引。
+- [x] **P1-4 `python -m meta.tools.sync_schema --generate`**，确认 `generated_schema.sql` 含 `time_entries` 与 5 条索引。
 
 ### Phase 2 派生视图（工时回聚本体）
 
-- [ ] **P2-1 `v_project_task_labor`**（任务级）
+- [x] **P2-1 `v_project_task_labor`**（任务级）
   - 列：`project_id, project_task_id, task_no, task_name, status, actual_minutes, actual_hours, billable_minutes, entry_count, resource_count, first_work_date, last_work_date`。
   - 来源：`time_entries te JOIN project_tasks pt ON pt.id = te.project_task_id`；`GROUP BY pt.project_id, pt.id`。
   - `actual_hours = ROUND(SUM(minutes)/60.0, 2)`；`billable_minutes = SUM(CASE WHEN billable=1 THEN minutes ELSE 0 END)`。
-- [ ] **P2-2 `v_project_labor`**（项目级）
+- [x] **P2-2 `v_project_labor`**（项目级）
   - 列：`project_id, project_no, project_name, actual_minutes, actual_hours, billable_minutes, task_count, resource_count, entry_count, last_work_date`。
   - 归属解析：`COALESCE(pt.project_id, wo.project_id)`；`LEFT JOIN work_orders wo ON wo.id = te.work_order_id`。
   - 防重：一条工时即使同时挂任务与工序，也只按 `COALESCE` 的一个项目计一次；`task_count = COUNT(DISTINCT te.project_task_id)`。
-- [ ] **P2-3 `v_resource_labor_daily`**（资源 × 日，纯实际）
+- [x] **P2-3 `v_resource_labor_daily`**（资源 × 日，纯实际）
   - 列：`resource_id, work_date, actual_minutes, billable_minutes, entry_count, project_count`。
   - 只做实际分钟，不塞产能；产能利用率由服务层算（D16）。
-- [ ] **P2-4 视图守卫**
+- [x] **P2-4 视图守卫**
   - 迁移内 `DROP VIEW IF EXISTS` → `CREATE VIEW`；`verify` 对三个视图各做一次 `SELECT ... LIMIT 1`（SQLite 视图延迟解析，不 SELECT 等于没建）。
   - 回滚只删视图与表，不碰任何既有表。
   - 新增测试：空库建视图成功、插入种子后聚合值正确、回滚后视图消失。
 
 ### Phase 3 查询服务与入口
 
-- [ ] **P3-1 `labor_service.py` 聚合查询**
+- [x] **P3-1 `labor_service.py` 聚合查询**
   - `project_task_labor(project_id=None, task_id=None)` → 读 `v_project_task_labor`。
   - `project_labor(project_id)` → 读 `v_project_labor`。
   - `resource_utilization(resource_id, start_date, end_date)`：
     - 逐日读 `v_resource_labor_daily`，逐日调 `available_minutes(conn, resource_id, date)`；
     - 返回 `actual_minutes / available_minutes / utilization_pct / overtime_minutes`；
     - 当日 `available_minutes=0` 且 `actual>0` 时记 `capacity_missing`，不抛错。
-- [ ] **P3-2 API**
+- [x] **P3-2 API**（实际：`/api/v1/labor` + `/api/labor` 别名）
   - 工时录入走通用 BO CRUD（`time_entry` 对象）+ 服务层校验；聚合查询新增只读端点（`GET /api/labor/...`），走 `_response_contract`，禁 `jsonify(`。
   - 权限：录入/修改沿用 `project:time_entry_*`；聚合读沿用 `project:time_entry_read`。
-- [ ] **P3-3 UI（最小）**
-  - 菜单「工时记录」：列表 + 抽屉表单（资源 / 日期 / 分钟 / 项目任务 / 工单工序）。
-  - 项目任务详情加「工时」分区（读 `v_project_task_labor`），不新增项目 360 段（AC-03 仍为五段）。
+- [x] **P3-3 UI（最小，通用页承载）**
+  - 菜单「工时记录」：`page_type=object_list` + `primary_object_type=time_entry`，由 `GenericObjectList` / `MetaListPage` 自动渲染列表与抽屉表单（资源 / 日期 / 分钟 / 项目任务 / 工单工序均来自 YAML 元模型），未新增前端文件。
+  - 项目任务详情「工时」分区暂不新增：本工作树尚无项目任务详情页 / 项目 360 前端，随项目 360 前端一并落地；后端 `GET /api/labor/project-tasks` 已就绪。
 
 ### Phase 4 测试
 
-- [ ] **P4-1 `meta/tests/test_time_entry.py`**
+- [x] **P4-1 `meta/tests/test_time_entry.py`**（15 passed）
   - 元模型：字段 / 必填 / 索引 / 5 条真外键。
   - 每条校验规则各 1 用例（R-TE-1 … R-TE-6）。
-- [ ] **P4-2 `meta/tests/test_project_labor_view.py`**
+- [x] **P4-2 `meta/tests/test_project_labor_view.py`**（9 passed）
   - 种子：项目 A 两个任务 + 项目 B 一个任务 + 一条只挂工单的工时；
   - 断言任务级 / 项目级 / 资源日级数字一致，且只挂工单的工时归到工单项目；
   - 断言「任务 + 同项目工序」的工时只计一次。
-- [ ] **P4-3 `meta/tests/test_labor_utilization.py`**
+- [x] **P4-3 `meta/tests/test_labor_queries.py`**（15 passed；任务单原写 `test_labor_utilization.py`，实际落地改名）
   - 班次 480 分钟、实际 600 → `overtime_minutes=120`；
   - `resource_availability` 请假扣减后 `available_minutes` 下降；
   - 无日历资源 → `available_minutes=0` + `capacity_missing`。
-- [ ] **P4-4 回归**：`test_project_p15.py`、`test_project_p1.py`、`test_project_p2b1.py`、`test_work_order_production.py`、`test_work_order_service.py`、资源域既有测试。
+  - 另覆盖三个只读 API 端点。
+- [x] **P4-4 回归**：`test_project_p15.py`（21）、`test_project_p1.py`（35）、`test_project_p2b1.py`（25）、`test_work_order_production.py`（15）、`test_work_order_service.py`（17）、`test_resource_matching.py`（22），全部通过。
 
 ### Phase 5 文档
 
-- [ ] **P5-1** project spec 升 v1.8：G14 关闭；D11 补「工时视图载体 = `time_entries`」；§8.2 红线确认未破。
-- [ ] **P5-2** 统一里程碑 spec 升 v0.8：P1.5 的「工时回聚视图（待 G7）」改为「已落，v187；G7 仅治理项」。
-- [ ] **P5-3** 本文件勾选完成项，提交（仅分支，不 merge）。
+- [x] **P5-1** project spec 升 v1.8：G14 关闭；D11 补「工时视图载体 = `time_entries`」；补 D13–D17；§2.5 红线 3 改写、§8.2 红线 1 / 2 确认未破。
+- [x] **P5-2** 统一里程碑 spec 升 v0.8：P1.5 的「工时回聚视图（待 G7）」改为「已落，v182；G7 仅治理项」。
+- [x] **P5-3** 本文件勾选完成项，提交（仅分支，不 merge）。
 
 ## 4. 视图 SQL 草案
 
