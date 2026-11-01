@@ -1,6 +1,6 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.15
+- 文档版本：v1.16
 - 日期：2026-11-01
 - 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（24 passed，含多口径产能、例外求交与 HR 分支），架构门禁 10 项全 OK；**P3 员工主数据已完成（v185，`employees` + `employee_shift_assignments`，schema 23 / migration 7 / 服务 11 全绿）；端到端验收已完成（E2E 7 passed，见 §11）**
 - 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）、`spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.1，Routing 与流程生产对标，见附 B）
@@ -612,7 +612,7 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | ~~TBD-4~~ | ~~多口径产能（含物流）~~ | **已定：P2b 建 `resource_capacity` 多行（category + uom），不与 capability 混用；覆盖 labor/machine/tool/vehicle/facility，物流只是其中一类** | 关闭 |
 | ~~TBD-5~~ | ~~服务地理~~ | **已定：复用 `territory` 作为区域字典 + 新增服务覆盖分配表**（2026-11-01） | 关闭（FR-010 已改写） |
 | ~~TBD-6~~ | ~~技能字典升级~~ | **已定：直接使用 `skill` 主数据对象**（2026-11-01 用户确认；多模块引用需独立生命周期/层级/认证） | 关闭（FR-003 已改写，见附 A.4） |
-| TBD-7 | 迁移号分配 | 当前仓库最大迁移号 v174（v174 有两条同名版本文件） | **已定：资源域取 v175**（`v175__resource_domain_foundation.py`） |
+| ~~TBD-7~~ | ~~迁移号分配~~ | 资源域曾取 v175；当前仓库最大迁移号已到 **v187**（`receipt`，并行会话），后续迁移从 **v188** 起 | 关闭（P4a 用 v188） |
 | TBD-8 | 成本中心主数据 | 平台暂无 `cost_center` 对象（仅 `cost_center_id` 字段引用），SAP 的"作业类型"费率依赖它 | **暂不建**：P2a 保留 `cost_center_id` 引用；等财务域立项再建主数据并迁移 |
 | TBD-9 | `employee.name` 是否冗余 | 姓名可从 `person_profile` → `party` 取，但通用列表页不支持 join 展示 | **建议冗余 + 保存时由服务同步**；若后续列表页支持 relation 展示可去列 |
 | TBD-10 | 外协/派遣人员是否入 `employees` | `employment_type=dispatched` 与 `resource_kind=external` 语义交叉 | **建议**：派遣入 `employees`（工时/排班归我方），外协主体仍走 `party` + `resource(external)`，不建员工行 |
@@ -620,8 +620,8 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | TBD-12 | 多法人 / 多分配（Oracle 三层） | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **首期用两层简化**（`employee` 即一条在职雇佣）；P4 若出现多法人/多岗并行，再拆 `employments`（法人/雇佣段）+ `employee_assignments`（岗位/班次），`employee` 降级为兼容视图；不提前建表 |
 | TBD-13 | 员工排班是否受工厂日历节假日约束 | P3 实现为"有员工排班即不叠加日历"（FR-015 原文），故 `calendar_day.day_type=holiday` 不作用于员工排班 | **P4 定**：建议用 `employee_shift_assignment.work_center_id` → 该工作中心/地点的日历**仅取 holiday 关闭**（不取产能），避免节假日仍排班；需与 HR 确认"节假日值班"是否例外 |
 | ~~TBD-14~~ | ~~同日多段排班重叠告警~~ | **已实现（v1.14）**：`employee_service.shift_overlap_warnings` / `employee_shift_warnings` 按 `start_time + gross_minutes` 展开绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警（含 `assignment_ids / shift_ids / overlap_minutes`），**不阻断落库**；员工服务 13 passed | 关闭 |
-| TBD-15 | 备选 / 并行工艺路线 | 现 `work_definition_operations.seq` 只能表达线性路线；SAP 用 Sequence（0 标准 / P 并行 / A 替代）、EBS 用 Alternate 标签、Fusion 用多个 Work Definition + 优先级 | **P4a 建议建 `work_definition_sequences`**（`seq_type=std/parallel/alternative` + `branch_from_seq/return_seq`），首期只支持整条替代路线，branch/return 放 P5（研究稿 §5.2 / R-2） |
-| TBD-16 | 物料 ↔ BOM ↔ 路线的版本绑定 | 三方都需"某物料某批量区间用哪套 BOM + 哪条路线"的唯一真源（SAP Production Version；EBS BOM/Routing 共享 alternate；Fusion 版本+优先级） | **P4a 建议建 `production_versions`**（`item_ref / plant / bom_ref / work_definition_id / valid_from-to / lot_min-max / locked / priority`）；先确认物料与工厂对象名（R-1） |
+| TBD-15 | 备选 / 并行工艺路线 | 现 `work_definition_operations.seq` 只能表达线性路线；SAP 用 Sequence（0 标准 / P 并行 / A 替代）、EBS 用 Alternate 标签、Fusion 用多个 Work Definition + 优先级 | **P4a 建议建 `work_definition_sequences`**（`seq_type=std/parallel/alternative` + `branch_from_seq/return_seq`），首期只支持整条替代路线，branch/return 放 P5（研究稿 §5.2 / R-2）。**不复用 `workflow_task` / `project_task`**：前者是工艺主数据（静态定义，随 `work_definition` 版本存续），后者是运行态待办/审批或 WBS 计划节点；混表会让主数据查询被迫过滤运行态状态行 |
+| TBD-16 | 物料 ↔ BOM ↔ 路线的版本绑定 | 三方都需"某物料某批量区间用哪套 BOM + 哪条路线"的唯一真源（SAP Production Version；EBS BOM/Routing 共享 alternate；Fusion 版本+优先级） | **P4a 建议建 `production_versions`**（`item_ref / plant / bom_ref / work_definition_id / valid_from-to / lot_min-max / locked / priority`）。**R-1 已核实（v1.16）**：物料用存量表 `items`（`target_bo: item`，`code` 唯一、`item_type ∈ {goods, service}`），工厂无 `plants` 表、首期用 `org`（`orgs` 表） |
 | TBD-17 | 流程生产（配方）是否新建对象 | SAP PP-PI Master Recipe（配方头 + Phase + 配方 BOM + 过程指令 + 批次效价）、Oracle OPM Recipe = Formula + Routing + Instructions | **不新建独立 recipe 头**：`work_definitions` 增 `definition_kind=recipe` + `base_qty/batch_qty` + `operation_outputs`（联/副产品）+ `process_instructions` + 最小 `batches`；判据 5 条见研究稿 §6 |
 
 ---
@@ -782,3 +782,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.13 | FR-015 补「适用主体边界」：`employee_shift_assignment` 仅允许员工主体（不做多态外键）；非员工资源班次一律走 `calendar_shift`，临时例外走 `resource_availability`；person 资源无在职员工行（外协/离职）回退日历分支；派遣人员按 TBD-10 入 `employees` 后可排班 |
 | 2026-11-01 | v1.14 | 关闭 TBD-14：新增 `employee_service.shift_overlap_warnings` / `employee_shift_warnings`（按 gross 绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库），补 2 条单测；员工服务 13 passed；FR-015 验收全部闭合 |
 | 2026-11-01 | v1.15 | Routing 与流程生产对标研究落地（新增研究稿 `spec-routing-process-manufacturing-benchmark-2026-11-01.md` v0.1 + 附 B）：新增 TBD-15（备选/并行路线 `work_definition_sequences`）、TBD-16（`production_versions` 版本真源）、TBD-17（流程生产用 `definition_kind=recipe` 扩展，不新建 recipe 头）；给出 P4a/P4b/P4c 落地顺序与 6 项待核实 |
+| 2026-11-01 | v1.16 | 关闭 TBD-7（迁移号：现最大 v187，P4a 用 v188）与 R-1（物料=存量 `items` 表、工厂首期用 `org`）；TBD-16 解除阻塞可开工；`work_definition_sequences` 明确不复用 `workflow_task`/`project_task`（工艺主数据 vs 运行态） |

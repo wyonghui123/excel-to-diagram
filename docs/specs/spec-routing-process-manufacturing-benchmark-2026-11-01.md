@@ -187,6 +187,7 @@ Product Definition（该产品怎么做：规则集合）
 | `process_segment` 对象（ISA-95） | 可由"工序 + 资源需求 + 组产能"组合表达，独立建表会重复 |
 | `control_key` 主数据 | 行为开关，落在工序字段即可（`is_schedulable` / `is_external` / `is_cost_relevant`） |
 | 独立"外协工序"主数据 | 资源需求 `role='outside'` + 采购域合同即可 |
+| 复用 `workflow_task` / `project_task` 表达 Routing Sequence | 语义层级不同：`work_definition_sequences` 是**工艺主数据**（静态分组 + 分支引用，随工艺版本存续、被排程/MRP 读取）；`workflow_task` 是**运行态待办/审批实例**（assignee、state、due date，随流程实例生灭，当前仓库仅文档规划、无 schema）；`project_task` 是 WBS 计划节点（只产需求不产动作）。混表会导致主数据查询必须过滤运行态行，且删除策略/权限/审计模型冲突 |
 | Routing 二次 revision 对象 | 现有 `code + revision` 已表达 |
 
 ---
@@ -223,7 +224,7 @@ Product Definition（该产品怎么做：规则集合）
 
 | # | 问题 | 建议 |
 |---|---|---|
-| R-1 | 物料/工厂对象的确切名称与主键（`item`? `material`? `plant`? org?） | 需对照现有 schemas 再定 `production_versions` 外键 |
+| R-1 | 物料/工厂对象的确切名称与主键 | **已核实（2026-11-01）**：物料 = 存量表 `items`（`generated_schema.sql`，`code` UNIQUE、`item_type`、`item_group_id`、`structure_role`），多张 schema 以 `target_bo: item` 引用；仓库无 `plants` 表，工厂首期用 `org`（`orgs` 表），如后续需要工厂独立属性再建。⇒ `production_versions.item_ref → item`、`plant_id → org` |
 | R-2 | 备选路线是否需要"成对 branch/return 工序"（SAP 语义）还是只允许整条备选路线 | 首期只支持整条备选（简单、可校验）；branch/return 放 P5 |
 | R-3 | 流程是否需要"按客户/批次重选配方"（OPM Validity Rules） | 首期用 `production_versions` 有效期 + priority，不做规则引擎 |
 | R-4 | 联产品/副产品的成本分摊是否进入本期 | 只存 `cost_allocation` 百分比字段，不做成本计算 |
