@@ -165,6 +165,14 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 # ── CRUD ──
 
 SALES_ORDER_OBJECT = 'sales_order'
+PURCHASE_ORDER_OBJECT = 'purchase_order'
+#: 需要按「单据类型 → number_sequence_id」自动取号的对象
+_NUMBERED_OBJECTS = (SALES_ORDER_OBJECT, PURCHASE_ORDER_OBJECT)
+#: 取号异常文案里的单据名
+_NUMBER_SEQ_LABELS = {
+    SALES_ORDER_OBJECT: '销售订单',
+    PURCHASE_ORDER_OBJECT: '采购订单',
+}
 #: 抬头变更后需要重算商务默认值的维度（客户 / 销售组织变化）
 _SALES_ORDER_PARTY_FIELDS = ('customer_account_id', 'sales_org_id')
 #: 订单抬头地址字段（收货 / 收票）
@@ -472,7 +480,7 @@ def _reapply_sales_order_salesperson(object_type: str, obj_id, data: dict) -> di
 
 
 def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
-    """销售订单编号：按单据类型指向的序列取号（波次 0 §2.3 / W0-R1）。
+    """单据编号：按单据类型指向的序列取号（销售订单 / 采购订单）。
 
     取号必须独立成事务（NumberSequenceEngine.allocate 的硬约束：嵌入调用方
     事务会退化为「锁持有到 COMMIT + 回滚把号一并回滚」），而 BOFramework 对
@@ -481,7 +489,7 @@ def _allocate_sales_order_no(object_type: str, data: dict) -> dict:
     已带 order_no、或缺少单据类型/订单日期时不取号，交由字段必填校验兜底；
     单据类型未挂序列（number_sequence_id 为空）时同样不取号。
     """
-    if object_type != SALES_ORDER_OBJECT or data.get('order_no'):
+    if object_type not in _NUMBERED_OBJECTS or data.get('order_no'):
         return data
 
     document_type_id = data.get('document_type_id')
@@ -558,10 +566,11 @@ def create_bo(object_type):
 
         if result.success:
             return ok(result.data, message=result.message), status_code
-        return json_response({'success': False, 'data': result.data, 'message': result.message}, status_code)
+        return error_response(result.message, status=status_code, errors=result.errors)
     except NumberSequenceError as e:
         logger.warning(f"[bo_api] allocate order_no failed: {e}")
-        return error_response(f'销售订单取号失败：{e}', status=400)
+        label = _NUMBER_SEQ_LABELS.get(object_type, '单据')
+        return error_response(f'{label}取号失败：{e}', status=400)
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] create error: {e}\n{traceback.format_exc()}")

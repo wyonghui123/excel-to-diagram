@@ -558,6 +558,11 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.demand_entry_guard_interceptor import DemandEntryGuardInterceptor
     bo_framework.register_interceptor(DemandEntryGuardInterceptor())
+    # [PURCHASE_ORDER 2026-11-01] 采购订单守卫（P50）：抬头 / 行 / 计划行 / 需求分配的
+    #   写前校验（R-PO-0~R-PO-18），以及行写入后的金额重算、采购取价、取消冲销。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.purchase_order_guard_interceptor import PurchaseOrderGuardInterceptor
+    bo_framework.register_interceptor(PurchaseOrderGuardInterceptor())
     # [DOCUMENT_TYPE 2026-11-01] 单据类型守卫（T-D20，平台层）：对所有声明
     #   document_type_id 的业务单据头生效。
     from meta.core.interceptors.document_type_guard_interceptor import DocumentTypeGuardInterceptor

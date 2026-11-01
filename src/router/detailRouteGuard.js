@@ -74,7 +74,11 @@ const SUPPORTED_OBJECT_TYPES = [
   //   list.detail_mode = page 却未列入白名单 ⇒ 行点击 / 展开入口一律弹回首页。
   //   sales_order 自身声明了 ui_view_config.detail（child_sections 订单行），
   //   加进来不是放开任意类型，而是补齐 list 已声明 page 详情的对象。
-  'sales_order'
+  'sales_order',
+  // 采购轴 2026-11-01: purchase_order 与 sales_order 同构（ui_view_config.detail 的
+  //   child_sections 承载订单行 / 到货计划子表）。未列入白名单时，列表行点击 /
+  //   手拼 /detail/purchase_order/<id> 一律 reason=unsupported_object_type 弹回首页。
+  'purchase_order'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -143,7 +147,9 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'location': '库位',
     'calendar': '日历',
     'address': '地址',
-    'party_relation': '业务伙伴关系'
+    'party_relation': '业务伙伴关系',
+    // [采购轴 2026-11-01] 与 SUPPORTED_OBJECT_TYPES 同步，缺了面包屑会回退英文 id
+    'purchase_order': '采购订单'
   }
 
   const label = typeLabels[normalizedType] || objectType

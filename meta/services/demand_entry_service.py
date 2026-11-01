@@ -19,9 +19,7 @@
     `demand_entry_decision`；任务与单据状态迁移分开：本服务只建待办，不改单据状态。
 """
 
-import json
 import logging
-import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -35,21 +33,6 @@ _APPROVAL_TASK_SPEC = {
     SERVICE_REQUEST_OBJECT: ('service_requests', '服务请求审批'),
     REQUISITION_OBJECT: ('requisitions', '采购申请审批'),
 }
-
-#: 任务决策 → BO Action（成对配置，decision_effect 机器校验）
-_APPROVAL_DECISION_ACTIONS = {
-    SERVICE_REQUEST_OBJECT: {
-        'approve': 'service_request.approve',
-        'reject': 'service_request.reject',
-    },
-    REQUISITION_OBJECT: {
-        'approve': 'requisition.approve',
-        'reject': 'requisition.reject',
-    },
-}
-
-#: 审批任务的终止态（这些状态不再算在途，可重新建任务）
-_TASK_TERMINAL_STATUSES = ('done', 'failed', 'cancelled', 'skipped', 'dead')
 
 #: 控制参数编码（维度：org_id / document_type_id / line_type_id / item_group_id）
 _APPROVAL_REQUIRED_PARAM = 'demand_approval_required'
@@ -241,52 +224,10 @@ class DemandEntryService:
                              actor: str = '') -> Optional[str]:
         """提交且需审批 → 落一条审批待办；已有在途任务则不重复建。
 
-        返回任务 id；不适用（免审批 / 缺 id）返回 None。
+        建任务已抽到 `ApprovalTaskService`（M3 与采购订单共用），本方法保留
+        作为 M1 调用入口，行为不变。
         """
-        spec = _APPROVAL_TASK_SPEC.get(object_type)
-        if not spec or record_id in (None, ''):
-            return None
-        _, title_prefix = spec
+        from meta.services.approval_task_service import ApprovalTaskService
 
-        placeholders = ', '.join('?' * len(_TASK_TERMINAL_STATUSES))
-        active = self._ds.query(
-            "SELECT id FROM tasks WHERE type = 'approval' AND doc_ref = ? "
-            'AND status NOT IN ({0})'.format(placeholders),
-            [str(record_id)] + list(_TASK_TERMINAL_STATUSES),
-        )
-        if active:
-            return None
-
-        task_id = uuid.uuid4().hex
-        id_key = '{0}_id'.format(object_type)
-        row = {
-            'id': task_id,
-            'code': None,
-            'title': '{0} #{1}'.format(title_prefix, record_id),
-            'type': 'approval',
-            'status': 'waiting_approval',
-            'priority': 'P1',
-            'app_id': '',
-            'executor_type': 'human',
-            'assign_policy': 'claim',
-            'executor_candidates': json.dumps([], ensure_ascii=False),
-            'executor_config': json.dumps(
-                {'decision_actions': _APPROVAL_DECISION_ACTIONS[object_type]},
-                ensure_ascii=False),
-            'inputs': json.dumps(
-                {'id': record_id, id_key: record_id},
-                ensure_ascii=False, default=str),
-            'doc_ref': str(record_id),
-            'created_by': actor or 'system',
-            'created_at': datetime.now().isoformat(timespec='seconds'),
-            'attempt': 1,
-        }
-        columns = ', '.join(row.keys())
-        values = ', '.join('?' * len(row))
-        self._ds.execute(
-            'INSERT INTO tasks ({0}) VALUES ({1})'.format(columns, values),
-            list(row.values()),
-        )
-        logger.info('[DemandEntry] %s id=%s 建审批任务 %s',
-                    object_type, record_id, task_id)
-        return task_id
+        return ApprovalTaskService(self._ds).create_task(
+            object_type, record_id, actor=actor)

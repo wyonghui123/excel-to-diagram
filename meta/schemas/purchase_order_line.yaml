@@ -1,0 +1,1158 @@
+# 采购订单行 (Purchase Order Line) — M3 第一阶段
+# 依据: docs/specs/spec-purchase-order-object-model-2026-11-01.md §4 / §5.1 / §5.2 / §5.4.4 / §4.3.4
+#
+# 定位: purchase_order 的附属明细（child_sections），不单独成菜单。
+#
+# 行级口径:
+#   ① 业务类型放行级 line_type（standard / subcontract / asset / service / expense）；
+#      一张 PO 可混合物料与服务；委外不新建单据对象（spec §5.1 / D-PO-16）。
+#   ② 合并采购：行不放 requisition_line_id / project_task_id 单值引用（T-D3），
+#      需求归属由 demand_allocation 表达；行不设 project_id（spec §2.1 D6）。
+#   ③ 金额快照：net = qty × unit_price（再叠加头折扣 / 附加分摊）；tax 按 tax_code；
+#      gross = net + tax；头三项恒等于行汇总，由服务层回写。
+#   ④ item_id 为空（服务 / 文本行）时 description 必填；
+#      goods 行 item_id 与 uom_id 必填（守卫强制）。
+#   ⑤ tax_recoverable=false 时税额单列 non_recoverable_tax_amount，
+#      不并入 net_amount（保持 net 未税口径，R-PO-16）。
+#   ⑥ 成套：pricing_mode / parent_line_id / component_no 与销售订单同一枚举；
+#      configuration_id 只读追溯，PO 不触发选配求解。
+#   ⑦ BOM：只存追溯锚点 source_structure_id / source_structure_line_id，
+#      不复制 BOM 行；展开在需求侧完成（spec §5.4.3）。
+#
+# 行状态极简：open / closed / cancelled（不复制抬头状态机）。
+
+id: purchase_order_line
+name: 采购订单行
+table_name: purchase_order_lines
+description: 采购订单行（物料 / 服务 / 资产 / 费用 / 委外行）
+parent_object: purchase_order
+display_name_field: line_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: order_id
+
+deletion_policy:
+  # 父单草稿删除时级联；非草稿由守卫禁删（R-PO-6）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - fulfillment_status
+      - fulfillment_derived_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = purchase_order 的字段）
+  - id: order_id
+    name: 所属订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 所属采购订单
+    semantics:
+      meaning: 所属采购订单
+      display:
+        type: association
+        target_type: purchase_order
+        display_field: order_no
+    value_help:
+      source:
+        type: bo
+        target_bo: purchase_order
+        value_field: id
+        display_field: order_no
+        code_field: order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{order_no}"
+    ui:
+      widget: select
+      relation: purchase_order
+      multiple: false
+
+  - id: line_no
+    name: 行号
+    type: string
+    db_column: line_no
+    required: true
+    max_length: 6
+    pattern: "^[0-9]{1,6}$"
+    description: 行号（同一订单内唯一，如 10 / 20 / 30）
+    semantics:
+      meaning: 订单行号
+      data_category: code
+      filterable: true
+      filter_type: text
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: line_type_id
+    name: 行类型
+    type: integer
+    db_column: line_type_id
+    required: true
+    description: 行类型（type_definitions，scope_bo='purchase_order' + level='line'）
+    semantics:
+      meaning: 采购行业务类型（standard / subcontract / asset / service / expense）
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: purchase_order
+          level: line
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 类型编码
+            width: 140
+          - field: name
+            label: 类型名称
+            width: 200
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 物料；goods / subcontract / asset 行必填，service / expense 行可空
+    semantics:
+      meaning: 订单行物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+        placeholder: "非物料行留空"
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 140
+          - field: name
+            label: 物料名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+
+  - id: supplier_item_code
+    name: 供应商物料号
+    type: string
+    db_column: supplier_item_code
+    nullable: true
+    max_length: 40
+    description: 供应商物料号快照
+    semantics:
+      meaning: 供应商方物料编码快照
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: description
+    name: 行描述
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 300
+    description: 行描述 / 服务规格；item_id 为空时必填
+    semantics:
+      meaning: 订单行描述
+      searchable: true
+    ui:
+      widget: input
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    required: true
+    description: 数量（恒为正；方向由单据类型 document_category 决定）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 订单行数量
+    ui:
+      widget: input
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 计量单位；goods / subcontract 行必填，service / expense 行可空
+    semantics:
+      meaning: 订单行计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+
+  - id: unit_price
+    name: 单价
+    type: number
+    db_column: unit_price
+    nullable: true
+    description: 不含税单价（快照）；确认时冻结
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 行不含税单价
+    ui:
+      widget: input
+
+  - id: net_amount
+    name: 不含税金额
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    description: 行不含税金额 = qty × unit_price + 头折扣 / 附加分摊（服务层计算）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 行不含税金额
+    ui:
+      widget: input
+      editable: false
+
+  - id: header_discount_amount
+    name: 头折扣分摊额
+    type: number
+    db_column: header_discount_amount
+    required: true
+    default: 0
+    description: 抬头折扣按行净额比例分摊到本行的调整额（负 = 减少净额）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头折扣分摊调整额
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_surcharge_amount
+    name: 头附加分摊额
+    type: number
+    db_column: header_surcharge_amount
+    required: true
+    default: 0
+    description: 抬头附加费按行净额比例分摊到本行的调整额（正 = 增加净额）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 抬头附加费分摊调整额
+    ui:
+      widget: number
+      editable: false
+
+  - id: tax_code_id
+    name: 税码
+    type: integer
+    db_column: tax_code_id
+    nullable: true
+    description: 税码（空 = 免税 / 待定）；进项税码
+    semantics:
+      meaning: 行税码
+      display:
+        type: association
+        target_type: tax_code
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: tax_code
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        # 进项税码：input 与 both 都可用
+        value_filter:
+          direction__in: input,both
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+    ui:
+      widget: select
+      relation: tax_code
+      multiple: false
+      clearable: true
+
+  - id: tax_base_amount
+    name: 计税基数
+    type: number
+    db_column: tax_base_amount
+    required: true
+    default: 0
+    description: 计税基数（快照，默认 = net_amount）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 行计税基数
+    ui:
+      widget: input
+      editable: false
+
+  - id: tax_rate_percent
+    name: 税率
+    type: number
+    db_column: tax_rate_percent
+    nullable: true
+    description: 税率快照（从 tax_code 取，确认时冻结）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 4
+    semantics:
+      meaning: 行税率快照
+      hint: 例：13 表示 13%
+    ui:
+      widget: input
+      editable: false
+
+  - id: tax_amount
+    name: 税额
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    description: 行税额 = round(tax_base_amount × tax_rate_percent / 100, 币种精度)
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 行税额
+    ui:
+      widget: input
+      editable: false
+
+  - id: tax_recoverable
+    name: 进项税可抵扣
+    type: boolean
+    db_column: tax_recoverable
+    required: true
+    default: true
+    description: 进项税是否可抵扣；false 时税额单列不可抵扣额（R-PO-16）
+    semantics:
+      meaning: 进项税可抵扣标记
+    ui:
+      widget: switch
+
+  - id: non_recoverable_tax_amount
+    name: 不可抵扣税额
+    type: number
+    db_column: non_recoverable_tax_amount
+    required: true
+    default: 0
+    description: 不可抵扣税额（tax_recoverable=false 时 = tax_amount；不并入 net_amount）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 不可抵扣进项税额
+    ui:
+      widget: number
+      editable: false
+
+  - id: gross_amount
+    name: 含税金额
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    description: 行含税金额 = net_amount + tax_amount
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 行含税金额
+    ui:
+      widget: input
+      editable: false
+
+  - id: requested_date
+    name: 行需求日期
+    type: date
+    db_column: requested_date
+    nullable: true
+    description: 行级需求日期；空 = 取头；计划行可覆盖
+    semantics:
+      meaning: 行需求交付日
+      filterable: true
+      filter_type: date
+      filter_label: 行需求日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: deliver_to_location_id
+    name: 行收货地点
+    type: integer
+    db_column: deliver_to_location_id
+    nullable: true
+    description: 行级收货地点；空 = 取头；计划行可覆盖
+    semantics:
+      meaning: 行收货地点
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          location_type: site
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: service_start_date
+    name: 服务开始日
+    type: date
+    db_column: service_start_date
+    nullable: true
+    description: 服务开始日期（仅 service 行）
+    semantics:
+      meaning: 服务行开始日
+    ui:
+      widget: date
+
+  - id: service_end_date
+    name: 服务结束日
+    type: date
+    db_column: service_end_date
+    nullable: true
+    description: 服务结束日期（不得早于开始日，仅 service 行）
+    semantics:
+      meaning: 服务行结束日
+    ui:
+      widget: date
+
+  # ---- 采购业务类型追加字段（spec §5.2，M3 建列 / UI 后置）----
+  - id: subcontract_fee_basis
+    name: 委外加工费口径
+    type: string
+    db_column: subcontract_fee_basis
+    nullable: true
+    max_length: 20
+    description: 委外加工费计价口径（仅 subcontract 行）
+    enum_values:
+      - value: per_unit
+        label: 按件
+        color: primary
+      - value: per_batch
+        label: 按批
+        color: info
+    semantics:
+      meaning: 委外加工费计价口径
+    ui:
+      widget: select
+
+  - id: component_issue_required
+    name: 需组件发料
+    type: boolean
+    db_column: component_issue_required
+    required: true
+    default: false
+    description: 是否需要向供应商发料；仅 subcontract 行可为 true（R-PO-15）
+    semantics:
+      meaning: 委外组件发料标记
+    ui:
+      widget: switch
+
+  - id: asset_category_code
+    name: 资产类别
+    type: string
+    db_column: asset_category_code
+    nullable: true
+    max_length: 20
+    description: 资产类别代码（仅 asset 行，收货后转固依据）
+    semantics:
+      meaning: 资产类别
+      data_category: code
+    ui:
+      widget: input
+
+  - id: capitalization_flag
+    name: 资本化
+    type: boolean
+    db_column: capitalization_flag
+    nullable: true
+    description: 是否资本化（仅 asset 行）
+    semantics:
+      meaning: 资产资本化标记
+    ui:
+      widget: switch
+
+  - id: capitalization_date
+    name: 资本化日期
+    type: date
+    db_column: capitalization_date
+    nullable: true
+    description: 资本化日期（仅 asset 行）
+    semantics:
+      meaning: 资产资本化日期
+    ui:
+      widget: date
+
+  - id: service_acceptance_required
+    name: 需服务验收
+    type: boolean
+    db_column: service_acceptance_required
+    required: true
+    default: true
+    description: 服务验收单驱动付款（仅 service 行）
+    semantics:
+      meaning: 服务验收要求
+    ui:
+      widget: switch
+
+  - id: expense_account_code
+    name: 费用科目
+    type: string
+    db_column: expense_account_code
+    nullable: true
+    max_length: 32
+    description: 费用科目代码（仅 expense 行 / 分配行）
+    semantics:
+      meaning: 费用科目
+      data_category: code
+    ui:
+      widget: input
+
+  - id: cost_center_id
+    name: 成本中心
+    type: integer
+    db_column: cost_center_id
+    nullable: true
+    description: 成本中心（行级缺省；成本归属以 demand_allocation 为准）
+    semantics:
+      meaning: 成本中心
+      display:
+        type: association
+        target_type: cost_center
+        display_field: name
+        placeholder: "未指定"
+    ui:
+      widget: input
+      editable: false
+
+  # ---- 定价结果（由采购取价服务回写，界面只读）----
+  - id: price_source
+    name: 单价来源
+    type: string
+    db_column: price_source
+    nullable: true
+    max_length: 20
+    description: 单价来源（协议 / 报价 / 价目表 / 最近采购价 / 标准成本 / 手工）
+    enum_values:
+      - value: manual
+        label: 手工录入
+        color: warning
+      - value: agreement
+        label: 一揽子协议
+        color: primary
+      - value: quotation
+        label: 供应商报价
+        color: info
+      - value: rate_table
+        label: 价目表
+        color: success
+      - value: last_po
+        label: 最近采购价
+        color: info
+      - value: standard_cost
+        label: 标准成本
+        color: default
+    semantics:
+      meaning: 订单行单价来源
+      filterable: true
+      filter_type: enum
+      filter_label: 单价来源
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: price_trace
+    name: 取价轨迹
+    type: json
+    db_column: price_trace
+    nullable: true
+    description: 取价轨迹（命中键 / 阶梯档 / 候选与失败原因；非 manual 时必填，R-PO-18）
+    semantics:
+      meaning: 单价取价过程的可回放记录
+    ui:
+      widget: textarea
+      editable: false
+
+  - id: sourcing_rule_line_id
+    name: 命中寻源规则行
+    type: integer
+    db_column: sourcing_rule_line_id
+    nullable: true
+    description: M2 sourcing 命中规则行（接线后回填，用于回答「为什么这个供应商」）
+    semantics:
+      meaning: 寻源规则行引用
+    ui:
+      widget: input
+      editable: false
+
+  # ---- 成套 / BOM 追溯（spec §5.4.4）----
+  - id: pricing_mode
+    name: 行定价模式
+    type: string
+    db_column: pricing_mode
+    required: true
+    default: standalone
+    max_length: 30
+    description: 金额归属方式（独立 / 打包价 / 组件价 / 基准加选项）
+    enum_values:
+      - value: standalone
+        label: 独立计价
+        color: info
+        is_initial: true
+      - value: bundle_price
+        label: 打包价
+        color: primary
+      - value: component_price
+        label: 组件价
+        color: primary
+      - value: base_plus_option
+        label: 基准加选项
+        color: warning
+    semantics:
+      meaning: 行与子行的金额归属
+      filterable: true
+      filter_type: enum
+      filter_label: 定价模式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: parent_line_id
+    name: 父行
+    type: integer
+    db_column: parent_line_id
+    nullable: true
+    description: 成套子行的父行（同单、父行 pricing_mode='bundle_price'）
+    semantics:
+      meaning: 套装层级的父订单行
+      display:
+        type: association
+        target_type: purchase_order_line
+        display_field: line_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: component_no
+    name: 组件号
+    type: string
+    db_column: component_no
+    nullable: true
+    max_length: 20
+    description: 成套内组件序号（同一父行内唯一）
+    semantics:
+      meaning: 成套组件序号
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: configuration_id
+    name: 配置实例
+    type: integer
+    db_column: configuration_id
+    nullable: true
+    description: 需求 / 销售订单已确定的配置（只读追溯；PO 不触发选配求解）
+    semantics:
+      meaning: 本行引用的配置实例
+      display:
+        type: association
+        target_type: configuration
+        display_field: config_hash
+    ui:
+      widget: input
+      editable: false
+
+  - id: source_structure_id
+    name: 来源 BOM 头
+    type: integer
+    db_column: source_structure_id
+    nullable: true
+    description: 来源 BOM 头（item_structure.id；只存追溯锚点）
+    semantics:
+      meaning: 来源物料结构
+      display:
+        type: association
+        target_type: item_structure
+        display_field: structure_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: source_structure_line_id
+    name: 来源 BOM 行
+    type: integer
+    db_column: source_structure_line_id
+    nullable: true
+    description: 来源 BOM 行（item_structure_line.id；item_id / uom_id 必须一致）
+    semantics:
+      meaning: 来源结构行
+      display:
+        type: association
+        target_type: item_structure_line
+        display_field: line_no
+    ui:
+      widget: input
+      editable: false
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    description: 行状态（开放 / 已关闭 / 已取消）
+    enum_values:
+      - value: open
+        label: 开放
+        color: primary
+        category: active
+        is_initial: true
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 订单行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: fulfillment_status
+    name: 行履约状态
+    type: string
+    db_column: fulfillment_status
+    nullable: true
+    max_length: 20
+    description: 行收货进度（只读缓存，由收货分配派生）
+    enum_values:
+      - value: open
+        label: 未收货
+        color: info
+        category: active
+      - value: partially_received
+        label: 部分收货
+        color: warning
+        category: active
+      - value: received
+        label: 已收货
+        color: success
+        category: active
+    semantics:
+      meaning: 行到货进度
+      filterable: true
+      filter_type: enum
+      filter_label: 行履约状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  - id: fulfillment_derived_at
+    name: 行派生时间
+    type: datetime
+    db_column: fulfillment_derived_at
+    nullable: true
+    description: 最近一次履约状态派生确认时间（UTC），只读
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+    ui:
+      readonly: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: close_purchase_order_line
+    name: 关闭订单行
+    type: state_transition
+    state_field: status
+    from_states: [open]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: archive
+      confirm_message: "关闭后该行不再参与履约推进，确定要关闭吗？"
+
+  - id: cancel_purchase_order_line
+    name: 取消订单行
+    type: state_transition
+    state_field: status
+    from_states: [open, closed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后该行作废且不可恢复，确定要取消吗？"
+
+indexes:
+  - fields: [order_id, line_no]
+    unique: true
+    name: uidx_purchase_order_line_no
+  - fields: [item_id]
+    name: idx_purchase_order_line_item
+  - fields: [order_id, status]
+    name: idx_purchase_order_line_order_status
+  - fields: [sourcing_rule_line_id]
+    name: idx_purchase_order_line_sourcing
+  - fields: [parent_line_id]
+    name: idx_purchase_order_line_parent
+  # 同一父行内组件号唯一；未成套行不参与
+  - fields: [parent_line_id, component_no]
+    type: partial
+    unique: true
+    condition: "parent_line_id IS NOT NULL AND component_no IS NOT NULL"
+    name: uidx_purchase_order_line_component
+  - fields: [source_structure_line_id]
+    name: idx_purchase_order_line_source_structure
+
+relations:
+  - id: purchase_order_line_to_order
+    name: 所属订单
+    type: reference
+    target: purchase_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属采购订单引用（真外键）
+  - id: purchase_order_line_to_type_definition
+    name: 行类型
+    type: reference
+    target: type_definition
+    source_field: line_type_id
+    target_field: id
+    cardinality: N:1
+    description: 行类型引用（真外键，限定 line 层）
+  - id: purchase_order_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（可空）
+  - id: purchase_order_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 计量单位引用（可空）
+  - id: purchase_order_line_to_tax_code
+    name: 税码
+    type: reference
+    target: tax_code
+    source_field: tax_code_id
+    target_field: id
+    cardinality: N:1
+    description: 税码引用（可空）
+  - id: purchase_order_line_to_location
+    name: 收货地点
+    type: reference
+    target: location
+    source_field: deliver_to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 行收货地点引用（可空）
+  - id: purchase_order_line_to_parent_line
+    name: 父行
+    type: reference
+    target: purchase_order_line
+    source_field: parent_line_id
+    target_field: id
+    cardinality: N:1
+    description: 成套父行引用（自引用，可空）
+  - id: purchase_order_line_to_configuration
+    name: 配置实例
+    type: reference
+    target: configuration
+    source_field: configuration_id
+    target_field: id
+    cardinality: N:1
+    description: 只读追溯的配置实例引用（可空）
+  - id: purchase_order_line_to_structure
+    name: 来源 BOM 头
+    type: reference
+    target: item_structure
+    source_field: source_structure_id
+    target_field: id
+    cardinality: N:1
+    description: 来源 BOM 头引用（可空，只读追溯）
+  - id: purchase_order_line_to_structure_line
+    name: 来源 BOM 行
+    type: reference
+    target: item_structure_line
+    source_field: source_structure_line_id
+    target_field: id
+    cardinality: N:1
+    description: 来源 BOM 行引用（可空，只读追溯）
+
+ui_view_config:
+  # 作为订单头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 订单行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: line_type_id
+        width: 130
+      - field: item_id
+        width: 200
+      - field: supplier_item_code
+        width: 140
+      - field: description
+        width: 220
+        type: ellipsis
+      - field: qty
+        width: 100
+      - field: uom_id
+        width: 90
+      - field: unit_price
+        width: 110
+      - field: net_amount
+        width: 120
+      - field: tax_amount
+        width: 110
+      - field: gross_amount
+        width: 120
+      - field: requested_date
+        width: 120
+        format: date
+      - field: deliver_to_location_id
+        width: 140
+      - field: price_source
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: fulfillment_status
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 订单行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, line_type_id]
+          - fields: [item_id, supplier_item_code]
+          - fields: [description]
+      - title: 数量与价格
+        columns:
+          - fields: [qty, uom_id]
+          - fields: [unit_price, price_source]
+          - fields: [net_amount]
+          - fields: [price_trace]
+      - title: 税
+        columns:
+          - fields: [tax_code_id, tax_rate_percent]
+          - fields: [tax_base_amount, tax_amount]
+          - fields: [tax_recoverable, non_recoverable_tax_amount]
+          - fields: [gross_amount]
+      - title: 交付
+        columns:
+          - fields: [requested_date, deliver_to_location_id]
+      - title: 服务信息（仅服务行）
+        columns:
+          - fields: [service_start_date, service_end_date]
+          - fields: [service_acceptance_required]
+      - title: 委外 / 资产 / 费用
+        columns:
+          - fields: [subcontract_fee_basis, component_issue_required]
+          - fields: [asset_category_code, capitalization_flag]
+          - fields: [capitalization_date, expense_account_code]
+          - fields: [cost_center_id]
+      - title: 成套与 BOM 追溯
+        columns:
+          - fields: [pricing_mode, component_no]
+          - fields: [parent_line_id, configuration_id]
+          - fields: [source_structure_id, source_structure_line_id]
+      - title: 其他
+        columns:
+          - fields: [status, fulfillment_status]
