@@ -118,6 +118,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { metaService } from '@/services/metaService'
 import { useAuthStore } from '@/stores/authStore'
+import { can } from '@/services/permissionService'
 
 const props = defineProps({
   visible: {
@@ -219,7 +220,7 @@ const authStore = useAuthStore()
 const availableMultiTypes = computed(() => {
   return props.objectTypes
     .filter(t => t && typeof t === 'string')
-    .filter(t => authStore.hasPermission(`${t}:export`))  // 只显示有权限的
+    .filter(t => can('export', { objectType: t, authStore }))  // 只显示有权限的
     .map(t => ({
       value: t,
       label: props.objectTypeLabels[t] || t

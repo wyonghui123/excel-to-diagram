@@ -23,6 +23,7 @@ import { ref, computed, watch, provide, inject, onMounted, isRef, effectScope } 
 import { useRoute } from 'vue-router'
 import boService from '@/services/boService'
 import { useAuthStore } from '@/stores/authStore'
+import { can } from '@/services/permissionService'
 
 // [DBG 2026-09-04] 产线 console 噪音治理: window 探测 __archPage.debug, 仅 ?mode=debug 时输出.
 //   useVersionContext 是单例 + provide/inject 双重机制, fallback (L475) 是设计内行为
@@ -84,7 +85,7 @@ function createVersionContext() {
     //   - 后端 list 端点实际接受 product:read (已验证 200 OK)
     //   - 改用 product:read, 跟后端权限语义对齐, 减少误拦截
     const authStore = useAuthStore()
-    if (!authStore.hasPermission('product:read')) {
+    if (!can('read', { objectType: 'product', authStore })) {
       products.value = []
       loadingProducts.value = false
       return
@@ -121,7 +122,7 @@ function createVersionContext() {
     // [FIX 2026-06-09] 跟 fetchProducts 一致, 用 version:read 保护
     //   防止角色只有 version:list 没有 version:read 时误拦截 (反向 case)
     const authStore = useAuthStore()
-    if (!authStore.hasPermission('version:read')) {
+    if (!can('read', { objectType: 'version', authStore })) {
       versions.value = []
       loadingVersions.value = false
       return

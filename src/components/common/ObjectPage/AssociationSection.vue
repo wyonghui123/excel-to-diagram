@@ -361,6 +361,7 @@ import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import boService from '@/services/boService'
 import metaService from '@/services/metaService'
 import { useAuthStore } from '@/stores/authStore'
+import { can } from '@/services/permissionService'
 import { CATEGORY_CONFIG } from '@/composables/useMermaid/annotation/annotationConfig'
 import * as annotationService from '@/services/annotationService'
 import EnumService from '@/services/enumService'
@@ -696,7 +697,7 @@ const partyRelationToolbarActions = computed(() => {
   )
   if (!create) return []
   const perm = typeof create === 'string' ? null : create.permission
-  if (perm && !authStore.hasPermission(perm)) return []
+  if (perm && !can(null, { permission: perm, authStore })) return []
   return [{
     key: 'create',
     label: (typeof create === 'string' ? null : create.label) || '新建往来关系',
@@ -1063,7 +1064,7 @@ const relationAccountToolbarActions = computed(() => {
   )
   if (!create) return []
   const perm = typeof create === 'string' ? null : create.permission
-  if (perm && !authStore.hasPermission(perm)) return []
+  if (perm && !can(null, { permission: perm, authStore })) return []
   return [{
     key: 'create',
     label: (typeof create === 'string' ? null : create.label) || '新建档案',

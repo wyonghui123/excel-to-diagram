@@ -18,6 +18,7 @@ import {
   getResourceLabel,
   getActionLabel,
   getDimensionName,
+  can,
   loadPermissionMeta,
   invalidatePermissionMetaCache,
   loadPermissionMetaWithScope,
@@ -113,7 +114,8 @@ describe('permissionService', () => {
           'product', 'version', 'relationship', 'annotation',
         ])
       )
-      expect(Object.keys(RESOURCE_LABELS)).toHaveLength(8)
+      // [Spec 19 M2-8] 追加 audit_log / org / user 三行（委托授权），共 11 项
+      expect(Object.keys(RESOURCE_LABELS)).toHaveLength(11)
     })
   })
 
@@ -201,13 +203,13 @@ describe('permissionService', () => {
   // ==================== API 函数 ====================
 
   describe('loadRoles', () => {
-    it('应调用 GET /bo/role 并返回成功响应', async () => {
+    it('应调用 GET /bo/permission_set 并返回成功响应', async () => {
       const rolesData = [{ id: 1, name: 'admin' }, { id: 2, name: 'viewer' }]
       mocks.apiV2Get.mockResolvedValueOnce(okResp(rolesData))
 
       const result = await loadRoles()
 
-      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role', { params: {} })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_set', { params: {} })
       expect(result.success).toBe(true)
       expect(result.data).toEqual(rolesData)
     })
@@ -226,17 +228,17 @@ describe('permissionService', () => {
 
       await loadRoles({ page: 2, page_size: 10 })
 
-      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role', { params: { page: 2, page_size: 10 } })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_set', { params: { page: 2, page_size: 10 } })
     })
   })
 
   describe('loadRole', () => {
-    it('应调用 GET /bo/role/:roleId', async () => {
+    it('应调用 GET /bo/permission_set/:roleId', async () => {
       mocks.apiV2Get.mockResolvedValueOnce(okResp({ id: 1, name: 'admin' }))
 
       const result = await loadRole(1)
 
-      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/role/1')
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_set/1')
       expect(result.success).toBe(true)
     })
   })
@@ -253,54 +255,65 @@ describe('permissionService', () => {
   })
 
   describe('loadPermissionRules', () => {
-    it('应调用 GET /bo/permission_rule 并传递 role_id 参数', async () => {
-      mocks.apiV2Get.mockResolvedValueOnce(okResp([{ id: 10, role_id: 1 }]))
+    it('应调用 GET /permission-rules 并传递 permission_set_id 参数', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp([{ id: 10, permission_set_id: 1 }]))
 
       const result = await loadPermissionRules(1, { page: 1 })
 
-      expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_rule', { params: { role_id: 1, page: 1 } })
+      expect(mocks.apiV2Get).toHaveBeenCalledWith('/permission-rules', { params: { permission_set_id: 1, page: 1 } })
       expect(result.success).toBe(true)
+      expect(result.data.rules[0].id).toBe(10)
+    })
+
+    it('data.items 分页格式应归一化为 data.rules', async () => {
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({ items: [{ id: 11 }] }))
+
+      const result = await loadPermissionRules(1)
+
+      expect(result.data.rules[0].id).toBe(11)
     })
   })
 
   describe('savePermissionRules', () => {
-    it('mode=create 时应调用 POST /roles/:roleId/permission-rules', async () => {
+    it('mode=create 时应 POST /permission-rules 并注入 permission_set_id', async () => {
       const rule = { resource_type: 'domain', permission_level: 'read' }
-      mocks.apiV1Post.mockResolvedValueOnce(okResp(rule))
+      mocks.apiV2Post.mockResolvedValueOnce(okResp(rule))
 
       const result = await savePermissionRules(1, rule, 'create')
 
-      expect(mocks.apiV1Post).toHaveBeenCalledWith('/roles/1/permission-rules', rule)
+      expect(mocks.apiV2Post).toHaveBeenCalledWith('/permission-rules', { ...rule, permission_set_id: 1 })
       expect(result.success).toBe(true)
     })
 
-    it('mode=update 且有 rule.id 时应调用 PUT /roles/:roleId/permission-rules/:ruleId', async () => {
+    it('mode=update 且有 rule.id 时应 PUT /permission-rules/:ruleId', async () => {
       const rule = { id: 10, resource_type: 'domain', permission_level: 'write' }
-      mocks.apiV1Put.mockResolvedValueOnce(okResp(rule))
+      mocks.apiV2Put.mockResolvedValueOnce(okResp(rule))
 
       const result = await savePermissionRules(1, rule, 'update')
 
-      expect(mocks.apiV1Put).toHaveBeenCalledWith('/roles/1/permission-rules/10', rule)
+      expect(mocks.apiV2Put).toHaveBeenCalledWith('/permission-rules/10', { ...rule, permission_set_id: 1 })
       expect(result.success).toBe(true)
     })
 
-    it('mode=batch 时应调用 POST /roles/:roleId/permission-rules/batch', async () => {
-      const rules = [{ resource_type: 'domain' }, { resource_type: 'product' }]
-      mocks.apiV1Post.mockResolvedValueOnce(okResp(rules))
+    it('mode=batch 时应按 id 逐条 PUT / 无 id 逐条 POST', async () => {
+      const rules = { rules: [{ id: 1, resource_type: 'domain' }, { resource_type: 'product' }] }
+      mocks.apiV2Put.mockResolvedValueOnce(okResp({ id: 1 }))
+      mocks.apiV2Post.mockResolvedValueOnce(okResp({ id: 2 }))
 
       const result = await savePermissionRules(1, rules, 'batch')
 
-      expect(mocks.apiV1Post).toHaveBeenCalledWith('/roles/1/permission-rules/batch', rules)
+      expect(mocks.apiV2Put).toHaveBeenCalledWith('/permission-rules/1', { id: 1, resource_type: 'domain', permission_set_id: 1 })
+      expect(mocks.apiV2Post).toHaveBeenCalledWith('/permission-rules', { resource_type: 'product', permission_set_id: 1 })
       expect(result.success).toBe(true)
     })
 
     it('默认 mode 为 create', async () => {
       const rule = { resource_type: 'domain' }
-      mocks.apiV1Post.mockResolvedValueOnce(okResp(rule))
+      mocks.apiV2Post.mockResolvedValueOnce(okResp(rule))
 
       await savePermissionRules(1, rule)
 
-      expect(mocks.apiV1Post).toHaveBeenCalledWith('/roles/1/permission-rules', rule)
+      expect(mocks.apiV2Post).toHaveBeenCalledWith('/permission-rules', { ...rule, permission_set_id: 1 })
     })
   })
 
@@ -317,12 +330,12 @@ describe('permissionService', () => {
   })
 
   describe('loadUnifiedPermissions', () => {
-    it('应调用 GET /roles/:roleId/unified-permissions', async () => {
+    it('应调用 GET /permission-sets/:roleId/unified-permissions', async () => {
       mocks.apiV1Get.mockResolvedValueOnce(okResp({ menus: [], scopes: [] }))
 
       const result = await loadUnifiedPermissions(1)
 
-      expect(mocks.apiV1Get).toHaveBeenCalledWith('/roles/1/unified-permissions')
+      expect(mocks.apiV1Get).toHaveBeenCalledWith('/permission-sets/1/unified-permissions')
       expect(result.success).toBe(true)
     })
   })
@@ -436,6 +449,72 @@ describe('permissionService', () => {
       expect(mocks.apiV2Get).toHaveBeenCalledWith('/bo/permission_dimension/meta', {
         params: { scope_code: 'SCP' },
       })
+    })
+  })
+
+  // ==================== FR-009 权限判定统一入口 ====================
+
+  describe('can（权限判定统一入口）', () => {
+    // 极简 store 替身：避免单测里依赖 pinia / authStore
+    function makeStore(granted = []) {
+      return {
+        hasPermission: vi.fn(code => granted.includes(code)),
+      }
+    }
+
+    it('无任何权限码时默认放行', () => {
+      const store = makeStore()
+      expect(can(null, { authStore: store })).toBe(true)
+      expect(can(undefined, {})).toBe(true)
+      expect(store.hasPermission).not.toHaveBeenCalled()
+    })
+
+    it('无 authStore 时降级放行（兼容单测 / 非 setup 上下文）', () => {
+      expect(can('export', { objectType: 'product' })).toBe(true)
+      expect(can('export', { objectType: 'product', authStore: null })).toBe(true)
+    })
+
+    it('由 objectType + action 派生权限码', () => {
+      const store = makeStore(['product:export'])
+
+      expect(can('export', { objectType: 'product', authStore: store })).toBe(true)
+      expect(store.hasPermission).toHaveBeenCalledWith('product:export')
+    })
+
+    it('action 原样使用，不做别名归一（read 不会变成 view）', () => {
+      const store = makeStore(['product:view'])
+
+      expect(can('read', { objectType: 'product', authStore: store })).toBe(false)
+      expect(store.hasPermission).toHaveBeenCalledWith('product:read')
+    })
+
+    it('显式 permission 字符串优先于 objectType 派生', () => {
+      const store = makeStore(['user:delete'])
+
+      expect(can('export', { permission: 'user:delete', objectType: 'product', authStore: store })).toBe(true)
+      expect(store.hasPermission).toHaveBeenCalledWith('user:delete')
+      expect(store.hasPermission).not.toHaveBeenCalledWith('product:export')
+    })
+
+    it('permission 数组默认 any（任意一项满足即放行）', () => {
+      const store = makeStore(['user:export'])
+
+      expect(can(null, { permission: ['user:import', 'user:export'], authStore: store })).toBe(true)
+      expect(store.hasPermission).toHaveBeenCalledTimes(2)
+    })
+
+    it('mode=all 时要求全部满足', () => {
+      const store = makeStore(['user:import'])
+
+      expect(can(null, { permission: ['user:import', 'user:export'], mode: 'all', authStore: store })).toBe(false)
+      expect(store.hasPermission).toHaveBeenCalledTimes(2)
+    })
+
+    it('permission 为空数组时回退 objectType 派生', () => {
+      const store = makeStore(['product:export'])
+
+      expect(can('export', { permission: [], objectType: 'product', authStore: store })).toBe(true)
+      expect(store.hasPermission).toHaveBeenCalledWith('product:export')
     })
   })
 })
