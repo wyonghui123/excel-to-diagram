@@ -107,4 +107,4 @@
 - [x] `generated_schema.sql` 含两张新表与六条索引；
 - [x] 旧链路无回归（work_order service / production 测试不变）；
 - [x] spec v1.7 变更记录落地；
-- [ ] worktree 单次提交，未动主工作树。
+- [x] worktree 单次提交（c4723446），未动主工作树。
