@@ -10,11 +10,11 @@
 #   ② 金额只在 SO / line / schedule；本对象仅 budget_amount（预算），不做金额冗余（I1）
 #   ③ sales_order.project_id / sales_order_line.project_id / sales_order_schedule.project_id
 #      均为可空挂载；为空时旧链路行为不变（AC-02）
-#   ④ 项目 360 聚合只读：销售订单走 child_sections（外键 project_id，平台按 {父对象}_id 过滤），
-#      订单行 / 计划行 / 履约由只读聚合接口 GET /api/v1/projects/<id>/overview 返回（AC-03）
+#   ④ 项目 360 聚合只读：销售订单 / 订单行 / 计划行均由 child_sections 按 project_id 原生过滤
+#      （AssociationSection 父键 = `{父对象类型}_id` = project_id），不需要前端组件；履约聚合留 P2
 #   ⑤ 项目暂不进入权限维度链（D8），沿用 org 维度
 #
-# 状态机（服务层只做枚举校验，不做强制流转）:
+# 状态机（声明式 rules: type=state_transition，state_field=status；服务层不再硬编码状态判断）:
 #   draft(草稿) → active(进行中) → inactive(已停用) / closed(已关闭)
 #   cancelled(已取消) 仅从 draft / active 进入
 
@@ -23,6 +23,7 @@ name: 项目
 table_name: projects
 description: 项目（商务层归集对象；挂载销售订单 / 订单行 / 计划行）
 display_name_field: name
+aspects: [audit_aspect]
 
 semantics:
   meaning: 项目
@@ -108,9 +109,10 @@ fields:
     type: integer
     db_column: project_type_id
     required: true
-    description: 项目类型（type_definitions，scope_bo='project' + level='header'）
+    description: 项目类型（type_definitions，scope_bo='project' + level='header'）；创建后不可修改（对齐 SAP/Oracle 类型锁定，选错只能重建项目）
     semantics:
       meaning: 项目类型
+      immutable: true
       display:
         type: association
         target_type: type_definition
@@ -410,6 +412,10 @@ fields:
     ui:
       widget: textarea
 
+  # 审计字段：
+  #   created_by / updated_by 由 audit_aspect 注入（redundant_storage，此前 YAML 缺失）；
+  #   created_at / updated_at 在 aspect 中为 virtual（不落列），故显式声明物理列，
+  #   与 sales_order 同构，保证 generated_schema.sql 与 v172 迁移 DDL 一致。
   - id: created_at
     name: 创建时间
     type: datetime
@@ -427,6 +433,58 @@ fields:
     semantics:
       meaning: 记录更新时间
       audit_field: true
+
+# ────────────────────────────────────────────
+# 状态流转（声明式；对象原则 7.3）
+# ────────────────────────────────────────────
+rules:
+  - id: activate_project
+    name: 启用项目
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: play
+      confirm_message: "启用后项目进入进行中状态，确定要启用吗？"
+
+  - id: deactivate_project
+    name: 停用项目
+    type: state_transition
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause
+      confirm_message: "停用后项目不再承接新单据，确定要停用吗？"
+
+  - id: close_project
+    name: 关闭项目
+    type: state_transition
+    state_field: status
+    from_states: [active, inactive]
+    to_state: closed
+    triggers: [before_update]
+    ui_hints:
+      label: 关闭
+      icon: lock
+      confirm_message: "关闭后项目只读，确定要关闭吗？"
+
+  - id: cancel_project
+    name: 取消项目
+    type: state_transition
+    state_field: status
+    from_states: [draft, active]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后不可恢复，确定要取消吗？"
 
 indexes:
   - fields: [project_no]
@@ -476,7 +534,7 @@ relations:
     description: 项目经理引用（可空）
 
 ui_view_config:
-  # 菜单由迁移 v169 手工声明（挂 sales 分组），不让自动生成器产出孤儿行
+  # 菜单由迁移 v172 手工声明（挂 sales 分组），不让自动生成器产出孤儿行
   skip_auto_menu: true
   showChangeHistory: true
   list:
@@ -553,9 +611,9 @@ ui_view_config:
                  customer_account_id, manager_user_id, start_date, end_date,
                  budget_amount, currency_id, description]
 
-  # 项目 360（只读）：销售订单按 sales_orders.project_id 过滤
+  # 项目 360（只读）：三条子对象均按 project_id 原生过滤
   #   （AssociationSection 取父键 = `<父对象类型>_id` = project_id，无需 customFetcher）
-  #   订单行 / 计划行 / 履约的聚合由 GET /api/v1/projects/<id>/overview 提供
+  #   履约的聚合仍由 GET /api/v1/projects/<id>/overview 提供（P2）
   child_sections:
     - child_object: sales_order
       title: 销售订单（360）
@@ -565,9 +623,25 @@ ui_view_config:
       enableAutoCrud: false
       readonly: true
       pageSize: 20
+    - child_object: sales_order_line
+      title: 订单行（360）
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false
+      readonly: true
+      pageSize: 20
+    - child_object: sales_order_schedule
+      title: 计划行（360）
+      display: tab
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false
+      readonly: true
+      pageSize: 20
 
 category_config:
-  # 双段式权限码，与 permissions 表实际行一致（v169 落库）
+  # 双段式权限码，与 permissions 表实际行一致（v172 落库）
   create_permission: project:project_create
   update_permission: project:project_update
   delete_permission: project:project_delete

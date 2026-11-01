@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 08:01:26.417400
+-- 生成时间: 2026-11-01 09:49:27.344122
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1515,6 +1515,31 @@ CREATE TABLE IF NOT EXISTS pricing_periods (
     updated_at DATETIME
 )
 
+-- 项目: 项目（商务层归集对象；挂载销售订单 / 订单行 / 计划行）
+CREATE TABLE IF NOT EXISTS projects (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_no VARCHAR(200) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    project_type_id INTEGER NOT NULL,
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    org_id INTEGER NOT NULL,
+    customer_account_id INTEGER,
+    manager_user_id INTEGER,
+    start_date DATETIME,
+    end_date DATETIME,
+    budget_amount REAL,
+    currency_id INTEGER,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (project_type_id) REFERENCES type_definitions(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (customer_account_id) REFERENCES customer_accounts(id),
+    FOREIGN KEY (manager_user_id) REFERENCES users(id)
+)
+
 -- 费率记录: 费率记录（业务别名：价目行 · 条件记录）——键组合下的费率值
 CREATE TABLE IF NOT EXISTS rate_records (
     created_by VARCHAR(200),
@@ -1692,6 +1717,7 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     order_no VARCHAR(200) NOT NULL,
     document_type_id INTEGER NOT NULL,
     order_date DATETIME NOT NULL,
+    project_id INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     customer_account_id INTEGER NOT NULL,
     bill_to_account_id INTEGER,
@@ -1758,6 +1784,7 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
     updated_by VARCHAR(200),
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL,
+    project_id INTEGER,
     line_no VARCHAR(200) NOT NULL,
     line_type_id INTEGER NOT NULL,
     item_id INTEGER,
@@ -1813,6 +1840,7 @@ CREATE TABLE IF NOT EXISTS sales_order_schedules (
     updated_by VARCHAR(200),
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL,
+    project_id INTEGER,
     line_id INTEGER NOT NULL,
     plant_location_id INTEGER,
     schedule_no INTEGER NOT NULL,
@@ -2880,6 +2908,15 @@ CREATE INDEX IF NOT EXISTS idx_pricing_determinations_name ON pricing_determinat
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_period_code ON pricing_periods(code)
 CREATE INDEX IF NOT EXISTS idx_pricing_periods_name ON pricing_periods(name)
 
+-- Indexes for 项目
+CREATE INDEX IF NOT EXISTS idx_projects_org_id ON projects(org_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_project_no ON projects(project_no)
+CREATE INDEX IF NOT EXISTS idx_project_type ON projects(project_type_id)
+CREATE INDEX IF NOT EXISTS idx_project_org_status ON projects(org_id, status)
+CREATE INDEX IF NOT EXISTS idx_project_customer ON projects(customer_account_id)
+CREATE INDEX IF NOT EXISTS idx_project_manager ON projects(manager_user_id)
+CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)
+
 -- Indexes for 费率记录
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_record_code ON rate_records(code)
 CREATE INDEX IF NOT EXISTS idx_rate_record_table ON rate_records(rate_table_id)
@@ -2945,6 +2982,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_order_sales_org_date ON sales_orders(sales_
 CREATE INDEX IF NOT EXISTS idx_sales_order_status ON sales_orders(status)
 CREATE INDEX IF NOT EXISTS idx_sales_order_document_type ON sales_orders(document_type_id)
 CREATE INDEX IF NOT EXISTS idx_sales_order_territory ON sales_orders(territory_id)
+CREATE INDEX IF NOT EXISTS idx_sales_order_project ON sales_orders(project_id)
 
 -- Indexes for 销售订单行
 CREATE INDEX IF NOT EXISTS idx_sales_order_lines_uom_id ON sales_order_lines(uom_id)
@@ -2956,12 +2994,14 @@ CREATE INDEX IF NOT EXISTS idx_sales_order_line_parent ON sales_order_lines(pare
 CREATE INDEX IF NOT EXISTS idx_sales_order_line_reference ON sales_order_lines(reference_line_id)
 CREATE INDEX IF NOT EXISTS idx_sales_order_line_configuration ON sales_order_lines(configuration_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_sales_order_line_component ON sales_order_lines(parent_line_id, component_no)
+CREATE INDEX IF NOT EXISTS idx_sales_order_line_project ON sales_order_lines(project_id)
 
 -- Indexes for 订单计划行
 CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_line_kind_no ON sales_order_schedules(line_id, schedule_kind, schedule_no)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_service_visit ON sales_order_schedules(line_id, service_visit_no) WHERE schedule_kind = 'service' AND service_visit_no IS NOT NULL
 CREATE INDEX IF NOT EXISTS idx_schedule_order ON sales_order_schedules(order_id)
 CREATE INDEX IF NOT EXISTS idx_schedule_line ON sales_order_schedules(line_id)
+CREATE INDEX IF NOT EXISTS idx_schedule_project ON sales_order_schedules(project_id)
 
 -- Indexes for 服务目录项
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_service_catalog_item_code ON service_catalog_items(code)

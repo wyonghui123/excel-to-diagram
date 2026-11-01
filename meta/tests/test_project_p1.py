@@ -109,6 +109,11 @@ class TestProjectDeclaration:
         assert field['max_length'] == 30
         assert field['semantics']['immutable'] is True
 
+    def test_type_is_immutable_after_create(self):
+        """类型锁定：对齐 SAP / Oracle —— 类型选定后不可改（选错只能重建）。"""
+        field = _field(_load_raw('project'), 'project_type_id')
+        assert field['semantics']['immutable'] is True
+
     def test_type_walks_type_definitions_not_enum_column(self):
         """D2: 项目类型走 type_definitions(scope_bo='project' + level='header')。"""
         field = _field(_load_raw('project'), 'project_type_id')
@@ -169,12 +174,16 @@ class TestProjectDeclaration:
         ]
         assert 'project_no' in form_fields and 'budget_amount' in form_fields
 
-        child = ui['child_sections'][0]
-        assert child['child_object'] == 'sales_order'
-        assert child['readonly'] is True
-        assert child['enableAutoCrud'] is False
-        assert child['useMetaList'] is True
-        assert child['pageSize'] == 20
+        # 360 三段均按 project_id 原生过滤，零前端组件（AC-03）
+        children = ui['child_sections']
+        assert [c['child_object'] for c in children] == [
+            'sales_order', 'sales_order_line', 'sales_order_schedule']
+        for child in children:
+            assert child['readonly'] is True
+            assert child['enableAutoCrud'] is False
+            assert child['useMetaList'] is True
+            assert child['display'] == 'tab'
+            assert child['pageSize'] == 20
 
     def test_permission_codes_match_migration(self):
         declared = _load_raw('project')['category_config']
@@ -184,6 +193,29 @@ class TestProjectDeclaration:
         assert declared['delete_permission'] in expected
         assert all(c.startswith('project:project_') for c in expected)
 
+    def test_audit_aspect_declared(self):
+        """对象原则 7.1：审计切面复用，created_by / updated_by 不再手写。"""
+        raw = _load_raw('project')
+        assert raw['aspects'] == ['audit_aspect']
+
+    def test_state_transition_rules_are_declarative(self):
+        """对象原则 7.3：状态流转由 rules 声明，服务层不硬编码状态判断。"""
+        rules = _load_raw('project')['rules']
+        assert {r['type'] for r in rules} == {'state_transition'}
+        assert {r['state_field'] for r in rules} == {'status'}
+        transitions = {
+            (r['id'], tuple(r['from_states']), r['to_state']) for r in rules
+        }
+        assert transitions == {
+            ('activate_project', ('draft',), 'active'),
+            ('deactivate_project', ('active',), 'inactive'),
+            ('close_project', ('active', 'inactive'), 'closed'),
+            ('cancel_project', ('draft', 'active'), 'cancelled'),
+        }
+        for rule in rules:
+            assert rule['triggers'] == ['before_update']
+            assert rule['ui_hints']['label']
+
     def test_generated_ddl_matches_migration_table(self):
         _reload_quietly()
         mo = registry.get('project')
@@ -192,6 +224,9 @@ class TestProjectDeclaration:
         assert 'projects' in sql
         assert 'project_no' in sql and 'budget_amount' in sql
         assert 'FOREIGN KEY (project_type_id) REFERENCES type_definitions(id)' in sql
+        # 审计列传来源与 v172 迁移对齐（YAML 与 DDL 不得双源漂移）
+        for column in ('created_by', 'updated_by', 'created_at', 'updated_at'):
+            assert column + ' ' in sql, column
         assert mo.table_name == PROJECT_TABLE
 
 
