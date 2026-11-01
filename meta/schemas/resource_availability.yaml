@@ -1,0 +1,386 @@
+# 资源可用性例外（Resource Availability）—— 统一资源模型 P2c / FR-005
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-005 产能与可用性 / §9.3 数据模型表
+#
+# 定位: 可用性基准来自 calendar（班次 + 例外日）；加班 / 请假 / 检修等
+#   对基准的"例外"由本对象承载，一行 = 一个资源 × 一个绝对时间区间 × 一种例外类型。
+#
+# 口径:
+#   ① 例外区间按绝对时间（datetime）声明，可跨天；与班次窗口求重叠分钟。
+#   ② 同一资源允许重叠例外（不建唯一键，由服务层判定）。
+#   ③ available 类型只记录，不改变产能；unavailable 扣减、overtime 加成。
+#   ④ 本对象是叶子表，不被其他对象引用，restrict_on 为空。
+
+id: resource_availability
+name: 资源可用性例外
+table_name: resource_availabilities
+description: 资源可用性例外（资源 + 绝对时间窗 + 例外类型 + 来源）
+display_name_field: availability_type
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源可用性例外
+  category: business_document_line
+  aliases:
+    - 资源可用性例外
+    - 可用性例外
+    - resource availability
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 例外所属的具体资源
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          is_active: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      fieldGroup: 归属
+      fieldGroupPosition: 10
+
+  - id: availability_type
+    name: 例外类型
+    type: string
+    db_column: availability_type
+    required: true
+    default: unavailable
+    description: 例外类型（可用 / 不可用 / 加班）
+    enum_values:
+      - value: available
+        label: 可用
+        color: success
+      - value: unavailable
+        label: 不可用
+        color: danger
+        is_initial: true
+      - value: overtime
+        label: 加班
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: availability_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 可用性例外类型
+      filterable: true
+      filter_type: enum
+      filter_label: 例外类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 例外
+      fieldGroupPosition: 20
+
+  - id: start_at
+    name: 开始时间
+    type: datetime
+    db_column: start_at
+    required: true
+    description: 例外区间开始时刻（绝对时间）
+    semantics:
+      meaning: 例外开始时刻
+    ui:
+      widget: datetime
+      fieldGroup: 时间窗
+      fieldGroupPosition: 30
+
+  - id: end_at
+    name: 结束时间
+    type: datetime
+    db_column: end_at
+    required: true
+    description: 例外区间结束时刻（绝对时间；可跨天）
+    semantics:
+      meaning: 例外结束时刻
+    ui:
+      widget: datetime
+      fieldGroup: 时间窗
+      fieldGroupPosition: 40
+
+  - id: reason
+    name: 原因说明
+    type: string
+    db_column: reason
+    nullable: true
+    max_length: 200
+    description: 例外原因（如请假事由 / 检修工单号）
+    semantics:
+      meaning: 例外原因说明
+    ui:
+      widget: input
+      fieldGroup: 例外
+      fieldGroupPosition: 50
+
+  - id: source
+    name: 数据来源
+    type: string
+    db_column: source
+    required: true
+    default: manual
+    description: 例外数据来源（手工 / 人事 / 检修 / 其他）
+    enum_values:
+      - value: manual
+        label: 手工
+        color: primary
+        is_initial: true
+      - value: hr
+        label: 人事
+        color: info
+      - value: maintenance
+        label: 检修
+        color: warning
+      - value: other
+        label: 其他
+        color: purple
+    value_help:
+      source:
+        type: enum
+        enum_type_id: availability_source
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 例外数据来源
+      filterable: true
+      filter_type: enum
+      filter_label: 数据来源
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 例外
+      fieldGroupPosition: 60
+
+  - id: org_id
+    name: 组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 例外归属组织（多组织隔离）；空表示全局
+    semantics:
+      meaning: 组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 200
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 70
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [resource_id]
+    name: idx_resource_availability_resource
+  - fields: [start_at]
+    name: idx_resource_availability_window
+
+relations:
+  - id: resource_availability_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（真外键）
+  - id: resource_availability_to_org
+    name: 组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 组织引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v180 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源可用性例外
+    columns:
+      - field: resource_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: availability_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: start_at
+        width: 160
+        sortable: true
+      - field: end_at
+        width: 160
+      - field: reason
+        width: 200
+      - field: source
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [resource_id]
+    actions:
+      - id: create
+        label: 新建例外
+        icon: plus
+        type: primary
+        permission: resource_availability:resource_availability_create
+    defaultSort:
+      field: start_at
+      order: asc
+  form:
+    title: 资源可用性例外
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [resource_id, org_id]
+      - title: 例外
+        columns:
+          - fields: [availability_type, source]
+          - fields: [reason]
+      - title: 时间窗
+        columns:
+          - fields: [start_at, end_at]
+  detail:
+    layout: tabs
+    title: 资源可用性例外 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [resource_id, availability_type, start_at, end_at, reason,
+                 source, org_id]
+
+category_config:
+  create_permission: resource_availability:resource_availability_create
+  update_permission: resource_availability:resource_availability_update
+  delete_permission: resource_availability:resource_availability_delete
+  owner_auto_permission: false

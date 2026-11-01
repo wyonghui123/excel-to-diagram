@@ -99,6 +99,12 @@ def register_all_bo_actions(registry=None):
         requisition_reject_handler,
     )
 
+    # M3 采购订单: 审批决策（spec-purchase-order-object-model §6.3）
+    from meta.services.document_approval_decision import (
+        purchase_order_approve_handler,
+        purchase_order_reject_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -695,6 +701,48 @@ def register_all_bo_actions(registry=None):
             requires_auth=True,
             idempotent=True,
         )
+
+    # ==================== 30-31: 采购订单审批（M3） ====================
+    # 权限码用双段式 `{bo}:{bo}_{action}`（与 v177 权限种子一致）；
+    # decision_effect 以 '*' 通配放行管理员，普通审批人须被授予对应权限。
+    registry.register(
+        'purchase_order.approve',
+        purchase_order_approve_handler,
+        description='采购订单审批通过（submitted → confirmed，approval_status=approved）',
+        object_type='purchase_order',
+        category='business',
+        permission_required='purchase_order:purchase_order_approve',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'purchase_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'comment': {'type': 'string'},
+            }
+        },
+        output_schema=_demand_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'purchase_order.reject',
+        purchase_order_reject_handler,
+        description='采购订单审批驳回（submitted → draft，approval_status=rejected）',
+        object_type='purchase_order',
+        category='business',
+        permission_required='purchase_order:purchase_order_reject',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'purchase_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'comment': {'type': 'string'},
+            }
+        },
+        output_schema=_demand_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")
 

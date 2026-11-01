@@ -1,0 +1,451 @@
+# 资源产能（Resource Capacity）—— 统一资源模型 P2b / TBD-4
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §NFR-003 / §9.3 数据模型表
+#
+# 定位: 多口径产能（人工工时 / 设备工时 / 工装位 / 载重 / 体积 / 场地容量），
+#   一行 = 一个资源（或资源组）× 一个产能口径 × 一个生效区间。
+#   与 capability（资质）分离：capacity 管数量约束，capability 只管资质。
+#
+# 口径:
+#   ① resource_id 与 resource_group_id 二者必填其一（服务层校验）。
+#   ② 同一资源同一口径同一时间窗唯一。
+#   ③ capacity_uom_id 限 TIME / COUNT 组（服务层校验）。
+
+id: resource_capacity
+name: 资源产能
+table_name: resource_capacities
+description: 资源/资源组的多口径产能（类别 + 单位 + 日产能 + 单元数 + 利用率 + 有效期）
+display_name_field: capacity_category
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源产能
+  category: core_entity
+  aliases:
+    - 资源产能
+    - 产能口径
+    - capacity
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    nullable: true
+    description: 产能归属的具体资源；与 resource_group_id 二者必填其一
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+        placeholder: "按组计量"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 10
+
+  - id: resource_group_id
+    name: 资源组
+    type: integer
+    db_column: resource_group_id
+    nullable: true
+    description: 产能归属的资源组；与 resource_id 二者必填其一
+    semantics:
+      meaning: 资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "按资源计量"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 20
+
+  - id: capacity_category
+    name: 产能口径
+    type: string
+    db_column: capacity_category
+    required: true
+    default: labor_hours
+    description: 产能口径（人工工时 / 设备工时 / 工装位 / 载重 / 体积 / 场地容量）
+    enum_values:
+      - value: labor_hours
+        label: 人工工时
+        color: primary
+        is_initial: true
+      - value: machine_hours
+        label: 设备工时
+        color: success
+      - value: tool_count
+        label: 工装位
+        color: warning
+      - value: vehicle_weight
+        label: 载重
+        color: info
+      - value: vehicle_volume
+        label: 体积
+        color: purple
+      - value: facility_capacity
+        label: 场地容量
+        color: cyan
+    value_help:
+      source:
+        type: enum
+        enum_type_id: capacity_category
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 产能口径
+      filterable: true
+      filter_type: enum
+      filter_label: 产能口径
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 产能
+      fieldGroupPosition: 30
+
+  - id: capacity_uom_id
+    name: 产能单位
+    type: integer
+    db_column: capacity_uom_id
+    nullable: true
+    description: 产能计量单位（引用 uom，限 TIME / COUNT 组）
+    semantics:
+      meaning: 产能口径单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 140
+          - field: name
+            label: 单位名称
+            width: 180
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 产能
+      fieldGroupPosition: 40
+
+  - id: capacity_per_day
+    name: 日产能
+    type: number
+    db_column: capacity_per_day
+    nullable: true
+    description: 单日产能（按 capacity_uom_id 计量）；空表示未定义日产能
+    semantics:
+      meaning: 日产能
+    ui:
+      widget: number
+      fieldGroup: 产能
+      fieldGroupPosition: 50
+
+  - id: capacity_units
+    name: 资源单元数
+    type: number
+    db_column: capacity_units
+    required: true
+    default: 1
+    description: 同类资源的可用单元数（默认 1）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 同类资源单元数
+    ui:
+      widget: number
+      fieldGroup: 产能
+      fieldGroupPosition: 60
+
+  - id: utilization_pct
+    name: 利用率（%）
+    type: number
+    db_column: utilization_pct
+    required: true
+    default: 100
+    description: 利用率（默认 100，可 >100 表示加班）
+    semantics:
+      meaning: 产能利用率百分比
+    ui:
+      widget: number
+      fieldGroup: 产能
+      fieldGroupPosition: 70
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 有效期起始日（含）；空表示立即有效
+    semantics:
+      meaning: 产能有效期起始日
+    ui:
+      widget: date
+      fieldGroup: 有效期
+      fieldGroupPosition: 80
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 有效期截止日（不含）；空表示长期有效
+    semantics:
+      meaning: 产能有效期截止日
+    ui:
+      widget: date
+      fieldGroup: 有效期
+      fieldGroupPosition: 90
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [resource_id, resource_group_id, capacity_category, valid_from]
+    unique: true
+    name: uq_resource_capacity
+  - fields: [resource_group_id]
+    name: idx_resource_capacity_group
+  - fields: [capacity_uom_id]
+    name: idx_resource_capacity_uom
+  - fields: [valid_from]
+    name: idx_resource_capacity_validity
+
+relations:
+  - id: resource_capacity_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（可空；真外键）
+  - id: resource_capacity_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键）
+  - id: resource_capacity_to_uom
+    name: 产能单位
+    type: reference
+    target: uom
+    source_field: capacity_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 产能单位引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源产能
+    columns:
+      - field: resource_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: resource_group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource_group
+        display_field: name
+      - field: capacity_category
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: capacity_uom_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: capacity_per_day
+        width: 110
+      - field: capacity_units
+        width: 110
+      - field: utilization_pct
+        width: 110
+      - field: valid_from
+        width: 120
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [capacity_category]
+    actions:
+      - id: create
+        label: 新建产能
+        icon: plus
+        type: primary
+        permission: resource_capacity:resource_capacity_create
+    defaultSort:
+      field: valid_from
+      order: desc
+  form:
+    title: 资源产能
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [resource_id, resource_group_id]
+      - title: 产能
+        columns:
+          - fields: [capacity_category, capacity_uom_id]
+          - fields: [capacity_per_day, capacity_units]
+          - fields: [utilization_pct]
+      - title: 有效期
+        columns:
+          - fields: [valid_from, valid_to]
+  detail:
+    layout: tabs
+    title: 资源产能 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [resource_id, resource_group_id, capacity_category, capacity_uom_id,
+                 capacity_per_day, capacity_units, utilization_pct, valid_from, valid_to]
+
+category_config:
+  create_permission: resource_capacity:resource_capacity_create
+  update_permission: resource_capacity:resource_capacity_update
+  delete_permission: resource_capacity:resource_capacity_delete
+  owner_auto_permission: false

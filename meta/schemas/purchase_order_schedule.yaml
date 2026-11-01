@@ -1,0 +1,473 @@
+# 采购订单到货计划行 (Purchase Order Schedule)
+# 依据: docs/specs/spec-purchase-order-object-model-2026-11-01.md §10
+#
+# 定位: purchase_order_lines 的附属计划层（相对订单是第三层），与销售侧
+#   sales_order_schedule（交货计划行）同构 —— SO 是发货承诺，PO 是到货承诺。
+#
+# 本波口径:
+#   ① 收货行（receipt_line）唯一挂载点 = 本对象（§11 契约）；收货单另立 spec，
+#      本波不建 receipt 对象、不写 DOC_FLOW 规则。
+#   ② schedule_kind 只有两种：delivery（到货）/ service（服务）；
+#      采购侧开票计划由发票 spec 处理，不在本对象承载。
+#   ③ 数量只有一个量 promised_qty（承诺量），单位 = 订单行 uom_id；
+#      累计到货量靠 received_qty 缓存列回写，不在此处建派生边。
+#   ④ 索引按行 + kind + 序号唯一；作废后仍占号，新增顺延 schedule_no。
+#
+# received_qty 口径修正（spec §10.2 原写「计算字段，不落库」）:
+#   当前没有收货对象，无法在读取时计算。实现为「nullable 只读缓存列」，
+#   由收货服务在过账 / 红冲时回写；M3 落地前恒为空（不回填 0，避免与
+#   「未收货」和「零收货」语义混淆）。表结构层面仍是列，不是虚拟字段。
+#
+# 守卫不变量（R-SCH-0 ~ R-SCH-4，由 purchase_order_guard_service 强制）:
+#   R-SCH-0  order_id 必须等于 line_id 所属订单；schedule_no 在同
+#            line_id + schedule_kind 内唯一
+#   R-SCH-1  promised_qty > 0
+#   R-SCH-2  同一 PO 行的计划行 promised_qty 合计不得超过行 qty
+#   R-SCH-3  收货累计量 > promised_qty 时拒绝（容差默认 0，
+#            未来由控制参数 receipt_over_tolerance_percent 放开）
+#   R-SCH-4  作废后不可重开
+
+id: purchase_order_schedule
+name: 到货计划行
+table_name: purchase_order_schedules
+description: 采购订单到货计划行（承诺到货日 / 承诺量，一行多批次）
+parent_object: purchase_order
+display_name_field: schedule_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: order_id
+
+deletion_policy:
+  # 计划行可删除，但已有 posted 收货时由守卫拦截（R-SCH-3 的删除侧对称）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - received_qty
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = purchase_order 的字段）
+  # line_id 不配 ui.relation，避免双父键歧义。
+  - id: order_id
+    name: 所属订单
+    type: integer
+    db_column: order_id
+    required: true
+    description: 所属采购订单（由 line_id 反查填充，一致性由 R-SCH-0 保证）
+    semantics:
+      meaning: 所属采购订单
+      display:
+        type: association
+        target_type: purchase_order
+        display_field: order_no
+    value_help:
+      source:
+        type: bo
+        target_bo: purchase_order
+        value_field: id
+        display_field: order_no
+        code_field: order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{order_no}"
+        columns:
+          - field: order_no
+            label: 订单编号
+            width: 180
+    ui:
+      widget: select
+      relation: purchase_order
+      multiple: false
+
+  - id: line_id
+    name: 订单行
+    type: integer
+    db_column: line_id
+    required: true
+    description: 所属订单行（真外键，restrict）
+    semantics:
+      meaning: 所属采购订单行
+      display:
+        type: association
+        target_type: purchase_order_line
+        display_field: line_no
+    value_help:
+      source:
+        type: bo
+        target_bo: purchase_order_line
+        value_field: id
+        display_field: line_no
+        code_field: line_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "行 {line_no}"
+        columns:
+          - field: line_no
+            label: 行号
+            width: 100
+    ui:
+      widget: select
+      multiple: false
+
+  - id: schedule_no
+    name: 序号
+    type: integer
+    db_column: schedule_no
+    required: true
+    description: 行内序号（按 kind 各自从 1 递增；作废后仍占号）
+    semantics:
+      meaning: 计划行序号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 序号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: schedule_kind
+    name: 计划类型
+    type: string
+    db_column: schedule_kind
+    required: true
+    default: delivery
+    max_length: 20
+    description: 计划类型（delivery 到货 / service 服务；采购侧开票计划不在本对象）
+    enum_values:
+      - value: delivery
+        label: 到货计划
+        color: primary
+        category: active
+        is_initial: true
+      - value: service
+        label: 服务计划
+        color: warning
+        category: active
+    semantics:
+      meaning: 计划行的业务类型
+      filterable: true
+      filter_type: enum
+      filter_label: 计划类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: deliver_to_location_id
+    name: 收货地点
+    type: integer
+    db_column: deliver_to_location_id
+    nullable: true
+    description: 收货地点（空 = 取行 / 头；delivery 建议必填）
+    semantics:
+      meaning: 计划行收货地点
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          location_type: site
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: promised_date
+    name: 承诺到货日
+    type: date
+    db_column: promised_date
+    required: true
+    description: 供应商承诺到货日；可与需求日不同
+    semantics:
+      meaning: 对采购方的到货承诺日期
+      filterable: true
+      filter_type: date
+      filter_label: 承诺到货日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: promised_qty
+    name: 承诺数量
+    type: number
+    db_column: promised_qty
+    required: true
+    description: 承诺量（单位 = 订单行 uom_id）；必须大于 0
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 4
+    semantics:
+      meaning: 承诺到货数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: status
+    name: 计划状态
+    type: string
+    db_column: status
+    required: true
+    default: planned
+    max_length: 20
+    description: 计划状态（内排 / 已确认 / 已到货 / 已作废）
+    enum_values:
+      - value: planned
+        label: 内排
+        color: info
+        category: active
+        is_initial: true
+      - value: confirmed
+        label: 已确认
+        color: primary
+        category: active
+      - value: completed
+        label: 已到货
+        color: success
+        category: inactive
+      - value: cancelled
+        label: 已作废
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 计划行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 计划状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 只读缓存列：收货服务过账 / 红冲时回写（见文件头口径修正）。
+  # 不声明 computed: 平台会把它当虚拟字段（db_column: null），无法回写。
+  - id: received_qty
+    name: 已收数量
+    type: number
+    db_column: received_qty
+    nullable: true
+    description: 累计已收数量（只读缓存，由收货服务回写；M3 前恒为空）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 4
+    semantics:
+      meaning: 累计到货数量（缓存）
+      readonly: true
+      filterable: false
+    ui:
+      widget: number
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: confirm_po_schedule
+    name: 确认到货计划
+    type: state_transition
+    state_field: status
+    from_states: [planned]
+    to_state: confirmed
+    triggers: [before_update]
+    ui_hints:
+      label: 确认
+      icon: check_circle
+      confirm_message: "确认后供应商承诺生效，确定要确认吗？"
+
+  - id: complete_po_schedule
+    name: 完成到货
+    type: state_transition
+    state_field: status
+    from_states: [confirmed]
+    to_state: completed
+    triggers: [before_update]
+    ui_hints:
+      label: 完成到货
+      icon: inbox
+      confirm_message: "标记为已到货后不再接收收货，确定吗？"
+
+  - id: cancel_po_schedule
+    name: 作废到货计划
+    type: state_transition
+    state_field: status
+    from_states: [planned, confirmed]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 作废
+      icon: cancel
+      confirm_message: "作废后不可重开（已有过账收货时禁止作废），确定吗？"
+
+indexes:
+  # 同一订单行内，同一 kind 的序号唯一
+  - fields: [line_id, schedule_kind, schedule_no]
+    unique: true
+    name: uidx_po_schedule_line_kind_no
+  - fields: [order_id]
+    name: idx_po_schedule_order
+  - fields: [line_id]
+    name: idx_po_schedule_line
+  - fields: [promised_date]
+    name: idx_po_schedule_promised_date
+  - fields: [deliver_to_location_id]
+    name: idx_po_schedule_location
+
+relations:
+  - id: purchase_order_schedule_to_order
+    name: 所属订单
+    type: reference
+    target: purchase_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属采购订单引用（真外键）
+  - id: purchase_order_schedule_to_line
+    name: 订单行
+    type: reference
+    target: purchase_order_line
+    source_field: line_id
+    target_field: id
+    cardinality: N:1
+    description: 所属订单行引用（真外键）
+  - id: purchase_order_schedule_to_location
+    name: 收货地点
+    type: reference
+    target: location
+    source_field: deliver_to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 收货地点引用（可空）
+
+ui_view_config:
+  # 作为采购订单抬头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 到货计划
+    columns:
+      - field: schedule_no
+        width: 80
+        sortable: true
+      - field: line_id
+        width: 100
+      - field: schedule_kind
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: deliver_to_location_id
+        width: 160
+      - field: promised_date
+        width: 130
+        sortable: true
+      - field: promised_qty
+        width: 110
+      - field: received_qty
+        width: 110
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: schedule_no
+      order: asc
+  form:
+    title: 到货计划信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_id, schedule_kind]
+          - fields: [schedule_no, status]
+      - title: 到货承诺
+        columns:
+          - fields: [promised_date, promised_qty, received_qty]
+          - fields: [deliver_to_location_id]

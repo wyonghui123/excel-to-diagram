@@ -1,0 +1,313 @@
+# 资源组成员（Resource Group Member）—— 统一资源模型 P2a / FR-002
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-002 / §9.3 数据模型表
+#
+# 定位: resource_group 的附属明细（child_sections），不单独成菜单。
+#   单组成员关系：(group_id, resource_id) 唯一。
+#   允许同一资源跨组共享，按 allocation_pct 拆分（和超 100 告警不阻断）。
+#
+# 约束:
+#   ① 0 < allocation_pct ≤ 100；quantity ≥ 1（默认 1）。
+#   ② (group_id, resource_id) 唯一，防重复加入同一组。
+
+id: resource_group_member
+name: 资源组成员
+table_name: resource_group_members
+description: 资源组与资源的成员关系（可设角色、优先级、分配比例与数量）
+parent_object: resource_group
+display_name_field: resource_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源组成员关系
+  category: core_entity
+  aliases:
+    - 资源组成员
+    - 组成员
+    - resource group member
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: group_id
+    name: 资源组
+    type: integer
+    db_column: group_id
+    required: true
+    description: 所属资源组（父字段）
+    semantics:
+      meaning: 所属资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      hidden_in_form: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 成员资源
+    semantics:
+      meaning: 成员资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+
+  - id: role
+    name: 组内角色
+    type: string
+    db_column: role
+    nullable: true
+    max_length: 64
+    description: 组内角色（如 machine / labor / tool / vehicle）
+    semantics:
+      meaning: 成员在组中的角色
+      data_category: text
+    ui:
+      widget: input
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    nullable: true
+    default: 0
+    description: 候选优先级（数值大者优先）
+    constraints:
+      - type: numeric_range
+        decimal_places: 0
+    semantics:
+      meaning: 成员优先级
+      filterable: true
+      filter_type: number
+      filter_label: 优先级
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: allocation_pct
+    name: 分配比例（%）
+    type: number
+    db_column: allocation_pct
+    required: true
+    default: 100
+    description: 分配到本组的比例（0 < x ≤ 100）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lte: 100
+    semantics:
+      meaning: 分配比例百分比
+    ui:
+      widget: number
+
+  - id: quantity
+    name: 资源数量
+    type: number
+    db_column: quantity
+    required: true
+    default: 1
+    description: 同组内同型资源计数（默认 1）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 计入产能的资源数量
+    ui:
+      widget: number
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 生效起始日（含）；空表示立即生效
+    semantics:
+      meaning: 成员关系生效起始日
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 成员关系失效日
+    ui:
+      widget: date
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [group_id, resource_id]
+    unique: true
+    name: uq_resource_group_member
+  - fields: [resource_id]
+    name: idx_resource_group_member_resource
+  - fields: [group_id]
+    name: idx_resource_group_member_group
+
+relations:
+  - id: resource_group_member_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: group_id
+    target_field: id
+    cardinality: N:1
+    description: 所属资源组引用（真外键）
+  - id: resource_group_member_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 成员资源引用（真外键）
+
+ui_view_config:
+  # 作为资源组详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源组成员
+    columns:
+      - field: resource_id
+        width: 220
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: role
+        width: 120
+      - field: allocation_pct
+        width: 120
+      - field: quantity
+        width: 100
+      - field: priority
+        width: 100
+      - field: valid_from
+        width: 120
+      - field: valid_to
+        width: 120
+    defaultSort:
+      field: priority
+      order: desc
+  form:
+    title: 资源组成员
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [resource_id, role]
+          - fields: [allocation_pct, quantity, priority]
+      - title: 有效期
+        columns:
+          - fields: [valid_from, valid_to]

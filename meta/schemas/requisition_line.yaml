@@ -309,6 +309,24 @@ fields:
       multiple: false
       clearable: true
 
+  # M3 前置：成本中心在需求行落地，否则转采购订单时分配行无处继承（spec §9.2.1）。
+  # 平台暂无 cost_center 主数据（resource.yaml TBD-8），暂为纯整数引用。
+  - id: cost_center_id
+    name: 成本中心
+    type: integer
+    db_column: cost_center_id
+    nullable: true
+    description: 成本中心（需求侧记账归属；转单后由 demand_allocation 继承）
+    semantics:
+      meaning: 申请行成本中心
+      display:
+        type: association
+        target_type: cost_center
+        display_field: name
+        placeholder: "未指定"
+    ui:
+      widget: number
+
   # A4：人工指定承接方。sourcing 求值时不直接覆盖本列。
   - id: requested_source_org_id
     name: 指定承接组织
@@ -435,6 +453,8 @@ indexes:
     name: idx_requisition_line_requested_source
   - fields: [resolved_source_org_id]
     name: idx_requisition_line_resolved_source
+  - fields: [cost_center_id]
+    name: idx_requisition_line_cost_center
 
 relations:
   - id: requisition_line_to_requisition
@@ -563,6 +583,7 @@ ui_view_config:
         columns:
           - fields: [qty, uom_id]
           - fields: [need_date, deliver_to_location_id]
+          - fields: [cost_center_id]
       - title: 承接方
         columns:
           - fields: [requested_source_org_id, resolved_source_org_id]
