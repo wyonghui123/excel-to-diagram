@@ -7,7 +7,8 @@ before_action 修改的入参由随后的持久化链路消费，状态机规则
 
 受管范围:
   service_request / requisition —— crud_create 补单号；crud_update 且 status
-    目标为 submitted 时补号 + 免审批直落
+    目标为 submitted 时补号 + 免审批直落；需审批时在 after_action 落一条
+    `tasks(type=approval)`（S7 / S-D5，决策动作见 demand_entry_decision）
   service_request_line          —— crud_create / crud_update 的行级必填
 其余对象与动作零开销短路。
 
@@ -18,6 +19,8 @@ before_action 修改的入参由随后的持久化链路消费，状态机规则
     均为事务内取号，极端并发由数据库唯一索引兜底；
   · 免审批：目录项 requires_approval=false 且 approval_policy 为空 → 直接落 approved；
     requisition 在 M1 无审批策略载体 → 免审批；
+  · 需审批：单据保持 submitted，after_action 建审批待办（单据落库后才建，
+    避免持久化失败留下孤儿任务）；
   · 取消不回滚下游：本拦截器不处理 cancel，交由状态机规则只改本条状态。
 """
 
@@ -42,6 +45,7 @@ HEADER_OBJECTS = (SERVICE_REQUEST_OBJECT, REQUISITION_OBJECT)
 _WRITE_ACTIONS = ('crud_create', 'crud_update')
 _STATUS_SUBMITTED = 'submitted'
 _STATUS_DRAFT = 'draft'
+_APPROVAL_FLAG = 'demand_entry_approval'
 
 
 def _blank(value) -> bool:
@@ -78,8 +82,21 @@ class DemandEntryGuardInterceptor(Interceptor):
             self._raise_validation(error)
 
     def after_action(self, context: 'ActionContext') -> None:
-        """免审批在 before_action 改写 status 完成，无需后置动作。"""
-        return
+        """需审批的提交：单据已落库，补建审批待办。"""
+        extra = getattr(context, 'extra', None) or {}
+        info = extra.pop(_APPROVAL_FLAG, None)
+        if not info:
+            return
+        result = getattr(context, 'result', None)
+        if result is not None and not getattr(result, 'success', True):
+            return
+        actor = str(getattr(context, 'user_id', '') or
+                    getattr(context, 'user_name', '') or '')
+        try:
+            DemandEntryService(context.data_source).create_approval_task(
+                info['object_type'], info['record_id'], actor=actor)
+        except Exception as error:  # noqa: BLE001 - 建任务失败不阻断已完成的提交
+            logger.warning('[DemandEntry] 审批任务创建失败: %s', error)
 
     # ---------------- 创建 ----------------
 
@@ -118,6 +135,14 @@ class DemandEntryGuardInterceptor(Interceptor):
             payload['status'] = 'approved'
             logger.info('[DemandEntry] %s id=%s 审批策略为空，提交即免审批',
                         object_type, payload.get('id'))
+            return
+
+        extra = getattr(context, 'extra', None)
+        if extra is not None:
+            extra[_APPROVAL_FLAG] = {
+                'object_type': object_type,
+                'record_id': payload.get('id'),
+            }
 
     # ---------------- 错误转换 ----------------
 

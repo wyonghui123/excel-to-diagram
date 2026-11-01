@@ -11,6 +11,7 @@
   · 服务 / 拦截器用内存 SQLite 真 SQL（取号与免审批都依赖真查询）
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -31,6 +32,12 @@ from meta.core.interceptors.document_type_guard_interceptor import (
     DocumentTypeGuardInterceptor,
 )
 from meta.services.demand_entry_service import DemandEntryService
+from meta.services import demand_entry_decision
+from meta.services.demand_entry_decision import (
+    requisition_approve_handler,
+    service_request_approve_handler,
+    service_request_reject_handler,
+)
 
 _SCHEMA_DIR = Path(__file__).resolve().parents[1] / 'schemas'
 
@@ -46,6 +53,7 @@ CREATE TABLE service_catalog_items (
 CREATE TABLE service_requests (
     id INTEGER PRIMARY KEY,
     request_no TEXT UNIQUE,
+    document_type_id INTEGER,
     title TEXT,
     status TEXT,
     requester_org_id INTEGER,
@@ -79,6 +87,57 @@ CREATE TABLE type_definitions (
 );
 INSERT INTO type_definitions (id, code, name, scope_bo, level, status)
 VALUES (1, 'STD', '标准采购申请', 'requisition', 'header', 'active');
+CREATE TABLE items (id INTEGER PRIMARY KEY, item_group_id INTEGER);
+CREATE TABLE requisition_lines (
+    id INTEGER PRIMARY KEY,
+    requisition_id INTEGER,
+    line_no INTEGER,
+    line_type TEXT,
+    item_id INTEGER,
+    qty REAL NOT NULL,
+    status TEXT
+);
+CREATE TABLE control_parameter_defs (
+    id INTEGER PRIMARY KEY,
+    code TEXT UNIQUE,
+    name TEXT,
+    domain TEXT,
+    value_type TEXT,
+    target_bo TEXT,
+    default_value TEXT,
+    description TEXT,
+    status TEXT
+);
+CREATE TABLE control_parameter_values (
+    id INTEGER PRIMARY KEY,
+    control_parameter_id INTEGER,
+    org_id INTEGER,
+    document_type_id INTEGER,
+    line_type_id INTEGER,
+    item_group_id INTEGER,
+    specificity_rank INTEGER,
+    value TEXT,
+    status TEXT,
+    description TEXT
+);
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority TEXT,
+    app_id TEXT,
+    executor_type TEXT NOT NULL,
+    assign_policy TEXT,
+    executor_candidates TEXT,
+    executor_config TEXT,
+    inputs TEXT,
+    doc_ref TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    attempt INTEGER
+);
 """
 
 
@@ -414,12 +473,28 @@ def real_framework(tmp_path):
     connection.executescript(
         'CREATE TABLE IF NOT EXISTS orgs (id INTEGER PRIMARY KEY);'
         'CREATE TABLE IF NOT EXISTS party_internal (id INTEGER PRIMARY KEY);'
-        'CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY);'
+        'CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, item_group_id INTEGER);'
         'CREATE TABLE IF NOT EXISTS uoms (id INTEGER PRIMARY KEY);'
         'CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY);'
         'CREATE TABLE IF NOT EXISTS number_sequences (id INTEGER PRIMARY KEY);'
         'INSERT INTO orgs (id) VALUES (1),(2);'
         'INSERT INTO items (id) VALUES (1);'
+        # 审批待办表（M1 提交需审批时写入；最小列集够插入与断言）
+        'CREATE TABLE tasks ('
+        ' id TEXT PRIMARY KEY, code TEXT UNIQUE, title TEXT NOT NULL,'
+        ' type TEXT NOT NULL, status TEXT NOT NULL, priority TEXT, app_id TEXT,'
+        ' executor_type TEXT NOT NULL, assign_policy TEXT,'
+        ' executor_candidates TEXT, executor_config TEXT, inputs TEXT,'
+        ' doc_ref TEXT, created_by TEXT, created_at TEXT, attempt INTEGER);'
+        # 控制参数两表（M1 审批策略载体；未配置时服务回退固有口径）
+        'CREATE TABLE IF NOT EXISTS control_parameter_defs ('
+        ' id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT, domain TEXT,'
+        ' value_type TEXT, target_bo TEXT, default_value TEXT,'
+        ' description TEXT, status TEXT);'
+        'CREATE TABLE IF NOT EXISTS control_parameter_values ('
+        ' id INTEGER PRIMARY KEY, control_parameter_id INTEGER, org_id INTEGER,'
+        ' document_type_id INTEGER, line_type_id INTEGER, item_group_id INTEGER,'
+        ' specificity_rank INTEGER, value TEXT, status TEXT, description TEXT);'
     )
     generator = SchemaGenerator('sqlite')
     # 单据类型父表（requisition.document_type_id 真外键），并种一条默认类型
@@ -515,6 +590,16 @@ def test_real_chain_submit_with_policy_stays_submitted(real_framework):
     assert final['status'] == 'submitted'
     assert (final['request_no'] or '').startswith('SR-')
 
+    task_rows = data_source.query(
+        'SELECT * FROM tasks WHERE doc_ref = ?', [str(request_row['id'])])
+    assert len(task_rows) == 1, '需审批的提交应落一条审批待办'
+    assert task_rows[0]['type'] == 'approval'
+    config = json.loads(task_rows[0]['executor_config'])
+    assert config['decision_actions'] == {
+        'approve': 'service_request.approve',
+        'reject': 'service_request.reject',
+    }
+
 
 def test_real_chain_requisition_submit_auto_approves(real_framework):
     framework, data_source = real_framework
@@ -547,3 +632,263 @@ def test_real_chain_service_line_without_catalog_rejected(real_framework):
         'request_id': request_row['id'], 'line_no': '10', 'line_type': 'service'})
     assert rejected.success is False
     assert '目录项' in rejected.message
+
+
+# ---------------- 审批任务接线（S7 / S-D5） ----------------
+
+
+def _seed_pending_request(conn, request_id=11, requires_approval=1):
+    conn.execute(
+        "INSERT INTO service_catalog_items (id, code, status, requires_approval, approval_policy) "
+        "VALUES (1, 'C1', 'active', ?, NULL)", (requires_approval,))
+    conn.execute(
+        "INSERT INTO service_request_lines (id, request_id, line_no, line_type, catalog_item_id, status) "
+        "VALUES (1, ?, 10, 'service', 1, 'open')", (request_id,))
+    conn.execute(
+        "INSERT INTO service_requests (id, title, status, requester_org_id, provider_org_id) "
+        "VALUES (?, '搬工位', 'draft', 1, 2)", (request_id,))
+
+
+def _submit(ds, object_type, record_id):
+    interceptor = DemandEntryGuardInterceptor()
+    ctx = _ctx(ds, object_type, 'crud_update',
+               {'id': record_id, 'status': 'submitted'},
+               original={'id': record_id, 'status': 'draft'})
+    interceptor.before_action(ctx)
+    ctx.result = SimpleNamespace(success=True)
+    interceptor.after_action(ctx)
+    return ctx
+
+
+def test_requires_approval_submit_creates_approval_task(conn, ds):
+    _seed_pending_request(conn)
+    ctx = _submit(ds, 'service_request', 11)
+
+    assert ctx.params['status'] == 'submitted'
+    rows = ds.query('SELECT * FROM tasks')
+    assert len(rows) == 1
+    task = rows[0]
+    assert task['type'] == 'approval'
+    assert task['status'] == 'waiting_approval'
+    assert task['doc_ref'] == '11'
+    config = json.loads(task['executor_config'])
+    assert config['decision_actions'] == {
+        'approve': 'service_request.approve',
+        'reject': 'service_request.reject',
+    }
+    assert json.loads(task['inputs'])['service_request_id'] == 11
+
+
+def test_exempt_submit_creates_no_task(conn, ds):
+    _seed_pending_request(conn, requires_approval=0)
+    ctx = _submit(ds, 'service_request', 11)
+
+    assert ctx.params['status'] == 'approved'
+    assert ds.query('SELECT * FROM tasks') == []
+
+
+def test_requisition_submit_creates_no_task(conn, ds):
+    conn.execute(
+        "INSERT INTO requisitions (id, status, requester_org_id, deliver_to_org_id) "
+        "VALUES (20, 'draft', 1, 2)")
+    ctx = _submit(ds, 'requisition', 20)
+
+    assert ctx.params['status'] == 'approved'
+    assert ds.query('SELECT * FROM tasks') == []
+
+
+def test_create_approval_task_is_idempotent(conn, ds):
+    service = DemandEntryService(ds)
+    first = service.create_approval_task('service_request', 11)
+    second = service.create_approval_task('service_request', 11)
+
+    assert first
+    assert second is None
+    assert len(ds.query('SELECT * FROM tasks')) == 1
+
+
+def test_approve_handler_returns_method_receipt(conn, ds, monkeypatch):
+    conn.execute(
+        "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
+        "VALUES (12, 'submitted', 1, 2)")
+    calls = []
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, action_id, record_id: (
+            calls.append((object_type, action_id, record_id)) or
+            SimpleNamespace(success=True)))
+
+    result = service_request_approve_handler({'id': 12}, {})
+
+    assert result['success'] is True
+    assert result['data']['new_status'] == 'approved'
+    assert calls == [('service_request', 'approve_service_request', 12)]
+
+
+def test_reject_handler_returns_method_receipt(conn, ds, monkeypatch):
+    conn.execute(
+        "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
+        "VALUES (13, 'submitted', 1, 2)")
+    calls = []
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, action_id, record_id: (
+            calls.append((object_type, action_id, record_id)) or
+            SimpleNamespace(success=True)))
+
+    result = service_request_reject_handler({'id': 13}, {})
+
+    assert result['success'] is True
+    assert result['data']['new_status'] == 'rejected'
+    assert calls == [('service_request', 'reject_service_request', 13)]
+
+
+def test_requisition_approve_handler_returns_receipt(conn, ds, monkeypatch):
+    conn.execute(
+        "INSERT INTO requisitions (id, status, requester_org_id, deliver_to_org_id) "
+        "VALUES (21, 'submitted', 1, 2)")
+    calls = []
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, action_id, record_id: (
+            calls.append((object_type, action_id, record_id)) or
+            SimpleNamespace(success=True)))
+
+    result = requisition_approve_handler({'requisition_id': 21}, {})
+
+    assert result['success'] is True
+    assert result['data']['new_status'] == 'approved'
+    assert calls == [('requisition', 'approve_requisition', 21)]
+
+
+def test_handler_rejects_non_submitted_status(conn, ds, monkeypatch):
+    conn.execute(
+        "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
+        "VALUES (14, 'cancelled', 1, 2)")
+    calls = []
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, action_id, record_id: (
+            calls.append((object_type, action_id, record_id)) or
+            SimpleNamespace(success=True)))
+
+    result = service_request_approve_handler({'id': 14}, {})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVALID_STATUS'
+    assert calls == []
+
+
+def test_handler_is_noop_when_already_target(conn, ds, monkeypatch):
+    conn.execute(
+        "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
+        "VALUES (15, 'approved', 1, 2)")
+    calls = []
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, action_id, record_id: (
+            calls.append((object_type, action_id, record_id)) or
+            SimpleNamespace(success=True)))
+
+    result = service_request_approve_handler({'id': 15}, {})
+
+    assert result['success'] is True
+    assert result['data']['new_status'] == 'approved'
+    assert calls == []
+
+
+# ---------------- 控制参数（审批策略载体） ----------------
+
+
+def _seed_param(conn, code, value_type):
+    conn.execute(
+        "INSERT INTO control_parameter_defs (code, name, domain, value_type, status) "
+        "VALUES (?, ?, 'demand', ?, 'active')", [code, code, value_type])
+    return conn.execute(
+        'SELECT id FROM control_parameter_defs WHERE code = ?', [code]).fetchone()[0]
+
+
+def _seed_param_value(conn, param_id, value, **dims):
+    columns = ['control_parameter_id', 'specificity_rank', 'value', 'status']
+    values = [param_id, 100, value, 'active']
+    for key, dim in dims.items():
+        columns.append(key)
+        values.append(dim)
+    conn.execute(
+        'INSERT INTO control_parameter_values ({0}) VALUES ({1})'.format(
+            ', '.join(columns), ', '.join(['?'] * len(columns))), values)
+
+
+def test_requisition_control_param_requires_approval(conn, ds):
+    """单据类型命中 demand_approval_required=true → 采购申请不自动批准。"""
+    required_id = _seed_param(conn, 'demand_approval_required', 'bool')
+    _seed_param_value(conn, required_id, 'true', document_type_id=1)
+    _seed_param(conn, 'demand_approval_policy', 'string')
+    conn.execute(
+        "INSERT INTO requisitions (id, requisition_no, document_type_id, status, "
+        "requester_org_id, deliver_to_org_id) VALUES (31, 'RQ-1', 1, 'draft', 1, 2)")
+    conn.execute(
+        "INSERT INTO requisition_lines (id, requisition_id, line_no, line_type, "
+        "item_id, qty, status) VALUES (1, 31, 1, 'goods', 101, 2, 'open')")
+
+    assert DemandEntryService(ds).is_approval_exempt('requisition', 31) is False
+
+
+def test_requisition_without_param_value_is_exempt(conn, ds):
+    """参数未命中 → 回退采购申请固有口径：免审批。"""
+    _seed_param(conn, 'demand_approval_required', 'bool')
+    _seed_param(conn, 'demand_approval_policy', 'string')
+    conn.execute(
+        "INSERT INTO requisitions (id, requisition_no, document_type_id, status, "
+        "requester_org_id, deliver_to_org_id) VALUES (32, 'RQ-2', 2, 'draft', 1, 2)")
+
+    assert DemandEntryService(ds).is_approval_exempt('requisition', 32) is True
+
+
+def test_service_request_policy_param_requires_approval(conn, ds):
+    """策略参数非空 → 需审批（不依赖目录项）。"""
+    _seed_param(conn, 'demand_approval_required', 'bool')
+    policy_id = _seed_param(conn, 'demand_approval_policy', 'string')
+    _seed_param_value(conn, policy_id, '{"approver": "org_manager"}',
+                      document_type_id=2)
+    conn.execute(
+        "INSERT INTO service_requests (id, title, document_type_id, status, "
+        "requester_org_id, provider_org_id) VALUES (41, '搬工位', 2, 'draft', 1, 2)")
+
+    assert DemandEntryService(ds).is_approval_exempt('service_request', 41) is False
+
+
+def test_control_param_absent_falls_back_to_catalog(conn, ds):
+    """参数表未配置 → 仍按目录项 requires_approval 判定（零回归）。"""
+    conn.execute(
+        "INSERT INTO service_catalog_items (id, code, status, requires_approval, approval_policy) "
+        "VALUES (2, 'C2', 'active', 1, NULL)")
+    conn.execute(
+        "INSERT INTO service_request_lines (id, request_id, line_no, line_type, catalog_item_id, status) "
+        "VALUES (2, 42, 1, 'service', 2, 'open')")
+    conn.execute(
+        "INSERT INTO service_requests (id, title, status, requester_org_id, provider_org_id) "
+        "VALUES (42, '保养', 'draft', 1, 2)")
+
+    assert DemandEntryService(ds).is_approval_exempt('service_request', 42) is False
+
+
+def test_item_group_dimension_triggers_approval(conn, ds):
+    """物料组维度命中 → 行级需审批。"""
+    required_id = _seed_param(conn, 'demand_approval_required', 'bool')
+    _seed_param_value(conn, required_id, 'true', item_group_id=5)
+    _seed_param(conn, 'demand_approval_policy', 'string')
+    conn.execute('INSERT INTO items (id, item_group_id) VALUES (101, 5)')
+    conn.execute(
+        "INSERT INTO service_requests (id, title, status, requester_org_id, provider_org_id) "
+        "VALUES (43, '买备件', 'draft', 1, 2)")
+    conn.execute(
+        "INSERT INTO service_request_lines (id, request_id, line_no, line_type, item_id, qty, status) "
+        "VALUES (3, 43, 1, 'goods', 101, 1, 'open')")
+
+    assert DemandEntryService(ds).is_approval_exempt('service_request', 43) is False
