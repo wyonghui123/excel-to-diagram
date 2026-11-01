@@ -452,14 +452,16 @@ relations:
     target_field: id
     cardinality: N:1
     description: 送达地点引用（可空）
+  # FK 指向真表 parties（party_internal 是视图，SQLite 不允许 FK 指向视图）；
+  # 物理列存 parties.id，展示 / 下拉面仍走 party_internal 视图
   - id: requisition_to_requested_by_party
     name: 申请人
     type: reference
-    target: party_internal
+    target: party
     source_field: requested_by_party_id
     target_field: id
     cardinality: N:1
-    description: 申请人引用（可空）
+    description: 申请人引用（可空；FK 指向真表 parties，展示走 party_internal 视图）
 
 # 状态机:
 #   draft → submitted → approved → closed

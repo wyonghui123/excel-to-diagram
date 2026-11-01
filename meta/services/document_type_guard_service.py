@@ -27,14 +27,31 @@ STATUS_DRAFT = 'draft'
 #: 引用类型字典的列名（用于删除保护扫描）
 _TYPE_REFERENCE_FIELDS = (DOCUMENT_TYPE_FIELD, LINE_TYPE_FIELD, DEFAULT_TYPE_FIELD)
 
+#: 业务单据头的语义类别；单据类型维度表（控制参数取值 / 行类型分配）不属此类
+BUSINESS_DOCUMENT_CATEGORY = 'business_document'
+
+#: 单据类型切面名（声明即视为业务单据头）
+DOCUMENT_TYPE_ASPECT = 'document_type_aspect'
+
 
 def _blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and value.strip() == '')
 
 
 def object_declares_document_type(meta_object: Any) -> bool:
-    """对象是否声明了单据类型字段（切面或本地字段均可）。"""
+    """对象是否声明了**自身**的单据类型（切面或本地字段均可）。
+
+    `document_type_id` 同时出现在「把单据类型当维度」的配置表
+    （control_parameter_value / line_type_assignment）里，那类对象不是业务单据头，
+    其类型值属于别的单据域，不能按本对象归属域校验
+    ⇒ 仅当对象声明 `document_type_aspect` 或语义类别为 business_document 才纳入守卫。
+    """
     if meta_object is None:
+        return False
+    aspects = getattr(meta_object, 'aspects', None) or []
+    semantics = getattr(meta_object, 'semantics', None)
+    is_business_document = str(getattr(semantics, 'category', '') or '') == BUSINESS_DOCUMENT_CATEGORY
+    if DOCUMENT_TYPE_ASPECT not in aspects and not is_business_document:
         return False
     for field in getattr(meta_object, 'fields', []) or []:
         if (getattr(field, 'db_column', None) or getattr(field, 'id', None)) == DOCUMENT_TYPE_FIELD:

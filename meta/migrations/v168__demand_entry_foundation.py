@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS service_requests (
     updated_at         DATETIME,
     FOREIGN KEY (requester_org_id) REFERENCES orgs(id),
     FOREIGN KEY (provider_org_id) REFERENCES orgs(id),
-    FOREIGN KEY (requester_party_id) REFERENCES party_internal(id)
+    -- party_internal 是视图，SQLite 不允许 FK 指向视图；物理列存 parties.id
+    FOREIGN KEY (requester_party_id) REFERENCES parties(id)
 )
 """
 
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS requisitions (
     FOREIGN KEY (requester_org_id) REFERENCES orgs(id),
     FOREIGN KEY (deliver_to_org_id) REFERENCES orgs(id),
     FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id),
-    FOREIGN KEY (requested_by_party_id) REFERENCES party_internal(id)
+    -- party_internal 是视图，SQLite 不允许 FK 指向视图；物理列存 parties.id
+    FOREIGN KEY (requested_by_party_id) REFERENCES parties(id)
 )
 """
 

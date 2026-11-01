@@ -412,14 +412,16 @@ relations:
     target_field: id
     cardinality: N:1
     description: 承接方组织引用（真外键）
+  # FK 指向真表 parties（party_internal 是视图，SQLite 不允许 FK 指向视图）；
+  # 物理列存 parties.id，展示 / 下拉面仍走 party_internal 视图
   - id: service_request_to_requester_party
     name: 请求人
     type: reference
-    target: party_internal
+    target: party
     source_field: requester_party_id
     target_field: id
     cardinality: N:1
-    description: 请求人引用（可空）
+    description: 请求人引用（可空；FK 指向真表 parties，展示走 party_internal 视图）
 
 # 状态机:
 #   draft → submitted → approved → completed → closed

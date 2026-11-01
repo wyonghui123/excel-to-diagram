@@ -472,7 +472,8 @@ def real_framework(tmp_path):
     # 这里只建最小父表，避免依赖 create_app 全量初始化与仓库 DB。
     connection.executescript(
         'CREATE TABLE IF NOT EXISTS orgs (id INTEGER PRIMARY KEY);'
-        'CREATE TABLE IF NOT EXISTS party_internal (id INTEGER PRIMARY KEY);'
+        # 往来方基表：单据 FK 指向真表 parties（party_internal 是视图，不能作 FK 目标）
+        'CREATE TABLE IF NOT EXISTS parties (id INTEGER PRIMARY KEY);'
         'CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, item_group_id INTEGER);'
         'CREATE TABLE IF NOT EXISTS uoms (id INTEGER PRIMARY KEY);'
         'CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY);'
@@ -712,18 +713,21 @@ def test_approve_handler_returns_method_receipt(conn, ds, monkeypatch):
         "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
         "VALUES (12, 'submitted', 1, 2)")
     calls = []
+
+    def _apply(object_type, target_status, record_id):
+        calls.append((object_type, target_status, record_id))
+        ds.execute('UPDATE service_requests SET status = ? WHERE id = ?',
+                   [target_status, record_id])
+        return SimpleNamespace(success=True)
+
     monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
-    monkeypatch.setattr(
-        demand_entry_decision, '_execute_meta_action',
-        lambda object_type, action_id, record_id: (
-            calls.append((object_type, action_id, record_id)) or
-            SimpleNamespace(success=True)))
+    monkeypatch.setattr(demand_entry_decision, '_execute_meta_action', _apply)
 
     result = service_request_approve_handler({'id': 12}, {})
 
     assert result['success'] is True
     assert result['data']['new_status'] == 'approved'
-    assert calls == [('service_request', 'approve_service_request', 12)]
+    assert calls == [('service_request', 'approved', 12)]
 
 
 def test_reject_handler_returns_method_receipt(conn, ds, monkeypatch):
@@ -731,18 +735,21 @@ def test_reject_handler_returns_method_receipt(conn, ds, monkeypatch):
         "INSERT INTO service_requests (id, status, requester_org_id, provider_org_id) "
         "VALUES (13, 'submitted', 1, 2)")
     calls = []
+
+    def _apply(object_type, target_status, record_id):
+        calls.append((object_type, target_status, record_id))
+        ds.execute('UPDATE service_requests SET status = ? WHERE id = ?',
+                   [target_status, record_id])
+        return SimpleNamespace(success=True)
+
     monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
-    monkeypatch.setattr(
-        demand_entry_decision, '_execute_meta_action',
-        lambda object_type, action_id, record_id: (
-            calls.append((object_type, action_id, record_id)) or
-            SimpleNamespace(success=True)))
+    monkeypatch.setattr(demand_entry_decision, '_execute_meta_action', _apply)
 
     result = service_request_reject_handler({'id': 13}, {})
 
     assert result['success'] is True
     assert result['data']['new_status'] == 'rejected'
-    assert calls == [('service_request', 'reject_service_request', 13)]
+    assert calls == [('service_request', 'rejected', 13)]
 
 
 def test_requisition_approve_handler_returns_receipt(conn, ds, monkeypatch):
@@ -750,18 +757,39 @@ def test_requisition_approve_handler_returns_receipt(conn, ds, monkeypatch):
         "INSERT INTO requisitions (id, status, requester_org_id, deliver_to_org_id) "
         "VALUES (21, 'submitted', 1, 2)")
     calls = []
+
+    def _apply(object_type, target_status, record_id):
+        calls.append((object_type, target_status, record_id))
+        ds.execute('UPDATE requisitions SET status = ? WHERE id = ?',
+                   [target_status, record_id])
+        return SimpleNamespace(success=True)
+
     monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
-    monkeypatch.setattr(
-        demand_entry_decision, '_execute_meta_action',
-        lambda object_type, action_id, record_id: (
-            calls.append((object_type, action_id, record_id)) or
-            SimpleNamespace(success=True)))
+    monkeypatch.setattr(demand_entry_decision, '_execute_meta_action', _apply)
 
     result = requisition_approve_handler({'requisition_id': 21}, {})
 
     assert result['success'] is True
     assert result['data']['new_status'] == 'approved'
-    assert calls == [('requisition', 'approve_requisition', 21)]
+    assert calls == [('requisition', 'approved', 21)]
+
+
+def test_handler_fails_when_framework_reports_success_but_status_unchanged(
+        conn, ds, monkeypatch):
+    """框架对未知动作返回默认 success=True，必须复核落库状态，不能假闭环。"""
+    conn.execute(
+        "INSERT INTO requisitions (id, status, requester_org_id, deliver_to_org_id) "
+        "VALUES (22, 'submitted', 1, 2)")
+    monkeypatch.setattr(demand_entry_decision, '_get_ds', lambda: ds)
+    monkeypatch.setattr(
+        demand_entry_decision, '_execute_meta_action',
+        lambda object_type, target_status, record_id: SimpleNamespace(success=True))
+
+    result = requisition_approve_handler({'requisition_id': 22}, {})
+
+    assert result['success'] is False
+    assert result['code'] == 'EFFECT_NOT_APPLIED'
+    assert ds.query('SELECT status FROM requisitions WHERE id = 22')[0]['status'] == 'submitted'
 
 
 def test_handler_rejects_non_submitted_status(conn, ds, monkeypatch):

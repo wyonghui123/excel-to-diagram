@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 09:49:27.344122
+-- 生成时间: 2026-11-01 11:01:18.649618
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1646,7 +1646,7 @@ CREATE TABLE IF NOT EXISTS requisitions (
     FOREIGN KEY (requester_org_id) REFERENCES orgs(id),
     FOREIGN KEY (deliver_to_org_id) REFERENCES orgs(id),
     FOREIGN KEY (deliver_to_location_id) REFERENCES locations(id),
-    FOREIGN KEY (requested_by_party_id) REFERENCES party_internal(id)
+    FOREIGN KEY (requested_by_party_id) REFERENCES parties(id)
 )
 
 -- 采购申请行: 采购申请行（实物 / 服务需求项）
@@ -1910,7 +1910,7 @@ CREATE TABLE IF NOT EXISTS service_requests (
     FOREIGN KEY (document_type_id) REFERENCES type_definitions(id),
     FOREIGN KEY (requester_org_id) REFERENCES orgs(id),
     FOREIGN KEY (provider_org_id) REFERENCES orgs(id),
-    FOREIGN KEY (requester_party_id) REFERENCES party_internal(id)
+    FOREIGN KEY (requester_party_id) REFERENCES parties(id)
 )
 
 -- 服务请求行: 服务请求行（服务 / 实物请求项）

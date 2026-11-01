@@ -17,10 +17,10 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-#: object_type → (表名, 通过动作, 驳回动作)
+#: object_type → 表名（状态迁移由 YAML rules 的 state_transition 驱动，不是独立 action）
 _OBJECTS = {
-    'service_request': ('service_requests', 'approve_service_request', 'reject_service_request'),
-    'requisition': ('requisitions', 'approve_requisition', 'reject_requisition'),
+    'service_request': 'service_requests',
+    'requisition': 'requisitions',
 }
 
 _STATUS_SUBMITTED = 'submitted'
@@ -50,10 +50,15 @@ def _get_ds():
     return get_data_source('sqlite', database=get_meta_db_path())
 
 
-def _execute_meta_action(object_type: str, action_id: str, record_id: Any):
-    """经 BO 框架执行 YAML 状态迁移动作（同一写漏斗，含审计）。"""
+def _execute_meta_action(object_type: str, target_status: str, record_id: Any):
+    """经 BO 框架走 crud_update，让 YAML 状态机规则（from_states → to_state）生效。
+
+    不能把规则 id 当 action 调 `execute_action`——规则不在 `actions` 清单里，
+    框架会返回「未知动作」的默认 success=True（假成功，状态并不落库）。
+    """
     from meta.core.bo_framework import bo_framework
-    return bo_framework.execute_action(object_type, action_id, {'id': record_id})
+    return bo_framework.execute(object_type, 'crud_update',
+                                {'id': record_id, 'status': target_status})
 
 
 def _set_user_context():
@@ -74,8 +79,7 @@ def _decide(params: Dict[str, Any], context: Dict[str, Any], *,
             object_type: str, target_status: str, message: str) -> Dict[str, Any]:
     if object_type not in _OBJECTS:
         return _envelope_error('不支持的需求入口对象: {0}'.format(object_type))
-    table, approve_action, reject_action = _OBJECTS[object_type]
-    action_id = approve_action if target_status == _STATUS_APPROVED else reject_action
+    table = _OBJECTS[object_type]
 
     record_id = _record_id(params, object_type)
     if record_id in (None, ''):
@@ -105,7 +109,7 @@ def _decide(params: Dict[str, Any], context: Dict[str, Any], *,
                 'INVALID_STATUS',
             )
 
-        result = _execute_meta_action(object_type, action_id, record_id)
+        result = _execute_meta_action(object_type, target_status, record_id)
     except Exception as error:  # noqa: BLE001 - 统一转为失败信封
         logger.exception('[demand_entry] 审批决策失败: %s', error)
         return _envelope_error('审批决策失败: {0}'.format(error))
@@ -115,6 +119,13 @@ def _decide(params: Dict[str, Any], context: Dict[str, Any], *,
             getattr(result, 'message', None) or '审批决策未生效',
             getattr(result, 'error', None),
         )
+
+    # 复核落库结果：框架对未知动作会返回默认 success=True，不能只信返回值
+    rows = ds.query('SELECT status FROM {0} WHERE id = ?'.format(table), [record_id])
+    actual_status = rows[0].get('status') if rows else None
+    if str(actual_status) != target_status:
+        return _envelope_error(
+            '审批决策未生效（单据状态仍为 {0}）'.format(actual_status), 'EFFECT_NOT_APPLIED')
 
     return {
         'success': True,
