@@ -19,8 +19,10 @@ pytestmark = pytest.mark.unit
 
 from meta.services.employee_service import (
     MAX_MANAGER_DEPTH,
+    employee_shift_warnings,
     employee_shift_windows,
     resolve_resource_employee,
+    shift_overlap_warnings,
     validate_employee,
 )
 from meta.services.resource_matching_service import (
@@ -326,3 +328,44 @@ def test_available_minutes_employee_shift_overrides_calendar_with_leave():
     assert result['unavailable_minutes'] == 60.0
     assert result['available_minutes'] == 180.0
     assert result['calendar_id'] == 5
+
+
+# ============================================================================
+# 同日排班重叠告警 (FR-015 验收 / TBD-14)
+# ============================================================================
+
+def test_shift_overlap_warnings_detects_same_day_overlap():
+    conn = _connect()
+    day_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                     start_time='08:00', end_time='16:00', break_minutes=60)
+    swing_id = _insert(conn, 'shifts', code='SWING', name='中班',
+                       start_time='12:00', end_time='20:00', break_minutes=60)
+    _employee(conn, 1)
+    _insert(conn, 'employee_shift_assignments', employee_id=1,
+            shift_id=day_id, effective_from='2026-01-01')
+    _insert(conn, 'employee_shift_assignments', employee_id=1,
+            shift_id=swing_id, effective_from='2026-01-01')
+
+    # 08:00-16:00 与 12:00-20:00 重叠 240 分钟(按 gross 时间窗求交, 不扣休息)
+    warnings = employee_shift_warnings(conn, 1, '2026-11-02')
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning['code'] == 'ASSIGNMENT_OVERLAP'
+    assert warning['employee_id'] == 1
+    assert warning['date'] == '2026-11-02'
+    assert warning['overlap_minutes'] == 240
+    assert len(warning['assignment_ids']) == 2
+    assert set(warning['shift_ids']) == {day_id, swing_id}
+
+
+def test_shift_overlap_warnings_ignores_adjacent_windows():
+    windows = [
+        {'shift_id': 1, 'shift_code': 'A', 'start_time': '08:00',
+         'gross_minutes': 240, 'employee_id': 9,
+         'employee_shift_assignment_id': 11},
+        {'shift_id': 2, 'shift_code': 'B', 'start_time': '12:00',
+         'gross_minutes': 240, 'employee_id': 9,
+         'employee_shift_assignment_id': 12},
+    ]
+    # 首尾相接(08:00-12:00 与 12:00-16:00)不算重叠
+    assert shift_overlap_warnings(windows, '2026-11-02') == []

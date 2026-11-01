@@ -1,6 +1,6 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.12
+- 文档版本：v1.14
 - 日期：2026-11-01
 - 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（24 passed，含多口径产能、例外求交与 HR 分支），架构门禁 10 项全 OK；**P3 员工主数据已完成（v185，`employees` + `employee_shift_assignments`，schema 23 / migration 7 / 服务 11 全绿）；端到端验收已完成（E2E 7 passed，见 §11）**
 - 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）
@@ -325,6 +325,12 @@
   - `work_center_id`（可空，指向 `resource_group(group_kind=work_center)`，表示实际上班工作中心/班组）
   - `note`；唯一 `(employee_id, shift_id, seq, effective_from)`
   - **与 `calendar_shift` 的差异**：`calendar_shift` 回答"哪个日历哪天开哪个班"（产能侧）；`employee_shift_assignment` 回答"谁上哪个班"（人员侧）。两者共用 `shift`，不复制时段定义。
+- **适用主体边界（v1.13 澄清，非员工不得用此表）**：
+  - `employee_shift_assignment.employee_id` **只允许指向 `employee`**，不做"员工或资源"多态外键；
+  - 非员工资源（`resource_kind ∈ {machine, tool, vehicle, facility}`）的班次一律由 `calendar_shift` 表达（日历×星期×班次×产能系数），临时例外由 `resource_availability` 表达；
+  - person 资源但无 `status='active'` 员工行（外协主体、离职人员）⇒ 视同"找不到员工"，回退资源日历分支，**不建员工行就不享受 HR 排班**；
+  - 派遣人员按 TBD-10 入 `employees`（`employment_type=dispatched`），因此可正常排班；
+  - 理由：保持"谁被排班"的**单一真源**；与 Oracle 对标一致（Labor Resource Instance 关联 TCA person，排班属 HCM Workforce Scheduling）；多态外键会让日历分支与 HR 分支的判定依赖类型判别，且无法保证"一个班次窗口只对应一个可追责的人"。
 - **可用性推导规则**（`available_minutes` 的 HR 分支，P3 实施）：
   1. 先 `resolve_resource_employee(resource_id)`：由 `resource.person_ref` 找 `status='active'` 的员工；找不到 ⇒ 纯日历资源，走原逻辑；
   2. 员工当日有生效排班 ⇒ 以**员工排班窗口**为准，**不再叠加**资源日历（避免双轨重复计数）；
@@ -613,7 +619,7 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | TBD-11 | 一人多组织 | 兼职/矩阵汇报需要一人挂多组织 | **首期不支持**：`employee` 单 `org_id`；多组织用 `employee_org_assignment` 另立（P4），避免首期做成都市 |
 | TBD-12 | 多法人 / 多分配（Oracle 三层） | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **首期用两层简化**（`employee` 即一条在职雇佣）；P4 若出现多法人/多岗并行，再拆 `employments`（法人/雇佣段）+ `employee_assignments`（岗位/班次），`employee` 降级为兼容视图；不提前建表 |
 | TBD-13 | 员工排班是否受工厂日历节假日约束 | P3 实现为"有员工排班即不叠加日历"（FR-015 原文），故 `calendar_day.day_type=holiday` 不作用于员工排班 | **P4 定**：建议用 `employee_shift_assignment.work_center_id` → 该工作中心/地点的日历**仅取 holiday 关闭**（不取产能），避免节假日仍排班；需与 HR 确认"节假日值班"是否例外 |
-| TBD-14 | 同日多段排班重叠告警 | FR-015 验收要求返回 `ASSIGNMENT_OVERLAP` 告警 | **P4 实现**：`employee_shift_windows` 已按 `seq,id` 返回全部窗口，告警只需在排班校验函数里做区间求交（当前未写该校验函数） |
+| ~~TBD-14~~ | ~~同日多段排班重叠告警~~ | **已实现（v1.14）**：`employee_service.shift_overlap_warnings` / `employee_shift_warnings` 按 `start_time + gross_minutes` 展开绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警（含 `assignment_ids / shift_ids / overlap_minutes`），**不阻断落库**；员工服务 13 passed | 关闭 |
 
 ---
 
@@ -759,3 +765,5 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.10 | Oracle 对标修正 FR-015：Oracle HCM 为 Person → Work Relationship → Assignment（employee 只是 assignment_type），制造 Labor Resource Instance 关联 TCA **person** 且工厂内唯一 ⇒ **资源到 person，不到 employee**；删除 `employee.resource_id` 桥接，改为 `resolve_resource_employee` 按 person 求交；`employee_no` 由全局唯一改为 `status='active'` 部分唯一（再入职沿用原号）；§9.3 同步；新增 TBD-12（多法人/多分配，首期两层简化）；研究稿升 v0.3 并补 §2.5 与 5 条官方来源 |
 | 2026-11-01 | v1.11 | P3 实施完成（迁移 **v185**，避开并行会话占用的 v181-v184）：`employees`（2 条部分唯一索引：在职工号 / 在职 person）、`employee_shift_assignments`（唯一 `(employee_id, shift_id, seq, effective_from)`，不做独立菜单）；`employee_service`（`resolve_resource_employee` / `validate_employee` / `employee_shift_windows`）；`resource_matching_service._resource_windows` 接入 HR 分支（有排班覆盖日历、无排班回退、例外照常扣减）；schema 23 + migration 7 + 服务 11 + 资源服务 24 passed，架构门禁 10 项 OK；新增 TBD-13（节假日是否约束员工排班）、TBD-14（重叠告警） |
 | 2026-11-01 | v1.12 | 端到端验收落地：新增 §11「验收证据（E2E）」；`e2e/features/resource-master-data-employee.spec.js` 覆盖员工列表/主体全链路/筛选枚举/可用性例外列表与全链路，**7 passed**（FE 3006 / BE 3010 @ `b7739b83`）；用例结束五接口 `total=0` 无残留；记录测试侧稳健性处理（删除后 reload+搜索断言，规避详情抽屉旧 DOM） |
+| 2026-11-01 | v1.13 | FR-015 补「适用主体边界」：`employee_shift_assignment` 仅允许员工主体（不做多态外键）；非员工资源班次一律走 `calendar_shift`，临时例外走 `resource_availability`；person 资源无在职员工行（外协/离职）回退日历分支；派遣人员按 TBD-10 入 `employees` 后可排班 |
+| 2026-11-01 | v1.14 | 关闭 TBD-14：新增 `employee_service.shift_overlap_warnings` / `employee_shift_warnings`（按 gross 绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库），补 2 条单测；员工服务 13 passed；FR-015 验收全部闭合 |

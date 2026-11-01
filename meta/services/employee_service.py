@@ -270,3 +270,54 @@ def employee_shift_windows(conn, employee_id: int,
             'employee_shift_assignment_id': row['assignment_id'],
         })
     return windows
+
+
+# ============================================================================
+# 同日排班重叠告警 (FR-015 验收, TBD-14)
+# ============================================================================
+
+def shift_overlap_warnings(windows: List[Dict[str, Any]],
+                           the_date: Any = None) -> List[Dict[str, Any]]:
+    """检测同一员工同日多段排班的时间窗重叠(告警, **不阻断落库**)。
+
+    口径:
+      · 每段按 `start_time + gross_minutes` 展开成绝对分钟区间, 跨天班可超过 1440;
+      · 两两求交, 重叠 > 0 即产生一条 `ASSIGNMENT_OVERLAP`;
+      · 仅返回告警数据(可序列化 dict), 不抛异常, 由调用方记录或提示。
+    """
+    date_text = _normalize_date(the_date) if the_date is not None else None
+    spans: List[tuple] = []
+    for window in windows:
+        start = _minutes_from_time(window['start_time'], 'start_time')
+        gross = int(window.get('gross_minutes') or 0)
+        spans.append((start, start + gross, window))
+
+    warnings: List[Dict[str, Any]] = []
+    for i in range(len(spans)):
+        for j in range(i + 1, len(spans)):
+            start_a, end_a, window_a = spans[i]
+            start_b, end_b, window_b = spans[j]
+            overlap = min(end_a, end_b) - max(start_a, start_b)
+            if overlap <= 0:
+                continue
+            warnings.append({
+                'code': 'ASSIGNMENT_OVERLAP',
+                'date': date_text,
+                'employee_id': window_a.get('employee_id'),
+                'assignment_ids': [
+                    window_a.get('employee_shift_assignment_id'),
+                    window_b.get('employee_shift_assignment_id'),
+                ],
+                'shift_ids': [window_a['shift_id'], window_b['shift_id']],
+                'overlap_minutes': overlap,
+                'message': '同日排班重叠 {0} 分钟({1} 与 {2})'.format(
+                    overlap, window_a.get('shift_code'), window_b.get('shift_code')),
+            })
+    return warnings
+
+
+def employee_shift_warnings(conn, employee_id: int,
+                            the_date: Any = None) -> List[Dict[str, Any]]:
+    """展开某员工某天排班窗口并返回重叠告警(FR-015 校验入口)。"""
+    return shift_overlap_warnings(
+        employee_shift_windows(conn, employee_id, the_date), the_date)
