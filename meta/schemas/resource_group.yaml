@@ -1,0 +1,751 @@
+# 资源组（Resource Group）—— 统一资源模型 P2a / FR-002
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-002 / §FR-013 / §9.3 数据模型表
+#
+# 定位: 资源聚合对象。`work_center` 是 group_kind 的取值，不建独立表。
+#   组的层级只用于产能聚合，不参与权限与审批（权限仍由 org / 角色决定）。
+#
+# 口径:
+#   ① code 全局唯一，^[A-Z][A-Z0-9_]*$。
+#   ② parent_group_id 单父树（不是 DAG），无环，最大深度 10。
+#   ③ membership_mode 决定节点挂成员（members）还是子组（children），
+#      同一节点禁止两者并存（避免产能重复计数；服务层校验）。
+#   ④ 产能自下而上递归聚合，每个节点按自身 capacity_aggregation 从直接下级聚合。
+
+id: resource_group
+name: 资源组
+table_name: resource_groups
+description: 资源聚合对象——工作中心 / 服务班组 / 资源池 / 车队 / 场地组，支持多层级产能聚合
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源组
+  category: core_entity
+  aliases:
+    - 资源组
+    - 工作中心
+    - 班组
+    - 资源池
+    - 车队
+    - resource group
+    - work center
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: resource_groups
+      foreign_key: parent_group_id
+      message: 该资源组下仍有子组，请先处理子组后再删除
+    - table: resource_group_members
+      foreign_key: group_id
+      message: 该资源组仍有成员，请先移除成员后再删除
+    - table: resource_rates
+      foreign_key: resource_group_id
+      message: 该资源组仍有费率记录，请先处理费率后再删除
+    - table: work_order_operations
+      foreign_key: resource_group_id
+      message: 该资源组仍被工单工序引用，请先调整工序后再删除
+    - table: operation_resource_requirements
+      foreign_key: resource_group_id
+      message: 该资源组仍被工序资源要求引用，请先处理资源要求后再删除
+    - table: resource_capacities
+      foreign_key: resource_group_id
+      message: 该资源组仍有产能记录，请先处理产能后再删除
+    - table: resource_territory_assignments
+      foreign_key: resource_group_id
+      message: 该资源组仍有区域覆盖记录，请先处理区域分配后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 资源组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 资源组编码（全局唯一）
+    semantics:
+      meaning: 资源组业务代码
+      business_key: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 资源组名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 资源组名称
+    semantics:
+      meaning: 资源组显示名称
+      display_name: true
+      data_category: text
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: group_kind
+    name: 组类型
+    type: string
+    db_column: group_kind
+    required: true
+    default: work_center
+    description: 资源组类型（工作中心/班组/资源池/车队/场地组）
+    enum_values:
+      - value: work_center
+        label: 工作中心
+        color: primary
+        is_initial: true
+      - value: crew
+        label: 班组
+        color: success
+      - value: pool
+        label: 资源池
+        color: info
+      - value: fleet
+        label: 车队
+        color: warning
+      - value: site_group
+        label: 场地组
+        color: purple
+    value_help:
+      source:
+        type: enum
+        enum_type_id: resource_group_kind
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 资源组类型
+      filterable: true
+      filter_type: enum
+      filter_label: 组类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: org_id
+    name: 归属组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 管理/责任归属组织（谁负责这套产能）
+    semantics:
+      meaning: 归属组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 40
+
+  - id: org_unit_id
+    name: 组织单元
+    type: integer
+    db_column: org_unit_id
+    nullable: true
+    description: 部门/团队级组织；用于报表按部门汇总，不等于成员来源
+    semantics:
+      meaning: 组织单元引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 50
+
+  - id: location_id
+    name: 所在地点
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 资源组所在地点（Oracle Work Area 用地点树）
+    semantics:
+      meaning: 地点引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 地点编码
+            width: 140
+          - field: name
+            label: 地点名称
+            width: 220
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 60
+
+  - id: calendar_id
+    name: 可用日历
+    type: integer
+    db_column: calendar_id
+    nullable: true
+    description: 组日历（可覆盖资源日历）；空表示继承地点/组织
+    semantics:
+      meaning: 组可用日历引用
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+        placeholder: "继承地点日历"
+    value_help:
+      source:
+        type: bo
+        target_bo: calendar
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 日历编码
+            width: 140
+          - field: name
+            label: 日历名称
+            width: 220
+    ui:
+      widget: select
+      relation: calendar
+      multiple: false
+      clearable: true
+      fieldGroup: 可用性
+      fieldGroupPosition: 70
+
+  # 成本归集：平台暂无 cost_center 主数据（TBD-8），保留纯整数引用
+  - id: cost_center_id
+    name: 成本中心
+    type: integer
+    db_column: cost_center_id
+    nullable: true
+    description: 组级成本中心ID（平台暂无 cost_center 主数据，暂为纯整数引用）
+    semantics:
+      meaning: 组级成本归集中心
+    ui:
+      widget: number
+      fieldGroup: 归属
+      fieldGroupPosition: 80
+
+  - id: capacity_aggregation
+    name: 产能聚合方式
+    type: string
+    db_column: capacity_aggregation
+    required: true
+    default: sum
+    description: 产能聚合口径（求和 / 取最大 / 瓶颈）
+    enum_values:
+      - value: sum
+        label: 求和
+        color: primary
+        is_initial: true
+      - value: max
+        label: 取最大
+        color: success
+      - value: bottleneck
+        label: 瓶颈
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: capacity_aggregation
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 产能聚合方式
+      filterable: true
+      filter_type: enum
+      filter_label: 聚合方式
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 产能
+      fieldGroupPosition: 90
+
+  - id: membership_mode
+    name: 成员模式
+    type: string
+    db_column: membership_mode
+    required: true
+    default: members
+    description: 节点挂成员（members）还是子组（children），二者互斥
+    enum_values:
+      - value: members
+        label: 挂成员
+        color: primary
+        is_initial: true
+      - value: children
+        label: 挂子组
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: membership_mode
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 组成员模式
+      filterable: true
+      filter_type: enum
+      filter_label: 成员模式
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 层级
+      fieldGroupPosition: 100
+
+  - id: parent_group_id
+    name: 上级资源组
+    type: integer
+    db_column: parent_group_id
+    nullable: true
+    description: 上级资源组ID（单父树，最大深度 10）
+    semantics:
+      meaning: 上级资源组引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_group_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+      fieldGroup: 层级
+      fieldGroupPosition: 110
+
+  - id: is_bottleneck
+    name: 瓶颈组
+    type: boolean
+    db_column: is_bottleneck
+    required: true
+    default: false
+    description: 瓶颈组标记
+    semantics:
+      meaning: 是否瓶颈资源组
+      filterable: true
+      filter_type: enum
+      filter_label: 瓶颈组
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 产能
+      fieldGroupPosition: 120
+
+  - id: is_active
+    name: 启用
+    type: boolean
+    db_column: is_active
+    required: true
+    default: true
+    description: 是否启用
+    semantics:
+      meaning: 启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 启用
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 基本信息
+      fieldGroupPosition: 130
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 有效期起始日（含）；空表示立即有效
+    semantics:
+      meaning: 资源组有效期起始日
+    ui:
+      widget: date
+      fieldGroup: 可用性
+      fieldGroupPosition: 140
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 有效期截止日（不含）；空表示长期有效
+    semantics:
+      meaning: 资源组有效期截止日
+    ui:
+      widget: date
+      fieldGroup: 可用性
+      fieldGroupPosition: 150
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 说明
+    semantics:
+      meaning: 资源组说明
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 其他
+      fieldGroupPosition: 160
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_resource_group_code
+  - fields: [parent_group_id]
+    name: idx_resource_group_parent
+  - fields: [org_id]
+    name: idx_resource_group_org
+  - fields: [group_kind]
+    name: idx_resource_group_kind
+  - fields: [is_active]
+    name: idx_resource_group_active
+
+relations:
+  - id: resource_group_to_parent
+    name: 上级资源组
+    type: reference
+    target: resource_group
+    source_field: parent_group_id
+    target_field: id
+    cardinality: N:1
+    description: 上级资源组引用（自引用树；真外键，restrict）
+  - id: resource_group_to_org
+    name: 归属组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 归属组织引用（可空；真外键）
+  - id: resource_group_to_org_unit
+    name: 组织单元
+    type: reference
+    target: org
+    source_field: org_unit_id
+    target_field: id
+    cardinality: N:1
+    description: 组织单元引用（可空；真外键）
+  - id: resource_group_to_location
+    name: 所在地点
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+    description: 地点引用（可空；真外键）
+  - id: resource_group_to_calendar
+    name: 可用日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 组日历引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v175 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  # 左树右表：树 = 资源组层级（自引用），右表 = 资源组列表
+  hub:
+    object_types: [resource_group]
+    default_tab: resource_group
+    tabs:
+      resource_group: 资源组
+    state_key: resourceGroupManagerState
+    scope:
+      type: hierarchy
+      object: resource_group
+      scope_key: resource_group
+      parent_field: parent_group_id
+      node_icon: folder
+      empty_text: 暂无资源组
+      search_placeholder: 搜索资源组（编码/名称）
+    filters:
+      resource_group:
+        field: id
+  list:
+    detail_mode: drawer
+    title: 资源组
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: group_kind
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: parent_group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "无上级"
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: capacity_aggregation
+        width: 110
+      - field: membership_mode
+        width: 100
+      - field: is_bottleneck
+        width: 90
+      - field: is_active
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建资源组
+        icon: plus
+        type: primary
+        permission: resource_group:resource_group_create
+    defaultSort:
+      field: code
+      order: asc
+  form:
+    title: 资源组
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [group_kind, parent_group_id]
+          - fields: [is_active, is_bottleneck]
+      - title: 归属
+        columns:
+          - fields: [org_id, org_unit_id]
+          - fields: [location_id, calendar_id]
+          - fields: [cost_center_id]
+      - title: 聚合与层级
+        columns:
+          - fields: [capacity_aggregation, membership_mode]
+          - fields: [valid_from, valid_to]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, group_kind, parent_group_id, org_id, org_unit_id,
+                 location_id, calendar_id, cost_center_id, capacity_aggregation,
+                 membership_mode, is_bottleneck, is_active, valid_from, valid_to,
+                 description]
+
+category_config:
+  create_permission: resource_group:resource_group_create
+  update_permission: resource_group:resource_group_update
+  delete_permission: resource_group:resource_group_delete
+  owner_auto_permission: false

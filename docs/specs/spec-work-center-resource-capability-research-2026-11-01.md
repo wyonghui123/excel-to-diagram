@@ -10,12 +10,12 @@
 ## 0. 结论先行
 
 1. **三个对象成立，但它们不是三个并列主数据，而是同一"资源域"的三个视角**：
-   - `resource`：可被占用、可被调度、可被消耗的主体（人、班组、设备、车辆、工具、场地、外协）
+   - `resource`：可被占用、可被调度、可被消耗的主体（人、设备、车辆、工具、场地、外协）
    - `resource_capability`：主体的能力/资质（技能、等级、认证、有效期）
    - `work_center`：主体的**聚合与产能池**（生产语义下的可调度单元）
 2. **不需要为生产、服务各建一套主数据**。生产与服务共享 `resource` + `resource_capability` + `calendar`，差异只体现在"聚合方式"和"任务承载"：
    - 生产：`routing_operation` → `work_center`（组级产能）→ 组内 `resource`
-   - 服务：`work_order_operation`（上门步骤）→ `required_skill` → 具备该能力的 `resource`（人/班组/车）
+   - 服务：`work_order_operation`（上门步骤）→ `required_skill` → 具备该能力的 `resource`（人/车）或 `resource_group`（班组）
 3. **`work_center` 的通用性低于 `resource`**：它是"资源组"的一个类型（`group_kind = work_center`），本质上是一个产能/成本归集单元，而不是一类新的实体。把它做成独立顶层实体，会在服务场景产生第二个"组"概念（服务班组/驻点团队），最终退化成两套主数据。
 4. 当前代码的真实缺口：`work_order_operation.work_center_id` 指向 `target_type: work_center`，但**对象与表都不存在**（悬空引用）；`required_skill` 是自由字符串，**无能力主数据可校验**；`routing` 完全缺失。
 
@@ -104,7 +104,7 @@
 resource_group (group_kind: work_center | crew | pool | site_group)
       │  member
       ▼
-resource (resource_kind: person | crew | machine | vehicle | tool | facility | site | external)
+resource (resource_kind: person | machine | vehicle | tool | facility | site | external)
       │
       ├── resource_capability (skill_code, level, valid_from/to, certification)
       └── resource_availability (calendar_id + 例外/加班/占用)
@@ -203,14 +203,23 @@ resource (resource_kind: person | crew | machine | vehicle | tool | facility | s
 
 ---
 
-## 9. 开放问题（需决策）
+## 9. 决策记录与开放问题
 
-1. **人是否直接作为可调度资源**，还是仅作为 `resource_capability` 的载体、由 `resource_group` 调度？（影响：派单粒度、与 `user` 的关系）
-2. **产能单位**先固定哪几个：`hours` / `quantity` / `trips` / `headcount`？是否需要多单位换算？
-3. **`work_center` 是否允许"组套组"**（多级产能池），还是只允许一级？
-4. **外协资源**与 `party_relation` 的边界：外协是 `resource(kind=external)` 还是仅 `party` + 协议产能？
-5. **成本费率**是否按 `org` / `location` / 时段分层（影响 `cost_rate` 是列还是子表）。
-6. `service_catalog_item` 的技能要求字段命名（`required_skill` 与现有 `work_order_operation.required_skill` 是否统一为一个字典）。
+### 9.1 已决策（2026-11-01）
+
+| # | 决策 | 结论 |
+|---|---|---|
+| D-1 | 人是否直接作为可调度资源 | **是**。`resource(resource_kind=person)` 可直接被派单/排程，`resource_capability` 挂在人上；组只是"批量调度/产能归集"的便利，不是人的前置条件 |
+| D-2 | 组对象命名 | **`resource_group`**（详见 §11），`work_center` 降为 `group_kind` 的一个取值 |
+| D-3 | `resource_kind` 值域 | `person / machine / vehicle / tool / facility / site / external`；**不含 `crew`**——班组是组，不是资源主体 |
+| D-4 | 组级嵌套 | 允许**一级**成员关系；暂不做"组套组"，用 `resource_group_member` 预留 `parent_group_id` 可空列，未来放开不改表 |
+
+### 9.2 仍开放（逐项分析见 §12）
+
+1. **产能单位**先固定哪几个：`hours` / `quantity` / `trips` / `headcount`？是否需要多单位换算？
+2. **外协资源**与 `party_relation` 的边界：外协是 `resource(kind=external)` 还是仅 `party` + 协议产能？
+3. **成本费率**是否按 `org` / `location` / 时段分层（影响 `cost_rate` 是列还是子表）。
+4. `service_catalog_item` 的技能要求字段命名（与 `work_order_operation.required_skill` 是否统一为同一字典）。
 
 ---
 
@@ -222,8 +231,197 @@ resource (resource_kind: person | crew | machine | vehicle | tool | facility | s
 
 ---
 
+## 11. 命名裁决：叫 `resource_group` 还是 `work_center`
+
+### 11.1 结论
+
+**技术对象名用 `resource_group`，`work_center` 作为 `group_kind` 的取值；界面按业务场景显示名称。**
+
+| 层面 | 命名 |
+|---|---|
+| 表 / schema / API | `resource_groups` / `resource_group` |
+| 组成员关系 | `resource_group_member` |
+| 枚举 `group_kind` | `work_center`（生产）/ `crew`（服务班组）/ `pool`（共享池）/ `site_group`（驻点） |
+| 菜单与页面标题 | 生产入口显示「工作中心」，服务入口显示「服务班组」，同一套页面按 `group_kind` 切换 |
+| `work_order_operation` 字段 | `work_center_id` → `resource_group_id` |
+
+### 11.2 理由
+
+1. **同一实体、两种场景**：生产用工作中心，服务用班组/驻点。若对象直接叫 `work_center`，服务团队要么被强行叫"工作中心"（语义漂移），要么另建 `team`（两套主数据）。
+2. **改名窗口现在最便宜**：`work_order_operation.work_center_id` 目前是悬空引用——无表、无数据、无消费方。此刻改成 `resource_group_id` 几乎零成本；一旦建表落数据，再改要迁移 + 兼容。
+3. **字段名要跟着对象名**：若字段仍叫 `work_center_id` 而实际存"服务班组"，读代码的人会持续误解。
+4. **业务可见名称不受影响**：菜单标题、枚举 label、报表列都可以叫"工作中心"，用户视角没有损失。
+
+### 11.3 反对意见与回应
+
+| 反对 | 回应 |
+|---|---|
+| "工作中心"是制造业标准术语，改成 resource_group 不直观 | 术语保留在 `group_kind` 与 UI 文案里；对象名只影响开发侧 |
+| P2 交付写的是 `work_center` 主数据 | 交付的是"工作中心"这个业务能力，底层可以由 `resource_group(kind=work_center)` 承载；Spec 里注明映射即可 |
+| 未来若 90% 使用都是工作中心，通用名是否过度抽象 | 组的两项核心能力（成员管理、产能/成本合计）本来就是共享的，抽象成本一次性且低于双对象维护成本 |
+
+---
+
+## 12. 四个开放问题的深入分析
+
+### 12.1 产能单位
+
+**现状取证**
+
+| 对象 | 事实 |
+|---|---|
+| `uom` | `code / name / uom_group_id / decimal_places / status` |
+| `uom_group` | 计量组（如时间、数量） |
+| `uom_conversion` | `uom_group_id + uom_id + factor`，**仅在组内换算** |
+| `item_uom_conversion` | 物料级换算，与资源无关 |
+| `work_order_operation` | 只有 `setup_minutes` / `run_minutes`，时间口径 |
+| `calendar` | 只有 `day_mask_*`，**没有"每日工时"字段** |
+
+**候选**
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| A | 硬编码枚举 `capacity_uom ∈ {hours, quantity, trips, headcount}` | 最简单，但无精度（`decimal_places`）、无字典治理、无法同组换算 |
+| B | `capacity_uom_id → uom`，复用 `uom_conversion` | 与物料/单据度量口径一致，精度与字典可治理 |
+| C | 时间 + 数量双列（`capacity_minutes_per_day` + `capacity_qty_per_day`） | 表达力强，但产生双真源与"哪个为空"的组合校验 |
+
+**推荐 B，并加三条约束**
+
+1. `capacity_uom_id` 必须指向 `uom_group ∈ {TIME, COUNT}` 的计量单位。
+2. **TIME 组只允许 `MINUTE` / `HOUR`，不引入 `DAY`**。原因：`DAY → HOUR` 取决于班次长度，而 `calendar` 目前没有每日工时字段；引入 `DAY` 会迫使加列并让同一资源在不同日历下产能漂移。需要"每天 8 小时"就填 `8 HOUR`。
+3. 一个资源**只保留一个主产能口径**（`capacity_uom_id + capacity_per_day`）。需要"台时 + 件数"双口径时，属于组的聚合或后续 `resource_capacity` 子表扩展，P2 不建。
+
+**对字段的影响**：`resource` / `resource_group` 用 `capacity_uom_id`（引用）+ `capacity_per_day`，弃用无类型的 `capacity_uom` 字符串。
+
+**风险**：数量口径的"1 趟=多少公里/多少件"属于业务换算，不进 `uom_conversion`（那是同组度量换算），在 `resource_group` 的产能校验里显式按主口径求和。
+
+### 12.2 外协边界
+
+**现状取证**
+
+| 对象 | 事实 |
+|---|---|
+| `party_relation` | `role ∈ {customer, vendor}`，一实例一角色，双角色 = 两条记录；`internal_mark` 区分内外 |
+| `sourcing_rule_line` | `supplier_party_id → party`，寻源只认交易主体 |
+| 资源域 | 无 `resource` 概念，外协在排程/派单侧无处落地 |
+
+**候选**
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| A | 外协只做 `party + party_relation(vendor)`，不进资源域 | 排程/派单无法表达外协可用时间与能力，外协产能进不了计划 |
+| B | 外协 = `resource(kind=external)`，不与 `party` 关联 | 成本/合同/准入信息脱节，无法与寻源对齐 |
+| C | 外协 = `resource(kind=external)` + 必填 `party_id`；与 `sourcing_rule_line.supplier_party_id` 通过 party 桥接 | 交易主体与可调度对象各归其位，多对一 |
+
+**推荐 C。** 关键规则：
+
+1. `party` = 法人/交易主体（合同、税务、准入）；`resource` = 可调度对象（时间、能力、地点）。**一个 vendor 可以有多个资源**（不同团队/车辆/工位），不能一对一强绑。
+2. `resource(resource_kind=external)` 时 `party_id` **必填**；`resource_kind=person` 也可填 `party_id`（个人顾问/外协人员）。
+3. **不自动物化**：新建 vendor 不自动生成 resource，资源登记是显式动作，避免主数据被污染。
+4. 校验强度：外协资源保存时校验该 party 存在 `role=vendor` 的关系，**默认警告不阻断**（历史数据与临时合作需要逃生口）。
+5. 寻源与外协资源不新建桥表：两者都以 `party_id` 为共同键，需要时按 party 聚合。
+
+**对字段的影响**：`resource.party_id`（可空）+ `resource_kind=external` 的必填校验；`resource.cost_rate` 退役，改 `resource_rate` 子表（见 12.3）。
+
+### 12.3 成本费率分层
+
+**现状取证**
+
+| 对象 | 事实 |
+|---|---|
+| `rate_table` | `code / name / type / currency / owner_org_id / status`，通用费率表 |
+| `rate_record` | `rate_table_id / key_schema_id / keys / rate_type_id / rate / valid_from/to / currency / rate_unit / rate_qty / scale / priority / hit_policy`，**通用定价引擎** |
+| `rate_type` | `rate_class / calc_type / rate_source / sign / rounding / lookup_sequence_id` |
+| 资源域 | 无费率对象；P2 草案只有单个 `cost_rate` 列 |
+
+**候选**
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| A | `resource.cost_rate` 单列 | 无法表达历史价、币种、组织/地点差异；改价即篡改历史 |
+| B | `resource_rate` 子表 + 生效期 + 分层键 | 成本口径清晰，与定价引擎解耦 |
+| C | 复用 `rate_table / rate_record` | 复用重引擎，但 `key_schema` 配置成本高，定价语义（法向、优先级、命中策略）会污染成本口径 |
+
+**推荐 B。** `resource_rate` 字段：
+
+- `resource_id`、`rate_purpose ∈ {cost, billing, overtime}`
+- 分层键（均可空）：`org_id`、`location_id`
+- 金额：`currency_id`、`rate`、`rate_uom_id`（每小时/每趟/每件）
+- 生效：`valid_from` / `valid_to`
+- 优先级：`priority`（同层多条时的取值顺序）
+
+取值顺序（明确写死，避免两套解释）：
+
+```
+resource 自身 → 所属 resource_group → 组织默认（org_id 非空、resource_id 空）
+同层多条：valid_from 晚者优先 → priority 大者优先 → valid_to 早者优先（窄范围优先）
+```
+
+其他规则：
+
+- 主表**不保留** `cost_rate` 列，列表页展示"当前生效费率"由派生查询得到，避免双真源。
+- 历史项目/工单引用费率时按 `valid_from` 快照取值，不做回写。
+- 与 `rate_table` 的边界：`rate_table` 服务于**商品定价/折扣**；资源费率服务于**内部成本与结算**。两者不混用；若未来需要折扣类定价，再做桥接而非改造。
+
+**对字段的影响**：P2 草案的 `work_center.cost_rate` 由 `resource_rate`（`resource_id` 或 `resource_group_id`）承载，组费率与成员费率的回退关系按上面的顺序。
+
+### 12.4 技能字典统一
+
+> **[已被取代 2026-11-01]** 本节推荐的方案 A（`enum_type(skill_code)`）作废；最终决策为**方案 B：`skill` 主数据对象**（理由：多模块引用需独立生命周期、需承载层级/认证/有效期、枚举无审计与引用完整性）。详见 `spec-unified-resource-model-2026-11-01-v1.0.md`（v1.3）FR-003 与附 A.4。本节保留作为取证与论证记录。
+
+**现状取证**
+
+| 对象 | 事实 |
+|---|---|
+| `enum_type` / `enum_value` | `name / category / mutability`；被 `value_help(source.type='enum', enum_type_id=...)` 引用，`binding_strength: strict` 可做严格校验（先例：`party_relation_role`） |
+| `work_order_operation.required_skill` | 自由字符串，无字典、无等级 |
+| `service_catalog_item` | 无技能要求字段 |
+| `attribute_definition` | 通用属性字典，服务于对象字段扩展，不具"可调度能力"语义 |
+
+**候选**
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| A | 统一到 `enum_type(skill_code)` + `value_help(strict)` | 零新增对象、可动态维护、可严格校验 |
+| B | 新建 `skill` 对象（code / name / category / parent / certification_required） | 支持层级与认证模板，但 P2 首期成本高 |
+| C | 复用 `attribute_definition` | 语义不符（属性字典 ≠ 能力枚举），治理口径也会跑偏 |
+
+**推荐 A（首期），并统一三处引用同一字典**
+
+1. `resource_capability.skill_code` → `value_help(enum_type=skill_code, binding_strength=strict)`
+2. `work_order_operation.required_skill` → 同字典，**字段名不变**（避免迁移扩散），仅把 UI 从 free text 改下拉
+3. `service_catalog_item.required_skill`（新增）→ 同字典
+
+**升级触发条件（写成规则，避免以后争论）**：当出现以下任一需求时，升级为独立 `skill` 对象，`enum_value` 保留为别名映射：
+
+- 技能需要层级（焊接 → 氩弧焊）
+- 技能需要携带认证模板/有效期规则
+- 技能需要跨行业分类，`enum_type.category` 撑不住
+
+为什么不选 `attribute_definition`：它服务于"任意对象可扩展属性"，没有 `mutability` 与值域治理；把它当技能字典会让权限、校验、UI 组件全部走错路径。
+
+### 12.5 汇总
+
+| # | 问题 | 推荐 | 对 P2a 字段的影响 | 主要风险 |
+|---|---|---|---|---|
+| 1 | 产能单位 | `capacity_uom_id → uom`，TIME 仅 MINUTE/HOUR，单一主口径 | `resource` / `resource_group` 用引用字段 + `capacity_per_day` | 多口径资源需要后续子表 |
+| 2 | 外协边界 | `resource(kind=external)` + 必填 `party_id`，与寻源按 party 桥接 | `resource.party_id` 可空，external 必填 | vendor 关系校验若阻断会挡历史数据 |
+| 3 | 成本费率 | `resource_rate` 子表（分层键 + 生效期 + 优先级） | 取消主表 `cost_rate` 列 | 取值顺序必须唯一，否则两套解释 |
+| 4 | 技能字典 | **[已被取代 2026-11-01]** 最终为 `skill` 主数据对象（原推荐 `enum_type(skill_code)` 作废，见 §12.4 顶部声明） | `required_skill_id → skill`（旧 `required_skill` 只读） | 见 Spec v1.3+ FR-003 |
+
+### 12.6 仍待你确认的 4 个细节
+
+1. **TIME 只允许 MINUTE/HOUR（不允许 DAY）**是否接受？（接受则不必给 `calendar` 加"每日工时"列）
+2. 外协资源保存时校验 vendor 关系：**警告**（推荐）还是 **阻断**？
+3. 资源费率分层是否允许 `location_id`（推荐保留），还是首期只做 `org_id`？
+4. ~~技能字典首期用 `enum_type`、未来按触发条件升级 `skill` 对象~~ **[已关闭 2026-11-01]** 直接采用 `skill` 主数据（见 §12.4 顶部声明）。
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-11-01 | v0.1 | 首版：现状取证、泛资源检验、四方案对比、资源域三层模型、双场景映射、分期与开放问题 |
+| 2026-11-01 | v0.2 | 决策落定：人直接作为可调度资源；组对象命名 `resource_group`（`work_center` 降为 `group_kind`）；`resource_kind` 移除 crew；组仅一级成员关系；新增 §11 命名裁决 |
+| 2026-11-01 | v0.3 | 新增 §12：产能单位（复用 uom，TIME 仅 MINUTE/HOUR）、外协边界（external resource + party 桥接）、成本费率（resource_rate 子表）、技能字典（enum_type strict + 升级触发条件）四项深入分析与推荐 |

@@ -98,21 +98,46 @@ fields:
     ui:
       widget: number
 
-  - id: work_center_id
-    name: 工作中心
+  # [P2a 2026-11-01] work_center_id → resource_group_id：消除悬空引用，
+  #   工作中心作为 resource_group(group_kind=work_center) 的取值（不建独立表）。
+  - id: resource_group_id
+    name: 资源组/工作中心
     type: integer
-    db_column: work_center_id
+    db_column: resource_group_id
     nullable: true
-    description: 工作中心（批次 5 建表前可空）
+    description: 资源组（工作中心是 group_kind=work_center 的取值）；空表示未指定
     semantics:
-      meaning: 工作中心
+      meaning: 执行工序的资源组 / 工作中心
       display:
         type: association
-        target_type: work_center
+        target_type: resource_group
         display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
     ui:
       widget: select
-      relation: work_center
+      relation: resource_group
       clearable: true
 
   - id: operation_name
@@ -150,16 +175,77 @@ fields:
     ui:
       widget: number
 
-  - id: required_skill
+  # [P2a 2026-11-01] 收尾工时（作业收尾，默认 0）；
+  #   queue_minutes / move_minutes 留 P2b。
+  - id: teardown_minutes
+    name: 收尾工时
+    type: integer
+    db_column: teardown_minutes
+    nullable: true
+    default: 0
+    description: 收尾工时（分钟，默认 0）
+    semantics:
+      meaning: 工序收尾工时
+    ui:
+      widget: number
+
+  # [P2a 2026-11-01] 技能要求改为主数据引用（skill）；可空。
+  - id: required_skill_id
     name: 所需技能
+    type: integer
+    db_column: required_skill_id
+    nullable: true
+    description: 所需技能（引用 skill 主数据，可空）
+    semantics:
+      meaning: 工序所需技能引用
+      display:
+        type: association
+        target_type: skill
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: skill
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 技能编码
+            width: 160
+          - field: name
+            label: 技能名称
+            width: 220
+    ui:
+      widget: select
+      relation: skill
+      clearable: true
+
+  # [P2a 2026-11-01] 旧文本列仅保留历史只读，新逻辑不再读取。
+  - id: required_skill
+    name: 所需技能（已废弃）
     type: string
     db_column: required_skill
     nullable: true
     max_length: 100
-    description: 所需技能（technician / engineer / consultant 等）
+    description: 已废弃：旧文本技能列，仅供历史数据只读，新逻辑请用 required_skill_id
     semantics:
-      meaning: 工序所需技能
+      meaning: 已废弃的文本技能（历史只读；新逻辑改用 required_skill_id）
       data_category: text
+      readonly_always: true
+    ui:
+      widget: input
+      editable: false
+      readonly: true
 
   - id: status
     name: 工序状态
@@ -219,6 +305,10 @@ indexes:
   - fields: [work_order_id, seq]
     unique: true
     name: uq_work_order_operation_seq
+  - fields: [resource_group_id]
+    name: idx_work_order_operation_resource_group
+  - fields: [required_skill_id]
+    name: idx_work_order_operation_required_skill
 
 relations:
   - id: work_order_operation_to_work_order
@@ -229,6 +319,22 @@ relations:
     target_field: id
     cardinality: N:1
     description: 所属工单引用（真外键）
+  - id: work_order_operation_to_resource_group
+    name: 资源组/工作中心
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键，restrict）
+  - id: work_order_operation_to_required_skill
+    name: 所需技能
+    type: reference
+    target: skill
+    source_field: required_skill_id
+    target_field: id
+    cardinality: N:1
+    description: 所需技能引用（可空；真外键，restrict）
 
 ui_view_config:
   skip_auto_menu: true
@@ -240,14 +346,22 @@ ui_view_config:
         width: 90
       - field: operation_name
         width: 180
-      - field: work_center_id
-        width: 140
+      - field: resource_group_id
+        width: 160
+        render_as: association
+        target_type: resource_group
+        display_field: name
       - field: setup_minutes
+        width: 110
+      - field: teardown_minutes
         width: 110
       - field: run_minutes
         width: 110
-      - field: required_skill
-        width: 130
+      - field: required_skill_id
+        width: 150
+        render_as: association
+        target_type: skill
+        display_field: name
       - field: status
         width: 100
         filterable: true
@@ -267,8 +381,9 @@ ui_view_config:
           - fields: [seq, operation_name, status]
       - title: 资源与工时
         columns:
-          - fields: [work_center_id, required_skill]
-          - fields: [setup_minutes, run_minutes]
+          - fields: [resource_group_id, required_skill_id]
+          - fields: [setup_minutes, teardown_minutes, run_minutes]
+          # required_skill（旧文本列）已废弃，仅历史只读，不进入录入表单
   detail:
     facets:
       - title: 工序信息
@@ -277,9 +392,11 @@ ui_view_config:
         fields:
           - seq
           - operation_name
-          - work_center_id
+          - resource_group_id
+          - required_skill_id
           - required_skill
           - setup_minutes
+          - teardown_minutes
           - run_minutes
           - status
           - created_at

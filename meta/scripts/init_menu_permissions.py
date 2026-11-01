@@ -2092,6 +2092,418 @@ def init_menu_permissions(db_path):
                 'message': '建议分配产品组数据权限'
             })
         },
+        {
+            # [RESOURCE-P2A 2026-11-01] 资源 —— 主数据组（v175 交付）
+            #   与 v175__resource_domain_foundation 的菜单声明保持一致；缺本声明时
+            #   步骤 7.6 会把该手工菜单当冗余删除（资源页入口随之消失）。
+            #   权限码用双段式真实码 {bo}:{bo}_{action}，与 v175 写入的 24 条一致。
+            'menu_code': 'resource-list',
+            'menu_name': '资源',
+            'menu_path': '/resources',
+            'icon': 'Boxes',
+            'color': '#0ea5e9',
+            'sort_order': 87,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource',
+            'object_types': json.dumps(['resource']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource:resource_create',
+                'resource:resource_read',
+                'resource:resource_update',
+                'resource:resource_delete',
+            ]),
+            'description': '资源主数据：人 / 设备 / 车辆 / 工具 / 场地 / 站点 / 外协',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource'],
+                'message': '建议分配资源数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2A 2026-11-01] 资源组 —— 主数据组（v175 交付）
+            'menu_code': 'resource-group-list',
+            'menu_name': '资源组',
+            'menu_path': '/resource-groups',
+            'icon': 'Network',
+            'color': '#6366f1',
+            'sort_order': 88,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_group',
+            'object_types': json.dumps(['resource_group']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_group', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_group:resource_group_create',
+                'resource_group:resource_group_read',
+                'resource_group:resource_group_update',
+                'resource_group:resource_group_delete',
+            ]),
+            'description': '资源组：工作中心 / 班组 / 资源池 / 车队 / 场地组（多层级）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_group'],
+                'message': '建议分配资源组数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2A 2026-11-01] 技能 —— 主数据组（v175 交付）
+            'menu_code': 'skill-list',
+            'menu_name': '技能',
+            'menu_path': '/skills',
+            'icon': 'BadgeCheck',
+            'color': '#10b981',
+            'sort_order': 89,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'skill',
+            'object_types': json.dumps(['skill']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'skill', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'skill:skill_create',
+                'skill:skill_read',
+                'skill:skill_update',
+                'skill:skill_delete',
+            ]),
+            'description': '技能主数据：工种 / 认证 / 语言 / 通用素质',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['skill'],
+                'message': '建议分配技能数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2A 2026-11-01] 资源组成员 —— 主数据组（v175 交付）
+            'menu_code': 'resource-group-member-list',
+            'menu_name': '资源组成员',
+            'menu_path': '/resource-group-members',
+            'icon': 'Users',
+            'color': '#f59e0b',
+            'sort_order': 90,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_group_member',
+            'object_types': json.dumps(['resource_group_member']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_group_member', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_group_member:resource_group_member_create',
+                'resource_group_member:resource_group_member_read',
+                'resource_group_member:resource_group_member_update',
+                'resource_group_member:resource_group_member_delete',
+            ]),
+            'description': '资源组成员关系（分配比例 / 数量 / 有效期）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_group_member'],
+                'message': '建议分配资源组成员数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2A 2026-11-01] 资源能力 —— 主数据组（v175 交付）
+            'menu_code': 'resource-capability-list',
+            'menu_name': '资源能力',
+            'menu_path': '/resource-capabilities',
+            'icon': 'Award',
+            'color': '#8b5cf6',
+            'sort_order': 91,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_capability',
+            'object_types': json.dumps(['resource_capability']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_capability', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_capability:resource_capability_create',
+                'resource_capability:resource_capability_read',
+                'resource_capability:resource_capability_update',
+                'resource_capability:resource_capability_delete',
+            ]),
+            'description': '资源持有技能的能力记录（等级 / 有效期 / 认证）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_capability'],
+                'message': '建议分配资源能力数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2A 2026-11-01] 资源费率 —— 主数据组（v175 交付）
+            'menu_code': 'resource-rate-list',
+            'menu_name': '资源费率',
+            'menu_path': '/resource-rates',
+            'icon': 'CircleDollarSign',
+            'color': '#ef4444',
+            'sort_order': 92,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_rate',
+            'object_types': json.dumps(['resource_rate']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_rate', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_rate:resource_rate_create',
+                'resource_rate:resource_rate_read',
+                'resource_rate:resource_rate_update',
+                'resource_rate:resource_rate_delete',
+            ]),
+            'description': '资源 / 资源组费率（用途 / 基准 / 有效期 / 优先级）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_rate'],
+                'message': '建议分配资源费率数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 班次 —— 主数据组（v176 交付）
+            #   与 v176__resource_domain_p2b 的菜单声明保持一致；缺本声明时
+            #   步骤 7.6 会把该手工菜单当冗余删除（班次页入口随之消失）。
+            #   权限码用双段式真实码 {bo}:{bo}_{action}，与 v176 写入的 32 条一致。
+            'menu_code': 'shift-list',
+            'menu_name': '班次',
+            'menu_path': '/shifts',
+            'icon': 'CalendarClock',
+            'color': '#0ea5e9',
+            'sort_order': 93,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'shift',
+            'object_types': json.dumps(['shift']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'shift', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'shift:shift_create',
+                'shift:shift_read',
+                'shift:shift_update',
+                'shift:shift_delete',
+            ]),
+            'description': '班次时段模板（开始/结束/跨天/休息扣减/类型）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['shift'],
+                'message': '建议分配班次数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 日历班次 —— 主数据组（v176 交付）
+            'menu_code': 'calendar-shift-list',
+            'menu_name': '日历班次',
+            'menu_path': '/calendar-shifts',
+            'icon': 'CalendarRange',
+            'color': '#6366f1',
+            'sort_order': 94,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'calendar_shift',
+            'object_types': json.dumps(['calendar_shift']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'calendar_shift', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'calendar_shift:calendar_shift_create',
+                'calendar_shift:calendar_shift_read',
+                'calendar_shift:calendar_shift_update',
+                'calendar_shift:calendar_shift_delete',
+            ]),
+            'description': '日历 × 星期掩码 × 班次（产能系数 / 同日多班排序）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['calendar_shift'],
+                'message': '建议分配日历班次数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 作业定义 —— 主数据组（v176 交付）
+            'menu_code': 'work-definition-list',
+            'menu_name': '作业定义',
+            'menu_path': '/work-definitions',
+            'icon': 'ClipboardList',
+            'color': '#10b981',
+            'sort_order': 95,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'work_definition',
+            'object_types': json.dumps(['work_definition']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'work_definition', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'work_definition:work_definition_create',
+                'work_definition:work_definition_read',
+                'work_definition:work_definition_update',
+                'work_definition:work_definition_delete',
+            ]),
+            'description': '标准作业定义：工艺路线 / 服务模板（编码 + 版本唯一）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['work_definition'],
+                'message': '建议分配作业定义数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 作业定义工序 —— 主数据组（v176 交付）
+            'menu_code': 'work-definition-operation-list',
+            'menu_name': '作业定义工序',
+            'menu_path': '/work-definition-operations',
+            'icon': 'ListOrdered',
+            'color': '#f59e0b',
+            'sort_order': 96,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'work_definition_operation',
+            'object_types': json.dumps(['work_definition_operation']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'work_definition_operation', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'work_definition_operation:work_definition_operation_create',
+                'work_definition_operation:work_definition_operation_read',
+                'work_definition_operation:work_definition_operation_update',
+                'work_definition_operation:work_definition_operation_delete',
+            ]),
+            'description': '作业定义下的工序（顺序 / 六类工时 / 产量倍数）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['work_definition_operation'],
+                'message': '建议分配作业定义工序数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 工序资源要求 —— 主数据组（v176 交付）
+            'menu_code': 'operation-resource-requirement-list',
+            'menu_name': '工序资源要求',
+            'menu_path': '/operation-resource-requirements',
+            'icon': 'Users',
+            'color': '#8b5cf6',
+            'sort_order': 97,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'operation_resource_requirement',
+            'object_types': json.dumps(['operation_resource_requirement']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'operation_resource_requirement', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'operation_resource_requirement:operation_resource_requirement_create',
+                'operation_resource_requirement:operation_resource_requirement_read',
+                'operation_resource_requirement:operation_resource_requirement_update',
+                'operation_resource_requirement:operation_resource_requirement_delete',
+            ]),
+            'description': '工序需要的资源组/资源、角色、数量与技能等级',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['operation_resource_requirement'],
+                'message': '建议分配工序资源要求数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 资源产能 —— 主数据组（v176 交付）
+            'menu_code': 'resource-capacity-list',
+            'menu_name': '资源产能',
+            'menu_path': '/resource-capacities',
+            'icon': 'Gauge',
+            'color': '#06b6d4',
+            'sort_order': 98,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_capacity',
+            'object_types': json.dumps(['resource_capacity']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_capacity', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_capacity:resource_capacity_create',
+                'resource_capacity:resource_capacity_read',
+                'resource_capacity:resource_capacity_update',
+                'resource_capacity:resource_capacity_delete',
+            ]),
+            'description': '资源 / 资源组的多口径产能（口径 + 单位 + 日产能 + 有效性）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_capacity'],
+                'message': '建议分配资源产能数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 资源分配 —— 主数据组（v176 交付）
+            'menu_code': 'resource-assignment-list',
+            'menu_name': '资源分配',
+            'menu_path': '/resource-assignments',
+            'icon': 'CalendarCheck',
+            'color': '#ef4444',
+            'sort_order': 99,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_assignment',
+            'object_types': json.dumps(['resource_assignment']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_assignment', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_assignment:resource_assignment_create',
+                'resource_assignment:resource_assignment_read',
+                'resource_assignment:resource_assignment_update',
+                'resource_assignment:resource_assignment_delete',
+            ]),
+            'description': '工单工序的资源分配（资源 + 计划时间窗 + 计划量 + 状态）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_assignment'],
+                'message': '建议分配资源分配数据权限'
+            })
+        },
+        {
+            # [RESOURCE-P2B 2026-11-01] 资源区域分配 —— 主数据组（v176 交付）
+            'menu_code': 'resource-territory-assignment-list',
+            'menu_name': '资源区域分配',
+            'menu_path': '/resource-territory-assignments',
+            'icon': 'MapPin',
+            'color': '#22c55e',
+            'sort_order': 100,
+            'parent_menu': 'master-data',
+            'page_type': 'object_list',
+            'primary_object_type': 'resource_territory_assignment',
+            'object_types': json.dumps(['resource_territory_assignment']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'resource_territory_assignment', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'resource_territory_assignment:resource_territory_assignment_create',
+                'resource_territory_assignment:resource_territory_assignment_read',
+                'resource_territory_assignment:resource_territory_assignment_update',
+                'resource_territory_assignment:resource_territory_assignment_delete',
+            ]),
+            'description': '资源/资源组的服务区域覆盖（区域 + 覆盖级别 + 生效区间）',
+            'show_in_sidebar': 0,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['resource_territory_assignment'],
+                'message': '建议分配资源区域分配数据权限'
+            })
+        },
     ]
 
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========

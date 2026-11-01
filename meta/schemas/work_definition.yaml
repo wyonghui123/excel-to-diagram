@@ -1,0 +1,427 @@
+# 作业定义（Work Definition）—— 统一资源模型 P2b
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §9.3 数据模型表 / §9.2 目标架构
+#
+# 定位: 描述"怎么做"的标准作业定义。制造侧是工艺路线（routing，挂 item），
+#   服务侧是服务模板（service_template），两场景同表（definition_kind 区分）。
+#
+# 口径:
+#   ① (code, revision) 唯一：同一工艺路线允许多个版本（A/B/C）。
+#   ② definition_kind=routing 时 item_id 必填（服务层校验）。
+#   ③ revision 字符串版本，默认 "A"；status 控制生效/作废。
+#   ④ 被 work_definition_operations 引用时删除被拒绝（restrict）。
+
+id: work_definition
+name: 作业定义
+table_name: work_definitions
+description: 标准作业定义——工艺路线（routing）/ 服务模板（service_template）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 作业定义
+  category: core_entity
+  aliases:
+    - 作业定义
+    - 工艺路线
+    - 服务模板
+    - routing
+    - work definition
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: work_definition_operations
+      foreign_key: definition_id
+      message: 该作业定义下仍有工序，请先处理工序后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 作业定义编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 40
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 作业定义编码（与 revision 组合唯一）
+    semantics:
+      meaning: 作业定义业务代码
+      business_key: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 作业定义名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 作业定义名称
+    semantics:
+      meaning: 作业定义显示名称
+      display_name: true
+      data_category: text
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: definition_kind
+    name: 定义类型
+    type: string
+    db_column: definition_kind
+    required: true
+    default: routing
+    description: 定义类型（工艺路线 / 服务模板）
+    enum_values:
+      - value: routing
+        label: 工艺路线
+        color: primary
+        is_initial: true
+      - value: service_template
+        label: 服务模板
+        color: success
+    value_help:
+      source:
+        type: enum
+        enum_type_id: definition_kind
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 作业定义类型
+      filterable: true
+      filter_type: enum
+      filter_label: 定义类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 工艺路线对应的物料；definition_kind=routing 时必填
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+        placeholder: "服务模板无需物料"
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 160
+          - field: name
+            label: 物料名称
+            width: 220
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: revision
+    name: 版本
+    type: string
+    db_column: revision
+    required: true
+    default: A
+    max_length: 20
+    description: 版本号（默认 "A"）
+    semantics:
+      meaning: 作业定义版本
+      data_category: code
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 状态（草稿 / 生效 / 作废）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        is_initial: true
+      - value: active
+        label: 生效
+        color: success
+      - value: obsolete
+        label: 作废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: work_definition_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 作业定义状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 60
+
+  - id: org_id
+    name: 归属组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 归属组织；空表示共享
+    semantics:
+      meaning: 归属组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "共享"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 70
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 说明
+    semantics:
+      meaning: 作业定义说明
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 其他
+      fieldGroupPosition: 80
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code, revision]
+    unique: true
+    name: uq_work_definition_code_revision
+  - fields: [item_id]
+    name: idx_work_definition_item
+  - fields: [org_id]
+    name: idx_work_definition_org
+  - fields: [status]
+    name: idx_work_definition_status
+
+relations:
+  - id: work_definition_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（可空；真外键）
+  - id: work_definition_to_org
+    name: 归属组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 归属组织引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 作业定义
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 200
+        sortable: true
+      - field: definition_kind
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: item_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: revision
+        width: 90
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建作业定义
+        icon: plus
+        type: primary
+        permission: work_definition:work_definition_create
+    defaultSort:
+      field: code
+      order: asc
+  form:
+    title: 作业定义
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [definition_kind, item_id]
+          - fields: [revision, status]
+      - title: 归属
+        columns:
+          - fields: [org_id]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, definition_kind, item_id, revision, status, org_id,
+                 description]
+
+category_config:
+  create_permission: work_definition:work_definition_create
+  update_permission: work_definition:work_definition_update
+  delete_permission: work_definition:work_definition_delete
+  owner_auto_permission: false

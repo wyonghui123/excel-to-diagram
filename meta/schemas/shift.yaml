@@ -1,0 +1,416 @@
+# 班次（Shift）—— 统一资源模型 P2b / FR-014
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-014 / §9.3 数据模型表
+#
+# 定位: 班次是**与时序无关的时段模板**，日期维度交给 `calendar`；
+#   同一套三班制可被多条产线 / 多辆车 / 多个班组共享，因此挂在日历
+#   （`calendar_shift`）而不是资源上，全部 resource_kind 同构适用。
+#
+# 口径:
+#   ① code 全局唯一，^[A-Z][A-Z0-9_]*$。
+#   ② 净工时 = (end - start [+24h if crosses_midnight]) − break_minutes，
+#      由服务层计算，不落冗余列。
+#   ③ 被 calendar_shift 引用时删除被拒绝（restrict）。
+
+id: shift
+name: 班次
+table_name: shifts
+description: 班次时段模板（开始/结束时间、跨天标记、休息扣减、班次类型）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 班次
+  category: core_entity
+  aliases:
+    - 班次
+    - 时段模板
+    - shift
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: calendar_shifts
+      foreign_key: shift_id
+      message: 该班次仍被日历班次引用，请先处理日历班次后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 班次编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 班次编码（全局唯一）
+    semantics:
+      meaning: 班次业务代码
+      business_key: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 班次名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 班次名称
+    semantics:
+      meaning: 班次显示名称
+      display_name: true
+      data_category: text
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: start_time
+    name: 开始时间
+    type: string
+    db_column: start_time
+    required: true
+    max_length: 5
+    pattern: "^[0-2][0-9]:[0-5][0-9]$"
+    description: 班次开始时间（HH:MM）
+    semantics:
+      meaning: 班次开始时刻
+      data_category: text
+    ui:
+      widget: input
+      fieldGroup: 时段
+      fieldGroupPosition: 30
+
+  - id: end_time
+    name: 结束时间
+    type: string
+    db_column: end_time
+    required: true
+    max_length: 5
+    pattern: "^[0-2][0-9]:[0-5][0-9]$"
+    description: 班次结束时间（HH:MM）
+    semantics:
+      meaning: 班次结束时刻
+      data_category: text
+    ui:
+      widget: input
+      fieldGroup: 时段
+      fieldGroupPosition: 40
+
+  - id: crosses_midnight
+    name: 跨天班
+    type: boolean
+    db_column: crosses_midnight
+    required: true
+    default: false
+    description: 结束时间是否跨到次日（跨天班必填 true）
+    semantics:
+      meaning: 是否跨天
+      filterable: true
+      filter_type: enum
+      filter_label: 跨天班
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 时段
+      fieldGroupPosition: 50
+
+  - id: break_minutes
+    name: 休息扣减（分钟）
+    type: integer
+    db_column: break_minutes
+    required: true
+    default: 0
+    description: 班内休息时长，计算净工时时扣减
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 班内休息分钟数
+    ui:
+      widget: number
+      fieldGroup: 时段
+      fieldGroupPosition: 60
+
+  - id: shift_type
+    name: 班次类型
+    type: string
+    db_column: shift_type
+    required: true
+    default: regular
+    description: 班次类型（常规 / 加班 / 待命）
+    enum_values:
+      - value: regular
+        label: 常规
+        color: primary
+        is_initial: true
+      - value: overtime
+        label: 加班
+        color: warning
+      - value: standby
+        label: 待命
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: shift_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 班次类型
+      filterable: true
+      filter_type: enum
+      filter_label: 班次类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 70
+
+  - id: org_id
+    name: 归属组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 归属组织；空表示全局共享班次
+    semantics:
+      meaning: 归属组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "全局共享"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 80
+
+  - id: is_active
+    name: 启用
+    type: boolean
+    db_column: is_active
+    required: true
+    default: true
+    description: 是否启用
+    semantics:
+      meaning: 启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 启用
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 基本信息
+      fieldGroupPosition: 90
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 有效期起始日（含）；空表示立即有效
+    semantics:
+      meaning: 班次有效期起始日
+    ui:
+      widget: date
+      fieldGroup: 有效期
+      fieldGroupPosition: 100
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 有效期截止日（不含）；空表示长期有效
+    semantics:
+      meaning: 班次有效期截止日
+    ui:
+      widget: date
+      fieldGroup: 有效期
+      fieldGroupPosition: 110
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_shift_code
+  - fields: [org_id]
+    name: idx_shift_org
+  - fields: [valid_from]
+    name: idx_shift_validity
+
+relations:
+  - id: shift_to_org
+    name: 归属组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 归属组织引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 班次
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: start_time
+        width: 110
+      - field: end_time
+        width: 110
+      - field: crosses_midnight
+        width: 100
+      - field: break_minutes
+        width: 120
+      - field: shift_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: is_active
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建班次
+        icon: plus
+        type: primary
+        permission: shift:shift_create
+    defaultSort:
+      field: code
+      order: asc
+  form:
+    title: 班次
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [shift_type, is_active]
+      - title: 时段
+        columns:
+          - fields: [start_time, end_time]
+          - fields: [crosses_midnight, break_minutes]
+      - title: 归属与有效期
+        columns:
+          - fields: [org_id, valid_from, valid_to]
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, start_time, end_time, crosses_midnight,
+                 break_minutes, shift_type, org_id, is_active, valid_from, valid_to]
+
+category_config:
+  create_permission: shift:shift_create
+  update_permission: shift:shift_update
+  delete_permission: shift:shift_delete
+  owner_auto_permission: false

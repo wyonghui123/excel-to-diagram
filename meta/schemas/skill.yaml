@@ -1,0 +1,400 @@
+# 技能主数据（Skill）—— 统一资源模型 P2a / FR-003
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-003 / §9.3 数据模型表
+#
+# 定位: 技能是**主数据对象**（不是字段级枚举字典），被 resource_capability
+#   与 work_order_operation.required_skill_id 引用；需要独立生命周期
+#   （启用/停用、审计、权限、导入）。
+#
+# 口径:
+#   ① code 全局唯一，^[A-Z][A-Z0-9_]*$，是外部系统与导入导出的稳定键。
+#   ② parent_id 单父树，≤3 级；成环由服务层递归校验，直连自引用由 exclude_self 拦截。
+#   ③ 停用后不再进入新候选，但历史工单/能力引用不受影响。
+
+id: skill
+name: 技能
+table_name: skills
+description: 技能主数据——能力持有（resource_capability）与工序要求（required_skill_id）的共同字典
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 技能主数据
+  category: core_entity
+  aliases:
+    - 技能
+    - 资质
+    - 资格
+    - skill
+    - qualification
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: skills
+      foreign_key: parent_id
+      message: 该技能下仍有子技能，请先处理子技能后再删除
+    - table: resource_capabilities
+      foreign_key: skill_id
+      message: 该技能仍被资源能力引用，请先处理能力记录后再删除
+    - table: work_order_operations
+      foreign_key: required_skill_id
+      message: 该技能仍被工单工序引用，请先调整工序后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 技能编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    pattern: "^[A-Z][A-Z0-9_]*$"
+    description: 技能编码（全局唯一）
+    semantics:
+      meaning: 技能业务代码
+      business_key: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 技能名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 技能名称
+    semantics:
+      meaning: 技能显示名称
+      display_name: true
+      data_category: text
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: category
+    name: 技能分类
+    type: string
+    db_column: category
+    required: true
+    default: trade
+    description: 技能分类（工种/认证/语言/通用素质）
+    enum_values:
+      - value: trade
+        label: 工种
+        color: primary
+        is_initial: true
+      - value: certification
+        label: 认证
+        color: success
+      - value: language
+        label: 语言
+        color: info
+      - value: soft
+        label: 通用素质
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: skill_category
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 技能分类
+      filterable: true
+      filter_type: enum
+      filter_label: 技能分类
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: parent_id
+    name: 上级技能
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 上级技能ID（单父树，≤3 级）
+    semantics:
+      meaning: 上级技能引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 3
+      display:
+        type: association
+        target_type: skill
+        display_field: name
+        placeholder: "无上级"
+    value_help:
+      source:
+        type: bo
+        target_bo: skill
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        exclude_self: true
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_mode: tree
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 技能编码
+            width: 160
+          - field: name
+            label: 技能名称
+            width: 220
+    ui:
+      widget: select
+      relation: skill
+      multiple: false
+      clearable: true
+      fieldGroup: 层级
+      fieldGroupPosition: 40
+
+  - id: requires_certification
+    name: 需要认证
+    type: boolean
+    db_column: requires_certification
+    required: true
+    default: false
+    description: 是否要求持证上岗
+    semantics:
+      meaning: 是否需要认证
+      filterable: true
+      filter_type: enum
+      filter_label: 需要认证
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 资质
+      fieldGroupPosition: 50
+
+  - id: default_validity_months
+    name: 默认有效期（月）
+    type: integer
+    db_column: default_validity_months
+    nullable: true
+    description: 能力默认有效期（月），空表示长期有效
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 能力默认有效期月数
+    ui:
+      widget: number
+      fieldGroup: 资质
+      fieldGroupPosition: 60
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 启用状态（停用后不再进入新候选）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+    semantics:
+      meaning: 技能启用状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 70
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 说明
+    semantics:
+      meaning: 技能说明
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 其他
+      fieldGroupPosition: 80
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_skill_code
+  - fields: [parent_id]
+    name: idx_skill_parent
+  - fields: [category]
+    name: idx_skill_category
+  - fields: [status]
+    name: idx_skill_status
+
+relations:
+  - id: skill_to_parent
+    name: 上级技能
+    type: reference
+    target: skill
+    source_field: parent_id
+    target_field: id
+    cardinality: N:1
+    description: 上级技能引用（自引用树；真外键，restrict）
+
+ui_view_config:
+  # 菜单由迁移 v175 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 技能
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 220
+        sortable: true
+      - field: category
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: parent_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: skill
+        display_field: name
+        placeholder: "无上级"
+      - field: requires_certification
+        width: 110
+      - field: default_validity_months
+        width: 130
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建技能
+        icon: plus
+        type: primary
+        permission: skill:skill_create
+    defaultSort:
+      field: code
+      order: asc
+  form:
+    title: 技能
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [category, parent_id]
+          - fields: [status]
+      - title: 资质
+        columns:
+          - fields: [requires_certification, default_validity_months]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, category, parent_id, requires_certification, default_validity_months, status, description]
+
+category_config:
+  create_permission: skill:skill_create
+  update_permission: skill:skill_update
+  delete_permission: skill:skill_delete
+  owner_auto_permission: false
