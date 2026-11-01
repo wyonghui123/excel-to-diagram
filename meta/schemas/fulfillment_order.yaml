@@ -140,6 +140,50 @@ fields:
       widget: number
       clearable: true
 
+  # 项目锚点：履约分组单按 project_id 归集（可空；空 = 未归集到项目）
+  #   与 work_order / shipment 的挂载列同构：只声明字段 + 索引，不声明 reference 关系
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
   - id: fulfillment_type
     name: 履约类型
     type: string
@@ -286,6 +330,9 @@ indexes:
     name: idx_fulfillment_order_status
   - fields: [document_type_id]
     name: idx_fulfillment_order_document_type
+  # 项目归集：履约分组单按 project_id 过滤
+  - fields: [project_id]
+    name: idx_fulfillment_order_project
 
 relations:
   - id: fulfillment_order_to_document_type
@@ -329,6 +376,10 @@ ui_view_config:
         width: 160
         filterable: true
         filter_type: select
+      - field: project_id
+        width: 160
+        filterable: true
+        filter_type: select
       - field: fulfillment_type
         width: 120
         filterable: true
@@ -362,7 +413,7 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [fulfillment_no, order_id, status]
-          - fields: [customer_account_id, site_id]
+          - fields: [customer_account_id, site_id, project_id]
           - fields: [fulfillment_type, planned_date]
       - title: 编排
         columns:
@@ -382,6 +433,7 @@ ui_view_config:
           - order_id
           - customer_account_id
           - site_id
+          - project_id
           - fulfillment_type
           - status
           - planned_date

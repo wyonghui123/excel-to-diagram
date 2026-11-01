@@ -148,15 +148,15 @@
 
 | # | 缺口 | 等级 | 影响 |
 |---|---|---|---|
-| G1 | 无 `project` 对象与 `project_id` 挂载 | P0 | 项目类型商务层不可表达 |
-| G2 | `work_center_id` 悬空（无对象/无表） | P0 | 工序无法归属产能，排程/成本不可算 |
+| G1 | ~~无 `project` 对象与 `project_id` 挂载~~ **已落（P1）** | P0 | `project` 一等对象 + SO / 行 / 计划行 / 工单 / 交货单挂载，项目 360 五段按 `project_id` 原生过滤 |
+| G2 | ~~`work_center_id` 悬空（无对象/无表）~~ **已落（P2a）** | P0 | 改为 `resource_group_id`，工单工序归集到资源组，消除悬空引用 |
 | G3 | 无 `routing` 工艺路线主数据 | P0 | 工序只能工单级手填，标准工时不可复用 |
 | G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销） | P0 | 工程变更与项目实例化 BOM 不可表达 |
-| G5 | 资源只有 3 值枚举，无实例/日历/技能/费率 | P1 | 派工、资源排程、成本核算缺主数据 |
-| G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` 已落，`fulfillment_order` 待补） | P1 | 项目 360 已能跨链聚合交货单；业务分组单仍缺锚点 |
+| G5 | ~~资源只有 3 值枚举，无实例/日历/技能/费率~~ **已落（P2，v175 / v176 / v180）** | P1 | `resource` / `resource_group` / `resource_capability` / `skill` / `shift` / `calendar_shift` / `resource_rate` 已落库 |
+| G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` **已落 v177**，`fulfillment_order.project_id` **已落 v183**） | P1 | 三条履约链均可按 `project_id` 归集；项目 360 仍为五段（未新增履约分组段） |
 | G7 | Gen2 任务六表不在 YAML 元模型内 | P1 | 四层对象无法统一治理（与 L18 治理项同源） |
-| G8 | 三套里程碑（billing / SLA / 计划行）无统一项目外键 | P1 | 项目进度与收款视图割裂 |
-| G9 | `order_type=repair/install/maintenance` inactive | P2 | 项目售后场景受限 |
+| G8 | ~~三套里程碑（billing / SLA / 计划行）无统一项目外键~~ **已落（P1 / P2）** | P1 | `sla_milestone.project_id`、`sales_order_schedule.project_id` 已落；三套里程碑可按项目归集 |
+| G9 | ~~`order_type=repair/install/maintenance` inactive~~ **已落（P2 收尾）** | P2 | 售后三值已启用，复用 service 路径 |
 | G10 | ~~`configuration` 无 `project_id`~~ **已落（v178，P3）** | P2 | 项目级选配可归集；物化链路不感知项目标签（AC-06 已测） |
 | G11 | `source_demand_type` 无 `project_task` 枚举 | P0 | 项目无法产生执行需求（扩 1 个枚举值即可） |
 | G12 | 生产履约「有壳无骨」：`work_order_operation` 只有 `(work_order_id, seq)`，无工作中心 / 标准工时 / routing 溯源 | P0 | `production` 仅类型校验通过，工序不具备制造语义 |
@@ -308,3 +308,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.6：G10 落地——`configuration.project_id`（v178，可空 + `(project_id, status)` 索引 + 列表/表单 UI）；AC-06 由测试闭环（有项目标签的配置物化结果不变，`project_id` 留在配置实例不写进 items） |
 | 2026-11-01 | v1.7：P1.5 落地——`project_task` / `project_task_dependency`（v179，含状态机、四类依赖 + lag、项目内唯一索引、手工菜单）；`work_order.source_demand_type` 扩 `project_task`（G11）；AC-09 四点由 `meta/tests/test_project_p15.py` 闭环；工时回聚派生视图因 G7（Gen2 任务六表未进元模型）标注「待 G7」 |
 | 2026-11-01 | v1.8：G14 闭环——`time_entry`（`time_entries`，v182）+ 三张派生视图 + 查询服务 / API；补 D13-D17；D11 明确工时视图载体不回读 Gen2 `worklogs`；§2.5 红线 3 与 §8.2 红线 1 / 2 确认未破（G7 仍为治理项，不再是 G14 前置） |
+| 2026-11-01 | v1.9：G6 收尾——`fulfillment_order.project_id`（v183，可空 + `idx_fulfillment_order_project`），三条履约链（工单 / 交货单 / 履约分组单）共用项目锚点；G1 / G2 / G5 / G8 / G9 缺口表按代码实况回填为已落；项目 360 仍为五段（未新增履约分组段） |

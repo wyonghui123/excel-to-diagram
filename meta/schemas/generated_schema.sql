@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 18:56:53.273996
+-- 生成时间: 2026-11-01 20:55:09.912180
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -841,6 +841,7 @@ CREATE TABLE IF NOT EXISTS fulfillment_orders (
     order_id INTEGER NOT NULL,
     customer_account_id INTEGER,
     site_id INTEGER,
+    project_id INTEGER,
     fulfillment_type VARCHAR(200) NOT NULL DEFAULT 'delivery',
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     workflow_run_id INTEGER,
@@ -3327,6 +3328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_fulfillment_no ON fulfillment_orders(fulfil
 CREATE INDEX IF NOT EXISTS idx_fulfillment_order_order ON fulfillment_orders(order_id)
 CREATE INDEX IF NOT EXISTS idx_fulfillment_order_status ON fulfillment_orders(status)
 CREATE INDEX IF NOT EXISTS idx_fulfillment_order_document_type ON fulfillment_orders(document_type_id)
+CREATE INDEX IF NOT EXISTS idx_fulfillment_order_project ON fulfillment_orders(project_id)
 
 -- Indexes for 履约路由规则
 CREATE INDEX IF NOT EXISTS idx_fulfillment_routing_lookup ON fulfillment_routing_rules(enabled, priority)

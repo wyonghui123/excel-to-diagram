@@ -13,6 +13,7 @@
   P2-2 售后三值（repair / install / maintenance）转 active（G9）
   P2-3 shipment 补可空 project_id（G6），v177 幂等迁移
   P2-4 configuration 补可空 project_id（G10 / P3），v178 幂等迁移
+  P2-5 fulfillment_order 补可空 project_id（G6 收尾），v183 幂等迁移
 
 建库一律走 factories 的 create_tables / seed_row（conftest 的裸 SQL 守卫
 会把含裸 DML 的测试文件整体 skip）。
@@ -41,6 +42,7 @@ from meta.migrations.v175__work_order_project_id import (  # noqa: E402
 from meta.migrations import v176__sla_milestone_project_id as v176  # noqa: E402
 from meta.migrations import v177__shipment_project_id as v177  # noqa: E402
 from meta.migrations import v178__configuration_project_id as v178  # noqa: E402
+from meta.migrations import v183__fulfillment_order_project_id as v183  # noqa: E402
 
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
@@ -402,6 +404,82 @@ def _build_legacy_configuration_db(path):
     try:
         conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, status TEXT)'
                      .format(v178.CONFIGURATION_TABLE))
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+class TestFulfillmentOrderProjectAnchor:
+    """G6 收尾：履约分组单按 project_id 归集（三条履约链共用项目锚点）。"""
+
+    def test_project_id_declared_nullable_without_fk(self):
+        raw = _load_raw('fulfillment_order')
+        field = _field(raw, 'project_id')
+        assert field is not None
+        assert field['nullable'] is True
+        assert field['semantics']['display']['target_type'] == 'project'
+        indexes = {i['name'] for i in raw['indexes']}
+        assert v183.PROJECT_INDEX in indexes
+        relations = {r['id'] for r in raw['relations']}
+        assert 'fulfillment_order_to_project' not in relations
+
+    def test_ui_exposes_project_in_list_form_and_detail(self):
+        ui = _load_raw('fulfillment_order')['ui_view_config']
+        assert 'project_id' in {c['field'] for c in ui['list']['columns']}
+        form_fields = [
+            f for section in ui['form']['sections']
+            for column in section['columns']
+            for f in column['fields']
+        ]
+        assert 'project_id' in form_fields
+        detail_fields = [
+            f for facet in ui['detail']['facets']
+            for f in facet['fields']
+        ]
+        assert 'project_id' in detail_fields
+
+    def test_generated_ddl_has_plain_nullable_column(self):
+        _reload_quietly()
+        mo = registry.get('fulfillment_order')
+        assert mo is not None
+        sql = SchemaGenerator("sqlite").generate_create_table(mo)
+        assert 'project_id INTEGER' in sql
+        assert 'FOREIGN KEY (project_id)' not in sql
+        assert mo.table_name == v183.FULFILLMENT_TABLE
+
+    def test_migration_adds_column_and_index(self, tmp_path):
+        db = tmp_path / 'g6_fulfillment.db'
+        _build_legacy_fulfillment_db(db)
+        assert v183.verify(db) is False
+        assert v183.migrate(db) is True
+        assert v183.verify(db) is True
+        assert v183.PROJECT_COLUMN in _columns(db, v183.FULFILLMENT_TABLE)
+        assert _index_count(db, v183.PROJECT_INDEX) == 1
+
+    def test_migration_is_idempotent(self, tmp_path):
+        db = tmp_path / 'g6_fulfillment_twice.db'
+        _build_legacy_fulfillment_db(db)
+        assert v183.migrate(db) is True
+        assert v183.migrate(db) is True
+        assert v183.verify(db) is True
+        assert _index_count(db, v183.PROJECT_INDEX) == 1
+
+    def test_rollback_drops_index_keeps_column(self, tmp_path):
+        db = tmp_path / 'g6_fulfillment_rollback.db'
+        _build_legacy_fulfillment_db(db)
+        assert v183.migrate(db) is True
+        assert v183.rollback(db) is True
+        assert _index_count(db, v183.PROJECT_INDEX) == 0
+        assert v183.PROJECT_COLUMN in _columns(db, v183.FULFILLMENT_TABLE)
+
+
+def _build_legacy_fulfillment_db(path):
+    """最小骨架表：模拟 v183 之前（无 project_id）的存量库。"""
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, order_id INTEGER)'
+                     .format(v183.FULFILLMENT_TABLE))
         conn.commit()
     finally:
         conn.close()
