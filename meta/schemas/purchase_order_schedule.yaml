@@ -18,6 +18,14 @@
 #   由收货服务在过账 / 红冲时回写；M3 落地前恒为空（不回填 0，避免与
 #   「未收货」和「零收货」语义混淆）。表结构层面仍是列，不是虚拟字段。
 #
+# 收货回写的三列缓存（R-RC-16 / R-RC-18 / R-RC-10）:
+#   received_qty         净收累计（≈ Oracle ACCEPTED），红冲按流水重算
+#   rejected_qty         拒收累计，与净收分开记账，不得混算
+#   completion_source    置为 completed 的来源（receipt / manual / short_close）
+#   completion_prev_status  自动完成前状态快照，仅 receipt 来源可回退
+#   四列均只读（semantics.readonly + ui.editable=false），唯一写入口是
+#   receipt_service；且从 audit.update.exclude 中排除，避免派生差异污染审计。
+#
 # 守卫不变量（R-SCH-0 ~ R-SCH-4，由 purchase_order_guard_service 强制）:
 #   R-SCH-0  order_id 必须等于 line_id 所属订单；schedule_no 在同
 #            line_id + schedule_kind 内唯一
@@ -56,7 +64,11 @@ audit:
       - id
       - created_at
       - updated_at
+      # 收货回写的派生缓存（由 receipt_service 维护，不进人工审计差异）
       - received_qty
+      - rejected_qty
+      - completion_source
+      - completion_prev_status
   delete:
     enabled: true
     fields: business_only
@@ -329,6 +341,83 @@ fields:
       widget: number
       editable: false
 
+  # 拒收量与净收量分开记账（R-RC-18）：received_qty 只扣净收，rejected_qty 独立累加
+  - id: rejected_qty
+    name: 已拒收数量
+    type: number
+    db_column: rejected_qty
+    nullable: true
+    default: 0
+    description: 累计拒收数量（只读缓存，由收货服务过账 / 红冲回写；不参与净收）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 4
+    semantics:
+      meaning: 累计拒收数量（缓存）
+      readonly: true
+      filterable: false
+    ui:
+      widget: number
+      editable: false
+
+  # 「谁把计划行置为 completed」决定红冲能否回退（R-RC-10）：
+  #   只有 receipt 来源可回退到 completion_prev_status；manual / short_close 不回退
+  - id: completion_source
+    name: 完成来源
+    type: string
+    db_column: completion_source
+    nullable: true
+    max_length: 20
+    description: 置为已完成的来源（receipt 收货自动 / manual 人工 / short_close 短收结案）
+    enum_values:
+      - value: receipt
+        label: 收货自动完成
+        color: success
+        category: active
+      - value: manual
+        label: 人工完成
+        color: info
+        category: active
+      - value: short_close
+        label: 短收结案
+        color: warning
+        category: active
+    semantics:
+      meaning: 计划行完成来源
+      readonly: true
+      filterable: true
+      filter_type: enum
+      filter_label: 完成来源
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: completion_prev_status
+    name: 完成前状态
+    type: string
+    db_column: completion_prev_status
+    nullable: true
+    max_length: 20
+    description: 自动完成前原状态（planned / confirmed），红冲回退时使用
+    enum_values:
+      - value: planned
+        label: 内排
+        color: info
+        category: active
+      - value: confirmed
+        label: 已确认
+        color: primary
+        category: active
+    semantics:
+      meaning: 自动完成前的计划状态快照
+      readonly: true
+    ui:
+      widget: select
+      editable: false
+      hidden_in_form: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -449,6 +538,8 @@ ui_view_config:
         width: 110
       - field: received_qty
         width: 110
+      - field: rejected_qty
+        width: 110
       - field: status
         width: 100
         filterable: true
@@ -470,4 +561,4 @@ ui_view_config:
       - title: 到货承诺
         columns:
           - fields: [promised_date, promised_qty, received_qty]
-          - fields: [deliver_to_location_id]
+          - fields: [rejected_qty, deliver_to_location_id]

@@ -20,7 +20,7 @@
 | 审不审批是否由 document type 定 | **document type 决定「用哪套策略」，不决定「是否审批」**。平台层应以 `document_type_id` 作为策略选择维度，再叠加金额 / 组织 / 品类条件；无匹配策略 = 免审批。**条件因子由独立审批规则模型（策略 / 条件 / 步骤，见 §6.2）承载，不是控制参数表的列** |
 | 采购业务类型（委外 / 资产 / 服务 / 费用） | **放行级 `line_type`，不放头级**。一张 PO 可混合物料与服务（SAP item category、Oracle line type + 分配行 expense destination 均为行级）；委外不新建单据对象 |
 | 成本中心 / distribution | distribution 在 Oracle 就是「记账到谁头上」（`ChargeAccountId` = 公司 + 成本中心 + 科目 + 项目），与 pegging 同表。所以成本维度（成本中心 / 费用科目 / 资产类别）**长在分配行**，并加 `charge_basis` 决定记账走向 |
-| 收货 / 发票 | **另立 spec**。本 spec 只定对象关系：`purchase_order_schedule`（到货计划行）→ `receipt_line`（收货行）→ `vendor_invoice_line`（发票行），并给出与销售侧 `sales_order_schedule` / `shipment_line` 的镜像表 |
+| 收货 / 发票 | 收货已另立并细化：`spec-receipt-object-model-2026-11-01.md`（头 / 行 / 过账 / 红冲 / 分配拆分）；本 spec 仍只定对象关系：`purchase_order_schedule`（到货计划行）→ `receipt_line`（收货行）→ `vendor_invoice_line`（发票行）；**发票仍待立** |
 | 本 spec 明确不做的 | PO 头 `from_org / to_org`（T-D8）、供应商主数据新表（T-D4）、`doc_flow` 写边（M6）、ASN 对象（列为未决） |
 
 ---
@@ -57,7 +57,7 @@ purchase_order（采购订单，本 spec）
 | 单据类型平台 | v170 / v171 已落，`type_definitions` 可挂 `scope_bo='purchase_order'` | 无阻塞 |
 | 需求层审批 | M1 已落 `tasks(type=approval)` + 控制参数 | PO 审批可复用同一底座 |
 | sourcing 求值 | M2 代码齐备但全仓无调用方 | `supplier_party_id` 先人工填；`sourcing_rule_line_id` 先留空 |
-| 收货 / 发票 | 全缺 | 本 spec 只定 `source_doc_type` 契约与计划行层，字段另立 spec |
+| 收货 / 发票 | 收货已细化（`spec-receipt-object-model-2026-11-01.md`）；发票仍待立 | 收货字段 / 过账 / 红冲已独立成 spec；本 spec 保留 `source_doc_type` 契约与计划行层 |
 | `doc_flow` | 内核已存在，app 未声明 | M3 不写边；数量闭合用 `demand_allocation` + 收货行引用 |
 
 风险：M2 未接线时，合并采购的「同物料同供应商」只能人工判断；M3 出口判据中的 sourcing 相关项降级为「结构可回填，不阻塞验收」。
@@ -79,7 +79,7 @@ purchase_order（采购订单，本 spec）
 | U7 | 审计切面 | `aspects: [audit_aspect]`；`create: all` / `update: changed_only` / `delete: business_only`；派生缓存列与 PII 列排除 |
 | U8 | 删除策略 | `mode: restrict`，`cascade_delete: [purchase_order_lines]`；非草稿禁删行（守卫强制度） |
 | U9 | 版本号 | `revision_no` 整数、默认 1、平台写入、界面不可编辑 |
-| U10 | 派生缓存 | `fulfillment_status` / `fulfillment_derived_at` 为**只读缓存**（T-D19），事实源是收货 / 分配数据，禁止人工改；计划行 `received_qty` 为计算字段，不落库 |
+| U10 | 派生缓存 | `fulfillment_status` / `fulfillment_derived_at` 为**只读缓存**（T-D19），唯一写入方 `PurchaseOrderFulfillmentService`，禁止人工改；计划行 `received_qty` / `rejected_qty` 为只读缓存列（真源是 `receipt_line` 过账流水，R-RC-16 对账） |
 | U11 | 子表挂载 | 行与计划行不建顶层菜单；头 `ui_view_config` 用 `child_sections` 内联行、分配、计划；`skip_auto_menu: true`，菜单由迁移落库 |
 | U12 | 编号 | 头创建时经 `type_definitions.number_sequence_id` 取号（平台通用路径 `meta/api/bo_api.py` L482-500），生成后不可改，允许跳号 |
 | U13 | 计划层 | SO 有 `sales_order_schedule`；PO 必须有同构的 `purchase_order_schedule`，下游单据（SO→shipment / PO→receipt）都挂在计划行上，不直接挂订单行 |
@@ -142,8 +142,8 @@ purchase_order（采购订单，本 spec）
 | 33 | `description` | 订单说明 | text(2000) | 否 | `description` | 与 SO 同义 |
 | 34 | `revision_no` | 版本号 | integer | 是 | `revision_no` | 默认 1，平台写入 |
 | 35 | `approval_status` | 审批状态 | string(20) | 是 | （SO 无） | **只读缓存**：`not_required / pending / approved / rejected`；默认 `not_required`，由审批任务派生，见 §6 |
-| 36 | `fulfillment_status` | 履约状态 | string(20) | 否 | `fulfillment_status` | **只读缓存**：`open / partially_received / received / closed` |
-| 37 | `fulfillment_derived_at` | 履约派生时间 | datetime | 否 | 同名 | **只读缓存** |
+| 36 | `fulfillment_status` | 履约状态 | string(20) | 否 | `fulfillment_status` | **只读缓存**：`open / partially_received / received / closed`；唯一写入方 `PurchaseOrderFulfillmentService` |
+| 37 | `fulfillment_derived_at` | 履约派生时间 | datetime | 否 | 同名 | **只读缓存**；随派生刷新，作为巡检水位 |
 | 38 | `created_at` | 创建时间 | datetime | 否 | `created_at` | — |
 | 39 | `updated_at` | 更新时间 | datetime | 否 | `updated_at` | — |
 
@@ -684,9 +684,12 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 7 | `promised_date` | 承诺到货日 | date | 是 | 供应商承诺日；可与「需求日」不同 |
 | 8 | `promised_qty` | 承诺数量 | number(6) | 是 | `> 0`；单位 = 订单行 `uom_id` |
 | 9 | `status` | 计划状态 | string(20) | 是 | `planned / confirmed / completed / cancelled`，默认 `planned` |
-| 10 | `received_qty` | 已收数量 | number(6) | 否 | **只读缓存列（实现修正）**：口径仍是 `sum(receipt_line.qty_received - qty_rejected)`，仅 `posted` 收货；但本波没有收货对象，无法在读取时派生，故落为 nullable 列并由收货服务过账 / 红冲时回写，M3 前恒为空（不回填 0，避免「未收货」与「零收货」混淆） |
-| 11 | `created_at` | 创建时间 | datetime | 否 | — |
-| 12 | `updated_at` | 更新时间 | datetime | 否 | — |
+| 10 | `received_qty` | 已收数量 | number(6) | 否 | **只读缓存（净收口径）**：`sum(posted 标准单 qty_received − qty_rejected) − sum(posted 红字单净量)`，≈ Oracle `QUANTITY_ACCEPTED`；仅收货服务过账 / 红冲回写；不回填 0（区分「未收货」与「零收货」）；R-RC-16 对账以 `receipt_line` 流水为准 |
+| 11 | `rejected_qty` | 累计拒收量 | number(6) | 否 | **只读缓存**：`sum(posted qty_rejected)`；与 `received_qty` 独立累加，不得混算（R-RC-18） |
+| 12 | `completion_source` | 完成来源 | string(20) | 否 | `manual / receipt / short_close`；仅 `status='completed'` 时有值，红冲只回退 `receipt` 来源 |
+| 13 | `completion_prev_status` | 完成前状态 | string(20) | 否 | `planned / confirmed`；红冲时据此回退（避免把原 `planned` 错写成 `confirmed`） |
+| 14 | `created_at` | 创建时间 | datetime | 否 | — |
+| 15 | `updated_at` | 更新时间 | datetime | 否 | — |
 
 ### 10.3 索引与关系
 
@@ -705,8 +708,9 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 规则 id | 名称 | from | to | 说明 |
 |---|---|---|---|---|
 | `confirm_po_schedule` | 确认到货计划 | `planned` | `confirmed` | 供应商承诺后确认 |
-| `complete_po_schedule` | 完成到货 | `confirmed` | `completed` | 累计收货 = 承诺量时由收货服务自动置位 |
-| `cancel_po_schedule` | 作废 | `planned, confirmed` | `cancelled` | 已有 `posted` 收货时禁止作废 |
+| `complete_po_schedule` | 完成到货 | `confirmed` | `completed` | 累计净收 ≥ 承诺量时由收货服务自动置位，写 `completion_source='receipt'` + `completion_prev_status` |
+| `close_po_schedule` | 短收结案 | `planned, confirmed` | `completed` | `completion_source='short_close'`，记 `closed_short_qty = promised_qty − received_qty`；结案后禁止再收货 |
+| `cancel_po_schedule` | 作废 | `planned, confirmed` | `cancelled` | 已有 `posted` 收货时禁止作废；`completed` 不可作废 |
 
 不变量：
 
@@ -715,6 +719,8 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 - R-SCH-2：同一 PO 行的计划行 `promised_qty` 合计不得超过行 `qty`（允许后续追加计划行，不允许超计划）。
 - R-SCH-3：收货累计量 > `promised_qty` 时拒绝（容差默认 0，未来由控制参数 `receipt_over_tolerance_percent` 放开）。
 - R-SCH-4：计划行作废后不可重开；新增计划行顺延 `schedule_no`。
+- R-SCH-5：`completion_source='short_close'` 的计划行禁止再收货（`RC_SCHEDULE_CLOSED`）；`completed` 计划行不可回退，只能由红字收货单按 `completion_prev_status` 回退 `completion_source='receipt'` 的完成。
+- R-SCH-6：`received_qty`（净收）与 `rejected_qty`（拒收）独立累加；两者以 `receipt_line` 流水为准，计划行列只作缓存（R-RC-16 对账）。
 
 ### 10.5 与销售侧镜像
 
@@ -734,7 +740,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 
 ---
 
-## 11. 收货 / 发票接口契约（T-D12，字段细化另立 spec）
+## 11. 收货 / 发票接口契约（T-D12）；收货字段细化见 `spec-receipt-object-model-2026-11-01.md`，发票后置
 
 | 约定 | 内容 |
 |---|---|
@@ -751,6 +757,8 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 到货计划 vs ASN | 计划行是**买方计划 / 供应商承诺**；ASN（供应商预先发货通知）是外部事件，M3 不建，列为未决 Q1 |
 
 本 spec 只要求：M3 第一阶段落 PO + 计划行后，收货 / 发票 spec 必须遵守以上契约，不得另起字段名。
+
+> 收货 spec §18 提出 7 项对本 spec 的修订，**已于 2026-11-01 评审通过并回写**：R-PO-9 分段计数（§14.1）、`close_po_schedule` 与 `completion_source`（§10.4）、计划行新增 `rejected_qty` / `completion_source` / `completion_prev_status`（§10.2）、`schedule_id` 改为「PO 来源必填」、收货头字段扩展、分配拆分算法（收货 spec §6.1）。履约派生唯一写入方为 `PurchaseOrderFulfillmentService`（§3 字段 36/37）。
 
 ---
 
@@ -775,7 +783,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | 头表单分区 | 基本信息（`order_no / document_type_id / order_date / status`）；供应商与组织（`supplier_party_id / supplier_account_id / supplier_reference_no / purchase_org_id / org_id / division_code`）；交付与条款（`deliver_to_location_id / requested_date / confirmed_date / payment_term_id / incoterm_code / currency_id / exchange_rate / exchange_rate_type / exchange_rate_date`）；金额（4 个头折扣 / 附加字段 + `net / tax / gross`）；说明（`description`） |
 | 详情子表 | `child_sections`：`purchase_order_line`（行）、`purchase_order_schedule`（到货计划）。**落库后回写（D-PO-23）**：`demand_allocation` 是多态分配表（`target_bo` + `target_id` 可指向任意载体，没有单一父字段），M3 不放进 `child_sections`，由服务 / API 维护；等 M6 派生只读视图就位后再做「需求分配」tab，不为单载体写前端特例 |
 | 行列表列 | `line_no / line_type_id / item_id / supplier_item_code / description / qty / uom_id / unit_price / net_amount / tax_amount / gross_amount / requested_date / deliver_to_location_id / status / fulfillment_status` |
-| 计划行列表列 | `schedule_no / line_id / schedule_kind / deliver_to_location_id / promised_date / promised_qty / received_qty / status` |
+| 计划行列表列 | `schedule_no / line_id / schedule_kind / deliver_to_location_id / promised_date / promised_qty / received_qty / rejected_qty / status` |
 | 行表单分区 | 基本信息（`line_no / line_type_id`）；物料（`item_id / supplier_item_code / description`）；数量与价格（`qty / uom_id / unit_price / net_amount`）；税（`tax_code_id / tax_rate_percent / tax_amount / gross_amount`）；交付（`requested_date / deliver_to_location_id`）；服务（`service_start_date / service_end_date`，仅服务行）；价格来源（`price_source`，只读 `price_trace`） |
 | 菜单 | 顶层分组 `procurement`（无页面 / 无路径），子菜单 `purchase-order-management` → `/purchase-orders`；`skip_auto_menu: true` |
 | 权限码 | 双段式：`purchase_order:purchase_order_create/read/update/delete/list`、`purchase_order_line:*`、`purchase_order_schedule:*`、`demand_allocation:*`；与 `v121` 同款写法 |
@@ -792,7 +800,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 |---|---|---|---|
 | 1 | `meta/schemas/purchase_order.yaml`（新建） | §3 头字段（含 `approval_status`）、§2 统一骨架、状态机、索引、关系、`ui_view_config`（含 `child_sections`） | YAML 加载无报错；`metadata_validator` 通过 |
 | 2 | `meta/schemas/purchase_order_line.yaml`（新建） | §4 行字段、行规则、索引、关系 | 同上 |
-| 3 | `meta/schemas/purchase_order_schedule.yaml`（新建） | §10 计划行字段、状态机、索引、`received_qty` 只读缓存列、UI 配置 | 同上 |
+| 3 | `meta/schemas/purchase_order_schedule.yaml`（新建） | §10 计划行字段、状态机、索引、`received_qty` / `rejected_qty` / `completion_source` / `completion_prev_status` 只读缓存列、UI 配置 | 同上 |
 | 4 | `meta/schemas/demand_allocation.yaml`（新建） | §9 字段、唯一索引、审计、UI 三态 | 同上 |
 | 5 | `meta/migrations/v177__purchase_order_object.py`（新建） | 建四张表 + 索引；补 `requisition_line.cost_center_id`（§9.2.1 前置小改）；seed `type_definitions`（`PO_STD` / `PO_GOODS` / `PO_SUBCONTRACT` / `PO_ASSET` / `PO_SERVICE` / `PO_EXPENSE` / `PO_TEXT`）；seed `number_sequences`（`PO-`）；回填 `number_sequence_id` / `default_type_id`；permissions（双段式）；menus（`procurement` + `purchase-order-management`）；幂等；`verify()` 断言表 / 类型 / 序列 / 权限 / 菜单 | 迁移连跑两次，DB 终态一致 |
 | 6 | `meta/migrations/v178__approval_rule_model.py`（新建） | 建 `approval_policies` / `approval_policy_conditions` / `approval_policy_steps` 三表 + 索引；seed 组织级 `approval_enabled` 控制参数；旧 `demand_approval_*` 标 deprecated；PO 默认无策略 = 免审批 | 迁移幂等；`DocumentApprovalResolver` 能按对象字段求值 |
@@ -829,7 +837,7 @@ PO 的第三层，挂在 PO 行上，回答「这批货什么时候到、到多�
 | R-PO-6 | 非草稿禁删行；禁改 `order_no` / `document_type_id` / `currency_id` / `supplier_party_id` |
 | R-PO-7 | 确认时冻结 `exchange_rate / exchange_rate_type / exchange_rate_date / tax_rate_percent / unit_price` |
 | R-PO-8 | 提交 / 确认时 `supplier_party_id` 必须有有效 `party_relation(role='vendor', internal_mark='外部')`；`purchase_org_id` 必须有 purchasing 职能 |
-| R-PO-9 | 分配：`sum(active.qty) <= 计划行 promised_qty`；`sum(active.qty) <= 行 qty`；同需求行 `sum(active.qty) <= 需求行 qty` |
+| R-PO-9 | 分配分段计数（按 `target_bo`，两段不相加）：① `target_bo='purchase_order'`：`sum(active.qty) <= 计划行 promised_qty`、`<= 行 qty`、同需求行 `<= 需求行 qty`；② `target_bo='receipt'`：单条 `<=` 对应 PO 分配剩余量，同需求行在本计划行累计 `<=` 对应 PO 分配 `qty × (1 + receipt_over_tolerance_percent)`（与 R-SCH-3 共用容差） |
 | R-PO-10 | 行 / 计划行 `cancelled` ⇒ 其 `active` 分配置 `reversed` 并写 `reversed_at` |
 | R-PO-11 | 计划行 `order_id` 必须与 `line_id` 所属订单一致；`schedule_no` 行内唯一 |
 | R-PO-12 | 确认动作仅当 `approval_status ∈ {not_required, approved}`；`approval_status=pending` 时禁止 `confirm_purchase_order` |
