@@ -50,7 +50,7 @@
 | `items` | `item_type(goods/service)`、`billing_method_default`、`required_resource_type`、`standard_duration/duration_type`、`is_field_service`、`structure_role(none/model/option_class)`、`config_match_policy(no/one_time_standard/one_time_user_defined)`、`config_materialize_policy(off/manual/auto)`、`variant_of_item_id / variant_config_hash` | 实物与服务同表，服务属性 1:1 不拆表（YAML 注释明确） |
 | `item_structure` | `item_id / usage(production/engineering/sales/costing) / alternative_no / revision / base_qty / status / valid_from/to` | 一套 BOM 用 `usage` 区分用途 |
 | `item_structure_line` | `component_item_id / qty_per / fixed_qty / scrap_rate / optional_flag / phantom_flag / substitute_group_code / operation_seq / bom_price / valid_from/to` | 已具备选配与替代组 |
-| `configuration` | `model_item_id`（根）、`structure_id`、`config_hash`、`status`、`source_level`、`context_json`、`variant_item_id`、`materialize` | 根是模型物料，**无项目上下文列** |
+| `configuration` | `model_item_id`（根）、`structure_id`、`project_id`（v178 补）、`config_hash`、`status`、`source_level`、`context_json`、`variant_item_id`、`materialize` | 根是模型物料；项目上下文列 `project_id` 已补（v178），扩展上下文仍走 `context_json` |
 | `configuration_component` | `component_key / parent_component_key / structure_line_id / substitute_for_key / child_configuration_id` | 支持嵌套配置 |
 | `config_rule` | `structure_id / rule_type / severity / priority / message` | 规则按结构绑定，无项目作用域 |
 
@@ -157,7 +157,7 @@
 | G7 | Gen2 任务六表不在 YAML 元模型内 | P1 | 四层对象无法统一治理（与 L18 治理项同源） |
 | G8 | 三套里程碑（billing / SLA / 计划行）无统一项目外键 | P1 | 项目进度与收款视图割裂 |
 | G9 | `order_type=repair/install/maintenance` inactive | P2 | 项目售后场景受限 |
-| G10 | `configuration` 无 `project_id` | P2 | 项目级选配不可归集 |
+| G10 | ~~`configuration` 无 `project_id`~~ **已落（v178，P3）** | P2 | 项目级选配可归集；物化链路不感知项目标签（AC-06 已测） |
 | G11 | `source_demand_type` 无 `project_task` 枚举 | P0 | 项目无法产生执行需求（扩 1 个枚举值即可） |
 | G12 | 生产履约「有壳无骨」：`work_order_operation` 只有 `(work_order_id, seq)`，无工作中心 / 标准工时 / routing 溯源 | P0 | `production` 仅类型校验通过，工序不具备制造语义 |
 | G13 | 双执行通道未定界（`workflow_run + tasks` 与 `work_order_operation` 并存） | P0 | 同一动作两处留痕，报工口径分裂 |
@@ -192,7 +192,7 @@
 | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + SO/line/schedule 挂载 + 项目 360 只读视图 | 新增对象，旧单据可空 |
 | Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图 | 新增计划层对象，执行链路不变 |
 | Phase 2 | `work_center / resource / resource_capability / routing(+operation)`；`work_order.project_id`；工序溯源 | 新增主数据，工单可空挂载 |
-| Phase 3 | `configuration.project_id` + `context_json` 承载项目上下文；项目配置物化联动（**不建项目级 BOM 快照**，D5 撤销） | 配置层挂载，履约链路不变 |
+| Phase 3 | `configuration.project_id`（**已落，v178**）+ `context_json` 承载项目上下文；项目配置物化联动（**不建项目级 BOM 快照**，D5 撤销） | 配置层挂载，履约链路不变 |
 | Phase 4 | 项目预算/收入确认；`project` generic 权限维度评估 | 按需 |
 
 ---
@@ -300,3 +300,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.3：补 §2.5 计划层对象契约与 Phase 1.5 排期；新增 AC-09；修正 P1–P4 未覆盖 `project_task` 的里程碑漏项 |
 | 2026-11-01 | v1.4：P3 裁决——撤销 D5，不建 `project_structure_snapshot`（AC-07 已由 `work_order_components` 工单级展开快照满足）；§2.3 / §3 G4 / Phase 3 / AC-07 / D5 / §8.4 同步；P3 范围收缩为 `configuration.project_id` + 物化联动 |
 | 2026-11-01 | v1.5：G6 落地——`shipment.project_id`（v177）+ 360 第五段「交货单」，AC-03 的 shipment 聚合闭环；AC-07 补断言测试；G6 只剩 `fulfillment_order` |
+| 2026-11-01 | v1.6：G10 落地——`configuration.project_id`（v178，可空 + `(project_id, status)` 索引 + 列表/表单 UI）；AC-06 由测试闭环（有项目标签的配置物化结果不变，`project_id` 留在配置实例不写进 items） |

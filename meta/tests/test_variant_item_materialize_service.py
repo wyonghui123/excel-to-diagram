@@ -122,7 +122,7 @@ def ds():
             config_hash TEXT, revision INTEGER, reused_from_id INTEGER,
             match_policy_used TEXT, source_level TEXT, context_json TEXT,
             validation_result_json TEXT, solved_at TEXT, frozen_at TEXT,
-            variant_item_id INTEGER);
+            variant_item_id INTEGER, project_id INTEGER);
         CREATE TABLE configuration_values (id INTEGER PRIMARY KEY AUTOINCREMENT,
             configuration_id INTEGER, attribute_code TEXT, seq INTEGER,
             value_text TEXT, value_number REAL, value_boolean INTEGER,
@@ -180,13 +180,13 @@ def _seed(data_source):
 
 
 def _add_config(data_source, config_id, model_item_id, status, config_hash,
-                solved_at):
+                solved_at, project_id=None):
     insert(data_source, 'configurations', id=config_id,
            model_item_id=model_item_id, structure_id=9, status=status,
            config_hash=config_hash, revision=1, reused_from_id=None,
            match_policy_used='no', source_level='L2', context_json=None,
            validation_result_json=None, solved_at=solved_at, frozen_at=None,
-           variant_item_id=None)
+           variant_item_id=None, project_id=project_id)
     insert(data_source, 'configuration_values', rows=[
         dict(configuration_id=config_id, attribute_code='color', seq=1,
              value_text='red', value_number=None, value_boolean=None,
@@ -513,3 +513,20 @@ def test_auto_policy_reuses_variant_for_same_hash(ds):
     assert second is not None and second['created'] is False
     assert second['item_id'] == first['item_id']
     assert _items_count(ds) == 4  # 3 模型 + 1 变式物料
+
+
+def test_project_tagged_configuration_materializes_unchanged(ds):
+    """AC-06：`configuration.project_id` 非空不改变物化链路（G10 / P3）。"""
+    _set_policy(ds, MODEL_ITEM, 'auto')
+    project_cfg = 9001
+    _add_config(ds, project_cfg, MODEL_ITEM, 'frozen', 'H-PROJ',
+                '2026-10-30 00:00:00', project_id=1)
+    ds.commit()
+
+    result = VariantItemMaterializeService(ds).materialize_on_freeze(project_cfg)
+
+    assert result is not None and result['created'] is True
+    assert _item(ds, result['item_id'])['status'] == 'active'
+    assert _config(ds, project_cfg)['variant_item_id'] == result['item_id']
+    # 项目上下文留在配置实例上，不写进物料主数据
+    assert _config(ds, project_cfg)['project_id'] == 1

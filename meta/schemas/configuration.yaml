@@ -106,6 +106,53 @@ fields:
       relation: item_structure
       multiple: false
 
+  # G10（D6 不新建表）：项目上下文只加可空 project_id；
+  # 扩展上下文（WBS / 客户 / 合同号）继续走 context_json，不新增列
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 与项目无关的通用配置）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+      filterable: true
+      filter_type: relation
+      filter_label: 所属项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 150
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      clearable: true
+
   - id: status
     name: 状态
     type: string
@@ -317,6 +364,9 @@ indexes:
     name: idx_configuration_structure_hash
   - fields: [model_item_id, status]
     name: idx_configuration_model_status
+  # 项目配置归集路径（G10 / P3）
+  - fields: [project_id, status]
+    name: idx_configuration_project_status
 
 relations:
   - id: configuration_to_model_item
@@ -363,6 +413,10 @@ ui_view_config:
         width: 200
       - field: structure_id
         width: 160
+      - field: project_id
+        width: 180
+        filterable: true
+        filter_type: select
       - field: status
         width: 100
         filterable: true
@@ -386,7 +440,7 @@ ui_view_config:
     sections:
       - title: 基本信息
         columns:
-          - fields: [model_item_id, structure_id]
+          - fields: [model_item_id, structure_id, project_id]
           - fields: [status, revision]
           - fields: [config_hash]
       - title: 上下文

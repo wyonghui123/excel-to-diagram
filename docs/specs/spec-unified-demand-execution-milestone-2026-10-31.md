@@ -27,7 +27,7 @@
 | **P1** | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + `sales_order.project_id` / 行 / 计划行挂载 + 项目 360 只读视图（D1 / D2） | M0 |
 | **P1.5** | Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图（Q3 / G11 / G14 / D11） | P1 |
 | **P2** | Phase 2 | `work_center` / `resource` / `resource_capability` / `routing(+operation)`；`work_order.project_id`；工序溯源（D4 / D10） | M4（共用工序语义） |
-| **P3** | Phase 3 | `configuration.project_id` + `context_json`；配置物化联动（D6 / D11）；**不建项目级 BOM 快照（D5 撤销）** | P2 |
+| **P3** | Phase 3 | `configuration.project_id`（已落，v178）+ `context_json`；配置物化联动（D6 / D11）；**不建项目级 BOM 快照（D5 撤销）** | P2 |
 | **P4** | Phase 4 | 项目预算 / 收入确认；`project` 权限维度（D8） | 按需，不承诺 |
 
 对齐说明：project spec 的 Phase 0（口径核验）并入 M0；P1 不放在 M6，因为 M6 是 `doc_flow` 治理，与项目对象无关。P1 出口判据：`project_id` 为空时旧链路零回归（AC-02），项目 360 视图按 `project_id` 聚合且不复制金额（AC-03）。
@@ -126,7 +126,8 @@
 | project | G11 | P1.5 / M1 |
 | project | G2、G3、G4、G12、G13 | M4 |
 | project | G14 | P1.5 |
-| project | G5、G8、G9、G10 | P2 / P3 / M5 |
+| project | G5、G8、G9 | P2 / P3 / M5 |
+| project | G10（`configuration.project_id`，已落 v178） | P3 |
 | project | G6（`shipment` 已落，`fulfillment_order` 待补） | P2 |
 
 ### 8.1 项目侧决策归位
@@ -165,3 +166,4 @@
 | 2026-11-01 | v0.3 | 补 P1.5（`project_task` 计划层，Q3 / G11 / G14）；缺口映射拆分 G1→P1、G11→P1.5；售后三值启用与 `sla_milestone.project_id` 归入已实施的 P2 收尾 |
 | 2026-11-01 | v0.4 | P3 裁决：D5 撤销，P3 收缩为 `configuration.project_id` + 物化联动，不建项目级 BOM 快照（对齐 project spec v1.4） |
 | 2026-11-01 | v0.5 | G6 部分落地：`shipment.project_id`（v177）+ 项目 360 交货单段；缺口映射拆出 G6→P2 |
+| 2026-11-01 | v0.6 | G10 落地：`configuration.project_id`（v178）+ 缺口映射把 G10 从 P2/P3/M5 拆出为 P3（对齐 project spec v1.6） |

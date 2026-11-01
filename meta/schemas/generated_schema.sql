@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 15:31:48.531893
+-- 生成时间: 2026-11-01 15:59:35.111114
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -396,6 +396,7 @@ CREATE TABLE IF NOT EXISTS configurations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_item_id INTEGER NOT NULL,
     structure_id INTEGER NOT NULL,
+    project_id INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     config_hash VARCHAR(200),
     revision INTEGER NOT NULL DEFAULT 1,
@@ -2628,6 +2629,7 @@ CREATE INDEX IF NOT EXISTS idx_change_subscriptions_enabled ON change_subscripti
 -- Indexes for 配置实例
 CREATE INDEX IF NOT EXISTS idx_configuration_structure_hash ON configurations(structure_id, config_hash)
 CREATE INDEX IF NOT EXISTS idx_configuration_model_status ON configurations(model_item_id, status)
+CREATE INDEX IF NOT EXISTS idx_configuration_project_status ON configurations(project_id, status)
 CREATE INDEX IF NOT EXISTS idx_configurations_solved_at ON configurations(solved_at)
 
 -- Indexes for 配置组件

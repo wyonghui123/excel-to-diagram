@@ -12,6 +12,7 @@
   P2-1 sla_milestone 补可空 project_id（D3 里程碑归集），v176 幂等迁移
   P2-2 售后三值（repair / install / maintenance）转 active（G9）
   P2-3 shipment 补可空 project_id（G6），v177 幂等迁移
+  P2-4 configuration 补可空 project_id（G10 / P3），v178 幂等迁移
 
 建库一律走 factories 的 create_tables / seed_row（conftest 的裸 SQL 守卫
 会把含裸 DML 的测试文件整体 skip）。
@@ -39,6 +40,7 @@ from meta.migrations.v175__work_order_project_id import (  # noqa: E402
 )
 from meta.migrations import v176__sla_milestone_project_id as v176  # noqa: E402
 from meta.migrations import v177__shipment_project_id as v177  # noqa: E402
+from meta.migrations import v178__configuration_project_id as v178  # noqa: E402
 
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
@@ -345,3 +347,62 @@ class TestShipmentProjectAnchor:
         assert v177.rollback(db) is True
         assert _index_count(db, v177.PROJECT_INDEX) == 0
         assert v177.PROJECT_COLUMN in _columns(db, v177.SHIPMENT_TABLE)
+
+
+class TestConfigurationProjectAnchor:
+    """G10 / P3：配置实例按 project_id 归集（D6：不新建表，扩展走 context_json）。"""
+
+    def test_project_id_declared_nullable_without_fk(self):
+        raw = _load_raw('configuration')
+        field = _field(raw, 'project_id')
+        assert field is not None
+        assert field['nullable'] is True
+        assert field['semantics']['display']['target_type'] == 'project'
+        indexes = {i['name'] for i in raw['indexes']}
+        assert v178.PROJECT_INDEX in indexes
+        relations = {r['id'] for r in raw['relations']}
+        assert 'configuration_to_project' not in relations
+
+    def test_ui_exposes_project_in_list_and_form(self):
+        ui = _load_raw('configuration')['ui_view_config']
+        assert 'project_id' in {c['field'] for c in ui['list']['columns']}
+        basic = ui['form']['sections'][0]
+        assert 'project_id' in [f for column in basic['columns']
+                                for f in column['fields']]
+
+    def test_migration_adds_column_and_index(self, tmp_path):
+        db = tmp_path / 'p3_config.db'
+        _build_legacy_configuration_db(db)
+        assert v178.verify(db) is False
+        assert v178.migrate(db) is True
+        assert v178.verify(db) is True
+        assert v178.PROJECT_COLUMN in _columns(db, v178.CONFIGURATION_TABLE)
+        assert _index_count(db, v178.PROJECT_INDEX) == 1
+
+    def test_migration_is_idempotent(self, tmp_path):
+        db = tmp_path / 'p3_config_twice.db'
+        _build_legacy_configuration_db(db)
+        assert v178.migrate(db) is True
+        assert v178.migrate(db) is True
+        assert v178.verify(db) is True
+        assert _index_count(db, v178.PROJECT_INDEX) == 1
+
+    def test_rollback_drops_index_keeps_column(self, tmp_path):
+        db = tmp_path / 'p3_config_rollback.db'
+        _build_legacy_configuration_db(db)
+        assert v178.migrate(db) is True
+        assert v178.rollback(db) is True
+        assert _index_count(db, v178.PROJECT_INDEX) == 0
+        assert v178.PROJECT_COLUMN in _columns(db, v178.CONFIGURATION_TABLE)
+
+
+def _build_legacy_configuration_db(path):
+    """最小骨架表：模拟 v178 之前（无 project_id）的存量库（索引依赖 status）。"""
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute('CREATE TABLE {0} (id INTEGER PRIMARY KEY, status TEXT)'
+                     .format(v178.CONFIGURATION_TABLE))
+        conn.commit()
+    finally:
+        conn.close()
+    return path
