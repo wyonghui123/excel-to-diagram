@@ -290,6 +290,109 @@ def available_minutes(conn, resource_id: int, the_date: Any = None,
 
 
 # ============================================================================
+# 多口径产能 (FR-005)
+# ============================================================================
+
+#: 按时间计量的产能口径: 有效值由日历开机时长推导; 其余口径按声明值展开
+TIME_CAPACITY_CATEGORIES = frozenset({'labor_hours', 'machine_hours'})
+
+
+def capacity_by_category(conn, resource_id: Optional[int] = None,
+                         group_id: Optional[int] = None,
+                         the_date: Any = None,
+                         default_calendar_id: Optional[int] = None,
+                         ) -> Dict[str, Any]:
+    """读取资源/组的多口径日产能(resource_capacities)。
+
+    口径:
+      · 同一类别多条有效期重叠时, 取 valid_from 最新的有效行(同等取 id 最大);
+      · labor_hours / machine_hours 的有效值 = 日历开机时长 × units × util%;
+      · tool_count / vehicle_weight / vehicle_volume / facility_capacity
+        按声明值 capacity_per_day × units × util%(日历不影响计量单位);
+      · 日历: 资源用 FR-005 优先级链路, 组用 resource_group.calendar_id。
+    """
+    the_date = _normalize_date(the_date)
+    if resource_id is None and group_id is None:
+        raise ResourceMatchingError(
+            'resource_id 与 group_id 至少提供一个', 'INVALID_ARGUMENT')
+
+    if resource_id is not None and group_id is not None:
+        scope_sql = '(resource_id = ? OR resource_group_id = ?)'
+        scope_params: List[Any] = [resource_id, group_id]
+    elif resource_id is not None:
+        scope_sql = 'resource_id = ?'
+        scope_params = [resource_id]
+    else:
+        scope_sql = 'resource_group_id = ?'
+        scope_params = [group_id]
+
+    rows = _fetch_all(
+        conn,
+        """
+        SELECT id, resource_id, resource_group_id, capacity_category,
+               capacity_uom_id, capacity_per_day, capacity_units,
+               utilization_pct, valid_from, valid_to
+        FROM resource_capacities
+        WHERE {0}
+          AND (valid_from IS NULL OR substr(valid_from, 1, 10) <= ?)
+          AND (valid_to IS NULL OR substr(valid_to, 1, 10) >= ?)
+        ORDER BY capacity_category ASC,
+                 COALESCE(valid_from, '0000-00-00') DESC, id DESC
+        """.format(scope_sql),
+        tuple(scope_params + [the_date, the_date]))
+
+    calendar_id: Optional[int] = None
+    if resource_id is not None:
+        calendar_id = resolve_resource_calendar(
+            conn, resource_id, default_calendar_id, as_of=the_date)
+    else:
+        group = _fetch_one(
+            conn,
+            'SELECT calendar_id FROM resource_groups WHERE id = ?',
+            (group_id,))
+        calendar_id = group['calendar_id'] if group and group['calendar_id'] \
+            else default_calendar_id
+
+    windows = shift_windows_for_date(conn, calendar_id, the_date) \
+        if calendar_id else []
+    window_minutes = float(sum(w['effective_minutes'] for w in windows))
+
+    categories: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        category = row['capacity_category']
+        if category in categories:
+            continue
+        units = float(row['capacity_units'] or 1)
+        utilization = float(row['utilization_pct']
+                            if row['utilization_pct'] is not None else 100)
+        if category in TIME_CAPACITY_CATEGORIES and window_minutes > 0:
+            effective = window_minutes * units * utilization / 100.0
+        else:
+            effective = float(row['capacity_per_day'] or 0) * units \
+                * utilization / 100.0
+        categories[category] = {
+            'capacity_category': category,
+            'scope': 'resource' if row['resource_id'] else 'group',
+            'capacity_uom_id': row['capacity_uom_id'],
+            'declared_per_day': row['capacity_per_day'],
+            'capacity_units': units,
+            'utilization_pct': utilization,
+            'effective_per_day': effective,
+            'valid_from': row['valid_from'],
+            'valid_to': row['valid_to'],
+        }
+
+    return {
+        'resource_id': resource_id,
+        'group_id': group_id,
+        'as_of': the_date,
+        'calendar_id': calendar_id,
+        'calendar_minutes': window_minutes,
+        'categories': categories,
+    }
+
+
+# ============================================================================
 # 技能匹配
 # ============================================================================
 

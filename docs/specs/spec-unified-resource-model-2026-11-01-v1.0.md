@@ -1,8 +1,8 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.6
+- 文档版本：v1.7
 - 日期：2026-11-01
-- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；服务层 `resource_matching_service` 已落地（16 passed），架构门禁 10 项全 OK
+- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；服务层 `resource_matching_service` 已落地（19 passed，含多口径产能），架构门禁 10 项全 OK
 - 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.2）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
@@ -649,3 +649,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.4 | 对标细化落地（用户采纳 8 项建议）：`resource.capacity_units` / `utilization_pct`、`member.quantity`、`group.is_bottleneck`、`rate.rate_basis`（+ `rate_purpose=setup`）、`operation.teardown_minutes`、外协 `lead_time_days`（P2b）；FR-005 补"产能公式 + 日历优先级"；`service_area_code` 移除（改由 `territory` 承担）；TBD-8 记录"成本中心主数据暂不建" |
 | 2026-11-01 | v1.5 | P2b 定稿：新增 FR-014「班次模型」（`shift` 时段模板 + `calendar_shift` 日历×星期×班次×产能系数，全部 `resource_kind` 同构，HR 复用）；§9.3 补 8 张 P2b 表与约束；关闭 TBD-2、TBD-4；迁移号 v176 |
 | 2026-11-01 | v1.6 | 服务层落地：新增 `meta/services/resource_matching_service.py`（日历优先级解析 / 班次按日展开 / 可用分钟（产能公式）/ 技能+组匹配 / 分配校验），对应 FR-003 / FR-005 / FR-008 验收；`meta/tests/test_resource_matching_service.py` 16 passed，架构门禁 10 项全 OK |
+| 2026-11-01 | v1.7 | FR-005 多口径补齐：新增 `capacity_by_category`（同一类别取有效期最新行；labor_hours/machine_hours 由日历推导，工具数/载重/体积/场地按声明值展开；支持资源与组两种主体）；服务测试 19 passed |

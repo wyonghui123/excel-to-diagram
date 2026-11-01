@@ -21,8 +21,10 @@ pytestmark = pytest.mark.unit
 
 from meta.services.resource_matching_service import (
     ACTIVE_ASSIGNMENT_STATUSES,
+    TIME_CAPACITY_CATEGORIES,
     ResourceMatchingError,
     available_minutes,
+    capacity_by_category,
     match_resources,
     resolve_resource_calendar,
     shift_windows_for_date,
@@ -106,6 +108,18 @@ CREATE TABLE resource_capabilities (
     resource_id INTEGER,
     skill_id INTEGER,
     level INTEGER,
+    valid_from TEXT,
+    valid_to TEXT
+);
+CREATE TABLE resource_capacities (
+    id INTEGER PRIMARY KEY,
+    resource_id INTEGER,
+    resource_group_id INTEGER,
+    capacity_category TEXT,
+    capacity_uom_id INTEGER,
+    capacity_per_day REAL,
+    capacity_units REAL DEFAULT 1,
+    utilization_pct REAL DEFAULT 100,
     valid_from TEXT,
     valid_to TEXT
 );
@@ -441,3 +455,81 @@ def test_validate_assignment_warns_when_skill_missing():
     result = validate_assignment(conn, 102, 8, '2026-11-03 09:00:00',
                                  '2026-11-03 12:00:00')
     assert result['warnings'] == []
+
+
+# ============================================================================
+# 多口径产能 (FR-005)
+# ============================================================================
+
+def test_capacity_by_category_latest_valid_row_wins():
+    conn = _connect()
+    _calendar(conn, 30)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='16:00', break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=30, shift_id=shift_id)
+    _insert(conn, 'resources', id=30, code='R30', calendar_id=30)
+
+    _insert(conn, 'resource_capacities', resource_id=30,
+            capacity_category='labor_hours', capacity_uom_id=1,
+            capacity_per_day=420, capacity_units=1, utilization_pct=100,
+            valid_from='2026-01-01')
+    _insert(conn, 'resource_capacities', resource_id=30,
+            capacity_category='labor_hours', capacity_uom_id=1,
+            capacity_per_day=420, capacity_units=2, utilization_pct=100,
+            valid_from='2026-10-01')
+    _insert(conn, 'resource_capacities', resource_id=30,
+            capacity_category='machine_hours', capacity_uom_id=1,
+            capacity_per_day=420, capacity_units=1, utilization_pct=100,
+            valid_from='2026-01-01', valid_to='2026-06-30')
+
+    result = capacity_by_category(conn, resource_id=30, the_date='2026-11-03')
+    assert result['calendar_id'] == 30
+    assert result['calendar_minutes'] == 420.0
+    assert 'machine_hours' not in result['categories']
+    labor = result['categories']['labor_hours']
+    # 10-01 那行生效(units=2): 420 × 2 × 100% = 840
+    assert labor['capacity_units'] == 2
+    assert labor['effective_per_day'] == 840.0
+    assert labor['scope'] == 'resource'
+    assert 'labor_hours' in TIME_CAPACITY_CATEGORIES
+
+
+def test_capacity_by_category_non_time_uses_declared_value():
+    conn = _connect()
+    _calendar(conn, 31)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='16:00', break_minutes=60)
+    _insert(conn, 'calendar_shifts', calendar_id=31, shift_id=shift_id)
+    _insert(conn, 'resources', id=31, code='R31', calendar_id=31)
+    _insert(conn, 'resource_capacities', resource_id=31,
+            capacity_category='vehicle_weight', capacity_uom_id=2,
+            capacity_per_day=1000, capacity_units=2, utilization_pct=80,
+            valid_from='2026-01-01')
+
+    result = capacity_by_category(conn, resource_id=31, the_date='2026-11-03')
+    weight = result['categories']['vehicle_weight']
+    # 非时间口径: 1000 × 2 × 80% = 1600, 不受日历 420 分钟影响
+    assert weight['effective_per_day'] == 1600.0
+    assert weight['declared_per_day'] == 1000
+
+
+def test_capacity_by_category_group_scope_and_argument_check():
+    conn = _connect()
+    _calendar(conn, 32)
+    _insert(conn, 'resource_groups', id=40, code='FLEET', calendar_id=32)
+    shift_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                       start_time='08:00', end_time='12:00')
+    _insert(conn, 'calendar_shifts', calendar_id=32, shift_id=shift_id)
+    _insert(conn, 'resource_capacities', resource_group_id=40,
+            capacity_category='tool_count', capacity_per_day=5,
+            capacity_units=1, utilization_pct=100,
+            valid_from='2026-01-01')
+
+    result = capacity_by_category(conn, group_id=40, the_date='2026-11-03')
+    assert result['calendar_id'] == 32
+    assert result['categories']['tool_count']['scope'] == 'group'
+    assert result['categories']['tool_count']['effective_per_day'] == 5.0
+
+    with pytest.raises(ResourceMatchingError) as exc:
+        capacity_by_category(conn)
+    assert exc.value.code == 'INVALID_ARGUMENT'
