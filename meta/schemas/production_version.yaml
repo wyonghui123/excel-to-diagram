@@ -1,0 +1,577 @@
+# 生产版本（Production Version）—— 统一资源模型 P4a
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §TBD-16 / 附 B.2；研究稿 spec-routing-process-manufacturing-benchmark-2026-11-01.md §5.2
+#
+# 定位: "某物料在某工厂、某批量区间、某有效期内，走哪套 BOM + 哪条工艺路线"的
+#   唯一真源（对标 SAP Production Version）。
+#
+# 口径（已定，勿重复讨论）:
+#   ① 物料 = 存量 `items`（target_bo: item；code UNIQUE）；工厂首期用 `org`（orgs）。
+#   ② BOM 可空：`bom_id → item_structure`（结构头 = item + usage + alternative + revision）。
+#   ③ 路线必填：`work_definition_id → work_definition`（code + revision 已表达版本）。
+#   ④ 同一 (item_id, org_id) 允许存在多条生产版本，按 `priority` + 批量区间 + 有效期选路；
+#      唯一约束只落在 `code` 上（SAP 的 PV 编号唯一）。
+#   ⑤ `locked=1` 表示冻结：服务层改选路/停用时拒绝（SAP Locked indicator）。
+#   ⑥ `lot_max` 为空表示无上限；`lot_min` 默认 0。
+
+id: production_version
+name: 生产版本
+table_name: production_versions
+description: 生产版本——物料 + 工厂 ↔ BOM + 工艺路线 + 有效期 + 批量区间 + 优先级
+display_name_field: code
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 生产版本（物料↔BOM↔路线绑定）
+  category: core_entity
+  aliases:
+    - 生产版本
+    - 版本真源
+    - production version
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 生产版本编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 60
+    description: 生产版本编码（全局唯一）
+    semantics:
+      meaning: 生产版本业务代码
+      business_key: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 生产版本对应的物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 160
+          - field: name
+            label: 物料名称
+            width: 220
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: org_id
+    name: 工厂
+    type: integer
+    db_column: org_id
+    required: true
+    description: 生产工厂（首期用组织 orgs 表）
+    semantics:
+      meaning: 工厂组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: bom_id
+    name: 物料结构
+    type: integer
+    db_column: bom_id
+    nullable: true
+    description: 绑定的 BOM 结构头；空表示由物料主数据默认结构决定
+    semantics:
+      meaning: 物料结构引用
+      display:
+        type: association
+        target_type: item_structure
+        display_field: revision
+        placeholder: "空 = 默认结构"
+    value_help:
+      source:
+        type: bo
+        target_bo: item_structure
+        value_field: id
+        display_field: revision
+        code_field: revision
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{revision}"
+        columns:
+          - field: item_id
+            label: 物料
+            width: 220
+          - field: revision
+            label: 版本
+            width: 120
+          - field: usage
+            label: 用途
+            width: 120
+    ui:
+      widget: select
+      relation: item_structure
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: work_definition_id
+    name: 作业定义
+    type: integer
+    db_column: work_definition_id
+    required: true
+    description: 绑定的工艺路线 / 服务模板
+    semantics:
+      meaning: 作业定义引用
+      display:
+        type: association
+        target_type: work_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 定义编码
+            width: 150
+          - field: name
+            label: 定义名称
+            width: 220
+          - field: revision
+            label: 版本
+            width: 90
+    ui:
+      widget: select
+      relation: work_definition
+      multiple: false
+      clearable: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    required: true
+    description: 有效期起始日（含）
+    semantics:
+      meaning: 生产版本生效起始日
+    ui:
+      widget: date
+      fieldGroup: 有效期与批量
+      fieldGroupPosition: 60
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 有效期截止日（不含）；空表示长期有效
+    semantics:
+      meaning: 生产版本生效截止日
+    ui:
+      widget: date
+      fieldGroup: 有效期与批量
+      fieldGroupPosition: 70
+
+  - id: lot_min
+    name: 最小批量
+    type: number
+    db_column: lot_min
+    required: true
+    default: 0
+    description: 适用批量下限（含）
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 批量区间下限
+    ui:
+      widget: number
+      fieldGroup: 有效期与批量
+      fieldGroupPosition: 80
+
+  - id: lot_max
+    name: 最大批量
+    type: number
+    db_column: lot_max
+    nullable: true
+    description: 适用批量上限（含）；空表示无上限
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 批量区间上限
+    ui:
+      widget: number
+      fieldGroup: 有效期与批量
+      fieldGroupPosition: 90
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 1
+    description: 选路优先级（数字小者优先）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 选路优先级
+    ui:
+      widget: number
+      fieldGroup: 有效期与批量
+      fieldGroupPosition: 100
+
+  - id: locked
+    name: 冻结
+    type: boolean
+    db_column: locked
+    required: true
+    default: false
+    description: 是否冻结（冻结后服务层拒绝改选路/停用）
+    semantics:
+      meaning: 冻结标记
+      filterable: true
+      filter_type: enum
+      filter_label: 冻结
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 基本信息
+      fieldGroupPosition: 110
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 状态（草稿 / 生效 / 作废）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        is_initial: true
+      - value: active
+        label: 生效
+        color: success
+      - value: obsolete
+        label: 作废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: production_version_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 生产版本状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 120
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 说明
+    semantics:
+      meaning: 生产版本说明
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 其他
+      fieldGroupPosition: 130
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_production_version_code
+  - fields: [item_id, org_id]
+    name: idx_production_version_item_org
+  - fields: [work_definition_id]
+    name: idx_production_version_work_definition
+  - fields: [bom_id]
+    name: idx_production_version_bom
+  - fields: [status]
+    name: idx_production_version_status
+
+relations:
+  - id: production_version_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（必填；真外键 restrict）
+  - id: production_version_to_org
+    name: 工厂
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 工厂组织引用（必填；真外键 restrict）
+  - id: production_version_to_bom
+    name: 物料结构
+    type: reference
+    target: item_structure
+    source_field: bom_id
+    target_field: id
+    cardinality: N:1
+    description: 物料结构头引用（可空；真外键 restrict）
+  - id: production_version_to_work_definition
+    name: 作业定义
+    type: reference
+    target: work_definition
+    source_field: work_definition_id
+    target_field: id
+    cardinality: N:1
+    description: 工艺路线引用（必填；真外键 restrict）
+
+ui_view_config:
+  # 菜单由迁移 v188 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 生产版本
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: item_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: bom_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item_structure
+        display_field: revision
+      - field: work_definition_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition
+        display_field: name
+      - field: valid_from
+        width: 110
+        sortable: true
+      - field: lot_min
+        width: 100
+      - field: lot_max
+        width: 100
+      - field: priority
+        width: 90
+        sortable: true
+      - field: locked
+        width: 90
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code]
+    actions:
+      - id: create
+        label: 新建生产版本
+        icon: plus
+        type: primary
+        permission: production_version:production_version_create
+    defaultSort:
+      field: code
+      order: asc
+  form:
+    title: 生产版本
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, status]
+          - fields: [item_id, org_id]
+          - fields: [bom_id, work_definition_id]
+          - fields: [locked]
+      - title: 有效期与批量
+        columns:
+          - fields: [valid_from, valid_to]
+          - fields: [lot_min, lot_max, priority]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "{record.code} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, item_id, org_id, bom_id, work_definition_id, valid_from,
+                 valid_to, lot_min, lot_max, priority, locked, status, description]
+
+category_config:
+  create_permission: production_version:production_version_create
+  update_permission: production_version:production_version_update
+  delete_permission: production_version:production_version_delete
+  owner_auto_permission: false

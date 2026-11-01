@@ -38,7 +38,8 @@ SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 TABLES = ["org", "calendar", "item_group", "uom_group", "uom", "item",
           "territory", "skill", "resource_group", "resource",
           "shift", "calendar_shift", "work_definition",
-          "work_definition_operation", "operation_resource_requirement",
+          "work_definition_sequence", "work_definition_operation",
+          "operation_resource_requirement",
           "resource_capacity", "resource_territory_assignment",
           "work_order", "work_order_operation", "resource_assignment"]
 
@@ -50,7 +51,9 @@ EXPECTED_FKS = {
                          ("org_id", "orgs", "id")},
     "work_definition_operations": {
         ("definition_id", "work_definitions", "id"),
-        ("resource_group_id", "resource_groups", "id")},
+        ("resource_group_id", "resource_groups", "id"),
+        # P4a：sequence_id 可空，空 = 标准序列
+        ("sequence_id", "work_definition_sequences", "id")},
     "operation_resource_requirements": {
         ("operation_id", "work_definition_operations", "id"),
         ("resource_group_id", "resource_groups", "id"),

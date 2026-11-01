@@ -124,6 +124,52 @@ fields:
       fieldGroup: 关联
       fieldGroupPosition: 20
 
+  - id: sequence_id
+    name: 所属序列
+    type: integer
+    db_column: sequence_id
+    nullable: true
+    description: 所属路线序列；空表示标准序列（存量行全部为空）
+    semantics:
+      meaning: 作业定义序列引用
+      display:
+        type: association
+        target_type: work_definition_sequence
+        display_field: seq_no
+        placeholder: "空 = 标准序列"
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_sequence
+        value_field: id
+        display_field: seq_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{seq_no} - {seq_type}"
+        columns:
+          - field: seq_no
+            label: 序列号
+            width: 100
+          - field: seq_type
+            label: 序列类型
+            width: 120
+          - field: description
+            label: 说明
+            width: 240
+    ui:
+      widget: select
+      relation: work_definition_sequence
+      multiple: false
+      clearable: true
+      fieldGroup: 关联
+      fieldGroupPosition: 25
+
   - id: operation_name
     name: 工序名称
     type: string
@@ -373,6 +419,8 @@ indexes:
     name: idx_work_definition_operation_group
   - fields: [status]
     name: idx_work_definition_operation_status
+  - fields: [sequence_id]
+    name: idx_work_definition_operation_sequence
 
 relations:
   - id: work_definition_operation_to_definition
@@ -391,6 +439,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 资源组引用（可空；真外键）
+  - id: work_definition_operation_to_sequence
+    name: 所属序列
+    type: reference
+    target: work_definition_sequence
+    source_field: sequence_id
+    target_field: id
+    cardinality: N:1
+    description: 路线序列引用（可空；空 = 标准序列；真外键）
 
 ui_view_config:
   # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
@@ -409,6 +465,13 @@ ui_view_config:
       - field: seq
         width: 90
         sortable: true
+      - field: sequence_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition_sequence
+        display_field: seq_no
       - field: operation_name
         width: 200
       - field: resource_group_id
@@ -448,7 +511,8 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [definition_id, seq]
-          - fields: [operation_name, resource_group_id]
+          - fields: [sequence_id, operation_name]
+          - fields: [resource_group_id]
           - fields: [status]
       - title: 工时与产量
         columns:
@@ -462,9 +526,10 @@ ui_view_config:
       - id: basic
         label: 基本信息
         type: fields
-        fields: [definition_id, seq, operation_name, resource_group_id,
-                 setup_minutes, teardown_minutes, run_minutes, queue_minutes,
-                 move_minutes, travel_minutes, qty_per, status]
+        fields: [definition_id, seq, sequence_id, operation_name,
+                 resource_group_id, setup_minutes, teardown_minutes,
+                 run_minutes, queue_minutes, move_minutes, travel_minutes,
+                 qty_per, status]
 
 category_config:
   create_permission: work_definition_operation:work_definition_operation_create
