@@ -1,8 +1,8 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.8
+- 文档版本：v1.9
 - 日期：2026-11-01
-- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（22 passed，含多口径产能与例外求交），架构门禁 10 项全 OK
+- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（22 passed，含多口径产能与例外求交），架构门禁 10 项全 OK；**P3 员工主数据（FR-015）方案已细化，未实施**
 - 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.2）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
@@ -271,6 +271,72 @@
 - **类型映射**：功能
 - **来源**：用户三问之"班次是否适用所有 resource" + 对标 §3.3 HR Work Schedule Rule / Shift Group
 
+### FR-015 员工主数据（薄）
+
+- **描述**：系统 MUST 提供 `employee`（员工）**薄主数据**，只承载"谁被我方雇佣、在哪个组织/地点、什么岗位、何时在职"；它是 `person_profile` 之上的**雇佣身份**（role object），不是新的自然人。**不承载薪酬/考勤/绩效**。
+- **现状盘点（2026-11-01 核查，确认缺失）**：
+
+| 现有对象 | 表 | 实际内容 | 能否当员工主数据 |
+|---|---|---|---|
+| `person_profile` | `person_profiles` | 仅 `party_id` / `mobile` / `email` | 否：自然人联系面，无雇佣关系 |
+| `party_internal` | `party_internal` | 内部**组织**面（`party_type` 恒为 organization，带 `org_id` / `status`） | 否：是企业不是人 |
+| `user` | `users` | 登录账号，`party_id` 可空 | 否：认证主体，无岗位/雇佣 |
+| `salesperson` | `salespersons` | 销售角色（`party_id` + `user_id`） | 否：岗位角色，只覆盖销售 |
+| `employee_data_scope` | `employee_data_scopes` | 权限数据范围字典 | 否：只是范围定义 |
+| `resource`(person) | `resources` | `person_ref` → `person_profile` | 否：调度侧主体，无雇佣信息 |
+
+  ⇒ 结论：平台只有"自然人（person_profile）+ 登录（user）+ 角色（salesperson）"，**缺"雇佣关系"这一层**。
+- **为什么是"薄"**：P3 只解决排班与可用性推导所需的字段；薪酬、个税、社保、考勤打卡、请假余额、绩效、培训、劳动合同附件、招聘候选人均**不做**（另立 HR 域）。避免把 `employee` 做成第二个 `party`。
+- **`employee` 字段**（表 `employees`）：
+
+| 字段 | 说明 | 约束 |
+|---|---|---|
+| `employee_no` | 工号 | 全局唯一，必填 |
+| `name` | 姓名（展示冗余，来源 `person_profile` 对应 party 名称） | 必填 |
+| `person_profile_id` | 自然人档案 | 必填，FK `person_profiles` restrict |
+| `user_id` | 登录账号（可后绑） | 可空，FK `users` |
+| `resource_id` | 调度资源桥（见下） | 可空，FK `resources` |
+| `org_id` | 所属组织 | 必填，FK `orgs` |
+| `location_id` | 工作地点 | 可空，FK `locations` |
+| `position` | 岗位名称（首期自由文本，不建岗位主数据） | 可空 |
+| `job_grade` | 职级 | 可空 |
+| `employment_type` | `full_time` / `part_time` / `contractor` / `intern` / `dispatched` | 默认 `full_time` |
+| `status` | `active` / `inactive` / `terminated` | 默认 `active` |
+| `hire_date` | 入职日期 | 必填 |
+| `termination_date` | 离职日期 | 可空；`status=terminated` 时必填 |
+| `manager_employee_id` | 直属主管（自引用） | 可空，无环 |
+
+- **唯一性与完整性**：
+  - `employee_no` 唯一；
+  - 部分唯一索引 `employees(person_profile_id) WHERE status='active'`：同一自然人在同一时刻只能有一条在职雇佣记录（再入职走新行 + 旧行 `terminated`）；
+  - 部分唯一索引 `employees(resource_id) WHERE resource_id IS NOT NULL AND status='active'`：一个调度资源只能被一个在职员工占用；
+  - `termination_date >= hire_date`；`manager_employee_id` 不得成环（服务层校验）。
+- **与 `resource` 的桥接**（关键决策）：`employee.resource_id` 可选 1:1 指向 `resource(resource_kind=person)`。
+  - 理由：调度/产能侧只认 `resource`，HR 侧只认 `employee`；显式桥接避免每次排程都走 `resource → person_profile ← employee` 三跳 join；不建资源岗（纯办公室员工）留空即可。
+  - 反向不建 `resource.employee_id`：`resource` 保持与 HR 解耦（外协/设备不需要员工概念）。
+- **`employee_shift_assignment` 字段**（表 `employee_shift_assignments`，P3）：
+  - `employee_id`（必填）/ `shift_id`（必填，复用 FR-014 的 `shift` 时段模板）
+  - `day_mask_mon` ~ `day_mask_sun`（默认 true）/ `seq`（默认 1）
+  - `effective_from`（必填）/ `effective_to`（可空）
+  - `work_center_id`（可空，指向 `resource_group(group_kind=work_center)`，表示实际上班工作中心/班组）
+  - `note`；唯一 `(employee_id, shift_id, seq, effective_from)`
+  - **与 `calendar_shift` 的差异**：`calendar_shift` 回答"哪个日历哪天开哪个班"（产能侧）；`employee_shift_assignment` 回答"谁上哪个班"（人员侧）。两者共用 `shift`，不复制时段定义。
+- **可用性推导规则**（`available_minutes` 的 HR 分支，P3 实施）：
+  1. 若资源被在职员工占用且该员工当日有生效排班 ⇒ 以**员工排班窗口**为准，**不再叠加**资源日历（避免双轨重复计数）；
+  2. 若该员工当日无排班 ⇒ 回退到资源日历（空岗/未排班）；
+  3. `resource_availability` 例外在**两个分支上都生效**（请假优先于排班，检修覆盖设备）；
+  4. 同一员工同日多段排班允许；时间窗重叠时返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库。
+- **验收**：
+  - 同一 `person_profile` 新建第二条 `status=active` 员工时保存失败（部分唯一索引）；
+  - 同一 `resource_id` 被第二个在职员工占用时保存失败；
+  - 员工离职（`status=terminated`）缺 `termination_date` 时保存失败；
+  - 员工可无 `resource_id`（不参与调度），也可有（立即进入资源匹配候选）；
+  - HR 排班窗口与资源日历冲突时，按上述规则以 HR 排班为准，且结果可解释（返回命中的 assignment id）。
+- **UI/菜单**：`employee` 是**主体实体** ⇒ 独立菜单；`employee_shift_assignment` 是**关系对象** ⇒ **不做独立菜单**，收进员工详情页分区，但必须补齐 `ui_view_config` 三态（list/form/detail），避免裸 ID 列与空表单（遵循 `meta-menu-retirement`）。
+- **优先级**：Should（P3，依赖 P2b `shift`）
+- **类型映射**：功能
+- **来源**：用户 2026-11-01 提出"Employee 主数据是否还没有"的核查 + 对标 §3.3（HR Work Schedule Rule / Shift Group）
+
 ## 4. 非功能需求
 
 ### NFR-001 性能
@@ -399,6 +465,7 @@
 | FR-012 | 导入/治理 | Should | 主数据上线效率 |
 | FR-008 | 资源分配 | Could | 依赖排程 |
 | FR-010 | 地理 | Could | 复用 `territory` + 服务覆盖分配；P2c 服务派单前置 |
+| FR-015 | 员工主数据（薄） | Should | 缺"雇佣关系"层；P3，依赖 P2b `shift` |
 
 里程碑：
 
@@ -406,6 +473,7 @@
 - **M2（P2b）**：FR-006、FR-008、FR-005 校验。依赖 M4 工序语义定稿。
 - **M3（P2c）**：`resource_capacity` 多口径、可用性例外、物流载重/体积（FR-005 扩展）。
 - **M4（P2d）**：FR-010 服务覆盖分配（复用 territory）、`work_order.project_id`（依赖 P1）。
+- **M5（P3）**：FR-015 员工主数据（`employee`）+ `employee_shift_assignment` + `available_minutes` 的 HR 分支（依赖 P2b `shift`）。
 
 ## 9. 变更/设计方案（RFC）
 
@@ -455,6 +523,8 @@
 | `resource_assignments` | `work_order_operation_id` / `resource_id` / `planned_start` / `planned_end` / `planned_qty` / `status` / `source` | 计划量 ≤ 工序量；同一资源时间窗不重叠（显式超产标记例外） |
 | `resource_territory_assignments` | `resource_id`（或 `resource_group_id`）/ `territory_id` / `coverage_level` / `effective_from` / `effective_to` | 唯一 `(resource_id, territory_id, effective_from)`；允许重叠 |
 | `resource_availabilities` | `resource_id` / `availability_type`（available/unavailable/overtime）/ `start_at` / `end_at` / `reason` / `source`（manual/hr/maintenance/other）/ `org_id` | **不建唯一键**（同一资源允许重叠例外）；`end_at > start_at`；例外与班次窗口按**绝对时间**求交，见 FR-005 |
+| `employees`（P3） | 见 FR-015 | `employee_no` 全局唯一；部分唯一 `(person_profile_id) WHERE status='active'`；部分唯一 `(resource_id) WHERE resource_id IS NOT NULL AND status='active'`；`termination_date >= hire_date`；主管自引用无环 |
+| `employee_shift_assignments`（P3） | `employee_id` / `shift_id` / 7 日掩码 / `seq` / `effective_from` / `effective_to` / `work_center_id` / `note` | 唯一 `(employee_id, shift_id, seq, effective_from)`；复用 `shifts` 时段模板，不复制时段定义；不做独立菜单 |
 
 **修改表**
 
@@ -532,6 +602,9 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | ~~TBD-6~~ | ~~技能字典升级~~ | **已定：直接使用 `skill` 主数据对象**（2026-11-01 用户确认；多模块引用需独立生命周期/层级/认证） | 关闭（FR-003 已改写，见附 A.4） |
 | TBD-7 | 迁移号分配 | 当前仓库最大迁移号 v174（v174 有两条同名版本文件） | **已定：资源域取 v175**（`v175__resource_domain_foundation.py`） |
 | TBD-8 | 成本中心主数据 | 平台暂无 `cost_center` 对象（仅 `cost_center_id` 字段引用），SAP 的"作业类型"费率依赖它 | **暂不建**：P2a 保留 `cost_center_id` 引用；等财务域立项再建主数据并迁移 |
+| TBD-9 | `employee.name` 是否冗余 | 姓名可从 `person_profile` → `party` 取，但通用列表页不支持 join 展示 | **建议冗余 + 保存时由服务同步**；若后续列表页支持 relation 展示可去列 |
+| TBD-10 | 外协/派遣人员是否入 `employees` | `employment_type=dispatched` 与 `resource_kind=external` 语义交叉 | **建议**：派遣入 `employees`（工时/排班归我方），外协主体仍走 `party` + `resource(external)`，不建员工行 |
+| TBD-11 | 一人多组织 | 兼职/矩阵汇报需要一人挂多组织 | **首期不支持**：`employee` 单 `org_id`；多组织用 `employee_org_assignment` 另立（P4），避免首期做成都市 |
 
 ---
 
@@ -652,3 +725,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.6 | 服务层落地：新增 `meta/services/resource_matching_service.py`（日历优先级解析 / 班次按日展开 / 可用分钟（产能公式）/ 技能+组匹配 / 分配校验），对应 FR-003 / FR-005 / FR-008 验收；`meta/tests/test_resource_matching_service.py` 16 passed，架构门禁 10 项全 OK |
 | 2026-11-01 | v1.7 | FR-005 多口径补齐：新增 `capacity_by_category`（同一类别取有效期最新行；labor_hours/machine_hours 由日历推导，工具数/载重/体积/场地按声明值展开；支持资源与组两种主体）；服务测试 19 passed |
 | 2026-11-01 | v1.8 | P2c 可用性例外落地：新增 `resource_availability`（枚举 available/unavailable/overtime × manual/hr/maintenance/other，绝对时间窗，不建唯一键）+ 迁移 v180（1 菜单 / 4 权限 / 2 枚举 / 2 索引）；服务层 `availability_overrides` 与 `available_minutes` 按**绝对时间**把例外与班次窗口求交（请假扣减、加班加成、检修等同不可用）；schema 16 + migration 6 + 服务 22 passed |
+| 2026-11-01 | v1.9 | P3 方案细化：新增 FR-015「员工主数据（薄）」（现状盘点确认 `person_profile`/`party_internal`/`user`/`salesperson` 均不承载雇佣关系；`employee` 14 字段 + `employee.resource_id` 1:1 桥接 + 两个部分唯一索引；`employee_shift_assignment` 复用 `shift` 时段模板、不做独立菜单；HR 排班优先于资源日历的可用性推导规则）；新增 M5（P3）、§9.3 两行、TBD-9~11；**仅方案，未实施** |
