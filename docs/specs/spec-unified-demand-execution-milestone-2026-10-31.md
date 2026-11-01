@@ -25,8 +25,9 @@
 | 里程碑 | 对应 project spec | 内容 | 依赖 |
 |---|---|---|---|
 | **P1** | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + `sales_order.project_id` / 行 / 计划行挂载 + 项目 360 只读视图（D1 / D2） | M0 |
+| **P1.5** | Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图（Q3 / G11 / G14 / D11） | P1 |
 | **P2** | Phase 2 | `work_center` / `resource` / `resource_capability` / `routing(+operation)`；`work_order.project_id`；工序溯源（D4 / D10） | M4（共用工序语义） |
-| **P3** | Phase 3 | `project_structure_snapshot`；`configuration.project_id`；配置物化联动（D5 / D6 / D11） | P2 |
+| **P3** | Phase 3 | `configuration.project_id` + `context_json`；配置物化联动（D6 / D11）；**不建项目级 BOM 快照（D5 撤销）** | P2 |
 | **P4** | Phase 4 | 项目预算 / 收入确认；`project` 权限维度（D8） | 按需，不承诺 |
 
 对齐说明：project spec 的 Phase 0（口径核验）并入 M0；P1 不放在 M6，因为 M6 是 `doc_flow` 治理，与项目对象无关。P1 出口判据：`project_id` 为空时旧链路零回归（AC-02），项目 360 视图按 `project_id` 聚合且不复制金额（AC-03）。
@@ -121,8 +122,10 @@
 | SSC | S1、S2、S4、S7 | M1 |
 | SSC | S3、S5、S10 | M5 |
 | SSC | S11 | M3（合同 / 权益） |
-| project | G1、G11 | P1 / M1 |
-| project | G2、G3、G4、G12、G13、G14 | M4 |
+| project | G1 | P1 |
+| project | G11 | P1.5 / M1 |
+| project | G2、G3、G4、G12、G13 | M4 |
+| project | G14 | P1.5 |
 | project | G5、G6、G8、G9、G10 | P2 / P3 / M5 |
 
 ### 8.1 项目侧决策归位
@@ -130,9 +133,10 @@
 | 决策 | 落点 |
 |---|---|
 | D1 / D2（项目为一等对象、类型走 `type_definition`） | P1 |
+| Q3（`project_task` 独立成表，与 `tasks` 仅弱引用） | P1.5 |
 | D3（三套里程碑只补 `project_id` 做归集） | P1（挂载）+ M5（SLA 归集） |
 | D4（工作中心 / 资源 / routing 新主数据） | P2 |
-| D5 / D6（BOM 快照、配置不新建表） | P3 |
+| D5（**撤销**：不建项目级 BOM 快照，快照粒度 = 工单）/ D6（配置不新建表） | P3 |
 | D7（履约入口仍是 `work_order`） | 全局原则，不单列里程碑 |
 | D8（项目暂不进权限维度） | P4 |
 | D9（不新建 `demand` / `planned_order`） | M1 约束 |
@@ -157,3 +161,5 @@
 |---|---|---|
 | 2026-10-31 | v0.1 | 首版：6 个里程碑 + 4 条口径裁决 + 缺口映射 + 4 条跨里程碑风险 |
 | 2026-10-31 | v0.2 | 补项目侧并行轨 P1-P4（对齐 project spec 的 Phase 0-4，Phase 0 并入 M0）；`project` 对象从 M6 移到 P1；新增 §8.1 项目侧 D1-D12 决策归位；补 P1 出口判据（AC-02 / AC-03） |
+| 2026-11-01 | v0.3 | 补 P1.5（`project_task` 计划层，Q3 / G11 / G14）；缺口映射拆分 G1→P1、G11→P1.5；售后三值启用与 `sla_milestone.project_id` 归入已实施的 P2 收尾 |
+| 2026-11-01 | v0.4 | P3 裁决：D5 撤销，P3 收缩为 `configuration.project_id` + 物化联动，不建项目级 BOM 快照（对齐 project spec v1.4） |

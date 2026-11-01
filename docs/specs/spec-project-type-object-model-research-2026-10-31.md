@@ -112,7 +112,9 @@
 
 - `items` 的 `goods/service` 是本体性质，**不新增 `project_delivery` 之类的 item_type**；项目交付物 = `sales_order_line.item_id` + `project_wbs` 引用。
 - 服务包/工时物料已可用 `item_type=service + billing_method=time_and_material + standard_duration` 表达，无需新对象。
-- BOM 侧：不改 `item_structure` 语义，新增 `project_structure_snapshot`（`project_id / structure_id / revision / frozen_at / snapshot_json`），项目冻结时快照，履约只读快照。
+- BOM 侧：不改 `item_structure` 语义，**也不建项目级快照表**（D5 已撤销，见 §8.4）；快照粒度落在工单——
+  `work_order_components` 展开时即复制 `structure_id / structure_line_id / qty_per / fixed_qty / qty_required`，
+  履约期间不回读 BOM（即 AC-07 的实际落点）。
 - 补 `usage=engineering` 的消费方（工程变更/BOM 比较），或新增 `usage=project`；二者择一，需评审（见 Q2）。
 
 ### 2.4 结构配置层：不新建表，用 `project_id + context_json` 承载项目上下文
@@ -121,6 +123,24 @@
 - `config_rule` 的项目作用域优先复用 `control_parameter_def/value`（既有「行为参数不进类型字典」原则），不新增 project 列。
 - `config_materialize_policy(off/manual/auto)` 已与 2026-10-30 变式物料 spec 对齐：项目配置冻结 → `auto` 直接物化 active，`manual` 物化 draft 需签发。
 - **不变量 I4**：配置/结构冻结后，履约与定价只读快照，不回读主数据。
+
+### 2.5 计划层：`project_task` + 依赖边（Q3 已决，补排期）
+
+> 此前 P1–P4 未覆盖计划层，导致 G11（`source_demand_type` 扩 `project_task`）与 G14（工时回聚）无落点；
+> 本节把 Q3 已决口径落成可实施的对象契约，排期见 §5 Phase 1.5。
+
+- `project_task`（项目活动 / WBS 节点）：
+  - 字段：`project_id`（必填）、`parent_task_id`（可空，WBS 层级）、`task_no`（项目内唯一）、`name`、`task_type`（phase / work_package / activity）、`status`（draft / planned / in_progress / done / cancelled）、`planned_start` / `planned_end`、`percent_complete`、`owner_user_id`、`description`。
+  - 不参与执行：**不生成** `tasks`、**不挂** `work_order_operation`（§8.2 硬规则 1 / 2）。
+  - 需求入口：`source_demand_type='project_task'` + `source_demand_id`，落在工单 / 采购单头（G11）。
+- `project_task_dependency`（活动依赖边）：
+  - 字段：`predecessor_task_id` / `successor_task_id`、`dependency_type ∈ {FS, SS, FF, SF}`、`lag_minutes`（可正可负）。
+  - 唯一性：`(predecessor_task_id, successor_task_id, dependency_type)`；跨项目依赖拒绝。
+- 红线三条（与 §8.2 一致）：
+  1. 计划只产需求，不产动作；
+  2. 桥只两个键：`project_id` + `project_task_id`，只允许落在单据头 / 行，不允许落在 `work_order_operation`；
+  3. 工时只记在 `tasks` / `worklogs`，回聚 `project_task → project` 用派生视图（D11），不落汇总表。
+- 暂不做：关键路径落表（`project_schedule_result`）、`project_milestone` 独立表（Q5），先算不存 / 由 billing schedule 承载。
 
 ---
 
@@ -131,7 +151,7 @@
 | G1 | 无 `project` 对象与 `project_id` 挂载 | P0 | 项目类型商务层不可表达 |
 | G2 | `work_center_id` 悬空（无对象/无表） | P0 | 工序无法归属产能，排程/成本不可算 |
 | G3 | 无 `routing` 工艺路线主数据 | P0 | 工序只能工单级手填，标准工时不可复用 |
-| G4 | `usage=engineering` 无消费方；无项目 BOM 快照 | P0 | 工程变更与项目实例化 BOM 不可表达 |
+| G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销） | P0 | 工程变更与项目实例化 BOM 不可表达 |
 | G5 | 资源只有 3 值枚举，无实例/日历/技能/费率 | P1 | 派工、资源排程、成本核算缺主数据 |
 | G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点 | P1 | 项目 360 视图需跨链拼接 |
 | G7 | Gen2 任务六表不在 YAML 元模型内 | P1 | 四层对象无法统一治理（与 L18 治理项同源） |
@@ -153,7 +173,7 @@
 | D2 | 项目类型走 `type_definition(scope_bo='project')`，不新增枚举列 | 复用「一张表 + scope_bo + level」的既有统一载体 |
 | D3 | 三套里程碑保留各自语义，只补 `project_id` 做归集 | 收款、SLA、作业完成不是同一事实，合并会造成状态耦合 |
 | D4 | `work_center / resource / routing` 作为新主数据对象，`work_order_operation` 增溯源列 | 修悬空引用 + 让标准工时/产能可复用 |
-| D5 | 项目 BOM 用快照表，不改 `item_structure` 语义 | 冻结后履约只读快照，避免主数据变更导致历史漂移 |
+| D5 | **撤销**：不建项目级 BOM 快照表；快照粒度 = 工单（`work_order_components`）/ 配置实例（`structure_id` + `config_hash`） | 项目级快照唯一收益是「基线对比」，却与工单展开快照构成双源；与 §8.4 一致，等出现基线对比或 ECO 追溯再做轻量引用表 |
 | D6 | 配置层不新建表，`configuration.project_id + context_json` 承载 | 与现有选配/物化链路一致，改动最小 |
 | D7 | 履约统一入口仍是 `work_order`（`order_type` 扩展）；实物 `shipment` 不合并 | 避免多态大表；项目视图靠 `project_id` 跨链查询 |
 | D8 | 项目暂不进入权限维度链（沿用 org 维度）；Phase 4 评估 `project` generic 维度 | 与 Spec 23 的 org 维度保持正交，避免权限体系短期复杂化 |
@@ -170,8 +190,9 @@
 |---|---|---|
 | Phase 0 | 一手产品口径核验（SAP PS / Oracle PPM / 用友项目云 / Dynamics PSA / NetSuite project）；字段与不变量评审 | 无 |
 | Phase 1 | `project` 对象 + `type_definition(scope_bo='project')` + SO/line/schedule 挂载 + 项目 360 只读视图 | 新增对象，旧单据可空 |
+| Phase 1.5 | `project_task` + `project_task_dependency`；`source_demand_type` 扩 `project_task`；工时回聚派生视图 | 新增计划层对象，执行链路不变 |
 | Phase 2 | `work_center / resource / resource_capability / routing(+operation)`；`work_order.project_id`；工序溯源 | 新增主数据，工单可空挂载 |
-| Phase 3 | `project_structure_snapshot`；`configuration.project_id`；项目配置物化联动 | 冻结链路增强 |
+| Phase 3 | `configuration.project_id` + `context_json` 承载项目上下文；项目配置物化联动（**不建项目级 BOM 快照**，D5 撤销） | 配置层挂载，履约链路不变 |
 | Phase 4 | 项目预算/收入确认；`project` generic 权限维度评估 | 按需 |
 
 ---
@@ -184,8 +205,11 @@
 - AC-04 `work_order_operation.work_center_id` 只能引用存在的 `work_center`（删除 restrict）。
 - AC-05 routing 展开到工单后，修订 routing 不影响已发工单（快照断言）。
 - AC-06 `configuration.project_id` 为空时选配/物化链路无回归；项目配置冻结后物化遵循 `config_materialize_policy`。
-- AC-07 `project_structure_snapshot` 冻结后，工单用料只读快照。
+- AC-07 工单组件由 `work_order_components` 展开落表后，`item_structure` 的后续修订不回冲已发工单的用料；
+  项目级不建 BOM 快照表。
 - AC-08 现有 `service/production` 工单全链路测试通过，`order_type` 新增值仅扩展不改变旧语义。
+- AC-09 `project_task` 可独立创建 / 关闭，`project_task_dependency` 只表达 FS/SS/FF/SF + lag；
+  `source_demand_type='project_task'` 时 `source_demand_id` 必填，且该任务归属同一 `project_id`。
 
 ---
 
@@ -248,7 +272,7 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 |---|---|---|
 | `demand` / `planned_order` 表 | 现有 `source_demand_type` 枚举够用 | 出现「一个活动拆多张执行单」 |
 | `project_schedule_result`（关键路径落表） | 先算不存，避免调度结果与计划双源 | 需要基线对比或冻结排程 |
-| `project_structure_snapshot` | 无「项目改 BOM 需冻结」的真实诉求 | 工程变更影响在途履约 |
+| `project_structure_snapshot` | 无「项目改 BOM 需冻结」的真实诉求；AC-07 已由工单级展开快照满足（D5 撤销） | 出现「多工单之间比 BOM 基线」或「ECO 需追溯在途工单」时，先做轻量引用表 `project_structure_baseline(project_id, item_id, structure_id, frozen_at)`，不落 `snapshot_json` |
 
 ### 8.5 修订后的一句话模型
 
@@ -272,4 +296,6 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 |---|---|
 | 2026-10-31 | 初版研究稿 v1.0（仅取证与设计建议，未改代码、未提交） |
 | 2026-10-31 | v1.1：并入「对象与关系复审」（§8）；补 G11-G14、D9-D12；Q3 改为已决；证据清单顺延为 §9 |
+| 2026-11-01 | v1.3：补 §2.5 计划层对象契约与 Phase 1.5 排期；新增 AC-09；修正 P1–P4 未覆盖 `project_task` 的里程碑漏项 |
+| 2026-11-01 | v1.4：P3 裁决——撤销 D5，不建 `project_structure_snapshot`（AC-07 已由 `work_order_components` 工单级展开快照满足）；§2.3 / §3 G4 / Phase 3 / AC-07 / D5 / §8.4 同步；P3 范围收缩为 `configuration.project_id` + 物化联动 |
 | 2026-10-31 | v1.2：命名口径复核——只改 `work_order`，撤销 `fulfillment_order` 改名与「活动」对象改名；D12 与 §8.3 同步 |
