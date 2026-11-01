@@ -43,6 +43,14 @@ from meta.migrations.v172__project_object_p1 import (  # noqa: E402
     rollback,
     verify,
 )
+from meta.migrations.v174__project_type_seed import (  # noqa: E402
+    LEVEL as SEED_LEVEL,
+    PROJECT_TYPES,
+    SCOPE_BO as SEED_SCOPE_BO,
+    migrate as seed_migrate,
+    rollback as seed_rollback,
+    verify as seed_verify,
+)
 from meta.services.project_overview_service import (  # noqa: E402
     ProjectNotFound,
     ProjectOverviewService,
@@ -534,3 +542,107 @@ class TestProjectOverview:
         svc, _path = overview
         with pytest.raises(ProjectNotFound):
             svc.overview(999)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v174 项目类型种子（P1 出口：类型下拉不能为空）
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SEED_TYPE_DDL = """
+CREATE TABLE type_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    scope_bo VARCHAR(40) NOT NULL,
+    level VARCHAR(20) NOT NULL,
+    line_category VARCHAR(40),
+    document_category VARCHAR(40),
+    default_type_id INTEGER,
+    number_sequence_id INTEGER,
+    delivery_relevant INTEGER,
+    status VARCHAR(200) NOT NULL DEFAULT 'active',
+    description TEXT,
+    created_at DATETIME
+)
+"""
+
+_SEED_PROJECTS_DDL = """
+CREATE TABLE projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_type_id INTEGER
+)
+"""
+
+
+def _build_type_db(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.executescript(_SEED_TYPE_DDL)
+        conn.executescript(_SEED_PROJECTS_DDL)
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def _type_status(path, code):
+    return _scalar(
+        path,
+        'SELECT status FROM type_definitions '
+        'WHERE scope_bo = ? AND level = ? AND code = ?',
+        ('project', 'header', code))
+
+
+class TestProjectTypeSeed:
+    """v174：播种 SAP 四分项目类型，保证新建项目时类型下拉非空。"""
+
+    def test_declares_four_sap_aligned_header_types(self):
+        assert {'P_INVEST', 'P_CUSTOMER', 'P_INTERNAL', 'P_MAINT'} == {
+            item[0] for item in PROJECT_TYPES}
+        assert SEED_SCOPE_BO == 'project'
+        assert SEED_LEVEL == 'header'
+        for code, name, desc in PROJECT_TYPES:
+            assert name and desc, code
+
+    def test_migrate_seeds_all_types_as_active(self, tmp_path):
+        db = _build_type_db(tmp_path / 'type_seed.db')
+        assert seed_migrate(db) is True
+        assert seed_verify(db) is True
+        for code, _name, _desc in PROJECT_TYPES:
+            assert _type_status(db, code) == 'active'
+
+    def test_migrate_is_idempotent_without_overwriting_status(self, tmp_path):
+        db = _build_type_db(tmp_path / 'type_seed_twice.db')
+        # 实施侧先停用过一条类型，重跑迁移不得把它激活
+        conn = sqlite3.connect(str(db))
+        try:
+            seed_row(conn, 'type_definitions', code='P_MAINT', name='维护项目',
+                     scope_bo='project', level='header', status='inactive')
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert seed_migrate(db) is True
+        assert _scalar(db, 'SELECT COUNT(1) FROM type_definitions '
+                           "WHERE scope_bo = 'project'") == 4
+        # 实施侧停用过的类型不被重跑迁移激活
+        assert _type_status(db, 'P_MAINT') == 'inactive'
+        assert seed_verify(db) is False
+
+    def test_rollback_keeps_type_referenced_by_project(self, tmp_path):
+        db = _build_type_db(tmp_path / 'type_seed_rollback.db')
+        assert seed_migrate(db) is True
+        conn = sqlite3.connect(str(db))
+        try:
+            type_id = conn.execute(
+                "SELECT id FROM type_definitions WHERE code = 'P_CUSTOMER'"
+            ).fetchone()[0]
+            seed_row(conn, 'projects', project_type_id=type_id)
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert seed_rollback(db) is True
+        assert _type_status(db, 'P_CUSTOMER') == 'active'
+        for code in ('P_INVEST', 'P_INTERNAL', 'P_MAINT'):
+            assert _type_status(db, code) is None
