@@ -161,6 +161,7 @@ CREATE TABLE employees (
     position TEXT,
     job_grade TEXT,
     employment_type TEXT DEFAULT 'full_time',
+    supplier_party_id INTEGER,
     status TEXT DEFAULT 'active',
     hire_date TEXT,
     termination_date TEXT,

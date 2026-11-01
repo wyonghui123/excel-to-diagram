@@ -32,7 +32,7 @@ from meta.tests.factories._pricing_p2_helpers import create_tables, seed_row  # 
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 
 # 建表顺序：先 FK 目标表，再员工 / 排班
-TABLES = ["org", "location", "user", "person_profile", "shift",
+TABLES = ["party", "org", "location", "user", "person_profile", "shift",
           "resource_group", "employee", "employee_shift_assignment"]
 
 EXPECTED_FKS = {
@@ -41,6 +41,7 @@ EXPECTED_FKS = {
         ("user_id", "users", "id"),
         ("org_id", "orgs", "id"),
         ("location_id", "locations", "id"),
+        ("supplier_party_id", "parties", "id"),
         ("manager_employee_id", "employees", "id"),
     },
     "employee_shift_assignments": {
@@ -51,7 +52,7 @@ EXPECTED_FKS = {
 }
 
 PARTIAL_UNIQUE_INDEXES = [
-    ("uq_employee_active_no", ["employee_no"]),
+    ("uq_employee_active_org_no", ["org_id", "employee_no"]),
     ("uq_employee_active_person", ["person_profile_id"]),
 ]
 
@@ -75,7 +76,8 @@ NOT_NULL_COLUMNS = {
 
 NULLABLE_COLUMNS = {
     "employees": ("user_id", "location_id", "position", "job_grade",
-                  "termination_date", "manager_employee_id"),
+                  "supplier_party_id", "termination_date",
+                  "manager_employee_id"),
     "employee_shift_assignments": ("effective_to", "work_center_id", "note"),
 }
 
@@ -216,6 +218,7 @@ class TestDeclaration:
                 ("employee", "user_id", "user"),
                 ("employee", "org_id", "org"),
                 ("employee", "location_id", "location"),
+                ("employee", "supplier_party_id", "party"),
                 ("employee", "manager_employee_id", "employee"),
                 ("employee_shift_assignment", "employee_id", "employee"),
                 ("employee_shift_assignment", "shift_id", "shift"),
@@ -310,14 +313,19 @@ class TestTable:
                      shift_id=999, effective_from="2026-01-01")
         assert "FOREIGN KEY" in str(exc.value).upper()
 
-    def test_active_employee_no_unique(self, conn):
+    def test_active_employee_no_unique_per_org(self, conn):
+        """工号按法人雇主唯一（TBD-12）：同法人同号被拒，跨法人可复用。"""
         seed_row(conn, "employees", employee_no="E-DUP", name="甲",
-                 person_profile_id=1, org_id=0, status="active",
+                 person_profile_id=1, org_id=1, status="active",
                  hire_date="2026-01-01")
         with pytest.raises(sqlite3.IntegrityError):
             seed_row(conn, "employees", employee_no="E-DUP", name="乙",
-                     person_profile_id=2, org_id=0, status="active",
+                     person_profile_id=2, org_id=1, status="active",
                      hire_date="2026-02-01")
+        # 另一法人可用同一工号
+        seed_row(conn, "employees", employee_no="E-DUP", name="丙",
+                 person_profile_id=4, org_id=2, status="active",
+                 hire_date="2026-03-01")
 
     def test_terminated_employee_no_can_repeat(self, conn):
         """历史离职行可同号（再入职沿用原号）⇒ 部分唯一索引不应拦截。"""

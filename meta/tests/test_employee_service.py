@@ -53,6 +53,7 @@ CREATE TABLE employees (
     position TEXT,
     job_grade TEXT,
     employment_type TEXT DEFAULT 'full_time',
+    supplier_party_id INTEGER,
     status TEXT DEFAULT 'active',
     hire_date TEXT,
     termination_date TEXT,
@@ -99,6 +100,18 @@ CREATE TABLE calendar_shifts (
     capacity_factor REAL DEFAULT 1.0,
     valid_from TEXT,
     valid_to TEXT
+);
+CREATE TABLE resource_groups (
+    id INTEGER PRIMARY KEY,
+    code TEXT,
+    name TEXT,
+    calendar_id INTEGER
+);
+CREATE TABLE calendar_days (
+    id INTEGER PRIMARY KEY,
+    calendar_id INTEGER,
+    date TEXT,
+    day_type TEXT
 );
 CREATE TABLE resource_availabilities (
     id INTEGER PRIMARY KEY,
@@ -194,19 +207,53 @@ def test_validate_terminated_requires_termination_date():
 
 def test_validate_employee_no_conflict_only_for_active():
     conn = _connect()
-    _employee(conn, 1, employee_no='E1', person_profile_id=101, status='active')
+    _employee(conn, 1, employee_no='E1', person_profile_id=101, status='active',
+              org_id=1)
     result = validate_employee(conn, {
         'employee_no': 'E1', 'person_profile_id': 999, 'status': 'active',
-        'hire_date': '2026-11-01'})
+        'org_id': 1, 'hire_date': '2026-11-01'})
     assert 'EMPLOYEE_NO_CONFLICT' in _codes(result)
 
     _employee(conn, 2, employee_no='E-OLD', person_profile_id=102,
-              status='terminated', hire_date='2020-01-01',
+              status='terminated', org_id=2, hire_date='2020-01-01',
               termination_date='2021-01-01')
     result = validate_employee(conn, {
         'employee_no': 'E-OLD', 'person_profile_id': 999, 'status': 'active',
-        'hire_date': '2026-11-01'})
+        'org_id': 2, 'hire_date': '2026-11-01'})
     assert 'EMPLOYEE_NO_CONFLICT' not in _codes(result)
+
+
+def test_validate_employee_no_conflict_is_per_legal_employer():
+    """TBD-12：工号唯一域 = (org_id, employee_no)，跨法人同号不冲突。"""
+    conn = _connect()
+    _employee(conn, 1, employee_no='E1', person_profile_id=101, status='active',
+              org_id=1)
+    result = validate_employee(conn, {
+        'employee_no': 'E1', 'person_profile_id': 102, 'status': 'active',
+        'org_id': 2, 'hire_date': '2026-11-01'})
+    assert 'EMPLOYEE_NO_CONFLICT' not in _codes(result)
+
+
+def test_validate_dispatched_requires_supplier_party():
+    """TBD-10：派遣员工必须填派遣供应商；其他用工类型不要求。"""
+    conn = _connect()
+    result = validate_employee(conn, {
+        'employee_no': 'D1', 'person_profile_id': 201, 'org_id': 1,
+        'employment_type': 'dispatched', 'status': 'active',
+        'hire_date': '2026-11-01'})
+    assert 'SUPPLIER_PARTY_REQUIRED' in _codes(result)
+
+    result = validate_employee(conn, {
+        'employee_no': 'D2', 'person_profile_id': 202, 'org_id': 1,
+        'employment_type': 'dispatched', 'supplier_party_id': 8,
+        'status': 'active', 'hire_date': '2026-11-01'})
+    assert _codes(result) == []
+
+    result = validate_employee(conn, {
+        'employee_no': 'F1', 'person_profile_id': 203, 'org_id': 1,
+        'employment_type': 'full_time', 'status': 'active',
+        'hire_date': '2026-11-01'})
+    assert 'SUPPLIER_PARTY_REQUIRED' not in _codes(result)
 
 
 def test_validate_person_profile_conflict():
@@ -369,3 +416,54 @@ def test_shift_overlap_warnings_ignores_adjacent_windows():
     ]
     # 首尾相接(08:00-12:00 与 12:00-16:00)不算重叠
     assert shift_overlap_warnings(windows, '2026-11-02') == []
+
+
+# ============================================================================
+# 节假日排班告警 (TBD-13, 不阻断落库)
+# ============================================================================
+
+def test_holiday_work_warning_when_shift_on_calendar_holiday():
+    conn = _connect()
+    day_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                     start_time='08:00', end_time='16:00')
+    _insert(conn, 'calendars', id=5)
+    _insert(conn, 'resource_groups', id=9, code='WC1', name='工作中心',
+            calendar_id=5)
+    _insert(conn, 'calendar_days', calendar_id=5, date='2026-11-02',
+            day_type='holiday')
+    _employee(conn, 1)
+    _insert(conn, 'employee_shift_assignments', employee_id=1,
+            shift_id=day_id, effective_from='2026-01-01', work_center_id=9)
+
+    warnings = employee_shift_warnings(conn, 1, '2026-11-02')
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning['code'] == 'HOLIDAY_WORK'
+    assert warning['employee_id'] == 1
+    assert warning['date'] == '2026-11-02'
+    assert warning['work_center_id'] == 9
+    assert warning['calendar_id'] == 5
+    assert warning['assignment_id'] is not None
+
+
+def test_holiday_work_ignores_non_holiday_or_missing_work_center():
+    conn = _connect()
+    day_id = _insert(conn, 'shifts', code='DAY', name='白班',
+                     start_time='08:00', end_time='16:00')
+    _insert(conn, 'calendars', id=5)
+    _insert(conn, 'resource_groups', id=9, code='WC1', name='工作中心',
+            calendar_id=5)
+    # 当天是强制工作日（调休），不算节假日
+    _insert(conn, 'calendar_days', calendar_id=5, date='2026-11-03',
+            day_type='workday')
+    _employee(conn, 1)
+    _insert(conn, 'employee_shift_assignments', employee_id=1,
+            shift_id=day_id, effective_from='2026-01-01', work_center_id=9)
+    # 无工作中心的排班不做节假日判定
+    _insert(conn, 'employee_shift_assignments', employee_id=2,
+            shift_id=day_id, effective_from='2026-01-01')
+
+    assert employee_shift_warnings(conn, 1, '2026-11-03') == []
+    assert employee_shift_warnings(conn, 2, '2026-11-03') == []
+    # 该日期无例外日记录 ⇒ 标准日, 不告警
+    assert employee_shift_warnings(conn, 1, '2026-11-04') == []

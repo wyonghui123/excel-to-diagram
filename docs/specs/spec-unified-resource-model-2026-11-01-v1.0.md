@@ -291,29 +291,32 @@
   1. Oracle HCM 是三层：**Person → Work Relationship（person ↔ 法人雇主）→ Assignment（岗位/组织/地点/职级/排班）**；`employee` 只是 `assignment_type` 的一个取值，**不是独立主数据**。
   2. Oracle 制造：**Labor Resource Instance 关联 TCA `person`**（关联在**工厂内唯一**），而不是关联 employee/assignment；工作中心可用性通过 HCM Workforce Scheduling 取"部门 + 排班组"的 person 排班。
   3. ⇒ **本平台结论**：`employee` 定位为**雇佣关系（薄 assignment）**，指向 `person_profile`；`resource.person_ref` 继续指向 `person_profile`；**资源到 person，不到 employee**，不建 `employee.resource_id` 外键。
-  4. ⇒ 由此产生的两条修正：同一人可在多个工厂/组织各有一个人资源实例（不再做 resource 1:1 唯一约束）；员工号在 Oracle 中**再入职沿用原号**，故 `employee_no` 只在 `status='active'` 时唯一。
+  4. ⇒ 由此产生的两条修正：同一人可在多个工厂/组织各有一个人资源实例（不再做 resource 1:1 唯一约束）；员工号在 Oracle 中**再入职沿用原号**，故 `employee_no` 按「法人雇主 + 在职」唯一（`(org_id, employee_no) WHERE status='active'`，v1.18）。
 - **`employee` 字段**（表 `employees`）：
 
 | 字段 | 说明 | 约束 |
 |---|---|---|
-| `employee_no` | 工号（再入职沿用原号） | 必填；**部分唯一** `WHERE status='active'` |
-| `name` | 姓名（展示冗余，来源 `person_profile` 对应 party 名称） | 必填 |
+| `employee_no` | 工号（再入职沿用原号） | 必填；**部分唯一** `(org_id, employee_no) WHERE status='active'` |
+| `name` | 姓名（**缓存列**，真源 `person_profile` 对应 party 名称，改名走服务同步） | 必填 |
 | `person_profile_id` | 自然人档案 | 必填，FK `person_profiles` restrict |
 | `user_id` | 登录账号（可后绑） | 可空，FK `users` |
-| `org_id` | 所属组织（雇佣组织，即 Oracle 的 legal employer/work relationship 简化） | 必填，FK `orgs` |
+| `org_id` | **法人雇主**（legal employer，即 Oracle work relationship 的 person↔法人 段） | 必填，FK `orgs` |
 | `location_id` | 工作地点 | 可空，FK `locations` |
 | `position` | 岗位名称（首期自由文本，不建岗位主数据） | 可空 |
 | `job_grade` | 职级 | 可空 |
 | `employment_type` | `full_time` / `part_time` / `contractor` / `intern` / `dispatched` | 默认 `full_time` |
+| `supplier_party_id` | 派遣供应商（`party.id`） | 可空，FK `parties`；`dispatched` 时必填（服务层） |
 | `status` | `active` / `inactive` / `terminated` | 默认 `active` |
 | `hire_date` | 入职日期 | 必填 |
 | `termination_date` | 离职日期 | 可空；`status=terminated` 时必填 |
 | `manager_employee_id` | 直属主管（自引用） | 可空，无环 |
 
-- **唯一性与完整性**：
-  - 部分唯一索引 `employees(employee_no) WHERE status='active'`：在职期间工号唯一；再入职沿用原号（历史行 `terminated` 可与在职行同号）；
+- **唯一性与完整性**（v1.18 / TBD-12 收口）：
+  - 部分唯一索引 `employees(org_id, employee_no) WHERE status='active'`：工号按**法人雇主**唯一，再入职沿用原号（历史行 `terminated` 可与在职行同号），**跨法人可复用同一工号**；
   - 部分唯一索引 `employees(person_profile_id) WHERE status='active'`：同一自然人在同一时刻只能有一条在职雇佣记录（再入职走新行 + 旧行 `terminated`）；
-  - `termination_date >= hire_date`；`status=terminated` 时 `termination_date` 必填；`manager_employee_id` 不得成环（服务层校验）。
+  - `employment_type=dispatched` 时 `supplier_party_id` 必填（服务层；外协主体走 `party` + `resource(external)`，不建员工行，TBD-10）；
+  - `termination_date >= hire_date`；`status=terminated` 时 `termination_date` 必填；`manager_employee_id` 不得成环（服务层校验）；
+  - `name` 为缓存列，唯一真源是 `person_profile → party`，不允许把改名逻辑写回员工表以外的副本。
 - **与 `resource` 的关系（关键决策，v1.10 修正）**：**不建 `employee.resource_id`，资源与员工都指向 person，按 person 求交。**
   - 求交方式：`resource.person_ref = employees.person_profile_id AND employees.status='active'`；服务层提供 `resolve_resource_employee(conn, resource_id)` 封装（一处 join，其他调用方不再各写 SQL）。
   - 理由（Oracle 依据）：① 劳动资源实例关联的是 **person**，不是 employee；② 关联在**工厂内唯一**，同一个人跨厂/跨组织可有多个 person 资源实例 —— 若做 1:1 外键，第二实例无法表达；③ 员工历史行（离职/再入职/调岗）会让资源指向失效，而 person 不变。
@@ -329,7 +332,7 @@
   - `employee_shift_assignment.employee_id` **只允许指向 `employee`**，不做"员工或资源"多态外键；
   - 非员工资源（`resource_kind ∈ {machine, tool, vehicle, facility}`）的班次一律由 `calendar_shift` 表达（日历×星期×班次×产能系数），临时例外由 `resource_availability` 表达；
   - person 资源但无 `status='active'` 员工行（外协主体、离职人员）⇒ 视同"找不到员工"，回退资源日历分支，**不建员工行就不享受 HR 排班**；
-  - 派遣人员按 TBD-10 入 `employees`（`employment_type=dispatched`），因此可正常排班；
+  - 派遣人员按 TBD-10 入 `employees`（`employment_type=dispatched` + `supplier_party_id` 必填），因此可正常排班；
   - 理由：保持"谁被排班"的**单一真源**；与 Oracle 对标一致（Labor Resource Instance 关联 TCA person，排班属 HCM Workforce Scheduling）；多态外键会让日历分支与 HR 分支的判定依赖类型判别，且无法保证"一个班次窗口只对应一个可追责的人"。
 - **可用性推导规则**（`available_minutes` 的 HR 分支，P3 实施）：
   1. 先 `resolve_resource_employee(resource_id)`：由 `resource.person_ref` 找 `status='active'` 的员工；找不到 ⇒ 纯日历资源，走原逻辑；
@@ -337,9 +340,12 @@
   3. 员工当日无排班 ⇒ 回退到资源日历（空岗/未排班）；
   4. `resource_availability` 例外在**两个分支上都生效**（请假优先于排班，检修覆盖设备）；
   5. 同一员工同日多段排班允许；时间窗重叠时返回 `ASSIGNMENT_OVERLAP` 告警，不阻断落库。
+  6. 排班落在 `calendar_day.day_type=holiday` 时返回 `HOLIDAY_WORK` 告警（判定路径 `assignment.work_center_id` → `resource_group.calendar_id` → `calendar_day`），**仅告警不阻断**、不折算产能；无工作中心/无日历时不判定（v1.18 / TBD-13）。
 - **验收**：
   - 同一 `person_profile` 新建第二条 `status=active` 员工时保存失败（部分唯一索引）；
-  - 同一 `employee_no` 在职期间建第二条 `status=active` 时保存失败；历史 `terminated` 行可复用同号（再入职）；
+  - 同一法人下同一 `employee_no` 在职期间建第二条 `status=active` 时保存失败；历史 `terminated` 行可复用同号（再入职）；**跨法人同号允许**（v1.18）；
+  - `employment_type=dispatched` 未填 `supplier_party_id` 时保存失败（`SUPPLIER_PARTY_REQUIRED`）；
+  - 排班日命中工作中心日历的 `holiday` 时返回 `HOLIDAY_WORK` 告警且仍落库成功；
   - 员工离职（`status=terminated`）缺 `termination_date` 时保存失败；
   - 员工不建资源也能存在（纯办公室岗）；建了 person 资源即自动进入匹配候选，**无需人工绑 employee↔resource**；
   - 同一 person 在两个组织各有一个人资源实例时，两实例都能解析到同一条在职员工记录（Oracle 工厂内唯一语义）；
@@ -535,7 +541,7 @@
 | `resource_assignments` | `work_order_operation_id` / `resource_id` / `planned_start` / `planned_end` / `planned_qty` / `status` / `source` | 计划量 ≤ 工序量；同一资源时间窗不重叠（显式超产标记例外） |
 | `resource_territory_assignments` | `resource_id`（或 `resource_group_id`）/ `territory_id` / `coverage_level` / `effective_from` / `effective_to` | 唯一 `(resource_id, territory_id, effective_from)`；允许重叠 |
 | `resource_availabilities` | `resource_id` / `availability_type`（available/unavailable/overtime）/ `start_at` / `end_at` / `reason` / `source`（manual/hr/maintenance/other）/ `org_id` | **不建唯一键**（同一资源允许重叠例外）；`end_at > start_at`；例外与班次窗口按**绝对时间**求交，见 FR-005 |
-| `employees`（P3） | 见 FR-015（不含 `resource_id`，资源按 person 求交） | 部分唯一 `(employee_no) WHERE status='active'`；部分唯一 `(person_profile_id) WHERE status='active'`；`termination_date >= hire_date`；主管自引用无环 |
+| `employees`（P3） | 见 FR-015（不含 `resource_id`，资源按 person 求交；`org_id`=法人雇主，`name` 为缓存列） | 部分唯一 `(org_id, employee_no) WHERE status='active'`；部分唯一 `(person_profile_id) WHERE status='active'`；`supplier_party_id` 可空（dispatched 必填）；`termination_date >= hire_date`；主管自引用无环 |
 | `employee_shift_assignments`（P3） | `employee_id` / `shift_id` / 7 日掩码 / `seq` / `effective_from` / `effective_to` / `work_center_id` / `note` | 唯一 `(employee_id, shift_id, seq, effective_from)`；复用 `shifts` 时段模板，不复制时段定义；不做独立菜单 |
 
 **修改表**
@@ -613,16 +619,16 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | ~~TBD-5~~ | ~~服务地理~~ | **已定：复用 `territory` 作为区域字典 + 新增服务覆盖分配表**（2026-11-01） | 关闭（FR-010 已改写） |
 | ~~TBD-6~~ | ~~技能字典升级~~ | **已定：直接使用 `skill` 主数据对象**（2026-11-01 用户确认；多模块引用需独立生命周期/层级/认证） | 关闭（FR-003 已改写，见附 A.4） |
 | ~~TBD-7~~ | ~~迁移号分配~~ | 资源域曾取 v175；当前仓库最大迁移号已到 **v187**（`receipt`，并行会话），后续迁移从 **v188** 起 | 关闭（P4a 用 v188） |
-| TBD-8 | 成本中心主数据 | 平台暂无 `cost_center` 对象（仅 `cost_center_id` 字段引用），SAP 的"作业类型"费率依赖它 | **暂不建**：P2a 保留 `cost_center_id` 引用；等财务域立项再建主数据并迁移 |
-| TBD-9 | `employee.name` 是否冗余 | 姓名可从 `person_profile` → `party` 取，但通用列表页不支持 join 展示 | **建议冗余 + 保存时由服务同步**；若后续列表页支持 relation 展示可去列 |
-| TBD-10 | 外协/派遣人员是否入 `employees` | `employment_type=dispatched` 与 `resource_kind=external` 语义交叉 | **建议**：派遣入 `employees`（工时/排班归我方），外协主体仍走 `party` + `resource(external)`，不建员工行 |
-| TBD-11 | 一人多组织 | 兼职/矩阵汇报需要一人挂多组织 | **首期不支持**：`employee` 单 `org_id`；多组织用 `employee_org_assignment` 另立（P4），避免首期做成都市 |
-| TBD-12 | 多法人 / 多分配（Oracle 三层） | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **首期用两层简化**（`employee` 即一条在职雇佣）；P4 若出现多法人/多岗并行，再拆 `employments`（法人/雇佣段）+ `employee_assignments`（岗位/班次），`employee` 降级为兼容视图；不提前建表 |
-| TBD-13 | 员工排班是否受工厂日历节假日约束 | P3 实现为"有员工排班即不叠加日历"（FR-015 原文），故 `calendar_day.day_type=holiday` 不作用于员工排班 | **P4 定**：建议用 `employee_shift_assignment.work_center_id` → 该工作中心/地点的日历**仅取 holiday 关闭**（不取产能），避免节假日仍排班；需与 HR 确认"节假日值班"是否例外 |
+| ~~TBD-8~~ | ~~成本中心主数据~~ | 平台暂无 `cost_center` 对象（仅 `cost_center_id` 字段引用），SAP 的"作业类型"费率依赖它 | **已定（v1.18）：本期不建 `cost_center`**；P2a 保留 `cost_center_id` 引用；财务域立项时 `cost_center` + `activity_rate` 一起建并迁移 | 关闭 |
+| ~~TBD-9~~ | ~~`employee.name` 是否冗余~~ | 姓名可从 `person_profile` → `party` 取，但通用列表页不支持 join 展示 | **已定（v1.18）：保留 `name` 冗余列（缓存列）**；真源 `person_profile → party`，改名走服务同步；仅改注释/口径，不改表 | 关闭 |
+| ~~TBD-10~~ | ~~外协/派遣人员是否入 `employees`~~ | `employment_type=dispatched` 与 `resource_kind=external` 语义交叉 | **已定（v1.18）：派遣入 `employees`**（工时/排班归我方）+ 新增 `supplier_party_id`（可空，`dispatched` 时服务层必填，v189）；外协主体仍走 `party` + `resource(external)`，不建员工行 | 关闭（v189） |
+| ~~TBD-11~~ | ~~一人多组织~~ | 兼职/矩阵汇报需要一人挂多组织 | **已定（v1.18）：本期不做**；**不建** `employee_org_assignment`、**不加**矩阵汇报虚线字段；P4 再评估 | 关闭 |
+| ~~TBD-12~~ | ~~多法人 / 多分配（Oracle 三层）~~ | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **已定（v1.18）：两层简化 + 三点预埋**——① `org_id` 语义写死为**法人雇主**；② `employee_no` 唯一域改为 `(org_id, employee_no) WHERE status='active'`（`person_profile_id` 在职唯一不变，v189）；③ 不提前拆 `employments` / `employee_assignments` | 关闭（v189） |
+| ~~TBD-13~~ | ~~员工排班是否受工厂日历节假日约束~~ | P3 实现为"有员工排班即不叠加日历"，故 `calendar_day.day_type=holiday` 不作用于员工排班 | **已定（v1.18）：告警不阻断**——`employee_shift_warnings` 增 `HOLIDAY_WORK`（`assignment.work_center_id` → `resource_group.calendar_id` → `calendar_day.day_type=holiday`）；显式排班允许落库，仅告警、不折算产能 | 关闭 |
 | ~~TBD-14~~ | ~~同日多段排班重叠告警~~ | **已实现（v1.14）**：`employee_service.shift_overlap_warnings` / `employee_shift_warnings` 按 `start_time + gross_minutes` 展开绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警（含 `assignment_ids / shift_ids / overlap_minutes`），**不阻断落库**；员工服务 13 passed | 关闭 |
 | TBD-15 | 备选 / 并行工艺路线 | 现 `work_definition_operations.seq` 只能表达线性路线；SAP 用 Sequence（0 标准 / P 并行 / A 替代）、EBS 用 Alternate 标签、Fusion 用多个 Work Definition + 优先级 | **P4a 建议建 `work_definition_sequences`**（`seq_type=std/parallel/alternative` + `branch_from_seq/return_seq`），首期只支持整条替代路线，branch/return 放 P5（研究稿 §5.2 / R-2）。**不复用 `workflow_task` / `project_task`**：前者是工艺主数据（静态定义，随 `work_definition` 版本存续），后者是运行态待办/审批或 WBS 计划节点；混表会让主数据查询被迫过滤运行态状态行。⇒ **已实现（v188，P4a）**：`work_definition_sequences`（definition_id / seq_no / seq_type=std\|alternative）+ `work_definition_operations.sequence_id` 可空真外键（NULL=标准序列） |
 | TBD-16 | 物料 ↔ BOM ↔ 路线的版本绑定 | 三方都需"某物料某批量区间用哪套 BOM + 哪条路线"的唯一真源（SAP Production Version；EBS BOM/Routing 共享 alternate；Fusion 版本+优先级） | **P4a 建议建 `production_versions`**（`item_ref / plant / bom_ref / work_definition_id / valid_from-to / lot_min-max / locked / priority`）。**R-1 已核实（v1.16）**：物料用存量表 `items`（`target_bo: item`，`code` 唯一、`item_type ∈ {goods, service}`），工厂无 `plants` 表、首期用 `org`（`orgs` 表）。⇒ **已实现（v188，P4a）**：`production_versions`（code / item_id / org_id / bom_id / work_definition_id / valid_from-to / lot_min-max / priority / locked / status）+ 菜单 `/master-data/production-version` |
-| TBD-17 | 流程生产（配方）是否新建对象 | SAP PP-PI Master Recipe（配方头 + Phase + 配方 BOM + 过程指令 + 批次效价）、Oracle OPM Recipe = Formula + Routing + Instructions | **不新建独立 recipe 头**：`work_definitions` 增 `definition_kind=recipe` + `base_qty/batch_qty` + `operation_outputs`（联/副产品）+ `process_instructions` + 最小 `batches`；判据 5 条见研究稿 §6 |
+| ~~TBD-17~~ | ~~流程生产（配方）是否新建对象~~ | SAP PP-PI Master Recipe（配方头 + Phase + 配方 BOM + 过程指令 + 批次效价）、Oracle OPM Recipe = Formula + Routing + Instructions | **已定（v1.18）：不新建 recipe 头**；P4b 做最小扩展——`definition_kind=recipe` + `base_qty/batch_qty` + `operation_outputs`（联/副产品）+ `process_instructions`；`batches` 不进本期；P4a 漏掉的 `work_definitions` 有效期/`base_qty` 扩展与 P4b 合并，不单开迁移 | 关闭（P4b 实施） |
 
 ---
 
@@ -784,3 +790,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.15 | Routing 与流程生产对标研究落地（新增研究稿 `spec-routing-process-manufacturing-benchmark-2026-11-01.md` v0.1 + 附 B）：新增 TBD-15（备选/并行路线 `work_definition_sequences`）、TBD-16（`production_versions` 版本真源）、TBD-17（流程生产用 `definition_kind=recipe` 扩展，不新建 recipe 头）；给出 P4a/P4b/P4c 落地顺序与 6 项待核实 |
 | 2026-11-01 | v1.16 | 关闭 TBD-7（迁移号：现最大 v187，P4a 用 v188）与 R-1（物料=存量 `items` 表、工厂首期用 `org`）；TBD-16 解除阻塞可开工；`work_definition_sequences` 明确不复用 `workflow_task`/`project_task`（工艺主数据 vs 运行态） |
 | 2026-11-01 | v1.17 | P4a 落地（v188）：`production_versions` + `work_definition_sequences` + `work_definition_operations.sequence_id`（可空）；2 组枚举（`sequence_type` / `production_version_status`）、8 权限、1 菜单（挂 master-data）；TBD-15 / TBD-16 标记已实现；branch/return、parallel 与流程生产（TBD-17）留 P4b/P5 |
+| 2026-11-02 | v1.18 | 关闭 TBD-8/9/10/11/12/13/17：`employees` 增 `supplier_party_id`（`dispatched` 必填）、工号唯一索引改 `(org_id, employee_no) WHERE active`（`org_id` = legal employer）、`name` 明确为缓存列；不建 `employee_org_assignment` / 矩阵汇报 / `cost_center` / recipe 头（recipe 走 P4b 最小扩展）；节假日排班改"仅告警不阻断"（`HOLIDAY_WORK`）；迁移 **v189**（加列 + 换索引，可回滚，列留 stub）；schema 23 + 迁移 v189 4 + 服务 17 + v185 回归 7 + 资源服务 24 passed |

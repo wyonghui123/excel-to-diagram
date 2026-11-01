@@ -12,14 +12,21 @@
 #   ③ 员工历史行（离职/再入职）不使个人资源失效。
 #
 # 唯一性口径（部分唯一索引，见 indexes）:
-#   · employee_no 仅在职唯一（再入职沿用原号，历史 terminated 行可同号）；
+#   · employee_no 按**法人雇主**唯一（`(org_id, employee_no) WHERE status='active'`）；
+#     再入职沿用原号，历史 terminated 行可同号；跨法人可复用同一工号；
 #   · person_profile_id 仅在职唯一（同一自然人在同一时刻只能有一条在职雇佣）。
 #
-# 口径:
-#   ① status='terminated' 时 termination_date 必填（服务层校验）；
-#   ② termination_date >= hire_date（服务层校验）；
-#   ③ manager_employee_id 不得成环（服务层校验，向上追溯）。
-#   ④ employee 是主体实体 ⇒ 独立菜单（v185，menu_code='employee-list'）。
+# 口径（v1.18 关闭 TBD-9/10/11/12）:
+#   ① `org_id` 语义 = **法人雇主（legal employer）**，即 Oracle Work Relationship 的
+#     person ↔ 法人 段；employee 首期压成「person → 单条在职雇佣」两层（TBD-12）；
+#   ② `name` 是**缓存列**：真源 `person_profile → party` 名称，改名由服务同步；
+#   ③ 派遣人员（employment_type=dispatched）必须填 `supplier_party_id`（服务层校验）；
+#     外协主体仍走 party + resource(external)，不建员工行（TBD-10）；
+#   ④ 不建 `employee_org_assignment`、不加矩阵汇报虚线字段（TBD-11 关闭，P4 再评估）；
+#   ⑤ status='terminated' 时 termination_date 必填（服务层校验）；
+#   ⑥ termination_date >= hire_date（服务层校验）；
+#   ⑦ manager_employee_id 不得成环（服务层校验，向上追溯）；
+#   ⑧ employee 是主体实体 ⇒ 独立菜单（v185，menu_code='employee-list'）。
 
 id: employee
 name: 员工
@@ -84,7 +91,7 @@ fields:
     db_column: employee_no
     required: true
     max_length: 200
-    description: 工号（再入职沿用原号；仅 status='active' 时唯一）
+    description: 工号（再入职沿用原号；按法人雇主 + status='active' 唯一）
     semantics:
       meaning: 工号
       business_key: true
@@ -100,7 +107,7 @@ fields:
     db_column: name
     required: true
     max_length: 200
-    description: 姓名（展示冗余，来源 person_profile 对应 party 名称）
+    description: 姓名（缓存列，真源 person_profile 对应 party 名称；改名走服务同步）
     semantics:
       meaning: 员工姓名
       display_name: true
@@ -196,7 +203,7 @@ fields:
     type: integer
     db_column: org_id
     required: true
-    description: 雇佣组织（legal employer / work relationship 简化）
+    description: 法人雇主（legal employer，Oracle work relationship 的 person↔法人 段）
     semantics:
       meaning: 组织引用
       display:
@@ -353,6 +360,49 @@ fields:
       fieldGroup: 雇佣
       fieldGroupPosition: 90
 
+  # 派遣供应商（TBD-10）: employment_type=dispatched 时必填（服务层校验）
+  - id: supplier_party_id
+    name: 派遣供应商
+    type: integer
+    db_column: supplier_party_id
+    nullable: true
+    description: 派遣供应商往来单位（party.id）；employment_type=dispatched 时必填
+    semantics:
+      meaning: 派遣供应商
+      display:
+        type: association
+        target_type: party
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 供应商
+            width: 220
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+      clearable: true
+      fieldGroup: 雇佣
+      fieldGroupPosition: 95
+
   - id: status
     name: 在职状态
     type: string
@@ -481,12 +531,13 @@ fields:
       audit_field: true
 
 indexes:
-  # 在职期间工号唯一；再入职沿用原号，历史 terminated 行可同号
-  - fields: [employee_no]
+  # 工号按法人雇主（org_id）唯一；再入职沿用原号，历史 terminated 行可同号；
+  # 跨法人可复用同一工号（v1.18 / TBD-12：org_id 语义 = legal employer）
+  - fields: [org_id, employee_no]
     unique: true
     type: partial
     condition: "status = 'active'"
-    name: uq_employee_active_no
+    name: uq_employee_active_org_no
   # 同一自然人在同一时刻只能有一条在职雇佣
   - fields: [person_profile_id]
     unique: true
@@ -541,6 +592,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 直属主管引用（可空；自引用真外键）
+  - id: employee_to_supplier_party
+    name: 派遣供应商
+    type: reference
+    target: party
+    source_field: supplier_party_id
+    target_field: id
+    cardinality: N:1
+    description: 派遣供应商引用（可空；employment_type=dispatched 时必填）
 
 ui_view_config:
   # 菜单由迁移 v185 手工声明（挂 master-data），不让自动生成器产出孤儿行
@@ -571,6 +630,13 @@ ui_view_config:
         display_field: name
       - field: position
         width: 160
+      - field: supplier_party_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party
+        display_field: name
       - field: employment_type
         width: 120
         filterable: true
@@ -606,7 +672,8 @@ ui_view_config:
         columns:
           - fields: [org_id, location_id]
           - fields: [position, job_grade]
-          - fields: [employment_type, status]
+          - fields: [employment_type, supplier_party_id]
+          - fields: [status]
       - title: 在职区间
         columns:
           - fields: [hire_date, termination_date]
@@ -619,8 +686,9 @@ ui_view_config:
         label: 基本信息
         type: fields
         fields: [employee_no, name, person_profile_id, user_id, org_id,
-                 location_id, position, job_grade, employment_type, status,
-                 hire_date, termination_date, manager_employee_id]
+                 location_id, position, job_grade, employment_type,
+                 supplier_party_id, status, hire_date, termination_date,
+                 manager_employee_id]
 
 category_config:
   create_permission: employee:employee_create

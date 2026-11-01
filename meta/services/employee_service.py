@@ -35,8 +35,9 @@ MAX_MANAGER_DEPTH = 20
 #: 员工表的业务列(按固定顺序返回, 便于调用方稳定读取)
 _EMPLOYEE_COLUMNS = (
     'id', 'employee_no', 'name', 'person_profile_id', 'user_id', 'org_id',
-    'location_id', 'position', 'job_grade', 'employment_type', 'status',
-    'hire_date', 'termination_date', 'manager_employee_id',
+    'location_id', 'position', 'job_grade', 'employment_type',
+    'supplier_party_id', 'status', 'hire_date', 'termination_date',
+    'manager_employee_id',
 )
 
 
@@ -107,9 +108,10 @@ def validate_employee(conn, data: Dict[str, Any],
     规则:
       ① `status='terminated'` 必须有 `termination_date`;
       ② `termination_date >= hire_date`;
-      ③ `employee_no` 在职冲突(仅 status='active' 参与唯一, 历史离职行可同号);
-      ④ `person_profile_id` 在职冲突(同一自然人同一时刻只有一条在职雇佣);
-      ⑤ `manager_employee_id` 不得成环(自引用即错, 向上追溯 ≤ MAX_MANAGER_DEPTH 层)。
+      ③ `employment_type='dispatched'` 必须有 `supplier_party_id`(TBD-10);
+      ④ `employee_no` 在职冲突**按法人雇主**(`org_id` + status='active', TBD-12);
+      ⑤ `person_profile_id` 在职冲突(同一自然人同一时刻只有一条在职雇佣);
+      ⑥ `manager_employee_id` 不得成环(自引用即错, 向上追溯 ≤ MAX_MANAGER_DEPTH 层)。
 
     更新场景(传 employee_id)时, data 未给的字段回退到库内现值。
     """
@@ -136,20 +138,27 @@ def validate_employee(conn, data: Dict[str, Any],
                    '离职日期不得早于入职日期({0} < {1})'.format(
                        termination_date, hire_date))
 
+    employment_type = value('employment_type') or 'full_time'
+    supplier_party_id = value('supplier_party_id')
+    if employment_type == 'dispatched' and supplier_party_id in (None, ''):
+        _add_error(errors, 'SUPPLIER_PARTY_REQUIRED', 'supplier_party_id',
+                   '派遣员工(employment_type=dispatched)必须填写派遣供应商')
+
     if status == 'active':
         employee_no = value('employee_no')
-        if employee_no:
-            params: List[Any] = [employee_no]
+        org_id = value('org_id')
+        if employee_no and org_id is not None:
+            params: List[Any] = [employee_no, org_id]
             sql = ("SELECT id FROM employees WHERE employee_no = ? "
-                   "AND status = 'active'")
+                   "AND org_id = ? AND status = 'active'")
             if employee_id is not None:
                 sql += ' AND id <> ?'
                 params.append(employee_id)
             conflict = _fetch_one(conn, sql + ' LIMIT 1', tuple(params))
             if conflict:
                 _add_error(errors, 'EMPLOYEE_NO_CONFLICT', 'employee_no',
-                           '工号 {0} 已存在在职员工(id={1})'.format(
-                               employee_no, conflict['id']))
+                           '工号 {0} 在法人 {1} 下已存在在职员工(id={2})'.format(
+                               employee_no, org_id, conflict['id']))
 
         person_profile_id = value('person_profile_id')
         if person_profile_id:
@@ -216,7 +225,8 @@ def employee_shift_windows(conn, employee_id: int,
       calendar_shift_id(None) / shift_id / shift_code / shift_name / seq /
       start_time / end_time / crosses_midnight / gross_minutes / break_minutes /
       net_minutes / capacity_factor(1.0) / effective_minutes / weekday / day_type;
-    另附 `employee_id` / `employee_shift_assignment_id`(命中排班行 id, 可解释)。
+    另附 `employee_id` / `employee_shift_assignment_id`(命中排班行 id, 可解释) /
+    `work_center_id`(节假日告警用, 可空)。
     """
     date_str = _normalize_date(the_date)
     weekday = date.fromisoformat(date_str).weekday()
@@ -226,6 +236,7 @@ def employee_shift_windows(conn, employee_id: int,
         conn,
         """
         SELECT esa.id AS assignment_id, esa.seq AS assignment_seq,
+               esa.work_center_id AS work_center_id,
                s.id AS shift_id, s.code AS shift_code, s.name AS shift_name,
                s.start_time, s.end_time, s.crosses_midnight, s.break_minutes
         FROM employee_shift_assignments esa
@@ -268,6 +279,7 @@ def employee_shift_windows(conn, employee_id: int,
             'day_type': None,
             'employee_id': employee_id,
             'employee_shift_assignment_id': row['assignment_id'],
+            'work_center_id': row['work_center_id'],
         })
     return windows
 
@@ -316,8 +328,64 @@ def shift_overlap_warnings(windows: List[Dict[str, Any]],
     return warnings
 
 
+def holiday_work_warnings(conn, windows: List[Dict[str, Any]],
+                          the_date: Any = None) -> List[Dict[str, Any]]:
+    """检测排班落在工厂日历节假日(告警, **不阻断落库**, TBD-13)。
+
+    口径:
+      · 仅当排班行带 `work_center_id` 时判定: 工作中心
+        (`resource_groups.calendar_id`) → 对应日历 `calendar_days`；
+      · `calendar_day.day_type='holiday'` 命中当天 ⇒ 一条 `HOLIDAY_WORK`；
+      · 无工作中心 / 工作中心无日历 / 无例外日记录 ⇒ 不产生告警；
+      · 不折算产能、不改排班窗口 —— "节假日值班"由 HR 自行确认。
+    """
+    date_text = _normalize_date(the_date) if the_date is not None else None
+    if not date_text:
+        return []
+
+    warnings: List[Dict[str, Any]] = []
+    for window in windows:
+        work_center_id = window.get('work_center_id')
+        if not work_center_id:
+            continue
+        center = _fetch_one(
+            conn,
+            'SELECT calendar_id FROM resource_groups WHERE id = ?',
+            (work_center_id,))
+        if not center or not center['calendar_id']:
+            continue
+        holiday = _fetch_one(
+            conn,
+            "SELECT 1 FROM calendar_days WHERE calendar_id = ? "
+            "AND substr(date, 1, 10) = ? AND day_type = 'holiday' LIMIT 1",
+            (center['calendar_id'], date_text))
+        if not holiday:
+            continue
+        warnings.append({
+            'code': 'HOLIDAY_WORK',
+            'date': date_text,
+            'employee_id': window.get('employee_id'),
+            'assignment_id': window.get('employee_shift_assignment_id'),
+            'shift_id': window.get('shift_id'),
+            'shift_code': window.get('shift_code'),
+            'work_center_id': work_center_id,
+            'calendar_id': center['calendar_id'],
+            'message': '节假日排班({0} 为日历 {1} 的非工作日)，仅告警不阻断'.format(
+                date_text, center['calendar_id']),
+        })
+    return warnings
+
+
 def employee_shift_warnings(conn, employee_id: int,
                             the_date: Any = None) -> List[Dict[str, Any]]:
-    """展开某员工某天排班窗口并返回重叠告警(FR-015 校验入口)。"""
-    return shift_overlap_warnings(
-        employee_shift_windows(conn, employee_id, the_date), the_date)
+    """展开某员工某天排班窗口并返回告警(FR-015 校验入口)。
+
+    告警类型:
+      · `ASSIGNMENT_OVERLAP` —— 同日多段排班时间窗重叠(TBD-14);
+      · `HOLIDAY_WORK` —— 排班落在工厂日历节假日(TBD-13)。
+    两者均**不阻断落库**。
+    """
+    windows = employee_shift_windows(conn, employee_id, the_date)
+    warnings = shift_overlap_warnings(windows, the_date)
+    warnings.extend(holiday_work_warnings(conn, windows, the_date))
+    return warnings
