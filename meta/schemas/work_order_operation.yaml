@@ -247,6 +247,94 @@ fields:
       editable: false
       readonly: true
 
+  # 作业定义溯源（G12）：本工序由哪条工艺路线 / 哪个标准工序展开而来
+  #   手填工序留空（空值 = 未溯源）；存量工单不回溯
+  #   不加真外键：SQLite 不支持对存量表 ALTER 加 FK，且删除 restrict 已由
+  #   work_definition_operation.deletion_policy 承担（软引用 + 服务层校验）
+  - id: work_definition_id
+    name: 作业定义
+    type: integer
+    db_column: work_definition_id
+    nullable: true
+    description: 来源作业定义（工艺路线 / 服务模板；可空 = 手填工序）
+    semantics:
+      meaning: 来源作业定义
+      display:
+        type: association
+        target_type: work_definition
+        display_field: name
+        placeholder: "手填"
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 定义编号
+            width: 140
+          - field: name
+            label: 定义名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_definition
+      multiple: false
+      clearable: true
+
+  - id: work_definition_operation_id
+    name: 标准工序
+    type: integer
+    db_column: work_definition_operation_id
+    nullable: true
+    description: 来源作业定义工序（可空 = 手填工序）
+    semantics:
+      meaning: 来源作业定义工序
+      display:
+        type: association
+        target_type: work_definition_operation
+        display_field: operation_name
+        placeholder: "手填"
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_operation
+        value_field: id
+        display_field: operation_name
+        code_field: seq
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{seq} {operation_name}"
+        columns:
+          - field: seq
+            label: 序号
+            width: 80
+          - field: operation_name
+            label: 工序名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_definition_operation
+      multiple: false
+      clearable: true
+
   - id: status
     name: 工序状态
     type: string
@@ -309,6 +397,11 @@ indexes:
     name: idx_work_order_operation_resource_group
   - fields: [required_skill_id]
     name: idx_work_order_operation_required_skill
+  # G12 溯源：按作业定义查工单工序
+  - fields: [work_definition_id]
+    name: idx_work_order_operation_definition
+  - fields: [work_definition_operation_id]
+    name: idx_work_order_operation_definition_op
 
 relations:
   - id: work_order_operation_to_work_order
@@ -384,6 +477,9 @@ ui_view_config:
           - fields: [resource_group_id, required_skill_id]
           - fields: [setup_minutes, teardown_minutes, run_minutes]
           # required_skill（旧文本列）已废弃，仅历史只读，不进入录入表单
+      - title: 工艺溯源
+        columns:
+          - fields: [work_definition_id, work_definition_operation_id]
   detail:
     facets:
       - title: 工序信息
@@ -392,6 +488,8 @@ ui_view_config:
         fields:
           - seq
           - operation_name
+          - work_definition_id
+          - work_definition_operation_id
           - resource_group_id
           - required_skill_id
           - required_skill

@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-01 20:55:09.912180
+-- 生成时间: 2026-11-01 23:05:36.170223
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -2966,6 +2966,8 @@ CREATE TABLE IF NOT EXISTS work_order_operations (
     teardown_minutes INTEGER DEFAULT 0,
     required_skill_id INTEGER,
     required_skill VARCHAR(200),
+    work_definition_id INTEGER,
+    work_definition_operation_id INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'pending',
     created_at DATETIME,
     updated_at DATETIME,
@@ -3916,6 +3918,8 @@ CREATE INDEX IF NOT EXISTS idx_work_order_operation_work_order ON work_order_ope
 CREATE UNIQUE INDEX IF NOT EXISTS uq_work_order_operation_seq ON work_order_operations(work_order_id, seq)
 CREATE INDEX IF NOT EXISTS idx_work_order_operation_resource_group ON work_order_operations(resource_group_id)
 CREATE INDEX IF NOT EXISTS idx_work_order_operation_required_skill ON work_order_operations(required_skill_id)
+CREATE INDEX IF NOT EXISTS idx_work_order_operation_definition ON work_order_operations(work_definition_id)
+CREATE INDEX IF NOT EXISTS idx_work_order_operation_definition_op ON work_order_operations(work_definition_operation_id)
 
 -- Indexes for 产品线
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)

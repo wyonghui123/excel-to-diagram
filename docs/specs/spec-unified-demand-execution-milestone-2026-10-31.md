@@ -124,7 +124,7 @@
 | SSC | S11 | M3（合同 / 权益） |
 | project | G1（已落 P1） | P1 |
 | project | G11 | P1.5 / M1 |
-| project | G3、G4、G12、G13 | M4 |
+| project | G4、G12（溯源已落 v184）、G13 | M4 |
 | project | G14（已落 v182） | P1.5 |
 | project | G5、G8、G9（均已落 P2 / P3） | P2 / P3 / M5 |
 | project | G10（`configuration.project_id`，已落 v178） | P3 |
@@ -170,3 +170,4 @@
 | 2026-11-01 | v0.7 | P1.5 落地：`project_task` / `project_task_dependency`（v179）+ `source_demand_type` 扩 `project_task`（G11）；工时回聚派生视图待 G7（对齐 project spec v1.7） |
 | 2026-11-01 | v0.8 | G14 闭环：`time_entry`（v182）+ `v_project_task_labor` / `v_project_labor` / `v_resource_labor_daily` + 查询 API；G7 降为治理项（对齐 project spec v1.8） |
 | 2026-11-01 | v0.9 | G6 收尾：`fulfillment_order.project_id`（v183）；三条履约链共用项目锚点（对齐 project spec v1.9） |
+| 2026-11-01 | v1.0 | G12 溯源：`work_order_operation` 补 `work_definition_id` / `work_definition_operation_id`（v184）；G7 经核对仅剩「注册豁免 + YAML」，G13 待 G7（对齐 project spec v2.0） |
