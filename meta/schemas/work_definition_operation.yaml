@@ -32,6 +32,12 @@ deletion_policy:
     - table: operation_resource_requirements
       foreign_key: operation_id
       message: 该工序仍被资源要求引用，请先处理资源要求后再删除
+    - table: work_definition_operation_outputs
+      foreign_key: operation_id
+      message: 该工序仍有产出，请先处理产出后再删除
+    - table: process_instructions
+      foreign_key: operation_id
+      message: 该工序仍有过程指令，请先处理指令后再删除
   cascade_delete: []
 
 audit:

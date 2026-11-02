@@ -306,6 +306,16 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.transfer_order_guard_interceptor import TransferOrderGuardInterceptor
         bo_framework.register_interceptor(TransferOrderGuardInterceptor())
+        # [ROUTING P4b 2026-11-02] 作业定义守卫（P54）：配方基准量 / 工序产出 /
+        #   替代资源组写前校验，生效时逐工序校验替代包数量。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.work_definition_guard_interceptor import WorkDefinitionGuardInterceptor
+        bo_framework.register_interceptor(WorkDefinitionGuardInterceptor())
+        # [ROUTING P4b 2026-11-02] 过程指令守卫（P55）：text / parameter 双形态
+        #   字段矩阵、numeric 区间与绑定资源类型。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.process_instruction_guard_interceptor import ProcessInstructionGuardInterceptor
+        bo_framework.register_interceptor(ProcessInstructionGuardInterceptor())
         # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
         #   服务请求行 / 请购行的行级必填。与 server.py create_app() 同位登记 ——
         #   两条启动路径缺一会静默失效。

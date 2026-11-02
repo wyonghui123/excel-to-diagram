@@ -108,12 +108,15 @@ fields:
     db_column: definition_kind
     required: true
     default: routing
-    description: 定义类型（工艺路线 / 服务模板）
+    description: 定义类型（工艺路线 / 配方 / 服务模板）
     enum_values:
       - value: routing
         label: 工艺路线
         color: primary
         is_initial: true
+      - value: recipe
+        label: 配方
+        color: warning
       - value: service_template
         label: 服务模板
         color: success
@@ -298,6 +301,108 @@ fields:
       fieldGroup: 其他
       fieldGroupPosition: 80
 
+  - id: base_qty
+    name: 配方基准量
+    type: number
+    db_column: base_qty
+    nullable: true
+    description: 配方基准量；definition_kind=recipe 必填且 >0，routing 必须为空
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 配方基准量（按该数量折算产出与消耗）
+    ui:
+      widget: number
+      fieldGroup: 配方
+      fieldGroupPosition: 90
+
+  - id: base_uom_id
+    name: 基准单位
+    type: integer
+    db_column: base_uom_id
+    nullable: true
+    description: 配方基准量对应的计量单位；recipe 必填，须与物料基本单位同 uom_group
+    semantics:
+      meaning: 基准单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "配方必填"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 140
+          - field: name
+            label: 单位名称
+            width: 200
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 配方
+      fieldGroupPosition: 100
+
+  - id: batch_qty
+    name: 标准批次量
+    type: number
+    db_column: batch_qty
+    nullable: true
+    description: 标准批次量（计划默认值，非执行批次量）；仅 recipe 可填且 >0
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 配方标准批次量（计划默认值）
+    ui:
+      widget: number
+      fieldGroup: 配方
+      fieldGroupPosition: 110
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 作业定义有效期起（含）；空表示不设下限
+    semantics:
+      meaning: 有效期起
+    ui:
+      widget: date-picker
+      fieldGroup: 有效期
+      fieldGroupPosition: 120
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 作业定义有效期止（不含）；空表示长期有效；须大于有效期起
+    semantics:
+      meaning: 有效期止
+    ui:
+      widget: date-picker
+      fieldGroup: 有效期
+      fieldGroupPosition: 130
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -326,6 +431,10 @@ indexes:
     name: idx_work_definition_org
   - fields: [status]
     name: idx_work_definition_status
+  - fields: [valid_from, valid_to]
+    name: idx_work_definition_validity
+  - fields: [base_uom_id]
+    name: idx_work_definition_base_uom
 
 relations:
   - id: work_definition_to_item
@@ -344,6 +453,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 归属组织引用（可空；真外键）
+  - id: work_definition_to_base_uom
+    name: 基准单位
+    type: reference
+    target: uom
+    source_field: base_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 配方基准单位引用（可空；真外键）
 
 ui_view_config:
   # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
@@ -371,6 +488,19 @@ ui_view_config:
         display_field: name
       - field: revision
         width: 90
+      - field: base_qty
+        width: 110
+      - field: base_uom_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: valid_from
+        width: 120
+      - field: valid_to
+        width: 120
       - field: status
         width: 100
         filterable: true
@@ -404,6 +534,12 @@ ui_view_config:
           - fields: [code, name]
           - fields: [definition_kind, item_id]
           - fields: [revision, status]
+      - title: 配方
+        columns:
+          - fields: [base_qty, base_uom_id, batch_qty]
+      - title: 有效期
+        columns:
+          - fields: [valid_from, valid_to]
       - title: 归属
         columns:
           - fields: [org_id]
@@ -417,8 +553,9 @@ ui_view_config:
       - id: basic
         label: 基本信息
         type: fields
-        fields: [code, name, definition_kind, item_id, revision, status, org_id,
-                 description]
+        fields: [code, name, definition_kind, item_id, revision, status,
+                 base_qty, base_uom_id, batch_qty, valid_from, valid_to,
+                 org_id, description]
 
 category_config:
   create_permission: work_definition:work_definition_create

@@ -370,6 +370,36 @@ fields:
       fieldGroup: 认定
       fieldGroupPosition: 100
 
+  - id: substitute_group
+    name: 替代组
+    type: string
+    db_column: substitute_group
+    nullable: true
+    max_length: 40
+    description: 替代组；同工序同组内的资源要求互为候选
+    semantics:
+      meaning: 资源替代组
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 替代
+      fieldGroupPosition: 110
+
+  - id: replacement_group
+    name: 替换包
+    type: string
+    db_column: replacement_group
+    nullable: true
+    max_length: 40
+    description: 替换包；同 (替代组, 替换包) 的多行必须整组一起可用；非空时替代组必填
+    semantics:
+      meaning: 替换包分组
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 替代
+      fieldGroupPosition: 120
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -397,6 +427,8 @@ indexes:
     name: idx_operation_resource_requirement_resource
   - fields: [required_skill_id]
     name: idx_operation_resource_requirement_skill
+  - fields: [operation_id, substitute_group]
+    name: idx_operation_resource_requirement_substitute
 
 relations:
   - id: requirement_to_operation
@@ -475,6 +507,10 @@ ui_view_config:
         display_field: name
       - field: min_level
         width: 100
+      - field: substitute_group
+        width: 140
+      - field: replacement_group
+        width: 140
       - field: is_primary
         width: 100
       - field: priority
@@ -505,6 +541,9 @@ ui_view_config:
           - fields: [qty, is_primary, priority]
           - fields: [required_skill_id, min_level]
           - fields: [lead_time_days]
+      - title: 替代
+        columns:
+          - fields: [substitute_group, replacement_group]
   detail:
     layout: tabs
     title: 工序资源要求 详情
@@ -513,7 +552,8 @@ ui_view_config:
         label: 基本信息
         type: fields
         fields: [operation_id, resource_group_id, resource_id, role, qty,
-                 required_skill_id, min_level, is_primary, priority, lead_time_days]
+                 required_skill_id, min_level, is_primary, priority, lead_time_days,
+                 substitute_group, replacement_group]
 
 category_config:
   create_permission: operation_resource_requirement:operation_resource_requirement_create

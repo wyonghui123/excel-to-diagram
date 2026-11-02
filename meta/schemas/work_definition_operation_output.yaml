@@ -1,0 +1,445 @@
+# 工序产出（Work Definition Operation Output）—— 统一资源模型 P4b
+# 依据: docs/specs/spec-routing-process-manufacturing-benchmark-2026-11-01.md §10.3
+#       docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md 附 C.1
+#
+# 定位: 工序产出的主/联/副产品清单，recipe 与 routing 都可挂。
+#   计划量公式: planned = qty × (order_qty / base_qty) × operation.qty_per；
+#   routing 的 base_qty 视为 1。
+#
+# 口径（已定，勿重复讨论）:
+#   ① 唯一 (operation_id, item_id)，防同一物料重复挂到同一工序。
+#   ② 同工序至多一条 is_primary=1（部分唯一索引）；is_primary=1 必须 product。
+#   ③ co_product / by_product 必须 is_primary=0；cost_allocation_pct 仅这两类可填。
+#   ④ 同工序 cost_allocation_pct 合计 ≤100；主产出份额 = 100 - 合计。
+#   ⑤ qty_uom_id 空 = 取 item.base_uom；须与 base_uom 同 uom_group（服务层校验）。
+#   ⑥ 不建 yield_pct：计划产出用 qty 表达。
+#   ⑦ 从表对象 ⇒ 不建独立菜单（skip_auto_menu），但保留完整三态 UI 配置。
+
+id: work_definition_operation_output
+name: 工序产出
+table_name: work_definition_operation_outputs
+description: 工序的产出清单（主产品 / 联产品 / 副产品）
+display_name_field: description
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 工序产出
+  category: business_document_line
+  aliases:
+    - 工序产出
+    - 主产出
+    - 联产品
+    - 副产品
+    - operation output
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: operation_id
+    name: 工序
+    type: integer
+    db_column: operation_id
+    required: true
+    description: 所属作业定义工序
+    semantics:
+      meaning: 工序引用
+      display:
+        type: association
+        target_type: work_definition_operation
+        display_field: operation_name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_operation
+        value_field: id
+        display_field: operation_name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id} - {operation_name}"
+        columns:
+          - field: id
+            label: 工序ID
+            width: 120
+          - field: operation_name
+            label: 工序名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_definition_operation
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: output_type
+    name: 产出类型
+    type: string
+    db_column: output_type
+    required: true
+    default: product
+    max_length: 40
+    description: 产出类型（主产品 / 联产品 / 副产品）
+    enum_values:
+      - value: product
+        label: 主产品
+        color: primary
+        is_initial: true
+      - value: co_product
+        label: 联产品
+        color: success
+      - value: by_product
+        label: 副产品
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: operation_output_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 工序产出类型
+      filterable: true
+      filter_type: enum
+      filter_label: 产出类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 认定
+      fieldGroupPosition: 20
+
+  - id: item_id
+    name: 产出物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 产出的物料
+    semantics:
+      meaning: 产出物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 160
+          - field: name
+            label: 物料名称
+            width: 220
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      fieldGroup: 认定
+      fieldGroupPosition: 30
+
+  - id: qty
+    name: 产出数量
+    type: number
+    db_column: qty
+    required: true
+    description: 每 base_qty（recipe）或每 1 个物料单位（routing）的产出量
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 产出数量
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 40
+
+  - id: qty_uom_id
+    name: 产出单位
+    type: integer
+    db_column: qty_uom_id
+    nullable: true
+    description: 产出数量单位；空表示取物料基本单位，须与物料基本单位同 uom_group
+    semantics:
+      meaning: 产出单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "空 = 物料基本单位"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 140
+          - field: name
+            label: 单位名称
+            width: 200
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 认定
+      fieldGroupPosition: 50
+
+  - id: is_primary
+    name: 主产出
+    type: boolean
+    db_column: is_primary
+    required: true
+    default: false
+    description: 是否为主产出；同工序至多一条，且必须 output_type=product
+    semantics:
+      meaning: 是否主产出
+      filterable: true
+      filter_type: enum
+      filter_label: 主产出
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 认定
+      fieldGroupPosition: 60
+
+  - id: cost_allocation_pct
+    name: 成本分摊比例（%）
+    type: number
+    db_column: cost_allocation_pct
+    nullable: true
+    description: 成本分摊比例；仅联产品 / 副产品可填，同工序合计 ≤100
+    constraints:
+      - type: numeric_range
+        gte: 0
+        lte: 100
+    semantics:
+      meaning: 成本分摊比例
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 70
+
+  - id: description
+    name: 说明
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 产出说明
+    semantics:
+      meaning: 产出说明
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 其他
+      fieldGroupPosition: 80
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [operation_id, item_id]
+    unique: true
+    name: uq_work_definition_output_operation_item
+  # 同工序至多一条主产出（部分唯一索引）
+  - fields: [operation_id]
+    unique: true
+    type: partial
+    condition: "is_primary = 1"
+    name: uq_work_definition_output_primary
+  - fields: [item_id]
+    name: idx_work_definition_output_item
+
+relations:
+  - id: work_definition_output_to_operation
+    name: 工序
+    type: reference
+    target: work_definition_operation
+    source_field: operation_id
+    target_field: id
+    cardinality: N:1
+    description: 工序引用（真外键 restrict）
+  - id: work_definition_output_to_item
+    name: 产出物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 产出物料引用（真外键 restrict）
+  - id: work_definition_output_to_uom
+    name: 产出单位
+    type: reference
+    target: uom
+    source_field: qty_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 产出单位引用（可空；空 = 物料基本单位；真外键）
+
+ui_view_config:
+  # 从表对象，菜单由迁移 v191 不建（产出随工序维护）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 工序产出
+    columns:
+      - field: operation_id
+        width: 210
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition_operation
+        display_field: operation_name
+      - field: output_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: item_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: qty
+        width: 100
+      - field: qty_uom_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: is_primary
+        width: 100
+      - field: cost_allocation_pct
+        width: 130
+      - field: description
+        width: 220
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [description]
+    actions:
+      - id: create
+        label: 新建产出
+        icon: plus
+        type: primary
+        permission: work_definition_operation_output:work_definition_operation_output_create
+    defaultSort:
+      field: output_type
+      order: asc
+  form:
+    title: 工序产出
+    layout: vertical
+    sections:
+      - title: 关联
+        columns:
+          - fields: [operation_id, output_type]
+          - fields: [item_id, qty]
+      - title: 认定
+        columns:
+          - fields: [qty_uom_id, is_primary]
+          - fields: [cost_allocation_pct]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "工序产出 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [operation_id, output_type, item_id, qty, qty_uom_id,
+                 is_primary, cost_allocation_pct, description]
+
+category_config:
+  create_permission: work_definition_operation_output:work_definition_operation_output_create
+  update_permission: work_definition_operation_output:work_definition_operation_output_update
+  delete_permission: work_definition_operation_output:work_definition_operation_output_delete
+  owner_auto_permission: false

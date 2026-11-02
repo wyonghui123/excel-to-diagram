@@ -1,9 +1,9 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.16
-- 日期：2026-11-01
-- 状态：已确认（2026-11-01），P2a 已完成（schema 32 / migration 4）；P2b 已完成（schema 29 / migration 6；v176，8 对象）；P2c 可用性例外已完成（v180，`resource_availabilities`，schema 16 / migration 6 全绿）；服务层 `resource_matching_service` 已落地（24 passed，含多口径产能、例外求交与 HR 分支），架构门禁 10 项全 OK；**P3 员工主数据已完成（v185，`employees` + `employee_shift_assignments`，schema 23 / migration 7 / 服务 11 全绿）；端到端验收已完成（E2E 7 passed，见 §11）**
-- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）、`spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.1，Routing 与流程生产对标，见附 B）
+- 文档版本：v1.21
+- 日期：2026-11-02
+- 状态：已确认（2026-11-01）；P2a/P2b/P2c/P3 已完成，P4a 已完成（v188）；**P4b/P4c/P5/财务域细化方案已定稿（v1.21，见附 C），尚未实施**；批次特性已定复用既有属性字典（不建 `characteristics_json` / `batch_characteristics`）；端到端验收已完成（E2E 7 passed，见 §11）
+- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）、`spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.4，Routing 与流程生产对标 + P4c/P5 细化 + 批次特性复用属性字典 + 替代关系归属，见附 B/C）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
 ## 1. 背景与目标
@@ -492,6 +492,10 @@
 - **M3（P2c）**：`resource_capacity` 多口径、可用性例外、物流载重/体积（FR-005 扩展）。
 - **M4（P2d）**：FR-010 服务覆盖分配（复用 territory）、`work_order.project_id`（依赖 P1）。
 - **M5（P3）**：FR-015 员工主数据（`employee`）+ `employee_shift_assignment` + `available_minutes` 的 HR 分支（依赖 P2b `shift`）。
+- **M6（P4b，v191/v192）**：`work_definitions` 基准量/有效期扩展、`work_definition_operation_outputs`、替代资源组、`process_instructions`、`definition_kind=recipe` 语义校验（见附 C.1）。
+- **M7（P4c）**：最小 `batches`（流程订单域立项后实施；见附 C.2）。
+- **M8（P5）**：`work_definition_sequences` branch/return/parallel/lot range/priority + 批次特性提列清单（不建 `batch_characteristics`，复用属性字典；见附 C.3）。
+- **M9（财务域）**：`cost_centers` + `activity_types` + `activity_rates` + `resource_group_activity_types`（见附 C.4；TBD-8 仍为“本期不建”）。
 
 ## 9. 变更/设计方案（RFC）
 
@@ -610,8 +614,8 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 
 ## 10. TBD List
 
-| ID | 事项 | 缺失信息 | 下一步 |
-|---|---|---|---|
+| ID | 事项 | 缺失信息 | 决策 / 结论 | 状态 |
+|---|---|---|---|---|
 | ~~TBD-1~~ | ~~资源编码唯一域~~ | **已定：编码全局唯一**（2026-11-01 用户确认） | 关闭 |
 | ~~TBD-2~~ | ~~班次模型~~ | **已定：P2b 建通用 `shift`（时段模板）+ `calendar_shift`（日历×星期×班次×产能系数），全部 `resource_kind` 适用；HR 排班复用同一 `shift`，另建 `employee_shift_assignment`（P3）**（见 FR-014） | 关闭 |
 | ~~TBD-3~~ | ~~资源组层级~~ | **已定：支持任意层级**（单父/无环/深度 ≤10/节点模式互斥） | 关闭 |
@@ -626,9 +630,17 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | ~~TBD-12~~ | ~~多法人 / 多分配（Oracle 三层）~~ | Oracle 是 Person → Work Relationship → 多 Assignment；我们首期压成 Person → 单条 employee | **已定（v1.18）：两层简化 + 三点预埋**——① `org_id` 语义写死为**法人雇主**；② `employee_no` 唯一域改为 `(org_id, employee_no) WHERE status='active'`（`person_profile_id` 在职唯一不变，v189）；③ 不提前拆 `employments` / `employee_assignments` | 关闭（v189） |
 | ~~TBD-13~~ | ~~员工排班是否受工厂日历节假日约束~~ | P3 实现为"有员工排班即不叠加日历"，故 `calendar_day.day_type=holiday` 不作用于员工排班 | **已定（v1.18）：告警不阻断**——`employee_shift_warnings` 增 `HOLIDAY_WORK`（`assignment.work_center_id` → `resource_group.calendar_id` → `calendar_day.day_type=holiday`）；显式排班允许落库，仅告警、不折算产能 | 关闭 |
 | ~~TBD-14~~ | ~~同日多段排班重叠告警~~ | **已实现（v1.14）**：`employee_service.shift_overlap_warnings` / `employee_shift_warnings` 按 `start_time + gross_minutes` 展开绝对区间两两求交，返回 `ASSIGNMENT_OVERLAP` 告警（含 `assignment_ids / shift_ids / overlap_minutes`），**不阻断落库**；员工服务 13 passed | 关闭 |
-| TBD-15 | 备选 / 并行工艺路线 | 现 `work_definition_operations.seq` 只能表达线性路线；SAP 用 Sequence（0 标准 / P 并行 / A 替代）、EBS 用 Alternate 标签、Fusion 用多个 Work Definition + 优先级 | **P4a 建议建 `work_definition_sequences`**（`seq_type=std/parallel/alternative` + `branch_from_seq/return_seq`），首期只支持整条替代路线，branch/return 放 P5（研究稿 §5.2 / R-2）。**不复用 `workflow_task` / `project_task`**：前者是工艺主数据（静态定义，随 `work_definition` 版本存续），后者是运行态待办/审批或 WBS 计划节点；混表会让主数据查询被迫过滤运行态状态行。⇒ **已实现（v188，P4a）**：`work_definition_sequences`（definition_id / seq_no / seq_type=std\|alternative）+ `work_definition_operations.sequence_id` 可空真外键（NULL=标准序列） |
-| TBD-16 | 物料 ↔ BOM ↔ 路线的版本绑定 | 三方都需"某物料某批量区间用哪套 BOM + 哪条路线"的唯一真源（SAP Production Version；EBS BOM/Routing 共享 alternate；Fusion 版本+优先级） | **P4a 建议建 `production_versions`**（`item_ref / plant / bom_ref / work_definition_id / valid_from-to / lot_min-max / locked / priority`）。**R-1 已核实（v1.16）**：物料用存量表 `items`（`target_bo: item`，`code` 唯一、`item_type ∈ {goods, service}`），工厂无 `plants` 表、首期用 `org`（`orgs` 表）。⇒ **已实现（v188，P4a）**：`production_versions`（code / item_id / org_id / bom_id / work_definition_id / valid_from-to / lot_min-max / priority / locked / status）+ 菜单 `/master-data/production-version` |
+| ~~TBD-15~~ | ~~备选 / 并行工艺路线~~ | 现 `work_definition_operations.seq` 只能表达线性路线；SAP 用 Sequence（0 标准 / P 并行 / A 替代）、EBS 用 Alternate 标签、Fusion 用多个 Work Definition + 优先级 | **P4a 建议建 `work_definition_sequences`**（`seq_type=std/parallel/alternative` + `branch_from_seq/return_seq`），首期只支持整条替代路线，branch/return 放 P5（研究稿 §5.2 / R-2）。**不复用 `workflow_task` / `project_task`**：前者是工艺主数据（静态定义，随 `work_definition` 版本存续），后者是运行态待办/审批或 WBS 计划节点；混表会让主数据查询被迫过滤运行态状态行。⇒ **已实现（v188，P4a）**：`work_definition_sequences`（definition_id / seq_no / seq_type=std\|alternative）+ `work_definition_operations.sequence_id` 可空真外键（NULL=标准序列） | 关闭（v188；branch/return 转 P5） |
+| ~~TBD-16~~ | ~~物料 ↔ BOM ↔ 路线的版本绑定~~ | 三方都需"某物料某批量区间用哪套 BOM + 哪条路线"的唯一真源（SAP Production Version；EBS BOM/Routing 共享 alternate；Fusion 版本+优先级） | **P4a 建议建 `production_versions`**（`item_ref / plant / bom_ref / work_definition_id / valid_from-to / lot_min-max / locked / priority`）。**R-1 已核实（v1.16）**：物料用存量表 `items`（`target_bo: item`，`code` 唯一、`item_type ∈ {goods, service}`），工厂无 `plants` 表、首期用 `org`（`orgs` 表）。⇒ **已实现（v188，P4a）**：`production_versions`（code / item_id / org_id / bom_id / work_definition_id / valid_from-to / lot_min-max / priority / locked / status）+ 菜单 `/master-data/production-version` | 关闭（v188） |
 | ~~TBD-17~~ | ~~流程生产（配方）是否新建对象~~ | SAP PP-PI Master Recipe（配方头 + Phase + 配方 BOM + 过程指令 + 批次效价）、Oracle OPM Recipe = Formula + Routing + Instructions | **已定（v1.18）：不新建 recipe 头**；P4b 做最小扩展——`definition_kind=recipe` + `base_qty/batch_qty` + `operation_outputs`（联/副产品）+ `process_instructions`；`batches` 不进本期；P4a 漏掉的 `work_definitions` 有效期/`base_qty` 扩展与 P4b 合并，不单开迁移 | 关闭（P4b 实施） |
+| TBD-18 | P4b 的字段范围（recipe 扩展 / 产出 / 替代资源 / 过程指令） | `work_definitions` 是否加 usage/lot 区间；`process_instructions` 单表还是双表；替代资源是否加 `substitute_priority` | **已定（v1.19，方案待实施）**：只加 `base_qty/base_uom_id/batch_qty/valid_from/valid_to`，不加 usage/lot；`process_instructions` 单表双形态（text/parameter）；替代资源只加 `substitute_group/replacement_group`，复用 `priority`；产出只存 `cost_allocation_pct`，不建 `yield_pct` | 方案已定（待 v191/v192） |
+| TBD-19 | P4c `batches` 是否把生命周期与质量状态合并 | SAP 批次状态（unrestricted/inspection/blocked）与订单状态（planned/in_process/closed）语义不同 | **已定（v1.19，v1.21 修订）**：拆 `status`（planned/in_process/closed）+ `quality_status`（unrestricted/inspection/blocked）；`potency_pct` 为**物理列**（计算型，走 `attribute_promotion` 口径）；描述性批次特性走属性字典 `batch_attribute_values`，不建 `characteristics_json` | 方案已定（待流程订单域） |
+| TBD-20 | P5 branch/return 与 parallel 的规则 | SAP `PLFL` 有 `BSCHL1/BSCHL2`，但官方 help 正文未取到；替代是否强制成对 | **已定（v1.19，方案待实施）**：alternative 必须成对 branch+return（return > branch），parallel 只需 branch（return 可选作汇合点）；补 `lot_min/lot_max/priority`；R-2 设计层关闭 | 方案已定（待 P5） |
+| TBD-21 | 财务域 `cost_center` / `activity_type` / `activity_rate` 与 `resource_rate` 的关系 | 两套费率可能形成双真源 | **已定（v1.19，方案待实施）**：新增 4 对象；成本取值顺序 = 具体资源 cost 费率 → 作业类型费率 → 组 cost 费率 → 组织默认；billing 只允许具体资源；不建 controlling area/成本要素/核算单 | 方案已定（待财务域） |
+| TBD-22 | `work_definitions.usage` 与 lot 区间是否本期加 | 当前无 MRP/成本 usage 消费者；lot 区间已在 `production_versions` | **已定（v1.19）：本期不加**；等 MRP/成本域立项再评估 | 关闭 |
+| TBD-23 | `process_instructions` 是否建 Category 主数据 | SAP 用 Process Instruction Category + Characteristics；Oracle 用扁平 Operational Parameters | **已定（v1.19）：不建 Category 主数据**；用 `parameter_code` + `data_type` + `direction` 扁平字段 | 关闭 |
+| TBD-24 | `batches.potency_pct` 是否硬编码列 | SAP 无标准 Potency 字段，走批次分类特性 + MQC；OPM potency 未核实 | **已定（v1.21 修订）**：保留 `potency_pct` 但定性为**物理列**（计算型，明确非 OPM 官方字段）；描述性批次特性走属性字典 EAV；P5 不建强类型特性表，只补提列清单 | 关闭 |
+| TBD-25 | 替代关系放 `sourcing_rule` 还是独立主数据 | 供应商多来源、BOM 替代组、工序资源替代都叫“替代”，易混成一个模型 | **已定（v1.20）：不进 sourcing**；按域分层——BOM 替代留在结构行、工序替代是需求行属性、路线替代走 sequence/PV、多供应商走 `sourcing_rule_line`；只有跨域物料替代才建独立 `item_substitute`（本期不建） | 关闭（未来域评估） |
 
 ---
 
@@ -738,14 +750,62 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 
 ## 附 B：Routing 与流程生产对标（研究稿指针）
 
-详见 `spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.1）。三条与本 Spec 直接相关的结论：
+详见 `spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.3）。以下结论与核实项与本 Spec 直接相关：
 
 1. **离散路线**：SAP 的备选/并行靠 `Sequence`（0 标准 / P 并行 / A 替代），EBS 靠 Routing `Alternate` 标签（与 BOM alternate 共享），Fusion 靠"多个 Work Definition + Production Priority"。我们现有 `work_definitions`（`code + revision`）+ 线性 `work_definition_operations` 只能表达**单条线性路线** ⇒ 见 TBD-15。
 2. **版本真源**：SAP `Production Version`（物料+工厂 ↔ BOM 备选 ↔ Routing Group/Counter + 有效期 + 批量区间 + Locked）、EBS 的 BOM/Routing 共享 alternate、Fusion 的版本+优先级 —— 都说明"某物料某批量区间走哪套 BOM + 哪条路线"必须是独立对象 ⇒ 见 TBD-16。
 3. **流程生产**：SAP PP-PI `Master Recipe`（配方头 + Phase + 配方 BOM 的原料/联产品/副产品 + 过程指令 + 批次效价）与 Oracle OPM `Recipe = Formula + Routing + Instructions` 表明"配方"与"工艺路线"**同层级**；我们已在 `work_definitions` 有 `definition_kind` 判别字段 ⇒ 用 `definition_kind=recipe` + 字段扩展承载，**不新建 recipe 头对象** ⇒ 见 TBD-17。
 
-**建议落地顺序**：P4a（`production_versions` + `work_definitions` 扩 usage/status/有效期/base_qty/lot 区间 + `work_definition_sequences`）→ P4b（替代资源组 `substitute_group`、工序产出 `operation_outputs`、`process_instructions`）→ P4c（最小 `batches`）。
-**待核实**（进实施 Spec 前）：物料/工厂对象确切命名（R-1）、SAP Sequence 字段与成对 branch/return 规则（R-2）、SAP Help 正文未能抓取的字段细节（研究稿 §9）。
+4. **字段级核实（v1.19）**：SAP `PLKO.BMSCH`（Base Quantity）、`PLFL.FLGAT/BSCHL1/BSCHL2`（序列类别 / branch / return）、`PLPO.VORNR/STEUS`、`PLMZ`、`MKAL`、`CRCO/CSLA` 已用数据字典镜像核实；Oracle Fusion `Work Definition Operation Outputs` / `Operational Parameters` / `Instructions` 已取到官方页；OPM potency 未核实（R-7）。
+5. **替代关系归属（v1.20）**：替代关系**不进 `sourcing_rule`**——BOM 组件替代留在结构行（`item_structure_line.substitute_group_code`）、工序资源替代是需求行属性（`substitute_group/replacement_group`）、路线替代由 sequence/PV 表达、多供应商是 sourcing 的来源排序；只有跨域复用的物料替代才建独立 `item_substitute`（本期不建）⇒ 见 TBD-25 / 附 C.5。
+
+**落地顺序（更新 2026-11-02）**：P4a ✅ 已完成（v188）→ P4b-1 **v191**（`work_definitions` 只加 `base_qty/base_uom_id/batch_qty/valid_from/valid_to` + `work_definition_operation_outputs` + `substitute_group/replacement_group`）→ P4b-2 **v192**（`process_instructions`）→ P4c（最小 `batches` + `batch_attribute_values`，复用属性字典，流程订单域立项）→ P5（branch/return/parallel + 批次特性提列清单，不建 `batch_characteristics`）→ 财务域（`cost_center/activity_type/activity_rate`）。
+**仍待实施前复核**：SAP `help.sap.com` 正文未取到，替代序列“必须成对 branch/return”需用 CP305 / SAP Help 复核；Oracle OPM `Base/Batch Quantity` 与 potency 字段未核实（研究稿 §9）。
+
+## 附 C：P4b / P4c / P5 / 财务域细化方案（v1.21）
+
+> 完整字段级设计见研究稿 v0.4 §10–§13；本节只放决策摘要，供评审。
+
+### C.1 P4b（v191 / v192）
+
+| 对象/字段 | 决策 | 验收 |
+|---|---|---|
+| `work_definitions` +5 列 | `base_qty` / `base_uom_id` / `batch_qty` / `valid_from` / `valid_to`；recipe 必填基准量；routing 必须为空；**不加** `usage` / lot 区间 | recipe 缺基准量失败；routing 填基准量失败；`valid_to > valid_from` |
+| `work_definition_operation_outputs` | `output_type ∈ {product, co_product, by_product}`；`is_primary`；`cost_allocation_pct` 0–100；同工序合计 ≤100；不建 `yield_pct` | 多主产出失败；分摊 >100 失败；单位跨 `uom_group` 失败 |
+| `operation_resource_requirements` +2 列 | `substitute_group` / `replacement_group`；同包整组替换；复用 `priority`；不建 `substitute_priority` | 无 `substitute_group` 的 `replacement_group` 失败；包内字段不一致失败；生效时仅 1 包失败 |
+| `process_instructions` | 单表双形态：`instruction_kind=text\|parameter`；parameter 有 `data_type/uom/target/min/max/direction=set\|collect`；不建 Category 主数据 | text/parameter 字段矩阵；numeric 顺序错误失败 |
+| `definition_kind=recipe` | recipe 生效至少一个主产出；`base_qty/base_uom` 生效后不可改，新 revision 改版 | 生效校验；版本不可变 |
+
+迁移：**v191（P4b-1）+ v192（P4b-2）**；v190 已被 `transfer_order_object` 占用。两笔均可回滚，枚举种子保留。
+
+### C.2 P4c（最小 `batches`）
+
+- `batch_no` + `item_id` + `org_id` + `qty/qty_uom_id` + `parent_batch_id` + `status`（planned/in_process/closed）+ `quality_status`（unrestricted/inspection/blocked）+ `source` + `potency_pct`（**物理列**，计算型）。
+- 批次特性**复用属性字典**：`attribute_definitions` + `attribute_scopes(scope_ref='batch')` + `batch_attribute_values`；不建 `characteristics_json`（接入项见研究稿 §11.7）。
+- 唯一 `(item_id, org_id, batch_no)`；父批次单父、无环、深度 ≤10；`potency_pct` 0–100。
+- 不做批次库存 / 批次成本 / 多父 genealogy；不建 `batch_characteristics` 强类型表。
+- 迁移在流程订单域立项时取当时最大号 +1（预计 v193+，不预占）。
+
+### C.3 P5（branch/return + parallel + 批次特性）
+
+- `work_definition_sequences` 扩 `seq_type=parallel`、`branch_operation_seq`、`return_operation_seq`、`lot_min/lot_max`、`priority`。
+- 规则：alternative 必须 branch+return 成对（return > branch）；parallel 只需 branch（return 可选汇合）；branch/return 必须在标准序列；同 branch 多替代按 priority + lot 区间选一。
+- 批次特性**不建独立主数据**：复用 `attribute_definitions` + `attribute_scopes` + `batch_attribute_values`；参与计算/需索引的特性走 `attribute_promotion` 提为 `batches` 物理列（`potency_pct` 已在 P4c 落地）。
+- R-2 设计层关闭；实施前用 SAP CP305 / Help 复核强制成对规则。
+
+### C.4 财务域（`cost_center` / `activity_type` / `activity_rate`）
+
+- 4 对象：`cost_centers`（树，org 内唯一，无环/深度 ≤10）、`activity_types`（挂成本中心，activity_uom 限 TIME/COUNT）、`activity_rates`（version + fixed/variable + currency + rate_uom，同版本不重叠）、`resource_group_activity_types`（工作中心 → 作业类型 + standard_value_category + formula + priority）。
+- 成本取值顺序唯一：具体资源 `resource_rate(cost)` → 作业类型费率 → 组 `resource_rate(cost)` → 组织默认；`billing` 只允许具体资源。
+- 不建 controlling area / 成本要素 / 核算单 / 实际过账；只做主数据与费率。
+- 迁移在财务域立项时取当时最大号 +1（预计 v195+，不预占）。
+
+### C.5 替代关系归属（TBD-25）
+
+- 判据：替代 = 「什么能顶替什么」（等价/升级/降级 + 换算比 + 方向 + 条件）；sourcing = 「从哪取货」（`rank / fixed / blocked / allocation_pct`）。
+- 归属：BOM 组件替代 → `item_structure_line.substitute_group_code`；工序资源替代 → `operation_resource_requirements`（P4b 两列）；路线替代 → `work_definition_sequences` + `production_versions`；多供应商/多来源 → `sourcing_rule_line`；跨域物料替代 → 未来 `item_substitute`（本期不建）。
+- 不建「供应商替代关系」表：停供切换 = `blocked=true` + 下一 `rank`，避免与 sourcing 双真源。
+- `item_substitute` 立项触发：至少两个域复用同一替代结论；最小字段 `item_id / substitute_item_id / substitute_type ∈ {equivalent, upgrade, downgrade} / conversion_factor / priority / org_id / valid_from-to / status`，唯一 `(item_id, substitute_item_id, org_id, valid_from)`，禁止成环；与 BOM 替代组不混用（BOM 组内优先）。
 
 ## 11. 验收证据（E2E，2026-11-01）
 
@@ -791,3 +851,6 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-01 | v1.16 | 关闭 TBD-7（迁移号：现最大 v187，P4a 用 v188）与 R-1（物料=存量 `items` 表、工厂首期用 `org`）；TBD-16 解除阻塞可开工；`work_definition_sequences` 明确不复用 `workflow_task`/`project_task`（工艺主数据 vs 运行态） |
 | 2026-11-01 | v1.17 | P4a 落地（v188）：`production_versions` + `work_definition_sequences` + `work_definition_operations.sequence_id`（可空）；2 组枚举（`sequence_type` / `production_version_status`）、8 权限、1 菜单（挂 master-data）；TBD-15 / TBD-16 标记已实现；branch/return、parallel 与流程生产（TBD-17）留 P4b/P5 |
 | 2026-11-02 | v1.18 | 关闭 TBD-8/9/10/11/12/13/17：`employees` 增 `supplier_party_id`（`dispatched` 必填）、工号唯一索引改 `(org_id, employee_no) WHERE active`（`org_id` = legal employer）、`name` 明确为缓存列；不建 `employee_org_assignment` / 矩阵汇报 / `cost_center` / recipe 头（recipe 走 P4b 最小扩展）；节假日排班改"仅告警不阻断"（`HOLIDAY_WORK`）；迁移 **v189**（加列 + 换索引，可回滚，列留 stub）；schema 23 + 迁移 v189 4 + 服务 17 + v185 回归 7 + 资源服务 24 passed |
+| 2026-11-02 | v1.19 | 后续开发待办（P4b / P4c / P5 / 财务域）的 Oracle·SAP 深入研究与方案细化定稿：研究稿升 **v0.2**（字段级证据 + §10–§13 细化）；新增 TBD-18~TBD-24（18–21 方案已定待实施，22–24 关闭）；新增 **附 C** 决策摘要（P4b：`work_definitions` +5 列 / `work_definition_operation_outputs` / `operation_resource_requirements` +2 列成组替换 / `process_instructions` 单表双形态；P4c：最小 `batches`；P5：sequence `parallel/branch/return/lot/priority` + `batch_characteristics`；财务域：`cost_centers` / `activity_types` / `activity_rates` / `resource_group_activity_types` + 成本取值唯一顺序）；§8 追加 M6–M9；迁移号 P4b = **v191 / v192**（v190 已被 `transfer_order_object` 占用），P4c/P5/财务域不预占；附 B 补字段级核实第 4 条与落地顺序；**仅方案，未实施、未建迁移文件** |
+| 2026-11-02 | v1.20 | 新增 **TBD-25 / 附 C.5「替代关系归属」**：替代关系**不进 `sourcing_rule`**，按域分层（BOM 替代留在 `item_structure_line.substitute_group_code`；工序资源替代为 `operation_resource_requirements` 需求行属性；路线替代走 sequence/PV；多供应商走 `sourcing_rule_line`；跨域物料替代才建独立 `item_substitute`，本期不建）；不建「供应商替代关系」表（`blocked + rank` 表达停供切换）；研究稿升 **v0.3**（新增 §5.3，原「明确不建」顺延 §5.4），附 B 增加第 5 条结论；**仅方案，未实施** |
+| 2026-11-02 | v1.21 | 修订 P4c/P5 批次特性方案（R-5 关闭）：确认平台既有属性字典（`attribute_definitions` + `attribute_scopes` + `*_attribute_values`）可作 Batch 基础设施复用，等价覆盖 SAP Classification 的 Characteristic / 适用范围 / Value 三层；**取消 `characteristics_json`**，P4c 改为新增 `batch_attribute_values`（照 `_attribute_value_template.yaml`）；**不建 `batch_characteristics`**，P5 只做提列清单（`potency_pct` 等计算型/索引型走 `attribute_promotion` 提物理列）；同步修订 TBD-19 / TBD-24 / M8 / 附 C.2 / C.3 / §8 落地顺序；研究稿升 **v0.4**（新增 §11.7 接入方案，§12.3 重写）；遗留待确认：`item_group` 范围语义扩展（批次取所属物料的分类）与是否建 `batch_type_attribute` 档案层；**仅方案，未实施、未建迁移** |
