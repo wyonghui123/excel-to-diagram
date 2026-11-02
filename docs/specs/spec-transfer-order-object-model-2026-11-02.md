@@ -115,7 +115,7 @@ M4 已确定内部供应载体边界：
 设计说明：
 
 - 头不存金额、币种、供应商、客户、发票信息。
-- 头不存 `reversal_of_transfer_id`；反向调拨是独立标准 TO，本波不做原单链接（TBD-2）。
+- 头存 `reversal_of_transfer_id`（v191 起）：反向调拨仍是独立标准 TO，只做原单链接与 from/to 互换校验（TBD-2 已关闭）。
 - 头不存 `inventory_org` 之外的执行组织；调出/调入组织本身就是库存组织。
 
 ### 3.2 transfer_order_line（行）
@@ -193,7 +193,7 @@ M4 已确定内部供应载体边界：
 | `status` | `active` |
 | `description` | 可发货、可收货的实物物料行 |
 
-本波不建 `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT`。扩展路径见 TBD-5。
+v191 起建 `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT`（`delivery_relevant=0`，release 时自动关闭行，不参与发货 / 收货 / 履约收满判定）。
 
 ### 4.3 编号序列
 
@@ -467,16 +467,16 @@ TO 涉及两个组织。若平台数据权限只支持单字段，以 `from_org_
 | 编号 | 待定项 | 触发条件 / 说明 |
 |---|---|---|
 | TBD-1 | 库存域：inventory transaction / on-hand / in-transit / lot / serial / bin stock / 库存过账 | 用户明确后续 TODO；落地后 TO 发货/收货改为库存事实源 |
-| TBD-2 | `reversal_of_transfer_id` 原单链接与反向调拨校验 | 需要“反向调拨必须对应原单”时加；本波只要求 from/to 互换 |
-| TBD-3 | 多包裹 / 多承运商发货单（独立 `transfer_shipment`） | 需要装箱单、分批发货单时 |
-| TBD-4 | 请购 → 调拨自动转换（`create_from_allocation`）与 `line_type_assignment` | 需要按物料组确定行类型或从需求分配自动建单时 |
-| TBD-5 | `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT` 行类型 | 需要调拨服务、资产或备注行时 |
+| TBD-2 | `reversal_of_transfer_id` 原单链接与反向调拨校验 | **已关闭（v191）**：头加列 + 守卫校验 from/to、库位互换 + `create_reversal` |
+| TBD-3 | 多包裹 / 多承运商发货单（独立 `transfer_shipment`） | **已关闭（v192）**：`transfer_shipment` + `transfer_shipment_line`，post 原子累加 TO `qty_shipped` |
+| TBD-4 | 请购 → 调拨自动转换（`create_from_allocation`）与 `line_type_assignment` | **已关闭（v191 + v193）**：`LineTypeResolver` 支持 scope；`transfer_order.create_from_allocation` 按分配建单 |
+| TBD-5 | `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT` 行类型 | **已关闭（v191）**：三种行类型种子，`delivery_relevant=0` |
 | TBD-6 | 收货头 `inventory_org_id`（收货库存组织） | 库存域落地或跨来源报表需要收货库存组织维度时；本波由 `source_doc_id` 回查 |
 | TBD-7 | `location` 增加 `org_id` 与组织归属校验 | 需要库位级库存与组织隔离时 |
-| TBD-8 | 超发 / 超收容差参数 | 需要业务容差时再加控制参数；本波严格不超 |
-| TBD-9 | TO 审批流 | 需要按金额/组织/物料组审批时 |
-| TBD-10 | 跨法人场景的 PO / receipt 法人一致性守卫 | 当前为独立议题：PO 采购组织与收货组织法人不一致时的 R-RC-19 / `purchase_legal_entity_id` 快照 |
-| TBD-11 | `line_type` / `document_type` 视图暴露 `scope_bo` | 多行类型需要按 BO 过滤下拉时；本波单类型绕开 |
+| TBD-8 | 超发 / 超收容差参数 | **已关闭（v191）**：`transfer_over_ship_percent` / `transfer_over_receive_percent`，默认 0 |
+| TBD-9 | TO 审批流 | **已关闭（v194）**：`approval_status` + submit / withdraw / approve / reject + release 闸门 |
+| TBD-10 | 跨法人场景的 PO / receipt 法人一致性守卫 | **已关闭（v195）**：`purchase_orders.purchase_legal_entity_id` 快照 + 收货法人一致性守卫（R-RC-19） |
+| TBD-11 | `line_type` / `document_type` 视图暴露 `scope_bo` | **已关闭（v191）**：两个只读视图增加 `scope_bo` 列并重建 |
 
 ---
 

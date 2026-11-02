@@ -281,3 +281,31 @@ def test_create_rejects_unsupported_source_type():
         _svc(conn).create_receipt(
             _header(source_doc_type='sales_order'), [])
     assert exc.value.rule == 'RC_SOURCE_UNSUPPORTED'
+
+
+# ---------------- 采购法人一致性（TBD-10） ----------------
+
+def test_create_rejects_org_mismatching_purchase_legal_entity():
+    """PO 法人快照非空且与收货组织不一致 → RC_LEGAL_ENTITY_MISMATCH。"""
+    conn = seeded_db()
+    conn.execute(
+        'UPDATE purchase_orders SET purchase_legal_entity_id = 2 WHERE id = 1')
+    with pytest.raises(ReceiptError) as exc:
+        _create(_svc(conn))
+    assert exc.value.rule == 'RC_LEGAL_ENTITY_MISMATCH'
+    assert exc.value.field_name == 'org_id'
+
+
+def test_create_accepts_org_matching_purchase_legal_entity():
+    conn = seeded_db()
+    conn.execute(
+        'UPDATE purchase_orders SET purchase_legal_entity_id = 1 WHERE id = 1')
+    result = _create(_svc(conn))
+    assert _row(conn, 'receipts', result['id'])['org_id'] == 1
+
+
+def test_create_skips_legal_entity_check_when_snapshot_empty():
+    """快照为空（解析失败）不阻断收货 —— seeded_db 默认快照 NULL。"""
+    conn = seeded_db()
+    result = _create(_svc(conn))
+    assert result['status'] == 'draft'

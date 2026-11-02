@@ -22,13 +22,19 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 from meta.services.transfer_order_service import (
+    APPROVAL_NOT_REQUIRED,
+    APPROVAL_PENDING,
+    APPROVAL_REJECTED,
     LINE_STATUS_OPEN,
     STATUS_CANCELLED,
     STATUS_CLOSED,
     STATUS_DRAFT,
     STATUS_RELEASED,
+    TOLERANCE_RECEIVE_PARAM,
+    TOLERANCE_SHIP_PARAM,
     TERMINAL_STATUSES,
     TransferOrderError,
+    resolve_tolerance_ratio,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +130,48 @@ class TransferOrderGuardService:
             raise TransferOrderError(
                 '调出组织与调入组织不能相同', field_name='to_org_id',
                 rule='TO_ORG_SAME')
+
+        # 反向调拨：原单存在、非取消、组织与库位互换、原单尚无反向单
+        reversal_of = header.get('reversal_of_transfer_id')
+        if not _blank(reversal_of):
+            original = self._load_header(reversal_of)
+            if original is None:
+                raise TransferOrderError(
+                    '反向原单 %s 不存在' % reversal_of,
+                    field_name='reversal_of_transfer_id',
+                    rule='TO_REVERSAL_ORIGINAL_NOT_FOUND')
+            if _status(original.get('status')) == STATUS_CANCELLED:
+                raise TransferOrderError(
+                    '反向原单 %s 已取消' % reversal_of,
+                    field_name='reversal_of_transfer_id',
+                    rule='TO_REVERSAL_ORIGINAL_CANCELLED')
+            if (str(from_org_id) != str(original.get('to_org_id'))
+                    or str(to_org_id) != str(original.get('from_org_id'))):
+                raise TransferOrderError(
+                    '反向调拨必须互换调出 / 调入组织',
+                    field_name='to_org_id',
+                    rule='TO_REVERSAL_ORG_NOT_SWAPPED')
+            if (str(header.get('from_location_id'))
+                    != str(original.get('to_location_id'))
+                    or str(header.get('to_location_id'))
+                    != str(original.get('from_location_id'))):
+                raise TransferOrderError(
+                    '反向调拨必须互换调出 / 调入库位',
+                    field_name='to_location_id',
+                    rule='TO_REVERSAL_LOCATION_NOT_SWAPPED')
+            try:
+                existing = self._query(
+                    'SELECT id FROM %s WHERE reversal_of_transfer_id = ? LIMIT 1'
+                    % HEADER_TABLE, [reversal_of])
+            except Exception as error:  # noqa: BLE001 - 旧库列缺失不阻断
+                logger.warning('[transfer_order_guard] 查询反向单失败: %s', error)
+                existing = []
+            if existing:
+                raise TransferOrderError(
+                    '反向原单 %s 已存在反向单 %s'
+                    % (reversal_of, existing[0].get('id')),
+                    field_name='reversal_of_transfer_id',
+                    rule='TO_REVERSAL_EXISTS')
 
         self._require_inventory_org(from_org_id, 'from_org_id')
         self._require_inventory_org(to_org_id, 'to_org_id')
@@ -270,6 +318,17 @@ class TransferOrderGuardService:
                 '仅草稿态调拨单可下达', field_name='status',
                 rule='TO_STATE_INVALID')
 
+        # 审批闸门：pending / rejected 拒绝下达；not_required / approved 放行
+        approval = _status(header.get('approval_status')) or APPROVAL_NOT_REQUIRED
+        if approval == APPROVAL_PENDING:
+            raise TransferOrderError(
+                '调拨单审批未完成，禁止下达', field_name='approval_status',
+                rule='TO_APPROVAL_PENDING')
+        if approval == APPROVAL_REJECTED:
+            raise TransferOrderError(
+                '调拨单审批已驳回，禁止下达', field_name='approval_status',
+                rule='TO_APPROVAL_REJECTED')
+
         self.validate_create(header)
         lines = self._load_lines(header['id'])
         if not lines:
@@ -300,6 +359,7 @@ class TransferOrderGuardService:
         if not pending:
             raise TransferOrderError(
                 '发货至少需要一行', field_name='lines', rule='TO_NO_LINES')
+        ratio = resolve_tolerance_ratio(self.ds, TOLERANCE_SHIP_PARAM, header)
         shipped_so_far: Dict[Any, Any] = {}
         for item in pending:
             item = dict(item or {})
@@ -328,14 +388,19 @@ class TransferOrderGuardService:
             total = already + qty
             shipped_so_far[line_id] = total
             plan = _dec(line.get('qty'), 'qty') or 0
-            if total > plan:
+            limit = plan * (Decimal('1') + ratio)
+            if total > limit:
                 raise TransferOrderError(
-                    '调拨行 %s 累计发货量 %s 超过计划量 %s'
-                    % (line_id, total, plan),
+                    '调拨行 %s 累计发货量 %s 超过计划量 %s（含容差 %s%%）'
+                    % (line_id, total, plan, ratio * 100),
                     field_name='qty', rule='TO_SHIP_QTY_EXCEEDED')
 
-    def validate_receive(self, transfer_order_id: Any) -> None:
-        """收货：released 且存在发运余量 > 0 的行（R-TO-8）。"""
+    def validate_receive(self, transfer_order_id: Any,
+                         lines: Optional[List[Dict[str, Any]]] = None) -> None:
+        """收货：released 且存在发运余量 > 0 的行（R-TO-8）。
+
+        传入 `lines` 时额外校验净收累计不超过已发货量 × (1 + 超收容差)。
+        """
         header = self._load_header(transfer_order_id)
         if header is None:
             raise TransferOrderError('调拨单不存在', field_name='id',
@@ -353,6 +418,51 @@ class TransferOrderGuardService:
             raise TransferOrderError(
                 '调拨单没有发运余量 > 0 的行，禁止收货',
                 field_name='status', rule='TO_NOTHING_TO_RECEIVE')
+        if lines:
+            self._validate_receive_lines(header, lines)
+
+    def _validate_receive_lines(self, header: Dict[str, Any],
+                                lines: List[Dict[str, Any]]) -> None:
+        ratio = resolve_tolerance_ratio(
+            self.ds, TOLERANCE_RECEIVE_PARAM, header)
+        received_so_far: Dict[Any, Any] = {}
+        for item in lines:
+            item = dict(item or {})
+            line_id = (item.get('line_id') or item.get('transfer_order_line_id')
+                       or item.get('source_line_id'))
+            if _blank(line_id):
+                raise TransferOrderError(
+                    '收货回写行缺少 line_id', field_name='line_id',
+                    rule='TO_LINE_REQUIRED')
+            line = self._load_line(line_id)
+            if line is None or line.get('transfer_order_id') != header['id']:
+                raise TransferOrderError(
+                    '调拨行 %s 不属于该调拨单' % line_id,
+                    field_name='line_id', rule='TO_LINE_NOT_FOUND')
+            if item.get('qty_received') is None and item.get('qty') is not None:
+                net = _dec(item.get('qty'), 'qty') or 0
+            else:
+                received = _dec(item.get('qty_received'), 'qty_received') or 0
+                rejected = _dec(item.get('qty_rejected'), 'qty_rejected') or 0
+                net = received - rejected
+            if net == 0:
+                continue
+            if net < 0:
+                raise TransferOrderError(
+                    '收货净收量不能为负', field_name='qty_received',
+                    rule='TO_QTY_INVALID')
+            already = received_so_far.get(line_id)
+            if already is None:
+                already = _dec(line.get('qty_received'), 'qty_received') or 0
+            total = already + net
+            received_so_far[line_id] = total
+            shipped = _dec(line.get('qty_shipped'), 'qty_shipped') or 0
+            limit = shipped * (Decimal('1') + ratio)
+            if total > limit:
+                raise TransferOrderError(
+                    '调拨行 %s 累计收货量 %s 超过已发货量 %s（含容差 %s%%）'
+                    % (line_id, total, shipped, ratio * 100),
+                    field_name='qty_received', rule='TO_RECEIVE_EXCEEDED')
 
     def validate_cancel(self, transfer_order_id: Any) -> None:
         """取消：仅 draft / released，且总发货量 = 0（R-TO-6）。"""
@@ -570,8 +680,10 @@ class TransferOrderGuardService:
             return None
         rows = self._query(
             'SELECT id, transfer_order_no, document_type_id, transfer_date, '
-            'status, fulfillment_status, from_org_id, to_org_id, legal_entity_id, '
-            'from_location_id, to_location_id FROM %s WHERE id = ?' % HEADER_TABLE,
+            'status, approval_status, fulfillment_status, from_org_id, '
+            'to_org_id, legal_entity_id, from_location_id, to_location_id, '
+            'reversal_of_transfer_id '
+            'FROM %s WHERE id = ?' % HEADER_TABLE,
             [transfer_order_id])
         return rows[0] if rows else None
 

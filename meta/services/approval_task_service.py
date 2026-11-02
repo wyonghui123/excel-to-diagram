@@ -44,6 +44,13 @@ APPROVAL_TASK_SPECS = {
         'app_id': 'procurement',
         'id_key': 'purchase_order_id',
     },
+    'transfer_order': {
+        'table': 'transfer_orders',
+        'title_prefix': '调拨单审批',
+        'title_field': 'transfer_order_no',
+        'app_id': 'procurement',
+        'id_key': 'transfer_order_id',
+    },
 }
 
 #: 任务决策 → BO Action（成对配置，decision_effect 机器校验）
@@ -59,6 +66,10 @@ DECISION_ACTIONS = {
     PURCHASE_ORDER_OBJECT: {
         'approve': 'purchase_order.approve',
         'reject': 'purchase_order.reject',
+    },
+    'transfer_order': {
+        'approve': 'transfer_order.approve',
+        'reject': 'transfer_order.reject',
     },
 }
 

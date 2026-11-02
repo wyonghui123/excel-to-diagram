@@ -13,7 +13,8 @@
 #   ③ 状态机 4 态 draft / released / closed / cancelled；
 #      fulfillment_status 为只读派生缓存（open / partially_shipped / shipped /
 #      partially_received / received）。
-#   ④ 头不存金额、币种、税率、供应商、客户、发票、reversal_of_transfer_id。
+#   ④ 头不存金额、币种、税率、供应商、客户、发票。
+#      reversal_of_transfer_id 只记反向单回指的原单，由 create_reversal 写入。
 #   ⑤ legal_entity_id 为组织上溯解析的法人快照，只读写入；解析失败拒绝创建。
 #   ⑥ 发货事实（actual_ship_date / carrier_name / waybill_no）由 ship 动作写入，
 #      不创建 shipment 对象；在途量为派生值 sum(qty_shipped - qty_received)。
@@ -155,6 +156,42 @@ fields:
       filter_scope: local
     ui:
       widget: select
+
+  # 审批状态：与业务状态 status 正交；事实源 tasks(type=approval)
+  - id: approval_status
+    name: 审批状态
+    type: string
+    db_column: approval_status
+    required: true
+    default: not_required
+    max_length: 20
+    description: 审批状态（只读缓存，事实源 tasks(type=approval)）
+    enum_values:
+      - value: not_required
+        label: 免审批
+        color: info
+        category: active
+        is_initial: true
+      - value: pending
+        label: 审批中
+        color: warning
+        category: active
+      - value: approved
+        label: 审批通过
+        color: success
+        category: active
+      - value: rejected
+        label: 审批驳回
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 审批状态（正交于业务状态 status）
+      filterable: true
+      filter_type: enum
+      filter_label: 审批状态
+      filter_scope: local
+    ui:
+      readonly: true
 
   - id: fulfillment_status
     name: 履约状态
@@ -498,6 +535,25 @@ fields:
     ui:
       widget: textarea
 
+  # 反向调拨：由原单互换调出 / 调入组织与库位生成的反向草稿单
+  - id: reversal_of_transfer_id
+    name: 反向原单
+    type: integer
+    db_column: reversal_of_transfer_id
+    nullable: true
+    description: 反向调拨原单 ID（由 create_reversal 写入，只读）
+    semantics:
+      meaning: 反向调拨的原调拨单
+      display:
+        type: association
+        target_type: transfer_order
+        display_field: transfer_order_no
+      hint: 空表示普通调拨单；有值表示由原单反向生成
+    ui:
+      widget: select
+      relation: transfer_order
+      readonly: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -532,6 +588,8 @@ indexes:
     name: idx_transfer_order_project
   - fields: [status]
     name: idx_transfer_order_status
+  - fields: [reversal_of_transfer_id]
+    name: idx_transfer_order_reversal
 
 relations:
   - id: transfer_order_to_type_definition
@@ -590,6 +648,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 项目引用（可空）
+  - id: transfer_order_to_reversal_original
+    name: 反向原单
+    type: reference
+    target: transfer_order
+    source_field: reversal_of_transfer_id
+    target_field: id
+    cardinality: N:1
+    description: 反向调拨引用的原调拨单（可空）
 
 ui_view_config:
   # 菜单由 v190 迁移手工声明（procurement / transfer-order-management）
@@ -615,6 +681,10 @@ ui_view_config:
         width: 160
       - field: status
         width: 100
+        filterable: true
+        filter_type: select
+      - field: approval_status
+        width: 110
         filterable: true
         filter_type: select
       - field: fulfillment_status
@@ -648,7 +718,7 @@ ui_view_config:
         columns:
           - fields: [transfer_order_no, document_type_id]
           - fields: [transfer_date, status]
-          - fields: [fulfillment_status]
+          - fields: [approval_status, fulfillment_status]
       - title: 组织与库位
         columns:
           - fields: [from_org_id, to_org_id]

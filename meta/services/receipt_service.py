@@ -1177,6 +1177,14 @@ class ReceiptService:
         if _blank(header.get('org_id')):
             raise ReceiptError('无法推导收货方法人（org_id）',
                                field_name='org_id', rule='RC_ORG_REQUIRED')
+        # TBD-10：PO 法人快照非空时，收货组织必须与之一致；快照为空跳过校验
+        purchase_legal_entity_id = order.get('purchase_legal_entity_id')
+        if not _blank(purchase_legal_entity_id) \
+                and str(header['org_id']) != str(purchase_legal_entity_id):
+            raise ReceiptError(
+                '收货组织 %s 与采购订单法人 %s 不一致'
+                % (header['org_id'], purchase_legal_entity_id),
+                field_name='org_id', rule='RC_LEGAL_ENTITY_MISMATCH')
         return header
 
     # ------------------------------------------------------------------ 持久化
@@ -1252,7 +1260,8 @@ class ReceiptService:
         if _blank(order_id):
             return None
         rows = self.ds.query(
-            'SELECT id, order_no, org_id, purchase_org_id, supplier_party_id, '
+            'SELECT id, order_no, org_id, purchase_org_id, '
+            'purchase_legal_entity_id, supplier_party_id, '
             'project_id, deliver_to_location_id FROM %s WHERE id = ?' % ORDER_TABLE,
             [order_id])
         return rows[0] if rows else None

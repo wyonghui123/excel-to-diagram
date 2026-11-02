@@ -1,7 +1,7 @@
 # Tasks: Transfer Order（调拨单）对象模型
 
 > 配套规格：`docs/specs/spec-transfer-order-object-model-2026-11-02.md`
-> 状态：已实施（T1-T10 全部完成；v190 迁移 verify PASS，TO 测试 85 用例 + PO/Receipt 回归 102 用例全绿）
+> 状态：已实施（T1-T10 全部完成；v190 迁移 verify PASS，TO 测试 85 用例 + PO/Receipt 回归 102 用例全绿）；TBD 收口（v191/v193/v194/v195）已完成，新增 37 用例，6 文件 134 passed
 > 日期：2026-11-02（实施完成日）
 
 ---
@@ -450,3 +450,82 @@ feat(transfer-order): add transfer order object model and receipt bridge
 3. `from_location_id` / `to_location_id` 可空（默认组织级调拨）。
 
 确认后按 T1 → T9 顺序实施；T10 提交需另行确认。
+
+---
+
+## 12. TBD 关闭任务（v191 → v195，库存域除外）
+
+> 用户指令：`除了库存 其他继续完成`。TBD-1 / TBD-6 / TBD-7 保持冻结。
+
+### B1 `v191__transfer_order_tbd_b1.py` + 服务
+
+- 迁移：
+  - `transfer_orders` 增列 `reversal_of_transfer_id INTEGER`（可空）；
+  - 索引 `idx_transfer_order_reversal`；
+  - 行类型种子 `TRF_SERVICE`（service）/ `TRF_ASSET`（asset）/ `TRF_TEXT`（text），`delivery_relevant=0`；
+  - `line_type_assignments` 种子：`TRF_STD` + 通配物料组 → `TRF_GOODS`（rank 900，表不存在则 SKIP）；
+  - 控制参数 `transfer_over_ship_percent` / `transfer_over_receive_percent`（number，默认 0，domain=procurement，target_bo=transfer_order）；
+  - 重建 `document_types` / `line_types` 视图，追加 `scope_bo` 列（TBD-11）。
+- `meta/schemas/transfer_order.yaml`：新增 `reversal_of_transfer_id` 字段 + 关系 + 索引。
+- `meta/schemas/document_type.yaml` / `line_type.yaml`：`view_definition` 加 `scope_bo` + 字段声明。
+- `meta/services/transfer_order_guard_service.py`：
+  - `validate_create`：`reversal_of_transfer_id` 非空时校验原单存在、非 cancelled、from/to 与库位互换；
+  - `validate_release`：`delivery_relevant=0` 的行在 release 时自动关闭（由 service 执行）；
+  - 容差：`_ship_tolerance_ratio` / `_receive_tolerance_ratio` 读控制参数。
+- `meta/services/transfer_order_service.py`：
+  - `reversal_of_transfer_id` 进 `_HEADER_COLUMNS`；
+  - `create_reversal(original_id, transfer_date=None)`（事务外取号，事务内插头+行）；
+  - `release` 时关闭 `delivery_relevant=0` 行；
+  - `ship` / `apply_receipt` 允许行计划量 × (1 + 容差)；
+  - `_all_received` 排除 closed / cancelled 行；
+  - `allocate_transfer_order_no` 复用序列引擎。
+
+### B2 `v193__transfer_shipment.py` + 服务（v192 被并发会话 `v192__routing_p4b_2.py` 占用）
+
+- 新 schema：`meta/schemas/transfer_shipment.yaml` / `transfer_shipment_line.yaml`
+  （头：transfer_order_id / shipment_no / ship_date / carrier_name / waybill_no / status / remark；
+  行：transfer_shipment_id / transfer_order_line_id / qty / remark）。
+- 迁移：建表 + 索引 + `TRS` 编号序列 + `transfer_shipment` 5 动作权限 + 菜单（procurement 下 `/transfer-shipments`）。
+- `meta/services/transfer_shipment_service.py`：
+  - `create`（草稿，事务外取号；校验行属于 TO 且未超发）；
+  - `post`（调 `TransferOrderService.ship` 后置 posted，同一事务）；
+  - `cancel`（仅 draft）。
+- `meta/services/transfer_shipment_actions.py` + `bo_action_registrations.py` 注册 create/post/cancel。
+
+### B3 `create_from_allocation`（无迁移）
+
+- `meta/services/line_type_service.py`：`LineTypeResolver(scope_bo=...)`，默认 `sales_order` 向后兼容。
+- `meta/services/transfer_order_from_allocation.py`（仿 `requisition_po_conversion.py`）：
+  - 输入 `allocation_ids` + 头字段（from_org_id / to_org_id / transfer_date）；
+  - 读 `demand_allocations`（`target_bo='transfer_order'`、`status='active'`）与 `requisition_lines` 取 item/uom/qty；
+  - 事务外取号；事务内走 BO 框架建头 + 行，再回填分配 `target_id` / `target_line_id`；
+  - BO Action `transfer_order.create_from_allocation`。
+
+### B4 `v194__transfer_order_approval.py`
+
+- `transfer_order.yaml` 增 `approval_status`（not_required / pending / approved / rejected，默认 not_required，只读）。
+- 迁移：增列 + 4 个动作权限（submit / withdraw / approve / reject）。
+- `document_approval_service.APPROVAL_TABLES` 增 `transfer_order`。
+- `transfer_order_service.py`：`submit` / `withdraw`（draft，写 approval_status；命中策略时 `pending`）。
+- `transfer_order_guard_service.validate_release`：`approval_status` ∉ {not_required, approved} 拒绝。
+- `transfer_order_actions.py`：submit / withdraw / approve / reject；submit 后建审批任务，withdraw 取消待办。
+
+### B5 `v195__purchase_legal_entity.py`
+
+- `purchase_order.yaml` 增 `purchase_legal_entity_id`（整数，可空，只读快照）。
+- 迁移：`purchase_orders` 增列 + 回填（可解析时）；verify / rollback。
+- `purchase_order_guard_service`：创建 / 更新时按 `purchase_org_id` 上溯法人写入快照（解析失败留空，不阻断）。
+- `receipt_service._apply_header_defaults`（PO 来源）：若 PO 有快照，收货 `org_id` 必须与其法人一致，否则 `RC_LEGAL_ENTITY_MISMATCH`。
+
+### B6 验证
+
+```powershell
+python d:\filework\test.py --single meta/tests/test_transfer_order_schema.py
+python d:\filework\test.py --single meta/tests/test_transfer_order_service.py
+python d:\filework\test.py --single meta/tests/test_transfer_order_guard.py
+python d:\filework\test.py --single meta/tests/test_transfer_order_receipt_bridge.py
+python d:\filework\test.py --single meta/tests/test_transfer_order_tbd.py
+python d:\filework\test.py --failed
+```
+
+新增测试 `meta/tests/test_transfer_order_tbd.py` 覆盖：反向链接、非交付行、容差、shipment、分配转单、审批闸门、PO/收货法人一致性。

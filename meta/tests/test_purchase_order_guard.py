@@ -32,10 +32,13 @@ CREATE TABLE party_relations (
 CREATE TABLE org_functions (
     id INTEGER PRIMARY KEY, org_id INTEGER, function_type TEXT
 );
+CREATE TABLE orgs (
+    id INTEGER PRIMARY KEY, parent_id INTEGER, status TEXT
+);
 CREATE TABLE purchase_orders (
     id INTEGER PRIMARY KEY, order_no TEXT, status TEXT, document_type_id INTEGER,
-    org_id INTEGER, purchase_org_id INTEGER, supplier_party_id INTEGER,
-    currency_id INTEGER,
+    org_id INTEGER, purchase_org_id INTEGER, purchase_legal_entity_id INTEGER,
+    supplier_party_id INTEGER, currency_id INTEGER,
     exchange_rate REAL, exchange_rate_type TEXT, exchange_rate_date TEXT,
     approval_status TEXT, net_amount REAL, tax_amount REAL, gross_amount REAL
 );
@@ -68,7 +71,12 @@ INSERT INTO type_definitions VALUES
     (113, 'PO_SUBCONTRACT', '委外行', 'purchase_order', 'line', 'active', NULL, 'subcontract', 116, NULL),
     (114, 'SO_GOODS', '销售物料行', 'sales_order', 'line', 'active', NULL, 'material', NULL, NULL);
 INSERT INTO party_relations VALUES (1, 1, 10, 'vendor', 'active', '外部');
-INSERT INTO org_functions VALUES (1, 1, 'purchasing');
+INSERT INTO org_functions VALUES
+    (1, 1, 'purchasing'), (2, 1, 'legal_entity'),
+    (3, 2, 'legal_entity'), (4, 2, 'purchasing');
+INSERT INTO orgs VALUES
+    (1, NULL, 'active'), (2, NULL, 'active'),
+    (10, 1, 'active'), (20, 2, 'active');
 """
 
 
@@ -216,6 +224,38 @@ def test_delete_only_draft(conn, ds):
     _insert_order(conn, status='submitted')
     guard = PurchaseOrderGuardService(ds)
     _expect_rule(lambda: guard.validate_order_delete(1), 'PO_DELETE_ONLY_DRAFT')
+
+
+# ---------------- 采购法人快照（TBD-10） ----------------
+
+def test_create_derives_purchase_legal_entity(ds):
+    guard = PurchaseOrderGuardService(ds)
+    data = _order(purchase_org_id=10)
+    guard.validate_order_write(data, is_create=True)
+    assert data['purchase_legal_entity_id'] == 1
+
+
+def test_create_leaves_snapshot_empty_when_unresolved(ds):
+    guard = PurchaseOrderGuardService(ds)
+    data = _order(purchase_org_id=999)
+    guard.validate_order_write(data, is_create=True)
+    assert data['purchase_legal_entity_id'] is None
+
+
+def test_update_recomputes_snapshot_when_purchase_org_changes(ds):
+    guard = PurchaseOrderGuardService(ds)
+    old = _order(purchase_org_id=1, purchase_legal_entity_id=1)
+    data = dict(old, purchase_org_id=20)
+    guard.validate_order_write(data, old_data=old)
+    assert data['purchase_legal_entity_id'] == 2
+
+
+def test_update_keeps_snapshot_when_purchase_org_unchanged(ds):
+    guard = PurchaseOrderGuardService(ds)
+    old = _order(purchase_org_id=20, purchase_legal_entity_id=2)
+    data = dict(old, org_id=2)
+    guard.validate_order_write(data, old_data=old)
+    assert data['purchase_legal_entity_id'] == 2
 
 
 # ---------------- 行 ----------------

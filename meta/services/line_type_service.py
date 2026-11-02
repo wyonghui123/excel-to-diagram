@@ -9,8 +9,8 @@
   ④ 全不命中回落单据类型（type_definitions.level='header'）的 default_type_id；
   ⑤ 单据类型不存在或未配置默认行类型 → 返回 None，由调用方决定报错还是放行。
 
-当前使用方只有销售（scope_bo='sales_order'），故单据类型候选按该 scope 过滤；
-泛化到其他域时把 scope 提为参数即可。
+单据类型候选按实例的 `scope_bo` 过滤；构造参数默认 `sales_order`，
+其他域（如 `transfer_order`）显式传入即可，既有调用零改动。
 
 性能口径: 一次装载全部 active 确定规则 + 单据类型默认值，内存匹配；实例级缓存，
 配置写入后 invalidate()（类型字典 / 销售配置拦截器在 after_action 里调用）。
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 _RANK_FALLBACK = 100
-_SCOPE_BO = 'sales_order'
+_DEFAULT_SCOPE_BO = 'sales_order'
 
 
 class LineTypeError(ValueError):
@@ -43,15 +43,20 @@ class LineTypeResolver:
         "SELECT id, document_type_id, item_group_id, specificity_rank, "
         "line_type_id FROM line_type_assignments "
         "WHERE status = 'active'")
-    DOC_TYPE_SQL = (
-        "SELECT id, code, default_type_id FROM type_definitions "
-        "WHERE scope_bo = '%s' AND level = 'header' AND status = 'active'"
-        % _SCOPE_BO)
 
-    def __init__(self, data_source=None):
+    def __init__(self, data_source=None, scope_bo: str = _DEFAULT_SCOPE_BO):
         self._ds = data_source
+        self.scope_bo = scope_bo or _DEFAULT_SCOPE_BO
         self._by_doc_type: Optional[Dict[Any, List[Dict[str, Any]]]] = None
         self._defaults: Optional[Dict[Any, Any]] = None
+
+    @property
+    def doc_type_sql(self) -> str:
+        """单据类型候选按实例 `scope_bo` 过滤（默认销售域）。"""
+        return (
+            "SELECT id, code, default_type_id FROM type_definitions "
+            "WHERE scope_bo = '%s' AND level = 'header' AND status = 'active'"
+            % self.scope_bo)
 
     @property
     def ds(self):
@@ -159,7 +164,7 @@ class LineTypeResolver:
         return self.ds.query(self.ASSIGNMENT_SQL)
 
     def _fetch_doc_types(self) -> List[Dict[str, Any]]:
-        return self.ds.query(self.DOC_TYPE_SQL)
+        return self.ds.query(self.doc_type_sql)
 
     @staticmethod
     def _match(rows: List[Dict[str, Any]],

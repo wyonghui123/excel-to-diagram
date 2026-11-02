@@ -27,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 APPROVAL_ENABLED_PARAM = 'approval_enabled'
 
-#: 对象 → 表名（M3 只有 PO 接入；requisition / service_request 保持 M1 旧口径）
+#: 对象 → 表名（M3 PO / M4 调拨单接入；requisition / service_request 保持 M1 旧口径）
 APPROVAL_TABLES = {
     'purchase_order': 'purchase_orders',
+    'transfer_order': 'transfer_orders',
     'requisition': 'requisitions',
     'service_request': 'service_requests',
 }

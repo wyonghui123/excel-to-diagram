@@ -90,6 +90,9 @@ class PurchaseOrderGuardInterceptor(Interceptor):
                 guard.validate_order_write(
                     data, old_data=old_data,
                     is_create=context.action == 'crud_create')
+                # TBD-10：守卫派生的采购法人快照回填到写入口径
+                self._sync_params(
+                    context, data, old_data, ('purchase_legal_entity_id',))
                 return
 
             if object_id == SCHEDULE_OBJECT:

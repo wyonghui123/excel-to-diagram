@@ -460,6 +460,25 @@ fields:
       relation: org
       multiple: false
 
+  # TBD-10（v195）：采购法人只读快照 —— 由 purchase_org_id 沿组织层级上溯
+  # legal_entity 职能组织解析后写入；解析失败留空，不阻断保存。
+  # 收货单（purchase_order 来源）据此校验收货组织 org_id 一致性。
+  - id: purchase_legal_entity_id
+    name: 采购法人
+    type: integer
+    db_column: purchase_legal_entity_id
+    nullable: true
+    description: 采购法人快照（由 purchase_org_id 上溯，不直接维护）
+    semantics:
+      meaning: 采购法人快照
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "未解析"
+    ui:
+      readonly: true
+
   - id: division_code
     name: 产品分部
     type: string
@@ -1259,6 +1278,8 @@ ui_view_config:
         width: 200
       - field: purchase_org_id
         width: 160
+      - field: purchase_legal_entity_id
+        width: 160
       - field: org_id
         width: 160
       - field: currency_id
@@ -1310,7 +1331,8 @@ ui_view_config:
           - fields: [supplier_party_id, supplier_account_id]
           - fields: [supplier_reference_no, contact_party_id]
           - fields: [contact_name_text, contact_phone_text]
-          - fields: [purchase_org_id, org_id]
+          - fields: [purchase_org_id, purchase_legal_entity_id]
+          - fields: [org_id]
           - fields: [division_code, project_id]
       - title: 交付与条款
         columns:

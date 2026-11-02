@@ -27,7 +27,8 @@ _SCHEMA_DIR = Path(__file__).resolve().parents[1] / 'schemas'
 _SCHEMA = """
 CREATE TABLE purchase_orders (
     id INTEGER PRIMARY KEY, order_no TEXT, status TEXT, document_type_id INTEGER,
-    purchase_org_id INTEGER, supplier_party_id INTEGER, currency_id INTEGER,
+    purchase_org_id INTEGER, purchase_legal_entity_id INTEGER,
+    supplier_party_id INTEGER, currency_id INTEGER,
     exchange_rate REAL, exchange_rate_type TEXT, exchange_rate_date TEXT,
     approval_status TEXT
 );

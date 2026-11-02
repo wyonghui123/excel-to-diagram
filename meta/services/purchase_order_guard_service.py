@@ -195,6 +195,31 @@ class PurchaseOrderGuardService:
                 '创建采购订单必须选择单据类型',
                 field_name='document_type_id', rule='PO_DOCUMENT_TYPE_REQUIRED')
 
+        # TBD-10：采购法人只读快照（解析失败留空，不阻断保存）
+        self._write_legal_entity_snapshot(data, old, is_create)
+
+    def resolve_legal_entity(self, org_id: Any) -> Optional[Any]:
+        """按采购组织沿组织层级上溯 `legal_entity` 职能组织；失败返回 None。"""
+        if _is_blank(org_id):
+            return None
+        try:
+            from meta.services.transfer_order_guard_service import (
+                TransferOrderGuardService,
+            )
+            return TransferOrderGuardService(self.ds)._resolve_org_legal_entity(org_id)
+        except Exception as e:  # noqa: BLE001 - 解析失败留空，不阻断保存
+            logger.warning('[purchase_order_guard] 采购组织 %s 法人上溯失败: %s',
+                           org_id, e)
+            return None
+
+    def _write_legal_entity_snapshot(self, data: Dict[str, Any],
+                                     old: Dict[str, Any], is_create: bool) -> None:
+        """新建或采购组织变更时重算快照；其余场景保留原值。"""
+        if not is_create and not _changed(data, old, 'purchase_org_id'):
+            return
+        data['purchase_legal_entity_id'] = self.resolve_legal_entity(
+            data.get('purchase_org_id'))
+
     def validate_order_delete(self, order_id: Any) -> None:
         order = self._load_order(order_id)
         if not order:
@@ -756,8 +781,9 @@ class PurchaseOrderGuardService:
             return None
         rows = self._query(
             'SELECT id, order_no, status, document_type_id, purchase_org_id, '
-            '       supplier_party_id, currency_id, exchange_rate, '
-            '       exchange_rate_type, exchange_rate_date, approval_status '
+            '       purchase_legal_entity_id, supplier_party_id, currency_id, '
+            '       exchange_rate, exchange_rate_type, exchange_rate_date, '
+            '       approval_status '
             'FROM purchase_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
 

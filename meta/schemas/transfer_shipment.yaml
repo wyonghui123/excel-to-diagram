@@ -1,0 +1,334 @@
+# 调拨发货单 (Transfer Shipment) — TBD-3 独立发货单对象
+# 依据: docs/specs/tasks-transfer-order-object-model-2026-11-02.md §12 B2
+#
+# 定位: 调拨单（transfer_order）的独立发货事实单据头。
+#       行见 transfer_shipment_line；行挂载点是调拨行的 transfer_order_line_id。
+#
+# 口径:
+#   ① 业务键 shipment_no：创建时按单据类型 number_sequence_id 取号
+#      （TRS 序列，按 ship_date 年月分段的 6 位流水），生成后不可改。
+#   ② 状态机 draft → posted / cancelled；post 由
+#      TransferOrderService.ship 在同一事务内累加调拨行 qty_shipped，
+#      超发由 TO 发货守卫 / 容差拒绝后整体回滚。
+#   ③ cancel 仅对 draft 生效，不触碰调拨单数量。
+#   ④ 不存金额 / 币种 / 税率，不写库存事务。
+
+id: transfer_shipment
+name: 调拨发货单
+table_name: transfer_shipments
+description: 调拨发货单头（行见 transfer_shipment_line）
+display_name_field: shipment_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 调拨发货单
+  category: business_document
+  business_key: [shipment_no]
+  display_name_field: shipment_no
+  aliases:
+    - 调拨发货单
+    - 发货单
+    - Transfer Shipment
+
+deletion_policy:
+  # 事实单据：仅 draft 可删除（守卫强制度）；删除头时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - transfer_shipment_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 取号由平台按「单据类型 → number_sequence_id」完成（必须在开事务前）
+  - id: shipment_no
+    name: 发货单号
+    type: string
+    db_column: shipment_no
+    required: true
+    unique: true
+    max_length: 30
+    description: 发货单号（业务键，取号生成后不可修改）
+    semantics:
+      meaning: 发货单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: transfer_order_id
+    name: 调拨单
+    type: integer
+    db_column: transfer_order_id
+    required: true
+    description: 所属调拨单（仅已下达的调拨单可发货）
+    semantics:
+      meaning: 所属调拨单
+      display:
+        type: association
+        target_type: transfer_order
+        display_field: transfer_order_no
+      filterable: true
+      filter_type: relation
+      filter_label: 调拨单
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: transfer_order
+        value_field: id
+        display_field: transfer_order_no
+        code_field: transfer_order_no
+        apply_target_permissions: true
+        value_filter:
+          status: released
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{transfer_order_no}"
+        columns:
+          - field: transfer_order_no
+            label: 调拨单号
+            width: 180
+          - field: transfer_date
+            label: 调拨日期
+            width: 120
+          - field: status
+            label: 状态
+            width: 100
+    ui:
+      widget: value_help
+      relation: transfer_order
+      multiple: false
+
+  - id: ship_date
+    name: 发货日期
+    type: date
+    db_column: ship_date
+    required: true
+    description: 发货业务日期；取号日期段基准
+    semantics:
+      meaning: 发货业务日期
+      filterable: true
+      filter_type: date
+      filter_label: 发货日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: carrier_name
+    name: 承运商
+    type: string
+    db_column: carrier_name
+    nullable: true
+    max_length: 100
+    description: 承运商（可空）
+    semantics:
+      meaning: 承运商名称
+      searchable: true
+    ui:
+      widget: input
+
+  - id: waybill_no
+    name: 运单号
+    type: string
+    db_column: waybill_no
+    nullable: true
+    max_length: 50
+    description: 承运商运单号（可空）
+    semantics:
+      meaning: 承运商运单号
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 发货单状态（草稿 / 已过账 / 已取消）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: posted
+        label: 已过账
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 发货单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: remark
+    name: 备注
+    type: text
+    db_column: remark
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 发货单备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [shipment_no]
+    unique: true
+    name: uq_transfer_shipment_no
+  - fields: [transfer_order_id]
+    name: idx_transfer_shipment_order
+  - fields: [status]
+    name: idx_transfer_shipment_status
+  - fields: [ship_date]
+    name: idx_transfer_shipment_date
+
+relations:
+  - id: transfer_shipment_to_transfer_order
+    name: 调拨单
+    type: reference
+    target: transfer_order
+    source_field: transfer_order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属调拨单引用（真外键）
+
+ui_view_config:
+  # 菜单由 v193 迁移手工声明（procurement / transfer-shipment-management）
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: page
+    title: 调拨发货单
+    description: 调拨发货单（草稿 / 已过账 / 已取消）。过账后累加调拨行已发量。
+    columns:
+      - field: shipment_no
+        width: 180
+        sortable: true
+      - field: transfer_order_id
+        width: 180
+      - field: ship_date
+        width: 120
+        format: date
+        sortable: true
+      - field: carrier_name
+        width: 160
+      - field: waybill_no
+        width: 160
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - shipment_no
+      - waybill_no
+    actions:
+      - id: create
+        label: 新建发货单
+        icon: plus
+        type: primary
+        permission: transfer_shipment:transfer_shipment_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: ship_date
+      order: desc
+  form:
+    title: 调拨发货单信息
+    layout: vertical
+    sections:
+      - title: 单据信息
+        columns:
+          - fields: [shipment_no, status]
+          - fields: [transfer_order_id, ship_date]
+      - title: 运输信息
+        columns:
+          - fields: [carrier_name, waybill_no]
+      - title: 其他
+        columns:
+          - fields: [remark]
+  child_sections:
+    - child_object: transfer_shipment_line
+      title: 发货行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

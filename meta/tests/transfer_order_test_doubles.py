@@ -13,6 +13,7 @@ CREATE TABLE transfer_orders (
     document_type_id INTEGER,
     transfer_date TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft',
+    approval_status TEXT NOT NULL DEFAULT 'not_required',
     fulfillment_status TEXT,
     from_org_id INTEGER NOT NULL,
     to_org_id INTEGER NOT NULL,
@@ -23,6 +24,7 @@ CREATE TABLE transfer_orders (
     actual_ship_date TEXT,
     carrier_name TEXT,
     waybill_no TEXT,
+    reversal_of_transfer_id INTEGER,
     remark TEXT,
     created_at TEXT,
     updated_at TEXT
@@ -43,6 +45,35 @@ CREATE TABLE transfer_order_lines (
     created_at TEXT,
     updated_at TEXT,
     UNIQUE (transfer_order_id, line_no)
+);
+CREATE TABLE transfer_shipments (
+    created_by TEXT,
+    updated_by TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shipment_no TEXT NOT NULL UNIQUE,
+    transfer_order_id INTEGER NOT NULL,
+    ship_date TEXT NOT NULL,
+    carrier_name TEXT,
+    waybill_no TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    remark TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    CHECK (status IN ('draft', 'posted', 'cancelled'))
+);
+CREATE TABLE transfer_shipment_lines (
+    created_by TEXT,
+    updated_by TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_shipment_id INTEGER NOT NULL,
+    line_no INTEGER NOT NULL,
+    transfer_order_line_id INTEGER NOT NULL,
+    qty REAL NOT NULL DEFAULT 0,
+    remark TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE (transfer_shipment_id, line_no),
+    CHECK (qty > 0)
 );
 CREATE TABLE type_definitions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +122,7 @@ CREATE TABLE items (
     code TEXT,
     name TEXT,
     item_type TEXT,
+    item_group_id INTEGER,
     status TEXT DEFAULT 'active'
 );
 CREATE TABLE uoms (
@@ -169,16 +201,129 @@ CREATE TABLE control_parameter_values (
     value TEXT,
     status TEXT
 );
+CREATE TABLE approval_policies (
+    id INTEGER PRIMARY KEY,
+    code TEXT,
+    name TEXT,
+    scope_bo TEXT,
+    trigger_action TEXT,
+    status TEXT,
+    priority INTEGER,
+    effective_from TEXT,
+    effective_to TEXT
+);
+CREATE TABLE approval_policy_conditions (
+    id INTEGER PRIMARY KEY,
+    policy_id INTEGER,
+    group_no INTEGER,
+    field_id TEXT,
+    operator TEXT,
+    value_number REAL,
+    value_text TEXT,
+    value_json TEXT
+);
+CREATE TABLE approval_policy_steps (
+    id INTEGER PRIMARY KEY,
+    policy_id INTEGER,
+    step_no INTEGER,
+    approver_type TEXT,
+    approver_ref TEXT,
+    min_amount REAL,
+    max_amount REAL,
+    approve_mode TEXT,
+    sla_hours INTEGER
+);
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority TEXT,
+    app_id TEXT,
+    executor_type TEXT NOT NULL,
+    assign_policy TEXT,
+    executor_candidates TEXT,
+    executor_config TEXT,
+    inputs TEXT,
+    doc_ref TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    attempt INTEGER
+);
+CREATE TABLE line_type_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_type_id INTEGER NOT NULL,
+    item_group_id INTEGER,
+    specificity_rank INTEGER NOT NULL DEFAULT 100,
+    line_type_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    description TEXT,
+    created_at TEXT
+);
+CREATE TABLE demand_allocations (
+    created_by TEXT,
+    updated_by TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    demand_bo TEXT NOT NULL,
+    demand_id INTEGER NOT NULL,
+    demand_line_id INTEGER NOT NULL,
+    demand_line_no TEXT,
+    demand_need_date TEXT,
+    project_id INTEGER,
+    project_task_id INTEGER,
+    target_bo TEXT NOT NULL,
+    target_id INTEGER NOT NULL,
+    target_line_id INTEGER NOT NULL,
+    target_schedule_id INTEGER,
+    qty REAL NOT NULL,
+    uom_id INTEGER,
+    allocated_amount REAL,
+    cost_center_id INTEGER,
+    expense_account_code TEXT,
+    asset_category_code TEXT,
+    charge_basis TEXT NOT NULL DEFAULT 'inventory',
+    status TEXT NOT NULL DEFAULT 'active',
+    reversed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE TABLE requisition_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requisition_id INTEGER NOT NULL,
+    line_no TEXT NOT NULL,
+    line_type TEXT NOT NULL DEFAULT 'goods',
+    item_id INTEGER,
+    description TEXT,
+    qty REAL NOT NULL,
+    uom_id INTEGER,
+    need_date TEXT,
+    deliver_to_location_id INTEGER,
+    requested_source_org_id INTEGER,
+    resolved_source_org_id INTEGER,
+    cost_center_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 #: type_definitions 中固定 id（便于测试断言）
 TO_STANDARD_TYPE_ID = 100
 TO_GOODS_TYPE_ID = 110
+TO_SERVICE_TYPE_ID = 111
+TO_ASSET_TYPE_ID = 112
+TO_TEXT_TYPE_ID = 113
 PO_LINE_TYPE_ID = 10
 
 #: number_sequences 中固定 id
 TRF_SEQUENCE_ID = 5
 RCV_SEQUENCE_ID = 1
+TRS_SEQUENCE_ID = 6
+
+#: 调拨发货单头 / 行类型（v193 种子）
+TRS_STANDARD_TYPE_ID = 120
+TRS_GOODS_TYPE_ID = 130
 
 #: 收货单头类型
 RCV_STANDARD_TYPE_ID = 1
@@ -256,6 +401,11 @@ def add_types(conn):
         "date_field, start_value, on_exhaust, status) VALUES (?, 'TRF', '调拨单编号', "
         "'TRF-{DATE:yyyymm}-{SEQ:6}', NULL, 'transfer_date', 1, 'error', 'active')",
         [TRF_SEQUENCE_ID])
+    conn.execute(
+        'INSERT INTO number_sequences (id, code, name, pattern, scope_fields, '
+        "date_field, start_value, on_exhaust, status) VALUES (?, 'TRS', '调拨发货单编号', "
+        "'TRS-{DATE:yyyymm}-{SEQ:6}', NULL, 'ship_date', 1, 'error', 'active')",
+        [TRS_SEQUENCE_ID])
 
     conn.execute(
         'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
@@ -288,6 +438,78 @@ def add_types(conn):
         "VALUES (?, 'TRF_GOODS', '标准物料行', 'transfer_order', 'line', NULL, "
         "'material', 1, 'active')",
         [TO_GOODS_TYPE_ID])
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, line_category, delivery_relevant, status) '
+        "VALUES (?, 'TRF_SERVICE', '服务行', 'transfer_order', 'line', NULL, "
+        "'service', 0, 'active')",
+        [TO_SERVICE_TYPE_ID])
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, line_category, delivery_relevant, status) '
+        "VALUES (?, 'TRF_ASSET', '资产行', 'transfer_order', 'line', NULL, "
+        "'asset', 0, 'active')",
+        [TO_ASSET_TYPE_ID])
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, line_category, delivery_relevant, status) '
+        "VALUES (?, 'TRF_TEXT', '文本行', 'transfer_order', 'line', NULL, "
+        "'text', 0, 'active')",
+        [TO_TEXT_TYPE_ID])
+
+    # v193 调拨发货单类型（头绑定 TRS 序列 / 默认行类型）
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, number_sequence_id, default_type_id, status) '
+        "VALUES (?, 'TRS_STD', '标准调拨发货单', 'transfer_shipment', 'header', "
+        "'standard', ?, ?, 'active')",
+        [TRS_STANDARD_TYPE_ID, TRS_SEQUENCE_ID, TRS_GOODS_TYPE_ID])
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, line_category, delivery_relevant, status) '
+        "VALUES (?, 'TRS_GOODS', '标准发货行', 'transfer_shipment', 'line', NULL, "
+        "'material', 1, 'active')",
+        [TRS_GOODS_TYPE_ID])
+
+    conn.execute(
+        'INSERT INTO line_type_assignments (document_type_id, item_group_id, '
+        'specificity_rank, line_type_id, status) '
+        "VALUES (?, NULL, 900, ?, 'active')",
+        [TO_STANDARD_TYPE_ID, TO_GOODS_TYPE_ID])
+
+    conn.execute(
+        'INSERT INTO control_parameter_defs (id, code, default_value, status) '
+        "VALUES (1, 'transfer_over_ship_percent', '0', 'active')")
+    conn.execute(
+        'INSERT INTO control_parameter_defs (id, code, default_value, status) '
+        "VALUES (2, 'transfer_over_receive_percent', '0', 'active')")
+
+
+# ---------------------------------------------------------------------------
+# 审批配置（TBD-9）
+# ---------------------------------------------------------------------------
+def add_approval_policy(conn, policy_id=1, code='TRF_APPROVAL',
+                        name='调拨审批策略', scope_bo='transfer_order',
+                        trigger_action='submit', status='active', priority=0,
+                        effective_from=None, effective_to=None):
+    conn.execute(
+        'INSERT INTO approval_policies (id, code, name, scope_bo, '
+        'trigger_action, status, priority, effective_from, effective_to) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [policy_id, code, name, scope_bo, trigger_action, status, priority,
+         effective_from, effective_to])
+
+
+def add_approval_step(conn, policy_id=1, step_no=1, approver_type='role',
+                      approver_ref='procurement_manager', min_amount=None,
+                      max_amount=None, approve_mode='any', sla_hours=24,
+                      step_id=None):
+    conn.execute(
+        'INSERT INTO approval_policy_steps (id, policy_id, step_no, '
+        'approver_type, approver_ref, min_amount, max_amount, approve_mode, '
+        'sla_hours) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [step_id, policy_id, step_no, approver_type, approver_ref, min_amount,
+         max_amount, approve_mode, sla_hours])
 
 
 # ---------------------------------------------------------------------------
@@ -324,10 +546,13 @@ def add_org_tree(conn):
     add_org_function(conn, 11, 'inventory')
 
 
-def add_item(conn, item_id=900, item_type='goods', status='active'):
+def add_item(conn, item_id=900, item_type='goods', status='active',
+             item_group_id=None):
     conn.execute(
-        'INSERT INTO items (id, code, name, item_type, status) VALUES (?, ?, ?, ?, ?)',
-        [item_id, 'ITEM%s' % item_id, '物料%s' % item_id, item_type, status])
+        'INSERT INTO items (id, code, name, item_type, item_group_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [item_id, 'ITEM%s' % item_id, '物料%s' % item_id, item_type,
+         item_group_id, status])
 
 
 def add_uom(conn, uom_id=3, status='active'):
@@ -342,7 +567,7 @@ def add_location(conn, location_id=7, status='active'):
 
 
 def add_master_data(conn):
-    add_item(conn, 900, 'goods', 'active')
+    add_item(conn, 900, 'goods', 'active', item_group_id=7)
     add_item(conn, 901, 'service', 'active')
     add_item(conn, 902, 'goods', 'inactive')
     add_uom(conn, 3, 'active')
@@ -357,17 +582,19 @@ def add_master_data(conn):
 def add_transfer_order(conn, oid=1, order_no='TRF-202611-000001',
                        document_type_id=TO_STANDARD_TYPE_ID,
                        transfer_date='2026-11-01', status='draft',
+                       approval_status='not_required',
                        from_org_id=2, to_org_id=3, legal_entity_id=1,
                        from_location_id=None, to_location_id=7,
                        fulfillment_status=None, actual_ship_date=None):
     conn.execute(
         'INSERT INTO transfer_orders (id, transfer_order_no, document_type_id, '
-        'transfer_date, status, fulfillment_status, from_org_id, to_org_id, '
-        'legal_entity_id, from_location_id, to_location_id, actual_ship_date) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'transfer_date, status, approval_status, fulfillment_status, from_org_id, '
+        'to_org_id, legal_entity_id, from_location_id, to_location_id, '
+        'actual_ship_date) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [oid, order_no, document_type_id, transfer_date, status,
-         fulfillment_status, from_org_id, to_org_id, legal_entity_id,
-         from_location_id, to_location_id, actual_ship_date])
+         approval_status, fulfillment_status, from_org_id, to_org_id,
+         legal_entity_id, from_location_id, to_location_id, actual_ship_date])
 
 
 def add_transfer_line(conn, lid=100, oid=1, line_no=10,
@@ -408,6 +635,43 @@ def seeded_db(line_qtys=(100.0, 50.0), status='draft'):
                           line_no=10 * (index + 1), qty=float(qty))
     conn.commit()
     return conn
+
+
+# ---------------------------------------------------------------------------
+# 需求分配 / 需求行（TBD-4 转调拨）
+# ---------------------------------------------------------------------------
+def add_requisition_line(conn, lid=500, requisition_id=1, line_no='10',
+                         item_id=900, qty=100.0, uom_id=3,
+                         need_date='2026-11-10', cost_center_id=None,
+                         status='open'):
+    conn.execute(
+        'INSERT INTO requisition_lines (id, requisition_id, line_no, item_id, '
+        'qty, uom_id, need_date, cost_center_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [lid, requisition_id, line_no, item_id, float(qty), uom_id,
+         need_date, cost_center_id, status])
+
+
+def add_allocation(conn, aid=200, demand_line_id=500, qty=100.0,
+                   uom_id=3, target_bo='inventory', target_id=0,
+                   target_line_id=0, status='active', demand_bo='requisition',
+                   demand_id=1, demand_line_no='10', cost_center_id=None,
+                   project_id=None):
+    """需求分配种子；`target_bo='inventory'` + `target_id=0` = 尚未落载体。"""
+    conn.execute(
+        'INSERT INTO demand_allocations (id, demand_bo, demand_id, '
+        'demand_line_id, demand_line_no, target_bo, target_id, target_line_id, '
+        'qty, uom_id, cost_center_id, project_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [aid, demand_bo, demand_id, demand_line_id, demand_line_no, target_bo,
+         target_id, target_line_id, float(qty), uom_id, cost_center_id,
+         project_id, status])
+
+
+def from_allocation_service(conn, framework=None):
+    from meta.services.transfer_order_from_allocation import (
+        TransferOrderFromAllocationService)
+    return TransferOrderFromAllocationService(MemDS(conn), framework)
 
 
 # ---------------------------------------------------------------------------

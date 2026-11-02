@@ -2870,7 +2870,8 @@ def init_menu_permissions(db_path):
     #   收货单菜单曾因此在跑测试后被清空。下架须走 migration 置 is_active=0（见
     #   .trae/rules/scenarios/5-development/meta-menu-retirement.md），不能靠本步骤物理删除。
     MIGRATION_OWNED_MENUS = ('procurement', 'goods-receipt-management',
-                             'transfer-order-management')
+                             'transfer-order-management',
+                             'transfer-shipment-management')
 
     print("\n[步骤7.5] 清理 menu_permissions 表冗余条目...")
     valid_perm_codes = {m['menu_code'] for m in system_menus}

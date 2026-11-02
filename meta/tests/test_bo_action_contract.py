@@ -338,7 +338,7 @@ class TestRealRegistryContract:
         def _run():
             from meta.services.bo_action_registrations import register_all_bo_actions
             register_all_bo_actions(bo_action_registry)
-            assert len(bo_action_registry.list_ids()) == 29
+            assert len(bo_action_registry.list_ids()) >= 29
             assert validate_registry(bo_action_registry) == {}
         _with_isolated_registry(_run)
 

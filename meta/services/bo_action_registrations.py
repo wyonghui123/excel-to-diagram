@@ -118,12 +118,29 @@ def register_all_bo_actions(registry=None):
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
+    # + 审批提交 / 撤回 / 通过 / 驳回（TBD-9，approval_status 正交于 status）
     from meta.services.transfer_order_actions import (
         release_handler as transfer_order_release_handler,
         ship_handler as transfer_order_ship_handler,
         receive_handler as transfer_order_receive_handler,
         cancel_handler as transfer_order_cancel_handler,
         close_handler as transfer_order_close_handler,
+        submit_handler as transfer_order_submit_handler,
+        withdraw_handler as transfer_order_withdraw_handler,
+        approve_handler as transfer_order_approve_handler,
+        reject_handler as transfer_order_reject_handler,
+    )
+
+    # M4 调拨单: 需求分配转调拨单（TBD-4）
+    from meta.services.transfer_order_from_allocation import (
+        create_from_allocation_handler as transfer_order_from_allocation_handler,
+    )
+
+    # M4 调拨发货单: 建单 / 过账 / 取消（TBD-3 独立发货单）
+    from meta.services.transfer_shipment_actions import (
+        create_handler as transfer_shipment_create_handler,
+        post_handler as transfer_shipment_post_handler,
+        cancel_handler as transfer_shipment_cancel_handler,
     )
 
     # ==================== 1-5: 用户认证 (auth) ====================
@@ -912,6 +929,10 @@ def register_all_bo_actions(registry=None):
             'actual_ship_date': {'type': 'string'},
             'receipt_no': {'type': 'string'},
             'transfer_order_id': {'type': 'integer'},
+            'approval_status': {'type': 'string'},
+            'required': {'type': 'boolean'},
+            'policy_code': {'type': 'string'},
+            'task_id': {'type': 'string'},
         }
     }
     registry.register(
@@ -1021,6 +1042,220 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.submit',
+        transfer_order_submit_handler,
+        description='调拨单提交审批（草稿态；按策略落 pending 并建审批任务）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_submit',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.withdraw',
+        transfer_order_withdraw_handler,
+        description='调拨单撤回审批（pending → not_required，关闭在途审批任务）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_withdraw',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.approve',
+        transfer_order_approve_handler,
+        description='调拨单审批通过（pending → approved，任务归位 done）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_approve',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.reject',
+        transfer_order_reject_handler,
+        description='调拨单审批驳回（pending → rejected，任务归位 failed）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_reject',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 42: 调拨单需求转单（M4 / TBD-4） ====================
+    # 复用创建权限 `transfer_order:transfer_order_create`；不写库存台账 / 在途。
+    _transfer_order_from_allocation_output_schema = {
+        'type': 'object',
+        'properties': {
+            'success': {'type': 'boolean'},
+            'data': {
+                'type': 'object',
+                'properties': {
+                    'transfer_order_id': {'type': 'integer'},
+                    'transfer_order_no': {'type': 'string'},
+                    'lines': {'type': 'array', 'items': {'type': 'object'}},
+                    'allocations': {
+                        'type': 'array', 'items': {'type': 'integer'}},
+                },
+            },
+            'message': {'type': 'string'},
+            'code': {'type': 'string'},
+        }
+    }
+    registry.register(
+        'transfer_order.create_from_allocation',
+        transfer_order_from_allocation_handler,
+        description='需求分配转调拨单（active 分配 → 草稿 TO + 分配回写）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_create',
+        input_schema={
+            'type': 'object',
+            'required': ['allocation_ids', 'from_org_id', 'to_org_id',
+                         'transfer_date'],
+            'properties': {
+                'allocation_ids': {
+                    'type': 'array', 'items': {'type': 'integer'}},
+                'demand_allocation_ids': {
+                    'type': 'array', 'items': {'type': 'integer'}},
+                'from_org_id': {'type': 'integer'},
+                'to_org_id': {'type': 'integer'},
+                'transfer_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'project_id': {'type': 'integer'},
+                'remark': {'type': 'string'},
+                'from_location_id': {'type': 'integer'},
+                'to_location_id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_from_allocation_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+
+    # ==================== 43-45: 调拨发货单（M4 / TBD-3） ====================
+    # 权限码双段式 `transfer_shipment:transfer_shipment_{action}`（与 v193 权限种子一致）
+    _transfer_shipment_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'shipment_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'transfer_order_id': {'type': 'integer'},
+            'fulfillment_status': {'type': 'string'},
+            'line_count': {'type': 'integer'},
+        }
+    }
+    registry.register(
+        'transfer_shipment.create',
+        transfer_shipment_create_handler,
+        description='调拨发货单建单（released 调拨单下建草稿发货单，取号 + 行校验）',
+        object_type='transfer_shipment',
+        category='business',
+        permission_required='transfer_shipment:transfer_shipment_create',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id', 'ship_date', 'lines'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'ship_date': {'type': 'string'},
+                'carrier_name': {'type': 'string'},
+                'waybill_no': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'transfer_order_line_id': {'type': 'integer'},
+                            'qty': {'type': 'number'},
+                            'remark': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        },
+        output_schema=_transfer_shipment_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'transfer_shipment.post',
+        transfer_shipment_post_handler,
+        description='调拨发货单过账（调 TO ship 累加调拨行 qty_shipped，失败保持草稿）',
+        object_type='transfer_shipment',
+        category='business',
+        permission_required='transfer_shipment:transfer_shipment_post',
+        input_schema={
+            'type': 'object',
+            'required': ['shipment_id'],
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'transfer_shipment_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_shipment_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'transfer_shipment.cancel',
+        transfer_shipment_cancel_handler,
+        description='调拨发货单取消（draft → cancelled，不触碰调拨单数量）',
+        object_type='transfer_shipment',
+        category='business',
+        permission_required='transfer_shipment:transfer_shipment_cancel',
+        input_schema={
+            'type': 'object',
+            'required': ['shipment_id'],
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'transfer_shipment_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_shipment_output_schema,
         requires_auth=True,
         idempotent=True,
     )

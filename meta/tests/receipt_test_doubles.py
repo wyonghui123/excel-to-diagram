@@ -12,6 +12,7 @@ CREATE TABLE purchase_orders (
     order_no TEXT,
     org_id INTEGER,
     purchase_org_id INTEGER,
+    purchase_legal_entity_id INTEGER,
     supplier_party_id INTEGER,
     project_id INTEGER,
     deliver_to_location_id INTEGER,
@@ -238,13 +239,14 @@ def add_types(conn, delivered_seq=1, return_seq=1):
 
 def add_order(conn, oid=1, order_no='PO-0001', org_id=1, purchase_org_id=1,
               supplier_party_id=500, project_id=None, deliver_to_location_id=7,
-              status='confirmed'):
+              status='confirmed', purchase_legal_entity_id=None):
     conn.execute(
         'INSERT INTO purchase_orders (id, order_no, org_id, purchase_org_id, '
-        'supplier_party_id, project_id, deliver_to_location_id, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [oid, order_no, org_id, purchase_org_id, supplier_party_id, project_id,
-         deliver_to_location_id, status])
+        'purchase_legal_entity_id, supplier_party_id, project_id, '
+        'deliver_to_location_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [oid, order_no, org_id, purchase_org_id, purchase_legal_entity_id,
+         supplier_party_id, project_id, deliver_to_location_id, status])
 
 
 def add_order_line(conn, lid=100, oid=1, item_id=900, uom_id=3, qty=100.0,

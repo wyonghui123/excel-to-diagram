@@ -42,18 +42,28 @@ FULFILL_SHIPPED = 'shipped'
 FULFILL_PARTIALLY_RECEIVED = 'partially_received'
 FULFILL_RECEIVED = 'received'
 
+#: 审批状态（与业务状态 status 正交；事实源 tasks(type=approval)）
+APPROVAL_NOT_REQUIRED = 'not_required'
+APPROVAL_PENDING = 'pending'
+APPROVAL_APPROVED = 'approved'
+APPROVAL_REJECTED = 'rejected'
+
 #: 终态：禁止 ship / receive / update（R-TO-13）
 TERMINAL_STATUSES = (STATUS_CLOSED, STATUS_CANCELLED)
 
 #: 无时间戳时要落库的最小列集
 _HEADER_COLUMNS = (
     'id, transfer_order_no, document_type_id, transfer_date, status, '
-    'fulfillment_status, from_org_id, to_org_id, legal_entity_id, '
-    'from_location_id, to_location_id, project_id, actual_ship_date, '
-    'carrier_name, waybill_no')
+    'approval_status, fulfillment_status, from_org_id, to_org_id, '
+    'legal_entity_id, from_location_id, to_location_id, project_id, '
+    'actual_ship_date, carrier_name, waybill_no, reversal_of_transfer_id')
 _LINE_COLUMNS = (
     'id, transfer_order_id, line_no, line_type_id, item_id, uom_id, qty, '
     'qty_shipped, qty_received, status, fulfillment_status')
+
+#: 超发 / 超收容差控制参数（百分数）
+TOLERANCE_SHIP_PARAM = 'transfer_over_ship_percent'
+TOLERANCE_RECEIVE_PARAM = 'transfer_over_receive_percent'
 
 
 class TransferOrderError(ValueError):
@@ -101,6 +111,37 @@ def _rowcount(cursor: Any) -> int:
     return int(getattr(cursor, 'rowcount', 0) or 0)
 
 
+def resolve_tolerance_ratio(ds: Any, code: str,
+                            header: Optional[Dict[str, Any]]) -> Decimal:
+    """读取调拨超发 / 超收容差（百分数）→ 小数倍数（10 → 0.1）。
+
+    参数缺失、读取失败或值非法时按 0 处理（等价「不允许超发 / 超收」）。
+    """
+    if ds is None or not header:
+        return Decimal('0')
+    dims = {
+        'org_id': header.get('from_org_id'),
+        'document_type_id': header.get('document_type_id'),
+    }
+    try:
+        from meta.services.control_parameter_service import (
+            ControlParameterResolver)
+        value = ControlParameterResolver(ds).resolve(code, dims)
+    except Exception as error:  # noqa: BLE001 - 参数表缺失不阻断单据
+        logger.warning('[transfer_order] 读取容差参数 %s 失败，按 0 处理: %s',
+                       code, error)
+        return Decimal('0')
+    if _blank(value):
+        return Decimal('0')
+    try:
+        percent = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal('0')
+    if percent <= 0:
+        return Decimal('0')
+    return percent / Decimal('100')
+
+
 class TransferOrderService:
     """调拨单生命周期动作与履约派生。"""
 
@@ -145,11 +186,250 @@ class TransferOrderService:
             self.ds.execute(
                 'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
                 % HEADER_TABLE, [STATUS_RELEASED, now, header['id']])
+            self._close_non_delivery_lines(header['id'], now)
             self.recompute_fulfillment(header['id'])
             logger.info('[transfer_order] released id=%s lines=%s',
                         header['id'], len(lines))
             return {'id': header['id'], 'status': STATUS_RELEASED,
                     'idempotent': False, 'line_count': len(lines)}
+
+    # ------------------------------------------------------------------
+    # 审批（与业务状态 status 正交；TO 无 submitted 状态）
+    # ------------------------------------------------------------------
+    def submit(self, transfer_order_id: Any) -> Dict[str, Any]:
+        """草稿态提交审批：命中策略 → pending + 建任务；否则 approved。"""
+        with self.ds.transaction():
+            header = self._require_header(transfer_order_id)
+            status = _status(header.get('status'))
+            if status in TERMINAL_STATUSES:
+                raise TransferOrderError(
+                    '调拨单已处于终态 %s，禁止提交审批' % status,
+                    field_name='status', rule='TO_TERMINAL_IMMUTABLE')
+            if status != STATUS_DRAFT:
+                raise TransferOrderError(
+                    '仅草稿态调拨单可提交审批', field_name='status',
+                    rule='TO_STATE_INVALID')
+
+            approval = (_status(header.get('approval_status'))
+                        or APPROVAL_NOT_REQUIRED)
+            if approval == APPROVAL_PENDING:
+                raise TransferOrderError(
+                    '调拨单已在审批中，禁止重复提交',
+                    field_name='approval_status', rule='TO_APPROVAL_PENDING')
+            if approval == APPROVAL_APPROVED:
+                raise TransferOrderError(
+                    '调拨单审批已通过，禁止重复提交',
+                    field_name='approval_status',
+                    rule='TO_APPROVAL_ALREADY_APPROVED')
+
+            from meta.services.document_approval_service import (
+                DocumentApprovalResolver)
+            try:
+                decision = DocumentApprovalResolver(self.ds).resolve(
+                    'transfer_order', header['id'])
+            except Exception as error:  # noqa: BLE001 - 策略表缺失 / 条件求值异常
+                raise TransferOrderError(
+                    '审批策略解析失败: %s' % error,
+                    field_name='approval_status',
+                    rule='TO_APPROVAL_RESOLVE_FAILED')
+
+            required = bool(decision.get('required'))
+            target = APPROVAL_PENDING if required else APPROVAL_APPROVED
+            now = _now()
+            self.ds.execute(
+                'UPDATE %s SET approval_status = ?, updated_at = ? WHERE id = ?'
+                % HEADER_TABLE, [target, now, header['id']])
+
+            task_id = None
+            if required:
+                task_id = self._create_approval_task(
+                    header['id'], decision.get('snapshot'))
+            logger.info('[transfer_order] submitted approval id=%s target=%s task=%s',
+                        header['id'], target, task_id)
+            return {
+                'id': header['id'],
+                'status': header.get('status'),
+                'approval_status': target,
+                'required': required,
+                'policy_code': decision.get('policy_code'),
+                'task_id': task_id,
+            }
+
+    def withdraw(self, transfer_order_id: Any) -> Dict[str, Any]:
+        """审批中 → 免审批（撤回审批），并尽量关闭在途审批任务。"""
+        with self.ds.transaction():
+            header = self._require_header(transfer_order_id)
+            status = _status(header.get('status'))
+            if status in TERMINAL_STATUSES:
+                raise TransferOrderError(
+                    '调拨单已处于终态 %s，禁止撤回审批' % status,
+                    field_name='status', rule='TO_TERMINAL_IMMUTABLE')
+            approval = (_status(header.get('approval_status'))
+                        or APPROVAL_NOT_REQUIRED)
+            if approval != APPROVAL_PENDING:
+                raise TransferOrderError(
+                    '调拨单当前审批状态 %s，无法撤回' % approval,
+                    field_name='approval_status',
+                    rule='TO_APPROVAL_NOT_PENDING')
+
+            now = _now()
+            self.ds.execute(
+                'UPDATE %s SET approval_status = ?, updated_at = ? WHERE id = ?'
+                % HEADER_TABLE, [APPROVAL_NOT_REQUIRED, now, header['id']])
+            self._close_approval_tasks(header['id'], 'cancelled')
+            logger.info('[transfer_order] withdrawn approval id=%s', header['id'])
+            return {'id': header['id'], 'status': header.get('status'),
+                    'approval_status': APPROVAL_NOT_REQUIRED}
+
+    def _create_approval_task(self, transfer_order_id: Any,
+                              snapshot: Optional[Dict[str, Any]]) -> Optional[str]:
+        """建审批待办；失败只告警，不回滚已落的 approval_status（同 PO 口径）。"""
+        try:
+            from meta.services.approval_task_service import ApprovalTaskService
+            return ApprovalTaskService(self.ds).create_task(
+                'transfer_order', transfer_order_id,
+                policy_snapshot=snapshot, actor='')
+        except Exception as error:  # noqa: BLE001 - 任务表缺失不阻断提交
+            logger.warning('[transfer_order] 建审批任务失败（跳过）: %s', error)
+            return None
+
+    def _close_approval_tasks(self, transfer_order_id: Any,
+                              target_status: str) -> None:
+        """把该单在途审批任务归位到 target_status（done / failed / cancelled）。"""
+        try:
+            self.ds.execute(
+                'UPDATE tasks SET status = ? WHERE type = ? AND doc_ref = ? '
+                'AND status NOT IN (?, ?, ?, ?, ?)',
+                [target_status, 'approval', str(transfer_order_id),
+                 'done', 'failed', 'cancelled', 'skipped', 'dead'])
+        except Exception as error:  # noqa: BLE001 - 任务表缺失 / 旧库不阻断
+            logger.warning('[transfer_order] 归位审批任务失败（跳过）: %s', error)
+
+    # ------------------------------------------------------------------
+    # 反向调拨
+    # ------------------------------------------------------------------
+    def allocate_transfer_order_no(self, document_type_id: Any,
+                                   transfer_date: Any) -> str:
+        """按单据类型指向的序列取号（必须在开事务前调用，允许跳号）。"""
+        if _blank(document_type_id) or _blank(transfer_date):
+            raise TransferOrderError(
+                '调拨单类型或日期缺失，无法取号',
+                field_name='transfer_order_no', rule='TO_NUMBER_REQUIRED')
+        rows = self.ds.query(
+            'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
+            [document_type_id])
+        sequence_id = rows[0].get('number_sequence_id') if rows else None
+        if _blank(sequence_id):
+            raise TransferOrderError(
+                '调拨单类型未绑定编号序列', field_name='transfer_order_no',
+                rule='TO_NUMBER_REQUIRED')
+        configs = self.ds.query(
+            'SELECT code, pattern, scope_fields, date_field, start_value, '
+            'on_exhaust FROM number_sequences WHERE id = ?', [sequence_id])
+        if not configs:
+            raise TransferOrderError(
+                '编号序列 %s 不存在' % sequence_id,
+                field_name='transfer_order_no', rule='TO_NUMBER_REQUIRED')
+        from meta.core.number_sequence_engine import (
+            NumberSequenceEngine, NumberSequenceError)
+        try:
+            return NumberSequenceEngine(self.ds).allocate(
+                dict(configs[0]), {}, {'transfer_date': transfer_date})
+        except NumberSequenceError as error:
+            raise TransferOrderError(
+                str(error), field_name='transfer_order_no',
+                rule='TO_NUMBER_REQUIRED')
+
+    def create_reversal(self, original_id: Any, transfer_date: Any = None,
+                        user_context: Any = None) -> Dict[str, Any]:
+        """由原单生成反向草稿调拨单（调出 / 调入组织与库位互换）。
+
+        原单保持不动；反向单只做草稿，行号重排为 10 / 20 / 30，
+        `qty_shipped` / `qty_received` 归零。非交付行照抄，release 时关闭。
+        取消态原单或已存在反向单的原单拒绝。
+        """
+        original = self._require_header(original_id)
+        self._assert_reversible(original)
+        date = str(transfer_date or original.get('transfer_date') or '').strip()
+        if _blank(date):
+            raise TransferOrderError(
+                '调拨日期必填', field_name='transfer_date',
+                rule='TO_DATE_REQUIRED')
+
+        # 取号必须在事务外完成（号段独立提交，回滚不吞号）
+        number = self.allocate_transfer_order_no(
+            original.get('document_type_id'), date)
+
+        with self.ds.transaction():
+            original = self._require_header(original_id)
+            self._assert_reversible(original)
+            now = _now()
+            cursor = self.ds.execute(
+                'INSERT INTO %s (transfer_order_no, document_type_id, '
+                'transfer_date, status, from_org_id, to_org_id, legal_entity_id, '
+                'from_location_id, to_location_id, project_id, '
+                'reversal_of_transfer_id, created_at, updated_at) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % HEADER_TABLE,
+                [number, original.get('document_type_id'), date, STATUS_DRAFT,
+                 original.get('to_org_id'), original.get('from_org_id'),
+                 original.get('legal_entity_id'), original.get('to_location_id'),
+                 original.get('from_location_id'), original.get('project_id'),
+                 original.get('id'), now, now])
+            new_id = int(getattr(cursor, 'lastrowid', 0) or 0)
+            lines = self._load_lines(original['id'])
+            for index, line in enumerate(lines, start=1):
+                self.ds.execute(
+                    'INSERT INTO %s (transfer_order_id, line_no, line_type_id, '
+                    'item_id, uom_id, qty, qty_shipped, qty_received, status, '
+                    'created_at, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)' % LINE_TABLE,
+                    [new_id, index * 10, line.get('line_type_id'),
+                     line.get('item_id'), line.get('uom_id'),
+                     float(_num(line.get('qty'))), LINE_STATUS_OPEN, now, now])
+
+        logger.info('[transfer_order] reversal created id=%s original=%s lines=%s',
+                    new_id, original['id'], len(lines))
+        return {'id': new_id, 'transfer_order_no': number,
+                'status': STATUS_DRAFT,
+                'reversal_of_transfer_id': original['id'],
+                'line_count': len(lines)}
+
+    def _assert_reversible(self, original: Dict[str, Any]) -> None:
+        if _status(original.get('status')) == STATUS_CANCELLED:
+            raise TransferOrderError(
+                '原调拨单已取消，不能生成反向调拨',
+                field_name='reversal_of_transfer_id',
+                rule='TO_REVERSAL_ORIGINAL_CANCELLED')
+        existing = self._find_reversal(original['id'])
+        if existing:
+            raise TransferOrderError(
+                '原调拨单 ID=%s 已存在反向单 ID=%s'
+                % (original['id'], existing.get('id')),
+                field_name='reversal_of_transfer_id',
+                rule='TO_REVERSAL_EXISTS')
+
+    def _find_reversal(self, transfer_order_id: Any) -> Optional[Dict[str, Any]]:
+        try:
+            rows = self.ds.query(
+                'SELECT id FROM %s WHERE reversal_of_transfer_id = ? LIMIT 1'
+                % HEADER_TABLE, [transfer_order_id])
+        except Exception as error:  # noqa: BLE001 - 旧库列缺失不阻断
+            logger.warning('[transfer_order] 查询反向单失败: %s', error)
+            return None
+        return rows[0] if rows else None
+
+    def _close_non_delivery_lines(self, transfer_order_id: Any,
+                                  now: str) -> None:
+        """release 时关闭 `delivery_relevant=0` 的行（服务行 / 资产行 / 文本行）。"""
+        try:
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? '
+                'WHERE transfer_order_id = ? AND status = ? AND line_type_id IN '
+                '(SELECT id FROM type_definitions '
+                'WHERE COALESCE(delivery_relevant, 1) = 0)' % LINE_TABLE,
+                [LINE_STATUS_CLOSED, now, transfer_order_id, LINE_STATUS_OPEN])
+        except Exception as error:  # noqa: BLE001 - 旧库无类型表不阻断
+            logger.warning('[transfer_order] 关闭非交付行失败（跳过）: %s', error)
 
     # ------------------------------------------------------------------
     # 发货
@@ -176,6 +456,8 @@ class TransferOrderService:
                     rule='TO_STATE_INVALID')
 
             now = _now()
+            ratio = resolve_tolerance_ratio(
+                self.ds, TOLERANCE_SHIP_PARAM, header)
             for line_id, qty in items.items():
                 line = self._load_line(line_id)
                 if line is None or line.get('transfer_order_id') != header['id']:
@@ -186,14 +468,16 @@ class TransferOrderService:
                     raise TransferOrderError(
                         '调拨行 %s 已关闭 / 已取消，禁止发货' % line_id,
                         field_name='line_id', rule='TO_LINE_NOT_OPEN')
-                # R-TO-7 唯一判定点：条件 UPDATE 原子累加，rowcount=0 即超发
+                # R-TO-7 唯一判定点：条件 UPDATE 原子累加，rowcount=0 即超发；
+                # 上限 = 计划量 × (1 + 超发容差)
+                limit = _num(line.get('qty')) * (Decimal('1') + ratio)
                 cursor = self.ds.execute(
                     'UPDATE %s SET qty_shipped = COALESCE(qty_shipped, 0) + ?, '
                     'updated_at = ? WHERE id = ? AND transfer_order_id = ? '
-                    'AND status = ? AND COALESCE(qty_shipped, 0) + ? <= qty'
+                    'AND status = ? AND COALESCE(qty_shipped, 0) + ? <= ?'
                     % LINE_TABLE,
                     [float(qty), now, line_id, header['id'],
-                     LINE_STATUS_OPEN, float(qty)])
+                     LINE_STATUS_OPEN, float(qty), float(limit)])
                 if not _rowcount(cursor):
                     raise TransferOrderError(
                         '调拨行 %s 发货量超过计划量（本次 %s，已发 %s）'
@@ -352,6 +636,8 @@ class TransferOrderService:
                     '收货回写没有任何行', field_name='lines', rule='TO_NO_LINES')
 
             now = _now()
+            ratio = resolve_tolerance_ratio(
+                self.ds, TOLERANCE_RECEIVE_PARAM, header)
             for line_id, net in items.items():
                 line = self._load_line(line_id)
                 if line is None or line.get('transfer_order_id') != header['id']:
@@ -369,13 +655,16 @@ class TransferOrderService:
                             '调拨行 %s 红冲量超过已收量' % line_id,
                             field_name='qty_received', rule='TO_RECEIVE_REVERSE_EXCEEDED')
                 else:
-                    # 条件 UPDATE 原子累加：不得超过已发货量（R-TO-9）
+                    # 条件 UPDATE 原子累加：不得超过已发货量 × (1 + 超收容差)
+                    limit = _num(line.get('qty_shipped')) * (
+                        Decimal('1') + ratio)
                     cursor = self.ds.execute(
                         'UPDATE %s SET qty_received = COALESCE(qty_received, 0) + ?, '
                         'updated_at = ? WHERE id = ? AND transfer_order_id = ? '
-                        'AND COALESCE(qty_received, 0) + ? <= COALESCE(qty_shipped, 0)'
+                        'AND COALESCE(qty_received, 0) + ? <= ?'
                         % LINE_TABLE,
-                        [float(net), now, line_id, header['id'], float(net)])
+                        [float(net), now, line_id, header['id'],
+                         float(net), float(limit)])
                     if not _rowcount(cursor):
                         raise TransferOrderError(
                             '调拨行 %s 收货量超过已发货量' % line_id,
@@ -461,8 +750,18 @@ class TransferOrderService:
 
     @staticmethod
     def _all_received(lines: List[Dict[str, Any]]) -> bool:
-        active = [x for x in lines if _status(x.get('status'))
-                  != LINE_STATUS_CANCELLED]
+        # 取消行不参与；release 时关闭的非交付行（未收货）也不参与，
+        # 但「收满后自动关闭」的行仍算已收（否则重算会把 received 打回
+        # partially_received）。
+        active = []
+        for line in lines:
+            status = _status(line.get('status'))
+            if status == LINE_STATUS_CANCELLED:
+                continue
+            if (status == LINE_STATUS_CLOSED
+                    and _num(line.get('qty_received')) < _num(line.get('qty'))):
+                continue
+            active.append(line)
         if not active:
             return False
         return all(_num(x.get('qty_received')) >= _num(x.get('qty'))
