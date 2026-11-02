@@ -2,20 +2,20 @@
 # 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
 #       §9.3 数据模型表 / 关联结构
 #
-# 定位: 工单工序（work_order_operation）× 资源（resource）× 计划时间窗，
-#   一行 = 一个资源承诺在某时间窗内做某工序的一部分/全部数量。
+# 定位: 作业步骤（work_order_operation）× 资源（resource）× 计划时间窗，
+#   一行 = 一个资源承诺在某时间窗内做某步骤的一部分/全部数量。
 #   作业定义侧只声明"要求"（operation_resource_requirement），
 #   本表才是"实际分配"，是排程结果与成本归集的落点。
 #
 # 口径:
 #   ① (work_order_operation_id, resource_id, planned_start) 唯一。
-#   ② 计划量 ≤ 工序量，同一资源时间窗不重叠（服务层校验，显式超产标记例外）。
+#   ② 计划量 ≤ 步骤量，同一资源时间窗不重叠（服务层校验，显式超产标记例外）。
 #   ③ 本表为叶子表，不被其他对象引用，restrict_on 为空。
 
 id: resource_assignment
 name: 资源分配
 table_name: resource_assignments
-description: 工单工序的资源分配（资源 + 计划时间窗 + 计划量 + 状态 + 来源）
+description: 作业步骤的资源分配（资源 + 计划时间窗 + 计划量 + 状态 + 来源）
 display_name_field: resource_id
 aspects: [audit_aspect]
 
@@ -63,13 +63,13 @@ fields:
       primary_key: true
 
   - id: work_order_operation_id
-    name: 工单工序
+    name: 作业步骤
     type: integer
     db_column: work_order_operation_id
     required: true
-    description: 被分配的工单工序
+    description: 被分配的作业步骤
     semantics:
-      meaning: 工单工序引用
+      meaning: 作业步骤引用
       display:
         type: association
         target_type: work_order_operation
@@ -91,10 +91,10 @@ fields:
         display_format: "{id}"
         columns:
           - field: id
-            label: 工序ID
+            label: 步骤ID
             width: 120
           - field: operation_name
-            label: 工序名称
+            label: 步骤名称
             width: 200
     ui:
       widget: select
@@ -109,7 +109,7 @@ fields:
     type: integer
     db_column: resource_id
     required: true
-    description: 承担该工序的资源
+    description: 承担该步骤的资源
     semantics:
       meaning: 资源引用
       display:
@@ -179,7 +179,7 @@ fields:
     type: number
     db_column: planned_qty
     nullable: true
-    description: 本次分配承担的数量；空表示承担整道工序
+    description: 本次分配承担的数量；空表示承担整个步骤
     semantics:
       meaning: 计划分配数量
     ui:
@@ -299,13 +299,13 @@ indexes:
 
 relations:
   - id: resource_assignment_to_operation
-    name: 工单工序
+    name: 作业步骤
     type: reference
     target: work_order_operation
     source_field: work_order_operation_id
     target_field: id
     cardinality: N:1
-    description: 工单工序引用（真外键）
+    description: 作业步骤引用（真外键）
   - id: resource_assignment_to_resource
     name: 资源
     type: reference

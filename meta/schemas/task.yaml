@@ -1,0 +1,252 @@
+# 统一任务实例（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_schema.py::_build_task_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象 —— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+# `status` 只能经任务引擎状态机迁移；通用更新路径按 requires_state_machine 拦截。
+id: task
+name: 任务
+table_name: tasks
+description: 统一任务实例（11 态唯一状态列；executor 为维度；对业务对象仅弱引用）
+skip_auto_menu: true
+skip_generic_api: true
+requires_state_machine: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: 任务 ID（uuid4 hex，主键）
+  - id: code
+    name: 人读编号
+    type: string
+    db_column: code
+    description: 人读编号 T-1234（§7.3 pattern ^T-[0-9]+$）
+  - id: title
+    name: 标题
+    type: string
+    db_column: title
+    required: true
+    description: 任务标题
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 任务描述
+  - id: type
+    name: 业务分类
+    type: string
+    db_column: type
+    required: true
+    default: story
+    description: 业务分类 story/automation/approval/review/notification（UI 用，不参与调度）
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: pending
+    description: 11 态 pending/ready/claimed/in_progress/blocked/waiting_approval/done/failed/cancelled/skipped/dead（唯一状态列）
+  - id: priority
+    name: 优先级
+    type: string
+    db_column: priority
+    default: P2
+    description: 优先级 P0/P1/P2/P3
+  - id: app_id
+    name: 应用
+    type: string
+    db_column: app_id
+    description: 所属应用（行级可见性过滤键；空 = 平台级任务）
+  - id: executor_type
+    name: 执行方式
+    type: string
+    db_column: executor_type
+    required: true
+    description: 执行方式 human/agent/cron/system/webhook
+  - id: executor_assignee
+    name: 指派人
+    type: string
+    db_column: executor_assignee
+    description: 指派人 user_id/agent_id；cron/webhook 为空
+  - id: executor_candidates
+    name: 抢单候选池
+    type: json
+    db_column: executor_candidates
+    description: 抢单候选池（用户或用户组数组）
+  - id: assign_policy
+    name: 分配策略
+    type: string
+    db_column: assign_policy
+    default: direct
+    description: direct/claim/round_robin/skill_based/ai_routed
+  - id: executor_config
+    name: 执行配置
+    type: json
+    db_column: executor_config
+    description: 按 executor_type 解释（§9 各 executor 规范）
+  - id: executor_fallback
+    name: 失败升级配置
+    type: json
+    db_column: executor_fallback
+    description: 失败/超时后升级到的另一个 executor_spec
+  - id: claim_timeout_seconds
+    name: 认领回收阈值
+    type: integer
+    db_column: claim_timeout_seconds
+    default: 300
+    description: 认领后未 start 的回收阈值
+  - id: timeout_seconds
+    name: 执行超时
+    type: integer
+    db_column: timeout_seconds
+    description: 执行超时
+  - id: retry_policy
+    name: 重试策略
+    type: json
+    db_column: retry_policy
+    description: max_attempts/initial_backoff_ms/backoff_multiplier/max_backoff_ms/non_retryable
+  - id: due_at
+    name: 截止时间
+    type: datetime
+    db_column: due_at
+    description: 截止时间
+  - id: sla
+    name: SLA
+    type: json
+    db_column: sla
+    description: SLA 配置快照 warn_at_pct/on_breach；运行态归 F2 独立对象
+  - id: parent_task_id
+    name: 父任务 ID
+    type: string
+    db_column: parent_task_id
+    description: 父任务 ID（手动拆解 / Agent Plan-and-Execute），弱引用无 FK
+  - id: workflow_run_id
+    name: 运行实例 ID
+    type: string
+    db_column: workflow_run_id
+    description: 所属 Run ID（弱引用无 FK）
+  - id: workflow_node_id
+    name: 工作流节点 ID
+    type: string
+    db_column: workflow_node_id
+    description: Run 内节点标识
+  - id: deps
+    name: 依赖
+    type: json
+    db_column: deps
+    description: 依赖数组 [{task_id, when}]，when=done/skipped/done_or_skipped；默认 AND
+  - id: inputs
+    name: 入参
+    type: json
+    db_column: inputs
+    description: 入参实例值
+  - id: inputs_schema
+    name: 入参 Schema
+    type: json
+    db_column: inputs_schema
+    description: 入参 JSON Schema（强校验）
+  - id: outputs
+    name: 出参
+    type: json
+    db_column: outputs
+    description: 出参（完成后回写）
+  - id: outputs_schema
+    name: 出参 Schema
+    type: json
+    db_column: outputs_schema
+    description: 出参 JSON Schema
+  - id: acceptance
+    name: 验收
+    type: json
+    db_column: acceptance
+    description: 验收：{kind:checklist,items} 或 {kind:eval,evaluator,threshold}
+  - id: attempt
+    name: 尝试序号
+    type: integer
+    db_column: attempt
+    default: 1
+    description: 尝试序号（幂等键组成，从 1 起）
+  - id: trace_id
+    name: Trace ID
+    type: string
+    db_column: trace_id
+    description: OTel trace id（创建即注入）
+  - id: agent_session_id
+    name: Agent 会话 ID
+    type: string
+    db_column: agent_session_id
+    description: Agent 会话 ID（checkpoint 续跑；非 agent executor 为空）
+  - id: doc_ref
+    name: 单据引用
+    type: string
+    db_column: doc_ref
+    description: 单据级弱引用（businessKey 等价物，跨环节关联键）；无 FK
+  - id: line_refs
+    name: 行级引用
+    type: json
+    db_column: line_refs
+    description: 行级弱引用数组（可选，Phase 3 启用）；不建 FK、不建行级生命周期表
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    description: 创建者 user_id/agent_id/system
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+  - id: started_at
+    name: 开始时间
+    type: datetime
+    db_column: started_at
+    description: 开始时间
+  - id: finished_at
+    name: 结束时间
+    type: datetime
+    db_column: finished_at
+    description: 结束时间
+  - id: fail_reason
+    name: 失败原因
+    type: string
+    db_column: fail_reason
+    description: 失败/终止原因 error/timeout/max_iterations/budget_exhausted/guardrail/tool_failure/handoff_to_human/review_rejected
+  - id: meta
+    name: 扩展元数据
+    type: json
+    db_column: meta
+    description: 业务自定义 KV，引擎不解释
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+
+indexes:
+  - name: uq_tasks_code
+    fields: [code]
+    unique: true
+    description: 人读编号唯一
+  - name: idx_tasks_status
+    fields: [status, priority]
+    description: 收件箱：按状态 + 优先级取待办
+  - name: idx_tasks_inbox
+    fields: [app_id, status]
+    description: A8 行级可见性过滤 + 跨应用收件箱（Q1 配套）
+  - name: idx_tasks_assignee
+    fields: [executor_type, executor_assignee, status]
+    description: 我的待办（含 agent 身份）
+  - name: idx_tasks_run
+    fields: [workflow_run_id]
+    description: Run 进度聚合（Run 状态派生走此索引）
+  - name: idx_tasks_parent
+    fields: [parent_task_id]
+    description: 子任务树
+  - name: idx_tasks_doc
+    fields: [doc_ref]
+    description: 按单据追任务（跨环节关联）
+
+ui_view_config:
+  skip_auto_menu: true

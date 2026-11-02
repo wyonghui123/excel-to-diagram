@@ -451,6 +451,8 @@ class ApplicationBuilder:
         from meta.api.sales_order_expand_api import sales_order_expand_bp
         from meta.api.sales_order_pricing_api import sales_order_pricing_bp
         from meta.api.project_overview_api import project_overview_bp
+        from meta.api.labor_api import labor_bp
+        from meta.api.work_order_api import work_order_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -519,6 +521,13 @@ class ApplicationBuilder:
         app.register_blueprint(sales_order_pricing_bp)
         # [项目 P1 2026-11-01] 项目 360 只读聚合端点。
         app.register_blueprint(project_overview_bp)
+        # [项目 G14 2026-11-01] 工时回聚只读聚合端点（正式前缀 /api/v1/labor，
+        #   同时保留 spec 中的 /api/labor 无版本别名）。
+        app.register_blueprint(labor_bp)
+        app.register_blueprint(labor_bp, url_prefix='/api/labor',
+                               name='labor_compat')
+        # [项目 G13 2026-11-02] 工单开始作业（New → In Progress + 执行 tasks 桥接）。
+        app.register_blueprint(work_order_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

@@ -1,0 +1,170 @@
+# 任务模板节点（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_schema.py::_build_task_template_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象 —— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+id: task_template
+name: 任务模板节点
+table_name: task_templates
+description: Workflow 静态节点定义（定义层无状态；Run 启动时按版本克隆为 Task）
+skip_auto_menu: true
+skip_generic_api: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: 模板节点 ID（如 wf-invoice-processing@3.n1，主键）
+  - id: workflow_id
+    name: 工作流 ID
+    type: string
+    db_column: workflow_id
+    required: true
+    description: 所属 Workflow 定义 ID（弱引用无 FK）
+  - id: workflow_version
+    name: 工作流版本
+    type: integer
+    db_column: workflow_version
+    required: true
+    description: 所属 Workflow 版本（定义层版本化）
+  - id: node_id
+    name: 节点标识
+    type: string
+    db_column: node_id
+    required: true
+    description: Run 内节点标识（n1/n2…）
+  - id: step_number
+    name: 主干节点编号
+    type: integer
+    db_column: step_number
+    description: 主干节点编号（Oracle STEP_NUMBER 对位）
+  - id: parent_step_number
+    name: 单亲节点编号
+    type: integer
+    db_column: parent_step_number
+    description: 单亲节点编号（分支块挂载点；0/空 = 主干）
+  - id: group_name
+    name: 分组名
+    type: string
+    db_column: group_name
+    description: 分支块/分组名（§7.4 nodes[].group）
+  - id: title
+    name: 默认标题
+    type: string
+    db_column: title
+    required: true
+    description: 默认任务标题
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 节点描述
+  - id: type
+    name: 业务分类
+    type: string
+    db_column: type
+    required: true
+    default: story
+    description: 默认业务分类
+  - id: priority
+    name: 优先级
+    type: string
+    db_column: priority
+    default: P2
+    description: 默认优先级
+  - id: executor_type
+    name: 执行方式
+    type: string
+    db_column: executor_type
+    required: true
+    description: 默认执行方式
+  - id: executor_assignee
+    name: 默认指派人
+    type: string
+    db_column: executor_assignee
+    description: 默认指派人
+  - id: executor_candidates
+    name: 默认候选池
+    type: json
+    db_column: executor_candidates
+    description: 默认候选池
+  - id: assign_policy
+    name: 分配策略
+    type: string
+    db_column: assign_policy
+    default: direct
+    description: 默认分配策略
+  - id: executor_config
+    name: 执行配置
+    type: json
+    db_column: executor_config
+    description: 执行配置（§9）
+  - id: executor_fallback
+    name: 默认 fallback
+    type: json
+    db_column: executor_fallback
+    description: 默认 fallback executor_spec
+  - id: claim_timeout_seconds
+    name: 认领回收阈值
+    type: integer
+    db_column: claim_timeout_seconds
+    default: 300
+    description: 默认认领回收阈值
+  - id: timeout_seconds
+    name: 执行超时
+    type: integer
+    db_column: timeout_seconds
+    description: 默认执行超时
+  - id: retry_policy
+    name: 重试策略
+    type: json
+    db_column: retry_policy
+    description: 默认重试策略
+  - id: inputs_schema
+    name: 入参 Schema
+    type: json
+    db_column: inputs_schema
+    description: 入参 JSON Schema
+  - id: outputs_schema
+    name: 出参 Schema
+    type: json
+    db_column: outputs_schema
+    description: 出参 JSON Schema
+  - id: acceptance
+    name: 验收配置
+    type: json
+    db_column: acceptance
+    description: 默认验收配置
+  - id: sla
+    name: SLA
+    type: json
+    db_column: sla
+    description: 节点级 SLA 配置
+  - id: meta
+    name: 扩展元数据
+    type: json
+    db_column: meta
+    description: 业务自定义 KV
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+
+indexes:
+  - name: uq_task_template_node
+    fields: [workflow_id, workflow_version, node_id]
+    unique: true
+    description: 同版本内节点唯一
+  - name: idx_task_template_wf
+    fields: [workflow_id, workflow_version]
+    description: 按定义版本取全部节点
+
+ui_view_config:
+  skip_auto_menu: true

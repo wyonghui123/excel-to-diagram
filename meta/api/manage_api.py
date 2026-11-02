@@ -22,6 +22,25 @@ logger = logging.getLogger(__name__)
 
 manage_bp = Blueprint('manage', __name__, url_prefix='/api/v1')
 
+
+@manage_bp.before_request
+def _reject_skip_generic_api_objects():
+    """[G7 2026-11-02] 平台机制对象（skip_generic_api=True）不开放通用 CRUD。
+
+    路径形如 /api/v1/<object_type>/...；仅对已注册且声明了该开关的对象返回 404。
+    """
+    parts = (request.path or '').split('/')
+    if len(parts) >= 4 and parts[1] == 'api' and parts[2] == 'v1':
+        obj = registry.get(parts[3])
+        if obj is not None and getattr(obj, 'skip_generic_api', False):
+            return error_response(
+                f'对象 {parts[3]} 未开放通用 CRUD API',
+                error_code='GENERIC_API_DISABLED',
+                status=404,
+            )
+    return None
+
+
 _data_source = None
 _manage_service = None
 _query_service = None
@@ -852,7 +871,11 @@ def update_record(object_type, id):
     result = _get_manage_service().update(req)
     if result.success:
         return ok(result.data, message=result.message)
-    return json_response({'success': False, 'data': result.data, 'message': result.message}, 400)
+    payload = {'success': False, 'data': result.data, 'message': result.message}
+    # [G7 2026-11-02] 状态机等业务拒绝携带 error_code（如 STATE_MACHINE_VIOLATION）
+    if result.error:
+        payload['error_code'] = result.error
+    return json_response(payload, result.status_code or 400)
 
 
 @manage_bp.route('/<object_type>/<id>', methods=['DELETE'])

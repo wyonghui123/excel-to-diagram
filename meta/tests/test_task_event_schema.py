@@ -21,8 +21,8 @@ from meta.core.task_event_schema import (
     TASK_EVENT_TABLE,
     WORKLOG_ENTRY_TYPES,
     WORKLOG_TABLE,
-    build_task_event_meta_objects,
     ensure_task_event_tables,
+    get_task_event_meta_objects,
     record_task_event,
     record_transition,
     task_event_tables_exist,
@@ -56,7 +56,7 @@ class TestMetaObjects:
 
     def test_two_objects_with_expected_table_names(self):
         """TC-TEV-001: 恰两张表 task_events / task_worklogs"""
-        objs = build_task_event_meta_objects()
+        objs = get_task_event_meta_objects()
         assert [o.table_name for o in objs] == [TASK_EVENT_TABLE, WORKLOG_TABLE]
 
     def test_event_type_value_set(self):
@@ -69,7 +69,7 @@ class TestMetaObjects:
 
     def test_task_event_has_oced_object_refs(self):
         """TC-TEV-003: TASK_EVENT 携带 OCED 对象关联列（§16.4）"""
-        obj = build_task_event_meta_objects()[0]
+        obj = get_task_event_meta_objects()[0]
         cols = {f.db_column for f in obj.fields}
         for required in ("task_id", "workflow_run_id", "doc_ref", "line_refs",
                          "agent_session_id", "trace_id", "actor", "event_type",
@@ -78,7 +78,7 @@ class TestMetaObjects:
 
     def test_worklog_has_audit_fields(self):
         """TC-TEV-004: WORKLOG 含 event_id 配对与输入输出哈希"""
-        obj = build_task_event_meta_objects()[1]
+        obj = get_task_event_meta_objects()[1]
         cols = {f.db_column for f in obj.fields}
         for required in ("task_id", "event_id", "entry_type", "summary",
                          "inputs_hash", "outputs_hash", "progress_pct", "occurred_at"):
@@ -86,7 +86,7 @@ class TestMetaObjects:
 
     def test_indexes_declared(self):
         """TC-TEV-005: 两表索引已声明"""
-        ev, wl = build_task_event_meta_objects()
+        ev, wl = get_task_event_meta_objects()
         assert {i.name for i in ev.indexes} == {
             "idx_task_events_task", "idx_task_events_run", "idx_task_events_type",
             "idx_task_events_doc", "idx_task_events_trace"}

@@ -183,6 +183,25 @@ class BOFramework:
             if action in (CRUD_UPDATE, CRUD_DELETE):
                 self._load_old_data(context)
 
+            # [G7 2026-11-02] 通用更新路径 status 迁移守卫
+            # 对象声明 requires_state_machine 时，改 status 必须走平台状态机。
+            if (action == CRUD_UPDATE and isinstance(params, dict) and 'status' in params
+                    and meta_object.requires_state_machine()):
+                from meta.core.task_state_machine import (
+                    TaskTransitionError,
+                    check_meta_object_status_update,
+                )
+                try:
+                    check_meta_object_status_update(
+                        meta_object, context.old_data, params)
+                except TaskTransitionError as e:
+                    return ActionResult(
+                        success=False,
+                        message=str(e),
+                        error='STATE_MACHINE_VIOLATION',
+                        status_code=400,
+                    )
+
             # [Constraint 双轨消除 2026-06-07]
             # 约束校验统一由 ConstraintValidationInterceptor(P42) 在拦截器链中执行，
             # 不再在 bo_framework.execute() 中重复调用 _constraint_engine。

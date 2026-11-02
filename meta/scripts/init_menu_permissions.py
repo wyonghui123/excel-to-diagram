@@ -1992,6 +1992,38 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [PROJECT-G14 2026-11-01] 工时记录 —— 项目侧 G14（v182 交付）,
+            #   与 v182__time_entry_labor_view 的菜单声明保持一致; 缺本声明时步骤 7.6
+            #   会把该手工菜单当冗余删除 (工时录入入口随之消失)。
+            'menu_code': 'time-entry',
+            'menu_name': '工时记录',
+            'menu_path': '/time-entries',
+            'icon': 'Clock',
+            'color': '#14b8a6',
+            'sort_order': 4,
+            'parent_menu': 'sales',
+            'page_type': 'object_list',
+            'primary_object_type': 'time_entry',
+            'object_types': json.dumps(['time_entry']),
+            'bo_bindings': json.dumps([
+                {'bo_id': 'time_entry', 'role': 'primary',
+                 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+            ]),
+            'required_permissions': json.dumps([
+                'project:time_entry_create',
+                'project:time_entry_read',
+                'project:time_entry_update',
+                'project:time_entry_delete',
+                'project:time_entry_list',
+            ]),
+            'description': '工时记录：资源 × 日期 × 分钟，挂项目任务 / 工单工序',
+            'show_in_sidebar': 1,
+            'data_permission_hint': json.dumps({
+                'resource_types': ['project'],
+                'message': '工时记录沿用项目的业务实体（org）数据权限口径'
+            })
+        },
+        {
             # [ITEM-STRUCTURE 2026-10-25] 物料结构（BOM / 选配模型）—— v112 交付,
             #   与 v112__item_structure_menu 的声明保持一致; 缺本声明时步骤 7.6 会
             #   把该手工菜单当冗余删除 (BOM 页入口随之消失)。

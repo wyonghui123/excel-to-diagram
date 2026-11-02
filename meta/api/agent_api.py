@@ -42,7 +42,8 @@ def get_tools():
     
     for obj_id in registry.list_objects():
         obj = registry.get(obj_id)
-        if not obj or not obj.persistent:
+        # [G7 2026-11-02] 平台机制对象不生成 agent 工具
+        if not obj or not obj.persistent or getattr(obj, 'skip_generic_api', False):
             continue
         
         for action in obj.actions:
@@ -250,7 +251,7 @@ def get_full_schema():
     for obj_id in registry.list_objects():
         try:
             obj = registry.get(obj_id)
-            if not obj:
+            if not obj or getattr(obj, 'skip_generic_api', False):
                 continue
             
             obj_schema = {

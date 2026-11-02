@@ -39,7 +39,7 @@ deletion_policy:
       message: 该技能仍被资源能力引用，请先处理能力记录后再删除
     - table: work_order_operations
       foreign_key: required_skill_id
-      message: 该技能仍被工单工序引用，请先调整工序后再删除
+      message: 该技能仍被作业步骤引用，请先调整步骤后再删除
   cascade_delete: []
 
 audit:

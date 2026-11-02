@@ -33,7 +33,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
-import { apiV2 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 
 const props = defineProps({
@@ -123,10 +123,16 @@ const executeTransition = async (transition) => {
   console.debug('[StateTransitionButtons] executeTransition:', transition)
   
   try {
-    const data = await apiV2.put(
-      `/bo/${props.objectType}/${props.objectId}`,
-      { [transition.stateField]: transition.toState }
-    )
+    // [G13 2026-11-02] 工单「开始」走执行入口：开工 + project_task 来源同步生成 tasks
+    //   其它状态迁移仍走通用 BO 更新。
+    const isWorkOrderStart =
+      props.objectType === 'work_order' && transition.id === 'start_work_order'
+    const data = isWorkOrderStart
+      ? await apiV1.post(`/work-orders/${props.objectId}/start`)
+      : await apiV2.put(
+          `/bo/${props.objectType}/${props.objectId}`,
+          { [transition.stateField]: transition.toState }
+        )
 
     if (data.success) {
       // [FIX 2026-06-09] 用 useCrudMessage 替代 ElMessage

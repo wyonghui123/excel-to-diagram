@@ -1,0 +1,117 @@
+# 任务事件账（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_event_schema.py::_build_task_event_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象（append-only）—— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+id: task_event
+name: 任务事件
+table_name: task_events
+description: 任务生命周期事件账（append-only，不可删；≈ OCED 底座；兼 hold/release）
+skip_auto_menu: true
+skip_generic_api: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: 事件 ID（uuid4 hex，主键）
+  - id: task_id
+    name: 任务 ID
+    type: string
+    db_column: task_id
+    required: true
+    description: 所属任务 ID（弱引用无 FK）
+  - id: workflow_run_id
+    name: 运行实例 ID
+    type: string
+    db_column: workflow_run_id
+    description: 所属 Run（弱引用无 FK；OCED 关联）
+  - id: event_type
+    name: 事件类型
+    type: string
+    db_column: event_type
+    required: true
+    default: status_changed
+    description: created / status_changed / hold / release / legacy_execution
+  - id: from_status
+    name: 迁移前状态
+    type: string
+    db_column: from_status
+    description: 迁移前状态（created / hold / release 事件为空）
+  - id: to_status
+    name: 迁移后状态
+    type: string
+    db_column: to_status
+    description: 迁移后状态（created 事件 = pending；hold / release 为空）
+  - id: actor
+    name: 操作者
+    type: string
+    db_column: actor
+    description: who：操作者 user_id / agent_id / system
+  - id: actor_kind
+    name: 操作者类型
+    type: string
+    db_column: actor_kind
+    description: human / agent / system（executor 维度）
+  - id: reason
+    name: 原因
+    type: string
+    db_column: reason
+    description: what：触发原因 / 守卫说明 / 审核意见摘要
+  - id: payload
+    name: 细节
+    type: json
+    db_column: payload
+    description: what 细节（如 outputs hash、hold 原因编码、edge 判定结果）
+  - id: doc_ref
+    name: 单据引用
+    type: string
+    db_column: doc_ref
+    description: 业务对象弱引用（OCED 对象关联键）；无 FK
+  - id: line_refs
+    name: 行级引用
+    type: json
+    db_column: line_refs
+    description: 行级弱引用数组（行级 hold 场景；无 FK）
+  - id: agent_session_id
+    name: Agent 会话 ID
+    type: string
+    db_column: agent_session_id
+    description: Agent 会话 ID（非 agent 来源为空）
+  - id: trace_id
+    name: Trace ID
+    type: string
+    db_column: trace_id
+    description: OTel trace id
+  - id: occurred_at
+    name: 业务发生时间
+    type: datetime
+    db_column: occurred_at
+    required: true
+    description: when：业务发生时间（append-only 时间轴）
+  - id: created_at
+    name: 落账时间
+    type: datetime
+    db_column: created_at
+    description: 落账时间
+
+indexes:
+  - name: idx_task_events_task
+    fields: [task_id, occurred_at]
+    description: 按任务取事件轴（状态回放 / 派生视图）
+  - name: idx_task_events_run
+    fields: [workflow_run_id]
+    description: 按 Run 聚合（Run 进度 / OCED 导出）
+  - name: idx_task_events_type
+    fields: [event_type, occurred_at]
+    description: 按类型扫描（hold 派生视图：hold/release 配对）
+  - name: idx_task_events_doc
+    fields: [doc_ref]
+    description: 按单据追过程（OCED event-observes-objects）
+  - name: idx_task_events_trace
+    fields: [trace_id]
+    description: trace 关联
+
+ui_view_config:
+  skip_auto_menu: true
