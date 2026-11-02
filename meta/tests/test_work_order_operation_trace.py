@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""G12：工单工序补作业定义溯源
+"""G12：作业步骤补作业定义溯源
 
 依据:
   docs/specs/spec-project-type-object-model-research-2026-10-31.md §3 G12 / D4
@@ -7,10 +7,10 @@
 
 【本文件守什么】
   P1-1 work_order_operation 声明可空 work_definition_id / work_definition_operation_id
-       （字段 + 索引，不声明真外键；空值 = 手填工序）
+       （字段 + 索引，不声明真外键；空值 = 手填步骤）
   P1-2 表单 / 详情可见工艺溯源
   P1-3 v184 迁移对存量库补列 + 补索引，幂等；回滚只删索引、保留列
-  P1-4 工序**不新增** project_task_id（§8.2 红线 2 不被 G12 破坏）
+  P1-4 作业步骤**不新增** project_task_id（§8.2 红线 2 不被 G12 破坏）
 """
 import logging
 import os

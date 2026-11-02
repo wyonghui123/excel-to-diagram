@@ -4,7 +4,7 @@
 #   docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md FR-001 / FR-004 / FR-008
 #
 # 定位: 唯一的「实际工时」载体。一行 = 某资源在某日（或时间窗）为
-#   项目任务 / 工单工序投入的分钟数，可选挂资源分配与单据归属。
+#   项目任务 / 作业步骤投入的分钟数，可选挂资源分配与单据归属。
 #   ① 不写 `tasks` / `task_worklogs`（G7 未落地，且 worklogs 是 append-only 审计账）；
 #   ② `resource_assignment` 只有计划量，实际工时只落本表（D13）；
 #   ③ 回聚用派生视图 `v_project_task_labor` / `v_project_labor` /
@@ -14,15 +14,15 @@
 # 约束口径（服务层 labor_service.py 实现）:
 #   R-TE-1 project_task_id 与 work_order_operation_id 至少一个
 #   R-TE-2 两者都在时任务与工单 project_id 必须一致（工单为空以任务为准）
-#   R-TE-3 传工序时由工序反查 work_order_id 并回填；显式值不得冲突
-#   R-TE-4 传资源分配时须与工序、资源一致
+#   R-TE-3 传步骤时由步骤反查 work_order_id 并回填；显式值不得冲突
+#   R-TE-4 传资源分配时须与步骤、资源一致
 #   R-TE-5 minutes 1–1440 整数；work_date 不得晚于今天
 #   R-TE-6 资源必须 is_active=1
 
 id: time_entry
 name: 工时记录
 table_name: time_entries
-description: 实际工时记录（资源 × 日期 × 分钟 + 任务/工单工序锚点）
+description: 实际工时记录（资源 × 日期 × 分钟 + 任务/作业步骤锚点）
 display_name_field: id
 aspects: [audit_aspect]
 skip_auto_menu: true
@@ -157,7 +157,7 @@ fields:
     type: integer
     db_column: project_task_id
     nullable: true
-    description: 归属的项目任务（与工单工序至少填一个）
+    description: 归属的项目任务（与作业步骤至少填一个）
     semantics:
       meaning: 项目任务引用
       display:
@@ -198,7 +198,7 @@ fields:
     type: integer
     db_column: work_order_id
     nullable: true
-    description: 归属工单（传工序时由工序反查回填）
+    description: 归属工单（传步骤时由步骤反查回填）
     semantics:
       meaning: 工单引用
       display:
@@ -232,13 +232,13 @@ fields:
       clearable: true
 
   - id: work_order_operation_id
-    name: 工单工序
+    name: 作业步骤
     type: integer
     db_column: work_order_operation_id
     nullable: true
-    description: 归属的工单工序（与项目任务至少填一个）
+    description: 归属的作业步骤（与项目任务至少填一个）
     semantics:
-      meaning: 工单工序引用
+      meaning: 作业步骤引用
       display:
         type: association
         target_type: work_order_operation
@@ -261,10 +261,10 @@ fields:
         display_format: "{operation_name}"
         columns:
           - field: operation_name
-            label: 工序名称
+            label: 步骤名称
             width: 200
           - field: seq
-            label: 工序号
+            label: 步骤号
             width: 90
     ui:
       widget: select
@@ -277,7 +277,7 @@ fields:
     type: integer
     db_column: resource_assignment_id
     nullable: true
-    description: 关联的资源分配（可选；须与工序、资源一致）
+    description: 关联的资源分配（可选；须与步骤、资源一致）
     semantics:
       meaning: 资源分配引用
       display:
@@ -427,13 +427,13 @@ relations:
     cardinality: N:1
     description: 工单引用（可空；真外键）
   - id: time_entry_to_work_order_operation
-    name: 工单工序
+    name: 作业步骤
     type: reference
     target: work_order_operation
     source_field: work_order_operation_id
     target_field: id
     cardinality: N:1
-    description: 工单工序引用（可空；真外键）
+    description: 作业步骤引用（可空；真外键）
   - id: time_entry_to_resource_assignment
     name: 资源分配
     type: reference
@@ -449,7 +449,7 @@ ui_view_config:
   list:
     detail_mode: drawer
     title: 工时记录
-    description: 资源 × 日期 × 分钟，挂项目任务 / 工单工序
+    description: 资源 × 日期 × 分钟，挂项目任务 / 作业步骤
     columns:
       - field: work_date
         width: 120

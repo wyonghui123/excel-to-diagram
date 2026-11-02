@@ -36,7 +36,7 @@
 - [x] **P1-2** 迁移 `v184__work_order_operation_definition_trace.py`：ALTER 补列 + 索引，幂等 `[SKIP]`；回滚只删索引、保留列。
 - [x] **P1-3** `sync_schema --generate` 同步 `generated_schema.sql`。
 - [x] **P1-4** 测试 `meta/tests/test_work_order_operation_trace.py` 8 passed：字段声明 / 无真外键 / 红线（无 `project_task_id`）/ UI 表单详情 / DDL / 迁移幂等 / 回滚。
-- [ ] **P1-5 定名**（`工序` vs `上门步骤`）：等 `order_type` 文案统一时一起改，本阶段不动。
+- [x] **P1-5 定名**：统一为「作业步骤」（`work_order_operation.name` + 字段标签 / UI 标题 / 工单子表标题；保留旧别名「工单工序 / 作业工序」）；表名 / 对象 id / 列名不变。
 
 ### Phase 2 G7 元模型化（已落 2026-11-02）
 

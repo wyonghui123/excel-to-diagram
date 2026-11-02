@@ -45,7 +45,7 @@ deletion_policy:
       message: 该资源组仍有费率记录，请先处理费率后再删除
     - table: work_order_operations
       foreign_key: resource_group_id
-      message: 该资源组仍被工单工序引用，请先调整工序后再删除
+      message: 该资源组仍被作业步骤引用，请先调整步骤后再删除
     - table: operation_resource_requirements
       foreign_key: resource_group_id
       message: 该资源组仍被工序资源要求引用，请先处理资源要求后再删除

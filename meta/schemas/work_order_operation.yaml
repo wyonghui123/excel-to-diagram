@@ -1,7 +1,7 @@
-# 工单工序 (Work Order Operation) — 销售订单波次 3 / B6
+# 作业步骤 (Work Order Operation) — 销售订单波次 3 / B6
 # 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md §10.15
 #
-# 定位: work_order 内部工序（1:N，用于多次上门 / 多道处置）。
+# 定位: work_order 内部作业步骤（1:N，用于多次上门 / 多道处置）。
 #       与批次 4 的 tasks（跨单据编排节点）区分：本表一定消耗资源、
 #       按工单模板顺序执行，不参与跨单据依赖。
 #
@@ -9,9 +9,9 @@
 # 唯一性: (work_order_id, seq) 唯一。
 
 id: work_order_operation
-name: 工单工序
+name: 作业步骤
 table_name: work_order_operations
-description: 工单内部工序（多次上门 / 多道处置）
+description: 工单内部作业步骤（生产工序 / 上门服务步骤统一命名；多次上门 / 多道处置）
 display_name_field: id
 parent_object: work_order
 
@@ -19,10 +19,11 @@ hierarchy:
   parent_field: work_order_id
 
 semantics:
-  meaning: 工单工序
+  meaning: 作业步骤
   category: business_document_line
   business_key: []
   aliases:
+    - 作业步骤
     - 工单工序
     - 作业工序
     - Work Order Operation
@@ -80,20 +81,20 @@ fields:
       hidden_in_form: true
 
   - id: seq
-    name: 工序号
+    name: 步骤号
     type: integer
     db_column: seq
     required: true
-    description: 工序顺序号（同一工单内唯一）
+    description: 步骤顺序号（同一工单内唯一）
     constraints:
       - type: numeric_range
         gt: 0
         decimal_places: 0
     semantics:
-      meaning: 工序顺序
+      meaning: 步骤顺序
       filterable: true
       filter_type: number
-      filter_label: 工序号
+      filter_label: 步骤号
       filter_scope: local
     ui:
       widget: number
@@ -107,7 +108,7 @@ fields:
     nullable: true
     description: 资源组（工作中心是 group_kind=work_center 的取值）；空表示未指定
     semantics:
-      meaning: 执行工序的资源组 / 工作中心
+      meaning: 执行步骤的资源组 / 工作中心
       display:
         type: association
         target_type: resource_group
@@ -141,14 +142,14 @@ fields:
       clearable: true
 
   - id: operation_name
-    name: 工序名称
+    name: 步骤名称
     type: string
     db_column: operation_name
     required: true
     max_length: 100
-    description: 工序名称（如 上门诊断 / 更换配件）
+    description: 步骤名称（如 上门诊断 / 更换配件）
     semantics:
-      meaning: 工序名称
+      meaning: 步骤名称
       data_category: text
     ui:
       widget: input
@@ -160,7 +161,7 @@ fields:
     nullable: true
     description: 准备工时（分钟）
     semantics:
-      meaning: 工序准备工时
+      meaning: 步骤准备工时
     ui:
       widget: number
 
@@ -171,7 +172,7 @@ fields:
     nullable: true
     description: 执行工时（分钟）
     semantics:
-      meaning: 工序执行工时
+      meaning: 步骤执行工时
     ui:
       widget: number
 
@@ -185,7 +186,7 @@ fields:
     default: 0
     description: 收尾工时（分钟，默认 0）
     semantics:
-      meaning: 工序收尾工时
+      meaning: 步骤收尾工时
     ui:
       widget: number
 
@@ -197,7 +198,7 @@ fields:
     nullable: true
     description: 所需技能（引用 skill 主数据，可空）
     semantics:
-      meaning: 工序所需技能引用
+      meaning: 步骤所需技能引用
       display:
         type: association
         target_type: skill
@@ -247,8 +248,8 @@ fields:
       editable: false
       readonly: true
 
-  # 作业定义溯源（G12）：本工序由哪条工艺路线 / 哪个标准工序展开而来
-  #   手填工序留空（空值 = 未溯源）；存量工单不回溯
+  # 作业定义溯源（G12）：本步骤由哪条工艺路线 / 哪个标准工序展开而来
+  #   手填步骤留空（空值 = 未溯源）；存量工单不回溯
   #   不加真外键：SQLite 不支持对存量表 ALTER 加 FK，且删除 restrict 已由
   #   work_definition_operation.deletion_policy 承担（软引用 + 服务层校验）
   - id: work_definition_id
@@ -256,7 +257,7 @@ fields:
     type: integer
     db_column: work_definition_id
     nullable: true
-    description: 来源作业定义（工艺路线 / 服务模板；可空 = 手填工序）
+    description: 来源作业定义（工艺路线 / 服务模板；可空 = 手填步骤）
     semantics:
       meaning: 来源作业定义
       display:
@@ -298,7 +299,7 @@ fields:
     type: integer
     db_column: work_definition_operation_id
     nullable: true
-    description: 来源作业定义工序（可空 = 手填工序）
+    description: 来源作业定义工序（可空 = 手填步骤）
     semantics:
       meaning: 来源作业定义工序
       display:
@@ -336,12 +337,12 @@ fields:
       clearable: true
 
   - id: status
-    name: 工序状态
+    name: 步骤状态
     type: string
     db_column: status
     required: true
     default: pending
-    description: 工序状态（只读投影；动作流转走 tasks，唯一状态列为 tasks.status）
+    description: 步骤状态（只读投影；动作流转走 tasks，唯一状态列为 tasks.status）
     enum_values:
       - value: pending
         label: 待开始
@@ -361,10 +362,10 @@ fields:
         color: danger
         category: inactive
     semantics:
-      meaning: 工序状态
+      meaning: 步骤状态
       filterable: true
       filter_type: enum
-      filter_label: 工序状态
+      filter_label: 步骤状态
       filter_scope: local
       readonly_always: true
     ui:
@@ -400,7 +401,7 @@ indexes:
     name: idx_work_order_operation_resource_group
   - fields: [required_skill_id]
     name: idx_work_order_operation_required_skill
-  # G12 溯源：按作业定义查工单工序
+  # G12 溯源：按作业定义查作业步骤
   - fields: [work_definition_id]
     name: idx_work_order_operation_definition
   - fields: [work_definition_operation_id]
@@ -436,7 +437,7 @@ ui_view_config:
   skip_auto_menu: true
   list:
     detail_mode: drawer
-    title: 工单工序
+    title: 作业步骤
     columns:
       - field: seq
         width: 90
@@ -469,7 +470,7 @@ ui_view_config:
       field: seq
       order: asc
   form:
-    title: 工序信息
+    title: 步骤信息
     layout: vertical
     sections:
       - title: 基本信息
@@ -485,7 +486,7 @@ ui_view_config:
           - fields: [work_definition_id, work_definition_operation_id]
   detail:
     facets:
-      - title: 工序信息
+      - title: 步骤信息
         id: work_order_operation_basic
         type: fieldGroup
         fields:

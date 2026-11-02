@@ -50,7 +50,7 @@ semantics:
     - Service Order
 
 deletion_policy:
-  # 事实单据：删除时级联清工序、里程碑与服务事件（均为工单从属数据）
+  # 事实单据：删除时级联清作业步骤、里程碑与服务事件（均为工单从属数据）
   mode: restrict
   restrict_on: []
   cascade_delete:
@@ -853,10 +853,10 @@ ui_view_config:
           - created_at
           - updated_at
 
-  # 工序子表：父字段由 work_order_operation.work_order_id 承载
+  # 作业步骤子表：父字段由 work_order_operation.work_order_id 承载
   child_sections:
     - child_object: work_order_operation
-      title: 工单工序
+      title: 作业步骤
       display: tab
       pageSize: 10
       useMetaList: true
