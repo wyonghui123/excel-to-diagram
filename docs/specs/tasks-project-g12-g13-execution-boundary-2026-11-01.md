@@ -46,19 +46,21 @@
 - [x] **P2-4** 删除 `task_schema.py` / `task_event_schema.py` 的 `_build_*_meta()` / `build_*_meta_objects()`；保留表名 / 对象 id 常量、状态机 import、`register_table_name` 白名单；新增 `get_task_meta_objects()` / `get_task_event_meta_objects()` 从 registry 按 id 取；`ensure_task_tables()` / `ensure_task_event_tables()` 改为 YAML 驱动，返回 SQL 列表签名与幂等性不变。
 - [x] **P2-5** 测试：`meta/tests/test_g7_task_domain_meta_migration.py` 15 passed（YAML 加载 / `skip_generic_api` 生效 / v154 幂等 / 六表与 21 索引 / DDL 逐列等价 / 状态机合法与非法各一例）；回归任务域 195 passed、工作流 / 项目 / 工单域 284 passed。
 
-### Phase 3 G13 双通道定界（待 G7 元模型化）
+### Phase 3 G13 双通道定界（P3-3 已落；P3-1 / P3-2 / P3-4 后半 / P3-5 待做）
 
 - [ ] **P3-1** 规则落地：`work_order_operations.status` 降为只读投影（或停写），唯一状态列 = `tasks.status`。
 - [ ] **P3-2** 桥接逻辑：`project_task → source_demand(project_task) → work_order → work_order_operation → tasks`，创建 tasks 时回填 `line_refs`（指向工序 id）。
-- [ ] **P3-3** 报工口径：实际工时只走 `time_entry`（v182）；工序不落 actual 列。
+- [x] **P3-3** 报工口径：实际工时只走 `time_entry`（v182）；工序不落 actual 列。证据：`work_order_operation.yaml` 字段无 `actual_*` / `reported_*` / `completed_qty` / `qty_done`；`generated_schema.sql` 的 `work_order_operations` 仅 `setup_minutes` / `run_minutes` / `teardown_minutes`，实际工时唯一落点是 `time_entries.minutes`。测试 `meta/tests/test_single_point_trace.py::TestReportingCaliber` 4 passed。
 - [ ] **P3-4** 「单点留痕」测试：同一动作只产生一条 `tasks` 状态流转 + 一条 `task_events`；工序状态不可手工推进。
+  - 已落前半：一次 `record_transition` = 1 条 `status_changed` 事件 + 1 条 `transition` WORKLOG，事件与 WORKLOG 一一配对；任务迁移不改写 `work_order_operations.status`，`line_refs` 可反查工序（`TestSinglePointTrace` 3 passed）。
+  - 后半「工序状态不可手工推进」依赖 P3-1（`work_order_operations.status` 降为只读投影），本阶段不宣称完成。
 - [ ] **P3-5** 回归 `test_work_order_production.py` / `test_work_order_service.py` / 任务域六表测试。
 
 ## 4. 验收
 
 - [x] G12：工序可按 `work_definition_id` / `work_definition_operation_id` 回溯；手填工序留空合法。
 - [x] §8.2 红线 2 未破：`work_order_operation` 无 `project_task_id`（测试守护）。
-- [ ] G13：同一动作只在一处留痕；`tasks.line_refs` 能反查工序。
+- [ ] G13：同一动作只在一处留痕；`tasks.line_refs` 能反查工序。（已验：任务迁移不写工序状态、`line_refs` 可反查；待验：P3-1 工序状态只读后「不可手工推进」）
 - [x] G7：六表 DDL 单一真源（YAML）；`ensure_task_tables()` 仅保留 YAML 驱动的幂等兜底，启动期不再由代码 MetaObject 建表。
 
 ## 5. 风险
