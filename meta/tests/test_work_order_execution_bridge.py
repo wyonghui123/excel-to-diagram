@@ -25,6 +25,10 @@ from meta.services.work_order_execution_service import (  # noqa: E402
     BridgeError,
     create_operation_tasks,
 )
+from meta.services.work_order_service import (  # noqa: E402
+    WorkOrderError,
+    WorkOrderService,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -32,9 +36,14 @@ _SCHEMA = (
     """CREATE TABLE work_orders (
     id INTEGER PRIMARY KEY,
     work_order_no TEXT,
+    status TEXT DEFAULT 'New',
+    schedule_id INTEGER,
+    coverage_id INTEGER,
     project_id INTEGER,
     source_demand_type TEXT,
-    source_demand_id INTEGER
+    source_demand_id INTEGER,
+    resolved_at TEXT,
+    updated_at TEXT
 );""",
     """CREATE TABLE project_tasks (
     id INTEGER PRIMARY KEY,
@@ -48,6 +57,16 @@ _SCHEMA = (
     seq INTEGER,
     operation_name TEXT,
     status TEXT DEFAULT 'pending'
+);""",
+    """CREATE TABLE service_events (
+    id INTEGER PRIMARY KEY,
+    work_order_id INTEGER,
+    event_type TEXT,
+    occurred_at TEXT,
+    actor TEXT,
+    payload TEXT,
+    note TEXT,
+    created_at TEXT
 );""",
 )
 
@@ -140,3 +159,97 @@ class TestBridgeCreation:
             create_operation_tasks(ds, 11, created_by="owner")
         assert err.value.rule == "WORK_ORDER_NOT_FOUND"
         assert _tasks(ds) == []
+
+
+def _work_order_status(ds, work_order_id):
+    return ds.query(
+        "SELECT status FROM work_orders WHERE id = ?", [work_order_id])[0]["status"]
+
+
+class TestStartWorkOrder:
+
+    def test_project_task_工单开工生成任务(self, ds):
+        svc = WorkOrderService(ds)
+        result = svc.start_work_order(
+            21, now="2026-11-02 09:00:00", actor="tester", created_by="tester")
+
+        assert result["status"] == "In Progress"
+        assert len(result["task_ids"]) == 2
+        assert _work_order_status(ds, 21) == "In Progress"
+        assert len(_tasks(ds)) == 2
+        events = ds.query(
+            "SELECT event_type FROM service_events WHERE work_order_id = 21")
+        assert [e["event_type"] for e in events] == ["start"]
+
+    def test_非_project_task_来源只改状态不建任务(self, ds):
+        result = WorkOrderService(ds).start_work_order(23)
+
+        assert result["task_ids"] == []
+        assert _work_order_status(ds, 23) == "In Progress"
+        assert _tasks(ds) == []
+
+    def test_仅新建工单可开始作业(self, ds):
+        svc = WorkOrderService(ds)
+        svc.start_work_order(21)
+
+        with pytest.raises(WorkOrderError) as err:
+            svc.start_work_order(21)
+        assert err.value.rule == "ST_STATE_INVALID"
+
+    def test_桥接失败时状态不变(self, ds):
+        ds.execute("DELETE FROM work_order_operations WHERE work_order_id = 21")
+        with pytest.raises(BridgeError) as err:
+            WorkOrderService(ds).start_work_order(21)
+
+        assert err.value.rule == "OPERATION_NOT_FOUND"
+        assert _work_order_status(ds, 21) == "New"
+        assert _tasks(ds) == []
+
+
+class _FakeBlacklist:
+    @staticmethod
+    def is_blacklisted(token):
+        return False
+
+
+class _FakeTokenService:
+    @staticmethod
+    def verify_token(token):
+        return {'user_id': '1', 'username': 'tester', 'token_version': 0,
+                'permissions': ['*']}
+
+
+AUTH = {'Authorization': 'Bearer test-token', 'Content-Type': 'application/json'}
+
+
+class TestStartWorkOrderApi:
+
+    def test_端点开工并返回任务(self, monkeypatch, ds):
+        from flask import Flask
+
+        import meta.api.work_order_api as wo_api
+        import meta.services.auth_middleware as auth_mw
+
+        monkeypatch.setattr(auth_mw, 'token_blacklist_service', _FakeBlacklist())
+        monkeypatch.setattr(auth_mw, 'TokenService', _FakeTokenService)
+        wo_api.init_service(ds)
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+        app.register_blueprint(wo_api.work_order_bp)
+        client = app.test_client()
+        try:
+            resp = client.post('/api/v1/work-orders/21/start',
+                               headers=AUTH, json={})
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body['success'] is True
+            assert body['data']['status'] == 'In Progress'
+            assert len(body['data']['task_ids']) == 2
+
+            again = client.post('/api/v1/work-orders/21/start',
+                                headers=AUTH, json={})
+            assert again.status_code == 400
+            assert again.get_json()['code'] == 'ST_STATE_INVALID'
+        finally:
+            wo_api._service = None
+

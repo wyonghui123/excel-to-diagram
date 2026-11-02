@@ -49,7 +49,7 @@
 ### Phase 3 G13 双通道定界（已落 2026-11-02，设计见 §6）
 
 - [x] **P3-1** 规则落地：`work_order_operations.status` 降为只读投影（`semantics.readonly_always` + UI 只读），唯一状态列 = `tasks.status`。证据：通用 `ManageService.update` 携带 `status` 不落库（库中仍 `pending`），随行可写字段正常更新；`test_single_point_trace.py::TestOperationStatusProjection` 4 passed。
-- [x] **P3-2** 桥接逻辑：`meta/services/work_order_execution_service.py::create_operation_tasks` 只接受 `work_order_id`（project_task 不直接生成 tasks），校验 `source_demand_type='project_task'` + 项目一致（AC-09），按工序创建 tasks 并回填 `line_refs=[工序 id]`，重复调用幂等。测试 `test_work_order_execution_bridge.py` 6 passed。
+- [x] **P3-2** 桥接逻辑：`meta/services/work_order_execution_service.py::create_operation_tasks` 只接受 `work_order_id`（project_task 不直接生成 tasks），校验 `source_demand_type='project_task'` + 项目一致（AC-09），按工序创建 tasks 并回填 `line_refs=[工序 id]`，重复调用幂等。接入点：`WorkOrderService.start_work_order`（New → In Progress，仅 project_task 来源调桥接）+ `POST /api/v1/work-orders/<id>/start`（事务包裹，桥接失败整体回滚）。测试 `test_work_order_execution_bridge.py` 11 passed。
 - [x] **P3-3** 报工口径：实际工时只走 `time_entry`（v182）；工序不落 actual 列。证据：`work_order_operation.yaml` 字段无 `actual_*` / `reported_*` / `completed_qty` / `qty_done`；`generated_schema.sql` 的 `work_order_operations` 仅 `setup_minutes` / `run_minutes` / `teardown_minutes`，实际工时唯一落点是 `time_entries.minutes`。测试 `meta/tests/test_single_point_trace.py::TestReportingCaliber` 4 passed。
 - [x] **P3-4** 「单点留痕」测试：同一动作只产生一条 `tasks` 状态流转 + 一条 `task_events`；工序状态不可手工推进。
   - 前半已落：一次 `record_transition` = 1 条 `status_changed` 事件 + 1 条 `transition` WORKLOG，事件与 WORKLOG 一一配对；任务迁移不改写 `work_order_operations.status`，`line_refs` 可反查工序（`TestSinglePointTrace` 3 passed）。
@@ -118,7 +118,7 @@
    - 项目不一致 → `PROJECT_MISMATCH`；
    - 正常路径：2 条工序 → 2 条 tasks，`line_refs == ["<op_id>"]`、`doc_ref` 一致、`status='pending'`；
    - 幂等：重复调用不新增；且只给 `project_task`（无工单）时不会生成任何 task（硬规则 1）。
-3. 不改 `work_order_service.py` / `project_task` 现有路径；不改表结构。
+3. 接入点：`WorkOrderService.start_work_order`（New → In Progress；仅 project_task 来源调桥接）+ 专用端点 `POST /api/v1/work-orders/<id>/start`（显式事务，桥接失败整体回滚）；不改 `project_task` 现有路径；不改表结构。
 
 ### 6.3 P3-4 后半与 P3-5
 

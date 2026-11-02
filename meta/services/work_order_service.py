@@ -725,6 +725,44 @@ class WorkOrderService:
                     day + timedelta(days=1), time(BUSINESS_START_HOUR, 0))
         return _fmt(cursor)
 
+    # -------------------------------------------------------------- 开始作业
+
+    def start_work_order(self, work_order_id: Any, now: Any = None,
+                         actor: Any = None, created_by: Any = None,
+                         executor_type: str = 'human') -> Dict[str, Any]:
+        """G13：New → In Progress；project_task 来源的工单同步创建执行 tasks。
+
+        §8.2 硬规则 1：只有 `source_demand_type='project_task'` 的工单在开工时
+        桥接 tasks；其它来源（计划行 / 订单行）保持原开工语义，不生成 tasks。
+        事务边界由调用方控制（本方法不自开事务）。
+        """
+        occurred = now or _now()
+        work_order = self._require_work_order(work_order_id)
+        if str(work_order.get('status')) != STATUS_NEW:
+            raise WorkOrderError(
+                '仅新建工单可开始作业（当前 %s）' % work_order.get('status'),
+                field_name='status', rule='ST_STATE_INVALID')
+
+        task_ids: List[str] = []
+        if str(work_order.get('source_demand_type')) == SOURCE_DEMAND_PROJECT_TASK:
+            from meta.services.work_order_execution_service import (
+                create_operation_tasks,
+            )
+            task_ids = create_operation_tasks(
+                self.ds, work_order.get('id'),
+                created_by=created_by or 'system',
+                executor_type=executor_type)
+
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
+            % WORK_ORDER_TABLE,
+            [STATUS_IN_PROGRESS, occurred, work_order.get('id')])
+        self._append_event(work_order.get('id'), 'start', occurred, actor, {})
+        self._append_change_event(work_order.get('id'), 'state_change',
+                                  {'status': (STATUS_NEW, STATUS_IN_PROGRESS)})
+        return {'id': work_order.get('id'), 'status': STATUS_IN_PROGRESS,
+                'task_ids': task_ids}
+
     # -------------------------------------------------------------- 暂停/恢复
 
     def pause(self, work_order_id: Any, now: Any = None,
@@ -1071,8 +1109,8 @@ class WorkOrderService:
                                  rule='ST_NOT_FOUND')
         rows = self.ds.query(
             'SELECT id, work_order_no, status, schedule_id, coverage_id, '
-            'resolved_at FROM %s WHERE id = ?' % WORK_ORDER_TABLE,
-            [work_order_id])
+            'source_demand_type, resolved_at FROM %s WHERE id = ?'
+            % WORK_ORDER_TABLE, [work_order_id])
         if not rows:
             raise WorkOrderError('工单不存在', field_name='id',
                                  rule='ST_NOT_FOUND')

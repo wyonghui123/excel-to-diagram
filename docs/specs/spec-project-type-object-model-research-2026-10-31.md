@@ -159,8 +159,8 @@
 | G9 | ~~`order_type=repair/install/maintenance` inactive~~ **已落（P2 收尾）** | P2 | 售后三值已启用，复用 service 路径 |
 | G10 | ~~`configuration` 无 `project_id`~~ **已落（v178，P3）** | P2 | 项目级选配可归集；物化链路不感知项目标签（AC-06 已测） |
 | G11 | ~~`source_demand_type` 无 `project_task` 枚举~~ **已落（v179 / P1.5）** | P0 | `work_order` 可直接由项目任务产生（扩 1 个枚举值） |
-| G12 | 生产履约「有壳无骨」：工序已补标准工时 / 资源组 / 技能（P2b）、作业定义溯源（**v184**）；剩余「工序」定名与执行边界 | P0 | 制造语义已可用；定名与 G13 一并收口 |
-| G13 | 双执行通道未定界（`workflow_run + tasks` 与 `work_order_operation` 并存） | P0 | 同一动作两处留痕，报工口径分裂 |
+| G12 | ~~生产履约「有壳无骨」：工序缺标准工时 / 资源组 / 技能 / 溯源~~ **已落（P2b + v184 + P1-5 定名）** | P0 | 工序补齐标准工时 / 资源组 / 技能；作业定义溯源软引用（v184）；定名「作业步骤」；执行边界随 G13 收口 |
+| G13 | ~~双执行通道未定界（`workflow_run + tasks` 与 `work_order_operation` 并存）~~ **已落（2026-11-02，P3）** | P0 | 工序只存参数、`status` 降为只读投影；动作流转唯一走 `tasks`，`tasks.line_refs` 反查步骤；实际工时唯一落 `time_entries`；桥接入口 `create_operation_tasks` + 开工端点 `POST /api/v1/work-orders/<id>/start` |
 | G14 | ~~工时 / 消耗无回聚载体（`worklogs` 只挂 `tasks`，无支出项对象）~~ **已落（v182，P1.5）** | P1 | `time_entry` 补实际工时载体；`v_project_task_labor` / `v_project_labor` / `v_resource_labor_daily` 回聚，不落汇总表；G7 降为治理项 |
 
 ---
@@ -272,7 +272,7 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | `work_order.name = 服务工单` 却含 `production` | 名不副实（全仓 9 处引用中 8 处是注释） | 语义改「工单」，类型由 `order_type` 显示；旧称降为 `aliases`（D12） |
 | `fulfillment_order` 也叫「履约单」 | 与 `work_order` 曾共享「履约」说法，易被误当执行单据 | **不改名**；用层级「履约单（分组）→ 工单（执行）」消歧，`aliases` 已有「履约分组」 |
 | `project_task` 与 `tasks` 仅差前缀 | 评审易误读为同一对象 | 仅评审口语固定「活动 / 待办」，**不改对象 `name`**（避免与营销「活动」撞词） |
-| `work_order_operation` 叫「工序」 | 实为「上门步骤」，无制造字段（G12） | 与 G12 一并处理：先补字段，再定名 |
+| `work_order_operation` 曾叫「工序」 | 生产 / 服务两语境混用（G12） | **已定名「作业步骤」**（P1-5）：对象名 / 字段标签 / UI 标题统一，旧称降为 `aliases`；表名 / 对象 id / 列名不变 |
 
 ### 8.4 明确不做（防过度设计）
 
@@ -314,3 +314,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v1.9：G6 收尾——`fulfillment_order.project_id`（v183，可空 + `idx_fulfillment_order_project`），三条履约链（工单 / 交货单 / 履约分组单）共用项目锚点；G1 / G2 / G5 / G8 / G9 缺口表按代码实况回填为已落；项目 360 仍为五段（未新增履约分组段） |
 | 2026-11-01 | v2.0：G12 溯源落地——`work_order_operation` 补 `work_definition_id` / `work_definition_operation_id`（v184，软引用 + 2 索引）；补 D18–D20；核出 routing 已以 `work_definition` 落地（v176）、Gen2 六表迁移兜底已由 v154 完成，G7 剩余为「注册豁免 + YAML」治理项；G13 待 G7 |
 | 2026-11-02 | v2.1：G7 落地——六表进 `meta/schemas/*.yaml`（`workflow` / `task_template` / `workflow_run` / `task` / `task_event` / `task_worklog`）+ `skip_generic_api` 屏蔽通用 CRUD / agent 工具 / 自动菜单；`task_schema` / `task_event_schema` 删除代码 MetaObject 定义、改 YAML 驱动，v154 改从 registry 取对象；六表 DDL 基线比对零差异；D19 改写为「不改运行时语义」，并推翻 `task-two-generation-convergence/spec.md` D3「不引入元模型 YAML」的历史裁决 |
+| 2026-11-02 | v2.2：G12 / G13 闭环——工序定名「作业步骤」（P1-5，表名 / 对象 id / 列名不变）；工序 `status` 降为只读投影（`readonly_always`），动作流转唯一走 `tasks`；`tasks.line_refs` 弱引用步骤；实际工时唯一落 `time_entries`；新增桥接服务 `create_operation_tasks`（只接受 `work_order_id`，幂等） |
