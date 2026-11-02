@@ -341,7 +341,7 @@ fields:
     db_column: status
     required: true
     default: pending
-    description: 工序状态
+    description: 工序状态（只读投影；动作流转走 tasks，唯一状态列为 tasks.status）
     enum_values:
       - value: pending
         label: 待开始
@@ -366,8 +366,11 @@ fields:
       filter_type: enum
       filter_label: 工序状态
       filter_scope: local
+      readonly_always: true
     ui:
       widget: select
+      editable: false
+      readonly: true
 
   - id: created_at
     name: 创建时间

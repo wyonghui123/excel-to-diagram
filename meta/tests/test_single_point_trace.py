@@ -10,19 +10,20 @@
   P3-4 一次任务动作 = 一条 `tasks` 状态流转 + 一条 `task_events`（另配一条
        WORKLOG）；任务状态迁移不写 `work_order_operations.status`（动作只在 tasks
        一处留痕，工序侧只存参数）。
-
-工序状态「不可手工推进」属 P3-1（status 降为只读投影）的验收项，本文件不越界断言。
+  P3-1 工序 `status` 是只读投影：通用更新路径跳过该字段，手工推进不落库。
 """
 import os
 
 os.environ.setdefault('ALLOW_RAW_SQL', '1')
 
 import json
+import logging
 import yaml
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from meta.core.models import registry  # noqa: E402
 from meta.core.task_event_schema import (  # noqa: E402
     ensure_task_event_tables,
     record_transition,
@@ -229,3 +230,79 @@ class TestSinglePointTrace:
             "SELECT line_refs FROM task_events WHERE task_id = ?", ("T-TRACE-3",),
         ).fetchall()
         assert json.loads(line_refs[0][0]) == ["OP-1"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P3-1 工序状态只读投影（P3-4 后半：不可手工推进）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _reload_quietly():
+    logging.disable(logging.CRITICAL)
+    try:
+        registry.reload(SCHEMA_DIR)
+    finally:
+        logging.disable(logging.NOTSET)
+
+
+def _status_field():
+    meta_obj = registry.get("work_order_operation")
+    assert meta_obj is not None, "registry 缺少 work_order_operation"
+    for f in meta_obj.fields:
+        if f.id == "status":
+            return f
+    raise AssertionError("work_order_operation 缺少 status 字段")
+
+
+def _op_status(ds, op_id):
+    rows = ds.execute(
+        "SELECT status FROM work_order_operations WHERE id = ?", (op_id,),
+    ).fetchall()
+    return rows[0][0] if rows else None
+
+
+def _op_name(ds, op_id):
+    rows = ds.execute(
+        "SELECT operation_name FROM work_order_operations WHERE id = ?", (op_id,),
+    ).fetchall()
+    return rows[0][0] if rows else None
+
+
+class TestOperationStatusProjection:
+    def test_yaml_声明只读(self):
+        raw = _load_raw("work_order_operation")
+        status = next(f for f in raw["fields"] if f.get("id") == "status")
+        assert status["semantics"]["readonly_always"] is True
+        assert status["ui"]["editable"] is False
+
+    def test_registry_携带只读语义(self):
+        _reload_quietly()
+        assert _status_field().semantics.readonly_always is True
+
+    def test_通用更新不能手工推进状态(self, ds):
+        from meta.services.manage_service import ManageService, UpdateRequest
+
+        _operation(ds, "1", status="pending")
+        result = ManageService(ds).update(UpdateRequest(
+            object_type="work_order_operation",
+            id=1,
+            data={"status": "completed"},
+            skip_audit=True,
+        ))
+
+        assert _op_status(ds, "1") == "pending", "工序状态不得经通用更新推进"
+        assert result.success is True, (result.error, result.message)
+
+    def test_携带其它字段时状态仍不变(self, ds):
+        from meta.services.manage_service import ManageService, UpdateRequest
+
+        _operation(ds, "2", status="pending")
+        result = ManageService(ds).update(UpdateRequest(
+            object_type="work_order_operation",
+            id=2,
+            data={"status": "completed", "operation_name": "复检"},
+            skip_audit=True,
+        ))
+
+        assert result.success is True, (result.error, result.message)
+        assert _op_name(ds, "2") == "复检", "可写字段应正常落库"
+        assert _op_status(ds, "2") == "pending", "只读状态不得被顺带改写"

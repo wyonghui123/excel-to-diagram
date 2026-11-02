@@ -1,6 +1,6 @@
 # G12 / G13 执行边界 —— 任务单（2026-11-01）
 
-> 状态：**P1 / P2（G7）已落，P3–P4 待评审**。依据：
+> 状态：**P1 / P2（G7）/ Phase 3 全部已落（2026-11-02）**。依据：
 > `spec-project-type-object-model-research-2026-10-31.md` §3 G12 / G13、§4 D4 / D10 / D14、§8.2 四条硬规则；
 > `spec-unified-resource-model-2026-11-01-v1.0.md` §9.3（`work_definition` 作业定义）；
 > `docs/specs/task-two-generation-convergence/spec.md` §2.1 轨③。
@@ -46,21 +46,21 @@
 - [x] **P2-4** 删除 `task_schema.py` / `task_event_schema.py` 的 `_build_*_meta()` / `build_*_meta_objects()`；保留表名 / 对象 id 常量、状态机 import、`register_table_name` 白名单；新增 `get_task_meta_objects()` / `get_task_event_meta_objects()` 从 registry 按 id 取；`ensure_task_tables()` / `ensure_task_event_tables()` 改为 YAML 驱动，返回 SQL 列表签名与幂等性不变。
 - [x] **P2-5** 测试：`meta/tests/test_g7_task_domain_meta_migration.py` 15 passed（YAML 加载 / `skip_generic_api` 生效 / v154 幂等 / 六表与 21 索引 / DDL 逐列等价 / 状态机合法与非法各一例）；回归任务域 195 passed、工作流 / 项目 / 工单域 284 passed。
 
-### Phase 3 G13 双通道定界（P3-3 已落；P3-1 / P3-2 / P3-4 后半 / P3-5 待做）
+### Phase 3 G13 双通道定界（已落 2026-11-02，设计见 §6）
 
-- [ ] **P3-1** 规则落地：`work_order_operations.status` 降为只读投影（或停写），唯一状态列 = `tasks.status`。
-- [ ] **P3-2** 桥接逻辑：`project_task → source_demand(project_task) → work_order → work_order_operation → tasks`，创建 tasks 时回填 `line_refs`（指向工序 id）。
+- [x] **P3-1** 规则落地：`work_order_operations.status` 降为只读投影（`semantics.readonly_always` + UI 只读），唯一状态列 = `tasks.status`。证据：通用 `ManageService.update` 携带 `status` 不落库（库中仍 `pending`），随行可写字段正常更新；`test_single_point_trace.py::TestOperationStatusProjection` 4 passed。
+- [x] **P3-2** 桥接逻辑：`meta/services/work_order_execution_service.py::create_operation_tasks` 只接受 `work_order_id`（project_task 不直接生成 tasks），校验 `source_demand_type='project_task'` + 项目一致（AC-09），按工序创建 tasks 并回填 `line_refs=[工序 id]`，重复调用幂等。测试 `test_work_order_execution_bridge.py` 6 passed。
 - [x] **P3-3** 报工口径：实际工时只走 `time_entry`（v182）；工序不落 actual 列。证据：`work_order_operation.yaml` 字段无 `actual_*` / `reported_*` / `completed_qty` / `qty_done`；`generated_schema.sql` 的 `work_order_operations` 仅 `setup_minutes` / `run_minutes` / `teardown_minutes`，实际工时唯一落点是 `time_entries.minutes`。测试 `meta/tests/test_single_point_trace.py::TestReportingCaliber` 4 passed。
-- [ ] **P3-4** 「单点留痕」测试：同一动作只产生一条 `tasks` 状态流转 + 一条 `task_events`；工序状态不可手工推进。
-  - 已落前半：一次 `record_transition` = 1 条 `status_changed` 事件 + 1 条 `transition` WORKLOG，事件与 WORKLOG 一一配对；任务迁移不改写 `work_order_operations.status`，`line_refs` 可反查工序（`TestSinglePointTrace` 3 passed）。
-  - 后半「工序状态不可手工推进」依赖 P3-1（`work_order_operations.status` 降为只读投影），本阶段不宣称完成。
-- [ ] **P3-5** 回归 `test_work_order_production.py` / `test_work_order_service.py` / 任务域六表测试。
+- [x] **P3-4** 「单点留痕」测试：同一动作只产生一条 `tasks` 状态流转 + 一条 `task_events`；工序状态不可手工推进。
+  - 前半已落：一次 `record_transition` = 1 条 `status_changed` 事件 + 1 条 `transition` WORKLOG，事件与 WORKLOG 一一配对；任务迁移不改写 `work_order_operations.status`，`line_refs` 可反查工序（`TestSinglePointTrace` 3 passed）。
+  - 后半已落：`TestOperationStatusProjection` 2 条通用更新用例证明工序 `status` 不可手工推进（4 passed）；整文件 11 passed。
+- [x] **P3-5** 回归 `test_work_order_production.py` 15 passed / `test_work_order_service.py` 17 passed / `test_g7_task_domain_meta_migration.py` 15 passed / `test_task_state_machine.py` 33 passed。
 
 ## 4. 验收
 
 - [x] G12：工序可按 `work_definition_id` / `work_definition_operation_id` 回溯；手填工序留空合法。
 - [x] §8.2 红线 2 未破：`work_order_operation` 无 `project_task_id`（测试守护）。
-- [ ] G13：同一动作只在一处留痕；`tasks.line_refs` 能反查工序。（已验：任务迁移不写工序状态、`line_refs` 可反查；待验：P3-1 工序状态只读后「不可手工推进」）
+- [x] G13：同一动作只在一处留痕；`tasks.line_refs` 能反查工序。（任务迁移不写工序状态、`line_refs` 可反查；工序 `status` 只读后不可手工推进）
 - [x] G7：六表 DDL 单一真源（YAML）；`ensure_task_tables()` 仅保留 YAML 驱动的幂等兜底，启动期不再由代码 MetaObject 建表。
 
 ## 5. 风险
@@ -71,3 +71,65 @@
 | 对象进 BO registry 后绕过任务状态机 | `skip_generic_api` 关闭通用 CRUD / agent 工具；通用更新路径遇 `requires_state_machine` 调 `require_transition`，非法迁移返回 400 `STATE_MACHINE_VIOLATION` |
 | 工序状态停写影响存量前端 / API 调用方 | P3-1 先投影只读，观察一轮再删写路径 |
 | 工时口径被再次分裂 | 复用 `time_entry` + `v_resource_labor_daily`，不新增 actual 列 |
+
+## 6. Phase 3 执行设计（2026-11-02，已批准并落地）
+
+### 6.1 P3-1 工序 `status` 只读投影
+
+**机制核对（已读代码）**
+
+- `meta/core/yaml_loader.py` L367-374：字段级 `semantics.readonly_always` 会被解析进 `MetaField`；`work_order_operation.yaml` L363-368 已有 `semantics` 块，可直接加键。
+- `meta/core/action_executor.py` L3339：`for_update` 时 `readonly_always` 字段被跳过（不落库、不报错）；`required_skill`（L244）已是同款写法。
+- `meta/core/ui_config/field_extractor.py` L85：`readonly_always → readonly=True, editable=False`，列表 / 详情 / 表单三视图统一只读。
+- 全仓无代码写 `work_order_operations.status`（`work_order_service` / `labor_service` / `resource_matching_service` 只读该校验），不会破坏存量链路。
+
+**改动**
+
+1. `meta/schemas/work_order_operation.yaml` 的 `status` 字段：
+   - `semantics` 增 `readonly_always: true`；
+   - `ui` 增 `editable: false` / `readonly: true`（与 `required_skill` 同款）；
+   - `description` 改为「工序状态（只读投影；动作流转走 tasks，唯一状态列为 tasks.status）」。
+2. 不改 DDL（无语义列变更），不重跑 `sync_schema --generate`。
+3. `meta/tests/test_single_point_trace.py` 增 `TestOperationStatusProjection`（4 例）：
+   - YAML `status.semantics.readonly_always is True`；
+   - registry 加载后 `MetaField.semantics.readonly_always is True`；
+   - `ManageService.update(object_type='work_order_operation', data={'status': 'completed'})` → 不落库，库中 `status` 仍为 `pending`（框架既定语义：只读字段跳过，不报错）；
+   - 同一更新携带 `operation_name` 时：`operation_name` 落库、`status` 仍为 `pending`（证明「不可手工推进」且不误伤其它字段）。
+4. 不改 `action_executor` / `manage_service` 全局行为（`readonly_always` 已被多处父键字段依赖，不能改成硬报错）。
+
+### 6.2 P3-2 工序 → 任务桥接与 `line_refs` 回填
+
+**边界**（延续 D10 / §8.2 硬规则 1）：`project_task` **不直接生成** `tasks`；只在工单已有工序后，由执行入口按工单创建 tasks。
+
+**改动**
+
+1. 新增 `meta/services/work_order_execution_service.py`：
+   - `class BridgeError(Exception)`：带 `rule` 字段（`WORK_ORDER_NOT_FOUND` / `BRIDGE_SOURCE_NOT_PROJECT_TASK` / `PROJECT_MISMATCH` / `OPERATION_NOT_FOUND`）。
+   - `create_operation_tasks(ds, work_order_id, *, created_by, executor_type='human') -> list[str]`：
+     - 读 `work_orders`：空 → `WORK_ORDER_NOT_FOUND`；`source_demand_type != 'project_task'` → `BRIDGE_SOURCE_NOT_PROJECT_TASK`；
+     - 读 `project_tasks(source_demand_id)` 校验 `project_id` 与工单一致（AC-09 口径），不一致 → `PROJECT_MISMATCH`；
+     - 读 `work_order_operations`（按 `seq`，无工序 → `OPERATION_NOT_FOUND`），逐条 INSERT `tasks`：
+       `id=uuid4().hex`、`title=operation_name`、`type='story'`、`status='pending'`、`executor_type`、`created_by`、`doc_ref=f'work_order:{work_order_id}'`、`line_refs=json.dumps([str(operation_id)])`、`created_at=updated_at=now`；
+     - 幂等：先 `SELECT id, line_refs FROM tasks WHERE doc_ref = ?`，按 JSON 解析后匹配工序 id，已存在则跳过并返回已有 id；
+     - 不自开事务（与 `work_order_service` 同构，事务边界由调用方控制）。
+2. 新增 `meta/tests/test_work_order_execution_bridge.py`（5 例）：
+   - 工单不存在 → `WORK_ORDER_NOT_FOUND`；
+   - 来源非 `project_task` → `BRIDGE_SOURCE_NOT_PROJECT_TASK`；
+   - 项目不一致 → `PROJECT_MISMATCH`；
+   - 正常路径：2 条工序 → 2 条 tasks，`line_refs == ["<op_id>"]`、`doc_ref` 一致、`status='pending'`；
+   - 幂等：重复调用不新增；且只给 `project_task`（无工单）时不会生成任何 task（硬规则 1）。
+3. 不改 `work_order_service.py` / `project_task` 现有路径；不改表结构。
+
+### 6.3 P3-4 后半与 P3-5
+
+- P3-4 后半：由 6.1 的两条 `ManageService` 用例直接收口，通过后勾选。
+- P3-5 回归（worktree 内绝对路径 + 端口 3015）：
+  - `python scripts/agent_test.py --file D:\filework\p2b1-worktree\meta\tests\test_work_order_production.py --port 3015 -q`
+  - `test_work_order_service.py` / `test_g7_task_domain_meta_migration.py` / `test_task_state_machine.py` / `test_single_point_trace.py` / `test_work_order_execution_bridge.py`
+- 全部通过后勾选 P3-1 / P3-2 / P3-4 / P3-5 与 §4 G13 验收，提交 `agent/labor-view`（不 merge）。
+
+### 6.4 批准点
+
+- 批准 = 同意按 §6.1 / §6.2 的文件与行为落地，并接受「只读字段跳过不报错」的既有框架语义。
+- 不批准项可单独指定（例如要求 `status` 写入硬报错、或桥接不新增 service 文件）。
+
