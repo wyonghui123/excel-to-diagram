@@ -125,6 +125,7 @@ CREATE TABLE resources (
     code TEXT,
     name TEXT,
     resource_kind TEXT DEFAULT 'person',
+    person_ref INTEGER,
     calendar_id INTEGER,
     location_id INTEGER,
     capacity_units REAL DEFAULT 1,
