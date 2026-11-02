@@ -301,6 +301,11 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.receipt_guard_interceptor import ReceiptGuardInterceptor
         bo_framework.register_interceptor(ReceiptGuardInterceptor())
+        # [TRANSFER_ORDER 2026-11-02] 调拨单守卫（P53）：抬头组织/法人/类型校验与
+        #   派生字段回填、行类型/物料/单位/数量区间校验、终态保护（R-TO-0~R-TO-13）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.transfer_order_guard_interceptor import TransferOrderGuardInterceptor
+        bo_framework.register_interceptor(TransferOrderGuardInterceptor())
         # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
         #   服务请求行 / 请购行的行级必填。与 server.py create_app() 同位登记 ——
         #   两条启动路径缺一会静默失效。

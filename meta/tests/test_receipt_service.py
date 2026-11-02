@@ -279,5 +279,5 @@ def test_create_rejects_unsupported_source_type():
     conn = seeded_db()
     with pytest.raises(ReceiptError) as exc:
         _svc(conn).create_receipt(
-            _header(source_doc_type='transfer_order'), [])
+            _header(source_doc_type='sales_order'), [])
     assert exc.value.rule == 'RC_SOURCE_UNSUPPORTED'

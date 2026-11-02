@@ -117,6 +117,15 @@ def register_all_bo_actions(registry=None):
         cancel_handler as receipt_cancel_handler,
     )
 
+    # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
+    from meta.services.transfer_order_actions import (
+        release_handler as transfer_order_release_handler,
+        ship_handler as transfer_order_ship_handler,
+        receive_handler as transfer_order_receive_handler,
+        cancel_handler as transfer_order_cancel_handler,
+        close_handler as transfer_order_close_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -885,6 +894,133 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 37-41: 调拨单（M4） ====================
+    # 权限码双段式 `transfer_order:transfer_order_{action}`（与 v190 权限种子一致）
+    _transfer_order_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'status': {'type': 'string'},
+            'fulfillment_status': {'type': 'string'},
+            'idempotent': {'type': 'boolean'},
+            'line_count': {'type': 'integer'},
+            'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            'actual_ship_date': {'type': 'string'},
+            'receipt_no': {'type': 'string'},
+            'transfer_order_id': {'type': 'integer'},
+        }
+    }
+    registry.register(
+        'transfer_order.release',
+        transfer_order_release_handler,
+        description='调拨单下达（draft → released，校验组织 / 法人 / 行完整性）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_release',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.ship',
+        transfer_order_ship_handler,
+        description='调拨单发货（released 下累加行 qty_shipped，不建发货单 / 不碰库存）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_ship',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id', 'lines'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'ship_date': {'type': 'string'},
+                'lines': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'line_id': {'type': 'integer'},
+                            'qty': {'type': 'number'},
+                            'carrier_name': {'type': 'string'},
+                            'waybill_no': {'type': 'string'},
+                            'ship_date': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'transfer_order.receive',
+        transfer_order_receive_handler,
+        description='调拨单收货（按发运余量生成 TO 来源草稿收货单）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_receive',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'transfer_order.cancel',
+        transfer_order_cancel_handler,
+        description='调拨单取消（draft / released → cancelled，已发货拒绝取消）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_cancel',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.close',
+        transfer_order_close_handler,
+        description='调拨单关闭（released → closed，在途量为 0 且已收货）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_close',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
         requires_auth=True,
         idempotent=True,
     )

@@ -23,6 +23,7 @@ from meta.services.receipt_service import (
     DOC_CATEGORY_STANDARD,
     ReceiptError,
     ReceiptService,
+    SOURCE_TRANSFER_ORDER,
     STATUS_CANCELLED,
     STATUS_DRAFT,
     STATUS_POSTED,
@@ -57,8 +58,16 @@ class ReceiptGuardService:
 
     # ------------------------------------------------------------------ 抬头
     def prepare_create(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """归一化 BO 新建入参（单据类型 / 默认值 / 取号），返回可持久化的抬头。"""
-        header, _order, doc_type = self.service.prepare_header(dict(data or {}))
+        """归一化 BO 新建入参（单据类型 / 默认值 / 取号），返回可持久化的抬头。
+
+        调拨单来源走 `prepare_transfer_header`：跳过采购专属校验（供应商必填、
+        `schedule_id` / `order_id` 反查、超收容差），只保留通用校验与取号。
+        """
+        header = dict(data or {})
+        if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
+            header, _order, doc_type = self.service.prepare_transfer_header(header)
+        else:
+            header, _order, doc_type = self.service.prepare_header(header)
         if doc_type.get('document_category') == DOC_CATEGORY_STANDARD \
                 and not _blank(header.get('reversal_of_receipt_id')):
             raise ReceiptError('标准收货单不得引用冲销原单',

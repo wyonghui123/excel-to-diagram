@@ -162,7 +162,7 @@ fields:
         category: active
         is_initial: true
       - value: transfer_order
-        label: 转移单
+        label: 调拨单
         color: info
         category: active
       - value: work_order

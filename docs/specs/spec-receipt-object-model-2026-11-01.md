@@ -310,12 +310,12 @@ purchase_order
 | receipt → vendor_invoice | 匹配锚点 | 1:N（后置） | `receipt_line_id` | 契约见 §10 |
 | receipt → doc_flow | 只读消耗账 | — | M6 派生 | 本波不写边（§11） |
 
-### 8.2 非 PO 来源的挂载契约（本波不实现，只定字段）
+### 8.2 非 PO 来源的挂载契约（`transfer_order` 已实现，其余只定字段）
 
 | `source_doc_type` | 头锚点 | 行锚点 | 本波状态 |
 |---|---|---|---|
 | `purchase_order` | `source_doc_id=PO id` | `schedule_id` | **实现** |
-| `transfer_order` | 转移单头 | `source_line_id`（转移单计划行，后置） | 契约占位 |
+| `transfer_order` | `source_doc_id=TO id` | 调拨单行 `source_line_id` | **实现（v190，`create_from_transfer_order`）** |
 | `work_order` | 工单头 | `source_line_id`（工单产出 / 组件行，后置） | 契约占位 |
 | `sales_return` | 销售退货单 | `source_line_id`（退货行） | 契约占位 |
 | `intercompany` | ISO 头 | `source_line_id`（ISO 行） | 契约占位 |

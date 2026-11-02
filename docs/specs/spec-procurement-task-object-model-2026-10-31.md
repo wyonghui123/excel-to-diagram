@@ -40,7 +40,7 @@
 | 来源路由 | 已有：`sourcing_rule` / `sourcing_rule_line` / `sourcing_rule_assignment`；`source_type ∈ {supplier, internal_org, internal_location}`，`supplier_party_id → parties.id` | `meta/schemas/sourcing_rule_line.yaml` |
 | 供应商主体 | 只有通用 `parties`，**无供应商准入 / 绩效 / 结算条件** | 全仓无 `supplier` 表 |
 | 内部主体表达 | **已有**：`party_internal`（法人 / 管理单元台账面）、`party_relation.role`（customer / vendor）、`party_relation.internal_mark`（内｜外标记） | `meta/schemas/party_internal.yaml`、`vendor_account.yaml` §0 |
-| 采购单据 | **全缺**：无 `purchase_requisition` / `purchase_order` / 收货 / 发票 | 全仓无 `purchase*` / `receipt*` / `invoice*` |
+| 采购单据 | 2026-10-31 基线为全缺；2026-11-02 已落地 `purchase_order(+line+schedule)`（v177）、`receipt(+line)`（v186）、`transfer_order(+line)`（v190）；仍缺 `purchase_requisition`、发票 | `meta/schemas/{purchase_order,receipt,transfer_order}.yaml`、`meta/migrations/v{177,186,190}__*.py` |
 | 物料需求 | 工单侧已有 `work_order_component`；项目侧无需求行 | `meta/schemas/work_order_component.yaml` |
 | 任务与审批 | 已有：11 态、`waiting_approval`、`doc_ref` / `line_refs`、审批子任务 | `meta/core/task_schema.py` |
 | 队列 | 无（见 SSC 研究 S3） | 全仓无 `assignment_group` |
@@ -239,7 +239,7 @@ source_type（派生，不落库） = f(mode, 非空外键, party_relation.inter
 | T10 | 无内部交易标识（`is_intercompany` / 接收法人） | P0 | 内部交易混入对外销售报表会虚增收入，集团合并无法抵消 |
 | T11 | 无转移价策略对象 | P0 | 跨法人有价内部交易无价格来源，内部发票开不出 |
 | T12 | 无 `intercompany_deal_id` 锚点 | P1 | 将来升级为成对或独立内部交易对象时，数量与价格无法对齐 |
-| T13 | 收货 / 发票不支持非 PO 来源 | P1 | A 路线（ISO 收货、内部发票）落不了地 |
+| T13 | 收货 / 发票不支持非 PO 来源 | P1（部分解决） | `transfer_order` 来源已实现（v190：`create_from_transfer_order` + `receipt_line.source_line_id`）；`work_order` / `sales_return` / `intercompany` 仍待，内部发票仍缺 |
 | T14 | 无内部退货与链式交易标识 | P2 | 逆向红冲与 A→B→C 转手无法追溯 |
 | T15 | `source_type` 与 `sourcing_mode_policies.mode` 职责重叠（`production` 两处都能表达） | P1 | 同一条规则可同时被「自制策略」与「外购策略」命中，求值结果二义 |
 | T16 | 需求行无派生完成量（`fulfilled_qty`） | P1 | 需求无法闭合，只能从执行单据反推 |
