@@ -118,7 +118,7 @@
    - 项目不一致 → `PROJECT_MISMATCH`；
    - 正常路径：2 条工序 → 2 条 tasks，`line_refs == ["<op_id>"]`、`doc_ref` 一致、`status='pending'`；
    - 幂等：重复调用不新增；且只给 `project_task`（无工单）时不会生成任何 task（硬规则 1）。
-3. 接入点：`WorkOrderService.start_work_order`（New → In Progress；仅 project_task 来源调桥接）+ 专用端点 `POST /api/v1/work-orders/<id>/start`（显式事务，桥接失败整体回滚）；不改 `project_task` 现有路径；不改表结构。
+3. 接入点：`WorkOrderService.start_work_order`（New → In Progress；仅 project_task 来源调桥接）+ 专用端点 `POST /api/v1/work-orders/<id>/start`（显式事务，桥接失败整体回滚）；前端 `StateTransitionButtons` 对 `work_order` 的 `start_work_order` 改走该端点，其它迁移仍走通用 BO 更新；不改 `project_task` 现有路径；不改表结构。
 
 ### 6.3 P3-4 后半与 P3-5
 
