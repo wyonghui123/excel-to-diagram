@@ -28,6 +28,12 @@
 
 因此 G4 的剩余问题不是「项目 BOM 快照」，而是：**工程态 BOM 没有任何读写消费方，工程变更无法表达，也无法安全地把工程差异落到生产 BOM**。
 
+**定位判定（v1.1，SAP / Oracle 对标后修正）**：本设计属于 **ECM（Engineering Change Management，工程变更管理）**，不是 **ETO（Engineer-to-Order，按单设计）**。
+
+- ECM 是「变更控制机制」：谁在什么时间、因何原因、把哪一版设计 BOM 改成哪一版制造 BOM，如何生效与追溯；
+- ETO 是「业务模式」：销售订单/项目驱动，每个订单重新设计，BOM 随设计逐步成型，需要项目专用 BOM、项目库存、WBS 成本归集；
+- 两者可组合（ETO 场景变更更频繁），但本设计没有「订单驱动的项目专用 BOM」这一 ETO 核心，故只覆盖 ECM。详见文末附录 A。
+
 ## 2. 范围
 
 ### 2.1 本期做
@@ -36,6 +42,7 @@
 2. **工程变更单**：把差异固化为可评审、可审计的变更单（头 + 明细），带状态流转。
 3. **变更应用**：审批通过后，把变更明细落到 `item_structure_line`（生产结构），并保留历史行。
 4. **项目归集（可空）**：变更单可挂 `project_id`，用于项目筛选；**不改变项目 360 的五段结构**。
+5. **变更影响预览（v1.1 增补）**：`where-used` 只读分析，列出受影响的父项结构、以及已展开的在途工单（只列不改，对齐 SAP change monitor / Oracle affected objects 的最小能力）。
 
 ### 2.2 本期不做
 
@@ -285,6 +292,7 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | AC-G4-6 | 并发场景：目标结构 `revision` 变化或已有未应用变更单时，`apply` 拒绝并回滚 |
 | AC-G4-7 | 重复 `apply` 幂等；变更单 `project_id` 可空；项目 360 仍五段 |
 | AC-G4-8 | 所有动作写审计（人 / 时间 / 前后状态） |
+| AC-G4-9 | 变更单详情可查看影响预览：受影响父项结构 + 在途工单清单；预览为只读，不得修改工单或结构 |
 
 ## 12. 风险与回滚
 
@@ -311,3 +319,52 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-03 | v1.0 | 初稿：裁决 Q2（engineering 补消费方）、变更单两表、差异实时计算、apply 规则、P1/P2/P3 分期与 8 条验收 |
+| 2026-11-03 | v1.1 | SAP / Oracle 对标后校正：明确本设计为 ECM（非 ETO）；P1 增补 where-used 影响预览；新增 AC-G4-9；补充附录 A |
+
+---
+
+## 附录 A：业界对标（SAP / Oracle）与设计校正
+
+### A.1 对标对象
+
+- **SAP**：ETO 业务流程（SD 销售订单 → PS 项目/WBS → 设计/BOM/工艺 → MRP/生产订单 → 交付结算）；ECM 工程变更管理（Change Master Record）；BOM 用途键（1 生产 / 2 设计 / 3 通用 / 5 销售 / 6 成本）。
+- **Oracle**：EBS 离散制造中 `Engineering BOM` 与 `Manufacturing BOM` 分离，ECO 可由 mass change 生成并支持未来生效日；Project Manufacturing 用「项目引用 / 项目库存」支持按项目生产；Fusion PLM / NetSuite 的 `Change Order` 以受影响对象 + 审批工作流 + BOM revision 为核心。
+
+### A.2 九维对比
+
+| 维度 | SAP | Oracle | 本设计（G4） |
+|---|---|---|---|
+| 业务模式定位 | **ETO**：销售订单 + 项目/WBS + Super BOM + 项目库存；**ECM** 是独立变更机制，可与 ETO 组合 | **Project Manufacturing**（项目引用/项目库存）与 **Change Order** 分离，可组合 | **只做 ECM**；无订单驱动的项目专用 BOM |
+| BOM 种类 | 用途 1 生产 / 2 设计 / 3 通用 / 5 销售 / 6 成本 | Engineering BOM 与 Manufacturing BOM 分开 | `production / engineering` 等四值，语义对齐 SAP 用途 1/2 |
+| 变更单据 | Change Master Record（变更号）覆盖 BOM、工艺路线、物料、文档 | ECO / Change Order，关联受影响 BOM、组件、工艺 | `engineering_change` + 明细，仅 BOM |
+| 生效控制 | 日期生效，或参数生效（序列号 / 批次 / 客户等） | 日期 / 序列号 effectivity；工程 BOM 支持未来生效日 | **仅日期**（`effective_date`） |
+| 版本与历史 | 变更前后双版本保存，变更号长期可追溯 | BOM revision + ECO 历史 | 结构 `revision` + 关旧开新（`valid_to`） |
+| 影响分析 | where-used / change monitor / 按用途释放 | affected objects / where-used | **v1.1 补只读影响预览**（父项结构 + 在途工单） |
+| 审批 | 变更号审批与释放 | Approval workflow | 状态机 + approve/apply 双权限 |
+| 项目 / 订单 | ETO：WBS、项目库存、按项目成本归集 | Project Manufacturing：项目引用、项目库存 | `project_id` 可空，仅归集，不建项目 BOM |
+| 工艺路线联动 | ECM 同一变更号可覆盖 routing | 变更单可含工艺/流程变更 | 本期不联动（工艺走 `work_definition`，G3） |
+
+### A.3 结论
+
+1. **选型正确**：`usage=engineering` 对应 SAP 的「设计 BOM（用途 2）」，`production` 对应「生产 BOM（用途 1）」；两套 BOM 并行、变更单驱动 EBOM→MBOM，与 SAP ECM / Oracle ECO 属同一族。
+2. **不是 ETO**：ETO 的核心是「销售订单 → 项目专用 BOM/工艺 → 项目库存/成本」，本设计没有这一层；D5 明确不建项目 BOM 快照，故 ETO 链路不在 G4 范围。把 G4 称为 ETO 会误导评审。
+3. **最小必要补齐是影响分析**：SAP / Oracle 的变更单都以 where-used 影响面为前提；本设计原先只有「差异」，缺少「改了会影响谁」，v1.1 已补 AC-G4-9 与 P1 影响预览。
+
+### A.4 差距分级
+
+| 级别 | 差距 | 处理 |
+|---|---|---|
+| P1（本期） | where-used 影响预览（父项结构 + 在途工单，只读） | 已补入 §2.1 / AC-G4-9 |
+| P2 | ECR（变更申请）与 ECO（变更执行）分离；影响面扩展到在途采购/工单；工艺路线联动 | 真实审批诉求出现再做 |
+| P3 / 不做 | 参数化 effectivity（序列号 / 批次 / 客户）、redline 图文档、按用途释放（仅成本不生产）、项目专用 BOM（D5） | 平台无对应诉求，明确不做 |
+
+### A.5 若产品目标确实是 ETO
+
+则不能扩展 G4，应另立 **G15（按单设计链路）**，最小范围：
+
+1. 销售订单/项目 → 项目专用 BOM 与工艺（允许从标准 BOM 复制后本地修改）；
+2. 项目库存/项目引用（采购与生产按项目归集）；
+3. 项目成本归集（设计工时 + 制造工时 + 采购）。
+
+在此之前，G4 的 ECM 链路可独立交付，不会与 ETO 方案冲突。
+
