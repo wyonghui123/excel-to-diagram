@@ -73,7 +73,8 @@ CREATE TABLE calendar_shifts (
 );
 CREATE TABLE locations (
     id INTEGER PRIMARY KEY,
-    calendar_id INTEGER
+    calendar_id INTEGER,
+    org_id INTEGER
 );
 CREATE TABLE resources (
     id INTEGER PRIMARY KEY,

@@ -135,7 +135,8 @@ CREATE TABLE locations (
     id INTEGER PRIMARY KEY,
     code TEXT,
     name TEXT,
-    status TEXT DEFAULT 'active'
+    status TEXT DEFAULT 'active',
+    org_id INTEGER
 );
 CREATE TABLE receipts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,6 +151,7 @@ CREATE TABLE receipts (
     supplier_delivery_no TEXT,
     org_id INTEGER,
     purchase_org_id INTEGER,
+    inventory_org_id INTEGER,
     deliver_to_location_id INTEGER,
     project_id INTEGER,
     received_by TEXT,
@@ -560,10 +562,12 @@ def add_uom(conn, uom_id=3, status='active'):
                  [uom_id, 'UOM%s' % uom_id, '单位%s' % uom_id, status])
 
 
-def add_location(conn, location_id=7, status='active'):
+def add_location(conn, location_id=7, status='active', org_id=None):
     conn.execute(
-        'INSERT INTO locations (id, code, name, status) VALUES (?, ?, ?, ?)',
-        [location_id, 'LOC%s' % location_id, '库位%s' % location_id, status])
+        'INSERT INTO locations (id, code, name, status, org_id) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [location_id, 'LOC%s' % location_id, '库位%s' % location_id, status,
+         org_id])
 
 
 def add_master_data(conn):
@@ -571,9 +575,14 @@ def add_master_data(conn):
     add_item(conn, 901, 'service', 'active')
     add_item(conn, 902, 'goods', 'inactive')
     add_uom(conn, 3, 'active')
+    # TBD-7 库位归属种子：6/7/8 未归属（NULL，校验放行）/ 9 属调出组织 2 /
+    # 10 属调入组织 3（正确）/ 11 属组织 4（跨组织，用于反例）
     add_location(conn, 6, 'active')
     add_location(conn, 7, 'active')
     add_location(conn, 8, 'inactive')
+    add_location(conn, 9, 'active', org_id=2)
+    add_location(conn, 10, 'active', org_id=3)
+    add_location(conn, 11, 'active', org_id=4)
 
 
 # ---------------------------------------------------------------------------

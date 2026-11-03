@@ -471,8 +471,8 @@ TO 涉及两个组织。若平台数据权限只支持单字段，以 `from_org_
 | TBD-3 | 多包裹 / 多承运商发货单（独立 `transfer_shipment`） | **已关闭（v192）**：`transfer_shipment` + `transfer_shipment_line`，post 原子累加 TO `qty_shipped` |
 | TBD-4 | 请购 → 调拨自动转换（`create_from_allocation`）与 `line_type_assignment` | **已关闭（v191 + v193）**：`LineTypeResolver` 支持 scope；`transfer_order.create_from_allocation` 按分配建单 |
 | TBD-5 | `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT` 行类型 | **已关闭（v191）**：三种行类型种子，`delivery_relevant=0` |
-| TBD-6 | 收货头 `inventory_org_id`（收货库存组织） | 库存域落地或跨来源报表需要收货库存组织维度时；本波由 `source_doc_id` 回查 |
-| TBD-7 | `location` 增加 `org_id` 与组织归属校验 | 需要库位级库存与组织隔离时 |
+| TBD-6 | 收货头 `inventory_org_id`（收货库存组织） | **已关闭（v197）**：收货头增库存组织维度（可空 + 场景必填），校验库存职能与法人一致 |
+| TBD-7 | `location` 增加 `org_id` 与组织归属校验 | **已关闭（v198）**：库位增可空 `org_id`，库存相关引用校验归属 |
 | TBD-8 | 超发 / 超收容差参数 | **已关闭（v191）**：`transfer_over_ship_percent` / `transfer_over_receive_percent`，默认 0 |
 | TBD-9 | TO 审批流 | **已关闭（v194）**：`approval_status` + submit / withdraw / approve / reject + release 闸门 |
 | TBD-10 | 跨法人场景的 PO / receipt 法人一致性守卫 | **已关闭（v195）**：`purchase_orders.purchase_legal_entity_id` 快照 + 收货法人一致性守卫（R-RC-19） |

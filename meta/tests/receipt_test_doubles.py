@@ -78,6 +78,7 @@ CREATE TABLE receipts (
     supplier_delivery_no TEXT,
     org_id INTEGER,
     purchase_org_id INTEGER,
+    inventory_org_id INTEGER,
     deliver_to_location_id INTEGER,
     project_id INTEGER,
     received_by TEXT,
@@ -137,7 +138,8 @@ CREATE TABLE demand_allocations (
 );
 CREATE TABLE locations (
     id INTEGER PRIMARY KEY,
-    status TEXT
+    status TEXT,
+    org_id INTEGER
 );
 CREATE TABLE party_relations (
     id INTEGER PRIMARY KEY,
@@ -157,6 +159,17 @@ CREATE TABLE control_parameter_values (
     control_parameter_id INTEGER,
     value TEXT,
     status TEXT
+);
+CREATE TABLE orgs (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER,
+    status TEXT DEFAULT 'active'
+);
+CREATE TABLE org_functions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER,
+    function_type TEXT,
+    status TEXT DEFAULT 'active'
 );
 """
 
@@ -276,9 +289,9 @@ def add_vendor(conn, party_id=500):
         "VALUES ('vendor', ?, 1, 'active')", [party_id])
 
 
-def add_location(conn, location_id=7, status='active'):
-    conn.execute('INSERT INTO locations (id, status) VALUES (?, ?)',
-                 [location_id, status])
+def add_location(conn, location_id=7, status='active', org_id=None):
+    conn.execute('INSERT INTO locations (id, status, org_id) VALUES (?, ?, ?)',
+                 [location_id, status, org_id])
 
 
 def add_tolerance(conn, percent=0, param_id=1):
@@ -286,6 +299,35 @@ def add_tolerance(conn, percent=0, param_id=1):
         'INSERT INTO control_parameter_defs (id, code, default_value, status) '
         "VALUES (?, 'receipt_over_tolerance_percent', ?, 'active')",
         [param_id, str(percent)])
+
+
+def add_org(conn, org_id, parent_id=None, status='active'):
+    conn.execute(
+        'INSERT INTO orgs (id, parent_id, status) VALUES (?, ?, ?)',
+        [org_id, parent_id, status])
+
+
+def add_org_function(conn, org_id, function_type='inventory',
+                     status='active'):
+    conn.execute(
+        'INSERT INTO org_functions (org_id, function_type, status) '
+        'VALUES (?, ?, ?)', [org_id, function_type, status])
+
+
+def add_org_tree(conn):
+    """法人 1 / 10；2 为法人 1 下的库存组织；3 停用；4 无 inventory 职能；
+    11 属法人 10（跨法人）。"""
+    add_org(conn, 1)
+    add_org_function(conn, 1, 'legal_entity')
+    add_org(conn, 2, parent_id=1)
+    add_org_function(conn, 2, 'inventory')
+    add_org(conn, 3, parent_id=1, status='inactive')
+    add_org_function(conn, 3, 'inventory')
+    add_org(conn, 4, parent_id=1)
+    add_org(conn, 10)
+    add_org_function(conn, 10, 'legal_entity')
+    add_org(conn, 11, parent_id=10)
+    add_org_function(conn, 11, 'inventory')
 
 
 def add_po_allocation(conn, schedule_id=1, demand_line_id=1, qty=100.0,
@@ -305,10 +347,15 @@ def seeded_db(percent=0, with_vendor=True, with_po_allocation=True,
     """标准场景：PO + 行 + 到货计划行 + 合法 vendor + 库位 + 可选容差。"""
     conn = build_db()
     add_types(conn)
+    add_org_tree(conn)
     add_order(conn)
     add_order_line(conn)
     add_schedule(conn, promised_qty=promised_qty)
+    # TBD-7 库位归属种子：7 未归属（默认收货库位，校验放行）/ 8 属库存组织 2
+    # （正确）/ 9 属组织 4（跨组织，用于反例）
     add_location(conn)
+    add_location(conn, 8, org_id=2)
+    add_location(conn, 9, org_id=4)
     if with_vendor:
         add_vendor(conn)
     if with_po_allocation:

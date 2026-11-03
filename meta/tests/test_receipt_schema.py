@@ -18,8 +18,8 @@ RECEIPT_FIELDS = {
     'id', 'receipt_no', 'receipt_date',
     'actual_arrival_date', 'source_doc_type', 'source_doc_id', 'source_doc_no',
     'supplier_party_id', 'supplier_delivery_no', 'org_id', 'purchase_org_id',
-    'deliver_to_location_id', 'project_id', 'received_by', 'status',
-    'reversal_of_receipt_id', 'remark', 'created_at', 'updated_at',
+    'inventory_org_id', 'deliver_to_location_id', 'project_id', 'received_by',
+    'status', 'reversal_of_receipt_id', 'remark', 'created_at', 'updated_at',
 }
 
 RECEIPT_LINE_FIELDS = {

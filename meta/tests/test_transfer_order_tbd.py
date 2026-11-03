@@ -706,6 +706,48 @@ def test_validate_release_respects_approval_gate():
 
 
 # ===========================================================================
+# 7.5 库位组织归属（TBD-7 / v198）
+# ===========================================================================
+def _location_header(**extra):
+    data = {
+        'document_type_id': TO_STANDARD_TYPE_ID,
+        'transfer_date': '2026-11-02',
+        'from_org_id': 2,
+        'to_org_id': 3,
+        'from_location_id': None,
+        'to_location_id': None,
+    }
+    data.update(extra)
+    return data
+
+
+def test_location_org_allows_unassigned_locations():
+    """库位 6 / 7 的 org_id 为空（共享场地）⇒ 归属校验放行。"""
+    conn = seeded_db()
+    header = to_guard(conn).validate_create(
+        _location_header(from_location_id=6, to_location_id=7))
+    assert (header['from_location_id'], header['to_location_id']) == (6, 7)
+
+
+def test_location_org_accepts_matching_orgs():
+    """库位 9 属组织 2 / 库位 10 属组织 3 ⇒ 与 from_org / to_org 一致。"""
+    conn = seeded_db()
+    header = to_guard(conn).validate_create(
+        _location_header(from_location_id=9, to_location_id=10))
+    assert header['from_org_id'] == 2 and header['to_org_id'] == 3
+
+
+@pytest.mark.parametrize('field', ['from_location_id', 'to_location_id'])
+def test_location_org_rejects_mismatch(field):
+    """库位 11 属组织 4 ⇒ 与 from_org 2 / to_org 3 均不一致。"""
+    conn = seeded_db()
+    with pytest.raises(TransferOrderError) as exc:
+        to_guard(conn).validate_create(_location_header(**{field: 11}))
+    assert exc.value.rule == 'TO_LOCATION_ORG_MISMATCH'
+    assert exc.value.field_name == field
+
+
+# ===========================================================================
 # 7. 采购法人一致性（v195）
 # ===========================================================================
 def _po_write_data(**extra):

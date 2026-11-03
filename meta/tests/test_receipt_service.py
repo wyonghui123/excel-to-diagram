@@ -67,6 +67,64 @@ def test_create_applies_defaults_and_allocates_number():
     assert line['status'] == 'draft'
 
 
+def test_create_derives_inventory_org_from_purchase_org():
+    conn = seeded_db()
+    conn.execute('UPDATE purchase_orders SET purchase_org_id = 2 WHERE id = 1')
+    conn.commit()
+    result = _create(_svc(conn))
+    assert _row(conn, 'receipts', result['id'])['inventory_org_id'] == 2
+
+
+def test_create_leaves_inventory_org_blank_when_purchase_org_lacks_inventory():
+    conn = seeded_db()  # 种子采购组织 1 只有 legal_entity 职能
+    result = _create(_svc(conn))
+    assert _row(conn, 'receipts', result['id'])['inventory_org_id'] is None
+
+
+def test_create_accepts_valid_inventory_org():
+    conn = seeded_db()
+    result = _create(_svc(conn), header={'inventory_org_id': 2})
+    assert _row(conn, 'receipts', result['id'])['inventory_org_id'] == 2
+
+
+@pytest.mark.parametrize('inventory_org_id, rule', [
+    (3, 'RC_INVENTORY_ORG_INVALID'),
+    (4, 'RC_INVENTORY_ORG_NOT_INVENTORY'),
+    (11, 'RC_INVENTORY_ORG_LEGAL_MISMATCH'),
+])
+def test_create_rejects_invalid_inventory_org(inventory_org_id, rule):
+    conn = seeded_db()
+    with pytest.raises(ReceiptError) as exc:
+        _create(_svc(conn), header={'inventory_org_id': inventory_org_id})
+    assert exc.value.rule == rule
+    assert exc.value.field_name == 'inventory_org_id'
+
+
+def test_create_accepts_location_belonging_to_inventory_org():
+    """TBD-7：库位 8 属组织 2，与收货库存组织 2 一致 ⇒ 通过。"""
+    conn = seeded_db()
+    result = _create(_svc(conn), header={'inventory_org_id': 2,
+                                         'deliver_to_location_id': 8})
+    assert _row(conn, 'receipts', result['id'])['deliver_to_location_id'] == 8
+
+
+def test_create_rejects_location_of_other_org():
+    """TBD-7：库位 9 属组织 4，与收货库存组织 2 不一致 ⇒ 拒绝。"""
+    conn = seeded_db()
+    with pytest.raises(ReceiptError) as exc:
+        _create(_svc(conn), header={'inventory_org_id': 2,
+                                    'deliver_to_location_id': 9})
+    assert exc.value.rule == 'RC_LOCATION_ORG_MISMATCH'
+    assert exc.value.field_name == 'deliver_to_location_id'
+
+
+def test_create_skips_location_org_check_when_unassigned():
+    """TBD-7：默认收货库位 7 未归属组织（org_id 空）⇒ 不阻断。"""
+    conn = seeded_db()
+    result = _create(_svc(conn), header={'inventory_org_id': 2})
+    assert _row(conn, 'receipts', result['id'])['deliver_to_location_id'] == 7
+
+
 def test_create_rejects_schedule_of_another_order():
     conn = seeded_db()
     add_order(conn, oid=2, order_no='PO-0002')

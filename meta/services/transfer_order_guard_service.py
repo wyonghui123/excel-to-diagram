@@ -186,6 +186,9 @@ class TransferOrderGuardService:
             raise TransferOrderError(
                 '调出库位与调入库位不能相同', field_name='to_location_id',
                 rule='TO_LOCATION_SAME')
+        # TBD-7：库位所属组织（org_id 非空时）必须与对应组织一致
+        self._require_location_orgs(from_location, from_org_id,
+                                    to_location, to_org_id)
         return header
 
     def validate_update(self, data: Dict[str, Any],
@@ -610,6 +613,39 @@ class TransferOrderGuardService:
             raise TransferOrderError(
                 '类型 %s 已停用' % row.get('code'),
                 field_name=field_name, rule=rule)
+
+    def _require_location_orgs(self, from_location_id: Any, from_org_id: Any,
+                               to_location_id: Any, to_org_id: Any) -> None:
+        """TBD-7：一次查询两条库位；`locations.org_id` 非空时必须等于对应组织。
+
+        空值（库位未归属 / 共享场地 / 旧库缺列）一律放行，不阻断保存。
+        """
+        pairs = []
+        if not _blank(from_location_id):
+            pairs.append((from_location_id, from_org_id, 'from_location_id'))
+        if not _blank(to_location_id):
+            pairs.append((to_location_id, to_org_id, 'to_location_id'))
+        if not pairs:
+            return
+        ids = [pair[0] for pair in pairs]
+        try:
+            rows = self._query(
+                'SELECT id, org_id FROM %s WHERE id IN (%s)'
+                % (LOCATION_TABLE, ', '.join(['?'] * len(ids))), ids)
+        except Exception as error:  # noqa: BLE001 - 旧库缺 org_id 列不阻断
+            logger.warning('[transfer_order_guard] 读取库位归属失败: %s', error)
+            return
+        org_by_location = {str(r.get('id')): r.get('org_id') for r in rows}
+        for location_id, org_id, field_name in pairs:
+            location_org = org_by_location.get(str(location_id))
+            if _blank(location_org):
+                continue
+            if str(location_org) != str(org_id):
+                raise TransferOrderError(
+                    '库位 %s 所属组织 %s 与%s %s 不一致'
+                    % (location_id, location_org, field_name, org_id),
+                    field_name=field_name,
+                    rule='TO_LOCATION_ORG_MISMATCH')
 
     def _require_inventory_org(self, org_id: Any, field_name: str) -> None:
         """组织存在、启用且具备 `inventory` 职能（R-TO-1）。"""

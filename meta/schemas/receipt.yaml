@@ -354,6 +354,52 @@ fields:
       multiple: false
       clearable: true
 
+  # TBD-6（v197）：收货库存组织（对应 Oracle SHIP_TO_ORG_ID），与收货法人
+  # org_id 正交。由来源单据带出（TO = to_org_id；PO = purchase_org_id 且具备
+  # inventory 职能时），只读、不改写 org_id 的法人语义（v195 校验不变）。
+  - id: inventory_org_id
+    name: 收货库存组织
+    type: integer
+    db_column: inventory_org_id
+    nullable: true
+    description: 收货库存组织（与收货法人 org_id 正交；由来源单据只读带出）
+    semantics:
+      meaning: 收货后归属的库存组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      readonly: true
+
   - id: deliver_to_location_id
     name: 收货地点
     type: integer
@@ -684,6 +730,8 @@ ui_view_config:
         width: 160
       - field: purchase_org_id
         width: 160
+      - field: inventory_org_id
+        width: 160
       - field: deliver_to_location_id
         width: 160
       - field: actual_arrival_date
@@ -728,7 +776,8 @@ ui_view_config:
       - title: 组织与地点
         columns:
           - fields: [org_id, purchase_org_id]
-          - fields: [deliver_to_location_id, project_id]
+          - fields: [inventory_org_id, deliver_to_location_id]
+          - fields: [project_id]
       - title: 其他
         columns:
           - fields: [actual_arrival_date, received_by]

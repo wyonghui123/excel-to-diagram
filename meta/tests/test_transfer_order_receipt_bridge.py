@@ -68,6 +68,7 @@ def test_create_maps_header_and_only_open_balances():
     assert header['source_doc_no'] == 'TRF-202611-000001'
     # 收货方法人取调拨单 legal_entity_id；采购专属字段置空
     assert header['org_id'] == 1
+    assert header['inventory_org_id'] == 3
     assert header['purchase_org_id'] is None
     assert header['supplier_party_id'] is None
     assert header['deliver_to_location_id'] == 7
@@ -186,6 +187,7 @@ def test_reverse_restores_qty_and_reopens_auto_closed_order():
     assert red['document_type_id'] == 2
     assert red['reversal_of_receipt_id'] == receipt['id']
     assert red['status'] == 'posted'
+    assert red['inventory_org_id'] == 3
     assert _receipt_header(conn, receipt['id'])['status'] == 'reversed'
 
 

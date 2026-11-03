@@ -44,6 +44,9 @@ LOCATION_TABLE = 'locations'
 PARTY_RELATION_TABLE = 'party_relations'
 PARAM_TABLE = 'control_parameter_defs'
 PARAM_VALUE_TABLE = 'control_parameter_values'
+ORG_TABLE = 'orgs'
+ORG_FUNCTION_TABLE = 'org_functions'
+FUNCTION_INVENTORY = 'inventory'
 
 SOURCE_PURCHASE_ORDER = 'purchase_order'
 SOURCE_TRANSFER_ORDER = 'transfer_order'
@@ -219,6 +222,11 @@ class ReceiptService:
         header['purchase_org_id'] = None
         header['supplier_party_id'] = None
         header['deliver_to_location_id'] = transfer_order.get('to_location_id')
+        # TBD-6：收货库存组织 = 调拨单收货组织（与法人 org_id 正交）
+        header['inventory_org_id'] = transfer_order.get('to_org_id')
+        self._validate_inventory_org(header)
+        # TBD-7：收货库位所属组织（org_id 非空时）须等于收货库存组织
+        self._validate_location_org(header)
         receipt_no = header.get('receipt_no') or self.allocate_receipt_no(
             doc_type['id'], receipt_date)
         if _blank(receipt_no):
@@ -256,6 +264,7 @@ class ReceiptService:
             'supplier_delivery_no': header.get('supplier_delivery_no'),
             'org_id': header.get('org_id'),
             'purchase_org_id': header.get('purchase_org_id'),
+            'inventory_org_id': header.get('inventory_org_id'),
             'deliver_to_location_id': header.get('deliver_to_location_id'),
             'project_id': header.get('project_id'),
             'received_by': header.get('received_by'),
@@ -511,6 +520,7 @@ class ReceiptService:
             'supplier_delivery_no': header.get('supplier_delivery_no'),
             'org_id': header.get('org_id'),
             'purchase_org_id': header.get('purchase_org_id'),
+            'inventory_org_id': header.get('inventory_org_id'),
             'deliver_to_location_id': header.get('deliver_to_location_id'),
             'project_id': header.get('project_id'),
             'received_by': header.get('received_by'),
@@ -627,6 +637,7 @@ class ReceiptService:
             'supplier_delivery_no': header.get('supplier_delivery_no'),
             'org_id': header.get('org_id'),
             'purchase_org_id': None,
+            'inventory_org_id': header.get('inventory_org_id'),
             'deliver_to_location_id': header.get('deliver_to_location_id'),
             'project_id': header.get('project_id'),
             'received_by': header.get('received_by'),
@@ -1185,7 +1196,96 @@ class ReceiptService:
                 '收货组织 %s 与采购订单法人 %s 不一致'
                 % (header['org_id'], purchase_legal_entity_id),
                 field_name='org_id', rule='RC_LEGAL_ENTITY_MISMATCH')
+        # TBD-6：PO 来源收货库存组织 = 采购组织（须具备 inventory 职能），否则留空
+        if _blank(header.get('inventory_org_id')):
+            header['inventory_org_id'] = self._inventory_org_from_purchase(order)
+        self._validate_inventory_org(header)
+        # TBD-7：收货库位所属组织（org_id 非空时）须等于收货库存组织
+        self._validate_location_org(header)
         return header
+
+    def _inventory_org_from_purchase(self, order: Dict[str, Any]) -> Optional[Any]:
+        """采购订单来源的收货库存组织：`purchase_org_id` 具 inventory 职能才取。"""
+        purchase_org_id = order.get('purchase_org_id')
+        if _blank(purchase_org_id):
+            return None
+        try:
+            if self._inventory_guard()._org_has_function(
+                    purchase_org_id, FUNCTION_INVENTORY):
+                return purchase_org_id
+        except Exception as e:  # noqa: BLE001 - 旧环境 / 替身缺职能表
+            logger.debug('[receipt] 读取采购组织 %s 职能失败，留空库存组织: %s',
+                         purchase_org_id, e)
+        return None
+
+    def _inventory_guard(self):
+        """复用调拨守卫的组织读取 / 上溯口径（不重写法人与职能解析）。"""
+        from meta.services.transfer_order_guard_service import (
+            TransferOrderGuardService)
+        return TransferOrderGuardService(self.ds)
+
+    def _validate_inventory_org(self, header: Dict[str, Any]) -> None:
+        """TBD-6：收货库存组织非空时校验（存在且启用 / 库存职能 / 法人一致）。"""
+        inventory_org_id = header.get('inventory_org_id')
+        if _blank(inventory_org_id):
+            return
+        guard = self._inventory_guard()
+        try:
+            org = guard._load_org(inventory_org_id)
+        except Exception as e:  # noqa: BLE001 - 旧环境 / 替身缺组织表
+            logger.debug('[receipt] 读取组织 %s 失败，跳过库存组织校验: %s',
+                         inventory_org_id, e)
+            return
+        status = str((org or {}).get('status') or '').strip().lower()
+        if org is None or (status and status != 'active'):
+            raise ReceiptError(
+                '收货库存组织 %s 不存在或未启用' % inventory_org_id,
+                field_name='inventory_org_id', rule='RC_INVENTORY_ORG_INVALID')
+        if not guard._org_has_function(inventory_org_id, FUNCTION_INVENTORY):
+            raise ReceiptError(
+                '收货库存组织 %s 不具备库存职能' % inventory_org_id,
+                field_name='inventory_org_id',
+                rule='RC_INVENTORY_ORG_NOT_INVENTORY')
+        legal_entity_id = guard._resolve_org_legal_entity(inventory_org_id)
+        if _blank(legal_entity_id) \
+                or str(legal_entity_id) != str(header.get('org_id')):
+            raise ReceiptError(
+                '收货库存组织 %s 所属法人 %s 与收货单法人 %s 不一致'
+                % (inventory_org_id, legal_entity_id, header.get('org_id')),
+                field_name='inventory_org_id',
+                rule='RC_INVENTORY_ORG_LEGAL_MISMATCH')
+
+    def _validate_location_org(self, header: Dict[str, Any]) -> None:
+        """TBD-7：收货库位 `locations.org_id` 非空时须等于收货库存组织。
+
+        库存组织为空时回退收货法人 `org_id`；库位未归属（NULL）或旧库缺列放行。
+        """
+        location_id = header.get('deliver_to_location_id')
+        if _blank(location_id):
+            return
+        inventory_org_id = header.get('inventory_org_id')
+        if _blank(inventory_org_id):
+            inventory_org_id = header.get('org_id')
+        if _blank(inventory_org_id):
+            return
+        try:
+            rows = self.ds.query(
+                'SELECT id, org_id FROM locations WHERE id = ?', [location_id])
+        except Exception as e:  # noqa: BLE001 - 旧库缺 org_id 列不阻断
+            logger.debug('[receipt] 读取库位 %s 归属失败，跳过校验: %s',
+                         location_id, e)
+            return
+        if not rows:
+            return
+        location_org = rows[0].get('org_id')
+        if _blank(location_org):
+            return
+        if str(location_org) != str(inventory_org_id):
+            raise ReceiptError(
+                '收货库位 %s 所属组织 %s 与收货库存组织 %s 不一致'
+                % (location_id, location_org, inventory_org_id),
+                field_name='deliver_to_location_id',
+                rule='RC_LOCATION_ORG_MISMATCH')
 
     # ------------------------------------------------------------------ 持久化
     def _insert_header(self, row: Dict[str, Any]) -> int:
@@ -1339,8 +1439,8 @@ class ReceiptService:
             'SELECT id, receipt_no, document_type_id, receipt_date, '
             'actual_arrival_date, source_doc_type, source_doc_id, source_doc_no, '
             'supplier_party_id, supplier_delivery_no, org_id, purchase_org_id, '
-            'deliver_to_location_id, project_id, received_by, status, '
-            'reversal_of_receipt_id FROM %s WHERE id = ?' % HEADER_TABLE,
+            'inventory_org_id, deliver_to_location_id, project_id, received_by, '
+            'status, reversal_of_receipt_id FROM %s WHERE id = ?' % HEADER_TABLE,
             [receipt_id])
         if not rows:
             raise ReceiptError('收货单不存在', field_name='id',

@@ -406,14 +406,14 @@ python d:\filework\test.py --failed
 
 ### T8.4 验收清单
 
-- [ ] v190 verify PASS
-- [ ] schema 注册无报错
-- [ ] 四个新测试文件全绿
-- [ ] 既有收货 / PO / 需求分配测试全绿
-- [ ] TO 全链路（create → release → ship → receive → post → close）可跑
-- [ ] 收货红冲回退 TO 数量与状态
-- [ ] 代码无库存域依赖、无金额字段
-- [ ] 菜单不被 `init_menu_permissions.py` 清理
+- [x] v190 verify PASS
+- [x] schema 注册无报错
+- [x] 四个新测试文件全绿
+- [x] 既有收货 / PO / 需求分配测试全绿
+- [x] TO 全链路（create → release → ship → receive → post → close）可跑
+- [x] 收货红冲回退 TO 数量与状态
+- [x] 代码无库存域依赖、无金额字段
+- [x] 菜单不被 `init_menu_permissions.py` 清理
 
 ---
 
@@ -455,7 +455,7 @@ feat(transfer-order): add transfer order object model and receipt bridge
 
 ## 12. TBD 关闭任务（v191 → v195，库存域除外）
 
-> 用户指令：`除了库存 其他继续完成`。TBD-1 / TBD-6 / TBD-7 保持冻结。
+> 用户指令：`除了库存 其他继续完成`。TBD-1 保持冻结；TBD-6 / TBD-7 已解冻（v197 / v198，库存边界补强）。
 
 ### B1 `v191__transfer_order_tbd_b1.py` + 服务
 
