@@ -6,7 +6,7 @@
 - 归属：**独立专题（ECM 工程变更管理）**，不占 project 轨里程碑 M4；project 轨对其无硬依赖，属非阻塞项
 - 关联主 Spec：[`spec-project-type-object-model-research-2026-10-31.md`](./spec-project-type-object-model-research-2026-10-31.md) §3 G4 / §7 Q2 / §8.4 D5
 - 关联对象：`items` / `item_structure` / `item_structure_line` / `work_order_components` / `work_definition`
-- 迁移编号：预计 `v196`（当前仓库最大 `v195`，以实际落地时为准）
+- 迁移编号：预计 `v198`（当前仓库最大 `v196`＝`batch_foundation`；`v197` 已被 P5 批次策略方案预占，以实际落地时为准）
 
 ---
 
@@ -267,7 +267,7 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 
 | 项 | 内容 |
 |---|---|
-| 迁移 | `v196__engineering_change.py`：建 `engineering_changes` / `engineering_change_lines` + 索引；`verify / migrate / rollback`（rollback 先删明细表再删头表） |
+| 迁移 | `v198__engineering_change.py`：建 `engineering_changes` / `engineering_change_lines` + 索引；`verify / migrate / rollback`（rollback 先删明细表再删头表） |
 | YAML | `meta/schemas/engineering_change.yaml`、`engineering_change_line.yaml`（`skip_generic_api` / `requires_state_machine` / `rules` 状态迁移） |
 | 菜单 | 工程变更单菜单节点（挂在物料 / BOM 域下） |
 | 权限 | `engineering_change:*` 四个权限键 |
