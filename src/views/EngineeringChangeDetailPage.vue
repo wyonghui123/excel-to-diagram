@@ -315,9 +315,15 @@ const breadcrumbs = computed(() => {
   return crumbs
 })
 
-const hasCreate = computed(() => can('create', { objectType: 'engineering_change', authStore }))
-const hasApprove = computed(() => can('approve', { objectType: 'engineering_change', authStore }))
-const hasApply = computed(() => can('apply', { objectType: 'engineering_change', authStore }))
+const hasCreate = computed(
+  () => can('engineering_change_create', { objectType: 'engineering_change', authStore })
+)
+const hasApprove = computed(
+  () => can('engineering_change_approve', { objectType: 'engineering_change', authStore })
+)
+const hasApply = computed(
+  () => can('engineering_change_apply', { objectType: 'engineering_change', authStore })
+)
 const status = computed(() => change.value?.status)
 
 const canSubmit = computed(() => status.value === 'draft' && hasCreate.value)

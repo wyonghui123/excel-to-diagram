@@ -335,8 +335,10 @@ class TestMigration:
             "SELECT code FROM permissions WHERE resource_type = "
             "'engineering_change' ORDER BY code").fetchall()
         assert [r[0] for r in rows] == [
-            'engineering_change:apply', 'engineering_change:approve',
-            'engineering_change:create', 'engineering_change:view']
+            'engineering_change:engineering_change_apply',
+            'engineering_change:engineering_change_approve',
+            'engineering_change:engineering_change_create',
+            'engineering_change:engineering_change_view']
         assert conn.execute(
             "SELECT COUNT(*) FROM enum_values WHERE enum_type_id = "
             "'engineering_change_status'").fetchone()[0] == 6

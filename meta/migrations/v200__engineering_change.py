@@ -15,7 +15,8 @@
     仅用于 apply / approve 的并发改版拒绝（spec §6.4 前置校验 2）。
   · 枚举：`engineering_change_status` / `engineering_change_type` /
     `engineering_change_line_type`。
-  · 权限：engineering_change:view / create / approve / apply（4 个），授予 admin / default。
+  · 权限：engineering_change:engineering_change_{view/create/approve/apply}（双段式，4 个），
+    授予 admin / default；单段式旧码在升级时退役。
   · 菜单：`engineering-change` 挂 master-data（sort_order=105，v196 批次占 104）。
 
 幂等:
@@ -133,7 +134,7 @@ ACTION_LABEL = {
     'view': '查看', 'create': '新建', 'approve': '批准', 'apply': '应用',
 }
 PERMISSIONS = tuple(
-    ('engineering_change:%s' % action,
+    ('engineering_change:engineering_change_%s' % action,
      '工程变更单%s' % ACTION_LABEL[action], 'engineering_change', action)
     for action in ('view', 'create', 'approve', 'apply')
 )
@@ -248,6 +249,42 @@ def _do_enums(conn: sqlite3.Connection) -> None:
                 (type_id, code, value_name, name_en, sort_order),
             )
             print(f'    - [NEW] 枚举值 {type_id}.{code}')
+
+
+LEGACY_CODES = tuple(
+    'engineering_change:%s' % action
+    for action in ('view', 'create', 'approve', 'apply')
+)
+
+
+def _retire_legacy_codes(conn: sqlite3.Connection) -> None:
+    """单段式 legacy 权限码（engineering_change:view 等）退役。
+
+    项目约定是双段式 `{bo}:{bo}_{action}`；单段式不会报错，只会让非 admin
+    角色静默看不到按钮。旧码从未发版，这里直接删行（含授权/菜单绑定）。
+    """
+    removed = 0
+    if _table_exists(conn, 'permission_set_permissions'):
+        cols = _columns(conn, 'permission_set_permissions')
+        code_col = 'permission_code' if 'permission_code' in cols else None
+        if code_col:
+            cur = conn.execute(
+                'DELETE FROM permission_set_permissions WHERE %s IN (%s)'
+                % (code_col, ','.join('?' * len(LEGACY_CODES))), LEGACY_CODES)
+            removed += cur.rowcount
+    if _table_exists(conn, 'menu_permissions'):
+        if 'permission_code' in _columns(conn, 'menu_permissions'):
+            cur = conn.execute(
+                'DELETE FROM menu_permissions WHERE permission_code IN (%s)'
+                % ','.join('?' * len(LEGACY_CODES)), LEGACY_CODES)
+            removed += cur.rowcount
+    if _table_exists(conn, 'permissions'):
+        cur = conn.execute(
+            'DELETE FROM permissions WHERE code IN (%s)'
+            % ','.join('?' * len(LEGACY_CODES)), LEGACY_CODES)
+        removed += cur.rowcount
+    if removed:
+        print(f'  - [DROP] {removed} 条单段式 legacy 权限行')
 
 
 def _do_permissions(conn: sqlite3.Connection) -> None:
@@ -408,6 +445,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
         _ensure_audit_columns(conn)
         _do_indexes(conn)
         _do_enums(conn)
+        _retire_legacy_codes(conn)
         _do_permissions(conn)
         _do_grants(conn)
         _do_menus(conn)

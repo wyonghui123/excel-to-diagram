@@ -1071,6 +1071,14 @@ def create_app(db_path=None):
     #   两条启动路径必须同址登记：waitress 走本函数，app_builder 另有一份。
     from meta.api.engineering_change_api import engineering_change_bp
     app.register_blueprint(engineering_change_bp)
+    # [项目轨 G6/G13/G14 2026-11-03] 项目 360 / 工单执行 / 人力负荷：app_builder
+    #   已登记，生产入口这里补齐（否则运行态 405/410）。
+    from meta.api.project_overview_api import project_overview_bp
+    from meta.api.labor_api import labor_bp
+    from meta.api.work_order_api import work_order_bp
+    app.register_blueprint(project_overview_bp)
+    app.register_blueprint(labor_bp)
+    app.register_blueprint(work_order_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1192,6 +1200,11 @@ def create_app(db_path=None):
         # [ECM G4 2026-11-03] 工程变更单是独立 Blueprint 的域内命令端点，
         # 非 BO CRUD；不列入会被本中间件按"其他 v1 路径"误判为 410。
         'engineering-changes',  # /api/v1/engineering-changes/*（列表/diff/动作/where-used）
+        # [项目轨 G6/G13/G14 2026-11-03] 项目 360 / 工单执行 / 人力负荷 同为独立
+        # Blueprint 的域内命令端点；缺白名单会被本中间件误判为 410。
+        'projects',     # /api/v1/projects/<id>/overview — 项目 360
+        'work-orders',  # /api/v1/work-orders/<id>/start — 工单执行动作
+        'labor',        # /api/v1/labor/* — 项目任务 / 人力负荷
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

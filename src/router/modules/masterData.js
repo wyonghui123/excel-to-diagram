@@ -19,7 +19,7 @@ export default [
     meta: {
       title: '工程变更',
       requiresAuth: true,
-      requiredPermissions: ['engineering_change:view']
+      requiredPermissions: ['engineering_change:engineering_change_view']
     }
   },
   {
@@ -29,7 +29,7 @@ export default [
     meta: {
       title: '工程变更差异预览',
       requiresAuth: true,
-      requiredPermissions: ['engineering_change:view']
+      requiredPermissions: ['engineering_change:engineering_change_view']
     }
   },
   {
@@ -39,7 +39,7 @@ export default [
     meta: {
       title: '工程变更详情',
       requiresAuth: true,
-      requiredPermissions: ['engineering_change:view']
+      requiredPermissions: ['engineering_change:engineering_change_view']
     }
   }
 ]

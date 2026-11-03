@@ -142,10 +142,10 @@ async function mountPage(status = 'draft', permissions = null) {
 
   setPermissions(
     permissions || [
-      'engineering_change:view',
-      'engineering_change:create',
-      'engineering_change:approve',
-      'engineering_change:apply'
+      'engineering_change:engineering_change_view',
+      'engineering_change:engineering_change_create',
+      'engineering_change:engineering_change_approve',
+      'engineering_change:engineering_change_apply'
     ]
   )
 
@@ -205,8 +205,8 @@ describe('EngineeringChangeDetailPage', () => {
 
   it('无 approve 权限时 in_review 不显示批准/驳回', async () => {
     const w = await mountPage('in_review', [
-      'engineering_change:view',
-      'engineering_change:create'
+      'engineering_change:engineering_change_view',
+      'engineering_change:engineering_change_create'
     ])
 
     expect(w.find('[data-test="ec-action-approve"]').exists()).toBe(false)
