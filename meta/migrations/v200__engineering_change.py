@@ -197,6 +197,28 @@ def _do_indexes(conn: sqlite3.Connection) -> None:
         _create_index(conn, table, name, sql)
 
 
+# 后端启动会按 YAML 自动建表；若先于迁移发生，CREATE TABLE IF NOT EXISTS 会
+# 跳过整表，留下缺审计列的半成品。这里按列补齐（仅审计列，均为可空）。
+AUDIT_COLUMNS = (
+    ('created_by', 'VARCHAR(200)'),
+    ('updated_by', 'VARCHAR(200)'),
+    ('created_at', 'DATETIME'),
+    ('updated_at', 'DATETIME'),
+)
+
+
+def _ensure_audit_columns(conn: sqlite3.Connection) -> None:
+    for table, _ddl in TABLES:
+        existing = _columns(conn, table)
+        if not existing:
+            continue
+        for name, col_type in AUDIT_COLUMNS:
+            if name in existing:
+                continue
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {col_type}')
+            print(f'  - [ALTER] {table}.{name} 补齐审计列')
+
+
 def _do_enums(conn: sqlite3.Connection) -> None:
     if not (_table_exists(conn, 'enum_types') and _table_exists(conn, 'enum_values')):
         print('  - enum_types / enum_values 不存在, 跳过枚举种子')
@@ -383,6 +405,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     try:
         print('[v200] 开始: G4 工程变更单（engineering_changes + engineering_change_lines）')
         _do_tables(conn)
+        _ensure_audit_columns(conn)
         _do_indexes(conn)
         _do_enums(conn)
         _do_permissions(conn)

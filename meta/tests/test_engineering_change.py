@@ -60,7 +60,7 @@ CREATE TABLE projects (
 );
 CREATE TABLE items (
     id INTEGER PRIMARY KEY,
-    item_no TEXT,
+    code TEXT,
     name TEXT,
     item_type TEXT,
     status TEXT
@@ -166,7 +166,7 @@ class _DS:
 def _seed(conn):
     conn.executescript("""
         INSERT INTO projects (id, project_no, name) VALUES (10, 'P-10', '项目十');
-        INSERT INTO items (id, item_no, name, item_type, status) VALUES
+        INSERT INTO items (id, code, name, item_type, status) VALUES
             (100, 'I-100', '整机', 'goods', 'active'),
             (200, 'I-200', '组件A', 'goods', 'active'),
             (201, 'I-201', '组件B', 'goods', 'active'),

@@ -1067,6 +1067,10 @@ def create_app(db_path=None):
     # [销售订单 W1-A 2026-10-25] 重新取价端点。
     from meta.api.sales_order_pricing_api import sales_order_pricing_bp
     app.register_blueprint(sales_order_pricing_bp)
+    # [项目 G4 2026-11-03] 工程变更单（diff 预览 / 提交 / 批准 / 应用 / 影响预览）。
+    #   两条启动路径必须同址登记：waitress 走本函数，app_builder 另有一份。
+    from meta.api.engineering_change_api import engineering_change_bp
+    app.register_blueprint(engineering_change_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1185,6 +1189,9 @@ def create_app(db_path=None):
         # [BOM P4 2026-10-25] 配置求解/取价/匹配是独立 Blueprint 的域内命令端点，
         # 非 BO CRUD；不列入会被本中间件按"其他 v1 路径"误判为 410。
         'config',       # /api/v1/config/solve、/price、/match
+        # [ECM G4 2026-11-03] 工程变更单是独立 Blueprint 的域内命令端点，
+        # 非 BO CRUD；不列入会被本中间件按"其他 v1 路径"误判为 410。
+        'engineering-changes',  # /api/v1/engineering-changes/*（列表/diff/动作/where-used）
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

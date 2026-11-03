@@ -2903,7 +2903,8 @@ def init_menu_permissions(db_path):
     #   .trae/rules/scenarios/5-development/meta-menu-retirement.md），不能靠本步骤物理删除。
     MIGRATION_OWNED_MENUS = ('procurement', 'goods-receipt-management',
                              'transfer-order-management',
-                             'transfer-shipment-management')
+                             'transfer-shipment-management',
+                             'engineering-change')
 
     print("\n[步骤7.5] 清理 menu_permissions 表冗余条目...")
     valid_perm_codes = {m['menu_code'] for m in system_menus}

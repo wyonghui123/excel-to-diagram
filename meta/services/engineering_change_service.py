@@ -646,7 +646,7 @@ class EngineeringChangeService:
         if item_ids:
             mark = ','.join('?' * len(item_ids))
             items = {r['id']: r for r in self._fetch_all(
-                'SELECT id, item_no, name FROM items WHERE id IN (%s)' % mark,
+                'SELECT id, code, name FROM items WHERE id IN (%s)' % mark,
                 item_ids)}
         if project_ids:
             mark = ','.join('?' * len(project_ids))
@@ -656,7 +656,7 @@ class EngineeringChangeService:
         for row in rows:
             item = items.get(row.get('item_id')) or {}
             project = projects.get(row.get('project_id')) or {}
-            row['item_no'] = item.get('item_no')
+            row['item_no'] = item.get('code')
             row['item_name'] = item.get('name')
             row['project_no'] = project.get('project_no')
             row['project_name'] = project.get('name')
