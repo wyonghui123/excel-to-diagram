@@ -1,12 +1,12 @@
 # 细化稿：G4 工程 BOM 消费方（工程变更单 + 差异应用）
 
-- 文档版本：v1.3
+- 文档版本：v1.4
 - 日期：2026-11-03
 - 状态：已评审（2026-11-03 采纳 Oracle/NetSuite 对标结论），P1 实施中
 - 归属：**独立专题（ECM 工程变更管理）**，不占 project 轨里程碑 M4；project 轨对其无硬依赖，属非阻塞项
 - 关联主 Spec：[`spec-project-type-object-model-research-2026-10-31.md`](./spec-project-type-object-model-research-2026-10-31.md) §3 G4 / §7 Q2 / §8.4 D5
 - 关联对象：`items` / `item_structure` / `item_structure_line` / `work_order_components` / `work_definition`
-- 迁移编号：预计 `v198`（当前仓库最大 `v196`＝`batch_foundation`；`v197` 已被 P5 批次策略方案预占，以实际落地时为准）
+- 迁移编号：`v200`（`v196`＝`batch_foundation`、`v198`＝`location_org`、`v199` 已被 P5 批次策略方案预占）
 
 ---
 
@@ -130,6 +130,8 @@
 | `target_structure_id` | integer | 目标生产结构（`usage=production`，软引用，必填） |
 | `source_structure_id` | integer | 来源工程结构（`usage=engineering`，软引用，`add/modify` 必填） |
 | `source_structure_line_id` | integer | 来源工程行 id（软引用；`add/modify` 从该行复制新值） |
+| `target_revision` | string | 创建时目标结构 `revision` 快照（`apply` 比对，防并发改版） |
+| `source_revision` | string | 创建时来源工程结构 `revision` 快照（`apply` 比对） |
 | `structure_line_id` | integer | 生产侧被修改 / 移除的行 id；`add` 时为空 |
 | `component_item_id` | integer | 组件物料（真外键，restrict） |
 | `match_key` | string(120) | 差异匹配键（`component_item_id + substitute_group_code + operation_seq`），便于复核 |
@@ -277,7 +279,7 @@ create_change(ds, *, change_type, title, reason, effective_date,
 
 | 项 | 内容 |
 |---|---|
-| 迁移 | `v198__engineering_change.py`：建 `engineering_changes` / `engineering_change_lines` + 索引；`verify / migrate / rollback`（rollback 先删明细表再删头表） |
+| 迁移 | `v200__engineering_change.py`：建 `engineering_changes` / `engineering_change_lines` + 索引；`verify / migrate / rollback`（rollback 先删明细表再删头表） |
 | YAML | `meta/schemas/engineering_change.yaml`、`engineering_change_line.yaml`（`skip_generic_api` / `requires_state_machine` / `rules` 状态迁移） |
 | 菜单 | 工程变更单菜单节点（挂在物料 / BOM 域下） |
 | 权限 | `engineering_change:*` 四个权限键 |
@@ -335,6 +337,7 @@ create_change(ds, *, change_type, title, reason, effective_date,
 | 2026-11-03 | v1.1 | SAP / Oracle 对标后校正：明确本设计为 ECM（非 ETO）；P1 增补 where-used 影响预览；新增 AC-G4-9；补充附录 A |
 | 2026-11-03 | v1.2 | 定位收口：G4 拆为**独立专题（ECM）**，不占 project 轨 M4；取证确认 project 轨无硬依赖（`engineering_change` 仅存于本稿，`usage=engineering` 无任何代码消费方） |
 | 2026-11-03 | v1.3 | 采纳 Oracle/NetSuite 结论：结构 / 物料下沉明细行（多物料预留，P1 限制单目标结构）、`apply` 不新建结构版本、草稿明细可物理删、`project_id` 定为平台扩展标签；Q1–Q5 转已决；新增 AC-G4-10/11；影响预览归入 P1、P2 只做定时应用与扩展 |
+| 2026-11-03 | v1.4 | 实施回填：明细行增 `target_revision` / `source_revision` 快照列（`apply` 并发校验用）；迁移号定稿 `v200`（v196/v198/v199 均已被占用或预占）；`apply` 的 `modify` 新行另取 `line_no`（`(structure_id, line_no)` 唯一）；状态迁移与 apply 改为条件更新防并发 |
 
 ---
 

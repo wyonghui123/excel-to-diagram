@@ -458,6 +458,7 @@ class ApplicationBuilder:
         from meta.api.project_overview_api import project_overview_bp
         from meta.api.labor_api import labor_bp
         from meta.api.work_order_api import work_order_bp
+        from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -533,6 +534,8 @@ class ApplicationBuilder:
                                name='labor_compat')
         # [项目 G13 2026-11-02] 工单开始作业（New → In Progress + 执行 tasks 桥接）。
         app.register_blueprint(work_order_bp)
+        # [项目 G4 2026-11-03] 工程变更单（diff 预览 / 提交 / 批准 / 应用 / 影响预览）。
+        app.register_blueprint(engineering_change_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

@@ -1,0 +1,297 @@
+# 工程变更单（Engineering Change）— G4 / ECM
+# 依据: docs/specs/spec-project-g4-engineering-bom-2026-11-03.md §5.2 / §6.3 / §9
+#
+# 定位: 工程 BOM（usage=engineering）到生产 BOM（usage=production）的变更控制单据。
+#   · 头表不含 item_id / source_structure_id / target_structure_id：结构维度下沉到
+#     engineering_change_line，表结构支持一单多物料；P1 服务层限制同一 target_structure_id。
+#   · status 唯一状态列：draft → in_review → approved → applied；
+#     in_review → rejected、draft/in_review/approved → cancelled。
+#   · 不接通用 workflow；保留 in_review + approve 作为后续接入点（Q2）。
+#   · skip_generic_api：通用 CRUD / agent 工具不得写本对象，状态只能经专用动作。
+#   · 删除策略 restrict：终态用 cancelled，不提供物理删除。
+
+id: engineering_change
+name: 工程变更单
+table_name: engineering_changes
+description: 工程 BOM 差异评审与生效（工程变更单头）
+display_name_field: change_no
+skip_auto_menu: true
+skip_generic_api: true
+requires_state_machine: true
+aspects: [audit_aspect]
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - engineering_change_lines
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: change_no
+    name: 变更单号
+    type: string
+    db_column: change_no
+    required: true
+    unique: true
+    max_length: 40
+    description: 变更单号（业务键，格式 EC-<yyyyMM>-<seq>，生成后不可修改）
+    semantics:
+      meaning: 工程变更单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: title
+    name: 变更标题
+    type: string
+    db_column: title
+    required: true
+    max_length: 120
+    description: 变更标题
+    semantics:
+      meaning: 变更标题
+      searchable: true
+    ui:
+      widget: input
+
+  - id: change_type
+    name: 变更类型
+    type: string
+    db_column: change_type
+    required: true
+    default: revise
+    max_length: 20
+    description: 变更类型（new 首次工程 BOM / revise 改版 / obsolete 停用）
+    enum_values:
+      - value: new
+        label: 首次工程 BOM
+        color: primary
+        category: active
+      - value: revise
+        label: 改版
+        color: primary
+        category: active
+        is_initial: true
+      - value: obsolete
+        label: 停用
+        color: warning
+        category: inactive
+    semantics:
+      meaning: 变更类型
+      filterable: true
+      filter_type: enum
+      filter_label: 变更类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: project_id
+    name: 关联项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 可选；平台扩展筛选标签（Oracle/SAP ECO 无项目关联），不改变项目 360 段
+    semantics:
+      meaning: 可选项目归集标签
+      filterable: true
+      filter_type: relation
+      filter_label: 关联项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        label_field: name
+    ui:
+      widget: select
+
+  - id: reason
+    name: 变更原因
+    type: text
+    db_column: reason
+    nullable: true
+    description: 变更原因
+    semantics:
+      meaning: 变更原因说明
+    ui:
+      widget: textarea
+
+  - id: effective_date
+    name: 生效日
+    type: date
+    db_column: effective_date
+    required: true
+    description: 生效日（apply 时写入新结构行 valid_from；关旧日 = 生效日前一天）
+    semantics:
+      meaning: 变更生效日期
+      filterable: true
+      filter_type: date
+      filter_label: 生效日
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 变更单状态（唯一状态列）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: in_review
+        label: 评审中
+        color: primary
+        category: active
+      - value: approved
+        label: 已批准
+        color: success
+        category: active
+      - value: applied
+        label: 已应用
+        color: success
+        category: inactive
+      - value: rejected
+        label: 已驳回
+        color: danger
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: warning
+        category: inactive
+    semantics:
+      meaning: 工程变更单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: applied_at
+    name: 应用时间
+    type: datetime
+    db_column: applied_at
+    nullable: true
+    description: 应用到生产 BOM 的时间
+    semantics:
+      meaning: 应用时间
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: applied_by
+    name: 应用人
+    type: string
+    db_column: applied_by
+    nullable: true
+    max_length: 40
+    description: 应用人
+    semantics:
+      meaning: 应用操作人
+    ui:
+      widget: input
+      editable: false
+
+# 状态机（spec §6.3）：draft → in_review → approved → applied；
+# rejected / cancelled 为终态。action_ref 对应 4 个权限键
+# （submit / cancel 归 engineering_change:create，reject 归 approve）。
+rules:
+  - id: submit_engineering_change
+    name: 提交评审
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: in_review
+    triggers: [before_update]
+    action_ref: "engineering_change:create"
+    ui_hints:
+      label: 提交评审
+      icon: send
+      confirm_message: "提交后明细不可再修改，确定提交评审吗？"
+
+  - id: approve_engineering_change
+    name: 批准
+    type: state_transition
+    state_field: status
+    from_states: [in_review]
+    to_state: approved
+    triggers: [before_update]
+    action_ref: "engineering_change:approve"
+    ui_hints:
+      label: 批准
+      icon: check_circle
+      highlight: true
+      confirm_message: "批准后变更可应用到生产 BOM，确定批准吗？"
+
+  - id: reject_engineering_change
+    name: 驳回
+    type: state_transition
+    state_field: status
+    from_states: [in_review]
+    to_state: rejected
+    triggers: [before_update]
+    action_ref: "engineering_change:approve"
+    ui_hints:
+      label: 驳回
+      icon: cancel
+      confirm_message: "驳回后变更单终止，确定驳回吗？"
+
+  - id: cancel_engineering_change
+    name: 取消
+    type: state_transition
+    state_field: status
+    from_states: [draft, in_review, approved]
+    to_state: cancelled
+    triggers: [before_update]
+    action_ref: "engineering_change:create"
+    ui_hints:
+      label: 取消
+      icon: cancel
+      confirm_message: "取消后变更单终止（不可应用），确定取消吗？"
+
+  - id: apply_engineering_change
+    name: 应用到生产 BOM
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: applied
+    triggers: [before_update]
+    action_ref: "engineering_change:apply"
+    ui_hints:
+      label: 应用
+      icon: play
+      highlight: true
+      confirm_message: "应用后生产 BOM 结构行将按生效日切换，确定应用吗？"
+
+indexes:
+  - fields: [change_no]
+    unique: true
+    name: uq_ec_change_no
+  - fields: [status]
+    name: idx_ec_status
+  - fields: [project_id]
+    name: idx_ec_project
