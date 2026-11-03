@@ -1,8 +1,8 @@
 # 细化稿：G4 工程 BOM 消费方（工程变更单 + 差异应用）
 
-- 文档版本：v1.2
+- 文档版本：v1.3
 - 日期：2026-11-03
-- 状态：细化设计（**待评审，尚未实施**）
+- 状态：已评审（2026-11-03 采纳 Oracle/NetSuite 对标结论），P1 实施中
 - 归属：**独立专题（ECM 工程变更管理）**，不占 project 轨里程碑 M4；project 轨对其无硬依赖，属非阻塞项
 - 关联主 Spec：[`spec-project-type-object-model-research-2026-10-31.md`](./spec-project-type-object-model-research-2026-10-31.md) §3 G4 / §7 Q2 / §8.4 D5
 - 关联对象：`items` / `item_structure` / `item_structure_line` / `work_order_components` / `work_definition`
@@ -52,7 +52,7 @@
 | `project_structure_snapshot` / 项目 BOM 快照 | D5 保留撤销；快照粒度继续落在工单 `work_order_components` |
 | 新增 `usage=project` 枚举 | 与 D5 冲突，且项目不持有 BOM 快照（见 §3） |
 | ECO 多级审批 / 会签 / 审批流引擎 | 本期用状态机 + 权限；复杂审批出现后再接 workflow |
-| 在途工单回冲 / ECO 影响分析 | 工单展开快照已隔离（AC-07）；P3 再做「列影响、不自动改」 |
+| 在途工单回冲 / 自动改工单 | 工单展开快照已隔离（AC-07）；P1 只做**只读**影响预览（§2.1 #5 / AC-G4-9），不自动改 |
 | 给 `item_structure_line` 加 `status` 列 | 不加列；失效复用 `valid_to`（explode 已按日期窗口过滤） |
 | BOM 基线冻结 / 多版本对比报表 | 无真实诉求；出现后再评估轻量基线表 |
 
@@ -101,10 +101,7 @@
 | `change_no` | string(40) | 变更单号，唯一；建议 `EC-{年月}-{序号}` |
 | `title` | string(120) | 变更标题 |
 | `change_type` | string | `new`（首次工程 BOM）/ `revise`（改版）/ `obsolete`（停用） |
-| `item_id` | integer | 根物料（真外键，restrict） |
-| `project_id` | integer | 可选；挂项目仅用于归集，不改变 360 段 |
-| `source_structure_id` | integer | 工程结构 id（`usage=engineering`） |
-| `target_structure_id` | integer | 生产结构 id（`usage=production`） |
+| `project_id` | integer | 可选；平台扩展标签（Oracle/SAP 的 ECO 无项目关联），仅用于筛选，不改变 360 段 |
 | `reason` | text | 变更原因 |
 | `effective_date` | date | 生效日（应用时写入结构行 `valid_from`） |
 | `status` | string | `draft / in_review / approved / applied / rejected / cancelled` |
@@ -115,8 +112,9 @@
 约束与索引：
 
 - `change_no` 唯一；
-- 索引：`(item_id)`、`(status)`、`(project_id)`、`(source_structure_id)`、`(target_structure_id)`；
-- 关系：`item_id → items`、`project_id → project`（可空）、两个 structure 字段为**软引用**（不建真外键，避免删除结构时级联锁；由服务层校验存在与 `usage`）；
+- 索引：`(status)`、`(project_id)`；
+- 关系：`project_id → project`（可空）；`item_id / source_structure_id / target_structure_id` **下沉到明细行**（见 §5.3），以便一张变更单覆盖多个装配物料（对齐 NetSuite ECO：一个 ECO 可含多个 item）；
+- P1 兼容约束（服务层）：一张变更单的所有明细 `target_structure_id` 必须相同（等价「一单一个根结构」），后续放开时无需迁移；
 - `deletion_policy`：`restrict`（终态用 `cancelled`，不提供物理删除）；
 - `skip_generic_api: true` + `requires_state_machine: true`（沿用 G7 机制，通用 CRUD / agent 工具不得改状态）；
 - 归档：不单独建表，`rejected / cancelled` 保留可查。
@@ -129,6 +127,9 @@
 | `change_id` | integer | 父变更单（真外键，cascade） |
 | `line_no` | integer | 行号，`(change_id, line_no)` 唯一 |
 | `line_type` | string | `add / modify / remove` |
+| `target_structure_id` | integer | 目标生产结构（`usage=production`，软引用，必填） |
+| `source_structure_id` | integer | 来源工程结构（`usage=engineering`，软引用，`add/modify` 必填） |
+| `source_structure_line_id` | integer | 来源工程行 id（软引用；`add/modify` 从该行复制新值） |
 | `structure_line_id` | integer | 生产侧被修改 / 移除的行 id；`add` 时为空 |
 | `component_item_id` | integer | 组件物料（真外键，restrict） |
 | `match_key` | string(120) | 差异匹配键（`component_item_id + substitute_group_code + operation_seq`），便于复核 |
@@ -138,8 +139,10 @@
 
 约束：
 
-- `change_id + line_no` 唯一；索引 `(change_id)`、`(component_item_id)`；
-- 明细只允许在 `draft / in_review` 阶段追加或删除；`approved` 之后不可改（服务层校验）。
+- `change_id + line_no` 唯一；索引 `(change_id)`、`(component_item_id)`、`(target_structure_id)`；
+- 明细只允许在 `draft / in_review` 阶段追加或删除；`approved` 之后不可改（服务层校验）；草稿明细允许物理删，`apply` 后只失效不删除；
+- `add` 必须带 `source_structure_line_id`、不得带 `structure_line_id`；`modify/remove` 必须带 `structure_line_id` 且属于目标结构；`modify` 还要带 `source_structure_line_id`；
+- 设计上允许多物料（每行自带结构），P1 服务层限制同一 `target_structure_id`。
 
 ### 5.4 差异不落表
 
@@ -183,18 +186,22 @@ EngineeringChangeService(ds).diff(
 ### 6.2 创建变更单
 
 ```python
-create_change(ds, *, item_id, source_structure_id, target_structure_id,
-              change_type, title, reason, effective_date,
+create_change(ds, *, change_type, title, reason, effective_date,
               project_id=None, lines, created_by) -> change_id
+# lines: [{'line_type', 'target_structure_id', 'source_structure_id',
+#          'source_structure_line_id', 'structure_line_id',
+#          'component_item_id', 'old_qty_per', 'new_qty_per',
+#          'old_valid_to', 'new_valid_to', 'note'}]
 ```
 
 校验：
 
-1. 结构归属同一 `item_id`，且 usage 正确；
-2. `effective_date` 不早于今天（补录场景另议）；
-3. 明细 `add` 不能带 `structure_line_id`，`modify/remove` 必须带且属于目标结构；
-4. 明细行数 1..N，`line_no` 连续；
-5. `project_id` 为空或存在。
+1. 每条明细的 `target_structure_id` 存在且 `usage=production`，`source_structure_id` 存在且 `usage=engineering`，两者归属同一 `item_id`；
+2. **P1 限制：所有明细的 `target_structure_id` 必须一致**（一单一个根结构）；表结构已按多物料设计，后续放开无需迁移；
+3. `effective_date` 不早于今天（补录场景另议）；
+4. `add` 必须带 `source_structure_line_id` 且不带 `structure_line_id`；`modify/remove` 必须带 `structure_line_id` 且属于目标结构，`modify` 还要带 `source_structure_line_id`；
+5. 明细行数 1..N，`line_no` 连续；
+6. `project_id` 为空或存在。
 
 ### 6.3 状态流转
 
@@ -207,7 +214,8 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | `apply` | `approved → applied` | 见 §6.4 | `engineering_change:apply` |
 
 - 通用更新 / agent 工具对 `status` 的写入被 `requires_state_machine` 拦截；
-- 所有动作写审计（操作人、时间、前后状态）。
+- 所有动作写审计（操作人、时间、前后状态）；
+- **Q2 已决**：P1 不接通用 workflow（审批规则尚未定义）；保留 `in_review` 与独立 `approve` 作为接入点，后续只加 `workflow_run_id` 列并让 `submit` 触发，不改状态机。
 
 ### 6.4 应用变更（`apply`）
 
@@ -215,15 +223,17 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 
 | 明细类型 | 操作 |
 |---|---|
-| `add` | INSERT `item_structure_line`（`valid_from=effective_date`，复制 `component_item_id / qty_per / fixed_qty / substitute_group_code / operation_seq` 等） |
-| `modify` | 旧行 `valid_to = effective_date - 1 天`（关旧）+ INSERT 新行（`valid_from=effective_date`，保留未变字段） |
+| `add` | 从 `source_structure_line_id` 复制字段 INSERT `item_structure_line`（`valid_from=effective_date`） |
+| `modify` | 旧行 `valid_to = effective_date - 1 天`（关旧）+ 从 `source_structure_line_id` 复制字段 INSERT 新行（`valid_from=effective_date`） |
 | `remove` | 旧行 `valid_to = effective_date - 1 天` |
+
+**Q3 补充决定**：`apply` **不新建结构版本、不改 `item_structure.revision`**，只在同一版本内切换行有效期；结构版本级历史留 P2（需要时再加 `new_revision`）。避免「结构版本 + 行有效期」双重记账。
 
 前置校验（任一失败整体回滚）：
 
 1. 变更单 `status=approved`；
-2. 目标结构与创建时 `revision` 一致（防止并发改版）；
-3. 每条 `structure_line_id` 仍存在且属于目标结构；
+2. 目标结构与创建时 `revision` 一致，来源工程结构 `revision` 亦一致（防止并发改版）；
+3. 每条 `structure_line_id` 仍存在且属于目标结构，`source_structure_line_id` 仍存在且属于来源结构；
 4. `effective_date` 合法；
 5. 同一目标结构不允许存在另一张 `approved` 未应用的变更单（串行化，避免两次 apply 互相覆盖）。
 
@@ -278,7 +288,7 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | 阶段 | 内容 | 出口 |
 |---|---|---|
 | **P1（本期）** | 差异预览 + 变更单（draft/in_review/approved/applied）+ apply + 专用 API + 最小前端 | G4 从「无消费方」变为「有可审计的工程变更链路」 |
-| P2 | 生效日定时应用、变更影响提示（列出在途工单，不自动改） | 减少手工 apply |
+| P2 | 生效日定时应用；影响预览扩展到更多单据类型（仍只读） | 减少手工 apply |
 | P3 | ECO 与工单追溯、项目 BOM 基线对比（仅在真实诉求出现时） | 对应主 Spec §8.4「何时再做」 |
 
 ## 11. 验收标准
@@ -294,6 +304,8 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | AC-G4-7 | 重复 `apply` 幂等；变更单 `project_id` 可空；项目 360 仍五段 |
 | AC-G4-8 | 所有动作写审计（人 / 时间 / 前后状态） |
 | AC-G4-9 | 变更单详情可查看影响预览：受影响父项结构 + 在途工单清单；预览为只读，不得修改工单或结构 |
+| AC-G4-10 | 多物料预留：表结构允许明细各自挂结构；P1 服务层对跨 `target_structure_id` 的变更单报错（后续放开不改表） |
+| AC-G4-11 | `apply` 不改变 `item_structure.revision`，只切换行 `valid_to/valid_from`；explode 按日期正确区分新旧 |
 
 ## 12. 风险与回滚
 
@@ -305,15 +317,15 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | 结构 `revision` 漂移 | 创建时记录、apply 时比对，不一致拒绝 |
 | 回滚 | 迁移 `rollback` 只删两张新表；已应用的 BOM 变更通过反向变更单处理，不做自动回滚 |
 
-## 13. 待评审确认
+## 13. 待评审确认（2026-11-03 已采纳 Oracle/NetSuite 对标结论）
 
-| # | 问题 | 本文倾向 |
-|---|---|---|
-| Q1 | 变更单是否需要 `project_id` | 保留可空；仅归集，不加 360 段 |
-| Q2 | 审批是否接通用 workflow | 本期不接，状态机 + 双权限 |
-| Q3 | `modify` 关旧开新 vs 原地更新 | 关旧开新（保留历史，explode 按日期窗口过滤） |
-| Q4 | `remove` 物理删 vs `valid_to` 失效 | `valid_to` 失效（不丢主数据） |
-| Q5 | 变更单是否允许跨物料 | 不允许，一次变更单只服务一个根物料 |
+| # | 问题 | 决定 | 依据 |
+|---|---|---|---|
+| Q1 | 变更单是否需要 `project_id` | 保留可空；仅筛选标签，不加 360 段；标注「平台扩展，Oracle/SAP 的 ECO 无项目关联」 | NetSuite/EBS ECO 无项目字段 |
+| Q2 | 审批是否接通用 workflow | P1 不接；保留 `in_review` + 独立 `approve` 作为 seam，后续只加 `workflow_run_id` | NetSuite SuiteApprovals 把审批作为一等能力，但平台审批规则未定义 |
+| Q3 | `modify` 关旧开新 vs 原地更新 | 关旧开新；**`apply` 不新建结构版本**，只切行有效期 | Oracle 用生效/失效日期表达增删改 |
+| Q4 | `remove` 物理删 vs `valid_to` 失效 | `valid_to` 失效；**草稿明细允许物理删**，apply 后只失效 | 保留历史可追溯 |
+| Q5 | 变更单是否允许跨物料 | 表结构支持多物料（`item_id / struct` 下沉明细）；**P1 服务层限制同一目标结构**，后续放开零迁移 | NetSuite ECO 支持一单多 item |
 
 ## 14. 变更记录
 
@@ -322,6 +334,7 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 | 2026-11-03 | v1.0 | 初稿：裁决 Q2（engineering 补消费方）、变更单两表、差异实时计算、apply 规则、P1/P2/P3 分期与 8 条验收 |
 | 2026-11-03 | v1.1 | SAP / Oracle 对标后校正：明确本设计为 ECM（非 ETO）；P1 增补 where-used 影响预览；新增 AC-G4-9；补充附录 A |
 | 2026-11-03 | v1.2 | 定位收口：G4 拆为**独立专题（ECM）**，不占 project 轨 M4；取证确认 project 轨无硬依赖（`engineering_change` 仅存于本稿，`usage=engineering` 无任何代码消费方） |
+| 2026-11-03 | v1.3 | 采纳 Oracle/NetSuite 结论：结构 / 物料下沉明细行（多物料预留，P1 限制单目标结构）、`apply` 不新建结构版本、草稿明细可物理删、`project_id` 定为平台扩展标签；Q1–Q5 转已决；新增 AC-G4-10/11；影响预览归入 P1、P2 只做定时应用与扩展 |
 
 ---
 
