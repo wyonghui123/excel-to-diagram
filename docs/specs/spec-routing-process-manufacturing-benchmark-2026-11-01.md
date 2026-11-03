@@ -1,9 +1,9 @@
 # 研究稿：工艺路线（Routing）与流程生产主数据 — Oracle / SAP 对标与后续域细化方案
 
-- 文档版本：v0.4
+- 文档版本：v0.5
 - 日期：2026-11-02
 - 状态：研究稿 + 细化方案（待评审，**尚未实施**）
-- 关联主 Spec：`spec-unified-resource-model-2026-11-01-v1.0.md`（v1.21）
+- 关联主 Spec：`spec-unified-resource-model-2026-11-01-v1.0.md`（v1.22）
 - 研究范围：P4b（配方 / 工序产出 / 替代资源组 / 过程指令）、P4c（最小批次）、P5（branch/return、parallel、批次特性复用属性字典）、R-2、财务域（`cost_center` / `activity_type` / `activity_rate`）
 
 ---
@@ -235,6 +235,7 @@ Product Definition（该产品怎么做：规则集合）
 | 9 | `activity_types`（新表） | `code`、`name`、`cost_center_id`、`category`、`activity_uom_id`、有效期 | SAP CSLA | 财务域 |
 | 10 | `activity_rates`（新表） | `activity_type_id`、`version`、`fixed_rate`、`variable_rate`、`currency_id`、`rate_uom_id`、有效期 | SAP KP26 固定/变动价格 | 财务域 |
 | 11 | `resource_group_activity_types`（新表） | `resource_group_id`、`activity_type_id`、`standard_value_category`、`formula`、`priority` | SAP CRCO | 财务域 |
+| 12 | `batch_selection_policy`（新表） | `code`、`name`、`scope_type ∈ {item, item_group, org}`、`scope_ref`、`rule_json`（过滤 + 排序）、`priority`、`status` | SAP 批次确定条件技术的**简化替代**（不建策略类型/访问顺序/条件记录三层） | P5 / 流程订单域启用批次确定时 |
 
 ### 5.3 替代关系归属：放 `sourcing_rule` 还是独立主数据
 
@@ -609,15 +610,18 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 
 ### 11.7 批次特性接入（复用属性字典）
 
-**映射**
+**映射（SAP / Oracle / 平台三方）**
 
-| SAP Classification | 平台现有设施 |
-|---|---|
-| Class Type（批次常用 023） | `attribute_scopes.scope_type='object'` + `scope_ref='batch'`（对象编码承担类类型角色） |
-| Class（挂到物料的特征集） | `attribute_scopes(scope_type='item_group', scope_ref=物料分类)` |
-| Characteristic | `attribute_definitions`（`data_type` / `value_domain_type` / `uom_code` / `multi_value_flag`） |
-| Characteristic Value | `batch_attribute_values`（五行类型化值 + `seq`） |
-| Class 内必填 | `attribute_scopes.required_flag` |
+| 概念 | SAP Classification | Oracle（Item Catalog / EFF / Lot） | 平台现有设施 |
+|---|---|---|---|
+| 入口 / 类类型 | Class Type（批次常用 023） | Item Catalog Group / EFF Context | `attribute_scopes.scope_type='object'` + `scope_ref='batch'`（对象编码承担类类型角色） |
+| 特征集归属 | Class 挂到物料 | EFF 上下文挂物料 / 物料类 | `attribute_scopes(scope_type='item_group', scope_ref=物料分类)` |
+| 特征定义 | Characteristic（值域 / 单位 / 多值） | EFF 段（格式 / 默认值 / 校验脚本） | `attribute_definitions`（`data_type` / `value_domain_type` / `uom_code` / `multi_value_flag`） |
+| 特征值 | Characteristic Value（`AUSP`） | 段值（按对象一份，一般不支持多值） | `batch_attribute_values`（五行类型化值 + `seq`） |
+| 必填 | Class 内必填 / 字段状态 | 弱（靠界面或脚本） | `attribute_scopes.required_flag` |
+| 组织口径 | `MCH1` 跨工厂 / `MCHA` 工厂 / `MCHB` 库存 | 按库存组织一份 Lot | `(item_id, org_id, batch_no)` |
+| 参与计算的特性 | 可留在特性里，配合 MQC 折算 | 通常直接是 Lot 主档字段 | `attribute_promotion` 提为物理列（红线） |
+| 批次确定 | 条件技术（策略类型 / 访问顺序 / 条件记录 / 排序） | 拣货规则 / 自定义逻辑 | 显式 `batch_selection_policy` + 单一服务函数 |
 
 **接入四项（按顺序）**
 
@@ -639,6 +643,35 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 **决策点：是否需要“特征集档案”**。若需要“某物料/某分类的批次固定用哪套特性 + 默认值 + 展示/打印顺序”，仿 `item_structure_attribute` 建 `batch_type_attribute`（`scope_key` + `attribute_id` + `required_flag` + 默认值 + `seq`）。触发条件：出现默认值或特征集版本化需求；否则先用 `attribute_scopes(item_group)`，不建此表。
 
 **迁移**：`batches` 与 `batch_attribute_values` 同笔迁移创建（+ 索引/权限/菜单）；P4c 为新表，无历史特性回填；`receipt_lines.lot_no` / `shipment_lines.lot_no` 的文本批次暂不回填批次主数据（沿用 Q5 现状）；`potency_pct` 直接建物理列，不需从 JSON 回填。
+
+### 11.8 SAP / Oracle 两条路线的取舍
+
+**形态差异一句话**：SAP 是“分类引擎”（Class Type → Class → Characteristic → Value，四层显式、强约束、带确定能力）；Oracle 是“弹性域引擎”（属性组 / 上下文 → 段 → 值，通用、轻量、弱约束）。
+
+**各自优缺点**
+
+- SAP：语义完整（必填、值域、多值、单位、状态）、批次确定可配置可审计、组织口径三级清晰、特性可驱动 MQC；代价是配置重、类与特征建错迁移成本高、EAV 查询依赖专门索引、实施周期长。
+- Oracle：极轻（加一段即新增属性）、跨对象复用同一套弹性域、批次主档字段直白、接口与报表好写；代价是值域/必填/多值弱、批次挑选无配置化引擎、复杂规则要写代码、特性多了同样要提列。
+
+**关键差异（必须避开）**：SAP 敢把效价留在特性里，是因为它有专门值表索引 + MQC 计算引擎；通用 EAV 照抄会在“按效价排序 / 筛选 / 投料折算”上明显变慢。平台 `usage_class` 红线（`computed`/`indexed` 必须提为物理列）即对此的防御，继续执行。
+
+**路线对比**
+
+| 路线 | 做法 | 评价 |
+|---|---|---|
+| A. 学 SAP | Class/Class Type + 特性全 EAV + 条件技术做批次确定 | 功能最全，但需多建 3–4 张表 + 策略引擎，P4c 会膨胀成 P6 |
+| B. 学 Oracle | 纯弹性域，全描述性，批次挑选写代码 | 最省事，但效价/等级查询与批次确定散落在各服务，后期难收口 |
+| C. 现状改良（**采纳**） | 字典定义 + 值表 + 少量提列 + 显式策略对象 | 语义够用、成本可控、不引入第二真源 |
+
+**路线 C 的落地口径**
+
+1. 物理列：`potency_pct`、`grade_code`（启用等级时）、`quality_status`、`expiry_date`、`produced_at`、`parent_batch_id`、`batch_no`——参与计算或需索引/排序。
+2. EAV：外观、检验备注、产地/证书号、包装规格、供应商批号等纯描述/分析特性。
+3. 范围与必填：`attribute_scopes`；`scope_ref='batch'` 管全局，`item_group` 管“某类物料的批次”（语义扩展见 §11.7）。
+4. 批次确定：不实现 SAP 条件技术（策略类型 / 访问顺序 / 条件记录三层 + 解释器），改为显式 `batch_selection_policy`（`code` / `name` / `scope_type ∈ {item, item_group, org}` / `scope_ref` / `rule_json`（过滤 + 排序，如效价降序、FIFO、保质期优先）/ `priority` / `status`），由单一服务函数 `select_batches(item_id, org_id, qty, uom, context)` 执行并留痕。
+5. 组织口径：沿用 SAP 三级分层的结论、Oracle 的“批次属库存组织”约束，落为 `(item_id, org_id, batch_no)`，不加 `location_id`。
+
+**何时才回退到 A**：出现“多工厂差异化批次确定 + 业务人员零代码编排多策略组合”时再评估条件技术；在此之前不建 Class 头、不建条件记录表。
 
 ---
 
@@ -680,7 +713,7 @@ P5 只做两件事：
 - **提列清单**：把参与计算或需索引的批次特性（效价、批次确定用质量等级）通过 `attribute_promotion` 提为 `batches` 物理列；`potency_pct` 已在 P4c 落地，其余按需补列。
 - **确认特征集档案**：仅当需要默认值/版本化时，按 §11.7 决策点建 `batch_type_attribute`；否则用 `attribute_scopes(item_group)`。
 
-与 SAP 的差距（接受，不补）：无 Class Type 枚举、无 Class 头/类层级、无“用于批次确定 / 用于效价计算 / 可打印”特性语义位。批次确定在流程订单域用显式策略对象实现，不照搬 SAP 条件技术；若后续需要，再在 `attribute_definitions` 加语义位并走 promotion。
+与 SAP 的差距（接受，不补）：无 Class Type 枚举、无 Class 头/类层级、无“用于批次确定 / 用于效价计算 / 可打印”特性语义位。批次确定在流程订单域用显式 `batch_selection_policy` + 单一服务函数实现（见 §11.8 路线 C），不照搬 SAP 条件技术；若后续需要，再在 `attribute_definitions` 加语义位并走 promotion。
 
 ### 12.4 验收
 
@@ -689,6 +722,7 @@ P5 只做两件事：
 3. 同一 branch 下两个 alternative 的 priority 重复失败；lot 区间与定义/PV 不重叠失败。
 4. 特性类型与值列不符失败；`usage_class=computed` 定义以 active 创建失败；`scope_ref='batch'` 引用未注册对象失败；`potency_pct` 越界失败。
 5. 既有 `seq_type=std/alternative` 行行为不变。
+6. `batch_selection_policy` 同范围同 `priority` 重复失败；`rule_json` 解析失败或无匹配批次时返回明确错误（不静默取第一条）；选择结果落审计（批次 + 策略 + 规则版本）。
 
 ---
 
@@ -807,7 +841,7 @@ P5 只做两件事：
 | P4b-1 | v191 | `work_definitions` 扩列、`work_definition_operation_outputs`、替代组 2 列 | `python d:\filework\test.py --single meta/tests/test_work_definition_recipe.py` 等 |
 | P4b-2 | v192 | `process_instructions` | `--single meta/tests/test_process_instructions.py` |
 | P4c | 立项取号 | `batches` + `batch_attribute_values` | `--single meta/tests/test_batches.py`、`--single meta/tests/test_batch_attribute_values.py` |
-| P5 | 立项取号 | sequences 扩列、批次特性提列清单（不建独立表） | `--single meta/tests/test_work_definition_sequence_graph.py` |
+| P5 | 立项取号 | sequences 扩列、批次特性提列清单（不建独立表）、`batch_selection_policy` | `--single meta/tests/test_work_definition_sequence_graph.py`、`--single meta/tests/test_batch_selection_policy.py` |
 | 财务域 | 立项取号 | `cost_centers` / `activity_types` / `activity_rates` / 映射 | `--single meta/tests/test_cost_center.py` 等 |
 
 **测试策略**：

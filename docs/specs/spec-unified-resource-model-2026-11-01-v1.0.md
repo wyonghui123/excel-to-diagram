@@ -1,9 +1,9 @@
 # Spec：统一资源模型（生产 / 服务 / 物流）
 
-- 文档版本：v1.21
+- 文档版本：v1.22
 - 日期：2026-11-02
-- 状态：已确认（2026-11-01）；P2a/P2b/P2c/P3 已完成，P4a 已完成（v188）；**P4b/P4c/P5/财务域细化方案已定稿（v1.21，见附 C），尚未实施**；批次特性已定复用既有属性字典（不建 `characteristics_json` / `batch_characteristics`）；端到端验收已完成（E2E 7 passed，见 §11）
-- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）、`spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.4，Routing 与流程生产对标 + P4c/P5 细化 + 批次特性复用属性字典 + 替代关系归属，见附 B/C）
+- 状态：已确认（2026-11-01）；P2a/P2b/P2c/P3 已完成，P4a 已完成（v188）；**P4b/P4c/P5/财务域细化方案已定稿（v1.22，见附 C），尚未实施**；批次特性已定复用既有属性字典（不建 `characteristics_json` / `batch_characteristics`），批次确定采用显式 `batch_selection_policy`（不照搬 SAP 条件技术）；端到端验收已完成（E2E 7 passed，见 §11）
+- 上游研究：`spec-work-center-resource-capability-research-2026-11-01.md`（v0.3）、`spec-resource-model-benchmark-oracle-sap-2026-11-01.md`（v0.3，§2.5 雇佣模型）、`spec-routing-process-manufacturing-benchmark-2026-11-01.md`（v0.5，Routing 与流程生产对标 + P4c/P5 细化 + 批次特性复用属性字典 + SAP/Oracle 路线取舍 + 替代关系归属，见附 B/C）
 - 适用范围：`meta/schemas/` 新增资源域对象、`meta/services/` 资源匹配与产能校验、前端主数据页面（走通用列表/详情）
 
 ## 1. 背景与目标
@@ -762,9 +762,9 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 **落地顺序（更新 2026-11-02）**：P4a ✅ 已完成（v188）→ P4b-1 **v191**（`work_definitions` 只加 `base_qty/base_uom_id/batch_qty/valid_from/valid_to` + `work_definition_operation_outputs` + `substitute_group/replacement_group`）→ P4b-2 **v192**（`process_instructions`）→ P4c（最小 `batches` + `batch_attribute_values`，复用属性字典，流程订单域立项）→ P5（branch/return/parallel + 批次特性提列清单，不建 `batch_characteristics`）→ 财务域（`cost_center/activity_type/activity_rate`）。
 **仍待实施前复核**：SAP `help.sap.com` 正文未取到，替代序列“必须成对 branch/return”需用 CP305 / SAP Help 复核；Oracle OPM `Base/Batch Quantity` 与 potency 字段未核实（研究稿 §9）。
 
-## 附 C：P4b / P4c / P5 / 财务域细化方案（v1.21）
+## 附 C：P4b / P4c / P5 / 财务域细化方案（v1.22）
 
-> 完整字段级设计见研究稿 v0.4 §10–§13；本节只放决策摘要，供评审。
+> 完整字段级设计见研究稿 v0.5 §10–§13；本节只放决策摘要，供评审。
 
 ### C.1 P4b（v191 / v192）
 
@@ -791,6 +791,8 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 - `work_definition_sequences` 扩 `seq_type=parallel`、`branch_operation_seq`、`return_operation_seq`、`lot_min/lot_max`、`priority`。
 - 规则：alternative 必须 branch+return 成对（return > branch）；parallel 只需 branch（return 可选汇合）；branch/return 必须在标准序列；同 branch 多替代按 priority + lot 区间选一。
 - 批次特性**不建独立主数据**：复用 `attribute_definitions` + `attribute_scopes` + `batch_attribute_values`；参与计算/需索引的特性走 `attribute_promotion` 提为 `batches` 物理列（`potency_pct` 已在 P4c 落地）。
+- **模型路线（v1.22，见研究稿 §11.8）**：语义学 SAP、存储学 Oracle、确定逻辑自建。不建 Class/Class Type/类层级，不建 SAP 条件技术（策略类型/访问顺序/条件记录三层）。
+- **批次确定**：显式 `batch_selection_policy`（`code` / `name` / `scope_type ∈ {item, item_group, org}` / `scope_ref` / `rule_json`（过滤 + 排序：效价降序、FIFO、保质期优先）/ `priority` / `status`），由单一服务函数 `select_batches(...)` 执行并留痕；触发回退到条件技术的条件是“多工厂差异化 + 业务零代码编排多策略组合”。
 - R-2 设计层关闭；实施前用 SAP CP305 / Help 复核强制成对规则。
 
 ### C.4 财务域（`cost_center` / `activity_type` / `activity_rate`）
@@ -854,3 +856,4 @@ work_order_operations ─< resource_assignments >── resources / resource_gro
 | 2026-11-02 | v1.19 | 后续开发待办（P4b / P4c / P5 / 财务域）的 Oracle·SAP 深入研究与方案细化定稿：研究稿升 **v0.2**（字段级证据 + §10–§13 细化）；新增 TBD-18~TBD-24（18–21 方案已定待实施，22–24 关闭）；新增 **附 C** 决策摘要（P4b：`work_definitions` +5 列 / `work_definition_operation_outputs` / `operation_resource_requirements` +2 列成组替换 / `process_instructions` 单表双形态；P4c：最小 `batches`；P5：sequence `parallel/branch/return/lot/priority` + `batch_characteristics`；财务域：`cost_centers` / `activity_types` / `activity_rates` / `resource_group_activity_types` + 成本取值唯一顺序）；§8 追加 M6–M9；迁移号 P4b = **v191 / v192**（v190 已被 `transfer_order_object` 占用），P4c/P5/财务域不预占；附 B 补字段级核实第 4 条与落地顺序；**仅方案，未实施、未建迁移文件** |
 | 2026-11-02 | v1.20 | 新增 **TBD-25 / 附 C.5「替代关系归属」**：替代关系**不进 `sourcing_rule`**，按域分层（BOM 替代留在 `item_structure_line.substitute_group_code`；工序资源替代为 `operation_resource_requirements` 需求行属性；路线替代走 sequence/PV；多供应商走 `sourcing_rule_line`；跨域物料替代才建独立 `item_substitute`，本期不建）；不建「供应商替代关系」表（`blocked + rank` 表达停供切换）；研究稿升 **v0.3**（新增 §5.3，原「明确不建」顺延 §5.4），附 B 增加第 5 条结论；**仅方案，未实施** |
 | 2026-11-02 | v1.21 | 修订 P4c/P5 批次特性方案（R-5 关闭）：确认平台既有属性字典（`attribute_definitions` + `attribute_scopes` + `*_attribute_values`）可作 Batch 基础设施复用，等价覆盖 SAP Classification 的 Characteristic / 适用范围 / Value 三层；**取消 `characteristics_json`**，P4c 改为新增 `batch_attribute_values`（照 `_attribute_value_template.yaml`）；**不建 `batch_characteristics`**，P5 只做提列清单（`potency_pct` 等计算型/索引型走 `attribute_promotion` 提物理列）；同步修订 TBD-19 / TBD-24 / M8 / 附 C.2 / C.3 / §8 落地顺序；研究稿升 **v0.4**（新增 §11.7 接入方案，§12.3 重写）；遗留待确认：`item_group` 范围语义扩展（批次取所属物料的分类）与是否建 `batch_type_attribute` 档案层；**仅方案，未实施、未建迁移** |
+| 2026-11-02 | v1.22 | 补充 SAP / Oracle 两条路线取舍（研究稿 §11.8）：SAP = 分类引擎（Class Type/Class/Characteristic/Value + 条件技术），Oracle = 弹性域引擎（Item Catalog/EFF/Lot 属性，弱约束）；采纳**路线 C**——“语义学 SAP、存储学 Oracle、确定逻辑自建”，即字典定义 + 值表 + 少量提列 + 显式 `batch_selection_policy`（`rule_json` 过滤/排序 + 单服务函数 `select_batches`，不建条件技术三层）；§11.7 映射表扩为 SAP/Oracle/平台三方，§12.3/§12.4 同步（新增策略重复优先级与无匹配报错验收）；研究稿升 **v0.5**；**仅方案，未实施** |

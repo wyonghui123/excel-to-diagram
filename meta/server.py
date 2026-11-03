@@ -574,6 +574,11 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.process_instruction_guard_interceptor import ProcessInstructionGuardInterceptor
     bo_framework.register_interceptor(ProcessInstructionGuardInterceptor())
+    # [ROUTING P4c 2026-11-03] 批次守卫（P56）：身份 / 数量单位组 / 枚举 /
+    #   冻结不可关闭 / 日期与效价 / 父批次无环 / 必填批次特性。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.batch_guard_interceptor import BatchGuardInterceptor
+    bo_framework.register_interceptor(BatchGuardInterceptor())
     # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
     #   服务请求行 / 请购行的行级必填。
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。

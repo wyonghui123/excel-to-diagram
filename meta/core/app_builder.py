@@ -316,6 +316,11 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.process_instruction_guard_interceptor import ProcessInstructionGuardInterceptor
         bo_framework.register_interceptor(ProcessInstructionGuardInterceptor())
+        # [ROUTING P4c 2026-11-03] 批次守卫（P56）：身份 / 数量单位组 / 枚举 /
+        #   冻结不可关闭 / 日期与效价 / 父批次无环 / 必填批次特性。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.batch_guard_interceptor import BatchGuardInterceptor
+        bo_framework.register_interceptor(BatchGuardInterceptor())
         # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
         #   服务请求行 / 请购行的行级必填。与 server.py create_app() 同位登记 ——
         #   两条启动路径缺一会静默失效。

@@ -9,6 +9,7 @@
       attribute_definition / attribute_scope → 准入 lint
       party_attribute_value                  → 通用值校验
       item_attribute_value                   → 平台层限定 + attr_code 与字典编码一致 + 通用值校验
+      batch_attribute_value                  → 通用值校验（P4c 批次特性；租户对象，不做平台层限定）
   - 删除：只拦 attribute_definition —— 被引用时禁止删除，引导改为停用
 判定口径见 meta/services/attribute_lint_service.py / attribute_value_service.py /
 attribute_impact_service.py。
@@ -28,6 +29,7 @@ from meta.services.attribute_value_service import (
     AttributeValueService,
     ItemAttributeValueService,
 )
+from meta.services.batch_attribute_value_service import BatchAttributeValueService
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -36,7 +38,8 @@ logger = logging.getLogger(__name__)
 
 #: 受本守卫约束的对象
 GUARDED_OBJECTS = ('attribute_definition', 'attribute_scope',
-                   'party_attribute_value', 'item_attribute_value')
+                   'party_attribute_value', 'item_attribute_value',
+                   'batch_attribute_value')
 _GUARDED_ACTIONS = ('crud_create', 'crud_update')
 #: 删除只对定义层设防（范围的删除不破坏值行语义）
 _DELETE_GUARDED = ('attribute_definition',)
@@ -91,6 +94,8 @@ class AttributeGuardInterceptor(Interceptor):
                 service.check_scope(data)
             elif object_id == 'item_attribute_value':
                 ItemAttributeValueService(context.data_source).validate_write(data)
+            elif object_id == 'batch_attribute_value':
+                BatchAttributeValueService(context.data_source).validate_write(data)
             else:
                 AttributeValueService(context.data_source).validate_write(data)
         except (AttributeLintError, AttributeValueError) as e:
