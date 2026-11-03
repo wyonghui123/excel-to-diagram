@@ -344,8 +344,10 @@ class ShipmentService:
     def _validate_serial_tracking(self, delivery_id: Any) -> None:
         """§6.1 发运前置：require_on_issue 时 link 数必须等于发运数量。"""
         from meta.services.serial_number_service import (
-            SerialNumberError, SerialNumberService,
+            SerialNumberError, SerialNumberService, serial_schema_ready,
         )
+        if not serial_schema_ready(self.ds):
+            return
         try:
             SerialNumberService(self.ds).precheck_shipment(delivery_id)
         except SerialNumberError as error:
@@ -355,6 +357,9 @@ class ShipmentService:
 
     def _register_shipment_serials(self, lines: List[Dict[str, Any]],
                                    delivery_id: Any) -> None:
+        from meta.services.serial_number_service import serial_schema_ready
+        if not serial_schema_ready(self.ds):
+            return
         tracked = any(
             self._item_serial_flags(line.get('item_id')).get('serial_tracked')
             for line in lines or []

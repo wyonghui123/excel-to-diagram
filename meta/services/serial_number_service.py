@@ -73,6 +73,25 @@ TRANSITIONS = {
 OUTBOUND_ALLOWED = (STATUS_IN_STORES, STATUS_ISSUED)
 
 
+def serial_schema_ready(ds: Any) -> bool:
+    """P6a 前置：三表 + items 三开关齐全才启用录号钩子。
+
+    未执行 v202 的库（含大量历史测试替身）应保持旧行为，调用方直接跳过。
+    """
+    try:
+        rows = ds.query(
+            'SELECT name FROM sqlite_master WHERE type = ? AND name IN (?, ?, ?)',
+            ['table', SERIAL_TABLE, SERIAL_TX_TABLE, LINK_TABLE])
+        if len({row.get('name') for row in rows}) < 3:
+            return False
+        columns = {row.get('name') for row in ds.query(
+            'PRAGMA table_info(%s)' % ITEM_TABLE)}
+        return {'serial_tracked', 'require_on_receipt',
+                'require_on_issue'} <= columns
+    except Exception:
+        return False
+
+
 class SerialNumberError(Exception):
     """序列号业务校验错误（拦截器转为 ValidationFailedError）。"""
 

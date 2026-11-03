@@ -723,6 +723,9 @@ class ReceiptService:
         return rows[0] if rows else {}
 
     def _has_serial_tracked(self, checked: Any) -> bool:
+        from meta.services.serial_number_service import serial_schema_ready
+        if not serial_schema_ready(self.ds):
+            return False
         for item in checked or []:
             line = item.get('line') or {}
             if str(line.get('serial_no') or '').strip():
