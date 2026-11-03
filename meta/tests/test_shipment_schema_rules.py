@@ -12,6 +12,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'schemas' / 'shipment.yaml'
+_LINE_SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'schemas' / 'shipment_line.yaml'
 
 _RULE_IDS = {
     'release_shipment',
@@ -72,3 +73,16 @@ def test_list_actions(schema):
     assert {action['id'] for action in actions} == _ACTION_IDS
     create = next(action for action in actions if action['id'] == 'create')
     assert create['permission'] == 'shipment:create'
+
+
+@pytest.fixture(scope='module')
+def line_schema():
+    return yaml.safe_load(_LINE_SCHEMA_PATH.read_text(encoding='utf-8'))
+
+
+def test_line_serial_no_is_quick_entry_only(line_schema):
+    """D7：行内 serial_no 仅 qty=1 快捷录入，宽度对齐 generated_schema 200。"""
+    field = next(f for f in line_schema['fields'] if f['id'] == 'serial_no')
+    assert field['max_length'] == 200
+    assert 'qty=1' in field['description']
+    assert 'qty>1' in field['description']

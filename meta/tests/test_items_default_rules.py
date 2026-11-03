@@ -19,6 +19,8 @@ TBD-19（falsy 常量误判）已修复：服务类规则改用裸 0 自然写�
 
 import os
 
+import yaml
+
 from meta.core.action_executor import ActionExecutor
 from meta.core.models_enums import RuleType
 from meta.core.rule_executor import RuleEngine
@@ -83,6 +85,8 @@ def _prepare(tmp_path):
         "CREATE TABLE IF NOT EXISTS uoms (id INTEGER PRIMARY KEY AUTOINCREMENT)")
     ds.execute(
         "CREATE TABLE IF NOT EXISTS item_groups (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    ds.execute(
+        "CREATE TABLE IF NOT EXISTS tax_classifications (id INTEGER PRIMARY KEY AUTOINCREMENT)")
     insert(ds, "uoms", id=1)
     insert(ds, "item_groups", id=1)
     engine = RuleEngine(ds)
@@ -209,3 +213,19 @@ class TestFillIfEmpty:
                                             gross_weight=3.0))
         row = ds.find_by_id(TABLE, new_id)
         assert row["gross_weight"] == 3.0
+
+
+# ---------------------------------------------------------------------------
+# 5. P6a 序列号三开关（items.yaml）
+# ---------------------------------------------------------------------------
+
+class TestSerialSwitches:
+    def test_three_switches_declared(self):
+        with open(_ITEMS_PATH, encoding="utf-8") as fh:
+            doc = yaml.safe_load(fh)
+        fields = {f["id"]: f for f in doc["fields"]}
+        for column in ("serial_tracked", "require_on_receipt", "require_on_issue"):
+            field = fields[column]
+            assert field["type"] == "boolean"
+            assert field["default"] is False
+            assert field["ui"]["fieldGroup"] == "序列号"

@@ -579,6 +579,19 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.batch_guard_interceptor import BatchGuardInterceptor
     bo_framework.register_interceptor(BatchGuardInterceptor())
+    # [SERIAL P6a 2026-11-03] 序列号守卫（P59）：主档唯一键 / 初始与流转状态 /
+    #   scrapped 终态；物料序列号三开关一致性。与 app_builder 同位补齐。
+    from meta.core.interceptors.serial_number_guard_interceptor import (
+        SerialNumberGuardInterceptor,
+    )
+    bo_framework.register_interceptor(SerialNumberGuardInterceptor())
+    # [SERIAL P6a 2026-11-03] 单据序列号守卫（P60）：收货 / 发运过账录号
+    #   前置校验。priority=50，必须早于 shipment_guard(51) / receipt_guard(52)。
+    #   与 app_builder.with_interceptors() 同位补齐。
+    from meta.core.interceptors.serial_tracking_guard_interceptor import (
+        SerialTrackingGuardInterceptor,
+    )
+    bo_framework.register_interceptor(SerialTrackingGuardInterceptor())
     # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
     #   服务请求行 / 请购行的行级必填。
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。

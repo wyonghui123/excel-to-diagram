@@ -357,6 +357,10 @@ class ReceiptService:
         checked = [self._validate_line(line, order, doc_type, for_post=True)
                    for line in lines]
 
+        # P6a §6.1：序列号录号前置校验（最后一步做写副作用前必须通过）
+        if not is_return:
+            self._validate_serial_tracking(header, checked)
+
         order_ids = set()
         for item in checked:
             line = item['line']
@@ -392,6 +396,10 @@ class ReceiptService:
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
             % HEADER_TABLE,
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
+
+        # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
+        # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
+        self._register_receipt_serials(header, checked)
 
         logger.info('[receipt] posted id=%s return=%s lines=%s',
                     header['id'], is_return, len(checked))
@@ -704,6 +712,51 @@ class ReceiptService:
         return {'id': header['id'], 'status': STATUS_REVERSED,
                 'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
                 'order_ids': [], 'transfer_order_id': header.get('source_doc_id')}
+
+    # ------------------------------------------------------------------ 序列号（P6a）
+    def _item_serial_flags(self, item_id: Any) -> Dict[str, Any]:
+        if _blank(item_id):
+            return {}
+        rows = self.ds.query(
+            'SELECT serial_tracked, require_on_receipt FROM items WHERE id = ?',
+            [item_id])
+        return rows[0] if rows else {}
+
+    def _has_serial_tracked(self, checked: Any) -> bool:
+        for item in checked or []:
+            line = item.get('line') or {}
+            if str(line.get('serial_no') or '').strip():
+                return True
+            if self._item_serial_flags(line.get('item_id')).get('serial_tracked'):
+                return True
+        return False
+
+    def _validate_serial_tracking(self, header: Dict[str, Any],
+                                  checked: Any) -> None:
+        """§6.1 收货前置：require_on_receipt 时 link 数必须等于净收数量。"""
+        if not self._has_serial_tracked(checked):
+            return
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).precheck_receipt(header['id'])
+        except SerialNumberError as error:
+            raise ReceiptError(str(error), field_name=error.field_name or 'serial_no',
+                               rule=error.rule or 'SERIAL_RECEIPT_COUNT_MISMATCH')
+
+    def _register_receipt_serials(self, header: Dict[str, Any],
+                                  checked: Any) -> None:
+        if not self._has_serial_tracked(checked):
+            return
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).register_receipt(header['id'])
+        except SerialNumberError as error:
+            raise ReceiptError(str(error), field_name=error.field_name or 'serial_no',
+                               rule=error.rule or 'SERIAL_RECEIPT_REGISTER_FAILED')
 
     # ------------------------------------------------------------------ 行校验
     def validate_new_line(self, payload: Dict[str, Any],

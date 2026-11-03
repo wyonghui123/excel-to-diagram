@@ -219,8 +219,8 @@ fields:
     type: string
     db_column: serial_no
     nullable: true
-    max_length: 64
-    description: 序列号
+    max_length: 200
+    description: 快捷录入：qty=1 时可直接录号；qty>1 必须走序列号子表
     semantics:
       meaning: 序列号
       data_category: code

@@ -95,6 +95,14 @@ def test_receipt_line_rejection_disposition_enum(line_doc):
     assert _enum_values(field) == DISPOSITIONS
 
 
+def test_receipt_line_serial_no_is_quick_entry_only(line_doc):
+    """D7：行内 serial_no 仅 qty=1 快捷录入，宽度对齐 generated_schema 200。"""
+    field = _fields(line_doc)['serial_no']
+    assert field['max_length'] == 200
+    assert 'qty=1' in field['description']
+    assert 'qty>1' in field['description']
+
+
 def test_receipt_line_has_dual_anchors(line_doc):
     fields = _fields(line_doc)
     assert fields['schedule_id'].get('nullable') is True

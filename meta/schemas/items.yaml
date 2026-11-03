@@ -611,6 +611,50 @@ fields:
       widget: input
       unit_hint: 重量
 
+  # 序列号管理三开关（P6a）：收货 / 发货分开控制，不合并成单一枚举（D8）。
+  #   require_on_receipt / require_on_issue 为 1 时 serial_tracked 必须为 1（服务层约束）。
+  - id: serial_tracked
+    name: 序列号管理
+    type: boolean
+    db_column: serial_tracked
+    nullable: true
+    default: false
+    description: 是否启用序列号管理
+    semantics:
+      meaning: 物料是否序列号管理
+    ui:
+      widget: switch
+      fieldGroup: 序列号
+      fieldGroupPosition: 210
+
+  - id: require_on_receipt
+    name: 收货强制录号
+    type: boolean
+    db_column: require_on_receipt
+    nullable: true
+    default: false
+    description: 收货过账是否强制录号
+    semantics:
+      meaning: 收货是否强制录号
+    ui:
+      widget: switch
+      fieldGroup: 序列号
+      fieldGroupPosition: 220
+
+  - id: require_on_issue
+    name: 发货强制录号
+    type: boolean
+    db_column: require_on_issue
+    nullable: true
+    default: false
+    description: 发运过账是否强制录号
+    semantics:
+      meaning: 发运是否强制录号
+    ui:
+      widget: switch
+      fieldGroup: 序列号
+      fieldGroupPosition: 230
+
   # I 外部标识（主值；配对值走 item_xref 子表）
   - id: barcode
     name: 主条码

@@ -175,6 +175,9 @@ class ShipmentService:
             raise ShipmentError('交货单没有任何行，禁止发运确认',
                                 field_name='lines', rule='DN_EMPTY')
 
+        # P6a §6.1：发运录号前置校验（require_on_issue 时 link 数必须等于 qty）
+        self._validate_serial_tracking(delivery_id)
+
         grouped: Dict[Any, Decimal] = {}
         for line in lines:
             if line['status'] == STATUS_CANCELLED:
@@ -204,6 +207,9 @@ class ShipmentService:
             'UPDATE %s SET status = ?, actual_ship_date = ?, updated_at = ? '
             'WHERE id = ?' % HEADER_TABLE,
             [STATUS_SHIPPED, now, now, delivery_id])
+
+        # P6a §5 register_shipment：校验在库、写 ship 事件与 link、置 shipped。
+        self._register_shipment_serials(lines, delivery_id)
 
         order_line_ids = sorted({int(line['order_line_id']) for line in lines})
         logger.info('[shipment] ship_confirm id=%s schedules=%s', delivery_id,
@@ -325,6 +331,45 @@ class ShipmentService:
         if header['status'] in UNDELETABLE_HEADER_STATUSES:
             raise ShipmentError('已发运的交货单不可删除，请用反向交货单冲销',
                                 field_name='status', rule='DN_DELETE_FORBIDDEN')
+
+    # ------------------------------------------------------------------ 序列号（P6a）
+    def _item_serial_flags(self, item_id: Any) -> Dict[str, Any]:
+        if _blank(item_id):
+            return {}
+        rows = self.ds.query(
+            'SELECT serial_tracked, require_on_issue FROM items WHERE id = ?',
+            [item_id])
+        return rows[0] if rows else {}
+
+    def _validate_serial_tracking(self, delivery_id: Any) -> None:
+        """§6.1 发运前置：require_on_issue 时 link 数必须等于发运数量。"""
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).precheck_shipment(delivery_id)
+        except SerialNumberError as error:
+            raise ShipmentError(str(error),
+                                field_name=error.field_name or 'serial_no',
+                                rule=error.rule or 'SERIAL_ISSUE_COUNT_MISMATCH')
+
+    def _register_shipment_serials(self, lines: List[Dict[str, Any]],
+                                   delivery_id: Any) -> None:
+        tracked = any(
+            self._item_serial_flags(line.get('item_id')).get('serial_tracked')
+            for line in lines or []
+            if line.get('status') != STATUS_CANCELLED)
+        if not tracked:
+            return
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).register_shipment(delivery_id)
+        except SerialNumberError as error:
+            raise ShipmentError(str(error),
+                                field_name=error.field_name or 'serial_no',
+                                rule=error.rule or 'SERIAL_SHIPMENT_REGISTER_FAILED')
 
     # ------------------------------------------------------------------ 编号
 
