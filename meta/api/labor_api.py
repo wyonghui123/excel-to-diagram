@@ -11,7 +11,7 @@
   · 产能利用率复用 `LaborService.resource_utilization()`（D16：不在 SQL 里
     重写日历 / 班次口径）。
   · 权限沿用 `project:time_entry_read`（v182 已落码）。
-  · 响应统一走 `_response_contract`，不直接 `jsonify(`。
+  · 响应统一走 `_response_contract`，不直接调用 jsonify。
 """
 
 import logging

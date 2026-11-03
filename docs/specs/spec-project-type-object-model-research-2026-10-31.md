@@ -150,7 +150,7 @@
 |---|---|---|---|
 | G1 | ~~无 `project` 对象与 `project_id` 挂载~~ **已落（P1）** | P0 | `project` 一等对象 + SO / 行 / 计划行 / 工单 / 交货单挂载，项目 360 五段按 `project_id` 原生过滤 |
 | G2 | ~~`work_center_id` 悬空（无对象/无表）~~ **已落（P2a）** | P0 | 改为 `resource_group_id`，工单工序归集到资源组，消除悬空引用 |
-| G3 | 无 `routing` 工艺路线主数据 | P0 | 工序只能工单级手填，标准工时不可复用 |
+| G3 | ~~无 `routing` 工艺路线主数据~~ **已落（v176，以 `work_definition` / `work_definition_operation` 落地）** | P0 | 工序可复用标准工时与资源组；改版不回冲已发工单 |
 | G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销） | P0 | 工程变更与项目实例化 BOM 不可表达 |
 | G5 | ~~资源只有 3 值枚举，无实例/日历/技能/费率~~ **已落（P2，v175 / v176 / v180）** | P1 | `resource` / `resource_group` / `resource_capability` / `skill` / `shift` / `calendar_shift` / `resource_rate` 已落库 |
 | G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` **已落 v177**，`fulfillment_order.project_id` **已落 v183**） | P1 | 三条履约链均可按 `project_id` 归集；项目 360 仍为五段（未新增履约分组段） |

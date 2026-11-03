@@ -196,8 +196,8 @@ GROUP BY te.resource_id, te.work_date;
 - [x] 任务级 / 项目级 / 资源日级数字与种子数据逐项一致；无重复计数。
 - [x] `work_order_operation` 未新增 `project_task_id`；工时桥只落 `time_entries` 行。
 - [x] `resource_utilization` 复用 `available_minutes()`，不出现第二套班次 / 日历口径。
-- [ ] 所有新增测试 + 6 个回归文件全绿；`check_architecture.py` 计数不上升。
-      —— 测试全绿已确认；但本仓库不存在 `meta/scripts/check_architecture.py`，架构计数项无法执行，留待该脚本落库后补跑。
+- [x] 所有新增测试 + 6 个回归文件全绿；`check_architecture.py` 计数不上升。
+      —— 测试全绿已确认；`scripts/check_architecture.py` 全部计数持平基线（jsonify_total 372→371，系文档注释误计，已改文案）。
 - [x] spec v1.8 / 里程碑 v0.8 变更记录落地。
 
 ## 6. 风险与暂不做
