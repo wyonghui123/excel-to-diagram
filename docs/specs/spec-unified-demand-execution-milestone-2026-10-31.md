@@ -1,6 +1,6 @@
 # 统一需求—执行体系 里程碑计划
 
-> 依据：`spec-procurement-task-object-model-2026-10-31.md`（v1.13）、`spec-shared-service-center-object-model-2026-10-31.md`（v1.4）、`spec-project-type-object-model-research-2026-10-31.md`（v1.2）、`spec-oracle-fusion-project-object-model-2026-10-31.md`
+> 依据：`spec-procurement-task-object-model-2026-10-31.md`（v1.13）、`spec-shared-service-center-object-model-2026-10-31.md`（v1.4）、`spec-project-type-object-model-research-2026-10-31.md`（v2.3）、`spec-oracle-fusion-project-object-model-2026-10-31.md`
 > 状态：草案，待评审
 > 组织原则：**需求 → 寻源 → 载体 → 执行 → 事实沉淀**，每一层只依赖上一层
 
@@ -124,7 +124,8 @@
 | SSC | S11 | M3（合同 / 权益） |
 | project | G1（已落 P1） | P1 |
 | project | G11 | P1.5 / M1 |
-| project | G4、G12（溯源已落 v184）、G13 | M4 |
+| project | G12（溯源已落 v184）、G13 | M4 |
+| project | G4（已拆分为独立专题 ECM，不占 M4） | 独立专题，另行排期 |
 | project | G14（已落 v182） | P1.5 |
 | project | G5、G8、G9（均已落 P2 / P3） | P2 / P3 / M5 |
 | project | G10（`configuration.project_id`，已落 v178） | P3 |
@@ -171,3 +172,4 @@
 | 2026-11-01 | v0.8 | G14 闭环：`time_entry`（v182）+ `v_project_task_labor` / `v_project_labor` / `v_resource_labor_daily` + 查询 API；G7 降为治理项（对齐 project spec v1.8） |
 | 2026-11-01 | v0.9 | G6 收尾：`fulfillment_order.project_id`（v183）；三条履约链共用项目锚点（对齐 project spec v1.9） |
 | 2026-11-01 | v1.0 | G12 溯源：`work_order_operation` 补 `work_definition_id` / `work_definition_operation_id`（v184）；G7 经核对仅剩「注册豁免 + YAML」，G13 待 G7（对齐 project spec v2.0） |
+| 2026-11-03 | v1.1 | G4 拆为独立专题（ECM）：从 M4 映射移出、单独列为「独立专题，另行排期」；M4 仅保留 G12 / G13（对齐 project spec v2.3） |

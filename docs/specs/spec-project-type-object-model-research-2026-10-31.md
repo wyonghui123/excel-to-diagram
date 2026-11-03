@@ -1,6 +1,6 @@
 # 研究：项目类型的四层对象模型（商务层 / 履约层 / 主数据层 / 结构配置层）
 
-> 文档编号：研究稿 v2.1 | 日期：2026-10-31（更新 2026-11-02） | 状态：已评审，G1–G14 按 §3 推进
+> 文档编号：研究稿 v2.3 | 日期：2026-10-31（更新 2026-11-03） | 状态：已评审，G1–G14 按 §3 推进（G4 已拆为独立专题）
 > 命题：以「项目」为业务主线，审视现有四套统一对象体系（任务 / 商务订单 / 结构主数据 / 履约），
 > 给出项目类型的四层主数据结构与挂载方案。
 > 取证基线：`meta/schemas/` 当前 YAML 与 `docs/superpowers/specs/` 现有 spec。
@@ -151,7 +151,7 @@
 | G1 | ~~无 `project` 对象与 `project_id` 挂载~~ **已落（P1）** | P0 | `project` 一等对象 + SO / 行 / 计划行 / 工单 / 交货单挂载，项目 360 五段按 `project_id` 原生过滤 |
 | G2 | ~~`work_center_id` 悬空（无对象/无表）~~ **已落（P2a）** | P0 | 改为 `resource_group_id`，工单工序归集到资源组，消除悬空引用 |
 | G3 | ~~无 `routing` 工艺路线主数据~~ **已落（v176，以 `work_definition` / `work_definition_operation` 落地）** | P0 | 工序可复用标准工时与资源组；改版不回冲已发工单 |
-| G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销）；**细化稿已产出（[spec-project-g4-engineering-bom-2026-11-03.md](./spec-project-g4-engineering-bom-2026-11-03.md)，待评审）** | P0 | 工程变更与项目实例化 BOM 不可表达 |
+| G4 | `usage=engineering` 无消费方（项目 BOM 快照已裁决不建，D5 撤销）；**已拆分为独立专题（ECM），细化稿见 [spec-project-g4-engineering-bom-2026-11-03.md](./spec-project-g4-engineering-bom-2026-11-03.md)（待评审）**；project 轨无硬依赖，非阻塞项 | P2（独立专题） | 工程变更不可表达；原「项目实例化 BOM」部分已由 `configuration.project_id`（v178）+ 工单展开快照（AC-07）覆盖 |
 | G5 | ~~资源只有 3 值枚举，无实例/日历/技能/费率~~ **已落（P2，v175 / v176 / v180）** | P1 | `resource` / `resource_group` / `resource_capability` / `skill` / `shift` / `calendar_shift` / `resource_rate` 已落库 |
 | G6 | `fulfillment_order/shipment` 与 `work_order` 两条履约链未共用项目锚点（`shipment.project_id` **已落 v177**，`fulfillment_order.project_id` **已落 v183**） | P1 | 三条履约链均可按 `project_id` 归集；项目 360 仍为五段（未新增履约分组段） |
 | G7 | ~~Gen2 任务六表不在 YAML 元模型内~~ **已落（2026-11-02）** | P1 | 六表进 `meta/schemas/*.yaml` + `skip_generic_api` 屏蔽通用 CRUD / agent 工具，不改运行时语义 |
@@ -315,3 +315,4 @@ project ──1:N──> project_task ──需求──> source_demand(type=pro
 | 2026-11-01 | v2.0：G12 溯源落地——`work_order_operation` 补 `work_definition_id` / `work_definition_operation_id`（v184，软引用 + 2 索引）；补 D18–D20；核出 routing 已以 `work_definition` 落地（v176）、Gen2 六表迁移兜底已由 v154 完成，G7 剩余为「注册豁免 + YAML」治理项；G13 待 G7 |
 | 2026-11-02 | v2.1：G7 落地——六表进 `meta/schemas/*.yaml`（`workflow` / `task_template` / `workflow_run` / `task` / `task_event` / `task_worklog`）+ `skip_generic_api` 屏蔽通用 CRUD / agent 工具 / 自动菜单；`task_schema` / `task_event_schema` 删除代码 MetaObject 定义、改 YAML 驱动，v154 改从 registry 取对象；六表 DDL 基线比对零差异；D19 改写为「不改运行时语义」，并推翻 `task-two-generation-convergence/spec.md` D3「不引入元模型 YAML」的历史裁决 |
 | 2026-11-02 | v2.2：G12 / G13 闭环——工序定名「作业步骤」（P1-5，表名 / 对象 id / 列名不变）；工序 `status` 降为只读投影（`readonly_always`），动作流转唯一走 `tasks`；`tasks.line_refs` 弱引用步骤；实际工时唯一落 `time_entries`；新增桥接服务 `create_operation_tasks`（只接受 `work_order_id`，幂等） |
+| 2026-11-03 | v2.3：G4 拆分为独立专题——取证确认 project 轨无硬依赖（`engineering_change` 仅存在于细化稿、`usage=engineering` 无代码消费方、依赖方向是 ECM → project 的可选归集）；G4 等级 P0 → P2（独立专题），从 M4 移出，细化稿补「不占 M4」定位 |

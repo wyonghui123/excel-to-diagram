@@ -1,8 +1,9 @@
 # 细化稿：G4 工程 BOM 消费方（工程变更单 + 差异应用）
 
-- 文档版本：v1.0
+- 文档版本：v1.2
 - 日期：2026-11-03
 - 状态：细化设计（**待评审，尚未实施**）
+- 归属：**独立专题（ECM 工程变更管理）**，不占 project 轨里程碑 M4；project 轨对其无硬依赖，属非阻塞项
 - 关联主 Spec：[`spec-project-type-object-model-research-2026-10-31.md`](./spec-project-type-object-model-research-2026-10-31.md) §3 G4 / §7 Q2 / §8.4 D5
 - 关联对象：`items` / `item_structure` / `item_structure_line` / `work_order_components` / `work_definition`
 - 迁移编号：预计 `v196`（当前仓库最大 `v195`，以实际落地时为准）
@@ -320,6 +321,7 @@ create_change(ds, *, item_id, source_structure_id, target_structure_id,
 |---|---|---|
 | 2026-11-03 | v1.0 | 初稿：裁决 Q2（engineering 补消费方）、变更单两表、差异实时计算、apply 规则、P1/P2/P3 分期与 8 条验收 |
 | 2026-11-03 | v1.1 | SAP / Oracle 对标后校正：明确本设计为 ECM（非 ETO）；P1 增补 where-used 影响预览；新增 AC-G4-9；补充附录 A |
+| 2026-11-03 | v1.2 | 定位收口：G4 拆为**独立专题（ECM）**，不占 project 轨 M4；取证确认 project 轨无硬依赖（`engineering_change` 仅存于本稿，`usage=engineering` 无任何代码消费方） |
 
 ---
 
