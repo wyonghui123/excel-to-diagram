@@ -65,14 +65,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="物料" width="100">
+        <el-table-column label="物料" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.item_id ?? '—' }}
+            {{ itemLabel(row) }}
           </template>
         </el-table-column>
-        <el-table-column label="项目" width="100">
+        <el-table-column label="项目" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.project_id ?? '—' }}
+            {{ projectLabel(row) }}
           </template>
         </el-table-column>
         <el-table-column label="生效日" width="120">
@@ -153,6 +153,22 @@ function statusLabel(status) {
 
 function statusTagType(status) {
   return STATUS_TAG_TYPES[status] || 'info'
+}
+
+function itemLabel(row) {
+  const code = row?.item_no
+  const name = row?.item_name
+  if (code && name) return `${code} ${name}`
+  if (code || name) return code || name
+  return row?.item_id ?? '—'
+}
+
+function projectLabel(row) {
+  const code = row?.project_no
+  const name = row?.project_name
+  if (code && name) return `${code} ${name}`
+  if (code || name) return code || name
+  return row?.project_id ?? '—'
 }
 
 function handleSearch() {

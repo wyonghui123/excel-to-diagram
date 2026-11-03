@@ -43,7 +43,11 @@ const ITEMS = [
     title: '工程 BOM 改版',
     status: 'draft',
     item_id: 101,
+    item_no: 'FG-101',
+    item_name: '总成十号',
     project_id: 7,
+    project_no: 'P-10',
+    project_name: '项目十',
     effective_date: '2026-11-20',
     line_count: 3,
     created_at: '2026-11-03 10:00:00'
@@ -89,8 +93,9 @@ describe('EngineeringChangeListPage', () => {
     expect(w.text()).toContain('草稿')
     expect(w.text()).toContain('评审中')
     expect(w.text()).toContain('2026-11-20')
-    expect(w.text()).toContain('101')
-    expect(w.text()).toContain('7')
+    expect(w.text()).toContain('FG-101 总成十号')
+    expect(w.text()).toContain('P-10 项目十')
+    expect(w.text()).toContain('102')
   })
 
   it('状态筛选带上 status 并重置到第一页', async () => {

@@ -631,8 +631,35 @@ class EngineeringChangeService:
             'FROM %s ec%s ORDER BY ec.created_at DESC, ec.id DESC LIMIT ? OFFSET ?'
             % (LINE_TABLE, LINE_TABLE, LINE_TABLE, HEADER_TABLE, where_sql),
             params + [page_size, (page - 1) * page_size])
+        self._enrich_list_rows(rows)
         return {'items': rows, 'total': int((total_row or {}).get('total') or 0),
                 'page': page, 'page_size': page_size}
+
+    def _enrich_list_rows(self, rows: List[Dict]) -> None:
+        """补列表展示所需的物料 / 项目名称（批量查询，避免 N+1）。"""
+        item_ids = sorted({row['item_id'] for row in rows
+                           if row.get('item_id')})
+        project_ids = sorted({row['project_id'] for row in rows
+                              if row.get('project_id')})
+        items: Dict[Any, Dict] = {}
+        projects: Dict[Any, Dict] = {}
+        if item_ids:
+            mark = ','.join('?' * len(item_ids))
+            items = {r['id']: r for r in self._fetch_all(
+                'SELECT id, item_no, name FROM items WHERE id IN (%s)' % mark,
+                item_ids)}
+        if project_ids:
+            mark = ','.join('?' * len(project_ids))
+            projects = {r['id']: r for r in self._fetch_all(
+                'SELECT id, project_no, name FROM projects WHERE id IN (%s)'
+                % mark, project_ids)}
+        for row in rows:
+            item = items.get(row.get('item_id')) or {}
+            project = projects.get(row.get('project_id')) or {}
+            row['item_no'] = item.get('item_no')
+            row['item_name'] = item.get('name')
+            row['project_no'] = project.get('project_no')
+            row['project_name'] = project.get('name')
 
     # ==================================================================
     # EC-3 状态迁移（服务层强制权限/前置校验；权限由 API 层装饰器保证）

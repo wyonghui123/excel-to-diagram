@@ -423,6 +423,28 @@ class TestDiff:
         # 其它键仍正常产出
         assert {r['line_type'] for r in result['rows']} == {'add', 'remove'}
 
+    def test_list_returns_item_and_project_names(self, service, db):
+        change = _create(service, service.diff_structures(10, 20))
+        result = service.list_changes(status='draft')
+
+        assert result['total'] == 1
+        row = result['items'][0]
+        assert row['id'] == change['id']
+        assert row['item_no'] == 'I-100'
+        assert row['item_name'] == '整机'
+        assert row['project_no'] == 'P-10'
+        assert row['project_name'] == '项目十'
+        assert row['line_count'] == 3
+
+    def test_list_without_project_keeps_names_null(self, service, db):
+        change = _create(service, service.diff_structures(10, 20), project_id=None)
+
+        row = next(r for r in service.list_changes()['items']
+                   if r['id'] == change['id'])
+        assert row['project_id'] is None
+        assert row['project_no'] is None
+        assert row['project_name'] is None
+
 
 # ======================================================================
 # AC-G4-3 / 4 / 6 / 7 / 8 / 10 / 11 apply 全链路
