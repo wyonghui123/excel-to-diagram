@@ -48,6 +48,8 @@
 | D12 | 序列号不挂销售订单行 / 调拨单行 | 沿用 P5 D12；拆号属执行层 |
 | D13 | 反冲不删 `document_serial_links` | 审计优先；反冲只写反向事件并回退状态 |
 | D14 | 回填只处理 `qty=1` 的存量行，`qty>1` 标记待清洗 | 单值文本无法可靠拆分，不自动猜测 |
+| D15 | **不把序列号合并进批次物理模型**（不建「数量恒为 1 的 batch」）；批次做组、序列号做件，仅用 `serial_numbers.batch_id` 可空关联 | SAP / Oracle / Dynamics 365 / Odoo / NetSuite 均为两套独立主档；无一家用 batch 行表达单件 |
+| D16 | 序列号唯一性范围保留扩展位：当前固定 `(item_id, org_id, serial_no)`，P7 再做 item / org / across-org 可配置 | Oracle 唯一性三档可配；当前取值即其 organization 档 |
 
 ## 3. 数据模型
 
@@ -259,6 +261,6 @@
 | 阶段 | 内容 |
 |---|---|
 | P6a（本 Spec） | 三表 + items 三开关 + 收货/发运录号 + 按号查历史 + 回填 |
-| P6b | 调拨 / 盘点 / 调整 / 退货；`quality_status` 流转；`issue_created` 建档 |
+| P6b | 调拨 / 盘点 / 调整 / 退货；`quality_status` 流转；`issue_created` 建档（已细化：`docs/specs/p6b-serial-execution/spec.md`） |
 | P6c | 完工成品号 + 组件单父谱系（`relation_type=assembly`） |
 | P7 | 全局唯一（`serial_uniqueness_scope`）、多父谱系、包装嵌套（`packaging`）、序列号级预留 |

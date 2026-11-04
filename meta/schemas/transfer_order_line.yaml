@@ -258,6 +258,19 @@ fields:
     ui:
       widget: input
 
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 200
+    description: 序列号（qty=1 快捷录入；qty>1 必须走 document_serial_links 序列号子表）
+    semantics:
+      meaning: 调拨行序列号（仅数量为 1 时快捷录入）
+      searchable: true
+    ui:
+      widget: input
+
   - id: qty_shipped
     name: 已发货量
     type: number
@@ -480,6 +493,7 @@ ui_view_config:
       - title: 数量与进度
         columns:
           - fields: [qty]
+          - fields: [serial_no]
           - fields: [qty_shipped, qty_received]
           - fields: [status, fulfillment_status]
       - title: 其他

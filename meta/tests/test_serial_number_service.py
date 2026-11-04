@@ -262,3 +262,87 @@ def test_trace_serial_returns_timeline_and_documents_across_orgs():
 
     scoped = _svc(conn).trace_serial('SN-001', org_id=1)
     assert [m['org_id'] for m in scoped['matches']] == [1]
+
+
+# ---------------- P6b：质量状态 / 退货 / 仅发货建档 ----------------
+
+def test_change_quality_status_only_touches_quality_axis():
+    conn = _db()
+    _add_item(conn)
+    serial = _svc(conn).create_serial(
+        {'item_id': 900, 'org_id': 1, 'serial_no': 'SN-001'})
+
+    result = _svc(conn).change_quality_status(
+        serial['id'], 'inspection', '质检中')
+    row = _find(conn, 'SN-001')[0]
+    assert result['to'] == 'inspection'
+    assert row['quality_status'] == 'inspection'
+    assert row['usage_status'] == 'defined'
+
+    events = [e for e in _txns(conn, serial['id'])
+              if e['txn_type'] == 'status_change']
+    assert events[-1]['quality_from'] == 'unrestricted'
+    assert events[-1]['quality_to'] == 'inspection'
+
+
+def test_change_quality_status_rejects_unknown_value_and_scrapped():
+    conn = _db()
+    _add_item(conn)
+    service = _svc(conn)
+    serial = service.create_serial(
+        {'item_id': 900, 'org_id': 1, 'serial_no': 'SN-001'})
+
+    with pytest.raises(SerialNumberError) as exc:
+        service.change_quality_status(serial['id'], 'frozen')
+    assert exc.value.rule == 'SERIAL_QUALITY_STATUS_INVALID'
+
+    service.change_status(serial['id'], 'scrapped', '报废')
+    with pytest.raises(SerialNumberError) as exc:
+        service.change_quality_status(serial['id'], 'unrestricted')
+    assert exc.value.rule == 'SERIAL_STATUS_TRANSITION_INVALID'
+
+
+def test_return_serial_moves_issued_to_returned_then_in_stores():
+    conn = _db()
+    _add_item(conn)
+    service = _svc(conn)
+    serial = service.create_serial(
+        {'item_id': 900, 'org_id': 1, 'serial_no': 'SN-001'})
+    service.change_status(serial['id'], 'in_stores', '入库')
+    service.change_status(serial['id'], 'issued', '领用')
+
+    returned = service.return_serial(serial['id'], reason='客户退回')
+    assert returned['to_status'] == 'returned'
+    assert _find(conn, 'SN-001')[0]['usage_status'] == 'returned'
+
+    stored = service.return_serial(
+        serial['id'], location_id=7, to_stores=True, reason='退回入库')
+    assert stored['to_status'] == 'in_stores'
+    assert _find(conn, 'SN-001')[0]['current_location_id'] == 7
+    assert [e['txn_type'] for e in _txns(conn, serial['id'])][-2:] == [
+        'return', 'return']
+
+
+def test_issue_created_shipment_creates_serials_on_register():
+    conn = _db()
+    _add_item(conn, tracked=1, receipt=0, issue=1)
+    conn.execute(
+        'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
+        "actual_ship_date, status) VALUES (1, ?, 7, ?, 'draft')",
+        ['DN-001', '2026-11-04'])
+    conn.execute(
+        'INSERT INTO shipment_lines (id, delivery_id, item_id, qty, serial_no, '
+        "status) VALUES (10, 1, 900, 2, NULL, 'open')")
+    service = _svc(conn)
+
+    service.precheck_shipment(1)  # 仅发货管理模式允许未录号
+    result = service.register_shipment(1)
+
+    rows = MemDS(conn).query(
+        'SELECT * FROM serial_numbers ORDER BY serial_no')
+    assert result['registered'] == 2
+    assert len(rows) == 2
+    assert {row['usage_status'] for row in rows} == {'shipped'}
+    assert {row['source_type'] for row in rows} == {'issue_created'}
+    assert MemDS(conn).query(
+        'SELECT COUNT(*) AS cnt FROM document_serial_links')[0]['cnt'] == 2

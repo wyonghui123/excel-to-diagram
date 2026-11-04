@@ -104,6 +104,14 @@ class SerialNumberGuardInterceptor(Interceptor):
             raise SerialNumberError('未知质量状态：%s' % quality,
                                     field_name='quality_status',
                                     rule='SERIAL_QUALITY_STATUS_INVALID')
+        if old and quality is not None \
+                and quality != (old.get('quality_status') or 'unrestricted'):
+            # FR-008：质量状态只能经服务流转（写 status_change 事件）
+            from meta.services.serial_number_service import SerialNumberService
+            SerialNumberService(context.data_source).change_quality_status(
+                old.get('id'), quality,
+                reason=params.get('remark') or '序列号质量状态变更',
+                doc={'doc_type': 'serial_number', 'doc_id': old.get('id')})
         source_type = params.get('source_type')
         if not old and source_type is not None \
                 and source_type not in SOURCE_TYPES:

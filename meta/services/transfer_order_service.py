@@ -456,6 +456,9 @@ class TransferOrderService:
                     rule='TO_STATE_INVALID')
 
             now = _now()
+            serial_ready = self._serial_ready()
+            if serial_ready:
+                self._precheck_transfer_serials(header['id'], items)
             ratio = resolve_tolerance_ratio(
                 self.ds, TOLERANCE_SHIP_PARAM, header)
             for line_id, qty in items.items():
@@ -494,6 +497,12 @@ class TransferOrderService:
                 'WHERE id = ?' % HEADER_TABLE,
                 [ship_date, carrier, waybill, now, header['id']])
 
+            # 库存出账：发货即转出（同事务；开关关闭时 post() 内部自动跳过）
+            event_key = self._post_ship_inventory(header, items, ship_date)
+            if serial_ready:
+                self._register_transfer_serials(
+                    header['id'], items, event_key, ship_date)
+
             self.recompute_fulfillment(header['id'])
             fresh = self._require_header(header['id'])
             logger.info('[transfer_order] shipped id=%s lines=%s',
@@ -502,6 +511,96 @@ class TransferOrderService:
                     'fulfillment_status': fresh.get('fulfillment_status'),
                     'actual_ship_date': fresh.get('actual_ship_date'),
                     'line_ids': sorted(items.keys())}
+
+    # ------------------------------------------------------------- 库存过账
+    def _post_ship_inventory(self, header: Dict[str, Any],
+                             items: Dict[Any, Any],
+                             ship_date: Any = None) -> Optional[str]:
+        """发货出账：按本次发货行写 ISSUE_TO_SHIP（org/location = 调出方）。
+
+        返回本次库存事件键，供序列号事件桥接；开关关闭 / 无分录时返回 None。
+        """
+        from meta.services.inventory_guard_service import (
+            InventoryError, InventoryGuardService)
+        from meta.services.inventory_posting_service import (
+            InventoryPostingService,
+        )
+
+        if not InventoryGuardService(self.ds).posting_enabled():
+            return None
+
+        event_seq = self.ds.query(
+            'SELECT COUNT(DISTINCT source_event_key) AS c '
+            'FROM inventory_transactions '
+            "WHERE source_doc_type = 'transfer_order' AND source_doc_id = ? "
+            "AND source_event_key LIKE 'transfer_order:%:ship:%'",
+            [header['id']])
+        seq = int((event_seq[0].get('c') if event_seq else 0) or 0) + 1
+        event_key = 'transfer_order:%s:ship:%s' % (header['id'], seq)
+
+        entries = []
+        for line_id, qty in items.items():
+            line = self._load_line(line_id) or {}
+            entries.append({
+                'transaction_type': 'ISSUE_TO_SHIP',
+                'transaction_date': ship_date or header.get('actual_ship_date'),
+                'org_id': header.get('from_org_id'),
+                'location_id': header.get('from_location_id'),
+                'item_id': line.get('item_id'),
+                'uom_id': line.get('uom_id'),
+                'qty': float(qty),
+                'stock_status': 'unrestricted',
+                'source_line_id': line_id,
+                'remark': '调拨单 %s 发货' % header.get('order_no'),
+            })
+        if not entries:
+            return None
+
+        source = {
+            'source_doc_type': 'transfer_order',
+            'source_doc_id': header['id'],
+            'source_event_key': event_key,
+            'transaction_date': ship_date or header.get('actual_ship_date'),
+            'remark': '调拨单 %s 发货' % header.get('order_no'),
+        }
+        try:
+            InventoryPostingService(self.ds).post(entries, source)
+        except InventoryError as e:
+            raise TransferOrderError(
+                e.message, field_name='inventory', rule=e.code)
+        return event_key
+
+    # ------------------------------------------------------------- 序列号钩子
+    def _serial_ready(self) -> bool:
+        from meta.services.serial_number_service import serial_schema_ready
+        return serial_schema_ready(self.ds)
+
+    def _precheck_transfer_serials(self, transfer_order_id: Any,
+                                   items: Dict[Any, Any]) -> None:
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService)
+        try:
+            SerialNumberService(self.ds).precheck_transfer_ship(
+                transfer_order_id, items)
+        except SerialNumberError as error:
+            raise TransferOrderError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_ERROR')
+
+    def _register_transfer_serials(self, transfer_order_id: Any,
+                                   items: Dict[Any, Any],
+                                   event_key: Any = None,
+                                   ship_date: Any = None) -> None:
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService)
+        try:
+            SerialNumberService(self.ds).register_transfer_ship(
+                transfer_order_id, items, event_key=event_key,
+                txn_date=ship_date)
+        except SerialNumberError as error:
+            raise TransferOrderError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_ERROR')
 
     # ------------------------------------------------------------------
     # 取消 / 关闭

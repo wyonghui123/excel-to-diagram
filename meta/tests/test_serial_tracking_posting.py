@@ -295,13 +295,22 @@ def test_qty_two_requires_two_links_and_ships_both():
             [serial_no])[0]['usage_status'] == 'shipped'
 
 
-def test_require_on_issue_rejects_count_mismatch():
+def test_require_on_issue_auto_creates_serials_when_none_selected():
+    """P6b FR-007：仅发货管理模式未录号时按数量自动建档（替代 P6a 的拒绝口径）。"""
     conn = _shipment_db()
-    svc, delivery_id, _line_id = _prepare_shipment(conn, 2)
-    with pytest.raises(ShipmentError) as exc:
-        svc.ship_confirm(delivery_id)
-    assert exc.value.rule == 'SERIAL_ISSUE_COUNT_MISMATCH'
-    assert exc.value.field_name == 'serial_no'
+    svc, delivery_id, line_id = _prepare_shipment(conn, 2)
+
+    svc.ship_confirm(delivery_id)
+
+    rows = MemDS(conn).query(
+        'SELECT * FROM serial_numbers ORDER BY serial_no')
+    assert len(rows) == 2
+    assert {row['usage_status'] for row in rows} == {'shipped'}
+    assert {row['source_type'] for row in rows} == {'issue_created'}
+    links = MemDS(conn).query(
+        'SELECT * FROM document_serial_links WHERE doc_type = ? AND line_id = ?',
+        ['shipment', line_id])
+    assert len(links) == 2
 
 
 def test_defined_serial_cannot_be_shipped():

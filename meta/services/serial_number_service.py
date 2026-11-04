@@ -31,6 +31,25 @@ INV_TX_TABLE = 'inventory_transactions'
 
 DOC_RECEIPT = 'receipt'
 DOC_SHIPMENT = 'shipment'
+DOC_TRANSFER = 'transfer_order'
+DOC_ADJUSTMENT = 'inventory_adjustment'
+DOC_COUNT = 'inventory_count'
+
+TRANSFER_TABLE = 'transfer_orders'
+TRANSFER_LINE_TABLE = 'transfer_order_lines'
+ADJ_TABLE = 'inventory_adjustments'
+ADJ_LINE_TABLE = 'inventory_adjustment_lines'
+CNT_TABLE = 'inventory_counts'
+CNT_LINE_TABLE = 'inventory_count_lines'
+
+#: 单据行表映射（用于按行 id 补读 serial_no，兼容未加列的旧替身）
+LINE_TABLE_BY_DOC = {
+    DOC_RECEIPT: RECEIPT_LINE_TABLE,
+    DOC_SHIPMENT: SHIPMENT_LINE_TABLE,
+    DOC_TRANSFER: TRANSFER_LINE_TABLE,
+    DOC_ADJUSTMENT: ADJ_LINE_TABLE,
+    DOC_COUNT: CNT_LINE_TABLE,
+}
 
 STATUS_DEFINED = 'defined'
 STATUS_IN_STORES = 'in_stores'
@@ -293,6 +312,10 @@ class SerialNumberService:
         if bool(item.get(require_field)):
             expected = int(round(qty))
             actual = links if links else (1 if line_serial else 0)
+            # 仅发货管理模式：发货登记时按数量自动建档，前置未录号时放行（D6）
+            if actual == 0 and doc_type == DOC_SHIPMENT \
+                    and not bool(item.get('require_on_receipt')):
+                return
             if actual != expected:
                 raise SerialNumberError(
                     '序列号数量必须等于单据数量 %s，实际 %s' % (expected, actual),
@@ -422,6 +445,23 @@ class SerialNumberService:
         logger.info('[serial] shipment=%s registered=%s', shipment_id, registered)
         return {'shipment_id': shipment_id, 'registered': registered}
 
+    def _create_issue_serials(self, header: Dict[str, Any],
+                              line: Dict[str, Any], item: Dict[str, Any],
+                              org_id: Any, qty: int) -> List[Dict[str, Any]]:
+        """仅发货建档：按数量生成号并登记 link（FR-007）。"""
+        if qty <= 0:
+            return []
+        base = '%s-L%s' % (header.get('delivery_no') or 'DN',
+                          line.get('id'))
+        for index in range(1, qty + 1):
+            serial_no = ('%s-%d' % (base, index))[-64:]
+            serial = self._ensure_serial(
+                item, org_id, serial_no, header, line, 'issue_created',
+                source_doc_type=DOC_SHIPMENT)
+            self._ensure_link(DOC_SHIPMENT, header.get('id'), line.get('id'),
+                              serial['id'], 'out')
+        return self._links(DOC_SHIPMENT, line.get('id'))
+
     def _register_shipment_line(self, header: Dict[str, Any],
                                 line: Dict[str, Any], org_id: Any,
                                 location_id: Any) -> int:
@@ -453,6 +493,11 @@ class SerialNumberService:
             self._ensure_link(DOC_SHIPMENT, header.get('id'), line.get('id'),
                               serial['id'], 'out')
             links = self._links(DOC_SHIPMENT, line.get('id'))
+        # FR-007 仅发货建档：仅在发货时建号，前置未录号按数量自动建档（D6）
+        if require and not links and not line_serial \
+                and not bool(item.get('require_on_receipt')):
+            links = self._create_issue_serials(
+                header, line, item, org_id, int(round(qty)))
         if require and int(round(qty)) != len(links):
             raise SerialNumberError(
                 '发运行序列号数量必须等于发运数量 %s，实际 %s' % (
@@ -465,7 +510,9 @@ class SerialNumberService:
             serial = self._require_row(
                 SERIAL_TABLE, link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
             self._assert_org(serial, org_id)
-            if serial.get('usage_status') not in OUTBOUND_ALLOWED:
+            if serial.get('usage_status') not in OUTBOUND_ALLOWED \
+                    and not (serial.get('source_type') == 'issue_created'
+                             and serial.get('usage_status') == STATUS_DEFINED):
                 raise SerialNumberError(
                     '序列号 %s 当前状态 %s 不可发运' % (
                         serial.get('serial_no'), serial.get('usage_status')),
@@ -626,6 +673,648 @@ class SerialNumberService:
         return {'serial_no': serial_no, 'matches': matches}
 
     # ------------------------------------------------------------------
+    # 质量状态 / 退货 / 通用链接（P6b）
+    # ------------------------------------------------------------------
+    def change_quality_status(self, serial_id: Any, to_quality: str,
+                              reason: str = '',
+                              doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """三值质量状态自由流转；只改 quality_status，不动用途轴（D12）。"""
+        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                                   'SERIAL_NOT_FOUND')
+        self._assert_quality_status(to_quality)
+        if serial.get('usage_status') == STATUS_SCRAPPED:
+            raise SerialNumberError('已报废序列号不可变更质量状态',
+                                    field_name='quality_status',
+                                    rule='SERIAL_STATUS_TRANSITION_INVALID')
+        current = serial.get('quality_status') or 'unrestricted'
+        if current == to_quality:
+            return {'id': serial_id, 'from': current, 'to': to_quality,
+                    'idempotent': True}
+        doc = dict(doc or {})
+        now = _now()
+        with self.ds.transaction():
+            self._insert_txn(
+                serial_id, TXN_STATUS_CHANGE, now,
+                org_from_id=serial.get('org_id'),
+                org_to_id=serial.get('org_id'),
+                quality_from=current, quality_to=to_quality,
+                doc_type=doc.get('doc_type'), doc_id=doc.get('doc_id'),
+                line_id=doc.get('line_id'),
+                remark=reason or '质量状态变更')
+            self.ds.execute(
+                'UPDATE %s SET quality_status = ?, updated_at = ? WHERE id = ?'
+                % SERIAL_TABLE, [to_quality, now, serial_id])
+        return {'id': serial_id, 'from': current, 'to': to_quality,
+                'idempotent': False}
+
+    def return_serial(self, serial_id: Any, location_id: Any = None,
+                      batch_id: Any = None, to_stores: bool = False,
+                      reason: str = '',
+                      doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """退货预留：`issued→returned`；`to_stores=True` 再落库 `returned→in_stores`。"""
+        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                                   'SERIAL_NOT_FOUND')
+        current = serial.get('usage_status')
+        if current not in (STATUS_ISSUED, STATUS_RETURNED):
+            raise SerialNumberError(
+                '序列号 %s 当前状态 %s 不可退回' % (
+                    serial.get('serial_no'), current),
+                field_name='serial_no',
+                rule='SERIAL_STATUS_TRANSITION_INVALID')
+        doc = dict(doc or {})
+        now = _now()
+        origin = current
+        with self.ds.transaction():
+            if current == STATUS_ISSUED:
+                self._insert_txn(
+                    serial_id, 'return', now,
+                    org_from_id=serial.get('org_id'),
+                    org_to_id=serial.get('org_id'),
+                    location_from_id=serial.get('current_location_id'),
+                    location_to_id=location_id,
+                    usage_from=current, usage_to=STATUS_RETURNED,
+                    doc_type=doc.get('doc_type'), doc_id=doc.get('doc_id'),
+                    line_id=doc.get('line_id'), remark=reason or '退回')
+                self.ds.execute(
+                    'UPDATE %s SET usage_status = ?, current_location_id = ?, '
+                    'batch_id = COALESCE(?, batch_id), updated_at = ? WHERE id = ?'
+                    % SERIAL_TABLE,
+                    [STATUS_RETURNED, location_id, batch_id, now, serial_id])
+                current = STATUS_RETURNED
+                if not to_stores:
+                    return {'id': serial_id, 'from_status': origin,
+                            'to_status': STATUS_RETURNED}
+            if STATUS_IN_STORES not in TRANSITIONS.get(current, ()):
+                raise SerialNumberError(
+                    '不允许从 %s 流转到 %s' % (current, STATUS_IN_STORES),
+                    field_name='usage_status',
+                    rule='SERIAL_STATUS_TRANSITION_INVALID')
+            self._insert_txn(
+                serial_id, 'return', now,
+                org_from_id=serial.get('org_id'),
+                org_to_id=serial.get('org_id'),
+                location_from_id=serial.get('current_location_id'),
+                location_to_id=location_id,
+                usage_from=current, usage_to=STATUS_IN_STORES,
+                doc_type=doc.get('doc_type'), doc_id=doc.get('doc_id'),
+                line_id=doc.get('line_id'), remark=reason or '退回入库')
+            self.ds.execute(
+                'UPDATE %s SET usage_status = ?, current_location_id = ?, '
+                'batch_id = COALESCE(?, batch_id), received_at = '
+                'COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
+                % SERIAL_TABLE,
+                [STATUS_IN_STORES, location_id, batch_id, now, now, serial_id])
+        return {'id': serial_id, 'from_status': origin,
+                'to_status': STATUS_IN_STORES}
+
+    def link_serials(self, doc_type: str, doc_id: Any, line_id: Any,
+                     serials: List[Any], direction: str) -> Dict[str, Any]:
+        """统一链接登记入口（幂等）；serial 项可为主档 id 或 {serial_id}。"""
+        linked = 0
+        with self.ds.transaction():
+            for ref in serials or []:
+                serial_id = ref.get('serial_id') if isinstance(ref, dict) else ref
+                if _blank(serial_id):
+                    raise SerialNumberError('序列号不能为空',
+                                            field_name='serial_no',
+                                            rule='SERIAL_NO_REQUIRED')
+                self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                                  'SERIAL_NOT_FOUND')
+                self._ensure_link(doc_type, doc_id, line_id, serial_id,
+                                  direction)
+                linked += 1
+        return {'linked': linked}
+
+    # ------------------------------------------------------------------
+    # 调拨发货 / 收货（FR-001 / FR-002）
+    # ------------------------------------------------------------------
+    def precheck_transfer_ship(self, transfer_order_id: Any,
+                               items: Dict[Any, Any]) -> None:
+        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+                                   'SERIAL_TRANSFER_NOT_FOUND')
+        for line_id, qty in (items or {}).items():
+            line = self._require_row(TRANSFER_LINE_TABLE, line_id, '调拨行',
+                                     'SERIAL_TRANSFER_LINE_NOT_FOUND')
+            item = self._require_item(line.get('item_id'))
+            self._line_serials(
+                line, DOC_TRANSFER, qty, 'out', header.get('from_org_id'),
+                item, 'SERIAL_TRANSFER_COUNT_MISMATCH',
+                allowed=(STATUS_IN_STORES,), link=False, header=header)
+
+    def register_transfer_ship(self, transfer_order_id: Any,
+                               items: Dict[Any, Any], event_key: Any = None,
+                               location_id: Any = None,
+                               txn_date: Any = None) -> Dict[str, Any]:
+        """发货登记：写 transfer_out 事件、主档置 in_transit（FR-001）。"""
+        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+                                   'SERIAL_TRANSFER_NOT_FOUND')
+        org_id = header.get('from_org_id')
+        txn_date = txn_date or header.get('actual_ship_date') or _now()
+        registered = 0
+        with self.ds.transaction():
+            for line_id, qty in (items or {}).items():
+                line = self._require_row(TRANSFER_LINE_TABLE, line_id,
+                                         '调拨行', 'SERIAL_TRANSFER_LINE_NOT_FOUND')
+                item = self._require_item(line.get('item_id'))
+                rows = self._line_serials(
+                    line, DOC_TRANSFER, qty, 'out', org_id, item,
+                    'SERIAL_TRANSFER_COUNT_MISMATCH',
+                    header=header, allowed=(STATUS_IN_STORES,))
+                inv_tx_id = self._find_inv_tx(event_key, line_id) \
+                    if event_key else None
+                for serial in rows:
+                    exists = self.ds.query(
+                        'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+                        'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+                        % SERIAL_TX_TABLE,
+                        [serial['id'], 'transfer_out', DOC_TRANSFER,
+                         header.get('id'), line.get('id')])
+                    if not exists:
+                        self._insert_txn(
+                            serial['id'], 'transfer_out', txn_date,
+                            inventory_transaction_id=inv_tx_id,
+                            org_from_id=org_id,
+                            location_from_id=serial.get('current_location_id'),
+                            batch_from_id=serial.get('batch_id'),
+                            usage_from=serial.get('usage_status'),
+                            usage_to=STATUS_IN_TRANSIT,
+                            doc_type=DOC_TRANSFER,
+                            doc_id=header.get('id'),
+                            line_id=line.get('id'),
+                            remark='调拨单 %s 发货' % header.get('transfer_order_no'))
+                    self.ds.execute(
+                        'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
+                        'updated_at = ? WHERE id = ?' % SERIAL_TABLE,
+                        [STATUS_IN_TRANSIT, _now(), serial['id']])
+                    registered += 1
+        return {'transfer_order_id': transfer_order_id,
+                'registered': registered}
+
+    def precheck_transfer_receipt(self, transfer_order_id: Any,
+                                  receipt_id: Any) -> None:
+        self._transfer_receipt_groups(transfer_order_id, receipt_id)
+
+    def register_transfer_receipt(self, transfer_order_id: Any,
+                                  receipt_id: Any) -> Dict[str, Any]:
+        """TO 来源收货过账：写 transfer_in 事件、主档落库并迁移组织（FR-002）。"""
+        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+                                   'SERIAL_TRANSFER_NOT_FOUND')
+        receipt = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+                                    'SERIAL_RECEIPT_NOT_FOUND')
+        target_org = header.get('to_org_id')
+        target_location = (receipt.get('deliver_to_location_id')
+                           or header.get('to_location_id'))
+        groups = self._transfer_receipt_groups(transfer_order_id, receipt_id)
+        registered = 0
+        with self.ds.transaction():
+            for rline, line, links in groups:
+                for link in links:
+                    serial = self._require_row(
+                        SERIAL_TABLE, link.get('serial_id'), '序列号',
+                        'SERIAL_NOT_FOUND')
+                    exists = self.ds.query(
+                        'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+                        'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+                        % SERIAL_TX_TABLE,
+                        [serial['id'], 'transfer_in', DOC_TRANSFER,
+                         header.get('id'), line.get('id')])
+                    if exists:
+                        continue
+                    if serial.get('usage_status') != STATUS_IN_TRANSIT:
+                        raise SerialNumberError(
+                            '序列号 %s 当前状态 %s 不可调入' % (
+                                serial.get('serial_no'),
+                                serial.get('usage_status')),
+                            field_name='serial_no',
+                            rule='SERIAL_NOT_AVAILABLE')
+                    duplicate = self._find_serial(
+                        serial.get('item_id'), target_org,
+                        serial.get('serial_no'))
+                    if duplicate and duplicate.get('id') != serial.get('id'):
+                        raise SerialNumberError(
+                            '目标组织已存在同号序列号：%s'
+                            % serial.get('serial_no'),
+                            field_name='serial_no', rule='SERIAL_DUPLICATE')
+                    batch_id = self._resolve_batch_id(
+                        target_org, serial.get('item_id'), rline.get('lot_no'))
+                    inv_tx_id = self._find_inv_tx(
+                        'receipt:%s:post' % receipt_id, rline.get('id'))
+                    now = _now()
+                    self._insert_txn(
+                        serial['id'], 'transfer_in', now,
+                        inventory_transaction_id=inv_tx_id,
+                        org_from_id=serial.get('org_id'),
+                        org_to_id=target_org,
+                        location_from_id=serial.get('current_location_id'),
+                        location_to_id=target_location,
+                        batch_from_id=serial.get('batch_id'),
+                        batch_to_id=batch_id,
+                        usage_from=STATUS_IN_TRANSIT,
+                        usage_to=STATUS_IN_STORES,
+                        doc_type=DOC_TRANSFER,
+                        doc_id=header.get('id'),
+                        line_id=line.get('id'),
+                        remark='调拨单 %s 收货' % header.get('transfer_order_no'))
+                    self.ds.execute(
+                        'UPDATE %s SET org_id = ?, usage_status = ?, '
+                        'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
+                        'received_at = COALESCE(received_at, ?), updated_at = ? '
+                        'WHERE id = ?' % SERIAL_TABLE,
+                        [target_org, STATUS_IN_STORES, target_location, batch_id,
+                         now, now, serial['id']])
+                    registered += 1
+        return {'transfer_order_id': transfer_order_id,
+                'receipt_id': receipt_id, 'registered': registered}
+
+    def _transfer_receipt_groups(self, transfer_order_id: Any,
+                                 receipt_id: Any) -> List[Any]:
+        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+                                   'SERIAL_TRANSFER_NOT_FOUND')
+        self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+                          'SERIAL_RECEIPT_NOT_FOUND')
+        rlines = self.ds.query(
+            'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
+            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+        groups: List[Any] = []
+        for rline in rlines:
+            net = _as_float(rline.get('qty_received')) \
+                - _as_float(rline.get('qty_rejected'))
+            if net <= 0:
+                continue
+            line = self._require_row(
+                TRANSFER_LINE_TABLE, rline.get('source_line_id'), '调拨行',
+                'SERIAL_TRANSFER_LINE_NOT_FOUND')
+            item = self._require_item(line.get('item_id'))
+            if not bool(item.get('serial_tracked')):
+                continue
+            links = self._links(DOC_RECEIPT, rline.get('id')) \
+                or self._links(DOC_TRANSFER, line.get('id'))
+            if len(links) != int(round(net)):
+                raise SerialNumberError(
+                    '收货序列号数量必须等于净收数量 %s，实际 %s' % (
+                        int(round(net)), len(links)),
+                    field_name='serial_no',
+                    rule='SERIAL_TRANSFER_COUNT_MISMATCH')
+            for link in links:
+                serial = self._require_row(
+                    SERIAL_TABLE, link.get('serial_id'), '序列号',
+                    'SERIAL_NOT_FOUND')
+                exists = self.ds.query(
+                    'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+                    'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+                    % SERIAL_TX_TABLE,
+                    [serial['id'], 'transfer_in', DOC_TRANSFER,
+                     header.get('id'), line.get('id')])
+                if exists:
+                    continue
+                if serial.get('usage_status') != STATUS_IN_TRANSIT:
+                    raise SerialNumberError(
+                        '序列号 %s 当前状态 %s 不可调入' % (
+                            serial.get('serial_no'),
+                            serial.get('usage_status')),
+                        field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+            groups.append((rline, line, links))
+        return groups
+
+    # ------------------------------------------------------------------
+    # 库存调整（FR-002 / FR-003 / FR-004）
+    # ------------------------------------------------------------------
+    def precheck_adjustment(self, adjustment_id: Any) -> None:
+        header = self._require_row(ADJ_TABLE, adjustment_id, '调整单',
+                                   'INV_ADJ_NOT_FOUND')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE adjustment_id = ? ORDER BY line_no, id'
+            % ADJ_LINE_TABLE, [adjustment_id])
+        adj_type = header.get('adjustment_type')
+        for line in lines:
+            item = self._require_item(line.get('item_id'))
+            if not bool(item.get('serial_tracked')):
+                continue
+            qty = _as_float(line.get('qty'))
+            if adj_type == 'status_transfer':
+                rows = self._line_serials(
+                    line, DOC_ADJUSTMENT, qty, 'none',
+                    header.get('org_id'), item, 'SERIAL_STATUS_PAIR_INVALID',
+                    header=header, link=False)
+                source = line.get('from_stock_status')
+                if source == line.get('to_stock_status'):
+                    raise SerialNumberError(
+                        '状态转移前后状态不能相同',
+                        field_name='to_stock_status',
+                        rule='SERIAL_STATUS_PAIR_INVALID')
+                for serial in rows:
+                    self._assert_quality(serial, source)
+            elif adj_type in ('qty_decrease', 'scrap'):
+                rows = self._line_serials(
+                    line, DOC_ADJUSTMENT, qty, 'out',
+                    header.get('org_id'), item, 'SERIAL_ADJUST_COUNT_MISMATCH',
+                    header=header, allowed=(STATUS_IN_STORES,), link=False)
+                for serial in rows:
+                    self._assert_quality(serial, line.get('from_stock_status'))
+            elif adj_type in ('qty_increase', 'opening'):
+                rows = self._line_serials(
+                    line, DOC_ADJUSTMENT, qty, 'in',
+                    header.get('org_id'), item, 'SERIAL_ADJUST_COUNT_MISMATCH',
+                    header=header, source_type='opening', link=False,
+                    allow_new=True,
+                    quality_status=(line.get('to_stock_status')
+                                    or 'unrestricted'))
+                for serial in rows:
+                    self._assert_quality(serial, line.get('to_stock_status'))
+
+    def register_adjustment(self, adjustment_id: Any) -> Dict[str, Any]:
+        header = self._require_row(ADJ_TABLE, adjustment_id, '调整单',
+                                   'INV_ADJ_NOT_FOUND')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE adjustment_id = ? ORDER BY line_no, id'
+            % ADJ_LINE_TABLE, [adjustment_id])
+        adj_type = header.get('adjustment_type')
+        event_key = 'adjustment:%s' % header.get('adjustment_no')
+        txn_date = header.get('posting_date') or _now()
+        org_id = header.get('org_id')
+        registered = 0
+        skipped = 0
+        with self.ds.transaction():
+            for line in lines:
+                item = self._require_item(line.get('item_id'))
+                if not bool(item.get('serial_tracked')):
+                    continue
+                qty = _as_float(line.get('qty'))
+                if adj_type == 'status_transfer':
+                    rows = self._line_serials(
+                        line, DOC_ADJUSTMENT, qty, 'none', org_id, item,
+                        'SERIAL_STATUS_PAIR_INVALID', header=header, link=False)
+                    self._apply_quality_transfer(header, line, rows, txn_date)
+                    registered += len(rows)
+                    continue
+                direction = 'in' if adj_type in ('qty_increase', 'opening') \
+                    else 'out'
+                create = direction == 'in'
+                rows = self._line_serials(
+                    line, DOC_ADJUSTMENT, qty, direction, org_id, item,
+                    'SERIAL_ADJUST_COUNT_MISMATCH',
+                    header=header, create=create, source_type='opening',
+                    quality_status=(line.get('to_stock_status')
+                                    if create else None),
+                    allowed=(STATUS_IN_STORES,) if not create else None)
+                inv_tx_id = self._find_inv_tx(event_key, str(line.get('id')))
+                for serial in rows:
+                    if direction == 'in':
+                        if self._apply_adjust_in(
+                                header, line, serial, org_id, inv_tx_id,
+                                txn_date):
+                            registered += 1
+                        else:
+                            skipped += 1
+                    else:
+                        if self._apply_scrap(
+                                header, line, serial, org_id, inv_tx_id,
+                                txn_date):
+                            registered += 1
+                        else:
+                            skipped += 1
+        return {'adjustment_id': adjustment_id, 'registered': registered,
+                'skipped': skipped}
+
+    def _apply_quality_transfer(self, header: Dict[str, Any],
+                                line: Dict[str, Any],
+                                rows: List[Dict[str, Any]],
+                                txn_date: Any) -> None:
+        source = line.get('from_stock_status')
+        target = line.get('to_stock_status')
+        for serial in rows:
+            self._assert_quality(serial, source)
+            self._insert_txn(
+                serial['id'], TXN_STATUS_CHANGE, txn_date,
+                org_from_id=serial.get('org_id'),
+                org_to_id=serial.get('org_id'),
+                quality_from=source, quality_to=target,
+                doc_type=DOC_ADJUSTMENT, doc_id=header.get('id'),
+                line_id=line.get('id'), remark='调整单状态转移')
+            self.ds.execute(
+                'UPDATE %s SET quality_status = ?, updated_at = ? WHERE id = ?'
+                % SERIAL_TABLE, [target, _now(), serial['id']])
+
+    def _apply_adjust_in(self, header: Dict[str, Any],
+                         line: Dict[str, Any], serial: Dict[str, Any],
+                         org_id: Any, inv_tx_id: Any,
+                         txn_date: Any) -> bool:
+        exists = self.ds.query(
+            'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+            % SERIAL_TX_TABLE,
+            [serial['id'], TXN_ADJUST, DOC_ADJUSTMENT, header.get('id'),
+             line.get('id')])
+        if exists:
+            return False
+        if serial.get('usage_status') not in (STATUS_DEFINED, STATUS_RETURNED):
+            raise SerialNumberError(
+                '序列号 %s 当前状态 %s 不可增加入库' % (
+                    serial.get('serial_no'), serial.get('usage_status')),
+                field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+        now = _now()
+        self._ensure_link(DOC_ADJUSTMENT, header.get('id'), line.get('id'),
+                          serial['id'], 'in')
+        self._insert_txn(
+            serial['id'], TXN_ADJUST, txn_date,
+            inventory_transaction_id=inv_tx_id,
+            org_from_id=org_id, org_to_id=org_id,
+            location_from_id=serial.get('current_location_id'),
+            location_to_id=line.get('location_id'),
+            batch_from_id=serial.get('batch_id'),
+            batch_to_id=line.get('batch_id'),
+            usage_from=serial.get('usage_status'),
+            usage_to=STATUS_IN_STORES,
+            doc_type=DOC_ADJUSTMENT, doc_id=header.get('id'),
+            line_id=line.get('id'),
+            remark='调整单 %s 增加' % header.get('adjustment_no'))
+        self.ds.execute(
+            'UPDATE %s SET usage_status = ?, quality_status = ?, '
+            'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
+            'received_at = COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
+            % SERIAL_TABLE,
+            [STATUS_IN_STORES,
+             line.get('to_stock_status') or serial.get('quality_status'),
+             line.get('location_id'), line.get('batch_id'), now, now,
+             serial['id']])
+        return True
+
+    def _apply_scrap(self, header: Dict[str, Any], line: Dict[str, Any],
+                     serial: Dict[str, Any], org_id: Any, inv_tx_id: Any,
+                     txn_date: Any) -> bool:
+        exists = self.ds.query(
+            'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+            % SERIAL_TX_TABLE,
+            [serial['id'], 'scrap', DOC_ADJUSTMENT, header.get('id'),
+             line.get('id')])
+        if exists:
+            return False
+        if serial.get('usage_status') != STATUS_IN_STORES:
+            raise SerialNumberError(
+                '序列号 %s 当前状态 %s 不可减少 / 报废' % (
+                    serial.get('serial_no'), serial.get('usage_status')),
+                field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+        now = _now()
+        self._ensure_link(DOC_ADJUSTMENT, header.get('id'), line.get('id'),
+                          serial['id'], 'out')
+        self._insert_txn(
+            serial['id'], 'scrap', txn_date,
+            inventory_transaction_id=inv_tx_id,
+            org_from_id=org_id, org_to_id=org_id,
+            location_from_id=serial.get('current_location_id'),
+            batch_from_id=serial.get('batch_id'),
+            usage_from=STATUS_IN_STORES, usage_to=STATUS_SCRAPPED,
+            doc_type=DOC_ADJUSTMENT, doc_id=header.get('id'),
+            line_id=line.get('id'),
+            remark='调整单 %s 减少 / 报废' % header.get('adjustment_no'))
+        self.ds.execute(
+            'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
+            'scrapped_at = COALESCE(scrapped_at, ?), updated_at = ? WHERE id = ?'
+            % SERIAL_TABLE, [STATUS_SCRAPPED, now, now, serial['id']])
+        return True
+
+    # ------------------------------------------------------------------
+    # 盘点差异（FR-005 / FR-006）
+    # ------------------------------------------------------------------
+    def precheck_count(self, count_id: Any) -> None:
+        header = self._require_row(CNT_TABLE, count_id, '盘点单',
+                                   'INV_COUNT_NOT_FOUND')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE count_id = ? ORDER BY line_no, id'
+            % CNT_LINE_TABLE, [count_id])
+        for line in lines:
+            variance = (_as_float(line.get('counted_qty'))
+                        - _as_float(line.get('snapshot_qty')))
+            if abs(variance) <= 1e-9:
+                continue
+            item = self._require_item(line.get('item_id'))
+            if not bool(item.get('serial_tracked')):
+                continue
+            direction = 'in' if variance > 0 else 'out'
+            self._line_serials(
+                line, DOC_COUNT, abs(variance), direction,
+                header.get('org_id'), item, 'SERIAL_COUNT_SERIAL_REQUIRED',
+                header=header, source_type='opening', link=False,
+                allow_new=(variance > 0),
+                quality_status=(line.get('stock_status')
+                                if variance > 0 else None),
+                allowed=(STATUS_IN_STORES,) if variance < 0 else None)
+
+    def register_count(self, count_id: Any) -> Dict[str, Any]:
+        header = self._require_row(CNT_TABLE, count_id, '盘点单',
+                                   'INV_COUNT_NOT_FOUND')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE count_id = ? ORDER BY line_no, id'
+            % CNT_LINE_TABLE, [count_id])
+        event_key = 'count:%s' % header.get('count_no')
+        txn_date = header.get('posting_date') or _now()
+        org_id = header.get('org_id')
+        registered = 0
+        with self.ds.transaction():
+            for line in lines:
+                variance = (_as_float(line.get('counted_qty'))
+                            - _as_float(line.get('snapshot_qty')))
+                if abs(variance) <= 1e-9:
+                    continue
+                item = self._require_item(line.get('item_id'))
+                if not bool(item.get('serial_tracked')):
+                    continue
+                direction = 'in' if variance > 0 else 'out'
+                rows = self._line_serials(
+                    line, DOC_COUNT, abs(variance), direction, org_id, item,
+                    'SERIAL_COUNT_SERIAL_REQUIRED', header=header,
+                    create=(variance > 0), source_type='opening',
+                    quality_status=(line.get('stock_status')
+                                    if variance > 0 else None),
+                    allowed=(STATUS_IN_STORES,) if variance < 0 else None)
+                inv_tx_id = self._find_inv_tx(event_key, str(line.get('id')))
+                for serial in rows:
+                    if direction == 'in':
+                        registered += int(self._apply_count_in(
+                            header, line, serial, org_id, inv_tx_id, txn_date))
+                    else:
+                        registered += int(self._apply_count_out(
+                            header, line, serial, org_id, inv_tx_id, txn_date))
+        return {'count_id': count_id, 'registered': registered}
+
+    def _apply_count_in(self, header: Dict[str, Any], line: Dict[str, Any],
+                        serial: Dict[str, Any], org_id: Any, inv_tx_id: Any,
+                        txn_date: Any) -> bool:
+        exists = self.ds.query(
+            'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+            % SERIAL_TX_TABLE,
+            [serial['id'], TXN_ADJUST, DOC_COUNT, header.get('id'),
+             line.get('id')])
+        if exists:
+            return False
+        if serial.get('usage_status') not in (STATUS_DEFINED, STATUS_RETURNED):
+            raise SerialNumberError(
+                '序列号 %s 当前状态 %s 不可盘盈入库' % (
+                    serial.get('serial_no'), serial.get('usage_status')),
+                field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+        now = _now()
+        self._ensure_link(DOC_COUNT, header.get('id'), line.get('id'),
+                          serial['id'], 'in')
+        self._insert_txn(
+            serial['id'], TXN_ADJUST, txn_date,
+            inventory_transaction_id=inv_tx_id,
+            org_from_id=org_id, org_to_id=org_id,
+            location_from_id=serial.get('current_location_id'),
+            location_to_id=line.get('location_id'),
+            batch_from_id=serial.get('batch_id'),
+            batch_to_id=line.get('batch_id'),
+            usage_from=serial.get('usage_status'),
+            usage_to=STATUS_IN_STORES,
+            doc_type=DOC_COUNT, doc_id=header.get('id'),
+            line_id=line.get('id'), remark='盘点单 %s 盘盈' % header.get('count_no'))
+        self.ds.execute(
+            'UPDATE %s SET usage_status = ?, quality_status = ?, '
+            'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
+            'received_at = COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
+            % SERIAL_TABLE,
+            [STATUS_IN_STORES,
+             line.get('stock_status') or serial.get('quality_status'),
+             line.get('location_id'), line.get('batch_id'), now, now,
+             serial['id']])
+        return True
+
+    def _apply_count_out(self, header: Dict[str, Any], line: Dict[str, Any],
+                         serial: Dict[str, Any], org_id: Any, inv_tx_id: Any,
+                         txn_date: Any) -> bool:
+        exists = self.ds.query(
+            'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+            % SERIAL_TX_TABLE,
+            [serial['id'], 'scrap', DOC_COUNT, header.get('id'),
+             line.get('id')])
+        if exists:
+            return False
+        if serial.get('usage_status') != STATUS_IN_STORES:
+            raise SerialNumberError(
+                '序列号 %s 当前状态 %s 不可盘亏' % (
+                    serial.get('serial_no'), serial.get('usage_status')),
+                field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+        now = _now()
+        self._ensure_link(DOC_COUNT, header.get('id'), line.get('id'),
+                          serial['id'], 'out')
+        self._insert_txn(
+            serial['id'], 'scrap', txn_date,
+            inventory_transaction_id=inv_tx_id,
+            org_from_id=org_id, org_to_id=org_id,
+            location_from_id=serial.get('current_location_id'),
+            batch_from_id=serial.get('batch_id'),
+            usage_from=STATUS_IN_STORES, usage_to=STATUS_SCRAPPED,
+            doc_type=DOC_COUNT, doc_id=header.get('id'),
+            line_id=line.get('id'), remark='盘点单 %s 盘亏' % header.get('count_no'))
+        self.ds.execute(
+            'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
+            'scrapped_at = COALESCE(scrapped_at, ?), updated_at = ? WHERE id = ?'
+            % SERIAL_TABLE, [STATUS_SCRAPPED, now, now, serial['id']])
+        return True
+
+    # ------------------------------------------------------------------
     # 供过账钩子 / 拦截器使用的小工具
     # ------------------------------------------------------------------
     def validate_item_switches(self, payload: Dict[str, Any],
@@ -676,26 +1365,126 @@ class SerialNumberService:
 
     def _ensure_serial(self, item: Dict[str, Any], org_id: Any, serial_no: str,
                        header: Dict[str, Any], line: Dict[str, Any],
-                       source_type: str) -> Dict[str, Any]:
+                       source_type: str, quality_status: str = 'unrestricted',
+                       source_doc_type: Optional[str] = None) -> Dict[str, Any]:
         row = self._find_serial(item.get('id'), org_id, serial_no)
         if row:
             return row
+        self._assert_quality_status(quality_status)
         now = _now()
         cursor = self.ds.execute(
             'INSERT INTO %s (item_id, org_id, serial_no, usage_status, '
             ' quality_status, source_type, source_doc_type, source_doc_id, '
             ' received_at, created_at, updated_at) '
-            "VALUES (?, ?, ?, ?, 'unrestricted', ?, ?, ?, ?, ?, ?)"
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             % SERIAL_TABLE,
-            [item.get('id'), org_id, serial_no, STATUS_DEFINED, source_type,
-             'receipt' if header.get('receipt_no') else 'shipment',
+            [item.get('id'), org_id, serial_no, STATUS_DEFINED, quality_status,
+             source_type,
+             source_doc_type or ('receipt' if header.get('receipt_no')
+                                 else 'shipment'),
              header.get('id'), now, now, now])
         serial_id = cursor.lastrowid
         self._insert_txn(
             serial_id, TXN_CREATE, now, org_to_id=org_id,
-            usage_to=STATUS_DEFINED, remark='过账快捷录入建档')
+            usage_to=STATUS_DEFINED, quality_to=quality_status,
+            remark='过账快捷录入建档')
         return self._require_row(SERIAL_TABLE, serial_id, '序列号',
                                  'SERIAL_NOT_FOUND')
+
+    def _line_serials(self, line: Dict[str, Any], doc_type: str, qty: Any,
+                      direction: str, org_id: Any, item: Dict[str, Any],
+                      rule: str, create: bool = False,
+                      source_type: str = 'opening',
+                      header: Optional[Dict[str, Any]] = None,
+                      quality_status: Optional[str] = None,
+                      allowed: Optional[tuple] = None,
+                      link: bool = True,
+                      allow_new: bool = False) -> List[Dict[str, Any]]:
+        """解析一行序列号：链接优先，qty=1 允许 `serial_no` 快捷录入。"""
+        header = dict(header or {})
+        qty_int = int(round(_as_float(qty)))
+        if qty_int <= 0:
+            return []
+        line_serial = self._line_serial_no(doc_type, line)
+        if not bool(item.get('serial_tracked')):
+            if line_serial:
+                raise SerialNumberError(
+                    '该物料未启用序列号管理，不能录入序列号',
+                    field_name='serial_no', rule='SERIAL_ITEM_NOT_TRACKED')
+            return []
+        links = self._links(doc_type, line.get('id'))
+        if not links and line_serial:
+            if qty_int > 1:
+                raise SerialNumberError(
+                    '数量大于 1 时不能用单值序列号快捷录入，请走序列号子表',
+                    field_name='serial_no',
+                    rule='SERIAL_SINGLE_VALUE_WITH_MULTI_QTY')
+            serial = self._find_serial(item.get('id'), org_id, line_serial)
+            if serial is None:
+                if allow_new:
+                    return []
+                if not create:
+                    raise SerialNumberError(
+                        '序列号不存在：%s' % line_serial,
+                        field_name='serial_no', rule='SERIAL_NOT_FOUND')
+                serial = self._ensure_serial(
+                    item, org_id, line_serial, header, line, source_type,
+                    quality_status=quality_status or 'unrestricted',
+                    source_doc_type=doc_type)
+            if link:
+                self._ensure_link(doc_type, header.get('id'), line.get('id'),
+                                  serial['id'], direction)
+                links = self._links(doc_type, line.get('id'))
+            else:
+                self._assert_serial_available(serial, org_id, direction, allowed)
+                return [serial]
+        if len(links) != qty_int:
+            raise SerialNumberError(
+                '序列号数量必须等于单据数量 %s，实际 %s' % (qty_int, len(links)),
+                field_name='serial_no', rule=rule)
+        rows: List[Dict[str, Any]] = []
+        for link_row in links:
+            serial = self._require_row(SERIAL_TABLE, link_row.get('serial_id'),
+                                       '序列号', 'SERIAL_NOT_FOUND')
+            self._assert_serial_available(serial, org_id, direction, allowed)
+            rows.append(serial)
+        return rows
+
+    def _line_serial_no(self, doc_type: str, line: Dict[str, Any]) -> str:
+        """读取行 `serial_no`；行字典缺列时按行 id 回查，旧替身无列返回空。"""
+        if 'serial_no' in line:
+            return str(line.get('serial_no') or '').strip()
+        table = LINE_TABLE_BY_DOC.get(doc_type)
+        if not table or _blank(line.get('id')):
+            return ''
+        try:
+            rows = self.ds.query(
+                'SELECT serial_no FROM %s WHERE id = ?' % table,
+                [line.get('id')])
+            return str(rows[0].get('serial_no') or '').strip() if rows else ''
+        except Exception:  # noqa: BLE001 - 旧库 / 旧替身无该列
+            return ''
+
+    def _assert_serial_available(self, serial: Dict[str, Any], org_id: Any,
+                                 direction: str, allowed: Optional[tuple]) -> None:
+        self._assert_org(serial, org_id)
+        if direction == 'out':
+            allow = allowed or OUTBOUND_ALLOWED
+            if serial.get('usage_status') not in allow:
+                raise SerialNumberError(
+                    '序列号 %s 当前状态 %s 不可出库' % (
+                        serial.get('serial_no'), serial.get('usage_status')),
+                    field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+
+    def _assert_quality(self, serial: Dict[str, Any], expected: Any) -> None:
+        if not expected:
+            return
+        current = serial.get('quality_status') or 'unrestricted'
+        if current != expected:
+            raise SerialNumberError(
+                '序列号 %s 质量状态 %s 与单据要求 %s 不一致' % (
+                    serial.get('serial_no'), current, expected),
+                field_name='serial_no', rule='SERIAL_STATUS_PAIR_INVALID')
 
     def _ensure_link(self, doc_type: str, doc_id: Any, line_id: Any,
                      serial_id: Any, direction: str) -> None:

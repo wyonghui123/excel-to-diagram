@@ -397,9 +397,21 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
-        # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
-        # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
-        self._register_receipt_serials(header, checked)
+        # 6. 库存入账（同事务；开关关闭时 post() 内部自动跳过）
+        #    红字单由 reverse 流程生成并直接置为已过账，不经过此处；若手工
+        #    过账红字单则拒绝，避免与 REVERSAL 反冲重复记账。
+        if is_return:
+            from meta.services.inventory_guard_service import (
+                InventoryError, InventoryGuardService, INV_STATUS_INVALID)
+            if InventoryGuardService(self.ds).posting_enabled():
+                e = InventoryError(
+                    INV_STATUS_INVALID, '红字收货单不支持库存入库，请走红冲')
+                raise ReceiptError(e.message, field_name='inventory', rule=e.code)
+        else:
+            self._post_receipt_inventory(header, checked, 'RCV_PO')
+            # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
+            # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
+            self._register_receipt_serials(header, checked)
 
         logger.info('[receipt] posted id=%s return=%s lines=%s',
                     header['id'], is_return, len(checked))
@@ -427,6 +439,10 @@ class ReceiptService:
                     'qty_received': float(item['net']),
                     'qty_rejected': float(item['rejected'])}
                    for item in checked if item['net'] > 0]
+        serial_ready = self._serial_ready()
+        if serial_ready:
+            self._precheck_transfer_receipt_serials(
+                transfer_order['id'], header['id'])
         if updates:
             from meta.services.transfer_order_service import (
                 TransferOrderError, TransferOrderService)
@@ -447,6 +463,12 @@ class ReceiptService:
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
             % HEADER_TABLE,
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
+
+        # 库存入账：TO 来源收货写 RCV_TO（org=inventory_org_id）
+        self._post_receipt_inventory(header, checked, 'RCV_TO')
+        if serial_ready:
+            self._register_transfer_receipt_serials(
+                transfer_order['id'], header['id'])
 
         logger.info('[receipt] posted to id=%s transfer_order=%s lines=%s',
                     header['id'], transfer_order['id'], len(checked))
@@ -597,6 +619,9 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_REVERSED, now, now, header['id']])
 
+        # 库存红冲：按原过账事件键生成 REVERSAL（同事务）
+        self._reverse_receipt_inventory(header, date)
+
         logger.info('[receipt] reversed original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
         return {'id': header['id'], 'status': STATUS_REVERSED,
@@ -707,11 +732,79 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_REVERSED, now, now, header['id']])
 
+        # 库存红冲：TO 收货原分录生成 REVERSAL（同事务）
+        self._reverse_receipt_inventory(header, date)
+
         logger.info('[receipt] reversed to original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
         return {'id': header['id'], 'status': STATUS_REVERSED,
                 'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
                 'order_ids': [], 'transfer_order_id': header.get('source_doc_id')}
+
+    # ------------------------------------------------------------- 库存过账
+    def _post_receipt_inventory(self, header: Dict[str, Any],
+                                checked: List[Dict[str, Any]],
+                                transaction_type: str) -> None:
+        """按收货行写库存入账分录（RCV_PO / RCV_TO）。
+
+        净收（qty_received - qty_rejected）为库存入账数量；净收为 0 的行跳过。
+        库存组织取 receipt.inventory_org_id，库位取 deliver_to_location_id。
+        """
+        from meta.services.inventory_guard_service import (
+            InventoryError, InventoryGuardService)
+        from meta.services.inventory_posting_service import (
+            InventoryPostingService,
+        )
+
+        if not InventoryGuardService(self.ds).posting_enabled():
+            return
+
+        org_id = header.get('inventory_org_id')
+        location_id = header.get('deliver_to_location_id')
+        entries = []
+        for item in checked:
+            line = item.get('line') or {}
+            net = float(item.get('net') or 0)
+            if net <= 0:
+                continue
+            entries.append({
+                'transaction_type': transaction_type,
+                'transaction_date': header.get('receipt_date'),
+                'org_id': org_id,
+                'location_id': location_id,
+                'item_id': line.get('item_id'),
+                'uom_id': line.get('uom_id'),
+                'qty': net,
+                'batch_id': self._resolve_batch_id(
+                    org_id, line.get('item_id'), line.get('lot_no')),
+                'stock_status': 'unrestricted',
+                'source_line_id': line.get('id'),
+                'remark': '收货单 %s' % header.get('receipt_no'),
+            })
+        if not entries:
+            return
+
+        source = {
+            'source_doc_type': 'receipt',
+            'source_doc_id': header.get('id'),
+            'source_event_key': 'receipt:%s:post' % header.get('id'),
+            'transaction_date': header.get('receipt_date'),
+            'remark': '收货单 %s 过账' % header.get('receipt_no'),
+        }
+        try:
+            InventoryPostingService(self.ds).post(entries, source)
+        except InventoryError as e:
+            raise ReceiptError(e.message, field_name='inventory', rule=e.code)
+
+    def _resolve_batch_id(self, org_id: Any, item_id: Any,
+                          lot_no: Any) -> Optional[int]:
+        """收货行 lot_no → 批次 id（无匹配则返回 None，不阻断过账）。"""
+        if not lot_no or _blank(org_id) or _blank(item_id):
+            return None
+        rows = self.ds.query(
+            'SELECT id FROM batches WHERE item_id = ? AND org_id = ? '
+            'AND batch_no = ?', [item_id, org_id, lot_no])
+        return rows[0]['id'] if rows else None
 
     # ------------------------------------------------------------------ 序列号（P6a）
     def _item_serial_flags(self, item_id: Any) -> Dict[str, Any]:
@@ -760,6 +853,60 @@ class ReceiptService:
         except SerialNumberError as error:
             raise ReceiptError(str(error), field_name=error.field_name or 'serial_no',
                                rule=error.rule or 'SERIAL_RECEIPT_REGISTER_FAILED')
+
+    def _serial_ready(self) -> bool:
+        from meta.services.serial_number_service import serial_schema_ready
+        return serial_schema_ready(self.ds)
+
+    def _precheck_transfer_receipt_serials(self, transfer_order_id: Any,
+                                           receipt_id: Any) -> None:
+        """TO 来源收货前置：在途号数量必须等于净收数量。"""
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).precheck_transfer_receipt(
+                transfer_order_id, receipt_id)
+        except SerialNumberError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_TRANSFER_COUNT_MISMATCH')
+
+    def _register_transfer_receipt_serials(self, transfer_order_id: Any,
+                                           receipt_id: Any) -> None:
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).register_transfer_receipt(
+                transfer_order_id, receipt_id)
+        except SerialNumberError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_TRANSFER_REGISTER_FAILED')
+
+    def _reverse_receipt_inventory(self, header: Dict[str, Any],
+                                   transaction_date: Any = None) -> None:
+        """按原过账事件键写 REVERSAL 反冲分录。"""
+        from meta.services.inventory_guard_service import InventoryError
+        from meta.services.inventory_posting_service import (
+            InventoryPostingService,
+        )
+
+        receipt_id = header.get('id')
+        source = {
+            'source_doc_type': 'receipt',
+            'source_doc_id': receipt_id,
+            'source_event_key': 'receipt:%s:reverse' % receipt_id,
+            'transaction_date': transaction_date,
+            'remark': '收货单 %s 红冲' % header.get('receipt_no'),
+        }
+        try:
+            InventoryPostingService(self.ds).reverse_by_source(
+                'receipt:%s:post' % receipt_id, source,
+                transaction_date=transaction_date or header.get('receipt_date'))
+        except InventoryError as e:
+            raise ReceiptError(e.message, field_name='inventory', rule=e.code)
 
     # ------------------------------------------------------------------ 行校验
     def validate_new_line(self, payload: Dict[str, Any],
