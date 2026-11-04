@@ -356,6 +356,31 @@ fields:
     ui:
       widget: input
 
+  # G15 ETO：设计模式开关（engineered = 按单设计，standard = 标准交付）
+  - id: design_mode
+    name: 设计模式
+    type: string
+    db_column: design_mode
+    required: true
+    default: standard
+    description: 项目设计模式；engineered 表示按单设计（ETO），standard 表示标准产品交付
+    enum_values:
+      - value: standard
+        label: 标准
+        color: info
+        is_initial: true
+      - value: engineered
+        label: 按单设计
+        color: warning
+    semantics:
+      meaning: 设计模式
+      filterable: true
+      filter_type: enum
+      filter_label: 设计模式
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: currency_id
     name: 预算币种
     type: integer
