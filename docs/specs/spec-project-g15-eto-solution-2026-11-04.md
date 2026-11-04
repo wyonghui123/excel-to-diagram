@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 日期：2026-11-04
-- 状态：**部分已实施**（2026-11-04；P1-1 / P1-3 / P1-4 / P1-5 已落地，P1-6 后置，详见 §11）
+- 状态：**P1 已实施 + P2-1/P2-2 已实施，P2-3 后置**（2026-11-04；P1-1 / P1-3 / P1-4 / P1-5 已落地，P1-6 后置；P2 详见 §11.5）
 - 上游裁决：
   - `spec-project-g15-eto-oracle-vs-sap-2026-11-04.md`（§4 四条再评估条件、§7 14 项裁决）
   - `spec-project-g15-eto-infor-ifs-benchmark-2026-11-04.md`（§6 新增 `design_mode`）
@@ -250,7 +250,7 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 
 **发运**：交货单创建时把 SO 行的 `project_id/project_task_id` 复制到 `shipment_lines`（字段已在 INV-2 存在）。仓库当前无发运自动过账；后续接入出库过账时必须带这两个维度，否则会出现「预留占任务段、出库扣自有段」。
 
-**迁移**：`v208__sales_order_line_project_task.py`（v205-v207 已占用），加列 + 索引，不重建既有索引。
+**迁移**：`v210__sales_order_line_project_task.py`（v208 已被 `work_order_project_task` 占用，v209 让位 P2-2 基线）。
 
 ### 4.2 P2-2 `project_structure_baselines`
 
@@ -283,7 +283,14 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 | `baseline_hash` | sha256 hex，检测漂移 |
 | `captured_at` | 快照时间 |
 
-**哈希口径**：对稳定串做 sha256，不拼行 id / 时间戳：`revision|base_qty|uom` + 按 `line_no` 排序的行 `component_item_id|qty_per|fixed_qty|scrap_rate|optional|default|default_qty`；数值去尾零，布尔 1/0，无值不拼。
+**哈希口径**：对稳定串做 sha256，不拼行 id / 时间戳：
+- 头：`revision|base_qty|base_uom_id`
+- 行：按 `line_no` 排序的 `component_item_id|qty_per|fixed_qty|scrap_rate|optional_flag|default_flag|default_qty|min_qty|max_qty|operation_seq|phantom_flag|substitute_group_code`
+- 数值去尾零，布尔 1/0，无值不拼。
+
+> 注意字段名必须是表上真实列名：`item_structures` 用 `base_uom_id`（无 `uom`）；`item_structure_lines` 用 `optional_flag` / `default_flag`（无 `optional` / `default`）。
+
+**生效率解析**：复用 [item_structure_select_service](file:///d:/filework/excel-to-diagram/meta/services/item_structure_select_service.py) 的 `_find_active_structure(item_id, usage, alternative_no, as_of)`；因其为私有方法且 `_covers` 走字符串比较，P2 包一层公共 `resolve_structure(...)` 统一日期口径，并把「生效区间重叠」原样抛 `ItemStructureSelectError`。
 
 **漂移**：只读计算 `OK / DRIFT / STRUCTURE_MISSING`；`structure_id=0` 取 `captured_at` 时点 active 版本重算，显式版本对钉住版本重算。列表展示存储 hash，detail / `check_drift` 动作实时算；`refresh` 显式重钉并更新 hash/captured_at/note。不做后台定时。
 
@@ -298,10 +305,10 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 
 ### 4.3 实施顺序与验收
 
-1. v208 字段 + 守卫（复用 `project_task_guard`）
+1. v210 字段 + 守卫（复用 `project_task_guard`）
 2. 预留 `segment_ctx` 传任务 + SO 段互斥
 3. 发运行复制任务维度
-4. v209 baseline + 服务（hash / drift / refresh）+ 权限菜单
+4. v209 baseline + 服务（hash / drift / refresh）+ 权限
 5. P2-3 `v_project_cost.amount` 后置（依赖成本价 / 费率）
 
 验收见 `spec-project-g15-eto-P2-tasks.md`。
@@ -316,9 +323,10 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 | `v205__inventory_segment_reservation.py` | INV-2 段/预留/线索 + 余额 10 列键 | 已应用 |
 | `v206__project_design_mode.py` | `projects.design_mode` | 已应用 |
 | `v207__project_task_index.py` | 任务轴索引 | 已应用 |
-| `v208__sales_order_line_project_task.py` | `sales_order_lines.project_task_id` + 索引 | 待实施 |
-| `v209__project_structure_baseline.py` | 基线表 + 唯一索引 | 待实施 |
-| `v210__project_cost_view.py` | `v_project_cost`（P2-3 后置） | 待实施 |
+| `v208__work_order_project_task.py` | `work_orders.project_task_id` + 索引 | 已应用 |
+| `v209__project_structure_baseline.py` | 基线表 + 唯一索引（实现见 §11.5） | 已实施 |
+| `v210__sales_order_line_project_task.py` | `sales_order_lines.project_task_id` + 索引 | 已实施 |
+| `v211__project_cost_view.py` | `v_project_cost`（P2-3 后置） | 待实施 |
 
 要求：
 
@@ -376,9 +384,9 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 
 **P2（可选）**
 
-- [ ] P2-1 `sales_order_lines.project_task_id` + 守卫 + 预留/发运维度（v209+）
-- [ ] P2-2 `project_structure_baseline` 指针表 + 漂移检测（v209+）
-- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐（v210+，后置）
+- [x] P2-1 `sales_order_lines.project_task_id` + 守卫 + 预留/发运维度（v210）
+- [x] P2-2 `project_structure_baseline` 指针表 + 漂移检测（v209）
+- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐（v211+，后置）
 
 > P2 细化任务与验收用例见 `spec-project-g15-eto-P2-tasks.md`。
 
@@ -444,6 +452,16 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 | P1-4 余额唯一键 | ✅ 已完成（INV-2 v205 10 列唯一键） |
 | P1-5 守卫 G1-G3 | ✅ 已完成（`demand_allocation` 写入守卫，`PO_ALLOCATION_TASK_*` 错误码） |
 | P1-6 `v_project_cost` | ⏳ 依赖成本价 / 费率，后置 |
+
+### 11.5 P2 状态（2026-11-04）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| P2-1 SO 行任务轴 | `v210` 加 `sales_order_lines.project_task_id` + 索引；`sales_order_line.yaml` 声明字段；`SalesOrderGuardService` 接入共享 `project_task_guard`（R1-R5，错误码 `SO_LINE_TASK_PROJECT_REQUIRED` / `SO_LINE_PROJECT_MISMATCH` / `SO_LINE_SEGMENT_TASK_CONFLICT`） | `test_sales_order_line_project_task.py` 14 passed；`test_sales_order_guard.py` 34 passed |
+| P2-1 预留维度 | `InventoryReservationService` 任务行落 `project_task` 段，释放后清理任务段空余额；`shipment_lines` 创建继承 `project_task_id`（发运当前无自动过账，接入时必须带维度） | `test_inventory_reservation_service.py` / `test_mto_consignment_flow.py` / `test_shipment_service.py` 全通过 |
+| P2-2 结构基线 | `v209` 建 `project_structure_baselines` + 唯一索引；`project_structure_baseline.yaml`；`ProjectStructureBaselineService`（resolve / compute_hash / upsert / check_drift / refresh）；BO Action `check_drift` / `refresh` | `test_project_structure_baseline.py` 15 passed；`test_bo_action_contract.py` 通过 |
+| 回归 | `test_inventory_schema` / `test_inventory_atp` / `test_demand_trace_service` / `test_purchase_order_guard` / `test_demand_allocation_schema` / `test_inventory_segment_migration` / `test_app_builder` / `test_schema_generator` | 全通过（`test_sales_order_fulfillment_status` 保留 1 例既有失败，与本次无关） |
+| P2-3 | `v_project_cost` 待成本价 / 费率口径 | 后置 |
 
 ### 11.4 结论
 
