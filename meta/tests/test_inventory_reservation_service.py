@@ -24,6 +24,8 @@ from meta.tests.inventory_test_doubles import (
 
 UOM_ID = 3
 SO_LINE_ID = 501
+PROJECT_ID = 301
+TASK_ID = 201
 
 
 def _conn(with_balance=10):
@@ -184,7 +186,8 @@ def _create_so_tables(conn, so_flag=0):
     conn.execute('CREATE TABLE IF NOT EXISTS sales_order_lines '
                  '(id INTEGER PRIMARY KEY, order_id INTEGER, item_id INTEGER, '
                  'uom_id INTEGER, qty REAL, status TEXT, '
-                 'plant_location_id INTEGER, project_id INTEGER)')
+                 'plant_location_id INTEGER, project_id INTEGER, '
+                 'project_task_id INTEGER)')
     conn.execute("INSERT INTO sales_orders (id, status, org_id) "
                  "VALUES (1, 'open', ?)", [ORG_ID])
     conn.execute("INSERT INTO sales_order_lines (id, order_id, item_id, "
@@ -230,3 +233,30 @@ def test_sync_sales_order_line_with_segment_flag():
     assert result['created'] is True
     assert result['reservation']['stock_segment_type'] == 'sales_order_line'
     assert result['reservation']['sales_order_line_id'] == SO_LINE_ID
+
+
+def test_sync_sales_order_line_with_project_task_segment():
+    """G15 P2：任务行落 project_task 段；取消后释放预留。"""
+    conn = _conn(10)
+    _create_so_tables(conn)
+    conn.execute('UPDATE sales_order_lines SET project_id = ?, '
+                 'project_task_id = ? WHERE id = ?',
+                 [PROJECT_ID, TASK_ID, SO_LINE_ID])
+    conn.commit()
+    service = _service(conn)
+
+    result = service.sync_sales_order_line(SO_LINE_ID)
+    assert result['created'] is True
+    reservation = result['reservation']
+    assert reservation['stock_segment_type'] == 'project_task'
+    assert reservation['project_id'] == PROJECT_ID
+    assert reservation['project_task_id'] == TASK_ID
+    assert reservation['sales_order_line_id'] == 0
+
+    conn.execute("UPDATE sales_order_lines SET status = 'cancelled' "
+                 'WHERE id = ?', [SO_LINE_ID])
+    conn.commit()
+    released = service.sync_sales_order_line(SO_LINE_ID)
+    assert released['released'] == 1
+    row = service._load(reservation['id'])
+    assert row['status'] == 'cancelled'

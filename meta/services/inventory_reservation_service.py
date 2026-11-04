@@ -470,6 +470,15 @@ class InventoryReservationService:
                     'stock_segment_type': 'sales_order_line',
                     'sales_order_line_id': _to_int(line_id),
                 })
+            # G15 P2：任务行释放后清理任务段空余额（有项目才可校验段）
+            task_id = _to_int(line.get('project_task_id'))
+            project_id = _to_int(line.get('project_id'))
+            if task_id and project_id:
+                self._segment_service().prune_empty_balances({
+                    'stock_segment_type': 'project_task',
+                    'project_id': project_id,
+                    'project_task_id': task_id,
+                })
             return {'created': False, 'skipped': True,
                     'released': released, 'reason': 'NOT_RESERVABLE'}
 
@@ -484,6 +493,11 @@ class InventoryReservationService:
             'sales_order_line_id': (_to_int(line_id)
                                     if flags['so_segment_enabled'] else 0),
             'so_segment_enabled': flags['so_segment_enabled'],
+            # G15 P2：任务行落 project_task 段（任务优先于 SO 行段；
+            # SO 段 + 任务组合已在 SO 守卫拒绝，无歧义）。
+            'project_id': (_to_int(line.get('project_id'))
+                           if _to_int(line.get('project_task_id')) else 0),
+            'project_task_id': _to_int(line.get('project_task_id')),
         }
         payload = {
             'reservation_key': key,
@@ -572,8 +586,8 @@ class InventoryReservationService:
     def _load_sales_order_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
-                'SELECT l.id, l.order_id, l.item_id, l.uom_id, l.qty, '
-                'l.status, l.plant_location_id, o.org_id AS header_org_id, '
+                # 整行读取：兼容未加 project_task_id 的旧库 / 测试库
+                'SELECT l.*, o.org_id AS header_org_id, '
                 'o.status AS order_status '
                 'FROM sales_order_lines l '
                 'LEFT JOIN sales_orders o ON o.id = l.order_id '

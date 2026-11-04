@@ -566,13 +566,19 @@ class ShipmentService:
         return int(getattr(cursor, 'lastrowid', 0) or 0)
 
     def _insert_line(self, delivery_id: int, item: Dict[str, Any], now: str) -> None:
+        # G15 P2：发运行继承订单行的项目任务维度。
+        # 注意：当前发运（ship confirm）没有自动库存过账；后续接入出库过账时
+        # 必须以 shipment_lines.project_task_id（+ 抬头 project_id）为段维度，
+        # 否则会扣错库存段。
         self.ds.execute(
             'INSERT INTO %s (delivery_id, schedule_id, order_line_id, item_id, '
-            'uom_id, qty, lot_no, serial_no, status, created_at, updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % LINE_TABLE,
+            'uom_id, qty, lot_no, serial_no, project_task_id, '
+            'status, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % LINE_TABLE,
             [delivery_id, item['schedule']['id'], item['order_line']['id'],
              item['order_line'].get('item_id'), item['order_line'].get('uom_id'),
              float(item['qty']), item.get('lot_no'), item.get('serial_no'),
+             int(item['order_line'].get('project_task_id') or 0),
              STATUS_DRAFT, now, now])
 
     def _transition_header(self, delivery_id: Any, status: str) -> Dict[str, Any]:
@@ -618,9 +624,10 @@ class ShipmentService:
     def _load_order_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
         if _blank(line_id):
             return None
+        # G15 P2：整行读取，兼容未加 project_task_id 的旧库/测试库；
+        # 需要时取 order_line['project_task_id']（缺省视为 0）。
         rows = self.ds.query(
-            'SELECT id, order_id, item_id, uom_id, status FROM %s WHERE id = ?'
-            % ORDER_LINE_TABLE, [line_id])
+            'SELECT * FROM %s WHERE id = ?' % ORDER_LINE_TABLE, [line_id])
         return rows[0] if rows else None
 
     def _require_header(self, delivery_id: Any) -> Dict[str, Any]:

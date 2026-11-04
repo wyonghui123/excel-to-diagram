@@ -48,6 +48,12 @@ def _env():
                  "uom_id, qty, status, plant_location_id, project_id, "
                  "project_task_id) VALUES (?, 1, ?, ?, 10, 'open', ?, NULL, 0)",
                  [SO_LINE_ID, ITEM_ID, UOM_ID, LOCATION_ID])
+    # G15 任务轴：过账校验需要项目任务事实（activity + planned）
+    conn.execute('CREATE TABLE project_tasks '
+                 '(id INTEGER PRIMARY KEY, project_id INTEGER, '
+                 'task_type TEXT, status TEXT)')
+    conn.execute("INSERT INTO project_tasks (id, project_id, task_type, status) "
+                 "VALUES (?, ?, 'activity', 'planned')", [TASK_ID, PROJECT_ID])
     for code, name, direction in (
             ('SEG_TRANSFER_OUT', '段转出', 'out'),
             ('SEG_TRANSFER_IN', '段转入', 'in')):
@@ -109,6 +115,40 @@ def test_mto_soft_reservation_to_shipment_closure():
     _post(conn, 10, DEFAULT_SEGMENT, direction='out', event='mto-ship')
     assert reservations.available_on_hand(query)['on_hand'] \
         == pytest.approx(0)
+
+
+def test_project_task_line_reservation_to_fulfillment():
+    """G15 P2：任务行端到端（预留 → 任务段收货 → 核销），段内不串池。"""
+    conn = _env()
+    conn.execute('UPDATE sales_order_lines SET project_id = ?, '
+                 'project_task_id = ? WHERE id = ?',
+                 [PROJECT_ID, TASK_ID, SO_LINE_ID])
+    conn.commit()
+    reservations = InventoryReservationService(MemDS(conn))
+    created = reservations.sync_sales_order_line(SO_LINE_ID)
+    reservation = created['reservation']
+    assert reservation['stock_segment_type'] == 'project_task'
+    assert reservation['project_id'] == PROJECT_ID
+    assert reservation['project_task_id'] == TASK_ID
+
+    task_segment = {'stock_segment_type': 'project_task',
+                    'project_id': PROJECT_ID,
+                    'project_task_id': TASK_ID,
+                    'sales_order_line_id': 0, 'owner_party_id': 0}
+    query = {'org_id': ORG_ID, 'item_id': ITEM_ID, **task_segment}
+    assert reservations.available_on_hand(query)['available_on_hand'] \
+        == pytest.approx(-10)
+
+    _post(conn, 10, task_segment, event='task-receipt')
+    assert reservations.available_on_hand(query)['available_on_hand'] \
+        == pytest.approx(0)
+    # 自有段不因任务段收货而变化（不串池）
+    assert reservations.available_on_hand(
+        {'org_id': ORG_ID, 'item_id': ITEM_ID})['on_hand'] == pytest.approx(0)
+
+    fulfilled = reservations.fulfill_by_demand('sales_order_line',
+                                               SO_LINE_ID, 10)
+    assert fulfilled['fulfilled'] == pytest.approx(10)
 
 
 def test_consignment_receipt_and_consume_transfer():
