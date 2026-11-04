@@ -34,6 +34,7 @@ DOC_SHIPMENT = 'shipment'
 DOC_TRANSFER = 'transfer_order'
 DOC_ADJUSTMENT = 'inventory_adjustment'
 DOC_COUNT = 'inventory_count'
+DOC_WORK_ORDER = 'work_order'
 
 TRANSFER_TABLE = 'transfer_orders'
 TRANSFER_LINE_TABLE = 'transfer_order_lines'
@@ -41,6 +42,8 @@ ADJ_TABLE = 'inventory_adjustments'
 ADJ_LINE_TABLE = 'inventory_adjustment_lines'
 CNT_TABLE = 'inventory_counts'
 CNT_LINE_TABLE = 'inventory_count_lines'
+WORK_ORDER_TABLE = 'work_orders'
+WORK_ORDER_COMPONENT_TABLE = 'work_order_components'
 
 #: 单据行表映射（用于按行 id 补读 serial_no，兼容未加列的旧替身）
 LINE_TABLE_BY_DOC = {
@@ -1313,6 +1316,372 @@ class SerialNumberService:
             'scrapped_at = COALESCE(scrapped_at, ?), updated_at = ? WHERE id = ?'
             % SERIAL_TABLE, [STATUS_SCRAPPED, now, now, serial['id']])
         return True
+
+    # ------------------------------------------------------------------
+    # 完工入库与组件谱系（P6c）
+    # ------------------------------------------------------------------
+    def precheck_completion(self, work_order_id: Any,
+                            receipt_id: Any) -> None:
+        """完工过账前置（无副作用）：成品录号 + 组件号合法性（D7）。"""
+        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+                                   'SERIAL_RECEIPT_NOT_FOUND')
+        work_order = self._require_production_order(work_order_id)
+        org_id = header.get('inventory_org_id') or header.get('org_id')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
+            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+        for line in lines:
+            net = _as_float(line.get('qty_received')) \
+                - _as_float(line.get('qty_rejected'))
+            self._precheck_line(line, net, DOC_RECEIPT, 'require_on_receipt',
+                                'SERIAL_RECEIPT_COUNT_MISMATCH')
+        self._completion_groups(work_order, org_id)
+
+    def register_completion(self, work_order_id: Any, receipt_id: Any,
+                            event_key: Any = None,
+                            parent_serial_id: Any = None) -> Dict[str, Any]:
+        """完工过账登记：成品建档入库 + 组件耗用 + 写单父谱系（D3/D4/D6）。"""
+        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+                                   'SERIAL_RECEIPT_NOT_FOUND')
+        work_order = self._require_production_order(work_order_id)
+        org_id = header.get('inventory_org_id') or header.get('org_id')
+        location_id = header.get('deliver_to_location_id')
+        txn_date = (header.get('actual_arrival_date')
+                    or header.get('receipt_date') or _now())
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
+            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+        # 先做全量校验，任何不合法都不落库
+        groups = self._completion_groups(work_order, org_id)
+        produced: List[Dict[str, Any]] = []
+        consumed = 0
+        with self.ds.transaction():
+            for line in lines:
+                produced.extend(self._produce_line(
+                    header, line, org_id, location_id, txn_date, event_key))
+            parent_id = self._completion_parent(
+                produced, groups, org_id, parent_serial_id)
+            for component, rows in groups:
+                for serial in rows:
+                    if self._consume_component(
+                            header, work_order, component, serial, org_id,
+                            parent_id, txn_date):
+                        consumed += 1
+        logger.info('[serial] completion receipt=%s work_order=%s produced=%s '
+                    'consumed=%s parent=%s', receipt_id, work_order_id,
+                    len(produced), consumed, parent_id)
+        return {'work_order_id': work_order_id, 'receipt_id': receipt_id,
+                'produced': len(produced), 'consumed': consumed,
+                'parent_serial_id': parent_id}
+
+    def reverse_completion(self, work_order_id: Any,
+                           receipt_id: Any) -> Dict[str, Any]:
+        """完工红冲：成品 receive 与组件 issue 状态回退，保留谱系与 link。"""
+        events = self.ds.query(
+            'SELECT * FROM %s WHERE txn_type IN (?, ?) AND '
+            '((doc_type = ? AND doc_id = ?) OR (doc_type = ? AND doc_id = ?)) '
+            'ORDER BY id' % SERIAL_TX_TABLE,
+            [TXN_RECEIVE, 'issue', DOC_RECEIPT, receipt_id,
+             DOC_WORK_ORDER, work_order_id])
+        now = _now()
+        reverted = 0
+        with self.ds.transaction():
+            for event in events:
+                serial = self._require_row(
+                    SERIAL_TABLE, event.get('serial_id'), '序列号',
+                    'SERIAL_NOT_FOUND')
+                if serial.get('usage_status') != event.get('usage_to'):
+                    continue
+                back = event.get('usage_from')
+                self._insert_txn(
+                    serial['id'], TXN_ADJUST, now,
+                    org_from_id=event.get('org_to_id'),
+                    org_to_id=event.get('org_from_id'),
+                    location_from_id=event.get('location_to_id'),
+                    location_to_id=event.get('location_from_id'),
+                    usage_from=event.get('usage_to'), usage_to=back,
+                    doc_type=event.get('doc_type'), doc_id=event.get('doc_id'),
+                    line_id=event.get('line_id'),
+                    remark='完工红冲 收货单 %s' % receipt_id)
+                updates = ['usage_status = ?', 'updated_at = ?']
+                params: List[Any] = [back, now]
+                if back == STATUS_IN_STORES:
+                    updates.append('current_location_id = ?')
+                    params.append(event.get('location_from_id'))
+                elif back == STATUS_DEFINED:
+                    updates.append('current_location_id = NULL')
+                if event.get('txn_type') == TXN_RECEIVE:
+                    updates.append('produced_at = NULL')
+                params.append(serial['id'])
+                self.ds.execute(
+                    'UPDATE %s SET %s WHERE id = ?'
+                    % (SERIAL_TABLE, ', '.join(updates)), params)
+                reverted += 1
+        return {'work_order_id': work_order_id, 'receipt_id': receipt_id,
+                'reverted': reverted}
+
+    def genealogy(self, serial_id: Any, depth: Any = 1) -> Dict[str, Any]:
+        """只读谱系：向上找父号、向下找子号；depth 截断 1..5，防环。"""
+        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                                   'SERIAL_NOT_FOUND')
+        try:
+            depth = int(depth or 1)
+        except (TypeError, ValueError):
+            depth = 1
+        depth = max(1, min(depth, 5))
+        return {
+            'serial': serial,
+            'parents': self._genealogy_up(serial, depth, {serial['id']}),
+            'children': self._genealogy_down(serial['id'], depth,
+                                             {serial['id']}),
+        }
+
+    # ------------------------------ 内部工具
+    def _require_production_order(self, work_order_id: Any) -> Dict[str, Any]:
+        order = self._require_row(WORK_ORDER_TABLE, work_order_id, '生产工单',
+                                  'SERIAL_COMPLETION_WORK_ORDER_INVALID')
+        if str(order.get('order_type') or '').strip().lower() != 'production':
+            raise SerialNumberError('来源工单不是生产工单',
+                                    field_name='work_order_id',
+                                    rule='SERIAL_COMPLETION_WORK_ORDER_INVALID')
+        status = str(order.get('status') or '').strip().lower()
+        if status not in ('new', 'in progress'):
+            raise SerialNumberError(
+                '工单状态 %s 不允许完工' % order.get('status'),
+                field_name='work_order_id',
+                rule='SERIAL_COMPLETION_WORK_ORDER_INVALID')
+        return order
+
+    def _completion_groups(self, work_order: Dict[str, Any],
+                           org_id: Any) -> List[Any]:
+        """校验组件链接并返回 [(component, rows)]（D7，无副作用）。"""
+        components = self.ds.query(
+            'SELECT * FROM %s WHERE work_order_id = ? ORDER BY line_no, id'
+            % WORK_ORDER_COMPONENT_TABLE, [work_order.get('id')])
+        groups: List[Any] = []
+        for component in components:
+            item = self._require_item(component.get('component_item_id'))
+            links = self._links(DOC_WORK_ORDER, component.get('id'))
+            if not bool(item.get('serial_tracked')):
+                if links:
+                    raise SerialNumberError(
+                        '组件物料未启用序列号管理，不能录入组件序列号',
+                        field_name='serial_no', rule='SERIAL_ITEM_NOT_TRACKED')
+                continue
+            required = int(round(_as_float(component.get('qty_required'))))
+            if bool(component.get('optional_flag')):
+                if len(links) > required:
+                    raise SerialNumberError(
+                        '可选组件序列号数量不能超过需求数量 %s，实际 %s'
+                        % (required, len(links)),
+                        field_name='serial_no',
+                        rule='SERIAL_COMPONENT_COUNT_MISMATCH')
+            elif len(links) != required:
+                raise SerialNumberError(
+                    '组件序列号数量必须等于需求数量 %s，实际 %s'
+                    % (required, len(links)),
+                    field_name='serial_no',
+                    rule='SERIAL_COMPONENT_COUNT_MISMATCH')
+            rows: List[Dict[str, Any]] = []
+            for link in links:
+                serial = self._require_row(
+                    SERIAL_TABLE, link.get('serial_id'), '序列号',
+                    'SERIAL_NOT_FOUND')
+                if str(serial.get('item_id')) \
+                        != str(component.get('component_item_id')):
+                    raise SerialNumberError(
+                        '序列号 %s 的物料与组件行不一致' % serial.get('serial_no'),
+                        field_name='serial_no',
+                        rule='SERIAL_COMPONENT_ITEM_MISMATCH')
+                self._assert_org(serial, org_id)
+                if serial.get('usage_status') != STATUS_IN_STORES:
+                    raise SerialNumberError(
+                        '组件序列号 %s 当前状态 %s 不在库' % (
+                            serial.get('serial_no'),
+                            serial.get('usage_status')),
+                        field_name='serial_no',
+                        rule='SERIAL_COMPONENT_NOT_IN_STORES')
+                if not _blank(serial.get('parent_serial_id')):
+                    raise SerialNumberError(
+                        '组件序列号 %s 已有父号，不允许重复挂接'
+                        % serial.get('serial_no'),
+                        field_name='serial_no',
+                        rule='SERIAL_PARENT_ALREADY_SET')
+                rows.append(serial)
+            groups.append((component, rows))
+        return groups
+
+    def _produce_line(self, header: Dict[str, Any], line: Dict[str, Any],
+                      org_id: Any, location_id: Any, txn_date: Any,
+                      event_key: Any = None) -> List[Dict[str, Any]]:
+        net = _as_float(line.get('qty_received')) \
+            - _as_float(line.get('qty_rejected'))
+        if net <= 0:
+            return []
+        item = self._require_item(line.get('item_id'))
+        line_serial = self._line_serial_no(DOC_RECEIPT, line)
+        if not bool(item.get('serial_tracked')):
+            if line_serial:
+                raise SerialNumberError(
+                    '物料未启用序列号管理，行内不能填写序列号',
+                    field_name='serial_no', rule='SERIAL_ITEM_NOT_TRACKED')
+            return []
+
+        links = self._links(DOC_RECEIPT, line.get('id'))
+        if not links and line_serial:
+            if net > 1:
+                raise SerialNumberError(
+                    '数量大于 1 时不能用单值序列号快捷录入，请走序列号子表',
+                    field_name='serial_no',
+                    rule='SERIAL_SINGLE_VALUE_WITH_MULTI_QTY')
+            serial = self._ensure_serial(
+                item, org_id, line_serial, header, line, 'produced',
+                source_doc_type=DOC_RECEIPT)
+            self._ensure_link(DOC_RECEIPT, header.get('id'), line.get('id'),
+                              serial['id'], 'in')
+            links = self._links(DOC_RECEIPT, line.get('id'))
+        if bool(item.get('require_on_receipt')) \
+                and int(round(net)) != len(links):
+            raise SerialNumberError(
+                '完工行序列号数量必须等于净收数量 %s，实际 %s'
+                % (int(round(net)), len(links)),
+                field_name='serial_no', rule='SERIAL_RECEIPT_COUNT_MISMATCH')
+
+        inv_tx_id = self._find_inv_tx(event_key, line.get('id')) \
+            if event_key else None
+        now = _now()
+        produced: List[Dict[str, Any]] = []
+        for link in links:
+            serial = self._require_row(SERIAL_TABLE, link.get('serial_id'),
+                                       '序列号', 'SERIAL_NOT_FOUND')
+            if serial.get('usage_status') == STATUS_SCRAPPED:
+                raise SerialNumberError('已报废序列号不能再完工入库',
+                                        field_name='serial_no',
+                                        rule='SERIAL_STATUS_TRANSITION_INVALID')
+            self._assert_org(serial, org_id)
+            existing = self.ds.query(
+                'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+                'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+                % SERIAL_TX_TABLE,
+                [serial['id'], TXN_RECEIVE, DOC_RECEIPT, header.get('id'),
+                 line.get('id')])
+            if not existing:
+                usage_from = serial.get('usage_status')
+                if usage_from not in (STATUS_DEFINED, STATUS_RETURNED,
+                                      STATUS_IN_STORES):
+                    raise SerialNumberError(
+                        '序列号 %s 当前状态 %s 不可完工入库' % (
+                            serial.get('serial_no'), usage_from),
+                        field_name='serial_no',
+                        rule='SERIAL_STATUS_TRANSITION_INVALID')
+                self._insert_txn(
+                    serial['id'], TXN_RECEIVE, txn_date,
+                    inventory_transaction_id=inv_tx_id, org_to_id=org_id,
+                    location_to_id=location_id, usage_from=usage_from,
+                    usage_to=STATUS_IN_STORES, doc_type=DOC_RECEIPT,
+                    doc_id=header.get('id'), line_id=line.get('id'),
+                    remark='完工收货单 %s' % header.get('receipt_no'))
+            self.ds.execute(
+                'UPDATE %s SET usage_status = ?, source_type = ?, '
+                'current_location_id = ?, produced_at = COALESCE(produced_at, ?), '
+                'received_at = COALESCE(received_at, ?), updated_at = ? '
+                'WHERE id = ?' % SERIAL_TABLE,
+                [STATUS_IN_STORES, 'produced', location_id, txn_date, txn_date,
+                 now, serial['id']])
+            produced.append(dict(serial, usage_status=STATUS_IN_STORES))
+        return produced
+
+    def _completion_parent(self, produced: List[Dict[str, Any]],
+                            groups: Any, org_id: Any,
+                            parent_serial_id: Any = None) -> Optional[Any]:
+        has_components = any(rows for _component, rows in groups)
+        if not _blank(parent_serial_id):
+            parent = self._require_row(SERIAL_TABLE, parent_serial_id, '序列号',
+                                       'SERIAL_NOT_FOUND')
+            self._assert_org(parent, org_id)
+            return parent['id']
+        if not has_components:
+            return None
+        if not produced:
+            # 成品未启序列号管理时不存在父号，组件仍可耗用（无谱系）
+            return None
+        if len(produced) > 1:
+            raise SerialNumberError(
+                '成品序列号多于 1 个，请显式指定组件父号',
+                field_name='parent_serial_id',
+                rule='SERIAL_COMPLETION_PARENT_AMBIGUOUS')
+        return produced[0]['id']
+
+    def _consume_component(self, header: Dict[str, Any],
+                           work_order: Dict[str, Any],
+                           component: Dict[str, Any],
+                           serial: Dict[str, Any], org_id: Any,
+                           parent_serial_id: Any, txn_date: Any) -> bool:
+        existing = self.ds.query(
+            'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+            % SERIAL_TX_TABLE,
+            [serial['id'], 'issue', DOC_WORK_ORDER, work_order.get('id'),
+             component.get('id')])
+        if existing:
+            return False
+        now = _now()
+        self._insert_txn(
+            serial['id'], 'issue', txn_date,
+            org_from_id=org_id, org_to_id=org_id,
+            location_from_id=serial.get('current_location_id'),
+            usage_from=STATUS_IN_STORES, usage_to=STATUS_ISSUED,
+            doc_type=DOC_WORK_ORDER, doc_id=work_order.get('id'),
+            line_id=component.get('id'),
+            remark='生产工单 %s 组件耗用' % work_order.get('work_order_no'))
+        updates = ['usage_status = ?', 'current_location_id = NULL',
+                   'updated_at = ?']
+        params: List[Any] = [STATUS_ISSUED, now]
+        if not _blank(parent_serial_id):
+            updates.append('parent_serial_id = ?')
+            updates.append('relation_type = ?')
+            params.extend([parent_serial_id, 'assembly'])
+        params.append(serial['id'])
+        self.ds.execute(
+            'UPDATE %s SET %s WHERE id = ?'
+            % (SERIAL_TABLE, ', '.join(updates)), params)
+        return True
+
+    def _genealogy_up(self, serial: Dict[str, Any], remaining: int,
+                      seen: set) -> List[Dict[str, Any]]:
+        if remaining <= 0:
+            return []
+        parent_id = serial.get('parent_serial_id')
+        if _blank(parent_id) or parent_id in seen:
+            return []
+        rows = self.ds.query('SELECT * FROM %s WHERE id = ?' % SERIAL_TABLE,
+                             [parent_id])
+        if not rows:
+            return []
+        parent = rows[0]
+        seen.add(parent['id'])
+        return [{'serial': parent,
+                 'relation_type': serial.get('relation_type'),
+                 'parents': self._genealogy_up(parent, remaining - 1, seen)}]
+
+    def _genealogy_down(self, serial_id: Any, remaining: int,
+                        seen: set) -> List[Dict[str, Any]]:
+        if remaining <= 0:
+            return []
+        rows = self.ds.query(
+            'SELECT * FROM %s WHERE parent_serial_id = ? ORDER BY id'
+            % SERIAL_TABLE, [serial_id])
+        children: List[Dict[str, Any]] = []
+        for row in rows:
+            if row['id'] in seen:
+                continue
+            seen.add(row['id'])
+            children.append({
+                'serial': row,
+                'relation_type': row.get('relation_type'),
+                'children': self._genealogy_down(row['id'], remaining - 1, seen),
+            })
+        return children
 
     # ------------------------------------------------------------------
     # 供过账钩子 / 拦截器使用的小工具

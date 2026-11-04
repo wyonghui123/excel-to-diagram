@@ -50,6 +50,7 @@ FUNCTION_INVENTORY = 'inventory'
 
 SOURCE_PURCHASE_ORDER = 'purchase_order'
 SOURCE_TRANSFER_ORDER = 'transfer_order'
+SOURCE_WORK_ORDER = 'work_order'
 SOURCE_SUPPORTED = (SOURCE_PURCHASE_ORDER, SOURCE_TRANSFER_ORDER)
 
 DOC_CATEGORY_STANDARD = 'standard'
@@ -160,6 +161,8 @@ class ReceiptService:
         source_type = header.get('source_doc_type') or SOURCE_PURCHASE_ORDER
         if source_type == SOURCE_TRANSFER_ORDER:
             return self.prepare_transfer_header(header)
+        if source_type == SOURCE_WORK_ORDER:
+            return self.prepare_work_order_header(header)
         if source_type not in SOURCE_SUPPORTED:
             raise ReceiptError(
                 '来源单据类型 %s 暂不支持收货' % source_type,
@@ -235,6 +238,61 @@ class ReceiptService:
         header['receipt_no'] = receipt_no
         return header, transfer_order, doc_type
 
+    def prepare_work_order_header(self, header: Dict[str, Any]):
+        """生产工单来源抬头归一化（P6c D1/D2）。
+
+        工单无库存组织 / 收货库位字段，必须由收货单表头显式提供；
+        采购专属字段置空。返回 `(header, work_order, doc_type)`。
+        """
+        header = dict(header or {})
+        receipt_date = header.get('receipt_date')
+        if _blank(receipt_date):
+            raise ReceiptError('收货日期必填', field_name='receipt_date',
+                               rule='RC_DATE_REQUIRED')
+
+        work_order = self._load_work_order(header.get('source_doc_id'))
+        if work_order is None:
+            raise ReceiptError('来源生产工单不存在', field_name='source_doc_id',
+                               rule='RC_WORK_ORDER_INVALID')
+        if str(work_order.get('order_type') or '').strip().lower() != 'production':
+            raise ReceiptError('来源工单不是生产工单', field_name='source_doc_id',
+                               rule='RC_WORK_ORDER_INVALID')
+        status = str(work_order.get('status') or '').strip().lower()
+        if status not in ('new', 'in progress'):
+            raise ReceiptError(
+                '工单状态 %s 不允许完工收货' % work_order.get('status'),
+                field_name='source_doc_id', rule='RC_WORK_ORDER_INVALID')
+
+        doc_type = self._require_document_type(header.get('document_type_id'))
+        if doc_type['document_category'] == DOC_CATEGORY_RETURN \
+                and _blank(header.get('reversal_of_receipt_id')):
+            raise ReceiptError('红字收货单必须引用原单',
+                               field_name='reversal_of_receipt_id',
+                               rule='RC_DOC_TYPE_INVALID')
+
+        header['source_doc_type'] = SOURCE_WORK_ORDER
+        header['source_doc_id'] = work_order['id']
+        header['source_doc_no'] = work_order.get('work_order_no')
+        header['purchase_org_id'] = None
+        header['supplier_party_id'] = None
+        if _blank(header.get('inventory_org_id')):
+            raise ReceiptError('完工收货单必须指定库存组织',
+                               field_name='inventory_org_id',
+                               rule='RC_WORK_ORDER_ORG_REQUIRED')
+        if _blank(header.get('deliver_to_location_id')):
+            raise ReceiptError('完工收货单必须指定收货库位',
+                               field_name='deliver_to_location_id',
+                               rule='RC_WORK_ORDER_LOCATION_REQUIRED')
+        self._validate_inventory_org(header)
+        self._validate_location_org(header)
+        receipt_no = header.get('receipt_no') or self.allocate_receipt_no(
+            doc_type['id'], receipt_date)
+        if _blank(receipt_no):
+            raise ReceiptError('单据类型未绑定编号序列，无法生成收货单号',
+                               field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
+        header['receipt_no'] = receipt_no
+        return header, work_order, doc_type
+
     # ------------------------------------------------------------------ 创建
     def create_receipt(self, header: Dict[str, Any],
                        lines: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -245,8 +303,13 @@ class ReceiptService:
         """
         header, order, doc_type = self.prepare_header(header)
         is_transfer = header['source_doc_type'] == SOURCE_TRANSFER_ORDER
-        validator = self._validate_transfer_line if is_transfer \
-            else self._validate_line
+        is_work_order = header['source_doc_type'] == SOURCE_WORK_ORDER
+        if is_work_order:
+            validator = self._validate_work_order_line
+        elif is_transfer:
+            validator = self._validate_transfer_line
+        else:
+            validator = self._validate_line
         normalized = [validator(line, order, doc_type)
                       for line in (lines or [])]
 
@@ -276,8 +339,12 @@ class ReceiptService:
         }
         receipt_id = self._insert_header(row)
         for seq, item in enumerate(normalized, start=1):
-            payload = self._normalized_transfer_payload(item) if is_transfer \
-                else self._normalized_payload(item)
+            if is_work_order:
+                payload = self._normalized_work_order_payload(item)
+            elif is_transfer:
+                payload = self._normalized_transfer_payload(item)
+            else:
+                payload = self._normalized_payload(item)
             payload['line_no'] = str(seq)
             self._insert_line(receipt_id, payload, now)
 
@@ -323,6 +390,32 @@ class ReceiptService:
         with self.ds.transaction():
             return self.create_receipt(prepared, lines)
 
+    def create_from_work_order(
+            self, work_order_id: Any, location_id: Any,
+            lines: List[Dict[str, Any]],
+            inventory_org_id: Any = None, receipt_date: Any = None,
+            document_type_id: Any = None,
+            remark: Any = None, org_id: Any = None) -> Dict[str, Any]:
+        """由生产工单生成完工收货单草稿（P6c D1/D2）。
+
+        工单无成品数量字段，行内容（成品物料 / 数量 / 序列号）由调用方显式给；
+        组织与库位由表头显式提供。取号在事务之外（R-RC-8）。
+        """
+        header = {
+            'source_doc_type': SOURCE_WORK_ORDER,
+            'source_doc_id': work_order_id,
+            'receipt_date': receipt_date or _now()[:10],
+            'document_type_id': document_type_id
+            or self.standard_header_type()['id'],
+            'org_id': org_id,
+            'inventory_org_id': inventory_org_id,
+            'deliver_to_location_id': location_id,
+            'remark': remark or '生产工单 %s 完工收货' % work_order_id,
+        }
+        prepared, _order, _doc_type = self.prepare_work_order_header(header)
+        with self.ds.transaction():
+            return self.create_receipt(prepared, lines)
+
     # ------------------------------------------------------------------ 过账
     def post(self, receipt_id: Any,
              actual_arrival_date: Optional[str] = None) -> Dict[str, Any]:
@@ -337,6 +430,8 @@ class ReceiptService:
 
         if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
             return self._post_transfer_order(header, actual_arrival_date)
+        if header.get('source_doc_type') == SOURCE_WORK_ORDER:
+            return self._post_work_order(header, actual_arrival_date)
 
         doc_type = self._require_document_type(header.get('document_type_id'))
         is_return = doc_type['document_category'] == DOC_CATEGORY_RETURN
@@ -476,6 +571,53 @@ class ReceiptService:
                 'idempotent': False, 'order_ids': [],
                 'transfer_order_id': transfer_order['id']}
 
+    def _post_work_order(self, header: Dict[str, Any],
+                         actual_arrival_date: Optional[str] = None,
+                         ) -> Dict[str, Any]:
+        """生产工单来源过账：成品入库 + 组件号爆用 + 单父谱系（P6c）。
+
+        不自动关闭工单（D5）；组件只写一条 issue（D4）。
+        """
+        doc_type = self._require_document_type(header.get('document_type_id'))
+        lines = self._load_lines(header['id'])
+        if not lines:
+            raise ReceiptError('收货单没有任何行，禁止过账',
+                               field_name='lines', rule='RC_EMPTY')
+        work_order = self._load_work_order(header.get('source_doc_id'))
+        if work_order is None:
+            raise ReceiptError('来源生产工单不存在', field_name='source_doc_id',
+                               rule='RC_WORK_ORDER_INVALID')
+
+        checked = [self._validate_work_order_line(line, work_order, doc_type,
+                                                  for_post=True)
+                   for line in lines]
+        serial_ready = self._serial_ready()
+        if serial_ready:
+            self._precheck_work_order_serials(work_order['id'], header['id'])
+
+        now = actual_arrival_date or _now()
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
+            'AND status = ?' % LINE_TABLE,
+            [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
+        self.ds.execute(
+            'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
+            'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
+            % HEADER_TABLE,
+            [STATUS_POSTED, actual_arrival_date, now, header['id']])
+
+        self._post_receipt_inventory(header, checked, 'RCV_WO')
+        if serial_ready:
+            self._register_completion_serials(
+                work_order['id'], header['id'],
+                event_key='receipt:%s:post' % header['id'])
+
+        logger.info('[receipt] posted work order id=%s work_order=%s lines=%s',
+                    header['id'], work_order['id'], len(checked))
+        return {'id': header['id'], 'status': STATUS_POSTED,
+                'idempotent': False, 'order_ids': [],
+                'work_order_id': work_order['id']}
+
     # ------------------------------------------------------------------ 取消
     def cancel(self, receipt_id: Any) -> Dict[str, Any]:
         """draft → cancelled，行一并取消（R-RC-13 草稿才可删 / 可废）。"""
@@ -511,6 +653,9 @@ class ReceiptService:
                                rule='RC_STATE_INVALID')
         if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
             return self._reverse_transfer_order(
+                header, receipt_date, receipt_no, remark)
+        if header.get('source_doc_type') == SOURCE_WORK_ORDER:
+            return self._reverse_work_order(
                 header, receipt_date, receipt_no, remark)
         original_type = self._require_document_type(header.get('document_type_id'))
         if original_type['document_category'] == DOC_CATEGORY_RETURN:
@@ -741,6 +886,107 @@ class ReceiptService:
                 'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
                 'order_ids': [], 'transfer_order_id': header.get('source_doc_id')}
 
+    def _reverse_work_order(self, header: Dict[str, Any],
+                            receipt_date: Optional[str] = None,
+                            receipt_no: Optional[str] = None,
+                            remark: Optional[str] = None) -> Dict[str, Any]:
+        """生产工单来源整单红冲：新建红字单 + 序列号状态回退（P6c §5.3）。
+
+        谱系与 document_serial_links 不解除（与 P6a D13 一致）。
+        """
+        if self._reversal_exists(header['id']):
+            raise ReceiptError('该收货单已存在红字单，禁止重复冲销',
+                               field_name='status', rule='RC_REVERSAL_EXISTS')
+
+        return_type = self._return_header_type()
+        date = receipt_date or header.get('receipt_date') or _now()
+        red_no = receipt_no or self.allocate_receipt_no(return_type['id'], date)
+        if _blank(red_no):
+            raise ReceiptError('缺少红字收货单类型或编号序列',
+                               field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
+
+        original_lines = self._load_lines(header['id'], status=STATUS_POSTED)
+        source_items = []
+        for line in original_lines:
+            net = _q4(_dec(line.get('qty_received') or 0)
+                      - _dec(line.get('qty_rejected') or 0))
+            if net > 0:
+                source_items.append((line, net))
+        if not source_items:
+            raise ReceiptError('原单没有可冲销的净收行', field_name='lines',
+                               rule='RC_REVERSAL_INVALID')
+
+        now = _now()
+        red_row = {
+            'receipt_no': red_no,
+            'document_type_id': return_type['id'],
+            'receipt_date': date,
+            'actual_arrival_date': header.get('actual_arrival_date'),
+            'source_doc_type': SOURCE_WORK_ORDER,
+            'source_doc_id': header.get('source_doc_id'),
+            'source_doc_no': header.get('source_doc_no'),
+            'supplier_party_id': None,
+            'supplier_delivery_no': header.get('supplier_delivery_no'),
+            'org_id': header.get('org_id'),
+            'purchase_org_id': None,
+            'inventory_org_id': header.get('inventory_org_id'),
+            'deliver_to_location_id': header.get('deliver_to_location_id'),
+            'project_id': header.get('project_id'),
+            'received_by': header.get('received_by'),
+            'status': STATUS_DRAFT,
+            'reversal_of_receipt_id': header['id'],
+            'remark': remark or ('红冲 %s' % header.get('receipt_no')),
+            'created_at': now,
+            'updated_at': now,
+        }
+        red_id = self._insert_header(red_row)
+
+        for seq, (line, net) in enumerate(source_items, start=1):
+            red_line = {
+                'line_no': line.get('line_no') or str(seq),
+                'schedule_id': None,
+                'source_line_id': None,
+                'order_id': None,
+                'order_line_id': None,
+                'item_id': line['item_id'],
+                'uom_id': line['uom_id'],
+                'qty_received': _q4(net),
+                'qty_rejected': 0,
+                'lot_no': line.get('lot_no'),
+                'serial_no': line.get('serial_no'),
+                'putaway_location_id': line.get('putaway_location_id'),
+                'status': STATUS_DRAFT,
+                'reversal_of_line_id': line['id'],
+            }
+            self._insert_line(red_id, red_line, now)
+
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
+            'AND status = ?' % LINE_TABLE,
+            [STATUS_POSTED, now, red_id, STATUS_DRAFT])
+        self.ds.execute(
+            'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
+            'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
+            % HEADER_TABLE,
+            [STATUS_POSTED, red_row['actual_arrival_date'], now, red_id])
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
+            'AND status = ?' % LINE_TABLE,
+            [STATUS_REVERSED, now, header['id'], STATUS_POSTED])
+        self.ds.execute(
+            'UPDATE %s SET status = ?, reversed_at = ?, updated_at = ? WHERE id = ?'
+            % HEADER_TABLE,
+            [STATUS_REVERSED, now, now, header['id']])
+
+        self._reverse_receipt_inventory(header, date)
+        self._reverse_completion_serials(header.get('source_doc_id'), header['id'])
+
+        logger.info('[receipt] reversed work order original=%s red=%s lines=%s',
+                    header['id'], red_id, len(source_items))
+        return {'id': header['id'], 'status': STATUS_REVERSED,
+                'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
+                'order_ids': [], 'work_order_id': header.get('source_doc_id')}
+
     # ------------------------------------------------------------- 库存过账
     def _post_receipt_inventory(self, header: Dict[str, Any],
                                 checked: List[Dict[str, Any]],
@@ -885,6 +1131,47 @@ class ReceiptService:
                 str(error), field_name=error.field_name or 'serial_no',
                 rule=error.rule or 'SERIAL_TRANSFER_REGISTER_FAILED')
 
+    def _precheck_work_order_serials(self, work_order_id: Any,
+                                     receipt_id: Any) -> None:
+        """完工前置：成品录号完整性 + 组件号合法性（D7）。"""
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).precheck_completion(
+                work_order_id, receipt_id)
+        except SerialNumberError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_COMPLETION_INVALID')
+
+    def _register_completion_serials(self, work_order_id: Any,
+                                     receipt_id: Any,
+                                     event_key: Any = None) -> None:
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).register_completion(
+                work_order_id, receipt_id, event_key)
+        except SerialNumberError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_COMPLETION_REGISTER_FAILED')
+
+    def _reverse_completion_serials(self, work_order_id: Any,
+                                    receipt_id: Any) -> None:
+        from meta.services.serial_number_service import (
+            SerialNumberError, SerialNumberService,
+        )
+        try:
+            SerialNumberService(self.ds).reverse_completion(
+                work_order_id, receipt_id)
+        except SerialNumberError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'serial_no',
+                rule=error.rule or 'SERIAL_COMPLETION_REVERSE_FAILED')
+
     def _reverse_receipt_inventory(self, header: Dict[str, Any],
                                    transaction_date: Any = None) -> None:
         """按原过账事件键写 REVERSAL 反冲分录。"""
@@ -918,6 +1205,14 @@ class ReceiptService:
                                field_name='status',
                                rule='RC_POSTED_IMMUTABLE')
         doc_type = self._require_document_type(header.get('document_type_id'))
+        if header.get('source_doc_type') == SOURCE_WORK_ORDER:
+            order = self._load_work_order(header.get('source_doc_id'))
+            if order is None:
+                raise ReceiptError('来源生产工单不存在',
+                                   field_name='source_doc_id',
+                                   rule='RC_WORK_ORDER_INVALID')
+            return self._normalized_work_order_payload(
+                self._validate_work_order_line(payload, order, doc_type))
         if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
             order = self._load_transfer_order(header.get('source_doc_id'))
             if order is None:
@@ -1316,6 +1611,47 @@ class ReceiptService:
             'rejected': _q4(rejected),
         }
 
+    def _validate_work_order_line(self, line: Dict[str, Any],
+                                  work_order: Dict[str, Any],
+                                  doc_type: Dict[str, Any],
+                                  for_post: bool = False) -> Dict[str, Any]:
+        """生产工单来源行校验（P6c）：成品物料与数量由调用方显式给出。"""
+        line = dict(line or {})
+        if _blank(line.get('item_id')):
+            raise ReceiptError('完工收货行必须指定成品物料',
+                               field_name='item_id',
+                               rule='RC_WORK_ORDER_LINE_INVALID')
+        received = _dec(line.get('qty_received'), 'qty_received')
+        if received <= 0:
+            raise ReceiptError('收货数量必须大于 0', field_name='qty_received',
+                               rule='RC_QTY_INVALID')
+        rejected = _dec(line.get('qty_rejected') or 0, 'qty_rejected')
+        if rejected < 0 or rejected > received:
+            raise ReceiptError('拒收数量须在 0 ~ 收货数量之间',
+                               field_name='qty_rejected', rule='RC_QTY_INVALID')
+        if rejected > 0:
+            if _blank(line.get('rejection_reason_code')):
+                raise ReceiptError('存在拒收时必须填拒收原因',
+                                   field_name='rejection_reason_code',
+                                   rule='RC_REJECTION_INCOMPLETE')
+            if _blank(line.get('rejection_disposition')):
+                raise ReceiptError('存在拒收时必须填拒收处置',
+                                   field_name='rejection_disposition',
+                                   rule='RC_REJECTION_INCOMPLETE')
+            if line['rejection_disposition'] not in REJECTION_DISPOSITIONS:
+                raise ReceiptError('拒收处置取值非法',
+                                   field_name='rejection_disposition',
+                                   rule='RC_REJECTION_INCOMPLETE')
+        self._assert_location_active(line.get('putaway_location_id'))
+        return {
+            'line': line,
+            'work_order': work_order,
+            'order_line': None,
+            'schedule': None,
+            'net': _q4(received - rejected),
+            'rejected': _q4(rejected),
+        }
+
     def _assert_location_active(self, location_id: Any) -> None:
         """R-RC-15：指定入库库位必须启用；库表缺失时 fail-open。"""
         if _blank(location_id):
@@ -1558,6 +1894,25 @@ class ReceiptService:
             'putaway_location_id': line.get('putaway_location_id'),
         }
 
+    def _normalized_work_order_payload(self, checked: Dict[str, Any]) -> Dict[str, Any]:
+        """完工行归一化：schedule / order 字段置空，成品与数量取行内值。"""
+        line = checked['line']
+        return {
+            'schedule_id': None,
+            'source_line_id': None,
+            'order_id': None,
+            'order_line_id': None,
+            'item_id': line.get('item_id'),
+            'uom_id': line.get('uom_id'),
+            'qty_received': float(line.get('qty_received')),
+            'qty_rejected': float(line.get('qty_rejected') or 0),
+            'rejection_reason_code': line.get('rejection_reason_code'),
+            'rejection_disposition': line.get('rejection_disposition'),
+            'lot_no': line.get('lot_no'),
+            'serial_no': line.get('serial_no'),
+            'putaway_location_id': line.get('putaway_location_id'),
+        }
+
     # ------------------------------------------------------------------ 读取
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         if _blank(order_id):
@@ -1584,6 +1939,14 @@ class ReceiptService:
             'SELECT id, transfer_order_no, status, legal_entity_id, '
             'from_org_id, to_org_id, to_location_id '
             'FROM transfer_orders WHERE id = ?', [transfer_order_id])
+        return rows[0] if rows else None
+
+    def _load_work_order(self, work_order_id: Any) -> Optional[Dict[str, Any]]:
+        if _blank(work_order_id):
+            return None
+        rows = self.ds.query(
+            'SELECT id, work_order_no, order_type, status '
+            'FROM work_orders WHERE id = ?', [work_order_id])
         return rows[0] if rows else None
 
     def _load_transfer_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
