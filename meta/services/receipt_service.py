@@ -1019,8 +1019,13 @@ class ReceiptService:
             context = {
                 'item_id': line.get('item_id'),
                 'org_id': org_id,
-                'project_task_id': line.get('project_task_id') or 0,
             }
+            # G7：项目字段只能来自该行的需求分配（收货桥复制），禁止手填不同值
+            project_id, project_task_id = self._line_project_scope(line)
+            if project_id:
+                context['project_id'] = project_id
+            if project_task_id:
+                context['project_task_id'] = project_task_id
             # G1：寄售物料收货时所有权仍归供应商；普通物料走 owned。
             if supplier_id and segments.item_flags(
                     line.get('item_id'))['consignment_enabled']:
@@ -1056,6 +1061,37 @@ class ReceiptService:
             InventoryPostingService(self.ds).post(entries, source)
         except InventoryError as e:
             raise ReceiptError(e.message, field_name='inventory', rule=e.code)
+
+    def _line_project_scope(self, line: Dict[str, Any]) -> tuple:
+        """G7：收货行的项目 / 任务归属以该行 active 需求分配为唯一真源。
+
+        · 无分配：回退到收货行自身的 project_task_id（来源单据口径）。
+        · 分配不唯一 / 与行上手填值冲突：400，禁止调用方自造项目归属。
+        """
+        rows = self.ds.query(
+            "SELECT project_id, project_task_id FROM %s "
+            "WHERE target_bo = 'receipt' AND target_line_id = ? "
+            "AND status = 'active'" % ALLOCATION_TABLE,
+            [line.get('id')])
+        pairs = {(int(row.get('project_id') or 0),
+                  int(row.get('project_task_id') or 0)) for row in rows}
+        line_task = int(line.get('project_task_id') or 0)
+        if len(pairs) > 1:
+            raise ReceiptError(
+                '收货行 %s 的项目分配不唯一（%s 组），无法确定库存归属'
+                % (line.get('id'), len(pairs)),
+                field_name='project_task_id',
+                rule='RC_PROJECT_SOURCE_AMBIGUOUS')
+        if not pairs:
+            return int(line.get('project_id') or 0), line_task
+        project_id, task_id = pairs.pop()
+        if line_task and line_task != task_id:
+            raise ReceiptError(
+                '收货行 %s 的项目任务 %s 与需求分配 %s 不一致（禁止手填）'
+                % (line.get('id'), line_task, task_id or '空'),
+                field_name='project_task_id',
+                rule='RC_PROJECT_SOURCE_MISMATCH')
+        return project_id, task_id
 
     def _resolve_batch_id(self, org_id: Any, item_id: Any,
                           lot_no: Any) -> Optional[int]:

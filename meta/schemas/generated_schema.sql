@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-04 18:06:57.868140
+-- 生成时间: 2026-11-04 22:48:24.258245
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -768,6 +768,29 @@ CREATE TABLE IF NOT EXISTS demand_allocations (
     FOREIGN KEY (uom_id) REFERENCES uoms(id)
 )
 
+-- 需求线索: 跨单据的供应—需求链（预留 / 钉住 / 分配）
+CREATE TABLE IF NOT EXISTS demand_trace_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supply_object_type VARCHAR(200) NOT NULL,
+    supply_object_id INTEGER NOT NULL,
+    supply_line_id INTEGER NOT NULL DEFAULT 0,
+    demand_object_type VARCHAR(200) NOT NULL,
+    demand_object_id INTEGER NOT NULL,
+    demand_line_id INTEGER NOT NULL DEFAULT 0,
+    trace_type VARCHAR(200) NOT NULL DEFAULT 'allocation',
+    peg_type VARCHAR(200) NOT NULL DEFAULT 'soft',
+    allocated_qty REAL NOT NULL DEFAULT 0,
+    plan_version VARCHAR(200),
+    valid_from DATETIME,
+    valid_to DATETIME,
+    source_doc_type VARCHAR(200),
+    source_doc_id INTEGER,
+    source_line_id INTEGER,
+    remark VARCHAR(200),
+    computed_at DATETIME,
+    created_at DATETIME
+)
+
 -- 产品组: 产品组（SAP division 语义的扁平受控值集；非物料分类 item_group）
 CREATE TABLE IF NOT EXISTS divisions (
     created_at DATETIME,
@@ -1051,6 +1074,59 @@ CREATE TABLE IF NOT EXISTS group_data_permissions (
     created_at DATETIME
 )
 
+-- 包装容器: 包装容器（HU/LPN）——托盘、箱、料箱的当前状态与内容归属
+CREATE TABLE IF NOT EXISTS handling_units (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hu_no VARCHAR(200) NOT NULL,
+    hu_type VARCHAR(200) NOT NULL DEFAULT 'carton',
+    packaging_item_id INTEGER,
+    org_id INTEGER NOT NULL,
+    location_id INTEGER,
+    parent_hu_id INTEGER,
+    root_hu_id INTEGER,
+    status VARCHAR(200) NOT NULL DEFAULT 'open',
+    is_reusable INTEGER DEFAULT 0,
+    cycle_no INTEGER DEFAULT 1,
+    sealed_at DATETIME,
+    shipped_at DATETIME,
+    voided_at DATETIME,
+    gross_weight REAL,
+    tare_weight REAL,
+    net_weight REAL,
+    volume REAL,
+    uom_id INTEGER,
+    source_doc_type VARCHAR(200),
+    source_doc_id INTEGER,
+    remark VARCHAR(200),
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (packaging_item_id) REFERENCES items(id),
+    FOREIGN KEY (parent_hu_id) REFERENCES handling_units(id)
+)
+
+-- 包装容器内容: 容器内容投影——装了什么（物料 / 包装物 / 子容器）
+CREATE TABLE IF NOT EXISTS handling_unit_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hu_id INTEGER NOT NULL,
+    content_type VARCHAR(200) NOT NULL DEFAULT 'material',
+    item_id INTEGER,
+    batch_id INTEGER,
+    serial_id INTEGER,
+    child_hu_id INTEGER,
+    qty REAL NOT NULL DEFAULT 0,
+    uom_id INTEGER,
+    created_at DATETIME,
+    FOREIGN KEY (hu_id) REFERENCES handling_units(id),
+    FOREIGN KEY (item_id) REFERENCES items(id),
+    FOREIGN KEY (batch_id) REFERENCES batches(id),
+    FOREIGN KEY (serial_id) REFERENCES serial_numbers(id),
+    FOREIGN KEY (child_hu_id) REFERENCES handling_units(id)
+)
+
 -- 国际贸易术语: 国际贸易术语（Incoterms）字典——风险转移点与买卖双方责任划分
 CREATE TABLE IF NOT EXISTS incoterms (
     created_by VARCHAR(200),
@@ -1131,6 +1207,11 @@ CREATE TABLE IF NOT EXISTS inventory_balances (
     stock_status VARCHAR(200) NOT NULL DEFAULT 'unrestricted',
     qty_on_hand REAL NOT NULL DEFAULT 0,
     qty_reserved REAL NOT NULL DEFAULT 0,
+    stock_segment_type VARCHAR(200) NOT NULL DEFAULT 'owned',
+    project_id INTEGER NOT NULL DEFAULT 0,
+    project_task_id INTEGER NOT NULL DEFAULT 0,
+    sales_order_line_id INTEGER NOT NULL DEFAULT 0,
+    owner_party_id INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME,
     FOREIGN KEY (org_id) REFERENCES orgs(id),
     FOREIGN KEY (location_id) REFERENCES locations(id),
@@ -1190,6 +1271,45 @@ CREATE TABLE IF NOT EXISTS inventory_count_lines (
     FOREIGN KEY (uom_id) REFERENCES uoms(id)
 )
 
+-- 库存预留: 库存预留与 ATP 占用（需求节点 × 库存段 × 硬软钉）
+CREATE TABLE IF NOT EXISTS inventory_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_no VARCHAR(200) UNIQUE NOT NULL,
+    org_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    uom_id INTEGER NOT NULL,
+    demand_object_type VARCHAR(200) NOT NULL,
+    demand_object_id INTEGER NOT NULL,
+    demand_line_id INTEGER NOT NULL DEFAULT 0,
+    location_id INTEGER,
+    batch_id INTEGER,
+    stock_segment_type VARCHAR(200) NOT NULL DEFAULT 'owned',
+    project_id INTEGER NOT NULL DEFAULT 0,
+    project_task_id INTEGER NOT NULL DEFAULT 0,
+    sales_order_line_id INTEGER NOT NULL DEFAULT 0,
+    owner_party_id INTEGER NOT NULL DEFAULT 0,
+    qty_reserved REAL NOT NULL,
+    qty_fulfilled REAL NOT NULL DEFAULT 0,
+    peg_type VARCHAR(200) NOT NULL DEFAULT 'soft',
+    status VARCHAR(200) NOT NULL DEFAULT 'open',
+    valid_from DATETIME,
+    valid_to DATETIME,
+    source_doc_type VARCHAR(200),
+    source_doc_id INTEGER,
+    source_line_id INTEGER,
+    reservation_key VARCHAR(200) NOT NULL,
+    remark VARCHAR(200),
+    created_by VARCHAR(200),
+    created_at DATETIME,
+    updated_by VARCHAR(200),
+    updated_at DATETIME,
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (item_id) REFERENCES items(id),
+    FOREIGN KEY (uom_id) REFERENCES uoms(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (batch_id) REFERENCES batches(id)
+)
+
 -- 库存事务: 追加式库存数量事件账——所有库存变化的唯一真相
 CREATE TABLE IF NOT EXISTS inventory_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1205,6 +1325,11 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
     direction VARCHAR(200) NOT NULL,
     batch_id INTEGER,
     stock_status VARCHAR(200) NOT NULL DEFAULT 'unrestricted',
+    stock_segment_type VARCHAR(200) NOT NULL DEFAULT 'owned',
+    project_id INTEGER NOT NULL DEFAULT 0,
+    project_task_id INTEGER NOT NULL DEFAULT 0,
+    sales_order_line_id INTEGER NOT NULL DEFAULT 0,
+    owner_party_id INTEGER NOT NULL DEFAULT 0,
     source_doc_type VARCHAR(200) NOT NULL,
     source_doc_id INTEGER NOT NULL,
     source_line_id INTEGER NOT NULL,
@@ -1254,6 +1379,10 @@ CREATE TABLE IF NOT EXISTS items (
     serial_tracked INTEGER DEFAULT 0,
     require_on_receipt INTEGER DEFAULT 0,
     require_on_issue INTEGER DEFAULT 0,
+    so_segment_enabled INTEGER NOT NULL DEFAULT 0,
+    consignment_enabled INTEGER NOT NULL DEFAULT 0,
+    hard_peg_default INTEGER NOT NULL DEFAULT 0,
+    valuation_relevant INTEGER NOT NULL DEFAULT 1,
     barcode VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     created_at DATETIME,
@@ -2296,6 +2425,7 @@ CREATE TABLE IF NOT EXISTS receipt_lines (
     order_id INTEGER,
     order_line_id INTEGER,
     item_id INTEGER NOT NULL,
+    project_task_id INTEGER,
     uom_id INTEGER NOT NULL,
     qty_received REAL NOT NULL,
     qty_rejected REAL DEFAULT 0,
@@ -2978,6 +3108,7 @@ CREATE TABLE IF NOT EXISTS shipment_lines (
     schedule_id INTEGER NOT NULL,
     order_line_id INTEGER NOT NULL,
     item_id INTEGER NOT NULL,
+    project_task_id INTEGER,
     uom_id INTEGER NOT NULL,
     qty REAL NOT NULL,
     lot_no VARCHAR(200),
@@ -3726,6 +3857,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
     order_id INTEGER NOT NULL,
     order_line_id INTEGER NOT NULL,
     project_id INTEGER,
+    project_task_id INTEGER,
     customer_account_id INTEGER,
     severity VARCHAR(200),
     channel VARCHAR(200),
@@ -3759,6 +3891,7 @@ CREATE TABLE IF NOT EXISTS work_order_components (
     scrap_rate REAL,
     qty_required REAL,
     optional_flag INTEGER NOT NULL DEFAULT 0,
+    project_task_id INTEGER,
     created_at DATETIME,
     updated_at DATETIME,
     FOREIGN KEY (work_order_id) REFERENCES work_orders(id),
@@ -4121,6 +4254,12 @@ CREATE INDEX IF NOT EXISTS idx_demand_alloc_project ON demand_allocations(projec
 CREATE INDEX IF NOT EXISTS idx_demand_alloc_cost ON demand_allocations(cost_center_id, expense_account_code)
 CREATE INDEX IF NOT EXISTS idx_demand_allocations_demand_need_date ON demand_allocations(demand_need_date)
 
+-- Indexes for 需求线索
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trace_link ON demand_trace_links(supply_object_type, supply_object_id, supply_line_id, demand_object_type, demand_object_id, demand_line_id, trace_type)
+CREATE INDEX IF NOT EXISTS idx_trace_supply ON demand_trace_links(supply_object_type, supply_object_id, supply_line_id)
+CREATE INDEX IF NOT EXISTS idx_trace_demand ON demand_trace_links(demand_object_type, demand_object_id, demand_line_id)
+CREATE INDEX IF NOT EXISTS idx_demand_trace_links_created_at ON demand_trace_links(created_at)
+
 -- Indexes for 产品组
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_division_code ON divisions(code)
 CREATE INDEX IF NOT EXISTS idx_division_status ON divisions(status)
@@ -4205,6 +4344,24 @@ CREATE INDEX IF NOT EXISTS idx_fulfillment_routing_workflow ON fulfillment_routi
 CREATE UNIQUE INDEX IF NOT EXISTS idx_group_data_perm_unique ON group_data_permissions(group_id, resource_type, resource_id)
 CREATE INDEX IF NOT EXISTS idx_group_data_perm_group ON group_data_permissions(group_id)
 
+-- Indexes for 包装容器
+CREATE INDEX IF NOT EXISTS idx_handling_units_org_id ON handling_units(org_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hu_no ON handling_units(org_id, hu_no)
+CREATE INDEX IF NOT EXISTS idx_hu_parent ON handling_units(parent_hu_id)
+CREATE INDEX IF NOT EXISTS idx_hu_root ON handling_units(root_hu_id)
+CREATE INDEX IF NOT EXISTS idx_hu_location ON handling_units(location_id)
+CREATE INDEX IF NOT EXISTS idx_hu_status ON handling_units(status)
+CREATE INDEX IF NOT EXISTS idx_handling_units_id ON handling_units(id)
+
+-- Indexes for 包装容器内容
+CREATE INDEX IF NOT EXISTS idx_handling_unit_items_item_id ON handling_unit_items(item_id)
+CREATE INDEX IF NOT EXISTS idx_handling_unit_items_batch_id ON handling_unit_items(batch_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hu_serial ON handling_unit_items(hu_id, serial_id) WHERE serial_id IS NOT NULL
+CREATE UNIQUE INDEX IF NOT EXISTS uq_serial_in_hu ON handling_unit_items(serial_id) WHERE serial_id IS NOT NULL
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hu_child ON handling_unit_items(hu_id, child_hu_id) WHERE child_hu_id IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_hu_item_item ON handling_unit_items(item_id, batch_id)
+CREATE INDEX IF NOT EXISTS idx_handling_unit_items_id ON handling_unit_items(id)
+
 -- Indexes for 国际贸易术语
 CREATE UNIQUE INDEX IF NOT EXISTS idx_incoterm_code_edition ON incoterms(code, edition)
 CREATE INDEX IF NOT EXISTS idx_incoterms_name ON incoterms(name)
@@ -4228,7 +4385,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_balances_org_id ON inventory_balances(o
 CREATE INDEX IF NOT EXISTS idx_inventory_balances_location_id ON inventory_balances(location_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_balances_item_id ON inventory_balances(item_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_balances_batch_id ON inventory_balances(batch_id)
-CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_balance_key ON inventory_balances(org_id, location_id, item_id, batch_id, stock_status)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_balance_segment ON inventory_balances(org_id, location_id, item_id, batch_id, stock_status, stock_segment_type, project_id, project_task_id, sales_order_line_id, owner_party_id)
 CREATE INDEX IF NOT EXISTS idx_inv_balance_org_item ON inventory_balances(org_id, item_id, stock_status)
 CREATE INDEX IF NOT EXISTS idx_inventory_balances_updated_at ON inventory_balances(updated_at)
 
@@ -4245,6 +4402,17 @@ CREATE INDEX IF NOT EXISTS idx_inventory_count_lines_location_id ON inventory_co
 CREATE INDEX IF NOT EXISTS idx_inventory_count_lines_batch_id ON inventory_count_lines(batch_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_count_lines_uom_id ON inventory_count_lines(uom_id)
 
+-- Indexes for 库存预留
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_org_id ON inventory_reservations(org_id)
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_item_id ON inventory_reservations(item_id)
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_uom_id ON inventory_reservations(uom_id)
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_location_id ON inventory_reservations(location_id)
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_batch_id ON inventory_reservations(batch_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reservation_key ON inventory_reservations(reservation_key)
+CREATE INDEX IF NOT EXISTS idx_reservation_demand ON inventory_reservations(demand_object_type, demand_object_id, demand_line_id)
+CREATE INDEX IF NOT EXISTS idx_reservation_segment ON inventory_reservations(org_id, item_id, stock_segment_type, project_task_id, sales_order_line_id, owner_party_id, status)
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_created_at ON inventory_reservations(created_at)
+
 -- Indexes for 库存事务
 CREATE INDEX IF NOT EXISTS idx_inventory_transactions_org_id ON inventory_transactions(org_id)
 CREATE INDEX IF NOT EXISTS idx_inventory_transactions_location_id ON inventory_transactions(location_id)
@@ -4254,6 +4422,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_transactions_batch_id ON inventory_tran
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_tx_source_line ON inventory_transactions(source_event_key, source_line_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_tx_reversal ON inventory_transactions(reversal_of_transaction_id)
 CREATE INDEX IF NOT EXISTS idx_inv_tx_org_item_date ON inventory_transactions(org_id, item_id, transaction_date)
+CREATE INDEX IF NOT EXISTS idx_inv_tx_segment ON inventory_transactions(org_id, item_id, stock_segment_type, project_task_id, sales_order_line_id, owner_party_id)
 CREATE INDEX IF NOT EXISTS idx_inv_tx_source_doc ON inventory_transactions(source_doc_type, source_doc_id)
 CREATE INDEX IF NOT EXISTS idx_inv_tx_location ON inventory_transactions(org_id, location_id, item_id)
 

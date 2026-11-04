@@ -36,6 +36,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
+from meta.services import project_task_guard
+
 logger = logging.getLogger(__name__)
 
 WORK_ORDER_TABLE = 'work_orders'
@@ -107,6 +109,10 @@ SERVICE_STATUS_COMPLETED = 'completed'
 SERVICE_STATUS_CANCELLED = 'cancelled'
 
 SLA_RULE_AMBIGUOUS = 'SLA_RULE_AMBIGUOUS'
+
+#: G15 G5：工单发布后项目归属锁定
+STATUS_RELEASED = 'released'
+PROJECT_TASK_COLUMN = 'project_task_id'
 
 
 class WorkOrderError(ValueError):
@@ -193,6 +199,55 @@ class WorkOrderService:
                 field_name='order_type', rule='ST_ORDER_TYPE_UNSUPPORTED')
         return self._create_service(payload)
 
+    # ------------------------------------------------- G15 项目任务执行守卫
+
+    def validate_project_scope(self, payload: Dict[str, Any],
+                               existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """G1-G5 的统一判定入口（创建与更新路径共用）。
+
+        · 只校验 payload 中显式出现的项目 / 任务字段；更新时缺省字段回落旧值。
+        · 返回归一化后的 {project_id, project_task_id}，供写入口径使用。
+        """
+        data = dict(payload or {})
+        old = dict(existing or {})
+        has_project = 'project_id' in data
+        has_task = PROJECT_TASK_COLUMN in data
+        project_id = data.get('project_id') if has_project \
+            else old.get('project_id')
+        task_id = data.get(PROJECT_TASK_COLUMN) if has_task \
+            else old.get(PROJECT_TASK_COLUMN)
+
+        try:
+            # G5：已发布工单锁定项目归属
+            if str(old.get('status') or '').strip().lower() == STATUS_RELEASED:
+                project_changed = has_project \
+                    and project_task_guard.to_int(data.get('project_id')) \
+                    != project_task_guard.to_int(old.get('project_id'))
+                task_changed = has_task \
+                    and project_task_guard.to_int(data.get(PROJECT_TASK_COLUMN)) \
+                    != project_task_guard.to_int(old.get(PROJECT_TASK_COLUMN))
+                if project_changed or task_changed:
+                    raise project_task_guard.ProjectTaskGuardError(
+                        '工单已发布，禁止修改项目 / 项目任务归属',
+                        field_name=PROJECT_TASK_COLUMN,
+                        rule=project_task_guard.RULE_TASK_LOCKED,
+                        details={'work_order_id': old.get('id')})
+
+            # G1 / G2 / G3：任务必带项目、同项目、activity 且可执行
+            if not _blank(task_id):
+                project_task_guard.assert_task_executable(
+                    self.ds, project_id, task_id)
+
+            # G4：engineered 多任务项目必须落到具体任务
+            project_task_guard.assert_engineered_task_required(
+                self.ds, project_id, task_id)
+        except project_task_guard.ProjectTaskGuardError as error:
+            raise WorkOrderError(
+                str(error), field_name=error.field_name, rule=error.rule,
+                details=error.details)
+        return {'project_id': project_id,
+                PROJECT_TASK_COLUMN: task_id}
+
     def _create_service(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """创建服务工单并生成 SLA 里程碑；返回 `{'id', 'work_order_no', 'status', 'sla'}`。"""
         schedule = self._require_service_schedule(payload.get('schedule_id'))
@@ -219,6 +274,7 @@ class WorkOrderService:
 
         opened_at = payload.get('opened_at') or _now()
         _parse_dt(opened_at)  # 格式校验（非法直接拒绝）
+        scope = self.validate_project_scope(payload)
 
         work_order_no = payload.get('work_order_no') or self._next_work_order_no()
         now = _now()
@@ -229,7 +285,8 @@ class WorkOrderService:
             'order_id': order_id,
             'order_line_id': order_line_id,
             'customer_account_id': payload.get('customer_account_id'),
-            'project_id': payload.get('project_id'),
+            'project_id': scope.get('project_id'),
+            PROJECT_TASK_COLUMN: scope.get(PROJECT_TASK_COLUMN),
             'severity': severity,
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -337,6 +394,15 @@ class WorkOrderService:
                     field_name='project_id', rule='ST_PROJECT_MISMATCH')
             project_id = project_id if not _blank(project_id) else demand_project_id
 
+        # G15：项目任务来源的工单默认挂该任务；G1-G4 统一校验
+        task_id = payload.get(PROJECT_TASK_COLUMN)
+        if _blank(task_id) and str(demand_type) == SOURCE_DEMAND_PROJECT_TASK:
+            task_id = demand_id
+        scope = self.validate_project_scope({
+            'project_id': project_id, PROJECT_TASK_COLUMN: task_id})
+        project_id = scope.get('project_id')
+        task_id = scope.get(PROJECT_TASK_COLUMN)
+
         schedule_id = payload.get('schedule_id')
         if not _blank(schedule_id):
             self._reject_service_schedule(schedule_id)
@@ -375,6 +441,7 @@ class WorkOrderService:
             'order_line_id': order_line_id,
             'customer_account_id': customer_account_id,
             'project_id': project_id,
+            PROJECT_TASK_COLUMN: task_id,
             'severity': payload.get('severity'),
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -1157,6 +1224,11 @@ class WorkOrderService:
 
     def _insert(self, table: str, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
+        # 旧库（P1-2 列迁移尚未落地）不写 project_task_id，保持建单可用
+        if table == WORK_ORDER_TABLE and PROJECT_TASK_COLUMN in columns:
+            available = project_task_guard.table_columns(self.ds, table)
+            if PROJECT_TASK_COLUMN not in available:
+                columns.remove(PROJECT_TASK_COLUMN)
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
             table, ', '.join(columns), ', '.join('?' * len(columns)))
         cursor = self.ds.execute(sql, [row[c] for c in columns])

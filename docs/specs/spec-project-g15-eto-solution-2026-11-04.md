@@ -230,33 +230,95 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 
 ---
 
-## 4. P2：`project_structure_baseline`（指针型，非副本）
+## 4. P2：销售订单任务轴 + 结构基线（细化版）
 
-仅用于"标准物料 + 项目小幅差异"这一条路线，避免一项目一物料造成的料号爆炸。
+### 4.1 P2-1 `sales_order_lines.project_task_id`
+
+**语义**：任务字段是成本/库存段的时间归属，不是订单行默认任务；可空，不影响 MTS 标准链路。
+
+| 规则 | 内容 |
+|---|---|
+| 字段 | `project_task_id INTEGER NOT NULL DEFAULT 0`，association → `project_task`（display `task_no`，filterable） |
+| R1 | 任务非空 ⇒ 行 `project_id` 必填（空时取抬头项目归一化，仍空则 400 `SO_LINE_TASK_PROJECT_REQUIRED`） |
+| R2 | 任务必须属于同一项目（`PROJECT_TASK_PROJECT_MISMATCH`） |
+| R3 | 任务 `task_type='activity'` 且 `status ∈ planned/in_progress`（`PROJECT_TASK_NOT_EXECUTABLE`） |
+| R4 | 行 `project_id` 与抬头 `project_id` 非空时必须一致（`SO_LINE_PROJECT_MISMATCH`）；抬头为空不自动回填 |
+| R5 | 与 SO 专用段互斥：`item.so_segment_enabled=1` 且行挂任务 → `SO_LINE_SEGMENT_TASK_CONFLICT`（禁止静默降级段优先级） |
+| R6 | 不扩 `demand_bo='sales_order_line'`；SO 行暂不参与 `demand_allocation` |
+
+**库存段**：`InventoryReservationService._load_sales_order_line` 增查 `l.project_id, l.project_task_id`；`segment_ctx` 增传两者，按 INV-2 优先级自动落 `project_task` 段（寄售 > 项目任务 > SO 段 > owned）。取消/关闭沿用 `release_by_source`，释放后 `prune_empty_balances` 清除任务段空余额。
+
+**发运**：交货单创建时把 SO 行的 `project_id/project_task_id` 复制到 `shipment_lines`（字段已在 INV-2 存在）。仓库当前无发运自动过账；后续接入出库过账时必须带这两个维度，否则会出现「预留占任务段、出库扣自有段」。
+
+**迁移**：`v208__sales_order_line_project_task.py`（v205-v207 已占用），加列 + 索引，不重建既有索引。
+
+### 4.2 P2-2 `project_structure_baselines`
+
+仅用于「标准物料 + 项目小幅差异」路线，避免一项目一物料。不存 BOM 行，只存指针 + 哈希。
+
+**表结构**
+
+```sql
+CREATE TABLE IF NOT EXISTS project_structure_baselines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  item_id INTEGER NOT NULL,
+  usage TEXT NOT NULL DEFAULT 'production',
+  alternative_no INTEGER NOT NULL DEFAULT 1,
+  structure_id INTEGER NOT NULL DEFAULT 0,
+  baseline_hash TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  note TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_structure_baseline
+  ON project_structure_baselines(project_id, item_id, usage, alternative_no);
+CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
+  ON project_structure_baselines(item_id);
+```
 
 | 字段 | 说明 |
 |---|---|
-| `project_id` | 项目 |
-| `item_id` | 被引用的标准物料 |
-| `structure_id` | 指向的 `item_structures` 版本（可为空 = 用当前生效版本） |
-| `alternative_no` | 替代结构号 |
-| `baseline_hash` | 该结构版本内容哈希（用于检测漂移） |
+| `usage` | 与 `item_structures` 业务键对齐（`item_id, usage, alternative_no, revision`） |
+| `structure_id` | 0 = 当前生效版本；非 0 = 钉住版本。用 0 哨兵避免 SQLite 唯一索引对 NULL 去重失效 |
+| `baseline_hash` | sha256 hex，检测漂移 |
 | `captured_at` | 快照时间 |
-| `note` | 差异说明 |
 
-**它不存 BOM 行。**这是与 SAP WBS BOM 的根本区别：SAP 存行，我们存指针 + 哈希。差异一旦需要"独立维护"，就必须改用"一项目一物料"，不允许在指针上加行。
+**哈希口径**：对稳定串做 sha256，不拼行 id / 时间戳：`revision|base_qty|uom` + 按 `line_no` 排序的行 `component_item_id|qty_per|fixed_qty|scrap_rate|optional|default|default_qty`；数值去尾零，布尔 1/0，无值不拼。
+
+**漂移**：只读计算 `OK / DRIFT / STRUCTURE_MISSING`；`structure_id=0` 取 `captured_at` 时点 active 版本重算，显式版本对钉住版本重算。列表展示存储 hash，detail / `check_drift` 动作实时算；`refresh` 显式重钉并更新 hash/captured_at/note。不做后台定时。
+
+**守卫**
+
+- 项目 `design_mode='standard'`（engineered 走一项目一物料，不允许 baseline 绕过料号爆炸约束）。
+- `structure_id` 必须属同一 `item_id/usage/alternative_no`；不可解析 → 400。
+- 同键 upsert 一条；禁止行级维护（无子表，不得用 note 承载 BOM 行）。
+- baseline 不进成本、不参与 MRP；展开仍走 `item_structures`。
+
+**迁移**：`v209__project_structure_baseline.py`。
+
+### 4.3 实施顺序与验收
+
+1. v208 字段 + 守卫（复用 `project_task_guard`）
+2. 预留 `segment_ctx` 传任务 + SO 段互斥
+3. 发运行复制任务维度
+4. v209 baseline + 服务（hash / drift / refresh）+ 权限菜单
+5. P2-3 `v_project_cost.amount` 后置（依赖成本价 / 费率）
+
+验收见 `spec-project-g15-eto-P2-tasks.md`。
 
 ---
 
 ## 5. 迁移与生成流程
 
-| 迁移 | 内容 | 依赖 |
+| 迁移 | 内容 | 状态 |
 |---|---|---|
-| `v204__project_design_mode.py` | `projects.design_mode` | 无 |
-| `v205__eto_task_axis.py` | `work_orders.project_task_id`、`inventory_transactions.project_id/project_task_id`、`purchase_order_lines.project_task_id`、`sales_order_lines.project_task_id`（可一并） | v204 |
-| `v206__project_stock_balance.py` | `inventory_balances` 唯一键重建 + 全量重算投影 | v205 |
-| `v207__project_cost_view.py` | 建 `v_project_cost` 视图 | v205 |
-| `v208__project_structure_baseline.py` | 建表（P2） | v207 |
+| `v204__inventory_work_order_receipt_type.py` | 库存/工单/收货类型 | 已应用 |
+| `v205__inventory_segment_reservation.py` | INV-2 段/预留/线索 + 余额 10 列键 | 已应用 |
+| `v206__project_design_mode.py` | `projects.design_mode` | 已应用 |
+| `v207__project_task_index.py` | 任务轴索引 | 已应用 |
+| `v208__sales_order_line_project_task.py` | `sales_order_lines.project_task_id` + 索引 | 待实施 |
+| `v209__project_structure_baseline.py` | 基线表 + 唯一索引 | 待实施 |
+| `v210__project_cost_view.py` | `v_project_cost`（P2-3 后置） | 待实施 |
 
 要求：
 
@@ -314,9 +376,11 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 
 **P2（可选）**
 
-- [ ] P2-1 `sales_order_lines.project_task_id`
-- [ ] P2-2 `project_structure_baseline` 指针表 + 漂移检测
-- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐
+- [ ] P2-1 `sales_order_lines.project_task_id` + 守卫 + 预留/发运维度（v208）
+- [ ] P2-2 `project_structure_baseline` 指针表 + 漂移检测（v209）
+- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐（v210，后置）
+
+> P2 细化任务与验收用例见 `spec-project-g15-eto-P2-tasks.md`。
 
 **P3（暂不做）**
 

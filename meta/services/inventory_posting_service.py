@@ -21,12 +21,14 @@ import re
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
+from meta.services import project_task_guard
 from meta.services.inventory_guard_service import (
     INV_COUNT_BLOCKED, INV_POSTING_DISABLED, InventoryError,
     InventoryGuardService,
 )
 from meta.services.stock_segment_service import (
-    DEFAULT_SEGMENT, SEGMENT_COLUMNS, SEGMENT_OWNED, StockSegmentService,
+    DEFAULT_SEGMENT, SEGMENT_COLUMNS, SEGMENT_OWNED, SEGMENT_PROJECT_TASK,
+    StockSegmentService,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,10 +154,14 @@ class InventoryPostingService:
             normalized = self.guard.normalize_entry(
                 payload, allow_non_unrestricted=allow_non_unrestricted,
                 allow_blocked_batch=allow_blocked_batch)
-            if normalized.get('stock_segment_type') != SEGMENT_OWNED \
-                    or any(normalized.get(col) for col in SEGMENT_COLUMNS[1:]):
-                normalized.update(
-                    StockSegmentService(self.ds).validate_segment(normalized))
+            # G8：段类型与伙伴列双向校验（project_task 必带 project+task；
+            # owned 必须全 0），无论 normalize 是否补默认段都走同一校验入口。
+            normalized.update(
+                StockSegmentService(self.ds).validate_segment(normalized))
+            # G3（放宽）：项目任务段引用任务时，拒绝终态 / 非 activity 任务；
+            # 历史段的旧状态值（如 active）保持兼容，不阻断既有 INV-2 链路。
+            if normalized.get('stock_segment_type') == SEGMENT_PROJECT_TASK:
+                self._assert_project_task(project_task_guard, normalized)
             if not bypass_posting_block and self._posting_block_active(
                     normalized.get('org_id'),
                     normalized.get('location_id')):
@@ -187,6 +193,15 @@ class InventoryPostingService:
             doc_type, doc_id, source_event_key, len(created), len(existing))
         return {'created': len(created), 'existing': existing,
                 'transactions': created, 'skipped': False}
+
+    def _assert_project_task(self, guard_module, normalized: Dict[str, Any]) -> None:
+        """G3（放宽）：项目任务段的任务须为 activity 且未进入终态。"""
+        try:
+            guard_module.assert_task_executable(
+                self.ds, normalized.get('project_id'),
+                normalized.get('project_task_id'), strict=False)
+        except guard_module.ProjectTaskGuardError as error:
+            raise InventoryError(error.rule, str(error), error.details)
 
     # ------------------------------------------------------------------
     # 反冲

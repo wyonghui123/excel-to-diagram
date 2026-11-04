@@ -366,6 +366,11 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.purchase_order_guard_interceptor import PurchaseOrderGuardInterceptor
         bo_framework.register_interceptor(PurchaseOrderGuardInterceptor())
+        # [G15 2026-11-04] 项目任务执行守卫（P51）：工单 G1-G5 项目归属与发布后锁定，
+        #   项目任务删除 / 取消的 G9 引用检查。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.project_task_guard_interceptor import ProjectTaskGuardInterceptor
+        bo_framework.register_interceptor(ProjectTaskGuardInterceptor())
         # [DOCUMENT_TYPE 2026-11-01] 单据类型守卫（T-D20，平台层）：对所有声明
         #   document_type_id 的业务单据头生效，新增单据只需引用 document_type_aspect。
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
