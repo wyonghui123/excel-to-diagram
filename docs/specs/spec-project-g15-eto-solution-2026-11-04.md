@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 日期：2026-11-04
-- 状态：实施方案（待评审，**未实施**）
+- 状态：**部分已实施**（2026-11-04；P1-1 / P1-3 / P1-4 / P1-5 已落地，P1-6 后置，详见 §11）
 - 上游裁决：
   - `spec-project-g15-eto-oracle-vs-sap-2026-11-04.md`（§4 四条再评估条件、§7 14 项裁决）
   - `spec-project-g15-eto-infor-ifs-benchmark-2026-11-04.md`（§6 新增 `design_mode`）
@@ -359,6 +359,7 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 | `projects.design_mode` | 新增字段（`standard` / `engineered`），存量回填 `standard` | `test_project_p15` 21 passed |
 | `meta/migrations/v206__project_design_mode.py` | 加列 + 幂等 skip + `verify` | 临时库探针：ADD → SKIP → PASS |
 | `meta/schemas/generated_schema.sql` | 由 YAML 重新生成 | 顺带修复既有漂移（26 张表此前未写入） |
+| G1-G3 任务守卫 | `PurchaseOrderGuardService._validate_project_task_link`：任务非空 ⇒ 项目非空；任务属同项目；`task_type=activity` 且 `status ∈ planned/in_progress`；作用于 `demand_allocation` 写入 | `test_demand_allocation_schema.py` 20 passed（新增 3 例） |
 
 ### 11.2 更正（初稿判断有误）
 
@@ -375,9 +376,9 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 |---|---|
 | P1-1 `design_mode` | ✅ 已完成（v206） |
 | P1-2 工单任务轴 | ✅ 已具备（`source_demand_type='project_task'`），无需开发 |
-| P1-3 库存 / 采购任务轴 | ⏳ 由 INV-2 v205 + `demand_allocation` 承接 |
-| P1-4 余额唯一键 | ⏳ 同上，由 INV-2 统一改 |
-| P1-5 守卫 G1-G3 | ⏳ 改为作用在 `demand_allocation`（随 INV-2） |
+| P1-3 库存 / 采购任务轴 | ✅ 已完成（INV-2 v205 段列 + `demand_allocation` 承接） |
+| P1-4 余额唯一键 | ✅ 已完成（INV-2 v205 10 列唯一键） |
+| P1-5 守卫 G1-G3 | ✅ 已完成（`demand_allocation` 写入守卫，`PO_ALLOCATION_TASK_*` 错误码） |
 | P1-6 `v_project_cost` | ⏳ 依赖成本价 / 费率，后置 |
 
 ### 11.4 结论

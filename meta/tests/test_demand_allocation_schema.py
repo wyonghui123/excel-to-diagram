@@ -55,6 +55,10 @@ CREATE TABLE demand_allocations (
 CREATE TABLE requisition_lines (
     id INTEGER PRIMARY KEY, requisition_id INTEGER, line_no TEXT, qty REAL
 );
+CREATE TABLE project_tasks (
+    id INTEGER PRIMARY KEY, project_id INTEGER, task_no TEXT, name TEXT,
+    task_type TEXT, status TEXT, parent_task_id INTEGER
+);
 """
 
 
@@ -177,6 +181,14 @@ def _insert_line(conn, line_id=10, qty=10.0):
         [line_id, qty])
 
 
+def _insert_task(conn, task_id=21, project_id=7,
+                 task_type='activity', status='planned'):
+    conn.execute(
+        'INSERT INTO project_tasks (id, project_id, task_no, name, task_type, status) '
+        "VALUES (?, ?, 'T21', '任务', ?, ?)",
+        [task_id, project_id, task_type, status])
+
+
 def _alloc(**overrides):
     row = {
         'id': None, 'demand_bo': 'requisition', 'demand_id': 1,
@@ -232,6 +244,51 @@ def test_charge_basis_linkage(conn, ds):
         _alloc(charge_basis='expense', expense_account_code='6602'), is_create=True)
     guard.validate_allocation_write(
         _alloc(charge_basis='asset', asset_category_code='FA01'), is_create=True)
+
+
+def test_allocation_task_requires_project(conn, ds):
+    """G1：填任务必须同时填项目。"""
+    _insert_order(conn)
+    _insert_line(conn)
+    _insert_task(conn)
+    guard = PurchaseOrderGuardService(ds)
+    _expect_rule(lambda: guard.validate_allocation_write(
+        _alloc(project_task_id=21), is_create=True),
+        'PO_ALLOCATION_TASK_PROJECT_REQUIRED')
+
+
+def test_allocation_task_must_belong_to_project(conn, ds):
+    """G2：任务必须存在且属于同一项目。"""
+    _insert_order(conn)
+    _insert_line(conn)
+    _insert_task(conn, project_id=8)
+    guard = PurchaseOrderGuardService(ds)
+    _expect_rule(lambda: guard.validate_allocation_write(
+        _alloc(charge_basis='project', project_id=7, project_task_id=21),
+        is_create=True), 'PO_ALLOCATION_TASK_PROJECT_MISMATCH')
+    _expect_rule(lambda: guard.validate_allocation_write(
+        _alloc(charge_basis='project', project_id=7, project_task_id=99),
+        is_create=True), 'PO_ALLOCATION_TASK_NOT_FOUND')
+
+
+def test_allocation_task_must_be_executable_activity(conn, ds):
+    """G3：任务类型 activity 且状态 planned/in_progress。"""
+    _insert_order(conn)
+    _insert_line(conn)
+    _insert_task(conn, task_type='phase')
+    guard = PurchaseOrderGuardService(ds)
+    _expect_rule(lambda: guard.validate_allocation_write(
+        _alloc(charge_basis='project', project_id=7, project_task_id=21),
+        is_create=True), 'PO_ALLOCATION_TASK_TYPE_INVALID')
+    conn.execute(
+        "UPDATE project_tasks SET task_type='activity', status='done' WHERE id=21")
+    _expect_rule(lambda: guard.validate_allocation_write(
+        _alloc(charge_basis='project', project_id=7, project_task_id=21),
+        is_create=True), 'PO_ALLOCATION_TASK_STATUS_INVALID')
+    conn.execute("UPDATE project_tasks SET status='in_progress' WHERE id=21")
+    guard.validate_allocation_write(
+        _alloc(charge_basis='project', project_id=7, project_task_id=21),
+        is_create=True)
 
 
 def test_allocation_line_cap(conn, ds):

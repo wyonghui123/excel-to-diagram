@@ -28,6 +28,10 @@ ORDER_STATUSES = ('draft', 'submitted', 'confirmed', 'closed', 'cancelled')
 LINE_STATUSES = ('open', 'closed', 'cancelled')
 SCHEDULE_STATUSES = ('planned', 'confirmed', 'completed', 'cancelled')
 ALLOCATION_STATUSES = ('active', 'reversed')
+#: 项目任务守卫（G15 G1-G3）：只有可执行的 activity 任务允许挂分配
+TASK_TABLE = 'project_tasks'
+TASK_TYPE_ACTIVITY = 'activity'
+TASK_STATUSES = ('planned', 'in_progress')
 
 #: 合法状态迁移（审批驳回走 submitted → draft）
 _STATUS_TRANSITIONS = {
@@ -73,6 +77,11 @@ def _num(value: Any) -> Optional[float]:
 
 def _status(value: Any) -> str:
     return str(value or '').strip().lower()
+
+
+def _int(value: Any) -> int:
+    numeric = _num(value)
+    return int(numeric) if numeric is not None else 0
 
 
 def _changed(data: Dict[str, Any], old: Dict[str, Any], field: str) -> bool:
@@ -642,6 +651,7 @@ class PurchaseOrderGuardService:
                 field_name='target_bo', rule='PO_ALLOCATION_TARGET_INVALID')
 
         self._validate_charge_basis(data)
+        self._validate_project_task_link(data)
         self._validate_allocation_caps(data, old)
         if _status(data.get('status')) == 'reversed' \
                 and _status(old.get('status')) != 'reversed':
@@ -674,6 +684,55 @@ class PurchaseOrderGuardService:
                 '资产归属分配必须填写资产类别',
                 field_name='asset_category_code',
                 rule='PO_ALLOCATION_ASSET_CATEGORY_REQUIRED')
+
+    def _validate_project_task_link(self, data: Dict[str, Any]) -> None:
+        """G15 G1-G3：任务非空 ⇒ 项目非空；任务属同项目；任务可执行。"""
+        task_id = data.get('project_task_id')
+        if _is_blank(task_id):
+            return
+        project_id = data.get('project_id')
+        if _is_blank(project_id):
+            raise PurchaseOrderGuardError(
+                '填写项目任务时必须同时填写项目',
+                field_name='project_id',
+                rule='PO_ALLOCATION_TASK_PROJECT_REQUIRED')
+
+        if not self._table_exists(TASK_TABLE):
+            return
+        task = self._load_project_task(task_id)
+        if not task:
+            raise PurchaseOrderGuardError(
+                '项目任务不存在: {0}'.format(task_id),
+                field_name='project_task_id',
+                rule='PO_ALLOCATION_TASK_NOT_FOUND')
+        if _int(task.get('project_id')) != _int(project_id):
+            raise PurchaseOrderGuardError(
+                '项目任务不属于所选项目',
+                field_name='project_task_id',
+                rule='PO_ALLOCATION_TASK_PROJECT_MISMATCH')
+        if _status(task.get('task_type')) != TASK_TYPE_ACTIVITY:
+            raise PurchaseOrderGuardError(
+                '分配只能落到 activity 类型任务',
+                field_name='project_task_id',
+                rule='PO_ALLOCATION_TASK_TYPE_INVALID')
+        if _status(task.get('status')) not in TASK_STATUSES:
+            raise PurchaseOrderGuardError(
+                '项目任务状态不可执行: {0}'.format(task.get('status')),
+                field_name='project_task_id',
+                rule='PO_ALLOCATION_TASK_STATUS_INVALID')
+
+    def _load_project_task(self, task_id: Any) -> Optional[Dict[str, Any]]:
+        if _is_blank(task_id):
+            return None
+        rows = self._query(
+            'SELECT id, project_id, task_type, status FROM project_tasks '
+            'WHERE id = ?', [task_id])
+        return rows[0] if rows else None
+
+    def _table_exists(self, name: str) -> bool:
+        return bool(self._query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            [name]))
 
     def _validate_allocation_caps(self, data: Dict[str, Any], old: Dict[str, Any]) -> None:
         qty = _num(data.get('qty')) or 0.0
