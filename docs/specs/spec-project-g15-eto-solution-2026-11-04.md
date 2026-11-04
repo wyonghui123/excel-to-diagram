@@ -34,7 +34,7 @@
 | `work_order` | 有 `project_id`，无任务 | 加 `project_task_id` | P1 |
 | `inventory_transaction` | **无项目字段** | 加 `project_id` + `project_task_id` | P1 |
 | `inventory_balances` | 唯一键不含项目 | 唯一键纳入 `project_id` / `project_task_id`（0 哨兵） | P1 |
-| `purchase_order_line` | 无任务 | 加 `project_task_id`（头已有 `project_id`） | P1 |
+| `purchase_order_line` | 无任务 | **不加字段**（T-D3 禁止行级项目/任务引用）；任务轴走 `demand_allocation` | P1 |
 | `time_entry` | 已有 `project_task_id` | 不改字段，纳入成本来源 | P1 |
 | `sales_order_line` | 无任务 | 加 `project_task_id`（可空） | P2 |
 | `project_structure_baseline` | 不存在 | 新建（指针型） | P2 |
@@ -181,14 +181,14 @@ uq_inv_balance_key = (org_id, location_id, item_id, batch_id, stock_status, proj
 
 不改的运行代价（必须写进风险）：项目专用库存与公共库存混算 → 可用量虚高 → 缺料/超发。
 
-### 2.6 `purchase_order_line.project_task_id`
+### 2.6 `purchase_order_line`：不新增任务字段
 
-采购头已有 `project_id`。行级补任务，才能让"一批采购对应多个 WBS 任务"成立（ETO 常见：同一供应商同批到货，分属不同任务）。
+采购头已有 `project_id`。**行级不加 `project_task_id`** —— `purchase_order_line.yaml` 的 T-D3 / D6 明确禁止行级单值项目或任务引用。
 
-新增字段与 `work_order.project_task_id` 同构。守卫：G1-G3 同上，另加：
+"一批采购对应多个 WBS 任务"由 `demand_allocation` 表达：采购行 → 分配记录（带 `project_id` + `project_task_id`）→ 各任务。守卫随之改为：
 
-- G6：`purchase_order_line.project_task_id` 非空 ⇒ 采购头 `project_id` 非空，且二者一致。
-- G7：收货生成 `inventory_transaction` 时，项目字段**从采购行复制**，不允许手填。
+- G6：采购行若绑任务，只能体现为 `demand_allocation` 记录；其 `project_id` 必须与采购头 `project_id` 一致，任务必须属同一项目且为活动任务。
+- G7：收货行项目字段**不从采购行复制**，以该行 active `demand_allocation` 为真源（多组歧义或手填冲突 → 400）。
 
 ### 2.7 `time_entry`：不改字段
 
@@ -366,19 +366,19 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 
 **P1（必须）**
 
-- [ ] P1-1 `projects.design_mode` 字段 + 枚举 + 迁移 v204
-- [ ] P1-2 `work_orders.project_task_id` + 值帮助 + 迁移 v205
-- [ ] P1-3 `inventory_transactions.project_id / project_task_id` + 索引
-- [ ] P1-4 `inventory_balances` 唯一键纳入项目（0 哨兵）+ 投影重算 + 迁移 v206
-- [ ] P1-5 `purchase_order_lines.project_task_id` + 收货复制链路
-- [ ] P1-6 守卫 G1-G10 + 单测
-- [ ] P1-7 `v_project_cost` 视图（材料/人工/外协三来源）+ 迁移 v207
+- [x] P1-1 `projects.design_mode` 字段 + 枚举 + 迁移 v206（已提交）
+- [x] P1-2 `work_orders.project_task_id` + 值帮助 + 迁移 v208（已提交）
+- [x] P1-3 `inventory_transactions.project_id / project_task_id` + 索引（INV-2 v205 已承接）
+- [x] P1-4 `inventory_balances` 唯一键纳入项目（0 哨兵）+ 投影重算（INV-2 v205 已承接）
+- [ ] P1-5 采购任务轴走 `demand_allocation`（PO 行不加字段）+ 收货按分配取项目口径
+- [x] P1-6 守卫 G1-G10 + 单测（v207 索引 + guard 模块 + 拦截器，13 例通过）
+- [ ] P1-7 `v_project_cost` 视图（材料/人工/外协三来源）
 
 **P2（可选）**
 
-- [ ] P2-1 `sales_order_lines.project_task_id` + 守卫 + 预留/发运维度（v208）
-- [ ] P2-2 `project_structure_baseline` 指针表 + 漂移检测（v209）
-- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐（v210，后置）
+- [ ] P2-1 `sales_order_lines.project_task_id` + 守卫 + 预留/发运维度（v209+）
+- [ ] P2-2 `project_structure_baseline` 指针表 + 漂移检测（v209+）
+- [ ] P2-3 `v_project_cost` 接成本价/费率，`amount` 补齐（v210+，后置）
 
 > P2 细化任务与验收用例见 `spec-project-g15-eto-P2-tasks.md`。
 
