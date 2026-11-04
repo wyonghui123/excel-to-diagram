@@ -1,0 +1,346 @@
+# 项目结构基线（Project Structure Baseline）—— G15 ETO P2-2
+# 依据: docs/specs/spec-project-g15-eto-solution-2026-11-04.md §4.2（P2-2 项目结构基线指针表）
+#
+# 口径:
+#   ① 只存「指针 + 哈希」，不存 BOM 行；结构事实源仍是 item_structures / item_structure_lines。
+#   ② structure_id = 0 表示「时点 active 版本」，非 0 表示钉住某版本
+#      （0 哨兵是避免 SQLite 唯一索引对 NULL 去重失效）。
+#   ③ 业务键 = project_id + item_id + usage + alternative_no，同键 upsert 一条。
+#   ④ baseline 不进成本、不参与 MRP；无人工行级维护入口。
+#   ⑤ baseline_hash / captured_at 由服务维护，禁止手工编辑。
+
+id: project_structure_baseline
+name: 项目结构基线
+table_name: project_structure_baselines
+description: 项目结构基线指针（项目 × 物料 × 用途 × 替代号 → 结构版本 + 哈希）
+display_name_field: id
+aspects: []
+
+authorization:
+  check: true
+  permissions:
+    read: project_structure_baseline:project_structure_baseline_read
+    list: project_structure_baseline:project_structure_baseline_list
+    create: project_structure_baseline:project_structure_baseline_create
+    update: project_structure_baseline:project_structure_baseline_update
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: project_structure_baseline_read
+    name: 查询项目结构基线
+    type: crud
+    method: GET
+    path: "/api/v1/project_structure_baselines/{id}"
+    description: 查询单条项目结构基线
+  - id: project_structure_baseline_list
+    name: 查询项目结构基线列表
+    type: crud
+    method: GET
+    path: "/api/v1/project_structure_baselines"
+    description: 查询项目结构基线列表
+  - id: project_structure_baseline_create
+    name: 创建项目结构基线
+    type: crud
+    method: POST
+    path: "/api/v1/project_structure_baselines"
+    description: 同键 upsert 一条基线（计算并记录基线哈希）
+  - id: project_structure_baseline_update
+    name: 编辑项目结构基线
+    type: crud
+    method: PUT
+    path: "/api/v1/project_structure_baselines/{id}"
+    description: 更新基线指针或备注（哈希由服务重算）
+  - id: project_structure_baseline_check_drift
+    name: 检查结构漂移
+    type: action
+    method: POST
+    path: "/api/v1/project_structure_baselines/{id}/check-drift"
+    description: 对比当前结构与基线哈希，返回 OK / DRIFT / STRUCTURE_MISSING
+    action_ref: project_structure_baseline.check_drift
+    authorization:
+      permission: project_structure_baseline:check_drift
+  - id: project_structure_baseline_refresh
+    name: 刷新结构基线
+    type: action
+    method: POST
+    path: "/api/v1/project_structure_baselines/{id}/refresh"
+    description: 按当前解析到的结构重算哈希并回写基线（幂等）
+    action_ref: project_structure_baseline.refresh
+    authorization:
+      permission: project_structure_baseline:refresh
+
+semantics:
+  meaning: 项目物料的 BOM 结构时点快照指针
+  category: business_document
+  business_key: [project_id, item_id, usage, alternative_no]
+  display_name_field: id
+  aliases:
+    - 项目结构基线
+    - 结构基线
+    - structure baseline
+    - BOM 快照
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    required: true
+    description: 基线归属项目（项目 design_mode 必须是 standard）
+    semantics:
+      meaning: 项目引用
+      business_key: true
+      filterable: true
+      display:
+        type: association
+        target_type: project
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 基线归属物料
+    semantics:
+      meaning: 物料引用
+      business_key: true
+      filterable: true
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: usage
+    name: 用途
+    type: string
+    db_column: usage
+    required: true
+    default: production
+    max_length: 200
+    description: 物料结构用途（默认 production），业务键之一
+    semantics:
+      meaning: 结构用途
+      business_key: true
+      filterable: true
+      filter_type: input
+      filter_label: 用途
+
+  - id: alternative_no
+    name: 替代号
+    type: integer
+    db_column: alternative_no
+    required: true
+    default: 1
+    description: 替代结构号（默认 1），业务键之一
+    semantics:
+      meaning: 替代号
+      business_key: true
+      filterable: true
+    ui:
+      widget: number
+
+  - id: structure_id
+    name: 结构版本
+    type: integer
+    db_column: structure_id
+    required: true
+    default: 0
+    description: 0 = 时点 active 版本；非 0 = 钉住某结构版本 id
+    semantics:
+      meaning: 结构版本指针（0 为 active 哨兵）
+      filterable: true
+    ui:
+      widget: number
+
+  - id: baseline_hash
+    name: 基线哈希
+    type: string
+    db_column: baseline_hash
+    required: true
+    max_length: 64
+    description: 头 + 行按固定口径算出的 sha256 hex，服务维护，禁止手工编辑
+    semantics:
+      meaning: 结构内容哈希
+      immutable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: captured_at
+    name: 采集时间
+    type: datetime
+    db_column: captured_at
+    required: true
+    description: 基线采集（或最近刷新）时间，服务维护
+    semantics:
+      meaning: 基线采集时间
+      immutable: true
+      filterable: true
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: note
+    name: 备注
+    type: string
+    db_column: note
+    nullable: true
+    max_length: 255
+    description: 备注（不承载 BOM 行，行内容只属于结构表）
+    semantics:
+      meaning: 备注
+
+indexes:
+  - fields: [project_id, item_id, usage, alternative_no]
+    unique: true
+    name: uq_project_structure_baseline
+    description: 项目结构基线业务键唯一（同键 upsert）
+  - fields: [item_id]
+    name: idx_project_structure_baseline_item
+    description: 按物料反查基线
+
+relations:
+  - id: project_structure_baseline_to_project
+    name: 项目
+    type: reference
+    target: project
+    source_field: project_id
+    target_field: id
+    cardinality: N:1
+  - id: project_structure_baseline_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 项目结构基线
+    columns:
+      - field: project_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: project
+        display_field: name
+      - field: item_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: usage
+        width: 120
+        filterable: true
+        filter_type: input
+      - field: alternative_no
+        width: 100
+        align: right
+      - field: structure_id
+        width: 120
+        align: right
+      - field: baseline_hash
+        width: 240
+      - field: captured_at
+        width: 170
+        sortable: true
+      - field: note
+        width: 200
+    selection:
+      enabled: true
+    searchFields: [baseline_hash, note]
+    actions:
+      - id: check_drift
+        name: 检查漂移
+        action_ref: project_structure_baseline.check_drift
+        type: action
+        icon: CircleCheck
+      - id: refresh
+        name: 刷新
+        action_ref: project_structure_baseline.refresh
+        type: action
+        icon: Refresh
+    defaultSort:
+      field: captured_at
+      order: desc
+  form:
+    title: 项目结构基线
+    layout: vertical
+    sections:
+      - title: 业务键
+        columns:
+          - fields: [project_id, item_id]
+          - fields: [usage, alternative_no]
+      - title: 结构指针
+        columns:
+          - fields: [structure_id]
+      - title: 基线事实
+        columns:
+          - fields: [baseline_hash, captured_at]
+          - fields: [note]
+  detail:
+    layout: tabs
+    title: "项目结构基线 #{record.id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [project_id, item_id, usage, alternative_no, structure_id,
+                 baseline_hash, captured_at, note]

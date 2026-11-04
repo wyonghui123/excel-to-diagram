@@ -143,6 +143,12 @@ def register_all_bo_actions(registry=None):
         cancel_handler as transfer_shipment_cancel_handler,
     )
 
+    # G15 ETO P2-2: 项目结构基线漂移检查 / 刷新
+    from meta.services.project_structure_baseline_service import (
+        check_drift_handler as project_structure_baseline_check_drift_handler,
+        refresh_handler as project_structure_baseline_refresh_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -1256,6 +1262,59 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_transfer_shipment_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 37-38: 项目结构基线（G15 ETO P2-2） ====================
+    _project_structure_baseline_output_schema = {
+        'type': 'object',
+        'properties': {
+            'baseline_id': {'type': 'integer'},
+            'status': {'type': 'string'},
+            'structure_id': {'type': 'integer'},
+            'baseline_structure_id': {'type': 'integer'},
+            'baseline_hash': {'type': 'string'},
+            'current_hash': {'type': 'string'},
+            'captured_at': {'type': 'string'},
+        },
+    }
+    registry.register(
+        'project_structure_baseline.check_drift',
+        project_structure_baseline_check_drift_handler,
+        description='项目结构基线漂移检查（OK / DRIFT / STRUCTURE_MISSING）',
+        object_type='project_structure_baseline',
+        category='business',
+        permission_required='project_structure_baseline:check_drift',
+        input_schema={
+            'type': 'object',
+            'required': ['baseline_id'],
+            'properties': {
+                'baseline_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_project_structure_baseline_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'project_structure_baseline.refresh',
+        project_structure_baseline_refresh_handler,
+        description='项目结构基线刷新（按当前结构重算哈希，幂等）',
+        object_type='project_structure_baseline',
+        category='business',
+        permission_required='project_structure_baseline:refresh',
+        input_schema={
+            'type': 'object',
+            'required': ['baseline_id'],
+            'properties': {
+                'baseline_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'note': {'type': 'string'},
+            },
+        },
+        output_schema=_project_structure_baseline_output_schema,
         requires_auth=True,
         idempotent=True,
     )
