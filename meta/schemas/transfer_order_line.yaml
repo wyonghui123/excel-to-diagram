@@ -271,6 +271,47 @@ fields:
     ui:
       widget: input
 
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；发运按该容器整体移库 / 整箱发运
+    semantics:
+      meaning: 包装容器业务标识
+      data_category: code
+    ui:
+      widget: input
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    nullable: true
+    max_length: 20
+    description: 容器类型（仅建新容器时使用；空 = carton）
+    enum_values:
+      - value: pallet
+        label: 托盘
+        color: primary
+      - value: carton
+        label: 纸箱
+        color: info
+      - value: bin
+        label: 料箱
+        color: success
+      - value: container
+        label: 集装箱
+        color: warning
+      - value: other
+        label: 其他
+        color: default
+    semantics:
+      meaning: 包装容器类型
+    ui:
+      widget: select
+
   - id: qty_shipped
     name: 已发货量
     type: number

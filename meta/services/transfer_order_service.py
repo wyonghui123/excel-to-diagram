@@ -502,6 +502,7 @@ class TransferOrderService:
             if serial_ready:
                 self._register_transfer_serials(
                     header['id'], items, event_key, ship_date)
+            self._ship_transfer_hus(header['id'])
 
             self.recompute_fulfillment(header['id'])
             fresh = self._require_header(header['id'])
@@ -586,6 +587,19 @@ class TransferOrderService:
             raise TransferOrderError(
                 str(error), field_name=error.field_name or 'serial_no',
                 rule=error.rule or 'SERIAL_ERROR')
+
+    def _ship_transfer_hus(self, transfer_order_id: Any) -> None:
+        """P6a-2 §11.5：调拨发运按行 hu_no 整体移库 / 整箱发运。"""
+        from meta.services.handling_unit_service import (
+            HandlingUnitError, HandlingUnitService, hu_schema_ready)
+        if not hu_schema_ready(self.ds):
+            return
+        try:
+            HandlingUnitService(self.ds).ship_transfer(transfer_order_id)
+        except HandlingUnitError as error:
+            raise TransferOrderError(
+                str(error), field_name=error.field_name or 'hu_no',
+                rule=error.rule or 'HU_SHIP_FAILED')
 
     def _register_transfer_serials(self, transfer_order_id: Any,
                                    items: Dict[Any, Any],

@@ -333,8 +333,8 @@
 ## 11. P6a-2 增量规格：包装容器（HU/LPN）
 
 - 日期: 2026-11-04（v1.1 细化，v1.2 实施）
-- 状态: **已实施**（as-built；v211 已落三表 + 服务 + 收货/发运接线 + 35 个新测试；调拨发运侧与 D4 查询 UI 见 §11.11 备注）
-- 迁移号: **v211**（`v207__project_task_index.py`、`v208__work_order_project_task.py`、`v209__project_structure_baseline.py`、`v210__sales_order_line_project_task.py` 均已被占用，顺延至 v211）
+- 状态: **已实施**（as-built；v211 三表 + 服务 + 收货/发运接线，v212 调拨行容器列，41 个新测试；仅 D4 查询 UI 未做，见 §11.11 备注）
+- 迁移号: **v211**（HU 三表；`v207`–`v210` 均已被占用，顺延至 v211）+ **v212**（调拨行 `hu_no` / `hu_type`）
 - 对标: SAP `VEKP` / `VEPO` / `UNVEL`、EWM `/SCWM/HUHDR`；Oracle EBS `WMS_LICENSE_PLATE_NUMBERS` / `WMS_LPN_CONTENTS`、Fusion `INV_LICENSE_PLATE_NUMBERS`、Shipping `WSH_DELIVERY_DETAILS`
 
 ### 11.1 术语映射与三条边界
@@ -493,7 +493,7 @@
 | 盘点 `inventory_count` | P7 | 按 HU 计数，差异写 `adjust` 事件 |
 | 退货 `rma` | P7 | 按 HU 整箱退回 |
 
-as-built 边界（2026-11-04）：收货侧（含 TO 收货、完工成品）已接线，载体为 `receipt_lines.hu_no`；**调拨发运侧未接线**——`transfer_order_lines` 无 `hu_no` 载体，需后续补列后再接；跨组织收货按行扁平建箱，**不做子树结构复制**。
+as-built（2026-11-04）：收货侧（含 TO 收货、完工成品）载体为 `receipt_lines.hu_no`；调拨发运侧由 `v212__transfer_line_hu.py` 给 `transfer_order_lines` 补 `hu_no` / `hu_type` 后接 `ship_transfer`；跨组织收货按源容器**整棵子树复制**到目标组织（`_clone_tree`，按目标组织重建批次、不复制序列号主档）。
 
 门控：所有接线先用 `hu_schema_ready(ds)` 判断三表是否存在；不存在时整条支路 no-op，不影响 P6a/P6b/P6c 主流程。
 
@@ -508,6 +508,8 @@ as-built 边界（2026-11-04）：收货侧（含 TO 收货、完工成品）已
 - 迁移 `v211__handling_unit.py`：建三表 + 索引 + 枚举 + 权限 + 菜单；另给
   `receipt_lines` / `shipment_lines` 补可选 `hu_no` / `hu_type` 两列；
   **不回填历史数据**（存量无容器信息，不做猜测）。
+- 迁移 `v212__transfer_line_hu.py`：给 `transfer_order_lines` 补可选
+  `hu_no` / `hu_type` 两列（调拨发运侧载体）。
 
 ### 11.7 错误码
 
@@ -578,7 +580,7 @@ as-built 边界（2026-11-04）：收货侧（含 TO 收货、完工成品）已
 | D3 | 单据接线（收货 / 完工 / 发运 / 调拨）+ 红冲 | D1、D2 |
 | D4 | 查询 UI（容器内容树、按号查容器） | D1 |
 
-as-built 备注：D1 / D2 / D3（收货、完工、发运、红冲）已完成并测试通过；D3 的调拨发运侧未接线（缺 `transfer_order_lines.hu_no`）；D4 查询 UI 未实施（`hu_contents` / `hu_stock` / `hu_where_used` 服务方法已就绪，仅缺页面入口）。
+as-built 备注：D1 / D2 / D3（收货、完工、发运、调拨发运、跨组织子树复制、红冲）已完成并测试通过；D4 查询 UI 未实施（`hu_contents` / `hu_stock` / `hu_where_used` 服务方法已就绪，仅缺页面入口）。
 
 ### 11.12 明确不做
 

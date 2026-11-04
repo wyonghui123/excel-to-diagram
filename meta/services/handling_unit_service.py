@@ -33,6 +33,8 @@ RECEIPT_TABLE = 'receipts'
 RECEIPT_LINE_TABLE = 'receipt_lines'
 SHIPMENT_TABLE = 'shipments'
 SHIPMENT_LINE_TABLE = 'shipment_lines'
+TRANSFER_TABLE = 'transfer_orders'
+TRANSFER_LINE_TABLE = 'transfer_order_lines'
 
 STATUS_OPEN = 'open'
 STATUS_SEALED = 'sealed'
@@ -64,6 +66,7 @@ TXN_TYPES = (TXN_CREATE, TXN_PACK, TXN_UNPACK, TXN_MOVE, TXN_CONSOLIDATE,
 
 DOC_RECEIPT = 'receipt'
 DOC_SHIPMENT = 'shipment'
+DOC_TRANSFER = 'transfer_order'
 
 
 def hu_schema_ready(ds: Any) -> bool:
@@ -845,8 +848,8 @@ class HandlingUnitService:
                 self._ship_serial(serial, hu, now, doc_type, doc_id)
             for hu_item in tree:
                 self.ds.execute(
-                    'UPDATE %s SET status = ?, shipped_at = ?, updated_at = ? '
-                    'WHERE id = ?' % HU_TABLE,
+                    'UPDATE %s SET status = ?, location_id = NULL, '
+                    'shipped_at = ?, updated_at = ? WHERE id = ?' % HU_TABLE,
                     [STATUS_SHIPPED, now, now, hu_item])
                 self._insert_txn(hu_item, TXN_SHIP, now,
                                  from_location_id=hu.get('location_id'),
@@ -1113,14 +1116,27 @@ class HandlingUnitService:
             hu = self._find_hu(hu_no, org_id)
             if hu is not None and hu.get('status') == STATUS_SEALED:
                 # 同组织调拨：容器整体 move 到收货库位，不在收货侧重装
-                self.move(hu['id'], line.get('putaway_location_id') or location_id,
-                          {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
-                           'line_id': line.get('id')})
+                target_location = line.get('putaway_location_id') or location_id
+                if hu.get('location_id') != target_location:
+                    self.move(hu['id'], target_location,
+                              {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
+                               'line_id': line.get('id')})
                 packed += 1
                 continue
             if hu is not None and hu.get('status') != STATUS_OPEN:
                 continue
             if hu is None:
+                # 跨组织调拨：源组织同号容器已发运 → 复制整棵子树到目标组织
+                source = self._find_hu(hu_no)
+                if source is not None and source.get('status') in (
+                        STATUS_SEALED, STATUS_SHIPPED):
+                    self._clone_tree(
+                        source, org_id,
+                        line.get('putaway_location_id') or location_id,
+                        {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
+                         'line_id': line.get('id')})
+                    packed += 1
+                    continue
                 hu = self.create_hu({
                     'hu_no': hu_no,
                     'hu_type': str(line.get('hu_type') or 'carton').strip(),
@@ -1186,6 +1202,111 @@ class HandlingUnitService:
                           'line_id': line.get('id')})
             shipped += 1
         return {'shipment_id': shipment_id, 'shipped': shipped}
+
+    def ship_transfer(self, transfer_order_id: Any) -> Dict[str, Any]:
+        """调拨发运：同组织整体移库；跨组织整箱发运（源容器置 shipped）。
+
+        §11.5：同组织 HU 整体 move 到目标库位；跨组织只把源子树置 shipped，
+        目标组织侧的结构复制在收货过账时由 `_clone_tree` 完成。
+        """
+        if not hu_schema_ready(self.ds):
+            return {'skipped': True, 'moved': 0, 'shipped': 0}
+        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+                                   'HU_NOT_FOUND')
+        from_org = header.get('from_org_id')
+        to_org = header.get('to_org_id')
+        to_location = header.get('to_location_id')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE transfer_order_id = ? AND status <> ?'
+            % TRANSFER_LINE_TABLE, [transfer_order_id, 'cancelled'])
+        moved = shipped = 0
+        for line in lines:
+            hu_no = str(line.get('hu_no') or '').strip()
+            if not hu_no:
+                continue
+            hu = self._find_hu(hu_no, from_org)
+            if hu is None:
+                raise HandlingUnitError('包装容器不存在：%s' % hu_no,
+                                        field_name='hu_no', rule='HU_NOT_FOUND')
+            doc = {'doc_type': DOC_TRANSFER, 'doc_id': transfer_order_id,
+                   'line_id': line.get('id')}
+            same_org = _blank(to_org) or int(to_org) == int(from_org)
+            if same_org:
+                if _blank(to_location):
+                    continue
+                if hu.get('location_id') != to_location:
+                    self.move(hu['id'], to_location, doc)
+                moved += 1
+            else:
+                self.ship_hu(hu['id'], None, doc)
+                shipped += 1
+        return {'transfer_order_id': transfer_order_id,
+                'moved': moved, 'shipped': shipped}
+
+    def _clone_tree(self, source: Dict[str, Any], org_id: Any,
+                    location_id: Any, doc: Optional[Dict[str, Any]] = None,
+                    parent_id: Any = None) -> int:
+        """跨组织调拨收货：把源容器子树复制到目标组织。
+
+        容器号按 (org_id, hu_no) 唯一，跨组织允许同号；物料行保留 item / qty /
+        batch_no（按目标组织重建批次关联），**不复制 serial_id**——序列号主档
+        按组织隔离，由目标组织收货录号重新建号。已存在同号容器时直接复用（幂等）。
+        """
+        hu_no = str(source.get('hu_no') or '').strip()
+        existing = self._find_hu(hu_no, org_id)
+        if existing is not None:
+            return int(existing['id'])
+        now = _now()
+        doc = doc or {}
+        cursor = self.ds.execute(
+            'INSERT INTO %s (hu_no, hu_type, packaging_item_id, org_id, '
+            ' location_id, parent_hu_id, root_hu_id, status, is_reusable, '
+            ' cycle_no, gross_weight, tare_weight, net_weight, volume, uom_id, '
+            ' source_doc_type, source_doc_id, sealed_at, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            % HU_TABLE,
+            [hu_no, source.get('hu_type') or 'carton',
+             source.get('packaging_item_id'), org_id, location_id,
+             parent_id, None, STATUS_SEALED,
+             int(source.get('is_reusable') or 0),
+             int(source.get('cycle_no') or 1),
+             source.get('gross_weight'), source.get('tare_weight'),
+             source.get('net_weight'), source.get('volume'),
+             source.get('uom_id'), doc.get('doc_type'), doc.get('doc_id'),
+             now, now, now])
+        target_id = int(cursor.lastrowid)
+        root_id = target_id
+        if parent_id is not None:
+            parent = self._get_hu(parent_id)
+            root_id = parent.get('root_hu_id') or target_id
+        self.ds.execute('UPDATE %s SET root_hu_id = ? WHERE id = ?' % HU_TABLE,
+                        [root_id, target_id])
+        self._insert_txn(target_id, TXN_CREATE, now, **doc)
+
+        for row in self._contents(source['id']):
+            if row.get('content_type') == CONTENT_HU:
+                child = self._get_hu(row['child_hu_id'])
+                child_id = self._clone_tree(child, org_id, location_id, doc,
+                                            target_id)
+                self.ds.execute(
+                    'INSERT INTO %s (hu_id, content_type, child_hu_id, qty, '
+                    ' created_at) VALUES (?, ?, ?, 0, ?)' % ITEM_TABLE,
+                    [target_id, CONTENT_HU, child_id, now])
+                continue
+            batch_id = None
+            if row.get('batch_id'):
+                src_batch = self.ds.query(
+                    'SELECT batch_no FROM %s WHERE id = ?' % BATCH_TABLE,
+                    [row['batch_id']])
+                batch_no = src_batch[0].get('batch_no') if src_batch else None
+                batch_id = self._resolve_batch(org_id, row.get('item_id'), batch_no)
+            self.ds.execute(
+                'INSERT INTO %s (hu_id, content_type, item_id, batch_id, qty, '
+                ' uom_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)' % ITEM_TABLE,
+                [target_id, row.get('content_type') or CONTENT_MATERIAL,
+                 row.get('item_id'), batch_id, _as_float(row.get('qty')),
+                 row.get('uom_id'), now])
+        return target_id
 
     # ------------------------------------------------------------------
     # 内部

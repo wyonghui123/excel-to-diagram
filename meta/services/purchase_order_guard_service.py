@@ -651,6 +651,7 @@ class PurchaseOrderGuardService:
                 field_name='target_bo', rule='PO_ALLOCATION_TARGET_INVALID')
 
         self._validate_charge_basis(data)
+        self._validate_allocation_project_scope(data)
         self._validate_project_task_link(data)
         self._validate_allocation_caps(data, old)
         if _status(data.get('status')) == 'reversed' \
@@ -684,6 +685,29 @@ class PurchaseOrderGuardService:
                 '资产归属分配必须填写资产类别',
                 field_name='asset_category_code',
                 rule='PO_ALLOCATION_ASSET_CATEGORY_REQUIRED')
+
+    def _validate_allocation_project_scope(self, data: Dict[str, Any]) -> None:
+        """G15 G6：分配的项目必须与采购头项目一致（头有项目时）。
+
+        采购行不新增项目/任务列（`purchase_order_line.yaml` T-D3），
+        任务轴只能落在 `demand_allocations` 行；头无项目时允许分配带项目。
+        """
+        project_id = data.get('project_id')
+        if _is_blank(project_id):
+            return
+        if _status(data.get('target_bo')) != 'purchase_order':
+            return
+        order = self._load_order(data.get('target_id'))
+        if not order:
+            return
+        header_project = order.get('project_id')
+        if _is_blank(header_project):
+            return
+        if _int(header_project) != _int(project_id):
+            raise PurchaseOrderGuardError(
+                '分配项目与采购订单项目不一致',
+                field_name='project_id',
+                rule='PO_ALLOCATION_PROJECT_MISMATCH')
 
     def _validate_project_task_link(self, data: Dict[str, Any]) -> None:
         """G15 G1-G3：任务非空 ⇒ 项目非空；任务属同项目；任务可执行。"""
@@ -842,7 +866,7 @@ class PurchaseOrderGuardService:
             'SELECT id, order_no, status, document_type_id, purchase_org_id, '
             '       purchase_legal_entity_id, supplier_party_id, currency_id, '
             '       exchange_rate, exchange_rate_type, exchange_rate_date, '
-            '       approval_status '
+            '       approval_status, project_id '
             'FROM purchase_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
 

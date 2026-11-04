@@ -40,7 +40,8 @@ CREATE TABLE purchase_orders (
     org_id INTEGER, purchase_org_id INTEGER, purchase_legal_entity_id INTEGER,
     supplier_party_id INTEGER, currency_id INTEGER,
     exchange_rate REAL, exchange_rate_type TEXT, exchange_rate_date TEXT,
-    approval_status TEXT, net_amount REAL, tax_amount REAL, gross_amount REAL
+    approval_status TEXT, net_amount REAL, tax_amount REAL, gross_amount REAL,
+    project_id INTEGER
 );
 CREATE TABLE purchase_order_lines (
     id INTEGER PRIMARY KEY, order_id INTEGER, line_no TEXT, line_type_id INTEGER,
@@ -57,12 +58,17 @@ CREATE TABLE purchase_order_schedules (
 CREATE TABLE demand_allocations (
     id INTEGER PRIMARY KEY, demand_bo TEXT, demand_id INTEGER, demand_line_id INTEGER,
     target_bo TEXT, target_id INTEGER, target_line_id INTEGER,
-    target_schedule_id INTEGER, qty REAL, status TEXT, reversed_at TEXT
+    target_schedule_id INTEGER, qty REAL, status TEXT, reversed_at TEXT,
+    project_id INTEGER, project_task_id INTEGER, charge_basis TEXT
 );
 CREATE TABLE item_structure_lines (
     id INTEGER PRIMARY KEY, structure_id INTEGER, item_id INTEGER,
     uom_id INTEGER, line_no TEXT
 );
+CREATE TABLE requisition_lines (
+    id INTEGER PRIMARY KEY, qty REAL
+);
+INSERT INTO requisition_lines VALUES (2, 10);
 INSERT INTO type_definitions VALUES
     (1, 'PO_STD', '标准采购订单', 'purchase_order', 'header', 'active', 'standard', NULL, 116, 3),
     (2, 'SO_STD', '标准销售订单', 'sales_order', 'header', 'active', 'standard', NULL, NULL, NULL),
@@ -407,3 +413,36 @@ def test_cancelled_line_reverses_allocations(conn, ds):
     row = ds.query('SELECT status, reversed_at FROM demand_allocations WHERE id=2')[0]
     assert row['status'] == 'reversed'
     assert row['reversed_at']
+
+
+# ---------------- 分配 / 项目任务轴（G15 G6） ----------------
+
+def test_allocation_project_must_match_order(conn, ds):
+    _insert_order(conn)
+    conn.execute('UPDATE purchase_orders SET project_id = 7 WHERE id = 1')
+    conn.execute(
+        "INSERT INTO purchase_order_lines (id, order_id, line_no, line_type_id, qty) "
+        "VALUES (20, 1, '10', 111, 5)")
+    guard = PurchaseOrderGuardService(ds)
+    data = {
+        'demand_bo': 'requisition', 'demand_id': 1, 'demand_line_id': 2,
+        'target_bo': 'purchase_order', 'target_id': 1, 'target_line_id': 20,
+        'qty': 1, 'project_id': 8, 'charge_basis': 'project',
+    }
+    _expect_rule(lambda: guard.validate_allocation_write(dict(data), is_create=True),
+                 'PO_ALLOCATION_PROJECT_MISMATCH')
+    data['project_id'] = 7
+    guard.validate_allocation_write(dict(data), is_create=True)
+
+
+def test_allocation_project_allowed_when_order_has_none(conn, ds):
+    _insert_order(conn)
+    conn.execute(
+        "INSERT INTO purchase_order_lines (id, order_id, line_no, line_type_id, qty) "
+        "VALUES (20, 1, '10', 111, 5)")
+    guard = PurchaseOrderGuardService(ds)
+    guard.validate_allocation_write({
+        'demand_bo': 'requisition', 'demand_id': 1, 'demand_line_id': 2,
+        'target_bo': 'purchase_order', 'target_id': 1, 'target_line_id': 20,
+        'qty': 1, 'project_id': 7, 'charge_basis': 'project',
+    }, is_create=True)

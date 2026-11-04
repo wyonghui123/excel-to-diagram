@@ -378,7 +378,7 @@ CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item
 - [x] P1-2 `work_orders.project_task_id` + 值帮助 + 迁移 v208（已提交）
 - [x] P1-3 `inventory_transactions.project_id / project_task_id` + 索引（INV-2 v205 已承接）
 - [x] P1-4 `inventory_balances` 唯一键纳入项目（0 哨兵）+ 投影重算（INV-2 v205 已承接）
-- [ ] P1-5 采购任务轴走 `demand_allocation`（PO 行不加字段）+ 收货按分配取项目口径
+- [x] P1-5 采购任务轴走 `demand_allocation`（PO 行不加字段）+ 收货按分配取项目口径（G6 `PO_ALLOCATION_PROJECT_MISMATCH` 已补）
 - [x] P1-6 守卫 G1-G10 + 单测（v207 索引 + guard 模块 + 拦截器，13 例通过）
 - [ ] P1-7 `v_project_cost` 视图（材料/人工/外协三来源）
 
