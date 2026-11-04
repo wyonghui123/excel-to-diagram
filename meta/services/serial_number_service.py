@@ -81,7 +81,9 @@ TXN_TYPES = (TXN_CREATE, TXN_RECEIVE, 'issue', 'transfer_out', 'transfer_in',
 #: 状态流转白名单（§3.5）。scrapped 为终态，不可再流转。
 TRANSITIONS = {
     STATUS_DEFINED: (STATUS_IN_STORES, STATUS_SCRAPPED),
-    STATUS_IN_STORES: (STATUS_ISSUED, STATUS_IN_TRANSIT, STATUS_SCRAPPED),
+    # in_stores → shipped 仅供整箱发运（handling_unit_service.ship_hu 调用）
+    STATUS_IN_STORES: (STATUS_ISSUED, STATUS_IN_TRANSIT, STATUS_SHIPPED,
+                       STATUS_SCRAPPED),
     STATUS_IN_TRANSIT: (STATUS_IN_STORES, STATUS_SCRAPPED),
     STATUS_ISSUED: (STATUS_SHIPPED, STATUS_CONSUMED, STATUS_RETURNED,
                     STATUS_SCRAPPED),

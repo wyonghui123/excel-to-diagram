@@ -1,0 +1,426 @@
+# 包装容器事件账（HU Transaction）—— P6a-2 §11.2.3
+# 依据: docs/specs/p6-serial-number-model/spec.md §11.2.3 / §11.6
+#
+# 口径（已定）:
+#   ① 事件账是真相，handling_units / handling_unit_items 是当前态投影。
+#   ② 事件幂等键 (hu_id, txn_type, doc_type, doc_id, line_id, serial_id)。
+#   ③ 反冲只写 reverse 事件并回退主档，不删除内容行与历史事件。
+#   ④ 只读面：由 handling_unit_service 写入，不开放写动作。
+
+id: hu_transaction
+name: 包装容器事件
+table_name: hu_transactions
+description: 容器事件账——建箱 / 装箱 / 拆箱 / 移库 / 合并 / 拆分 / 密封 / 发运 / 反冲
+display_name_field: txn_type
+
+authorization:
+  check: true
+  permissions:
+    read: hu_transaction:hu_transaction_read
+    list: hu_transaction:hu_transaction_list
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: hu_transaction_read
+    name: 查询容器事件
+    type: crud
+    method: GET
+    path: "/api/v1/hu_transactions/{id}"
+    description: 查询单条容器事件（只读）
+  - id: hu_transaction_list
+    name: 查询容器事件列表
+    type: crud
+    method: GET
+    path: "/api/v1/hu_transactions"
+    description: 查询容器事件列表（只读）
+
+semantics:
+  meaning: 包装容器事件
+  category: business_document
+  aliases:
+    - 容器事件
+    - HU 状态日志
+    - hu transaction
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: hu_id
+    name: 容器
+    type: integer
+    db_column: hu_id
+    required: true
+    description: 事件所属容器
+    semantics:
+      meaning: 容器引用
+      filterable: true
+      filter_type: value_help
+      filter_label: 容器
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: txn_type
+    name: 事件类型
+    type: string
+    db_column: txn_type
+    required: true
+    max_length: 20
+    description: 事件类型（建箱 / 装箱 / 拆箱 / 移库 / 合并 / 拆分 / 密封 / 开封 / 发运 / 反冲 / 复用 / 作废）
+    enum_values:
+      - value: create
+        label: 建箱
+        color: primary
+      - value: pack
+        label: 装箱
+        color: success
+      - value: unpack
+        label: 拆箱
+        color: warning
+      - value: move
+        label: 移库
+        color: info
+      - value: consolidate
+        label: 合并
+        color: primary
+      - value: split
+        label: 拆分
+        color: primary
+      - value: seal
+        label: 密封
+        color: success
+      - value: unseal
+        label: 开封
+        color: warning
+      - value: ship
+        label: 发运
+        color: primary
+      - value: reverse
+        label: 反冲
+        color: danger
+      - value: reuse
+        label: 复用
+        color: info
+      - value: void
+        label: 作废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: hu_txn_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 容器事件类型
+      filterable: true
+      filter_type: enum
+      filter_label: 事件类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: serial_id
+    name: 序列号
+    type: integer
+    db_column: serial_id
+    nullable: true
+    description: 涉及的序列号
+    semantics:
+      meaning: 序列号引用
+    ui:
+      widget: select
+      relation: serial_number
+      multiple: false
+      clearable: true
+      fieldGroup: 对象
+      fieldGroupPosition: 30
+
+  - id: child_hu_id
+    name: 子容器
+    type: integer
+    db_column: child_hu_id
+    nullable: true
+    description: 涉及的子容器
+    semantics:
+      meaning: 子容器引用
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      clearable: true
+      fieldGroup: 对象
+      fieldGroupPosition: 40
+
+  - id: from_hu_id
+    name: 来源容器
+    type: integer
+    db_column: from_hu_id
+    nullable: true
+    description: 拆并迁移的来源容器
+    semantics:
+      meaning: 来源容器引用
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      clearable: true
+      fieldGroup: 迁移
+      fieldGroupPosition: 50
+
+  - id: to_hu_id
+    name: 目标容器
+    type: integer
+    db_column: to_hu_id
+    nullable: true
+    description: 拆并迁移的目标容器
+    semantics:
+      meaning: 目标容器引用
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      clearable: true
+      fieldGroup: 迁移
+      fieldGroupPosition: 60
+
+  - id: from_location_id
+    name: 来源库位
+    type: integer
+    db_column: from_location_id
+    nullable: true
+    description: 库位迁移的起点
+    semantics:
+      meaning: 来源库位引用
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 迁移
+      fieldGroupPosition: 70
+
+  - id: to_location_id
+    name: 目标库位
+    type: integer
+    db_column: to_location_id
+    nullable: true
+    description: 库位迁移的终点
+    semantics:
+      meaning: 目标库位引用
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 迁移
+      fieldGroupPosition: 80
+
+  - id: doc_type
+    name: 单据类型
+    type: string
+    db_column: doc_type
+    nullable: true
+    max_length: 30
+    description: 来源单据类型
+    semantics:
+      meaning: 来源单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 单据类型
+    ui:
+      widget: input
+      fieldGroup: 来源
+      fieldGroupPosition: 90
+
+  - id: doc_id
+    name: 单据
+    type: integer
+    db_column: doc_id
+    nullable: true
+    description: 来源单据主键
+    semantics:
+      meaning: 来源单据引用
+    ui:
+      widget: number
+      fieldGroup: 来源
+      fieldGroupPosition: 100
+
+  - id: line_id
+    name: 单据行
+    type: integer
+    db_column: line_id
+    nullable: true
+    description: 来源单据行主键
+    semantics:
+      meaning: 来源单据行引用
+    ui:
+      widget: number
+      fieldGroup: 来源
+      fieldGroupPosition: 110
+
+  - id: txn_at
+    name: 事件时间
+    type: datetime
+    db_column: txn_at
+    required: true
+    description: 事件发生时间
+    semantics:
+      meaning: 事件时间
+      filterable: true
+      filter_type: date_range
+      filter_label: 事件时间
+    ui:
+      widget: datetime
+      fieldGroup: 时间
+      fieldGroupPosition: 120
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 时间
+      fieldGroupPosition: 130
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [hu_id, txn_at]
+    name: idx_hu_tx_hu_at
+  - fields: [serial_id, txn_at]
+    name: idx_hu_tx_serial_at
+  - fields: [doc_type, doc_id]
+    name: idx_hu_tx_doc
+
+relations:
+  - id: hu_transaction_to_hu
+    name: 容器
+    type: reference
+    target: handling_unit
+    source_field: hu_id
+    target_field: id
+    cardinality: N:1
+  - id: hu_transaction_to_serial
+    name: 序列号
+    type: reference
+    target: serial_number
+    source_field: serial_id
+    target_field: id
+    cardinality: N:1
+  - id: hu_transaction_to_child
+    name: 子容器
+    type: reference
+    target: handling_unit
+    source_field: child_hu_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 包装容器事件
+    columns:
+      - field: hu_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: txn_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: serial_id
+        width: 170
+        render_as: association
+        target_type: serial_number
+        display_field: serial_no
+      - field: child_hu_id
+        width: 160
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: from_hu_id
+        width: 150
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: to_hu_id
+        width: 150
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: txn_at
+        width: 170
+        sortable: true
+      - field: doc_type
+        width: 130
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: false
+    searchFields: []
+    actions: []
+    defaultSort:
+      field: id
+      order: desc
+  form:
+    title: 包装容器事件
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [hu_id, txn_type, serial_id, child_hu_id]
+      - title: 迁移
+        columns:
+          - fields: [from_hu_id, to_hu_id, from_location_id, to_location_id]
+      - title: 来源
+        columns:
+          - fields: [doc_type, doc_id, line_id, txn_at, remark]
+  detail:
+    layout: tabs
+    title: "容器事件 {record.txn_type}#{record.id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [hu_id, txn_type, serial_id, child_hu_id, from_hu_id,
+                 to_hu_id, from_location_id, to_location_id, doc_type,
+                 doc_id, line_id, txn_at, remark, created_at]

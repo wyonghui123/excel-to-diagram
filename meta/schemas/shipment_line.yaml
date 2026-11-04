@@ -243,6 +243,18 @@ fields:
       meaning: 序列号
       data_category: code
 
+  # 可选整箱发运：发运确认后按容器号置 shipped 并级联成员号（§11.5）
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；发运确认后整箱发运（容器须已 sealed）
+    semantics:
+      meaning: 包装容器业务标识
+      data_category: code
+
   - id: status
     name: 行状态
     type: string

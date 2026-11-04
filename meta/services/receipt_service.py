@@ -507,6 +507,8 @@ class ReceiptService:
             # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
             # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
             self._register_receipt_serials(header, checked)
+            # P6a-2 §11.5：按行 hu_no 建箱 / 装箱（表缺失时自动 no-op）
+            self._register_receipt_hus(header)
 
         logger.info('[receipt] posted id=%s return=%s lines=%s',
                     header['id'], is_return, len(checked))
@@ -564,6 +566,8 @@ class ReceiptService:
         if serial_ready:
             self._register_transfer_receipt_serials(
                 transfer_order['id'], header['id'])
+        # P6a-2 §11.5：目标组织侧按行 hu_no 建箱 / 装箱（跨组织=复制结构）
+        self._register_receipt_hus(header)
 
         logger.info('[receipt] posted to id=%s transfer_order=%s lines=%s',
                     header['id'], transfer_order['id'], len(checked))
@@ -611,6 +615,8 @@ class ReceiptService:
             self._register_completion_serials(
                 work_order['id'], header['id'],
                 event_key='receipt:%s:post' % header['id'])
+        # P6a-2 §11.5：成品按行 hu_no 装箱（仅成品行，组件在工单侧）
+        self._register_receipt_hus(header)
 
         logger.info('[receipt] posted work order id=%s work_order=%s lines=%s',
                     header['id'], work_order['id'], len(checked))
@@ -766,6 +772,8 @@ class ReceiptService:
 
         # 库存红冲：按原过账事件键生成 REVERSAL（同事务）
         self._reverse_receipt_inventory(header, date)
+        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
+        self._reverse_receipt_hus(header)
 
         logger.info('[receipt] reversed original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
@@ -879,6 +887,8 @@ class ReceiptService:
 
         # 库存红冲：TO 收货原分录生成 REVERSAL（同事务）
         self._reverse_receipt_inventory(header, date)
+        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
+        self._reverse_receipt_hus(header)
 
         logger.info('[receipt] reversed to original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
@@ -979,6 +989,8 @@ class ReceiptService:
             [STATUS_REVERSED, now, now, header['id']])
 
         self._reverse_receipt_inventory(header, date)
+        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
+        self._reverse_receipt_hus(header)
         self._reverse_completion_serials(header.get('source_doc_id'), header['id'])
 
         logger.info('[receipt] reversed work order original=%s red=%s lines=%s',
@@ -1154,6 +1166,38 @@ class ReceiptService:
     def _serial_ready(self) -> bool:
         from meta.services.serial_number_service import serial_schema_ready
         return serial_schema_ready(self.ds)
+
+    def _hu_ready(self) -> bool:
+        from meta.services.handling_unit_service import hu_schema_ready
+        return hu_schema_ready(self.ds)
+
+    def _register_receipt_hus(self, header: Dict[str, Any]) -> None:
+        """P6a-2 §11.5：过账后按行 hu_no 建箱 / 装箱；表缺失时 no-op。"""
+        if not self._hu_ready():
+            return
+        from meta.services.handling_unit_service import (
+            HandlingUnitError, HandlingUnitService,
+        )
+        try:
+            HandlingUnitService(self.ds).pack_receipt(header['id'])
+        except HandlingUnitError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'hu_no',
+                rule=error.rule or 'HU_PACK_FAILED')
+
+    def _reverse_receipt_hus(self, header: Dict[str, Any]) -> None:
+        """红冲：倒序回退该收货单产生的容器事件（不删历史事件）。"""
+        if not self._hu_ready():
+            return
+        from meta.services.handling_unit_service import (
+            HandlingUnitError, HandlingUnitService,
+        )
+        try:
+            HandlingUnitService(self.ds).reverse_document('receipt', header['id'])
+        except HandlingUnitError as error:
+            raise ReceiptError(
+                str(error), field_name=error.field_name or 'hu_no',
+                rule=error.rule or 'HU_REVERSE_FAILED')
 
     def _precheck_transfer_receipt_serials(self, transfer_order_id: Any,
                                            receipt_id: Any) -> None:

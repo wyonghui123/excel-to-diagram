@@ -332,9 +332,9 @@
 
 ## 11. P6a-2 增量规格：包装容器（HU/LPN）
 
-- 日期: 2026-11-04（v1.1 细化，原 §11 预研）
-- 状态: **预研，未批准**（不改变已落地的三表；批准后进入实现）
-- 迁移号: **v207**（仓库当前最大 `v206__project_design_mode.py`）
+- 日期: 2026-11-04（v1.1 细化，v1.2 实施）
+- 状态: **已实施**（as-built；v211 已落三表 + 服务 + 收货/发运接线 + 35 个新测试；调拨发运侧与 D4 查询 UI 见 §11.11 备注）
+- 迁移号: **v211**（`v207__project_task_index.py`、`v208__work_order_project_task.py`、`v209__project_structure_baseline.py`、`v210__sales_order_line_project_task.py` 均已被占用，顺延至 v211）
 - 对标: SAP `VEKP` / `VEPO` / `UNVEL`、EWM `/SCWM/HUHDR`；Oracle EBS `WMS_LICENSE_PLATE_NUMBERS` / `WMS_LPN_CONTENTS`、Fusion `INV_LICENSE_PLATE_NUMBERS`、Shipping `WSH_DELIVERY_DETAILS`
 
 ### 11.1 术语映射与三条边界
@@ -408,6 +408,11 @@
 - `uq_hu_serial`：`(hu_id, serial_id)` 部分唯一 `WHERE serial_id IS NOT NULL`
 - `uq_serial_in_hu`：`(serial_id)` 全局部分唯一 `WHERE serial_id IS NOT NULL`（一个号同一时点只能在一个容器）
 - `uq_hu_child`：`(hu_id, child_hu_id)` 部分唯一 `WHERE child_hu_id IS NOT NULL`
+- `ck_hu_item_content`：内容类型与列组合必须一致
+  - `material`：`item_id` 非空、`child_hu_id` 空；`serial_id` / `batch_id` 可空
+  - `packaging`：`item_id` 非空；`serial_id` / `batch_id` / `child_hu_id` 必须为空（依据 IFS：序列号/批次跟踪件不得作包装物料）
+  - `hu`：`child_hu_id` 非空、`qty = 0`、`item_id` / `batch_id` / `serial_id` 必须为空
+- 仅 `material` 行允许 `serial_id` 非空；序列号行 `qty` 必须为 1
 - `idx_hu_item_serial`：`(serial_id)`；`idx_hu_item_item`：`(item_id, batch_id)`
 - 嵌套用 `child_hu_id` 行表达，不再重复写 `parent_hu_id`（父关系只存 `handling_units` 一处）
 
@@ -455,17 +460,18 @@
 | `create_hu(payload)` | 校验 `hu_no` 组织内唯一；18 位纯数字时校验 GS1 SSCC 校验位；`root_hu_id=id`；写 `create` 事件 |
 | `pack(hu_id, lines)` | HU 必须 `open`；序列号必须 `in_stores`；号库位必须等于 HU 库位（HU 未定库位时取首个号库位）；全局唯一归属兜底；写 `pack` 事件 + 内容行 |
 | `unpack(hu_id, lines)` | HU 必须 `open`（`sealed` 须先 `unseal`）；删除内容行；写 `unpack` 事件 |
-| `move(hu_id, to_location_id, doc=None)` | 递归改子树 `location_id`；写 `move` 事件（含 `from/to`） |
+| `move(hu_id, to_location_id, doc=None)` | 同组织内递归改子树 `location_id`；写 `move` 事件（含 `from/to`）；跨组织不走此方法，见 §11.5 |
 | `consolidate(source_hu_ids, target_hu_id)` | 目标 `open`、同组织、同库位；源内容并入目标；源置 `void`；写 `consolidate` 事件 |
 | `split(hu_id, lines, target_hu_id)` | 源不能为 `shipped`；目标 `open`、同组织、同库位；写 `split` 事件 |
 | `seal(hu_id)` | 按 §11.3 前置校验；写 `seal` 事件 |
 | `unseal(hu_id)` | `sealed → open`；写 `unseal` 事件 |
-| `reuse(hu_id)` | 复用型空箱回到 `open`，`cycle_no+1`；写 `reuse` 事件 |
+| `reuse(hu_id)` | 复用型空箱（`open` 或 `sealed`）回到 `open`，`cycle_no+1`；写 `reuse` 事件 |
 | `void_hu(hu_id, reason)` | 内容非空时拒绝；写 `void` 事件 |
 | `ship_hu(hu_id, shipment_id)` | HU 置 `shipped`；成员号 `in_stores → shipped`；写 `ship` 事件 |
 | `reverse_hu_transaction(hu_txn_id)` | 反向事件；不删除内容行与历史事件 |
-| `hu_contents(hu_no, org_id)` | 返回内容树 + 事件时间线 |
-| `hu_where_used(serial_no, org_id)` | 反查序列号当前所在 HU 与历史容器 |
+| `hu_contents(hu_no, org_id, mode='direct'\|'exploded')` | `direct` 返回直接子行；`exploded` 递归返回叶子 `material` 行 + 路径；附事件时间线 |
+| `hu_stock(hu_id, mode='exploded')` | 按 `(item, batch, serial)` 汇总叶子 `material` 行；只读，不改库存账 |
+| `hu_where_used(serial_no, org_id)` | 反查序列号当前所在 HU、根 HU 与嵌套路径，以及历史容器 |
 
 事务与幂等契约（沿用 §5.1）：
 
@@ -483,9 +489,11 @@
 | 收货 `receipt` | `post` 后 | 行可选 `hu_no` + `hu_type`；`create_hu` + `pack`；仅当装箱数量 = 行净收数量 |
 | 完工 `receipt(source_doc_type='work_order')` | `post` 后 | 成品号可选装入成品箱；组件号不装 HU |
 | 发运 `shipment` | `ship` 后 | 按 HU 装运：`ship_hu`；成员号级联 `shipped` |
-| 调拨 `transfer_order` | 发运 / 收货 | HU 整体 `move`；数量账按 HU 内容汇总；跨组织时 HU `org_id` 同步改 |
+| 调拨 `transfer_order` | 发运 / 收货 | 同组织：HU 整体 `move`；跨组织：**复制 HU 结构到目标组织**，源 HU 随发运置 `shipped`，不改 `org_id`（依据 Infor LN 多公司 HU 复制）；数量账按叶子 `material` 行汇总 |
 | 盘点 `inventory_count` | P7 | 按 HU 计数，差异写 `adjust` 事件 |
 | 退货 `rma` | P7 | 按 HU 整箱退回 |
+
+as-built 边界（2026-11-04）：收货侧（含 TO 收货、完工成品）已接线，载体为 `receipt_lines.hu_no`；**调拨发运侧未接线**——`transfer_order_lines` 无 `hu_no` 载体，需后续补列后再接；跨组织收货按行扁平建箱，**不做子树结构复制**。
 
 门控：所有接线先用 `hu_schema_ready(ds)` 判断三表是否存在；不存在时整条支路 no-op，不影响 P6a/P6b/P6c 主流程。
 
@@ -496,15 +504,21 @@
 - 新建 `meta/schemas/hu_transaction.yaml`（`hu_transactions`，只读，`skip_auto_menu: true`）。
 - 菜单：`handling-unit-list` 挂 `inventory` 根菜单（`sort_order=9`）；`hu-transaction-list` 只读（`sort_order=10`）。实施时以 DB 当前最大值为准。
 - 权限：`handling_unit:handling_unit_{read|create|update|delete}`、`handling_unit_item:handling_unit_item_read`、`hu_transaction:hu_transaction_read`。
-- 枚举：`hu_type` / `hu_status` / `hu_content_type` / `hu_txn_type`（v207 注册）。
-- 迁移 `v207__handling_unit.py`：建三表 + 索引 + 枚举 + 权限 + 菜单；**不回填历史数据**（存量无容器信息，不做猜测）。
+- 枚举：`hu_type` / `hu_status` / `hu_content_type` / `hu_txn_type`（v211 注册）。
+- 迁移 `v211__handling_unit.py`：建三表 + 索引 + 枚举 + 权限 + 菜单；另给
+  `receipt_lines` / `shipment_lines` 补可选 `hu_no` / `hu_type` 两列；
+  **不回填历史数据**（存量无容器信息，不做猜测）。
 
 ### 11.7 错误码
 
 | 码 | 触发 |
 |---|---|
-| `HU_NOT_FOUND` | `hu_id` / `hu_no` 不存在 |
+| `HU_NOT_FOUND` | `hu_id` / `hu_no` 不存在（也用于目标库位缺失） |
+| `HU_NO_REQUIRED` | 建箱未填 `hu_no` |
+| `HU_NO_TOO_LONG` | `hu_no` 超过 40 字符 |
+| `HU_TYPE_INVALID` | `hu_type` 不在枚举内 |
 | `HU_NO_DUPLICATE` | 组织内 `hu_no` 重复 |
+| `HU_SERIAL_CONTENT_TYPE_INVALID` | `packaging` / `hu` 行挂了 `serial_id` / `batch_id` |
 | `HU_SSCC_CHECKSUM_INVALID` | `hu_no` 为 18 位纯数字但 GS1 mod-10 校验位不符 |
 | `HU_STATUS_INVALID` | 当前状态不允许该动作（如 `sealed` 直接 `pack`） |
 | `HU_PARENT_SELF` | `parent_hu_id = id` |
@@ -525,7 +539,7 @@
 
 | # | 决策 | 依据 |
 |---|---|---|
-| H1 | **组织内唯一** `(org_id, hu_no)` | Oracle LPN 绑定 inventory org；SAP `VEKP` 带工厂；跨组织移动按“改归属 + 事件”处理，不做全局唯一 |
+| H1 | **组织内唯一** `(org_id, hu_no)` | Oracle LPN 绑定 inventory org；SAP `VEKP` 带工厂；Infor LN 多公司转移是“复制 HU 结构到收货公司”。跨组织按复制 + 源 HU 置 `shipped` 处理，不做全局唯一 |
 | H2 | **单父 + 冗余根**（`parent_hu_id` + `root_hu_id`），禁止 DAG | SAP `UNVEL` 单上层；Oracle Fusion 用 `PARENT_LPN_ID` + `OUTERMOST_LPN_ID` 同样是单父 + 冗余最外层。物理包装不可能同时属于两个容器；运输域的重切分用 Ship Unit 表达，不污染 HU |
 | H3 | **允许复用，但仅限 `is_reusable=1`**；`hu_no` 不放开唯一 | Oracle 空 LPN 可复用；周转箱/托盘是常态。历史留在 `hu_transactions`，`cycle_no` 标识第几次使用；一次性纸箱不复用 |
 | H4 | `open → sealed → shipped`，加 `void`；不引入 `received/in_stock` | 仓储已由 `location_id` + 状态表达；SAP 的 `0001/0010/0020/0030` 细分对当前业务过重。`open` 对应 `0001/0010`，`sealed` 对应 `0030`，`shipped` 对应 `0050` |
@@ -559,10 +573,12 @@
 
 | 步骤 | 内容 | 依赖 |
 |---|---|---|
-| D1 | v207 建表 + `handling_unit_service` 基础动作（create / pack / unpack / seal / void） | 无 |
+| D1 | v211 建表 + `handling_unit_service` 全动作（create / pack / unpack / move / consolidate / split / seal / unseal / reuse / void / ship / reverse + 3 查询） | 无 |
 | D2 | 嵌套与迁移（`move` / `consolidate` / `split` / `reuse`） | D1 |
 | D3 | 单据接线（收货 / 完工 / 发运 / 调拨）+ 红冲 | D1、D2 |
 | D4 | 查询 UI（容器内容树、按号查容器） | D1 |
+
+as-built 备注：D1 / D2 / D3（收货、完工、发运、红冲）已完成并测试通过；D3 的调拨发运侧未接线（缺 `transfer_order_lines.hu_no`）；D4 查询 UI 未实施（`hu_contents` / `hu_stock` / `hu_where_used` 服务方法已就绪，仅缺页面入口）。
 
 ### 11.12 明确不做
 
@@ -572,3 +588,44 @@
 - LPN 即库位模式（`HU == location`）。
 - 运输域：承运人、路线、装载顺序、运费、ASN/EDI 856、OTM Ship Unit / THU。
 - HU 与销售订单行 / 调拨单行的预留关系（P7）。
+
+### 11.13 嵌套容器的库存口径与内容查询
+
+#### 11.13.1 库存账不按 HU 记
+
+- `inventory_balances` 仍是唯一库存账，维度 `(item, org, location, batch)`；HU 不是账本，不新增余额行，也不产生第二套库存。
+- **嵌套不增加库存数量**：父 HU 的“库存”是子树叶子 `material` 行之和，不是父行与子行重复相加。
+- `content_type='hu'` 行 `qty=0`，只表达结构；任何数量汇总必须只取 `material` 行。
+- 对照 IFS：IFS 把 `handling unit` 挂在库存记录上（未装箱为 0）；我们不挂，所以“未装箱”= 无 `handling_unit_items` 记录，不需要哨兵值。
+
+#### 11.13.2 两种查询口径
+
+| 方法 | 口径 | 用途 |
+|---|---|---|
+| `hu_contents(mode='direct')` | 直接子行（含 `content_type='hu'`） | 编辑容器、查看当前层 |
+| `hu_contents(mode='exploded')` | 递归到叶子，返回 `material` 行 + 嵌套路径 | 查看整托实际装了什么 |
+| `hu_stock()` | `exploded` 后按 `(item, batch, serial)` 聚合 | 回答“这托里有多少库存” |
+
+#### 11.13.3 能看到的字段
+
+- 物料、数量、单位、批次 `batch_id`、序列号 `serial_id`；库位取 HU 头 `location_id`，内容行不单独存库位。
+- 序列号实时状态（`usage_status` / `quality_status`）仍以 `serial_numbers` 为准；`handling_unit_items` 只存归属，不复制状态。
+- 批次属性通过 `batch_id` 关联批次主档。
+
+#### 11.13.4 不重复计数的保证
+
+- 序列号件：`uq_serial_in_hu` 全局部分唯一，一个号只能出现在一条 `material` 行。
+- 批次/非序列号件：同一物理件只在一条 `material` 行登记，靠作业规范；`pack` 不做同 `(item, batch)` 自动合并（同批次可能是不同物理件），也不跨父子层搬移已有行。
+- 嵌套只通过 `content_type='hu'` 行表达，**不把子容器内容复制到父容器**。
+
+#### 11.13.5 与库存可用量的关系
+
+- HU 不冻结库存：`sealed` 不改变 `inventory_balances` 可用量；质量冻结走 `serial_numbers.quality_status` 或批次质量状态。
+- 按 HU 汇总得到的是“已装箱数量”，不等于组织总库存；未装箱库存不在任何 HU 中。
+- 可选一致性校验（非强制）：`hu_stock()` 之和不得超过同维度 `inventory_balances`；超出说明装箱数据与账不符，交人工处置，不做自动修正。
+
+#### 11.13.6 明确不做
+
+- 不建 `hu_balances` / HU 级余额表。
+- 不按 HU 做库存预留、拣货分配（P7）。
+- 不做父子层数量对账触发器。

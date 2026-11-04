@@ -210,6 +210,8 @@ class ShipmentService:
 
         # P6a §5 register_shipment：校验在库、写 ship 事件与 link、置 shipped。
         self._register_shipment_serials(lines, delivery_id)
+        # P6a-2 §11.5：按行 hu_no 整箱发运（容器须 sealed；表缺失时 no-op）
+        self._ship_hus(delivery_id)
 
         # INV-2：发运核销需求预留并写 shipment → SO 行 trace（未建表时空操作）。
         self._fulfill_reservations(lines, delivery_id, header.get('order_id'))
@@ -419,6 +421,21 @@ class ShipmentService:
             raise ShipmentError(str(error),
                                 field_name=error.field_name or 'serial_no',
                                 rule=error.rule or 'SERIAL_SHIPMENT_REGISTER_FAILED')
+
+    def _ship_hus(self, delivery_id: Any) -> None:
+        """P6a-2 §11.5：整箱发运；容器必须已密封且成员号在库。"""
+        from meta.services.handling_unit_service import hu_schema_ready
+        if not hu_schema_ready(self.ds):
+            return
+        from meta.services.handling_unit_service import (
+            HandlingUnitError, HandlingUnitService,
+        )
+        try:
+            HandlingUnitService(self.ds).ship_shipment(delivery_id)
+        except HandlingUnitError as error:
+            raise ShipmentError(str(error),
+                                field_name=error.field_name or 'hu_no',
+                                rule=error.rule or 'HU_SHIP_FAILED')
 
     # ------------------------------------------------------------------ 编号
 

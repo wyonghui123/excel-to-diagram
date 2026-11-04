@@ -369,6 +369,48 @@ fields:
     ui:
       widget: input
 
+  # 可选装箱：过账后按容器号建箱 / 装箱（§11.5）；空 = 不装箱
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；过账后建箱并把本行装入该容器
+    semantics:
+      meaning: 包装容器业务标识
+      data_category: code
+    ui:
+      widget: input
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    nullable: true
+    max_length: 20
+    description: 容器类型（仅建新容器时使用；空 = carton）
+    enum_values:
+      - value: pallet
+        label: 托盘
+        color: primary
+      - value: carton
+        label: 纸箱
+        color: info
+      - value: bin
+        label: 料箱
+        color: success
+      - value: container
+        label: 集装箱
+        color: warning
+      - value: other
+        label: 其他
+        color: default
+    semantics:
+      meaning: 包装容器类型
+    ui:
+      widget: select
+
   # 入库库位 ≠ 收货地点（D-RC-10）；只作过账契约锚点，本波不写库存
   - id: putaway_location_id
     name: 入库库位
