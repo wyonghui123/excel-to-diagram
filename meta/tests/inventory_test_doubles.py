@@ -5,11 +5,16 @@
 DDL 与种子直接复用 v201 迁移常量，避免测试与迁移漂移。
 """
 
+import io
 import sqlite3
+from contextlib import redirect_stdout
 
 from meta.migrations.v201__inventory_foundation import (
     BAL_TABLE, INDEXES, NUMBER_SEQUENCE, TABLES, TRANSACTION_TYPES, TX_TABLE,
     TYPES_TABLE,
+)
+from meta.migrations.v205__inventory_segment_reservation import (
+    apply_segment_schema,
 )
 
 ORG_ID = 1
@@ -173,6 +178,9 @@ def _install_tables(conn):
             conn.execute(ddl)
     for name, _table, ddl in INDEXES:
         conn.execute(ddl)
+    # INV-2：段列 / 预留表 / 线索表 / 余额新唯一键（与 v205 单一 DDL 来源）
+    with redirect_stdout(io.StringIO()):
+        apply_segment_schema(conn)
 
 
 def _seed_types(conn):

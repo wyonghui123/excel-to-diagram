@@ -655,6 +655,64 @@ fields:
       fieldGroup: 序列号
       fieldGroupPosition: 230
 
+  # 库存段策略开关（INV-2 S1）：段是否可用的物料级闸门。
+  #   so_segment_enabled 默认关闭；customer_owned 段本期恒禁用（仅枚举保留）。
+  - id: so_segment_enabled
+    name: 允许 SO 专用段
+    type: boolean
+    db_column: so_segment_enabled
+    required: true
+    default: false
+    description: 是否允许销售订单专用库存段（默认关闭）
+    semantics:
+      meaning: 物料是否允许 SO 专用段
+    ui:
+      widget: switch
+      fieldGroup: 库存段
+      fieldGroupPosition: 240
+
+  - id: consignment_enabled
+    name: 允许供应商寄售
+    type: boolean
+    db_column: consignment_enabled
+    required: true
+    default: false
+    description: 是否允许供应商寄售库存
+    semantics:
+      meaning: 物料是否允许寄售
+    ui:
+      widget: switch
+      fieldGroup: 库存段
+      fieldGroupPosition: 250
+
+  - id: hard_peg_default
+    name: 默认硬钉
+    type: boolean
+    db_column: hard_peg_default
+    required: true
+    default: false
+    description: 预留默认硬钉（MTO/ETO 物料建议开启）
+    semantics:
+      meaning: 物料预留是否默认硬钉
+    ui:
+      widget: switch
+      fieldGroup: 库存段
+      fieldGroupPosition: 260
+
+  - id: valuation_relevant
+    name: 估值相关
+    type: boolean
+    db_column: valuation_relevant
+    required: true
+    default: true
+    description: 是否参与库存估值（INV-5 使用；寄售/客供料应关闭）
+    semantics:
+      meaning: 物料库存是否估值相关
+    ui:
+      widget: switch
+      fieldGroup: 库存段
+      fieldGroupPosition: 270
+
   # I 外部标识（主值；配对值走 item_xref 子表）
   - id: barcode
     name: 主条码

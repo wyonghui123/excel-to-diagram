@@ -1,0 +1,636 @@
+# 库存预留（Inventory Reservation）—— INV-2 S2
+# 依据: docs/specs/inv2-reservation-atp/spec.md §3.3 / §4.2
+#
+# 口径:
+#   ① 预留量唯一事实源；inventory_balances.qty_reserved 只是本表的投影。
+#   ② 段由 stock_segment_service.resolve_segment 解析，伙伴列 0 哨兵。
+#   ③ hard 预留在目标段扣减；soft 在公共池扣减，可释放/改派。
+#   ④ 状态机 open → partially_fulfilled → fulfilled / cancelled / expired。
+#   ⑤ 无人工写入口的字段（qty_reserved/qty_fulfilled/status）由服务维护。
+
+id: inventory_reservation
+name: 库存预留
+table_name: inventory_reservations
+description: 库存预留与 ATP 占用（需求节点 × 库存段 × 硬软钉）
+display_name_field: reservation_no
+aspects: [audit_aspect]
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_reservation:inventory_reservation_read
+    # 列表复用 read，不再新增 list 权限码（Spec §5 共 5 条）
+    list: inventory_reservation:inventory_reservation_read
+    create: inventory_reservation:inventory_reservation_create
+    update: inventory_reservation:inventory_reservation_update
+    delete: inventory_reservation:inventory_reservation_delete
+    release: inventory_reservation:inventory_reservation_update
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: inventory_reservation_read
+    name: 查询库存预留
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_reservations/{id}"
+    description: 查询单条库存预留
+  - id: inventory_reservation_list
+    name: 查询库存预留列表
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_reservations"
+    description: 查询库存预留列表
+  - id: inventory_reservation_create
+    name: 创建库存预留
+    type: crud
+    method: POST
+    path: "/api/v1/inventory_reservations"
+    description: 创建库存预留（幂等键 reservation_key）
+  - id: inventory_reservation_update
+    name: 编辑库存预留
+    type: crud
+    method: PUT
+    path: "/api/v1/inventory_reservations/{id}"
+    description: 更新预留（数量/有效期/状态由服务校验）
+  - id: inventory_reservation_delete
+    name: 删除库存预留
+    type: crud
+    method: DELETE
+    path: "/api/v1/inventory_reservations/{id}"
+    description: 删除预留（仅 cancelled/expired 允许）
+  - id: inventory_reservation_release
+    name: 释放库存预留
+    type: action
+    method: POST
+    path: "/api/v1/inventory_reservations/{id}/release"
+    description: 释放预留（写 cancelled 并回写 qty_reserved 投影）
+    action_ref: inventory_reservation:inventory_reservation_update
+    authorization:
+      permission: inventory_reservation:inventory_reservation_update
+
+semantics:
+  meaning: 库存预留
+  category: business_document
+  business_key: [reservation_no]
+  display_name_field: reservation_no
+  aliases:
+    - 库存预留
+    - 预留
+    - reservation
+    - ATP 占用
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: reservation_no
+    name: 预留号
+    type: string
+    db_column: reservation_no
+    required: true
+    unique: true
+    max_length: 32
+    description: 预留号（RSV 序列：RSV-年月-6 位流水），生成后不可改
+    semantics:
+      meaning: 预留业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 预留数量归属库存组织
+    semantics:
+      meaning: 库存组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 预留物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 预留数量单位；按 base_qty 口径校验
+    semantics:
+      meaning: 单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+
+  - id: demand_object_type
+    name: 需求对象类型
+    type: string
+    db_column: demand_object_type
+    required: true
+    max_length: 30
+    description: 需求节点对象类型
+    enum_values:
+      - value: sales_order_line
+        label: 销售订单行
+        color: primary
+        is_initial: true
+      - value: project_task
+        label: 项目任务
+        color: info
+      - value: work_order
+        label: 工单
+        color: warning
+      - value: service_order
+        label: 服务单
+        color: success
+      - value: forecast
+        label: 预测
+        color: default
+    semantics:
+      meaning: 需求节点类型
+      filterable: true
+      filter_type: enum
+      filter_label: 需求类型
+
+  - id: demand_object_id
+    name: 需求对象
+    type: integer
+    db_column: demand_object_id
+    required: true
+    description: 需求节点主键（订单/项目/工单等）
+    semantics:
+      meaning: 需求对象引用
+
+  - id: demand_line_id
+    name: 需求行
+    type: integer
+    db_column: demand_line_id
+    required: true
+    default: 0
+    description: 需求节点行主键；0 = 头级需求
+    semantics:
+      meaning: 需求行引用
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 指定库位；为空表示不限定
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    nullable: true
+    description: 指定批次；为空表示不限定
+    semantics:
+      meaning: 批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+
+  - id: stock_segment_type
+    name: 库存段类型
+    type: string
+    db_column: stock_segment_type
+    required: true
+    default: owned
+    max_length: 20
+    description: 预留所属库存段
+    enum_values:
+      - value: owned
+        label: 自有
+        color: success
+        is_initial: true
+      - value: project_task
+        label: 项目任务
+        color: primary
+      - value: sales_order_line
+        label: 销售订单行
+        color: warning
+      - value: supplier_consignment
+        label: 供应商寄售
+        color: info
+      - value: customer_owned
+        label: 客户所有
+        color: secondary
+    semantics:
+      meaning: 库存段类型
+      filterable: true
+      filter_type: enum
+      filter_label: 库存段
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    required: true
+    default: 0
+    description: 项目段归属项目；0 = 无项目
+    semantics:
+      meaning: 项目引用
+
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    required: true
+    default: 0
+    description: 项目任务段；0 = 无任务
+    semantics:
+      meaning: 项目任务引用
+
+  - id: sales_order_line_id
+    name: 销售订单行
+    type: integer
+    db_column: sales_order_line_id
+    required: true
+    default: 0
+    description: SO 段所属订单行；0 = 无 SO 段
+    semantics:
+      meaning: 销售订单行引用
+
+  - id: owner_party_id
+    name: 所有权方
+    type: integer
+    db_column: owner_party_id
+    required: true
+    default: 0
+    description: 寄售/客供料所有权方；0 = 自有
+    semantics:
+      meaning: 所有权方引用
+
+  - id: qty_reserved
+    name: 预留数量
+    type: number
+    db_column: qty_reserved
+    required: true
+    description: 预留数量（基本单位，正数）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 预留数量
+    ui:
+      widget: number
+      editable: false
+
+  - id: qty_fulfilled
+    name: 已核销数量
+    type: number
+    db_column: qty_fulfilled
+    required: true
+    default: 0
+    description: 已核销数量；累计不得超过 qty_reserved
+    semantics:
+      meaning: 已核销数量
+    ui:
+      widget: number
+      editable: false
+
+  - id: peg_type
+    name: 钉类型
+    type: string
+    db_column: peg_type
+    required: true
+    default: soft
+    max_length: 10
+    description: 硬钉 / 软钉
+    enum_values:
+      - value: hard
+        label: 硬钉
+        color: danger
+      - value: soft
+        label: 软钉
+        color: info
+        is_initial: true
+    semantics:
+      meaning: 钉类型
+      filterable: true
+      filter_type: enum
+      filter_label: 钉类型
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    max_length: 20
+    description: open / partially_fulfilled / fulfilled / cancelled / expired
+    enum_values:
+      - value: open
+        label: 开放
+        color: primary
+        is_initial: true
+      - value: partially_fulfilled
+        label: 部分核销
+        color: warning
+      - value: fulfilled
+        label: 已核销
+        color: success
+      - value: cancelled
+        label: 已取消
+        color: default
+      - value: expired
+        label: 已过期
+        color: danger
+    semantics:
+      meaning: 预留状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+    ui:
+      widget: select
+      editable: false
+
+  - id: valid_from
+    name: 生效时间
+    type: datetime
+    db_column: valid_from
+    nullable: true
+    description: 预留生效时间
+    semantics:
+      meaning: 生效时间
+
+  - id: valid_to
+    name: 失效时间
+    type: datetime
+    db_column: valid_to
+    nullable: true
+    description: 预留失效时间；过期批处理依据
+    semantics:
+      meaning: 失效时间
+
+  - id: source_doc_type
+    name: 来源单据类型
+    type: string
+    db_column: source_doc_type
+    nullable: true
+    max_length: 50
+    description: 来源单据对象类型
+    semantics:
+      meaning: 来源单据类型
+
+  - id: source_doc_id
+    name: 来源单据
+    type: integer
+    db_column: source_doc_id
+    nullable: true
+    description: 来源单据主键
+    semantics:
+      meaning: 来源单据引用
+
+  - id: source_line_id
+    name: 来源行
+    type: integer
+    db_column: source_line_id
+    nullable: true
+    description: 来源单据行主键
+    semantics:
+      meaning: 来源行引用
+
+  - id: reservation_key
+    name: 幂等键
+    type: string
+    db_column: reservation_key
+    required: true
+    max_length: 200
+    description: 业务幂等键（重复创建返回既有预留）
+    semantics:
+      meaning: 预留幂等键
+      searchable: true
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    nullable: true
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 创建人
+      audit_field: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_by
+    name: 更新人
+    type: string
+    db_column: updated_by
+    nullable: true
+    max_length: 200
+    description: 更新人
+    semantics:
+      meaning: 更新人
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    nullable: true
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [reservation_key]
+    unique: true
+    name: uq_reservation_key
+    description: 预留幂等唯一键
+  - fields: [demand_object_type, demand_object_id, demand_line_id]
+    name: idx_reservation_demand
+    description: 按需求节点查预留
+  - fields: [org_id, item_id, stock_segment_type, project_task_id,
+             sales_order_line_id, owner_party_id, status]
+    name: idx_reservation_segment
+    description: 按段汇总预留（ATP 口径）
+
+relations:
+  - id: inventory_reservation_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_reservation_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_reservation_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_reservation_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_reservation_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 库存预留
+    columns:
+      - field: reservation_no
+        width: 180
+        sortable: true
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: item_id
+        width: 200
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: demand_object_type
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: demand_object_id
+        width: 130
+      - field: stock_segment_type
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: qty_reserved
+        width: 110
+        align: right
+      - field: qty_fulfilled
+        width: 110
+        align: right
+      - field: peg_type
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: valid_to
+        width: 170
+    selection:
+      enabled: true
+    searchFields: [reservation_no, reservation_key]
+    actions:
+      - id: release
+        name: 释放
+        action_ref: inventory_reservation_release
+        type: action
+        icon: Unlock
+        confirm:
+          title: 释放预留
+          message: 确认释放该预留？释放后数量回到可用池。
+    defaultSort:
+      field: created_at
+      order: desc
+  form:
+    title: 库存预留
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [reservation_no, org_id, item_id]
+          - fields: [uom_id, demand_object_type, demand_object_id, demand_line_id]
+      - title: 库存段
+        columns:
+          - fields: [stock_segment_type, project_id, project_task_id,
+                    sales_order_line_id, owner_party_id]
+      - title: 数量与钉定
+        columns:
+          - fields: [qty_reserved, peg_type, status, valid_from, valid_to]
+  detail:
+    layout: tabs
+    title: "库存预留 #{record.reservation_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [reservation_no, org_id, item_id, uom_id,
+                 demand_object_type, demand_object_id, demand_line_id,
+                 location_id, batch_id, stock_segment_type, project_id,
+                 project_task_id, sales_order_line_id, owner_party_id,
+                 qty_reserved, qty_fulfilled, peg_type, status,
+                 valid_from, valid_to, reservation_key, remark,
+                 created_by, created_at, updated_at]

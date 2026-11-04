@@ -3,9 +3,10 @@
 #
 # 口径（已定）:
 #   ① 余额是 inventory_transactions 的投影，不是独立真相；可随时重建。
-#   ② 唯一键 = (org_id, location_id, item_id, batch_id, stock_status)；
-#      batch_id 为空时用 0 哨兵，保证 SQLite 唯一约束可用。
-#   ③ qty_reserved 在 INV-1 恒为 0，为 INV-2 预留/ATP 占位。
+#   ② 唯一键 = (org_id, location_id, item_id, batch_id, stock_status,
+#      stock_segment_type, project_id, project_task_id, sales_order_line_id,
+#      owner_party_id)；空伙伴列用 0 哨兵，保证 SQLite 唯一约束可用。
+#   ③ qty_reserved 是 inventory_reservations 的投影，由预留服务回写。
 #   ④ 在途量不落本表：由调拨单行 qty_shipped - qty_received 派生。
 #   ⑤ 只读对象：无 create / update / delete 权限与入口。
 
@@ -157,9 +158,96 @@ fields:
     db_column: qty_reserved
     required: true
     default: 0
-    description: 预留数量；INV-1 恒为 0，INV-2 启用
+    description: 预留数量投影；唯一事实源为 inventory_reservations
     semantics:
       meaning: 预留数量
+
+  - id: stock_segment_type
+    name: 库存段类型
+    type: string
+    db_column: stock_segment_type
+    required: true
+    default: owned
+    max_length: 20
+    description: 库存段类型（自有 / 项目任务 / 销售订单行 / 供应商寄售 / 客户所有）
+    enum_values:
+      - value: owned
+        label: 自有
+        color: success
+        is_initial: true
+      - value: project_task
+        label: 项目任务
+        color: primary
+      - value: sales_order_line
+        label: 销售订单行
+        color: warning
+      - value: supplier_consignment
+        label: 供应商寄售
+        color: info
+      - value: customer_owned
+        label: 客户所有
+        color: secondary
+    semantics:
+      meaning: 库存段类型
+      filterable: true
+      filter_type: enum
+      filter_label: 库存段
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    required: true
+    default: 0
+    description: 项目段归属项目；0 = 无项目
+    semantics:
+      meaning: 项目引用
+      display:
+        type: association
+        target_type: project
+        display_field: name
+
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    required: true
+    default: 0
+    description: 项目任务段；0 = 无任务
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+
+  - id: sales_order_line_id
+    name: 销售订单行
+    type: integer
+    db_column: sales_order_line_id
+    required: true
+    default: 0
+    description: 销售订单专用段；0 = 无 SO 段
+    semantics:
+      meaning: 销售订单行引用
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+
+  - id: owner_party_id
+    name: 所有权方
+    type: integer
+    db_column: owner_party_id
+    required: true
+    default: 0
+    description: 寄售/客供料所有权方；0 = 自有
+    semantics:
+      meaning: 所有权方引用
+      display:
+        type: association
+        target_type: party
+        display_field: name
 
   - id: updated_at
     name: 更新时间
@@ -172,10 +260,12 @@ fields:
       audit_field: true
 
 indexes:
-  - fields: [org_id, location_id, item_id, batch_id, stock_status]
+  - fields: [org_id, location_id, item_id, batch_id, stock_status,
+             stock_segment_type, project_id, project_task_id,
+             sales_order_line_id, owner_party_id]
     unique: true
-    name: uq_inv_balance_key
-    description: 余额唯一键
+    name: uq_inv_balance_segment
+    description: 余额唯一键（含库存段）
   - fields: [org_id, item_id, stock_status]
     name: idx_inv_balance_org_item
 

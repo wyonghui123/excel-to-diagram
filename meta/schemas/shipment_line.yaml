@@ -170,6 +170,24 @@ fields:
       relation: item
       hidden_in_form: true
 
+  # INV-2：项目任务段来源；发运继承 SO 行/项目任务归属
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 项目任务段归属（由来源单据继承；为空 = 无任务段）
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+    ui:
+      widget: select
+      relation: project_task
+      hidden_in_form: true
+
   - id: uom_id
     name: 计量单位
     type: integer

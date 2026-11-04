@@ -180,10 +180,12 @@ def test_balance_schema_declares_projection_object():
         assert name in fields, '缺字段 %s' % name
     assert fields['batch_id'].get('default') == 0
     index = next(i for i in doc['indexes']
-                 if i.get('name') == 'uq_inv_balance_key')
+                 if i.get('name') == 'uq_inv_balance_segment')
     assert index['unique'] is True
     assert index['fields'] == ['org_id', 'location_id', 'item_id', 'batch_id',
-                               'stock_status']
+                               'stock_status', 'stock_segment_type',
+                               'project_id', 'project_task_id',
+                               'sales_order_line_id', 'owner_party_id']
 
 
 def test_readonly_schemas_have_no_write_actions():

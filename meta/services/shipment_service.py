@@ -211,12 +211,56 @@ class ShipmentService:
         # P6a §5 register_shipment：校验在库、写 ship 事件与 link、置 shipped。
         self._register_shipment_serials(lines, delivery_id)
 
+        # INV-2：发运核销需求预留并写 shipment → SO 行 trace（未建表时空操作）。
+        self._fulfill_reservations(lines, delivery_id, header.get('order_id'))
+
         order_line_ids = sorted({int(line['order_line_id']) for line in lines})
         logger.info('[shipment] ship_confirm id=%s schedules=%s', delivery_id,
                     list(grouped.keys()))
         return {'id': header['id'], 'status': STATUS_SHIPPED,
                 'order_id': header['order_id'], 'line_ids': order_line_ids,
                 'idempotent': False}
+
+    def _fulfill_reservations(self, lines, delivery_id, order_id) -> None:
+        """发运核销：按 SO 行汇总数量核销预留，并链接 shipment → SO 行 trace。"""
+        from meta.services.demand_trace_service import DemandTraceService
+        from meta.services.inventory_reservation_service import (
+            InventoryReservationService,
+        )
+
+        grouped: Dict[int, Decimal] = {}
+        for line in lines:
+            if line.get('status') == STATUS_CANCELLED:
+                continue
+            order_line_id = int(line.get('order_line_id') or 0)
+            if not order_line_id:
+                continue
+            grouped[order_line_id] = grouped.get(order_line_id, Decimal('0')) \
+                + _to_decimal(line.get('qty'))
+        if not grouped:
+            return
+        reservations = InventoryReservationService(self.ds)
+        traces = DemandTraceService(self.ds)
+        for order_line_id, qty in grouped.items():
+            try:
+                reservations.fulfill_by_demand(
+                    'sales_order_line', order_line_id, qty)
+                traces.link_supply_demand({
+                    'supply_object_type': 'shipment',
+                    'supply_object_id': int(delivery_id),
+                    'supply_line_id': 0,
+                    'demand_object_type': 'sales_order_line',
+                    'demand_object_id': order_line_id,
+                    'demand_line_id': order_line_id,
+                    'trace_type': 'reservation',
+                    'peg_type': 'soft',
+                    'allocated_qty': float(qty),
+                    'source_doc_type': 'sales_order',
+                    'source_doc_id': order_id,
+                })
+            except Exception as exc:  # 预留/trace 为附加能力，不阻断发运
+                logger.warning('[shipment] 预留核销跳过 order_line=%s: %s',
+                               order_line_id, exc)
 
     def receive(self, delivery_id: Any, signature_ref: Optional[str] = None,
                 actual_arrival_date: Optional[str] = None) -> Dict[str, Any]:

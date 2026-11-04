@@ -610,6 +610,10 @@ def create_app(db_path=None):
     # [INV-4 2026-11-03] 库存盘点单守卫（P59）：快照生成、实盘录入、容差提交、差异过账、冻结解除。
     from meta.core.interceptors.inventory_count_guard_interceptor import InventoryCountGuardInterceptor
     bo_framework.register_interceptor(InventoryCountGuardInterceptor())
+    # [INV-2 2026-11-04] 库存预留守卫（P60）：创建委托服务取号/段解析/投影，
+    #   更新只允许 status=cancelled 触发释放，段与数量列不可变。
+    from meta.core.interceptors.inventory_reservation_guard_interceptor import InventoryReservationGuardInterceptor
+    bo_framework.register_interceptor(InventoryReservationGuardInterceptor())
     # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
     #   服务请求行 / 请购行的行级必填。
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。

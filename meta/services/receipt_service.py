@@ -1001,19 +1001,32 @@ class ReceiptService:
         from meta.services.inventory_posting_service import (
             InventoryPostingService,
         )
+        from meta.services.stock_segment_service import StockSegmentService
 
         if not InventoryGuardService(self.ds).posting_enabled():
             return
 
         org_id = header.get('inventory_org_id')
         location_id = header.get('deliver_to_location_id')
+        segments = StockSegmentService(self.ds)
+        supplier_id = header.get('supplier_party_id')
         entries = []
         for item in checked:
             line = item.get('line') or {}
             net = float(item.get('net') or 0)
             if net <= 0:
                 continue
-            entries.append({
+            context = {
+                'item_id': line.get('item_id'),
+                'org_id': org_id,
+                'project_task_id': line.get('project_task_id') or 0,
+            }
+            # G1：寄售物料收货时所有权仍归供应商；普通物料走 owned。
+            if supplier_id and segments.item_flags(
+                    line.get('item_id'))['consignment_enabled']:
+                context['owner_party_id'] = supplier_id
+            segment = segments.resolve_segment(context)
+            entry = {
                 'transaction_type': transaction_type,
                 'transaction_date': header.get('receipt_date'),
                 'org_id': org_id,
@@ -1026,7 +1039,9 @@ class ReceiptService:
                 'stock_status': 'unrestricted',
                 'source_line_id': line.get('id'),
                 'remark': '收货单 %s' % header.get('receipt_no'),
-            })
+            }
+            entry.update(segment)
+            entries.append(entry)
         if not entries:
             return
 

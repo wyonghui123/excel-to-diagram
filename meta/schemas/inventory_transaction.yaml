@@ -7,6 +7,7 @@
 #   ③ 唯一性 = (source_event_key, source_line_id)，保证单据动作幂等。
 #   ④ 一条原分录最多被反冲一次（reversal_of_transaction_id 部分唯一）。
 #   ⑤ 编号 INV-{DATE:yyyymm}-{SEQ:6}，按 transaction_date 分月。
+#   ⑥ 库存段随分录持久化：段变更只能走段转移事务，禁止原地修改。
 
 id: inventory_transaction
 name: 库存事务
@@ -235,6 +236,93 @@ fields:
       filter_type: enum
       filter_label: 库存状态
 
+  - id: stock_segment_type
+    name: 库存段类型
+    type: string
+    db_column: stock_segment_type
+    required: true
+    default: owned
+    max_length: 20
+    description: 库存段类型（自有 / 项目任务 / 销售订单行 / 供应商寄售 / 客户所有）
+    enum_values:
+      - value: owned
+        label: 自有
+        color: success
+        is_initial: true
+      - value: project_task
+        label: 项目任务
+        color: primary
+      - value: sales_order_line
+        label: 销售订单行
+        color: warning
+      - value: supplier_consignment
+        label: 供应商寄售
+        color: info
+      - value: customer_owned
+        label: 客户所有
+        color: secondary
+    semantics:
+      meaning: 库存段类型
+      filterable: true
+      filter_type: enum
+      filter_label: 库存段
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    required: true
+    default: 0
+    description: 项目段归属项目；0 = 无项目
+    semantics:
+      meaning: 项目引用
+      display:
+        type: association
+        target_type: project
+        display_field: name
+
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    required: true
+    default: 0
+    description: 项目任务段；0 = 无任务
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+
+  - id: sales_order_line_id
+    name: 销售订单行
+    type: integer
+    db_column: sales_order_line_id
+    required: true
+    default: 0
+    description: 销售订单专用段；0 = 无 SO 段
+    semantics:
+      meaning: 销售订单行引用
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+
+  - id: owner_party_id
+    name: 所有权方
+    type: integer
+    db_column: owner_party_id
+    required: true
+    default: 0
+    description: 寄售/客供料所有权方；0 = 自有
+    semantics:
+      meaning: 所有权方引用
+      display:
+        type: association
+        target_type: party
+        display_field: name
+
   - id: source_doc_type
     name: 来源单据类型
     type: string
@@ -342,6 +430,10 @@ indexes:
     description: 一条原分录最多被反冲一次（部分唯一，NULL 不约束）
   - fields: [org_id, item_id, transaction_date]
     name: idx_inv_tx_org_item_date
+  - fields: [org_id, item_id, stock_segment_type, project_task_id,
+             sales_order_line_id, owner_party_id]
+    name: idx_inv_tx_segment
+    description: 按段查询在途/在手
   - fields: [source_doc_type, source_doc_id]
     name: idx_inv_tx_source_doc
   - fields: [org_id, location_id, item_id]

@@ -261,9 +261,17 @@ class SalesOrderFulfillmentService:
                 [SCHEDULE_STATUS_CANCELLED, order_id])
 
         status = self.recompute_order(order_id)
+        # INV-2：订单取消 → 释放该单全部活跃预留（未建预留表时为空操作）
+        from meta.services.inventory_reservation_service import (
+            InventoryReservationService,
+        )
+        reservations_released = InventoryReservationService(
+            self.ds).release_by_source(
+                'sales_order', order_id, reason='销售订单取消')
         return {
             'lines_cancelled': lines_cancelled,
             'schedules_cancelled': schedules_cancelled,
+            'reservations_released': reservations_released,
             'fulfillment_status': status,
         }
 

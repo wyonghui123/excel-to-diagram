@@ -195,6 +195,32 @@ class SalesOrderGuardInterceptor(Interceptor):
         except SalesOrderAmountError as e:
             self._raise_validation(e)
 
+        self._after_line_reservation(context)
+
+    # ---------------- 预留接线（INV-2） ----------------
+
+    def _after_line_reservation(self, context: 'ActionContext') -> None:
+        """订单行落库后同步库存预留；删除行按来源释放。"""
+        from meta.services.inventory_reservation_service import (
+            InventoryReservationService,
+        )
+
+        service = InventoryReservationService(context.data_source)
+        try:
+            if context.action == 'crud_delete':
+                order_id = context.extra.get(_ORDER_ID_KEY) \
+                    or (context.old_data or {}).get('order_id')
+                service.release_by_source(
+                    'sales_order', order_id, line_id=context.object_id,
+                    reason='销售订单行删除')
+                return
+            if context.object_id in (None, ''):
+                return
+            service.sync_sales_order_line(context.object_id)
+        except Exception as e:  # 预留是附加能力，不阻断订单主流程
+            logger.warning('[inv2] SO 行 %s 预留同步跳过: %s',
+                           context.object_id, e)
+
     # ---------------- 履约状态接线 ----------------
 
     def _after_schedule_write(self, context: 'ActionContext') -> None:

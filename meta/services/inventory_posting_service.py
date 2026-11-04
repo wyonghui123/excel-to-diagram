@@ -25,6 +25,9 @@ from meta.services.inventory_guard_service import (
     INV_COUNT_BLOCKED, INV_POSTING_DISABLED, InventoryError,
     InventoryGuardService,
 )
+from meta.services.stock_segment_service import (
+    DEFAULT_SEGMENT, SEGMENT_COLUMNS, SEGMENT_OWNED, StockSegmentService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,18 @@ def _as_date(value: Any) -> date:
         return datetime.strptime(text, '%Y-%m-%d').date()
     except ValueError:
         return date.today()
+
+
+def _segment_clause(segment: Optional[Dict[str, Any]] = None):
+    """段过滤 SQL 片段与参数（默认 owned + 0 哨兵）。"""
+    seg = dict(DEFAULT_SEGMENT)
+    for col in SEGMENT_COLUMNS:
+        if segment and segment.get(col) not in (None, ''):
+            seg[col] = segment.get(col)
+    sql = ' AND ' + ' AND '.join('%s = ?' % col for col in SEGMENT_COLUMNS)
+    params: List[Any] = [seg['stock_segment_type']]
+    params.extend(int(seg[col] or 0) for col in SEGMENT_COLUMNS[1:])
+    return sql, params
 
 
 class InventoryPostingService:
@@ -137,6 +152,10 @@ class InventoryPostingService:
             normalized = self.guard.normalize_entry(
                 payload, allow_non_unrestricted=allow_non_unrestricted,
                 allow_blocked_batch=allow_blocked_batch)
+            if normalized.get('stock_segment_type') != SEGMENT_OWNED \
+                    or any(normalized.get(col) for col in SEGMENT_COLUMNS[1:]):
+                normalized.update(
+                    StockSegmentService(self.ds).validate_segment(normalized))
             if not bypass_posting_block and self._posting_block_active(
                     normalized.get('org_id'),
                     normalized.get('location_id')):
@@ -267,6 +286,11 @@ class InventoryPostingService:
                 'direction': direction,
                 'batch_id': original.get('batch_id'),
                 'stock_status': original.get('stock_status'),
+                'stock_segment_type': original.get('stock_segment_type') or SEGMENT_OWNED,
+                'project_id': int(original.get('project_id') or 0),
+                'project_task_id': int(original.get('project_task_id') or 0),
+                'sales_order_line_id': int(original.get('sales_order_line_id') or 0),
+                'owner_party_id': int(original.get('owner_party_id') or 0),
                 'source_line_id': original.get('source_line_id'),
                 'source_event_key': source_event_key,
                 'transfer_group_id': original.get('transfer_group_id'),
@@ -309,22 +333,29 @@ class InventoryPostingService:
     # ------------------------------------------------------------------
     def on_hand(self, org_id: Any, location_id: Any, item_id: Any,
                 batch_id: Any = None,
-                stock_status: str = 'unrestricted') -> float:
+                stock_status: str = 'unrestricted',
+                segment: Optional[Dict[str, Any]] = None) -> float:
+        clause, seg_params = _segment_clause(segment)
         rows = self.ds.query(
             'SELECT qty_on_hand FROM %s WHERE org_id = ? AND location_id = ? '
-            'AND item_id = ? AND batch_id = ? AND stock_status = ?' % BAL_TABLE,
+            'AND item_id = ? AND batch_id = ? AND stock_status = ?' % BAL_TABLE
+            + clause,
             [org_id, location_id, item_id,
-             int(batch_id) if not _blank(batch_id) else 0, stock_status])
+             int(batch_id) if not _blank(batch_id) else 0, stock_status]
+            + seg_params)
         return float(rows[0].get('qty_on_hand') or 0) if rows else 0.0
 
     def available_qty(self, org_id: Any, location_id: Any, item_id: Any,
-                      batch_id: Any = None) -> float:
+                      batch_id: Any = None,
+                      segment: Optional[Dict[str, Any]] = None) -> float:
+        clause, seg_params = _segment_clause(segment)
         rows = self.ds.query(
             'SELECT qty_on_hand, qty_reserved FROM %s WHERE org_id = ? '
             'AND location_id = ? AND item_id = ? AND batch_id = ? '
-            "AND stock_status = 'unrestricted'" % BAL_TABLE,
+            "AND stock_status = 'unrestricted'" % BAL_TABLE + clause,
             [org_id, location_id, item_id,
-             int(batch_id) if not _blank(batch_id) else 0])
+             int(batch_id) if not _blank(batch_id) else 0]
+            + seg_params)
         if not rows:
             return 0.0
         return float(rows[0].get('qty_on_hand') or 0) - \
@@ -391,6 +422,8 @@ class InventoryPostingService:
         sql = (
             'SELECT org_id, location_id, item_id, '
             '       COALESCE(batch_id, 0) AS batch_id, stock_status, '
+            '       stock_segment_type, project_id, project_task_id, '
+            '       sales_order_line_id, owner_party_id, '
             "       SUM(CASE WHEN direction = 'in' THEN base_qty "
             '               ELSE -base_qty END) AS qty '
             'FROM %s ' % TX_TABLE
@@ -399,16 +432,23 @@ class InventoryPostingService:
         if org_id is not None:
             sql += 'WHERE org_id = ? '
             params.append(org_id)
-        sql += 'GROUP BY org_id, location_id, item_id, COALESCE(batch_id, 0), stock_status'
+        sql += ('GROUP BY org_id, location_id, item_id, COALESCE(batch_id, 0), '
+                'stock_status, stock_segment_type, project_id, project_task_id, '
+                'sales_order_line_id, owner_party_id')
         totals: Dict[tuple, float] = {}
         for row in self.ds.query(sql, params):
-            key = (row['org_id'], row['location_id'], row['item_id'],
-                   row['batch_id'], row['stock_status'])
+            key = tuple(row[col] for col in (
+                'org_id', 'location_id', 'item_id', 'batch_id', 'stock_status',
+                'stock_segment_type', 'project_id', 'project_task_id',
+                'sales_order_line_id', 'owner_party_id'))
             totals[key] = float(row.get('qty') or 0)
         return totals
 
     def _current_totals(self, org_id: Any = None) -> Dict[tuple, float]:
-        sql = 'SELECT org_id, location_id, item_id, batch_id, stock_status, qty_on_hand FROM %s' % BAL_TABLE
+        sql = ('SELECT org_id, location_id, item_id, batch_id, stock_status, '
+               'stock_segment_type, project_id, project_task_id, '
+               'sales_order_line_id, owner_party_id, qty_on_hand FROM %s'
+               % BAL_TABLE)
         params: List[Any] = []
         if org_id is not None:
             sql += ' WHERE org_id = ?'
@@ -416,7 +456,12 @@ class InventoryPostingService:
         totals: Dict[tuple, float] = {}
         for row in self.ds.query(sql, params):
             key = (row['org_id'], row['location_id'], row['item_id'],
-                   int(row.get('batch_id') or 0), row['stock_status'])
+                   int(row.get('batch_id') or 0), row['stock_status'],
+                   row.get('stock_segment_type') or SEGMENT_OWNED,
+                   int(row.get('project_id') or 0),
+                   int(row.get('project_task_id') or 0),
+                   int(row.get('sales_order_line_id') or 0),
+                   int(row.get('owner_party_id') or 0))
             totals[key] = float(row.get('qty_on_hand') or 0)
         return totals
 
@@ -427,8 +472,9 @@ class InventoryPostingService:
         current = self._current_totals(org_id)
         keys = set(computed) | set(current)
         rows: List[Dict[str, Any]] = []
-        for key in sorted(keys):
-            org, location, item, batch, status = key
+        for key in sorted(keys, key=lambda item: tuple(str(x) for x in item)):
+            (org, location, item, batch, status, seg_type,
+             project_id, project_task_id, so_line_id, owner_id) = key
             account_qty = computed.get(key, 0.0)
             balance_qty = current.get(key, 0.0)
             diff = account_qty - balance_qty
@@ -437,6 +483,11 @@ class InventoryPostingService:
             rows.append({
                 'org_id': org, 'location_id': location, 'item_id': item,
                 'batch_id': batch, 'stock_status': status,
+                'stock_segment_type': seg_type,
+                'project_id': project_id,
+                'project_task_id': project_task_id,
+                'sales_order_line_id': so_line_id,
+                'owner_party_id': owner_id,
                 'account_qty': round(account_qty, 6),
                 'balance_qty': round(balance_qty, 6),
                 'diff': round(diff, 6),
@@ -451,7 +502,7 @@ class InventoryPostingService:
         }
 
     def rebuild_balances(self, org_id: Any = None) -> Dict[str, Any]:
-        """按分录重算余额：删除范围内余额后重建（投影允许重建）。"""
+        """按分录重算余额（含段键）：删除范围内余额后重建。"""
         computed = self._computed_totals(org_id)
         with self.ds.transaction():
             if org_id is not None:
@@ -460,15 +511,90 @@ class InventoryPostingService:
             else:
                 self.ds.execute('DELETE FROM %s' % BAL_TABLE)
             now = _now()
-            for (org, location, item, batch, status), qty in computed.items():
+            for (org, location, item, batch, status, seg_type,
+                 project_id, project_task_id, so_line_id, owner_id), qty \
+                    in computed.items():
                 self.ds.execute(
                     'INSERT INTO %s (org_id, location_id, item_id, batch_id, '
-                    'stock_status, qty_on_hand, qty_reserved, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, 0, ?)' % BAL_TABLE,
-                    [org, location, item, batch, status, qty, now])
-        logger.info('[inventory] rebuild org=%s rows=%s', org_id, len(computed))
+                    'stock_status, stock_segment_type, project_id, '
+                    'project_task_id, sales_order_line_id, owner_party_id, '
+                    'qty_on_hand, qty_reserved, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)' % BAL_TABLE,
+                    [org, location, item, batch, status, seg_type,
+                     project_id, project_task_id, so_line_id, owner_id,
+                     qty, now])
+            rebuilt_reserved = self.rebuild_reserved_qty(org_id)
+        logger.info('[inventory] rebuild org=%s rows=%s reserved_rows=%s',
+                    org_id, len(computed), rebuilt_reserved)
         return {'org_id': org_id, 'rows': len(computed),
+                'reserved_rows': rebuilt_reserved,
                 'total_qty': round(sum(computed.values()), 6)}
+
+    def rebuild_reserved_qty(self, org_id: Any = None) -> int:
+        """由 inventory_reservations 汇总回写 qty_reserved（唯一写入口）。"""
+        if not self._reservation_table_ready():
+            return 0
+        sql = ('SELECT org_id, item_id, stock_segment_type, project_id, '
+               'project_task_id, sales_order_line_id, owner_party_id, '
+               'location_id, batch_id, qty_reserved, qty_fulfilled '
+               'FROM inventory_reservations '
+               "WHERE status IN ('open', 'partially_fulfilled')")
+        params: List[Any] = []
+        if org_id is not None:
+            sql += ' AND org_id = ?'
+            params.append(org_id)
+        reservations = self.ds.query(sql, params)
+
+        bal_sql = ('SELECT rowid AS rid, org_id, location_id, item_id, batch_id, '
+                   'stock_segment_type, project_id, project_task_id, '
+                   'sales_order_line_id, owner_party_id FROM %s '
+                   "WHERE stock_status = 'unrestricted'" % BAL_TABLE)
+        bal_params: List[Any] = []
+        if org_id is not None:
+            bal_sql += ' AND org_id = ?'
+            bal_params.append(org_id)
+        balances = self.ds.query(bal_sql, bal_params)
+
+        updated = 0
+        with self.ds.transaction():
+            for balance in balances:
+                key_match = [
+                    r for r in reservations
+                    if int(r.get('org_id') or 0) == int(balance.get('org_id') or 0)
+                    and int(r.get('item_id') or 0) == int(balance.get('item_id') or 0)
+                    and (r.get('stock_segment_type') or SEGMENT_OWNED)
+                    == (balance.get('stock_segment_type') or SEGMENT_OWNED)
+                    and int(r.get('project_id') or 0) == int(balance.get('project_id') or 0)
+                    and int(r.get('project_task_id') or 0) == int(balance.get('project_task_id') or 0)
+                    and int(r.get('sales_order_line_id') or 0)
+                    == int(balance.get('sales_order_line_id') or 0)
+                    and int(r.get('owner_party_id') or 0) == int(balance.get('owner_party_id') or 0)
+                    and (int(r.get('location_id') or 0) == 0
+                         or int(r.get('location_id')) == int(balance.get('location_id') or 0))
+                    and (int(r.get('batch_id') or 0) == 0
+                         or int(r.get('batch_id')) == int(balance.get('batch_id') or 0))
+                ]
+                reserved = sum(
+                    float(r.get('qty_reserved') or 0)
+                    - float(r.get('qty_fulfilled') or 0)
+                    for r in key_match
+                    if float(r.get('qty_reserved') or 0)
+                    - float(r.get('qty_fulfilled') or 0) > 0)
+                self.ds.execute(
+                    'UPDATE %s SET qty_reserved = ?, updated_at = ? '
+                    'WHERE rowid = ?' % BAL_TABLE,
+                    [reserved, _now(), balance['rid']])
+                updated += 1
+        return updated
+
+    def _reservation_table_ready(self) -> bool:
+        try:
+            rows = self.ds.query(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                'AND name = ?', ['inventory_reservations'])
+        except Exception:
+            return False
+        return bool(rows)
 
     # ------------------------------------------------------------------
     # 内部
@@ -477,7 +603,9 @@ class InventoryPostingService:
                        source_line_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT id, transaction_no, direction, base_qty, org_id, '
-            'location_id, item_id, batch_id, stock_status FROM %s '
+            'location_id, item_id, batch_id, stock_status, '
+            'stock_segment_type, project_id, project_task_id, '
+            'sales_order_line_id, owner_party_id FROM %s '
             'WHERE source_event_key = ? AND source_line_id = ?' % TX_TABLE,
             [event_key, source_line_id])
         return rows[0] if rows else None
@@ -487,16 +615,20 @@ class InventoryPostingService:
             'SELECT id, transaction_no, transaction_type_id, '
             'transaction_date, org_id, location_id, item_id, uom_id, qty, '
             'base_qty, direction, batch_id, stock_status, source_line_id, '
-            'transfer_group_id, reversal_of_transaction_id '
+            'transfer_group_id, reversal_of_transaction_id, '
+            'stock_segment_type, project_id, project_task_id, '
+            'sales_order_line_id, owner_party_id '
             'FROM %s WHERE id = ?' % TX_TABLE, [tx_id])
         return rows[0] if rows else None
 
     def _current_qty(self, entry: Dict[str, Any]) -> float:
         batch_id = entry.get('batch_id')
+        segment = {col: entry.get(col) for col in SEGMENT_COLUMNS}
         return self.on_hand(
             entry.get('org_id'), entry.get('location_id'),
             entry.get('item_id'), batch_id,
-            entry.get('stock_status') or 'unrestricted')
+            entry.get('stock_status') or 'unrestricted',
+            segment=segment)
 
     def _insert_transaction(self, entry: Dict[str, Any], doc_type: str,
                             doc_id: Any, event_key: str, remark: Any,
@@ -507,17 +639,25 @@ class InventoryPostingService:
         cursor = self.ds.execute(
             'INSERT INTO %s (transaction_no, transaction_type_id, '
             'transaction_date, org_id, location_id, item_id, uom_id, qty, '
-            'base_qty, direction, batch_id, stock_status, source_doc_type, '
+            'base_qty, direction, batch_id, stock_status, '
+            'stock_segment_type, project_id, project_task_id, '
+            'sales_order_line_id, owner_party_id, source_doc_type, '
             'source_doc_id, source_line_id, source_event_key, '
             'transfer_group_id, reversal_of_transaction_id, remark, '
             'created_by, created_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '
+            '?, ?, ?, ?, ?, ?, ?)'
             % TX_TABLE,
             [transaction_no, entry['transaction_type_id'],
              entry.get('transaction_date'), entry['org_id'],
              entry['location_id'], entry['item_id'], entry['uom_id'],
              entry['qty'], entry['base_qty'], entry['direction'],
-             entry.get('batch_id'), entry['stock_status'], doc_type,
+             entry.get('batch_id'), entry['stock_status'],
+             entry.get('stock_segment_type') or SEGMENT_OWNED,
+             int(entry.get('project_id') or 0),
+             int(entry.get('project_task_id') or 0),
+             int(entry.get('sales_order_line_id') or 0),
+             int(entry.get('owner_party_id') or 0), doc_type,
              doc_id, entry['source_line_id'], event_key,
              entry.get('transfer_group_id'), reversal_of,
              remark, entry.get('created_by'), now])
@@ -531,6 +671,11 @@ class InventoryPostingService:
             'item_id': entry['item_id'],
             'batch_id': entry.get('batch_id'),
             'stock_status': entry['stock_status'],
+            'stock_segment_type': entry.get('stock_segment_type') or SEGMENT_OWNED,
+            'project_id': int(entry.get('project_id') or 0),
+            'project_task_id': int(entry.get('project_task_id') or 0),
+            'sales_order_line_id': int(entry.get('sales_order_line_id') or 0),
+            'owner_party_id': int(entry.get('owner_party_id') or 0),
             'reversal_of_transaction_id': reversal_of,
         }
 
@@ -542,13 +687,22 @@ class InventoryPostingService:
         now = _now()
         self.ds.execute(
             'INSERT INTO %s (org_id, location_id, item_id, batch_id, '
-            'stock_status, qty_on_hand, qty_reserved, updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, 0, ?) '
-            'ON CONFLICT(org_id, location_id, item_id, batch_id, stock_status) '
+            'stock_status, stock_segment_type, project_id, project_task_id, '
+            'sales_order_line_id, owner_party_id, qty_on_hand, qty_reserved, '
+            'updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) '
+            'ON CONFLICT(org_id, location_id, item_id, batch_id, stock_status, '
+            'stock_segment_type, project_id, project_task_id, '
+            'sales_order_line_id, owner_party_id) '
             'DO UPDATE SET qty_on_hand = qty_on_hand + excluded.qty_on_hand, '
             'updated_at = excluded.updated_at' % BAL_TABLE,
             [entry['org_id'], entry['location_id'], entry['item_id'],
-             batch_id, entry['stock_status'], delta, now])
+             batch_id, entry['stock_status'],
+             entry.get('stock_segment_type') or SEGMENT_OWNED,
+             int(entry.get('project_id') or 0),
+             int(entry.get('project_task_id') or 0),
+             int(entry.get('sales_order_line_id') or 0),
+             int(entry.get('owner_party_id') or 0), delta, now])
 
     def _next_transaction_no(self, transaction_date: Any) -> str:
         """在当前事务内取 INV 号（不单独提交，单据回滚时号一并回滚）。"""
