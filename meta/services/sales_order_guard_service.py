@@ -129,6 +129,7 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, Optional
 
+from meta.services import project_task_guard
 from meta.services.uom_quantity_service import UomQuantityService
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,14 @@ _CONTACT_SNAPSHOT_FIELDS = tuple(pair[0] for pair in _CONTACT_SNAPSHOT_PAIRS)
 # W1-C：改客户即清空时涉及的列（引用 + 两张快照）
 _CONTACT_CLEAR_FIELDS = ('contact_party_id',) + _CONTACT_SNAPSHOT_FIELDS
 CONFIRMED = 'confirmed'
+
+# ---------------- 行项目任务（G15 P2-1） ----------------
+#: 行挂任务但归一化后仍无项目（行项目为空且抬头项目为空）
+SO_LINE_TASK_PROJECT_REQUIRED = 'SO_LINE_TASK_PROJECT_REQUIRED'
+#: 行项目与抬头项目都非空但不一致
+SO_LINE_PROJECT_MISMATCH = 'SO_LINE_PROJECT_MISMATCH'
+#: SO 段物料（so_segment_enabled=1）不允许再挂项目任务
+SO_LINE_SEGMENT_TASK_CONFLICT = 'SO_LINE_SEGMENT_TASK_CONFLICT'
 
 # ---------------- 抬头折扣 / 附加费（R-DSC-H） ----------------
 HEADER_DISCOUNT_PERCENT = 'header_discount_percent'
@@ -777,6 +786,9 @@ class SalesOrderGuardService:
                 '未选物料的行必须填写行描述', field_name='description',
                 rule='description_required')
 
+        # G15 P2-1：行项目任务（R1-R5）
+        self._validate_project_task_link(data, order)
+
         # W2-R1：展开字段只读（表单回传原值放行）
         self._validate_expand_fields(data, old_data, is_create)
         # B7：行地址文本快照只由确认动作回填，手工路径不可设置
@@ -820,6 +832,69 @@ class SalesOrderGuardService:
         # E6 / R-RET-1~8：退货行引用原行（引用为空直接放行）
         self._validate_return_reference(
             data, old_data, is_create, line_type, order_type, order)
+
+    # ---------------- 行项目任务（G15 P2-1） ----------------
+
+    def _validate_project_task_link(self, data: Dict[str, Any],
+                                    order: Dict[str, Any]) -> None:
+        """行项目任务校验（R1-R5）。
+
+        R1 挂任务 ⇒ 项目非空（行项目为空时取抬头项目归一化）；
+        R2 任务须属于同一项目；R3 任务须为 activity + planned/in_progress；
+        R4 行项目与抬头项目都非空时须一致；
+        R5 SO 段物料（so_segment_enabled=1）行不允许挂任务，避免 SO 段与任务段
+           静默降级（不做优先级兜底）。
+        项目任务表缺失（旧库）→ fail-open，不阻断旧链路。
+        """
+        line_pid = project_task_guard.to_int(data.get('project_id'))
+        header_pid = project_task_guard.to_int(order.get('project_id'))
+        if line_pid and header_pid and line_pid != header_pid:
+            raise SalesOrderGuardError(
+                f'订单行项目 {line_pid} 与抬头项目 {header_pid} 不一致',
+                field_name='project_id', rule=SO_LINE_PROJECT_MISMATCH)
+
+        task_id = project_task_guard.to_int(data.get('project_task_id'))
+        if not task_id:
+            return
+
+        effective_pid = line_pid or header_pid
+        if not effective_pid:
+            raise SalesOrderGuardError(
+                '订单行挂项目任务时必须填写项目（行项目与抬头项目均为空）',
+                field_name='project_task_id', rule=SO_LINE_TASK_PROJECT_REQUIRED)
+
+        if not project_task_guard.table_exists(
+                self.ds, project_task_guard.TASK_TABLE):
+            return
+
+        try:
+            project_task_guard.assert_task_executable(
+                self.ds, effective_pid, task_id, strict=True)
+        except project_task_guard.ProjectTaskGuardError as e:
+            raise SalesOrderGuardError(
+                str(e), field_name=e.field_name or 'project_task_id',
+                rule=e.rule) from e
+
+        if self._item_segment_enabled(data.get('item_id')):
+            raise SalesOrderGuardError(
+                '该物料启用了销售订单专用段，订单行不能再挂项目任务',
+                field_name='project_task_id',
+                rule=SO_LINE_SEGMENT_TASK_CONFLICT)
+
+    def _item_segment_enabled(self, item_id: Any) -> bool:
+        """读取物料 SO 段开关；读不到 / 旧库缺列 → False（fail-open）。"""
+        if _is_blank(item_id):
+            return False
+        try:
+            rows = self.ds.query(
+                'SELECT so_segment_enabled FROM items WHERE id = ?', [item_id])
+        except Exception as e:
+            logger.warning(
+                f'[sales_order_guard] 读取物料段开关 {item_id} 失败: {e}')
+            return False
+        if not rows:
+            return False
+        return project_task_guard.to_int(rows[0].get('so_segment_enabled')) == 1
 
     # ---------------- 行单位可换算（V-SU-3 / R-SU-5） ----------------
 
@@ -1096,7 +1171,7 @@ class SalesOrderGuardService:
             rows = self.ds.query(
                 'SELECT id, order_no, document_type_id, order_date, status, '
                 'sales_org_id, org_id, currency_id, exchange_rate, '
-                'customer_account_id FROM sales_orders WHERE id = ?', [order_id])
+                'customer_account_id, project_id FROM sales_orders WHERE id = ?', [order_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(f'[sales_order_guard] 读取订单 {order_id} 失败: {e}')
             return None

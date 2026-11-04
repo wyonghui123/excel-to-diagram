@@ -160,6 +160,51 @@ fields:
       multiple: false
       clearable: true
 
+  # 项目任务（G15 P2，可空）：挂任务时项目必填（行项目为空时取抬头项目），
+  # 任务须属于同一项目且为 activity + planned/in_progress；0 = 未挂任务。
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    default: 0
+    description: 所属项目任务（0 = 未挂任务；挂任务时项目必填）
+    semantics:
+      meaning: 订单行所属项目任务
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+        placeholder: "未挂任务"
+    value_help:
+      source:
+        type: bo
+        target_bo: project_task
+        value_field: id
+        display_field: task_no
+        code_field: task_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{task_no} {name}"
+        columns:
+          - field: task_no
+            label: 任务编号
+            width: 140
+          - field: name
+            label: 任务名称
+            width: 200
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+      clearable: true
+
   # 行号用字符串（10/20/30 留插入空间），同一订单内唯一
   - id: line_no
     name: 行号
