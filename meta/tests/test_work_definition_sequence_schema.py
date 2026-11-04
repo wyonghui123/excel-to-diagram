@@ -5,7 +5,7 @@
 
 【本文件守什么】
   1. work_definition_sequence 已注册，table_name 正确，skip_auto_menu + 三态 UI 配置
-  2. seq_type 首期只有 std / alternative（branch/return 与 parallel 不提前建字段）
+  2. seq_type 含 std / parallel / alternative（P5 扩并行）；5 个 P5 字段与部分唯一索引
   3. work_definition_operations.sequence_id 可空（存量行 NULL = 标准序列）
   4. (definition_id, seq_no) 唯一；sequence_id 有索引且是真外键
   5. restrict：序列下仍有工序时删除被拒绝；YAML 声明反向 restrict 规则
@@ -45,11 +45,13 @@ EXPECTED_FKS = {
 }
 
 NOT_NULL_COLUMNS = {
-    "work_definition_sequences": ("definition_id", "seq_no", "seq_type"),
+    "work_definition_sequences": ("definition_id", "seq_no", "seq_type",
+                                  "priority"),
 }
 
 NULLABLE_COLUMNS = {
-    "work_definition_sequences": ("description",),
+    "work_definition_sequences": ("description", "branch_operation_seq",
+                                  "return_operation_seq", "lot_min", "lot_max"),
     "work_definition_operations": ("sequence_id", "resource_group_id"),
 }
 
@@ -124,21 +126,28 @@ class TestDeclaration:
         assert "form" in schema["ui_view_config"]
         assert "detail" in schema["ui_view_config"]
 
-    def test_seq_type_only_std_and_alternative(self):
-        """TBD-15：首期只实现 std / alternative，branch/return/parallel 放 P5。"""
+    def test_seq_type_std_parallel_alternative(self):
+        """P5：seq_type 扩为 std / parallel / alternative。"""
         field = _field(_load_raw("work_definition_sequence"), "seq_type")
         assert field is not None
-        assert [v["value"] for v in field["enum_values"]] == ["std", "alternative"]
+        assert [v["value"] for v in field["enum_values"]] == [
+            "std", "parallel", "alternative"]
         assert all("label" in v for v in field["enum_values"])
         assert field["default"] == "std"
         assert field["value_help"]["source"]["type"] == "enum"
         assert field["value_help"]["source"]["enum_type_id"] == "sequence_type"
 
-    def test_no_p5_fields(self):
-        """不提前建字段：branch_from_seq / return_seq / parallel 均不出现。"""
-        ids = {f["id"] for f in _load_raw("work_definition_sequence")["fields"]}
-        for forbidden in ("branch_from_seq", "return_seq", "is_parallel"):
-            assert forbidden not in ids
+    def test_p5_fields_declared(self):
+        """P5 字段：branch/return、批量区间、优先级。"""
+        schema = _load_raw("work_definition_sequence")
+        ids = {f["id"] for f in schema["fields"]}
+        for field_id in ("branch_operation_seq", "return_operation_seq",
+                         "lot_min", "lot_max", "priority"):
+            assert field_id in ids
+        priority = _field(schema, "priority")
+        assert priority["required"] is True
+        assert priority["default"] == 1
+        assert priority["constraints"][0]["gte"] == 1
 
     def test_sequence_no_required_and_ranged(self):
         field = _field(_load_raw("work_definition_sequence"), "seq_no")
@@ -204,6 +213,8 @@ class TestTable:
     def test_indexes_created(self, conn):
         for name in ("uq_work_definition_sequence_no",
                      "idx_work_definition_sequence_type",
+                     "uq_work_definition_sequence_branch_priority",
+                     "idx_work_definition_sequence_branch",
                      "idx_work_definition_operation_sequence"):
             assert _index_sql(conn, name) is not None, "缺索引 {0}".format(name)
 

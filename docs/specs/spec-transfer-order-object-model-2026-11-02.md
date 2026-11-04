@@ -468,7 +468,7 @@ TO 涉及两个组织。若平台数据权限只支持单字段，以 `from_org_
 |---|---|---|
 | TBD-1 | 库存域：inventory transaction / on-hand / in-transit / lot / serial / bin stock / 库存过账 | 用户明确后续 TODO；落地后 TO 发货/收货改为库存事实源 |
 | TBD-2 | `reversal_of_transfer_id` 原单链接与反向调拨校验 | **已关闭（v191）**：头加列 + 守卫校验 from/to、库位互换 + `create_reversal` |
-| TBD-3 | 多包裹 / 多承运商发货单（独立 `transfer_shipment`） | **已关闭（v192）**：`transfer_shipment` + `transfer_shipment_line`，post 原子累加 TO `qty_shipped` |
+| TBD-3 | 多包裹 / 多承运商发货单（独立 `transfer_shipment`） | **已关闭（v193）**：`transfer_shipment` + `transfer_shipment_line`，post 原子累加 TO `qty_shipped` |
 | TBD-4 | 请购 → 调拨自动转换（`create_from_allocation`）与 `line_type_assignment` | **已关闭（v191 + v193）**：`LineTypeResolver` 支持 scope；`transfer_order.create_from_allocation` 按分配建单 |
 | TBD-5 | `TRF_SERVICE` / `TRF_ASSET` / `TRF_TEXT` 行类型 | **已关闭（v191）**：三种行类型种子，`delivery_relevant=0` |
 | TBD-6 | 收货头 `inventory_org_id`（收货库存组织） | **已关闭（v197）**：收货头增库存组织维度（可空 + 场景必填），校验库存职能与法人一致 |

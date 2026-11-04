@@ -448,6 +448,22 @@ fields:
       fieldGroup: 质量
       fieldGroupPosition: 120
 
+  - id: grade_code
+    name: 质量等级
+    type: string
+    db_column: grade_code
+    nullable: true
+    max_length: 20
+    description: 质量等级；字典序排序，NULL 排最后；物理列不进属性字典（研究稿 §11.9 O1）
+    semantics:
+      meaning: 批次质量等级
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 质量
+      fieldGroupPosition: 125
+
   - id: description
     name: 说明
     type: string
@@ -498,6 +514,9 @@ indexes:
     name: idx_batch_parent
   - fields: [produced_at]
     name: idx_batch_produced_at
+  - fields: [item_id, grade_code]
+    name: idx_batches_grade
+    description: 按物料 + 质量等级筛选/排序（批次确定）
 
 relations:
   - id: batch_to_item

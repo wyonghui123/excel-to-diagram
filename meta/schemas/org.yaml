@@ -321,6 +321,50 @@ fields:
     ui:
       render_as: textarea
 
+  - id: default_inventory_location_id
+    name: 默认库存库位
+    type: integer
+    db_column: default_inventory_location_id
+    nullable: true
+    description: 该组织库存过账的默认库位；仅具备 inventory 职能的组织生效
+    semantics:
+      meaning: 默认库存库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "未设置"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 库位编码
+            width: 160
+          - field: name
+            label: 库位名称
+            width: 220
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 库存
+      fieldGroupPosition: 20
+
   - id: created_at
     name: 创建时间
     type: datetime

@@ -229,7 +229,8 @@ def test_batch_schema_declared():
     fields = _field_ids(doc)
     assert {'batch_no', 'item_id', 'org_id', 'qty', 'qty_uom_id',
             'parent_batch_id', 'status', 'quality_status', 'source',
-            'produced_at', 'expiry_date', 'potency_pct', 'description'} <= fields
+            'produced_at', 'expiry_date', 'potency_pct', 'grade_code',
+            'description'} <= fields
 
     status_field = next(f for f in doc['fields'] if f['id'] == 'status')
     assert {v['value'] for v in status_field['enum_values']} == {
@@ -245,6 +246,10 @@ def test_batch_schema_declared():
     assert unique['unique'] is True
     assert unique['fields'] == ['item_id', 'org_id', 'batch_no']
     assert _index(doc, 'idx_batch_parent')['fields'] == ['parent_batch_id']
+    grade = next(f for f in doc['fields'] if f['id'] == 'grade_code')
+    assert grade['nullable'] is True
+    assert grade['max_length'] == 20
+    assert _index(doc, 'idx_batches_grade')['fields'] == ['item_id', 'grade_code']
 
     assert doc['ui_view_config']['skip_auto_menu'] is True
     assert {'list', 'form', 'detail'} <= set(doc['ui_view_config'])

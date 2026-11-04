@@ -1,0 +1,498 @@
+# 库存事务（Inventory Transaction）—— INV-1 数量账
+# 依据: .trae/specs/excel-to-diagram/define-inventory-model/spec.md FR-001 / FR-002
+#
+# 口径（已定）:
+#   ① 追加式事件账：只 INSERT，不 UPDATE / DELETE；纠错走 REVERSAL 反冲分录。
+#   ② 数量真相唯一来源；inventory_balances 只是本表的投影。
+#   ③ 唯一性 = (source_event_key, source_line_id)，保证单据动作幂等。
+#   ④ 一条原分录最多被反冲一次（reversal_of_transaction_id 部分唯一）。
+#   ⑤ 编号 INV-{DATE:yyyymm}-{SEQ:6}，按 transaction_date 分月。
+
+id: inventory_transaction
+name: 库存事务
+table_name: inventory_transactions
+description: 追加式库存数量事件账——所有库存变化的唯一真相
+display_name_field: transaction_no
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_transaction:inventory_transaction_read
+    list: inventory_transaction:inventory_transaction_list
+
+# 只读面：显式声明 read/list 动作（存在任意 {object}_read 动作时，
+# yaml_loader.ensure_crud_actions 不再自动补 create/update/delete）；
+# auto_crud: false 为声明性意图（与 line_type.yaml 等只读面一致）。
+import_export:
+  auto_crud: false
+
+actions:
+  - id: inventory_transaction_read
+    name: 查询库存事务
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_transactions/{id}"
+    description: 查询单条库存事务（只读）
+  - id: inventory_transaction_list
+    name: 查询库存事务列表
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_transactions"
+    description: 查询库存事务列表（只读）
+
+semantics:
+  meaning: 库存事务
+  category: business_document_line
+  aliases:
+    - 库存事务
+    - 库存分录
+    - inventory transaction
+    - stock ledger entry
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: transaction_no
+    name: 事务编号
+    type: string
+    db_column: transaction_no
+    required: true
+    unique: true
+    max_length: 30
+    description: 库存事务编号（INV 序列），创建后不可改
+    semantics:
+      meaning: 事务业务标识
+      business_key: true
+      data_category: code
+      searchable: true
+
+  - id: transaction_type_id
+    name: 移动类型
+    type: integer
+    db_column: transaction_type_id
+    required: true
+    description: 库存移动类型（RCV_PO / RCV_TO / ISSUE_TO_SHIP / OPENING / REVERSAL）
+    semantics:
+      meaning: 移动类型引用
+      display:
+        type: association
+        target_type: inventory_transaction_type
+        display_field: name
+
+  - id: transaction_date
+    name: 事务日期
+    type: datetime
+    db_column: transaction_date
+    required: true
+    description: 业务发生日期；用于 INV 编号分月与账龄查询
+    semantics:
+      meaning: 库存事务业务日期
+      filterable: true
+      filter_type: date_range
+      filter_label: 事务日期
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 库存数量归属组织
+    semantics:
+      meaning: 库存组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    required: true
+    description: 库存数量发生库位（site/warehouse/zone/bin 树节点）
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 发生数量变化的物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 分录记录单位；base_qty 按物料基本单位归一
+    semantics:
+      meaning: 单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    required: true
+    description: 按分录单位的正数数量（方向由 direction 表达）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 分录数量
+
+  - id: base_qty
+    name: 基本单位数量
+    type: number
+    db_column: base_qty
+    required: true
+    description: 按 item.base_uom 归一后的正数数量
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 基本单位数量
+
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    required: true
+    max_length: 10
+    description: 数量方向（in / out）
+    enum_values:
+      - value: in
+        label: 入
+        color: success
+      - value: out
+        label: 出
+        color: danger
+    semantics:
+      meaning: 库存方向
+      filterable: true
+      filter_type: enum
+      filter_label: 方向
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    nullable: true
+    description: 批次引用；为空表示不按批次管理
+    semantics:
+      meaning: 批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+        placeholder: "无批次"
+
+  - id: stock_status
+    name: 库存状态
+    type: string
+    db_column: stock_status
+    required: true
+    default: unrestricted
+    max_length: 20
+    description: 库存状态；日常过账只允许 unrestricted，期初可导入三种
+    enum_values:
+      - value: unrestricted
+        label: 可用
+        color: success
+        is_initial: true
+      - value: inspection
+        label: 检验中
+        color: warning
+      - value: blocked
+        label: 冻结
+        color: danger
+    semantics:
+      meaning: 库存状态
+      filterable: true
+      filter_type: enum
+      filter_label: 库存状态
+
+  - id: source_doc_type
+    name: 来源单据类型
+    type: string
+    db_column: source_doc_type
+    required: true
+    max_length: 50
+    description: 来源单据对象类型（receipt / transfer_order / opening）
+    semantics:
+      meaning: 来源单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 来源单据类型
+
+  - id: source_doc_id
+    name: 来源单据
+    type: integer
+    db_column: source_doc_id
+    required: true
+    description: 来源单据主键
+    semantics:
+      meaning: 来源单据引用
+
+  - id: source_line_id
+    name: 来源行
+    type: integer
+    db_column: source_line_id
+    required: true
+    description: 来源单据行主键；与 source_event_key 组成幂等键
+    semantics:
+      meaning: 来源行引用
+
+  - id: source_event_key
+    name: 来源事件键
+    type: string
+    db_column: source_event_key
+    required: true
+    max_length: 200
+    description: 来源动作事件键（如 receipt:{id}:post），用于幂等
+    semantics:
+      meaning: 来源事件键
+      searchable: true
+
+  - id: transfer_group_id
+    name: 过账组
+    type: string
+    db_column: transfer_group_id
+    nullable: true
+    max_length: 64
+    description: 同一过账批次的分组标识（跨行关联）
+    semantics:
+      meaning: 过账分组
+
+  - id: reversal_of_transaction_id
+    name: 反冲原分录
+    type: integer
+    db_column: reversal_of_transaction_id
+    nullable: true
+    description: 被反冲的原分录；一条原分录最多一个反冲
+    semantics:
+      meaning: 反冲引用
+      display:
+        type: association
+        target_type: inventory_transaction
+        display_field: transaction_no
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 过账备注
+    semantics:
+      meaning: 备注
+      searchable: true
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    nullable: true
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 创建人
+      audit_field: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [source_event_key, source_line_id]
+    unique: true
+    name: uq_inv_tx_source_line
+    description: 来源事件 + 来源行的幂等唯一键
+  - fields: [reversal_of_transaction_id]
+    unique: true
+    name: uq_inv_tx_reversal
+    description: 一条原分录最多被反冲一次（部分唯一，NULL 不约束）
+  - fields: [org_id, item_id, transaction_date]
+    name: idx_inv_tx_org_item_date
+  - fields: [source_doc_type, source_doc_id]
+    name: idx_inv_tx_source_doc
+  - fields: [org_id, location_id, item_id]
+    name: idx_inv_tx_location
+
+relations:
+  - id: inventory_transaction_to_type
+    name: 移动类型
+    type: reference
+    target: inventory_transaction_type
+    source_field: transaction_type_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_transaction_to_reversal
+    name: 反冲原分录
+    type: reference
+    target: inventory_transaction
+    source_field: reversal_of_transaction_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 库存事务
+    columns:
+      - field: transaction_no
+        width: 180
+        sortable: true
+      - field: transaction_date
+        width: 160
+        sortable: true
+      - field: transaction_type_id
+        width: 140
+        render_as: association
+        target_type: inventory_transaction_type
+        display_field: name
+      - field: org_id
+        width: 170
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: item_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: qty
+        width: 110
+      - field: uom_id
+        width: 100
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: direction
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: batch_id
+        width: 130
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: stock_status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: source_doc_type
+        width: 130
+      - field: source_doc_id
+        width: 100
+    selection:
+      enabled: false
+    searchFields: [transaction_no, source_event_key, remark]
+    actions: []
+    defaultSort:
+      field: transaction_date
+      order: desc
+  form:
+    title: 库存事务
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [transaction_no, transaction_date, transaction_type_id]
+          - fields: [org_id, location_id, item_id, uom_id]
+      - title: 数量
+        columns:
+          - fields: [qty, base_qty, direction]
+      - title: 维度
+        columns:
+          - fields: [batch_id, stock_status]
+      - title: 来源
+        columns:
+          - fields: [source_doc_type, source_doc_id, source_line_id,
+                     source_event_key, transfer_group_id,
+                     reversal_of_transaction_id]
+  detail:
+    layout: tabs
+    title: "库存事务 {record.transaction_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [transaction_no, transaction_date, transaction_type_id,
+                 org_id, location_id, item_id, uom_id, qty, base_qty,
+                 direction, batch_id, stock_status, source_doc_type,
+                 source_doc_id, source_line_id, source_event_key,
+                 transfer_group_id, reversal_of_transaction_id, remark]

@@ -321,6 +321,18 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.batch_guard_interceptor import BatchGuardInterceptor
         bo_framework.register_interceptor(BatchGuardInterceptor())
+        # [ROUTING P5 2026-11-03] 作业定义序列守卫（P57）：branch/return/parallel 图校验
+        #   （G1–G11）与工序边界改号保护。与 server.py create_app() 同位登记。
+        from meta.core.interceptors.work_definition_sequence_guard_interceptor import (
+            WorkDefinitionSequenceGuardInterceptor,
+        )
+        bo_framework.register_interceptor(WorkDefinitionSequenceGuardInterceptor())
+        # [ROUTING P5 2026-11-03] 批次选择策略守卫（P58）：rule_json v1 白名单、
+        #   范围存在性与 active priority 唯一。与 server.py create_app() 同位登记。
+        from meta.core.interceptors.batch_selection_policy_guard_interceptor import (
+            BatchSelectionPolicyGuardInterceptor,
+        )
+        bo_framework.register_interceptor(BatchSelectionPolicyGuardInterceptor())
         # [SERIAL P6a 2026-11-03] 序列号守卫（P59）：主档唯一键 / 初始与流转状态 /
         #   scrapped 终态；物料序列号三开关一致性。与 server.py 同位登记。
         from meta.core.interceptors.serial_number_guard_interceptor import (

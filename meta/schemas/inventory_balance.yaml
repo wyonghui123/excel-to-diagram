@@ -1,0 +1,285 @@
+# 库存余额（Inventory Balance）—— INV-1 余额投影
+# 依据: .trae/specs/excel-to-diagram/define-inventory-model/spec.md FR-003 / FR-011
+#
+# 口径（已定）:
+#   ① 余额是 inventory_transactions 的投影，不是独立真相；可随时重建。
+#   ② 唯一键 = (org_id, location_id, item_id, batch_id, stock_status)；
+#      batch_id 为空时用 0 哨兵，保证 SQLite 唯一约束可用。
+#   ③ qty_reserved 在 INV-1 恒为 0，为 INV-2 预留/ATP 占位。
+#   ④ 在途量不落本表：由调拨单行 qty_shipped - qty_received 派生。
+#   ⑤ 只读对象：无 create / update / delete 权限与入口。
+
+id: inventory_balance
+name: 库存余额
+table_name: inventory_balances
+description: 库存余额投影——按组织/库位/物料/批次/状态维护在手数量
+display_name_field: id
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_balance:inventory_balance_read
+    list: inventory_balance:inventory_balance_list
+
+# 只读面：显式声明 read/list 动作（存在任意 {object}_read 动作时，
+# yaml_loader.ensure_crud_actions 不再自动补 create/update/delete）；
+# auto_crud: false 为声明性意图（与 line_type.yaml 等只读面一致）。
+import_export:
+  auto_crud: false
+
+actions:
+  - id: inventory_balance_read
+    name: 查询库存余额
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_balances/{id}"
+    description: 查询单条库存余额（只读）
+  - id: inventory_balance_list
+    name: 查询库存余额列表
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_balances"
+    description: 查询库存余额列表（只读）
+
+semantics:
+  meaning: 库存余额
+  category: master_data
+  aliases:
+    - 库存余额
+    - 在手库存
+    - on hand
+    - inventory balance
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 库存数量归属组织
+    semantics:
+      meaning: 库存组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    required: true
+    description: 库存所在库位
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    required: true
+    default: 0
+    description: 批次引用；0 = 无批次（哨兵值，避免 NULL 破坏唯一键）
+    semantics:
+      meaning: 批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+        placeholder: "无批次"
+
+  - id: stock_status
+    name: 库存状态
+    type: string
+    db_column: stock_status
+    required: true
+    default: unrestricted
+    max_length: 20
+    description: 库存状态（可用 / 检验中 / 冻结）
+    enum_values:
+      - value: unrestricted
+        label: 可用
+        color: success
+        is_initial: true
+      - value: inspection
+        label: 检验中
+        color: warning
+      - value: blocked
+        label: 冻结
+        color: danger
+    semantics:
+      meaning: 库存状态
+      filterable: true
+      filter_type: enum
+      filter_label: 库存状态
+
+  - id: qty_on_hand
+    name: 在手数量
+    type: number
+    db_column: qty_on_hand
+    required: true
+    default: 0
+    description: 在手数量（事务分录按方向累加/扣减）
+    semantics:
+      meaning: 在手数量
+
+  - id: qty_reserved
+    name: 预留数量
+    type: number
+    db_column: qty_reserved
+    required: true
+    default: 0
+    description: 预留数量；INV-1 恒为 0，INV-2 启用
+    semantics:
+      meaning: 预留数量
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    nullable: true
+    description: 最近一次投影更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [org_id, location_id, item_id, batch_id, stock_status]
+    unique: true
+    name: uq_inv_balance_key
+    description: 余额唯一键
+  - fields: [org_id, item_id, stock_status]
+    name: idx_inv_balance_org_item
+
+relations:
+  - id: inventory_balance_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_balance_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_balance_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_balance_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 库存余额
+    columns:
+      - field: org_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: item_id
+        width: 200
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: batch_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: stock_status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: qty_on_hand
+        width: 120
+        sortable: true
+        align: right
+      - field: qty_reserved
+        width: 110
+        align: right
+      - field: updated_at
+        width: 170
+    selection:
+      enabled: false
+    searchFields: []
+    actions: []
+    defaultSort:
+      field: updated_at
+      order: desc
+  form:
+    title: 库存余额
+    layout: vertical
+    sections:
+      - title: 维度
+        columns:
+          - fields: [org_id, location_id, item_id]
+          - fields: [batch_id, stock_status]
+      - title: 数量
+        columns:
+          - fields: [qty_on_hand, qty_reserved]
+  detail:
+    layout: tabs
+    title: "库存余额 #{record.id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [org_id, location_id, item_id, batch_id, stock_status,
+                 qty_on_hand, qty_reserved, updated_at]

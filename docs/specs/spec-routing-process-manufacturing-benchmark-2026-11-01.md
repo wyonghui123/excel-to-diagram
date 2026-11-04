@@ -1,9 +1,9 @@
 # 研究稿：工艺路线（Routing）与流程生产主数据 — Oracle / SAP 对标与后续域细化方案
 
-- 文档版本：v0.5
-- 日期：2026-11-02
-- 状态：研究稿 + 细化方案（待评审，**尚未实施**）
-- 关联主 Spec：`spec-unified-resource-model-2026-11-01-v1.0.md`（v1.22）
+- 文档版本：v0.8
+- 日期：2026-11-03
+- 状态：研究稿 + 细化方案（P5 字段级细化 + Oracle 二次复核 + Fusion 官方数据字典确认，待评审，**尚未实施**）
+- 关联主 Spec：`spec-unified-resource-model-2026-11-01-v1.0.md`（v1.25）
 - 研究范围：P4b（配方 / 工序产出 / 替代资源组 / 过程指令）、P4c（最小批次）、P5（branch/return、parallel、批次特性复用属性字典）、R-2、财务域（`cost_center` / `activity_type` / `activity_rate`）
 
 ---
@@ -18,7 +18,7 @@
    - 替代资源用 `operation_resource_requirements` 扩 `substitute_group` + `replacement_group`；**不新增** `substitute_priority`，复用已有 `priority`；语义为「同组内按 replacement bundle 整组替换」。
    - 过程指令用**一张** `process_instructions` 表，`instruction_kind ∈ {text, parameter}`：text 对应 Oracle Operation Instructions，parameter 对应 Oracle Operational Parameters / SAP Process Instruction 的“目标值 / 公差 / 单位 / Set|Collect”。
 4. **P4c 细化**：`batches` 只做最小主数据（`batch_no` + `item_id` + `org_id` + 产出数量 + 生命周期状态 + 质量状态 + 父批次 + `potency_pct` 物理列）；**批次特性不新建独立设施**，复用平台既有属性字典（`attribute_definitions` 定义层 + `attribute_scopes` 适用范围/必填 + `batch_attribute_values` 值表）；不做批次库存、批次成本、批次 genealogy 全链路。`potency_pct` 参与投料折算（计算型），按既有 `usage_class` 红线提为物理列（`attribute_promotion` 口径），不进 EAV。
-5. **P5 细化**：`work_definition_sequences` 扩 `parallel` + `branch_operation_seq` + `return_operation_seq` + `lot_min/lot_max` + `priority`；规则：替代序列必须成对 branch/return，并行序列只需 branch（return 可选作汇合点）。R-2 由此关闭（设计层）。
+5. **P5 细化**：`work_definition_sequences` 扩 `parallel` + `branch_operation_seq` + `return_operation_seq` + `lot_min/lot_max` + `priority`；规则：替代序列必须成对 branch/return，并行序列只需 branch（return 可选作汇合点）。批次确定用显式 `batch_selection_policy` + 单一 `select_batches`（§12.5/12.6），不照搬 SAP 条件技术；迁移取当时最大号 +1（实际取 v199，v197/v198 已被占）。R-2 由此关闭（设计层）。
 6. **财务域细化**：`cost_centers` + `activity_types` + `activity_rates` + `resource_group_activity_types`；工作中心（`resource_group`）通过映射表挂多个作业类型，费率取「固定 + 变动」两段。与现有 `resource_rate` 的取值顺序必须收敛到一个服务函数，避免双真源。
 7. **明确不建**：独立 `recipe` 头、`department`、`process_segment`、`control_key` 主数据、独立“外协工序”、Process Instruction Category 主数据、`controlling_area`、成本要素 / 成本核算单 / 实际成本过账。
 
@@ -596,7 +596,7 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 - `batch_cost` / 批次成本。
 - `batch_genealogy` 多父边表（P4c 单父；多父后置）。
 - `characteristics_json`（P4c 过渡形态取消，改走属性字典）。
-- `batch_characteristics` / `batch_characteristic_values` 强类型表（P5 也不再建，见 §12.3）。
+- `batch_characteristics` / `batch_characteristic_values` 强类型表（P5 也不再建，见 §12.4）。
 - `batch_type_attribute` 批次特征集档案层（除非确认需要默认值/版本化，见 §11.7 决策点）。
 
 ### 11.6 验收
@@ -646,7 +646,7 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 
 ### 11.8 SAP / Oracle 两条路线的取舍
 
-**形态差异一句话**：SAP 是“分类引擎”（Class Type → Class → Characteristic → Value，四层显式、强约束、带确定能力）；Oracle 是“弹性域引擎”（属性组 / 上下文 → 段 → 值，通用、轻量、弱约束）。
+**形态差异一句话**：SAP 是“分类引擎”（Class Type → Class → Characteristic → Value，四层显式、强约束、带确定能力）；Oracle 是“预置字段 + 弹性域”混合模型（`grade / expiry / retest / hold` 等固定字段 + DFF/EFF 扩展段），通用、轻量、弱约束（二次复核见 §11.9）。
 
 **各自优缺点**
 
@@ -665,7 +665,7 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 
 **路线 C 的落地口径**
 
-1. 物理列：`potency_pct`、`grade_code`（启用等级时）、`quality_status`、`expiry_date`、`produced_at`、`parent_batch_id`、`batch_no`——参与计算或需索引/排序。
+1. 物理列：`potency_pct`、`grade_code`（P5 建，见 §11.9 O1）、`quality_status`、`expiry_date`、`produced_at`、`parent_batch_id`、`batch_no`——参与计算或需索引/排序。
 2. EAV：外观、检验备注、产地/证书号、包装规格、供应商批号等纯描述/分析特性。
 3. 范围与必填：`attribute_scopes`；`scope_ref='batch'` 管全局，`item_group` 管“某类物料的批次”（语义扩展见 §11.7）。
 4. 批次确定：不实现 SAP 条件技术（策略类型 / 访问顺序 / 条件记录三层 + 解释器），改为显式 `batch_selection_policy`（`code` / `name` / `scope_type ∈ {item, item_group, org}` / `scope_ref` / `rule_json`（过滤 + 排序，如效价降序、FIFO、保质期优先）/ `priority` / `status`），由单一服务函数 `select_batches(item_id, org_id, qty, uom, context)` 执行并留痕。
@@ -673,56 +673,246 @@ P4c **只在流程订单域立项后做**。本期不建批次库存、批次成
 
 **何时才回退到 A**：出现“多工厂差异化批次确定 + 业务人员零代码编排多策略组合”时再评估条件技术；在此之前不建 Class 头、不建条件记录表。
 
+### 11.9 Oracle 二次复核（2026-11-03）
+
+**一句话结论**：Oracle 的批次能力 = **预置批次字段（grade / expiry / retest / hold / parent / status）+ 批次 DFF/弹性域 + 既定排序规则（FEFO / FIFO / 批号）**，不是通用规则引擎。路线 C 不变，但两点要改：`grade_code` 提为一等物理列；选择时默认排除冻结/关闭批次。
+
+**证据 A：EBS / 发布说明（二手；Fusion 部分已用官方数据字典确认，见证据 B）**
+
+| 事实 | 来源 |
+|---|---|
+| 批次记录字段含 `status / grade / disabled / parent lot / origination / expiration / expiration action / retest / maturity / hold dates` + Lot Attributes + Lot DFF | Oracle Inventory「Lot Numbers」表单字段（INV Lot Upload 帮助逐项列出） |
+| 批次附加信息用 DFF；可设“全局批次属性”，跨组织取值一致 | Oracle Applications Help「Item Lots (Inventory)」 |
+| 挑库规则（Pick Rule）的批次排序只有：有效期 / 接收日期 / 批号 / 不排序；另有版本顺序、子库存顺序 | Oracle EBS Picking Rules 设置说明 |
+| 流程制造库存支持批次有效期，并可按 FEFO 分配 | OPM Inventory / 捡选规则资料 |
+| Fusion Process Manufacturing 26A「按等级发料/完工」：可按首选等级选发批次；物料带 `GradeControlFlag` / `DefaultGradeValue`；另有批次级 UOM 换算、按成分自动算效期 | Oracle 26A 发布说明、Item Service XSD |
+
+**证据 B：Fusion 官方数据字典确认（2026-11-03）**
+
+| 结论 | 官方依据 | 对 P5 的影响 |
+|---|---|---|
+| 批次主数据物理字段（官方表 16 项）含 `LOT_NUMBER / INVENTORY_ITEM_ID / ORGANIZATION_ID / PARENT_LOT_NUMBER / STATUS_ID / GRADE_CODE / DISABLE_FLAG / ORIGINATION_DATE / ORIGINATION_TYPE / EXPIRATION_DATE / RETEST_DATE / MATURITY_DATE / EXPIRATION_ACTION_CODE / EXPIRATION_ACTION_DATE / HOLD_DATE / SUPPLIER_LOT_NUMBER`；键为 `LotNumber + InventoryItemId + OrganizationId` | Oracle Fusion `INV_LOT_NUMBERS` 表（Fusion 参考字典，2026-11-03 复核） | **O1 成立**：`grade_code` 必须是物理列，不能留 EAV；`retest/hold/maturity/supplier_lot_no` 确为 Oracle 标准字段，但 P5 选择不需要，仍可后置；`parent_lot_number` 单父与平台 P4c 一致 |
+| 批次附加属性由两个 DFF 承载：`Maintain Lot Numbers`（Attribute1–20 等）与 `Lot Attributes`（CAttribute/DAttribute/NAttribute/TAttribute + `LotAttributeCategory` 上下文） | 同上 | **强印证 R-5**：Oracle 也是“固定字段 + 弹性属性”；平台的 `attribute_definitions + attribute_scopes + batch_attribute_values` 等价，不需要 `batch_characteristics` |
+| 拣选规则 `PickingRuleValue` 的职责是“决定子库存、货位、批次、版本的取用顺序” | Oracle Item Service XSD（Oracle Cloud 端点） | **O3 成立**：批次选择本质是排序；平台用 FEFO/FIFO/等级优先模板 + `rule_json`，比 Fusion 灵活，但不替代质量判定 |
+| 批次主数据**无 potency 字段**；质量抽样事件（`SamplingEventId`）属 OPM Quality，不在批次主表 | `INV_LOT_NUMBERS` 16 个物理字段中无 potency；`SamplingEventId` 仅见抽取 PVO 名称，**未逐字核实**，标为待核实 | `potency_pct` 是质量结果的冗余快照；质量模块落地后以质量结果为真源，批次列只做缓存 |
+| 批次按 `(item, org, lot)` 隔离，同一批号可在不同物料/组织下存在（同 Key 三件套） | 同上 | 平台 `(item_id, org_id, batch_no)` 与 Fusion 一致；**不补“全局批次属性”** |
+
+**对平台的影响（建议）**
+
+| # | 建议 | 理由 |
+|---|---|---|
+| O1 | **P5 建 `batches.grade_code VARCHAR(20) NULL` + 索引 `(item_id, grade_code)`**（改判 12.9 Q4） | Oracle 把 grade 作为一等批次字段并用于发料/完工选择；等级排序/筛选走 EAV 不可接受 |
+| O2 | `select_batches` 增加**默认可用性谓词**：`quality_status='unrestricted'` 且 `status != 'closed'`；策略确需时用 `allow_blocked=true` 显式放开 blocked/inspection（closed 永远排除） | Fusion 用 `StatusId` + `DisableFlag` 控制可用性；平台用 `quality_status` + 生命周期 `status` 表达，语义对齐 |
+| O3 | `rule_json` 保留为唯一引擎，但固化 3 个预设模板：FEFO（`expiry_date asc`）、FIFO（`created_at asc`）、等级优先（`grade_code desc, expiry_date asc`）；**不加 `selection_basis` 列** | Fusion 的“批次顺序”是一等选项（`PickingRuleValue`）；模板覆盖 80% 场景，避免再加列 |
+| O4 | `retest_date / hold_date / maturity_date` **不建**，只列入提列清单（受监管行业触发再建） | Fusion 官方字段已确认存在，但非 P5 选择必需；避免范围膨胀 |
+| O5 | 等级排序暂按**字典序**，不建等级主数据/等级序 | 平台暂无 grade master；先把限制文档化，后续再补 |
+| O6 | 不补“全局批次属性”“批次级 UOM 换算”“多父 genealogy” | 平台批次按 `(item_id, org_id)` 隔离；UOM 换算/多父后置 |
+| O7 | `rule_json` 允许 filter/sort，但文档标注“比 Oracle EBS 挑库规则灵活，禁止用它替代质量判定” | 防止把质量放行/冻结逻辑写进选择策略，形成第二真源 |
+
+**与原 §11.8 的差异**：原表述“Oracle 是纯弹性域引擎”偏简化，准确说法是“预置字段 + DFF 的混合模型”。路线 C 不变；物理列清单增加 `grade_code`，选择默认过滤冻结/关闭批次；仍不建条件技术。
+
 ---
 
-## 12. P5 细化方案：branch/return、parallel、批次特性
+## 12. P5 细化方案：branch/return、parallel、批次特性与批次确定
 
-### 12.1 `work_definition_sequences` 扩展
+> 版本：P5 字段级细化（2026-11-03）。P5 只做三件事：① `work_definition_sequences` 补分支/并行/批量区间/优先级；② 批次特性提列清单（不建表）；③ 显式 `batch_selection_policy` + 单一选择函数。**不写实现代码、不建迁移文件**；迁移号立项时取「当时最大号 +1」（实际取 v199（v197/v198 已被占））。
 
-| 字段 | 类型 | 可空 | 语义 |
-|---|---|---|---|
-| `seq_type` | TEXT | 否 | 枚举扩为 `std` / `parallel` / `alternative` |
-| `branch_operation_seq` | INTEGER | 是 | 分支工序号；指向同定义标准序列的 `work_definition_operations.seq` |
-| `return_operation_seq` | INTEGER | 是 | 返回工序号；alternative 必填；parallel 可选（作为汇合点） |
-| `lot_min` | REAL | 是 | 该序列适用批量下限；空 = 继承定义/PV |
-| `lot_max` | REAL | 是 | 适用批量上限；空 = 无上限 |
-| `priority` | INTEGER | 否 | 默认 1；同一 branch 下多个替代序列的选取顺序（小者优先） |
+### 12.1 `work_definition_sequences` 扩展（P4a 现状 + 5 列）
 
-**规则**：
+P4a（v188）现状：`id / definition_id / seq_no / seq_type(std|alternative) / description` + 审计列；唯一 `(definition_id, seq_no)`；工序 `sequence_id` 可空（NULL = 标准序列）。
 
-- `std`：`branch_operation_seq` / `return_operation_seq` 必须为空；`lot_min/lot_max` 可为空。
-- `parallel`：`branch_operation_seq` 必填；`return_operation_seq` 可空（为空表示不设显式汇合点，执行域按下一标准工序汇合）。
-- `alternative`：`branch_operation_seq` 与 `return_operation_seq` 必填；`branch != return`；`return > branch`；两者都必须存在于标准序列。
-- 同一 `(definition_id, branch_operation_seq)` 下多个 alternative 按 `priority` 选一个；`lot_min/lot_max` 用于按订单批量筛选，区间必须与定义/PV 的批量区间至少部分重叠。
-- 非标准序列的工序必须挂在 `sequence_id` 上；branch/return 工序属于标准序列，不得再挂到替代序列。
-- 服务 `validate_sequence_graph(definition_id)`：branch/return 存在性、成对规则、区间重叠、priority 唯一性、无环（静态图）。
-- 执行展开顺序：标准序列从 1..N；到达 branch 后执行所选替代序列（按 `seq`），在 return 汇合；并行序列在 branch 后与标准序列并行执行，至 return（若设）或下一标准工序汇合。
+P5 增量列（同笔迁移 `ALTER TABLE ADD COLUMN`；SQLite 裸列，不建外键）：
 
-### 12.2 R-2 结论
+| 列 | DDL 片段 | 可空 | 默认 | 语义 |
+|---|---|---|---|---|
+| `branch_operation_seq` | `INTEGER` | 是 | — | 分支工序号；引用同定义 `work_definition_operations.seq`（**不是外键**，服务层校验） |
+| `return_operation_seq` | `INTEGER` | 是 | — | 返回/汇合工序号；alternative 必填；parallel 可选 |
+| `lot_min` | `REAL` | 是 | — | 该序列适用批量下限；空 = 不限下限 |
+| `lot_max` | `REAL` | 是 | — | 上限；空 = 无上限 |
+| `priority` | `INTEGER NOT NULL DEFAULT 1` | 否 | 1 | 同一 branch 下多个 alternative 的取用顺序（小者优先） |
 
-- **P4a/P4b**：只支持整条替代路线（`seq_type=alternative`，无 branch/return 字段）；简单、可校验。
-- **P5**：增加 branch/return；替代必须成对，并行只需 branch；字段名对齐 SAP `FLGAT/BSCHL1/BSCHL2` 语义。
-- **证据**：SAP `PLFL` 字段 `BSCHL1` / `BSCHL2` 为 Branch/Return Operation；替代序列官方说明“从标准序列分支、返回标准序列”；并行序列“在标准序列旁并行执行”。官方 help.sap.com 正文未取到，P5 实施前用 CP305 / SAP Help 复核强制成对规则。
+`seq_type`：`sequence_type` 枚举**追加** `parallel`（`std / parallel / alternative`），不新建枚举类型。
 
-### 12.3 批次特性：复用属性字典（R-5 关闭）
+索引（迁移新增）：
+
+- `uq_work_definition_sequence_branch_priority`：**部分唯一** `(definition_id, branch_operation_seq, priority) WHERE seq_type='alternative' AND branch_operation_seq IS NOT NULL` —— 保证同 branch 的替代序列 priority 不重复；`parallel` 不参与（可同 priority）。
+- `idx_work_definition_sequence_branch`：`(definition_id, branch_operation_seq)`，并行序列与图校验用。
+- 现有 `uq_work_definition_sequence_no` / `idx_work_definition_sequence_type` 保留；`lot_min/lot_max` 不建索引（按定义内小集合筛选）。
+
+新增 schema 字段的 UI 分组：`branch_operation_seq / return_operation_seq` 进「分支」组，`lot_min / lot_max / priority` 进「适用范围」组。
+
+### 12.2 R-2 结论与校验规则（服务层 `validate_sequence_graph`）
+
+**R-2 结论**：P4a/P4b 只支持整条替代路线；P5 增加 branch/return——替代必须成对，并行只需 branch；字段语义对齐 SAP `PLFL` 的 `BSCHL1`（branch）/ `BSCHL2`（return）。证据强度：官方 help.sap.com 正文未取到，实施前用 CP305 / SAP Help 复核强制成对规则。
+
+新增 `WorkDefinitionSequenceService.validate_sequence_graph(definition_id)`，在序列/工序保存时调用（BO 守卫拦截器照 P4c 模式，两条启动路径都注册）：
+
+| # | 规则 | 失败处理 |
+|---|---|---|
+| G1 | 每个定义**至多一条** `std` 序列；存量多 std 只告警（`MULTIPLE_STD_SEQUENCE`），不阻断读取 | 新写入拒绝 |
+| G2 | `std`：`branch/return` 必须为空 | 拒绝 |
+| G3 | `parallel`：`branch` 必填；`return` 可空；填了必须 `> branch` | 拒绝 |
+| G4 | `alternative`：`branch` 与 `return` 必填；`branch != return`；`return > branch` | 拒绝 |
+| G5 | branch/return 必须存在于**标准序列**：`work_definition_operations` 中 `definition_id = D` 且（`sequence_id IS NULL` 或指向本定义 `std` 序列行），且工序 `status='active'` | 拒绝 |
+| G6 | 同 `(definition_id, branch)` 的 alternative `priority` 唯一（DB 部分唯一索引 + 服务层预检） | 拒绝 |
+| G7 | `lot_min >= 0`；两者都填时 `lot_max > lot_min` | 拒绝 |
+| G8 | 静态图无环：按 `branch → return` 连边 DFS；替代/并行序列内工序 `seq` 必须单调递增，且不得包含 branch/return 工序号 | 拒绝 |
+| G9 | 非 std 序列的工序必须挂在该序列 `sequence_id`；branch/return 工序只能属于 std | 拒绝 |
+| G10 | 替代/并行序列至少 1 道工序（std 允许 0） | 拒绝 |
+| G11 | 已有替代/并行序列引用某工序号时，禁止修改该工序 `seq`（先解除引用） | 拒绝 |
+| G12 | 该定义已被 **active** `production_versions` 引用，且序列区间与所有 active PV 区间都不相交 → **告警** `SEQUENCE_LOT_NOT_COVERED`，不阻断保存（原因见 12.3） | 告警 |
+
+> **修订（相对 §5.2 / 旧 §12.1）**：旧口径「序列批量区间必须与定义/PV 至少部分重叠」改为 **G12 告警 + 运行期回退**。理由：PV 可能后补；若硬拒绝，先建序列后建 PV 的合法流程会被卡死。区间合法性仍在 G7 硬校验。
+
+### 12.3 运行期展开（只读）
+
+`expand_sequences(definition_id, lot_qty)` 返回有序工序列表，供未来工单展开；P5 不落 `work_order`。
+
+1. 选中 PV（沿用 P4a 选路：`priority` + 批量区间 + 有效期）；P5 不改选 PV 逻辑。
+2. 标准序列按 `seq` 升序执行 1..N；到达某标准工序 `b` 时：
+   - **alternative**：取 `branch_operation_seq = b` 的候选，按 `lot_qty` 过滤（`lot_min <= qty <= lot_max`，空视为不限），按 `priority` 升序、`id` 升序取第一条；替换标准区间 `[b, return]`。
+   - **parallel**：取全部 `branch_operation_seq = b` 的并行序列，按 `seq_no` 升序并列输出；有 `return` 的在该工序汇合，无 `return` 的汇合到第一个 `seq > b` 的标准工序。
+3. **无替代命中** ⇒ 走标准路径，输出决策 `ROUTE_FALLBACK_STD`（不静默取任意替代）。
+4. 替代序列内部工序按 `seq` 升序；越界/成环由 G5/G8 在保存时已拦截。
+5. 返回结构 `[{seq, source: 'std'|'alternative'|'parallel', sequence_id, operation_seq}]`，纯函数、可单测。
+
+### 12.4 批次特性：复用属性字典（R-5 关闭）+ 提列清单
 
 不建 `batch_characteristics` / `batch_characteristic_values`。原因：现有 `attribute_definitions` + `attribute_scopes` + `batch_attribute_values` 已等价覆盖“特征定义 / 适用范围与必填 / 值”，且自带值域、单位、多值、类型化列、lint 与删除保护；再建一套强类型表会形成第二真源。
 
-P5 只做两件事：
+**提列清单**（`attribute_promotion` 不是表，而是平台红线：`usage_class ∈ {indexed, computed, referential, stateful, secured}` 的定义不得 `status='active'`，必须提为物理列并在 schema 注释留痕）：
 
-- **提列清单**：把参与计算或需索引的批次特性（效价、批次确定用质量等级）通过 `attribute_promotion` 提为 `batches` 物理列；`potency_pct` 已在 P4c 落地，其余按需补列。
-- **确认特征集档案**：仅当需要默认值/版本化时，按 §11.7 决策点建 `batch_type_attribute`；否则用 `attribute_scopes(item_group)`。
+| 特性 | 分级 | 落点 | P5 动作 |
+|---|---|---|---|
+| 效价 / 活性成分 | computed（投料折算） | `batches.potency_pct` | 已落地（P4c） |
+| 质量等级 `grade` | indexed（批次确定排序/筛选） | `batches.grade_code VARCHAR(20)` | **P5 同笔加列 + 索引**（Oracle 一等属性，见 §11.9 O1） |
+| 复检日期 / 保留日期 / 成熟日期 | indexed（受监管） | `batches.retest_date` 等 | **未触发不建**（§11.9 O4） |
+| 有效期 | indexed（FIFO/FEFO 排序） | `batches.expiry_date` | 已落地（P4c） |
+| 生产日期 | indexed（排序） | `batches.produced_at` | 已落地（P4c） |
+| 质量状态 | stateful | `batches.quality_status` | 已落地（P4c） |
+| 外观 / 检验备注 / 产地证书号 / 包装规格 / 供应商批号 | descriptive / analytic | `batch_attribute_values` | 不建列 |
 
-与 SAP 的差距（接受，不补）：无 Class Type 枚举、无 Class 头/类层级、无“用于批次确定 / 用于效价计算 / 可打印”特性语义位。批次确定在流程订单域用显式 `batch_selection_policy` + 单一服务函数实现（见 §11.8 路线 C），不照搬 SAP 条件技术；若后续需要，再在 `attribute_definitions` 加语义位并走 promotion。
+**特征集档案**：仅当出现「某物料/分类的批次固定特性集 + 默认值 + 版本化」时再建 `batch_type_attribute`（`scope_key / attribute_id / required_flag / default_value / seq`）；否则用 `attribute_scopes(item_group)`，P5 不建。
 
-### 12.4 验收
+与 SAP 的差距（接受，不补）：无 Class Type 枚举、无 Class 头/类层级、无“用于批次确定 / 用于效价计算 / 可打印”特性语义位；若后续需要，再在 `attribute_definitions` 加语义位并走 promotion。
 
-1. alternative 缺 branch/return 失败；return < branch 失败；branch/return 不在标准序列失败。
-2. parallel 缺 branch 失败；parallel 设 return 时 return 必须存在且 > branch。
-3. 同一 branch 下两个 alternative 的 priority 重复失败；lot 区间与定义/PV 不重叠失败。
-4. 特性类型与值列不符失败；`usage_class=computed` 定义以 active 创建失败；`scope_ref='batch'` 引用未注册对象失败；`potency_pct` 越界失败。
-5. 既有 `seq_type=std/alternative` 行行为不变。
-6. `batch_selection_policy` 同范围同 `priority` 重复失败；`rule_json` 解析失败或无匹配批次时返回明确错误（不静默取第一条）；选择结果落审计（批次 + 策略 + 规则版本）。
+### 12.5 `batch_selection_policy`（新对象，字段级）
+
+**表 `batch_selection_policies`**
+
+| 字段 | 类型/DDL | 可空 | 约束 |
+|---|---|---|---|
+| `id` | INTEGER PK AUTOINCREMENT | 否 | — |
+| `code` | VARCHAR(40) | 否 | 全局唯一 `uq_batch_selection_policy_code` |
+| `name` | VARCHAR(128) | 否 | 显示名 |
+| `scope_type` | TEXT | 否 | 枚举 `batch_selection_scope`：`item / item_group / org` |
+| `scope_ref` | VARCHAR(60) | 否 | **业务编码**：`item → items.code`、`item_group → item_groups.code`、`org → orgs.code`；保存时校验存在性 |
+| `rule_json` | TEXT | 否 | JSON DSL（见下）；保存时 parse + 白名单校验 |
+| `priority` | INTEGER | 否 | `>= 1`，默认 1；同 `(scope_type, scope_ref)` 下 **active** 唯一 |
+| `status` | TEXT | 否 | 枚举 `batch_selection_policy_status`：`active / inactive`，默认 active |
+| `description` | VARCHAR(255) | 是 | — |
+| `created_at / updated_at` | DATETIME | 是 | 审计 |
+
+索引：`uq_batch_selection_policy_code(code)`；**部分唯一** `uq_batch_selection_policy_scope_priority(scope_type, scope_ref, priority) WHERE status='active'`；`idx_batch_selection_policy_scope(scope_type, scope_ref)`。
+
+**`rule_json` v1（只允许物理列，禁 EAV）**
+
+```json
+{
+  "version": 1,
+  "filters": [
+    {"field": "quality_status", "op": "eq", "value": "unrestricted"},
+    {"field": "expiry_date", "op": "between", "value": ["2026-11-03", "2027-11-03"]}
+  ],
+  "sort": [
+    {"field": "expiry_date", "dir": "asc"},
+    {"field": "potency_pct", "dir": "desc"}
+  ],
+  "limit": 100
+}
+```
+
+- `field` 白名单 = `batches` 物理列：`batch_no / status / quality_status / qty / produced_at / expiry_date / potency_pct / grade_code / source / parent_batch_id / created_at`。
+- 出现 EAV 特性字段 ⇒ 拒绝（`rule='batch_selection_eav_field_not_allowed'`），沿用 `usage_class` 红线（EAV 不能做范围扫描/排序）。
+- `op ∈ {eq, ne, gt, gte, lt, lte, in, between, is_null, is_not_null}`，按字段类型校验值。
+- `sort.dir ∈ {asc, desc}`；`limit ∈ 1..500`，缺省 100。
+- 未知键 / 未知字段 / 未知算子 ⇒ 拒绝（不忽略，避免静默错配）。
+- 可选 `allow_blocked`（boolean，默认 false）：放开 blocked/inspection 批次，`status='closed'` 永远排除。
+- `grade_code` 排序按**字典序**（无 grade master，见 §11.9 O5）；固化 3 个预设模板：FEFO（`expiry_date asc`）、FIFO（`created_at asc`）、等级优先（`grade_code desc, expiry_date asc`），不新增 `selection_basis` 列。
+- `version` 必填且 = 1；未来扩展按版本分支。
+
+### 12.6 选择算法与留痕
+
+`select_batches(item_id, org_id, qty, uom, context=None)`（`meta/services/batch_selection_service.py`，纯查询 + 审计）：
+
+1. **默认可用性谓词**：`quality_status='unrestricted'` 且 `status != 'closed'`；策略 `allow_blocked=true` 时放开 blocked/inspection，但 `status='closed'` 永远排除（见 §11.9 O2）。该谓词先于策略过滤。
+2. 解析 `item.code` / `item.item_group.code` / `org.code`；缺失的层跳过。
+3. 策略顺序：**item → item_group → org**（具体的先）；同层 `priority` 升序、`id` 升序。
+4. 逐条执行 `rule_json`：
+   - 解析/白名单错误 ⇒ **立即抛错**（不跳到下一条，避免静默）；
+   - 结果 0 条 ⇒ 记录 `attempted`，继续下一条；
+   - 首个 ≥1 条结果的策略生效，按 `sort + limit` 返回。
+5. 所有策略 0 条或没有任何策略 ⇒ `NoBatchMatchError`（**不静默返回第一条**）。
+6. `qty/uom` 在 P5 **不参与筛选**：当前无批次库存余额表，无法算可用量；仅透传审计，待批次库存落地后启用 `available_qty >= qty`。
+7. 留痕：`AuditService.log(object_type='batch_selection_policy', object_id=policy_id, action='select', extra_data={item_code, org_code, qty, uom, batch_ids, policy_code, priority, rule_hash, default_predicate, allow_blocked, attempted_policy_codes, context})`；`rule_hash = sha256(canonical(rule_json))[:16]` 代替独立 `rule_version` 列；无策略/无匹配也写审计（`outcome='failed'` + `reason`）。
+8. 返回 `BatchSelectionResult(batch_ids, policy_id, rule_hash, evaluated_policies)`。
+
+**服务拆分**：`batch_selection_policy_service.py`（保存校验：scope 存在性、priority 唯一、`rule_json` 白名单）/ `batch_selection_service.py`（执行 + 留痕）。守卫拦截器 `batch_selection_policy_guard_interceptor.py` 照 P4c `BatchGuardInterceptor` 模式，两条启动路径都注册。
+
+### 12.7 迁移 v199（实际取号）
+
+当前仓库最大迁移 **v196**（`v196__batch_foundation.py`）；P5 实际取 **v199**（v197/v198 已被占）。单笔迁移包含：
+
+1. `ALTER TABLE work_definition_sequences ADD COLUMN` × 5（`branch_operation_seq / return_operation_seq / lot_min / lot_max / priority`，裸列无 FK）。
+2. `sequence_type` 枚举补 `parallel`。
+3. 新枚举 `batch_selection_scope`（item/item_group/org）、`batch_selection_policy_status`（active/inactive）。
+4. `CREATE TABLE batch_selection_policies` + 3 索引。
+5. 权限 4 条 `batch_selection_policy:{bo}_{action}`，授予 admin / default。
+6. 菜单 `batch-selection-policy-list`「批次选择策略」挂 `master-data`，`sort_order=104`（接 v188 的 103）。
+7. `batches` **只加** `grade_code VARCHAR(20) NULL` + 索引 `idx_batches_grade(item_id, grade_code)`；不改 `batch_attribute_values`；不建 `batch_characteristics` / `batch_type_attribute`；无数据回填。
+8. `verify`：5 列 + `grade_code` 1 列、4 索引（3 policy + 1 batch grade）、3 枚举值、4 权限、1 菜单；`rollback` 反向删除（枚举种子保留）；重复执行幂等。
+
+### 12.8 验收与测试（`python d:\filework\test.py`，禁 pytest）
+
+`meta/tests/test_work_definition_sequence_graph.py`（新）：
+
+1. 5 列类型/可空/默认正确；`sequence_type` 含 `parallel`。
+2. alternative 缺 branch/return 失败；`return < branch` / `branch == return` 失败；branch/return 不在标准序列失败。
+3. parallel 缺 branch 失败；parallel 的 return 存在性 + `> branch` 校验。
+4. 同 branch 两个 alternative 的 priority 重复失败（DB 部分唯一索引 + 服务层）。
+5. `lot_min < 0` / `lot_max <= lot_min` 失败；与 active PV 全不相交 ⇒ 告警不阻断。
+6. 一个定义两条 std ⇒ 新写入拒绝（存量只告警）；替代序列 0 工序失败；branch/return 工序改号被拒。
+7. 无环校验；std/alternative 既有行行为不变（回归）。
+
+`meta/tests/test_batch_selection_policy.py`（新）：
+
+1. 表结构/索引/唯一约束；`scope_type` 枚举 3 值；`priority >= 1`。
+2. `scope_ref` 不存在（item/group/org 编码）失败；同 scope 同 priority 两条 active 失败；inactive 可复用 priority。
+3. `rule_json` 非法 JSON / 未知字段 / EAV 字段 / 未知算子 / `limit=0` 失败；`version != 1` 失败。
+4. 选择顺序 item > item_group > org；同层 priority 升序；首条命中即停。
+5. 首策略 0 条 ⇒ 落到下一条；全部 0 条 ⇒ `NoBatchMatchError`；无策略 ⇒ 同样报错。
+6. 审计载荷含 `batch_ids / policy_code / priority / rule_hash / default_predicate / allow_blocked`；无匹配写 `outcome='failed'`。
+7. `qty/uom` 不参与筛选（同参数不同 qty 返回同批次集合）。
+8. 默认谓词：blocked / inspection / closed 被排除；`allow_blocked=true` 放开 blocked+inspection，closed 仍排除。
+9. `grade_code` 在白名单内、可升降序；`grade_code` 为 NULL 的批次排在最后；3 个预设模板（FEFO/FIFO/等级优先）可通过保存校验。
+
+回归：`test_work_definition_sequence_schema.py` 需同步改（当前断言「只有 std/alternative」与「无 P5 字段」，P5 落地时必须翻转，否则红）；`test_batches.py` 需补 `grade_code` 可空 + 索引断言；`test_batch_attribute_values.py` / `test_production_version_schema.py` 保持绿。
+
+迁移：`migrate → verify → 再 migrate（幂等）→ verify → rollback → verify 失败`。
+
+### 12.9 P5 待确认项（开工前需拍板）
+
+| # | 问题 | 当前建议 |
+|---|---|---|
+| Q1 | 序列批量区间与 PV 不重叠：硬失败还是告警？ | 告警 + 运行期回退 std（12.2 G12） |
+| Q2 | `scope_ref` 存业务编码还是 ID？ | 业务编码（与 `attribute_scopes` 一致）；编码可变场景再评估 |
+| Q3 | 所有策略无匹配时是否允许「任取一条」兜底？ | 不允许，`NoBatchMatchError` |
+| Q4 | 是否本笔建 `batches.grade_code`？ | **已改判：建**（Oracle 一等属性 + 发料/完工按等级选择，见 §11.9 O1） |
+| Q5 | 选择留痕落 `audit_log` 还是新表？ | `audit_log + extra_data`（不新增表/列） |
+| Q6 | 是否给 `work_definition_sequences` 加 `status`？ | 不加；停用走删除 + 审计（避免范围膨胀） |
+| Q7 | branch/return 强制成对规则证据 | 实施前用 SAP CP305 / PLFL 字段说明复核（官方正文未取到） |
+| Q8 | 等级排序用字典序还是等级主数据？ | 先字典序（§11.9 O5）；出现 A/B/C 之外的非序等级再建 grade master |
+| Q9 | `allow_blocked` 放开范围？ | 放开 blocked + inspection；`closed` 永远排除 |
 
 ---
 
@@ -841,7 +1031,7 @@ P5 只做两件事：
 | P4b-1 | v191 | `work_definitions` 扩列、`work_definition_operation_outputs`、替代组 2 列 | `python d:\filework\test.py --single meta/tests/test_work_definition_recipe.py` 等 |
 | P4b-2 | v192 | `process_instructions` | `--single meta/tests/test_process_instructions.py` |
 | P4c | 立项取号 | `batches` + `batch_attribute_values` | `--single meta/tests/test_batches.py`、`--single meta/tests/test_batch_attribute_values.py` |
-| P5 | 立项取号 | sequences 扩列、批次特性提列清单（不建独立表）、`batch_selection_policy` | `--single meta/tests/test_work_definition_sequence_graph.py`、`--single meta/tests/test_batch_selection_policy.py` |
+| P5 | 实际取号 v199 | sequences 扩 5 列 + `parallel` 枚举、批次特性提列清单（不建独立表）、`batch_selection_policies` 新表 | `--single meta/tests/test_work_definition_sequence_graph.py`、`--single meta/tests/test_batch_selection_policy.py` |
 | 财务域 | 立项取号 | `cost_centers` / `activity_types` / `activity_rates` / 映射 | `--single meta/tests/test_cost_center.py` 等 |
 
 **测试策略**：
@@ -861,6 +1051,11 @@ P5 只做两件事：
 | 2026-11-01 | v0.1 | 首版：Oracle EBS/Fusion、SAP Routing/Production Version、PP-PI/OPM/ISA-95 对标；P4a/P4b/P4c 初稿；R-1~R-6 |
 | 2026-11-02 | v0.2 | 深入核实 Oracle Fusion Operation Outputs / Operational Parameters、EBS 成组替换、SAP PLKO/PLFL/PLPO/PLMZ/MKAL/CRCO/CSLA 字段；细化 P4b（v191/v192）、P4c（batches）、P5（branch/return + batch characteristics）、财务域（cost center/activity type/activity rate）；关闭 R-2 设计层；补 R-7/R-8；明确不建清单 |
 | 2026-11-02 | v0.3 | 新增 §5.3「替代关系归属」：替代关系不进 `sourcing_rule`，按域分层（BOM 替代组 / 工序资源替代 / 路线替代 / sourcing 来源排序 / 未来 `item_substitute`）；§10.4 补归属边界；原「明确不建」顺延为 §5.4 |
+| 2026-11-02 | v0.4 | 修订批次特性方案（R-5 关闭）：确认复用平台属性字典（`attribute_definitions` + `attribute_scopes` + `*_attribute_values`）等价覆盖 SAP 分类三层；取消 `characteristics_json`，新增 `batch_attribute_values`；不建 `batch_characteristics`，P5 只做提列清单；重写 §12.3、新增 §11.7 |
+| 2026-11-02 | v0.5 | 补充 SAP / Oracle 路线取舍（§11.8）：SAP = 分类引擎 + 条件技术，Oracle = 弹性域引擎；采纳路线 C「语义学 SAP、存储学 Oracle、确定逻辑自建」——字典 + 值表 + 少量提列 + 显式 `batch_selection_policy`（`rule_json` + 单一 `select_batches`）；§11.7 扩为三方映射，§12.3/§12.4 同步 |
+| 2026-11-03 | v0.6 | **P5 字段级细化**（§12 重写）：sequences 扩 5 列 + `parallel` 枚举 + 部分唯一索引；新增 12 条图校验 G1–G12（含 lot 区间由硬校验改为告警 + 运行期回退）；批次特性提列清单（当前不新增物理列）；`batch_selection_policies` 字段级设计（`scope_ref` 存业务编码、`rule_json` v1 只允许物理列、item→item_group→org 选取顺序、`rule_hash` 留痕）；迁移实际 v199（v197/v198 已被占）；新增 2 个测试文件与 7 项待确认（Q1–Q7）。**仅文档，未实施** |
+| 2026-11-03 | v0.7 | **Oracle 二次复核**（新增 §11.9）：修正“Oracle 纯弹性域引擎”的简化表述（实为预置批次字段 + DFF 混合）；结论仍是路线 C，但改判两点——① P5 建 `batches.grade_code` + 索引（Oracle 26A 按等级发料/完工，grade 为一等字段）；② `select_batches` 默认排除 blocked/inspection/closed，`allow_blocked` 显式放开；固化 FEFO/FIFO/等级优先 3 个 `rule_json` 模板，不新增 `selection_basis`；`retest/hold/maturity` 只入提列清单不建；同步 §12.4–12.9（Q4 改判，新增 Q8/Q9）与主 Spec C.3。**仅文档，未实施** |
+| 2026-11-03 | v0.8 | **Fusion 官方确认**（§11.9 新增证据 B）：复核 Fusion `INV_LOT_NUMBERS` 表 16 个物理字段（含 `GRADE_CODE`），键为 `LOT_NUMBER + INVENTORY_ITEM_ID + ORGANIZATION_ID`；确认批次属性由 `Maintain Lot Numbers` DFF + `Lot Attributes` DFF 承载；确认 `PickingRuleValue` 只决定子库存/货位/批次/版本顺序；确认批次主数据无 potency（`SamplingEventId` 仅见抽取 PVO 名称，标注待核实）；`BEST_BY_DATE` 未在表字段中出现，删除该表述。O1–O5 结论不变，证据强度从二手升为官方表字段。**仅文档，未实施** |
 
 ---
 
@@ -900,3 +1095,4 @@ P5 只做两件事：
 | 30 | <https://mfgtechhub.com/sap/sap-pp-pi-process-industries/> | PP 与 PP-PI 对照（二手） |
 | 31 | <https://www.isa.org/standards-and-publications/isa-standards/isa-95-standard> | ISA-95 标准族（官方） |
 | 32 | <https://docs.rhize.com/isa-95/how-to-speak-isa-95/> | ISA-95 Product Definition / Process Segment 解读（二手） |
+| 33 | <https://summit-bi.com/resources/fusion-reference/tables/inv_lot_numbers> | Fusion `INV_LOT_NUMBERS` 表 16 个物理字段（含 `GRADE_CODE`）、三元键、`DISABLE_FLAG` 类型；2026-11-03 复核证据 B |
