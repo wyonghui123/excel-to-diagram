@@ -1,0 +1,542 @@
+# 库存盘点单（Inventory Count）—— INV-4
+# 依据: .trae/specs/excel-to-diagram/define-inventory-adjustment/spec.md FR-004/005/006/007
+#
+# 定位:
+#   全盘（physical）与循环盘点（cycle）共用同一对象；循环盘点的选品规则不在本期。
+#   盘点差异以「账面快照」为基准：start 时抓取非零余额行并冻结 snapshot_qty，
+#   submit 时计算 variance_qty，post 时生成 count_difference 调整单并落库存事务。
+#
+# 父子关系:
+#   头 + 行两表；行见 inventory_count_line，通过 child_sections 挂载。
+#
+# 状态机:
+#   draft --start--> counting --submit--> submitted --approve--> approved --post--> posted
+#   draft / counting / submitted / approved --cancel--> cancelled
+#
+# 副作用由 InventoryCountService 执行（守卫拦截器委托），禁止裸 PUT status。
+
+id: inventory_count
+name: 库存盘点单
+table_name: inventory_counts
+description: 库存盘点单头（账面快照 / 实盘录入 / 差异过账）
+display_name_field: count_no
+aspects: [audit_aspect]
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_count:inventory_count_read
+    list: inventory_count:inventory_count_list
+    create: inventory_count:inventory_count_create
+    update: inventory_count:inventory_count_update
+    # 草稿删除复用编辑权限，不新增权限码（Spec FR-011 只列 8 条）
+    delete: inventory_count:inventory_count_update
+    start: inventory_count:inventory_count_start
+    submit: inventory_count:inventory_count_submit
+    approve: inventory_count:inventory_count_approve
+    post: inventory_count:inventory_count_post
+    cancel: inventory_count:inventory_count_cancel
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: inventory_count_read
+    name: 查询库存盘点单
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_counts/{id}"
+    description: 查询单条库存盘点单
+  - id: inventory_count_list
+    name: 查询库存盘点单列表
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_counts"
+    description: 查询库存盘点单列表
+  - id: inventory_count_create
+    name: 创建库存盘点单
+    type: crud
+    method: POST
+    path: "/api/v1/inventory_counts"
+    description: 创建库存盘点单（草稿）
+  - id: inventory_count_update
+    name: 编辑库存盘点单
+    type: crud
+    method: PUT
+    path: "/api/v1/inventory_counts/{id}"
+    description: 编辑草稿，或推进状态（start / submit / approve / post / cancel）
+
+semantics:
+  meaning: 库存盘点单
+  category: business_document
+  business_key: [count_no]
+  display_name_field: count_no
+  aliases:
+    - 库存盘点单
+    - 盘点单
+    - 盘点凭证
+    - Inventory Count
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - inventory_count_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: count_no
+    name: 盘点单号
+    type: string
+    db_column: count_no
+    required: true
+    unique: true
+    max_length: 50
+    description: 盘点单号（CNT 序列：CNT-年月-6 位流水），生成后不可改
+    semantics:
+      meaning: 盘点单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: count_type
+    name: 盘点类型
+    type: string
+    db_column: count_type
+    required: true
+    default: physical
+    max_length: 20
+    description: 盘点类型（physical 全盘 / cycle 循环盘点）
+    enum_values:
+      - value: physical
+        label: 全盘
+        color: info
+        is_initial: true
+      - value: cycle
+        label: 循环盘点
+        color: success
+    semantics:
+      meaning: 盘点类型
+      filterable: true
+      filter_type: enum
+      filter_label: 盘点类型
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 盘点单状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        is_initial: true
+      - value: counting
+        label: 盘点中
+        color: warning
+      - value: submitted
+        label: 已提交
+        color: warning
+      - value: approved
+        label: 已审批
+        color: success
+      - value: posted
+        label: 已过账
+        color: success
+      - value: cancelled
+        label: 已取消
+        color: danger
+    semantics:
+      meaning: 单据状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 盘点范围组织
+    semantics:
+      meaning: 库存组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 库存组织
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 盘点范围库位；为空表示全组织
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: snapshot_at
+    name: 快照时间
+    type: datetime
+    db_column: snapshot_at
+    nullable: true
+    description: start 时的账面快照时间；CNT 编号分月基准
+    semantics:
+      meaning: 账面快照时间
+      filterable: true
+      filter_type: datetime
+      filter_label: 快照时间
+
+  - id: posting_block
+    name: 冻结过账
+    type: boolean
+    db_column: posting_block
+    required: true
+    default: 0
+    description: 1 = 盘点期间阻断该组织/库位的日常库存过账（盘点差异自身豁免）
+    semantics:
+      meaning: 是否冻结库存过账
+      filterable: true
+      filter_type: enum
+      filter_label: 冻结过账
+    ui:
+      widget: switch
+
+  - id: tolerance_qty_pct
+    name: 数量容差比例
+    type: number
+    db_column: tolerance_qty_pct
+    required: true
+    default: 0
+    description: 数量容差比例（0.05 表示 5%）；容差 = max(abs, snapshot × pct)
+    semantics:
+      meaning: 数量容差比例
+
+  - id: tolerance_qty_abs
+    name: 数量容差绝对值
+    type: number
+    db_column: tolerance_qty_abs
+    required: true
+    default: 0
+    description: 数量容差绝对值
+    semantics:
+      meaning: 数量容差绝对值
+
+  - id: generated_adjustment_id
+    name: 生成调整单
+    type: integer
+    db_column: generated_adjustment_id
+    nullable: true
+    description: 盘点差异过账生成的系统调整单
+    semantics:
+      meaning: 生成调整单引用
+      display:
+        type: association
+        target_type: inventory_adjustment
+        display_field: adjustment_no
+
+  - id: approved_by
+    name: 审批人
+    type: string
+    db_column: approved_by
+    nullable: true
+    max_length: 200
+    description: 审批人
+    semantics:
+      meaning: 审批人
+      audit_field: true
+
+  - id: approved_at
+    name: 审批时间
+    type: datetime
+    db_column: approved_at
+    nullable: true
+    description: 审批时间
+    semantics:
+      meaning: 审批时间
+      audit_field: true
+
+  - id: posted_at
+    name: 过账时间
+    type: datetime
+    db_column: posted_at
+    nullable: true
+    description: 过账时间
+    semantics:
+      meaning: 过账时间
+      audit_field: true
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 200
+    description: 备注
+    semantics:
+      meaning: 备注
+      searchable: true
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    nullable: true
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 创建人
+      audit_field: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: start_inventory_count
+    name: 开始盘点
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: counting
+    action_ref: inventory_count:inventory_count_start
+    triggers: [before_update]
+    ui_hints:
+      label: 开始盘点
+      icon: play
+      highlight: true
+      confirm_message: "开始盘点将冻结账面快照并生成盘点行，确定开始吗？"
+
+  - id: submit_inventory_count
+    name: 提交盘点
+    type: state_transition
+    state_field: status
+    from_states: [counting]
+    to_state: submitted
+    action_ref: inventory_count:inventory_count_submit
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后差异将固化；容差内将自动审批，确定提交吗？"
+
+  - id: approve_inventory_count
+    name: 审批盘点
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: approved
+    action_ref: inventory_count:inventory_count_approve
+    triggers: [before_update]
+    ui_hints:
+      label: 审批
+      icon: check
+      highlight: true
+      confirm_message: "审批后盘点差异可执行过账，确定审批吗？"
+
+  - id: post_inventory_count
+    name: 盘点过账
+    type: state_transition
+    state_field: status
+    from_states: [approved]
+    to_state: posted
+    action_ref: inventory_count:inventory_count_post
+    triggers: [before_update]
+    ui_hints:
+      label: 过账
+      icon: check_circle
+      highlight: true
+      confirm_message: "过账将生成盘点差异调整单并写入库存事务，确定过账吗？"
+
+  - id: cancel_inventory_count
+    name: 取消盘点
+    type: state_transition
+    state_field: status
+    from_states: [draft, counting, submitted, approved]
+    to_state: cancelled
+    action_ref: inventory_count:inventory_count_cancel
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后将解除盘点冻结（快照行保留），确定取消吗？"
+
+indexes:
+  - fields: [count_no]
+    unique: true
+    name: uq_inv_count_no
+  - fields: [org_id, status]
+    name: idx_inv_count_org_status
+  - fields: [org_id, location_id, status, posting_block]
+    name: idx_inv_count_block
+
+relations:
+  - id: inventory_count_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_to_adjustment
+    name: 生成调整单
+    type: reference
+    target: inventory_adjustment
+    source_field: generated_adjustment_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: page
+    title: 库存盘点单
+    description: 账面快照、实盘录入与差异过账
+    columns:
+      - field: count_no
+        width: 180
+        sortable: true
+      - field: count_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: org_id
+        width: 170
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: snapshot_at
+        width: 160
+        format: datetime
+      - field: posting_block
+        width: 100
+      - field: approved_at
+        width: 160
+      - field: posted_at
+        width: 160
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [count_no, remark]
+    actions:
+      - id: create
+        label: 新建盘点单
+        icon: plus
+        type: primary
+        permission: inventory_count:inventory_count_create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: count_no
+      order: desc
+  form:
+    title: 库存盘点单信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [count_no, count_type]
+          - fields: [status, snapshot_at]
+      - title: 盘点范围
+        columns:
+          - fields: [org_id, location_id]
+      - title: 容差与冻结
+        columns:
+          - fields: [posting_block, tolerance_qty_pct]
+          - fields: [tolerance_qty_abs]
+      - title: 审批与过账
+        columns:
+          - fields: [approved_by, approved_at]
+          - fields: [posted_at, generated_adjustment_id]
+      - title: 其他
+        columns:
+          - fields: [remark]
+  detail:
+    layout: tabs
+    title: "库存盘点单 {record.count_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [count_no, count_type, status, org_id, location_id,
+                 snapshot_at, posting_block, tolerance_qty_pct,
+                 tolerance_qty_abs, generated_adjustment_id, approved_by,
+                 approved_at, posted_at, remark, created_by, created_at]
+  child_sections:
+    - child_object: inventory_count_line
+      title: 盘点行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

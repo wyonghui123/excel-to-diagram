@@ -1,0 +1,358 @@
+# 库存调整行（Inventory Adjustment Line）—— INV-4
+# 依据: .trae/specs/excel-to-diagram/define-inventory-adjustment/spec.md FR-001/002/003
+#
+# 父子关系:
+#   parent_object=inventory_adjustment，父字段 adjustment_id；
+#   通过 inventory_adjustment.yaml 的 child_sections 挂载，本对象不单独成菜单。
+#
+# 行口径:
+#   · qty 恒为正数，方向由调整类型决定（in/out）。
+#   · qty_increase / opening 使用 to_stock_status（默认 unrestricted）。
+#   · qty_decrease / scrap 使用 from_stock_status（默认 unrestricted）。
+#   · status_transfer 同时使用 from/to，且两者不同。
+#   · count_difference 行由盘点服务生成：正差异填 to，负差异填 from。
+
+id: inventory_adjustment_line
+name: 库存调整行
+table_name: inventory_adjustment_lines
+description: 库存调整单行
+display_name_field: line_no
+parent_object: inventory_adjustment
+
+hierarchy:
+  parent_field: adjustment_id
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_adjustment:inventory_adjustment_read
+    list: inventory_adjustment:inventory_adjustment_read
+    create: inventory_adjustment:inventory_adjustment_update
+    update: inventory_adjustment:inventory_adjustment_update
+    delete: inventory_adjustment:inventory_adjustment_update
+
+import_export:
+  auto_crud: false
+
+semantics:
+  meaning: 库存调整行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 调整行
+    - Inventory Adjustment Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: adjustment_id
+    name: 调整单
+    type: integer
+    db_column: adjustment_id
+    required: true
+    description: 所属调整单（父字段）
+    semantics:
+      meaning: 所属调整单
+      display:
+        type: association
+        target_type: inventory_adjustment
+        display_field: adjustment_no
+    ui:
+      widget: select
+      relation: inventory_adjustment
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 单据内行号（唯一）
+    semantics:
+      meaning: 行号
+      searchable: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 发生数量变化的物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 物料
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 行级库位；为空时取头 location_id，再为空取组织默认库位
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    nullable: true
+    description: 批次引用；为空表示不按批次管理
+    semantics:
+      meaning: 批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+        placeholder: "无批次"
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 行记录单位；过账时按物料基本单位归一
+    semantics:
+      meaning: 单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    required: true
+    description: 正数数量（方向由调整类型表达）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 调整数量
+
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 200
+    description: 序列号（qty=1 快捷录入；qty>1 必须走 document_serial_links 序列号子表）
+    semantics:
+      meaning: 调整行序列号（仅数量为 1 时快捷录入）
+      searchable: true
+    ui:
+      widget: input
+
+  - id: from_stock_status
+    name: 转出状态
+    type: string
+    db_column: from_stock_status
+    nullable: true
+    max_length: 20
+    description: 转出库存状态（qty_decrease / scrap / status_transfer 使用）
+    enum_values:
+      - value: unrestricted
+        label: 可用
+        color: success
+      - value: inspection
+        label: 检验中
+        color: warning
+      - value: blocked
+        label: 冻结
+        color: danger
+    semantics:
+      meaning: 转出库存状态
+
+  - id: to_stock_status
+    name: 转入状态
+    type: string
+    db_column: to_stock_status
+    nullable: true
+    max_length: 20
+    description: 转入库存状态（qty_increase / opening / status_transfer 使用）
+    enum_values:
+      - value: unrestricted
+        label: 可用
+        color: success
+      - value: inspection
+        label: 检验中
+        color: warning
+      - value: blocked
+        label: 冻结
+        color: danger
+    semantics:
+      meaning: 转入库存状态
+
+  - id: source_count_line_id
+    name: 来源盘点行
+    type: integer
+    db_column: source_count_line_id
+    nullable: true
+    description: 盘点差异来源行
+    semantics:
+      meaning: 来源盘点行引用
+      display:
+        type: association
+        target_type: inventory_count_line
+        display_field: line_no
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 200
+    description: 行备注
+    semantics:
+      meaning: 备注
+      searchable: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+relations:
+  - id: inventory_adjustment_line_to_header
+    name: 调整单
+    type: reference
+    target: inventory_adjustment
+    source_field: adjustment_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_line_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_line_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 调整行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: item_id
+        width: 180
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: batch_id
+        width: 130
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: qty
+        width: 110
+      - field: uom_id
+        width: 100
+        render_as: association
+        target_type: uom
+        display_field: name
+      - field: from_stock_status
+        width: 110
+      - field: to_stock_status
+        width: 110
+      - field: remark
+        width: 180
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [remark]
+    actions: []
+  form:
+    title: 调整行
+    layout: vertical
+    sections:
+      - title: 物料与数量
+        columns:
+          - fields: [line_no, item_id]
+          - fields: [location_id, batch_id]
+          - fields: [uom_id, qty]
+          - fields: [serial_no]
+      - title: 库存状态
+        columns:
+          - fields: [from_stock_status, to_stock_status]
+      - title: 追溯
+        columns:
+          - fields: [source_count_line_id, remark]

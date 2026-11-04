@@ -604,6 +604,12 @@ def create_app(db_path=None):
         SerialTrackingGuardInterceptor,
     )
     bo_framework.register_interceptor(SerialTrackingGuardInterceptor())
+    # [INV-4 2026-11-03] 库存调整单守卫（P58）：创建取号/类型白名单、状态迁移委托服务、终态锁定、行仅草稿可编辑。
+    from meta.core.interceptors.inventory_adjustment_guard_interceptor import InventoryAdjustmentGuardInterceptor
+    bo_framework.register_interceptor(InventoryAdjustmentGuardInterceptor())
+    # [INV-4 2026-11-03] 库存盘点单守卫（P59）：快照生成、实盘录入、容差提交、差异过账、冻结解除。
+    from meta.core.interceptors.inventory_count_guard_interceptor import InventoryCountGuardInterceptor
+    bo_framework.register_interceptor(InventoryCountGuardInterceptor())
     # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
     #   服务请求行 / 请购行的行级必填。
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。

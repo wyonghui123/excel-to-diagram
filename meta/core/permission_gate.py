@@ -71,7 +71,13 @@ def permission_suffix(action: str) -> str:
 
 
 def resolve_declared_permission(object_type: str, action: str) -> Optional[str]:
-    """读取元对象声明的权限码（authorization.permissions[action]）。"""
+    """读取元对象声明的权限码（authorization.permissions[suffix]）。
+
+    authorization.permissions 的键是动作后缀（create/read/update/delete，见
+    yaml_loader._resolve_authorization），而调用方传的是 crud_* 动作码，
+    因此这里必须先按 permission_suffix 归一；否则声明的权限码永远取不到，
+    只会回落到 canonical `object_type:suffix`（只读对象的自定义 read 码会被绕过）。
+    """
     try:
         from meta.core.models import registry
         meta_obj = registry.get(object_type)
@@ -82,7 +88,8 @@ def resolve_declared_permission(object_type: str, action: str) -> Optional[str]:
     auth = getattr(meta_obj, 'authorization', None)
     if not isinstance(auth, dict) or auth.get('check') is not True:
         return None
-    declared = (auth.get('permissions') or {}).get(action)
+    key = permission_suffix(action) or action
+    declared = (auth.get('permissions') or {}).get(key)
     return declared or None
 
 
