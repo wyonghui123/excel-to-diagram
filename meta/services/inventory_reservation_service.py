@@ -54,6 +54,15 @@ WO_COMPONENT_KEY_PREFIX = 'WO-COMP'
 #: 工单进入这两个终态后不再需要投料，组件承诺全部释放
 WO_COMPONENT_RELEASE_STATUSES = ('Cancelled', 'Closed')
 
+DEMAND_SERVICE_ORDER = 'service_order'
+SERVICE_REQUEST_SOURCE_TYPE = 'service_request'
+SERVICE_LINE_KEY_PREFIX = 'SVC-LN'
+#: 只有已提交/已批准的服务请求才占用可用量（草稿不承诺）
+SERVICE_REQUEST_ACTIVE_STATUSES = ('submitted', 'approved')
+#: 请求进入这些终态后备件需求结束，承诺全部释放
+SERVICE_REQUEST_RELEASE_STATUSES = ('rejected', 'completed', 'closed',
+                                    'cancelled')
+
 INV_RESERVATION_QTY_EXCEEDED = 'INV_RESERVATION_QTY_EXCEEDED'
 INV_RESERVATION_NOT_FOUND = 'INV_RESERVATION_NOT_FOUND'
 INV_RESERVATION_STATE_INVALID = 'INV_RESERVATION_STATE_INVALID'
@@ -68,6 +77,32 @@ ATP_INBOUND_UNSUPPORTED = 'ATP_INBOUND_UNSUPPORTED'
 DEMAND_QTY_SOURCES = {
     'sales_order_line': ('sales_order_lines', 'qty'),
     DEMAND_WORK_ORDER_COMPONENT: ('work_order_components', 'qty_required'),
+    DEMAND_SERVICE_ORDER: ('service_request_lines', 'qty'),
+}
+
+#: 需求量必须按行解析的节点类型（demand_line_id 缺失时不猜）
+DEMAND_LINE_REQUIRED = (DEMAND_SERVICE_ORDER,)
+
+#: 行式需求单据策略：单据头状态 + 明细行 → soft 承诺。
+#: 同类单据接入只需登记一条策略，通用引擎（sync_document_row_demands）
+#: 无需改动；带事件驱动核销或特殊数量推导的单据（工单组件/收货）仍走适配器。
+ROW_DEMAND_POLICIES = {
+    SERVICE_REQUEST_SOURCE_TYPE: {
+        'name': '服务请求',
+        'doc_table': 'service_requests',
+        'line_table': 'service_request_lines',
+        'doc_field': 'request_id',
+        'line_where': "line_type = 'goods' AND status = 'open'",
+        'active_statuses': SERVICE_REQUEST_ACTIVE_STATUSES,
+        'release_statuses': SERVICE_REQUEST_RELEASE_STATUSES,
+        'demand_object_type': DEMAND_SERVICE_ORDER,
+        'key_prefix': SERVICE_LINE_KEY_PREFIX,
+        'org_fields': ('provider_org_id', 'requester_org_id'),
+        'qty_field': 'qty',
+        'uom_field': 'uom_id',
+        'peg_type': PEG_SOFT,
+        'release_reason': '服务请求备件行失效',
+    },
 }
 
 TRACE_TABLE = 'demand_trace_links'
@@ -375,6 +410,51 @@ class InventoryReservationService:
                                                  tx_id=tx_id))
             remaining -= take
         return {'fulfilled': total - remaining, 'remaining': remaining,
+                'reservations': done}
+
+    def unfulfill_by_demand(self, demand_type: str, demand_id: Any, qty: Any,
+                            reason: str = '') -> Dict[str, Any]:
+        """按需求节点反向核销：把已核销量退回（单据红冲专用，从后往前冲）。
+
+        与 `fulfill_by_demand` 对称：只作用于 partially_fulfilled / fulfilled
+        的预留，回退后 status 回落为 open / partially_fulfilled。
+        """
+        total = _num(qty)
+        if total <= 0 or not self._table_ready():
+            return {'unfulfilled': 0.0, 'remaining': total, 'reservations': []}
+        rows = self.ds.query(
+            'SELECT id FROM %s WHERE demand_object_type = ? '
+            'AND demand_object_id = ? AND status IN (?, ?) ORDER BY id DESC'
+            % RESERVATION_TABLE,
+            [demand_type, _to_int(demand_id), STATUS_PARTIALLY_FULFILLED,
+             STATUS_FULFILLED])
+        remaining = total
+        done: List[Dict[str, Any]] = []
+        for row in rows:
+            if remaining <= 1e-9:
+                break
+            current = self._load(row['id'])
+            fulfilled = _num(current.get('qty_fulfilled'))
+            if fulfilled <= 1e-9:
+                continue
+            take = min(fulfilled, remaining)
+            new_fulfilled = fulfilled - take
+            status = (STATUS_OPEN if new_fulfilled <= 1e-9
+                      else STATUS_PARTIALLY_FULFILLED)
+            remark = current.get('remark')
+            if reason:
+                remark = ('%s; reverse: %s' % (remark, reason)).strip('; ')
+            with self.ds.transaction():
+                self.ds.execute(
+                    'UPDATE %s SET qty_fulfilled = ?, status = ?, remark = ?, '
+                    'updated_at = ? WHERE id = ?' % RESERVATION_TABLE,
+                    [new_fulfilled, status, remark, _now(), current['id']])
+                self._rebuild_projection(current.get('org_id'))
+            done.append(self._load(current['id']))
+            remaining -= take
+        logger.info('[inv2] 预留反向核销 demand=%s:%s qty=%s',
+                    demand_type, demand_id, total - remaining)
+        return {'unfulfilled': total - remaining, 'remaining': remaining,
                 'reservations': done}
 
     def fulfill_work_order_components(self, work_order_id: Any,
@@ -888,6 +968,161 @@ class InventoryReservationService:
                                      reason='工单组件重建后释放旧承诺')
         return len(stale)
 
+    # ------------------------------------------------------------------
+    # 行式需求单据通用引擎
+    # ------------------------------------------------------------------
+    def sync_document_row_demands(self, source_doc_type: str,
+                                  doc_id: Any) -> Dict[str, Any]:
+        """行式需求单据通用同步：单据头状态 + 明细行 → soft 承诺。
+
+        · 策略来自 `ROW_DEMAND_POLICIES`：表名、行过滤、状态、组织字段、
+          数量/单位字段、幂等键前缀、钉类型；
+        · 单据未生效（草稿等）不占可用量，进入终态则释放全部承诺；
+        · 行关闭 / 取消 / 删除由 active_keys 差集释放；
+        · 新增同类单据只需登记一条策略，不用写新的同步方法。
+        """
+        empty = {'created': 0, 'updated': 0, 'released': 0, 'skipped': True}
+        policy = ROW_DEMAND_POLICIES.get(source_doc_type)
+        if not policy:
+            return dict(empty, reason='POLICY_NOT_REGISTERED')
+        if not self._table_ready():
+            return dict(empty, reason='RESERVATION_TABLE_MISSING')
+        doc = self._load_table_row(policy['doc_table'], doc_id)
+        if not doc:
+            return dict(empty,
+                        reason='%s_NOT_FOUND' % source_doc_type.upper())
+        doc_id = _to_int(doc.get('id'))
+        status = str(doc.get('status') or '').strip().lower()
+        if status in policy['release_statuses']:
+            return {'created': 0, 'updated': 0, 'skipped': False,
+                    'released': self.release_by_source(
+                        source_doc_type, doc_id,
+                        reason='%s结束' % policy['name'])}
+        if status not in policy['active_statuses']:
+            # 草稿等非承诺状态：清理可能残留的承诺后不入池
+            return {'created': 0, 'updated': 0, 'skipped': False,
+                    'released': self.release_by_source(
+                        source_doc_type, doc_id,
+                        reason='%s未生效' % policy['name'])}
+
+        org_id = self._first_int_field(doc, policy['org_fields'])
+        if not org_id:
+            logger.warning('[inv2] %s %s 无法解析库存组织，跳过预留',
+                           policy['name'], doc_id)
+            return dict(empty, reason='ORG_NOT_RESOLVED')
+
+        rows = self._load_policy_lines(policy, doc_id)
+        created = updated = skipped = 0
+        active_keys = set()
+        for line in rows:
+            line_id = _to_int(line.get('id'))
+            item_id = _to_int(line.get('item_id'))
+            qty = _num(line.get(policy['qty_field']))
+            if line_id <= 0 or item_id <= 0 or qty <= 0:
+                skipped += 1
+                continue
+            key = '%s-%s-%s' % (policy['key_prefix'], doc_id, line_id)
+            active_keys.add(key)
+            segment_ctx = {'item_id': item_id, 'org_id': org_id}
+            try:
+                segment = self._resolve_segment(segment_ctx)
+            except InventoryError as error:
+                logger.warning('[inv2] %s %s 行 %s 段解析失败，跳过: %s',
+                               policy['name'], doc_id, line_id, error)
+                skipped += 1
+                continue
+            payload = {
+                'reservation_key': key,
+                'org_id': org_id,
+                'item_id': item_id,
+                'uom_id': _to_int(line.get(policy['uom_field']))
+                or self._base_uom(item_id),
+                'qty_reserved': qty,
+                'peg_type': policy['peg_type'],
+                'demand_object_type': policy['demand_object_type'],
+                'demand_object_id': doc_id,
+                'demand_line_id': line_id,
+                'source_doc_type': source_doc_type,
+                'source_doc_id': doc_id,
+                'source_line_id': line_id,
+            }
+            payload.update(segment)
+            result = self.sync_reservation(payload)
+            if result.get('created'):
+                created += 1
+            elif result.get('updated'):
+                updated += 1
+
+        released = self._release_stale_policy_rows(
+            policy, source_doc_type, doc_id, active_keys)
+        return {'created': created, 'updated': updated,
+                'released': released, 'skipped': skipped}
+
+    def _release_stale_policy_rows(self, policy: Dict[str, Any],
+                                   source_doc_type: str, doc_id: int,
+                                   active_keys: set) -> int:
+        """释放已关闭 / 删除 / 不再满足行过滤的旧承诺。"""
+        rows = self.ds.query(
+            'SELECT id, reservation_key FROM %s WHERE source_doc_type = ? '
+            'AND source_doc_id = ? AND demand_object_type = ? '
+            'AND status IN (?, ?)' % RESERVATION_TABLE,
+            [source_doc_type, doc_id, policy['demand_object_type'],
+             STATUS_OPEN, STATUS_PARTIALLY_FULFILLED])
+        stale = [row for row in rows
+                 if str(row.get('reservation_key') or '') not in active_keys]
+        for row in stale:
+            self.release_reservation(_to_int(row.get('id')),
+                                     reason=policy['release_reason'])
+        return len(stale)
+
+    def _load_table_row(self, table: str,
+                        row_id: Any) -> Optional[Dict[str, Any]]:
+        if _to_int(row_id) <= 0:
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT * FROM %s WHERE id = ?' % table, [_to_int(row_id)])
+        except Exception:
+            return None
+        return rows[0] if rows else None
+
+    def _load_policy_lines(self, policy: Dict[str, Any],
+                           doc_id: int) -> List[Dict[str, Any]]:
+        """按策略过滤取行；表缺失时返回空（不影响单据写入）。"""
+        try:
+            return self.ds.query(
+                'SELECT * FROM %s WHERE %s = ? AND %s' % (
+                    policy['line_table'], policy['doc_field'],
+                    policy['line_where']),
+                [doc_id])
+        except Exception:
+            return []
+
+    @staticmethod
+    def _first_int_field(record: Dict[str, Any], fields: tuple) -> int:
+        for field in fields:
+            value = _to_int(record.get(field))
+            if value:
+                return value
+        return 0
+
+    # ------------------------------------------------------------------
+    # 服务请求接入（调用通用引擎，保留具名入口）
+    # ------------------------------------------------------------------
+    def sync_service_request_reservations(self,
+                                          request_id: Any) -> Dict[str, Any]:
+        """服务请求备件行 soft 预留：goods 行按行承诺，计入可用量。
+
+        策略见 `ROW_DEMAND_POLICIES['service_request']`：
+        · 仅已提交 / 已批准（及免审批直落 approved）的请求占用可用量；
+        · 只接 `line_type='goods'` 且物料、数量有效的行；service 行不承诺；
+        · 组织：服务方组织（provider_org_id）优先，请求方组织兜底；
+        · 行关闭 / 取消 / 删除，或请求进入终态时释放承诺；
+        · 备件实际消耗（发料批次）在 L1/L2 接入，本期只做承诺层。
+        """
+        return self.sync_document_row_demands(
+            SERVICE_REQUEST_SOURCE_TYPE, request_id)
+
     def sync_reservation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """幂等创建 + 数量同步：仅活跃预留允许改量，不得低于已核销量。"""
         result = self.create_reservation(payload)
@@ -1123,6 +1358,8 @@ class InventoryReservationService:
                     demand_line_id: int) -> Optional[float]:
         mapping = DEMAND_QTY_SOURCES.get(demand_type)
         if not mapping or not demand_id:
+            return None
+        if demand_type in DEMAND_LINE_REQUIRED and not demand_line_id:
             return None
         table, column = mapping
         key = demand_line_id or demand_id

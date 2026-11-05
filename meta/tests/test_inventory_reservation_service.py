@@ -638,3 +638,208 @@ def test_sync_sales_order_line_with_project_task_segment():
     assert released['released'] == 1
     row = service._load(reservation['id'])
     assert row['status'] == 'cancelled'
+
+
+# ----------------------------------------------------------------------
+# 服务请求备件行 soft 预留
+# ----------------------------------------------------------------------
+def _create_service_request_tables(conn, status='approved',
+                                   provider_org=ORG_ID,
+                                   requester_org=ORG_ID):
+    conn.execute('CREATE TABLE IF NOT EXISTS service_requests '
+                 '(id INTEGER PRIMARY KEY, status TEXT, '
+                 'requester_org_id INTEGER, provider_org_id INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS service_request_lines '
+                 '(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER, '
+                 'line_no TEXT, line_type TEXT, item_id INTEGER, qty REAL, '
+                 'uom_id INTEGER, status TEXT)')
+    conn.execute('INSERT INTO service_requests '
+                 '(id, status, requester_org_id, provider_org_id) '
+                 'VALUES (1, ?, ?, ?)', [status, requester_org, provider_org])
+    conn.commit()
+
+
+def _add_service_line(conn, line_type='goods', item_id=ITEM_ID, qty=4.0,
+                      uom_id=UOM_ID, status='open', line_no='10'):
+    cursor = conn.execute(
+        'INSERT INTO service_request_lines '
+        '(request_id, line_no, line_type, item_id, qty, uom_id, status) '
+        'VALUES (1, ?, ?, ?, ?, ?, ?)',
+        [line_no, line_type, item_id, qty, uom_id, status])
+    conn.commit()
+    return cursor.lastrowid
+
+
+def test_service_request_goods_line_creates_soft_reservation():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    line_id = _add_service_line(conn, qty=4)
+    service = _service(conn)
+    result = service.sync_service_request_reservations(1)
+    assert result['created'] == 1
+
+    row = conn.execute(
+        'SELECT demand_object_type, demand_object_id, demand_line_id, '
+        'peg_type, stock_segment_type FROM inventory_reservations').fetchone()
+    assert row[0] == 'service_order'
+    assert int(row[1]) == 1
+    assert int(row[2]) == line_id
+    assert row[3] == 'soft'
+    assert row[4] == 'owned'
+
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(4)
+    assert atp['available_on_hand'] == pytest.approx(6)
+
+
+def test_service_request_draft_does_not_reserve():
+    conn = _conn(10)
+    _create_service_request_tables(conn, status='draft')
+    _add_service_line(conn, qty=4)
+    result = _service(conn).sync_service_request_reservations(1)
+    assert result['created'] == 0
+    assert conn.execute(
+        'SELECT COUNT(*) FROM inventory_reservations').fetchone()[0] == 0
+
+
+def test_service_request_service_line_is_skipped():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    _add_service_line(conn, line_type='service', item_id=None,
+                      qty=None, uom_id=None)
+    result = _service(conn).sync_service_request_reservations(1)
+    assert result['created'] == 0
+    assert result['skipped'] == 0  # service 行由策略层过滤，不进候选
+    assert conn.execute(
+        'SELECT COUNT(*) FROM inventory_reservations').fetchone()[0] == 0
+
+
+def test_service_request_reservation_idempotent_and_resized():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    line_id = _add_service_line(conn, qty=4)
+    service = _service(conn)
+    first = service.sync_service_request_reservations(1)
+    assert first['created'] == 1
+    again = service.sync_service_request_reservations(1)
+    assert again['created'] == 0
+    assert again['updated'] == 0
+
+    conn.execute('UPDATE service_request_lines SET qty = 6 WHERE id = ?',
+                 [line_id])
+    conn.commit()
+    changed = service.sync_service_request_reservations(1)
+    assert changed['updated'] == 1
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(6)
+
+
+def test_service_request_line_close_releases_reservation():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    line_id = _add_service_line(conn, qty=4)
+    service = _service(conn)
+    service.sync_service_request_reservations(1)
+
+    conn.execute("UPDATE service_request_lines SET status = 'closed' "
+                 'WHERE id = ?', [line_id])
+    conn.commit()
+    released = service.sync_service_request_reservations(1)
+    assert released['released'] == 1
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(0)
+
+
+def test_service_request_terminal_status_releases_all():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    _add_service_line(conn, qty=4)
+    _add_service_line(conn, qty=2, line_no='20')
+    service = _service(conn)
+    assert service.sync_service_request_reservations(1)['created'] == 2
+
+    conn.execute("UPDATE service_requests SET status = 'cancelled' "
+                 'WHERE id = 1')
+    conn.commit()
+    released = service.sync_service_request_reservations(1)
+    assert released['released'] == 2
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(0)
+
+
+def test_service_request_org_unresolved_skips():
+    conn = _conn(10)
+    _create_service_request_tables(conn, provider_org=0, requester_org=0)
+    _add_service_line(conn, qty=4)
+    result = _service(conn).sync_service_request_reservations(1)
+    assert result['created'] == 0
+    assert result['reason'] == 'ORG_NOT_RESOLVED'
+
+
+class _ServiceRequestCtx:
+    def __init__(self, conn, params, old_data=None, action='crud_update',
+                 object_id='service_request'):
+        self.meta_object = type('Meta', (), {'id': object_id})()
+        self.action = action
+        self.params = params
+        self.old_data = old_data or {}
+        self.result = None
+        self.data_source = MemDS(conn)
+
+
+def test_demand_entry_interceptor_syncs_service_reservations():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    _add_service_line(conn, qty=4)
+
+    from meta.core.interceptors.demand_entry_guard_interceptor import (
+        DemandEntryGuardInterceptor,
+    )
+    context = _ServiceRequestCtx(conn, {'id': 1, 'status': 'approved'})
+    DemandEntryGuardInterceptor().after_action(context)
+
+    row = conn.execute(
+        'SELECT demand_object_type, demand_object_id FROM '
+        'inventory_reservations').fetchone()
+    assert row[0] == 'service_order'
+    assert int(row[1]) == 1
+
+
+def test_demand_entry_interceptor_line_delete_releases():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    line_id = _add_service_line(conn, qty=4)
+    service = _service(conn)
+    service.sync_service_request_reservations(1)
+
+    from meta.core.interceptors.demand_entry_guard_interceptor import (
+        DemandEntryGuardInterceptor,
+    )
+    context = _ServiceRequestCtx(
+        conn, {'id': line_id}, action='crud_delete',
+        old_data={'id': line_id, 'request_id': 1},
+        object_id='service_request_line')
+    interceptor = DemandEntryGuardInterceptor()
+    interceptor.before_action(context)  # 删除不要求行必填字段
+    interceptor.after_action(context)
+
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(0)
+
+
+def test_row_demand_engine_unknown_policy_skips():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    _add_service_line(conn, qty=4)
+    result = _service(conn).sync_document_row_demands('unknown_doc', 1)
+    assert result['created'] == 0
+    assert result['reason'] == 'POLICY_NOT_REGISTERED'
+
+
+def test_row_demand_engine_drives_service_request():
+    conn = _conn(10)
+    _create_service_request_tables(conn)
+    _add_service_line(conn, qty=4)
+    result = _service(conn).sync_document_row_demands('service_request', 1)
+    assert result['created'] == 1
+    assert result['skipped'] == 0

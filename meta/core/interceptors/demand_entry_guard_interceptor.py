@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 LINE_OBJECT = 'service_request_line'
 HEADER_OBJECTS = (SERVICE_REQUEST_OBJECT, REQUISITION_OBJECT)
 _WRITE_ACTIONS = ('crud_create', 'crud_update')
+_DELETE_ACTION = 'crud_delete'
 _STATUS_SUBMITTED = 'submitted'
 _STATUS_DRAFT = 'draft'
 _APPROVAL_FLAG = 'demand_entry_approval'
@@ -62,9 +63,9 @@ class DemandEntryGuardInterceptor(Interceptor):
     def should_execute(self, context: 'ActionContext') -> bool:
         object_id = getattr(context.meta_object, 'id', None)
         if object_id == LINE_OBJECT:
-            return context.action in _WRITE_ACTIONS
+            return context.action in _WRITE_ACTIONS + (_DELETE_ACTION,)
         if object_id in HEADER_OBJECTS:
-            return context.action in _WRITE_ACTIONS
+            return context.action in _WRITE_ACTIONS + (_DELETE_ACTION,)
         return False
 
     def before_action(self, context: 'ActionContext') -> None:
@@ -72,7 +73,8 @@ class DemandEntryGuardInterceptor(Interceptor):
         service = DemandEntryService(context.data_source)
         try:
             if object_id == LINE_OBJECT:
-                service.validate_line(object_id, dict(context.params or {}))
+                if context.action != _DELETE_ACTION:
+                    service.validate_line(object_id, dict(context.params or {}))
                 return
             if context.action == 'crud_create':
                 self._allocate_on_create(object_id, context.params or {}, service)
@@ -82,13 +84,17 @@ class DemandEntryGuardInterceptor(Interceptor):
             self._raise_validation(error)
 
     def after_action(self, context: 'ActionContext') -> None:
-        """需审批的提交：单据已落库，补建审批待办。"""
+        """写后同步：需审批的提交补建待办；服务请求备件行同步 soft 预留。"""
+        result = getattr(context, 'result', None)
+        if result is not None and not getattr(result, 'success', True):
+            return
+        self._create_approval_task(context)
+        self._sync_service_request_reservations(context)
+
+    def _create_approval_task(self, context: 'ActionContext') -> None:
         extra = getattr(context, 'extra', None) or {}
         info = extra.pop(_APPROVAL_FLAG, None)
         if not info:
-            return
-        result = getattr(context, 'result', None)
-        if result is not None and not getattr(result, 'success', True):
             return
         actor = str(getattr(context, 'user_id', '') or
                     getattr(context, 'user_name', '') or '')
@@ -97,6 +103,47 @@ class DemandEntryGuardInterceptor(Interceptor):
                 info['object_type'], info['record_id'], actor=actor)
         except Exception as error:  # noqa: BLE001 - 建任务失败不阻断已完成的提交
             logger.warning('[DemandEntry] 审批任务创建失败: %s', error)
+
+    def _sync_service_request_reservations(self, context: 'ActionContext') -> None:
+        """服务请求写后同步备件承诺（失败只告警，不阻断已完成的写入）。"""
+        object_id = getattr(context.meta_object, 'id', None)
+        if object_id not in (SERVICE_REQUEST_OBJECT, LINE_OBJECT):
+            return
+        try:
+            self._apply_reservation_sync(context, object_id)
+        except Exception as error:  # noqa: BLE001
+            logger.warning('[DemandEntry] 服务请求预留同步失败: %s', error)
+
+    def _apply_reservation_sync(self, context: 'ActionContext',
+                                object_id: str) -> None:
+        from meta.services.inventory_reservation_service import (
+            SERVICE_REQUEST_SOURCE_TYPE, InventoryReservationService,
+        )
+
+        service = InventoryReservationService(context.data_source)
+        old = dict(getattr(context, 'old_data', None) or {})
+        params = dict(getattr(context, 'params', None) or {})
+        if context.action == _DELETE_ACTION:
+            if object_id == LINE_OBJECT:
+                request_id = old.get('request_id')
+                line_id = old.get('id')
+                if request_id and line_id:
+                    service.release_by_source(
+                        SERVICE_REQUEST_SOURCE_TYPE, request_id,
+                        line_id=line_id, reason='服务请求行删除')
+            else:
+                request_id = params.get('id')
+                if request_id:
+                    service.release_by_source(
+                        SERVICE_REQUEST_SOURCE_TYPE, request_id,
+                        reason='服务请求删除')
+            return
+        if object_id == LINE_OBJECT:
+            request_id = params.get('request_id') or old.get('request_id')
+        else:
+            request_id = params.get('id')
+        if request_id:
+            service.sync_service_request_reservations(request_id)
 
     # ---------------- 创建 ----------------
 

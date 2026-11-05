@@ -160,7 +160,9 @@ def verify(db_path: Path) -> bool:
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
         ddl = _table_sql(conn, TABLE)
-        ok = ddl is None or "'closed'" in ddl.lower()
+        # 与 migrate 口径一致：表不存在或无 status CHECK 时 closed 天然可写
+        ok = (ddl is None or 'check (status in' not in ddl.lower()
+              or "'closed'" in ddl.lower())
         print('[v218 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:

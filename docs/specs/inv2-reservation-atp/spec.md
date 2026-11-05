@@ -246,6 +246,8 @@
 | `close_reservation(id, reason)` | 终止履行并保留历史，写 `closed`（R2） |
 | `sync_work_order_components(work_order_id)` | 工单组件级 soft 预留（幂等；取消/结构行消失即释放） |
 | `fulfill_work_order_components(work_order_id, completed_qty)` | 完工收货按累计完工量核销组件承诺（累进到目标、只进不退） |
+| `sync_document_row_demands(source_doc_type, doc_id)` | 行式需求单据通用引擎：按 `ROW_DEMAND_POLICIES` 读取头状态与明细行，幂等建/释 soft 承诺 |
+| `sync_service_request_reservations(request_id)` | 服务请求具名入口（委托通用引擎；行关闭/删除或请求终态即释放） |
 | `outstanding_commitments(source_doc_type, source_doc_id)` | 来源单据未核销承诺汇总（活跃且未过期） |
 | `assert_source_closable(source_doc_type, source_doc_id)` | 关单前置校验；有未核销承诺时报 `INV_RESERVATION_ACTIVE_ON_CLOSE` |
 | `atp(query)` | 返回 `{available_on_hand, shortage}`，按 `scope` 计算 |
@@ -307,6 +309,7 @@ shortage(segment) = max(0, Σ(active commitments) - qty_on_hand(segment))
 | 收货 | `resolve_segment` 后过账；SO 段来源为关联 SO 行 |
 | 发运 | 校验预留与段；核销预留、写 trace |
 | 工单 | 项目任务段发料；成品入库按项目任务或 SO 段；组件按 `work_order_component` 建 soft 预留（独立物料需求，与来源 SO 行不重复计量） |
+| 服务请求 | `line_type='goods'` 行按 `service_order` 建 soft 预留；service 行不承诺；组织取 `provider_org_id`，回退 `requester_org_id` |
 | 调拨 | 段随行；跨段禁止，走段转移 |
 | 调整/盘点 | 按段盘点与过账，不改变段类型 |
 | 退货 | 优先回原段；原段失效转 `owned` |
@@ -478,6 +481,11 @@ SO 行（so_segment_enabled=1）
 | optional 组件不自动核销 | 同上 | `skipped=1`，承诺保留 |
 | 组件任务段继承工单头任务 | `test_work_order_production.py` | `expand_components` 写入 `project_task_id` |
 | 重展开保留逐组件任务覆盖 | 同上 | 按 `structure_line_id` 保留，不被 DELETE/INSERT 抹掉 |
+| 服务请求 goods 行建 soft 预留并扣减可用量 | `test_inventory_reservation_service.py` | 需求节点 `service_order`、`demand_line_id=行 id`，ATP `reserved=4` |
+| 服务请求 service 行不承诺 | 同上 | `created=0`，无预留行（行由策略层过滤） |
+| 草稿态服务请求不占可用量 | 同上 | `created=0` |
+| 服务请求备件行改量 / 关闭 / 请求取消 | 同上 | 改量 `updated=1`；关闭或取消 `released=1..n`，可用量恢复 |
+| 服务请求组织无法解析 | 同上 | `ORG_NOT_RESOLVED`，跳过且不落预留 |
 | 组件组织兜底到 SO 行库位 | `test_inventory_reservation_service.py` | 抬头 org 为空时取 `sales_order_lines.plant_location_id → locations.org_id` |
 | 组件组织兜底到单一活跃组织 | 同上 | 仅一个 active org 时创建承诺；多组织仍 `ORG_NOT_RESOLVED` |
 
@@ -544,11 +552,13 @@ SO 行（so_segment_enabled=1）
 - 风险：段行爆炸（SO 默认关闭缓解）、双写不一致（段变更只走服务层）、ATP 性能（按段索引）、重建耗时（分批 org）。
 - **回滚（downgrade）**：仅当 `inventory_transactions` 无任何非 `owned` 段数据时，才允许删列 / 删表；否则保留结构并报错，交人工清洗后再回滚。`qty_reserved` 投影列不随降级删除，只停止回写。
 - **v218（2026-11-05）**：重建 `inventory_reservations` 表，status CHECK 增加 `closed`；保留数据与索引，降级把 `closed` 回写为 `cancelled`。语义、ATP 口径、互斥校验仍在服务层与读取层。
+- **v218 真库校验（2026-11-05）**：`meta/architecture.db` 的 `inventory_reservations` 为 30 列 / 10 索引 / 0 行，且**无 status CHECK**，v218 按设计跳过（`closed` 天然可写；探针写入后回滚，无残留）。`verify()` 已改为与迁移口径一致：表不存在或无 CHECK 视为通过。带旧 CHECK 的重建路径由测试内存替身（`inventory_test_doubles` 每次建库调用 `apply_closed_status`）持续覆盖；回滚/重放演练在备份副本上执行，不触碰真库。
 - **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
 - **工单组件预留（2026-11-05）**：不新增表/迁移。`work_order_component` 作需求节点，统一 soft；幂等键 `WO-COMP-{work_order_id}-{structure_line_id}` 以结构行稳定，重展开只更新数量与组件 id，结构行消失或工单取消/关闭时释放。
 - **关单前置校验（2026-11-05）**：通用 BO 更新 `status → Closed` 时，`ProjectTaskGuardInterceptor` 调 `assert_source_closable('work_order', id)`；仍有活跃未核销组件承诺则拒绝（`INV_RESERVATION_ACTIVE_ON_CLOSE`）。取消（`Cancelled`）不走该校验，按显式释放语义处理。
 - **组件组织来源补强（2026-11-05）**：组件承诺组织解析四级兜底：项目 → SO 抬头 → SO 行 `plant_location_id` 所属组织 → 单一活跃组织；订单多行时仅在所有行指向同一组织才按订单兜底，多组织仍报 `ORG_NOT_RESOLVED` 并跳过（不猜测）。
 - **组件任务段（2026-11-05）**：`expand_components` 重建组件时按 `structure_line_id` 保留逐组件 `project_task_id`，无值时继承工单头任务；重展开的 DELETE/INSERT 不再抹掉任务覆盖。组件预留据此落到各自任务段，而非全部堆在头任务段。旧库缺列时自动跳过写入（`_insert` 列探测）。
+- **行式需求策略引擎（2026-11-05）**：不新增表/迁移。`ROW_DEMAND_POLICIES` 登记“单据头 + 明细行”的共性（表名、行过滤、活跃/终态、组织字段、数量/单位字段、幂等键前缀、钉类型），`sync_document_row_demands` 统一完成读取、幂等建预留、改量与差集释放；新增同类单据只需登记一条策略。服务请求为首个接入方：`line_type='goods'` 行以 `service_order` 为需求节点、行 `qty` 为需求量，仅在 `submitted / approved` 入池，行 `closed / cancelled`、被删除或请求进入 `rejected / completed / closed / cancelled` 时释放；幂等键 `SVC-LN-{request_id}-{line_id}`；组织取 `provider_org_id`，回退 `requester_org_id`，都空报 `ORG_NOT_RESOLVED`。工单组件（需结构反推数量 + 完工核销）与收货（事件驱动）保留各自适配器，不强行套用行式引擎。写后同步挂在 `DemandEntryGuardInterceptor.after_action`，失败只告警不阻断单据写入。
 - **组件核销链路（2026-11-05）**：P6c 不建领料单据，完工收货即唯一的组件消耗事件；`ReceiptService._post_work_order` 过账后按累计净完工量调 `fulfill_work_order_components`。目标量由结构行反推工单数量（`(qty_required/(1+scrap) − fixed)/qty_per`），按比例累进核销；`qty_per` 缺失按整单处理；optional 组件不自动核销。只进不退——红冲保留谱系，组件退回需走独立退料流程。预留层失败仅告警，不阻断完工过账。
 
 ---
