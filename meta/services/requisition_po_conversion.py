@@ -269,20 +269,10 @@ class RequisitionToPoService:
         """
         if document_type_id in (None, '') or order_date in (None, ''):
             return None
-        rows = self.ds.query(
-            'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
-            [document_type_id])
-        sequence_id = rows[0].get('number_sequence_id') if rows else None
-        if sequence_id in (None, ''):
-            return None
-        configs = self.ds.query(
-            'SELECT code, pattern, scope_fields, date_field, start_value, on_exhaust '
-            'FROM number_sequences WHERE id = ?', [sequence_id])
-        if not configs:
-            return None
-        from meta.core.number_sequence_engine import NumberSequenceEngine
-        return NumberSequenceEngine(self.ds).allocate(
-            dict(configs[0]), {}, {'order_date': order_date})
+        from meta.services.document_number_service import DocumentNumberService
+        return DocumentNumberService(self.ds).allocate_for(
+            'purchase_order',
+            {'document_type_id': document_type_id, 'order_date': order_date})
 
     # ------------------------------------------------------------------ 组装
     def _build_header(self, requisition: Dict[str, Any],

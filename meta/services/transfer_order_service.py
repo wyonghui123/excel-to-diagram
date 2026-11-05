@@ -328,30 +328,18 @@ class TransferOrderService:
             raise TransferOrderError(
                 '调拨单类型或日期缺失，无法取号',
                 field_name='transfer_order_no', rule='TO_NUMBER_REQUIRED')
-        rows = self.ds.query(
-            'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
-            [document_type_id])
-        sequence_id = rows[0].get('number_sequence_id') if rows else None
-        if _blank(sequence_id):
-            raise TransferOrderError(
-                '调拨单类型未绑定编号序列', field_name='transfer_order_no',
-                rule='TO_NUMBER_REQUIRED')
-        configs = self.ds.query(
-            'SELECT code, pattern, scope_fields, date_field, start_value, '
-            'on_exhaust FROM number_sequences WHERE id = ?', [sequence_id])
-        if not configs:
-            raise TransferOrderError(
-                '编号序列 %s 不存在' % sequence_id,
-                field_name='transfer_order_no', rule='TO_NUMBER_REQUIRED')
-        from meta.core.number_sequence_engine import (
-            NumberSequenceEngine, NumberSequenceError)
+        from meta.services.document_number_service import (
+            DocumentNumberError, DocumentNumberService)
         try:
-            return NumberSequenceEngine(self.ds).allocate(
-                dict(configs[0]), {}, {'transfer_date': transfer_date})
-        except NumberSequenceError as error:
+            return DocumentNumberService(self.ds).allocate_for(
+                'transfer_order',
+                {'document_type_id': document_type_id,
+                 'transfer_date': transfer_date},
+                required=True)
+        except DocumentNumberError as error:
             raise TransferOrderError(
                 str(error), field_name='transfer_order_no',
-                rule='TO_NUMBER_REQUIRED')
+                rule='TO_NUMBER_REQUIRED') from error
 
     def create_reversal(self, original_id: Any, transfer_date: Any = None,
                         user_context: Any = None) -> Dict[str, Any]:

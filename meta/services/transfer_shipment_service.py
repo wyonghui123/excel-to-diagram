@@ -37,9 +37,6 @@ STATUS_DRAFT = 'draft'
 STATUS_POSTED = 'posted'
 STATUS_CANCELLED = 'cancelled'
 
-#: 发货单编号序列（v193 种子；类型绑定缺失时按 code 兜底）
-SEQUENCE_CODE = 'TRS'
-
 #: 行号递增步长（与调拨行 10 / 20 / 30 同口径）
 LINE_NO_STEP = 10
 
@@ -129,37 +126,15 @@ class TransferShipmentService:
                 '发货日期缺失，无法取号', field_name='ship_date',
                 rule='TRS_DATE_REQUIRED')
 
-        rows = self.ds.query(
-            'SELECT number_sequence_id FROM type_definitions '
-            "WHERE scope_bo = 'transfer_shipment' AND level = 'header' "
-            'ORDER BY id LIMIT 1')
-        sequence_id = rows[0].get('number_sequence_id') if rows else None
-        if _blank(sequence_id):
-            rows = self.ds.query(
-                'SELECT id FROM number_sequences WHERE code = ?', [SEQUENCE_CODE])
-            sequence_id = rows[0].get('id') if rows else None
-        if _blank(sequence_id):
-            raise TransferShipmentError(
-                '调拨发货单编号序列未配置', field_name='shipment_no',
-                rule='TRS_NUMBER_REQUIRED')
-
-        configs = self.ds.query(
-            'SELECT code, pattern, scope_fields, date_field, start_value, '
-            'on_exhaust FROM number_sequences WHERE id = ?', [sequence_id])
-        if not configs:
-            raise TransferShipmentError(
-                '编号序列 %s 不存在' % sequence_id,
-                field_name='shipment_no', rule='TRS_NUMBER_REQUIRED')
-
-        from meta.core.number_sequence_engine import (
-            NumberSequenceEngine, NumberSequenceError)
+        from meta.services.document_number_service import (
+            DocumentNumberError, DocumentNumberService)
         try:
-            return NumberSequenceEngine(self.ds).allocate(
-                dict(configs[0]), {}, {'ship_date': date})
-        except NumberSequenceError as error:
+            return DocumentNumberService(self.ds).allocate_for(
+                'transfer_shipment', {'ship_date': date}, required=True)
+        except DocumentNumberError as error:
             raise TransferShipmentError(
                 str(error), field_name='shipment_no',
-                rule='TRS_NUMBER_REQUIRED')
+                rule='TRS_NUMBER_REQUIRED') from error
 
     # ------------------------------------------------------------------
     # 建单

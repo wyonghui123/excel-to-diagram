@@ -22,7 +22,8 @@ from meta.services.revision_service import RevisionError
 from meta.services.field_masking_service import mask_record, mask_records
 from meta.api._audit_helper import write_permission_config_audit
 from meta.core.db_path import get_meta_db_path
-from meta.core.number_sequence_engine import NumberSequenceEngine, NumberSequenceError
+from meta.core.number_sequence_engine import NumberSequenceError
+from meta.services.document_number_service import DocumentNumberError
 
 logger = logging.getLogger(__name__)
 
@@ -519,35 +520,19 @@ def _allocate_document_no(object_type: str, data: dict) -> dict:
     """
     if object_type not in _NUMBERED_OBJECTS:
         return data
-    no_field, date_field = _NUMBER_SEQ_FIELDS[object_type]
-    if data.get(no_field):
+    no_field = _NUMBER_SEQ_FIELDS[object_type][0]
+
+    from meta.services.document_number_service import DocumentNumberService
+
+    allocated = DocumentNumberService(_get_data_source()).allocate_for(
+        object_type, data)
+    if not allocated:
         return data
 
-    document_type_id = data.get('document_type_id')
-    doc_date = data.get(date_field)
-    if document_type_id in (None, '') or doc_date in (None, ''):
-        return data
-
-    ds = _get_data_source()
-    rows = ds.query(
-        'SELECT number_sequence_id FROM type_definitions WHERE id = ?',
-        [document_type_id])
-    sequence_id = rows[0].get('number_sequence_id') if rows else None
-    if sequence_id in (None, ''):
-        return data
-
-    configs = ds.query(
-        'SELECT code, pattern, scope_fields, date_field, start_value, on_exhaust '
-        'FROM number_sequences WHERE id = ?', [sequence_id])
-    if not configs:
-        return data
-
-    allocated = NumberSequenceEngine(ds).allocate(
-        dict(configs[0]), {}, {date_field: doc_date})
     payload = dict(data)
     payload[no_field] = allocated
     logger.info('[bo_api] allocated %s=%s (type=%s)', no_field, allocated,
-                document_type_id)
+                data.get('document_type_id'))
     return payload
 
 
@@ -599,7 +584,7 @@ def create_bo(object_type):
         if result.success:
             return ok(result.data, message=result.message), status_code
         return error_response(result.message, status=status_code, errors=result.errors)
-    except NumberSequenceError as e:
+    except (NumberSequenceError, DocumentNumberError) as e:
         logger.warning(f"[bo_api] allocate order_no failed: {e}")
         label = _NUMBER_SEQ_LABELS.get(object_type, '单据')
         return error_response(f'{label}取号失败：{e}', status=400)

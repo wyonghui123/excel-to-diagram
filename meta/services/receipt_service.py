@@ -142,25 +142,15 @@ class ReceiptService:
         """按单据类型指向的序列取号（R-RC-8：必须在开事务前调用）。"""
         if _blank(document_type_id) or _blank(receipt_date):
             return None
-        rows = self.ds.query(
-            'SELECT number_sequence_id FROM %s WHERE id = ?' % TYPE_TABLE,
-            [document_type_id])
-        sequence_id = rows[0].get('number_sequence_id') if rows else None
-        if _blank(sequence_id):
-            return None
-        configs = self.ds.query(
-            'SELECT code, pattern, scope_fields, date_field, start_value, '
-            'on_exhaust FROM number_sequences WHERE id = ?', [sequence_id])
-        if not configs:
-            return None
-        from meta.core.number_sequence_engine import (
-            NumberSequenceEngine, NumberSequenceError)
+        from meta.services.document_number_service import (
+            DocumentNumberError, DocumentNumberService)
         try:
-            return NumberSequenceEngine(self.ds).allocate(
-                dict(configs[0]), {}, {'receipt_date': receipt_date})
-        except NumberSequenceError as e:
-            raise ReceiptError(str(e), field_name='receipt_no',
-                               rule='RC_NUMBER_REQUIRED')
+            return DocumentNumberService(self.ds).allocate_for(
+                'receipt', {'document_type_id': document_type_id,
+                            'receipt_date': receipt_date})
+        except DocumentNumberError as error:
+            raise ReceiptError(str(error), field_name='receipt_no',
+                               rule='RC_NUMBER_REQUIRED') from error
 
     # ------------------------------------------------------------------ 创建
     def prepare_header(self, header: Dict[str, Any]):
