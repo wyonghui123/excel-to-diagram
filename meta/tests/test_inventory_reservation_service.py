@@ -17,6 +17,7 @@ from meta.tests.inventory_test_doubles import (
     ITEM_ID,
     LOCATION_ID,
     ORG_ID,
+    OTHER_ORG_ID,
     MemDS,
     build_db,
     seed,
@@ -368,6 +369,50 @@ def test_rebuilt_components_release_stale_reservation():
         'SELECT reservation_key FROM inventory_reservations '
         'WHERE status IN (?, ?)', ['open', 'partially_fulfilled']).fetchall()
     assert [row[0] for row in active] == ['WO-COMP-1-2']
+
+
+def test_work_order_component_org_falls_back_to_so_line_location():
+    conn = _conn(10)
+    _create_work_order_tables(conn, order_id=1)
+    conn.execute('UPDATE sales_orders SET org_id = NULL WHERE id = 1')
+    conn.execute('CREATE TABLE IF NOT EXISTS sales_order_lines '
+                 '(id INTEGER PRIMARY KEY, order_id INTEGER, '
+                 'plant_location_id INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS locations '
+                 '(id INTEGER PRIMARY KEY, org_id INTEGER)')
+    conn.execute('INSERT INTO locations (id, org_id) VALUES (1, ?)',
+                 [ORG_ID])
+    conn.execute('INSERT INTO sales_order_lines (id, order_id, '
+                 'plant_location_id) VALUES (501, 1, 1)')
+    conn.commit()
+    _add_component(conn, qty=4)
+
+    result = _service(conn).sync_work_order_components(1)
+    assert result['created'] == 1
+    row = conn.execute('SELECT org_id FROM inventory_reservations').fetchone()
+    assert int(row[0]) == ORG_ID
+
+
+def test_work_order_component_org_falls_back_to_single_active_org():
+    conn = _conn(10)
+    _create_work_order_tables(conn, order_id=0)
+    conn.execute("UPDATE orgs SET status = 'inactive' WHERE id = ?",
+                 [OTHER_ORG_ID])
+    conn.commit()
+    _add_component(conn, qty=4)
+
+    result = _service(conn).sync_work_order_components(1)
+    assert result['created'] == 1
+
+
+def test_work_order_component_org_skips_when_ambiguous():
+    conn = _conn(10)
+    _create_work_order_tables(conn, order_id=0)
+    _add_component(conn, qty=4)
+
+    result = _service(conn).sync_work_order_components(1)
+    assert result['created'] == 0
+    assert result['reason'] == 'ORG_NOT_RESOLVED'
 
 
 def test_work_order_component_uses_project_task_segment():

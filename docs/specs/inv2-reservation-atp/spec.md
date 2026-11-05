@@ -478,6 +478,8 @@ SO 行（so_segment_enabled=1）
 | optional 组件不自动核销 | 同上 | `skipped=1`，承诺保留 |
 | 组件任务段继承工单头任务 | `test_work_order_production.py` | `expand_components` 写入 `project_task_id` |
 | 重展开保留逐组件任务覆盖 | 同上 | 按 `structure_line_id` 保留，不被 DELETE/INSERT 抹掉 |
+| 组件组织兜底到 SO 行库位 | `test_inventory_reservation_service.py` | 抬头 org 为空时取 `sales_order_lines.plant_location_id → locations.org_id` |
+| 组件组织兜底到单一活跃组织 | 同上 | 仅一个 active org 时创建承诺；多组织仍 `ORG_NOT_RESOLVED` |
 
 ---
 
@@ -545,6 +547,7 @@ SO 行（so_segment_enabled=1）
 - **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
 - **工单组件预留（2026-11-05）**：不新增表/迁移。`work_order_component` 作需求节点，统一 soft；幂等键 `WO-COMP-{work_order_id}-{structure_line_id}` 以结构行稳定，重展开只更新数量与组件 id，结构行消失或工单取消/关闭时释放。
 - **关单前置校验（2026-11-05）**：通用 BO 更新 `status → Closed` 时，`ProjectTaskGuardInterceptor` 调 `assert_source_closable('work_order', id)`；仍有活跃未核销组件承诺则拒绝（`INV_RESERVATION_ACTIVE_ON_CLOSE`）。取消（`Cancelled`）不走该校验，按显式释放语义处理。
+- **组件组织来源补强（2026-11-05）**：组件承诺组织解析四级兜底：项目 → SO 抬头 → SO 行 `plant_location_id` 所属组织 → 单一活跃组织；订单多行时仅在所有行指向同一组织才按订单兜底，多组织仍报 `ORG_NOT_RESOLVED` 并跳过（不猜测）。
 - **组件任务段（2026-11-05）**：`expand_components` 重建组件时按 `structure_line_id` 保留逐组件 `project_task_id`，无值时继承工单头任务；重展开的 DELETE/INSERT 不再抹掉任务覆盖。组件预留据此落到各自任务段，而非全部堆在头任务段。旧库缺列时自动跳过写入（`_insert` 列探测）。
 - **组件核销链路（2026-11-05）**：P6c 不建领料单据，完工收货即唯一的组件消耗事件；`ReceiptService._post_work_order` 过账后按累计净完工量调 `fulfill_work_order_components`。目标量由结构行反推工单数量（`(qty_required/(1+scrap) − fixed)/qty_per`），按比例累进核销；`qty_per` 缺失按整单处理；optional 组件不自动核销。只进不退——红冲保留谱系，组件退回需走独立退料流程。预留层失败仅告警，不阻断完工过账。
 

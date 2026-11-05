@@ -779,7 +779,8 @@ class InventoryReservationService:
 
         · 组件是独立物料需求，与来源 SO 行（成品）预留不重复计量；
         · 一律 soft：不锁死库存，短缺由 ATP shortage 暴露；
-        · 段：组件任务 → 任务段，否则 owned；组织：项目 → 销售订单抬头；
+        · 段：组件任务 → 任务段，否则 owned；组织：项目 → SO 抬头 →
+          SO 行库位 → 单一活跃组织兜底；
         · 幂等键按 structure_line_id 稳定，重展开不会重复承诺；
         · 工单取消/关闭时释放组件承诺；结构行消失的旧承诺一并释放。
         """
@@ -997,7 +998,7 @@ class InventoryReservationService:
             return []
 
     def _resolve_work_order_org(self, work_order: Dict[str, Any]) -> int:
-        """项目组织优先，销售订单抬头组织兜底；都缺失则无法建承诺。"""
+        """项目 → SO 抬头 → SO 行库位 → 单一组织兜底；都缺失则无法建承诺。"""
         project_id = _to_int(work_order.get('project_id'))
         if project_id:
             org_id = self._query_org('projects', project_id)
@@ -1008,7 +1009,62 @@ class InventoryReservationService:
             org_id = self._query_org('sales_orders', order_id)
             if org_id:
                 return org_id
-        return 0
+        org_id = self._query_so_line_org(_to_int(work_order.get('order_line_id')))
+        if org_id:
+            return org_id
+        if order_id:
+            org_id = self._query_order_single_line_org(order_id)
+            if org_id:
+                return org_id
+        return self._query_single_org()
+
+    def _query_so_line_org(self, line_id: int) -> int:
+        """SO 行发运/生产库位所属组织。"""
+        if line_id <= 0:
+            return 0
+        try:
+            rows = self.ds.query(
+                'SELECT plant_location_id FROM sales_order_lines WHERE id = ?',
+                [line_id])
+        except Exception:
+            return 0
+        return self._query_location_org(rows[0].get('plant_location_id')) \
+            if rows else 0
+
+    def _query_location_org(self, location_id: Any) -> int:
+        loc_id = _to_int(location_id)
+        if loc_id <= 0:
+            return 0
+        try:
+            rows = self.ds.query('SELECT org_id FROM locations WHERE id = ?',
+                                 [loc_id])
+        except Exception:
+            return 0
+        return _to_int(rows[0].get('org_id')) if rows else 0
+
+    def _query_order_single_line_org(self, order_id: int) -> int:
+        """订单全部行指向同一组织时才兜底，避免跨厂/跨组织猜测。"""
+        if order_id <= 0:
+            return 0
+        try:
+            rows = self.ds.query(
+                'SELECT DISTINCT loc.org_id FROM sales_order_lines l '
+                'JOIN locations loc ON loc.id = l.plant_location_id '
+                'WHERE l.order_id = ? AND loc.org_id IS NOT NULL '
+                'AND loc.org_id > 0', [order_id])
+        except Exception:
+            return 0
+        org_ids = {_to_int(row.get('org_id')) for row in rows}
+        return org_ids.pop() if len(org_ids) == 1 else 0
+
+    def _query_single_org(self) -> int:
+        """仅当系统只有一个活跃组织时兜底；多组织不猜。"""
+        try:
+            rows = self.ds.query(
+                "SELECT id FROM orgs WHERE status = 'active' ORDER BY id")
+        except Exception:
+            return 0
+        return _to_int(rows[0].get('id')) if len(rows) == 1 else 0
 
     def _query_org(self, table: str, row_id: int) -> int:
         try:
