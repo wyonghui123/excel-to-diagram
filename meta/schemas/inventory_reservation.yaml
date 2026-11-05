@@ -5,7 +5,7 @@
 #   ① 预留量唯一事实源；inventory_balances.qty_reserved 只是本表的投影。
 #   ② 段由 stock_segment_service.resolve_segment 解析，伙伴列 0 哨兵。
 #   ③ hard 预留在目标段扣减；soft 在公共池扣减，可释放/改派。
-#   ④ 状态机 open → partially_fulfilled → fulfilled / cancelled / expired。
+#   ④ 状态机 open → partially_fulfilled → fulfilled / cancelled / closed / expired。
 #   ⑤ 无人工写入口的字段（qty_reserved/qty_fulfilled/status）由服务维护。
 
 id: inventory_reservation
@@ -357,7 +357,7 @@ fields:
     required: true
     default: open
     max_length: 20
-    description: open / partially_fulfilled / fulfilled / cancelled / expired
+    description: open / partially_fulfilled / fulfilled / cancelled / closed / expired
     enum_values:
       - value: open
         label: 开放
@@ -369,6 +369,9 @@ fields:
       - value: fulfilled
         label: 已核销
         color: success
+      - value: closed
+        label: 已关闭
+        color: default
       - value: cancelled
         label: 已取消
         color: default

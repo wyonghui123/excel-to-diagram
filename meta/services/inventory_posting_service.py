@@ -360,22 +360,6 @@ class InventoryPostingService:
             + seg_params)
         return float(rows[0].get('qty_on_hand') or 0) if rows else 0.0
 
-    def available_qty(self, org_id: Any, location_id: Any, item_id: Any,
-                      batch_id: Any = None,
-                      segment: Optional[Dict[str, Any]] = None) -> float:
-        clause, seg_params = _segment_clause(segment)
-        rows = self.ds.query(
-            'SELECT qty_on_hand, qty_reserved FROM %s WHERE org_id = ? '
-            'AND location_id = ? AND item_id = ? AND batch_id = ? '
-            "AND stock_status = 'unrestricted'" % BAL_TABLE + clause,
-            [org_id, location_id, item_id,
-             int(batch_id) if not _blank(batch_id) else 0]
-            + seg_params)
-        if not rows:
-            return 0.0
-        return float(rows[0].get('qty_on_hand') or 0) - \
-            float(rows[0].get('qty_reserved') or 0)
-
     def in_transit(self, org_id: Any = None,
                    item_id: Any = None) -> List[Dict[str, Any]]:
         """在途派生：按调出/调入组织与物料汇总 TO 行未收量。"""

@@ -502,7 +502,11 @@ class StockSegmentService:
     # 生命周期辅助
     # ------------------------------------------------------------------
     def prune_empty_balances(self, segment: Dict[str, Any]) -> int:
-        """清理指定段下已无在库/预留的余额投影行，返回删除行数。"""
+        """清理指定段下已无在库/预留的余额投影行，返回删除行数。
+
+        预留判定只查 `inventory_reservations` 事实表，不读 `qty_reserved`
+        投影（不变量 18）。
+        """
         seg = self.validate_segment(segment)
         if not self._table_exists('inventory_balances'):
             return 0
@@ -510,11 +514,15 @@ class StockSegmentService:
         params = [seg['stock_segment_type']]
         params.extend(_to_int(seg[col]) for col in SEGMENT_COLUMNS[1:])
         rows = self.ds.query(
-            'SELECT id FROM inventory_balances WHERE qty_on_hand = 0 '
-            'AND qty_reserved = 0 AND ' + clause, params)
+            'SELECT id, location_id, batch_id FROM inventory_balances '
+            'WHERE qty_on_hand = 0 AND ' + clause, params)
         if not rows:
             return 0
-        ids = [row['id'] for row in rows]
+        active = self._active_reservation_scopes(seg)
+        ids = [row['id'] for row in rows
+               if not self._covered_by_reservation(row, active)]
+        if not ids:
+            return 0
         placeholders = ', '.join('?' for _ in ids)
         self.ds.execute(
             'DELETE FROM inventory_balances WHERE id IN (%s)' % placeholders,
@@ -522,6 +530,35 @@ class StockSegmentService:
         logger.info('[inv2] 清理空段余额 %s 条 segment=%s',
                     len(ids), seg['stock_segment_type'])
         return len(ids)
+
+    def _active_reservation_scopes(self, seg: Dict[str, Any]):
+        """该段仍占用可用量的预留（含未限定库位/批次的行）。"""
+        if not self._table_exists('inventory_reservations'):
+            return []
+        clause = ' AND '.join('%s = ?' % col for col in SEGMENT_COLUMNS)
+        params = [seg['stock_segment_type']]
+        params.extend(_to_int(seg[col]) for col in SEGMENT_COLUMNS[1:])
+        return self.ds.query(
+            'SELECT location_id, batch_id FROM inventory_reservations '
+            "WHERE status IN ('open', 'partially_fulfilled') "
+            'AND (valid_to IS NULL OR valid_to > ?) '
+            'AND qty_reserved - qty_fulfilled > 0 AND ' + clause,
+            [_now()] + params)
+
+    @staticmethod
+    def _covered_by_reservation(balance: Dict[str, Any],
+                                reservations) -> bool:
+        balance_location = _to_int(balance.get('location_id'))
+        balance_batch = _to_int(balance.get('batch_id'))
+        for reservation in reservations:
+            location = _to_int(reservation.get('location_id'))
+            batch = _to_int(reservation.get('batch_id'))
+            if location and location != balance_location:
+                continue
+            if batch and batch != balance_batch:
+                continue
+            return True
+        return False
 
     def consume_consignment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """寄售消耗：供应商所有 → 自有，等价成对段转移 + 计价标记。"""

@@ -121,3 +121,27 @@ def test_pinned_reservation_not_counted_in_other_batch():
     same_batch = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID,
                               'batch_id': BATCH_ID})
     assert same_batch['available_on_hand'] == pytest.approx(5)
+
+
+def test_expired_reservation_excluded_without_expire_job():
+    conn = seed(build_db())
+    _post(conn, 10, DEFAULT_SEGMENT, 'owned-in')
+    _reservation(conn, 'RSV-ATP-3', 4, 3,
+                 valid_to='2026-01-01 00:00:00')
+
+    service = InventoryReservationService(MemDS(conn))
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(0)
+    assert atp['available_on_hand'] == pytest.approx(10)
+    assert atp['shortage'] == pytest.approx(0)
+
+
+def test_soft_overbooking_reports_shortage():
+    conn = seed(build_db())
+    _post(conn, 10, DEFAULT_SEGMENT, 'owned-in')
+    _reservation(conn, 'RSV-ATP-4', 12, 4)
+
+    atp = InventoryReservationService(MemDS(conn)).atp(
+        {'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['available_on_hand'] == pytest.approx(-2)
+    assert atp['shortage'] == pytest.approx(2)

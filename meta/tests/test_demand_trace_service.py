@@ -105,6 +105,16 @@ def test_trace_unknown_node_type_rejected():
     assert exc.value.code == 'INV_TRACE_NODE_INVALID'
 
 
+def test_hard_pegging_inventory_segment_rejected():
+    """R15：库存段行的数量只能由预留陈述，hard pegging 不得再记量。"""
+    conn = _conn()
+    demand = ('sales_order_line', SO_LINE_ID, SO_LINE_ID)
+    with pytest.raises(InventoryError) as exc:
+        _link(conn, ('inventory_balance', 1, 0), demand, 5,
+              trace_type='pegging', peg_type='hard')
+    assert exc.value.code == 'TRACE_SUPPLY_DOUBLE_COUNT'
+
+
 def test_trace_does_not_duplicate_demand_allocation_project_task():
     """I11 边界：采购行的项目任务归属只留在 demand_allocation，trace 不双写。"""
     conn = _conn()

@@ -8,10 +8,12 @@
   ① inventory_reservations 是预留量的唯一事实源；
      inventory_balances.qty_reserved 只是投影，由 rebuild_reserved_qty 回写。
   ② reservation_key 幂等：重复创建返回既有预留，不重复占用。
-  ③ 状态机 open → partially_fulfilled → fulfilled / cancelled / expired。
+  ③ 状态机 open → partially_fulfilled → fulfilled / cancelled / closed / expired；
+     closed 为终止履行并保留历史，与 cancelled（承诺作废）区分。
   ④ available_on_hand(segment) = 段内 on_hand - 活跃预留未核销量。
   ⑤ hard 钉在目标段扣减且不得超订；soft 允许先预留后补货（MTO 标准）。
-  ⑥ atp(include_inbound=False) 保留接口；v1 expected_receipts 恒为 0。
+  ⑥ 活跃判定含时间派生：valid_to 已过的预留读取时即不计入可用量。
+  ⑦ atp(include_inbound=False) 保留接口；在途能力未实现，传 True 报错。
 """
 
 import logging
@@ -35,6 +37,7 @@ STATUS_OPEN = 'open'
 STATUS_PARTIALLY_FULFILLED = 'partially_fulfilled'
 STATUS_FULFILLED = 'fulfilled'
 STATUS_CANCELLED = 'cancelled'
+STATUS_CLOSED = 'closed'
 STATUS_EXPIRED = 'expired'
 
 ACTIVE_STATUSES = (STATUS_OPEN, STATUS_PARTIALLY_FULFILLED)
@@ -46,6 +49,15 @@ INV_RESERVATION_QTY_EXCEEDED = 'INV_RESERVATION_QTY_EXCEEDED'
 INV_RESERVATION_NOT_FOUND = 'INV_RESERVATION_NOT_FOUND'
 INV_RESERVATION_STATE_INVALID = 'INV_RESERVATION_STATE_INVALID'
 INV_HARD_PEG_CONFLICT = 'INV_HARD_PEG_CONFLICT'
+INV_RESERVATION_EXCEEDS_DEMAND = 'INV_RESERVATION_EXCEEDS_DEMAND'
+INV_RESERVATION_CLOSED = 'INV_RESERVATION_CLOSED'
+INV_DEMAND_QTY_UNKNOWN = 'INV_DEMAND_QTY_UNKNOWN'
+ATP_INBOUND_UNSUPPORTED = 'ATP_INBOUND_UNSUPPORTED'
+
+#: 可解析需求量的节点 → (表, 数量列)。不可解析时告警放行。
+DEMAND_QTY_SOURCES = {
+    'sales_order_line': ('sales_order_lines', 'qty'),
+}
 
 
 def _blank(value: Any) -> bool:
@@ -164,6 +176,10 @@ class InventoryReservationService:
                 'INV_ENTRY_INVALID', '钉类型只允许 hard / soft',
                 {'peg_type': peg_type})
 
+        self._assert_demand_capacity(
+            demand_type, demand_id,
+            _to_int(data.get('demand_line_id')), qty)
+
         if peg_type == PEG_HARD:
             self._assert_hard_peg(segment, data, qty)
 
@@ -234,6 +250,7 @@ class InventoryReservationService:
                             reason: str = '') -> Dict[str, Any]:
         """释放预留（cancelled）；仅活跃状态可释放。"""
         row = self._load(reservation_id)
+        self._assert_not_closed(row, '释放')
         if row['status'] not in ACTIVE_STATUSES:
             raise InventoryError(
                 INV_RESERVATION_STATE_INVALID,
@@ -250,10 +267,33 @@ class InventoryReservationService:
         logger.info('[inv2] 预留释放 id=%s reason=%s', reservation_id, reason)
         return updated
 
+    def close_reservation(self, reservation_id: int,
+                          reason: str = '') -> Dict[str, Any]:
+        """终止履行并保留历史（closed）；已核销量与链路不变。"""
+        row = self._load(reservation_id)
+        if row['status'] == STATUS_CLOSED:
+            return row
+        if row['status'] not in ACTIVE_STATUSES:
+            raise InventoryError(
+                INV_RESERVATION_STATE_INVALID,
+                '当前状态不可关闭: %s' % row['status'],
+                {'reservation_id': reservation_id, 'status': row['status']})
+        with self.ds.transaction():
+            self.ds.execute(
+                'UPDATE %s SET status = ?, remark = ?, updated_at = ? '
+                'WHERE id = ?' % RESERVATION_TABLE,
+                [STATUS_CLOSED, reason or row.get('remark'), _now(),
+                 reservation_id])
+            self._rebuild_projection(row.get('org_id'))
+        updated = self._load(reservation_id)
+        logger.info('[inv2] 预留关闭 id=%s reason=%s', reservation_id, reason)
+        return updated
+
     def fulfill_reservation(self, reservation_id: int, qty: Any,
                             tx_id: int = 0) -> Dict[str, Any]:
         """核销预留（部分/全部）；累计不得超过 qty_reserved。"""
         row = self._load(reservation_id)
+        self._assert_not_closed(row, '核销')
         if row['status'] not in ACTIVE_STATUSES:
             raise InventoryError(
                 INV_RESERVATION_STATE_INVALID,
@@ -347,7 +387,12 @@ class InventoryReservationService:
     # ------------------------------------------------------------------
     def available_on_hand(self, query: Dict[str, Any],
                           include_inbound: bool = False) -> Dict[str, Any]:
-        """按段可用量：段内 on_hand - 活跃预留未核销量（+可选在途，v1 恒 0）。"""
+        """按段可用量：段内 on_hand - 活跃预留未核销量（+可选在途，未实现）。"""
+        if include_inbound:
+            raise InventoryError(
+                ATP_INBOUND_UNSUPPORTED,
+                '在途供应未接入，include_inbound=true 暂不支持',
+                {'include_inbound': include_inbound})
         data = dict(query or {})
         org_id = _to_int(data.get('org_id'))
         item_id = _to_int(data.get('item_id'))
@@ -364,26 +409,26 @@ class InventoryReservationService:
                                     stock_status, segment)
         reserved = self._sum_active_reservations(
             org_id, item_id, location_id, batch_id, segment)
-        expected = 0.0
-        if include_inbound:
-            # v1 不接入 PO/工单在途；接口保留，不得返回非零。
-            expected = 0.0
         return {
             'on_hand': on_hand,
             'reserved': reserved,
             'available_on_hand': on_hand - reserved,
-            'expected_receipts': expected,
+            'shortage': max(0.0, reserved - on_hand),
+            'expected_receipts': 0.0,
             'stock_segment_type': segment['stock_segment_type'],
             'project_id': segment['project_id'],
             'project_task_id': segment['project_task_id'],
             'sales_order_line_id': segment['sales_order_line_id'],
             'owner_party_id': segment['owner_party_id'],
-            'include_inbound': bool(include_inbound),
+            'include_inbound': False,
         }
 
     def atp(self, query: Dict[str, Any],
             include_inbound: bool = False) -> Dict[str, Any]:
-        """ATP 接口保留：v1 返回值与 available_on_hand 相同。"""
+        """简化 ATP（不带日期）：v1 返回值与 available_on_hand 相同。
+
+        include_inbound=True 因在途未实现按 ATP_INBOUND_UNSUPPORTED 报错。
+        """
         return self.available_on_hand(query, include_inbound=include_inbound)
 
     def _segment_clause(self, segment: Dict[str, Any]):
@@ -419,8 +464,9 @@ class InventoryReservationService:
         rows = self.ds.query(
             'SELECT COALESCE(SUM(qty_reserved - qty_fulfilled), 0) AS total '
             'FROM %s WHERE org_id = ? AND item_id = ? AND status IN (?, ?) '
+            'AND (valid_to IS NULL OR valid_to > ?) '
             % RESERVATION_TABLE + clause + scope_sql,
-            [org_id, item_id, STATUS_OPEN, STATUS_PARTIALLY_FULFILLED]
+            [org_id, item_id, STATUS_OPEN, STATUS_PARTIALLY_FULFILLED, _now()]
             + params + scope_params)
         return _num(rows[0].get('total')) if rows else 0.0
 
@@ -624,6 +670,70 @@ class InventoryReservationService:
                 org_id=org_id or None)
         except Exception as exc:  # 投影失败不得影响预留事实写入
             logger.warning('[inv2] qty_reserved 投影回写跳过: %s', exc)
+
+    def _assert_not_closed(self, row: Dict[str, Any], action: str) -> None:
+        if row.get('status') == STATUS_CLOSED:
+            raise InventoryError(
+                INV_RESERVATION_CLOSED,
+                '已关闭的预留不可%s' % action,
+                {'reservation_id': row.get('id'), 'status': row.get('status')})
+
+    def _assert_demand_capacity(self, demand_type: str, demand_id: int,
+                                demand_line_id: int, qty: float) -> None:
+        """需求上限守卫：已核销 + 未核销承诺 + 本次量不得超过需求量。"""
+        demand_qty = self._demand_qty(demand_type, demand_id, demand_line_id)
+        if demand_qty is None:
+            logger.warning(
+                '[inv2] %s demand=%s:%s line=%s 需求量不可解析，跳过上限守卫',
+                INV_DEMAND_QTY_UNKNOWN, demand_type, demand_id, demand_line_id)
+            return
+        fulfilled, open_qty = self._demand_usage(
+            demand_type, demand_id, demand_line_id)
+        if fulfilled + open_qty + qty > demand_qty + 1e-9:
+            raise InventoryError(
+                INV_RESERVATION_EXCEEDS_DEMAND,
+                '未核销承诺合计超过需求剩余量',
+                {'demand_object_type': demand_type,
+                 'demand_object_id': demand_id,
+                 'demand_line_id': demand_line_id,
+                 'demand_qty': demand_qty,
+                 'fulfilled': fulfilled,
+                 'open_commitment': open_qty,
+                 'qty': qty})
+
+    def _demand_qty(self, demand_type: str, demand_id: int,
+                    demand_line_id: int) -> Optional[float]:
+        mapping = DEMAND_QTY_SOURCES.get(demand_type)
+        if not mapping or not demand_id:
+            return None
+        table, column = mapping
+        key = demand_line_id or demand_id
+        try:
+            rows = self.ds.query(
+                'SELECT %s AS qty FROM %s WHERE id = ?' % (column, table),
+                [key])
+        except Exception:
+            return None
+        if not rows:
+            return None
+        return _num(rows[0].get('qty'))
+
+    def _demand_usage(self, demand_type: str, demand_id: int,
+                      demand_line_id: int) -> tuple:
+        """返回该需求节点已核销量与活跃未核销承诺量。"""
+        if not self._table_ready():
+            return 0.0, 0.0
+        rows = self.ds.query(
+            'SELECT COALESCE(SUM(qty_fulfilled), 0) AS fulfilled, '
+            'COALESCE(SUM(CASE WHEN status IN (?, ?) '
+            'THEN qty_reserved - qty_fulfilled ELSE 0 END), 0) AS open_qty '
+            'FROM %s WHERE demand_object_type = ? AND demand_object_id = ? '
+            'AND demand_line_id = ?' % RESERVATION_TABLE,
+            [STATUS_OPEN, STATUS_PARTIALLY_FULFILLED, demand_type, demand_id,
+             demand_line_id])
+        if not rows:
+            return 0.0, 0.0
+        return _num(rows[0].get('fulfilled')), _num(rows[0].get('open_qty'))
 
     def _assert_hard_peg(self, segment: Dict[str, Any], data: Dict[str, Any],
                          qty: float) -> None:

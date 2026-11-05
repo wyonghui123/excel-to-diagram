@@ -16,6 +16,9 @@ from meta.migrations.v201__inventory_foundation import (
 from meta.migrations.v205__inventory_segment_reservation import (
     apply_segment_schema,
 )
+from meta.migrations.v216__reservation_closed_status import (
+    apply_closed_status,
+)
 
 ORG_ID = 1
 OTHER_ORG_ID = 2
@@ -181,6 +184,7 @@ def _install_tables(conn):
     # INV-2：段列 / 预留表 / 线索表 / 余额新唯一键（与 v205 单一 DDL 来源）
     with redirect_stdout(io.StringIO()):
         apply_segment_schema(conn)
+        apply_closed_status(conn)
 
 
 def _seed_types(conn):

@@ -170,13 +170,54 @@ def test_expire_reservations():
     assert service.expire_reservations(now='2026-06-01 00:00:00') == 0
 
 
-def test_atp_keep_expected_receipts_zero():
+def test_atp_include_inbound_unsupported():
     conn = _conn(10)
     service = _service(conn)
-    result = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID},
-                         include_inbound=True)
-    assert result['available_on_hand'] == pytest.approx(10)
-    assert result['expected_receipts'] == pytest.approx(0)
+    with pytest.raises(InventoryError) as exc:
+        service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID},
+                    include_inbound=True)
+    assert exc.value.code == 'ATP_INBOUND_UNSUPPORTED'
+
+
+def test_manual_reservation_exceeding_demand_rejected():
+    conn = _conn(10)
+    _create_so_tables(conn)
+    service = _service(conn)
+    service.create_reservation(_payload('RSV-D1', 8))
+    with pytest.raises(InventoryError) as exc:
+        service.create_reservation(_payload('RSV-D2', 4))
+    assert exc.value.code == 'INV_RESERVATION_EXCEEDS_DEMAND'
+
+
+def test_unknown_demand_qty_warns_and_allows(caplog):
+    conn = _conn()
+    service = _service(conn)
+    with caplog.at_level('WARNING'):
+        created = service.create_reservation(_payload('RSV-U1', 12,
+                                                      demand_id=999))
+    assert created['created'] is True
+    assert 'INV_DEMAND_QTY_UNKNOWN' in caplog.text
+
+
+def test_close_reservation_keeps_fulfilled_and_releases_rest():
+    conn = _conn(10)
+    service = _service(conn)
+    rid = service.create_reservation(_payload('RSV-CL', 5))['reservation']['id']
+    service.fulfill_reservation(rid, 2)
+
+    closed = service.close_reservation(rid, reason='终止履行')
+    assert closed['status'] == 'closed'
+    assert float(closed['qty_fulfilled']) == pytest.approx(2)
+    atp = service.available_on_hand({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(0)
+    assert atp['available_on_hand'] == pytest.approx(10)
+
+    with pytest.raises(InventoryError) as exc:
+        service.fulfill_reservation(rid, 1)
+    assert exc.value.code == 'INV_RESERVATION_CLOSED'
+    with pytest.raises(InventoryError) as exc:
+        service.release_reservation(rid)
+    assert exc.value.code == 'INV_RESERVATION_CLOSED'
 
 
 def _create_so_tables(conn, so_flag=0):

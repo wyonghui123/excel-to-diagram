@@ -34,6 +34,15 @@ _GUARDED_WORK_ORDER_FIELDS = ('project_id', 'project_task_id', 'status')
 _STATUS_CANCELLED = 'cancelled'
 
 
+def _to_int(value) -> int:
+    if value in (None, ''):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 class ProjectTaskGuardInterceptor(Interceptor):
     """工单归属守卫 + 项目任务解绑守卫。"""
 
@@ -112,4 +121,35 @@ class ProjectTaskGuardInterceptor(Interceptor):
         )
 
     def after_action(self, context: 'ActionContext') -> None:
-        """本守卫无后置逻辑。"""
+        """A3：工单/服务单创建或更新后，确保其来源 SO 行的 soft 预留已同步。
+
+        工单只是销售需求的执行载体，不新增预留事实，复用 sync_reservation 路径；
+        失败不阻断工单写入（仅告警）。
+        """
+        if getattr(context.meta_object, 'id', None) != WORK_ORDER_OBJECT:
+            return
+        if context.action not in _WRITE_ACTIONS:
+            return
+        result = context.result
+        if result is not None and not getattr(result, 'success', True):
+            return
+        data = {}
+        for source in (getattr(result, 'data', None), context.old_data,
+                       context.params):
+            for key, value in (source or {}).items():
+                if value not in (None, ''):
+                    data[key] = value
+        line_id = _to_int(data.get('order_line_id'))
+        if line_id <= 0:
+            return
+        try:
+            from meta.services.inventory_reservation_service import (
+                InventoryReservationService,
+            )
+            InventoryReservationService(
+                context.data_source).sync_sales_order_line(line_id)
+        except Exception as error:
+            logger.warning(
+                '[inv2] 工单来源行 %s 预留同步失败（不阻断写入）: %s',
+                line_id, error)
+

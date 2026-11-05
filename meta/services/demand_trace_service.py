@@ -34,6 +34,10 @@ PEG_SOFT = 'soft'
 INV_TRACE_QTY_EXCEEDED = 'INV_TRACE_QTY_EXCEEDED'
 INV_TRACE_NODE_INVALID = 'INV_TRACE_NODE_INVALID'
 INV_TRACE_NOT_FOUND = 'INV_TRACE_NOT_FOUND'
+TRACE_SUPPLY_DOUBLE_COUNT = 'TRACE_SUPPLY_DOUBLE_COUNT'
+
+#: 库存段行（数量已由预留陈述，禁止再被 hard pegging 记量）
+INVENTORY_SUPPLY_TYPES = ('inventory_balance', 'inventory_transaction')
 
 #: 节点类型白名单（供应侧 + 需求侧）
 NODE_TYPES = (
@@ -148,6 +152,15 @@ class DemandTraceService:
             raise InventoryError(
                 INV_TRACE_QTY_EXCEEDED, 'trace 分配量必须大于 0',
                 {'allocated_qty': data.get('allocated_qty')})
+
+        # 互斥消费（R15）：库存段行的数量只能由预留陈述，hard pegging
+        # 若再记量即双计，直接拒绝。
+        if trace_type == TRACE_PEGGING and peg_type == PEG_HARD \
+                and supply['object_type'] in INVENTORY_SUPPLY_TYPES:
+            raise InventoryError(
+                TRACE_SUPPLY_DOUBLE_COUNT,
+                '库存段行不可被 hard pegging 记量（数量归预留）',
+                {'supply': supply, 'allocated_qty': qty})
 
         existing = self._find_active(supply, demand, trace_type)
         if existing:
