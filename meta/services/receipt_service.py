@@ -644,15 +644,17 @@ class ReceiptService:
                 'work_order_id': work_order['id']}
 
     def _fulfill_component_reservations(self, work_order_id: Any) -> None:
-        """按累计完工量核销工单组件软预留；预留层失败不阻断过账。"""
+        """发出完工过账事件，由承诺层按累计完工量核销组件预留。
+
+        预留层失败不阻断过账。
+        """
         try:
-            from meta.services.inventory_reservation_service import (
-                InventoryReservationService,
-            )
-            completed = self._work_order_completed_qty(work_order_id)
-            InventoryReservationService(
-                self.ds).fulfill_work_order_components(
-                    work_order_id, completed_qty=completed)
+            from meta.services.commitment_handlers import dispatch
+            dispatch('receipt.posted', {
+                'data_source': self.ds,
+                'work_order_id': work_order_id,
+                'completed_qty': self._work_order_completed_qty(work_order_id),
+            })
         except Exception as error:  # noqa: BLE001 - 承诺核销失败不阻断完工
             logger.warning('[receipt] 工单 %s 组件承诺核销失败（跳过）: %s',
                            work_order_id, error)

@@ -23,6 +23,16 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from meta.services.commitment_policies import (
+    DEMAND_SERVICE_ORDER,
+    PEG_HARD,
+    PEG_SOFT,
+    ROW_DEMAND_POLICIES,
+    SERVICE_LINE_KEY_PREFIX,
+    SERVICE_REQUEST_ACTIVE_STATUSES,
+    SERVICE_REQUEST_RELEASE_STATUSES,
+    SERVICE_REQUEST_SOURCE_TYPE,
+)
 from meta.services.inventory_document_sequence import next_document_no
 from meta.services.inventory_guard_service import InventoryError
 from meta.services.stock_segment_service import (
@@ -45,23 +55,11 @@ STATUS_EXPIRED = 'expired'
 
 ACTIVE_STATUSES = (STATUS_OPEN, STATUS_PARTIALLY_FULFILLED)
 
-PEG_HARD = 'hard'
-PEG_SOFT = 'soft'
-
 DEMAND_WORK_ORDER_COMPONENT = 'work_order_component'
 WO_SOURCE_TYPE = 'work_order'
 WO_COMPONENT_KEY_PREFIX = 'WO-COMP'
 #: 工单进入这两个终态后不再需要投料，组件承诺全部释放
 WO_COMPONENT_RELEASE_STATUSES = ('Cancelled', 'Closed')
-
-DEMAND_SERVICE_ORDER = 'service_order'
-SERVICE_REQUEST_SOURCE_TYPE = 'service_request'
-SERVICE_LINE_KEY_PREFIX = 'SVC-LN'
-#: 只有已提交/已批准的服务请求才占用可用量（草稿不承诺）
-SERVICE_REQUEST_ACTIVE_STATUSES = ('submitted', 'approved')
-#: 请求进入这些终态后备件需求结束，承诺全部释放
-SERVICE_REQUEST_RELEASE_STATUSES = ('rejected', 'completed', 'closed',
-                                    'cancelled')
 
 INV_RESERVATION_QTY_EXCEEDED = 'INV_RESERVATION_QTY_EXCEEDED'
 INV_RESERVATION_NOT_FOUND = 'INV_RESERVATION_NOT_FOUND'
@@ -83,27 +81,7 @@ DEMAND_QTY_SOURCES = {
 #: 需求量必须按行解析的节点类型（demand_line_id 缺失时不猜）
 DEMAND_LINE_REQUIRED = (DEMAND_SERVICE_ORDER,)
 
-#: 行式需求单据策略：单据头状态 + 明细行 → soft 承诺。
-#: 同类单据接入只需登记一条策略，通用引擎（sync_document_row_demands）
-#: 无需改动；带事件驱动核销或特殊数量推导的单据（工单组件/收货）仍走适配器。
-ROW_DEMAND_POLICIES = {
-    SERVICE_REQUEST_SOURCE_TYPE: {
-        'name': '服务请求',
-        'doc_table': 'service_requests',
-        'line_table': 'service_request_lines',
-        'doc_field': 'request_id',
-        'line_where': "line_type = 'goods' AND status = 'open'",
-        'active_statuses': SERVICE_REQUEST_ACTIVE_STATUSES,
-        'release_statuses': SERVICE_REQUEST_RELEASE_STATUSES,
-        'demand_object_type': DEMAND_SERVICE_ORDER,
-        'key_prefix': SERVICE_LINE_KEY_PREFIX,
-        'org_fields': ('provider_org_id', 'requester_org_id'),
-        'qty_field': 'qty',
-        'uom_field': 'uom_id',
-        'peg_type': PEG_SOFT,
-        'release_reason': '服务请求备件行失效',
-    },
-}
+#: 行式需求单据策略见 `meta.services.commitment_policies.ROW_DEMAND_POLICIES`。
 
 TRACE_TABLE = 'demand_trace_links'
 TRACE_PEGGING = 'pegging'
