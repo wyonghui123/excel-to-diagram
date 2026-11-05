@@ -170,6 +170,30 @@ def _rebuild(conn: sqlite3.Connection, ddl: str) -> None:
         conn.execute(sql)
 
 
+LINK_VIEW = 'document_hu_link_view'
+
+
+def _link_view_exists(conn: sqlite3.Connection) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='view' AND name=?",
+        (LINK_VIEW,)).fetchone() is not None
+
+
+def _recreate_link_view(conn: sqlite3.Connection) -> None:
+    """重建表会破坏依赖视图（RENAME 时 SQLite 需重新解析视图）。
+
+    ALTER TABLE RENAME 会因视图引用 `main.handling_units` 而失败，因此重建前先
+    DROP；重建后按 v220 的定义恢复（视图定义唯一真源在 v220）。
+    """
+    from meta.migrations.v220__document_hu_link_view import (
+        REQUIRED_TABLES, VIEW_NAME, VIEW_SQL,
+    )
+    if any(not _table_exists(conn, t) for t in REQUIRED_TABLES):
+        return
+    conn.execute('DROP VIEW IF EXISTS %s' % VIEW_NAME)
+    conn.execute('CREATE VIEW %s AS\n%s' % (VIEW_NAME, VIEW_SQL))
+
+
 def _do_enums(conn: sqlite3.Connection) -> None:
     if not (_table_exists(conn, 'enum_types')
             and _table_exists(conn, 'enum_values')):
@@ -228,8 +252,13 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
         elif 'in_transit' in _status_sql(conn):
             print('  - [SKIP] handling_units 已含 in_transit')
         else:
+            had_view = _link_view_exists(conn)
+            if had_view:
+                conn.execute('DROP VIEW IF EXISTS %s' % LINK_VIEW)
             _rebuild(conn, NEW_DDL)
             print('  - [NEW] handling_units 重建为 6 态')
+            if had_view:
+                _recreate_link_view(conn)
         _do_enums(conn)
         conn.commit()
         print('[v217] 迁移提交完成')

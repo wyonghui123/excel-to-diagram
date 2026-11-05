@@ -62,7 +62,8 @@
 - [x] `test_hu_document_link_view.py` / `test_hu_seal_api.py` 全绿；HU 四文件回归全绿
 - [x] 生产入口冒烟：`/api/v1/handling-units` 不死锁 410、`/scan` 返回结构化 `HU_NOT_FOUND`
 - [x] FE 运行态冒烟：`/warehouse/handling-unit-docs` 与 `/warehouse/handling-unit-seal` 均渲染成功且无 JS 错误
-- [x] 真实数据全链路手验待真实库迁移（120 条 pending 收尾后执行），不阻塞本次代码交付
+- [x] 真实库迁移已执行：v211 / v216 / v217 / v220 / v221 全部 SUCCESS，视图 18 列、两菜单、两权限、admin 授权均落库；剩余 28 条为历史遗留「无 migrate() 函数」脚本，runner 自动跳过，与 HU 无关
+- [ ] 真实业务数据全链路手验（父托盘带子单据 / 扫码→预检→封箱）待执行：当前真实库无 HU 单据数据；浏览器登录被 admin JWT 12.9KB 超单 cookie 4096 上限阻断（非本迁移引入，需单独修复 token 载荷）
 
 ## 边界
 

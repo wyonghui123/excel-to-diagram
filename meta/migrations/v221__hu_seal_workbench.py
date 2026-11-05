@@ -214,7 +214,7 @@ def _upsert_menu(conn: sqlite3.Connection, menu: dict) -> None:
 
     if _table_exists(conn, 'menu_permissions'):
         row = conn.execute(
-            'SELECT id FROM menu_permissions WHERE menu_code=?',
+            'SELECT 1 FROM menu_permissions WHERE menu_code=?',
             (menu['menu_code'],)).fetchone()
         if row:
             conn.execute(

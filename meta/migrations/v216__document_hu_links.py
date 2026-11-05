@@ -99,11 +99,15 @@ PERMISSIONS = (
 
 GRANT_TO_SETS = ('admin', 'default')
 
-# (单据行表, 单据外键列, doc_type, direction, link_type)
+# (单据行表, 单据外键列, doc_type, direction, link_type, 数量列候选)
+# 生产库 receipt_lines 用 qty_received，部分测试替身 / 历史库用 qty，运行时探测。
 BACKFILL_SPECS = (
-    ('receipt_lines', 'receipt_id', 'receipt', 'in', 'packed'),
-    ('shipment_lines', 'delivery_id', 'shipment', 'out', 'shipped'),
-    ('transfer_order_lines', 'transfer_order_id', 'transfer_order', 'out', 'shipped'),
+    ('receipt_lines', 'receipt_id', 'receipt', 'in', 'packed',
+     ('qty_received', 'qty')),
+    ('shipment_lines', 'delivery_id', 'shipment', 'out', 'shipped',
+     ('qty', 'qty_received')),
+    ('transfer_order_lines', 'transfer_order_id', 'transfer_order', 'out',
+     'shipped', ('qty', 'qty_received')),
 )
 
 
@@ -247,11 +251,15 @@ def _do_backfill(conn: sqlite3.Connection) -> None:
         print('  - handling_units 不存在, 跳过回填')
         return
     inserted = skipped = 0
-    for table, doc_fk, doc_type, direction, link_type in BACKFILL_SPECS:
+    for table, doc_fk, doc_type, direction, link_type, qty_cols in BACKFILL_SPECS:
         if not _table_exists(conn, table) or 'hu_no' not in _columns(conn, table):
             continue
+        qty_col = next(
+            (c for c in qty_cols if c in _columns(conn, table)), None)
+        if not qty_col:
+            continue
         rows = conn.execute(
-            "SELECT l.{fk} AS doc_id, l.id AS line_id, l.qty AS qty, "
+            "SELECT l.{fk} AS doc_id, l.id AS line_id, l.{qty} AS qty, "
             "       l.hu_no AS hu_no, "
             "       (SELECT COUNT(*) FROM handling_units h "
             "         WHERE h.hu_no = l.hu_no) AS hu_count, "
@@ -259,7 +267,7 @@ def _do_backfill(conn: sqlite3.Connection) -> None:
             "         WHERE h.hu_no = l.hu_no) AS hu_id "
             "FROM {table} l "
             "WHERE TRIM(COALESCE(l.hu_no, '')) <> ''".format(
-                fk=doc_fk, table=table)).fetchall()
+                fk=doc_fk, qty=qty_col, table=table)).fetchall()
         for doc_id, line_id, qty, hu_no, hu_count, hu_id in rows:
             if not hu_count:
                 skipped += 1
