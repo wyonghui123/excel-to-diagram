@@ -1168,23 +1168,25 @@ class ReceiptService:
 
     def _reverse_receipt_inbound_edges(self, line_ids: List[Any],
                                        red_receipt_id: Any) -> None:
-        """红冲时整体冲销「收货行 → 入库事务」边（红字边 + 原边 reversed）。
+        """红冲时整体冲销「收货行 → 入库事务」边（档位由 profile 声明）。
 
-        DOC_FLOW 未启用 / 边表缺失时降级为告警，不阻断收货红冲。
+        receipt 档位 = red_reverse（红字边 + 原边 reversed），承诺口径 no_revert：
+        已发生的组件投料不回退。DOC_FLOW 未启用 / 边表缺失时降级为告警，
+        不阻断收货红冲。
         """
         if not line_ids or _blank(red_receipt_id):
             return
         try:
-            from meta.core.doc_flow_attach import reverse_edges_by_source
+            from meta.core.reversal_orchestrator import reverse_document_edges
         except Exception:  # pragma: no cover - 核心模块缺失时保持红冲可用
-            logger.warning('[receipt] DOC_FLOW 模块不可用，跳过红字边')
+            logger.warning('[receipt] 冲销编排不可用，跳过红字边')
             return
         for line_id in line_ids:
             if _blank(line_id):
                 continue
-            reverse_edges_by_source(
-                self.ds, 'receipt_line_to_inventory_txn', 'receipt_line',
-                line_id, ref_id=red_receipt_id, derived_by='receipt_service')
+            reverse_document_edges(
+                self.ds, self.platform_ds, 'receipt', line_id,
+                ref_id=red_receipt_id, reason='receipt_reversal')
 
     def _line_project_scope(self, line: Dict[str, Any]) -> tuple:
         """G7：收货行的项目 / 任务归属以该行 active 需求分配为唯一真源。
