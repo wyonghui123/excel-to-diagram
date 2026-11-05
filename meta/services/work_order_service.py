@@ -568,6 +568,15 @@ class WorkOrderService:
                 'qty_required': qty_required,
             })
 
+        try:
+            from meta.services.inventory_reservation_service import (
+                InventoryReservationService,
+            )
+            InventoryReservationService(self.ds).sync_work_order_components(
+                work_order_id)
+        except Exception as error:  # 预留失败不得阻断工单展开
+            logger.warning('[work_order] 组件预留同步跳过: %s', error)
+
         return {'code': 'expanded', 'structure_id': structure_id,
                 'components': created}
 

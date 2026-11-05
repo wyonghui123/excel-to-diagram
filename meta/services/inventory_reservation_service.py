@@ -15,6 +15,8 @@
   ⑥ 活跃判定含时间派生：valid_to 已过的预留读取时即不计入可用量。
   ⑦ atp(include_inbound=True) 扣减该段已 hard 钉住的未收货未来供应；
      available_on_hand 的含在途分支仍未实现（报 ATP_INBOUND_UNSUPPORTED）。
+  ⑧ 工单组件以 work_order_component 为需求节点建 soft 预留；组件是独立
+     物料需求，与来源 SO 行（成品）的预留不重复计量。
 """
 
 import logging
@@ -46,6 +48,12 @@ ACTIVE_STATUSES = (STATUS_OPEN, STATUS_PARTIALLY_FULFILLED)
 PEG_HARD = 'hard'
 PEG_SOFT = 'soft'
 
+DEMAND_WORK_ORDER_COMPONENT = 'work_order_component'
+WO_SOURCE_TYPE = 'work_order'
+WO_COMPONENT_KEY_PREFIX = 'WO-COMP'
+#: 工单进入这两个终态后不再需要投料，组件承诺全部释放
+WO_COMPONENT_RELEASE_STATUSES = ('Cancelled', 'Closed')
+
 INV_RESERVATION_QTY_EXCEEDED = 'INV_RESERVATION_QTY_EXCEEDED'
 INV_RESERVATION_NOT_FOUND = 'INV_RESERVATION_NOT_FOUND'
 INV_RESERVATION_STATE_INVALID = 'INV_RESERVATION_STATE_INVALID'
@@ -58,6 +66,7 @@ ATP_INBOUND_UNSUPPORTED = 'ATP_INBOUND_UNSUPPORTED'
 #: 可解析需求量的节点 → (表, 数量列)。不可解析时告警放行。
 DEMAND_QTY_SOURCES = {
     'sales_order_line': ('sales_order_lines', 'qty'),
+    DEMAND_WORK_ORDER_COMPONENT: ('work_order_components', 'qty_required'),
 }
 
 TRACE_TABLE = 'demand_trace_links'
@@ -635,6 +644,122 @@ class InventoryReservationService:
         payload.update(segment)
         return self.sync_reservation(payload)
 
+    # ------------------------------------------------------------------
+    # 工单组件接入
+    # ------------------------------------------------------------------
+    def sync_work_order_components(self, work_order_id: Any) -> Dict[str, Any]:
+        """工单组件级 soft 预留：把投料需求计入可用量（A3 最小闭环）。
+
+        · 组件是独立物料需求，与来源 SO 行（成品）预留不重复计量；
+        · 一律 soft：不锁死库存，短缺由 ATP shortage 暴露；
+        · 段：组件任务 → 任务段，否则 owned；组织：项目 → 销售订单抬头；
+        · 幂等键按 structure_line_id 稳定，重展开不会重复承诺；
+        · 工单取消/关闭时释放组件承诺；结构行消失的旧承诺一并释放。
+        """
+        empty = {'created': 0, 'updated': 0, 'released': 0, 'skipped': True}
+        if not self._table_ready():
+            return dict(empty, reason='RESERVATION_TABLE_MISSING')
+        work_order = self._load_work_order(work_order_id)
+        if not work_order:
+            return dict(empty, reason='WORK_ORDER_NOT_FOUND')
+        wo_id = _to_int(work_order.get('id'))
+        if str(work_order.get('status') or '') in WO_COMPONENT_RELEASE_STATUSES:
+            return {'created': 0, 'updated': 0, 'skipped': False,
+                    'released': self.release_by_source(
+                        WO_SOURCE_TYPE, wo_id, reason='工单取消/关闭')}
+        components = self._load_work_order_components(wo_id)
+        org_id = self._resolve_work_order_org(work_order)
+        if not org_id:
+            logger.warning('[inv2] 工单 %s 无法解析库存组织，跳过组件预留',
+                           wo_id)
+            return dict(empty, reason='ORG_NOT_RESOLVED')
+
+        project_id = _to_int(work_order.get('project_id'))
+        wo_task_id = _to_int(work_order.get('project_task_id'))
+        created = updated = skipped = 0
+        active_keys = set()
+        for component in components:
+            component_id = _to_int(component.get('id'))
+            item_id = _to_int(component.get('component_item_id'))
+            qty = _num(component.get('qty_required'))
+            if component_id <= 0 or item_id <= 0 or qty <= 0:
+                skipped += 1
+                continue
+            structure_line_id = _to_int(component.get('structure_line_id')) \
+                or component_id
+            key = '%s-%s-%s' % (WO_COMPONENT_KEY_PREFIX, wo_id,
+                                structure_line_id)
+            active_keys.add(key)
+            task_id = _to_int(component.get('project_task_id')) or wo_task_id
+            segment_ctx = {
+                'item_id': item_id,
+                'org_id': org_id,
+                'project_id': project_id if task_id else 0,
+                'project_task_id': task_id,
+            }
+            try:
+                segment = self._resolve_segment(segment_ctx)
+            except InventoryError as error:
+                logger.warning('[inv2] 工单 %s 组件 %s 段解析失败，跳过: %s',
+                               wo_id, component_id, error)
+                skipped += 1
+                continue
+            payload = {
+                'reservation_key': key,
+                'org_id': org_id,
+                'item_id': item_id,
+                'uom_id': self._base_uom(item_id),
+                'qty_reserved': qty,
+                'peg_type': PEG_SOFT,
+                'demand_object_type': DEMAND_WORK_ORDER_COMPONENT,
+                'demand_object_id': component_id,
+                'demand_line_id': component_id,
+                'source_doc_type': WO_SOURCE_TYPE,
+                'source_doc_id': wo_id,
+                'source_line_id': component_id,
+            }
+            payload.update(segment)
+            result = self.sync_reservation(payload)
+            if result.get('created'):
+                created += 1
+            elif result.get('updated'):
+                updated += 1
+            self._refresh_component_demand(result.get('reservation'), component_id)
+
+        released = self._release_stale_components(wo_id, active_keys)
+        return {'created': created, 'updated': updated,
+                'released': released, 'skipped': skipped}
+
+    def _refresh_component_demand(self, row: Optional[Dict[str, Any]],
+                                  component_id: int) -> None:
+        """重展开后组件 id 变化：把承诺重新指向新组件行（键不变，不重复承诺）。"""
+        if not row:
+            return
+        if _to_int(row.get('demand_object_id')) == component_id \
+                and _to_int(row.get('demand_line_id')) == component_id:
+            return
+        with self.ds.transaction():
+            self.ds.execute(
+                'UPDATE %s SET demand_object_id = ?, demand_line_id = ?, '
+                'updated_at = ? WHERE id = ?' % RESERVATION_TABLE,
+                [component_id, component_id, _now(), row.get('id')])
+
+    def _release_stale_components(self, work_order_id: int,
+                                  active_keys: set) -> int:
+        """释放结构行已消失的组件承诺（active_keys 之外的旧行）。"""
+        rows = self.ds.query(
+            'SELECT id, reservation_key FROM %s WHERE source_doc_type = ? '
+            'AND source_doc_id = ? AND demand_object_type = ? '
+            'AND status IN (?, ?)' % RESERVATION_TABLE,
+            [WO_SOURCE_TYPE, work_order_id, DEMAND_WORK_ORDER_COMPONENT,
+             STATUS_OPEN, STATUS_PARTIALLY_FULFILLED])
+        stale = [row for row in rows
+                 if str(row.get('reservation_key') or '') not in active_keys]
+        for row in stale:
+            self.release_reservation(_to_int(row.get('id')),
+                                     reason='工单组件重建后释放旧承诺')
+        return len(stale)
+
     def sync_reservation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """幂等创建 + 数量同步：仅活跃预留允许改量，不得低于已核销量。"""
         result = self.create_reservation(payload)
@@ -724,6 +849,47 @@ class InventoryReservationService:
             if loc_org:
                 return loc_org, location_id
         return _to_int(line.get('header_org_id')), location_id or 0
+
+    def _load_work_order(self, work_order_id: Any) -> Optional[Dict[str, Any]]:
+        if _to_int(work_order_id) <= 0:
+            return None
+        try:
+            rows = self.ds.query('SELECT * FROM work_orders WHERE id = ?',
+                                 [_to_int(work_order_id)])
+        except Exception:
+            return None
+        return rows[0] if rows else None
+
+    def _load_work_order_components(self, work_order_id: int):
+        try:
+            return self.ds.query(
+                # 整行读取：兼容未加 structure_line_id 的旧库 / 测试库
+                'SELECT * FROM work_order_components WHERE work_order_id = ? '
+                'ORDER BY id', [work_order_id])
+        except Exception:
+            return []
+
+    def _resolve_work_order_org(self, work_order: Dict[str, Any]) -> int:
+        """项目组织优先，销售订单抬头组织兜底；都缺失则无法建承诺。"""
+        project_id = _to_int(work_order.get('project_id'))
+        if project_id:
+            org_id = self._query_org('projects', project_id)
+            if org_id:
+                return org_id
+        order_id = _to_int(work_order.get('order_id'))
+        if order_id:
+            org_id = self._query_org('sales_orders', order_id)
+            if org_id:
+                return org_id
+        return 0
+
+    def _query_org(self, table: str, row_id: int) -> int:
+        try:
+            rows = self.ds.query('SELECT org_id FROM %s WHERE id = ?' % table,
+                                 [row_id])
+        except Exception:
+            return 0
+        return _to_int(rows[0].get('org_id')) if rows else 0
 
     # ------------------------------------------------------------------
     # 内部

@@ -240,6 +240,145 @@ def _create_so_tables(conn, so_flag=0):
     conn.commit()
 
 
+# ----------------------------------------------------------------------
+# 工单组件级 soft 预留
+# ----------------------------------------------------------------------
+def _create_work_order_tables(conn, status='New', project_id=0,
+                              task_id=0, order_id=1):
+    conn.execute('CREATE TABLE IF NOT EXISTS projects '
+                 '(id INTEGER PRIMARY KEY, org_id INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS project_tasks '
+                 '(id INTEGER PRIMARY KEY, project_id INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS work_orders '
+                 '(id INTEGER PRIMARY KEY, status TEXT, project_id INTEGER, '
+                 'project_task_id INTEGER, order_id INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS work_order_components '
+                 '(id INTEGER PRIMARY KEY AUTOINCREMENT, work_order_id INTEGER, '
+                 'structure_line_id INTEGER, component_item_id INTEGER, '
+                 'qty_required REAL, project_task_id INTEGER DEFAULT 0)')
+    try:
+        conn.execute('ALTER TABLE items ADD COLUMN base_uom INTEGER DEFAULT 0')
+    except Exception:
+        pass
+    conn.execute('UPDATE items SET base_uom = ? WHERE id = ?',
+                 [UOM_ID, ITEM_ID])
+    if project_id:
+        conn.execute('INSERT INTO projects (id, org_id) VALUES (?, ?)',
+                     [project_id, ORG_ID])
+    if project_id and task_id:
+        conn.execute('INSERT INTO project_tasks (id, project_id) '
+                     'VALUES (?, ?)', [task_id, project_id])
+    if order_id:
+        conn.execute('CREATE TABLE IF NOT EXISTS sales_orders '
+                     '(id INTEGER PRIMARY KEY, status TEXT, org_id INTEGER)')
+        conn.execute("INSERT OR IGNORE INTO sales_orders "
+                     "(id, status, org_id) VALUES (?, 'open', ?)",
+                     [order_id, ORG_ID])
+    conn.execute('INSERT INTO work_orders (id, status, project_id, '
+                 'project_task_id, order_id) VALUES (1, ?, ?, ?, ?)',
+                 [status, project_id, task_id, order_id])
+    conn.commit()
+
+
+def _add_component(conn, structure_line_id=1, item_id=ITEM_ID, qty=4.0,
+                   task_id=0):
+    cursor = conn.execute(
+        'INSERT INTO work_order_components (work_order_id, '
+        'structure_line_id, component_item_id, qty_required, project_task_id) '
+        'VALUES (1, ?, ?, ?, ?)',
+        [structure_line_id, item_id, qty, task_id])
+    conn.commit()
+    return cursor.lastrowid
+
+
+def test_work_order_component_creates_soft_reservation():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    component_id = _add_component(conn, qty=4)
+    service = _service(conn)
+    result = service.sync_work_order_components(1)
+    assert result['created'] == 1
+
+    row = conn.execute(
+        'SELECT demand_object_id, demand_object_type, peg_type, '
+        'stock_segment_type FROM inventory_reservations').fetchone()
+    assert row[1] == 'work_order_component'
+    assert int(row[0]) == component_id
+    assert row[2] == 'soft'
+    assert row[3] == 'owned'
+
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(4)
+    assert atp['available_on_hand'] == pytest.approx(6)
+
+
+def test_work_order_component_sync_idempotent_and_updates_qty():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+    again = service.sync_work_order_components(1)
+    assert again['created'] == 0
+    assert again['updated'] == 0
+
+    conn.execute('UPDATE work_order_components SET qty_required = 6')
+    conn.commit()
+    changed = service.sync_work_order_components(1)
+    assert changed['updated'] == 1
+    atp = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert atp['reserved'] == pytest.approx(6)
+
+
+def test_cancelled_work_order_releases_component_reservations():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    conn.execute("UPDATE work_orders SET status = 'Cancelled'")
+    conn.commit()
+    released = service.sync_work_order_components(1)
+    assert released['released'] == 1
+    assert service.atp({'org_id': ORG_ID,
+                        'item_id': ITEM_ID})['reserved'] == pytest.approx(0)
+
+
+def test_rebuilt_components_release_stale_reservation():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, structure_line_id=1, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    conn.execute('DELETE FROM work_order_components WHERE work_order_id = 1')
+    _add_component(conn, structure_line_id=2, qty=5)
+    result = service.sync_work_order_components(1)
+    assert result['created'] == 1
+    assert result['released'] == 1
+
+    active = conn.execute(
+        'SELECT reservation_key FROM inventory_reservations '
+        'WHERE status IN (?, ?)', ['open', 'partially_fulfilled']).fetchall()
+    assert [row[0] for row in active] == ['WO-COMP-1-2']
+
+
+def test_work_order_component_uses_project_task_segment():
+    conn = _conn(10)
+    _create_work_order_tables(conn, project_id=PROJECT_ID, task_id=TASK_ID,
+                              order_id=0)
+    _add_component(conn, qty=3)
+    result = _service(conn).sync_work_order_components(1)
+    assert result['created'] == 1
+
+    row = conn.execute('SELECT stock_segment_type, project_task_id, '
+                       'project_id FROM inventory_reservations').fetchone()
+    assert row[0] == 'project_task'
+    assert int(row[2]) == PROJECT_ID
+    assert int(row[1]) == TASK_ID
+
+
 def test_sync_sales_order_line_create_and_resize():
     conn = _conn(10)
     _create_so_tables(conn)

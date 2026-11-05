@@ -121,9 +121,10 @@ class ProjectTaskGuardInterceptor(Interceptor):
         )
 
     def after_action(self, context: 'ActionContext') -> None:
-        """A3：工单/服务单创建或更新后，确保其来源 SO 行的 soft 预留已同步。
+        """A3：工单/服务单创建或更新后，同步来源 SO 行与组件级 soft 预留。
 
-        工单只是销售需求的执行载体，不新增预留事实，复用 sync_reservation 路径；
+        工单本身不新增预留事实：来源 SO 行走 sync_sales_order_line；
+        组件（投料物料）是独立需求，走 sync_work_order_components。
         失败不阻断工单写入（仅告警）。
         """
         if getattr(context.meta_object, 'id', None) != WORK_ORDER_OBJECT:
@@ -140,16 +141,29 @@ class ProjectTaskGuardInterceptor(Interceptor):
                 if value not in (None, ''):
                     data[key] = value
         line_id = _to_int(data.get('order_line_id'))
-        if line_id <= 0:
-            return
-        try:
-            from meta.services.inventory_reservation_service import (
-                InventoryReservationService,
-            )
-            InventoryReservationService(
-                context.data_source).sync_sales_order_line(line_id)
-        except Exception as error:
-            logger.warning(
-                '[inv2] 工单来源行 %s 预留同步失败（不阻断写入）: %s',
-                line_id, error)
+        work_order_id = (_to_int(getattr(context, 'object_id', 0))
+                         or _to_int(data.get('id')))
+        if line_id > 0:
+            try:
+                from meta.services.inventory_reservation_service import (
+                    InventoryReservationService,
+                )
+                InventoryReservationService(
+                    context.data_source).sync_sales_order_line(line_id)
+            except Exception as error:
+                logger.warning(
+                    '[inv2] 工单来源行 %s 预留同步失败（不阻断写入）: %s',
+                    line_id, error)
+        if work_order_id > 0:
+            try:
+                from meta.services.inventory_reservation_service import (
+                    InventoryReservationService,
+                )
+                InventoryReservationService(
+                    context.data_source).sync_work_order_components(
+                        work_order_id)
+            except Exception as error:
+                logger.warning(
+                    '[inv2] 工单 %s 组件预留同步失败（不阻断写入）: %s',
+                    work_order_id, error)
 

@@ -59,9 +59,9 @@
 | 枚举 | 值 |
 |---|---|
 | `stock_segment_type` | `owned` / `project_task` / `sales_order_line` / `supplier_consignment` / `customer_owned`（后者暂不启用） |
-| `inventory_reservation_status` | `open` / `partially_fulfilled` / `fulfilled` / `cancelled` / `expired` |
+| `inventory_reservation_status` | `open` / `partially_fulfilled` / `fulfilled` / `cancelled` / `closed` / `expired` |
 | `inventory_peg_type` | `hard` / `soft` |
-| `demand_object_type` | `sales_order_line` / `project_task` / `work_order` / `service_order` / `forecast` |
+| `demand_object_type` | `sales_order_line` / `work_order_component` / `project_task` / `work_order` / `service_order` / `forecast` |
 | `demand_trace_type` | `reservation` / `pegging` / `allocation` |
 
 ### 3.2 事务与余额
@@ -302,7 +302,7 @@ shortage(segment) = max(0, Σ(active commitments) - qty_on_hand(segment))
 | 采购申请/PO | 项目任务/寄售供应商写入行；收货继承 |
 | 收货 | `resolve_segment` 后过账；SO 段来源为关联 SO 行 |
 | 发运 | 校验预留与段；核销预留、写 trace |
-| 工单 | 项目任务段发料；成品入库按项目任务或 SO 段 |
+| 工单 | 项目任务段发料；成品入库按项目任务或 SO 段；组件按 `work_order_component` 建 soft 预留（独立物料需求，与来源 SO 行不重复计量） |
 | 调拨 | 段随行；跨段禁止，走段转移 |
 | 调整/盘点 | 按段盘点与过账，不改变段类型 |
 | 退货 | 优先回原段；原段失效转 `owned` |
@@ -464,6 +464,9 @@ SO 行（so_segment_enabled=1）
 | `available_on_hand` 含在途未实现时报错 | 同上 | `ATP_INBOUND_UNSUPPORTED` |
 | 库存段 hard pegging 带量被拒 | `test_demand_trace_service.py` | `TRACE_SUPPLY_DOUBLE_COUNT` |
 | 已钉住的未来供应从含在途 ATP 中扣减 | `test_inventory_atp.py` | `inbound_pegged = 5`，`available_on_hand` 由 5 降为 0 |
+| 工单组件建 soft 预留并扣减可用量 | `test_inventory_reservation_service.py` | 需求节点 `work_order_component`、`peg_type=soft`，ATP `reserved=4` |
+| 组件重展开不重复承诺、旧结构行释放 | 同上 | 二次同步 `created=0`；结构行变化后旧承诺 `cancelled` |
+| 工单取消释放组件承诺 | 同上 | `released=1`，可用量恢复 |
 
 ---
 
@@ -484,7 +487,8 @@ SO 行（so_segment_enabled=1）
 12. 同一库存段行不会同时被 hard pegging 与预留计数（互斥消费）；
 13. `closed` 终态保留历史且不再占用可用量；
 14. `qty_reserved` 投影无任何判定调用方（`available_qty` 已移除或改调预留服务）；
-15. `atp(include_inbound=True)` 扣减已 hard 钉住的未收货未来供应，且不重复承诺同一在途。
+15. `atp(include_inbound=True)` 扣减已 hard 钉住的未收货未来供应，且不重复承诺同一在途；
+16. 工单组件以 `work_order_component` 建 soft 预留，重展开幂等、取消即释放，且不与来源 SO 行重复计量。
 
 ### 10.1 实施验收结果（2026-11-04）
 
@@ -505,7 +509,7 @@ SO 行（so_segment_enabled=1）
 - 已知既有失败（与 INV-2 无关）：`test_server_app_integration.py` 2 例（hello_world 路由 404）、`test_sales_order_fulfillment_status.py` 1 例（`test_inv1_single_writer`）。
 - 本期未接入：收货/工单/调拨的 trace 继承（仅提供 `DemandTraceService.inherit_from_document` 服务 API）；发运已接入。
 
-### 10.2 细化验收（2026-11-05，待实施）
+### 10.2 细化验收（2026-11-05，已实施）
 
 | 项 | 状态 |
 |---|---|
@@ -514,7 +518,8 @@ SO 行（so_segment_enabled=1）
 | §4.2 ATP 口径（`valid_to` 读取时判定、`scope`、`shortage`、在途扣减） | ✅ 文档完成 |
 | §8.14–8.19 不变量 | ✅ 文档完成 |
 | 代码实现（需求守卫、`closed`、互斥校验、投影解耦、在途扣减） | ✅ 已实施 |
-| §9.1 九个新增用例 | ✅ 已实施（预留服务 13、ATP 6、trace 7 全绿） |
+| §9.1 新增用例 | ✅ 已实施（预留服务 18、ATP 6、trace 7 全绿） |
+| 工单组件级 soft 预留（A3） | ✅ 已实施（`expand_components` + 工单写后置钩子） |
 
 ---
 
@@ -527,6 +532,7 @@ SO 行（so_segment_enabled=1）
 - **回滚（downgrade）**：仅当 `inventory_transactions` 无任何非 `owned` 段数据时，才允许删列 / 删表；否则保留结构并报错，交人工清洗后再回滚。`qty_reserved` 投影列不随降级删除，只停止回写。
 - **v218（2026-11-05）**：重建 `inventory_reservations` 表，status CHECK 增加 `closed`；保留数据与索引，降级把 `closed` 回写为 `cancelled`。语义、ATP 口径、互斥校验仍在服务层与读取层。
 - **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
+- **工单组件预留（2026-11-05）**：不新增表/迁移。`work_order_component` 作需求节点，统一 soft；幂等键 `WO-COMP-{work_order_id}-{structure_line_id}` 以结构行稳定，重展开只更新数量与组件 id，结构行消失或工单取消/关闭时释放。
 
 ---
 
@@ -557,4 +563,4 @@ SO 行（so_segment_enabled=1）
 
 ### 12.4 当下落地顺序（L0 收口）
 
-1. 互斥消费校验（R15）；2. 需求上限守卫；3. `valid_to` 读取过滤；4. 投影解耦；5. `closed` 终态；6. `shortage` 视图；7. 工单/服务单接入 soft 预留（A3 最小闭环）。
+1. 互斥消费校验（R15）；2. 需求上限守卫；3. `valid_to` 读取过滤；4. 投影解耦；5. `closed` 终态；6. `shortage` 视图；7. 工单/服务单接入 soft 预留（A3 最小闭环）——工单组件级已完成，服务单待其备件批次落地。
