@@ -1405,31 +1405,10 @@ class HandlingUnitService:
             return
         if _blank(doc_id) or _blank(hu_id):
             return
-        now = _now()
-        rows = self.ds.query(
-            'SELECT id, link_type FROM %s WHERE doc_type = ? AND doc_id = ? '
-            'AND COALESCE(line_id, 0) = ? AND hu_id = ? AND direction = ?'
-            % DOC_HU_LINK_TABLE,
-            [doc_type, doc_id, line_id or 0, hu_id, direction])
-        if rows:
-            row = rows[0]
-            current = row.get('link_type') or LINK_TYPE_PLANNED
-            if LINK_RANK.get(link_type, 0) > LINK_RANK.get(current, 0):
-                self.ds.execute(
-                    'UPDATE %s SET link_type = ?, qty = COALESCE(?, qty), '
-                    'updated_at = ? WHERE id = ?' % DOC_HU_LINK_TABLE,
-                    [link_type, qty, now, row['id']])
-            elif not _blank(qty):
-                self.ds.execute(
-                    'UPDATE %s SET qty = ?, updated_at = ? WHERE id = ?'
-                    % DOC_HU_LINK_TABLE, [qty, now, row['id']])
-            return
-        self.ds.execute(
-            'INSERT INTO %s (doc_type, doc_id, line_id, hu_id, direction, '
-            'link_type, tentative, qty, org_id, created_at, updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % DOC_HU_LINK_TABLE,
-            [doc_type, doc_id, line_id, hu_id, direction, link_type,
-             tentative, qty, org_id, now, now])
+        from meta.services.trace_link_service import link_hu
+        link_hu(self.ds, doc_type, doc_id, line_id, hu_id, direction,
+                link_type=link_type, qty=qty, tentative=tentative,
+                org_id=org_id)
 
     def pack_line(self, doc_type: str, doc_id: Any, line_id: Any, hu_id: Any,
                   qty: Any = None, direction: Optional[str] = None,

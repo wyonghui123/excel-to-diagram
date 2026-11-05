@@ -1866,15 +1866,8 @@ class SerialNumberService:
 
     def _ensure_link(self, doc_type: str, doc_id: Any, line_id: Any,
                      serial_id: Any, direction: str) -> None:
-        if self.ds.query(
-                'SELECT id FROM %s WHERE doc_type = ? AND line_id = ? '
-                'AND serial_id = ?' % LINK_TABLE,
-                [doc_type, line_id, serial_id]):
-            return
-        self.ds.execute(
-            'INSERT INTO %s (doc_type, doc_id, line_id, serial_id, direction, '
-            "created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))" % LINK_TABLE,
-            [doc_type, doc_id, line_id, serial_id, direction])
+        from meta.services.trace_link_service import link_serial
+        link_serial(self.ds, doc_type, doc_id, line_id, serial_id, direction)
 
     def _links(self, doc_type: str, line_id: Any) -> List[Dict[str, Any]]:
         return self.ds.query(
