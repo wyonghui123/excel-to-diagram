@@ -170,12 +170,12 @@ def test_expire_reservations():
     assert service.expire_reservations(now='2026-06-01 00:00:00') == 0
 
 
-def test_atp_include_inbound_unsupported():
+def test_available_on_hand_include_inbound_unsupported():
     conn = _conn(10)
     service = _service(conn)
     with pytest.raises(InventoryError) as exc:
-        service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID},
-                    include_inbound=True)
+        service.available_on_hand({'org_id': ORG_ID, 'item_id': ITEM_ID},
+                                  include_inbound=True)
     assert exc.value.code == 'ATP_INBOUND_UNSUPPORTED'
 
 

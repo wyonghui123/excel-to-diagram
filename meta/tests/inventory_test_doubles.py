@@ -16,7 +16,7 @@ from meta.migrations.v201__inventory_foundation import (
 from meta.migrations.v205__inventory_segment_reservation import (
     apply_segment_schema,
 )
-from meta.migrations.v216__reservation_closed_status import (
+from meta.migrations.v218__reservation_closed_status import (
     apply_closed_status,
 )
 

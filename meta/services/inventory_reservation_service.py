@@ -13,7 +13,8 @@
   ④ available_on_hand(segment) = 段内 on_hand - 活跃预留未核销量。
   ⑤ hard 钉在目标段扣减且不得超订；soft 允许先预留后补货（MTO 标准）。
   ⑥ 活跃判定含时间派生：valid_to 已过的预留读取时即不计入可用量。
-  ⑦ atp(include_inbound=False) 保留接口；在途能力未实现，传 True 报错。
+  ⑦ atp(include_inbound=True) 扣减该段已 hard 钉住的未收货未来供应；
+     available_on_hand 的含在途分支仍未实现（报 ATP_INBOUND_UNSUPPORTED）。
 """
 
 import logging
@@ -58,6 +59,12 @@ ATP_INBOUND_UNSUPPORTED = 'ATP_INBOUND_UNSUPPORTED'
 DEMAND_QTY_SOURCES = {
     'sales_order_line': ('sales_order_lines', 'qty'),
 }
+
+TRACE_TABLE = 'demand_trace_links'
+TRACE_PEGGING = 'pegging'
+#: 未收货的未来供应：数量只由 hard pegging 陈述
+FUTURE_SUPPLY_TYPES = ('purchase_order_line', 'work_order',
+                       'transfer_order_line')
 
 
 def _blank(value: Any) -> bool:
@@ -387,7 +394,10 @@ class InventoryReservationService:
     # ------------------------------------------------------------------
     def available_on_hand(self, query: Dict[str, Any],
                           include_inbound: bool = False) -> Dict[str, Any]:
-        """按段可用量：段内 on_hand - 活跃预留未核销量（+可选在途，未实现）。"""
+        """按段可用量：段内 on_hand - 活跃预留未核销量。
+
+        含在途分支未实现：在途供应由 hard pegging 陈述，只能从 atp() 读取。
+        """
         if include_inbound:
             raise InventoryError(
                 ATP_INBOUND_UNSUPPORTED,
@@ -425,11 +435,23 @@ class InventoryReservationService:
 
     def atp(self, query: Dict[str, Any],
             include_inbound: bool = False) -> Dict[str, Any]:
-        """简化 ATP（不带日期）：v1 返回值与 available_on_hand 相同。
+        """简化 ATP（不带日期）：可用量；含在途时再扣未收货 hard pegging。
 
-        include_inbound=True 因在途未实现按 ATP_INBOUND_UNSUPPORTED 报错。
+        v1 expected_receipts 恒为 0；include_inbound=True 只做“已钉住的未来
+        供应不再计入可用”的扣减，避免把已被 pegging 占用的在途重复承诺。
         """
-        return self.available_on_hand(query, include_inbound=include_inbound)
+        result = self.available_on_hand(query, include_inbound=False)
+        data = dict(query or {})
+        pegged = 0.0
+        if include_inbound:
+            pegged = self._sum_inbound_pegged(
+                _to_int(data.get('org_id')), _to_int(data.get('item_id')),
+                _to_int(data.get('location_id')),
+                _to_int(data.get('batch_id')), self._resolve_segment(data))
+            result['available_on_hand'] -= pegged
+        result['inbound_pegged'] = pegged
+        result['include_inbound'] = bool(include_inbound)
+        return result
 
     def _segment_clause(self, segment: Dict[str, Any]):
         sql = ' AND ' + ' AND '.join('%s = ?' % col for col in SEGMENT_COLUMNS)
@@ -469,6 +491,53 @@ class InventoryReservationService:
             [org_id, item_id, STATUS_OPEN, STATUS_PARTIALLY_FULFILLED, _now()]
             + params + scope_params)
         return _num(rows[0].get('total')) if rows else 0.0
+
+    def _sum_inbound_pegged(self, org_id: int, item_id: int,
+                            location_id: int, batch_id: int,
+                            segment: Dict[str, Any]) -> float:
+        """含在途 ATP 扣减：该段活跃需求上 hard 钉住的未收货未来供应量。
+
+        只统计能以活跃预留定位到需求节点的 pegging；trace 表无段字段，
+        故以预留作为段锚点，避免跨段误扣。
+        """
+        if not org_id or not item_id or not self._table_ready():
+            return 0.0
+        try:
+            exists = self.ds.query(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                'AND name=?', [TRACE_TABLE])
+        except Exception:
+            return 0.0
+        if not exists:
+            return 0.0
+        clause, params = self._segment_clause(segment)
+        scope_sql, scope_params = self._scope_clause(location_id, batch_id)
+        nodes = self.ds.query(
+            'SELECT DISTINCT demand_object_type, demand_object_id, '
+            'demand_line_id FROM %s WHERE org_id = ? AND item_id = ? '
+            'AND status IN (?, ?) AND (valid_to IS NULL OR valid_to > ?) '
+            % RESERVATION_TABLE + clause + scope_sql,
+            [org_id, item_id, STATUS_OPEN, STATUS_PARTIALLY_FULFILLED,
+             _now()] + params + scope_params)
+        if not nodes:
+            return 0.0
+        placeholders = ', '.join('?' for _ in FUTURE_SUPPLY_TYPES)
+        total = 0.0
+        for node in nodes:
+            rows = self.ds.query(
+                'SELECT COALESCE(SUM(allocated_qty), 0) AS total '
+                'FROM %s WHERE trace_type = ? AND peg_type = ? '
+                'AND (valid_to IS NULL OR valid_to > ?) '
+                'AND supply_object_type IN (%s) '
+                'AND demand_object_type = ? AND demand_object_id = ? '
+                'AND demand_line_id = ?' % (TRACE_TABLE, placeholders),
+                [TRACE_PEGGING, PEG_HARD, _now()]
+                + list(FUTURE_SUPPLY_TYPES)
+                + [node.get('demand_object_type'),
+                   _to_int(node.get('demand_object_id')),
+                   _to_int(node.get('demand_line_id'))])
+            total += _num(rows[0].get('total')) if rows else 0.0
+        return total
 
     def _scope_clause(self, location_id: int, batch_id: int):
         """location/batch 过滤：0 = 不限；预留的 NULL 视为不限定。"""

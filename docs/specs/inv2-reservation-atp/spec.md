@@ -1,8 +1,8 @@
 # INV-2 实现规格：库存段、预留与 ATP
 
 - 日期：2026-11-04
-- 状态：**已实施 + 细化中**（2026-11-05 追加语义/不变量细化，见 §3.3、§3.4、§4.2、§8、§10.2；代码未改）
-- 迁移号：**v205**（v201 = INV-1，v202 = P6a，v203 = INV-4，v204 已占用；本次细化不新增迁移）
+- 状态：**已实施 + 细化已落地**（2026-11-05 语义/不变量细化与含在途 ATP 扣减均已实现，见 §3.3、§3.4、§4.2、§8、§10.2）
+- 迁移号：**v205**（主体；v201 = INV-1，v202 = P6a，v203 = INV-4）+ **v218**（2026-11-05：`inventory_reservations` status CHECK 增加 `closed`；v216/v217 已被并发会话占用）
 - 对标依据：`docs/specs/reservation-oracle-vs-sap-2026-11-05.md`（Oracle / SAP 及 Infor、IFS、D365、NetSuite、Epicor 二次研究，R1–R18）
 - 上游依据：
   - `docs/specs/spec-mto-eto-stock-segment-design-2026-11-04.md`（MTO/ETO 段方案与 4 条口径）
@@ -266,9 +266,9 @@ shortage(segment) = max(0, Σ(active commitments) - qty_on_hand(segment))
 - **过期由读取时判定**（`valid_to`）；`expire_reservations` 只负责把状态改成 `expired`，任务不运行不得影响可用量正确性（R15）。
 - `scope` ∈ `org` / `segment` / `location` / `batch`，默认 `segment`；这是 SAP "检查范围"的裁剪版，不做配置矩阵（研究稿 R3）。
 - `available_on_hand` 为对外唯一展示口径，`atp` 作为接口保留；两者必须在同一次查询内一致。
-- **口径定位（2026-11-05）**：`available_on_hand` 等价于 Oracle 的 **ATR（可预留量）**；`atp` 当前与它同值，属"简化 ATP"——不含时区、在途与跨组织寻源，**不得对外宣称支持交期承诺**（对标见 `docs/specs/reservation-oracle-vs-sap-2026-11-05.md` §9）。
-- `expected_receipts` 第一版恒为 0；`include_inbound=true` 且未实现时报 `ATP_INBOUND_UNSUPPORTED`，不得静默返回 0。
-- 未来供应的 hard pegging 只从 `atp(include_inbound=true)` 扣减，不影响 `available_on_hand`（互斥消费，见 §3.4）。
+- **口径定位（2026-11-05）**：`available_on_hand` 等价于 Oracle 的 **ATR（可预留量）**；`atp` 在不含在途时与其同值，`include_inbound=true` 时额外扣减已被 hard pegging 钉住的未收货未来供应；仍不含时区与跨组织寻源，**不得对外宣称支持交期承诺**（对标见 `docs/specs/reservation-oracle-vs-sap-2026-11-05.md` §9）。
+- `expected_receipts` 第一版恒为 0；`available_on_hand(include_inbound=true)` 因在途收货未接入报 `ATP_INBOUND_UNSUPPORTED`，不得静默返回 0。
+- 未来供应的 hard pegging 只从 `atp(include_inbound=true)` 扣减，不影响 `available_on_hand`（互斥消费，见 §3.4）；段归属以该需求节点的活跃预留为锚点（trace 表当前无段字段）。
 - `hard` 预留在目标段内扣减，且供应不得再分配；`soft` 预留在公共池扣减，允许释放/改派，并产生 `shortage`。
 - 非估值段（寄售/客供料）同样扣减，但消耗时触发所有权转移。
 - **需求覆盖现状（2026-11-05 核实）**：只有 SO 行在保存时自动建 soft 预留；工单 / 服务单 / 调拨**不建预留**，其需求目前不进入可用量（研究稿 A3）。最小闭环：需求单据接入时统一建 soft 预留，不为每类单据再写一套净算逻辑。
@@ -359,7 +359,7 @@ shortage(segment) = max(0, Σ(active commitments) - qty_on_hand(segment))
 | `INV_RESERVATION_CLOSED` | 对 `closed` 预留再核销/释放 |
 | `INV_DEMAND_QTY_UNKNOWN` | **告警（不阻断）**：需求量不可解析，无法执行上限守卫 |
 | `TRACE_SUPPLY_DOUBLE_COUNT` | 库存段行同时被 hard pegging 记量与预留计数（§3.4） |
-| `ATP_INBOUND_UNSUPPORTED` | `include_inbound=true` 但 `expected_receipts` 未实现 |
+| `ATP_INBOUND_UNSUPPORTED` | `available_on_hand(include_inbound=True)`：含在途的可用量未实现（`atp(include_inbound=True)` 已支持扣在途，见 §4.2） |
 
 ---
 
@@ -435,6 +435,7 @@ SO 行（so_segment_enabled=1）
 16. 同一库存段行的数量只能由预留陈述；hard pegging 的 `allocated_qty` 必须为 0（否则 `TRACE_SUPPLY_DOUBLE_COUNT`）；
 17. 未收货的未来供应不得建预留，其数量只能由 hard pegging 陈述；
 18. `qty_reserved` 投影只能用于展示与重建校验，不得作为任何判定输入。
+19. 含在途 ATP 只扣已 hard 钉住的未收货未来供应；段归属以需求节点的活跃预留为锚点，无预留的需求不进入 L0 在途扣减。
 
 ---
 
@@ -460,9 +461,9 @@ SO 行（so_segment_enabled=1）
 | `closed` 不可再核销/释放 | 同上 | 状态机拒绝，`INV_RESERVATION_CLOSED` |
 | 过期不跑任务仍不计入 ATP | `test_inventory_atp.py` | `valid_to` 过后 `available_on_hand` 立即恢复 |
 | soft 超可用返回短缺 | 同上 | `shortage > 0`，`available_on_hand < 0` |
-| `include_inbound` 未实现时报错 | 同上 | `ATP_INBOUND_UNSUPPORTED` |
+| `available_on_hand` 含在途未实现时报错 | 同上 | `ATP_INBOUND_UNSUPPORTED` |
 | 库存段 hard pegging 带量被拒 | `test_demand_trace_service.py` | `TRACE_SUPPLY_DOUBLE_COUNT` |
-| 已钉住的未来供应从含在途 ATP 中扣减 | 同上 | `atp(include_inbound=True)` 相应下降 |
+| 已钉住的未来供应从含在途 ATP 中扣减 | `test_inventory_atp.py` | `inbound_pegged = 5`，`available_on_hand` 由 5 降为 0 |
 
 ---
 
@@ -482,7 +483,8 @@ SO 行（so_segment_enabled=1）
 11. `expire_reservations` 未运行时，过期预留已不占用可用量；
 12. 同一库存段行不会同时被 hard pegging 与预留计数（互斥消费）；
 13. `closed` 终态保留历史且不再占用可用量；
-14. `qty_reserved` 投影无任何判定调用方（`available_qty` 已移除或改调预留服务）。
+14. `qty_reserved` 投影无任何判定调用方（`available_qty` 已移除或改调预留服务）；
+15. `atp(include_inbound=True)` 扣减已 hard 钉住的未收货未来供应，且不重复承诺同一在途。
 
 ### 10.1 实施验收结果（2026-11-04）
 
@@ -510,9 +512,9 @@ SO 行（so_segment_enabled=1）
 | §3.3 单义模型、档位映射、`closed` 状态表 | ✅ 文档完成 |
 | §3.4 互斥消费规则（库存段行 / 未来供应 / 计划型） | ✅ 文档完成 |
 | §4.2 ATP 口径（`valid_to` 读取时判定、`scope`、`shortage`、在途扣减） | ✅ 文档完成 |
-| §8.14–8.18 不变量 | ✅ 文档完成 |
-| 代码实现（需求守卫、`closed`、互斥校验、投影解耦） | ⏳ 未开始 |
-| §9.1 九个新增用例 | ⏳ 未开始 |
+| §8.14–8.19 不变量 | ✅ 文档完成 |
+| 代码实现（需求守卫、`closed`、互斥校验、投影解耦、在途扣减） | ✅ 已实施 |
+| §9.1 九个新增用例 | ✅ 已实施（预留服务 13、ATP 6、trace 7 全绿） |
 
 ---
 
@@ -523,7 +525,8 @@ SO 行（so_segment_enabled=1）
 - 回填只按“默认 owned”，不做历史项目猜测；需要时另跑清洗脚本；
 - 风险：段行爆炸（SO 默认关闭缓解）、双写不一致（段变更只走服务层）、ATP 性能（按段索引）、重建耗时（分批 org）。
 - **回滚（downgrade）**：仅当 `inventory_transactions` 无任何非 `owned` 段数据时，才允许删列 / 删表；否则保留结构并报错，交人工清洗后再回滚。`qty_reserved` 投影列不随降级删除，只停止回写。
-- **本次细化（2026-11-05）不新增迁移**：语义、ATP 口径、互斥校验都在服务层与读取层；若 `inventory_reservation_status` 的枚举存于 DB 表，`closed` 随下一个可用迁移号（v214）落地，否则仅改元数据。
+- **v218（2026-11-05）**：重建 `inventory_reservations` 表，status CHECK 增加 `closed`；保留数据与索引，降级把 `closed` 回写为 `cancelled`。语义、ATP 口径、互斥校验仍在服务层与读取层。
+- **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
 
 ---
 
@@ -549,7 +552,7 @@ SO 行（so_segment_enabled=1）
 
 | 进入 | 条件 |
 |---|---|
-| L0 → L1 | §8.14–8.18 五条新不变量全部有测试且绿；供应计划（在途/计划订单）有稳定数据源 |
+| L0 → L1 | §8.14–8.19 六条新不变量全部有测试且绿；供应计划（在途/计划订单）有稳定数据源 |
 | L1 → L2 | `promise` 能稳定给出交期；产能日历/工艺路线可用；MIP 与库存层的边界书面确认 |
 
 ### 12.4 当下落地顺序（L0 收口）

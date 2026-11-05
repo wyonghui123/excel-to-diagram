@@ -7,6 +7,7 @@ import pytest
 
 os.environ.setdefault('ALLOW_RAW_SQL', '1')
 
+from meta.services.demand_trace_service import DemandTraceService
 from meta.services.inventory_posting_service import InventoryPostingService
 from meta.services.inventory_reservation_service import (
     InventoryReservationService,
@@ -145,3 +146,29 @@ def test_soft_overbooking_reports_shortage():
         {'org_id': ORG_ID, 'item_id': ITEM_ID})
     assert atp['available_on_hand'] == pytest.approx(-2)
     assert atp['shortage'] == pytest.approx(2)
+
+
+def test_atp_include_inbound_deducts_hard_pegged_supply():
+    conn = seed(build_db())
+    _post(conn, 10, DEFAULT_SEGMENT, 'owned-in')
+    _reservation(conn, 'RSV-ATP-5', 5, 601)
+    DemandTraceService(MemDS(conn)).link_supply_demand({
+        'supply_object_type': 'purchase_order_line',
+        'supply_object_id': 801,
+        'demand_object_type': 'sales_order_line',
+        'demand_object_id': 601,
+        'demand_line_id': 601,
+        'trace_type': 'pegging',
+        'peg_type': 'hard',
+        'allocated_qty': 5,
+    })
+
+    service = InventoryReservationService(MemDS(conn))
+    on_hand_only = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID})
+    assert on_hand_only['available_on_hand'] == pytest.approx(5)
+    assert on_hand_only['inbound_pegged'] == pytest.approx(0)
+
+    inbound = service.atp({'org_id': ORG_ID, 'item_id': ITEM_ID},
+                          include_inbound=True)
+    assert inbound['inbound_pegged'] == pytest.approx(5)
+    assert inbound['available_on_hand'] == pytest.approx(0)

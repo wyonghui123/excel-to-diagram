@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v216 2026-11-05] 预留状态新增 closed（INV-2 L0 收口）
+"""[v218 2026-11-05] 预留状态新增 closed（INV-2 L0 收口）
 
 依据:
   docs/specs/inv2-reservation-atp/spec.md §3.3 / §12.4
@@ -19,14 +19,14 @@
 import sqlite3
 from pathlib import Path
 
-MIGRATION_NAME = 'v216__reservation_closed_status'
+MIGRATION_NAME = 'v218__reservation_closed_status'
 
 TABLE = 'inventory_reservations'
-NEW_TABLE = 'inventory_reservations_v216'
-OLD_TABLE = 'inventory_reservations_old_v216'
+NEW_TABLE = 'inventory_reservations_v218'
+OLD_TABLE = 'inventory_reservations_old_v218'
 
 DDL_NEW = """
-CREATE TABLE IF NOT EXISTS inventory_reservations_v216 (
+CREATE TABLE IF NOT EXISTS inventory_reservations_v218 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reservation_no VARCHAR(32) NOT NULL UNIQUE,
     org_id INTEGER NOT NULL,
@@ -135,19 +135,19 @@ def _do_downgrade(conn: sqlite3.Connection) -> None:
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print('[v216] DB 不存在: %s' % db_path)
+        print('[v218] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v216] 开始: 预留状态 closed')
+        print('[v218] 开始: 预留状态 closed')
         conn.execute('PRAGMA foreign_keys = OFF')
         apply_closed_status(conn)
         conn.commit()
-        print('[v216] 迁移提交完成')
+        print('[v218] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v216] 失败: %s' % e)
+        print('[v218] 失败: %s' % e)
         raise
     finally:
         conn.close()
@@ -155,13 +155,13 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v216 verify] FAIL: DB 不存在')
+        print('[v218 verify] FAIL: DB 不存在')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
         ddl = _table_sql(conn, TABLE)
         ok = ddl is None or "'closed'" in ddl.lower()
-        print('[v216 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v218 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -169,18 +169,18 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v216 rollback] DB 不存在: %s' % db_path)
+        print('[v218 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
         conn.execute('PRAGMA foreign_keys = OFF')
         _do_downgrade(conn)
         conn.commit()
-        print('[v216 rollback] 完成')
+        print('[v218 rollback] 完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v216 rollback] 失败: %s' % e)
+        print('[v218 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()
