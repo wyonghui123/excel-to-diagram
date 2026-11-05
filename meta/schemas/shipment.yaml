@@ -385,6 +385,27 @@ fields:
       meaning: 签收凭证引用
       data_category: text
 
+  - id: reversed_at
+    name: 冲销时间
+    type: datetime
+    db_column: reversed_at
+    nullable: true
+    description: 数据错误红冲时间（业务退货请用反向交货，不用此字段）
+    semantics:
+      meaning: 冲销时间
+      data_category: timestamp
+
+  - id: reversal_reason
+    name: 冲销原因
+    type: string
+    db_column: reversal_reason
+    nullable: true
+    max_length: 200
+    description: 数据错误红冲原因（必填由服务校验）
+    semantics:
+      meaning: 冲销原因
+      data_category: text
+
   - id: status
     name: 状态
     type: string
@@ -414,6 +435,10 @@ fields:
         label: 已签收
         color: success
         category: active
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
       - value: closed
         label: 已关闭
         color: info
@@ -490,9 +515,10 @@ fields:
       audit_field: true
 
 # 状态机（B1）：draft → released → staged → shipped → delivered → closed；
-# shipped 之前可 cancelled。迁移由平台状态接口按 PUT status 执行；
-# 带跨表副作用的三段（shipped / delivered / cancelled）由
-# shipment_guard_interceptor 委托 shipment_service 执行（delivered_qty 唯一写入口）。
+# shipped 之前可 cancelled；shipped / delivered 可 reversed（仅数据错误红冲）。
+# 迁移由平台状态接口按 PUT status 执行；带跨表副作用的四段
+# （shipped / delivered / cancelled / reversed）由 shipment_guard_interceptor
+# 委托 shipment_service 执行（delivered_qty 唯一写入口）。
 rules:
   - id: release_shipment
     name: 释放交货单
@@ -542,6 +568,18 @@ rules:
       label: 签收
       icon: check_circle
       confirm_message: "确认客户已签收，确定吗？"
+
+  - id: reverse_shipment
+    name: 冲销交货单
+    type: state_transition
+    state_field: status
+    from_states: [shipped, delivered]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 冲销
+      icon: undo
+      confirm_message: "冲销将反向过账库存并回退序列号 / 装箱 / 预留台账，仅用于数据错误；业务退货请用反向交货。确定冲销吗？"
 
   - id: close_shipment
     name: 关闭交货单

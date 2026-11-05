@@ -34,6 +34,7 @@ from meta.services.shipment_service import (
     STATUS_CLOSED,
     STATUS_DELIVERED,
     STATUS_RELEASED,
+    STATUS_REVERSED,
     STATUS_SHIPPED,
     STATUS_STAGED,
     ShipmentError,
@@ -148,6 +149,9 @@ class ShipmentGuardInterceptor(Interceptor):
                 actual_arrival_date=payload.get('actual_arrival_date'))
         if target == STATUS_CANCELLED:
             return service.cancel(delivery_id)
+        if target == STATUS_REVERSED:
+            return service.reverse(
+                delivery_id, reason=payload.get('reversal_reason'))
         if target == STATUS_CLOSED:
             return None
         return None

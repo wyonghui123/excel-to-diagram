@@ -85,6 +85,11 @@ def _build_edge_meta() -> MetaObject:
            description="预留：目标实例 ID（跨实例派生，Phase 3 启用）"),
         _f("derive_key", FieldType.STRING, default="",
            description="预留：业务幂等键（调用方自定义去重维度，Phase 3 启用）"),
+        # 单一事实模型（D5）：边类型 + 补偿指向
+        _f("edge_kind", FieldType.STRING, required=True, default="normal",
+           description="边类型：normal / counter / red_ink / reversal"),
+        _f("reverses_edge_id", FieldType.STRING, default="",
+           description="补偿边指向的被补偿边 ID（reversal 专用，补偿不可变历史）"),
     ]
 
     indexes = [

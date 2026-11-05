@@ -280,6 +280,10 @@ fields:
         label: 已签收
         color: success
         category: active
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
       - value: cancelled
         label: 已取消
         color: danger

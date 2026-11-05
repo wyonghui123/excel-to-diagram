@@ -21,6 +21,7 @@ _RULE_IDS = {
     'receive_shipment',
     'close_shipment',
     'cancel_shipment',
+    'reverse_shipment',
 }
 
 #: 规则 id → (from_states, to_state)
@@ -31,6 +32,7 @@ _TRANSITIONS = {
     'receive_shipment': (['shipped'], 'delivered'),
     'close_shipment': (['delivered'], 'closed'),
     'cancel_shipment': (['draft', 'released'], 'cancelled'),
+    'reverse_shipment': (['shipped', 'delivered'], 'reversed'),
 }
 
 _ACTION_IDS = {'create', 'export', 'print'}
@@ -41,9 +43,9 @@ def schema():
     return yaml.safe_load(_SCHEMA_PATH.read_text(encoding='utf-8'))
 
 
-def test_rules_have_six_state_transitions(schema):
+def test_rules_have_seven_state_transitions(schema):
     rules = schema['rules']
-    assert len(rules) == 6
+    assert len(rules) == 7
     assert {rule['id'] for rule in rules} == _RULE_IDS
     for rule in rules:
         assert rule['type'] == 'state_transition'
