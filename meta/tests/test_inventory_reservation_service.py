@@ -379,6 +379,96 @@ def test_work_order_component_uses_project_task_segment():
     assert int(row[1]) == TASK_ID
 
 
+# ----------------------------------------------------------------------
+# 关单前置校验
+# ----------------------------------------------------------------------
+def test_assert_source_closable_rejects_outstanding_commitment():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    with pytest.raises(InventoryError) as exc:
+        service.assert_source_closable('work_order', 1)
+    assert exc.value.code == 'INV_RESERVATION_ACTIVE_ON_CLOSE'
+    assert exc.value.details['outstanding'] == pytest.approx(4)
+    assert exc.value.details['count'] == 1
+
+    conn.execute('UPDATE inventory_reservations SET qty_fulfilled = 4, '
+                 "status = 'fulfilled'")
+    conn.commit()
+    service.assert_source_closable('work_order', 1)
+
+
+def test_assert_source_closable_ignores_expired_and_cancelled():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    conn.execute('UPDATE inventory_reservations '
+                 "SET valid_to = '2026-01-01 00:00:00'")
+    conn.commit()
+    service.assert_source_closable('work_order', 1)
+
+    conn.execute("UPDATE inventory_reservations SET valid_to = NULL, "
+                 "status = 'cancelled'")
+    conn.commit()
+    service.assert_source_closable('work_order', 1)
+
+
+class _WorkOrderCtx:
+    def __init__(self, conn, params, old_data, object_id=1):
+        self.meta_object = type('Meta', (), {'id': 'work_order'})()
+        self.action = 'crud_update'
+        self.params = params
+        self.old_data = old_data
+        self.object_id = object_id
+        self.data_source = MemDS(conn)
+
+
+def test_interceptor_blocks_close_with_outstanding_component():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    _service(conn).sync_work_order_components(1)
+
+    from meta.core.exceptions import ValidationFailedError
+    from meta.core.interceptors.project_task_guard_interceptor import (
+        ProjectTaskGuardInterceptor,
+    )
+    context = _WorkOrderCtx(
+        conn, {'status': 'Closed'},
+        {'id': 1, 'status': 'Resolved', 'project_id': 0,
+         'project_task_id': 0})
+    with pytest.raises(ValidationFailedError) as exc:
+        ProjectTaskGuardInterceptor().before_action(context)
+    assert exc.value.details[0]['rule'] == \
+        'INV_RESERVATION_ACTIVE_ON_CLOSE'
+
+
+def test_interceptor_allows_close_after_release():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+    reservation_id = conn.execute(
+        'SELECT id FROM inventory_reservations').fetchone()[0]
+    service.release_reservation(reservation_id, reason='关单前释放')
+
+    from meta.core.interceptors.project_task_guard_interceptor import (
+        ProjectTaskGuardInterceptor,
+    )
+    context = _WorkOrderCtx(
+        conn, {'status': 'Closed'},
+        {'id': 1, 'status': 'Resolved', 'project_id': 0,
+         'project_task_id': 0})
+    ProjectTaskGuardInterceptor().before_action(context)
+
+
 def test_sync_sales_order_line_create_and_resize():
     conn = _conn(10)
     _create_so_tables(conn)

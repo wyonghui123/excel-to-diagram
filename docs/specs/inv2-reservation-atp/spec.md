@@ -244,6 +244,9 @@
 | `fulfill_reservation(id, qty, tx_id)` | 部分/全部核销；累计不得超过 `qty_reserved` |
 | `expire_reservations(now)` | 把到期行标记为 `expired`（不承担正确性，见下） |
 | `close_reservation(id, reason)` | 终止履行并保留历史，写 `closed`（R2） |
+| `sync_work_order_components(work_order_id)` | 工单组件级 soft 预留（幂等；取消/结构行消失即释放） |
+| `outstanding_commitments(source_doc_type, source_doc_id)` | 来源单据未核销承诺汇总（活跃且未过期） |
+| `assert_source_closable(source_doc_type, source_doc_id)` | 关单前置校验；有未核销承诺时报 `INV_RESERVATION_ACTIVE_ON_CLOSE` |
 | `atp(query)` | 返回 `{available_on_hand, shortage}`，按 `scope` 计算 |
 
 ATP 口径（2026-11-05 细化；派生只在读取时发生）：
@@ -357,6 +360,7 @@ shortage(segment) = max(0, Σ(active commitments) - qty_on_hand(segment))
 | `INV_VALUATION_NOT_SUPPORTED` | 库存层收到金额/估值请求 |
 | `INV_RESERVATION_EXCEEDS_DEMAND` | 未核销承诺合计超过需求剩余量（§8.14） |
 | `INV_RESERVATION_CLOSED` | 对 `closed` 预留再核销/释放 |
+| `INV_RESERVATION_ACTIVE_ON_CLOSE` | 关单前置校验：来源单据仍有未核销承诺（先核销或释放） |
 | `INV_DEMAND_QTY_UNKNOWN` | **告警（不阻断）**：需求量不可解析，无法执行上限守卫 |
 | `TRACE_SUPPLY_DOUBLE_COUNT` | 库存段行同时被 hard pegging 记量与预留计数（§3.4） |
 | `ATP_INBOUND_UNSUPPORTED` | `available_on_hand(include_inbound=True)`：含在途的可用量未实现（`atp(include_inbound=True)` 已支持扣在途，见 §4.2） |
@@ -467,6 +471,8 @@ SO 行（so_segment_enabled=1）
 | 工单组件建 soft 预留并扣减可用量 | `test_inventory_reservation_service.py` | 需求节点 `work_order_component`、`peg_type=soft`，ATP `reserved=4` |
 | 组件重展开不重复承诺、旧结构行释放 | 同上 | 二次同步 `created=0`；结构行变化后旧承诺 `cancelled` |
 | 工单取消释放组件承诺 | 同上 | `released=1`，可用量恢复 |
+| 有未核销组件承诺时拒绝关单 | 同上 | `INV_RESERVATION_ACTIVE_ON_CLOSE`，`outstanding` 带入明细 |
+| 核销/释放后允许关单 | 同上 | 拦截器放行 |
 
 ---
 
@@ -533,6 +539,7 @@ SO 行（so_segment_enabled=1）
 - **v218（2026-11-05）**：重建 `inventory_reservations` 表，status CHECK 增加 `closed`；保留数据与索引，降级把 `closed` 回写为 `cancelled`。语义、ATP 口径、互斥校验仍在服务层与读取层。
 - **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
 - **工单组件预留（2026-11-05）**：不新增表/迁移。`work_order_component` 作需求节点，统一 soft；幂等键 `WO-COMP-{work_order_id}-{structure_line_id}` 以结构行稳定，重展开只更新数量与组件 id，结构行消失或工单取消/关闭时释放。
+- **关单前置校验（2026-11-05）**：通用 BO 更新 `status → Closed` 时，`ProjectTaskGuardInterceptor` 调 `assert_source_closable('work_order', id)`；仍有活跃未核销组件承诺则拒绝（`INV_RESERVATION_ACTIVE_ON_CLOSE`）。取消（`Cancelled`）不走该校验，按显式释放语义处理。
 
 ---
 
@@ -563,4 +570,4 @@ SO 行（so_segment_enabled=1）
 
 ### 12.4 当下落地顺序（L0 收口）
 
-1. 互斥消费校验（R15）；2. 需求上限守卫；3. `valid_to` 读取过滤；4. 投影解耦；5. `closed` 终态；6. `shortage` 视图；7. 工单/服务单接入 soft 预留（A3 最小闭环）——工单组件级已完成，服务单待其备件批次落地。
+1. 互斥消费校验（R15）；2. 需求上限守卫；3. `valid_to` 读取过滤；4. 投影解耦；5. `closed` 终态；6. `shortage` 视图；7. 工单/服务单接入 soft 预留（A3 最小闭环）——工单组件级已完成，服务单待其备件批次落地；8. 工单关闭前置校验——有未核销组件承诺时拒绝 `Closed`。

@@ -60,6 +60,7 @@ INV_RESERVATION_STATE_INVALID = 'INV_RESERVATION_STATE_INVALID'
 INV_HARD_PEG_CONFLICT = 'INV_HARD_PEG_CONFLICT'
 INV_RESERVATION_EXCEEDS_DEMAND = 'INV_RESERVATION_EXCEEDS_DEMAND'
 INV_RESERVATION_CLOSED = 'INV_RESERVATION_CLOSED'
+INV_RESERVATION_ACTIVE_ON_CLOSE = 'INV_RESERVATION_ACTIVE_ON_CLOSE'
 INV_DEMAND_QTY_UNKNOWN = 'INV_DEMAND_QTY_UNKNOWN'
 ATP_INBOUND_UNSUPPORTED = 'ATP_INBOUND_UNSUPPORTED'
 
@@ -397,6 +398,48 @@ class InventoryReservationService:
                 self._rebuild_projection(org_id)
         logger.info('[inv2] 预留过期处理 %s 条 (now=%s)', len(rows), moment)
         return len(rows)
+
+    # ------------------------------------------------------------------
+    # 关单前置校验
+    # ------------------------------------------------------------------
+    def outstanding_commitments(self, source_doc_type: Any,
+                                source_doc_id: Any) -> Dict[str, Any]:
+        """来源单据上的未核销承诺（活跃且未过期），供关单前置校验使用。"""
+        empty = {'count': 0, 'outstanding': 0.0, 'reservation_ids': []}
+        if not str(source_doc_type or '').strip() or not _to_int(source_doc_id):
+            return empty
+        if not self._table_ready():
+            return empty
+        rows = self.ds.query(
+            'SELECT id, qty_reserved, qty_fulfilled FROM %s '
+            'WHERE source_doc_type = ? AND source_doc_id = ? '
+            'AND status IN (?, ?) AND (valid_to IS NULL OR valid_to > ?)'
+            % RESERVATION_TABLE,
+            [str(source_doc_type).strip(), _to_int(source_doc_id),
+             STATUS_OPEN, STATUS_PARTIALLY_FULFILLED, _now()])
+        count = 0
+        outstanding = 0.0
+        reservation_ids = []
+        for row in rows:
+            remaining = _num(row.get('qty_reserved')) \
+                - _num(row.get('qty_fulfilled'))
+            if remaining <= 0:
+                continue
+            count += 1
+            outstanding += remaining
+            reservation_ids.append(_to_int(row.get('id')))
+        return {'count': count, 'outstanding': outstanding,
+                'reservation_ids': reservation_ids}
+
+    def assert_source_closable(self, source_doc_type: Any,
+                               source_doc_id: Any) -> None:
+        """关单前置校验：仍有未核销承诺时拒绝关闭，避免静默丢需求。"""
+        info = self.outstanding_commitments(source_doc_type, source_doc_id)
+        if info['count'] > 0:
+            raise InventoryError(
+                INV_RESERVATION_ACTIVE_ON_CLOSE,
+                '仍有未核销预留，不能关闭；请先核销或释放',
+                info)
 
     # ------------------------------------------------------------------
     # ATP

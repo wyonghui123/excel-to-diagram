@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING
 
 from meta.core.interceptors.base import Interceptor
 from meta.services import project_task_guard
-from meta.services.work_order_service import WorkOrderError, WorkOrderService
+from meta.services.work_order_service import (
+    STATUS_CLOSED, WorkOrderError, WorkOrderService,
+)
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -80,6 +82,32 @@ class ProjectTaskGuardInterceptor(Interceptor):
                 if context.action == 'crud_update' else None)
         except WorkOrderError as error:
             self._raise_validation(error)
+        if context.action == 'crud_update':
+            self._guard_work_order_close(context, data)
+
+    def _guard_work_order_close(self, context: 'ActionContext',
+                                data: dict) -> None:
+        """工单关闭前置校验：仍有未核销组件承诺时拒绝 Closed。"""
+        new_status = str(data.get('status') or '').strip().lower()
+        old_status = str((context.old_data or {}).get('status') or '') \
+            .strip().lower()
+        if new_status != STATUS_CLOSED.lower() \
+                or old_status == STATUS_CLOSED.lower():
+            return
+        work_order_id = _to_int(context.object_id) \
+            or _to_int((context.old_data or {}).get('id'))
+        if not work_order_id:
+            return
+        try:
+            from meta.services.inventory_guard_service import InventoryError
+            from meta.services.inventory_reservation_service import (
+                InventoryReservationService,
+            )
+            InventoryReservationService(
+                context.data_source).assert_source_closable(
+                    'work_order', work_order_id)
+        except InventoryError as error:
+            self._raise_inventory_validation(error)
 
     # ------------------------------------------------------------------
     # 项目任务 G9
@@ -117,6 +145,22 @@ class ProjectTaskGuardInterceptor(Interceptor):
                 'i18n_key': '',
                 'params': {},
                 'http_status': http_status,
+            }],
+        )
+
+    @staticmethod
+    def _raise_inventory_validation(error) -> None:
+        from meta.core.exceptions import ValidationFailedError
+
+        raise ValidationFailedError(
+            message=str(error),
+            details=[{
+                'field_name': 'status',
+                'rule': error.code,
+                'message': error.message,
+                'i18n_key': '',
+                'params': {},
+                'http_status': 400,
             }],
         )
 
