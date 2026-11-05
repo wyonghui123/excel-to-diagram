@@ -35,6 +35,9 @@ from meta.services.commitment_policies import (
 )
 from meta.services.inventory_document_sequence import next_document_no
 from meta.services.inventory_guard_service import InventoryError
+from meta.services.org_context_resolver import (
+    OrgContextResolver, OrgNotResolved,
+)
 from meta.services.stock_segment_service import (
     DEFAULT_SEGMENT, SEGMENT_COLUMNS, StockSegmentService,
 )
@@ -983,7 +986,11 @@ class InventoryReservationService:
                         source_doc_type, doc_id,
                         reason='%s未生效' % policy['name'])}
 
-        org_id = self._first_int_field(doc, policy['org_fields'])
+        try:
+            org_id = OrgContextResolver(self.ds).from_fields(
+                doc, policy['org_fields'])
+        except OrgNotResolved:
+            org_id = 0
         if not org_id:
             logger.warning('[inv2] %s %s 无法解析库存组织，跳过预留',
                            policy['name'], doc_id)
@@ -1075,14 +1082,6 @@ class InventoryReservationService:
                 [doc_id])
         except Exception:
             return []
-
-    @staticmethod
-    def _first_int_field(record: Dict[str, Any], fields: tuple) -> int:
-        for field in fields:
-            value = _to_int(record.get(field))
-            if value:
-                return value
-        return 0
 
     # ------------------------------------------------------------------
     # 服务请求接入（调用通用引擎，保留具名入口）
@@ -1179,17 +1178,10 @@ class InventoryReservationService:
 
     def _resolve_so_org(self, line: Dict[str, Any]) -> tuple:
         """返回 (org_id, location_id)；库位组织优先，抬头组织兜底。"""
-        location_id = _to_int(line.get('plant_location_id'))
-        if location_id:
-            try:
-                rows = self.ds.query(
-                    'SELECT org_id FROM locations WHERE id = ?', [location_id])
-            except Exception:
-                rows = []
-            loc_org = _to_int(rows[0].get('org_id')) if rows else 0
-            if loc_org:
-                return loc_org, location_id
-        return _to_int(line.get('header_org_id')), location_id or 0
+        try:
+            return OrgContextResolver(self.ds).from_sales_order_line(line)
+        except OrgNotResolved:
+            return 0, _to_int(line.get('plant_location_id'))
 
     def _load_work_order(self, work_order_id: Any) -> Optional[Dict[str, Any]]:
         if _to_int(work_order_id) <= 0:
@@ -1212,80 +1204,10 @@ class InventoryReservationService:
 
     def _resolve_work_order_org(self, work_order: Dict[str, Any]) -> int:
         """项目 → SO 抬头 → SO 行库位 → 单一组织兜底；都缺失则无法建承诺。"""
-        project_id = _to_int(work_order.get('project_id'))
-        if project_id:
-            org_id = self._query_org('projects', project_id)
-            if org_id:
-                return org_id
-        order_id = _to_int(work_order.get('order_id'))
-        if order_id:
-            org_id = self._query_org('sales_orders', order_id)
-            if org_id:
-                return org_id
-        org_id = self._query_so_line_org(_to_int(work_order.get('order_line_id')))
-        if org_id:
-            return org_id
-        if order_id:
-            org_id = self._query_order_single_line_org(order_id)
-            if org_id:
-                return org_id
-        return self._query_single_org()
-
-    def _query_so_line_org(self, line_id: int) -> int:
-        """SO 行发运/生产库位所属组织。"""
-        if line_id <= 0:
-            return 0
         try:
-            rows = self.ds.query(
-                'SELECT plant_location_id FROM sales_order_lines WHERE id = ?',
-                [line_id])
-        except Exception:
+            return OrgContextResolver(self.ds).from_work_order(work_order)
+        except OrgNotResolved:
             return 0
-        return self._query_location_org(rows[0].get('plant_location_id')) \
-            if rows else 0
-
-    def _query_location_org(self, location_id: Any) -> int:
-        loc_id = _to_int(location_id)
-        if loc_id <= 0:
-            return 0
-        try:
-            rows = self.ds.query('SELECT org_id FROM locations WHERE id = ?',
-                                 [loc_id])
-        except Exception:
-            return 0
-        return _to_int(rows[0].get('org_id')) if rows else 0
-
-    def _query_order_single_line_org(self, order_id: int) -> int:
-        """订单全部行指向同一组织时才兜底，避免跨厂/跨组织猜测。"""
-        if order_id <= 0:
-            return 0
-        try:
-            rows = self.ds.query(
-                'SELECT DISTINCT loc.org_id FROM sales_order_lines l '
-                'JOIN locations loc ON loc.id = l.plant_location_id '
-                'WHERE l.order_id = ? AND loc.org_id IS NOT NULL '
-                'AND loc.org_id > 0', [order_id])
-        except Exception:
-            return 0
-        org_ids = {_to_int(row.get('org_id')) for row in rows}
-        return org_ids.pop() if len(org_ids) == 1 else 0
-
-    def _query_single_org(self) -> int:
-        """仅当系统只有一个活跃组织时兜底；多组织不猜。"""
-        try:
-            rows = self.ds.query(
-                "SELECT id FROM orgs WHERE status = 'active' ORDER BY id")
-        except Exception:
-            return 0
-        return _to_int(rows[0].get('id')) if len(rows) == 1 else 0
-
-    def _query_org(self, table: str, row_id: int) -> int:
-        try:
-            rows = self.ds.query('SELECT org_id FROM %s WHERE id = ?' % table,
-                                 [row_id])
-        except Exception:
-            return 0
-        return _to_int(rows[0].get('org_id')) if rows else 0
 
     # ------------------------------------------------------------------
     # 内部
