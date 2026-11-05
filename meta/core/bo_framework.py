@@ -246,7 +246,16 @@ class BOFramework:
                 return context.result or ActionResult(success=True, message="Operation completed")
 
         except Exception as e:
-            from meta.core.exceptions import FieldPolicyViolationError, ValidationFailedError
+            from meta.core.exceptions import (
+                FieldPolicyViolationError,
+                StateMachineViolationError,
+                ValidationFailedError,
+            )
+            if isinstance(e, StateMachineViolationError):
+                logger.info(f"[BOFramework] State machine violation: {e}")
+                return ActionResult(success=False, message=str(e),
+                                    errors=e.details, status_code=400,
+                                    code=StateMachineViolationError.code)
             if isinstance(e, FieldPolicyViolationError):
                 logger.info(f"[BOFramework] FieldPolicy validation FAILED: {e}")
                 return ActionResult(success=False, message=str(e))

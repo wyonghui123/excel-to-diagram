@@ -32,6 +32,7 @@ class ActionResult:
     errors: Optional[list] = None
     total: Optional[int] = None
     status_code: Optional[int] = None
+    code: Optional[str] = None
 
 
 @dataclass

@@ -1223,7 +1223,8 @@ def update_bo(object_type, obj_id):
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return ok(result.data, message=result.message)
-    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
+    return error_response(result.message, code=result.code,
+                          status=(result.status_code or 400), errors=result.errors)
 
 
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['PUT'])
@@ -1246,7 +1247,8 @@ def update_bo_by_string_id(object_type, obj_id):
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return ok(result.data, message=result.message)
-    return error_response(result.message, status=(result.status_code or 400), errors=result.errors)
+    return error_response(result.message, code=result.code,
+                          status=(result.status_code or 400), errors=result.errors)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['DELETE'])
@@ -1291,7 +1293,8 @@ def execute_action(object_type, obj_id, action_id):
     result = bo.execute_action(object_type, action_id, params)
     if result.success:
         return ok(result.data, message=result.message)
-    return error_response(result.message, status=(result.status_code or 400))
+    return error_response(result.message, code=result.code,
+                          status=(result.status_code or 400))
 
 
 # ── Association ──

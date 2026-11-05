@@ -6,6 +6,7 @@ schema 的 `rules: type=state_transition` 是服务请求生命周期的唯一�
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -49,3 +50,66 @@ def test_reject_only_from_submitted_but_cancel_covers_pre_commit_states():
     assert (('submitted',), 'rejected') in pairs
     assert (('approved',), 'rejected') not in pairs
     assert (('draft', 'submitted', 'approved'), 'cancelled') in pairs
+
+
+# ---------------- 守卫按声明拒绝非法迁移 ----------------------------
+
+
+def _ensure_registry():
+    from meta.core.models import registry
+    if registry.get('service_request') is None:
+        registry.reload(str(SCHEMA.parent))
+
+
+class _EmptyDS:
+    """非法迁移应在触库前被拒绝，这里刻意返回空结果。"""
+
+    def query(self, sql, params=None):
+        return []
+
+    def execute(self, sql, params=None):
+        raise AssertionError('非法迁移不应触库: ' + sql)
+
+
+def _ctx(object_type, current_status, target_status):
+    return SimpleNamespace(
+        meta_object=SimpleNamespace(id=object_type),
+        action='crud_update',
+        params={'id': 1, 'status': target_status},
+        data_source=_EmptyDS(),
+        old_data={'id': 1, 'status': current_status},
+        extra={},
+    )
+
+
+@pytest.fixture(scope='module', autouse=True)
+def _registry_loaded():
+    _ensure_registry()
+
+
+@pytest.mark.parametrize('object_type,current,target', [
+    ('service_request', 'draft', 'approved'),
+    ('service_request', 'approved', 'submitted'),
+    ('service_request', 'completed', 'cancelled'),
+    ('requisition', 'rejected', 'submitted'),
+])
+def test_guard_rejects_undeclared_transition(object_type, current, target):
+    from meta.core.exceptions import StateMachineViolationError
+    from meta.core.interceptors.demand_entry_guard_interceptor import (
+        DemandEntryGuardInterceptor,
+    )
+
+    with pytest.raises(StateMachineViolationError) as exc:
+        DemandEntryGuardInterceptor().before_action(
+            _ctx(object_type, current, target))
+    assert exc.value.code == 'STATE_MACHINE_VIOLATION'
+
+
+def test_guard_allows_declared_transition():
+    from meta.core.interceptors.demand_entry_guard_interceptor import (
+        DemandEntryGuardInterceptor,
+    )
+
+    DemandEntryGuardInterceptor().before_action(
+        _ctx('service_request', 'submitted', 'approved'))
+

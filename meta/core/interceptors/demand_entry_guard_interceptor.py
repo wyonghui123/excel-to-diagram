@@ -161,14 +161,21 @@ class DemandEntryGuardInterceptor(Interceptor):
     def _guard_submit(self, context: 'ActionContext', object_type: str,
                       service: DemandEntryService) -> None:
         payload = context.params or {}
-        if payload.get('status') != _STATUS_SUBMITTED:
+        target_status = payload.get('status')
+        if _blank(target_status):
             return
 
         current_status = (context.old_data or {}).get('status')
         if _blank(current_status):
             current_status = _STATUS_DRAFT
-        if current_status != _STATUS_DRAFT:
-            # 非「草稿 → 提交」的更新，不接管
+
+        # 状态机声明（schema rules）是唯一真源：无合法边直接拒绝，
+        # 不再由本拦截器各自硬编码对象状态。
+        service.assert_status_transition(object_type, current_status,
+                                         target_status)
+
+        if target_status != _STATUS_SUBMITTED or current_status != _STATUS_DRAFT:
+            # 非「草稿 → 提交」的更新，不接管取号/审批
             return
 
         document_no = service.allocate_document_no(object_type, payload)

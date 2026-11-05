@@ -58,6 +58,49 @@ class DemandEntryService:
     def __init__(self, data_source):
         self._ds = data_source
 
+    # ---------------- 状态机 ----------------
+
+    def state_transition_rules(self, object_type: str,
+                               state_field: str = 'status'):
+        """读取对象在 schema 中声明的状态迁移规则（唯一真源）。"""
+        from meta.core.models import MetaStateTransition, registry as meta_registry
+
+        meta_object = meta_registry.get(object_type)
+        if meta_object is None:
+            return []
+        return [rule for rule in (getattr(meta_object, 'rules', None) or [])
+                if isinstance(rule, MetaStateTransition)
+                and rule.state_field == state_field]
+
+    def assert_status_transition(self, object_type: str, current_status,
+                                 to_status):
+        """校验一条状态边：目标状态必须在当前状态的声明边内。
+
+        对象尚未声明 state_transition 规则时返回 None（沿用旧行为），
+        避免统一守卫把未迁移对象一次性锁死。
+        """
+        rules = self.state_transition_rules(object_type)
+        if not rules:
+            return None
+        for rule in rules:
+            if rule.to_state == to_status and \
+                    current_status in list(rule.from_states or []):
+                return rule
+        from meta.core.exceptions import StateMachineViolationError
+
+        message = '状态 {0} 不能直接变更为 {1}（对象 {2} 未声明该迁移）'.format(
+            current_status, to_status, object_type)
+        raise StateMachineViolationError(
+            message,
+            details=[{
+                'field_name': 'status',
+                'rule': 'state_transition',
+                'message': message,
+                'i18n_key': '',
+                'params': {},
+            }],
+        )
+
     # ---------------- 提交取号 ----------------
 
     def allocate_document_no(self, object_type: str, payload: Dict[str, Any]) -> Optional[str]:
