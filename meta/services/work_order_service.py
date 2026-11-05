@@ -540,6 +540,11 @@ class WorkOrderService:
             logger.warning('[work_order] 读取 production 结构行失败: %s', e)
             lines = []
 
+        # 重展开保留逐组件任务归属（structure_line_id 稳定键），无值时继承工单头任务
+        assignments = self._component_task_assignments(work_order_id)
+        header_task_id = self._work_order_task_id(work_order_id)
+        can_store_task = PROJECT_TASK_COLUMN in project_task_guard.table_columns(
+            self.ds, COMPONENT_TABLE)
         self.ds.execute('DELETE FROM %s WHERE work_order_id = ?'
                         % COMPONENT_TABLE, [work_order_id])
 
@@ -547,7 +552,7 @@ class WorkOrderService:
         created: List[Dict[str, Any]] = []
         for line in lines:
             qty_required = self._component_qty_required(line, quantity)
-            self._insert(COMPONENT_TABLE, {
+            row = {
                 'work_order_id': work_order_id,
                 'structure_id': structure_id,
                 'structure_line_id': line.get('id'),
@@ -560,7 +565,12 @@ class WorkOrderService:
                 'optional_flag': 1 if bool(line.get('optional_flag')) else 0,
                 'created_at': now,
                 'updated_at': now,
-            })
+            }
+            if can_store_task:
+                task_id = assignments.get(
+                    project_task_guard.to_int(line.get('id'))) or header_task_id
+                row[PROJECT_TASK_COLUMN] = task_id
+            self._insert(COMPONENT_TABLE, row)
             created.append({
                 'structure_line_id': line.get('id'),
                 'component_item_id': line.get('component_item_id'),
@@ -600,6 +610,34 @@ class WorkOrderService:
             value = ((_num(line.get('qty_per')) or 0.0) * quantity
                      + (_num(line.get('fixed_qty')) or 0.0)) * (1 + scrap)
         return _round4(value)
+
+    def _component_task_assignments(self,
+                                    work_order_id: Any) -> Dict[int, int]:
+        """重展开前的逐组件任务归属；`structure_line_id` 为稳定键。"""
+        try:
+            rows = self.ds.query(
+                'SELECT structure_line_id, project_task_id FROM %s '
+                'WHERE work_order_id = ?' % COMPONENT_TABLE, [work_order_id])
+        except Exception:  # 旧库/测试库缺列 → 无归属可保留
+            return {}
+        assignments = {}
+        for row in rows:
+            line_id = project_task_guard.to_int(row.get('structure_line_id'))
+            task_id = project_task_guard.to_int(row.get('project_task_id'))
+            if line_id > 0 and task_id > 0:
+                assignments[line_id] = task_id
+        return assignments
+
+    def _work_order_task_id(self, work_order_id: Any) -> int:
+        """工单头任务，作为组件任务段的默认归属。"""
+        try:
+            rows = self.ds.query(
+                'SELECT project_task_id FROM %s WHERE id = ?'
+                % WORK_ORDER_TABLE, [work_order_id])
+        except Exception:  # 旧库缺列 → 无默认任务段
+            return 0
+        return project_task_guard.to_int(rows[0].get('project_task_id')) \
+            if rows else 0
 
     def _resolve_demand(self, demand_type: str,
                         demand_id: Any) -> Dict[str, Any]:
@@ -1234,7 +1272,8 @@ class WorkOrderService:
     def _insert(self, table: str, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
         # 旧库（P1-2 列迁移尚未落地）不写 project_task_id，保持建单可用
-        if table == WORK_ORDER_TABLE and PROJECT_TASK_COLUMN in columns:
+        if table in (WORK_ORDER_TABLE, COMPONENT_TABLE) \
+                and PROJECT_TASK_COLUMN in columns:
             available = project_task_guard.table_columns(self.ds, table)
             if PROJECT_TASK_COLUMN not in available:
                 columns.remove(PROJECT_TASK_COLUMN)

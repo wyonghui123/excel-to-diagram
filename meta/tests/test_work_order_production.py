@@ -99,6 +99,7 @@ CREATE TABLE work_orders (
     order_line_id INTEGER,
     customer_account_id INTEGER,
     project_id INTEGER,
+    project_task_id INTEGER DEFAULT 0,
     severity TEXT,
     channel TEXT,
     status TEXT,
@@ -125,6 +126,7 @@ CREATE TABLE work_order_components (
     scrap_rate REAL,
     qty_required REAL,
     optional_flag INTEGER DEFAULT 0,
+    project_task_id INTEGER DEFAULT 0,
     created_at TEXT,
     updated_at TEXT
 );
@@ -316,7 +318,8 @@ def test_service_path_behavior_unchanged():
     assert len(result['sla']['milestones']) == 2
     row = _row(conn, 'SELECT * FROM work_orders WHERE id = ?', [result['id']])[0]
     columns = ('id', 'work_order_no', 'order_type', 'schedule_id', 'order_id',
-               'order_line_id', 'customer_account_id', 'project_id', 'severity',
+               'order_line_id', 'customer_account_id', 'project_id',
+               'project_task_id', 'severity',
                'channel', 'status', 'coverage_id', 'asset_ref',
                'source_demand_type', 'source_demand_id', 'opened_at',
                'first_response_at', 'resolved_at', 'closed_at', 'created_at',
@@ -389,7 +392,8 @@ def test_production_creates_without_sla_side_effects():
 
     row = _row(conn, 'SELECT * FROM work_orders WHERE id = ?', [result['id']])[0]
     columns = ('id', 'work_order_no', 'order_type', 'schedule_id', 'order_id',
-               'order_line_id', 'customer_account_id', 'project_id', 'severity',
+               'order_line_id', 'customer_account_id', 'project_id',
+               'project_task_id', 'severity',
                'channel', 'status', 'coverage_id', 'asset_ref',
                'source_demand_type', 'source_demand_id', 'opened_at',
                'first_response_at', 'resolved_at', 'closed_at', 'created_at',
@@ -538,6 +542,42 @@ def test_expand_components_is_idempotent():
         'WHERE work_order_id = ? ORDER BY component_item_id', [1]).fetchall()
     assert rows[0][1] == pytest.approx(8.0)   # 2 × 4
     assert rows[1][1] == pytest.approx(4.8)   # 1 × 4 × 1.2
+
+
+def test_expand_components_writes_work_order_task_segment():
+    conn = _db()
+    conn.execute(
+        "INSERT INTO work_orders (id, work_order_no, order_type, status, "
+        "project_task_id) VALUES (1, 'WO-1', 'production', 'New', 7)")
+    _add_structure(conn, sid=1, item_id=500)
+    _add_line(conn, 11, 1, 501, qty_per=2, line_no=10)
+
+    _svc(conn).expand_components(1, 500, 4)
+
+    task = _row(conn, 'SELECT project_task_id FROM work_order_components '
+                      'WHERE work_order_id = ?', [1])[0][0]
+    assert task == 7
+
+
+def test_expand_components_preserves_component_task_override():
+    conn = _db()
+    conn.execute(
+        "INSERT INTO work_orders (id, work_order_no, order_type, status, "
+        "project_task_id) VALUES (1, 'WO-1', 'production', 'New', 7)")
+    _add_structure(conn, sid=1, item_id=500)
+    _add_line(conn, 11, 1, 501, qty_per=2, line_no=10)
+
+    svc = _svc(conn)
+    svc.expand_components(1, 500, 4)
+    conn.execute('UPDATE work_order_components SET project_task_id = 8 '
+                 'WHERE work_order_id = ?', [1])
+    conn.commit()
+
+    svc.expand_components(1, 500, 4)
+
+    task = _row(conn, 'SELECT project_task_id FROM work_order_components '
+                      'WHERE work_order_id = ?', [1])[0][0]
+    assert task == 8
 
 
 def test_expand_components_requires_item_and_qty():
