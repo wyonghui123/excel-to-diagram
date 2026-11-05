@@ -8,8 +8,12 @@
 #   不设 write_anchor ⇒ 写请求由 READ_ONLY_VIEW 护栏拒绝（API 侧 400）。
 #
 # [同库前提]
-#   SQLite 视图不能跨库 UNION；两基表须在同一库。缺任一基表时由 v216 迁移
+#   SQLite 视图不能跨库 UNION；两基表须在同一库。缺任一基表时由 v222 迁移
 #   [SKIP]，本面查询返回空，不阻断业务。
+#
+# [退货符号口径]
+#   执行层 signed_qty 按规则映射「对源单履约量的净贡献」：出库 +、退货 −、
+#   红字取反（业务退货被冲销 ⇒ 恢复为正）。列数不变（仍 17 列）。
 #
 # [不挂维度绑定]
 #   两基表均无 org 列；挂 dimension_bindings 会静默注入过滤得空集。
@@ -33,7 +37,11 @@ view_definition: |
     e.target_id AS target_object_id,
     COALESCE(e.target_item, '') AS target_line_id,
     e.quantity AS qty,
-    CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END AS signed_qty,
+    CASE
+      WHEN e.rule_id = 'shipment_line_to_return_in_txn'
+        THEN CASE WHEN e.quantity_sign = 'red' THEN e.quantity ELSE -e.quantity END
+      ELSE CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END
+    END AS signed_qty,
     e.status AS status,
     NULL AS peg_type,
     NULL AS plan_version,
@@ -163,7 +171,7 @@ fields:
     name: 有效数量
     type: number
     db_column: signed_qty
-    description: 执行层红字取负；计划层失效取 0，可直接求和
+    description: 执行层出库为正、退货为负、红字取反；计划层失效取 0，可直接求和
 
   - id: status
     name: 状态

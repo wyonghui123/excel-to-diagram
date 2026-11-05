@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 from meta.core.doc_flow_reconcile import scan
 from meta.core.yaml_loader import load_yaml_file
 from meta.migrations import v215__doc_flow_stage2_rules as v215
-from meta.migrations import v219__demand_trace_graph_view as v216
+from meta.migrations import v222__doc_flow_return_shipment_rule as v222
 from meta.services.trace_graph_service import TraceGraphService
 
 _SCHEMA_DIR = os.path.join(
@@ -78,7 +78,7 @@ def _db(*, with_view=True, with_shipment_lines=False):
     if with_shipment_lines:
         conn.execute(SHIPMENT_LINE_DDL)
     if with_view:
-        assert v216._do_upgrade(conn) is True
+        assert v222._do_upgrade(conn) is True
     return conn
 
 
@@ -169,7 +169,7 @@ def test_view_yaml_matches_migration_sql():
         data = yaml.safe_load(fh)
 
     norm = lambda s: re.sub(r'\s+', ' ', s or '').strip()
-    assert norm(data['view_definition']) == norm(v216.VIEW_SQL)
+    assert norm(data['view_definition']) == norm(v222.VIEW_SQL)
     assert data.get('write_anchor') is None
     assert data['import_export']['auto_crud'] is False
     action_ids = [a['id'] for a in data['actions']]
@@ -216,8 +216,8 @@ def test_trace_service_returns_empty_without_view():
 def test_migration_skips_when_base_tables_missing(tmp_path):
     db_path = str(tmp_path / 'empty.db')
     sqlite3.connect(db_path).close()
-    v216.migrate(db_path)
-    result = v216.verify(db_path)
+    v222.migrate(db_path)
+    result = v222.verify(db_path)
     assert result['ok'] is True
     assert result['checks']['skipped_without_base_tables'] is True
 

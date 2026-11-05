@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 日期：2026-11-05
-- 状态：**阶段 0/1/2/3/4 已实施**，AC-01~AC-18 已验证通过（2026-11-05）
+- 状态：**阶段 0/1/2/3/4/5 已实施**（AC-01~AC-18、AC-19~AC-23 已验证通过）（2026-11-05）
 - 上游依据：
   - 本次端到端流程检查结论（销售→发货→出库、采购→到货→入库、需求→采购/调拨、销售→服务确认）
   - `docs/specs/spec-project-g15-eto-solution-2026-11-04.md` §4（P2 任务轴）
@@ -22,6 +22,7 @@
    - **`demand_trace_links` 保留「计划/钉住」语义**（含 `forecast`、`inventory_balance` 等非单据节点、`plan_version` 与有效期），**不降级为边表派生视图**；
    - **两表之上新增只读统一追溯面**（view 元模型 `v_demand_trace_graph`：执行层取边表、计划层取线索表），读统一、写边界不变。
 4. 接入范围不是"全部"：单据→单据必须接；单据→库存事务应当接（attach 模式）；纯状态动作与派生视图不必接。
+5. 退货执行缺口按**方案 A** 处理：复用交货单 + 单据类别 `return` 反向入库，不新建独立退货单/退货收货单对象（与 SAP Returns Delivery、Oracle RMA 一致）；阶段 5 实施，验收 AC-19~AC-23。
 
 ---
 
@@ -59,6 +60,7 @@
 | G4 | 数量幂等与池隔离：重复派生不重复记数、Σ 派生量不超过源数量 |
 | G5 | 对账可发现「有事务无边」「有边无事务」「源目标数量不一致」 |
 | G6 | 追溯查询由统一只读追溯面驱动（执行层 `doc_flow_edges` / 计划层 `demand_trace_links`），不再出现两套查询口径 |
+| G7 | 退货执行可表达：交货单按单据类别反向入库（退货交货），退货事实与数据错误冲销可区分 |
 
 ### 2.2 非目标
 
@@ -69,6 +71,7 @@
 - 不实现服务确认/开票对象本身，只预留规则位。
 - 不删除、不改写 `demand_trace_links` 的计划语义，也不把它替换为边表（计划节点与钉住口径无法由边表表达）。
 - 不把统一追溯视图做成可写入口（写仍走各自权威服务）。
+- 不新建独立退货单/退货收货单对象：退货复用既有单据 + 单据类别（方案 A）；退货检验/维修/报废分支（ARM）不在本规格实现。
 
 ---
 
@@ -132,7 +135,8 @@ P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','
 | A | 采购订单→收货单 | 必须接 | attach |
 | A | 销售订单→交货单 | 必须接 | attach |
 | A | 需求分配→调拨单 | 必须接 | attach |
-| A | 退货/冲销（反向单据） | 必须接 | reversal |
+| A | 销售退货 → 退货交货（退货订单计划行 → 退货交货行） | 必须接（方案 A） | attach |
+| A | 数据错误冲销（货物未真实离库） | 必须接 | reversal（`reverse_edge` + 反向过账，与退货路径分开） |
 | A | 服务确认→开票（未来） | 必须接 | create |
 | B. 单据→库存事务 | 收货→入库事务 | 应当接 | attach |
 | B | 交货→出库事务 | 应当接（P0） | attach |
@@ -143,42 +147,72 @@ P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','
 
 ## 5. 逐链路设计
 
-### 5.1 交货确认 → 出库事务（P0，最高优先）
+### 5.1 交货确认 → 库存事务（正向出库 / 退货入库，P0 + P0.5）
 
 **触发点**：`ShipmentService.ship_confirm()`（[L157-224](file:///d:/filework/excel-to-diagram/meta/services/shipment_service.py#L157-L224)）
 
-**顺序**（外层事务）：
+**方向决议（方案 A）**：读交货单 `document_type_id` → `type_definitions.document_category`（`scope_bo='shipment'`、`level='header'`）：
+
+- `document_category='return'` → **退货入库**分支；
+- 其他值或缺失 → **正向出库**分支（存量类型兼容，按 `sales` 解释）。
+
+**行不带方向**：沿用 `sales_order` 口径，方向只在抬头类型上。
+
+**顺序**（两分支相同，外层事务）：
 
 ```
 ① 校验 staged / 序列号 / HU
-② InventoryPostingService.post(entries, source)      # 唯一写库存
-③ doc_flow derive(attach)                            # 只写边
-④ 回写 schedule delivered_qty / 行/头状态
-⑤ 核销预留 + demand_trace
+② 类型一致性守卫（见下）
+③ InventoryPostingService.post(entries, source)      # 唯一写库存
+④ doc_flow derive(attach)                            # 只写边
+⑤ 回写 schedule delivered_qty / 行/头状态
+⑥ 核销预留 + demand_trace（仅正向分支）
 ```
 
-**过账参数**：
+**过账参数（按分支）**：
 
-- `source = {source_doc_type:'shipment', source_doc_id:delivery_id, source_event_key:'shipment:{id}:ship', transaction_date, created_by}`
-- 每交货行 entry：`direction='out'`、`transaction_type_id=ISSUE_TO_SHIP`、`qty`、`item_id/location_id/batch_id/serial_no/hu_id`、`project_id`（抬头）、`project_task_id`（行）、`source_line_id`
+| 项 | 正向出库 | 退货入库（P0.5） |
+|---|---|---|
+| `direction` | `out` | `in` |
+| `transaction_type_id` | `ISSUE_TO_SHIP` | `RETURN_IN`（`category='receipt'`、`direction='in'`，按 v204 模式 seed） |
+| `source_event_key` | `shipment:{id}:ship` | `shipment:{id}:return` |
+| 边规则 `rule_id` | `shipment_line_to_issue_txn` | `shipment_line_to_return_in_txn` |
+| `pool` | `inventory_issue` | `inventory_return` |
+| 核销预留 / `demand_trace` | 是 | 否（退货不回写履约预留） |
 
-**规则**：
+共同字段：`source={source_doc_type:'shipment', source_doc_id:delivery_id, transaction_date, created_by}`；每行 entry 带 `qty`（保持正数）、`item_id/location_id/batch_id/serial_no/hu_id`、`project_id`（抬头）、`project_task_id`（行）、`source_line_id`。
+
+**规则（阶段 5 新增退货规则）**：
 
 | 字段 | 值 |
 |---|---|
-| `rule_id` | `shipment_line_to_issue_txn` |
+| `rule_id` | `shipment_line_to_return_in_txn` |
 | `source_bo` → `target_bo` | `shipment_line` → `inventory_transaction` |
 | `source_qty_field` | `qty` |
-| `pool` | `inventory_issue` |
+| `pool` | `inventory_return` |
 | `status` | `active` |
 
 attach 模式：`target_data={'id': txn_id, 'item': line_id, 'amount': 0, 'unit': uom_id}`。
 
+**类型一致性守卫**：
+
+1. 交货单类别与来源订单类别必须一致：`shipment.document_type_id → category` 对比 `shipment.order_id → sales_orders.document_type_id → category`；不一致 → `DN_CATEGORY_MISMATCH`，零事务、零边。
+2. 行 `schedule_id` 所属订单必须等于 `shipment.order_id`（现状由 `order_line_id` 冗余校验，缺时以 schedule 反查）。
+3. 退货单行合法性由 R-RET-1~9 在订单侧保证；发运侧复用 R-DN-1（`qty > 0` 且不超过计划剩余量）。
+
 **幂等**：`source_event_key` 去重 + 边 7 元组幂等；状态机保证 `staged→shipped` 单次。
 
-**过账开关**：`inventory_posting_enabled=0`（迁移默认值）时**跳过过账与转单边，不阻断发运**——与收货同口径的过渡期行为；开关开启后才校验负库存/批次/段，失败即拒绝并整体回滚。
+**过账开关**：`inventory_posting_enabled=0`（迁移默认值）时两分支均**跳过过账与转单边，不阻断发运**——与收货同口径的过渡期行为；开关开启后才校验负库存/批次/段，失败即拒绝并整体回滚。
 
-**冲销**：P0 禁止已 `shipped` 取消；P0.5 走退货单/红字。
+**退货 ≠ 冲销（关键语义）**：
+
+- **业务退货** = 新事实：生成退货交货 + `RETURN_IN` 入库 + 新边；原正向 `shipment_line_to_issue_txn` 边保持 `active`，不置 `reversed`。
+- **数据错误冲销** = 货物未真实离库：调用 `reverse_edges_by_source` + 反向过账（`InventoryPostingService.reverse_by_source`），不得用退货单掩盖数据错误。
+- P0 仍禁止已 `shipped` 单据取消（R-DN-2 不变）。
+
+**追溯口径**：`v_demand_trace_graph.signed_qty` 定义「对源单履约量的净贡献」——出库 `+qty`、退货入库 `-qty`；由阶段 5 迁移刷新视图 SQL（仍 17 列，`relation` 区分 `shipment_line_to_issue_txn` / `shipment_line_to_return_in_txn`）。
+
+**对账**：`ORPHAN_TXN` 判定纳入 `RETURN_IN` 事务；退货边与事务数量互检沿用 `DANGLING_EDGE` / 数量一致规则。
 
 ### 5.2 请购 → 采购订单
 
@@ -352,6 +386,7 @@ actions:
 | **2 存量补边** | 5.2~5.6 各加 1 处 attach | 6 条主链路均有边，测试通过 |
 | **3 冲销统一** | 取消/退货/红字 | 已实施（收货链路）：边 `reversed` + 红字边 + 余额回补一致 |
 | **4 追溯统一** | 只读统一追溯面 `v_demand_trace_graph`（view 元模型）+ 写边界治理 + 跨层对账 | 追溯查询走单一读面；两表保持权威；无越层直写 |
+| **5 P0.5 退货执行** | 5.1 退货入库分支（类型决议 + `RETURN_IN` 过账 + 独立规则/池）+ 退货≠冲销语义 | AC-19~AC-23 通过；正向链路零回归 |
 
 **阶段 0/1 实施记录（2026-11-05）**：
 
@@ -455,6 +490,41 @@ actions:
 | 测试 | `meta/tests/test_demand_trace_graph.py`（12 例：双层投影 / YAML-SQL 一致 / 双向遍历 / 缺视图空读 / 迁移跳过 / sync 降级 / 跨层对账 4 例 / 只读护栏 / 无直插 SQL） |
 | 回归 | `test_doc_flow_reconcile.py`(29) · `test_doc_flow_stage3_reversal.py`(3) · `test_doc_flow_stage2_edges.py`(4) 全绿 |
 
+### 阶段 5 实施计划（方案 A，已实施 2026-11-05）
+
+**决策依据**：SAP 的退货交货（Returns Delivery）复用 delivery 对象并带退货标识；Oracle 的 RMA 是订单类型而非并列对象。两家都不做独立退货单对象，且本仓库红字收货已采用「复用单据 + `document_category='return'`」模式。因此销售退货复用 `shipment`（方案 A），不新建退货收货单（方案 B）。
+
+| 工作项 | 内容 | 验收 |
+|---|---|---|
+| 类型决议 | `ShipmentService` 读 `document_type_id` → `document_category`；缺失按 `sales` 解释 | AC-20 |
+| 类型守卫 | `shipment` 类别 vs `order_id` 所属订单类别不一致 → `DN_CATEGORY_MISMATCH`（零事务/零边） | AC-20 |
+| 事务类型 | 迁移 seed `RETURN_IN`（`category='receipt'`、`direction='in'`，按 v204 模式）；缺 `inventory_transaction_types` 表 `[SKIP]` | AC-19 |
+| 过账分支 | `_post_issue_inventory` 按类别选 `ISSUE_TO_SHIP`/`RETURN_IN`、`out`/`in`、`shipment:{id}:ship`/`shipment:{id}:return`；退货分支跳过预留核销 | AC-19 |
+| 规则 | 迁移 upsert `shipment_line_to_return_in_txn`（`pool=inventory_return`），不覆盖运行态 `status` | AC-21 |
+| 边 | `_write_issue_edges` 按分支选规则；两池互不合并计数 | AC-21 |
+| 追溯视图 | 同一迁移 `DROP VIEW` + `CREATE VIEW`：`signed_qty` 按规则映射（出库 +、退货 −），列数不变 | AC-22 |
+| 对账 | `ORPHAN_TXN` 纳入 `RETURN_IN`；退货边事务互检 | AC-23 |
+| 冲销入口 | P0.5 只接「业务退货」；「数据错误冲销」单独评审，复用 `reverse_edges_by_source`，不复用退货路径 | AC-22 |
+| 测试 | 新增 `meta/tests/test_shipment_return_doc_flow.py`（覆盖 AC-19~AC-23） | 全绿 |
+
+**阶段 5 实施记录（2026-11-05）**：
+
+| 项 | 落地 |
+|---|---|
+| 服务分支 | `meta/services/shipment_service.py`：`_is_return_shipment`（读交货单/来源订单 `document_type_id` 的 `document_category`，缺失继承订单类别）；不一致抛 `DN_CATEGORY_MISMATCH`；退货跳过序列号校验/HU/预留核销 |
+| 过账 | `_post_issue_inventory(..., is_return)`：`RETURN_IN` / `direction='in'` / 事件键 `shipment:{id}:return`（与 `:ship` 互不覆盖） |
+| 边 | `_write_issue_edges(..., is_return)`：退货走 `shipment_line_to_return_in_txn`（`pool=inventory_return`），正向仍 `shipment_line_to_issue_txn`（`inventory_issue`） |
+| 迁移 | `meta/migrations/v222__doc_flow_return_shipment_rule.py`：seed `RETURN_IN` + 退货交货类型（`shipment`/`header`/`RETURN`/`return`）+ upsert 退货规则 + 刷新视图（四分支 `signed_qty`，仍 17 列）；缺表 `[SKIP]` |
+| 视图元数据 | `meta/schemas/demand_trace_graph.yaml` `view_definition` 与 v222 逐字一致（出库 +、退货 −、红字取反） |
+| 测试 | `meta/tests/test_shipment_return_doc_flow.py`（8 例：退货过账/继承类别/类别不一致/池隔离/退货≠冲销/对账/迁移幂等）；`test_demand_trace_graph.py` 改以 v222 为视图真源（12 例） |
+| 回归 | `test_shipment_issue_doc_flow.py`(6) · `test_shipment_service.py`(32) · `test_shipment_schema_rules.py`(5) · `test_doc_flow_reconcile.py`(29) 全绿 |
+
+**不做（阶段 5 边界）**：
+
+- 不新建退货收货单对象、不动 `shipment_line` 行模型；
+- 不实现退货检验/维修/报废分支（留给 ARM 式扩展）；
+- 不把退货入库写进 `demand_trace_links`（避免污染履约钉住口径）。
+
 **阶段 0 的两种实现方式（待决策 D1）**：
 
 - **方式 A（声明式）**：新建 app 清单声明 `doc_flow.enabled` + 规则。要求规则引用的 BO 都在该 app 声明；但 `shipment_line`/`inventory_transaction` 当前属于核心 schema，不在 `apps/*`，需要先建 app 清单。
@@ -469,6 +539,9 @@ actions:
 | 新表 | 无新业务表；边表由 `doc_flow_schema.ensure_doc_flow_edge_tables` 幂等创建 |
 | 视图 | 阶段 4 由 `v219` 建/刷 `v_demand_trace_graph`；缺任一基表跳过；不重建基表、不迁数据 |
 | 规则 | 新迁移幂等 upsert；重复执行 `[SKIP]`；不覆盖运行态 `status` |
+| 移动类型（阶段 5） | `RETURN_IN` 按 v204 模式幂等 seed（`category='receipt'`、`direction='in'`）；`inventory_transaction_types` 缺表 `[SKIP]` |
+| 退货规则/视图（阶段 5） | `v222` 幂等 upsert `shipment_line_to_return_in_txn` + `DROP VIEW`/`CREATE VIEW` 刷新符号映射；不迁数据、不改列数 |
+| 单据类别（阶段 5） | 不改写存量 `type_definitions.document_category`；缺失按 `sales` 解释，退货类型由业务配置建档 |
 | 历史回填 | 按现有外键关系（`source_doc_type/source_doc_id`、`demand_allocations`）扫描生成边；只处理可确定数量的记录；必须 dry-run + 计数报告 |
 | 回填顺序 | 先阶段 2 的存量链路，再阶段 1 的事务类；回填脚本可重跑（7 元组幂等） |
 | 备份 | 迁移前自动备份应用库（沿用迁移框架） |
@@ -497,8 +570,13 @@ actions:
 | AC-16 | 统一追溯读面 | `v_demand_trace_graph` 同时返回 execution 与 plan 行；`layer/id/relation/signed_qty` 正确；通用 list API 可分页过滤 |
 | AC-17 | 跨层对账 | 同一 SO 行 trace=10、出库边=12 → 报告 `TRACE_EDGE_QTY_MISMATCH`；两侧为空不报 |
 | AC-18 | 只读与写边界 | 对视图发 create/update/delete → `READ_ONLY_VIEW`；发运核销仍经 `DemandTraceService` 写入，无直插 SQL |
+| AC-19 | 退货交货入库 | 退货类型交货单 `ship_confirm` → `RETURN_IN` 事务 1 条（`direction='in'`）、余额增加、边 `shipment_line_to_return_in_txn`（`pool=inventory_return`）；重复确认无重复事务/边 |
+| AC-20 | 方向分支与类型一致性 | 正向类型 → `ISSUE_TO_SHIP`/`out`；退货类型 → `RETURN_IN`/`in`；交货单类别与来源订单类别不一致 → `DN_CATEGORY_MISMATCH`，零事务零边 |
+| AC-21 | 规则与池隔离 | 正向边只落 `inventory_issue`、退货边只落 `inventory_return`；同池内 Σ 派生量 ≤ 源数量，跨池不合并计数 |
+| AC-22 | 退货 ≠ 冲销 | 业务退货后原出库边仍 `active`；只有数据错误冲销才 `reversed` + 红字边；`v_demand_trace_graph` 同时返回两条 relation，且 `signed_qty` 出库为正、退货为负 |
+| AC-23 | 退货对账 | 无边 `RETURN_IN` 事务 → `ORPHAN_TXN`；退货边指向不存在事务 → `DANGLING_EDGE`；正向单据不误报；缺表降级为空 |
 
-**验收状态（2026-11-05）**：AC-01~AC-18 已验证通过（AC-13 由 `test_doc_flow_stage3_reversal.py` 覆盖；AC-14 由 `test_doc_flow_reconcile.py` 新增库存事务互检例覆盖；AC-15 由阶段 2 端到端链路例覆盖；AC-16~AC-18 由 `test_demand_trace_graph.py` 12 例覆盖）。
+**验收状态（2026-11-05）**：AC-01~AC-18 已验证通过（AC-13 由 `test_doc_flow_stage3_reversal.py` 覆盖；AC-14 由 `test_doc_flow_reconcile.py` 新增库存事务互检例覆盖；AC-15 由阶段 2 端到端链路例覆盖；AC-16~AC-18 由 `test_demand_trace_graph.py` 12 例覆盖）；AC-19~AC-23 已验证通过（`test_shipment_return_doc_flow.py` 8 例）。
 
 ---
 
@@ -511,8 +589,9 @@ actions:
 | D3 | 事务类是否建边 | 建（attach），用于冲销与追溯；不建则无法回答"这笔事务来自哪条发运行" |
 | D4 | `demand_trace_links` 与边表的关系 | **不做派生视图替换**：计划层（peg / plan_version / 有效期 / 非单据节点）与执行层语义不可映射；阶段 4 改为「只读统一追溯面 + 写边界 + 跨层对账」 |
 | D5 | 历史数据回填范围 | 只回填数量可确定的记录；不可确定的留空并在报告中列示 |
-| D6 | 已发运取消 | P0 禁止；P0.5 做红字冲销 |
+| D6 | 已发运取消 | P0 禁止；P0.5 走方案 A（退货交货入库）；数据错误冲销仍走 `reverse_edge`，两条路径不得混用 |
 | D7 | 统一追溯视图定义的生效方式 | `schema_generator` 仅 `CREATE VIEW IF NOT EXISTS`，定义变更由迁移 `DROP VIEW` + `CREATE VIEW` 负责；YAML 仍是元数据真源 |
+| D8 | 退货执行单据形态：复用 `shipment`（A）vs 独立退货收货单（B） | 采用 A：与 SAP Returns Delivery / Oracle RMA 一致，且与仓库红字收货「复用单据 + 类别」模式一致；B 仅在需要 ARM 式检验/维修分支时作为上层子流程引入 |
 | R1 | `inventory_transaction` 无 `quantity` 字段 | attach 模式不受影响；未来 create 模式需 `target_data` 显式写 `qty` |
 | R2 | 三套并存（trace + allocation + edge） | 不合并存储；阶段 4 以统一读面 + 跨层对账防止口径漂移 |
 | R3 | 调拨双记账 | 阶段 2 已确认 `transfer_shipment.post` 委托 `transfer_order_service` 记账，仅一次；边由后者写 |
@@ -520,6 +599,8 @@ actions:
 | R5 | 统一追溯面依赖两基表同库 | 视图只能 UNION 同库表；缺任一表迁移 `[SKIP]`，不做空表 stub，不跨库 `ATTACH` |
 | R6 | 视图无 `org_id` | 边与线索均不带 org 维度；不挂 `dimension_bindings`（避免静默过滤/空集），需要组织范围时由消费方 join 源单 |
 | R7 | 视图为虚拟表，深度遍历成本 | 仅做索引可覆盖的逐跳查询；深链用递归 CTE 并限制深度/节点数；不在视图内做聚合重算 |
+| R8 | `shipment` 存量类型可能无 `document_category` | 缺失按 `sales` 解释，不回填业务配置；退货类型须由业务建档后才能发运 |
+| R9 | `RETURN_IN` 移动类型缺失导致过账失败 | 迁移幂等 seed；类型缺失时过账明确失败并回滚，不静默降级为正向 |
 
 ---
 
@@ -536,7 +617,10 @@ actions:
 | 启动期准备 | `meta/core/app_registry.py` `_prepare_doc_flow` |
 | 声明解析 | `meta/core/app_loader.py` `DocFlowRuleDecl` |
 | 当前唯一业务读边 | `meta/services/sales_order_guard_service.py` |
-| 发运确认 | `meta/services/shipment_service.py` `ship_confirm` |
+| 交货发运服务 | `meta/services/shipment_service.py`（`ship_confirm` / `_post_issue_inventory` / `_write_issue_edges`） |
+| 交货单模型 | `meta/schemas/shipment.yaml`（`order_id` / `document_type_id`）、`shipment_line.yaml`（`schedule_id`） |
+| 单据类别 | `meta/schemas/type_definition.yaml`（`document_category`）、`meta/migrations/v201__inventory_foundation.py`（移动类型字典） |
+| 退货阶段 5 | `meta/migrations/v222__doc_flow_return_shipment_rule.py`、`meta/tests/test_shipment_return_doc_flow.py`、`meta/services/shipment_service.py`（退货分支） |
 | 收货过账 | `meta/services/receipt_service.py` `_post_receipt_inventory` |
 | 库存过账 | `meta/services/inventory_posting_service.py` `post` |
 | 请购转 PO | `meta/services/requisition_po_conversion.py` |

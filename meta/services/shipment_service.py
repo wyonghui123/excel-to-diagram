@@ -48,6 +48,12 @@ STATUS_CANCELLED = 'cancelled'
 ISSUE_TXN_TYPE = 'ISSUE_TO_SHIP'
 DOC_FLOW_RULE_ID = 'shipment_line_to_issue_txn'
 
+#: 阶段 5（方案 A）：退货复用交货单，方向由抬头单据类别决定
+RETURN_CATEGORY = 'return'
+RETURN_TXN_TYPE = 'RETURN_IN'
+RETURN_DOC_FLOW_RULE_ID = 'shipment_line_to_return_in_txn'
+TYPE_TABLE = 'type_definitions'
+
 #: 可编辑 / 可取消 / 可发运确认的抬头状态集合
 EDITABLE_HEADER_STATUSES = (STATUS_DRAFT, STATUS_RELEASED)
 CANCELLABLE_HEADER_STATUSES = (STATUS_DRAFT, STATUS_RELEASED)
@@ -131,6 +137,9 @@ class ShipmentService:
             'created_at': now,
             'updated_at': now,
         }
+        # 方案 A：退货交货可显式指定单据类型；未给则按来源订单类型类别解释
+        if not _blank(header.get('document_type_id')):
+            row['document_type_id'] = header['document_type_id']
         delivery_id = self._insert_header(row)
 
         created_lines = []
@@ -199,8 +208,13 @@ class ShipmentService:
             raise ShipmentError('交货单没有任何行，禁止发运确认',
                                 field_name='lines', rule='DN_EMPTY')
 
+        # 方案 A：方向由单据类别决定（return → 退货入库；其余正向出库）
+        is_return = self._is_return_shipment(delivery_id, header.get('order_id'))
+
         # P6a §6.1：发运录号前置校验（require_on_issue 时 link 数必须等于 qty）
-        self._validate_serial_tracking(delivery_id)
+        # 退货为入库方向，不校验出库序列号；P0.5 边界：退货序列号/HU 回收入库后续补
+        if not is_return:
+            self._validate_serial_tracking(delivery_id)
 
         grouped: Dict[Any, Decimal] = {}
         for line in lines:
@@ -220,9 +234,11 @@ class ShipmentService:
             schedules[schedule_id] = schedule
 
         now = actual_ship_date or _now()
-        # DOC_FLOW/P0：出库过账（唯一账实写入口）→ 转单事实边（attach）
-        issue_txns = self._post_issue_inventory(header, lines, now)
-        self._write_issue_edges(header, lines, now, issue_txns)
+        # DOC_FLOW/P0：库存过账（唯一账实写入口）→ 转单事实边（attach）
+        issue_txns = self._post_issue_inventory(
+            header, lines, now, is_return=is_return)
+        self._write_issue_edges(
+            header, lines, now, issue_txns, is_return=is_return)
         for schedule_id, qty in grouped.items():
             self._apply_schedule_delivery(schedule_id, qty, delivery_id, now)
 
@@ -235,15 +251,17 @@ class ShipmentService:
             'WHERE id = ?' % HEADER_TABLE,
             [STATUS_SHIPPED, now, now, delivery_id])
 
-        # P6a-2 §11.5：先按行 hu_no 整箱发运（容器须 sealed，成员号须在库）
-        self._ship_hus(delivery_id)
-        # P6a §5 register_shipment：校验在库、写 ship 事件与 link、置 shipped。
-        # 顺序在 HU 之后：ship_hu 要求成员号 in_stores，register_shipment 再推进到 shipped
-        # （同单据已由 ship_hu 置 shipped 的号按幂等跳过，见 §11.15 P1-2）。
-        self._register_shipment_serials(lines, delivery_id)
+        # 退货入库不推进 HU/序列号出库状态，也不核销履约预留（P0.5 边界）
+        if not is_return:
+            # P6a-2 §11.5：先按行 hu_no 整箱发运（容器须 sealed，成员号须在库）
+            self._ship_hus(delivery_id)
+            # P6a §5 register_shipment：校验在库、写 ship 事件与 link、置 shipped。
+            # 顺序在 HU 之后：ship_hu 要求成员号 in_stores，register_shipment 再推进到 shipped
+            # （同单据已由 ship_hu 置 shipped 的号按幂等跳过，见 §11.15 P1-2）。
+            self._register_shipment_serials(lines, delivery_id)
 
-        # INV-2：发运核销需求预留并写 shipment → SO 行 trace（未建表时空操作）。
-        self._fulfill_reservations(lines, delivery_id, header.get('order_id'))
+            # INV-2：发运核销需求预留并写 shipment → SO 行 trace（未建表时空操作）。
+            self._fulfill_reservations(lines, delivery_id, header.get('order_id'))
 
         order_line_ids = sorted({int(line['order_line_id']) for line in lines})
         logger.info('[shipment] ship_confirm id=%s schedules=%s', delivery_id,
@@ -252,13 +270,17 @@ class ShipmentService:
                 'order_id': header['order_id'], 'line_ids': order_line_ids,
                 'idempotent': False}
 
-    def _post_issue_inventory(self, header, lines, now) -> Dict[int, Any]:
-        """发运出库过账：写入 ISSUE_TO_SHIP 事务并更新库存余额（唯一账实写入口）。
+    def _post_issue_inventory(self, header, lines, now, *,
+                              is_return: bool = False) -> Dict[int, Any]:
+        """发运库存过账：写入出库（正向）/ 退货入库事务并更新库存余额。
 
         返回 ``{发运行 id: 库存事务 id}``，供 DOC_FLOW attach 边定位目标行。
         过账总开关关闭时与收货同口径：跳过不阻断（过渡期行为），返回空映射。
         段优先级由 StockSegmentService 决定（寄售 / 项目任务 / SO 专用 / 自有）；
         项目任务与销售订单行互斥，避免 INV_SEGMENT_INVALID。
+
+        方案 A：退货交货走 ``RETURN_IN`` / ``direction='in'``，事件键后缀 ``return``，
+        与正向 ``ISSUE_TO_SHIP`` / ``ship`` 互不覆盖（同一交货单可各自幂等）。
         """
         from meta.services.inventory_guard_service import (
             InventoryError, InventoryGuardService)
@@ -266,9 +288,13 @@ class ShipmentService:
         from meta.services.stock_segment_service import StockSegmentService
 
         if not InventoryGuardService(self.ds).posting_enabled():
-            logger.info('[shipment] 库存过账开关关闭，跳过出库过账 id=%s',
+            logger.info('[shipment] 库存过账开关关闭，跳过库存过账 id=%s',
                         header.get('id'))
             return {}
+
+        txn_type = RETURN_TXN_TYPE if is_return else ISSUE_TXN_TYPE
+        txn_direction = 'in' if is_return else 'out'
+        txn_label = '退货入库' if is_return else '出库'
 
         order = self._load_order(header.get('order_id')) or {}
         org_id = int(order.get('org_id') or 0)
@@ -296,14 +322,15 @@ class ShipmentService:
                 'item_id': item_id,
                 'uom_id': int(line.get('uom_id') or 0),
                 'qty': qty,
-                'transaction_type': ISSUE_TXN_TYPE,
-                'direction': 'out',
+                'transaction_type': txn_type,
+                'direction': txn_direction,
                 'stock_status': 'unrestricted',
                 'org_id': org_id,
                 'location_id': int(location_id),
                 'batch_id': self._resolve_batch_id(line) or None,
                 'source_line_id': line.get('id'),
-                'remark': '交货单 %s 出库' % (header.get('delivery_no') or ''),
+                'remark': '交货单 %s %s' % (
+                    header.get('delivery_no') or '', txn_label),
             }
             # 段解析（互斥优先级）：项目任务 > 供应商寄售 > SO 专用行 > 自有
             flags = segment_service.item_flags(item_id)
@@ -325,9 +352,11 @@ class ShipmentService:
         source = {
             'source_doc_type': 'shipment',
             'source_doc_id': header.get('id'),
-            'source_event_key': 'shipment:%s:ship' % header.get('id'),
+            'source_event_key': 'shipment:%s:%s' % (
+                header.get('id'), 'return' if is_return else 'ship'),
             'transaction_date': now,
-            'remark': '交货单 %s 出库过账' % (header.get('delivery_no') or ''),
+            'remark': '交货单 %s %s过账' % (
+                header.get('delivery_no') or '', txn_label),
         }
         try:
             result = InventoryPostingService(self.ds).post(entries, source)
@@ -344,11 +373,15 @@ class ShipmentService:
         return {int(row['source_line_id']): row['id']
                 for row in rows if row.get('source_line_id') is not None}
 
-    def _write_issue_edges(self, header, lines, now, issue_txns) -> None:
-        """把「发运行 → 出库事务」写成 DOC_FLOW 边（attach 模式，只写事实不建行）。
+    def _write_issue_edges(self, header, lines, now, issue_txns, *,
+                           is_return: bool = False) -> None:
+        """把「发运行 → 库存事务」写成 DOC_FLOW 边（attach 模式，只写事实不建行）。
 
-        未启用 DOC_FLOW（规则不存在/表未建）或当日无出库事务时降级为告警，
+        未启用 DOC_FLOW（规则不存在/表未建）或当日无库存事务时降级为告警，
         不阻断发运；其他派生失败同样告警，由对账命令发现缺失。
+
+        方案 A：退货交货使用 ``shipment_line_to_return_in_txn``（池 ``inventory_return``），
+        与正向 ``shipment_line_to_issue_txn``（池 ``inventory_issue``）分池，避免共用额度。
         """
         if not issue_txns:
             return
@@ -360,6 +393,8 @@ class ShipmentService:
             logger.warning('[shipment] DOC_FLOW 模块不可用，跳过转单边')
             return
 
+        rule_id = RETURN_DOC_FLOW_RULE_ID if is_return else DOC_FLOW_RULE_ID
+
         platform_ds = self.platform_ds
         if platform_ds is None:
             try:
@@ -368,13 +403,13 @@ class ShipmentService:
                 platform_ds = self.ds
 
         try:
-            rule = get_rule(platform_ds, DOC_FLOW_RULE_ID)
+            rule = get_rule(platform_ds, rule_id)
         except Exception as exc:
             logger.warning('[shipment] DOC_FLOW 规则表不可读，跳过转单边: %s', exc)
             return
         if rule is None:
             logger.warning('[shipment] DOC_FLOW 规则 %s 未注册，跳过转单边',
-                           DOC_FLOW_RULE_ID)
+                           rule_id)
             return
 
         for line in lines:
@@ -385,12 +420,12 @@ class ShipmentService:
                 continue
             txn_id = issue_txns.get(int(line.get('id') or 0))
             if not txn_id:
-                logger.warning('[shipment] 发运行 %s 无出库事务，跳过转单边',
+                logger.warning('[shipment] 发运行 %s 无库存事务，跳过转单边',
                                line.get('id'))
                 continue
             try:
                 derive(
-                    self.ds, platform_ds, DOC_FLOW_RULE_ID, line.get('id'),
+                    self.ds, platform_ds, rule_id, line.get('id'),
                     quantity=qty,
                     target_data={
                         'id': int(txn_id),
@@ -403,6 +438,58 @@ class ShipmentService:
             except Exception as exc:
                 logger.warning('[shipment] DOC_FLOW 派生失败 line=%s: %s',
                                line.get('id'), exc)
+
+    def _is_return_shipment(self, delivery_id, order_id) -> bool:
+        """判定交货单方向：抬头单据类别（缺省继承来源订单类型类别）为 return 即退货。
+
+        方案 A：退货不是独立对象，方向只落在抬头 `document_category`；两类同时存在
+        且不一致时报 ``DN_CATEGORY_MISMATCH``，避免「退货单发正向料」的静默错账。
+        """
+        ship_category = self._load_document_category(
+            self._column_value(HEADER_TABLE, delivery_id, 'document_type_id'))
+        order_category = self._load_document_category(
+            self._column_value(ORDER_TABLE, order_id, 'document_type_id'))
+        if ship_category and order_category and ship_category != order_category:
+            raise ShipmentError(
+                '交货单类型类别（%s）与来源订单类型类别（%s）不一致'
+                % (ship_category, order_category),
+                field_name='document_type_id', rule='DN_CATEGORY_MISMATCH')
+        return (ship_category or order_category) == RETURN_CATEGORY
+
+    def _load_document_category(self, document_type_id) -> str:
+        """读单据类型的 document_category；表/行缺失按 ''（正向）解释。"""
+        if _blank(document_type_id):
+            return ''
+        ds = self.platform_ds
+        if ds is None:
+            try:
+                from meta.core.datasource import get_platform_data_source
+                ds = get_platform_data_source()
+            except Exception:
+                ds = self.ds
+        try:
+            rows = ds.query(
+                'SELECT document_category FROM %s WHERE id = ?' % TYPE_TABLE,
+                [document_type_id])
+        except Exception:
+            return ''
+        if not rows:
+            return ''
+        return str(rows[0].get('document_category') or '').strip().lower()
+
+    def _column_value(self, table, row_id, column) -> str:
+        """容错读单列（旧测试库可能无该列）：缺失/异常一律返回 ''。"""
+        if _blank(row_id):
+            return ''
+        try:
+            rows = self.ds.query(
+                'SELECT %s FROM %s WHERE id = ?' % (column, table), [row_id])
+        except Exception:
+            return ''
+        if not rows:
+            return ''
+        value = rows[0].get(column)
+        return '' if _blank(value) else str(value)
 
     def _resolve_batch_id(self, line) -> int:
         """解析批次：行上有 batch_id 直接用；否则按 lot_no 反查 batches。"""
