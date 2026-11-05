@@ -72,7 +72,9 @@ CREATE TABLE IF NOT EXISTS doc_flow_edges (
     pool                TEXT NOT NULL DEFAULT 'default',
     source_instance_id  TEXT DEFAULT '',
     target_instance_id  TEXT DEFAULT '',
-    derive_key          TEXT DEFAULT ''
+    derive_key          TEXT DEFAULT '',
+    edge_kind           TEXT NOT NULL DEFAULT 'normal',
+    reverses_edge_id    TEXT DEFAULT ''
 )
 """
 

@@ -77,19 +77,20 @@ def attach_edge(app_ds, platform_ds, rule_id: str, source_id: Any,
 def reverse_edges_by_source(app_ds, rule_id: str, source_bo: str,
                             source_id: Any, *, ref_id: Any,
                             derived_by: str = '') -> int:
-    """整体冲销某源行在指定规则下的 active 正向边。
+    """整体冲销某源行在指定规则下的 active 正向边（追加补偿事实）。
 
-    每条边先写红字边（``quantity_sign='red'``，业务锚 = 红字单 ``ref_id``），
-    再把原边置 ``reversed``（级联反转其红字子边，聚合归零）。
-    与 ``attach_edge`` 同口径：边表缺失 / 单边冲销失败仅告警，不阻断业务红冲。
+    对每条 active 正向边追加一条 ``edge_kind='reversal'`` 的补偿边，
+    并把其名下 active 红字子边一并补偿（红字边补偿为正向号，聚合还原）。
+    **不改任何边的 status**，原边与红字历史全部保留、可查询。
+    与 ``attach_edge`` 同口径：边表缺失 / 单边补偿失败仅告警，不阻断业务红冲。
 
     Returns:
-        成功冲销的边数；未启用或全部失败时返回 0。
+        成功补偿的原边条数；未启用或全部失败时返回 0。
     """
     if source_id in (None, '') or ref_id in (None, ''):
         return 0
     try:
-        from meta.core.doc_flow_reversal import red_ink_edge, reverse_edge
+        from meta.core.doc_flow_reversal import compensate_edge
     except Exception as exc:  # pragma: no cover - 核心模块缺失时保持业务可用
         logger.warning('[doc_flow_attach] 冲销引擎不可用，跳过 %s: %s',
                        rule_id, exc)
@@ -106,17 +107,24 @@ def reverse_edges_by_source(app_ds, rule_id: str, source_bo: str,
                        rule_id, exc)
         return 0
 
-    reversed_count = 0
+    compensated_count = 0
     for row in rows:
         edge_id = row.get('id')
         try:
-            red_ink_edge(
-                app_ds, edge_id,
-                quantity=float(row.get('quantity') or 0),
-                ref_id=str(ref_id), derived_by=derived_by)
-            reverse_edge(app_ds, edge_id, reversed_by=derived_by)
-            reversed_count += 1
+            created = compensate_edge(app_ds, edge_id, ref_id=str(ref_id),
+                                      derived_by=derived_by)
+            # 历史红字子边：同样追加补偿（red → normal），聚合归零且保留原行
+            prefix = 'red:{0}:'.format(edge_id)
+            children = app_ds.query(
+                'SELECT id FROM doc_flow_edges WHERE quantity_sign = ? '
+                'AND status = ? AND substr(derive_key, 1, ?) = ?',
+                ['red', 'active', len(prefix), prefix])
+            for child in children:
+                compensate_edge(app_ds, child.get('id'), ref_id=str(ref_id),
+                                derived_by=derived_by)
+            if not created.replay:
+                compensated_count += 1
         except Exception as exc:  # noqa: BLE001 - 单边失败不影响其他边与红冲
-            logger.warning('[doc_flow_attach] 冲销失败 edge=%s: %s',
+            logger.warning('[doc_flow_attach] 补偿失败 edge=%s: %s',
                            edge_id, exc)
-    return reversed_count
+    return compensated_count

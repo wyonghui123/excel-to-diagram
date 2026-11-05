@@ -94,15 +94,16 @@ def test_reverse_marks_edge_reversed_and_writes_red_edge():
     rows = _edge_rows(conn)
     assert len(rows) == 2
     by_id = {row['id']: row for row in rows}
-    assert by_id['edge-1']['status'] == 'reversed'
+    # 单一事实模型：原边保持 active，冲销以补偿边追加
+    assert by_id['edge-1']['status'] == 'active'
 
-    red = [row for row in rows if row['quantity_sign'] == 'red']
-    assert len(red) == 1
-    assert red[0]['rule_id'] == '%s#red:%s' % (RULE_ID, red_id)
-    assert red[0]['derive_key'] == 'red:edge-1:%s' % red_id
-    assert red[0]['quantity'] == pytest.approx(100.0)
-    # A 档反转级联红字子边（防负聚合）
-    assert red[0]['status'] == 'reversed'
+    comp = [row for row in rows if row['edge_kind'] == 'reversal']
+    assert len(comp) == 1
+    assert comp[0]['rule_id'] == '%s#rev:%s' % (RULE_ID, red_id)
+    assert comp[0]['derive_key'] == 'rev:edge-1:%s' % red_id
+    assert comp[0]['quantity'] == pytest.approx(100.0)
+    assert comp[0]['quantity_sign'] == 'red'
+    assert comp[0]['status'] == 'active'
     assert _consumed(conn, line_id) == 0.0
 
     # 原单已置 reversed：状态守卫先于红字单守卫拒绝重复冲销
@@ -134,9 +135,11 @@ def test_reverse_edges_by_source_is_idempotent_and_resets_view():
     assert count == 2
     assert _consumed(conn, 7) == 0.0
     assert len(_edge_rows(conn)) == 4
-    assert all(row['status'] == 'reversed' for row in _edge_rows(conn))
+    assert all(row['status'] == 'active' for row in _edge_rows(conn))
+    assert len([row for row in _edge_rows(conn)
+                if row['edge_kind'] == 'reversal']) == 2
 
-    # 无 active 正向边 → 0 新增、0 变更
+    # 同一 ref 重放 → 0 新增、0 变更（幂等）
     assert reverse_edges_by_source(
         _DS(conn), RULE_ID, 'receipt_line', 7, ref_id='RED-1') == 0
     assert len(_edge_rows(conn)) == 4

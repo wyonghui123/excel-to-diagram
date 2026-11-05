@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 日期：2026-11-05
-- 状态：**阶段 0/1/2/3/4/5 已实施**（AC-01~AC-18、AC-19~AC-23 已验证通过）（2026-11-05）
+- 状态：**阶段 0/1/2/3/4/5 已实施**，阶段 5.1「已发运数据错误冲销」已实施（AC-01~AC-28 已验证通过）（2026-11-05）
 - 上游依据：
   - 本次端到端流程检查结论（销售→发货→出库、采购→到货→入库、需求→采购/调拨、销售→服务确认）
   - `docs/specs/spec-project-g15-eto-solution-2026-11-04.md` §4（P2 任务轴）
@@ -207,8 +207,26 @@ attach 模式：`target_data={'id': txn_id, 'item': line_id, 'amount': 0, 'unit'
 **退货 ≠ 冲销（关键语义）**：
 
 - **业务退货** = 新事实：生成退货交货 + `RETURN_IN` 入库 + 新边；原正向 `shipment_line_to_issue_txn` 边保持 `active`，不置 `reversed`。
-- **数据错误冲销** = 货物未真实离库：调用 `reverse_edges_by_source` + 反向过账（`InventoryPostingService.reverse_by_source`），不得用退货单掩盖数据错误。
-- P0 仍禁止已 `shipped` 单据取消（R-DN-2 不变）。
+- **数据错误冲销** = 货物未真实离库：调用 `reverse_edges_by_source` + 反向过账（`InventoryPostingService.reverse_by_source`），不得用退货单掩盖数据错误。入口见下「5.1.1 已发运数据错误冲销（阶段 5.1）」。
+- P0 仍禁止已 `shipped` 单据取消（R-DN-2 不变）；数据错误改走 `reversed` 终态，`cancelled` 语义不变。
+
+**5.1.1 已发运数据错误冲销（阶段 5.1，全量回滚版）**
+
+评审结论：`shipped` / `delivered` 后无冲销入口是真实缺口；序列号、装箱（HU）、预留三处的「不回滚」并**不是不支持**——前两者已有现成反向原语，仅预留缺反向核销，故本阶段一次做全量回滚，不保留已知边界。
+
+| 项 | 落地 |
+|---|---|
+| 状态机 | `shipped` / `delivered` → `reversed`（新增终态，行状态同步）；`draft`/`released`/`staged` 拒绝（`DN_STATE_INVALID`）；`reversed` 幂等重入 |
+| 库存 | `InventoryPostingService.reverse_by_source`：`source_event_key = shipment:{id}:{ship\|return}_reverse`，原事件键 `shipment:{id}:{ship\|return}`；生成 `REVERSAL` 分录并回指 `reversal_of_transaction_id` |
+| 单据边 | `reverse_edges_by_source(rule_id, 'shipment_line', line_id, ref_id=delivery_id)`：红字边 `quantity_sign='red'`（`derive_key='red:<原边id>:<交货单id>'`、`rule_id` 带 `#red:<交货单id>`）+ 原边 `reversed` |
+| 序列号 | `SerialNumberService.reverse_serial_event(txn_id)`：按原出库事务逐条反冲（退货方向未登记，自动 no-op） |
+| 装箱 HU | `HandlingUnitService.reverse_document('shipment', delivery_id)`（退货方向未装箱，自动 no-op） |
+| 预留 | `InventoryReservationService.unfulfill_by_demand('sales_order_line', line_id, qty, reason)`：`fulfilled`/`partially_fulfilled` → `open`，`qty_fulfilled` 回退（新增原语） |
+| 计划行 | `delivered_qty = MAX(delivered_qty − 行数量, 0)`，归零时清 `delivery_id`；`completed` 回落 `confirmed`；随后 `SalesOrderFulfillmentService.recompute_order` |
+| 审计 | 抬头写 `reversed_at` / `reversal_reason`（v223 迁移新增两列）+ 新权限 `shipment:shipment_reverse` |
+| 权限 / UI | `shipment.yaml` 新增 `reverse_shipment` 规则（`shipped`/`delivered` → `reversed`，二次确认文案明确「数据错误」）与 `reversed` 状态枚举；拦截器 `ShipmentGuardInterceptor` 委托 `service.reverse()` |
+
+**边界（本阶段不做）**：调拨发运已发运行的冲销入口仍为 P1——现状不是缺冲销，而是 `TransferShipmentService.post()` 正向过账/边未接（R3 范围内仅委托记账），待正向接入后复用同一套 `reverse_by_source`。退货检验/维修/报废分支仍不在本规格。
 
 **追溯口径**：`v_demand_trace_graph.signed_qty` 定义「对源单履约量的净贡献」——出库 `+qty`、退货入库 `-qty`；由阶段 5 迁移刷新视图 SQL（仍 17 列，`relation` 区分 `shipment_line_to_issue_txn` / `shipment_line_to_return_in_txn`）。
 
@@ -387,6 +405,7 @@ actions:
 | **3 冲销统一** | 取消/退货/红字 | 已实施（收货链路）：边 `reversed` + 红字边 + 余额回补一致 |
 | **4 追溯统一** | 只读统一追溯面 `v_demand_trace_graph`（view 元模型）+ 写边界治理 + 跨层对账 | 追溯查询走单一读面；两表保持权威；无越层直写 |
 | **5 P0.5 退货执行** | 5.1 退货入库分支（类型决议 + `RETURN_IN` 过账 + 独立规则/池）+ 退货≠冲销语义 | AC-19~AC-23 通过；正向链路零回归 |
+| **5.1 冲销入口** | 5.1.1 已发运数据错误冲销（全量回滚：库存/边/序列号/HU/预留/计划行/履约） | AC-24~AC-28 通过；调拨发运 P1 |
 
 **阶段 0/1 实施记录（2026-11-05）**：
 
@@ -419,8 +438,8 @@ actions:
 | 链路 | 是否存在「已过账冲销」业务入口 | 结论 |
 |---|---|---|
 | 收货 → 入库事务 | 有：`ReceiptService.reverse()` 覆盖 PO / TO / WO 三支；`_reverse_receipt_inventory()` 已做反向过账 | **本阶段接入红字边** |
-| 发运 → 出库事务 | 无：`ShipmentService.cancel()` 仅 draft/released；`shipped` 之后按 R-DN-2 禁止取消，且无 reverse 方法 | 无可冲销对象；P0.5 退货单落地后才接入 |
-| 调拨发运 → 事务 | 无：`TransferOrderService.cancel()` 要求总发货量 = 0；`create_reversal()` 只建反向**草稿**，其发运走正常正向规则 | 反向调拨单发运已由阶段 2 正向规则产生正常边；已发运行无冲销入口 |
+| 发运 → 出库事务 | 无：`ShipmentService.cancel()` 仅 draft/released；`shipped` 之后按 R-DN-2 禁止取消，且无 reverse 方法 | **阶段 5.1 已补**：`ShipmentService.reverse()` + `reversed` 终态（AC-24~AC-28） |
+| 调拨发运 → 事务 | 无：`TransferOrderService.cancel()` 要求总发货量 = 0；`create_reversal()` 只建反向**草稿**，其发运走正常正向规则 | 反向调拨单发运已由阶段 2 正向规则产生正常边；已发运行无冲销入口（P1） |
 
 **实现方案（仅收货链路，不改 schema、不新增迁移）**：
 
@@ -441,7 +460,7 @@ actions:
 4. `python d:\filework\test.py --single meta/tests/test_doc_flow_reversal.py`
 5. `python d:\filework\test.py --single meta/tests/test_doc_flow_stage2_edges.py`
 
-**执行结果（2026-11-05）**：新增 3 例通过；收货红冲、收货服务、DOC_FLOW 冲销引擎、阶段 2 补边套件回归全绿。无新迁移（边表列已由 v214/v215 提供）。发运 / 调拨发运已发运行的冲销入口仍按 D6 留给 P0.5（退货单 / 红字单），届时复用 `reverse_edges_by_source` 接线。
+**执行结果（2026-11-05）**：新增 3 例通过；收货红冲、收货服务、DOC_FLOW 冲销引擎、阶段 2 补边套件回归全绿。无新迁移（边表列已由 v214/v215 提供）。发运已发运行的冲销入口已由**阶段 5.1** 补齐（`ShipmentService.reverse()`，复用 `reverse_edges_by_source`）；调拨发运仍为 P1（正向过账/边未接）。
 
 **对账增强（AC-14 / AC-15，2026-11-05）**：
 
@@ -504,7 +523,7 @@ actions:
 | 边 | `_write_issue_edges` 按分支选规则；两池互不合并计数 | AC-21 |
 | 追溯视图 | 同一迁移 `DROP VIEW` + `CREATE VIEW`：`signed_qty` 按规则映射（出库 +、退货 −），列数不变 | AC-22 |
 | 对账 | `ORPHAN_TXN` 纳入 `RETURN_IN`；退货边事务互检 | AC-23 |
-| 冲销入口 | P0.5 只接「业务退货」；「数据错误冲销」单独评审，复用 `reverse_edges_by_source`，不复用退货路径 | AC-22 |
+| 冲销入口 | P0.5 只接「业务退货」；「数据错误冲销」另立阶段 5.1（已实施，全量回滚），不复用退货路径 | AC-22 / AC-24~AC-28 |
 | 测试 | 新增 `meta/tests/test_shipment_return_doc_flow.py`（覆盖 AC-19~AC-23） | 全绿 |
 
 **阶段 5 实施记录（2026-11-05）**：
@@ -518,6 +537,19 @@ actions:
 | 视图元数据 | `meta/schemas/demand_trace_graph.yaml` `view_definition` 与 v222 逐字一致（出库 +、退货 −、红字取反） |
 | 测试 | `meta/tests/test_shipment_return_doc_flow.py`（8 例：退货过账/继承类别/类别不一致/池隔离/退货≠冲销/对账/迁移幂等）；`test_demand_trace_graph.py` 改以 v222 为视图真源（12 例） |
 | 回归 | `test_shipment_issue_doc_flow.py`(6) · `test_shipment_service.py`(32) · `test_shipment_schema_rules.py`(5) · `test_doc_flow_reconcile.py`(29) 全绿 |
+
+**阶段 5.1 实施记录（已发运数据错误冲销，2026-11-05）**：
+
+| 项 | 落地 |
+|---|---|
+| 服务 | `meta/services/shipment_service.py`：新增 `reverse(delivery_id, reason)` + 6 个私有 helper；`STATUS_REVERSED` 纳入 LOCKED / UNDELETABLE |
+| 预留原语 | `meta/services/inventory_reservation_service.py`：新增 `unfulfill_by_demand()`（`fulfilled`/`partially_fulfilled` → `open`，重建投影） |
+| 拦截器 | `meta/core/interceptors/shipment_guard_interceptor.py`：`reversed` 目标委托 `service.reverse()` |
+| 元数据 | `meta/schemas/shipment.yaml` / `shipment_line.yaml`：新增 `reversed` 状态 + `reversed_at` / `reversal_reason` + `reverse_shipment` 规则（`shipped`/`delivered` → `reversed`） |
+| 迁移 | `meta/migrations/v223__shipment_reverse.py`：加两列（缺表 `[SKIP]`）+ 权限 `shipment:shipment_reverse`（`INSERT OR IGNORE`）并授权 admin/default |
+| 测试 | `meta/tests/test_shipment_reverse.py`（5 例：正向全量回滚+幂等 / 退货方向反冲 / draft 拒绝 / 预留反向核销 / 冲销后禁签收重发） |
+| 回归 | `test_shipment_issue_doc_flow.py`(6) · `test_shipment_service.py`(32) · `test_shipment_schema_rules.py`(5→7 条规则) · `test_demand_trace_graph.py`(12) · `test_doc_flow_reconcile.py`(29) · `test_shipment_reverse.py`(5) 全绿 |
+| 已知边界 | 调拨发运已发运行的冲销入口 = P1（正向过账/边未接，非冲销缺口） |
 
 **不做（阶段 5 边界）**：
 
@@ -575,8 +607,13 @@ actions:
 | AC-21 | 规则与池隔离 | 正向边只落 `inventory_issue`、退货边只落 `inventory_return`；同池内 Σ 派生量 ≤ 源数量，跨池不合并计数 |
 | AC-22 | 退货 ≠ 冲销 | 业务退货后原出库边仍 `active`；只有数据错误冲销才 `reversed` + 红字边；`v_demand_trace_graph` 同时返回两条 relation，且 `signed_qty` 出库为正、退货为负 |
 | AC-23 | 退货对账 | 无边 `RETURN_IN` 事务 → `ORPHAN_TXN`；退货边指向不存在事务 → `DANGLING_EDGE`；正向单据不误报；缺表降级为空 |
+| AC-24 | 已发运数据错误冲销（正向） | `shipped` → `reversed`：库存回补、`REVERSAL` 事务回指原事务、原边 `reversed` + 红字边、计划行 `delivered_qty` 归零、抬头/行 `reversed` 并记录原因；重复冲销零新增（`idempotent`） |
+| AC-25 | 退货交货冲销 | 退货类型 `shipped` → `reversed`：`RETURN_IN` 反冲为 `direction='out'` 的 `REVERSAL`，红字边按退货规则（`shipment_line_to_return_in_txn`），计划行按实际回写对称回滚，跳过序列号/HU/预留 |
+| AC-26 | 冲销状态守卫 | 仅 `shipped` / `delivered` 可冲销；`draft` / `released` / `staged` → `DN_STATE_INVALID` 且零副作用；`reversed` 重入幂等 |
+| AC-27 | 预留反向核销 | 发运时 `fulfilled` 的预留，冲销后 `status='open'`、`qty_fulfilled=0`，投影重建 |
+| AC-28 | 冲销后终态 | `reversed` 禁止再签收 / 再发运 / 取消（`LOCKED` + `UNDELETABLE`），行状态同步 `reversed` |
 
-**验收状态（2026-11-05）**：AC-01~AC-18 已验证通过（AC-13 由 `test_doc_flow_stage3_reversal.py` 覆盖；AC-14 由 `test_doc_flow_reconcile.py` 新增库存事务互检例覆盖；AC-15 由阶段 2 端到端链路例覆盖；AC-16~AC-18 由 `test_demand_trace_graph.py` 12 例覆盖）；AC-19~AC-23 已验证通过（`test_shipment_return_doc_flow.py` 8 例）。
+**验收状态（2026-11-05）**：AC-01~AC-18 已验证通过（AC-13 由 `test_doc_flow_stage3_reversal.py` 覆盖；AC-14 由 `test_doc_flow_reconcile.py` 新增库存事务互检例覆盖；AC-15 由阶段 2 端到端链路例覆盖；AC-16~AC-18 由 `test_demand_trace_graph.py` 12 例覆盖）；AC-19~AC-23 已验证通过（`test_shipment_return_doc_flow.py` 8 例）；AC-24~AC-28 已验证通过（`test_shipment_reverse.py` 5 例）。
 
 ---
 
@@ -589,7 +626,8 @@ actions:
 | D3 | 事务类是否建边 | 建（attach），用于冲销与追溯；不建则无法回答"这笔事务来自哪条发运行" |
 | D4 | `demand_trace_links` 与边表的关系 | **不做派生视图替换**：计划层（peg / plan_version / 有效期 / 非单据节点）与执行层语义不可映射；阶段 4 改为「只读统一追溯面 + 写边界 + 跨层对账」 |
 | D5 | 历史数据回填范围 | 只回填数量可确定的记录；不可确定的留空并在报告中列示 |
-| D6 | 已发运取消 | P0 禁止；P0.5 走方案 A（退货交货入库）；数据错误冲销仍走 `reverse_edge`，两条路径不得混用 |
+| D6 | 已发运取消 / 冲销 | P0 禁止取消；P0.5 走方案 A（退货交货入库）；**阶段 5.1 已实施数据错误冲销**（`reversed` 终态，全量回滚），两条路径不得混用 |
+| D6.1 | 序列号 / HU / 预留是否随冲销回滚 | **全量回滚**：前两者复用 `reverse_serial_event` / `reverse_document`，预留新增 `unfulfill_by_demand`；不留「不回滚」已知边界 |
 | D7 | 统一追溯视图定义的生效方式 | `schema_generator` 仅 `CREATE VIEW IF NOT EXISTS`，定义变更由迁移 `DROP VIEW` + `CREATE VIEW` 负责；YAML 仍是元数据真源 |
 | D8 | 退货执行单据形态：复用 `shipment`（A）vs 独立退货收货单（B） | 采用 A：与 SAP Returns Delivery / Oracle RMA 一致，且与仓库红字收货「复用单据 + 类别」模式一致；B 仅在需要 ARM 式检验/维修分支时作为上层子流程引入 |
 | R1 | `inventory_transaction` 无 `quantity` 字段 | attach 模式不受影响；未来 create 模式需 `target_data` 显式写 `qty` |
@@ -601,6 +639,8 @@ actions:
 | R7 | 视图为虚拟表，深度遍历成本 | 仅做索引可覆盖的逐跳查询；深链用递归 CTE 并限制深度/节点数；不在视图内做聚合重算 |
 | R8 | `shipment` 存量类型可能无 `document_category` | 缺失按 `sales` 解释，不回填业务配置；退货类型须由业务建档后才能发运 |
 | R9 | `RETURN_IN` 移动类型缺失导致过账失败 | 迁移幂等 seed；类型缺失时过账明确失败并回滚，不静默降级为正向 |
+| R10 | 调拨发运已发运行无冲销入口（P1） | 现状是正向未接（`TransferShipmentService.post()` 无过账/边），不是冲销缺口；正向补齐后复用 `reverse_by_source`，不伪造红字调拨单 |
+| R11 | `reversed` 为终态、冲销不可逆 | 误冲销只能人工新建正向交货修复；审计保留红字边 + `REVERSAL` 事务 + `reversal_reason`，不提供二次撤销 |
 
 ---
 
@@ -621,6 +661,7 @@ actions:
 | 交货单模型 | `meta/schemas/shipment.yaml`（`order_id` / `document_type_id`）、`shipment_line.yaml`（`schedule_id`） |
 | 单据类别 | `meta/schemas/type_definition.yaml`（`document_category`）、`meta/migrations/v201__inventory_foundation.py`（移动类型字典） |
 | 退货阶段 5 | `meta/migrations/v222__doc_flow_return_shipment_rule.py`、`meta/tests/test_shipment_return_doc_flow.py`、`meta/services/shipment_service.py`（退货分支） |
+| 冲销阶段 5.1 | `meta/services/shipment_service.py`（`reverse` / `_reverse_inventory` / `_reverse_serial_tracking` / `_reverse_hus` / `_unfulfill_reservations` / `_rollback_schedule_delivery`）、`meta/services/inventory_reservation_service.py`（`unfulfill_by_demand`）、`meta/migrations/v223__shipment_reverse.py`、`meta/tests/test_shipment_reverse.py` |
 | 收货过账 | `meta/services/receipt_service.py` `_post_receipt_inventory` |
 | 库存过账 | `meta/services/inventory_posting_service.py` `post` |
 | 请购转 PO | `meta/services/requisition_po_conversion.py` |
