@@ -339,6 +339,84 @@ class TestEdgeDomain:
 
 
 # ---------------------------------------------------------------------------
+# ④ 库存事务互检（ORPHAN_TXN / DANGLING_EDGE，AC-14）
+# ---------------------------------------------------------------------------
+
+def _txn_table(app_ds):
+    app_ds.execute(
+        "CREATE TABLE inventory_transactions ("
+        "id INTEGER PRIMARY KEY, source_doc_type TEXT, source_doc_id INTEGER, "
+        "reversal_of_transaction_id INTEGER DEFAULT 0)")
+
+
+def _insert_txn(app_ds, txn_id, doc_type, reversal_of=0):
+    app_ds.insert("inventory_transactions", {
+        "id": txn_id, "source_doc_type": doc_type,
+        "source_doc_id": 1, "reversal_of_transaction_id": reversal_of,
+    })
+
+
+def _insert_inv_edge(app_ds, edge_id, target_id, quantity=100.0, status="active"):
+    app_ds.insert("doc_flow_edges", {
+        "id": edge_id, "source_bo": SOURCE_BO, "source_id": "1",
+        "source_item": "", "target_bo": "inventory_transaction",
+        "target_id": str(target_id), "target_item": str(target_id),
+        "quantity": quantity, "quantity_sign": "normal", "rule_id": RULE_ID,
+        "status": status, "pool": "inventory_receipt",
+    })
+
+
+class TestInventoryCrossCheck:
+
+    def test_edge_and_txn_match(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 1, "receipt")
+        _insert_inv_edge(app_ds, "inv-edge-1", "1")
+
+        report = scan(app_ds)
+        assert report.ok, report.codes()
+
+    def test_orphan_txn_without_edge(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 2, "shipment")
+
+        assert "ORPHAN_TXN" in scan(app_ds).codes()
+
+    def test_transfer_order_txn_is_checked(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 3, "transfer_order")
+
+        assert "ORPHAN_TXN" in scan(app_ds).codes()
+
+    def test_reversal_txn_exempt_and_reversed_edge_still_counts(self, ready_env):
+        """REVERSAL 分录不要求边；原边即使 reversed 仍算引用。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 1, "receipt")
+        _insert_inv_edge(app_ds, "inv-edge-1", "1", status="reversed")
+        _insert_txn(app_ds, 2, "receipt", reversal_of=1)
+
+        report = scan(app_ds)
+        assert report.ok, report.codes()
+
+    def test_dangling_edge(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_inv_edge(app_ds, "inv-edge-x", "999")
+
+        assert "DANGLING_EDGE" in scan(app_ds).codes()
+
+    def test_skips_when_txn_table_absent(self, ready_env):
+        app_ds, _ = ready_env
+        _insert_inv_edge(app_ds, "inv-edge-x", "999")
+
+        assert "DANGLING_EDGE" not in scan(app_ds).codes()
+
+
+# ---------------------------------------------------------------------------
 # 重建（显式触发）
 # ---------------------------------------------------------------------------
 

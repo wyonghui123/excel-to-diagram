@@ -100,6 +100,23 @@ def _lines_from_schedules(service: ReceiptService,
     return lines
 
 
+def _write_schedule_edges(service: ReceiptService, receipt_id: Any) -> None:
+    """DOC_FLOW 阶段 2：PO 计划行 → 收货行（attach 模式，失败降级不阻断）。"""
+    from meta.core.doc_flow_attach import attach_edge
+    rows = service.ds.query(
+        'SELECT id, schedule_id, qty_received, uom_id FROM receipt_lines '
+        'WHERE receipt_id = ? AND schedule_id IS NOT NULL ORDER BY id',
+        [receipt_id])
+    for row in rows:
+        attach_edge(
+            service.ds, service.platform_ds, 'po_schedule_to_receipt_line',
+            row['schedule_id'], row['id'],
+            float(row.get('qty_received') or 0),
+            target_item=str(row.get('id') or ''),
+            unit=str(row.get('uom_id') or ''),
+            derived_by='receipt_actions')
+
+
 def create_from_schedule_handler(params: Dict[str, Any],
                                  context=None) -> Dict[str, Any]:
     """BO Action：`receipt.create_from_schedule`（PO 计划行 → 草稿收货单）。"""
@@ -123,6 +140,7 @@ def create_from_schedule_handler(params: Dict[str, Any],
         prepared, _order, _doc_type = service.prepare_header(header)
         with service.ds.transaction():
             result = service.create_receipt(prepared, lines)
+            _write_schedule_edges(service, result['id'])
     except ReceiptError as e:
         return _fail(e.message, e.rule or 'RC_CREATE_FAILED')
 

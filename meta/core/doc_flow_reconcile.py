@@ -10,6 +10,9 @@
       ② 边域      7 元组幂等键重复 / 同 6 元组异规则 active+normal（R4 双重消耗）/
                   status·quantity_sign·quantity 域值非法
       ③ 视图对账  边表复算 vs 视图查询逐行比对（数值侧双保险；含红字口径）
+      ④ 事务互检  库存事务 ↔ 转单边双向核对（ORPHAN_TXN / DANGLING_EDGE）
+      ⑤ 跨层对账  计划层 reservation 量 ↔ 执行层出库边量
+                  （TRACE_EDGE_QTY_MISMATCH，2026-11-05 阶段 4）
 
     投影重建（显式触发，CLI --rebuild）：视图**单事务原子替换**（失败回滚，
     旧视图不变）+ 缺失索引/缺列补建；
@@ -23,7 +26,8 @@
   冲销审计位，E6 的 reversed_by 仅记日志，引擎翻转与手工翻转不可区分）；
   ④ 插孤儿边（target 不存在）；⑤ 改 rule_id 为不存在规则。以上需读事实对象
   / 规则表或快照对照，属完全体。
-- 本版不做业务锚/孤儿边/超耗检查（2026-10-02 用户拍板精简 3 域）。
+- 2026-10-02 精简 3 域（业务锚/超耗检查仍不做）；2026-11-05 端到端规格
+  §3.5 新增④ 库存事务互检: 孤儿事务 ORPHAN_TXN / 悬空边 DANGLING_EDGE。
 - 跨实例镜像差异不在本版（Phase 3 未启动，无镜像对象）。
 - 不挂定时（E7 触发式；定时巡检属 Phase 4 完全体）。
 - 全表扫描：边表起步量级可接受；大表窗口化留完全体。
@@ -56,6 +60,16 @@ _MAX_DETAIL = 20
 
 _STATUS_VALID = ("active", "reversed")
 _SIGN_VALID = ("normal", "red")
+#: 需与边表核对「有事务无边」的过账来源单据类型（发运 / 收货 / 调拨）
+_POSTING_DOC_TYPES = ("shipment", "receipt", "transfer_order")
+#: 边表指向库存事务的目标 BO
+_INVENTORY_TXN_BO = "inventory_transaction"
+#: 计划层线索表 / 发货行表（跨层对账用）
+_TRACE_TABLE = "demand_trace_links"
+_SHIPMENT_LINE_TABLE = "shipment_lines"
+#: 计划层参与执行量对账的关系与执行边规则
+_TRACE_RESERVATION = "reservation"
+_SHIPMENT_ISSUE_RULE = "shipment_line_to_issue_txn"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -260,11 +274,158 @@ def _compare_view_sums(app_ds) -> List[Tuple[Tuple, float, float]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ④ 库存事务互检
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _table_exists(app_ds, name: str) -> bool:
+    try:
+        found = app_ds.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (name,)).fetchall()
+    except Exception:  # noqa: BLE001 - 无 sqlite_master 的测试双桩
+        return False
+    return bool(found)
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _inventory_edge_findings(app_ds, rows) -> List[Finding]:
+    """库存事务与转单边双向核对（2026-11-05 端到端规格 §3.5）。
+
+    - ``DANGLING_EDGE``：边 target_bo 指向库存事务，但事务不存在 / ID 非整数；
+    - ``ORPHAN_TXN``：发运 / 收货 / 调拨过账事务没有任何边引用（有事务无边）。
+      REVERSAL（``reversal_of_transaction_id`` 非 0）不要求边；原边保留
+      ``status='reversed'`` 仍算引用，不误报。
+    """
+    if not _table_exists(app_ds, "inventory_transactions"):
+        return []
+    try:
+        txn_rows = app_ds.execute(
+            "SELECT id, source_doc_type, "
+            "COALESCE(reversal_of_transaction_id, 0) "
+            "FROM inventory_transactions").fetchall()
+    except Exception:  # noqa: BLE001 - 半迁移 / 缺列时跳过本域
+        return []
+
+    txn_ids = {_int_or_none(r[0]) for r in txn_rows}
+    txn_ids.discard(None)
+
+    edge_targets: set = set()
+    dangling: List[str] = []
+    for r in rows:
+        if r[4] != _INVENTORY_TXN_BO:
+            continue
+        tid = _int_or_none(r[5])
+        if tid is None or tid not in txn_ids:
+            dangling.append("edge={0} target_id={1!r}".format(r[0], r[5]))
+        else:
+            edge_targets.add(tid)
+
+    orphan = [
+        "txn={0} source_doc_type={1!r}".format(r[0], r[1])
+        for r in txn_rows
+        if r[1] in _POSTING_DOC_TYPES
+        and (_int_or_none(r[2]) or 0) == 0
+        and _int_or_none(r[0]) not in edge_targets
+    ]
+
+    findings: List[Finding] = []
+    if dangling:
+        findings.append(Finding(
+            "DANGLING_EDGE", "error",
+            "边指向不存在的库存事务 {0} 条: {1}".format(
+                len(dangling), _sample(dangling))))
+    if orphan:
+        findings.append(Finding(
+            "ORPHAN_TXN", "error",
+            "过账事务无对应转单边 {0} 条: {1}".format(
+                len(orphan), _sample(orphan))))
+    return findings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ⑤ 跨层对账（计划层 reservation ↔ 执行层出库边）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _trace_edge_findings(app_ds) -> List[Finding]:
+    """同一 SO 行的计划核销量与执行出库量比对。
+
+    - 计划侧：``demand_trace_links`` 中 ``trace_type='reservation'`` 且
+      ``valid_to IS NULL`` 的 ``allocated_qty``，按 ``demand_object_id`` 聚合；
+    - 执行侧：``shipment_line_to_issue_txn`` 边，按发货行回查
+      ``shipment_lines.order_line_id`` 聚合；
+    - 任一侧为空不报（历史缺失不是漂移）；容差同视图对账。
+    - 缺 ``demand_trace_links`` / ``shipment_lines`` / 边表时跳过本域。
+    """
+    if not (_table_exists(app_ds, _TRACE_TABLE)
+            and _table_exists(app_ds, _SHIPMENT_LINE_TABLE)
+            and _table_exists(app_ds, DOC_FLOW_EDGE_TABLE)):
+        return []
+
+    try:
+        plan_rows = app_ds.execute(
+            "SELECT demand_object_id, SUM(allocated_qty) "
+            "FROM {0} "
+            "WHERE demand_object_type='sales_order_line' "
+            "  AND trace_type=? AND valid_to IS NULL "
+            "GROUP BY demand_object_id".format(_TRACE_TABLE),
+            (_TRACE_RESERVATION,),
+        ).fetchall()
+        exec_rows = app_ds.execute(
+            "SELECT sl.order_line_id, SUM(e.quantity) "
+            "FROM {0} e "
+            "JOIN {1} sl ON CAST(sl.id AS TEXT) = e.source_id "
+            "WHERE e.rule_id=? AND e.target_bo=? "
+            "  AND e.status='active' AND e.quantity_sign='normal' "
+            "GROUP BY sl.order_line_id".format(
+                DOC_FLOW_EDGE_TABLE, _SHIPMENT_LINE_TABLE),
+            (_SHIPMENT_ISSUE_RULE, _INVENTORY_TXN_BO),
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - 半迁移 / 缺列时跳过本域
+        return []
+
+    plan = {}
+    for so_line_id, qty in plan_rows:
+        key = _int_or_none(so_line_id)
+        if key is not None:
+            plan[key] = plan.get(key, 0.0) + _f(qty)
+
+    executed = {}
+    for so_line_id, qty in exec_rows:
+        key = _int_or_none(so_line_id)
+        if key is not None:
+            executed[key] = executed.get(key, 0.0) + _f(qty)
+
+    mismatch: List[str] = []
+    for key in sorted(set(plan) & set(executed)):
+        planned, actual = plan[key], executed[key]
+        if planned <= 0 or actual <= 0:
+            continue
+        if abs(planned - actual) > max(
+                _QTY_EPSILON, _SUM_REL_TOL * max(abs(planned), abs(actual), 1.0)):
+            mismatch.append(
+                "sales_order_line={0} plan={1:g} exec={2:g}".format(
+                    key, planned, actual))
+
+    if not mismatch:
+        return []
+    return [Finding(
+        "TRACE_EDGE_QTY_MISMATCH", "error",
+        "计划核销量与执行出库量不一致 {0} 条: {1}".format(
+            len(mismatch), _sample(mismatch)))]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 巡检（只读）
 # ─────────────────────────────────────────────────────────────────────────────
 
 def scan(app_ds) -> ReconcileReport:
-    """一致性巡检（只读，3 域）。
+    """一致性巡检（只读，5 域：结构 / 边域 / 视图 / 库存事务互检 / 跨层对账）。
 
     Args:
         app_ds: 应用库数据源（边表/视图所在库）
@@ -408,6 +569,12 @@ def scan(app_ds) -> ReconcileReport:
             "同源同目标行经不同规则重复派生 {0} 组（§14 R4 双重消耗风险）: {1}".format(
                 len(dup_pairs), _sample(lines)),
         ))
+
+    # ── ④ 库存事务互检（ORPHAN_TXN / DANGLING_EDGE；无事务表时跳过） ───────────
+    findings.extend(_inventory_edge_findings(app_ds, rows))
+
+    # ── ⑤ 跨层对账（计划核销 vs 执行出库；缺 trace/shipment_lines 时跳过） ─────
+    findings.extend(_trace_edge_findings(app_ds))
 
     # ── ③ 视图对账（数值侧双保险；视图缺失时跳过） ────────────────────────────
     if view_ok:

@@ -16,6 +16,8 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from meta.core.doc_flow_attach import attach_edge
+
 logger = logging.getLogger(__name__)
 
 OBJECT_TYPE = 'purchase_order'
@@ -49,9 +51,10 @@ class ConversionError(Exception):
 class RequisitionToPoService:
     """采购申请 → 采购订单（部分 / 全部数量）。"""
 
-    def __init__(self, data_source=None, framework=None):
+    def __init__(self, data_source=None, framework=None, platform_data_source=None):
         self._ds = data_source
         self._framework = framework
+        self._platform_ds = platform_data_source
 
     # ------------------------------------------------------------------ 依赖
     @property
@@ -61,6 +64,17 @@ class RequisitionToPoService:
             from meta.core.db_path import get_meta_db_path
             self._ds = get_data_source('sqlite', database=get_meta_db_path())
         return self._ds
+
+    @property
+    def platform_ds(self):
+        """平台库（doc_flow_rule）；未配置时回落应用库（单库部署）。"""
+        if self._platform_ds is None:
+            try:
+                from meta.core.datasource import get_platform_data_source
+                self._platform_ds = get_platform_data_source() or self.ds
+            except Exception:  # noqa: BLE001 - 未配置平台库
+                self._platform_ds = self.ds
+        return self._platform_ds
 
     @property
     def framework(self):
@@ -141,6 +155,13 @@ class RequisitionToPoService:
                     'qty': alloc_data['qty'],
                 })
                 result['allocations'].append(self._created_id(alloc_result))
+
+                # DOC_FLOW 阶段 2：需求行 → 采购订单行（attach 既有目标行）
+                attach_edge(
+                    self.ds, self.platform_ds, 'requisition_line_to_po_line',
+                    row['id'], po_line_id, alloc_data['qty'],
+                    unit=str(row.get('uom_id') or ''),
+                    derived_by='requisition_po_conversion')
 
         logger.info('[RequisitionToPo] %s → %s，%d 行',
                     requisition.get('requisition_no'), result.get('order_no'),

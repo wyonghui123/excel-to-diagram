@@ -145,8 +145,10 @@ def resolve_tolerance_ratio(ds: Any, code: str,
 class TransferOrderService:
     """调拨单生命周期动作与履约派生。"""
 
-    def __init__(self, data_source=None):
+    def __init__(self, data_source=None, platform_data_source=None):
         self._ds = data_source
+        # 平台库（doc_flow_rule）；单库部署时与 self.ds 相同
+        self._platform_ds = platform_data_source
 
     @property
     def ds(self):
@@ -155,6 +157,17 @@ class TransferOrderService:
             from meta.core.db_path import get_meta_db_path
             self._ds = get_data_source('sqlite', database=get_meta_db_path())
         return self._ds
+
+    @property
+    def platform_ds(self):
+        """平台库（doc_flow_rule）；未配置时回落应用库（单库部署）。"""
+        if self._platform_ds is None:
+            try:
+                from meta.core.datasource import get_platform_data_source
+                self._platform_ds = get_platform_data_source() or self.ds
+            except Exception:  # noqa: BLE001 - 未配置平台库
+                self._platform_ds = self.ds
+        return self._platform_ds
 
     # ------------------------------------------------------------------
     # 下达
@@ -569,6 +582,24 @@ class TransferOrderService:
         except InventoryError as e:
             raise TransferOrderError(
                 e.message, field_name='inventory', rule=e.code)
+
+        # DOC_FLOW 阶段 2：调拨行 → 出库事务（attach 模式，失败降级不阻断）
+        from meta.core.doc_flow_attach import attach_edge
+        rows = self.ds.query(
+            'SELECT id, source_line_id FROM inventory_transactions '
+            'WHERE source_event_key = ?', [event_key])
+        txn_map = {int(row['source_line_id']): row['id']
+                   for row in rows if row.get('source_line_id') is not None}
+        for entry in entries:
+            line_id = entry.get('source_line_id')
+            txn_id = txn_map.get(int(line_id or 0))
+            if not txn_id:
+                continue
+            attach_edge(
+                self.ds, self.platform_ds, 'transfer_order_line_to_issue_txn',
+                line_id, txn_id, float(entry.get('qty') or 0),
+                target_item=str(line_id), unit=str(entry.get('uom_id') or ''),
+                derived_by='transfer_order_service')
         return event_key
 
     # ------------------------------------------------------------- 序列号钩子

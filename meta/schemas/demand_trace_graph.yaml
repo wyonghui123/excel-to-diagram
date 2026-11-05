@@ -1,0 +1,247 @@
+# ============================================
+# 统一追溯图谱（demand_trace_graph）— 阶段 4 只读读面
+# 依据: docs/specs/spec-doc-flow-end-to-end-2026-11-05.md §5.10 / §6 阶段 4
+#
+# [为什么是只读面]
+#   执行层事实（doc_flow_edges）与计划/钉住（demand_trace_links）语义不同，
+#   不能互替存储；本面只做列投影与分层，查询/遍历由 TraceGraphService 负责。
+#   不设 write_anchor ⇒ 写请求由 READ_ONLY_VIEW 护栏拒绝（API 侧 400）。
+#
+# [同库前提]
+#   SQLite 视图不能跨库 UNION；两基表须在同一库。缺任一基表时由 v216 迁移
+#   [SKIP]，本面查询返回空，不阻断业务。
+#
+# [不挂维度绑定]
+#   两基表均无 org 列；挂 dimension_bindings 会静默注入过滤得空集。
+# ============================================
+
+id: demand_trace_graph
+name: 统一追溯图谱
+table_name: v_demand_trace_graph
+description: 只读统一追溯面：执行层取 doc_flow_edges，计划层取 demand_trace_links
+display_name_field: id
+object_type: view
+view_definition: |
+  SELECT
+    'execution' AS layer,
+    'E:' || e.id AS id,
+    e.rule_id AS relation,
+    e.source_bo AS source_object_type,
+    e.source_id AS source_object_id,
+    COALESCE(e.source_item, '') AS source_line_id,
+    e.target_bo AS target_object_type,
+    e.target_id AS target_object_id,
+    COALESCE(e.target_item, '') AS target_line_id,
+    e.quantity AS qty,
+    CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END AS signed_qty,
+    e.status AS status,
+    NULL AS peg_type,
+    NULL AS plan_version,
+    NULL AS valid_from,
+    NULL AS valid_to,
+    e.derived_at AS occurred_at
+  FROM doc_flow_edges e
+  UNION ALL
+  SELECT
+    'plan' AS layer,
+    'T:' || CAST(t.id AS TEXT) AS id,
+    t.trace_type AS relation,
+    t.supply_object_type AS source_object_type,
+    CAST(t.supply_object_id AS TEXT) AS source_object_id,
+    COALESCE(NULLIF(CAST(t.supply_line_id AS TEXT), '0'), '') AS source_line_id,
+    t.demand_object_type AS target_object_type,
+    CAST(t.demand_object_id AS TEXT) AS target_object_id,
+    COALESCE(NULLIF(CAST(t.demand_line_id AS TEXT), '0'), '') AS target_line_id,
+    t.allocated_qty AS qty,
+    CASE WHEN t.valid_to IS NULL THEN t.allocated_qty ELSE 0 END AS signed_qty,
+    CASE WHEN t.valid_to IS NULL THEN 'active' ELSE 'expired' END AS status,
+    t.peg_type AS peg_type,
+    t.plan_version AS plan_version,
+    t.valid_from AS valid_from,
+    t.valid_to AS valid_to,
+    t.computed_at AS occurred_at
+  FROM demand_trace_links t
+
+# 只读面：仅 read / list；auto_crud 关闭
+import_export:
+  auto_crud: false
+
+actions:
+  - id: demand_trace_graph_read
+    name: 查询追溯关系
+    type: crud
+    method: GET
+    path: "/api/v1/demand_trace_graphs/{id}"
+    description: "查询单条追溯关系（合成键 E: / T: 前缀）"
+  - id: demand_trace_graph_list
+    name: 查询追溯关系列表
+    type: crud
+    method: GET
+    path: "/api/v1/demand_trace_graphs"
+    description: 查询追溯关系列表
+
+fields:
+  - id: id
+    name: 追溯关系ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: "跨层合成主键（执行层 E: + 边 id；计划层 T: + 线索 id）"
+    semantics:
+      meaning: 跨层稳定主键
+      primary_key: true
+
+  - id: layer
+    name: 分层
+    type: string
+    db_column: layer
+    required: true
+    description: execution=转单事实层；plan=计划/钉住层
+    enum_values:
+      - value: execution
+        label: 执行层
+        color: primary
+      - value: plan
+        label: 计划层
+        color: success
+
+  - id: relation
+    name: 关系类型
+    type: string
+    db_column: relation
+    required: true
+    description: 执行层取 rule_id；计划层取 trace_type
+
+  - id: source_object_type
+    name: 来源对象类型
+    type: string
+    db_column: source_object_type
+    required: true
+    description: 执行层 source_bo；计划层 supply_object_type
+
+  - id: source_object_id
+    name: 来源对象ID
+    type: string
+    db_column: source_object_id
+    required: true
+    description: 执行层 source_id；计划层 supply_object_id（统一为字符串）
+
+  - id: source_line_id
+    name: 来源行ID
+    type: string
+    db_column: source_line_id
+    description: 执行层 source_item；计划层 supply_line_id（0 归一为空）
+
+  - id: target_object_type
+    name: 目标对象类型
+    type: string
+    db_column: target_object_type
+    required: true
+    description: 执行层 target_bo；计划层 demand_object_type
+
+  - id: target_object_id
+    name: 目标对象ID
+    type: string
+    db_column: target_object_id
+    required: true
+    description: 执行层 target_id；计划层 demand_object_id（统一为字符串）
+
+  - id: target_line_id
+    name: 目标行ID
+    type: string
+    db_column: target_line_id
+    description: 执行层 target_item；计划层 demand_line_id（0 归一为空）
+
+  - id: qty
+    name: 原始数量
+    type: number
+    db_column: qty
+    description: 执行层 quantity；计划层 allocated_qty
+
+  - id: signed_qty
+    name: 有效数量
+    type: number
+    db_column: signed_qty
+    description: 执行层红字取负；计划层失效取 0，可直接求和
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    description: 执行层 active/reversed；计划层 active/expired
+    enum_values:
+      - value: active
+        label: 有效
+        color: success
+      - value: reversed
+        label: 已冲销
+        color: danger
+      - value: expired
+        label: 已失效
+        color: info
+
+  - id: peg_type
+    name: 钉住强度
+    type: string
+    db_column: peg_type
+    description: 仅计划层：hard/soft；执行层为空
+
+  - id: plan_version
+    name: 计划版本
+    type: string
+    db_column: plan_version
+    description: 仅计划层；执行层为空
+
+  - id: valid_from
+    name: 有效期起
+    type: datetime
+    db_column: valid_from
+    description: 仅计划层；执行层为空
+
+  - id: valid_to
+    name: 有效期止
+    type: datetime
+    db_column: valid_to
+    description: 仅计划层；执行层为空
+
+  - id: occurred_at
+    name: 发生时间
+    type: datetime
+    db_column: occurred_at
+    description: 执行层 derived_at；计划层 computed_at
+
+# 视图上不建 FK；引用口径留在基表侧
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    columns:
+      - field: layer
+        width: 100
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: relation
+        width: 220
+        filterable: true
+        filter_type: select
+      - field: source_object_type
+        width: 170
+      - field: source_object_id
+        width: 110
+      - field: target_object_type
+        width: 170
+      - field: target_object_id
+        width: 110
+      - field: signed_qty
+        width: 110
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: occurred_at
+        width: 170

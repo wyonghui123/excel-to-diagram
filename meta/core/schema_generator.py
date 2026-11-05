@@ -401,8 +401,18 @@ class SchemaMigrator:
                 if sql:
                     executed_sql.append(sql)
                     if not dry_run:
-                        self.ds.execute(sql)
-                        self.ds.commit()
+                        try:
+                            self.ds.execute(sql)
+                            self.ds.commit()
+                        except Exception as e:
+                            # [2026-11-05] 视图基表可能尚未建（如 doc_flow 未启用）；
+                            # 单个 VIEW 失败不应中断整轮 schema sync（与索引同款降级）。
+                            if obj.object_type == ObjectType.VIEW:
+                                logger.warning(
+                                    "[SchemaMigrator] CREATE VIEW skipped: %s | SQL: %s",
+                                    e, sql)
+                                continue
+                            raise
                     print("[CREATE] {0}: {1}".format(obj.table_name, obj.name))
             else:
                 if report["missing_columns"]:

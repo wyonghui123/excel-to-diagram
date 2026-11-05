@@ -112,8 +112,10 @@ def _q4(value: Decimal) -> Decimal:
 class ReceiptService:
     """收货单创建、过账、取消与整单红冲。"""
 
-    def __init__(self, data_source=None):
+    def __init__(self, data_source=None, platform_data_source=None):
         self._ds = data_source
+        # 平台库（doc_flow_rule）；单库部署时与 self.ds 相同
+        self._platform_ds = platform_data_source
 
     @property
     def ds(self):
@@ -122,6 +124,17 @@ class ReceiptService:
             from meta.core.db_path import get_meta_db_path
             self._ds = get_data_source('sqlite', database=get_meta_db_path())
         return self._ds
+
+    @property
+    def platform_ds(self):
+        """平台库（doc_flow_rule）；未配置时回落应用库（单库部署）。"""
+        if self._platform_ds is None:
+            try:
+                from meta.core.datasource import get_platform_data_source
+                self._platform_ds = get_platform_data_source() or self.ds
+            except Exception:  # noqa: BLE001 - 未配置平台库
+                self._platform_ds = self.ds
+        return self._platform_ds
 
     # ------------------------------------------------------------------ 取号
     def allocate_receipt_no(self, document_type_id: Any,
@@ -503,7 +516,9 @@ class ReceiptService:
                     INV_STATUS_INVALID, '红字收货单不支持库存入库，请走红冲')
                 raise ReceiptError(e.message, field_name='inventory', rule=e.code)
         else:
-            self._post_receipt_inventory(header, checked, 'RCV_PO')
+            txns = self._post_receipt_inventory(header, checked, 'RCV_PO')
+            # DOC_FLOW 阶段 2：收货行 → 入库事务（attach 既有事务）
+            self._write_receipt_inbound_edges(checked, txns)
             # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
             # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
             self._register_receipt_serials(header, checked)
@@ -562,7 +577,8 @@ class ReceiptService:
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
         # 库存入账：TO 来源收货写 RCV_TO（org=inventory_org_id）
-        self._post_receipt_inventory(header, checked, 'RCV_TO')
+        txns = self._post_receipt_inventory(header, checked, 'RCV_TO')
+        self._write_receipt_inbound_edges(checked, txns)
         if serial_ready:
             self._register_transfer_receipt_serials(
                 transfer_order['id'], header['id'])
@@ -610,7 +626,8 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
-        self._post_receipt_inventory(header, checked, 'RCV_WO')
+        txns = self._post_receipt_inventory(header, checked, 'RCV_WO')
+        self._write_receipt_inbound_edges(checked, txns)
         if serial_ready:
             self._register_completion_serials(
                 work_order['id'], header['id'],
@@ -772,6 +789,9 @@ class ReceiptService:
 
         # 库存红冲：按原过账事件键生成 REVERSAL（同事务）
         self._reverse_receipt_inventory(header, date)
+        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
+        self._reverse_receipt_inbound_edges(
+            [item['line']['id'] for item in source_items], red_id)
         # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
         self._reverse_receipt_hus(header)
 
@@ -887,6 +907,9 @@ class ReceiptService:
 
         # 库存红冲：TO 收货原分录生成 REVERSAL（同事务）
         self._reverse_receipt_inventory(header, date)
+        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
+        self._reverse_receipt_inbound_edges(
+            [line['id'] for line, _ in source_items], red_id)
         # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
         self._reverse_receipt_hus(header)
 
@@ -989,6 +1012,9 @@ class ReceiptService:
             [STATUS_REVERSED, now, now, header['id']])
 
         self._reverse_receipt_inventory(header, date)
+        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
+        self._reverse_receipt_inbound_edges(
+            [line['id'] for line, _ in source_items], red_id)
         # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
         self._reverse_receipt_hus(header)
         self._reverse_completion_serials(header.get('source_doc_id'), header['id'])
@@ -1002,11 +1028,13 @@ class ReceiptService:
     # ------------------------------------------------------------- 库存过账
     def _post_receipt_inventory(self, header: Dict[str, Any],
                                 checked: List[Dict[str, Any]],
-                                transaction_type: str) -> None:
-        """按收货行写库存入账分录（RCV_PO / RCV_TO）。
+                                transaction_type: str) -> Dict[int, Any]:
+        """按收货行写库存入账分录（RCV_PO / RCV_TO / RCV_WO）。
 
         净收（qty_received - qty_rejected）为库存入账数量；净收为 0 的行跳过。
         库存组织取 receipt.inventory_org_id，库位取 deliver_to_location_id。
+        返回 ``{收货行 id: 库存事务 id}``，供 DOC_FLOW attach 边定位目标行；
+        开关关闭 / 无分录时返回空映射。
         """
         from meta.services.inventory_guard_service import (
             InventoryError, InventoryGuardService)
@@ -1016,7 +1044,7 @@ class ReceiptService:
         from meta.services.stock_segment_service import StockSegmentService
 
         if not InventoryGuardService(self.ds).posting_enabled():
-            return
+            return {}
 
         org_id = header.get('inventory_org_id')
         location_id = header.get('deliver_to_location_id')
@@ -1060,7 +1088,7 @@ class ReceiptService:
             entry.update(segment)
             entries.append(entry)
         if not entries:
-            return
+            return {}
 
         source = {
             'source_doc_type': 'receipt',
@@ -1073,6 +1101,57 @@ class ReceiptService:
             InventoryPostingService(self.ds).post(entries, source)
         except InventoryError as e:
             raise ReceiptError(e.message, field_name='inventory', rule=e.code)
+
+        rows = self.ds.query(
+            'SELECT id, source_line_id FROM inventory_transactions '
+            'WHERE source_event_key = ?', [source['source_event_key']])
+        return {int(row['source_line_id']): row['id']
+                for row in rows if row.get('source_line_id') is not None}
+
+    def _write_receipt_inbound_edges(self, checked: List[Dict[str, Any]],
+                                     txns: Dict[int, Any]) -> None:
+        """把「收货行 → 入库事务」写成 DOC_FLOW 边（attach 模式）。
+
+        未启用 DOC_FLOW（规则 / 边表缺失）或当日无入库事务时降级为告警，
+        不阻断收货过账。
+        """
+        if not txns:
+            return
+        from meta.core.doc_flow_attach import attach_edge
+        for item in checked:
+            line = item.get('line') or {}
+            net = float(item.get('net') or 0)
+            if net <= 0:
+                continue
+            txn_id = txns.get(int(line.get('id') or 0))
+            if not txn_id:
+                continue
+            attach_edge(
+                self.ds, self.platform_ds, 'receipt_line_to_inventory_txn',
+                line.get('id'), txn_id, net,
+                target_item=str(line.get('id') or ''),
+                unit=str(line.get('uom_id') or ''),
+                derived_by='receipt_service')
+
+    def _reverse_receipt_inbound_edges(self, line_ids: List[Any],
+                                       red_receipt_id: Any) -> None:
+        """红冲时整体冲销「收货行 → 入库事务」边（红字边 + 原边 reversed）。
+
+        DOC_FLOW 未启用 / 边表缺失时降级为告警，不阻断收货红冲。
+        """
+        if not line_ids or _blank(red_receipt_id):
+            return
+        try:
+            from meta.core.doc_flow_attach import reverse_edges_by_source
+        except Exception:  # pragma: no cover - 核心模块缺失时保持红冲可用
+            logger.warning('[receipt] DOC_FLOW 模块不可用，跳过红字边')
+            return
+        for line_id in line_ids:
+            if _blank(line_id):
+                continue
+            reverse_edges_by_source(
+                self.ds, 'receipt_line_to_inventory_txn', 'receipt_line',
+                line_id, ref_id=red_receipt_id, derived_by='receipt_service')
 
     def _line_project_scope(self, line: Dict[str, Any]) -> tuple:
         """G7：收货行的项目 / 任务归属以该行 active 需求分配为唯一真源。
