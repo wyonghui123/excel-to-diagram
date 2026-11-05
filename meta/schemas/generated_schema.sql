@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-04 22:48:24.258245
+-- 生成时间: 2026-11-05 14:03:16.434188
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -803,6 +803,25 @@ CREATE TABLE IF NOT EXISTS divisions (
     description TEXT
 )
 
+-- 单据容器关系: 单据行与包装容器的关系清单——收货 / 发运 / 调拨统一登记
+CREATE TABLE IF NOT EXISTS document_hu_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_type VARCHAR(200) NOT NULL,
+    doc_id INTEGER NOT NULL,
+    line_id INTEGER,
+    hu_id INTEGER NOT NULL,
+    direction VARCHAR(200) NOT NULL,
+    link_type VARCHAR(200) NOT NULL,
+    tentative INTEGER DEFAULT 0,
+    qty REAL,
+    org_id INTEGER,
+    remark VARCHAR(200),
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (hu_id) REFERENCES handling_units(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id)
+)
+
 -- 单据序列号关系: 单据与序列号的对象清单——收货 / 发运 / 调拨 / 工单等统一登记
 CREATE TABLE IF NOT EXISTS document_serial_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1123,6 +1142,28 @@ CREATE TABLE IF NOT EXISTS handling_unit_items (
     FOREIGN KEY (hu_id) REFERENCES handling_units(id),
     FOREIGN KEY (item_id) REFERENCES items(id),
     FOREIGN KEY (batch_id) REFERENCES batches(id),
+    FOREIGN KEY (serial_id) REFERENCES serial_numbers(id),
+    FOREIGN KEY (child_hu_id) REFERENCES handling_units(id)
+)
+
+-- 包装容器事件: 容器事件账——建箱 / 装箱 / 拆箱 / 移库 / 合并 / 拆分 / 密封 / 发运 / 反冲
+CREATE TABLE IF NOT EXISTS hu_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hu_id INTEGER NOT NULL,
+    txn_type VARCHAR(200) NOT NULL,
+    serial_id INTEGER,
+    child_hu_id INTEGER,
+    from_hu_id INTEGER,
+    to_hu_id INTEGER,
+    from_location_id INTEGER,
+    to_location_id INTEGER,
+    doc_type VARCHAR(200),
+    doc_id INTEGER,
+    line_id INTEGER,
+    txn_at DATETIME NOT NULL,
+    remark VARCHAR(200),
+    created_at DATETIME,
+    FOREIGN KEY (hu_id) REFERENCES handling_units(id),
     FOREIGN KEY (serial_id) REFERENCES serial_numbers(id),
     FOREIGN KEY (child_hu_id) REFERENCES handling_units(id)
 )
@@ -2132,6 +2173,21 @@ CREATE TABLE IF NOT EXISTS projects (
     FOREIGN KEY (manager_user_id) REFERENCES users(id)
 )
 
+-- 项目结构基线: 项目结构基线指针（项目 × 物料 × 用途 × 替代号 → 结构版本 + 哈希）
+CREATE TABLE IF NOT EXISTS project_structure_baselines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    usage VARCHAR(200) NOT NULL DEFAULT 'production',
+    alternative_no INTEGER NOT NULL DEFAULT 1,
+    structure_id INTEGER NOT NULL DEFAULT 0,
+    baseline_hash VARCHAR(200) NOT NULL,
+    captured_at DATETIME NOT NULL,
+    note VARCHAR(200),
+    FOREIGN KEY (project_id) REFERENCES projects(id),
+    FOREIGN KEY (item_id) REFERENCES items(id)
+)
+
 -- 项目活动: 项目活动（计划层 WBS 节点；只产需求不产动作）
 CREATE TABLE IF NOT EXISTS project_tasks (
     created_by VARCHAR(200),
@@ -2433,6 +2489,8 @@ CREATE TABLE IF NOT EXISTS receipt_lines (
     rejection_disposition VARCHAR(200),
     lot_no VARCHAR(200),
     serial_no VARCHAR(200),
+    hu_no VARCHAR(200),
+    hu_type VARCHAR(200),
     putaway_location_id INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     reversal_of_line_id INTEGER,
@@ -2829,6 +2887,7 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL,
     project_id INTEGER,
+    project_task_id INTEGER DEFAULT 0,
     line_no VARCHAR(200) NOT NULL,
     line_type_id INTEGER NOT NULL,
     item_id INTEGER,
@@ -3113,6 +3172,7 @@ CREATE TABLE IF NOT EXISTS shipment_lines (
     qty REAL NOT NULL,
     lot_no VARCHAR(200),
     serial_no VARCHAR(200),
+    hu_no VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     created_at DATETIME,
     updated_at DATETIME,
@@ -3559,6 +3619,8 @@ CREATE TABLE IF NOT EXISTS transfer_order_lines (
     uom_id INTEGER NOT NULL,
     qty REAL NOT NULL,
     serial_no VARCHAR(200),
+    hu_no VARCHAR(200),
+    hu_type VARCHAR(200),
     qty_shipped REAL NOT NULL DEFAULT 0,
     qty_received REAL NOT NULL DEFAULT 0,
     status VARCHAR(200) NOT NULL DEFAULT 'open',
@@ -4265,6 +4327,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uidx_division_code ON divisions(code)
 CREATE INDEX IF NOT EXISTS idx_division_status ON divisions(status)
 CREATE INDEX IF NOT EXISTS idx_divisions_name ON divisions(name)
 
+-- Indexes for 单据容器关系
+CREATE INDEX IF NOT EXISTS idx_document_hu_links_org_id ON document_hu_links(org_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_document_hu_link ON document_hu_links(doc_type, doc_id, COALESCE(line_id, 0), hu_id, direction)
+CREATE INDEX IF NOT EXISTS idx_document_hu_doc ON document_hu_links(doc_type, doc_id)
+CREATE INDEX IF NOT EXISTS idx_document_hu_hu ON document_hu_links(hu_id, direction)
+CREATE INDEX IF NOT EXISTS idx_document_hu_line ON document_hu_links(line_id)
+
 -- Indexes for 单据序列号关系
 CREATE UNIQUE INDEX IF NOT EXISTS uq_document_serial_link ON document_serial_links(doc_type, line_id, serial_id)
 CREATE INDEX IF NOT EXISTS idx_document_serial_doc ON document_serial_links(doc_type, doc_id)
@@ -4361,6 +4430,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_serial_in_hu ON handling_unit_items(serial_
 CREATE UNIQUE INDEX IF NOT EXISTS uq_hu_child ON handling_unit_items(hu_id, child_hu_id) WHERE child_hu_id IS NOT NULL
 CREATE INDEX IF NOT EXISTS idx_hu_item_item ON handling_unit_items(item_id, batch_id)
 CREATE INDEX IF NOT EXISTS idx_handling_unit_items_id ON handling_unit_items(id)
+
+-- Indexes for 包装容器事件
+CREATE INDEX IF NOT EXISTS idx_hu_tx_hu_at ON hu_transactions(hu_id, txn_at)
+CREATE INDEX IF NOT EXISTS idx_hu_tx_serial_at ON hu_transactions(serial_id, txn_at)
+CREATE INDEX IF NOT EXISTS idx_hu_tx_doc ON hu_transactions(doc_type, doc_id)
+CREATE INDEX IF NOT EXISTS idx_hu_transactions_id ON hu_transactions(id)
 
 -- Indexes for 国际贸易术语
 CREATE UNIQUE INDEX IF NOT EXISTS idx_incoterm_code_edition ON incoterms(code, edition)
@@ -4619,6 +4694,12 @@ CREATE INDEX IF NOT EXISTS idx_project_org_status ON projects(org_id, status)
 CREATE INDEX IF NOT EXISTS idx_project_customer ON projects(customer_account_id)
 CREATE INDEX IF NOT EXISTS idx_project_manager ON projects(manager_user_id)
 CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)
+
+-- Indexes for 项目结构基线
+CREATE INDEX IF NOT EXISTS idx_project_structure_baselines_project_id ON project_structure_baselines(project_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_structure_baseline ON project_structure_baselines(project_id, item_id, usage, alternative_no)
+CREATE INDEX IF NOT EXISTS idx_project_structure_baseline_item ON project_structure_baselines(item_id)
+CREATE INDEX IF NOT EXISTS idx_project_structure_baselines_captured_at ON project_structure_baselines(captured_at)
 
 -- Indexes for 项目活动
 CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks(project_id)

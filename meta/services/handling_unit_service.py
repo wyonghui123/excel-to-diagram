@@ -68,6 +68,28 @@ DOC_RECEIPT = 'receipt'
 DOC_SHIPMENT = 'shipment'
 DOC_TRANSFER = 'transfer_order'
 
+#: v216 单据↔容器关系桥表（§11.15 D17）
+DOC_HU_LINK_TABLE = 'document_hu_links'
+LINK_TYPE_PLANNED = 'planned'
+LINK_TYPE_PACKED = 'packed'
+LINK_TYPE_SHIPPED = 'shipped'
+LINK_TYPES = (LINK_TYPE_PLANNED, LINK_TYPE_PACKED, LINK_TYPE_SHIPPED)
+LINK_RANK = {LINK_TYPE_PLANNED: 0, LINK_TYPE_PACKED: 1, LINK_TYPE_SHIPPED: 2}
+DIRECTION_IN = 'in'
+DIRECTION_OUT = 'out'
+
+
+def document_links_ready(ds: Any) -> bool:
+    """v216 前置：document_hu_links 存在才启用关系写入（旧库保持旧行为）。"""
+    try:
+        rows = ds.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [DOC_HU_LINK_TABLE])
+        return bool(rows)
+    except Exception:
+        return False
+
+
 
 def hu_schema_ready(ds: Any) -> bool:
     """P6a-2 前置：三张 HU 表齐全才启用装箱 / 整箱发运钩子。"""
@@ -815,7 +837,8 @@ class HandlingUnitService:
     # 发运 / 反冲
     # ------------------------------------------------------------------
     def ship_hu(self, hu_id: Any, shipment_id: Any = None,
-                doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                doc: Optional[Dict[str, Any]] = None,
+                line_ids: Optional[List[Any]] = None) -> Dict[str, Any]:
         hu = self._get_hu(hu_id)
         if hu.get('status') != STATUS_SEALED:
             raise HandlingUnitError('仅已密封的容器可整箱发运，当前 %s'
@@ -828,6 +851,13 @@ class HandlingUnitService:
         doc = dict(doc or {})
         doc_type = doc.get('doc_type') or (DOC_SHIPMENT if not _blank(shipment_id) else None)
         doc_id = doc.get('doc_id') if not _blank(doc.get('doc_id')) else shipment_id
+        # 同一容器出现在同一单据多行时，主事件记首行，其余行补事件（§11.15 P1-1）
+        extra_lines: List[Any] = []
+        for line_id in (line_ids or []):
+            if _blank(line_id) or line_id == doc.get('line_id'):
+                continue
+            if line_id not in extra_lines:
+                extra_lines.append(line_id)
         tree = self._descendant_ids(hu['id'])
         for hu_item in tree:
             node = self._get_hu(hu_item)
@@ -856,6 +886,20 @@ class HandlingUnitService:
                                  from_hu_id=hu_item,
                                  doc_type=doc_type, doc_id=doc_id,
                                  line_id=doc.get('line_id'), remark='整箱发运')
+            for line_id in extra_lines:
+                self._insert_txn(hu['id'], TXN_SHIP, now,
+                                 from_location_id=hu.get('location_id'),
+                                 from_hu_id=hu['id'],
+                                 doc_type=doc_type, doc_id=doc_id,
+                                 line_id=line_id,
+                                 remark='整箱发运（同箱多行）')
+            if doc_type in (DOC_SHIPMENT, DOC_TRANSFER):
+                self._write_link(doc_type, doc_id, doc.get('line_id'), hu['id'],
+                                 DIRECTION_OUT, LINK_TYPE_SHIPPED, org_id=hu.get('org_id'))
+                for line_id in extra_lines:
+                    self._write_link(doc_type, doc_id, line_id, hu['id'],
+                                     DIRECTION_OUT, LINK_TYPE_SHIPPED,
+                                     org_id=hu.get('org_id'))
         return {'hu_id': hu['id'], 'status': STATUS_SHIPPED,
                 'shipped_serials': len(serial_ids),
                 'shipped_hus': len(tree)}
@@ -959,6 +1003,8 @@ class HandlingUnitService:
         for row in rows:
             self.reverse_hu_transaction(row['id'])
             reversed_count += 1
+        # 关系行只回退不删除（审计优先，D13 口径）：shipped → packed → planned
+        self._rollback_links(doc_type, doc_id)
         return {'doc_type': doc_type, 'doc_id': doc_id,
                 'reversed': reversed_count}
 
@@ -1113,6 +1159,8 @@ class HandlingUnitService:
             # §11.5：仅当装箱数量 = 行净收数量；不满足则本行不装箱
             if not contents:
                 continue
+            line_qty = _as_float(line.get('qty_received')) \
+                - _as_float(line.get('qty_rejected'))
             hu = self._find_hu(hu_no, org_id)
             if hu is not None and hu.get('status') == STATUS_SEALED:
                 # 同组织调拨：容器整体 move 到收货库位，不在收货侧重装
@@ -1121,6 +1169,9 @@ class HandlingUnitService:
                     self.move(hu['id'], target_location,
                               {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
                                'line_id': line.get('id')})
+                self._write_link(DOC_RECEIPT, receipt_id, line.get('id'), hu['id'],
+                                 DIRECTION_IN, LINK_TYPE_PACKED, qty=line_qty,
+                                 org_id=org_id)
                 packed += 1
                 continue
             if hu is not None and hu.get('status') != STATUS_OPEN:
@@ -1130,11 +1181,14 @@ class HandlingUnitService:
                 source = self._find_hu(hu_no)
                 if source is not None and source.get('status') in (
                         STATUS_SEALED, STATUS_SHIPPED):
-                    self._clone_tree(
+                    target_id = self._clone_tree(
                         source, org_id,
                         line.get('putaway_location_id') or location_id,
                         {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
                          'line_id': line.get('id')})
+                    self._write_link(DOC_RECEIPT, receipt_id, line.get('id'),
+                                     target_id, DIRECTION_IN, LINK_TYPE_PACKED,
+                                     qty=line_qty, org_id=org_id)
                     packed += 1
                     continue
                 hu = self.create_hu({
@@ -1148,6 +1202,9 @@ class HandlingUnitService:
             self.pack(hu['id'], contents,
                       {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
                        'line_id': line.get('id')})
+            self._write_link(DOC_RECEIPT, receipt_id, line.get('id'), hu['id'],
+                             DIRECTION_IN, LINK_TYPE_PACKED, qty=line_qty,
+                             org_id=org_id)
             packed += 1
         return {'receipt_id': receipt_id, 'packed': packed}
 
@@ -1179,38 +1236,55 @@ class HandlingUnitService:
         return rows[0]['id'] if rows else None
 
     def ship_shipment(self, shipment_id: Any) -> Dict[str, Any]:
-        """发运确认后按行 hu_no 整箱发运（级联成员号）。"""
+        """发运确认后按行 hu_no 整箱发运（级联成员号）。
+
+        同一容器出现在同一单据多行时只发运一次，全部 line_id 写入事件（§11.15 P1-1）；
+        已发运容器按幂等跳过，避免重复过账导致整单回滚。
+        """
         if not hu_schema_ready(self.ds):
-            return {'skipped': True, 'shipped': 0}
+            return {'skipped': True, 'shipped': 0, 'skipped_lines': 0}
         header = self._require_row(SHIPMENT_TABLE, shipment_id, '交货单',
                                    'HU_NOT_FOUND')
         org_id = self._location_org(header.get('ship_from_location_id'))
         lines = self.ds.query(
             'SELECT * FROM %s WHERE delivery_id = ? AND status <> ?'
             % SHIPMENT_LINE_TABLE, [shipment_id, 'cancelled'])
-        shipped = 0
+        groups: Dict[str, List[Dict[str, Any]]] = {}
         for line in lines:
             hu_no = str(line.get('hu_no') or '').strip()
             if not hu_no:
                 continue
+            groups.setdefault(hu_no, []).append(line)
+        shipped = skipped_lines = 0
+        for hu_no, rows in groups.items():
             hu = self._find_hu(hu_no, org_id)
             if hu is None:
                 raise HandlingUnitError('包装容器不存在：%s' % hu_no,
                                         field_name='hu_no', rule='HU_NOT_FOUND')
+            if hu.get('status') == STATUS_SHIPPED:
+                skipped_lines += len(rows)
+                logger.info('[handling_unit] 容器 %s 已发运，跳过 %s 行',
+                            hu_no, len(rows))
+                continue
+            primary = rows[0]
             self.ship_hu(hu['id'], shipment_id,
                          {'doc_type': DOC_SHIPMENT, 'doc_id': shipment_id,
-                          'line_id': line.get('id')})
+                          'line_id': primary.get('id')},
+                         line_ids=[row.get('id') for row in rows])
             shipped += 1
-        return {'shipment_id': shipment_id, 'shipped': shipped}
+        return {'shipment_id': shipment_id, 'shipped': shipped,
+                'skipped_lines': skipped_lines}
 
     def ship_transfer(self, transfer_order_id: Any) -> Dict[str, Any]:
         """调拨发运：同组织整体移库；跨组织整箱发运（源容器置 shipped）。
 
         §11.5：同组织 HU 整体 move 到目标库位；跨组织只把源子树置 shipped，
         目标组织侧的结构复制在收货过账时由 `_clone_tree` 完成。
+        同一容器多行只处理一次（§11.15 P1-1），已发运容器幂等跳过。
         """
         if not hu_schema_ready(self.ds):
-            return {'skipped': True, 'moved': 0, 'shipped': 0}
+            return {'skipped': True, 'moved': 0, 'shipped': 0,
+                    'skipped_lines': 0}
         header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
                                    'HU_NOT_FOUND')
         from_org = header.get('from_org_id')
@@ -1219,29 +1293,190 @@ class HandlingUnitService:
         lines = self.ds.query(
             'SELECT * FROM %s WHERE transfer_order_id = ? AND status <> ?'
             % TRANSFER_LINE_TABLE, [transfer_order_id, 'cancelled'])
-        moved = shipped = 0
+        groups: Dict[str, List[Dict[str, Any]]] = {}
         for line in lines:
             hu_no = str(line.get('hu_no') or '').strip()
             if not hu_no:
                 continue
+            groups.setdefault(hu_no, []).append(line)
+        same_org = _blank(to_org) or int(to_org) == int(from_org)
+        moved = shipped = skipped_lines = 0
+        for hu_no, rows in groups.items():
             hu = self._find_hu(hu_no, from_org)
             if hu is None:
                 raise HandlingUnitError('包装容器不存在：%s' % hu_no,
                                         field_name='hu_no', rule='HU_NOT_FOUND')
+            primary = rows[0]
             doc = {'doc_type': DOC_TRANSFER, 'doc_id': transfer_order_id,
-                   'line_id': line.get('id')}
-            same_org = _blank(to_org) or int(to_org) == int(from_org)
+                   'line_id': primary.get('id')}
             if same_org:
                 if _blank(to_location):
+                    skipped_lines += len(rows)
                     continue
                 if hu.get('location_id') != to_location:
                     self.move(hu['id'], to_location, doc)
+                self._write_link(DOC_TRANSFER, transfer_order_id,
+                                 primary.get('id'), hu['id'], DIRECTION_OUT,
+                                 LINK_TYPE_SHIPPED, org_id=from_org)
                 moved += 1
             else:
-                self.ship_hu(hu['id'], None, doc)
+                if hu.get('status') == STATUS_SHIPPED:
+                    skipped_lines += len(rows)
+                    logger.info('[handling_unit] 容器 %s 已发运，跳过 %s 行',
+                                hu_no, len(rows))
+                    continue
+                self.ship_hu(hu['id'], None, doc,
+                             line_ids=[row.get('id') for row in rows])
                 shipped += 1
         return {'transfer_order_id': transfer_order_id,
-                'moved': moved, 'shipped': shipped}
+                'moved': moved, 'shipped': shipped,
+                'skipped_lines': skipped_lines}
+
+    # ------------------------------------------------------------------
+    # 单据 ↔ 容器关系（v216，§11.15 D17 / D18）
+    # ------------------------------------------------------------------
+    def _write_link(self, doc_type: Any, doc_id: Any, line_id: Any, hu_id: Any,
+                    direction: str, link_type: str = LINK_TYPE_PACKED,
+                    qty: Any = None, tentative: int = 0,
+                    org_id: Any = None) -> None:
+        """推进关系行：只前进（planned → packed → shipped），不回退。"""
+        if not document_links_ready(self.ds):
+            return
+        if _blank(doc_id) or _blank(hu_id):
+            return
+        now = _now()
+        rows = self.ds.query(
+            'SELECT id, link_type FROM %s WHERE doc_type = ? AND doc_id = ? '
+            'AND COALESCE(line_id, 0) = ? AND hu_id = ? AND direction = ?'
+            % DOC_HU_LINK_TABLE,
+            [doc_type, doc_id, line_id or 0, hu_id, direction])
+        if rows:
+            row = rows[0]
+            current = row.get('link_type') or LINK_TYPE_PLANNED
+            if LINK_RANK.get(link_type, 0) > LINK_RANK.get(current, 0):
+                self.ds.execute(
+                    'UPDATE %s SET link_type = ?, qty = COALESCE(?, qty), '
+                    'updated_at = ? WHERE id = ?' % DOC_HU_LINK_TABLE,
+                    [link_type, qty, now, row['id']])
+            elif not _blank(qty):
+                self.ds.execute(
+                    'UPDATE %s SET qty = ?, updated_at = ? WHERE id = ?'
+                    % DOC_HU_LINK_TABLE, [qty, now, row['id']])
+            return
+        self.ds.execute(
+            'INSERT INTO %s (doc_type, doc_id, line_id, hu_id, direction, '
+            'link_type, tentative, qty, org_id, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % DOC_HU_LINK_TABLE,
+            [doc_type, doc_id, line_id, hu_id, direction, link_type,
+             tentative, qty, org_id, now, now])
+
+    def pack_line(self, doc_type: str, doc_id: Any, line_id: Any, hu_id: Any,
+                  qty: Any = None, direction: Optional[str] = None,
+                  org_id: Any = None, tentative: int = 0) -> Dict[str, Any]:
+        """把单据行的一个数量段装进指定容器（一行多箱的写入口）。
+
+        qty 为空仅在「该行第一次装箱」时允许（视为整行全量）；同一行出现第二个
+        容器时必须显式 qty，且 SUM(qty) 不得超过行数量。
+        """
+        line_tables = {
+            DOC_RECEIPT: RECEIPT_LINE_TABLE,
+            DOC_SHIPMENT: SHIPMENT_LINE_TABLE,
+            DOC_TRANSFER: TRANSFER_LINE_TABLE,
+        }
+        if doc_type not in line_tables:
+            raise HandlingUnitError('不支持的单据类型：%s' % doc_type,
+                                    field_name='doc_type',
+                                    rule='HU_LINK_DOC_UNSUPPORTED')
+        if not document_links_ready(self.ds):
+            raise HandlingUnitError('未执行 v216，单据容器关系不可用',
+                                    field_name='hu_id',
+                                    rule='HU_LINK_SCHEMA_MISSING')
+        self._require_row(HU_TABLE, hu_id, '包装容器', 'HU_NOT_FOUND')
+        line = self._require_row(line_tables[doc_type], line_id, '单据行',
+                                 'HU_LINE_NOT_FOUND')
+        total = _as_float(line.get('qty'))
+        allocated_rows = self.ds.query(
+            'SELECT qty FROM %s WHERE doc_type = ? AND COALESCE(line_id, 0) = ? '
+            'AND direction = ?' % DOC_HU_LINK_TABLE,
+            [doc_type, line_id or 0, direction or (
+                DIRECTION_OUT if doc_type in (DOC_SHIPMENT, DOC_TRANSFER)
+                else DIRECTION_IN)])
+        if any(row.get('qty') is None for row in allocated_rows):
+            raise HandlingUnitError(
+                '该行已存在整行容器，拆箱前请先明确各行数量',
+                field_name='qty', rule='HU_LINK_QTY_REQUIRED')
+        allocated = sum(_as_float(row.get('qty')) for row in allocated_rows)
+        if _blank(qty):
+            if allocated_rows:
+                raise HandlingUnitError(
+                    '同一行出现第二个容器时必须填写数量',
+                    field_name='qty', rule='HU_LINK_QTY_REQUIRED')
+            qty = total
+        if allocated + _as_float(qty) > total + 1e-9:
+            raise HandlingUnitError(
+                '容器分配数量超过单据行数量（已分配 %s / 行数量 %s）'
+                % (allocated, total), field_name='qty',
+                rule='HU_LINK_QTY_EXCEEDED')
+        direction = direction or (DIRECTION_OUT
+                                  if doc_type in (DOC_SHIPMENT, DOC_TRANSFER)
+                                  else DIRECTION_IN)
+        self._write_link(doc_type, doc_id, line_id, hu_id, direction,
+                         LINK_TYPE_PACKED, qty=qty, tentative=tentative,
+                         org_id=org_id if not _blank(org_id)
+                         else line.get('org_id'))
+        return {'doc_type': doc_type, 'doc_id': doc_id, 'line_id': line_id,
+                'hu_id': hu_id, 'qty': qty, 'direction': direction}
+
+    def document_hus(self, doc_type: str, doc_id: Any) -> List[Dict[str, Any]]:
+        """单据 → 容器正向清单（含容器号与状态）。"""
+        if not document_links_ready(self.ds):
+            return []
+        return self.ds.query(
+            'SELECT l.*, h.hu_no, h.status AS hu_status, h.hu_type, '
+            'h.org_id AS hu_org_id '
+            'FROM %s l JOIN %s h ON h.id = l.hu_id '
+            'WHERE l.doc_type = ? AND l.doc_id = ? ORDER BY l.id'
+            % (DOC_HU_LINK_TABLE, HU_TABLE), [doc_type, doc_id])
+
+    def hu_documents(self, hu_id: Any) -> List[Dict[str, Any]]:
+        """容器 → 单据反查清单。"""
+        if not document_links_ready(self.ds):
+            return []
+        return self.ds.query(
+            'SELECT * FROM %s WHERE hu_id = ? ORDER BY id' % DOC_HU_LINK_TABLE,
+            [hu_id])
+
+    def unassigned_hus(self, org_id: Any = None) -> List[Dict[str, Any]]:
+        """预分配查询：tentative=1 的关系行。"""
+        if not document_links_ready(self.ds):
+            return []
+        if _blank(org_id):
+            return self.ds.query(
+                'SELECT * FROM %s WHERE tentative = 1 ORDER BY id'
+                % DOC_HU_LINK_TABLE)
+        return self.ds.query(
+            'SELECT * FROM %s WHERE tentative = 1 AND org_id = ? ORDER BY id'
+            % DOC_HU_LINK_TABLE, [org_id])
+
+    def _rollback_links(self, doc_type: Any, doc_id: Any) -> None:
+        """反冲：关系状态后退一级，不删行（审计优先）。"""
+        if not document_links_ready(self.ds):
+            return
+        rows = self.ds.query(
+            'SELECT id, link_type FROM %s WHERE doc_type = ? AND doc_id = ?'
+            % DOC_HU_LINK_TABLE, [doc_type, doc_id])
+        now = _now()
+        for row in rows:
+            current = row.get('link_type')
+            if current == LINK_TYPE_SHIPPED:
+                target = LINK_TYPE_PACKED
+            elif current == LINK_TYPE_PACKED:
+                target = LINK_TYPE_PLANNED
+            else:
+                continue
+            self.ds.execute(
+                'UPDATE %s SET link_type = ?, updated_at = ? WHERE id = ?'
+                % DOC_HU_LINK_TABLE, [target, now, row['id']])
 
     def _clone_tree(self, source: Dict[str, Any], org_id: Any,
                     location_id: Any, doc: Optional[Dict[str, Any]] = None,

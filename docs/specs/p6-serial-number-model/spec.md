@@ -1,7 +1,8 @@
 # P6 实现规格：序列号对象模型（主档 / 事件账 / 对象清单）
 
 - 日期: 2026-11-03（v1.0）/ 2026-11-04（v1.1 细化）
-- 状态: **P6a 已实施**（as-built）；v1.1 补充事务契约、测试矩阵与 §11 容器规格；**§11 为预研，未批准**
+- 状态: **P6a 已实施**（as-built）；v1.1 补充事务契约、测试矩阵与 §11 容器规格；**§11 为预研，未批准**；
+  §11.14 已实施（D4 查询 UI）；**§11.15 为预研草案**（D17 / D18 / D19 与三项决策已定稿，待排期）
 - 上游依据:
   - SAP / Oracle 序列号对象模型研究结论（`EQUI.GERNR` / `EQBS` / `OBJK` 与 `INV_SERIAL_NUMBERS`）
   - SAP HU（`VEKP` / `VEPO` / `UNVEL`、EWM `/SCWM/HUHDR`）与 Oracle LPN（`WMS_LICENSE_PLATE_NUMBERS` / `INV_LICENSE_PLATE_NUMBERS` / OTM `SHIP_UNIT`）专题研究
@@ -333,8 +334,8 @@
 ## 11. P6a-2 增量规格：包装容器（HU/LPN）
 
 - 日期: 2026-11-04（v1.1 细化，v1.2 实施）
-- 状态: **已实施**（as-built；v211 三表 + 服务 + 收货/发运接线，v212 调拨行容器列，41 个新测试；仅 D4 查询 UI 未做，见 §11.11 备注）
-- 迁移号: **v211**（HU 三表；`v207`–`v210` 均已被占用，顺延至 v211）+ **v212**（调拨行 `hu_no` / `hu_type`）
+- 状态: **已实施**（as-built；v211 三表 + 服务 + 收货/发运接线，v212 调拨行容器列，v213 D4 查询 UI（MOMP），49 个新测试 + 17 例前端 hubOptions 测试）
+- 迁移号: **v211**（HU 三表；`v207`–`v210` 均已被占用，顺延至 v211）+ **v212**（调拨行 `hu_no` / `hu_type`）+ **v213**（D4 查询 UI：菜单转 `multi_object_hub`）
 - 对标: SAP `VEKP` / `VEPO` / `UNVEL`、EWM `/SCWM/HUHDR`；Oracle EBS `WMS_LICENSE_PLATE_NUMBERS` / `WMS_LPN_CONTENTS`、Fusion `INV_LICENSE_PLATE_NUMBERS`、Shipping `WSH_DELIVERY_DETAILS`
 
 ### 11.1 术语映射与三条边界
@@ -486,14 +487,18 @@
 
 | 单据 | 动作 | 接线 |
 |---|---|---|
-| 收货 `receipt` | `post` 后 | 行可选 `hu_no` + `hu_type`；`create_hu` + `pack`；仅当装箱数量 = 行净收数量 |
+| 收货 `receipt` | `post` 后 | 行可选 `hu_no` + `hu_type`；`create_hu` + `pack`；仅当装箱数量 = 行净收数量（v216 起拆箱由 `document_hu_links.qty` 承载，见 §11.15.5） |
 | 完工 `receipt(source_doc_type='work_order')` | `post` 后 | 成品号可选装入成品箱；组件号不装 HU |
 | 发运 `shipment` | `ship` 后 | 按 HU 装运：`ship_hu`；成员号级联 `shipped` |
-| 调拨 `transfer_order` | 发运 / 收货 | 同组织：HU 整体 `move`；跨组织：**复制 HU 结构到目标组织**，源 HU 随发运置 `shipped`，不改 `org_id`（依据 Infor LN 多公司 HU 复制）；数量账按叶子 `material` 行汇总 |
+| 调拨 `transfer_order` | 发运 / 收货 | 同组织：HU 整体 `move`；跨组织：**复制 HU 结构到目标组织**，源 HU 随发运置 `shipped`（v217 起改 `in_transit`，见下方修订），不改 `org_id`（依据 Infor LN 多公司 HU 复制）；数量账按叶子 `material` 行汇总 |
 | 盘点 `inventory_count` | P7 | 按 HU 计数，差异写 `adjust` 事件 |
 | 退货 `rma` | P7 | 按 HU 整箱退回 |
 
 as-built（2026-11-04）：收货侧（含 TO 收货、完工成品）载体为 `receipt_lines.hu_no`；调拨发运侧由 `v212__transfer_line_hu.py` 给 `transfer_order_lines` 补 `hu_no` / `hu_type` 后接 `ship_transfer`；跨组织收货按源容器**整棵子树复制**到目标组织（`_clone_tree`，按目标组织重建批次、不复制序列号主档）。
+
+修订（§11.15 D19）：v216 先落 `document_hu_links` 与「一行多箱」`qty`；
+v217 起跨组织源容器由 `shipped` 改为 `in_transit`（受 v211 CHECK 约束，需重建表），目标侧仍新建 HU；
+`receipt_lines.hu_no` 只保留「整行进一箱」快捷语义。
 
 门控：所有接线先用 `hu_schema_ready(ds)` 判断三表是否存在；不存在时整条支路 no-op，不影响 P6a/P6b/P6c 主流程。
 
@@ -579,8 +584,11 @@ as-built（2026-11-04）：收货侧（含 TO 收货、完工成品）载体为 
 | D2 | 嵌套与迁移（`move` / `consolidate` / `split` / `reuse`） | D1 |
 | D3 | 单据接线（收货 / 完工 / 发运 / 调拨）+ 红冲 | D1、D2 |
 | D4 | 查询 UI（容器内容树、按号查容器） | D1 |
+| D5 | HU ↔ 单据关系模型（P1 止血 + v216 `document_hu_links`；`planned` / `in_transit` → v217） | D3（P1 + v216 已实施） |
 
-as-built 备注：D1 / D2 / D3（收货、完工、发运、调拨发运、跨组织子树复制、红冲）已完成并测试通过；D4 查询 UI 未实施（`hu_contents` / `hu_stock` / `hu_where_used` 服务方法已就绪，仅缺页面入口）。
+as-built 备注：D1 / D2 / D3（收货、完工、发运、调拨发运、跨组织子树复制、红冲）已完成并测试通过；D4 查询 UI 已实施（§11.14：`handling_unit.yaml` 的 `hub` 声明 + v213 菜单转 `multi_object_hub`，`hu_contents` / `hu_stock` / `hu_where_used` 服务方法复用现有 BO 列表接口）。
+
+D5（已实施）：P1 三项止血 + v216 `document_hu_links` 桥表（含 `pack_line` / 逆转回退 / 存量回填）已落地并通过 6 例单测；`planned` / `in_transit` 因 v211 CHECK 需重建表，拆到 v217。详见 §11.15。
 
 ### 11.12 明确不做
 
@@ -631,3 +639,407 @@ as-built 备注：D1 / D2 / D3（收货、完工、发运、调拨发运、跨�
 - 不建 `hu_balances` / HU 级余额表。
 - 不按 HU 做库存预留、拣货分配（P7）。
 - 不做父子层数量对账触发器。
+
+### 11.14 D4 查询 UI 方案（MOMP 元数据驱动，已实施）
+
+#### 11.14.1 现有链路（事实依据）
+
+```
+menus.page_type='multi_object_hub' + primary_object_type
+  → GenericTabContainer.decorateComponentTab() 装配
+  → MultiObjectHubPage 读该对象 ui_view_config.hub
+  → resolveHubOptions(hub) → MultiObjectManagementPage（左树 + 多 tab）
+```
+
+- 左树：`hub.scope.type='hierarchy'`，`HierarchyScopeTree` 用 `boService.query(objectType, page_size)` 拉扁平列表，再按 `parentField` 在客户端建树。
+- 过滤：`hub.filters.<objectType>.field` → `<field>__in = effective ids`；`effective = 勾选 ∪ 全部子孙`。
+  未选范围时不加条件（看全量），符合主数据页预期。
+- 右 tab：`hub.object_types` 决定顺序与过滤分派，`hub.tabs` 给中文标签。
+
+#### 11.14.2 信息架构（一期，零新组件）
+
+单菜单「包装容器」（`/inventory/handling-units`）：
+
+| 区域 | 内容 | 元数据实现 |
+|---|---|---|
+| 左树 | 容器嵌套树（托盘 → 箱 → 料箱），节点文案 `hu_no`，徽标 `status` | `scope.object=handling_unit`、`parent_field=parent_hu_id`、`label_field/code_field=hu_no`、`badge_field=status` |
+| 顶部搜索 | 输入容器号即时过滤树节点 | `scope.search_placeholder` |
+| Tab 1 子容器 | **当前选中容器的直接子容器**（`handling_unit`） | `filters.handling_unit: field=parent_hu_id, mode=direct` |
+| Tab 2 容器内容 | 选中容器的内容行（`handling_unit_item`），因 effective 含子孙，等价 `hu_contents(mode='exploded')` | `filters.handling_unit_item: field=hu_id` |
+| Tab 3 容器事件 | 子树事件账（`hu_transaction`） | `filters.hu_transaction: field=hu_id` |
+
+「逐层展开」是本次确认的口径：Tab 1 用 `mode: direct`（只取勾选节点自身，即 `parent_hu_id = 选中 id`），
+避免选中托盘时把整棵子树的容器平铺出来；Tab 2 / Tab 3 仍取整棵子树（`effective`），
+因为内容与事件天然需要聚合子孙。实现上给 `hubOptions.js` 增加：
+
+- `buildFilterStrategies` 读 `rule.mode === 'direct'` → 取 `scopeIds[scope_key].selected`（缺省取 `effective`）；
+- `buildScopeProps` 透传 `label_field` / `code_field`（`HierarchyScopeTree` 已有同名 props，缺省 `name` / `code`）；
+  包装容器没有 `name` / `code` 字段，必须显式指向 `hu_no`，否则树节点标签为空。
+
+以上均为既有组件内的 2 处小改（约 6 行），不新增页面组件。
+
+「容器内容树」的呈现口径：左树负责结构下钻（选中托盘即见其全部子孙容器节点），Tab 2 负责叶子明细（物料 / 批次 / 序列号 / 数量），两层组合即等于 exploded 视图，且不需要新增页面组件。
+
+#### 11.14.3 元数据声明（`handling_unit.yaml` 追加 `ui_view_config.hub`）
+
+```yaml
+  hub:
+    object_types: [handling_unit, handling_unit_item, hu_transaction]
+    default_tab: handling_unit
+    tabs:
+      handling_unit: 子容器
+      handling_unit_item: 容器内容
+      hu_transaction: 容器事件
+    state_key: handlingUnitManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: handling_unit
+      scope_key: handling_unit
+      parent_field: parent_hu_id
+      label_field: hu_no
+      code_field: hu_no
+      order_by: hu_no
+      badge_field: status
+      badge_map:
+        open:     { label: 未封箱, type: info }
+        sealed:   { label: 已封箱, type: success }
+        shipped:  { label: 已发运, type: warning }
+        void:     { label: 已作废, type: danger }
+      node_icon: folder
+      search_placeholder: 输入容器号搜索
+      empty_text: 暂无包装容器
+      paginate_all: true
+    filters:
+      handling_unit: { field: parent_hu_id, mode: direct }
+      handling_unit_item: { field: hu_id }
+      hu_transaction: { field: hu_id }
+```
+
+要点：
+
+- `scope_key` 必须出现在 `object_types` 内（`resolveHubOptions` 校验）。
+- `badge_map` 的 `type` 取值按 `HierarchyScopeTree` 的既有契约（Element Plus tag type）；若组件吃 `color`，同步改键。
+- `filters` 必须给每个 tab 显式声明：未声明的 tab 会落到关系过滤默认分支，注入噪声参数。
+- `label_field` / `code_field` 是本次给 `hubOptions` 新增的透传键（`HierarchyScopeTree` 早已支持）：
+  包装容器没有 `name` / `code`，不显式声明会导致树节点文本为空、搜索失效。
+
+#### 11.14.4 菜单改造（新迁移 `v213__handling_unit_momp.py`）
+
+v211 建的 `handling-unit-list` 是普通 `object_list`；需改为 MOMP：
+
+```sql
+UPDATE menus
+   SET page_type = 'multi_object_hub',
+       primary_object_type = 'handling_unit',
+       object_types = '["handling_unit","handling_unit_item","hu_transaction"]',
+       bo_bindings = '[{"bo_id":"handling_unit","role":"primary",
+                       "include_actions":["read","create","update","delete"]},
+                      {"bo_id":"handling_unit_item","role":"related",
+                       "include_actions":["read","list"]},
+                      {"bo_id":"hu_transaction","role":"related",
+                       "include_actions":["read","list"]}]',
+       required_permissions = '[handling_unit 4 条 + handling_unit_item 2 条 + hu_transaction 2 条]',
+       auto_generated = 0
+ WHERE menu_code = 'handling-unit-list';
+```
+
+- 幂等：整行形态（page_type / object_types / bo_bindings / required_permissions）全部一致时打印 `[SKIP]`；
+  只写 `WHERE page_type <> ...` 会在半套状态（如权限串没更新）下漏修，故按整行比对。
+- `required_permissions` 必须只引用 v211 实际注册的权限码（前端守卫是 every 判定，引用不存在的码会整页 403）；
+  `verify` 显式检查 `permissions.code` 是否存在。
+- `menu_permissions.required_permissions` 同步为同样 8 条（否则路由菜单可见但页面被 403）。
+- `hu-transaction-list` 保持独立只读菜单，不并入 hub。
+
+#### 11.14.5 按号查容器（三档，按成本递增）
+
+1. **左树搜索**（一期，已实施）：`scope.search_placeholder` + 树组件本地过滤（匹配 `labelField` / `codeField`，
+   两者均为 `hu_no`），输入 `P1` 即定位节点。
+2. **列表搜索**（一期，已实施）：`ui_view_config.list.searchFields: [hu_no]`，右侧 tab 直接按号查。
+3. **深链定位**（二期）：`/inventory/handling-units?hu_no=HU-001` 自动选中树节点。需 `HierarchyScopeTree` 增加 `initialSelected` 或在 hub 侧 `scopeAdapter` 初始化，属前端小改。
+
+服务层已具备 `hu_where_used(serial_no)`（按序列号反查容器），一期不放页面入口，二期可加「序列号反查」Tab 或查询框。
+
+#### 11.14.6 二期：图形内容树（可选）
+
+若需要「树形卡片」而非表格呈现，走 `MultiObjectManagementPage` 的 chart 视图：
+
+- `viewMode='chart'` 时渲染业务方注入的 `detailContent` slot；
+- 需给 `resolveHubOptions` 增加 `hub.detail_content` 声明 → `MultiObjectHubPage` 传 slot；
+- 新增 `HandlingUnitContentTree.vue`，数据直接调 `GET /api/handling_unit/<id>/contents?mode=exploded`（服务层已有）。
+
+评估：一期表格 + 左树下钻已覆盖 90% 场景；图形树仅在「托盘装箱可视化」明确需要时再做。
+
+#### 11.14.7 边界与风险
+
+| 项 | 处理 |
+|---|---|
+| 树拉全量 | `paginate_all: true`；HU 单组织建议 < 2000 节点，超出时二期加服务端树接口 |
+| 多组织混合 | 一期树不按 `org_id` 过滤，靠列表列区分；二期给 `HierarchyScopeTree` 加 `extraFilters`（需组件小改） |
+| `shipped` / `void` 容器 | 保留在树中（`location_id` 为空），徽标区分，不提供装箱操作入口 |
+| 空容器 | Tab 2 空态「该容器为空」`handling_unit_items` 无行 |
+| 未建 HU 表 | 菜单与页面照常渲染，列表返回空（后端 `hu_schema_ready` 只门控过账，不门控查询） |
+| 树字段裁剪 | `HierarchyScopeTree` 目前取全字段；HU 列多，二期评估只取 `id/hu_no/parent_hu_id/status/org_id` |
+
+#### 11.14.8 验收
+
+- 新增 `meta/tests/test_hu_momp.py`（8 例，已通过）：YAML `hub` 契约（三对象 / 默认 tab / `parent_field` /
+  `label_field` / `mode: direct`）；三个 hub 对象的 schema 与 `ui_config.list` 存在；迁移形态、幂等、
+  `menu_permissions` 同步、菜单缺失跳过、权限码缺失时 `verify` 失败、`downgrade` 恢复。
+- 前端 Vitest（`hubOptions.spec.js` 17 例，已通过）：补 `mode: direct` 只取 `selected`、
+  内容/事件 tab 仍取 `effective`、未选范围不过滤、`labelField/codeField` 透传。
+- 手工验收：建托盘 P1 + 子箱 C1 + 装 SN 件 → 打开页面，左树 P1→C1 可展开；选中 P1，Tab 1 只列 C1（不列 C1 的下级），
+  Tab 2 显示子树内 SN 行；输入 `P1` 可搜索定位。
+
+#### 11.14.9 改动文件清单
+
+| 文件 | 改动 |
+|---|---|
+| `meta/schemas/handling_unit.yaml` | 追加 `ui_view_config.hub`（§11.14.3）；头部枚举迁移号 v208 → v211 |
+| `meta/migrations/v213__handling_unit_momp.py` | 新增：菜单转 MOMP + `menu_permissions` 同步 + 幂等 / 回滚 / verify |
+| `meta/tests/test_hu_momp.py` | 新增：YAML 契约 + 迁移幂等 + 权限码校验 + 回滚（8 例） |
+| `src/components/common/MultiObjectHubPage/hubOptions.js` | `mode: direct`（约 3 行）+ `label_field` / `code_field` 透传（2 行）+ 契约注释 |
+| `src/components/common/MultiObjectHubPage/__tests__/hubOptions.spec.js` | 追加 handling_unit hub 解析断言（`direct` / `effective` / 显示字段） |
+| 二期：`src/components/common/HandlingUnitContentTree.vue`、`MultiObjectHubPage.vue` | 图形内容树（暂不做） |
+
+### 11.15 HU 与单据的关系模型：SAP / Oracle 对标与缺口（预研，待批准）
+
+> 本节是**预研与规格草案**，未批准实施。结论来源：SAP `VEKP` / `VEPO` / `UNVEL`、Oracle
+> `WSH_DELIVERY_ASSIGNMENTS` / `WSH_DELIVERY_DETAILS` / `WMS_LPN_CONTENTS` 的表结构与状态机。
+
+#### 11.15.1 对标事实：SAP
+
+| 表 | 关键列 | 含义 |
+|---|---|---|
+| `VEKP`（HU 抬头） | `VPOBJ` / `VPOBJKEY` | HU 绑定一个单据对象（外向交货 01 / 内向交货 03 / 装运 04 / 生产订单 08-09 / 跨组织交货 21-23） |
+| `VEKP` | `STATUS` | 9 态：Planned / 已实现库存未过账 / 库位非 HU / 库位为 HU / 盘点中 / 在途 / 已过账发货 / 已删除 / 目视检查 |
+| `VEKP` | `UEVEL` | 上层 HU（子箱指向父托盘） |
+| `VEKP` | `MAGEW` / `ZUL_AUFL` | 允许载重 / 允许附加量（容量约束） |
+| `VEKP` | `PACKVORSCHR` + `PACKVORSCHR_ST` | 装箱指令号 + 合规状态（undefined / violated / tolerated / fulfilled） |
+| `VEKP` | `KZGVH` | 封闭包装标记 |
+| `VEPO`（内容行） | `VENUM` + `VEPOS` | 内容行主键（HU 号 + 行号） |
+| `VEPO` | `VBELN` / `POSNR` | **指向交货单行**（一箱可对多行，一行可进多箱） |
+| `VEPO` | `UNVEL` | 下层 HU（父托盘行指向子箱） |
+| `VEPO` | `XCHAR` | 暂定分配标记（未确认的装箱关系） |
+| `VBELN_GEN` / `POSNR_GEN` | — | 包装物料自动生成的交货行 |
+
+**结论**：SAP 中 HU 与单据行是**多对多**，关系落点是 HU 内容行（`VEPO`），而不是单据行上的单值字段；
+`XCHAR` 表明「暂定分配」是原生一等状态。
+
+#### 11.15.2 对标事实：Oracle
+
+| 表 | 关键列 | 含义 |
+|---|---|---|
+| `WSH_DELIVERY_ASSIGNMENTS` | `DELIVERY_DETAIL_ID` / `DELIVERY_ID` | 交货行 ↔ 交货单的显式桥表；`DELIVERY_ID` 为空即「未分配」 |
+| `WSH_DELIVERY_ASSIGNMENTS` | `PARENT_DELIVERY_DETAIL_ID` | **装箱层级**：该行装在哪个容器行下 |
+| `WSH_DELIVERY_DETAILS` | — | 容器（LPN）本身也是一行交货明细 |
+| `WMS_LPN_CONTENTS` | — | LPN 内容明细（物料 / 批次 / 序列号 / 数量） |
+| LPN context | — | 11 态，含 Receiving / Stores / In Transit / Packing / Picked / Loaded for shipment 等 |
+
+**结论**：Oracle 用**显式桥表 + 层级列**表达装箱，且「未分配」是一等状态；容器态覆盖到「在途」而不止步于「已发运」。
+
+#### 11.15.3 本地现状（as-built）
+
+- 物理模型：`handling_units`（抬头/当前态）、`handling_unit_items`（内容投影）、`hu_transactions`（事件账）。
+- 单据侧：`receipt_lines` / `shipment_lines` / `transfer_order_lines` 各带**单值** `hu_no` + `hu_type`（v211 加的列）。
+- 事件侧：`hu_transactions` 已有 `doc_type` / `doc_id` / `line_id`，幂等键
+  `(hu_id, txn_type, doc_type, doc_id, line_id, serial_id)`（应用层 SELECT-then-INSERT，无 DB 唯一索引）。
+- 服务侧：`pack_receipt`（收货建箱/装箱，不封箱）、`ship_hu`（要求 `sealed` + 有库位、成员 SN 必须 `in_stores`）、
+  `ship_shipment`（逐行调用 `ship_hu`，无去重）、`ship_transfer`（同组织 `move` / 跨组织 `ship`）、
+  `reverse_document`（只回退 `create` / `pack` / `ship` / `move`）。
+
+#### 11.15.4 缺口矩阵
+
+| # | 缺口 | 严重度 | 证据（现状） | 对标 |
+|---|---|---|---|---|
+| 1 | 同一 HU 出现在同单据多行 → 第二次调用失败，**整单发运回滚** | **P1** | `ship_shipment` 逐行 `ship_hu` 无去重；`ship_hu` 对非 `sealed` 直接抛错 | SAP 一箱多行 `VEPO` 原生 |
+| 2 | HU 与序列号发运**顺序冲突**：先 `_register_shipment_serials`（SN→`shipped`）再 `_ship_hus`，而 `ship_hu` 要求成员 SN `in_stores` | **P1** | `shipment_service` 先登记 SN 后发 HU | Oracle 容器态与序列号态同源推进 |
+| 3 | `status` / `hu_no` / `parent_hu_id` 等状态字段在表单可编辑，未标不可变 | **P1** | `handling_unit.yaml` 的 `status` 仍是可编辑下拉 | SAP `STATUS` 只由事务推进 |
+| 4 | 单据行 `hu_no` 是**单值**：一行一箱，一箱多行只能重复填写 | **P1**（模型级） | `receipt_line` / `shipment_line` / `transfer_order_line` 的 `hu_no VARCHAR(40)` | SAP `VEPO.VBELN/POSNR`、Oracle `WSH_DELIVERY_ASSIGNMENTS` |
+| 5 | 收货装箱后不封箱，无「封箱」作业节点 | P2 | `pack_receipt` 只 `pack` 不 `seal` | SAP `KZGVH` 封闭包装 |
+| 6 | 无单据 → 容器的**正向清单**（只能从 `hu_transactions` 反查） | P2 | 仅有 `hu_where_used(serial_no)` | Oracle 容器内容报表 |
+| 7 | 无预分配 / 装箱计划（`planned` 态） | P2 | 状态机只有 `open / sealed / shipped / void` | SAP `Planned` + `XCHAR`；Oracle `DELIVERY_ID` 为空 |
+| 8 | 无容量 / 超装校验 | P2 | 无载重、体积、件数上限 | SAP `MAGEW` / `ZUL_AUFL` |
+| 9 | 跨组织调拨缺「在途」容器态：源侧直接 `shipped`、目标侧新建 `sealed`，容器身份只靠 `hu_no` 串 | P2 | `ship_transfer` 跨组织走 `ship` | SAP `In transit`；Oracle LPN `In Transit` |
+| 10 | 无装箱单 / 箱贴 | P3 | §11.12 已明示不做 | 同左（对标有，但不纳入本阶段） |
+| 11 | 无装箱指令合规校验 | P3 | — | SAP `PACKVORSCHR_ST`（不做） |
+
+**无缺口（对齐良好）**：嵌套单父 `UEVEL` / `UNVEL`、空箱复用、HU 不改变库存余额、SSCC 校验位。
+
+#### 11.15.5 建议方案 D17–D19
+
+**D17（新增）：v216 建 `document_hu_links` 显式桥表**
+
+关系从「单据行上的单值文本」下沉为「独立关系行」，对应 SAP `VEPO.VBELN/POSNR` 与 Oracle `WSH_DELIVERY_ASSIGNMENTS`：
+
+```sql
+CREATE TABLE document_hu_links (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_type      VARCHAR(30) NOT NULL,   -- receipt / shipment / transfer_order / work_order
+  doc_id        INTEGER NOT NULL,
+  line_id       INTEGER,                -- 单据行；表头级关系可空
+  hu_id         INTEGER NOT NULL,
+  direction     VARCHAR(10) NOT NULL,   -- in / out
+  link_type     VARCHAR(20) NOT NULL DEFAULT 'packed',  -- planned / packed / shipped
+  tentative     INTEGER NOT NULL DEFAULT 0,  -- 1 = 暂定分配（SAP XCHAR / Oracle 未分配）
+  qty           REAL,                   -- 该行在该容器内的数量；空 = 整行
+  org_id        INTEGER,
+  created_at    DATETIME NOT NULL,
+  created_by    INTEGER,
+  updated_at    DATETIME,
+  remark        VARCHAR(255)
+);
+
+-- line_id 可空，普通 UNIQUE 在 SQLite 下会放过重复，必须用表达式唯一索引
+CREATE UNIQUE INDEX uq_document_hu_link ON document_hu_links(
+  doc_type, doc_id, COALESCE(line_id, 0), hu_id, direction);
+CREATE INDEX idx_document_hu_doc  ON document_hu_links(doc_type, doc_id);
+CREATE INDEX idx_document_hu_hu   ON document_hu_links(hu_id);
+CREATE INDEX idx_document_hu_line ON document_hu_links(line_id);
+```
+
+口径：
+
+- **一行一关系**：`(doc, line, hu, direction)` 只有一行，`link_type` 沿 `planned → packed → shipped` 推进（不追加重复行）；
+  全量历史仍由 `hu_transactions` 承载，桥表只是当前关系投影。
+- `tentative=1` 表示未经作业确认的预分配（对应 SAP `XCHAR`、Oracle `DELIVERY_ID IS NULL`）。
+- `qty` 是**一行多箱的承载列**（对标 SAP `VEPO.VEMNG`、Oracle 容器明细数量），不是可选装饰：
+  行只有 1 条 link 时 `NULL` 表示「整行全量」；一旦该行出现第 2 条 link，所有 link 必须写显式 `qty`。
+- 校验：同一 `(doc_type, line_id, direction)` 的 `SUM(qty)` 不得超过单据行数量（容差沿用现有
+  `transfer_over_ship_percent` / `transfer_over_receive_percent` 口径）；`SUM(qty) = 行数量` 才算该行装箱完成。
+- 落地边界：v216 提供 `pack_line(doc_type, doc_id, line_id, hu_id, qty)` 服务入口承载拆箱；
+  现有 `receipt_lines.hu_no` 快捷路径语义不变（整行进一箱）。自动分配与拆箱 UI 不在 v216。
+- 关系行仍**一行一关系**（`line_id` + `hu_id` + `direction` 唯一），不做「同一行同一箱多条 qty 行」。
+- 枚举：`document_hu_link_type`（`planned` / `packed` / `shipped`）、`document_hu_direction`（`in` / `out`）。
+- 权限：`document_hu_link:document_hu_link_read`（只读）；不建独立菜单（由 HU hub 二期加「关联单据」tab 承载）。
+- 回填：按 `hu_no` 反查 `handling_units.id`，把存量 `receipt_lines`（`in` / `packed`）、
+  `shipment_lines`（`out` / `shipped`）、`transfer_order_lines`（`out` / `shipped`）迁入；
+  `hu_no` 无法解析的行**跳过并计数告警**，不阻断迁移。
+
+**D18（新增）：单据行 `hu_no` 降级为快捷录入**
+
+保留 `hu_no` / `hu_type` 两列（兼容存量与手工录单），但语义改为「快捷录入：过账时由服务
+`resolve_or_create_hu(hu_no)` 转成 `document_hu_links` 行」；不再把它当作事实源。
+与 D7（`serial_no` 快捷录入）同口径。
+
+**D19（修订 H4）：状态机补 `planned` / `in_transit`**
+
+| From | To | 触发 |
+|---|---|---|
+| `planned` | `open` | 计划转实体（一期只占位，不产生） |
+| `planned` | `void` | 计划取消 |
+| `open` | `sealed` | 封箱 |
+| `sealed` | `in_transit` | 跨组织调拨发出（P2 启用） |
+| `in_transit` | `sealed` | 目标组织确认到达（P2 启用） |
+| `sealed` | `shipped` | 本组织发运 |
+| `in_transit` | `shipped` | 跨组织直接走完（P2） |
+| 任意（非 `shipped` / `void`） | `void` | 作废 |
+
+一期目标：新增两个枚举值 + `sealed ↔ in_transit` 两条迁移；`planned` 仅占位，等装箱计划一并启用。
+
+> 落地拆分：v216 只建 `document_hu_links` 与 P1 接线，**不改** `handling_units` 的
+> `CHECK (status IN ('open','sealed','shipped','void'))`。SQLite 改 CHECK 必须重建表
+> （连带索引与 `handling_unit_items` / `hu_transactions` 外键），风险独立，故
+> `planned` / `in_transit` 与 `sealed ↔ in_transit` 状态迁移统一推到 **v217**。
+
+#### 11.15.6 P1 止血（不依赖 v216，先落三项）
+
+| 项 | 改法 | 文件 |
+|---|---|---|
+| #1 发运去重 | `ship_shipment` / `ship_transfer` 先按 `hu_no` 归并为 `hu_no → [line_id]`，每 HU 只调一次 `ship_hu`，并把全部 `line_id` 一次写入事件；对已 `shipped` 的同单据 HU 视为幂等跳过（`[SKIP]` 日志） | `meta/services/handling_unit_service.py` |
+| #2 顺序冲突 | `shipment_service` 改为**先** `_ship_hus` **后** `_register_shipment_serials`；同时让 `register_shipment` 对「同 `(doc_type=shipment, doc_id)` 已 link」的号幂等跳过，避免反向顺序再次踩坑 | `meta/services/shipment_service.py`、`meta/services/serial_number_service.py` |
+| #3 语义不可变 | `handling_unit.yaml` 给 `hu_no` / `status` / `parent_hu_id` / `root_hu_id` / `cycle_no` / `sealed_at` / `shipped_at` / `voided_at` 标 `semantics.immutable: true`，状态只由 BO action 推进 | `meta/schemas/handling_unit.yaml` |
+
+三项均不改变物理表结构，可在 v216 之前独立发布。
+
+#### 11.15.7 v216 之后的接线
+
+| 方法 | 变更 |
+|---|---|
+| `pack_receipt` | 每行写 `link(direction=in, link_type=packed, tentative=0)`；同键已存在则 UPDATE `link_type`，不追加 |
+| `ship_hu` | 增加 `line_ids` 入参（缺省 `[line_id]`）；一次把该 HU 所有行的 link 推进到 `shipped`，事件仍写一条（`line_id` 取首行，其余行 id 记 `remark` 或拆多事件） |
+| `ship_shipment` | 按 `hu_no` 归并后调用；回写全部行 link |
+| `ship_transfer` | 同组织 `move` 不写 link；跨组织写 `direction=out`（源，`org_id=from`，源 HU 置 `in_transit`）+ `direction=in`（目标，`org_id=to`，目标侧新建 HU 置 `sealed`） |
+| `reverse_document` | 按 link 回退（`shipped → packed → 删除`），并写反向 `hu_transactions`；**不物理删 link 行**（审计优先，沿用 D13 口径） |
+| 新查询 | `hu_documents(hu_id)`（容器 → 单据）、`document_hus(doc_type, doc_id)`（单据 → 容器）、`unassigned_hus(org_id)`（`tentative=1`） |
+
+#### 11.15.8 分期
+
+| 步骤 | 内容 | 依赖 |
+|---|---|---|
+| P1-1 | 发运去重（#1） | 无 |
+| P1-2 | SN/HU 顺序与幂等（#2） | 无 |
+| P1-3 | 语义不可变标注（#3） | 无 |
+| v216 | `document_hu_links`（含 `qty` 拆箱语义）+ `pack_line` 入口 + 存量回填 + 上述接线（**不含** `planned` / `in_transit`） | P1 |
+| v217 | 状态机补 `planned` / `in_transit`（重建 `handling_units` CHECK）+ 跨组织 `sealed ↔ in_transit` 迁移 | v216 |
+| v218 | 收货封箱节点（#5）、单据→容器正查 UI（#6，hub 加「关联单据」tab） | v217 |
+| 二期 | 装箱单 / 箱贴（#10）、容量校验（#8）、装箱计划（#7 → `planned` 实启用） | v218 |
+| 不做 | 装箱指令合规（#11） | — |
+
+#### 11.15.9 验收
+
+| 测试文件 | 覆盖 |
+|---|---|
+| `meta/tests/test_hu_ship_dedup.py` | 同一 HU 出现在两行 → 只发一次，两行 link 均为 `shipped`；重复过账幂等 |
+| `meta/tests/test_hu_serial_order.py` | 序列号物料 + 装箱发运 → 先 HU 后 SN 不冲突；反向顺序亦幂等 |
+| `meta/tests/test_hu_document_links.py` | v216 建表/唯一索引（含 `COALESCE(line_id,0)` 兜 NULL）/迁移幂等/回填/回滚；`pack_receipt` 写 link；`ship_hu` 推进；`reverse_document` 回退；**一行多箱 qty 汇总校验**（`SUM(qty)` 不得超行数量、等于行数量才算完成） |
+| `meta/tests/test_hu_transit.py` | 跨组织调拨 `sealed → in_transit → sealed`；`in_transit` 不清空 `org_id` |
+| `meta/tests/test_hu_immutable.py` | YAML `semantics.immutable` 覆盖 8 个字段 |
+
+入口：`python d:\filework\test.py --single <path>`（禁止 pytest）。
+
+#### 11.15.10 决策（已按 SAP / Oracle 对标定稿，不再逐项确认）
+
+**决策 1：一行多箱 / 部分装箱 —— 纳入 v216，`qty` 是一等列**
+
+| 对标 | 事实 |
+|---|---|
+| SAP `VEPO` | 内容行主键 `(VENUM, VEPOS)`，每行带 `VBELN` + `POSNR` + `VEMNG`，即「某交货行的某数量进了某箱」；一行拆多箱、一箱装多行都是原生能力 |
+| Oracle | 容器本身是 `WSH_DELIVERY_DETAILS` 的一行，数量落在容器明细 / `WMS_LPN_CONTENTS`；`PARENT_DELIVERY_DETAIL_ID` 表达层级，因此同样是行 ↔ 箱的多对多 |
+
+本地现状为什么必须补：`handling_unit_items` **没有** `doc_type` / `doc_id` / `line_id`（只有
+`item_id` / `batch_id` / `serial_id` / `qty`），单据行只有单值 `hu_no`，且 §11.5 明写「仅当装箱数量 = 行净收数量」。
+这套结构只能表达「一行整箱」，连「一箱多行」都要靠重复写多行实现，**一行多箱完全无法表达**。
+
+结论：v216 把 `qty` 落成真实语义列（见 §11.15.5），并新增 `pack_line(doc_type, doc_id, line_id, hu_id, qty)`
+服务入口；`receipt_lines.hu_no` 仍表示「整行进一箱」，作为快捷录入保留。这样模型一次到位，
+后端先具备拆箱能力，前端拆箱 UI 与自动分配留到 v218。
+
+**决策 2：跨组织调拨目标侧 —— 保持新建 HU（你的判断成立）**
+
+| 对标 | 事实 |
+|---|---|
+| SAP | `VEKP.WERKS` 是工厂级对象；跨工厂调拨在途态为 `STATUS=In transit`，收货工厂以自己的 HU 对象承接（物理标签同一个，系统内是目标工厂的新对象） |
+| Oracle | LPN 归属组织，`LPN context` 含 `In Transit`；目标组织收货时按 LPN 号重建 LPN |
+
+结论：保持 `_clone_tree` 在目标组织新建 HU、复用同一 `hu_no`。配套修订：源 HU 由 `sealed → in_transit`
+（**不再**直接 `shipped`），目标侧新 HU 为 `sealed`；两侧各写一条 link（源 `direction=out`、目标 `direction=in`，
+同一 `transfer_order` + 行），据此可还原「同一箱的跨组织链路」。`in_transit` 不清 `org_id`（仍属源组织），
+正好与「新建」互补：源对象可查、目标对象可操作。
+
+**决策 3：`planned` —— 只加枚举值，不产生数据；预分配用 `tentative`**
+
+| 对标 | 事实 |
+|---|---|
+| SAP | `STATUS=Planned` 是 HU 生命周期态；`XCHAR` 是「关系暂定」标记，二者是两个机制 |
+| Oracle | 「未分配」由 `WSH_DELIVERY_ASSIGNMENTS.DELIVERY_ID IS NULL` 表达，同样不是容器状态 |
+
+本地没有装箱计划单据，若让 `planned` 真的产生数据，必须先造计划对象（超出本阶段）。
+结论：`hu_status` 加 `planned` 枚举值但**不产生数据**（保留位，状态机无入边）；当期真正需要的是
+`document_hu_links.tentative=1`，用它查「未确认装箱 / 预分配」，并可按需在 v218 接装箱计划。
+
+#### 11.15.11 改动文件清单（预估）
+
+| 文件 | 改动 |
+|---|---|
+| `meta/migrations/v216__document_hu_links.py` | 新增：桥表 + 4 索引 + 2 枚举 + 2 权限 + 存量回填（`planned` / `in_transit` 见 v217） |
+| `meta/schemas/document_hu_link.yaml` | 新增：只读对象，`skip_auto_menu: true` |
+| `meta/services/handling_unit_service.py` | 去重、`line_ids`、link 写入/推进、`pack_line`（一行多箱）、`hu_documents` / `document_hus` |
+| `meta/services/shipment_service.py` | 调换 SN / HU 顺序 |
+| `meta/services/serial_number_service.py` | `register_shipment` 幂等跳过已 link 的号 |
+| `meta/services/transfer_order_service.py` | 跨组织 `in_transit` 接线（v217） |
+| `meta/schemas/handling_unit.yaml` | 状态枚举补 2 值；8 个字段 `semantics.immutable` |
+| `meta/schemas/receipt_line.yaml` / `shipment_line.yaml` / `transfer_order_line.yaml` | `hu_no` 描述改「快捷录入」 |
+| `meta/tests/test_hu_ship_dedup.py` 等 5 个 | 见 §11.15.9 |
+
+> 以上为**方案草案**，未动代码；D17 / D18 / D19 与 §11.15.10 三项决策已定稿，实施前只需确认排期。

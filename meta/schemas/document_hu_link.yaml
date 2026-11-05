@@ -1,0 +1,332 @@
+# 单据容器关系（Document HU Link）—— P6a-2 §11.15（SAP VEPO / Oracle WSH_DELIVERY_ASSIGNMENTS 口径）
+# 依据: docs/specs/p6-serial-number-model/spec.md §11.15
+#
+# 口径:
+#   ① 单据行 ↔ 容器是显式关系行，不再是单据行上的单值 hu_no（D17 / D18）。
+#   ② 唯一键 (doc_type, doc_id, COALESCE(line_id,0), hu_id, direction)：
+#      SQLite 普通 UNIQUE 遇 NULL 会放过重复，因此迁移用表达式索引。
+#   ③ qty 承载「一行多箱」：单箱可空（整行），该行出现第二个容器时必须显式数量。
+#   ④ tentative=1 表示预分配（对应 SAP XCHAR / Oracle DELIVERY_ID 为空）。
+#   ⑤ 只读面：写入口在 handling_unit_service，不开放前端直接写。
+
+id: document_hu_link
+name: 单据容器关系
+table_name: document_hu_links
+description: 单据行与包装容器的关系清单——收货 / 发运 / 调拨统一登记
+display_name_field: doc_type
+
+authorization:
+  check: true
+  permissions:
+    read: document_hu_link:document_hu_link_read
+    list: document_hu_link:document_hu_link_list
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: document_hu_link_read
+    name: 查询单据容器关系
+    type: crud
+    method: GET
+    path: "/api/v1/document_hu_links/{id}"
+    description: 查询单条单据容器关系（只读）
+  - id: document_hu_link_list
+    name: 查询单据容器关系列表
+    type: crud
+    method: GET
+    path: "/api/v1/document_hu_links"
+    description: 查询单据容器关系列表（只读）
+
+semantics:
+  meaning: 单据容器关系
+  category: business_document_line
+  aliases:
+    - 单据容器关系
+    - 单据装箱关系
+    - document HU link
+    - packing relation
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: doc_type
+    name: 单据类型
+    type: string
+    db_column: doc_type
+    required: true
+    max_length: 30
+    description: 单据类型（receipt / shipment / transfer_order / work_order）
+    semantics:
+      meaning: 单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 单据类型
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: doc_id
+    name: 单据
+    type: integer
+    db_column: doc_id
+    required: true
+    description: 单据主键
+    semantics:
+      meaning: 单据引用
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: line_id
+    name: 单据行
+    type: integer
+    db_column: line_id
+    description: 单据行主键；表头级关系可空
+    semantics:
+      meaning: 单据行引用
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: hu_id
+    name: 包装容器
+    type: integer
+    db_column: hu_id
+    required: true
+    description: 容器主键
+    semantics:
+      meaning: 容器引用
+      display:
+        type: association
+        target_type: handling_unit
+        display_field: hu_no
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    required: true
+    max_length: 10
+    description: 关系方向（in 入库 / out 出库）
+    enum_values:
+      - value: in
+        label: 入库
+        color: success
+      - value: out
+        label: 出库
+        color: danger
+    semantics:
+      meaning: 单据容器方向
+      filterable: true
+      filter_type: enum
+      filter_label: 方向
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+
+  - id: link_type
+    name: 关系状态
+    type: string
+    db_column: link_type
+    required: true
+    max_length: 20
+    description: 计划 / 已装箱 / 已发运（只前进不回退，回退由反冲显式处理）
+    enum_values:
+      - value: planned
+        label: 已计划
+        color: info
+      - value: packed
+        label: 已装箱
+        color: success
+      - value: shipped
+        label: 已发运
+        color: warning
+    semantics:
+      meaning: 关系推进状态
+      filterable: true
+      filter_type: enum
+      filter_label: 关系状态
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 60
+
+  - id: tentative
+    name: 暂定
+    type: boolean
+    db_column: tentative
+    description: 1 = 预分配（未经作业确认）
+    default: 0
+    semantics:
+      meaning: 暂定分配标记
+      filterable: true
+      filter_type: boolean
+      filter_label: 暂定
+    ui:
+      widget: switch
+      fieldGroup: 基本信息
+      fieldGroupPosition: 70
+
+  - id: qty
+    name: 数量
+    type: decimal
+    db_column: qty
+    precision: 18
+    scale: 4
+    description: 该单据行在该容器内的数量；空 = 整行全量
+    semantics:
+      meaning: 行内分配数量
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 80
+
+  - id: org_id
+    name: 组织
+    type: integer
+    db_column: org_id
+    description: 关系所属组织
+    semantics:
+      meaning: 组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: org_name
+    ui:
+      widget: select
+      relation: org
+      fieldGroup: 基本信息
+      fieldGroupPosition: 90
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 100
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [doc_type, doc_id, line_id, hu_id, direction]
+    unique: true
+    name: uq_document_hu_link
+    # SQLite 唯一索引不约束 NULL：line_id 为空（整单级关系）需按 0 归一，
+    # 否则同一单据/容器/方向可插入多行。与 v216 迁移表达式一致。
+    db_columns: [doc_type, doc_id, "COALESCE(line_id, 0)", hu_id, direction]
+    description: 同一单据行同一容器同一方向唯一（line_id 为空时按 0 归一）
+  - fields: [doc_type, doc_id]
+    name: idx_document_hu_doc
+  - fields: [hu_id, direction]
+    name: idx_document_hu_hu
+  - fields: [line_id]
+    name: idx_document_hu_line
+
+relations:
+  - id: document_hu_link_to_hu
+    name: 包装容器
+    type: reference
+    target: handling_unit
+    source_field: hu_id
+    target_field: id
+    cardinality: N:1
+  - id: document_hu_link_to_org
+    name: 组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 单据容器关系
+    columns:
+      - field: doc_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: doc_id
+        width: 90
+      - field: line_id
+        width: 90
+      - field: hu_id
+        width: 150
+        relation: handling_unit
+        relation_display_field: hu_no
+      - field: direction
+        width: 80
+        filterable: true
+        filter_type: select
+      - field: link_type
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: qty
+        width: 100
+      - field: tentative
+        width: 80
+      - field: org_id
+        width: 120
+        relation: org
+        relation_display_field: org_name
+      - field: created_at
+        width: 160
+  form:
+    sections:
+      - title: 基本信息
+        fields: [doc_type, doc_id, line_id, hu_id, direction, link_type,
+                 tentative, qty, org_id, remark]
+      - title: 审计
+        fields: [created_at, updated_at]
+  detail:
+    sections:
+      - title: 基本信息
+        fields: [doc_type, doc_id, line_id, hu_id, direction, link_type,
+                 tentative, qty, org_id, remark]
+      - title: 审计
+        fields: [created_at, updated_at]

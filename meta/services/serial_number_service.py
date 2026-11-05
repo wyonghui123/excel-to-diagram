@@ -515,7 +515,14 @@ class SerialNumberService:
             serial = self._require_row(
                 SERIAL_TABLE, link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
             self._assert_org(serial, org_id)
-            if serial.get('usage_status') not in OUTBOUND_ALLOWED \
+            # 整箱发运先于录号执行：同单据已由 ship_hu 置 shipped 的号不再校验在库（§11.15 P1-2）
+            shipped_by_doc = self.ds.query(
+                'SELECT id FROM %s WHERE serial_id = ? AND doc_type = ? '
+                'AND doc_id = ? AND usage_to = ?'
+                % SERIAL_TX_TABLE,
+                [serial['id'], DOC_SHIPMENT, header.get('id'), STATUS_SHIPPED])
+            if not shipped_by_doc \
+                    and serial.get('usage_status') not in OUTBOUND_ALLOWED \
                     and not (serial.get('source_type') == 'issue_created'
                              and serial.get('usage_status') == STATUS_DEFINED):
                 raise SerialNumberError(
@@ -529,7 +536,7 @@ class SerialNumberService:
                 [serial['id'], TXN_SHIP, DOC_SHIPMENT, header.get('id'),
                  line.get('id')])
             now = _now()
-            if not existing:
+            if not existing and not shipped_by_doc:
                 self._insert_txn(
                     serial['id'], TXN_SHIP, txn_date or now,
                     inventory_transaction_id=None, org_from_id=org_id,

@@ -9,7 +9,7 @@
 #   ⑤ 不生成 SSCC，仅校验 18 位纯数字的 GS1 校验位（H6）。
 #   ⑥ 不自动汇总重量体积（H7）；允许混物料混批次（H9）。
 #
-# 枚举值由迁移 v208 注册；本文件只声明 enum_values 与 value_help 引用。
+# 枚举值由迁移 v211 注册；本文件只声明 enum_values 与 value_help 引用。
 
 id: handling_unit
 name: 包装容器
@@ -89,6 +89,7 @@ fields:
       business_key: true
       data_category: code
       searchable: true
+      immutable: true
     ui:
       widget: input
       fieldGroup: 身份
@@ -204,6 +205,7 @@ fields:
     description: 上层容器（单父）；禁止成环
     semantics:
       meaning: 上层容器引用
+      immutable: true
       display:
         type: association
         target_type: handling_unit
@@ -225,6 +227,7 @@ fields:
     description: 最外层容器（自身为顶层时等于 id）
     semantics:
       meaning: 最外层容器引用
+      immutable: true
     ui:
       widget: number
       fieldGroup: 嵌套
@@ -265,6 +268,7 @@ fields:
         result_type: dropdown
     semantics:
       meaning: 容器状态
+      immutable: true
       filterable: true
       filter_type: enum
       filter_label: 状态
@@ -298,6 +302,7 @@ fields:
     description: 第几次使用（复用箱递增）
     semantics:
       meaning: 使用轮次
+      immutable: true
     ui:
       widget: number
       fieldGroup: 状态
@@ -311,6 +316,7 @@ fields:
     description: 密封时间
     semantics:
       meaning: 容器密封时间
+      immutable: true
     ui:
       widget: datetime
       fieldGroup: 状态
@@ -324,6 +330,7 @@ fields:
     description: 发运时间
     semantics:
       meaning: 容器发运时间
+      immutable: true
     ui:
       widget: datetime
       fieldGroup: 状态
@@ -337,6 +344,7 @@ fields:
     description: 作废时间
     semantics:
       meaning: 容器作废时间
+      immutable: true
     ui:
       widget: datetime
       fieldGroup: 状态
@@ -623,3 +631,40 @@ ui_view_config:
                  cycle_no, parent_hu_id, root_hu_id, packaging_item_id,
                  gross_weight, tare_weight, net_weight, volume, uom_id,
                  remark, created_at, updated_at]
+
+  # [D4 查询 UI 2026-11-04] page_type=multi_object_hub 时，MultiObjectHubPage 读本块
+  #   构建「容器树 + 三个 tab」；契约见 MultiObjectHubPage/hubOptions.js。
+  # 形态：左树按 parent_hu_id 组嵌套（容器可套容器），右表按当前 tab 展示：
+  #   子容器 tab 只列直接子级（mode: direct → 取 selected 而非 effective）；
+  #   容器内容 / 事件 tab 取整棵子树（effective = 勾选 ∪ 全部子孙）。
+  hub:
+    object_types: [handling_unit, handling_unit_item, hu_transaction]
+    default_tab: handling_unit
+    tabs:
+      handling_unit: 子容器
+      handling_unit_item: 容器内容
+      hu_transaction: 容器事件
+    state_key: handlingUnitManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: handling_unit
+      scope_key: handling_unit
+      parent_field: parent_hu_id
+      label_field: hu_no
+      code_field: hu_no
+      order_by: hu_no
+      badge_field: status
+      badge_map:
+        open: { label: 未封箱, type: info }
+        sealed: { label: 已封箱, type: success }
+        shipped: { label: 已发运, type: warning }
+        void: { label: 已作废, type: danger }
+      node_icon: folder
+      search_placeholder: 输入容器号搜索
+      empty_text: 暂无包装容器
+      paginate_all: true
+    filters:
+      handling_unit: { field: parent_hu_id, mode: direct }
+      handling_unit_item: { field: hu_id }
+      hu_transaction: { field: hu_id }

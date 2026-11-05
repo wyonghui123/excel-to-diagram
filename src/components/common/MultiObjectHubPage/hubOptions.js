@@ -19,6 +19,8 @@
  *       object: item_group               # 树查询的 BO
  *       scope_key: item                  # 写入 scopeIds 的键（受过滤 tab 名）
  *       parent_field: parent_id          # 缺省 parent_id
+ *       label_field / code_field         # 节点显示字段；缺省 name / code
+ *                                        # （无 name/code 的对象，如包装容器用 hu_no）
  *       flat: true                       # 扁平分类（无 parent 自引用）
  *       order_by: ''                     # 省略 = 组件默认按 code 排；'' = 保持后端顺序
  *       badge_field / badge_map          # 节点徽标（枚举值 → { label, type }）
@@ -27,6 +29,8 @@
  *       empty_text / search_placeholder
  *     filters:                           # 每个 tab 的范围过滤；缺省 = 不受左树影响
  *       item: { field: item_group_id }   # → item_group_id__in = effective ids
+ *       handling_unit: { field: parent_hu_id, mode: direct }
+ *                                        # mode: direct → 只取勾选节点自身（列直接子级）
  *       item_group: { mode: none }       # 显式声明「不过滤」（语义同缺省）
  *       party_archive:                   # 两段桥接：树选组 → 关系表 → 伙伴集合
  *         bridge:
@@ -123,7 +127,10 @@ function buildFilterStrategies(filtersConfig, objectTypes, scopeKey, { bridgeIds
       continue
     }
     strategies[objectType] = (filters, scopeIds) => {
-      const ids = scopeIds?.[scopeKey]?.effective || []
+      // mode: direct = 只取勾选节点自身（嵌套树逐层展开时列直接子级）；
+      // 缺省 effective = 勾选 ∪ 全部子孙（主数据页的范围收窄口径）
+      const scope = scopeIds?.[scopeKey]
+      const ids = (rule.mode === 'direct' ? scope?.selected : scope?.effective) || []
       if (!ids.length) return filters
       return { ...filters, [`${rule.field}__in`]: ids.join(',') }
     }
@@ -139,6 +146,8 @@ function buildScopeProps(scopeConfig, { scopeObject, scopeKey, idsKey, effective
     effectiveIdsKey
   }
   if (scopeConfig.parent_field) props.parentField = scopeConfig.parent_field
+  if (scopeConfig.label_field) props.labelField = scopeConfig.label_field
+  if (scopeConfig.code_field) props.codeField = scopeConfig.code_field
   if (scopeConfig.flat) props.flat = true
   // order_by 区分「省略」与「空串」：省略 ⇒ 组件默认 code 排序；'' ⇒ 保持后端顺序
   if (scopeConfig.order_by !== undefined && scopeConfig.order_by !== null) {

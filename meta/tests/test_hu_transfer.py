@@ -99,6 +99,59 @@ def test_ship_transfer_missing_hu_raises():
     assert exc.value.rule == 'HU_NOT_FOUND'
 
 
+def test_ship_transfer_same_hu_multi_lines_moves_once():
+    """同一容器出现在同单据多行：同组织只移库一次（§11.15 P1-1）。"""
+    conn = build_db()
+    add_item(conn)
+    svc = service(conn)
+    serial_id = add_serial(conn, 'SN-001', org_id=1, location_id=7)
+    hu = svc.create_hu({'hu_no': 'HU-001', 'org_id': 1, 'location_id': 7})
+    svc.pack(hu['id'], [{'content_type': 'material', 'serial_id': serial_id}])
+    svc.seal(hu['id'])
+    conn.execute(
+        'INSERT INTO transfer_orders (id, from_org_id, to_org_id, '
+        'from_location_id, to_location_id, status) '
+        "VALUES (1, 1, 1, 7, 8, 'released')")
+    conn.execute(
+        'INSERT INTO transfer_order_lines (id, transfer_order_id, item_id, qty, '
+        "hu_no, status) VALUES (1, 1, 900, 1, 'HU-001', 'open')")
+    conn.execute(
+        'INSERT INTO transfer_order_lines (id, transfer_order_id, item_id, qty, '
+        "hu_no, status) VALUES (2, 1, 901, 1, 'HU-001', 'open')")
+
+    result = svc.ship_transfer(1)
+
+    assert result['moved'] == 1
+    moves = ds(conn).query(
+        "SELECT * FROM hu_transactions WHERE hu_id = ? AND txn_type = 'move'",
+        [hu['id']])
+    assert len(moves) == 1
+
+
+def test_ship_transfer_cross_org_is_idempotent():
+    """跨组织重复发运：容器已 shipped 时按幂等跳过，不抛错（§11.15 P1-1）。"""
+    conn = build_db()
+    add_item(conn)
+    svc = service(conn)
+    serial_id = add_serial(conn, 'SN-001', org_id=1, location_id=7)
+    hu = svc.create_hu({'hu_no': 'HU-001', 'org_id': 1, 'location_id': 7})
+    svc.pack(hu['id'], [{'content_type': 'material', 'serial_id': serial_id}])
+    svc.seal(hu['id'])
+    conn.execute(
+        'INSERT INTO transfer_orders (id, from_org_id, to_org_id, '
+        'from_location_id, to_location_id, status) '
+        "VALUES (1, 1, 2, 7, 9, 'released')")
+    conn.execute(
+        'INSERT INTO transfer_order_lines (id, transfer_order_id, item_id, qty, '
+        "hu_no, status) VALUES (1, 1, 900, 1, 'HU-001', 'open')")
+
+    first = svc.ship_transfer(1)
+    again = svc.ship_transfer(1)
+
+    assert first['shipped'] == 1
+    assert again['shipped'] == 0 and again['skipped_lines'] == 1
+
+
 def test_pack_receipt_clones_cross_org_tree():
     conn = build_db()
     add_item(conn)

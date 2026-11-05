@@ -197,3 +197,45 @@ def test_linked_receipt_twice_is_idempotent():
     pack_events = ds(conn).query(
         "SELECT COUNT(*) AS n FROM hu_transactions WHERE txn_type = 'pack' ")
     assert pack_events[0]['n'] == 1
+
+
+def test_ship_shipment_same_hu_two_lines_ships_once():
+    """同一容器出现在同单据多行：只发一次，两个 line_id 都落事件（§11.15 P1-1）。"""
+    conn = build_db()
+    add_item(conn)
+    serial_id = add_serial(conn)
+    _receipt_with_hu(conn, hu_no='HU-R')
+    link_receipt_serial(conn, 1, 1, serial_id)
+    svc = service(conn)
+    svc.pack_receipt(1)
+    hu = ds(conn).query('SELECT id FROM handling_units WHERE hu_no = ?',
+                        ['HU-R'])[0]
+    svc.seal(hu['id'])
+    conn.execute(
+        'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
+        "status) VALUES (1, 'DN-1', 7, 'confirmed')")
+    conn.execute(
+        'INSERT INTO shipment_lines (id, delivery_id, item_id, qty, hu_no, '
+        "status) VALUES (1, 1, 900, 1, 'HU-R', 'confirmed')")
+    conn.execute(
+        'INSERT INTO shipment_lines (id, delivery_id, item_id, qty, hu_no, '
+        "status) VALUES (2, 1, 901, 1, 'HU-R', 'confirmed')")
+
+    result = svc.ship_shipment(1)
+
+    assert result['shipped'] == 1
+    events = ds(conn).query(
+        "SELECT line_id FROM hu_transactions WHERE hu_id = ? "
+        "AND txn_type = 'ship' ORDER BY line_id", [hu['id']])
+    assert [row['line_id'] for row in events] == [1, 2]
+    hu_row = ds(conn).query('SELECT status FROM handling_units WHERE id = ?',
+                            [hu['id']])[0]
+    assert hu_row['status'] == 'shipped'
+
+    # 重复过账：容器已 shipped，整单按幂等跳过，不重复写事件
+    again = svc.ship_shipment(1)
+    assert again['shipped'] == 0 and again['skipped_lines'] == 2
+    count = ds(conn).query(
+        "SELECT COUNT(*) AS n FROM hu_transactions WHERE hu_id = ? "
+        "AND txn_type = 'ship'", [hu['id']])[0]
+    assert count['n'] == 2
