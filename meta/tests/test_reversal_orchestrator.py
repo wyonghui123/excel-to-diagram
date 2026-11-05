@@ -45,8 +45,9 @@ def _edge(ds, edge_id, source_id='L1', qty=10):
 
 
 def _rows(ds):
-    return {row['id']: row for row in
-            ds.query('SELECT id, quantity_sign, status FROM doc_flow_edges')}
+    return {row['id']: row for row in ds.query(
+        'SELECT id, quantity_sign, status, edge_kind, reverses_edge_id '
+        'FROM doc_flow_edges')}
 
 
 def test_resolve_mode_uses_profile():
@@ -79,7 +80,7 @@ def test_red_reverse_writes_red_edge_and_flips_original(app_ds):
     assert reds[0]['status'] == 'reversed'
 
 
-def test_reverse_document_edges_only_touches_given_source(app_ds):
+def test_source_level_reversal_compensates_without_flipping(app_ds):
     _edge(app_ds, 'e1', source_id='L1', qty=5)
     _edge(app_ds, 'e2', source_id='L1', qty=7)
     _edge(app_ds, 'e3', source_id='L2', qty=9)
@@ -89,9 +90,12 @@ def test_reverse_document_edges_only_touches_given_source(app_ds):
 
     assert count == 2
     rows = _rows(app_ds)
-    assert rows['e1']['status'] == 'reversed'
-    assert rows['e2']['status'] == 'reversed'
+    # 单一事实模型：原边保留，追加 reversal 补偿边（不改历史）
+    assert rows['e1']['status'] == 'active'
+    assert rows['e2']['status'] == 'active'
     assert rows['e3']['status'] == 'active'
+    reversals = [r for r in rows.values() if r.get('edge_kind') == 'reversal']
+    assert sorted(r['reverses_edge_id'] for r in reversals) == ['e1', 'e2']
 
 
 def test_reverse_document_edges_is_idempotent(app_ds):

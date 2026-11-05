@@ -23,6 +23,7 @@ EXPECTED_EDGES = {
         (('shipped',), 'delivered'),
         (('delivered',), 'closed'),
         (('draft', 'released'), 'cancelled'),
+        (('shipped', 'delivered'), 'reversed'),
     },
     'receipt.yaml': {
         (('draft',), 'posted'),
