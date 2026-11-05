@@ -74,13 +74,51 @@ def test_ship_transfer_cross_org_ships_source_tree():
 
     assert result['shipped'] == 1 and result['moved'] == 0
     hu_row = ds(conn).query(
-        'SELECT status, location_id FROM handling_units WHERE id = ?',
+        'SELECT status, location_id, shipped_at FROM handling_units WHERE id = ?',
         [hu['id']])[0]
-    assert hu_row['status'] == 'shipped'
+    assert hu_row['status'] == 'in_transit'
     assert hu_row['location_id'] is None
+    assert hu_row['shipped_at'] is None
     serial_row = ds(conn).query(
         'SELECT usage_status FROM serial_numbers WHERE id = ?', [serial_id])[0]
     assert serial_row['usage_status'] == 'shipped'
+
+
+def test_cross_org_transit_completes_on_target_receipt():
+    """目标组织收货复制子树后，源容器由 in_transit 转 shipped（v217）。"""
+    conn = build_db()
+    add_item(conn)
+    svc = service(conn)
+    serial_id = add_serial(conn, 'SN-001', org_id=1, location_id=7)
+    hu = svc.create_hu({'hu_no': 'HU-001', 'org_id': 1, 'location_id': 7})
+    svc.pack(hu['id'], [{'content_type': 'material', 'serial_id': serial_id}])
+    svc.seal(hu['id'])
+    conn.execute(
+        'INSERT INTO transfer_orders (id, from_org_id, to_org_id, '
+        'from_location_id, to_location_id, status) '
+        "VALUES (1, 1, 2, 7, 9, 'released')")
+    conn.execute(
+        'INSERT INTO transfer_order_lines (id, transfer_order_id, item_id, qty, '
+        "hu_no, status) VALUES (1, 1, 900, 1, 'HU-001', 'open')")
+    assert svc.ship_transfer(1)['shipped'] == 1
+
+    conn.execute(
+        'INSERT INTO receipts (id, receipt_no, inventory_org_id, '
+        "deliver_to_location_id, status) VALUES (1, 'R1', 2, 9, 'posted')")
+    conn.execute(
+        'INSERT INTO receipt_lines (id, receipt_id, item_id, qty_received, '
+        "putaway_location_id, hu_no, status) "
+        "VALUES (1, 1, 900, 1, 9, 'HU-001', 'open')")
+
+    assert svc.pack_receipt(1)['packed'] == 1
+    source = ds(conn).query(
+        'SELECT status, shipped_at FROM handling_units WHERE id = ?',
+        [hu['id']])[0]
+    assert source['status'] == 'shipped'
+    assert source['shipped_at'] is not None
+    target = ds(conn).query(
+        "SELECT * FROM handling_units WHERE hu_no = 'HU-001' AND org_id = 2")[0]
+    assert target['status'] == 'sealed'
 
 
 def test_ship_transfer_missing_hu_raises():

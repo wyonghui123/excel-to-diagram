@@ -111,7 +111,6 @@ def test_ship_advances_link_to_shipped_and_reverse_steps_back():
     svc.pack_receipt(1)
     hu = ds(conn).query(
         'SELECT id FROM handling_units WHERE hu_no = ?', ['HU-R'])[0]
-    svc.seal(hu['id'])
     shipped = svc.ship_shipment(1)
 
     assert shipped['shipped'] == 1

@@ -36,11 +36,14 @@ SHIPMENT_LINE_TABLE = 'shipment_lines'
 TRANSFER_TABLE = 'transfer_orders'
 TRANSFER_LINE_TABLE = 'transfer_order_lines'
 
+STATUS_PLANNED = 'planned'
 STATUS_OPEN = 'open'
 STATUS_SEALED = 'sealed'
+STATUS_IN_TRANSIT = 'in_transit'
 STATUS_SHIPPED = 'shipped'
 STATUS_VOID = 'void'
-HU_STATUSES = (STATUS_OPEN, STATUS_SEALED, STATUS_SHIPPED, STATUS_VOID)
+HU_STATUSES = (STATUS_PLANNED, STATUS_OPEN, STATUS_SEALED, STATUS_IN_TRANSIT,
+               STATUS_SHIPPED, STATUS_VOID)
 HU_TYPES = ('pallet', 'carton', 'bin', 'container', 'other')
 
 CONTENT_MATERIAL = 'material'
@@ -838,7 +841,8 @@ class HandlingUnitService:
     # ------------------------------------------------------------------
     def ship_hu(self, hu_id: Any, shipment_id: Any = None,
                 doc: Optional[Dict[str, Any]] = None,
-                line_ids: Optional[List[Any]] = None) -> Dict[str, Any]:
+                line_ids: Optional[List[Any]] = None,
+                in_transit: bool = False) -> Dict[str, Any]:
         hu = self._get_hu(hu_id)
         if hu.get('status') != STATUS_SEALED:
             raise HandlingUnitError('仅已密封的容器可整箱发运，当前 %s'
@@ -867,6 +871,7 @@ class HandlingUnitService:
                     field_name='status', rule='HU_SHIP_STATUS_INVALID')
         serial_ids = self._leaf_serial_ids(hu['id'])
         now = _now()
+        target_status = STATUS_IN_TRANSIT if in_transit else STATUS_SHIPPED
         with self.ds.transaction():
             for serial_id in serial_ids:
                 serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
@@ -880,12 +885,13 @@ class HandlingUnitService:
                 self.ds.execute(
                     'UPDATE %s SET status = ?, location_id = NULL, '
                     'shipped_at = ?, updated_at = ? WHERE id = ?' % HU_TABLE,
-                    [STATUS_SHIPPED, now, now, hu_item])
+                    [target_status, None if in_transit else now, now, hu_item])
                 self._insert_txn(hu_item, TXN_SHIP, now,
                                  from_location_id=hu.get('location_id'),
                                  from_hu_id=hu_item,
                                  doc_type=doc_type, doc_id=doc_id,
-                                 line_id=doc.get('line_id'), remark='整箱发运')
+                                 line_id=doc.get('line_id'),
+                                 remark='整箱发运（在途）' if in_transit else '整箱发运')
             for line_id in extra_lines:
                 self._insert_txn(hu['id'], TXN_SHIP, now,
                                  from_location_id=hu.get('location_id'),
@@ -900,7 +906,7 @@ class HandlingUnitService:
                     self._write_link(doc_type, doc_id, line_id, hu['id'],
                                      DIRECTION_OUT, LINK_TYPE_SHIPPED,
                                      org_id=hu.get('org_id'))
-        return {'hu_id': hu['id'], 'status': STATUS_SHIPPED,
+        return {'hu_id': hu['id'], 'status': target_status,
                 'shipped_serials': len(serial_ids),
                 'shipped_hus': len(tree)}
 
@@ -1151,6 +1157,7 @@ class HandlingUnitService:
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
             % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
         packed = 0
+        seal_candidates: List[int] = []
         for line in lines:
             hu_no = str(line.get('hu_no') or '').strip()
             if not hu_no:
@@ -1180,12 +1187,14 @@ class HandlingUnitService:
                 # 跨组织调拨：源组织同号容器已发运 → 复制整棵子树到目标组织
                 source = self._find_hu(hu_no)
                 if source is not None and source.get('status') in (
-                        STATUS_SEALED, STATUS_SHIPPED):
+                        STATUS_SEALED, STATUS_SHIPPED, STATUS_IN_TRANSIT):
                     target_id = self._clone_tree(
                         source, org_id,
                         line.get('putaway_location_id') or location_id,
                         {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
                          'line_id': line.get('id')})
+                    if source.get('status') == STATUS_IN_TRANSIT:
+                        self._complete_transit(source, receipt_id, line.get('id'))
                     self._write_link(DOC_RECEIPT, receipt_id, line.get('id'),
                                      target_id, DIRECTION_IN, LINK_TYPE_PACKED,
                                      qty=line_qty, org_id=org_id)
@@ -1202,11 +1211,36 @@ class HandlingUnitService:
             self.pack(hu['id'], contents,
                       {'doc_type': DOC_RECEIPT, 'doc_id': receipt_id,
                        'line_id': line.get('id')})
+            seal_candidates.append(int(hu['id']))
             self._write_link(DOC_RECEIPT, receipt_id, line.get('id'), hu['id'],
                              DIRECTION_IN, LINK_TYPE_PACKED, qty=line_qty,
                              org_id=org_id)
             packed += 1
+        # §11.15 缺口 #5：收货装箱完成后封箱（同箱多行的行全部装完再封）
+        for hu_id in seal_candidates:
+            if self._get_hu(hu_id).get('status') == STATUS_OPEN:
+                self.seal(hu_id)
         return {'receipt_id': receipt_id, 'packed': packed}
+
+    def _complete_transit(self, source: Dict[str, Any], receipt_id: Any,
+                          line_id: Any) -> int:
+        """目标组织收货确认：源子树 in_transit → shipped（v217 / D19）。"""
+        now = _now()
+        completed = 0
+        for hu_item in self._descendant_ids(source['id']):
+            node = self._get_hu(hu_item)
+            if node.get('status') != STATUS_IN_TRANSIT:
+                continue
+            self.ds.execute(
+                'UPDATE %s SET status = ?, shipped_at = ?, updated_at = ? '
+                'WHERE id = ?' % HU_TABLE,
+                [STATUS_SHIPPED, now, now, hu_item])
+            self._insert_txn(hu_item, TXN_SHIP, now, from_hu_id=hu_item,
+                             doc_type=DOC_RECEIPT, doc_id=receipt_id,
+                             line_id=line_id,
+                             remark='目标组织收货确认（在途转已发运）')
+            completed += 1
+        return completed
 
     def _receipt_contents(self, line: Dict[str, Any], org_id: Any) \
             -> List[Dict[str, Any]]:
@@ -1261,9 +1295,9 @@ class HandlingUnitService:
             if hu is None:
                 raise HandlingUnitError('包装容器不存在：%s' % hu_no,
                                         field_name='hu_no', rule='HU_NOT_FOUND')
-            if hu.get('status') == STATUS_SHIPPED:
+            if hu.get('status') in (STATUS_SHIPPED, STATUS_IN_TRANSIT):
                 skipped_lines += len(rows)
-                logger.info('[handling_unit] 容器 %s 已发运，跳过 %s 行',
+                logger.info('[handling_unit] 容器 %s 已发运/在途，跳过 %s 行',
                             hu_no, len(rows))
                 continue
             primary = rows[0]
@@ -1276,11 +1310,12 @@ class HandlingUnitService:
                 'skipped_lines': skipped_lines}
 
     def ship_transfer(self, transfer_order_id: Any) -> Dict[str, Any]:
-        """调拨发运：同组织整体移库；跨组织整箱发运（源容器置 shipped）。
+        """调拨发运：同组织整体移库；跨组织整箱发运（源容器置 in_transit）。
 
-        §11.5：同组织 HU 整体 move 到目标库位；跨组织只把源子树置 shipped，
-        目标组织侧的结构复制在收货过账时由 `_clone_tree` 完成。
-        同一容器多行只处理一次（§11.15 P1-1），已发运容器幂等跳过。
+        §11.5：同组织 HU 整体 move 到目标库位；跨组织只把源子树置 in_transit，
+        目标组织侧的结构复制与「在途→已发运」确认在收货过账时由
+        `_clone_tree` / `_complete_transit` 完成。
+        同一容器多行只处理一次（§11.15 P1-1），已发运/在途容器幂等跳过。
         """
         if not hu_schema_ready(self.ds):
             return {'skipped': True, 'moved': 0, 'shipped': 0,
@@ -1320,13 +1355,14 @@ class HandlingUnitService:
                                  LINK_TYPE_SHIPPED, org_id=from_org)
                 moved += 1
             else:
-                if hu.get('status') == STATUS_SHIPPED:
+                if hu.get('status') in (STATUS_SHIPPED, STATUS_IN_TRANSIT):
                     skipped_lines += len(rows)
-                    logger.info('[handling_unit] 容器 %s 已发运，跳过 %s 行',
+                    logger.info('[handling_unit] 容器 %s 已发运/在途，跳过 %s 行',
                                 hu_no, len(rows))
                     continue
                 self.ship_hu(hu['id'], None, doc,
-                             line_ids=[row.get('id') for row in rows])
+                             line_ids=[row.get('id') for row in rows],
+                             in_transit=True)
                 shipped += 1
         return {'transfer_order_id': transfer_order_id,
                 'moved': moved, 'shipped': shipped,

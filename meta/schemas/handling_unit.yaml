@@ -242,6 +242,9 @@ fields:
     max_length: 20
     description: 容器状态；只由 handling_unit_service 流转
     enum_values:
+      - value: planned
+        label: 已计划
+        color: info
       - value: open
         label: 打开
         color: info
@@ -249,6 +252,9 @@ fields:
       - value: sealed
         label: 已密封
         color: success
+      - value: in_transit
+        label: 在途
+        color: warning
       - value: shipped
         label: 已发运
         color: primary

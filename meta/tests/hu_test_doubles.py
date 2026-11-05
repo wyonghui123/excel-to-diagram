@@ -11,6 +11,8 @@ import sqlite3
 from meta.tests.receipt_test_doubles import MemDS
 
 _MIGRATION = importlib.import_module('meta.migrations.v211__handling_unit')
+_STATUS_MIGRATION = importlib.import_module(
+    'meta.migrations.v217__handling_unit_status')
 
 SCHEMA = """
 CREATE TABLE items (
@@ -94,6 +96,8 @@ def build_db(with_hu: bool = True):
             conn.executescript(ddl)
         for _table, _name, ddl in _MIGRATION.INDEXES:
             conn.execute(ddl)
+        # v217：测试库同样升到 6 态（planned / in_transit）
+        _STATUS_MIGRATION._rebuild(conn, _STATUS_MIGRATION.NEW_DDL)
     conn.execute("INSERT INTO orgs (id, code, name) VALUES (1, 'ORG1', '组织一')")
     conn.execute("INSERT INTO orgs (id, code, name) VALUES (2, 'ORG2', '组织二')")
     conn.execute(

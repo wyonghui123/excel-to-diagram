@@ -844,7 +844,7 @@ UPDATE menus
 - 单据侧：`receipt_lines` / `shipment_lines` / `transfer_order_lines` 各带**单值** `hu_no` + `hu_type`（v211 加的列）。
 - 事件侧：`hu_transactions` 已有 `doc_type` / `doc_id` / `line_id`，幂等键
   `(hu_id, txn_type, doc_type, doc_id, line_id, serial_id)`（应用层 SELECT-then-INSERT，无 DB 唯一索引）。
-- 服务侧：`pack_receipt`（收货建箱/装箱，不封箱）、`ship_hu`（要求 `sealed` + 有库位、成员 SN 必须 `in_stores`）、
+- 服务侧：`pack_receipt`（收货建箱/装箱/装完自动封箱）、`ship_hu`（要求 `sealed` + 有库位、成员 SN 必须 `in_stores`）、
   `ship_shipment`（逐行调用 `ship_hu`，无去重）、`ship_transfer`（同组织 `move` / 跨组织 `ship`）、
   `reverse_document`（只回退 `create` / `pack` / `ship` / `move`）。
 
@@ -852,15 +852,15 @@ UPDATE menus
 
 | # | 缺口 | 严重度 | 证据（现状） | 对标 |
 |---|---|---|---|---|
-| 1 | 同一 HU 出现在同单据多行 → 第二次调用失败，**整单发运回滚** | **P1** | `ship_shipment` 逐行 `ship_hu` 无去重；`ship_hu` 对非 `sealed` 直接抛错 | SAP 一箱多行 `VEPO` 原生 |
-| 2 | HU 与序列号发运**顺序冲突**：先 `_register_shipment_serials`（SN→`shipped`）再 `_ship_hus`，而 `ship_hu` 要求成员 SN `in_stores` | **P1** | `shipment_service` 先登记 SN 后发 HU | Oracle 容器态与序列号态同源推进 |
-| 3 | `status` / `hu_no` / `parent_hu_id` 等状态字段在表单可编辑，未标不可变 | **P1** | `handling_unit.yaml` 的 `status` 仍是可编辑下拉 | SAP `STATUS` 只由事务推进 |
-| 4 | 单据行 `hu_no` 是**单值**：一行一箱，一箱多行只能重复填写 | **P1**（模型级） | `receipt_line` / `shipment_line` / `transfer_order_line` 的 `hu_no VARCHAR(40)` | SAP `VEPO.VBELN/POSNR`、Oracle `WSH_DELIVERY_ASSIGNMENTS` |
-| 5 | 收货装箱后不封箱，无「封箱」作业节点 | P2 | `pack_receipt` 只 `pack` 不 `seal` | SAP `KZGVH` 封闭包装 |
+| 1 | 同一 HU 出现在同单据多行 → 第二次调用失败，**整单发运回滚** | 已实施（P1） | `ship_shipment` 按 `hu_no` 归并；`ship_hu` 补 `line_ids` 事件 | SAP 一箱多行 `VEPO` 原生 |
+| 2 | HU 与序列号发运**顺序冲突**：先 `_register_shipment_serials`（SN→`shipped`）再 `_ship_hus`，而 `ship_hu` 要求成员 SN `in_stores` | 已实施（P1） | `shipment_service` 先 HU 后 SN；同单据已 ship 的号幂等 | Oracle 容器态与序列号态同源推进 |
+| 3 | `status` / `hu_no` / `parent_hu_id` 等状态字段在表单可编辑，未标不可变 | 已实施（P1） | 8 个字段 `semantics.immutable: true` | SAP `STATUS` 只由事务推进 |
+| 4 | 单据行 `hu_no` 是**单值**：一行一箱，一箱多行只能重复填写 | 已实施（v216，模型级） | 桥表 `document_hu_links.qty` 承载拆箱；行内 `hu_no` 保留快捷语义 | SAP `VEPO.VBELN/POSNR`、Oracle `WSH_DELIVERY_ASSIGNMENTS` |
+| 5 | 收货装箱后不封箱，无「封箱」作业节点 | 已实施（v217） | `pack_receipt` 装完按箱 `seal`；独立封箱作业节点仍留 P2 | SAP `KZGVH` 封闭包装 |
 | 6 | 无单据 → 容器的**正向清单**（只能从 `hu_transactions` 反查） | P2 | 仅有 `hu_where_used(serial_no)` | Oracle 容器内容报表 |
-| 7 | 无预分配 / 装箱计划（`planned` 态） | P2 | 状态机只有 `open / sealed / shipped / void` | SAP `Planned` + `XCHAR`；Oracle `DELIVERY_ID` 为空 |
+| 7 | 无预分配 / 装箱计划（`planned` 态） | P2 | v217 已有 `planned` 枚举但无创建入口；预分配先用 `document_hu_links.tentative=1` | SAP `Planned` + `XCHAR`；Oracle `DELIVERY_ID` 为空 |
 | 8 | 无容量 / 超装校验 | P2 | 无载重、体积、件数上限 | SAP `MAGEW` / `ZUL_AUFL` |
-| 9 | 跨组织调拨缺「在途」容器态：源侧直接 `shipped`、目标侧新建 `sealed`，容器身份只靠 `hu_no` 串 | P2 | `ship_transfer` 跨组织走 `ship` | SAP `In transit`；Oracle LPN `In Transit` |
+| 9 | 跨组织调拨缺「在途」容器态：源侧直接 `shipped`、目标侧新建 `sealed`，容器身份只靠 `hu_no` 串 | 已实施（v217） | `ship_transfer` 跨组织置 `in_transit`，目标收货确认后转 `shipped` | SAP `In transit`；Oracle LPN `In Transit` |
 | 10 | 无装箱单 / 箱贴 | P3 | §11.12 已明示不做 | 同左（对标有，但不纳入本阶段） |
 | 11 | 无装箱指令合规校验 | P3 | — | SAP `PACKVORSCHR_ST`（不做） |
 
@@ -959,7 +959,7 @@ CREATE INDEX idx_document_hu_line ON document_hu_links(line_id);
 | `pack_receipt` | 每行写 `link(direction=in, link_type=packed, tentative=0)`；同键已存在则 UPDATE `link_type`，不追加 |
 | `ship_hu` | 增加 `line_ids` 入参（缺省 `[line_id]`）；一次把该 HU 所有行的 link 推进到 `shipped`，事件仍写一条（`line_id` 取首行，其余行 id 记 `remark` 或拆多事件） |
 | `ship_shipment` | 按 `hu_no` 归并后调用；回写全部行 link |
-| `ship_transfer` | 同组织 `move` 不写 link；跨组织写 `direction=out`（源，`org_id=from`，源 HU 置 `in_transit`）+ `direction=in`（目标，`org_id=to`，目标侧新建 HU 置 `sealed`） |
+| `ship_transfer` | 同组织 `move` 不写 link；跨组织写 `direction=out`（源，`org_id=from`，源子树置 `in_transit`）；目标侧 HU 不在此刻新建，由收货过账 `_clone_tree` 复制并写 `direction=in`（`org_id=to`，`sealed`），随后 `_complete_transit` 把源子树 `in_transit → shipped` |
 | `reverse_document` | 按 link 回退（`shipped → packed → 删除`），并写反向 `hu_transactions`；**不物理删 link 行**（审计优先，沿用 D13 口径） |
 | 新查询 | `hu_documents(hu_id)`（容器 → 单据）、`document_hus(doc_type, doc_id)`（单据 → 容器）、`unassigned_hus(org_id)`（`tentative=1`） |
 
@@ -971,8 +971,8 @@ CREATE INDEX idx_document_hu_line ON document_hu_links(line_id);
 | P1-2 | SN/HU 顺序与幂等（#2） | 无 |
 | P1-3 | 语义不可变标注（#3） | 无 |
 | v216 | `document_hu_links`（含 `qty` 拆箱语义）+ `pack_line` 入口 + 存量回填 + 上述接线（**不含** `planned` / `in_transit`） | P1 |
-| v217 | 状态机补 `planned` / `in_transit`（重建 `handling_units` CHECK）+ 跨组织 `sealed ↔ in_transit` 迁移 | v216 |
-| v218 | 收货封箱节点（#5）、单据→容器正查 UI（#6，hub 加「关联单据」tab） | v217 |
+| v217 | 状态机补 `planned` / `in_transit`（重建 `handling_units` CHECK，6 态）+ 跨组织 `sealed → in_transit`，目标收货确认时 `in_transit → shipped`（`_complete_transit`） | v216 |
+| v218 | 单据→容器正查 UI（#6，hub 加「关联单据」tab）、独立封箱作业节点 | v217 |
 | 二期 | 装箱单 / 箱贴（#10）、容量校验（#8）、装箱计划（#7 → `planned` 实启用） | v218 |
 | 不做 | 装箱指令合规（#11） | — |
 
@@ -980,11 +980,11 @@ CREATE INDEX idx_document_hu_line ON document_hu_links(line_id);
 
 | 测试文件 | 覆盖 |
 |---|---|
-| `meta/tests/test_hu_ship_dedup.py` | 同一 HU 出现在两行 → 只发一次，两行 link 均为 `shipped`；重复过账幂等 |
-| `meta/tests/test_hu_serial_order.py` | 序列号物料 + 装箱发运 → 先 HU 后 SN 不冲突；反向顺序亦幂等 |
+| `meta/tests/test_hu_schema.py` | v211 表结构 + v217 重建（6 态 / 幂等 / 非法状态拒绝 / 索引复原 / 回滚归并 `planned→open`、`in_transit→sealed`） |
+| `meta/tests/test_hu_transfer.py` | 跨组织调拨 `sealed → in_transit`（不清 `org_id`、`shipped_at` 为空）；目标收货后源子树 `in_transit → shipped`；重复发运幂等 |
+| `meta/tests/test_hu_posting.py` | 同一 HU 出现在两行 → 只发一次，两行事件齐全；重复过账幂等；收货建箱后自动 `sealed` |
 | `meta/tests/test_hu_document_links.py` | v216 建表/唯一索引（含 `COALESCE(line_id,0)` 兜 NULL）/迁移幂等/回填/回滚；`pack_receipt` 写 link；`ship_hu` 推进；`reverse_document` 回退；**一行多箱 qty 汇总校验**（`SUM(qty)` 不得超行数量、等于行数量才算完成） |
-| `meta/tests/test_hu_transit.py` | 跨组织调拨 `sealed → in_transit → sealed`；`in_transit` 不清空 `org_id` |
-| `meta/tests/test_hu_immutable.py` | YAML `semantics.immutable` 覆盖 8 个字段 |
+| `meta/tests/test_hu_schema.py`（immutable 子用例） | YAML `semantics.immutable` 覆盖 8 个状态字段 |
 
 入口：`python d:\filework\test.py --single <path>`（禁止 pytest）。
 

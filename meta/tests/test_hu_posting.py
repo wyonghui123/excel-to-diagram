@@ -53,6 +53,7 @@ def test_pack_receipt_creates_hu_and_packs_serial():
     assert hu['org_id'] == 1
     assert hu['location_id'] == 7
     assert hu['source_doc_type'] == 'receipt'
+    assert hu['status'] == 'sealed'
     contents = service(conn).hu_contents('HU-R', org_id=1)['items']
     assert contents[0]['serial_no'] == 'SN-001'
 
@@ -95,6 +96,9 @@ def test_ship_shipment_requires_sealed_hu():
     link_receipt_serial(conn, 1, 1, serial_id)
     svc = service(conn)
     svc.pack_receipt(1)
+    hu = ds(conn).query('SELECT id FROM handling_units WHERE hu_no = ?',
+                        ['HU-OPEN'])[0]
+    svc.unseal(hu['id'])
     conn.execute(
         'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
         "status) VALUES (1, 'DN-1', 7, 'confirmed')")
@@ -117,8 +121,6 @@ def test_ship_shipment_marks_hu_and_serial_shipped():
     svc.pack_receipt(1)
     hu = ds(conn).query('SELECT id FROM handling_units WHERE hu_no = ?',
                         ['HU-R'])[0]
-    svc.seal(hu['id'])
-
     conn.execute(
         'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
         "status) VALUES (1, 'DN-1', 7, 'confirmed')")
@@ -148,7 +150,6 @@ def test_reverse_shipment_restores_sealed_and_in_stores():
     svc.pack_receipt(1)
     hu = ds(conn).query('SELECT id FROM handling_units WHERE hu_no = ?',
                         ['HU-R'])[0]
-    svc.seal(hu['id'])
     conn.execute(
         'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
         "status) VALUES (1, 'DN-1', 7, 'confirmed')")
@@ -210,7 +211,6 @@ def test_ship_shipment_same_hu_two_lines_ships_once():
     svc.pack_receipt(1)
     hu = ds(conn).query('SELECT id FROM handling_units WHERE hu_no = ?',
                         ['HU-R'])[0]
-    svc.seal(hu['id'])
     conn.execute(
         'INSERT INTO shipments (id, delivery_no, ship_from_location_id, '
         "status) VALUES (1, 'DN-1', 7, 'confirmed')")

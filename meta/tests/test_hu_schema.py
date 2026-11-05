@@ -15,6 +15,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _MIGRATION = importlib.import_module('meta.migrations.v211__handling_unit')
+_STATUS_MIGRATION = importlib.import_module(
+    'meta.migrations.v217__handling_unit_status')
 
 REQUIRED = {
     'handling_units': {
@@ -99,5 +101,97 @@ def test_migration_migrate_and_verify(tmp_path):
         # 单据行可选装箱列由迁移补齐
         assert 'hu_no' in _columns(conn, 'receipt_lines')
         assert 'hu_type' in _columns(conn, 'receipt_lines')
+    finally:
+        conn.close()
+
+
+def test_status_fields_marked_immutable():
+    """hu_no / status 等 8 个状态字段标 immutable（P1-3）。"""
+    import yaml
+    from pathlib import Path
+    from meta.core.yaml_loader import get_yaml_schema_dir
+    data = yaml.safe_load(
+        (Path(get_yaml_schema_dir()) / 'handling_unit.yaml')
+        .read_text(encoding='utf-8'))
+    fields = {field['id']: field for field in data['fields']}
+    for name in ('hu_no', 'status', 'parent_hu_id', 'root_hu_id', 'cycle_no',
+                 'sealed_at', 'shipped_at', 'voided_at'):
+        assert fields[name]['semantics']['immutable'] is True, name
+
+
+def _status_sql(conn):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='handling_units'"
+    ).fetchone()
+    return row[0]
+
+
+def test_status_migration_rebuilds_to_six_states(tmp_path):
+    db_path = tmp_path / 'meta.db'
+    conn = sqlite3.connect(str(db_path))
+    for _table, ddl in _MIGRATION.TABLES:
+        conn.executescript(ddl)
+    conn.execute(
+        "INSERT INTO handling_units (hu_no, hu_type, org_id, status) "
+        "VALUES ('HU-1', 'carton', 1, 'sealed')")
+    conn.commit()
+    conn.close()
+
+    assert _STATUS_MIGRATION.migrate(db_path, skip_backup=True) is True
+    assert _STATUS_MIGRATION.verify(db_path) is True
+    assert _STATUS_MIGRATION.migrate(db_path, skip_backup=True) is True
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sql = _status_sql(conn)
+        assert 'planned' in sql and 'in_transit' in sql
+        assert conn.execute(
+            "SELECT status FROM handling_units WHERE hu_no='HU-1'").fetchone()[0] \
+            == 'sealed'
+        conn.execute(
+            "INSERT INTO handling_units (hu_no, hu_type, org_id, status) "
+            "VALUES ('HU-2', 'carton', 1, 'in_transit')")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO handling_units (hu_no, hu_type, org_id, status) "
+                "VALUES ('HU-3', 'carton', 1, 'unknown')")
+        conn.rollback()
+        names = {row[1] for row in conn.execute(
+            "SELECT * FROM sqlite_master WHERE type='index'").fetchall()}
+        for name in ('uq_hu_no', 'idx_hu_parent', 'idx_hu_root',
+                     'idx_hu_location', 'idx_hu_status'):
+            assert name in names
+    finally:
+        conn.close()
+
+
+def test_status_rollback_merges_transit_back_to_sealed(tmp_path):
+    db_path = tmp_path / 'meta.db'
+    conn = sqlite3.connect(str(db_path))
+    for _table, ddl in _MIGRATION.TABLES:
+        conn.executescript(ddl)
+    conn.execute(
+        "INSERT INTO handling_units (hu_no, hu_type, org_id, status) "
+        "VALUES ('HU-1', 'carton', 1, 'sealed')")
+    conn.commit()
+    conn.close()
+    assert _STATUS_MIGRATION.migrate(db_path, skip_backup=True) is True
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO handling_units (hu_no, hu_type, org_id, status, shipped_at) "
+        "VALUES ('HU-T', 'carton', 1, 'in_transit', '2026-11-05 10:00:00')")
+    conn.commit()
+    conn.close()
+
+    assert _STATUS_MIGRATION.rollback(db_path) is True
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sql = _status_sql(conn)
+        assert 'in_transit' not in sql and 'planned' not in sql
+        row = conn.execute(
+            "SELECT status, shipped_at FROM handling_units WHERE hu_no='HU-T'"
+        ).fetchone()
+        assert row[0] == 'sealed' and row[1] is None
     finally:
         conn.close()
