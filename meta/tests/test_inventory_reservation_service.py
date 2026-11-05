@@ -255,7 +255,10 @@ def _create_work_order_tables(conn, status='New', project_id=0,
     conn.execute('CREATE TABLE IF NOT EXISTS work_order_components '
                  '(id INTEGER PRIMARY KEY AUTOINCREMENT, work_order_id INTEGER, '
                  'structure_line_id INTEGER, component_item_id INTEGER, '
-                 'qty_required REAL, project_task_id INTEGER DEFAULT 0)')
+                 'qty_required REAL, qty_per REAL, fixed_qty REAL DEFAULT 0, '
+                 'scrap_rate REAL DEFAULT 0, '
+                 'optional_flag INTEGER DEFAULT 0, '
+                 'project_task_id INTEGER DEFAULT 0)')
     try:
         conn.execute('ALTER TABLE items ADD COLUMN base_uom INTEGER DEFAULT 0')
     except Exception:
@@ -281,12 +284,15 @@ def _create_work_order_tables(conn, status='New', project_id=0,
 
 
 def _add_component(conn, structure_line_id=1, item_id=ITEM_ID, qty=4.0,
-                   task_id=0):
+                   task_id=0, qty_per=None, fixed=0.0, scrap=0.0,
+                   optional=0):
     cursor = conn.execute(
         'INSERT INTO work_order_components (work_order_id, '
-        'structure_line_id, component_item_id, qty_required, project_task_id) '
-        'VALUES (1, ?, ?, ?, ?)',
-        [structure_line_id, item_id, qty, task_id])
+        'structure_line_id, component_item_id, qty_required, qty_per, '
+        'fixed_qty, scrap_rate, optional_flag, project_task_id) '
+        'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [structure_line_id, item_id, qty, qty_per, fixed, scrap, optional,
+         task_id])
     conn.commit()
     return cursor.lastrowid
 
@@ -377,6 +383,63 @@ def test_work_order_component_uses_project_task_segment():
     assert row[0] == 'project_task'
     assert int(row[2]) == PROJECT_ID
     assert int(row[1]) == TASK_ID
+
+
+# ----------------------------------------------------------------------
+# 组件核销链路（完工收货 → 组件承诺）
+# ----------------------------------------------------------------------
+def test_fulfill_components_by_completion_ratio():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=10, qty_per=2.0)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    partial = service.fulfill_work_order_components(1, completed_qty=2)
+    assert partial['components'] == 1
+    assert partial['fulfilled'] == pytest.approx(4)
+    assert service.atp({'org_id': ORG_ID,
+                        'item_id': ITEM_ID})['reserved'] == pytest.approx(6)
+
+    again = service.fulfill_work_order_components(1, completed_qty=2)
+    assert again['fulfilled'] == pytest.approx(0)
+
+    done = service.fulfill_work_order_components(1, completed_qty=5)
+    assert done['fulfilled'] == pytest.approx(6)
+    row = conn.execute(
+        'SELECT status, qty_fulfilled FROM inventory_reservations').fetchone()
+    assert row[0] == 'fulfilled'
+    assert float(row[1]) == pytest.approx(10)
+    assert service.atp({'org_id': ORG_ID,
+                        'item_id': ITEM_ID})['reserved'] == pytest.approx(0)
+
+
+def test_fulfill_components_skips_optional():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4, optional=1)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    result = service.fulfill_work_order_components(1, completed_qty=1)
+    assert result['fulfilled'] == pytest.approx(0)
+    assert result['skipped'] == 1
+    # optional 未投料无确定信号：承诺保留，关单仍需先释放
+    assert service.outstanding_commitments(
+        'work_order', 1)['outstanding'] == pytest.approx(4)
+
+
+def test_fulfill_components_without_progress_fulfills_all():
+    conn = _conn(10)
+    _create_work_order_tables(conn)
+    _add_component(conn, qty=4)
+    service = _service(conn)
+    service.sync_work_order_components(1)
+
+    result = service.fulfill_work_order_components(1)
+    assert result['fulfilled'] == pytest.approx(4)
+    assert service.atp({'org_id': ORG_ID,
+                        'item_id': ITEM_ID})['reserved'] == pytest.approx(0)
 
 
 # ----------------------------------------------------------------------

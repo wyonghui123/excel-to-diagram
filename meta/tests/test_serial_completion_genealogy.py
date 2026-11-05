@@ -14,6 +14,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.migrations import v202__serial_number_model as v202
+from meta.migrations import v205__inventory_segment_reservation as v205
 from meta.services.receipt_service import ReceiptError, ReceiptService
 from meta.services.serial_number_service import SerialNumberService
 from meta.tests.receipt_test_doubles import MemDS, seeded_db
@@ -43,6 +44,9 @@ CREATE TABLE work_order_components (
     line_no TEXT,
     component_item_id INTEGER,
     qty_required REAL,
+    qty_per REAL,
+    fixed_qty REAL DEFAULT 0,
+    scrap_rate REAL DEFAULT 0,
     optional_flag INTEGER DEFAULT 0
 );
 """
@@ -279,6 +283,33 @@ def test_untracked_finished_item_still_consumes_components():
     row = _row(conn, 'SELECT * FROM serial_numbers WHERE id = ?', [serial_id])
     assert row['usage_status'] == 'issued'
     assert row['parent_serial_id'] is None
+
+
+def test_completion_fulfills_component_reservation():
+    """INV-2 核销链路：完工过账按累计完工量核销组件软预留。"""
+    conn = _db(components=[(ITEM_COMPONENT, 1, 0)])
+    serial_id = _serial(conn, ITEM_COMPONENT, 'C-1')
+    _link_components(conn, 1, [serial_id])
+    v205._do_tables(conn)
+    conn.execute(
+        'INSERT INTO inventory_reservations (reservation_no, org_id, item_id, '
+        'uom_id, demand_object_type, demand_object_id, demand_line_id, '
+        'stock_segment_type, qty_reserved, qty_fulfilled, peg_type, status, '
+        'source_doc_type, source_doc_id, source_line_id, reservation_key, '
+        'created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '
+        '?, ?, ?, ?, ?, ?)',
+        ['RSV-WO-1', 2, ITEM_COMPONENT, 3, 'work_order_component', 1, 1,
+         'owned', 1, 0, 'soft', 'open', 'work_order', 1, 1, 'WO-COMP-1-1',
+         '2026-11-01', '2026-11-01'])
+    conn.commit()
+
+    receipt = _make_receipt(
+        conn, [{'item_id': ITEM_UNTRACKED, 'uom_id': 3, 'qty_received': 1}])
+    _service(conn).post(receipt['id'])
+
+    row = _row(conn, 'SELECT * FROM inventory_reservations WHERE id = 1', [])
+    assert row['status'] == 'fulfilled'
+    assert float(row['qty_fulfilled']) == pytest.approx(1)
 
 
 def test_reverse_completion_restores_status_and_keeps_genealogy():

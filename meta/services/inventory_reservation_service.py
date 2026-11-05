@@ -377,6 +377,90 @@ class InventoryReservationService:
         return {'fulfilled': total - remaining, 'remaining': remaining,
                 'reservations': done}
 
+    def fulfill_work_order_components(self, work_order_id: Any,
+                                      completed_qty: Any = None,
+                                      tx_id: int = 0) -> Dict[str, Any]:
+        """完工收货按累计完工量核销组件承诺（A3 核销链路）。
+
+        目标量 = qty_required × min(1, 累计完工量 / 由结构行反推的工单数量)；
+        反推数量 = (qty_required / (1 + scrap_rate) − fixed_qty) / qty_per。
+        `completed_qty` 为 None 表示按整单完工处理；`qty_per` 缺失时同样按整单处理。
+        只向前核销、不回退：红冲保留成品谱系，组件退回需走独立退料。
+        optional 组件不自动核销（是否投料无确定信号），留待释放或关单校验。
+        """
+        empty = {'fulfilled': 0.0, 'components': 0, 'skipped': 0}
+        wo_id = _to_int(work_order_id)
+        if wo_id <= 0 or not self._table_ready():
+            return empty
+        rows = self.ds.query(
+            'SELECT id, qty_reserved, qty_fulfilled, demand_object_id '
+            'FROM %s WHERE source_doc_type = ? AND source_doc_id = ? '
+            'AND demand_object_type = ? AND status IN (?, ?)'
+            % RESERVATION_TABLE,
+            [WO_SOURCE_TYPE, wo_id, DEMAND_WORK_ORDER_COMPONENT,
+             STATUS_OPEN, STATUS_PARTIALLY_FULFILLED])
+        if not rows:
+            return empty
+        components = self._load_component_factors(wo_id)
+        completed = None if completed_qty is None else _num(completed_qty)
+        total = 0.0
+        done = skipped = 0
+        for row in rows:
+            component = components.get(_to_int(row.get('demand_object_id')))
+            target = self._component_fulfill_target(row, component, completed)
+            if target is None or target <= 0:
+                skipped += 1
+                continue
+            delta = target - _num(row.get('qty_fulfilled'))
+            if delta <= 1e-9:
+                continue
+            self.fulfill_reservation(_to_int(row.get('id')), delta,
+                                     tx_id=tx_id)
+            total += delta
+            done += 1
+        if done:
+            logger.info(
+                '[inv2] 工单 %s 组件承诺核销 %s 条，合计 %s（累计完工 %s）',
+                wo_id, done, total, completed)
+        return {'fulfilled': round(total, 4), 'components': done,
+                'skipped': skipped}
+
+    def _load_component_factors(self, work_order_id: int) -> Dict[int, Dict]:
+        """组件结构用量因子；表/列缺失时返回空（跳过自动核销）。"""
+        try:
+            rows = self.ds.query(
+                'SELECT id, qty_required, qty_per, fixed_qty, scrap_rate, '
+                'optional_flag FROM work_order_components '
+                'WHERE work_order_id = ?', [work_order_id])
+        except Exception as error:  # noqa: BLE001 - 旧库缺列不阻断完工
+            logger.warning('[inv2] 读取工单组件因子失败: %s', error)
+            return {}
+        return {_to_int(row.get('id')): row for row in rows}
+
+    @staticmethod
+    def _component_fulfill_target(row: Dict[str, Any],
+                                  component: Optional[Dict[str, Any]],
+                                  completed: Optional[float]) -> Optional[float]:
+        """单个组件承诺的目标核销量；None = 不自动核销。"""
+        if not component or bool(component.get('optional_flag')):
+            return None
+        qty_reserved = _num(row.get('qty_reserved'))
+        if completed is None:
+            return qty_reserved
+        if completed <= 0:
+            return 0.0
+        qty_required = _num(component.get('qty_required'))
+        qty_per = _num(component.get('qty_per'))
+        if qty_required <= 0 or qty_per <= 0:
+            return qty_reserved
+        scrap = max(_num(component.get('scrap_rate')), 0.0)
+        fixed = max(_num(component.get('fixed_qty')), 0.0)
+        implied_qty = (qty_required / (1 + scrap) - fixed) / qty_per
+        if implied_qty <= 0:
+            return qty_reserved
+        ratio = min(1.0, completed / implied_qty)
+        return min(qty_reserved, qty_required * ratio)
+
     def expire_reservations(self, now: Optional[str] = None) -> int:
         """把已过有效期的活跃预留置为 expired，返回处理行数。"""
         moment = now or _now()

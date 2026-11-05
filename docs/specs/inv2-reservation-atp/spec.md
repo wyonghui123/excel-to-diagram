@@ -245,6 +245,7 @@
 | `expire_reservations(now)` | 把到期行标记为 `expired`（不承担正确性，见下） |
 | `close_reservation(id, reason)` | 终止履行并保留历史，写 `closed`（R2） |
 | `sync_work_order_components(work_order_id)` | 工单组件级 soft 预留（幂等；取消/结构行消失即释放） |
+| `fulfill_work_order_components(work_order_id, completed_qty)` | 完工收货按累计完工量核销组件承诺（累进到目标、只进不退） |
 | `outstanding_commitments(source_doc_type, source_doc_id)` | 来源单据未核销承诺汇总（活跃且未过期） |
 | `assert_source_closable(source_doc_type, source_doc_id)` | 关单前置校验；有未核销承诺时报 `INV_RESERVATION_ACTIVE_ON_CLOSE` |
 | `atp(query)` | 返回 `{available_on_hand, shortage}`，按 `scope` 计算 |
@@ -473,6 +474,8 @@ SO 行（so_segment_enabled=1）
 | 工单取消释放组件承诺 | 同上 | `released=1`，可用量恢复 |
 | 有未核销组件承诺时拒绝关单 | 同上 | `INV_RESERVATION_ACTIVE_ON_CLOSE`，`outstanding` 带入明细 |
 | 核销/释放后允许关单 | 同上 | 拦截器放行 |
+| 完工收货按累计完工比例核销组件承诺 | `test_inventory_reservation_service.py` / `test_serial_completion_genealogy.py` | 完工 2/5 时核销 4/10，完工 5/5 时全部 `fulfilled` |
+| optional 组件不自动核销 | 同上 | `skipped=1`，承诺保留 |
 
 ---
 
@@ -540,6 +543,7 @@ SO 行（so_segment_enabled=1）
 - **含在途 ATP（2026-11-05）**：`atp(include_inbound=True)` 只扣已 hard 钉住的未收货未来供应（PO 行 / 工单 / 调拨行），不引入 `expected_receipts`；`available_on_hand` 的含在途分支继续报 `ATP_INBOUND_UNSUPPORTED`。
 - **工单组件预留（2026-11-05）**：不新增表/迁移。`work_order_component` 作需求节点，统一 soft；幂等键 `WO-COMP-{work_order_id}-{structure_line_id}` 以结构行稳定，重展开只更新数量与组件 id，结构行消失或工单取消/关闭时释放。
 - **关单前置校验（2026-11-05）**：通用 BO 更新 `status → Closed` 时，`ProjectTaskGuardInterceptor` 调 `assert_source_closable('work_order', id)`；仍有活跃未核销组件承诺则拒绝（`INV_RESERVATION_ACTIVE_ON_CLOSE`）。取消（`Cancelled`）不走该校验，按显式释放语义处理。
+- **组件核销链路（2026-11-05）**：P6c 不建领料单据，完工收货即唯一的组件消耗事件；`ReceiptService._post_work_order` 过账后按累计净完工量调 `fulfill_work_order_components`。目标量由结构行反推工单数量（`(qty_required/(1+scrap) − fixed)/qty_per`），按比例累进核销；`qty_per` 缺失按整单处理；optional 组件不自动核销。只进不退——红冲保留谱系，组件退回需走独立退料流程。预留层失败仅告警，不阻断完工过账。
 
 ---
 
