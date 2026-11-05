@@ -361,6 +361,11 @@ class ApplicationBuilder:
         #   两条启动路径缺一会静默失效。
         from meta.core.interceptors.demand_entry_guard_interceptor import DemandEntryGuardInterceptor
         bo_framework.register_interceptor(DemandEntryGuardInterceptor())
+        # [BO-PLATFORM 2026-11-06] 行语义通用守卫（P54）：同一单据行号唯一、
+        #   实物行数量 > 0。白名单试点 service_request_line，其余对象零开销。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.line_guard_interceptor import LineGuardInterceptor
+        bo_framework.register_interceptor(LineGuardInterceptor())
         # [PURCHASE_ORDER 2026-11-01] 采购订单守卫（P50）：抬头 / 行 / 计划行 / 需求分配的
         #   写前校验（R-PO-0~R-PO-18），以及行写入后的金额重算、采购取价、取消冲销。
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
