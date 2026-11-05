@@ -27,7 +27,9 @@ const STATIC_ROUTE_NAMES = new Set([
   // ai-async-tasks 已随菜单收敛下线，不再登记为静态路由。
   'task-management',
   // 平台运维作业（custom_page，静态路由在 router/modules/system.js 注册）
-  'platform-ops-jobs'
+  'platform-ops-jobs',
+  // 包装容器查询 / 封箱作业（custom_page，静态路由在 router/modules/business.js 注册）
+  'handling-unit-docs', 'handling-unit-seal'
 ])
 
 const STATIC_ROUTE_PATHS = new Set([
@@ -39,6 +41,8 @@ const STATIC_ROUTE_PATHS = new Set([
   '/sourcing-rules/calc/',
   '/system/task-management',
   '/system/platform-ops-jobs',
+  // 包装容器查询 / 封箱作业（custom_page）
+  '/warehouse/handling-unit-docs', '/warehouse/handling-unit-seal',
 ])
 
 let _routesRegistered = false

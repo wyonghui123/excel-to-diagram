@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-05 14:03:16.434188
+-- 生成时间: 2026-11-05 15:34:53.221543
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -768,6 +768,48 @@ CREATE TABLE IF NOT EXISTS demand_allocations (
     FOREIGN KEY (uom_id) REFERENCES uoms(id)
 )
 
+-- 统一追溯图谱: 只读统一追溯面：执行层取 doc_flow_edges，计划层取 demand_trace_links
+CREATE VIEW IF NOT EXISTS v_demand_trace_graph AS SELECT
+  'execution' AS layer,
+  'E:' || e.id AS id,
+  e.rule_id AS relation,
+  e.source_bo AS source_object_type,
+  e.source_id AS source_object_id,
+  COALESCE(e.source_item, '') AS source_line_id,
+  e.target_bo AS target_object_type,
+  e.target_id AS target_object_id,
+  COALESCE(e.target_item, '') AS target_line_id,
+  e.quantity AS qty,
+  CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END AS signed_qty,
+  e.status AS status,
+  NULL AS peg_type,
+  NULL AS plan_version,
+  NULL AS valid_from,
+  NULL AS valid_to,
+  e.derived_at AS occurred_at
+FROM doc_flow_edges e
+UNION ALL
+SELECT
+  'plan' AS layer,
+  'T:' || CAST(t.id AS TEXT) AS id,
+  t.trace_type AS relation,
+  t.supply_object_type AS source_object_type,
+  CAST(t.supply_object_id AS TEXT) AS source_object_id,
+  COALESCE(NULLIF(CAST(t.supply_line_id AS TEXT), '0'), '') AS source_line_id,
+  t.demand_object_type AS target_object_type,
+  CAST(t.demand_object_id AS TEXT) AS target_object_id,
+  COALESCE(NULLIF(CAST(t.demand_line_id AS TEXT), '0'), '') AS target_line_id,
+  t.allocated_qty AS qty,
+  CASE WHEN t.valid_to IS NULL THEN t.allocated_qty ELSE 0 END AS signed_qty,
+  CASE WHEN t.valid_to IS NULL THEN 'active' ELSE 'expired' END AS status,
+  t.peg_type AS peg_type,
+  t.plan_version AS plan_version,
+  t.valid_from AS valid_from,
+  t.valid_to AS valid_to,
+  t.computed_at AS occurred_at
+FROM demand_trace_links t
+
+
 -- 需求线索: 跨单据的供应—需求链（预留 / 钉住 / 分配）
 CREATE TABLE IF NOT EXISTS demand_trace_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -821,6 +863,37 @@ CREATE TABLE IF NOT EXISTS document_hu_links (
     FOREIGN KEY (hu_id) REFERENCES handling_units(id),
     FOREIGN KEY (org_id) REFERENCES orgs(id)
 )
+
+-- 单据容器关联: 只读：容器与收货单 / 发货单 / 调拨单的关系投影
+CREATE VIEW IF NOT EXISTS document_hu_link_view AS SELECT
+  l.id AS id,
+  l.hu_id AS hu_id,
+  h.hu_no AS hu_no,
+  h.status AS hu_status,
+  h.hu_type AS hu_type,
+  l.doc_type AS doc_type,
+  l.doc_id AS doc_id,
+  COALESCE(r.receipt_no, s.delivery_no, t.transfer_order_no) AS doc_no,
+  COALESCE(r.status, s.status, t.status) AS doc_status,
+  COALESCE(r.receipt_date, s.actual_ship_date, s.planned_ship_date,
+           t.transfer_date) AS doc_date,
+  l.line_id AS line_id,
+  COALESCE(rl.line_no, tl.line_no, CAST(l.line_id AS TEXT)) AS line_no,
+  l.direction AS direction,
+  l.link_type AS link_type,
+  l.tentative AS tentative,
+  l.qty AS qty,
+  l.org_id AS org_id,
+  l.created_at AS created_at
+FROM document_hu_links l
+LEFT JOIN handling_units h ON h.id = l.hu_id
+LEFT JOIN receipts r ON l.doc_type = 'receipt' AND r.id = l.doc_id
+LEFT JOIN receipt_lines rl ON l.doc_type = 'receipt' AND rl.id = l.line_id
+LEFT JOIN shipments s ON l.doc_type = 'shipment' AND s.id = l.doc_id
+LEFT JOIN transfer_orders t ON l.doc_type = 'transfer_order' AND t.id = l.doc_id
+LEFT JOIN transfer_order_lines tl
+       ON l.doc_type = 'transfer_order' AND tl.id = l.line_id
+
 
 -- 单据序列号关系: 单据与序列号的对象清单——收货 / 发运 / 调拨 / 工单等统一登记
 CREATE TABLE IF NOT EXISTS document_serial_links (

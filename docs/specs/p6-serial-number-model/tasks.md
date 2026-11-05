@@ -94,3 +94,15 @@
 
 - `python d:\filework\test.py --failed`（若有并发假失败，串行复跑确认）。
 - 输出改动清单 + 测试结果；**不 commit、不部署**。
+
+## [x] V218 单据↔容器查询与封箱作业台（方案已批准，spec §11.16）
+
+- [x] V1 只读视图：新建 `meta/schemas/document_hu_link_view.yaml`（`is_view: true`、仅 read/list）与 `meta/migrations/v220__document_hu_link_view.py`（DROP+CREATE、verify 列数 18、缺基表 SKIP、rollback 仅删视图）；`view_definition` 与迁移 SQL 逐字一致。
+- [x] V2 hub tab：`handling_unit.yaml` 的 `hub.object_types` 加 `document_hu_link_view`，tab 名「关联单据」，filter `{field: hu_id}`（effective 子树）；`badge_map` 补 `planned` / `in_transit`。
+- [x] V3 反查页：新建 `src/views/HandlingUnitDocs.vue`（单据查容器 / 容器查单据两 tab），`src/services/handlingUnitService.js`，路由 `/warehouse/handling-unit-docs`（`business.js` + `dynamicRoutes.js` 白名单）。
+- [x] V4 封箱台：服务抽 `seal_check`；新建 `meta/api/handling_unit_api.py`（6 端点，错误码 404/409/400/403）；`app_builder.with_blueprints` 注册；新建 `src/views/HandlingUnitSeal.vue` 与路由 `/warehouse/handling-unit-seal`。
+  - [x] 生产入口补齐：`meta/server.py` 增加 blueprint 注册（否则 waitress 运行态 `/scan` 404、列表被通用 BO 路由兜底）与 v1 sunset 白名单 `handling-units`（否则 410）。
+- [x] V5 权限/菜单：新建 `meta/migrations/v221__hu_seal_workbench.py`（`handling_unit:handling_unit_seal` / `_unseal`，admin 全授、default 只读；两菜单 `custom_page`，幂等 UPSERT + rollback）。
+  - [x] 补建库存域根菜单 `inventory`（历史迁移只引用未创建；缺失时子菜单挂顶层且 `show_in_sidebar=0` ⇒ 侧栏不可见）。
+- [x] V6 测试：新增 `meta/tests/test_hu_document_link_view.py`、`meta/tests/test_hu_seal_api.py`；回归 `test_hu_posting/transfer/schema/document_links`；`python -m meta.tools.sync_schema --generate` 后核对视图 DDL。
+- [x] V7 验收：自动化（视图/API 测试、FE `npm run build`）+ 生产入口冒烟（3010 `/api/v1/handling-units` 返回空列表，`/scan` 返回 `HU_NOT_FOUND`）。真实数据手工验收（hub tab / 反查页 / 封箱页全链路）待真实库迁移（v211+ 共 120 条 pending，等并发 WIP 收尾后统一执行）。

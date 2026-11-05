@@ -582,23 +582,35 @@ class HandlingUnitService:
     # ------------------------------------------------------------------
     # 密封 / 开封 / 复用 / 作废
     # ------------------------------------------------------------------
-    def seal(self, hu_id: Any) -> Dict[str, Any]:
+    def seal_check(self, hu_id: Any) -> Dict[str, Any]:
+        """密封预检：返回 HU + 库位 + 全部阻断项；seal() 复用本方法。
+
+        扫码头 / 封箱台先调本方法，避免前端复制规则，也保证「预检」与
+        「真封」永不漂移。
+        """
         hu = self._get_hu(hu_id)
+        blockers: List[Dict[str, str]] = []
         if hu.get('status') != STATUS_OPEN:
-            raise HandlingUnitError('仅打开状态的容器可密封', field_name='status',
-                                    rule='HU_STATUS_INVALID')
+            blockers.append({'rule': 'HU_STATUS_INVALID', 'field_name': 'status',
+                             'message': '仅打开状态的容器可密封'})
+            return {'hu': hu, 'location_id': hu.get('location_id'),
+                    'blockers': blockers}
         rows = self._contents(hu['id'])
         if not rows:
-            raise HandlingUnitError('容器无内容，不能密封', field_name='status',
-                                    rule='HU_CONTENT_EMPTY')
+            blockers.append({'rule': 'HU_CONTENT_EMPTY', 'field_name': 'status',
+                             'message': '容器无内容，不能密封'})
+            return {'hu': hu, 'location_id': hu.get('location_id'),
+                    'blockers': blockers}
         location = hu.get('location_id')
         for row in rows:
             if row.get('content_type') == CONTENT_HU:
                 child = self._get_hu(row['child_hu_id'])
                 if child.get('status') != STATUS_SEALED:
-                    raise HandlingUnitError(
-                        '子容器 %s 未密封，不能密封父容器' % child.get('hu_no'),
-                        field_name='status', rule='HU_CHILD_STATUS_INVALID')
+                    blockers.append({
+                        'rule': 'HU_CHILD_STATUS_INVALID', 'field_name': 'status',
+                        'message': '子容器 %s 未密封，不能密封父容器'
+                                   % child.get('hu_no')})
+                    continue
             serial_id = row.get('serial_id')
             if not _blank(serial_id):
                 serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
@@ -608,12 +620,25 @@ class HandlingUnitService:
                     location = serial_location
                 elif not _blank(serial_location) \
                         and int(serial_location) != int(location):
-                    raise HandlingUnitError(
-                        '容器内容库位不一致', field_name='location_id',
-                        rule='HU_CONTENT_LOCATION_MISMATCH')
+                    blockers.append({
+                        'rule': 'HU_CONTENT_LOCATION_MISMATCH',
+                        'field_name': 'location_id',
+                        'message': '容器内容库位不一致'})
         if _blank(location):
-            raise HandlingUnitError('容器无库位，不能密封', field_name='location_id',
-                                    rule='HU_CONTENT_LOCATION_MISMATCH')
+            blockers.append({'rule': 'HU_CONTENT_LOCATION_MISMATCH',
+                             'field_name': 'location_id',
+                             'message': '容器无库位，不能密封'})
+        return {'hu': hu, 'location_id': location, 'blockers': blockers}
+
+    def seal(self, hu_id: Any) -> Dict[str, Any]:
+        check = self.seal_check(hu_id)
+        if check['blockers']:
+            first = check['blockers'][0]
+            raise HandlingUnitError(first['message'],
+                                    field_name=first['field_name'],
+                                    rule=first['rule'])
+        hu = check['hu']
+        location = check['location_id']
         now = _now()
         with self.ds.transaction():
             self.ds.execute(

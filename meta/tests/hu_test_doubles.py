@@ -58,7 +58,8 @@ CREATE TABLE document_serial_links (
 );
 CREATE TABLE receipts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_no TEXT, org_id INTEGER,
-    inventory_org_id INTEGER, deliver_to_location_id INTEGER, status TEXT
+    inventory_org_id INTEGER, deliver_to_location_id INTEGER, status TEXT,
+    receipt_date DATETIME
 );
 CREATE TABLE receipt_lines (
     id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_id INTEGER, line_no TEXT,
@@ -68,20 +69,22 @@ CREATE TABLE receipt_lines (
 );
 CREATE TABLE shipments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_no TEXT,
-    ship_from_location_id INTEGER, status TEXT
+    ship_from_location_id INTEGER, status TEXT,
+    planned_ship_date DATETIME, actual_ship_date DATETIME
 );
 CREATE TABLE shipment_lines (
     id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id INTEGER, item_id INTEGER,
     qty REAL, serial_no TEXT, hu_no TEXT, status TEXT
 );
 CREATE TABLE transfer_orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, order_no TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, order_no TEXT, transfer_order_no TEXT,
     from_org_id INTEGER, to_org_id INTEGER,
-    from_location_id INTEGER, to_location_id INTEGER, status TEXT
+    from_location_id INTEGER, to_location_id INTEGER, status TEXT,
+    transfer_date DATETIME
 );
 CREATE TABLE transfer_order_lines (
     id INTEGER PRIMARY KEY AUTOINCREMENT, transfer_order_id INTEGER,
-    item_id INTEGER, uom_id INTEGER, qty REAL,
+    line_no TEXT, item_id INTEGER, uom_id INTEGER, qty REAL,
     qty_shipped REAL DEFAULT 0, serial_no TEXT, hu_no TEXT, hu_type TEXT,
     status TEXT
 );

@@ -1043,3 +1043,233 @@ CREATE INDEX idx_document_hu_line ON document_hu_links(line_id);
 | `meta/tests/test_hu_ship_dedup.py` 等 5 个 | 见 §11.15.9 |
 
 > 以上为**方案草案**，未动代码；D17 / D18 / D19 与 §11.15.10 三项决策已定稿，实施前只需确认排期。
+
+### 11.16 v218 细化方案：单据↔容器双向查询 + 独立封箱作业节点（已批准，已实施）
+
+> 对应 §11.15.8 的 v218 行。只补「查」与「封箱操作台」，不引入装箱单 / 箱贴 /
+> 容量校验 / 装箱计划（`planned` 仍只占枚举位）。
+
+#### 11.16.1 交付面与职责边界
+
+| # | 交付 | 入口 | 方向 |
+|---|---|---|---|
+| V1 | 只读视图 `document_hu_link_view` | DB / 通用 BO API | — |
+| V2 | 容器 hub 第 4 个 tab「关联单据」 | 现有 `handling-unit-management` 菜单 | 容器 → 单据 |
+| V3 | 「包装容器查询」页（单据查容器 + 容器查单据） | 新菜单 `handling-unit-docs`（`custom_page`） | 单据 ↔ 容器 |
+| V4 | 「封箱作业」页（扫码 → 校验 → 封箱 / 批量封箱 / 解封） | 新菜单 `handling-unit-seal`（`custom_page`） | 作业 |
+| V5 | 封箱 / 解封权限 + 两菜单迁移 | DB | — |
+
+为什么 V3 单独成页而不是塞进 hub：MOMP 通用列表只认 `object_list` 的列与标准
+detail，`hubOptions.js` 不支持自定义行内抽屉 / 自定义 action；把「单据 → 容器」
+做成 hub 行点击会退化成只读字段详情。hub tab 与反查页共享**同一视图**，
+只是过滤键不同（`hu_id` vs `doc_type + doc_id/doc_no`）。
+
+#### 11.16.2 只读视图 `document_hu_link_view`（V1）
+
+不建关系 BO、不改 `document_hu_links` 写模型：写模型只有桥表一处，读模型用
+SQL VIEW 投影，避免第二套 join 维护。
+
+| 列 | 来源 | 说明 |
+|---|---|---|
+| `id` | `document_hu_links.id` | 行主键 |
+| `hu_id` / `hu_no` / `hu_status` / `hu_type` | link + `handling_units` | 容器侧 |
+| `doc_type` | link | `receipt` / `shipment` / `transfer_order` |
+| `doc_id` / `doc_no` / `doc_status` / `doc_date` | 三张单据头 | `doc_no` 取 `receipt_no` / `delivery_no` / `transfer_order_no`；日期取 `receipt_date` / `actual_ship_date`（空则 `planned_ship_date`）/ `transfer_date` |
+| `line_id` / `line_no` | link + 行表 | `shipment_lines` **无** `line_no` 字段（该表 `display_name_field=id`），故 `line_no = COALESCE(rl.line_no, tl.line_no, CAST(l.line_id AS TEXT))` |
+| `direction` / `link_type` / `tentative` / `qty` | link | 沿用 v216 枚举 |
+| `org_id` / `created_at` | link | 审计 |
+
+视图 SQL（`view_definition` 与迁移必须逐字一致，测试锁定）：
+
+```sql
+SELECT
+  l.id AS id, l.hu_id AS hu_id, h.hu_no AS hu_no, h.status AS hu_status,
+  h.hu_type AS hu_type, l.doc_type AS doc_type, l.doc_id AS doc_id,
+  COALESCE(r.receipt_no, s.delivery_no, t.transfer_order_no) AS doc_no,
+  COALESCE(r.status, s.status, t.status) AS doc_status,
+  COALESCE(r.receipt_date, s.actual_ship_date, s.planned_ship_date,
+           t.transfer_date) AS doc_date,
+  l.line_id AS line_id,
+  COALESCE(rl.line_no, tl.line_no, CAST(l.line_id AS TEXT)) AS line_no,
+  l.direction AS direction, l.link_type AS link_type,
+  l.tentative AS tentative, l.qty AS qty,
+  l.org_id AS org_id, l.created_at AS created_at
+FROM document_hu_links l
+LEFT JOIN handling_units h ON h.id = l.hu_id
+LEFT JOIN receipts r ON l.doc_type = 'receipt' AND r.id = l.doc_id
+LEFT JOIN receipt_lines rl ON l.doc_type = 'receipt' AND rl.id = l.line_id
+LEFT JOIN shipments s ON l.doc_type = 'shipment' AND s.id = l.doc_id
+LEFT JOIN transfer_orders t ON l.doc_type = 'transfer_order' AND t.id = l.doc_id
+LEFT JOIN transfer_order_lines tl
+       ON l.doc_type = 'transfer_order' AND tl.id = l.line_id
+```
+
+Schema YAML：`meta/schemas/document_hu_link_view.yaml`
+（`id/table_name=document_hu_link_view`、`is_view: true`、仅 `read` + `list`、
+`skip_auto_menu: true`、`import_export.auto_crud: false`）。`doc_type` 用内联
+`enum_values`（收货单 / 发货单 / 调拨单），`direction` / `link_type` 复用 v216 枚举。
+
+迁移 `meta/migrations/v220__document_hu_link_view.py`（号被占用则顺延下一个空闲号）：
+
+- 前置：`document_hu_links`、`handling_units`、`receipts`、`receipt_lines`、
+  `shipments`、`transfer_orders`、`transfer_order_lines` 任一缺失 → `[SKIP]`，不建空视图。
+- 刷新：`DROP VIEW IF EXISTS` + `CREATE VIEW`（schema_generator 只发
+  `CREATE VIEW IF NOT EXISTS`，定义变更不生效；与 v219 同口径）。
+- `verify`：视图存在 + 列数 18 + `doc_no` / `hu_no` 可查；`rollback`：仅 DROP VIEW。
+- `[ALLOW_DESTRUCTIVE]` 仅影响视图，不动表数据。
+
+#### 11.16.3 hub「关联单据」tab（V2）
+
+`meta/schemas/handling_unit.yaml` 的 `ui_view_config.hub` 追加：
+
+```yaml
+object_types: [handling_unit, handling_unit_item, hu_transaction,
+               document_hu_link_view]
+tabs:
+  document_hu_link_view: 关联单据
+filters:
+  document_hu_link_view: { field: hu_id }     # effective：选中容器 ∪ 全部子孙
+```
+
+口径：**用 effective 而非 direct**。link 通常写在真正装货的叶子箱，父托盘自身
+往往没有 link；direct 会让托盘选中时永远空表。排序 `doc_date DESC, id DESC`。
+
+列：`doc_type` / `doc_no` / `doc_date` / `line_no` / `direction` / `link_type` /
+`qty` / `tentative` / `hu_no`（显示具体是哪只子容器）/ `doc_status`。
+空态文案「该容器（含子容器）暂无关联单据」。
+顺带补 v217 遗漏：`hub.scope.badge_map` 增加 `planned`（info）与 `in_transit`（warning）。
+
+#### 11.16.4 单据↔容器反查页 `handling-unit-docs`（V3）
+
+页面 `src/views/HandlingUnitDocs.vue`，两个内嵌 tab：
+
+1. **单据查容器**：选择 `doc_type` + 输入 `doc_no`（或日期范围）→ 查
+   `GET /api/v1/bo/document_hu_link_view?doc_type=receipt&doc_no=R...&page_size=200`。
+   前端按 `hu_id` 聚合展示：容器号 / 状态 / 数量 / 关系 / 方向 / 是否暂定。
+   行点击 → 调 `GET /api/v1/handling-units/scan?hu_no=<hu_no>&org_id=` 展示容器内容抽屉。
+2. **容器查单据**：输入 `hu_no` → 同一视图按 `hu_no` 过滤，列出该容器全部单据。
+
+不新增「单据→容器」后端接口：视图列已含容器侧全部字段，通用 BO list 即可满足。
+
+#### 11.16.5 独立封箱作业节点 `handling-unit-seal`（V4）
+
+页面 `src/views/HandlingUnitSeal.vue`：
+
+- 顶部扫码框自动聚焦，回车 → `GET /api/v1/handling-units/scan`；
+- 左栏「待封队列」（会话内去重，上限 50，可移除 / 清空）；
+- 中栏容器详情：抬头（号/类型/组织/库位/状态/重量体积）+ 内容表 + 直接子容器；
+- 右栏动作：封箱、批量封箱（仅 `can_seal` 项）、解封（二次确认）；
+- 校验结果用 `AppAlert` 展示 blockers，不在前端复制规则。
+
+服务层小改：把 `seal()` 现有校验抽成 `seal_check(hu_id) -> {hu, blockers}`，
+`seal()` 调 `seal_check` 后抛首个 blocker，保证「预检」与「真封」永不漂移。
+
+新增 `meta/api/handling_unit_api.py`（Blueprint `handling_unit_bp`，在
+`meta/core/app_builder.py::with_blueprints` 与 `meta/server.py::create_app`
+**两处**注册；waitress 运行态只走后者，漏登记会 404/410），并把
+`handling-units` 加入 `meta/server.py` 的 v1 sunset 白名单（否则整个前缀 410）：
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/api/v1/handling-units` | 列表：`status`（缺省 `open`）/`org_id`/`hu_no` 前缀/`location_id`/分页 | `handling_unit:handling_unit_read` |
+| GET | `/api/v1/handling-units/scan` | `hu_no` + 可选 `org_id` → 抬头 + 内容 + 子容器 + `checks` | read |
+| GET | `/api/v1/handling-units/<hu_id>/contents` | `mode=direct\|exploded`，复用 `hu_contents` | read |
+| POST | `/api/v1/handling-units/<hu_id>/seal` | body `{remark?}` | `handling_unit:handling_unit_seal` |
+| POST | `/api/v1/handling-units/<hu_id>/unseal` | 仅 `sealed` | `handling_unit:handling_unit_unseal` |
+| POST | `/api/v1/handling-units/batch-seal` | body `{hu_ids: [1..50]}`，逐条独立事务 | seal |
+
+`scan` 返回：
+
+```json
+{"hu": {...}, "contents": [...], "children": [...],
+ "checks": {"can_seal": true, "blockers": [
+   {"rule": "HU_CHILD_STATUS_INVALID", "field_name": "status",
+    "message": "子容器 HU-002 未密封，不能密封父容器"}]}}
+```
+
+`batch-seal` 返回 `{total, sealed, failed, items:[{hu_id, ok, rule, message}]}`，
+**不用一个大事务**：单箱失败不回滚已成功的箱子。
+
+错误码 → HTTP：`HU_NOT_FOUND` 404；`HU_STATUS_INVALID` / `HU_CONTENT_EMPTY` /
+`HU_CHILD_STATUS_INVALID` / `HU_CONTENT_LOCATION_MISMATCH` /
+`HU_LOCATION_MISSING` / `HU_ORG_MISMATCH` 409；参数错误 400；无权限 403。
+
+前端路由（`custom_page` 必须静态注册，否则页面空白）：
+
+- `src/router/modules/business.js` 增加 `/warehouse/handling-unit-docs`、
+  `/warehouse/handling-unit-seal`，name 分别为 `handling-unit-docs` / `handling-unit-seal`；
+- `src/router/dynamicRoutes.js` 的 `STATIC_ROUTE_NAMES` 与 `STATIC_ROUTE_PATHS`
+  同步登记；
+- 新增 `src/services/handlingUnitService.js`（cookie 认证，复用 `httpClient`）。
+
+#### 11.16.6 权限与菜单迁移（V5）
+
+`meta/migrations/v221__hu_seal_workbench.py`（号顺延）：
+
+- 权限（双段式）：`handling_unit:handling_unit_seal`、
+  `handling_unit:handling_unit_unseal`；`admin` 全授，`default` 仅 read（不授 seal）。
+- 两个菜单：`handling-unit-docs`（「包装容器查询」）、`handling-unit-seal`
+  （「封箱作业」），`page_type=custom_page`，父菜单 `inventory`，
+  `sort_order` 取当前最大值 +1，`required_permissions` 指向对应权限。
+- 补建/激活 `inventory` 根菜单（`show_in_sidebar=1`）：v202 / v211 只引用了父菜单号，
+  历史迁移未创建根节点；缺失时子菜单会挂顶层且 `show_in_sidebar=0` ⇒ 侧栏不可见。
+- 幂等 UPSERT；`verify` 断言菜单 `is_active=1`、权限行存在、`admin` 角色绑定存在；
+  `rollback` 置 `is_active=0` 并删 `menu_permissions` 孤儿行（不物理删菜单行，沿用
+  §11 菜单退役口径）。
+
+#### 11.16.7 改动文件清单
+
+| 文件 | 改动 |
+|---|---|
+| `meta/schemas/document_hu_link_view.yaml` | 新增只读视图对象 |
+| `meta/migrations/v220__document_hu_link_view.py` | 新增：建 / 重建视图 + verify / rollback |
+| `meta/migrations/v221__hu_seal_workbench.py` | 新增：2 权限 + 2 菜单 |
+| `meta/schemas/handling_unit.yaml` | hub 增 tab / filter；`badge_map` 补 2 态 |
+| `meta/services/handling_unit_service.py` | 抽 `seal_check`（`seal` 行为不变） |
+| `meta/api/handling_unit_api.py` | 新增 Blueprint（6 端点） |
+| `meta/core/app_builder.py` | `with_blueprints` 注册 `handling_unit_bp` |
+| `meta/server.py` | `create_app` 注册 `handling_unit_bp`；v1 sunset 白名单加 `handling-units` |
+| `src/views/HandlingUnitDocs.vue` | 新增单据↔容器反查页 |
+| `src/views/HandlingUnitSeal.vue` | 新增封箱作业台 |
+| `src/services/handlingUnitService.js` | 新增 API 客户端 |
+| `src/router/modules/business.js` | 2 条静态路由 |
+| `src/router/dynamicRoutes.js` | 静态路由白名单登记 |
+| `meta/tests/test_hu_document_link_view.py` | 新增 |
+| `meta/tests/test_hu_seal_api.py` | 新增 |
+
+#### 11.16.8 验收
+
+| 测试 | 覆盖 |
+|---|---|
+| `test_hu_document_link_view.py` | YAML `is_view` / 仅 read+list / `view_definition` 与迁移 SQL 逐字一致；migrate → verify → 再 migrate（`[SKIP]`）→ rollback；收货 / 发运 / 调拨三种 doc_no 与日期；`shipment` 的 `line_no` 回退为 `line_id` 字符串；按 `hu_id__in`（子树）与 `doc_type+doc_id` 过滤；缺基表时 SKIP |
+| `test_hu_seal_api.py` | scan 预检：空内容 / 子容器未封 / 库位缺失 → `can_seal=false` 且 blocker 规则正确；POST seal 对应 409；正常封箱写 `seal` 事件；batch-seal 混合结果（成功项不回滚）；unseal 状态校验；无 seal 权限 403 |
+
+命令（唯一入口）：
+
+```
+python d:\filework\test.py --single meta/tests/test_hu_document_link_view.py
+python d:\filework\test.py --single meta/tests/test_hu_seal_api.py
+python d:\filework\test.py --file meta/tests/test_hu_posting.py
+python d:\filework\test.py --file meta/tests/test_hu_transfer.py
+python d:\filework\test.py --file meta/tests/test_hu_schema.py
+python d:\filework\test.py --file meta/tests/test_hu_document_links.py
+```
+
+生成快照后核对视图 DDL：`python -m meta.tools.sync_schema --generate`（必须模块方式）。
+手工验收（FE 3006 / BE 3011）：hub「关联单据」tab 有数据且父托盘能带出子箱单据；
+反查页两个 tab 可用；封箱页扫码 → 预检 → 封箱 → 状态变 `sealed`。
+
+#### 11.16.9 依赖、风险与回滚
+
+- 依赖 v216（桥表）与 v217（6 态）先落库；真实库当前仍有 120 条 pending，需等并发
+  Agent 的 WIP 收尾后统一执行。
+- 风险：视图与三张单据表强耦合；`shipment_lines` 无 `line_no` 已用回退表达式规避；
+  任一单据表改名/删列会让视图失效，`verify` 与测试可提前发现。
+- 回滚顺序：v221（菜单 / 权限）→ v220（视图）。两者都无业务数据变更。
+
+#### 11.16.10 待批准项
+
+1. 视图列为 18 列（不含 `line_no` 之外的扩展字段）是否足够；
+2. 反查页与封箱页作为两个独立 `custom_page` 菜单（父菜单 `inventory`）；
+3. `default` 角色只授 read、不授 seal / unseal；
+4. 迁移号用 v220 / v221（若实施时已被占用则顺延，runner 按文件名跟踪）。

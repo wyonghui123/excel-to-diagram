@@ -1119,6 +1119,11 @@ def create_app(db_path=None):
     app.register_blueprint(project_overview_bp)
     app.register_blueprint(labor_bp)
     app.register_blueprint(work_order_bp)
+    # [P6a-2 v218 2026-11-05] 包装容器作业台（扫码预检 / 封箱 / 解封 / 批量封箱）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐；
+    #   缺登记时 /scan 返回 404、列表被通用 BO 路由兜底。
+    from meta.api.handling_unit_api import handling_unit_bp
+    app.register_blueprint(handling_unit_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1245,6 +1250,9 @@ def create_app(db_path=None):
         'projects',     # /api/v1/projects/<id>/overview — 项目 360
         'work-orders',  # /api/v1/work-orders/<id>/start — 工单执行动作
         'labor',        # /api/v1/labor/* — 项目任务 / 人力负荷
+        # [P6a-2 v218 2026-11-05] 包装容器作业是独立 Blueprint 的域内命令端点
+        # （扫码预检/封箱/解封/批量封箱），非 BO CRUD；缺白名单会被误判为 410。
+        'handling-units',  # /api/v1/handling-units/*
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

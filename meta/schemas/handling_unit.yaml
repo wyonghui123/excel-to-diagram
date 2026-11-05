@@ -644,12 +644,14 @@ ui_view_config:
   #   子容器 tab 只列直接子级（mode: direct → 取 selected 而非 effective）；
   #   容器内容 / 事件 tab 取整棵子树（effective = 勾选 ∪ 全部子孙）。
   hub:
-    object_types: [handling_unit, handling_unit_item, hu_transaction]
+    object_types: [handling_unit, handling_unit_item, hu_transaction,
+                   document_hu_link_view]
     default_tab: handling_unit
     tabs:
       handling_unit: 子容器
       handling_unit_item: 容器内容
       hu_transaction: 容器事件
+      document_hu_link_view: 关联单据
     state_key: handlingUnitManagerState
     disable_version_context: true
     scope:
@@ -662,10 +664,12 @@ ui_view_config:
       order_by: hu_no
       badge_field: status
       badge_map:
-        open: { label: 未封箱, type: info }
-        sealed: { label: 已封箱, type: success }
-        shipped: { label: 已发运, type: warning }
-        void: { label: 已作废, type: danger }
+        planned:   { label: 已计划, type: info }
+        open:      { label: 未封箱, type: info }
+        sealed:    { label: 已封箱, type: success }
+        in_transit: { label: 在途, type: warning }
+        shipped:   { label: 已发运, type: warning }
+        void:      { label: 已作废, type: danger }
       node_icon: folder
       search_placeholder: 输入容器号搜索
       empty_text: 暂无包装容器
@@ -674,3 +678,6 @@ ui_view_config:
       handling_unit: { field: parent_hu_id, mode: direct }
       handling_unit_item: { field: hu_id }
       hu_transaction: { field: hu_id }
+      # 关联单据取整棵子树（effective）：link 通常写在装货的叶子箱，
+      # 父托盘自身往往没有 link，direct 会让托盘选中时永远空表。
+      document_hu_link_view: { field: hu_id }
