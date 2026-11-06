@@ -1023,7 +1023,7 @@ class ReceiptService:
                     header['id'], red_id, len(source_items))
         return {'id': red_id, 'no': red_no, 'replay': False,
                 'line_ids': [line['id'] for line, _ in source_items],
-                'schedules': [], 'order_ids': [],
+                'schedules': [], 'returned_schedules': [], 'order_ids': [],
                 'transaction_date': date}
 
     def _create_work_order_reversal_document(
@@ -1104,7 +1104,7 @@ class ReceiptService:
                     header['id'], red_id, len(source_items))
         return {'id': red_id, 'no': red_no, 'replay': False,
                 'line_ids': [line['id'] for line, _ in source_items],
-                'schedules': [], 'order_ids': [],
+                'schedules': [], 'returned_schedules': [], 'order_ids': [],
                 'transaction_date': date}
 
     # ------------------------------------------------------------- 库存过账

@@ -419,7 +419,7 @@ def add_types(conn):
         'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
         'document_category, delivery_relevant, number_sequence_id, '
         "default_type_id, status) VALUES (?, 'RCV_RETURN', '红字收货单', 'receipt', "
-        "'header', 'return', NULL, ?, NULL, 'active')",
+        "'header', 'red', NULL, ?, NULL, 'active')",
         [RCV_RETURN_TYPE_ID, RCV_SEQUENCE_ID])
     conn.execute(
         'INSERT INTO type_definitions (id, code, name, scope_bo, level, '

@@ -77,7 +77,10 @@ CREATE TABLE purchase_orders (
     exchange_rate_date TEXT,
     project_id INTEGER,
     deliver_to_location_id INTEGER,
-    approval_status TEXT
+    approval_status TEXT,
+    origin_purchase_order_id INTEGER,
+    origin_receipt_id INTEGER,
+    return_reason TEXT
 );
 """
 
