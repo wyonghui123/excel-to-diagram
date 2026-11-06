@@ -1399,7 +1399,7 @@
       "table": "inventory_adjustment_lines"
     },
     "inventory_balance": {
-      "hash": "beca277430a709a26ea2ca75849f6213",
+      "hash": "d644e3724acded64785742ec10adedc7",
       "fields": [
         "id",
         "org_id",
@@ -1414,6 +1414,7 @@
         "project_task_id",
         "sales_order_line_id",
         "owner_party_id",
+        "first_received_date",
         "updated_at"
       ],
       "table": "inventory_balances"
@@ -4277,5 +4278,5 @@
       "table": "work_order_operations"
     }
   },
-  "last_sync": "2026-11-06T10:30:13.272355"
+  "last_sync": "2026-11-06T13:19:54.975717"
 }
