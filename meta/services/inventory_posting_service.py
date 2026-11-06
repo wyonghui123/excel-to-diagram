@@ -22,6 +22,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from meta.services import project_task_guard
+from meta.services.inventory_aging_service import InventoryAgingService
 from meta.services.inventory_guard_service import (
     INV_COUNT_BLOCKED, INV_POSTING_DISABLED, InventoryError,
     InventoryGuardService,
@@ -185,7 +186,9 @@ class InventoryPostingService:
             txn = self._insert_transaction(
                 normalized, doc_type, doc_id, source_event_key,
                 payload.get('remark') or source.get('remark'))
-            self._apply_balance(normalized)
+            self._apply_balance(
+                normalized,
+                reversal_of=txn.get('reversal_of_transaction_id'))
             created.append(txn)
 
         logger.info(
@@ -335,7 +338,9 @@ class InventoryPostingService:
             txn = self._insert_transaction(
                 normalized, doc_type, doc_id, source_event_key,
                 source.get('remark'), reversal_of=original['id'])
-            self._apply_balance(normalized)
+            self._apply_balance(
+                normalized,
+                reversal_of=txn.get('reversal_of_transaction_id'))
             created.append(txn)
 
         logger.info('[inventory] reverse event=%s created=%s existing=%s',
@@ -522,12 +527,30 @@ class InventoryPostingService:
                     [org, location, item, batch, status, seg_type,
                      project_id, project_task_id, so_line_id, owner_id,
                      qty, now])
+            self._rebuild_received_dates(sorted({key[0] for key in computed}))
             rebuilt_reserved = self.rebuild_reserved_qty(org_id)
         logger.info('[inventory] rebuild org=%s rows=%s reserved_rows=%s',
                     org_id, len(computed), rebuilt_reserved)
         return {'org_id': org_id, 'rows': len(computed),
                 'reserved_rows': rebuilt_reserved,
                 'total_qty': round(sum(computed.values()), 6)}
+
+    def _rebuild_received_dates(self, org_ids: List[Any]) -> None:
+        """重建后按组织回填最早入库日（与逐笔过账同一条 §5.3 SQL）。"""
+        match = ' AND '.join('b.%s = a.%s' % (col, col) for col in (
+            'location_id', 'item_id', 'batch_id', 'stock_status',
+            'stock_segment_type', 'project_id', 'project_task_id',
+            'sales_order_line_id', 'owner_party_id'))
+        for org in org_ids:
+            select_sql = InventoryAgingService.first_received_date_sql(
+                org_filter=True)
+            self.ds.execute(
+                'UPDATE %s AS b SET first_received_date = '
+                'a.first_received_date FROM (%s) AS a '
+                'WHERE %s AND b.org_id = ? AND b.qty_on_hand > 0 '
+                'AND a.first_received_date IS NOT NULL'
+                % (BAL_TABLE, select_sql, match),
+                [org, org, org])
 
     def rebuild_reserved_qty(self, org_id: Any = None) -> int:
         """由 inventory_reservations 汇总回写 qty_reserved（唯一写入口）。"""
@@ -678,22 +701,40 @@ class InventoryPostingService:
             'reversal_of_transaction_id': reversal_of,
         }
 
-    def _apply_balance(self, entry: Dict[str, Any]) -> None:
+    def _apply_balance(self, entry: Dict[str, Any],
+                       reversal_of: Any = None) -> None:
+        """同一条 UPSERT 维护数量与最早入库日（不新增 SQL 条数）。
+
+        reversal_of 必须显式传入：红冲出库的方向是 'in'，只判方向会把
+        红冲误当新入库层，库龄被重置到红冲日（D5 / R4）。
+        """
         batch_id = int(entry['batch_id']) if not _blank(entry.get('batch_id')) else 0
         delta = float(entry['base_qty'])
         if entry.get('direction') == 'out':
             delta = -delta
+        is_receipt = entry.get('direction') == 'in' and not reversal_of
+        received = str(entry.get('transaction_date'))[:10] if is_receipt else None
         now = _now()
         self.ds.execute(
             'INSERT INTO %s (org_id, location_id, item_id, batch_id, '
             'stock_status, stock_segment_type, project_id, project_task_id, '
             'sales_order_line_id, owner_party_id, qty_on_hand, qty_reserved, '
-            'updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) '
+            'first_received_date, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) '
             'ON CONFLICT(org_id, location_id, item_id, batch_id, stock_status, '
             'stock_segment_type, project_id, project_task_id, '
             'sales_order_line_id, owner_party_id) '
-            'DO UPDATE SET qty_on_hand = qty_on_hand + excluded.qty_on_hand, '
+            'DO UPDATE SET '
+            'first_received_date = CASE '
+            'WHEN qty_on_hand + excluded.qty_on_hand <= 0 THEN NULL '
+            'WHEN excluded.first_received_date IS NULL '
+            'THEN first_received_date '
+            'WHEN first_received_date IS NULL '
+            'THEN excluded.first_received_date '
+            'WHEN excluded.first_received_date < first_received_date '
+            'THEN excluded.first_received_date '
+            'ELSE first_received_date END, '
+            'qty_on_hand = qty_on_hand + excluded.qty_on_hand, '
             'updated_at = excluded.updated_at' % BAL_TABLE,
             [entry['org_id'], entry['location_id'], entry['item_id'],
              batch_id, entry['stock_status'],
@@ -701,7 +742,7 @@ class InventoryPostingService:
              int(entry.get('project_id') or 0),
              int(entry.get('project_task_id') or 0),
              int(entry.get('sales_order_line_id') or 0),
-             int(entry.get('owner_party_id') or 0), delta, now])
+             int(entry.get('owner_party_id') or 0), delta, received, now])
 
     def _next_transaction_no(self, transaction_date: Any) -> str:
         """在当前事务内取 INV 号（不单独提交，单据回滚时号一并回滚）。"""

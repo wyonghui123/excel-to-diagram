@@ -1326,6 +1326,7 @@ CREATE TABLE IF NOT EXISTS inventory_balances (
     project_task_id INTEGER NOT NULL DEFAULT 0,
     sales_order_line_id INTEGER NOT NULL DEFAULT 0,
     owner_party_id INTEGER NOT NULL DEFAULT 0,
+    first_received_date DATETIME,
     updated_at DATETIME,
     FOREIGN KEY (org_id) REFERENCES orgs(id),
     FOREIGN KEY (location_id) REFERENCES locations(id),

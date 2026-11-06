@@ -13,6 +13,7 @@ const PAGE_TYPE_COMPONENTS = {
   object_list: () => import('@/views/GenericObjectList.vue'),
   object_detail: () => import('@/views/ObjectDetailPage.vue'),
   multi_object_hub: () => import('@/views/GenericTabContainer.vue'),
+  report: () => import('@/views/MetaReportPage.vue'),
 }
 
 const STATIC_ROUTE_NAMES = new Set([
@@ -69,7 +70,7 @@ function _resolveComponent(menu) {
 function _buildProps(menu) {
   const props = {}
 
-  if (menu.page_type === 'object_list') {
+  if (menu.page_type === 'object_list' || menu.page_type === 'report') {
     if (menu.primary_object_type) {
       props.objectType = menu.primary_object_type
     }

@@ -1129,6 +1129,10 @@ def create_app(db_path=None):
     #   缺登记时 /scan 返回 404、列表被通用 BO 路由兜底。
     from meta.api.handling_unit_api import handling_unit_bp
     app.register_blueprint(handling_unit_bp)
+    # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.inventory_aging_api import inventory_aging_bp
+    app.register_blueprint(inventory_aging_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1258,6 +1262,9 @@ def create_app(db_path=None):
         # [P6a-2 v218 2026-11-05] 包装容器作业是独立 Blueprint 的域内命令端点
         # （扫码预检/封箱/解封/批量封箱），非 BO CRUD；缺白名单会被误判为 410。
         'handling-units',  # /api/v1/handling-units/*
+        # [P8 2026-11-06] 库存库龄报表/明细是独立 Blueprint 的只读聚合端点，
+        # 非 BO CRUD；缺白名单会被本中间件误判为 410。
+        'inventory-aging',  # /api/v1/inventory-aging/report、/detail
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

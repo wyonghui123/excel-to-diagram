@@ -249,6 +249,20 @@ fields:
         target_type: party
         display_field: name
 
+  - id: first_received_date
+    name: 最早入库日期
+    type: date
+    db_column: first_received_date
+    nullable: true
+    description: 当前余额行最早未清零的入库过账日；空=无库存/负库存/未回填
+    semantics:
+      meaning: 库龄起算日（最早未清零入库层）
+      filterable: true
+      filter_type: date_range
+      readonly: true
+      derived: true
+      note: 由库存过账维护，不可手工编辑；口径为过账日，非实际到货日
+
   - id: updated_at
     name: 更新时间
     type: datetime
@@ -344,6 +358,11 @@ ui_view_config:
       - field: qty_reserved
         width: 110
         align: right
+      - field: first_received_date
+        width: 130
+        filterable: true
+        filter_type: date_range
+        format: date
       - field: updated_at
         width: 170
     selection:
@@ -372,4 +391,82 @@ ui_view_config:
         label: 基本信息
         type: fields
         fields: [org_id, location_id, item_id, batch_id, stock_status,
-                 qty_on_hand, qty_reserved, updated_at]
+                 qty_on_hand, qty_reserved, first_received_date, updated_at]
+  # [P9 2026-11-06] 库龄报表页：由 MetaReportPage 按本段配置渲染，
+  # 数据来自只读聚合接口；不要在此重复配置第二份口径。
+  report:
+    title: 库存库龄
+    description: 按余额行最早入库日分桶；空日期=期初未回填/负库存/无库存
+    endpoint: /api/v1/inventory-aging/report
+    filters:
+      - field: org_id
+        label: 库存组织
+        type: value_help
+        target_type: org
+        required: true
+      - field: location_id
+        label: 库位
+        type: value_help
+        target_type: location
+      - field: item_id
+        label: 物料
+        type: value_help
+        target_type: item
+      - field: batch_id
+        label: 批次
+        type: value_help
+        target_type: batch
+      - field: stock_status
+        label: 库存状态
+        type: select
+      - field: as_of
+        label: 截止日期
+        type: date
+      - field: group_by
+        label: 汇总维度
+        type: select
+        default: balance
+        options:
+          - { value: balance, label: 余额行 }
+          - { value: item, label: 按物料 }
+          - { value: batch, label: 按批次 }
+    kpis:
+      - { label: 在手数量, field: total_qty, format: number }
+      - { label: 未分桶数量, field: unassigned_qty, format: number }
+    chart:
+      type: bar
+      title: 库龄分布
+      data_field: summary
+      category_field: bucket
+      value_field: qty
+    table:
+      data_field: rows
+      page_size: 20
+      row_key: [org_id, location_id, item_id, batch_id, stock_status,
+                stock_segment_type, project_id, project_task_id,
+                sales_order_line_id, owner_party_id]
+      columns:
+        - { field: location_id, label: 库位 }
+        - { field: item_id, label: 物料 }
+        - { field: batch_id, label: 批次 }
+        - { field: stock_status, label: 库存状态 }
+        - { field: qty_on_hand, label: 在手数量, format: number }
+        - { field: first_received_date, label: 最早入库日期, format: date }
+        - { field: days_in_stock, label: 库龄(天), format: number }
+        - { field: age_bucket, label: 库龄区间 }
+    drilldown:
+      endpoint: /api/v1/inventory-aging/detail
+      title: 库龄明细
+      only_when_group_by: balance
+      param_map:
+        org_id: org_id
+        location_id: location_id
+        item_id: item_id
+        batch_id: batch_id
+        stock_status: stock_status
+        stock_segment_type: stock_segment_type
+        project_id: project_id
+        project_task_id: project_task_id
+        sales_order_line_id: sales_order_line_id
+        owner_party_id: owner_party_id
+        as_of: as_of

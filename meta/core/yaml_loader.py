@@ -164,6 +164,12 @@ from meta.core.models import (
     UIFilterDefinition,
     UIFilterViewConfig,
     UIViewConfig,
+    UIReportConfig,
+    UIReportFilterConfig,
+    UIReportKpiConfig,
+    UIReportChartConfig,
+    UIReportTableConfig,
+    UIReportDrilldownConfig,
     ActionParameter,
     DeletabilityConfig,
     AddabilityConfig,
@@ -1066,6 +1072,83 @@ def parse_change_notification_config(data: Dict[str, Any]) -> ChangeNotification
     )
 
 
+def parse_ui_report_config(data: Dict[str, Any]) -> Optional[UIReportConfig]:
+    """解析报表页配置（ui_view_config.report）。
+
+    未知键忽略；缺省值由 dataclass 提供。未声明 report 时返回 None，
+    以便调用方区分“无报表页”和“声明了空报表页”。
+    """
+    if not data:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    filters = [
+        UIReportFilterConfig(
+            key=item.get("key") or item.get("field") or "",
+            label=item.get("label", ""),
+            type=item.get("type", "text") or "text",
+            required=bool(item.get("required")),
+            default=item.get("default"),
+            options=item.get("options") or [],
+            target_type=item.get("target_type", ""),
+        )
+        for item in (data.get("filters") or [])
+        if isinstance(item, dict) and (item.get("key") or item.get("field"))
+    ]
+
+    kpis = [
+        UIReportKpiConfig(
+            label=item.get("label", ""),
+            field=item.get("field", ""),
+            format=item.get("format", "number") or "number",
+        )
+        for item in (data.get("kpis") or [])
+        if isinstance(item, dict) and item.get("field")
+    ]
+
+    chart = None
+    if data.get("chart"):
+        chart_data = data.get("chart") or {}
+        chart = UIReportChartConfig(
+            type=chart_data.get("type", "bar") or "bar",
+            title=chart_data.get("title", ""),
+            data_field=chart_data.get("data_field", "summary") or "summary",
+            category_field=chart_data.get("category_field", "bucket") or "bucket",
+            value_field=chart_data.get("value_field", "qty") or "qty",
+        )
+
+    table_data = data.get("table") or {}
+    table = UIReportTableConfig(
+        data_field=table_data.get("data_field", "rows") or "rows",
+        page_size=int(table_data.get("page_size") or 20),
+        row_key=table_data.get("row_key") or [],
+        columns=table_data.get("columns") or [],
+    )
+
+    drilldown = None
+    if data.get("drilldown"):
+        drill_data = data.get("drilldown") or {}
+        drilldown = UIReportDrilldownConfig(
+            endpoint=drill_data.get("endpoint", ""),
+            title=drill_data.get("title", ""),
+            only_when_group_by=drill_data.get("only_when_group_by", ""),
+            param_map=drill_data.get("param_map") or {},
+        )
+
+    return UIReportConfig(
+        title=data.get("title", ""),
+        description=data.get("description", ""),
+        endpoint=data.get("endpoint", ""),
+        method=(data.get("method", "GET") or "GET").upper(),
+        filters=filters,
+        kpis=kpis,
+        chart=chart,
+        table=table,
+        drilldown=drilldown,
+    )
+
+
 def parse_ui_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]] = None) -> UIViewConfig:
     """解析 UI 视图配置
 
@@ -1094,6 +1177,8 @@ def parse_ui_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]] = No
         child_sections=data.get("child_sections", []),
         # [HUB 2026-10-24] 页面聚合形态（object_types/tabs/scope/filters），原样透传。
         hub=data.get("hub", {}) or {},
+        # [P9 2026-11-06] 报表页配置；未声明时为 None。
+        report=parse_ui_report_config(data.get("report")),
     )
 
 
@@ -2531,6 +2616,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         display_name_field=data.get("display_name_field"),
         skip_generic_api=data.get("skip_generic_api", False),
         state_machine_required=data.get("requires_state_machine", False),
+        # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）
+        doc_effect=data.get("doc_effect") or {},
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)

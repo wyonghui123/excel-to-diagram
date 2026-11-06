@@ -62,6 +62,16 @@ class TestDomainCommandRoutesNotSunset:
             f"{path} 被 deprecate_v1_crud 拦截: {body[:200]}"
         )
 
+    def test_inventory_aging_not_blocked(self):
+        """P8 库龄只读端点必须列入 V1_SPECIAL_PREFIXES，否则被误判为 410。"""
+        _, client = get_shared_app()
+        client.get("/api/v1/auth/dev-login?username=admin")
+        resp = client.get("/api/v1/inventory-aging/report?org_id=1")
+        assert resp.status_code != 410, (
+            f"库龄端点被 deprecate_v1_crud 拦截: "
+            f"{resp.get_data(as_text=True)[:200]}"
+        )
+
 
 class TestEnabledAppIntegration:
     """ENABLED_APPS=hello_world → 应用路由可达且平台路由不受影响"""

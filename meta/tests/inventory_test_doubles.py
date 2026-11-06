@@ -19,6 +19,9 @@ from meta.migrations.v205__inventory_segment_reservation import (
 from meta.migrations.v218__reservation_closed_status import (
     apply_closed_status,
 )
+from meta.migrations.v224__inventory_balance_received_date import (
+    apply_column as apply_received_date_column,
+)
 
 ORG_ID = 1
 OTHER_ORG_ID = 2
@@ -185,6 +188,7 @@ def _install_tables(conn):
     with redirect_stdout(io.StringIO()):
         apply_segment_schema(conn)
         apply_closed_status(conn)
+        apply_received_date_column(conn)
 
 
 def _seed_types(conn):
