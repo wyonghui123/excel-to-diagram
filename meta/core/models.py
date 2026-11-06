@@ -517,6 +517,34 @@ class FieldPolicy:
 
 
 @dataclass
+class MetaStateDefinition:
+    """对象级状态定义（S1 状态目录）
+
+    对标 SAP 状态参数文件（BS02/TJ30）的「状态目录」部分：
+    只声明状态本身与分类；状态迁移仍由 MetaStateTransition 表达。
+    """
+    code: str = ""                       # 状态值（state_field 的实际取值）
+    label: str = ""                      # 展示名
+    # initial / normal / terminal / system；system = 系统置位、业务不可手工设置
+    category: str = "normal"
+    is_system_locked: bool = False
+    seq: int = 0                         # 展示排序
+
+
+@dataclass
+class MetaStateFieldPolicy:
+    """状态 × 字段矩阵（S1）
+
+    对标 SAP 状态参数文件对字段选择（field selection）的控制：
+    某状态下强制只读 / 必填 / 隐藏的字段集合。
+    求值优先级：系统字段 > 本矩阵（命中短路）> 字段级 determination > ui 默认。
+    """
+    readonly: List[str] = field(default_factory=list)
+    required: List[str] = field(default_factory=list)
+    hidden: List[str] = field(default_factory=list)
+
+
+@dataclass
 class EnhancedMetaField(MetaField):
     """增强版元数据字段（继承现有MetaField并扩展）
     
@@ -1107,6 +1135,11 @@ class MetaObject:
     # [G7 2026-11-02] YAML 显式声明「需要状态机」：优先于分类模板的
     # default_state_machine；供通用更新路径做 status 迁移守卫。
     state_machine_required: bool = False
+
+    # [S1 2026-11-06] 状态目录 + 状态×字段矩阵（对标 SAP 状态参数文件）。
+    # 默认空 = 完全向后兼容；未声明 state_field_policies 的对象行为不变。
+    states: List[MetaStateDefinition] = field(default_factory=list)
+    state_field_policies: Dict[str, MetaStateFieldPolicy] = field(default_factory=dict)
 
     def __post_init__(self):
         """初始化时自动应用分类模板"""

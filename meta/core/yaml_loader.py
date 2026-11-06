@@ -124,6 +124,8 @@ from meta.core.models import (
     MetaComputation,
     MetaDefaultRule,
     MetaStateTransition,
+    MetaStateDefinition,
+    MetaStateFieldPolicy,
     MetaTrigger,
     MetaRule,
     MetaQuery,
@@ -1667,6 +1669,17 @@ def _resolve_field_type(type_str: str, field_id: Any = None) -> "FieldType":
 
 
 def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
+    # [S2 2026-11-06] type_spec 合并：字段显式值 > spec 值。
+    # 例：fields: [{id: code, type_spec: code_32}] ⇒ 继承 string/max_length/pattern。
+    _spec_id = data.get("type_spec")
+    if _spec_id:
+        _spec = _TYPE_SPECS.get(str(_spec_id))
+        if _spec is None:
+            raise ValueError(
+                f"[S2] field {data.get('id', '?')}: unknown type_spec {_spec_id!r}; "
+                f"known={sorted(_TYPE_SPECS)}")
+        data = {**_spec, **data}
+
     field_type_str = str(data.get("type", "string")).lower()
     field_type = _resolve_field_type(field_type_str, data.get("id"))
 
@@ -2453,6 +2466,72 @@ def _resolve_includes_compat(data: Dict[str, Any], shared_props: Dict[str, List[
 _resolve_includes = _resolve_includes_compat
 
 
+# [S2 2026-11-06] 类型规格别名注册表（_type_specs.yaml）。
+# 同一「type + max_length + pattern」组合只需定义一次，字段用 type_spec 引用。
+_TYPE_SPECS: Dict[str, Dict[str, Any]] = {}
+
+
+def load_type_specs(dir_path: str) -> Dict[str, Dict[str, Any]]:
+    """加载 <schema_dir>/_type_specs.yaml；文件不存在则清空注册表。
+
+    规格键与 parse_field 读取的 YAML 键一致（type / max_length / pattern 等）；
+    合并规则：字段显式值 > spec 值 > 内置默认值。
+    """
+    global _TYPE_SPECS
+    path = Path(dir_path) / "_type_specs.yaml"
+    if not path.exists():
+        _TYPE_SPECS = {}
+        return _TYPE_SPECS
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    specs = data.get("type_specs") or {}
+    if not isinstance(specs, dict):
+        raise ValueError(
+            "[S2] _type_specs.yaml: type_specs 必须是映射，实际为 {0}".format(
+                type(specs).__name__))
+    _TYPE_SPECS = {
+        str(k): dict(v) for k, v in specs.items() if isinstance(v, dict)
+    }
+    _info("[YAML Loader] Loaded {0} type_specs: {1}".format(
+        len(_TYPE_SPECS), ", ".join(sorted(_TYPE_SPECS))))
+    return _TYPE_SPECS
+
+
+def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None:
+    """[S1] 状态目录/矩阵的 fail-fast 校验。
+
+    规则：① 矩阵 key 必须出现在 obj.states 或任一 state_transition 的 from/to；
+          ② 矩阵中的字段 id 必须存在于 obj.fields。
+    违规直接抛错（启动失败），不静默忽略。
+    """
+    if not obj.state_field_policies:
+        return
+    declared = {s.code for s in obj.states}
+    transition_states: set = set()
+    for rule in obj.rules:
+        if getattr(rule, "rule_type", None) == RuleType.STATE_TRANSITION:
+            transition_states.update(getattr(rule, "from_states", []) or [])
+            to_state = getattr(rule, "to_state", "")
+            if to_state:
+                transition_states.add(to_state)
+    allowed = declared | transition_states
+    field_ids = {f.id for f in obj.fields}
+    where = " ({0})".format(source_file) if source_file else ""
+    for state, policy in obj.state_field_policies.items():
+        if state not in allowed:
+            raise ValueError(
+                "[S1] {0}: state_field_policies 引用了未声明的状态 {1!r}{2}；"
+                "已声明 states={3} / transitions={4}".format(
+                    obj.id, state, where,
+                    sorted(declared), sorted(transition_states)))
+        for kind in ("readonly", "required", "hidden"):
+            for fid in getattr(policy, kind, []) or []:
+                if fid not in field_ids:
+                    raise ValueError(
+                        "[S1] {0}: state {1!r} 的 {2} 引用了不存在的字段 {3!r}{4}".format(
+                            obj.id, state, kind, fid, where))
+
+
 def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject:
     fields = [parse_field(f, included_from=f.get("included_from", "")) for f in data.get("fields", [])]
     relations = [parse_relation(r) for r in data.get("relations", [])]
@@ -2539,6 +2618,31 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
     obj.hierarchy = parse_hierarchy(data)
     obj.context = parse_context(data)
     obj.cascade_select = parse_cascade_select(data)
+
+    # [S1 2026-11-06] 状态目录 + 状态×字段矩阵；默认空 = 行为不变。
+    obj.states = [
+        MetaStateDefinition(
+            code=str(item.get("code", "")),
+            label=item.get("label", ""),
+            category=item.get("category", "normal"),
+            is_system_locked=bool(item.get("is_system_locked", False)),
+            seq=int(item.get("seq", 0) or 0),
+        )
+        for item in (data.get("states") or [])
+        if isinstance(item, dict) and item.get("code")
+    ]
+    obj.state_field_policies = {}
+    for state, policy in (data.get("state_field_policies") or {}).items():
+        if not isinstance(policy, dict):
+            raise ValueError(
+                "[S1] {0}: state_field_policies[{1!r}] 必须是映射".format(
+                    obj.id, state))
+        obj.state_field_policies[str(state)] = MetaStateFieldPolicy(
+            readonly=list(policy.get("readonly") or []),
+            required=list(policy.get("required") or []),
+            hidden=list(policy.get("hidden") or []),
+        )
+    _validate_state_declarations(obj, source_file)
     
     associations = obj.associations
     if associations:
@@ -2768,6 +2872,7 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     
     shared_props = parse_shared_properties(str(dir_path))
     aspects_defs = parse_aspects_yaml(str(dir_path))
+    load_type_specs(str(dir_path))
     
     # [2026-10-07] 仅注册"对象定义"文件。schemas/ 目录混放三类 yaml：
     #   ① 对象定义（顶层有 id:）—— 注册为 MetaObject

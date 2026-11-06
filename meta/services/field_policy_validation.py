@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
+from meta.core.models import RuleType
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,10 @@ class FieldPolicyValidationInterceptor:
         # 判断是否新行
         is_new = old_data is None
         row_data['is_new'] = is_new
+
+        # [S1 2026-11-06] 注入当前状态值：状态字段以元数据声明为准（不硬编码 status）。
+        state_field = self._resolve_state_field()
+        state_value = row_data.get(state_field) if state_field else None
         
         # 构建对象上下文
         object_ctx = None
@@ -236,8 +241,23 @@ class FieldPolicyValidationInterceptor:
         return PolicyContext(
             row=row_data,
             object_context=object_ctx,
-            action=action
+            action=action,
+            state=state_value,
         )
+
+    def _resolve_state_field(self) -> str:
+        """[S1] 从对象的 state_transition 规则解析状态字段名。
+
+        不硬编码 'status'：以 MetaStateTransition.state_field 的元数据声明为准。
+        """
+        if not self.meta_object:
+            return ""
+        for rule in getattr(self.meta_object, 'rules', []) or []:
+            if getattr(rule, 'rule_type', None) == RuleType.STATE_TRANSITION:
+                state_field = getattr(rule, 'state_field', '')
+                if state_field:
+                    return state_field
+        return ""
     
     def _validate_field_editable(
         self,

@@ -35,6 +35,8 @@ class PolicyContext:
     object_context: Optional[ObjectContext] = None
     user_context: Optional[UserContext] = None
     action: str = 'read'
+    # [S1 2026-11-06] 当前对象状态值（取自 state_field）；用于状态×字段矩阵求值。
+    state: Optional[str] = None
 
 
 @dataclass
@@ -113,6 +115,23 @@ class FieldPolicyEngine:
             return semantics.get('immutable', False)
         return getattr(semantics, 'immutable', False)
     
+    def _state_policy(self, field_id: str, context: Optional[PolicyContext]) -> Optional[str]:
+        """[S1] 返回状态矩阵对该字段的强制策略：hidden / readonly / required；否则 None。
+
+        优先级：hidden > readonly > required（hidden 与 readonly 都禁止写入，
+        hidden 更强；required 只在字段可写时才有意义）。
+        """
+        if not context or not context.state or not self.meta_object:
+            return None
+        policies = getattr(self.meta_object, 'state_field_policies', None) or {}
+        policy = policies.get(context.state)
+        if not policy:
+            return None
+        for kind in ('hidden', 'readonly', 'required'):
+            if field_id in (getattr(policy, kind, None) or []):
+                return kind
+        return None
+
     def is_field_editable(
         self,
         field_id: str,
@@ -138,7 +157,11 @@ class FieldPolicyEngine:
         """
         if self._is_system_field(field_id):
             return False
-        
+
+        # [S1] 状态×字段矩阵优先（命中即短路），对标 SAP 状态参数文件的字段选择控制。
+        if self._state_policy(field_id, context) in ('hidden', 'readonly'):
+            return False
+
         field_def = self._get_field(field_id)
         if self._is_immutable(field_def):
             if context and context.action == 'create':
@@ -171,6 +194,10 @@ class FieldPolicyEngine:
         """判断字段是否可见"""
         if self._is_system_field(field_id):
             return False
+
+        # [S1] 状态矩阵 hidden 优先。
+        if self._state_policy(field_id, context) == 'hidden':
+            return False
         
         if field_id in self._field_policies:
             policy = self._field_policies[field_id]
@@ -185,6 +212,13 @@ class FieldPolicyEngine:
         context: Optional[PolicyContext] = None
     ) -> bool:
         """判断字段是否必填"""
+        # [S1] 状态矩阵：required 直接为真；hidden 时不要求必填。
+        _state_kind = self._state_policy(field_id, context)
+        if _state_kind == 'required':
+            return True
+        if _state_kind == 'hidden':
+            return False
+
         if field_id in self._field_policies:
             policy = self._field_policies[field_id]
             if policy.required:

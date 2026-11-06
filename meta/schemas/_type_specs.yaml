@@ -1,0 +1,22 @@
+# 类型规格别名（S2 / 2026-11-06）
+#
+# 用途：把「type + max_length + pattern」等组合命名一次，字段用 `type_spec: <id>` 引用。
+# 合并规则：字段显式值 > spec 值 > 内置默认值。未知 spec id 在启动期报错。
+# 本文件以 `_` 前缀命名，yaml_loader 不会把它注册为业务对象。
+#
+# 渐进原则：只收录确实在多处重复的规格；改规格会同时影响所有引用字段，故保持克制。
+type_specs:
+  code_32:
+    type: string
+    max_length: 32
+    pattern: "^[A-Z0-9_-]+$"
+  code_64:
+    type: string
+    max_length: 64
+    pattern: "^[A-Z0-9_-]+$"
+  name_64:
+    type: string
+    max_length: 64
+  description_1024:
+    type: string
+    max_length: 1024

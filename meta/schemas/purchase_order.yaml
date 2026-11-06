@@ -45,6 +45,68 @@ semantics:
     - Purchase Order
     - PO
 
+# [S1 2026-11-06] 状态目录 + 状态×字段矩阵（对标 SAP 状态参数文件的字段选择控制）。
+# 把原来只写在 ui_hints.confirm_message 里的口头承诺（「确认后汇率冻结」「关闭后只读」）
+# 变成元数据强制。默认未命中的状态行为完全不变。
+states:
+  - code: draft
+    label: 草稿
+    category: initial
+    seq: 1
+  - code: submitted
+    label: 已提交
+    seq: 2
+  - code: confirmed
+    label: 已确认
+    seq: 3
+  - code: closed
+    label: 已关闭
+    category: terminal
+    seq: 4
+  - code: cancelled
+    label: 已取消
+    category: terminal
+    seq: 5
+
+state_field_policies:
+  # 已确认：源头字段锁定（供应商/组织/地点/日期/币种/汇率/折扣）
+  confirmed:
+    readonly:
+      - supplier_party_id
+      - supplier_account_id
+      - purchase_org_id
+      - purchase_legal_entity_id
+      - deliver_to_location_id
+      - order_date
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - header_discount_percent
+  # 已关闭：订单只读（业务文案「关闭后订单只读」）
+  closed:
+    readonly:
+      - supplier_party_id
+      - supplier_account_id
+      - purchase_org_id
+      - purchase_legal_entity_id
+      - deliver_to_location_id
+      - order_date
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - header_discount_percent
+      - payment_term_id
+      - incoterm_code
+  # 已取消：不可再改抬头要素
+  cancelled:
+    readonly:
+      - supplier_party_id
+      - purchase_org_id
+      - purchase_legal_entity_id
+      - order_date
+
 deletion_policy:
   # 事实单据：非草稿禁止删除（守卫拦截器强制度）；草稿删除时级联清行
   mode: restrict
