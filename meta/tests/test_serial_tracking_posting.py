@@ -89,7 +89,8 @@ CREATE TABLE shipments (
 CREATE TABLE shipment_lines (
     id INTEGER PRIMARY KEY, delivery_id INTEGER, schedule_id INTEGER,
     order_line_id INTEGER, item_id INTEGER, uom_id INTEGER, qty REAL,
-    lot_no TEXT, serial_no TEXT, status TEXT, created_at TEXT, updated_at TEXT
+    lot_no TEXT, serial_no TEXT, project_task_id INTEGER,
+    status TEXT, created_at TEXT, updated_at TEXT
 );
 """
 

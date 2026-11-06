@@ -1002,6 +1002,10 @@ def create_app(db_path=None):
 
     @app.errorhandler(Exception)
     def handle_exception(error):
+        # HTTPException（404/403/405 等）应保留原状态码，不能被当作 500 吞掉
+        from werkzeug.exceptions import HTTPException
+        if isinstance(error, HTTPException):
+            return error
         error_msg = str(error)
         app_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
         if app_debug:

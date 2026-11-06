@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from meta.core.action_executor import ActionExecutor, AuditLogger, ActionResult
+from meta.tests.test_utils import ensure_audit_log_columns
 from meta.core.datasource import DataSource, DataSourceType
 from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.rule_executor import RuleEngine
@@ -60,6 +61,7 @@ def ds(tmp_path_factory):
     )
     """
     data_source.execute(audit_log_sql)
+    ensure_audit_log_columns(data_source)
     return data_source
 
 
@@ -206,6 +208,7 @@ def setup_database(ds, parent, child):
     )
     """
     ds.execute(audit_sql)
+    ensure_audit_log_columns(ds)
 
 
 def test_audit_logger(tmp_path):
@@ -243,6 +246,7 @@ def test_audit_logger(tmp_path):
             parent_object_id TEXT
         )
     """)
+    ensure_audit_log_columns(ds)
     
     logger = AuditLogger(ds, enabled=True)
     logger.set_user(user_id=1, user_name="测试用户", ip_address="127.0.0.1")

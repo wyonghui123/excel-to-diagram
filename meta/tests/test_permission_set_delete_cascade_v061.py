@@ -36,15 +36,38 @@ def admin_cookie():
     return get_admin_cookie()
 
 
+def _assign_permissions(permission_set_id: int, cookie: str, count: int = 2) -> None:
+    """通过 API 给 permission_set 分配权限 (BO create 不再隐式分配)."""
+    import requests
+
+    bo_url = os.environ.get('BO_API_BASE', 'http://localhost:3010')
+    resp = requests.get(
+        f'{bo_url}/api/v2/bo/permission?page=1&page_size={count}',
+        headers={'Cookie': cookie}, timeout=15,
+    )
+    items = (resp.json().get('data') or {}).get('items') or []
+    permission_ids = [it['id'] for it in items][:count]
+    assert len(permission_ids) == count, f'not enough permissions: {items}'
+
+    resp = requests.put(
+        f'{bo_url}/api/v1/permission-sets/{permission_set_id}/permissions',
+        json={'permission_ids': permission_ids},
+        headers={'Cookie': cookie, 'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    assert resp.status_code == 200 and resp.json().get('success'), \
+        f'assign permissions failed: {resp.status_code} {resp.text[:200]}'
+
+
 def _count_child_tables(permission_set_id: int) -> dict:
     """[read-only] 统计角色在各子表中的引用数量."""
     conn = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True)
     try:
         cur = conn.cursor()
         counts = {}
-        for tbl in ('role_permissions', 'role_menu_permissions',
-                    'permission_rules', 'role_data_permissions',
-                    'role_dimension_scopes', 'user_roles'):
+        for tbl in ('permission_set_permissions', 'permission_set_menu_permissions',
+                    'permission_rules', 'permission_set_data_permissions',
+                    'permission_set_dimension_scopes', 'user_permission_sets'):
             try:
                 cur.execute(f'SELECT COUNT(*) FROM {tbl} WHERE permission_set_id=?', (permission_set_id,))
                 counts[tbl] = cur.fetchone()[0]
@@ -60,20 +83,17 @@ class TestRoleDeleteCascadeV061:
 
     def test_tc01_delete_with_refs_cascades(self, admin_cookie):
         """TC-01: 创建角色 + 分配权限 + 菜单 → 删角色 → 子表清零."""
-        # 用 RoleFactory 创建 + 自动分配权限 (RoleFactory 默认带 permissions)
-        # 显式覆盖 permissions
-        permission_set = RoleFactory.create(
-            cookie=admin_cookie,
-            permissions=['product:read', 'product:write'],
-        )
+        # 用 RoleFactory 创建 permission_set, 再通过 API 显式分配权限
+        permission_set = RoleFactory.create(cookie=admin_cookie)
         permission_set_id = permission_set['id']
         assert permission_set_id > 0, f'create permission_set failed: {permission_set}'
+        _assign_permissions(permission_set_id, admin_cookie)
 
         try:
-            # 1. 验证子表确实有引用 (RoleFactory 默认会创建 role_permissions)
+            # 1. 验证子表确实有引用
             counts = _count_child_tables(permission_set_id)
-            assert counts['role_permissions'] >= 2, \
-                f'expected >=2 role_permissions, got: {counts}'
+            assert counts['permission_set_permissions'] >= 2, \
+                f'expected >=2 permission_set_permissions, got: {counts}'
 
             # 2. 删除角色 (走 API, 触发级联)
             RoleFactory.cleanup(permission_set_id, cookie=admin_cookie)

@@ -4,8 +4,8 @@ PermissionRuleV2DAO — permission_rules_v2 表的 CRUD 操作
 
 [Phase 3 P3.1] 为前端 UnifiedPermissionPanel 提供数据访问层
 
-[表结构] (见 meta/migrations/add_permission_rules_v2.py)
-    id, role_id, resource_type, permission_level,
+[表结构] (见 meta/schemas/permission_rule.yaml)
+    id, permission_set_id, resource_type, permission_level,
     include_conditions, exclude_conditions,
     derivation_mode, source, created_at, updated_at
 """
@@ -26,11 +26,11 @@ class PermissionRuleV2DAO:
         return conn
 
     def list_by_role(
-        self, role_id: int, resource_type: Optional[str] = None
+        self, permission_set_id: int, resource_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """按 role_id 查询规则列表"""
-        sql = 'SELECT * FROM permission_rules_v2 WHERE role_id = ?'
-        params: List[Any] = [role_id]
+        """按 permission_set_id 查询规则列表"""
+        sql = 'SELECT * FROM permission_rules_v2 WHERE permission_set_id = ?'
+        params: List[Any] = [permission_set_id]
         if resource_type:
             sql += ' AND resource_type = ?'
             params.append(resource_type)
@@ -61,7 +61,7 @@ class PermissionRuleV2DAO:
 
     def create(
         self,
-        role_id: int,
+        permission_set_id: int,
         resource_type: str,
         permission_level: str = 'read',
         include_conditions: Optional[List[Dict]] = None,
@@ -75,11 +75,11 @@ class PermissionRuleV2DAO:
         with self._connect() as conn:
             cursor = conn.execute(
                 '''INSERT INTO permission_rules_v2
-                   (role_id, resource_type, permission_level,
+                   (permission_set_id, resource_type, permission_level,
                     include_conditions, exclude_conditions,
                     derivation_mode, source)
                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                [role_id, resource_type, permission_level,
+                [permission_set_id, resource_type, permission_level,
                  inc_json, exc_json, derivation_mode, source],
             )
             conn.commit()

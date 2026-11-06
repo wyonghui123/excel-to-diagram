@@ -176,6 +176,21 @@ CREATE TABLE inventory_transactions (
     sales_order_line_id INTEGER,
     owner_party_id INTEGER
 );
+CREATE TABLE purchase_orders (
+    id INTEGER PRIMARY KEY,
+    order_no TEXT,
+    status TEXT,
+    document_type_id INTEGER,
+    purchase_org_id INTEGER,
+    purchase_legal_entity_id INTEGER,
+    supplier_party_id INTEGER,
+    currency_id INTEGER,
+    exchange_rate REAL,
+    exchange_rate_type TEXT,
+    exchange_rate_date TEXT,
+    approval_status TEXT,
+    project_id INTEGER
+);
 CREATE TABLE purchase_order_lines (
     id INTEGER PRIMARY KEY,
     order_id INTEGER,
@@ -394,6 +409,8 @@ def test_a6_purchase_ownership_is_carried_by_demand_allocation():
     _add_project(conn, 2, 'standard')
     _add_task(conn, 61, 1)
     _add_task(conn, 62, 2)
+    conn.execute('INSERT INTO purchase_orders (id, order_no, status, project_id) '
+                 "VALUES (1, 'PO001', 'approved', 1)")
     conn.execute('INSERT INTO purchase_order_lines (id, order_id, qty, '
                  'unit_price) VALUES (1, 1, 100, 10)')
     service = PurchaseOrderGuardService(_MemDS(conn))

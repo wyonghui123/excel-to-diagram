@@ -270,23 +270,57 @@ class PermissionSetService:
                 return None
 
             # 2. 查询角色权限 (注: 表已重命名为 permission_set_*)
-            # role_permissions 已重命名为 permission_set_permissions
-            cursor = self._ds.execute(
-                """SELECT p.code FROM permissions p
-                   JOIN permission_set_permissions psp ON psp.permission_id = p.id
-                   WHERE psp.permission_set_id = ?""",
-                [role_id]
-            )
+            # 源表兼容: 迁移前为 role_permissions; 迁移后为 permission_set_permissions
+            # 目标表存在两种形态 (见 v084):
+            #   ID-form:   (permission_set_id, permission_id, granted, created_at)
+            #   CODE-form: (permission_set_id, permission_code, created_at)
+            tables = {r[0] for r in self._ds.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()}
+            psp_cols = {r[1] for r in self._ds.execute(
+                "PRAGMA table_info(permission_set_permissions)"
+            ).fetchall()}
+            use_code_col = 'permission_code' in psp_cols
+            if 'role_permissions' in tables:
+                cursor = self._ds.execute(
+                    """SELECT p.code, p.id FROM permissions p
+                       JOIN role_permissions rp ON rp.permission_id = p.id
+                       WHERE rp.role_id = ?""",
+                    [role_id]
+                )
+            elif use_code_col:
+                cursor = self._ds.execute(
+                    """SELECT p.code, p.id FROM permissions p
+                       JOIN permission_set_permissions psp ON psp.permission_code = p.code
+                       WHERE psp.permission_set_id = ?""",
+                    [role_id]
+                )
+            else:
+                cursor = self._ds.execute(
+                    """SELECT p.code, p.id FROM permissions p
+                       JOIN permission_set_permissions psp ON psp.permission_id = p.id
+                       WHERE psp.permission_set_id = ?""",
+                    [role_id]
+                )
             rows = cursor.fetchall()
             now = datetime.now().isoformat()
             for row in rows:
                 perm_code = row[0] if isinstance(row, (tuple, list)) else row['code']
-                self._ds.execute(
-                    """INSERT OR IGNORE INTO permission_set_permissions
-                       (permission_set_id, permission_code, created_at)
-                       VALUES (?, ?, ?)""",
-                    [ps_id, perm_code, now]
-                )
+                perm_id = row[1] if isinstance(row, (tuple, list)) else row['id']
+                if use_code_col:
+                    self._ds.execute(
+                        """INSERT OR IGNORE INTO permission_set_permissions
+                           (permission_set_id, permission_code, created_at)
+                           VALUES (?, ?, ?)""",
+                        [ps_id, perm_code, now]
+                    )
+                else:
+                    self._ds.execute(
+                        """INSERT OR IGNORE INTO permission_set_permissions
+                           (permission_set_id, permission_id, granted, created_at)
+                           VALUES (?, ?, 1, ?)""",
+                        [ps_id, perm_id, now]
+                    )
 
             # 3. 关联到角色对应的所有用户
             try:

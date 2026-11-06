@@ -42,7 +42,7 @@ class TestIntentAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert 'required' in body.get('error', '')
+        assert '不能为空' in body.get('error', '')
 
     def test_list_bos_v1(self, api_client, admin_headers):
         """GET /api/v1/bos 列出所有 BO"""

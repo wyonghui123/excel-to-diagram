@@ -97,8 +97,8 @@ class TestBOFrameworkDisplayNameIntegration:
         val = config.get("display_name_field"); assert val is not None and val == "name" or pytest.fail("display_name_field not configured")
     
     def test_user_group_display_name_field_is_name(self, bo_framework):
-        """TC-BF-DN-009: user_group的display_name_field是name"""
-        config = bo_framework.get_ui_config("user_group")
+        """TC-BF-DN-009: org 的 display_name_field 是 name"""
+        config = bo_framework.get_ui_config("org")
         assert config, "config not available"
         
         val = config.get("display_name_field"); assert val is not None and val == "name" or pytest.fail("display_name_field not configured")
@@ -222,7 +222,7 @@ class TestMultipleObjectTypes:
         ("role", "name"),
         ("product", "name"),
         ("domain", "name"),
-        ("user_group", "name"),
+        ("org", "name"),
     ])
     def test_display_name_field_for_object(self, bo_framework, object_type, expected_field):
         """TC-MOT-001: 各对象类型的display_name_field"""

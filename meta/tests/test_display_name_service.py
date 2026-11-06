@@ -88,7 +88,7 @@ class TestGetFieldName:
     def test_get_field_name_role_name(self, service):
         """TC-DNS-009: role对象的name字段"""
         name = service.get_field_name("role", "name")
-        assert name in ["名称", "角色名称"]
+        assert name in ["名称", "角色名称", "权限集名称"]
 
 
 class TestGetObjectDisplayName:
@@ -194,7 +194,7 @@ class TestGetAllFieldNames:
         """TC-DNS-023: 获取role所有字段名称"""
         names = service.get_all_field_names("role")
         assert isinstance(names, dict)
-        assert names.get("name") in ["名称", "角色名称"]
+        assert names.get("name") in ["名称", "角色名称", "权限集名称"]
     
     def test_get_all_field_names_nonexistent_object(self, service):
         """TC-DNS-024: 不存在的对象返回空字典"""

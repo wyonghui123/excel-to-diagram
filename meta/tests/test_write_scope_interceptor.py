@@ -64,6 +64,8 @@ class MockActionContext:
         self.data_source = kwargs.get('data_source', MockDataSource())
         self.user_id = kwargs.get('user_id', 1)
         self.trace_id = kwargs.get('trace_id', 'test-trace')
+        # [BUG-V010] 生产 ActionContext 有 extra dict; 拦截器优先读 extra['_owner_chain_match']
+        self.extra = kwargs.get('extra', {})
 
     @property
     def object_id(self):
@@ -113,11 +115,11 @@ class TestWriteScopeInterceptorMetadata:
         ctx = MockActionContext(action='crud_read')
         assert interceptor.should_execute(ctx) is False
 
-    def test_should_not_execute_for_crud_create(self):
-        """create 路径由 OwnerAutoPermissionInterceptor 处理, 不重复"""
+    def test_should_execute_for_crud_create(self):
+        """[H14.1 2026-06-15] create 也走写范围校验 (此前 create 完全无数据范围检查)"""
         interceptor = WriteScopeInterceptor()
         ctx = MockActionContext(action='crud_create')
-        assert interceptor.should_execute(ctx) is False
+        assert interceptor.should_execute(ctx) is True
 
 
 # ============================================================================
@@ -209,6 +211,9 @@ class TestWriteScopeInterceptorCheckDimScope:
         """[v2.1] 多 role 任一满足即放行 (Union)"""
         # Mock DimensionScopeEngine: role 1 不匹配, role 3 匹配
         mock_engine = MagicMock()
+        mock_engine.expand_dimension_values.side_effect = lambda rid: (
+            {'domain': {1}} if rid == 3 else {'domain': {999}}
+        )
         mock_engine.derive_data_conditions.side_effect = lambda rid: (
             {'domain': "id = 1"} if rid == 3 else {'domain': "id = 999"}
         )
@@ -225,13 +230,18 @@ class TestWriteScopeInterceptorCheckDimScope:
             with patch.object(
                 WriteScopeInterceptor, '_get_user_role_ids', return_value=[1, 3]
             ):
-                interceptor = WriteScopeInterceptor()
-                result = interceptor._check_dim_scope(
-                    ctx, 'domain', {'id': 1}, user_info
-                )
-                assert result['matched'] is True
-                # 应至少检查 2 个 role
-                assert len(result['roles_checked']) >= 1
+                # V2.1.2 perm 联动默认开启: role 需具备 domain:update 才会检查 dim scope
+                with patch.object(
+                    WriteScopeInterceptor, '_get_role_perm_codes',
+                    return_value={'domain:update'}
+                ):
+                    interceptor = WriteScopeInterceptor()
+                    result = interceptor._check_dim_scope(
+                        ctx, 'domain', {'id': 1}, user_info
+                    )
+                    assert result['matched'] is True
+                    # 应至少检查 2 个 role
+                    assert len(result['roles_checked']) >= 1
 
 
 class TestWriteScopeInterceptorCheckVisibility:
@@ -274,12 +284,14 @@ class TestWriteScopeDenied:
         exc = WriteScopeDenied('product', 1, 333, {}, 'primary')
         assert exc.status_code == 403
 
-    def test_message_includes_object_and_user(self):
+    def test_message_includes_object_and_key(self):
+        """消息契约: 无写权限: <object_type>(<business_key>); 用户 ID 不再暴露给调用方"""
         exc = WriteScopeDenied('domain', 20, 333, {}, 'primary')
         msg = str(exc)
         assert 'domain' in msg
         assert '20' in msg
-        assert '333' in msg
+        assert exc.user_id == 333
+        assert exc.target_id == 20
 
     def test_check_results_stored(self):
         exc = WriteScopeDenied(

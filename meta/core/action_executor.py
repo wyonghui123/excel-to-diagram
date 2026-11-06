@@ -318,7 +318,7 @@ class AuditLogger:
                    user_id: Any = None, user_name: str = None,
                    ip_address: str = None, user_agent: str = None,
                    change_set_id: str = None, reason_code: str = None) -> bool:
-        self.log(
+        result = self.log(
             object_type=object_type,
             object_id=object_id,
             action="CREATE",
@@ -339,7 +339,7 @@ class AuditLogger:
                        "updated_date", "created_date", "version", "password_hash",
                        "token", "secret", "tenant_id", "is_system"):
                 continue
-            self.log(
+            result = self.log(
                 object_type=object_type,
                 object_id=object_id,
                 action="CREATE",
@@ -355,8 +355,8 @@ class AuditLogger:
                 user_agent=user_agent,
                 change_set_id=change_set_id,
                 reason_code=reason_code,
-            )
-        return True
+            ) and result
+        return result
 
     def log_update(self, object_type: str, object_id: Any,
                    old_data: Dict[str, Any], new_data: Dict[str, Any],

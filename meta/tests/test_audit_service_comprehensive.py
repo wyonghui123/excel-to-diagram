@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, patch
 
 from meta.services.audit_service import AuditService, AuditQuery, AuditRecord
 from meta.core.datasource import get_data_source
+from meta.tests.test_utils import ensure_audit_log_columns
 
 
 class TestAuditServiceInit:
@@ -207,6 +208,7 @@ class TestAuditServiceLog:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         conn.commit()
         conn.close()
         
@@ -533,6 +535,7 @@ class TestAuditServiceQuery:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -657,6 +660,7 @@ class TestAuditServiceObjectHistory:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -738,6 +742,7 @@ class TestAuditServiceUserActivities:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # conn closed - use AuditService.log() via ds
         conn.close()
@@ -820,6 +825,7 @@ class TestAuditServiceChangeSummary:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -903,6 +909,7 @@ class TestAuditServiceCategoryStatistics:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # Use AuditService.log() via ds (avoiding raw SQL in test files per conftest rule)
         conn.close()
@@ -985,6 +992,7 @@ class TestAuditServiceFailedLogs:
                 cascade_root_action TEXT
             );
         """)
+        ensure_audit_log_columns(conn)
         
         # Pre-populate via service.log() (writes status='written' by default)
         # Then mark 2 as 'failed' using ds.update (avoids raw SQL per conftest rule)
