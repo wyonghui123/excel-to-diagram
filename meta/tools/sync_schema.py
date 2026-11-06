@@ -11,6 +11,7 @@ Schema 同步工具 - 从元数据驱动数据库 Schema 更新
 """
 
 import argparse
+import dataclasses
 import json
 import hashlib
 from typing import List, Dict, Any, Optional
@@ -40,16 +41,40 @@ def get_all_meta_objects() -> List:
     return objects
 
 
+def _aux_meta_fingerprint(meta_object: MetaObject) -> str:
+    """[P1-4 2026-11-06] 非列级元数据指纹（document / revision_policy）。
+
+    这些声明不改变 DDL，但决定取号、状态机、修订等行为。此前
+    compute_meta_hash 只看列，于是「只改了单据六件套 / 修订策略」会被
+    detect_changes 判为「无变化」，元数据变更在版本基线里静默丢失。
+    """
+    payload = {}
+    profile = getattr(meta_object, 'document_profile', None)
+    if profile is not None:
+        payload['document'] = (
+            dataclasses.asdict(profile) if dataclasses.is_dataclass(profile)
+            else str(profile))
+    policy = getattr(meta_object, 'revision_policy', None)
+    if policy is not None:
+        payload['revision_policy'] = (
+            dataclasses.asdict(policy) if dataclasses.is_dataclass(policy)
+            else str(policy))
+    if not payload:
+        return ""
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+
+
 def compute_meta_hash(meta_object: MetaObject) -> str:
     """计算元模型的哈希值（用于变更检测）"""
-    content = "{0}|{1}|{2}".format(
+    content = "{0}|{1}|{2}|{3}".format(
         meta_object.table_name,
         "|".join([
             "{0}:{1}:{2}:{3}".format(
                 f.db_column or "", f.field_type.value, f.required, f.unique
             ) for f in sorted(meta_object.fields, key=lambda x: (x.db_column or ""))
         ]),
-        meta_object.semantics.hierarchy_level
+        meta_object.semantics.hierarchy_level,
+        _aux_meta_fingerprint(meta_object),
     )
     return hashlib.md5(content.encode()).hexdigest()
 
