@@ -330,6 +330,25 @@ class SchemaGenerator:
         }
 
 
+def _sqlite_affinity(type_name: str) -> str:
+    """把列类型名归一到 SQLite 亲和类型（用于判定真实 drift）。
+
+    YAML 声明 `VARCHAR(200)`、DB 实际 `TEXT` 在语义上是同一种存储，不应报 drift；
+    而 `INTEGER` vs `TEXT` 才是真正的类型漂移（历史上 `number`/`timestamp`
+    漏登记曾把金额、日期列建成了 VARCHAR）。
+    """
+    name = (type_name or "").upper()
+    if "INT" in name:
+        return "INTEGER"
+    if "CHAR" in name or "CLOB" in name or "TEXT" in name:
+        return "TEXT"
+    if not name or "BLOB" in name:
+        return "BLOB"
+    if "REAL" in name or "FLOA" in name or "DOUB" in name:
+        return "REAL"
+    return "NUMERIC"
+
+
 class SchemaComparator:
     """Schema 比较器 - 比较元数据定义和实际数据库结构"""
     
@@ -365,6 +384,16 @@ class SchemaComparator:
         for col_name, field in meta_columns.items():
             if col_name not in existing_columns:
                 report["missing_columns"].append(col_name)
+                continue
+            # [P1-3 2026-11-06] 类型漂移：按 SQLite 亲和类型比较，避免 VARCHAR/TEXT 误报
+            declared = SchemaGenerator.TYPE_MAPPING.get(field.field_type, "TEXT")
+            actual = (existing_columns.get(col_name) or {}).get("type") or ""
+            if _sqlite_affinity(declared) != _sqlite_affinity(actual):
+                report["type_mismatches"].append({
+                    "column": col_name,
+                    "declared": declared,
+                    "actual": actual,
+                })
         
         for col_name in existing_columns:
             if col_name not in meta_columns:

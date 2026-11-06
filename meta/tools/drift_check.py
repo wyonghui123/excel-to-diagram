@@ -47,7 +47,8 @@ def check_all_objects(strict_mode: bool = False) -> Dict[str, Any]:
 
         report = comparator.compare(obj)
         reports.append(report)
-        if not report["exists"] or report["missing_columns"] or report["extra_columns"]:
+        if (not report["exists"] or report["missing_columns"]
+                or report["extra_columns"] or report["type_mismatches"]):
             drift_count += 1
 
     return {
@@ -72,7 +73,8 @@ def print_summary(drift: Dict[str, Any]):
 
     print(f"[FAIL] 发现 {drift['yaml_objects_with_drift']} 个对象的 drift:")
     for r in drift["reports"]:
-        if not r["exists"] or r["missing_columns"] or r["extra_columns"]:
+        if (not r["exists"] or r["missing_columns"]
+                or r["extra_columns"] or r["type_mismatches"]):
             print(f"\n  - {r['object_id']} ({r['table_name']})")
             if not r["exists"]:
                 print(f"    表不存在")
@@ -80,6 +82,8 @@ def print_summary(drift: Dict[str, Any]):
                 print(f"    缺失列: {r['missing_columns']}")
             if r["extra_columns"]:
                 print(f"    多余列: {r['extra_columns']}")
+            if r["type_mismatches"]:
+                print(f"    类型漂移: {r['type_mismatches']}")
 
 
 def save_report(drift: Dict[str, Any], path: str = DRIFT_REPORT_FILE):

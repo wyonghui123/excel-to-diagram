@@ -290,6 +290,42 @@ def test_schema_migrator(tmp_path):
     print("[PASS] SchemaMigrator 测试通过")
 
 
+def test_schema_comparator_detects_type_drift(tmp_path):
+    """[P1-3 2026-11-06] YAML 声明类型与 DB 实际列类型不一致时必须报告类型漂移。
+
+    历史事故：`number` / `timestamp` 漏登记导致金额、日期列被建成 VARCHAR，
+    而旧版 compare() 只查列存在性，这类漂移永远发现不了。
+    """
+    from meta.core.sql_adapters import SQLiteAdapter
+
+    ds = SQLiteAdapter()
+    ds.connect(path=str(tmp_path / "test_type_drift.db"))
+    ds.execute(
+        "CREATE TABLE users ("
+        "id INTEGER PRIMARY KEY, amount TEXT, note TEXT)")
+
+    obj = MetaObject(
+        id="drift_obj",
+        name="漂移对象",
+        table_name="users",
+        fields=[
+            MetaField(id="id", name="ID", field_type=FieldType.INTEGER,
+                      db_column="id", required=True, unique=True),
+            MetaField(id="amount", name="金额", field_type=FieldType.FLOAT,
+                      db_column="amount"),
+            MetaField(id="note", name="备注", field_type=FieldType.STRING,
+                      db_column="note"),
+        ]
+    )
+
+    report = SchemaComparator(ds).compare(obj)
+
+    # amount: 声明 REAL，实际 TEXT -> 漂移
+    # note:   声明 VARCHAR(200)，实际 TEXT -> 同属 TEXT 亲和，不报
+    assert report["type_mismatches"] == [
+        {"column": "amount", "declared": "REAL", "actual": "TEXT"}]
+
+
 def run_all_tests():
     print("=" * 60)
     print("Schema 生成器测试")
