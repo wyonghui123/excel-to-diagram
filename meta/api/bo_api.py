@@ -2789,6 +2789,31 @@ def get_meta_full(object_type):
 # [DECORATIVE] [NEW] v1.2 / FR-2.4: 全量 OpenAPI 端点（Action + BO CRUD + Meta）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+@meta_v2_bp.route('/impact', methods=['GET'])
+@login_required
+def get_meta_impact():
+    """[T5.1 2026-11-06] 元数据影响分析（where-used）。
+
+    GET /api/v2/meta/impact?object=purchase_order[&field=status]
+    返回该字段被哪些规则 / 状态转换 / 状态矩阵 / 关联 / 索引 / 查询 / 视图 /
+    值帮助 / 级联 / 删除策略 / 变更事件 / 动作参数引用；不传 field 时返回整对象。
+    """
+    from meta.services.meta_impact_service import MetaImpactService
+
+    object_type = (request.args.get('object') or '').strip()
+    field_id = (request.args.get('field') or '').strip() or None
+    if not object_type:
+        return error_response('缺少 object 参数', error_code='INVALID_ARGUMENT', status=400)
+
+    try:
+        result = MetaImpactService().analyze(object_type, field_id)
+    except KeyError:
+        return error_response(f'Object type {object_type} not found', status=404)
+    except ValueError as exc:
+        return error_response(str(exc), error_code='INVALID_ARGUMENT', status=400)
+    return ok(result)
+
+
 @meta_v2_bp.route('/_openapi.json', methods=['GET'])
 def get_full_openapi():
     """
