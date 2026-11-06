@@ -1134,6 +1134,26 @@ class PersistenceInterceptor(Interceptor):
             return ActionResult(success=False, message=str(e), errors=[str(e)])
 
     def _execute_for_list(self, registry, sql, params, use_fresh):
+        """执行列表查询的 SQL，审计视图不可用时降级到 audit_logs 重试一次。
+
+        v_audit_all / audit_logs_archive 由迁移 v007_50 创建（union 冷热审计表）。
+        若环境漏跑该迁移，带 updated_at 排序的列表会直接 400；这里做等价降级，
+        只损失冷归档数据，在线数据与排序语义不变（与 audit_derived_fields 同策略）。
+        """
+        try:
+            return self._run_list_query(registry, sql, params, use_fresh)
+        except Exception as e:
+            lowered = str(e).lower()
+            if 'v_audit_all' not in lowered and 'audit_logs_archive' not in lowered:
+                raise
+            logger.warning(
+                "[_do_list] 审计视图不可用，降级查询 audit_logs 重试: %s", e
+            )
+            return self._run_list_query(
+                registry, sql.replace('v_audit_all', 'audit_logs'), params, use_fresh
+            )
+
+    def _run_list_query(self, registry, sql, params, use_fresh):
         """执行列表查询的 SQL 并取回结果。
 
         use_fresh=True 时通过全新 sqlite3 连接执行（绕过读池），

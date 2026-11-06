@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -583,3 +585,71 @@ class TestPersistenceInterceptorDoList:
         result = interceptor._do_list(ctx, mock_registry)
 
         assert result.success is True
+
+
+class TestPersistenceInterceptorAuditViewFallback:
+    """审计视图不可用时的降级（v007_50 漏跑场景）。"""
+
+    @staticmethod
+    def _cursor():
+        cursor = Mock()
+        cursor.description = [('id', None)]
+        cursor.fetchall.return_value = [(1,)]
+        return cursor
+
+    @staticmethod
+    def _registry_with(ds):
+        registry = Mock()
+        registry.ds = ds
+        return registry
+
+    def test_fallback_to_audit_logs_when_view_missing(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = [
+            sqlite3.OperationalError("no such table: v_audit_all"),
+            self._cursor(),
+        ]
+        sql = (
+            "SELECT * FROM users LEFT JOIN ("
+            "SELECT object_id FROM v_audit_all GROUP BY object_id"
+            ") s ON s.object_id = users.id"
+        )
+
+        rows, columns = interceptor._execute_for_list(
+            self._registry_with(ds), sql, [], False
+        )
+
+        assert rows == [(1,)]
+        assert columns == ['id']
+        assert 'v_audit_all' not in ds.execute.call_args_list[1].args[0]
+        assert 'audit_logs' in ds.execute.call_args_list[1].args[0]
+
+    def test_fallback_when_archive_table_missing(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = [
+            sqlite3.OperationalError("no such table: audit_logs_archive"),
+            self._cursor(),
+        ]
+
+        rows, _ = interceptor._execute_for_list(
+            self._registry_with(ds), "SELECT * FROM v_audit_all", [], False
+        )
+
+        assert rows == [(1,)]
+        assert 'v_audit_all' not in ds.execute.call_args_list[1].args[0]
+
+    def test_unrelated_error_propagates(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = sqlite3.OperationalError("no such table: orders")
+
+        with pytest.raises(sqlite3.OperationalError):
+            interceptor._execute_for_list(
+                self._registry_with(ds), "SELECT 1 FROM orders", [], False
+            )
+        assert ds.execute.call_count == 1
