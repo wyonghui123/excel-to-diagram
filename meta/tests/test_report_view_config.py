@@ -134,3 +134,11 @@ class TestReportMenuMigration:
             assert perms == 1
             conn.close()
             assert v225.verify(db_path) is True
+
+    def test_menu_whitelisted_in_init_script(self):
+        """init_menu_permissions 步骤 7.6 会物理删除未声明的 auto_generated=0
+        菜单；迁移建的报表菜单必须留在白名单，否则每次启动后菜单消失而
+        schema_migrations 仍是 SUCCESS（记录与副作用漂移）。"""
+        from meta.scripts.init_menu_permissions import MIGRATION_OWNED_MENUS
+        assert 'inventory-aging-report' in MIGRATION_OWNED_MENUS
+

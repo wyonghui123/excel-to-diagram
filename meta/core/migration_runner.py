@@ -953,8 +953,14 @@ class MigrationRunner:
             return False, True, "verify() not implemented (skip)"
         try:
             db_path = self._get_db_path()
-            ok = module.verify(db_path)
-            return True, bool(ok), "verify() executed"
+            result = module.verify(db_path)
+            # verify() 可能返回 bool 或 {"ok": bool, ...}；dict 非空恒为真，
+            # 直接 bool(dict) 会把失败结果误报为 OK（如 v224）。
+            if isinstance(result, dict):
+                ok = bool(result.get('ok'))
+            else:
+                ok = bool(result)
+            return True, ok, "verify() executed"
         except Exception as e:
             return True, False, f"verify() exception: {e}"
 

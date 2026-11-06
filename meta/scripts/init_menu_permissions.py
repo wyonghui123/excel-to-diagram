@@ -26,6 +26,19 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 
+# 步骤 7.5 / 7.6 白名单：由 migration 创建/维护、本脚本未声明的菜单。
+# 缺登记时每次 init 都会把它们当 stale 物理删除；而 schema_migrations 里
+# 该迁移仍是 SUCCESS ⇒ 记录与副作用漂移（v225 库存库龄菜单就是这样消失的）。
+MIGRATION_OWNED_MENUS = (
+    'procurement',
+    'goods-receipt-management',
+    'transfer-order-management',
+    'transfer-shipment-management',
+    'engineering-change',
+    'inventory-aging-report',
+)
+
+
 def init_menu_permissions(db_path):
     """初始化菜单权限表和 menus 导航表数据（元数据驱动）
 
@@ -2901,10 +2914,7 @@ def init_menu_permissions(db_path):
     #   若按本脚本白名单清理，每次 init（含测试 setup）都会把它们当 stale 删掉，
     #   收货单菜单曾因此在跑测试后被清空。下架须走 migration 置 is_active=0（见
     #   .trae/rules/scenarios/5-development/meta-menu-retirement.md），不能靠本步骤物理删除。
-    MIGRATION_OWNED_MENUS = ('procurement', 'goods-receipt-management',
-                             'transfer-order-management',
-                             'transfer-shipment-management',
-                             'engineering-change')
+    #   白名单已提升为模块级 MIGRATION_OWNED_MENUS（可被测试断言）。
 
     print("\n[步骤7.5] 清理 menu_permissions 表冗余条目...")
     valid_perm_codes = {m['menu_code'] for m in system_menus}

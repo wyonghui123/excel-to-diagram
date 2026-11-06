@@ -149,6 +149,24 @@ relations: []
 
 ui_view_config:
   skip_auto_menu: true
+  # [视图配置补齐 2026-11-06] 补 list，否则 view-config 返回空列表列（与 org 同源）。
+  list:
+    detail_mode: drawer
+    title: 销售组织
+    columns:
+      - field: name
+        width: 220
+      - field: code
+        width: 140
+        sortable: true
+      - field: org_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
   detail:
     description: 这是组织档案中具备销售职能、可用于承接销售订单与价目表作用域的组织。
     facets:
