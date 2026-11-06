@@ -83,6 +83,22 @@ class ConsistencyConfig:
 
 
 @dataclass
+class AggregateSpec:
+    """[P2 2026-11-06] 聚合型派生事实声明（SUM/COUNT + GROUP BY 维度键）。
+
+    与 join_path 的 1:1 派生不同，聚合型用于「行汇总快照」列，例如
+    `purchase_order.gross_amount = SUM(purchase_order_lines.gross_amount)`。
+    只参与一致性审计，不参与写入同步（写入仍由服务层回写）。
+    """
+    func: str = 'sum'            # sum | count
+    table: str = ''              # 明细来源（对象 id 或表名）
+    group_key: str = ''          # 明细表中指向本表的维度键
+    value: str = ''              # 被聚合列（count 时可为空）
+    where: str = ''              # 附加过滤（声明层常量 SQL 片段）
+    tolerance: float = 0.0001    # 浮点比较容差
+
+
+@dataclass
 class RedundancyDef:
     """冗余字段定义
     
@@ -95,6 +111,7 @@ class RedundancyDef:
     derived_from: str                             # 派生来源路径，如 "business_object.code"
     join_path: List[JoinStep] = field(default_factory=list)  # JOIN 路径（用于虚拟冗余）
     consistency: ConsistencyConfig = field(default_factory=ConsistencyConfig)
+    aggregate: Optional[AggregateSpec] = None     # 聚合型派生声明（行汇总快照）
     
     @property
     def derived_table(self) -> str:
@@ -259,6 +276,21 @@ class RedundancyRegistry:
             derived_from=redundancy.get('derived_from', ''),
             join_path=join_steps,
             consistency=consistency,
+            aggregate=self._parse_aggregate(redundancy.get('aggregate')),
+        )
+
+    @staticmethod
+    def _parse_aggregate(raw: Optional[Dict[str, Any]]) -> Optional[AggregateSpec]:
+        """解析行汇总快照声明；缺失时返回 None（保持 1:1 派生路径不变）。"""
+        if not raw:
+            return None
+        return AggregateSpec(
+            func=str(raw.get('func', 'sum')).lower(),
+            table=raw.get('table', ''),
+            group_key=raw.get('group_key', ''),
+            value=raw.get('value', ''),
+            where=raw.get('where', ''),
+            tolerance=float(raw.get('tolerance', 0.0001)),
         )
 
     def _parse_enum_ref(

@@ -1043,6 +1043,16 @@ fields:
         decimal_places: 4
     semantics:
       meaning: 订单含税合计
+      # [P2 2026-11-06] 行汇总快照：声明真源为明细聚合，仅用于一致性审计
+      redundancy:
+        type: stored
+        aggregate:
+          func: sum
+          table: purchase_order_line
+          group_key: order_id
+          value: gross_amount
+        consistency:
+          strategy: sync_on_write
     ui:
       widget: input
       editable: false

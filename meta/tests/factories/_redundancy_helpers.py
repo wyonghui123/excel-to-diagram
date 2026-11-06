@@ -32,3 +32,35 @@ def build_receipt_line_fixture(ds):
 def repair_order_id(ds):
     """把行 1 的 order_id 修正为真源值。"""
     ds.execute('UPDATE receipt_lines SET order_id = 1 WHERE id = 1')
+
+
+def build_purchase_order_aggregate_fixture(ds):
+    """[P2 2026-11-06] 造 4 张订单：一致 / 合计漂移 / 无明细零合计 / 无明细残留合计。"""
+    ds.execute(
+        'CREATE TABLE purchase_orders ('
+        'id INTEGER PRIMARY KEY, gross_amount NUMERIC)')
+    ds.execute(
+        'CREATE TABLE purchase_order_lines ('
+        'id INTEGER PRIMARY KEY, order_id INTEGER, gross_amount NUMERIC)')
+    ds.execute(
+        'INSERT INTO purchase_orders (id, gross_amount) VALUES (1, 100)')
+    ds.execute(
+        'INSERT INTO purchase_orders (id, gross_amount) VALUES (2, 90)')
+    ds.execute(
+        'INSERT INTO purchase_orders (id, gross_amount) VALUES (3, 0)')
+    ds.execute(
+        'INSERT INTO purchase_orders (id, gross_amount) VALUES (4, 50)')
+    ds.execute(
+        'INSERT INTO purchase_order_lines (id, order_id, gross_amount) '
+        'VALUES (1, 1, 60)')
+    ds.execute(
+        'INSERT INTO purchase_order_lines (id, order_id, gross_amount) '
+        'VALUES (2, 1, 40)')
+    ds.execute(
+        'INSERT INTO purchase_order_lines (id, order_id, gross_amount) '
+        'VALUES (3, 2, 100)')
+
+
+def repair_purchase_order_gross_amount(ds):
+    """把订单 2 的合计修正为明细聚合值。"""
+    ds.execute('UPDATE purchase_orders SET gross_amount = 100 WHERE id = 2')

@@ -467,7 +467,54 @@ class MetadataValidator:
                         "suggestion": "请评估数据不一致的风险，考虑使用更严格的一致性策略"
                     }
                 ))
-    
+
+        # [P2 2026-11-06] 行汇总快照：校验聚合来源对象与字段存在
+        aggregate = materialization.get('aggregate') or None
+        if aggregate:
+            self._validate_aggregate_materialization(
+                meta_obj, field, aggregate, report
+            )
+
+    def _validate_aggregate_materialization(
+        self,
+        meta_obj: MetaObject,
+        field: MetaField,
+        aggregate: Dict[str, Any],
+        report: ValidationReport
+    ):
+        """校验聚合型冗余声明的来源对象 / 维度键 / 被聚合列。"""
+        table = aggregate.get('table', '')
+        group_key = aggregate.get('group_key', '')
+        value = aggregate.get('value', '')
+        func = str(aggregate.get('func', 'sum')).lower()
+
+        detail_obj = self.registry.get(table) if table else None
+        if detail_obj is None:
+            report.add_result(ValidationResult(
+                level=ValidationLevel.ERROR,
+                object_id=meta_obj.id,
+                field_id=field.id,
+                message="聚合冗余来源对象 '%s' 不存在" % table,
+                details={"aggregate": aggregate},
+            ))
+            return
+
+        columns = {f.id for f in detail_obj.fields}
+        columns.update(f.db_column for f in detail_obj.fields if f.db_column)
+        required = [group_key]
+        if func != 'count':
+            required.append(value)
+        for name in required:
+            if name and name not in columns:
+                report.add_result(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    object_id=meta_obj.id,
+                    field_id=field.id,
+                    message="聚合冗余字段 '%s' 在对象 '%s' 上不存在"
+                            % (name, table),
+                    details={"aggregate": aggregate},
+                ))
+
     def _validate_derivations(self, meta_obj: MetaObject, report: ValidationReport):
         """验证对象的派生规则
         

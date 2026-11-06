@@ -417,7 +417,11 @@ class RedundancyAuditor:
     ) -> List[ConsistencyViolation]:
         """校验单个冗余字段"""
         violations = []
-        
+
+        # [P2 2026-11-06] 行汇总快照走聚合审计，不套用 1:1 JOIN
+        if red_def.aggregate is not None:
+            return self._validate_aggregate_redundancy(red_def)
+
         derived_table = red_def.derived_table
         derived_field = red_def.derived_field
         
@@ -457,6 +461,73 @@ class RedundancyAuditor:
         
         return violations
     
+    def _validate_aggregate_redundancy(
+        self,
+        red_def: RedundancyDef,
+    ) -> List[ConsistencyViolation]:
+        """[P2 2026-11-06] 行汇总快照审计：缓存列 vs 明细聚合值。
+
+        只做只读比对（不生成修复 SQL），差异超过 tolerance 才报违规；
+        明细为空时聚合值视为 0，避免「无明细却残留合计」被漏掉。
+        """
+        violations = []
+        spec = red_def.aggregate
+        if spec is None or not spec.group_key:
+            return violations
+
+        target_table = self._get_table_name(red_def.object_type)
+        detail_table = self._get_table_name(spec.table) if spec.table else ''
+        if not target_table or not detail_table:
+            logger.warning(
+                "[RedundancyAuditor] 聚合来源表未解析: %s.%s",
+                red_def.object_type, red_def.field_id)
+            return violations
+
+        if spec.func == 'count':
+            agg_expr = 'COUNT(*)'
+        else:
+            if not spec.value:
+                return violations
+            agg_expr = 'SUM({0})'.format(spec.value)
+
+        where_sql = ' WHERE {0}'.format(spec.where) if spec.where else ''
+        sql = (
+            "SELECT t1.id, t1.{field}, COALESCE(agg.expected, 0) AS expected "
+            "FROM {target} t1 "
+            "LEFT JOIN (SELECT {group_key} AS gk, {agg} AS expected "
+            "           FROM {detail}{where} GROUP BY {group_key}) agg "
+            "  ON agg.gk = t1.id "
+            "WHERE t1.{field} IS NOT NULL "
+            "  AND ABS(COALESCE(t1.{field}, 0) - COALESCE(agg.expected, 0)) > ?"
+        ).format(
+            field=red_def.field_id,
+            target=target_table,
+            group_key=spec.group_key,
+            agg=agg_expr,
+            detail=detail_table,
+            where=where_sql,
+        )
+
+        try:
+            rows = self.ds.execute(sql, [spec.tolerance]).fetchall()
+        except Exception as e:  # noqa: BLE001 - 审计失败不应中断其他字段
+            logger.error(
+                "[RedundancyAuditor] 聚合校验失败: %s.%s: %s",
+                red_def.object_type, red_def.field_id, e)
+            return violations
+
+        for row in rows:
+            violations.append(ConsistencyViolation(
+                object_type=red_def.object_type,
+                record_id=row[0],
+                field_id=red_def.field_id,
+                expected_value=row[2],
+                actual_value=row[1],
+                severity="high" if not red_def.consistency.allow_stale else "medium",
+            ))
+
+        return violations
+
     def repair_all(self, dry_run: bool = False) -> Dict[str, Any]:
         """修复所有不一致记录
         
