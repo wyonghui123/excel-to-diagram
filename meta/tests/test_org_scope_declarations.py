@@ -5,7 +5,7 @@
   1. 全量 org_scope 声明合法（V1-V5）；
   2. 规格 §4 登记清单完整且模式一致（V6）；
   3. V1-V5 负向用例（防止校验器空转）；
-  4. visible_org_ids：权限集子树 / 主组织 / 排除 / 管理员豁免 / 三态开关；
+  4. visible_org_ids：权限集子树 / 排除 / 管理员豁免 / 三态开关（主组织不授权）；
   5. 读条件 direct / dual / chain（含嵌套 chain）；
   6. 写判定：direct / dual / chain 与组织职能校验。
 """
@@ -151,11 +151,18 @@ def test_visible_orgs_include_subtree_and_exclude(ds):
     assert service.visible_org_ids(100) == {2}
 
 
-def test_visible_orgs_add_primary(ds):
+def test_primary_org_does_not_grant_access(ds):
     insert_user(ds, 100, 5)
     service = OrgScopeService(ds, mode=ORG_SCOPE_ENFORCE)
-    # 主组织只加入自身（规格 §5.1），不展开子树
-    assert service.visible_org_ids(100) == {2, 5}
+    # 规格 24 §5.1：主组织只作默认上下文，不进入可见集
+    assert service.visible_org_ids(100) == {2}
+
+
+def test_primary_org_alone_yields_empty(ds):
+    insert_user(ds, 300, 5)
+    service = OrgScopeService(ds, mode=ORG_SCOPE_ENFORCE)
+    # 无任何权限集组织范围时，仅有主组织不授予数据访问
+    assert service.visible_org_ids(300) == set()
 
 
 def test_visible_orgs_admin_is_all(ds):

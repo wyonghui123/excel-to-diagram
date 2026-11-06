@@ -15,7 +15,7 @@
 ## 0. TL;DR
 
 1. 每个业务对象（BO）必须声明**唯一的 owning org**（归属组织），不再"多个组织字段并列、以谁为准不明"。
-2. 用户可见组织集 = **权限集组织范围（含子树）∪ 主组织 − 排除项**；不是"有主组织就自动全有"，也不是"无配置就放行"。
+2. 用户可见组织集 = **权限集组织范围（含子树）− 排除项**；主组织只是默认上下文、不参与授权，也不是"无配置就放行"。
 3. 读过滤、写校验、参照（F7）三处共用**同一个求值器**，避免"列表看不到、详情能改、参照能选"。
 4. BO 的组织声明是**单一真源**，`dimension_object_mapping` 不再手工双写；声明与绑定不一致时一致性测试失败。
 5. 阶段拆分：**2a 只读过滤 → 2b 写校验 → 2c 组织职能校验**，每步可独立回滚。
@@ -74,10 +74,10 @@ owning org 必须在该组织上具备对应职能（`org_functions.function_typ
 | Inventory Organization | `inventory` 职能 + `inventory_org_id` / `org_id` | 已有 |
 | Organization Hierarchy | `orgs.parent_id` + `filter_through_hierarchy: true` | 已有 |
 | Data Role → Organization Security | 权限集 + `permission_set_dimension_scopes('org')` | 已有载体，未接 BO |
-| Default Business Unit | `users.primary_org_id` | Phase 1 补 |
+| Default Business Unit | `users.primary_org_id` | Phase 1 补，仅默认上下文，不参与授权 |
 | Reference Data Set (RDS) | §4.4 `reference_data_scope` | 本规格补 |
 
-> 差异说明：Fusion 的权限来源是 Data Role 的组织范围，主组织只是默认上下文。本规格保持同一语义——主组织**加入**可见集，但不替代权限集范围；唯一例外是兼容期（§7.2）。
+> 差异说明：Fusion 的权限来源是 Data Role 的组织范围，主组织只是默认上下文。本规格与之完全对齐——主组织**不加入**可见集，授权只来自权限集组织范围。
 
 ## 3. 元模型
 
@@ -195,17 +195,19 @@ org_scope:
 ```text
 visible(user) =
     ⋃ { expand_subtree(v) | (dimension_code='org', scope_mode='include', v ∈ values(PSS(user))) }
-  ∪ { users.primary_org_id }                                    # Phase 1 字段；为空则跳过
   − ⋃ { expand_subtree(v) | scope_mode='exclude' }
 
 expand_subtree(v) = 递归 CTE：v 及其全部后代（orgs.parent_id，防环，最大深度 10）
 is_admin(user)   → visible = ALL（显式豁免，非"无配置放行"）
 ```
 
+> 主组织（`users.primary_org_id`）只是默认业务上下文，**不进入可见集**；与 Oracle/SAP/NetSuite/D365
+> 「默认组织不授权」的语义一致。授权只来自权限集组织范围。
+
 **约束**
 
 * `values(PSS)` 取用户全部权限集的并集（用户→角色/组织→权限集）。
-* 无任何 org 范围且无主组织：
+* 无任何 org 范围：
   * `enforce` → 空集，查询注入 `1=0`（默认拒绝）；
   * `compat` → 不过滤（仅灰度期）；
   * `off` → 不过滤。
@@ -315,7 +317,7 @@ is_admin(user)   → visible = ALL（显式豁免，非"无配置放行"）
 | 任务 | 落点 | 状态 |
 |---|---|---|
 | T1 | [org_scope_validator.py](../../meta/core/org_scope_validator.py)：V1-V5 单对象校验 + V6 §4 登记清单；`MetaObject.org_scope` 解析 | ✅ |
-| T2 | [org_scope_service.py](../../meta/services/org_scope_service.py)：`visible_org_ids`（include/exclude 子树、主组织、管理员豁免、进程缓存）、三态开关 | ✅ |
+| T2 | [org_scope_service.py](../../meta/services/org_scope_service.py)：`visible_org_ids`（include/exclude 子树、管理员豁免、进程缓存）、三态开关；主组织不参与授权 | ✅ |
 | T3 | [org_scope_interceptor.py](../../meta/core/interceptors/org_scope_interceptor.py)：direct/chain/dual 读条件注入（crud_query / crud_read / query / list） | ✅ |
 | T4 | 同拦截器：create/update/delete 双向写校验，`ORG_SCOPE_DENIED` | ✅ |
 | T5 | §4 A/B/C/D 类共 40 个 BO 声明（含嵌套 chain：shipment_line → shipment → location） | ✅ |

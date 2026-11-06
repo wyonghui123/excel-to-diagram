@@ -4,7 +4,7 @@
 依据: docs/spec_权限体系升级/24_org_scope_business_object_phase2.md §7.1
 
 范围:
-  1. users.primary_org_id（Phase 1 未交付时补齐；Phase 2 可见集的默认组织锚点）。
+  1. users.primary_org_id（Phase 1 未交付时补齐；仅作默认业务上下文，不参与授权判定）。
   2. idx_users_primary_org。
   3. control_parameter_defs 种子 org_scope_enforce = off（三态：off | compat | enforce）。
 

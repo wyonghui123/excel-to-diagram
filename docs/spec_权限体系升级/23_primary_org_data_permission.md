@@ -175,7 +175,7 @@
 | # | 原则 | 含义 |
 |---|---|---|
 | P1 | **组织是资源，不是只有容器** | `org` 必须进入 `applies_to`，且组织管理页所有入口共用同一可见集 |
-| P2 | **主组织只加不减** | 主组织进入可见集，但不清空、不覆盖显式授权与排除 |
+| P2 | **主组织只作默认上下文** | 主组织提供新建默认值，但**不进入可见集**、不参与授权与排除计算 |
 | P3 | **无配置不等于全量** | org 维度 `empty_scope_behavior: membership`；无成员关系才走兼容放行 |
 | P4 | **一次求值，多处复用** | 一个 `VisibleOrgScope` 同时服务列表、树、表单参照、新建默认值、CRUD 校验 |
 | P5 | **不物化、实时展开** | 组织树调整后范围自动跟随，与 `OrgAdminScopeService` 现有语义一致 |
@@ -241,7 +241,7 @@
     scope_policy:                       # 新增；缺省 = unrestricted，保持旧行为
       empty_scope_behavior: membership  # org 维度专属：无显式 scope 时按成员关系派生
       membership_inherit_children: true # 成员组织默认含子树（可关）
-      primary_org_always_visible: true  # 主组织始终加入可见集
+      primary_org_always_visible: false # [v1.1] 主组织只作默认上下文，不参与授权
       unassigned_user_behavior: unrestricted  # 无任何组织关系的账号（系统/外部）
     applies_to:
       - bo: org                        # 新增：组织对象自身
@@ -259,7 +259,7 @@
 **约束**：
 1. 若用户存在 `org_members` 记录，则 `primary_org_id` 必须 ∈ 其成员组织（写路径校验 + 一致性测试）。
 2. 若用户无任何成员关系，`primary_org_id` 允许为空；为空时按 `unassigned_user_behavior` 处理。
-3. 主组织**不参与排除逻辑**：即使被 exclude 命中，主组织仍保留可见（防止用户把自己锁死）。
+3. 主组织**不参与授权与排除判定**：不加入可见集、不抵消 exclude；可见范围完全由权限集组织范围决定（对齐 Oracle/SAP 的默认组织语义）。
 4. 主组织变更写审计日志（复用 `audit_log`）。
 
 **不采用**：
@@ -273,22 +273,23 @@ resolve_visible_org_scope(user_id) -> VisibleOrgScope
 
   0. admin / '*' 权限 → UNRESTRICTED
   1. members   = SELECT org_id FROM org_members WHERE user_id = ?
-     primary   = SELECT primary_org_id FROM users WHERE id = ?
   2. cols      = 该用户全部权限集的 org 维度范围
                  （org_permission_sets → permission_set_dimension_scopes
                    WHERE dimension_code = 'org'）
   3. delegated = OrgAdminScopeService.get_delegated_org_rules(user_id)
   4. 若 cols 中存在 scope_mode='all' 且无任何 exclude → UNRESTRICTED
-  5. base      = {primary} ∪ members
+  5. base      = members
      若 membership_inherit_children → base = expand_subtree(base)
   6. include   = 每条 col 按其 inherit_children 展开后取并集
      delegated = 每个 root_id 及其子树
-  7. exclude   = 所有 exclude 集合（按 inherit_children 展开）− {primary}
+  7. exclude   = 所有 exclude 集合（按 inherit_children 展开）
   8. visible   = (base ∪ include ∪ delegated) − exclude
   9. 若 visible 为空：
         - 用户有组织关系 → RESTRICTED(空)（组织管理页无可见节点）
         - 用户无组织关系 → 按 unassigned_user_behavior
 ```
+
+> `users.primary_org_id` 不参与上式，仅用于新建单据/表单的默认组织值。
 
 **返回值结构**（供 UI 与 API 共用）：
 
@@ -434,7 +435,7 @@ resolve_visible_org_scope(user_id) -> VisibleOrgScope
 
 | 场景 | 开关 `off` | 开关 `on` |
 |---|---|---|
-| 无 `primary_org_id` 且无成员关系 | 不过滤 | 按 `unassigned_user_behavior`（默认仍不过滤） |
+| 无成员关系 | 不过滤 | 按 `unassigned_user_behavior`（默认仍不过滤） |
 | 有成员关系、无维度范围 | 不过滤 | 成员组织子树 |
 | 有 `scope_mode='all'` | 不过滤 | 不过滤（显式全量） |
 | `scope_mode='exclude'` | 当前对 org 不生效 | 生效 |
@@ -474,7 +475,7 @@ resolve_visible_org_scope(user_id) -> VisibleOrgScope
 | AC-12 | 树调整自动跟随 | 新增子组织 / 移动节点后，无需重算授权，下一次查询范围自动变化 | 变更前后对比 |
 | AC-13 | 性能 | `orgs` 959 行、单用户可见 500+ 节点时，树接口 p95 < 300ms；分页在 SQL 层完成 | 压测记录 |
 | AC-14 | 兼容 | 开关关闭时，组织列表 / 树 / CRUD 结果与今日逐条一致 | 回归对比脚本 |
-| AC-15 | 主组织自锁保护 | 主组织被 exclude 命中时仍可见可读（可写性可降级） | 边界用例 |
+| AC-15 | 主组织不授权 | 仅有主组织、无权限集组织范围时，enforce 下不可见任何数据（不出现隐式放行） | 边界用例 |
 
 ---
 

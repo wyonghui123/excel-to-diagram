@@ -82,7 +82,7 @@ class OrgScopeService:
     # 可见组织集
     # ------------------------------------------------------------------
     def visible_org_ids(self, user_id: Optional[int], is_admin: bool = False) -> Optional[Set[int]]:
-        """用户可见组织集；None = 全量（管理员豁免）"""
+        """用户可见组织集（仅权限集组织范围）；None = 全量（管理员豁免）"""
         if is_admin:
             return None
         if user_id is None:
@@ -96,11 +96,8 @@ class OrgScopeService:
                 return set(cached[1])
 
         include, exclude = self._permission_scope_values(user_id)
-        primary = self._primary_org_id(user_id)
-        if primary:
-            include.add(primary)
 
-        # include/exclude 已在取值时按 inherit_children 展开子树（规格 §5.1）
+        # 可见集只由权限集范围决定；主组织是默认上下文，不参与授权（规格 24 §5.1）
         visible = include - exclude
 
         with _CACHE_LOCK:
@@ -348,21 +345,6 @@ class OrgScopeService:
             except Exception as exc:
                 logger.debug('org_permission_sets lookup failed: %s', exc)
         return sorted(v for v in ids if v)
-
-    def _primary_org_id(self, user_id: int) -> Optional[int]:
-        try:
-            row = self._ds.execute(
-                "SELECT primary_org_id FROM users WHERE id = ?", [user_id]
-            ).fetchone()
-        except Exception:
-            return None
-        if row is None:
-            return None
-        value = _row_get(row, 'primary_org_id', 0)
-        try:
-            return int(value) if value is not None else None
-        except (TypeError, ValueError):
-            return None
 
     def _fetch_row(self, table: str, record_id: Any) -> Optional[Dict[str, Any]]:
         if not table:

@@ -99,16 +99,16 @@ fields:
       hidden_in_list: true
       hidden_in_form: true
 
-  # [Spec 24 T8 2026-11-06] 用户主组织（默认业务组织上下文；加入可见组织集）
+  # [Spec 24 T8 2026-11-06] 用户主组织（仅作默认业务上下文，不参与授权判定）
   # 可空: 存量账号无主组织；为空则跳过（不隐式放大权限）
   - id: primary_org_id
     name: 主组织
     type: integer
     db_column: primary_org_id
     nullable: true
-    description: 用户主组织（默认业务组织；加入可见组织集，不替代权限集范围）
+    description: 用户主组织（默认业务上下文；不参与授权，授权仅来自权限集组织范围）
     semantics:
-      meaning: 用户默认业务组织，仅用于默认上下文与可见集补充
+      meaning: 用户默认业务组织，仅用于新建单据默认值等上下文
       display:
         type: association
         target_type: org
@@ -462,7 +462,7 @@ indexes:
   # [person 面一期 · E2-B] 反查「某人有哪些账号」；不唯一（一人可多账号）
   - fields: [party_id]
     name: idx_user_party
-  # [Spec 24 T8] 主组织反查（组织维度可见集补充）
+  # [Spec 24 T8] 主组织反查（默认业务上下文，不参与授权）
   - fields: [primary_org_id]
     name: idx_users_primary_org
 
