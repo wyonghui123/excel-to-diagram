@@ -540,6 +540,42 @@ def pytest_configure(config):
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 
+_AUDIT_UNION_VIEW_CHECKED = False
+
+
+def _ensure_audit_union_view():
+    """测试库补齐 v_audit_all 视图。
+
+    生产库由迁移 v007_50 创建该视图；测试库由 SchemaMigrator 从 YAML 元模型建出，
+    不含该视图（它依赖 audit_logs / audit_logs_archive 的运行时列并集）。
+    缺视图会让审计派生查询直接 400，因此这里做等价补齐（幂等）。
+    """
+    if os.environ.get('TESTING') != 'true':
+        return
+    db_path = (os.environ.get('TEST_DB_PATH')
+               or os.environ.get('SQLITE_DB_PATH')
+               or str(Path(__file__).parent.parent / "architecture.db"))
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            conn.execute(
+                "CREATE VIEW IF NOT EXISTS v_audit_all AS SELECT * FROM audit_logs"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+def pytest_runtest_setup(item):
+    global _AUDIT_UNION_VIEW_CHECKED
+    if _AUDIT_UNION_VIEW_CHECKED:
+        return
+    _AUDIT_UNION_VIEW_CHECKED = True
+    _ensure_audit_union_view()
+
+
 def pytest_collection_finish(session):
     progress_file = _get_progress_file()
     if not progress_file:
