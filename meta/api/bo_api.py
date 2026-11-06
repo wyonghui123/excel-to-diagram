@@ -524,8 +524,14 @@ def _allocate_document_no(object_type: str, data: dict) -> dict:
 
     from meta.services.document_number_service import DocumentNumberService
 
-    allocated = DocumentNumberService(_get_data_source()).allocate_for(
-        object_type, data)
+    service = DocumentNumberService(_get_data_source())
+    # [T6.1 2026-11-06] 调用方自带单号时补齐校验（格式 / 起始值 / 位数 / 唯一性）：
+    # 原实现直接跳过取号，等于绕过全部编号约束。
+    if data.get(no_field):
+        service.validate_external_number(object_type, data[no_field], data)
+        return data
+
+    allocated = service.allocate_for(object_type, data)
     if not allocated:
         return data
 
@@ -2812,6 +2818,67 @@ def get_meta_impact():
     except ValueError as exc:
         return error_response(str(exc), error_code='INVALID_ARGUMENT', status=400)
     return ok(result)
+
+
+@meta_v2_bp.route('/number-sequences', methods=['GET'])
+@login_required
+def get_number_sequences():
+    """[T6.1 2026-11-06] 编号序列只读区间查询。
+
+    GET /api/v2/meta/number-sequences
+    返回每个序列的声明（模式 / 起始值 / 耗尽策略）与运行游标（已用 / 剩余）。
+    on_exhaust=error 时 remaining 按 {SEQ:n} 位数上限计算；extend 时为 null。
+    """
+    from meta.core.key_template_engine import _SEQUENCES_TABLE
+    from meta.services.document_number_service import DocumentNumberService, NUMBERING
+
+    ds = _get_data_source()
+    rows = ds.query(
+        'SELECT id, code, name, pattern, scope_fields, date_field, start_value, '
+        'on_exhaust, status FROM number_sequences ORDER BY code')
+    sequences = []
+    for row in rows:
+        padding = DocumentNumberService._seq_padding(row.get('pattern') or '')
+        on_exhaust = row.get('on_exhaust') or 'error'
+        start_value = int(row.get('start_value') or 1)
+        capacity = (10 ** padding - 1) if padding else None
+
+        runtimes = []
+        for runtime in ds.query(
+                'SELECT sequence_name, current_value FROM %s '
+                'WHERE sequence_name LIKE ? ORDER BY sequence_name'
+                % _SEQUENCES_TABLE, [row['code'] + ':%']):
+            current = int(runtime.get('current_value') or 0)
+            runtimes.append({
+                'sequence_name': runtime.get('sequence_name'),
+                'current_value': current,
+                'used': max(current - start_value + 1, 0),
+                'remaining': None if on_exhaust == 'extend' else max(
+                    (capacity or current) - current, 0),
+            })
+
+        sequences.append({
+            'id': row.get('id'),
+            'code': row.get('code'),
+            'name': row.get('name'),
+            'pattern': row.get('pattern'),
+            'scope_fields': row.get('scope_fields'),
+            'date_field': row.get('date_field'),
+            'start_value': start_value,
+            'padding': padding,
+            'capacity': capacity,
+            'on_exhaust': on_exhaust,
+            'status': row.get('status'),
+            'runtimes': runtimes,
+        })
+
+    numbering = [
+        {'object_type': key, 'no_field': cfg.get('no_field'),
+         'date_field': cfg.get('date_field'), 'type_table': cfg.get('type_table'),
+         'fallback_sequence_code': cfg.get('fallback_sequence_code')}
+        for key, cfg in sorted(NUMBERING.items())
+    ]
+    return ok({'sequences': sequences, 'numbering': numbering})
 
 
 @meta_v2_bp.route('/_openapi.json', methods=['GET'])
