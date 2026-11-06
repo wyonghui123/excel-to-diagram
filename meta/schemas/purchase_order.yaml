@@ -1120,6 +1120,56 @@ fields:
     ui:
       widget: textarea
 
+  # 采购退货锚点（D6 / D16）：退货单必须可回指原 PO 与原收货单；原 PO 不重开
+  - id: origin_purchase_order_id
+    name: 原采购订单
+    type: integer
+    db_column: origin_purchase_order_id
+    nullable: true
+    description: 退货采购单指向的原采购订单（退货类型必填，普通订单为空）
+    semantics:
+      meaning: 被退货的原采购订单
+      display:
+        type: association
+        target_type: purchase_order
+        display_field: order_no
+    ui:
+      widget: select
+      relation: purchase_order
+      multiple: false
+      clearable: true
+
+  - id: origin_receipt_id
+    name: 原收货单
+    type: integer
+    db_column: origin_receipt_id
+    nullable: true
+    description: 触发退货的原收货单（可退量上限依据）
+    semantics:
+      meaning: 被退货的原收货单
+      display:
+        type: association
+        target_type: receipt
+        display_field: receipt_no
+    ui:
+      widget: select
+      relation: receipt
+      multiple: false
+      clearable: true
+
+  - id: return_reason
+    name: 退货原因
+    type: text
+    db_column: return_reason
+    nullable: true
+    description: 采购退货原因（退货类型单据使用）
+    semantics:
+      meaning: 退货原因
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
   - id: revision_no
     name: 版本号
     type: integer

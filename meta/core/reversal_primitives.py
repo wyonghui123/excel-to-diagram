@@ -372,6 +372,20 @@ def reverse_schedule_received(ds, args, ctx) -> Dict[str, Any]:
     return {"updated": len(items)}
 
 
+def recompute_schedule_returned(ds, args, ctx) -> Dict[str, Any]:
+    """按已过账退货行重算计划行 returned_qty（D6，幂等）。"""
+    from meta.services.receipt_service import ReceiptService
+
+    items = [item for item in (args.get("items") or [])
+             if isinstance(item, dict) and item.get("schedule_id") not in (None, "")]
+    if not items:
+        return {"updated": 0}
+    service = ReceiptService(ds)
+    for item in items:
+        service.recompute_schedule_returned(item.get("schedule_id"))
+    return {"updated": len(items)}
+
+
 def reservation_unfulfill_by_shipment(ds, args, ctx) -> Dict[str, Any]:
     """按交货行汇总反向核销销售订单行预留（恢复可用量）。"""
     from meta.services.inventory_reservation_service import (
@@ -527,6 +541,7 @@ PRIMITIVES: Dict[str, Primitive] = {
     "recompute_purchase_fulfillment": recompute_purchase_fulfillment,
     "recompute_transfer_fulfillment": recompute_transfer_fulfillment,
     "reverse_schedule_received": reverse_schedule_received,
+    "recompute_schedule_returned": recompute_schedule_returned,
     "shipment_reverse_lines": shipment_reverse_lines,
     "transfer_reverse_lines": transfer_reverse_lines,
 }

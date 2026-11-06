@@ -136,7 +136,21 @@ class DocumentApprovalResolver:
     def _load_record(self, table: str, record_id: Any) -> Optional[Dict[str, Any]]:
         rows = self._ds.query(
             'SELECT * FROM {0} WHERE id = ?'.format(table), [record_id])
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        record = dict(rows[0])
+        # D6：审批条件可直接引用单据类别（standard / return / red）
+        type_id = record.get('document_type_id')
+        if not _blank(type_id):
+            try:
+                type_rows = self._ds.query(
+                    'SELECT document_category FROM type_definitions WHERE id = ?',
+                    [type_id])
+            except Exception:  # noqa: BLE001 - 极简测试替身无类型表
+                type_rows = []
+            if type_rows:
+                record['document_category'] = type_rows[0].get('document_category')
+        return record
 
     @staticmethod
     def _amount_of(record: Dict[str, Any]) -> float:

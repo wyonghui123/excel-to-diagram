@@ -23,6 +23,7 @@ from meta.core.doc_flow_reconcile import scan
 from meta.core.yaml_loader import load_yaml_file
 from meta.migrations import v215__doc_flow_stage2_rules as v215
 from meta.migrations import v222__doc_flow_return_shipment_rule as v222
+from meta.migrations import v227__purchase_return_object as v227
 from meta.services.trace_graph_service import TraceGraphService
 
 _SCHEMA_DIR = os.path.join(
@@ -169,7 +170,7 @@ def test_view_yaml_matches_migration_sql():
         data = yaml.safe_load(fh)
 
     norm = lambda s: re.sub(r'\s+', ' ', s or '').strip()
-    assert norm(data['view_definition']) == norm(v222.VIEW_SQL)
+    assert norm(data['view_definition']) == norm(v227.VIEW_SQL)
     assert data.get('write_anchor') is None
     assert data['import_export']['auto_crud'] is False
     action_ids = [a['id'] for a in data['actions']]

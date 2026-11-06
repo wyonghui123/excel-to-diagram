@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """收货单 BO Action（spec-receipt-object-model §13 步骤 7）。
 
-注册于 `meta/services/bo_action_registrations.py`，共 4 个：
+注册于 `meta/services/bo_action_registrations.py`，共 5 个：
 
   · `receipt.create_from_schedule` —— 由 PO 计划行批量生成草稿收货单
+  · `receipt.create_vendor_return` —— 由原收货单生成退货采购单 + 退货出库草稿（D6）
   · `receipt.post`                —— 草稿 → 已过账（§6 六步）
   · `receipt.reverse`             —— 已过账 → 整单红冲（§7）
   · `receipt.cancel`              —— 草稿 → 已取消
@@ -145,6 +146,202 @@ def create_from_schedule_handler(params: Dict[str, Any],
         return _fail(e.message, e.rule or 'RC_CREATE_FAILED')
 
     return _ok(result, '已生成收货单 %s' % result.get('receipt_no'))
+
+
+def create_vendor_return_handler(params: Dict[str, Any],
+                                 context=None) -> Dict[str, Any]:
+    """BO Action：`receipt.create_vendor_return`（原收货单 → 退货 PO + 退货出库草稿）。"""
+    _set_user_context()
+    receipt_id = _receipt_id(params)
+    if _blank(receipt_id):
+        return _fail('缺少 receipt_id', 'INVALID_ARGUMENT')
+
+    from datetime import date as _date
+    from meta.core.bo_framework import bo_framework
+    from meta.services.document_number_service import DocumentNumberService
+
+    service = ReceiptService()
+    header = service.ds.query('SELECT * FROM receipts WHERE id = ?', [receipt_id])
+    if not header:
+        return _fail('原收货单不存在', 'RECEIPT_NOT_FOUND')
+    header = header[0]
+    if header.get('status') != 'posted':
+        return _fail('只有已过账的收货单可以发起退货', 'RECEIPT_NOT_POSTED')
+    if header.get('source_doc_type') != SOURCE_PURCHASE_ORDER:
+        return _fail('仅采购订单来源的收货单支持退货', 'RETURN_NOT_SUPPORTED')
+    doc_type = service._require_document_type(header.get('document_type_id'))
+    if doc_type.get('document_category') != 'standard':
+        return _fail('只有标准收货单可以发起退货', 'RETURN_NOT_SUPPORTED')
+
+    source_lines = service.ds.query(
+        'SELECT id, schedule_id, item_id, uom_id, order_line_id, '
+        'qty_received, qty_rejected FROM receipt_lines '
+        'WHERE receipt_id = ? AND status = ? ORDER BY id',
+        [receipt_id, 'posted'])
+    if not source_lines:
+        return _fail('原收货单没有可退货的行', 'NO_RETURNABLE_LINE')
+
+    picked = params.get('lines')
+    picked_map = {}
+    if picked:
+        for spec in picked:
+            key = spec.get('receipt_line_id') or spec.get('line_id') \
+                or spec.get('schedule_id')
+            picked_map[key] = float(spec.get('qty') or 0)
+    planned = []
+    for line in source_lines:
+        net = float(line.get('qty_received') or 0) - float(line.get('qty_rejected') or 0)
+        if net <= 0:
+            continue
+        if picked_map:
+            qty = picked_map.get(line['id'], picked_map.get(line.get('schedule_id'), 0))
+            qty = min(qty, net)
+        else:
+            qty = net
+        if qty <= 0:
+            continue
+        planned.append((line, qty))
+    if not planned:
+        return _fail('未指定有效的退货数量', 'NO_RETURNABLE_LINE')
+
+    return_type = service.ds.query(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'purchase_order' "
+        "AND level = 'header' AND code = 'RETURN_PO'")
+    receipt_type = service.ds.query(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'receipt' "
+        "AND level = 'header' AND code = 'VENDOR_RETURN'")
+    if not return_type or not receipt_type:
+        return _fail('缺少 RETURN_PO / VENDOR_RETURN 单据类型种子',
+                     'RETURN_TYPE_MISSING')
+    return_type_id = return_type[0]['id']
+    receipt_type_id = receipt_type[0]['id']
+
+    receipt_date = params.get('receipt_date') or header.get('receipt_date') \
+        or _date.today().isoformat()
+    source_order = service._load_order(header.get('source_doc_id')) or {}
+    order_no = DocumentNumberService(service.ds).allocate_for(
+        'purchase_order', {'document_type_id': return_type_id,
+                           'order_date': receipt_date})
+    receipt_no = service.allocate_receipt_no(receipt_type_id, receipt_date)
+
+    header_data = {
+        'order_no': order_no,
+        'order_date': receipt_date,
+        'document_type_id': return_type_id,
+        'supplier_party_id': source_order.get('supplier_party_id'),
+        'org_id': source_order.get('org_id'),
+        'purchase_org_id': source_order.get('purchase_org_id'),
+        'purchase_legal_entity_id': source_order.get('purchase_legal_entity_id'),
+        'deliver_to_location_id': source_order.get('deliver_to_location_id'),
+        'project_id': source_order.get('project_id'),
+        'requested_date': receipt_date,
+        'description': '采购退货：%s' % (params.get('return_reason') or ''),
+        'origin_purchase_order_id': source_order.get('id'),
+        'origin_receipt_id': receipt_id,
+        'return_reason': params.get('return_reason'),
+    }
+    header_data = {k: v for k, v in header_data.items() if v is not None}
+
+    line_type = service.ds.query(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'purchase_order' "
+        "AND level = 'line' AND code = 'PO_GOODS'")
+    line_type_id = line_type[0]['id'] if line_type else None
+    created = {'purchase_order_id': None, 'purchase_order_no': order_no,
+               'receipt_id': None, 'receipt_no': receipt_no, 'lines': []}
+    try:
+        with service.ds.transaction():
+            order_result = bo_framework.execute(
+                'purchase_order', 'crud_create', header_data)
+            if not order_result or not order_result.success:
+                return _fail('创建退货采购单失败: %s'
+                             % getattr(order_result, 'message', '未知错误'),
+                             'RETURN_PO_CREATE_FAILED')
+            po_id = (order_result.data or {}).get('id')
+            created['purchase_order_id'] = po_id
+            for seq, (line, qty) in enumerate(planned, start=1):
+                line_data = {
+                    'order_id': po_id,
+                    'line_no': '%04d' % seq,
+                    'line_type_id': line_type_id,
+                    'item_id': line.get('item_id'),
+                    'qty': qty,
+                    'uom_id': line.get('uom_id'),
+                    'unit_price': 0,
+                    'net_amount': 0,
+                    'header_discount_amount': 0,
+                    'header_surcharge_amount': 0,
+                    'tax_base_amount': 0,
+                    'tax_amount': 0,
+                    'tax_recoverable': True,
+                    'non_recoverable_tax_amount': 0,
+                    'gross_amount': 0,
+                    'component_issue_required': False,
+                    'service_acceptance_required': False,
+                    'requested_date': receipt_date,
+                    'deliver_to_location_id': source_order.get(
+                        'deliver_to_location_id'),
+                }
+                line_result = bo_framework.execute(
+                    'purchase_order_line', 'crud_create',
+                    {k: v for k, v in line_data.items() if v is not None})
+                if not line_result or not line_result.success:
+                    return _fail('创建退货订单行失败: %s'
+                                 % getattr(line_result, 'message', '未知错误'),
+                                 'RETURN_PO_LINE_CREATE_FAILED')
+                po_line_id = (line_result.data or {}).get('id')
+                schedule_result = bo_framework.execute(
+                    'purchase_order_schedule', 'crud_create', {
+                        'order_id': po_id,
+                        'line_id': po_line_id,
+                        'schedule_no': '%04d' % seq,
+                        'schedule_kind': 'delivery',
+                        'promised_date': receipt_date,
+                        'promised_qty': qty,
+                        'status': 'confirmed',
+                        'deliver_to_location_id': source_order.get(
+                            'deliver_to_location_id'),
+                    })
+                if not schedule_result or not schedule_result.success:
+                    return _fail('创建退货计划行失败: %s'
+                                 % getattr(schedule_result, 'message', '未知错误'),
+                                 'RETURN_SCHEDULE_CREATE_FAILED')
+                schedule_id = (schedule_result.data or {}).get('id')
+                created['lines'].append({
+                    'source_receipt_line_id': line['id'],
+                    'purchase_order_line_id': po_line_id,
+                    'schedule_id': schedule_id,
+                    'qty': qty,
+                })
+
+            receipt_header = {
+                'document_type_id': receipt_type_id,
+                'receipt_no': receipt_no,
+                'receipt_date': receipt_date,
+                'source_doc_type': SOURCE_PURCHASE_ORDER,
+                'source_doc_id': po_id,
+                'supplier_party_id': source_order.get('supplier_party_id'),
+                'org_id': source_order.get('org_id'),
+                'purchase_org_id': source_order.get('purchase_org_id'),
+                'deliver_to_location_id': source_order.get(
+                    'deliver_to_location_id'),
+                'project_id': source_order.get('project_id'),
+                'return_to': 'supplier',
+                'remark': params.get('return_reason'),
+            }
+            prepared, _order, _doc_type = service.prepare_header(receipt_header)
+            result = service.create_receipt(
+                prepared,
+                [{'schedule_id': item['schedule_id'],
+                  'qty_received': item['qty']} for item in created['lines']])
+            created['receipt_id'] = result['id']
+            _write_schedule_edges(service, result['id'])
+    except ReceiptError as exc:
+        return _fail(exc.message, exc.rule or 'RETURN_CREATE_FAILED')
+
+    logger.info('[receipt] vendor return receipt=%s → po=%s receipt=%s',
+                receipt_id, created['purchase_order_id'], created['receipt_id'])
+    return _ok(created, '已生成退货采购单 %s 与退货出库草稿 %s'
+               % (order_no, receipt_no))
 
 
 def post_handler(params: Dict[str, Any], context=None) -> Dict[str, Any]:

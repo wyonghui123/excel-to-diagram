@@ -112,6 +112,7 @@ def register_all_bo_actions(registry=None):
     # M3 收货单: 建单 / 过账 / 整单红冲 / 取消（spec-receipt-object-model §13 步 7）
     from meta.services.receipt_actions import (
         create_from_schedule_handler,
+        create_vendor_return_handler as receipt_create_vendor_return_handler,
         post_handler as receipt_post_handler,
         reverse_handler as receipt_reverse_handler,
         cancel_handler as receipt_cancel_handler,
@@ -820,7 +821,7 @@ def register_all_bo_actions(registry=None):
         idempotent=False,
     )
 
-    # ==================== 33-36: 收货单（M3） ====================
+    # ==================== 33-37: 收货单（M3） ====================
     # 权限码双段式 `receipt:receipt_{action}`（与 v186 权限种子一致）
     _receipt_output_schema = {
         'type': 'object',
@@ -861,6 +862,36 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_receipt_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'receipt.create_vendor_return',
+        receipt_create_vendor_return_handler,
+        description='由已过账收货单生成退货采购单 + 采购退货出库草稿（D6）',
+        object_type='receipt',
+        category='business',
+        permission_required='receipt:receipt_create_vendor_return',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'receipt_id': {'type': 'integer'},
+                'lines': {'type': 'array'},
+                'return_reason': {'type': 'string'},
+                'receipt_date': {'type': 'string'},
+            },
+            'required': ['receipt_id'],
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'purchase_order_id': {'type': 'integer'},
+                'purchase_order_no': {'type': 'string'},
+                'receipt_id': {'type': 'integer'},
+                'receipt_no': {'type': 'string'},
+                'lines': {'type': 'array'},
+            },
+        },
         requires_auth=True,
         idempotent=False,
     )

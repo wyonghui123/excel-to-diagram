@@ -73,10 +73,12 @@ RELATION_TYPES = ('assembly', 'packaging')
 TXN_CREATE = 'create'
 TXN_RECEIVE = 'receive'
 TXN_SHIP = 'ship'
+TXN_RETURN_VENDOR = 'return_to_vendor'
 TXN_ADJUST = 'adjust'
 TXN_STATUS_CHANGE = 'status_change'
 TXN_TYPES = (TXN_CREATE, TXN_RECEIVE, 'issue', 'transfer_out', 'transfer_in',
-             TXN_SHIP, 'return', TXN_ADJUST, TXN_STATUS_CHANGE, 'scrap')
+             TXN_SHIP, TXN_RETURN_VENDOR, 'return', TXN_ADJUST,
+             TXN_STATUS_CHANGE, 'scrap')
 
 #: 状态流转白名单（§3.5）。scrapped 为终态，不可再流转。
 TRANSITIONS = {
@@ -295,6 +297,17 @@ class SerialNumberService:
                                 'require_on_issue',
                                 'SERIAL_ISSUE_COUNT_MISMATCH')
 
+    def precheck_receipt_return(self, receipt_id: Any) -> None:
+        """采购退货出库前置：逐行校验 require_on_issue 序列号数量。"""
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
+            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+        for line in lines:
+            net = _as_float(line.get('qty_received')) \
+                - _as_float(line.get('qty_rejected'))
+            self._precheck_line(line, net, DOC_RECEIPT, 'require_on_issue',
+                                'SERIAL_ISSUE_COUNT_MISMATCH')
+
     def _precheck_line(self, line: Dict[str, Any], qty: float,
                        doc_type: str, require_field: str,
                        count_rule: str) -> None:
@@ -433,6 +446,102 @@ class SerialNumberService:
             'batch_id = COALESCE(?, batch_id), received_at = COALESCE(received_at, ?), '
             'updated_at = ? WHERE id = ?' % SERIAL_TABLE,
             [STATUS_IN_STORES, location_id, batch_id, now, now, serial_id])
+
+    def register_receipt_return(self, receipt_id: Any,
+                                txn_by_line: Optional[Dict[Any, Any]] = None
+                                ) -> Dict[str, Any]:
+        """采购退货出库登记：校验在库、写 return_to_vendor 事件、置 shipped。"""
+        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+                                   'SERIAL_RECEIPT_NOT_FOUND')
+        org_id = header.get('inventory_org_id') or header.get('org_id')
+        lines = self.ds.query(
+            'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
+            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+        txn_by_line = txn_by_line or {}
+        registered = 0
+        for line in lines:
+            registered += self._register_receipt_return_line(
+                header, line, org_id,
+                txn_by_line.get(line.get('id')))
+        logger.info('[serial] receipt_return=%s registered=%s',
+                    receipt_id, registered)
+        return {'receipt_id': receipt_id, 'registered': registered}
+
+    def _register_receipt_return_line(self, header: Dict[str, Any],
+                                      line: Dict[str, Any], org_id: Any,
+                                      inv_tx_id: Any = None) -> int:
+        net = _as_float(line.get('qty_received')) \
+            - _as_float(line.get('qty_rejected'))
+        if net <= 0:
+            return 0
+        item = self._require_item(line.get('item_id'))
+        line_serial = str(line.get('serial_no') or '').strip()
+        if not bool(item.get('serial_tracked')):
+            if line_serial:
+                raise SerialNumberError(
+                    '物料未启用序列号管理，行内不能填写序列号',
+                    field_name='serial_no', rule='SERIAL_ITEM_NOT_TRACKED')
+            return 0
+
+        links = self._links(DOC_RECEIPT, line.get('id'))
+        if not links and line_serial:
+            if net > 1:
+                raise SerialNumberError(
+                    '数量大于 1 时不能用单值序列号快捷录入，请走序列号子表',
+                    field_name='serial_no',
+                    rule='SERIAL_SINGLE_VALUE_WITH_MULTI_QTY')
+            serial = self._find_serial(item.get('id'), org_id, line_serial)
+            if serial is None:
+                raise SerialNumberError('序列号不存在：%s' % line_serial,
+                                        field_name='serial_no',
+                                        rule='SERIAL_NOT_FOUND')
+            self._ensure_link(DOC_RECEIPT, header.get('id'), line.get('id'),
+                              serial['id'], 'out')
+            links = self._links(DOC_RECEIPT, line.get('id'))
+        if bool(item.get('require_on_issue')) \
+                and int(round(net)) != len(links):
+            raise SerialNumberError(
+                '退货行序列号数量必须等于退货数量 %s，实际 %s' % (
+                    int(round(net)), len(links)),
+                field_name='serial_no', rule='SERIAL_ISSUE_COUNT_MISMATCH')
+
+        if inv_tx_id is None:
+            inv_tx_id = self._find_inv_tx(
+                'receipt:%s:post' % header.get('id'), line.get('id'))
+        txn_date = header.get('actual_arrival_date') or _now()
+        count = 0
+        for link in links:
+            serial = self._require_row(
+                SERIAL_TABLE, link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
+            self._assert_org(serial, org_id)
+            if serial.get('usage_status') not in OUTBOUND_ALLOWED:
+                raise SerialNumberError(
+                    '序列号 %s 当前状态 %s 不可退货出库' % (
+                        serial.get('serial_no'), serial.get('usage_status')),
+                    field_name='serial_no', rule='SERIAL_NOT_AVAILABLE')
+            existing = self.ds.query(
+                'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
+                'AND doc_type = ? AND doc_id = ? AND line_id = ?'
+                % SERIAL_TX_TABLE,
+                [serial['id'], TXN_RETURN_VENDOR, DOC_RECEIPT,
+                 header.get('id'), line.get('id')])
+            now = _now()
+            if not existing:
+                self._insert_txn(
+                    serial['id'], TXN_RETURN_VENDOR, txn_date or now,
+                    inventory_transaction_id=inv_tx_id, org_from_id=org_id,
+                    location_from_id=serial.get('current_location_id'),
+                    batch_from_id=serial.get('batch_id'),
+                    usage_from=serial.get('usage_status'),
+                    usage_to=STATUS_SHIPPED, doc_type=DOC_RECEIPT,
+                    doc_id=header.get('id'), line_id=line.get('id'),
+                    remark='采购退货出库 %s' % header.get('receipt_no'))
+            self.ds.execute(
+                'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
+                'shipped_at = COALESCE(shipped_at, ?), updated_at = ? WHERE id = ?'
+                % SERIAL_TABLE, [STATUS_SHIPPED, now, now, serial['id']])
+            count += 1
+        return count
 
     def register_shipment(self, shipment_id: Any) -> Dict[str, Any]:
         """发运过账后登记：校验在库、写 ship 事件与 link、置 shipped。"""

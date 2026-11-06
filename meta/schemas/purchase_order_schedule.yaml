@@ -361,6 +361,26 @@ fields:
       widget: number
       editable: false
 
+  # 采购退货量独立口径（D6）：退货不改 received_qty，原 PO 不重开
+  - id: returned_qty
+    name: 已退货数量
+    type: number
+    db_column: returned_qty
+    nullable: true
+    default: 0
+    description: 累计已退货数量（只读缓存，由退货出库过账 / 红冲重算）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 4
+    semantics:
+      meaning: 累计退货数量（缓存）
+      readonly: true
+      filterable: false
+    ui:
+      widget: number
+      editable: false
+
   # 「谁把计划行置为 completed」决定红冲能否回退（R-RC-10）：
   #   只有 receipt 来源可回退到 completion_prev_status；manual / short_close 不回退
   - id: completion_source
@@ -539,6 +559,8 @@ ui_view_config:
       - field: received_qty
         width: 110
       - field: rejected_qty
+        width: 110
+      - field: returned_qty
         width: 110
       - field: status
         width: 100

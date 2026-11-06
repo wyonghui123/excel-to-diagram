@@ -834,15 +834,50 @@ python d:\filework\test.py --file meta/tests/test_transfer_ship_reversal.py,meta
   `test_yaml_loader`（46）全绿。
 - `test_transfer_order_schema.test_header_status_enum` 同步纳入 `reversed`。
 
-### 阶段 D6：采购退货正向对象（§11）
+### 阶段 D6：采购退货正向对象（§11）—— ✅ 已实施 2026-11-06
 
 1. `v227` 迁移（D5 占用 v226）：类型三值化 + `RETURN_TO_VENDOR` + 规则 + 追溯视图 + `returned_qty` / `return_to` 列。
-2. `receipt_service`：方向解析 / 出库守卫（抽 `OutboundGuard`）/ `returned_qty` 重算与上限守卫 / 边规则分流。
+2. `receipt_service`：方向解析 / 出库守卫（`_assert_return_limit` + `_post_receipt_inventory(direction='out')`）/ `returned_qty` 重算与上限守卫 / 边规则分流。
 3. `purchase_order` 加 `origin_*` / `return_reason` 字段；审批条件增加 `document_category` 维度。
 4. 入口：「收货详情 → 退货」按钮（带原单与可退量）；PO 新建可选退货类型。
 5. 新增 `test_purchase_return.py` 9 例（见 §14 补充）。
 6. 回归 `test_receipt_service` / `test_receipt_reversal` / `test_doc_flow_reconcile` /
    `test_demand_trace_graph` / `test_purchase_order*`。
+
+**实施记录（2026-11-06）**
+
+* 迁移 `v227__purchase_return_object.py`：新增 `RETURN_PO` / `VENDOR_RETURN` 类型与
+  `RPO` / `RTV` 序列；`RCV_RETURN` 类别改 `red`；`purchase_orders.origin_*` /
+  `return_reason`、`purchase_order_schedules.returned_qty`、`receipts.return_to`；
+  `RETURN_TO_VENDOR` 库存事务类型 + `receipt_line_to_return_out_txn` 边规则；
+  重建 `v_demand_trace_graph`（signed_qty 退货出库分支）与 `serial_transactions`
+  CHECK（`return_to_vendor`）；种子权限 `receipt:receipt_create_vendor_return`。
+* `receipt_service`：`post()` 按 `document_category` 三分流（standard 正向 /
+  return 独立出库过账 / red 禁止独立过账）；建单阶段 `_assert_category_consistency`；
+  过账前 `_assert_return_limit`（`returned_qty <= received_qty - rejected_qty`）；
+  `recompute_schedule_returned` 与逆向原语 `recompute_schedule_returned`（注册表 17→18）。
+* `serial_number_service`：新增 `return_to_vendor` 事件、`precheck_receipt_return` /
+  `register_receipt_return`（`inventory_transaction_id` 关联库存事务，可被
+  `reverse_serial_event` 回退）。
+* `document_approval_service`：`_load_record` 注入 `document_category`
+  （仅当记录含 `document_type_id`；极简测试替身缺表时静默跳过）。
+* 入口：`receipt_actions.create_vendor_return_handler` +
+  `bo_action_registrations` 注册 `receipt.create_vendor_return`；
+  `receipt.yaml` 新增 `actions` 声明（`from_states: [posted]`）。
+
+**回归记录（2026-11-06）**
+
+- `test_purchase_return`（9 例）全绿：退货出库过账 / 类别不一致 / 拒收拒绝 /
+  超可退量 / 红字不可独立过账 / 退货红冲回退 `returned_qty` / 原 PO 不重开 /
+  审批维度 / 序列号出库 + 红冲回退。
+- `test_receipt_service`（30）/ `test_receipt_reversal`（9）/
+  `test_receipt_schema`（11）/ `test_doc_flow_reconcile`（29）/
+  `test_demand_trace_graph`（12）/ `test_purchase_order*`（66）全绿。
+- `test_reversal_platform`（15）/ `test_reversal_orchestrator`（7）/
+  `test_bo_action_*`（45）/ `test_document_approval`（25）全绿。
+- 已知既有失败（与 D6 无关）：`test_serial_tracking_posting` 的发运 4 例
+  因其内联 `shipment_lines` 缺 `project_task_id`；`test_yaml_single_source_of_truth`
+  的 10 例仍断言已迁移的 `user_group` / `role_permissions`。
 
 ### 阶段 D7：收口
 

@@ -55,7 +55,13 @@ SOURCE_SUPPORTED = (SOURCE_PURCHASE_ORDER, SOURCE_TRANSFER_ORDER)
 
 DOC_CATEGORY_STANDARD = 'standard'
 DOC_CATEGORY_RETURN = 'return'
-DOC_CATEGORIES = (DOC_CATEGORY_STANDARD, DOC_CATEGORY_RETURN)
+DOC_CATEGORY_RED = 'red'
+DOC_CATEGORIES = (DOC_CATEGORY_STANDARD, DOC_CATEGORY_RETURN, DOC_CATEGORY_RED)
+
+#: 退货出库移动类型与边规则（D6；红冲时方向由库存原语自动翻转）
+RETURN_TXN_TYPE = 'RETURN_TO_VENDOR'
+INBOUND_EDGE_RULE = 'receipt_line_to_inventory_txn'
+RETURN_EDGE_RULE = 'receipt_line_to_return_out_txn'
 
 STATUS_DRAFT = 'draft'
 STATUS_POSTED = 'posted'
@@ -182,11 +188,13 @@ class ReceiptService:
                                rule='RC_ORDER_NOT_FOUND')
 
         doc_type = self._require_document_type(header.get('document_type_id'))
-        if doc_type['document_category'] == DOC_CATEGORY_RETURN \
+        if doc_type['document_category'] == DOC_CATEGORY_RED \
                 and _blank(header.get('reversal_of_receipt_id')):
             raise ReceiptError('红字收货单必须引用原单',
                                field_name='reversal_of_receipt_id',
                                rule='RC_DOC_TYPE_INVALID')
+        # D13：类别一致性在建单阶段即校验（红字单除外）
+        self._assert_category_consistency(order, doc_type)
 
         header = self._apply_header_defaults(header, order)
         receipt_no = header.get('receipt_no') or self.allocate_receipt_no(
@@ -215,7 +223,7 @@ class ReceiptService:
                                rule='RC_TRANSFER_NOT_FOUND')
 
         doc_type = self._require_document_type(header.get('document_type_id'))
-        if doc_type['document_category'] == DOC_CATEGORY_RETURN \
+        if doc_type['document_category'] == DOC_CATEGORY_RED \
                 and _blank(header.get('reversal_of_receipt_id')):
             raise ReceiptError('红字收货单必须引用原单',
                                field_name='reversal_of_receipt_id',
@@ -267,7 +275,7 @@ class ReceiptService:
                 field_name='source_doc_id', rule='RC_WORK_ORDER_INVALID')
 
         doc_type = self._require_document_type(header.get('document_type_id'))
-        if doc_type['document_category'] == DOC_CATEGORY_RETURN \
+        if doc_type['document_category'] == DOC_CATEGORY_RED \
                 and _blank(header.get('reversal_of_receipt_id')):
             raise ReceiptError('红字收货单必须引用原单',
                                field_name='reversal_of_receipt_id',
@@ -437,7 +445,12 @@ class ReceiptService:
             return self._post_work_order(header, actual_arrival_date)
 
         doc_type = self._require_document_type(header.get('document_type_id'))
-        is_return = doc_type['document_category'] == DOC_CATEGORY_RETURN
+        category = doc_type['document_category']
+        if category == DOC_CATEGORY_RED:
+            raise ReceiptError(
+                '红字收货单不支持独立过账，请走原单红冲',
+                field_name='document_type_id', rule='RC_CATEGORY_INVALID')
+        is_return = category == DOC_CATEGORY_RETURN
         lines = self._load_lines(receipt_id)
         if not lines:
             raise ReceiptError('收货单没有任何行，禁止过账',
@@ -449,14 +462,21 @@ class ReceiptService:
         if order is None:
             raise ReceiptError('来源采购订单不存在', field_name='source_doc_id',
                                rule='RC_ORDER_NOT_FOUND')
+        self._assert_category_consistency(order, doc_type)
         self._require_vendor(header)
 
         # 1. 行校验（R-RC-1 ~ R-RC-4 / R-RC-15 / R-RC-17）
-        checked = [self._validate_line(line, order, doc_type, for_post=True)
+        checked = [self._validate_line(line, order, doc_type, for_post=True,
+                                       is_return=is_return)
                    for line in lines]
 
-        # P6a §6.1：序列号录号前置校验（最后一步做写副作用前必须通过）
-        if not is_return:
+        # D6：退货出库前校验可退量与序列号在库（写副作用前必须通过）
+        if is_return:
+            for item in checked:
+                self._assert_return_limit(order, item['line'], item['net'])
+            self._precheck_receipt_return_serials(header)
+        else:
+            # P6a §6.1：序列号录号前置校验（最后一步做写副作用前必须通过）
             self._validate_serial_tracking(header, checked)
 
         order_ids = set()
@@ -466,14 +486,14 @@ class ReceiptService:
             schedule = item['schedule']
             order_ids.add(schedule['order_id'])
 
-            # 2. 需求分配（红字单取负，标准单按剩余占比拆）
+            if is_return:
+                # 退货是正向新事实：不写需求分配，退货量由 returned_qty 独立承接
+                continue
+
+            # 2. 需求分配（标准单按剩余占比拆）
             if net > 0:
-                if is_return:
-                    self._write_reversal_allocations(
-                        line, header['id'], schedule, tol, now)
-                else:
-                    self._write_allocations(line, header['id'], schedule, net,
-                                            tol, now)
+                self._write_allocations(line, header['id'], schedule, net,
+                                        tol, now)
             # 3. 计划行条件 UPDATE 原子累加（R-RC-5 唯一判定点）
             self._apply_schedule_receipt(schedule, net, item['rejected'], tol, now)
 
@@ -495,20 +515,24 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
-        # 6. 库存入账（同事务；开关关闭时 post() 内部自动跳过）
-        #    红字单由 reverse 流程生成并直接置为已过账，不经过此处；若手工
-        #    过账红字单则拒绝，避免与 REVERSAL 反冲重复记账。
+        # 6. 库存过账（同事务；开关关闭时内部自动跳过）
+        #    · standard：入库 RCV_PO，边规则 receipt_line_to_inventory_txn；
+        #    · return  ：出库 RETURN_TO_VENDOR + direction=out，边规则
+        #                receipt_line_to_return_out_txn；
+        #    · red     ：不会到达此处（reverse 流程直接置 posted）。
         if is_return:
-            from meta.services.inventory_guard_service import (
-                InventoryError, InventoryGuardService, INV_STATUS_INVALID)
-            if InventoryGuardService(self.ds).posting_enabled():
-                e = InventoryError(
-                    INV_STATUS_INVALID, '红字收货单不支持库存入库，请走红冲')
-                raise ReceiptError(e.message, field_name='inventory', rule=e.code)
+            txns = self._post_receipt_inventory(
+                header, checked, RETURN_TXN_TYPE, direction='out')
+            self._write_receipt_inbound_edges(
+                checked, txns, rule_id=RETURN_EDGE_RULE)
+            self._register_receipt_return_serials(header, txns)
+            for item in checked:
+                self.recompute_schedule_returned(item['schedule']['id'])
         else:
             txns = self._post_receipt_inventory(header, checked, 'RCV_PO')
             # DOC_FLOW 阶段 2：收货行 → 入库事务（attach 既有事务）
-            self._write_receipt_inbound_edges(checked, txns)
+            self._write_receipt_inbound_edges(
+                checked, txns, rule_id=INBOUND_EDGE_RULE)
             # P6a §5 register_receipt：建号 / 复用、写 receive 事件与 link、
             # 主档置 in_stores。只处理标准收货；红字 / TO 不走本支路。
             self._register_receipt_serials(header, checked)
@@ -702,7 +726,7 @@ class ReceiptService:
         if source_type not in (SOURCE_TRANSFER_ORDER, SOURCE_WORK_ORDER):
             original_type = self._require_document_type(
                 header.get('document_type_id'))
-            if original_type['document_category'] == DOC_CATEGORY_RETURN:
+            if original_type['document_category'] == DOC_CATEGORY_RED:
                 raise ReceiptError('红字收货单不可再冲销', field_name='status',
                                    rule='RC_REVERSAL_INVALID')
         if self._reversal_exists(header['id']):
@@ -783,7 +807,7 @@ class ReceiptService:
         净量为 0 的行（全部拒收）不产生红字行：拒收是独立事实，
         不属于净收冲销范围。
         """
-        return_type = self._return_header_type()
+        return_type = self._red_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
         red_no = receipt_no
         if _blank(red_no):
@@ -801,6 +825,9 @@ class ReceiptService:
 
         now = _now()
         tol = self._tolerance_ratio()
+        original_category = self._require_document_type(
+            header.get('document_type_id'))['document_category']
+        is_return_origin = original_category == DOC_CATEGORY_RETURN
         red_row = {
             'receipt_no': red_no,
             'document_type_id': return_type['id'],
@@ -827,6 +854,7 @@ class ReceiptService:
 
         order_ids = set()
         schedules = []
+        returned_schedules = set()
         for item in source_items:
             line = item['line']
             schedule = item['schedule']
@@ -852,10 +880,17 @@ class ReceiptService:
             red_line_id = self._insert_line(red_id, red_line, now)
             red_line['id'] = red_line_id
 
-            self._write_reversal_allocations(red_line, red_id, schedule, tol, now)
+            # 退货单未写需求分配，其红字单同样不写负分配
+            if not is_return_origin:
+                self._write_reversal_allocations(
+                    red_line, red_id, schedule, tol, now)
             order_ids.add(schedule['order_id'])
-            schedules.append({'schedule_id': schedule['id'],
-                              'net': float(_q4(net))})
+            if is_return_origin:
+                # 退货出库红冲：returned_qty 由投影按已过账行重算（幂等）
+                returned_schedules.add(schedule['id'])
+            else:
+                schedules.append({'schedule_id': schedule['id'],
+                                  'net': float(_q4(net))})
 
         self._post_red_receipt(red_row, red_id, now)
         self._mark_original_lines_reversed(header['id'], now)
@@ -864,6 +899,8 @@ class ReceiptService:
         return {'id': red_id, 'no': red_no, 'replay': False,
                 'line_ids': [item['line']['id'] for item in source_items],
                 'schedules': schedules,
+                'returned_schedules': [{'schedule_id': schedule_id}
+                                       for schedule_id in sorted(returned_schedules)],
                 'order_ids': sorted(order_ids),
                 'transaction_date': date}
 
@@ -903,7 +940,7 @@ class ReceiptService:
             receipt_no: Optional[str] = None,
             remark: Optional[str] = None) -> Dict[str, Any]:
         """TO 来源：红字头 + 行 + 反向扣减 TO 行 `qty_received`。"""
-        return_type = self._return_header_type()
+        return_type = self._red_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
         red_no = receipt_no
         if _blank(red_no):
@@ -998,7 +1035,7 @@ class ReceiptService:
 
         谱系与 document_serial_links 不解除（与 P6a D13 一致）。
         """
-        return_type = self._return_header_type()
+        return_type = self._red_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
         red_no = receipt_no
         if _blank(red_no):
@@ -1073,10 +1110,11 @@ class ReceiptService:
     # ------------------------------------------------------------- 库存过账
     def _post_receipt_inventory(self, header: Dict[str, Any],
                                 checked: List[Dict[str, Any]],
-                                transaction_type: str) -> Dict[int, Any]:
-        """按收货行写库存入账分录（RCV_PO / RCV_TO / RCV_WO）。
+                                transaction_type: str,
+                                direction: str = 'in') -> Dict[int, Any]:
+        """按收货行写库存分录（standard=in / return=out）。
 
-        净收（qty_received - qty_rejected）为库存入账数量；净收为 0 的行跳过。
+        净收（qty_received - qty_rejected）为库存过账数量；净收为 0 的行跳过。
         库存组织取 receipt.inventory_org_id，库位取 deliver_to_location_id。
         返回 ``{收货行 id: 库存事务 id}``，供 DOC_FLOW attach 边定位目标行；
         开关关闭 / 无分录时返回空映射。
@@ -1118,6 +1156,7 @@ class ReceiptService:
             segment = segments.resolve_segment(context)
             entry = {
                 'transaction_type': transaction_type,
+                'direction': direction,
                 'transaction_date': header.get('receipt_date'),
                 'org_id': org_id,
                 'location_id': location_id,
@@ -1128,7 +1167,8 @@ class ReceiptService:
                     org_id, line.get('item_id'), line.get('lot_no')),
                 'stock_status': 'unrestricted',
                 'source_line_id': line.get('id'),
-                'remark': '收货单 %s' % header.get('receipt_no'),
+                'remark': ('退货出库 %s' if direction == 'out' else '收货单 %s')
+                          % header.get('receipt_no'),
             }
             entry.update(segment)
             entries.append(entry)
@@ -1140,7 +1180,9 @@ class ReceiptService:
             'source_doc_id': header.get('id'),
             'source_event_key': 'receipt:%s:post' % header.get('id'),
             'transaction_date': header.get('receipt_date'),
-            'remark': '收货单 %s 过账' % header.get('receipt_no'),
+            'remark': '收货单 %s %s' % (
+                header.get('receipt_no'),
+                '退货出库过账' if direction == 'out' else '过账'),
         }
         try:
             InventoryPostingService(self.ds).post(entries, source)
@@ -1154,7 +1196,8 @@ class ReceiptService:
                 for row in rows if row.get('source_line_id') is not None}
 
     def _write_receipt_inbound_edges(self, checked: List[Dict[str, Any]],
-                                     txns: Dict[int, Any]) -> None:
+                                     txns: Dict[int, Any],
+                                     rule_id: str = INBOUND_EDGE_RULE) -> None:
         """把「收货行 → 入库事务」写成 DOC_FLOW 边（attach 模式）。
 
         未启用 DOC_FLOW（规则 / 边表缺失）或当日无入库事务时降级为告警，
@@ -1172,7 +1215,7 @@ class ReceiptService:
             if not txn_id:
                 continue
             attach_edge(
-                self.ds, self.platform_ds, 'receipt_line_to_inventory_txn',
+                self.ds, self.platform_ds, rule_id,
                 line.get('id'), txn_id, net,
                 target_item=str(line.get('id') or ''),
                 unit=str(line.get('uom_id') or ''),
@@ -1585,7 +1628,7 @@ class ReceiptService:
                                field_name='document_type_id',
                                rule='RC_DOC_TYPE_INVALID')
         if row.get('document_category') not in DOC_CATEGORIES:
-            raise ReceiptError('收货单类型的方向必须是 standard / return',
+            raise ReceiptError('收货单类型的方向必须是 standard / return / red',
                                field_name='document_type_id',
                                rule='RC_DOC_TYPE_INVALID')
         return row
@@ -1604,15 +1647,15 @@ class ReceiptService:
     def standard_header_type(self) -> Dict[str, Any]:
         return self._header_type(DOC_CATEGORY_STANDARD)
 
-    def _return_header_type(self) -> Dict[str, Any]:
-        return self._header_type(DOC_CATEGORY_RETURN)
+    def _red_header_type(self) -> Dict[str, Any]:
+        return self._header_type(DOC_CATEGORY_RED)
 
     def allocate_reversal_no(self, receipt_id: Any,
                              receipt_date: Optional[str] = None) -> str:
         """红字单取号（R-RC-8：必须在开事务前调用，供 BO Action 用）。"""
         header = self._require_header(receipt_id)
         date = receipt_date or header.get('receipt_date')
-        red_no = self.allocate_receipt_no(self._return_header_type()['id'], date)
+        red_no = self.allocate_receipt_no(self._red_header_type()['id'], date)
         if _blank(red_no):
             raise ReceiptError('缺少红字收货单类型或编号序列',
                                field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
@@ -1620,7 +1663,8 @@ class ReceiptService:
 
     def _validate_line(self, line: Dict[str, Any], order: Dict[str, Any],
                        doc_type: Dict[str, Any],
-                       for_post: bool = False) -> Dict[str, Any]:
+                       for_post: bool = False,
+                       is_return: bool = False) -> Dict[str, Any]:
         """R-RC-1 ~ R-RC-4 / R-RC-15 / R-RC-17 + 冗余列一致性。"""
         line = dict(line or {})
         source_type = 'purchase_order'
@@ -1666,6 +1710,10 @@ class ReceiptService:
             raise ReceiptError('收货数量必须大于 0', field_name='qty_received',
                                rule='RC_QTY_INVALID')
         rejected = _dec(line.get('qty_rejected') or 0, 'qty_rejected')
+        if is_return and rejected > 0:
+            raise ReceiptError('采购退货出库不允许拒收数量',
+                               field_name='qty_rejected',
+                               rule='RC_RETURN_REJECTED_NOT_ALLOWED')
         if rejected < 0 or rejected > received:
             raise ReceiptError('拒收数量须在 0 ~ 收货数量之间',
                                field_name='qty_rejected', rule='RC_QTY_INVALID')
@@ -2067,8 +2115,9 @@ class ReceiptService:
         if _blank(order_id):
             return None
         rows = self.ds.query(
-            'SELECT id, order_no, org_id, purchase_org_id, '
-            'purchase_legal_entity_id, supplier_party_id, '
+            'SELECT id, order_no, document_type_id, org_id, purchase_org_id, '
+            'purchase_legal_entity_id, supplier_party_id, origin_purchase_order_id, '
+            'origin_receipt_id, return_reason, '
             'project_id, deliver_to_location_id FROM %s WHERE id = ?' % ORDER_TABLE,
             [order_id])
         return rows[0] if rows else None
@@ -2080,6 +2129,105 @@ class ReceiptService:
             'SELECT id, order_id, item_id, uom_id FROM %s WHERE id = ?'
             % ORDER_LINE_TABLE, [line_id])
         return rows[0] if rows else None
+
+    # ------------------------------------------------------- 采购退货（D6）
+    def _order_category(self, order: Dict[str, Any]) -> Optional[str]:
+        """来源采购订单的 document_category（未绑定类型时按 standard）。"""
+        type_id = (order or {}).get('document_type_id')
+        if _blank(type_id):
+            return None
+        rows = self.ds.query(
+            'SELECT document_category FROM %s WHERE id = ?' % TYPE_TABLE,
+            [type_id])
+        if not rows:
+            return None
+        return (rows[0].get('document_category') or '').strip() or None
+
+    def _assert_category_consistency(self, order: Dict[str, Any],
+                                     doc_type: Dict[str, Any]) -> None:
+        """D13：收货单类别必须与来源采购订单类别一致（红字单除外）。"""
+        receipt_category = doc_type.get('document_category')
+        if receipt_category == DOC_CATEGORY_RED:
+            return
+        order_category = self._order_category(order) or DOC_CATEGORY_STANDARD
+        if order_category != receipt_category:
+            raise ReceiptError(
+                '收货单类别（%s）与来源采购订单类别（%s）不一致'
+                % (receipt_category, order_category),
+                field_name='document_type_id', rule='RC_CATEGORY_MISMATCH')
+
+    def _assert_return_limit(self, order: Dict[str, Any],
+                             line: Dict[str, Any], net: Decimal) -> None:
+        """D16：按原收货单 + 物料聚合，退货总量不得超过原净收量。"""
+        origin_receipt_id = (order or {}).get('origin_receipt_id')
+        item_id = line.get('item_id')
+        if _blank(origin_receipt_id) or _blank(item_id) or net <= 0:
+            return
+        original = self.ds.query(
+            'SELECT COALESCE(SUM(l.qty_received - l.qty_rejected), 0) AS qty '
+            'FROM %s l WHERE l.receipt_id = ? AND l.item_id = ? '
+            'AND l.status = ?' % LINE_TABLE,
+            [origin_receipt_id, item_id, STATUS_POSTED])
+        original_qty = _dec(original[0].get('qty') if original else 0)
+        used = self.ds.query(
+            'SELECT COALESCE(SUM(l.qty_received - l.qty_rejected), 0) AS qty '
+            'FROM %s l '
+            'JOIN %s r ON r.id = l.receipt_id '
+            'JOIN %s o ON o.id = r.source_doc_id '
+            "AND r.source_doc_type = 'purchase_order' "
+            'JOIN %s t ON t.id = r.document_type_id '
+            'WHERE o.origin_receipt_id = ? AND l.item_id = ? '
+            'AND r.status = ? AND t.document_category = ? AND r.id <> ?'
+            % (LINE_TABLE, HEADER_TABLE, ORDER_TABLE, TYPE_TABLE),
+            [origin_receipt_id, item_id, STATUS_POSTED, DOC_CATEGORY_RETURN,
+             line.get('receipt_id') or 0])
+        used_qty = _dec(used[0].get('qty') if used else 0)
+        if _q4(used_qty + net) > original_qty:
+            raise ReceiptError(
+                '退货数量超过原收货可退量（可退 %s，已退 %s，本单 %s）'
+                % (_q4(original_qty), _q4(used_qty), _q4(net)),
+                field_name='qty_received', rule='RC_RETURN_OVER_LIMIT')
+
+    def recompute_schedule_returned(self, schedule_id: Any,
+                                    now: Optional[str] = None) -> Decimal:
+        """按已过账退货行聚合重算 returned_qty（幂等，不做增量）。"""
+        if _blank(schedule_id):
+            return _q4(Decimal('0'))
+        rows = self.ds.query(
+            'SELECT COALESCE(SUM(l.qty_received - l.qty_rejected), 0) AS qty '
+            'FROM %s l '
+            'JOIN %s r ON r.id = l.receipt_id '
+            'JOIN %s t ON t.id = r.document_type_id '
+            'WHERE l.schedule_id = ? AND l.status = ? AND r.status = ? '
+            'AND t.document_category = ?'
+            % (LINE_TABLE, HEADER_TABLE, TYPE_TABLE),
+            [schedule_id, STATUS_POSTED, STATUS_POSTED, DOC_CATEGORY_RETURN])
+        value = _q4(_dec(rows[0].get('qty') if rows else 0))
+        self.ds.execute(
+            'UPDATE %s SET returned_qty = ?, updated_at = ? WHERE id = ?'
+            % SCHEDULE_TABLE, [float(value), now or _now(), schedule_id])
+        return value
+
+    def _serial_infra_ready(self) -> bool:
+        """序列号基础设施是否就绪（部分轻量替身库不含该域，直接 no-op）。"""
+        rows = self.ds.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
+            "('items', 'serial_numbers', 'serial_number_transactions', "
+            "'serial_number_links')")
+        return len(rows) == 4
+
+    def _precheck_receipt_return_serials(self, header: Dict[str, Any]) -> None:
+        if not self._serial_infra_ready():
+            return
+        from meta.services.serial_number_service import SerialNumberService
+        SerialNumberService(self.ds).precheck_receipt_return(header['id'])
+
+    def _register_receipt_return_serials(self, header: Dict[str, Any],
+                                         txns: Dict[int, Any]) -> None:
+        if not self._serial_infra_ready():
+            return
+        from meta.services.serial_number_service import SerialNumberService
+        SerialNumberService(self.ds).register_receipt_return(header['id'], txns)
 
     def _load_transfer_order(self, transfer_order_id: Any) -> Optional[Dict[str, Any]]:
         if _blank(transfer_order_id):

@@ -9,7 +9,8 @@
 #   ② 业务键 receipt_no，按 document_type.number_sequence_id 取号（R-RC-8：
 #      取号在开事务之前完成），生成后不可改，允许跳号。
 #   ③ 单据类型由切面 document_type_aspect 提供；头类型
-#      scope_bo='receipt' + level='header'；document_category ∈ {standard, return}。
+#      scope_bo='receipt' + level='header'；document_category ∈ {standard, return, red}。
+#      standard = 正向收货；return = 采购退货出库（独立过账）；red = 红字纠错（不独立过账）。
 #   ④ 状态机 draft → posted → reversed / cancelled（采购以「过账」为核心事件）。
 #   ⑤ 收货不落金额（D-RC-9）；金额以 PO 快照 + 发票为准。
 #   ⑥ 收货写需求分配（target_bo='receipt'），这是与销售侧唯一的结构性差异（M11）。
@@ -21,7 +22,7 @@
 #
 # 服务层不变量（R-RC-0 ~ R-RC-18，由 receipt_guard_service / receipt_service 强制）:
 #   R-RC-0  document_type_id 须 scope_bo='receipt' + level='header'；
-#           document_category='return' 时 reversal_of_receipt_id 必填
+#           document_category='red' 时 reversal_of_receipt_id 必填
 #   R-RC-1  PO 来源行 schedule_id 必填，计划行 schedule_kind ∈ {delivery, service}、
 #           状态 ∈ {planned, confirmed}；已短收结案的计划行禁止再收（R-RC-17）
 #   R-RC-3  qty_received > 0；0 <= qty_rejected <= qty_received
@@ -82,6 +83,18 @@ audit:
   dissociate:
     enabled: true
 
+# 业务动作（非状态迁移）：D6 采购退货入口，仅 posted 收货单可用。
+actions:
+  - id: receipt_create_vendor_return
+    name: 生成采购退货
+    type: action
+    method: POST
+    path: "/api/v1/receipts/{id}/create-vendor-return"
+    description: "按已过账收货行生成退货采购订单与退货出库收货草稿（from_states: posted）"
+    action_ref: receipt.create_vendor_return
+    authorization:
+      permission: receipt:receipt_create_vendor_return
+
 fields:
   - id: id
     name: ID
@@ -115,7 +128,7 @@ fields:
 
   # 单据类型由切面 document_type_aspect 提供（T-D20）：
   # 字段 document_type_id → type_definitions 的 header 行，承载编号 / 打印 / 权限等
-  # 治理语义；方向由 document_category（standard / return）表达。
+  # 治理语义；方向由 document_category（standard / return / red）表达。
 
   - id: receipt_date
     name: 收货日期
@@ -540,7 +553,7 @@ fields:
     type: integer
     db_column: reversal_of_receipt_id
     nullable: true
-    description: 红字收货单指向的原收货单（document_category='return' 时必填）
+    description: 红字收货单指向的原收货单（document_category='red' 时必填）
     semantics:
       meaning: 被冲销的原收货单
       display:
@@ -552,6 +565,31 @@ fields:
       relation: receipt
       multiple: false
       clearable: true
+
+  # 退货出库去向（D6）：本期仅 supplier，预留 receiving（退到收货区待检）
+  - id: return_to
+    name: 退货去向
+    type: string
+    db_column: return_to
+    nullable: true
+    default: supplier
+    max_length: 20
+    description: 采购退货出库的去向（仅 document_category='return' 时有意义）
+    enum_values:
+      - value: supplier
+        label: 退回供应商
+        color: warning
+        category: active
+        is_initial: true
+      - value: receiving
+        label: 退回收货区
+        color: info
+        category: active
+    semantics:
+      meaning: 退货去向
+      data_category: code
+    ui:
+      widget: select
 
   - id: reversed_at
     name: 被冲销时间
@@ -620,7 +658,7 @@ doc_effect:
       primitive: edge_compensate_by_source
       args:
         source_bo: receipt_line
-        rule_ids: [receipt_line_to_inventory_txn]
+        rule_ids: [receipt_line_to_inventory_txn, receipt_line_to_return_out_txn]
         source_ids: "{reversal.doc.line_ids}"
         ref: "{reversal.doc.id}"
       on_missing: skip
@@ -642,6 +680,10 @@ doc_effect:
       primitive: reverse_schedule_received
       args:
         items: "{reversal.doc.schedules}"
+    - id: schedule_returned
+      primitive: recompute_schedule_returned
+      args:
+        items: "{reversal.doc.returned_schedules}"
     - id: fulfillment
       primitive: recompute_purchase_fulfillment
       args:

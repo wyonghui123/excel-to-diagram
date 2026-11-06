@@ -38,7 +38,8 @@ view_definition: |
     COALESCE(e.target_item, '') AS target_line_id,
     e.quantity AS qty,
     CASE
-      WHEN e.rule_id = 'shipment_line_to_return_in_txn'
+      WHEN e.rule_id IN ('shipment_line_to_return_in_txn',
+                         'receipt_line_to_return_out_txn')
         THEN CASE WHEN e.quantity_sign = 'red' THEN e.quantity ELSE -e.quantity END
       ELSE CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END
     END AS signed_qty,

@@ -10,6 +10,7 @@ SCHEMA = """
 CREATE TABLE purchase_orders (
     id INTEGER PRIMARY KEY,
     order_no TEXT,
+    document_type_id INTEGER,
     org_id INTEGER,
     purchase_org_id INTEGER,
     purchase_legal_entity_id INTEGER,
@@ -17,6 +18,9 @@ CREATE TABLE purchase_orders (
     project_id INTEGER,
     deliver_to_location_id INTEGER,
     status TEXT,
+    origin_purchase_order_id INTEGER,
+    origin_receipt_id INTEGER,
+    return_reason TEXT,
     fulfillment_status TEXT DEFAULT 'not_started',
     fulfillment_derived_at TEXT,
     updated_at TEXT
@@ -42,6 +46,7 @@ CREATE TABLE purchase_order_schedules (
     promised_qty REAL,
     received_qty REAL DEFAULT 0,
     rejected_qty REAL DEFAULT 0,
+    returned_qty REAL DEFAULT 0,
     completion_source TEXT,
     completion_prev_status TEXT,
     status TEXT,
@@ -84,6 +89,7 @@ CREATE TABLE receipts (
     received_by TEXT,
     status TEXT,
     reversal_of_receipt_id INTEGER,
+    return_to TEXT DEFAULT 'supplier',
     remark TEXT,
     created_at TEXT,
     updated_at TEXT,
@@ -231,11 +237,19 @@ def build_db():
 
 
 def add_types(conn, delivered_seq=1, return_seq=1):
-    """收货头类型（standard / return 共用一条 RCV 序列）+ PO 行类型。"""
+    """收货头类型（standard / red 共用 RCV 序列）+ 采购退货类型 + PO 行类型。"""
     conn.execute(
         'INSERT INTO number_sequences (id, code, pattern, scope_fields, '
         "date_field, start_value, on_exhaust) VALUES (1, 'RCV', "
         "'RCV-{DATE:yyyymm}-{SEQ:6}', NULL, 'receipt_date', 1, 'error')")
+    conn.execute(
+        'INSERT INTO number_sequences (id, code, pattern, scope_fields, '
+        "date_field, start_value, on_exhaust) VALUES (2, 'RPO', "
+        "'RPO-{DATE:yyyymm}-{SEQ:6}', NULL, 'order_date', 1, 'error')")
+    conn.execute(
+        'INSERT INTO number_sequences (id, code, pattern, scope_fields, '
+        "date_field, start_value, on_exhaust) VALUES (3, 'RTV', "
+        "'RTV-{DATE:yyyymm}-{SEQ:6}', NULL, 'receipt_date', 1, 'error')")
     conn.execute(
         'INSERT INTO type_definitions (id, code, scope_bo, level, '
         'document_category, delivery_relevant, number_sequence_id) '
@@ -243,7 +257,15 @@ def add_types(conn, delivered_seq=1, return_seq=1):
     conn.execute(
         'INSERT INTO type_definitions (id, code, scope_bo, level, '
         'document_category, delivery_relevant, number_sequence_id) '
-        "VALUES (2, 'RCV_RETURN', 'receipt', 'header', 'return', NULL, 1)")
+        "VALUES (2, 'RCV_RETURN', 'receipt', 'header', 'red', NULL, 1)")
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, scope_bo, level, '
+        'document_category, delivery_relevant, number_sequence_id) '
+        "VALUES (3, 'RETURN_PO', 'purchase_order', 'header', 'return', NULL, 2)")
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, scope_bo, level, '
+        'document_category, delivery_relevant, number_sequence_id) '
+        "VALUES (4, 'VENDOR_RETURN', 'receipt', 'header', 'return', NULL, 3)")
     conn.execute(
         'INSERT INTO type_definitions (id, code, scope_bo, level, '
         'document_category, delivery_relevant, number_sequence_id) '
@@ -252,14 +274,19 @@ def add_types(conn, delivered_seq=1, return_seq=1):
 
 def add_order(conn, oid=1, order_no='PO-0001', org_id=1, purchase_org_id=1,
               supplier_party_id=500, project_id=None, deliver_to_location_id=7,
-              status='confirmed', purchase_legal_entity_id=None):
+              status='confirmed', purchase_legal_entity_id=None,
+              document_type_id=None, origin_purchase_order_id=None,
+              origin_receipt_id=None, return_reason=None):
     conn.execute(
-        'INSERT INTO purchase_orders (id, order_no, org_id, purchase_org_id, '
-        'purchase_legal_entity_id, supplier_party_id, project_id, '
-        'deliver_to_location_id, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [oid, order_no, org_id, purchase_org_id, purchase_legal_entity_id,
-         supplier_party_id, project_id, deliver_to_location_id, status])
+        'INSERT INTO purchase_orders (id, order_no, document_type_id, org_id, '
+        'purchase_org_id, purchase_legal_entity_id, supplier_party_id, project_id, '
+        'deliver_to_location_id, status, origin_purchase_order_id, '
+        'origin_receipt_id, return_reason) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [oid, order_no, document_type_id, org_id, purchase_org_id,
+         purchase_legal_entity_id, supplier_party_id, project_id,
+         deliver_to_location_id, status, origin_purchase_order_id,
+         origin_receipt_id, return_reason])
 
 
 def add_order_line(conn, lid=100, oid=1, item_id=900, uom_id=3, qty=100.0,
