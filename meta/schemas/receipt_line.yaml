@@ -189,6 +189,21 @@ fields:
         type: association
         target_type: purchase_order
         display_field: order_no
+      # [P1-5 2026-11-06] 派生事实声明试点：真源 = 计划行的 order_id。
+      # 审计器按 source_field=schedule_id 单跳 JOIN purchase_order_schedules 比对；
+      # 非 PO 来源（schedule_id 指向其他计划表）LEFT JOIN 为空，自动跳过不误报。
+      redundancy:
+        type: stored
+        source_field: schedule_id
+        derived_from: purchase_order_schedule.order_id
+        join_path:
+        - table: purchase_order_schedules
+          from: schedule_id
+          to: id
+          select: order_id
+        consistency:
+          strategy: sync_on_write
+          repair_strategy: recompute
     ui:
       widget: select
       relation: purchase_order
@@ -206,6 +221,19 @@ fields:
         type: association
         target_type: purchase_order_line
         display_field: line_no
+      # [P1-5 2026-11-06] 派生事实声明试点：真源 = 计划行的 line_id（订单行真外键）
+      redundancy:
+        type: stored
+        source_field: schedule_id
+        derived_from: purchase_order_schedule.line_id
+        join_path:
+        - table: purchase_order_schedules
+          from: schedule_id
+          to: id
+          select: line_id
+        consistency:
+          strategy: sync_on_write
+          repair_strategy: recompute
     ui:
       widget: select
       relation: purchase_order_line
