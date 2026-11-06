@@ -13,6 +13,7 @@
 停用 / 已废弃的属性不再接受新增写入（历史值仍可读）。
 """
 
+import importlib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,13 @@ class AttributeValueService:
     VALUE_TABLE = 'party_attribute_values'
     OWNER_FIELD = 'party_id'
 
+    #: 对象 → 专用服务类（延迟导入，避免与 batch 服务循环依赖）。
+    #: 专用类承载额外业务校验（如 item 只允许平台层定义、batch 的列互斥）。
+    _SPECIALIZED = {
+        'item': ('meta.services.attribute_value_service', 'ItemAttributeValueService'),
+        'batch': ('meta.services.batch_attribute_value_service', 'BatchAttributeValueService'),
+    }
+
     def __init__(self, data_source, value_table: Optional[str] = None,
                  owner_field: Optional[str] = None):
         self.ds = data_source
@@ -56,6 +64,27 @@ class AttributeValueService:
             self.VALUE_TABLE = value_table
         if owner_field:
             self.OWNER_FIELD = owner_field
+
+    @classmethod
+    def for_object(cls, object_type: str, data_source):
+        """[T3.1] 按对象派生值服务，取代「每个对象硬编码一张值表」。
+
+        命名约定（与 party / item / batch 三张现存表一致）：
+          value_table = `<object_type>_attribute_values`
+          owner_field = `<object_type>_id`
+        以对象 id（单数）为基准而非 table_name：`parties` 去复数会得到
+        `partie`，只有对象 id 才是稳定单数。
+
+        有专用子类的对象（item / batch）返回子类实例，其余返回基类实例。
+        新对象要接扩展属性，只需建一张符合约定的值表，无需改本文件。
+        """
+        module_path, class_name = cls._SPECIALIZED.get(object_type, ('', ''))
+        if module_path:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)(data_source)
+        return cls(data_source,
+                   value_table=f'{object_type}_attribute_values',
+                   owner_field=f'{object_type}_id')
 
     # ---------- 写入校验 ----------
 
