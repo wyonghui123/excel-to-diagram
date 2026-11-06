@@ -255,6 +255,9 @@ class InventoryAdjustmentService:
 
     def reverse(self, adjustment_id: Any,
                 user_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """红冲：委托 ReversalOrchestrator（红字单由声明的创建器生成）。"""
+        from meta.core.reversal_orchestrator import ReversalError, execute
+
         header = self._load(adjustment_id)
         if header['status'] == STATUS_REVERSED:
             raise InventoryError(INV_ALREADY_REVERSED, '调整单已红冲',
@@ -266,89 +269,79 @@ class InventoryAdjustmentService:
                 {'adjustment_id': adjustment_id,
                  'status': header['status']})
 
-        original_event = self._original_event_key(header)
-        existing_reversal = self._reversal_exists(header['adjustment_no'])
-        if existing_reversal:
-            with self.ds.transaction():
-                self.ds.execute(
-                    'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
-                    % ADJ_TABLE,
-                    [STATUS_REVERSED, _now(), header['id']])
-            return {'adjustment_id': header['id'],
-                    'adjustment_no': header['adjustment_no'],
-                    'status': STATUS_REVERSED, 'created': 0,
-                    'reversal_adjustment_id': None,
-                    'reversal_adjustment_no': None}
+        try:
+            outcome = execute(
+                self.ds, schema_id='inventory_adjustment',
+                doc_id=header['id'],
+                reason='红冲 %s' % header['adjustment_no'],
+                user_info=user_info)
+        except ReversalError as error:
+            raise self._map_reversal_error(error, header) from error
 
-        tx_rows = self.ds.query(
-            'SELECT id FROM %s WHERE source_event_key = ?' % TX_TABLE,
-            [original_event])
-        tx_ids = [row['id'] for row in tx_rows]
-        if not tx_ids:
-            raise InventoryError(
-                INV_ADJ_NO_TRANSACTIONS, '原调整单没有可红冲的库存事务',
-                {'adjustment_id': adjustment_id,
-                 'source_event_key': original_event})
+        document = outcome.document or {}
+        inventory = outcome.faces.get('inventory') or {}
+        logger.info('[inventory-adjustment] reverse id=%s -> %s created=%s',
+                    header['id'], document.get('no'),
+                    inventory.get('created'))
+        return {'adjustment_id': header['id'],
+                'adjustment_no': header['adjustment_no'],
+                'status': STATUS_REVERSED,
+                'created': int(inventory.get('created') or 0),
+                'reversal_adjustment_id': document.get('id'),
+                'reversal_adjustment_no': document.get('no')}
+
+    @staticmethod
+    def _map_reversal_error(error, header: Dict[str, Any]) -> 'InventoryError':
+        """平台错误码 → 调整单既有错误码（前端契约不变）。"""
+        details = {'adjustment_id': header['id'], 'status': header['status']}
+        if error.code == 'REVERSAL_STATE_INVALID':
+            return InventoryError(INV_ADJ_STATE_INVALID, error.message, details)
+        if error.code == 'REVERSAL_FACT_MISSING':
+            return InventoryError(INV_ADJ_NO_TRANSACTIONS, error.message,
+                                  details)
+        return InventoryError(error.code, error.message, details)
+
+    def create_reversal_document(self, adjustment_id: Any,
+                                 user_info: Optional[Dict[str, Any]] = None
+                                 ) -> Dict[str, Any]:
+        """创建红字镜像调整单（幂等：已有 REVERSAL 事实则 replay）。
+
+        供 ReversalOrchestrator 的 ``reversal.create_document`` 声明调用；
+        必须在编排器事务内执行（行复制与单据头同事务）。
+        """
+        header = self._load(adjustment_id)
+        result = {
+            'id': None, 'no': None, 'replay': False,
+            'event_key': self._original_event_key(header),
+            'reversal_event_key': 'reversal:%s' % header['adjustment_no'],
+            'created_by': _user_name(user_info),
+        }
+        if self._reversal_exists(header['adjustment_no']):
+            result['replay'] = True
+            return result
 
         lines = self._load_lines(adjustment_id)
         reversal_no = next_document_no(
             self.ds, 'ADJ', _today(), 'ADJ-{DATE:yyyymm}-{SEQ:6}')
         now = _now()
-        with self.ds.transaction():
-            cur = self.ds.execute(
-                'INSERT INTO %s (adjustment_no, adjustment_type, status, '
-                'org_id, location_id, reason_code, reason_text, '
-                'posting_date, source_count_id, reversal_of_adjustment_id, '
-                'created_by, created_at, posted_by, posted_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-                % ADJ_TABLE,
-                [reversal_no, header['adjustment_type'], STATUS_POSTED,
-                 header['org_id'], header.get('location_id'),
-                 header.get('reason_code'),
-                 '红冲 %s' % header['adjustment_no'],
-                 _today(), header.get('source_count_id'), header['id'],
-                 _user_name(user_info), now, _user_name(user_info), now, now])
-            reversal_id = cur.lastrowid
-            swap_status = header['adjustment_type'] == TYPE_STATUS_TRANSFER
-            for line in lines:
-                self._insert_line_from(reversal_id, line,
-                                       swap_status=swap_status)
-            result = self.posting.reverse(
-                tx_ids,
-                {
-                    'source_doc_type': 'inventory_adjustment',
-                    'source_doc_id': reversal_id,
-                    'source_doc_no': reversal_no,
-                    'source_event_key': 'reversal:%s'
-                                        % header['adjustment_no'],
-                    'transaction_date': _today(),
-                    'created_by': _user_name(user_info),
-                },
-                allow_blocked_batch=True)
-            if self._serial_ready():
-                from meta.services.serial_number_service import (
-                    SerialNumberError, SerialNumberService)
-                serial_service = SerialNumberService(self.ds)
-                for tx_id in tx_ids:
-                    try:
-                        serial_service.reverse_serial_event(tx_id)
-                    except SerialNumberError as error:
-                        logger.warning(
-                            '[inventory-adjustment] 序列号反冲跳过 tx=%s: %s',
-                            tx_id, error)
-            self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
-                % ADJ_TABLE,
-                [STATUS_REVERSED, _now(), header['id']])
-
-        logger.info('[inventory-adjustment] reverse id=%s -> %s created=%s',
-                    header['id'], reversal_no, result.get('created'))
-        return {'adjustment_id': header['id'],
-                'adjustment_no': header['adjustment_no'],
-                'status': STATUS_REVERSED,
-                'created': result.get('created', 0),
-                'reversal_adjustment_id': reversal_id,
-                'reversal_adjustment_no': reversal_no}
+        cur = self.ds.execute(
+            'INSERT INTO %s (adjustment_no, adjustment_type, status, '
+            'org_id, location_id, reason_code, reason_text, '
+            'posting_date, source_count_id, reversal_of_adjustment_id, '
+            'created_by, created_at, posted_by, posted_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            % ADJ_TABLE,
+            [reversal_no, header['adjustment_type'], STATUS_POSTED,
+             header['org_id'], header.get('location_id'),
+             header.get('reason_code'), '红冲 %s' % header['adjustment_no'],
+             _today(), header.get('source_count_id'), header['id'],
+             _user_name(user_info), now, _user_name(user_info), now, now])
+        reversal_id = cur.lastrowid
+        swap_status = header['adjustment_type'] == TYPE_STATUS_TRANSFER
+        for line in lines:
+            self._insert_line_from(reversal_id, line, swap_status=swap_status)
+        result.update({'id': reversal_id, 'no': reversal_no})
+        return result
 
     def cancel(self, adjustment_id: Any,
                user_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

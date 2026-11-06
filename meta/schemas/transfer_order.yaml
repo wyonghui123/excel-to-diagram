@@ -129,7 +129,7 @@ fields:
     required: true
     default: draft
     max_length: 20
-    description: 单据状态（草稿 / 已下达 / 已关闭 / 已取消）
+    description: 单据状态（草稿 / 已下达 / 已关闭 / 已取消 / 已红冲）
     enum_values:
       - value: draft
         label: 草稿
@@ -146,6 +146,10 @@ fields:
         category: inactive
       - value: cancelled
         label: 已取消
+        color: danger
+        category: inactive
+      - value: reversed
+        label: 已红冲
         color: danger
         category: inactive
     semantics:
@@ -740,3 +744,64 @@ ui_view_config:
       enableDetail: true
       enableAutoCrud: true
       rowMutability: fullEditable
+
+# 调拨发货红冲：原地红冲发货事实（released → reversed），不新建反向调拨单
+rules:
+  - id: reverse_transfer_shipment
+    name: 调拨发货红冲
+    type: state_transition
+    state_field: status
+    from_states: [released]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 发货红冲
+      icon: undo
+      confirm_message: "红冲将回退本次发货的库存 / 序列号 / 容器 / 单据流事实，仅用于数据错误；已收货请使用反向调拨。确定红冲吗？"
+
+doc_effect:
+  faces:
+    - id: inventory_ship
+      primitive: inventory_reverse_by_source
+      args:
+        source_doc_type: transfer_order
+        source_doc_id: "{id}"
+        remark: "调拨单 {id} 发货冲销"
+      on_missing: skip
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory_ship.source_txn_ids}"
+      on_missing: skip
+    - id: hu
+      primitive: hu_reverse_document
+      args:
+        doc_type: transfer_order
+        doc_id: "{id}"
+      on_missing: skip
+    - id: doc_flow
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: transfer_order_line
+        rule_ids: [transfer_order_line_to_issue_txn]
+        ref: "{id}"
+        derived_by: transfer_order_reverse
+      on_missing: skip
+    - id: lines
+      primitive: transfer_reverse_lines
+      args:
+        doc_id: "{id}"
+        now: "{now}"
+      on_missing: skip
+  projections:
+    - id: fulfillment
+      primitive: recompute_transfer_fulfillment
+      args:
+        doc_id: "{id}"
+  reversal:
+    from_states: [released]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    write_audit_fields:
+      updated_at: "{now}"

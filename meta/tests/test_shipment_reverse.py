@@ -377,3 +377,25 @@ def test_reversed_delivery_cannot_receive_or_reship():
         svc.receive(created['id'])
     with pytest.raises(ShipmentError):
         svc.ship_confirm(created['id'])
+
+
+def test_reverse_goes_through_reversal_orchestrator(monkeypatch):
+    """D4：交货红冲必须经 ReversalOrchestrator（声明式写面 + 方向分支）。"""
+    from meta.core import reversal_orchestrator
+
+    conn = _db()
+    inv.enable_posting(conn, True)
+    _seed_balance(conn, 100.0)
+    svc, created, _result = _ship(conn, qty=10.0)
+
+    seen = []
+    real_execute = reversal_orchestrator.execute
+
+    def spy(ds, **kwargs):
+        seen.append((kwargs.get('schema_id'), kwargs.get('params')))
+        return real_execute(ds, **kwargs)
+
+    monkeypatch.setattr(reversal_orchestrator, 'execute', spy)
+    svc.reverse(created['id'], reason='数据错误')
+
+    assert seen == [('shipment', {'direction': 'standard', 'line_ids': [1]})]

@@ -35,6 +35,8 @@ from meta.core.models_ui_config import (
     UIDetailViewConfig, UIFormColumn, UIFormSection, UIFormViewConfig,
     UIFilterDefinition, UIFilterViewConfig, ChangeEventConfig,
     WebhookConfig, ChangeNotificationConfig, UIViewConfig,
+    UIReportConfig, UIReportFilterConfig, UIReportKpiConfig,
+    UIReportChartConfig, UIReportTableConfig, UIReportDrilldownConfig,
 )
 
 
@@ -1089,6 +1091,10 @@ class MetaObject:
 
     # ── 新增：上下文配置 ──
     context: Optional[Dict[str, Any]] = None
+
+    # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）；
+    # 空 = 未声明逆向能力（编排器拒绝，D8）
+    doc_effect: Dict[str, Any] = field(default_factory=dict)
 
     # ── 新增：级联选择配置 ──
     cascade_select: Optional[List[Dict[str, Any]]] = None

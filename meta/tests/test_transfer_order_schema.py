@@ -116,7 +116,7 @@ def test_header_fields_complete(transfer_doc):
 def test_header_status_enum(transfer_doc):
     field = _fields(transfer_doc)['status']
     assert {item['value'] for item in field['enum_values']} == {
-        'draft', 'released', 'closed', 'cancelled'}
+        'draft', 'released', 'closed', 'cancelled', 'reversed'}
     assert field['default'] == 'draft'
 
 

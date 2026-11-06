@@ -514,6 +514,96 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# 逆向能力声明（Reversal Platform D4）：正向写面清单 + 逆向过渡条件。
+# 交货红冲由 ReversalOrchestrator 统一持事务执行；方向由服务按
+# document_category 透传（standard / return），退货入库走 return 分支，
+# 序列号 / HU / 预留只在出库方向产生，故按方向条件启用。
+# 规格：docs/specs/spec-reversal-platform-2026-11-06.md §12 D4。
+doc_effect:
+  posting:
+    direction_field: document_category
+  faces:
+    - id: inventory_standard
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "shipment:{id}:ship"
+        new_event_key: "shipment:{id}:ship_reverse"
+        source_doc_id: "{id}"
+        remark: "交货单 {id} 出库冲销"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: inventory_return
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "shipment:{id}:return"
+        new_event_key: "shipment:{id}:return_reverse"
+        source_doc_id: "{id}"
+        remark: "交货单 {id} 退货入库冲销"
+      enabled_when: "direction == 'return'"
+      on_missing: skip
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory_standard.source_txn_ids}"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: hu
+      primitive: hu_reverse_document
+      args:
+        doc_type: shipment
+        doc_id: "{id}"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: reservation
+      primitive: reservation_unfulfill_by_shipment
+      args:
+        doc_id: "{id}"
+        demand_type: sales_order_line
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: doc_flow_standard
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: shipment_line
+        rule_ids: [shipment_line_to_issue_txn]
+        ref: "{id}"
+        derived_by: shipment_reverse
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: doc_flow_return
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: shipment_line
+        rule_ids: [shipment_line_to_return_in_txn]
+        ref: "{id}"
+        derived_by: shipment_reverse
+      enabled_when: "direction == 'return'"
+      on_missing: skip
+    - id: lines
+      primitive: shipment_reverse_lines
+      args:
+        doc_id: "{id}"
+        now: "{now}"
+      on_missing: skip
+  projections:
+    - id: schedule
+      primitive: recompute_schedule_delivered
+      args:
+        doc_id: "{id}"
+    - id: fulfillment
+      primitive: recompute_fulfillment
+      args:
+        order_id: "{order_id}"
+  reversal:
+    from_states: [shipped, delivered]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    write_audit_fields:
+      reversed_at: "{now}"
+      reversal_reason: "{reason}"
+      updated_at: "{now}"
+
 # 状态机（B1）：draft → released → staged → shipped → delivered → closed；
 # shipped 之前可 cancelled；shipped / delivered 可 reversed（仅数据错误红冲）。
 # 迁移由平台状态接口按 PUT status 执行；带跨表副作用的四段

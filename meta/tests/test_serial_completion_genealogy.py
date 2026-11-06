@@ -94,7 +94,6 @@ def _service(conn) -> ReceiptService:
     service = ReceiptService(MemDS(conn))
     # 库存数量事务由 inventory 测试覆盖，这里只验证序列号钩子
     service._post_receipt_inventory = lambda *args, **kwargs: None
-    service._reverse_receipt_inventory = lambda *args, **kwargs: None
     return service
 
 

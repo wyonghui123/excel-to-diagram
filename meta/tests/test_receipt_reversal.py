@@ -165,3 +165,24 @@ def test_reverse_requires_positive_net_lines():
         _svc(conn).reverse(original['id'])
     assert exc.value.rule == 'RC_REVERSAL_INVALID'
     assert exc.value.field_name == 'lines'
+
+
+def test_reverse_goes_through_reversal_orchestrator(monkeypatch):
+    """D3：收货红冲必须经 ReversalOrchestrator（声明式写面 + 红字单创建器）。"""
+    from meta.core import reversal_orchestrator
+
+    conn = seeded_db()
+    original = _posted(conn)
+
+    seen = []
+    real_execute = reversal_orchestrator.execute
+
+    def spy(ds, **kwargs):
+        seen.append((kwargs.get('schema_id'), kwargs.get('doc_id')))
+        return real_execute(ds, **kwargs)
+
+    monkeypatch.setattr(reversal_orchestrator, 'execute', spy)
+    result = _svc(conn).reverse(original['id'])
+
+    assert seen == [('receipt', original['id'])]
+    assert result['reversal_receipt_id']

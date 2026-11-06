@@ -598,6 +598,65 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# 逆向能力声明（Reversal Platform D3）：正向写面清单 + 逆向过渡条件。
+# 收货红冲 = 红字单（reversal.create_document）+ 库存/边/HU/完工序列号回退 +
+# 计划行与 PO 履约投影；由 ReversalOrchestrator 统一持有事务执行。
+# 规格：docs/specs/spec-reversal-platform-2026-11-06.md §12 D3。
+doc_effect:
+  posting:
+    event_key: "receipt:{id}:post"
+  faces:
+    - id: inventory
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "{posting.event_key}"
+        new_event_key: "receipt:{id}:reverse"
+        source_doc_id: "{id}"
+        source_doc_no: "{receipt_no}"
+        transaction_date: "{reversal.doc.transaction_date}"
+        remark: "收货单 {receipt_no} 红冲"
+      on_missing: skip
+    - id: doc_flow
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: receipt_line
+        rule_ids: [receipt_line_to_inventory_txn]
+        source_ids: "{reversal.doc.line_ids}"
+        ref: "{reversal.doc.id}"
+      on_missing: skip
+    - id: hu
+      primitive: hu_reverse_document
+      args:
+        doc_type: receipt
+        doc_id: "{id}"
+      on_missing: skip
+    - id: serial_completion
+      primitive: serial_reverse_completion
+      args:
+        work_order_id: "{source_doc_id}"
+        receipt_id: "{id}"
+      enabled_when: "source_doc_type == 'work_order'"
+      on_missing: skip
+  projections:
+    - id: schedule
+      primitive: reverse_schedule_received
+      args:
+        items: "{reversal.doc.schedules}"
+    - id: fulfillment
+      primitive: recompute_purchase_fulfillment
+      args:
+        order_ids: "{reversal.doc.order_ids}"
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: receipt_red_letter
+    write_audit_fields:
+      reversed_at: "{now}"
+      updated_at: "{now}"
+
 # 状态机（spec §5.1）：draft → posted → reversed；draft 可 cancelled。
 # 三段均带跨表副作用，由 receipt_service 执行（receipt_guard_interceptor 委托），
 # 不走裸 PUT status（避免绕过计划行回写与分配拆分）。

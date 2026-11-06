@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """调拨单 BO Action（spec-transfer-order-object-model §6 / §7）。
 
-注册于 `meta/services/bo_action_registrations.py`，共 9 个：
+注册于 `meta/services/bo_action_registrations.py`，共 10 个：
 
   · `transfer_order.release`  —— 草稿 → 已下达
   · `transfer_order.ship`     —— 已下达 → 累计发货（不建发货单 / 不碰库存）
@@ -12,6 +12,7 @@
   · `transfer_order.withdraw` —— 审批中 → 撤回审批
   · `transfer_order.approve`  —— 审批中 → 审批通过
   · `transfer_order.reject`   —— 审批中 → 审批驳回
+  · `transfer_order.reverse_shipment` —— 已下达且已发货 → 发货事实原地红冲
 
 口径：
   · 守卫校验（`TransferOrderGuardService`）与业务写入（`TransferOrderService`）
@@ -186,6 +187,27 @@ def close_handler(params: Dict[str, Any], context=None) -> Dict[str, Any]:
         return _fail(e.message, e.rule or 'TO_CLOSE_FAILED')
 
     return _ok(result, '调拨单 %s 已关闭' % result.get('id'))
+
+
+def reverse_shipment_handler(params: Dict[str, Any],
+                             context=None) -> Dict[str, Any]:
+    """BO Action：`transfer_order.reverse_shipment`（released → reversed）。
+
+    原地红冲全部发货事实；事务由 ReversalOrchestrator 自持，此处不再包事务。
+    """
+    _set_user_context()
+    transfer_order_id = _transfer_order_id(params)
+    if _blank(transfer_order_id):
+        return _fail('缺少 transfer_order_id', 'INVALID_ARGUMENT')
+    reason = params.get('reason') or params.get('remark') or ''
+
+    try:
+        result = TransferOrderService().reverse_shipment(
+            transfer_order_id, reason=reason)
+    except TransferOrderError as e:
+        return _fail(e.message, e.rule or 'TO_REVERSE_FAILED')
+
+    return _ok(result, '调拨单 %s 已红冲发货' % result.get('id'))
 
 
 def submit_handler(params: Dict[str, Any], context=None) -> Dict[str, Any]:

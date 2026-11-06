@@ -353,6 +353,36 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# [Reversal Platform D2 2026-11-06] 逆向写面声明（规格 §7）
+# 正向写面仅库存事务；序列号随原分录回退。红字镜像单由声明创建器生成，
+# 由 ReversalOrchestrator 统一编排（事务 / 倒序 / 幂等 / 状态推进）。
+doc_effect:
+  faces:
+    - id: inventory
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "{reversal.doc.event_key}"
+        new_event_key: "{reversal.doc.reversal_event_key}"
+        source_doc_id: "{reversal.doc.id}"
+        source_doc_no: "{reversal.doc.no}"
+        created_by: "{reversal.doc.created_by}"
+        allow_blocked_batch: true
+      on_missing: strict
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory.source_txn_ids}"
+      on_missing: skip
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: inventory_adjustment_red_letter
+    write_audit_fields:
+      updated_at: "{now}"
+
 rules:
   - id: release_inventory_adjustment
     name: 下达调整单

@@ -689,40 +689,110 @@ class ReceiptService:
     def reverse(self, receipt_id: Any, receipt_date: Optional[str] = None,
                 receipt_no: Optional[str] = None,
                 remark: Optional[str] = None) -> Dict[str, Any]:
-        """整单红冲：新建红字单并自动过账（§7）。
+        """整单红冲：由 ReversalOrchestrator 按 receipt.yaml 声明执行（D3）。
 
-        调用前须确保不在事务中（取号 R-RC-8）；红字单过账与原单置位在同一事务内
-        由调用方提交。净量为 0 的行（全部拒收）不产生红字行：拒收是独立事实，
-        不属于净收冲销范围。
+        调用前须确保不在事务中（取号 R-RC-8）；红字单过账、写面回退与原单置位
+        在同一事务内由编排器持有（外层事务嵌套时透传）。
         """
         header = self._require_header(receipt_id)
         if header['status'] != STATUS_POSTED:
             raise ReceiptError('仅已过账收货单可冲销', field_name='status',
                                rule='RC_STATE_INVALID')
-        if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
-            return self._reverse_transfer_order(
-                header, receipt_date, receipt_no, remark)
-        if header.get('source_doc_type') == SOURCE_WORK_ORDER:
-            return self._reverse_work_order(
-                header, receipt_date, receipt_no, remark)
-        original_type = self._require_document_type(header.get('document_type_id'))
-        if original_type['document_category'] == DOC_CATEGORY_RETURN:
-            raise ReceiptError('红字收货单不可再冲销', field_name='status',
-                               rule='RC_REVERSAL_INVALID')
+        source_type = header.get('source_doc_type')
+        if source_type not in (SOURCE_TRANSFER_ORDER, SOURCE_WORK_ORDER):
+            original_type = self._require_document_type(
+                header.get('document_type_id'))
+            if original_type['document_category'] == DOC_CATEGORY_RETURN:
+                raise ReceiptError('红字收货单不可再冲销', field_name='status',
+                                   rule='RC_REVERSAL_INVALID')
         if self._reversal_exists(header['id']):
             raise ReceiptError('该收货单已存在红字单，禁止重复冲销',
                                field_name='status', rule='RC_REVERSAL_EXISTS')
 
+        # R-RC-8：取号必须在开事务前完成（编排器内不再取号）
+        if _blank(receipt_no):
+            receipt_no = self.allocate_reversal_no(header['id'], receipt_date)
+
+        from meta.core.reversal_orchestrator import ReversalError, execute
+        try:
+            outcome = execute(
+                self.ds, schema_id='receipt', doc_id=header['id'],
+                reason=remark or ('红冲 %s' % header.get('receipt_no')),
+                params={'receipt_date': receipt_date,
+                        'receipt_no': receipt_no,
+                        'remark': remark})
+        except ReversalError as error:
+            raise self._map_reversal_error(error) from error
+
+        document = outcome.document or {}
+        result = {
+            'id': header['id'],
+            'status': STATUS_REVERSED,
+            'reversal_receipt_id': document.get('id'),
+            'reversal_receipt_no': document.get('no'),
+            'order_ids': list(document.get('order_ids') or []),
+        }
+        if source_type == SOURCE_TRANSFER_ORDER:
+            result['transfer_order_id'] = header.get('source_doc_id')
+        elif source_type == SOURCE_WORK_ORDER:
+            result['work_order_id'] = header.get('source_doc_id')
+        return result
+
+    @staticmethod
+    def _map_reversal_error(error) -> 'ReceiptError':
+        """编排器错误码 → 收货域错误码（前端仍按 RC_* 分支）。"""
+        code = str(getattr(error, 'code', '') or '')
+        rule = str(getattr(error, 'rule', '') or '')
+        field_name = str(getattr(error, 'field_name', '') or '')
+        if code == 'REVERSAL_STATE_INVALID':
+            return ReceiptError('仅已过账收货单可冲销', field_name='status',
+                                rule='RC_STATE_INVALID')
+        if rule:
+            return ReceiptError(str(error), field_name=field_name, rule=rule)
+        return ReceiptError(str(error), field_name=field_name or 'status',
+                            rule='RC_REVERSE_FAILED')
+
+    def create_reversal_document(self, receipt_id: Any,
+                                 receipt_date: Optional[str] = None,
+                                 receipt_no: Optional[str] = None,
+                                 remark: Optional[str] = None,
+                                 ) -> Dict[str, Any]:
+        """D3 创建器：新建红字收货单（PO / TO / WO 三分支）。
+
+        只负责单据事实：红字头 + 行、负分配 / 计划行回退 / TO 回写、红字过账、
+        原单行置 reversed；库存 / 边 / HU / 序列号写面与抬头状态由平台执行。
+        """
+        header = self._require_header(receipt_id)
+        source_type = header.get('source_doc_type')
+        if source_type == SOURCE_TRANSFER_ORDER:
+            return self._create_transfer_reversal_document(
+                header, receipt_date, receipt_no, remark)
+        if source_type == SOURCE_WORK_ORDER:
+            return self._create_work_order_reversal_document(
+                header, receipt_date, receipt_no, remark)
+        return self._create_purchase_reversal_document(
+            header, receipt_date, receipt_no, remark)
+
+    def _create_purchase_reversal_document(
+            self, header: Dict[str, Any],
+            receipt_date: Optional[str] = None,
+            receipt_no: Optional[str] = None,
+            remark: Optional[str] = None) -> Dict[str, Any]:
+        """PO 来源：红字头 + 行 + 负分配 + 计划行回退指令（投影由平台执行）。
+
+        净量为 0 的行（全部拒收）不产生红字行：拒收是独立事实，
+        不属于净收冲销范围。
+        """
         return_type = self._return_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
-        red_no = receipt_no or self.allocate_receipt_no(return_type['id'], date)
+        red_no = receipt_no
         if _blank(red_no):
             raise ReceiptError('缺少红字收货单类型或编号序列',
                                field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
 
         original_lines = self._load_lines(header['id'], status=STATUS_POSTED)
         source_items = [self._load_schedule_context(line)
-                       for line in original_lines]
+                        for line in original_lines]
         source_items = [item for item in source_items
                         if item['schedule'] is not None and item['net'] > 0]
         if not source_items:
@@ -756,7 +826,8 @@ class ReceiptService:
         red_id = self._insert_header(red_row)
 
         order_ids = set()
-        for seq, item in enumerate(source_items, start=1):
+        schedules = []
+        for item in source_items:
             line = item['line']
             schedule = item['schedule']
             net = item['net']
@@ -782,16 +853,23 @@ class ReceiptService:
             red_line['id'] = red_line_id
 
             self._write_reversal_allocations(red_line, red_id, schedule, tol, now)
-            self._apply_schedule_reversal(schedule, net, now)
             order_ids.add(schedule['order_id'])
+            schedules.append({'schedule_id': schedule['id'],
+                              'net': float(_q4(net))})
 
-        from meta.services.purchase_order_fulfillment_service import (
-            PurchaseOrderFulfillmentService)
-        fulfillment = PurchaseOrderFulfillmentService(self.ds)
-        for order_id in sorted(order_ids):
-            fulfillment.recompute_order(order_id)
+        self._post_red_receipt(red_row, red_id, now)
+        self._mark_original_lines_reversed(header['id'], now)
+        logger.info('[receipt] red document original=%s red=%s lines=%s',
+                    header['id'], red_id, len(source_items))
+        return {'id': red_id, 'no': red_no, 'replay': False,
+                'line_ids': [item['line']['id'] for item in source_items],
+                'schedules': schedules,
+                'order_ids': sorted(order_ids),
+                'transaction_date': date}
 
-        # 红字单过账
+    def _post_red_receipt(self, red_row: Dict[str, Any], red_id: Any,
+                          now: str) -> None:
+        """红字单自动过账（行 + 头）。"""
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
             'AND status = ?' % LINE_TABLE,
@@ -802,42 +880,32 @@ class ReceiptService:
             % HEADER_TABLE,
             [STATUS_POSTED, red_row['actual_arrival_date'], now, red_id])
 
-        # 原单置 reversed（全部行冲销）
+    def _mark_original_lines_reversed(self, receipt_id: Any, now: str) -> None:
+        """原单全部已过账行置 reversed（抬头状态由编排器推进）。"""
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
             'AND status = ?' % LINE_TABLE,
-            [STATUS_REVERSED, now, header['id'], STATUS_POSTED])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, reversed_at = ?, updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
-            [STATUS_REVERSED, now, now, header['id']])
+            [STATUS_REVERSED, now, receipt_id, STATUS_POSTED])
 
-        # 库存红冲：按原过账事件键生成 REVERSAL（同事务）
-        self._reverse_receipt_inventory(header, date)
-        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
-        self._reverse_receipt_inbound_edges(
-            [item['line']['id'] for item in source_items], red_id)
-        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
-        self._reverse_receipt_hus(header)
+    def apply_schedule_reversal(self, schedule_id: Any, net: Any,
+                                now: Optional[str] = None) -> bool:
+        """投影入口：按红字单净收量回退计划行已收量（R-RC-10）。"""
+        schedule = self._load_schedule(schedule_id)
+        if not schedule:
+            return False
+        self._apply_schedule_reversal(schedule, _q4(_dec(net or 0)),
+                                      now or _now())
+        return True
 
-        logger.info('[receipt] reversed original=%s red=%s lines=%s',
-                    header['id'], red_id, len(source_items))
-        return {'id': header['id'], 'status': STATUS_REVERSED,
-                'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
-                'order_ids': sorted(order_ids)}
-
-    def _reverse_transfer_order(self, header: Dict[str, Any],
-                                receipt_date: Optional[str] = None,
-                                receipt_no: Optional[str] = None,
-                                remark: Optional[str] = None) -> Dict[str, Any]:
-        """TO 来源整单红冲：新建红字单并反向扣减 TO 行 `qty_received`。"""
-        if self._reversal_exists(header['id']):
-            raise ReceiptError('该收货单已存在红字单，禁止重复冲销',
-                               field_name='status', rule='RC_REVERSAL_EXISTS')
-
+    def _create_transfer_reversal_document(
+            self, header: Dict[str, Any],
+            receipt_date: Optional[str] = None,
+            receipt_no: Optional[str] = None,
+            remark: Optional[str] = None) -> Dict[str, Any]:
+        """TO 来源：红字头 + 行 + 反向扣减 TO 行 `qty_received`。"""
         return_type = self._return_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
-        red_no = receipt_no or self.allocate_receipt_no(return_type['id'], date)
+        red_no = receipt_no
         if _blank(red_no):
             raise ReceiptError('缺少红字收货单类型或编号序列',
                                field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
@@ -911,54 +979,28 @@ class ReceiptService:
             raise ReceiptError(e.message, field_name=e.field_name,
                                rule=e.rule or 'RC_TRANSFER_REVERSE_FAILED')
 
-        # 红字单过账 + 原单置 reversed
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
-            [STATUS_POSTED, now, red_id, STATUS_DRAFT])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
-            'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
-            [STATUS_POSTED, red_row['actual_arrival_date'], now, red_id])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
-            [STATUS_REVERSED, now, header['id'], STATUS_POSTED])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, reversed_at = ?, updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
-            [STATUS_REVERSED, now, now, header['id']])
+        self._post_red_receipt(red_row, red_id, now)
+        self._mark_original_lines_reversed(header['id'], now)
 
-        # 库存红冲：TO 收货原分录生成 REVERSAL（同事务）
-        self._reverse_receipt_inventory(header, date)
-        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
-        self._reverse_receipt_inbound_edges(
-            [line['id'] for line, _ in source_items], red_id)
-        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
-        self._reverse_receipt_hus(header)
-
-        logger.info('[receipt] reversed to original=%s red=%s lines=%s',
+        logger.info('[receipt] red document original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
-        return {'id': header['id'], 'status': STATUS_REVERSED,
-                'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
-                'order_ids': [], 'transfer_order_id': header.get('source_doc_id')}
+        return {'id': red_id, 'no': red_no, 'replay': False,
+                'line_ids': [line['id'] for line, _ in source_items],
+                'schedules': [], 'order_ids': [],
+                'transaction_date': date}
 
-    def _reverse_work_order(self, header: Dict[str, Any],
-                            receipt_date: Optional[str] = None,
-                            receipt_no: Optional[str] = None,
-                            remark: Optional[str] = None) -> Dict[str, Any]:
-        """生产工单来源整单红冲：新建红字单 + 序列号状态回退（P6c §5.3）。
+    def _create_work_order_reversal_document(
+            self, header: Dict[str, Any],
+            receipt_date: Optional[str] = None,
+            receipt_no: Optional[str] = None,
+            remark: Optional[str] = None) -> Dict[str, Any]:
+        """WO 来源：红字头 + 行（完工序列号回退由平台 serial 写面执行）。
 
         谱系与 document_serial_links 不解除（与 P6a D13 一致）。
         """
-        if self._reversal_exists(header['id']):
-            raise ReceiptError('该收货单已存在红字单，禁止重复冲销',
-                               field_name='status', rule='RC_REVERSAL_EXISTS')
-
         return_type = self._return_header_type()
         date = receipt_date or header.get('receipt_date') or _now()
-        red_no = receipt_no or self.allocate_receipt_no(return_type['id'], date)
+        red_no = receipt_no
         if _blank(red_no):
             raise ReceiptError('缺少红字收货单类型或编号序列',
                                field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
@@ -1018,37 +1060,15 @@ class ReceiptService:
             }
             self._insert_line(red_id, red_line, now)
 
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
-            [STATUS_POSTED, now, red_id, STATUS_DRAFT])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
-            'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
-            [STATUS_POSTED, red_row['actual_arrival_date'], now, red_id])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
-            [STATUS_REVERSED, now, header['id'], STATUS_POSTED])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, reversed_at = ?, updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
-            [STATUS_REVERSED, now, now, header['id']])
+        self._post_red_receipt(red_row, red_id, now)
+        self._mark_original_lines_reversed(header['id'], now)
 
-        self._reverse_receipt_inventory(header, date)
-        # DOC_FLOW 阶段 3：收货行 → 入库事务边整体冲销（红字边 + 原边 reversed）
-        self._reverse_receipt_inbound_edges(
-            [line['id'] for line, _ in source_items], red_id)
-        # P6a-2 §11.5：倒序回退该单据产生的容器事件（装箱 / 发运 / 移库）
-        self._reverse_receipt_hus(header)
-        self._reverse_completion_serials(header.get('source_doc_id'), header['id'])
-
-        logger.info('[receipt] reversed work order original=%s red=%s lines=%s',
+        logger.info('[receipt] red document work order original=%s red=%s lines=%s',
                     header['id'], red_id, len(source_items))
-        return {'id': header['id'], 'status': STATUS_REVERSED,
-                'reversal_receipt_id': red_id, 'reversal_receipt_no': red_no,
-                'order_ids': [], 'work_order_id': header.get('source_doc_id')}
+        return {'id': red_id, 'no': red_no, 'replay': False,
+                'line_ids': [line['id'] for line, _ in source_items],
+                'schedules': [], 'order_ids': [],
+                'transaction_date': date}
 
     # ------------------------------------------------------------- 库存过账
     def _post_receipt_inventory(self, header: Dict[str, Any],
@@ -1157,28 +1177,6 @@ class ReceiptService:
                 target_item=str(line.get('id') or ''),
                 unit=str(line.get('uom_id') or ''),
                 derived_by='receipt_service')
-
-    def _reverse_receipt_inbound_edges(self, line_ids: List[Any],
-                                       red_receipt_id: Any) -> None:
-        """红冲时整体冲销「收货行 → 入库事务」边（档位由 profile 声明）。
-
-        receipt 档位 = red_reverse（红字边 + 原边 reversed），承诺口径 no_revert：
-        已发生的组件投料不回退。DOC_FLOW 未启用 / 边表缺失时降级为告警，
-        不阻断收货红冲。
-        """
-        if not line_ids or _blank(red_receipt_id):
-            return
-        try:
-            from meta.core.reversal_orchestrator import reverse_document_edges
-        except Exception:  # pragma: no cover - 核心模块缺失时保持红冲可用
-            logger.warning('[receipt] 冲销编排不可用，跳过红字边')
-            return
-        for line_id in line_ids:
-            if _blank(line_id):
-                continue
-            reverse_document_edges(
-                self.ds, self.platform_ds, 'receipt', line_id,
-                ref_id=red_receipt_id, reason='receipt_reversal')
 
     def _line_project_scope(self, line: Dict[str, Any]) -> tuple:
         """G7：收货行的项目 / 任务归属以该行 active 需求分配为唯一真源。
@@ -1291,20 +1289,6 @@ class ReceiptService:
                 str(error), field_name=error.field_name or 'hu_no',
                 rule=error.rule or 'HU_PACK_FAILED')
 
-    def _reverse_receipt_hus(self, header: Dict[str, Any]) -> None:
-        """红冲：倒序回退该收货单产生的容器事件（不删历史事件）。"""
-        if not self._hu_ready():
-            return
-        from meta.services.handling_unit_service import (
-            HandlingUnitError, HandlingUnitService,
-        )
-        try:
-            HandlingUnitService(self.ds).reverse_document('receipt', header['id'])
-        except HandlingUnitError as error:
-            raise ReceiptError(
-                str(error), field_name=error.field_name or 'hu_no',
-                rule=error.rule or 'HU_REVERSE_FAILED')
-
     def _precheck_transfer_receipt_serials(self, transfer_order_id: Any,
                                            receipt_id: Any) -> None:
         """TO 来源收货前置：在途号数量必须等于净收数量。"""
@@ -1359,42 +1343,6 @@ class ReceiptService:
             raise ReceiptError(
                 str(error), field_name=error.field_name or 'serial_no',
                 rule=error.rule or 'SERIAL_COMPLETION_REGISTER_FAILED')
-
-    def _reverse_completion_serials(self, work_order_id: Any,
-                                    receipt_id: Any) -> None:
-        from meta.services.serial_number_service import (
-            SerialNumberError, SerialNumberService,
-        )
-        try:
-            SerialNumberService(self.ds).reverse_completion(
-                work_order_id, receipt_id)
-        except SerialNumberError as error:
-            raise ReceiptError(
-                str(error), field_name=error.field_name or 'serial_no',
-                rule=error.rule or 'SERIAL_COMPLETION_REVERSE_FAILED')
-
-    def _reverse_receipt_inventory(self, header: Dict[str, Any],
-                                   transaction_date: Any = None) -> None:
-        """按原过账事件键写 REVERSAL 反冲分录。"""
-        from meta.services.inventory_guard_service import InventoryError
-        from meta.services.inventory_posting_service import (
-            InventoryPostingService,
-        )
-
-        receipt_id = header.get('id')
-        source = {
-            'source_doc_type': 'receipt',
-            'source_doc_id': receipt_id,
-            'source_event_key': 'receipt:%s:reverse' % receipt_id,
-            'transaction_date': transaction_date,
-            'remark': '收货单 %s 红冲' % header.get('receipt_no'),
-        }
-        try:
-            InventoryPostingService(self.ds).reverse_by_source(
-                'receipt:%s:post' % receipt_id, source,
-                transaction_date=transaction_date or header.get('receipt_date'))
-        except InventoryError as e:
-            raise ReceiptError(e.message, field_name='inventory', rule=e.code)
 
     # ------------------------------------------------------------------ 行校验
     def validate_new_line(self, payload: Dict[str, Any],
