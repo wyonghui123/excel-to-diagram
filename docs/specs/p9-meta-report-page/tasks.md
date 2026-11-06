@@ -42,10 +42,11 @@
 
 | ID | 任务 | 命令 / 证据 | 结果 | 状态 |
 |---|---|---|---|---|
-| P9-11 | 后端配置回归 | `python d:\filework\test.py --single meta/tests/test_report_view_config.py` | 9 passed | 完成 |
+| P9-11 | 后端配置回归 | `python d:\filework\test.py --single meta/tests/test_report_view_config.py` | 10 passed（含菜单白名单断言） | 完成 |
 | P9-12 | 全对象视图配置回归 | `python d:\filework\test.py --single meta/tests/test_runtime_view_config_engine.py` | 15 passed | 完成 |
 | P9-13 | 前端容器单测 | `npx vitest run src/views/__tests__/MetaReportPage.spec.js` | 14 passed | 完成 |
 | P9-14 | 前端图表单测 | `npx vitest run src/components/common/MetaReportPage/__tests__/ReportBarChart.spec.js` | 5 passed | 完成 |
+| P9-14b | 筛选栏 date 分支单测 | `npx vitest run src/components/common/FilterBar/__tests__/FilterBar.spec.js` | 36 passed（含 date 2 例） | 完成 |
 | P9-15 | 浏览器实机验证 | 菜单 → 路由 → 筛选 → `GET /api/v1/inventory-aging/report?org_id=1&group_by=balance` 200 → 2 KPI + canvas + 8 列表头，控制台无错误 | 通过 | 完成 |
 | P9-16 | 规格文档 | 本目录 `spec.md` + `tasks.md` | 入库 | 完成 |
 

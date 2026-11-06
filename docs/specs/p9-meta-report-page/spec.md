@@ -9,8 +9,8 @@
 ## 0. 结论先行
 
 1. **报表页也是元数据**：报表的标题、数据接口、筛选器、KPI、图表、表格列、钻取全部声明在 BO 的 `ui_view_config.report` 中，前端不写任何业务字段名。
-2. **新增第 6 种视图配置**：`list / detail / form / filter / hub / report`，复用同一条 `GET /api/v1/meta/{objectType}/view-config/{viewName}` 通道，不新增配置 API。
-3. **新增第 3 种动态页型**：`menu.page_type = report` → `MetaReportPage.vue`，与 `object_list` / `multi_object_hub` 同一套动态路由机制。
+2. **新增第 6 个视图段**：在既有 `list / detail / form / filter / hub` 之外新增 `ui_view_config.report`，复用同一条 `GET /api/v1/meta/{objectType}/view-config/{viewName}` 通道，不新增配置 API。
+3. **新增第 4 种动态页型**：`menu.page_type = report` → `MetaReportPage.vue`，与 `object_list` / `object_detail` / `multi_object_hub` 同一套动态路由机制。
 4. **报表 v1 只做只读分析页**：`bar` 图表 + KPI 卡 + 客户端分页表格 + 可选钻取抽屉；不做导出、不做保存视图、不做多图表布局。
 5. **第一个落地场景**：`inventory_balance` 的库存库龄报表（P8），读取 `/api/v1/inventory-aging/report`。
 
@@ -131,6 +131,8 @@ BO YAML
 conn.execute("UPDATE menus SET show_in_sidebar=1, is_active=1 WHERE menu_code=?", (MENU['menu_code'],))
 ```
 
+**迁移建的菜单必须在 init 白名单**：`init_menu_permissions.py` 步骤 7.6 会物理删除 `auto_generated=0` 且未声明的菜单。该脚本已把白名单提升为模块级 `MIGRATION_OWNED_MENUS` 并登记 `inventory-aging-report`；否则每次服务启动/测试 setup 后菜单都会消失，而 `schema_migrations` 仍为 SUCCESS（记录与副作用漂移）。
+
 ---
 
 ## 5. 前端链路
@@ -188,10 +190,12 @@ echarts.use([BarChart, GridComponent, TitleComponent, TooltipComponent, CanvasRe
 
 | 层 | 用例 / 证据 | 结果 |
 |---|---|---|
-| 后端配置 | `python d:\filework\test.py --single meta/tests/test_report_view_config.py` | 9 passed |
+| 后端配置 | `python d:\filework\test.py --single meta/tests/test_report_view_config.py` | 10 passed（含菜单白名单断言） |
 | 后端全对象 | `--single meta/tests/test_runtime_view_config_engine.py` | 15 passed（含本次补齐 3 个 facade 视图的 list 列） |
+| 后端迁移 | `--single meta/tests/test_migration_runner_verify.py` | 3 passed（verify dict 归一化） |
 | 前端容器 | `npx vitest run src/views/__tests__/MetaReportPage.spec.js` | 14 passed |
 | 前端图表 | `npx vitest run src/components/common/MetaReportPage/__tests__/ReportBarChart.spec.js` | 5 passed |
+| 前端筛选 | `npx vitest run src/components/common/FilterBar/__tests__/FilterBar.spec.js` | 36 passed（含 `date` 分支 2 例） |
 | 浏览器实机 | 菜单下发 → 路由注册 → 7 项筛选 → 选库存组织 → `GET /api/v1/inventory-aging/report?org_id=1&group_by=balance` 200 → 2 KPI + ECharts canvas + 8 列表头，控制台无错误 | 通过 |
 
 ---
@@ -203,6 +207,8 @@ echarts.use([BarChart, GridComponent, TitleComponent, TooltipComponent, CanvasRe
 3. **钻取仅支持余额行**：`only_when_group_by` 是单值约束，按物料/批次汇总时不开放明细。
 4. **无导出**：报表数据导出未实现。
 5. **配置无校验**：YAML 中写错 `data_field` 只会得到空表，不会报错；后续可加 schema 校验。
+6. **`method` 未生效**：`UIReportConfig.method` 已建模，但前端固定 `apiV1.get`；报表接口当前均为 GET。
+7. **跨库漂移需手工重放**：v225 记录为 SUCCESS 但菜单被删的库（历史工作树/旧快照），白名单修复不会自动补回，需重放 v225 或手工 INSERT；主库已重放。
 
 ---
 
@@ -214,4 +220,5 @@ echarts.use([BarChart, GridComponent, TitleComponent, TooltipComponent, CanvasRe
 | 选组织后仍 400 `INV_AGING_ORG_REQUIRED` | `v-model` 绑定 `reactive` 常量，赋值无效 | `:model-value` + `onFilterValuesChange` 原地合并 |
 | ECharts `Component title is used but not imported` | 按需引入漏 `TitleComponent` | 补 `echarts.use` |
 | `org_legal_entity has no list columns` 等存量失败 | YAML 只有 detail/facets 时配置非空，自动生成不介入 | 三个 facade 视图补齐 `ui_view_config.list` |
-| 迁移记录存在但菜单行不存在 | runner 先写 `schema_migrations` 再执行 | 手工重放 v225；根因治理见待办 D |
+| 迁移记录 SUCCESS 但菜单行不存在 | `init_menu_permissions.py` 步骤 7.6 物理删除 `auto_generated=0` 且未在 `MIGRATION_OWNED_MENUS` 的菜单 | 白名单登记 `inventory-aging-report` + 重放 v225 |
+| v224/v225 `verify=OK` 但实际失败 | `verify()` 返回 dict，`bool(dict)` 恒真 | `verify_migration` 归一化 `{'ok': bool}` |
