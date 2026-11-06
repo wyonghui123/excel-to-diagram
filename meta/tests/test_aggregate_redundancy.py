@@ -80,3 +80,23 @@ def test_auditor_reports_only_drifted_rows(tmp_path):
         'purchase_order')
     assert {(v.record_id, v.field_id) for v in remaining} == {
         (4, 'gross_amount')}
+
+
+def test_audit_entry_reports_violations(tmp_path):
+    """meta.tools.redundancy_audit 是声明的运行入口，输出机读报告。"""
+    from meta.core.sql_adapters import SQLiteAdapter
+    from meta.tools.redundancy_audit import audit_all
+
+    _aggregate_def()
+
+    ds = SQLiteAdapter()
+    ds.connect(path=str(tmp_path / 'audit_entry.db'))
+    build_purchase_order_aggregate_fixture(ds)
+
+    report = audit_all(
+        database='audit_entry.db', object_ids=['purchase_order'], ds=ds)
+
+    assert report['objects_with_stored_redundancy'] == 1
+    assert report['violation_count'] == 2
+    assert {(v['record_id'], v['field_id']) for v in report['violations']} == {
+        (2, 'gross_amount'), (4, 'gross_amount')}
