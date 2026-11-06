@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-05 15:34:53.221543
+-- 生成时间: 2026-11-06 07:37:56.097694
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -780,7 +780,11 @@ CREATE VIEW IF NOT EXISTS v_demand_trace_graph AS SELECT
   e.target_id AS target_object_id,
   COALESCE(e.target_item, '') AS target_line_id,
   e.quantity AS qty,
-  CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END AS signed_qty,
+  CASE
+    WHEN e.rule_id = 'shipment_line_to_return_in_txn'
+      THEN CASE WHEN e.quantity_sign = 'red' THEN e.quantity ELSE -e.quantity END
+    ELSE CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END
+  END AS signed_qty,
   e.status AS status,
   NULL AS peg_type,
   NULL AS plan_version,
@@ -1326,6 +1330,7 @@ CREATE TABLE IF NOT EXISTS inventory_balances (
     project_task_id INTEGER NOT NULL DEFAULT 0,
     sales_order_line_id INTEGER NOT NULL DEFAULT 0,
     owner_party_id INTEGER NOT NULL DEFAULT 0,
+    first_received_date DATETIME,
     updated_at DATETIME,
     FOREIGN KEY (org_id) REFERENCES orgs(id),
     FOREIGN KEY (location_id) REFERENCES locations(id),
@@ -3222,6 +3227,8 @@ CREATE TABLE IF NOT EXISTS shipments (
     actual_ship_date DATETIME,
     actual_arrival_date DATETIME,
     signature_ref VARCHAR(200),
+    reversed_at DATETIME,
+    reversal_reason VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     source VARCHAR(200) NOT NULL DEFAULT 'manual',
     remark VARCHAR(200),

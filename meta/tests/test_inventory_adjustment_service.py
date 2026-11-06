@@ -263,6 +263,29 @@ def test_reverse_creates_red_document_and_rolls_back_balance():
     assert exc.value.code == INV_ALREADY_REVERSED
 
 
+def test_reverse_goes_through_reversal_orchestrator(monkeypatch):
+    """D2：红冲必须经 ReversalOrchestrator（声明式写面 + 红字单创建器）。"""
+    from meta.core import reversal_orchestrator
+
+    conn = adj.build_adjustment_db()
+    header_id, _header, service = _create(conn, 'qty_increase', 5)
+    service.release(header_id)
+    service.post(header_id)
+
+    seen = []
+    real_execute = reversal_orchestrator.execute
+
+    def spy(ds, **kwargs):
+        seen.append(kwargs.get('schema_id'))
+        return real_execute(ds, **kwargs)
+
+    monkeypatch.setattr(reversal_orchestrator, 'execute', spy)
+    result = service.reverse(header_id)
+
+    assert seen == ['inventory_adjustment']
+    assert result['reversal_adjustment_id']
+
+
 def test_cancel_allows_draft_and_released_only():
     conn = adj.build_adjustment_db()
 

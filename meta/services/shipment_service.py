@@ -638,19 +638,10 @@ class ShipmentService:
     def reverse(self, delivery_id: Any, reason: Optional[str] = None) -> Dict[str, Any]:
         """shipped / delivered → reversed：数据错误红冲（非退货业务）。
 
-        退货是新事实（新交货 + 新入库事务 + 新边）；本方法反冲原事实：
-          1. 库存 REVERSAL 分录（幂等键 `shipment:{id}:{ship|return}_reverse`）
-          2. 按方向追加 DOC_FLOW 补偿边（ref_id = 原交货单，原边与红字历史不改）
-          3. 回退序列号 / HU / 预留核销台账（退货方向发运未产生，自动 no-op）
-          4. 抬头 / 行置 reversed 后按交货行事实重算计划行交付量
-          5. 重算订单履约状态
-        全部步骤在同一事务域内提交或回滚（R-SF-01）。
+        由 ReversalOrchestrator 按 shipment.yaml 声明执行（D4）：库存 REVERSAL →
+        （非退货）序列号 / HU / 预留 → 单据边补偿 → 行置 reversed → 计划行重算
+        → 订单履约重算，全部写面与抬头推进在同一事务内提交或回滚（R-SF-01）。
         """
-        with _atomic(self.ds):
-            return self._reverse_impl(delivery_id, reason)
-
-    def _reverse_impl(self, delivery_id: Any,
-                      reason: Optional[str] = None) -> Dict[str, Any]:
         header = self._require_header(delivery_id)
         if header['status'] == STATUS_REVERSED:
             return {'id': header['id'], 'status': STATUS_REVERSED,
@@ -661,111 +652,36 @@ class ShipmentService:
 
         lines = self._load_lines(delivery_id)
         is_return = self._is_return_shipment(delivery_id, header.get('order_id'))
-        now = _now()
-        reason_text = (reason or '').strip()
-        suffix = 'return' if is_return else 'ship'
-        original_key = 'shipment:%s:%s' % (header['id'], suffix)
-        reverse_key = 'shipment:%s:%s_reverse' % (header['id'], suffix)
+        line_ids = [line.get('id') for line in lines
+                    if line.get('status') != STATUS_CANCELLED and line.get('id')]
 
-        # 1) 库存分录反冲（已反冲的原分录由 posting 服务幂等跳过）
-        self._reverse_inventory(header, is_return, original_key, reverse_key,
-                                now, reason_text)
+        from meta.core.reversal_orchestrator import ReversalError, execute
+        try:
+            outcome = execute(
+                self.ds, schema_id='shipment', doc_id=header['id'],
+                reason=(reason or '').strip(),
+                params={'direction': 'return' if is_return else 'standard',
+                        'line_ids': line_ids})
+        except ReversalError as error:
+            raise self._map_reversal_error(error) from error
 
-        # 2) 序列号 / HU 反冲；预留反向核销（退货方向发运时未产生，自动 no-op）
-        if not is_return:
-            self._reverse_serial_tracking(original_key)
-            self._reverse_hus(delivery_id)
-            self._unfulfill_reservations(lines, reason_text)
-
-        # 3) 单据边补偿（按方向选规则；未启用时内部降级为告警）
-        from meta.core.doc_flow_attach import reverse_edges_by_source
-        rule_id = RETURN_DOC_FLOW_RULE_ID if is_return else DOC_FLOW_RULE_ID
-        for line in lines:
-            if line.get('status') == STATUS_CANCELLED:
-                continue
-            reverse_edges_by_source(
-                self.ds, rule_id, 'shipment_line', line.get('id'),
-                ref_id=delivery_id, derived_by='shipment_reverse')
-
-        # 4) 先落 reversed 状态，再按交货行事实重算计划行（R-SF-05）
-        self._mark_reversed(delivery_id, now, reason_text)
-        self._refresh_schedule_delivery(
-            {line.get('schedule_id') for line in lines
-             if line.get('status') != STATUS_CANCELLED
-             and line.get('schedule_id')})
-        self._recompute_order_fulfillment(header.get('order_id'))
         return {'id': header['id'], 'status': STATUS_REVERSED,
-                'order_id': header.get('order_id'), 'idempotent': False}
+                'order_id': header.get('order_id'),
+                'idempotent': bool(outcome.replay)}
 
-    # ------------------------------------------------------------------ 冲销台账
-
-    def _reverse_inventory(self, header, is_return, original_key, reverse_key,
-                           now, reason) -> None:
-        """按原事件键生成 REVERSAL 分录；未过账 / 未迁移时由 posting 服务幂等空返回。"""
-        from meta.services.inventory_posting_service import (
-            InventoryPostingService,
-        )
-        direction_label = '退货入库' if is_return else '出库'
-        remark = '交货单 %s %s冲销' % (
-            header.get('delivery_no') or header.get('id'), direction_label)
-        if reason:
-            remark = '%s：%s' % (remark, reason)
-        InventoryPostingService(self.ds).reverse_by_source(
-            original_key,
-            {'source_doc_type': 'shipment',
-             'source_doc_id': header.get('id'),
-             'source_event_key': reverse_key,
-             'transaction_date': now,
-             'remark': remark},
-            transaction_date=now)
-
-    def _reverse_serial_tracking(self, original_key) -> None:
-        """按原库存事务反冲序列号使用状态（未追踪 / 未迁移时跳过）。"""
-        from meta.services.serial_number_service import (
-            SerialNumberService, serial_schema_ready,
-        )
-        if not serial_schema_ready(self.ds):
-            return
-        txns = self.ds.query(
-            'SELECT id FROM inventory_transactions WHERE source_event_key = ?',
-            [original_key])
-        service = SerialNumberService(self.ds)
-        for txn in txns:
-            try:
-                service.reverse_serial_event(txn['id'])
-            except Exception as exc:  # noqa: BLE001 - 号台账反冲失败不阻断库存红冲
-                logger.warning('[shipment] 序列号反冲跳过 tx=%s: %s',
-                               txn['id'], exc)
-
-    def _reverse_hus(self, delivery_id: Any) -> None:
-        """倒序回退装箱 / 发运 HU 事件（未启用时 no-op）。"""
-        from meta.services.handling_unit_service import (
-            HandlingUnitService, hu_schema_ready,
-        )
-        if not hu_schema_ready(self.ds):
-            return
-        HandlingUnitService(self.ds).reverse_document('shipment', delivery_id)
-
-    def _unfulfill_reservations(self, lines, reason) -> None:
-        """按 SO 行汇总反向核销预留，恢复可用量。"""
-        from meta.services.inventory_reservation_service import (
-            InventoryReservationService,
-        )
-        grouped: Dict[int, Decimal] = {}
-        for line in lines:
-            if line.get('status') == STATUS_CANCELLED:
-                continue
-            order_line_id = int(line.get('order_line_id') or 0)
-            if not order_line_id:
-                continue
-            grouped[order_line_id] = grouped.get(order_line_id, Decimal('0')) \
-                + _to_decimal(line.get('qty'))
-        if not grouped:
-            return
-        reservations = InventoryReservationService(self.ds)
-        for order_line_id, qty in grouped.items():
-            reservations.unfulfill_by_demand(
-                'sales_order_line', order_line_id, qty, reason=reason)
+    @staticmethod
+    def _map_reversal_error(error) -> 'ShipmentError':
+        """编排器错误码 → 交货域错误码。"""
+        code = str(getattr(error, 'code', '') or '')
+        rule = str(getattr(error, 'rule', '') or '')
+        field_name = str(getattr(error, 'field_name', '') or '')
+        if code == 'REVERSAL_STATE_INVALID':
+            return ShipmentError('仅已发运 / 已签收的交货单可冲销',
+                                 field_name='status', rule='DN_STATE_INVALID')
+        if rule:
+            return ShipmentError(str(error), field_name=field_name, rule=rule)
+        return ShipmentError(str(error), field_name=field_name or 'status',
+                             rule='DN_REVERSE_FAILED')
 
     def _refresh_schedule_delivery(self, schedule_ids) -> None:
         """按交货行事实重算计划行交付量（R-SF-05：唯一权威，禁止增量算术）。

@@ -1007,7 +1007,9 @@ class ViewConfigService:
         return (
             not config.list.columns and
             not config.detail.facets and
-            not config.form.sections
+            not config.form.sections and
+            # [P9 2026-11-06] 只声明 report 的对象不能被自动生成覆盖。
+            not config.report
         )
     
     def invalidate_cache(self, object_type: Optional[str] = None) -> None:

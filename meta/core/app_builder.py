@@ -506,6 +506,7 @@ class ApplicationBuilder:
         # [P6a-2 v218 2026-11-05] 包装容器作业台（扫码预检 / 封箱 / 批量封箱）。
         from meta.api.handling_unit_api import handling_unit_bp
         from meta.api.engineering_change_api import engineering_change_bp
+        from meta.api.inventory_aging_api import inventory_aging_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -585,6 +586,8 @@ class ApplicationBuilder:
         app.register_blueprint(handling_unit_bp)
         # [项目 G4 2026-11-03] 工程变更单（diff 预览 / 提交 / 批准 / 应用 / 影响预览）。
         app.register_blueprint(engineering_change_bp)
+        # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由，不新增 View BO）。
+        app.register_blueprint(inventory_aging_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

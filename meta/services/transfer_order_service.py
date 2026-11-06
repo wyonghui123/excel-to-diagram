@@ -31,6 +31,8 @@ STATUS_DRAFT = 'draft'
 STATUS_RELEASED = 'released'
 STATUS_CLOSED = 'closed'
 STATUS_CANCELLED = 'cancelled'
+#: 发货事实红冲终态（原地红冲，不产生反向调拨单）
+STATUS_REVERSED = 'reversed'
 
 LINE_STATUS_OPEN = 'open'
 LINE_STATUS_CLOSED = 'closed'
@@ -49,7 +51,7 @@ APPROVAL_APPROVED = 'approved'
 APPROVAL_REJECTED = 'rejected'
 
 #: 终态：禁止 ship / receive / update（R-TO-13）
-TERMINAL_STATUSES = (STATUS_CLOSED, STATUS_CANCELLED)
+TERMINAL_STATUSES = (STATUS_CLOSED, STATUS_CANCELLED, STATUS_REVERSED)
 
 #: 无时间戳时要落库的最小列集
 _HEADER_COLUMNS = (
@@ -846,6 +848,73 @@ class TransferOrderService:
         return self.apply_receipt(transfer_order_id, lines, reverse=True)
 
     # ------------------------------------------------------------------
+    # 发货红冲（原地红冲发货事实，不产生反向调拨单）
+    # ------------------------------------------------------------------
+    def reverse_shipment(self, transfer_order_id: Any, reason: str = '',
+                         user_info: Optional[Dict[str, Any]] = None
+                         ) -> Dict[str, Any]:
+        """released → reversed：红冲全部发货事实（库存 / 序列号 / HU / 边 / 行）。
+
+        已收货（任一 `qty_received > 0`）不得原地红冲，须走 `create_reversal()`
+        反向调拨单；已 `reversed` 幂等返回。
+        """
+        header = self._require_header(transfer_order_id)
+        status = _status(header.get('status'))
+        if status == STATUS_REVERSED:
+            return {'id': header['id'], 'status': STATUS_REVERSED,
+                    'fulfillment_status': header.get('fulfillment_status'),
+                    'idempotent': True}
+        if status in TERMINAL_STATUSES:
+            raise TransferOrderError(
+                '调拨单已处于终态 %s，禁止红冲' % status,
+                field_name='status', rule='TO_TERMINAL_IMMUTABLE')
+        if status != STATUS_RELEASED:
+            raise TransferOrderError(
+                '仅已下达的调拨单可红冲发货', field_name='status',
+                rule='TO_STATE_INVALID')
+        if self._total_shipped(header['id']) <= 0:
+            raise TransferOrderError(
+                '调拨单尚未发货，无发货事实可红冲', field_name='status',
+                rule='TO_SHIP_NOT_FOUND')
+        if self._total_received(header['id']) > 0:
+            raise TransferOrderError(
+                '调拨单已有收货，禁止原地红冲发货；请使用反向调拨单',
+                field_name='status', rule='TO_RECEIVED_CANNOT_REVERSE')
+
+        lines = self._load_lines(header['id'])
+        line_ids = [line.get('id') for line in lines
+                    if line.get('id') is not None
+                    and _status(line.get('status')) != LINE_STATUS_CANCELLED]
+        from meta.core.reversal_orchestrator import ReversalError, execute
+        try:
+            outcome = execute(
+                self.ds, schema_id='transfer_order', doc_id=header['id'],
+                reason=(reason or '').strip(),
+                params={'line_ids': line_ids}, user_info=user_info)
+        except ReversalError as error:
+            raise self._map_reversal_error(error) from error
+
+        fresh = self._require_header(header['id'])
+        logger.info('[transfer_order] ship reversed id=%s lines=%s',
+                    header['id'], len(line_ids))
+        return {'id': fresh['id'], 'status': fresh.get('status'),
+                'fulfillment_status': fresh.get('fulfillment_status'),
+                'idempotent': bool(outcome.replay)}
+
+    def _map_reversal_error(self, error: Any) -> TransferOrderError:
+        """编排器错误码映射回调拨单既有 `TO_*` 契约。"""
+        code = str(getattr(error, 'code', '') or '')
+        if code == 'REVERSAL_STATE_INVALID':
+            return TransferOrderError(
+                '仅已下达且已发货的调拨单可红冲', field_name='status',
+                rule='TO_STATE_INVALID')
+        message = str(getattr(error, 'message', '') or error)
+        field_name = str(getattr(error, 'field_name', '') or '')
+        rule = str(getattr(error, 'rule', '') or '')
+        return TransferOrderError(message, field_name=field_name,
+                                  rule=rule or code or 'TO_REVERSE_FAILED')
+
+    # ------------------------------------------------------------------
     # 派生规则
     # ------------------------------------------------------------------
     @staticmethod
@@ -1000,6 +1069,13 @@ class TransferOrderService:
     def _total_shipped(self, transfer_order_id: Any) -> Decimal:
         rows = self.ds.query(
             'SELECT COALESCE(SUM(qty_shipped), 0) AS total FROM %s '
+            'WHERE transfer_order_id = ? AND status <> ?'
+            % LINE_TABLE, [transfer_order_id, LINE_STATUS_CANCELLED])
+        return _num(rows[0].get('total')) if rows else Decimal('0')
+
+    def _total_received(self, transfer_order_id: Any) -> Decimal:
+        rows = self.ds.query(
+            'SELECT COALESCE(SUM(qty_received), 0) AS total FROM %s '
             'WHERE transfer_order_id = ? AND status <> ?'
             % LINE_TABLE, [transfer_order_id, LINE_STATUS_CANCELLED])
         return _num(rows[0].get('total')) if rows else Decimal('0')

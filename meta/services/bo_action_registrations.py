@@ -125,6 +125,7 @@ def register_all_bo_actions(registry=None):
         receive_handler as transfer_order_receive_handler,
         cancel_handler as transfer_order_cancel_handler,
         close_handler as transfer_order_close_handler,
+        reverse_shipment_handler as transfer_order_reverse_shipment_handler,
         submit_handler as transfer_order_submit_handler,
         withdraw_handler as transfer_order_withdraw_handler,
         approve_handler as transfer_order_approve_handler,
@@ -1045,6 +1046,27 @@ def register_all_bo_actions(registry=None):
             'properties': {
                 'transfer_order_id': {'type': 'integer'},
                 'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_transfer_order_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'transfer_order.reverse_shipment',
+        transfer_order_reverse_shipment_handler,
+        description='调拨发货红冲（released → reversed，原地回退库存/序列号/容器/边）',
+        object_type='transfer_order',
+        category='business',
+        permission_required='transfer_order:transfer_order_reverse_shipment',
+        input_schema={
+            'type': 'object',
+            'required': ['transfer_order_id'],
+            'properties': {
+                'transfer_order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
             },
         },
         output_schema=_transfer_order_output_schema,
