@@ -1011,6 +1011,15 @@ fields:
         decimal_places: 4
     semantics:
       meaning: 订单不含税合计
+      redundancy:
+        type: stored
+        aggregate:
+          func: sum
+          table: purchase_order_line
+          group_key: order_id
+          value: net_amount
+        consistency:
+          strategy: sync_on_write
     ui:
       widget: input
       editable: false
@@ -1027,6 +1036,15 @@ fields:
         decimal_places: 4
     semantics:
       meaning: 订单税额合计
+      redundancy:
+        type: stored
+        aggregate:
+          func: sum
+          table: purchase_order_line
+          group_key: order_id
+          value: tax_amount
+        consistency:
+          strategy: sync_on_write
     ui:
       widget: input
       editable: false

@@ -41,6 +41,19 @@ def test_purchase_order_declares_aggregate_redundancy():
     assert red_def.aggregate.tolerance == 0.0001
 
 
+def test_all_header_amounts_declared_against_same_ledger():
+    _aggregate_def()
+
+    for field_id in ('net_amount', 'tax_amount', 'gross_amount'):
+        red_def = redundancy_registry.get_redundancy('purchase_order', field_id)
+        assert red_def is not None, field_id
+        assert red_def.aggregate is not None, field_id
+        assert red_def.aggregate.func == 'sum'
+        assert red_def.aggregate.table == 'purchase_order_line'
+        assert red_def.aggregate.group_key == 'order_id'
+        assert red_def.aggregate.value == field_id
+
+
 def test_declaration_passes_metadata_validation():
     _aggregate_def()
 
@@ -63,12 +76,18 @@ def test_auditor_reports_only_drifted_rows(tmp_path):
     violations = auditor.validate_object('purchase_order')
 
     seen = {(v.record_id, v.field_id) for v in violations}
-    # 订单 2：缓存 90 vs 明细 100；订单 4：无明细但残留 50
-    assert seen == {(2, 'gross_amount'), (4, 'gross_amount')}
+    # 订单 2：不含税/含税缓存 90 vs 明细 100（税额 0 一致）；订单 4：无明细但残留 50
+    assert seen == {
+        (2, 'net_amount'), (2, 'gross_amount'),
+        (4, 'net_amount'), (4, 'gross_amount'),
+    }
 
-    expected = {v.record_id: v.expected_value for v in violations}
-    assert expected[2] == 100
-    assert expected[4] == 0
+    expected = {(v.record_id, v.field_id): v.expected_value
+                for v in violations}
+    assert expected[(2, 'net_amount')] == 100
+    assert expected[(2, 'gross_amount')] == 100
+    assert expected[(4, 'net_amount')] == 0
+    assert expected[(4, 'gross_amount')] == 0
 
     # 审计只读：修数前缓存列保持不变
     row = ds.execute(
@@ -79,7 +98,7 @@ def test_auditor_reports_only_drifted_rows(tmp_path):
     remaining = RedundancyAuditor(ds, redundancy_registry).validate_object(
         'purchase_order')
     assert {(v.record_id, v.field_id) for v in remaining} == {
-        (4, 'gross_amount')}
+        (4, 'net_amount'), (4, 'gross_amount')}
 
 
 def test_audit_entry_reports_violations(tmp_path):
@@ -97,6 +116,8 @@ def test_audit_entry_reports_violations(tmp_path):
         database='audit_entry.db', object_ids=['purchase_order'], ds=ds)
 
     assert report['objects_with_stored_redundancy'] == 1
-    assert report['violation_count'] == 2
+    assert report['violation_count'] == 4
     assert {(v['record_id'], v['field_id']) for v in report['violations']} == {
-        (2, 'gross_amount'), (4, 'gross_amount')}
+        (2, 'net_amount'), (2, 'gross_amount'),
+        (4, 'net_amount'), (4, 'gross_amount'),
+    }
