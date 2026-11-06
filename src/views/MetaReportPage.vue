@@ -17,8 +17,9 @@
 
     <FilterBar
       v-if="config"
-      v-model="filterValues"
+      :model-value="filterValues"
       :fields="filterFields"
+      @update:model-value="onFilterValuesChange"
       @search="fetchReport"
       @reset="resetAndFetch"
     />
@@ -161,6 +162,15 @@ watch(pageSize, () => { currentPage.value = 1 })
 
 function normalizeEndpoint(endpoint) {
   return String(endpoint || '').replace(/^\/api\/v1/, '')
+}
+
+// FilterBar 以新对象回传，reactive 对象不能直接 v-model 赋值，需原地合并
+function onFilterValuesChange(values) {
+  const next = values || {}
+  for (const key of Object.keys(filterValues)) {
+    if (!(key in next)) delete filterValues[key]
+  }
+  Object.assign(filterValues, next)
 }
 
 function formatDate(value) {

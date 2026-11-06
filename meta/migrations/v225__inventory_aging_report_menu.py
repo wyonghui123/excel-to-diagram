@@ -43,7 +43,7 @@ MENU = {
     'color': '#f59e0b',
     'description': '按余额行最早入库日分桶的只读库龄报表',
     'sort_order': 7,
-    'show_in_sidebar': 0,
+    'show_in_sidebar': 1,
     'data_permission_hint': {
         'resource_types': ['inventory_balance'],
         'message': '建议按库存组织分配库存余额数据权限',
@@ -64,6 +64,10 @@ def _insert_menu(conn):
     if conn.execute('SELECT 1 FROM menus WHERE menu_code=?',
                     (MENU['menu_code'],)).fetchone():
         print("  - [SKIP] 菜单 %s 已存在" % MENU['menu_code'])
+        # 幂等修正：报表页必须进侧边栏，否则 /menu-permission/visible 不下发、前端无路由
+        conn.execute(
+            "UPDATE menus SET show_in_sidebar=1, is_active=1 WHERE menu_code=?",
+            (MENU['menu_code'],))
     else:
         conn.execute(
             "INSERT INTO menus (menu_code, menu_name, menu_path, page_type, "

@@ -6,10 +6,10 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
+import { GridComponent, TitleComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
+echarts.use([BarChart, GridComponent, TitleComponent, TooltipComponent, CanvasRenderer])
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
