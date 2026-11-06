@@ -12,6 +12,15 @@
 
 id: engineering_change
 name: 工程变更单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: change_no
+  business_date_field: effective_date
+  state_field: status
+  line_object: engineering_change_line
+  line_parent_field: change_id
+  line_sequence_field: line_no
 table_name: engineering_changes
 description: 工程 BOM 差异评审与生效（工程变更单头）
 display_name_field: change_no

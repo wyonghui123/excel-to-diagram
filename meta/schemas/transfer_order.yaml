@@ -25,6 +25,15 @@
 
 id: transfer_order
 name: 调拨单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: transfer_order_no
+  business_date_field: transfer_date
+  state_field: status
+  line_object: transfer_order_line
+  line_parent_field: transfer_order_id
+  line_sequence_field: line_no
 table_name: transfer_orders
 description: 调拨单头（行见 transfer_order_line）
 display_name_field: transfer_order_no

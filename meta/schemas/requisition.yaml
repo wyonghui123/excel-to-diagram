@@ -23,6 +23,14 @@
 
 id: requisition
 name: 采购申请
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: requisition_no
+  state_field: status
+  line_object: requisition_line
+  line_parent_field: requisition_id
+  line_sequence_field: line_no
 table_name: requisitions
 description: 采购申请头（承诺型需求单；行见 requisition_line）
 display_name_field: requisition_no

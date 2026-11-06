@@ -17,6 +17,14 @@
 
 id: inventory_count
 name: 库存盘点单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；未核到盘点业务日期字段，留空。
+document:
+  number_field: count_no
+  state_field: status
+  line_object: inventory_count_line
+  line_parent_field: count_id
+  line_sequence_field: line_no
 table_name: inventory_counts
 description: 库存盘点单头（账面快照 / 实盘录入 / 差异过账）
 display_name_field: count_no

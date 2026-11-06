@@ -33,6 +33,15 @@
 
 id: sales_order
 name: 销售订单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；posting_state 待状态目录补齐后再填。
+document:
+  number_field: order_no
+  business_date_field: order_date
+  state_field: status
+  line_object: sales_order_line
+  line_parent_field: order_id
+  line_sequence_field: line_no
 table_name: sales_orders
 description: 销售订单头（行见 sales_order_line）
 display_name_field: order_no

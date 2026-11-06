@@ -13,6 +13,10 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 
+# [S7.2 2026-11-06] 修既有缺陷：_evaluate_expression 一直在用 safe_evaluate 但从未 import，
+# NameError 被 except Exception 吞掉 → 所有 when_expr 恒为 False。
+from meta.core.safe_expr_evaluator import safe_evaluate
+
 
 @dataclass
 class ObjectContext:
@@ -90,6 +94,70 @@ class FieldPolicyEngine:
         self.meta_object = meta_object
         self.data_source = data_source
         self._field_policies: Dict[str, FieldPolicy] = {}
+        # [S7.2 2026-11-06] YAML `field_policies:` 声明的对象级策略（含角色 when_expr）；
+        # 与 _field_policies（运行时注册）分开：前者在状态矩阵之前求值，后者保持在矩阵之后。
+        self._role_policies: Dict[str, FieldPolicy] = {}
+        self._load_role_policies()
+
+    def _load_role_policies(self) -> None:
+        """从 MetaObject.field_policies 装载对象级字段策略声明。"""
+        raw = getattr(self.meta_object, 'field_policies', None)
+        if not isinstance(raw, dict):
+            return
+        for field_id, spec in raw.items():
+            if not isinstance(spec, dict):
+                continue
+            self._role_policies[str(field_id)] = FieldPolicy(
+                editable=self._parse_policy_kind(spec.get('editable'), True),
+                visible=self._parse_policy_kind(spec.get('visible'), True),
+                required=self._parse_policy_kind(spec.get('required'), False),
+            )
+
+    @staticmethod
+    def _parse_policy_kind(raw, default: bool):
+        """把 YAML 的 editable/visible/required 段解析为 *Policy。"""
+        if raw is None:
+            return None
+        if isinstance(raw, list):
+            determination_raw, default_value = raw, default
+        elif isinstance(raw, dict):
+            determination_raw = raw.get('determination') or []
+            default_value = bool(raw.get('default', default))
+        else:
+            return None
+        determination = []
+        for item in determination_raw:
+            if not isinstance(item, dict):
+                continue
+            determination.append(PolicyRule(
+                when_expr=item.get('when') or item.get('when_expr'),
+                value=item.get('value'),
+                default=bool(item.get('default', False)),
+            ))
+        if not determination:
+            return None
+        return EditablePolicy(determination=determination, default=default_value) \
+            if default is True else RequiredPolicy(determination=determination, default=default_value)
+
+    def _role_policy(
+        self,
+        field_id: str,
+        kind: str,
+        context: Optional[PolicyContext]
+    ) -> Optional[bool]:
+        """[S7.2] 角色/字段级前置规则：命中返回布尔，未命中返回 None（视为无意见）。"""
+        policy = self._role_policies.get(field_id)
+        if policy is None:
+            return None
+        kind_policy = getattr(policy, kind, None)
+        if kind_policy is None:
+            return None
+        for rule in kind_policy.determination:
+            if rule.default:
+                continue
+            if rule.when_expr and self._evaluate_rule(rule, context):
+                return bool(rule.value)
+        return None
     
     def _is_system_field(self, field_id: str) -> bool:
         """检查是否是系统字段"""
@@ -126,6 +194,15 @@ class FieldPolicyEngine:
         policies = getattr(self.meta_object, 'state_field_policies', None) or {}
         policy = policies.get(context.state)
         if not policy:
+            # [S7.4 2026-11-06] 未显式声明时，由 document_profile 推导过账只读兜底。
+            try:
+                from meta.services.document_invariants import derive_default_state_policy
+                derived = derive_default_state_policy(
+                    getattr(self.meta_object, 'id', '') or '').get(context.state) or {}
+            except Exception:
+                derived = {}
+            if field_id in (derived.get('readonly') or []):
+                return 'readonly'
             return None
         for kind in ('hidden', 'readonly', 'required'):
             if field_id in (getattr(policy, kind, None) or []):
@@ -157,6 +234,11 @@ class FieldPolicyEngine:
         """
         if self._is_system_field(field_id):
             return False
+
+        # [S7.2] 角色/对象级字段策略优先（命中即短路；未命中 = 无意见，继续走状态矩阵）。
+        _role = self._role_policy(field_id, 'editable', context)
+        if _role is not None:
+            return _role
 
         # [S1] 状态×字段矩阵优先（命中即短路），对标 SAP 状态参数文件的字段选择控制。
         if self._state_policy(field_id, context) in ('hidden', 'readonly'):
@@ -195,6 +277,11 @@ class FieldPolicyEngine:
         if self._is_system_field(field_id):
             return False
 
+        # [S7.2] 角色/对象级可见性策略优先。
+        _role = self._role_policy(field_id, 'visible', context)
+        if _role is not None:
+            return _role
+
         # [S1] 状态矩阵 hidden 优先。
         if self._state_policy(field_id, context) == 'hidden':
             return False
@@ -212,6 +299,11 @@ class FieldPolicyEngine:
         context: Optional[PolicyContext] = None
     ) -> bool:
         """判断字段是否必填"""
+        # [S7.2] 角色/对象级必填策略优先。
+        _role = self._role_policy(field_id, 'required', context)
+        if _role is not None:
+            return _role
+
         # [S1] 状态矩阵：required 直接为真；hidden 时不要求必填。
         _state_kind = self._state_policy(field_id, context)
         if _state_kind == 'required':

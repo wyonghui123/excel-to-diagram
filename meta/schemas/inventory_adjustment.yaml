@@ -18,6 +18,15 @@
 
 id: inventory_adjustment
 name: 库存调整单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: adjustment_no
+  business_date_field: posting_date
+  state_field: status
+  line_object: inventory_adjustment_line
+  line_parent_field: adjustment_id
+  line_sequence_field: line_no
 table_name: inventory_adjustments
 description: 库存调整单头（数量调整 / 报废 / 状态变更 / 盘点差异）
 display_name_field: adjustment_no

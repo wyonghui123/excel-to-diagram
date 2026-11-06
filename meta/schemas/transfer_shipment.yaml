@@ -15,6 +15,18 @@
 
 id: transfer_shipment
 name: 调拨发货单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: shipment_no
+  business_date_field: ship_date
+  state_field: status
+  line_object: transfer_shipment_line
+  line_parent_field: transfer_shipment_id
+  line_sequence_field: line_no
+  numbering:
+    scope_bo: transfer_shipment
+    fallback_sequence_code: TRS
 table_name: transfer_shipments
 description: 调拨发货单头（行见 transfer_shipment_line）
 display_name_field: shipment_no

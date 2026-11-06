@@ -28,6 +28,14 @@
 
 id: shipment
 name: 交货单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；行对象无 line_no，故不声明序号字段。
+document:
+  number_field: delivery_no
+  business_date_field: actual_ship_date
+  state_field: status
+  line_object: shipment_line
+  line_parent_field: delivery_id
 table_name: shipments
 description: 交货单头（交货行见 shipment_line）
 display_name_field: delivery_no

@@ -44,6 +44,34 @@ _SEQUENCE_SQL = (
     'FROM number_sequences WHERE id = ?')
 
 
+def resolve_document_numbering(object_type):
+    """[P1 2026-11-06] 元数据优先的取号绑定解析。
+
+    `document.number_field` 非空即视为该对象参与取号；`type_table` 默认
+    `type_definitions`（声明了 `numbering.scope_bo` 的对象走 scope 分支，
+    例如调拨发货单），其余键由 `document.numbering` 覆盖。
+    未声明 `document:` 的对象回落 `NUMBERING`（存量兼容）。
+    """
+    try:
+        from meta.core.models import registry
+        meta_object = registry.get(object_type)
+    except Exception:  # noqa: BLE001 - 测试环境 registry 可能未初始化
+        meta_object = None
+
+    profile = getattr(meta_object, 'document_profile', None)
+    if profile is not None and profile.number_field:
+        config = {
+            'no_field': profile.number_field,
+            'date_field': profile.business_date_field or '',
+        }
+        numbering = dict(profile.numbering or {})
+        if not numbering.get('scope_bo'):
+            config['type_table'] = 'type_definitions'
+        config.update(numbering)
+        return config
+    return NUMBERING.get(object_type)
+
+
 class DocumentNumberError(ValueError):
     """取号失败（序列未配置 / 分配异常）。"""
 
@@ -64,7 +92,7 @@ class DocumentNumberService:
 
         required=True 时，序列缺失或分配失败抛 DocumentNumberError。
         """
-        config = NUMBERING.get(object_type)
+        config = resolve_document_numbering(object_type)
         if config is None:
             raise DocumentNumberError('未声明取号规则的单据类型: %s' % object_type)
         no_field = config['no_field']
@@ -138,7 +166,7 @@ class DocumentNumberService:
             raise DocumentNumberError('编号不能为空', rule='NUMBER_FORMAT_INVALID')
         number = number.strip()
 
-        config = NUMBERING.get(object_type)
+        config = resolve_document_numbering(object_type)
         if config is None:
             raise DocumentNumberError(
                 '未声明取号规则的单据类型: %s' % object_type,

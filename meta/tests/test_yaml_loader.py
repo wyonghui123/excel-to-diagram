@@ -704,3 +704,53 @@ class TestDetailTabActionParsing:
         })
 
         assert tab.actions == ["assign", "unassign"]
+
+
+class TestUnknownTopLevelKeys:
+    """[P1-2 2026-11-06] 顶层键白名单：拼错键不再静默失效。
+
+    解析器只消费它认识的键，`relatons:` / `feilds:` 这类拼写错误会让整段
+    声明消失且无任何报错。白名单把这类错误在加载期暴露出来。
+    """
+
+    def test_typo_key_is_reported(self):
+        from meta.core.yaml_loader import find_unknown_keys
+
+        assert find_unknown_keys({
+            "id": "x", "name": "X", "table_name": "x",
+            "fields": [], "relatons": [],
+        }) == ["relatons"]
+
+    def test_object_definition_keys_are_all_accepted(self):
+        from meta.core.yaml_loader import find_unknown_keys
+
+        assert find_unknown_keys({
+            "id": "x", "name": "X", "table_name": "x",
+            "fields": [], "relations": [], "actions": [], "rules": [],
+            "document": {}, "states": [], "revision_policy": {},
+        }) == []
+
+    def test_non_object_definition_is_exempt(self):
+        """配置字典（无顶层 id）的顶层就是业务键，不做白名单校验。"""
+        from meta.core.yaml_loader import find_unknown_keys
+
+        assert find_unknown_keys({
+            "hierarchies": [], "dimension_priority": {},
+            "some_business_key": 1,
+        }) == []
+
+    def test_full_schema_dir_has_no_unknown_keys(self):
+        import yaml
+
+        from meta.core.yaml_loader import find_unknown_keys
+
+        schema_dir = Path(__file__).resolve().parents[1] / "schemas"
+        offenders = {}
+        for path in sorted(schema_dir.glob("*.yaml")):
+            if path.name.startswith("_"):
+                continue
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            unknown = find_unknown_keys(data)
+            if unknown:
+                offenders[path.name] = unknown
+        assert offenders == {}, "对象定义出现未登记顶层键：{0}".format(offenders)

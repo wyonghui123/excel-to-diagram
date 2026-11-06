@@ -10,6 +10,12 @@
 
 id: change_request
 name: 变更申请
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；该对象无独立业务编号字段。
+document:
+  state_field: status
+  line_object: change_request_line
+  line_parent_field: change_request_id
 table_name: change_requests
 description: 通用单据内容变更申请（审批通过后经统一写漏斗生效）
 display_name_field: id

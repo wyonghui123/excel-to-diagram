@@ -34,6 +34,15 @@
 
 id: receipt
 name: 收货单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: receipt_no
+  business_date_field: receipt_date
+  state_field: status
+  line_object: receipt_line
+  line_parent_field: receipt_id
+  line_sequence_field: line_no
 table_name: receipts
 description: 收货单头（收货行见 receipt_line）
 display_name_field: receipt_no

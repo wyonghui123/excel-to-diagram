@@ -69,6 +69,21 @@ def _current_actor() -> Optional[Dict[str, Any]]:
     return None
 
 
+def _document_posting_entry(meta_object, before: Optional[Dict[str, Any]],
+                            after: Dict[str, Any]) -> bool:
+    """[S7.3 2026-11-06] 本次更新是否「跨入」对象声明的 posting_state。
+
+    posting_state 只由 document_profile 声明；未声明对象恒为 False（零影响）。
+    """
+    profile = getattr(meta_object, 'document_profile', None)
+    if profile is None or not profile.posting_state:
+        return False
+    state_field = profile.state_field or 'status'
+    new_state = str((after or {}).get(state_field) or '')
+    old_state = str((before or {}).get(state_field) or '')
+    return new_state == profile.posting_state and old_state != profile.posting_state
+
+
 # [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
 # 原代码: ValidationMessageRegistry.get(...) 在 import 时执行, params 不完整时 KeyError,
 # 导致 "{target_name} '{value}' 不存在（字段：{field_name}）" 字面量返回给前端
@@ -2102,6 +2117,9 @@ class ActionExecutor:
                 tracked_change = bool(revision_tracking) and bool(
                     revision_service.content_changed(content_candidates)
                 )
+                # [S7.3 2026-11-06] 进入 posting_state 时即使无内容变更也强制留快照（G15）。
+                posting_entry = bool(revision_tracking) and bool(original_data) and \
+                    _document_posting_entry(meta_object, original_data, data)
                 new_revision_no = None
 
                 # [M4] 同一 change_set 内已写过版本 ⇒ 复用该版本号（父单据只 +1）
@@ -2131,7 +2149,7 @@ class ActionExecutor:
                                 '单据已被他人修改（期望版本 %s）' % expected_revision,
                             )
                         self.ds.update(meta_object.table_name, id_value, data)
-                elif tracked_change:
+                elif tracked_change or posting_entry:
                     # FR-010（M2 等价实现）：UPDATE ... WHERE id=? AND revision_no=?
                     if existing_revision is not None:
                         new_revision_no = int(existing_revision.get('revision_no') or 0)
@@ -2178,11 +2196,15 @@ class ActionExecutor:
                         self._trigger_aggregate_refresh(meta_object.id, id_value, "updated")
 
                 # [M2 FR-004] 版本记录：整单快照取更新后状态，与业务写入同事务
-                if tracked_change:
+                if tracked_change or posting_entry:
                     content_fields = revision_service.content_changed({
                         k for k, v in data.items()
                         if k != 'revision_no' and original_data.get(k) != v
                     })
+                    _after_row = None
+                    if content_fields or posting_entry:
+                        _after_row = self.ds.find_by_id(
+                            meta_object.table_name, id_value) or {}
                     if content_fields:
                         snapshot = None
                         if owner is not None:
@@ -2202,6 +2224,24 @@ class ActionExecutor:
                             owner_object_id=(owner.object_id if owner is not None else None),
                             line_key=(owner.line_key if owner is not None else None),
                             snapshot=snapshot,
+                        )
+                    elif posting_entry:
+                        # [S7.3 2026-11-06] 过账时点强制快照：无内容变更也要留一条版本
+                        # （回答「过账瞬间长什么样」），changed_fields 为空 = 只写版本行。
+                        revision_service.record(
+                            self.ds, meta_object, id_value,
+                            before=original_data,
+                            after=_after_row or {},
+                            changed_fields=[],
+                            revision_no=new_revision_no,
+                            reason_code='POST',
+                            change_set_id=change_set_id,
+                            user=cr_ctx.get('user') or _current_actor(),
+                            change_request_id=cr_ctx.get('change_request_id'),
+                            owner_object_type=(owner.object_type if owner is not None else None),
+                            owner_object_id=(owner.object_id if owner is not None else None),
+                            line_key=(owner.line_key if owner is not None else None),
+                            forced=True,
                         )
 
                 # [M3 D4] 变更申请提交钩子：draft→submitted 时校验行内容 + 建审批任务，

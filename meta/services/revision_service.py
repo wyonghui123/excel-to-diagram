@@ -219,6 +219,7 @@ def record(
     owner_object_type: Optional[str] = None,
     owner_object_id: Any = None,
     line_key: Any = None,
+    forced: bool = False,
 ) -> int:
     """写入一个版本 + 该版本的字段级差异行，返回 revision_no。
 
@@ -230,7 +231,9 @@ def record(
     刷新为最新状态（父单据 `revision_no` 只 +1，见 spec §4）。
     """
     policy = getattr(meta_object, 'revision_policy', None)
-    if (policy is None or not policy.enabled) and owner_object_type is None:
+    # [S7.3 2026-11-06] forced=True 用于「过账时点强制快照」：即使对象未启用
+    # revision_policy（或本次无内容变更）也写一条整单版本。
+    if not forced and (policy is None or not policy.enabled) and owner_object_type is None:
         return revision_no
 
     ensure_table_names_registered()

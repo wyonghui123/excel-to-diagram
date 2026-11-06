@@ -19,6 +19,14 @@
 
 id: service_request
 name: 服务请求
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）。
+document:
+  number_field: request_no
+  state_field: status
+  line_object: service_request_line
+  line_parent_field: request_id
+  line_sequence_field: line_no
 table_name: service_requests
 description: 服务请求头（事件型需求单；行见 service_request_line）
 display_name_field: title

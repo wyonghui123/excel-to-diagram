@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import json
 from flask import Blueprint, request, g
 from meta.api._response_contract import ok, ok_message, ok_list, error_response, json_response
 from meta.core.query_spec import parse_query_spec
@@ -14,7 +15,7 @@ from meta.core.bo_framework import bo_framework
 from meta.core.models import registry, resolve_write_anchor
 from meta.core.rule_provider import get_rule_provider
 from meta.services.auth_middleware import login_required, get_current_user, require_permission
-from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
+from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext, UserContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
 from meta.services import revision_service
@@ -188,20 +189,8 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 SALES_ORDER_OBJECT = 'sales_order'
 PURCHASE_ORDER_OBJECT = 'purchase_order'
 RECEIPT_OBJECT = 'receipt'
-#: 需要按「单据类型 → number_sequence_id」自动取号的对象
-_NUMBERED_OBJECTS = (SALES_ORDER_OBJECT, PURCHASE_ORDER_OBJECT, RECEIPT_OBJECT)
-#: 取号异常文案里的单据名
-_NUMBER_SEQ_LABELS = {
-    SALES_ORDER_OBJECT: '销售订单',
-    PURCHASE_ORDER_OBJECT: '采购订单',
-    RECEIPT_OBJECT: '收货单',
-}
-#: 对象 → (编号列, 取号用的日期列)
-_NUMBER_SEQ_FIELDS = {
-    SALES_ORDER_OBJECT: ('order_no', 'order_date'),
-    PURCHASE_ORDER_OBJECT: ('order_no', 'order_date'),
-    RECEIPT_OBJECT: ('receipt_no', 'receipt_date'),
-}
+# [P1 2026-11-06] 取号绑定改由元数据 `document.number_field` 解析
+# （见 DocumentNumberService.resolve_document_numbering），不再维护对象白名单。
 #: 抬头变更后需要重算商务默认值的维度（客户 / 销售组织变化）
 _SALES_ORDER_PARTY_FIELDS = ('customer_account_id', 'sales_org_id')
 #: 订单抬头地址字段（收货 / 收票）
@@ -518,11 +507,13 @@ def _allocate_document_no(object_type: str, data: dict) -> dict:
     已带单号、或缺少单据类型/单据日期时不取号，交由字段必填校验兜底；
     单据类型未挂序列（number_sequence_id 为空）时同样不取号。
     """
-    if object_type not in _NUMBERED_OBJECTS:
-        return data
-    no_field = _NUMBER_SEQ_FIELDS[object_type][0]
+    from meta.services.document_number_service import (
+        DocumentNumberService, resolve_document_numbering)
 
-    from meta.services.document_number_service import DocumentNumberService
+    config = resolve_document_numbering(object_type)
+    if config is None:
+        return data
+    no_field = config['no_field']
 
     service = DocumentNumberService(_get_data_source())
     # [T6.1 2026-11-06] 调用方自带单号时补齐校验（格式 / 起始值 / 位数 / 唯一性）：
@@ -592,7 +583,8 @@ def create_bo(object_type):
         return error_response(result.message, status=status_code, errors=result.errors)
     except (NumberSequenceError, DocumentNumberError) as e:
         logger.warning(f"[bo_api] allocate order_no failed: {e}")
-        label = _NUMBER_SEQ_LABELS.get(object_type, '单据')
+        meta_object = registry.get(object_type)
+        label = getattr(meta_object, 'name', None) or '单据'
         return error_response(f'{label}取号失败：{e}', status=400)
     except Exception as e:
         import traceback
@@ -824,6 +816,38 @@ def _get_current_user_safe():
         return None
 
 
+def _current_user_roles() -> list:
+    """[S7.2 2026-11-06] 当前用户的权限集 code 列表，供字段策略角色规则求值。
+
+    优先用会话里已解析的 roles；否则按 org_members → org_permission_sets →
+    permission_sets.code 反查（与 data_permission 同源）。任何异常返回空列表，
+    保证「无角色信息 = 无意见」，不阻断读路径。
+    """
+    user = _get_current_user_safe()
+    if not isinstance(user, dict):
+        return []
+    roles = user.get('roles')
+    if isinstance(roles, list) and roles:
+        return [str(r) for r in roles]
+    user_id = user.get('user_id') or user.get('id')
+    if user_id is None:
+        return []
+    try:
+        ds = _get_data_source()
+        cursor = ds.execute(
+            """SELECT DISTINCT ps.code
+               FROM permission_sets ps
+               JOIN org_permission_sets gr ON gr.permission_set_id = ps.id
+               JOIN org_members ugm ON gr.org_id = ugm.org_id
+               WHERE ugm.user_id = ?""",
+            [user_id]
+        )
+        return [str(row[0]) for row in cursor.fetchall() if row[0]]
+    except Exception as exc:
+        logger.debug(f'[_current_user_roles] resolve failed: {exc}')
+        return []
+
+
 def _read_audit_log_via_v1(obj_id):
     """[FIX 2026-06-12] audit_log 单条: 走 v1 /audit/logs/{id} (已有 extra_data_parsed)
     再 enrich 中英文 label, 跟 v2 BO 列表接口行为一致.
@@ -939,6 +963,31 @@ def read_bo_by_string_id(object_type, obj_id):
         data = mask_record(object_type, result.data)
         return ok(data)
     return error_response(result.message, status=404)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/revisions/<int:revision_no>', methods=['GET'])
+@login_required
+@declare_permission('crud_read')
+def get_bo_revision(object_type, obj_id, revision_no):
+    """[S7.3 2026-11-06] 单个版本快照 + 字段级差异（只读，不提供编辑/删除）。"""
+    ds = _get_data_source()
+    row = revision_service._find_revision(ds, object_type, obj_id, revision_no)
+    if not row:
+        return error_response('版本不存在', error_code='REVISION_NOT_FOUND', status=404)
+    snapshot = row.get('snapshot')
+    try:
+        snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    except (TypeError, ValueError):
+        pass
+    changes = ds.find(revision_service.CHANGES_TABLE, {'revision_id': row.get('id')}) or []
+    return ok({
+        'revision_no': row.get('revision_no'),
+        'created_at': row.get('created_at'),
+        'created_by': row.get('created_by'),
+        'reason_code': row.get('reason_code'),
+        'snapshot': snapshot,
+        'changes': changes,
+    })
 
 
 @bo_bp.route('/<object_type>', methods=['GET'])
@@ -2781,7 +2830,11 @@ def get_meta_full(object_type):
             mutability = request.args.get('mutability')
             engine = FieldPolicyEngine(meta_object=meta_obj)
             object_context = ObjectContext(mutability=mutability, object_type=object_type)
-            policy_context = PolicyContext(object_context=object_context, action=context)
+            policy_context = PolicyContext(
+                object_context=object_context,
+                action=context,
+                user_context=UserContext(roles=_current_user_roles()),
+            )
             for f in meta_obj.fields:
                 field_policies[f.id] = {
                     'editable': engine.is_field_editable(f.id, policy_context),
@@ -2839,7 +2892,8 @@ def get_number_sequences():
     on_exhaust=error 时 remaining 按 {SEQ:n} 位数上限计算；extend 时为 null。
     """
     from meta.core.key_template_engine import _SEQUENCES_TABLE
-    from meta.services.document_number_service import DocumentNumberService, NUMBERING
+    from meta.services.document_number_service import (
+        DocumentNumberService, NUMBERING, resolve_document_numbering)
 
     ds = _get_data_source()
     rows = ds.query(
@@ -2881,12 +2935,20 @@ def get_number_sequences():
             'runtimes': runtimes,
         })
 
-    numbering = [
-        {'object_type': key, 'no_field': cfg.get('no_field'),
-         'date_field': cfg.get('date_field'), 'type_table': cfg.get('type_table'),
-         'fallback_sequence_code': cfg.get('fallback_sequence_code')}
-        for key, cfg in sorted(NUMBERING.items())
-    ]
+    numbering = []
+    seen = set()
+    for key in list(NUMBERING) + [obj.id for obj in registry.all()]:
+        if key in seen:
+            continue
+        cfg = resolve_document_numbering(key)
+        if not cfg:
+            continue
+        seen.add(key)
+        numbering.append({
+            'object_type': key, 'no_field': cfg.get('no_field'),
+            'date_field': cfg.get('date_field'), 'type_table': cfg.get('type_table'),
+            'fallback_sequence_code': cfg.get('fallback_sequence_code'),
+        })
     return ok({'sequences': sequences, 'numbering': numbering})
 
 
@@ -2955,7 +3017,8 @@ def get_field_policies(object_type):
 
         object_context = ObjectContext(mutability=mutability, object_type=object_type)
         policy_context = PolicyContext(object_context=object_context, action=context,
-                                       state=state)
+                                       state=state,
+                                       user_context=UserContext(roles=_current_user_roles()))
 
         field_ids = [f.id for f in meta_obj.fields]
         editable_fields = engine.get_editable_fields(field_ids, policy_context)

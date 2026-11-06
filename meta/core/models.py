@@ -547,6 +547,28 @@ class MetaStateFieldPolicy:
 
 
 @dataclass
+class MetaDocumentProfile:
+    """[S7.1 2026-11-06] 事实单据六件套声明（G13）。
+
+    把原先散落在 states / state_field_policies / line_type_assignment /
+    reversal_profiles / service 层不变量里的「六份事实」收敛为对象级一次声明。
+    默认 None（未声明）= 存量对象行为完全不变。
+    """
+    number_field: str = ""                # 业务编号（如 order_no）
+    business_date_field: str = ""         # 业务时点（如 order_date）
+    state_field: str = ""                 # 状态字段（如 status）
+    posting_state: str = ""               # 到达此状态即「已过账」
+    document_type_field: str = ""         # 单据类型字段（指向 type_definition）
+    line_object: str = ""                 # 行子对象（如 purchase_order_line）
+    line_parent_field: str = ""           # 行对象指向抬头的 FK（如 order_id）
+    line_sequence_field: str = ""         # 行号字段（如 line_no）
+    reversal_profile: str = ""            # 冲销策略 id（复用 reversal_profiles）
+    snapshot_fields: List[str] = field(default_factory=list)  # 过账时点冻结字段
+    # [P1 2026-11-06] 取号绑定（type_table / scope_bo / fallback_sequence_code）
+    numbering: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class EnhancedMetaField(MetaField):
     """增强版元数据字段（继承现有MetaField并扩展）
     
@@ -1146,6 +1168,11 @@ class MetaObject:
     # 默认空 = 完全向后兼容；未声明 state_field_policies 的对象行为不变。
     states: List[MetaStateDefinition] = field(default_factory=list)
     state_field_policies: Dict[str, MetaStateFieldPolicy] = field(default_factory=dict)
+
+    # [S7.1 2026-11-06] 事实单据六件套声明；None = 未声明（存量对象零影响）。
+    document_profile: Optional['MetaDocumentProfile'] = None
+    # [S7.2 2026-11-06] 对象级字段策略（含角色 when_expr）；由 FieldPolicyEngine 装载。
+    field_policies: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """初始化时自动应用分类模板"""

@@ -14,7 +14,12 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 
-from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
+from meta.services.field_policy_engine import (
+    FieldPolicyEngine,
+    PolicyContext,
+    ObjectContext,
+    UserContext,
+)
 from meta.core.models import RuleType
 
 logger = logging.getLogger(__name__)
@@ -243,6 +248,33 @@ class FieldPolicyValidationInterceptor:
             object_context=object_ctx,
             action=action,
             state=state_value,
+            user_context=self._to_user_context(user_context),
+        )
+
+    @staticmethod
+    def _to_user_context(raw):
+        """[S7.2 2026-11-06] 把调用方传入的 dict 转成 UserContext。
+
+        改造前 `_build_context` 收了 user_context 却没用 → 角色规则永远不生效。
+        None / 非法类型 → None（引擎视为「无意见」，行为与改造前一致）。
+        """
+        if raw is None:
+            return None
+        if isinstance(raw, UserContext):
+            return raw
+        if not isinstance(raw, dict):
+            return None
+        roles = raw.get('roles')
+        if roles is None:
+            roles = raw.get('permission_sets') or []
+        if isinstance(roles, str):
+            roles = [roles]
+        permissions = raw.get('permissions') or []
+        if isinstance(permissions, str):
+            permissions = [permissions]
+        return UserContext(
+            roles=[str(r) for r in roles],
+            permissions=[str(p) for p in permissions],
         )
 
     def _resolve_state_field(self) -> str:

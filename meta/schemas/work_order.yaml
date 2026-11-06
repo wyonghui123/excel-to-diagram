@@ -34,6 +34,11 @@
 
 id: work_order
 name: 服务工单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；该对象无行子对象。
+document:
+  number_field: work_order_no
+  state_field: status
 table_name: work_orders
 description: 服务工单头（SLA 里程碑见 sla_milestone，服务事件见 service_event）
 display_name_field: work_order_no

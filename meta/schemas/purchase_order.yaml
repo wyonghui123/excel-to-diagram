@@ -107,6 +107,25 @@ state_field_policies:
       - purchase_legal_entity_id
       - order_date
 
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）：编号 / 时点 / 状态 / 类型 / 头-行 / 过账快照
+document:
+  number_field: order_no
+  business_date_field: order_date
+  state_field: status
+  posting_state: confirmed
+  document_type_field: document_type_id
+  line_object: purchase_order_line
+  line_parent_field: order_id
+  line_sequence_field: line_no
+  snapshot_fields:
+    - order_no
+    - document_type_id
+    - supplier_party_id
+    - order_date
+    - currency_id
+    - exchange_rate
+    - gross_amount
+
 deletion_policy:
   # 事实单据：非草稿禁止删除（守卫拦截器强制度）；草稿删除时级联清行
   mode: restrict

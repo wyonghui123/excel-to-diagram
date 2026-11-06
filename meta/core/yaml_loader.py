@@ -126,6 +126,7 @@ from meta.core.models import (
     MetaStateTransition,
     MetaStateDefinition,
     MetaStateFieldPolicy,
+    MetaDocumentProfile,
     MetaTrigger,
     MetaRule,
     MetaQuery,
@@ -2647,6 +2648,160 @@ def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None
                             obj.id, state, kind, fid, where))
 
 
+def parse_document_profile(
+    obj: MetaObject,
+    data: Dict[str, Any],
+    source_file: str = "",
+) -> Optional[MetaDocumentProfile]:
+    """[S7.1 2026-11-06] 解析对象顶层 `document:` 段（事实单据六件套，G13）。
+
+    只做对象内自洽校验（字段存在 / posting_state 在状态目录内 / 冲销 id 可解析）；
+    跨对象引用（line_object 及其字段）在 `validate_document_profiles()` 中统一校验，
+    因为子对象可能在抬头对象之后才加载。
+    """
+    raw = data.get("document")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "[S7] {0}: document 必须是映射{1}".format(
+                obj.id, " ({0})".format(source_file) if source_file else ""))
+
+    where = " ({0})".format(source_file) if source_file else ""
+    field_ids = {f.id for f in obj.fields}
+    # document_type_field 常由 aspect（document_type_aspect）提供；parse_meta_object
+    # 直接解析原始 YAML 时切面尚未合并，故此处只校验自有字段，跨对象校验时再验类型字段。
+    _IN_OBJECT_FIELDS = ("number_field", "business_date_field", "state_field")
+    for key in _IN_OBJECT_FIELDS:
+        value = str(raw.get(key) or "")
+        if value and value not in field_ids:
+            raise ValueError(
+                "[S7] {0}: document.{1}={2!r} 不存在于 fields{3}".format(
+                    obj.id, key, value, where))
+
+    posting_state = str(raw.get("posting_state") or "")
+    if posting_state:
+        declared = {s.code for s in obj.states}
+        if not declared:
+            raise ValueError(
+                "[S7] {0}: document.posting_state={1!r} 但对象未声明 states{2}".format(
+                    obj.id, posting_state, where))
+        if posting_state not in declared:
+            raise ValueError(
+                "[S7] {0}: document.posting_state={1!r} 不在 states 中；"
+                "已声明 states={2}{3}".format(
+                    obj.id, posting_state, sorted(declared), where))
+
+    reversal_profile = str(raw.get("reversal_profile") or "")
+    if reversal_profile:
+        profiles = data.get("reversal_profiles") or {}
+        if profiles and reversal_profile not in profiles:
+            raise ValueError(
+                "[S7] {0}: document.reversal_profile={1!r} 未在 reversal_profiles 中声明{2}".format(
+                    obj.id, reversal_profile, where))
+
+    snapshot_fields = [str(f) for f in (raw.get("snapshot_fields") or [])]
+    numbering = raw.get("numbering") or {}
+    if not isinstance(numbering, dict):
+        raise ValueError(
+            "[S7] {0}: document.numbering 必须是映射{1}".format(obj.id, where))
+
+    return MetaDocumentProfile(
+        number_field=str(raw.get("number_field") or ""),
+        business_date_field=str(raw.get("business_date_field") or ""),
+        state_field=str(raw.get("state_field") or ""),
+        posting_state=posting_state,
+        document_type_field=str(raw.get("document_type_field") or ""),
+        line_object=str(raw.get("line_object") or ""),
+        line_parent_field=str(raw.get("line_parent_field") or ""),
+        line_sequence_field=str(raw.get("line_sequence_field") or ""),
+        reversal_profile=reversal_profile,
+        snapshot_fields=snapshot_fields,
+        numbering=dict(numbering),
+    )
+
+
+def validate_document_profiles(objects: List[MetaObject]) -> None:
+    """[S7.1] 跨对象校验：line_object 必须存在，且其 parent/sequence 字段必须存在。"""
+    by_id = {obj.id: obj for obj in objects}
+    for obj in objects:
+        profile = getattr(obj, "document_profile", None)
+        if profile is None:
+            continue
+        # 切面合并后校验 document_type_field / snapshot_fields（可能由 aspect 提供）
+        own_fields = {f.id for f in obj.fields}
+        if profile.document_type_field and profile.document_type_field not in own_fields:
+            raise ValueError(
+                "[S7] {0}: document.document_type_field={1!r} 不存在于 fields".format(
+                    obj.id, profile.document_type_field))
+        for name in profile.snapshot_fields:
+            if name not in own_fields:
+                raise ValueError(
+                    "[S7] {0}: document.snapshot_fields 含未知字段 {1!r}".format(
+                        obj.id, name))
+        if not profile.line_object:
+            continue
+        child = by_id.get(profile.line_object)
+        if child is None:
+            raise ValueError(
+                "[S7] {0}: document.line_object={1!r} 不是已加载的对象".format(
+                    obj.id, profile.line_object))
+        child_fields = {f.id for f in child.fields}
+        for key in ("line_parent_field", "line_sequence_field"):
+            value = getattr(profile, key)
+            if value and value not in child_fields:
+                raise ValueError(
+                    "[S7] {0}: document.{1}={2!r} 不存在于 {3}.fields".format(
+                        obj.id, key, value, profile.line_object))
+
+
+# [P1-2 2026-11-06] 对象定义 YAML 的顶层键白名单。
+#
+# 背景：`parse_meta_object` 只消费它认识的键，拼错（如 `relatons:` / `feilds:`）
+# 会被静默忽略 —— 对象照常注册，但声明的能力（关系 / 字段 / 单号）整体消失，
+# 且没有任何报错。此处枚举解析器真正消费的键，未知键在加载期告警。
+#
+# 注意：只对「含顶层 id: 的对象定义」生效。schemas/ 目录里另有配置字典
+# （hierarchies.yaml / dimension_object_mapping.yaml / shared_properties.yaml 等），
+# 其顶层就是业务键，不做本校验（判据同 load_yaml_directory 的对象定义判据）。
+_KNOWN_OBJECT_KEYS = frozenset({
+    # 标识 / 展示
+    "id", "name", "description", "table_name", "object_type", "display_name_field",
+    "bo_category", "bo_sub_category", "skip_generic_api", "skip_auto_menu",
+    "is_view", "view_definition", "virtual_config", "view_config", "base_objects",
+    "persistent", "persistence", "resource", "write_anchor", "parent_object", "parent",
+    # 结构
+    "fields", "relations", "indexes", "actions", "ui_actions", "rules", "queries",
+    "functions", "includes", "aspects", "aliases", "nested", "list",
+    "semantics", "ui_badge", "ui_view_config", "ui_view_configs",
+    # 关联 / 层级 / 维度
+    "associations", "hierarchy", "hierarchies", "hierarchy_paths",
+    "hierarchy_scopes", "context", "context_levels", "cascade_select",
+    "dimensions", "dimension_bindings", "dimension_object_mappings",
+    "dimension_priority", "filter_dependencies", "api_mappings",
+    "combination_policy", "category_config", "analytical_model",
+    # 删除 / 审计 / 权限 / 导入导出
+    "deletability", "addability", "deletion_policy", "audit", "audit_levels",
+    "authorization", "security", "import_export", "routes",
+    "soft_delete", "soft_delete_field", "soft_delete_value",
+    "soft_delete_undelete_value",
+    # 编号 / 状态机 / 修订 / 单据六件套 / 行级策略
+    "key_template", "states", "state_field_policies", "requires_state_machine",
+    "revision_policy", "document", "doc_effect",
+    "field_policies", "conditional_required_examples",
+})
+
+
+def find_unknown_keys(data: Dict[str, Any]) -> List[str]:
+    """返回对象定义 YAML 中未被解析器消费的顶层键（拼写错误的信号）。
+
+    非对象定义（无顶层 `id:`）返回空列表 —— 配置字典的顶层就是业务键。
+    """
+    if not isinstance(data, dict) or "id" not in data:
+        return []
+    return sorted(str(key) for key in data if str(key) not in _KNOWN_OBJECT_KEYS)
+
+
 def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject:
     fields = [parse_field(f, included_from=f.get("included_from", "")) for f in data.get("fields", [])]
     relations = [parse_relation(r) for r in data.get("relations", [])]
@@ -2760,6 +2915,9 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
             hidden=list(policy.get("hidden") or []),
         )
     _validate_state_declarations(obj, source_file)
+    # [S7.1/S7.2 2026-11-06] 事实单据六件套 + 对象级字段策略声明。
+    obj.document_profile = parse_document_profile(obj, data, source_file)
+    obj.field_policies = data.get("field_policies") or {}
     
     associations = obj.associations
     if associations:
@@ -2853,6 +3011,15 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
                 "请改用字段属性（required/unique/pattern/enum_values）或 rules:（type: validation）。"
                 .format(file_path)
             )
+
+        # [P1-2 2026-11-06] 未知顶层键告警（拼写错误会让整段声明静默失效）。
+        # 先告警一版，不直接 raise：schemas/ 之外的调用方（tests / tools）可能
+        # 传入带自定义顶层键的临时 YAML，直接失败会误伤。
+        unknown_keys = find_unknown_keys(data)
+        if unknown_keys:
+            logger.warning(
+                "[P1-2] %s: 未知顶层键 %s（拼写错误？该键不会被任何解析器消费）",
+                file_path, unknown_keys)
 
         if aspects_defs:
             data = _resolve_aspects(data, aspects_defs, shared_props=shared_props)
@@ -3017,6 +3184,8 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
 
     # [M4] 行级策略的跨对象校验（child_object / parent_field / 清单字段）
     validate_line_policies(objects)
+    # [S7.1] 单据六件套的跨对象校验（line_object / line_parent_field / line_sequence_field）
+    validate_document_profiles(objects)
 
     return objects
 

@@ -12,6 +12,12 @@
 
 id: fulfillment_order
 name: 履约单
+
+# [S7.1 2026-11-06] 事实单据六件套声明（G13）；该对象无行子对象。
+document:
+  number_field: fulfillment_no
+  business_date_field: planned_date
+  state_field: status
 table_name: fulfillment_orders
 description: 履约业务分组单据（按客户 / 站点 / 交付方式分组；执行由 workflow_run 驱动）
 display_name_field: fulfillment_no
