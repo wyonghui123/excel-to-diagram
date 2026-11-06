@@ -2500,23 +2500,53 @@ def load_type_specs(dir_path: str) -> Dict[str, Dict[str, Any]]:
 def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None:
     """[S1] 状态目录/矩阵的 fail-fast 校验。
 
-    规则：① 矩阵 key 必须出现在 obj.states 或任一 state_transition 的 from/to；
-          ② 矩阵中的字段 id 必须存在于 obj.fields。
+    规则：① 状态 code 非空且不重复；② category 必须在四类内；
+          ③ 声明了 states 时，transitions 的 from/to 必须落在目录内；
+          ④ 矩阵 key 必须出现在 obj.states 或任一 state_transition 的 from/to；
+          ⑤ 矩阵中的字段 id 必须存在于 obj.fields。
     违规直接抛错（启动失败），不静默忽略。
     """
-    if not obj.state_field_policies:
-        return
-    declared = {s.code for s in obj.states}
+    where = " ({0})".format(source_file) if source_file else ""
+    declared = set()
+    for state in obj.states:
+        if not state.code:
+            raise ValueError("[S1] {0}: states 存在空 code{1}".format(obj.id, where))
+        if state.code in declared:
+            raise ValueError(
+                "[S1] {0}: states 重复声明 {1!r}{2}".format(obj.id, state.code, where))
+        declared.add(state.code)
+        if state.category not in ("initial", "normal", "terminal", "system"):
+            raise ValueError(
+                "[S1] {0}: state {1!r} 的 category={2!r} 非法"
+                "（只允许 initial/normal/terminal/system）{3}".format(
+                    obj.id, state.code, state.category, where))
+
     transition_states: set = set()
     for rule in obj.rules:
-        if getattr(rule, "rule_type", None) == RuleType.STATE_TRANSITION:
-            transition_states.update(getattr(rule, "from_states", []) or [])
-            to_state = getattr(rule, "to_state", "")
-            if to_state:
-                transition_states.add(to_state)
+        if getattr(rule, "rule_type", None) != RuleType.STATE_TRANSITION:
+            continue
+        from_states = [s for s in (getattr(rule, "from_states", []) or [])
+                       if s not in ("", "*")]
+        to_state = getattr(rule, "to_state", "")
+        transition_states.update(from_states)
+        if to_state:
+            transition_states.add(to_state)
+        if not declared:
+            continue
+        unknown = [s for s in from_states if s not in declared]
+        if to_state and to_state not in declared:
+            unknown.append(to_state)
+        if unknown:
+            raise ValueError(
+                "[S1] {0}: transition {1!r} 引用了未在 states 声明的状态 {2}{3}；"
+                "已声明 states={4}".format(
+                    obj.id, getattr(rule, "id", "?"), sorted(set(unknown)),
+                    where, sorted(declared)))
+
+    if not obj.state_field_policies:
+        return
     allowed = declared | transition_states
     field_ids = {f.id for f in obj.fields}
-    where = " ({0})".format(source_file) if source_file else ""
     for state, policy in obj.state_field_policies.items():
         if state not in allowed:
             raise ValueError(

@@ -16,6 +16,8 @@ from meta.core.models import (
 )
 from meta.core.models_enums import RelationType
 from meta.core.models_ui_config import (
+    ChangeEventConfig,
+    ChangeNotificationConfig,
     UIFormSection,
     UIFormViewConfig,
     UIListViewColumn,
@@ -69,6 +71,12 @@ def _build_object():
         ui_view_config=UIViewConfig(
             list=UIListViewConfig(columns=[UIListViewColumn(key="status")]),
             form=UIFormViewConfig(sections=[UIFormSection(title="备注", fields=["remark"])]),
+            change_notification=ChangeNotificationConfig(
+                enabled=True,
+                events=[ChangeEventConfig(type="status_changed",
+                                          track_fields=["status"],
+                                          payload=["remark"])],
+            ),
         ),
         state_field_policies={
             "submitted": MetaStateFieldPolicy(readonly=["item_id"], required=["remark"]),
@@ -120,7 +128,7 @@ def test_object_level_analyze_covers_all_fields(service):
     assert [item['field'] for item in result['impacts']] == ['status', 'remark', 'item_id']
     assert result['total'] > 0
     assert set(result['summary']) <= {'rule', 'state_transition', 'state_field_policy',
-                                      'relation', 'index', 'query', 'view'}
+                                      'relation', 'index', 'query', 'view', 'change_event'}
 
 
 def test_unknown_object_and_field_raise(service):
@@ -145,6 +153,16 @@ def test_field_id_word_boundary(service):
     status_rule_ids = [ref['id'] for ref in status_result['impacts'][0]['references']
                        if ref['kind'] == 'rule']
     assert "check_item" not in status_rule_ids
+
+
+def test_change_event_refs_live_on_event(service):
+    """track_fields / payload 挂在 event 上，不应因层级读错而漏报。"""
+    status_refs = service.analyze("po_test", "status")['impacts'][0]['references']
+    remark_refs = service.analyze("po_test", "remark")['impacts'][0]['references']
+    assert any(ref['kind'] == 'change_event' and ref['detail'] == 'track_fields'
+               for ref in status_refs)
+    assert any(ref['kind'] == 'change_event' and ref['detail'] == 'payload'
+               for ref in remark_refs)
 
 
 def test_purchase_order_real_schema_status_impact():

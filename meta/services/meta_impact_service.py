@@ -295,14 +295,18 @@ class MetaImpactService:
         return []
 
     def _change_event_refs(self, obj: Any, field_id: str) -> List[Dict[str, Any]]:
+        # track_fields / payload 挂在每个 event 上，不在 change_notification 顶层。
         config = _value(_value(obj, 'ui_view_config'), 'change_notification')
         if not config:
             return []
         refs = []
-        if field_id in _as_list(_value(config, 'track_fields')):
-            refs.append(self._ref('change_event', 'change_notification', 'track_fields'))
-        if field_id in _as_list(_value(config, 'payload')):
-            refs.append(self._ref('change_event', 'change_notification', 'payload'))
+        for event in _as_list(_value(config, 'events')):
+            event_type = _value(event, 'type', '') or 'change_notification'
+            ref_id = 'change_notification:{0}'.format(event_type)
+            if field_id in _as_list(_value(event, 'track_fields')):
+                refs.append(self._ref('change_event', ref_id, 'track_fields'))
+            if field_id in _as_list(_value(event, 'payload')):
+                refs.append(self._ref('change_event', ref_id, 'payload'))
         return refs
 
     def _action_refs(self, obj: Any, field_id: str) -> List[Dict[str, Any]]:

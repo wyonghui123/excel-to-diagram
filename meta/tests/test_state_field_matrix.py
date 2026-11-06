@@ -85,10 +85,11 @@ def test_parse_states_and_policies():
             "id": "po_submit", "name": "提交", "type": "state_transition",
             "state_field": "status", "from_states": ["draft"], "to_state": "submitted",
         }],
-        "states": [{"code": "draft", "label": "草稿", "category": "initial"}],
+        "states": [{"code": "draft", "label": "草稿", "category": "initial"},
+                   {"code": "submitted", "label": "已提交"}],
         "state_field_policies": {"submitted": {"readonly": ["code"]}},
     })
-    assert [s.code for s in obj.states] == ["draft"]
+    assert [s.code for s in obj.states] == ["draft", "submitted"]
     assert obj.states[0].category == "initial"
     assert obj.state_field_policies["submitted"].readonly == ["code"]
 
@@ -116,6 +117,44 @@ def test_invalid_field_ref_fails_fast():
                 "state_field": "status", "from_states": ["draft"], "to_state": "submitted",
             }],
             "state_field_policies": {"submitted": {"readonly": ["ghost_field"]}},
+        })
+
+
+def test_duplicate_state_code_fails_fast():
+    with pytest.raises(ValueError, match="重复声明"):
+        parse_meta_object({
+            "id": "po_dup_state",
+            "name": "重复状态",
+            "table_name": "po_dup_state",
+            "fields": [{"id": "code", "name": "编码", "type": "string"}],
+            "states": [{"code": "draft", "label": "草稿"},
+                       {"code": "draft", "label": "又一份草稿"}],
+        })
+
+
+def test_invalid_state_category_fails_fast():
+    with pytest.raises(ValueError, match="category"):
+        parse_meta_object({
+            "id": "po_bad_category",
+            "name": "坏分类",
+            "table_name": "po_bad_category",
+            "fields": [{"id": "code", "name": "编码", "type": "string"}],
+            "states": [{"code": "draft", "label": "草稿", "category": "draft"}],
+        })
+
+
+def test_transition_outside_state_catalog_fails_fast():
+    with pytest.raises(ValueError, match="未在 states 声明"):
+        parse_meta_object({
+            "id": "po_ghost_transition",
+            "name": "越界转换",
+            "table_name": "po_ghost_transition",
+            "fields": [{"id": "code", "name": "编码", "type": "string"}],
+            "rules": [{
+                "id": "po_submit", "name": "提交", "type": "state_transition",
+                "state_field": "status", "from_states": ["draft"], "to_state": "ghost",
+            }],
+            "states": [{"code": "draft", "label": "草稿"}],
         })
 
 

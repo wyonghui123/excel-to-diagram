@@ -2731,6 +2731,15 @@ def get_object_schema(object_type):
             if hasattr(meta_obj, 'cascade_select') and meta_obj.cascade_select:
                 schema['cascade_select'] = meta_obj.cascade_select
 
+            # [S1 2026-11-06] 状态目录 + 状态×字段矩阵下发给前端，供按状态渲染只读/必填。
+            if getattr(meta_obj, 'states', None):
+                schema['states'] = [_to_json_dict(s) for s in meta_obj.states]
+            if getattr(meta_obj, 'state_field_policies', None):
+                schema['state_field_policies'] = {
+                    code: _to_json_dict(policy)
+                    for code, policy in meta_obj.state_field_policies.items()
+                }
+
             if object_type == 'relationship':
                 scope_rules = _load_scope_rules()
                 if scope_rules:
@@ -2935,6 +2944,8 @@ def get_field_policies(object_type):
     try:
         context = request.args.get('context', 'read')
         mutability = request.args.get('mutability', None)
+        # [S1 2026-11-06] 可选 state：传入时按状态×字段矩阵求值（前端切换状态后重查）。
+        state = (request.args.get('state') or '').strip() or None
 
         meta_obj = registry.get(object_type)
         if not meta_obj:
@@ -2943,7 +2954,8 @@ def get_field_policies(object_type):
         engine = FieldPolicyEngine(meta_object=meta_obj)
 
         object_context = ObjectContext(mutability=mutability, object_type=object_type)
-        policy_context = PolicyContext(object_context=object_context, action=context)
+        policy_context = PolicyContext(object_context=object_context, action=context,
+                                       state=state)
 
         field_ids = [f.id for f in meta_obj.fields]
         editable_fields = engine.get_editable_fields(field_ids, policy_context)
