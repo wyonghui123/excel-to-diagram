@@ -342,7 +342,8 @@ class TestBusinessObjectRedundancyFields:
         red_def = self.registry.get_redundancy("business_object", "domain_id")
 
         assert red_def is not None, "domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        # [P2 2026-11-06] YAML 声明 type=stored（物理列，db_trigger 维护）
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "domain.id"
 
@@ -365,7 +366,8 @@ class TestBusinessObjectRedundancyFields:
         red_def = self.registry.get_redundancy("business_object", "sub_domain_id")
 
         assert red_def is not None, "sub_domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        # [P2 2026-11-06] YAML 声明 type=stored（物理列，db_trigger 维护）
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "sub_domain.id"
 
@@ -379,22 +381,22 @@ class TestBusinessObjectRedundancyFields:
         assert step0.table == "service_modules"
         assert step0.select == "sub_domain_id"
 
-    def test_business_object_all_virtual_fields_registered(self):
-        """测试 business_object 所有虚拟字段都已注册"""
+    def test_business_object_all_redundancy_fields_registered(self):
+        """测试 business_object 所有冗余字段都已注册（含 stored / virtual 两类）"""
         obj_reds = self.registry.get_object_redundancies("business_object")
 
-        required_virtual_fields = [
-            "domain_id",
-            "sub_domain_id",
-            "domain_name",
-            "sub_domain_name",
-            "service_module_name",
-            "version_name",
-        ]
+        expected_types = {
+            "domain_id": RedundancyType.STORED,
+            "sub_domain_id": RedundancyType.STORED,
+            "domain_name": RedundancyType.VIRTUAL,
+            "sub_domain_name": RedundancyType.VIRTUAL,
+            "service_module_name": RedundancyType.VIRTUAL,
+            "version_name": RedundancyType.VIRTUAL,
+        }
 
-        for field_id in required_virtual_fields:
+        for field_id, expected_type in expected_types.items():
             assert field_id in obj_reds, f"business_object.{field_id} 未注册"
-            assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+            assert obj_reds[field_id].redundancy_type == expected_type
 
     def test_business_object_domain_id_vs_domain_name_distinction(self):
         """测试 domain_id (integer) 和 domain_name (string) 是不同的冗余定义"""
@@ -480,7 +482,8 @@ class TestServiceModuleRedundancyFields:
         red_def = self.registry.get_redundancy("service_module", "domain_id")
 
         assert red_def is not None, "service_module.domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        # [P2 2026-11-06] YAML 声明 type=stored（物理列，db_trigger 维护）
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "sub_domain_id"
         assert red_def.derived_from == "domain.id"
 
@@ -516,20 +519,20 @@ class TestServiceModuleRedundancyFields:
         assert red_def.derived_from == "domain.name"
         assert len(red_def.join_path) == 2, "domain_name 需要2步: sub_domains → domains"
 
-    def test_service_module_all_virtual_fields_registered(self):
-        """测试 service_module 所有虚拟字段都已注册"""
+    def test_service_module_all_redundancy_fields_registered(self):
+        """测试 service_module 所有冗余字段都已注册（含 stored / virtual 两类）"""
         obj_reds = self.registry.get_object_redundancies("service_module")
 
-        required_virtual_fields = [
-            "domain_id",
-            "domain_name",
-            "sub_domain_name",
-            "version_name",
-        ]
+        expected_types = {
+            "domain_id": RedundancyType.STORED,
+            "domain_name": RedundancyType.VIRTUAL,
+            "sub_domain_name": RedundancyType.VIRTUAL,
+            "version_name": RedundancyType.VIRTUAL,
+        }
 
-        for field_id in required_virtual_fields:
+        for field_id, expected_type in expected_types.items():
             assert field_id in obj_reds, f"service_module.{field_id} 未注册"
-            assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+            assert obj_reds[field_id].redundancy_type == expected_type
 
     def test_service_module_vs_business_object_join_depth_difference(self):
         """验证 service_module 和 business_object 的 domain_id JOIN 深度不同
