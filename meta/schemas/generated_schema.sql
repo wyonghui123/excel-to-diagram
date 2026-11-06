@@ -3829,6 +3829,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(200) UNIQUE NOT NULL,
     email VARCHAR(200) NOT NULL,
     party_id INTEGER,
+    primary_org_id INTEGER,
     password_hash VARCHAR(200),
     display_name VARCHAR(200) NOT NULL,
     status VARCHAR(200) DEFAULT 'active',
@@ -5227,6 +5228,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_groups_name ON usage_groups(name)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_username ON users(username)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sso ON users(sso_provider, sso_user_id)
 CREATE INDEX IF NOT EXISTS idx_user_party ON users(party_id)
+CREATE INDEX IF NOT EXISTS idx_users_primary_org ON users(primary_org_id)
 CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name)
 
 -- Indexes for 供应商档案

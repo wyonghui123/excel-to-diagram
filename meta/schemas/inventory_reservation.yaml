@@ -85,6 +85,12 @@ deletion_policy:
   mode: restrict
   restrict_on: []
 
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

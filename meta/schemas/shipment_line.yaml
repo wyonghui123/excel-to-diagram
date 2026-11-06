@@ -56,6 +56,13 @@ audit:
       - created_at
       - updated_at
 
+org_scope:
+  mode: chain
+  via: delivery_id
+  host: shipment
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

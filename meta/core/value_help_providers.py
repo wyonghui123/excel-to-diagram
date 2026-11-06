@@ -263,6 +263,14 @@ class BoValueHelpProvider(ValueHelpProvider):
         if not meta_obj:
             return {"data": [], "total": 0, "has_more": False}
 
+        # [Spec 24 T6] 组织参照的职能过滤入参（不落到 orgs 表的 SQL）
+        filters = dict(filters or {})
+        org_function_type = None
+        if user_context:
+            org_function_type = user_context.get('org_function_type')
+        if org_function_type is None:
+            org_function_type = filters.pop('org_function_type', None)
+
         effective_display, effective_code = self._resolve_effective_fields(meta_obj)
 
         engine = BOEngine(meta_obj)
@@ -309,6 +317,26 @@ class BoValueHelpProvider(ValueHelpProvider):
                     filter_conditions.extend(perm_filters)
             except Exception:
                 pass
+
+        # [Spec 24 T6 2026-11-06] 组织参照收敛：只返回可见（且职能匹配）组织，
+        #   避免"列表看不到、参照能选"的越权路径。
+        if self.target_bo == 'org' and user_context and not user_context.get('is_admin', False):
+            try:
+                from meta.services.org_scope_service import OrgScopeService
+                scope_service = OrgScopeService(engine._ds)
+                if scope_service.mode() != 'off':
+                    visible = scope_service.visible_org_ids_for_function(
+                        user_context.get('user_id') or user_context.get('id'),
+                        org_function_type,
+                    )
+                    if visible is not None:
+                        filter_conditions.append(
+                            {"field": "id", "op": "in", "value": sorted(visible)}
+                        )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    'org reference scope filter failed: %s', exc)
 
         results = engine.list_records(
             filters=filter_conditions,

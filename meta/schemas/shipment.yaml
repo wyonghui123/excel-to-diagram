@@ -75,6 +75,14 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: chain
+  via: ship_from_location_id
+  host: location
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

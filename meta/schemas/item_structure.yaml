@@ -64,6 +64,9 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID

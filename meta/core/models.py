@@ -1124,6 +1124,10 @@ class MetaObject:
     # 空 = 未声明逆向能力（编排器拒绝，D8）
     doc_effect: Dict[str, Any] = field(default_factory=dict)
 
+    # [Spec 24 T1 2026-11-06] 业务对象组织边界声明（owning org）；
+    # 空 = 未声明（V6 一致性测试拦截，不阻塞启动）
+    org_scope: Dict[str, Any] = field(default_factory=dict)
+
     # ── 新增：级联选择配置 ──
     cascade_select: Optional[List[Dict[str, Any]]] = None
 

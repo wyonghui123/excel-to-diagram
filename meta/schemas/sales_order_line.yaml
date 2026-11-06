@@ -67,6 +67,14 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: chain
+  via: order_id
+  host: sales_order
+  field: sales_org_id
+  function: sales
+  write_check: true
+
 fields:
   - id: id
     name: ID

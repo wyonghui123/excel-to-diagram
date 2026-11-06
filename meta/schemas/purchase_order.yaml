@@ -148,6 +148,12 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: purchase_org_id
+  function: procurement
+  write_check: true
+
 fields:
   - id: id
     name: ID

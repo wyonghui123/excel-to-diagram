@@ -51,6 +51,12 @@ semantics:
     - on hand
     - inventory balance
 
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

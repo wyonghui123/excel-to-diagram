@@ -60,6 +60,12 @@ actions:
     path: "/api/v1/party_internals"
     description: 查询内部治理台账列表
 
+org_scope:
+  mode: direct
+  field: org_id
+  function: legal_entity
+  write_check: true
+
 fields:
   - id: id
     name: ID

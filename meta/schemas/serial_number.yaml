@@ -61,6 +61,12 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

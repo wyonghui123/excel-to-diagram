@@ -61,6 +61,9 @@ actions:
     path: "/api/v1/party_archives/{id}"
     description: 删除记录（转发到写锚 party 执行）
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID

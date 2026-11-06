@@ -90,6 +90,12 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: sales_org_id
+  function: sales
+  write_check: true
+
 fields:
   - id: id
     name: ID

@@ -50,6 +50,12 @@ semantics:
     - inventory transaction
     - stock ledger entry
 
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

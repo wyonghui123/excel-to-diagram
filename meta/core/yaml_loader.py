@@ -2727,6 +2727,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         state_machine_required=data.get("requires_state_machine", False),
         # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）
         doc_effect=data.get("doc_effect") or {},
+        # [Spec 24 T1 2026-11-06] 业务对象组织边界声明
+        org_scope=data.get("org_scope") or {},
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)

@@ -60,6 +60,11 @@ audit:
       - created_at
       - updated_at
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID

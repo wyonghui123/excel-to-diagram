@@ -492,6 +492,9 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(OrgAdminGuardInterceptor())
     bo_framework.register_interceptor(PermissionInterceptor())
     bo_framework.register_interceptor(DataPermissionInterceptor())
+    # [Spec 24 T3/T4 2026-11-06] 业务对象组织边界（与 app_builder 同位补齐）
+    from meta.core.interceptors.org_scope_interceptor import OrgScopeInterceptor
+    bo_framework.register_interceptor(OrgScopeInterceptor())
     bo_framework.register_interceptor(FieldPolicyInterceptor())
     from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
     bo_framework.register_interceptor(ConstraintValidationInterceptor())

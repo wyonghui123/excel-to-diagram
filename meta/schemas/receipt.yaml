@@ -95,6 +95,12 @@ actions:
     authorization:
       permission: receipt:receipt_create_vendor_return
 
+org_scope:
+  mode: direct
+  field: inventory_org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

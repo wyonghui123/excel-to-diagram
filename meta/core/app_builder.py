@@ -231,6 +231,9 @@ class ApplicationBuilder:
         # [V1.1.8] WriteScopeInterceptor (P35) 在 PermissionInterceptor 之后
         bo_framework.register_interceptor(WriteScopeInterceptor())
         bo_framework.register_interceptor(DataPermissionInterceptor())
+        # [Spec 24 T3/T4 2026-11-06] 业务对象组织边界（读过滤 + 写校验，三态开关默认 off）
+        from meta.core.interceptors.org_scope_interceptor import OrgScopeInterceptor
+        bo_framework.register_interceptor(OrgScopeInterceptor())
         bo_framework.register_interceptor(FieldPolicyInterceptor())
         from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
         bo_framework.register_interceptor(ConstraintValidationInterceptor())
