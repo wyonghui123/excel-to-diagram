@@ -35,14 +35,14 @@ def service():
 def test_view_config_has_expected_tabs(service):
     config = service.get_view_config()
 
-    assert config.get('version') == 1
+    assert config.get('version') == 2
     assert config.get('title')
 
     tabs = config['tabs']
     tab_ids = [tab['id'] for tab in tabs]
     assert tab_ids == [
         'all', 'control_parameter', 'line_type', 'doc_flow',
-        'approval', 'validation', 'simulate', 'health',
+        'approval', 'validation', 'simulate', 'health', 'trace',
     ]
     assert len(set(tab_ids)) == len(tab_ids)
 
@@ -157,9 +157,58 @@ class TestRuleTraceService:
 
         for envelope in result['scenarios']:
             assert set(envelope) >= {
-                'ok', 'scenario', 'decision', 'rule_id', 'source',
+                'ok', 'scenario', 'decision', 'kind', 'rule_id', 'source',
                 'reason', 'factors', 'elapsed_ms',
             }
+            assert envelope['kind'] in ('hit', 'miss', 'skip', 'error', 'info')
+
+    def test_factor_sources_precedence(self):
+        # 单据自带 org_id -> record；请求显式传 org_id -> override；其余无值 -> missing
+        result = self.service.build(
+            'sales_order',
+            data={'status': 'draft', 'org_id': 1},
+            scenarios=['default'],
+        )
+        assert result['factor_sources']['org_id'] == 'record'
+        assert result['factor_sources']['document_type_id'] == 'missing'
+
+        overridden = self.service.build(
+            'sales_order',
+            data={'status': 'draft', 'org_id': 1},
+            dims={'org_id': 9},
+            scenarios=['default'],
+        )
+        assert overridden['factors']['org_id'] == 9
+        assert overridden['factor_sources']['org_id'] == 'override'
+
+    def test_default_detail_lists_all_rules(self):
+        result = self.service.build(
+            'sales_order',
+            data={'status': 'draft', 'org_id': 1},
+            scenarios=['default'],
+        )
+        envelope = result['scenarios'][0]
+        assert isinstance(envelope.get('detail', {}).get('rules'), list)
+        for entry in envelope['detail']['rules']:
+            assert entry['status'] in ('applied', 'skipped', 'not_matched')
+
+    def test_control_parameter_all_codes_missing(self):
+        result = self.service.build(
+            'sales_order',
+            data={'status': 'draft', 'org_id': 1},
+            scenarios=['control_parameter'],
+            codes=['__no_such_parameter__'],
+        )
+        envelope = result['scenarios'][0]
+        assert envelope['decision'] == 'missing'
+        assert envelope['kind'] == 'miss'
+        assert envelope['reason'] == 'all_codes_missing'
+        assert envelope['detail']['missing'] == ['__no_such_parameter__']
+
+    def test_default_scenarios_exclude_permission(self):
+        from meta.core.rule_trace_service import TRACE_SCENARIOS
+
+        assert 'permission' not in TRACE_SCENARIOS
 
     def test_control_parameter_requires_codes(self):
         result = self.service.build(
@@ -185,6 +234,64 @@ class TestRuleTraceService:
         with pytest.raises(RuleTraceNotFound):
             self.service.build('no_such_bo', data={'status': 'draft'})
 
+    # ------------------------------------------------------------------
+    # L1 运行期节点字段（spec §11.3）
+    # ------------------------------------------------------------------
+
+    def test_node_fields_and_seq(self):
+        from meta.core.rule_trace_service import STAGE_MAP
+
+        result = self.service.build(
+            'sales_order', data={'status': 'draft', 'org_id': 1})
+        trace_id = result['trace_id']
+        nodes = result['scenarios']
+
+        assert result['truncated'] is False
+        assert result['node_count'] == len(nodes)
+        assert [node['seq'] for node in nodes] == list(range(1, len(nodes) + 1))
+
+        for node in nodes:
+            assert node['node_id'] == '{0}:{1}'.format(trace_id, node['seq'])
+            assert node['parent_id'] is None
+            assert node['stage'] == STAGE_MAP.get(node['scenario'], 'validate')
+            assert isinstance(node['match'], dict)
+            assert isinstance(node['match']['matched'], bool)
+            assert isinstance(node['match']['conditions'], list)
+            assert isinstance(node['output'], dict)
+
+        assert len({node['node_id'] for node in nodes}) == len(nodes)
+
+    def test_nodes_truncated_when_exceed_limit(self, monkeypatch):
+        import meta.core.rule_trace_service as trace_mod
+
+        monkeypatch.setattr(trace_mod, 'MAX_TRACE_NODES', 2)
+        result = trace_mod.RuleTraceService().build(
+            'sales_order', data={'status': 'draft', 'org_id': 1})
+
+        assert result['truncated'] is True
+        assert result['node_count'] == 2
+        assert len(result['scenarios']) == 2
+        # 截断只影响返回体积：kind_counts 仍按完整求值结果统计
+        assert sum(result['kind_counts'].values()) == len(trace_mod.TRACE_SCENARIOS)
+
+    def test_state_transition_match_and_output(self):
+        result = self.service.build(
+            'sales_order', data={'status': 'draft', 'org_id': 1},
+            scenarios=['state_transition'], to_state='submitted',
+        )
+        node = result['scenarios'][0]
+
+        assert node['decision'] == 'allowed'
+        assert node['stage'] == 'status_transition'
+        assert node['output'] == {'status': 'submitted'}
+
+        conditions = {item['field']: item for item in node['match']['conditions']}
+        assert conditions['from_state']['actual'] == 'draft'
+        assert conditions['from_state']['passed'] is True
+        # 期望值取状态机声明的全部出边，不硬编码具体迁移列表
+        assert 'submitted' in conditions['to_state']['expected']
+        assert conditions['to_state']['passed'] is True
+
 
 # ---------------------------------------------------------------------------
 # 端到端（共享 app + dev-login）
@@ -204,7 +311,7 @@ class TestRuleCenterEndpoints:
 
         body = resp.get_json()
         assert body['success'] is True
-        assert len(body['data']['tabs']) == 8
+        assert len(body['data']['tabs']) == 9
 
     def test_list_rules_ok(self):
         resp = self.client.get('/api/v2/rules?limit=3')

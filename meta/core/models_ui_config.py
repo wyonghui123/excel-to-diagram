@@ -139,6 +139,10 @@ class UIDetailViewConfig:
     layout: str = "tabs"
     showChangeHistory: bool = True
     showRelations: bool = True
+    # [v1.7 2026-11-07] 规则推导分区声明（原样透传给前端 DetailPage）：
+    #   {enabled, label, permission, scenarios, codes}
+    #   不入库、不参与规则解析，仅决定详情页是否挂载「规则推导」分区。
+    rule_trace: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

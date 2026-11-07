@@ -31,7 +31,7 @@ SOURCES = (
 NOT_INSTRUMENTED = ('state_machine', 'numbering')
 
 # 视图元数据中允许引用的动作 / widget 类型（封闭枚举，YAML 不能引入新类型）
-ACTIONS = ('detail', 'edit', 'view_source', 'simulate', 'copy_key', 'publish', 'rollback')
+ACTIONS = ('detail', 'edit', 'view_source', 'simulate', 'copy_key', 'publish', 'rollback', 'rerun')
 WIDGETS = ('code', 'factor_matrix', 'source_snippet', 'audit_log')
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')

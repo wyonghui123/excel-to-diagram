@@ -1750,6 +1750,16 @@ ui_view_config:
         customFetcher: target_change_requests
         readonly: true
         pageSize: 10
+    # [v1.7 2026-11-07] 规则推导分区（A 入口）：展示本单据的规则因子快照与命中结论。
+    #   权限：rule_center:rule_center_trace（无权限时分区不显示）；
+    #   scenarios 缺省 5 个（default / control_parameter / line_type / approval / doc_flow），
+    #   codes 为控制参数维度的预置编码（可在分区内改）。
+    rule_trace:
+      enabled: true
+      label: 规则推导
+      permission: rule_center:rule_center_trace
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]
+      codes: [qty_required, price_required, default_incoterm]
 
   # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
   child_sections:

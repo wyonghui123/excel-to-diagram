@@ -27,8 +27,42 @@ TRACE_SCENARIOS = (
     'default', 'control_parameter', 'line_type',
     'approval', 'state_transition', 'doc_flow',
 )
-_CORE_SCENARIOS = ('default', 'permission', 'state_transition', 'approval')
+# [v1.8 2026-11-07] permission 场景依赖 user_id，单据推导接口不传该入参，
+# 纳入白名单只会产生"永远跳过"的假场景，故从核心场景集移除。
+_CORE_SCENARIOS = ('default', 'state_transition', 'approval')
 DIMENSION_FIELDS = ('org_id', 'document_type_id', 'line_type_id', 'item_group_id')
+
+# [v1.8 2026-11-07] 决策归一：decision 保留场景细分词（applied/allowed/...），
+# kind 统一为 hit / miss / skip / info，供前端着色与汇总，避免每个场景各自造词。
+DECISION_KINDS = {
+    'applied': 'hit',
+    'granted': 'hit',
+    'allowed': 'hit',
+    'matched': 'hit',
+    'resolved': 'hit',
+    'declared': 'hit',
+    'rejected': 'miss',
+    'denied': 'miss',
+    'not_matched': 'miss',
+    'missing': 'miss',
+    'not_declared': 'miss',
+    'skipped': 'skip',
+    'not_instrumented': 'skip',
+}
+
+# [L1 2026-11-08] 运行期节点上限（spec §11.4）：超出只截断返回体积，不影响求值；
+# 截断标记与 kind 计数挂在返回体侧（`truncated` / `kind_counts`）。
+MAX_TRACE_NODES = 200
+
+# 场景 → 执行阶段（spec §11.3 stage 枚举）：只用于展示分组，不参与求值。
+STAGE_MAP = {
+    'default': 'before_save',
+    'control_parameter': 'calc',
+    'line_type': 'calc',
+    'approval': 'approve',
+    'state_transition': 'status_transition',
+    'doc_flow': 'validate',
+}
 
 
 class RuleTraceError(ValueError):
@@ -48,6 +82,7 @@ def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
         'ok': ok,
         'scenario': scenario,
         'decision': decision,
+        'kind': DECISION_KINDS.get(decision, 'info'),
         'rule_id': rule_id,
         'source': source,
         'reason': reason,
@@ -57,6 +92,113 @@ def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
     if detail is not None:
         envelope['detail'] = detail
     return envelope
+
+
+def _same_value(left: Any, right: Any) -> bool:
+    """与 ControlParameterResolver._matches 同口径的宽松比较。"""
+    if left is None or right is None:
+        return left is None and right is None
+    return str(left) == str(right)
+
+
+def _output_of(step: Dict[str, Any]) -> Dict[str, Any]:
+    """节点写出的字段与值（spec §11.3）；无写入时返回空字典。
+
+    只收录已确认写入的值：`default` 取 winner 赋值、`control_parameter`
+    取已解析的编码值、`line_type` 取行类型、`state_transition` 取目标状态；
+    `approval` / `doc_flow` 只做判定不写字段，保持空字典。
+    """
+    scenario = step.get('scenario')
+    decision = step.get('decision')
+    factors = step.get('factors') or {}
+    detail = step.get('detail') or {}
+
+    if scenario == 'default':
+        target = factors.get('target_field')
+        if decision == 'applied' and target and factors.get('value') is not None:
+            return {str(target): factors.get('value')}
+    elif scenario == 'control_parameter':
+        output = {}
+        for entry in detail.get('chain') or []:
+            if isinstance(entry, dict) and entry.get('value') is not None:
+                output[str(entry.get('code'))] = entry.get('value')
+        return output
+    elif scenario == 'line_type':
+        line_type_id = detail.get('line_type_id')
+        if line_type_id is not None:
+            return {'line_type_id': line_type_id}
+    elif scenario == 'state_transition':
+        if decision == 'allowed':
+            state_field = factors.get('state_field') or 'status'
+            return {str(state_field): factors.get('to_state')}
+    return {}
+
+
+def _match_of(step: Dict[str, Any]) -> Dict[str, Any]:
+    """判定条件与结果（spec §11.3）。
+
+    只回填可核对的字段对比：状态流转的 from/to、控制参数的维度匹配、
+    行类型的 item_group_id。其余场景（default 条件表达式、审批阈值、
+    单据流声明）平台侧拿不到期望值，conditions 留空，不臆造比对项。
+    """
+    scenario = step.get('scenario')
+    factors = step.get('factors') or {}
+    detail = step.get('detail') or {}
+    conditions: List[Dict[str, Any]] = []
+
+    if scenario == 'state_transition':
+        states = [str(item) for item in (factors.get('states') or [])]
+        from_state = factors.get('from_state')
+        if from_state is not None and states:
+            conditions.append({
+                'field': 'from_state', 'op': 'in',
+                'expected': states, 'actual': from_state,
+                'passed': str(from_state) in states,
+            })
+        allowed = [str(item) for item in (factors.get('allowed_to_states') or [])]
+        to_state = factors.get('to_state')
+        if to_state is not None:
+            conditions.append({
+                'field': 'to_state', 'op': 'in',
+                'expected': allowed, 'actual': to_state,
+                'passed': str(to_state) in allowed,
+            })
+    elif scenario == 'control_parameter':
+        for entry in detail.get('chain') or []:
+            if not isinstance(entry, dict):
+                continue
+            candidates = entry.get('candidates') or []
+            dims = candidates[0].get('dims') if candidates else {}
+            for field in DIMENSION_FIELDS:
+                expected = (dims or {}).get(field)
+                if expected is None:  # 通配维度不构成条件
+                    continue
+                actual = factors.get(field)
+                conditions.append({
+                    'field': field, 'op': '=',
+                    'expected': expected, 'actual': actual,
+                    'passed': _same_value(actual, expected),
+                })
+    elif scenario == 'line_type':
+        candidates = detail.get('candidates') or []
+        expected = candidates[0].get('item_group_id') if candidates else None
+        if expected is not None:
+            conditions.append({
+                'field': 'item_group_id', 'op': '=',
+                'expected': expected,
+                'actual': factors.get('item_group_id'),
+                'passed': _same_value(factors.get('item_group_id'), expected),
+            })
+
+    return {'matched': step.get('kind') == 'hit', 'conditions': conditions}
+
+
+def _kind_counts(steps: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for step in steps:
+        kind = step.get('kind') or 'info'
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
 
 
 def _default_data_source():
@@ -71,7 +213,6 @@ class RuleTraceService:
     def build(self, object_type: str, *, record_id: Any = None,
               data: Optional[Dict[str, Any]] = None,
               scenarios: Optional[Iterable[str]] = None,
-              user_id: Optional[int] = None, action_id: str = 'read',
               dims: Optional[Dict[str, Any]] = None,
               codes: Optional[Iterable[str]] = None,
               from_state: Any = None, to_state: Any = None,
@@ -86,9 +227,16 @@ class RuleTraceService:
             raise RuleTraceError('data 或 record_id 必须提供其一')
 
         factors = dict(dims or {})
+        factor_sources: Dict[str, str] = {}
         for field in DIMENSION_FIELDS:
-            if factors.get(field) is None and record.get(field) is not None:
+            if (dims or {}).get(field) is not None:
+                # 请求显式传入的因子优先，快照需标注来源，避免与单据取值混淆
+                factor_sources[field] = 'override'
+            elif record.get(field) is not None:
                 factors[field] = record.get(field)
+                factor_sources[field] = 'record'
+            else:
+                factor_sources[field] = 'missing'
 
         selected = self._normalize_scenarios(scenarios)
         ds = data_source or _default_data_source()
@@ -98,18 +246,44 @@ class RuleTraceService:
             steps.append(self._run_scenario(
                 scenario, object_type=object_type, record=record,
                 record_id=record_id, factors=factors,
-                user_id=user_id, action_id=action_id,
                 codes=codes, from_state=from_state, to_state=to_state,
                 data_source=ds,
             ))
 
+        trace_id = uuid.uuid4().hex
+        # 截断只影响返回体积，不影响求值：kind_counts 按完整结果统计
+        kind_counts = _kind_counts(steps)
+        nodes = self._decorate_steps(trace_id, steps)
         return {
-            'trace_id': uuid.uuid4().hex,
+            'trace_id': trace_id,
             'object_type': object_type,
             'record_id': record_id,
             'factors': factors,
-            'scenarios': steps,
+            'factor_sources': factor_sources,
+            'scenarios': nodes,
+            'truncated': len(steps) > MAX_TRACE_NODES,
+            'node_count': len(nodes),
+            'kind_counts': kind_counts,
         }
+
+    @staticmethod
+    def _decorate_steps(trace_id: str,
+                        steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """补齐运行期节点字段（spec §11.3）。
+
+        L1 不跨对象递归，`parent_id` 恒为 null；`seq` 在同一 trace 内从 1 递增。
+        """
+        decorated: List[Dict[str, Any]] = []
+        for index, step in enumerate(steps[:MAX_TRACE_NODES], start=1):
+            node = dict(step)
+            node['seq'] = index
+            node['node_id'] = f'{trace_id}:{index}'
+            node['parent_id'] = None
+            node['stage'] = STAGE_MAP.get(node.get('scenario'), 'validate')
+            node['match'] = _match_of(node)
+            node['output'] = _output_of(node)
+            decorated.append(node)
+        return decorated
 
     # ------------------------------------------------------------------
     # 场景分发
@@ -130,24 +304,23 @@ class RuleTraceService:
 
     def _run_scenario(self, scenario: str, *, object_type: str,
                       record: Dict[str, Any], record_id: Any,
-                      factors: Dict[str, Any], user_id: Optional[int],
-                      action_id: str, codes: Optional[Iterable[str]],
+                      factors: Dict[str, Any], codes: Optional[Iterable[str]],
                       from_state: Any, to_state: Any,
                       data_source: Any) -> Dict[str, Any]:
         started = time.perf_counter()
         try:
             if scenario in _CORE_SCENARIOS:
-                return self._core_scenario(
+                result = self._core_scenario(
                     scenario, object_type=object_type, record=record,
-                    record_id=record_id, user_id=user_id, action_id=action_id,
-                    from_state=from_state, to_state=to_state,
-                    data_source=data_source,
+                    record_id=record_id, from_state=from_state,
+                    to_state=to_state, data_source=data_source,
                 )
-            if scenario == 'control_parameter':
-                return self._control_parameter(record, factors, codes, started)
-            if scenario == 'line_type':
-                return self._line_type(factors, started)
-            return self._doc_flow(object_type, data_source, started)
+            elif scenario == 'control_parameter':
+                result = self._control_parameter(record, factors, codes, started)
+            elif scenario == 'line_type':
+                result = self._line_type(factors, started)
+            else:
+                result = self._doc_flow(object_type, data_source, started)
         except RuleTraceError:
             raise
         except Exception as e:  # noqa: BLE001 - 推导失败不影响其它场景
@@ -157,10 +330,12 @@ class RuleTraceService:
                 factors={'error': str(e)},
                 elapsed_ms=(time.perf_counter() - started) * 1000, ok=False,
             )
+        # explainer 返回的信封不含 kind，此处统一补齐归一类别
+        result['kind'] = DECISION_KINDS.get(result.get('decision'), 'info')
+        return result
 
     def _core_scenario(self, scenario: str, *, object_type: str,
                        record: Dict[str, Any], record_id: Any,
-                       user_id: Optional[int], action_id: str,
                        from_state: Any, to_state: Any,
                        data_source: Any) -> Dict[str, Any]:
         from meta.core.rule_explainer import explain
@@ -168,9 +343,6 @@ class RuleTraceService:
         if scenario == 'default':
             return explain(object_type, 'default', data=record,
                            data_source=data_source)
-        if scenario == 'permission':
-            return explain(object_type, 'permission', user_id=user_id,
-                           action_id=action_id)
         if scenario == 'state_transition':
             state_field = factors_state_field(record)
             return explain(
@@ -203,10 +375,18 @@ class RuleTraceService:
         chain = [resolver.explain(code, factors) for code in requested]
         missing = [entry['code'] for entry in chain
                    if entry.get('source', {}).get('type') == 'missing']
+        # [v1.8 2026-11-07] chain 恒非空，原实现「有请求即 resolved」会误报；
+        # 全部编码都没取到值时必须如实报告 missing。
+        if missing and len(missing) == len(requested):
+            decision, reason = 'missing', 'all_codes_missing'
+        elif missing:
+            decision, reason = 'resolved', 'partially_resolved'
+        else:
+            decision, reason = 'resolved', 'resolved'
         return _envelope(
-            'control_parameter', 'resolved' if chain else 'skipped',
+            'control_parameter', decision,
             rule_id='control_parameter:' + ','.join(requested),
-            source='db', reason='resolved' if chain else 'no_codes_requested',
+            source='db', reason=reason,
             factors=dict(factors),
             detail={'codes': requested, 'missing': missing, 'chain': chain},
             elapsed_ms=(time.perf_counter() - started) * 1000,

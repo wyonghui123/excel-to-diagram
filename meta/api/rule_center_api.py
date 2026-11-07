@@ -259,6 +259,7 @@ def explain_rule(object_type: str):
 
 @rule_trace_bp.route('/<object_type>/<record_id>/rule-trace', methods=['GET'])
 @login_required
+@require_permission('rule_center:rule_center_trace')
 def get_rule_trace(object_type: str, record_id: str):
     """单据推导链（IF-007）：返回各场景统一信封。"""
     args = request.args
@@ -275,8 +276,6 @@ def get_rule_trace(object_type: str, record_id: str):
             object_type,
             record_id=record_pk,
             scenarios=_split_csv(args.get('scenarios')),
-            user_id=request.args.get('user_id', type=int),
-            action_id=args.get('action_id') or 'read',
             dims=_dims(args),
             codes=_split_csv(args.get('codes')),
             from_state=args.get('from_state') or None,

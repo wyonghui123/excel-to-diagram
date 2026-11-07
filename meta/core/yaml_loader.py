@@ -945,6 +945,7 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
         layout=data.get("layout", "tabs"),
         showChangeHistory=data.get("showChangeHistory", True),
         showRelations=data.get("showRelations", True),
+        rule_trace=data.get("rule_trace", {}) or {},
     )
 
 

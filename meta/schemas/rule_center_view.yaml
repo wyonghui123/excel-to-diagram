@@ -6,7 +6,7 @@
 # 职责边界：只描述「规则怎么显示」，不参与任何规则解析。
 # 规则本体来自 RuleCatalogService 聚合（BO YAML / DB 配置 / 只读声明）。
 
-version: 1
+version: 2
 title: 规则中心
 description: 统一展示、查询与管理所有可配置规则，并在单据详情展示规则推导过程。
 
@@ -63,6 +63,15 @@ column_labels:
   label: 检查项名称
   finding_count: 问题数
   sample: 样例
+  # 单据推导表单 / 因子快照
+  object_type: 单据对象
+  record_id: 记录 ID
+  scenarios: 推导场景
+  codes: 控制参数编码
+  org_id: 组织 ID
+  document_type_id: 单据类型 ID
+  line_type_id: 行类型 ID
+  item_group_id: 物料组 ID
 
 filter_labels:
   keyword: 关键字
@@ -148,6 +157,15 @@ tabs:
     filters: [severity]
     actions: [detail]
 
+  - id: trace
+    label: 单据推导
+    kind: rule_trace
+    require: rule_center:rule_center_trace
+    sources: []
+    columns: []
+    filters: []
+    actions: [rerun]
+
 detail:
   sections:
     - id: basic
@@ -171,6 +189,96 @@ detail:
 
 trace:
   scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow]
+  # 场景展示文案（前端不得写死中文；未知值回落原文）
+  scenario_labels:
+    default: 属性确定
+    control_parameter: 控制参数
+    line_type: 行类型
+    approval: 审批策略
+    state_transition: 状态流转
+    doc_flow: 单据流
+  # 节点执行阶段（后端 STAGE_MAP 同源；只用于展示分组）
+  stages:
+    before_save: 保存前
+    validate: 校验
+    calc: 计算
+    approve: 审批
+    status_transition: 状态流转
+  # 规则全集归属（spec §11.4）
+  scopes:
+    evaluated: 已评估
+    not_triggered: 未触发
+    downstream: 下游
+  # 规则全集表列文案
+  rules_columns:
+    scenario: 场景
+    rule_id: 规则
+    scope: 归属
+    status: 结论
+    output: 输出
+  # 行内展开：可核对条件列文案
+  conditions_columns:
+    field: 字段
+    op: 运算
+    expected: 期望
+    actual: 实际
+    passed: 结果
+  # 归一决策类别（kind）：仅决定颜色与汇总口径，细分结论仍看 decisions
+  kinds:
+    hit: { label: 命中, type: success }
+    miss: { label: 未命中, type: danger }
+    skip: { label: 未评估, type: info }
+    error: { label: 推导失败, type: warning }
+    info: { label: 未知, type: info }
+  # 推导结论 → 展示文案/颜色（前端不得写死中文；未知值回落原文）
+  decisions:
+    applied: { label: 已应用, type: success }
+    skipped: { label: 已跳过, type: info }
+    granted: { label: 已授予, type: success }
+    denied: { label: 已拒绝, type: danger }
+    allowed: { label: 已允许, type: success }
+    rejected: { label: 已拒绝, type: danger }
+    matched: { label: 已命中, type: success }
+    not_matched: { label: 未命中, type: info }
+    resolved: { label: 已解析, type: success }
+    missing: { label: 缺配置, type: warning }
+    declared: { label: 已声明, type: success }
+    not_declared: { label: 未声明, type: info }
+    not_instrumented: { label: 未接入, type: info }
+  # 因子取值来源标注
+  factor_sources:
+    override: 请求指定
+    record: 单据取值
+    missing: 未提供
+  # 界面文案（空态 / 错误 / 操作提示），前端不得写死中文
+  messages:
+    rerun: 重新推导
+    copy_snapshot: 复制因子快照
+    copied: 因子快照已复制
+    copy_failed: 复制失败，请手动复制
+    clipboard_unsupported: 当前环境不支持剪贴板
+    missing_target: 请先选择单据对象并填写记录 ID
+    codes_required: 需指定控制参数编码（codes）后重跑
+    empty_result: 未返回推导场景
+    idle: 尚未推导
+    failed: 推导失败
+    factor_detail: 因子明细
+    value_missing: 未提供
+    forbidden: '无权查看单据推导（缺少 rule_center:rule_center_trace）'
+    not_found: 单据不存在或超出数据范围
+    all_missing: 全部控制参数均未取到值
+    # L1：规则全集表
+    rules_all: 规则全集
+    rules_empty: 本次推导没有可展示的规则
+    scope_all: 全部
+    conditions_empty: 无可核对条件
+    condition_passed: 通过
+    condition_failed: 未通过
+    output_empty: 无输出
+    truncated: 规则节点过多，已截断展示
+  tab:
+    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, item_group_id]
+    actions: [rerun]
 
 simulate:
   fields: [scenario, config_mode, codes, object_type, record_id, org_id, document_type_id, line_type_id, item_group_id]

@@ -92,14 +92,33 @@ def _make_fk_message(target_meta, field_id, field_value):
     )
 
 
-def _make_required_message(meta, field_id=None):
+def _resolve_field_display_name(meta, field_id):
+    """把 DB 列名翻译成字段的业务中文名 (semantics.meaning), 兜底字段 id/name"""
+    if meta and field_id:
+        try:
+            field = meta.get_field(field_id)
+            if field is not None:
+                meaning = getattr(getattr(field, 'semantics', None), 'meaning', None)
+                return meaning or getattr(field, 'name', None) or field_id
+        except Exception:
+            pass
+    return field_id
+
+
+def _make_required_message(meta, field_id=None, field_value=None):
     """生成 NOT NULL 错误消息"""
-    return ValidationMessageRegistry.get("validation.field.required", field_name=field_id or "字段")
+    return ValidationMessageRegistry.get(
+        "validation.field.required",
+        field_name=_resolve_field_display_name(meta, field_id) or "字段",
+    )
 
 
-def _make_unique_message(meta, field_id=None):
+def _make_unique_message(meta, field_id=None, field_value=None):
     """生成 UNIQUE 错误消息"""
-    return ValidationMessageRegistry.get("validation.field.unique", field_name=field_id or "值")
+    return ValidationMessageRegistry.get(
+        "validation.field.unique",
+        field_name=_resolve_field_display_name(meta, field_id) or "值",
+    )
 
 
 ERROR_MESSAGE_MAP = {

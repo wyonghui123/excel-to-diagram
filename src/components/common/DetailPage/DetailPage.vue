@@ -64,7 +64,14 @@
           @row-action="handleRowAction"
         >
           <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]>
-            <slot :name="`section-${section.key}`" :data="data" />
+            <RuleTracePanel
+              v-if="section.key === 'rule_trace'"
+              :object-type="objectType"
+              :record-id="id"
+              :scenarios="ruleTraceConfig.scenarios || []"
+              :codes="ruleTraceConfig.codes || []"
+            />
+            <slot v-else :name="`section-${section.key}`" :data="data" />
           </template>
         </ObjectPage>
         <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
@@ -136,8 +143,15 @@
         @row-action="handleRowAction"
       >
         <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]="sectionData">
+          <RuleTracePanel
+            v-if="section.key === 'rule_trace'"
+            :object-type="objectType"
+            :record-id="id"
+            :scenarios="ruleTraceConfig.scenarios || []"
+            :codes="ruleTraceConfig.codes || []"
+          />
           <!-- Always render slot if provided by parent -->
-          <slot :name="`section-${section.key}`" :data="data" />
+          <slot v-else :name="`section-${section.key}`" :data="data" />
         </template>
       </ObjectPage>
       <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
@@ -180,6 +194,8 @@ import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
+import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import { useAuthStore } from '@/stores/authStore'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -218,6 +234,12 @@ const props = defineProps({
 //   L1 接入 coordinator；L2 让 ObjectPageContent 暴露 refreshAllSections()；
 //   L3 加 onActivated 保留状态（对齐 metalist FR-005）。
 const coordinator = inject('refreshCoordinator', null)
+
+// [v1.7 2026-11-07] 规则推导分区元数据：BO YAML 的 ui_view_config.detail.rule_trace
+const authStore = useAuthStore()
+const ruleTraceConfig = computed(
+  () => entityMeta.value?.ui_view_config?.detail?.rule_trace || {}
+)
 
 // [L1] refreshKey：详情页用 objectType + id 区分实例。
 //   区别于 metalist 的 `list:${objectType}`（单 objectType 单实例），
@@ -1058,6 +1080,22 @@ const computedSections = computed(() => {
         inlineEdit: cs.inlineEdit || null,
         columns: cs.columns || null,
         extraRowActions: cs.extraRowActions || null
+      })
+    }
+  }
+
+  // [v1.7 2026-11-07] 规则推导分区：由 BO YAML 的 ui_view_config.detail.rule_trace 声明，
+  //   无权限时不显示分区（权限码缺省 rule_center:rule_center_trace）。
+  const traceSection = detailConfig?.rule_trace
+  if (traceSection?.enabled && !isAddMode) {
+    const tracePermission = traceSection.permission || 'rule_center:rule_center_trace'
+    if (authStore.hasPermission(tracePermission)) {
+      sections.push({
+        key: 'rule_trace',
+        label: traceSection.label || '规则推导',
+        icon: 'rule',
+        type: 'custom',
+        display: 'always'
       })
     }
   }

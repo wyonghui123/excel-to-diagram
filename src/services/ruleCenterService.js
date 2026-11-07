@@ -10,6 +10,22 @@ export function getRuleCenterViewConfig() {
   return apiV2.get('/rules/view-config')
 }
 
+let _viewConfigCache = null
+
+/**
+ * 视图元数据的进程内缓存（多页面共用页签/文案映射，避免重复请求）。
+ * 规则中心页面仍用 getRuleCenterViewConfig() 以便手动刷新。
+ */
+export function getRuleCenterViewConfigCached() {
+  if (!_viewConfigCache) {
+    _viewConfigCache = getRuleCenterViewConfig().catch((err) => {
+      _viewConfigCache = null
+      throw err
+    })
+  }
+  return _viewConfigCache
+}
+
 /** 规则目录（多来源聚合）。 */
 export function listRules(params = {}) {
   return apiV2.get('/rules', { params })

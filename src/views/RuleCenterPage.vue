@@ -92,6 +92,69 @@
           </div>
         </div>
 
+        <div v-else-if="tab.kind === 'rule_trace'" class="trace-pane">
+          <el-form :model="traceForm" label-width="120px" class="simulate-form">
+            <el-form-item
+              v-for="field in traceFields"
+              :key="field"
+              :label="labelOfColumn(field)"
+            >
+              <el-select
+                v-if="field === 'object_type'"
+                v-model="traceForm.object_type"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选择单据对象"
+              >
+                <el-option
+                  v-for="option in objectTypeOptions"
+                  :key="option.id"
+                  :label="option.label"
+                  :value="option.id"
+                />
+              </el-select>
+              <el-select
+                v-else-if="field === 'scenarios'"
+                v-model="traceForm.scenarios"
+                multiple
+                collapse-tags
+                placeholder="推导场景（缺省全部）"
+              >
+                <el-option
+                  v-for="option in scenarioOptions"
+                  :key="option"
+                  :label="option"
+                  :value="option"
+                />
+              </el-select>
+              <el-input
+                v-else
+                v-model="traceForm[field]"
+                :placeholder="simulatePlaceholder(field)"
+                clearable
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="runTrace">推导</el-button>
+              <el-button @click="resetTrace">重置</el-button>
+            </el-form-item>
+          </el-form>
+
+          <RuleTracePanel
+            v-if="traceRequest"
+            ref="tracePanelRef"
+            :key="traceRunSeq"
+            :object-type="traceRequest.object_type"
+            :record-id="traceRequest.record_id"
+            :scenarios="traceRequest.scenarios"
+            :codes="traceRequest.codes"
+            :dims="traceRequest.dims"
+            :decisions="traceDecisions"
+            :labels="columnLabels"
+          />
+        </div>
+
         <div v-else-if="tab.kind" class="placeholder">
           <el-empty :description="`${tab.label} · 暂未接入`" />
         </div>
@@ -299,6 +362,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useAuthStore } from '@/stores/authStore'
+import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import { apiV1 } from '@/utils/httpClient'
 import { getRule, getRuleCenterViewConfig, getRuleConfigHistory, listRules, publishRuleConfig, rollbackRuleConfig, simulateRule } from '@/services/ruleCenterService'
 
 const FALLBACK_CONFIG = {
@@ -336,6 +401,12 @@ const simulateForm = reactive({})
 const simulating = ref(false)
 const simulateResult = ref(null)
 
+const traceForm = reactive({})
+const traceRequest = ref(null)
+const traceRunSeq = ref(0)
+const tracePanelRef = ref(null)
+const objectTypeOptions = ref([])
+
 const historyRows = ref([])
 const historyLoading = ref(false)
 const historyPage = ref(1)
@@ -345,7 +416,7 @@ const rollingBack = ref(false)
 
 const DIMENSION_FIELDS = ['org_id', 'document_type_id', 'line_type_id', 'item_group_id']
 const SIMULATE_HINTS = {
-  codes: '控制参数编码，逗号分隔，如 payment_term, credit_limit',
+  codes: '控制参数编码，逗号分隔，如 qty_required, price_required',
   object_type: '单据对象类型，如 sales_order',
   record_id: '单据主键 ID（需配合 object_type）',
   org_id: '组织 ID',
@@ -411,6 +482,11 @@ const factorRows = computed(() => {
 const simulateMeta = computed(() => config.value.simulate || {})
 const simulateFields = computed(() => simulateMeta.value.fields || [])
 const scenarioOptions = computed(() => config.value.trace?.scenarios || [])
+const traceMeta = computed(() => config.value.trace || {})
+const traceFields = computed(
+  () => traceMeta.value.tab?.fields || ['object_type', 'record_id', 'scenarios', 'codes']
+)
+const traceDecisions = computed(() => traceMeta.value.decisions || {})
 const configModeOptions = computed(
   () => simulateMeta.value.config_modes || ['baseline', 'draft', 'both']
 )
@@ -494,6 +570,8 @@ onMounted(async () => {
   activeTab.value = defaultTab?.id || visibleTabs.value[0]?.id || ''
   resetFilters()
   resetSimulate()
+  resetTrace()
+  loadObjectTypes()
   await reload()
 })
 
@@ -506,6 +584,54 @@ function resetSimulate() {
   simulateForm.scenario = scenarioOptions.value[0] || 'default'
   simulateForm.config_mode = configModeOptions.value[0] || 'baseline'
   simulateResult.value = null
+}
+
+async function loadObjectTypes() {
+  try {
+    const response = await apiV1.get('/meta/objects')
+    if (response.success) {
+      objectTypeOptions.value = (response.data || []).map(item => ({
+        id: item.id || item.name,
+        label: item.name || item.id,
+      }))
+    }
+  } catch {
+    // 下拉不可用时仍允许手填 object_type
+  }
+}
+
+function resetTrace() {
+  Object.keys(traceForm).forEach(key => delete traceForm[key])
+  traceRequest.value = null
+}
+
+function runTrace() {
+  const objectType = String(traceForm.object_type || '').trim()
+  const recordRaw = String(traceForm.record_id || '').trim()
+  const recordId = Number(recordRaw)
+  if (!objectType || !recordRaw || !Number.isFinite(recordId) || recordId <= 0) {
+    message.warning('请先选择单据对象并填写记录 ID')
+    return
+  }
+  const codes = String(traceForm.codes || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+  const dims = {}
+  for (const field of DIMENSION_FIELDS) {
+    const value = traceForm[field]
+    if (value !== '' && value !== null && value !== undefined) {
+      dims[field] = /^\d+$/.test(String(value).trim()) ? Number(value) : value
+    }
+  }
+  traceRequest.value = {
+    object_type: objectType,
+    record_id: recordId,
+    scenarios: [...(traceForm.scenarios || [])],
+    codes,
+    dims,
+  }
+  traceRunSeq.value += 1
 }
 
 function buildSimulatePayload() {

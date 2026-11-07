@@ -538,3 +538,75 @@ class TestRuleCenterP2Endpoints:
         rolled = resp.get_json()['data']
         assert rolled['restored'] == 1
         assert rolled['row']['value'] == 'net30'
+
+    # ------------------------------------------------------------------
+    # 单据推导（IF-007 / FR-015）：权限码 + 入参校验
+    # ------------------------------------------------------------------
+
+    def test_trace_http_forbidden_without_permission(self, monkeypatch):
+        """trace 端点已挂 rule_center:rule_center_trace，无权限必须 403。"""
+        import meta.api.decorators as decorators
+
+        monkeypatch.setattr(decorators, 'evaluate_code', lambda user, code: False)
+        resp = self.client.get('/api/v2/bo/sales_order/1/rule-trace')
+        assert resp.status_code == 403
+        body = resp.get_json()
+        assert body['success'] is False
+        assert body['error'] == 'FORBIDDEN'
+
+    def test_trace_http_rejects_invalid_scenario(self, monkeypatch):
+        """scenarios 不在白名单 → 400，不允许静默丢弃。"""
+        from meta.api import bo_api
+        from meta.core import rule_trace_service as trace_module
+
+        monkeypatch.setattr(
+            bo_api, '_check_single_bo_in_dim_scope', lambda *a, **k: False)
+        monkeypatch.setattr(
+            trace_module.RuleTraceService, '_load_record',
+            staticmethod(lambda object_type, record_id: {'id': record_id}))
+        resp = self.client.get(
+            '/api/v2/bo/sales_order/1/rule-trace?scenarios=not_a_scenario')
+        assert resp.status_code == 400
+        assert resp.get_json()['success'] is False
+
+    def test_trace_http_unknown_object_404(self):
+        resp = self.client.get('/api/v2/bo/__unknown_bo__/1/rule-trace')
+        assert resp.status_code == 404
+        assert resp.get_json()['code'] == 'NOT_FOUND'
+
+    def test_trace_http_returns_envelope(self, monkeypatch):
+        """正常路径：HTTP 透传 service 结果，envelope 结构不被包装破坏。"""
+        from meta.api import bo_api
+
+        envelope = {
+            'trace_id': 'abc123',
+            'object_type': 'sales_order',
+            'record_id': 1,
+            'factors': {'org_id': None},
+            'scenarios': [{
+                'ok': True,
+                'scenario': 'default',
+                'decision': 'resolved',
+                'rule_id': 'doc_flow:sales_order',
+                'source': 'db',
+                'reason': '',
+                'factors': {},
+                'elapsed_ms': 0.1,
+            }],
+        }
+
+        class _StubService:
+            def build(self, object_type, **kwargs):
+                assert object_type == 'sales_order'
+                assert kwargs['record_id'] == 1
+                return envelope
+
+        monkeypatch.setattr(
+            bo_api, '_check_single_bo_in_dim_scope', lambda *a, **k: False)
+        monkeypatch.setattr(
+            rule_center_api, 'get_rule_trace_service', lambda: _StubService())
+        resp = self.client.get('/api/v2/bo/sales_order/1/rule-trace')
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body['success'] is True
+        assert body['data']['scenarios'][0]['scenario'] == 'default'

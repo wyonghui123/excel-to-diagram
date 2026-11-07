@@ -1,6 +1,6 @@
 # Spec：规则化收敛（Rule Convergence）
 
-> 文档编号: 待定 | 状态: 执行基线 v1.6 | 日期: 2026-11-07（v1.1：TBD 决议；v1.2：官方文档二次确认；v1.3：TBD-4 关闭，进入 M1 执行；v1.4：细化规则中心 FR-014/015/016 与单据级推导设计；v1.5：补规则试算 FR-017、配置发布流 FR-018，回写头部产品对标结论；v1.6：规则中心改为视图元数据驱动，新增 §9.6.9 与 TBD-15）
+> 文档编号: 待定 | 状态: 执行基线 v1.9 | 日期: 2026-11-07（v1.1：TBD 决议；v1.2：官方文档二次确认；v1.3：TBD-4 关闭，进入 M1 执行；v1.4：细化规则中心 FR-014/015/016 与单据级推导设计；v1.5：补规则试算 FR-017、配置发布流 FR-018，回写头部产品对标结论；v1.6：规则中心改为视图元数据驱动，新增 §9.6.9 与 TBD-15；v1.7：细化 FR-015 / IF-007 单据推导的可操作入口——规则中心「单据推导」页签 + 详情分区、参数与渲染契约、场景能力矩阵、实现差距与验收；v1.8：信封 v2 语义落地（`kind` / `factor_sources` / 全量规则明细）；v1.9：L1 落地——运行期节点字段、200 节点截断、前端规则全集表与场景/归属筛选）
 > 主题: 把仍硬编码在 Python 中的业务规则，按「元模型 / 配置 / 代码」三层归属收敛到规则模型
 > 前置: [2026-10-02 规则模型 Spec](./2026-10-02-rule-model-spec.md)、[24 · 业务对象组织边界](../spec_权限体系升级/24_org_scope_business_object_phase2.md)
 > 关联: `meta/core/rule_executor.py`、`meta/core/rule_provider.py`、`meta/core/hierarchy_loader.py`
@@ -251,11 +251,29 @@
 | `state_transition` | 允许/拒绝的目标状态及声明来源 | `state_machine_loader` |
 | `doc_flow` | 上游/下游派生关系与规则 | `doc_flow_rule_store` |
 
+**入口（v1.7 细化）**
+
+| 入口 | 声明处 | 记录来源 | 适用 |
+|---|---|---|---|
+| A 单据详情「规则推导」分区 | `ui_view_config.detail.rule_trace` | 当前记录 id 自动带入 | 看「这张单」 |
+| B 规则中心「单据推导」页签 | `rule_center_view.yaml` 的 `tabs[trace]` | 手输 `object_type` + `record_id` | 跨 BO 排查 / 无详情页的 BO |
+
+- 两个入口 MUST 复用同一接口（IF-007）与同一渲染组件 `RuleTracePanel.vue`，差异仅在外壳与参数来源；禁止第二套渲染逻辑。
+- 必填：`object_type`（须在 `registry` 已注册）、`record_id`（存在且在读取维度范围内）。
+- 可选：`scenarios`（缺省 6 类全量）、`codes[]`（控制参数场景必需，去重后 ≤20）、`dims`（`org_id / document_type_id / line_type_id / item_group_id`，缺省由单据字段回填）、`from_state / to_state`。
+- 字段映射、决策徽标、空态文案由视图元数据声明（§9.6.9 `trace.decisions`），不写在组件里。
+
 - **验收标准**：
   - 详情页新增「规则推导」分区，按决策时间线展示；每条含场景、规则 ID、载体、因子快照、候选集、命中/未命中原因、结果、耗时。
   - 推导为只读，MUST NOT 落库、MUST NOT 触发业务副作用；提供「重新推导」按钮。
   - 未接入场景返回 `decision = "not_instrumented"` 并说明原因，不得显示空白或伪装成功。
   - 推导结果与写入路径同源（同一 Provider / Resolver），并与最近一次实际落库结果可对照。
+  - （v1.7）两个入口 MUST 均可实际点击到达并产出结果；仅后端接口可用不算交付完成。
+  - （v1.7）卡片 MUST 展示服务端 `decision` / `reason` / `elapsed_ms`；前端不得按场景名自行推断结果或本地重算候选。
+  - （v1.7）`factors` 中未提供的维度显示「未提供」，MUST NOT 用 0 / 空串 / 默认值静默补位（与 FR-016 同口径）。
+  - （v1.7）控制参数场景未给 `codes` 时显示「需选参数」引导；行类型场景缺 `document_type_id` 时显示补全提示，均不得空表静默。
+  - （v1.7）未接入场景（validation / numbering）不出现在场景选择器中，也不展示伪造结果。
+  - （v1.7）无 `rule_center:rule_center_trace` 时 A 入口不渲染分区、B 页签不可见；服务端返回 403，不得用伪空态掩盖。
   - 追踪受单据数据权限约束；敏感字段按字段策略脱敏。
   - 一期不新增持久化表；二期如需事后审计再评估 `rule_trace` 表（需 DDL 审批）。
 
@@ -398,9 +416,20 @@
 ### IF-007 单据规则推导接口
 
 - **类型**：HTTP API
-- **入口**：`GET /api/v2/bo/<object_type>/<record_id>/rule-trace?scenarios=...`
-- **请求/响应**：返回该单据在指定场景下的推导链（`trace_id`、`steps[]`、每条决策的信封字段与因子快照）
-- **错误处理**：只读、不落库；单据不存在 404；无数据权限 403；单场景失败不影响其他场景返回
+- **入口**：`GET /api/v2/bo/<object_type>/<record_id>/rule-trace`
+- **查询参数（v1.7 细化）**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `scenarios` | csv | 否 | 6 类场景任意子集，缺省全量；含非法值 → 400 |
+| `codes` | csv | 否 | 控制参数参数码，trim + 去重后 ≤20；缺省时该场景 `skipped / no_codes_requested` |
+| `org_id` / `document_type_id` / `line_type_id` / `item_group_id` | int | 否 | 显式因子，优先于单据字段回填 |
+| `user_id` / `action_id` | int / str | 否 | 权限场景上下文；缺省当前登录用户 + `read` |
+| `from_state` / `to_state` | str | 否 | 状态流转场景；`from_state` 缺省取单据状态字段 |
+
+- **响应**：顶层 `trace_id`（UUID，仅日志关联）、`object_type`、`record_id`、`factors`、`scenarios[]`；每条为统一信封 `ok / scenario / decision / rule_id / source / reason / factors / elapsed_ms`，可选 `detail`（`control_parameter` 给 `codes / missing / chain[]`，`line_type` 给命中行快照，`doc_flow` 给声明列表）
+- **`decision` 取值**：`hit / resolved / allow / deny / missing / skipped / not_instrumented`；由服务端返回，前端 MUST NOT 自行推断
+- **错误处理**：只读、不落库；`object_type` 未注册或单据不存在 / 越维度 → 404 `NOT_FOUND`（不暴露记录存在性）；`scenarios` / 参数非法 → 400；无 `rule_center:rule_center_trace` → 403；单场景异常 → 200 且该 `step.ok=false`，不影响其他场景
 - **来源**：FR-015
 
 ### IF-008 规则试算接口
@@ -656,7 +685,7 @@ ExplainService（默认/权限/状态/审批统一解释）
 
 - 路由：`/system/rule-center`，菜单 `rule-center`，`page_type=rule_center`（`menu.yaml` 新增枚举值，属 L1 schema 变更、零 DDL；`dynamicRoutes.js` 的 `PAGE_TYPE_COMPONENTS` 注册 `RuleCenterPage.vue`，由菜单表自动注册路由）。
 - **页面由视图元数据驱动**：页签、列、筛选项、行操作、详情分区与试算场景全部来自 `meta/schemas/rule_center_view.yaml`（结构见 §9.6.9）。Vue 侧只保留一个通用壳 `RuleCenterPage.vue`，按元数据渲染；新增/调整页签不得改前端代码。
-- 默认 `rule_center_view.yaml` 声明 8 个页签（实施时可增删，无需改前端）：
+- 默认 `rule_center_view.yaml` 声明 9 个页签（实施时可增删，无需改前端）：
   1. **全部规则**：统一列表（默认页签）。
   2. **控制参数**：按 domain → 参数定义 → 取值矩阵展示；四维列默认 组织 / 单据类型 / 行类型 / 物料组（列由 YAML 声明，非组件固定）。
   3. **行类型**：`line_type_assignments` 按单据类型 + 物料组展示命中顺序与默认值。
@@ -665,14 +694,22 @@ ExplainService（默认/权限/状态/审批统一解释）
   6. **校验与默认值**：YAML rules 只读列表。
   7. **规则试算**：因子快照输入 + 基线/草稿对照（见 §9.6.7）。
   8. **健康检查**：见 FR-016（因子覆盖矩阵 / 未引用规则 / 静默回落 / 硬编码残留）。
+  9. **单据推导**：输入 `object_type` + `record_id`（可选 `codes` / 四维因子），展示 6 场景推导信封与因子快照（见 §9.6.4，`kind=rule_trace`，需 `rule_center:rule_center_trace`）。
 - 默认列表列：`rule_key`、名称、类型、载体、作用对象、适用因子、可配置、状态、更新时间、操作。
 - 默认行操作：查看详情（抽屉）、编辑（跳转 BO 详情/抽屉）、查看声明、**试算**（跳转试算页签并预填因子）、复制 `rule_key`；发布 / 回滚为 §9.6.8 的链接动作（`links.publish` / `links.rollback`）。
 - 筛选条件可写入 URL query，支持从单据详情反向跳转（带 `bo` / `rule_type`）。
 - 元数据缺失或页面配置不可解析时，前端 MUST 回落到「全部规则 + 默认列」，并按 `not_instrumented` 口径提示，不得白屏。
 
-#### 9.6.4 单据详情「规则推导」分区
+#### 9.6.4 单据规则推导的展示设计（v1.7 细化）
 
-**声明方式（遵循 `ui_view_config` 单一真源）**
+同一份数据、同一套渲染契约，两个入口：
+
+| 入口 | 位置 | 适用 | 记录来源 |
+|---|---|---|---|
+| A 单据详情分区 | 任意 BO 详情页，`ui_view_config.detail.rule_trace.enabled=true` 时追加 | 看「当前这张单」 | 当前记录 id 自动带入 |
+| B 规则中心页签 | `/system/rule-center?tab=trace`，`rule_center_view.yaml` 的 `tabs[trace]` | 跨 BO 排查 / 无详情页的 BO | 手输 `object_type` + `record_id` |
+
+**A. 详情分区声明（`ui_view_config`，单一真源）**
 
 ```yaml
 ui_view_config:
@@ -680,25 +717,106 @@ ui_view_config:
     rule_trace:
       enabled: true
       label: 规则推导
-      scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow]
+      permission: rule_center:rule_center_trace
+      lazy: true                    # 首次展开分区才请求
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]   # state_transition 需 from_state/to_state，A 入口缺省不选
+      codes: []                     # 控制参数场景必填；为空时该场景显示「需选参数」引导
 ```
 
-- `DetailPage.computedSections` 在 `rule_trace.enabled=true` 时追加 `type='rule-trace'` 分区；未声明不显示。
-- 前端组件：`src/components/common/RuleTrace/RuleTracePanel.vue`，懒加载（首次展开分区时才请求）。
-- 分区内容：
-  - 顶部：单据标识、因子快照条（org / document_type / line_type / item_group）。
-  - 时间线：按场景分组，每组展示候选 → 命中 → 结果。
-  - 每条卡片：场景、`rule_id`、载体、原因、结果值、耗时、`not_instrumented` 标记。
-  - 操作：「重新推导」（只读）、「查看规则」（跳规则中心详情）、「复制因子快照」。
-- 空态与失败态：未接入场景显示灰色「未接入」；单场景异常只影响该卡片，不影响整页。
+- `DetailPage.computedSections` 在 `enabled=true` **且** 当前用户具备 `permission` 时追加 `type='custom'`、`key='rule_trace'` 的分区（经 ObjectPage 的 `section-*` slot 转发渲染）；缺权限不渲染分区（不是渲染空态）。
+- 组件 `src/components/common/RuleTrace/RuleTracePanel.vue`，props：`objectType`、`recordId`、`scenarios`、`codes?`、`dims?`；组件不读 store、不拼 URL，统一走 `getRuleTrace()`（`src/services/ruleCenterService.js`）。
+- 操作：「重新推导」（只 GET，不写）、「复制因子快照」。视图元数据缺失时回落为不带分区，不白屏。
 
-**推导计算**
+**B. 规则中心页签声明（`rule_center_view.yaml`）**
 
-- 新增 `meta/core/rule_trace_service.py`：接收 `object_type + record_id + scenarios`，按场景调用现有 Resolver / Explainer，组装统一 `steps[]`。
-- `control_parameter` 场景调用 `ControlParameterResolver.resolve_many(codes, dims)`，并辅以其 `explain(code, dims)` 输出候选行的 `specificity_rank`、命中行、回落 `default_value` 原因。
-- `line_type` 场景调用 `LineTypeResolver.resolve(doc_type_id, ...)` 与其 `explain(doc_type_id, ...)`，输出 `assignment / default / missing` 来源。
-- 其余场景复用 `rule_explainer.explain()`；`doc_flow` 查询 `doc_flow_rule_store` 当前单据的上/下游边。
-- 每个步骤强制携带 `factors` 与 `elapsed_ms`；响应顶层带请求级 `trace_id`（UUID，仅用于日志关联）。
+```yaml
+  - id: trace
+    label: 单据推导
+    kind: rule_trace
+    require: rule_center:rule_center_trace
+    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, item_group_id]
+    actions: [rerun]
+```
+
+- `kind=rule_trace` 为封闭枚举中的新增值（与 `simulate` / `health` 同级），需同步升 `version`。
+- 渲染组件与 A 复用 `RuleTracePanel.vue`，仅外壳不同（B 多一层表单壳），**不新增第二套渲染逻辑**。
+- `object_type` 下拉取值来自 `registry.list()`（BO 注册表），不写死在 YAML；`record_id` 必填数值。
+- 页签 MUST NOT 自动请求：先选对象 + 填记录 id，再点「推导」，避免打空请求。
+
+**请求契约（IF-007）**
+
+参数以 IF-007 为准：`scenarios`（csv，缺省 6 类）、`codes`（csv，≤20）、四维因子（`org_id / document_type_id / line_type_id / item_group_id`）、`user_id / action_id`、`from_state / to_state`。两个入口的差异仅在于谁填这些值。
+
+**渲染契约（信封 → UI）**
+
+| 响应字段 | UI 位置 | 展示规则 |
+|---|---|---|
+| `trace_id` | 顶部标题右侧（monospace，可复制） | 仅日志关联，不参与判定 |
+| `object_type` / `record_id` / `factors` | 顶部因子快照条 | `factors` 全量展示；`null` 显示「未提供」，禁止显示 0 / 空串 |
+| `scenarios[].scenario` / `decision` / `rule_id` / `source` / `reason` / `elapsed_ms` | 场景卡片头 | `decision` 用元数据映射的固定徽标（见 §9.6.9 `trace.decisions`） |
+| `scenarios[].detail.chain[]`（control_parameter） | 参数链路表 | 每行 `code / value / source.type / candidates[]（specificity_rank 升序）/ missing`；命中行高亮 |
+| `scenarios[].detail`（line_type） | 行类型命中表 | `line_type_id` + `source`（assignment / default / missing）+ 候选 assignment 顺序 |
+| `scenarios[].detail`（doc_flow） | 上下游列表 | 每条 `rule_id / target_bo / pool / status` |
+| `scenarios[].ok=false` | 卡片红色边 + 可展开错误 | 单场景失败不隐藏、不阻塞其他卡片 |
+
+- 卡片顺序 MUST 与 `scenarios[]` 一致（即 `scenarios` 入参顺序），前端不重排。
+- `decision` 文案与徽标色放 `rule_center_view.yaml` 的 `trace.decisions`；未知值回落原文，不写死在组件里。
+- `codes` 前端先 trim + 去重 + 截断到 20 并提示；与 `simulate.max_codes` 同口径。
+
+**场景能力矩阵（当前实现）**
+
+| 场景 | 状态 | 前置条件 | 缺前置时表现 | 前端引导 |
+|---|---|---|---|---|
+| `default` | 已接入 | 单据数据 | — | — |
+| `control_parameter` | 已接入 | `codes[]` | `decision=skipped, reason=no_codes_requested` | 显示「需选参数」+ 跳控制参数页签；A 入口由 YAML `codes` 预置 |
+| `line_type` | 已接入 | `document_type_id` | `decision=skipped, reason=document_type_id_missing` | 提示补单据类型；`final.assignment_id=null` 表示未匹配 |
+| `approval` | 已接入 | 记录存在 | — | — |
+| `state_transition` | 已接入 | `from_state` 或单据状态字段 | 缺 `to_state` 时只列允许状态 | — |
+| `doc_flow` | 已接入 | 该 BO 有 active 声明 | 空列表（非错误） | 空态文案「该单据无上下游派生声明」 |
+| `validation` / `numbering` | **未接入** | — | 不在 6 场景枚举内，入参直接 400 | 选择器不提供，**不展示伪造结果** |
+
+**口径（MUST）**
+
+- 推导只读：GET 无写副作用；「重新推导」只重复 GET。
+- 前端 MUST 消费服务端 `decision` / `reason`，不得按场景名自行推断，也不得本地重算候选。
+- 同一单据连续重新推导不做前端缓存（服务端推导不缓存），避免看到过期结论。
+- 受单据数据权限约束（越维度 404）；敏感字段按字段策略脱敏。
+
+**空态与错误态**
+
+| 情形 | HTTP | 前端表现 |
+|---|---|---|
+| 单据不存在 / 不在读取维度范围 | 404 `NOT_FOUND` | 分区内「单据不存在或无权限查看」，不弹全局错误 |
+| 无 `rule_center:rule_center_trace` | 403 | A 不渲染分区；B 页签不可见（按 `tabs[].require` 裁剪） |
+| `object_type` 未注册 | 404 `NOT_FOUND` | 页签内提示「对象未注册」，不白屏 |
+| `scenarios` 非法 | 400 | 前端限制选项，正常路径不可达；命中则展示 400 原文 |
+| 单场景内部异常 | 200，该 `scenarios[].ok=false` | 单卡片告警，其余正常 |
+| `success=false`（其他） | 5xx | 顶部 `message.error(message)`，保留上次成功结果 |
+
+**落地状态（v1.7 P2 已实施）**
+
+1. trace 端点已补 `@require_permission('rule_center:rule_center_trace')`，403 / 非法 `scenarios` / 未知对象 404 均有用例覆盖。
+2. B 入口：`rule_center_view.yaml` 已加 `trace` 页签（`kind: rule_trace`，`version: 2`），`RuleCenterPage.vue` 按 `kind` 分派并消费 `getRuleTrace`。
+3. A 入口：`DetailPage` 已按 `ui_view_config.detail.rule_trace` 追加分区（权限裁剪 + 首见懒加载），`RuleTracePanel.vue` 共用渲染。
+4. `trace.decisions` 文案映射已进 YAML（13 种 decision），前端未知值回落原文。
+5. A 入口 `codes` 预置来源已定为 `ui_view_config.detail.rule_trace.codes`（`sales_order` 已声明 3 个控制参数码）。
+
+**推导计算（不变）**
+
+- `meta/core/rule_trace_service.py`：接收 `object_type + record_id + scenarios`，按场景调用现有 Resolver / Explainer，组装统一 `scenarios[]`。
+- `control_parameter` 调用 `ControlParameterResolver.explain(code, dims)`，输出候选行 `specificity_rank`、命中行与回落 `default` 原因。
+- `line_type` 调用 `LineTypeResolver.explain(doc_type_id, item_group_id)`，输出 `assignment / default / missing` 来源。
+- 其余场景复用 `rule_explainer.explain()`；`doc_flow` 查询 `doc_flow_rule_store` 的 active 声明。
+- 每步强制携带 `factors` 与 `elapsed_ms`；顶层带请求级 `trace_id`（UUID，仅日志关联）。
+
+**实施切片（均在 P2，见 §9.6.6）**
+
+| 切片 | 范围 | 验收 |
+|---|---|---|
+| T1 后端对齐 | trace 端点补 `rule_center:rule_center_trace`；补 403 / 非法 `scenarios` / `codes` 上限用例 | 无权限 403；非法 400；6 场景信封结构不变 |
+| T2 页签（B） | `rule_center_view.yaml` 加 `trace` 页签 + `kind=rule_trace`；新增 `RuleTracePanel.vue`；`RuleCenterPage.vue` 按 `kind` 分派 | 输入 `sales_order` + 真实 id → 6 场景卡片 + 因子快照；改 YAML 可隐藏页签且不改 Vue |
+| T3 详情分区（A） | `DetailPage` 追加 `rule-trace` 分区 + `ui_view_config.detail.rule_trace` 声明 + 权限裁剪 + 懒加载 | 销售订单详情能看到当前单据推导；无权限不显示分区 |
+| T4 口径收口 | `trace.decisions` 入 YAML；空态 / 错误态 / `codes` 去重截断用例 | 前端无硬编码文案；异常不白屏；`codes` 行为与试算一致 |
 
 #### 9.6.5 权限与安全
 
@@ -715,8 +833,8 @@ ui_view_config:
 
 | 阶段 | 范围 | 验收 |
 |---|---|---|
-| P1（只读） | 规则目录 + 详情抽屉 + 单据推导（default / control_parameter / line_type / approval / state_transition）；视图元数据落地（`page_type=rule_center` 注册 + `rule_center_view.yaml` + 通用壳 `RuleCenterPage.vue`） | 6 类来源可检索；一张销售订单/采购订单/调拨单/需求单能看到推导链；只改 YAML 即可增删页签与列，无需改 Vue 组件 |
-| P2（可配置） | 控制参数 / 行类型进入发布流（draft → 校验 → active）、内联编辑、规则试算（含基线/草稿对照）、doc_flow status 变更、审批策略编辑器 | 编辑只写草稿不改变生产解析；发布前必须通过试算与加载期校验；发布留痕且可回滚 |
+| P1（只读） | 规则目录 + 详情抽屉 + 推导接口（default / control_parameter / line_type / approval / state_transition / doc_flow）；视图元数据落地（`page_type=rule_center` 注册 + `rule_center_view.yaml` + 通用壳 `RuleCenterPage.vue`） | 6 类来源可检索；推导接口对一张销售订单/采购订单/调拨单/需求单返回 6 场景信封；只改 YAML 即可增删页签与列，无需改 Vue 组件 |
+| P2（可配置） | 控制参数 / 行类型进入发布流（draft → 校验 → active）、内联编辑、规则试算（含基线/草稿对照）、**单据推导入口（B 规则中心「单据推导」页签 + A 详情分区，见 §9.6.4 T1–T4）**、doc_flow status 变更、审批策略编辑器 | 编辑只写草稿不改变生产解析；发布前必须通过试算与加载期校验；发布留痕且可回滚；**规则中心与单据详情均能实际打开推导并看到因子值 / 候选集 / 命中输出** |
 | P3（增强） | `validation` 场景、规则影响分析、配置导出/导入 + diff、可选 `rule_trace` 持久化 | 需单独 DDL 审批与保留期策略 |
 
 **测试策略**
@@ -858,6 +976,26 @@ detail:
     - { id: history, widget: audit_log, params: { biz_type: rule_config, biz_id: "{rule_key}" } }
 trace:
   scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow]
+  decisions:                 # 决策徽标文案 + 颜色档；未知值回落原文，不写死在组件里
+    applied: { label: 已应用, type: success }
+    skipped: { label: 已跳过, type: info }
+    granted: { label: 已授予, type: success }
+    denied: { label: 已拒绝, type: danger }
+    allowed: { label: 已允许, type: success }
+    rejected: { label: 已拒绝, type: danger }
+    matched: { label: 已命中, type: success }
+    not_matched: { label: 未命中, type: info }
+    resolved: { label: 已解析, type: success }
+    missing: { label: 缺配置, type: warning }
+    declared: { label: 已声明, type: success }
+    not_declared: { label: 未声明, type: info }
+    not_instrumented: { label: 未接入, type: info }
+  tab:                       # §9.6.4 入口 B
+    id: trace
+    label: 单据推导
+    require: rule_center:rule_center_trace
+    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, item_group_id]
+    actions: [rerun]
 simulate:
   fields: [scenario, org_id, document_type_id, line_type_id, item_group_id, record_id, config_mode]
   max_codes: 20
@@ -869,9 +1007,13 @@ simulate:
 |---|---|---|
 | `tabs[].columns` | `GenericObjectList` 列定义 | 列 key 对应 `RuleDescriptor` 字段；未知 key 记 warn 并跳过 |
 | `filters` | FilterBar 配置 | 筛选项生成规则同列定义，不写死下拉值 |
-| `actions` | 行操作注册表 | `detail / edit / view_source / simulate / publish / rollback / copy_key` 为固定动作类型 |
+| `actions` | 行操作注册表 | `detail / edit / view_source / simulate / publish / rollback / copy_key / rerun` 为固定动作类型（`rerun` 于 v2 新增，用于推导页签） |
 | `detail.sections[].widget` | widget 注册表 | `code / factor_matrix / source_snippet / audit_log` 为固定 widget 类型 |
-| `trace.scenarios` | 推导场景选择器 | 与 IF-003 `scenario` 枚举同源，未接入场景只读展示 `not_instrumented` |
+| `trace.scenarios` | 推导场景选择器 | 与 IF-003 `scenario` 枚举同源；只提供已接入场景，`validation` / `numbering` 未接入不出现选项 |
+| `trace.decisions` | 决策徽标（文案 + 颜色档） | 未知 `decision` 回落原文；组件内禁止硬编码中文 |
+| `trace.tab.fields` | 推导表单（入口 B） | 与 IF-007 query 参数一一对应；`object_type` 选项取自 BO 注册表，不写死在 YAML |
+| `trace.tab.require` | 页签可见性 | 缺该权限时按 `tabs[].require` 裁剪页签 |
+| `ui_view_config.detail.rule_trace` | 详情分区（入口 A） | 在 BO 侧声明，规则中心 YAML 不重复定义；缺权限不渲染分区 |
 | `simulate.fields` | 试算表单 | 与 IF-008 请求体字段一一对应 |
 
 - 动作与 widget 是**封闭枚举**（代码注册、元数据引用），YAML 不能引入新类型；新增类型需改代码并升 `version`。
@@ -1021,6 +1163,7 @@ dimension_levels:
 | TBD-13 | 配置发布流载体 | 复用 `status` 列新增 `draft` 枚举（L1 schema 变更，零 DDL），不引入 `validated` 中间态；发布/回滚写 `audit_log(biz_type=rule_config)` | 运行期解析已按 `status='active'` 过滤，`draft` 天然隔离；Oracle Sandbox 也以「激活」为唯一切换点 | 已定 |
 | TBD-14 | 配置版本记录 | 一期不新增版本表，用 `audit_log` 的 `before/after` JSON + `trace_id` 承载历史；P3 若需并行编辑与逐版本 diff，再评估 `rule_config_version` 表（需 DDL 审批） | 与 TBD-10「先按需计算、后置持久化」保持一致；避免为低频操作引入新表 | 已定 |
 | TBD-15 | 规则中心页面载体 | 采用 `page_type=rule_center` + `rule_center_view.yaml` 视图元数据驱动；不落 `custom_page`，也不把展示字段塞进 `MetaRule` | `custom_page` 不自动注册路由、须在 `router/index.js` 手写静态路由，违背平台元数据驱动原则；规则元数据回答「是什么」、视图元数据回答「怎么显示」，职责不同（§9.6.9） | 已定 |
+| TBD-16 | 单据推导 `codes` 预置来源 | 一期采用「`ui_view_config.detail.rule_trace.codes` 手配 + 页面允许用户增删」，不改 BO schema、不引入新表；若后续需要按单据类型自动推荐参数清单，再评估 BO schema 扩展 | `control_parameter` 场景缺 `codes` 会 `skipped`，但「哪张单关心哪些参数」目前无真源；为避免臆造，先由配置显式声明 | 已定 |
 
 **关联修正**
 
@@ -1032,3 +1175,150 @@ dimension_levels:
 - （v1.5）新增 FR-018 配置发布流，设计见 §9.6.8；§9.6.3 页签由 7 个增至 8 个（新增「规则试算」）。
 - （v1.5）§9.6.6 的 P2 由「直接内联编辑」改为「草稿 + 校验 + 发布」，P3 增加「配置导出/导入 + diff」。
 - （v1.6）规则中心改为视图元数据驱动：新增 §9.6.9 与 TBD-15；FR-014 增补「只改 YAML 即可增删页签/列/筛选」验收项；§9.6.3 的 8 个页签改为 `rule_center_view.yaml` 的默认声明，不再是 Vue 组件内硬编码。
+- （v1.7）细化单据推导的可操作入口：FR-015 增补 A/B 两入口与 v1.7 验收项；IF-007 补全 query 参数、响应信封与 400/403/404 矩阵；§9.6.4 重写为「入口 + 请求/渲染契约 + 场景能力矩阵 + 空错态 + 实现差距 + T1–T4 切片」；§9.6.3 页签增至 9 个（新增「单据推导」）；§9.6.9 补 `trace.decisions` / `trace.tab` 与渲染契约行；§9.6.6 的 P1/P2 验收同步（P1 仅要求接口可用，页面入口归入 P2）。
+- （v1.8）P2 第一步「表述准确」收敛（仅新增字段，HTTP 状态与错误码不变）：①移除 `permission` 空场景——其依赖 `user_id` 而推导接口不传，属恒跳过的死分支，第二步以登录身份补回；②信封新增 `kind`（`hit/miss/skip/error/info`）与 `factor_sources`（`override/record/missing`），`detail` 升为一等字段；③`control_parameter` 改三级判定（全缺 → `missing / all_codes_missing`，部分 → `resolved / partially_resolved`，全中 → `resolved`）；④`default` 的 `detail.rules` 列出全部参与规则及 `applied/skipped/not_matched` 三态；⑤决策徽标、因子来源、空错态文案迁入 `trace.kinds / trace.factor_sources / trace.messages`，组件仅保留兜底。同步新增 §11 第二步方案（本期仅评审，不实施；全集口径已定，见 §11.9）。
+
+---
+
+## 11. 规则链与规则全集方案（v1.8 新增，本期仅评审）
+
+> 触发：FR-015 现在能回答「某个场景的一个结论」，但回答不了「这张单到底牵涉哪些规则、谁先谁后、彼此的输入输出怎么传递」。
+> 本章是第二步设计：L0 已落地；L1 及以上本期不实施，待评审确认后再排期。
+
+### 11.1 现状差距
+
+| 现状 | 缺口 |
+|---|---|
+| 6 个场景各自一个信封，通常只给一条 winner | 同一字段的其余候选规则（被覆盖、被跳过）不可见 |
+| 引擎已有规则链能力（`RuleDependencyAnalyzer` + 拓扑执行），trace 未表达 | 用户看不到 A 的输出如何成为 B 的输入 |
+| `doc_flow` 只列下游规则声明 | 跨单据的实际执行链无法回溯 |
+| 场景即分组容器 | 想换一个维度（按字段 / 按状态 / 按审批）看，必须改代码 |
+
+### 11.2 头部产品对照（含取证）
+
+> 取证日期 2026-11-07。置信度：高 = 官方文档明确；中 = 官方文档间接或旧版；低 = 仅第三方资料或机制级认知。
+> **未取证条目不得在评审中当作事实引用**。
+
+| 产品 | 已取证机制 | 可借鉴 | 不照搬 | 置信度 |
+|---|---|---|---|---|
+| Salesforce Flow | Debug 运行时按 element 展示运行时值与路径（官方原文 “view debug details about how the flow runs”）；运行实例官方称 **interview**；持久化逐元素日志仅屏幕流有 `FlowInterviewLogEntry` | 一次运行 = 一条记录 + 节点级输入输出 | 重量级调试器交互 | 中高 |
+| ServiceNow Flow Designer | **Execution details** 逐 item 展示 runtime state、duration、input/output；Decision Table 按 Order 逐行求值、**首个匹配即返回** | 执行详情的数据结构（节点 + 时长 + 输入输出） | 断点 / 逐行 Debugger | 高（执行详情）/ 中（决策表） |
+| Camunda DMN | DRD 用 `requiredDecision` 表达决策依赖；评估结果含 `ruleId` / `ruleOrder`；`HistoricDecisionInstance` 按输出子句与命中规则留档 | 静态依赖图 + 命中规则回传 + 历史实例 | BPMN/DRD 全量建模成本 | 高 |
+| Drools / KIE | Agenda 为激活队列；优先级由 **salience** 决定，官方术语 **conflict resolution**，默认 Salience + LIFO；Agenda View 界面说明仅见于 5.3 旧版文档 | 展示「为什么这条先执行」 | `salience` / LIFO 冲突消解策略 | 中高 |
+| SAP BRFplus | **未找到官方依据**：仅第三方培训材料提到 `FDT_LEAN_TRACE` / `FDT_PROCESS_LOG`，逐表达式中间值待核 | 暂不引用 | —— | 低 |
+| IBM ODM / FICO Blaze / 钉钉宜搭 / 简道云 / 金蝶苍穹 / 用友 YonBuilder / Odoo | 机制级认知，未逐条取证（Odoo 无统一 trace 为反例） | 仅作方向参考 | 私有 DSL、插件机制 | 低–中 |
+
+**证据链接**
+
+- Salesforce：[Flow 官方 PDF](https://resources.docs.salesforce.com/latest/latest/en-us/sfdc/pdf/extend_click_automate.pdf)、[FlowInterviewLogEntry（API 256.0）](https://developer.salesforce.com/docs/atlas.en-us.256.0.object_reference.meta/object_reference/sforce_api_objects_flowinterviewlogentry.htm)
+- ServiceNow：[Flow execution details（Australia）](https://www.servicenow.com/docs/r/australia/build-workflows/workflow-studio/flow-execution-details.html)、[Flow debugger](https://www.servicenow.com/docs/r/australia/build-workflows/workflow-studio/flow-debugger.html)
+- Camunda：[Decision Requirements Graph（8.10）](https://docs.camunda.io/docs/components/modeler/dmn/decision-requirements-graph/)、[DMN History（7.24）](https://docs.camunda.org/manual/latest/user-guide/process-engine/decisions/history/)
+- Drools：[Rule Engine 8.32](https://docs.drools.org/8.32.0.Final/drools-docs/docs-website/drools/rule-engine/index.html)、[Agenda View（5.3）](https://docs.drools.org/5.3.0.Final/drools-expert-docs/html/ch08.html)
+
+**修正说明（相对上一版）**
+
+- 原表把「ServiceNow 决策表 specific→generic 排序 + 命中行高亮」写成事实，官方无依据 → 已降级为「按 Order 逐行、首个匹配即返回」。
+- 原表把「SAP BRFplus 有 trace/中间值」写成事实，未找到官方文档 → 已标注待核，不作为设计依据。
+- 「一次评估 = 一条 trace」是**我们的设计选择**（Salesforce 仅屏幕流持久化逐元素日志，Camunda 才全量留历史），不是行业硬规范。
+
+**三条设计共识（本方案归纳，非厂商规范）**
+
+1. **一次评估 = 一条 trace 记录**：含输入快照、命中标识、命中位置、输出、耗时。
+2. **依赖双层表达**：模型期 DAG（规则之间靠哪个字段相连）+ 运行期顺序列表（`parent_id` / `seq`，反映条件跳过后真实顺序）。
+3. **UI 三件套**：可折叠 trace 树 + 命中位置高亮 + 每步输入/输出对照。
+
+**明确不照搬**：Drools `salience` / LIFO 冲突消解、全量 working memory 快照、断点/单步调试器、仅以决策表行号表达命中、trace 默认关闭并定期删除。
+
+### 11.3 运行期 trace 节点（信封 v2）
+
+在现有信封上**只增不改**（后端 `_envelope` 扩展、前端按列渲染）：
+
+| 字段 | 类型 | 阶段 | 说明 |
+|---|---|---|---|
+| `node_id` | string | L1 | 稳定节点标识，`{trace_id}:{seq}` |
+| `parent_id` | string \| null | L1 | 上游节点；链式规则必填 |
+| `seq` | int | L1 | 运行期执行序号，全局递增 |
+| `stage` | string | L1 | `before_save / validate / calc / approve / status_transition` |
+| `rule_id` | string \| null | 已有 | 命中的规则；未命中时为候选规则 ID 列表的首项或空 |
+| `match` | object | L1 | `{conditions: [{field, op, expected, actual, passed}], matched: bool}` |
+| `factors` | object | 已有 | 该节点实际读取的因子快照（只存参与判定的字段） |
+| `output` | object | L1 | 该节点写出的字段与值（`default` 场景为赋值结果，`state_transition` 为目标状态） |
+| `kind` / `decision` / `reason` / `elapsed_ms` | — | 已有 | v1.8 语义 |
+
+约束：`seq` 在同一 `trace_id` 内唯一；`parent_id` 必须指向已存在的 `node_id`，否则加载期报错；节点总量 ≤200，超出置 `truncated: true` 并返回各 `kind` 计数。
+
+> **落地状态（v1.9 / L1 已实施）**：后端由 `RuleTraceService._decorate_steps()` 统一补 `seq / node_id / parent_id / stage / match / output`；`MAX_TRACE_NODES = 200` 只截断返回体积，`kind_counts` 仍按完整求值结果统计（截断不影响求值）。L1 不跨对象递归，`parent_id` 恒为 `null`（子 trace 挂父节点属 L3）；`match.conditions` 仅对 `state_transition` / `control_parameter` / `line_type` 三个场景回填可核对项，其余场景留空，不臆造比对项。前端文案全部来自 `rule_center_view.yaml` 的 `trace.scenario_labels / stages / scopes / rules_columns / conditions_columns`。
+
+### 11.4 规则全集分层
+
+对目标 BO，规则全集由三类组成，界面上同表展示、用 `scope_kind` 区分：
+
+| 类别 | 判定 | 典型原因 |
+|---|---|---|
+| `evaluated` | 本次实际参与求值（含 `miss` / `skip`） | 命中、条件不满足、维度不匹配 |
+| `not_triggered` | 相关但未进入求值 | `state_mismatch` / `stage_not_reached` / `scope_mismatch` / `not_instrumented` |
+| `downstream` | 通过 `doc_flow` / `derive` 影响其他 BO | 下游单据默认值、状态联动 |
+
+纳入口径（可配，默认值即 L1 标准）：
+
+1. 规则声明 `scope_bo` 命中该 BO；
+2. 规则 `target_field` 出现在该 BO 的写入路径（默认值 / 校验 / 状态动作）；
+3. 上下游各一跳（`max_depth=1`）。
+
+禁止把「未在本 BO 声明且无字段关联」的规则凑数进来——否则规则全集会退化成噪音列表。
+
+### 11.5 双层依赖
+
+**模型期（静态 DAG）**：复用 `RuleDependencyAnalyzer.analyze()`，边补语义：
+
+```yaml
+edges:
+  - from: rule_a
+    to: rule_b
+    via_field: unit_price     # A 写、B 读
+    kind: derive              # derive | validate | gate | flow | approval
+```
+
+**运行期（动态链）**：`parent_id` + `seq`。两者不一致属正常现象（条件跳过后拓扑序 ≠ 执行序），界面以运行期为准，静态图只做导航。
+
+不变量：`ImplicitRuleChainExecutor` 保持无生产调用方（`rule_executor.py` 已有守卫），链执行仍由 `RuleEngine.execute_rules` 的拓扑序承担。
+
+### 11.6 UI 形态
+
+1. **规则全集表**（默认）：一行一规则，列 = 状态 / 规则 / 场景标签 / 命中位置 / 耗时；展开行为条件项 diff（期望 vs 实际）+ 输入输出对照。场景降级为筛选 `tag`，不再是分组容器。
+2. **链视图**（可选 tab）：静态 DAG（Mermaid）+ 运行期顺序列表；点节点高亮对应表行，点表行定位图上节点。
+3. **命中位置**：`rule_id` 跳 YAML 声明（`source=bo_yaml`）或配置详情（`source=control_parameter / line_type`），复用现有详情页路由。
+
+### 11.7 分档与验收
+
+| 档 | 内容 | 验收 |
+|---|---|---|
+| L0（已完成） | 场景分组 + `kind` + `factor_sources` + `default.detail.rules` | 现有 `test_rule_center_api.py` 全绿 |
+| L1（已完成） | 信封补 `node_id/parent_id/seq/stage/match/output`；前端规则全集表 + 展开行；场景改筛选 | 单测覆盖字段与 `seq` 唯一性；payload ≤200 节点有截断标记；页面无写死中文 |
+| L2 | 链视图：`GET /api/v2/rules/rule-chain`（只读，复用 Analyzer）+ 图与表联动 | 图节点数 = 运行期节点数；点选联动可用；无生产判定改动 |
+| L3 | 跨单据链：`doc_flow` 递归一层，子 trace 以 `parent_id` 挂到主 trace | 递归深度上限可配；超限标注 `truncated` |
+| L4（可选） | 持久化 `rule_trace` 表 + 保留期 | 独立 DDL 审批；默认关闭 |
+
+分档原则：L1 只改展示契约，L2 才新增接口，L3 涉及跨对象递归（性能与权限边界需要单独评审）。
+
+> **L1 验收记录（2026-11-08）**：`meta/tests/test_rule_center_api.py` 新增 `test_node_fields_and_seq`（字段/`seq` 连续/`node_id` 唯一）、`test_nodes_truncated_when_exceed_limit`（上限截断 + 计数完整）、`test_state_transition_match_and_output`（条件回填与写出值）；`test_rule_center_api.py` + `test_rule_simulate_api.py` 共 56 passed；`npm run build` 与 ESLint 均通过。
+
+### 11.8 风险与非目标
+
+- **口径风险**：`default` 走 `ActionExecutor.dry_run_defaults`，与生产写入不是同一执行实例；L1 只标注来源，不做"生产回放"承诺。
+- **体积风险**：条件项 diff 会放大 payload，必须有节点上限与截断标记。
+- **顺序风险**：静态 DAG 的拓扑序不能替代运行期 `seq`。
+- **权限风险**：`permission` 场景需以登录用户身份计算；若 L1 补回，禁止从 query 取 `user_id`（可越权）。
+- **非目标**：断点/单步调试、working memory 全量快照、冲突消解策略配置、决策表行号定位、trace 默认关闭。
+
+### 11.9 待决策
+
+> 2026-11-07 评审结论：**本期不实施，仅评审方案**；全集成口径已定为「声明在本 BO + 字段写入路径 + 一跳（`max_depth=1`）」，其余条目待 L1 排期时再定。
+
+| ID | 事项 | 选项 | 结论 |
+|---|---|---|---|
+| TBD-17 | 规则全集口径 | 仅声明在本 BO / 加字段写入路径 / 再上下游一跳 | **已定**：加字段写入路径 + 一跳，`max_depth` 可配 |
+| TBD-18 | 链视图形态 | 仅顺序列表 / 列表 + DAG / 仅 DAG | 待评审（建议列表为默认，DAG 作可选 tab） |
+| TBD-19 | 跨单据深度 | 不跨 / 一跳 / 可配 | 待评审（建议一跳起步） |
+| TBD-20 | trace 持久化 | 不落库（现状）/ 落库 + 保留期 | 待评审（建议维持不落库） |
+| TBD-21 | `permission` 场景回补 | 不补 / 以登录身份补 | 待评审（建议 L1 以会话用户补，禁止 query 传入） |

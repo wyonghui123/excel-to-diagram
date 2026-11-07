@@ -24,8 +24,9 @@ SCENARIOS = ('default', 'permission', 'state_transition', 'approval')
 def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
               source: str = 'code', reason: str = '',
               factors: Optional[Dict[str, Any]] = None,
+              detail: Optional[Dict[str, Any]] = None,
               elapsed_ms: float = 0.0, ok: bool = True) -> Dict[str, Any]:
-    return {
+    envelope = {
         'ok': ok,
         'scenario': scenario,
         'decision': decision,
@@ -35,6 +36,9 @@ def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
         'factors': factors or {},
         'elapsed_ms': round(elapsed_ms, 3),
     }
+    if detail is not None:
+        envelope['detail'] = detail
+    return envelope
 
 
 def _default_data_source():
@@ -51,17 +55,34 @@ def _explain_default(meta_obj, data, data_source) -> Dict[str, Any]:
     executor = ActionExecutor(ds, RuleEngine(ds))
     result = executor.dry_run_defaults(meta_obj, dict(data or {}))
     logs = result.get('logs') or []
-    applied = [
-        entry for entry in logs
-        if entry.get('hit') and entry.get('value') is not None
-        and not entry.get('skip_reason')
+
+    def _status(entry: Dict[str, Any]) -> str:
+        if (entry.get('hit') and entry.get('value') is not None
+                and not entry.get('skip_reason')):
+            return 'applied'
+        if entry.get('skip_reason'):
+            return 'skipped'
+        return 'not_matched'
+
+    # [v1.8 2026-11-07] 全部参与评估的规则都要露出（原实现只给 winner，
+    # 其余只躺在 factors.logs 里，等于看不到"为什么别的规则没生效"）。
+    rules = [
+        {
+            'rule_id': entry.get('rule_id'),
+            'target_field': entry.get('target_field'),
+            'value': entry.get('value'),
+            'status': _status(entry),
+            'skip_reason': entry.get('skip_reason'),
+        }
+        for entry in logs
     ]
+    applied = [entry for entry in logs if _status(entry) == 'applied']
 
     if not result.get('success', True):
         return _envelope(
             'default', 'skipped', source='yaml',
             reason=result.get('error') or 'dry_run_failed',
-            factors={'target_fields': []}, ok=False,
+            factors={'target_fields': []}, detail={'rules': rules}, ok=False,
         )
     if applied:
         winner = applied[0]
@@ -74,6 +95,7 @@ def _explain_default(meta_obj, data, data_source) -> Dict[str, Any]:
                 'auto_filled_fields': result.get('auto_filled_fields') or [],
                 'logs': logs,
             },
+            detail={'rules': rules},
         )
     skip_reason = next(
         (entry.get('skip_reason') for entry in logs if entry.get('skip_reason')),
@@ -82,6 +104,7 @@ def _explain_default(meta_obj, data, data_source) -> Dict[str, Any]:
     return _envelope(
         'default', 'skipped', source='yaml', reason=skip_reason,
         factors={'auto_filled_fields': [], 'logs': logs},
+        detail={'rules': rules},
     )
 
 
