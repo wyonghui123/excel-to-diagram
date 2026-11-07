@@ -420,6 +420,58 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# [Rule Convergence M2 FR-004 2026-11-07] R-SCH-9 唯一真源。
+# 服务层（sales_order_guard_service）只读本声明做流转校验，保留副作用与跨字段校验；
+# 新增状态 / 流转只改这里。规则 triggers 为空、ui_hints.hidden=true：
+# 不接通用 RuleEngine，也不改变 /state_transitions 的对外输出。
+states:
+  - code: planned
+    label: 计划中
+    category: initial
+    seq: 1
+  - code: confirmed
+    label: 已确认
+    seq: 2
+  - code: completed
+    label: 已完成
+    category: terminal
+    seq: 3
+  - code: cancelled
+    label: 已作废
+    category: terminal
+    seq: 4
+
+rules:
+  - id: confirm_sales_order_schedule
+    name: 确认计划行
+    type: state_transition
+    state_field: status
+    from_states: [planned]
+    to_state: confirmed
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: complete_sales_order_schedule
+    name: 完成计划行
+    type: state_transition
+    state_field: status
+    from_states: [confirmed]
+    to_state: completed
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: cancel_sales_order_schedule
+    name: 作废计划行
+    type: state_transition
+    state_field: status
+    from_states: [planned, confirmed]
+    to_state: cancelled
+    enabled: false
+    ui_hints:
+      hidden: true
+
 indexes:
   # 同一订单行内，同一 kind 的序号唯一
   - fields: [line_id, schedule_kind, schedule_no]

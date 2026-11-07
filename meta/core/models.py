@@ -1128,6 +1128,14 @@ class MetaObject:
     # 空 = 未声明（V6 一致性测试拦截，不阻塞启动）
     org_scope: Dict[str, Any] = field(default_factory=dict)
 
+    # [Rule Convergence M1 2026-11-07] 单据编号声明（no_field / date_field /
+    # type_table / scope_bo / fallback_sequence_code）；空 = 未声明取号规则
+    numbering: Dict[str, Any] = field(default_factory=dict)
+
+    # [Rule Convergence M2 2026-11-07] 审批对象注册声明（table / amount_fields）；
+    # 空 = 该对象不参与审批注册（新增对象只改 YAML）
+    approval: Dict[str, Any] = field(default_factory=dict)
+
     # ── 新增：级联选择配置 ──
     cascade_select: Optional[List[Dict[str, Any]]] = None
 

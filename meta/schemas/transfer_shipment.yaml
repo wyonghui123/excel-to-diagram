@@ -61,6 +61,12 @@ audit:
   dissociate:
     enabled: true
 
+numbering:
+  no_field: shipment_no
+  date_field: ship_date
+  scope_bo: transfer_shipment
+  fallback_sequence_code: TRS
+
 fields:
   - id: id
     name: ID

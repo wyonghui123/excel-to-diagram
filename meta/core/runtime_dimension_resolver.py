@@ -34,8 +34,14 @@ from typing import List, Dict, Any, Optional
 
 from meta.core.bo_schema_loader import get_bo_schema_loader
 from meta.core.feature_flags import is_enabled
+from meta.core.hierarchy_loader import (
+    get_parent_field_map,
+    get_scope_chain,
+    get_table_map,
+)
 from meta.core.perm_cache import get_permission_cache, PermissionCache
 from meta.core.db_path import get_meta_db_path
+from meta.core.safe_connect import safe_connect_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,7 @@ class RuntimeDimensionResolver:
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or _get_db_path()
         self._schema_loader = get_bo_schema_loader()
+        self._scope_bo_id_supported: Optional[bool] = None
 
     def resolve(
         self,
@@ -183,18 +190,10 @@ class RuntimeDimensionResolver:
             父资源 ID 列表 (例: [1, 17])
             None 表示无法向上展开 (bo_id 不在 HIERARCHY_CHAIN 中)
         """
-        HIERARCHY_CHAIN = ['product', 'version', 'domain', 'sub_domain']
-        PARENT_FIELD_MAP = {
-            'version': 'product_id',
-            'domain': 'version_id',
-            'sub_domain': 'domain_id',
-        }
-        RESOURCE_TABLE_MAP = {
-            'product': 'products',
-            'version': 'versions',
-            'domain': 'domains',
-            'sub_domain': 'sub_domains',
-        }
+        # [Rule Convergence M3 2026-11-07] 链 / 父字段 / 表名由 hierarchies.yaml 派生（FR-002）
+        HIERARCHY_CHAIN = get_scope_chain()
+        PARENT_FIELD_MAP = get_parent_field_map()
+        RESOURCE_TABLE_MAP = get_table_map()
         if bo_id not in HIERARCHY_CHAIN or dim_code not in HIERARCHY_CHAIN:
             return None
         bo_idx = HIERARCHY_CHAIN.index(bo_id)
@@ -319,12 +318,30 @@ class RuntimeDimensionResolver:
             with safe_connect_for_read(self._db_path) as conn:
                 cursor = conn.cursor()
                 placeholders = ','.join('?' * len(role_ids))
-                cursor.execute(f"""
-                    SELECT permission_set_id, dimension_code, dimension_values, inherit_children,
-                           scope_mode, bo_id
-                    FROM permission_set_dimension_scopes
-                    WHERE permission_set_id IN ({placeholders})
-                """, role_ids)
+                # [FIX 2026-11-07] bo_id 只在部分环境存在：
+                #   v070 把 role_dimension_scopes 重命名为 permission_set_dimension_scopes，
+                #   但 bo_id 列由独立迁移添加、未进入 generated_schema。
+                #   列缺失时按公共维度（NULL）读取，避免整条查询抛错后静默返回空条件。
+                bo_expr = 'bo_id' if self._scope_bo_id_supported is not False else 'NULL'
+                try:
+                    cursor.execute(f"""
+                        SELECT permission_set_id, dimension_code, dimension_values, inherit_children,
+                               scope_mode, {bo_expr}
+                        FROM permission_set_dimension_scopes
+                        WHERE permission_set_id IN ({placeholders})
+                    """, role_ids)
+                    if self._scope_bo_id_supported is None:
+                        self._scope_bo_id_supported = True
+                except Exception:
+                    if self._scope_bo_id_supported is False:
+                        raise
+                    cursor.execute(f"""
+                        SELECT permission_set_id, dimension_code, dimension_values, inherit_children,
+                               scope_mode, NULL
+                        FROM permission_set_dimension_scopes
+                        WHERE permission_set_id IN ({placeholders})
+                    """, role_ids)
+                    self._scope_bo_id_supported = False
                 scopes = []
                 for row in cursor.fetchall():
                     scopes.append({

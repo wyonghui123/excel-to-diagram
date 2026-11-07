@@ -32,6 +32,20 @@ from meta.services.token_service import TokenService
 from meta.services.auth_provider import UserInfo
 from meta.tests.test_utils import get_test_db_path
 
+
+def _first_existing_version_id() -> int:
+    """取真实存在的版本 id。
+
+    [2026-11-07] 测试库数据会被重建（当前 versions 从 id=3 起），不再保证
+    version_id=1 存在；硬编码 1 会让上下文/关系导出类用例拿不到任何数据。
+    """
+    ds = get_data_source('sqlite', database=get_test_db_path())
+    row = ds.execute("SELECT id FROM versions ORDER BY id LIMIT 1").fetchone()
+    if not row:
+        pytest.skip('测试库无版本数据')
+    return row[0] if not isinstance(row, dict) else row['id']
+
+
 class TestImportExportConfigAPI:
 
     def test_01_get_domain_import_export_config(self, api_client):
@@ -779,7 +793,7 @@ class TestRelationshipExportFields:
                 '/api/v1/query/search',
                 data=json.dumps({
                     'object_type': 'relationship',
-                    'version_id': 1,
+                    'version_id': _first_existing_version_id(),
                     'page': 1,
                     'page_size': 1
                 }),
@@ -823,7 +837,7 @@ class TestRelationshipExportFields:
                 data=json.dumps({
                     'object_type': 'relationship',
                     'scope': 'single',
-                    'filters': {'version_id': 1}
+                    'filters': {'version_id': _first_existing_version_id()}
                 }),
                 headers=headers
             )
@@ -1912,7 +1926,7 @@ class TestBusinessKeyContext:
             data=json.dumps({
                 'object_type': 'domain',
                 'scope': 'single',
-                'filters': {'version_id': 1}
+                'filters': {'version_id': _first_existing_version_id()}
             }),
             headers=headers
         )
@@ -2097,7 +2111,7 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        product_code, version_name = ie_service._get_product_version_codes({'version_id': 1})
+        product_code, version_name = ie_service._get_product_version_codes({'version_id': _first_existing_version_id()})
         assert product_code is not None
         assert version_name is not None
 
@@ -2118,7 +2132,7 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        version_id = 1
+        version_id = _first_existing_version_id()
         result = ie_service._find_by_key('domain', 'code', 'DOMAIN_1')
 
         if result:
@@ -2145,7 +2159,7 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        product_code, version_name = ie_service._get_product_version_codes({'version_id': 1})
+        product_code, version_name = ie_service._get_product_version_codes({'version_id': _first_existing_version_id()})
         version_id = ie_service._resolve_version_id(product_code, version_name)
 
         assert version_id is not None
@@ -3117,7 +3131,9 @@ class TestExcelFileContent:
         wb = Workbook()
         wb.remove(wb.active)
         sheets_info = []
-        self.ie_service._write_child_sheet(wb, child_type, child_meta, data, sheets_info)
+        self.ie_service._write_child_sheet(
+            wb, child_type, child_meta, data, sheets_info,
+            options={'empty_rows_for_new': 3})
         return wb, child_meta
 
     def _make_main_sheet_wb(self, object_type='domain'):

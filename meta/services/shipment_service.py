@@ -433,7 +433,7 @@ class ShipmentService:
         try:
             from meta.core.datasource import get_platform_data_source
             from meta.core.doc_flow_derive_engine import derive
-            from meta.core.doc_flow_rule_store import get_rule
+            from meta.core.rule_provider import get_doc_flow_rule as get_rule
         except Exception:  # pragma: no cover - 核心模块缺失时保持发运可用
             logger.warning('[shipment] DOC_FLOW 模块不可用，跳过转单边')
             return

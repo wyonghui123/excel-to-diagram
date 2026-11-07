@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 
-import yaml
+from meta.core import yaml_compat as yaml
 
 logger = logging.getLogger(__name__)
 

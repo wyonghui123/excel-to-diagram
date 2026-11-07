@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from meta.core.yaml_compat import safe_load as _yaml_safe_load
 
 # 应用 ID 规范: 小写字母开头, 仅含小写字母/数字/下划线
 # 该 ID 会同时用作: 目录名 / 路由前缀 / DB 文件名 / 权限命名空间前缀
@@ -462,7 +463,7 @@ def load_manifest(app_dir: Path) -> AppManifest:
         raise AppManifestError(f"未找到描述符: {manifest_path}")
 
     try:
-        raw_all = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        raw_all = _yaml_safe_load(manifest_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise AppManifestError(f"{manifest_path} YAML 解析失败: {e}") from e
 

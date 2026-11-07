@@ -6,7 +6,7 @@
 """
 
 from typing import Dict, List, Tuple, Optional, Any
-import yaml
+from meta.core import yaml_compat as yaml
 import os
 import logging
 

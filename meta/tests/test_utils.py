@@ -169,7 +169,10 @@ def create_test_workbook(child_type='annotation', data=None):
     wb = Workbook()
     wb.remove(wb.active)
     sheets_info = []
-    ie_service._write_child_sheet(wb, child_type, child_meta, data, sheets_info)
+    # 显式要求追加 3 行新增空行（导出默认在有数据时不追加）
+    ie_service._write_child_sheet(
+        wb, child_type, child_meta, data, sheets_info,
+        options={'empty_rows_for_new': 3})
     return wb, child_meta
 
 

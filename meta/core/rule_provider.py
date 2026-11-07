@@ -72,6 +72,36 @@ class RuleProvider:
         """
         return self.get_rules_by_type(meta_object, RuleType.DEFAULT)
 
+    # ------------------------------------------------------------------
+    # DB 规则门面（FR-010）：业务调用方不直连各域 store
+    # 懒 import 以避免 rule_provider ↔ store/DAO 的循环依赖。
+    # ------------------------------------------------------------------
+
+    def get_doc_flow_rule(self, data_source, rule_id: str) -> Optional[dict]:
+        """按 rule_id 读取单据流规则（DB 载体）。"""
+        from meta.core.doc_flow_rule_store import get_rule
+        return get_rule(data_source, rule_id)
+
+    def upsert_doc_flow_rules(self, data_source, rules) -> int:
+        """写入/更新单据流规则（DB 载体）。"""
+        from meta.core.doc_flow_rule_store import upsert_rules
+        return upsert_rules(data_source, rules)
+
+    def ensure_doc_flow_rule_table(self, data_source) -> None:
+        """确保单据流规则表存在。"""
+        from meta.core.doc_flow_rule_store import ensure_doc_flow_rule_table
+        ensure_doc_flow_rule_table(data_source)
+
+    def set_doc_flow_rule_status(self, data_source, rule_id: str, status: str) -> bool:
+        """启停单据流规则。"""
+        from meta.core.doc_flow_rule_store import set_rule_status
+        return set_rule_status(data_source, rule_id, status)
+
+    def list_permission_rules(self, db_path: str, resource_type: Optional[str] = None):
+        """读取权限规则（DB 载体）。"""
+        from meta.core.permission_rule_v2_dao import PermissionRuleV2DAO
+        return PermissionRuleV2DAO(db_path).list_all(resource_type)
+
 
 _default_provider: Optional[RuleProvider] = None
 
@@ -88,3 +118,28 @@ def set_rule_provider(provider: Optional[RuleProvider]) -> None:
     """替换全局提供者（供测试注入 / 后期切换在线配置实现）"""
     global _default_provider
     _default_provider = provider
+
+
+def get_doc_flow_rule(data_source, rule_id: str) -> Optional[dict]:
+    """模块级便捷函数：单据流规则读取。"""
+    return get_rule_provider().get_doc_flow_rule(data_source, rule_id)
+
+
+def upsert_doc_flow_rules(data_source, rules) -> int:
+    """模块级便捷函数：单据流规则写入。"""
+    return get_rule_provider().upsert_doc_flow_rules(data_source, rules)
+
+
+def ensure_doc_flow_rule_table(data_source) -> None:
+    """模块级便捷函数：单据流规则表初始化。"""
+    return get_rule_provider().ensure_doc_flow_rule_table(data_source)
+
+
+def set_doc_flow_rule_status(data_source, rule_id: str, status: str) -> bool:
+    """模块级便捷函数：单据流规则启停。"""
+    return get_rule_provider().set_doc_flow_rule_status(data_source, rule_id, status)
+
+
+def list_permission_rules(db_path: str, resource_type: Optional[str] = None):
+    """模块级便捷函数：权限规则读取。"""
+    return get_rule_provider().list_permission_rules(db_path, resource_type)

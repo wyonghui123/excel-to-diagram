@@ -42,41 +42,23 @@ logger = logging.getLogger(__name__)
 from meta.services.permission_dimension_engine import (  # noqa: E402
     RESOURCE_TABLE_MAP,
 )
+from meta.core.hierarchy_loader import (  # noqa: E402
+    get_child_type_map,
+    get_code_field_map,
+    get_display_field_map,
+    get_parent_info_map,
+)
 
-CHILD_TYPE_MAP = {
-    'product': ['version'],
-    'version': ['domain'],
-    'domain': ['sub_domain'],
-    'sub_domain': [],  # 已移除 service_module 和 business_object
-    # 'service_module': ['business_object'],  # 已移除
-}
+CHILD_TYPE_MAP = get_child_type_map('default')
 
+# [Rule Convergence M1 2026-11-07] 映射统一读 hierarchies.yaml（经 loader）。
 PARENT_FIELD_MAP = {
-    'version': 'product_id',
-    'domain': 'version_id',
-    'sub_domain': 'domain_id',
-    # [V1.1.8+ 2026-06-15] service_module / business_object 链路恢复 (WriteScope 需要)
-    'service_module': 'sub_domain_id',
-    'business_object': 'service_module_id',
+    obj: info[2] for obj, info in get_parent_info_map().items()
 }
 
-DISPLAY_FIELD_MAP = {
-    'product': 'name',
-    'version': 'name',
-    'domain': 'domain_name',
-    'sub_domain': 'sub_domain_name',
-    # 'service_module': 'module_name',  # 已移除
-    # 'business_object': 'object_name',  # 已移除
-}
+DISPLAY_FIELD_MAP = get_display_field_map()
 
-CODE_FIELD_MAP = {
-    'product': 'code',
-    'version': 'code',
-    'domain': 'code',
-    'sub_domain': 'code',
-    # 'service_module': 'code',  # 已移除
-    # 'business_object': 'code',  # 已移除
-}
+CODE_FIELD_MAP = get_code_field_map()
 
 
 class ManagementDimensionEngine:

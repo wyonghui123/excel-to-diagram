@@ -1091,16 +1091,21 @@ class ImportExportService:
                         export_enum_validations[actual_col_idx] = dv
                         export_enum_validations_by_col[col_idx] = dv
 
-            for row_idx in range(2, len(sheet_data) + 2):
-                for col_idx in export_enum_validations_by_col:
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    export_enum_validations_by_col[col_idx].add(cell)
+            # [perf-2026-11-07] 批量范围添加: 原按行 dv.add(cell) 在 openpyxl 内
+            # 逐条比较 sqref 是 O(N²)，cascade 导出数千行时整文件卡死（实测 >130s）
+            if sheet_data:
+                last_data_row = len(sheet_data) + 1
+                for col_idx, dv in export_enum_validations_by_col.items():
+                    col_letter = get_column_letter(col_idx)
+                    dv.add(f"{col_letter}2:{col_letter}{last_data_row}")
 
-            # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
-            if len(sheet_data) > 0:
+            # [FIX] 默认有数据时不追加新增行；caller 显式传 empty_rows_for_new 时按传入值追加
+            if "empty_rows_for_new" in options:
+                empty_rows_count = options["empty_rows_for_new"]
+            elif len(sheet_data) > 0:
                 empty_rows_count = 0
             else:
-                empty_rows_count = options.get("empty_rows_for_new", 5)
+                empty_rows_count = 5
             next_row_idx = len(sheet_data) + 2
             for empty_row in range(empty_rows_count):
                 col_idx = 1
@@ -1208,7 +1213,12 @@ class ImportExportService:
                 from meta.services.auth_middleware import get_current_user, is_admin
                 user = _get_thread_user()
                 if not user:
-                    user = get_current_user()
+                    try:
+                        user = get_current_user()
+                    except RuntimeError:
+                        # [FIX 2026-11-07] 无 Flask app/request context 时（纯服务层调用、CLI、单元测试）
+                        # g 不可用会抛 RuntimeError；与 auth_middleware.is_admin 一致，视为未登录。
+                        user = None
                 if user and not is_admin(user):
                     from meta.services.permission_service import PermissionService
                     perm_service = PermissionService(self.data_source)
@@ -1447,7 +1457,6 @@ class ImportExportService:
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
                         cell.protection = Protection(locked=False)
-                    operation_dv.add(cell)
                     col_idx += 1
                 
                 for header in headers[1:] if include_operation_mode else headers:
@@ -1503,6 +1512,10 @@ class ImportExportService:
                     col_idx += 1
                 row_idx += 1
 
+            # [perf-2026-11-07] 批量范围添加，替代逐行 operation_dv.add(cell)（O(N²)）
+            if include_operation_mode and row_idx > 2:
+                operation_dv.add(f"A2:A{row_idx - 1}")
+
             export_enum_validations = {}  # key: actual_col_idx (不含offset)，用于新增行
             export_enum_validations_by_col = {}  # key: col_idx (含offset)，用于数据行
             for col_idx, header in enumerate(headers[1:] if include_operation_mode else headers, 2 if include_operation_mode else 1):
@@ -1527,16 +1540,19 @@ class ImportExportService:
                         export_enum_validations[actual_col_idx] = dv
                         export_enum_validations_by_col[col_idx] = dv
 
-            for row in range(2, row_idx):
-                for col_idx in export_enum_validations_by_col:
-                    cell = ws.cell(row=row, column=col_idx)
-                    export_enum_validations_by_col[col_idx].add(cell)
+            # [perf-2026-11-07] 批量范围添加: 逐行 dv.add(cell) 在 openpyxl 内是 O(N²)
+            if row_idx > 2:
+                for col_idx, dv in export_enum_validations_by_col.items():
+                    col_letter = get_column_letter(col_idx)
+                    dv.add(f"{col_letter}2:{col_letter}{row_idx - 1}")
             
-            # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
-            if len(sheet_data) > 0:
+            # [FIX] 默认有数据时不追加新增行；caller 显式传 empty_rows_for_new 时按传入值追加
+            if "empty_rows_for_new" in options:
+                empty_rows_count = options["empty_rows_for_new"]
+            elif len(sheet_data) > 0:
                 empty_rows_count = 0
             else:
-                empty_rows_count = options.get("empty_rows_for_new", 5)
+                empty_rows_count = 5
             for empty_row in range(empty_rows_count):
                 col_idx = 1
                 
@@ -3310,7 +3326,7 @@ class ImportExportService:
 
         try:
             query = """
-                SELECT p.code as product_code, v.code as version_code
+                SELECT p.code as product_code, v.name as version_code
                 FROM versions v
                 LEFT JOIN products p ON v.product_id = p.id
                 WHERE v.id = ?
@@ -3766,11 +3782,11 @@ class ImportExportService:
                     if val_len > col_max_lengths.get(actual_col, 0):
                         col_max_lengths[actual_col] = val_len
 
-        # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
-        if len(data) > 0:
-            empty_rows_count = 0
-        elif include_operation_mode:
-            empty_rows_count = options.get("empty_rows_for_new", 5)
+        # [FIX] 默认有数据时不追加新增行；caller 显式传 empty_rows_for_new 时按传入值追加
+        if "empty_rows_for_new" in options:
+            empty_rows_count = options["empty_rows_for_new"]
+        elif include_operation_mode and not data:
+            empty_rows_count = 5
         else:
             empty_rows_count = 0
         for empty_row in range(empty_rows_count):
@@ -5669,7 +5685,12 @@ class ImportExportService:
             from meta.services.query_service import _get_thread_user
             user = _get_thread_user()
             if not user:
-                user = get_current_user()
+                try:
+                    user = get_current_user()
+                except RuntimeError:
+                    # [FIX 2026-11-07] 无 Flask app/request context 时（纯服务层调用、CLI、单元测试）
+                    # g 不可用会抛 RuntimeError；与 auth_middleware.is_admin 一致，视为未登录。
+                    user = None
             if user and not is_admin(user):
                 perm_service = PermissionService(self.data_source)
                 has_permission = perm_service.check_permission_unified(
@@ -8219,17 +8240,17 @@ class ImportExportService:
 
         return meta
 
-    def _resolve_version_id(self, product_code: str, version_code: str) -> Optional[int]:
-        """根据 product_code 和 version_code 解析 version_id
+    def _resolve_version_id(self, product_code: str, version_name: str) -> Optional[int]:
+        """根据 product_code 和 version_name 解析 version_id
         
         Args:
             product_code: 产品编码
-            version_code: 版本编码
+            version_name: 版本名称（version.code 已删除，name 承载业务编码语义）
             
         Returns:
             int: version_id，如果未找到返回 None
         """
-        if not product_code or not version_code:
+        if not product_code or not version_name:
             return None
         
         try:
@@ -8237,10 +8258,10 @@ class ImportExportService:
                 SELECT v.id
                 FROM versions v
                 LEFT JOIN products p ON v.product_id = p.id
-                WHERE p.code = ? AND v.code = ?
+                WHERE p.code = ? AND v.name = ?
                 LIMIT 1
             """
-            cursor = self.data_source.execute(query, (product_code, version_code))
+            cursor = self.data_source.execute(query, (product_code, version_name))
             row = cursor.fetchone()
             if row:
                 return row[0]

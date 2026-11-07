@@ -2,7 +2,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from meta.core.models import ValueHelpSource
-from meta.core.hierarchy_loader import get_table_map
+from meta.core.hierarchy_loader import (
+    get_dimension_levels,
+    get_parent_info_map,
+    get_table_map,
+)
 from meta.core.value_help_accessor import parse_value_filter_conditions
 
 
@@ -28,17 +32,8 @@ def _build_ancestors(dimension_id: str, instance_id: int, data_source) -> Tuple[
         - [R24 2026-07-24] ancestor_names: {"domain": "采购管理", "sub_domain": "采购需求", ...}
                        用于详情页前端一次性拿到 display 文本, 避免多次异步 resolve
     """
-    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name'
-    _PARENT_INFO_MAP = {
-        'version': ('product', 'products', 'product_id', 'name'),
-        'domain': ('version', 'versions', 'version_id', 'name'),
-        'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
-        'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
-        'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
-    }
-    # [A2 2026-10-06] 改由 hierarchies.yaml 驱动（SSOT）。
-    # _PARENT_INFO_MAP 刻意保持静态：其第 4 位 'name'（父级显示列）无 yaml 依据，
-    # 是 [FIX 2026-06-15] 从 parent_name 纠错而来的经验值，不在 levels[] 声明中。
+    # [Rule Convergence M1 2026-11-07] 父级映射改由 hierarchies.yaml 驱动（SSOT）。
+    _PARENT_INFO_MAP = get_parent_info_map()
     _RESOURCE_TABLE_MAP = get_table_map()
 
     if dimension_id == 'product':
@@ -416,8 +411,11 @@ class BoValueHelpProvider(ValueHelpProvider):
         # [R23 2026-07-24] 详情页字段反推: 同时返回 ancestor_ids (按 dim_name → id 映射)
         #   场景: 详情页 service_module_id 变化时, 自动回填 sub_domain_id / domain_id / version_id
         #   前端只需读 ancestor_ids[parent_dim] 即可, 无需自己解析路径字符串
+        # [Rule Convergence M3 2026-11-07] 层级维度集合由 hierarchies.yaml 派生（FR-002），
+        #   不再维护字面量清单；level 0（product）无祖先，故排除。
         HIERARCHY_DIMS = {
-            'version', 'domain', 'sub_domain', 'service_module', 'business_object'
+            lv.object for lv in get_dimension_levels()
+            if lv.level > 0 and lv.level_type == 'entity'
         }
         if self.target_bo in HIERARCHY_DIMS:
             try:

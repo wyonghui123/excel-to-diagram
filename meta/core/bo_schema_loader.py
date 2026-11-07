@@ -19,7 +19,7 @@ dimension_bindings 格式：
 """
 import os
 import time
-import yaml
+from meta.core import yaml_compat as yaml
 from threading import Lock
 from typing import Dict, List, Optional, Any
 

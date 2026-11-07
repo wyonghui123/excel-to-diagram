@@ -96,6 +96,11 @@ org_scope:
   function: sales
   write_check: true
 
+numbering:
+  no_field: order_no
+  date_field: order_date
+  type_table: type_definitions
+
 fields:
   - id: id
     name: ID

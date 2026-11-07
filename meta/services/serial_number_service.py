@@ -15,6 +15,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from meta.core.state_machine_loader import get_state_machine
+
 logger = logging.getLogger(__name__)
 
 SERIAL_TABLE = 'serial_numbers'
@@ -80,20 +82,10 @@ TXN_TYPES = (TXN_CREATE, TXN_RECEIVE, 'issue', 'transfer_out', 'transfer_in',
              TXN_SHIP, TXN_RETURN_VENDOR, 'return', TXN_ADJUST,
              TXN_STATUS_CHANGE, 'scrap')
 
-#: 状态流转白名单（§3.5）。scrapped 为终态，不可再流转。
-TRANSITIONS = {
-    STATUS_DEFINED: (STATUS_IN_STORES, STATUS_SCRAPPED),
-    # in_stores → shipped 仅供整箱发运（handling_unit_service.ship_hu 调用）
-    STATUS_IN_STORES: (STATUS_ISSUED, STATUS_IN_TRANSIT, STATUS_SHIPPED,
-                       STATUS_SCRAPPED),
-    STATUS_IN_TRANSIT: (STATUS_IN_STORES, STATUS_SCRAPPED),
-    STATUS_ISSUED: (STATUS_SHIPPED, STATUS_CONSUMED, STATUS_RETURNED,
-                    STATUS_SCRAPPED),
-    STATUS_SHIPPED: (STATUS_SCRAPPED,),
-    STATUS_CONSUMED: (STATUS_SCRAPPED,),
-    STATUS_RETURNED: (STATUS_IN_STORES, STATUS_SCRAPPED),
-    STATUS_SCRAPPED: (),
-}
+#: 状态流转白名单唯一真源 = meta/schemas/serial_number.yaml
+#: （states 目录 + rules: type=state_transition）。scrapped 为终态，不可再流转。
+def _usage_machine() -> Any:
+    return get_state_machine('serial_number', 'usage_status')
 
 #: 可发运 / 可领用的在库状态（§5 validate_line_serials）
 OUTBOUND_ALLOWED = (STATUS_IN_STORES, STATUS_ISSUED)
@@ -676,15 +668,20 @@ class SerialNumberService:
                                     field_name='usage_status',
                                     rule='SERIAL_STATUS_INVALID')
         current = serial.get('usage_status')
-        if current == STATUS_SCRAPPED:
-            raise SerialNumberError('已报废序列号为终态，不可再流转',
-                                    field_name='usage_status',
-                                    rule='SERIAL_STATUS_TRANSITION_INVALID')
-        if to_status not in TRANSITIONS.get(current, ()):
-            raise SerialNumberError(
-                '不允许从 %s 流转到 %s' % (current, to_status),
-                field_name='usage_status',
-                rule='SERIAL_STATUS_TRANSITION_INVALID')
+        machine = _usage_machine()
+        if machine is None:
+            logger.warning(
+                '[serial_number] serial_number 未声明状态机，跳过状态流转校验')
+        else:
+            if current in machine.terminal:
+                raise SerialNumberError('已报废序列号为终态，不可再流转',
+                                        field_name='usage_status',
+                                        rule='SERIAL_STATUS_TRANSITION_INVALID')
+            if to_status not in machine.allowed(current):
+                raise SerialNumberError(
+                    '不允许从 %s 流转到 %s' % (current, to_status),
+                    field_name='usage_status',
+                    rule='SERIAL_STATUS_TRANSITION_INVALID')
         doc = dict(doc or {})
         now = _now()
         with self.ds.transaction():
@@ -865,7 +862,9 @@ class SerialNumberService:
                 if not to_stores:
                     return {'id': serial_id, 'from_status': origin,
                             'to_status': STATUS_RETURNED}
-            if STATUS_IN_STORES not in TRANSITIONS.get(current, ()):
+            machine = _usage_machine()
+            if (machine is not None
+                    and STATUS_IN_STORES not in machine.allowed(current)):
                 raise SerialNumberError(
                     '不允许从 %s 流转到 %s' % (current, STATUS_IN_STORES),
                     field_name='usage_status',

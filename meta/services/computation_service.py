@@ -111,7 +111,7 @@ class ComputationService:
             计算列配置列表，格式: [{'key': field_id, 'computation': {...}}, ...]
         """
         meta_obj = registry.get(object_type)
-        if not meta_obj or not meta_obj.rules:
+        if not meta_obj:
             return []
 
         computed_columns = []

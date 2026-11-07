@@ -630,6 +630,109 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# [Rule Convergence M2 FR-004 2026-11-07] usage_status 状态图唯一真源。
+# 规则顺序即目标状态追加顺序，必须与旧 TRANSITIONS 的元组顺序一致；
+# triggers 为空、ui_hints.hidden=true：状态变更只走 serial_number_service 白名单
+# 与 serial_transactions 事件账（D4/D11），不接通用 RuleEngine。
+states:
+  - code: defined
+    label: 已建档
+    category: initial
+    seq: 1
+  - code: in_stores
+    label: 在库
+    seq: 2
+  - code: in_transit
+    label: 在途
+    seq: 3
+  - code: issued
+    label: 已领用
+    seq: 4
+  - code: shipped
+    label: 已发运
+    seq: 5
+  - code: consumed
+    label: 已消耗
+    seq: 6
+  - code: returned
+    label: 已退回
+    seq: 7
+  - code: scrapped
+    label: 已报废
+    category: terminal
+    seq: 8
+
+rules:
+  - id: serial_to_in_stores
+    name: 序列号入库
+    type: state_transition
+    state_field: usage_status
+    from_states: [defined, returned, in_transit]
+    to_state: in_stores
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_issued
+    name: 序列号领用
+    type: state_transition
+    state_field: usage_status
+    from_states: [in_stores]
+    to_state: issued
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_in_transit
+    name: 序列号发运在途
+    type: state_transition
+    state_field: usage_status
+    from_states: [in_stores]
+    to_state: in_transit
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_shipped
+    name: 序列号已发运
+    type: state_transition
+    state_field: usage_status
+    from_states: [in_stores, issued]
+    to_state: shipped
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_consumed
+    name: 序列号已消耗
+    type: state_transition
+    state_field: usage_status
+    from_states: [issued]
+    to_state: consumed
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_returned
+    name: 序列号已退回
+    type: state_transition
+    state_field: usage_status
+    from_states: [issued]
+    to_state: returned
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: serial_to_scrapped
+    name: 序列号报废
+    type: state_transition
+    state_field: usage_status
+    from_states: [defined, in_stores, in_transit, issued, shipped, consumed, returned]
+    to_state: scrapped
+    enabled: false
+    ui_hints:
+      hidden: true
+
 indexes:
   - fields: [item_id, org_id, serial_no]
     unique: true

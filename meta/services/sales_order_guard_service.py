@@ -129,6 +129,7 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, Optional
 
+from meta.core.state_machine_loader import get_state_machine
 from meta.services import project_task_guard
 from meta.services.uom_quantity_service import UomQuantityService
 
@@ -245,13 +246,8 @@ SCHEDULE_TABLE = 'sales_order_schedules'
 # R-SCH-10：三 kind 全部启用（service 由 B6 服务工单接线解禁）
 SCHEDULE_KINDS = ('delivery', 'billing', 'service')
 SCHEDULE_KINDS_ENABLED = ('delivery', 'billing', 'service')
-SCHEDULE_STATUSES = ('planned', 'confirmed', 'completed', 'cancelled')
-# §2.3：completed / cancelled 为终态，不可回退、不可复活
-SCHEDULE_TERMINAL = ('completed', 'cancelled')
-SCHEDULE_TRANSITIONS = {
-    'planned': ('confirmed', 'cancelled'),
-    'confirmed': ('completed', 'cancelled'),
-}
+# R-SCH-9 状态图唯一真源 = meta/schemas/sales_order_schedule.yaml
+# （states 目录 + rules: type=state_transition）；服务层只读声明做校验。
 SCHEDULE_MILESTONE_MAX = 64
 # R-SCH-5：订单离开草稿后仍可改的列。status 不在冻结范围（状态流转由 R-SCH-9 管）。
 SCHEDULE_EDITABLE_AFTER_DRAFT = ('promised_date', 'promised_qty',
@@ -1676,19 +1672,25 @@ class SalesOrderGuardService:
                     rule='SERVICE_VISIT_NO_REQUIRED')
 
         # R-SCH-9：状态流转须符合 §2.3 图，终态不可回退 / 复活
+        # 唯一真源 = sales_order_schedule.yaml 的 states + state_transition 规则
+        machine = get_state_machine(SCHEDULE_OBJECT)
         new_status = data.get('status')
-        if not _is_blank(new_status) and str(new_status) not in SCHEDULE_STATUSES:
+        if machine is None:
+            logger.warning(
+                '[sales_order_guard] sales_order_schedule 未声明状态机，'
+                '跳过 R-SCH-9')
+        elif not _is_blank(new_status) and str(new_status) not in machine.states:
             raise SalesOrderGuardError(
-                f'计划行状态 {new_status} 不属于 {"/".join(SCHEDULE_STATUSES)}',
+                f'计划行状态 {new_status} 不属于 {"/".join(machine.states)}',
                 field_name='status', rule='SCHEDULE_STATUS_INVALID')
-        if not is_create and not _is_blank(new_status):
+        if machine is not None and not is_create and not _is_blank(new_status):
             old_status = old.get('status')
             if old_status and str(new_status) != str(old_status):
-                if str(old_status) in SCHEDULE_TERMINAL:
+                if str(old_status) in machine.terminal:
                     raise SalesOrderGuardError(
                         f'计划行已处于终态 {old_status}，不可再变更状态',
                         field_name='status', rule='SCHEDULE_STATUS_INVALID')
-                allowed = SCHEDULE_TRANSITIONS.get(str(old_status), ())
+                allowed = machine.transitions.get(str(old_status), ())
                 if str(new_status) not in allowed:
                     raise SalesOrderGuardError(
                         f'计划行状态不允许从 {old_status} 变为 {new_status}'

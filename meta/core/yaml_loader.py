@@ -11,7 +11,7 @@ YAML 元模型加载器
 import os
 import re
 import logging
-import yaml
+from meta.core import yaml_compat as yaml
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -2729,6 +2729,10 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         doc_effect=data.get("doc_effect") or {},
         # [Spec 24 T1 2026-11-06] 业务对象组织边界声明
         org_scope=data.get("org_scope") or {},
+        # [Rule Convergence M1 2026-11-07] 单据编号声明
+        numbering=data.get("numbering") or {},
+        # [Rule Convergence M2 2026-11-07] 审批对象注册声明
+        approval=data.get("approval") or {},
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)

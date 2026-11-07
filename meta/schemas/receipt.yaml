@@ -101,6 +101,11 @@ org_scope:
   function: inventory
   write_check: true
 
+numbering:
+  no_field: receipt_no
+  date_field: receipt_date
+  type_table: type_definitions
+
 fields:
   - id: id
     name: ID

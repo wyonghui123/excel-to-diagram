@@ -18,6 +18,13 @@ import os
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from meta.services.condition_evaluator import ConditionEvaluator
+from meta.core.hierarchy_loader import (
+    get_child_type_map,
+    get_extra_entity_map,
+    get_extra_entity_table_map,
+    get_parent_info_map,
+    get_table_map,
+)
 from meta.services.permission_dimension_engine import (
     RESOURCE_TABLE_MAP as _DIM_TABLES,
     CODE_FIELD_MAP as _DIM_CODE_FIELDS,
@@ -26,45 +33,21 @@ from meta.services.permission_dimension_engine import (
 logger = logging.getLogger(__name__)
 
 
-# [A1 2026-10-06] 本表与上方导入的 _DIM_TABLES 内容不同，是**有意为之**，不是重复：
-#   _DIM_TABLES（来自 permission_dimension_engine）用于「维度名白名单」判断
-#     （_fk_code_field_map / _anchor_target_of_field 中的 `dim in _DIM_TABLES`），
-#     含 relationship / annotation，不含 org / user。
-#   本表用于「BO → 物理表名」取表拼 SQL，含 org / user（Spec 19 M2 委托授权），
-#     不含 relationship / annotation。
-#   两者若合并，org 会被误判为维度、relationship 会被误当作可取表对象，故保持分离。
-RESOURCE_TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-    # [Spec 19 M2 2026-09-05] 组织管理委托授权：组织/用户纳入资源矩阵
-    # 语义：行级规则 = 管理（manage）该行对应组织子树/子树内用户，非普通读写
-    'org': 'orgs',
-    'user': 'users',
-}
+# [Rule Convergence M1 2026-11-07] 「BO → 物理表名」统一读 hierarchies.yaml；
+# 仅补 org / user（Spec 19 M2 委托授权），它们不在层级链声明中。
+RESOURCE_TABLE_MAP = dict(get_table_map())
+RESOURCE_TABLE_MAP.update(get_extra_entity_table_map('org', 'user'))
 
-CHILD_TYPE_MAP = {
-    'product': ['version'],
-    'version': ['domain'],
-    'domain': ['sub_domain'],
-    'sub_domain': ['service_module'],
-    'service_module': ['business_object'],
-    # [Spec 19 M2] org 自引用（parent_id），user 无子类型不参与继承
-    'org': ['org'],
-}
+CHILD_TYPE_MAP = get_child_type_map('full', include_extra=True)
 
 PARENT_FIELD_MAP = {
-    'version': 'product_id',
-    'domain': 'version_id',
-    'sub_domain': 'domain_id',
-    'service_module': 'sub_domain_id',
-    'business_object': 'service_module_id',
-    # [Spec 19 M2] org 自引用父字段；user 无父字段（用户行范围由所属组织解析）
-    'org': 'parent_id',
+    obj: info[2] for obj, info in get_parent_info_map().items()
 }
+PARENT_FIELD_MAP.update({
+    obj: info['parent_field']
+    for obj, info in get_extra_entity_map().items()
+    if info.get('parent_field')
+})
 
 LEVEL_ORDER = {'none': 0, 'read': 1, 'write': 2, 'admin': 3}
 

@@ -394,7 +394,7 @@ def derive(app_ds, platform_ds, rule_id: str, source_id: Any,
             SOURCE_ROW_NOT_FOUND / TARGET_ROW_NOT_FOUND / INVALID_QUANTITY /
             SOURCE_QTY_FIELD_MISSING / OVER_DERIVE
     """
-    from meta.core.doc_flow_rule_store import get_rule
+    from meta.core.rule_provider import get_doc_flow_rule as get_rule
     from meta.core.models import registry
 
     target_data = dict(target_data or {})

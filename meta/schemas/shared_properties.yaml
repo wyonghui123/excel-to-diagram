@@ -1,3 +1,21 @@
+# [Rule Convergence M1 2026-11-07] 系统字段清单（字段策略引擎判定依据）
+# 新增系统字段只改此处，不再修改 field_policy_engine.py
+system_fields:
+  - id
+  - _id
+  - tenant_id
+  - created_at
+  - updated_at
+  - created_by
+  - updated_by
+  - created_date
+  - updated_date
+  - created_user
+  - updated_user
+  - is_system
+  - system_flag
+  - readonly
+
 hierarchy_fields:
   - id: version_id
     name: 版本

@@ -34,6 +34,8 @@ v1.4 抽取为 SSOT helper，未来 2 处实现应改为调用本模块。
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
+from meta.core.hierarchy_loader import get_table_map
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,9 +108,8 @@ def _object_type_to_table_name(object_type: str) -> str:
         'role': 'roles',
         # [Spec 19 v072 rename] user_group → org
         'user_group': 'orgs',
-        'product': 'products',
-        'version': 'versions',
-        'domain': 'domains',
+        # [Rule Convergence M3 2026-11-07] 层级表名由 hierarchies.yaml 派生（FR-002）
+        **get_table_map(),
     }
     return _fallback_map.get(object_type, object_type + 's')
 

@@ -183,7 +183,7 @@ def derive_batch(app_ds, platform_ds, rule_id: str, items: List[Dict[str, Any]],
             SOURCE_ROW_NOT_FOUND / TARGET_ROW_NOT_FOUND / INVALID_QUANTITY /
             OVER_DERIVE（后四者由 _derive_core 逐行抛出）
     """
-    from meta.core.doc_flow_rule_store import get_rule
+    from meta.core.rule_provider import get_doc_flow_rule as get_rule
     from meta.core.models import registry
 
     if not items:

@@ -5,39 +5,73 @@
 事务会退化为「锁持有到 COMMIT + 回滚把号一并回滚」）。本服务只负责
 「解析序列 → 分配」，各调用方自行决定取号失败是静默跳过还是抛域错误。
 
-对象 → 编号列 / 日期列 / 序列来源集中声明在 NUMBERING；新增单据加一行。
+[Rule Convergence M1 2026-11-07] 对象 → 编号列 / 日期列 / 序列来源不再写死，
+统一读取各 BO YAML 的 `numbering` 声明（经 registry 加载；registry 未就绪时
+直接读取同名 schema 文件，保持同一真源）。
 """
 
+import os
 import re
 
-NUMBERING = {
-    'sales_order': {
-        'no_field': 'order_no',
-        'date_field': 'order_date',
-        'type_table': 'type_definitions',
-    },
-    'purchase_order': {
-        'no_field': 'order_no',
-        'date_field': 'order_date',
-        'type_table': 'type_definitions',
-    },
-    'receipt': {
-        'no_field': 'receipt_no',
-        'date_field': 'receipt_date',
-        'type_table': 'type_definitions',
-    },
-    'transfer_order': {
-        'no_field': 'transfer_order_no',
-        'date_field': 'transfer_date',
-        'type_table': 'type_definitions',
-    },
-    'transfer_shipment': {
-        'no_field': 'shipment_no',
-        'date_field': 'ship_date',
-        'scope_bo': 'transfer_shipment',
-        'fallback_sequence_code': 'TRS',
-    },
-}
+import yaml
+
+_SCHEMA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')
+
+# 进程内声明缓存（仅用于 registry 未加载时的 YAML 直读路径）
+_numbering_cache = {}
+
+
+def _read_numbering(object_type):
+    """读取对象的 numbering 声明；未声明返回 None。"""
+    from meta.core.models import registry
+
+    meta_obj = registry.get(object_type)
+    if meta_obj is not None:
+        return getattr(meta_obj, 'numbering', None) or None
+
+    if object_type in _numbering_cache:
+        return _numbering_cache[object_type]
+
+    config = None
+    path = os.path.join(_SCHEMA_DIR, '%s.yaml' % object_type)
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            config = data.get('numbering') or None
+        except Exception:
+            config = None
+    _numbering_cache[object_type] = config
+    return config
+
+
+def get_numbering_map():
+    """返回 {object_type: numbering}，仅收录声明了取号规则的对象。"""
+    from meta.core.models import registry
+
+    result = {}
+    for object_type, meta_obj in (registry.get_all() or {}).items():
+        config = getattr(meta_obj, 'numbering', None)
+        if config:
+            result[object_type] = config
+
+    if result:
+        return result
+
+    # registry 未加载（脚本 / 单测直调）：按同名 schema 文件兜底
+    try:
+        names = os.listdir(_SCHEMA_DIR)
+    except OSError:
+        return result
+    for name in names:
+        if not name.endswith('.yaml'):
+            continue
+        config = _read_numbering(name[:-5])
+        if config:
+            result[name[:-5]] = config
+    return result
+
 
 _SEQUENCE_SQL = (
     'SELECT code, pattern, scope_fields, date_field, start_value, on_exhaust '
@@ -64,7 +98,7 @@ class DocumentNumberService:
 
         required=True 时，序列缺失或分配失败抛 DocumentNumberError。
         """
-        config = NUMBERING.get(object_type)
+        config = _read_numbering(object_type)
         if config is None:
             raise DocumentNumberError('未声明取号规则的单据类型: %s' % object_type)
         no_field = config['no_field']
@@ -138,7 +172,7 @@ class DocumentNumberService:
             raise DocumentNumberError('编号不能为空', rule='NUMBER_FORMAT_INVALID')
         number = number.strip()
 
-        config = NUMBERING.get(object_type)
+        config = _read_numbering(object_type)
         if config is None:
             raise DocumentNumberError(
                 '未声明取号规则的单据类型: %s' % object_type,

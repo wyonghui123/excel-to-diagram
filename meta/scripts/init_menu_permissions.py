@@ -21,7 +21,11 @@ import json
 import sys
 import io
 import glob
-import yaml
+try:
+    # 优先 C 实现（libyaml）：本脚本启动时会全量解析 213 个 schema yaml
+    from meta.core import yaml_compat as yaml
+except ImportError:  # 作为脚本直接运行（sys.path 无项目根）时回退
+    import yaml
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 

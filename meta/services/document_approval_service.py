@@ -23,20 +23,11 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from meta.core.approval_meta_loader import get_approval_meta
+
 logger = logging.getLogger(__name__)
 
 APPROVAL_ENABLED_PARAM = 'approval_enabled'
-
-#: 对象 → 表名（M3 PO / M4 调拨单接入；requisition / service_request 保持 M1 旧口径）
-APPROVAL_TABLES = {
-    'purchase_order': 'purchase_orders',
-    'transfer_order': 'transfer_orders',
-    'requisition': 'requisitions',
-    'service_request': 'service_requests',
-}
-
-#: 金额取值优先级（步骤金额分段的比较基准）
-_AMOUNT_FIELDS = ('gross_amount', 'net_amount', 'total_amount', 'amount')
 
 
 def _blank(value: Any) -> bool:
@@ -82,7 +73,9 @@ class DocumentApprovalResolver:
     # ------------------------------------------------------------------
     def resolve(self, object_type: str, record_id: Any,
                 trigger_action: str = 'submit') -> Dict[str, Any]:
-        table = APPROVAL_TABLES.get(object_type)
+        # 审批对象注册唯一真源 = BO YAML approval:（M2 FR-005）
+        approval_meta = get_approval_meta(object_type)
+        table = approval_meta['table']
         empty = {
             'required': False, 'policy_id': None, 'policy_code': None,
             'steps': [], 'amount': 0.0, 'snapshot': None,
@@ -96,7 +89,7 @@ class DocumentApprovalResolver:
                            object_type, record_id)
             return dict(empty, reason='record_not_found')
 
-        amount = self._amount_of(record)
+        amount = self._amount_of(record, approval_meta['amount_fields'])
         empty['amount'] = amount
 
         if self._approval_disabled(record):
@@ -153,8 +146,9 @@ class DocumentApprovalResolver:
         return record
 
     @staticmethod
-    def _amount_of(record: Dict[str, Any]) -> float:
-        for field in _AMOUNT_FIELDS:
+    def _amount_of(record: Dict[str, Any],
+                   amount_fields: Tuple[str, ...] = ()) -> float:
+        for field in (amount_fields or ()):
             value = _num(record.get(field))
             if value is not None:
                 return value

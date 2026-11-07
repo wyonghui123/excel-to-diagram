@@ -296,7 +296,7 @@ def counter_edge(app_ds, platform_ds, orig_edge_id: str, *,
             "退货数量必须 > 0（正向新增请走 derive），实际: {0}".format(quantity),
         )
 
-    from meta.core.doc_flow_rule_store import get_rule
+    from meta.core.rule_provider import get_doc_flow_rule as get_rule
     rule = get_rule(platform_ds, return_rule_id)
     if rule is None:
         raise DocFlowDeriveError(

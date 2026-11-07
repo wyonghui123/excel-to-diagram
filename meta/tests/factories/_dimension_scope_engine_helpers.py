@@ -17,6 +17,26 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 
+class _MockDS:
+    """最小 DS 包装: cursor 每次自动 commit, 并暴露 db_path 供复用临时库的使用方."""
+
+    def __init__(self, connection, db_path=None):
+        self._conn = connection
+        self.db_path = db_path
+
+    def execute(self, sql, params=None):
+        cursor = self._conn.cursor()
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
+        self._conn.commit()
+        return cursor
+
+    def commit(self):
+        self._conn.commit()
+
+
 def make_dim_scope_engine_ds() -> Iterator[object]:
     """创建临时 SQLite DB + DS wrapper, 含 permission_set_dimension_scopes + menus.
 
@@ -92,24 +112,60 @@ def make_dim_scope_engine_ds() -> Iterator[object]:
     """)
     conn.commit()
 
-    class MockDS:
-        def __init__(self, connection):
-            self._conn = connection
+    try:
+        yield _MockDS(conn, db_path)
+    finally:
+        conn.close()
+        os.unlink(db_path)
 
-        def execute(self, sql, params=None):
-            cursor = self._conn.cursor()
-            if params:
-                cursor.execute(sql, params)
-            else:
-                cursor.execute(sql)
-            self._conn.commit()
-            return cursor
 
-        def commit(self):
-            self._conn.commit()
+def make_runtime_resolver_ds() -> Iterator[object]:
+    """[FIX 2026-11-07] RuntimeDimensionResolver 专用临时库.
+
+    继承历史用例的数据拓扑 (permission_set_id=999, user_id=1):
+      - org_members / org_permission_sets: 用户 → permission_set 链路
+      - permission_set_dimension_scopes: 含 bo_id, 支持 BO 级覆盖
+
+    Yields:
+        _MockDS (暴露 db_path, 可直接传给 RuntimeDimensionResolver).
+    """
+    db_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    db_path = db_file.name
+    db_file.close()
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE org_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL
+        );
+        CREATE TABLE org_permission_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL
+        );
+        CREATE TABLE permission_set_dimension_scopes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            permission_set_id INTEGER NOT NULL,
+            dimension_code TEXT NOT NULL,
+            dimension_values TEXT,
+            inherit_children INTEGER DEFAULT 1,
+            scope_mode VARCHAR(20) DEFAULT 'include',
+            bo_id VARCHAR(50) NULL
+        );
+        INSERT INTO org_members (org_id, user_id) VALUES (10, 1);
+        INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (10, 999);
+        INSERT INTO permission_set_dimension_scopes
+            (permission_set_id, dimension_code, dimension_values, inherit_children, scope_mode, bo_id)
+        VALUES
+            (999, 'domain', '[1, 2, 3]', 1, 'include', NULL),
+            (999, 'product', '[1]', 1, 'include', NULL),
+            (999, 'sub_domain', '[100, 200]', 1, 'include', 'sub_domain');
+    """)
+    conn.commit()
 
     try:
-        yield MockDS(conn)
+        yield _MockDS(conn, db_path)
     finally:
         conn.close()
         os.unlink(db_path)

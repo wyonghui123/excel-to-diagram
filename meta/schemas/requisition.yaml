@@ -71,6 +71,11 @@ audit:
   dissociate:
     enabled: true
 
+# [Rule Convergence M2 2026-11-07] 审批对象注册（表名 + 金额取值优先级）
+approval:
+  table: requisitions
+  amount_fields: []
+
 fields:
   - id: id
     name: ID

@@ -26,6 +26,15 @@ from meta.core.enums.cache_manager import EnumCacheManager
 from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
+from meta.core.hierarchy_loader import (
+    get_child_type_map,
+    get_code_field_map,
+    get_display_field_map,
+    get_extra_entity_table_map,
+    get_parent_info_map,
+    get_scope_chain,
+    get_table_map,
+)
 from meta.services.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
@@ -40,67 +49,23 @@ SCHEMA_REPORT_FILES = [
     'menu.yaml',
 ]
 
-# [REMOVED] 2026-06-03: service_module 和 business_object 从权限维度移除
-# 新的层级链: product → version → domain → sub_domain (4层)
-RESOURCE_TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
-    # [V1.1.8 2026-06-15] 重新加回 service_module / business_object / relationship 的表映射
-    #   原因: dimension_scope_engine 的 _build_chain_condition 需要
-    #   RESOURCE_TABLE_MAP 查这些 BO 的物理表名 (即使它们不参与 HIERARCHY_CHAIN 展开)
-    #   旧版注释掉导致 chain 构造时 self._resource_table_map.get('service_module') → None, 链式 SQL 失败
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-    'relationship': 'relationships',
-    # [FIX v1.2.34 2026-06-21] annotation 表映射 (WriteScopeInterceptor 需要)
-    'annotation': 'annotations',
-}
+# [Rule Convergence M1 2026-11-07] 层级映射统一读 hierarchies.yaml（经 loader）。
+# 保留 relationship / annotation 两项：它们是实体映射，但不是层级链成员。
+RESOURCE_TABLE_MAP = dict(get_table_map())
+RESOURCE_TABLE_MAP.update(get_extra_entity_table_map('relationship', 'annotation'))
 
-CHILD_TYPE_MAP = {
-    'product': ['version'],
-    'version': ['domain'],
-    'domain': ['sub_domain'],
-    'sub_domain': [],  # 已移除 service_module 和 business_object
-    # 'service_module': ['business_object'],  # 已移除
-}
+CHILD_TYPE_MAP = get_child_type_map('default')
 
 # [P7-T3 2026-07-20] 权限维度映射链 (Spec §3.15 / §8.7)
-# 4 层: product → version → domain → sub_domain
-# 用于声明式配置 (P7-T1) 和 dimension scope 派生 (P7-T3)
-MANAGEMENT_DIMENSION_CHAIN = ['product', 'version', 'domain', 'sub_domain']
+MANAGEMENT_DIMENSION_CHAIN = get_scope_chain()
 
 PARENT_FIELD_MAP = {
-    'version': 'product_id',
-    'domain': 'version_id',
-    'sub_domain': 'domain_id',
-    # [V1.1.8+ 2026-06-15] service_module / business_object 链路恢复 (WriteScope 需要)
-    'service_module': 'sub_domain_id',
-    'business_object': 'service_module_id',
+    obj: info[2] for obj, info in get_parent_info_map().items()
 }
 
-DISPLAY_FIELD_MAP = {
-    'product': 'name',
-    'version': 'name',
-    'domain': 'domain_name',
-    'sub_domain': 'sub_domain_name',
-    # [R21 2026-07-24] 加回 service_module: tree API 需要展示服务模块树
-    'service_module': 'name',
-    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
-    'business_object': 'name',
-}
+DISPLAY_FIELD_MAP = get_display_field_map()
 
-CODE_FIELD_MAP = {
-    'product': 'code',
-    'version': 'code',
-    'domain': 'code',
-    'sub_domain': 'code',
-    # [R21 2026-07-24] 加回 service_module: tree API 需要
-    'service_module': 'code',
-    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
-    'business_object': 'code',
-}
+CODE_FIELD_MAP = get_code_field_map()
 
 
 # ============================================================================

@@ -2839,7 +2839,8 @@ def get_number_sequences():
     on_exhaust=error 时 remaining 按 {SEQ:n} 位数上限计算；extend 时为 null。
     """
     from meta.core.key_template_engine import _SEQUENCES_TABLE
-    from meta.services.document_number_service import DocumentNumberService, NUMBERING
+    from meta.services.document_number_service import (
+        DocumentNumberService, get_numbering_map)
 
     ds = _get_data_source()
     rows = ds.query(
@@ -2885,7 +2886,7 @@ def get_number_sequences():
         {'object_type': key, 'no_field': cfg.get('no_field'),
          'date_field': cfg.get('date_field'), 'type_table': cfg.get('type_table'),
          'fallback_sequence_code': cfg.get('fallback_sequence_code')}
-        for key, cfg in sorted(NUMBERING.items())
+        for key, cfg in sorted(get_numbering_map().items())
     ]
     return ok({'sequences': sequences, 'numbering': numbering})
 
@@ -4075,4 +4076,41 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
             }
         }
     return paths
+
+
+# ---------------------------------------------------------------------------
+# 统一规则解释 / dry-run（FR-011）
+# ---------------------------------------------------------------------------
+
+@bo_bp.route('/<object_type>/rules/explain', methods=['POST'])
+@login_required
+def explain_bo_rules(object_type):
+    """解释一次规则决策：default / permission / state_transition / approval。
+
+    只读接口：不落库、不改变数据。
+    Body: ``{"scenario": "...", ...场景参数}``
+    """
+    from meta.core.rule_explainer import SCENARIOS, explain
+
+    payload = request.get_json(silent=True) or {}
+    scenario = payload.get('scenario')
+    if scenario not in SCENARIOS or registry.get(object_type) is None:
+        return error_response(
+            'scenario 或 object_type 非法', code='BAD_REQUEST', status=400)
+
+    try:
+        result = explain(
+            object_type,
+            scenario,
+            data=payload.get('data'),
+            user_id=payload.get('user_id'),
+            action_id=payload.get('action_id') or 'read',
+            record_id=payload.get('record_id'),
+            state_field=payload.get('state_field') or 'status',
+            from_state=payload.get('from_state'),
+            to_state=payload.get('to_state'),
+        )
+    except ValueError as exc:
+        return error_response(str(exc), code='BAD_REQUEST', status=400)
+    return ok(result)
 

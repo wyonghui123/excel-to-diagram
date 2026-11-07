@@ -1,4 +1,4 @@
-import yaml
+from meta.core import yaml_compat as yaml
 import os
 from typing import List
 

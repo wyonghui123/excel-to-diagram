@@ -5,7 +5,11 @@
 本模块只做加载期/测试期校验，不参与请求链路。
 """
 
+import os
+import re
 from typing import Dict, List, Optional, Set
+
+import yaml
 
 ORG_SCOPE_MODES = ('direct', 'chain', 'dual', 'global')
 
@@ -15,58 +19,16 @@ ORG_SCOPE_AMBIGUOUS = 'ORG_SCOPE_AMBIGUOUS'
 ORG_SCOPE_FIELD_MISSING = 'ORG_SCOPE_FIELD_MISSING'
 ORG_SCOPE_CHAIN_INVALID = 'ORG_SCOPE_CHAIN_INVALID'
 ORG_SCOPE_DUAL_INCOMPLETE = 'ORG_SCOPE_DUAL_INCOMPLETE'
+ORG_SCOPE_EXEMPTION_REASON_MISSING = 'ORG_SCOPE_EXEMPTION_REASON_MISSING'
 
-# 规格 24 §4 登记清单（一致性测试期望集合，mode 为期望值）
-#   声明真源仍在各 BO YAML；此常量用于拦截"漏登记 / 模式漂移"。
-REQUIRED_ORG_SCOPE_BOS: Dict[str, str] = {
-    # ── A 类：直接归属 ──
-    'purchase_order': 'direct',
-    'receipt': 'direct',
-    'sales_order': 'direct',
-    'inventory_transaction': 'direct',
-    'inventory_balance': 'direct',
-    'inventory_adjustment': 'direct',
-    'inventory_count': 'direct',
-    'inventory_reservation': 'direct',
-    'serial_number': 'direct',
-    'party_internal': 'direct',
-    'project': 'direct',
-    'location': 'direct',
-    'batch': 'direct',
-    'employee': 'direct',
-    'shift': 'direct',
-    'resource': 'direct',
-    'resource_group': 'direct',
-    'resource_availability': 'direct',
-    'resource_rate': 'direct',
-    'handling_unit': 'direct',
-    'production_version': 'direct',
-    'work_definition': 'direct',
-    # ── B 类：派生成 ──
-    'receipt_line': 'chain',
-    'purchase_order_line': 'chain',
-    'purchase_order_schedule': 'chain',
-    'shipment': 'chain',
-    'shipment_line': 'chain',
-    'sales_order_line': 'chain',
-    'transfer_order_line': 'chain',
-    'inventory_adjustment_line': 'chain',
-    'inventory_count_line': 'chain',
-    'work_order': 'chain',
-    # ── C 类：双端 ──
-    'transfer_order': 'dual',
-    # ── D 类：全局共享（RDS 等价） ──
-    'item': 'global',
-    'item_group': 'global',
-    'item_structure': 'global',
-    'item_uom_conversion': 'global',
-    'item_xref': 'global',
-    'item_attribute_value': 'global',
-    'party': 'global',
-    'party_archive': 'global',
-    'control_parameter_value': 'global',
-    'pricing_determination': 'global',
-}
+# 组织字段命名（用于推导「可能承载 owning org」的候选对象）
+_ORG_COLUMN_PATTERN = re.compile(r'(^|_)org_id$')
+
+EXEMPTIONS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'schemas',
+    'org_scope_exemptions.yaml',
+)
 
 
 class OrgScopeDeclarationError(ValueError):
@@ -190,8 +152,55 @@ def validate_object(meta_obj, registry_obj=None) -> List[OrgScopeDeclarationErro
     return errors
 
 
+def org_columns(meta_obj) -> Set[str]:
+    """返回对象中形如 org_id / *_org_id 的字段名集合。"""
+    return {
+        column for column in _declared_columns(meta_obj)
+        if _ORG_COLUMN_PATTERN.search(column)
+    }
+
+
+def load_exemptions() -> Dict[str, str]:
+    """读取豁免清单；理由为空直接抛错（FR-003：豁免必须带理由）。"""
+    if not os.path.exists(EXEMPTIONS_PATH):
+        return {}
+    with open(EXEMPTIONS_PATH, 'r', encoding='utf-8') as handle:
+        data = yaml.safe_load(handle) or {}
+
+    result: Dict[str, str] = {}
+    for item in data.get('exemptions') or []:
+        bo_id = str(item.get('object') or '').strip()
+        reason = str(item.get('reason') or '').strip()
+        if not bo_id:
+            continue
+        if not reason:
+            raise OrgScopeDeclarationError(
+                ORG_SCOPE_EXEMPTION_REASON_MISSING, '豁免必须填写 reason', bo_id)
+        result[bo_id] = reason
+    return result
+
+
+def candidate_org_scope_bos(registry_obj=None) -> Set[str]:
+    """推导候选对象：已声明 org_scope ∪ 含组织字段的 BO。"""
+    if registry_obj is None:
+        from meta.core.models import registry as registry_obj
+
+    candidates: Set[str] = set()
+    for obj in registry_obj.all():
+        if _get(obj, 'org_scope', None) or org_columns(obj):
+            candidates.add(_get(obj, 'id', '') or '')
+    return {bo_id for bo_id in candidates if bo_id}
+
+
+def required_org_scope_bos(registry_obj=None, exemptions=None) -> Set[str]:
+    """候选 - 显式豁免 = 必须声明 org_scope 的集合。"""
+    if exemptions is None:
+        exemptions = load_exemptions()
+    return candidate_org_scope_bos(registry_obj) - set(exemptions)
+
+
 def validate_registry(registry_obj=None) -> List[OrgScopeDeclarationError]:
-    """全量校验：已声明对象的 V1-V5 + 规格 §4 登记清单（V6）"""
+    """全量校验：已声明对象的 V1-V5 + 候选对象必须声明（V6）。"""
     if registry_obj is None:
         from meta.core.models import registry as registry_obj
 
@@ -199,18 +208,21 @@ def validate_registry(registry_obj=None) -> List[OrgScopeDeclarationError]:
     for obj in registry_obj.all():
         errors.extend(validate_object(obj, registry_obj))
 
-    # V6: 规格 §4 登记清单必须声明，且模式与期望一致
-    for bo_id, expected_mode in REQUIRED_ORG_SCOPE_BOS.items():
+    # V6: 候选对象（含组织字段或已显式登记）必须声明；豁免只能来自 YAML
+    try:
+        exemptions = load_exemptions()
+    except OrgScopeDeclarationError as exc:
+        errors.append(exc)
+        exemptions = {}
+
+    for bo_id in sorted(required_org_scope_bos(registry_obj, exemptions)):
         obj = registry_obj.get(bo_id)
         if obj is None:
-            continue  # 视图依赖缺失时对象可能未注册
-        decl = getattr(obj, 'org_scope', None) or {}
-        if not decl:
-            errors.append(OrgScopeDeclarationError(
-                ORG_SCOPE_UNDECLARED, '规格 §4 要求声明 org_scope 但未声明', bo_id))
-        elif decl.get('mode') != expected_mode:
+            continue
+        if not (_get(obj, 'org_scope', None) or {}):
             errors.append(OrgScopeDeclarationError(
                 ORG_SCOPE_UNDECLARED,
-                f'org_scope.mode={decl.get("mode")!r} 与规格期望 {expected_mode!r} 不一致', bo_id,
+                '存在组织字段但未声明 org_scope（如为执行组织字段，请登记到 '
+                'org_scope_exemptions.yaml 并填写理由）', bo_id,
             ))
     return errors

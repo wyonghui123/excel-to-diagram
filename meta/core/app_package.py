@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from meta.core.yaml_compat import safe_load as _yaml_safe_load
 
 from meta.core.app_loader import (
     AppManifest,
@@ -95,7 +96,7 @@ def read_bo_ids(manifest: AppManifest) -> List[str]:
     bo_ids: List[str] = []
     for schema_path in manifest.schema_paths():
         try:
-            raw = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+            raw = _yaml_safe_load(schema_path.read_text(encoding="utf-8"))
         except yaml.YAMLError as e:
             raise AppPackageError(f"schema 解析失败 {schema_path}: {e}") from e
         if isinstance(raw, dict) and isinstance(raw.get("id"), str) and raw["id"].strip():

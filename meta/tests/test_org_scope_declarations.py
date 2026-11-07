@@ -18,12 +18,14 @@ from meta.core.org_scope_validator import (
     ORG_SCOPE_AMBIGUOUS,
     ORG_SCOPE_CHAIN_INVALID,
     ORG_SCOPE_DUAL_INCOMPLETE,
+    ORG_SCOPE_EXEMPTION_REASON_MISSING,
     ORG_SCOPE_FIELD_MISSING,
     ORG_SCOPE_UNDECLARED,
-    REQUIRED_ORG_SCOPE_BOS,
+    required_org_scope_bos,
     validate_object,
     validate_registry,
 )
+import meta.core.org_scope_validator as validator_module
 from meta.core.yaml_loader import get_yaml_schema_dir
 from meta.services.org_scope_service import (
     ORG_SCOPE_ENFORCE,
@@ -76,8 +78,49 @@ def test_registry_declarations_are_valid():
 
 def test_required_objects_are_registered():
     _load_registry()
-    missing = [bo for bo in REQUIRED_ORG_SCOPE_BOS if registry.get(bo) is None]
+    missing = [bo for bo in required_org_scope_bos(registry) if registry.get(bo) is None]
     assert missing == []
+
+
+class _StubRegistry:
+    """最小 registry 桩，用于验证 V6 推导行为。"""
+
+    def __init__(self, objects):
+        self._objects = {obj['id']: obj for obj in objects}
+
+    def all(self):
+        return list(self._objects.values())
+
+    def get(self, bo_id):
+        return self._objects.get(bo_id)
+
+
+def _probe_bo():
+    return {'id': 'probe_bo', 'fields': [{'id': 'org_id'}], 'org_scope': {}}
+
+
+def test_v6_derives_candidate_from_org_field(tmp_path, monkeypatch):
+    monkeypatch.setattr(validator_module, 'EXEMPTIONS_PATH', str(tmp_path / 'none.yaml'))
+    errors = validate_registry(_StubRegistry([_probe_bo()]))
+    assert [(e.code, e.bo_id) for e in errors] == [(ORG_SCOPE_UNDECLARED, 'probe_bo')]
+
+
+def test_exemption_requires_reason(tmp_path, monkeypatch):
+    path = tmp_path / 'exemptions.yaml'
+    path.write_text('exemptions:\n  - object: probe_bo\n    reason: ""\n', encoding='utf-8')
+    monkeypatch.setattr(validator_module, 'EXEMPTIONS_PATH', str(path))
+    errors = validate_registry(_StubRegistry([_probe_bo()]))
+    assert ORG_SCOPE_EXEMPTION_REASON_MISSING in [e.code for e in errors]
+
+
+def test_exempted_candidate_is_skipped(tmp_path, monkeypatch):
+    path = tmp_path / 'exemptions.yaml'
+    path.write_text(
+        'exemptions:\n  - object: probe_bo\n    reason: "执行组织字段"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(validator_module, 'EXEMPTIONS_PATH', str(path))
+    assert validate_registry(_StubRegistry([_probe_bo()])) == []
 
 
 def test_v1_invalid_mode():
