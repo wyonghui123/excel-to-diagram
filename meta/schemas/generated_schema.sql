@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-06 07:37:56.097694
+-- 生成时间: 2026-11-07 14:05:47.502436
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -781,7 +781,8 @@ CREATE VIEW IF NOT EXISTS v_demand_trace_graph AS SELECT
   COALESCE(e.target_item, '') AS target_line_id,
   e.quantity AS qty,
   CASE
-    WHEN e.rule_id = 'shipment_line_to_return_in_txn'
+    WHEN e.rule_id IN ('shipment_line_to_return_in_txn',
+                       'receipt_line_to_return_out_txn')
       THEN CASE WHEN e.quantity_sign = 'red' THEN e.quantity ELSE -e.quantity END
     ELSE CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END
   END AS signed_qty,
@@ -1504,6 +1505,7 @@ CREATE TABLE IF NOT EXISTS items (
     valuation_relevant INTEGER NOT NULL DEFAULT 1,
     barcode VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    revision_no INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME,
     FOREIGN KEY (item_group_id) REFERENCES item_groups(id),
     FOREIGN KEY (base_uom) REFERENCES uoms(id),
@@ -2345,6 +2347,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     fulfillment_status VARCHAR(200),
     fulfillment_derived_at DATETIME,
     description TEXT,
+    origin_purchase_order_id INTEGER,
+    origin_receipt_id INTEGER,
+    return_reason TEXT,
     revision_no INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME,
     updated_at DATETIME,
@@ -2436,6 +2441,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_schedules (
     status VARCHAR(200) NOT NULL DEFAULT 'planned',
     received_qty REAL,
     rejected_qty REAL DEFAULT 0,
+    returned_qty REAL DEFAULT 0,
     completion_source VARCHAR(200),
     completion_prev_status VARCHAR(200),
     created_at DATETIME,
@@ -2537,6 +2543,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     received_by VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     reversal_of_receipt_id INTEGER,
+    return_to VARCHAR(200) DEFAULT 'supplier',
     reversed_at DATETIME,
     remark VARCHAR(200),
     created_at DATETIME,

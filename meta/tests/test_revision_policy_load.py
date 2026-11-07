@@ -274,3 +274,24 @@ def test_sales_order_declares_revision_policy():
     assert policy.require_reason is True
     assert {f.field for f in policy.fields if f.diff} == {
         'customer_account_id', 'gross_amount', 'header_discount_percent', 'status'}
+
+
+def test_item_declares_revision_policy():
+    """T8.3-b 收敛：revision 只用于主数据 ⇒ items.yaml 声明策略且补 revision_no 字段。"""
+    from pathlib import Path
+    from meta.core.yaml_loader import get_yaml_schema_dir
+    data = yaml.safe_load(
+        (Path(get_yaml_schema_dir()) / 'items.yaml').read_text(encoding='utf-8')
+    )
+    field_ids = [f['id'] for f in data['fields']]
+    policy = parse_revision_policy(data, field_ids)
+    assert policy is not None
+    assert policy.enabled is True
+    assert policy.scope == 'header'
+    assert policy.revision_field == 'revision_no'
+    assert policy.require_reason is False
+    assert 'revision_no' in field_ids
+    diff = {f.field for f in policy.fields if f.diff}
+    assert {'code', 'name', 'spec', 'status'} <= diff
+    code = next(f for f in policy.fields if f.field == 'code')
+    assert code.editable is False

@@ -74,6 +74,25 @@ audit:
   dissociate:
     enabled: true
 
+# 版本策略（2026-11-07 决策：revision 仅用于主数据 item；销售订单保留既有策略，
+# 其余单据不启用）。口径参照 SAP DMS / Oracle PLM：版本只覆盖主数据与受控文档。
+revision_policy:
+  enabled: true
+  scope: header
+  revision_field: revision_no
+  generate_on: [content_update]
+  require_reason: false
+  fields:
+    - {field: code,                editable: false, diff: true, audit: true}
+    - {field: name,                editable: true,  diff: true, audit: true}
+    - {field: spec,                editable: true,  diff: true, audit: true}
+    - {field: description,         editable: true,  diff: true, audit: true}
+    - {field: item_type,           editable: true,  diff: true, audit: true}
+    - {field: item_group_id,       editable: true,  diff: true, audit: true}
+    - {field: base_uom,            editable: true,  diff: true, audit: true}
+    - {field: valuation_relevant,  editable: true,  diff: true, audit: true}
+    - {field: status,              editable: false, diff: true, audit: true}
+
 fields:
   - id: id
     name: ID
@@ -765,6 +784,18 @@ fields:
       filter_scope: local
     ui:
       widget: select
+
+  - id: revision_no
+    name: 版本号
+    type: integer
+    db_column: revision_no
+    required: true
+    default: 1
+    description: 主数据内容版本号（平台写入，界面不可编辑）
+    semantics:
+      meaning: 每次内容变更 +1，用于版本快照与并发冲突检测
+    ui:
+      editable: false
 
   - id: created_at
     name: 创建时间
