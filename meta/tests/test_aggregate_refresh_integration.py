@@ -348,7 +348,8 @@ class TestAggregateRefreshViaChangeNotification:
                 changed_fields TEXT, old_values TEXT, new_values TEXT,
                 payload TEXT, channels TEXT,
                 status TEXT, retry_count INTEGER,
-                created_at TEXT, delivered_at TEXT, audit_log_id INTEGER
+                created_at TEXT, delivered_at TEXT, audit_log_id INTEGER,
+                retention_until TEXT
             )
         """)
         self.ds.commit()

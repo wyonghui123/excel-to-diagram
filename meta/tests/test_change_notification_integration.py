@@ -92,7 +92,8 @@ _CHANGE_EVENTS_DDL = """
         retry_count INTEGER DEFAULT 0,
         created_at TEXT,
         delivered_at TEXT,
-        audit_log_id INTEGER
+        audit_log_id INTEGER,
+        retention_until TEXT
     )
 """
 

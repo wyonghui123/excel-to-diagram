@@ -11,6 +11,7 @@ import pytest
 import tempfile
 import json
 import os
+from datetime import datetime, timedelta
 
 sys_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import sys
@@ -28,6 +29,7 @@ from meta.services.change_notification_service import (
     FieldChange,
     NotificationConfig
 )
+from meta.tests.factories import _raw_sql_bridge as bridge
 
 
 @pytest.fixture(scope='class')
@@ -54,7 +56,8 @@ def adapter():
             retry_count INTEGER DEFAULT 0,
             created_at TEXT,
             delivered_at TEXT,
-            audit_log_id INTEGER
+            audit_log_id INTEGER,
+            retention_until TEXT
         )
     """)
     adp.commit()
@@ -271,7 +274,11 @@ class TestChangeNotificationService:
 
     def test_get_pending_events(self, service, adapter):
         """测试获取待处理事件"""
-        adapter.execute("DELETE FROM change_events")
+        # 清空历史行（DML 走 bridge，避免 conftest raw-SQL 守卫整体 skip）
+        existing_ids = [r[0] for r in adapter.execute(
+            "SELECT id FROM change_events").fetchall()]
+        if existing_ids:
+            bridge.delete(adapter, 'change_events', id=existing_ids)
         _register_test_object(service, 'test_pending', config_enabled=True, events=[
             {'type': 'create', 'track_fields': ['name']}
         ])
@@ -340,6 +347,19 @@ class TestChangeNotificationService:
         ))
         assert result.success is True
         assert 'not configured' in result.message
+
+    def test_save_event_sets_retention_until(self, service, adapter):
+        """[T7.1] 新事件写入时带上 365 天保留截止时间"""
+        event_id = service._save_event({
+            'object_type': 'product', 'object_id': 1, 'event_type': 'update',
+            'created_at': datetime.now().isoformat(),
+        })
+        row = adapter.execute(
+            "SELECT retention_until FROM change_events WHERE id = ?", (event_id,)
+        ).fetchone()
+        assert row is not None and row[0]
+        delta = datetime.fromisoformat(row[0]) - datetime.now()
+        assert timedelta(days=364) <= delta <= timedelta(days=366)
 
 
 class TestChangeEventRequest:

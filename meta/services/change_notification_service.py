@@ -11,7 +11,7 @@
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from meta.core.datasource import DataSource
 from meta.core.models import registry, ChangeNotificationConfig, ChangeEventConfig
@@ -69,6 +69,8 @@ class ChangeNotificationService:
     """
     
     CHANGE_EVENTS_TABLE = "change_events"
+    #: [T7.1] 事件在线保留 365 天，之后由 archive_change_events.py 归档
+    RETENTION_DAYS = 365
     
     SYSTEM_FIELDS = {'id', 'created_at', 'created_by', 'updated_at', 'updated_by'}
     
@@ -379,7 +381,10 @@ class ChangeNotificationService:
             'retry_count': event_data.get('retry_count', 0),
             'created_at': event_data.get('created_at'),
             'delivered_at': event_data.get('delivered_at'),
-            'audit_log_id': event_data.get('audit_log_id')
+            'audit_log_id': event_data.get('audit_log_id'),
+            'retention_until': event_data.get('retention_until') or (
+                datetime.now() + timedelta(days=self.RETENTION_DAYS)
+            ).isoformat(),
         }
         
         event_id = self.ds.insert(self.CHANGE_EVENTS_TABLE, record)
