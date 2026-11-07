@@ -732,6 +732,22 @@ fields:
       fieldGroup: 库存段
       fieldGroupPosition: 270
 
+  # 无单收货物料开关（2026-11-07，对标 Oracle AllowUnorderedReceiptsFlag 默认 No）：
+  # 与组织参数 allow_unordered_receipt 双开，才允许 source_doc_type=unordered 的收货行。
+  - id: allow_unordered_receipt
+    name: 允许无单收货
+    type: boolean
+    db_column: allow_unordered_receipt
+    required: true
+    default: false
+    description: 允许该物料在无采购/调拨/工单来源时直接收货（需同时开启组织参数）
+    semantics:
+      meaning: 物料是否允许无上游单据收货
+    ui:
+      widget: switch
+      fieldGroup: 库存段
+      fieldGroupPosition: 280
+
   # I 外部标识（主值；配对值走 item_xref 子表）
   - id: barcode
     name: 主条码

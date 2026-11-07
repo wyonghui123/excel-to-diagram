@@ -219,6 +219,30 @@ fields:
     semantics:
       meaning: 转入库存状态
 
+  # 费用归属（2026-11-07，对标 SAP 201/551 的账户分配与 Oracle Misc Issue 的 Distribution Account）：
+  # 仅在 qty_decrease / scrap 时必填（由 inventory_adjustment_service 守卫）；
+  # cost_center 沿用 demand_allocation 口径，平台暂无主数据，暂为纯整数引用。
+  - id: cost_center_id
+    name: 成本中心
+    type: integer
+    db_column: cost_center_id
+    nullable: true
+    description: 费用归属成本中心（qty_decrease / scrap 必填）
+    semantics:
+      meaning: 成本中心引用（平台暂无 cost_center 主数据）
+
+  - id: expense_account_code
+    name: 费用科目
+    type: string
+    db_column: expense_account_code
+    nullable: true
+    max_length: 40
+    description: 费用归属科目编码（qty_decrease / scrap 必填）
+    semantics:
+      meaning: 费用科目编码
+      searchable: true
+      data_category: code
+
   - id: source_count_line_id
     name: 来源盘点行
     type: integer

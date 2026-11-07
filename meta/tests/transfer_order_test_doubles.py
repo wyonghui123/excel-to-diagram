@@ -147,6 +147,8 @@ CREATE TABLE receipts (
     source_doc_type TEXT,
     source_doc_id INTEGER,
     source_doc_no TEXT,
+    received_from_party_id INTEGER,
+    reason_code TEXT,
     supplier_party_id INTEGER,
     supplier_delivery_no TEXT,
     org_id INTEGER,

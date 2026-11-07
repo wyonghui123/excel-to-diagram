@@ -176,7 +176,7 @@ fields:
     db_column: source_doc_type
     required: true
     max_length: 30
-    description: 来源单据类型（purchase_order / transfer_order / work_order / sales_return / intercompany）
+    description: 来源单据类型（purchase_order / transfer_order / work_order / sales_return / intercompany / unordered）
     enum_values:
       - value: purchase_order
         label: 采购订单
@@ -199,6 +199,13 @@ fields:
         label: 公司间交易
         color: info
         category: active
+      # 无单收货（2026-11-07，对标 SAP 501/511 与 Oracle unordered receipt）：
+      # 不引用任何上游单据，需组织参数 allow_unordered_receipt 与物料标志双开，
+      # 且必须填写收货来源方与原因；不写计划行 / 需求分配 / 履约派生。
+      - value: unordered
+        label: 无单收货
+        color: secondary
+        category: active
     semantics:
       meaning: 收货来源单据类型（决定行挂载点）
       filterable: true
@@ -213,7 +220,7 @@ fields:
     type: integer
     db_column: source_doc_id
     required: true
-    description: 来源单据头 id（多态，按 source_doc_type 解释；PO 来源 = purchase_orders.id）
+    description: 来源单据头 id（多态，按 source_doc_type 解释；PO 来源 = purchase_orders.id；unordered 来源统一填 0）
     semantics:
       meaning: 来源单据头引用（多态）
       filterable: true
@@ -235,6 +242,49 @@ fields:
     ui:
       widget: input
       editable: false
+
+  # 无单收货专用：来源方（不一定是已建档供应商）与收货原因，均在 source_doc_type=unordered 时必填。
+  # 对标 Oracle unordered receipt 的 supplier + reason，以及 SAP 501 的凭证抬头说明。
+  - id: received_from_party_id
+    name: 收货来源方
+    type: integer
+    db_column: received_from_party_id
+    nullable: true
+    description: 无单收货的来源方（unordered 来源必填；可为未建档的临时往来单位）
+    semantics:
+      meaning: 无单收货来源方引用
+      display:
+        type: association
+        target_type: party
+        display_field: name
+
+  - id: reason_code
+    name: 收货原因
+    type: string
+    db_column: reason_code
+    nullable: true
+    max_length: 30
+    description: 无单收货原因（unordered 来源必填）
+    enum_values:
+      - value: found_stock
+        label: 盘盈/账外库存
+      - value: supplier_gift
+        label: 供应商赠品
+      - value: sample
+        label: 样品
+      - value: consignment_return
+        label: 寄售退回
+      - value: repair_return
+        label: 维修返还
+      - value: correction
+        label: 纠错
+      - value: other
+        label: 其他
+    semantics:
+      meaning: 无单收货原因
+      filterable: true
+      filter_type: enum
+      filter_label: 收货原因
 
   # PO 来源创建时必填；非 PO 来源可空（过账时按 R-PO-8 同口径校验 vendor 关系）
   - id: supplier_party_id

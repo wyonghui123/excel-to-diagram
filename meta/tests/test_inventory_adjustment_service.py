@@ -58,6 +58,8 @@ def _create(conn, adj_type='qty_increase', qty=5.0, reason_code=None,
             spec.setdefault('to_stock_status', 'unrestricted')
         elif adj_type in ('qty_decrease', 'scrap'):
             spec.setdefault('from_stock_status', 'unrestricted')
+            spec.setdefault('cost_center_id', 1)
+            spec.setdefault('expense_account_code', '6601.01')
         adj.add_adjustment_line(conn, header_id, **spec)
     return header_id, header, service
 

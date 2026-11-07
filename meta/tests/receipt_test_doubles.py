@@ -79,6 +79,8 @@ CREATE TABLE receipts (
     source_doc_type TEXT,
     source_doc_id INTEGER,
     source_doc_no TEXT,
+    received_from_party_id INTEGER,
+    reason_code TEXT,
     supplier_party_id INTEGER,
     supplier_delivery_no TEXT,
     org_id INTEGER,
@@ -163,6 +165,7 @@ CREATE TABLE control_parameter_defs (
 CREATE TABLE control_parameter_values (
     id INTEGER PRIMARY KEY,
     control_parameter_id INTEGER,
+    org_id INTEGER,
     value TEXT,
     status TEXT
 );
@@ -321,11 +324,50 @@ def add_location(conn, location_id=7, status='active', org_id=None):
                  [location_id, status, org_id])
 
 
+def add_item(conn, item_id=900, code='ITEM900', name='物料900', base_uom=3):
+    """物料主数据（表由 `inventory_test_doubles.install_inventory` 建）。"""
+    conn.execute(
+        "INSERT OR REPLACE INTO items (id, code, name, status, base_uom) "
+        "VALUES (?, ?, ?, 'active', ?)", [item_id, code, name, base_uom])
+
+
+def add_uom(conn, uom_id=3, code='UOM3', name='单位3'):
+    conn.execute(
+        "INSERT OR REPLACE INTO uoms (id, code, name, status) "
+        "VALUES (?, ?, ?, 'active')", [uom_id, code, name])
+
+
 def add_tolerance(conn, percent=0, param_id=1):
     conn.execute(
         'INSERT INTO control_parameter_defs (id, code, default_value, status) '
         "VALUES (?, 'receipt_over_tolerance_percent', ?, 'active')",
         [param_id, str(percent)])
+
+
+def add_param_def(conn, code, value, param_id=None):
+    """通用参数定义（替身表只有 code / default_value / status 三列）。
+
+    `param_id=None` 交给 SQLite 自增，避免与库存替身已种参数（id 2/3）撞号。
+    """
+    conn.execute(
+        'INSERT INTO control_parameter_defs (id, code, default_value, status) '
+        "VALUES (?, ?, ?, 'active')", [param_id, code, str(value)])
+
+
+def allow_unordered(conn, param='1', item_id=900, item_flag=1):
+    """无单收货双开关：组织参数默认值 + 物料「允许无单收货」。
+
+    列由 `v230__unordered_receipt._do_columns` 补齐（调用方先执行）。
+    """
+    add_param_def(conn, 'allow_unordered_receipt', param)
+    set_item_unordered(conn, item_flag=item_flag, item_id=item_id)
+
+
+def set_item_unordered(conn, item_flag=0, item_id=900):
+    """单独切换物料开关（测试「过账时复检物料开关」）。"""
+    conn.execute(
+        'UPDATE items SET allow_unordered_receipt = ? WHERE id = ?',
+        [1 if item_flag else 0, item_id])
 
 
 def add_org(conn, org_id, parent_id=None, status='active'):

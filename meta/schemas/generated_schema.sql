@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-07 14:05:47.502436
+-- 生成时间: 2026-11-07 16:30:20.923148
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1305,6 +1305,8 @@ CREATE TABLE IF NOT EXISTS inventory_adjustment_lines (
     serial_no VARCHAR(200),
     from_stock_status VARCHAR(200),
     to_stock_status VARCHAR(200),
+    cost_center_id INTEGER,
+    expense_account_code VARCHAR(200),
     source_count_line_id INTEGER,
     remark VARCHAR(200),
     created_at DATETIME,
@@ -1503,6 +1505,7 @@ CREATE TABLE IF NOT EXISTS items (
     consignment_enabled INTEGER NOT NULL DEFAULT 0,
     hard_peg_default INTEGER NOT NULL DEFAULT 0,
     valuation_relevant INTEGER NOT NULL DEFAULT 1,
+    allow_unordered_receipt INTEGER NOT NULL DEFAULT 0,
     barcode VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     revision_no INTEGER NOT NULL DEFAULT 1,
@@ -2533,6 +2536,8 @@ CREATE TABLE IF NOT EXISTS receipts (
     source_doc_type VARCHAR(200) NOT NULL,
     source_doc_id INTEGER NOT NULL,
     source_doc_no VARCHAR(200),
+    received_from_party_id INTEGER,
+    reason_code VARCHAR(200),
     supplier_party_id INTEGER,
     supplier_delivery_no VARCHAR(200),
     org_id INTEGER NOT NULL,

@@ -76,6 +76,7 @@ INV_ADJ_STATUS_PAIR_INVALID = 'INV_ADJ_STATUS_PAIR_INVALID'
 INV_ADJ_NO_TRANSACTIONS = 'INV_ADJ_NO_TRANSACTIONS'
 INV_DOC_POSTED_LOCKED = 'INV_DOC_POSTED_LOCKED'
 INV_REASON_REQUIRED = 'INV_REASON_REQUIRED'
+INV_EXPENSE_ATTRIBUTION_REQUIRED = 'INV_EXPENSE_ATTRIBUTION_REQUIRED'
 INV_ALREADY_REVERSED = 'INV_ALREADY_REVERSED'
 INV_PERMISSION_DENIED = 'INV_PERMISSION_DENIED'
 
@@ -474,6 +475,19 @@ class InventoryAdjustmentService:
                         INV_ADJ_STATUS_PAIR_INVALID,
                         '减少类调整行只允许 from_stock_status',
                         {'line_id': line.get('id')})
+                # 费用归属前置（对标 SAP 201/551 账户分配、Oracle Misc Issue
+                # Distribution Account）：减少库存必须说明费用落到哪个成本中心/科目
+                if _blank(line.get('cost_center_id')):
+                    raise InventoryError(
+                        INV_EXPENSE_ATTRIBUTION_REQUIRED,
+                        '减少类调整行必须填写成本中心',
+                        {'line_id': line.get('id'), 'field': 'cost_center_id'})
+                if _blank(line.get('expense_account_code')):
+                    raise InventoryError(
+                        INV_EXPENSE_ATTRIBUTION_REQUIRED,
+                        '减少类调整行必须填写费用科目',
+                        {'line_id': line.get('id'),
+                         'field': 'expense_account_code'})
             elif adj_type == TYPE_STATUS_TRANSFER:
                 if _blank(from_status) or _blank(to_status):
                     raise InventoryError(
@@ -666,11 +680,13 @@ class InventoryAdjustmentService:
         self.ds.execute(
             'INSERT INTO %s (adjustment_id, line_no, item_id, location_id, '
             'batch_id, uom_id, qty, from_stock_status, to_stock_status, '
+            'cost_center_id, expense_account_code, '
             'source_count_line_id, remark, created_at, updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % ADJ_LINE_TABLE,
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % ADJ_LINE_TABLE,
             [adjustment_id, line['line_no'], line['item_id'],
              line.get('location_id'), line.get('batch_id'), line['uom_id'],
              line['qty'], from_status, to_status,
+             line.get('cost_center_id'), line.get('expense_account_code'),
              line.get('source_count_line_id'), line.get('remark'),
              _now(), _now()])
 

@@ -51,7 +51,15 @@ FUNCTION_INVENTORY = 'inventory'
 SOURCE_PURCHASE_ORDER = 'purchase_order'
 SOURCE_TRANSFER_ORDER = 'transfer_order'
 SOURCE_WORK_ORDER = 'work_order'
+SOURCE_UNORDERED = 'unordered'
 SOURCE_SUPPORTED = (SOURCE_PURCHASE_ORDER, SOURCE_TRANSFER_ORDER)
+
+#: 无单收货：组织参数与物料开关双开才允许（对标 Oracle）
+UNORDERED_PARAM = 'allow_unordered_receipt'
+UNORDERED_TXN_TYPE = 'RCV_UNORDERED'
+UNORDERED_REASONS = ('found_stock', 'supplier_gift', 'sample',
+                     'consignment_return', 'repair_return', 'correction',
+                     'other')
 
 DOC_CATEGORY_STANDARD = 'standard'
 DOC_CATEGORY_RETURN = 'return'
@@ -100,6 +108,14 @@ def _now() -> str:
 
 def _blank(value: Any) -> bool:
     return value is None or value == ''
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def _dec(value: Any, field_name: str = 'qty') -> Decimal:
@@ -172,6 +188,8 @@ class ReceiptService:
             return self.prepare_transfer_header(header)
         if source_type == SOURCE_WORK_ORDER:
             return self.prepare_work_order_header(header)
+        if source_type == SOURCE_UNORDERED:
+            return self.prepare_unordered_header(header)
         if source_type not in SOURCE_SUPPORTED:
             raise ReceiptError(
                 '来源单据类型 %s 暂不支持收货' % source_type,
@@ -304,6 +322,64 @@ class ReceiptService:
         header['receipt_no'] = receipt_no
         return header, work_order, doc_type
 
+    def prepare_unordered_header(self, header: Dict[str, Any]):
+        """无单收货抬头归一化（对标 Oracle unordered receipt / SAP 501 511）。
+
+        不引用任何上游单据：`source_doc_id` 固定为 0；必须显式提供收货组织、
+        收货库位、收货来源方与原因；组织参数 `allow_unordered_receipt` 必须开启。
+        返回 `(header, None, doc_type)`。
+        """
+        header = dict(header or {})
+        receipt_date = header.get('receipt_date')
+        if _blank(receipt_date):
+            raise ReceiptError('收货日期必填', field_name='receipt_date',
+                               rule='RC_DATE_REQUIRED')
+
+        doc_type = self._require_document_type(header.get('document_type_id'))
+        if doc_type['document_category'] != DOC_CATEGORY_STANDARD:
+            raise ReceiptError('无单收货只支持标准单据类型',
+                               field_name='document_type_id',
+                               rule='RC_DOC_TYPE_INVALID')
+
+        for field_name, label in (
+                ('org_id', '收货方法人'),
+                ('inventory_org_id', '收货库存组织'),
+                ('deliver_to_location_id', '收货库位'),
+                ('received_from_party_id', '收货来源方')):
+            if _blank(header.get(field_name)):
+                raise ReceiptError('无单收货必须指定%s' % label,
+                                   field_name=field_name,
+                                   rule='RC_UNORDERED_FIELD_REQUIRED')
+        reason = str(header.get('reason_code') or '').strip()
+        if not reason:
+            raise ReceiptError('无单收货必须填写收货原因',
+                               field_name='reason_code',
+                               rule='RC_UNORDERED_FIELD_REQUIRED')
+        if reason not in UNORDERED_REASONS:
+            raise ReceiptError('收货原因取值非法', field_name='reason_code',
+                               rule='RC_UNORDERED_REASON_INVALID')
+        if not self._unordered_enabled(header.get('inventory_org_id')):
+            raise ReceiptError('收货库存组织未开启「允许无单收货」参数',
+                               field_name='inventory_org_id',
+                               rule='RC_UNORDERED_DISABLED')
+        self._assert_location_active(header.get('deliver_to_location_id'))
+
+        header['source_doc_type'] = SOURCE_UNORDERED
+        header['source_doc_id'] = 0
+        header['source_doc_no'] = None
+        header['purchase_org_id'] = None
+        header['supplier_party_id'] = None
+        header['reason_code'] = reason
+        self._validate_inventory_org(header)
+        self._validate_location_org(header)
+        receipt_no = header.get('receipt_no') or self.allocate_receipt_no(
+            doc_type['id'], receipt_date)
+        if _blank(receipt_no):
+            raise ReceiptError('单据类型未绑定编号序列，无法生成收货单号',
+                               field_name='receipt_no', rule='RC_NUMBER_REQUIRED')
+        header['receipt_no'] = receipt_no
+        return header, None, doc_type
+
     # ------------------------------------------------------------------ 创建
     def create_receipt(self, header: Dict[str, Any],
                        lines: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -315,25 +391,35 @@ class ReceiptService:
         header, order, doc_type = self.prepare_header(header)
         is_transfer = header['source_doc_type'] == SOURCE_TRANSFER_ORDER
         is_work_order = header['source_doc_type'] == SOURCE_WORK_ORDER
-        if is_work_order:
-            validator = self._validate_work_order_line
-        elif is_transfer:
-            validator = self._validate_transfer_line
+        is_unordered = header['source_doc_type'] == SOURCE_UNORDERED
+        if is_unordered:
+            normalized = [self._validate_unordered_line(line, doc_type)
+                          for line in (lines or [])]
         else:
-            validator = self._validate_line
-        normalized = [validator(line, order, doc_type)
-                      for line in (lines or [])]
+            if is_work_order:
+                validator = self._validate_work_order_line
+            elif is_transfer:
+                validator = self._validate_transfer_line
+            else:
+                validator = self._validate_line
+            normalized = [validator(line, order, doc_type)
+                          for line in (lines or [])]
 
         now = _now()
+        source_doc_id = order['id'] if order else int(header.get('source_doc_id') or 0)
+        source_doc_no = header.get('source_doc_no') or (
+            (order.get('order_no') or order.get('transfer_order_no'))
+            if order else None)
         row = {
             'receipt_no': header['receipt_no'],
             'document_type_id': doc_type['id'],
             'receipt_date': header['receipt_date'],
             'actual_arrival_date': header.get('actual_arrival_date'),
             'source_doc_type': header['source_doc_type'],
-            'source_doc_id': order['id'],
-            'source_doc_no': header.get('source_doc_no') or order.get('order_no')
-                             or order.get('transfer_order_no'),
+            'source_doc_id': source_doc_id,
+            'source_doc_no': source_doc_no,
+            'received_from_party_id': header.get('received_from_party_id'),
+            'reason_code': header.get('reason_code'),
             'supplier_party_id': header.get('supplier_party_id'),
             'supplier_delivery_no': header.get('supplier_delivery_no'),
             'org_id': header.get('org_id'),
@@ -350,7 +436,9 @@ class ReceiptService:
         }
         receipt_id = self._insert_header(row)
         for seq, item in enumerate(normalized, start=1):
-            if is_work_order:
+            if is_unordered:
+                payload = self._normalized_unordered_payload(item)
+            elif is_work_order:
                 payload = self._normalized_work_order_payload(item)
             elif is_transfer:
                 payload = self._normalized_transfer_payload(item)
@@ -362,7 +450,7 @@ class ReceiptService:
         logger.info('[receipt] created id=%s no=%s lines=%s',
                     receipt_id, header['receipt_no'], len(normalized))
         return {'id': receipt_id, 'receipt_no': header['receipt_no'],
-                'status': STATUS_DRAFT, 'source_doc_id': order['id'],
+                'status': STATUS_DRAFT, 'source_doc_id': source_doc_id,
                 'line_count': len(normalized)}
 
     def create_from_transfer_order(
@@ -443,6 +531,8 @@ class ReceiptService:
             return self._post_transfer_order(header, actual_arrival_date)
         if header.get('source_doc_type') == SOURCE_WORK_ORDER:
             return self._post_work_order(header, actual_arrival_date)
+        if header.get('source_doc_type') == SOURCE_UNORDERED:
+            return self._post_unordered(header, actual_arrival_date)
 
         doc_type = self._require_document_type(header.get('document_type_id'))
         category = doc_type['document_category']
@@ -657,6 +747,49 @@ class ReceiptService:
                 'idempotent': False, 'order_ids': [],
                 'work_order_id': work_order['id']}
 
+    def _post_unordered(self, header: Dict[str, Any],
+                        actual_arrival_date: Optional[str] = None) -> Dict[str, Any]:
+        """无单收货过账：只做库存入库，不写计划行 / 需求分配 / 履约派生。
+
+        对标 Oracle unordered receipt 与 SAP 501/511；组织参数 + 物料开关
+        在创建与过账两处都校验（防止参数中途被关）。
+        """
+        doc_type = self._require_document_type(header.get('document_type_id'))
+        if doc_type['document_category'] != DOC_CATEGORY_STANDARD:
+            raise ReceiptError('无单收货只支持标准单据类型',
+                               field_name='document_type_id',
+                               rule='RC_DOC_TYPE_INVALID')
+        if not self._unordered_enabled(header.get('inventory_org_id')):
+            raise ReceiptError('收货库存组织未开启「允许无单收货」参数',
+                               field_name='inventory_org_id',
+                               rule='RC_UNORDERED_DISABLED')
+        lines = self._load_lines(header['id'])
+        if not lines:
+            raise ReceiptError('收货单没有任何行，禁止过账',
+                               field_name='lines', rule='RC_EMPTY')
+        checked = [self._validate_unordered_line(line, doc_type, for_post=True)
+                   for line in lines]
+
+        now = actual_arrival_date or _now()
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
+            'AND status = ?' % LINE_TABLE,
+            [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
+        self.ds.execute(
+            'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
+            'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
+            % HEADER_TABLE,
+            [STATUS_POSTED, actual_arrival_date, now, header['id']])
+
+        txns = self._post_receipt_inventory(header, checked, UNORDERED_TXN_TYPE)
+        self._write_receipt_inbound_edges(checked, txns)
+        self._register_receipt_hus(header)
+
+        logger.info('[receipt] posted unordered id=%s lines=%s',
+                    header['id'], len(checked))
+        return {'id': header['id'], 'status': STATUS_POSTED,
+                'idempotent': False, 'order_ids': []}
+
     def _fulfill_component_reservations(self, work_order_id: Any) -> None:
         """发出完工过账事件，由承诺层按累计完工量核销组件预留。
 
@@ -792,8 +925,12 @@ class ReceiptService:
             return self._create_transfer_reversal_document(
                 header, receipt_date, receipt_no, remark)
         if source_type == SOURCE_WORK_ORDER:
-            return self._create_work_order_reversal_document(
+            return self._create_direct_reversal_document(
                 header, receipt_date, receipt_no, remark)
+        if source_type == SOURCE_UNORDERED:
+            return self._create_direct_reversal_document(
+                header, receipt_date, receipt_no, remark,
+                source_type=SOURCE_UNORDERED)
         return self._create_purchase_reversal_document(
             header, receipt_date, receipt_no, remark)
 
@@ -1026,12 +1163,13 @@ class ReceiptService:
                 'schedules': [], 'returned_schedules': [], 'order_ids': [],
                 'transaction_date': date}
 
-    def _create_work_order_reversal_document(
+    def _create_direct_reversal_document(
             self, header: Dict[str, Any],
             receipt_date: Optional[str] = None,
             receipt_no: Optional[str] = None,
-            remark: Optional[str] = None) -> Dict[str, Any]:
-        """WO 来源：红字头 + 行（完工序列号回退由平台 serial 写面执行）。
+            remark: Optional[str] = None,
+            source_type: str = SOURCE_WORK_ORDER) -> Dict[str, Any]:
+        """工单 / 无单来源：红字头 + 行（库存回退由平台写面按原单事件执行）。
 
         谱系与 document_serial_links 不解除（与 P6a D13 一致）。
         """
@@ -1059,9 +1197,11 @@ class ReceiptService:
             'document_type_id': return_type['id'],
             'receipt_date': date,
             'actual_arrival_date': header.get('actual_arrival_date'),
-            'source_doc_type': SOURCE_WORK_ORDER,
+            'source_doc_type': source_type,
             'source_doc_id': header.get('source_doc_id'),
             'source_doc_no': header.get('source_doc_no'),
+            'received_from_party_id': header.get('received_from_party_id'),
+            'reason_code': header.get('reason_code'),
             'supplier_party_id': None,
             'supplier_delivery_no': header.get('supplier_delivery_no'),
             'org_id': header.get('org_id'),
@@ -1100,8 +1240,8 @@ class ReceiptService:
         self._post_red_receipt(red_row, red_id, now)
         self._mark_original_lines_reversed(header['id'], now)
 
-        logger.info('[receipt] red document work order original=%s red=%s lines=%s',
-                    header['id'], red_id, len(source_items))
+        logger.info('[receipt] red document %s original=%s red=%s lines=%s',
+                    source_type, header['id'], red_id, len(source_items))
         return {'id': red_id, 'no': red_no, 'replay': False,
                 'line_ids': [line['id'] for line, _ in source_items],
                 'schedules': [], 'returned_schedules': [], 'order_ids': [],
@@ -1397,6 +1537,9 @@ class ReceiptService:
                                field_name='status',
                                rule='RC_POSTED_IMMUTABLE')
         doc_type = self._require_document_type(header.get('document_type_id'))
+        if header.get('source_doc_type') == SOURCE_UNORDERED:
+            return self._normalized_unordered_payload(
+                self._validate_unordered_line(payload, doc_type))
         if header.get('source_doc_type') == SOURCE_WORK_ORDER:
             order = self._load_work_order(header.get('source_doc_id'))
             if order is None:
@@ -1439,6 +1582,9 @@ class ReceiptService:
                                 'rejection_disposition', 'lot_no', 'serial_no',
                                 'putaway_location_id')})
         doc_type = self._require_document_type(header.get('document_type_id'))
+        if header.get('source_doc_type') == SOURCE_UNORDERED:
+            normalized = self._validate_unordered_line(merged, doc_type)
+            return self._normalized_unordered_payload(normalized)
         if header.get('source_doc_type') == SOURCE_TRANSFER_ORDER:
             order = self._load_transfer_order(header.get('source_doc_id'))
             if order is None:
@@ -1849,6 +1995,91 @@ class ReceiptService:
             'rejected': _q4(rejected),
         }
 
+    def _validate_unordered_line(self, line: Dict[str, Any],
+                                 doc_type: Dict[str, Any] = None,
+                                 for_post: bool = False) -> Dict[str, Any]:
+        """无单收货行校验：不引用上游行 / 计划行，物料与单位由行内显式给出。
+
+        Oracle 双开关中，组织参数在抬头校验，物料标志在本方法校验。
+        """
+        line = dict(line or {})
+        if _blank(line.get('item_id')):
+            raise ReceiptError('无单收货行必须指定物料', field_name='item_id',
+                               rule='RC_UNORDERED_LINE_INVALID')
+        if _blank(line.get('uom_id')):
+            raise ReceiptError('无单收货行必须指定单位', field_name='uom_id',
+                               rule='RC_UNORDERED_LINE_INVALID')
+        received = _dec(line.get('qty_received'), 'qty_received')
+        if received <= 0:
+            raise ReceiptError('收货数量必须大于 0', field_name='qty_received',
+                               rule='RC_QTY_INVALID')
+        rejected = _dec(line.get('qty_rejected') or 0, 'qty_rejected')
+        if rejected < 0 or rejected > received:
+            raise ReceiptError('拒收数量须在 0 ~ 收货数量之间',
+                               field_name='qty_rejected', rule='RC_QTY_INVALID')
+        if rejected > 0:
+            if _blank(line.get('rejection_reason_code')):
+                raise ReceiptError('存在拒收时必须填拒收原因',
+                                   field_name='rejection_reason_code',
+                                   rule='RC_REJECTION_INCOMPLETE')
+            if _blank(line.get('rejection_disposition')):
+                raise ReceiptError('存在拒收时必须填拒收处置',
+                                   field_name='rejection_disposition',
+                                   rule='RC_REJECTION_INCOMPLETE')
+            if line['rejection_disposition'] not in REJECTION_DISPOSITIONS:
+                raise ReceiptError('拒收处置取值非法',
+                                   field_name='rejection_disposition',
+                                   rule='RC_REJECTION_INCOMPLETE')
+        self._assert_item_unordered_allowed(line['item_id'])
+        self._assert_location_active(line.get('putaway_location_id'))
+        return {
+            'line': line,
+            'order_line': None,
+            'schedule': None,
+            'net': _q4(received - rejected),
+            'rejected': _q4(rejected),
+        }
+
+    def _unordered_enabled(self, org_id: Any) -> bool:
+        """组织参数 `allow_unordered_receipt`；未定义或未开启一律视为关闭。
+
+        优先取本组织参数值，未配置则回落参数默认值（默认 false）。
+        """
+        try:
+            rows = self.ds.query(
+                'SELECT id, default_value FROM %s WHERE code = ? AND status = ?'
+                % PARAM_TABLE, [UNORDERED_PARAM, 'active'])
+            if not rows:
+                return False
+            value = rows[0].get('default_value')
+            if not _blank(org_id):
+                scoped = self.ds.query(
+                    'SELECT value FROM %s WHERE control_parameter_id = ? '
+                    "AND status = 'active' AND org_id = ? ORDER BY id DESC LIMIT 1"
+                    % PARAM_VALUE_TABLE, [rows[0]['id'], org_id])
+                if scoped and not _blank(scoped[0].get('value')):
+                    value = scoped[0]['value']
+            return _truthy(value)
+        except Exception as e:  # noqa: BLE001 - 单测库无参数表
+            logger.debug('[receipt] 读取无单收货参数失败，按关闭处理: %s', e)
+            return False
+
+    def _assert_item_unordered_allowed(self, item_id: Any) -> None:
+        """物料标志 `allow_unordered_receipt` 必须开启（Oracle 双开关之一）。"""
+        try:
+            rows = self.ds.query(
+                'SELECT allow_unordered_receipt FROM items WHERE id = ?',
+                [item_id])
+        except Exception as e:  # noqa: BLE001 - 旧环境尚未加列
+            logger.warning('[receipt] 读取物料无单收货开关失败: %s', e)
+            raise ReceiptError('物料表缺少「允许无单收货」开关，请先执行迁移',
+                               field_name='item_id',
+                               rule='RC_UNORDERED_DISABLED') from e
+        if not rows or not _truthy(rows[0].get('allow_unordered_receipt')):
+            raise ReceiptError('物料未开启「允许无单收货」',
+                               field_name='item_id',
+                               rule='RC_UNORDERED_DISABLED')
+
     def _assert_location_active(self, location_id: Any) -> None:
         """R-RC-15：指定入库库位必须启用；库表缺失时 fail-open。"""
         if _blank(location_id):
@@ -2110,6 +2341,10 @@ class ReceiptService:
             'putaway_location_id': line.get('putaway_location_id'),
         }
 
+    def _normalized_unordered_payload(self, checked: Dict[str, Any]) -> Dict[str, Any]:
+        """无单收货行归一化：与完工行一致（无 schedule / order 冗余）。"""
+        return self._normalized_work_order_payload(checked)
+
     # ------------------------------------------------------------------ 读取
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         if _blank(order_id):
@@ -2301,6 +2536,7 @@ class ReceiptService:
         rows = self.ds.query(
             'SELECT id, receipt_no, document_type_id, receipt_date, '
             'actual_arrival_date, source_doc_type, source_doc_id, source_doc_no, '
+            'received_from_party_id, reason_code, '
             'supplier_party_id, supplier_delivery_no, org_id, purchase_org_id, '
             'inventory_org_id, deliver_to_location_id, project_id, received_by, '
             'status, reversal_of_receipt_id FROM %s WHERE id = ?' % HEADER_TABLE,

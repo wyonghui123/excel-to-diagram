@@ -71,7 +71,9 @@ def test_receipt_source_doc_type_is_enum(receipt_doc):
     field = _fields(receipt_doc)['source_doc_type']
     values = _enum_values(field)
     assert 'purchase_order' in values
-    assert len(values) == 5
+    # 2026-11-07：新增 unordered（无单收货，Oracle 双开关）→ 6 个来源
+    assert 'unordered' in values
+    assert len(values) == 6
 
 
 def test_receipt_line_fields_complete(line_doc):

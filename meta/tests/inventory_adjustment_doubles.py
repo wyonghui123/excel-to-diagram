@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any, Dict, Optional
 
 from meta.migrations import v203__inventory_adjustment as v203
+from meta.migrations import v230__unordered_receipt as v230
 from meta.tests import inventory_test_doubles as inv
 
 DEFAULT_DATE = '2026-11-03'
@@ -21,6 +22,8 @@ def install_adjustment(conn: sqlite3.Connection) -> sqlite3.Connection:
     """在 `inv.build_db()` + `inv.seed()` 之后安装 v203（表/索引/类型/序列/参数）。"""
     v203._do_tables(conn)
     v203._do_indexes(conn)
+    # v230 费用归属列（复用迁移常量，避免测试 DDL 与真实库漂移）
+    v230._do_columns(conn)
     v203._do_types(conn)
     v203._do_number_sequences(conn)
     v203._do_params(conn)
@@ -101,6 +104,8 @@ def add_adjustment_line(conn: sqlite3.Connection, adjustment_id: int,
                         qty: float = 1.0,
                         from_stock_status: Any = None,
                         to_stock_status: Any = None,
+                        cost_center_id: Any = None,
+                        expense_account_code: Any = None,
                         remark: Any = None) -> int:
     if line_no is None:
         row = conn.execute(
@@ -109,10 +114,12 @@ def add_adjustment_line(conn: sqlite3.Connection, adjustment_id: int,
         line_no = int(row[0] or 0) + 1
     cursor = conn.execute(
         'INSERT INTO %s (adjustment_id, line_no, item_id, location_id, '
-        'batch_id, uom_id, qty, from_stock_status, to_stock_status, remark) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % v203.ADJ_LINE_TABLE,
+        'batch_id, uom_id, qty, from_stock_status, to_stock_status, '
+        'cost_center_id, expense_account_code, remark) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % v203.ADJ_LINE_TABLE,
         [adjustment_id, line_no, item_id, location_id, batch_id, uom_id, qty,
-         from_stock_status, to_stock_status, remark])
+         from_stock_status, to_stock_status, cost_center_id,
+         expense_account_code, remark])
     return cursor.lastrowid
 
 
