@@ -82,20 +82,23 @@ def archive_old_audit_logs(db_path: str, retention_days: int = DEFAULT_RETENTION
             return {"archived_count": 0, "error_count": 0, "dry_run": True, "would_archive": total}
 
         # 2. 批量复制到 archive 表（500/批，事务）
+        # 用 keyset 分页（id > last_id）：删除后行会消失，OFFSET 分页会跳过记录
         BATCH_SIZE = 500
-        offset = 0
+        last_id = 0
         while True:
             cur.execute(
                 """SELECT * FROM audit_logs
-                   WHERE retention_until IS NOT NULL AND retention_until < ?
-                   ORDER BY id ASC LIMIT ? OFFSET ?""",
-                (cutoff_iso, BATCH_SIZE, offset)
+                   WHERE retention_until IS NOT NULL AND retention_until < ? AND id > ?
+                   ORDER BY id ASC LIMIT ?""",
+                (cutoff_iso, last_id, BATCH_SIZE)
             )
             rows = cur.fetchall()
             if not rows:
                 break
+            last_id = rows[-1]['id']
 
             # 复制到 archive 表
+            copied_ids = []
             for row in rows:
                 row_dict = dict(row)
                 row_dict['archived_at'] = archived_at
@@ -106,28 +109,43 @@ def archive_old_audit_logs(db_path: str, retention_days: int = DEFAULT_RETENTION
                         f"INSERT OR IGNORE INTO audit_logs_archive ({cols}) VALUES ({placeholders})",
                         list(row_dict.values())
                     )
+                    copied_ids.append(row['id'])
                 except Exception as e:
-                    logger.warning(f"Failed to copy row id={row_dict.get('id')}: {e}")
+                    logger.error(f"Failed to copy row id={row_dict.get('id')}, keep it in source: {e}")
                     error_count += 1
-                    continue
 
-            # 3. 从原表删除
-            ids = [row['id'] for row in rows]
-            placeholders = ', '.join(['?'] * len(ids))
-            try:
-                cur.execute(
-                    f"DELETE FROM audit_logs WHERE id IN ({placeholders})",
-                    ids
-                )
-                archived_count += len(ids)
-                logger.info(f"Archived batch: {len(ids)} records (total: {archived_count}/{total})")
-            except Exception as e:
-                logger.error(f"Failed to delete batch: {e}")
-                error_count += len(ids)
-                conn.rollback()
+            if not copied_ids:
+                conn.commit()
                 continue
 
-            offset += BATCH_SIZE
+            # 3. 删除前确认 archive 中确实存在对应行（防止复制失败仍删除）
+            placeholders = ', '.join(['?'] * len(copied_ids))
+            cur.execute(
+                f"SELECT id FROM audit_logs_archive WHERE id IN ({placeholders})",
+                copied_ids
+            )
+            archived_ids = {r['id'] for r in cur.fetchall()}
+            safe_ids = [i for i in copied_ids if i in archived_ids]
+            missing = len(copied_ids) - len(safe_ids)
+            if missing:
+                logger.error(f"{missing} rows not found in archive after copy, skip deleting them")
+                error_count += missing
+
+            if safe_ids:
+                placeholders = ', '.join(['?'] * len(safe_ids))
+                try:
+                    cur.execute(
+                        f"DELETE FROM audit_logs WHERE id IN ({placeholders})",
+                        safe_ids
+                    )
+                    archived_count += len(safe_ids)
+                    logger.info(f"Archived batch: {len(safe_ids)} records (total: {archived_count}/{total})")
+                except Exception as e:
+                    logger.error(f"Failed to delete batch: {e}")
+                    error_count += len(safe_ids)
+                    conn.rollback()
+                    continue
+
             # 提交当前批
             conn.commit()
 

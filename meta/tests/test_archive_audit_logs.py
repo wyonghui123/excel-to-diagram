@@ -1,12 +1,22 @@
-"""Test archive_audit_logs.py - FR-LOG-008"""
+"""Test archive_audit_logs.py - FR-LOG-008
+
+DML 统一走 factories/_raw_sql_bridge（避免 conftest raw-SQL 守卫整体 skip）。
+"""
 import pytest
 import sys
 import os
 import sqlite3
-import tempfile
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from meta.tests.factories import _raw_sql_bridge as bridge
+
+
+AUDIT_LOG_COLS = (
+    "object_type, object_id, action, user_id, user_name, "
+    "retention_until, action_kind, outcome"
+)
 
 
 class TestArchiveAuditLogs:
@@ -51,12 +61,13 @@ class TestArchiveAuditLogs:
 
     def _insert_log(self, db_path, retention_until):
         conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO audit_logs
-                (object_type, object_id, action, user_id, user_name, retention_until, action_kind, outcome)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'created', 1, 'alice', retention_until, 'instance', 'success'))
+        bridge.insert(
+            conn, 'audit_logs',
+            object_type='user', object_id='1', action='created',
+            user_id=1, user_name='alice',
+            retention_until=retention_until,
+            action_kind='instance', outcome='success',
+        )
         conn.commit()
         conn.close()
 
@@ -122,18 +133,70 @@ class TestArchiveAuditLogs:
         from meta.scripts.archive_audit_logs import archive_old_audit_logs
         # v1 记录没有 retention_until
         conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO audit_logs
-                (object_type, object_id, action, user_id, user_name, retention_until)
-                VALUES (?, ?, ?, ?, ?, NULL)
-        """, ('user', '1', 'created', 1, 'alice'))
+        bridge.insert(
+            conn, 'audit_logs',
+            object_type='user', object_id='1', action='created',
+            user_id=1, user_name='alice', retention_until=None,
+        )
         conn.commit()
         conn.close()
 
         result = archive_old_audit_logs(db_path, retention_days=180, dry_run=False)
         # v1 记录不应被归档
         assert result['archived_count'] == 0
+
+    def test_copy_failure_keeps_source_rows(self, db_path):
+        """archive 写入失败时，源表记录不得被删除（防丢数据）"""
+        from meta.scripts.archive_audit_logs import archive_old_audit_logs
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("DROP TABLE audit_logs_archive")
+        # 缺列 → INSERT 必然失败
+        cur.execute("CREATE TABLE audit_logs_archive (id INTEGER PRIMARY KEY, archived_at TEXT NOT NULL)")
+        conn.commit()
+        conn.close()
+
+        old_iso = (datetime.utcnow() - timedelta(days=200)).isoformat()
+        self._insert_log(db_path, old_iso)
+        self._insert_log(db_path, old_iso)
+
+        result = archive_old_audit_logs(db_path, retention_days=180, dry_run=False)
+        assert result['archived_count'] == 0
+        assert result['error_count'] == 2
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM audit_logs WHERE action = 'created'")
+        assert cur.fetchone()[0] == 2  # 原记录仍在源表
+        cur.execute("SELECT COUNT(*) FROM audit_logs_archive")
+        assert cur.fetchone()[0] == 0
+        conn.close()
+
+    def test_batch_over_500_archives_all(self, db_path):
+        """超过一个批次（500）时不得跳行（keyset 分页）"""
+        from meta.scripts.archive_audit_logs import archive_old_audit_logs
+        old_iso = (datetime.utcnow() - timedelta(days=200)).isoformat()
+        conn = sqlite3.connect(db_path)
+        for i in range(600):
+            bridge.insert(
+                conn, 'audit_logs',
+                object_type='user', object_id=str(i), action='created',
+                user_id=1, user_name='alice',
+                retention_until=old_iso,
+                action_kind='instance', outcome='success',
+            )
+        conn.commit()
+        conn.close()
+
+        result = archive_old_audit_logs(db_path, retention_days=180, dry_run=False)
+        assert result['archived_count'] == 600
+        assert result['error_count'] == 0
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM audit_logs_archive")
+        assert cur.fetchone()[0] == 600
+        conn.close()
 
 
 if __name__ == "__main__":
