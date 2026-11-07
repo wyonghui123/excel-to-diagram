@@ -1,0 +1,178 @@
+# 规则中心视图元数据
+#
+# 顶层无 `id:` —— 按 yaml_loader.load_yaml_directory 的语义判据，本文件不是 BO 对象定义，
+# 不会被注册为 MetaObject，由 rule_center_api / 前端 RuleCenterPage 单独消费。
+#
+# 职责边界：只描述「规则怎么显示」，不参与任何规则解析。
+# 规则本体来自 RuleCatalogService 聚合（BO YAML / DB 配置 / 只读声明）。
+
+version: 1
+title: 规则中心
+description: 统一展示、查询与管理所有可配置规则，并在单据详情展示规则推导过程。
+
+permission:
+  read: rule_center:rule_center_read
+  write: rule_center:rule_center_write
+  trace: rule_center:rule_center_trace
+
+# 来源枚举：与 RuleCatalogService.SOURCES 保持一致；未知来源在加载期报错。
+sources:
+  - id: bo_yaml
+    label: BO 规则
+  - id: doc_flow
+    label: 单据流
+  - id: approval
+    label: 审批策略
+  - id: control_parameter
+    label: 控制参数
+  - id: line_type
+    label: 行类型
+  - id: state_machine
+    label: 状态机
+  - id: numbering
+    label: 编号规则
+  - id: validation
+    label: 校验与默认值
+
+# 列/筛选的展示文案（前端壳只读这里的映射，不得在组件内写死中文）
+column_labels:
+  rule_key: 规则键
+  name: 名称
+  rule_type: 类型
+  source: 来源
+  layer: 层级
+  scope_bo: 作用对象
+  factors: 因子
+  configurable: 可配置
+  status: 状态
+  updated_at: 更新时间
+  org: 组织
+  document_type: 单据类型
+  line_type: 行类型
+  item_group: 物料组
+  value: 取值
+  source_kind: 取值来源
+  source_bo: 来源单据
+  target_bo: 目标单据
+  flow_kind: 单据流类型
+  condition_summary: 条件摘要
+  step_count: 审批层级
+  severity: 严重度
+  enabled: 启用
+  check_key: 检查项
+  label: 检查项名称
+  finding_count: 问题数
+  sample: 样例
+
+filter_labels:
+  keyword: 关键字
+  domain: 域
+  rule_type: 规则类型
+  source: 来源
+  configurable: 可配置
+  status: 状态
+  document_type: 单据类型
+  line_type: 行类型
+  item_group: 物料组
+  source_bo: 来源单据
+  target_bo: 目标单据
+  scope_bo: 作用对象
+  severity: 严重度
+  enabled: 启用
+
+filter_options:
+  rule_type: [validation, default, constraint, computation, derivation, trigger, approval, doc_flow, control_parameter, line_type]
+  status: [active, inactive]
+  severity: [error, warning, info]
+  enabled: ['true', 'false']
+  configurable: ['true', 'false']
+
+tabs:
+  - id: all
+    label: 全部规则
+    default: true
+    sources: [bo_yaml, doc_flow, approval, control_parameter, line_type, state_machine, numbering, validation]
+    columns: [rule_key, name, rule_type, source, scope_bo, factors, configurable, status, updated_at]
+    filters: [domain, rule_type, source, configurable, status, keyword]
+    actions: [detail, edit, view_source, simulate, copy_key]
+
+  - id: control_parameter
+    label: 控制参数
+    sources: [control_parameter]
+    columns: [rule_key, name, org, document_type, line_type, item_group, value, status]
+    filters: [domain, status, keyword]
+    actions: [detail, edit, publish, rollback, copy_key]
+
+  - id: line_type
+    label: 行类型
+    sources: [line_type]
+    columns: [rule_key, name, document_type, item_group, line_type, source_kind, status]
+    filters: [document_type, status, keyword]
+    actions: [detail, edit, copy_key]
+
+  - id: doc_flow
+    label: 单据流
+    sources: [doc_flow]
+    columns: [rule_key, name, source_bo, target_bo, flow_kind, status]
+    filters: [source_bo, target_bo, status, keyword]
+    actions: [detail, edit]
+
+  - id: approval
+    label: 审批策略
+    sources: [approval]
+    columns: [rule_key, name, scope_bo, condition_summary, step_count, status]
+    filters: [scope_bo, status, keyword]
+    actions: [detail]
+
+  - id: validation
+    label: 校验与默认值
+    sources: [validation]
+    columns: [rule_key, name, rule_type, scope_bo, severity, enabled]
+    filters: [scope_bo, rule_type, severity, enabled, keyword]
+    actions: [detail, view_source, copy_key]
+
+  - id: simulate
+    label: 规则试算
+    kind: simulate
+    require: rule_center:rule_center_read
+    sources: []
+    columns: []
+    filters: []
+    actions: []
+
+  - id: health
+    label: 健康检查
+    kind: health
+    sources: []
+    columns: [check_key, label, severity, finding_count, sample]
+    filters: [severity]
+    actions: [detail]
+
+detail:
+  sections:
+    - id: basic
+      label: 基本信息
+      fields: [rule_key, name, rule_type, source, scope_bo, factors, priority, status, updated_at]
+    - id: expression
+      label: 规则表达式
+      widget: code
+    - id: factors
+      label: 因子矩阵
+      widget: factor_matrix
+    - id: source
+      label: 声明位置
+      widget: source_snippet
+    - id: history
+      label: 变更记录
+      widget: audit_log
+      params:
+        # 后端 /rules/config/history 按 rule_key 前缀推导发布目标
+        rule_key: "{rule_key}"
+
+trace:
+  scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow]
+
+simulate:
+  fields: [scenario, config_mode, codes, object_type, record_id, org_id, document_type_id, line_type_id, item_group_id]
+  config_modes: [baseline, draft, both]
+  max_codes: 20

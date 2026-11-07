@@ -375,6 +375,24 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [规则收敛 v1.6 2026-11-07] 规则中心 —— 全部可配置规则目录 + 试算入口。
+            #   page_type=rule_center: 页面结构由 meta/schemas/rule_center_view.yaml 驱动,
+            #   dynamicRoutes.js 自动注册 RuleCenterPage, 无需静态路由。
+            'menu_code': 'rule-center',
+            'menu_name': '规则中心',
+            'menu_path': '/system/rule-center',
+            'icon': 'SetUp',
+            'color': '#0ea5e9',
+            'sort_order': 55,
+            'parent_menu': 'system',
+            'page_type': 'rule_center',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['rule_center:rule_center_read']),
+            'data_permission_hint': None
+        },
+        {
             # [C6 2026-10-14] 平台运维作业 —— 进程内调度器状态 + 手动触发页。
             #   形态照抄 business-config / audit-log 等同父菜单(system)条目:
             #     - page_type=custom_page ⇒ 无自动菜单, 由静态路由

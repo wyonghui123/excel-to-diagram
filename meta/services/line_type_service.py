@@ -41,13 +41,18 @@ class LineTypeResolver:
 
     ASSIGNMENT_SQL = (
         "SELECT id, document_type_id, item_group_id, specificity_rank, "
-        "line_type_id FROM line_type_assignments "
+        "line_type_id, status FROM line_type_assignments "
         "WHERE status = 'active'")
+    #: 试算草稿模式专用：draft 只在发布流内置位，运行期解析仍走 ASSIGNMENT_SQL
+    DRAFT_ASSIGNMENT_SQL = (
+        "SELECT id, document_type_id, item_group_id, specificity_rank, "
+        "line_type_id, status FROM line_type_assignments "
+        "WHERE status IN ('active', 'draft')")
 
     def __init__(self, data_source=None, scope_bo: str = _DEFAULT_SCOPE_BO):
         self._ds = data_source
         self.scope_bo = scope_bo or _DEFAULT_SCOPE_BO
-        self._by_doc_type: Optional[Dict[Any, List[Dict[str, Any]]]] = None
+        self._by_doc_type: Dict[bool, Dict[Any, List[Dict[str, Any]]]] = {}
         self._defaults: Optional[Dict[Any, Any]] = None
 
     @property
@@ -69,7 +74,7 @@ class LineTypeResolver:
 
     def invalidate(self) -> None:
         """配置写入后调用，丢弃缓存。"""
-        self._by_doc_type = None
+        self._by_doc_type = {}
         self._defaults = None
 
     # ------------------------------------------------------------------
@@ -77,7 +82,8 @@ class LineTypeResolver:
     # ------------------------------------------------------------------
 
     def resolve(self, doc_type_id: Any,
-                item_group_id: Any = None) -> Dict[str, Any]:
+                item_group_id: Any = None,
+                include_draft: bool = False) -> Dict[str, Any]:
         """确定单据行应使用的行类型。
 
         Returns:
@@ -90,7 +96,7 @@ class LineTypeResolver:
               'item_group_id': 入参,
             }
         """
-        by_doc_type, defaults = self._ensure_loaded()
+        by_doc_type, defaults = self._ensure_loaded(include_draft)
         base = {
             'line_type_id': None,
             'source': 'missing',
@@ -121,12 +127,13 @@ class LineTypeResolver:
         return base
 
     def explain(self, doc_type_id: Any,
-                item_group_id: Any = None) -> Dict[str, Any]:
+                item_group_id: Any = None,
+                include_draft: bool = False) -> Dict[str, Any]:
         """返回命中链，供实施排查「为什么这一行用了这个行类型」。"""
-        by_doc_type, defaults = self._ensure_loaded()
+        by_doc_type, defaults = self._ensure_loaded(include_draft)
         rows = by_doc_type.get(str(doc_type_id), [])
         matched = [r for r in rows if _matches(r, item_group_id)]
-        result = self.resolve(doc_type_id, item_group_id)
+        result = self.resolve(doc_type_id, item_group_id, include_draft)
         result['candidates'] = [
             {'assignment_id': r.get('id'),
              'item_group_id': r.get('item_group_id'),
@@ -137,16 +144,31 @@ class LineTypeResolver:
         result['default_type_id'] = defaults.get(str(doc_type_id))
         return result
 
+    def candidates(self, doc_type_id: Any, item_group_id: Any = None,
+                   include_draft: bool = False) -> Dict[str, Any]:
+        """返回同单据类型下全部候选行（含未命中行），供试算展示候选集。"""
+        by_doc_type, defaults = self._ensure_loaded(include_draft)
+        rows = by_doc_type.get(str(doc_type_id), [])
+        return {
+            'doc_type_id': doc_type_id,
+            'doc_type_exists': doc_type_id is not None and str(doc_type_id) in defaults,
+            'rows': list(rows),
+            'hit': self._match(rows, item_group_id),
+            'default_type_id': defaults.get(str(doc_type_id)),
+            'item_group_id': item_group_id,
+        }
+
     # ------------------------------------------------------------------
     # 装载与匹配
     # ------------------------------------------------------------------
 
-    def _ensure_loaded(self):
-        if self._by_doc_type is None or self._defaults is None:
+    def _ensure_loaded(self, include_draft: bool = False):
+        mode = bool(include_draft)
+        if mode not in self._by_doc_type or self._defaults is None:
             grouped: Dict[Any, List[Dict[str, Any]]] = {}
             defaults: Dict[Any, Any] = {}
             try:
-                for row in self._fetch_assignments() or []:
+                for row in self._fetch_assignments(mode) or []:
                     grouped.setdefault(str(row.get('document_type_id')), []).append(row)
                 for row in self._fetch_doc_types() or []:
                     defaults[str(row.get('id'))] = row.get('default_type_id')
@@ -156,12 +178,13 @@ class LineTypeResolver:
             for rows in grouped.values():
                 rows.sort(key=lambda r: (_rank(r.get('specificity_rank')),
                                          r.get('id') or 0))
-            self._by_doc_type = grouped
+            self._by_doc_type[mode] = grouped
             self._defaults = defaults
-        return self._by_doc_type, self._defaults
+        return self._by_doc_type[mode], self._defaults
 
-    def _fetch_assignments(self) -> List[Dict[str, Any]]:
-        return self.ds.query(self.ASSIGNMENT_SQL)
+    def _fetch_assignments(self, include_draft: bool = False) -> List[Dict[str, Any]]:
+        return self.ds.query(self.DRAFT_ASSIGNMENT_SQL if include_draft
+                             else self.ASSIGNMENT_SQL)
 
     def _fetch_doc_types(self) -> List[Dict[str, Any]]:
         return self.ds.query(self.doc_type_sql)

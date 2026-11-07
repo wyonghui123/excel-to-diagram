@@ -1140,6 +1140,11 @@ def create_app(db_path=None):
     #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
     from meta.api.inventory_aging_api import inventory_aging_bp
     app.register_blueprint(inventory_aging_bp)
+    # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
+    app.register_blueprint(rule_center_bp)
+    app.register_blueprint(rule_trace_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)

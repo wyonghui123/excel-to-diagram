@@ -186,6 +186,29 @@ def get_rule(data_source, rule_id: str) -> Optional[Dict[str, Any]]:
     return rule
 
 
+def list_rules(data_source, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """只读列出单据流规则（规则中心目录用）。
+
+    与 :func:`get_rule` 的字段解析口径一致（``field_map`` / ``split_key`` 转对象）。
+    """
+    sql = "SELECT {0} FROM doc_flow_rule".format(", ".join(RULE_COLUMNS))
+    params: tuple = ()
+    if status:
+        sql += " WHERE status = ?"
+        params = (status,)
+    sql += " ORDER BY rule_id"
+    rows = data_source.execute(sql, params).fetchall() if params else \
+        data_source.execute(sql).fetchall()
+
+    rules: List[Dict[str, Any]] = []
+    for row in rows:
+        rule = dict(zip(RULE_COLUMNS, row))
+        rule["field_map"] = _loads(rule.get("field_map"), {})
+        rule["split_key"] = _loads(rule.get("split_key"), [])
+        rules.append(rule)
+    return rules
+
+
 def set_rule_status(data_source, rule_id: str, status: str) -> bool:
     """显式变更规则运行态（active/deprecated）；返回是否命中规则行。
 

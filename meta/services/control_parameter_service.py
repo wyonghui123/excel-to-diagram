@@ -47,11 +47,14 @@ class ControlParameterResolver:
 
     DEF_SQL = ("SELECT * FROM control_parameter_defs WHERE status = 'active'")
     VALUE_SQL = ("SELECT * FROM control_parameter_values WHERE status = 'active'")
+    #: 试算草稿模式专用：draft 只在发布流内置位，运行期解析仍走 VALUE_SQL
+    DRAFT_VALUE_SQL = ("SELECT * FROM control_parameter_values "
+                       "WHERE status IN ('active', 'draft')")
 
     def __init__(self, data_source=None):
         self._ds = data_source
         self._defs_by_code: Optional[Dict[str, Dict[str, Any]]] = None
-        self._values_by_param: Optional[Dict[Any, List[Dict[str, Any]]]] = None
+        self._values_by_param: Dict[bool, Dict[Any, List[Dict[str, Any]]]] = {}
 
     # ------------------------------------------------------------------
     # 数据源与缓存
@@ -69,33 +72,36 @@ class ControlParameterResolver:
     def invalidate(self) -> None:
         """配置写入后调用，丢弃缓存。"""
         self._defs_by_code = None
-        self._values_by_param = None
+        self._values_by_param = {}
 
     def _fetch_defs(self) -> List[Dict[str, Any]]:
         return self.ds.query(self.DEF_SQL)
 
-    def _fetch_values(self) -> List[Dict[str, Any]]:
-        return self.ds.query(self.VALUE_SQL)
+    def _fetch_values(self, include_draft: bool = False) -> List[Dict[str, Any]]:
+        return self.ds.query(self.DRAFT_VALUE_SQL if include_draft else self.VALUE_SQL)
 
-    def _ensure_loaded(self) -> Tuple[Dict[str, Dict[str, Any]], Dict[Any, List[Dict[str, Any]]]]:
+    def _ensure_loaded(self, include_draft: bool = False
+                       ) -> Tuple[Dict[str, Dict[str, Any]],
+                                  Dict[Any, List[Dict[str, Any]]]]:
         if self._defs_by_code is None:
             try:
                 self._defs_by_code = {row['code']: row for row in (self._fetch_defs() or [])}
             except Exception as e:
                 logger.error(f'[control_parameter] 装载参数定义失败: {e}')
                 self._defs_by_code = {}
-        if self._values_by_param is None:
+        mode = bool(include_draft)
+        if mode not in self._values_by_param:
             grouped: Dict[Any, List[Dict[str, Any]]] = {}
             try:
-                for row in (self._fetch_values() or []):
+                for row in (self._fetch_values(mode) or []):
                     grouped.setdefault(row.get('control_parameter_id'), []).append(row)
             except Exception as e:
                 logger.error(f'[control_parameter] 装载参数取值失败: {e}')
                 grouped = {}
             for rows in grouped.values():
                 rows.sort(key=lambda r: (_rank(r), r.get('id') or 0))
-            self._values_by_param = grouped
-        return self._defs_by_code, self._values_by_param
+            self._values_by_param[mode] = grouped
+        return self._defs_by_code, self._values_by_param[mode]
 
     # ------------------------------------------------------------------
     # 对外入口
@@ -148,6 +154,29 @@ class ControlParameterResolver:
                  'value': r.get('value')}
                 for r in matched
             ],
+        }
+
+    # ------------------------------------------------------------------
+    # 规则试算（FR-017）：暴露完整候选集，命中判定仍复用 _match
+    # ------------------------------------------------------------------
+
+    def candidates(self, code: str, dims: Dict[str, Any],
+                   include_draft: bool = False) -> Dict[str, Any]:
+        """返回某参数的全部候选行（含未命中行），供试算展示候选集。"""
+        defs, values = self._ensure_loaded(include_draft)
+        definition = defs.get(code)
+        if not definition:
+            return {'code': code, 'defined': False, 'rows': [], 'hit': None,
+                    'default_value': None, 'value_type': None}
+        rows = values.get(definition.get('id'), [])
+        return {
+            'code': code,
+            'defined': True,
+            'definition': definition,
+            'rows': list(rows),
+            'hit': self._match(rows, dims),
+            'default_value': definition.get('default_value'),
+            'value_type': definition.get('value_type'),
         }
 
     # ------------------------------------------------------------------

@@ -510,6 +510,7 @@ class ApplicationBuilder:
         from meta.api.handling_unit_api import handling_unit_bp
         from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.inventory_aging_api import inventory_aging_bp
+        from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -591,6 +592,9 @@ class ApplicationBuilder:
         app.register_blueprint(engineering_change_bp)
         # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由，不新增 View BO）。
         app.register_blueprint(inventory_aging_bp)
+        # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
+        app.register_blueprint(rule_center_bp)
+        app.register_blueprint(rule_trace_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，
