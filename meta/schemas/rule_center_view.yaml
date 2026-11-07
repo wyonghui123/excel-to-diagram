@@ -204,11 +204,45 @@ trace:
     calc: 计算
     approve: 审批
     status_transition: 状态流转
-  # 规则全集归属（spec §11.4）
+  # 规则全集归属（spec §11.4；判定在后端 scope_of，前端只渲染）
   scopes:
-    evaluated: 已评估
-    not_triggered: 未触发
-    downstream: 下游
+    evaluated: { label: 已评估, type: success }
+    not_triggered: { label: 未触发, type: info }
+    downstream: { label: 下游, type: warning }
+  # 因子键顺序与中文名（与后端 factors 同源）
+  factor_keys: [org_id, document_type_id, line_type_id, item_group_id]
+  factor_labels:
+    org_id: 组织
+    document_type_id: 单据类型
+    line_type_id: 行类型
+    item_group_id: 物料组
+  # 控制参数命中链列契约
+  chain_columns:
+    code: { label: 编码, min_width: 160 }
+    value: { label: 取值, min_width: 100 }
+    source: { label: 来源, min_width: 140 }
+    specificity_rank: { label: 匹配度, min_width: 120 }
+    candidates: { label: 候选数, min_width: 90 }
+  # 命中链取值来源（对应 source.type）
+  source_types:
+    value: 命中取值
+    default: 取默认值
+    missing: 未定义
+  # 各场景 detail.rules 列契约（未知场景回落 rules_columns 之外的通用两列）
+  scenario_rules:
+    default:
+      columns:
+        rule_id: { label: 规则, min_width: 180 }
+        target_field: { label: 目标字段, min_width: 140 }
+        value: { label: 取值, min_width: 100 }
+        status: { label: 结论, min_width: 110 }
+        skip_reason: { label: 跳过原因, min_width: 140 }
+    doc_flow:
+      columns:
+        rule_id: { label: 规则, min_width: 180 }
+        target_bo: { label: 目标单据, min_width: 140 }
+        pool: { label: 归属池, min_width: 100 }
+        status: { label: 结论, min_width: 90 }
   # 规则全集表列文案
   rules_columns:
     scenario: 场景
@@ -258,7 +292,7 @@ trace:
     copy_failed: 复制失败，请手动复制
     clipboard_unsupported: 当前环境不支持剪贴板
     missing_target: 请先选择单据对象并填写记录 ID
-    codes_required: 需指定控制参数编码（codes）后重跑
+    no_codes_requested: 需指定控制参数编码（codes）后重跑
     empty_result: 未返回推导场景
     idle: 尚未推导
     failed: 推导失败
@@ -266,7 +300,7 @@ trace:
     value_missing: 未提供
     forbidden: '无权查看单据推导（缺少 rule_center:rule_center_trace）'
     not_found: 单据不存在或超出数据范围
-    all_missing: 全部控制参数均未取到值
+    all_codes_missing: 全部控制参数均未取到值
     # L1：规则全集表
     rules_all: 规则全集
     rules_empty: 本次推导没有可展示的规则

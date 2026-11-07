@@ -285,7 +285,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { getRuleCenterViewConfigCached, getRuleTrace } from '@/services/ruleCenterService'
 
-const FACTOR_KEYS = ['org_id', 'document_type_id', 'line_type_id', 'item_group_id']
+// 协议层兜底键顺序；展示顺序以视图元数据 trace.factor_keys 为准
+const DEFAULT_FACTOR_KEYS = ['org_id', 'document_type_id', 'line_type_id', 'item_group_id']
 
 // 元数据缺失时的兜底文案；正常路径以视图配置 trace.messages 为准
 const FALLBACK_MESSAGES = {
@@ -295,8 +296,8 @@ const FALLBACK_MESSAGES = {
   copy_failed: '复制失败，请手动复制',
   clipboard_unsupported: '当前环境不支持剪贴板',
   missing_target: '请先选择单据对象并填写记录 ID',
-  codes_required: '需指定控制参数编码（codes）后重跑',
-  all_missing: '全部控制参数均未取到值',
+  no_codes_requested: '需指定控制参数编码（codes）后重跑',
+  all_codes_missing: '全部控制参数均未取到值',
   empty_result: '未返回推导场景',
   idle: '尚未推导',
   failed: '推导失败',
@@ -312,13 +313,6 @@ const FALLBACK_MESSAGES = {
   condition_failed: '未通过',
   output_empty: '无输出',
   truncated: '规则节点过多，已截断展示'
-}
-
-// 规则全集归属 → tag 颜色（文案走视图元数据 trace.scopes）
-const SCOPE_TAG_TYPES = {
-  evaluated: 'success',
-  not_triggered: 'info',
-  downstream: 'warning'
 }
 
 const props = defineProps({
@@ -390,6 +384,13 @@ const decisionMap = computed(() => ({
 const kindMap = computed(() => fetchedTrace.value.kinds || {})
 const factorSourceLabels = computed(() => fetchedTrace.value.factor_sources || {})
 const factorSources = computed(() => result.value?.factor_sources || {})
+const factorKeys = computed(() => {
+  const declared = fetchedTrace.value.factor_keys
+  return Array.isArray(declared) && declared.length ? declared : DEFAULT_FACTOR_KEYS
+})
+const factorLabels = computed(() => fetchedTrace.value.factor_labels || {})
+const sourceTypeLabels = computed(() => fetchedTrace.value.source_types || {})
+const scenarioRuleColumns = computed(() => fetchedTrace.value.scenario_rules || {})
 
 const scenarioSteps = computed(() => {
   const data = result.value
@@ -402,25 +403,38 @@ const scenarioSteps = computed(() => {
 const factorItems = computed(() => {
   const factors = result.value?.factors || {}
   const keys = []
-  for (const key of FACTOR_KEYS) keys.push(key)
+  for (const key of factorKeys.value) keys.push(key)
   for (const key of Object.keys(factors)) {
     if (!keys.includes(key)) keys.push(key)
   }
   return keys.map((key) => ({
     key,
-    label: props.labels?.[key] || key,
+    label: factorLabels.value[key] || props.labels?.[key] || key,
     value: valueText(factors[key]),
     source: factorSourceLabels.value[factorSources.value[key]] || ''
   }))
 })
 
-const chainColumns = [
-  { key: 'code', label: 'code', minWidth: 160 },
-  { key: 'value', label: 'value', minWidth: 100 },
-  { key: 'source', label: 'source', minWidth: 140 },
-  { key: 'specificity', label: 'specificity_rank', minWidth: 120 },
-  { key: 'candidates', label: '候选数', minWidth: 80 }
-]
+// 元数据 { key: { label, min_width } } → el-table 列定义
+function columnsOf(meta, fallback) {
+  if (!meta || !Object.keys(meta).length) return fallback
+  return Object.entries(meta).map(([key, item]) => ({
+    key,
+    label: (item && item.label) || key,
+    minWidth: (item && item.min_width) || 120
+  }))
+}
+
+const chainColumns = computed(() => columnsOf(
+  fetchedTrace.value.chain_columns,
+  [
+    { key: 'code', label: 'code', minWidth: 160 },
+    { key: 'value', label: 'value', minWidth: 100 },
+    { key: 'source', label: 'source', minWidth: 140 },
+    { key: 'specificity_rank', label: 'specificity_rank', minWidth: 120 },
+    { key: 'candidates', label: 'candidates', minWidth: 90 }
+  ]
+))
 
 const scopeMap = computed(() => fetchedTrace.value.scopes || {})
 
@@ -436,11 +450,9 @@ function stageLabelOf(stage) {
 
 function scopeMeta(scope) {
   const raw = scopeMap.value?.[scope]
-  if (typeof raw === 'string') {
-    return { label: raw, type: SCOPE_TAG_TYPES[scope] || 'info' }
-  }
+  if (typeof raw === 'string') return { label: raw, type: 'info' }
   if (raw && typeof raw === 'object') return raw
-  return { label: scope || '-', type: SCOPE_TAG_TYPES[scope] || 'info' }
+  return { label: scope || '-', type: 'info' }
 }
 
 // 规则全集表：聚合各场景 detail.rules；无规则明细的场景按节点本身出一行
@@ -465,16 +477,13 @@ function ruleOutput(step, rule) {
 function buildRuleRow(step, rule, index) {
   const scenario = step?.scenario || ''
   const status = rule ? rule.status : step?.decision
-  // 归属三类（spec §11.4）：下游声明 / 条件未命中 / 本次已评估
-  let scope = 'evaluated'
-  if (scenario === 'doc_flow') scope = 'downstream'
-  else if (status === 'not_matched') scope = 'not_triggered'
   return {
     key: `${step?.node_id || scenario}-${index}`,
     scenario,
     scenarioLabel: scenarioLabelOf(scenario),
     rule_id: rule?.rule_id || step?.rule_id || scenario,
-    scope,
+    // 归属由后端 scope_of() 给出，前端不做语义推导
+    scope: rule?.scope || step?.scope || 'evaluated',
     status,
     output: ruleOutput(step, rule),
     conditions: Array.isArray(step?.match?.conditions) ? step.match.conditions : []
@@ -545,24 +554,13 @@ const outputColumnLabel = computed(() => (
   (fetchedTrace.value.rules_columns || {}).output || 'output'
 ))
 
-// default 场景列出"参与评估的规则清单"，doc_flow 列出"下游单据规则"
-const defaultRuleColumns = [
-  { key: 'rule_id', label: 'rule_id', minWidth: 180 },
-  { key: 'target_field', label: 'target_field', minWidth: 140 },
-  { key: 'value', label: 'value', minWidth: 100 },
-  { key: 'status', label: 'status', minWidth: 110 },
-  { key: 'skip_reason', label: 'skip_reason', minWidth: 140 }
-]
-
-const docFlowRuleColumns = [
-  { key: 'rule_id', label: 'rule_id', minWidth: 180 },
-  { key: 'target_bo', label: 'target_bo', minWidth: 140 },
-  { key: 'pool', label: 'pool', minWidth: 100 },
-  { key: 'status', label: 'status', minWidth: 90 }
-]
-
+// 各场景 detail.rules 列契约走视图元数据 trace.scenario_rules
 function rulesColumnsFor(step) {
-  return step?.scenario === 'default' ? defaultRuleColumns : docFlowRuleColumns
+  const spec = scenarioRuleColumns.value?.[step?.scenario]
+  return columnsOf(spec?.columns, [
+    { key: 'rule_id', label: 'rule_id', minWidth: 180 },
+    { key: 'status', label: 'status', minWidth: 110 }
+  ])
 }
 
 function valueText(value) {
@@ -587,12 +585,10 @@ function decisionMeta(stepOrValue) {
   return { label: decision || kind || '-', type: 'info' }
 }
 
-// 区分"需要补输入"与"确实取不到值"两种跳过
+// 区分"需要补输入"与"确实取不到值"两种跳过；文案键即 reason
 function stepHint(step) {
   if (!step || step.ok === false) return ''
-  if (step.reason === 'no_codes_requested') return messages.value.codes_required
-  if (step.reason === 'all_codes_missing') return messages.value.all_missing
-  return ''
+  return messages.value[step.reason] || ''
 }
 
 function elapsedText(value) {
@@ -601,9 +597,23 @@ function elapsedText(value) {
   return `${num.toFixed(2)} ms`
 }
 
+function sourceLabel(source) {
+  if (!source) return ''
+  const type = typeof source === 'string' ? source : source.type
+  return sourceTypeLabels.value[type] || type || ''
+}
+
+// 后端 chain 为协议结构，这里只做展示扁平化（不推导业务语义）
 function chainRows(step) {
   const chain = step?.detail?.chain
-  return Array.isArray(chain) ? chain : []
+  if (!Array.isArray(chain)) return []
+  return chain.map((entry) => ({
+    code: entry.code,
+    value: entry.value,
+    source: sourceLabel(entry.source),
+    specificity_rank: entry.specificity_rank ?? entry.source?.specificity_rank ?? '',
+    candidates: Array.isArray(entry.candidates) ? entry.candidates.length : ''
+  }))
 }
 
 function rulesRows(step) {
@@ -624,7 +634,7 @@ function stepFactorPairs(step) {
   if (!factors || typeof factors !== 'object') return []
   return Object.entries(factors).map(([key, value]) => ({
     key,
-    label: props.labels?.[key] || key,
+    label: factorLabels.value[key] || props.labels?.[key] || key,
     value: valueText(value)
   }))
 }
@@ -647,7 +657,7 @@ function buildParams() {
   if (props.scenarios.length) params.scenarios = props.scenarios.join(',')
   const codes = normalizeCodes()
   if (codes.length) params.codes = codes.join(',')
-  for (const key of FACTOR_KEYS) {
+  for (const key of factorKeys.value) {
     const raw = props.dims?.[key]
     if (raw == null || raw === '') continue
     params[key] = raw

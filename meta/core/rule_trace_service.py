@@ -201,6 +201,39 @@ def _kind_counts(steps: List[Dict[str, Any]]) -> Dict[str, int]:
     return counts
 
 
+# 规则全集归属（spec §11.4）：下游声明 / 条件未命中 / 本次已评估
+SCOPE_EVALUATED = 'evaluated'
+SCOPE_NOT_TRIGGERED = 'not_triggered'
+SCOPE_DOWNSTREAM = 'downstream'
+
+
+def scope_of(scenario: str, status: Any) -> str:
+    """归属判定的唯一真源；渲染层不得再按场景名/状态自行推导。"""
+    if scenario == 'doc_flow':
+        return SCOPE_DOWNSTREAM
+    if status == 'not_matched':
+        return SCOPE_NOT_TRIGGERED
+    return SCOPE_EVALUATED
+
+
+def _scope_rules(node: Dict[str, Any]) -> Any:
+    """为 detail.rules 每行补 scope，保持节点自身结构不变。"""
+    detail = node.get('detail')
+    if not isinstance(detail, dict):
+        return detail
+    rules = detail.get('rules')
+    if not isinstance(rules, list):
+        return detail
+    scenario = node.get('scenario') or ''
+    decorated = dict(detail)
+    decorated['rules'] = [
+        dict(rule, scope=scope_of(scenario, rule.get('status')))
+        if isinstance(rule, dict) else rule
+        for rule in rules
+    ]
+    return decorated
+
+
 def _default_data_source():
     from meta.core.datasource import get_data_source
     from meta.core.db_path import get_meta_db_path
@@ -280,8 +313,10 @@ class RuleTraceService:
             node['node_id'] = f'{trace_id}:{index}'
             node['parent_id'] = None
             node['stage'] = STAGE_MAP.get(node.get('scenario'), 'validate')
+            node['scope'] = scope_of(node.get('scenario') or '', node.get('decision'))
             node['match'] = _match_of(node)
             node['output'] = _output_of(node)
+            node['detail'] = _scope_rules(node)
             decorated.append(node)
         return decorated
 

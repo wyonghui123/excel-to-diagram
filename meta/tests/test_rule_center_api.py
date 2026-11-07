@@ -292,6 +292,25 @@ class TestRuleTraceService:
         assert 'submitted' in conditions['to_state']['expected']
         assert conditions['to_state']['passed'] is True
 
+    def test_node_scope_and_rule_scope(self):
+        result = self.service.build(
+            'sales_order', data={'status': 'draft', 'org_id': 1})
+        scopes = {'evaluated', 'not_triggered', 'downstream'}
+        saw_rules = False
+
+        for node in result['scenarios']:
+            # 归属判定在平台层（scope_of），前端不得自行推导
+            assert node['scope'] in scopes
+            if node['scenario'] == 'doc_flow':
+                assert node['scope'] == 'downstream'
+            rules = (node.get('detail') or {}).get('rules')
+            if isinstance(rules, list):
+                saw_rules = True
+                for rule in rules:
+                    assert rule['scope'] in scopes
+
+        assert saw_rules is True
+
 
 # ---------------------------------------------------------------------------
 # 端到端（共享 app + dev-login）
@@ -312,6 +331,21 @@ class TestRuleCenterEndpoints:
         body = resp.get_json()
         assert body['success'] is True
         assert len(body['data']['tabs']) == 9
+
+    def test_trace_metadata_complete(self):
+        """新增渲染语义必须可由 YAML 提供，前端不得回退到硬编码。"""
+        resp = self.client.get('/api/v2/rules/view-config')
+        assert resp.status_code == 200
+
+        trace = resp.get_json()['data']['trace']
+        assert set(trace['scopes']) == {'evaluated', 'not_triggered', 'downstream'}
+        assert isinstance(trace['scopes']['evaluated'], dict)
+        assert set(trace['factor_keys']) == set(trace['factor_labels'])
+        assert set(trace['factor_keys']) == {
+            'org_id', 'document_type_id', 'line_type_id', 'item_group_id'}
+        assert trace['chain_columns']['candidates']['label']
+        assert 'default' in trace['scenario_rules']
+        assert trace['scenario_rules']['default']['columns']['rule_id']['label']
 
     def test_list_rules_ok(self):
         resp = self.client.get('/api/v2/rules?limit=3')
