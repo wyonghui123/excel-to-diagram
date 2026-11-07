@@ -4877,9 +4877,16 @@ class ImportExportService:
                 page_size=1,
             )
             result = self.query_service.search(search_request)
-            return result.data[0] if result.data else {}
+            record = result.data[0] if result.data else {}
         except Exception:
-            return {}
+            record = {}
+        # [perf-2026-11-07] 回填缓存: 同一父级会被数千条子记录重复访问
+        # (3228 BO × 5 层 + 5756 relationship), 预加载链未覆盖时每次都走
+        # page_size=1 查询, 单次导出 35k+ 次 → 26s。回填后每个 (类型, id) 只查一次。
+        cache = getattr(self, '_current_enrichment_cache', None)
+        if cache is not None:
+            cache.setdefault('parent_by_type_id', {})[(object_type, record_id)] = record
+        return record
 
     def _add_hierarchy_fields(self, record: Dict[str, Any], meta_obj: MetaObject, options: Dict[str, Any],
                               enrichment_cache: Optional[Dict[str, Any]] = None):
