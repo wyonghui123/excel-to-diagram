@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-07 16:30:20.923148
+-- 生成时间: 2026-11-07 17:27:29.898995
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -4008,8 +4008,10 @@ CREATE TABLE IF NOT EXISTS work_orders (
     schedule_id INTEGER,
     source_demand_type VARCHAR(200),
     source_demand_id INTEGER,
-    order_id INTEGER NOT NULL,
-    order_line_id INTEGER NOT NULL,
+    order_id INTEGER,
+    order_line_id INTEGER,
+    item_id INTEGER,
+    planned_qty REAL,
     project_id INTEGER,
     project_task_id INTEGER,
     customer_account_id INTEGER,

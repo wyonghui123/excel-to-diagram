@@ -3,13 +3,14 @@
 #
 # 定位: 作业层统一单据（作业层统一契约）。`order_type` 已启用 service / production /
 #       repair / install / maintenance（售后三值按 service 路径复用，P2 G9）。
-#       `project` 待 project_task 计划层落地后再启用（需先放开 order_id/order_line_id 必填）。
+#       `project` / `project_task` 已支持；项目任务来源的工单不冗余订单 / 订单行。
 #       与架构元模型的 service_module（服务模块，三级业务分类）无关，勿混淆。
 #
 # 挂载点（按 order_type 分流，服务层强制）:
 #   · service / repair / install / maintenance
 #                → `schedule_id` 必填且指向 schedule_kind='service' 的计划行（R-ST-0，§10.5）
-#   · production → `source_demand_type` + `source_demand_id` 必填（计划行 / 订单行 / 项目任务）
+#   · production → `source_demand_type` 必填（计划行 / 订单行 / 项目任务 / manual）；
+#                  前三种必须给 `source_demand_id`；manual（MTS 手工备货）给 `item_id` + `planned_qty`
 #
 # 服务层不变量（YAML 表达不了的，由 work_order_service 强制；R-ST-* 为 service 专属）:
 #   R-ST-0（service 专属）schedule_id 必填且计划行 schedule_kind='service'；否则 ST_SCHEDULE_INVALID
@@ -25,9 +26,11 @@
 #   R-ST-8 取消工单需同时把计划行置 cancelled 或改约；否则 ST_SCHEDULE_DESYNC
 #
 # 生产工单（批次 4a，§10.15 / §10.16）:
-#   P-1 source_demand_type ∈ {sales_order_schedule, sales_order_line, project_task}
-#       且 source_demand_id 必填；project_task 时工单须与任务同一 project_id（AC-09）；
-#       否则 ST_SOURCE_DEMAND_REQUIRED / ST_SOURCE_DEMAND_INVALID
+#   P-1 source_demand_type ∈ {sales_order_schedule, sales_order_line, project_task, manual}；
+#       前三值 source_demand_id 必填，project_task 时工单须与任务同一 project_id（AC-09）；
+#       manual（MTS 无来源备货）禁 source_demand_id / order_id / order_line_id / schedule_id，
+#       必填 item_id + planned_qty（>0）；错误码 ST_SOURCE_DEMAND_REQUIRED /
+#       ST_SOURCE_DEMAND_INVALID / ST_ITEM_REQUIRED / ST_QTY_REQUIRED / ST_QTY_INVALID
 #   P-2 禁 asset_ref（ST_ASSET_NOT_ALLOWED）、禁 coverage_id（ST_SLA_NOT_ALLOWED）、
 #       禁挂 schedule_kind='service' 的计划行（ST_SCHEDULE_INVALID）
 #   P-3 不匹配 SLA 覆盖、不生成里程碑、不写 service_events（只写 change_events 一条 state_change）
@@ -230,6 +233,10 @@ fields:
         label: 项目任务
         color: info
         category: active
+      - value: manual
+        label: 手工备货（MTS）
+        color: warning
+        category: active
     semantics:
       meaning: 生产需求来源类型
       filterable: true
@@ -245,7 +252,7 @@ fields:
     type: integer
     db_column: source_demand_id
     nullable: true
-    description: 需求来源主键（配合 source_demand_type；service 为空）
+    description: 需求来源主键（配合 source_demand_type；service / manual 为空）
     semantics:
       meaning: 生产需求来源主键
       filterable: true
@@ -259,8 +266,8 @@ fields:
     name: 来源订单
     type: integer
     db_column: order_id
-    required: true
-    description: 冗余：由 schedule_id 反查的来源销售订单（不一致拒绝）
+    nullable: true
+    description: 冗余：由需求来源反查的销售订单（service / manual 可空；不一致拒绝）
     semantics:
       meaning: 来源销售订单
       display:
@@ -280,8 +287,8 @@ fields:
     name: 订单行
     type: integer
     db_column: order_line_id
-    required: true
-    description: 冗余：由 schedule_id 反查的计划行所属订单行
+    nullable: true
+    description: 冗余：由需求来源反查的订单行（service / manual / 项目任务可空）
     semantics:
       meaning: 所属订单行
       display:
@@ -292,6 +299,67 @@ fields:
       widget: select
       relation: sales_order_line
       hidden_in_form: true
+
+  # 生产产出物料（MTS 手工备货必填；有来源时由需求来源自动回填）
+  - id: item_id
+    name: 产出物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 生产工单的产出物料（manual 必填；有来源时由需求来源回填）
+    semantics:
+      meaning: 生产产出物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 产出物料
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 160
+          - field: name
+            label: 物料名称
+            width: 220
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  # MTS 计划数量：建单时按此数量展开组件；有来源时由需求来源回填
+  - id: planned_qty
+    name: 计划数量
+    type: number
+    db_column: planned_qty
+    nullable: true
+    description: 计划生产数量（manual 必填且 > 0；有来源时由需求来源回填）
+    semantics:
+      meaning: 计划生产数量
+      filterable: true
+      filter_type: number
+      filter_label: 计划数量
+      filter_scope: local
+    ui:
+      widget: number
 
   # 项目 360 履约聚合的唯一挂载列：工单按 project_id 归集（可空；空 = 未归集到项目）
   - id: project_id

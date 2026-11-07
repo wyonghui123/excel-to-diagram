@@ -67,8 +67,11 @@ ORDER_TYPE_PRODUCTION = 'production'
 SOURCE_DEMAND_SCHEDULE = 'sales_order_schedule'
 SOURCE_DEMAND_LINE = 'sales_order_line'
 SOURCE_DEMAND_PROJECT_TASK = 'project_task'
+#: MTS 手工备货：无上游单据，产出物料 + 计划数量由用户直接给定
+SOURCE_DEMAND_MANUAL = 'manual'
 SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE,
                        SOURCE_DEMAND_PROJECT_TASK)
+SOURCE_DEMAND_ALL = SOURCE_DEMAND_TYPES + (SOURCE_DEMAND_MANUAL,)
 
 STRUCTURE_USAGE_PRODUCTION = 'production'
 STRUCTURE_STATUS_ACTIVE = 'active'
@@ -113,6 +116,8 @@ SLA_RULE_AMBIGUOUS = 'SLA_RULE_AMBIGUOUS'
 #: G15 G5：工单发布后项目归属锁定
 STATUS_RELEASED = 'released'
 PROJECT_TASK_COLUMN = 'project_task_id'
+ITEM_COLUMN = 'item_id'
+PLANNED_QTY_COLUMN = 'planned_qty'
 
 
 class WorkOrderError(ValueError):
@@ -362,15 +367,24 @@ class WorkOrderService:
 
     # -------------------------------------------------------- 生产工单（批次 4a）
 
-    def _create_production(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """创建生产工单：需求追溯 + 可选组件展开；不匹配 SLA、不写 service_events。"""
+    def validate_production_create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """通用 BO CRUD 建单前置校验（与 create_work_order 同口径）。
+
+        返回归一化的可写字段，供拦截器回填 context.params：
+        order_id / order_line_id / customer_account_id / project_id /
+        project_task_id / schedule_id / item_id / planned_qty。
+        拒绝时抛 WorkOrderError（field_name / rule 供前端定位）。
+        """
+        return self._prepare_production(dict(payload or {}))
+
+    def _prepare_production(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """校验生产工单入参并推导冗余字段；来源路径与 manual 共用。"""
         demand_type = payload.get('source_demand_type')
-        demand_id = payload.get('source_demand_id')
-        if _blank(demand_type) or _blank(demand_id) \
-                or str(demand_type) not in SOURCE_DEMAND_TYPES:
+        if _blank(demand_type) or str(demand_type) not in SOURCE_DEMAND_ALL:
             raise WorkOrderError(
                 '生产工单必须提供有效需求来源（source_demand_type / source_demand_id）',
-                field_name='source_demand_id', rule='ST_SOURCE_DEMAND_REQUIRED')
+                field_name='source_demand_type', rule='ST_SOURCE_DEMAND_REQUIRED')
+        demand_type = str(demand_type)
 
         if not _blank(payload.get('asset_ref')):
             raise WorkOrderError('生产工单不允许填写资产引用',
@@ -381,7 +395,16 @@ class WorkOrderService:
                                  field_name='coverage_id',
                                  rule='ST_SLA_NOT_ALLOWED')
 
-        demand = self._resolve_demand(str(demand_type), demand_id)
+        if demand_type == SOURCE_DEMAND_MANUAL:
+            return self._prepare_manual(payload)
+
+        demand_id = payload.get('source_demand_id')
+        if _blank(demand_id):
+            raise WorkOrderError(
+                '生产工单必须提供需求来源主键（source_demand_type / source_demand_id）',
+                field_name='source_demand_id', rule='ST_SOURCE_DEMAND_REQUIRED')
+
+        demand = self._resolve_demand(demand_type, demand_id)
 
         # AC-09：project_task 来源时工单与任务必须归属同一项目（缺省则回填任务项目）
         project_id = payload.get('project_id')
@@ -417,16 +440,78 @@ class WorkOrderService:
             else demand.get('order_line_id')
 
         # 组件展开的物料与数量：payload 显式优先，缺省由需求来源自动推导（T4.2）
-        item_id = payload.get('item_id')
+        item_id = payload.get(ITEM_COLUMN)
         if _blank(item_id):
             item_id = demand.get('item_id')
-        qty = payload.get('qty')
+        qty = payload.get(PLANNED_QTY_COLUMN)
+        if _blank(qty):
+            qty = payload.get('qty')
         if _blank(qty):
             qty = demand.get('qty')
 
         customer_account_id = payload.get('customer_account_id')
         if _blank(customer_account_id):
             customer_account_id = demand.get('customer_account_id')
+
+        return {
+            'demand_type': demand_type,
+            'demand_id': demand_id,
+            'order_id': demand.get('order_id'),
+            'order_line_id': order_line_id,
+            'customer_account_id': customer_account_id,
+            'project_id': project_id,
+            'project_task_id': task_id,
+            'schedule_id': None if _blank(schedule_id) else schedule_id,
+            ITEM_COLUMN: item_id,
+            PLANNED_QTY_COLUMN: qty,
+        }
+
+    def _prepare_manual(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """MTS 手工备货：禁止任何上游引用，物料 + 计划数量必填。"""
+        for field, label in (('source_demand_id', '需求来源 ID'),
+                             ('order_id', '来源订单'),
+                             ('order_line_id', '订单行'),
+                             ('schedule_id', '服务计划行')):
+            if not _blank(payload.get(field)):
+                raise WorkOrderError(
+                    '手工备货工单不能填写%s' % label,
+                    field_name=field, rule='ST_SOURCE_DEMAND_INVALID')
+        item_id = payload.get(ITEM_COLUMN)
+        if _blank(item_id):
+            raise WorkOrderError('手工备货工单必须指定产出物料',
+                                 field_name=ITEM_COLUMN,
+                                 rule='ST_ITEM_REQUIRED')
+        qty = payload.get(PLANNED_QTY_COLUMN)
+        if _blank(qty):
+            qty = payload.get('qty')
+        if _blank(qty):
+            raise WorkOrderError('手工备货工单必须填写计划数量',
+                                 field_name=PLANNED_QTY_COLUMN,
+                                 rule='ST_QTY_REQUIRED')
+        qty_num = _num(qty)
+        if qty_num is None or qty_num <= 0:
+            raise WorkOrderError('计划数量必须大于 0',
+                                 field_name=PLANNED_QTY_COLUMN,
+                                 rule='ST_QTY_INVALID')
+        scope = self.validate_project_scope({
+            'project_id': payload.get('project_id'),
+            PROJECT_TASK_COLUMN: payload.get(PROJECT_TASK_COLUMN)})
+        return {
+            'demand_type': SOURCE_DEMAND_MANUAL,
+            'demand_id': None,
+            'order_id': None,
+            'order_line_id': None,
+            'customer_account_id': payload.get('customer_account_id'),
+            'project_id': scope.get('project_id'),
+            'project_task_id': scope.get(PROJECT_TASK_COLUMN),
+            'schedule_id': None,
+            ITEM_COLUMN: item_id,
+            PLANNED_QTY_COLUMN: qty_num,
+        }
+
+    def _create_production(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """创建生产工单：需求追溯 + 可选组件展开；不匹配 SLA、不写 service_events。"""
+        prepared = self._prepare_production(payload)
 
         opened_at = payload.get('opened_at') or _now()
         _parse_dt(opened_at)  # 格式校验（非法直接拒绝）
@@ -436,19 +521,21 @@ class WorkOrderService:
         row = {
             'work_order_no': work_order_no,
             'order_type': ORDER_TYPE_PRODUCTION,
-            'schedule_id': None if _blank(schedule_id) else schedule_id,
-            'order_id': demand.get('order_id'),
-            'order_line_id': order_line_id,
-            'customer_account_id': customer_account_id,
-            'project_id': project_id,
-            PROJECT_TASK_COLUMN: task_id,
+            'schedule_id': prepared['schedule_id'],
+            'order_id': prepared['order_id'],
+            'order_line_id': prepared['order_line_id'],
+            'customer_account_id': prepared['customer_account_id'],
+            'project_id': prepared['project_id'],
+            PROJECT_TASK_COLUMN: prepared['project_task_id'],
+            ITEM_COLUMN: prepared[ITEM_COLUMN],
+            PLANNED_QTY_COLUMN: prepared[PLANNED_QTY_COLUMN],
             'severity': payload.get('severity'),
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
             'coverage_id': None,
             'asset_ref': None,
-            'source_demand_type': str(demand_type),
-            'source_demand_id': demand_id,
+            'source_demand_type': prepared['demand_type'],
+            'source_demand_id': prepared['demand_id'],
             'opened_at': opened_at,
             'first_response_at': payload.get('first_response_at'),
             'resolved_at': None,
@@ -462,17 +549,21 @@ class WorkOrderService:
         self._append_change_event(work_order_id, 'state_change',
                                   {'status': (None, row['status'])})
 
-        expansion = self._maybe_expand_components(work_order_id, item_id, qty)
+        expansion = self._maybe_expand_components(
+            work_order_id, prepared[ITEM_COLUMN], prepared[PLANNED_QTY_COLUMN])
         return {
             'id': work_order_id,
             'work_order_no': work_order_no,
             'status': row['status'],
             'order_type': ORDER_TYPE_PRODUCTION,
             'schedule_id': row['schedule_id'],
+            'order_id': row['order_id'],
+            'order_line_id': row['order_line_id'],
             'source_demand_type': row['source_demand_type'],
             'source_demand_id': row['source_demand_id'],
-            'item_id': item_id,
-            'qty': qty,
+            ITEM_COLUMN: prepared[ITEM_COLUMN],
+            PLANNED_QTY_COLUMN: prepared[PLANNED_QTY_COLUMN],
+            'qty': prepared[PLANNED_QTY_COLUMN],
             'component_expansion': expansion,
             'sla': None,
         }
@@ -1271,12 +1362,17 @@ class WorkOrderService:
 
     def _insert(self, table: str, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
-        # 旧库（P1-2 列迁移尚未落地）不写 project_task_id，保持建单可用
-        if table in (WORK_ORDER_TABLE, COMPONENT_TABLE) \
-                and PROJECT_TASK_COLUMN in columns:
-            available = project_task_guard.table_columns(self.ds, table)
-            if PROJECT_TASK_COLUMN not in available:
-                columns.remove(PROJECT_TASK_COLUMN)
+        # 旧库（列迁移尚未落地）不写新增列，保持建单可用
+        if table in (WORK_ORDER_TABLE, COMPONENT_TABLE):
+            guarded = [PROJECT_TASK_COLUMN]
+            if table == WORK_ORDER_TABLE:
+                guarded += [ITEM_COLUMN, PLANNED_QTY_COLUMN]
+            missing = [column for column in guarded if column in columns]
+            if missing:
+                available = project_task_guard.table_columns(self.ds, table)
+                for column in missing:
+                    if column not in available:
+                        columns.remove(column)
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
             table, ', '.join(columns), ', '.join('?' * len(columns)))
         cursor = self.ds.execute(sql, [row[c] for c in columns])

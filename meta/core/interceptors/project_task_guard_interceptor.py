@@ -72,6 +72,9 @@ class ProjectTaskGuardInterceptor(Interceptor):
     # ------------------------------------------------------------------
     def _guard_work_order(self, context: 'ActionContext') -> None:
         data = dict(context.params or {})
+        if context.action == 'crud_create' and self._is_production(data):
+            self._guard_production_create(context, data)
+            return
         if context.action == 'crud_update' \
                 and not (set(data) & set(_GUARDED_WORK_ORDER_FIELDS)):
             return
@@ -84,6 +87,24 @@ class ProjectTaskGuardInterceptor(Interceptor):
             self._raise_validation(error)
         if context.action == 'crud_update':
             self._guard_work_order_close(context, data)
+
+    @staticmethod
+    def _is_production(data: dict) -> bool:
+        return str(data.get('order_type') or '').strip().lower() == 'production'
+
+    def _guard_production_create(self, context: 'ActionContext',
+                                 data: dict) -> None:
+        """通用 BO CRUD 建生产工单：与服务建单同一校验口径，并回填推导字段。"""
+        service = WorkOrderService(context.data_source)
+        try:
+            normalized = service.validate_production_create(data)
+        except WorkOrderError as error:
+            self._raise_validation(error)
+        for key in ('order_id', 'order_line_id', 'customer_account_id',
+                    'project_id', 'project_task_id', 'schedule_id',
+                    'item_id', 'planned_qty'):
+            context.params[key] = normalized.get(key)
+        context.extra['work_order_production'] = normalized
 
     def _guard_work_order_close(self, context: 'ActionContext',
                                 data: dict) -> None:
@@ -187,6 +208,8 @@ class ProjectTaskGuardInterceptor(Interceptor):
         line_id = _to_int(data.get('order_line_id'))
         work_order_id = (_to_int(getattr(context, 'object_id', 0))
                          or _to_int(data.get('id')))
+        if context.action == 'crud_create':
+            self._expand_components(context, work_order_id, data)
         if line_id > 0:
             try:
                 from meta.services.inventory_reservation_service import (
@@ -210,4 +233,22 @@ class ProjectTaskGuardInterceptor(Interceptor):
                 logger.warning(
                     '[inv2] 工单 %s 组件预留同步失败（不阻断写入）: %s',
                     work_order_id, error)
+
+    @staticmethod
+    def _expand_components(context: 'ActionContext', work_order_id: int,
+                           data: dict) -> None:
+        """通用 BO CRUD 建单后展开组件（与服务建单同一入口，幂等重建）。"""
+        item_id = data.get('item_id')
+        qty = data.get('planned_qty')
+        if qty in (None, ''):
+            qty = data.get('qty')
+        if not work_order_id or item_id in (None, '') or qty in (None, ''):
+            return
+        try:
+            WorkOrderService(context.data_source).expand_components(
+                work_order_id, item_id, qty)
+        except Exception as error:
+            logger.warning(
+                '[work_order] 工单 %s 组件展开失败（不阻断写入）: %s',
+                work_order_id, error)
 
