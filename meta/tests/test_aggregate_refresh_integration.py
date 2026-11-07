@@ -101,6 +101,10 @@ class TestAggregateRefreshOnCreate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
+                source_domain_id INTEGER, source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER, target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER,
                 created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
             )
         """)
@@ -231,6 +235,10 @@ class TestAggregateRefreshOnUpdate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
+                source_domain_id INTEGER, source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER, target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER,
                 created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
             )
         """)
