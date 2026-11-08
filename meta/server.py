@@ -150,7 +150,7 @@ from meta.api.special_routes_api import special_bp, init_special_services
 from meta.api.annotation_routes_api import annotation_bp, init_annotation_services
 from meta.api.audit_management_api import audit_mgmt_bp, init_audit_mgmt_services
 from meta.api.meta_utility_routes_api import meta_util_bp
-from meta.core.datasource import get_data_source
+from meta.core.datasource import get_data_source, get_platform_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
 from meta.core.migration_runner import init_change_notification_tables
 from meta.services.view_config_service import view_config_service
@@ -735,6 +735,12 @@ def create_app(db_path=None):
 
     init_region_seed_data(data_source)
 
+    # [单据流 Phase 3 2026-11-08] 服务层单例注入（复用启动期 data_source，
+    #   不新建第二个 DataSource 实例，避免事务与连接池分裂）。
+    from meta.api.doc_flow_api import init_doc_flow_service
+    from meta.services.doc_flow_service import DocFlowService
+    init_doc_flow_service(DocFlowService(data_source, get_platform_data_source()))
+
     from meta.services.audit_service import AuditService
     _audit_svc = AuditService(data_source)
     _failed_count = len(_audit_svc.get_failed_audit_logs(page=1, page_size=1).get('data', []))
@@ -1079,6 +1085,10 @@ def create_app(db_path=None):
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
+    # [单据流 Phase 3 2026-11-08] 通用服务 API（规则/上游/派生/追溯）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.doc_flow_api import doc_flow_bp
+    app.register_blueprint(doc_flow_bp)
     # [roadmap v1.32.0 §6.2.4] 任务体系 = 部署级可关闭的平台模块。
     # 不注册 blueprint ⇒ 路由真 404（不只是前端看不见），须与菜单种子同门。
     _tasks_enabled = is_module_enabled('tasks')
