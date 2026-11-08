@@ -24,6 +24,22 @@ _QTY_EPSILON = 1e-9
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
+_ENGINE_ERROR_MAP = {
+    "BATCH_EMPTY": ("DOC_FLOW_QTY_INVALID", 400),
+    "RULE_NOT_FOUND": ("DOC_FLOW_RULE_NOT_FOUND", 404),
+    "RULE_DEPRECATED": ("DOC_FLOW_RULE_NOT_FOUND", 404),
+    "BO_NOT_REGISTERED": ("DOC_FLOW_RULE_INVALID", 409),
+    "SOURCE_QTY_FIELD_MISSING": ("DOC_FLOW_RULE_INVALID", 409),
+    "TARGET_LINE_BO_MISSING": ("DOC_FLOW_RULE_INVALID", 409),
+    "HEAD_FK_NOT_FOUND": ("DOC_FLOW_RULE_INVALID", 409),
+    "SPLIT_KEY_FIELD_MISSING": ("DOC_FLOW_SPLIT_KEY_FIELD_MISSING", 400),
+    "SOURCE_ROW_NOT_FOUND": ("DOC_FLOW_SOURCE_NOT_FOUND", 404),
+    "TARGET_ROW_NOT_FOUND": ("DOC_FLOW_TARGET_NOT_FOUND", 404),
+    "INVALID_QUANTITY": ("DOC_FLOW_QTY_INVALID", 400),
+    "OVER_DERIVE": ("DOC_FLOW_QTY_EXCEEDED", 409),
+    "HEAD_LINE_MULTI_NOT_SUPPORTED": ("HEAD_LINE_MULTI_NOT_SUPPORTED", 409),
+}
+
 
 class DocFlowServiceError(Exception):
     """服务层业务异常：code 直接作为 API 错误码。"""
@@ -199,3 +215,141 @@ class DocFlowService:
             })
         return {"items": items, "total": total,
                 "page": page, "page_size": page_size}
+
+    # ------------------------------------------------------------------ 派生
+    def derive(self, payload: Dict[str, Any],
+               derived_by: str = "") -> Dict[str, Any]:
+        payload = payload or {}
+        rule = self._require_rule(payload.get("rule_id"))
+        target = payload.get("target") or {}
+        mode = target.get("mode") or "create"
+        two_level = bool(rule.get("target_line_bo"))
+
+        if mode not in ("create", "append"):
+            raise DocFlowServiceError(
+                "DOC_FLOW_TARGET_MODE_INVALID",
+                "target.mode 仅支持 create / append", 400)
+        if mode == "append" and not two_level:
+            raise DocFlowServiceError(
+                "DOC_FLOW_TARGET_MODE_INVALID",
+                "单表模式不支持追加，请使用 create", 400)
+        if mode == "append" and target.get("id") in (None, ""):
+            raise DocFlowServiceError(
+                "DOC_FLOW_TARGET_MODE_INVALID",
+                "append 模式必须提供目标单据 ID", 400)
+
+        raw_sources = payload.get("sources") or []
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise DocFlowServiceError(
+                "DOC_FLOW_QTY_INVALID", "sources 不能为空", 400)
+
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+        for raw in raw_sources:
+            if not isinstance(raw, dict):
+                raise DocFlowServiceError(
+                    "DOC_FLOW_QTY_INVALID", "sources 元素必须是对象", 400)
+            source_id = raw.get("source_id")
+            if source_id in (None, ""):
+                raise DocFlowServiceError(
+                    "DOC_FLOW_SOURCE_NOT_FOUND", "source_id 不能为空", 404)
+            source_item = raw.get("source_item") or ""
+            key = (str(source_id), source_item)
+            if key in seen:
+                raise DocFlowServiceError(
+                    "DOC_FLOW_DUPLICATE_SOURCE",
+                    "同一源行重复出现: {0}/{1}".format(source_id, source_item), 400)
+            seen.add(key)
+            quantity = raw.get("quantity")
+            if quantity is not None:
+                quantity = _num(quantity)
+                if not math.isfinite(quantity) or quantity <= 0:
+                    raise DocFlowServiceError(
+                        "DOC_FLOW_QTY_INVALID",
+                        "quantity 必须是大于 0 的有限数", 400)
+            normalized.append({"source_id": source_id,
+                               "source_item": source_item,
+                               "quantity": quantity})
+
+        head_overrides = None
+        if mode == "append":
+            head_overrides = {"id": target.get("id")}
+            if isinstance(target.get("data"), dict):
+                head_overrides.update(target["data"])
+
+        with self.app_ds.transaction():
+            self._assert_open_qty(rule, normalized)
+            try:
+                batch = derive_batch(
+                    self.app_ds, self.platform_ds, rule["rule_id"],
+                    normalized, head_overrides=head_overrides,
+                    derived_by=derived_by)
+            except Exception as exc:
+                self._raise_mapped(exc)
+        return self._derive_view(rule, batch)
+
+    def _assert_open_qty(self, rule: Dict[str, Any],
+                         items: List[Dict[str, Any]]) -> None:
+        obj, id_field, qty_field = self._source_meta(rule)
+        pool = rule.get("pool") or "default"
+        for item in items:
+            rows = self.app_ds.execute(
+                "SELECT {0} FROM {1} WHERE {2} = ?".format(
+                    qty_field.db_column, obj.table_name, id_field.db_column),
+                (item["source_id"],),
+            ).fetchall()
+            if not rows:
+                raise DocFlowServiceError(
+                    "DOC_FLOW_SOURCE_NOT_FOUND",
+                    "上游记录不存在: {0}".format(item["source_id"]), 404)
+            total_qty = _num(rows[0][0])
+            consumed = _consumed_in_pool(
+                self.app_ds, rule.get("source_bo"), item["source_id"],
+                item["source_item"], pool)
+            open_qty = total_qty - consumed
+            if item["quantity"] is None:
+                if open_qty <= _QTY_EPSILON:
+                    raise DocFlowServiceError(
+                        "DOC_FLOW_QTY_INVALID",
+                        "上游已结清，无可用数量: {0}".format(item["source_id"]), 400)
+                item["quantity"] = open_qty
+            elif item["quantity"] > open_qty + _QTY_EPSILON:
+                raise DocFlowServiceError(
+                    "DOC_FLOW_QTY_EXCEEDED", "本次生成数量超过未结量", 409,
+                    {"source_id": item["source_id"],
+                     "source_item": item["source_item"],
+                     "open_qty": open_qty,
+                     "requested": item["quantity"]})
+
+    def _raise_mapped(self, exc: Exception) -> None:
+        code = getattr(exc, "code", "")
+        mapped = _ENGINE_ERROR_MAP.get(code)
+        if mapped is None:
+            raise exc
+        new_code, status = mapped
+        message = getattr(exc, "message", None) or str(exc)
+        raise DocFlowServiceError(new_code, message, status)
+
+    def _derive_view(self, rule: Dict[str, Any], batch) -> Dict[str, Any]:
+        created: List[Dict[str, Any]] = []
+        replayed: List[Dict[str, Any]] = []
+        for result in batch.results:
+            entry = {
+                "source_id": result.source_id,
+                "source_item": result.source_item,
+                "target_id": result.target_id,
+                "target_item": result.target_item,
+                "quantity": result.quantity,
+                "edge_id": result.edge_id,
+            }
+            (replayed if result.replay else created).append(entry)
+        return {
+            "target": {"bo": rule.get("target_bo"), "ids": list(batch.heads)},
+            "created": created,
+            "replayed": replayed,
+            "totals": {
+                "requested": len(created) + len(replayed),
+                "written": batch.total_edges,
+                "replayed": batch.skipped_replays,
+            },
+        }

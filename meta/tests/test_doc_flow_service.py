@@ -215,3 +215,86 @@ def test_list_sources_computes_open_qty(ready_env):
     assert row["consumed_qty"] == 60.0
     assert row["open_qty"] == 40.0
     assert row["display"] == "SO-1 / 物料A"
+
+
+def _edge_count(app_ds):
+    rows = app_ds.execute("SELECT COUNT(*) FROM doc_flow_edges").fetchall()
+    return int(rows[0][0])
+
+
+def test_derive_create_returns_target_and_totals(ready_env):
+    from meta.services.doc_flow_service import DocFlowService
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 100)
+    service = DocFlowService(app_ds, platform_ds)
+
+    data = service.derive({
+        "rule_id": "dfs-rule",
+        "sources": [{"source_id": 1, "quantity": 30}],
+        "target": {"mode": "create", "bo": HEAD_BO},
+    }, derived_by="tester")
+
+    assert len(data["target"]["ids"]) == 1
+    assert data["totals"] == {"requested": 1, "written": 1, "replayed": 0}
+    assert data["created"][0]["source_id"] == 1
+    assert data["created"][0]["quantity"] == 30.0
+    assert _edge_count(app_ds) == 1
+
+
+def test_derive_quantity_exceeded(ready_env):
+    from meta.services.doc_flow_service import DocFlowService, DocFlowServiceError
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 100)
+    service = DocFlowService(app_ds, platform_ds)
+
+    with pytest.raises(DocFlowServiceError) as exc:
+        service.derive({
+            "rule_id": "dfs-rule",
+            "sources": [{"source_id": 1, "quantity": 120}],
+            "target": {"mode": "create"},
+        })
+
+    assert exc.value.code == "DOC_FLOW_QTY_EXCEEDED"
+    assert exc.value.status == 409
+    assert exc.value.details["open_qty"] == 100.0
+    assert _edge_count(app_ds) == 0
+
+
+def test_derive_invalid_quantity_and_duplicate_source(ready_env):
+    from meta.services.doc_flow_service import DocFlowService, DocFlowServiceError
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 100)
+    service = DocFlowService(app_ds, platform_ds)
+
+    with pytest.raises(DocFlowServiceError) as exc:
+        service.derive({"rule_id": "dfs-rule",
+                        "sources": [{"source_id": 1, "quantity": 0}],
+                        "target": {"mode": "create"}})
+    assert exc.value.code == "DOC_FLOW_QTY_INVALID"
+
+    with pytest.raises(DocFlowServiceError) as exc:
+        service.derive({"rule_id": "dfs-rule",
+                        "sources": [{"source_id": 1}, {"source_id": 1}],
+                        "target": {"mode": "create"}})
+    assert exc.value.code == "DOC_FLOW_DUPLICATE_SOURCE"
+
+
+def test_derive_single_table_append_rejected(ready_env):
+    from meta.services.doc_flow_service import DocFlowService, DocFlowServiceError
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds)  # 单表模式：无 target_line_bo
+    _insert_source(app_ds, 1, 100)
+    service = DocFlowService(app_ds, platform_ds)
+
+    with pytest.raises(DocFlowServiceError) as exc:
+        service.derive({"rule_id": "dfs-rule",
+                        "sources": [{"source_id": 1, "quantity": 10}],
+                        "target": {"mode": "append", "id": 99}})
+    assert exc.value.code == "DOC_FLOW_TARGET_MODE_INVALID"
