@@ -103,3 +103,99 @@ class DocFlowService:
                 "DOC_FLOW_RULE_INVALID",
                 "规则源字段缺失: {0}".format(rule.get("source_qty_field")), 409)
         return obj, id_field, qty_field
+
+    # ------------------------------------------------------------------ 上游
+    def list_sources(self, rule_id: str, filters: Optional[Dict[str, Any]] = None,
+                     include_zero_open: bool = False, page: int = 1,
+                     page_size: int = _DEFAULT_PAGE_SIZE,
+                     source_item: str = "") -> Dict[str, Any]:
+        rule = self._require_rule(rule_id)
+        obj, id_field, qty_field = self._source_meta(rule)
+        page = max(1, int(page or 1))
+        page_size = min(_MAX_PAGE_SIZE, max(1, int(page_size or _DEFAULT_PAGE_SIZE)))
+
+        used = {"source_id", "quantity", "consumed_qty"}
+        display_fields: List[str] = []
+        for fid in rule.get("display_fields") or []:
+            field = obj.get_field(fid)
+            if field is None or field.db_column in used:
+                continue
+            used.add(field.db_column)
+            display_fields.append(fid)
+        display_cols = [obj.get_field(fid).db_column for fid in display_fields]
+
+        select_cols = [
+            "s.{0} AS source_id".format(id_field.db_column),
+            "s.{0} AS quantity".format(qty_field.db_column),
+            "COALESCE(c.consumed_qty, 0) AS consumed_qty",
+        ] + ["s.{0} AS {0}".format(col) for col in display_cols]
+
+        from_sql = (
+            " FROM {table} s LEFT JOIN {view} c"
+            " ON c.source_bo = ? AND c.source_item = ? AND c.pool = ?"
+            " AND c.source_id = CAST(s.{id_col} AS TEXT)"
+        ).format(table=obj.table_name, view=DOC_FLOW_CONSUMED_VIEW,
+                 id_col=id_field.db_column)
+
+        where = ["1 = 1"]
+        params: List[Any] = [
+            rule.get("source_bo"), source_item or "",
+            rule.get("pool") or "default",
+        ]
+        if not include_zero_open:
+            where.append(
+                "(s.{0} - COALESCE(c.consumed_qty, 0)) > ?".format(
+                    qty_field.db_column))
+            params.append(_QTY_EPSILON)
+        for key, value in (filters or {}).items():
+            if value in (None, ""):
+                continue
+            field = obj.get_field(key)
+            if field is None:
+                continue
+            where.append("CAST(s.{0} AS TEXT) LIKE ?".format(field.db_column))
+            params.append("%{0}%".format(value))
+        where_sql = " WHERE " + " AND ".join(where)
+
+        count_rows = self.app_ds.execute(
+            "SELECT COUNT(*)" + from_sql + where_sql, tuple(params)).fetchall()
+        total = int(count_rows[0][0]) if count_rows else 0
+
+        rows = self.app_ds.execute(
+            "SELECT " + ", ".join(select_cols) + from_sql + where_sql +
+            " ORDER BY s.{0} LIMIT ? OFFSET ?".format(id_field.db_column),
+            tuple(params + [page_size, (page - 1) * page_size]),
+        ).fetchall()
+
+        keys = ["source_id", "quantity", "consumed_qty"] + display_cols
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            record = dict(zip(keys, row))
+            quantity = _num(record.get("quantity"))
+            consumed = _num(record.get("consumed_qty"))
+            display_parts = [
+                str(record.get(col)).strip()
+                for col in display_cols
+                if record.get(col) not in (None, "")
+            ]
+            split_values = {}
+            for key in rule.get("split_key") or []:
+                field = obj.get_field(key)
+                if field is not None:
+                    split_values[key] = record.get(field.db_column)
+            display_values = {
+                fid: record.get(obj.get_field(fid).db_column)
+                for fid in display_fields
+            }
+            items.append({
+                "source_id": record.get("source_id"),
+                "source_item": source_item or "",
+                "quantity": quantity,
+                "consumed_qty": consumed,
+                "open_qty": round(quantity - consumed, 6),
+                "display": " / ".join(display_parts),
+                "display_values": display_values,
+                "split_key_values": split_values,
+            })
+        return {"items": items, "total": total,
+                "page": page, "page_size": page_size}

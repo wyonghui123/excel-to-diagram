@@ -192,3 +192,26 @@ def test_list_rules_returns_ui_metadata(ready_env):
     ]
     assert rule["allow_append"] is False
     assert rule["append_label"] == ""
+
+
+def test_list_sources_computes_open_qty(ready_env):
+    from meta.core.doc_flow_batch_engine import derive_batch
+    from meta.services.doc_flow_service import DocFlowService
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO,
+               display_fields=["order_no", "item_name"])
+    _insert_source(app_ds, 1, 100)
+    _insert_source(app_ds, 2, 50)
+    derive_batch(app_ds, platform_ds, "dfs-rule",
+                 [{"source_id": 1, "source_item": "", "quantity": 60}])
+
+    service = DocFlowService(app_ds, platform_ds)
+    data = service.list_sources("dfs-rule")
+
+    assert data["total"] == 2
+    row = [r for r in data["items"] if r["source_id"] == 1][0]
+    assert row["quantity"] == 100.0
+    assert row["consumed_qty"] == 60.0
+    assert row["open_qty"] == 40.0
+    assert row["display"] == "SO-1 / 物料A"
