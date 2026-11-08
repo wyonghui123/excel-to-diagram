@@ -333,3 +333,21 @@ def test_list_edges_requires_filter(ready_env):
         service.list_edges()
 
     assert exc.value.code == "DOC_FLOW_EDGE_FILTER_REQUIRED"
+
+
+def test_edges_source_item_index_declared():
+    from meta.core.doc_flow_schema import _build_edge_meta
+    meta = _build_edge_meta()
+    names = {idx.name for idx in meta.indexes}
+    assert 'idx_doc_flow_edges_src' in names
+
+
+def test_edges_source_item_index_created_in_sqlite(dbs):
+    _, app_ds = dbs
+    app_ds.execute('DROP INDEX IF EXISTS idx_doc_flow_edges_src')
+    from meta.core.doc_flow_schema import ensure_doc_flow_edge_tables
+    ensure_doc_flow_edge_tables(app_ds)
+    rows = app_ds.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+        ('idx_doc_flow_edges_src',)).fetchall()
+    assert rows, '索引未创建'
