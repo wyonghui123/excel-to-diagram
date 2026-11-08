@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     split_key        TEXT NOT NULL DEFAULT '[]',
     target_line_bo   TEXT NOT NULL DEFAULT '',
     head_fk_field    TEXT NOT NULL DEFAULT '',
+    display_fields   TEXT NOT NULL DEFAULT '[]',
     created_at       TEXT,
     updated_at       TEXT
 )
