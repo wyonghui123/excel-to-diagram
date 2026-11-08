@@ -298,3 +298,38 @@ def test_derive_single_table_append_rejected(ready_env):
                         "sources": [{"source_id": 1, "quantity": 10}],
                         "target": {"mode": "append", "id": 99}})
     assert exc.value.code == "DOC_FLOW_TARGET_MODE_INVALID"
+
+
+def test_list_edges_both_directions(ready_env):
+    from meta.services.doc_flow_service import DocFlowService
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 100)
+    service = DocFlowService(app_ds, platform_ds)
+
+    head_id = service.derive({
+        "rule_id": "dfs-rule",
+        "sources": [{"source_id": 1, "quantity": 20}],
+        "target": {"mode": "create"},
+    })["target"]["ids"][0]
+
+    by_source = service.list_edges(source_bo=SOURCE_BO, source_id=1)
+    by_target = service.list_edges(target_bo=HEAD_BO, target_id=head_id)
+
+    assert by_source["total"] == 1
+    assert by_target["total"] == 1
+    assert by_source["items"][0]["status"] == "active"
+    assert by_source["items"][0]["quantity"] == 20.0
+
+
+def test_list_edges_requires_filter(ready_env):
+    from meta.services.doc_flow_service import DocFlowService, DocFlowServiceError
+
+    app_ds, platform_ds = ready_env
+    service = DocFlowService(app_ds, platform_ds)
+
+    with pytest.raises(DocFlowServiceError) as exc:
+        service.list_edges()
+
+    assert exc.value.code == "DOC_FLOW_EDGE_FILTER_REQUIRED"

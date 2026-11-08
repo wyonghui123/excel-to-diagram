@@ -41,6 +41,15 @@ _ENGINE_ERROR_MAP = {
 }
 
 
+_EDGE_COLUMNS = (
+    "id", "source_bo", "source_id", "source_item",
+    "target_bo", "target_id", "target_item",
+    "quantity", "quantity_sign", "rule_id", "status", "pool",
+    "edge_kind", "reverses_edge_id", "unit",
+    "derived_at", "derived_by",
+)
+
+
 class DocFlowServiceError(Exception):
     """服务层业务异常：code 直接作为 API 错误码。"""
 
@@ -353,3 +362,32 @@ class DocFlowService:
                 "replayed": batch.skipped_replays,
             },
         }
+
+    # ------------------------------------------------------------------ 追溯
+    def list_edges(self, source_bo: Optional[str] = None,
+                   source_id: Any = None,
+                   source_item: Optional[str] = None,
+                   target_bo: Optional[str] = None,
+                   target_id: Any = None) -> Dict[str, Any]:
+        if source_bo and source_id not in (None, ""):
+            where = ["source_bo = ?", "source_id = ?"]
+            params: List[Any] = [source_bo, str(source_id)]
+            if source_item is not None:
+                where.append("source_item = ?")
+                params.append(source_item)
+        elif target_bo and target_id not in (None, ""):
+            where = ["target_bo = ?", "target_id = ?"]
+            params = [target_bo, str(target_id)]
+        else:
+            raise DocFlowServiceError(
+                "DOC_FLOW_EDGE_FILTER_REQUIRED",
+                "必须提供 source_bo+source_id 或 target_bo+target_id", 400)
+
+        rows = self.app_ds.execute(
+            "SELECT " + ", ".join(_EDGE_COLUMNS) + " FROM doc_flow_edges"
+            " WHERE " + " AND ".join(where) +
+            " ORDER BY derived_at, id",
+            tuple(params),
+        ).fetchall()
+        items = [dict(zip(_EDGE_COLUMNS, row)) for row in rows]
+        return {"items": items, "total": len(items)}
