@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     split_key       TEXT NOT NULL DEFAULT '[]',
     target_line_bo  TEXT NOT NULL DEFAULT '',
     head_fk_field   TEXT NOT NULL DEFAULT '',
+    display_fields  TEXT NOT NULL DEFAULT '[]',
     created_at      TEXT,
     updated_at      TEXT
 )
@@ -50,6 +51,7 @@ _ADDED_COLUMNS = (
     ("split_key", "TEXT NOT NULL DEFAULT '[]'"),
     ("target_line_bo", "TEXT NOT NULL DEFAULT ''"),
     ("head_fk_field", "TEXT NOT NULL DEFAULT ''"),
+    ("display_fields", "TEXT NOT NULL DEFAULT '[]'"),
 )
 
 # upsert 覆盖的"声明字段"（status 是运行态，刻意不在列）
@@ -57,6 +59,7 @@ _UPSERT_DECL_FIELDS = (
     "source_bo", "target_bo", "source_qty_field", "pool",
     "check_hook", "map_hook", "create_hook",
     "field_map", "split_key", "target_line_bo", "head_fk_field",
+    "display_fields",
 )
 
 RULE_COLUMNS = ("rule_id",) + _UPSERT_DECL_FIELDS + (
@@ -131,8 +134,8 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                (rule_id, source_bo, target_bo, source_qty_field, pool,
                 check_hook, map_hook, create_hook,
                 field_map, split_key, target_line_bo, head_fk_field,
-                status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                display_fields, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                ON CONFLICT(rule_id) DO UPDATE SET
                  source_bo = excluded.source_bo,
                  target_bo = excluded.target_bo,
@@ -145,6 +148,7 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                  split_key = excluded.split_key,
                  target_line_bo = excluded.target_line_bo,
                  head_fk_field = excluded.head_fk_field,
+                 display_fields = excluded.display_fields,
                  updated_at = excluded.updated_at""",
             (
                 rule_id,
@@ -159,6 +163,7 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                 _as_json_text(rule.get("split_key"), "[]"),
                 rule.get("target_line_bo") or "",
                 rule.get("head_fk_field") or "",
+                _as_json_text(rule.get("display_fields"), "[]"),
                 now, now,
             ),
         )
@@ -183,6 +188,7 @@ def get_rule(data_source, rule_id: str) -> Optional[Dict[str, Any]]:
     rule = dict(zip(RULE_COLUMNS, rows[0]))
     rule["field_map"] = _loads(rule.get("field_map"), {})
     rule["split_key"] = _loads(rule.get("split_key"), [])
+    rule["display_fields"] = _loads(rule.get("display_fields"), [])
     return rule
 
 
@@ -205,6 +211,7 @@ def list_rules(data_source, status: Optional[str] = None) -> List[Dict[str, Any]
         rule = dict(zip(RULE_COLUMNS, row))
         rule["field_map"] = _loads(rule.get("field_map"), {})
         rule["split_key"] = _loads(rule.get("split_key"), [])
+        rule["display_fields"] = _loads(rule.get("display_fields"), [])
         rules.append(rule)
     return rules
 
