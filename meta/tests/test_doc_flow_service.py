@@ -10,7 +10,7 @@ from meta.core.datasource import (
     _clear_data_source_cache_for_testing, get_data_source,
 )
 from meta.core.doc_flow_rule_store import (
-    ensure_doc_flow_rule_table, get_rule, upsert_rules,
+    ensure_doc_flow_rule_table, get_rule, set_rule_status, upsert_rules,
 )
 from meta.core.doc_flow_schema import ensure_doc_flow_edge_tables
 from meta.core.models import FieldType
@@ -170,3 +170,25 @@ def test_derive_result_carries_source_identity(ready_env):
     assert result.source_item == ""
     assert result.quantity == 30.0
     assert result.target_item
+
+
+def test_list_rules_returns_ui_metadata(ready_env):
+    from meta.services.doc_flow_service import DocFlowService
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, display_fields=["order_no", "item_name"])
+    _make_rule(platform_ds, rule_id="dfs-deprecated")
+    set_rule_status(platform_ds, "dfs-deprecated", "deprecated")
+
+    service = DocFlowService(app_ds, platform_ds)
+    data = service.list_rules(source_bo=SOURCE_BO)
+
+    assert data["total"] == 1
+    rule = data["rules"][0]
+    assert rule["rule_id"] == "dfs-rule"
+    assert rule["source_columns"] == [
+        {"field": "order_no", "label": "order_no"},
+        {"field": "item_name", "label": "item_name"},
+    ]
+    assert rule["allow_append"] is False
+    assert rule["append_label"] == ""
