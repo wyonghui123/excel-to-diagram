@@ -130,3 +130,26 @@ def test_rule_declares_display_fields(ready_env):
     rule = get_rule(platform_ds, "dfs-rule")
 
     assert rule["display_fields"] == ["order_no", "item_name"]
+
+
+def test_reversed_edge_does_not_block_rederive(ready_env):
+    from meta.core.doc_flow_batch_engine import derive_batch
+    from meta.core.doc_flow_reversal import reverse_edge
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 100)
+    head_id = app_ds.insert("dfs_deliveries", {"delivery_no": "DN-1"})
+
+    first = derive_batch(app_ds, platform_ds, "dfs-rule",
+                         [{"source_id": 1, "source_item": "", "quantity": 100}],
+                         head_overrides={"id": head_id})
+    assert first.total_edges == 1
+    reverse_edge(app_ds, first.results[0].edge_id, reversed_by="test")
+
+    second = derive_batch(app_ds, platform_ds, "dfs-rule",
+                          [{"source_id": 1, "source_item": "", "quantity": 100}],
+                          head_overrides={"id": head_id})
+
+    assert second.total_edges == 1
+    assert second.skipped_replays == 0

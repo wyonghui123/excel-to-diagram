@@ -101,7 +101,8 @@ def _find_edge_by_key(app_ds, key: Tuple) -> Optional[str]:
     rows = app_ds.execute(
         """SELECT id FROM doc_flow_edges
            WHERE source_bo=? AND source_id=? AND source_item=?
-             AND target_bo=? AND target_id=? AND target_item=? AND rule_id=?""",
+             AND target_bo=? AND target_id=? AND target_item=? AND rule_id=?
+             AND status='active'""",
         (source_bo, str(source_id), source_item,
          target_bo, str(target_id), target_item, rule_id),
     ).fetchall()
@@ -120,6 +121,7 @@ def _find_edge_loose(app_ds, source_bo: str, source_id: Any, source_item: str,
         """SELECT id, target_item FROM doc_flow_edges
            WHERE source_bo=? AND source_id=? AND source_item=?
              AND target_bo=? AND target_id=? AND rule_id=?
+             AND status='active'
            ORDER BY derived_at LIMIT 1""",
         (source_bo, str(source_id), source_item,
          target_bo, str(target_id), rule_id),
