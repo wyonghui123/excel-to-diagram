@@ -22,6 +22,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
+from meta.core.doc_flow_reversal import release_target_edges
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'transfer_orders'
@@ -664,6 +666,11 @@ class TransferOrderService:
             self.ds.execute(
                 'UPDATE %s SET status = ?, updated_at = ? WHERE transfer_order_id = ?'
                 % LINE_TABLE, [LINE_STATUS_CANCELLED, now, header['id']])
+            line_ids = [row['id'] for row in self.ds.query(
+                'SELECT id FROM %s WHERE transfer_order_id = ?' % LINE_TABLE,
+                [header['id']])]
+            release_target_edges(self.ds, 'transfer_order_line', line_ids,
+                                 reversed_by='transfer_order_service.cancel')
             return {'id': header['id'], 'status': STATUS_CANCELLED}
 
     def close(self, transfer_order_id: Any) -> Dict[str, Any]:

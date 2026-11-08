@@ -12,6 +12,7 @@
 
 import os
 import sqlite3
+from contextlib import contextmanager
 
 # 与 test_sales_order_fulfillment_status 同口径：只用内存库，不触碰真实库
 os.environ.setdefault('ALLOW_RAW_SQL', '1')
@@ -136,6 +137,11 @@ class _MemDS:
 
     def execute(self, sql, params=None):
         return self.conn.execute(sql, list(params or []))
+
+    @contextmanager
+    def transaction(self):
+        """与 DataSource.transaction 同形（内存库自带事务，这里仅做占位）。"""
+        yield
 
 
 def _db():

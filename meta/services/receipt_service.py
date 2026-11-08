@@ -31,6 +31,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
+from meta.core.doc_flow_reversal import release_target_edges
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'receipts'
@@ -701,12 +703,18 @@ class ReceiptService:
             raise ReceiptError('仅草稿收货单可取消', field_name='status',
                                rule='RC_STATE_INVALID')
         now = _now()
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
-            [STATUS_CANCELLED, now, header['id']])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % LINE_TABLE,
-            [STATUS_CANCELLED, now, header['id']])
+        with self.ds.transaction():
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+                [STATUS_CANCELLED, now, header['id']])
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % LINE_TABLE,
+                [STATUS_CANCELLED, now, header['id']])
+            line_ids = [row['id'] for row in self.ds.query(
+                'SELECT id FROM %s WHERE receipt_id = ?' % LINE_TABLE,
+                [header['id']])]
+            release_target_edges(self.ds, 'receipt_line', line_ids,
+                                 reversed_by='receipt_service.cancel')
         return {'id': header['id'], 'status': STATUS_CANCELLED}
 
     # ------------------------------------------------------------------ 红冲
