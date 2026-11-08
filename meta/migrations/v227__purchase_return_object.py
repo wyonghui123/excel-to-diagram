@@ -130,7 +130,9 @@ RETURN_RULE = {
     'rule_id': 'receipt_line_to_return_out_txn',
     'source_bo': 'receipt_line',
     'target_bo': 'inventory_transaction',
-    'source_qty_field': 'qty',
+    # receipt_line 无 qty 字段，收货/拒收量列名是 qty_received / qty_rejected
+    'source_qty_field': 'qty_received',
+    'target_qty_field': 'qty',
     'pool': 'inventory_return_out',
 }
 
@@ -149,12 +151,14 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     source_bo        TEXT NOT NULL,
     target_bo        TEXT NOT NULL,
     source_qty_field TEXT NOT NULL DEFAULT 'quantity',
+    target_qty_field TEXT NOT NULL DEFAULT '',
     pool             TEXT NOT NULL DEFAULT 'default',
     status           TEXT NOT NULL DEFAULT 'active',
     check_hook       TEXT,
     map_hook         TEXT,
     create_hook      TEXT,
     field_map        TEXT NOT NULL DEFAULT '{}',
+    copied_fields    TEXT NOT NULL DEFAULT '[]',
     split_key        TEXT NOT NULL DEFAULT '[]',
     target_line_bo   TEXT NOT NULL DEFAULT '',
     head_fk_field    TEXT NOT NULL DEFAULT '',
@@ -367,20 +371,22 @@ def _do_rule(conn):
     conn.execute(
         """
         INSERT INTO doc_flow_rule
-            (rule_id, source_bo, target_bo, source_qty_field, pool, status,
+            (rule_id, source_bo, target_bo, source_qty_field,
+             target_qty_field, pool, status,
              field_map, split_key, target_line_bo, head_fk_field,
              created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'active', '{}', '[]', '', '', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', '{}', '[]', '', '', ?, ?)
         ON CONFLICT(rule_id) DO UPDATE SET
             source_bo=excluded.source_bo,
             target_bo=excluded.target_bo,
             source_qty_field=excluded.source_qty_field,
+            target_qty_field=excluded.target_qty_field,
             pool=excluded.pool,
             updated_at=excluded.updated_at
         """,
         [RETURN_RULE['rule_id'], RETURN_RULE['source_bo'],
          RETURN_RULE['target_bo'], RETURN_RULE['source_qty_field'],
-         RETURN_RULE['pool'], now, now])
+         RETURN_RULE['target_qty_field'], RETURN_RULE['pool'], now, now])
     print('  - [OK] upsert 规则 %s' % RETURN_RULE['rule_id'])
 
 

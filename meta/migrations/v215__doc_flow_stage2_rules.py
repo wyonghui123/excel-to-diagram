@@ -15,6 +15,7 @@
 """
 
 import os
+import json
 import sqlite3
 from datetime import datetime
 
@@ -26,12 +27,14 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     source_bo        TEXT NOT NULL,
     target_bo        TEXT NOT NULL,
     source_qty_field TEXT NOT NULL DEFAULT 'quantity',
+    target_qty_field TEXT NOT NULL DEFAULT '',
     pool             TEXT NOT NULL DEFAULT 'default',
     status           TEXT NOT NULL DEFAULT 'active',
     check_hook       TEXT,
     map_hook         TEXT,
     create_hook      TEXT,
     field_map        TEXT NOT NULL DEFAULT '{}',
+    copied_fields    TEXT NOT NULL DEFAULT '[]',
     split_key        TEXT NOT NULL DEFAULT '[]',
     target_line_bo   TEXT NOT NULL DEFAULT '',
     head_fk_field    TEXT NOT NULL DEFAULT '',
@@ -98,13 +101,18 @@ RULES = (
         'source_bo': 'requisition_line',
         'target_bo': 'purchase_order_line',
         'source_qty_field': 'qty',
+        'target_qty_field': 'qty',
         'pool': 'purchasing',
+        # D1 决定：PO 行继承请购行 description（显式声明，非隐式直拷）
+        'copied_fields': ['description'],
     },
     {
         'rule_id': 'po_schedule_to_receipt_line',
         'source_bo': 'purchase_order_schedule',
         'target_bo': 'receipt_line',
         'source_qty_field': 'promised_qty',
+        # receipt_line 无 quantity/qty，数量列名是 qty_received
+        'target_qty_field': 'qty_received',
         'pool': 'purchasing',
     },
     {
@@ -112,6 +120,7 @@ RULES = (
         'source_bo': 'receipt_line',
         'target_bo': 'inventory_transaction',
         'source_qty_field': 'qty_received',
+        'target_qty_field': 'qty',
         'pool': 'inventory_receipt',
     },
     {
@@ -119,6 +128,7 @@ RULES = (
         'source_bo': 'sales_order_schedule',
         'target_bo': 'shipment_line',
         'source_qty_field': 'promised_qty',
+        'target_qty_field': 'qty',
         'pool': 'sales_delivery',
     },
     {
@@ -126,6 +136,7 @@ RULES = (
         'source_bo': 'demand_allocation',
         'target_bo': 'transfer_order_line',
         'source_qty_field': 'qty',
+        'target_qty_field': 'qty',
         'pool': 'transfer',
     },
     {
@@ -133,6 +144,7 @@ RULES = (
         'source_bo': 'transfer_order_line',
         'target_bo': 'inventory_transaction',
         'source_qty_field': 'qty',
+        'target_qty_field': 'qty',
         'pool': 'transfer_move',
     },
 )
@@ -191,19 +203,24 @@ def _do_upgrade(conn):
         conn.execute(
             """
             INSERT INTO doc_flow_rule
-                (rule_id, source_bo, target_bo, source_qty_field, pool, status,
+                (rule_id, source_bo, target_bo, source_qty_field,
+                 target_qty_field, pool, copied_fields, status,
                  field_map, split_key, target_line_bo, head_fk_field,
                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'active', '{}', '[]', '', '', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', '{}', '[]', '', '', ?, ?)
             ON CONFLICT(rule_id) DO UPDATE SET
                 source_bo=excluded.source_bo,
                 target_bo=excluded.target_bo,
                 source_qty_field=excluded.source_qty_field,
+                target_qty_field=excluded.target_qty_field,
                 pool=excluded.pool,
+                copied_fields=excluded.copied_fields,
                 updated_at=excluded.updated_at
             """,
             [rule['rule_id'], rule['source_bo'], rule['target_bo'],
-             rule['source_qty_field'], rule['pool'], now, now],
+             rule['source_qty_field'], rule['target_qty_field'], rule['pool'],
+             json.dumps(rule.get('copied_fields') or [], ensure_ascii=False),
+             now, now],
         )
         print('  - [OK] upsert 规则 %s' % rule['rule_id'])
 
