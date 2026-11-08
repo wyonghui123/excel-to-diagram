@@ -54,7 +54,7 @@ column_labels:
   source_kind: 取值来源
   source_bo: 来源单据
   target_bo: 目标单据
-  flow_kind: 单据流类型
+  pool: 归属池
   condition_summary: 条件摘要
   step_count: 审批层级
   severity: 严重度
@@ -125,7 +125,7 @@ tabs:
   - id: doc_flow
     label: 单据流
     sources: [doc_flow]
-    columns: [rule_key, name, source_bo, target_bo, flow_kind, status]
+    columns: [rule_key, name, source_bo, target_bo, pool, status]
     filters: [source_bo, target_bo, status, keyword]
     actions: [detail, edit]
 

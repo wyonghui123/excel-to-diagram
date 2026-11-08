@@ -271,6 +271,10 @@ def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
                 'field_map': rule.get('field_map') or {},
                 'split_key': rule.get('split_key') or [],
                 'pool': rule.get('pool'),
+                'source_qty_field': rule.get('source_qty_field'),
+                'target_line_bo': rule.get('target_line_bo') or '',
+                'head_fk_field': rule.get('head_fk_field') or '',
+                'display_fields': rule.get('display_fields') or [],
             },
         ))
     return items

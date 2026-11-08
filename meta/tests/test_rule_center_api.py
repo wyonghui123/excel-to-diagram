@@ -114,6 +114,48 @@ def test_filters_are_composable(service):
         assert item['status'] == 'active'
 
 
+def test_doc_flow_descriptors_come_from_rule_table(tmp_path, monkeypatch):
+    """单据流页签必须真正读到 doc_flow_rule（此前 ImportError 被 _collect 吞掉 → 恒 0 行）。"""
+    import meta.services.rule_catalog_service as catalog_mod
+    from meta.core.datasource import get_data_source
+    from meta.core.doc_flow_rule_store import ensure_doc_flow_rule_table, upsert_rules
+
+    ds = get_data_source('sqlite', database=str(tmp_path / 'platform.db'))
+    ensure_doc_flow_rule_table(ds)
+    upsert_rules(ds, [{
+        'rule_id': 'sales_order_to_shipment',
+        'source_bo': 'sales_order',
+        'target_bo': 'shipment',
+        'source_qty_field': 'quantity',
+        'pool': 'unshipped_qty',
+        'field_map': {'quantity': 'quantity'},
+        'split_key': ['order_no'],
+        'target_line_bo': 'shipment_line',
+        'head_fk_field': 'shipment_id',
+        'display_fields': ['order_no', 'item_name'],
+    }])
+    monkeypatch.setattr(catalog_mod, '_meta_db', lambda: ds)
+
+    result = catalog_mod.RuleCatalogService().list_rules(
+        sources=['doc_flow'], limit=50)
+
+    assert result['sources']['doc_flow'] == 'ok'
+    assert result['total'] == 1
+
+    item = result['items'][0]
+    assert item['rule_key'] == 'doc_flow:sales_order_to_shipment'
+    assert item['factors']['pool'] == 'unshipped_qty'
+    assert item['detail'] == {
+        'field_map': {'quantity': 'quantity'},
+        'split_key': ['order_no'],
+        'pool': 'unshipped_qty',
+        'source_qty_field': 'quantity',
+        'target_line_bo': 'shipment_line',
+        'head_fk_field': 'shipment_id',
+        'display_fields': ['order_no', 'item_name'],
+    }
+
+
 def test_unknown_rule_key_returns_none(service):
     assert service.get_rule('no_such_rule_key') is None
 
