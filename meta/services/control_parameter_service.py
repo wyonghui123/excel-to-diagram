@@ -20,15 +20,12 @@
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from meta.core.rule_keys import DIMENSION_FIELDS
+
 logger = logging.getLogger(__name__)
 
 #: 维度列（与 control_parameter_value 的字段一一对应；空 = 通配）
-DIMENSION_FIELDS: Tuple[str, ...] = (
-    'org_id',
-    'document_type_id',
-    'line_type_id',
-    'item_group_id',
-)
+#: 由 meta.core.rule_keys.DIMENSION_FIELDS 唯一声明（spec §13.1 / F-13-12）
 
 _TRUE_VALUES = ('true', '1', 'yes', 'y', '是')
 _FALSE_VALUES = ('false', '0', 'no', 'n', '否')

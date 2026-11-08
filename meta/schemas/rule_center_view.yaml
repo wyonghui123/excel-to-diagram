@@ -64,6 +64,8 @@ column_labels:
   finding_count: 问题数
   sample: 样例
   # 单据推导表单 / 因子快照
+  scenario: 场景
+  config_mode: 配置口径
   object_type: 单据对象
   record_id: 记录 ID
   scenarios: 推导场景
@@ -89,9 +91,9 @@ filter_labels:
   severity: 严重度
   enabled: 启用
 
+# 只允许静态封闭值域；source / rule_type / domain 由服务端按代码声明派生（spec §13.4）
 filter_options:
-  rule_type: [validation, default, constraint, computation, derivation, trigger, approval, doc_flow, control_parameter, line_type]
-  status: [active, inactive]
+  status: [active, inactive, draft]
   severity: [error, warning, info]
   enabled: ['true', 'false']
   configurable: ['true', 'false']
@@ -100,7 +102,8 @@ tabs:
   - id: all
     label: 全部规则
     default: true
-    sources: [bo_yaml, doc_flow, approval, control_parameter, line_type, state_machine, numbering, validation]
+    # 表格页签只列已接入来源；未接入（state_machine / numbering）在 sources 中标记
+    sources: [bo_yaml, doc_flow, approval, control_parameter, line_type, validation]
     columns: [rule_key, name, rule_type, source, scope_bo, factors, configurable, status, updated_at]
     filters: [domain, rule_type, source, configurable, status, keyword]
     actions: [detail, edit, view_source, simulate, copy_key]
@@ -310,11 +313,90 @@ trace:
     condition_failed: 未通过
     output_empty: 无输出
     truncated: 规则节点过多，已截断展示
+    # 规则中心页面级文案（列表 / 抽屉 / 操作反馈）
+    action_column: 操作
+    detail: 详情
+    copy_key: 复制键
+    copied_key: 已复制规则键
+    p2_pending: P2
+    not_ready: 暂未接入
+    query: 查询
+    refresh: 刷新
+    simulate_run: 试算
+    simulate_reset: 重置
+    trace_run: 推导
+    trace_reset: 重置
+    scenario_placeholder: 选择场景
+    config_mode_placeholder: 配置口径
+    object_type_placeholder: 选择单据对象
+    scenarios_placeholder: 推导场景（缺省全部）
+    publish_draft: 发布草稿
+    rollback_previous: 回滚上一版本
+    history_empty: 暂无记录
+    history_time: 时间
+    history_action: 动作
+    history_operator: 操作人
+    history_before: 变更前
+    history_after: 变更后
+    history_value: 值
+    candidates: 候选集
+    simulate_failed: 规则试算失败
+    history_load_failed: 读取变更记录失败
+    publish_failed: 发布配置失败
+    rollback_failed: 回滚配置失败
+    publish_success: 已发布（替换 {count} 条生效配置）
+    rollback_success: 已回滚（恢复 {count} 条配置）
+    catalog_failed: 查询规则目录失败
+    fallback_warning: 规则中心视图元数据不可用，已回落默认视图
+    # 配置变更动作 → 展示文案
+    action_labels:
+      SAVE: 保存草稿
+      PUBLISH: 发布
+      ROLLBACK: 回滚
   tab:
-    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, item_group_id]
+    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, line_type_id, item_group_id]
     actions: [rerun]
 
 simulate:
   fields: [scenario, config_mode, codes, object_type, record_id, org_id, document_type_id, line_type_id, item_group_id]
   config_modes: [baseline, draft, both]
   max_codes: 20
+  # 候选集列契约（键顺序即展示顺序；前端不得写死列表或中文）
+  candidate_columns:
+    code: 编码
+    value: 取值
+    value_id: 取值 ID
+    line_type_id: 行类型 ID
+    document_type_id: 单据类型 ID
+    item_group_id: 物料组 ID
+    specificity_rank: 匹配度
+    status: 结论
+    hit: 命中
+    reason: 原因
+  # 字段占位提示（前端不得写死；缺省回落字段展示名）
+  hints:
+    codes: 控制参数编码，逗号分隔，如 qty_required, price_required
+    object_type: 单据对象类型，如 sales_order
+    record_id: 单据主键 ID（需配合 object_type）
+    org_id: 组织 ID
+    document_type_id: 单据类型 ID
+    line_type_id: 行类型 ID
+    item_group_id: 物料组 ID
+  # 结果摘要标签
+  summary:
+    scenario: 场景
+    config_mode: 配置口径
+    decision: 决策
+    source: 来源
+    rule_id: 规则键
+    reason: 原因
+    elapsed_ms: 耗时(ms)
+    cached: 缓存
+    cached_hit: 命中
+    cached_miss: 未命中
+  # 结果区块文案
+  blocks:
+    final: 最终取值
+    baseline: baseline 结果
+    draft: draft 结果
+    diff: 差异

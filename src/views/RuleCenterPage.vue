@@ -22,7 +22,7 @@
               <el-select
                 v-if="field === 'scenario'"
                 v-model="simulateForm.scenario"
-                placeholder="选择场景"
+                :placeholder="messages.scenario_placeholder"
               >
                 <el-option
                   v-for="option in scenarioOptions"
@@ -34,7 +34,7 @@
               <el-select
                 v-else-if="field === 'config_mode'"
                 v-model="simulateForm.config_mode"
-                placeholder="配置口径"
+                :placeholder="messages.config_mode_placeholder"
               >
                 <el-option
                   v-for="option in configModeOptions"
@@ -52,9 +52,9 @@
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="simulating" @click="runSimulate">
-                试算
+                {{ messages.simulate_run }}
               </el-button>
-              <el-button @click="resetSimulate">重置</el-button>
+              <el-button @click="resetSimulate">{{ messages.simulate_reset }}</el-button>
             </el-form-item>
           </el-form>
 
@@ -70,12 +70,12 @@
             </el-descriptions>
 
             <template v-if="simulateCandidates.length">
-              <h4 class="result-title">候选集</h4>
+              <h4 class="result-title">{{ messages.candidates }}</h4>
               <el-table :data="simulateCandidates" size="small" border>
                 <el-table-column
                   v-for="column in candidateColumns"
                   :key="column"
-                  :label="column"
+                  :label="candidateLabel(column)"
                   min-width="120"
                 >
                   <template #default="{ row }">
@@ -105,7 +105,7 @@
                 filterable
                 allow-create
                 default-first-option
-                placeholder="选择单据对象"
+                :placeholder="messages.object_type_placeholder"
               >
                 <el-option
                   v-for="option in objectTypeOptions"
@@ -119,7 +119,7 @@
                 v-model="traceForm.scenarios"
                 multiple
                 collapse-tags
-                placeholder="推导场景（缺省全部）"
+                :placeholder="messages.scenarios_placeholder"
               >
                 <el-option
                   v-for="option in scenarioOptions"
@@ -136,8 +136,8 @@
               />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="runTrace">推导</el-button>
-              <el-button @click="resetTrace">重置</el-button>
+              <el-button type="primary" @click="runTrace">{{ messages.trace_run }}</el-button>
+              <el-button @click="resetTrace">{{ messages.trace_reset }}</el-button>
             </el-form-item>
           </el-form>
 
@@ -156,7 +156,7 @@
         </div>
 
         <div v-else-if="tab.kind" class="placeholder">
-          <el-empty :description="`${tab.label} · 暂未接入`" />
+          <el-empty :description="`${tab.label} · ${messages.not_ready}`" />
         </div>
 
         <template v-else>
@@ -194,7 +194,7 @@
                 clearable
               />
             </template>
-            <el-button type="primary" @click="reload">查询</el-button>
+            <el-button type="primary" @click="reload">{{ messages.query }}</el-button>
           </div>
 
           <el-table v-loading="loading" :data="pagedRows" border size="small">
@@ -209,16 +209,16 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" width="180" fixed="right">
+            <el-table-column :label="messages.action_column" width="180" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+                <el-button link type="primary" @click="openDetail(row)">{{ messages.detail }}</el-button>
                 <el-button
                   v-if="(tab.actions || []).includes('copy_key')"
                   link
                   type="primary"
                   @click="copyKey(row)"
                 >
-                  复制键
+                  {{ messages.copy_key }}
                 </el-button>
                 <el-button
                   v-if="(tab.actions || []).includes('simulate')"
@@ -226,7 +226,7 @@
                   type="primary"
                   @click="useSimulate(row)"
                 >
-                  试算
+                  {{ messages.simulate_run }}
                 </el-button>
                 <el-button
                   v-else-if="hasP2Action(tab)"
@@ -234,7 +234,7 @@
                   type="info"
                   disabled
                 >
-                  P2
+                  {{ messages.p2_pending }}
                 </el-button>
               </template>
             </el-table-column>
@@ -270,7 +270,7 @@
             border
           >
             <el-table-column prop="key" :label="labelOfColumn('factors')" min-width="160" />
-            <el-table-column prop="value" label="值" min-width="200" />
+            <el-table-column prop="value" :label="messages.history_value" min-width="200" />
           </el-table>
 
           <pre v-else-if="section.widget === 'source_snippet'" class="code-block">{{ snippetOf(detailRow) }}</pre>
@@ -278,7 +278,7 @@
           <div v-else-if="section.widget === 'audit_log'" class="audit-log">
             <div class="audit-toolbar">
               <el-button size="small" :loading="historyLoading" @click="loadHistory(section)">
-                刷新
+                {{ messages.refresh }}
               </el-button>
               <el-button
                 v-if="canPublish"
@@ -287,7 +287,7 @@
                 :loading="publishing"
                 @click="onPublish"
               >
-                发布草稿
+                {{ messages.publish_draft }}
               </el-button>
               <el-button
                 v-if="canRollback"
@@ -296,30 +296,30 @@
                 :loading="rollingBack"
                 @click="onRollback"
               >
-                回滚上一版本
+                {{ messages.rollback_previous }}
               </el-button>
             </div>
 
             <el-table v-loading="historyLoading" :data="pagedHistory" size="small" border>
-              <el-table-column label="时间" width="170">
+              <el-table-column :label="messages.history_time" width="170">
                 <template #default="{ row }">{{ row.created_at || '—' }}</template>
               </el-table-column>
-              <el-table-column label="动作" width="100">
+              <el-table-column :label="messages.history_action" width="100">
                 <template #default="{ row }">
                   <el-tag size="small" :type="actionTagType(row.action)">
                     {{ actionLabel(row.action) }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作人" width="120">
+              <el-table-column :label="messages.history_operator" width="120">
                 <template #default="{ row }">{{ row.operator || '—' }}</template>
               </el-table-column>
-              <el-table-column label="变更前" min-width="160">
+              <el-table-column :label="messages.history_before" min-width="160">
                 <template #default="{ row }">
                   <span class="cell-text">{{ formatCell(row.before) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="变更后" min-width="160">
+              <el-table-column :label="messages.history_after" min-width="160">
                 <template #default="{ row }">
                   <span class="cell-text">{{ formatCell(row.after) }}</span>
                 </template>
@@ -328,7 +328,7 @@
 
             <el-empty
               v-if="!historyLoading && !historyRows.length"
-              :description="section.label + ' · 暂无记录'"
+              :description="section.label + ' · ' + messages.history_empty"
               :image-size="60"
             />
 
@@ -367,17 +367,8 @@ import { apiV1 } from '@/utils/httpClient'
 import { getRule, getRuleCenterViewConfig, getRuleConfigHistory, listRules, publishRuleConfig, rollbackRuleConfig, simulateRule } from '@/services/ruleCenterService'
 
 const FALLBACK_CONFIG = {
-  title: '规则中心',
-  tabs: [
-    {
-      id: 'all',
-      label: '全部规则',
-      sources: ['bo_yaml', 'doc_flow', 'approval', 'control_parameter', 'line_type'],
-      columns: ['rule_key', 'name', 'rule_type', 'source', 'scope_bo', 'configurable', 'status'],
-      filters: ['keyword', 'rule_type', 'source', 'configurable', 'status'],
-      actions: ['detail', 'copy_key'],
-    },
-  ],
+  title: '',
+  tabs: [],
   column_labels: {},
   filter_labels: {},
   filter_options: {},
@@ -413,32 +404,6 @@ const historyPage = ref(1)
 const historyPageSize = ref(10)
 const publishing = ref(false)
 const rollingBack = ref(false)
-
-const DIMENSION_FIELDS = ['org_id', 'document_type_id', 'line_type_id', 'item_group_id']
-const SIMULATE_HINTS = {
-  codes: '控制参数编码，逗号分隔，如 qty_required, price_required',
-  object_type: '单据对象类型，如 sales_order',
-  record_id: '单据主键 ID（需配合 object_type）',
-  org_id: '组织 ID',
-  document_type_id: '单据类型 ID',
-  line_type_id: '行类型 ID',
-  item_group_id: '物料组 ID',
-}
-const TARGET_BY_SOURCE = {
-  control_parameter: 'control_parameter_value',
-  line_type: 'line_type_assignment',
-}
-const ACTION_LABELS = { SAVE: '保存草稿', PUBLISH: '发布', ROLLBACK: '回滚' }
-const BLOCK_LABELS = {
-  final: '最终取值',
-  baseline: 'baseline 结果',
-  draft: 'draft 结果',
-  diff: '差异',
-}
-const CANDIDATE_COLUMN_ORDER = [
-  'code', 'value', 'value_id', 'line_type_id', 'document_type_id',
-  'item_group_id', 'specificity_rank', 'status', 'hit', 'reason',
-]
 
 const columnLabels = computed(() => config.value.column_labels || {})
 const filterLabels = computed(() => config.value.filter_labels || {})
@@ -483,22 +448,23 @@ const simulateMeta = computed(() => config.value.simulate || {})
 const simulateFields = computed(() => simulateMeta.value.fields || [])
 const scenarioOptions = computed(() => config.value.trace?.scenarios || [])
 const traceMeta = computed(() => config.value.trace || {})
-const traceFields = computed(
-  () => traceMeta.value.tab?.fields || ['object_type', 'record_id', 'scenarios', 'codes']
-)
+const messages = computed(() => traceMeta.value.messages || {})
+const factorKeys = computed(() => traceMeta.value.factor_keys || [])
+const simulateHints = computed(() => simulateMeta.value.hints || {})
+const traceFields = computed(() => traceMeta.value.tab?.fields || [])
 const traceDecisions = computed(() => traceMeta.value.decisions || {})
-const configModeOptions = computed(
-  () => simulateMeta.value.config_modes || ['baseline', 'draft', 'both']
-)
+const configModeOptions = computed(() => simulateMeta.value.config_modes || [])
 
 const simulateCandidates = computed(() => simulateResult.value?.candidates || [])
 
 const candidateColumns = computed(() => {
   const rows = simulateCandidates.value
   if (!rows.length) return []
+  // 列顺序与中文名同源：视图元数据 simulate.candidate_columns（spec §13 F-13-07）
+  const declared = Object.keys(simulateMeta.value.candidate_columns || {})
   const keys = new Set()
   rows.forEach(row => Object.keys(row).forEach(key => keys.add(key)))
-  const ordered = CANDIDATE_COLUMN_ORDER.filter(key => keys.has(key))
+  const ordered = declared.filter(key => keys.has(key))
   keys.forEach(key => {
     if (!ordered.includes(key)) ordered.push(key)
   })
@@ -508,22 +474,23 @@ const candidateColumns = computed(() => {
 const simulateSummary = computed(() => {
   const result = simulateResult.value
   if (!result) return []
+  const labels = simulateMeta.value.summary || {}
   return [
-    ['场景', result.scenario],
-    ['配置口径', result.config_mode],
-    ['决策', result.decision],
-    ['来源', result.source],
-    ['规则键', result.rule_id],
-    ['原因', result.reason],
-    ['耗时(ms)', result.elapsed_ms],
-    ['缓存', result.cached ? '命中' : '未命中'],
-  ].map(([label, value]) => ({ label, value: formatCell(value) }))
+    ['scenario', result.scenario],
+    ['config_mode', result.config_mode],
+    ['decision', result.decision],
+    ['source', result.source],
+    ['rule_id', result.rule_id],
+    ['reason', result.reason],
+    ['elapsed_ms', result.elapsed_ms],
+    ['cached', result.cached ? labels.cached_hit : labels.cached_miss],
+  ].map(([key, value]) => ({ label: labels[key] || key, value: formatCell(value) }))
 })
 
 const simulateBlocks = computed(() => {
   const result = simulateResult.value
   if (!result) return []
-  return Object.entries(BLOCK_LABELS)
+  return Object.entries(simulateMeta.value.blocks || {})
     .filter(([key]) => result[key] !== undefined && result[key] !== null)
     .map(([key, label]) => ({ key, label, text: JSON.stringify(result[key], null, 2) }))
 })
@@ -533,7 +500,7 @@ const pagedHistory = computed(() => {
   return historyRows.value.slice(start, start + historyPageSize.value)
 })
 
-const configTarget = computed(() => TARGET_BY_SOURCE[detailRow.value?.source] || '')
+const configTarget = computed(() => detailRow.value?.links?.edit?.target || '')
 
 const canWriteConfig = computed(() => auth.hasPermission('rule_center:rule_center_write'))
 
@@ -561,10 +528,10 @@ onMounted(async () => {
     if (response.success && response.data?.tabs?.length) {
       config.value = response.data
     } else {
-      message.warning(response.message || '规则中心视图元数据不可用，已回落默认视图')
+      message.warning(response.message || messages.value.fallback_warning)
     }
   } catch {
-    message.warning('规则中心视图元数据不可用，已回落默认视图')
+    message.warning(messages.value.fallback_warning)
   }
   const defaultTab = (config.value.tabs || []).find(tab => tab.default)
   activeTab.value = defaultTab?.id || visibleTabs.value[0]?.id || ''
@@ -576,13 +543,13 @@ onMounted(async () => {
 })
 
 function simulatePlaceholder(field) {
-  return SIMULATE_HINTS[field] || labelOfColumn(field)
+  return simulateHints.value[field] || labelOfColumn(field)
 }
 
 function resetSimulate() {
   Object.keys(simulateForm).forEach(key => delete simulateForm[key])
-  simulateForm.scenario = scenarioOptions.value[0] || 'default'
-  simulateForm.config_mode = configModeOptions.value[0] || 'baseline'
+  simulateForm.scenario = scenarioOptions.value[0] || ''
+  simulateForm.config_mode = configModeOptions.value[0] || ''
   simulateResult.value = null
 }
 
@@ -610,7 +577,7 @@ function runTrace() {
   const recordRaw = String(traceForm.record_id || '').trim()
   const recordId = Number(recordRaw)
   if (!objectType || !recordRaw || !Number.isFinite(recordId) || recordId <= 0) {
-    message.warning('请先选择单据对象并填写记录 ID')
+    message.warning(messages.value.missing_target)
     return
   }
   const codes = String(traceForm.codes || '')
@@ -618,7 +585,7 @@ function runTrace() {
     .map(item => item.trim())
     .filter(Boolean)
   const dims = {}
-  for (const field of DIMENSION_FIELDS) {
+  for (const field of factorKeys.value) {
     const value = traceForm[field]
     if (value !== '' && value !== null && value !== undefined) {
       dims[field] = /^\d+$/.test(String(value).trim()) ? Number(value) : value
@@ -635,7 +602,7 @@ function runTrace() {
 }
 
 function buildSimulatePayload() {
-  const payload = { config_mode: simulateForm.config_mode || 'baseline' }
+  const payload = { config_mode: simulateForm.config_mode || configModeOptions.value[0] }
   if (simulateForm.scenario) payload.scenario = simulateForm.scenario
 
   const codes = String(simulateForm.codes || '')
@@ -648,7 +615,7 @@ function buildSimulatePayload() {
   if (simulateForm.record_id) payload.record_id = simulateForm.record_id
 
   const factors = {}
-  for (const field of DIMENSION_FIELDS) {
+  for (const field of factorKeys.value) {
     const value = simulateForm[field]
     if (value !== '' && value !== null && value !== undefined) {
       factors[field] = /^\d+$/.test(String(value).trim()) ? Number(value) : value
@@ -666,11 +633,11 @@ async function runSimulate() {
       simulateResult.value = response.data
     } else {
       simulateResult.value = null
-      message.error(response.message || '规则试算失败')
+      message.error(response.message || messages.value.simulate_failed)
     }
   } catch {
     simulateResult.value = null
-    message.error('规则试算失败')
+    message.error(messages.value.simulate_failed)
   } finally {
     simulating.value = false
   }
@@ -683,12 +650,14 @@ function useSimulate(row) {
   resetSimulate()
 
   if (row?.source === 'control_parameter') {
-    simulateForm.scenario = 'control_parameter'
     const code = String(row.rule_key || '').split(':').slice(1).join(':')
     if (code) simulateForm.codes = code
-  } else if (row?.source === 'line_type') {
-    simulateForm.scenario = 'line_type'
-    for (const field of DIMENSION_FIELDS) {
+  }
+  if (row?.source && scenarioOptions.value.includes(row.source)) {
+    simulateForm.scenario = row.source
+  }
+  if (row?.source === 'line_type') {
+    for (const field of factorKeys.value) {
       const value = pick(row, field)
       if (value !== undefined && value !== null) simulateForm[field] = value
     }
@@ -727,17 +696,17 @@ async function loadHistory(section) {
   try {
     const response = await getRuleConfigHistory(params)
     historyRows.value = response.success ? response.data?.items || [] : []
-    if (!response.success) message.error(response.message || '读取变更记录失败')
+    if (!response.success) message.error(response.message || messages.value.history_load_failed)
   } catch {
     historyRows.value = []
-    message.error('读取变更记录失败')
+    message.error(messages.value.history_load_failed)
   } finally {
     historyLoading.value = false
   }
 }
 
 function actionLabel(action) {
-  return ACTION_LABELS[action] || action || '—'
+  return (messages.value.action_labels || {})[action] || action || '—'
 }
 
 function actionTagType(action) {
@@ -762,13 +731,13 @@ async function onPublish() {
   try {
     const response = await publishRuleConfig({ target, draft_id: draftId })
     if (response.success) {
-      message.success(`已发布（替换 ${response.data?.superseded ?? 0} 条生效配置）`)
+      message.success(msgText('publish_success', { count: response.data?.superseded ?? 0 }))
       await refreshAfterConfigChange()
     } else {
-      message.error(response.message || '发布配置失败')
+      message.error(response.message || messages.value.publish_failed)
     }
   } catch {
-    message.error('发布配置失败')
+    message.error(messages.value.publish_failed)
   } finally {
     publishing.value = false
   }
@@ -783,13 +752,13 @@ async function onRollback() {
   try {
     const response = await rollbackRuleConfig({ target, payload: { rule_key: row.rule_key } })
     if (response.success) {
-      message.success(`已回滚（恢复 ${response.data?.restored ?? 0} 条配置）`)
+      message.success(msgText('rollback_success', { count: response.data?.restored ?? 0 }))
       await refreshAfterConfigChange()
     } else {
-      message.error(response.message || '回滚配置失败')
+      message.error(response.message || messages.value.rollback_failed)
     }
   } catch {
-    message.error('回滚配置失败')
+    message.error(messages.value.rollback_failed)
   } finally {
     rollingBack.value = false
   }
@@ -797,6 +766,10 @@ async function onRollback() {
 
 function labelOfColumn(key) {
   return columnLabels.value[key] || key
+}
+
+function candidateLabel(key) {
+  return (simulateMeta.value.candidate_columns || {})[key] || labelOfColumn(key)
 }
 
 function labelOfFilter(key) {
@@ -813,7 +786,7 @@ function optionsOf(key) {
 function resetFilters() {
   Object.keys(filters).forEach(key => delete filters[key])
   ;(currentTab.value?.filters || []).forEach(key => {
-    filters[key] = key === 'status' ? 'active' : ''
+    filters[key] = key === 'status' ? (optionsOf('status')[0] || '') : ''
   })
 }
 
@@ -833,10 +806,10 @@ async function reload() {
     }
     const response = await listRules(params)
     rows.value = response.success ? response.data?.items || [] : []
-    if (!response.success) message.error(response.message || '查询规则目录失败')
+    if (!response.success) message.error(response.message || messages.value.catalog_failed)
   } catch {
     rows.value = []
-    message.error('查询规则目录失败')
+    message.error(messages.value.catalog_failed)
   } finally {
     loading.value = false
   }
@@ -862,10 +835,18 @@ function pick(row, key) {
 function formatCell(value) {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'object') {
-    const text = JSON.stringify(value)
-    return text.length > 120 ? `${text.slice(0, 120)}…` : text
+    const serialized = JSON.stringify(value)
+    return serialized.length > 120 ? `${serialized.slice(0, 120)}…` : serialized
   }
   return String(value)
+}
+
+function msgText(key, params = {}) {
+  let value = messages.value[key] || ''
+  for (const [name, param] of Object.entries(params)) {
+    value = value.replace(`{${name}}`, String(param))
+  }
+  return value
 }
 
 function codeOf(row) {
@@ -902,7 +883,7 @@ async function openDetail(row) {
 async function copyKey(row) {
   try {
     await navigator.clipboard.writeText(row.rule_key)
-    message.success('已复制规则键')
+    message.success(messages.value.copied_key)
   } catch {
     message.warning(row.rule_key)
   }

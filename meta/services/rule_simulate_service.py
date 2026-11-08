@@ -18,6 +18,7 @@ import logging
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from meta.core.rule_keys import control_parameter_codes_key, line_type_key
 from meta.core.rule_trace_service import (
     DIMENSION_FIELDS,
     TRACE_SCENARIOS,
@@ -249,7 +250,7 @@ class RuleSimulateService:
         return {
             'decision': decision,
             'source': 'db:control_parameter_values',
-            'rule_id': 'control_parameter:' + ','.join(codes),
+            'rule_id': control_parameter_codes_key(codes),
             'reason': '' if decision == 'hit' else '部分或全部参数未命中具体取值',
             'candidates': candidates,
             'final': _final_of_control_parameter(results),
@@ -304,9 +305,7 @@ class RuleSimulateService:
             decision = 'missing'
             reason = '未命中确定规则且单据类型未配置默认行类型'
 
-        rule_key = 'line_type:{0}.{1}'.format(
-            doc_type_id if doc_type_id is not None else '*',
-            item_group_id if item_group_id is not None else '*')
+        rule_key = line_type_key(doc_type_id, item_group_id)
         final = {
             'line_type_id': resolved.get('line_type_id'),
             'from': resolved.get('source'),

@@ -20,6 +20,11 @@ import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 from meta.core.models import registry
+from meta.core.rule_keys import (
+    DIMENSION_FIELDS,
+    control_parameter_codes_key,
+    line_type_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +35,9 @@ TRACE_SCENARIOS = (
 # [v1.8 2026-11-07] permission 场景依赖 user_id，单据推导接口不传该入参，
 # 纳入白名单只会产生"永远跳过"的假场景，故从核心场景集移除。
 _CORE_SCENARIOS = ('default', 'state_transition', 'approval')
-DIMENSION_FIELDS = ('org_id', 'document_type_id', 'line_type_id', 'item_group_id')
+# 因子轴由 meta.core.rule_keys.DIMENSION_FIELDS 唯一声明（spec §13.1 / F-13-12）
+# 控制参数命中链的取值来源（视图元数据 trace.source_types 同源，spec §13.4）
+SOURCE_TYPES = ('value', 'default', 'missing')
 
 # [v1.8 2026-11-07] 决策归一：decision 保留场景细分词（applied/allowed/...），
 # kind 统一为 hit / miss / skip / info，供前端着色与汇总，避免每个场景各自造词。
@@ -420,7 +427,7 @@ class RuleTraceService:
             decision, reason = 'resolved', 'resolved'
         return _envelope(
             'control_parameter', decision,
-            rule_id='control_parameter:' + ','.join(requested),
+            rule_id=control_parameter_codes_key(requested),
             source='db', reason=reason,
             factors=dict(factors),
             detail={'codes': requested, 'missing': missing, 'chain': chain},
@@ -443,8 +450,7 @@ class RuleTraceService:
         return _envelope(
             'line_type', 'resolved' if result.get('line_type_id') is not None
             else 'missing',
-            rule_id=('line_type:{0}.{1}'.format(
-                doc_type_id, factors.get('item_group_id') or '*')),
+            rule_id=line_type_key(doc_type_id, factors.get('item_group_id')),
             source='db', reason=str(result.get('source') or 'missing'),
             factors=dict(factors),
             detail=result,
@@ -453,10 +459,10 @@ class RuleTraceService:
 
     def _doc_flow(self, object_type: str, data_source: Any,
                   started: float) -> Dict[str, Any]:
-        from meta.core.doc_flow_rule_store import list_rules
+        from meta.core.rule_provider import list_doc_flow_rules
 
         rules = [
-            rule for rule in list_rules(data_source)
+            rule for rule in list_doc_flow_rules(data_source)
             if rule.get('source_bo') == object_type and rule.get('status') == 'active'
         ]
         return _envelope(

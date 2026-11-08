@@ -14,25 +14,54 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
+from meta.core.rule_keys import (
+    NOT_INSTRUMENTED_SOURCES,
+    RULE_SOURCES,
+    RULE_TYPES,
+    approval_key,
+    bo_yaml_key,
+    control_parameter_key,
+    doc_flow_key,
+    line_type_key,
+)
+from meta.core.rule_targets import links_for
+
 logger = logging.getLogger(__name__)
 
-SOURCES = (
-    'bo_yaml', 'doc_flow', 'approval', 'control_parameter',
-    'line_type', 'state_machine', 'numbering', 'validation',
-)
+# 来源枚举唯一事实源在 meta/core/rule_keys.py（spec §13.2）
+SOURCES = RULE_SOURCES
 
 # 暂无统一只读入口的来源：目录如实标记，不编造空结果冒充「已覆盖」。
-NOT_INSTRUMENTED = ('state_machine', 'numbering')
+NOT_INSTRUMENTED = NOT_INSTRUMENTED_SOURCES
 
 # 视图元数据中允许引用的动作 / widget 类型（封闭枚举，YAML 不能引入新类型）
 ACTIONS = ('detail', 'edit', 'view_source', 'simulate', 'copy_key', 'publish', 'rollback', 'rerun')
 WIDGETS = ('code', 'factor_matrix', 'source_snippet', 'audit_log')
+TAB_KINDS = ('table', 'simulate', 'health', 'rule_trace')
+FILTER_KEYS = (
+    'keyword', 'domain', 'rule_type', 'source', 'configurable', 'status',
+    'document_type', 'line_type', 'item_group', 'source_bo', 'target_bo',
+    'scope_bo', 'severity', 'enabled',
+)
+
+# 静态封闭值域（owner=本模块）；动态筛选项（source/rule_type/domain）由服务端派生，
+# YAML 只允许写静态项，写动态项视为手写第二份业务枚举（spec §13.4）。
+STATIC_FILTER_OPTIONS = {
+    'status': ('active', 'inactive', 'draft'),
+    'severity': ('error', 'warning', 'info'),
+    'enabled': ('true', 'false'),
+    'configurable': ('true', 'false'),
+}
+DERIVED_FILTER_OPTIONS = ('source', 'rule_type', 'domain')
+
+SUPPORTED_VIEW_VERSION = 2
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')
 VIEW_CONFIG_PATH = os.path.join(_SCHEMA_DIR, 'rule_center_view.yaml')
@@ -42,6 +71,10 @@ _VALIDATION_TYPES = ('validation', 'default', 'constraint')
 
 class RuleCatalogError(ValueError):
     """视图元数据非法或来源读取失败。"""
+
+
+class RuleFilterError(RuleCatalogError):
+    """请求期筛选值不在声明值域内（API 层转 400）。"""
 
 
 def _enum(value: Any) -> Any:
@@ -76,8 +109,9 @@ def _descriptor(
     source_tags: Optional[Iterable[str]] = None,
     detail: Optional[Dict[str, Any]] = None,
     layer: str = 'L2',
+    links: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
-    return {
+    item = {
         'rule_key': rule_key,
         'layer': layer,
         'name': name or rule_key,
@@ -92,13 +126,16 @@ def _descriptor(
         'priority': priority,
         'detail': detail or {},
     }
+    if links:
+        item['links'] = links
+    return item
 
 
 # ----------------------------------------------------------------------
 # 各来源适配器
 # ----------------------------------------------------------------------
 
-def _bo_yaml_descriptors() -> List[Dict[str, Any]]:
+def _bo_yaml_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
     from meta.core.models import registry
     from meta.core.rule_provider import get_rule_provider
 
@@ -111,7 +148,7 @@ def _bo_yaml_descriptors() -> List[Dict[str, Any]]:
             tags = ['validation'] if rule_type in _VALIDATION_TYPES else []
             items.append(_descriptor(
                 'bo_yaml',
-                f'bo_yaml:{bo_id}.{rule_id}',
+                bo_yaml_key(bo_id, rule_id),
                 str(getattr(rule, 'name', '') or rule_id),
                 rule_type=rule_type,
                 scope_bo=bo_id,
@@ -133,7 +170,7 @@ def _bo_yaml_descriptors() -> List[Dict[str, Any]]:
     return items
 
 
-def _control_parameter_descriptors() -> List[Dict[str, Any]]:
+def _control_parameter_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
     from meta.services.control_parameter_service import get_control_parameter_resolver
 
     resolver = get_control_parameter_resolver()
@@ -146,10 +183,14 @@ def _control_parameter_descriptors() -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     for definition in defs:
         code = str(definition.get('code') or '')
+        status = str(definition.get('status') or 'active')
+        # 默认只看生效态，与运行时读取口径一致；发布流 / 试算显式开启（spec §9.6.2）
+        if not include_draft and status != 'active':
+            continue
         rows = grouped.get(definition.get('id'), [])
         items.append(_descriptor(
             'control_parameter',
-            f'control_parameter:{code}',
+            control_parameter_key(code),
             str(definition.get('name') or code),
             rule_type='control_parameter',
             factors={
@@ -159,7 +200,8 @@ def _control_parameter_descriptors() -> List[Dict[str, Any]]:
                 'value_count': len(rows),
             },
             configurable=True,
-            status=str(definition.get('status') or 'active'),
+            status=status,
+            links=links_for('control_parameter', status),
             detail={
                 'condition': str(definition.get('description') or ''),
                 'values': rows[:20],
@@ -169,7 +211,7 @@ def _control_parameter_descriptors() -> List[Dict[str, Any]]:
     return items
 
 
-def _line_type_descriptors() -> List[Dict[str, Any]]:
+def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
     from meta.services.line_type_service import get_line_type_resolver
 
     resolver = get_line_type_resolver()
@@ -180,9 +222,12 @@ def _line_type_descriptors() -> List[Dict[str, Any]]:
     )
     items: List[Dict[str, Any]] = []
     for row in rows:
+        status = str(row.get('status') or 'active')
+        if not include_draft and status != 'active':
+            continue
         doc_type_id = row.get('document_type_id')
         item_group_id = row.get('item_group_id')
-        key = f'line_type:{doc_type_id}.{item_group_id if item_group_id is not None else "*"}'
+        key = line_type_key(doc_type_id, item_group_id)
         items.append(_descriptor(
             'line_type',
             key,
@@ -195,21 +240,22 @@ def _line_type_descriptors() -> List[Dict[str, Any]]:
                 'specificity_rank': row.get('specificity_rank'),
             },
             configurable=True,
-            status=str(row.get('status') or 'active'),
+            status=status,
+            links=links_for('line_type', status),
             detail={'condition': str(row.get('description') or '')},
         ))
     return items
 
 
-def _doc_flow_descriptors() -> List[Dict[str, Any]]:
-    from meta.core.doc_flow_rule_store import list_rules
+def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    from meta.core.rule_provider import list_doc_flow_rules
 
     items: List[Dict[str, Any]] = []
-    for rule in list_rules(_meta_db()):
+    for rule in list_doc_flow_rules(_meta_db()):
         rule_id = str(rule.get('rule_id') or '')
         items.append(_descriptor(
             'doc_flow',
-            f'doc_flow:{rule_id}',
+            doc_flow_key(rule_id),
             f"{rule.get('source_bo')} → {rule.get('target_bo')}",
             rule_type='doc_flow',
             factors={
@@ -230,7 +276,7 @@ def _doc_flow_descriptors() -> List[Dict[str, Any]]:
     return items
 
 
-def _approval_descriptors() -> List[Dict[str, Any]]:
+def _approval_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
     from meta.core.models import registry
 
     items: List[Dict[str, Any]] = []
@@ -240,7 +286,7 @@ def _approval_descriptors() -> List[Dict[str, Any]]:
             continue
         items.append(_descriptor(
             'approval',
-            f'approval:{bo_id}',
+            approval_key(bo_id),
             f'{getattr(meta_obj, "name", bo_id)} 审批策略',
             rule_type='approval',
             scope_bo=bo_id,
@@ -278,18 +324,83 @@ class RuleCatalogService:
             return self._view_config
         try:
             with open(self._view_path, 'r', encoding='utf-8') as handle:
-                config = yaml.safe_load(handle) or {}
+                raw = handle.read()
+            config = yaml.safe_load(raw) or {}
         except FileNotFoundError:
             raise RuleCatalogError(f'规则中心视图元数据不存在: {self._view_path}')
         except Exception as exc:  # noqa: BLE001
             raise RuleCatalogError(f'规则中心视图元数据解析失败: {exc}') from exc
 
         self._validate_view_config(config)
+        config['filter_options'] = self._derive_filter_options(config)
+        # 响应自带版本与内容指纹，消费端可据此感知元数据变更（spec §13 F-13-10）
+        config['hash'] = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         self._view_config = config
         return config
 
     @staticmethod
+    def _derive_filter_options(config: Dict[str, Any]) -> Dict[str, Any]:
+        """动态筛选项由代码声明派生，YAML 只保留静态封闭值域（spec §13.4）。"""
+        options = dict(config.get('filter_options') or {})
+        options['source'] = list(SOURCES)
+        options['rule_type'] = list(RULE_TYPES)
+        return options
+
+    @staticmethod
     def _validate_view_config(config: Dict[str, Any]) -> None:
+        from meta.core.rule_keys import DIMENSION_FIELDS
+        from meta.core.rule_trace_service import (
+            DECISION_KINDS,
+            SCOPE_DOWNSTREAM,
+            SCOPE_EVALUATED,
+            SCOPE_NOT_TRIGGERED,
+            SOURCE_TYPES,
+            STAGE_MAP,
+            TRACE_SCENARIOS,
+        )
+        from meta.services.rule_simulate_service import CONFIG_MODES, MAX_CODES
+
+        version = config.get('version')
+        if version != SUPPORTED_VIEW_VERSION:
+            raise RuleCatalogError(
+                f'rule_center_view version 不受支持: {version!r}'
+                f'（期望 {SUPPORTED_VIEW_VERSION}）')
+
+        declared_sources: List[str] = []
+        for entry in config.get('sources') or []:
+            source_id = entry if isinstance(entry, str) else (entry or {}).get('id')
+            if not source_id:
+                raise RuleCatalogError('rule_center_view.sources 存在无 id 的条目')
+            if source_id in declared_sources:
+                raise RuleCatalogError(f'rule_center_view.sources 重复声明: {source_id}')
+            declared_sources.append(str(source_id))
+        missing = sorted(set(SOURCES) - set(declared_sources))
+        extra = sorted(set(declared_sources) - set(SOURCES))
+        if missing or extra or len(declared_sources) != len(SOURCES):
+            raise RuleCatalogError(
+                'rule_center_view.sources 与 RuleCatalogService.SOURCES 必须双向等值：'
+                f'缺少 {missing}，多余 {extra}')
+
+        options = config.get('filter_options') or {}
+        for key, values in options.items():
+            if key in DERIVED_FILTER_OPTIONS:
+                raise RuleCatalogError(
+                    f'filter_options.{key} 属服务端派生项，YAML 不得内联: {values}')
+            if key not in STATIC_FILTER_OPTIONS:
+                raise RuleCatalogError(f'filter_options 含未知筛选项: {key}')
+            given = tuple(str(value) for value in (values or []))
+            expected = STATIC_FILTER_OPTIONS[key]
+            if given != expected:
+                raise RuleCatalogError(
+                    f'filter_options.{key} 值域不闭合：{list(given)} != {list(expected)}')
+
+        column_labels = set(config.get('column_labels') or {})
+        filter_labels = set(config.get('filter_labels') or {})
+        if not column_labels:
+            raise RuleCatalogError('rule_center_view 缺少 column_labels')
+        if not filter_labels:
+            raise RuleCatalogError('rule_center_view 缺少 filter_labels')
+
         tabs = config.get('tabs') or []
         if not tabs:
             raise RuleCatalogError('rule_center_view 缺少 tabs')
@@ -303,9 +414,24 @@ class RuleCatalogService:
                 raise RuleCatalogError(f'rule_center_view 页签 id 重复: {tab_id}')
             seen_tabs.add(tab_id)
 
+            kind = tab.get('kind') or 'table'
+            if kind not in TAB_KINDS:
+                raise RuleCatalogError(f'页签 {tab_id} 引用未知 kind: {kind}')
             for source in tab.get('sources') or []:
                 if source not in SOURCES:
                     raise RuleCatalogError(f'页签 {tab_id} 引用了未知来源: {source}')
+                if kind == 'table' and source in NOT_INSTRUMENTED:
+                    raise RuleCatalogError(
+                        f'页签 {tab_id} 要求数据，但来源 {source} 尚未接入'
+                        '（not_instrumented 不得出现在表格页签）')
+            for column in tab.get('columns') or []:
+                if column not in column_labels:
+                    raise RuleCatalogError(f'页签 {tab_id} 引用了未知列: {column}')
+            for filter_key in tab.get('filters') or []:
+                if filter_key not in FILTER_KEYS:
+                    raise RuleCatalogError(f'页签 {tab_id} 引用了未实现筛选: {filter_key}')
+                if filter_key not in filter_labels:
+                    raise RuleCatalogError(f'页签 {tab_id} 的筛选 {filter_key} 缺少显示名')
             for action in tab.get('actions') or []:
                 if action not in ACTIONS:
                     raise RuleCatalogError(f'页签 {tab_id} 引用了未知动作: {action}')
@@ -315,9 +441,75 @@ class RuleCatalogService:
             if widget and widget not in WIDGETS:
                 raise RuleCatalogError(f'详情分区 {section.get("id")} 引用了未知 widget: {widget}')
 
+        trace = config.get('trace') or {}
+        scenarios = [str(item) for item in (trace.get('scenarios') or [])]
+        if len(scenarios) != len(TRACE_SCENARIOS) or set(scenarios) != set(TRACE_SCENARIOS):
+            raise RuleCatalogError(
+                f'trace.scenarios 与 TRACE_SCENARIOS 不等值：{scenarios} != {list(TRACE_SCENARIOS)}')
+        scenario_labels = set(trace.get('scenario_labels') or {})
+        if scenario_labels != set(scenarios):
+            raise RuleCatalogError('trace.scenario_labels 键集合必须与 trace.scenarios 等值')
+        scenario_rules = set(trace.get('scenario_rules') or {})
+        unknown_rules = sorted(scenario_rules - set(scenarios))
+        if unknown_rules:
+            raise RuleCatalogError(f'trace.scenario_rules 含未知场景: {unknown_rules}')
+        stages = set(trace.get('stages') or {})
+        if stages != set(STAGE_MAP.values()):
+            raise RuleCatalogError('trace.stages 与 STAGE_MAP 值域不等值')
+        decisions = set(trace.get('decisions') or {})
+        missing_decisions = sorted(set(DECISION_KINDS) - decisions)
+        if missing_decisions:
+            raise RuleCatalogError(f'trace.decisions 缺少决策文案: {missing_decisions}')
+        kinds = set(trace.get('kinds') or {})
+        missing_kinds = sorted(set(DECISION_KINDS.values()) - kinds)
+        if missing_kinds:
+            raise RuleCatalogError(f'trace.kinds 缺少归一类别: {missing_kinds}')
+        factor_keys = [str(key) for key in (trace.get('factor_keys') or [])]
+        if len(factor_keys) != len(DIMENSION_FIELDS) or set(factor_keys) != set(DIMENSION_FIELDS):
+            raise RuleCatalogError(
+                f'trace.factor_keys 与后端因子轴不等值：{factor_keys} != {list(DIMENSION_FIELDS)}')
+        factor_labels = set(trace.get('factor_labels') or {})
+        if factor_labels != set(factor_keys):
+            raise RuleCatalogError('trace.factor_labels 键集合必须与 trace.factor_keys 等值')
+        # 推导表单必须覆盖全部因子轴，否则用户无法覆盖某些因子（spec §13 F-13-12）
+        tab_fields = [str(field) for field in (trace.get('tab') or {}).get('fields') or []]
+        unknown_tab_fields = sorted(set(tab_fields) - column_labels)
+        if unknown_tab_fields:
+            raise RuleCatalogError(
+                f'trace.tab.fields 含未声明显示名的字段: {unknown_tab_fields}')
+        missing_tab_factors = sorted(set(factor_keys) - set(tab_fields))
+        if missing_tab_factors:
+            raise RuleCatalogError(
+                f'trace.tab.fields 缺少因子轴字段: {missing_tab_factors}')
+        scopes = set(trace.get('scopes') or {})
+        if scopes != {SCOPE_EVALUATED, SCOPE_NOT_TRIGGERED, SCOPE_DOWNSTREAM}:
+            raise RuleCatalogError('trace.scopes 与后端 scope_of 取值不等值')
+        source_types = set(trace.get('source_types') or {})
+        if source_types != set(SOURCE_TYPES):
+            raise RuleCatalogError('trace.source_types 与后端命中链 source.type 不等值')
+
+        simulate = config.get('simulate') or {}
+        modes = [str(mode) for mode in (simulate.get('config_modes') or [])]
+        if len(modes) != len(CONFIG_MODES) or set(modes) != set(CONFIG_MODES):
+            raise RuleCatalogError(
+                f'simulate.config_modes 与 CONFIG_MODES 不等值：{modes} != {list(CONFIG_MODES)}')
+        if simulate.get('max_codes') != MAX_CODES:
+            raise RuleCatalogError(
+                f'simulate.max_codes 与 MAX_CODES 不等值：{simulate.get("max_codes")} != {MAX_CODES}')
+        # 试算表单同样必须覆盖全部因子轴，口径与 trace 一致（spec §13 F-13-12）
+        simulate_fields = [str(field) for field in (simulate.get('fields') or [])]
+        unknown_simulate_fields = sorted(set(simulate_fields) - column_labels)
+        if unknown_simulate_fields:
+            raise RuleCatalogError(
+                f'simulate.fields 含未声明显示名的字段: {unknown_simulate_fields}')
+        missing_simulate_factors = sorted(set(factor_keys) - set(simulate_fields))
+        if missing_simulate_factors:
+            raise RuleCatalogError(
+                f'simulate.fields 缺少因子轴字段: {missing_simulate_factors}')
+
     # -- 目录 ----------------------------------------------------------
 
-    def _collect(self) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    def _collect(self, include_draft: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         items: List[Dict[str, Any]] = []
         status: Dict[str, str] = {}
 
@@ -327,7 +519,7 @@ class RuleCatalogService:
             if source in ('bo_yaml', 'validation'):
                 continue
             try:
-                source_items = adapter()
+                source_items = adapter(include_draft=include_draft)
             except Exception as exc:  # noqa: BLE001
                 logger.warning('[rule_catalog] 来源 %s 读取失败: %s', source, exc)
                 status[source] = f'error: {exc}'
@@ -336,7 +528,7 @@ class RuleCatalogService:
             items.extend(source_items)
 
         try:
-            bo_items = _bo_yaml_descriptors()
+            bo_items = _bo_yaml_descriptors(include_draft=include_draft)
             status['bo_yaml'] = 'ok'
             status['validation'] = 'ok'
         except Exception as exc:  # noqa: BLE001
@@ -361,10 +553,12 @@ class RuleCatalogService:
         domain: Optional[str] = None,
         bo: Optional[str] = None,
         layer: Optional[str] = None,
+        include_draft: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        items, source_status = self._collect()
+        self._validate_filters(sources, rule_type, status, layer)
+        items, source_status = self._collect(include_draft=include_draft)
 
         if sources:
             wanted = set(sources)
@@ -410,14 +604,38 @@ class RuleCatalogService:
             'not_instrumented': list(NOT_INSTRUMENTED),
         }
 
+    @staticmethod
+    def _validate_filters(
+        sources: Optional[List[str]],
+        rule_type: Optional[str],
+        status: Optional[str],
+        layer: Optional[str],
+    ) -> None:
+        """请求期筛选值必须落在声明值域内，非法值报错而不是静默返回空列表。"""
+        if sources:
+            unknown = sorted(set(sources) - set(SOURCES))
+            if unknown:
+                raise RuleFilterError(f'未知 sources 取值: {unknown}；可选 {list(SOURCES)}')
+        if rule_type and rule_type not in RULE_TYPES:
+            raise RuleFilterError(
+                f'未知 rule_type 取值: {rule_type!r}；可选 {list(RULE_TYPES)}')
+        if status and status not in STATIC_FILTER_OPTIONS['status']:
+            raise RuleFilterError(
+                f'未知 status 取值: {status!r}；'
+                f'可选 {list(STATIC_FILTER_OPTIONS["status"])}')
+        if layer and layer not in ('L1', 'L2', 'L3'):
+            raise RuleFilterError(f'未知 layer 取值: {layer!r}；可选 L1 / L2 / L3')
+
     def get_rule(self, rule_key: str) -> Optional[Dict[str, Any]]:
-        items, _ = self._collect()
+        # 详情/发布流需要能看到草稿行
+        items, _ = self._collect(include_draft=True)
         for item in items:
             if item['rule_key'] == rule_key:
                 return item
         return None
 
     def invalidate(self) -> None:
+        """失效进程内视图元数据缓存（发布 / 回滚后目录需立即反映新态）。"""
         self._view_config = None
 
 

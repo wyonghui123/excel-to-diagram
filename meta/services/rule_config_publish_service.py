@@ -18,28 +18,17 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from meta.core.rule_keys import (
+    control_parameter_value_key,
+    line_type_assignment_key,
+    split_key,
+)
+from meta.core.rule_targets import RULE_TARGETS
+
 logger = logging.getLogger(__name__)
 
 AUDIT_OBJECT_TYPE = 'rule_config'
 MAX_HISTORY = 50
-
-TARGETS: Dict[str, Dict[str, Any]] = {
-    'control_parameter_value': {
-        'table': 'control_parameter_values',
-        'label': '控制参数取值',
-        'key_fields': ('control_parameter_id', 'org_id', 'document_type_id',
-                       'line_type_id', 'item_group_id'),
-        'value_fields': ('specificity_rank', 'value', 'description'),
-        'required': ('control_parameter_id', 'value'),
-    },
-    'line_type_assignment': {
-        'table': 'line_type_assignments',
-        'label': '行类型确定规则',
-        'key_fields': ('document_type_id', 'item_group_id'),
-        'value_fields': ('specificity_rank', 'line_type_id', 'description'),
-        'required': ('document_type_id', 'line_type_id'),
-    },
-}
 
 
 class RuleConfigError(ValueError):
@@ -338,10 +327,10 @@ class RuleConfigPublishService:
     # ------------------------------------------------------------------
 
     def _spec(self, target: str) -> Dict[str, Any]:
-        spec = TARGETS.get(target)
+        spec = RULE_TARGETS.get(target)
         if not spec:
             raise RuleConfigError(
-                '不支持的配置目标: {0}；可选 {1}'.format(target, list(TARGETS)))
+                '不支持的配置目标: {0}；可选 {1}'.format(target, list(RULE_TARGETS)))
         return spec
 
     def _normalize(self, target: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -412,13 +401,9 @@ class RuleConfigPublishService:
     def _rule_key(self, target: str, row: Dict[str, Any]) -> str:
         if target == 'control_parameter_value':
             code = self._param_code(row.get('control_parameter_id'))
-            dims = '|'.join('*' if row.get(f) is None else str(row.get(f))
-                            for f in ('org_id', 'document_type_id',
-                                      'line_type_id', 'item_group_id'))
-            return f'{code}|{dims}'
-        item_group = row.get('item_group_id')
-        return '{0}.{1}'.format(row.get('document_type_id'),
-                                item_group if item_group is not None else '*')
+            return control_parameter_value_key(code, row)
+        return line_type_assignment_key(
+            row.get('document_type_id'), row.get('item_group_id'))
 
     def _param_code(self, control_parameter_id: Any) -> str:
         definition = self._one(
@@ -429,11 +414,13 @@ class RuleConfigPublishService:
     @staticmethod
     def _target_from_rule_key(rule_key: str) -> Optional[str]:
         """目录 rule_key 前缀 → 发布目标；未知前缀返回 None。"""
-        for prefix, target in (('control_parameter:', 'control_parameter_value'),
-                               ('line_type:', 'line_type_assignment')):
-            if rule_key.startswith(prefix):
-                return target
-        return None
+        split = split_key(rule_key)
+        if not split:
+            return None
+        return {
+            'control_parameter': 'control_parameter_value',
+            'line_type': 'line_type_assignment',
+        }.get(split[0])
 
     def _history_object_id(self, target: Optional[str],
                            rule_key: str) -> Tuple[str, str]:
@@ -444,12 +431,13 @@ class RuleConfigPublishService:
         控制参数按定义聚合多条维度行，故用前缀匹配。
         """
         prefix = f'{target}:' if target else '%:'
-        if rule_key.startswith('control_parameter:'):
-            code = rule_key.split(':', 1)[1]
-            return f'{prefix}{code}|', 'prefix'
-        if rule_key.startswith('line_type:'):
-            return f"{prefix}{rule_key.split(':', 1)[1]}", 'exact'
-        return f'{prefix}{rule_key}', 'exact'
+        split = split_key(rule_key)
+        if not split:
+            return f'{prefix}{rule_key}', 'exact'
+        source, natural = split
+        if source == 'control_parameter':
+            return f'{prefix}{natural}|', 'prefix'
+        return f'{prefix}{natural}', 'exact'
 
     def _last_publish(self, object_id: str) -> Optional[Dict[str, Any]]:
         return self._last_publish_where("object_id = ?", (object_id,))

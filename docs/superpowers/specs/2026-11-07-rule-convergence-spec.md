@@ -1,6 +1,6 @@
 # Spec：规则化收敛（Rule Convergence）
 
-> 文档编号: 待定 | 状态: 执行基线 v1.9 | 日期: 2026-11-07（v1.1：TBD 决议；v1.2：官方文档二次确认；v1.3：TBD-4 关闭，进入 M1 执行；v1.4：细化规则中心 FR-014/015/016 与单据级推导设计；v1.5：补规则试算 FR-017、配置发布流 FR-018，回写头部产品对标结论；v1.6：规则中心改为视图元数据驱动，新增 §9.6.9 与 TBD-15；v1.7：细化 FR-015 / IF-007 单据推导的可操作入口——规则中心「单据推导」页签 + 详情分区、参数与渲染契约、场景能力矩阵、实现差距与验收；v1.8：信封 v2 语义落地（`kind` / `factor_sources` / 全量规则明细）；v1.9：L1 落地——运行期节点字段、200 节点截断、前端规则全集表与场景/归属筛选）
+> 文档编号: 待定 | 状态: 执行基线 v2.1 | 日期: 2026-11-07（v1.1：TBD 决议；v1.2：官方文档二次确认；v1.3：TBD-4 关闭，进入 M1 执行；v1.4：细化规则中心 FR-014/015/016 与单据级推导设计；v1.5：补规则试算 FR-017、配置发布流 FR-018，回写头部产品对标结论；v1.6：规则中心改为视图元数据驱动，新增 §9.6.9 与 TBD-15；v1.7：细化 FR-015 / IF-007 单据推导的可操作入口——规则中心「单据推导」页签 + 详情分区、参数与渲染契约、场景能力矩阵、实现差距与验收；v1.8：信封 v2 语义落地（`kind` / `factor_sources` / 全量规则明细）；v1.9：L1 落地——运行期节点字段、200 节点截断、前端规则全集表与场景/归属筛选；v2.0：规则语义范畴与类型分层（§12），二次确认修正 4 处，`rule_type` 改为三轴拆分；v2.1：新增 §13 元数据驱动与单一事实源（SSOT）规范，修正 FR-012 / FR-014 / §9.6.1 / §9.6.9）
 > 主题: 把仍硬编码在 Python 中的业务规则，按「元模型 / 配置 / 代码」三层归属收敛到规则模型
 > 前置: [2026-10-02 规则模型 Spec](./2026-10-02-rule-model-spec.md)、[24 · 业务对象组织边界](../spec_权限体系升级/24_org_scope_business_object_phase2.md)
 > 关联: `meta/core/rule_executor.py`、`meta/core/rule_provider.py`、`meta/core/hierarchy_loader.py`
@@ -194,7 +194,9 @@
   - 状态机：无孤儿状态、无不可达状态、终态不可出边（除显式声明）。
   - 审批：对象/表存在、金额字段存在。
   - 映射：key 合法、无重复、无未知枚举。
-  - 非法声明在启动或 CI 阶段失败，错误码稳定。
+  - 视图元数据闭合：`rule_center_view.yaml` 的 `sources` 与 `RuleCatalogService.SOURCES` MUST 双向等值；`trace.scenarios` ⊆ `TRACE_SCENARIOS`；`trace.factor_keys` ⊆ 因子轴声明；`filter_options` 值域封闭（规则见 §13.4）。
+  - 描述符必填：`RuleDescriptor.rule_key / source / name` 非空，`rule_type` 属于已声明白名单，`source_tags ⊆ 来源标签集合`（契约见 §13.2）。
+  - 非法声明在启动或 CI 阶段失败，错误码稳定；请求期非法筛选值返回 400（`RULE_FILTER_UNKNOWN_VALUE`），不得静默返回空列表。
 - **优先级**：Must
 - **类型映射**：非功能/功能
 - **来源**：`org_scope_validator.py` 已验证的模式
@@ -232,6 +234,9 @@
   - 目录数据 MUST 与运行时同源（读取 `RuleProvider` 与各域 store），不允许维护第二份规则清单。
   - 权限码使用双段式并在 `permissions` 表真实存在（见 §9.6.5）。
   - **页面由视图元数据驱动**：页签、列、筛选、行操作、详情分区 MUST 来自 `meta/schemas/rule_center_view.yaml`（设计见 §9.6.9）；Vue 组件内不得硬编码页签名或列 key。验收以「只改 YAML 即可增删页签、列与筛选」为准。
+  - **筛选项取值不得手写**：`filter_options` 只允许两种来源——静态封闭值域（如 `configurable` / `status`），或服务端按目录声明派生（如 `source` / `rule_type` / `domain`）；YAML 不得内联与代码重复的业务枚举（见 §13.3 F-13-03）。
+  - **前端零业务常量**：`RuleCenterPage.vue` / `RuleTracePanel.vue` 只保留通用交互动词；来源名、列标签、动作名、决策文案、试算提示、`source → 目标表` 映射 MUST 由服务端元数据下发，兜底配置不得包含业务取值（见 §13.3 F-13-05 / F-13-07）。
+  - **可编辑目标由服务端下发**：`RuleDescriptor.links` 为唯一来源，前端不得维护 `TARGET_BY_SOURCE` 之类的第二份映射（见 §13.2）。
 
 - **优先级**：Should
 - **类型映射**：功能需求
@@ -474,7 +479,8 @@
 
 ### 7.1 技术约束
 
-- 复用现有 `RuleType` 8 类，不新增规则类型（状态图用 `STATE_TRANSITION`）。
+- 复用现有 `RuleType` 8 类，**不新增 `RuleType` 枚举值**（状态图用 `STATE_TRANSITION`）；语义扩展一律以正交属性承载（`semantic_class` / `semantic_type` / `constraint_kind` / `hit_policy` / `reference`），见 §12。
+- 规则中心列表的 `rule_type` 混入来源标签（`control_parameter` / `doc_flow` / `approval` / `line_type_assignment`），属**展示层兼容字段**，不得回写为 `RuleType`；目标契约见 §12.5。
 - 元数据在加载期完成解析与校验，运行期零 YAML 解析。
 - 数据库为 SQLite，规则表变更走迁移；禁止直读写 `meta/architecture.db`。
 - 测试唯一入口为 `python d:\filework\test.py`。
@@ -636,30 +642,42 @@ ExplainService（默认/权限/状态/审批统一解释）
 
 ```json
 {
-  "rule_key": "control_parameter_value:42",
-  "name": "销售订单-付款条件默认值",
-  "rule_type": "default",
+  "rule_key": "control_parameter:PAYMENT_TERM",
+  "name": "付款条件默认值",
+  "rule_type": "control_parameter",
   "layer": "L2",
-  "source": "control_parameter_value",
-  "scope": {"domain": "sales", "bo": "sales_order"},
-  "factors": ["org_id", "document_type_id"],
+  "source": "control_parameter",
+  "source_tags": ["validation", "default"],
+  "scope_bo": "sales_order",
+  "factors": {
+    "domain": "sales",
+    "value_type": "string",
+    "default_value": "NET30",
+    "value_count": 12
+  },
   "configurable": true,
   "status": "active",
-  "priority": 10,
-  "effective": {"from": null, "to": null},
+  "priority": null,
   "updated_at": "2026-11-07T10:00:00",
+  "detail": {
+    "condition": "付款条件按组织 + 单据类型取值",
+    "values": "[...前 20 条]",
+    "values_truncated": false
+  },
   "links": {
-    "edit": "/api/v2/bo/control_parameter_value/42",
-    "explain": "/api/v2/rules/control_parameter_value:42/explain"
+    "edit": "/api/v2/bo/control_parameter/42",
+    "publish": "/api/v2/rules/publish",
+    "rollback": "/api/v2/rules/rollback"
   }
 }
 ```
 
-- `rule_key` 命名：`{source}:{natural_key}`；同一来源内天然键唯一。
-- `factors`：该规则实际参与匹配的维度集合；未声明即空数组（全局规则）。
+- **字段契约以 §13.2 为准**：本节仅为示例；新增字段 MUST 先改 §13.2，禁止在适配器里私自扩字段或并存两种形状。
+- `rule_key` 命名：`{source}:{natural_key}`，由各来源适配器**唯一生成**；目录 / 试算 / 推导 / 发布四处禁止各自拼接（见 §13.3 F-13-04）。
+- `factors`：**对象形状**（键为因子名），空对象表示全局规则；不得与 `detail` 重复承载同一语义。
 - `configurable`：L1 YAML 与 doc_flow / approval 为 `false`；控制参数与行类型为 `true`。
-- `status`：`active / inactive / draft`；`draft` 仅在发布流启用后出现，列表默认排除，需勾选「包含草稿」才显示，并在行上标注「草稿未生效」。
-- `links.edit` 只对 `configurable=true` 下发，前端据此决定「编辑」或「查看声明」；草稿态额外下发 `links.publish` / `links.rollback`（见 §9.6.8）。
+- `status`：`active / inactive / draft`；`draft` 与 `active` **同表以 status 区分**，不另建草稿表；列表默认排除，勾选「包含草稿」才显示并标注「草稿未生效」。
+- `links`：由服务端下发，前端不维护 `source → 目标表` 映射；`links.edit` 仅对 `configurable=true` 下发；草稿态额外下发 `links.publish` / `links.rollback`（见 §9.6.8）。`links` 当前实现尚未落地（§13.3 F-13-05）。
 
 #### 9.6.2 聚合服务（RuleCatalogService）
 
@@ -669,7 +687,7 @@ ExplainService（默认/权限/状态/审批统一解释）
 |---|---|---|
 | `YamlRuleAdapter` | `RuleProvider.get_rules(meta_obj)` | 遍历 registry 中的 BO，展开 YAML 规则 |
 | `DocFlowAdapter` | `doc_flow_rule` 表（现有 `get_rule` 仅单条，列表需补只读查询） | 含 `status`，只读 |
-| `ApprovalAdapter` | `approval_policies` + conditions + steps | 一策略一描述符，条件/步骤放详情 |
+| `ApprovalAdapter` | BO YAML `approval` 声明（现状）；`approval_policies` + conditions + steps（DB 化后） | 一策略一描述符，条件/步骤放详情；当前实现读 YAML 声明（§13.3） |
 | `ControlParameterAdapter` | `control_parameter_defs` / `_values` | 已 BO 化，直接查询 |
 | `LineTypeAdapter` | `line_types` / `line_type_assignments` | 已 BO 化，直接查询 |
 | `StateMachineAdapter` | `state_machine_loader` / BO YAML | 只读 |
@@ -678,7 +696,7 @@ ExplainService（默认/权限/状态/审批统一解释）
 
 - **不新增表、不写库**；目录结果按请求实时聚合，可加 60s 进程内缓存（NFR-003）。
 - 目录与运行时共用同一读取入口；禁止在目录服务里复制匹配算法。
-- 控制参数 / 行类型适配器接收 `include_draft: bool = False`：默认仅取 `status='active'`（与运行时一致），发布流与试算需显式开启（见 §9.6.7 / §9.6.8）。
+- 控制参数 / 行类型适配器 MUST 支持 `include_draft: bool = False`：默认仅取 `status='active'`（与运行时一致），发布流与试算需显式开启（见 §9.6.7 / §9.6.8）。**当前实现无该参数**，默认过滤口径见 §13.3 F-13-11。
 - 详情页的「规则原文」由适配器返回：YAML 规则给声明块，DB 规则给行快照。
 
 #### 9.6.3 规则中心页面信息架构
@@ -698,7 +716,7 @@ ExplainService（默认/权限/状态/审批统一解释）
 - 默认列表列：`rule_key`、名称、类型、载体、作用对象、适用因子、可配置、状态、更新时间、操作。
 - 默认行操作：查看详情（抽屉）、编辑（跳转 BO 详情/抽屉）、查看声明、**试算**（跳转试算页签并预填因子）、复制 `rule_key`；发布 / 回滚为 §9.6.8 的链接动作（`links.publish` / `links.rollback`）。
 - 筛选条件可写入 URL query，支持从单据详情反向跳转（带 `bo` / `rule_type`）。
-- 元数据缺失或页面配置不可解析时，前端 MUST 回落到「全部规则 + 默认列」，并按 `not_instrumented` 口径提示，不得白屏。
+- 接口不可用或响应不可解析时，前端 MUST 回落到「全部规则 + 默认列」的**纯结构**兜底（不得包含业务取值），并按 `not_instrumented` 口径提示，不得白屏；服务端元数据非法则在加载期失败，不下发降级配置（§13.4）。
 
 #### 9.6.4 单据规则推导的展示设计（v1.7 细化）
 
@@ -946,7 +964,7 @@ draft ──(校验+试算通过)──> active ──(停用)──> inactive
 
 ```yaml
 # meta/schemas/rule_center_view.yaml
-version: 1
+version: 2
 title: 规则中心
 permission:
   read: rule_center:rule_center_read
@@ -1005,7 +1023,7 @@ simulate:
 
 | 元数据节点 | 渲染组件 | 说明 |
 |---|---|---|
-| `tabs[].columns` | `GenericObjectList` 列定义 | 列 key 对应 `RuleDescriptor` 字段；未知 key 记 warn 并跳过 |
+| `tabs[].columns` | `GenericObjectList` 列定义 | 列 key 对应 `RuleDescriptor` 字段；未知 key 为**加载期错误**（§13.4），不得静默跳过 |
 | `filters` | FilterBar 配置 | 筛选项生成规则同列定义，不写死下拉值 |
 | `actions` | 行操作注册表 | `detail / edit / view_source / simulate / publish / rollback / copy_key / rerun` 为固定动作类型（`rerun` 于 v2 新增，用于推导页签） |
 | `detail.sections[].widget` | widget 注册表 | `code / factor_matrix / source_snippet / audit_log` 为固定 widget 类型 |
@@ -1022,7 +1040,9 @@ simulate:
 **校验与演进**
 
 - `rule_center_view.yaml` 随 BO schema 一起在加载期校验：未知 `sources` / `actions` / `widget` / 重复 `tab.id` 直接报错，阻止启动期脏配置。
-- 加载失败时前端回落「全部规则 + 默认列」（§9.6.3 末条），不白屏。
+- **集合等值与引用闭合**同时校验：视图 `sources` ↔ `RuleCatalogService.SOURCES` 双向等值；`trace.scenarios` ⊆ `TRACE_SCENARIOS`；`trace.factor_keys` ⊆ 因子轴声明；`trace.decisions` / `trace.stages` / `messages` 键等值；`filter_options` 值域封闭。矩阵、错误码与负例见 §13.4。
+- **版本与指纹**：结构变更 MUST 升 `version`；API 响应携带 `version` + 内容指纹，便于定位「前后端各缓存一版」问题（§13.3 F-13-10）。
+- 服务端加载期失败即拒绝启动；前端仅在接口不可用时回落「全部规则 + 默认列」（§9.6.3 末条），且兜底不得含业务取值（§13.3 F-13-07），不白屏。
 - 视图元数据**不参与规则解析**：试算、推导、发布校验仍分别走 `rule_simulate_service` / `rule_trace_service` 与运行时同源逻辑；改 YAML 不可能改变任何业务判定。
 
 **权限边界**
@@ -1150,6 +1170,16 @@ dimension_levels:
 - （v1.5 补充）NetSuite：SuiteBuilder、SuiteCloud Development Framework（元数据即代码）
 - （v1.5 补充）Workday：Business Process Framework、Object Management Services
 - （v1.5 补充）Odoo：ORM 元数据模型、Server Actions
+- （v2.0 补充，规则语义范畴）SAP：MDG BRFplus Configuration Guide（对属性值做 check / derive）
+- （v2.0 补充）SAP：Variant Configuration Object Dependencies（Precondition / Selection Condition / Action / Constraint / Procedure）
+- （v2.0 补充）SAP：条件技术 access sequence（候选集 + most-specific-first + 命中即停 + 回退）
+- （v2.0 补充）Oracle Fusion：Value Sets（8 种校验类型、`$FLEX$` 上下文绑定）、Cross-Validation Rules、Related Value Sets、Defaulting Rules
+- （v2.0 补充）Microsoft Dynamics 365：Business Rules（set field value / business required / visibility / lock-unlock / error message，scope=Entity/All forms/Specific form）
+- （v2.0 补充）Workday：Calculated Fields（运行时算、不落库）、Condition Rules（entry / validation / while running / exit）
+- （v2.0 补充）ServiceNow：Data Policy（服务端强制、不可绕过）、Decision Table（按 Order 逐行、首个匹配即返回）
+- （v2.0 补充）NetSuite：Custom Field 的 Validation & Defaulting（Formula + Store Value 决定是否动态重算）
+- （v2.0 补充）Odoo：`default` / `compute` / `inverse` / `domain` / `@api.constrains` / `_sql_constraints` / `onchange`
+- （v2.0 补充）DMN 1.x：hit policy（UNIQUE / ANY / PRIORITY / FIRST / COLLECT 含 Sum·Min·Max·Count）、DRD 依赖图
 
 ### 10.7 规则中心与因子治理决议（v1.4 新增，v1.5 扩展）
 
@@ -1177,6 +1207,36 @@ dimension_levels:
 - （v1.6）规则中心改为视图元数据驱动：新增 §9.6.9 与 TBD-15；FR-014 增补「只改 YAML 即可增删页签/列/筛选」验收项；§9.6.3 的 8 个页签改为 `rule_center_view.yaml` 的默认声明，不再是 Vue 组件内硬编码。
 - （v1.7）细化单据推导的可操作入口：FR-015 增补 A/B 两入口与 v1.7 验收项；IF-007 补全 query 参数、响应信封与 400/403/404 矩阵；§9.6.4 重写为「入口 + 请求/渲染契约 + 场景能力矩阵 + 空错态 + 实现差距 + T1–T4 切片」；§9.6.3 页签增至 9 个（新增「单据推导」）；§9.6.9 补 `trace.decisions` / `trace.tab` 与渲染契约行；§9.6.6 的 P1/P2 验收同步（P1 仅要求接口可用，页面入口归入 P2）。
 - （v1.8）P2 第一步「表述准确」收敛（仅新增字段，HTTP 状态与错误码不变）：①移除 `permission` 空场景——其依赖 `user_id` 而推导接口不传，属恒跳过的死分支，第二步以登录身份补回；②信封新增 `kind`（`hit/miss/skip/error/info`）与 `factor_sources`（`override/record/missing`），`detail` 升为一等字段；③`control_parameter` 改三级判定（全缺 → `missing / all_codes_missing`，部分 → `resolved / partially_resolved`，全中 → `resolved`）；④`default` 的 `detail.rules` 列出全部参与规则及 `applied/skipped/not_matched` 三态；⑤决策徽标、因子来源、空错态文案迁入 `trace.kinds / trace.factor_sources / trace.messages`，组件仅保留兜底。同步新增 §11 第二步方案（本期仅评审，不实施；全集口径已定，见 §11.9）。
+- （v2.1）新增 §13 元数据驱动与单一事实源（SSOT）规范：术语与事实源登记、`RuleDescriptor` 唯一契约、13 项 SSOT 审计（F-13-01~13）、三层闭合矩阵、派生/缓存/快照边界、INV-SSOT-1~10、验收与 TBD-26~30；同步修正 FR-012 / FR-014 验收、§9.6.1 示例（移除不存在的 `control_parameter_value` / `effective` / 数组 `factors`）、§9.6.2（审批适配器现状 + `include_draft` 待补）、§9.6.3 兜底口径、§9.6.9（未知 key 加载期失败、`version: 2`）、§12.5 示例标注。
+
+### 10.8 二次确认（规则语义范畴，v2.0）
+
+对 §12 的结论做了第二轮取证，**修正 4 处、确认 3 条**。
+
+**修正项**
+
+| # | 上一版结论 | 二次确认事实 | 处理 |
+|---|---|---|---|
+| 1 | Oracle Value Set 有「三种校验类型」 | 官方与社区共同口径为 **8 种**：None / Independent / Dependent / Table / Special / Pair / Translatable Independent / Translatable Dependent；`$FLEX$` 可绑定上下文 | 表述降级为「常用三类（Independent / Dependent / Table）」，完整枚举入 §12.3 |
+| 2 | NetSuite 无声明式规则引擎（覆盖矩阵记 ○） | 官方「Creating Formula Fields」：custom field 的 **Validation & Defaulting** 子页签支持 Formula（NetSuite Tags + SQL Expressions）；勾选 `Store Value` 决定是否动态重算 | 矩阵「派生/计算」由 ○ 上调为 ◐，备注「声明式但无独立规则对象」 |
+| 3 | SAP MDG 的 required / referential integrity / value range 依据为期刊论文 | 找到 SAP MDG BRFplus Configuration Guide（厂商培训材料），原文「use BRFplus to define rules for checking attribute values or to derive them」 | 证据级别由「第三方期刊」升为「厂商培训材料」，结论不变 |
+| 4 | 「SaaS 平台普遍缺少 access-sequence 式 specificity」表述为事实 | 未找到任一厂商规范承认「缺失」；该判断由本项目横向对比归纳得出 | 标注为**本方案归纳，非厂商规范**，与 §11.2 的置信度纪律一致 |
+
+**确认项（结论不变，可作设计依据）**
+
+1. Workday 官方明确四类 condition rule：`entry` / `validation` / `while running` / `exit`。
+2. ServiceNow Data Policy 服务端强制：官方 SDK 原文「enforce field mandatory and read-only rules server-side across all interfaces … cannot be bypassed, unlike client-side UI Policies」。
+3. SAP 条件技术为「候选集 + most-specific-first + 命中即停 + 回退」，与 determination 同构。
+
+**顺带发现的实现不一致（非研究结论）**
+
+`rule_center_view.yaml` 的 `filter_options.rule_type` 含 `line_type`，而 `RuleCatalogService._line_type_descriptors()` 实际下发 `rule_type='line_type_assignment'`，该筛选项当前恒为空。归入 TBD-22 一并修正。
+
+**对既有章节的影响**
+
+- §7.1 技术约束增补「不新增 `RuleType` 枚举」的边界（已改）。
+- FR-014 的 `rule_type` 筛选需拆为 `semantic_type` / `source` 两组（TBD-22）。
+- §12 按修正后口径编写；`constraint` 二级化（TBD-23）不改变现有 `RuleEngine` 求值路径。
 
 ---
 
@@ -1322,3 +1382,322 @@ edges:
 | TBD-19 | 跨单据深度 | 不跨 / 一跳 / 可配 | 待评审（建议一跳起步） |
 | TBD-20 | trace 持久化 | 不落库（现状）/ 落库 + 保留期 | 待评审（建议维持不落库） |
 | TBD-21 | `permission` 场景回补 | 不补 / 以登录身份补 | 待评审（建议 L1 以会话用户补，禁止 query 传入） |
+
+---
+
+## 12. 规则语义范畴与类型分层（v2.0 新增，方案待评审）
+
+> 触发：FR-014 的规则中心已能聚合 8 类来源，但「规则类型」在实现里同时承担了**语义**（`default`）、**来源**（`control_parameter`）、**场景**（`doc_flow`）三种含义。新增规则形态时无法判断该不该加枚举，筛选也无法按「约束 vs 赋值」这类真正想知道的口径切分。
+
+### 12.1 四个正交维度
+
+| 维度 | 回答的问题 | 取值 | 承载位置 |
+|---|---|---|---|
+| 语义 | 这条规则产出什么 | 赋值 / 约束 / 决策 / 动作（§12.2） | 元模型 `semantic_class` + `semantic_type` |
+| 求值时机 | 什么时候生效 | 加载期 / 保存前 / 保存时 / 保存后 / 查询时 / 异步 | 元模型 `stage`（与 §11.3 的 `stage` 同源） |
+| 作用域 | 对谁生效 | 字段 / 跨字段 / 单记录 / 记录集合 / 单据流 | 元模型 `scope`（复用 `RuleScope`：field / cross_field / object / set / cross_object；`set` 为待补值，单据流用 `cross_object`） |
+| 表达形式 | 怎么算出来 | 声明式 / 决策表 / 表达式 / 脚本 | 载体（L1 YAML / L2 DB / L3 Python） |
+
+**不变量**：任一规则都能在四轴上各取一值；不得用单一 `rule_type` 同时编码多轴。四轴中只有「语义」进目录筛选，「时机 / 作用域」进详情，「表达形式」进 `layer`。
+
+### 12.2 语义四主类与 16 子类
+
+| 主类 | 子类 | 产出 | 判定所需参照系 | 本项目现状 |
+|---|---|---|---|---|
+| **ASSIGN** 赋值 | `default` 默认 | 字段值 | 因子匹配 | 已有 `RuleType.DEFAULT` |
+| | `derivation` 派生 | 字段值 | 其他字段 / 其他记录 | 已有 `RuleType.DERIVATION`（声明多、执行少） |
+| | `computation` 计算 | 字段值 | 表达式 | 已有 `RuleType.COMPUTATION` |
+| | `aggregation` 聚合 | 字段值 | 子记录集合 | **缺口**：现用 `computation` 表达，无 `group_by` 契约 |
+| **CONSTRAINT** 约束 | `value_list` 值列表 | 通过 / 拒绝 | 本地枚举 | 已有（`VALIDATION` + enum） |
+| | `range` 区间 | 通过 / 拒绝 | 区间 | 已有（`VALIDATION`） |
+| | `reference` 参照完整性 | 通过 / 拒绝 | 外部实体存在性 | **缺口**：仅外键存在性，无「状态 / 组织」限定参照 |
+| | `cross_field` 跨字段 | 通过 / 拒绝 | 同一记录其他字段 | 已有（`VALIDATION` / `CONSTRAINT`） |
+| | `uniqueness` 唯一性 | 通过 / 拒绝 | 全集合 | **缺口**：仅 DB 唯一索引，无业务口径的条件唯一 |
+| | `cross_record` 跨记录 | 通过 / 拒绝 | 其他记录 | **缺口**：散落在 L3 guard service |
+| **DECISION** 决策 | `determination` 确定 | 候选值 / 分支 | 候选集 + 优先级 + 回退 | **部分**：`control_parameter` 已实现候选链，未抽象为通用能力 |
+| | `decision_table` 决策表 | 输出行 | 条件矩阵 | **缺口**：现用多条 `derivation` 近似，无 hit policy |
+| **ACTION** 动作 | `trigger` 触发 | 副作用 | — | 已有 `RuleType.TRIGGER` |
+| | `state_transition` 状态流转 | 目标状态 | 状态图 | 已有 `RuleType.STATE_TRANSITION` |
+| | `approval` 审批 | 审批链 | 策略条件 | 已有（DB 层），无 `RuleType` 枚举 |
+| | `doc_flow` 单据流 | 目标单据 / 字段 | 上下游关系 | 已有（DB 层），无 `RuleType` 枚举 |
+| | `notification` 通知 | 消息 | 事件 | **缺口**（一期非目标） |
+
+**三条边界规则**
+
+1. **「计算算不算规则」**：判定标准为「可声明、可禁用、可追溯、可测试」四特征同时满足。`computation` / `aggregation` 属**赋值型**（产出值 + 依赖图），`constraint` 属**判定型**（产出结论 + 反例）；在 trace 中分别落在 `output` 与 `decision`，不得混用。
+2. **`permission` 不纳入业务规则范畴**：受众、Explain 语义、授权模型均不同，维持 TBD-8「跳转权限中心」。
+3. **`default` ≠ `determination`**：前者单向幂等（无值则填），后者有候选集与回退（命中即停）。当规则声明 `candidates` + `hit_policy` 时按 determination 处理，否则按 default。
+
+### 12.3 约束子类的参照系（修正后口径）
+
+「约束」的本质差异不是字段数，而是**判定所需的参照系**：
+
+| 参照系 | 子类 | 代表实现 | 可配置边界 |
+|---|---|---|---|
+| 本地枚举 | `value_list` | Oracle Value Set **Independent**；D365 `optionset` | 值集可扩，主键冻结 |
+| 区间 | `range` | Oracle Value Set 的 min / max；D365 Business Rule | 阈值可配 |
+| 外部实体存在性 | `reference` | Oracle Value Set **Table**；SAP MDG referential integrity | 目标对象 / 过滤条件可配 |
+| 上下文绑定 | `reference`（受限） | Oracle Value Set **Dependent**（`$FLEX$`）；Salesforce Dependent Picklist | 父字段可配 |
+| 其他字段 | `cross_field` | Oracle Cross-Validation Rules；Odoo `@api.constrains` | 表达式可配（白名单内） |
+| 全集合 | `uniqueness` | Odoo `_sql_constraints`；Salesforce Duplicate Rules | 匹配键 + 模糊度可配 |
+| 其他记录 | `cross_record` | ServiceNow Data Policy；NetSuite `validateField` | 一期不配置化 |
+
+> Oracle Value Set 完整枚举为 **8 种**（None / Independent / Dependent / Table / Special / Pair / Translatable Independent / Translatable Dependent）；上表只列与本项目相关的 4 种，`Pair` / `Translatable` 依赖多语言主数据，暂不引入（见 §10.8 修正 1）。
+
+### 12.4 命中策略（hit policy）通用化
+
+决策类规则统一用 `hit_policy` 表达「多条命中怎么处理」，不再把 `specificity_rank` 做成 `control_parameter` 的私有字段：
+
+| `hit_policy` | 语义 | 头部对应 | 本项目 |
+|---|---|---|---|
+| `first` | 按稳定排序取首个命中 | SAP access sequence；ServiceNow Decision Table Order；Drools salience | `default` / `control_parameter` 现状 |
+| `unique` | 至多一条命中，多条即冲突 | DMN `UNIQUE` | 待补 |
+| `priority` | 取声明优先级最高的命中 | DMN `PRIORITY` | 待补（可用 `first` + priority 排序等价） |
+| `collect` | 收集全部命中 | DMN `COLLECT`（含 Sum / Min / Max / Count） | 待补（与 `aggregation` 一并） |
+
+**约束**
+
+- `hit_policy=first` 时 MUST 声明稳定排序键（`priority` 或 `specificity_rank`），否则加载期报 `HIT_POLICY_UNORDERED`。
+- `hit_policy=unique` 出现多命中时报 `RULE_MULTI_MATCH`，并回传全部 `rule_id`，不得静默取第一条。
+- `hit_policy` 只对 `default` / `determination` / `decision_table` / `aggregation` 有意义；`constraint` 与 `action` 无多命中语义，声明该字段即加载期报错。
+
+### 12.5 与现有 `RuleType` 的映射（不新增枚举）
+
+| 现有 `RuleType` | `semantic_class` | `semantic_type` | 备注 |
+|---|---|---|---|
+| `DEFAULT` | assign | default | 声明 `candidates` 时升格为 determination |
+| `DERIVATION` | assign | derivation | |
+| `COMPUTATION` | assign | computation / aggregation | 有 `group_by` 时判 aggregation |
+| `VALIDATION` | constraint | value_list / range / cross_field | 由 `constraint_kind` 细分 |
+| `CONSTRAINT` | constraint | cross_field / cross_record | |
+| `TRIGGER` | action | trigger | |
+| `STATE_TRANSITION` | action | state_transition | |
+| `PERMISSION` | —（排除） | — | 不进规则中心（TBD-8） |
+| （DB 层，无枚举） | action | approval / doc_flow | `legacy_rule_type` 保持兼容 |
+
+**`RuleDescriptor` 三轴拆分**（§9.6.1 的非破坏性增补）：
+
+```json
+{
+  "rule_key": "control_parameter:PAYMENT_TERM",
+  "semantic_class": "assign",
+  "semantic_type": "default",
+  "constraint_kind": null,
+  "hit_policy": "first",
+  "source": "control_parameter",
+  "stage": "before_save",
+  "scope": {"kind": "field", "bo": "sales_order"},
+  "legacy_rule_type": "control_parameter"
+}
+```
+
+- `source` **已存在**（§9.6.1），取值与 `RuleCatalogService.SOURCES` 一致（`bo_yaml` / `doc_flow` / `approval` / `control_parameter` / `line_type` / `state_machine` / `numbering` / `validation`）；本次不改其语义。
+- 需要拆的是 `rule_type`：现状既装语义（`default` / `validation`）又装来源（`line_type_assignment`）。目标为新增 `semantic_type`（+ 可选的 `semantic_class` / `constraint_kind` / `hit_policy`），旧值平移到 `legacy_rule_type`。
+- 上述 JSON 为三轴**增量示意**，不是完整描述符；完整字段与命名（`scope_bo` 为字符串、`source_tags`、`factors` 为对象）以 §13.2 为唯一契约，禁止并存 `scope: {kind, bo}` 两套形状。
+- `legacy_rule_type` 一期保留供前端展示与筛选；二期前端改读 `semantic_type` + `source` 后删除。
+- 视图元数据 `filter_options.rule_type` MUST 拆为 `semantic_type` 与 `source` 两组，并同时修正 `line_type` ↔ `line_type_assignment` 命名不一致（§10.8）。
+
+### 12.6 缺口与优先级
+
+| 缺口 | 归入 | 优先级 | 理由 |
+|---|---|---|---|
+| `reference` 参照完整性 | FR-012 加载期校验扩展 | P1 | 只声明校验，不新增执行引擎 |
+| `uniqueness` 条件唯一 | FR-012 + 索引生成 | P1 | 可复用迁移，风险低 |
+| `determination` 通用化 | `default` + `candidates` + `hit_policy` | P1 | 复用 `control_parameter` 已验证的候选链 |
+| `cross_record` | 维持 L3 + 目录只读展示 | P2 | 需集合级求值，性能与权限未评估 |
+| `aggregation` | `computation` 增 `group_by` 契约 | P2 | 现有单据已有汇总需求 |
+| `decision_table` | 规则试算 + trace 渲染 | P2 | 需 hit policy；§11.2 / §11.9 已把「仅以行号表达命中」与「行号定位」列为非目标，故命中须回传 `rule_id`（可选 `row_key` 仅供人工定位） |
+| `notification` | 一期非目标 | — | 属消息基础设施，不进规则收敛范围 |
+
+### 12.7 不变量
+
+1. 新增规则形态 MUST 优先用正交属性表达；确需新增 `RuleType` 时须证明「无法用 `semantic_class` + 子属性表达」，并在评审记录中留证。
+2. API 响应中的 `rule_type` 不得再承担来源含义；兼容字段统一命名 `legacy_rule_type`。
+3. 任何 `hit_policy=first` 的规则 MUST 有稳定排序键，保证「同一输入同一结果」。
+4. 语义分类只影响目录展示与加载期校验，不改变现有执行路径；一期不改 `RuleEngine.execute_rules` 的求值顺序。
+
+### 12.8 待决策
+
+| ID | 事项 | 选项 | 建议 |
+|---|---|---|---|
+| TBD-22 | `rule_type` 三轴拆分 | 保持单字段 / 增 `semantic_class`+`semantic_type`+`source` / 仅前端拆 | 增字段 + `legacy_rule_type` 兼容（§12.5），并修 `line_type` 命名 |
+| TBD-23 | `constraint` 二级化 | 不拆 / 按参照系拆 6 类 / 只拆 value_list+range | 按参照系拆，由 `constraint_kind` 承载 |
+| TBD-24 | `hit_policy` 落地范围 | 仅决策类 / 全部规则 | 仅 `default` / `determination` / `decision_table` / `aggregation` |
+| TBD-25 | `reference` / `uniqueness` 实施批次 | M1 / M4 之后 | M4 之后（先有目录与健康检查，再补校验） |
+
+---
+
+## 13. 元数据驱动与单一事实源（SSOT）规范（v2.1）
+
+> 本节不新增功能，只回答四个问题：**同一语义由谁声明、谁读取、谁只能派生、谁必须失败**。
+> 与本节冲突的旧表述（含 §9.6.1 / §9.6.2 / §9.6.9 的示例与碎句）以本节为准。
+
+### 13.1 事实源分层与术语
+
+| 术语 | 定义 | 可写 | 可读 |
+|---|---|---|---|
+| 事实源 owner | 某类语义的唯一权威载体 | 仅其写入入口 | 任何人经唯一读取入口 |
+| 投影 projection | 为展示/检索做的实时归一，不新增语义 | 否 | 只读 owner |
+| 派生 derived | 由 owner 计算出的值（`rule_key` / `source_tags` / `scope_of` / `factor_keys` / `links`） | 否 | owner 计算并下发；消费方不得复算 |
+| 缓存 cache | 进程内短期副本 | 否 | 失效即重建；禁止写 DB/文件、禁止跨进程 |
+| 快照 snapshot | 历史时点副本（审计） | 仅审计表 | 仅回滚重放；运行期禁止读取 |
+
+四层归属不变（§1.1）；**视图元数据是呈现层 overlay，不是第四类业务事实**：不得承载判定、取值或第二份枚举。
+
+**事实源登记表**
+
+| 事实 | owner | 唯一读取入口 | 允许的投影/派生 | 禁止 |
+|---|---|---|---|---|
+| BO 规则定义 | BO YAML `rules` | `RuleProvider.get_rules` | 目录描述符 | 业务代码直接遍历 `meta_obj.rules`（FR-010 豁免除外） |
+| 控制参数/行类型/审批/单据流 | L2 表（已 BO 化） | 各域 store / resolver | 目录、试算、推导 | 目录服务复制匹配算法 |
+| 规则目录 | 实时聚合 | `RuleCatalogService.list_rules` | 前端表格 | 落库、另建目录表 |
+| `rule_key` | 键生成器（唯一 helper） | 所有消费方 import | — | 各服务自行拼接前缀 |
+| 视图结构（页签/列/筛选/动作/分区） | `rule_center_view.yaml` | `GET /rules/view-config` | 前端通用壳 | Vue 内硬编码页签/列/业务文案 |
+| 枚举值域（source/scenario/stage/decision/kind/action/widget） | 代码常量 / `models_enums` | 对应服务常量 + 目录 API | YAML 只引用 id | YAML 或前端另立同义列表 |
+| 展示文案（label/messages/kinds/scopes） | `rule_center_view.yaml` | view-config | 前端渲染 | 前端业务中文常量、后端拼中文 |
+| 生效态（active/draft） | 主表 `status` | 各域 resolver（只读 active） | 目录行状态 | 另建草稿表；审计表参与运行读取 |
+| 可编辑目标（BO/表/字段） | 各来源适配器声明 | 目录 `links.edit` | 前端跳转、发布服务 | 前端 `source→table` 映射、发布服务 `TARGETS` 常量 |
+| 因子轴 | 因子维度声明（唯一） | 目录/推导 API 下发 `factor_keys` | YAML 只放 labels | 后端、YAML、前端各存一份数组 |
+
+### 13.2 `RuleDescriptor` 契约（唯一定义处）
+
+| 字段 | 类型 | 必填 | owner | 说明 |
+|---|---|---|---|---|
+| `rule_key` | string | 是 | 键生成器 | `{source}:{natural_key}`，全局唯一 |
+| `name` | string | 是 | 来源 | 缺省回落 `rule_key` |
+| `source` | enum(`SOURCES`) | 是 | 代码 | **载体 carrier**，不是业务域 |
+| `source_tags` | string[] | 是（可空） | 目录派生 | 逻辑归属（如 `validation`）；不得冒充 carrier |
+| `rule_type` | string | 是 | 来源/代码 | 过渡期可为语义值或来源派生值（`control_parameter` / `line_type_assignment` / `doc_flow` / `approval`）；**不得为空** |
+| `legacy_rule_type` | string? | 否 | 目录 | §12.5 拆分后保留旧值，二期删除 |
+| `semantic_type` / `semantic_class` / `constraint_kind` / `hit_policy` | enum? | 否（预留） | 代码 | §12.5 目标字段；未完整落地前不得半套下发 |
+| `scope_bo` | string | 是（全局规则可空） | 来源 | 作用 BO；规划 `scope{kind,bo}` 见 TBD-22 |
+| `factors` | object | 是 | 来源 | 键为因子轴；`domain` 为业务域投影；未声明为 `null` |
+| `layer` | enum | 是 | 来源 | `L1` / `L2` / `L3` |
+| `configurable` | bool | 是 | 来源 | 仅 L2 可编辑域为 `true` |
+| `status` | enum | 是 | 来源 | `active` / `inactive` / `draft`；草稿与生效值同表 |
+| `priority` | int? | 否 | 来源 | first-match 排序辅助 |
+| `updated_at` | ISO8601 | 是 | 来源 | 目录不另维护时间 |
+| `detail` | object | 是 | 来源 | 原文/快照/取值矩阵，只读 |
+| `links` | object? | 否 | 适配器 | `edit` / `publish` / `rollback` / `explain`；M1 未实现（F-13-05） |
+
+约束：
+
+1. 新增/改名字段 MUST 先改本节表格，再改实现与示例；禁止只在示例中出现。
+2. 消费方（试算 / 推导 / 发布 / 前端）禁止自行拼接 `rule_key`、推导因子键、维护 `source → 目标表`。
+3. `source` 过滤只匹配 carrier；逻辑归属用独立 `tag` 过滤（TBD-26）。
+4. 同一字段不得同时下发两套形状（例如 `scope_bo` 与 `scope{}` 并存）；过渡期只能有一套，另一套标注「预留」。
+
+### 13.3 双写 / 双声明审计（本次检查结论）
+
+| ID | 第二事实源 | 证据 | 风险 | 处置 | 优先级 |
+|---|---|---|---|---|---|
+| F-13-01 | 来源枚举两处声明 | `rule_catalog_service.py:25-31`；`rule_center_view.yaml:19-38`；`_validate_view_config`（`rule_catalog_service.py:292-316`）只校验页签引用，不做集合等值 | 单侧新增来源 → 页签请求未知来源或来源无文案；启动不报错 | 加载期双向等值（§13.4） | P0 |
+| F-13-02 | 推导值域三处声明 | `rule_trace_service.py:26`（scenarios）、`:33`（DIMENSION_FIELDS）、`:37`（DECISION_KINDS）、`:58`（STAGE_MAP）；`rule_center_view.yaml:191/201/213`；前端 `RuleCenterPage.vue:417`、`RuleTracePanel.vue:289` | 改一处漏一处 → 选项与后端不认、分组错位、数组漂移 | 代码为值域 owner；YAML 只放文案；API 下发 `factor_keys`；前端删数组 | P0 |
+| F-13-03 | `rule_type` 筛选项已漂移 | `rule_center_view.yaml:93`；实际值 `rule_catalog_service.py:110/152/185/212/243` | `line_type` ≠ `line_type_assignment` ⇒ 该筛选项恒空；缺 `state_transition` / `permission` ⇒ 无法筛选；来源值混入语义轴 | 按 §12.5 拆 `source` / `semantic_type`；候选值由描述符值域派生或等值校验；删除手写列表 | P0 |
+| F-13-04 | `rule_key` 生成四处重复 | `rule_catalog_service.py:114/152/185/212/243`；`rule_simulate_service.py:252/307`；`rule_trace_service.py:423/446`；`rule_config_publish_service.py:412` | 前缀/天然键格式改动不同步 → 详情、历史、试算互相找不到 | 单一键生成器，全部 import（§13.2） | P0 |
+| F-13-05 | 可编辑目标两处硬编码 | `rule_config_publish_service.py:26`（`TARGETS`）；`RuleCenterPage.vue:427`（`TARGET_BY_SOURCE`）、`:536` 使用；目录未下发 `links` | 新增可编辑来源要改后端+前端，违背 FR-014「零改动」 | 适配器声明 `edit/publish target`，目录下发 `links`；删除两处常量 | P1 |
+| F-13-06 | 契约存在两套示例 | §9.6.1 示例（`source=control_parameter_value`、`scope{}`、`factors[]`、`effective`、`links`）vs §12.5 示例 vs 实现（`scope_bo`、`factors{}`、无 `links`） | 前后端按不同示例实现，联调才暴露 | §13.2 唯一定义；§9.6.1 示例已校正；预留字段显式标注 | P1 |
+| F-13-07 | 前端文案/选项第二份 | `RuleCenterPage.vue:369`（`FALLBACK_CONFIG`）、`:418`（`SIMULATE_HINTS`）、`:431`（`ACTION_LABELS`）、`:432`（`BLOCK_LABELS`）、`:212/214/221/273/304/307/314/317/322`（表格与按钮中文）；`RuleTracePanel.vue:292`（`FALLBACK_MESSAGES` 与 `rule_center_view.yaml:288` 同键重复） | 改 YAML 不生效；中英文双份；违反 FR-014 | 前端仅保留通用交互动词；业务文案全量入 YAML；兜底只留空态，由契约测试锁定键集合 | P1 |
+| F-13-08 | `source` 过滤混用逻辑归属 | `rule_catalog_service.py:369-374`（`source in wanted or wanted ∩ source_tags`）、`:111`（`validation` 标签） | `source=validation` 返回 carrier=`bo_yaml` 的规则；同一筛选两种语义，结果不可解释 | `source` 只匹配 carrier；新增 `tag` 过滤；`validation` 从 sources 降为 tag（TBD-26） | P1 |
+| F-13-09 | 未知枚举静默降级 | `rule_catalog_service.py:369-385` 无值域校验（未知值 → 空列表）；`rule_center_view.yaml:232`「未知场景回落通用两列」；§9.6.9 原有「未知 key 记 warn 并跳过」（v2.1 已改为加载期失败）；前端 `RuleCenterPage.vue:798/802` 文案缺失回落 key | 拼写错误表现为「没数据 / 英文键」，无告警 | 请求值域 → 400；元数据未知键 → 加载期失败；来源读失败 → `sources.status=error` + 健康检查 | P1 |
+| F-13-10 | 版本与配置指纹缺失 | YAML 实际 `version: 2`（§9.6.9 示例已于 v2.1 对齐）；`get_view_config` 不校验版本；API 不回传 hash | 破坏性改版无法识别；前端缓存无法判断失效；文档与文件漂移 | 加载期校验受支持版本；view-config 回传 `{version, hash}`；破坏性变更升版登记 | P2 |
+| F-13-11 | 草稿可见性双机制 | §9.6.2 要求 `include_draft`，实现无该参数；前端以 `status=active` 默认过滤 | 文档与实现两套口径；目录与运行时可能不一致 | 二选一写入 §9.6.2；生效态判定收敛为单一函数 | P2 |
+| F-13-12 | 因子轴四处声明 | `rule_trace_service.py:33`；`rule_center_view.yaml:213`；`RuleCenterPage.vue:417`；`RuleTracePanel.vue:289` | 新增因子需改四处 | 因子轴元模型/后端单一常量；API 下发；YAML 只放 labels（TBD-27） | P2 |
+| F-13-13 | 缓存与降级边界未成文 | `rule_catalog_service.py:329-345`（来源异常降级）、`:276-290`（view-config 进程缓存，无失效入口） | 有人把「来源读失败」当「空目录」；发布后目录最长 60s 旧值 | 明确两层语义（§13.4）；发布/回滚后主动失效缓存；缓存不得持久化 | P2 |
+
+### 13.4 加载期闭合校验与运行期零解析
+
+三层语义：
+
+- **L0 加载期（启动 / CI）**：封闭枚举与引用关系必须闭合，任一不满足 → 启动失败（配置错误，错误码稳定）。视图元数据随 BO schema 一起校验。
+- **L1 请求期**：用户输入（筛选值、推导参数）值域校验 → 400；不得静默返回空结果。
+- **L2 运行期**：规则解析只读 owner；视图只读内存副本；来源读取失败允许降级，但 MUST 在响应 `sources.status` 与健康检查中显式可见。
+
+**闭合矩阵**
+
+| 集合 | owner | 校验 | 未闭合处置 |
+|---|---|---|---|
+| view `sources` | `RuleCatalogService.SOURCES` | 双向等值 | 启动失败 |
+| `tabs[].sources` | `SOURCES` + `NOT_INSTRUMENTED` | ⊆；`not_instrumented` 不得出现在要求数据的页签 | 启动失败 |
+| `tabs[].kind` | `{table, simulate, health, rule_trace}` | 封闭枚举 | 启动失败 |
+| `tabs[].columns` | `column_labels` 键 | 引用闭合 | 启动失败（取消 warn 跳过） |
+| `tabs[].filters` | `filter_labels` + 已实现筛选项 | 引用闭合 | 启动失败 |
+| `tabs[].actions` | 动作注册表 | 封闭枚举 | 启动失败 |
+| `detail.sections[].widget` | widget 注册表 | 封闭枚举 | 启动失败 |
+| `trace.scenarios` | `TRACE_SCENARIOS` | ⊆（未接入场景不得出现在 UI） | 启动失败 |
+| `trace.scenario_labels` / `scenario_rules` / `messages` / `source_types` | `trace.scenarios` + 代码输出 | 键集合等值 | 启动失败 |
+| `trace.stages` | `STAGE_MAP` 值域 | 键集合等值 | 启动失败 |
+| `trace.factor_labels` | 因子轴 | 键 ⊆ 因子轴 | 启动失败 |
+| `trace.scopes` / `decisions` / `kinds` | `scope_of` / `DECISION_KINDS` | 值域等值（文案可多不可少） | 启动失败 |
+| `filter_options.*` | 静态封闭（status/severity/enabled/configurable）或描述符值域（source/rule_type/domain） | 静态=封闭枚举；动态=服务端派生 | 手写动态列表 → 启动失败 |
+| 描述符 `rule_type` | `RuleType` 8 值 + 已登记来源派生值 | 非空且 ∈ 白名单 | 来源读取失败（`status=error`） |
+| 描述符 `factors` 键 | 因子轴 | ⊆ | 记 error 并进健康检查 |
+| 请求 `source` / `rule_type` / `status` | 上述值域 | ∈ | 400 `RULE_FILTER_UNKNOWN_VALUE` |
+
+**运行期零解析**：YAML 只在加载时解析一次；请求路径不得读文件、不得重新拼装枚举。目录 60s 缓存与 view-config 进程缓存都只是派生副本，失效即重建。
+
+### 13.5 派生、缓存、快照的边界
+
+- 目录 / 推导 / 试算 MUST NOT 落库（与 FR-015 同口径）；审计只记录写操作（发布 / 回滚）。
+- 审计快照不是运行期事实源：运行时只读主表 `status=active`；回滚是把审计内容重放为**新的主表写入**，不得让 resolver 直读历史表。
+- 缓存仅进程内；不得写 DB / 文件；发布或回滚后 MUST 主动失效目录与 view-config 缓存；缓存命中与否不得改变结果语义。
+- 派生值（`rule_key` / `source_tags` / `scope_of` / `factor_keys` / `links`）由 owner 计算下发；消费方复算即视为 SSOT 违规（F-13-04 / F-13-12）。
+- 文档派生：API 示例、Spec 示例、测试期望不得各自定义契约，统一以 §13.2 为准。
+
+### 13.6 变更影响面：审计、发布、回滚、版本
+
+- 写路径唯一：发布 = 主表状态迁移（`draft → active`，旧 `active → inactive`）；回滚 = 原子「写主表 + 记审计」；禁止只改审计。
+- 审计最小字段：`target / rule_key / action / old_data / new_data / operator / at`；`rule_key` 必须由键生成器产出。
+- 版本：
+  - 视图元数据 `version` 为整数；破坏性变更（删字段 / 删动作 / 改语义）必须升版，加载期拒绝不支持的版本。
+  - `semantic_*` 落地时，目录响应 MUST 携带 `contract_version`；前端按版本选字段，禁止猜字段。
+- 生效时间（`effective_from/to`）当前未实现（TBD-30）；落地前，任何「定时生效」需求一律走发布动作，不得在业务代码里加时间判断。
+
+### 13.7 L3 边界（不可配置化）
+
+| 类别 | 示例 | 理由 |
+|---|---|---|
+| 安全 | 认证白名单、表达式白名单、审计哈希链 | 配置化即绕过治理 |
+| 事务/并发 | 锁、序列原子性、幂等 | 正确性依赖数据库语义 |
+| 算法 | 匹配算法、集合级求值（`cross_record` / `aggregation`）、排序稳定性 | 需要可证明的复杂度与性能边界 |
+| 集成 | 外部协议、重试、熔断 | 非业务策略 |
+| 求值器 | 条件 AST 求值、沙箱 | 注入面 |
+
+配置化的准入条件（四条缺一不可）：
+
+1. 有声明 schema；2. 有加载期校验；3. 有唯一读取入口；4. 有等价性测试。缺一 → 不得配置化。
+
+**禁止措辞**：「也可配置化」「视配置而定」而不写 owner / schema / validator / 默认值 / 回滚路径。出现即视为规范缺陷。
+
+### 13.8 不变量
+
+1. **INV-SSOT-1** 一个语义只有一处声明（枚举、键格式、文案、目标映射均适用）。
+2. **INV-SSOT-2** 视图元数据只引用 id，不内联取值、业务文案或目标表。
+3. **INV-SSOT-3** 目录是投影：不落库、不复制匹配算法、不成为第二事实源。
+4. **INV-SSOT-4** 缓存 / 快照 / 历史不是运行期事实源；运行期只读 owner。
+5. **INV-SSOT-5** 未知枚举键必须失败（加载期启动失败 / 请求期 400），不得静默空结果。
+6. **INV-SSOT-6** 可配置域必须同时具备 schema、validator、唯一入口、等价性测试。
+7. **INV-SSOT-7** 文档示例必须来自实现契约；同一契约不得有第二套字段集。
+8. **INV-SSOT-8** 派生值由 owner 计算并下发，消费方不得复算。
+9. **INV-SSOT-9** 发布 / 回滚只写主表；审计只追加，不参与运行读取。
+10. **INV-SSOT-10** L3 清单内不得出现「也可配置化」；清单外新增配置化必须走 INV-SSOT-6。
+
+### 13.9 验收（可执行清单）
+
+1. 新增 `test_rule_center_view_contract.py`：逐项断言 §13.4 闭合矩阵，失败信息必须给出具体键。
+2. 目录契约测试：所有描述符必填字段完整、`rule_type` 非空、`source ∈ SOURCES`、`factors` 键 ⊆ 因子轴。
+3. 请求负例：`GET /rules?source=__x__` / `rule_type=__x__` / `status=__x__` → 400 `RULE_FILTER_UNKNOWN_VALUE`。
+4. 前端静态守卫：`RuleCenterPage.vue` 与 `RuleTrace/*.vue` 不出现 `source→table` 映射、业务中文常量、因子轴数组；白名单仅通用交互动词（查询 / 重置 / 刷新 / 关闭 / 取消 / 确定）。
+5. 发布闭环：publish 后同名规则状态与值立即可见（缓存失效）；rollback 后主表恢复且审计新增一条。
+6. 文档一致性门禁：§9.6.1 示例字段 ⊆ §13.2 表格且无表外字段（人工评审项，不写脚本）。
+7. 全部经 `python d:\filework\test.py` 执行。
+
+### 13.10 待决策（SSOT）
+
+| ID | 事项 | 选项 | 建议 |
+|---|---|---|---|
+| TBD-26 | `source` / `source_tags` / `tag` 三轴收敛 | 维持 union 过滤 / `source` 只认 carrier + 独立 `tag` | 后者；`validation` 从 sources 枚举降为 tag，避免来源与逻辑域混用 |
+| TBD-27 | 因子轴 owner | 后端常量 / 元模型 `dimension_levels.factor=true` / 目录配置 | 元模型声明，API 下发 `factor_keys`；YAML、前端只消费 |
+| TBD-28 | 文案 i18n | 单语中文 / YAML 内 `{zh,en}` / 独立 i18n key 文件 | 若近期无多语言需求，保持单语但禁止前端复制；有需求时选独立 key 文件 |
+| TBD-29 | 多租户覆盖层 | 不引入 / 引入覆盖层 | 若引入，必须定义 `tenant > org > default` 单一合并点，禁止各域自行合并 |
+| TBD-30 | 视图元数据版本、热更新与生效时间 | 重启生效 / 发布即失效缓存 / 定时生效 | 一期重启生效 + `version/hash`；「定时生效」需独立设计，禁止散落业务代码 |

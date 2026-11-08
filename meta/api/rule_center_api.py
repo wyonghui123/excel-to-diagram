@@ -23,6 +23,7 @@ from flask import Blueprint, request
 
 from meta.api._response_contract import error_response, ok
 from meta.api.decorators import require_permission
+from meta.core.rule_keys import DIMENSION_FIELDS
 from meta.core.rule_trace_service import (
     RuleTraceError,
     RuleTraceNotFound,
@@ -31,6 +32,7 @@ from meta.core.rule_trace_service import (
 from meta.services.auth_middleware import login_required
 from meta.services.rule_catalog_service import (
     RuleCatalogError,
+    RuleFilterError,
     get_rule_catalog_service,
 )
 from meta.services.rule_config_publish_service import (
@@ -82,10 +84,14 @@ def list_rules():
             domain=args.get('domain') or None,
             bo=args.get('bo') or None,
             layer=args.get('layer') or None,
+            # 管理面板默认可看到草稿；显式 include_draft=false 时只看生效态
+            include_draft=_as_bool(args.get('include_draft')) is not False,
             limit=args.get('limit') or args.get('page_size') or 50,
             offset=_offset(args),
         )
         return ok(result)
+    except RuleFilterError as e:
+        return error_response(str(e), status=400, error_code='RULE_FILTER_UNKNOWN_VALUE')
     except RuleCatalogError as e:
         return error_response(str(e), status=400)
     except Exception as e:  # noqa: BLE001
@@ -192,6 +198,8 @@ def publish_config():
             payload=payload.get('payload') or payload,
             draft_id=payload.get('draft_id'),
             user_id=user.get('user_id'), user_name=user.get('username'))
+        # 发布后目录需立即反映新态（spec §13 F-13-13）
+        get_rule_catalog_service().invalidate()
         return ok(result)
     except RuleConfigNotFound as e:
         return error_response(str(e), status=404, error_code='NOT_FOUND')
@@ -213,6 +221,8 @@ def rollback_config():
         result = get_rule_config_publish_service().rollback(
             payload.get('target'), payload.get('payload') or payload,
             user_id=user.get('user_id'), user_name=user.get('username'))
+        # 回滚后目录需立即反映新态（spec §13 F-13-13）
+        get_rule_catalog_service().invalidate()
         return ok(result)
     except RuleConfigNotFound as e:
         return error_response(str(e), status=404, error_code='NOT_FOUND')
@@ -333,7 +343,7 @@ def _offset(args) -> int:
 
 def _dims(args) -> dict:
     dims = {}
-    for field in ('org_id', 'document_type_id', 'line_type_id', 'item_group_id'):
+    for field in DIMENSION_FIELDS:
         value = args.get(field, type=int)
         if value is not None:
             dims[field] = value

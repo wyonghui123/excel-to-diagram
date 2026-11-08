@@ -269,7 +269,8 @@ def test_explain_default_envelope(monkeypatch):
 
     from meta.core.rule_explainer import explain
     result = explain('item', 'default', data={})
-    assert set(result) == EXPECTED_KEYS
+    # default 场景额外回传 detail（命中规则明细），其余场景无此键
+    assert set(result) == EXPECTED_KEYS | {'detail'}
     assert result['decision'] == 'applied'
     assert result['rule_id'] == 'R-DEF-1'
 

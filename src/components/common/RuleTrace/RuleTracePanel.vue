@@ -285,36 +285,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { getRuleCenterViewConfigCached, getRuleTrace } from '@/services/ruleCenterService'
 
-// 协议层兜底键顺序；展示顺序以视图元数据 trace.factor_keys 为准
-const DEFAULT_FACTOR_KEYS = ['org_id', 'document_type_id', 'line_type_id', 'item_group_id']
-
-// 元数据缺失时的兜底文案；正常路径以视图配置 trace.messages 为准
-const FALLBACK_MESSAGES = {
-  rerun: '重新推导',
-  copy_snapshot: '复制因子快照',
-  copied: '因子快照已复制',
-  copy_failed: '复制失败，请手动复制',
-  clipboard_unsupported: '当前环境不支持剪贴板',
-  missing_target: '请先选择单据对象并填写记录 ID',
-  no_codes_requested: '需指定控制参数编码（codes）后重跑',
-  all_codes_missing: '全部控制参数均未取到值',
-  empty_result: '未返回推导场景',
-  idle: '尚未推导',
-  failed: '推导失败',
-  factor_detail: '因子明细',
-  value_missing: '未提供',
-  forbidden: '无权查看单据推导（缺少 rule_center:rule_center_trace）',
-  not_found: '单据不存在或超出数据范围',
-  rules_all: '规则全集',
-  rules_empty: '本次推导没有可展示的规则',
-  scope_all: '全部',
-  conditions_empty: '无可核对条件',
-  condition_passed: '通过',
-  condition_failed: '未通过',
-  output_empty: '无输出',
-  truncated: '规则节点过多，已截断展示'
-}
-
 const props = defineProps({
   objectType: { type: String, default: '' },
   recordId: { type: [String, Number], default: null },
@@ -345,10 +315,8 @@ const scopeFilter = ref('all')
 let observer = null
 let started = false
 
-const messages = computed(() => ({
-  ...FALLBACK_MESSAGES,
-  ...(fetchedTrace.value.messages || {})
-}))
+// 文案全部来自视图元数据 trace.messages（spec §13：前端不得写死业务中文）
+const messages = computed(() => fetchedTrace.value.messages || {})
 
 const rerunLabel = computed(() => messages.value.rerun)
 const copyLabel = computed(() => messages.value.copy_snapshot)
@@ -384,10 +352,8 @@ const decisionMap = computed(() => ({
 const kindMap = computed(() => fetchedTrace.value.kinds || {})
 const factorSourceLabels = computed(() => fetchedTrace.value.factor_sources || {})
 const factorSources = computed(() => result.value?.factor_sources || {})
-const factorKeys = computed(() => {
-  const declared = fetchedTrace.value.factor_keys
-  return Array.isArray(declared) && declared.length ? declared : DEFAULT_FACTOR_KEYS
-})
+// 因子轴声明唯一来源：视图元数据 trace.factor_keys（spec §13 F-13-12）
+const factorKeys = computed(() => fetchedTrace.value.factor_keys || [])
 const factorLabels = computed(() => fetchedTrace.value.factor_labels || {})
 const sourceTypeLabels = computed(() => fetchedTrace.value.source_types || {})
 const scenarioRuleColumns = computed(() => fetchedTrace.value.scenario_rules || {})
@@ -657,8 +623,9 @@ function buildParams() {
   if (props.scenarios.length) params.scenarios = props.scenarios.join(',')
   const codes = normalizeCodes()
   if (codes.length) params.codes = codes.join(',')
-  for (const key of factorKeys.value) {
-    const raw = props.dims?.[key]
+  // 因子入参以调用方传入的 dims 为准，不依赖展示用元数据
+  for (const key of Object.keys(props.dims || {})) {
+    const raw = props.dims[key]
     if (raw == null || raw === '') continue
     params[key] = raw
   }
@@ -751,6 +718,8 @@ function copySnapshot() {
 }
 
 onMounted(() => {
+  // 文案/映射是渲染前提，与是否可推导无关，挂载即加载
+  ensureTraceConfig()
   if (!props.autoLoad || !canRun.value) return
   if (typeof IntersectionObserver === 'undefined') {
     start()
