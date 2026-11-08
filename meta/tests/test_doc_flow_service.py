@@ -153,3 +153,20 @@ def test_reversed_edge_does_not_block_rederive(ready_env):
 
     assert second.total_edges == 1
     assert second.skipped_replays == 0
+
+
+def test_derive_result_carries_source_identity(ready_env):
+    from meta.core.doc_flow_batch_engine import derive_batch
+
+    app_ds, platform_ds = ready_env
+    _make_rule(platform_ds, target_line_bo=LINE_BO)
+    _insert_source(app_ds, 1, 30)
+
+    batch = derive_batch(app_ds, platform_ds, "dfs-rule",
+                         [{"source_id": 1, "source_item": "", "quantity": 30}])
+
+    result = batch.results[0]
+    assert result.source_id == 1
+    assert result.source_item == ""
+    assert result.quantity == 30.0
+    assert result.target_item

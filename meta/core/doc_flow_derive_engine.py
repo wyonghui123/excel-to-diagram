@@ -72,6 +72,10 @@ class DeriveResult:
     source_qty: float
     consumed_qty: float
     open_qty: float
+    source_id: Any = None
+    source_item: str = ""
+    target_item: str = ""
+    quantity: float = 0.0
 
 
 def _num(value: Any) -> float:
@@ -131,7 +135,8 @@ def _find_edge_loose(app_ds, source_bo: str, source_id: Any, source_item: str,
 
 def _replay_result(app_ds, rule, source_bo_id: str, source_id: Any,
                    source_item: str, source_qty: float, edge_id: str,
-                   target_id: Any) -> "DeriveResult":
+                   target_id: Any, quantity: float,
+                   target_item: str = "") -> "DeriveResult":
     """构造幂等重放结果（零新增：返回既有边 + 当前池消耗口径）。"""
     consumed = _consumed_in_pool(
         app_ds, source_bo_id, source_id, source_item, rule["pool"]
@@ -140,6 +145,10 @@ def _replay_result(app_ds, rule, source_bo_id: str, source_id: Any,
         edge_id=edge_id, target_id=target_id, replay=True,
         source_qty=source_qty, consumed_qty=consumed,
         open_qty=source_qty - consumed,
+        source_id=source_id,
+        source_item=source_item,
+        target_item=target_item,
+        quantity=quantity,
     )
 
 
@@ -264,7 +273,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             if existing:
                 return _replay_result(app_ds, rule, source_bo_id, source_id,
                                       source_item, source_qty, existing,
-                                      attach_target_id)
+                                      attach_target_id,
+                                      quantity=qty, target_item=target_item)
     else:
         if edge_target_id is None:
             raise DocFlowDeriveError(
@@ -276,7 +286,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         )
         if found:
             return _replay_result(app_ds, rule, source_bo_id, source_id,
-                                  source_item, source_qty, found[0], found[1])
+                                  source_item, source_qty, found[0], found[1],
+                                  quantity=qty, target_item=found[1])
 
     # ── 3. map + create：直拷 → 改名 → 静态覆盖 → 数量默认 ───────────────
     if exact_idem and attach_target_id is not None:
@@ -346,7 +357,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         if existing:
             logger.warning("[DocFlow] 7 元组冲突但命中既有边（并发重放）: %s", e)
             return _replay_result(app_ds, rule, source_bo_id, source_id,
-                                  source_item, source_qty, existing, target_id)
+                                  source_item, source_qty, existing, target_id,
+                                  quantity=qty, target_item=ed_item)
         raise
 
     # ── 5. Σ 校验（权威判定；违反 → 异常上抛 → 事务整体回滚）─────────────
@@ -367,6 +379,10 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         edge_id=edge_id, target_id=target_id, replay=False,
         source_qty=source_qty, consumed_qty=consumed,
         open_qty=source_qty - consumed,
+        source_id=source_id,
+        source_item=source_item,
+        target_item=ed_item,
+        quantity=qty,
     )
 
 
