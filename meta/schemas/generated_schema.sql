@@ -140,6 +140,27 @@ CREATE TABLE IF NOT EXISTS attribute_scopes (
     FOREIGN KEY (attribute_id) REFERENCES attribute_definitions(id)
 )
 
+-- 属性提升: 字典层属性提升为业务表物理列（一次性切换 cutover，spec 2026-11-09 TBD-003）
+CREATE TABLE IF NOT EXISTS attribute_promotion (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_type VARCHAR(200) NOT NULL,
+    attribute_code VARCHAR(200) NOT NULL,
+    target_table VARCHAR(200) NOT NULL,
+    target_column VARCHAR(200) NOT NULL,
+    data_type VARCHAR(200) NOT NULL DEFAULT 'string',
+    sync_mode VARCHAR(200) NOT NULL DEFAULT 'cutover',
+    status VARCHAR(200) NOT NULL DEFAULT 'pending',
+    backfilled_count INTEGER NOT NULL DEFAULT 0,
+    mismatch_count INTEGER NOT NULL DEFAULT 0,
+    last_checked_at DATETIME,
+    activated_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    UNIQUE (object_type, attribute_code)
+)
+
 -- 审计日志: 审计日志记录所有业务对象的变更历史，包括创建、更新、删除操作
 CREATE TABLE IF NOT EXISTS audit_logs (
     created_by VARCHAR(200),

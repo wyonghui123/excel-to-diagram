@@ -118,6 +118,17 @@ class AttributeValueService:
                 field_name='attribute_id',
             )
 
+        # 已提升（attribute_promotion active）：物理列是唯一 owner，值表只读
+        object_type = self._object_type()
+        if object_type and self._is_promoted(object_type,
+                                             definition.get('code')):
+            raise AttributeValueError(
+                '该属性已提升为业务表物理字段，值表只剩历史副本，'
+                '请通过业务对象更新该字段。',
+                rule='attribute_promoted',
+                field_name='attribute_id',
+            )
+
         filled = [c for c in VALUE_COLUMNS if not _is_blank(data.get(c))]
         if len(filled) != 1:
             raise AttributeValueError(
@@ -170,6 +181,21 @@ class AttributeValueService:
             return []
 
     # ---------- 查询辅助（可覆写注入）----------
+
+    def _object_type(self) -> str:
+        """从值表名反推对象类型（`<object>_attribute_values`）。"""
+        suffix = '_attribute_values'
+        table = str(self.VALUE_TABLE or '')
+        return table[:-len(suffix)] if table.endswith(suffix) else ''
+
+    def _is_promoted(self, object_type: str, code: Any) -> bool:
+        if not code:
+            return False
+        from meta.services.attribute_promotion_service import (
+            AttributePromotionService,
+        )
+        return str(code) in AttributePromotionService.active_codes(
+            self.ds, object_type, [str(code)])
 
     def load_definition(self, attribute_id: Any) -> Optional[Dict[str, Any]]:
         sql = (f'SELECT id, tenant_id, code, name, data_type, multi_value_flag, status '

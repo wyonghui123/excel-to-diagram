@@ -20,6 +20,7 @@
 
 import copy
 import logging
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -55,6 +56,9 @@ _CACHE: 'OrderedDict[Tuple, Tuple[float, Dict[str, Any]]]' = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 #: (ds_token, table) → 列名集合；表结构不随运行期变化，长 TTL 即可
 _COLUMNS_CACHE: Dict[Tuple[int, str], Tuple[float, frozenset]] = {}
+
+#: promotion 落表后的物理列查询只接受安全标识符（防注入）
+_SAFE_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
 # ----------------------------------------------------------------------
@@ -232,13 +236,17 @@ class AttributeProvider:
     # ------------------------------------------------------------------
     @staticmethod
     def invalidate(object_type: Optional[str] = None,
+                   object_ids: Optional[Iterable[Any]] = None,
                    codes: Optional[Iterable[str]] = None) -> int:
         """清除匹配的缓存条目；无参清空全部。返回清除条数。"""
         code_set = {str(code) for code in codes} if codes else None
+        id_set = ({str(oid) for oid in object_ids}
+                  if object_ids is not None else None)
         with _CACHE_LOCK:
             keys = [
                 key for key in _CACHE
                 if (object_type is None or key[3] == object_type)
+                and (id_set is None or id_set & set(key[4]))
                 and (code_set is None or code_set & set(key[5]))
             ]
             for key in keys:
@@ -294,7 +302,60 @@ class AttributeProvider:
                                                         row.get('attribute_id')),
                 'definition_version': (definition or {}).get('revision'),
             })
+        self._load_promoted(object_type, ids, codes, result)
         return result
+
+    def _load_promoted(self, object_type: str, ids: Tuple[str, ...],
+                       codes: Tuple[str, ...],
+                       result: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+        """已 active 的 promotion：物理列成为唯一 owner（TBD-003 cutover）。
+
+        切表后即使物理列为 NULL 也不再回落值表；未 active 的 promotion 不参与
+        （verified 前 Provider 仍读值表）。
+        """
+        placeholders = ','.join('?' for _ in codes)
+        try:
+            rows = self.ds.query(
+                'SELECT attribute_code, target_table, target_column '
+                "FROM attribute_promotion WHERE object_type = ? "
+                "AND status = 'active' AND attribute_code IN (%s)" % placeholders,
+                [object_type] + list(codes)) or []
+        except Exception:
+            # promotion 表尚未创建时按未提升处理
+            return
+        if not rows:
+            return
+
+        id_marks = ','.join('?' for _ in ids)
+        for promo in rows:
+            code = str(promo.get('attribute_code'))
+            table = str(promo.get('target_table') or '')
+            column = str(promo.get('target_column') or '')
+            if not (_SAFE_IDENTIFIER.match(table)
+                    and _SAFE_IDENTIFIER.match(column)):
+                logger.warning('[attribute_provider] promotion 标识符非法: %r.%r',
+                               table, column)
+                continue
+            try:
+                values = self.ds.query(
+                    'SELECT id AS owner_id, %s AS value FROM %s '
+                    'WHERE id IN (%s)' % (column, table, id_marks),
+                    list(ids)) or []
+            except Exception as exc:
+                logger.warning('[attribute_provider] 已提升属性读取失败 %s.%s: %s',
+                               table, column, exc)
+                continue
+            found = {str(row.get('owner_id')): row.get('value')
+                     for row in values}
+            for oid, code_map in result.items():
+                entry = code_map.get(code)
+                if entry is None:
+                    continue
+                value = found.get(oid)
+                entry.update({
+                    'value': value,
+                    'source': SOURCE_VALUE if value is not None else SOURCE_MISSING,
+                })
 
     def _load_definitions(self, tenant: int,
                           codes: Tuple[str, ...]) -> Dict[str, Dict[str, Any]]:

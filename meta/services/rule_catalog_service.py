@@ -33,6 +33,7 @@ from meta.core.rule_keys import (
     sourcing_key,
 )
 from meta.core.rule_trace_service import TRACE_SCENARIOS
+from meta.core.rule_scenarios import SCENARIO_FACTOR_KEYS
 from meta.core.rule_targets import links_for
 
 logger = logging.getLogger(__name__)
@@ -398,13 +399,16 @@ _ADAPTERS = {
 class RuleCatalogService:
     """规则目录聚合服务（只读）。"""
 
+    #: 属性变量清单的上一版静态快照（派生失败时回退，IF-004）
+    _attribute_variables_snapshot: Optional[Dict[str, Any]] = None
+
     def __init__(self, view_path: str = VIEW_CONFIG_PATH):
         self._view_path = view_path
         self._view_config: Optional[Dict[str, Any]] = None
 
     # -- 视图元数据 ----------------------------------------------------
 
-    def get_view_config(self) -> Dict[str, Any]:
+    def get_view_config(self, data_source: Any = None) -> Dict[str, Any]:
         if self._view_config is not None:
             return self._view_config
         try:
@@ -426,12 +430,54 @@ class RuleCatalogService:
             declared_sources.get(source_id, {'id': source_id, 'label': source_id})
             for source_id in SOURCES
         ]
-        config.setdefault('trace', {})['scenarios'] = list(TRACE_SCENARIOS)
+        trace = config.setdefault('trace', {})
+        trace['scenarios'] = list(TRACE_SCENARIOS)
+        # IF-004：按场景下发因子轴（含 sourcing 四轴），旧 factor_keys 保持兼容
+        trace['scenario_factor_keys'] = {
+            scenario: list(keys)
+            for scenario, keys in SCENARIO_FACTOR_KEYS.items()
+        }
         config['filter_options'] = self._derive_filter_options(config)
+        variables = self._derive_attribute_variables(data_source)
+        if variables is not None:
+            RuleCatalogService._attribute_variables_snapshot = variables
+            config['attribute_variables'] = variables
+        elif RuleCatalogService._attribute_variables_snapshot is not None:
+            config['attribute_variables'] = (
+                RuleCatalogService._attribute_variables_snapshot)
+        else:
+            config['attribute_variables'] = {}
         # 响应自带版本与内容指纹，消费端可据此感知元数据变更（spec §13 F-13-10）
         config['hash'] = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         self._view_config = config
         return config
+
+    @staticmethod
+    def _derive_attribute_variables(
+            data_source: Any = None) -> Optional[Dict[str, Any]]:
+        """按对象派生可配置属性变量；失败返回 None（保留上一版快照）。"""
+        if data_source is None:
+            try:
+                data_source = _meta_db()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('view-config 属性变量派生失败（无数据源）: %s', exc)
+                return None
+        try:
+            rows = data_source.query(
+                "SELECT DISTINCT scope_ref FROM attribute_scopes "
+                "WHERE scope_type = 'object' AND status = 'active'") or []
+            from meta.core.attribute_provider import AttributeProvider
+            provider = AttributeProvider(data_source)
+            result: Dict[str, Any] = {}
+            for row in rows:
+                bo_id = str(row.get('scope_ref') or '')
+                if not bo_id:
+                    continue
+                result[bo_id] = provider.available_variables(bo_id)
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('view-config 属性变量派生失败，保留上一版快照: %s', exc)
+            return None
 
     @staticmethod
     def _derive_filter_options(config: Dict[str, Any]) -> Dict[str, Any]:
