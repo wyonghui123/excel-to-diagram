@@ -579,28 +579,38 @@
 **对标要点**（Fusion / SAP）：
 - Fusion：编排单元是**履行行**（fulfillment line），每条订单行一个 orchestration process 实例；流程定义由任务 / 服务 + 依赖组成；assignment rules 选流程；变更走 processing constraints → `Change Pending` → 补偿动作 `Undo/Redo/Update/Cancel/None`；拆分行用 `SPLIT_FROM_FLINE_ID` 保留血缘。
 - SAP：copy control 只管**创建时复制**，运行期单据流由 `VBFA` 独立记录；没有等价的编排 / 补偿运行时。
-- 结论：编排不是 copy control 的扩展，而是**独立的履约运行时**；塞进规则表会同时污染规则语义与版本治理。
+- 结论：编排不是 copy control 的扩展，而是**独立的履约运行时**；平台已用 Gen2 任务 / 工作流域建成该运行时（见下），因此不塞进规则表、也不另造一套。
 
-**现状差距**：
-- `doc_flow` 是同步、单事务、一次性创建；`doc_flow_reversal` 的 A/B/C 三档只解决**数量**补偿。
-- 无异步任务、无外部系统等待、无重试 / 超时、无按行流程实例、无变更传播。
-- `derivation_executor` 是字段派生，不是编排。
+**已有底座（2026-09-07 任务模型设计 + 2026-10-30 两代收口）**：
 
-**建议：暂不立项**。立项触发条件（满足任一，且业务方确认）：
+| 层 | 已有对象 / 模块 | 已覆盖能力 |
+|---|---|---|
+| 定义层 | `workflows` + [workflow_definition.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_definition.py#L1-L18) + `workflow_store.publish_workflow()` | 版本化定义、发布期校验；**主干 + 单亲分支块（明确非通用 DAG，对齐 Oracle 最小充分集）** |
+| 实例层 | `workflow_runs` + [workflow_engine.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_engine.py#L1-L25) | `start_run` 定义快照 / 任务克隆、`advance_run` 依赖求值、`run_progress` 进度派生（Run 无状态列） |
+| 执行层 | `tasks` + `task_state_machine` + `task_event_schema` | 11 态、`executor_type`（human / agent / system / cron / webhook）、retry / timeout / SLA、`doc_ref` / `line_refs`、幂等 |
+| 补偿 | `workflow_engine.compensate_task()` | 新建补偿任务 + `bo_action` 声明，对齐 Oracle `REFERENCE_STEP_INSTANCE_ID`；业务红字执行委托 [doc_flow_reversal.py](file:///d:/filework/doc-flow-worktree/meta/core/doc_flow_reversal.py)（E6 三档冲销） |
+| 触发 | `workflow_trigger`（manual / schedule / event / api）+ `workflow_schedule_scheduler` | 事件、定时、手动、API 四种起 Run 方式 |
+| 边界铁律 | [任务模型设计 §17.1–§17.3](file:///d:/filework/docs/superpowers/specs/2026-09-07-task-model-design.md#L1166-L1207) | 单据流不进任务域；边只经 BO Action 创建；不删边；边表不知道任务引擎存在 |
+
+Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task_events` / `task_worklogs`）已由 [两代收口 spec](file:///d:/filework/doc-flow-worktree/docs/specs/task-two-generation-convergence/spec.md#L88-L99) 定为 Task/Orchestration Domain 的目标形态，并有 `test_workflow_engine.py` / `test_workflow_definition.py` / `test_workflow_trigger.py` 覆盖。
+
+**结论修正**：TBD-008 不是「新建 L3 运行时」，而是**复用 Gen2 任务 / 编排域，只补接缝**。原方案中的 `process_definition / process_instance / process_step / process_event` 与既有 `workflows / workflow_runs / tasks / task_events` 语义重复，撤回。
+
+**接缝清单**（按需实施，不新增表）：
+1. **`create_document` executor**：在现有 `executor_type` 体系增加 `bo_action`（或 `system` + `config.action_id=derive`），内部调用 `derive_batch`；幂等键 `(run_id, node_id)`；遵守决策-生效协议（任务库与业务库不同库，不能同事务）。
+2. **outputs → inputs 注入**：`workflow_engine` 已显式标注未实现；补 edge 模板 `{{node.outputs.field}}`，只做 DAG 内数据流，不碰任务状态。
+3. **补偿适配**：`compensate_task()` 的 `bo_action` 落到 E6 三档冲销；不复制数量语义，不新建补偿表。
+4. **事件触发接线**：`doc_flow.created` / `bo.status_changed` → `workflow_trigger(kind=event)` 起 Run；一期按目标单头建实例，二期如需按履行行用 `tasks.line_refs` 关联。
+5. **trace 分工**：编排状态查 `workflow_runs` / `tasks` / `task_events`；`doc_flow` trace 不混入流程状态。
+
+**何时启动接线**（满足任一，且业务方确认）：
 1. 需要对接外部履约系统（WMS / TMS / OMS）并等待回调；
 2. 需要异步任务、重试、超时、死信；
 3. 出现数量冲销无法覆盖的补偿（状态回退、外部取消、部分重放）；
 4. 需要按履行行跟踪多步骤状态与拆单血缘；
 5. 出现跨单据的审批 / 履约状态机。
 
-**若立项的最小方案（L3，独立运行时）**：
-- 与 `doc_flow` 并列，不塞进 `doc_flow_rule`；规则表继续只做创建时复制。
-- 数据模型：`process_definition`（版本化）、`process_instance`（一期按**目标单头**建实例，二期按履行行）、`process_step`（`create_document` / `call_service` / `wait_event` / `notify`）、`process_event`（append-only）。
-- 步骤执行：`(instance_id, step_code)` 幂等；失败重试与超时；补偿优先调用 `doc_flow_reversal`，不复制数量语义。
-- 一期范围：`create_document`（复用 `derive_batch`）+ `notify` 两种步骤 + 手工补偿；不做 BPMN、不做通用工作流、不做按行实例。
-- 二期：按履行行实例、自动补偿、拆单血缘（对应 Fusion `SPLIT_FROM_FLINE_ID`）。
-- trace：新增独立场景 `orchestration`，`doc_flow` 信封不变；节点组不承载流程状态。
-- 明确不做：BPMN 引擎、事件总线先行、把流程状态写进 `doc_flow_rule`。
+启动顺序：先接 1 + 3 + 4（创建、补偿、触发），再按需做 2（数据流）。
 
 **方案对比**：
 
@@ -608,7 +618,8 @@
 |---|---|---|---|
 | 规则表加流程状态 | 单表简单 | 规则与运行态混存、版本与幂等难治理 | 拒绝 |
 | 通用 BPMN 引擎 | 表达力强 | 语义溢出、运维成本高 | 拒绝 |
-| 独立轻量流程运行时（本建议） | 与规则分层、可增量 | 需新增表与运行时 | 触发后立项 |
+| 新建独立 L3 运行时（原建议） | 与规则分层 | 与 Gen2 四表重复，等于重造已建成的任务域 | **撤回** |
+| 复用 Gen2 + 补接缝（本建议） | 单一事实源、已有测试与状态机、增量接线 | 需补 executor / outputs / 补偿适配 | **选中** |
 
 ### 9.4 备选方案
 
@@ -662,4 +673,4 @@
 | TBD-005 | 多源分摊 / 配额能力 | 未决：Fusion allocation % 与 SAP 配额比率语义，不同于 `allocation_pct` 计划提示 | 单独立项，本轮不实现 |
 | TBD-006 | 单据节点组（node group）的声明归属 | **M4 已定**：只读派生（§9.3.10）；长期归属（YAML 显式声明 / 独立元数据表）仍未决 | 先落 M4；出现第二个消费方或持久化需求时再定归属 |
 | TBD-007 | 头级 / 计划行级边规则表达 | **已定（阶段化）**：不新增头级边 / 角色列；P0 复用 `head_overrides` + `split_key`（零 DDL），P1 触发后新增 `head_field_map`（§9.3.11） | P0 随下一次 doc_flow 变更落 catalog 只读 `header_contract` 与校验；P1 需第二个真实需求 |
-| TBD-008 | 编排层（orchestration）是否立项 | **暂不立项**：编排是独立履约运行时；立项条件与最小方案见 §9.3.12 | 满足触发条件后单独立项，不写入规则表 |
+| TBD-008 | 编排层（orchestration）是否立项 | **已定：复用 Gen2 任务 / 工作流域**（`workflows` / `workflow_runs` / `tasks` / `task_events`），不新建编排层；按需补 `create_document` executor / outputs 注入 / 补偿适配（§9.3.12） | 满足触发条件后接线，不写入规则表、不新增 `process_*` 表 |
