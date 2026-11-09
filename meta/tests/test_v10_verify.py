@@ -1,35 +1,34 @@
+# -*- coding: utf-8 -*-
+"""V10 版本可见性验证（原一次性 ad-hoc 脚本，2026-11-07 转为正式测试）
+
+原始脚本在模块级直接发 HTTP 请求，被 pytest 收集时若 3010 无服务会直接抛
+`ConnectionRefusedError`，产生 collection error 污染全量结果。
+现改为 requires_server 标记的集成测试：服务不可达时 skip。
+"""
+import pytest
 import requests
-import json
-import sys
 
-s = requests.Session()
-login = s.get('http://localhost:3010/api/v1/auth/dev-login?username=TEST333', allow_redirects=True)
-print('login status:', login.status_code, 'cookie auth_token:', 'auth_token' in s.cookies)
+from meta.tests.shared.fixtures import backend_base_url
 
-list_resp = s.get('http://localhost:3010/api/v1/versions?page_size=50')
-print('list status:', list_resp.status_code)
-list_data = list_resp.json()
-print()
-print('version list total:', list_data.get('data', {}).get('total', '?'))
-items = list_data.get('data', {}).get('items', [])
-print('  returned', len(items), 'items')
+_BASE = backend_base_url()
 
-v10 = [v for v in items if v.get('name') == 'V10']
-print()
-if v10:
-    v = v10[0]
-    print('  [FIX VERIFIED] V10 IS visible!')
-    print('  id={id} name={name!r} product_id={pid} product_name={pname!r} visibility={vis}'.format(
-        id=v.get('id'), name=v.get('name'),
-        pid=v.get('product_id'), pname=v.get('product_name'),
-        vis=v.get('visibility'),
-    ))
-else:
-    print('  [BUG NOT FIXED] V10 still NOT visible')
-    p476 = [v for v in items if v.get('product_id') == 476]
-    print('  product 476 versions:', len(p476))
-    for v in p476[:5]:
-        print('    id={id} name={name!r} product_id={pid}'.format(
-            id=v.get('id'), name=v.get('name'), pid=v.get('product_id')
-        ))
 
+@pytest.mark.integration
+@pytest.mark.requires_server
+def test_v10_visible_in_version_list():
+    s = requests.Session()
+    try:
+        login = s.get(
+            _BASE + '/api/v1/auth/dev-login?username=TEST333',
+            allow_redirects=True, timeout=5,
+        )
+    except requests.exceptions.RequestException as exc:
+        pytest.skip('需要 3010 后端服务：%s' % exc)
+    assert login.status_code == 200
+
+    list_resp = s.get(_BASE + '/api/v1/versions?page_size=50', timeout=10)
+    assert list_resp.status_code == 200
+    items = (list_resp.json().get('data') or {}).get('items') or []
+    names = {v.get('name') for v in items}
+    assert 'V10' in names, 'V10 未出现在版本列表（返回 %d 条：%s）' % (
+        len(items), sorted(n for n in names if n)[:10])

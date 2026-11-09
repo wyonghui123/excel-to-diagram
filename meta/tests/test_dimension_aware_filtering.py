@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造维度过滤测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -33,12 +34,18 @@ class TestGetAllowedFilterParams:
         self.ds = get_data_source("sqlite", database=get_test_db_path())
         init_services(self.ds)
         # v3.18 P1: 修复 S017 数据依赖 skip
-        cursor = self.ds.execute("SELECT COUNT(*) FROM domains WHERE version_id=1")
+        # [FIX 2026-11-09] 硬编码 version_id=1 在无该版本的库上触发 FK 约束失败，
+        #   改为取库中第一个可用版本。
+        vrow = self.ds.execute("SELECT id FROM versions ORDER BY id LIMIT 1").fetchone()
+        if not vrow:
+            pytest.skip("No version row in DB")
+        version_id = vrow[0]
+        cursor = self.ds.execute("SELECT COUNT(*) FROM domains WHERE version_id=?", (version_id,))
         if cursor.fetchone()[0] < 3:
             for i in range(3):
                 self.ds.execute(
-                    "INSERT INTO domains (name, code, version_id) VALUES (?, ?, 1)",
-                    (f'TEST_S017_D{i}', f'TEST_S017_D{i}')
+                    "INSERT INTO domains (name, code, version_id) VALUES (?, ?, ?)",
+                    (f'TEST_S017_D{i}', f'TEST_S017_D{i}', version_id)
                 )
             self.ds.commit()
         self.query_service = QueryService(self.ds)

@@ -181,7 +181,8 @@ def validate_numbering(
 def validate_doc_flow_rules(
         rules: Iterable[Dict[str, Any]],
         objects: Optional[Iterable[Any]] = None) -> List[DeclarationError]:
-    """单据流规则校验：源 / 目标 BO 已注册、数量字段存在、rule_id 唯一。"""
+    """单据流规则校验：源 / 目标 BO 已注册、数量字段存在、直拷字段可解析、
+    rule_id 唯一。"""
     errors: List[DeclarationError] = []
     known = {
         str(getattr(item, 'id', '') or ''): item
@@ -206,7 +207,8 @@ def validate_doc_flow_rules(
                 'DOC_FLOW_SOURCE_UNKNOWN', rule_id,
                 'source_bo %r 未注册' % source_bo))
             continue
-        if target_bo not in known:
+        target_known = target_bo in known
+        if not target_known:
             errors.append(DeclarationError(
                 'DOC_FLOW_TARGET_UNKNOWN', rule_id,
                 'target_bo %r 未注册' % target_bo))
@@ -216,6 +218,25 @@ def validate_doc_flow_rules(
             errors.append(DeclarationError(
                 'DOC_FLOW_QTY_FIELD_MISSING', rule_id,
                 'source_qty_field %r 不在 %s 字段' % (qty_field, source_bo)))
+
+        if not target_known:
+            continue
+
+        target_qty_field = str(rule.get('target_qty_field') or '')
+        if target_qty_field and \
+                target_qty_field not in _field_names(known[target_bo]):
+            errors.append(DeclarationError(
+                'DOC_FLOW_TARGET_QTY_FIELD_MISSING', rule_id,
+                'target_qty_field %r 不在 %s 字段'
+                % (target_qty_field, target_bo)))
+
+        for fid in (rule.get('copied_fields') or []):
+            if fid not in _field_names(known[source_bo]) or \
+                    fid not in _field_names(known[target_bo]):
+                errors.append(DeclarationError(
+                    'DOC_FLOW_COPIED_FIELD_MISSING', rule_id,
+                    'copied_fields %r 须同时存在于 %s 与 %s 字段'
+                    % (fid, source_bo, target_bo)))
     return errors
 
 

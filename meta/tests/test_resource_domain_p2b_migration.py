@@ -231,7 +231,7 @@ def test_fresh_creates_tables_indexes_enums_permissions_menus(tmp_path):
 
     assert _scalar(db, 'SELECT COUNT(*) FROM enum_types')[0] == len(ENUM_SEEDS)
     expected_values = sum(len(seed[3]) for seed in ENUM_SEEDS)
-    assert expected_values == 28
+    assert expected_values == 29
     assert _scalar(db, 'SELECT COUNT(*) FROM enum_values')[0] == expected_values
 
     assert _scalar(db, 'SELECT COUNT(*) FROM permissions')[0] == len(PERMISSIONS)

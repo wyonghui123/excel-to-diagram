@@ -29,15 +29,18 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     source_bo       TEXT NOT NULL,
     target_bo       TEXT NOT NULL,
     source_qty_field TEXT NOT NULL DEFAULT 'quantity',
+    target_qty_field TEXT NOT NULL DEFAULT '',
     pool            TEXT NOT NULL DEFAULT 'default',
     status          TEXT NOT NULL DEFAULT 'active',
     check_hook      TEXT,
     map_hook        TEXT,
     create_hook     TEXT,
     field_map       TEXT NOT NULL DEFAULT '{}',
+    copied_fields   TEXT NOT NULL DEFAULT '[]',
     split_key       TEXT NOT NULL DEFAULT '[]',
     target_line_bo  TEXT NOT NULL DEFAULT '',
     head_fk_field   TEXT NOT NULL DEFAULT '',
+    display_fields  TEXT NOT NULL DEFAULT '[]',
     created_at      TEXT,
     updated_at      TEXT
 )
@@ -46,17 +49,21 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
 # [Phase 2 §4.2] 存量部署的幂等加列清单（CREATE IF NOT EXISTS 不会给旧表加列）
 # 约束：SQLite ALTER TABLE ADD COLUMN 只能追加带默认值的列——四列均满足。
 _ADDED_COLUMNS = (
+    ("target_qty_field", "TEXT NOT NULL DEFAULT ''"),
     ("field_map", "TEXT NOT NULL DEFAULT '{}'"),
+    ("copied_fields", "TEXT NOT NULL DEFAULT '[]'"),
     ("split_key", "TEXT NOT NULL DEFAULT '[]'"),
     ("target_line_bo", "TEXT NOT NULL DEFAULT ''"),
     ("head_fk_field", "TEXT NOT NULL DEFAULT ''"),
+    ("display_fields", "TEXT NOT NULL DEFAULT '[]'"),
 )
 
 # upsert 覆盖的"声明字段"（status 是运行态，刻意不在列）
 _UPSERT_DECL_FIELDS = (
-    "source_bo", "target_bo", "source_qty_field", "pool",
+    "source_bo", "target_bo", "source_qty_field", "target_qty_field", "pool",
     "check_hook", "map_hook", "create_hook",
-    "field_map", "split_key", "target_line_bo", "head_fk_field",
+    "field_map", "copied_fields", "split_key", "target_line_bo",
+    "head_fk_field", "display_fields",
 )
 
 RULE_COLUMNS = ("rule_id",) + _UPSERT_DECL_FIELDS + (
@@ -128,37 +135,45 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
         rule_id = rule["rule_id"]
         data_source.execute(
             """INSERT INTO doc_flow_rule
-               (rule_id, source_bo, target_bo, source_qty_field, pool,
+               (rule_id, source_bo, target_bo, source_qty_field,
+                target_qty_field, pool,
                 check_hook, map_hook, create_hook,
-                field_map, split_key, target_line_bo, head_fk_field,
-                status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                field_map, copied_fields, split_key, target_line_bo,
+                head_fk_field, display_fields, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       'active', ?, ?)
                ON CONFLICT(rule_id) DO UPDATE SET
                  source_bo = excluded.source_bo,
                  target_bo = excluded.target_bo,
                  source_qty_field = excluded.source_qty_field,
+                 target_qty_field = excluded.target_qty_field,
                  pool = excluded.pool,
                  check_hook = excluded.check_hook,
                  map_hook = excluded.map_hook,
                  create_hook = excluded.create_hook,
                  field_map = excluded.field_map,
+                 copied_fields = excluded.copied_fields,
                  split_key = excluded.split_key,
                  target_line_bo = excluded.target_line_bo,
                  head_fk_field = excluded.head_fk_field,
+                 display_fields = excluded.display_fields,
                  updated_at = excluded.updated_at""",
             (
                 rule_id,
                 rule.get("source_bo", ""),
                 rule.get("target_bo", ""),
                 rule.get("source_qty_field") or "quantity",
+                rule.get("target_qty_field") or "",
                 rule.get("pool") or "default",
                 rule.get("check_hook") or None,
                 rule.get("map_hook") or None,
                 rule.get("create_hook") or None,
                 _as_json_text(rule.get("field_map"), "{}"),
+                _as_json_text(rule.get("copied_fields"), "[]"),
                 _as_json_text(rule.get("split_key"), "[]"),
                 rule.get("target_line_bo") or "",
                 rule.get("head_fk_field") or "",
+                _as_json_text(rule.get("display_fields"), "[]"),
                 now, now,
             ),
         )
@@ -182,7 +197,9 @@ def get_rule(data_source, rule_id: str) -> Optional[Dict[str, Any]]:
         return None
     rule = dict(zip(RULE_COLUMNS, rows[0]))
     rule["field_map"] = _loads(rule.get("field_map"), {})
+    rule["copied_fields"] = _loads(rule.get("copied_fields"), [])
     rule["split_key"] = _loads(rule.get("split_key"), [])
+    rule["display_fields"] = _loads(rule.get("display_fields"), [])
     return rule
 
 
@@ -204,7 +221,9 @@ def list_rules(data_source, status: Optional[str] = None) -> List[Dict[str, Any]
     for row in rows:
         rule = dict(zip(RULE_COLUMNS, row))
         rule["field_map"] = _loads(rule.get("field_map"), {})
+        rule["copied_fields"] = _loads(rule.get("copied_fields"), [])
         rule["split_key"] = _loads(rule.get("split_key"), [])
+        rule["display_fields"] = _loads(rule.get("display_fields"), [])
         rules.append(rule)
     return rules
 

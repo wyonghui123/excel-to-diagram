@@ -77,7 +77,11 @@ CREATE TABLE purchase_orders (
     exchange_rate_date TEXT,
     project_id INTEGER,
     deliver_to_location_id INTEGER,
-    approval_status TEXT
+    approval_status TEXT,
+    -- [FIX 2026-11-08] 采购退货/溯源链路读取的列（receipt_service._load_order）
+    origin_purchase_order_id INTEGER,
+    origin_receipt_id INTEGER,
+    return_reason TEXT
 );
 """
 

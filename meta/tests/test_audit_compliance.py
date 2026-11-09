@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [FILE] test_audit_compliance.py
 [DESCRIPTION] Phase 9 审计与合规 — TDD 测试用例

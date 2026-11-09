@@ -514,6 +514,7 @@ class ApplicationBuilder:
         from meta.api.work_order_api import work_order_bp
         # [P6a-2 v218 2026-11-05] 包装容器作业台（扫码预检 / 封箱 / 批量封箱）。
         from meta.api.handling_unit_api import handling_unit_bp
+        from meta.api.doc_flow_api import doc_flow_bp
         from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.inventory_aging_api import inventory_aging_bp
         from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
@@ -598,6 +599,8 @@ class ApplicationBuilder:
         app.register_blueprint(engineering_change_bp)
         # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由，不新增 View BO）。
         app.register_blueprint(inventory_aging_bp)
+        # [单据流 Phase 3 2026-11-08] 通用服务 API（规则/上游/派生/追溯）。
+        app.register_blueprint(doc_flow_bp)
         # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
         app.register_blueprint(rule_center_bp)
         app.register_blueprint(rule_trace_bp)

@@ -983,7 +983,7 @@ class PermissionDimensionEngine:
             for row in cursor.fetchall():
                 rule = {
                     'id': row[0],
-                    'role_id': row[1],
+                    'permission_set_id': row[1],
                     'resource_type': row[2],
                     'condition': row[3],
                     'permission_level': row[4],

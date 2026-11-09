@@ -198,7 +198,9 @@ class TestExportVisibleYamlSettings:
         with open(source_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        pattern = r'if not is_cud_required and not is_business_key and export_vis is False and import_vis is False:\s*\n\s*continue'
+        # [BUG-V023 2026-06-27] 判定已去掉 is_business_key:
+        # business_key 不再短路入列 (virtual + export_visible=false 应被 continue)
+        pattern = r'if not is_cud_required and export_vis is False and import_vis is False:\s*\n\s*continue'
         matches = re.findall(pattern, content)
         assert len(matches) >= 1, \
             f"导出服务应有 export_vis=False AND import_vis=False → continue 逻辑, 实际: {len(matches)} 处"
@@ -210,7 +212,8 @@ class TestExportVisibleYamlSettings:
         with open(source_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        pattern = r'if is_business_key or is_export or is_import or \(hasattr\(f,\s*[\'\"]ui[\'\"]\)\s+and\s+hasattr\(f\.ui,\s*[\'\"]visible[\'\"]\)\s+and\s+f\.ui\.visible\s+is\s+True\):'
+        # [BUG-V023 2026-06-27] is_business_key 已从条件移除
+        pattern = r'if is_export or is_import or \(hasattr\(f,\s*[\'\"]ui[\'\"]\)\s+and\s+hasattr\(f\.ui,\s*[\'\"]visible[\'\"]\)\s+and\s+f\.ui\.visible\s+is\s+True\):'
         matches = re.findall(pattern, content)
         assert len(matches) >= 1, \
             f"导出服务应有 ui.visible=True → 进入 candidates 逻辑, 实际: {len(matches)} 处"

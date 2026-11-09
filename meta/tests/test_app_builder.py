@@ -11,6 +11,20 @@ import pytest
 from unittest.mock import patch, MagicMock
 import os
 import tempfile
+import time
+
+
+def _remove_temp_db(db_path):
+    """删除临时 SQLite 文件; 句柄未释放时短间隔重试 (替代固定 time.sleep(0.1))。"""
+    deadline = time.monotonic() + 1.0
+    while os.path.exists(db_path):
+        try:
+            os.unlink(db_path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.05)
 
 
 class TestApplicationBuilderInit:
@@ -64,13 +78,7 @@ class TestApplicationBuilderWithDataSource:
             builder.with_data_source()
             assert builder._data_source is not None
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
 
 class TestApplicationBuilderServiceInit:
@@ -90,13 +98,7 @@ class TestApplicationBuilderServiceInit:
             result = builder.with_services()
             assert result is builder
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
     def test_init_service_function_isolates_failures(self):
         """TC-AB-021: _init_service 异常不影响整个初始化"""
@@ -123,13 +125,7 @@ class TestApplicationBuilderServiceInit:
                 result = builder.with_services()
                 assert result is builder
             finally:
-                import time
-                time.sleep(0.1)
-                if os.path.exists(db_path):
-                    try:
-                        os.unlink(db_path)
-                    except PermissionError:
-                        pass
+                _remove_temp_db(db_path)
         finally:
             ab._init_service = original
 
@@ -183,13 +179,7 @@ class TestApplicationBuilderWithInterceptors:
 
                     assert mock_bf.register_interceptor.call_count >= 0
             finally:
-                import time
-                time.sleep(0.1)
-                if os.path.exists(db_path):
-                    try:
-                        os.unlink(db_path)
-                    except PermissionError:
-                        pass
+                _remove_temp_db(db_path)
         except Exception:
             pass
 
@@ -215,13 +205,7 @@ class TestApplicationBuilderBuild:
             assert app is not None
             assert builder._app is not None
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
     def test_build_registers_middleware(self):
         """TC-AB-051: build 注册中间件"""
@@ -244,13 +228,7 @@ class TestApplicationBuilderBuild:
                 data = response.get_json()
                 assert data['status'] == 'ok'
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
     def test_build_register_error_handlers(self):
         """TC-AB-052: build 注册错误处理器"""
@@ -269,13 +247,7 @@ class TestApplicationBuilderBuild:
 
             assert '500' in [str(rule) for rule in app.error_handler_spec.get(None, {})]
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
     def test_build_with_cors_debug_mode(self):
         """TC-AB-053: DEBUG 模式下 CORS 响应头设置"""
@@ -321,13 +293,7 @@ class TestApplicationBuilderBuild:
             finally:
                 os.environ.pop('FLASK_DEBUG', None)
         finally:
-            import time
-            time.sleep(0.1)
-            if os.path.exists(db_path):
-                try:
-                    os.unlink(db_path)
-                except PermissionError:
-                    pass
+            _remove_temp_db(db_path)
 
 
 class TestDefaultDbPath:

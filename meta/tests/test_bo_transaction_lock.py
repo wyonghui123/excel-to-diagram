@@ -29,11 +29,20 @@ def _create_bo_framework(interceptors):
     register_from_directory(schema_dir)
 
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'meta', 'architecture.db')
-    db_available = True
+
+    # [FIX 2026-11-08] 本文件直接构造 BOFramework，不经过 create_app()，因此
+    # db_config_detector 的单例从未初始化 → bo_framework 写入时抛
+    # RuntimeError "[V007.15 L0] DB config not detected yet"。
+    # 与 server init 一致：未检测过才检测（已有配置不覆盖，避免干扰共享 app）。
+    from meta.core.db_config_detector import detect_runtime_config, get_runtime_config
+    try:
+        get_runtime_config()
+    except RuntimeError:
+        detect_runtime_config(db_path)
+
     try:
         data_source = get_data_source('sqlite', database=db_path)
     except Exception:
-        db_available = False
         return None, None
 
     bo_framework = BOFramework(data_source)

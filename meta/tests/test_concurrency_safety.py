@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造并发安全测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -27,7 +28,9 @@ def concurrent_db():
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = f.name
 
-    conn = sqlite3.connect(db_path)
+    # [FIX 2026-11-09] 本文件是多线程并发测试，fixture 连接会在 worker 线程复用；
+    #   sqlite3 默认 check_same_thread=True 会直接抛 ProgrammingError
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
 
     conn.execute("""

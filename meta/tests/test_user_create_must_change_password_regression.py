@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造用户测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [REGRESSION 2026-06-09] "强制改密" 字段在创建用户时报错 - 重点回归测试
 
@@ -142,6 +143,14 @@ class TestActionExecutorUserCreate:
     def bo_framework(self):
         """使用真实全局 bo_framework（已注册 PersistenceInterceptor 等）"""
         from meta.core.bo_framework import bo_framework as global_bo
+        from meta.core.db_config_detector import detect_runtime_config, get_runtime_config
+        from meta.core.db_path import get_meta_db_path
+        # [夹具补齐 2026-11-09] 绕开 HTTP 直调 BO 时进程内无 server 初始化，
+        #   必须补 detect_runtime_config，否则写路径报 "[V007.15 L0] DB config not detected yet"
+        try:
+            get_runtime_config()
+        except Exception:
+            detect_runtime_config(get_meta_db_path())
         # 设置测试用户上下文
         global_bo.set_user_context(
             user_id=1, user_name='admin', ip_address='127.0.0.1'
@@ -315,8 +324,8 @@ class TestHttpCreateBoUser:
             logger.warning(f"清理用户 {username} 失败: {e}")
 
     def _auth_or_skip(self, app, client, headers):
-        """快速检查 admin 认证是否可用"""
-        resp = client.get('/api/v1/users/1', headers=headers)
+        """快速检查 admin 认证是否可用（v1 by-id 已 sunset，探针走 v2 BO）"""
+        resp = client.get('/api/v2/bo/user/1', headers=headers)
         if resp.status_code in (401, 403, 500):
             pytest.skip(f"admin auth 不可用 (status={resp.status_code}), skip e2e")
         return resp.status_code

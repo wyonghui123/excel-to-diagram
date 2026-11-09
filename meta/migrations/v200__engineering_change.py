@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """[v200 2026-11-03] G4 工程 BOM 消费方（engineering_changes + engineering_change_lines）
 
 依据:

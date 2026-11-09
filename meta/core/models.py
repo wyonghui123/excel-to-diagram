@@ -1583,7 +1583,16 @@ class MetaRegistry:
             self._version = datetime.now().strftime("%Y%m%d%H%M%S")
             self._rule_chain_cache = {}
             self._ui_config_cache = {}
-        
+
+        # 热重载只用单个目录重建 _objects，apps/<app>/schemas 的 BO 会被丢弃；
+        # 重放已加载应用的 schema，避免 /api/v2/bo/<app_bo> 报 Unknown object type。
+        # legacy 模式（未加载任何应用）为空操作，零行为变化。
+        try:
+            from meta.core.app_registry import reapply_app_schemas
+            reapply_app_schemas()
+        except Exception:
+            pass
+
         return count
 
     def get_rule_chain(self, object_id: str):

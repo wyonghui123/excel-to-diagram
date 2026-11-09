@@ -10,7 +10,9 @@
       ② 边域      7 元组幂等键重复 / 同 6 元组异规则 active+normal（R4 双重消耗）/
                   status·quantity_sign·quantity 域值非法
       ③ 视图对账  边表复算 vs 视图查询逐行比对（数值侧双保险；含红字口径）
-      ④ 事务互检  库存事务 ↔ 转单边双向核对（ORPHAN_TXN / DANGLING_EDGE）
+      ④ 事务互检  库存事务 ↔ 转单边双向核对（ORPHAN_TXN / DANGLING_EDGE）；
+                  调整/盘点来源对账（P2 B+ 口径：UNKNOWN_SOURCE_DOC_TYPE /
+                  MISSING_SOURCE_DOC / UNEXPECTED_ADJUSTMENT_EDGE）
       ⑤ 跨层对账  计划层 reservation 量 ↔ 执行层出库边量
                   （TRACE_EDGE_QTY_MISMATCH，2026-11-05 阶段 4）
 
@@ -62,6 +64,24 @@ _STATUS_VALID = ("active", "reversed")
 _SIGN_VALID = ("normal", "red")
 #: 需与边表核对「有事务无边」的过账来源单据类型（发运 / 收货 / 调拨）
 _POSTING_DOC_TYPES = ("shipment", "receipt", "transfer_order")
+#: 库存事务来源类型注册表（P2 B+，规格 §4 C 类）：
+#:   key = inventory_transactions.source_doc_type
+#:   value = (来源单据表名 | None, 是否要求转单边)
+#: 过账类（A/B 类）必须写边；调整/盘点/期初（C 类）只保留事实引用，
+#: 不进入 DOC_FLOW 转单派生（与 Oracle Fusion「事务来源引用 ≠ 单据派生」一致）。
+_SOURCE_DOC_REGISTRY = {
+    "shipment": ("shipments", True),
+    "receipt": ("receipts", True),
+    "transfer_order": ("transfer_orders", True),
+    "inventory_adjustment": ("inventory_adjustments", False),
+    "inventory_count": ("inventory_counts", False),
+    # 期初导入的 source_doc_id 是批次号 CRC32（无来源单据表）
+    "opening": (None, False),
+    # 库存段转移以事件键为来源（source_doc_type 缺省值）
+    "inventory_segment_transfer": (None, False),
+}
+#: 调整类来源：B+ 明确不接入 DOC_FLOW，出现转单边即契约被破坏
+_NON_DOC_FLOW_DOC_TYPES = ("inventory_adjustment", "inventory_count")
 #: 边表指向库存事务的目标 BO
 _INVENTORY_TXN_BO = "inventory_transaction"
 #: 计划层线索表 / 发货行表（跨层对账用）
@@ -307,7 +327,7 @@ def _inventory_edge_findings(app_ds, rows) -> List[Finding]:
     try:
         txn_rows = app_ds.execute(
             "SELECT id, source_doc_type, "
-            "COALESCE(reversal_of_transaction_id, 0) "
+            "COALESCE(reversal_of_transaction_id, 0), source_doc_id "
             "FROM inventory_transactions").fetchall()
     except Exception:  # noqa: BLE001 - 半迁移 / 缺列时跳过本域
         return []
@@ -345,6 +365,81 @@ def _inventory_edge_findings(app_ds, rows) -> List[Finding]:
             "ORPHAN_TXN", "error",
             "过账事务无对应转单边 {0} 条: {1}".format(
                 len(orphan), _sample(orphan))))
+
+    findings.extend(_source_doc_findings(app_ds, txn_rows, rows))
+    return findings
+
+
+def _source_doc_findings(app_ds, txn_rows, edge_rows) -> List[Finding]:
+    """调整/盘点来源对账（P2 B+：保留事实引用，不建转单边）。
+
+    三项检查（缺来源表时自动降级）：
+    - ``UNKNOWN_SOURCE_DOC_TYPE``（warn）：来源类型不在注册表，防新入口绕开口径；
+    - ``MISSING_SOURCE_DOC``（error）：调整/盘点事务的 ``source_doc_id``
+      在来源表不存在（删除策略为 restrict，正常不应出现）；
+    - ``UNEXPECTED_ADJUSTMENT_EDGE``（warn）：调整类事务被转单边引用，
+      违反「不接入 DOC_FLOW」契约（会把调整量带进需求追溯执行层）。
+    """
+    findings: List[Finding] = []
+
+    unknown = [
+        "txn={0} source_doc_type={1!r}".format(r[0], r[1])
+        for r in txn_rows
+        if r[1] and r[1] not in _SOURCE_DOC_REGISTRY
+    ]
+    if unknown:
+        findings.append(Finding(
+            "UNKNOWN_SOURCE_DOC_TYPE", "warn",
+            "库存事务来源类型未注册 {0} 条: {1}".format(
+                len(unknown), _sample(unknown))))
+
+    missing: List[str] = []
+    for doc_type, (table, needs_edge) in _SOURCE_DOC_REGISTRY.items():
+        # 过账类来源的存在性由 ORPHAN_TXN/业务外键保障，本项只查 C 类
+        if not table or needs_edge or not _table_exists(app_ds, table):
+            continue
+        by_doc: Dict[int, List[Any]] = {}
+        for r in txn_rows:
+            if r[1] != doc_type:
+                continue
+            doc_id = _int_or_none(r[3])
+            if doc_id is not None:
+                by_doc.setdefault(doc_id, []).append(r[0])
+        if not by_doc:
+            continue
+        placeholders = ",".join("?" * len(by_doc))
+        try:
+            existing_rows = app_ds.execute(
+                "SELECT id FROM {0} WHERE id IN ({1})".format(
+                    table, placeholders),
+                tuple(sorted(by_doc))).fetchall()
+        except Exception:  # noqa: BLE001 - 半迁移 / 列名差异时跳过
+            continue
+        existing = {_int_or_none(r[0]) for r in existing_rows}
+        for doc_id in sorted(set(by_doc) - existing):
+            missing.append("{0} 缺失: txn={1} doc_id={2}".format(
+                table, "/".join(str(t) for t in by_doc[doc_id]), doc_id))
+    if missing:
+        findings.append(Finding(
+            "MISSING_SOURCE_DOC", "error",
+            "调整/盘点事务的来源单据不存在 {0} 条: {1}".format(
+                len(missing), _sample(missing))))
+
+    adjustment_txn_ids = {
+        _int_or_none(r[0]) for r in txn_rows
+        if r[1] in _NON_DOC_FLOW_DOC_TYPES and _int_or_none(r[0]) is not None
+    }
+    unexpected = [
+        "edge={0} target_id={1}".format(r[0], r[5])
+        for r in edge_rows
+        if r[4] == _INVENTORY_TXN_BO
+        and _int_or_none(r[5]) in adjustment_txn_ids
+    ]
+    if unexpected:
+        findings.append(Finding(
+            "UNEXPECTED_ADJUSTMENT_EDGE", "warn",
+            "调整/盘点事务被转单边引用 {0} 条（B+ 口径应为无边）: {1}".format(
+                len(unexpected), _sample(unexpected))))
     return findings
 
 

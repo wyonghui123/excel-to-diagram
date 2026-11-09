@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """Tests for V007.52 MaterializationRegistry SSOT (2026-07-14)
 
 覆盖场景：
@@ -51,7 +52,8 @@ class TestV00752MaterializationSSOT:
 
         # business_trigger
         assert registry.get_strategy("roles") == STRATEGY_BUSINESS_TRIGGER
-        assert registry.get_strategy("user_groups") == STRATEGY_BUSINESS_TRIGGER
+        # [v138] user_groups → orgs（audit_derived），不再走 business_trigger
+        assert registry.get_strategy("user_groups") is None
 
         # audit_callback (V007.51)
         assert registry.get_strategy("enum_types") == STRATEGY_AUDIT_CALLBACK
@@ -251,14 +253,9 @@ class TestV00752MaterializationSSOT:
         assert join_clause == "", "物化列路径 join_clause 应为空"
         assert "enum_types.updated_at" in order_alias
 
-        # roles (business_trigger) → 物化路径
-        result = _build_audit_derived_order_join(
-            table_name="roles", obj_type="role",
-            sort_field="updated_at", sort_direction="asc",
-        )
-        assert result is not None
-        join_clause, order_alias, sort_dir = result
-        assert join_clause == ""
+        # [2026-11-09] business_trigger 仅剩 legacy roles 条目；roles 表已在 v138
+        # 被 permission_sets 取代，不再注册到 table_name_validator，故这里不再用
+        # roles 走 virtual_sort（策略分类已由 test_strategy_classification 覆盖）。
 
         # products (audit_derived) → LEFT JOIN
         result = _build_audit_derived_order_join(

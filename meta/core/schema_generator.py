@@ -392,6 +392,7 @@ class SchemaMigrator:
             persistent_objects,
             key=lambda x: x.semantics.hierarchy_level
         )
+        table_map = {o.id: o.table_name for o in sorted_objects if o.table_name}
         
         for obj in sorted_objects:
             report = self.comparator.compare(obj)
@@ -429,6 +430,10 @@ class SchemaMigrator:
                                 except Exception as e:
                                     logger.warning("[SchemaMigrator] ALTER TABLE ADD COLUMN failed: %s | SQL: %s", e, sql)
                             print("[ALTER] {0}: ADD COLUMN {1}".format(obj.table_name, col_name))
+
+                # [2026-11-08] 补落新增 FK：SQLite 无 ADD CONSTRAINT，只能重建表。
+                # 此前表已存在时只走 ADD COLUMN 分支，新增的 relations 永远不会落成真 FK。
+                executed_sql.extend(self._sync_missing_fks(obj, table_map, dry_run))
         
         for obj in sorted_objects:
             indexes = self.generator.generate_create_index(obj)
@@ -445,7 +450,161 @@ class SchemaMigrator:
         self._cleanup_stale_indexes(sorted_objects, dry_run)
         
         return executed_sql
-    
+
+    def _sync_missing_fks(self, obj, table_map, dry_run=False):
+        """表已存在时补落新增 FK。
+
+        SQLite 不支持 ADD CONSTRAINT，唯一合法路径是「建新表 → 拷数据 → 换名」。
+        修复前 Migrator 对已存在表只走 ADD COLUMN，新增 relations 永远落不成真 FK。
+        """
+        if obj.object_type != ObjectType.ENTITY or not obj.table_name:
+            return []
+
+        try:
+            cursor = self.ds.execute(
+                'PRAGMA foreign_key_list("{0}")'.format(obj.table_name))
+            actual = set()
+            for row in (cursor.fetchall() if cursor else []):
+                actual.add(row[3] if isinstance(row, tuple) else row['from'])
+        except Exception:
+            return []
+
+        clauses, missing = [], []
+        for relation in obj.relations:
+            if relation.relation_type not in (RelationType.PARENT_CHILD,
+                                              RelationType.REFERENCE):
+                continue
+            if (relation.relation_type == RelationType.REFERENCE
+                    and not relation.source_field):
+                continue
+            if relation.cardinality not in ('N:1', '1:1'):
+                continue
+            fk_column = relation.source_field or '{0}_id'.format(
+                relation.target_object)
+            if fk_column in actual:
+                continue
+            ref_table = table_map.get(relation.target_object,
+                                      relation.target_object)
+            clauses.append('FOREIGN KEY ({0}) REFERENCES {1}(id)'.format(
+                fk_column, ref_table))
+            missing.append(fk_column)
+
+        if not clauses:
+            return []
+
+        violations = self.ds.execute(
+            'PRAGMA foreign_key_check("{0}")'.format(obj.table_name)).fetchall()
+        if violations:
+            print("[SKIP-FK] {0}: 存在 {1} 条外键违规，跳过重建以免丢数据".format(
+                obj.table_name, len(violations)))
+            return []
+
+        views = self._dependent_views(obj.table_name)
+        sqls = self._rebuild_table_with_fks(obj.table_name, clauses)
+        if dry_run:
+            return sqls
+
+        # 重建期间必须关闭 FK：新声明的 FK 会校验既有数据，DROP TABLE 也会触发
+        # 引用校验。注意 SQLite 的 PRAGMA foreign_keys 在事务内是 no-op，故必须在
+        # 无事务状态下设置（写队列连接为 autocommit）。
+        self.ds.execute('PRAGMA foreign_keys=OFF')
+        # 视图会阻止 DROP/RENAME（schema 重解析报 no such table），重建前后摘挂
+        for name, _ in views:
+            self.ds.execute('DROP VIEW IF EXISTS "{0}"'.format(name))
+        try:
+            for sql in sqls:
+                self.ds.execute(sql)
+            self.ds.commit()
+        finally:
+            for _, view_sql in views:
+                if view_sql:
+                    self.ds.execute(view_sql)
+            self.ds.execute('PRAGMA foreign_keys=ON')
+            self.ds.commit()
+        print("[REBUILD] {0}: ADD FK {1}".format(obj.table_name, missing))
+        orphans = self.ds.execute(
+            'PRAGMA foreign_key_check("{0}")'.format(obj.table_name)).fetchall()
+        if orphans:
+            print("[FK-ORPHAN] {0}: 历史数据有 {1} 行悬空引用，建议清理".format(
+                obj.table_name, len(orphans)))
+        return sqls
+
+    def _dependent_views(self, table):
+        """返回 SQL 中引用了该表的视图 [(name, sql)]（按创建顺序）。"""
+        import re
+        pattern = re.compile(
+            r'(?<![\w])"?{0}"?(?![\w])'.format(re.escape(table)), re.I)
+        views = []
+        cursor = self.ds.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='view' ORDER BY rowid")
+        for row in (cursor.fetchall() if cursor else []):
+            name = row[0] if isinstance(row, tuple) else row['name']
+            sql = row[1] if isinstance(row, tuple) else row['sql']
+            if sql and pattern.search(sql):
+                views.append((name, sql))
+        return views
+
+    def _rebuild_table_with_fks(self, table, fk_clauses):
+        """把缺失的 FOREIGN KEY 子句补进现有 DDL 并重建表（保留列/数据/触发器）。"""
+        import re
+        row = self.ds.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+            (table,)).fetchone()
+        ddl = row[0] if isinstance(row, tuple) else row['sql']
+        if not ddl or 'CREATE TABLE' not in ddl.upper():
+            return []
+
+        triggers = []
+        cursor = self.ds.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name=?",
+            (table,))
+        for r in (cursor.fetchall() if cursor else []):
+            sql = r[0] if isinstance(r, tuple) else r['sql']
+            if sql:
+                triggers.append(sql)
+
+        # DROP TABLE 会连带删除该表所有显式索引（sqlite_autoindex_* 随 DDL 重建），
+        # 故重建后按原 SQL 补回，避免索引丢失。
+        indexes = []
+        cursor = self.ds.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=?"
+            " AND sql IS NOT NULL", (table,))
+        for r in (cursor.fetchall() if cursor else []):
+            sql = r[0] if isinstance(r, tuple) else r['sql']
+            if sql:
+                indexes.append(sql)
+
+        body = ddl.rstrip()
+        if not body.endswith(')'):
+            return []
+        body = body[:-1].rstrip()
+        new_ddl = body + ',\n    ' + ',\n    '.join(fk_clauses) + '\n)'
+
+        tmp = '_rebuild_{0}'.format(table)
+        new_ddl = re.sub(
+            r'(?is)^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:["\[]?\w+["\]]?)',
+            lambda m: '{0}"{1}"'.format(m.group(1), tmp),
+            new_ddl, count=1)
+
+        columns = []
+        cursor = self.ds.execute(
+            'PRAGMA table_info("{0}")'.format(table))
+        for r in (cursor.fetchall() if cursor else []):
+            columns.append(r[1] if isinstance(r, tuple) else r['name'])
+        col_list = ', '.join('"{0}"'.format(c) for c in columns)
+
+        sqls = [
+            'DROP TABLE IF EXISTS "{0}"'.format(tmp),
+            new_ddl,
+            'INSERT INTO "{0}" ({1}) SELECT {1} FROM "{2}"'.format(
+                tmp, col_list, table),
+            'DROP TABLE "{0}"'.format(table),
+            'ALTER TABLE "{0}" RENAME TO "{1}"'.format(tmp, table),
+        ]
+        sqls.extend(indexes)
+        sqls.extend(triggers)
+        return sqls
+
     def _cleanup_stale_indexes(self, sorted_objects, dry_run=False):
         """删除基于过时 metadata 创建的 UNIQUE 索引"""
         import re

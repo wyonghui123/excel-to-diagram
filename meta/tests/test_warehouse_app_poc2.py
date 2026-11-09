@@ -64,15 +64,31 @@ def _restore_env(previous):
 
 
 def _build_app(tmp_path_factory, enabled_apps):
-    """在独立的应用库目录下建一个启用指定应用的 Flask app。"""
+    """在独立的应用库目录下建一个启用指定应用的 Flask app。
+
+    [FIX 2026-11-07] conftest 把 meta.server.create_app 打补丁为 shared-app 单例,
+    直接调用会把先前按默认 env 构建的共享 app 返回 ⇒ APP_DB_ROUTING/ENABLED_APPS
+    完全不生效(Unknown object type: warehouse / 应用库不建表 / 平台表落在平台库)。
+    这里改调 _original_create_app; 构建后恢复拦截器快照, 避免进程级重复追加。
+    """
     app_dir = tmp_path_factory.mktemp("appdata")
     os.environ["SQLITE_DB_DIR"] = str(app_dir)
     os.environ["APP_DB_ROUTING"] = "1"
     os.environ["ENABLED_APPS"] = enabled_apps
+    from meta.core.bo_framework import bo_framework
+    before = list(bo_framework._interceptors)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from meta.server import create_app
-        app = create_app()
+        import meta.server as _server
+        _create = getattr(_server, '_original_create_app', _server.create_app)
+        try:
+            app = _create()
+        finally:
+            # [FIX 2026-11-07] 仅当先前已有拦截器链（共享 app 已建）时才回退,
+            # 否则会把本次 create_app 注册的整条链清空 ⇒ 所有读写成 no-op
+            # （POST 返回 200/data=None 但应用库 0 行）。
+            if before:
+                bo_framework._interceptors[:] = before
     app.config["TESTING"] = True
     return app, app_dir
 

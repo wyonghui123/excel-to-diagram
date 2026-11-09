@@ -44,6 +44,11 @@ fields:
     type: string
     db_column: trigger_kind
     description: 实际触发方式 manual/schedule/event/api
+  - id: idempotency_key
+    name: 幂等键
+    type: string
+    db_column: idempotency_key
+    description: 事件触发幂等键（如 doc_flow.created:{trace_id}:{workflow_key}）；空 = 不参与去重
   - id: definition_snapshot
     name: 定义快照
     type: json
@@ -96,6 +101,10 @@ fields:
     description: 更新时间
 
 indexes:
+  - name: uq_run_idempotency
+    fields: [idempotency_key]
+    unique: true
+    description: 同一事件只起一个 Run（NULL 不参与唯一约束）
   - name: idx_run_workflow
     fields: [workflow_id]
     description: 按定义版本回溯 Run

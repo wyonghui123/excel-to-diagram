@@ -27,6 +27,24 @@ _APP_BO_URL = "/api/v2/bo/greeting"
 _APP_API_URL = "/api/v1/apps/hello_world/health"
 
 
+def _create_fresh_app():
+    """绕过 conftest 的 shared-app 单例, 按当前 env 真实构建一个 app。
+
+    同一进程内重复真实 create_app() 会向全局 bo_framework 追加重复拦截器,
+    构建完成后恢复拦截器列表, 避免污染其他用例。
+    """
+    from meta.core.bo_framework import bo_framework
+    before = list(bo_framework._interceptors)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import meta.server as _server
+        _create = getattr(_server, '_original_create_app', _server.create_app)
+        try:
+            return _create()
+        finally:
+            bo_framework._interceptors[:] = before
+
+
 @pytest.fixture(scope="class")
 def routed_env(tmp_path_factory):
     """整个类期间保持路由开启 —— 绑定开关是**请求期**读取的, 不能提前复原。"""
@@ -49,10 +67,7 @@ def routed_env(tmp_path_factory):
 
 @pytest.fixture(scope="class")
 def routed_app(routed_env):
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        from meta.server import create_app
-        app = create_app()
+    app = _create_fresh_app()
     app.config["TESTING"] = True
     return app
 

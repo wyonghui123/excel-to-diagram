@@ -19,14 +19,14 @@ id: factor_catalog
 name: 因子目录
 table_name: factor_catalogs
 description: 定价因子目录（业务别名：字段目录）——哪些字段可当定价因子、事实源分类、是否影响价格
-display_name_field: name
+# 【无 display_name_field】本表无 name 字段：因子由 object_type + field_id 唯一标识，
+#   显示名一律引用对应 MetaField.name（同 party_relation 薄表的同类口径）。
 aspects: [audit_aspect]
 
 semantics:
   meaning: 定价因子目录
   category: system_entity
   business_key: [field_id, object_type]
-  display_name_field: name
   aliases:
     - 因子目录
     - 字段目录

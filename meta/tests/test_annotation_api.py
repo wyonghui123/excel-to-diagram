@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造注解 API 测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -75,7 +76,7 @@ def setup_annotations_table():
 
 
 @pytest.fixture(scope='function')
-def shared_annotations(api_client, auth_headers):
+def shared_annotations(api_client, auth_headers, setup_annotations_table):
     """Class scope fixture - 在同一测试类内共享创建的注解"""
     created = []
     

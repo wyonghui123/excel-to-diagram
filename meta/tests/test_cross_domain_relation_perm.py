@@ -114,10 +114,10 @@ class TestUserHasBoEditPerm:
         user_info = {'id': 333, 'permissions': []}
         assert self.interceptor._user_has_bo_edit_perm_for_relationship(user_info) is False
 
-    def test_user_with_other_resource_perms_fails(self):
-        """user 有 relationship:create 但无 BO:edit → 无 BO:edit perm"""
+    def test_user_with_relationship_perm_passes(self):
+        """[V2.1.7] user 有 relationship:create → 视为"可写端点" (OR-edit 语义)"""
         user_info = {'id': 333, 'permissions': ['relationship:create', 'relationship:read']}
-        assert self.interceptor._user_has_bo_edit_perm_for_relationship(user_info) is False
+        assert self.interceptor._user_has_bo_edit_perm_for_relationship(user_info) is True
 
     def test_missing_user_info_defensive_pass(self):
         """[V1.2.0 防御] user_info=None → 默认放行 (PermissionInterceptor 已处理未登录)"""
@@ -152,7 +152,7 @@ class TestRelationshipAncestorDimScopeIntegration:
                 (100, 138, 703, 1, 1),  # BO_A 在 D1
                 (200, 240, 800, 1, 1),  # BO_B 在 D2
             ],
-            'select source_bo_id': [(100, 200)],  # relationship source/target
+            'select r.source_bo_id': [(100, 200, 'BO_A', 'BO_B')],  # relationship source/target
         })
         return ds
 
@@ -187,7 +187,7 @@ class TestRelationshipAncestorDimScopeIntegration:
                 (300, 240, 800, 1, 1),  # BO_C 在 D2
                 (400, 241, 800, 1, 1),  # BO_D 在 D2
             ],
-            'select source_bo_id': [(300, 400)],
+            'select r.source_bo_id': [(300, 400, 'BO_C', 'BO_D')],
         })
         with patch.object(self.interceptor, '_fetch_user_info_for_rel_perm', return_value=user_info):
             ctx = MockActionContext(data_source=ds)
@@ -217,7 +217,7 @@ class TestU05ViewerRoleSoftWarnVsHardReject:
                 # Mock: 端点 D1 在 expanded (OR 命中)
                 ds = MockDataSource(rows_by_query={
                     'select bo.id,': [(100, 138, 703, 1, 1)],
-                    'select source_bo_id': [(100, 200)],
+                    'select r.source_bo_id': [(100, 200, 'BO_A', 'BO_B')],
                 })
                 ctx = MockActionContext(data_source=ds)
                 record = {'id': 1}
@@ -263,7 +263,7 @@ class TestU06ProductOwnerBypassesDimScope:
         # Mock: 端点 D2 也不在 expanded
         ds = MockDataSource(rows_by_query={
             'select bo.id,': [(300, 240, 800, 1, 1)],
-            'select source_bo_id': [(300, 400)],
+            'select r.source_bo_id': [(300, 400, 'BO_C', 'BO_D')],
         })
         with patch.object(interceptor, '_fetch_user_info_for_rel_perm', return_value=user_info):
             ctx = MockActionContext(data_source=ds)
@@ -408,7 +408,7 @@ class TestU07U08UpdateDeleteSameAsCreate:
         user_info = {'id': 333, 'permissions': ['business_object:edit']}
         ds = MockDataSource(rows_by_query={
             'select bo.id,': [(100, 138, 703, 1, 1)],
-            'select source_bo_id': [(100, 200)],
+            'select r.source_bo_id': [(100, 200, 'BO_A', 'BO_B')],
         })
         with patch.object(self.interceptor, '_fetch_user_info_for_rel_perm', return_value=user_info):
             ctx = MockActionContext(action='crud_update', data_source=ds)
@@ -423,7 +423,7 @@ class TestU07U08UpdateDeleteSameAsCreate:
         user_info = {'id': 333, 'permissions': ['business_object:update']}
         ds = MockDataSource(rows_by_query={
             'select bo.id,': [(100, 138, 703, 1, 1)],
-            'select source_bo_id': [(100, 200)],
+            'select r.source_bo_id': [(100, 200, 'BO_A', 'BO_B')],
         })
         with patch.object(self.interceptor, '_fetch_user_info_for_rel_perm', return_value=user_info):
             ctx = MockActionContext(action='crud_delete', data_source=ds)

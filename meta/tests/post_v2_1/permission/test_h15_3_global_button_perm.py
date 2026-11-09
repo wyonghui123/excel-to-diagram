@@ -176,4 +176,4 @@ class TestButtonVisibilitySourceCode:
         # import_export_service 中的 admin 短路
         src_path = Path(PROJECT_ROOT) / 'meta' / 'services' / 'import_export_service.py'
         content = src_path.read_text(encoding='utf-8')
-        assert "user.get('username') != 'admin'" in content
+        assert 'is_admin(user)' in content

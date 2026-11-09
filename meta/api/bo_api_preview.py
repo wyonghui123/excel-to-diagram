@@ -174,8 +174,13 @@ def get_architecture_preview_impl(bo):
         #   3. 用 raw SQL 拉这些 BO 的元数据字段 (绕过 DataPermissionInterceptor)
         #   4. 标记 is_external=true 让前端区分 (灰显/特殊样式)
         logger.info(f"[v1.1.11 DEBUG] relationships_count={len(relationships)}")
-        from meta.core.datasource import get_data_source as _preview_ds_factory
-        _ds = _preview_ds_factory()
+        # [FIX 2026-11-07] 原代码 get_data_source() 缺 source_type → 整个端点 500
+        # 优先复用 BOFramework 已建好的 data_source (跟随 SQLITE_DB_PATH / 测试快照)
+        _ds = getattr(bo, '_data_source', None)
+        if _ds is None:
+            from meta.core.datasource import get_data_source as _preview_ds_factory
+            from meta.core.db_path import get_meta_db_path as _preview_db_path
+            _ds = _preview_ds_factory('sqlite', database=_preview_db_path())
         referenced_bo_ids = set()
         for r in relationships:
             sid = r.get('source_bo_id') or r.get('sourceBoId')

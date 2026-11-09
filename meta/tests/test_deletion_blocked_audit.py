@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 test_deletion_blocked_audit.py
 
@@ -212,6 +213,12 @@ class TestPath1HierarchyBlocked:
         from meta.core import action_executor as ae_mod
         from types import SimpleNamespace
 
+        # [2026-11-09] BUG-V011: 无 composition 子关联时 _all_children_cascade_delete
+        # 返回 True, 会用 cascade 分支跳过 validate_delete; 本用例专测层级校验路径.
+        monkeypatch.setattr(
+            ActionExecutor, "_all_children_cascade_delete",
+            lambda self, meta_object: False,
+        )
         monkeypatch.setattr(
             ae_mod, "validate_delete",
             lambda *a, **k: SimpleNamespace(
@@ -249,9 +256,14 @@ class TestPath2DeletabilityDenied:
     """路径 2: _check_deletability 表达式为 False → DELETE_BLOCKED / CANNOT_DELETE"""
 
     def test_deletability_condition_false_triggers_blocked_audit(
-        self, ds, executor, spy_blocked_audit
+        self, ds, executor, spy_blocked_audit, monkeypatch
     ):
         """deletability 条件不满足 → 写 DELETE_BLOCKED + CANNOT_DELETE"""
+        # [2026-11-09] 强制走 deletability 校验, 不被 BUG-V011 的 cascade 跳过分支短路
+        monkeypatch.setattr(
+            ActionExecutor, "_all_children_cascade_delete",
+            lambda self, meta_object: False,
+        )
         ds.execute("INSERT INTO blk_parent (id, name, status) VALUES (10, 'locked', 'locked')")
 
         # 配 deletability: status == 'active' 才能删
@@ -517,11 +529,16 @@ class TestBatchDeleteForceAuditsEachFailure:
     修复: force=True → effective_all_or_none=False → 每条独立事务, 失败也写审计.
     """
     def test_batch_delete_with_force_writes_audit_per_failed_id(
-        self, ds, executor, spy_blocked_audit
+        self, ds, executor, spy_blocked_audit, monkeypatch
     ):
         # 这是 _do_delete 单元测试层级, 验证 spy 已被 patch
         # 真实 batch_delete 集成测试见 test_delete_validation_e2e_regression.py
         # 这里只验证 spy 在多次 _do_delete 调用间能累加记录
+        # [2026-11-09] 强制走 deletability 校验, 不被 BUG-V011 的 cascade 跳过分支短路
+        monkeypatch.setattr(
+            ActionExecutor, "_all_children_cascade_delete",
+            lambda self, meta_object: False,
+        )
         ds.execute("INSERT INTO blk_parent (id, name, status) VALUES (80, 'a', 'locked')")
         ds.execute("INSERT INTO blk_parent (id, name, status) VALUES (81, 'b', 'locked')")
         ds.execute("INSERT INTO blk_parent (id, name, status) VALUES (82, 'c', 'active')")

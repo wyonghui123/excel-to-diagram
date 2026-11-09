@@ -338,11 +338,11 @@ class TestBusinessObjectRedundancyFields:
         self.registry.build_from_registry()
 
     def test_business_object_has_domain_id_redundancy(self):
-        """测试 business_object.domain_id 已正确注册"""
+        """测试 business_object.domain_id 已正确注册 (stored, DB trigger 维护)"""
         red_def = self.registry.get_redundancy("business_object", "domain_id")
 
         assert red_def is not None, "domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "domain.id"
 
@@ -361,11 +361,11 @@ class TestBusinessObjectRedundancyFields:
         assert step1.select == "domain_id"
 
     def test_business_object_has_sub_domain_id_redundancy(self):
-        """测试 business_object.sub_domain_id 已正确注册"""
+        """测试 business_object.sub_domain_id 已正确注册 (stored, DB trigger 维护)"""
         red_def = self.registry.get_redundancy("business_object", "sub_domain_id")
 
         assert red_def is not None, "sub_domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "sub_domain.id"
 
@@ -384,8 +384,6 @@ class TestBusinessObjectRedundancyFields:
         obj_reds = self.registry.get_object_redundancies("business_object")
 
         required_virtual_fields = [
-            "domain_id",
-            "sub_domain_id",
             "domain_name",
             "sub_domain_name",
             "service_module_name",
@@ -395,6 +393,11 @@ class TestBusinessObjectRedundancyFields:
         for field_id in required_virtual_fields:
             assert field_id in obj_reds, f"business_object.{field_id} 未注册"
             assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+
+        # domain_id / sub_domain_id 自 2026-06-28 起改为 stored 冗余 (DB trigger 维护)
+        for field_id in ("domain_id", "sub_domain_id"):
+            assert field_id in obj_reds, f"business_object.{field_id} 未注册"
+            assert obj_reds[field_id].redundancy_type == RedundancyType.STORED
 
     def test_business_object_domain_id_vs_domain_name_distinction(self):
         """测试 domain_id (integer) 和 domain_name (string) 是不同的冗余定义"""
@@ -480,7 +483,7 @@ class TestServiceModuleRedundancyFields:
         red_def = self.registry.get_redundancy("service_module", "domain_id")
 
         assert red_def is not None, "service_module.domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type == RedundancyType.STORED
         assert red_def.source_field == "sub_domain_id"
         assert red_def.derived_from == "domain.id"
 
@@ -521,7 +524,6 @@ class TestServiceModuleRedundancyFields:
         obj_reds = self.registry.get_object_redundancies("service_module")
 
         required_virtual_fields = [
-            "domain_id",
             "domain_name",
             "sub_domain_name",
             "version_name",
@@ -530,6 +532,10 @@ class TestServiceModuleRedundancyFields:
         for field_id in required_virtual_fields:
             assert field_id in obj_reds, f"service_module.{field_id} 未注册"
             assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+
+        # domain_id 自 2026-06-28 起改为 stored 冗余 (DB trigger 维护)
+        assert "domain_id" in obj_reds, "service_module.domain_id 未注册"
+        assert obj_reds["domain_id"].redundancy_type == RedundancyType.STORED
 
     def test_service_module_vs_business_object_join_depth_difference(self):
         """验证 service_module 和 business_object 的 domain_id JOIN 深度不同

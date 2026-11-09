@@ -189,7 +189,7 @@ def _populate_test_data(ds, scale: str = "medium"):
         {
             "id": i + 1,
             "name": "版本{0}".format(i + 1),
-            "code": "V{0:02d}".format(i + 1),
+            # [FIX 2026-11-09] versions.code 已废弃（2026-06-13，name 为唯一业务键）
             "product_id": product_ids[i % len(product_ids)],
             "created_at": now,
         }

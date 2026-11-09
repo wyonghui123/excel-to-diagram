@@ -406,6 +406,21 @@ def _register_app_schemas(manifests: List[AppManifest]) -> Dict[str, List[str]]:
     return declared_by_app
 
 
+def reapply_app_schemas() -> Dict[str, List[str]]:
+    """平台 schema 热重载后，重新注册已加载应用的 schema。
+
+    `MetaRegistry.reload()` 只用**单个目录**重建 `_objects`，应用
+    （apps/<app>/schemas）的 BO 会被整体丢弃；而 `register_from_directory`
+    的目录级缓存只校验"注册表非空"，此时会误命中并直接返回，应用 BO 永久
+    缺失（`/api/v2/bo/<app_bo>` 报 Unknown object type、应用表不再补建）。
+
+    legacy 模式（无应用）下 `_loaded_manifests` 为空，本函数直接返回，零行为变化。
+    """
+    if not _loaded_manifests:
+        return {}
+    return _register_app_schemas(list(_loaded_manifests))
+
+
 def _resolve_app_table_target(platform_data_source, manifest: AppManifest):
     """决定应用表建到哪个库（§6.5.3 改动 2）。
 

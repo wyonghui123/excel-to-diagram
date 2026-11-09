@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造有效意图测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 Phase 1 TDD 测试: Effective Intent 权限架构
@@ -244,7 +245,7 @@ def test_db():
     conn.executescript('''
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -253,7 +254,7 @@ def test_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         CREATE TABLE products (
@@ -295,7 +296,7 @@ class TestEffectiveIntentDAO:
 
         dao = EffectiveIntentDAO(test_db)
         dao.upsert(
-            role_id=1, bo_id='product', action_name='read',
+            permission_set_id=1, bo_id='product', action_name='read',
             data_scope={'include': [{'field': 'domain_id', 'op': 'IN', 'value': [1, 2]}]},
             derivation_mode='static',
             source='derived',
@@ -311,11 +312,11 @@ class TestEffectiveIntentDAO:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         dao = EffectiveIntentDAO(test_db)
-        dao.upsert(role_id=2, bo_id='product', action_name='read',
+        dao.upsert(permission_set_id=2, bo_id='product', action_name='read',
                    data_scope={'include': []}, source='derived')
 
         # 覆盖
-        dao.upsert(role_id=2, bo_id='product', action_name='read',
+        dao.upsert(permission_set_id=2, bo_id='product', action_name='read',
                    data_scope={'include': [{'field': 'status', 'op': '=', 'value': 'active'}]},
                    source='manual')
 
@@ -330,10 +331,10 @@ class TestEffectiveIntentDAO:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         dao = EffectiveIntentDAO(test_db)
-        dao.upsert(role_id=3, bo_id='product', action_name='read',
+        dao.upsert(permission_set_id=3, bo_id='product', action_name='read',
                    data_scope={'include': [{'field': 'domain_id', 'op': 'IN', 'value': [1]}]})
 
-        intents = dao.get_for_bo_action(role_id=3, bo_id='product', action_name='read')
+        intents = dao.get_for_bo_action(permission_set_id=3, bo_id='product', action_name='read')
         assert len(intents) == 1
 
     def test_mark_stale(self, test_db):
@@ -341,10 +342,10 @@ class TestEffectiveIntentDAO:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         dao = EffectiveIntentDAO(test_db)
-        dao.upsert(role_id=4, bo_id='product', action_name='read',
+        dao.upsert(permission_set_id=4, bo_id='product', action_name='read',
                    data_scope={'include': []})
 
-        dao.mark_stale(role_id=4)
+        dao.mark_stale(permission_set_id=4)
         intents = dao.list_for_role(4)
         assert intents[0]['is_stale'] == 1
 
@@ -353,7 +354,7 @@ class TestEffectiveIntentDAO:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         dao = EffectiveIntentDAO(test_db)
-        dao.upsert(role_id=5, bo_id='product', action_name='read',
+        dao.upsert(permission_set_id=5, bo_id='product', action_name='read',
                    data_scope={'include': []})
         dao.mark_stale(5)
         dao.clear_stale(5)
@@ -366,8 +367,8 @@ class TestEffectiveIntentDAO:
         from meta.core.effective_intent_dao import EffectiveIntentDAO
 
         dao = EffectiveIntentDAO(test_db)
-        dao.upsert(role_id=6, bo_id='product', action_name='read', data_scope={})
-        dao.upsert(role_id=6, bo_id='version', action_name='read', data_scope={})
+        dao.upsert(permission_set_id=6, bo_id='product', action_name='read', data_scope={})
+        dao.upsert(permission_set_id=6, bo_id='version', action_name='read', data_scope={})
 
         dao.delete_for_role(6)
         assert len(dao.list_for_role(6)) == 0
@@ -396,12 +397,13 @@ class TestEffectiveIntentChecker:
     def test_owner_grants_admin(self):
         """Owner 优先级最高, 直接授予 admin"""
         # Intent: product:read, include=domain_id IN [1,2], 但用户是 owner
-        self.dao.upsert(role_id=10, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=10, bo_id='product', action_name='read',
                         data_scope={
                             'include': [{'field': 'domain_id', 'op': 'IN', 'value': [1, 2]}]
                         })
 
         # product id=1, owner_id=159, domain_id=1
+        # EffectiveIntentChecker.check 的形参仍为 role_id（DAO 层已改名 permission_set_id）
         result = self.checker.check(
             role_id=10, bo_id='product', action_name='read',
             record_id=1, user_id=159,
@@ -411,7 +413,7 @@ class TestEffectiveIntentChecker:
 
     def test_exclude_denies_even_if_include_allows(self):
         """Exclude 一票否决, 即使 Include 允许"""
-        self.dao.upsert(role_id=11, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=11, bo_id='product', action_name='read',
                         data_scope={
                             'include': [],  # all
                             'exclude': [{'field': 'status', 'op': '=', 'value': 'archived'}],
@@ -427,7 +429,7 @@ class TestEffectiveIntentChecker:
 
     def test_include_allows_matching_record(self):
         """Include 匹配的记录允许访问"""
-        self.dao.upsert(role_id=12, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=12, bo_id='product', action_name='read',
                         data_scope={
                             'include': [
                                 {'field': 'domain_id', 'op': 'IN', 'value': [1, 2]},
@@ -445,7 +447,7 @@ class TestEffectiveIntentChecker:
 
     def test_include_denies_non_matching_record(self):
         """Include 不匹配的记录拒绝 (走 default_deny 路径)"""
-        self.dao.upsert(role_id=13, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=13, bo_id='product', action_name='read',
                         data_scope={
                             'include': [
                                 {'field': 'domain_id', 'op': 'IN', 'value': [1]},
@@ -463,7 +465,7 @@ class TestEffectiveIntentChecker:
 
     def test_empty_include_means_all(self):
         """空 include = all (全部允许)"""
-        self.dao.upsert(role_id=14, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=14, bo_id='product', action_name='read',
                         data_scope={'include': []})
 
         result = self.checker.check(
@@ -473,18 +475,18 @@ class TestEffectiveIntentChecker:
         assert result['allowed'] is True
         assert result['source'] == 'include'
 
-    def test_no_intent_denies(self):
-        """无 Intent → 默认拒绝"""
+    def test_no_intent_allows_all(self):
+        """无 Intent → 未配置 = 允许所有 (P4 语义, 与旧 DataPermissionInterceptor 一致)"""
         result = self.checker.check(
             role_id=999, bo_id='product', action_name='read',
             record_id=1, user_id=999,
         )
-        assert result['allowed'] is False
-        assert result['source'] == 'default_deny'
+        assert result['allowed'] is True
+        assert result['source'] == 'no_intent_allows_all'
 
     def test_owner_overrides_exclude(self):
         """Owner 优先于 Exclude (Owner 不受 exclude 限制)"""
-        self.dao.upsert(role_id=15, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=15, bo_id='product', action_name='read',
                         data_scope={
                             'include': [],
                             'exclude': [{'field': 'status', 'op': '=', 'value': 'archived'}],
@@ -500,7 +502,7 @@ class TestEffectiveIntentChecker:
 
     def test_runtime_variable_in_include(self):
         """Include 中使用运行时变量 ${user.id} (非 owner 场景)"""
-        self.dao.upsert(role_id=16, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=16, bo_id='product', action_name='read',
                         data_scope={
                             'include': [
                                 {'field': 'created_by', 'op': '=', 'value': '${user.id}'}
@@ -531,7 +533,7 @@ class TestEffectiveIntentChecker:
 
     def test_action_independent(self):
         """action 独立: read 和 delete 是不同的 Intent"""
-        self.dao.upsert(role_id=17, bo_id='product', action_name='read',
+        self.dao.upsert(permission_set_id=17, bo_id='product', action_name='read',
                         data_scope={'include': []})
         # 没有 delete 的 Intent
 
@@ -545,8 +547,9 @@ class TestEffectiveIntentChecker:
             role_id=17, bo_id='product', action_name='delete',
             record_id=1, user_id=999,
         )
-        assert result_delete['allowed'] is False
-        assert result_delete['source'] == 'default_deny'
+        # P4: 未配置 delete Intent = 允许所有 (不是 default_deny)
+        assert result_delete['allowed'] is True
+        assert result_delete['source'] == 'no_intent_allows_all'
 
 
 # ============================================================================

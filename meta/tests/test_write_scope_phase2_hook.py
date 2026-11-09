@@ -45,7 +45,7 @@ def write_hook_db():
     conn.executescript('''
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -54,23 +54,28 @@ def write_hook_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
+        -- [schema] org_permission_sets / org_members / orgs 为当前生产表结构
+        CREATE TABLE orgs (
+            id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER
+        );
         CREATE TABLE org_permission_sets (
-            group_id INTEGER, role_id INTEGER
+            org_id INTEGER, permission_set_id INTEGER
         );
         CREATE TABLE org_members (
-            user_id INTEGER, group_id INTEGER
+            user_id INTEGER, org_id INTEGER, is_manager INTEGER DEFAULT 0
         );
 
-        -- 用户 999 → group 1 → role 100
+        -- 用户 999 → org 1 → permission_set 100
+        INSERT INTO orgs VALUES (1, 'Root', NULL);
         INSERT INTO org_permission_sets VALUES (1, 100);
-        INSERT INTO org_members VALUES (999, 1);
+        INSERT INTO org_members VALUES (999, 1, 0);
 
-        -- role 100 对 product 有 update 权限 (owner_id = ${user.id})
+        -- permission_set 100 对 product 有 update 权限 (owner_id = ${user.id})
         INSERT INTO permission_set_effective_intents
-            (role_id, bo_id, action_name, data_scope, source)
+            (permission_set_id, bo_id, action_name, data_scope, source)
         VALUES
             (100, 'product', 'update',
              '{"include":[{"field":"owner_id","op":"=","value":"${user.id}"}],"exclude":[]}',
@@ -86,6 +91,18 @@ def write_hook_db():
             (1, 'P1', 'Product 1', 999, 999, 'public'),
             (2, 'P2', 'Product 2', 888, 888, 'public'),
             (3, 'P3', 'Product 3', 999, 999, 'private');
+
+        -- associate 场景: 两个 target 都是 relationship 记录
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            code TEXT, name TEXT,
+            source_bo_id INTEGER, target_bo_id INTEGER,
+            owner_id INTEGER, created_by INTEGER, visibility TEXT
+        );
+        INSERT INTO relationships VALUES
+            (1, 'R1', 'Rel 1', 1, 3, 999, 999, 'public'),
+            (2, 'R2', 'Rel 2', 1, 2, 888, 888, 'public'),
+            (3, 'R3', 'Rel 3', 1, 3, 999, 999, 'public');
     ''')
     conn.commit()
     conn.close()
@@ -344,10 +361,9 @@ class TestWriteScopePhase2Hook:
             assert exc_info.value.target_id == 2
             assert exc_info.value.user_id == 999
 
-    def test_hook_no_intent_denies(self, write_mock_context, write_hook_db):
-        """hook + 无 Intent → 默认拒绝 (抛 WriteScopeDenied)"""
+    def test_hook_no_intent_falls_back_to_legacy(self, write_mock_context, write_hook_db):
+        """hook + 无 Intent → 返回 False, 回退 legacy 5 步检查 (不硬拒)"""
         from meta.core.permission_flags import set_flag
-        from meta.core.interceptors.write_scope_interceptor import WriteScopeDenied
 
         set_flag('effective_intents_enabled', True)
 
@@ -357,13 +373,23 @@ class TestWriteScopePhase2Hook:
         conn.commit()
         conn.close()
 
+        # 用非 owner 记录 (product 2, owner=888), 避免 owner 短路
+        write_mock_context.object_id = 2
+
         interceptor = self._make_interceptor()
 
         with patch('meta.services.auth_middleware.is_admin', return_value=False), patch.object(
             interceptor, '_get_db_path', return_value=write_hook_db
-        ):
-            with pytest.raises(WriteScopeDenied):
-                interceptor.before_action(write_mock_context)
+        ), patch.object(
+            interceptor, '_check_target'
+        ) as mock_legacy, patch.object(
+            interceptor, '_validate_fk_scope_policies'
+        ) as mock_fk:
+            interceptor.before_action(write_mock_context)
+
+        # 回退到 legacy 路径
+        mock_legacy.assert_called()
+        mock_fk.assert_called_once_with(write_mock_context, 999)
 
     def test_hook_action_name_mapping_create(self, write_mock_context, write_hook_db):
         """action=crud_create → action_name='create'"""
@@ -430,7 +456,7 @@ class TestWriteScopePhase2Hook:
         # 补充 Intent: relationship update
         conn = sqlite3.connect(write_hook_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope, source) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope, source) "
             "VALUES (100, 'relationship', 'update', '{}', 'derived')"
         )
         conn.commit()
@@ -463,7 +489,7 @@ class TestWriteScopePhase2Hook:
         # relationship 的 Intent: owner_id=${user.id}
         conn = sqlite3.connect(write_hook_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope, source) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope, source) "
             "VALUES (100, 'relationship', 'update', "
             "'{\"include\":[{\"field\":\"owner_id\",\"op\":\"=\",\"value\":\"${user.id}\"}],\"exclude\":[]}', "
             "'derived')"
@@ -490,7 +516,7 @@ class TestWriteScopePhase2Hook:
         conn.execute(
             "UPDATE permission_set_effective_intents SET data_scope = "
             "'{\"include\":[],\"exclude\":[]}' "
-            "WHERE role_id = 100 AND bo_id = 'product' AND action_name = 'update'"
+            "WHERE permission_set_id = 100 AND bo_id = 'product' AND action_name = 'update'"
         )
         conn.commit()
         conn.close()
@@ -516,18 +542,18 @@ class TestWriteScopePhase2Hook:
 
         set_flag('effective_intents_enabled', True)
 
-        # 修改 Intent: 空 include + exclude owner_id=999
+        # 修改 Intent: 空 include + exclude owner_id=888
         conn = sqlite3.connect(write_hook_db)
         conn.execute(
             "UPDATE permission_set_effective_intents SET data_scope = "
-            "'{\"include\":[],\"exclude\":[{\"field\":\"owner_id\",\"op\":\"=\",\"value\":999}]}' "
-            "WHERE role_id = 100 AND bo_id = 'product' AND action_name = 'update'"
+            "'{\"include\":[],\"exclude\":[{\"field\":\"owner_id\",\"op\":\"=\",\"value\":888}]}' "
+            "WHERE permission_set_id = 100 AND bo_id = 'product' AND action_name = 'update'"
         )
         conn.commit()
         conn.close()
 
-        # product 1 (owner=999) → exclude 命中 → 拒绝
-        write_mock_context.object_id = 1
+        # product 2 (owner=888) → exclude 命中且非 owner → 拒绝
+        write_mock_context.object_id = 2
 
         interceptor = self._make_interceptor()
 

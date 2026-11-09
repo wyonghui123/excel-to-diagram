@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造关联测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 后端测试套件 - AssociationEngine测试
 测试关联操作功能（用户组-角色间接关联模式）
@@ -17,62 +18,62 @@ class TestGroupRoleAssociationQuery:
             INSERT INTO orgs (code, name)
             VALUES (?, ?)
         """, (f'group_{user["id"]}_{role["id"]}', f'Group {user["id"]}'))
-        group_id = cursor.lastrowid
+        org_id = cursor.lastrowid
         cursor.execute("""
-            INSERT INTO org_members (user_id, group_id)
+            INSERT INTO org_members (user_id, org_id)
             VALUES (?, ?)
-        """, (user['id'], group_id))
+        """, (user['id'], org_id))
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id)
+            INSERT INTO org_permission_sets (org_id, permission_set_id)
             VALUES (?, ?)
-        """, (group_id, role['id']))
+        """, (org_id, role['id']))
         db_connection.commit()
-        return group_id
+        return org_id
 
     def test_query_group_roles(self, db_connection, user_with_role):
         """TC-BE-005-01: 查询用户组-角色关联（通过用户组间接获取用户角色）"""
         cursor = db_connection.cursor()
 
         user_id = user_with_role['user']['id']
-        role_id = user_with_role['role']['id']
-        group_id = user_with_role['group_id']
+        permission_set_id = user_with_role['permission_set']['id']
+        org_id = user_with_role['org_id']
 
-        if not group_id:
+        if not org_id:
             pytest.skip("No group association in user_with_role")
 
         cursor.execute("""
             SELECT r.* FROM permission_sets r
-            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-            WHERE gr.group_id = ?
-        """, (group_id,))
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            WHERE gr.org_id = ?
+        """, (org_id,))
         roles = cursor.fetchall()
 
         assert len(roles) >= 1
-        role_ids = [r['id'] for r in roles]
-        assert role_id in role_ids
+        permission_set_ids = [r['id'] for r in roles]
+        assert permission_set_id in permission_set_ids
 
     def test_query_user_roles_via_group(self, db_connection, user_with_role):
         """查询用户的角色（通过用户组间接关联）"""
         cursor = db_connection.cursor()
 
         user_id = user_with_role['user']['id']
-        role_id = user_with_role['role']['id']
-        group_id = user_with_role.get('group_id')
+        permission_set_id = user_with_role['permission_set']['id']
+        org_id = user_with_role.get('org_id')
 
-        if not group_id:
+        if not org_id:
             pytest.skip("No group association")
 
         cursor.execute("""
             SELECT r.* FROM permission_sets r
-            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user_id,))
         roles = cursor.fetchall()
 
         assert len(roles) >= 1
-        role_ids = [r['id'] for r in roles]
-        assert role_id in role_ids
+        permission_set_ids = [r['id'] for r in roles]
+        assert permission_set_id in permission_set_ids
 
     def test_query_with_filters(self, db_connection, user_with_role):
         """TC-BE-005-05: 带过滤器的关联查询"""
@@ -80,16 +81,16 @@ class TestGroupRoleAssociationQuery:
             cursor = db_connection.cursor()
 
             user_id = user_with_role['user']['id']
-            group_id = user_with_role.get('group_id')
+            org_id = user_with_role.get('org_id')
 
-            if not group_id:
+            if not org_id:
                 pytest.skip("No group association")
 
             cursor.execute("""
                 SELECT r.* FROM permission_sets r
-                INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-                WHERE gr.group_id = ? AND (r.status IS NULL OR r.status = ?)
-            """, (group_id, 'active'))
+                INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+                WHERE gr.org_id = ? AND (r.status IS NULL OR r.status = ?)
+            """, (org_id, 'active'))
             roles = cursor.fetchall()
 
             for role in roles:
@@ -103,15 +104,15 @@ class TestGroupRoleAssociationQuery:
         cursor = db_connection.cursor()
 
         user_id = user_with_role['user']['id']
-        group_id = user_with_role.get('group_id')
+        org_id = user_with_role.get('org_id')
 
-        if not group_id:
+        if not org_id:
             pytest.skip("No group association")
 
         cursor.execute("""
             SELECT COUNT(*) as count FROM permission_sets r
-            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user_id,))
         count = cursor.fetchone()['count']
@@ -128,8 +129,8 @@ def created_user_group(db_connection):
         VALUES (?, ?, ?)
     """, ('test_group', 'Test Group', 'Test group for association tests'))
     db_connection.commit()
-    group_id = cursor.lastrowid
-    cursor.execute("SELECT * FROM orgs WHERE id = ?", (group_id,))
+    org_id = cursor.lastrowid
+    cursor.execute("SELECT * FROM orgs WHERE id = ?", (org_id,))
     return cursor.fetchone()
 
 
@@ -141,14 +142,14 @@ class TestGroupRoleAssign:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id)
+            INSERT INTO org_permission_sets (org_id, permission_set_id)
             VALUES (?, ?)
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (created_user_group['id'], created_role['id']))
         association = cursor.fetchone()
 
@@ -159,14 +160,14 @@ class TestGroupRoleAssign:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id)
+            INSERT INTO org_permission_sets (org_id, permission_set_id)
             VALUES (?, ?)
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
 
         try:
             cursor.execute("""
-                INSERT INTO org_permission_sets (group_id, role_id)
+                INSERT INTO org_permission_sets (org_id, permission_set_id)
                 VALUES (?, ?)
             """, (created_user_group['id'], created_role['id']))
             db_connection.commit()
@@ -179,14 +180,14 @@ class TestGroupRoleAssign:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id, created_at)
+            INSERT INTO org_permission_sets (org_id, permission_set_id, created_at)
             VALUES (?, ?, datetime('now'))
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
             SELECT created_at FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (created_user_group['id'], created_role['id']))
         association = cursor.fetchone()
 
@@ -201,20 +202,20 @@ class TestGroupRoleUnassign:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id)
+            INSERT INTO org_permission_sets (org_id, permission_set_id)
             VALUES (?, ?)
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
             DELETE FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (created_user_group['id'], created_role['id']))
         association = cursor.fetchone()
 
@@ -226,7 +227,7 @@ class TestGroupRoleUnassign:
 
         cursor.execute("""
             DELETE FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (created_user_group['id'], created_role['id'] + 9999))
         db_connection.commit()
 
@@ -241,21 +242,21 @@ class TestBatchGroupRoleAssociation:
         """TC-BE-005-21: 批量分配关联"""
         cursor = db_connection.cursor()
 
-        role_ids = [role['id'] for role in multiple_roles[:3]]
+        permission_set_ids = [role['id'] for role in multiple_roles[:3]]
 
-        for role_id in role_ids:
+        for permission_set_id in permission_set_ids:
             try:
                 cursor.execute("""
-                    INSERT OR IGNORE INTO org_permission_sets (group_id, role_id)
+                    INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id)
                     VALUES (?, ?)
-                """, (created_user_group['id'], role_id))
+                """, (created_user_group['id'], permission_set_id))
             except Exception:
                 pass
         db_connection.commit()
 
         cursor.execute("""
             SELECT COUNT(*) as count FROM org_permission_sets
-            WHERE group_id = ?
+            WHERE org_id = ?
         """, (created_user_group['id'],))
         count = cursor.fetchone()['count']
 
@@ -265,26 +266,26 @@ class TestBatchGroupRoleAssociation:
         """TC-BE-005-22: 批量取消关联"""
         cursor = db_connection.cursor()
 
-        role_ids = [role['id'] for role in multiple_roles[:2]]
-        for role_id in role_ids:
+        permission_set_ids = [role['id'] for role in multiple_roles[:2]]
+        for permission_set_id in permission_set_ids:
             try:
                 cursor.execute("""
-                    INSERT OR IGNORE INTO org_permission_sets (group_id, role_id)
+                    INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id)
                     VALUES (?, ?)
-                """, (created_user_group['id'], role_id))
+                """, (created_user_group['id'], permission_set_id))
             except Exception:
                 pass
         db_connection.commit()
 
         cursor.execute("""
             DELETE FROM org_permission_sets
-            WHERE group_id = ?
+            WHERE org_id = ?
         """, (created_user_group['id'],))
         db_connection.commit()
 
         cursor.execute("""
             SELECT COUNT(*) as count FROM org_permission_sets
-            WHERE group_id = ?
+            WHERE org_id = ?
         """, (created_user_group['id'],))
         count = cursor.fetchone()['count']
 
@@ -297,19 +298,19 @@ class TestBatchGroupRoleAssociation:
         cursor.execute("BEGIN TRANSACTION")
 
         try:
-            role_ids = [role['id'] for role in multiple_roles[:2]]
-            for role_id in role_ids:
+            permission_set_ids = [role['id'] for role in multiple_roles[:2]]
+            for permission_set_id in permission_set_ids:
                 cursor.execute("""
-                    INSERT INTO org_permission_sets (group_id, role_id)
+                    INSERT INTO org_permission_sets (org_id, permission_set_id)
                     VALUES (?, ?)
-                """, (created_user_group['id'], role_id))
+                """, (created_user_group['id'], permission_set_id))
 
             cursor.execute("COMMIT")
             db_connection.commit()
 
             cursor.execute("""
                 SELECT COUNT(*) as count FROM org_permission_sets
-                WHERE group_id = ?
+                WHERE org_id = ?
             """, (created_user_group['id'],))
             count = cursor.fetchone()['count']
             assert count == 2
@@ -328,14 +329,14 @@ class TestUserGroupMembership:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_members (user_id, group_id)
+            INSERT INTO org_members (user_id, org_id)
             VALUES (?, ?)
         """, (created_user['id'], created_user_group['id']))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_members
-            WHERE user_id = ? AND group_id = ?
+            WHERE user_id = ? AND org_id = ?
         """, (created_user['id'], created_user_group['id']))
         membership = cursor.fetchone()
 
@@ -346,18 +347,18 @@ class TestUserGroupMembership:
         cursor = db_connection.cursor()
 
         user_id = user_in_group['user']['id']
-        group_id = user_in_group['group']['id']
+        org_id = user_in_group['group']['id']
 
         cursor.execute("""
             DELETE FROM org_members
-            WHERE user_id = ? AND group_id = ?
-        """, (user_id, group_id))
+            WHERE user_id = ? AND org_id = ?
+        """, (user_id, org_id))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_members
-            WHERE user_id = ? AND group_id = ?
-        """, (user_id, group_id))
+            WHERE user_id = ? AND org_id = ?
+        """, (user_id, org_id))
         membership = cursor.fetchone()
 
         assert membership is None
@@ -368,19 +369,19 @@ class TestUserGroupMembership:
             cursor = db_connection.cursor()
 
             user_id = user_in_group['user']['id']
-            group_id = user_in_group['group']['id']
+            org_id = user_in_group['group']['id']
 
             cursor.execute("""
                 UPDATE org_members
                 SET is_manager = 1
-                WHERE user_id = ? AND group_id = ?
-            """, (user_id, group_id))
+                WHERE user_id = ? AND org_id = ?
+            """, (user_id, org_id))
             db_connection.commit()
 
             cursor.execute("""
                 SELECT is_manager FROM org_members
-                WHERE user_id = ? AND group_id = ?
-            """, (user_id, group_id))
+                WHERE user_id = ? AND org_id = ?
+            """, (user_id, org_id))
             membership = cursor.fetchone()
 
             assert membership['is_manager'] == 1 or membership is not None
@@ -396,15 +397,15 @@ class TestAssociationIntegrity:
         cursor = db_connection.cursor()
 
         user_id = user_in_group['user']['id']
-        group_id = user_in_group['group']['id']
+        org_id = user_in_group['group']['id']
 
-        cursor.execute("DELETE FROM orgs WHERE id = ?", (group_id,))
+        cursor.execute("DELETE FROM orgs WHERE id = ?", (org_id,))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_members
-            WHERE user_id = ? AND group_id = ?
-        """, (user_id, group_id))
+            WHERE user_id = ? AND org_id = ?
+        """, (user_id, org_id))
         membership = cursor.fetchone()
 
         if membership is not None:
@@ -416,7 +417,7 @@ class TestAssociationIntegrity:
         cursor = db_connection.cursor()
 
         cursor.execute("""
-            INSERT INTO org_permission_sets (group_id, role_id)
+            INSERT INTO org_permission_sets (org_id, permission_set_id)
             VALUES (?, ?)
         """, (created_user_group['id'], created_role['id']))
         db_connection.commit()
@@ -426,7 +427,7 @@ class TestAssociationIntegrity:
 
         cursor.execute("""
             SELECT * FROM org_permission_sets
-            WHERE role_id = ?
+            WHERE permission_set_id = ?
         """, (created_role['id'],))
         relations = cursor.fetchall()
 

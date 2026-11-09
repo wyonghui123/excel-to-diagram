@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造注解批量导入测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -110,9 +111,10 @@ class TestAnnotationBusinessKeyMatching:
     """注解组合业务键匹配测试"""
 
     def setup_method(self):
-        import meta
-        meta._yaml_loaded = False
-        meta._load_from_yaml()
+        # [FIX 2026-11-09] meta._load_from_yaml 已移除, 改用 register_from_directory
+        from meta.core.yaml_loader import get_yaml_schema_dir, register_from_directory
+        from meta.core.models import registry as _registry
+        register_from_directory(get_yaml_schema_dir(), _registry._objects)
 
     def _make_service(self):
         from meta.core.sql_adapters import SQLiteAdapter
@@ -167,9 +169,10 @@ class TestDynamicForeignKeyResolution:
     """动态外键(resolve_to_field)解析测试"""
 
     def setup_method(self):
-        import meta
-        meta._yaml_loaded = False
-        meta._load_from_yaml()
+        # [FIX 2026-11-09] meta._load_from_yaml 已移除, 改用 register_from_directory
+        from meta.core.yaml_loader import get_yaml_schema_dir, register_from_directory
+        from meta.core.models import registry as _registry
+        register_from_directory(get_yaml_schema_dir(), _registry._objects)
 
     def test_dynamic_resolve_semantics_on_target_id(self):
         """验证 target_id 的 resolve_to_field 语义正确加载"""
@@ -212,9 +215,10 @@ class TestAnnotationImportIntegration:
 
     def setup_method(self):
         """创建测试数据库"""
-        import meta
-        meta._yaml_loaded = False
-        meta._load_from_yaml()
+        # [FIX 2026-11-09] meta._load_from_yaml 已移除, 改用 register_from_directory
+        from meta.core.yaml_loader import get_yaml_schema_dir, register_from_directory
+        from meta.core.models import registry as _registry
+        register_from_directory(get_yaml_schema_dir(), _registry._objects)
 
         self.db_file = tempfile.mktemp(suffix='.db')
         self.conn = sqlite3.connect(self.db_file)
@@ -397,7 +401,8 @@ class TestAnnotationImportIntegration:
         assert existing is None, "不同 category 应视为不同记录"
 
         result = svc._upsert_record('annotation', record_warning, None)
-        assert result is True
+        # [FIX 2026-11-09] _upsert_record 现在返回 dict(success/operation/error)
+        assert (result is True) or (isinstance(result, dict) and result.get('success') is True), result
 
         cursor.execute("SELECT COUNT(*) as cnt FROM annotations WHERE target_type='service_module' AND target_id=1")
         count = cursor.fetchone()['cnt']

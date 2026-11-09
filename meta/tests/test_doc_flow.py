@@ -124,6 +124,8 @@ def ready_env(dbs):
     ensure_doc_flow_rule_table(platform_ds)
     upsert_rules(platform_ds, [{
         "rule_id": RULE_ID, "source_bo": SOURCE_BO, "target_bo": TARGET_BO,
+        # 显式直拷声明（item_name/unit 非引用字段，不再隐式同名拷贝）
+        "copied_fields": ["item_name", "unit"],
     }])
     return app_ds, platform_ds
 
@@ -352,7 +354,7 @@ class TestDeriveEngine:
             " FROM df_test_deliveries WHERE id = ?", (result.target_id,)
         ).fetchall()[0]
         assert tgt[0] == "DN-001"
-        assert tgt[1] == "物料A"                       # 同名直拷
+        assert tgt[1] == "物料A"                       # 规则声明直拷
         assert tgt[2] == 4
         assert tgt[3]                                  # created_at 自动填充
 

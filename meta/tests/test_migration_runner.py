@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 COV-007: MigrationRunner 8 个单元测试
 
@@ -49,9 +50,8 @@ class TestMigrationRunner:
         runner = MigrationRunner(ds, migrations_dir=tempfile.mkdtemp())
         runner.ensure_migrations_table()
         ds.execute.assert_called()
-        sql = ds.execute.call_args[0][0]
-        assert 'CREATE TABLE' in sql
-        assert 'schema_migrations' in sql
+        calls = [c[0][0] for c in ds.execute.call_args_list]
+        assert any('CREATE TABLE' in sql and 'schema_migrations' in sql for sql in calls)
 
     def test_get_executed_migrations_returns_list(self):
         """get_executed_migrations 返回 list[str]"""
@@ -85,8 +85,11 @@ class TestMigrationRunner:
         sql = ds.execute.call_args[0][0]
         assert 'INSERT' in sql
         assert 'schema_migrations' in sql
-        # 第二个位置参数是 (name, checksum) tuple
-        assert ds.execute.call_args[0][1] == ('001_test.sql', 'abc123')
+        # P1 增强后为 8 元组 (name, checksum, executed_by, execution_time_ms,
+        # backup_path, status, error_message, environment)
+        assert ds.execute.call_args[0][1] == (
+            '001_test.sql', 'abc123', None, None, None, 'SUCCESS', None, None
+        )
 
     def test_parse_sql_statements_splits_correctly(self):
         """_parse_sql_statements 正确切分多条 SQL"""

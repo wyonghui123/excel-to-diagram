@@ -282,3 +282,25 @@ def test_return_serial_outbound_event_and_reversal():
     serial = _row(conn, 'serial_numbers', 1)
     assert serial['usage_status'] == 'in_stores'
     assert serial['current_location_id'] == 7
+
+
+# ---------------- 规则字段守卫 ----------------
+
+def test_return_rule_qty_fields_exist_in_schema():
+    """规则声明的源/目标数量字段必须在对应 BO schema 中真实存在。"""
+    import yaml
+
+    migration = importlib.import_module(
+        'meta.migrations.v227__purchase_return_object')
+    rule = migration.RETURN_RULE
+    schema_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')
+
+    def _field_ids(bo):
+        path = os.path.join(schema_dir, bo + '.yaml')
+        with open(path, encoding='utf-8') as f:
+            meta = yaml.safe_load(f)
+        return {fld['id'] for fld in meta['fields']}
+
+    assert rule['source_qty_field'] in _field_ids(rule['source_bo'])
+    assert rule['target_qty_field'] in _field_ids(rule['target_bo'])

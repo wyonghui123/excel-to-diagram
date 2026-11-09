@@ -194,6 +194,21 @@ DOC_FLOW 已具备边表、规则注册、派生引擎、冲销引擎、追溯�
 
 规则元数据化、outbox、图遍历追溯；按需启动，不阻塞 A/B。
 
+### 实施记录（2026-11-06，逆向能力平台化 D1-D6 回填）
+
+| 本规格能力 | 落地位置 | 对应验收 |
+|---|---|---|
+| 补偿边原语 | `meta/core/reversal_primitives.py`（`edge_compensate_by_source`，注册表 18 项） | AC-SF-03 / AC-SF-07 |
+| 声明式 doc_effect | 4 个 schema（receipt / shipment / transfer_order / inventory_adjustment）+ `meta/core/doc_effect_validator.py`（V1-V6） | AC-SF-06 / AC-SF-09 |
+| 计划行按边重算 | 逆向投影 `recompute_schedule_received` / `recompute_schedule_returned` | AC-SF-05 |
+| 红字子边保留 | 红字单边规则 `receipt_line_to_return_out_txn` 等，原边置 `reversed` 而非删除 | AC-SF-04 |
+| 消耗量单一化 | `v_demand_trace_graph.signed_qty` 统一正向 / 退货出库 / 红字符号分支 | AC-SF-05 / AC-SF-07 |
+| 对账 | `test_doc_flow_reconcile` 29 例、`test_demand_trace_graph` 12 例、`test_doc_effect_declarations` 9 例 | AC-SF-08 / AC-SF-10 |
+
+> D7 收口结论：旧档位引擎（`doc_flow_reversal` / `reversal_profiles`）仍被
+> `reversal_orchestrator` 引用，且 Q5（旧错误码映射保留周期）未定，
+> 按决策 M6「保留一版」暂不删除。
+
 ---
 
 ## 9. 验收标准

@@ -74,6 +74,10 @@
             <slot v-else :name="`section-${section.key}`" :data="data" />
           </template>
         </ObjectPage>
+        <div v-if="docFlowMatched" class="dp-doc-flow">
+          <h4 class="dp-doc-flow__title">单据流追溯</h4>
+          <DocFlowTracePanel :object-type="objectType" :record-id="id" />
+        </div>
         <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
           <AppIcon name="refresh" size="16" class="spin" />
           <span>加载配置中...</span>
@@ -154,6 +158,10 @@
           <slot v-else :name="`section-${section.key}`" :data="data" />
         </template>
       </ObjectPage>
+      <div v-if="docFlowMatched" class="dp-doc-flow">
+        <h4 class="dp-doc-flow__title">单据流追溯</h4>
+        <DocFlowTracePanel :object-type="objectType" :record-id="id" />
+      </div>
       <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
         <AppIcon name="refresh" size="16" class="spin" />
         <span>加载配置中...</span>
@@ -195,6 +203,8 @@ import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import DocFlowTracePanel from '@/components/business/DocFlow/DocFlowTracePanel.vue'
+import { listRules } from '@/services/docFlowService'
 import { useAuthStore } from '@/stores/authStore'
 import { useBoAction } from '@/composables/useBoAction'
 
@@ -241,6 +251,24 @@ const authStore = useAuthStore()
 const ruleTraceConfig = computed(
   () => entityMeta.value?.ui_view_config?.detail?.rule_trace || {}
 )
+
+// [单据流 2026-11-08] 平台级追溯面板：规则命中当前 BO（源或目标）即渲染，
+//   不要求 BO YAML 重复声明 detail.facets。
+const docFlowRules = ref([])
+const docFlowMatched = computed(() => docFlowRules.value.some(
+  (rule) => rule.source_bo === props.objectType || rule.target_bo === props.objectType,
+))
+
+async function loadDocFlowRules() {
+  try {
+    const data = await listRules({})
+    docFlowRules.value = data.rules || []
+  } catch (error) {
+    docFlowRules.value = []
+  }
+}
+
+onMounted(loadDocFlowRules)
 
 // [L1] refreshKey：详情页用 objectType + id 区分实例。
 //   区别于 metalist 的 `list:${objectType}`（单 objectType 单实例），
@@ -1918,6 +1946,21 @@ const showAuditDialog = ref(false)
   padding: var(--spacing-md);
   color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+/* [单据流 2026-11-08] 平台级追溯面板容器 */
+.dp-doc-flow {
+  margin: var(--spacing-md);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border-light, var(--el-border-color-lighter));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.dp-doc-flow__title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .spin {

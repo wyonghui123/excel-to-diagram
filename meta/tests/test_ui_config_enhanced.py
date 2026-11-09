@@ -41,7 +41,8 @@ class TestUIConfigEnhanced:
         config = ui_config.get_ui_config('role')
 
         assert config is not None
-        assert config['object_type'] == 'role'
+        # role 已并入 permission_set（Spec16 Plan D），别名仍可解析
+        assert config['object_type'] == 'permission_set'
 
         is_system_field = next((f for f in config['fields'] if f['id'] == 'is_system'), None)
         assert is_system_field is not None

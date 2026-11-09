@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 校验运维服务数据，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -40,7 +41,7 @@ def _create_test_db():
             roles TEXT DEFAULT ''
         )
     """)
-    conn.execute("INSERT INTO users (username, permission_sets) VALUES ('admin', 'admin')")
+    conn.execute("INSERT INTO users (username) VALUES ('admin')")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -7,9 +7,11 @@ pytestmark = pytest.mark.unit
 StandardActionLoader 单元测试
 
 测试 §7.11.4 标准动作加载器的核心功能：
-1. load() 加载 16 个标准动作（[Spec 21 PM 反馈 2026-09-12] 从 12 扩到 16：增 unassign/associate/dissociate/grant）
-2. get_suffix_map() 返回正确的 16 对映射
-3. get_action_codes() 返回全部 16 个 code
+1. load() 加载 23 个标准动作（[Spec 21 PM 反馈 2026-09-12] 从 12 扩到 16：
+   增 unassign/associate/dissociate/grant；[Spec 22 FR-001 2026-09-13] 扩到 23：
+   增 activate/deactivate/lock/unlock/freeze/unfreeze/reset_password）
+2. get_suffix_map() 返回正确的 23 对映射
+3. get_action_codes() 返回全部 23 个 code
 4. 文件缺失时抛出 FileNotFoundError
 5. auto_load 机制
 6. instance_scope 字段正确加载
@@ -26,11 +28,11 @@ sys.path.insert(0, PROJECT_ROOT)
 
 class TestStandardActionLoaderLoad:
 
-    def test_load_returns_16_actions(self):
+    def test_load_returns_23_actions(self):
         from meta.core.standard_action_loader import StandardActionLoader
         schemas_dir = os.path.join(PROJECT_ROOT, 'meta', 'schemas')
         actions = StandardActionLoader.load(schemas_dir)
-        assert len(actions) == 16
+        assert len(actions) == 23
 
     def test_load_all_action_ids_present(self):
         from meta.core.standard_action_loader import StandardActionLoader
@@ -41,6 +43,8 @@ class TestStandardActionLoaderLoad:
             'export', 'import', 'approve', 'search',
             'assign', 'unassign', 'associate', 'dissociate',
             'grant', 'revoke', 'manage',
+            'activate', 'deactivate', 'lock', 'unlock',
+            'freeze', 'unfreeze', 'reset_password',
         }
         actual_ids = {a.id for a in StandardActionLoader.get_actions()}
         assert actual_ids == expected_ids
@@ -87,13 +91,16 @@ class TestStandardActionLoaderSuffixMap:
         assert smap['grant'] == 'grant'
         assert smap['revoke'] == 'revoke'
         assert smap['manage'] == 'manage'
+        for action_id in ('activate', 'deactivate', 'lock', 'unlock',
+                          'freeze', 'unfreeze', 'reset_password'):
+            assert smap[action_id] == action_id
 
-    def test_all_16_mappings_present(self):
+    def test_all_23_mappings_present(self):
         from meta.core.standard_action_loader import StandardActionLoader
         schemas_dir = os.path.join(PROJECT_ROOT, 'meta', 'schemas')
         StandardActionLoader.load(schemas_dir)
         smap = StandardActionLoader.get_suffix_map()
-        assert len(smap) == 16
+        assert len(smap) == 23
         assert 'crud_create' in smap
         assert 'manage' in smap
 
@@ -108,15 +115,17 @@ class TestStandardActionLoaderActionCodes:
         expected = {'create', 'read', 'update', 'delete', 'list',
                     'export', 'import', 'approve', 'search',
                     'assign', 'unassign', 'associate', 'dissociate',
-                    'grant', 'revoke', 'manage'}
+                    'grant', 'revoke', 'manage',
+                    'activate', 'deactivate', 'lock', 'unlock',
+                    'freeze', 'unfreeze', 'reset_password'}
         assert codes == expected
 
-    def test_size_is_16(self):
+    def test_size_is_23(self):
         from meta.core.standard_action_loader import StandardActionLoader
         schemas_dir = os.path.join(PROJECT_ROOT, 'meta', 'schemas')
         StandardActionLoader.load(schemas_dir)
         codes = StandardActionLoader.get_action_codes()
-        assert len(codes) == 16
+        assert len(codes) == 23
 
     def test_codes_are_strings(self):
         from meta.core.standard_action_loader import StandardActionLoader
@@ -152,7 +161,7 @@ class TestStandardActionLoaderInstanceScope:
 
     覆盖矩阵：
       object 级动作（创建/列表/导入/搜索/管理）→ InstanceScope.OBJECT
-      instance 级动作（其余 11 个）              → InstanceScope.INSTANCE
+      instance 级动作（其余 18 个）              → InstanceScope.INSTANCE
     """
 
     def test_object_scoped_actions(self):
@@ -176,12 +185,14 @@ class TestStandardActionLoaderInstanceScope:
             'export', 'approve',
             'assign', 'unassign', 'associate', 'dissociate',
             'grant', 'revoke',
+            'activate', 'deactivate', 'lock', 'unlock',
+            'freeze', 'unfreeze', 'reset_password',
         ]:
             assert actions[action_id].instance_scope == InstanceScope.INSTANCE, \
                 f'{action_id} 应为 instance 级'
 
     def test_instance_scope_count(self):
-        """总数 16：object=5, instance=11"""
+        """总数 23：object=5, instance=18"""
         from meta.core.standard_action_loader import StandardActionLoader
         from meta.core.models import InstanceScope
         schemas_dir = os.path.join(PROJECT_ROOT, 'meta', 'schemas')
@@ -189,8 +200,8 @@ class TestStandardActionLoaderInstanceScope:
         actions = StandardActionLoader.get_actions()
         n_object = sum(1 for a in actions if a.instance_scope == InstanceScope.OBJECT)
         n_instance = sum(1 for a in actions if a.instance_scope == InstanceScope.INSTANCE)
-        assert (n_object, n_instance) == (5, 11), \
-            f'应 object=5 / instance=11，实际 object={n_object} / instance={n_instance}'
+        assert (n_object, n_instance) == (5, 18), \
+            f'应 object=5 / instance=18，实际 object={n_object} / instance={n_instance}'
 
 
 class TestStandardActionLoaderAutoLoad:
@@ -200,21 +211,21 @@ class TestStandardActionLoaderAutoLoad:
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         actions = StandardActionLoader.get_actions()
-        assert len(actions) == 16
+        assert len(actions) == 23
 
     def test_get_suffix_map_auto_loads(self):
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         smap = StandardActionLoader.get_suffix_map()
-        assert len(smap) == 16
+        assert len(smap) == 23
 
     def test_get_action_codes_auto_loads(self):
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         codes = StandardActionLoader.get_action_codes()
-        assert len(codes) == 16
+        assert len(codes) == 23
 
 
 class TestStandardActionLoaderMetaActionProperties:

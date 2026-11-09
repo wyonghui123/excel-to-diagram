@@ -303,9 +303,9 @@ class TestExportRBACFilterAppliedToChildSheets:
         """admin 在 child OT 过滤时也跳过权限检查"""
         src_path = Path(PROJECT_ROOT) / 'meta' / 'services' / 'import_export_service.py'
         content = src_path.read_text(encoding='utf-8')
-        # 应有 username != 'admin' 短路
-        assert "user.get('username') != 'admin'" in content, \
-            "admin 应通过 username 短路跳过权限检查"
+        # 应有 admin 短路 (当前实现走 is_admin(user))
+        assert 'is_admin(user)' in content, \
+            "admin 应通过 is_admin 短路跳过权限检查"
 
 
 # ============================================================

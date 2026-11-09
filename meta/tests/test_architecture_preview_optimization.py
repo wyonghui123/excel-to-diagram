@@ -101,16 +101,20 @@ class TestArchitecturePreviewIDPushdown:
         assert page_size == 5000
 
     def test_relationship_query_uses_bo_in_filter(self, make_bo_mock):
-        """[FR-009] 关系表应使用 source_bo_id__in + target_bo_id__in"""
+        """[FR-009 / v39.6] 关系表 SQL 只下推 source_bo_id__in, 跨边界由 Python 端 OR 保留
+
+        v39.6 变更原因: 同时下推 source+target 的 __in 会漏掉「target 在范围内、
+        source 在范围外」的 cross-boundary 关系, 图表比列表少边;
+        现改为 SQL 下推 source + Python 端 (source OR target) 二次过滤。
+        """
         bo = make_bo_mock({})
         _patch_and_call(bo, '/api/v2/architecture/preview?business_object_ids=10,20')
 
         rel_call = next(c for c in bo.query.call_args_list if c[0][0] == 'relationship')
         filters = rel_call[0][1] or {}
         assert 'source_bo_id__in' in filters
-        assert 'target_bo_id__in' in filters
         assert set(filters['source_bo_id__in']) == {10, 20}
-        assert set(filters['target_bo_id__in']) == {10, 20}
+        assert 'target_bo_id__in' not in filters
 
     def test_all_4_entities_get_id_filter(self, make_bo_mock):
         """[FR-009] 4 个实体都应下推 ID 过滤"""

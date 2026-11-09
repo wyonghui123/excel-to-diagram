@@ -97,6 +97,11 @@ class RuleProvider:
         from meta.core.doc_flow_rule_store import set_rule_status
         return set_rule_status(data_source, rule_id, status)
 
+    def list_doc_flow_rules(self, data_source, status: Optional[str] = None) -> List[dict]:
+        """列出单据流规则（规则中心目录用，只读）。"""
+        from meta.core.doc_flow_rule_store import list_rules
+        return list_rules(data_source, status)
+
     def list_permission_rules(self, db_path: str, resource_type: Optional[str] = None):
         """读取权限规则（DB 载体）。"""
         from meta.core.permission_rule_v2_dao import PermissionRuleV2DAO
@@ -138,6 +143,11 @@ def ensure_doc_flow_rule_table(data_source) -> None:
 def set_doc_flow_rule_status(data_source, rule_id: str, status: str) -> bool:
     """模块级便捷函数：单据流规则启停。"""
     return get_rule_provider().set_doc_flow_rule_status(data_source, rule_id, status)
+
+
+def list_doc_flow_rules(data_source, status: Optional[str] = None) -> List[dict]:
+    """模块级便捷函数：单据流规则列表（规则中心目录用）。"""
+    return get_rule_provider().list_doc_flow_rules(data_source, status)
 
 
 def list_permission_rules(db_path: str, resource_type: Optional[str] = None):

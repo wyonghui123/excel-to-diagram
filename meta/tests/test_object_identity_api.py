@@ -6,9 +6,10 @@ import pytest
 from meta.tests.shared.assertions import expect, HTTPStatus
 
 # 状态码域 (复用 HTTPStatus)
-VALIDATION_500 = HTTPStatus.CLIENT_ERROR_SERVER
-GET_OK = HTTPStatus.PAGINATION_OK
-BATCH_400 = HTTPStatus.CLIENT_ERROR_SERVER
+# v1.4 P8 Sunset: /api/v1/identity 顶层资源已被 410 中间件接管，故允许 410
+VALIDATION_500 = tuple(HTTPStatus.CLIENT_ERROR_SERVER) + (410,)
+GET_OK = tuple(HTTPStatus.PAGINATION_OK) + (410,)
+BATCH_400 = tuple(HTTPStatus.CLIENT_ERROR_SERVER) + (410,)
 
 
 class TestObjectIdentityAPI:

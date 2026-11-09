@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造定时调度器测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """Workflow 定时调度器回归 —— schedule 触发从「占位」到「真行为」
 
 背景:

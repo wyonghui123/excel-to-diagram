@@ -92,9 +92,11 @@ class TestRolesAndLogs:
 
     @pytest.mark.parametrize('method,endpoint,body', ROLE_CRUD)
     def test_role_crud(self, api_client, method, endpoint, body):
-        r = expect(api_client, method, endpoint, OK_AUTH, json=body) if body \
-            else expect(api_client, method, endpoint, OK_AUTH)
-        assert r.status_code in OK_AUTH
+        # 角色双轨收口后 /orgs/<id>/roles 仅保留 GET/POST，PUT 已移除 → 405
+        codes = OK_AUTH + [405] if method == 'put' else OK_AUTH
+        r = expect(api_client, method, endpoint, codes, json=body) if body \
+            else expect(api_client, method, endpoint, codes)
+        assert r.status_code in codes
 
     def test_available_roles(self, api_client):
         expect(api_client, 'get', '/api/v1/orgs/1/roles/available', OK_AUTH)

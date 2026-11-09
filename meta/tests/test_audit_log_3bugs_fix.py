@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [NEW 2026-06-09] 3 个 audit log bug 修复验证
 
@@ -30,20 +31,9 @@ def fresh_db():
     fd, path = tempfile.mkstemp(suffix='.db')
     os.close(fd)
     conn = sqlite3.connect(path)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type TEXT, object_id TEXT, action TEXT,
-            field_name TEXT, old_value TEXT, new_value TEXT,
-            user_id TEXT, user_name TEXT, ip_address TEXT, user_agent TEXT,
-            created_at TEXT, trace_id TEXT, transaction_id TEXT,
-            status TEXT DEFAULT 'written', retry_count INTEGER DEFAULT 0,
-            error_message TEXT, log_category TEXT DEFAULT 'business',
-            log_level TEXT DEFAULT 'INFO', extra_data TEXT,
-            parent_object_type TEXT, parent_object_id TEXT,
-            agent_id TEXT, agent_session_id TEXT, tool_call_id TEXT, agent_reasoning TEXT
-        );
-    """)
+    # audit_logs 40 列真源统一由 shared/db_schema 提供, 避免手写 DDL 落后于生产
+    from meta.tests.shared.db_schema import create_audit_logs
+    create_audit_logs(conn)
     conn.commit()
     conn.close()
     yield path
@@ -226,14 +216,14 @@ class TestGetObjectDisplayNullFallback:
         result = get_object_display('user', 1, ds)
         assert result == 'p13_user', f"display_name=NULL 时应回退到 username, 实际: {result!r}"
 
-    def test_display_name_present_should_use_display_name(self, db_with_user):
+    def test_display_name_present_still_uses_username(self, db_with_user):
         from meta.core.datasource import get_data_source
         from meta.core.model_utils import get_object_display
 
         ds = get_data_source("sqlite", database=db_with_user)
-        # display_name 有值 → 直接用
+        # user.yaml display_name_field: username → 即使 display_name 有值也以 username 为准
         result = get_object_display('user', 2, ds)
-        assert result == 'Real Name', f"display_name 有值时直接用, 实际: {result!r}"
+        assert result == 'p14_user', f"user 展示字段是 username, 实际: {result!r}"
 
 
 # ============================================================

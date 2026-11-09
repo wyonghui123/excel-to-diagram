@@ -22,9 +22,10 @@ from pathlib import Path
 import pytest
 
 MIGRATION_ORDER = [
-    'rename_roles_to_permission_sets',
-    'rename_user_groups_to_orgs',
+    'v070__rename_roles_to_permission_sets',
+    'v072__rename_user_groups_to_orgs',
     'create_org_functions',
+    'v089__drop_legacy_user_group_and_role_tables',
 ]
 
 OLD_TABLES = [
@@ -85,13 +86,17 @@ def fresh_db():
 
 def _run_full_migration_chain(db_path):
     """按依赖顺序执行 3 个迁移 (验证完整迁移链端到端)"""
-    conn = sqlite3.connect(str(db_path))
-    try:
-        for name in MIGRATION_ORDER:
-            module = __import__(f'meta.migrations.{name}', fromlist=['upgrade'])
-            module.upgrade(conn)
-    finally:
-        conn.close()
+    for name in MIGRATION_ORDER:
+        module = __import__(f'meta.migrations.{name}', fromlist=['upgrade'])
+        _upgrade = getattr(module, 'upgrade', None) or getattr(module, '_do_upgrade', None)
+        if _upgrade is not None:
+            conn = sqlite3.connect(str(db_path))
+            try:
+                _upgrade(conn)
+            finally:
+                conn.close()
+        else:
+            module.migrate(db_path)
 
 
 def _table_set(db_path):

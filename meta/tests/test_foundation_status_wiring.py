@@ -299,11 +299,16 @@ class TestUiWiring:
         fields = [f for t in tabs for f in (t.get('fields') or [])]
         assert 'status' in fields, '%s 详情缺 status' % bo
 
-    def test_party_relation_has_no_list_config(self):
-        """关系层无自动菜单（skip_auto_menu），无列表接线需求"""
+    def test_party_relation_has_list_config_without_status(self):
+        """关系层无自动菜单（skip_auto_menu），但 2026-10-17 起显式补回 list 列
+
+        前端 useMetaList 只认 listConfig.tableColumns || listConfig.columns，
+        缺 list 时 tab 只渲染勾选框（见 party_relation.yaml ui_view_config 注释）。
+        status 不接入列表接线（_UI_OBJECTS 不含 party_relation）。
+        """
         uic = _load_raw('party_relation').get('ui_view_config') or {}
         assert uic.get('skip_auto_menu') is True
-        assert 'list' not in uic
+        assert (uic.get('list') or {}).get('columns'), 'party_relation 缺 list.columns'
 
 
 # ────────────────────────────────────────

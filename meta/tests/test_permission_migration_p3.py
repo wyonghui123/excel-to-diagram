@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [FILE] test_permission_migration_p3.py
 [DESCRIPTION] Phase 3 data_permission_rules 统一表 — TDD 测试用例
@@ -42,7 +43,8 @@ def db_with_legacy_tables():
         -- [P3-T1] 新统一表
         CREATE TABLE IF NOT EXISTS data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            role_id INTEGER,
+            permission_set_id INTEGER,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
             resource_type VARCHAR(200),
             dimension_code VARCHAR(200),
@@ -61,7 +63,7 @@ def db_with_legacy_tables():
         -- 旧表 (P3-T2 来源)
         CREATE TABLE IF NOT EXISTS permission_set_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             dimension_code VARCHAR(200) NOT NULL,
             dimension_values TEXT NOT NULL,
             inherit_children INTEGER DEFAULT 1,
@@ -70,7 +72,7 @@ def db_with_legacy_tables():
 
         -- 旧表 (P3-T3 来源)
         CREATE TABLE IF NOT EXISTS permission_rules (
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             condition TEXT NOT NULL,
             permission_level VARCHAR(200) NOT NULL DEFAULT 'read',
@@ -94,26 +96,26 @@ def db_with_legacy_tables():
     conn.execute("INSERT INTO permission_sets (id, code, name) VALUES (2, 'user', 'User')")
     # role_dimension_scopes 测试数据 (3 行)
     conn.execute(
-        "INSERT INTO permission_set_dimension_scopes (id, role_id, dimension_code, dimension_values, scope_mode) "
+        "INSERT INTO permission_set_dimension_scopes (id, permission_set_id, dimension_code, dimension_values, scope_mode) "
         "VALUES (1, 1, 'product', '[1, 2]', 'include')"
     )
     conn.execute(
-        "INSERT INTO permission_set_dimension_scopes (id, role_id, dimension_code, dimension_values, scope_mode) "
+        "INSERT INTO permission_set_dimension_scopes (id, permission_set_id, dimension_code, dimension_values, scope_mode) "
         "VALUES (2, 1, 'version', '[10, 11]', 'include')"
     )
     conn.execute(
-        "INSERT INTO permission_set_dimension_scopes (id, role_id, dimension_code, dimension_values, scope_mode) "
+        "INSERT INTO permission_set_dimension_scopes (id, permission_set_id, dimension_code, dimension_values, scope_mode) "
         "VALUES (3, 2, 'product', '[]', 'all')"
     )
     # permission_rules 测试数据 (2 行)
     conn.execute(
         "INSERT INTO permission_rules "
-        "(role_id, resource_type, condition, permission_level, is_denied) "
+        "(permission_set_id, resource_type, condition, permission_level, is_denied) "
         "VALUES (1, 'product', \"status = 'active'\", 'read', 0)"
     )
     conn.execute(
         "INSERT INTO permission_rules "
-        "(role_id, resource_type, condition, permission_level, is_denied) "
+        "(permission_set_id, resource_type, condition, permission_level, is_denied) "
         "VALUES (2, 'business_object', \"owner_id = 1\", 'write', 0)"
     )
     conn.commit()
@@ -180,19 +182,19 @@ class TestMigrateRoleDimensionScopes:
 
     def test_migrate_all_rows(self, db_with_legacy_tables):
         """迁移行数 = 原表行数"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
-        migrated = migrate_role_dimension_scopes(ds)
+        migrated = migrate_permission_set_dimension_scopes(ds)
         assert migrated == 3
 
     def test_migrated_rows_have_rule_type_dimension(self, db_with_legacy_tables):
         """迁移行的 rule_type='dimension'"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         rows = ds.execute(
             "SELECT rule_type, COUNT(*) FROM data_permission_rules "
-            "WHERE source_table='role_dimension_scopes' GROUP BY rule_type"
+            "WHERE source_table='permission_set_dimension_scopes' GROUP BY rule_type"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == 'dimension'
@@ -200,12 +202,12 @@ class TestMigrateRoleDimensionScopes:
 
     def test_migrated_rows_have_correct_dimension_code(self, db_with_legacy_tables):
         """迁移行的 dimension_code 与原表一致"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         rows = ds.execute(
             "SELECT dimension_code FROM data_permission_rules "
-            "WHERE source_table='role_dimension_scopes' "
+            "WHERE source_table='permission_set_dimension_scopes' "
             "ORDER BY source_id"
         ).fetchall()
         codes = [r[0] for r in rows]
@@ -213,9 +215,9 @@ class TestMigrateRoleDimensionScopes:
 
     def test_migrated_rows_have_scope_mode_preserved(self, db_with_legacy_tables):
         """迁移行的 scope_mode 保留 (含 'all')"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         row = ds.execute(
             "SELECT scope_mode FROM data_permission_rules "
             "WHERE source_id=3"
@@ -224,20 +226,20 @@ class TestMigrateRoleDimensionScopes:
 
     def test_migrate_idempotent(self, db_with_legacy_tables):
         """重复迁移不会插入重复行"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
-        first = migrate_role_dimension_scopes(ds)
-        second = migrate_role_dimension_scopes(ds)
+        first = migrate_permission_set_dimension_scopes(ds)
+        second = migrate_permission_set_dimension_scopes(ds)
         assert first == 3
         assert second == 0  # 已迁移, skip
 
     def test_migrate_without_target_table_raises(self, db_with_legacy_tables):
         """目标表不存在时抛异常"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_with_legacy_tables
         ds.execute("DROP TABLE data_permission_rules")
         with pytest.raises(RuntimeError, match='data_permission_rules'):
-            migrate_role_dimension_scopes(ds)
+            migrate_permission_set_dimension_scopes(ds)
 
 
 # ============================================================================
@@ -295,7 +297,7 @@ class TestMigratePermissionRules:
         # 插入一行 is_denied=1
         ds.execute(
             "INSERT INTO permission_rules "
-            "(role_id, resource_type, condition, is_denied) "
+            "(permission_set_id, resource_type, condition, is_denied) "
             "VALUES (1, 'product', \"status = 'archived'\", 1)"
         )
         migrate_permission_rules(ds)

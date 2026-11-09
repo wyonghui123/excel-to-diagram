@@ -2002,14 +2002,12 @@ def get_dimension_instances(dimension_id: str):
 
         return ok(
             {
-                "data": {
-                    "instances": instances,
-                    "pagination": {
-                        "page": page,
-                        "page_size": page_size,
-                        "total_count": total_count,
-                        "total_pages": (total_count + page_size - 1) // page_size,
-                    },
+                "instances": instances,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": (total_count + page_size - 1) // page_size,
                 },
             }
         )
@@ -2273,7 +2271,7 @@ def save_permission_rule(permission_set_id: int):
 
         rule_id = cursor.lastrowid
 
-        engine.invalidate_cache(permission_set_id=permission_set_id)
+        engine.invalidate_cache(permission_set_id)
 
         logger.info(f"保存权限规则成功 [permission_set_id={permission_set_id}, rule_id={rule_id}]")
 
@@ -2411,7 +2409,7 @@ def save_resource_action_matrix(permission_set_id: int):
         # 缓存失效（与 POST /permission-rules 同样的 invalidate 模式）
         try:
             engine = _get_engine()
-            engine.invalidate_cache(permission_set_id=permission_set_id)
+            engine.invalidate_cache(permission_set_id)
         except Exception as cache_err:
             logger.warning(f"[resource-action-matrix] 缓存失效失败（非阻断）: {cache_err}")
 

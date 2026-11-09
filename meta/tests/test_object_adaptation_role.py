@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限集测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -33,6 +34,13 @@ class TestRoleCRUD:
         os.close(db_fd)
 
         ds = get_data_source('sqlite', database=db_path)
+
+        # [夹具补齐 2026-11-09] bo_framework.commit 依赖 get_runtime_config() 单例，
+        #   该单例仅在 server 初始化时由 detect_runtime_config(db_path) 设置；
+        #   临时库测试不经过 server 启动，必须在此补上，否则报
+        #   "[V007.15 L0] DB config not detected yet"。
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
 
         ds.execute('''CREATE TABLE IF NOT EXISTS permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,19 +79,19 @@ class TestRoleCRUD:
         ds.execute('''CREATE TABLE IF NOT EXISTS org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             joined_at DATETIME,
-            UNIQUE(user_id, group_id)
+            UNIQUE(user_id, org_id)
         )''')
         ds.commit()
 
         ds.execute('''CREATE TABLE IF NOT EXISTS org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             permission_set_id INTEGER NOT NULL,
             created_at DATETIME,
-            UNIQUE(group_id, permission_set_id)
+            UNIQUE(org_id, permission_set_id)
         )''')
         ds.commit()
 
@@ -132,7 +140,7 @@ class TestRoleCRUD:
         data = {'code': code, 'name': name}
         if description is not None:
             data['description'] = description
-        return data_source.insert('roles', data)
+        return data_source.insert('permission_sets', data)
 
     def _insert_user(self, data_source, username, email):
         return data_source.insert('users', {'username': username, 'email': email})
@@ -145,18 +153,18 @@ class TestRoleCRUD:
         data_source.commit()
         return cursor.lastrowid
 
-    def _add_user_to_group(self, data_source, user_id, group_id):
+    def _add_user_to_group(self, data_source, user_id, org_id):
         cursor = data_source.execute(
-            "INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
-            (user_id, group_id)
+            "INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
+            (user_id, org_id)
         )
         data_source.commit()
         return cursor.lastrowid
 
-    def _assign_role_to_group(self, data_source, group_id, permission_set_id):
+    def _assign_role_to_group(self, data_source, org_id, permission_set_id):
         cursor = data_source.execute(
-            "INSERT INTO org_permission_sets (group_id, permission_set_id) VALUES (?, ?)",
-            (group_id, permission_set_id)
+            "INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
+            (org_id, permission_set_id)
         )
         data_source.commit()
         return cursor.lastrowid
@@ -237,7 +245,7 @@ class TestRoleCRUD:
 
             assert result.success, f"更新失败: {result.message}"
 
-            record = data_source.find_by_id('roles', permission_set_id)
+            record = data_source.find_by_id('permission_sets', permission_set_id)
             assert record['name'] == '更新后名称'
             assert record['description'] == '新描述'
         except Exception as e:
@@ -259,7 +267,7 @@ class TestRoleCRUD:
 
             bo_framework.update('permission_set', permission_set_id, {'code': 'NEW_CODE'})
 
-            record = data_source.find_by_id('roles', permission_set_id)
+            record = data_source.find_by_id('permission_sets', permission_set_id)
             assert record['code'] == 'CODE_TEST'
         except Exception as e:
             pytest.fail(f"PermissionSet CRUD skipped: {e}")
@@ -272,7 +280,7 @@ class TestRoleCRUD:
 
             assert result.success, f"删除失败: {result.message}"
 
-            record = data_source.find_by_id('roles', permission_set_id)
+            record = data_source.find_by_id('permission_sets', permission_set_id)
             assert record is None
         except Exception as e:
             pytest.fail(f"PermissionSet CRUD skipped: {e}")

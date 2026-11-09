@@ -56,6 +56,7 @@ def _demo_metas():
         fields=[
             _field("id", FieldType.INTEGER, required=True, unique=True),
             _field("order_no", FieldType.STRING),
+            _field("line_no", FieldType.INTEGER),
             _field("ship_to", FieldType.STRING),
             _field("ship_point", FieldType.STRING),
             _field("item_name", FieldType.STRING),
@@ -74,6 +75,7 @@ def _demo_metas():
             _field("ship_to", FieldType.STRING),
             _field("ship_point", FieldType.STRING),
             _field("remark", FieldType.STRING),
+            _field("status", FieldType.STRING, default="new"),
             _field("quantity", FieldType.FLOAT),
             _field("created_at", FieldType.DATETIME),
         ],
@@ -84,8 +86,11 @@ def _demo_metas():
             _field("id", FieldType.INTEGER, required=True, unique=True),
             _field("delivery_id", FieldType.INTEGER,
                    semantics=SemanticAnnotation(parent_key=True)),
+            _field("line_no", FieldType.INTEGER),
             _field("item_name", FieldType.STRING),
             _field("material_name", FieldType.STRING),
+            _field("remark", FieldType.STRING),
+            _field("status", FieldType.STRING, default="new"),
             _field("quantity", FieldType.FLOAT),
             _field("unit", FieldType.STRING),
             _field("created_at", FieldType.DATETIME),
@@ -162,11 +167,13 @@ def _make_rule(platform_ds, rule_id="dfb-rule", **overrides):
 
 
 def _insert_source(app_ds, row_id, quantity=10, ship_to="S1", ship_point="P1",
-                   item_name="物料A", unit="PCS", order_no="SO-1"):
+                   item_name="物料A", unit="PCS", order_no="SO-1",
+                   line_no=1, status="open", remark=""):
     app_ds.insert("dfb_order_lines", {
-        "id": row_id, "order_no": order_no, "ship_to": ship_to,
+        "id": row_id, "order_no": order_no, "line_no": line_no,
+        "ship_to": ship_to,
         "ship_point": ship_point, "item_name": item_name, "alt_name": "",
-        "remark": "", "quantity": quantity, "unit": unit, "status": "open",
+        "remark": remark, "quantity": quantity, "unit": unit, "status": status,
     })
 
 
@@ -268,12 +275,16 @@ class TestRuleSchemaPhase2:
             "field_map": {"item_name": "material_name"},
             "split_key": ["ship_to"], "target_line_bo": "demo_line",
             "head_fk_field": "delivery_id",
+            "target_qty_field": "qty_received",
+            "copied_fields": ["description"],
         })
         decl = m.doc_flow_rules[0]
         assert decl.field_map == {"item_name": "material_name"}
         assert decl.split_key == ["ship_to"]
         assert decl.target_line_bo == "demo_line"
         assert decl.head_fk_field == "delivery_id"
+        assert decl.target_qty_field == "qty_received"
+        assert decl.copied_fields == ["description"]
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +313,8 @@ class TestMappingModel:
         """优先级链：同名字段直拷 < field_map 改名 < target_data 静态覆盖。"""
         app_ds, platform_ds = ready_env
         _make_rule(platform_ds, field_map={"item_name": "material_name"},
-                   target_line_bo=LINE_BO, split_key=[])
+                   target_line_bo=LINE_BO, split_key=[],
+                   copied_fields=["item_name"])
         _insert_source(app_ds, 1, quantity=10, item_name="物料A")
 
         # 明细行同时存在同名 item_name 与改名目标 material_name：
@@ -351,6 +363,25 @@ class TestMappingModel:
                      head_overrides={"delivery_no": "DN-1"})
         assert app_ds.execute(
             "SELECT quantity FROM dfb_deliveries").fetchall()[0][0] == 4
+
+    def test_status_and_remark_never_copied(self, ready_env):
+        """status / remark 属下游对象自身状态，不继承上游。"""
+        app_ds, platform_ds = ready_env
+        _make_rule(platform_ds, target_line_bo=LINE_BO, split_key=[])
+        _insert_source(app_ds, 1, quantity=10, status="closed",
+                       remark="上游备注")
+
+        derive_batch(app_ds, platform_ds, "dfb-rule",
+                     [{"source_id": 1, "quantity": 4}])
+
+        head = app_ds.execute(
+            "SELECT status, remark FROM dfb_deliveries").fetchall()[0]
+        assert head[0] == "new"          # 下游初始态
+        assert head[1] in (None, "")
+        line = app_ds.execute(
+            "SELECT status, remark FROM dfb_delivery_lines").fetchall()[0]
+        assert line[0] == "new"
+        assert line[1] in (None, "")
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +434,10 @@ class TestSplitMerge:
         assert _count(app_ds, "dfb_deliveries") == 1
         assert _count(app_ds, "dfb_delivery_lines") == 3
         assert _count(app_ds, "doc_flow_edges") == 3
+        # 行号不继承上游，目标行从 max+1 重新编号
+        line_nos = {r[0] for r in app_ds.execute(
+            "SELECT line_no FROM dfb_delivery_lines").fetchall()}
+        assert line_nos == {1, 2, 3}
 
     def test_no_split_key_each_row_own_head(self, ready_env):
         """无 split_key → 每行自成一组（各建一张单头）。"""
@@ -515,6 +550,33 @@ class TestAtomicityAndIdempotency:
         ])
         assert result.total_edges == 1 and result.skipped_replays == 1
         assert _count(app_ds, "doc_flow_edges") == 1
+
+    def test_same_source_same_head_different_qty_rejected(self, ready_env):
+        """头行模式不允许同单多行：同源行 + 同单头但数量不同 → 显式错误码。
+
+        spec §14.4 硬约束 2：头行模式是「一源行 = 一目标行」，
+        追加第二行必须显式拒绝，不能静默重放吞掉数量。
+        """
+        app_ds, platform_ds = ready_env
+        _make_rule(platform_ds, split_key=["ship_to"], target_line_bo=LINE_BO)
+        _insert_source(app_ds, 1, quantity=10, ship_to="上海")
+
+        derive_batch(app_ds, platform_ds, "dfb-rule",
+                     [{"source_id": 1, "quantity": 6}])
+        assert _count(app_ds, "doc_flow_edges") == 1
+        assert _count(app_ds, "dfb_delivery_lines") == 1
+        head_id = app_ds.execute("SELECT id FROM dfb_deliveries").fetchall()[0][0]
+
+        with pytest.raises(DocFlowDeriveError) as exc:
+            derive_batch(app_ds, platform_ds, "dfb-rule",
+                         [{"source_id": 1, "quantity": 4}],
+                         head_overrides={"id": head_id})
+        assert exc.value.code == "HEAD_LINE_MULTI_NOT_SUPPORTED"
+
+        # 拒绝后：既无新边，也无新明细行/单头
+        assert _count(app_ds, "doc_flow_edges") == 1
+        assert _count(app_ds, "dfb_delivery_lines") == 1
+        assert _count(app_ds, "dfb_deliveries") == 1
 
     def test_default_quantity_is_open_qty(self, ready_env):
         """quantity 缺省 = 源行未结量（源数量 − 同池已消耗）。"""

@@ -124,12 +124,13 @@ def test_yaml_hub_declaration():
     hub = doc['ui_view_config']['hub']
 
     assert hub['object_types'] == ['handling_unit', 'handling_unit_item',
-                                   'hu_transaction']
+                                   'hu_transaction', 'document_hu_link_view']
     assert hub['default_tab'] == 'handling_unit'
     assert hub['tabs'] == {
         'handling_unit': '子容器',
         'handling_unit_item': '容器内容',
         'hu_transaction': '容器事件',
+        'document_hu_link_view': '关联单据',
     }
     scope = hub['scope']
     assert scope['type'] == 'hierarchy'
@@ -148,6 +149,7 @@ def test_yaml_hub_declaration():
     # 内容 / 事件 tab 取整棵子树（effective 口径）
     assert filters['handling_unit_item'] == {'field': 'hu_id'}
     assert filters['hu_transaction'] == {'field': 'hu_id'}
+    assert filters['document_hu_link_view'] == {'field': 'hu_id'}
 
 
 def test_hub_object_types_have_schemas():

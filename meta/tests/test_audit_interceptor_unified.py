@@ -25,10 +25,15 @@ class TestAuditInterceptorUnified:
     """审计日志统一测试套件"""
 
     def get_audit_logs(self, client, headers, object_type, object_id):
-        """获取指定对象的审计日志"""
+        """获取指定对象的审计日志
+
+        [FIX 2026-11-07] 旧 URL /api/v2/bo/audit/logs 不存在(404), 返回体无 data
+        导致断言"应该存在审计日志"全挂。按 object_type/object_id 精确过滤由
+        v1 /api/v1/audit/logs 提供(在 V1_SPECIAL_PREFIXES 白名单内, 未 Sunset)。
+        """
         object_id_str = str(object_id)
         response = client.get(
-            '/api/v2/bo/audit/logs',
+            '/api/v1/audit/logs',
             headers=headers,
             query_string={
                 'object_type': object_type,
@@ -45,6 +50,9 @@ class TestAuditInterceptorUnified:
     # ==========================================
 
     @pytest.mark.requires_cleanup
+    @pytest.mark.skip(reason="CRUD 审计自 2026-06-09 停写: BusinessLogInterceptor 跳过 CRUD, "
+                             "仅 ActionExecutor 写动作审计, 通用 BO CRUD 不再产生审计日志"
+                             " (动作审计由 test_log_e2e 覆盖)")
     def test_user_create_audit(self, shared_client, admin_headers):
         """测试用户创建审计日志"""
         test_user = {
@@ -79,6 +87,7 @@ class TestAuditInterceptorUnified:
         assert create_log.get('action') in ['CREATE', 'CREATE_USER', 'INSERT'], "动作应该是创建"
 
     @pytest.mark.requires_cleanup
+    @pytest.mark.skip(reason="CRUD 审计自 2026-06-09 停写 (见 test_user_create_audit)")
     def test_user_update_audit_with_changes(self, shared_client, admin_headers):
         """测试用户更新审计日志（值有变化）"""
         test_user = {
@@ -138,6 +147,7 @@ class TestAuditInterceptorUnified:
         assert count_after == count_before, "值无变化时不应产生新的审计日志"
 
     @pytest.mark.requires_cleanup
+    @pytest.mark.skip(reason="CRUD 审计自 2026-06-09 停写 (见 test_user_create_audit)")
     def test_user_delete_audit(self, shared_client, admin_headers):
         """测试用户删除审计日志"""
         test_user = {
@@ -459,6 +469,7 @@ class TestAuditInterceptorUnified:
         assert count_after == count_before, "相同值不应产生新的审计日志"
 
     @pytest.mark.requires_cleanup
+    @pytest.mark.skip(reason="CRUD 审计自 2026-06-09 停写 (见 test_user_create_audit)")
     def test_audit_value_comparison_different_value(self, shared_client, admin_headers):
         """测试值对比逻辑：不同值应记录"""
         test_user = {
@@ -506,6 +517,7 @@ class TestAuditInterceptorUnified:
     # ==========================================
 
     @pytest.mark.requires_cleanup
+    @pytest.mark.skip(reason="CRUD 审计自 2026-06-09 停写 (见 test_user_create_audit)")
     def test_audit_log_required_fields(self, shared_client, admin_headers):
         """测试审计日志必填字段完整性"""
         test_user = {

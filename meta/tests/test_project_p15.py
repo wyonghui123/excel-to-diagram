@@ -221,7 +221,10 @@ CREATE TABLE project_tasks (
     id INTEGER PRIMARY KEY,
     project_id INTEGER NOT NULL,
     task_no TEXT,
-    name TEXT
+    name TEXT,
+    task_type TEXT,
+    status TEXT DEFAULT 'planned',
+    parent_task_id INTEGER
 );
 CREATE TABLE change_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

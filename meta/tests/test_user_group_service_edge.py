@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造组织测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
-P10 单元测试：user_group_service 边界场景
+P10 单元测试：OrgService 边界场景（历史入口名 user_group_service_edge）
 v1.4 P10 补齐：循环引用、深度嵌套、并发场景、UNIQUE 约束、级联
+[v089] UserGroupService 已 Sunset（shim → OrgService），group → org 全量重命名
+[v088] is_manager / manager_id 委托读路径已删除，委托统一走「权限集 + 资源矩阵 org 行级规则」
 """
 import pytest
 
@@ -15,12 +18,12 @@ import tempfile
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _PROJECT_ROOT)
 
-from meta.services.user_group_service import UserGroupService
+from meta.services.org_service import OrgService
 
 
 @pytest.fixture
 def ds():
-    """完整的真实 schema（参考 meta/schemas/user_group.yaml）"""
+    """完整的真实 schema（参考 meta/schemas/org.yaml）"""
     db_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
     db_path = db_file.name
     db_file.close()
@@ -36,7 +39,7 @@ def ds():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             token_version INTEGER DEFAULT 0
         );
-        CREATE TABLE user_groups (
+        CREATE TABLE orgs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             code TEXT UNIQUE NOT NULL,
@@ -46,15 +49,15 @@ def ds():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE user_group_members (
+        CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, group_id)
+            UNIQUE(user_id, org_id)
         );
-        CREATE TABLE roles (
+        CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -63,29 +66,39 @@ def ds():
             is_system INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE group_roles (
+        CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_by INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(group_id, role_id)
+            UNIQUE(org_id, permission_set_id)
         );
-        CREATE TABLE group_data_permissions (
+        CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT,
             is_deprecated INTEGER DEFAULT 1,
             inherit_to_children INTEGER DEFAULT 1
         );
-        CREATE TABLE role_data_permissions (
+        CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
-            permission_level TEXT
+            permission_level TEXT,
+            inherit_to_children INTEGER DEFAULT 1
+        );
+        CREATE TABLE data_permission_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            permission_set_id INTEGER NOT NULL,
+            rule_type TEXT DEFAULT 'condition',
+            resource_type TEXT,
+            condition TEXT,
+            is_denied INTEGER DEFAULT 0,
+            permission_level TEXT DEFAULT 'read'
         );
     """)
     conn.commit()
@@ -114,10 +127,26 @@ def ds():
 
 @pytest.fixture
 def svc(ds):
-    return UserGroupService(ds)
+    return OrgService(ds)
 
 
 # ============== Helpers ==============
+
+def _grant_delegation(ds, user_id, org_id, ps_id, condition):
+    """委托 = 权限集分配给用户个人组织 + org 行级规则（v088 起唯一路径）"""
+    from meta.services.permission_service import PermissionService
+    svc = PermissionService(ds)
+    personal = svc._get_or_create_personal_group(user_id)
+    svc._ensure_user_in_group(user_id, personal)
+    ds.execute(
+        "INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
+        [personal, ps_id]
+    )
+    ds.execute(
+        "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, condition) "
+        "VALUES (?, 'condition', 'org', ?)",
+        [ps_id, condition]
+    )
 
 def _insert_user(ds, username='u'):
     ds.execute(
@@ -129,18 +158,18 @@ def _insert_user(ds, username='u'):
 
 def _insert_group(ds, name='G', code='g', parent_id=None, manager_id=None):
     ds.execute(
-        "INSERT INTO user_groups (name, code, parent_id, manager_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO orgs (name, code, parent_id, manager_id) VALUES (?, ?, ?, ?)",
         [name, code, parent_id, manager_id]
     )
-    return ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
 def _insert_role(ds, code='R', name='R', priority=0):
     ds.execute(
-        "INSERT INTO roles (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, 0)",
+        "INSERT INTO permission_sets (code, name, description, priority, is_system) VALUES (?, ?, ?, ?, 0)",
         [code, name, 'desc', priority]
     )
-    return ds.execute("SELECT id FROM roles WHERE code = ?", [code]).fetchone()[0]
+    return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
 # =========================================================================
@@ -153,11 +182,11 @@ def test_self_reference_group(svc, ds):
     """自引用 group: A.parent_id = A.id（边界情况）"""
     g = _insert_group(ds, 'SelfRef', 'self_ref')
     # 模拟数据库被破坏：group.parent_id = group.id
-    ds.execute("UPDATE user_groups SET parent_id = ? WHERE id = ?", [g, g])
+    ds.execute("UPDATE orgs SET parent_id = ? WHERE id = ?", [g, g])
     # get_all_ancestors 应当不无限递归（依赖实现）
     # 如果实现不当会导致 StackOverflow 或无限循环
     try:
-        ancestors = svc.get_all_ancestors(g)
+        ancestors = svc.get_all_ancestor_orgs(g)
         # 即使自引用也不应崩溃
         assert isinstance(ancestors, list)
     except RecursionError:
@@ -168,13 +197,13 @@ def test_two_level_cycle(svc, ds):
     """A.parent_id = B, B.parent_id = A（两节点循环）"""
     a = _insert_group(ds, 'A', 'cycle_a')
     b = _insert_group(ds, 'B', 'cycle_b')
-    ds.execute("UPDATE user_groups SET parent_id = ? WHERE id = ?", [b, a])
-    ds.execute("UPDATE user_groups SET parent_id = ? WHERE id = ?", [a, b])
+    ds.execute("UPDATE orgs SET parent_id = ? WHERE id = ?", [b, a])
+    ds.execute("UPDATE orgs SET parent_id = ? WHERE id = ?", [a, b])
     # 应当不无限递归
     try:
-        ancestors_a = svc.get_all_ancestors(a)
+        ancestors_a = svc.get_all_ancestor_orgs(a)
         assert isinstance(ancestors_a, list)
-        ancestors_b = svc.get_all_ancestors(b)
+        ancestors_b = svc.get_all_ancestor_orgs(b)
         assert isinstance(ancestors_b, list)
     except RecursionError:
         pytest.fail("get_all_ancestors 在两节点循环时栈溢出")
@@ -188,13 +217,13 @@ def test_deeply_nested_descendants(svc, ds):
     for i in range(20):
         code = f'deep_{i}'
         ds.execute(
-            "INSERT INTO user_groups (name, code, parent_id) VALUES (?, ?, ?)",
+            "INSERT INTO orgs (name, code, parent_id) VALUES (?, ?, ?)",
             [f'Deep Level {i}', code, parent]
         )
-        parent = ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0]
+        parent = ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
-    root_id = ds.execute("SELECT id FROM user_groups WHERE code = 'deep_0'").fetchone()[0]
-    descendants = svc.get_all_descendants(root_id)
+    root_id = ds.execute("SELECT id FROM orgs WHERE code = 'deep_0'").fetchone()[0]
+    descendants = svc.get_all_descendant_orgs(root_id)
     # 应当返回 19 个子孙（不含自己）
     assert len(descendants) == 19
 
@@ -206,14 +235,14 @@ def test_deeply_nested_ancestors(svc, ds):
     for i in range(20):
         code = f'anc_deep_{i}'
         ds.execute(
-            "INSERT INTO user_groups (name, code, parent_id) VALUES (?, ?, ?)",
+            "INSERT INTO orgs (name, code, parent_id) VALUES (?, ?, ?)",
             [f'Anc Deep {i}', code, parent]
         )
-        ids.append(ds.execute("SELECT id FROM user_groups WHERE code = ?", [code]).fetchone()[0])
+        ids.append(ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0])
         parent = ids[-1]
 
     deepest = ids[-1]
-    ancestors = svc.get_all_ancestors(deepest)
+    ancestors = svc.get_all_ancestor_orgs(deepest)
     assert len(ancestors) == 19  # 不含自己
 
 
@@ -229,30 +258,31 @@ def test_add_member_duplicate(svc, ds):
     assert svc.add_member(g, u) is True
     # 验证：只存在 1 条记录
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM user_group_members WHERE group_id = ? AND user_id = ?",
+        "SELECT COUNT(*) FROM org_members WHERE org_id = ? AND user_id = ?",
         [g, u]
     )
     assert cursor.fetchone()[0] == 1
 
 
 def test_add_member_idempotent_manager(svc, ds):
-    """重复设置 manager 身份：最终状态应是 True"""
+    """v088 废弃契约：is_manager=True 一律拒绝，成员关系不写入"""
     g = _insert_group(ds, 'IdemG', 'idem_g')
     u = _insert_user(ds, 'idem_user')
-    svc.add_member(g, u, is_manager=True)
-    svc.add_member(g, u, is_manager=True)
-    assert svc.is_group_manager(g, u) is True
+    assert svc.add_member(g, u, is_manager=True) is False
+    assert svc.add_member(g, u, is_manager=True) is False
+    assert svc.is_org_manager(g, u) is False
+    assert svc.is_member(g, u) is False
 
 
 def test_add_group_role_duplicate(svc, ds):
-    """同一 group-role 重复添加：UNIQUE 约束"""
+    """同一 group-permission_set 重复添加：UNIQUE 约束"""
     g = _insert_group(ds, 'DupRoleG', 'dup_role_g')
     r = _insert_role(ds, code='dup_role', name='Dup')
-    assert svc.add_group_role(g, r) is True
+    assert svc.add_org_permission_set(g, r) is True
     # 第二次添加（应被 INSERT OR IGNORE 忽略）
-    assert svc.add_group_role(g, r) is True
+    assert svc.add_org_permission_set(g, r) is True
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM group_roles WHERE group_id = ? AND role_id = ?",
+        "SELECT COUNT(*) FROM org_permission_sets WHERE org_id = ? AND permission_set_id = ?",
         [g, r]
     )
     assert cursor.fetchone()[0] == 1
@@ -266,7 +296,7 @@ def test_parent_with_children_deletion(svc, ds):
     child = _insert_group(ds, 'Child', 'child_g', parent_id=parent)
     # 当前实现没有级联保护，delete_group 已被 Sunset
     # 但 get_child_groups 应当能返回子组
-    children = svc.get_child_groups(parent)
+    children = svc.get_child_orgs(parent)
     assert len(children) == 1
     assert children[0]['id'] == child
 
@@ -289,10 +319,10 @@ def test_role_shared_across_groups(svc, ds):
     u = _insert_user(ds, 'shared_user')
     svc.add_member(g1, u)
     svc.add_member(g2, u)
-    svc.add_group_role(g1, r)
-    svc.add_group_role(g2, r)
+    svc.add_org_permission_set(g1, r)
+    svc.add_org_permission_set(g2, r)
     # 验证：2 个 group_roles 记录
-    cursor = ds.execute("SELECT COUNT(*) FROM group_roles WHERE role_id = ?", [r])
+    cursor = ds.execute("SELECT COUNT(*) FROM org_permission_sets WHERE permission_set_id = ?", [r])
     assert cursor.fetchone()[0] == 2
 
 
@@ -307,18 +337,18 @@ def test_effective_data_permissions_dedup(svc, ds):
     svc.add_member(g2, u)
     r1 = _insert_role(ds, code='role1', name='Role1')
     r2 = _insert_role(ds, code='role2', name='Role2')
-    svc.add_group_role(g1, r1)
-    svc.add_group_role(g2, r2)
+    svc.add_org_permission_set(g1, r1)
+    svc.add_org_permission_set(g2, r2)
     # 同一 product/level 的 permission 出现在 2 个角色
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO permission_set_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r1]
     )
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO permission_set_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r2]
     )
-    perms = svc.get_user_effective_data_permissions_via_groups(u)
+    perms = svc.get_user_effective_data_permissions_via_orgs(u)
     # 实现可能不去重，验证至少有一条 product:100:read
     matching = [p for p in perms if p.get('resource_type') == 'product' and p.get('resource_id') == 100]
     assert len(matching) >= 1
@@ -330,16 +360,16 @@ def test_effective_data_permissions_different_resources(svc, ds):
     g = _insert_group(ds, 'MultiG', 'multi_g')
     svc.add_member(g, u)
     r = _insert_role(ds, code='multi_role', name='Multi')
-    svc.add_group_role(g, r)
+    svc.add_org_permission_set(g, r)
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
+        "INSERT INTO permission_set_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'product', 100, 'read')",
         [r]
     )
     ds.execute(
-        "INSERT INTO role_data_permissions (role_id, resource_type, resource_id, permission_level) VALUES (?, 'order', 200, 'write')",
+        "INSERT INTO permission_set_data_permissions (permission_set_id, resource_type, resource_id, permission_level) VALUES (?, 'order', 200, 'write')",
         [r]
     )
-    perms = svc.get_user_effective_data_permissions_via_groups(u)
+    perms = svc.get_user_effective_data_permissions_via_orgs(u)
     assert len(perms) == 2
     types = [p['resource_type'] for p in perms]
     assert 'product' in types
@@ -352,15 +382,15 @@ def test_personal_group_codes_unique(svc, ds):
     """多个用户的个人组 code 应互不冲突"""
     u1 = _insert_user(ds, 'p_user1')
     u2 = _insert_user(ds, 'p_user2')
-    g1 = _insert_group(ds, 'PG1', f'personal_group_user_{u1}')
-    g2 = _insert_group(ds, 'PG2', f'personal_group_user_{u2}')
+    g1 = _insert_group(ds, 'PG1', f'personal_org_user_{u1}')
+    g2 = _insert_group(ds, 'PG2', f'personal_org_user_{u2}')
     assert g1 != g2
     # 验证 DB
-    cursor = ds.execute("SELECT code FROM user_groups WHERE id IN (?, ?)", [g1, g2])
+    cursor = ds.execute("SELECT code FROM orgs WHERE id IN (?, ?)", [g1, g2])
     rows = cursor.fetchall()
     codes = [r[0] for r in rows]
-    assert f'personal_group_user_{u1}' in codes
-    assert f'personal_group_user_{u2}' in codes
+    assert f'personal_org_user_{u1}' in codes
+    assert f'personal_org_user_{u2}' in codes
 
 
 # =========================================================================
@@ -385,11 +415,12 @@ def test_can_manage_self_with_all_perm(svc, ds):
 
 
 def test_can_manage_user_idempotent(svc, ds):
-    """can_manage_user 多次调用结果一致"""
+    """can_manage_user 多次调用结果一致（委托来自资源矩阵行级规则）"""
     g = _insert_group(ds, 'IdemG2', 'idem_g2')
     op = _insert_user(ds, 'op_user')
     target = _insert_user(ds, 'target_user')
-    svc.add_member(g, op, is_manager=True)
+    ps = _insert_role(ds, code='idem_delegate', name='IdemDelegate')
+    _grant_delegation(ds, op, g, ps, f'id = {g}')
     svc.add_member(g, target, is_manager=False)
     results = [svc.can_manage_user(op, target) for _ in range(5)]
     assert all(r is True for r in results)
@@ -398,45 +429,47 @@ def test_can_manage_user_idempotent(svc, ds):
 # ============ C.2 多管理员同组 ============
 
 def test_multiple_managers_same_group(svc, ds):
-    """同组多个管理员：任一管理员应能管理其他成员"""
+    """同组多个受托管理员：任一管理员应能管理其他成员"""
     g = _insert_group(ds, 'MultiMgrG', 'multi_mgr_g')
     mgr1 = _insert_user(ds, 'mgr1')
     mgr2 = _insert_user(ds, 'mgr2')
     member = _insert_user(ds, 'just_member')
-    svc.add_member(g, mgr1, is_manager=True)
-    svc.add_member(g, mgr2, is_manager=True)
+    ps1 = _insert_role(ds, code='mgr1_delegate', name='M1')
+    ps2 = _insert_role(ds, code='mgr2_delegate', name='M2')
+    _grant_delegation(ds, mgr1, g, ps1, f'id = {g}')
+    _grant_delegation(ds, mgr2, g, ps2, f'id = {g}')
     svc.add_member(g, member, is_manager=False)
     # 任一管理员都能管理 member
     assert svc.can_manage_user(mgr1, member) is True
     assert svc.can_manage_user(mgr2, member) is True
-    # 但 member 不能管理 mgr1（除非有共同管理员身份）
+    # 但 member 不能管理 mgr1（无委托权限集）
     assert svc.can_manage_user(member, mgr1) is False
 
 
-# ============ C.3 manager_id 与 is_manager 双重管理 ============
+# ============ C.3 manager_id 委托读路径（v088 已删除） ============
 
-def test_manager_id_provides_manage_rights(svc, ds):
-    """manager_id=user_id 的组：用户也应能管理组成员"""
+def test_manager_id_no_longer_grants(svc, ds):
+    """v088 起 manager_id 不再提供委托权限（已删除读路径）"""
     g = _insert_group(ds, 'MgrIdG', 'mgr_id_g')
     manager = _insert_user(ds, 'dept_manager')
     member = _insert_user(ds, 'team_member')
-    # 设置 manager_id 而非 is_manager=True
-    ds.execute("UPDATE user_groups SET manager_id = ? WHERE id = ?", [manager, g])
+    ds.execute("UPDATE orgs SET manager_id = ? WHERE id = ?", [manager, g])
     svc.add_member(g, member, is_manager=False)
-    assert svc.can_manage_user(manager, member) is True
+    assert svc.can_manage_user(manager, member) is False
 
 
 def test_both_manager_id_and_is_manager(svc, ds):
-    """manager_id + is_manager=True 都设置：仍能管理"""
+    """manager_id + is_manager 全部失效：委托必须走权限集行级规则"""
     g = _insert_group(ds, 'DualMgrG', 'dual_mgr_g')
     user = _insert_user(ds, 'dual_user')
     member = _insert_user(ds, 'dual_member')
-    ds.execute("UPDATE user_groups SET manager_id = ? WHERE id = ?", [user, g])
-    svc.add_member(g, user, is_manager=True)  # user 是组管理员
+    ds.execute("UPDATE orgs SET manager_id = ? WHERE id = ?", [user, g])
+    ps = _insert_role(ds, code='dual_delegate', name='Dual')
+    _grant_delegation(ds, user, g, ps, f'id = {g}')
     svc.add_member(g, member, is_manager=False)
     assert svc.can_manage_user(user, member) is True
-    # get_managed_groups 应包含该组（来自两个来源之一）
-    managed = svc.get_managed_groups(user)
+    # get_managed_orgs 仅由资源矩阵规则提供
+    managed = svc.get_managed_orgs(user)
     assert g in managed
 
 
@@ -448,7 +481,8 @@ def test_can_manage_user_different_groups(svc, ds):
     g2 = _insert_group(ds, 'IsoG2', 'iso_g2')
     u1 = _insert_user(ds, 'iso_u1')
     u2 = _insert_user(ds, 'iso_u2')
-    svc.add_member(g1, u1, is_manager=True)
+    ps = _insert_role(ds, code='iso_delegate', name='Iso')
+    _grant_delegation(ds, u1, g1, ps, f'id = {g1}')
     svc.add_member(g2, u2, is_manager=False)
     assert svc.can_manage_user(u1, u2) is False
 
@@ -463,21 +497,21 @@ def test_descendants_includes_root_children(svc, ds):
     """根节点的子组应包含在 descendants 中"""
     root = _insert_group(ds, 'RootDesc', 'root_desc')
     c = _insert_group(ds, 'ChildDesc', 'child_desc', parent_id=root)
-    descendants = svc.get_all_descendants(root)
+    descendants = svc.get_all_descendant_orgs(root)
     assert c in descendants
 
 
 def test_descendants_root_no_children(svc, ds):
     """无子组的组：descendants 应为空"""
     g = _insert_group(ds, 'Lonely', 'lonely')
-    descendants = svc.get_all_descendants(g)
+    descendants = svc.get_all_descendant_orgs(g)
     assert descendants == []
 
 
 def test_ancestors_root_no_parent(svc, ds):
     """无父组的组：ancestors 应为空"""
     g = _insert_group(ds, 'Orphan', 'orphan')
-    ancestors = svc.get_all_ancestors(g)
+    ancestors = svc.get_all_ancestor_orgs(g)
     assert ancestors == []
 
 
@@ -487,7 +521,7 @@ def test_group_tree_multiple_roots(svc, ds):
     r2 = _insert_group(ds, 'Root2', 'root2')
     _insert_group(ds, 'C1', 'c1_of_r1', parent_id=r1)
     _insert_group(ds, 'C2', 'c2_of_r2', parent_id=r2)
-    tree = svc.get_group_tree()
+    tree = svc.get_org_tree()
     codes = [n['code'] for n in tree]
     assert 'root1' in codes
     assert 'root2' in codes
@@ -498,7 +532,7 @@ def test_group_tree_with_descendants(svc, ds):
     r = _insert_group(ds, 'TreeR', 'tree_r')
     c = _insert_group(ds, 'TreeC', 'tree_c', parent_id=r)
     gc = _insert_group(ds, 'TreeGC', 'tree_gc', parent_id=c)
-    tree = svc.get_group_tree()
+    tree = svc.get_org_tree()
     root = next(n for n in tree if n['code'] == 'tree_r')
     assert len(root['children']) == 1
     c_node = root['children'][0]
@@ -524,7 +558,7 @@ def test_add_member_invalid_group_id(svc, ds):
         assert result in (True, False)
         # 验证：不应有任何 user_group_members 记录
         cursor = ds.execute(
-            "SELECT COUNT(*) FROM user_group_members WHERE group_id = 9999"
+            "SELECT COUNT(*) FROM org_members WHERE org_id = 9999"
         )
         assert cursor.fetchone()[0] == 0
     except Exception:
@@ -539,13 +573,13 @@ def test_set_group_roles_clears_existing(svc, ds):
     g = _insert_group(ds, 'SetRG', 'set_rg')
     r1 = _insert_role(ds, code='old_r', name='Old')
     r2 = _insert_role(ds, code='new_r', name='New')
-    svc.add_group_role(g, r1)
+    svc.add_org_permission_set(g, r1)
     # 替换为只有 r2
-    result = svc.set_group_roles(g, [r2])
+    result = svc.set_org_permission_sets(g, [r2])
     assert result is True
     # 验证：r1 已移除，r2 存在
     cursor = ds.execute(
-        "SELECT role_id FROM group_roles WHERE group_id = ? ORDER BY role_id", [g]
+        "SELECT permission_set_id FROM org_permission_sets WHERE org_id = ? ORDER BY permission_set_id", [g]
     )
     role_ids = [r[0] for r in cursor.fetchall()]
     assert role_ids == [r2]
@@ -555,10 +589,10 @@ def test_set_group_roles_empty_list(svc, ds):
     """set_group_roles([]) 应清空所有角色"""
     g = _insert_group(ds, 'ClearRG', 'clear_rg')
     r = _insert_role(ds, code='to_clear', name='ToClear')
-    svc.add_group_role(g, r)
-    result = svc.set_group_roles(g, [])
+    svc.add_org_permission_set(g, r)
+    result = svc.set_org_permission_sets(g, [])
     assert result is True
-    roles = svc.get_group_roles(g)
+    roles = svc.get_org_permission_sets(g)
     assert roles == []
 
 
@@ -588,14 +622,14 @@ def test_user_in_multiple_groups_with_different_roles(svc, ds):
     r2 = _insert_role(ds, code='r2', name='R2')
     svc.add_member(g1, u)
     svc.add_member(g2, u)
-    svc.add_group_role(g1, r1)
-    svc.add_group_role(g2, r2)
+    svc.add_org_permission_set(g1, r1)
+    svc.add_org_permission_set(g2, r2)
     # 用 PermissionService 验证
     from meta.services.permission_service import PermissionService
     perm_svc = PermissionService(ds)
     perm_svc._ensure_user_in_group(u, g1)  # 先建 personal group
-    roles = perm_svc.get_user_roles(u)
-    # 应有 3 个角色（r1, r2 + system personal group role?）
+    roles = perm_svc.get_user_permission_sets(u)
+    # 应有 3 个角色（r1, r2 + system personal group permission_set?）
     # 实际：personal group 暂无角色
     assert len(roles) == 2
     role_ids = {r['id'] for r in roles}

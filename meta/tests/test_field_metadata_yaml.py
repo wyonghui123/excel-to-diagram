@@ -225,7 +225,11 @@ class TestDimensionObjectMappingYaml:
         assert isinstance(data, dict)
 
     def test_yaml_contains_hierarchy_chain(self):
-        """YAML 含 HIERARCHY_CHAIN 定义"""
+        """YAML 表达业务层级链 product → version → domain → sub_domain
+
+        [2026-10 起] 旧的 hierarchy_chain 段已由 dimension_object_mappings
+        的 filter_type (direct / fk / chain) 表达, 不再使用独立字段。
+        """
         import yaml
 
         yaml_path = os.path.join(
@@ -234,10 +238,26 @@ class TestDimensionObjectMappingYaml:
         with open(yaml_path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
 
-        # 检查是否含层级链定义 (字段名可能不同)
-        # 常见字段: hierarchy_chain, dimensions, dimension_chain
-        has_chain = any(
-            key in data
-            for key in ('hierarchy_chain', 'dimensions', 'dimension_chain', 'HIERARCHY_CHAIN')
-        )
-        assert has_chain, f"YAML missing hierarchy definition, keys: {list(data.keys())}"
+        mappings = data.get('dimension_object_mappings') or []
+        assert mappings, f"YAML missing dimension_object_mappings, keys: {list(data.keys())}"
+
+        by_code = {
+            m.get('dimension_code'): m
+            for m in mappings
+            if m.get('dimension_type') == 'business'
+        }
+        assert {'product', 'version', 'domain', 'sub_domain'} <= set(by_code), \
+            f"业务维度缺失: {sorted(by_code)}"
+
+        def _filter_type(code, bo):
+            for item in by_code[code].get('applies_to', []):
+                if item.get('bo') == bo:
+                    return item.get('filter_type')
+            return None
+
+        # 链路: version→product 直连(fk); domain→product 沿链(chain)
+        assert _filter_type('product', 'version') == 'fk'
+        assert _filter_type('product', 'domain') == 'chain'
+        assert _filter_type('version', 'domain') == 'fk'
+        assert _filter_type('version', 'sub_domain') == 'chain'
+        assert _filter_type('domain', 'sub_domain') == 'fk'

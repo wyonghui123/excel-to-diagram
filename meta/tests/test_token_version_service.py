@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 P10 单元测试：token_version_service
 v1.4 P10 补齐：核心安全机制 - token 失效

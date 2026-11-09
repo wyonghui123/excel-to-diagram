@@ -20,6 +20,7 @@ from meta.services.rule_catalog_service import (
     SOURCES,
     RuleCatalogError,
     RuleCatalogService,
+    _ADAPTERS,
 )
 
 
@@ -90,7 +91,10 @@ def test_list_rules_contract(service):
     assert result['not_instrumented'] == list(NOT_INSTRUMENTED)
 
     for source in NOT_INSTRUMENTED:
-        assert result['sources'].get(source) == 'not_instrumented'
+        # 已实现只读 adapter 的来源（sourcing 灰度期）如实返回 ok；
+        # 完全没有读取入口的来源仍标记 not_instrumented。
+        expected = 'ok' if source in _ADAPTERS else 'not_instrumented'
+        assert result['sources'].get(source) == expected
 
     for item in result['items']:
         assert item['rule_key']
@@ -112,6 +116,68 @@ def test_filters_are_composable(service):
     for item in result['items']:
         assert item['source'] == 'doc_flow'
         assert item['status'] == 'active'
+
+
+def test_doc_flow_descriptors_come_from_rule_table(tmp_path, monkeypatch):
+    """单据流页签必须真正读到 doc_flow_rule（此前 ImportError 被 _collect 吞掉 → 恒 0 行）。"""
+    import meta.services.rule_catalog_service as catalog_mod
+    from meta.core.datasource import get_data_source
+    from meta.core.doc_flow_rule_store import ensure_doc_flow_rule_table, upsert_rules
+
+    ds = get_data_source('sqlite', database=str(tmp_path / 'platform.db'))
+    ensure_doc_flow_rule_table(ds)
+    upsert_rules(ds, [{
+        'rule_id': 'sales_order_to_shipment',
+        'source_bo': 'sales_order',
+        'target_bo': 'shipment',
+        'source_qty_field': 'quantity',
+        'pool': 'unshipped_qty',
+        'field_map': {'quantity': 'quantity'},
+        'split_key': ['order_no'],
+        'target_line_bo': 'shipment_line',
+        'head_fk_field': 'shipment_id',
+        'display_fields': ['order_no', 'item_name'],
+    }])
+    monkeypatch.setattr(catalog_mod, '_meta_db', lambda: ds)
+
+    result = catalog_mod.RuleCatalogService().list_rules(
+        sources=['doc_flow'], limit=50)
+
+    assert result['sources']['doc_flow'] == 'ok'
+    assert result['total'] == 1
+
+    item = result['items'][0]
+    assert item['rule_key'] == 'doc_flow:sales_order_to_shipment'
+    assert item['factors']['pool'] == 'unshipped_qty'
+
+    detail = item['detail']
+    assert detail['field_map'] == {'quantity': 'quantity'}
+    assert detail['split_key'] == ['order_no']
+    assert detail['pool'] == 'unshipped_qty'
+    assert detail['source_qty_field'] == 'quantity'
+    assert detail['target_line_bo'] == 'shipment_line'
+    assert detail['head_fk_field'] == 'shipment_id'
+    assert detail['display_fields'] == ['order_no', 'item_name']
+
+    # FR-013：节点组为只读增量字段，既有 detail 键保持不变。
+    node_group = detail['node_group']
+    assert node_group['group_id'] == 'sales_order'
+    assert node_group['node_role'] == 'header'
+    assert [node['bo'] for node in node_group['nodes']] == [
+        'sales_order', 'sales_order_line', 'sales_order_schedule']
+    assert node_group['degraded'] is False
+
+    # TBD-007 P0：计划行角色与头字段契约均为只读增量字段。
+    assert detail['source_role'] == 'header'
+    contract = detail['header_contract']
+    assert contract['mode'] == 'rule_headed'
+    assert contract['head_bo'] == 'shipment'
+    assert contract['split_key'] == ['order_no']
+    assert contract['required_missing'] == [
+        'delivery_no', 'order_id', 'ship_from_location_id',
+        'ship_to_address_text']
+    assert contract['degraded'] is True
+    assert contract['reasons'] == ['header_field_uncovered']
 
 
 def test_unknown_rule_key_returns_none(service):
@@ -253,11 +319,16 @@ class TestRuleTraceService:
         for node in nodes:
             assert node['node_id'] == '{0}:{1}'.format(trace_id, node['seq'])
             assert node['parent_id'] is None
-            assert node['stage'] == STAGE_MAP.get(node['scenario'], 'validate')
+            if node['scenario'] == 'sourcing':
+                # sourcing 一次求值拆成 scope / filter / select 三段
+                assert node['stage'] in ('scope', 'filter', 'select')
+            else:
+                assert node['stage'] == STAGE_MAP.get(node['scenario'], 'validate')
             assert isinstance(node['match'], dict)
             assert isinstance(node['match']['matched'], bool)
             assert isinstance(node['match']['conditions'], list)
             assert isinstance(node['output'], dict)
+            assert isinstance(node['inputs'], dict)
 
         assert len({node['node_id'] for node in nodes}) == len(nodes)
 
@@ -272,7 +343,9 @@ class TestRuleTraceService:
         assert result['node_count'] == 2
         assert len(result['scenarios']) == 2
         # 截断只影响返回体积：kind_counts 仍按完整求值结果统计
-        assert sum(result['kind_counts'].values()) == len(trace_mod.TRACE_SCENARIOS)
+        # sourcing 一场景产出 3 个节点（scope/filter/select），其余场景各 1 个
+        assert sum(result['kind_counts'].values()) == len(
+            trace_mod.TRACE_SCENARIOS) + 2
 
     def test_state_transition_match_and_output(self):
         result = self.service.build(

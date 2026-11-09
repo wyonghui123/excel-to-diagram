@@ -123,12 +123,16 @@ class TestParsing:
 class TestKnownModules:
     """登记表与常量。"""
 
-    def test_known_modules_contains_two(self):
-        assert set(KNOWN_PLATFORM_MODULES) == {'tasks', 'rules'}
+    def test_known_modules_contains_registered(self):
+        # [FIX 2026-11-07] 2026-10 新增 party(往来关系身份轴) 模块, 登记表三项
+        assert set(KNOWN_PLATFORM_MODULES) == {'tasks', 'rules', 'party'}
 
-    def test_only_tasks_is_closable(self):
-        """规则体系暂不可关闭（无独立入口）—— 见 platform_modules.py 注释。"""
-        assert set(CLOSABLE_PLATFORM_MODULES) == {'tasks'}
+    def test_only_tasks_and_party_are_closable(self):
+        """规则体系暂不可关闭（无独立入口）—— 见 platform_modules.py 注释。
+
+        [FIX 2026-11-07] party 亦为可关闭模块（无 BU/LE 的部署须关掉）。
+        """
+        assert set(CLOSABLE_PLATFORM_MODULES) == {'tasks', 'party'}
 
     def test_env_key_name(self):
         assert ENV_DISABLED_PLATFORM_MODULES == 'DISABLED_PLATFORM_MODULES'
@@ -215,11 +219,27 @@ class TestServerBlueprintGate:
 
     @staticmethod
     def _build_app():
+        """按当前 env 真实构建 app。
+
+        [FIX 2026-11-07] conftest 把 meta.server.create_app 打补丁为 shared-app
+        单例, 直接调用会拿到"已按默认 env 构建好"的共享 app ⇒ 禁用 tasks 后
+        路由依旧存在、且新 tmp DB 从未建表(no such table: menus)。
+        这里改调 _original_create_app 并恢复拦截器快照, 保证 env 生效且不污染。
+        """
         import warnings
+        from meta.core.bo_framework import bo_framework
+        before = list(bo_framework._interceptors)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            from meta.server import create_app
-            app = create_app()
+            import meta.server as _server
+            _create = getattr(_server, '_original_create_app', _server.create_app)
+            try:
+                app = _create()
+            finally:
+                # [FIX 2026-11-07] 仅当先前已有拦截器链时才回退；否则会清空本次
+                # create_app 注册的整条链 ⇒ 读写成 no-op（返回 200 / data=None）。
+                if before:
+                    bo_framework._interceptors[:] = before
         app.config["TESTING"] = True
         return app
 
@@ -299,6 +319,10 @@ class TestMenuSeedGate:
             assert 'task-definitions' not in codes
             # 任何残留项都不得在侧栏可见
             for code, sidebar in rows:
+                # [FIX 2026-11-07] project-task 由迁移 v179__project_task_p15 写入
+                # (项目管理域菜单, 不受 tasks 平台模块门控), 不属本断言范围
+                if not code.startswith('task'):
+                    continue
                 assert not sidebar, f"禁用后残留菜单 {code} 不应 show_in_sidebar=1"
         finally:
             clear_cache()

@@ -36,8 +36,9 @@ class TestE2ETest60NoMore403(unittest.TestCase):
             }, timeout=10)
             if resp.status_code != 200:
                 print(f'[WARN] dev-login failed: {resp.status_code} {resp.text[:200]}')
-        except Exception as e:
-            print(f'[WARN] dev-login exception: {e}')
+        except requests.exceptions.RequestException as e:
+            # 本文件是真实 HTTP E2E，需要 3010 后端在跑；不可达时跳过而非失败
+            raise unittest.SkipTest(f'后端 {BASE_URL} 不可达，跳过 E2E: {e}')
 
     def test_get_product_no_403(self):
         """[A.4 v1.0.1] GET /api/v2/bo/product 不应 403 (v1.0 前是 403 due to missing product:list)"""
@@ -82,8 +83,9 @@ class TestE2EParentReadAdvisory(unittest.TestCase):
             resp = cls.session.post(f'{BASE_URL}/api/v1/auth/dev-login',
                                     json={'username': TEST60_USER, 'password': TEST60_PASS},
                                     timeout=10)
-        except Exception:
-            pass
+        except requests.exceptions.RequestException as e:
+            # 真实 HTTP E2E，需要 3010 后端在跑；不可达时跳过而非失败
+            raise unittest.SkipTest(f'后端 {BASE_URL} 不可达，跳过 E2E: {e}')
 
     def test_create_with_missing_parent_read_returns_audit_only(self):
         """[D9] 缺父 read 权限, 写操作应该 audit-only 警告 (不阻塞)"""

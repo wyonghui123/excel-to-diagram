@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -69,9 +70,9 @@ def _create_user_group_with_roles(ds, user_id, permission_set_id):
         ds.commit()
     
     # 先清理旧的用户组，避免残留数据
-    ds.execute("DELETE FROM org_permission_sets WHERE group_id IN (SELECT id FROM orgs WHERE code LIKE ?)",
+    ds.execute("DELETE FROM org_permission_sets WHERE org_id IN (SELECT id FROM orgs WHERE code LIKE ?)",
         (f'audit_group_{user_id}_%',))
-    ds.execute("DELETE FROM org_members WHERE group_id IN (SELECT id FROM orgs WHERE code LIKE ?)",
+    ds.execute("DELETE FROM org_members WHERE org_id IN (SELECT id FROM orgs WHERE code LIKE ?)",
         (f'audit_group_{user_id}_%',))
     ds.execute("DELETE FROM orgs WHERE code LIKE ?",
         (f'audit_group_{user_id}_%',))
@@ -87,9 +88,9 @@ def _create_user_group_with_roles(ds, user_id, permission_set_id):
     if group_id is None:
         raise RuntimeError(f"Failed to create org with code: {group_code}")
     
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
         (user_id, group_id))
-    ds.execute("INSERT INTO org_permission_sets (group_id, permission_set_id) VALUES (?, ?)",
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
         (group_id, permission_set_id))
     ds.commit()
     return group_id
@@ -97,9 +98,9 @@ def _create_user_group_with_roles(ds, user_id, permission_set_id):
 
 def _cleanup_user_group_association(ds, group_id, permission_set_id):
     """清理用户组-角色关联"""
-    ds.execute("DELETE FROM org_permission_sets WHERE group_id = ? AND permission_set_id = ?",
+    ds.execute("DELETE FROM org_permission_sets WHERE org_id = ? AND permission_set_id = ?",
         (group_id, permission_set_id))
-    ds.execute("DELETE FROM org_members WHERE group_id = ?", [group_id])
+    ds.execute("DELETE FROM org_members WHERE org_id = ?", [group_id])
     ds.execute("DELETE FROM orgs WHERE id = ?", [group_id])
     ds.commit()
 
@@ -112,7 +113,7 @@ class TestUserGroupAssociateAudit:
         group_id = 1
 
         ds.execute(
-            "INSERT OR IGNORE INTO org_members (user_id, group_id) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO org_members (user_id, org_id) VALUES (?, ?)",
             [user_id, group_id]
         )
         ds.commit()
@@ -129,7 +130,7 @@ class TestUserGroupAssociateAudit:
             user_name='admin',
         )
 
-        ds.execute("DELETE FROM org_members WHERE user_id = ? AND group_id = ?",
+        ds.execute("DELETE FROM org_members WHERE user_id = ? AND org_id = ?",
                     [user_id, group_id])
         ds.commit()
 
