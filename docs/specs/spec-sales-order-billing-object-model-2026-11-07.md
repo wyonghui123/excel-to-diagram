@@ -123,6 +123,8 @@ sales_order
 | 其他 | remark | remark | text | 否 | 备注 |
 | 审计 | created_by / created_at / updated_at | 同名 | — | — | 由 audit_aspect 管理 |
 
+> **字段增补见 §30.3 / §30.4**：`payment_term_id` 改为过账必填；行补 `billing_percent` / `billing_base_amount` / 改价快照字段。期次对象见 §30.5，发票头**不新增**已收金额列（R-INV-25）。
+
 YAML 声明（示意）：
 
 ```yaml
@@ -238,6 +240,8 @@ draft ──submit──► submitted ──post──► posted ──reverse�
 
 ---
 
+> **序列变更见 §30.9**：`post` 在回写来源前插入「生成应收期次并断言 Σ = gross」；`reverse` 增加前置「无 active 核销」。以 §30.9 为准。
+
 ## 8. 需新增的派生列（随发票回写）
 
 | 对象 | 新增字段 | 类型 | 说明 |
@@ -298,6 +302,8 @@ draft ──submit──► submitted ──post──► posted ──reverse�
 ---
 
 ## 12. 实施波次与任务
+
+> **任务补充见 §30.11**：Wave A 需增加 `customer_invoice_schedule` 建表、期次生成与取整断言（S8-A10 / A11）。
 
 ### Wave A（最小闭环，建议先做）
 
@@ -3788,3 +3794,267 @@ customer_invoice_schedule:
 17. `F-39` Clear Customer Down Payment — https://www.sap-tcodes.org/tcode/f-39.html
 18. Clearing Document（无独立核销表） — https://bestsapcbi.com/sap-clearing-document/
 19. Partial Payment vs Residual Item — https://sapinsider.org/which-a-r-underpayment-option-should-you-use-partial-payment-or-residual-item/
+
+---
+
+## 30. billing doc 对象与关系模型细化（2026-11-09）
+
+> 定位：§4–§12 定义的是「单据 + 行」；§29 补出了「应收期次」。本节把三层拼成一个完整模型，并给出字段增补、关系基数、金额链、状态交互与波次任务。
+> 与 §4 / §5 冲突时以本节为准；本节只做**增补**，不推翻 §4–§12 的既有规则（R-INV-0..20 继续有效，新增 R-INV-21..28）。
+> 一句话：**一张发票回答「开了什么」，期次回答「什么时候该收多少」，核销回答「哪笔钱抵了哪期」。三者不能合并成一张表。**
+
+### 30.1 三层定位
+
+| 层 | 对象 | 回答的问题 | 谁写 | 过账后可变性 | 行业对应 |
+|---|---|---|---|---|---|
+| **单据层** | `customer_invoice` + `customer_invoice_line` | 开了什么票、依据哪张发货单/计划 | `CustomerInvoiceService` | 只读 | Fusion AR transaction；SAP `VBRK`/`VBRP` |
+| **应收层** | `customer_invoice_schedule` | 这笔应收分几期、每期何时到期多少 | `post` 时自动生成 | 金额只读；`amount_applied` / `status` 派生 | Fusion `AR_PAYMENT_SCHEDULES_ALL`；SAP 分期未清项（同 `BELNR` 不同 `BUZEI`） |
+| **核销层** | `payment_allocation` | 哪笔收款抵了哪一期、抵了多少 | `AllocationService` | 只增不改（撤销=反向行） | Fusion `AR_RECEIVABLE_APPLICATIONS_ALL`；SAP 清账凭证 + `AUGDT`/`AUGBL` |
+
+**分层铁律**：
+
+1. 单据层不存「已收/未收」——发票头保持干净（R-INV-25）。
+2. 应收层不存「钱从哪来」——只存「期次 + 已核销缓存」，资金来源看 `payment_allocation`。
+3. 核销层不改任何金额——它只记录「哪笔钱抵了哪期」，余额由它汇总得出。
+
+### 30.2 对象总览
+
+```
+shipment_line ─────────────┐
+sales_order_schedule(plan) ─┼─► customer_invoice_line ─► customer_invoice ─► customer_invoice_schedule ─► payment_allocation
+sales_order_line ───────────┘                                  │
+service_confirmation (Wave C) ─────────────────────────────────┘
+                                                               └─► accounting_event（L2，hook）
+```
+
+- 上游三源（发货行 / 开票计划行 / 订单行）在**行级**汇入，互斥（R-INV-3）。
+- 下游只有一条主链：发票 → 期次 → 核销。贷项凭证（Wave C）作为第二条负向链，挂在原发票行上。
+
+### 30.3 头字段增补
+
+| 字段 | 变更 | 说明 |
+|---|---|---|
+| `payment_term_id` | **过账必填**（原为可空） | 空值时按「即期」处理：生成 1 行期次，`due_date = invoice_date`。来源优先级：订单 `payment_term_id` → 客户默认 → 即期 |
+| `settlement_status` | **不落列** | `unpaid / partial / paid` 由期次汇总派生，只出现在视图与列表筛选，不参与状态机 |
+| `receipt_settled_amount` / `prepaid_offset_amount` | **不加列** | 缓存改落 `customer_invoice_schedule.amount_applied`（R-INV-25），发票头不再需要 |
+
+> 这一步同时关闭 §28 断点 A：**不需要修改 §11 红线**。红线说「发票上不放已收金额」，把缓存放到期次表后，发票头确实没有已收金额，红线原文可以保留。D17 的口径随之调整为「缓存落期次，不落发票头」（见 §30.12 D23）。
+
+### 30.4 行字段增补
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `billing_percent` | number(9,4) | `billing_basis='percent'` 时必填 | 本期开票比例（相对 `billing_base_amount`） |
+| `billing_base_amount` | number(18,4) | 同上 | 计算基数快照：`plan` 行取计划行金额，`delivery` 行取订单行净额 |
+| `price_source` | enum(order, contract, manual) | 是 | 单价来源；`manual` 即 D13 的受控改价 |
+| `order_unit_price` | number(18,6) | 改价时必填 | 订单原单价快照，用于价差追溯与审计 |
+| `price_change_reason` | string(256) | `unit_price ≠ order_unit_price` 时必填 | 改价原因（D13） |
+| `price_change_approved_by` | integer | 否 | 改价审批人；由权限策略决定是否必填 |
+| `original_invoice_line_id` | integer | 否 | Wave C 贷项/借项行引用原发票行 |
+
+**三种 `billing_basis` 的权威字段与公式**（消除 §5 的口径歧义）：
+
+| basis | 权威字段 | 公式 | 其他字段约束 |
+|---|---|---|---|
+| `quantity` | `qty` + `unit_price` | `net = ROUND(qty × unit_price)` | `billing_percent` / `billing_base_amount` 必空 |
+| `percent` | `billing_percent` + `billing_base_amount` | `net = ROUND(base × percent / 100)` | `qty = 1`；`unit_price = net`（反算，只读） |
+| `amount` | `net_amount`（人工输入） | `unit_price = ROUND(net / qty, 6)` | `billing_percent` / `billing_base_amount` 必空 |
+
+税与总额沿用 R-INV-6 / R-INV-7：`tax = ROUND(net × rate/100)`，`gross = net + tax`，抬头合计 = Σ 行。
+
+### 30.5 应收期次：`customer_invoice_schedule`
+
+#### 30.5.1 字段
+
+| 分组 | 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| 标识 | `id` | integer | 是 | 主键 |
+| | `invoice_id` | integer | 是 | FK → `customer_invoice`；唯一键 `(invoice_id, schedule_no)` |
+| | `schedule_no` | integer | 是 | 期次号，从 1 开始，按到期日升序 |
+| 来源 | `payment_term_line_id` | integer | 否 | 来源付款条件行（快照，只读） |
+| | `ratio_percent` | number(9,4) | 否 | 本期比例快照（无分期时为 100） |
+| 日期 | `due_date` | date | 是 | `invoice_date` + 账期天数（工作日历由 `calendar` 决定） |
+| 金额 | `amount` | number(18,4) | 是 | 本期应收（含税），> 0 |
+| | `amount_applied` | number(18,4) | 是 | **缓存，只读**，= Σ `payment_allocation`（status=active 且 target=本期） |
+| 状态 | `status` | enum(open, partial, closed, cancelled) | 是 | 派生，不手工改 |
+| 审计 | `created_at` / `updated_at` | — | — | 由 audit_aspect 管理 |
+
+#### 30.5.2 生成规则（`post` 时一次性执行）
+
+1. 读取 `payment_term_line`（按 `sequence` 升序）；无分期 → 视为 1 期 100%。
+2. 断言 Σ `ratio_percent` = 100；不足或超出时**最后一期吸收差额**，不报错。
+3. 前 N−1 期：`amount_i = ROUND(gross × ratio_i / 100, 币种精度)`；最后一期：`amount_n = gross − Σ amount_i`（尾差归最后一期）。
+4. 断言 `Σ amount = invoice.gross_amount`，不等则整单回滚。
+5. 任一 `amount_i ≤ 0` → 该期不生成，比例并入下一期；全部合并后仅剩 1 期也合法。
+6. `due_date_i = invoice_date + payment_term_line.days`；`due_date` 早于 `invoice_date` 视为配置错误，拒绝过账。
+
+**取整示例**：`gross = 1000.01`，比例 30 / 60 / 10
+
+```
+第 1 期 = ROUND(1000.01 × 30%) = 300.00
+第 2 期 = ROUND(1000.01 × 60%) = 600.01
+第 3 期 = 1000.01 − 900.01   = 100.00
+Σ = 1000.01  [OK]
+```
+
+#### 30.5.3 状态派生（不手工改）
+
+| 条件 | `status` |
+|---|---|
+| `amount_applied = 0` | `open` |
+| `0 < amount_applied < amount` | `partial` |
+| `amount_applied = amount` | `closed` |
+| 所属发票 `reversed` | `cancelled`（由红冲统一置位） |
+
+> `amount_applied` 是缓存，真源是 `payment_allocation`。巡检口径：`Σ active allocation per schedule` 必须等于 `amount_applied`。
+
+#### 30.5.4 规则清单（R-INV-21..28）
+
+| 编号 | 规则 | 违反后果 |
+|---|---|---|
+| R-INV-21 | **期次完整性**：非红字发票 `posted` 后至少有 1 行期次，且 `Σ amount = gross_amount` | 过账回滚 |
+| R-INV-22 | **期次不可增删**：`posted` 后禁止新增/删除期次，禁止改 `amount` / `due_date` / `schedule_no`；仅 `amount_applied` / `status` 可由服务层派生更新 | 守卫拒绝 |
+| R-INV-23 | **红冲前置**：发票任一期次存在 active 核销时禁止整单红冲，必须先反核销（`ALLOCATION_EXISTS_REVERSE_FIRST`） | 红冲拒绝 |
+| R-INV-24 | **红字单不生成期次**：红字单只承担会计冲销与追溯，`schedule` 行数为 0；红冲时原单期次全部置 `cancelled` | 过账拒绝 |
+| R-INV-25 | **发票头不存已收金额**：`customer_invoice` 不得新增 `receipt_settled_amount` / `prepaid_offset_amount` 等核销缓存列；缓存只在 `customer_invoice_schedule.amount_applied` | 设计评审否决 |
+| R-INV-26 | **取整与尾差**：前 N−1 期 `ROUND(gross × ratio)`，最后一期吸收尾差；每期 `amount > 0`，为 0 的期次不生成 | 过账回滚 |
+| R-INV-27 | **期次日期与币种**：`due_date ≥ invoice_date`；期次币种恒等于发票币种，不做期次级币种 | 过账拒绝 |
+| R-INV-28 | **超收去向**：核销不得使 `amount_applied > amount`；超出部分只能落 `customer_account`（on-account / unapplied） | 核销拒绝 |
+
+> R-INV-27 的 `due_date` 计算使用平台 `calendar`（是否跳节假日由付款条件的日历类型决定），不在此处硬编码工作日算法。
+
+### 30.6 关系模型
+
+#### 30.6.1 关系总表
+
+| # | 关系 | 类型 | 实现方式 | 基数 | 写入时点 | 撤销方式 |
+|---|---|---|---|---|---|---|
+| 1 | invoice → line | 归属 | `line.invoice_id` FK | 1:N | create | draft 级联删；posted 只能红冲 |
+| 2 | invoice → schedule | 归属 | `schedule.invoice_id` FK | 1:N（≥1） | post | 红冲置 `cancelled`，不物理删 |
+| 3 | line → shipment_line | 追溯 | 列 `shipment_line_id` 快照 | N:1 | create | 不可改；红冲靠红字行 |
+| 4 | line → sales_order_schedule（plan） | 追溯 | 列 `schedule_id` 快照 | N:1 | create | 不可改 |
+| 5 | line → sales_order_line | 追溯 | 列 `order_line_id` 快照 | N:1 | create | 不可改 |
+| 6 | schedule → payment_allocation | 核销 | `target_bo='invoice_schedule'` + `target_id` | 1:N | 收款过账 | 反向行（V5/V8） |
+| 7 | invoice → 红字 invoice | 追溯 | `reversal_of_invoice_id` | 1:1 | reverse | 不可改；一单只能红冲一次 |
+| 8 | invoice_line → 贷项行 | 追溯 | `original_invoice_line_id` | 1:N | Wave C | 不可改 |
+| 9 | invoice → accounting_event | 派生 | `idempotency_key = invoice_no + ':' + event_type` | 1:N | post / reverse | 只能冲销事件 |
+| 10 | invoice → doc_flow_edges | 追溯 | 边表（pool=billing） | N:M | post | 不可改 |
+
+#### 30.6.2 为什么上游用快照列、下游用子表、核销用关系表
+
+| 选择 | 理由 |
+|---|---|
+| 上游（发货行 / 计划行 / 订单行）用**列快照** | 关系是 N:1、创建后不可变、且要保留「开票当时的来源」，建中间表只会增加连接成本且无法表达「只写一次」 |
+| 下游（期次）用**子表** | 期次有独立状态、独立余额、独立到期日，必须能被单独更新与查询 |
+| 核销用**关系表** | N:M、要审计、要支持部分核销与反核销；SAP 用「清账凭证 + 回填」隐式表达，Fusion 用 application 表显式表达，我方选显式（与 Fusion 一致，比 SAP 更易审计） |
+
+#### 30.6.3 新增基数
+
+| 从 | 到 | 基数 | 说明 |
+|---|---|---|---|
+| customer_invoice | customer_invoice_schedule | 1:N | 无分期也至少 1 行 |
+| customer_invoice_schedule | payment_allocation | 1:N | 一期可被多笔款核销 |
+| customer_invoice_line | customer_invoice_schedule | **无直接关系** | 期次是发票级拆分，不按行拆；要按行分析用行金额，不拆期次 |
+
+> 最后一行是刻意约束：**期次不按发票行再拆一层**。否则一张多行发票会产生「行 × 期」的笛卡尔积，核销目标爆炸。行业做法（Fusion / SAP）也是发票级期次。
+
+### 30.7 金额链与舍入
+
+```
+行：net = f(billing_basis)          # §30.4
+    tax = ROUND(net × rate/100)
+    gross = net + tax
+头：net = Σ 行 net；tax = Σ 行 tax；gross = Σ 行 gross
+期：amount_i = ROUND(gross × ratio_i / 100)   # 前 N−1 期
+    amount_n = gross − Σ amount_i             # 最后一期吸收尾差
+核：Σ active allocation(schedule) ≤ schedule.amount        # V2 修正版
+    Σ schedule.amount = invoice.gross_amount               # R-INV-21
+```
+
+三条断言必须在同一事务内执行：`Σ 行 = 头`、`Σ 期 = 头`、`Σ 核销 ≤ 期`。任一失败整体回滚，不允许「先过账再修数」。
+
+### 30.8 状态交互矩阵
+
+| invoice.status | 期次状态 | 可否新增核销 | 可否红冲 | 说明 |
+|---|---|---|---|---|
+| draft / submitted | 无期次 | 否 | 否（直接 cancel） | 期次只在 posted 生成 |
+| posted | open / partial / closed | 是（受期次 `amount` 封顶） | 仅当无 active 核销 | 红冲前置见 R-INV-23 |
+| reversed | 全部 `cancelled` | 否 | 否 | 原单只读；红字单自身 posted |
+| cancelled | 无期次 | 否 | 否 | 仅 draft/submitted 可进入 |
+
+**超收的处理**：核销到某期不得超过该期 `amount`（V2 修正版）。多出来的钱只能落在 `customer_account`（on-account / unapplied），不得挂到发票或期次上。Fusion 的 overapplication 是交易类型开关，我方默认关闭（B4 = `block`），打开时也只允许落在客户账户，不允许期次金额变负。
+
+**红冲与核销的先后**：有 active 核销的发票禁止整单红冲（R-INV-23），必须先反核销或退款；否则红字单会把已收的钱变成「无主应收」。这条是 §27.4.2 V4/V5 在单据层的延伸。
+
+### 30.9 写入口与事务边界（细化 §7）
+
+#### 30.9.1 `post(invoice_id)`
+
+```
+① 校验：R-INV-11（来源状态）/ R-INV-4（可开量）/ R-INV-7（合计）/ R-INV-21（期次前置）
+② 生成 customer_invoice_schedule × N，断言 Σ = gross（R-INV-21 / 26）
+③ 写 doc_flow_edges（source → invoice）
+④ 回写来源：shipment_line.billed_qty / order_line.billed_qty / schedule.billed_amount
+⑤ 重算 billing_status（order / schedule）
+⑥ 发 accounting_event(invoice_issued)（hook，失败不阻塞 Wave A）
+⑦ status → posted（最后一步）
+⑧ COMMIT
+```
+
+顺序原则：**金额与期次先落、状态最后落**。任一步失败都停在 `submitted`，不会出现「已 posted 但期次缺失」。
+
+#### 30.9.2 `reverse(invoice_id, reason)`
+
+```
+⓪ 前置：该发票所有期次 Σ active allocation = 0（R-INV-23），否则报 ALLOCATION_EXISTS_REVERSE_FIRST
+① 生成红字单（数量/金额取负，reversal_of_invoice_id 指向原单）
+② 红字单走同一 post 流程，但**跳过期次生成**（R-INV-24）
+③ 原单所有期次 → cancelled
+④ 原单 status → reversed；回滚 ④⑤ 的来源回写
+⑤ 发 accounting_event(invoice_reversed) 或红字事件
+```
+
+#### 30.9.3 其他入口
+
+| 入口 | 允许状态 | 说明 |
+|---|---|---|
+| `create_from_shipment` | — | `delivery` 行；按 `shipment_line` 挑量 |
+| `create_from_schedule` | — | `plan` 行（Wave B） |
+| `create_manual` | — | `delivery` 行按订单行挑量；来源键为空时只允许 `manual` |
+| `cancel` | draft / submitted | 不产生期次；释放锁量（若有） |
+| `recalc` | draft / submitted | 重算行与头金额，不触碰期次 |
+
+### 30.10 doc_flow 与追溯
+
+- §10 的五条边保持不变；`customer_invoice_schedule` **不建 doc_flow 边**——它不是单据，没有独立编号与业务日期，只是发票的应收拆分。
+- 新增 Wave C 边：`customer_invoice_to_credit_memo`（原发票 → 贷项单，pool=billing，金额为负）。
+- `accounting_event` 与发票是 1:N：正向开票、红冲、贷项各一条；用 `idempotency_key` 防重。
+
+### 30.11 对 §12 的任务补充
+
+| 任务 | 波次 | 内容 | 规模 |
+|---|---|---|---|
+| S8-A10 | Wave A | `customer_invoice_schedule.yaml` + 迁移（并入 `v232` 或新增 `v233__customer_invoice_schedule.py`）：建表、唯一键 `(invoice_id, schedule_no)`、索引 `(status, due_date)` | M |
+| S8-A11 | Wave A | `CustomerInvoiceService.post` 内生成期次 + 尾差归最后一期 + `Σ = gross` 断言；单测 ≥ 6（无分期 / 3 期 / 尾差 / 比例为 0 / 比例和 ≠ 100 / 红字单不生成） | M |
+| S8-A12 | Wave A | `v_receivable` 视图（发票 + 期次 + 核销汇总，输出 `amount_due_remaining`）；只读资源 | S |
+| S8-B* | Wave B | `payment_schedule`（订单级计划）与 `customer_invoice_schedule` 的汇总视图；预收 `reserved` 挂 order/group | M |
+| S8-C* | Wave C | 贷项/借项行引用 `original_invoice_line_id`；`receivable_adjustment`（write-off） | M |
+
+> Wave A 的 `payment_allocation` 只有 `receipt_to_invoice`，但目标必须是 `invoice_schedule`，不是发票头。这一条改动了 §27.8 的 Wave A 表述，以本节为准。
+
+### 30.12 决策与待拍板
+
+| # | 问题 | 建议 | 与旧决策的关系 | 状态 |
+|---|---|---|---|---|
+| **D23** | 核销进度缓存放哪 | **只放 `customer_invoice_schedule.amount_applied`**，发票头不加列 | 细化 D17；§11 红线不用改口，断点 A 以更小代价关闭 | ⏳ |
+| **D24** | 红冲与核销的先后 | 有 active 核销禁止红冲，必须先反核销（`ALLOCATION_EXISTS_REVERSE_FIRST`） | 新增，落实 V4/V5 到单据层 | ⏳ |
+| **D25** | 期次生成与尾差 | 无分期生成 1 行；前 N−1 期四舍五入，最后一期吸收尾差；Σ 必须等于 gross | 新增，R-INV-21 / 26 | ⏳ |
+| **D26** | 折扣行与 R-INV-8 冲突 | 修订 R-INV-8：`line_type='DISCOUNT'` 允许负 `net`，但 `qty ≥ 0` 且发票 `gross ≥ 0`；红字单仍全负 | 修订既有规则 | ⏳ |
+
+**D26 补充**：§9 已定义行类型 `DISCOUNT`，但 R-INV-8 写「非红字单金额/数量不得为负」，两者直接冲突。若不修，折扣行无法过账；若放开全部负行，又会放过真正的负数量。建议按行类型开例外，而不是按金额符号。
+
+### 30.13 本节结论（三句话）
+
+1. **billing doc 不是一张表，而是三张表**：`customer_invoice`（开了什么）+ `customer_invoice_schedule`（何时该收）+ `payment_allocation`（哪笔钱抵了哪期）。三张表各自有唯一写入口，不能互相代存。
+2. **关系只有三类**：上游快照（N:1，只写一次）、下游归属（1:N，红冲置 cancelled）、核销关系（N:M，只增不改）。**不建**「行 × 期」的中间层。
+3. **金额链只有一条**：行 → 头 → 期 → 核销，每一步都有断言；任何一步失败都回滚到 `submitted`，不允许「先过账再修数」。
