@@ -3044,6 +3044,8 @@ order_settlement_summary                    订单/组级汇总
 2. 它过账后是否必须不可改？→ 决定是不是"事实层"
 3. 它能否被多次引用、且引用方与被引用方都可独立存在？→ 决定是不是"关系层"
 
+> **二次核验注记（2026-11-09）**：§29.3.1 建议新增第 10 个对象 `customer_invoice_schedule`（应收期次），并把核销目标从发票下沉到期次；§29.3.2 建议把计划行移出核销目标。两条均为待拍板 D21 / D22，未拍板前本节仍按 9 对象执行。
+
 ### 27.3 关系模型
 
 #### 27.3.1 三类关系
@@ -3573,3 +3575,216 @@ accounting_event(hook) → 外部总账
 1. 三条链**不是同一天设计的**：开票链（§3–§10）早于财务边界（g15）早于收付款模型（§25）。所以出现「红线禁止已收金额」与「收款模型要求已收金额」并存，是时序造成的，不是谁写错了。
 2. **修复原则只有一条**：能算出来的，不要存；必须存的，必须能重算。按这条原则，A1（允许缓存列）、C3（视图即应收）、D（区分执行与登记）都是自然结论。
 3. **D19 影响面最大**：把 `payment_receipt` 改成收付款通用对象，会改动 §25.3 的字段表。这是本轮唯一一处「改已有定义」而不只是「补新定义」的建议，建议优先拍板。
+
+---
+
+## 29. Fusion 与 SAP 二次核验：对象与关系模型（2026-11-09）
+
+> 目的：§27 是从业务规则反推的自洽模型，§28 是内部一致性检查。本节做**外部对账**：用 Oracle Fusion Cloud Financials 26C 官方文档与 SAP DDIC / Help，逐项检验「九个对象、三类关系、四层分层」是否站得住。
+> 证据等级：**A** = 厂商官方文档正文（docs.oracle.com）；**B** = DDIC / 官方摘要 / 权威二手；**C** = 未证实。
+> 总结论：**关系模型方向正确**（收款单独立、核销落独立关系表、反核销落反向记录、余额必须可重算），**但核销粒度错了半级**——两家都把核销落到「应收期次」而不是发票头；我方缺这个对象，需补第 10 个对象。
+
+### 29.1 逐项核验
+
+| # | 我方模型 | Oracle Fusion | SAP | 判定 |
+|---|---|---|---|---|
+| 1 | `customer_invoice` 同时承担开票单据与应收事实 | 无独立 billing 单据；AutoInvoice 直接生成 AR 交易（`RA_CUSTOMER_TRX_ALL`），开票事实即应收事实（A） | `VBRK`/`VBRP` 是 SD 单据，保存时生成 `BKPF`/`BSEG`，是**两层**对象（B） | 我方走 Fusion 路线；SAP 的第二层由 L2 会计事件承担 |
+| 2 | `customer_invoice_line` | `RA_CUSTOMER_TRX_LINES_ALL`（A） | `VBRP`（B） | 一致 |
+| 3 | 发票无「期次」对象 | `AR_PAYMENT_SCHEDULES_ALL`：付款条件在**发票层**展开，每期一行，直接存 `AMOUNT_DUE_ORIGINAL` / `AMOUNT_DUE_REMAINING` / `AMOUNT_APPLIED`（A） | OBB9 分期付款条件 → 同一 `BELNR`、不同 `BUZEI` 的多条未清项，各自到期、各自清账（B） | **我方缺对象**（见 29.3.1） |
+| 4 | `payment_receipt` 不带发票外键 | `AR_CASH_RECEIPTS_ALL` 只有收款头字段，无发票外键（A） | `BKPF` 收款凭证，发票关系靠清账回填而非外键（B） | 一致，D14 有外部依据 |
+| 5 | 核销落独立关系表 | `AR_RECEIVABLE_APPLICATIONS_ALL`（`APPLIED_CUSTOMER_TRX_ID` / `APPLIED_PAYMENT_SCHEDULE_ID` / `AMOUNT_APPLIED` / `STATUS` / `APPLY_DATE` / `REVERSAL_GL_DATE`）（A） | **无独立核销表**：清账凭证 + 被清项回填 `AUGBL`/`AUGDT`（B） | 我方近似 Fusion，比 SAP 更可审计 |
+| 6 | 核销目标是发票头 / 发票行 | 主定位是**付款计划行（期次）**，发票头只是冗余查询列（A） | 未清项行 `BELNR`+`BUZEI`（期次即行）（B） | **不一致，必须改**（见 29.3.1） |
+| 7 | 反核销 = 新增反向行 + 原行保留 | 收款 reversal 插入负向 application 行，原记录保留；unapply 写 reversal accounting date，不物理删除（A） | 冲销凭证；被清项重新打开（B） | 一致，V5 / V8 成立 |
+| 8 | 收款状态 draft / posted / reversed | `UNID`（未识别）/ `UNAPP`（未核销）/ `APP`（已核销或已挂 on-account）（A） | F-28 可挂 On account；锁箱 `FEBAN` 先挂未分配（B） | 我方四态可覆盖，需补「on-account」语义 |
+| 9 | 预收 = 收款单类型 + `reserved` | 预收是**独立 AR 交易**（Transaction Class=Invoice，Subclass=Prepayment），再 Apply Prepayment 到发票（B） | 特殊总账标识 **A**（实际预付，进客户未清项）；**F** 只是预付请求（noted item，不更新 FI）（B） | 部分一致，需补「预收是客户贷方事实」（见 29.3.3） |
+| 10 | `payment_schedule` 订单级 1:1 | **无订单级收付款计划**；订单层只有 recurring billing 的**开票计划**；收款期次在发票层生成（A） | **无订单级收款计划**；`FPLA`/`FPLT` 是开票计划，收款期次由付款条件在应收行生成（B/C） | **我方是差异化，不是对标**（见 29.3.2） |
+| 11 | 容差三字段挂发票头 | `Allow Overapplication` 挂**交易类型（Transaction Type）**；超/短收由 application exception rule set + write-off 限额处理（A） | 无计划级开关；未清项金额本身是硬上限（B） | 动作应挂 `document_type`，单票覆盖需权限 |
+| 12 | 无调整对象 | 独立 `AR_ADJUSTMENTS_ALL`（write-off / adjustment，按发票/行/税/运费拆分，更新期次 `amount_due_remaining`）（A） | 剩余项 / 清账差异（F-32）；FB75 纯 FI 贷项（B） | **缺对象，Wave C** |
+| 13 | Wave C 贷项凭证 | Credit Memo 是交易，经 application 与发票核销；Chargeback 是交易类 CB（A） | SD 开票类型 G2/L2 → FI；引用靠 `VBFA` + `REBZG`（B） | 方向一致，需引用原发票 |
+| 14 | 整单红冲 vs 贷项凭证分层 | Void / Reverse 与 Credit Memo 并存（A） | `VF11` 冲销（S1/S2）与贷项凭证性质不同（B） | 与 D8 一致 |
+| 15 | `payment_receipt` 收付款统一 | AR / AP **对象完全分离**：`AR_CASH_RECEIPTS_ALL` vs `AP_PAYMENTS_ALL`（A/B） | 会计凭证统一 `BKPF`，靠 `KOART`=D/K + 事务码 + `F110` 区分（B） | 我方是「会计层统一」路线，需 direction 规则集（见 29.5 D19） |
+| 16 | L0/L1 合同额与订单额闸门 | 无「累计开票 ≤ 订单额」硬校验；OM 只控发货容差（C） | 无金额级硬校验；数量受拷贝控制约束；`V1501` 属数量合同（C） | 我方闸门是**差异化能力**，不作为对标结论 |
+| 17 | 先登记后核销 | 支持：收款先 Unapplied / On Account，再 apply（A） | F-28 On account；锁箱先挂未分配（B） | 一致 |
+| 18 | 并发用条件更新 + 行数断言 | 无公开行锁说明（C） | `EFBKPF` 锁 + `F1805` 更新终止（B） | V9 是等价最小实现 |
+| 19 | 部分收款不改原单金额 | application 只记本次金额，不改发票原额（A） | 部分清账保持原项全额未清（B） | 一致，§27.6.2 成立 |
+| 20 | 应收用视图不落表 | `AR_PAYMENT_SCHEDULES_ALL` 是实际落表的应收载体（A） | 未清项是 FI 行项目状态，不是独立台账表（B） | 我方视图可保留，但**缓存列必须落到期次**（见 29.2.3） |
+
+### 29.2 三处确认（可以定稿）
+
+#### 29.2.1 D14 成立：收款单不带发票外键
+
+- Fusion：`AR_CASH_RECEIPTS_ALL` 无发票外键，核销全在 `AR_RECEIVABLE_APPLICATIONS_ALL`（A）。
+- SAP：收款凭证 `BKPF` 不含发票外键，发票关系靠被清项回填 `AUGBL`/`AUGDT`（B）。
+- 结论：D14 由「建议」转「已定」有外部依据；§27.4.1 的 R1-1 保留。
+
+#### 29.2.2 反核销 = 新增反向记录
+
+- Fusion 的收款 reversal 插入负向 application 行并保留原记录，unapply 只写 reversal accounting date（A）。
+- 我方 V5（反向行 ≤ 原行）+ V8（唯一反向）与此一致；V8 的唯一索引是 Fusion 未明文的强化（Fusion 二次反核销为 C 级）。
+- 结论：V5 / V8 保留，不需要改。
+
+#### 29.2.3 核销进度缓存列是行业常规（关闭断点 A）
+
+- Fusion 在 `AR_PAYMENT_SCHEDULES_ALL` 上**直接存储** `AMOUNT_APPLIED` / `AMOUNT_DUE_REMAINING`，并由调整、核销、收款动作维护（A）。
+- 这说明 §11 红线「不放已收金额」过于绝对。建议修订为：**允许核销进度缓存列，但必须只读、可由 `payment_allocation` 重算、可巡检比对**（A1 / D17）。
+- 关键限定：Fusion 把缓存挂在**期次**上，不是发票头。所以缓存列的落点随 29.3.1 一起改。
+
+### 29.3 三处修正
+
+#### 29.3.1 修正一（必改）：核销目标下沉到「应收期次」
+
+**证据**
+
+| 厂商 | 事实 | 等级 |
+|---|---|---|
+| Fusion | `AR_RECEIVABLE_APPLICATIONS_ALL.APPLIED_PAYMENT_SCHEDULE_ID` 是主定位，`APPLIED_CUSTOMER_TRX_ID` 是冗余；UI 按发票操作，数据落期次 | A |
+| SAP | OBB9 分期条件把一张发票拆成多条未清项（同 `BELNR` 不同 `BUZEI`），每期独立到期、独立清账 | B |
+
+**我方缺口**：`customer_invoice` 只有 `payment_term_id` 快照，没有期次行；`payment_allocation` 只能挂发票头/发票行。后果有三个：
+
+1. 分期收款无法按期核销，「30% 到期未收」算不出来；
+2. 单期逾期（DSO / 账龄）只能到发票级，精度不够；
+3. V2 在 Wave A 无处落地（没有计划行，也没有期次行）。
+
+**建议新增对象（D21）**：`customer_invoice_schedule`（应收期次，事实层）
+
+```yaml
+customer_invoice_schedule:
+  id: integer
+  invoice_id: integer            # FK -> customer_invoice，必填
+  schedule_no: integer           # 唯一键 (invoice_id, schedule_no)
+  payment_term_line_id: integer  # 来源付款条件行，快照，可空
+  due_date: date                 # 发票日 + 账期天数
+  amount: number(18,4)           # 本期应收（含税）
+  amount_applied: number(18,4)   # 缓存，只读，= Σ active allocation
+  status: enum(open, partial, closed, cancelled)
+```
+
+**生成规则**（在 `customer_invoice.posted` 时一次性生成）：
+
+- 付款条件有 N 期 → N 行；无分期 → 仍生成 1 行（`due_date` = 发票日 + 净天数），避免分支。
+- 断言 `Σ amount = invoice.gross_amount`，不等则整单回滚。
+- 之后不可增删；整单红冲时全部置 `cancelled`。
+
+**状态派生**（不手工改）：`amount_applied = 0` → `open`；`0 < amount_applied < amount` → `partial`；`= amount` → `closed`。
+
+**连带修正**
+
+| 项 | 现状 | 修正后 |
+|---|---|---|
+| `payment_allocation.target_bo` | `order` / `group` / `customer_invoice` / `customer_account` | 改为 `invoice_schedule` / `order` / `group` / `customer_account`；另加冗余列 `invoice_id`（同 Fusion 做法，便于按票查询） |
+| V2 | 单计划行 Σ active ≤ `planned_amount` | **单期次 Σ active ≤ `amount`**（条件写进 `WHERE`，Wave A 即生效） |
+| V3 | `receipt_settled_amount + prepaid_offset_amount ≤ gross_amount` | 保留为发票级求和断言；**主校验下移到期次** |
+| V7 目标侧 | 三分支（`schedule_line` / `invoice` / 订单组） | 主分支 = `invoice_schedule`；发票级只做「Σ 期次 = gross」断言 |
+| §27.3.3 基数 | 无期次行 | `customer_invoice` 1:N `customer_invoice_schedule`；`customer_invoice_schedule` 1:N `payment_allocation` |
+
+> 注意：`customer_invoice_schedule` 不是 §27 的 `payment_schedule`。前者是**事实**（开票后产生，不可改），后者是**计划**（订单确认后产生，可改）。两者不能合并。
+
+#### 29.3.2 修正二（定性）：订单级 `payment_schedule` 是差异化，不是对标结论
+
+**证据**
+
+- Fusion：**没有**订单级收付款计划对象。Payment Terms 在订单/发票上，期次在**发票层**展开为 `AR_PAYMENT_SCHEDULES_ALL`；订单层只有 recurring billing 的**开票计划**（A）。
+- SAP：**没有**订单级收款计划。`FPLA`/`FPLT` 是**开票计划**（挂在开票计划号 `FPLNR` 上，不落 `VBAP` 外键，开票单据也不回写 `FPLNR`）；收款期次由付款条件在应收行生成（B/C）。
+
+**结论**：我方 `payment_schedule` 可以保留，因为它解决的是「合同收款里程碑控制」——两家都没有的能力（与 §23 用友 / 金蝶的收款协议一致）。但必须重新定性：
+
+1. 它是**计划层**，不是核销对象（D22）；
+2. `settled_amount` 只能由「对应期次的 `customer_invoice_schedule.amount_applied`」汇总而来，不能直接承接 `payment_allocation`；
+3. 预收 / 预留只挂 `order` / `group`，不落到计划行；
+4. 计划改期、重排组不影响已核销记录（这正是把核销下沉到期次带来的好处）。
+
+**收益**：§28 断点 F 关闭——Wave A 只有 `invoice_schedule` 一个目标，Wave B 才加 `order` / `group`；V7 从三分支变两分支；S5a 的 `prepay_to_schedule` 改为 `prepay_reserve_order`（预留到订单/组，不绑计划行）。
+
+#### 29.3.3 修正三（补充）：预收必须落成「客户贷方事实」
+
+**证据**
+
+- Fusion：预收是独立 AR 交易（Transaction Class=Invoice，Subclass=Prepayment），收款核到预收交易，再用 **Apply Prepayment** 抵发票（B）。
+- SAP：实际预付用特殊总账标识 **A**，形成客户未清项（贷方）；预付请求 **F** 只是 noted item，**不更新 FI**（B）。
+
+**两家共同点**：预收是**已发生的客户贷方**，不是收款单上的备注字段。
+
+**我方补三条约束**：
+
+1. `payment_receipt.receipt_type: enum(standard, prepayment)`——只有 `prepayment` 允许产生 `reserved`；普通收款不得预留。
+2. `v_receivable` 必须把「已收未抵」的预收作为**客户贷方**单列，不能只从应收里减（否则客户余额会算错方向）。
+3. 预收可以关联订单（`order_id`），但关联是**业务意图**，不是会计必要条件（Fusion 也不强制）。
+
+> 这与 §25.7 方案 C 不冲突，只是把它从「业务层实现」提升为「事实层约束」。
+
+#### 29.3.4 附带修正：超额核销开关挂单据类型
+
+- Fusion 的 `Allow Overapplication` 是**交易类型**属性（A），不是单张发票属性。
+- 我方容差三字段现在落 `customer_invoice` 头。建议改为：`document_type` 给默认值，单票覆盖需权限（B4 的 `action` 来源改为 `type_definitions`）。
+- 不阻塞 Wave A：可先落头字段，Wave B 搬。
+
+### 29.4 修正后的对象与关系
+
+```
+【计划层】sales_order_line / sales_order_schedules / payment_schedule(+line)   ← 可改
+【事实层】shipment_line / customer_invoice(+line) / customer_invoice_schedule / payment_receipt
+【关系层】payment_allocation / doc_flow_edges
+【视图层】order_settlement_summary / v_receivable / v_unbilled_receivable
+```
+
+对象数：9 → **10**；层数仍为 4；三类关系（归属 / 追溯 / 核销）不变，但核销的「被核销方」从发票下沉到**应收期次**。
+
+新增基数：
+
+| 从 | 到 | 基数 |
+|---|---|---|
+| customer_invoice | customer_invoice_schedule | 1:N（无分期也至少 1 行） |
+| customer_invoice_schedule | payment_allocation | 1:N |
+| payment_receipt | payment_allocation | 1:N（不变） |
+
+### 29.5 对决策记录的影响
+
+| # | 原状态 | 核验后建议 | 依据 |
+|---|---|---|---|
+| **D14** | ⏳ 建议 | **转已定**：收款单不带发票/计划/订单外键 | Fusion A + SAP B |
+| **D17** | ⏳ 建议 | **采纳 A1**：允许缓存列，限定只读 + 可重算 + 可巡检；落点改为期次 | Fusion `AR_PAYMENT_SCHEDULES_ALL`（A） |
+| **D18** | ⏳ 建议 | 维持视图；但 `v_receivable` 口径改为「Σ 期次 `amount_due_remaining`」 | 期次是应收载体（A/B） |
+| **D19** | ⏳ 建议 | **降级为字段预留**：`direction` / `party_account_id` 先留，Wave A 只实现 inbound；AP 规则集独立 | 两家 AR/AP 对象都分离（A/B）；SAP 只在会计凭证层统一 |
+| **D20** | ⏳ 建议 | 不变：Wave A 用订单总额 ×(1+容差)；`contract_limit_amount` 仍缺定义 | §28 断点 B 未解 |
+| **D21** | 新增 | **新增 `customer_invoice_schedule`**，Wave A 必建 | 29.3.1 |
+| **D22** | 新增 | **计划行退出核销目标**，预收只挂 order/group | 29.3.2 |
+
+**D19 补充说明**：Fusion 的 AR / AP 是两个对象族；SAP 只在 `BKPF` 会计凭证层统一（`KOART` D/K），子账和事务码仍分离。所以我方「统一 `payment_receipt`」本质是走 SAP 的会计层路线，可行，但必须：
+
+- `direction` 决定规则集（核销目标、冻结、审批流）；
+- Wave A 只做 `inbound`，`outbound` 留 Wave C，避免把付款程序语义提前塞进来。
+
+### 29.6 本节结论（四句话）
+
+1. **方向对的**：收款单独立（D14）、核销用关系表（`payment_allocation`）、反核销用反向记录（V5/V8）、余额可重算——四点在 Fusion / SAP 都能找到对应或更强的证据。
+2. **粒度错了半级**：两家都把核销落到「应收期次」（Fusion `AR_PAYMENT_SCHEDULES_ALL`、SAP 分期未清项），我方停在发票头。必须补 `customer_invoice_schedule`（D21）。
+3. **订单级计划是差异化**：Fusion / SAP 都没有订单级收付款计划；我方 `payment_schedule` 保留，但只能做计划，不能承接核销（D22）。
+4. **缓存列可以存**：Fusion 自己就在期次上存 `AMOUNT_APPLIED` / `AMOUNT_DUE_REMAINING`；断点 A 可关闭，§11 红线按 A1 改口。
+
+### 29.7 Sources
+
+**Oracle Fusion（docs.oracle.com，26C）**
+
+1. Receivables Tables（`AR_PAYMENT_SCHEDULES_ALL`、`AR_CASH_RECEIPTS_ALL`、`AR_RECEIVABLE_APPLICATIONS_ALL`、`AR_ADJUSTMENTS_ALL`）— https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/receivables-tables.html
+2. AutoInvoice Import and External Data — https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/autoinvoice-import-and-external-data.html
+3. How Payment Activities Are Stored — https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/how-payment-activities-are-stored.html
+4. How Adjustments to Transactions Are Calculated — https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/how-adjustments-to-transactions-are-calculated.html
+5. Guidelines for Updating Installments on Transactions — https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/guidelines-for-updating-installments-on-transactions.html
+6. Write-offs and Receipts — https://docs.oracle.com/en/cloud/saas/financials/26c/faofc/write-offs-and-receipts.html
+7. Edit Recurring Billing（订单层只有开票计划）— https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26c/fauom/edit-recurring-billing.html
+8. Shipment Tolerances（无订单累计开票硬校验的旁证）— https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26c/fauom/shipment-tolerances.html
+9. Prepayment（Transaction Subclass）二手说明 — https://www.kovaion.com/blog/advance-payments-and-automation-of-invoicing-and-receipt-applications-24b-update/
+
+**SAP（DDIC / Help / 权威二手）**
+
+10. `FPLA` 表结构 — https://leanx.eu/sap/table/fpla/
+11. `FPLT` 表结构 — https://leanx.eu/sap/table/fplt/
+12. `VBFA` 单据流（含 `FPLNR` / `FPLTR`） — https://leanx.eu/sap/table/vbfa/
+13. `BSID` 未清项 — https://leanx.eu/sap/table/bsid/
+14. `BSEG` 行项目（`ZTERM` / `ZFBDT` / `REBZG`） — https://leanx.eu/sap/table/bseg/
+15. 特殊总账标识 A / F — https://www.s4pedia.com/post/special-general-ledger-sgl-transactions
+16. Customer Down Payment Process（`FAZ` / `FAS` / `AZWR`） — https://sapinsider.org/improve-your-companys-revenues-with-saps-customer-down-payment-process/
+17. `F-39` Clear Customer Down Payment — https://www.sap-tcodes.org/tcode/f-39.html
+18. Clearing Document（无独立核销表） — https://bestsapcbi.com/sap-clearing-document/
+19. Partial Payment vs Residual Item — https://sapinsider.org/which-a-r-underpayment-option-should-you-use-partial-payment-or-residual-item/
