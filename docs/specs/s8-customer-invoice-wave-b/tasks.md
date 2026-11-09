@@ -132,11 +132,14 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 ## [x] T30 守卫：R-INV-18 / R-SCH-17
 
 **文件**
-- 修改 `meta/core/interceptors/customer_invoice_guard_interceptor.py`
+- 修改 `meta/services/customer_invoice_service.py`（行级 plan 校验：`validate_line_write(..., allow_plan)` + `_assert_plan_identity_locked`）
 - 修改 `meta/services/sales_order_guard_service.py`
 - 修改 `meta/tests/test_customer_invoice_guard.py`
 - 修改 `meta/tests/test_sales_order_guard.py`
 - 修改 `meta/tests/test_sales_order_schedule_guard.py`
+
+> 口径修正：行级校验实际落在 service 的 `validate_line_write`；
+> `meta/core/interceptors/customer_invoice_guard_interceptor.py` 仅保留注释、不改逻辑。
 
 **内容**
 - 发票行守卫：放行 plan 行；禁止改 `schedule_id/billing_basis/billing_base_amount`；

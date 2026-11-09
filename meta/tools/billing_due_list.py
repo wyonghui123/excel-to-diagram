@@ -45,6 +45,7 @@ SELECT o.order_no,
  WHERE s.schedule_kind = 'billing'
    AND s.status IN ('planned', 'confirmed')
    AND s.billing_status <> 'full'
+   AND ol.billing_relevance = 'plan'
    AND s.promised_date IS NOT NULL
    AND s.promised_date <= ?
    AND o.status IN ('confirmed', 'closed')

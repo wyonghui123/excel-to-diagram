@@ -108,6 +108,12 @@ ORDER_BILLABLE_STATUSES = ('confirmed', 'closed')
 #: 按比例开票时吸收尾差的阈值（计算金额与期次剩余金额之差）
 PERCENT_TAIL_TOLERANCE = Decimal('0.01')
 
+#: Wave B：计划行生成后不可变更的身份字段（换绑期次会写错累计）
+PLAN_LINE_LOCKED_FIELDS = (
+    'schedule_id', 'billing_basis', 'billing_base_amount',
+    'source_doc_type', 'source_line_id',
+)
+
 #: 贷项 / 红字行引用原发票行的反向事实边规则（B7）
 CREDIT_DOC_FLOW_RULE_ID = 'customer_invoice_to_credit_memo'
 
@@ -276,33 +282,50 @@ class CustomerInvoiceService:
         payload = dict(payload or {})
         raw_lines = list(payload.get('lines') or [])
         schedule_ids = payload.get('schedule_ids') or []
+        if not isinstance(schedule_ids, (list, tuple, set)):
+            schedule_ids = [schedule_ids]
         if not schedule_ids and not _blank(payload.get('source_doc_id')):
             schedule_ids = [payload.get('source_doc_id')]
 
-        normalized = []
-        order_ids = set()
+        sources = []
         if raw_lines:
             for item in raw_lines:
                 item = dict(item or {})
                 schedule_id = (item.get('schedule_id')
                                or item.get('source_line_id')
                                or item.get('source_doc_id'))
-                schedule = self._require_billing_schedule(schedule_id)
-                order_line = self._require_order_line(
-                    schedule.get('line_id'))
-                order_ids.add(schedule.get('order_id'))
-                self._assert_relevance(order_line, expected='plan')
-                normalized.append(self._build_line_from_schedule(
-                    schedule, order_line, item.get('billing_percent')))
+                sources.append((schedule_id, item.get('billing_percent')))
         else:
-            for schedule_id in schedule_ids:
-                schedule = self._require_billing_schedule(schedule_id)
-                order_line = self._require_order_line(
-                    schedule.get('line_id'))
-                order_ids.add(schedule.get('order_id'))
-                self._assert_relevance(order_line, expected='plan')
-                normalized.append(self._build_line_from_schedule(
-                    schedule, order_line))
+            sources.extend((schedule_id, None) for schedule_id in schedule_ids)
+
+        normalized = []
+        order_ids = set()
+        # 同一期次可拆多行：按 schedule_id 累计，建单阶段就拦住超额草稿
+        period_totals: Dict[str, Decimal] = {}
+        period_sources: Dict[str, Any] = {}
+        for schedule_id, percent in sources:
+            schedule = self._require_billing_schedule(schedule_id)
+            order_line = self._require_order_line(schedule.get('line_id'))
+            order_ids.add(schedule.get('order_id'))
+            self._assert_relevance(order_line, expected='plan')
+            line = self._build_line_from_schedule(
+                schedule, order_line, percent)
+            key = str(schedule.get('id'))
+            period_sources.setdefault(key, (schedule, order_line))
+            period_totals[key] = period_totals.get(key, Decimal('0')) + \
+                _to_decimal(line.get('unit_price'))
+            normalized.append(line)
+
+        for key, total in period_totals.items():
+            schedule, order_line = period_sources[key]
+            period_amount = self._schedule_period_amount(schedule, order_line)
+            remaining = _round(period_amount - _to_decimal(
+                schedule.get('billed_amount')), 4)
+            if total > remaining + EPSILON:
+                raise CustomerInvoiceError(
+                    '同一期次累计开票金额 %s 超过剩余金额 %s' % (
+                        _round(total, 4), remaining),
+                    field_name='schedule_id', rule='INVOICE_PLAN_EXCEEDED')
 
         if not normalized:
             raise CustomerInvoiceError(
@@ -356,6 +379,7 @@ class CustomerInvoiceService:
         " WHERE s.schedule_kind = ? "
         "   AND s.status IN ('planned', 'confirmed') "
         "   AND COALESCE(s.billing_status, 'none') != 'full' "
+        "   AND ol.billing_relevance = 'plan' "
         "   AND s.promised_date <= ? "
         "   AND o.status IN ('confirmed', 'closed') "
         % (ORDER_SCHEDULE_TABLE, ORDER_LINE_TABLE, ORDER_TABLE))
@@ -393,6 +417,7 @@ class CustomerInvoiceService:
             " WHERE s.schedule_kind = ? "
             "   AND s.status IN ('planned', 'confirmed') "
             "   AND COALESCE(s.billing_status, 'none') != 'full' "
+            "   AND ol.billing_relevance = 'plan' "
             '   AND s.promised_date <= ? '
             "   AND o.status IN ('confirmed', 'closed')"
             % (ORDER_SCHEDULE_TABLE, ORDER_LINE_TABLE, ORDER_TABLE)
@@ -597,6 +622,8 @@ class CustomerInvoiceService:
                 schedule_id = (row.get('source_line_id')
                                or row.get('source_doc_id'))
                 row['schedule_id'] = schedule_id
+            if existing is not None:
+                self._assert_plan_identity_locked(existing, row)
             schedule = self._require_billing_schedule(schedule_id)
             order_line = self._require_order_line(
                 schedule.get('line_id'))
@@ -675,6 +702,24 @@ class CustomerInvoiceService:
                 field_name='source_doc_type',
                 rule='INVOICE_SOURCE_MISMATCH')
         return self._finalize_line(self._build_manual_line(row))
+
+    def _assert_plan_identity_locked(self, existing: Dict[str, Any],
+                                     row: Dict[str, Any]) -> None:
+        """计划行身份字段冻结：换绑期次/口径会让过账写错累计。"""
+        for field in PLAN_LINE_LOCKED_FIELDS:
+            old = existing.get(field)
+            new = row.get(field)
+            if _blank(old) and _blank(new):
+                continue
+            if field == 'billing_base_amount':
+                same = abs(_to_decimal(old) - _to_decimal(new)) <= EPSILON
+            else:
+                same = (not _blank(old) and not _blank(new)
+                        and str(old).strip() == str(new).strip())
+            if not same:
+                raise CustomerInvoiceError(
+                    '开票计划行的来源字段不可修改（%s）' % field,
+                    field_name=field, rule='INVOICE_LINE_SOURCE_LOCKED')
 
     def _apply_price_override(self, line: Dict[str, Any],
                               payload: Dict[str, Any],
@@ -1845,7 +1890,8 @@ class CustomerInvoiceService:
             'billing_percent': line_percent,
             'billing_base_amount': base,
             'price_source': 'order',
-            'order_unit_price': order_line.get('unit_price'),
+            # spec §5.3：plan 不做改价，参考价留空 → price_diff_amount 恒 0
+            'order_unit_price': None,
             'price_change_reason': None,
             'price_change_approved_by': None,
             'original_invoice_line_id': None,

@@ -431,6 +431,20 @@ def test_line_create_from_schedule_on_posted_parent_rejected():
     _expect(error, 'INVOICE_POSTED_READONLY')
 
 
+def test_line_update_plan_source_field_locked():
+    conn = build_conn()
+    created = _service(conn).create_from_schedule(dict(
+        BASE_HEADER, schedule_ids=[BILLING_SCHEDULE_ID]))
+    line = get_lines(conn, created['id'])[0]
+    make_billing_schedule(conn, 73, percent=40)
+    params = {'id': line['id'], 'schedule_id': 73}
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(
+            _ctx(conn, 'customer_invoice_line', 'crud_update', params))
+    _expect(error, 'INVOICE_LINE_SOURCE_LOCKED')
+
+
 def test_line_update_plan_percent_recalculates_amount():
     conn = build_conn()
     created = _service(conn).create_from_schedule(dict(

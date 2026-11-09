@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 
 from meta.tests.factories._customer_invoice_helpers import (
     BILLING_SCHEDULE_ID,
+    ORDER_LINE_DELIVERY,
     build_file,
     make_billing_schedule,
     set_order_status,
@@ -85,6 +86,18 @@ def test_non_billing_kind_is_excluded(tmp_path):
     rows = query_due(str(path), AS_OF_DUE)
     assert [row['schedule_id'] for row in rows] == [BILLING_SCHEDULE_ID]
     conn.close()
+
+
+def test_non_plan_line_is_excluded(tmp_path):
+    path, conn = _db_file(tmp_path)
+
+    # 非 plan 行（billing_relevance='delivery'）的期次不可按计划开票，不进清单
+    make_billing_schedule(conn, 91, percent=50, promised_date=AS_OF_EARLY,
+                          line_id=ORDER_LINE_DELIVERY)
+    conn.commit()
+
+    rows = query_due(str(path), AS_OF_DUE)
+    assert [row['schedule_id'] for row in rows] == [BILLING_SCHEDULE_ID]
 
 
 def test_json_output_shape(tmp_path, capsys):

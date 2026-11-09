@@ -322,21 +322,21 @@ remaining_pct   = schedule.billing_percent - ROUND(billed / base * 100, 4)
 ### 7.1 工具 `meta/tools/billing_due_list.py`
 
 ```sql
-SELECT o.order_no, ol.line_no, s.id AS schedule_id, s.sequence_no,
+SELECT o.order_no, ol.line_no, s.id AS schedule_id, s.schedule_no,
        s.promised_date, s.billing_percent, ol.net_amount,
        ROUND(s.billing_percent / 100.0 * ol.net_amount, 4) AS period_amount,
        s.billed_amount,
        ROUND(s.billing_percent / 100.0 * ol.net_amount, 4) - s.billed_amount AS remaining,
        s.billing_status
   FROM sales_order_schedules s
-  JOIN sales_order_lines ol ON ol.id = s.order_line_id
+  JOIN sales_order_lines ol ON ol.id = s.line_id
   JOIN sales_orders o       ON o.id = ol.order_id
  WHERE s.schedule_kind = 'billing'
    AND s.status IN ('planned', 'confirmed')
    AND s.billing_status <> 'full'
    AND s.promised_date <= :as_of
    AND o.status IN ('confirmed', 'closed')
- ORDER BY s.promised_date, o.order_no, s.sequence_no;
+ ORDER BY s.promised_date, o.order_no, s.schedule_no;
 ```
 
 - `:as_of` 默认今天；只读；退出码 0（无到期）/ 2（有到期，便于脚本判断）/ 1（异常）。

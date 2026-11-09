@@ -781,6 +781,44 @@ def test_create_from_schedule_defaults_to_full_period():
     assert Decimal(str(line['net_amount'])) == Decimal('1000')
 
 
+def test_create_from_schedule_keeps_price_diff_zero():
+    conn = build_conn()
+    result = _from_schedule(conn)
+
+    line = get_lines(conn, result['id'])[0]
+    # spec §5.3：plan 不做改价，参考价留空、差额恒 0
+    assert line['order_unit_price'] is None
+    assert Decimal(str(line['price_diff_amount'])) == Decimal('0')
+
+
+def test_create_from_schedule_accepts_scalar_schedule_ids():
+    conn = build_conn()
+    result = _from_schedule(conn, schedule_ids=BILLING_SCHEDULE_ID)
+
+    assert result['amounts']['net_amount'] == 1000.0
+
+
+def test_create_from_schedule_rejects_duplicate_schedule_over_period():
+    conn = build_conn()
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn, lines=[
+            {'schedule_id': BILLING_SCHEDULE_ID},
+            {'schedule_id': BILLING_SCHEDULE_ID},
+        ])
+    _expect(error, 'INVOICE_PLAN_EXCEEDED')
+
+
+def test_list_due_schedules_excludes_non_plan_line():
+    conn = build_conn()
+    make_billing_schedule(conn, 91, percent=50, promised_date='2026-11-15',
+                          line_id=ORDER_LINE_DELIVERY)
+
+    result = _service(conn).list_due_schedules(as_of='2026-11-20')
+
+    assert [row['schedule_id'] for row in result['items']] == [
+        BILLING_SCHEDULE_ID]
+
+
 def test_create_from_schedule_merges_multiple_periods():
     conn = build_conn()
     set_schedule_fields(conn, BILLING_SCHEDULE_ID, billing_percent=60)

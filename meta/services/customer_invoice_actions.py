@@ -105,6 +105,8 @@ def create_from_schedule_handler(params: Dict[str, Any],
     params = dict(params or {})
 
     schedule_ids = params.get('schedule_ids') or []
+    if not isinstance(schedule_ids, (list, tuple, set)):
+        schedule_ids = [schedule_ids]
     lines = params.get('lines') or []
     source_doc_id = params.get('source_doc_id')
     if not schedule_ids and not lines and _blank(source_doc_id):
