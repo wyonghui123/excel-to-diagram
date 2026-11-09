@@ -68,11 +68,12 @@ def init_services(data_source=None):
     init_enrichment_engine(_data_source)
 
     try:
-        from meta.core.schema_generator import sync_schema_from_meta
+        from meta.core.schema_sync_guard import guarded_sync_schema
         from meta.core.models import registry as meta_registry, FieldStorage
         meta_objects = [meta_registry.get(ot) for ot in meta_registry.list_types()]
         meta_objects = [obj for obj in meta_objects if obj is not None]
-        sync_schema_from_meta(_data_source, meta_objects)
+        # [TEST-EFF P1-1] 声明哈希守卫：声明未变且表齐全时跳过整轮 sync（约 2.9s/进程）
+        guarded_sync_schema(_data_source, meta_objects)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("Schema sync skipped: %s", str(e))
