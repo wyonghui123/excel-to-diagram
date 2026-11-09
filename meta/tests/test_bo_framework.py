@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 BO 框架测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -487,15 +488,15 @@ class TestBOFrameworkRelationships:
         
         cursor.execute("""
             SELECT r.* FROM permission_sets r
-            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user_with_role['user']['id'],))
         
         roles = cursor.fetchall()
         
         assert len(roles) >= 1
-        assert roles[0]['code'] == user_with_role['role']['code']
+        assert roles[0]['code'] == user_with_role['permission_set']['code']
     
     def test_query_user_groups(self, db_connection, user_in_group):
         """查询用户组关联"""
@@ -503,7 +504,7 @@ class TestBOFrameworkRelationships:
         
         cursor.execute("""
             SELECT g.* FROM orgs g
-            INNER JOIN org_members ugm ON g.id = ugm.group_id
+            INNER JOIN org_members ugm ON g.id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user_in_group['user']['id'],))
         

@@ -20,6 +20,7 @@ import sqlite3
 import pytest
 
 from meta.scripts.init_task_menus import init_task_menus
+from meta.tests.factories._raw_sql_bridge import insert
 
 #遗留实体 BO：入口收敛后不应再出现在 task-management 的任何绑定里
 LEGACY_BOS = ('scheduled_task', 'task_queue', 'task_execution', 'ai_async_task')
@@ -110,17 +111,15 @@ class Test入口收敛:
         """[收敛-4] 幂等重跑时须主动 DELETE 遗留菜单行（含历史库已有数据）"""
         #先手工塞入遗留行，模拟"旧版本已写过"的历史库
         for code in LEGACY_LEAF_CODES:
-            ds.execute(
-                "INSERT INTO menus (menu_code, menu_name, menu_path, page_type,"
-                " parent_menu, is_active, show_in_sidebar)"
-                " VALUES (?, ?, ?, 'object_list', 'task-management', 1, 0)",
-                (code, code, f'/system/{code}'))
-        ds.execute(
-            "INSERT INTO menu_permissions (menu_code, menu_name, menu_path,"
-            " required_permissions, required_any_permission, parent_menu,"
-            " icon, sort_order, is_active)"
-            " VALUES ('task-definitions', '任务定义', '/system/task-definitions',"
-            " '[]', 0, 'task-management', 'List', 1, 1)")
+            insert(ds, 'menus', menu_code=code, menu_name=code,
+                   menu_path=f'/system/{code}', page_type='object_list',
+                   parent_menu='task-management', is_active=1,
+                   show_in_sidebar=0)
+        insert(ds, 'menu_permissions', menu_code='task-definitions',
+               menu_name='任务定义', menu_path='/system/task-definitions',
+               required_permissions='[]', required_any_permission=0,
+               parent_menu='task-management', icon='List', sort_order=1,
+               is_active=1)
 
         init_task_menus(ds)
 

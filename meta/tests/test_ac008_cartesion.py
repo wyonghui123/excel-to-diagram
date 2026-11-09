@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造笛卡尔积测试数据，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 [FILE] test_ac008_cartesion.py
@@ -63,7 +64,7 @@ def setup_db():
 
     CREATE TABLE permission_set_dimension_scopes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role_id INTEGER, dimension_code TEXT, scope_mode TEXT,
+        permission_set_id INTEGER, dimension_code TEXT, scope_mode TEXT,
         dimension_values TEXT, inherit_children INTEGER DEFAULT 1
     );
     ''')
@@ -87,7 +88,7 @@ def setup_db():
 
     for role_id, dim, mode, vals, inherit in test_cases:
         cur.execute(
-            'INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, scope_mode, dimension_values, inherit_children) '
+            'INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, scope_mode, dimension_values, inherit_children) '
             'VALUES (?, ?, ?, ?, ?)',
             [role_id, dim, mode, vals, inherit]
         )
@@ -140,15 +141,15 @@ class TestCartesionAC008:
             f"AC-008.3 FAIL sub_domain expanded: expected {{101}}, got {expanded.get('sub_domain')}"
 
     def test_ac008_4_domain_specific_sub_domain_specific_inherit_0(self, setup_db):
-        """AC-008.4: domain=[1] + sub_domain=[101] (inherit=0) → sub_domain = {101, 102}"""
+        """AC-008.4: domain=[1] + sub_domain=[101] (inherit=0) → sub_domain = {101}（显式配置优先）"""
         engine = setup_db
         expanded = engine.expand_dimension_values(role_id=9004)
 
-        # domain=[1], expand_down: sub_domain=[101, 102] (domain=1 下所有)
+        # domain=[1] 精确匹配; 显式 sub_domain=[101] 不被 domain 展开覆盖 (笛卡尔积)
         assert expanded.get('domain') == {1}, \
             f"AC-008.4 FAIL domain: expected {{1}}, got {expanded.get('domain')}"
-        assert expanded.get('sub_domain') == {101, 102}, \
-            f"AC-008.4 FAIL sub_domain: expected {{101, 102}} (domain=1下所有), got {expanded.get('sub_domain')}"
+        assert expanded.get('sub_domain') == {101}, \
+            f"AC-008.4 FAIL sub_domain: expected {{101}} (显式配置优先), got {expanded.get('sub_domain')}"
 
     def test_ac008_helper_method_exists(self):
         """AC-008 helper: DimensionScopeEngine._has_explicit_include_for_dim 存在"""

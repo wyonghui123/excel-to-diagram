@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from meta.tests.factories._raw_sql_bridge import insert
+
 
 class TestArchiveAuditLogs:
 
@@ -51,12 +53,10 @@ class TestArchiveAuditLogs:
 
     def _insert_log(self, db_path, retention_until):
         conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO audit_logs
-                (object_type, object_id, action, user_id, user_name, retention_until, action_kind, outcome)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'created', 1, 'alice', retention_until, 'instance', 'success'))
+        insert(conn, 'audit_logs', object_type='user', object_id='1',
+               action='created', user_id=1, user_name='alice',
+               retention_until=retention_until, action_kind='instance',
+               outcome='success')
         conn.commit()
         conn.close()
 
@@ -122,12 +122,9 @@ class TestArchiveAuditLogs:
         from meta.scripts.archive_audit_logs import archive_old_audit_logs
         # v1 记录没有 retention_until
         conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO audit_logs
-                (object_type, object_id, action, user_id, user_name, retention_until)
-                VALUES (?, ?, ?, ?, ?, NULL)
-        """, ('user', '1', 'created', 1, 'alice'))
+        insert(conn, 'audit_logs', object_type='user', object_id='1',
+               action='created', user_id=1, user_name='alice',
+               retention_until=None)
         conn.commit()
         conn.close()
 

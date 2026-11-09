@@ -15,7 +15,10 @@ import sqlite3
 from typing import Any, Dict, Optional, Tuple
 
 BASE_HOST = os.environ.get('TEST_HOST', 'localhost')
-BASE_PORT = int(os.environ.get('TEST_PORT', '3010'))
+# 端口优先级: TEST_PORT → AGENT_PORT (agent_bootstrap 设置) → 共享槽 3010
+BASE_PORT = int(os.environ.get('TEST_PORT')
+                or os.environ.get('AGENT_PORT')
+                or '3010')
 # DB 路径: tests/ 在子目录, 需向上 1 级
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))

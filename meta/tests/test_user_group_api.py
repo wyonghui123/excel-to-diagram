@@ -57,7 +57,12 @@ class TestSunsetCRUD:
 
 
 class TestMembers:
-    """members + data-permissions 子端点"""
+    """members + data-permissions 子端点
+
+    [Spec16 Plan D 2026-09-02] user_group_bp 已从 app_builder 移除，
+    这些 v1 子端点不再注册（请求返回 404），迁移目标为 /api/v2/bo/user_group。
+    """
+    pytestmark = pytest.mark.skip(reason='user_group_bp 已下线（Spec16 Plan D），v1 子端点 404')
 
     def test_get_members(self, api_client):
         r = expect(api_client, 'get', '/api/v1/user-groups/1/members', OK_AUTH)
@@ -89,6 +94,8 @@ class TestMembers:
 
 class TestRolesAndLogs:
     """roles + 迁移 + logs"""
+
+    pytestmark = pytest.mark.skip(reason='user_group_bp 已下线（Spec16 Plan D），v1 子端点 404')
 
     @pytest.mark.parametrize('method,endpoint,body', ROLE_CRUD)
     def test_role_crud(self, api_client, method, endpoint, body):

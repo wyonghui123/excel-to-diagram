@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [NEW 2026-06-12] audit_api parent_object 联合查询 + _extract_deleted_data 测试
 
@@ -61,9 +62,9 @@ def inserted_audit_logs():
     test_user_name = f"test_audit_parent_{os.urandom(2).hex()}"
 
     rows = []
-    # 1 条 role 自身
+    # 1 条 role 自身 (v138 后 role 别名归一化为 permission_set, 自身日志按规范类型落库)
     rows.append({
-        "object_type": "role", "object_id": str(TEST_ROLE_ID),
+        "object_type": "permission_set", "object_id": str(TEST_ROLE_ID),
         "action": "UPDATE", "field_name": "display_name",
         "old_value": "Old", "new_value": "New",
         "user_id": "1", "user_name": test_user_name,
@@ -225,9 +226,9 @@ class TestAuditParentObjectQuery:
             f"OR 联合应返回 total=7 (role 自身 + 6 个子对象), 实际 {body.get('total')}"
         )
         data = body.get("data") or []
-        # 1 条 role 自身
+        # 1 条 role 自身 (object_type 已由 registry alias 归一化为 permission_set)
         own = [item for item in data
-               if item.get("object_type") == "role"
+               if item.get("object_type") == "permission_set"
                and str(item.get("object_id")) == role_id_s]
         # 6 条子对象
         children = [item for item in data

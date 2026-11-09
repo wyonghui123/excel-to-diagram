@@ -301,10 +301,22 @@ class TestAnnotationMetadataDriven:
         print("[PASS] List annotations for relationship")
 
     def test_11_update_annotation_service_module(self, api_client, auth_headers, shared_annotations, setup_annotations_table):
-        """测试更新服务模块备注"""
-        assert len(shared_annotations) > 0, "需要有测试数据才能执行此测试"
+        """测试更新服务模块备注
+
+        [FIX 2026-11-07] shared_annotations 是 function 级 fixture (annotations 表
+        每个用例都会 DROP+CREATE), 不能依赖其他用例写入的数据 → 本用例自建数据。
+        """
+        created = _create_annotation(
+            api_client, auth_headers,
+            'service_module', 1, 'important', '待更新的服务模块备注'
+        )
+        assert created.status_code in [200, 201]
+        created_data = json.loads(created.data)
+        annotation_id = created_data.get('data', {}).get('id')
+        if annotation_id is None:
+            pytest.skip(f"无法创建测试备注: {created_data}")
+        shared_annotations.append(annotation_id)
         
-        annotation_id = shared_annotations[0]
         response = api_client.put(
             f'/api/v1/annotations/{annotation_id}',
             data=json.dumps({
@@ -369,8 +381,22 @@ class TestAnnotationMetadataDriven:
         print("[PASS] Multiple annotations for same target")
 
     def test_14_delete_annotation(self, api_client, auth_headers, shared_annotations, setup_annotations_table):
-        """测试删除备注"""
-        assert len(shared_annotations) >= 2, "至少需要2条测试数据才能执行此测试"
+        """测试删除备注
+
+        [FIX 2026-11-07] 同 test_11: 自建 2 条数据再删除, 不依赖跨用例共享。
+        """
+        for i in range(2):
+            created = _create_annotation(
+                api_client, auth_headers,
+                'business_object', 1, 'info', f'待删除备注 #{i}'
+            )
+            assert created.status_code in [200, 201]
+            created_data = json.loads(created.data)
+            created_id = created_data.get('data', {}).get('id')
+            if created_id is not None:
+                shared_annotations.append(created_id)
+        if len(shared_annotations) < 2:
+            pytest.skip(f"无法创建足够的测试备注: {shared_annotations}")
 
         annotation_id = shared_annotations.pop()
         response = api_client.delete(

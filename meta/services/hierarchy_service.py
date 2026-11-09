@@ -80,7 +80,11 @@ class HierarchyService:
             return []
 
         if not levels:
-            levels = [lv['object'] for lv in hierarchy_levels]
+            # 只有 entity 层是层级节点; association 层(如 relationship)是边不是节点,
+            # 它没有 foreign_key_field, 若参与递归会退化成「每个父节点扫全表」
+            # (3228 个业务对象 × 5756 条关系 ≈ 1860 万节点 → 4GB 内存爆炸)。
+            levels = [lv['object'] for lv in hierarchy_levels
+                      if lv.get('kind', 'entity') == 'entity']
 
         start_level_idx = 0
         if object_type:
@@ -176,6 +180,11 @@ class HierarchyService:
         obj_type = level['object']
         table_name = level.get('table_name', f"{obj_type}s")
         fk_field = level.get('foreign_key_field', '')
+
+        # 防御: 非根层缺少外键列时不能查子节点 —— 否则 where_clause 为空,
+        # 每个父节点都会把整张表拉出来, 内存随父节点数线性爆炸。
+        if not fk_field and level_idx > 0:
+            return []
 
         meta_obj = registry.get(obj_type)
         display_field = 'name'

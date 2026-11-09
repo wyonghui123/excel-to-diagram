@@ -612,9 +612,16 @@ def _scan_set_fulfillment():
 
 
 def test_inv1_single_writer():
-    """验收 18 / INV-1：fulfillment_status 只有服务层一个写入方。"""
+    """验收 18 / INV-1：每个订单族只有各自服务层一个写入方。
+
+    sales_order / purchase_order / transfer_order 三张订单表分别由
+    各自 fulfillment 服务写入，业务侧无直接 SQL 写入。
+    """
     assert _scan_set_fulfillment() == {
-        'meta/services/sales_order_fulfillment_service.py'}
+        'meta/services/sales_order_fulfillment_service.py',
+        'meta/services/purchase_order_fulfillment_service.py',
+        'meta/services/transfer_order_service.py',
+    }
 
 
 # ---------------- INV-3（验收 20） ----------------

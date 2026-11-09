@@ -211,12 +211,17 @@ class TestProductVersionAspects:
         assert 'updated_by' in field_ids
 
     def test_version_has_naming_aspect(self):
+        """[2026-06-13 设计变更] version 不继承 naming_aspect, 仅用 name 作业务键
+
+        原因: version 的自然名称 (v1.0 / 2024-Q4) 本身就是标识,
+        唯一性由 (product_id, name) 联合约束保证。
+        """
         version = get_meta_object('version')
         assert version is not None, "version not found in registry"
-        assert 'naming_aspect' in version.aspects
+        assert 'naming_aspect' not in version.aspects
         field_ids = [f.id for f in version.fields]
-        assert 'code' in field_ids
         assert 'name' in field_ids
+        assert 'code' not in field_ids
 
     def test_version_audit_fields_have_auto_fill(self):
         version = get_meta_object('version')

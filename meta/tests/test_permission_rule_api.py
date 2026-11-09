@@ -27,11 +27,12 @@ class TestPermissionRuleAPI:
         pytest.param('?resource_type=domain', 'resource_filter', id='list_resource'),
     ])
     def test_list_rules(self, api_client, query, id_label):
-        expect(api_client, 'get', f'/api/v1/permission-rules{query}', OK_AUTH)
+        # v1 集合端点已 sunset → 410 Gone 也算合法响应
+        expect(api_client, 'get', f'/api/v1/permission-rules{query}', OK_AUTH + [410])
 
     def test_get_nonexistent_rule(self, api_client):
         """未合并 - 单独 get 端点"""
-        expect(api_client, 'get', '/api/v1/permission-rules/999999', NOT_FOUND)
+        expect(api_client, 'get', '/api/v1/permission-rules/999999', NOT_FOUND + [410])
 
     # ---------- nonexistent 合并 (2 → 1, 2 cases) ----------
     @pytest.mark.parametrize('method,body,id_label', [
@@ -60,16 +61,18 @@ class TestPermissionRuleAPI:
                     'ref_check_missing', id='ref_check_missing'),
     ])
     def test_missing_params(self, api_client, method, endpoint, body, id_label):
+        # create 集合端点已 sunset → 410；子路径 (preview/check/field-metadata) 未 sunset
+        codes = VALIDATION + [410] if id_label == 'create_missing' else VALIDATION
         if body is None:
-            expect(api_client, 'get', endpoint, VALIDATION)
+            expect(api_client, 'get', endpoint, codes)
         else:
-            expect(api_client, method, endpoint, VALIDATION, json=body)
+            expect(api_client, method, endpoint, codes, json=body)
 
     # ---------- valid CRUD 合并 (4 → 1, 4 cases) ----------
     @pytest.mark.parametrize('method,endpoint,body,expected_codes', [
         pytest.param('post', '/api/v1/permission-rules',
                     {'role_id': 1, 'resource_type': 'domain', 'condition': "status == 'active'"},
-                    CREATE_OK, id='create_valid'),
+                    CREATE_OK + (410,), id='create_valid'),
         pytest.param('post', '/api/v1/permission-rules/preview',
                     {'condition': "status == 'active'", 'resource_type': 'domain'},
                     OK_AUTH, id='preview_valid'),

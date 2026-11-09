@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 API 层测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -251,16 +252,16 @@ class TestAssociationAPI:
         cursor = db_connection.cursor()
 
         user_id = user_with_role['user']['id']
-        role_id = user_with_role['role']['id']
-        group_id = user_with_role.get('group_id')
+        role_id = user_with_role['permission_set']['id']
+        group_id = user_with_role.get('org_id')
 
         if not group_id:
             pytest.skip("No group association")
 
         cursor.execute("""
             SELECT r.* FROM permission_sets r
-            INNER JOIN org_permission_sets gr ON r.id = gr.role_id
-            INNER JOIN org_members ugm ON gr.group_id = ugm.group_id
+            INNER JOIN org_permission_sets gr ON r.id = gr.permission_set_id
+            INNER JOIN org_members ugm ON gr.org_id = ugm.org_id
             WHERE ugm.user_id = ?
         """, (user_id,))
         roles = cursor.fetchall()
@@ -276,15 +277,15 @@ class TestAssociationAPI:
         cursor.execute("INSERT INTO orgs (code, name) VALUES (?, ?)",
             ('test_assign_group', 'Test Assign Group'))
         group_id = cursor.lastrowid
-        cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
+        cursor.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
             (created_user['id'], group_id))
-        cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
+        cursor.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
             (group_id, created_role['id']))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (group_id, created_role['id']))
         association = cursor.fetchone()
 
@@ -295,21 +296,21 @@ class TestAssociationAPI:
         cursor = db_connection.cursor()
 
         user_id = user_with_role['user']['id']
-        role_id = user_with_role['role']['id']
-        group_id = user_with_role.get('group_id')
+        role_id = user_with_role['permission_set']['id']
+        group_id = user_with_role.get('org_id')
 
         if not group_id:
             pytest.skip("No group association")
 
         cursor.execute("""
             DELETE FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (group_id, role_id))
         db_connection.commit()
 
         cursor.execute("""
             SELECT * FROM org_permission_sets
-            WHERE group_id = ? AND role_id = ?
+            WHERE org_id = ? AND permission_set_id = ?
         """, (group_id, role_id))
         association = cursor.fetchone()
 

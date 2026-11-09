@@ -2796,6 +2796,7 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
 _yaml_cache = {}
 _shared_mtimes = {}
 _dir_registry_cache = {}
+_dir_registry_ids = {}
 
 def _get_file_cache_key(file_path: str) -> Optional[str]:
     """获取文件缓存键（基于 file_path + mtime），如果文件不存在返回 None
@@ -3057,7 +3058,10 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
     
     # 检查是否强制重新加载
     if target is None and canonical_dir in _dir_registry_cache and not MetaRegistry.__force_reload__:
-        if registry._objects:
+        cached_ids = _dir_registry_ids.get(canonical_dir)
+        # 缓存只在注册表仍保有本目录对象时可信: registry.reload() 会用单个目录
+        # 重建 _objects, 其他目录(如 apps/)的对象被丢弃, 此时必须重新注册。
+        if registry._objects and cached_ids and cached_ids.issubset(registry._objects.keys()):
             cached_count = _dir_registry_cache[canonical_dir]
             _info("[YAML Loader] Using cached registration for directory: {0} ({1} objects)".format(
                 canonical_dir, cached_count))
@@ -3075,6 +3079,7 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
             registry.register(obj)
             count += 1
         _dir_registry_cache[canonical_dir] = count
+        _dir_registry_ids[canonical_dir] = {obj.id for obj in objects}
     
     return count
 

@@ -47,13 +47,17 @@ def hook_db():
             UNIQUE (permission_set_id, bo_id, action_name)
         );
 
+        CREATE TABLE orgs (
+            id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER
+        );
         CREATE TABLE org_permission_sets (
-            group_id INTEGER, permission_set_id INTEGER
+            org_id INTEGER, permission_set_id INTEGER
         );
         CREATE TABLE org_members (
-            user_id INTEGER, group_id INTEGER
+            user_id INTEGER, org_id INTEGER
         );
 
+        INSERT INTO orgs VALUES (1, 'root', NULL);
         INSERT INTO org_permission_sets VALUES (1, 100);
         INSERT INTO org_members VALUES (999, 1);
 
@@ -212,8 +216,8 @@ class TestInterceptorFeatureFlagHook:
         # cond_expr 应该包含 owner_id (从 Intent data_scope 来的)
         assert 'owner_id' in raw_qcs[0]['expr']
 
-    def test_hook_with_no_intent_injects_default_deny(self, mock_context, hook_db):
-        """hook + 无 Intent → 注入 1=0 (默认拒绝)"""
+    def test_hook_with_no_intent_allows_all(self, mock_context, hook_db):
+        """hook + 无 Intent → 允许所有 (P5 语义: 未配置 = 不过滤)"""
         from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
         from meta.core.permission_flags import set_flag
 
@@ -230,13 +234,13 @@ class TestInterceptorFeatureFlagHook:
         with patch.object(interceptor, '_is_admin', return_value=False), patch.object(
             interceptor, '_get_db_path', return_value=hook_db
         ):
-            interceptor.before_action(mock_context)
+            handled = interceptor.before_action(mock_context)
 
-        # 验证 1=0 被注入
-        assert 'query_conditions' in mock_context.extra
-        qcs = mock_context.extra['query_conditions']
+        # [P5 2026-07-26] 无 Intent = 未配置 = 允许所有, 不再注入 1=0
+        assert handled is None  # None = 放行, 不短路
+        qcs = mock_context.extra.get('query_conditions', [])
         raw_qcs = [q for q in qcs if q.get('type') == 'raw']
-        assert any('1=0' in q['expr'] for q in raw_qcs)
+        assert not any('1=0' in q['expr'] for q in raw_qcs)
 
     def test_hook_exception_falls_back_safely(self, mock_context, hook_db):
         """hook 抛异常 → 安全回退到 legacy 路径"""

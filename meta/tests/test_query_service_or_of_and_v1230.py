@@ -40,9 +40,9 @@ class _FakeDataSource:
 
     def execute(self, sql, params=None):
         self._calls += 1
-        if 'group_roles' in sql:
+        if 'org_permission_sets' in sql:
             return _FakeCursor(rows=self._role_id_rows)
-        if 'role_dimension_scopes' in sql:
+        if 'permission_set_dimension_scopes' in sql:
             return _FakeCursor(rows=self._scope_count_rows)
         return _FakeCursor()
 
@@ -80,6 +80,12 @@ def test_multi_role_or_of_and_not_flattened(monkeypatch):
         DimensionScopeEngine,
         'derive_data_conditions',
         lambda self, role_id: fake_role_to_conds.get(role_id, {}),
+    )
+    # expand_dimension_values 只用于 wildcard 判定; 此处统一返回空 (无 wildcard)
+    monkeypatch.setattr(
+        DimensionScopeEngine,
+        'expand_dimension_values',
+        lambda self, permission_set_id: {},
     )
     from meta.services import chain_owner_resolver
     monkeypatch.setattr(chain_owner_resolver, 'is_in_chain', lambda ot: False)
@@ -139,6 +145,12 @@ def test_single_role_uses_or_where_path(monkeypatch):
         'derive_data_conditions',
         lambda self, role_id: fake_role_to_conds.get(role_id, {}),
     )
+    # expand_dimension_values 只用于 wildcard 判定; 此处统一返回空 (无 wildcard)
+    monkeypatch.setattr(
+        DimensionScopeEngine,
+        'expand_dimension_values',
+        lambda self, permission_set_id: {},
+    )
     from meta.services import chain_owner_resolver
     monkeypatch.setattr(chain_owner_resolver, 'is_in_chain', lambda ot: False)
 
@@ -159,8 +171,8 @@ def test_single_role_uses_or_where_path(monkeypatch):
 
     # 单 role: 不加 owner exception (business_object is not chain), 应该只有 dim scope OR cond
     # QueryBuilder 用 ? 作为占位符, 不是真实数字
-    assert 'id IN (?, ?, ?)' in sql
-    assert 'service_module_id IN (?, ?)' in sql
+    assert 'id IN (?,?,?)' in sql
+    assert 'service_module_id IN (?,?)' in sql
 
 
 def test_multi_role_with_in_subquery(monkeypatch):
@@ -184,6 +196,12 @@ def test_multi_role_with_in_subquery(monkeypatch):
         DimensionScopeEngine,
         'derive_data_conditions',
         lambda self, role_id: fake_role_to_conds.get(role_id, {}),
+    )
+    # expand_dimension_values 只用于 wildcard 判定; 此处统一返回空 (无 wildcard)
+    monkeypatch.setattr(
+        DimensionScopeEngine,
+        'expand_dimension_values',
+        lambda self, permission_set_id: {},
     )
     from meta.services import chain_owner_resolver
     monkeypatch.setattr(chain_owner_resolver, 'is_in_chain', lambda ot: False)
@@ -230,6 +248,12 @@ def test_multi_role_with_single_in_subquery(monkeypatch):
         DimensionScopeEngine,
         'derive_data_conditions',
         lambda self, role_id: fake_role_to_conds.get(role_id, {}),
+    )
+    # expand_dimension_values 只用于 wildcard 判定; 此处统一返回空 (无 wildcard)
+    monkeypatch.setattr(
+        DimensionScopeEngine,
+        'expand_dimension_values',
+        lambda self, permission_set_id: {},
     )
     from meta.services import chain_owner_resolver
     monkeypatch.setattr(chain_owner_resolver, 'is_in_chain', lambda ot: False)

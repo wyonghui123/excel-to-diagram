@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造真实数据场景测试数据，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -92,6 +93,15 @@ def _ensure_real_scenario_data(ds):
         WHERE version_id=2 AND code NOT LIKE 'T001_FIXED_%'
     """)
 
+    # [FIX 2026-11-09] 隔离测试库可能没有 version_id=2, 先建 product/version 以满足 FK
+    from datetime import datetime
+    _now = datetime.now().isoformat()
+    if ds.execute("SELECT COUNT(*) FROM versions WHERE id=2").fetchone()[0] == 0:
+        if ds.execute("SELECT COUNT(*) FROM products WHERE id=2").fetchone()[0] == 0:
+            ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (2, 'TestProduct2', 'PRD002', ?)", (_now,))
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (2, 'V2', 2, ?)", (_now,))
+        ds.commit()
+
     # 创建 5 个 public 状态的 v2 域 (用固定前缀, 避免重复)
     existing = ds.execute("""
         SELECT COUNT(*) FROM domains
@@ -101,7 +111,7 @@ def _ensure_real_scenario_data(ds):
     if existing < 5:
         for i in range(existing, 5):
             ds.execute(
-                "INSERT INTO domains (name, code, version_id, visibility) VALUES (?, ?, 2, 'public')",
+                "INSERT INTO domains (name, code, version_id) VALUES (?, ?, 2)",
                 (f'T001_FIXED_D{i}', f'T001_FIXED_D{i}')
             )
 
@@ -115,7 +125,7 @@ def _ensure_real_scenario_data(ds):
     """).fetchall()
     for i, (did,) in enumerate(parent_candidates):
         ds.execute(
-            "INSERT INTO sub_domains (name, code, version_id, domain_id, visibility) VALUES (?, ?, 2, ?, 'public')",
+            "INSERT INTO sub_domains (name, code, version_id, domain_id) VALUES (?, ?, 2, ?)",
             (f'T001_FIXED_SD_{did}', f'T001_FIXED_SD_{did}', did)
         )
         sd_id = ds.execute(
@@ -123,7 +133,7 @@ def _ensure_real_scenario_data(ds):
         ).fetchone()
         if sd_id:
             ds.execute(
-                "INSERT INTO service_modules (name, code, version_id, sub_domain_id, visibility) VALUES (?, ?, 2, ?, 'public')",
+                "INSERT INTO service_modules (name, code, version_id, sub_domain_id) VALUES (?, ?, 2, ?)",
                 (f'T001_FIXED_SM_{sd_id[0]}', f'T001_FIXED_SM_{sd_id[0]}', sd_id[0])
             )
 

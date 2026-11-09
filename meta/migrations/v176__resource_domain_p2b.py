@@ -10,7 +10,7 @@
     work_definition_operation,operation_resource_requirement,resource_capacity,
     resource_assignment,resource_territory_assignment}.yaml` 声明，
     sync_schema 生成；本迁移做「兜底 CREATE + 补索引 + 枚举种子 + 权限 + 菜单」。
-  · 8 组枚举（28 个取值）种入 `enum_types` / `enum_values`，type id 与
+  · 8 组枚举（29 个取值）种入 `enum_types` / `enum_values`，type id 与
     schema 里的 `value_help.source.enum_type_id` 一字不差。
   · 8 条菜单挂在现有「主数据」父菜单（menu_code='master-data'），
     sort_order 93–100 接在 v175 的 87–92 之后；父节点不存在时退回顶层并打印说明。
@@ -328,6 +328,7 @@ ENUM_SEEDS = (
       ('facility_capacity', '场地容量', 'Facility Capacity'))),
     ('definition_kind', '作业定义类型', '作业定义的场景类型',
      (('routing', '工艺路线', 'Routing'),
+      ('recipe', '配方', 'Recipe'),
       ('service_template', '服务模板', 'Service Template'))),
     ('work_definition_status', '作业定义状态', '作业定义与其工序的状态取值',
      (('draft', '草稿', 'Draft'),

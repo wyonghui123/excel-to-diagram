@@ -30,7 +30,7 @@ CREATE TABLE purchase_orders (
     purchase_org_id INTEGER, purchase_legal_entity_id INTEGER,
     supplier_party_id INTEGER, currency_id INTEGER,
     exchange_rate REAL, exchange_rate_type TEXT, exchange_rate_date TEXT,
-    approval_status TEXT
+    approval_status TEXT, project_id INTEGER
 );
 CREATE TABLE purchase_order_lines (
     id INTEGER PRIMARY KEY, order_id INTEGER, line_no TEXT, line_type_id INTEGER,

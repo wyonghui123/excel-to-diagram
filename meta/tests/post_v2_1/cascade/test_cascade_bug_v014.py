@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造级联删除回归测试数据，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 test_cascade_bug_v014.py

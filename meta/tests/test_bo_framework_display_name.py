@@ -24,7 +24,7 @@ class TestBOFrameworkDisplayNameIntegration:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -109,7 +109,7 @@ class TestAPIResponseStructure:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -171,7 +171,7 @@ class TestBackwardCompatibility:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -210,7 +210,7 @@ class TestMultipleObjectTypes:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -237,7 +237,7 @@ class TestPerformance:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()

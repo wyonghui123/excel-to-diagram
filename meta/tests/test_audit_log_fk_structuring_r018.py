@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [R018 FIX] audit_log FK 结构化增强单测
 =========================================
@@ -70,6 +71,8 @@ def fresh_db():
             prev_hash CHAR(64),
             row_hash CHAR(64),
             action_kind VARCHAR(20) DEFAULT 'instance',
+            change_set_id VARCHAR(200),
+            reason_code VARCHAR(200),
             created_by VARCHAR(200),
             updated_by VARCHAR(200),
             updated_at DATETIME,
@@ -171,8 +174,8 @@ class TestFkStructuringFixR018:
         assert parsed['target_display'] == '国资委报表'
 
     def test_singular_still_works(self, audit_svc):
-        """roles 表 (单数表未注册但表名就是复数, 注册后等价) 应正常命中"""
-        result = audit_svc._structure_fk_value('role_id', 1)
+        """permission_set_id (role 已退役, v138 双轨收口) 应命中 permission_sets"""
+        result = audit_svc._structure_fk_value('permission_set_id', 1)
         parsed = json.loads(result)
         assert parsed['target_display'] == '系统管理员'
 

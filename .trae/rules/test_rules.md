@@ -57,7 +57,7 @@ idle → --all → passed
 
 ## 4. 监控与问题文件
 
-超时：全局 300s（pytest.ini），slow 标记 600s（conftest.py）。
+超时：无全局 per-test timeout（R10：每用例一个 Timer 线程会耗尽 thread 资源）；卡死由 test.py 心跳看门狗兜底（`TEST_STALL_TIMEOUT`=600s 无新 report 即定向终止），slow 标记仍 600s（conftest.py）。
 
 | 文件 | 用途 |
 |---|---|

@@ -1,6 +1,25 @@
-"""权限预览聚合内核测试（org/user 共用 get_permission_preview）"""
+# -*- coding: utf-8 -*-
+"""preview 服务与权限预览聚合契约测试。
+
+[TEST-EFF P2-1] 由两个 <=2 用例的小文件合并而来，减少逐文件启动开销：
+- test_preview_service_init.py
+- test_permission_preview.py
+"""
 import pytest
+
 from meta.services.org_service import OrgService
+
+
+def test_preview_service_module_imports():
+    """preview_service 模块应能正常导入"""
+    from meta.services import preview_service
+    assert preview_service is not None
+
+
+def test_preview_service_has_aggregate_annotations():
+    """preview_service 应包含 aggregate_annotations_for_targets 函数"""
+    from meta.services.preview_service import aggregate_annotations_for_targets
+    assert callable(aggregate_annotations_for_targets)
 
 
 def test_has_get_permission_preview():

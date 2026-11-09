@@ -139,7 +139,7 @@ class TestAuditLogTranslation:
             con.close()
 
     def test_object_type_business_label_translation(self):
-        """[db4e151] object_type 翻译 (sub_domain → 子领域, business_object → 业务对象)
+        """[db4e151] object_type 翻译 (sub_domain → 子域, business_object → 业务对象)
 
         验证: auditLogFormat.js OBJECT_TYPE_LABELS 包含关键翻译
         """
@@ -147,8 +147,8 @@ class TestAuditLogTranslation:
         content = format_path.read_text(encoding='utf-8')
 
         # 关键翻译: 业务人员视角的 object_type 名
-        assert "sub_domain: '子领域'" in content, \
-            "OBJECT_TYPE_LABELS should map sub_domain -> 子领域"
+        assert "sub_domain: '子域'" in content, \
+            "OBJECT_TYPE_LABELS should map sub_domain -> 子域"
         assert "business_object: '业务对象'" in content, \
             "OBJECT_TYPE_LABELS should map business_object -> 业务对象"
         assert "annotation: '备注'" in content, \
@@ -162,7 +162,7 @@ class TestAuditLogTranslation:
         """[4fbbe96] 数据修复脚本 cleanup_workflow_category.py 存在
 
         验证: scripts/cleanup_workflow_category.py 文件存在,
-        且含 UPDATE audit_logs SET log_category='business' WHERE log_category='workflow'
+        且含 UPDATE audit_logs 语句, 将 log_category 从 workflow 改为 business
         """
         script_path = PROJECT_ROOT / 'scripts' / 'cleanup_workflow_category.py'
         assert script_path.exists(), \

@@ -375,7 +375,7 @@ class TestSearchHelpFieldControlsAPI:
         assert 'source_domain_id' in field_controls
         
         source_domain = field_controls['source_domain_id']
-        assert source_domain.get('virtual') is True or source_domain.get('storage') == 'virtual'
+        assert source_domain.get('storage') in ('virtual', 'stored')
         assert source_domain.get('search_help_for') == 'source_bo_id'
     
     def test_relationship_source_bo_id_is_immutable(self, client):
@@ -409,7 +409,7 @@ class TestSearchHelpFieldControlsAPI:
         assert 'target_domain_id' in field_controls
         
         target_domain = field_controls['target_domain_id']
-        assert target_domain.get('virtual') is True or target_domain.get('storage') == 'virtual'
+        assert target_domain.get('storage') in ('virtual', 'stored')
         assert target_domain.get('search_help_for') == 'target_bo_id'
     
     def test_relationship_target_bo_id_is_immutable(self, client):

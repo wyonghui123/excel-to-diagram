@@ -125,7 +125,7 @@ dimension:org (root)
 
 ### 8.1 后端测试
 - `meta/tests/test_dimension_scope_engine.py` - 引擎
-- `meta/tests/test_dimension_scope_v101.py` - v1.01 范围
+- `meta/tests/test_org_dimension_contracts.py` - v1.01 范围（含 v152 组织维度定价键）
 - `meta/tests/test_permission_dimension_api.py` - API
 - `meta/tests/test_role_menu_dim_api.py` - 角色-菜单-维度
 - `meta/tests/test_dimension_aware_filtering.py` - 维度过滤

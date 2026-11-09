@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 owner 场景测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 P12 单元测试：Owner 场景综合测试
@@ -63,9 +64,9 @@ def ds():
         CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
-            UNIQUE(user_id, group_id)
+            UNIQUE(user_id, org_id)
         );
         CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,10 +76,10 @@ def ds():
         );
         CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_by INTEGER,
-            UNIQUE(group_id, role_id)
+            UNIQUE(org_id, permission_set_id)
         );
 
         -- 6 级 hierarchy
@@ -125,7 +126,7 @@ def ds():
         );
         CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT,
@@ -133,7 +134,7 @@ def ds():
         );
         CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT,
@@ -144,7 +145,7 @@ def ds():
         -- condition permission rules
         CREATE TABLE permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             condition TEXT,
             permission_level TEXT DEFAULT 'read',
@@ -428,8 +429,8 @@ def test_owner_plus_group_role(dps, ds):
     r = _insert_role(ds, code='r_og', name='R_OG')
     p = _insert_product(ds, owner_id=owner)
     # user 在组中，组关联角色
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
     # 给角色 product 的 read 权限
     dps.add_role_data_permission(r, 'product', p, 'read')
     # user 既是 owner 又有 group_role 权限（两个来源）
@@ -446,7 +447,7 @@ def test_owner_loses_to_explicit_admin_via_group(dps, ds):
     owner = _insert_user(ds, 'admin_owner')
     g = _insert_group(ds, 'AG', 'ag')
     p = _insert_product(ds, owner_id=owner)
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [owner, g])
     # 给 group 显式 admin 权限
     dps.add_group_data_permission(g, 'product', p, 'admin')
     # user 有 owner + group admin → 应当 admin
@@ -461,8 +462,8 @@ def test_owner_does_not_grant_group_access(dps, ds):
     g = _insert_group(ds, 'OO', 'oo')
     p = _insert_product(ds, owner_id=owner)
     # owner 和 member 都在同一组
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [member, g])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [member, g])
     # owner 是 product 的 owner
     assert dps._is_owner(owner, 'product', p) is True
     # member 不是 owner（即使同组）
@@ -483,12 +484,12 @@ def test_owner_wins_over_denied_condition(cps, ds):
     g = _insert_group(ds)
     p = _insert_product(ds, owner_id=owner, created_by=owner)
     # user 通过 group 关联角色
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
     # 给 role 加 denied 规则（针对该 product）
     ds.execute(
         """INSERT INTO permission_rules
-           (role_id, resource_type, condition, permission_level, is_denied)
+           (permission_set_id, resource_type, condition, permission_level, is_denied)
            VALUES (?, 'product', ?, 'read', 1)""",
         [r, f'id = {p}']
     )
@@ -593,19 +594,19 @@ def test_owner_wins_over_multiple_conditions(cps, ds):
     # grant: 全部 product 都有 read
     ds.execute(
         """INSERT INTO permission_rules
-           (role_id, resource_type, condition, permission_level, is_denied)
+           (permission_set_id, resource_type, condition, permission_level, is_denied)
            VALUES (?, 'product', '1 = 1', 'read', 0)""",
         [r]
     )
     # deny: p 被禁止
     ds.execute(
         """INSERT INTO permission_rules
-           (role_id, resource_type, condition, permission_level, is_denied)
+           (permission_set_id, resource_type, condition, permission_level, is_denied)
            VALUES (?, 'product', ?, 'read', 1)""",
         [r, f'id = {p}']
     )
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [owner, g])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [owner, g])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
     # Owner 胜出
     result = cps.check_permission(owner, 'product', p, 'read')
     assert result['source'] == 'owner'
@@ -697,12 +698,12 @@ def test_owner_full_stack(dps, cps, ugs, ps, ds):
     g = _insert_group(ds, 'FSG', 'fsg')
     r = _insert_role(ds, code='fs_role', name='FS_Role')
     # 4) member 加入 group → 关联 role
-    ds.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)", [member, g])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)", [member, g])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
     # 5) role 获得 condition rule（用合法字段：id > 0）
     ds.execute(
         """INSERT INTO permission_rules
-           (role_id, resource_type, condition, permission_level)
+           (permission_set_id, resource_type, condition, permission_level)
            VALUES (?, 'product', 'id > 0', 'read')""",
         [r]
     )

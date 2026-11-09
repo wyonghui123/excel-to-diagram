@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 校验 v_audit_all 视图，守卫豁免（2026-11-09 恢复覆盖）
 """End-to-end verification: start backend, call key APIs that use v_audit_all
 
 V007.50 Phase 1 + V007.51 Phase 2 综合验证 (2026-07-14)

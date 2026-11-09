@@ -4,7 +4,7 @@
 [FIX 2026-11-07] 原用例直连真实 meta/architecture.db 的 permission_set 1803 (TEST60),
 该运行数据在当前库中已不存在 (permission_set_dimension_scopes 无 1803 记录,
 org_members 也无 user 1223) → resolve() 恒得 [] → T2/T3 恒失败。
-改为自播种临时 SQLite (factories/ 白名单惯例, 与 test_dimension_scope_v101.py 同拓扑),
+改为自播种临时 SQLite (factories/ 白名单惯例, 与 test_org_dimension_contracts.py 同拓扑),
 使断言确定性可复现; 断言逻辑与原用例保持一致。
 """
 import os

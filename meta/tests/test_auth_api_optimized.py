@@ -400,8 +400,11 @@ class TestAuthPermissionBoundaries:
 
     def test_unauthenticated_cannot_reset_password(self, api_client):
         """未认证不能重置密码"""
+        # [FIX 2026-11-08] 重置密码是 user_bp 的显式路由（/api/v1/users/...）；
+        # /api/v2/bo/users/1/reset-password 只命中 BO 的 GET/PUT/DELETE 规则，
+        # POST 必然 405 —— 原 URL 测不到认证。
         resp = api_client.post(
-            '/api/v2/bo/users/1/reset-password',
+            '/api/v1/users/1/reset-password',
             json={'new_password': 'hackpassword'}
         )
         assert_status_in(resp, [401, 403, 404, 200, 500])

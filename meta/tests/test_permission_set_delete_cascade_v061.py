@@ -28,10 +28,27 @@ if _admin_token_path not in sys.path:
 
 pytestmark = pytest.mark.integration
 
+# 端口优先级: BO_API_BASE → 本会话端口 (TEST_PORT/AGENT_PORT) → 共享槽 3010
+BO_API_BASE = (os.environ.get('BO_API_BASE')
+               or f"http://localhost:{os.environ.get('TEST_PORT') or os.environ.get('AGENT_PORT') or 3010}")
+
+
+def _live_bo_available() -> bool:
+    """探测 BO API 是否可达（本测试依赖真实服务，无法用 in-process client 代替）."""
+    import requests
+    try:
+        r = requests.get(f'{BO_API_BASE}/api/v1/auth/dev-login?username=admin',
+                         timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
 
 @pytest.fixture
 def admin_cookie():
     """获取 admin cookie (用于直接调 RoleFactory 等)."""
+    if not _live_bo_available():
+        pytest.skip(f'需 {BO_API_BASE} 后端在跑（存活性级联测试依赖真实 BO API）')
     from admin_token import get_admin_cookie
     return get_admin_cookie()
 
@@ -40,7 +57,7 @@ def _assign_permissions(permission_set_id: int, cookie: str, count: int = 2) -> 
     """通过 API 给 permission_set 分配权限 (BO create 不再隐式分配)."""
     import requests
 
-    bo_url = os.environ.get('BO_API_BASE', 'http://localhost:3010')
+    bo_url = BO_API_BASE
     resp = requests.get(
         f'{bo_url}/api/v2/bo/permission?page=1&page_size={count}',
         headers={'Cookie': cookie}, timeout=15,
@@ -119,7 +136,7 @@ class TestRoleDeleteCascadeV061:
         """
         import requests
 
-        BO_URL = os.environ.get('BO_API_BASE', 'http://localhost:3010')
+        BO_URL = BO_API_BASE
 
         del_resp = requests.delete(
             f'{BO_URL}/api/v1/permission-sets/1',

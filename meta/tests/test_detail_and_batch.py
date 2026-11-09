@@ -10,6 +10,18 @@ pytestmark = pytest.mark.integration
 """
 import pytest
 import json
+import sqlite3
+
+
+def _query_scalar(sql):
+    """从测试库取一个标量值 (测试数据 id 不再硬编码为 1)"""
+    from meta.tests.test_utils import get_test_db_path
+    conn = sqlite3.connect(get_test_db_path())
+    try:
+        row = conn.execute(sql).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else None
 
 
 @pytest.fixture(scope='class')
@@ -50,7 +62,11 @@ class TestDetailEnrichment:
     def test_01_business_object_detail_has_version_name(self, client_with_auth):
         """测试业务对象详情包含version_name"""
         client, headers = client_with_auth
-        response = client.get('/api/v2/bo/business_object/1', headers=headers)
+        bo_id = _query_scalar(
+            "SELECT id FROM business_objects WHERE version_id IS NOT NULL LIMIT 1")
+        if bo_id is None:
+            pytest.skip("测试库无 business_objects 数据")
+        response = client.get(f'/api/v2/bo/business_object/{bo_id}', headers=headers)
         assert response.status_code in [200, 401, 404, 500]
         try:
             data = json.loads(response.data)
@@ -71,7 +87,11 @@ class TestDetailEnrichment:
     def test_02_business_object_detail_has_service_module_name(self, client_with_auth):
         """测试业务对象详情包含service_module_name"""
         client, headers = client_with_auth
-        response = client.get('/api/v2/bo/business_object/1', headers=headers)
+        bo_id = _query_scalar(
+            "SELECT id FROM business_objects WHERE version_id IS NOT NULL LIMIT 1")
+        if bo_id is None:
+            pytest.skip("测试库无 business_objects 数据")
+        response = client.get(f'/api/v2/bo/business_object/{bo_id}', headers=headers)
         assert response.status_code in [200, 401, 404, 500]
         try:
             data = json.loads(response.data)
@@ -93,7 +113,11 @@ class TestDetailEnrichment:
     def test_03_domain_detail_has_version_name(self, client_with_auth):
         """测试领域详情包含version_name"""
         client, headers = client_with_auth
-        response = client.get('/api/v2/bo/domain/1', headers=headers)
+        domain_id = _query_scalar(
+            "SELECT id FROM domains WHERE version_id IS NOT NULL LIMIT 1")
+        if domain_id is None:
+            pytest.skip("测试库无 domains 数据")
+        response = client.get(f'/api/v2/bo/domain/{domain_id}', headers=headers)
         assert response.status_code in [200, 401, 404, 500]
         try:
             data = json.loads(response.data)
@@ -112,7 +136,11 @@ class TestDetailEnrichment:
     def test_04_version_detail_has_product_name(self, client_with_auth):
         """测试版本详情包含product_name"""
         client, headers = client_with_auth
-        response = client.get('/api/v2/bo/version/2', headers=headers)
+        version_id = _query_scalar(
+            "SELECT id FROM versions WHERE product_id IS NOT NULL LIMIT 1")
+        if version_id is None:
+            pytest.skip("测试库无 versions 数据")
+        response = client.get(f'/api/v2/bo/version/{version_id}', headers=headers)
         assert response.status_code in [200, 401, 404, 500]
         try:
             data = json.loads(response.data)
@@ -137,6 +165,9 @@ class TestBatchDelete:
         import uuid
         client, headers = client_with_auth
         uid = uuid.uuid4().hex[:8]
+        version_id = _query_scalar("SELECT id FROM versions LIMIT 1")
+        if version_id is None:
+            pytest.skip("测试库无 versions 数据")
         # v3.18 P1: 改用 v2 API 循环创建 (替代已弃用的 v1 batch-create)
         for i in range(1, 4):
             response = client.post(
@@ -144,7 +175,7 @@ class TestBatchDelete:
                 json={
                     'name': f'BatchDeleteTest{i}_{uid}',
                     'code': f'BDT{i}_{uid}'.upper(),  # v3.18 P1: 域 code 必须大写 (pattern=^[A-Z][A-Z0-9_]*$)
-                    'version_id': 1,
+                    'version_id': version_id,
                 },
                 headers=headers
             )

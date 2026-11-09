@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造通配符权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 [FILE] test_wildcard_support_p1.py
@@ -45,7 +46,7 @@ def db_with_scope_all():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS permission_set_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             dimension_code TEXT NOT NULL,
             dimension_values TEXT,
             inherit_children INTEGER DEFAULT 1,
@@ -111,7 +112,7 @@ def db_without_scope_all():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS permission_set_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             dimension_code TEXT NOT NULL,
             dimension_values TEXT,
             inherit_children INTEGER DEFAULT 1
@@ -166,7 +167,7 @@ class TestDimensionScopeEngineWildcard:
         ds = db_with_scope_all
         # 插入 scope_mode='all' 的配置
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -184,7 +185,7 @@ class TestDimensionScopeEngineWildcard:
         # 清空 products 表
         ds.execute("DELETE FROM products")
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -198,7 +199,7 @@ class TestDimensionScopeEngineWildcard:
         """scope_mode='all' + inherit_children=1 → 子维度也应展开全量"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode, inherit_children) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode, inherit_children) "
             "VALUES (?, ?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all', 1]
         )
@@ -216,12 +217,12 @@ class TestDimensionScopeEngineWildcard:
         """同一角色: product 用 'all', domain 用 'include' → 合并"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'domain', json.dumps([1]), 'include']
         )
@@ -237,7 +238,7 @@ class TestDimensionScopeEngineWildcard:
         """向后兼容: 无 scope_mode 列时默认 'include' 行为不变"""
         ds = db_without_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values) "
             "VALUES (?, ?, ?)",
             [1, 'product', json.dumps([1])]
         )
@@ -340,12 +341,12 @@ class TestScopeModeAllAPI:
         ds = db_with_scope_all
         # 直接 SQL 验证（API 层测试需要启动服务，这里用 SQL 替代）
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'product', json.dumps([]), 'all']
         )
         rows = ds.execute(
-            "SELECT scope_mode FROM permission_set_dimension_scopes WHERE role_id=2 AND dimension_code='product'"
+            "SELECT scope_mode FROM permission_set_dimension_scopes WHERE permission_set_id=2 AND dimension_code='product'"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == 'all'
@@ -354,17 +355,17 @@ class TestScopeModeAllAPI:
         """API 可将已有记录更新为 scope_mode='all'"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'product', json.dumps([1]), 'include']
         )
         ds.execute(
             "UPDATE permission_set_dimension_scopes SET scope_mode='all', dimension_values=? "
-            "WHERE role_id=2 AND dimension_code='product'",
+            "WHERE permission_set_id=2 AND dimension_code='product'",
             [json.dumps([])]
         )
         rows = ds.execute(
-            "SELECT scope_mode, dimension_values FROM permission_set_dimension_scopes WHERE role_id=2"
+            "SELECT scope_mode, dimension_values FROM permission_set_dimension_scopes WHERE permission_set_id=2"
         ).fetchall()
         assert rows[0][0] == 'all'
 
@@ -372,17 +373,17 @@ class TestScopeModeAllAPI:
         """API 查询 scope_mode='all' 的记录返回正确"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'product', json.dumps([]), 'all']
         )
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'version', json.dumps([1]), 'include']
         )
         rows = ds.execute(
-            "SELECT dimension_code, scope_mode FROM permission_set_dimension_scopes WHERE role_id=2"
+            "SELECT dimension_code, scope_mode FROM permission_set_dimension_scopes WHERE permission_set_id=2"
         ).fetchall()
         modes = {r[0]: r[1] for r in rows}
         assert modes['product'] == 'all'
@@ -400,7 +401,7 @@ class TestWildcardEndToEnd:
         """scope_mode='all' → 读路径返回全量数据"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -414,7 +415,7 @@ class TestWildcardEndToEnd:
         """scope_mode='all' → derive_data_conditions 不生成限制性条件"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -478,7 +479,7 @@ class TestWildcardEdgeCases:
         """scope_mode='all' + dimension_values=[] → 仍返回全量"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -491,7 +492,7 @@ class TestWildcardEdgeCases:
         """scope_mode='all' + dimension_values=[1] → dimension_values 被忽略，返回全量"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([1]), 'all']
         )
@@ -505,7 +506,7 @@ class TestWildcardEdgeCases:
         """scope_mode='exclude' 行为不受 'all' 影响"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([1]), 'exclude']
         )
@@ -520,12 +521,12 @@ class TestWildcardEdgeCases:
         """多角色: 角色A用'all', 角色B用'include' → 合并"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'product', json.dumps([1]), 'include']
         )
@@ -555,12 +556,12 @@ class TestWriteScopeFastPath:
         """_get_scope_all_roles 返回有 scope_mode='all' 的角色 ID"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [2, 'product', json.dumps([1]), 'include']
         )
@@ -577,7 +578,7 @@ class TestWriteScopeFastPath:
         assert 2 not in result
 
     def test_get_scope_all_roles_empty_input(self, db_with_scope_all):
-        """空 role_ids → 空集合"""
+        """空 permission_set_ids → 空集合"""
         from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
         interceptor = WriteScopeInterceptor()
 
@@ -627,7 +628,7 @@ class TestDimensionScopeAllIntegration:
         """scope_mode='all' → derive_data_conditions 不生成限制性条件"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )
@@ -646,7 +647,7 @@ class TestDimensionScopeAllIntegration:
         """scope_mode='all' → expand + derive 正常工作 (auto_sync_all 需要 menus 表，跳过)"""
         ds = db_with_scope_all
         ds.execute(
-            "INSERT INTO permission_set_dimension_scopes (role_id, dimension_code, dimension_values, scope_mode) "
+            "INSERT INTO permission_set_dimension_scopes (permission_set_id, dimension_code, dimension_values, scope_mode) "
             "VALUES (?, ?, ?, ?)",
             [1, 'product', json.dumps([]), 'all']
         )

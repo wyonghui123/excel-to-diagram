@@ -1,24 +1,12 @@
 # -*- coding: utf-8 -*-
-"""销售组织维度进入定价匹配键（T2.2 / B8 · v152）验收
+"""组织维度契约测试（数据范围向上展开 / 组织维度进入定价键）。
 
-依据:
-  docs/superpowers/specs/2026-10-29-so-wave3/spec.md（组织维度价目键）
-
-口径:
-  真建表（SchemaGenerator）+ 真跑 `PricingDeterminationService.determine_line`
-  → `PricingService.price_line`，不使用桩。
-  金额口径：过程 `lookup_amount * base`，故 qty=1 时 `unit_price == 费率`。
-
-覆盖:
-  a) 全局价目表内两条「组织 × 物料」价目行 → 不同 sales_org_id 取各自价格
-  b) 两张组织归属价目表 → 组织选表 + 组织键双保险
-  c) 全局表存量「物料」键（无 org）→ 传/不传销售组织价格一致（零回归）
-  d) v152 迁移在临时库的幂等性（两次执行终态一致 + verify PASS）
-  e) 无销售组织时 org 槽被跳过：仅 org 键价目行不应命中
-
-【DML 位置】建表与播种 DML 全部走 `_pricing_w1_helpers` / `registry`，
-本文件不写裸 SQL DML（避免被 conftest 整体 skip 成假绿）。
+[TEST-EFF P2-1] 由两个同域（组织/维度范围，纯 tmp SQLite + factories）的
+<=5 用例小文件合并：
+- test_dimension_scope_v101.py     ([Test v1.0.1] DimensionScopeEngine 向上展开)
+- test_pricing_org_dimension_key.py (T2.2 / B8 · v152 组织维度价目键)
 """
+
 import json
 import logging
 import os
@@ -39,9 +27,14 @@ from meta.migrations.v152__pricing_org_dimension_key import (  # noqa: E402
     migrate,
     verify,
 )
+from meta.services.dimension_scope_engine import DimensionScopeEngine  # noqa: E402
 from meta.services.pricing_determination_service import (  # noqa: E402
     REASON_NO_CANDIDATE,
     PricingDeterminationService,
+)
+from meta.tests.factories._dimension_scope_engine_helpers import (  # noqa: E402
+    make_dim_scope_engine_ds,
+    seed_v101_upward_expansion,
 )
 from meta.tests.factories._pricing_w1_helpers import (  # noqa: E402
     seed_rate_table,
@@ -50,6 +43,83 @@ from meta.tests.factories._pricing_w1_helpers import (  # noqa: E402
 )
 
 pytestmark = pytest.mark.unit
+
+
+# ===========================================================================
+# 一、DimensionScopeEngine.derive_data_conditions 向上展开
+# ===========================================================================
+# [FIX 2026-10-05] 原用例直连真实 meta/architecture.db 的 permission_set 1803 (TEST60),
+# 该运行数据在当前库中已不存在 → _load_scopes 返回空 → 恒得 {} → 4 项恒失败。
+# 改为自播种临时 SQLite (factories/ 白名单惯例), 复刻同一拓扑 (version=[2,11,12]),
+# 使断言确定性可复现; 断言逻辑与原用例保持一致。
+
+PS_ID = 1803
+_CHAIN_DIMS = ['product', 'version', 'domain', 'sub_domain']
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    g = make_dim_scope_engine_ds()
+    ds = next(g)
+    seed_v101_upward_expansion(ds)
+    eng = DimensionScopeEngine(ds)
+    # 限定资源类型为 4 个业务维度, 避免无关 BO 的 chain 条件访问临时库中不存在的表
+    monkeypatch.setattr(eng, '_get_all_resource_types', lambda: list(_CHAIN_DIMS))
+    yield eng
+
+
+def test_T1_upward_product_from_version(engine):
+    """[T1] version=[2,11,12] 应向上反查 product 并生成 product 过滤"""
+    conditions = engine.derive_data_conditions(PS_ID)
+    # product filter 应有 id 限定 (向上的 product_id 反查)
+    assert 'product' in conditions, f"product should have filter, got: {conditions}"
+    cond = conditions['product']
+    assert 'id' in cond.lower() or 'IN' in cond.upper(), \
+        f"product filter should have id restriction, got: {cond}"
+
+
+def test_T2_upward_domain_no_change(engine):
+    """[T2] domain 已有向下展开, 不应破坏"""
+    conditions = engine.derive_data_conditions(PS_ID)
+    assert 'domain' in conditions, f"domain missing: {conditions}"
+    cond = conditions['domain']
+    assert 'version_id' in cond
+    assert '2' in cond
+    assert '11' in cond
+    assert '12' in cond
+
+
+def test_T3_subdomain_no_change(engine):
+    """[T3] sub_domain 向下展开, 应保留"""
+    conditions = engine.derive_data_conditions(PS_ID)
+    assert 'sub_domain' in conditions, f"sub_domain missing: {conditions}"
+    assert 'domain_id' in conditions['sub_domain']
+
+
+def test_T4_version_id_filter(engine):
+    """[T4] version 应有 id IN (2, 11, 12)"""
+    conditions = engine.derive_data_conditions(PS_ID)
+    assert 'version' in conditions, f"version missing: {conditions}"
+    cond = conditions['version']
+    assert 'id' in cond.lower() or 'IN' in cond.upper(), \
+        f"version filter should restrict ids, got: {cond}"
+
+
+# ===========================================================================
+# 二、销售组织维度进入定价匹配键（T2.2 / B8 · v152）
+# ===========================================================================
+# 依据: docs/superpowers/specs/2026-10-29-so-wave3/spec.md（组织维度价目键）
+# 口径: 真建表（SchemaGenerator）+ 真跑 `PricingDeterminationService.determine_line`
+#       → `PricingService.price_line`，不使用桩。
+#       金额口径：过程 `lookup_amount * base`，故 qty=1 时 `unit_price == 费率`。
+# 覆盖:
+#   a) 全局价目表内两条「组织 × 物料」价目行 → 不同 sales_org_id 取各自价格
+#   b) 两张组织归属价目表 → 组织选表 + 组织键双保险
+#   c) 全局表存量「物料」键（无 org）→ 传/不传销售组织价格一致（零回归）
+#   d) v152 迁移在临时库的幂等性（两次执行终态一致 + verify PASS）
+#   e) 无销售组织时 org 槽被跳过：仅 org 键价目行不应命中
+# 【DML 位置】建表与播种 DML 全部走 `_pricing_w1_helpers` / `registry`，
+# 本文件不写裸 SQL DML（避免被 conftest 整体 skip 成假绿）。
 
 #: 按 yaml 声明真建表所需的最小对象集合（含定价确定规则与取价链路）
 TABLES = ["pricing_determination", "factor_catalog", "key_schema",

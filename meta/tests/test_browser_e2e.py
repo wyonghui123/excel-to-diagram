@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 校验浏览器 E2E 数据，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -30,6 +31,9 @@ def app():
     db_fd, db_path = tempfile.mkstemp(suffix='.db')
     app.config['DATABASE'] = db_path
     fva._db_path = db_path
+    # [FIX 2026-11-09] 过滤变体写入前必须先检测 DB 配置 (V007.15 L0)
+    from meta.core.db_config_detector import detect_runtime_config
+    detect_runtime_config(db_path)
     
     with app.app_context():
         _init_table()

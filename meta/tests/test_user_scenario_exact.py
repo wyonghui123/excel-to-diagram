@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造用户场景测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -38,18 +39,25 @@ class TestUserScenarioExact:
 
         ds = get_data_source("sqlite", database=get_test_db_path())
 
+        # [FIX 2026-11-09] 硬编码 version_id=1 在空库/新快照上不存在，会触发
+        #   domains.version_id → versions(id) 的 FK 约束失败；改为取库中第一个可用版本。
+        vrow = ds.execute("SELECT id FROM versions ORDER BY id LIMIT 1").fetchone()
+        if not vrow:
+            pytest.skip("No version row in DB")
+        version_id = vrow[0]
+
         # v3.18 P1: 修复 S010 数据依赖 skip, 自动准备 ≥2 domains (含父子)
-        cursor = ds.execute("SELECT COUNT(*) FROM domains WHERE version_id=1")
+        cursor = ds.execute("SELECT COUNT(*) FROM domains WHERE version_id=?", (version_id,))
         if cursor.fetchone()[0] < 2:
-            ds.execute("INSERT INTO domains (name, code, version_id) VALUES ('TEST_PARENT_S010', 'TEST_PARENT_S010', 1)")
+            ds.execute("INSERT INTO domains (name, code, version_id) VALUES ('TEST_PARENT_S010', 'TEST_PARENT_S010', ?)", (version_id,))
             parent_id = ds.execute("SELECT id FROM domains WHERE code='TEST_PARENT_S010'").fetchone()
             if parent_id:
-                ds.execute("INSERT INTO sub_domains (name, code, version_id, domain_id) VALUES ('TEST_CHILD_S010', 'TEST_CHILD_S010', 1, ?)", (parent_id[0],))
-            ds.execute("INSERT INTO domains (name, code, version_id) VALUES ('TEST_LEAF_S010', 'TEST_LEAF_S010', 1)")
+                ds.execute("INSERT INTO sub_domains (name, code, version_id, domain_id) VALUES ('TEST_CHILD_S010', 'TEST_CHILD_S010', ?, ?)", (version_id, parent_id[0]))
+            ds.execute("INSERT INTO domains (name, code, version_id) VALUES ('TEST_LEAF_S010', 'TEST_LEAF_S010', ?)", (version_id,))
             ds.commit()
 
         domains = ds.execute(
-            "SELECT id, name FROM domains WHERE version_id = 1 ORDER BY id"
+            "SELECT id, name FROM domains WHERE version_id = ? ORDER BY id", (version_id,)
         ).fetchall()
         
         if len(domains) < 2:
@@ -83,8 +91,8 @@ class TestUserScenarioExact:
         checked_ids = [f'domain_{parent_domain[0]}', f'domain_{leaf_domain[0]}']
         
         child_sds = ds.execute(
-            "SELECT id FROM sub_domains WHERE domain_id=? AND version_id=1",
-            (parent_domain[0],)
+            "SELECT id FROM sub_domains WHERE domain_id=? AND version_id=?",
+            (parent_domain[0], version_id)
         ).fetchall()
         for sd in child_sds[:2]:
             checked_ids.append(f'sub_domain_{sd[0]}')
@@ -92,8 +100,8 @@ class TestUserScenarioExact:
         child_sms = ds.execute("""
             SELECT sm.id FROM service_modules sm
             JOIN sub_domains sd ON sm.sub_domain_id = sd.id
-            WHERE sd.domain_id=? AND sm.version_id=1
-        """, (parent_domain[0],)).fetchall()
+            WHERE sd.domain_id=? AND sm.version_id=?
+        """, (parent_domain[0], version_id)).fetchall()
         for sm in child_sms[:2]:
             checked_ids.append(f'service_module_{sm[0]}')
         
@@ -128,7 +136,7 @@ class TestUserScenarioExact:
             print(f"  {k}: {v}")
         
         print(f"\n--- 测试1: 领域标签页 ---")
-        qs_parts = ['version_id=1']
+        qs_parts = [f'version_id={version_id}']
         for k, v in field_to_ids.items():
             for val in v:
                 qs_parts.append(f'{k}={val}')

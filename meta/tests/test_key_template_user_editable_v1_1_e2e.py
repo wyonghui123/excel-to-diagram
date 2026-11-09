@@ -24,7 +24,7 @@ KT_URL = '/api/v2/key-template'
 
 # 共享 parametrize 列表
 KT_DISABLED_OBJECTS = [
-    'role', 'user_group', 'permission', 'menu',
+    'permission_set', 'org', 'permission', 'menu',
     'domain', 'sub_domain', 'service_module',
     'version',  # 已被 TBD-2 决策移除
 ]
@@ -102,8 +102,8 @@ class TestUserEditableConfigE2E:
     @pytest.mark.parametrize('object_type,expected_enabled', [
         ('business_object', True),
         ('relationship', True),
-        ('role', False),
-        ('user_group', False),
+        ('permission_set', False),
+        ('org', False),
         ('version', False),
     ])
     def test_config_enabled_for_each_object(self, api_client, admin_headers, object_type, expected_enabled):
@@ -135,7 +135,7 @@ class TestInterceptorE2E:
         """
         payload = {'name': f'Test_{object_type}_NoCode'}
         # 一些对象有额外必填字段，做简单兼容
-        if object_type == 'user_group':
+        if object_type == 'org':
             payload['name'] = f'ug_{object_type}_test'
         resp = api_client.post(f'/api/v2/bo/{object_type}', json=payload, headers=admin_headers)
         # 期望失败（code 必填或字段缺失）

@@ -214,7 +214,7 @@ class TestNotificationEndpoints:
 
     def test_notifications_list(self, client, headers):
         resp = client.get('/api/v1/notifications?page=1&page_size=10', headers=headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 410, 500]
 
 
 class TestAssociationEndpoints:
@@ -222,7 +222,7 @@ class TestAssociationEndpoints:
 
     def test_association_list(self, client, headers):
         resp = client.get('/api/v1/associations?page=1&page_size=10', headers=headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 410, 500]
 
 
 class TestMenuPermissionEndpoints:

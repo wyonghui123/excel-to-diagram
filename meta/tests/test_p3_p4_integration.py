@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 P3/P4 集成测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 [FILE] test_p3_p4_integration.py
@@ -223,9 +224,9 @@ class TestP3T6DataConsistency:
 
     def test_dimension_consistency(self, db_full_legacy):
         """role_dimension_scopes 迁移后数据一致"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         # 对比: 旧表行数 vs 新表 rule_type='dimension' 行数
         old_count = ds.execute("SELECT COUNT(*) FROM permission_set_dimension_scopes").fetchone()[0]
         new_count = ds.execute(
@@ -246,9 +247,9 @@ class TestP3T6DataConsistency:
 
     def test_dimension_values_preserved(self, db_full_legacy):
         """dimension_values 字段值完整保留到 condition"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         # 原: dimension_values='[1]', dimension_code='product'
         # 新: condition='[1]', dimension_code='product'
         row = ds.execute(
@@ -260,9 +261,9 @@ class TestP3T6DataConsistency:
 
     def test_scope_mode_preserved(self, db_full_legacy):
         """scope_mode 保留"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         row = ds.execute(
             "SELECT scope_mode FROM data_permission_rules WHERE rule_type='dimension'"
         ).fetchone()
@@ -288,10 +289,10 @@ class TestP3T7DeprecateLegacyTables:
     def test_deprecate_renames_legacy_tables(self, db_full_legacy):
         """正常情况: 旧表被重命名为 _deprecated_*"""
         from meta.services.permission_migration import (
-            migrate_role_dimension_scopes, deprecate_legacy_tables,
+            migrate_permission_set_dimension_scopes, deprecate_legacy_tables,
         )
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)  # 先迁移
+        migrate_permission_set_dimension_scopes(ds)  # 先迁移
         result = deprecate_legacy_tables(ds)
         # 至少 role_dimension_scopes 被重命名
         assert len(result['renamed']) >= 1
@@ -300,19 +301,19 @@ class TestP3T7DeprecateLegacyTables:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='permission_set_dimension_scopes'"
         ).fetchall()
         assert len(rows) == 0
-        # _deprecated_ 表存在
+        # _deprecated_ 表存在 (v138 后遗留表名为 permission_set_dimension_scopes)
         rows = ds.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='_deprecated_role_dimension_scopes'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='_deprecated_permission_set_dimension_scopes'"
         ).fetchall()
         assert len(rows) == 1
 
     def test_deprecate_idempotent(self, db_full_legacy):
         """重复执行: 已 deprecated 的跳过"""
         from meta.services.permission_migration import (
-            migrate_role_dimension_scopes, deprecate_legacy_tables,
+            migrate_permission_set_dimension_scopes, deprecate_legacy_tables,
         )
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         first = deprecate_legacy_tables(ds)
         second = deprecate_legacy_tables(ds)
         assert len(first['renamed']) >= 1
@@ -322,10 +323,10 @@ class TestP3T7DeprecateLegacyTables:
     def test_rollback_restores_tables(self, db_full_legacy):
         """rollback_deprecation 恢复旧表名"""
         from meta.services.permission_migration import (
-            migrate_role_dimension_scopes, deprecate_legacy_tables, rollback_deprecation,
+            migrate_permission_set_dimension_scopes, deprecate_legacy_tables, rollback_deprecation,
         )
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         deprecate_legacy_tables(ds)
         result = rollback_deprecation(ds)
         assert len(result['restored']) >= 1
@@ -338,10 +339,10 @@ class TestP3T7DeprecateLegacyTables:
     def test_new_table_unaffected_after_deprecate(self, db_full_legacy):
         """废弃旧表后新表查询不受影响"""
         from meta.services.permission_migration import (
-            migrate_role_dimension_scopes, deprecate_legacy_tables,
+            migrate_permission_set_dimension_scopes, deprecate_legacy_tables,
         )
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         count_before = ds.execute(
             "SELECT COUNT(*) FROM data_permission_rules WHERE rule_type='dimension'"
         ).fetchone()[0]
@@ -361,9 +362,9 @@ class TestP3T8Regression:
 
     def test_dimension_rule_in_new_table_works(self, db_full_legacy):
         """新表 rule_type='dimension' 可被 DimensionScopeEngine 读取"""
-        from meta.services.permission_migration import migrate_role_dimension_scopes
+        from meta.services.permission_migration import migrate_permission_set_dimension_scopes
         ds = db_full_legacy
-        migrate_role_dimension_scopes(ds)
+        migrate_permission_set_dimension_scopes(ds)
         # 即使旧表被 drop, 新表数据可读
         rows = ds.execute(
             "SELECT permission_set_id, dimension_code, condition FROM data_permission_rules "

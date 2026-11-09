@@ -127,7 +127,7 @@ class TestImportRBACUserSourcePriority:
         src_path = Path(PROJECT_ROOT) / 'meta' / 'services' / 'import_export_service.py'
         content = src_path.read_text(encoding='utf-8')
         # import_cascade 中的 admin 短路
-        assert "user.get('username') != 'admin'" in content
+        assert 'is_admin(user)' in content
 
 
 # ============================================================

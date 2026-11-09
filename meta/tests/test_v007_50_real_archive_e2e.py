@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 E2E 真实归档验证 (V007.50)
 
@@ -99,6 +100,9 @@ def _verify_archived_record_queryable(conn, archived_id):
 @pytest.fixture(scope="module")
 def tmp_db_path():
     """拷贝真实 architecture.db 到 tmp，测试结束后删除"""
+    # 真实 DB / 归档脚本位于 release-prep worktree，本地缺失时跳过而非报错
+    if not os.path.exists(REAL_DB) or not os.path.exists(ARCHIVE_SCRIPT):
+        pytest.skip(f"release-prep 真实归档环境不存在: {REAL_DB}")
     tmp_dir = tempfile.mkdtemp(prefix="e2e_archive_")
     tmp_db = os.path.join(tmp_dir, "architecture.db")
     shutil.copy2(REAL_DB, tmp_db)

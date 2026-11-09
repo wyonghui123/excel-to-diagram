@@ -330,6 +330,7 @@ TRS_GOODS_TYPE_ID = 130
 #: 收货单头类型
 RCV_STANDARD_TYPE_ID = 1
 RCV_RETURN_TYPE_ID = 2
+RCV_RED_TYPE_ID = 3
 
 
 class _Tx:
@@ -421,6 +422,14 @@ def add_types(conn):
         "default_type_id, status) VALUES (?, 'RCV_RETURN', '红字收货单', 'receipt', "
         "'header', 'return', NULL, ?, NULL, 'active')",
         [RCV_RETURN_TYPE_ID, RCV_SEQUENCE_ID])
+    # receipt.yaml: document_category ∈ {standard, return, red}；反向（红冲）
+    # 需要独立的 red 抬头类型，否则 reverse() 抛"缺少收货单类型"。
+    conn.execute(
+        'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
+        'document_category, delivery_relevant, number_sequence_id, '
+        "default_type_id, status) VALUES (?, 'RCV_RED', '红字冲销收货单', 'receipt', "
+        "'header', 'red', NULL, ?, NULL, 'active')",
+        [RCV_RED_TYPE_ID, RCV_SEQUENCE_ID])
     conn.execute(
         'INSERT INTO type_definitions (id, code, name, scope_bo, level, '
         'document_category, line_category, delivery_relevant, status) '

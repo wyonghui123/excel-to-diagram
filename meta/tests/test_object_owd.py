@@ -52,7 +52,7 @@ def owd_test_db():
 
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -63,14 +63,15 @@ def owd_test_db():
 
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
             derivation_mode VARCHAR(20) DEFAULT 'static',
             source VARCHAR(50) DEFAULT 'derived',
             is_stale INTEGER DEFAULT 0,
-            UNIQUE (role_id, bo_id, action_name)
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 测试 OWD 配置
@@ -280,14 +281,14 @@ class TestDeriveWithOwd:
         # 只配置 product 规则
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (300, 'product', 'read', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=300)
+        self.pipeline.derive(permission_set_id=300)
 
         intents = self.dao.list_for_role(300)
         # enum_type 应有 OWD 推导的 read intent (public_read)
@@ -301,14 +302,14 @@ class TestDeriveWithOwd:
         """derive() 后, private BO 不应有 OWD intent"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (301, 'product', 'read', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=301)
+        self.pipeline.derive(permission_set_id=301)
 
         intents = self.dao.list_for_role(301)
         # audit_log 是 private, 不应有 OWD intent

@@ -6,11 +6,13 @@ import pytest
 from meta.tests.shared.assertions import expect, HTTPStatus
 
 # 状态码域
-LIST_OK = HTTPStatus.PAGINATION_OK
-NOT_FOUND_500_200 = (200, 404, 500)
-VALIDATION = HTTPStatus.CLIENT_ERROR_SERVER
-SHARED_FORBIDDEN = (400, 403, 500)
-CREATE_OK_500 = (200, 201, 500)
+# [FIX 2026-11-07] v1.4 P8 Sunset: /api/v1/filter-variants 主表 CRUD 已 410 退役
+# (meta/server.py V1_CRUD_MIGRATION), 故各域统一放行 410
+LIST_OK = tuple(HTTPStatus.PAGINATION_OK) + (410,)
+NOT_FOUND_500_200 = (200, 404, 500, 410)
+VALIDATION = tuple(HTTPStatus.CLIENT_ERROR_SERVER) + (410,)
+SHARED_FORBIDDEN = (400, 403, 500, 410)
+CREATE_OK_500 = (200, 201, 500, 410)
 
 
 class TestFilterVariantAPI:

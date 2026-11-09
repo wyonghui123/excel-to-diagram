@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 P4.4 TDD 测试: legacy permission_rules 表迁移脚本 (补充测试)
 
@@ -44,7 +45,10 @@ def fresh_migration_db():
     conn.executescript('''
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            permission_set_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            -- 后续 v138 把 role_id 重命名为 permission_set_id；迁移脚本只写 legacy
+            -- role_id，这里用生成列模拟重命名后的现代读侧（derivation_pipeline）
+            permission_set_id INTEGER GENERATED ALWAYS AS (role_id) VIRTUAL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -56,15 +60,15 @@ def fresh_migration_db():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE permission_set_dimension_scopes (
+        CREATE TABLE role_dimension_scopes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            permission_set_id INTEGER, dimension_code TEXT, scope_mode TEXT,
+            role_id INTEGER, dimension_code TEXT, scope_mode TEXT,
             dimension_values TEXT, inherit_children INTEGER DEFAULT 1
         );
 
         CREATE TABLE data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            permission_set_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
+            role_id INTEGER, rule_type VARCHAR(50) DEFAULT 'condition',
             resource_type VARCHAR(200), dimension_code VARCHAR(200),
             condition TEXT, scope_mode VARCHAR(50) DEFAULT 'include',
             permission_level VARCHAR(50) DEFAULT 'read',
@@ -104,8 +108,8 @@ def fresh_migration_db():
 def _insert_dim_scope(conn, permission_set_id, dim_code, scope_mode, dim_values):
     """辅助: 插入 role_dimension_scopes"""
     conn.execute(
-        'INSERT INTO permission_set_dimension_scopes '
-        '(permission_set_id, dimension_code, scope_mode, dimension_values) '
+        'INSERT INTO role_dimension_scopes '
+        '(role_id, dimension_code, scope_mode, dimension_values) '
         'VALUES (?, ?, ?, ?)',
         (permission_set_id, dim_code, scope_mode, json.dumps(dim_values) if dim_values else None),
     )
@@ -115,7 +119,7 @@ def _insert_perm_rule(conn, permission_set_id, resource_type, condition, level, 
     """辅助: 插入 data_permission_rules"""
     conn.execute(
         'INSERT INTO data_permission_rules '
-        '(permission_set_id, resource_type, condition, permission_level, is_denied) '
+        '(role_id, resource_type, condition, permission_level, is_denied) '
         'VALUES (?, ?, ?, ?, ?)',
         (permission_set_id, resource_type, condition, level, is_denied),
     )
@@ -173,7 +177,7 @@ class TestMigrationRollback:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO permission_rules_v2 "
-            "(permission_set_id, resource_type, permission_level, source) "
+            "(role_id, resource_type, permission_level, source) "
             "VALUES (99, 'manual_bo', 'read', 'manual')"
         )
         # 插入待迁移数据
@@ -281,8 +285,8 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         # 直接插入异常 JSON
         conn.execute(
-            "INSERT INTO permission_set_dimension_scopes "
-            "(permission_set_id, dimension_code, scope_mode, dimension_values) "
+            "INSERT INTO role_dimension_scopes "
+            "(role_id, dimension_code, scope_mode, dimension_values) "
             "VALUES (?, ?, ?, ?)",
             (1, 'domain', 'include', 'not_a_json'),
         )
@@ -315,7 +319,7 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO data_permission_rules "
-            "(permission_set_id, resource_type, condition, permission_level, is_denied) "
+            "(role_id, resource_type, condition, permission_level, is_denied) "
             "VALUES (?, ?, NULL, ?, ?)",
             (10, 'product', 'read', 0),
         )
@@ -332,7 +336,7 @@ class TestMigrationEdgeCases:
         conn = sqlite3.connect(fresh_migration_db)
         conn.execute(
             "INSERT INTO data_permission_rules "
-            "(permission_set_id, resource_type, condition, permission_level, is_denied) "
+            "(role_id, resource_type, condition, permission_level, is_denied) "
             "VALUES (?, NULL, ?, ?, ?)",
             (10, "status='active'", 'read', 0),
         )
@@ -358,7 +362,7 @@ class TestMigrationEdgeCases:
 
         # 删除旧表
         conn = sqlite3.connect(fresh_migration_db)
-        conn.execute("DROP TABLE permission_set_dimension_scopes")
+        conn.execute("DROP TABLE role_dimension_scopes")
         conn.execute("DROP TABLE data_permission_rules")
         conn.commit()
         conn.close()
@@ -439,10 +443,10 @@ class TestMigrationToDerivationE2E:
         # 检查权限
         checker = EffectiveIntentChecker(db_path=fresh_migration_db)
         # domain#1 在 include=[1,2] 中 → 允许
-        r1 = checker.check(permission_set_id=1, bo_id='domain', action_name='read',
+        r1 = checker.check(role_id=1, bo_id='domain', action_name='read',
                            record_id=1, user_id=999)
         # domain#3 不在 include=[1,2] 中 → 拒绝
-        r3 = checker.check(permission_set_id=1, bo_id='domain', action_name='read',
+        r3 = checker.check(role_id=1, bo_id='domain', action_name='read',
                            record_id=3, user_id=999)
 
         # 注意: domain 表没有 owner_id 字段, 所以 owner 检查会失败, 走 include 路径

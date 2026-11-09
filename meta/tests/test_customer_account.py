@@ -60,7 +60,7 @@ def _create_fk_target_stubs(ds):
     SQLite 允许建表时引用不存在的表，但 INSERT 的准备阶段会报
     `no such table: main.payment_terms` ⇒ 直接落库类测试需先建桩表。
     """
-    for table in ('payment_terms', 'tax_classifications'):
+    for table in ('payment_terms', 'tax_classifications', 'rate_tables'):
         ds.execute(f'CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY)')
 
 
@@ -82,17 +82,18 @@ class TestStructure:
         assert 'name' in _field_ids()
 
     def test_field_set_is_exactly_declared_business_fields(self):
-        """业务字段集 = 骨架 5 字段 + 波次 0 新增 3 字段
+        """业务字段集 = 骨架 5 字段 + 波次 0 新增 3 字段 + 价目表默认 1 字段
 
         骨架（spec §3.1.2）：id / relation_id / name / description / created_at
         波次 0（销售订单详细方案 §8 步 1）新增：
           tax_classification_id / default_payment_term_id / default_incoterm_code
+        客户价目表账户默认（17786842）新增：default_rate_table_id
         [2026-10-23] customer_type 已删（见 test_customer_type_removed）。
         """
         assert _field_ids() == {
             'id', 'relation_id', 'name', 'description', 'created_at',
             'tax_classification_id', 'default_payment_term_id',
-            'default_incoterm_code',
+            'default_incoterm_code', 'default_rate_table_id',
         }
 
     def test_id_field(self):
@@ -326,6 +327,7 @@ class TestDeletionPolicy:
         """波次 0 起被销售订单三处引用（售达/收票/付款）⇒ restrict_on 必须挡住
 
         历史：建模前本对象零引用方，restrict_on 留空占位（结构保留）。
+        销售区域域（86a3eefe）新增 territory_account_assignments 入向引用。
         """
         dp = _raw()['deletion_policy']
         pairs = {(r['table'], r['foreign_key']) for r in dp['restrict_on']}
@@ -333,6 +335,7 @@ class TestDeletionPolicy:
             ('sales_orders', 'customer_account_id'),
             ('sales_orders', 'bill_to_account_id'),
             ('sales_orders', 'payer_account_id'),
+            ('territory_account_assignments', 'customer_account_id'),
         }
 
 
@@ -411,8 +414,9 @@ class TestNoSiteUseFields:
         """法人粒度由 party_relation.le_org_id 承载，档案不重复落列"""
         assert 'le_org_id' not in _field_ids()
 
-    def test_only_tax_and_payment_term_relations(self):
-        """波次 0 只新增两条引用关系（税务分类 / 默认付款条件）
+    def test_only_tax_payment_term_and_rate_table_relations(self):
+        """波次 0 新增两条引用关系（税务分类 / 默认付款条件）；
+        价目表账户默认（17786842）追加 rate_table 一条。
 
         本对象仍不建用途类（site_use）声明式关系。
         """
@@ -420,6 +424,7 @@ class TestNoSiteUseFields:
         assert {r['id'] for r in rels} == {
             'customer_account_to_tax_classification',
             'customer_account_to_payment_term',
+            'customer_account_to_rate_table',
         }
         for bad in ('site_use', 'bill_to', 'ship_to', 'sold_to'):
             assert not any(bad in r['id'] for r in rels), bad
@@ -498,8 +503,8 @@ class TestNamingDecision:
         # aspect 展开的 actor 字段
         assert 'created_by' in loaded and 'updated_by' in loaded, (
             f'audit_aspect 应展开 created_by / updated_by，实际：{loaded}')
-        # 总数 = 8 显式 + 3 净增
-        assert len(obj.fields) == 11, f'实际展开 {len(obj.fields)} 个字段'
+        # 总数 = 9 显式 + 3 净增
+        assert len(obj.fields) == 12, f'实际展开 {len(obj.fields)} 个字段'
 
     def test_updated_at_not_writable(self, tmp_path):
         """updated_at 为 virtual ⇒ INSERT 不得写该列（region / person_profile 同教训）"""

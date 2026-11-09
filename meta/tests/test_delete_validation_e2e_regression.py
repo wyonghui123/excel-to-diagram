@@ -33,11 +33,13 @@ import pytest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
+from meta.tests.shared.fixtures import backend_base_url
+
 
 # ---------- Helpers ----------
 
 def _api_url(path: str) -> str:
-    return f"http://localhost:3010{path}"
+    return backend_base_url() + path
 
 
 def _admin_cookie() -> str:
@@ -321,32 +323,32 @@ class TestAPIDeleteProductVersions:
             self._cleanup_product(cookie, pid)
 
 
-class TestUserGroupYamlRestrictOn:
-    """[YAML 配置契约] user_group.yaml 必须配 restrict_on, 不应该仅 cascade_delete
+class TestOrgYamlRestrictOn:
+    """[YAML 配置契约] org.yaml 必须配 restrict_on, 不应该仅 cascade_delete
 
-    之前 bug：user_group.yaml 只有 cascade_delete 没有 restrict_on,
+    之前 bug：user_group.yaml（现 org.yaml）只有 cascade_delete 没有 restrict_on,
     导致删除有成员的组直接被 cascade 清掉。
     修复：YAML 配 restrict_on, 触发拒绝路径。
     """
 
     def test_user_group_yaml_has_restrict_on_for_members(self):
         import yaml
-        yaml_path = os.path.join(PROJECT_ROOT, 'meta', 'schemas', 'user_group.yaml')
+        yaml_path = os.path.join(PROJECT_ROOT, 'meta', 'schemas', 'org.yaml')
         with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         deletion_policy = config.get('deletion_policy') or {}
         # 必须有 restrict_on
         assert 'restrict_on' in deletion_policy, \
-            f"user_group.yaml 必须有 restrict_on, 实际: {deletion_policy}"
+            f"org.yaml 必须有 restrict_on, 实际: {deletion_policy}"
         restrict_on = deletion_policy['restrict_on']
-        # 必须有针对 user_group_members 的规则
+        # 必须有针对 org_members 的规则
         has_member_rule = any(
-            r.get('table') == 'user_group_members' for r in restrict_on
+            r.get('table') == 'org_members' for r in restrict_on
         )
         assert has_member_rule, \
-            f"必须限制 user_group_members, 实际 restrict_on={restrict_on}"
+            f"必须限制 org_members, 实际 restrict_on={restrict_on}"
         # 消息必须是中文
-        member_rule = next(r for r in restrict_on if r.get('table') == 'user_group_members')
+        member_rule = next(r for r in restrict_on if r.get('table') == 'org_members')
         msg = member_rule.get('message', '')
         assert '成员' in msg, f"消息应提到成员, 实际: {msg!r}"
 
@@ -355,29 +357,35 @@ class TestUserGroupYamlRestrictOn:
         yaml_path = os.path.join(PROJECT_ROOT, 'meta', 'schemas', 'product.yaml')
         with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
+        # 现行机制: deletability.condition 阻止删除有版本的产品
+        deletability = config.get('deletability') or {}
+        assert deletability.get('condition'), \
+            f"product.yaml 必须配置 deletability 条件, 实际: {deletability}"
+        msg = deletability.get('message', '')
+        assert '版本' in msg, f"消息应提到版本, 实际: {msg!r}"
+        # 兼容旧机制: 若存在 deletion_policy.restrict_on 则必须含 versions
         deletion_policy = config.get('deletion_policy') or {}
-        assert 'restrict_on' in deletion_policy, \
-            f"product.yaml 必须有 restrict_on, 实际: {deletion_policy}"
-        restrict_on = deletion_policy['restrict_on']
-        has_version_rule = any(
-            r.get('table') == 'versions' for r in restrict_on
-        )
-        assert has_version_rule, \
-            f"必须限制 versions, 实际 restrict_on={restrict_on}"
+        restrict_on = deletion_policy.get('restrict_on')
+        if restrict_on is not None:
+            has_version_rule = any(
+                r.get('table') == 'versions' for r in restrict_on
+            )
+            assert has_version_rule, \
+                f"必须限制 versions, 实际 restrict_on={restrict_on}"
 
     def test_user_group_yaml_does_not_only_use_cascade_delete(self):
         """反向断言: 不能只靠 cascade_delete (会清子表, 数据丢失)"""
         import yaml
-        yaml_path = os.path.join(PROJECT_ROOT, 'meta', 'schemas', 'user_group.yaml')
+        yaml_path = os.path.join(PROJECT_ROOT, 'meta', 'schemas', 'org.yaml')
         with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         deletion_policy = config.get('deletion_policy') or {}
         mode = deletion_policy.get('mode', '')
         cascade = deletion_policy.get('cascade_delete', [])
-        # 不允许 mode=cascade 且 cascade_delete 含 user_group_members (因为这会清掉成员)
-        if mode == 'cascade' and 'user_group_members' in (cascade or []):
+        # 不允许 mode=cascade 且 cascade_delete 含 org_members (因为这会清掉成员)
+        if mode == 'cascade' and 'org_members' in (cascade or []):
             pytest.fail(
-                f"user_group.yaml 用 mode=cascade + cascade_delete=[user_group_members] "
+                f"org.yaml 用 mode=cascade + cascade_delete=[org_members] "
                 f"会直接清理成员, 不安全! 应改 mode=restrict + restrict_on="
             )
 

@@ -15,7 +15,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.services.receipt_service import ReceiptError
-from meta.tests.transfer_order_test_doubles import (MemDS, release_transfer_order,
+from meta.tests.transfer_order_test_doubles import (MemDS, RCV_RED_TYPE_ID,
+                                                    release_transfer_order,
                                                     receipt_guard_svc, receipt_svc,
                                                     seeded_db, to_service)
 
@@ -184,7 +185,8 @@ def test_reverse_restores_qty_and_reopens_auto_closed_order():
     assert line['qty_received'] == pytest.approx(0.0)
 
     red = _receipt_header(conn, result['reversal_receipt_id'])
-    assert red['document_type_id'] == 2
+    # 红字冲销单类型（document_category='red'，v193 种子，非 return 类）
+    assert red['document_type_id'] == RCV_RED_TYPE_ID
     assert red['reversal_of_receipt_id'] == receipt['id']
     assert red['status'] == 'posted'
     assert red['inventory_org_id'] == 3

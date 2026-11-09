@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造审计测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """Tests for v007_50 v_audit_all UNION ALL VIEW (2026-07-14)
 
 覆盖场景：

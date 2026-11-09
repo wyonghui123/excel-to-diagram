@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [V007.40] 回归测试: 验证所有 TRUNCATE 默认值已修复, 避免 I/O error 复发
 
@@ -208,8 +209,8 @@ class TestV00740NoTruncateInProductionDefaults:
 class TestV00740HighFrequencyHotPaths:
     """测试高频热路径都使用 safe connect pattern"""
 
-    def test_token_blacklist_has_timeout(self):
-        """token_blacklist_service._get_connection 应有 timeout"""
+    def test_token_blacklist_uses_safe_connect(self):
+        """token_blacklist_service 应统一走 safe_connect（V007.41 L0 入口）"""
         with open(os.path.join(
             os.path.dirname(__file__), "..", "services", "token_blacklist_service.py"
         ), "r", encoding="utf-8") as f:
@@ -225,9 +226,9 @@ class TestV00740HighFrequencyHotPaths:
             "每条 API 请求都触发 I/O error."
         )
 
-        # 应该有 timeout=30.0
-        assert "timeout=30.0" in content, (
-            "token_blacklist_service.py 缺少 timeout=30.0"
+        # [2026-11-09] V007.41 起统一走 safe_connect，不再手写 timeout
+        assert "safe_connect_for_write" in content, (
+            "token_blacklist_service.py 未使用 safe_connect_for_write"
         )
 
     def test_filter_variant_api_has_timeout(self):
@@ -247,15 +248,15 @@ class TestV00740HighFrequencyHotPaths:
         )
 
     def test_intent_resolver_uses_safe_connect(self):
-        """intent_resolver 应使用 _safe_connect helper"""
+        """intent_resolver 应使用 safe_connect helper"""
         with open(os.path.join(
             os.path.dirname(__file__), "..", "core", "intent_resolver.py"
         ), "r", encoding="utf-8") as f:
             content = f.read()
 
-        # 应该有 _safe_connect helper 函数定义
-        assert "def _safe_connect" in content, (
-            "intent_resolver.py 缺少 _safe_connect helper"
+        # [2026-11-09] V007.41 起改用 safe_connect_for_read 模块级 helper
+        assert "safe_connect_for_read" in content, (
+            "intent_resolver.py 缺少 safe_connect_for_read 使用"
         )
 
         # 6 处直接 sqlite3.connect 应都改为 _safe_connect
@@ -268,14 +269,15 @@ class TestV00740HighFrequencyHotPaths:
         )
 
     def test_subflow_template_store_uses_safe_connect(self):
-        """subflow_template_store 应使用 _safe_connect helper"""
+        """subflow_template_store 应使用 safe_connect helper"""
         with open(os.path.join(
             os.path.dirname(__file__), "..", "services", "subflow_template_store.py"
         ), "r", encoding="utf-8") as f:
             content = f.read()
 
-        assert "def _safe_connect" in content, (
-            "subflow_template_store.py 缺少 _safe_connect helper"
+        # [2026-11-09] V007.41 起改用 safe_connect_for_read/write 模块级 helper
+        assert "safe_connect_for_read" in content, (
+            "subflow_template_store.py 缺少 safe_connect_for_read 使用"
         )
 
         direct_count = content.count("sqlite3.connect(cls._get_db_path())")

@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造多跳关联测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 P12 unit tests: Association multi-hop permission scenarios.
@@ -35,10 +36,10 @@ def _insert_group(ds, code='g1', name='Group1'):
     return ds.execute("SELECT id FROM orgs WHERE code = ?", [code]).fetchone()[0]
 
 
-def _insert_group_member(ds, user_id, group_id, is_manager=0):
+def _insert_group_member(ds, user_id, org_id, is_manager=0):
     ds.execute(
-        "INSERT OR IGNORE INTO org_members (user_id, group_id, is_manager) VALUES (?, ?, ?)",
-        [user_id, group_id, is_manager]
+        "INSERT OR IGNORE INTO org_members (user_id, org_id, is_manager) VALUES (?, ?, ?)",
+        [user_id, org_id, is_manager]
     )
 
 
@@ -47,10 +48,10 @@ def _insert_role(ds, code='r1', name='Role1', priority=10):
     return ds.execute("SELECT id FROM permission_sets WHERE code = ?", [code]).fetchone()[0]
 
 
-def _insert_group_role(ds, group_id, role_id):
+def _insert_group_role(ds, org_id, permission_set_id):
     ds.execute(
-        "INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
-        [group_id, role_id]
+        "INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
+        [org_id, permission_set_id]
     )
 
 
@@ -126,9 +127,9 @@ def ds():
         CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
-            UNIQUE(user_id, group_id)
+            UNIQUE(user_id, org_id)
         );
         CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,10 +140,10 @@ def ds():
         );
         CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_by INTEGER,
-            UNIQUE(group_id, role_id)
+            UNIQUE(org_id, permission_set_id)
         );
 
         -- 6-level hierarchy
@@ -192,7 +193,7 @@ def ds():
         );
         CREATE TABLE permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT,
@@ -201,7 +202,7 @@ def ds():
         );
         CREATE TABLE org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             resource_type TEXT,
             resource_id INTEGER,
             permission_level TEXT,

@@ -101,7 +101,7 @@ class TestChildObjectTypesRBAC:
         src_path = Path(PROJECT_ROOT) / 'meta' / 'services' / 'import_export_service.py'
         content = src_path.read_text(encoding='utf-8')
         # admin 短路
-        assert "user.get('username') != 'admin'" in content, \
+        assert 'is_admin(user)' in content, \
             "admin 应跳过 child OT 权限过滤"
 
 

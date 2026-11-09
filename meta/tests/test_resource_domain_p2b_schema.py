@@ -48,7 +48,8 @@ EXPECTED_FKS = {
     "calendar_shifts": {("calendar_id", "calendars", "id"),
                         ("shift_id", "shifts", "id")},
     "work_definitions": {("item_id", "items", "id"),
-                         ("org_id", "orgs", "id")},
+                         ("org_id", "orgs", "id"),
+                         ("base_uom_id", "uoms", "id")},
     "work_definition_operations": {
         ("definition_id", "work_definitions", "id"),
         ("resource_group_id", "resource_groups", "id"),
@@ -78,7 +79,7 @@ ENUM_FIELDS = [
      ["regular", "overtime", "standby"]),
     ("calendar_shift", None, "calendar_shifts", None, None),
     ("work_definition", "definition_kind", "work_definitions",
-     "definition_kind", ["routing", "service_template"]),
+     "definition_kind", ["routing", "recipe", "service_template"]),
     ("work_definition", "status", "work_definitions",
      "work_definition_status", ["draft", "active", "obsolete"]),
     ("work_definition_operation", "status", "work_definition_operations",
@@ -363,7 +364,9 @@ class TestDeclaration:
             ("work_definition_operations", "definition_id")}
         wdo = _load_raw("work_definition_operation")["deletion_policy"]["restrict_on"]
         assert {(r["table"], r["foreign_key"]) for r in wdo} == {
-            ("operation_resource_requirements", "operation_id")}
+            ("operation_resource_requirements", "operation_id"),
+            ("work_definition_operation_outputs", "operation_id"),
+            ("process_instructions", "operation_id")}
         # 资源 / 资源组反向 restrict 已追加 P2b 子表
         resource = _load_raw("resource")["deletion_policy"]["restrict_on"]
         rules = {(r["table"], r["foreign_key"]) for r in resource}
