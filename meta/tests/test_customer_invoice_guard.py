@@ -157,6 +157,26 @@ def test_submitted_same_frozen_value_allowed():
     assert params['remark'] == '备注可改'
 
 
+def test_document_category_is_immutable():
+    conn = build_conn()
+    created = _draft_invoice(conn)
+    old_data = get_header(conn, created['id'])
+    assert old_data['document_category'] == 'invoice'
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(_ctx(
+            conn, 'customer_invoice', 'crud_update',
+            {'id': created['id'], 'document_category': 'credit_memo'},
+            old_data=old_data))
+    _expect(error, 'INVOICE_POSTED_READONLY')
+
+    params = {'id': created['id'], 'document_category': 'invoice',
+              'remark': '同值可提交'}
+    _INTERCEPTOR.before_action(_ctx(
+        conn, 'customer_invoice', 'crud_update', params, old_data=old_data))
+    assert params['remark'] == '同值可提交'
+
+
 def test_submitted_to_posted_delegates_and_exposes_posting_date():
     conn = build_conn()
     created = _submitted_invoice(conn)

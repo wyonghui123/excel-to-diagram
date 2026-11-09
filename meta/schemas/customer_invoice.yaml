@@ -146,6 +146,43 @@ fields:
       relation: type_definition
       multiple: false
 
+  - id: document_category
+    name: 单据类别
+    type: string
+    db_column: document_category
+    required: true
+    max_length: 20
+    default: invoice
+    description: 单据类别（由单据类型派生，生成后不可修改）
+    enum_values:
+      - value: invoice
+        label: 标准发票
+        color: primary
+        category: active
+        is_initial: true
+      - value: credit_memo
+        label: 贷项凭证
+        color: warning
+        category: active
+      - value: debit_memo
+        label: 借项通知单
+        color: info
+        category: active
+      - value: cancellation
+        label: 取消单据
+        color: info
+        category: inactive
+    semantics:
+      meaning: 区分标准发票 / 贷项凭证 / 借项通知单 / 取消单据
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 单据类别
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
   - id: invoice_date
     name: 发票日期
     type: date
@@ -628,6 +665,7 @@ state_field_policies:
     readonly:
       - invoice_no
       - document_type_id
+      - document_category
       - customer_account_id
       - bill_to_account_id
       - payer_account_id
@@ -641,6 +679,7 @@ state_field_policies:
     readonly:
       - invoice_no
       - document_type_id
+      - document_category
       - invoice_date
       - posting_date
       - customer_account_id
@@ -664,6 +703,7 @@ state_field_policies:
     readonly:
       - invoice_no
       - document_type_id
+      - document_category
       - invoice_date
       - posting_date
       - customer_account_id
@@ -689,6 +729,7 @@ state_field_policies:
     readonly:
       - invoice_no
       - document_type_id
+      - document_category
       - invoice_date
       - posting_date
       - customer_account_id
@@ -760,6 +801,12 @@ rules:
       label: 红冲
       icon: undo
       confirm_message: "红冲将生成红字发票并回退开票进度，仅用于已过账发票；确定红冲吗？"
+      input_fields:
+        - field: reversal_reason
+          label: 红冲原因
+          type: textarea
+          required: true
+          placeholder: 请填写红冲原因
 
 indexes:
   - fields: [invoice_no]

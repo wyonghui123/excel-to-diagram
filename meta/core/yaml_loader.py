@@ -2000,6 +2000,7 @@ def parse_state_transition_ui_hints(data: Dict[str, Any]) -> Optional["StateTran
         icon=uh.get("icon", ""),
         confirm_message=uh.get("confirm_message", ""),
         highlight=uh.get("highlight", False),
+        input_fields=uh.get("input_fields", []) or [],
     )
 
 

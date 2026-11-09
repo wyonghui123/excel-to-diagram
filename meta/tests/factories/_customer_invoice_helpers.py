@@ -474,3 +474,53 @@ def _seed_payment_term(conn: sqlite3.Connection, lines=None) -> None:
             ' fixed_day_of_month, offset_days) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [500 + index, PAYMENT_TERM_ID, seq, percentage, months, fixed_day,
              days])
+
+
+# ---------------------------------------------------------------- v232 迁移辅助
+
+def table_columns(path, table):
+    conn = sqlite3.connect(str(path))
+    try:
+        return {row[1] for row in conn.execute(
+            'PRAGMA table_info(%s)' % table).fetchall()}
+    finally:
+        conn.close()
+
+
+def drop_column(path, table, column):
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute('ALTER TABLE %s DROP COLUMN %s' % (table, column))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_invoice_without_category(path, invoice_no, type_code):
+    """按 v231 旧表结构插入发票（不含 document_category）。"""
+    conn = sqlite3.connect(str(path))
+    try:
+        type_id = conn.execute(
+            "SELECT id FROM type_definitions "
+            "WHERE scope_bo = 'customer_invoice' AND code = ?",
+            [type_code]).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO customer_invoices (
+                invoice_no, document_type_id, invoice_date, status,
+                customer_account_id, currency_id, org_id,
+                net_amount, tax_amount, gross_amount
+            ) VALUES (?, ?, '2026-11-01', 'draft', 1, 1, 1, 0, 0, 0)
+            """, [invoice_no, type_id])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def invoice_categories(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        return dict(conn.execute(
+            'SELECT invoice_no, document_category FROM customer_invoices'))
+    finally:
+        conn.close()

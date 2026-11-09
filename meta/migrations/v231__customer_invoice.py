@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS customer_invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     invoice_no VARCHAR(30) NOT NULL,
     document_type_id INTEGER NOT NULL,
+    document_category VARCHAR(20) NOT NULL DEFAULT 'invoice',
     invoice_date DATETIME NOT NULL,
     posting_date DATETIME,
     status VARCHAR(20) NOT NULL DEFAULT 'draft'

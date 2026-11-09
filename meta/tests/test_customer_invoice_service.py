@@ -66,6 +66,7 @@ def test_create_from_shipment_takes_number_and_snapshots_lines():
 
     assert result['invoice_no'] == 'SINV-202611-00001'
     assert result['status'] == 'draft'
+    assert get_header(conn, result['id'])['document_category'] == 'invoice'
     assert result['amounts'] == {'net_amount': 500.0, 'tax_amount': 65.0,
                                  'gross_amount': 565.0}
     lines = get_lines(conn, result['id'])
@@ -77,6 +78,22 @@ def test_create_from_shipment_takes_number_and_snapshots_lines():
     assert first['price_source'] == 'order'
     assert Decimal(str(first['qty'])) == Decimal('40')
     assert Decimal(str(first['net_amount'])) == Decimal('400')
+
+
+def test_validate_line_write_allows_shipment_line_with_redundant_order_line():
+    """回归：发货行同时带 shipment_line_id 与冗余 order_line_id 时不应被 XOR 拒绝。"""
+    conn = build_conn()
+    result = _from_shipment(conn)
+    service = _service(conn)
+    line = get_lines(conn, result['id'])[0]
+    header = get_header(conn, result['id'])
+
+    normalized = service.validate_line_write(
+        {'id': line['id'], 'qty': 10}, existing=line, invoice=header)
+
+    assert normalized['shipment_line_id'] == SHIP_LINE_ID
+    assert normalized['order_line_id'] == ORDER_LINE_DELIVERY
+    assert Decimal(str(normalized['qty'])) == Decimal('10')
 
 
 def test_create_from_shipment_partial_qty():
@@ -167,14 +184,24 @@ def test_order_line_none_relevance_rejected():
     _expect(error, 'INVOICE_SOURCE_MISMATCH')
 
 
-def test_line_source_keys_are_mutually_exclusive():
+def test_line_source_keys_schedule_is_exclusive():
     conn = build_conn()
+    service = _service(conn)
     with pytest.raises(CustomerInvoiceError) as error:
-        _service(conn).create_manual(dict(
+        service.create_manual(dict(
             BASE_HEADER,
-            lines=[{'shipment_line_id': SHIP_LINE_ID,
-                    'order_line_id': ORDER_LINE_DELIVERY, 'qty': 1}]))
+            lines=[{'shipment_line_id': SHIP_LINE_ID, 'schedule_id': 999,
+                    'qty': 1}]))
     _expect(error, 'INVOICE_LINE_XOR')
+
+    # 发货行允许携带冗余的 order_line_id（与 v231 CHECK 语义一致）
+    result = service.create_manual(dict(
+        BASE_HEADER,
+        lines=[{'shipment_line_id': SHIP_LINE_ID,
+                'order_line_id': ORDER_LINE_DELIVERY, 'qty': 1}]))
+    line = get_lines(conn, result['id'])[0]
+    assert line['shipment_line_id'] == SHIP_LINE_ID
+    assert line['order_line_id'] == ORDER_LINE_DELIVERY
 
 
 def test_manual_order_line_invoice_uses_order_price():
@@ -332,6 +359,8 @@ def test_reverse_creates_red_invoice_and_rolls_back_progress():
     assert get_header(conn, original['id'])['status'] == 'reversed'
     red = get_header(conn, reversed_result['red_invoice_id'])
     assert red['status'] == 'posted'
+    assert red['document_category'] == 'credit_memo'
+    assert get_header(conn, original['id'])['document_category'] == 'invoice'
     assert red['reversal_of_invoice_id'] == original['id']
     assert Decimal(str(red['gross_amount'])) == Decimal('-452')
     red_lines = get_lines(conn, red['id'])

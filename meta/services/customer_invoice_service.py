@@ -52,6 +52,24 @@ STATUS_REVERSED = 'reversed'
 STATUSES = (STATUS_DRAFT, STATUS_SUBMITTED, STATUS_POSTED,
             STATUS_CANCELLED, STATUS_REVERSED)
 
+#: 单据类别（与 Fusion transaction class 对齐；头级派生列，生成后不可改）
+DOCUMENT_CATEGORY_INVOICE = 'invoice'
+DOCUMENT_CATEGORY_CREDIT_MEMO = 'credit_memo'
+DOCUMENT_CATEGORY_DEBIT_MEMO = 'debit_memo'
+DOCUMENT_CATEGORY_CANCELLATION = 'cancellation'
+
+DOCUMENT_CATEGORIES = (
+    DOCUMENT_CATEGORY_INVOICE, DOCUMENT_CATEGORY_CREDIT_MEMO,
+    DOCUMENT_CATEGORY_DEBIT_MEMO, DOCUMENT_CATEGORY_CANCELLATION,
+)
+
+#: type_definitions.document_category → customer_invoices.document_category
+_TYPE_CATEGORY_TO_DOCUMENT_CATEGORY = {
+    'standard': DOCUMENT_CATEGORY_INVOICE,
+    'credit_memo': DOCUMENT_CATEGORY_CREDIT_MEMO,
+    'debit_memo': DOCUMENT_CATEGORY_DEBIT_MEMO,
+}
+
 SOURCE_SHIPMENT = 'shipment'
 SOURCE_ORDER = 'sales_order'
 SOURCE_MANUAL = 'manual'
@@ -90,7 +108,8 @@ SUBMITTED_FROZEN_FIELDS = (
 
 #: 可写入 customer_invoices 的头字段白名单（过滤调用方携带的 lines / 临时键）
 HEADER_FIELDS = (
-    'invoice_no', 'document_type_id', 'invoice_date', 'posting_date', 'status',
+    'invoice_no', 'document_type_id', 'document_category', 'invoice_date',
+    'posting_date', 'status',
     'customer_account_id', 'bill_to_account_id', 'payer_account_id',
     'bill_to_address_text', 'tax_registration_no', 'currency_id',
     'exchange_rate', 'exchange_rate_type', 'exchange_rate_date',
@@ -280,6 +299,10 @@ class CustomerInvoiceService:
                 RED_INVOICE_TYPE_CODE if for_reversal
                 else DEFAULT_INVOICE_TYPE_CODE, 'header')
 
+        # 单据类别一律由单据类型派生，调用方传入值不生效（Fusion 口径）
+        row['document_category'] = self._resolve_document_category(
+            row['document_type_id'])
+
         if _blank(row.get('invoice_no')):
             row['invoice_no'] = self._allocate_number(
                 row['invoice_date'], row['document_type_id'])
@@ -314,10 +337,13 @@ class CustomerInvoiceService:
             ('shipment_line_id', shipment_line_id),
             ('schedule_id', schedule_id),
             ('order_line_id', order_line_id)) if not _blank(value)]
-        if len(keys) > 1:
+        # 发货行允许同时携带冗余的 order_line_id（与 v231 CHECK 语义一致）；
+        # 仅计划行与其余两者互斥。
+        if not _blank(schedule_id) and (
+                not _blank(shipment_line_id) or not _blank(order_line_id)):
             raise CustomerInvoiceError(
-                '发货行 / 开票计划行 / 订单行只能三选一',
-                field_name='shipment_line_id', rule='INVOICE_LINE_XOR')
+                '开票计划行不能与发货行 / 订单行同时存在',
+                field_name='schedule_id', rule='INVOICE_LINE_XOR')
 
         if not _blank(schedule_id) or row.get('source_doc_type') == SOURCE_PLAN:
             raise CustomerInvoiceError(
@@ -1286,6 +1312,15 @@ class CustomerInvoiceService:
                 '缺少单据类型 %s（请先执行 v231 迁移）' % code,
                 field_name='document_type_id', rule='INVOICE_TYPE_MISSING')
         return int(rows[0]['id'])
+
+    def _resolve_document_category(self, document_type_id: Any) -> str:
+        """由单据类型派生单据类别；类型缺失时回落到标准发票。"""
+        rows = self.ds.query(
+            'SELECT document_category FROM %s WHERE id = ?' % TYPE_TABLE,
+            [document_type_id])
+        raw = (rows[0].get('document_category') if rows else '') or ''
+        return _TYPE_CATEGORY_TO_DOCUMENT_CATEGORY.get(
+            raw, DOCUMENT_CATEGORY_INVOICE)
 
     def _available_shipment_qty(self, shipment_line: Dict[str, Any]) -> Decimal:
         return (_to_decimal(shipment_line.get('qty'))

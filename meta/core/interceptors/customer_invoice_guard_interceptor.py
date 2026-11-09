@@ -54,7 +54,8 @@ _RESULT_KEY = 'customer_invoice_result'
 
 #: 创建时由服务归一化后回填到写入口径的抬头列
 _CREATE_SYNC_KEYS = (
-    'invoice_no', 'document_type_id', 'invoice_date', 'status',
+    'invoice_no', 'document_type_id', 'document_category', 'invoice_date',
+    'status',
     'customer_account_id', 'bill_to_account_id', 'payer_account_id',
     'bill_to_address_text', 'tax_registration_no', 'currency_id',
     'exchange_rate', 'exchange_rate_type', 'exchange_rate_date',
@@ -181,6 +182,15 @@ class CustomerInvoiceGuardInterceptor(Interceptor):
         current = old_data.get('status') or service._require_header(
             invoice_id).get('status')
         target = params.get('status')
+
+        # 单据类别由单据类型派生，任何状态下都不允许直接改写
+        if not _blank(params.get('document_category')) and \
+                not _same_value(params.get('document_category'),
+                                old_data.get('document_category')):
+            raise CustomerInvoiceError(
+                '单据类别由单据类型派生，不可修改',
+                field_name='document_category',
+                rule='INVOICE_POSTED_READONLY')
 
         if current == STATUS_POSTED:
             self._guard_posted_update(context, service, invoice_id,

@@ -289,6 +289,9 @@ class StateTransitionUIHints:
     icon: str = ""
     confirm_message: str = ""
     highlight: bool = False
+    #: 迁移前需要用户补录的字段（如红冲原因）；每项为
+    #: {field, label, type, required, placeholder}
+    input_fields: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

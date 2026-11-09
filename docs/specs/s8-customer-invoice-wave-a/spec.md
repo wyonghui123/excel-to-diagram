@@ -481,3 +481,40 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 - [ ] 行类型 code 用 `INV_ITEM` / `INV_SERVICE` / `INV_DISCOUNT`（修正上游 §9 的全局唯一冲突）。
 - [ ] 计划开票 fail-closed（`plan` 一律拒绝），严格期次只读（D27），不建 `settlement_block_code`（D28）。
 - [ ] 允许开始编码（S8-A1..A9）。
+
+---
+
+## 12. 语义校准与后续修复（2026-11-09，Fusion 26D 对标）
+
+> 依据：`docs/specs/research-fusion-billing-deep-dive-2026-11-09.md`。
+> 本节只校准语义与补齐 P0 缺口，不改变 Wave A 的业务范围。
+
+### 12.1 术语正名
+
+| 我方术语 | Fusion 对应 | 说明 |
+|---|---|---|
+| `cancelled`（draft/submitted → cancelled） | Void | 仅未过账、无活动可作废 |
+| 红字发票（`SCR`，负数量负金额） | Credit Memo | 我方「红冲」= 贷记，不是取消 |
+| `reversed`（原单终态） | 无直接对应 | 本地扩展，表示「已被贷记」 |
+| `document_category=debit_memo` | Debit Memo | 与发票无链接，本期不开放业务 |
+
+### 12.2 已执行修复（P0）
+
+1. **单据类别**：`customer_invoices` 新增 `document_category`（v232），
+   由 `type_definitions.document_category` 派生，生成后不可改；
+   `standard→invoice` / `credit_memo→credit_memo` / `debit_memo→debit_memo`。
+2. **红冲原因**：`reverse` 规则声明 `ui_hints.input_fields`，
+   通用状态按钮弹窗收集 `reversal_reason` 后随 PUT 提交。
+3. **发货行 XOR**：`validate_line_write` 不再拒绝
+   `shipment_line_id + 冗余 order_line_id`（与 v231 CHECK 一致）；
+   仅 `schedule_id` 与其余来源互斥。
+
+### 12.3 仍未覆盖（后续波次）
+
+- 行级贷项 / 部分冲销 / on-account credit（Fusion Credit Memo 能力）
+- Adjustment 对象与限额审批
+- 借项通知单业务（Fusion 口径：不强制引用原单）
+- 价格变更（D13）：需补 `price_diff_amount` 与「改价原因必填」；
+  开票后价格更正按 Credit and Rebill 处理
+- Complete 前审批闸门、打印权限、`create_from_shipment` 的 UI 入口
+
