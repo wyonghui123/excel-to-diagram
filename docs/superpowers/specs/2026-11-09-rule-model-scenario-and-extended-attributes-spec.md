@@ -621,6 +621,110 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
 | 新建独立 L3 运行时（原建议） | 与规则分层 | 与 Gen2 四表重复，等于重造已建成的任务域 | **撤回** |
 | 复用 Gen2 + 补接缝（本建议） | 单一事实源、已有测试与状态机、增量接线 | 需补 executor / outputs / 补偿适配 | **选中** |
 
+#### 9.3.13 五接缝实现步骤（M5 预案，按需启用）
+
+**总原则**：不新增编排表；全部落在既有 Gen2 任务/工作流域 + `doc_flow`。实施顺序 **S1 → S3 → S4 → S2 → S5**（S1/S3 可并行；S2 依赖 S1 的 outputs；S4 依赖 S1 的 action）。
+
+##### S1 `create_document` executor
+
+**目标**：Workflow 节点可创建单据，幂等、可重试、可观测。
+
+**现状**：
+- [bo_action_executor.py](file:///d:/filework/doc-flow-worktree/meta/core/bo_action_executor.py#L279-L289) 已支持 `system` 任务：参数取 `task.inputs`，调用 `registry.call(action_id, inputs, context)`，context 带 `run_as/task_id/workflow_run_id/trace_id`；幂等键 `{run_id}:{task_id}:{attempt}`。
+- 尚无 `doc_flow.*` BO Action；`start_run` 创建任务时 `inputs` 置 NULL（[workflow_engine.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_engine.py#L208-L238)）。
+
+**步骤**：
+1. **服务单例下沉**：把 `init_doc_flow_service()` / `_require_service()` 从 [doc_flow_api.py](file:///d:/filework/doc-flow-worktree/meta/api/doc_flow_api.py#L26-L41) 移到 `meta/services/doc_flow_service.py`（模块级 `init/get`）；API 与 action handler 共用，避免 service 反向 import API；同步更新 `meta/tests/test_doc_flow_api.py` 的导入。
+2. **新增 `meta/services/doc_flow_action.py`**：
+   - `doc_flow_derive_handler(params, context)`：取 `context['run_as']` 作 `derived_by`；调用 [DocFlowService.derive()](file:///d:/filework/doc-flow-worktree/meta/services/doc_flow_service.py#L229-L310) 或批量 [derive_batch()](file:///d:/filework/doc-flow-worktree/meta/core/doc_flow_batch_engine.py#L161)。
+   - 入参：`rule_id`、`sources`（源单 id 列表）、`target`（`{mode, id?, data?}`）、`head_overrides`。
+   - 返回：`{success, data: {created, target_ids, edge_ids}, message}`；`data` 会被 `_extract_outputs` 写入 `task.outputs`，供 S2/S3/S5 使用。
+3. **注册 Action**：在 [bo_action_registrations.py](file:///d:/filework/doc-flow-worktree/meta/services/bo_action_registrations.py) 注册 `doc_flow.derive`，`idempotent=True`、`operation_type='action'`、`category='doc_flow'`、`permission_required=None`（系统任务走内部调用），并给 `input_schema`。
+4. **节点契约**：`executor_type='system'`、`executor_config={"action_id":"doc_flow.derive"}`、输入模板放 `meta.inputs_template`（S2）；`publish_workflow()` 新增发布期校验：`action_id` 必须已注册，否则 `ACTION_NOT_REGISTERED`。
+5. **幂等**：执行器按 `(run_id, task_id, attempt)` 去重；handler 内再由规则 `derive_key` 去重（重复调用返回 replay，不新建行）。
+6. **失败归位**：业务异常返回 `{"success": False, "message": ...}` → 执行器归 `failed`，按 `retry_policy` 重试；不吞异常、不静默成功。
+
+**测试**：`meta/tests/test_doc_flow_action_executor.py` — 成功建单并产出 `edge_ids`；同参数重放不新增；无规则报错归 failed；`trace_id` 从 context 透传。
+
+##### S2 outputs → inputs 注入
+
+**目标**：上游节点 outputs 能按模板注入下游 `task.inputs`，不引入表达式引擎。
+
+**现状**：`start_run` 已把 `node.meta` 存入 `task.meta`（[workflow_store.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_store.py#L39-L44) 的 `NODE_CONTENT_FIELDS` 含 `meta`）；`advance_run()` 只改状态，不写 `inputs`（[workflow_engine.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_engine.py#L285-L320)）；outputs 已落 `task.outputs`。
+
+**步骤**：
+1. **模板语法**：节点 `meta.inputs_template`（JSON 对象），值支持整值占位 `{{run.inputs.<path>}}`、`{{<node_id>.outputs.<path>}}`；只支持点路径，不支持运算/函数。
+2. **发布期校验**：`workflow_definition.validate_definition()` 增加引用校验——`<node_id>` 必须是直接上游（`incoming_edges`），路径非空；失败 `INPUT_TEMPLATE_INVALID`。
+3. **注入点**：`advance_run()` 提升 `pending → ready` 的同一事务内：
+   - 用已加载的 `tasks` 建 `outputs_by_task_id`；
+   - 解析 `task.meta.inputs_template`；
+   - 解析失败：不提升，保持 `pending`，在返回值新增 `blocked_reasons[task_id] = "INPUT_TEMPLATE_UNRESOLVED:<path>"`；
+   - 解析成功：`UPDATE tasks SET inputs=?`，与状态更新同事务。
+4. **首节点**：`start_run(inputs=payload)` 已存 Run inputs；首节点模板直接引用 `run.inputs`（事件触发场景由 S4 填充）。
+5. **类型与幂等**：单占位保持原类型（list/dict），嵌入字符串则 `str()`；重复 `advance_run()` 只对 `pending` 生效，天然幂等。
+
+**测试**：`meta/tests/test_workflow_inputs_injection.py` — 正常注入、缺路径阻塞、非直接上游发布失败、`run.inputs`、重复 advance 幂等。
+
+##### S3 补偿适配
+
+**目标**：`compensate_task()` 的 `bo_action` 真正执行 E6 冲销，而不是重放原 Action。
+
+**现状**：`compensate_task()` 复制原任务的 `executor_type/executor_config/workflow_node_id`（[workflow_engine.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_engine.py#L458-L485)），`bo_action` 只写入 `meta`，`BOActionExecutor` 不读取 → system 补偿任务会再次执行 `doc_flow.derive`，造成重复建单。
+
+**步骤**：
+1. **改写补偿执行配置**：当 `bo_action` 非空且原 `executor_type ∈ {system, cron}` 时，补偿任务 `executor_config` 覆写为 `{"action_id": "doc_flow.reverse", "params": {...}}`；`meta.bo_action` 保留审计，不删除。
+2. **扩展 `compensate_task()` 入参**（向后兼容）：新增可选 `ref_id`、`params`；`mode` 从 `bo_action` 映射：
+   - `cancel` → A 档 `reverse_edge()`（[doc_flow_reversal.py](file:///d:/filework/doc-flow-worktree/meta/core/doc_flow_reversal.py#L108)）；
+   - `partial` → B 档 `red_ink_edge()`（同文件 L226）；
+   - `update` → C 档 `counter_edge()`（同文件 L313）；
+   - `compensate` → 追加补偿 `compensate_edge()`（同文件 L391）；
+   - `none` → 直接返回 `success + skipped`，只留审计。
+3. **新增 handler**：`doc_flow_reverse_handler(params, context)` 调上述函数；`ref_id` 对 B/C 档必填（`REF_ID_REQUIRED`），A 档用补偿任务 id 作 `reversed_by`。
+4. **注册 `doc_flow.reverse`**：与 S1 同文件注册，`idempotent=True`；B/C 档幂等由 `derive_key='rev:<edge>:<ref_id>'` 保证。
+5. **幂等边界（对齐引擎原设计）**：不在 `compensate_task()` 做「同一任务只能补偿一次」的硬拦截（其 docstring 明确：业务幂等由 E6 红字单锚保证）。改为：`partial/update/compensate` 创建补偿任务时必须传 `ref_id`，否则 `WorkflowEngineError("REF_ID_REQUIRED")`；`cancel` 由 `reverse_edge()` 对同一 edge 的 replay 保证幂等；重复调用产生的新任务在 outputs 中标记 `replay=true`。
+6. **边界**：补偿写业务库走 Action，任务状态在任务库，两库不同事务；失败按 `retry_policy` 重试，不硬编码回滚。
+
+**测试**：`meta/tests/test_doc_flow_compensation_adapter.py` — A/B/C 三档、`ref_id` 缺失、重复补偿不重复建边、失败归位、`none` 不执行。
+
+##### S4 事件触发接线
+
+**目标**：`doc_flow.created` / `bo.status_changed` 能按 `trigger_expr` 唤起 Workflow Run。
+
+**现状**：`start_runs_for_event()` 已存在，payload 直接成为 `run.inputs`，`doc_ref` 从 payload 字段取（[workflow_trigger.py](file:///d:/filework/doc-flow-worktree/meta/core/workflow_trigger.py#L260-L307)）；但 [event_outbox.enqueue_event()](file:///d:/filework/doc-flow-worktree/meta/core/event_outbox.py#L321-L373) 只服务有 app.yaml 的应用，平台 BO（sales / shipment）`get_app_id_for_bo()` 返回 None（[app_registry.py](file:///d:/filework/doc-flow-worktree/meta/core/app_registry.py#L125-L127)），因此当前不会发事件。
+
+**步骤（MVP 先同步，后补持久化）**：
+1. **事件契约**：`doc_flow.created`，payload `{rule_id, source_bo, source_id, target_bo, target_id, target_line_bo, row_count, trace_id}`；`trigger_expr` 的 `doc_ref` 取 `target_id`。
+2. **MVP 触发**：`DocFlowService.derive()` 业务事务提交成功后，调用 `start_runs_for_event(platform_ds, event_name='doc_flow.created', payload=..., app_id='')`；异常只记录日志 + 指标，不影响业务成功。
+3. **去重**：`workflow_runs` 增加 nullable `idempotency_key` + 唯一索引（幂等加列 + 迁移号 +1）；键 = `doc_flow.created:{trace_id}`；`start_runs_for_event()` 落 Run 前查/插，重复直接返回已有 Run。
+4. **持久化升级**（触发：需要 at-least-once / 跨进程重试）：注册平台 core publisher contract，`enqueue_event()` 与业务写同事务；新增 core outbox consumer 调 `start_runs_for_event()`；删除 MVP 的同步调用。
+5. **Workflow 定义**：`trigger_kind='event'`、`trigger_expr={"event":"doc_flow.created","when":"target_bo == 'shipment'","doc_ref":"target_id"}`；启动期由 `assert_trigger()` 校验，未知事件拒绝发布。
+
+**测试**：`meta/tests/test_doc_flow_event_trigger.py` — 事件命中/不命中、payload→`run.inputs`、`doc_ref`、幂等键重复不起第二个 Run、触发异常不阻断 derive。
+
+##### S5 trace 分工与关联
+
+**目标**：两域各查各的，又能精确关联；不破坏 `doc_flow_edges` 17 列定稿。
+
+**现状**：`doc_flow` trace 已含 `rules/edges/node_group`；任务域有 `tasks.trace_id` / `task_events`；`doc_flow_edges` 无 `trace_id` 列，`doc_flow_batch_engine` 也没有 trace 参数。
+
+**步骤**：
+1. **不改边表**：不给 `doc_flow_edges` 加 `trace_id`（17 列定稿；且 `derive_key` 是幂等键，掺 trace 会破坏重放）。
+2. **用 outputs 关联**：S1 handler 的 `data.edge_ids` 写入 `task.outputs`；任务同时有 `doc_ref`（目标单 id）与 `trace_id`。查询链路 = `tasks.doc_ref/trace_id → task.outputs.edge_ids → doc_flow_edges`。
+3. **trace 服务不动**：`rule_trace_service` 的 `doc_flow` 信封保持原口径，不混入 Run/Task 状态；编排状态查 `workflow_runs` / `tasks` / `task_events`。
+4. **补偿链路**：S3 handler 返回 `reversed_edge_ids/created_edge_ids`，同样写 `task.outputs`，保持同一关联方式。
+5. **测试**：`meta/tests/test_trace_division.py` — `doc_flow` 信封无 workflow 字段；`task.outputs.edge_ids` 与边表一致；按 `doc_ref` 可反查任务。
+
+##### 实施顺序与验收
+
+| 阶段 | 接缝 | 验收用例 |
+|---|---|---|
+| M5-1 | S1 + S3 | SO → shipment 模板 Workflow：建单成功；取消补偿只冲销一次，不重复建单 |
+| M5-2 | S4 | `doc_flow.created` 命中 workflow 定义，Run 的 `inputs/doc_ref` 正确；重复事件不重复起 Run |
+| M5-3 | S2 | 上游 `outputs.target_ids` 注入下游 `inputs`；缺路径保持 pending 并可观测 |
+| M5-4 | S5 | 两域 trace 独立；`task.outputs.edge_ids` 可反查边，`doc_flow` 信封零变化 |
+
+**回滚**：S1/S3 为新增 Action；S4 为新增事件与 nullable 列；S2/S5 为模板与只读关联。停用对应 Workflow 定义即可关闭编排，不影响现有 `doc_flow_rule` / `derive` API / 边表。
+
 ### 9.4 备选方案
 
 | 方案 | 优点 | 缺点 | 结论 |
