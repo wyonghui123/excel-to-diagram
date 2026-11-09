@@ -107,12 +107,16 @@ def test_migrate_seeds_doc_flow_rule_permissions_and_grants(tmp_path):
         assert rule['target_bo'] == 'customer_invoice_line'
         permissions = fetch_all(
             conn, "SELECT code FROM permissions WHERE code LIKE 'customer_invoice:%'")
-        assert len(permissions) == 5
+        assert len(permissions) == 7
+        assert {row['code'] for row in permissions} >= {
+            'customer_invoice:customer_invoice_print',
+            'customer_invoice:customer_invoice_credit_memo',
+        }
         granted = fetch_all(
             conn,
             "SELECT permission_code FROM permission_set_permissions "
             "WHERE permission_code LIKE 'customer_invoice:%'")
-        assert len(granted) == 10
+        assert len(granted) == 14
     finally:
         conn.close()
 

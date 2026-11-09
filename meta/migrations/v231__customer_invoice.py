@@ -105,7 +105,7 @@ DOC_FLOW_RULE = {
     'pool': 'billing',
 }
 
-#: 权限（双段式）：本波 5 个动作
+#: 权限（双段式）：本波 7 个动作（B6 补 print / credit_memo）
 PERMISSIONS = tuple(
     ('customer_invoice:customer_invoice_{0}'.format(action),
      '销售发票{0}'.format(label), 'customer_invoice', action)
@@ -115,6 +115,8 @@ PERMISSIONS = tuple(
         ('post', '过账'),
         ('reverse', '红冲'),
         ('cancel', '取消'),
+        ('print', '打印'),
+        ('credit_memo', '创建贷项'),
     )
 )
 GRANT_TO_SETS = ('admin', 'default')

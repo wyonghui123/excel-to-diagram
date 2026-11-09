@@ -333,3 +333,39 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 - `git add` 逐文件 + commit：
   `feat(billing): standalone credit memo from posted invoice (B5)`
+
+---
+
+# B6 权限补齐与菜单分组（spec §17）
+
+## [x] T19 权限 / 菜单 / 打印
+
+**修改**
+- `meta/migrations/v231__customer_invoice.py`：PERMISSIONS 扩到 7 个动作
+  （新增 `print` / `credit_memo`）
+- `meta/migrations/v234__customer_invoice_permissions_menu.py`：旧库补权限 +
+  授予 admin/default；存在「应收」父菜单时挂载 `customer_invoice-list`
+- `meta/services/bo_action_registrations.py`：贷项 action 权限改为
+  `customer_invoice:customer_invoice_credit_memo`
+- `meta/schemas/customer_invoice.yaml`：detail.actions 增加「打印」，
+  「创建贷项」权限同步
+- `src/components/common/DetailPage/DetailPage.vue`：`case 'print'` →
+  `window.print()`
+- 测试：`test_migration_v234.py` 3 用例；v231 / actions 断言更新；
+  helpers 增加 menus 表与 `build_permission_file`
+
+## [x] T20 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v233.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v234.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+```
+
+- 前端 `npm run build`（DetailPage 变更）
+- `git add` 逐文件 + commit：
+  `feat(billing): invoice print/credit permissions and menu group (B6)`

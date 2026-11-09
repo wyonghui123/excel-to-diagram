@@ -186,6 +186,14 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     created_at DATETIME,
     updated_at DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS menus (
+    menu_code VARCHAR(64) PRIMARY KEY,
+    menu_name VARCHAR(128),
+    menu_path VARCHAR(200),
+    parent_menu VARCHAR(200),
+    sort_order INTEGER DEFAULT 99
+);
 """
 
 
@@ -284,6 +292,22 @@ def build_bare_file(path) -> sqlite3.Connection:
         conn.execute(
             'INSERT INTO permission_sets (code, is_active) VALUES (?, 1)',
             [code])
+    conn.commit()
+    return conn
+
+
+def build_permission_file(path, menu_rows=None) -> sqlite3.Connection:
+    """v234 专用：上游表 + 权限集 + 菜单种子（menu_rows: (code, name, parent, order)）。"""
+    conn = sqlite3.connect(str(path))
+    conn.executescript(_UPSTREAM_DDL)
+    for code in ('admin', 'default'):
+        conn.execute(
+            'INSERT INTO permission_sets (code, is_active) VALUES (?, 1)',
+            [code])
+    for menu_code, menu_name, parent, order in (menu_rows or ()):
+        conn.execute(
+            'INSERT INTO menus (menu_code, menu_name, parent_menu, sort_order) '
+            'VALUES (?, ?, ?, ?)', [menu_code, menu_name, parent, order])
     conn.commit()
     return conn
 

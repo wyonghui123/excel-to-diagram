@@ -1677,6 +1677,11 @@ async function handleObjectPageAction({ action }) {
       showAuditDialog.value = true
       break
 
+    case 'print':
+      // [B6] 打印当前详情页（浏览器打印）
+      window.print()
+      break
+
     default:
       // [spec §13] 业务 Action：YAML 声明 action 的按钮
       if (action.action) {

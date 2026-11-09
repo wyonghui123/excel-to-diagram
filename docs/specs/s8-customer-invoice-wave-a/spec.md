@@ -811,3 +811,38 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 - action 3 用例：建单成功 / 缺原单 id / 注册契约。
 - 回归：guard / schedule / v231 / v232 / v233 / schema_api。
 
+---
+
+## 17. B6 权限补齐与菜单分组
+
+> 决策：补 print 与独立 credit_memo 权限；贷项按钮改挂独立权限；
+> 发票菜单在存在「应收」父菜单时自动归组，否则保持顶层（不阻断）。
+
+### 17.1 权限
+
+| code | 用途 | 挂载点 |
+|---|---|---|
+| customer_invoice:customer_invoice_print | 打印发票详情 | detail.actions「打印」 |
+| customer_invoice:customer_invoice_credit_memo | 创建贷项 | B5 action + detail.actions「创建贷项」 |
+
+- v231 权限种子扩到 7 个动作（新库开箱可用）。
+- v234 迁移为旧库补写并授予 admin / default；幂等。
+
+### 17.2 菜单分组
+
+- 菜单仍由 `menu_auto_generator` 生成；v234 在 `menus` 存在名称含「应收」的
+  父菜单时，把 `customer_invoice-list` 挂到其下（sort_order=50）。
+- 无父菜单（当前环境）保持顶层，迁移不阻断、verify 不强制。
+
+### 17.3 打印
+
+- DetailPage 新增 `case 'print'`：调用浏览器 `window.print()` 打印当前详情页。
+- 列表页 print 不在本期（列表导出已有 export）。
+
+### 17.4 测试与验收
+
+- v234 3 用例：补权限 + 挂菜单 / 无父菜单保持顶层 / 幂等 + 回滚。
+- v231 权限断言更新为 7 权限、14 授权。
+- action 契约：credit_memo 权限断言更新。
+- 回归：schema_api / actions / service / guard / schedule / v231-v233。
+

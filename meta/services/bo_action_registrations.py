@@ -1421,7 +1421,7 @@ def register_all_bo_actions(registry=None):
         description='按已过账发票生成独立贷项草稿（引用原单，可按行选择）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_create',
+        permission_required='customer_invoice:customer_invoice_credit_memo',
         input_schema={
             'type': 'object',
             'properties': {

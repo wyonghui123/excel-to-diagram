@@ -141,6 +141,7 @@ def test_credit_action_is_registered_with_permission():
     assert meta is not None
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
-    assert meta.permission_required == 'customer_invoice:customer_invoice_create'
+    assert meta.permission_required == (
+        'customer_invoice:customer_invoice_credit_memo')
     assert meta.requires_auth is True
     assert meta.idempotent is False
