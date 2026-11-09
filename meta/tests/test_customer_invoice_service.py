@@ -12,28 +12,39 @@ pytestmark = pytest.mark.unit
 
 from meta.services.customer_invoice_service import (
     CREDIT_DOC_FLOW_RULE_ID,
+    PLAN_DOC_FLOW_RULE_ID,
     CustomerInvoiceError,
     CustomerInvoiceService,
 )
 from meta.tests.factories._customer_invoice_helpers import (
+    BILLING_SCHEDULE_ID,
     CURRENCY_ID,
     CUSTOMER_ID,
     INVOICE_DATE,
     ORDER_ID,
     ORDER_LINE_DELIVERY,
+    ORDER_LINE_NONE,
+    ORDER_LINE_PLAN,
     ORG_ID,
     SHIPMENT_ID,
     SHIP_LINE_ID,
     add_allocation,
     build_conn,
     enable_allocation_table,
+    fetch_one,
     get_header,
     get_lines,
     get_schedules,
+    make_billing_schedule,
     make_ds,
+    make_order,
+    make_order_line,
     set_header_amounts,
     set_order_line_billed,
     set_order_line_item,
+    set_order_status,
+    set_schedule_billed,
+    set_schedule_fields,
     set_shipment_line_billed,
     set_shipment_status,
     shipment_billed,
@@ -290,19 +301,21 @@ def test_create_manual_line_requires_tax_code():
 
 
 def test_create_manual_plan_schedule_fails_closed():
+    """Wave B：手工开票不允许按计划期次开票，必须走 create_from_schedule。"""
     conn = build_conn()
     with pytest.raises(CustomerInvoiceError) as error:
         _service(conn).create_manual(dict(
             BASE_HEADER, lines=[{'schedule_id': 72}]))
-    _expect(error, 'INVOICE_RELEVANCE_NOT_SUPPORTED')
+    _expect(error, 'INVOICE_SOURCE_MISMATCH')
 
 
 def test_order_line_plan_relevance_fails_closed():
+    """Wave B：plan 行只能按计划期次开票，手工按订单量开票直拒。"""
     conn = build_conn()
     with pytest.raises(CustomerInvoiceError) as error:
         _service(conn).create_manual(dict(
             BASE_HEADER, lines=[{'order_line_id': 12, 'qty': 5}]))
-    _expect(error, 'INVOICE_RELEVANCE_NOT_SUPPORTED')
+    _expect(error, 'INVOICE_SOURCE_MISMATCH')
 
 
 def test_order_line_none_relevance_rejected():
@@ -473,6 +486,8 @@ def test_recompute_order_billing_full_when_all_lines_billed():
     conn = build_conn()
     for line_id, qty in ((11, 100), (12, 50), (13, 5)):
         set_order_line_billed(conn, line_id, qty)
+    # Wave B：plan 行的完成度由其 billing 期次聚合决定
+    set_schedule_billed(conn, 1000)
 
     result = _service(conn).recompute_order_billing(ORDER_ID)
 
@@ -724,3 +739,216 @@ def test_reverse_writes_credit_doc_flow_edge(monkeypatch):
     assert args[4] == red_line_id
     assert args[5] == 40.0
     assert kwargs['amount'] == 400.0
+
+
+# ---------------------------------------------------------------- Wave B 计划期次开票
+
+def _from_schedule(conn, **overrides):
+    payload = dict(BASE_HEADER, schedule_ids=[BILLING_SCHEDULE_ID])
+    payload.update(overrides)
+    return _service(conn).create_from_schedule(payload)
+
+
+def _schedule_row(conn, schedule_id=BILLING_SCHEDULE_ID):
+    return fetch_one(
+        conn, 'SELECT * FROM sales_order_schedules WHERE id = ?',
+        [schedule_id])
+
+
+def _posted_plan_invoice(conn, **overrides):
+    service = _service(conn)
+    created = _from_schedule(conn, **overrides)
+    service.submit(created['id'])
+    service.post(created['id'], posting_date=INVOICE_DATE)
+    return service, created
+
+
+def test_create_from_schedule_defaults_to_full_period():
+    conn = build_conn()
+    result = _from_schedule(conn)
+
+    assert result['status'] == 'draft'
+    assert result['amounts'] == {'net_amount': 1000.0, 'tax_amount': 130.0,
+                                 'gross_amount': 1130.0}
+    line = get_lines(conn, result['id'])[0]
+    assert line['source_doc_type'] == 'billing_schedule'
+    assert line['schedule_id'] == BILLING_SCHEDULE_ID
+    assert line['order_line_id'] is None
+    assert line['billing_basis'] == 'percent'
+    assert Decimal(str(line['billing_percent'])) == Decimal('100')
+    assert Decimal(str(line['billing_base_amount'])) == Decimal('1000')
+    assert Decimal(str(line['qty'])) == Decimal('1')
+    assert Decimal(str(line['net_amount'])) == Decimal('1000')
+
+
+def test_create_from_schedule_merges_multiple_periods():
+    conn = build_conn()
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID, billing_percent=60)
+    make_billing_schedule(conn, 73, percent=40)
+
+    result = _from_schedule(conn, schedule_ids=[BILLING_SCHEDULE_ID, 73])
+
+    lines = get_lines(conn, result['id'])
+    assert [line['schedule_id'] for line in lines] == [
+        BILLING_SCHEDULE_ID, 73]
+    assert result['amounts']['net_amount'] == 1000.0
+
+
+def test_create_from_schedule_partial_then_remainder_absorbs_tail():
+    conn = build_conn()
+    service = _service(conn)
+    first = _from_schedule(
+        conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                      'billing_percent': 30}])
+    assert first['amounts']['net_amount'] == 300.0
+    service.submit(first['id'])
+    service.post(first['id'], posting_date=INVOICE_DATE)
+
+    second = _from_schedule(
+        conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                      'billing_percent': 70}])
+    assert second['amounts']['net_amount'] == 700.0
+    service.submit(second['id'])
+    service.post(second['id'], posting_date=INVOICE_DATE)
+
+    schedule = _schedule_row(conn)
+    assert Decimal(str(schedule['billed_amount'])) == Decimal('1000')
+    assert schedule['billing_status'] == 'full'
+
+
+def test_create_from_schedule_rejects_over_period_amount():
+    conn = build_conn()
+    _posted_plan_invoice(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn)
+    _expect(error, 'INVOICE_PLAN_EXCEEDED')
+
+
+def test_create_from_schedule_rejects_percent_over_remaining():
+    conn = build_conn()
+    service = _service(conn)
+    first = _from_schedule(
+        conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                      'billing_percent': 30}])
+    service.submit(first['id'])
+    service.post(first['id'], posting_date=INVOICE_DATE)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                                     'billing_percent': 80}])
+    _expect(error, 'INVOICE_PLAN_PERCENT_INVALID')
+
+
+def test_create_from_schedule_rejects_non_plan_line():
+    conn = build_conn()
+    make_billing_schedule(conn, 74, line_id=ORDER_LINE_DELIVERY, percent=50)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn, schedule_ids=[74])
+    _expect(error, 'INVOICE_RELEVANCE_NOT_PLAN')
+
+
+def test_create_from_schedule_rejects_unbillable_period_state():
+    conn = build_conn()
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID, status='cancelled')
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn)
+    _expect(error, 'INVOICE_PLAN_STATE_INVALID')
+
+
+def test_create_from_schedule_rejects_non_billable_order():
+    conn = build_conn()
+    set_order_status(conn, 'draft')
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn)
+    _expect(error, 'INVOICE_ORDER_STATE_INVALID')
+
+
+def test_create_from_schedule_rejects_mixed_orders():
+    conn = build_conn()
+    make_order(conn, 2)
+    make_order_line(conn, 21, order_id=2, relevance='plan', net_amount=500)
+    make_billing_schedule(conn, 75, order_id=2, line_id=21, percent=50)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_schedule(conn, schedule_ids=[BILLING_SCHEDULE_ID, 75])
+    _expect(error, 'INVOICE_PLAN_ORDER_MISMATCH')
+
+
+def test_plan_post_writes_schedule_billed_and_doc_flow(monkeypatch):
+    conn = build_conn()
+    calls = _capture_attach_edges(monkeypatch)
+    service, created = _posted_plan_invoice(conn)
+
+    schedule = _schedule_row(conn)
+    assert Decimal(str(schedule['billed_amount'])) == Decimal('1000')
+    assert schedule['billing_status'] == 'full'
+    order = fetch_one(
+        conn, 'SELECT billing_status FROM sales_orders WHERE id = ?',
+        [ORDER_ID])
+    assert order['billing_status'] == 'partial'
+
+    line = get_lines(conn, created['id'])[0]
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[2] == PLAN_DOC_FLOW_RULE_ID
+    assert args[3] == BILLING_SCHEDULE_ID
+    assert args[4] == line['id']
+    assert kwargs['amount'] == 1000.0
+    assert kwargs['derived_by'] == 'customer_invoice_service'
+
+
+def test_plan_post_derives_full_order_with_other_lines():
+    conn = build_conn()
+    service, _ = _posted_plan_invoice(conn)
+    set_order_line_billed(conn, ORDER_LINE_DELIVERY, 100, 1000)
+    set_order_line_billed(conn, ORDER_LINE_NONE, 5, 5)
+
+    result = service.recompute_order_billing(ORDER_ID)
+
+    assert result['billing_status'] == 'full'
+
+
+def test_plan_reverse_rolls_back_schedule_billed():
+    conn = build_conn()
+    service, created = _posted_plan_invoice(conn)
+
+    result = service.reverse(created['id'], '客户取消')
+
+    schedule = _schedule_row(conn)
+    assert Decimal(str(schedule['billed_amount'])) == Decimal('0')
+    assert schedule['billing_status'] == 'none'
+    assert schedule['status'] == 'planned'
+    assert get_header(conn, created['id'])['status'] == 'reversed'
+    assert result['red_invoice_no']
+
+
+def test_plan_red_invoice_keeps_percent_basis_and_negative_amount():
+    conn = build_conn()
+    service, created = _posted_plan_invoice(conn)
+
+    result = service.reverse(created['id'], '客户取消')
+
+    red_line = get_lines(conn, result['red_invoice_id'])[0]
+    assert red_line['billing_basis'] == 'percent'
+    assert red_line['schedule_id'] == BILLING_SCHEDULE_ID
+    assert Decimal(str(red_line['net_amount'])) == Decimal('-1000')
+
+
+def test_plan_post_rejects_stale_schedule_after_concurrent_billing():
+    conn = build_conn()
+    service = _service(conn)
+    created = _from_schedule(conn)
+    service.submit(created['id'])
+    # 模拟提交后另一会话把期次开满：过账时的条件 UPDATE 必须拦下
+    set_schedule_billed(conn, 1000)
+    conn.commit()
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.post(created['id'], posting_date=INVOICE_DATE)
+    _expect(error, 'INVOICE_PLAN_EXCEEDED')
+    assert get_header(conn, created['id'])['status'] == 'submitted'
+    assert Decimal(str(_schedule_row(conn)['billed_amount'])) == Decimal('1000')

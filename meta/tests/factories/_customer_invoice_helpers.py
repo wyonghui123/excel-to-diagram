@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     project_id INTEGER,
     billing_method VARCHAR(16) DEFAULT 'delivery',
     billing_status VARCHAR(16) NOT NULL DEFAULT 'none',
-    billing_derived_at DATETIME
+    billing_derived_at DATETIME,
+    status VARCHAR(20) NOT NULL DEFAULT 'confirmed'
 );
 
 CREATE TABLE IF NOT EXISTS sales_order_lines (
@@ -104,13 +105,20 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
     billing_method VARCHAR(16) DEFAULT 'delivery',
     billing_relevance VARCHAR(16) NOT NULL DEFAULT 'delivery',
     billed_qty NUMERIC(18,4) NOT NULL DEFAULT 0,
-    billed_amount NUMERIC(18,4) NOT NULL DEFAULT 0
+    billed_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
+    net_amount NUMERIC(18,4) NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sales_order_schedules (
     id INTEGER PRIMARY KEY,
-    order_line_id INTEGER,
+    order_id INTEGER,
+    line_id INTEGER,
+    schedule_no VARCHAR(30),
     schedule_kind VARCHAR(16) DEFAULT 'delivery',
+    status VARCHAR(20) NOT NULL DEFAULT 'planned',
+    promised_date DATE,
+    promised_qty NUMERIC(18,4),
+    billing_percent NUMERIC(9,4),
     billed_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
     billing_status VARCHAR(16) NOT NULL DEFAULT 'none'
 );
@@ -285,9 +293,9 @@ def build_bare_file(path) -> sqlite3.Connection:
         [ORDER_LINE_PLAN, ORDER_ID, 'delivery', 'delivery'])
     conn.execute(
         "INSERT INTO sales_order_schedules "
-        "(id, order_line_id, schedule_kind, billed_amount, billing_status) "
-        "VALUES (?, ?, 'billing', 0, 'none')",
-        [BILLING_SCHEDULE_ID, ORDER_LINE_DELIVERY])
+        "(id, order_id, line_id, schedule_kind, billed_amount, billing_status) "
+        "VALUES (?, ?, ?, 'billing', 0, 'none')",
+        [BILLING_SCHEDULE_ID, ORDER_ID, ORDER_LINE_DELIVERY])
     for code in ('admin', 'default'):
         conn.execute(
             'INSERT INTO permission_sets (code, is_active) VALUES (?, 1)',
@@ -398,6 +406,65 @@ def set_order_line_item(conn, item_id, line_id=ORDER_LINE_DELIVERY):
                  [item_id, line_id])
 
 
+def set_schedule_billed(conn, amount, status='full', schedule_id=BILLING_SCHEDULE_ID):
+    """Wave B：直接把开票期次标记为已开票（用于派生状态测试）。"""
+    conn.execute(
+        'UPDATE sales_order_schedules SET billed_amount = ?, billing_status = ? '
+        'WHERE id = ?', [amount, status, schedule_id])
+
+
+def set_schedule_fields(conn, schedule_id, **fields):
+    """Wave B：按字段更新开票期次（状态 / 比例 / 日期等）。"""
+    if not fields:
+        return
+    assignments = ', '.join('{0} = ?'.format(key) for key in fields)
+    conn.execute(
+        'UPDATE sales_order_schedules SET {0} WHERE id = ?'.format(assignments),
+        list(fields.values()) + [schedule_id])
+
+
+def set_order_status(conn, status, order_id=ORDER_ID):
+    conn.execute('UPDATE sales_orders SET status = ? WHERE id = ?',
+                 [status, order_id])
+
+
+def make_order(conn, order_id, status='confirmed', order_no=None):
+    conn.execute(
+        'INSERT INTO sales_orders (id, order_no, billing_status, status) '
+        "VALUES (?, ?, 'none', ?)",
+        [order_id, order_no or 'SO-%04d' % order_id, status])
+
+
+def make_order_line(conn, line_id, *, order_id=ORDER_ID, qty=10,
+                    unit_price=50, net_amount=None, relevance='delivery',
+                    billing_method='milestone'):
+    net = round(qty * unit_price, 4) if net_amount is None else net_amount
+    conn.execute(
+        'INSERT INTO sales_order_lines '
+        '(id, order_id, line_no, item_id, description, uom_id, qty, '
+        ' unit_price, net_amount, tax_code_id, tax_rate_percent, '
+        ' billing_method, billing_relevance, billed_qty, billed_amount) '
+        'VALUES (?, ?, ?, ?, ?, 21, ?, ?, ?, 31, 13.0, ?, ?, 0, 0)',
+        [line_id, order_id, line_id, 500 + line_id, '计划行%s' % line_id,
+         qty, unit_price, net, billing_method, relevance])
+
+
+def make_billing_schedule(conn, schedule_id, *, order_id=ORDER_ID,
+                          line_id=ORDER_LINE_PLAN, percent=None,
+                          status='planned', promised_date='2026-11-15',
+                          schedule_no=None, billed_amount=0,
+                          billing_status='none'):
+    conn.execute(
+        'INSERT INTO sales_order_schedules '
+        '(id, order_id, line_id, schedule_no, schedule_kind, status, '
+        ' promised_date, promised_qty, billing_percent, billed_amount, '
+        ' billing_status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)',
+        [schedule_id, order_id, line_id,
+         schedule_no or 'BS-%03d' % schedule_id, 'billing', status,
+         promised_date, percent, billed_amount, billing_status])
+
+
 def enable_allocation_table(conn):
     """模拟 AR 核销表存在（生产库尚无 payment_allocations，守卫 fail-open）。"""
     conn.execute(
@@ -483,21 +550,25 @@ def _seed_order(conn: sqlite3.Connection) -> None:
         conn.execute(
             'INSERT INTO sales_order_lines '
             '(id, order_id, line_no, item_id, description, uom_id, qty, '
-            ' unit_price, tax_code_id, tax_rate_percent, billing_relevance, '
-            ' billed_qty, billed_amount) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)',
+            ' unit_price, net_amount, tax_code_id, tax_rate_percent, '
+            ' billing_relevance, billed_qty, billed_amount) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)',
             [line_id, ORDER_ID, line_id, 500 + line_id, description, 21,
-             qty, price, 31, 13.0, relevance])
+             qty, price, round(qty * price, 4), 31, 13.0, relevance])
     conn.execute(
         'INSERT INTO sales_order_schedules '
-        '(id, order_line_id, schedule_kind, billed_amount, billing_status) '
-        "VALUES (?, ?, 'delivery', 0, 'none')",
-        [DELIVERY_SCHEDULE_ID, ORDER_LINE_DELIVERY])
+        '(id, order_id, line_id, schedule_no, schedule_kind, status, '
+        ' promised_date, billing_percent, billed_amount, billing_status) '
+        "VALUES (?, ?, ?, 'DS-001', 'delivery', 'confirmed', "
+        "'2026-11-01', NULL, 0, 'none')",
+        [DELIVERY_SCHEDULE_ID, ORDER_ID, ORDER_LINE_DELIVERY])
     conn.execute(
         'INSERT INTO sales_order_schedules '
-        '(id, order_line_id, schedule_kind, billed_amount, billing_status) '
-        "VALUES (?, ?, 'billing', 0, 'none')",
-        [BILLING_SCHEDULE_ID, ORDER_LINE_PLAN])
+        '(id, order_id, line_id, schedule_no, schedule_kind, status, '
+        ' promised_date, billing_percent, billed_amount, billing_status) '
+        "VALUES (?, ?, ?, 'BS-001', 'billing', 'planned', "
+        "'2026-11-15', 100, 0, 'none')",
+        [BILLING_SCHEDULE_ID, ORDER_ID, ORDER_LINE_PLAN])
 
 
 def _seed_shipment(conn: sqlite3.Connection, qty: float) -> None:
