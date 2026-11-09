@@ -18,7 +18,8 @@
 - 本模块不碰 Flask / BO registry
 
 边界（本模块不做）:
-- 上游 `outputs` 按 edge 注入下游 `inputs`（运行期数据流）—— 留待实例层后续
+- `inputs_template` 只做点路径取值（`run.inputs` / 直接上游 `outputs`），
+  不做表达式运算 / 函数调用
 - 任务的实际执行（executor 分派）—— 归 A5/A4
 - 补偿的**业务红字**执行：任务不写对象表（B4 写权单通道），`compensate_task()`
   只携带 `bo_action` 声明，真正调用归 B 系列 / E6 三档冲销
@@ -26,6 +27,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
@@ -37,7 +39,7 @@ from meta.core.task_schema import (
     WORKFLOW_RUN_TABLE,
 )
 from meta.core.task_state_machine import TransitionContext, require_transition
-from meta.core.workflow_definition import incoming_edges
+from meta.core.workflow_definition import incoming_edges, parse_ref_expr
 from meta.core.workflow_store import load_definition
 
 #: Run 派生状态口径（非 DB 列）
@@ -48,6 +50,9 @@ _TERMINAL_OK = ("done", "skipped", "cancelled")
 
 #: 派生「进行中」的状态集合
 _RUNNING = ("ready", "claimed", "in_progress", "waiting_approval", "blocked")
+
+#: 输入模板占位符（S2）：`{{run.inputs.<path>}}` / `{{<node_id>.outputs.<path>}}`
+_TEMPLATE_TOKEN = re.compile(r"\{\{(.*?)\}\}")
 
 _RUN_COLUMNS = (
     "id", "workflow_id", "workflow_key", "workflow_version", "name",
@@ -318,17 +323,94 @@ def deps_satisfied(deps: Any, status_by_task_id: Dict[str, str]) -> bool:
     return True
 
 
+def _resolve_path(root: Any, path: str):
+    """按点路径取值（dict 键 / list 下标）；缺失返回 (False, None)。"""
+    current = root
+    for part in path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
+            return False, None
+    return True, current
+
+
+def _resolve_ref(ref, run_inputs: Dict[str, Any],
+                 outputs_by_node: Dict[str, Any]):
+    """解析一个引用 → `(True, value)` / `(False, 缺失路径标签)`。"""
+    if ref is None:
+        return False, "INPUT_TEMPLATE_INVALID"
+    node_id, path = ref
+    if node_id is None:
+        label = "run.inputs.{0}".format(path)
+        ok, value = _resolve_path(run_inputs, path)
+        return (True, value) if ok else (False, label)
+    label = "{0}.outputs.{1}".format(node_id, path)
+    if node_id not in outputs_by_node:
+        return False, label
+    ok, value = _resolve_path(outputs_by_node.get(node_id) or {}, path)
+    return (True, value) if ok else (False, label)
+
+
+def _resolve_inputs_template(template: Dict[str, Any],
+                             run_inputs: Dict[str, Any],
+                             outputs_by_node: Dict[str, Any]):
+    """解析 `meta.inputs_template` → `(True, resolved)` / `(False, 缺失路径)`。
+
+    整值占位保留原类型（list/dict），字符串内嵌占位按 `str()` 拼接。
+    """
+    resolved: Dict[str, Any] = {}
+    for key, value in template.items():
+        if not isinstance(value, str) or "{{" not in value:
+            resolved[key] = value
+            continue
+        matches = list(_TEMPLATE_TOKEN.finditer(value))
+        whole = len(matches) == 1 and matches[0].span() == (0, len(value))
+        if whole:
+            ok, result = _resolve_ref(parse_ref_expr(matches[0].group(1)),
+                                      run_inputs, outputs_by_node)
+            if not ok:
+                return False, result
+            resolved[key] = result
+            continue
+        chunks: List[str] = []
+        cursor = 0
+        for match in matches:
+            chunks.append(value[cursor:match.start()])
+            ok, result = _resolve_ref(parse_ref_expr(match.group(1)),
+                                      run_inputs, outputs_by_node)
+            if not ok:
+                return False, result
+            chunks.append(str(result))
+            cursor = match.end()
+        chunks.append(value[cursor:])
+        resolved[key] = "".join(chunks)
+    return True, resolved
+
+
 def advance_run(data_source, run_id: str, *, actor: str = "engine",
                 actor_kind: str = "system") -> Dict[str, Any]:
     """把 deps 已满足的 `pending` 任务提升为 `ready`（幂等：可重复调用）。
 
+    S2：提升前按 `task.meta.inputs_template` 注入上游 outputs / run.inputs；
+    解析失败不提升，保持 `pending` 并写 `blocked_reasons`。
+
     Returns:
-        {"run_id", "promoted": [task_id...], "blocked": [task_id...]}
+        {"run_id", "promoted": [task_id...], "blocked": [task_id...],
+         "blocked_reasons": {task_id: "INPUT_TEMPLATE_UNRESOLVED:<path>"}}
     """
     tasks = list_run_tasks(data_source, run_id)
+    run = get_run(data_source, run_id)
+    run_inputs = (run or {}).get("inputs") or {}
+    outputs_by_node = {
+        task["workflow_node_id"]: (task.get("outputs") or {})
+        for task in tasks if task.get("workflow_node_id")
+    }
     status_by_task_id = {t["id"]: t["status"] for t in tasks}
     promoted: List[str] = []
     blocked: List[str] = []
+    blocked_reasons: Dict[str, str] = {}
 
     for task in tasks:
         if task["status"] != "pending":
@@ -337,15 +419,38 @@ def advance_run(data_source, run_id: str, *, actor: str = "engine",
             blocked.append(task["id"])
             continue
 
+        meta = task.get("meta")
+        template = meta.get("inputs_template") if isinstance(meta, dict) else None
+        inputs_text: Optional[str] = None
+        if isinstance(template, dict) and template:
+            ok, resolved = _resolve_inputs_template(
+                template, run_inputs, outputs_by_node)
+            if not ok:
+                blocked.append(task["id"])
+                blocked_reasons[task["id"]] = (
+                    "INPUT_TEMPLATE_UNRESOLVED:{0}".format(resolved))
+                continue
+            inputs_text = _json_text(resolved)
+
         require_transition("pending", "ready",
                            TransitionContext(deps_satisfied=True, actor=actor,
                                              actor_kind=actor_kind))
         with data_source.transaction():
-            cursor = data_source.execute(
-                f"UPDATE {TASK_TABLE} SET status = ?, started_at = COALESCE(started_at, ?), "
-                "updated_at = ? WHERE id = ? AND status = ?",
-                ("ready", _now_iso(), _now_iso(), task["id"], "pending"),
-            )
+            if inputs_text is None:
+                cursor = data_source.execute(
+                    f"UPDATE {TASK_TABLE} SET status = ?, "
+                    "started_at = COALESCE(started_at, ?), "
+                    "updated_at = ? WHERE id = ? AND status = ?",
+                    ("ready", _now_iso(), _now_iso(), task["id"], "pending"),
+                )
+            else:
+                cursor = data_source.execute(
+                    f"UPDATE {TASK_TABLE} SET status = ?, inputs = ?, "
+                    "started_at = COALESCE(started_at, ?), "
+                    "updated_at = ? WHERE id = ? AND status = ?",
+                    ("ready", inputs_text, _now_iso(), _now_iso(),
+                     task["id"], "pending"),
+                )
             if cursor.rowcount == 0:      # 并发下已被提升 → 视为已推进
                 continue
             record_transition(
@@ -358,7 +463,8 @@ def advance_run(data_source, run_id: str, *, actor: str = "engine",
         promoted.append(task["id"])
         status_by_task_id[task["id"]] = "ready"
 
-    return {"run_id": run_id, "promoted": promoted, "blocked": blocked}
+    return {"run_id": run_id, "promoted": promoted, "blocked": blocked,
+            "blocked_reasons": blocked_reasons}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
