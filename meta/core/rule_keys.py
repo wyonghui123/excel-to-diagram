@@ -13,24 +13,27 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from meta.core.models_enums import RuleType
-
-# 来源枚举（视图元数据 sources 必须与此处双向等值，见 spec §13.4）
-RULE_SOURCES = (
-    'bo_yaml', 'doc_flow', 'approval', 'control_parameter',
-    'line_type', 'state_machine', 'numbering', 'validation',
+from meta.core.rule_scenarios import (
+    DIMENSION_FIELDS as _SCENARIO_DIMENSION_FIELDS,
+    NOT_INSTRUMENTED_SOURCES as _SCENARIO_NOT_INSTRUMENTED,
+    SOURCES as _SCENARIO_SOURCES,
 )
 
-# 暂无统一只读入口的来源：目录如实标记，不编造空结果冒充「已覆盖」。
-NOT_INSTRUMENTED_SOURCES = ('state_machine', 'numbering')
+# 来源枚举（唯一声明在 meta/core/rule_scenarios.py；视图元数据必须与其双向等值）
+RULE_SOURCES = _SCENARIO_SOURCES
+
+# 暂无统一 trace 求值入口的来源：目录如实标记，不编造空结果冒充「已覆盖」。
+NOT_INSTRUMENTED_SOURCES = _SCENARIO_NOT_INSTRUMENTED
 
 # rule_type 白名单 = RuleType 8 值 + 已登记来源派生值
-DERIVED_RULE_TYPES = ('control_parameter', 'line_type_assignment', 'doc_flow', 'approval')
+DERIVED_RULE_TYPES = (
+    'control_parameter', 'line_type_assignment', 'doc_flow', 'approval', 'sourcing',
+)
 RULE_TYPES = tuple(item.value for item in RuleType) + DERIVED_RULE_TYPES
 
-# 因子轴唯一声明（spec §13.1 / F-13-12）：推导、试算、控制参数、视图元数据共用。
-DIMENSION_FIELDS = (
-    'org_id', 'document_type_id', 'line_type_id', 'item_group_id',
-)
+# 因子轴：场景注册表的只读并集投影（spec 2026-11-09 FR-004）
+# 新代码必须按场景读取 rule_scenarios.SCENARIO_FACTOR_KEYS，本常量仅供旧代码兼容。
+DIMENSION_FIELDS = _SCENARIO_DIMENSION_FIELDS
 # 控制参数的四个因子维度（发布审计键同源，保留别名避免重复声明）
 CONTROL_PARAMETER_DIM_FIELDS = DIMENSION_FIELDS
 
@@ -62,6 +65,11 @@ def doc_flow_key(rule_id: Any) -> str:
 
 def approval_key(bo_id: Any) -> str:
     return f'approval:{bo_id}'
+
+
+def sourcing_key(rule_code: Any) -> str:
+    """供应来源规则的唯一身份键（目录 / trace / 详情 / 审计共用）。"""
+    return f'sourcing:{rule_code}'
 
 
 def split_key(rule_key: Optional[str]) -> Optional[Tuple[str, str]]:

@@ -25,13 +25,16 @@ from meta.core.rule_keys import (
     control_parameter_codes_key,
     line_type_key,
 )
+from meta.core.rule_scenarios import (
+    SCENARIOS,
+    TRACE_SCENARIO_HANDLERS,
+    TRACE_SCENARIOS,
+)
 
 logger = logging.getLogger(__name__)
 
-TRACE_SCENARIOS = (
-    'default', 'control_parameter', 'line_type',
-    'approval', 'state_transition', 'doc_flow',
-)
+# 场景清单唯一声明在 meta.core.rule_scenarios（spec 2026-11-09 FR-001）
+# 未接入场景（如 sourcing 灰度期）不在 trace 白名单内，避免产生假节点。
 # [v1.8 2026-11-07] permission 场景依赖 user_id，单据推导接口不传该入参，
 # 纳入白名单只会产生"永远跳过"的假场景，故从核心场景集移除。
 _CORE_SCENARIOS = ('default', 'state_transition', 'approval')
@@ -62,13 +65,9 @@ DECISION_KINDS = {
 MAX_TRACE_NODES = 200
 
 # 场景 → 执行阶段（spec §11.3 stage 枚举）：只用于展示分组，不参与求值。
+# 由场景注册表派生，禁止在本模块另写场景清单。
 STAGE_MAP = {
-    'default': 'before_save',
-    'control_parameter': 'calc',
-    'line_type': 'calc',
-    'approval': 'approve',
-    'state_transition': 'status_transition',
-    'doc_flow': 'validate',
+    spec.scenario: spec.stage for spec in SCENARIOS if spec.stage
 }
 
 
@@ -351,15 +350,16 @@ class RuleTraceService:
                       data_source: Any) -> Dict[str, Any]:
         started = time.perf_counter()
         try:
-            if scenario in _CORE_SCENARIOS:
+            handler = TRACE_SCENARIO_HANDLERS.get(scenario)
+            if handler == 'core':
                 result = self._core_scenario(
                     scenario, object_type=object_type, record=record,
                     record_id=record_id, from_state=from_state,
                     to_state=to_state, data_source=data_source,
                 )
-            elif scenario == 'control_parameter':
+            elif handler == 'control_parameter':
                 result = self._control_parameter(record, factors, codes, started)
-            elif scenario == 'line_type':
+            elif handler == 'line_type':
                 result = self._line_type(factors, started)
             else:
                 result = self._doc_flow(object_type, data_source, started)

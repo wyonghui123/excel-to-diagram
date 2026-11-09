@@ -20,6 +20,7 @@ from meta.services.rule_catalog_service import (
     SOURCES,
     RuleCatalogError,
     RuleCatalogService,
+    _ADAPTERS,
 )
 
 
@@ -90,7 +91,10 @@ def test_list_rules_contract(service):
     assert result['not_instrumented'] == list(NOT_INSTRUMENTED)
 
     for source in NOT_INSTRUMENTED:
-        assert result['sources'].get(source) == 'not_instrumented'
+        # 已实现只读 adapter 的来源（sourcing 灰度期）如实返回 ok；
+        # 完全没有读取入口的来源仍标记 not_instrumented。
+        expected = 'ok' if source in _ADAPTERS else 'not_instrumented'
+        assert result['sources'].get(source) == expected
 
     for item in result['items']:
         assert item['rule_key']

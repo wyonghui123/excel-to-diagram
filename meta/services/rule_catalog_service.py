@@ -30,7 +30,9 @@ from meta.core.rule_keys import (
     control_parameter_key,
     doc_flow_key,
     line_type_key,
+    sourcing_key,
 )
+from meta.core.rule_trace_service import TRACE_SCENARIOS
 from meta.core.rule_targets import links_for
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,7 @@ def _descriptor(
     scope_bo: str = '',
     factors: Optional[Dict[str, Any]] = None,
     configurable: bool = False,
+    publishable: bool = False,
     status: str = 'active',
     updated_at: str = '',
     priority: Optional[int] = None,
@@ -121,6 +124,7 @@ def _descriptor(
         'scope_bo': scope_bo or '',
         'factors': factors or {},
         'configurable': bool(configurable),
+        'publishable': bool(publishable),
         'status': status or 'active',
         'updated_at': updated_at or '',
         'priority': priority,
@@ -200,6 +204,7 @@ def _control_parameter_descriptors(*, include_draft: bool = False) -> List[Dict[
                 'value_count': len(rows),
             },
             configurable=True,
+            publishable=True,
             status=status,
             links=links_for('control_parameter', status),
             detail={
@@ -240,6 +245,7 @@ def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any
                 'specificity_rank': row.get('specificity_rank'),
             },
             configurable=True,
+            publishable=True,
             status=status,
             links=links_for('line_type', status),
             detail={'condition': str(row.get('description') or '')},
@@ -301,12 +307,87 @@ def _approval_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
     return items
 
 
+def _scope_summary(assignments: List[Dict[str, Any]]) -> str:
+    """作用域摘要：按分配行拼一段可读文本（目录列展示用，不参与求值）。"""
+    if not assignments:
+        return '未声明作用域'
+    parts: List[str] = []
+    for row in assignments[:3]:
+        segment = str(row.get('scope_type') or '')
+        ref_id = row.get('scope_ref_id')
+        if ref_id is not None:
+            segment = f'{segment}:{ref_id}'
+        dest_org_id = row.get('dest_org_id')
+        if dest_org_id is not None:
+            segment = f'{segment}@{dest_org_id}'
+        dest_location_id = row.get('dest_location_id')
+        if dest_location_id is not None:
+            segment = f'{segment}/库位{dest_location_id}'
+        parts.append(segment)
+    if len(assignments) > 3:
+        parts.append(f'等{len(assignments)}项')
+    return '；'.join(parts)
+
+
+def _sourcing_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    """供应来源规则目录（只读）：BO 生命周期，不进入统一发布流。"""
+    data_source = _meta_db()
+    rules = _query(data_source, "SELECT * FROM sourcing_rules ORDER BY code")
+    try:
+        assignments = _query(
+            data_source,
+            "SELECT * FROM sourcing_rule_assignments "
+            "ORDER BY rule_id, specificity_rank DESC, seq, id",
+        )
+    except RuleCatalogError as exc:  # 子表缺失不阻断规则头可见性
+        logger.warning('[rule_catalog] sourcing 作用域读取失败: %s', exc)
+        assignments = []
+
+    grouped: Dict[Any, List[Dict[str, Any]]] = {}
+    for row in assignments:
+        grouped.setdefault(row.get('rule_id'), []).append(row)
+
+    items: List[Dict[str, Any]] = []
+    for rule in rules:
+        code = str(rule.get('code') or '')
+        status = str(rule.get('status') or 'draft')
+        # 默认只看生效态，与运行时读取口径一致；草稿由详情/发布流显式开启
+        if not include_draft and status != 'active':
+            continue
+        scopes = grouped.get(rule.get('id'), [])
+        items.append(_descriptor(
+            'sourcing',
+            sourcing_key(code),
+            str(rule.get('name') or code),
+            rule_type='sourcing',
+            factors={
+                'rule_usage': rule.get('rule_usage') or '',
+                'effectivity_start': rule.get('effectivity_start'),
+                'effectivity_end': rule.get('effectivity_end'),
+                'scope_count': len(scopes),
+                'scope_summary': _scope_summary(scopes),
+            },
+            configurable=False,
+            publishable=False,
+            status=status,
+            updated_at=str(rule.get('updated_at') or ''),
+            links={'edit': {'target': 'sourcing_rule'}},
+            detail={
+                'condition': str(rule.get('description') or ''),
+                'scope': scopes[:20],
+                'scope_truncated': len(scopes) > 20,
+            },
+        ))
+    return items
+
+
 _ADAPTERS = {
     'bo_yaml': _bo_yaml_descriptors,
     'control_parameter': _control_parameter_descriptors,
     'line_type': _line_type_descriptors,
     'doc_flow': _doc_flow_descriptors,
     'approval': _approval_descriptors,
+    'sourcing': _sourcing_descriptors,
 }
 
 
@@ -336,6 +417,16 @@ class RuleCatalogService:
             raise RuleCatalogError(f'规则中心视图元数据解析失败: {exc}') from exc
 
         self._validate_view_config(config)
+        # 声明源是场景注册表：校验通过后按注册表重排/派生，响应不再依赖 YAML 顺序
+        declared_sources = {
+            str(entry['id'] if isinstance(entry, dict) else entry): entry
+            for entry in (config.get('sources') or [])
+        }
+        config['sources'] = [
+            declared_sources.get(source_id, {'id': source_id, 'label': source_id})
+            for source_id in SOURCES
+        ]
+        config.setdefault('trace', {})['scenarios'] = list(TRACE_SCENARIOS)
         config['filter_options'] = self._derive_filter_options(config)
         # 响应自带版本与内容指纹，消费端可据此感知元数据变更（spec §13 F-13-10）
         config['hash'] = hashlib.sha256(raw.encode('utf-8')).hexdigest()
@@ -360,7 +451,6 @@ class RuleCatalogService:
             SCOPE_NOT_TRIGGERED,
             SOURCE_TYPES,
             STAGE_MAP,
-            TRACE_SCENARIOS,
         )
         from meta.services.rule_simulate_service import CONFIG_MODES, MAX_CODES
 
@@ -541,7 +631,9 @@ class RuleCatalogService:
             status['validation'] = f'error: {exc}'
 
         for source in NOT_INSTRUMENTED:
-            status[source] = 'not_instrumented'
+            # 已实现只读 adapter 的来源（如 sourcing）以实际读取结果为准；
+            # 仅对完全没有入口的来源标记 not_instrumented。
+            status.setdefault(source, 'not_instrumented')
 
         items.extend(bo_items)
         items.sort(key=lambda d: (d['source'], d['rule_key']))
@@ -606,6 +698,8 @@ class RuleCatalogService:
             'offset': offset,
             'sources': source_status,
             'not_instrumented': list(NOT_INSTRUMENTED),
+            'degraded': any(
+                str(value).startswith('error') for value in source_status.values()),
         }
 
     @staticmethod

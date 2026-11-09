@@ -33,6 +33,8 @@ sources:
     label: 编号规则
   - id: validation
     label: 校验与默认值
+  - id: sourcing
+    label: 供应来源
 
 # 列/筛选的展示文案（前端壳只读这里的映射，不得在组件内写死中文）
 column_labels:
