@@ -26,6 +26,8 @@ from meta.services.transfer_order_service import (
     resolve_tolerance_ratio,
 )
 
+from meta.core.doc_flow_reversal import release_target_edges
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'transfer_shipments'
@@ -97,9 +99,12 @@ def _rowcount(cursor: Any) -> int:
 class TransferShipmentService:
     """调拨发货单生命周期动作。"""
 
-    def __init__(self, data_source=None, order_service=None):
+    def __init__(self, data_source=None, order_service=None,
+                 platform_data_source=None):
         self._ds = data_source
         self._order_service = order_service
+        # 平台库（doc_flow_rule）；单库部署时与 self.ds 相同
+        self._platform_ds = platform_data_source
 
     @property
     def ds(self):
@@ -196,19 +201,37 @@ class TransferShipmentService:
                  STATUS_DRAFT, remark, now, now])
             shipment_id = int(getattr(cursor, 'lastrowid', 0) or 0)
 
+            created_lines = []
             for index, (order_line_id, qty) in enumerate(items.items(), start=1):
-                self.ds.execute(
+                cursor = self.ds.execute(
                     'INSERT INTO %s (transfer_shipment_id, line_no, '
                     'transfer_order_line_id, qty, remark, created_at, updated_at) '
                     'VALUES (?, ?, ?, ?, ?, ?, ?)' % LINE_TABLE,
                     [shipment_id, index * LINE_NO_STEP, order_line_id,
                      float(qty), None, now, now])
+                created_lines.append(
+                    (order_line_id, qty,
+                     int(getattr(cursor, 'lastrowid', 0) or 0)))
+            self._write_order_edges(created_lines)
 
         logger.info('[transfer_shipment] created id=%s order=%s lines=%s',
                     shipment_id, order['id'], len(items))
         return {'id': shipment_id, 'shipment_no': number,
                 'status': STATUS_DRAFT, 'transfer_order_id': order['id'],
                 'line_count': len(items)}
+
+    def _write_order_edges(self, created_lines) -> None:
+        """调拨行 → 调拨发货行（attach 模式，失败降级不阻断建单）。"""
+        from meta.core.doc_flow_attach import attach_edge
+        for order_line_id, qty, line_id in created_lines:
+            if not line_id:
+                continue
+            attach_edge(
+                self.ds, self._platform_ds,
+                'transfer_order_line_to_transfer_shipment_line',
+                order_line_id, line_id, float(qty),
+                target_item=str(line_id), unit='',
+                derived_by='transfer_shipment_service')
 
     # ------------------------------------------------------------------
     # 过账 / 取消
@@ -271,6 +294,13 @@ class TransferShipmentService:
             self.ds.execute(
                 'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
                 % HEADER_TABLE, [STATUS_CANCELLED, now, header['id']])
+            # 取消 → 释放调拨行被本发货行占用的量（边保留，视图不计）
+            line_ids = [row['id'] for row in self.ds.query(
+                'SELECT id FROM %s WHERE transfer_shipment_id = ?' % LINE_TABLE,
+                [header['id']])]
+            release_target_edges(
+                self.ds, 'transfer_shipment_line', line_ids,
+                reversed_by='transfer_shipment_service.cancel')
 
         logger.info('[transfer_shipment] cancelled id=%s', header['id'])
         return {'id': header['id'], 'shipment_no': header.get('shipment_no'),

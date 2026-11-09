@@ -123,7 +123,7 @@
 - 边域：边是否悬空、幂等冲突、Σ 超额；
 - 视图：`v_doc_flow_consumed_qty` 与边表汇总一致。
 
-P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','receipt','transfer_shipment')` 无对应边 → `ORPHAN_TXN`；边指向不存在事务 → `DANGLING_EDGE`。
+P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','receipt','transfer_order')` 无对应边 → `ORPHAN_TXN`；边指向不存在事务 → `DANGLING_EDGE`。
 
 ---
 
@@ -135,6 +135,8 @@ P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','
 | A | 采购订单→收货单 | 必须接 | attach |
 | A | 销售订单→交货单 | 必须接 | attach |
 | A | 需求分配→调拨单 | 必须接 | attach |
+| A | 调拨单→调拨发货单（调拨行 → 发货行） | 必须接（v231 补齐） | attach |
+| A | 调拨单→调拨收货单（调拨行 → 收货行） | 必须接（v231 补齐） | attach |
 | A | 销售退货 → 退货交货（退货订单计划行 → 退货交货行） | 必须接（方案 A） | attach |
 | A | 数据错误冲销（货物未真实离库） | 必须接 | reversal（`reverse_edge` + 反向过账，与退货路径分开） |
 | A | 服务确认→开票（未来） | 必须接 | create |
