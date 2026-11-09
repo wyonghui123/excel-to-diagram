@@ -778,5 +778,5 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
 | TBD-004 | sourcing `explain` 稳定性 | **已确认**：冻结 `explain_version=1` + 固定阶段与原因码枚举 | 关闭，随 P1 adapter 落契约测试 |
 | TBD-005 | 多源分摊 / 配额能力 | 未决：Fusion allocation % 与 SAP 配额比率语义，不同于 `allocation_pct` 计划提示 | 单独立项，本轮不实现 |
 | TBD-006 | 单据节点组（node group）的声明归属 | **M4 已定**：只读派生（§9.3.10）；长期归属（YAML 显式声明 / 独立元数据表）仍未决 | 先落 M4；出现第二个消费方或持久化需求时再定归属 |
-| TBD-007 | 头级 / 计划行级边规则表达 | **已定（阶段化）**：不新增头级边 / 角色列；P0 复用 `head_overrides` + `split_key`（零 DDL），P1 触发后新增 `head_field_map`（§9.3.11） | P0 随下一次 doc_flow 变更落 catalog 只读 `header_contract` 与校验；P1 需第二个真实需求 |
+| TBD-007 | 头级 / 计划行级边规则表达 | **已定（阶段化）**：不新增头级边 / 角色列；P0 已落 catalog 只读 `detail.header_contract` + `detail.source_role`（零 DDL，§9.3.11），P1 触发后新增 `head_field_map` | P1 需第二个真实需求；P0 已实现（2026-11-09） |
 | TBD-008 | 编排层（orchestration）是否立项 | **已定：复用 Gen2 任务 / 工作流域**（`workflows` / `workflow_runs` / `tasks` / `task_events`），不新建编排层；按需补 `create_document` executor / outputs 注入 / 补偿适配（§9.3.12） | 满足触发条件后接线，不写入规则表、不新增 `process_*` 表 |
