@@ -540,6 +540,76 @@
 - 单个 BO 派生失败只降级该组，写日志并置 `degraded`，不向 API 抛 500。
 - P0 不引入跨请求缓存（`child_sections` 与规则规模小）；若 trace 出现热点，再按规则 `updated_at` 做进程级缓存。
 
+#### 9.3.11 TBD-007 细化：头级 / 计划行级边（2026-11-09）
+
+**现状核查**（worktree DB + 代码）：
+- `doc_flow_rule` 现有 8 条 active 规则全部为平铺行级边，`target_line_bo` 全为空；两级模式（`target_line_bo + head_fk_field`）只存在于引擎与测试，无生产规则。
+- 真实单据头由业务服务创建（`shipment_service` / `transfer_shipment_service` / 收货 / 采购服务），头字段多为业务快照（地址、承运商、库位、日期），不是规则字段复制。
+- 通用入口 `DocFlowService.derive` 在 `mode=create` 时 `head_overrides=None`，两级建头只能得到「split_key 自动映射 + 常量覆盖」；required 头字段若不在 split_key，通用建单无法满足。
+
+**需求分拆**：三个问题不能混为一谈。
+
+| 子问题 | 现状 | 建议 |
+|---|---|---|
+| 头级边（头 → 头） | 无；边只到行 / 计划行 | **不新增**。头级关系由 M4 节点组 + 行级边 rollup 只读派生；写入头级边会形成第二事实源 |
+| 计划行级边 | 已可表达（`sales_order_schedule → shipment_line`） | **不新增角色列**。`schedule` 角色由 YAML 派生（M4）；如需展示标签，放 catalog 只读字段 `source_role` |
+| 头字段映射 | 依赖 split_key + head_overrides（运行时） | **两阶段**：P0 明确契约；触发后新增 `head_field_map` |
+
+**P0（现在，零 DDL）**：
+1. 规则目录增加只读 `detail.header_contract`：`mode`（`flat` / `rule_headed` / `service_headed`）、`split_key`、`required_missing`（目标头 YAML required 字段减去 split_key）、`service_owned_fields`（头快照 / 业务服务写入字段，仅提示）。
+2. 建单契约冻结：`rule_headed` 规则的头字段来源顺序 = `head_overrides`（运行时）> split_key 自动映射；required 字段未覆盖时，目录标记 `degraded=true` 并给 `header_field_uncovered`，不阻断既有服务建单。
+3. 计划行边继续用 BO 名表达，节点组负责角色解释；trace 的 `detail.node_group.node_role` 已可区分 `schedule`。
+
+**P1（触发条件满足后，新增 1 列）**：
+- 触发条件（任一）：① 出现第二条需要规则建头的 BO 对，且头必填字段不在 split_key；② 通用界面开始创建真实单据（非 demo）；③ 同一 split_key 混入「只复制、不分组」的字段，拆单粒度被污染。
+- 设计：`doc_flow_rule.head_field_map TEXT NOT NULL DEFAULT '{}'`，JSON `{target_field_id: source_field_id}`；常量仍走运行时 `head_overrides`，不落规则（避免主数据快照进规则）。
+- 解析顺序：`head_overrides` > `head_field_map` > split_key 自动映射；attach 模式（`head_overrides.id`）忽略 `head_field_map`，不改既有头。
+- 取值口径：按组内首行取值（与现有 split_key 建头一致）；组内多行该字段值不同时首行胜出，并在结果 `head_field_conflicts[]` 记录，不静默。
+- 校验：保存规则时校验源字段存在、目标头字段存在、类型兼容；失败 `HEAD_FIELD_MAP_INVALID`。`field_map` 仍只作用于行级复制。
+- 迁移：幂等加列（沿用 `_ADDED_COLUMNS` 模式），`app.yaml` upsert 声明列，无回填。
+- 不采用：`create_hook`（Python 钩子，破坏元数据驱动，仅在跨系统复杂快照时单独立项）；把 `head_field_map` 塞进 `field_map` 命名空间（语义重载，消费方需二次解析）。
+
+**验收**：
+- 两级规则 + `head_field_map` 建头：映射字段来自首行；attach 模式不改头；缺字段报 `HEAD_FIELD_MAP_INVALID`；多行冲突进 `head_field_conflicts`。
+- 头级 trace：不产生头级边，`doc_flow_edges` 行数不变；节点组 `outbound` 仍按规则列出。
+- 计划行：`so_schedule_to_shipment_line` 的 catalog `source_role=schedule`，边与下推行为不变。
+
+#### 9.3.12 TBD-008 细化：编排层（orchestration）
+
+**对标要点**（Fusion / SAP）：
+- Fusion：编排单元是**履行行**（fulfillment line），每条订单行一个 orchestration process 实例；流程定义由任务 / 服务 + 依赖组成；assignment rules 选流程；变更走 processing constraints → `Change Pending` → 补偿动作 `Undo/Redo/Update/Cancel/None`；拆分行用 `SPLIT_FROM_FLINE_ID` 保留血缘。
+- SAP：copy control 只管**创建时复制**，运行期单据流由 `VBFA` 独立记录；没有等价的编排 / 补偿运行时。
+- 结论：编排不是 copy control 的扩展，而是**独立的履约运行时**；塞进规则表会同时污染规则语义与版本治理。
+
+**现状差距**：
+- `doc_flow` 是同步、单事务、一次性创建；`doc_flow_reversal` 的 A/B/C 三档只解决**数量**补偿。
+- 无异步任务、无外部系统等待、无重试 / 超时、无按行流程实例、无变更传播。
+- `derivation_executor` 是字段派生，不是编排。
+
+**建议：暂不立项**。立项触发条件（满足任一，且业务方确认）：
+1. 需要对接外部履约系统（WMS / TMS / OMS）并等待回调；
+2. 需要异步任务、重试、超时、死信；
+3. 出现数量冲销无法覆盖的补偿（状态回退、外部取消、部分重放）；
+4. 需要按履行行跟踪多步骤状态与拆单血缘；
+5. 出现跨单据的审批 / 履约状态机。
+
+**若立项的最小方案（L3，独立运行时）**：
+- 与 `doc_flow` 并列，不塞进 `doc_flow_rule`；规则表继续只做创建时复制。
+- 数据模型：`process_definition`（版本化）、`process_instance`（一期按**目标单头**建实例，二期按履行行）、`process_step`（`create_document` / `call_service` / `wait_event` / `notify`）、`process_event`（append-only）。
+- 步骤执行：`(instance_id, step_code)` 幂等；失败重试与超时；补偿优先调用 `doc_flow_reversal`，不复制数量语义。
+- 一期范围：`create_document`（复用 `derive_batch`）+ `notify` 两种步骤 + 手工补偿；不做 BPMN、不做通用工作流、不做按行实例。
+- 二期：按履行行实例、自动补偿、拆单血缘（对应 Fusion `SPLIT_FROM_FLINE_ID`）。
+- trace：新增独立场景 `orchestration`，`doc_flow` 信封不变；节点组不承载流程状态。
+- 明确不做：BPMN 引擎、事件总线先行、把流程状态写进 `doc_flow_rule`。
+
+**方案对比**：
+
+| 方案 | 优点 | 缺点 | 结论 |
+|---|---|---|---|
+| 规则表加流程状态 | 单表简单 | 规则与运行态混存、版本与幂等难治理 | 拒绝 |
+| 通用 BPMN 引擎 | 表达力强 | 语义溢出、运维成本高 | 拒绝 |
+| 独立轻量流程运行时（本建议） | 与规则分层、可增量 | 需新增表与运行时 | 触发后立项 |
+
 ### 9.4 备选方案
 
 | 方案 | 优点 | 缺点 | 结论 |
@@ -591,5 +661,5 @@
 | TBD-004 | sourcing `explain` 稳定性 | **已确认**：冻结 `explain_version=1` + 固定阶段与原因码枚举 | 关闭，随 P1 adapter 落契约测试 |
 | TBD-005 | 多源分摊 / 配额能力 | 未决：Fusion allocation % 与 SAP 配额比率语义，不同于 `allocation_pct` 计划提示 | 单独立项，本轮不实现 |
 | TBD-006 | 单据节点组（node group）的声明归属 | **M4 已定**：只读派生（§9.3.10）；长期归属（YAML 显式声明 / 独立元数据表）仍未决 | 先落 M4；出现第二个消费方或持久化需求时再定归属 |
-| TBD-007 | 头级 / 计划行级边规则表达 | 未决：复用 `head_fk_field` + `head_overrides`，还是新增持久化 `head_field_map` | 出现第二个头级字段需求时评估，不新增 `RuleType` |
-| TBD-008 | 编排层（orchestration）是否立项 | 未决：当前无跨系统履约/补偿需求，Fusion orchestration 仅作参考 | 单独立项，本轮不实现 |
+| TBD-007 | 头级 / 计划行级边规则表达 | **已定（阶段化）**：不新增头级边 / 角色列；P0 复用 `head_overrides` + `split_key`（零 DDL），P1 触发后新增 `head_field_map`（§9.3.11） | P0 随下一次 doc_flow 变更落 catalog 只读 `header_contract` 与校验；P1 需第二个真实需求 |
+| TBD-008 | 编排层（orchestration）是否立项 | **暂不立项**：编排是独立履约运行时；立项条件与最小方案见 §9.3.12 | 满足触发条件后单独立项，不写入规则表 |
