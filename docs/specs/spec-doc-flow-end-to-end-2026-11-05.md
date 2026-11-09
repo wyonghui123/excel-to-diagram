@@ -125,6 +125,16 @@
 
 P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','receipt','transfer_order')` 无对应边 → `ORPHAN_TXN`；边指向不存在事务 → `DANGLING_EDGE`。
 
+P2（B+）新增检查项（`_SOURCE_DOC_REGISTRY` 为唯一来源类型注册表）：
+
+| code | 级别 | 含义 |
+|---|---|---|
+| `UNKNOWN_SOURCE_DOC_TYPE` | warn | 事务来源类型未注册（防新入口绕开 B+ 口径） |
+| `MISSING_SOURCE_DOC` | error | 调整/盘点事务的 `source_doc_id` 在来源表不存在（删除策略 restrict，正常不应出现） |
+| `UNEXPECTED_ADJUSTMENT_EDGE` | warn | 调整/盘点事务被转单边引用（违反「不接入 DOC_FLOW」，会把调整量带进需求追溯执行层） |
+
+未注册类型：`shipment` / `receipt` / `transfer_order`（过账，必须有边）、`inventory_adjustment` / `inventory_count`（C 类，只保留事实引用）、`opening`（批次号 CRC32，无来源表）、`inventory_segment_transfer`（事件键来源）。
+
 ---
 
 ## 4. 接入分类矩阵
@@ -143,7 +153,12 @@ P0/P1 新增检查项：`inventory_transactions.source_doc_type IN ('shipment','
 | B. 单据→库存事务 | 收货→入库事务 | 应当接 | attach |
 | B | 交货→出库事务 | 应当接（P0） | attach |
 | B | 调拨发运→事务 | 应当接 | attach |
-| C. 纯状态/派生 | 审批、预留创建/核销、履约状态回写、`v_project_cost` | 不必接 | — |
+| C. 调整/盘点→库存事务 | 库存调整→调整事务 | 不接入（B+：保留 `source_doc_type`/`source_doc_id` 事实引用） | — |
+| C | 库存盘点→盘盈盘亏事务 | 不接入（B+：盘点差异由盘点单承载，不做 Copy Control） | — |
+| C | 期初导入→期初事务 | 不接入（批次号即来源，无单据对象） | — |
+| D. 纯状态/派生 | 审批、预留创建/核销、履约状态回写、`v_project_cost` | 不必接 | — |
+
+> C 类判定依据（Oracle Fusion / SAP 对照）：库存调整、盘点差异是**事务源头**，其 `source_doc_type/source_doc_id` 只作为事实引用（等价 Oracle `SourceCode/SourceHeaderId/SourceLineId`），不进入单据派生（Copy Control 仅用于销售/采购等凭证派生，盘点差异走差异凭证 + 调整科目）。只有「调整单/盘点单」升级为受控单据（审批 + 行 + 状态机）后，才按受限 A 形态接入：`edge_kind='adjustment'`、带符号 delta、独立 pool 不参与 Σ、排除需求追溯。
 
 ---
 

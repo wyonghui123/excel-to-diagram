@@ -115,6 +115,17 @@ class TransferShipmentService:
         return self._ds
 
     @property
+    def platform_ds(self):
+        """平台库（doc_flow_rule）；未注入时回退平台库单例，再回退应用库。"""
+        if self._platform_ds is None:
+            try:
+                from meta.core.datasource import get_platform_data_source
+                self._platform_ds = get_platform_data_source() or self.ds
+            except Exception:  # noqa: BLE001 - 平台库不可用按单库处理
+                self._platform_ds = self.ds
+        return self._platform_ds
+
+    @property
     def order_service(self) -> TransferOrderService:
         if self._order_service is None:
             self._order_service = TransferOrderService(self.ds)
@@ -227,7 +238,7 @@ class TransferShipmentService:
             if not line_id:
                 continue
             attach_edge(
-                self.ds, self._platform_ds,
+                self.ds, self.platform_ds,
                 'transfer_order_line_to_transfer_shipment_line',
                 order_line_id, line_id, float(qty),
                 target_item=str(line_id), unit='',
