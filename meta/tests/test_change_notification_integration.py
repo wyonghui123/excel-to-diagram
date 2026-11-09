@@ -22,6 +22,7 @@ from meta.services.manage_service import (
     ManageService, CreateRequest, UpdateRequest, DeleteRequest
 )
 from meta.services.change_notification_service import ChangeEventRequest
+from meta.tests.shared.db_schema import create_audit_logs
 
 pytestmark = pytest.mark.integration
 
@@ -33,50 +34,7 @@ register_table_name('test_products')
 register_table_name('simple_objects')
 
 
-# [补 2026-10-07] audit_logs DDL 与平台 v2 schema 对齐
-# 原夹具缺 log_category / log_level / outcome / retention_until /
-# cascade_root_id / cascade_root_action 等列，导致 AuditService.log() 的
-# 27 列 INSERT 静默失败（仅 logger.warning），审计与事件关联无从验证。
-# 列清单权威来源：meta/core/audit_async_queue.py:205-211（27 列）+
-# meta/migrations/v2_001_audit_log_v2.sql；参考完整版：
-# meta/tests/test_audit_service_comprehensive.py:176-208。
-_AUDIT_LOGS_DDL = """
-    CREATE TABLE IF NOT EXISTS audit_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        object_type TEXT,
-        object_id TEXT,
-        action TEXT,
-        field_name TEXT,
-        old_value TEXT,
-        new_value TEXT,
-        user_id TEXT,
-        user_name TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        created_at TEXT,
-        trace_id TEXT,
-        transaction_id TEXT,
-        status TEXT DEFAULT 'written',
-        retry_count INTEGER DEFAULT 0,
-        error_message TEXT,
-        log_category TEXT,
-        log_level TEXT,
-        extra_data TEXT,
-        parent_object_type TEXT,
-        parent_object_id TEXT,
-        agent_id TEXT,
-        agent_session_id TEXT,
-        tool_call_id TEXT,
-        agent_reasoning TEXT,
-        action_kind TEXT,
-        outcome TEXT DEFAULT 'success',
-        parent_action_id INTEGER,
-        retention_until TEXT,
-        cascade_root_id TEXT,
-        cascade_root_action TEXT
-    )
-"""
-
+# [P1-8] audit_logs 表结构统一走 meta.tests.shared.db_schema（对齐生产 40 列）
 _CHANGE_EVENTS_DDL = """
     CREATE TABLE IF NOT EXISTS change_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +70,7 @@ _TEST_PRODUCTS_DDL = """
 
 def _create_tables(adapter):
     adapter.execute(_TEST_PRODUCTS_DDL)
-    adapter.execute(_AUDIT_LOGS_DDL)
+    create_audit_logs(adapter)
     adapter.execute(_CHANGE_EVENTS_DDL)
     adapter.commit()
 
@@ -120,7 +78,7 @@ def _create_tables(adapter):
 def _create_tables_without_change_events(adapter):
     """建表但**不建** change_events —— 用于验证事件发布失败不影响主业务。"""
     adapter.execute(_TEST_PRODUCTS_DDL)
-    adapter.execute(_AUDIT_LOGS_DDL)
+    create_audit_logs(adapter)
     adapter.commit()
 
 
@@ -410,7 +368,7 @@ def _create_simple_tables(adapter):
             created_at TEXT
         )
     """)
-    adapter.execute(_AUDIT_LOGS_DDL)
+    create_audit_logs(adapter)
     adapter.execute(_CHANGE_EVENTS_DDL)
     adapter.commit()
 

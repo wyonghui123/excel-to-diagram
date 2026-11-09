@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from meta.core.action_executor import ActionExecutor, AuditLogger, ActionResult
-from meta.tests.test_utils import ensure_audit_log_columns
+from meta.tests.shared.db_schema import create_audit_logs
 from meta.core.datasource import DataSource, DataSourceType
 from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.rule_executor import RuleEngine
@@ -35,33 +35,7 @@ def ds(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("test_executor") / "test.db"
     data_source.connect(path=str(db_path))
     # 创建 audit_logs 表（所有测试都需要）
-    audit_log_sql = """
-    CREATE TABLE IF NOT EXISTS audit_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        object_type TEXT NOT NULL,
-        object_id INTEGER,
-        action TEXT NOT NULL,
-        field_name TEXT,
-        old_value TEXT,
-        new_value TEXT,
-        user_id INTEGER,
-        user_name TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        created_at TEXT,
-        extra_data TEXT,
-        trace_id TEXT,
-        transaction_id TEXT,
-        status TEXT,
-        retry_count INTEGER DEFAULT 0,
-        agent_id TEXT,
-        agent_session_id TEXT,
-        tool_call_id TEXT,
-        agent_reasoning TEXT
-    )
-    """
-    data_source.execute(audit_log_sql)
-    ensure_audit_log_columns(data_source)
+    create_audit_logs(data_source)
     return data_source
 
 
@@ -180,35 +154,7 @@ def setup_database(ds, parent, child):
     """
     ds.execute(child_sql)
     
-    audit_sql = """
-    CREATE TABLE IF NOT EXISTS audit_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        object_type TEXT NOT NULL,
-        object_id INTEGER NOT NULL,
-        action TEXT NOT NULL,
-        field_name TEXT,
-        old_value TEXT,
-        new_value TEXT,
-        user_id INTEGER,
-        user_name TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        created_at TEXT,
-        extra_data TEXT,
-        trace_id TEXT,
-        transaction_id TEXT,
-        status TEXT,
-        retry_count INTEGER,
-        agent_id TEXT,
-        agent_session_id TEXT,
-        tool_call_id TEXT,
-        agent_reasoning TEXT,
-        parent_object_type TEXT,
-        parent_object_id TEXT
-    )
-    """
-    ds.execute(audit_sql)
-    ensure_audit_log_columns(ds)
+    create_audit_logs(ds)
 
 
 def test_audit_logger(tmp_path):
@@ -219,34 +165,7 @@ def test_audit_logger(tmp_path):
     db_path = tmp_path / "test_audit.db"
     ds.connect(path=str(db_path))
     
-    ds.execute("""
-        CREATE TABLE audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type TEXT,
-            object_id INTEGER,
-            action TEXT,
-            field_name TEXT,
-            old_value TEXT,
-            new_value TEXT,
-            user_id INTEGER,
-            user_name TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            created_at TEXT,
-            extra_data TEXT,
-            trace_id TEXT,
-            transaction_id TEXT,
-            status TEXT,
-            retry_count INTEGER,
-            agent_id TEXT,
-            agent_session_id TEXT,
-            tool_call_id TEXT,
-            agent_reasoning TEXT,
-            parent_object_type TEXT,
-            parent_object_id TEXT
-        )
-    """)
-    ensure_audit_log_columns(ds)
+    create_audit_logs(ds)
     
     logger = AuditLogger(ds, enabled=True)
     logger.set_user(user_id=1, user_name="测试用户", ip_address="127.0.0.1")

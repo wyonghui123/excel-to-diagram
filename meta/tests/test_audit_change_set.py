@@ -43,6 +43,7 @@ from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.table_name_validator import register_table_name
 from meta.core.yaml_loader import parse_revision_policy
 from meta.services.audit_service import AuditService
+from meta.tests.shared.db_schema import create_audit_logs
 
 CS_PATTERN = re.compile(r'^cs_[0-9a-f]{16}$')
 
@@ -353,23 +354,7 @@ class TestAuditServicePersist:
         """T6 AuditService.log 把 reason_code / change_set_id 真正写入 audit_logs。"""
         db_path = tmp_path / 'audit.db'
         conn = sqlite3.connect(str(db_path))
-        conn.execute("""
-            CREATE TABLE audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT, object_id TEXT, action TEXT,
-                field_name TEXT, old_value TEXT, new_value TEXT,
-                user_id TEXT, user_name TEXT, ip_address TEXT, user_agent TEXT,
-                created_at TEXT, trace_id TEXT, transaction_id TEXT,
-                change_set_id TEXT, reason_code TEXT,
-                agent_id TEXT, agent_session_id TEXT, tool_call_id TEXT,
-                agent_reasoning TEXT, status TEXT, extra_data TEXT,
-                parent_object_type TEXT, parent_object_id TEXT,
-                log_category TEXT, log_level TEXT, outcome TEXT,
-                retention_until TEXT, cascade_root_id TEXT,
-                cascade_root_action TEXT, error_message TEXT
-            )
-        """)
-        conn.commit()
+        create_audit_logs(conn)
         conn.close()
 
         data_source = SQLiteAdapter()

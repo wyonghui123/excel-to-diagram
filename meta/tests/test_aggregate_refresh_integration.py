@@ -26,6 +26,7 @@ from meta.core.action_executor import ActionRegistry
 from meta.core.aggregate_manager import AggregateManager, init_aggregate_manager
 from meta.core.redundancy_registry import redundancy_registry
 from meta.core.table_name_validator import register_table_name
+from meta.tests.shared.db_schema import create_audit_logs
 
 
 class TestAggregateRefreshOnCreate:
@@ -101,20 +102,14 @@ class TestAggregateRefreshOnCreate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
+                source_domain_id INTEGER, source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER, target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER,
                 created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
             )
         """)
-        self.ds.execute("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT, object_id INTEGER, action TEXT,
-                old_data TEXT, new_data TEXT,
-                trace_id TEXT, transaction_id TEXT,
-                created_at TEXT, created_by TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT
-            )
-        """)
+        create_audit_logs(self.ds)
         self.ds.commit()
     
     def _insert_hierarchy(self):
@@ -231,20 +226,14 @@ class TestAggregateRefreshOnUpdate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
+                source_domain_id INTEGER, source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER, target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER,
                 created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
             )
         """)
-        self.ds.execute("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT, object_id INTEGER, action TEXT,
-                old_data TEXT, new_data TEXT,
-                trace_id TEXT, transaction_id TEXT,
-                created_at TEXT, created_by TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT
-            )
-        """)
+        create_audit_logs(self.ds)
         self.ds.commit()
     
     def _insert_hierarchy(self):

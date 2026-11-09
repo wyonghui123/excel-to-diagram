@@ -31,6 +31,7 @@ if not os.environ.get('JWT_SECRET_KEY'):
 os.environ.setdefault('TESTING', 'true')
 
 from meta.core.sql_adapters import SQLiteAdapter
+from meta.tests.shared.db_schema import create_audit_logs
 from meta.core.action_executor import AuditLogger
 from meta.services import async_audit_writer as aaw_module
 aaw_module._TESTING_MODE = True
@@ -45,35 +46,7 @@ def _create_test_db():
     adapter = SQLiteAdapter()
     adapter.connect(path=db_path)
 
-    adapter.execute("""
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type TEXT NOT NULL,
-            object_id INTEGER,
-            action TEXT NOT NULL,
-            field_name TEXT,
-            old_value TEXT,
-            new_value TEXT,
-            user_id TEXT,
-            user_name TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            created_at TEXT,
-            extra_data TEXT,
-            trace_id TEXT,
-            transaction_id TEXT,
-            status TEXT DEFAULT 'written',
-            retry_count INTEGER DEFAULT 0,
-            error_message TEXT,
-            agent_id TEXT,
-            agent_session_id TEXT,
-            tool_call_id TEXT,
-            agent_reasoning TEXT,
-            parent_object_type TEXT,
-            parent_object_id TEXT
-        )
-    """)
-    adapter.commit()
+    create_audit_logs(adapter)
     return adapter, db_path
 
 
