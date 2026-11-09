@@ -13,6 +13,9 @@ from meta.services import customer_invoice_actions
 from meta.services.bo_action_registrations import register_all_bo_actions
 from meta.services.customer_invoice_service import CustomerInvoiceService
 from meta.tests.factories._customer_invoice_helpers import (
+    BILLING_SCHEDULE_ID,
+    INVOICE_DATE,
+    ORDER_ID,
     SHIPMENT_ID,
     build_conn,
     fetch_one,
@@ -145,3 +148,89 @@ def test_credit_action_is_registered_with_permission():
         'customer_invoice:customer_invoice_credit_memo')
     assert meta.requires_auth is True
     assert meta.idempotent is False
+
+
+# ---------------------------------------------------------------- Wave B 计划期次
+
+PLAN_ACTION_ID = 'customer_invoice.create_from_schedule'
+DUE_ACTION_ID = 'customer_invoice.list_due_schedules'
+
+
+def test_create_from_schedule_handler_creates_draft(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.create_from_schedule_handler(
+        {'schedule_ids': [BILLING_SCHEDULE_ID], 'invoice_date': INVOICE_DATE})
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'draft'
+    assert result['data']['invoice_no'].startswith('SINV-')
+    assert result['data']['order_id'] == ORDER_ID
+    line = get_lines(conn, result['data']['id'])[0]
+    assert line['source_doc_type'] == 'billing_schedule'
+    assert line['schedule_id'] == BILLING_SCHEDULE_ID
+    assert result['data']['amounts']['gross_amount'] == 1130.0
+    assert 'SINV-' in result['message']
+
+
+def test_create_from_schedule_handler_requires_schedule(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.create_from_schedule_handler({})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVALID_ARGUMENT'
+    assert _invoice_count(conn) == 0
+
+
+def test_list_due_schedules_handler_returns_due_items(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.list_due_schedules_handler(
+        {'as_of': '2026-11-20'})
+
+    assert result['success'] is True
+    assert result['data']['total'] == 1
+    item = result['data']['items'][0]
+    assert item['schedule_id'] == BILLING_SCHEDULE_ID
+    assert item['line_no'] == 12
+    assert item['period_amount'] == 1000.0
+    assert item['remaining_amount'] == 1000.0
+    assert '1 条' in result['message']
+
+
+def test_list_due_schedules_handler_empty_before_promised_date(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.list_due_schedules_handler(
+        {'as_of': '2026-11-01'})
+
+    assert result['success'] is True
+    assert result['data']['total'] == 0
+    assert result['data']['items'] == []
+
+
+def test_plan_actions_registered_with_permission():
+    registry = BoActionRegistry()
+    register_all_bo_actions(registry)
+
+    create_meta = registry.get(PLAN_ACTION_ID)
+    assert create_meta is not None
+    assert create_meta.object_type == 'customer_invoice'
+    assert create_meta.category == 'business'
+    assert create_meta.permission_required == (
+        'customer_invoice:customer_invoice_create')
+    assert create_meta.idempotent is False
+
+    due_meta = registry.get(DUE_ACTION_ID)
+    assert due_meta is not None
+    assert due_meta.object_type == 'customer_invoice'
+    assert due_meta.category == 'query'
+    assert due_meta.permission_required == (
+        'customer_invoice:customer_invoice_view')
+    assert due_meta.requires_auth is True
+    assert due_meta.idempotent is True

@@ -121,7 +121,9 @@ def register_all_bo_actions(registry=None):
     # S8 Wave A: 销售发票由发货单生成（spec-s8-customer-invoice-wave-a §13）
     from meta.services.customer_invoice_actions import (
         create_from_shipment_handler as customer_invoice_from_shipment_handler,
+        create_from_schedule_handler as customer_invoice_from_schedule_handler,
         create_credit_from_invoice_handler as customer_invoice_credit_handler,
+        list_due_schedules_handler as customer_invoice_due_list_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -1420,6 +1422,61 @@ def register_all_bo_actions(registry=None):
         output_schema=_customer_invoice_output_schema,
         requires_auth=True,
         idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.create_from_schedule',
+        customer_invoice_from_schedule_handler,
+        description='按开票计划期次生成草稿销售发票（支持一期分次 / 多期合并）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'schedule_ids': {'type': 'array',
+                                 'items': {'type': 'integer'}},
+                'source_doc_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.list_due_schedules',
+        customer_invoice_due_list_handler,
+        description='查询到期开票计划期次（只读，不产生写操作）',
+        object_type='customer_invoice',
+        category='query',
+        permission_required='customer_invoice:customer_invoice_view',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'as_of': {'type': 'string'},
+                'order_id': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'items': {'type': 'array', 'items': {'type': 'object'}},
+                'total': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+                'as_of': {'type': 'string'},
+            },
+        },
+        requires_auth=True,
+        idempotent=True,
     )
     registry.register(
         'customer_invoice.create_credit_from_invoice',

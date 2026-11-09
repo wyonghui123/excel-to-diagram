@@ -98,6 +98,59 @@ def create_from_shipment_handler(params: Dict[str, Any],
     return _ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))
 
 
+def create_from_schedule_handler(params: Dict[str, Any],
+                                 context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.create_from_schedule` 的处理器（Wave B）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    schedule_ids = params.get('schedule_ids') or []
+    lines = params.get('lines') or []
+    source_doc_id = params.get('source_doc_id')
+    if not schedule_ids and not lines and _blank(source_doc_id):
+        return _fail('缺少 schedule_ids / lines / source_doc_id',
+                     'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key) for key in HEADER_KEYS
+               if not _blank(params.get(key))}
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+    if schedule_ids:
+        payload['schedule_ids'] = schedule_ids
+    if isinstance(lines, list) and lines:
+        payload['lines'] = lines
+    if not _blank(source_doc_id):
+        payload['source_doc_id'] = source_doc_id
+
+    try:
+        data = _service().create_from_schedule(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] create_from_schedule '
+                'schedules=%s invoice=%s', schedule_ids or source_doc_id,
+                data.get('invoice_no'))
+    return _ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))
+
+
+def list_due_schedules_handler(params: Dict[str, Any],
+                               context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.list_due_schedules` 处理器（只读）。"""
+    _set_user_context()
+    params = dict(params or {})
+    try:
+        data = _service().list_due_schedules(
+            as_of=params.get('as_of'),
+            order_id=params.get('order_id'),
+            page=params.get('page') or 1,
+            page_size=params.get('page_size') or 50)
+    except Exception as exc:  # noqa: BLE001 - 只读查询失败透传
+        logger.warning('[customer_invoice_action] list_due_schedules 失败: %s',
+                       exc)
+        return _fail('查询到期开票计划失败：%s' % exc,
+                     'INVOICE_DUE_LIST_FAILED')
+    return _ok(data, '共 %s 条到期开票期次' % data.get('total', 0))
+
+
 def create_credit_from_invoice_handler(params: Dict[str, Any],
                                        context: Any = None) -> Dict[str, Any]:
     """`customer_invoice.create_credit_from_invoice` 的处理器（B5）。"""
