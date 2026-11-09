@@ -3132,6 +3132,8 @@ payment_allocation:
                   − Σ active 已核销 − Σ active 已预占
 ```
 
+> **波次注记（见 §28.2 断点 F）**：Wave A 只实现 `invoice` + `customer_account` 两个分支；`schedule_line` 随 `payment_schedule` 在 Wave B 落地；`order/group` 分支依赖合同额字段，Wave C 再开。`contract_limit_amount` 在 Wave A/B **不存在**，不得提前引用（见 §28.2 断点 B）。
+
 **V8 展开**：`reversal_of_allocation_id` 建唯一索引（`WHERE status = 'active'`），保证一笔核销只能被反冲一次；多次反冲必须走"反冲的反冲"（新增正向记录）。
 
 **V9 的意义**：这是把 SAP 的 `EFBKPF` 锁 + `F1805` 更新终止翻译成 SQLite 的最小等价物。见 §27.6。
@@ -3358,3 +3360,216 @@ UPDATE payment_schedule_line
 | 4 | D11（一期分次开票） | §13 | 允许 | 开票回写逻辑 |
 | 5 | 超容差默认动作 | B4 | `block` | 校验行为 |
 | 6 | 订单级余额用物化表还是视图 | §25.9 / §27.7 | **视图 + 缓存列**，不建独立物化表 | 性能方案 |
+
+---
+
+## 28. 跨层对齐：开票 / 应收 / 收付款三条链的整体校核（2026-11-09）
+
+> 本节回答一个问题：**§3–§11 的开票模型、g15 的财务边界、§25 的收付款模型，三者能不能拼成一个闭环？**
+> 结论：**不能直接拼，有 6 处断点，其中 1 处是硬冲突。** 逐条给证据与修复方案。
+
+### 28.1 三条链的现状
+
+| 链 | 核心对象 | 定义在哪 | 落地波次 | 完成度 |
+|---|---|---|---|---|
+| **开票链** | `customer_invoice` + line | §3–§10 | Wave A | 字段、状态机、规则 R-INV-0..20 齐全 |
+| **应收链** | **无独立对象**，由 `customer_invoice` 代替 | §11（明确不建 AR 台账） | — | **缺位** |
+| **收款链** | `payment_receipt` + `payment_allocation` | §25 | Wave A（部分）/ B | 字段齐全，但与开票链有冲突 |
+| **计划链** | `payment_schedule` + line | §24 | Wave B | 字段齐全，Wave A 不建 |
+| **财务出口** | L2 会计事件（hook） | §11 / g15 | Wave C | 未落地 |
+
+### 28.2 六个断点
+
+#### 断点 A（硬冲突）：发票头能不能放「已收金额」
+
+| 项 | 内容 |
+|---|---|
+| 冲突双方 | §11 红线（L296）：「不在 `customer_invoice` 上放科目、成本、**已收金额**、账龄字段」<br>§25.13（L2846）：「`customer_invoice` 补 `receipt_settled_amount`、`prepaid_offset_amount`」 |
+| 性质 | **直接矛盾**。评审时一定被问「到底能不能放」 |
+| 影响 | 不放 → V3「已收+预收 ≤ 发票额」无法高效校验，每次核销都要全表扫 allocation；放 → 违反既定红线 |
+
+**三个选项**：
+
+| 方案 | 做法 | 优点 | 缺点 |
+|---|---|---|---|
+| A1 | **修订红线**：允许「核销累计列」，仍禁止科目/成本/账龄 | 简单、查询快；累计列是派生缓存不是第二套账 | 需要重新解释「红线」 |
+| A2 | 两列挪到独立表 `invoice_settlement_status(invoice_id, settled, prepaid)` | 不动发票表 | 多一张一对一表，JOIN 成本更高 |
+| A3 | 纯视图计算，不落列 | 最纯粹 | 每次核销都要聚合 allocation，量上来会慢 |
+
+**建议 A1**。理由：这两列的性质与 §8 的 `billed_qty` / `billed_amount` 完全相同——都是「只读派生缓存，真源是关系表」。§11 红线真正要防的是「科目、成本、账龄」这类会计属性侵入业务单据，而不是核销进度。建议把红线原文改成：
+
+> 不在 `customer_invoice` 上放科目、成本、账龄字段；**允许存放核销进度缓存列（`receipt_settled_amount` / `prepaid_offset_amount`），但必须满足：① 只读；② 可由 `payment_allocation` 全量重算；③ 巡检能比对出差异**。
+
+#### 断点 B（悬空引用）：`contract_limit_amount` 从未定义
+
+| 项 | 内容 |
+|---|---|
+| 现象 | §27.4 V7 与 §27.7 L0 闸门都引用了 `sales_order.contract_limit_amount` |
+| 证据 | 全文检索该字段，除 §27 两处引用外**没有任何字段定义**；`sales_order.yaml` 现有字段也没有 |
+| 影响 | V7 的 order/group 分支无法实现；L0 闸门无落点 |
+
+**三个选项**：
+
+| 方案 | 做法 | 适用 |
+|---|---|---|
+| B1 | `sales_order` 头新增 `contract_limit_amount` / `contract_limit_percent` | 订单即合同口径（我方多数场景） |
+| B2 | 新建独立 `sales_contract` 对象，订单挂合同 | 一合同多订单 |
+| B3 | Wave A 不落字段，用 `sales_order.gross_amount ×(1+容差)` 代替 | 最小改动 |
+
+**建议 B3 + B1**：Wave A 用 B3（订单额即上限），Wave C 若出现「一合同多订单」再引入 B2。**不要**在 Wave A 造合同对象——目前没有合同主数据。
+
+#### 断点 C（对象缺位）：应收没有独立载体
+
+| 项 | 内容 |
+|---|---|
+| 现象 | g15 与 §11 都明确「不做 AR 台账」，但 §25 的核销目标写的是「发票」 |
+| 后果 1 | **预收无载体**：开票前没有应收，`reserved_amount` 只能挂在 order/group 上（§25.7 方案 C 已处理，但语义上是"绕过应收"） |
+| 后果 2 | **发票 ≠ 应收**：发票红冲后应收消失，但真实业务中可能仍有收款待退；红字单与蓝字单的应收净额没有独立对象表达 |
+| 后果 3 | **暂估缺失**：已发货未开票的部分（`billed_qty < shipped_qty`）在财务上是应收，但系统里完全看不到 |
+
+**三个选项**：
+
+| 方案 | 做法 | 优点 | 缺点 |
+|---|---|---|---|
+| C1 | **发票即应收**，只建视图 `v_receivable`（= posted 发票 − 已核销） | 零新表，符合 g15 | 无法表达暂估；红冲后退款场景靠人工 |
+| C2 | 建轻量 `receivable_item`（发票过账生成、红冲反向） | 语义纯正，可挂暂估 | 与发票高度重复，等于建了 AR 台账，违反 g15 |
+| C3 | 只建 `v_receivable` + `v_unbilled_receivable`（暂估视图） | 覆盖暂估，仍不落表 | 视图复杂度上升 |
+
+**建议 C3**。两个视图即可，不建表：
+
+```
+v_receivable            = posted 发票 gross − Σ active 现金核销 − Σ active 预收抵扣
+v_unbilled_receivable   = Σ(shipment_line.qty − billed_qty) × 订单行单价（仅 delivery 行）
+```
+
+这样「应收」是一个**口径**而不是一个**对象**，与 g15「L3 是投影」的原则一致。
+
+#### 断点 D（越界）：`payment_receipt` 触碰 g15「资金/银行/支付不建」红线
+
+| 项 | 内容 |
+|---|---|
+| 现象 | §25.3 的 `payment_receipt` 含 `bank_account_id` / `payment_method_id` / `reference_no` |
+| g15 原文 | §3.1：「资金 / 银行 / 支付」列为**不建** |
+| 辨析 | g15 要防的是「支付执行通道」（发起付款、对接银企直连、回单解析），不是「到账事实登记」 |
+| 影响 | 若按字面执行，收款单不能有任何银行字段，模型退化成「记一笔金额」，无法对账 |
+
+**建议**：修订 g15 表述，区分两个概念：
+
+| 概念 | 归属 | 我方是否做 |
+|---|---|---|
+| **支付执行**（发起付款指令、银企直连、回单自动解析） | 外部 | 不做 |
+| **到账登记**（人工/导入登记一笔钱到了哪个账户） | 平台 | **做** |
+
+即：`payment_receipt` 保留银行字段，但**不建** `payment_instruction` / `bank_connection` / `bank_statement_import` 这类执行侧对象。
+
+#### 断点 E（不对称）：采购侧没有对应的发票与付款对象
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `spec-purchase-order-object-model-2026-11-01.md` §0 明写「发票仍待立」；采购侧无 `vendor_payment` / 预付款对象 |
+| 影响 1 | §25 的 `payment_receipt` 若只在销售侧用，采购侧要重做一遍，两套逻辑会漂移 |
+| 影响 2 | 采购侧「三单匹配 → 应付 → 付款」是更刚需的场景，却比销售侧落后 |
+| 影响 3 | §26 研究的 SAP 机制（`MIRO` / `F110` / `ZLSPR`）全部是采购侧，研究成果没有落点 |
+
+**两个选项**：
+
+| 方案 | 做法 | 优点 | 缺点 |
+|---|---|---|---|
+| E1 | `payment_receipt` 改为**收付款通用对象**，加 `direction ∈ {inbound, outbound}` | 一套模型两侧复用；核销逻辑同构 | 字段要兼容两侧（往来方、账户类型） |
+| E2 | 销售 `payment_receipt` / 采购 `vendor_payment` 两张表 | 语义清晰 | 两套代码，长期漂移 |
+
+**建议 E1**。理由：收付款的机制（余额封顶、核销、反核销、幂等）在两侧完全同构，差异只在「往来方是谁」和「方向」。用 `direction` + `party_account_id` 即可统一。
+
+对应调整：
+
+```
+payment_receipt:
+  direction            enum(inbound, outbound)   ← 新增
+  party_account_id     integer                   ← 统一取代 customer_account_id / vendor_account_id
+  counterparty_type    enum(customer, vendor)    ← 配合 party_account_id
+```
+
+> 若采用 E1，§25.3 的 `customer_account_id` / `payer_account_id` 需合并为 `party_account_id` + `counterparty_type`。这是**对 §25 的实质修订**，需要拍板。
+
+#### 断点 F（波次错配）：V7 的三个 target 跨了两个波次
+
+| 项 | 内容 |
+|---|---|
+| 现象 | V7 写了三种 target（`schedule_line` / `invoice` / `order,group`），但 `payment_schedule` 是 **Wave B** |
+| 影响 | Wave A 实现 V7 时，`schedule_line` 分支不存在，`order/group` 也依赖 B1 的合同额字段 |
+| 修复 | Wave A 的 V7 **降级为两分支**：`invoice` + `customer_account`；Wave B 再补 `schedule_line` / `order/group` |
+
+建议在 §27.4.2 的 V7 下补一行波次注记。
+
+### 28.3 修复后的整体对象地图
+
+```
+【开票链】                        【应收链（视图，不落表）】
+sales_order_line                      v_receivable
+  └ customer_invoice ──line ──────────┘（posted 发票 − 核销）
+       │                              v_unbilled_receivable
+       │                                （已发货未开票，暂估）
+       │
+【收付款链】                          【计划链（Wave B）】
+payment_receipt（direction）           payment_schedule
+  └ payment_allocation ────────────────└ payment_schedule_line
+       ├ receipt_to_invoice
+       ├ prepay_offset_invoice
+       ├ prepay_to_schedule
+       └ on_account
+
+【财务出口】
+accounting_event(hook) → 外部总账
+```
+
+**关键变化**（相对 §27 的地图）：
+
+| 变化 | 原因 |
+|---|---|
+| 新增 `v_receivable` / `v_unbilled_receivable` 两个视图 | 断点 C |
+| `payment_receipt` 加 `direction` / `party_account_id` | 断点 E |
+| `contract_limit_amount` 降级为 Wave C | 断点 B |
+| 发票头明确允许两列核销缓存 | 断点 A |
+
+### 28.4 规则冲突矩阵
+
+| 规则/字段 | 出处 | 与谁冲突 | 处理 |
+|---|---|---|---|
+| 「不放已收金额」红线 | §11 L296 | D16 / §25.13 | **修订红线**（方案 A1） |
+| `contract_limit_amount` | §27.4 / §27.7 | 全文无定义 | **Wave C 再引入**（方案 B3） |
+| `customer_account_id` / `payer_account_id` | §25.3 | 断点 E 的统一方向 | **合并为 `party_account_id`**（需拍板） |
+| 不建 AR 台账 | §11 L296 / g15 §3.1 | §25 需要应收余额 | **建视图不建表**（方案 C3） |
+| 不建资金/银行/支付 | g15 §3.1 | `payment_receipt` 有银行字段 | **修订 g15 表述**（方案 D） |
+| R-INV-10「整单红冲」 | §6 | Wave C 行级部分冲销 | 已在 §13 D8 说明分期 |
+
+### 28.5 对 §13 决策记录的补充建议（D17–D20）
+
+| # | 问题 | 建议 | 候选 | 状态 |
+|---|---|---|---|---|
+| **D17** | 发票头能否放核销累计列 | **允许**，但限定「只读 + 可重算 + 可巡检」，修订 §11 红线 | 完全禁止（挪独立表） | ⏳ 建议 |
+| **D18** | 应收用什么承载 | **视图即应收**（`v_receivable` + `v_unbilled_receivable`），不建 `receivable_item` | 轻量 `receivable_item` 表 | ⏳ 建议 |
+| **D19** | 收付款对象是否统一 | **统一**：`payment_receipt` 加 `direction`，`party_account_id` 取代客户/供应商双字段 | 销售/采购两张表 | ⏳ 建议 |
+| **D20** | 合同额上限怎么落 | Wave A 用订单总额 ×(1+容差)，Wave C 再建 `contract_limit_amount` | Wave A 即建独立合同对象 | ⏳ 建议 |
+
+### 28.6 三条链的完整性检查清单（评审用）
+
+| # | 检查项 | 当前是否通过 | 阻塞点 |
+|---|---|---|---|
+| 1 | 每个事实单据都有唯一写入口 | 是 | — |
+| 2 | 每个累计字段都能从关系表重算 | 是（V6 / V9） | — |
+| 3 | 开票 → 应收的口径闭合 | **否** | 断点 C |
+| 4 | 应收 → 核销的口径闭合 | 部分 | 断点 A（无缓存则低效） |
+| 5 | 预收 → 应收的转换闭合 | 是（方案 C，V4） | — |
+| 6 | 销售侧 ↔ 采购侧同构 | **否** | 断点 E |
+| 7 | 财务边界（g15）无越界 | **否** | 断点 D |
+| 8 | 所有引用字段都已定义 | **否** | 断点 B |
+| 9 | 每个不变量都有明确波次 | **否** | 断点 F |
+| 10 | 红冲/反核销路径闭环 | 是 | — |
+
+**结论**：10 项中 6 项通过、1 项部分、3 项不通过。**断点 A / C / E 必须在评审前解决**，B / D / F 可以带条件通过。
+
+### 28.7 本节小结
+
+1. 三条链**不是同一天设计的**：开票链（§3–§10）早于财务边界（g15）早于收付款模型（§25）。所以出现「红线禁止已收金额」与「收款模型要求已收金额」并存，是时序造成的，不是谁写错了。
+2. **修复原则只有一条**：能算出来的，不要存；必须存的，必须能重算。按这条原则，A1（允许缓存列）、C3（视图即应收）、D（区分执行与登记）都是自然结论。
+3. **D19 影响面最大**：把 `payment_receipt` 改成收付款通用对象，会改动 §25.3 的字段表。这是本轮唯一一处「改已有定义」而不只是「补新定义」的建议，建议优先拍板。
