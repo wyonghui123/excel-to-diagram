@@ -315,7 +315,7 @@
   - M2（P1，接入）：FR-005/006/007/008/011，配套契约与单测。
   - M3（P2，治理）：FR-009/012，promotion 落表与影响面分析。
   - M4（只读增量）：FR-013，模块 + 目录/trace 增量字段 + 契约测试，不改表、不改枚举、不改写入。
-- 范围说明：M1-M3 不含单据流多节点与编排层实现；M4 仅实现 TBD-006 的只读派生，TBD-007（头级/计划行级边）与 TBD-008（编排层）不在范围。
+- 范围说明：M1-M3 不含单据流多节点与编排层实现；M4 仅实现 TBD-006 的只读派生。补充（2026-11-09）：TBD-007 P0 与 TBD-008 五接缝（M5）已作为独立增量落地，见 §9.3.11 / §9.3.13，不改变 M1-M4 的范围定义。
 
 ## 9. 变更 / 设计方案（RFC）
 
@@ -623,7 +623,7 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
 | 新建独立 L3 运行时（原建议） | 与规则分层 | 与 Gen2 四表重复，等于重造已建成的任务域 | **撤回** |
 | 复用 Gen2 + 补接缝（本建议） | 单一事实源、已有测试与状态机、增量接线 | 需补 executor / outputs / 补偿适配 | **选中** |
 
-#### 9.3.13 五接缝实现步骤（M5 预案，按需启用）
+#### 9.3.13 五接缝实现步骤（M5，2026-11-09 已落地）
 
 **总原则**：不新增编排表；全部落在既有 Gen2 任务/工作流域 + `doc_flow`。实施顺序 **S1 → S3 → S4 → S2 → S5**（S1/S3 可并行；S2 依赖 S1 的 outputs；S4 依赖 S1 的 action）。
 
@@ -727,6 +727,19 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
 
 **回滚**：S1/S3 为新增 Action；S4 为新增事件与 nullable 列；S2/S5 为模板与只读关联。停用对应 Workflow 定义即可关闭编排，不影响现有 `doc_flow_rule` / `derive` API / 边表。
 
+**实现状态（2026-11-09，M5 全部落地）**：
+
+| 接缝 | 落点 | 测试 |
+|---|---|---|
+| S1 | `meta/services/doc_flow_action.py`（`doc_flow.derive` handler）、`meta/services/doc_flow_service.py`（服务单例下沉）、`meta/services/bo_action_registrations.py`（注册 + 发布期 `ACTION_NOT_REGISTERED`） | `meta/tests/test_doc_flow_action_executor.py` |
+| S2 | `meta/core/workflow_engine.py`（`inputs_template` 整值占位解析、`pending → ready` 同事务注入、`blocked_reasons[task_id]=INPUT_TEMPLATE_UNRESOLVED:<path>`） | `meta/tests/test_workflow_inputs_injection.py` |
+| S3 | `meta/core/workflow_engine.py::compensate_task`（档位映射、`REF_ID_REQUIRED`、`mode=none` 跳过）、`doc_flow.reverse` handler | `meta/tests/test_doc_flow_compensation_adapter.py` |
+| S4 | `meta/services/doc_flow_service.py`（提交后同步触发 `doc_flow.created`）、`meta/core/workflow_trigger.py`（`idempotency_key=doc_flow.created:{trace_id}:{workflow_key}` + 唯一索引） | `meta/tests/test_doc_flow_event_trigger.py` |
+| S5 | `task.outputs.edge_ids` 关联（`doc_flow_edges` 保持 17 列、不加 `trace_id`） | `meta/tests/test_trace_division.py` |
+| M5-1 端到端 | S2 注入 → S1 建单 → S3 补偿任务经 `BOActionExecutor` 执行冲销 | `meta/tests/test_doc_flow_m5_acceptance.py`（建单 1 次；取消只冲销 1 次；同一补偿任务重放、二次补偿均零副作用） |
+
+S2/S5 随 `3dbf5d52`（M5-3/M5-4）落地，S1/S3/S4 随 `c0f20413` 合并入 main；上述 6 个测试文件全部通过（唯一入口 `python d:\filework\test.py --root d:\filework\excel-to-diagram --file <file>`）。
+
 ### 9.4 备选方案
 
 | 方案 | 优点 | 缺点 | 结论 |
@@ -748,6 +761,7 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
   2. P1：sourcing catalog adapter → trace adapter；AttributeProvider；`attrs` 表达式；inputs 采集与响应；缓存失效。
   3. P2：`attribute_promotion` 落表与同步；影响面分析（定义变更 → 受影响规则）；变量清单切换收尾。
   4. M4（只读增量）：`doc_flow_node_groups.py` → 目录 `detail.node_group` → trace `detail.node_group` → 契约/回归测试；不改表、不改枚举、不改写入。
+  5. M5（编排接缝，2026-11-09 已落地）：S1 → S3 → S4 → S2 → S5；实现状态与测试见 §9.3.13。
 - **风险与缓解**：
   - 视图元数据派生导致快照漂移 → 契约测试逐字比对；失败保留上一版快照并告警。
   - 跨对象属性 N+1 → Provider 批量化 + 请求级 memo；基准脚本纳入验收。
@@ -779,4 +793,4 @@ Gen2 六表（`tasks` / `task_templates` / `workflows` / `workflow_runs` / `task
 | TBD-005 | 多源分摊 / 配额能力 | 未决：Fusion allocation % 与 SAP 配额比率语义，不同于 `allocation_pct` 计划提示 | 单独立项，本轮不实现 |
 | TBD-006 | 单据节点组（node group）的声明归属 | **M4 已定**：只读派生（§9.3.10）；长期归属（YAML 显式声明 / 独立元数据表）仍未决 | 先落 M4；出现第二个消费方或持久化需求时再定归属 |
 | TBD-007 | 头级 / 计划行级边规则表达 | **已定（阶段化）**：不新增头级边 / 角色列；P0 已落 catalog 只读 `detail.header_contract` + `detail.source_role`（零 DDL，§9.3.11），P1 触发后新增 `head_field_map` | P1 需第二个真实需求；P0 已实现（2026-11-09） |
-| TBD-008 | 编排层（orchestration）是否立项 | **已定：复用 Gen2 任务 / 工作流域**（`workflows` / `workflow_runs` / `tasks` / `task_events`），不新建编排层；按需补 `create_document` executor / outputs 注入 / 补偿适配（§9.3.12） | 满足触发条件后接线，不写入规则表、不新增 `process_*` 表 |
+| TBD-008 | 编排层（orchestration）是否立项 | **已定：复用 Gen2 任务 / 工作流域**（`workflows` / `workflow_runs` / `tasks` / `task_events`），不新建编排层；五个接缝（S1–S5）已于 2026-11-09 全部落地（§9.3.13），不写入规则表、不新增 `process_*` 表 | 关闭；后续仅按业务触发条件扩展 Workflow 定义与 Action |
