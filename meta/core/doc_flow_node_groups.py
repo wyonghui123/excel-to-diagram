@@ -249,6 +249,36 @@ def build_node_groups(
     return {group_id: groups[group_id] for group_id in sorted(groups)}
 
 
+def owner_header(bo_id: str,
+                 registry_all: Optional[Dict[str, Any]] = None) -> str:
+    """返回子 BO 的直属单头 BO；未建模或自身即头返回 ``''``。
+
+    只读 BO YAML（全部 ``child_sections``），不依赖 doc_flow_rule 的 active
+    状态——规则目录对 deprecated 规则也要给出稳定契约。
+    """
+    if not bo_id:
+        return ''
+    if registry_all is None:
+        from meta.core.models import registry
+        registry_all = registry.get_all() or {}
+
+    meta_obj = registry_all.get(bo_id)
+    # 自身即头（有 child_sections）时不算任何组的子节点，避免 360 视图抢父。
+    if meta_obj is not None and _child_sections(meta_obj):
+        return ''
+
+    headers = sorted(
+        header for header, header_meta in registry_all.items()
+        if header != bo_id and bo_id in _child_ids(header_meta)
+    )
+    if not headers:
+        return ''
+    relation = _first_ui_relation(meta_obj)
+    if relation in headers:
+        return relation
+    return headers[0]
+
+
 def group_for_bo(groups: Dict[str, Dict[str, Any]],
                  bo_id: str) -> Tuple[str, str]:
     """返回 ``(group_id, role)``；未建模返回 ``('', '')``。"""

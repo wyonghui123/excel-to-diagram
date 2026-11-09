@@ -167,6 +167,18 @@ def test_doc_flow_descriptors_come_from_rule_table(tmp_path, monkeypatch):
         'sales_order', 'sales_order_line', 'sales_order_schedule']
     assert node_group['degraded'] is False
 
+    # TBD-007 P0：计划行角色与头字段契约均为只读增量字段。
+    assert detail['source_role'] == 'header'
+    contract = detail['header_contract']
+    assert contract['mode'] == 'rule_headed'
+    assert contract['head_bo'] == 'shipment'
+    assert contract['split_key'] == ['order_no']
+    assert contract['required_missing'] == [
+        'delivery_no', 'order_id', 'ship_from_location_id',
+        'ship_to_address_text']
+    assert contract['degraded'] is True
+    assert contract['reasons'] == ['header_field_uncovered']
+
 
 def test_unknown_rule_key_returns_none(service):
     assert service.get_rule('no_such_rule_key') is None

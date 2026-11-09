@@ -255,6 +255,7 @@ def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any
 
 
 def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    from meta.core.doc_flow_header_contract import build_header_contract
     from meta.core.doc_flow_node_groups import build_node_groups, node_group_detail
     from meta.core.rule_provider import list_doc_flow_rules
 
@@ -278,6 +279,9 @@ def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
             groups, str(rule.get('source_bo') or ''))
         if node_group:
             detail['node_group'] = node_group
+        # TBD-007 P0：计划行角色与头字段契约均为只读增量字段（零 DDL）。
+        detail['source_role'] = (node_group or {}).get('node_role', '')
+        detail['header_contract'] = build_header_contract(rule)
 
         items.append(_descriptor(
             'doc_flow',

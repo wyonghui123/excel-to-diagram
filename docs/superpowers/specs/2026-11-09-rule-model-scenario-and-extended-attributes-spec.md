@@ -556,9 +556,11 @@
 | 头字段映射 | 依赖 split_key + head_overrides（运行时） | **两阶段**：P0 明确契约；触发后新增 `head_field_map` |
 
 **P0（现在，零 DDL）**：
-1. 规则目录增加只读 `detail.header_contract`：`mode`（`flat` / `rule_headed` / `service_headed`）、`split_key`、`required_missing`（目标头 YAML required 字段减去 split_key）、`service_owned_fields`（头快照 / 业务服务写入字段，仅提示）。
+1. 规则目录增加只读 `detail.header_contract`：`mode`（`flat` / `rule_headed` / `service_headed`）、`split_key`、`required_missing`（目标头 required 且无 default 的存储字段，排除主键/审计列，再减 split_key 经 `field_map` 映射后的目标字段）、`service_owned_fields`（`service_headed` 时等于 `required_missing`，即业务服务必须写入的最小集合，仅提示）。
 2. 建单契约冻结：`rule_headed` 规则的头字段来源顺序 = `head_overrides`（运行时）> split_key 自动映射；required 字段未覆盖时，目录标记 `degraded=true` 并给 `header_field_uncovered`，不阻断既有服务建单。
 3. 计划行边继续用 BO 名表达，节点组负责角色解释；trace 的 `detail.node_group.node_role` 已可区分 `schedule`。
+
+> 实现状态（2026-11-09）：P0 已落 `meta/core/doc_flow_header_contract.py`（纯只读派生，复用 `doc_flow_node_groups.owner_header`）。目录同时下发 `detail.source_role`（取自 `node_group.node_role`），满足下方验收第 3 条。
 
 **P1（触发条件满足后，新增 1 列）**：
 - 触发条件（任一）：① 出现第二条需要规则建头的 BO 对，且头必填字段不在 split_key；② 通用界面开始创建真实单据（非 demo）；③ 同一 split_key 混入「只复制、不分组」的字段，拆单粒度被污染。
