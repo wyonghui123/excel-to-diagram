@@ -737,8 +737,9 @@ def create_app(db_path=None):
 
     # [单据流 Phase 3 2026-11-08] 服务层单例注入（复用启动期 data_source，
     #   不新建第二个 DataSource 实例，避免事务与连接池分裂）。
-    from meta.api.doc_flow_api import init_doc_flow_service
-    from meta.services.doc_flow_service import DocFlowService
+    from meta.services.doc_flow_service import (
+        DocFlowService, init_doc_flow_service,
+    )
     init_doc_flow_service(DocFlowService(data_source, get_platform_data_source()))
 
     from meta.services.audit_service import AuditService

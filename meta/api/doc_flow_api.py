@@ -12,33 +12,22 @@
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from flask import Blueprint, request
 
 from meta.services.auth_middleware import login_required
-from meta.services.doc_flow_service import DocFlowService, DocFlowServiceError
+from meta.services.doc_flow_service import (
+    DocFlowServiceError,
+    get_doc_flow_service,
+)
+from meta.services.trace_service import get_trace_id
 
 logger = logging.getLogger(__name__)
 
 doc_flow_bp = Blueprint('doc_flow', __name__, url_prefix='/api/v2/doc-flow')
 
-_service: Optional[DocFlowService] = None
-
 _EDGE_ARGS = ('source_bo', 'source_id', 'source_item', 'target_bo', 'target_id')
-
-
-def init_doc_flow_service(service: DocFlowService) -> None:
-    """由 server / app_builder 在启动期注入单例。"""
-    global _service
-    _service = service
-
-
-def _require_service() -> DocFlowService:
-    if _service is None:
-        raise DocFlowServiceError(
-            'DOC_FLOW_SERVICE_UNAVAILABLE', '单据流服务未初始化', 500)
-    return _service
 
 
 def _ok(data: Any, message: str = '') -> Tuple[Dict[str, Any], int]:
@@ -71,7 +60,7 @@ def _filters_from_args() -> Dict[str, Any]:
 # 视图体（无装饰器，便于单元测试）
 # ----------------------------------------------------------------------
 def _rules_view() -> Tuple[Dict[str, Any], int]:
-    service = _require_service()
+    service = get_doc_flow_service()
     data = service.list_rules(
         source_bo=request.args.get('source_bo') or None,
         target_bo=request.args.get('target_bo') or None)
@@ -79,7 +68,7 @@ def _rules_view() -> Tuple[Dict[str, Any], int]:
 
 
 def _sources_view() -> Any:
-    service = _require_service()
+    service = get_doc_flow_service()
     rule_id = request.args.get('rule_id') or ''
     if not rule_id:
         return _fail('DOC_FLOW_RULE_INVALID', '缺少 rule_id', 400)
@@ -98,21 +87,22 @@ def _sources_view() -> Any:
 
 
 def _derive_view() -> Any:
-    service = _require_service()
+    service = get_doc_flow_service()
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return _fail('DOC_FLOW_QTY_INVALID', '请求体必须是 JSON 对象', 400)
     if not payload.get('rule_id'):
         return _fail('DOC_FLOW_QTY_INVALID', '缺少 rule_id', 400)
     try:
-        data = service.derive(payload, derived_by='doc_flow_api')
+        data = service.derive(payload, derived_by='doc_flow_api',
+                              trace_id=get_trace_id() or '')
     except DocFlowServiceError as error:
         return _fail(error.code, error.message, error.status)
     return _ok(data, '已生成 {0} 条下游边'.format(data.get('total_edges', 0)))
 
 
 def _edges_view() -> Any:
-    service = _require_service()
+    service = get_doc_flow_service()
     kwargs = {key: request.args.get(key) for key in _EDGE_ARGS
               if request.args.get(key) not in (None, '')}
     if not kwargs:

@@ -11,7 +11,9 @@
 """
 from __future__ import annotations
 
+import logging
 import math
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.doc_flow_batch_engine import derive_batch
@@ -19,6 +21,8 @@ from meta.core.doc_flow_derive_engine import _consumed_in_pool, _num
 from meta.core.doc_flow_rule_store import get_rule, list_rules
 from meta.core.doc_flow_schema import DOC_FLOW_CONSUMED_VIEW
 from meta.core.models import registry
+
+logger = logging.getLogger(__name__)
 
 _QTY_EPSILON = 1e-9
 _DEFAULT_PAGE_SIZE = 50
@@ -227,7 +231,8 @@ class DocFlowService:
 
     # ------------------------------------------------------------------ 派生
     def derive(self, payload: Dict[str, Any],
-               derived_by: str = "") -> Dict[str, Any]:
+               derived_by: str = "",
+               trace_id: str = "") -> Dict[str, Any]:
         payload = payload or {}
         rule = self._require_rule(payload.get("rule_id"))
         target = payload.get("target") or {}
@@ -295,7 +300,39 @@ class DocFlowService:
                     derived_by=derived_by)
             except Exception as exc:
                 self._raise_mapped(exc)
-        return self._derive_view(rule, batch)
+        view = self._derive_view(rule, batch)
+        self._emit_created_event(rule, view, trace_id, derived_by)
+        return view
+
+    def _emit_created_event(self, rule: Dict[str, Any], view: Dict[str, Any],
+                            trace_id: str, derived_by: str) -> None:
+        """S4：派生提交成功后发 `doc_flow.created`（失败只记日志，不影响派生）。
+
+        一期按目标单头建实例：取首个新建目标行 + `target.ids[0]` 作为事件主体，
+        `row_count` 记录本次新建行数；纯幂等重放不发事件。
+        """
+        created = list(view.get("created") or [])
+        if not created:
+            return
+        target_ids = list((view.get("target") or {}).get("ids") or [])
+        event_payload = {
+            "rule_id": rule.get("rule_id"),
+            "source_bo": rule.get("source_bo"),
+            "source_id": created[0].get("source_id"),
+            "target_bo": rule.get("target_bo"),
+            "target_id": target_ids[0] if target_ids else created[0].get("target_id"),
+            "target_line_bo": rule.get("target_line_bo") or "",
+            "row_count": len(created),
+            "trace_id": trace_id or uuid.uuid4().hex,
+        }
+        try:
+            from meta.core.workflow_trigger import start_runs_for_event
+            start_runs_for_event(
+                self.platform_ds, event_name="doc_flow.created",
+                payload=event_payload, created_by=derived_by)
+        except Exception as exc:  # noqa: BLE001 - 触发失败不得回滚业务派生
+            logger.warning(
+                "[DocFlow] doc_flow.created 事件触发失败（不影响派生）: %s", exc)
 
     def _assert_open_qty(self, rule: Dict[str, Any],
                          items: List[Dict[str, Any]]) -> None:
@@ -391,3 +428,23 @@ class DocFlowService:
         ).fetchall()
         items = [dict(zip(_EDGE_COLUMNS, row)) for row in rows]
         return {"items": items, "total": len(items)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 服务单例（启动期注入；API 与 BO Action handler 共用，避免反向 import）
+# ─────────────────────────────────────────────────────────────────────────────
+
+_service: Optional[DocFlowService] = None
+
+
+def init_doc_flow_service(service: DocFlowService) -> None:
+    """由 server / app_builder 在启动期注入单例。"""
+    global _service
+    _service = service
+
+
+def get_doc_flow_service() -> DocFlowService:
+    if _service is None:
+        raise DocFlowServiceError(
+            "DOC_FLOW_SERVICE_UNAVAILABLE", "单据流服务未初始化", 500)
+    return _service

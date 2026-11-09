@@ -4,8 +4,8 @@
 import pytest
 from flask import Flask
 
-from meta.api.doc_flow_api import doc_flow_bp, init_doc_flow_service
-from meta.services.doc_flow_service import DocFlowServiceError
+from meta.api.doc_flow_api import doc_flow_bp
+from meta.services.doc_flow_service import DocFlowServiceError, init_doc_flow_service
 
 
 class FakeDocFlowService:
@@ -22,7 +22,7 @@ class FakeDocFlowService:
         return {'rows': [{'source_id': '1', 'open_qty': 40}], 'total': 1,
                 'page': page, 'page_size': page_size}
 
-    def derive(self, payload, derived_by=''):
+    def derive(self, payload, derived_by='', trace_id=''):
         self.calls.append(('derive', payload, derived_by))
         if payload.get('rule_id') == 'boom':
             raise DocFlowServiceError('DOC_FLOW_RULE_NOT_FOUND', '规则不存在', 404)

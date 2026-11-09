@@ -151,6 +151,12 @@ def register_all_bo_actions(registry=None):
         refresh_handler as project_structure_baseline_refresh_handler,
     )
 
+    # S1/S3 接缝: 单据流建单 / E6 三档冲销（spec 2026-11-09 §9.3.13）
+    from meta.services.doc_flow_action import (
+        doc_flow_derive_handler,
+        doc_flow_reverse_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
@@ -1370,6 +1376,74 @@ def register_all_bo_actions(registry=None):
         output_schema=_project_structure_baseline_output_schema,
         requires_auth=True,
         idempotent=True,
+    )
+
+    # ==================== 单据流 derive / reverse（§9.3.13 S1/S3） ====================
+    registry.register(
+        'doc_flow.derive',
+        doc_flow_derive_handler,
+        description='按单据流规则批量派生下游单据（幂等：重复执行返回 replayed）',
+        object_type='*',
+        category='doc_flow',
+        permission_required=None,
+        input_schema={
+            'type': 'object',
+            'required': ['rule_id', 'sources'],
+            'properties': {
+                'rule_id': {'type': 'string'},
+                'sources': {'type': 'array', 'description': '源单 id 列表或 {source_id, source_item, quantity} 列表'},
+                'target': {'type': 'object', 'description': 'mode=create|append；append 时 data 为抬头覆写'},
+                'head_overrides': {'type': 'object'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'created': {'type': 'array'},
+                'replayed': {'type': 'array'},
+                'target_ids': {'type': 'array'},
+                'edge_ids': {'type': 'array'},
+                'totals': {'type': 'object'},
+            },
+        },
+        requires_auth=False,
+        idempotent=True,
+        operation_type='action',
+    )
+    registry.register(
+        'doc_flow.reverse',
+        doc_flow_reverse_handler,
+        description='补偿任务执行 E6 三档冲销 / 追加补偿（cancel|partial|update|compensate）',
+        object_type='*',
+        category='doc_flow',
+        permission_required=None,
+        input_schema={
+            'type': 'object',
+            'required': ['mode'],
+            'properties': {
+                'mode': {'type': 'string',
+                         'enum': ['cancel', 'partial', 'update', 'compensate', 'none']},
+                'edge_ids': {'type': 'array'},
+                'ref_id': {'type': 'string'},
+                'quantity': {'type': 'number'},
+                'return_rule_id': {'type': 'string'},
+                'target_data': {'type': 'object'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'mode': {'type': 'string'},
+                'reversed_edge_ids': {'type': 'array'},
+                'created_edge_ids': {'type': 'array'},
+                'edge_ids': {'type': 'array'},
+                'replayed': {'type': 'array'},
+                'replay': {'type': 'boolean'},
+            },
+        },
+        requires_auth=False,
+        idempotent=True,
+        operation_type='action',
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")
