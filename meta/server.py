@@ -346,6 +346,16 @@ def _signal_handler(signum, frame, data_source=None):
     sys.exit(0)
 
 
+def _is_test_process() -> bool:
+    """[TEST-EFF P0-2] 测试进程判定。
+
+    - test.py 唯一入口会设置 TEST_ENTRY=1；
+    - 直接 pytest 时看 sys.modules（属于违规用法，但不应因此产生副作用）。
+    生产进程（service_manager / waitress）两条都不满足。
+    """
+    return os.environ.get('TEST_ENTRY') == '1' or 'pytest' in sys.modules
+
+
 def create_app(db_path=None):
     """
     [WARNING] LEGACY 入口 — 推荐使用 ApplicationBuilder（spec-pre-deployment-optimization.md v1.0.0 / FR-5.8）
@@ -1383,9 +1393,16 @@ def create_app(db_path=None):
     app.register_blueprint(graphql_bp)
     logging.getLogger(__name__).info("[M9] GraphQL endpoint registered at /graphql (POC: 1 entity, 2 queries)")
 
-    atexit.register(lambda: _cleanup_resources(data_source))
-    signal.signal(signal.SIGTERM, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
-    signal.signal(signal.SIGINT, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
+    # [TEST-EFF P0-2] 测试进程内不注册生产退出钩子：
+    #   1) atexit 会随 create_app() 累积，退出时串行执行
+    #      shutdown_all_data_sources(timeout=30.0)，导致「跑完不出结果」；
+    #   2) 重装 SIGINT/SIGTERM 会覆盖 pytest 的中断语义，中断后
+    #      以 sys.exit(0) 退出，形成「假成功」。
+    # 测试资源的收尾由 conftest.pytest_unconfigure 显式执行（P0-3）。
+    if not _is_test_process():
+        atexit.register(lambda: _cleanup_resources(data_source))
+        signal.signal(signal.SIGTERM, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
+        signal.signal(signal.SIGINT, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
 
     return app
 

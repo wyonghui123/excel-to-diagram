@@ -77,6 +77,11 @@ class RuleProvider:
     # 懒 import 以避免 rule_provider ↔ store/DAO 的循环依赖。
     # ------------------------------------------------------------------
 
+    def list_doc_flow_rules(self, data_source) -> list:
+        """读取全部单据流规则（DB 载体）。"""
+        from meta.core.doc_flow_rule_store import list_rules
+        return list_rules(data_source)
+
     def get_doc_flow_rule(self, data_source, rule_id: str) -> Optional[dict]:
         """按 rule_id 读取单据流规则（DB 载体）。"""
         from meta.core.doc_flow_rule_store import get_rule
@@ -118,6 +123,11 @@ def set_rule_provider(provider: Optional[RuleProvider]) -> None:
     """替换全局提供者（供测试注入 / 后期切换在线配置实现）"""
     global _default_provider
     _default_provider = provider
+
+
+def list_doc_flow_rules(data_source) -> list:
+    """模块级便捷函数：单据流规则全量读取。"""
+    return get_rule_provider().list_doc_flow_rules(data_source)
 
 
 def get_doc_flow_rule(data_source, rule_id: str) -> Optional[dict]:

@@ -516,6 +516,33 @@ class TestAtomicityAndIdempotency:
         assert result.total_edges == 1 and result.skipped_replays == 1
         assert _count(app_ds, "doc_flow_edges") == 1
 
+    def test_same_source_same_head_different_qty_rejected(self, ready_env):
+        """头行模式不允许同单多行：同源行 + 同单头但数量不同 → 显式错误码。
+
+        spec §14.4 硬约束 2：头行模式是「一源行 = 一目标行」，
+        追加第二行必须显式拒绝，不能静默重放吞掉数量。
+        """
+        app_ds, platform_ds = ready_env
+        _make_rule(platform_ds, split_key=["ship_to"], target_line_bo=LINE_BO)
+        _insert_source(app_ds, 1, quantity=10, ship_to="上海")
+
+        derive_batch(app_ds, platform_ds, "dfb-rule",
+                     [{"source_id": 1, "quantity": 6}])
+        assert _count(app_ds, "doc_flow_edges") == 1
+        assert _count(app_ds, "dfb_delivery_lines") == 1
+        head_id = app_ds.execute("SELECT id FROM dfb_deliveries").fetchall()[0][0]
+
+        with pytest.raises(DocFlowDeriveError) as exc:
+            derive_batch(app_ds, platform_ds, "dfb-rule",
+                         [{"source_id": 1, "quantity": 4}],
+                         head_overrides={"id": head_id})
+        assert exc.value.code == "HEAD_LINE_MULTI_NOT_SUPPORTED"
+
+        # 拒绝后：既无新边，也无新明细行/单头
+        assert _count(app_ds, "doc_flow_edges") == 1
+        assert _count(app_ds, "dfb_delivery_lines") == 1
+        assert _count(app_ds, "dfb_deliveries") == 1
+
     def test_default_quantity_is_open_qty(self, ready_env):
         """quantity 缺省 = 源行未结量（源数量 − 同池已消耗）。"""
         app_ds, platform_ds = ready_env

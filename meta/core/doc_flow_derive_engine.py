@@ -110,21 +110,25 @@ def _find_edge_by_key(app_ds, key: Tuple) -> Optional[str]:
 
 def _find_edge_loose(app_ds, source_bo: str, source_id: Any, source_item: str,
                      target_bo: str, target_id: Any,
-                     rule_id: str) -> Optional[Tuple[str, str]]:
-    """按 (源, 目标单头, 规则) 宽松键查既有边 → (edge_id, target_item)。
+                     rule_id: str) -> Optional[Tuple[str, str, float]]:
+    """按 (源, 目标单头, 规则) 宽松键查既有边 → (edge_id, target_item, quantity)。
 
     头行模式下明细行 ID 在幂等预查时刻尚未生成（spec §6.3），故退一格：
-    同一源行 + 同一目标单头 + 同一规则 = 已派生过，命中即重放。
+    同一源行 + 同一目标单头 + 同一规则 = 已派生过。
+
+    quantity 一并取出，用于区分两种情况（spec §14.4 硬约束 2）：
+    - 数量相同 = 真正的重放（同一次派生的重复调用）；
+    - 数量不同 = 试图向同一单据追加第二行 → 显式拒绝，不静默吞掉。
     """
     rows = app_ds.execute(
-        """SELECT id, target_item FROM doc_flow_edges
+        """SELECT id, target_item, quantity FROM doc_flow_edges
            WHERE source_bo=? AND source_id=? AND source_item=?
              AND target_bo=? AND target_id=? AND rule_id=?
            ORDER BY derived_at LIMIT 1""",
         (source_bo, str(source_id), source_item,
          target_bo, str(target_id), rule_id),
     ).fetchall()
-    return (rows[0][0], rows[0][1]) if rows else None
+    return (rows[0][0], rows[0][1], _num(rows[0][2])) if rows else None
 
 
 def _replay_result(app_ds, rule, source_bo_id: str, source_id: Any,
@@ -273,8 +277,21 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             edge_target_bo, edge_target_id, rule["rule_id"],
         )
         if found:
+            existing_edge_id, existing_item, existing_qty = found
+            if abs(existing_qty - qty) > _QTY_EPSILON:
+                raise DocFlowDeriveError(
+                    "HEAD_LINE_MULTI_NOT_SUPPORTED",
+                    (
+                        "头行模式不支持同一源行向同一单据追加第二行"
+                        f"（源行 {source_bo_id}.{source_id}/{source_item}，"
+                        f"单头 {edge_target_bo}.{edge_target_id}，规则 {rule['rule_id']}；"
+                        f"既有数量 {existing_qty}，本次请求 {qty}）。"
+                        "请改用不同单头/规则，或以单表模式（target_line_bo 为空）派生。"
+                    ),
+                )
             return _replay_result(app_ds, rule, source_bo_id, source_id,
-                                  source_item, source_qty, found[0], found[1])
+                                  source_item, source_qty,
+                                  existing_edge_id, existing_item)
 
     # ── 3. map + create：直拷 → 改名 → 静态覆盖 → 数量默认 ───────────────
     if exact_idem and attach_target_id is not None:
