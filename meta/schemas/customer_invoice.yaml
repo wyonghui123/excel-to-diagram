@@ -940,6 +940,14 @@ ui_view_config:
   detail:
     showChangeHistory: true
     showRelations: true
+    # 业务 Action（B5）：按已过账原发票生成独立贷项草稿（引用原单）
+    actions:
+      - id: create_credit
+        label: 创建贷项
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_create
+        action: customer_invoice.create_credit_from_invoice
     facets:
       - title: 基本信息
         id: customer_invoice_basic

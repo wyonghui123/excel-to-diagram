@@ -33,6 +33,7 @@ from meta.tests.factories._customer_invoice_helpers import (
     set_order_line_item,
     set_shipment_line_billed,
     set_shipment_status,
+    shipment_billed,
     type_id,
 )
 
@@ -522,3 +523,94 @@ def test_reverse_requires_reason():
     with pytest.raises(CustomerInvoiceError) as error:
         service.reverse(original['id'], '  ')
     _expect(error, 'INVOICE_REVERSE_INVALID')
+
+
+# ---------------------------------------------------------------- 独立贷项（B5）
+
+def test_create_credit_from_invoice_copies_negative_lines():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+
+    credit = service.create_credit_from_invoice(
+        {'source_invoice_id': original['id'], 'reason': '价格调整'})
+
+    assert credit['invoice_no'] == 'SCR-202611-00001'
+    assert credit['status'] == 'draft'
+    header = get_header(conn, credit['id'])
+    assert header['document_category'] == 'credit_memo'
+    assert header['reversal_of_invoice_id'] == original['id']
+    assert header['reversal_reason'] == '价格调整'
+    assert Decimal(str(header['gross_amount'])) == Decimal('-452')
+    assert get_header(conn, original['id'])['status'] == 'posted'
+
+    credit_line = get_lines(conn, credit['id'])[0]
+    assert Decimal(str(credit_line['qty'])) == Decimal('-40')
+    assert credit_line['original_invoice_line_id'] == get_lines(
+        conn, original['id'])[0]['id']
+    # 贷项草稿不回写原单进度
+    assert Decimal(str(shipment_billed(conn))) == Decimal('40')
+
+
+def test_create_credit_requires_posted_source():
+    conn = build_conn()
+    draft = _from_shipment(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_credit_from_invoice(
+            {'source_invoice_id': draft['id']})
+    _expect(error, 'INVOICE_STATE_INVALID')
+
+
+def test_create_credit_rejects_second_credit():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    service.create_credit_from_invoice({'source_invoice_id': original['id']})
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_invoice(
+            {'source_invoice_id': original['id']})
+    _expect(error, 'INVOICE_CREDIT_EXISTS')
+
+
+def test_create_credit_date_before_posting_rejected():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_invoice(
+            {'source_invoice_id': original['id'],
+             'invoice_date': '2026-11-08'})
+    _expect(error, 'INVOICE_POSTING_DATE_INVALID')
+
+
+def test_create_credit_selected_lines_only():
+    conn = build_conn()
+    service = _service(conn)
+    created = _from_shipment(conn)
+    service.submit(created['id'])
+    service.post(created['id'])
+    second_line_id = get_lines(conn, created['id'])[1]['id']
+
+    credit = service.create_credit_from_invoice(
+        {'source_invoice_id': created['id'], 'line_ids': [second_line_id]})
+
+    credit_lines = get_lines(conn, credit['id'])
+    assert len(credit_lines) == 1
+    assert credit_lines[0]['original_invoice_line_id'] == second_line_id
+    assert Decimal(str(credit_lines[0]['qty'])) == Decimal('-10')
+
+
+def test_credit_post_rolls_back_billed_progress():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    credit = service.create_credit_from_invoice(
+        {'source_invoice_id': original['id']})
+
+    service.submit(credit['id'])
+    service.post(credit['id'])
+
+    assert get_header(conn, credit['id'])['status'] == 'posted'
+    assert Decimal(str(shipment_billed(conn))) == Decimal('0')
+    assert conn.execute(
+        'SELECT billed_qty FROM sales_order_lines WHERE id = ?',
+        [ORDER_LINE_DELIVERY]).fetchone()[0] == 0

@@ -301,3 +301,35 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 - `git add` 逐文件 + commit：
   `feat(billing): 发票行类型行为（服务行空物料、折扣行负金额）`
+
+---
+
+# B5 独立贷项入口（spec §16）
+
+## [x] T17 服务层 create_credit_from_invoice + 过账方向修正
+
+**修改**
+- `meta/services/customer_invoice_service.py`
+  - 新增 `create_credit_from_invoice`：原单须 posted、无重复贷项 / 红字、
+    无活跃核销、贷项日期 ≥ 原过账日、可按 `line_ids` 选行
+  - `submit` / `post` 对红字 / 贷项单跳过 `_assert_lines_available`
+  - `post` 的 `_apply_billed` 方向：`-1 if _is_red(header) else 1`
+- `meta/services/customer_invoice_actions.py`：`create_credit_from_invoice_handler`
+- `meta/services/bo_action_registrations.py`：注册
+  `customer_invoice.create_credit_from_invoice`（权限沿用 create）
+- `meta/schemas/customer_invoice.yaml`：detail.actions「创建贷项」
+- 测试：service 6 用例、action 3 用例、helpers `shipment_billed`
+
+## [x] T18 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v233.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
+```
+
+- `git add` 逐文件 + commit：
+  `feat(billing): standalone credit memo from posted invoice (B5)`

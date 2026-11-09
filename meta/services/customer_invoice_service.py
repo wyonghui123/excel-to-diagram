@@ -279,6 +279,86 @@ class CustomerInvoiceService:
                 'status': header['status'], 'line_ids': line_ids,
                 'amounts': totals}
 
+    def create_credit_from_invoice(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """B5：按已过账原发票生成独立贷项草稿（引用原单，不回写进度）。
+
+        与 `reverse` 的区别：只生成贷项草稿，不改原单状态、不生成期次、
+        不回写 billed；后续 submit/post 走正常状态机（过账时按负方向扣减）。
+        """
+        payload = dict(payload or {})
+        source_id = payload.get('source_invoice_id') or payload.get('invoice_id')
+        if _blank(source_id):
+            raise CustomerInvoiceError(
+                '缺少原发票', field_name='source_invoice_id',
+                rule='INVOICE_SOURCE_INVALID')
+        source = self._require_header(source_id)
+        if source.get('status') != STATUS_POSTED:
+            raise CustomerInvoiceError(
+                '仅已过账发票可创建贷项', field_name='source_invoice_id',
+                rule='INVOICE_STATE_INVALID')
+        if self._find_red_invoice(source['id']):
+            raise CustomerInvoiceError(
+                '该发票已存在贷项 / 红字单', field_name='source_invoice_id',
+                rule='INVOICE_CREDIT_EXISTS')
+        self._assert_no_active_allocation(source['id'])
+
+        credit_date = _date_text(payload.get('invoice_date') or _today())
+        source_posting = _date_text(source.get('posting_date')
+                                    or source['invoice_date'])
+        if credit_date < source_posting:
+            raise CustomerInvoiceError(
+                '贷项日期不能早于原过账日期 %s' % source_posting,
+                field_name='invoice_date',
+                rule='INVOICE_POSTING_DATE_INVALID')
+
+        lines = self._load_invoice_lines(source['id'])
+        if not lines:
+            raise CustomerInvoiceError(
+                '原发票没有行，无法创建贷项', field_name='lines',
+                rule='INVOICE_SOURCE_INVALID')
+        selected = payload.get('line_ids')
+        if selected:
+            wanted = set(str(item) for item in selected)
+            lines = [line for line in lines if str(line['id']) in wanted]
+            if len(lines) != len(wanted):
+                raise CustomerInvoiceError(
+                    '贷项行不属于原发票', field_name='line_ids',
+                    rule='INVOICE_SOURCE_MISMATCH')
+            if not lines:
+                raise CustomerInvoiceError(
+                    '贷项至少需要一行', field_name='line_ids',
+                    rule='INVOICE_SOURCE_INVALID')
+
+        credit_type_id = self._default_type_id(RED_INVOICE_TYPE_CODE, 'header')
+        credit_no = self._allocate_number(credit_date, credit_type_id)
+
+        header = dict(source)
+        for key in ('id', 'created_at', 'updated_at', 'created_by',
+                    'updated_by', 'invoice_no', 'status', 'posting_date'):
+            header.pop(key, None)
+        header.update({
+            'invoice_no': credit_no,
+            'document_type_id': credit_type_id,
+            'invoice_date': credit_date,
+            'reversal_of_invoice_id': source['id'],
+            'reversal_reason': payload.get('reason') or '独立贷项',
+            'remark': payload.get('remark'),
+            'status': STATUS_DRAFT,
+        })
+        header = self.prepare_header(header, for_reversal=True)
+
+        with _atomic(self.ds):
+            credit_id = self._insert_header(header)
+            credit_lines = [self._negate_line(line, index + 1)
+                            for index, line in enumerate(lines)]
+            line_ids = self._insert_lines(credit_id, credit_lines)
+            totals = self._recalc_impl(credit_id)
+        logger.info('[customer_invoice] credit from invoice=%s -> id=%s no=%s',
+                    source['id'], credit_id, header['invoice_no'])
+        return {'id': credit_id, 'invoice_no': header['invoice_no'],
+                'status': STATUS_DRAFT, 'source_invoice_id': source['id'],
+                'line_ids': line_ids, 'amounts': totals}
+
     def prepare_header(self, payload: Dict[str, Any],
                        *, for_reversal: bool = False) -> Dict[str, Any]:
         """补默认值、取号、金额归零；返回可直接插入的头字典。"""
@@ -475,7 +555,8 @@ class CustomerInvoiceService:
                 raise CustomerInvoiceError('发票没有任何行，禁止提交',
                                            field_name='lines',
                                            rule='INVOICE_SOURCE_INVALID')
-            self._assert_lines_available(lines)
+            if not self._is_red(header):
+                self._assert_lines_available(lines)
             self._write_status(invoice_id, STATUS_SUBMITTED)
         return {'id': int(invoice_id), 'status': STATUS_SUBMITTED}
 
@@ -503,7 +584,8 @@ class CustomerInvoiceService:
                 raise CustomerInvoiceError('发票没有任何行，禁止过账',
                                            field_name='lines',
                                            rule='INVOICE_SOURCE_INVALID')
-            self._assert_lines_available(lines)
+            if not self._is_red(header):
+                self._assert_lines_available(lines)
             totals = self._assert_header_totals(header, lines)
 
             post_date = posting_date or header.get('posting_date') \
@@ -517,7 +599,7 @@ class CustomerInvoiceService:
             if not self._is_red(header):
                 self._generate_schedules(header, totals['gross_amount'])
 
-            self._apply_billed(lines, sign=1)
+            self._apply_billed(lines, sign=-1 if self._is_red(header) else 1)
             self._write_doc_flow_edges(header, lines)
 
             self.ds.execute(

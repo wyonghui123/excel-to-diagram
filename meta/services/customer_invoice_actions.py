@@ -96,3 +96,30 @@ def create_from_shipment_handler(params: Dict[str, Any],
     logger.info('[customer_invoice_action] create_from_shipment shipment=%s '
                 'invoice=%s', shipment_id, data.get('invoice_no'))
     return _ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))
+
+
+def create_credit_from_invoice_handler(params: Dict[str, Any],
+                                       context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.create_credit_from_invoice` 的处理器（B5）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    source_id = (params.get('source_invoice_id') or params.get('invoice_id')
+                 or params.get('source_doc_id'))
+    if _blank(source_id):
+        return _fail('缺少 source_invoice_id（原发票 id）', 'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key)
+               for key in ('invoice_date', 'remark', 'reason', 'line_ids')
+               if not _blank(params.get(key))}
+    payload['source_invoice_id'] = source_id
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+
+    try:
+        data = _service().create_credit_from_invoice(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] create_credit source=%s credit=%s',
+                source_id, data.get('invoice_no'))
+    return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))

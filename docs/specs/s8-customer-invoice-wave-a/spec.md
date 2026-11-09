@@ -764,3 +764,50 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
   6. 头类型当作行类型 → `INVOICE_LINE_TYPE_INVALID`。
 - 回归：guard / schedule / v231 / v232 / v233 / schema_api / actions。
 
+---
+
+## 16. B5 独立贷项入口（Credit Memo）
+
+> 决策：贷项不再只依赖「红冲」状态按钮；已过账发票详情页提供「创建贷项」，
+> 生成引用原单的贷项草稿，后续走 submit / post 正常状态机。
+
+### 16.1 接口
+
+BO Action：`customer_invoice.create_credit_from_invoice`
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| source_invoice_id / source_doc_id | 是 | 原发票 id |
+| invoice_date | 否 | 贷项日期，默认当天；不得早于原过账日 |
+| line_ids | 否 | 原发票行 id 子集；缺省复制全部行（整行取负） |
+| reason | 否 | 贷项原因，默认「独立贷项」，写入 reversal_reason |
+| remark | 否 | 备注 |
+
+前端入口：`customer_invoice.yaml` detail.actions「创建贷项」
+（权限 `customer_invoice:customer_invoice_create`）。
+
+### 16.2 服务规则
+
+- 原发票必须 `posted`，否则 `INVOICE_STATE_INVALID`。
+- 同一原发票已有非 cancelled 的引用单（贷项或红字）→ `INVOICE_CREDIT_EXISTS`。
+- 原发票存在未取消的核销 → 沿用 `_assert_no_active_allocation`。
+- 贷项日期 < 原过账日期 → `INVOICE_POSTING_DATE_INVALID`。
+- 行：默认全部行；`line_ids` 必须是原单行子集，否则 `INVOICE_SOURCE_MISMATCH`。
+- 头：类型 `SCR`（document_category=credit_memo）、`reversal_of_invoice_id`=原单、
+  `reversal_reason`=reason、status=draft、金额由负行汇总。
+- 草稿阶段不改原单状态、不回写 billed、不生成期次。
+- 过账：`post` 对红字 / 贷项单跳过可用量校验，`_apply_billed(sign=-1)` 扣减进度，
+  不生成收款期次。
+
+### 16.3 明确不做
+
+- 不支持部分数量贷项（`line_ids` 只能整行取负）；Wave B 再做按数量 / 金额拆分。
+- 不支持一张原单多张并存贷项（未核销前）。
+
+### 16.4 测试与验收
+
+- service 6 用例：负行复制 / 原单须已过账 / 重复贷项 / 日期早于过账 /
+  按行选择 / 贷项过账回滚进度。
+- action 3 用例：建单成功 / 缺原单 id / 注册契约。
+- 回归：guard / schedule / v231 / v232 / v233 / schema_api。
+

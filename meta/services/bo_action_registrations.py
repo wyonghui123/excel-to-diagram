@@ -121,6 +121,7 @@ def register_all_bo_actions(registry=None):
     # S8 Wave A: 销售发票由发货单生成（spec-s8-customer-invoice-wave-a §13）
     from meta.services.customer_invoice_actions import (
         create_from_shipment_handler as customer_invoice_from_shipment_handler,
+        create_credit_from_invoice_handler as customer_invoice_credit_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -1414,8 +1415,28 @@ def register_all_bo_actions(registry=None):
         requires_auth=True,
         idempotent=False,
     )
-
-    logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")
+    registry.register(
+        'customer_invoice.create_credit_from_invoice',
+        customer_invoice_credit_handler,
+        description='按已过账发票生成独立贷项草稿（引用原单，可按行选择）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'source_invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
 
     # [B1 2026-10-02] 注册契约机器校验（idempotent / 前置条件 / 参数 schema / 返回契约）
     # 固化形状 → 跨应用同一注册形状；warn-only，不阻断启动（与 schema sync 同容错口径）

@@ -336,6 +336,12 @@ def set_shipment_line_billed(conn, qty, line_id=SHIP_LINE_ID):
                  [qty, line_id])
 
 
+def shipment_billed(conn, line_id=SHIP_LINE_ID):
+    row = conn.execute('SELECT billed_qty FROM shipment_lines WHERE id = ?',
+                       [line_id]).fetchone()
+    return float(row[0])
+
+
 def set_order_terms(conn, *, basis_date_rule='invoice_date',
                     cutoff_day=None, term_id=PAYMENT_TERM_ID):
     conn.execute(

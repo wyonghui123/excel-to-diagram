@@ -23,6 +23,7 @@ from meta.tests.factories._customer_invoice_helpers import (
 )
 
 ACTION_ID = 'customer_invoice.create_from_shipment'
+CREDIT_ACTION_ID = 'customer_invoice.create_credit_from_invoice'
 
 
 def _bind_service(monkeypatch, conn):
@@ -83,6 +84,60 @@ def test_action_is_registered_with_permission():
     register_all_bo_actions(registry)
 
     meta = registry.get(ACTION_ID)
+    assert meta is not None
+    assert meta.object_type == 'customer_invoice'
+    assert meta.category == 'business'
+    assert meta.permission_required == 'customer_invoice:customer_invoice_create'
+    assert meta.requires_auth is True
+    assert meta.idempotent is False
+
+
+# ---------------------------------------------------------------- B5 独立贷项
+
+def _posted_invoice(conn):
+    service = CustomerInvoiceService(make_ds(conn))
+    created = service.create_from_shipment(
+        {'shipment_id': SHIPMENT_ID, 'invoice_date': '2026-11-09'})
+    service.submit(created['id'])
+    service.post(created['id'])
+    return created['id']
+
+
+def test_create_credit_handler_creates_draft(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    source_id = _posted_invoice(conn)
+
+    result = customer_invoice_actions.create_credit_from_invoice_handler(
+        {'source_doc_id': source_id, 'reason': '价格调整'})
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'draft'
+    assert result['data']['invoice_no'].startswith('SCR-')
+    header = get_header(conn, result['data']['id'])
+    assert header['document_category'] == 'credit_memo'
+    assert header['reversal_of_invoice_id'] == source_id
+    assert header['reversal_reason'] == '价格调整'
+    assert result['data']['amounts']['gross_amount'] == -565.0
+    assert 'SCR-' in result['message']
+
+
+def test_create_credit_handler_requires_source(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.create_credit_from_invoice_handler({})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVALID_ARGUMENT'
+    assert _invoice_count(conn) == 0
+
+
+def test_credit_action_is_registered_with_permission():
+    registry = BoActionRegistry()
+    register_all_bo_actions(registry)
+
+    meta = registry.get(CREDIT_ACTION_ID)
     assert meta is not None
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
