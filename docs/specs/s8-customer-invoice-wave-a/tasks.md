@@ -369,3 +369,39 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 - 前端 `npm run build`（DetailPage 变更）
 - `git add` 逐文件 + commit：
   `feat(billing): invoice print/credit permissions and menu group (B6)`
+
+---
+
+# B7 doc_flow 反向边（spec §18）
+
+## [x] T21 规则 + 服务写边
+
+**修改**
+- `meta/migrations/v235__customer_invoice_credit_doc_flow.py`（新建）
+  - doc_flow_rule upsert `customer_invoice_to_credit_memo`
+    （source_bo=target_bo=customer_invoice_line，source_qty_field=qty，pool=billing）
+  - verify：规则存在且 status=active；rollback：删除规则
+- `meta/services/customer_invoice_service.py`
+  - 新增常量 `CREDIT_DOC_FLOW_RULE_ID = 'customer_invoice_to_credit_memo'`
+  - `_write_doc_flow_edges`：行有 `original_invoice_line_id` 时写反向引用边
+    （source=原行 id、target=当前行 id，qty/amount 取 abs），然后 continue
+  - `reverse()`：插入红字行后调用 `_write_doc_flow_edges(red_header, red_lines)`
+- 测试
+  - `meta/tests/test_migration_v235.py` 3 用例：插规则 / 幂等 / 回滚
+  - `meta/tests/test_customer_invoice_service.py` 2 用例：
+    贷项过账与红冲各写一条引用边（monkeypatch attach_edge 捕获参数）
+
+## [x] T22 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v235.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
+```
+
+- `git add` 逐文件 + commit：
+  `feat(billing): doc flow reverse edges for credit memo (B7)`

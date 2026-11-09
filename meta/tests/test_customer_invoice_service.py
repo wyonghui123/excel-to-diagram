@@ -11,6 +11,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.services.customer_invoice_service import (
+    CREDIT_DOC_FLOW_RULE_ID,
     CustomerInvoiceError,
     CustomerInvoiceService,
 )
@@ -614,3 +615,56 @@ def test_credit_post_rolls_back_billed_progress():
     assert conn.execute(
         'SELECT billed_qty FROM sales_order_lines WHERE id = ?',
         [ORDER_LINE_DELIVERY]).fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------- doc_flow 反向边（B7）
+
+def _capture_attach_edges(monkeypatch):
+    calls = []
+
+    def _fake_attach_edge(*args, **kwargs):
+        calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr('meta.core.doc_flow_attach.attach_edge', _fake_attach_edge)
+    return calls
+
+
+def test_credit_post_writes_reverse_doc_flow_edge(monkeypatch):
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    credit = service.create_credit_from_invoice(
+        {'source_invoice_id': original['id']})
+    original_line_id = get_lines(conn, original['id'])[0]['id']
+    credit_line_id = get_lines(conn, credit['id'])[0]['id']
+    calls = _capture_attach_edges(monkeypatch)
+
+    service.submit(credit['id'])
+    service.post(credit['id'])
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[2] == CREDIT_DOC_FLOW_RULE_ID
+    assert args[3] == original_line_id
+    assert args[4] == credit_line_id
+    assert args[5] == 40.0        # 负行取正
+    assert kwargs['amount'] == 400.0
+    assert kwargs['derived_by'] == 'customer_invoice_service'
+
+
+def test_reverse_writes_credit_doc_flow_edge(monkeypatch):
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    original_line_id = get_lines(conn, original['id'])[0]['id']
+    calls = _capture_attach_edges(monkeypatch)
+
+    result = service.reverse(original['id'], '客户退货')
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    red_line_id = get_lines(conn, result['red_invoice_id'])[0]['id']
+    assert args[2] == CREDIT_DOC_FLOW_RULE_ID
+    assert args[3] == original_line_id
+    assert args[4] == red_line_id
+    assert args[5] == 40.0
+    assert kwargs['amount'] == 400.0

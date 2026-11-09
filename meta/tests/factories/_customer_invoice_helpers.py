@@ -610,3 +610,38 @@ def line_price_diffs(path):
             'ORDER BY id')]
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------- v235 迁移辅助
+
+def doc_flow_rule(path, rule_id):
+    conn = sqlite3.connect(str(path))
+    try:
+        row = conn.execute(
+            'SELECT source_bo, target_bo, source_qty_field, pool, status '
+            'FROM doc_flow_rule WHERE rule_id = ?', [rule_id]).fetchone()
+        return dict(zip(
+            ('source_bo', 'target_bo', 'source_qty_field', 'pool', 'status'),
+            row)) if row else None
+    finally:
+        conn.close()
+
+
+def doc_flow_rule_count(path, rule_id):
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute(
+            'SELECT COUNT(*) FROM doc_flow_rule WHERE rule_id = ?',
+            [rule_id]).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def set_doc_flow_rule_status(path, rule_id, status):
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute('UPDATE doc_flow_rule SET status = ? WHERE rule_id = ?',
+                     [status, rule_id])
+        conn.commit()
+    finally:
+        conn.close()

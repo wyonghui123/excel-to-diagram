@@ -846,3 +846,48 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 - action 契约：credit_memo 权限断言更新。
 - 回归：schema_api / actions / service / guard / schedule / v231-v233。
 
+---
+
+## 18. B7 doc_flow 反向边（贷项 / 红字引用原发票行）
+
+> 问题：`doc_flow_attach.attach_edge` 对 `qty <= 0` 直接返回 False，
+> 贷项 / 红字负行过账写不出任何转单事实边；`reverse()` 亦未写边。
+> 决策：新增反向引用规则，按「原发票行 → 贷项 / 红字行」写正数量事实边。
+
+### 18.1 规则 `customer_invoice_to_credit_memo`
+
+| 字段 | 值 |
+|---|---|
+| rule_id | customer_invoice_to_credit_memo |
+| source_bo | customer_invoice_line |
+| target_bo | customer_invoice_line |
+| source_qty_field | qty |
+| pool | billing |
+
+- v235 迁移幂等 upsert（同 v231 `_do_rule` 口径）；verify 要求规则存在且 active；
+  rollback 删除规则。
+- Σ 校验：源行 = 原发票行，pool=billing；贷项整行取负时 consumed == source_qty。
+
+### 18.2 服务改动
+
+- `_write_doc_flow_edges`：行存在 `original_invoice_line_id`（红字 / 贷项）时，
+  写 source=原行 id、target=当前行 id 的引用边，数量 / 金额取 `abs()`，
+  rule_id=新规则，然后 `continue`；否则维持发货行边逻辑。
+- `reverse()`：红字头 / 行插入并更新状态、重算订单开票状态后，
+  调用 `_write_doc_flow_edges(red_header, red_lines)` 补写引用边。
+- 贷项草稿过账（B5）走 `post()` 同一路径，自动写引用边。
+
+### 18.3 边界
+
+- 不补偿原「发货行 → 原发票行」正向边（冲销补偿属后续批次）。
+- 红字 / 贷项行虽复制 `shipment_line_id`，但走引用边分支，不重复写发货边。
+- 边写入失败仅告警，不阻断过账 / 红冲（与 `attach_edge` 既有降级口径一致）。
+
+### 18.4 测试与验收
+
+- v235 3 用例：插规则 / 幂等 / 回滚。
+- service 2 用例（monkeypatch `meta.core.doc_flow_attach.attach_edge` 捕获参数）：
+  - 贷项过账：rule_id / source=原行 id / target=贷项行 id / qty>0 / amount>0；
+  - 红冲：红字行同样写引用边且 source=原行 id。
+- 回归：service / actions / guard / schedule / v231-v235 / schema_api。
+

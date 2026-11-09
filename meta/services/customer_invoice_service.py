@@ -96,6 +96,9 @@ LINE_CATEGORY_DISCOUNT = 'discount'
 
 DOC_FLOW_RULE_ID = 'shipment_to_customer_invoice'
 
+#: 贷项 / 红字行引用原发票行的反向事实边规则（B7）
+CREDIT_DOC_FLOW_RULE_ID = 'customer_invoice_to_credit_memo'
+
 #: 数值容差（4 位小数金额）
 EPSILON = Decimal('0.0001')
 
@@ -685,6 +688,7 @@ class CustomerInvoiceService:
                 % HEADER_TABLE,
                 [STATUS_REVERSED, now, invoice_id])
             self._recompute_orders_for_lines(lines)
+            self._write_doc_flow_edges(red_header, red_lines)
         logger.info('[customer_invoice] reversed id=%s -> red=%s no=%s',
                     invoice_id, red_header_id, red_header['invoice_no'])
         return {'id': int(invoice_id), 'status': STATUS_REVERSED,
@@ -937,6 +941,18 @@ class CustomerInvoiceService:
                               lines: List[Dict[str, Any]]) -> None:
         from meta.core.doc_flow_attach import attach_edge
         for line in lines:
+            original_line_id = line.get('original_invoice_line_id')
+            if not _blank(original_line_id):
+                # B7：贷项 / 红字行按原发票行写反向引用边（数量 / 金额取正）
+                attach_edge(
+                    self.ds, self.platform_ds, CREDIT_DOC_FLOW_RULE_ID,
+                    original_line_id, line['id'],
+                    abs(float(_to_decimal(line.get('qty')))),
+                    target_item=str(line['id']),
+                    unit=str(line.get('uom_id') or ''),
+                    amount=abs(float(_to_decimal(line.get('net_amount')))),
+                    derived_by='customer_invoice_service')
+                continue
             shipment_line_id = line.get('shipment_line_id')
             if _blank(shipment_line_id):
                 continue
