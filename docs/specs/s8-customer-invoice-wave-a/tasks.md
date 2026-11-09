@@ -220,7 +220,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 npm run build   # 在 D:\filework\s8-billing-worktree 执行
 ```
 
-## T11 回归 + 提交
+## [x] T11 回归 + 提交
 
 ```powershell
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
