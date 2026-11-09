@@ -66,6 +66,28 @@ def test_without_parent_menu_keeps_top_level(tmp_path):
     assert parent[0][0] == ''
 
 
+def test_inserts_missing_menu_row(tmp_path):
+    """全新库：迁移须先补插菜单行（应用启动后 auto_generator 才 INSERT OR IGNORE）。"""
+    path = tmp_path / 'app.db'
+    conn = build_permission_file(path, [(PARENT_CODE, '应收管理', '', 10)])
+    conn.close()
+    assert _rows(path, 'SELECT 1 FROM menus WHERE menu_code = ?',
+                 [MENU_CODE]) == []
+
+    assert v234.migrate(path, skip_backup=True) is True
+    assert v234.verify(path) is True
+
+    row = _rows(
+        path,
+        'SELECT menu_name, menu_path, parent_menu, sort_order FROM menus '
+        'WHERE menu_code = ?', [MENU_CODE])
+    assert row
+    assert row[0][0] == '销售发票管理'
+    assert row[0][1] == '/customer-invoice'
+    assert row[0][2] == PARENT_CODE
+    assert row[0][3] == v234.MENU_SORT_ORDER
+
+
 def test_migrate_is_idempotent_and_rollback(tmp_path):
     path = _db_file(tmp_path)
 

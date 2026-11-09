@@ -23,13 +23,13 @@ shipment_line --(delivery)--> customer_invoice_line --> customer_invoice(post)
 
 ### 1.2 验收（全部满足才算完成）
 
-- [ ] 三张新表 + 五个派生列由 v231 迁移幂等创建，`verify()` 自检通过。
-- [ ] 从已发运/已签收的发货单可生成草稿发票；重复开票、超量开票被拒。
-- [ ] `post` 原子完成：状态→posted、期次生成（Σ金额=gross）、billed 回写、doc_flow 边写入、billing_status 派生。
-- [ ] `reverse` 生成红字发票（负数量/负金额、无期次），回滚 billed、取消原期次、原单→reversed。
-- [ ] `plan`/`none` 开票来源一律 fail-closed，错误码可定位。
-- [ ] 新增测试：service >= 14、schedule >= 6、guard >= 8、migration >= 4，全部通过。
-- [ ] 回归：shipment / sales order / payment term 既有测试无失败。
+- [x] 三张新表 + 五个派生列由 v231 迁移幂等创建，`verify()` 自检通过。
+- [x] 从已发运/已签收的发货单可生成草稿发票；重复开票、超量开票被拒。
+- [x] `post` 原子完成：状态→posted、期次生成（Σ金额=gross）、billed 回写、doc_flow 边写入、billing_status 派生。
+- [x] `reverse` 生成红字发票（负数量/负金额、无期次），回滚 billed、取消原期次、原单→reversed。
+- [x] `plan`/`none` 开票来源一律 fail-closed，错误码可定位。
+- [x] 新增测试：service >= 14、schedule >= 6、guard >= 8、migration >= 4，全部通过（实为 44 / 7 / 19 / 5）。
+- [x] 回归：shipment / sales order / payment term 既有测试 199 项，198 通过；唯一失败 `test_inv1_single_writer` 是本分支落后 main 的静态扫描期望（main `68ff9931` 已修复），合并 main 时随重排一并解决。
 
 ### 1.3 非目标（本波明确不做）
 
@@ -476,11 +476,11 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 ## 11. 需批准项（Approval Checklist）
 
-- [ ] 范围：仅后端 Wave A（对象/schema/迁移/服务/守卫/测试），不做 UI 页面。
-- [ ] 迁移号用 **v231**（已知与 doc-flow-worktree 未合并编号冲突，合并期重排）。
-- [ ] 行类型 code 用 `INV_ITEM` / `INV_SERVICE` / `INV_DISCOUNT`（修正上游 §9 的全局唯一冲突）。
-- [ ] 计划开票 fail-closed（`plan` 一律拒绝），严格期次只读（D27），不建 `settlement_block_code`（D28）。
-- [ ] 允许开始编码（S8-A1..A9）。
+- [x] 范围：仅后端 Wave A（对象/schema/迁移/服务/守卫/测试），不新增自定义 UI 页面（列表/详情由 schema 元数据驱动）。
+- [ ] 迁移号用 **v231**（已知与 doc-flow-worktree 未合并编号冲突，合并期重排为 v236-v240）。
+- [x] 行类型 code 用 `INV_ITEM` / `INV_SERVICE` / `INV_DISCOUNT`（修正上游 §9 的全局唯一冲突）。
+- [x] 计划开票 fail-closed（`plan` 一律拒绝），严格期次只读（D27），不建 `settlement_block_code`（D28）。
+- [x] 允许开始编码（S8-A1..A9）。
 
 ---
 

@@ -24,7 +24,9 @@ from meta.tests.factories._customer_invoice_helpers import (
     ORG_ID,
     SHIPMENT_ID,
     SHIP_LINE_ID,
+    add_allocation,
     build_conn,
+    enable_allocation_table,
     get_header,
     get_lines,
     get_schedules,
@@ -554,6 +556,30 @@ def test_reverse_requires_reason():
     with pytest.raises(CustomerInvoiceError) as error:
         service.reverse(original['id'], '  ')
     _expect(error, 'INVOICE_REVERSE_INVALID')
+
+
+def test_reverse_blocked_by_active_allocation():
+    """R-INV-23：存在 active 核销时禁止红冲。"""
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    enable_allocation_table(conn)
+    add_allocation(conn, original['id'], 452)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.reverse(original['id'], '有核销不能红冲')
+    _expect(error, 'INVOICE_ALLOCATION_EXISTS')
+
+
+def test_reverse_allows_cancelled_allocation():
+    """R-INV-23：核销已取消（status != active）不阻断红冲。"""
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    enable_allocation_table(conn)
+    add_allocation(conn, original['id'], 452, status='cancelled')
+
+    result = service.reverse(original['id'], '核销已取消')
+    assert result['status'] == 'reversed'
+    assert get_header(conn, original['id'])['status'] == 'reversed'
 
 
 # ---------------------------------------------------------------- 独立贷项（B5）

@@ -398,6 +398,22 @@ def set_order_line_item(conn, item_id, line_id=ORDER_LINE_DELIVERY):
                  [item_id, line_id])
 
 
+def enable_allocation_table(conn):
+    """模拟 AR 核销表存在（生产库尚无 payment_allocations，守卫 fail-open）。"""
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS payment_allocations ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'invoice_id INTEGER NOT NULL, '
+        'amount NUMERIC(18, 4) NOT NULL DEFAULT 0, '
+        "status VARCHAR(20) NOT NULL DEFAULT 'active')")
+
+
+def add_allocation(conn, invoice_id, amount, status='active'):
+    conn.execute(
+        'INSERT INTO payment_allocations (invoice_id, amount, status) '
+        'VALUES (?, ?, ?)', [invoice_id, amount, status])
+
+
 def type_id(conn, code):
     row = conn.execute(
         "SELECT id FROM type_definitions WHERE scope_bo = 'customer_invoice' "
