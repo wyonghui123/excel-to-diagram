@@ -273,3 +273,31 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 - `git add` 逐文件 + commit：
   `feat(billing): 发票行改价差额与原因必填（D13）`
+
+---
+
+# B4 行类型行为（spec §15）
+
+## [x] T15 服务层行类型规则
+
+**修改**
+- `meta/services/customer_invoice_service.py`
+  - 常量 `LINE_CATEGORY_MATERIAL / SERVICE / DISCOUNT`
+  - `_resolve_line_type`：默认 `INV_ITEM`；校验 `scope_bo=customer_invoice` + `level=line`
+  - `_apply_line_type_rules`：服务行空 item / 物料行必填 item / 折扣行负金额
+  - `_finalize_line` 调用上述规则；红字行豁免金额方向校验
+- `meta/tests/factories/_customer_invoice_helpers.py`：`set_order_line_item` / `type_id`
+- `meta/tests/test_customer_invoice_service.py`：新增 6 用例
+
+## [x] T16 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
+```
+
+- `git add` 逐文件 + commit：
+  `feat(billing): 发票行类型行为（服务行空物料、折扣行负金额）`

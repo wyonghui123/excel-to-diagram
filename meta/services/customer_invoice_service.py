@@ -89,6 +89,11 @@ RED_INVOICE_TYPE_CODE = 'SCR'
 DEFAULT_INVOICE_TYPE_CODE = 'SINV'
 DEFAULT_LINE_TYPE_CODE = 'INV_ITEM'
 
+#: 行类型类别（type_definitions.line_category）
+LINE_CATEGORY_MATERIAL = 'material'
+LINE_CATEGORY_SERVICE = 'service'
+LINE_CATEGORY_DISCOUNT = 'discount'
+
 DOC_FLOW_RULE_ID = 'shipment_to_customer_invoice'
 
 #: 数值容差（4 位小数金额）
@@ -1134,11 +1139,57 @@ class CustomerInvoiceService:
             'original_invoice_line_id': None,
         }
 
+    def _resolve_line_type(self, line_type_id: Any) -> tuple:
+        """解析行类型归属；返回 (type_id, line_category)。"""
+        if _blank(line_type_id):
+            return (self._default_type_id(DEFAULT_LINE_TYPE_CODE, 'line'),
+                    LINE_CATEGORY_MATERIAL)
+        rows = self.ds.query(
+            'SELECT id, line_category FROM %s '
+            "WHERE id = ? AND scope_bo = 'customer_invoice' AND level = 'line'"
+            % TYPE_TABLE, [line_type_id])
+        if not rows:
+            raise CustomerInvoiceError(
+                '行类型不属于销售发票行', field_name='line_type_id',
+                rule='INVOICE_LINE_TYPE_INVALID')
+        return (int(rows[0]['id']),
+                rows[0].get('line_category') or LINE_CATEGORY_MATERIAL)
+
+    def _apply_line_type_rules(self, line: Dict[str, Any],
+                               net: Decimal) -> Dict[str, Any]:
+        """B4 行类型行为：服务行可空 item；物料行必须有物料；仅折扣行可负金额。"""
+        type_id, category = self._resolve_line_type(line.get('line_type_id'))
+        line['line_type_id'] = type_id
+
+        # 红字行金额为负是预期（原行已校验），仅跳过金额方向校验
+        if not _blank(line.get('original_invoice_line_id')):
+            return line
+
+        if category == LINE_CATEGORY_DISCOUNT:
+            if net >= 0:
+                raise CustomerInvoiceError(
+                    '折扣行金额必须为负', field_name='net_amount',
+                    rule='INVOICE_LINE_AMOUNT_INVALID')
+            return line
+
+        if net < 0:
+            raise CustomerInvoiceError(
+                '非折扣行金额不能为负', field_name='net_amount',
+                rule='INVOICE_LINE_AMOUNT_INVALID')
+        source = line.get('source_doc_type')
+        if category != LINE_CATEGORY_SERVICE and source != SOURCE_MANUAL \
+                and _blank(line.get('item_id')):
+            raise CustomerInvoiceError(
+                '物料行必须关联物料', field_name='item_id',
+                rule='INVOICE_LINE_ITEM_REQUIRED')
+        return line
+
     def _finalize_line(self, line: Dict[str, Any]) -> Dict[str, Any]:
         qty = _to_decimal(line.get('qty'))
         unit_price = _to_decimal(line.get('unit_price'))
         rate = _to_decimal(line.get('tax_rate_percent'))
         net = _round(qty * unit_price, 4)
+        line = self._apply_line_type_rules(line, net)
         tax = _round(net * rate / Decimal('100'), 4)
         line['qty'] = qty
         line['unit_price'] = _to_decimal(unit_price)

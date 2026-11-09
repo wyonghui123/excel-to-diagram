@@ -363,6 +363,18 @@ def set_order_line_billed(conn, line_id, qty, amount=0):
         'WHERE id = ?', [qty, amount, line_id])
 
 
+def set_order_line_item(conn, item_id, line_id=ORDER_LINE_DELIVERY):
+    conn.execute('UPDATE sales_order_lines SET item_id = ? WHERE id = ?',
+                 [item_id, line_id])
+
+
+def type_id(conn, code):
+    row = conn.execute(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'customer_invoice' "
+        'AND code = ?', [code]).fetchone()
+    return int(row[0])
+
+
 def _seed_types(conn: sqlite3.Connection) -> None:
     rows = (
         ('SINV', 'header', 'standard', None),

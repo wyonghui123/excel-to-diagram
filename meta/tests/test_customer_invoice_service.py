@@ -30,8 +30,10 @@ from meta.tests.factories._customer_invoice_helpers import (
     make_ds,
     set_header_amounts,
     set_order_line_billed,
+    set_order_line_item,
     set_shipment_line_billed,
     set_shipment_status,
+    type_id,
 )
 
 BASE_HEADER = {
@@ -139,6 +141,84 @@ def test_line_qty_update_keeps_price_override():
     assert normalized['price_source'] == 'manual'
     assert normalized['price_change_reason'] == '客户议价'
     assert Decimal(str(normalized['price_diff_amount'])) == Decimal('20')
+
+
+def test_service_line_allows_empty_item():
+    """B4：服务行允许 item_id 为空（description 必填兜底）。"""
+    conn = build_conn()
+    result = _service(conn).create_manual(dict(
+        BASE_HEADER,
+        lines=[{'line_type_id': type_id(conn, 'INV_SERVICE'),
+                'description': '安装服务', 'uom_id': 21, 'tax_code_id': 31,
+                'tax_rate_percent': 6, 'billing_basis': 'amount',
+                'net_amount': 800}]))
+
+    line = get_lines(conn, result['id'])[0]
+    assert line['item_id'] is None
+    assert line['line_type_id'] == type_id(conn, 'INV_SERVICE')
+    assert Decimal(str(line['net_amount'])) == Decimal('800')
+
+
+def test_order_line_requires_item_for_material_line():
+    """B4：非手工的物料行必须关联物料。"""
+    conn = build_conn()
+    set_order_line_item(conn, None)
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_manual(dict(
+            BASE_HEADER,
+            lines=[{'order_line_id': ORDER_LINE_DELIVERY, 'qty': 5}]))
+    _expect(error, 'INVOICE_LINE_ITEM_REQUIRED')
+
+
+def test_discount_line_allows_negative_amount():
+    """B4：仅折扣行允许负金额。"""
+    conn = build_conn()
+    result = _service(conn).create_manual(dict(
+        BASE_HEADER,
+        lines=[{'line_type_id': type_id(conn, 'INV_DISCOUNT'),
+                'description': '年度折扣', 'uom_id': 21, 'tax_code_id': 31,
+                'tax_rate_percent': 13, 'billing_basis': 'amount',
+                'net_amount': -50}]))
+
+    line = get_lines(conn, result['id'])[0]
+    assert Decimal(str(line['net_amount'])) == Decimal('-50')
+    assert Decimal(str(line['gross_amount'])) == Decimal('-56.5')
+    assert result['amounts']['gross_amount'] == -56.5
+
+
+def test_discount_line_rejects_non_negative_amount():
+    conn = build_conn()
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_manual(dict(
+            BASE_HEADER,
+            lines=[{'line_type_id': type_id(conn, 'INV_DISCOUNT'),
+                    'description': '折扣', 'uom_id': 21, 'tax_code_id': 31,
+                    'tax_rate_percent': 13, 'billing_basis': 'amount',
+                    'net_amount': 50}]))
+    _expect(error, 'INVOICE_LINE_AMOUNT_INVALID')
+
+
+def test_non_discount_line_rejects_negative_amount():
+    conn = build_conn()
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_manual(dict(
+            BASE_HEADER,
+            lines=[{'description': '负数物料', 'uom_id': 21, 'tax_code_id': 31,
+                    'tax_rate_percent': 13, 'billing_basis': 'amount',
+                    'net_amount': -50}]))
+    _expect(error, 'INVOICE_LINE_AMOUNT_INVALID')
+
+
+def test_line_type_must_belong_to_customer_invoice():
+    conn = build_conn()
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_manual(dict(
+            BASE_HEADER,
+            lines=[{'line_type_id': type_id(conn, 'SINV'),
+                    'description': '错类型', 'uom_id': 21, 'tax_code_id': 31,
+                    'tax_rate_percent': 13, 'billing_basis': 'amount',
+                    'net_amount': 100}]))
+    _expect(error, 'INVOICE_LINE_TYPE_INVALID')
 
 
 def test_create_from_shipment_partial_qty():

@@ -723,3 +723,44 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 - 回归：`test_customer_invoice_guard.py`、`test_customer_invoice_schedule.py`、
   `test_migration_v231.py`、`test_migration_v232.py`、`test_schema_api.py`。
 
+---
+
+## 15. B4 行类型行为（SERVICE 空 item / DISCOUNT 负金额）
+
+> 决策：行类型由 `line_type_id → type_definitions.line_category` 解析；
+> 服务行允许空物料，物料行（非手工）必须关联物料；只有折扣行允许负金额。
+
+### 15.1 规则
+
+`_finalize_line` → `_apply_line_type_rules`（发货 / 订单 / 手工行统一经过）：
+
+| line_category | item_id | 金额方向 | 说明 |
+|---|---|---|---|
+| material | 发货 / 订单来源必填；手工行可空 | net ≥ 0 | 空 item 抛 `INVOICE_LINE_ITEM_REQUIRED` |
+| service | 可空 | net ≥ 0 | `description` 必填（沿用既有校验） |
+| discount | 可空 | net < 0 | 非负抛 `INVOICE_LINE_AMOUNT_INVALID` |
+
+- `line_type_id` 为空 → 默认 `INV_ITEM`（material）。
+- `line_type_id` 必须属于 `scope_bo='customer_invoice'` 且 `level='line'`，
+  否则 `INVOICE_LINE_TYPE_INVALID`。
+- 非折扣行净额为负 → `INVOICE_LINE_AMOUNT_INVALID`。
+- 红字行（`original_invoice_line_id` 非空）跳过金额方向校验；物料 / 服务约束
+  沿用原行（原行写入时已校验）。
+
+### 15.2 明确不做
+
+- 不新增行类型（沿用 v231 的 `INV_ITEM / INV_SERVICE / INV_DISCOUNT`）。
+- 折扣行不做自动分摊 / 反算（由用户直接给负净额）。
+- 不做行类型与订单行类型的联动校验（手工行自由选择）。
+
+### 15.3 测试与验收
+
+- `test_customer_invoice_service.py` 新增 6 用例：
+  1. 服务行空 item 建单成功；
+  2. 订单行来源物料行空 item → `INVOICE_LINE_ITEM_REQUIRED`；
+  3. 折扣行负金额成功（net=-50 / gross=-56.5）；
+  4. 折扣行非负金额 → `INVOICE_LINE_AMOUNT_INVALID`；
+  5. 非折扣行负金额 → `INVOICE_LINE_AMOUNT_INVALID`；
+  6. 头类型当作行类型 → `INVOICE_LINE_TYPE_INVALID`。
+- 回归：guard / schedule / v231 / v232 / v233 / schema_api / actions。
+
