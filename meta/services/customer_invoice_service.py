@@ -425,7 +425,7 @@ class CustomerInvoiceService:
             ('shipment_line_id', shipment_line_id),
             ('schedule_id', schedule_id),
             ('order_line_id', order_line_id)) if not _blank(value)]
-        # 发货行允许同时携带冗余的 order_line_id（与 v231 CHECK 语义一致）；
+        # 发货行允许同时携带冗余的 order_line_id（与 v236 CHECK 语义一致）；
         # 仅计划行与其余两者互斥。
         if not _blank(schedule_id) and (
                 not _blank(shipment_line_id) or not _blank(order_line_id)):
@@ -1512,7 +1512,7 @@ class CustomerInvoiceService:
             % TYPE_TABLE, ['customer_invoice', level, code])
         if not rows:
             raise CustomerInvoiceError(
-                '缺少单据类型 %s（请先执行 v231 迁移）' % code,
+                '缺少单据类型 %s（请先执行 v236 迁移）' % code,
                 field_name='document_type_id', rule='INVOICE_TYPE_MISSING')
         return int(rows[0]['id'])
 

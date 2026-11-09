@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v235 —— 销售发票贷项反向 doc_flow 规则（B7）。
+"""v240 —— 销售发票贷项反向 doc_flow 规则（B7）。
 
 背景：
   红冲 / 贷项行数量为负，`doc_flow_attach.attach_edge` 对 qty <= 0 直接
@@ -13,13 +13,13 @@
   2. verify：规则存在且 status='active'
   3. rollback：删除规则
 
-幂等：ON CONFLICT(rule_id) DO UPDATE（与 v231 `_do_rule` 同口径）。
+幂等：ON CONFLICT(rule_id) DO UPDATE（与 v236 `_do_rule` 同口径）。
 """
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-MIGRATION_NAME = 'v235__customer_invoice_credit_doc_flow'
+MIGRATION_NAME = 'v240__customer_invoice_credit_doc_flow'
 
 RULE_TABLE = 'doc_flow_rule'
 RULE_ID = 'customer_invoice_to_credit_memo'
@@ -45,7 +45,7 @@ def _table_exists(conn, table):
 
 def _do_rule(conn):
     if not _table_exists(conn, RULE_TABLE):
-        print('[v235] SKIP: %s 表不存在' % RULE_TABLE)
+        print('[v240] SKIP: %s 表不存在' % RULE_TABLE)
         return False
     now = datetime.now().isoformat(timespec='seconds')
     conn.execute(
@@ -65,7 +65,7 @@ def _do_rule(conn):
         """,
         (RULE['rule_id'], RULE['source_bo'], RULE['target_bo'],
          RULE['source_qty_field'], RULE['pool'], now, now))
-    print('[v235] doc_flow 规则 %s 已写入（pool=%s）'
+    print('[v240] doc_flow 规则 %s 已写入（pool=%s）'
           % (RULE_ID, RULE['pool']))
     return True
 
@@ -73,13 +73,13 @@ def _do_rule(conn):
 def upgrade(db_path, skip_backup=True):
     path = Path(db_path)
     if not path.exists():
-        print('[v235] SKIP: database not found: %s' % path)
+        print('[v240] SKIP: database not found: %s' % path)
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, RULE_TABLE):
-            print('[v235] SKIP: %s 表不存在' % RULE_TABLE)
+            print('[v240] SKIP: %s 表不存在' % RULE_TABLE)
             return False
         _do_rule(conn)
         conn.commit()
@@ -96,19 +96,19 @@ def verify(db_path):
     conn = _connect(path)
     try:
         if not _table_exists(conn, RULE_TABLE):
-            print('[v235] verify: 缺表 %s' % RULE_TABLE)
+            print('[v240] verify: 缺表 %s' % RULE_TABLE)
             return False
         row = conn.execute(
             'SELECT status, pool FROM %s WHERE rule_id = ?' % RULE_TABLE,
             [RULE_ID]).fetchone()
         if not row:
-            print('[v235] verify: 缺规则 %s' % RULE_ID)
+            print('[v240] verify: 缺规则 %s' % RULE_ID)
             return False
         if row[0] != 'active':
-            print('[v235] verify: 规则 %s 非 active（%s）' % (RULE_ID, row[0]))
+            print('[v240] verify: 规则 %s 非 active（%s）' % (RULE_ID, row[0]))
             return False
         if row[1] != RULE['pool']:
-            print('[v235] verify: 规则 %s pool 不符（%s）' % (RULE_ID, row[1]))
+            print('[v240] verify: 规则 %s pool 不符（%s）' % (RULE_ID, row[1]))
             return False
         return True
     finally:
@@ -126,7 +126,7 @@ def rollback(db_path):
             return False
         conn.execute('DELETE FROM %s WHERE rule_id = ?' % RULE_TABLE, [RULE_ID])
         conn.commit()
-        print('[v235] rollback: 已删除规则 %s' % RULE_ID)
+        print('[v240] rollback: 已删除规则 %s' % RULE_ID)
         return True
     finally:
         conn.close()

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v233 —— 销售发票行改价差额（price_diff_amount）。
+"""v238 —— 销售发票行改价差额（price_diff_amount）。
 
 背景：
   D13 价格变更（Fusion 对标）：草稿发票行允许覆盖订单单价，但必须填写改价原因；
@@ -46,17 +46,17 @@ def _column_exists(conn, table, column):
 def upgrade(db_path, skip_backup=True):
     path = Path(db_path)
     if not path.exists():
-        print('[v233] SKIP: database not found: %s' % path)
+        print('[v238] SKIP: database not found: %s' % path)
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, LINE_TABLE):
-            print('[v233] SKIP: table %s not found（请先执行 v231）' % LINE_TABLE)
+            print('[v238] SKIP: table %s not found（请先执行 v236）' % LINE_TABLE)
             return False
 
         if _column_exists(conn, LINE_TABLE, COLUMN):
-            print('[v233] column %s.%s already exists, skip ALTER'
+            print('[v238] column %s.%s already exists, skip ALTER'
                   % (LINE_TABLE, COLUMN))
             conn.commit()
             return True
@@ -64,7 +64,7 @@ def upgrade(db_path, skip_backup=True):
         conn.execute(
             "ALTER TABLE %s ADD COLUMN %s NUMERIC(18,4) NOT NULL DEFAULT 0"
             % (LINE_TABLE, COLUMN))
-        print('[v233] added column %s.%s' % (LINE_TABLE, COLUMN))
+        print('[v238] added column %s.%s' % (LINE_TABLE, COLUMN))
 
         conn.execute(
             'UPDATE %s SET %s = %s' % (LINE_TABLE, COLUMN, _DIFF_EXPR_SQL))
@@ -72,45 +72,45 @@ def upgrade(db_path, skip_backup=True):
     finally:
         conn.close()
 
-    print('[v233] done')
+    print('[v238] done')
     return True
 
 
 def migrate(db_path, skip_backup=True):
-    """与 v231 保持同名入口。"""
+    """与 v236 保持同名入口。"""
     return upgrade(db_path, skip_backup=skip_backup)
 
 
 def verify(db_path) -> bool:
     path = Path(db_path)
     if not path.exists():
-        print('[v233] verify FAIL: database not found')
+        print('[v238] verify FAIL: database not found')
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, LINE_TABLE):
-            print('[v233] verify FAIL: table %s missing' % LINE_TABLE)
+            print('[v238] verify FAIL: table %s missing' % LINE_TABLE)
             return False
         if not _column_exists(conn, LINE_TABLE, COLUMN):
-            print('[v233] verify FAIL: column %s missing' % COLUMN)
+            print('[v238] verify FAIL: column %s missing' % COLUMN)
             return False
 
         nulls = conn.execute(
             'SELECT COUNT(*) FROM %s WHERE %s IS NULL' % (LINE_TABLE, COLUMN)
         ).fetchone()[0]
         if nulls:
-            print('[v233] verify FAIL: %s NULL rows' % nulls)
+            print('[v238] verify FAIL: %s NULL rows' % nulls)
             return False
 
         mismatch = conn.execute(
             'SELECT COUNT(*) FROM %s WHERE ABS(%s - %s) > 0.0001'
             % (LINE_TABLE, COLUMN, _DIFF_EXPR_SQL)).fetchone()[0]
         if mismatch:
-            print('[v233] verify FAIL: %s diff mismatches' % mismatch)
+            print('[v238] verify FAIL: %s diff mismatches' % mismatch)
             return False
 
-        print('[v233] verify OK')
+        print('[v238] verify OK')
         return True
     finally:
         conn.close()
@@ -119,22 +119,22 @@ def verify(db_path) -> bool:
 def rollback(db_path) -> bool:
     path = Path(db_path)
     if not path.exists():
-        print('[v233] rollback SKIP: database not found')
+        print('[v238] rollback SKIP: database not found')
         return False
 
     conn = _connect(path)
     try:
         if not _column_exists(conn, LINE_TABLE, COLUMN):
-            print('[v233] rollback SKIP: column missing')
+            print('[v238] rollback SKIP: column missing')
             return True
         try:
             conn.execute(
                 'ALTER TABLE %s DROP COLUMN %s' % (LINE_TABLE, COLUMN))
             conn.commit()
-            print('[v233] rollback done')
+            print('[v238] rollback done')
             return True
         except sqlite3.OperationalError as exc:
-            print('[v233] rollback FAIL: %s' % exc)
+            print('[v238] rollback FAIL: %s' % exc)
             return False
     finally:
         conn.close()

@@ -323,7 +323,7 @@ def test_line_source_keys_schedule_is_exclusive():
                     'qty': 1}]))
     _expect(error, 'INVOICE_LINE_XOR')
 
-    # 发货行允许携带冗余的 order_line_id（与 v231 CHECK 语义一致）
+    # 发货行允许携带冗余的 order_line_id（与 v236 CHECK 语义一致）
     result = service.create_manual(dict(
         BASE_HEADER,
         lines=[{'shipment_line_id': SHIP_LINE_ID,

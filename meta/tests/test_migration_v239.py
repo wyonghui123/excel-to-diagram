@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v234 销售发票权限补齐 / 菜单分组迁移测试 —— 权限 / 挂载 / 幂等 / 回滚。
+"""v239 销售发票权限补齐 / 菜单分组迁移测试 —— 权限 / 挂载 / 幂等 / 回滚。
 
 依据: docs/specs/research-fusion-billing-deep-dive-2026-11-09.md §7 P2-9
 夹具: meta/tests/factories/_customer_invoice_helpers.py（permission file）
@@ -10,7 +10,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from meta.migrations import v234__customer_invoice_permissions_menu as v234
+from meta.migrations import v239__customer_invoice_permissions_menu as v239
 from meta.tests.factories._customer_invoice_helpers import build_permission_file
 
 MENU_CODE = 'customer_invoice-list'
@@ -38,11 +38,11 @@ def _rows(path, sql, params=None):
 def test_adds_permissions_and_attaches_menu(tmp_path):
     path = _db_file(tmp_path)
 
-    assert v234.migrate(path, skip_backup=True) is True
-    assert v234.verify(path) is True
+    assert v239.migrate(path, skip_backup=True) is True
+    assert v239.verify(path) is True
 
     codes = {row[0] for row in _rows(path, 'SELECT code FROM permissions')}
-    assert set(v234.PERMISSION_CODES) <= codes
+    assert set(v239.PERMISSION_CODES) <= codes
 
     parent = _rows(
         path, 'SELECT parent_menu FROM menus WHERE menu_code = ?', [MENU_CODE])
@@ -51,15 +51,15 @@ def test_adds_permissions_and_attaches_menu(tmp_path):
     granted = _rows(
         path,
         'SELECT COUNT(*) FROM permission_set_permissions '
-        'WHERE permission_code IN (?, ?)', list(v234.PERMISSION_CODES))
+        'WHERE permission_code IN (?, ?)', list(v239.PERMISSION_CODES))
     assert granted[0][0] == 4
 
 
 def test_without_parent_menu_keeps_top_level(tmp_path):
     path = _db_file(tmp_path, with_parent=False)
 
-    assert v234.migrate(path, skip_backup=True) is True
-    assert v234.verify(path) is True
+    assert v239.migrate(path, skip_backup=True) is True
+    assert v239.verify(path) is True
 
     parent = _rows(
         path, 'SELECT parent_menu FROM menus WHERE menu_code = ?', [MENU_CODE])
@@ -74,8 +74,8 @@ def test_inserts_missing_menu_row(tmp_path):
     assert _rows(path, 'SELECT 1 FROM menus WHERE menu_code = ?',
                  [MENU_CODE]) == []
 
-    assert v234.migrate(path, skip_backup=True) is True
-    assert v234.verify(path) is True
+    assert v239.migrate(path, skip_backup=True) is True
+    assert v239.verify(path) is True
 
     row = _rows(
         path,
@@ -85,20 +85,20 @@ def test_inserts_missing_menu_row(tmp_path):
     assert row[0][0] == '销售发票管理'
     assert row[0][1] == '/customer-invoice'
     assert row[0][2] == PARENT_CODE
-    assert row[0][3] == v234.MENU_SORT_ORDER
+    assert row[0][3] == v239.MENU_SORT_ORDER
 
 
 def test_migrate_is_idempotent_and_rollback(tmp_path):
     path = _db_file(tmp_path)
 
-    assert v234.migrate(path, skip_backup=True) is True
-    assert v234.migrate(path, skip_backup=True) is True
+    assert v239.migrate(path, skip_backup=True) is True
+    assert v239.migrate(path, skip_backup=True) is True
     assert len(_rows(path, 'SELECT code FROM permissions')) == 7
-    assert v234.verify(path) is True
+    assert v239.verify(path) is True
 
-    assert v234.rollback(path) is True
+    assert v239.rollback(path) is True
     codes = {row[0] for row in _rows(path, 'SELECT code FROM permissions')}
-    assert not (set(v234.PERMISSION_CODES) & codes)
+    assert not (set(v239.PERMISSION_CODES) & codes)
     parent = _rows(
         path, 'SELECT parent_menu FROM menus WHERE menu_code = ?', [MENU_CODE])
     assert parent[0][0] == ''

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v234 —— 销售发票权限补齐与菜单分组（B6）。
+"""v239 —— 销售发票权限补齐与菜单分组（B6）。
 
 背景：
   研究建议 P2-9：权限补 print 与独立 credit_memo 动作；菜单归入应收。
-  v231 的权限 tuple 已扩到 7 个动作，但旧库执行过 v231 后不会自动补写。
+  v236 的权限 tuple 已扩到 7 个动作，但旧库执行过 v236 后不会自动补写。
 
 内容：
-  1. 复用 v231 的权限写入与授权逻辑，补 print / credit_memo 并授予 admin / default。
+  1. 复用 v236 的权限写入与授权逻辑，补 print / credit_memo 并授予 admin / default。
   2. menus 表存在但没有 customer_invoice-list 行时先补插（菜单自动生成器在
      应用启动后才 INSERT OR IGNORE，迁移阶段不能假定该行已存在）；随后若存在
      「应收」父菜单，把 customer_invoice-list 挂入其下（sort_order=50），
@@ -21,7 +21,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from meta.migrations import v231__customer_invoice as v231
+from meta.migrations import v236__customer_invoice as v236
 
 PERMISSION_TABLE = 'permissions'
 GRANT_TABLE = 'permission_set_permissions'
@@ -36,7 +36,7 @@ PERMISSION_CODES = (
     'customer_invoice:customer_invoice_credit_memo',
 )
 
-#: 与 v231 种子的 7 个动作保持一致（全式权限码）
+#: 与 v236 种子的 7 个动作保持一致（全式权限码）
 MENU_ACTIONS = ('view', 'create', 'post', 'reverse', 'cancel',
                 'print', 'credit_memo')
 MENU_PERMISSIONS = [
@@ -117,7 +117,7 @@ def _insert_menu_if_missing(conn):
             MENU_TABLE, ', '.join(columns),
             ', '.join('?' for _ in columns)),
         [row[key] for key in columns])
-    print('[v234] menu %s inserted' % MENU_CODE)
+    print('[v239] menu %s inserted' % MENU_CODE)
     return True
 
 
@@ -155,12 +155,12 @@ def _attach_menu(conn):
     parent = _find_parent_menu(conn)
     sort_order = MENU_SORT_ORDER if parent else 99
     if not parent:
-        print('[v234] no parent menu matched %r, keep top-level' % PARENT_HINT)
+        print('[v239] no parent menu matched %r, keep top-level' % PARENT_HINT)
     else:
         conn.execute(
             'UPDATE %s SET parent_menu = ?, sort_order = ? WHERE menu_code = ?'
             % MENU_TABLE, [parent, sort_order, MENU_CODE])
-        print('[v234] menu %s -> %s' % (MENU_CODE, parent))
+        print('[v239] menu %s -> %s' % (MENU_CODE, parent))
     _sync_menu_permissions(conn, parent, sort_order)
     return parent
 
@@ -168,16 +168,16 @@ def _attach_menu(conn):
 def upgrade(db_path, skip_backup=True):
     path = Path(db_path)
     if not path.exists():
-        print('[v234] SKIP: database not found: %s' % path)
+        print('[v239] SKIP: database not found: %s' % path)
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, PERMISSION_TABLE):
-            print('[v234] SKIP: permissions 表不存在')
+            print('[v239] SKIP: permissions 表不存在')
             return False
-        v231._do_permissions(conn)
-        v231._do_grants(conn)
+        v236._do_permissions(conn)
+        v236._do_grants(conn)
         _attach_menu(conn)
         conn.commit()
         return True
@@ -198,7 +198,7 @@ def verify(db_path):
             'SELECT code FROM %s' % PERMISSION_TABLE)}
         missing = [code for code in PERMISSION_CODES if code not in existing]
         if missing:
-            print('[v234] verify: 缺少权限 %s' % ', '.join(missing))
+            print('[v239] verify: 缺少权限 %s' % ', '.join(missing))
             return False
 
         parent = _find_parent_menu(conn)
@@ -207,7 +207,7 @@ def verify(db_path):
                 'SELECT parent_menu FROM %s WHERE menu_code = ?' % MENU_TABLE,
                 [MENU_CODE]).fetchone()
             if not row or row[0] != parent:
-                print('[v234] verify: 菜单 %s 未挂载到 %s'
+                print('[v239] verify: 菜单 %s 未挂载到 %s'
                       % (MENU_CODE, parent))
                 return False
         return True

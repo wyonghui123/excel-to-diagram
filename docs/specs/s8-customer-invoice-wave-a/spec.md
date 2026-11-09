@@ -23,7 +23,7 @@ shipment_line --(delivery)--> customer_invoice_line --> customer_invoice(post)
 
 ### 1.2 验收（全部满足才算完成）
 
-- [x] 三张新表 + 五个派生列由 v231 迁移幂等创建，`verify()` 自检通过。
+- [x] 三张新表 + 五个派生列由 v236 迁移幂等创建，`verify()` 自检通过。
 - [x] 从已发运/已签收的发货单可生成草稿发票；重复开票、超量开票被拒。
 - [x] `post` 原子完成：状态→posted、期次生成（Σ金额=gross）、billed 回写、doc_flow 边写入、billing_status 派生。
 - [x] `reverse` 生成红字发票（负数量/负金额、无期次），回滚 billed、取消原期次、原单→reversed。
@@ -195,10 +195,10 @@ CHECK (source_doc_type IN ('shipment','sales_order','manual','billing_schedule',
 
 ---
 
-## 4. 迁移 `meta/migrations/v231__customer_invoice.py`
+## 4. 迁移 `meta/migrations/v236__customer_invoice.py`
 
-> 编号说明：本 worktree 当前最大 v230，故用 v231。`doc-flow-worktree` 有未合并的 v231/v232，
-> 合并时按实际顺序重排（迁移内容不变）。结构镜像 `v177__purchase_order_object.py`（建表/类型/序列/权限/verify）。
+> 编号说明：2026-11-09 已合并主树，本波迁移重排为 v236-v240（主树既有两条迁移保持原名）。
+> 结构镜像 `v177__purchase_order_object.py`（建表/类型/序列/权限/verify）。
 
 执行顺序：
 
@@ -386,7 +386,7 @@ CHECK (source_doc_type IN ('shipment','sales_order','manual','billing_schedule',
 
 ### 8.1 `meta/tests/test_customer_invoice_service.py`（>=14）
 
-夹具：in-memory sqlite + `_MemDS(query/execute)`；建表和种子镜像 v231；预置客户、币种、税码、订单（delivery 行）、发货单（staged→shipped）。
+夹具：in-memory sqlite + `_MemDS(query/execute)`；建表和种子镜像 v236；预置客户、币种、税码、订单（delivery 行）、发货单（staged→shipped）。
 
 1. `create_from_shipment` happy：头/行快照、行号、金额、币种、客户。
 2. 拒绝 draft/staged 发货单。
@@ -429,7 +429,7 @@ CHECK (source_doc_type IN ('shipment','sales_order','manual','billing_schedule',
 9. draft 头可删除，级联删行。
 10. 手工行缺 tax_rate → 拒绝。
 
-### 8.4 `meta/tests/test_migration_v231.py`（>=4）
+### 8.4 `meta/tests/test_migration_v236.py`（>=4）
 
 1. 三表 + 索引创建成功。
 2. 8 个派生列存在且默认值正确。
@@ -452,7 +452,7 @@ CHECK (source_doc_type IN ('shipment','sales_order','manual','billing_schedule',
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_shipment_service.py --port 3012
 ```
 
@@ -465,19 +465,19 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 | 风险 | 处理 |
 |---|---|
-| v231 与 doc-flow-worktree 的 v231/v232 合并冲突 | 合并时按主树实际顺序重排文件名与 `MIGRATION_NAME`，内容不变；本波不改他人迁移 |
+| 迁移编号与主树既有迁移冲突 | 已在 2026-11-09 合并时重排为本波 v236-v240，`MIGRATION_NAME` 同步更新；主树既有迁移不改名 |
 | 期次比例合计非 100 | 尾差归最后一期，不报错；到期日异常才报 `INVOICE_TERM_INVALID` |
 | 回写 billed 并发超量 | 条件 UPDATE + rowcount 校验，失败整单回滚（R-INV-16） |
 | doc_flow 表/规则缺失 | attach 失败仅告警，不阻断过账（与 shipment 一致） |
 | AR 核销表不存在 | 视为 0 条核销，允许红冲（D14/D19 未定稿的隔离） |
-| 回滚方式 | 本波仅新增表/列/服务/测试，不改既有表结构；回滚 = 撤销 commit + 不执行 v231 |
+| 回滚方式 | 本波仅新增表/列/服务/测试，不改既有表结构；回滚 = 撤销 commit + 不执行 v236 |
 
 ---
 
 ## 11. 需批准项（Approval Checklist）
 
 - [x] 范围：仅后端 Wave A（对象/schema/迁移/服务/守卫/测试），不新增自定义 UI 页面（列表/详情由 schema 元数据驱动）。
-- [ ] 迁移号用 **v231**（已知与 doc-flow-worktree 未合并编号冲突，合并期重排为 v236-v240）。
+- [x] 迁移号已重排为 **v236-v240**（2026-11-09 合并 main 时完成）。
 - [x] 行类型 code 用 `INV_ITEM` / `INV_SERVICE` / `INV_DISCOUNT`（修正上游 §9 的全局唯一冲突）。
 - [x] 计划开票 fail-closed（`plan` 一律拒绝），严格期次只读（D27），不建 `settlement_block_code`（D28）。
 - [x] 允许开始编码（S8-A1..A9）。
@@ -500,13 +500,13 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 ### 12.2 已执行修复（P0）
 
-1. **单据类别**：`customer_invoices` 新增 `document_category`（v232），
+1. **单据类别**：`customer_invoices` 新增 `document_category`（v237），
    由 `type_definitions.document_category` 派生，生成后不可改；
    `standard→invoice` / `credit_memo→credit_memo` / `debit_memo→debit_memo`。
 2. **红冲原因**：`reverse` 规则声明 `ui_hints.input_fields`，
    通用状态按钮弹窗收集 `reversal_reason` 后随 PUT 提交。
 3. **发货行 XOR**：`validate_line_write` 不再拒绝
-   `shipment_line_id + 冗余 order_line_id`（与 v231 CHECK 一致）；
+   `shipment_line_id + 冗余 order_line_id`（与 v236 CHECK 一致）；
    仅 `schedule_id` 与其余来源互斥。
 
 ### 12.3 仍未覆盖（后续波次）
@@ -639,7 +639,7 @@ registry.register(
 |---|---|---|
 | 后端 | `bo_action_registry.call` 校验 `permission_required`（`'*'` 放行） | 已存在 |
 | 前端 | 按钮声明 `permission`，`authStore.hasPermission` 过滤 | 本次新增 |
-| 数据 | v231 已创建并授予 admin/default `customer_invoice:customer_invoice_create` | 无需新迁移 |
+| 数据 | v236 已创建并授予 admin/default `customer_invoice:customer_invoice_create` | 无需新迁移 |
 
 ### 13.5 明确不做
 
@@ -687,8 +687,8 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 ### 14.1 数据
 
-- `v231` `LINE_DDL` 增加 `price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0`（新库）。
-- 新迁移 `v233__customer_invoice_line_price_diff.py`：
+- `v236` `LINE_DDL` 增加 `price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0`（新库）。
+- 新迁移 `v238__customer_invoice_line_price_diff.py`：
   - 既有库 `ALTER TABLE customer_invoice_lines ADD COLUMN`；
   - 回填 `ROUND((unit_price - COALESCE(order_unit_price, unit_price)) × qty, 4)`；
   - `verify` 校验列存在、无 NULL、与公式一致；`rollback` DROP COLUMN。
@@ -716,12 +716,12 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 ### 14.4 测试与验收
 
-- 新增 `meta/tests/test_migration_v233.py`（3 用例：加列回填 / 幂等 / 回滚）。
+- 新增 `meta/tests/test_migration_v238.py`（3 用例：加列回填 / 幂等 / 回滚）。
 - `test_customer_invoice_service.py` 新增 2 用例：
   1. 改价缺原因 → `INVOICE_PRICE_REASON_REQUIRED`；补原因后差额 = 80、`price_source=manual`；
   2. 已改价行只改数量 → 保留覆盖价与原因，差额按新数量重算。
 - 回归：`test_customer_invoice_guard.py`、`test_customer_invoice_schedule.py`、
-  `test_migration_v231.py`、`test_migration_v232.py`、`test_schema_api.py`。
+  `test_migration_v236.py`、`test_migration_v237.py`、`test_schema_api.py`。
 
 ---
 
@@ -749,7 +749,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 ### 15.2 明确不做
 
-- 不新增行类型（沿用 v231 的 `INV_ITEM / INV_SERVICE / INV_DISCOUNT`）。
+- 不新增行类型（沿用 v236 的 `INV_ITEM / INV_SERVICE / INV_DISCOUNT`）。
 - 折扣行不做自动分摊 / 反算（由用户直接给负净额）。
 - 不做行类型与订单行类型的联动校验（手工行自由选择）。
 
@@ -762,7 +762,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
   4. 折扣行非负金额 → `INVOICE_LINE_AMOUNT_INVALID`；
   5. 非折扣行负金额 → `INVOICE_LINE_AMOUNT_INVALID`；
   6. 头类型当作行类型 → `INVOICE_LINE_TYPE_INVALID`。
-- 回归：guard / schedule / v231 / v232 / v233 / schema_api / actions。
+- 回归：guard / schedule / v236 / v237 / v238 / schema_api / actions。
 
 ---
 
@@ -809,7 +809,7 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 - service 6 用例：负行复制 / 原单须已过账 / 重复贷项 / 日期早于过账 /
   按行选择 / 贷项过账回滚进度。
 - action 3 用例：建单成功 / 缺原单 id / 注册契约。
-- 回归：guard / schedule / v231 / v232 / v233 / schema_api。
+- 回归：guard / schedule / v236 / v237 / v238 / schema_api。
 
 ---
 
@@ -825,12 +825,12 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 | customer_invoice:customer_invoice_print | 打印发票详情 | detail.actions「打印」 |
 | customer_invoice:customer_invoice_credit_memo | 创建贷项 | B5 action + detail.actions「创建贷项」 |
 
-- v231 权限种子扩到 7 个动作（新库开箱可用）。
-- v234 迁移为旧库补写并授予 admin / default；幂等。
+- v236 权限种子扩到 7 个动作（新库开箱可用）。
+- v239 迁移为旧库补写并授予 admin / default；幂等。
 
 ### 17.2 菜单分组
 
-- 菜单仍由 `menu_auto_generator` 生成；v234 在 `menus` 存在名称含「应收」的
+- 菜单仍由 `menu_auto_generator` 生成；v239 在 `menus` 存在名称含「应收」的
   父菜单时，把 `customer_invoice-list` 挂到其下（sort_order=50）。
 - 无父菜单（当前环境）保持顶层，迁移不阻断、verify 不强制。
 
@@ -841,10 +841,10 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 
 ### 17.4 测试与验收
 
-- v234 3 用例：补权限 + 挂菜单 / 无父菜单保持顶层 / 幂等 + 回滚。
-- v231 权限断言更新为 7 权限、14 授权。
+- v239 3 用例：补权限 + 挂菜单 / 无父菜单保持顶层 / 幂等 + 回滚。
+- v236 权限断言更新为 7 权限、14 授权。
 - action 契约：credit_memo 权限断言更新。
-- 回归：schema_api / actions / service / guard / schedule / v231-v233。
+- 回归：schema_api / actions / service / guard / schedule / v236-v238。
 
 ---
 
@@ -864,7 +864,7 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 | source_qty_field | qty |
 | pool | billing |
 
-- v235 迁移幂等 upsert（同 v231 `_do_rule` 口径）；verify 要求规则存在且 active；
+- v240 迁移幂等 upsert（同 v236 `_do_rule` 口径）；verify 要求规则存在且 active；
   rollback 删除规则。
 - Σ 校验：源行 = 原发票行，pool=billing；贷项整行取负时 consumed == source_qty。
 
@@ -885,11 +885,11 @@ BO Action：`customer_invoice.create_credit_from_invoice`
 
 ### 18.4 测试与验收
 
-- v235 3 用例：插规则 / 幂等 / 回滚。
+- v240 3 用例：插规则 / 幂等 / 回滚。
 - service 2 用例（monkeypatch `meta.core.doc_flow_attach.attach_edge` 捕获参数）：
   - 贷项过账：rule_id / source=原行 id / target=贷项行 id / qty>0 / amount>0；
   - 红冲：红字行同样写引用边且 source=原行 id。
-- 回归：service / actions / guard / schedule / v231-v235 / schema_api。
+- 回归：service / actions / guard / schedule / v236-v240 / schema_api。
 
 ---
 
@@ -922,5 +922,5 @@ BO Action：`customer_invoice.create_credit_from_invoice`
   - `test_post_defaults_posting_date_to_invoice_date`（D19 默认取发票日期）；
   - `test_over_order_amount_does_not_block_posting`（D28 超额不阻断，gross=2260）。
 - guard 既有 `INVOICE_SCHEDULE_IMMUTABLE` 用例覆盖 D27。
-- 回归：service / guard；v231-v235、actions、schedule、schema_api 维持通过。
+- 回归：service / guard；v236-v240、actions、schedule、schema_api 维持通过。
 

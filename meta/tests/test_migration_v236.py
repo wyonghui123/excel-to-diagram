@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v231 销售发票迁移测试（S8 Wave A）—— 建表 / 种子 / 回填 / 回滚。
+"""v236 销售发票迁移测试（S8 Wave A）—— 建表 / 种子 / 回填 / 回滚。
 
 依据: docs/specs/s8-customer-invoice-wave-a/spec.md §8.4（迁移 4 条）
 夹具: meta/tests/factories/_customer_invoice_helpers.py（bare file：上游表已建）
@@ -8,7 +8,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from meta.migrations import v231__customer_invoice as v231
+from meta.migrations import v236__customer_invoice as v236
 from meta.services.document_number_service import DocumentNumberService
 from meta.tests.factories._customer_invoice_helpers import (
     ORDER_LINE_DELIVERY,
@@ -30,8 +30,8 @@ def _db_file(tmp_path):
 def test_migrate_creates_tables_indexes_and_verify_passes(tmp_path):
     path = _db_file(tmp_path)
 
-    assert v231.migrate(path, skip_backup=True) is True
-    assert v231.verify(path) is True
+    assert v236.migrate(path, skip_backup=True) is True
+    assert v236.verify(path) is True
 
     import sqlite3
     conn = sqlite3.connect(str(path))
@@ -46,7 +46,7 @@ def test_migrate_creates_tables_indexes_and_verify_passes(tmp_path):
 
 def test_migrate_seeds_types_sequences_and_numbering_works(tmp_path):
     path = _db_file(tmp_path)
-    v231.migrate(path, skip_backup=True)
+    v236.migrate(path, skip_backup=True)
 
     import sqlite3
     conn = sqlite3.connect(str(path))
@@ -75,7 +75,7 @@ def test_migrate_seeds_types_sequences_and_numbering_works(tmp_path):
 
 def test_backfill_marks_milestone_with_billing_plan_as_plan(tmp_path):
     path = _db_file(tmp_path)
-    v231.migrate(path, skip_backup=True)
+    v236.migrate(path, skip_backup=True)
 
     import sqlite3
     conn = sqlite3.connect(str(path))
@@ -94,7 +94,7 @@ def test_backfill_marks_milestone_with_billing_plan_as_plan(tmp_path):
 
 def test_migrate_seeds_doc_flow_rule_permissions_and_grants(tmp_path):
     path = _db_file(tmp_path)
-    v231.migrate(path, skip_backup=True)
+    v236.migrate(path, skip_backup=True)
 
     import sqlite3
     conn = sqlite3.connect(str(path))
@@ -124,14 +124,14 @@ def test_migrate_seeds_doc_flow_rule_permissions_and_grants(tmp_path):
 def test_verify_fails_before_migrate(tmp_path):
     path = _db_file(tmp_path)
 
-    assert v231.verify(path) is False
+    assert v236.verify(path) is False
 
 
 def test_rollback_removes_invoice_tables(tmp_path):
     path = _db_file(tmp_path)
-    v231.migrate(path, skip_backup=True)
+    v236.migrate(path, skip_backup=True)
 
-    assert v231.rollback(path) is True
+    assert v236.rollback(path) is True
 
     import sqlite3
     conn = sqlite3.connect(str(path))

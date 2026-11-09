@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""v232 —— 销售发票单据类别（document_category）。
+"""v237 —— 销售发票单据类别（document_category）。
 
 背景：
-  v231 建表时只靠 document_type_id 间接表达单据语义。Fusion 对标后确认需要
+  v236 建表时只靠 document_type_id 间接表达单据语义。Fusion 对标后确认需要
   头级 document_category（invoice / credit_memo / debit_memo / cancellation），
   并一律由 type_definitions.document_category 派生。
 
@@ -56,22 +56,22 @@ def _column_exists(conn, table, column):
 def upgrade(db_path, skip_backup=True):
     path = Path(db_path)
     if not path.exists():
-        print('[v232] SKIP: database not found: %s' % path)
+        print('[v237] SKIP: database not found: %s' % path)
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, HEADER_TABLE):
-            print('[v232] SKIP: table %s not found（请先执行 v231）' % HEADER_TABLE)
+            print('[v237] SKIP: table %s not found（请先执行 v236）' % HEADER_TABLE)
             return False
 
         if not _column_exists(conn, HEADER_TABLE, COLUMN):
             conn.execute(
                 "ALTER TABLE %s ADD COLUMN %s VARCHAR(20) NOT NULL DEFAULT 'invoice'"
                 % (HEADER_TABLE, COLUMN))
-            print('[v232] added column %s.%s' % (HEADER_TABLE, COLUMN))
+            print('[v237] added column %s.%s' % (HEADER_TABLE, COLUMN))
         else:
-            print('[v232] column %s.%s already exists, skip ALTER'
+            print('[v237] column %s.%s already exists, skip ALTER'
                   % (HEADER_TABLE, COLUMN))
 
         if _table_exists(conn, TYPE_TABLE):
@@ -85,34 +85,34 @@ def upgrade(db_path, skip_backup=True):
                 % (HEADER_TABLE, COLUMN, _CATEGORY_CASE_SQL, TYPE_TABLE,
                    HEADER_TABLE))
         else:
-            print('[v232] WARN: table %s not found, skip backfill' % TYPE_TABLE)
+            print('[v237] WARN: table %s not found, skip backfill' % TYPE_TABLE)
 
         conn.commit()
     finally:
         conn.close()
 
-    print('[v232] done')
+    print('[v237] done')
     return True
 
 
 def migrate(db_path, skip_backup=True):
-    """与 v231 保持同名入口。"""
+    """与 v236 保持同名入口。"""
     return upgrade(db_path, skip_backup=skip_backup)
 
 
 def verify(db_path) -> bool:
     path = Path(db_path)
     if not path.exists():
-        print('[v232] verify FAIL: database not found')
+        print('[v237] verify FAIL: database not found')
         return False
 
     conn = _connect(path)
     try:
         if not _table_exists(conn, HEADER_TABLE):
-            print('[v232] verify FAIL: table %s missing' % HEADER_TABLE)
+            print('[v237] verify FAIL: table %s missing' % HEADER_TABLE)
             return False
         if not _column_exists(conn, HEADER_TABLE, COLUMN):
-            print('[v232] verify FAIL: column %s missing' % COLUMN)
+            print('[v237] verify FAIL: column %s missing' % COLUMN)
             return False
 
         placeholders = ','.join(['?'] * len(ALLOWED_CATEGORIES))
@@ -121,7 +121,7 @@ def verify(db_path) -> bool:
             % (HEADER_TABLE, COLUMN, COLUMN, placeholders),
             list(ALLOWED_CATEGORIES)).fetchone()[0]
         if bad:
-            print('[v232] verify FAIL: %s invalid rows' % bad)
+            print('[v237] verify FAIL: %s invalid rows' % bad)
             return False
 
         if _table_exists(conn, TYPE_TABLE):
@@ -135,11 +135,11 @@ def verify(db_path) -> bool:
                 % (HEADER_TABLE, TYPE_TABLE, COLUMN, _CATEGORY_CASE_SQL)
             ).fetchone()[0]
             if mismatch:
-                print('[v232] verify FAIL: %s category/type mismatches'
+                print('[v237] verify FAIL: %s category/type mismatches'
                       % mismatch)
                 return False
 
-        print('[v232] verify OK')
+        print('[v237] verify OK')
         return True
     finally:
         conn.close()
@@ -148,22 +148,22 @@ def verify(db_path) -> bool:
 def rollback(db_path) -> bool:
     path = Path(db_path)
     if not path.exists():
-        print('[v232] rollback SKIP: database not found')
+        print('[v237] rollback SKIP: database not found')
         return False
 
     conn = _connect(path)
     try:
         if not _column_exists(conn, HEADER_TABLE, COLUMN):
-            print('[v232] rollback SKIP: column missing')
+            print('[v237] rollback SKIP: column missing')
             return True
         try:
             conn.execute(
                 'ALTER TABLE %s DROP COLUMN %s' % (HEADER_TABLE, COLUMN))
             conn.commit()
-            print('[v232] rollback done')
+            print('[v237] rollback done')
             return True
         except sqlite3.OperationalError as exc:
-            print('[v232] rollback FAIL: %s' % exc)
+            print('[v237] rollback FAIL: %s' % exc)
             return False
     finally:
         conn.close()

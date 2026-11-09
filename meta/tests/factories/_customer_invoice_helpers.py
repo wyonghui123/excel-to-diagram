@@ -5,14 +5,14 @@
 守卫的白名单路径（`meta/tests/factories/`），避免各测试文件重复声明
 ALLOW_RAW_SQL 并各写一份 DDL 造成漂移。
 
-表结构：customer_invoice 三张表 + 派生列直接复用 `v231__customer_invoice`
+表结构：customer_invoice 三张表 + 派生列直接复用 `v236__customer_invoice`
 的 DDL 常量；其余上游表（订单 / 发货 / 付款条件 / 类型 / 序列 / 权限）
 按服务真实读取的列做最小化建表。
 """
 import sqlite3
 from contextlib import contextmanager
 
-from meta.migrations.v231__customer_invoice import (
+from meta.migrations.v236__customer_invoice import (
     HEADER_DDL, LINE_DDL, SCHEDULE_DDL)
 
 INVOICE_DATE = '2026-11-09'
@@ -297,7 +297,7 @@ def build_bare_file(path) -> sqlite3.Connection:
 
 
 def build_permission_file(path, menu_rows=None) -> sqlite3.Connection:
-    """v234 专用：上游表 + 权限集 + 菜单种子（menu_rows: (code, name, parent, order)）。"""
+    """v239 专用：上游表 + 权限集 + 菜单种子（menu_rows: (code, name, parent, order)）。"""
     conn = sqlite3.connect(str(path))
     conn.executescript(_UPSTREAM_DDL)
     for code in ('admin', 'default'):
@@ -534,7 +534,7 @@ def _seed_payment_term(conn: sqlite3.Connection, lines=None) -> None:
              days])
 
 
-# ---------------------------------------------------------------- v232 迁移辅助
+# ---------------------------------------------------------------- v237 迁移辅助
 
 def table_columns(path, table):
     conn = sqlite3.connect(str(path))
@@ -555,7 +555,7 @@ def drop_column(path, table, column):
 
 
 def insert_invoice_without_category(path, invoice_no, type_code):
-    """按 v231 旧表结构插入发票（不含 document_category）。"""
+    """按 v236 旧表结构插入发票（不含 document_category）。"""
     conn = sqlite3.connect(str(path))
     try:
         type_id = conn.execute(
@@ -586,7 +586,7 @@ def invoice_categories(path):
 
 def insert_line_without_price_diff(path, invoice_no, qty, unit_price,
                                    order_unit_price=None):
-    """按 v231 旧结构插入「发票 + 行」，行不含 price_diff_amount。"""
+    """按 v236 旧结构插入「发票 + 行」，行不含 price_diff_amount。"""
     conn = sqlite3.connect(str(path))
     try:
         header_type_id = conn.execute(
@@ -628,7 +628,7 @@ def line_price_diffs(path):
         conn.close()
 
 
-# ---------------------------------------------------------------- v235 迁移辅助
+# ---------------------------------------------------------------- v240 迁移辅助
 
 def doc_flow_rule(path, rule_id):
     conn = sqlite3.connect(str(path))

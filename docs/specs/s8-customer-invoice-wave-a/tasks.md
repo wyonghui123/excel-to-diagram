@@ -25,10 +25,10 @@
 
 ---
 
-## [x] T2 迁移 v231
+## [x] T2 迁移 v236
 
 **文件**
-- 新增 `meta/migrations/v231__customer_invoice.py`
+- 新增 `meta/migrations/v236__customer_invoice.py`
 
 **内容**：按 `spec.md` §4 九步；镜像 `v177__purchase_order_object.py` 的
 `upgrade` / `verify` / `_table_exists` / `_column_exists` / 类型与序列插入 / 权限 grant 写法。
@@ -129,17 +129,17 @@
 - 新增 `meta/tests/test_customer_invoice_service.py`（>=14 用例）
 - 新增 `meta/tests/test_customer_invoice_schedule.py`（>=6 用例）
 - 新增 `meta/tests/test_customer_invoice_guard.py`（>=8 用例）
-- 新增 `meta/tests/test_migration_v231.py`（>=4 用例）
+- 新增 `meta/tests/test_migration_v236.py`（>=4 用例）
 
 **内容**：按 `spec.md` §8 矩阵；夹具使用 in-memory sqlite + `_MemDS`，
-表结构与种子直接复用 v231 的 DDL 常量（避免两处漂移）。
+表结构与种子直接复用 v236 的 DDL 常量（避免两处漂移）。
 
 **验收**
 ```powershell
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
 ```
 全部通过；再跑回归：
 ```powershell
@@ -153,7 +153,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 1. 复核 `git status`：只含 T1-T8 列出的文件。
 2. 在 s8 worktree `git add`（逐文件）+ `git commit`，message：
-   `feat(billing): customer invoice wave A (schema, v231, service, guard, tests)`。
+   `feat(billing): customer invoice wave A (schema, v236, service, guard, tests)`。
 3. 汇报：实现范围、回避的 TBD、测试结果、待拍板项（D19/D27/D28）。
 
 ---
@@ -236,18 +236,18 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 # B3 价格变更 D13（spec §14）
 
-## [x] T12 数据层：`price_diff_amount` 列 + v233 迁移
+## [x] T12 数据层：`price_diff_amount` 列 + v238 迁移
 
 **修改 / 新增**
-- `meta/migrations/v231__customer_invoice.py`：`LINE_DDL` 与 verify 列清单加
+- `meta/migrations/v236__customer_invoice.py`：`LINE_DDL` 与 verify 列清单加
   `price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0`
-- 新增 `meta/migrations/v233__customer_invoice_line_price_diff.py`
+- 新增 `meta/migrations/v238__customer_invoice_line_price_diff.py`
   （加列 + 回填 + verify + rollback，幂等）
 - `meta/schemas/customer_invoice_line.yaml`：新增派生字段
   `price_diff_amount`（`derived: true`、`ui.editable: false`）
 - `meta/tests/factories/_customer_invoice_helpers.py`：
   `insert_line_without_price_diff` / `line_price_diffs`
-- 新增 `meta/tests/test_migration_v233.py`（3 用例）
+- 新增 `meta/tests/test_migration_v238.py`（3 用例）
 
 ## [x] T13 服务与守卫：改价原因必填 + 差额派生
 
@@ -266,8 +266,8 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 ```powershell
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v237.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
 ```
 
@@ -295,7 +295,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
 ```
 
@@ -325,9 +325,9 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 ```powershell
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v233.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v237.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v238.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
 ```
 
@@ -341,9 +341,9 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 ## [x] T19 权限 / 菜单 / 打印
 
 **修改**
-- `meta/migrations/v231__customer_invoice.py`：PERMISSIONS 扩到 7 个动作
+- `meta/migrations/v236__customer_invoice.py`：PERMISSIONS 扩到 7 个动作
   （新增 `print` / `credit_memo`）
-- `meta/migrations/v234__customer_invoice_permissions_menu.py`：旧库补权限 +
+- `meta/migrations/v239__customer_invoice_permissions_menu.py`：旧库补权限 +
   授予 admin/default；存在「应收」父菜单时挂载 `customer_invoice-list`
 - `meta/services/bo_action_registrations.py`：贷项 action 权限改为
   `customer_invoice:customer_invoice_credit_memo`
@@ -351,16 +351,16 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
   「创建贷项」权限同步
 - `src/components/common/DetailPage/DetailPage.vue`：`case 'print'` →
   `window.print()`
-- 测试：`test_migration_v234.py` 3 用例；v231 / actions 断言更新；
+- 测试：`test_migration_v239.py` 3 用例；v236 / actions 断言更新；
   helpers 增加 menus 表与 `build_permission_file`
 
 ## [x] T20 回归 + 提交
 
 ```powershell
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v233.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v234.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v237.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v238.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v239.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
@@ -377,7 +377,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 ## [x] T21 规则 + 服务写边
 
 **修改**
-- `meta/migrations/v235__customer_invoice_credit_doc_flow.py`（新建）
+- `meta/migrations/v240__customer_invoice_credit_doc_flow.py`（新建）
   - doc_flow_rule upsert `customer_invoice_to_credit_memo`
     （source_bo=target_bo=customer_invoice_line，source_qty_field=qty，pool=billing）
   - verify：规则存在且 status=active；rollback：删除规则
@@ -387,7 +387,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
     （source=原行 id、target=当前行 id，qty/amount 取 abs），然后 continue
   - `reverse()`：插入红字行后调用 `_write_doc_flow_edges(red_header, red_lines)`
 - 测试
-  - `meta/tests/test_migration_v235.py` 3 用例：插规则 / 幂等 / 回滚
+  - `meta/tests/test_migration_v240.py` 3 用例：插规则 / 幂等 / 回滚
   - `meta/tests/test_customer_invoice_service.py` 2 用例：
     贷项过账与红冲各写一条引用边（monkeypatch attach_edge 捕获参数）
 
@@ -398,8 +398,8 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v235.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v236.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v240.py --port 3012
 python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
 ```
 

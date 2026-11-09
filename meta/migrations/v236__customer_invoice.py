@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""[v231 2026-11-09] 销售发票对象模型（S8 Wave A）
+"""[v236 2026-11-09] 销售发票对象模型（S8 Wave A）
 
 依据:
   docs/specs/s8-customer-invoice-wave-a/spec.md
@@ -36,7 +36,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-MIGRATION_NAME = 'v231__customer_invoice'
+MIGRATION_NAME = 'v236__customer_invoice'
 
 HEADER_TABLE = 'customer_invoices'
 LINE_TABLE = 'customer_invoice_lines'
@@ -574,11 +574,11 @@ def _do_grants(conn):
 def migrate(db_path: Path, skip_backup: bool = False) -> bool:
     """注意签名：migration_runner 以 `migrate(db_path, skip_backup=True)` 调用。"""
     if not db_path.exists():
-        print('[v231] DB 不存在: %s' % db_path)
+        print('[v236] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
-        print('[v231] 开始: 销售发票对象模型（S8 Wave A）')
+        print('[v236] 开始: 销售发票对象模型（S8 Wave A）')
         _do_tables(conn)
         _do_indexes(conn)
         _do_columns(conn)
@@ -590,11 +590,11 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
         _do_permissions(conn)
         _do_grants(conn)
         conn.commit()
-        print('[v231] 迁移提交完成')
+        print('[v236] 迁移提交完成')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v231] 失败: %s' % e)
+        print('[v236] 失败: %s' % e)
         raise
     finally:
         conn.close()
@@ -602,7 +602,7 @@ def migrate(db_path: Path, skip_backup: bool = False) -> bool:
 
 def verify(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v231 verify] FAIL: DB 不存在')
+        print('[v236 verify] FAIL: DB 不存在')
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -634,55 +634,55 @@ def verify(db_path: Path) -> bool:
         }
         for table, cols in required_cols.items():
             if not _table_exists(conn, table):
-                print('[v231 verify] FAIL: 缺表 %s' % table)
+                print('[v236 verify] FAIL: 缺表 %s' % table)
                 ok = False
                 continue
             have = _columns(conn, table)
             for col in cols:
                 if col not in have:
-                    print('[v231 verify] FAIL: 缺列 %s.%s' % (table, col))
+                    print('[v236 verify] FAIL: 缺列 %s.%s' % (table, col))
                     ok = False
 
         for name, _table, _sql in INDEXES:
             if not _index_exists(conn, name):
-                print('[v231 verify] FAIL: 缺索引 %s' % name)
+                print('[v236 verify] FAIL: 缺索引 %s' % name)
                 ok = False
 
         for table, columns in NEW_COLUMNS:
             if not _table_exists(conn, table):
-                print('[v231 verify] FAIL: 缺派生表 %s' % table)
+                print('[v236 verify] FAIL: 缺派生表 %s' % table)
                 ok = False
                 continue
             have = _columns(conn, table)
             for column, _ddl in columns:
                 if column not in have:
-                    print('[v231 verify] FAIL: 缺派生列 %s.%s' % (table, column))
+                    print('[v236 verify] FAIL: 缺派生列 %s.%s' % (table, column))
                     ok = False
 
         if _table_exists(conn, 'type_definitions'):
             for code, _name, category, seq_code, _desc in HEADER_TYPES:
                 type_id = _type_id(conn, code, 'header')
                 if not type_id:
-                    print('[v231 verify] FAIL: 缺头类型 %s' % code)
+                    print('[v236 verify] FAIL: 缺头类型 %s' % code)
                     ok = False
                     continue
                 row = conn.execute(
                     'SELECT number_sequence_id, document_category '
                     'FROM type_definitions WHERE id=?', (type_id,)).fetchone()
                 if not row[0]:
-                    print('[v231 verify] FAIL: 头类型 %s 未绑定编号序列' % code)
+                    print('[v236 verify] FAIL: 头类型 %s 未绑定编号序列' % code)
                     ok = False
                 if (row[1] or '') != category:
-                    print('[v231 verify] FAIL: 头类型 %s document_category 不符' % code)
+                    print('[v236 verify] FAIL: 头类型 %s document_category 不符' % code)
                     ok = False
                 if not conn.execute(
                         'SELECT 1 FROM number_sequences WHERE code=? AND id=?',
                         (seq_code, row[0])).fetchone():
-                    print('[v231 verify] FAIL: 头类型 %s 序列绑定错误' % code)
+                    print('[v236 verify] FAIL: 头类型 %s 序列绑定错误' % code)
                     ok = False
             for code, _name, line_category, _rel, _desc in LINE_TYPES:
                 if not _type_id(conn, code, 'line'):
-                    print('[v231 verify] FAIL: 缺行类型 %s' % code)
+                    print('[v236 verify] FAIL: 缺行类型 %s' % code)
                     ok = False
                     continue
                 row = conn.execute(
@@ -690,10 +690,10 @@ def verify(db_path: Path) -> bool:
                     'WHERE scope_bo=? AND level=? AND code=?',
                     (SCOPE_BO, 'line', code)).fetchone()
                 if (row[0] or '') != line_category:
-                    print('[v231 verify] FAIL: 行类型 %s line_category 不符' % code)
+                    print('[v236 verify] FAIL: 行类型 %s line_category 不符' % code)
                     ok = False
         else:
-            print('[v231 verify] FAIL: 缺表 type_definitions')
+            print('[v236 verify] FAIL: 缺表 type_definitions')
             ok = False
 
         if _table_exists(conn, 'number_sequences'):
@@ -701,20 +701,20 @@ def verify(db_path: Path) -> bool:
                 if not conn.execute(
                         'SELECT 1 FROM number_sequences WHERE code=?',
                         (code,)).fetchone():
-                    print('[v231 verify] FAIL: 缺编号序列 %s' % code)
+                    print('[v236 verify] FAIL: 缺编号序列 %s' % code)
                     ok = False
         else:
-            print('[v231 verify] FAIL: 缺表 number_sequences')
+            print('[v236 verify] FAIL: 缺表 number_sequences')
             ok = False
 
         if _table_exists(conn, RULE_TABLE):
             if not conn.execute(
                     'SELECT 1 FROM doc_flow_rule WHERE rule_id=?',
                     (DOC_FLOW_RULE_ID,)).fetchone():
-                print('[v231 verify] FAIL: 缺 doc_flow 规则 %s' % DOC_FLOW_RULE_ID)
+                print('[v236 verify] FAIL: 缺 doc_flow 规则 %s' % DOC_FLOW_RULE_ID)
                 ok = False
         else:
-            print('[v231 verify] FAIL: 缺表 %s' % RULE_TABLE)
+            print('[v236 verify] FAIL: 缺表 %s' % RULE_TABLE)
             ok = False
 
         if _table_exists(conn, PERMISSION_TABLE):
@@ -722,7 +722,7 @@ def verify(db_path: Path) -> bool:
                 if not conn.execute(
                         'SELECT 1 FROM permissions WHERE code=?',
                         (code,)).fetchone():
-                    print('[v231 verify] FAIL: 缺权限 %s' % code)
+                    print('[v236 verify] FAIL: 缺权限 %s' % code)
                     ok = False
             if _table_exists(conn, 'permission_sets') \
                     and _table_exists(conn, 'permission_set_permissions'):
@@ -737,11 +737,11 @@ def verify(db_path: Path) -> bool:
                                 'SELECT 1 FROM permission_set_permissions '
                                 'WHERE permission_set_id=? AND permission_code=?',
                                 (row[0], code)).fetchone():
-                            print('[v231 verify] FAIL: 权限 %s 未授予 %s'
+                            print('[v236 verify] FAIL: 权限 %s 未授予 %s'
                                   % (code, set_code))
                             ok = False
         else:
-            print('[v231 verify] FAIL: 缺表 permissions')
+            print('[v236 verify] FAIL: 缺表 permissions')
             ok = False
 
         if _table_exists(conn, ORDER_LINE_TABLE):
@@ -750,7 +750,7 @@ def verify(db_path: Path) -> bool:
                 "WHERE billing_relevance NOT IN ('delivery', 'plan')"
                 % ORDER_LINE_TABLE).fetchone()[0]
             if bad:
-                print('[v231 verify] FAIL: billing_relevance 非法值 %s 行' % bad)
+                print('[v236 verify] FAIL: billing_relevance 非法值 %s 行' % bad)
                 ok = False
             if _table_exists(conn, ORDER_SCHEDULE_TABLE):
                 bad = conn.execute(
@@ -763,10 +763,10 @@ def verify(db_path: Path) -> bool:
                     """.format(ORDER_LINE_TABLE, ORDER_SCHEDULE_TABLE)
                 ).fetchone()[0]
                 if bad:
-                    print('[v231 verify] FAIL: plan 行缺 billing 计划 %s 行' % bad)
+                    print('[v236 verify] FAIL: plan 行缺 billing 计划 %s 行' % bad)
                     ok = False
 
-        print('[v231 verify] %s' % ('PASS' if ok else 'FAIL'))
+        print('[v236 verify] %s' % ('PASS' if ok else 'FAIL'))
         return ok
     finally:
         conn.close()
@@ -774,7 +774,7 @@ def verify(db_path: Path) -> bool:
 
 def rollback(db_path: Path) -> bool:
     if not db_path.exists():
-        print('[v231 rollback] DB 不存在: %s' % db_path)
+        print('[v236 rollback] DB 不存在: %s' % db_path)
         return False
     conn = sqlite3.connect(str(db_path), timeout=10)
     try:
@@ -786,11 +786,11 @@ def rollback(db_path: Path) -> bool:
                 conn.execute('DROP TABLE IF EXISTS %s' % table)
         conn.execute('DELETE FROM doc_flow_rule WHERE rule_id=?', (DOC_FLOW_RULE_ID,))
         conn.commit()
-        print('[v231 rollback] 已删除 3 张表 / 索引 / doc_flow 规则（类型与权限保留）')
+        print('[v236 rollback] 已删除 3 张表 / 索引 / doc_flow 规则（类型与权限保留）')
         return True
     except Exception as e:
         conn.rollback()
-        print('[v231 rollback] 失败: %s' % e)
+        print('[v236 rollback] 失败: %s' % e)
         return False
     finally:
         conn.close()
