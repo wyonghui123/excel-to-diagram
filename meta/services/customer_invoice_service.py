@@ -363,6 +363,8 @@ class CustomerInvoiceService:
             line = self._build_line_from_shipment_line(
                 shipment_line, row.get('qty'), extra_billed=extra_billed)
             line['line_no'] = row.get('line_no')
+            line = self._apply_price_override(
+                line, payload or {}, existing)
             return self._finalize_line(line)
         if not _blank(order_line_id):
             order_line = self._require_order_line(order_line_id)
@@ -389,6 +391,8 @@ class CustomerInvoiceService:
                         rule='INVOICE_CURRENCY_MISMATCH')
             line = self._build_line_from_order_line(order_line, qty)
             line['line_no'] = row.get('line_no')
+            line = self._apply_price_override(
+                line, payload or {}, existing)
             return self._finalize_line(line)
 
         # 手工金额行
@@ -399,6 +403,49 @@ class CustomerInvoiceService:
                 field_name='source_doc_type',
                 rule='INVOICE_SOURCE_MISMATCH')
         return self._finalize_line(self._build_manual_line(row))
+
+    def _apply_price_override(self, line: Dict[str, Any],
+                              payload: Dict[str, Any],
+                              existing: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """D13 价格变更：草稿行可覆盖订单单价，但必须填写改价原因。
+
+        - 参考价一律取 `order_unit_price`（订单行单价快照）；
+        - 覆盖后 `price_source=manual`，差额按 `(unit_price - 订单价) × qty` 计算；
+        - 更新时未提交 unit_price 则沿用行上现有价格与原因；
+        - 手工行（`order_unit_price` 为空）不受本条约束。
+        """
+        order_price = line.get('order_unit_price')
+        if order_price is None:
+            return line
+        order_price = _to_decimal(order_price)
+
+        requested = payload.get('unit_price')
+        if _blank(requested):
+            if existing is not None:
+                price = _to_decimal(existing.get('unit_price'), 'unit_price')
+                reason = existing.get('price_change_reason')
+                approved = existing.get('price_change_approved_by')
+            else:
+                price, reason, approved = order_price, None, None
+        else:
+            price = _to_decimal(requested, 'unit_price')
+            reason = payload.get('price_change_reason')
+            approved = payload.get('price_change_approved_by')
+            if _blank(reason):
+                reason = (existing or {}).get('price_change_reason')
+            if _blank(approved):
+                approved = (existing or {}).get('price_change_approved_by')
+
+        changed = abs(price - order_price) > EPSILON
+        if changed and _blank(reason):
+            raise CustomerInvoiceError(
+                '改价必须填写改价原因', field_name='price_change_reason',
+                rule='INVOICE_PRICE_REASON_REQUIRED')
+        line['unit_price'] = price
+        line['price_source'] = 'manual' if changed else 'order'
+        line['price_change_reason'] = reason if changed else None
+        line['price_change_approved_by'] = approved if changed else None
+        return line
 
     def recalc(self, invoice_id: Any) -> Dict[str, Any]:
         header = self._require_header(invoice_id)
@@ -1098,6 +1145,12 @@ class CustomerInvoiceService:
         line['net_amount'] = net
         line['tax_amount'] = tax
         line['gross_amount'] = _round(net + tax, 4)
+        base_price = line.get('order_unit_price')
+        if base_price is None:
+            line['price_diff_amount'] = Decimal('0')
+        else:
+            line['price_diff_amount'] = _round(
+                (unit_price - _to_decimal(base_price)) * qty, 4)
         return line
 
     def _negate_line(self, line: Dict[str, Any], line_no: int) -> Dict[str, Any]:
@@ -1129,6 +1182,7 @@ class CustomerInvoiceService:
             'order_unit_price': line.get('order_unit_price'),
             'price_change_reason': line.get('price_change_reason'),
             'price_change_approved_by': line.get('price_change_approved_by'),
+            'price_diff_amount': -_to_decimal(line.get('price_diff_amount')),
             'original_invoice_line_id': line.get('id'),
         }
         return row

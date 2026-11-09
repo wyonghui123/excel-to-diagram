@@ -566,6 +566,24 @@ fields:
       meaning: 改价审批人
       data_category: text
 
+  - id: price_diff_amount
+    name: 改价差额
+    type: number
+    db_column: price_diff_amount
+    nullable: false
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: (本行单价 - 订单单价) × 数量，服务层派生
+    semantics:
+      meaning: 改价差额（订单价为基准）
+      data_category: amount
+      derived: true
+    ui:
+      widget: number
+      editable: false
+
   - id: original_invoice_line_id
     name: 原发票行
     type: integer

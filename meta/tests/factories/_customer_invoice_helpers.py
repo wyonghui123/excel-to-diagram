@@ -524,3 +524,47 @@ def invoice_categories(path):
             'SELECT invoice_no, document_category FROM customer_invoices'))
     finally:
         conn.close()
+
+
+def insert_line_without_price_diff(path, invoice_no, qty, unit_price,
+                                   order_unit_price=None):
+    """按 v231 旧结构插入「发票 + 行」，行不含 price_diff_amount。"""
+    conn = sqlite3.connect(str(path))
+    try:
+        header_type_id = conn.execute(
+            "SELECT id FROM type_definitions "
+            "WHERE scope_bo = 'customer_invoice' AND code = 'SINV'").fetchone()[0]
+        line_type_id = conn.execute(
+            "SELECT id FROM type_definitions "
+            "WHERE scope_bo = 'customer_invoice' AND code = 'INV_ITEM'").fetchone()[0]
+        cursor = conn.execute(
+            """
+            INSERT INTO customer_invoices (
+                invoice_no, document_type_id, invoice_date, status,
+                customer_account_id, currency_id, org_id,
+                net_amount, tax_amount, gross_amount
+            ) VALUES (?, ?, '2026-11-01', 'draft', 1, 1, 1, 0, 0, 0)
+            """, [invoice_no, header_type_id])
+        invoice_id = cursor.lastrowid
+        conn.execute(
+            """
+            INSERT INTO customer_invoice_lines (
+                invoice_id, line_no, line_type_id, source_doc_type,
+                description, uom_id, qty, unit_price, order_unit_price,
+                tax_code_id, tax_rate_percent
+            ) VALUES (?, 1, ?, 'manual', 'line', 1, ?, ?, ?, 1, 13)
+            """, [invoice_id, line_type_id, qty, unit_price, order_unit_price])
+        conn.commit()
+        return invoice_id
+    finally:
+        conn.close()
+
+
+def line_price_diffs(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        return [float(row[0]) for row in conn.execute(
+            'SELECT price_diff_amount FROM customer_invoice_lines '
+            'ORDER BY id')]
+    finally:
+        conn.close()

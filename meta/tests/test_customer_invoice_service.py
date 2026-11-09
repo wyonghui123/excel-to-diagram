@@ -96,6 +96,51 @@ def test_validate_line_write_allows_shipment_line_with_redundant_order_line():
     assert Decimal(str(normalized['qty'])) == Decimal('10')
 
 
+def test_line_price_change_requires_reason_and_computes_diff():
+    """D13：草稿行改价必须填写原因，差额按 (单价-订单价)×数量 派生。"""
+    conn = build_conn()
+    result = _from_shipment(conn)
+    service = _service(conn)
+    line = get_lines(conn, result['id'])[0]
+    header = get_header(conn, result['id'])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.validate_line_write(
+            {'id': line['id'], 'unit_price': 12},
+            existing=line, invoice=header)
+    _expect(error, 'INVOICE_PRICE_REASON_REQUIRED')
+
+    normalized = service.validate_line_write(
+        {'id': line['id'], 'unit_price': 12,
+         'price_change_reason': '客户议价'},
+        existing=line, invoice=header)
+    assert normalized['price_source'] == 'manual'
+    assert normalized['price_change_reason'] == '客户议价'
+    assert Decimal(str(normalized['price_diff_amount'])) == Decimal('80')
+
+
+def test_line_qty_update_keeps_price_override():
+    """D13：已改价行只改数量时，保留覆盖价与原因，差额按新数量重算。"""
+    conn = build_conn()
+    result = _from_shipment(conn)
+    service = _service(conn)
+    line = get_lines(conn, result['id'])[0]
+    header = get_header(conn, result['id'])
+
+    overridden = service.validate_line_write(
+        {'id': line['id'], 'unit_price': 12,
+         'price_change_reason': '客户议价'},
+        existing=line, invoice=header)
+    line.update(overridden)
+
+    normalized = service.validate_line_write(
+        {'id': line['id'], 'qty': 10}, existing=line, invoice=header)
+    assert Decimal(str(normalized['unit_price'])) == Decimal('12')
+    assert normalized['price_source'] == 'manual'
+    assert normalized['price_change_reason'] == '客户议价'
+    assert Decimal(str(normalized['price_diff_amount'])) == Decimal('20')
+
+
 def test_create_from_shipment_partial_qty():
     conn = build_conn()
     result = _from_shipment(

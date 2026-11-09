@@ -231,3 +231,45 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 - `git status` 仅含 T9-T10 文件；`git add` 逐文件 + commit：
   `feat(billing): 发货单详情页生成销售发票（BO action + 权限门）`
 - 汇报：action 契约、按钮派发口径、测试结果。
+
+---
+
+# B3 价格变更 D13（spec §14）
+
+## [x] T12 数据层：`price_diff_amount` 列 + v233 迁移
+
+**修改 / 新增**
+- `meta/migrations/v231__customer_invoice.py`：`LINE_DDL` 与 verify 列清单加
+  `price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0`
+- 新增 `meta/migrations/v233__customer_invoice_line_price_diff.py`
+  （加列 + 回填 + verify + rollback，幂等）
+- `meta/schemas/customer_invoice_line.yaml`：新增派生字段
+  `price_diff_amount`（`derived: true`、`ui.editable: false`）
+- `meta/tests/factories/_customer_invoice_helpers.py`：
+  `insert_line_without_price_diff` / `line_price_diffs`
+- 新增 `meta/tests/test_migration_v233.py`（3 用例）
+
+## [x] T13 服务与守卫：改价原因必填 + 差额派生
+
+**修改**
+- `meta/services/customer_invoice_service.py`
+  - `validate_line_write`：发货行 / 订单行分支调用 `_apply_price_override`
+  - 新增 `_apply_price_override`：覆盖价 / 原因必填 / `price_source` 切换
+  - `_finalize_line`：派生 `price_diff_amount`
+  - `_negate_line`：红字行差额取负
+- `meta/core/interceptors/customer_invoice_guard_interceptor.py`：
+  `_LINE_NORMALIZED_KEYS` 加 `price_diff_amount`
+- `meta/tests/test_customer_invoice_service.py`：新增 2 用例
+
+## [x] T14 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v232.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_schema_api.py --port 3012
+```
+
+- `git add` 逐文件 + commit：
+  `feat(billing): 发票行改价差额与原因必填（D13）`

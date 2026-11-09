@@ -74,7 +74,7 @@ _LINE_NORMALIZED_KEYS = (
     'tax_code_id', 'tax_rate_percent', 'project_id', 'project_task_id',
     'billing_percent', 'billing_base_amount', 'price_source',
     'order_unit_price', 'price_change_reason', 'price_change_approved_by',
-    'original_invoice_line_id',
+    'price_diff_amount', 'original_invoice_line_id',
 )
 
 #: 终态抬头：除无迁移外的一切写入都拒绝

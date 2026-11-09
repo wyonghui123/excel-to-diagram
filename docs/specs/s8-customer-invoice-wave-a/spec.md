@@ -678,3 +678,48 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 - [ ] 默认全量开票（不做行选择 UI）。
 - [ ] 允许开始实现 T9-T11。
 
+---
+
+## 14. B3 价格变更（D13，Fusion「Credit and Rebill」口径）
+
+> 决策：**草稿行允许覆盖订单单价，但必须填写改价原因**；差额派生到
+> `price_diff_amount`；开票后的价格更正不在本波（按 Fusion 走红冲 + 重开）。
+
+### 14.1 数据
+
+- `v231` `LINE_DDL` 增加 `price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0`（新库）。
+- 新迁移 `v233__customer_invoice_line_price_diff.py`：
+  - 既有库 `ALTER TABLE customer_invoice_lines ADD COLUMN`；
+  - 回填 `ROUND((unit_price - COALESCE(order_unit_price, unit_price)) × qty, 4)`；
+  - `verify` 校验列存在、无 NULL、与公式一致；`rollback` DROP COLUMN。
+- `meta/schemas/customer_invoice_line.yaml` 新增 `price_diff_amount`
+  （`derived: true`，`ui.editable: false`）。
+
+### 14.2 服务规则
+
+`validate_line_write` → 新增 `_apply_price_override`：
+
+- 参考价一律取 `order_unit_price`（订单行单价快照）；手工行（为空）不约束，差额恒 0。
+- 覆盖价 = 入参 `unit_price`；未提交时沿用行上现值与原因（只改数量不清原因）。
+- 差额 `= (unit_price - order_unit_price) × qty`，ROUND 4 位，由 `_finalize_line` 派生。
+- 有差额且 `price_change_reason` 为空 → `INVOICE_PRICE_REASON_REQUIRED`。
+- 有差额 → `price_source='manual'`，保留 `price_change_reason/approved_by`；
+  无差额 → `price_source='order'`，原因与审批人清空。
+- 红字行 `_negate_line` 同步取负 `price_diff_amount`。
+- 守卫 `_LINE_NORMALIZED_KEYS` 增加 `price_diff_amount`（确保写回）。
+
+### 14.3 明确不做
+
+- 开票后改价（posted 行只读；Fusion 口径为 Credit and Rebill）。
+- 改价审批流（只保留 `price_change_approved_by` 字段，不接审批引擎）。
+- 跨币种差额换算（差额与单价同币种）。
+
+### 14.4 测试与验收
+
+- 新增 `meta/tests/test_migration_v233.py`（3 用例：加列回填 / 幂等 / 回滚）。
+- `test_customer_invoice_service.py` 新增 2 用例：
+  1. 改价缺原因 → `INVOICE_PRICE_REASON_REQUIRED`；补原因后差额 = 80、`price_source=manual`；
+  2. 已改价行只改数量 → 保留覆盖价与原因，差额按新数量重算。
+- 回归：`test_customer_invoice_guard.py`、`test_customer_invoice_schedule.py`、
+  `test_migration_v231.py`、`test_migration_v232.py`、`test_schema_api.py`。
+

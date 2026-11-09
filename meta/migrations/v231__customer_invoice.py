@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS customer_invoice_lines (
     order_unit_price NUMERIC(18,6),
     price_change_reason VARCHAR(256),
     price_change_approved_by VARCHAR(64),
+    price_diff_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
     original_invoice_line_id INTEGER,
     created_at DATETIME,
     updated_at DATETIME,
@@ -623,7 +624,7 @@ def verify(db_path: Path) -> bool:
                 'project_id', 'project_task_id', 'billing_percent',
                 'billing_base_amount', 'price_source', 'order_unit_price',
                 'price_change_reason', 'price_change_approved_by',
-                'original_invoice_line_id'),
+                'price_diff_amount', 'original_invoice_line_id'),
             SCHEDULE_TABLE: (
                 'invoice_id', 'schedule_no', 'payment_term_line_id',
                 'ratio_percent', 'due_date', 'amount', 'amount_applied',
