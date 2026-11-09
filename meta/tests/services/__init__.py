@@ -19,7 +19,6 @@
 - test_dimension_scope_engine.py
 - test_date_format_service.py
 - test_cascade_service.py
-- test_user_group_service.py
 - test_business_key_service.py
 - test_filter_service.py
 - test_aggregate_manager.py

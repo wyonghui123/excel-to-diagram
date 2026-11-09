@@ -205,12 +205,18 @@ def _preflight_db_check(db_path):
         return
     try:
         conn = sqlite3.connect(db_path, timeout=5)
-        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        # [2026-11-09 P0] 用 quick_check 替代 integrity_check：
+        # 实测 157MB 库 quick_check 1.05s vs integrity_check 4.6-14.0s。
+        # quick_check 跳过 UNIQUE 与索引/表内容一致性校验，仍能发现页级损坏；
+        # 仅在 quick_check 报错时才升级到 integrity_check 取详细原因。
+        result = conn.execute("PRAGMA quick_check").fetchone()[0]
+        if result != "ok":
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         conn.close()
         if result == "ok":
             return
         logging.getLogger(__name__).error(
-            "[PREFLIGHT] DB integrity_check FAILED: %s", result
+            "[PREFLIGHT] DB integrity check FAILED: %s", result
         )
     except sqlite3.DatabaseError:
         logging.getLogger(__name__).error("[PREFLIGHT] DB is corrupt")
@@ -222,7 +228,7 @@ def _preflight_db_check(db_path):
         shutil.copy2(bak_path, db_path)
         try:
             conn = sqlite3.connect(db_path, timeout=5)
-            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            result = conn.execute("PRAGMA quick_check").fetchone()[0]
             conn.close()
             if result == "ok":
                 logging.getLogger(__name__).warning(

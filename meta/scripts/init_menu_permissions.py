@@ -21,6 +21,7 @@ import json
 import sys
 import io
 import glob
+import hashlib
 try:
     # 优先 C 实现（libyaml）：本脚本启动时会全量解析 213 个 schema yaml
     from meta.core import yaml_compat as yaml
@@ -41,6 +42,46 @@ MIGRATION_OWNED_MENUS = (
     'engineering-change',
     'inventory-aging-report',
 )
+
+
+# [P0-5 2026-11-09] 声明同步逻辑版本：步骤 5/6/6.5 的同步语义一旦变更就 +1，
+#   使库中旧哈希必然失配，强制下一次启动执行一次全量同步。
+_SYNC_DECLARATION_VERSION = 1
+
+
+def _ensure_guard_table(cursor):
+    """创建声明哈希守卫表（幂等）"""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS menu_sync_guard (
+            guard_key TEXT PRIMARY KEY,
+            guard_value TEXT NOT NULL,
+            updated_at TEXT
+        )
+    """)
+
+
+def _compute_declaration_hash(system_menus, schemas_dir):
+    """计算菜单声明的 sha256（步骤 5/6/6.5 的输入指纹）
+
+    覆盖范围：
+      - 过滤后的 system_menus（含 DISABLED_PLATFORM_MODULES 的过滤结果）
+      - meta/schemas/*.yaml 的原始字节（按文件名排序，避免依赖文件系统顺序）
+      - _SYNC_DECLARATION_VERSION（同步逻辑变更时手动递增）
+
+    只读 raw 字节、不做 yaml.safe_load —— 未变化时省掉 213 个文件的解析成本。
+    """
+    digest = hashlib.sha256()
+    digest.update(('v%d' % _SYNC_DECLARATION_VERSION).encode('utf-8'))
+    digest.update(json.dumps(system_menus, sort_keys=True, ensure_ascii=False).encode('utf-8'))
+    for yaml_path in sorted(glob.glob(os.path.join(schemas_dir, '*.yaml'))):
+        digest.update(os.path.basename(yaml_path).encode('utf-8'))
+        try:
+            with open(yaml_path, 'rb') as f:
+                digest.update(f.read())
+        except OSError:
+            # 读不到的文件用固定标记占位；下次可读时哈希必然变化并触发全量同步
+            digest.update(b'<unreadable>')
+    return digest.hexdigest()
 
 
 def init_menu_permissions(db_path):
@@ -2698,12 +2739,34 @@ def init_menu_permissions(db_path):
         cursor.execute("DELETE FROM menu_permissions WHERE menu_code = ?", [code])
     conn.commit()
 
+    # ========== 声明哈希守卫（P0-5） ==========
+    # 步骤 5/6/6.5 是纯声明收敛（system_menus + meta/schemas/*.yaml → DB）：
+    # 输入未变时重复 UPSERT 与解析 213 个 yaml 只会得到相同结果。
+    # 声明变更（含 DISABLED_PLATFORM_MODULES 切换）⇒ 哈希失配 ⇒ 回退到原全量同步。
+    # 步骤 7.5/7.6/7.7/7.8 不受守卫影响：它们处理 DB 侧状态（stale 清理、角色
+    #   权限展开），新增角色或权限定义后必须每次重新展开。
+    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
+    _ensure_guard_table(cursor)
+    declaration_hash = _compute_declaration_hash(system_menus, schemas_dir)
+    cursor.execute(
+        "SELECT guard_value FROM menu_sync_guard WHERE guard_key = 'menu_declaration'"
+    )
+    guard_row = cursor.fetchone()
+    declaration_unchanged = bool(guard_row and guard_row[0] == declaration_hash)
+    if declaration_unchanged:
+        print(f"\n[守卫] 菜单声明未变化 (sha256={declaration_hash[:12]}...)，"
+              "跳过步骤 5/6/6.5 全量同步")
+    else:
+        print(f"\n[守卫] 菜单声明有变化或无记录 (sha256={declaration_hash[:12]}...)，执行全量同步")
+    # 声明未变化时三个同步循环遍历空列表（保留原有打印与汇总结构）
+    sync_menus = [] if declaration_unchanged else system_menus
+
     # ========== 步骤5：写入/更新 menu_permissions 表（权限） ==========
     # [V007.49-A] 增量更新：每次启动都会 UPSERT，触发条件由 7.5 检测权限变更日志输出
     print("\n[步骤5] 同步 menu_permissions 表...")
     perm_new = 0
     perm_updated = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         cursor.execute(
             "SELECT menu_code, required_permissions FROM menu_permissions WHERE menu_code = ?",
             [menu['menu_code']]
@@ -2767,7 +2830,7 @@ def init_menu_permissions(db_path):
     print("\n[步骤6] 同步 menus 导航表...")
     nav_new = 0
     nav_updated = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         cursor.execute(
             "SELECT menu_code, bo_bindings FROM menus WHERE menu_code = ?",
             [menu['menu_code']]
@@ -2842,9 +2905,9 @@ def init_menu_permissions(db_path):
     # export_enabled, 自动补全到 menus.bo_bindings 对应 BO 的 include_actions.
     # 不删除人工显式声明 (yaml 未配但 menu 声明), 用 [KEEP] 日志标记.
     print("\n[步骤6.5] 对齐 yaml import_export → menu bo_bindings ...")
-    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
     yaml_action_map = {}  # bo_id -> {'import': bool, 'export': bool}
-    for yaml_path in glob.glob(os.path.join(schemas_dir, '*.yaml')):
+    # [守卫] 声明未变化时 yaml 已在上面的哈希阶段以 raw 字节读过，无需再解析
+    for yaml_path in ([] if declaration_unchanged else glob.glob(os.path.join(schemas_dir, '*.yaml'))):
         try:
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
@@ -2864,7 +2927,7 @@ def init_menu_permissions(db_path):
 
     align_total = 0
     keep_total = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         menu_code = menu['menu_code']
         # 从 DB 读最新 bo_bindings (步骤 6 UPSERT 后)
         cursor.execute("SELECT bo_bindings FROM menus WHERE menu_code = ?", [menu_code])
@@ -3071,6 +3134,13 @@ def init_menu_permissions(db_path):
     #   sqlite3 默认隔离级别下 DML 会开隐式事务, 而 conn.close() 会回滚未提交事务
     #   —— 导致「清理冗余菜单」「展开权限到角色」「绑定 admin 菜单」每次都只打印
     #   日志、不落库。此处统一提交, 使四步真正生效。
+    # [P0-5] 全量同步完成后记录本次声明哈希（未变化时不重写同值记录）
+    if not declaration_unchanged:
+        cursor.execute(
+            "INSERT OR REPLACE INTO menu_sync_guard (guard_key, guard_value, updated_at) "
+            "VALUES ('menu_declaration', ?, datetime('now'))",
+            [declaration_hash]
+        )
     conn.commit()
     conn.close()
 
