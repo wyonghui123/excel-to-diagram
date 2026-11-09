@@ -19,8 +19,8 @@ from meta.core.rule_trace_service import (
     SCOPE_EVALUATED,
     SCOPE_NOT_TRIGGERED,
     SOURCE_TYPES,
-    STAGE_MAP,
     TRACE_SCENARIOS,
+    TRACE_STAGES,
 )
 from meta.services.rule_catalog_service import (
     NOT_INSTRUMENTED,
@@ -76,7 +76,7 @@ def test_view_config_is_closed_against_code_declarations(service):
     trace = config['trace']
     assert trace['scenarios'] == list(TRACE_SCENARIOS)
     assert set(trace['scenario_labels']) == set(TRACE_SCENARIOS)
-    assert set(trace['stages']) == set(STAGE_MAP.values())
+    assert set(trace['stages']) == set(TRACE_STAGES)
     assert set(trace['decisions']) >= set(DECISION_KINDS)
     assert set(trace['kinds']) >= set(DECISION_KINDS.values())
     assert trace['factor_keys'] == list(DIMENSION_FIELDS)

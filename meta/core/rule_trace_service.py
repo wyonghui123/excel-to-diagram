@@ -24,11 +24,14 @@ from meta.core.rule_keys import (
     DIMENSION_FIELDS,
     control_parameter_codes_key,
     line_type_key,
+    sourcing_key,
 )
 from meta.core.rule_scenarios import (
+    SCENARIO_FACTOR_KEYS,
     SCENARIOS,
     TRACE_SCENARIO_HANDLERS,
     TRACE_SCENARIOS,
+    TRACE_STAGES,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,9 @@ DECISION_KINDS = {
     'not_declared': 'miss',
     'skipped': 'skip',
     'not_instrumented': 'skip',
+    # sourcing 三段解释的结论词（spec §9.3.3）
+    'hit': 'hit',
+    'miss': 'miss',
 }
 
 # [L1 2026-11-08] 运行期节点上限（spec §11.4）：超出只截断返回体积，不影响求值；
@@ -69,6 +75,26 @@ MAX_TRACE_NODES = 200
 STAGE_MAP = {
     spec.scenario: spec.stage for spec in SCENARIOS if spec.stage
 }
+
+# sourcing 来源行淘汰原因 → 冻结原因码（spec §9.3.4 TBD-004）；
+# 未知原因归 other，原始原因保留在 detail.raw_reason。
+_SOURCING_REASON_CODES = {
+    'blocked': 'blocked',
+    'line_expired': 'not_effective',
+    'org_not_found': 'inactive',
+    'mode_mismatch': 'mode_conflict',
+    'usage_mismatch': 'usage_mismatch',
+    'missing_source_ref': 'not_qualified',
+    'cross_legal_entity': 'not_qualified',
+    'supplier_not_vendor': 'not_qualified',
+}
+
+
+def _first_value(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 class RuleTraceError(ValueError):
@@ -83,6 +109,8 @@ def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
               source: str = 'code', reason: str = '',
               factors: Optional[Dict[str, Any]] = None,
               detail: Optional[Dict[str, Any]] = None,
+              stage: Optional[str] = None,
+              skip_reason: Optional[str] = None,
               elapsed_ms: float = 0.0, ok: bool = True) -> Dict[str, Any]:
     envelope = {
         'ok': ok,
@@ -95,6 +123,10 @@ def _envelope(scenario: str, decision: str, *, rule_id: Optional[str] = None,
         'factors': factors or {},
         'elapsed_ms': round(elapsed_ms, 3),
     }
+    if stage is not None:
+        envelope['stage'] = stage
+    if skip_reason is not None:
+        envelope['skip_reason'] = skip_reason
     if detail is not None:
         envelope['detail'] = detail
     return envelope
@@ -207,6 +239,34 @@ def _kind_counts(steps: List[Dict[str, Any]]) -> Dict[str, int]:
     return counts
 
 
+def _inputs_of(node: Dict[str, Any]) -> Dict[str, Any]:
+    """节点输入快照（spec FR-008）：factors 固定的因子轴 + 实际读取的输入。
+
+    default 场景的字段 / 属性读取由 ``DefaultLogEntry.inputs`` 从同一次求值
+    带出；其余场景目前只回填因子轴，fields/attrs/relations 留空。
+    """
+    scenario = node.get('scenario') or ''
+    factors = node.get('factors') or {}
+    buckets: Dict[str, Dict[str, Any]] = {
+        'fields': {}, 'attrs': {}, 'relations': {},
+    }
+    for log in factors.get('logs') or []:
+        if not isinstance(log, dict):
+            continue
+        part = log.get('inputs') or {}
+        for bucket, target in buckets.items():
+            for item in part.get(bucket) or []:
+                if isinstance(item, dict) and item.get('path'):
+                    target.setdefault(item['path'], item)
+    keys = SCENARIO_FACTOR_KEYS.get(scenario, ())
+    return {
+        'factors': {key: factors.get(key) for key in keys},
+        'fields': list(buckets['fields'].values()),
+        'attrs': list(buckets['attrs'].values()),
+        'relations': list(buckets['relations'].values()),
+    }
+
+
 # 规则全集归属（spec §11.4）：下游声明 / 条件未命中 / 本次已评估
 SCOPE_EVALUATED = 'evaluated'
 SCOPE_NOT_TRIGGERED = 'not_triggered'
@@ -282,12 +342,14 @@ class RuleTraceService:
 
         steps: List[Dict[str, Any]] = []
         for scenario in selected:
-            steps.append(self._run_scenario(
+            produced = self._run_scenario(
                 scenario, object_type=object_type, record=record,
                 record_id=record_id, factors=factors,
                 codes=codes, from_state=from_state, to_state=to_state,
                 data_source=ds,
-            ))
+            )
+            # sourcing 一次求值产出三段（scope/filter/select）节点
+            steps.extend(produced if isinstance(produced, list) else [produced])
 
         trace_id = uuid.uuid4().hex
         # 截断只影响返回体积，不影响求值：kind_counts 按完整结果统计
@@ -318,10 +380,13 @@ class RuleTraceService:
             node['seq'] = index
             node['node_id'] = f'{trace_id}:{index}'
             node['parent_id'] = None
-            node['stage'] = STAGE_MAP.get(node.get('scenario'), 'validate')
+            # sourcing 节点自带段内 stage（scope/filter/select），其余场景用整场景 stage
+            node['stage'] = node.get('stage') or STAGE_MAP.get(
+                node.get('scenario'), 'validate')
             node['scope'] = scope_of(node.get('scenario') or '', node.get('decision'))
             node['match'] = _match_of(node)
             node['output'] = _output_of(node)
+            node['inputs'] = _inputs_of(node)
             node['detail'] = _scope_rules(node)
             decorated.append(node)
         return decorated
@@ -361,6 +426,9 @@ class RuleTraceService:
                 result = self._control_parameter(record, factors, codes, started)
             elif handler == 'line_type':
                 result = self._line_type(factors, started)
+            elif handler == 'sourcing':
+                # sourcing 一次求值产出三段节点，不复制 resolver 的匹配/排序逻辑
+                return self._sourcing(record, factors, data_source, started)
             else:
                 result = self._doc_flow(object_type, data_source, started)
         except RuleTraceError:
@@ -456,6 +524,201 @@ class RuleTraceService:
             detail=result,
             elapsed_ms=(time.perf_counter() - started) * 1000,
         )
+
+    def _sourcing(self, record: Dict[str, Any], factors: Dict[str, Any],
+                  data_source: Any, started: float) -> List[Dict[str, Any]]:
+        """sourcing trace 适配器（FR-005）：只映射 explain 三段，不重算匹配。"""
+        from meta.services.sourcing_service import SourcingError, SourcingResolver
+
+        item_id = _first_value(factors.get('item_id'), record.get('item_id'))
+        dest_org_id = _first_value(
+            factors.get('dest_org_id'), record.get('dest_org_id'),
+            record.get('org_id'))
+        usage = _first_value(factors.get('usage'), record.get('usage'))
+        eval_date = _first_value(
+            factors.get('eval_date'), record.get('eval_date'), record.get('date'))
+        factors_snapshot = {
+            'dest_org_id': dest_org_id,
+            'item_id': item_id,
+            'usage': usage,
+            'eval_date': eval_date,
+        }
+        if item_id is None or dest_org_id is None or usage is None:
+            return self._sourcing_skipped_chain(
+                'invalid_input', factors_snapshot, started, rule_key=None)
+
+        spec = {
+            'item_id': item_id,
+            'dest_org_id': dest_org_id,
+            'usage': usage,
+            'date': eval_date,
+            'dest_location_id': _first_value(
+                record.get('dest_location_id'), factors.get('dest_location_id')),
+        }
+        try:
+            resolved = SourcingResolver(data_source).resolve(spec)
+        except SourcingError as exc:
+            return self._sourcing_failure(exc, factors_snapshot, started)
+
+        elapsed = (time.perf_counter() - started) * 1000
+        segments = {
+            str(seg.get('step')): seg
+            for seg in (resolved.get('explain') or [])
+            if isinstance(seg, dict)
+        }
+        rule_code = resolved.get('rule_code')
+        rule_key = sourcing_key(str(rule_code)) if rule_code else None
+        scope_seg = segments.get('assignment') or {}
+        filter_seg = segments.get('line_filter') or {}
+        pick_seg = segments.get('line_pick') or {}
+        return [
+            _envelope(
+                'sourcing', 'matched', rule_id=rule_key, source='db',
+                reason='scope_matched', factors=dict(factors_snapshot),
+                stage='scope', elapsed_ms=elapsed,
+                detail={
+                    'stage': 'assignment',
+                    'hit': scope_seg.get('hit'),
+                    'candidates': scope_seg.get('candidates') or [],
+                },
+            ),
+            _envelope(
+                'sourcing', 'matched', rule_id=rule_key, source='db',
+                reason='lines_qualified', factors=dict(factors_snapshot),
+                stage='filter',
+                detail={
+                    'stage': 'line_filter',
+                    'kept': filter_seg.get('kept') or [],
+                    'dropped': filter_seg.get('dropped') or [],
+                },
+            ),
+            _envelope(
+                'sourcing', 'hit', rule_id=rule_key, source='db',
+                reason='source_selected', factors=dict(factors_snapshot),
+                stage='select',
+                detail={
+                    'stage': 'line_pick',
+                    'line_id': resolved.get('line_id'),
+                    'fixed': pick_seg.get('fixed'),
+                    'rank': pick_seg.get('rank'),
+                    'source_type': resolved.get('source_type'),
+                    'source_org_id': resolved.get('source_org_id'),
+                    'source_location_id': resolved.get('source_location_id'),
+                    'supplier_party_id': resolved.get('supplier_party_id'),
+                    'supply_mode': resolved.get('supply_mode'),
+                    'assignment_id': resolved.get('assignment_id'),
+                    'specificity_rank': resolved.get('specificity_rank'),
+                    'evaluated_at': resolved.get('evaluated_at'),
+                },
+            ),
+        ]
+
+    def _sourcing_failure(self, exc: Any, factors_snapshot: Dict[str, Any],
+                          started: float) -> List[Dict[str, Any]]:
+        """SourcingError → 统一信封；原因分类以 resolver 的 explain 为准。"""
+        from meta.services.sourcing_service import (
+            SOURCING_INVALID_PARAM,
+            SOURCING_MODE_CONFLICT,
+            SOURCING_NO_ASSIGNMENT,
+        )
+
+        explain = (exc.extra or {}).get('explain') or []
+        segments = {
+            str(seg.get('step')): seg
+            for seg in explain if isinstance(seg, dict)
+        }
+        scope_seg = segments.get('assignment') or {}
+        assignment = scope_seg.get('hit') or {}
+        rule_code = assignment.get('rule_code')
+        rule_key = sourcing_key(str(rule_code)) if rule_code else None
+        elapsed = (time.perf_counter() - started) * 1000
+
+        if exc.code == SOURCING_NO_ASSIGNMENT:
+            return [
+                _envelope(
+                    'sourcing', 'not_matched', source='db',
+                    reason='scope_mismatch', skip_reason='scope_mismatch',
+                    factors=dict(factors_snapshot), stage='scope',
+                    detail={
+                        'stage': 'assignment', 'candidates': [],
+                        'supply_mode': (exc.extra or {}).get('supply_mode'),
+                    },
+                    elapsed_ms=elapsed,
+                ),
+                self._sourcing_skipped(
+                    'filter', 'upstream_miss', factors_snapshot, rule_key),
+                self._sourcing_skipped(
+                    'select', 'upstream_miss', factors_snapshot, rule_key),
+            ]
+
+        dropped = (segments.get('line_filter') or {}).get('dropped') or []
+        raw_reason = dropped[0].get('reason') if dropped else None
+        if exc.code == SOURCING_MODE_CONFLICT:
+            skip_reason = 'mode_conflict'
+        elif dropped:
+            skip_reason = _SOURCING_REASON_CODES.get(
+                str(raw_reason or ''), 'other')
+        else:
+            skip_reason = ('invalid_input'
+                           if exc.code == SOURCING_INVALID_PARAM else 'other')
+        return [
+            _envelope(
+                'sourcing', 'matched' if assignment else 'skipped',
+                rule_id=rule_key, source='db',
+                reason='scope_matched' if assignment else skip_reason,
+                skip_reason=None if assignment else skip_reason,
+                factors=dict(factors_snapshot), stage='scope',
+                detail={
+                    'stage': 'assignment',
+                    'hit': assignment or None,
+                    'candidates': scope_seg.get('candidates') or [],
+                },
+                elapsed_ms=elapsed,
+            ),
+            _envelope(
+                'sourcing', 'miss' if dropped else 'skipped',
+                rule_id=rule_key, source='db',
+                reason=str(raw_reason or skip_reason), skip_reason=skip_reason,
+                factors=dict(factors_snapshot), stage='filter',
+                detail={
+                    'stage': 'line_filter', 'kept': [],
+                    'dropped': dropped, 'raw_reason': raw_reason,
+                },
+            ),
+            self._sourcing_skipped(
+                'select', 'upstream_skip', factors_snapshot, rule_key),
+        ]
+
+    @staticmethod
+    def _sourcing_skipped(stage: str, reason: str,
+                          factors_snapshot: Dict[str, Any],
+                          rule_key: Optional[str]) -> Dict[str, Any]:
+        return _envelope(
+            'sourcing', 'skipped', rule_id=rule_key, source='db',
+            reason=reason, skip_reason=reason,
+            factors=dict(factors_snapshot), stage=stage,
+        )
+
+    def _sourcing_skipped_chain(self, reason: str,
+                                factors_snapshot: Dict[str, Any],
+                                started: float,
+                                rule_key: Optional[str]) -> List[Dict[str, Any]]:
+        """入参不足：三段全部标记跳过，不触碰 resolver。"""
+        elapsed = (time.perf_counter() - started) * 1000
+        nodes = [
+            _envelope(
+                'sourcing', 'skipped', rule_id=rule_key, source='db',
+                reason=reason, skip_reason=reason,
+                factors=dict(factors_snapshot), stage='scope',
+                detail={'stage': 'assignment', 'error': reason},
+                elapsed_ms=elapsed,
+            ),
+        ]
+        nodes.append(self._sourcing_skipped(
+            'filter', 'upstream_skip', factors_snapshot, rule_key))
+        nodes.append(self._sourcing_skipped(
+            'select', 'upstream_skip', factors_snapshot, rule_key))
+        return nodes
 
     def _doc_flow(self, object_type: str, data_source: Any,
                   started: float) -> Dict[str, Any]:

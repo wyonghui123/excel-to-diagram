@@ -299,11 +299,16 @@ class TestRuleTraceService:
         for node in nodes:
             assert node['node_id'] == '{0}:{1}'.format(trace_id, node['seq'])
             assert node['parent_id'] is None
-            assert node['stage'] == STAGE_MAP.get(node['scenario'], 'validate')
+            if node['scenario'] == 'sourcing':
+                # sourcing 一次求值拆成 scope / filter / select 三段
+                assert node['stage'] in ('scope', 'filter', 'select')
+            else:
+                assert node['stage'] == STAGE_MAP.get(node['scenario'], 'validate')
             assert isinstance(node['match'], dict)
             assert isinstance(node['match']['matched'], bool)
             assert isinstance(node['match']['conditions'], list)
             assert isinstance(node['output'], dict)
+            assert isinstance(node['inputs'], dict)
 
         assert len({node['node_id'] for node in nodes}) == len(nodes)
 
@@ -318,7 +323,9 @@ class TestRuleTraceService:
         assert result['node_count'] == 2
         assert len(result['scenarios']) == 2
         # 截断只影响返回体积：kind_counts 仍按完整求值结果统计
-        assert sum(result['kind_counts'].values()) == len(trace_mod.TRACE_SCENARIOS)
+        # sourcing 一场景产出 3 个节点（scope/filter/select），其余场景各 1 个
+        assert sum(result['kind_counts'].values()) == len(
+            trace_mod.TRACE_SCENARIOS) + 2
 
     def test_state_transition_match_and_output(self):
         result = self.service.build(

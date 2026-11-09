@@ -97,19 +97,18 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
         configurable=False, publishable=False,
         stage='validate', handler='doc_flow',
     ),
-    # [TR-002 灰度] trace adapter 上线前只登记、不求值；移出 NOT_INSTRUMENTED 即启用。
     ScenarioSpec(
         scenario='sourcing', source='sourcing',
         semantic_class='decision', semantic_type='determination',
         legacy_rule_type='sourcing', hit_policy='first',
         factor_keys=('dest_org_id', 'item_id', 'usage', 'eval_date'),
-        instrumented=False, configurable=False, publishable=False,
+        instrumented=True, configurable=False, publishable=False,
         stage_map={
             'assignment': 'scope',
             'line_filter': 'filter',
             'line_pick': 'select',
         },
-        handler=None, global_projection=False,
+        handler='sourcing', global_projection=False,
     ),
 )
 
@@ -154,6 +153,16 @@ TRACE_SCENARIO_HANDLERS: Dict[str, str] = {
     spec.scenario: spec.handler
     for spec in SCENARIOS if spec.handler
 }
+
+#: trace 节点可出现的全部 stage（整场景 stage + 场景内部 stage_map 值域）
+TRACE_STAGES: Tuple[str, ...] = tuple(dict.fromkeys(
+    [spec.stage for spec in SCENARIOS if spec.instrumented and spec.stage]
+    + [
+        stage
+        for spec in SCENARIOS if spec.instrumented
+        for stage in spec.stage_map.values()
+    ]
+))
 
 #: 旧 4 维因子轴 = 兼容投影场景的 factor_keys 并集（顺序按首次出现）
 DIMENSION_FIELDS: Tuple[str, ...] = tuple(dict.fromkeys(
@@ -200,8 +209,9 @@ def validate_registry() -> None:
 
     for spec in SCENARIOS:
         if spec.instrumented:
-            if not spec.stage:
-                raise ScenarioRegistryError(f'已接入场景 {spec.scenario!r} 缺少 stage')
+            if not (spec.stage or spec.stage_map):
+                raise ScenarioRegistryError(
+                    f'已接入场景 {spec.scenario!r} 缺少 stage 声明')
             if not spec.handler:
                 raise ScenarioRegistryError(
                     f'已接入场景 {spec.scenario!r} 缺少 trace handler')

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""规则场景注册表契约测试（spec 2026-11-09 M1/P0）。
+"""规则场景注册表契约测试（spec 2026-11-09 M1/P0 + M2/P1）。
 
-覆盖：注册表闭合、因子轴并集投影、sourcing 灰度登记、rule_key 唯一身份、
+覆盖：注册表闭合、因子轴并集投影、sourcing trace 接入、rule_key 唯一身份、
 FR-010 扩展属性不得作为因子轴。
 """
 import os
@@ -54,7 +54,8 @@ def test_registry_is_closed():
 
     for spec in SCENARIOS:
         if spec.instrumented:
-            assert spec.stage, f'{spec.scenario} 已接入但缺少 stage'
+            assert spec.stage or spec.stage_map, (
+                f'{spec.scenario} 已接入但缺少 stage 声明')
             assert spec.handler, f'{spec.scenario} 已接入但缺少 handler'
         else:
             assert spec.handler is None, f'{spec.scenario} 未接入却声明了 handler'
@@ -98,7 +99,7 @@ def test_scenario_factor_keys_are_declared_individually():
 # FR-002：sourcing 登记与枚举边界
 # ----------------------------------------------------------------------
 
-def test_sourcing_registered_as_gray_scenario():
+def test_sourcing_registered_as_trace_scenario():
     spec = get_scenario('sourcing')
     assert spec is not None
     assert spec.source == 'sourcing'
@@ -106,16 +107,17 @@ def test_sourcing_registered_as_gray_scenario():
     assert spec.semantic_type == 'determination'
     assert spec.legacy_rule_type == 'sourcing'
     assert spec.hit_policy == 'first'
-    assert spec.instrumented is False
+    assert spec.instrumented is True
     assert spec.configurable is False
     assert spec.publishable is False
+    assert spec.handler == 'sourcing'
     assert spec.stage_map == {
         'assignment': 'scope', 'line_filter': 'filter', 'line_pick': 'select'}
 
     assert 'sourcing' in SOURCES
-    assert 'sourcing' in NOT_INSTRUMENTED_SOURCES
-    # 灰度期不进入 trace 白名单，避免"永远跳过"的假节点
-    assert 'sourcing' not in TRACE_SCENARIOS
+    assert 'sourcing' not in NOT_INSTRUMENTED_SOURCES
+    # M2 起进入 trace 白名单
+    assert 'sourcing' in TRACE_SCENARIOS
 
 
 def test_sourcing_does_not_extend_rule_type_enum():

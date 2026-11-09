@@ -450,7 +450,7 @@ class RuleCatalogService:
             SCOPE_EVALUATED,
             SCOPE_NOT_TRIGGERED,
             SOURCE_TYPES,
-            STAGE_MAP,
+            TRACE_STAGES,
         )
         from meta.services.rule_simulate_service import CONFIG_MODES, MAX_CODES
 
@@ -548,8 +548,8 @@ class RuleCatalogService:
         if unknown_rules:
             raise RuleCatalogError(f'trace.scenario_rules 含未知场景: {unknown_rules}')
         stages = set(trace.get('stages') or {})
-        if stages != set(STAGE_MAP.values()):
-            raise RuleCatalogError('trace.stages 与 STAGE_MAP 值域不等值')
+        if stages != set(TRACE_STAGES):
+            raise RuleCatalogError('trace.stages 与 TRACE_STAGES 值域不等值')
         decisions = set(trace.get('decisions') or {})
         missing_decisions = sorted(set(DECISION_KINDS) - decisions)
         if missing_decisions:

@@ -193,7 +193,7 @@ detail:
         rule_key: "{rule_key}"
 
 trace:
-  scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow]
+  scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow, sourcing]
   # 场景展示文案（前端不得写死中文；未知值回落原文）
   scenario_labels:
     default: 属性确定
@@ -202,13 +202,17 @@ trace:
     approval: 审批策略
     state_transition: 状态流转
     doc_flow: 单据流
-  # 节点执行阶段（后端 STAGE_MAP 同源；只用于展示分组）
+    sourcing: 供应来源
+  # 节点执行阶段（后端 STAGE_MAP / TRACE_STAGES 同源；只用于展示分组）
   stages:
     before_save: 保存前
     validate: 校验
     calc: 计算
     approve: 审批
     status_transition: 状态流转
+    scope: 作用域匹配
+    filter: 资格过滤
+    select: 取源排序
   # 规则全集归属（spec §11.4；判定在后端 scope_of，前端只渲染）
   scopes:
     evaluated: { label: 已评估, type: success }
@@ -284,6 +288,8 @@ trace:
     declared: { label: 已声明, type: success }
     not_declared: { label: 未声明, type: info }
     not_instrumented: { label: 未接入, type: info }
+    hit: { label: 命中, type: success }
+    miss: { label: 未命中, type: danger }
   # 因子取值来源标注
   factor_sources:
     override: 请求指定
