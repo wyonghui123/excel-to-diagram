@@ -405,3 +405,30 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
 
 - `git add` 逐文件 + commit：
   `feat(billing): doc flow reverse edges for credit memo (B7)`
+
+---
+
+# B8 三项决策落地（spec §19）
+
+## [x] T23 决策口径与测试补齐
+
+**修改**
+- `docs/specs/s8-customer-invoice-wave-a/spec.md`：新增 §19
+  （D19 日期分离 / D27 期次严格只读 / D28 不做容差冻结）
+- `meta/tests/test_customer_invoice_service.py` 新增 2 用例：
+  - D19：未传 `posting_date` 过账，头 `posting_date` 取 `invoice_date`
+  - D28：订单行改价至 200×10（超订单金额）仍可提交并过账
+
+**说明**
+- D27 严格只读已由守卫 `INVOICE_SCHEDULE_IMMUTABLE`（R-INV-22）实现，本批不新增代码
+- D28 不引入 `settlement_block_code`，无代码改动
+
+## [x] T24 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+```
+
+- `git add` 逐文件 + commit：
+  `docs(billing): finalize wave A decisions D19/D27/D28 (B8)`

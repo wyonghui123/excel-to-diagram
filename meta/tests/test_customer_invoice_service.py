@@ -425,6 +425,36 @@ def test_post_rejects_posting_date_before_invoice_date():
     _expect(error, 'INVOICE_POSTING_DATE_INVALID')
 
 
+def test_post_defaults_posting_date_to_invoice_date():
+    """D19：发票日期与过账日期分离，未传过账日期时取发票日期。"""
+    conn = build_conn()
+    service = _service(conn)
+    result = _from_shipment(conn)
+    service.submit(result['id'])
+
+    posted = service.post(result['id'])
+
+    assert posted['posting_date'] == INVOICE_DATE
+    assert get_header(conn, result['id'])['posting_date'] == INVOICE_DATE
+
+
+def test_over_order_amount_does_not_block_posting():
+    """D28：不建冻结码，开票金额超过订单行金额也不阻断过账。"""
+    conn = build_conn()
+    service = _service(conn)
+    result = service.create_manual(dict(
+        BASE_HEADER,
+        lines=[{'order_line_id': ORDER_LINE_DELIVERY, 'qty': 10,
+                'unit_price': 200, 'price_change_reason': '溢价开票'}]))
+    service.submit(result['id'])
+
+    posted = service.post(result['id'])
+
+    assert posted['status'] == 'posted'
+    assert posted['amounts']['gross_amount'] == 2260.0
+    assert get_header(conn, result['id'])['status'] == 'posted'
+
+
 def test_post_rejects_tampered_header_totals():
     conn = build_conn()
     service = _service(conn)

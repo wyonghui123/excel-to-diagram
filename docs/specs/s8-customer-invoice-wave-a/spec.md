@@ -891,3 +891,36 @@ BO Action：`customer_invoice.create_credit_from_invoice`
   - 红冲：红字行同样写引用边且 source=原行 id。
 - 回归：service / actions / guard / schedule / v231-v235 / schema_api。
 
+---
+
+## 19. B8 三项决策落地（D19 / D27 / D28）
+
+> 决策口径沿用 §2：D19 分离但可默认、D27 严格只读、D28 不做冻结。
+
+### 19.1 D19 发票日期与过账日期分离
+
+- `invoice_date`：编号日期段与期次到期日的基准，建单必填。
+- `posting_date`：过账时可独立传入；为空时取 `invoice_date`；早于 `invoice_date`
+  抛 `INVOICE_POSTING_DATE_INVALID`。
+- 不引入独立会计期间对象，不做期间关账校验（留给财务期间模块）。
+
+### 19.2 D27 期次受控变更：严格只读
+
+- `customer_invoice_schedule` 的新增 / 修改 / 删除经 action 一律被守卫拒绝，
+  规则 `INVOICE_SCHEDULE_IMMUTABLE`（R-INV-22）。
+- 期次只在过账时由服务生成；红冲仅由服务内部把原期次置 `cancelled`，
+  不开放手工重排期。
+
+### 19.3 D28 容差冻结：不做
+
+- 不引入 `settlement_block_code` 或任何冻结字段。
+- 开票金额超过订单行金额不阻断过账（本波无容差校验，留给 AR 侧决策）。
+
+### 19.4 测试与验收
+
+- service 新增 2 用例：
+  - `test_post_defaults_posting_date_to_invoice_date`（D19 默认取发票日期）；
+  - `test_over_order_amount_does_not_block_posting`（D28 超额不阻断，gross=2260）。
+- guard 既有 `INVOICE_SCHEDULE_IMMUTABLE` 用例覆盖 D27。
+- 回归：service / guard；v231-v235、actions、schedule、schema_api 维持通过。
+
