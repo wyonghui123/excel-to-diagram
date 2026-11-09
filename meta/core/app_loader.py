@@ -130,21 +130,26 @@ class DocFlowRuleDecl:
     同事务派生，F5 铁律）——该约束在启动期 `_prepare_doc_flow` 校验。
 
     Phase 2 增补（spec 2026-09-29-doc-flow-phase2-spec.md §4.1/§5）：
-    - `field_map`：字段映射表 `{"源字段": "目标字段"}`；空 = 同名直拷
+    - `field_map`：字段映射表 `{"源字段": "目标字段"}`（改名映射）
     - `split_key`：分单键字段名数组；空 = 每行自成一组（1 源行 = 1 目标单）
     - `target_line_bo`：明细行 BO ID；空 = 单表模式（Phase 1 行为）
     - `head_fk_field`：明细行指向单头的外键字段；空 = 走约定解析
+    - `target_qty_field`：目标行数量字段名；空 = 自动解析 quantity → qty
+    - `copied_fields`：显式声明的同名字段直拷白名单（如 description）；
+      未声明的非引用字段（除 created_at/updated_at）不再隐式拷贝
     """
 
     rule_id: str
     source_bo: str
     target_bo: str
     source_qty_field: str = "quantity"   # Σ 校验读源行数量的字段名
+    target_qty_field: str = ""           # 目标行数量字段；空 = 自动解析
     pool: str = "default"                # 消耗池（§6.5，Phase 1 单池够用）
     check_hook: str = ""                 # Phase 1 留空列位（Phase 2 三段式）
     map_hook: str = ""                   # Phase 1 留空：空 = 默认映射
     create_hook: str = ""                # Phase 1 留空列位
     field_map: Dict[str, str] = field(default_factory=dict)   # 源字段 → 目标字段
+    copied_fields: List[str] = field(default_factory=list)    # 显式直拷白名单
     split_key: List[str] = field(default_factory=list)        # 分单键字段名
     target_line_bo: str = ""             # 明细行 BO；空 = 单表模式
     head_fk_field: str = ""              # 明细行→单头 外键字段（显式声明优先）
@@ -156,11 +161,13 @@ class DocFlowRuleDecl:
             "source_bo": self.source_bo,
             "target_bo": self.target_bo,
             "source_qty_field": self.source_qty_field,
+            "target_qty_field": self.target_qty_field,
             "pool": self.pool,
             "check_hook": self.check_hook,
             "map_hook": self.map_hook,
             "create_hook": self.create_hook,
             "field_map": dict(self.field_map),
+            "copied_fields": list(self.copied_fields),
             "split_key": list(self.split_key),
             "target_line_bo": self.target_line_bo,
             "head_fk_field": self.head_fk_field,
@@ -379,11 +386,14 @@ def _parse_doc_flow(raw: Dict[str, Any], app_id: str) -> tuple:
             source_bo=_require_str(item, "source_bo", ctx),
             target_bo=_require_str(item, "target_bo", ctx),
             source_qty_field=_optional_str(item, "source_qty_field") or "quantity",
+            target_qty_field=_optional_str(item, "target_qty_field"),
             pool=_optional_str(item, "pool") or "default",
             check_hook=_optional_str(item, "check_hook"),
             map_hook=_optional_str(item, "map_hook"),
             create_hook=_optional_str(item, "create_hook"),
             field_map=_parse_field_map(item, ctx),
+            copied_fields=_parse_str_list(
+                item, "copied_fields", ctx, "显式直拷字段名"),
             split_key=_parse_split_key(item, ctx),
             target_line_bo=_optional_str(item, "target_line_bo"),
             head_fk_field=_optional_str(item, "head_fk_field"),
@@ -419,14 +429,18 @@ def _parse_field_map(item: Dict[str, Any], ctx: str) -> Dict[str, str]:
 
 def _parse_split_key(item: Dict[str, Any], ctx: str) -> List[str]:
     """解析 split_key（分单键字段名数组）；缺省 = 空 list（每行自成一组）。"""
-    value = item.get("split_key")
+    return _parse_str_list(item, "split_key", ctx, "分单键字段名")
+
+
+def _parse_str_list(item: Dict[str, Any], key: str, ctx: str,
+                    label: str) -> List[str]:
+    """解析非空字符串数组声明（split_key / copied_fields 共用）。"""
+    value = item.get(key)
     if value is None:
         return []
     if not isinstance(value, list) or not all(
             isinstance(v, str) and v for v in value):
-        raise AppManifestError(
-            f"{ctx} split_key 需为非空字符串数组（分单键字段名）"
-        )
+        raise AppManifestError(f"{ctx} {key} 需为非空字符串数组（{label}）")
     return list(value)
 
 

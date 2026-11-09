@@ -10,7 +10,8 @@
 
     BEGIN
       1. check   源行存在 + 数量充足性（Σ 校验兜底，见下）
-      2. map     默认映射：同名字段直拷（quantity/unit 等）+ target_data 覆盖
+      2. map     字段映射：引用类 *_id + 规则声明字段（copied_fields）直拷
+                 + target_data 覆盖 + 目标数量字段写派生量
       3. create  写目标单行（直写 INSERT——不复用 _do_create，见"实现裁定"）
       4. edge    写边（7 元组 + quantity + rule_id + derived_at/by，status=active）
       5. Σ 校验  active 正向 − active 红字 ≤ 源行数量，违反 → 整体回滚
@@ -49,6 +50,14 @@ logger = logging.getLogger(__name__)
 #: 浮点比较容差（Σ 校验用，REAL 精度兜底）
 _QTY_EPSILON = 1e-9
 
+#: 永不从源行直拷的字段：status 属下游独立单据自身状态机（重置为初始态）；
+#: line_no 由下游重新编号；remark 是本次业务备注；source_line_id 是多态溯源
+#: 锚点，正确来源是 doc_flow_edges，而非上游行。
+_COPY_NEVER = frozenset({"status", "line_no", "remark", "source_line_id"})
+
+#: 统一审计字段：元数据模型统一存储，保持从源行拷贝（D4 决定，不改派生时刻）
+_COPY_AUDIT = frozenset({"created_at", "updated_at"})
+
 #: 边表物理表名（统一定义见 doc_flow_schema）
 DOC_FLOW_EDGES_TABLE = "doc_flow_edges"
 
@@ -72,10 +81,49 @@ class DeriveResult:
     source_qty: float
     consumed_qty: float
     open_qty: float
+    source_id: Any = None
+    source_item: str = ""
+    target_item: str = ""
+    quantity: float = 0.0
 
 
 def _num(value: Any) -> float:
     return float(value) if value is not None else 0.0
+
+
+def _resolve_target_qty_field(rule, target_obj):
+    """解析目标行数量字段：规则显式声明 → quantity → qty（名称兼容）。
+
+    历史缺陷：数量列名硬编码 `quantity`，而 purchase_order_line /
+    transfer_order_line / inventory_transaction / shipment_line 的列名是
+    `qty`、receipt_line 是 `qty_received`——派生量从未真正写入目标行。
+    """
+    declared = str(rule.get("target_qty_field") or "").strip()
+    if declared:
+        field_def = target_obj.get_field(declared)
+        if field_def is None:
+            raise DocFlowDeriveError(
+                "TARGET_QTY_FIELD_MISSING",
+                f"target_qty_field {declared!r} 不在 {target_obj.id} 字段",
+            )
+        return field_def
+    for name in ("quantity", "qty"):
+        field_def = target_obj.get_field(name)
+        if field_def is not None:
+            return field_def
+    return None
+
+
+def _next_line_no(app_ds, target_obj, target_table: str,
+                  fk_column: str, fk_value: Any) -> int:
+    """头行模式行号重编：取目标单当前最大行号 + 1（事务内，幂等重放已先返回）。"""
+    line_field = target_obj.get_field("line_no")
+    rows = app_ds.execute(
+        "SELECT COALESCE(MAX({0}), 0) FROM {1} WHERE {2} = ?".format(
+            line_field.db_column, target_table, fk_column),
+        (fk_value,),
+    ).fetchall()
+    return int(_num(rows[0][0])) + 1 if rows else 1
 
 
 def _consumed_in_pool(app_ds, source_bo: str, source_id: str,
@@ -101,7 +149,8 @@ def _find_edge_by_key(app_ds, key: Tuple) -> Optional[str]:
     rows = app_ds.execute(
         """SELECT id FROM doc_flow_edges
            WHERE source_bo=? AND source_id=? AND source_item=?
-             AND target_bo=? AND target_id=? AND target_item=? AND rule_id=?""",
+             AND target_bo=? AND target_id=? AND target_item=? AND rule_id=?
+             AND status='active'""",
         (source_bo, str(source_id), source_item,
          target_bo, str(target_id), target_item, rule_id),
     ).fetchall()
@@ -124,6 +173,7 @@ def _find_edge_loose(app_ds, source_bo: str, source_id: Any, source_item: str,
         """SELECT id, target_item, quantity FROM doc_flow_edges
            WHERE source_bo=? AND source_id=? AND source_item=?
              AND target_bo=? AND target_id=? AND rule_id=?
+             AND status='active'
            ORDER BY derived_at LIMIT 1""",
         (source_bo, str(source_id), source_item,
          target_bo, str(target_id), rule_id),
@@ -133,7 +183,8 @@ def _find_edge_loose(app_ds, source_bo: str, source_id: Any, source_item: str,
 
 def _replay_result(app_ds, rule, source_bo_id: str, source_id: Any,
                    source_item: str, source_qty: float, edge_id: str,
-                   target_id: Any) -> "DeriveResult":
+                   target_id: Any, quantity: float,
+                   target_item: str = "") -> "DeriveResult":
     """构造幂等重放结果（零新增：返回既有边 + 当前池消耗口径）。"""
     consumed = _consumed_in_pool(
         app_ds, source_bo_id, source_id, source_item, rule["pool"]
@@ -142,6 +193,10 @@ def _replay_result(app_ds, rule, source_bo_id: str, source_id: Any,
         edge_id=edge_id, target_id=target_id, replay=True,
         source_qty=source_qty, consumed_qty=consumed,
         open_qty=source_qty - consumed,
+        source_id=source_id,
+        source_item=source_item,
+        target_item=target_item,
+        quantity=quantity,
     )
 
 
@@ -197,22 +252,38 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
       归属外键；幂等按 **(源, 单头, 规则) 宽松匹配**——明细行 ID 此刻尚未生成
       （spec §6.3），命中即重放，不重复建行。
 
-    映射优先级链（spec §5.1）：同名字段直拷 → field_map 改名 → target_data
-    静态覆盖；目标行数量字段不参与映射链（§5.3，由引擎显式写入派生量）。
+    映射优先级链（spec §5.1，修订版）：显式直拷白名单（引用类 *_id +
+    规则 ``copied_fields`` + created_at/updated_at）→ field_map 改名 →
+    target_data 静态覆盖 → 数量派生量；status / line_no / remark /
+    source_line_id 永不直拷。
     """
     source_table = source_obj.table_name
     target_table = target_obj.table_name
     source_bo_id, target_bo_id = source_obj.id, target_obj.id
 
-    target_qty_field = target_obj.get_field("quantity")
+    target_qty_field = _resolve_target_qty_field(rule, target_obj)
     qty_col = target_qty_field.db_column if target_qty_field else None
     target_field_ids = tuple(
         f.id for f in target_obj.get_persistent_fields() if f.id != "id"
     )
-    # 同名直拷候选（数量字段例外——其语义是本次派生量，见模块 docstring）
+    # 直拷白名单（spec §5.1 修订）：引用类 *_id + 规则显式 copied_fields
+    # + created_at/updated_at（统一审计字段，D4 保持原状）。
+    # 未声明的业务字段不再隐式拷贝——「拷贝必须显式」。
+    declared_copies = tuple(rule.get("copied_fields") or [])
+    for fid in declared_copies:
+        if target_obj.get_field(fid) is None or source_obj.get_field(fid) is None:
+            raise DocFlowDeriveError(
+                "COPY_FIELD_MISSING",
+                f"copied_fields 声明 {fid!r} 须同时存在于源 {source_bo_id} "
+                f"与目标 {target_bo_id}",
+            )
     copy_field_ids = tuple(
         fid for fid in target_field_ids
         if fid != (target_qty_field.id if target_qty_field else None)
+        and fid not in _COPY_NEVER
+        and (fid.endswith("_id")
+             or fid in declared_copies
+             or fid in _COPY_AUDIT)
         and source_obj.get_field(fid) is not None
     )
     # field_map 改名对（§5.1 优先级链第 2 环）；两端字段须都存在，数量字段除外
@@ -266,7 +337,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             if existing:
                 return _replay_result(app_ds, rule, source_bo_id, source_id,
                                       source_item, source_qty, existing,
-                                      attach_target_id)
+                                      attach_target_id,
+                                      quantity=qty, target_item=target_item)
     else:
         if edge_target_id is None:
             raise DocFlowDeriveError(
@@ -291,7 +363,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
                 )
             return _replay_result(app_ds, rule, source_bo_id, source_id,
                                   source_item, source_qty,
-                                  existing_edge_id, existing_item)
+                                  existing_edge_id, existing_item,
+                                  quantity=qty, target_item=existing_item)
 
     # ── 3. map + create：直拷 → 改名 → 静态覆盖 → 数量默认 ───────────────
     if exact_idem and attach_target_id is not None:
@@ -311,6 +384,11 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             row_data[qty_col] = qty                      # 数量默认 = 本次派生量
         if fk_column is not None:                        # 头行模式：归属外键
             row_data[fk_column] = fk_value
+            line_field = target_obj.get_field("line_no")
+            if line_field is not None and line_field.db_column not in row_data:
+                # 行号由下游单据重编（不继承上游 line_no，避免唯一索引撞车）
+                row_data[line_field.db_column] = _next_line_no(
+                    app_ds, target_obj, target_table, fk_column, fk_value)
         for audit_col in ("created_at", "updated_at"):
             f = target_obj.get_field(audit_col)
             if f is not None and f.db_column not in row_data:
@@ -361,7 +439,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         if existing:
             logger.warning("[DocFlow] 7 元组冲突但命中既有边（并发重放）: %s", e)
             return _replay_result(app_ds, rule, source_bo_id, source_id,
-                                  source_item, source_qty, existing, target_id)
+                                  source_item, source_qty, existing, target_id,
+                                  quantity=qty, target_item=ed_item)
         raise
 
     # ── 5. Σ 校验（权威判定；违反 → 异常上抛 → 事务整体回滚）─────────────
@@ -382,6 +461,10 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         edge_id=edge_id, target_id=target_id, replay=False,
         source_qty=source_qty, consumed_qty=consumed,
         open_qty=source_qty - consumed,
+        source_id=source_id,
+        source_item=source_item,
+        target_item=ed_item,
+        quantity=qty,
     )
 
 

@@ -290,6 +290,15 @@ def start_runs_for_event(
             value = payload.get(spec.doc_ref_field)
             doc_ref = "" if value is None else str(value)
 
+        # S4 幂等：同一事件（trace）对同一 workflow_key 只起一个 Run。
+        trace_id = ""
+        if isinstance(payload, dict):
+            trace_id = str(payload.get("trace_id") or "")
+        idempotency_key = (
+            f"{event_name}:{trace_id}:{workflow['workflow_key']}"
+            if trace_id else ""
+        )
+
         run = start_run(
             data_source,
             workflow_key=workflow["workflow_key"],
@@ -300,6 +309,7 @@ def start_runs_for_event(
             doc_ref=doc_ref,
             app_id=app_id,
             created_by=created_by,
+            idempotency_key=idempotency_key,
         )
         logger.info(
             "[WorkflowTrigger] 事件命中并唤起 Run: event=%s workflow=%s@%s run=%s",

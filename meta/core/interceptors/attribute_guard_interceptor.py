@@ -43,6 +43,12 @@ GUARDED_OBJECTS = ('attribute_definition', 'attribute_scope',
 _GUARDED_ACTIONS = ('crud_create', 'crud_update')
 #: 删除只对定义层设防（范围的删除不破坏值行语义）
 _DELETE_GUARDED = ('attribute_definition',)
+#: 值表对象 → 扩展属性 Provider 的对象类型（缓存失效用）
+_VALUE_OBJECT_TYPES = {
+    'item_attribute_value': 'item',
+    'party_attribute_value': 'party',
+    'batch_attribute_value': 'batch',
+}
 
 
 class AttributeGuardInterceptor(Interceptor):
@@ -119,4 +125,13 @@ class AttributeGuardInterceptor(Interceptor):
         )
 
     def after_action(self, context: 'ActionContext') -> None:
-        pass
+        """写入成功后失效扩展属性缓存（spec 2026-11-09 FR-011）。"""
+        from meta.core.attribute_provider import AttributeProvider
+
+        object_id = getattr(context.meta_object, 'id', None)
+        if object_id in _VALUE_OBJECT_TYPES:
+            AttributeProvider.invalidate(
+                object_type=_VALUE_OBJECT_TYPES[object_id])
+        else:
+            # 定义 / 范围变更会影响所有对象与变量清单
+            AttributeProvider.invalidate()

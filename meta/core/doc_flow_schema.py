@@ -114,6 +114,12 @@ def _build_edge_meta() -> MetaObject:
             name="idx_doc_flow_target", source=IndexSource.SCHEMA,
             description="目标侧追溯（查目标单由哪些源派生而来）",
         ),
+        MetaIndex(
+            fields=["source_bo", "source_id", "source_item", "status"],
+            db_columns=["source_bo", "source_id", "source_item", "status"],
+            name="idx_doc_flow_edges_src", source=IndexSource.SCHEMA,
+            description="源行级已派生子查询（list_edges 按源行追溯 / 未结量按行聚合）",
+        ),
     ]
 
     return MetaObject(

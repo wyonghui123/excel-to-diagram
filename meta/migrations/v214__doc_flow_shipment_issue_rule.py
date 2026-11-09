@@ -37,15 +37,18 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     source_bo        TEXT NOT NULL,
     target_bo        TEXT NOT NULL,
     source_qty_field TEXT NOT NULL DEFAULT 'quantity',
+    target_qty_field TEXT NOT NULL DEFAULT '',
     pool             TEXT NOT NULL DEFAULT 'default',
     status           TEXT NOT NULL DEFAULT 'active',
     check_hook       TEXT,
     map_hook         TEXT,
     create_hook      TEXT,
     field_map        TEXT NOT NULL DEFAULT '{}',
+    copied_fields    TEXT NOT NULL DEFAULT '[]',
     split_key        TEXT NOT NULL DEFAULT '[]',
     target_line_bo   TEXT NOT NULL DEFAULT '',
     head_fk_field    TEXT NOT NULL DEFAULT '',
+    display_fields   TEXT NOT NULL DEFAULT '[]',
     created_at       TEXT,
     updated_at       TEXT
 )
@@ -106,6 +109,7 @@ RULE = {
     'source_bo': 'shipment_line',
     'target_bo': 'inventory_transaction',
     'source_qty_field': 'qty',
+    'target_qty_field': 'qty',
     'pool': 'inventory_issue',
     'field_map': '{}',
     'split_key': '[]',
@@ -166,14 +170,16 @@ def _do_upgrade(conn):
     conn.execute(
         """
         INSERT INTO doc_flow_rule
-            (rule_id, source_bo, target_bo, source_qty_field, pool, status,
+            (rule_id, source_bo, target_bo, source_qty_field,
+             target_qty_field, pool, status,
              field_map, split_key, target_line_bo, head_fk_field,
              created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
         ON CONFLICT(rule_id) DO UPDATE SET
             source_bo=excluded.source_bo,
             target_bo=excluded.target_bo,
             source_qty_field=excluded.source_qty_field,
+            target_qty_field=excluded.target_qty_field,
             pool=excluded.pool,
             field_map=excluded.field_map,
             split_key=excluded.split_key,
@@ -183,7 +189,7 @@ def _do_upgrade(conn):
         """,
         [
             RULE['rule_id'], RULE['source_bo'], RULE['target_bo'],
-            RULE['source_qty_field'], RULE['pool'],
+            RULE['source_qty_field'], RULE['target_qty_field'], RULE['pool'],
             RULE['field_map'], RULE['split_key'],
             RULE['target_line_bo'], RULE['head_fk_field'],
             now, now,

@@ -30,7 +30,10 @@ from meta.core.rule_keys import (
     control_parameter_key,
     doc_flow_key,
     line_type_key,
+    sourcing_key,
 )
+from meta.core.rule_trace_service import TRACE_SCENARIOS
+from meta.core.rule_scenarios import SCENARIO_FACTOR_KEYS
 from meta.core.rule_targets import links_for
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,7 @@ def _descriptor(
     scope_bo: str = '',
     factors: Optional[Dict[str, Any]] = None,
     configurable: bool = False,
+    publishable: bool = False,
     status: str = 'active',
     updated_at: str = '',
     priority: Optional[int] = None,
@@ -121,6 +125,7 @@ def _descriptor(
         'scope_bo': scope_bo or '',
         'factors': factors or {},
         'configurable': bool(configurable),
+        'publishable': bool(publishable),
         'status': status or 'active',
         'updated_at': updated_at or '',
         'priority': priority,
@@ -200,6 +205,7 @@ def _control_parameter_descriptors(*, include_draft: bool = False) -> List[Dict[
                 'value_count': len(rows),
             },
             configurable=True,
+            publishable=True,
             status=status,
             links=links_for('control_parameter', status),
             detail={
@@ -240,6 +246,7 @@ def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any
                 'specificity_rank': row.get('specificity_rank'),
             },
             configurable=True,
+            publishable=True,
             status=status,
             links=links_for('line_type', status),
             detail={'condition': str(row.get('description') or '')},
@@ -248,11 +255,34 @@ def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any
 
 
 def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    from meta.core.doc_flow_header_contract import build_header_contract
+    from meta.core.doc_flow_node_groups import build_node_groups, node_group_detail
     from meta.core.rule_provider import list_doc_flow_rules
 
+    rules = list_doc_flow_rules(_meta_db())
+    # FR-013：节点组是 YAML 元数据 + doc_flow_rule 的只读投影，不落库。
+    groups = build_node_groups(rules)
+
     items: List[Dict[str, Any]] = []
-    for rule in list_doc_flow_rules(_meta_db()):
+    for rule in rules:
         rule_id = str(rule.get('rule_id') or '')
+        detail = {
+            'field_map': rule.get('field_map') or {},
+            'split_key': rule.get('split_key') or [],
+            'pool': rule.get('pool'),
+            'source_qty_field': rule.get('source_qty_field'),
+            'target_line_bo': rule.get('target_line_bo') or '',
+            'head_fk_field': rule.get('head_fk_field') or '',
+            'display_fields': rule.get('display_fields') or [],
+        }
+        node_group = node_group_detail(
+            groups, str(rule.get('source_bo') or ''))
+        if node_group:
+            detail['node_group'] = node_group
+        # TBD-007 P0：计划行角色与头字段契约均为只读增量字段（零 DDL）。
+        detail['source_role'] = (node_group or {}).get('node_role', '')
+        detail['header_contract'] = build_header_contract(rule)
+
         items.append(_descriptor(
             'doc_flow',
             doc_flow_key(rule_id),
@@ -267,11 +297,7 @@ def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
             configurable=False,
             status=str(rule.get('status') or 'active'),
             updated_at=str(rule.get('updated_at') or ''),
-            detail={
-                'field_map': rule.get('field_map') or {},
-                'split_key': rule.get('split_key') or [],
-                'pool': rule.get('pool'),
-            },
+            detail=detail,
         ))
     return items
 
@@ -297,12 +323,87 @@ def _approval_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
     return items
 
 
+def _scope_summary(assignments: List[Dict[str, Any]]) -> str:
+    """作用域摘要：按分配行拼一段可读文本（目录列展示用，不参与求值）。"""
+    if not assignments:
+        return '未声明作用域'
+    parts: List[str] = []
+    for row in assignments[:3]:
+        segment = str(row.get('scope_type') or '')
+        ref_id = row.get('scope_ref_id')
+        if ref_id is not None:
+            segment = f'{segment}:{ref_id}'
+        dest_org_id = row.get('dest_org_id')
+        if dest_org_id is not None:
+            segment = f'{segment}@{dest_org_id}'
+        dest_location_id = row.get('dest_location_id')
+        if dest_location_id is not None:
+            segment = f'{segment}/库位{dest_location_id}'
+        parts.append(segment)
+    if len(assignments) > 3:
+        parts.append(f'等{len(assignments)}项')
+    return '；'.join(parts)
+
+
+def _sourcing_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    """供应来源规则目录（只读）：BO 生命周期，不进入统一发布流。"""
+    data_source = _meta_db()
+    rules = _query(data_source, "SELECT * FROM sourcing_rules ORDER BY code")
+    try:
+        assignments = _query(
+            data_source,
+            "SELECT * FROM sourcing_rule_assignments "
+            "ORDER BY rule_id, specificity_rank DESC, seq, id",
+        )
+    except RuleCatalogError as exc:  # 子表缺失不阻断规则头可见性
+        logger.warning('[rule_catalog] sourcing 作用域读取失败: %s', exc)
+        assignments = []
+
+    grouped: Dict[Any, List[Dict[str, Any]]] = {}
+    for row in assignments:
+        grouped.setdefault(row.get('rule_id'), []).append(row)
+
+    items: List[Dict[str, Any]] = []
+    for rule in rules:
+        code = str(rule.get('code') or '')
+        status = str(rule.get('status') or 'draft')
+        # 默认只看生效态，与运行时读取口径一致；草稿由详情/发布流显式开启
+        if not include_draft and status != 'active':
+            continue
+        scopes = grouped.get(rule.get('id'), [])
+        items.append(_descriptor(
+            'sourcing',
+            sourcing_key(code),
+            str(rule.get('name') or code),
+            rule_type='sourcing',
+            factors={
+                'rule_usage': rule.get('rule_usage') or '',
+                'effectivity_start': rule.get('effectivity_start'),
+                'effectivity_end': rule.get('effectivity_end'),
+                'scope_count': len(scopes),
+                'scope_summary': _scope_summary(scopes),
+            },
+            configurable=False,
+            publishable=False,
+            status=status,
+            updated_at=str(rule.get('updated_at') or ''),
+            links={'edit': {'target': 'sourcing_rule'}},
+            detail={
+                'condition': str(rule.get('description') or ''),
+                'scope': scopes[:20],
+                'scope_truncated': len(scopes) > 20,
+            },
+        ))
+    return items
+
+
 _ADAPTERS = {
     'bo_yaml': _bo_yaml_descriptors,
     'control_parameter': _control_parameter_descriptors,
     'line_type': _line_type_descriptors,
     'doc_flow': _doc_flow_descriptors,
     'approval': _approval_descriptors,
+    'sourcing': _sourcing_descriptors,
 }
 
 
@@ -313,13 +414,16 @@ _ADAPTERS = {
 class RuleCatalogService:
     """规则目录聚合服务（只读）。"""
 
+    #: 属性变量清单的上一版静态快照（派生失败时回退，IF-004）
+    _attribute_variables_snapshot: Optional[Dict[str, Any]] = None
+
     def __init__(self, view_path: str = VIEW_CONFIG_PATH):
         self._view_path = view_path
         self._view_config: Optional[Dict[str, Any]] = None
 
     # -- 视图元数据 ----------------------------------------------------
 
-    def get_view_config(self) -> Dict[str, Any]:
+    def get_view_config(self, data_source: Any = None) -> Dict[str, Any]:
         if self._view_config is not None:
             return self._view_config
         try:
@@ -332,11 +436,63 @@ class RuleCatalogService:
             raise RuleCatalogError(f'规则中心视图元数据解析失败: {exc}') from exc
 
         self._validate_view_config(config)
+        # 声明源是场景注册表：校验通过后按注册表重排/派生，响应不再依赖 YAML 顺序
+        declared_sources = {
+            str(entry['id'] if isinstance(entry, dict) else entry): entry
+            for entry in (config.get('sources') or [])
+        }
+        config['sources'] = [
+            declared_sources.get(source_id, {'id': source_id, 'label': source_id})
+            for source_id in SOURCES
+        ]
+        trace = config.setdefault('trace', {})
+        trace['scenarios'] = list(TRACE_SCENARIOS)
+        # IF-004：按场景下发因子轴（含 sourcing 四轴），旧 factor_keys 保持兼容
+        trace['scenario_factor_keys'] = {
+            scenario: list(keys)
+            for scenario, keys in SCENARIO_FACTOR_KEYS.items()
+        }
         config['filter_options'] = self._derive_filter_options(config)
+        variables = self._derive_attribute_variables(data_source)
+        if variables is not None:
+            RuleCatalogService._attribute_variables_snapshot = variables
+            config['attribute_variables'] = variables
+        elif RuleCatalogService._attribute_variables_snapshot is not None:
+            config['attribute_variables'] = (
+                RuleCatalogService._attribute_variables_snapshot)
+        else:
+            config['attribute_variables'] = {}
         # 响应自带版本与内容指纹，消费端可据此感知元数据变更（spec §13 F-13-10）
         config['hash'] = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         self._view_config = config
         return config
+
+    @staticmethod
+    def _derive_attribute_variables(
+            data_source: Any = None) -> Optional[Dict[str, Any]]:
+        """按对象派生可配置属性变量；失败返回 None（保留上一版快照）。"""
+        if data_source is None:
+            try:
+                data_source = _meta_db()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('view-config 属性变量派生失败（无数据源）: %s', exc)
+                return None
+        try:
+            rows = data_source.query(
+                "SELECT DISTINCT scope_ref FROM attribute_scopes "
+                "WHERE scope_type = 'object' AND status = 'active'") or []
+            from meta.core.attribute_provider import AttributeProvider
+            provider = AttributeProvider(data_source)
+            result: Dict[str, Any] = {}
+            for row in rows:
+                bo_id = str(row.get('scope_ref') or '')
+                if not bo_id:
+                    continue
+                result[bo_id] = provider.available_variables(bo_id)
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('view-config 属性变量派生失败，保留上一版快照: %s', exc)
+            return None
 
     @staticmethod
     def _derive_filter_options(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -355,8 +511,7 @@ class RuleCatalogService:
             SCOPE_EVALUATED,
             SCOPE_NOT_TRIGGERED,
             SOURCE_TYPES,
-            STAGE_MAP,
-            TRACE_SCENARIOS,
+            TRACE_STAGES,
         )
         from meta.services.rule_simulate_service import CONFIG_MODES, MAX_CODES
 
@@ -454,8 +609,8 @@ class RuleCatalogService:
         if unknown_rules:
             raise RuleCatalogError(f'trace.scenario_rules 含未知场景: {unknown_rules}')
         stages = set(trace.get('stages') or {})
-        if stages != set(STAGE_MAP.values()):
-            raise RuleCatalogError('trace.stages 与 STAGE_MAP 值域不等值')
+        if stages != set(TRACE_STAGES):
+            raise RuleCatalogError('trace.stages 与 TRACE_STAGES 值域不等值')
         decisions = set(trace.get('decisions') or {})
         missing_decisions = sorted(set(DECISION_KINDS) - decisions)
         if missing_decisions:
@@ -537,7 +692,9 @@ class RuleCatalogService:
             status['validation'] = f'error: {exc}'
 
         for source in NOT_INSTRUMENTED:
-            status[source] = 'not_instrumented'
+            # 已实现只读 adapter 的来源（如 sourcing）以实际读取结果为准；
+            # 仅对完全没有入口的来源标记 not_instrumented。
+            status.setdefault(source, 'not_instrumented')
 
         items.extend(bo_items)
         items.sort(key=lambda d: (d['source'], d['rule_key']))
@@ -602,6 +759,8 @@ class RuleCatalogService:
             'offset': offset,
             'sources': source_status,
             'not_instrumented': list(NOT_INSTRUMENTED),
+            'degraded': any(
+                str(value).startswith('error') for value in source_status.values()),
         }
 
     @staticmethod

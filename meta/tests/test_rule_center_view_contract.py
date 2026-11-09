@@ -19,8 +19,8 @@ from meta.core.rule_trace_service import (
     SCOPE_EVALUATED,
     SCOPE_NOT_TRIGGERED,
     SOURCE_TYPES,
-    STAGE_MAP,
     TRACE_SCENARIOS,
+    TRACE_STAGES,
 )
 from meta.services.rule_catalog_service import (
     NOT_INSTRUMENTED,
@@ -76,7 +76,7 @@ def test_view_config_is_closed_against_code_declarations(service):
     trace = config['trace']
     assert trace['scenarios'] == list(TRACE_SCENARIOS)
     assert set(trace['scenario_labels']) == set(TRACE_SCENARIOS)
-    assert set(trace['stages']) == set(STAGE_MAP.values())
+    assert set(trace['stages']) == set(TRACE_STAGES)
     assert set(trace['decisions']) >= set(DECISION_KINDS)
     assert set(trace['kinds']) >= set(DECISION_KINDS.values())
     assert trace['factor_keys'] == list(DIMENSION_FIELDS)
@@ -344,6 +344,12 @@ def test_editable_items_expose_links(service):
 
     readonly = service.list_rules(configurable=False, limit=50)
     for item in readonly['items']:
+        if item['source'] == 'sourcing':
+            # 来源规则走 BO 生命周期：edit 指向 BO 页面，不得出现发布/回滚动作
+            links = item.get('links') or {}
+            assert links.get('edit', {}).get('target') == 'sourcing_rule'
+            assert 'publish' not in links and 'rollback' not in links
+            continue
         assert 'links' not in item, f'只读规则不得下发可编辑 links: {item["rule_key"]}'
 
 
