@@ -106,10 +106,10 @@
   R-SCH-8  物理删除：仅 draft 且未被派生边引用时允许
   R-SCH-9  状态流转须符合 §2.3 图，终态不可回退 / 复活
   R-SCH-10 kind 门控：SCHEDULE_KINDS_ENABLED（delivery / billing / service）可写
-  R-SCH-11 billing 收款比例必填且在 0..100                 —— BILLING_PERCENT_*
+  R-SCH-11 billing 开票比例必填且在 0..100                 —— BILLING_PERCENT_*
   R-SCH-12 billing 不得填写 plant_location_id / service_visit_no
   R-SCH-13 同一订单行 billing 比例合计 ≤ 100
-  R-SCH-14 billing 收款日（promised_date）必填
+  R-SCH-14 billing 开票日（promised_date）必填
   R-SCH-15 非草稿订单冻结 billing_percent
   R-SCH-16 行类型 delivery_relevant=false 的订单行禁止建 delivery 计划行
            —— SCHEDULE_NOT_DELIVERY_RELEVANT
@@ -252,11 +252,15 @@ SCHEDULE_MILESTONE_MAX = 64
 # R-SCH-5：订单离开草稿后仍可改的列。status 不在冻结范围（状态流转由 R-SCH-9 管）。
 SCHEDULE_EDITABLE_AFTER_DRAFT = ('promised_date', 'promised_qty',
                                  'plant_location_id', 'status')
-# R-SCH-5 对 billing 收窄：无发货点 / 无承诺量，只余收款日与状态。
+# R-SCH-5 对 billing 收窄：无发货点 / 无承诺量，只余开票日与状态。
 # billing_percent 不在其中，由 R-SCH-15 单独判定（避免报错码串味）。
 SCHEDULE_BILLING_EDITABLE_AFTER_DRAFT = ('promised_date', 'status')
 # R-SCH-11 / R-SCH-13 / R-SCH-15：比例比较与合计上限的浮点容差
 BILLING_PERCENT_TOLERANCE = 1e-6
+# R-SCH-17：判定「期次已有开票金额」的金额容差
+_BILLING_AMOUNT_TOLERANCE = 1e-9
+# R-INV-18：订单行开票相关性枚举
+BILLING_RELEVANCES = ('delivery', 'plan')
 
 
 class SalesOrderGuardError(ValueError):
@@ -828,6 +832,9 @@ class SalesOrderGuardService:
         # E6 / R-RET-1~8：退货行引用原行（引用为空直接放行）
         self._validate_return_reference(
             data, old_data, is_create, line_type, order_type, order)
+
+        # R-INV-18：billing_relevance 受控（Wave B）
+        self._validate_billing_relevance(data, old_data, is_create, order)
 
     # ---------------- 行项目任务（G15 P2-1） ----------------
 
@@ -1506,6 +1513,124 @@ class SalesOrderGuardService:
             return True
         return bool(rows)
 
+    # ---------------- 开票相关性（R-INV-18） ----------------
+
+    def _validate_billing_relevance(self, data: Dict[str, Any],
+                                    old_data: Optional[Dict[str, Any]],
+                                    is_create: bool,
+                                    order: Dict[str, Any]) -> None:
+        """R-INV-18：`billing_relevance` 受控字段。
+
+        18a 仅 draft 可改；18b 被非 cancelled 发票行引用即锁定；
+        18c 设为 plan 须 billing_method='milestone' 且（更新时）已有开票期次；
+        18d plan → delivery 且期次已有开票金额 → 拒绝。
+        """
+        relevance = data.get('billing_relevance')
+        if _is_blank(relevance):
+            return
+        relevance = str(relevance)
+        if relevance not in BILLING_RELEVANCES:
+            raise SalesOrderGuardError(
+                f'开票相关性 {relevance} 不属于 '
+                f'{"/".join(BILLING_RELEVANCES)}',
+                field_name='billing_relevance',
+                rule='BILLING_RELEVANCE_LOCKED')
+        old = old_data or {}
+        old_relevance = str(old.get('billing_relevance') or 'delivery')
+        if is_create:
+            if relevance == 'plan':
+                self._require_plan_prerequisites(data, old)
+            return
+        if relevance == old_relevance:
+            return
+        parent_status = (order or {}).get('status')
+        if parent_status and parent_status != DRAFT:
+            raise SalesOrderGuardError(
+                f'订单处于 {parent_status} 状态，开票相关性已冻结',
+                field_name='billing_relevance',
+                rule='BILLING_RELEVANCE_LOCKED')
+        if self._has_invoice_refs(old.get('id')):
+            raise SalesOrderGuardError(
+                '该订单行已被销售发票引用，开票相关性已冻结',
+                field_name='billing_relevance',
+                rule='BILLING_RELEVANCE_LOCKED')
+        if relevance == 'plan':
+            self._require_plan_prerequisites(data, old)
+            return
+        # plan → delivery：任一期次已有开票金额即拒绝
+        line_id = old.get('id')
+        if old_relevance == 'plan' and not _is_blank(line_id) \
+                and self._plan_has_billed(line_id):
+            raise SalesOrderGuardError(
+                '该订单行的开票计划已产生开票金额，不能改回按发货开票',
+                field_name='billing_relevance', rule='BILLING_PLAN_IN_USE')
+
+    def _require_plan_prerequisites(self, data: Dict[str, Any],
+                                    old: Dict[str, Any]) -> None:
+        method = data.get('billing_method')
+        if _is_blank(method):
+            method = old.get('billing_method')
+        if str(method or '') != 'milestone':
+            raise SalesOrderGuardError(
+                '开票相关性设为「按开票计划」要求计费方式为里程碑',
+                field_name='billing_method', rule='BILLING_PLAN_REQUIRED')
+        line_id = old.get('id')
+        # 新建行尚无 id（期次只能在行存在后创建），仅校验计费方式；
+        # 更新时要求至少一条 billing 期次已存在。
+        if not _is_blank(line_id) and not self._has_billing_schedule(line_id):
+            raise SalesOrderGuardError(
+                '开票相关性设为「按开票计划」要求该行已存在开票期次',
+                field_name='billing_relevance', rule='BILLING_PLAN_REQUIRED')
+
+    def _has_invoice_refs(self, line_id: Any) -> bool:
+        """订单行是否被非 cancelled / 非 reversed 的发票行引用（R-INV-18b）。"""
+        if _is_blank(line_id):
+            return False
+        try:
+            rows = self.ds.query(
+                'SELECT 1 AS hit FROM customer_invoice_lines cil '
+                'LEFT JOIN customer_invoices ci ON ci.id = cil.invoice_id '
+                'WHERE (cil.order_line_id = ? OR cil.schedule_id IN ('
+                '        SELECT id FROM sales_order_schedules '
+                '        WHERE line_id = ?)) '
+                "  AND COALESCE(ci.status, '') NOT IN ('cancelled', 'reversed') "
+                'LIMIT 1', [line_id, line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单行 {line_id} 发票引用失败: {e}')
+            return False
+        return bool(rows)
+
+    def _has_billing_schedule(self, line_id: Any) -> bool:
+        if _is_blank(line_id):
+            return False
+        try:
+            rows = self.ds.query(
+                f'SELECT 1 FROM {SCHEDULE_TABLE} '
+                f"WHERE line_id = ? AND schedule_kind = 'billing' "
+                f"AND COALESCE(status, '') != 'cancelled' LIMIT 1",
+                [line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单行 {line_id} 开票期次失败: {e}')
+            return True
+        return bool(rows)
+
+    def _plan_has_billed(self, line_id: Any) -> bool:
+        if _is_blank(line_id):
+            return False
+        try:
+            rows = self.ds.query(
+                f'SELECT COALESCE(SUM(billed_amount), 0) AS billed '
+                f'FROM {SCHEDULE_TABLE} '
+                f"WHERE line_id = ? AND schedule_kind = 'billing'", [line_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单行 {line_id} 期次金额失败: {e}')
+            return False
+        return (_num((rows[0] if rows else {}).get('billed')) or 0.0) \
+            > _BILLING_AMOUNT_TOLERANCE
+
     # ---------------- 计划行（R-SCH-0 ~ R-SCH-10） ----------------
 
     def validate_schedule_write(self, data: Dict[str, Any],
@@ -1527,11 +1652,11 @@ class SalesOrderGuardService:
                 f'{"/".join(SCHEDULE_KINDS_ENABLED)}）',
                 field_name='schedule_kind', rule='SCHEDULE_KIND_NOT_ENABLED')
 
-        # R-SCH-1 / R-SCH-14：承诺日期必填（billing 的承诺日期即收款日）
+        # R-SCH-1 / R-SCH-14：承诺日期必填（billing 的承诺日期即开票日）
         if _is_blank(data.get('promised_date')):
             if str(kind) == 'billing':
                 raise SalesOrderGuardError(
-                    'billing 计划行必须填写收款日期',
+                    'billing 计划行必须填写开票日期',
                     field_name='promised_date', rule='BILLING_DATE_REQUIRED')
             raise SalesOrderGuardError(
                 '计划行必须填写承诺日期',
@@ -1558,7 +1683,7 @@ class SalesOrderGuardService:
                 field_name='order_id', rule='SCHEDULE_ORDER_MISMATCH')
 
         # R-SCH-5：订单离开草稿后禁止新增，只允许改期 / 改量 / 改发货点
-        #        （billing 收窄为改收款日 / 改状态，比例由 R-SCH-15 判定）
+        #        （billing 收窄为改开票日 / 改状态，比例由 R-SCH-15 判定）
         parent_order_id = order_id if not _is_blank(order_id) \
             else (line or {}).get('order_id')
         order = self._load_order(parent_order_id) \
@@ -1601,7 +1726,7 @@ class SalesOrderGuardService:
 
             old_pct = _num(old.get('billing_percent'))
             new_pct = _num(data.get('billing_percent'))
-            # R-SCH-15：非草稿订单冻结收款比例（旧值非空且本次变更）
+            # R-SCH-15：非草稿订单冻结开票比例（旧值非空且本次变更）
             if not is_create and parent_status and parent_status != DRAFT \
                     and old_pct is not None and 'billing_percent' in data:
                 if new_pct is None \
@@ -1611,14 +1736,14 @@ class SalesOrderGuardService:
                         field_name='billing_percent',
                         rule='BILLING_PERCENT_LOCKED')
 
-            # R-SCH-11：收款比例必填且 0 < p ≤ 100
+            # R-SCH-11：开票比例必填且 0 < p ≤ 100
             if _is_blank(data.get('billing_percent')):
                 raise SalesOrderGuardError(
-                    'billing 计划行必须填写收款比例',
+                    'billing 计划行必须填写开票比例',
                     field_name='billing_percent', rule='BILLING_PERCENT_REQUIRED')
             if new_pct is None or new_pct <= 0 or new_pct > 100:
                 raise SalesOrderGuardError(
-                    f'收款比例须大于 0 且不超过 100（当前 {new_pct}）',
+                    f'开票比例须大于 0 且不超过 100（当前 {new_pct}）',
                     field_name='billing_percent', rule='BILLING_PERCENT_RANGE')
 
             # R-SCH-13：同一订单行的 billing 比例合计 ≤ 100（作废行不占）
@@ -1628,9 +1753,32 @@ class SalesOrderGuardService:
                 total = planned + new_pct
                 if total > 100 + BILLING_PERCENT_TOLERANCE:
                     raise SalesOrderGuardError(
-                        f'本行 billing 收款比例合计（{total:g}）超过 100',
+                        f'本行 billing 开票比例合计（{total:g}）超过 100',
                         field_name='billing_percent',
                         rule='BILLING_PERCENT_SUM_EXCEEDED')
+
+            # R-SCH-17：期次已产生开票金额后只读（比例 / 开票日冻结 + 不可作废）
+            if not is_create:
+                current = self._load_schedule(data.get('id') or old.get('id')) \
+                    if not _is_blank(data.get('id') or old.get('id')) else None
+                billed = _num((current or old).get('billed_amount')) or 0.0
+                if billed > _BILLING_AMOUNT_TOLERANCE:
+                    frozen = []
+                    if new_pct is not None and old_pct is not None \
+                            and abs(new_pct - old_pct) > BILLING_PERCENT_TOLERANCE:
+                        frozen.append('billing_percent')
+                    if str(data.get('promised_date')) \
+                            != str(old.get('promised_date')):
+                        frozen.append('promised_date')
+                    if str(data.get('status')) == 'cancelled' \
+                            and str(old.get('status')) != 'cancelled':
+                        frozen.append('status')
+                    if frozen:
+                        raise SalesOrderGuardError(
+                            '该期次已产生开票金额，开票比例 / 开票日已冻结，'
+                            '且不可作废',
+                            field_name=frozen[0],
+                            rule='BILLING_SCHEDULE_IN_USE')
 
         elif str(kind) == 'delivery':
             # R-SCH-16：交货不相关的订单行（行类型 delivery_relevant=false）
@@ -1716,13 +1864,19 @@ class SalesOrderGuardService:
             raise SalesOrderGuardError(
                 '该计划行已被派生单据引用，不可物理删除（请作废）',
                 field_name='id', rule='SCHEDULE_DELETE_FORBIDDEN')
+        billed = _num(schedule.get('billed_amount')) or 0.0
+        if billed > _BILLING_AMOUNT_TOLERANCE:
+            raise SalesOrderGuardError(
+                '该期次已产生开票金额，不可物理删除',
+                field_name='id', rule='BILLING_SCHEDULE_IN_USE')
 
     def _load_schedule(self, schedule_id: Any) -> Optional[Dict[str, Any]]:
         try:
             rows = self.ds.query(
                 f'SELECT id, order_id, line_id, schedule_no, schedule_kind, '
                 f'       promised_date, promised_qty, plant_location_id, '
-                f'       milestone_code, service_visit_no, status '
+                f'       milestone_code, service_visit_no, status, '
+                f'       billing_percent, COALESCE(billed_amount, 0) AS billed_amount '
                 f'FROM {SCHEDULE_TABLE} WHERE id = ?', [schedule_id])
         except Exception as e:  # 查询失败 → fail-open
             logger.warning(
@@ -1771,7 +1925,7 @@ class SalesOrderGuardService:
 
     def _sum_billing_percent(self, line_id: Any,
                              exclude_id: Any = None) -> float:
-        """同一行已排的 billing 收款比例合计（作废行不占比例）。"""
+        """同一行已排的 billing 开票比例合计（作废行不占比例）。"""
         sql = (f'SELECT COALESCE(SUM(billing_percent), 0) AS pct '
                f'FROM {SCHEDULE_TABLE} '
                f"WHERE line_id = ? AND schedule_kind = 'billing' "

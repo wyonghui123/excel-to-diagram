@@ -16,14 +16,19 @@ from meta.core.interceptors.customer_invoice_guard_interceptor import (
 )
 from meta.services.customer_invoice_service import CustomerInvoiceService
 from meta.tests.factories._customer_invoice_helpers import (
+    BILLING_SCHEDULE_ID,
     CURRENCY_ID,
     CUSTOMER_ID,
+    DELIVERY_SCHEDULE_ID,
     INVOICE_DATE,
+    ORDER_LINE_DELIVERY,
     ORG_ID,
     build_conn,
     get_header,
     get_lines,
+    make_billing_schedule,
     make_ds,
+    set_schedule_billed,
     set_shipment_line_billed,
 )
 
@@ -336,3 +341,106 @@ def test_schedule_any_write_rejected(action):
         _INTERCEPTOR.before_action(
             _ctx(conn, 'customer_invoice_schedule', action, params))
     _expect(error, 'INVOICE_SCHEDULE_IMMUTABLE')
+
+
+# ---------------------------------------------------------------- Wave B 计划行
+
+def test_line_create_from_billing_schedule_fills_period_amounts():
+    conn = build_conn()
+    draft = _draft_invoice(conn)
+    params = {'invoice_id': draft['id'],
+              'schedule_id': BILLING_SCHEDULE_ID}
+
+    _INTERCEPTOR.before_action(
+        _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+
+    assert params['line_no'] == 2
+    assert params['source_doc_type'] == 'billing_schedule'
+    assert params['billing_basis'] == 'percent'
+    assert params['qty'] == 1.0
+    assert params['billing_percent'] == 100.0
+    assert params['billing_base_amount'] == 1000.0
+    assert params['net_amount'] == 1000.0
+    assert params['tax_amount'] == 130.0
+    assert params['gross_amount'] == 1130.0
+    # 三键 XOR：计划行不落冗余 order_line_id
+    assert 'order_line_id' not in params
+
+
+def test_line_create_plan_percent_partial_normalized():
+    conn = build_conn()
+    draft = _draft_invoice(conn)
+    params = {'invoice_id': draft['id'],
+              'schedule_id': BILLING_SCHEDULE_ID, 'billing_percent': 30}
+
+    _INTERCEPTOR.before_action(
+        _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+
+    assert params['billing_percent'] == 30.0
+    assert params['net_amount'] == 300.0
+    assert params['tax_amount'] == 39.0
+    assert params['gross_amount'] == 339.0
+
+
+def test_line_create_plan_percent_over_remaining_rejected():
+    conn = build_conn()
+    set_schedule_billed(conn, 800)
+    draft = _draft_invoice(conn)
+    params = {'invoice_id': draft['id'],
+              'schedule_id': BILLING_SCHEDULE_ID, 'billing_percent': 30}
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(
+            _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+    _expect(error, 'INVOICE_PLAN_PERCENT_INVALID')
+
+
+def test_line_create_from_non_billing_schedule_rejected():
+    conn = build_conn()
+    draft = _draft_invoice(conn)
+    params = {'invoice_id': draft['id'],
+              'schedule_id': DELIVERY_SCHEDULE_ID}
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(
+            _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+    _expect(error, 'INVOICE_PLAN_STATE_INVALID')
+
+
+def test_line_create_from_schedule_on_delivery_line_rejected():
+    conn = build_conn()
+    make_billing_schedule(conn, 73, line_id=ORDER_LINE_DELIVERY, percent=50)
+    draft = _draft_invoice(conn)
+    params = {'invoice_id': draft['id'], 'schedule_id': 73}
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(
+            _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+    _expect(error, 'INVOICE_RELEVANCE_NOT_PLAN')
+
+
+def test_line_create_from_schedule_on_posted_parent_rejected():
+    conn = build_conn()
+    posted = _posted_invoice(conn)
+    params = {'invoice_id': posted['id'],
+              'schedule_id': BILLING_SCHEDULE_ID}
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(
+            _ctx(conn, 'customer_invoice_line', 'crud_create', params))
+    _expect(error, 'INVOICE_POSTED_READONLY')
+
+
+def test_line_update_plan_percent_recalculates_amount():
+    conn = build_conn()
+    created = _service(conn).create_from_schedule(dict(
+        BASE_HEADER, schedule_ids=[BILLING_SCHEDULE_ID]))
+    line = get_lines(conn, created['id'])[0]
+    params = {'id': line['id'], 'billing_percent': 50}
+
+    _INTERCEPTOR.before_action(
+        _ctx(conn, 'customer_invoice_line', 'crud_update', params))
+
+    assert params['billing_percent'] == 50.0
+    assert params['net_amount'] == 500.0
+    assert params['tax_amount'] == 65.0
