@@ -118,6 +118,11 @@ def register_all_bo_actions(registry=None):
         cancel_handler as receipt_cancel_handler,
     )
 
+    # S8 Wave A: 销售发票由发货单生成（spec-s8-customer-invoice-wave-a §13）
+    from meta.services.customer_invoice_actions import (
+        create_from_shipment_handler as customer_invoice_from_shipment_handler,
+    )
+
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
     # + 审批提交 / 撤回 / 通过 / 驳回（TBD-9，approval_status 正交于 status）
     from meta.services.transfer_order_actions import (
@@ -1370,6 +1375,44 @@ def register_all_bo_actions(registry=None):
         output_schema=_project_structure_baseline_output_schema,
         requires_auth=True,
         idempotent=True,
+    )
+
+    # ==================== 39: 销售发票（S8 Wave A / B2） ====================
+    _customer_invoice_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'shipment_id': {'type': 'integer'},
+            'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            'amounts': {'type': 'object'},
+        },
+    }
+    registry.register(
+        'customer_invoice.create_from_shipment',
+        customer_invoice_from_shipment_handler,
+        description='由已发运/已签收发货单生成草稿销售发票（可按行部分开票）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")

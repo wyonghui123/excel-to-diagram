@@ -518,3 +518,163 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/te
   开票后价格更正按 Credit and Rebill 处理
 - Complete 前审批闸门、打印权限、`create_from_shipment` 的 UI 入口
 
+---
+
+## 13. B2 发货开票入口（BO Action + 详情页按钮 + 权限）
+
+> 目标：让「发货单 → 草稿销售发票」可由真实用户触发，不再只能靠代码。
+> **决策：入口放发货单详情页标题栏，不做列表行内按钮。**
+> 依据（已核实）：`src/views/GenericObjectList.vue` + `MetaListPage` 的行操作只派发
+> `detail/view/edit/delete` 等 CRUD 语义，没有业务 Action 派发通道；
+> 而 `src/components/common/DetailPage/DetailPage.vue` 的 `computedActions`
+> 已从 `ui_view_config.detail.actions` 装配按钮，是最小改动点。
+
+### 13.1 后端 Action
+
+**新建 `meta/services/customer_invoice_actions.py`**（镜像 `receipt_actions.py` 结构）：
+
+- `_ok(data, message)` / `_fail(message, code)` / `_blank(value)` / `_set_user_context()`
+  （`_set_user_context` 直接复用 `receipt_actions.py` 的实现口径：写 `bo_framework.set_user_context`）。
+- `_service()`：
+  ```python
+  from meta.core.datasource import get_data_source
+  from meta.core.db_path import get_meta_db_path
+  return CustomerInvoiceService(
+      get_data_source('sqlite', database=get_meta_db_path()))
+  ```
+- `create_from_shipment_handler(params, context=None) -> dict`：
+  1. `_set_user_context()`
+  2. `shipment_id = params.get('shipment_id') or params.get('source_doc_id')`；
+     空 → `_fail('缺少 shipment_id（发货单 id）', 'INVALID_ARGUMENT')`
+  3. 白名单透传：`invoice_date / posting_date / document_type_id /
+     payment_term_id / incoterm_code / remark / lines`（`_blank` 的跳过）；
+     未给 `invoice_date` 时默认当天（详情页按钮不弹日期）。
+  4. `data = _service().create_from_shipment(payload)`
+  5. `CustomerInvoiceError` → `_fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')`
+  6. 成功 → `_ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))`
+- 事务：服务层 `create_from_shipment` 内部已有 `_atomic(self.ds)`，
+  Action 不再自行包事务（与收货 action 的「action 控事务」不同，避免嵌套）。
+
+**编辑 `meta/services/bo_action_registrations.py`**：
+
+```python
+from meta.services.customer_invoice_actions import create_from_shipment_handler
+...
+registry.register(
+    'customer_invoice.create_from_shipment',
+    create_from_shipment_handler,
+    description='由已发运/已签收发货单生成草稿销售发票（可按行部分开票）',
+    object_type='customer_invoice',
+    category='business',
+    permission_required='customer_invoice:customer_invoice_create',
+    input_schema={
+        'type': 'object',
+        'properties': {
+            'shipment_id': {'type': 'integer'},
+            'invoice_date': {'type': 'string'},
+            'posting_date': {'type': 'string'},
+            'document_type_id': {'type': 'integer'},
+            'payment_term_id': {'type': 'integer'},
+            'remark': {'type': 'string'},
+            'lines': {'type': 'array', 'items': {'type': 'object'}},
+        },
+    },
+    output_schema={
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+        },
+    },
+    requires_auth=True,
+    idempotent=False,
+)
+```
+
+### 13.2 schema 声明（发货单）
+
+`meta/schemas/shipment.yaml` → `ui_view_config.detail` 下新增 `actions`（仅业务动作）：
+
+```yaml
+  detail:
+    actions:
+      - id: create_invoice
+        label: 生成销售发票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_create
+        action: customer_invoice.create_from_shipment
+```
+
+### 13.3 前端派发（DetailPage）
+
+`src/components/common/DetailPage/DetailPage.vue`（`authStore` 与 `ElMessage` 已在该文件引用）：
+
+1. `computedActions` 拆分 YAML 动作：
+   - **业务动作** = 含 `action` 字段的条目；先按 `a.permission` 用
+     `authStore.hasPermission(a.permission)` 过滤。
+   - **声明式动作** = 其余（edit/delete/...），保持现有「YAML 非空即替换默认按钮」语义。
+   - 合并规则：
+     - `yamlActions` 为空 → 维持现有默认集（edit/save/cancel/delete）。
+     - `yamlActions` 全为业务动作 → 默认集为底，追加业务动作。
+     - `yamlActions` 含声明式动作 → 现有替换逻辑，末尾追加业务动作（行为向后兼容）。
+2. 新增 `runBusinessAction(action)`：
+   ```js
+   await ElMessageBox.confirm('将从该发货单生成草稿销售发票，是否继续？', '生成销售发票')
+   const result = await useBoAction().call(action.action, {
+     source_doc_id: props.id, ...(action.params || {})
+   })
+   result.success ? ElMessage.success(result.message) : ElMessage.error(result.message)
+   ```
+   成功后调用现有 `handleRefresh()` 刷新详情。
+3. `handleObjectPageAction` 的 `default:` 分支：
+   `if (action.action) await runBusinessAction(action)`；其余分支不变。
+4. 状态门槛：前端**不判断**发货状态，统一由后端
+   `INVOICE_SHIPMENT_STATE_INVALID` 拒绝并回显，避免双份口径漂移。
+
+### 13.4 权限口径
+
+| 层 | 机制 | 状态 |
+|---|---|---|
+| 后端 | `bo_action_registry.call` 校验 `permission_required`（`'*'` 放行） | 已存在 |
+| 前端 | 按钮声明 `permission`，`authStore.hasPermission` 过滤 | 本次新增 |
+| 数据 | v231 已创建并授予 admin/default `customer_invoice:customer_invoice_create` | 无需新迁移 |
+
+### 13.5 明确不做
+
+- 列表行内「生成发票」按钮（通用列表无业务 action 派发通道，避免改通用列表）。
+- 生成后自动跳转发票详情（只回显单号，用户自行进入发票列表）。
+- 行选择弹窗（默认全部可开票行；部分开票走 Action 的 `lines` 参数，留给后续波次）。
+
+### 13.6 测试与验收
+
+新增 `meta/tests/test_customer_invoice_actions.py`（3 用例，夹具复用
+`meta/tests/factories/_customer_invoice_helpers.py`，`monkeypatch.setattr`
+把 `customer_invoice_actions._service` 指向测试连接）：
+
+1. 已发运发货单 + 2 行 → 返回 `id/invoice_no/status=draft`，库内
+   `document_category=invoice`、行数与金额汇总正确。
+2. 缺 `shipment_id` → `success=False, code=INVALID_ARGUMENT`，库内无新增。
+3. 发货单状态 `draft` → `success=False, code=INVOICE_SHIPMENT_STATE_INVALID`，库内无新增。
+
+注册契约：`register_all_bo_actions(registry)` 后断言
+`registry.get('customer_invoice.create_from_shipment')` 的
+`object_type='customer_invoice'`、`permission_required='customer_invoice:customer_invoice_create'`。
+
+验收命令：
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_bo_action_contract.py --port 3012
+```
+
+前端：`npm run build`（worktree 内）通过；不做 E2E。
+
+### 13.7 需批准项
+
+- [ ] 入口放发货单详情页标题栏（非列表行内）。
+- [ ] 默认全量开票（不做行选择 UI）。
+- [ ] 允许开始实现 T9-T11。
+

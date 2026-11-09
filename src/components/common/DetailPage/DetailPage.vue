@@ -196,6 +196,7 @@ import PermissionAuditDialog from '@/views/SystemManagement/components/Permissio
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
 import { useAuthStore } from '@/stores/authStore'
+import { useBoAction } from '@/composables/useBoAction'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -623,9 +624,28 @@ const computedActions = computed(() => {
 
   const detailConfig = entityMeta.value?.ui_view_config?.detail
   const yamlActions = detailConfig?.actions || []
+  // [spec §13] YAML 动作分两类：业务动作（含 action 字段，派发 BO Action）
+  //   与声明式动作（edit/delete 等，沿用 buildAction 语义）。
+  //   业务动作按 permission 门控；声明式动作保持「非空即替换默认按钮」旧语义。
+  const businessActions = yamlActions
+    .filter(a => a && typeof a === 'object' && a.action)
+    .filter(a => !a.permission || authStore.hasPermission(a.permission))
+    .map(a => ({
+      id: a.id || a.action,
+      key: a.id || a.action,
+      label: a.label,
+      icon: a.icon,
+      variant: a.variant || a.type,
+      container: a.container,
+      action: a.action,
+      params: a.params
+    }))
+  const declarativeActions = yamlActions.filter(
+    a => typeof a === 'string' || !(a && typeof a === 'object' && a.action)
+  )
 
-  if (yamlActions.length > 0) {
-    const actions = yamlActions.map(a => {
+  if (declarativeActions.length > 0) {
+    const actions = declarativeActions.map(a => {
       if (typeof a === 'string') {
         return buildAction(a)
       }
@@ -638,6 +658,7 @@ const computedActions = computed(() => {
         container: a.container
       }
     })
+    actions.push(...businessActions)
     appendRoleAuditAction(actions)
     return actions
   }
@@ -646,9 +667,11 @@ const computedActions = computed(() => {
   if (internalEditing.value) {
     actions.push(buildAction('save'))
     actions.push(buildAction('cancel'))
-  }
-  if (props.showDelete && !internalEditing.value) {
-    actions.push(buildAction('delete'))
+  } else {
+    actions.push(...businessActions)
+    if (props.showDelete) {
+      actions.push(buildAction('delete'))
+    }
   }
   appendRoleAuditAction(actions)
   return actions
@@ -1585,6 +1608,34 @@ function handleFieldDisplayUpdate({ key, displayValue }) {
 
 const objectPageRef = ref(null)
 
+// [spec §13] 业务 Action 派发：YAML detail.actions 中声明 action 的按钮
+//   → POST /api/v2/action/{actionId}，参数默认带 source_doc_id=当前对象 id。
+async function runBusinessAction(action) {
+  const { ElMessageBox } = await import('element-plus')
+  try {
+    await ElMessageBox.confirm(
+      action.confirmMessage || '确定要执行此操作吗？',
+      action.label || '确认操作',
+      { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  const { call } = useBoAction()
+  const result = await call(action.action, {
+    source_doc_id: props.id,
+    ...(action.params || {})
+  })
+
+  if (result?.success) {
+    message.success(result.message || '操作成功')
+    handleRefresh()
+  } else {
+    message.error(result?.message || '操作失败')
+  }
+}
+
 async function handleObjectPageAction({ action }) {
   const key = action.key || action.id
 
@@ -1627,6 +1678,10 @@ async function handleObjectPageAction({ action }) {
       break
 
     default:
+      // [spec §13] 业务 Action：YAML 声明 action 的按钮
+      if (action.action) {
+        await runBusinessAction(action)
+      }
   }
 }
 

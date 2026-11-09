@@ -830,6 +830,15 @@ ui_view_config:
   detail:
     showChangeHistory: true
     showRelations: true
+    # 业务 Action（含 action 字段）：详情页标题栏「生成销售发票」，
+    # 派发 customer_invoice.create_from_shipment（spec §13）
+    actions:
+      - id: create_invoice
+        label: 生成销售发票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_create
+        action: customer_invoice.create_from_shipment
     facets:
       - title: 基本信息
         id: shipment_basic

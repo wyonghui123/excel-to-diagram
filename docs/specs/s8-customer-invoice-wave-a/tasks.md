@@ -173,3 +173,61 @@ T7 独立（只依赖 T2 的列）
 - [x] `verify()` 自检通过；`check_billing_relevance_consistency.py` 在干净数据上退出码 0。
 - [x] 无 TBD 相关表/字段被引入（无 accounting_event、无 settlement_block_code、无 AR 收款核销）。
 - [x] 仅 s8 worktree 有一个新 commit，主工作树与 s7-worktree 未改动。
+
+---
+
+# B2 发货开票入口（spec §13）
+
+## [x] T9 后端 Action `customer_invoice.create_from_shipment`
+
+**新增**
+- `meta/services/customer_invoice_actions.py`
+  - `_ok` / `_fail` / `_blank` / `_set_user_context`（镜像 `receipt_actions.py`）
+  - `_service()`：`CustomerInvoiceService(get_data_source('sqlite', database=get_meta_db_path()))`
+  - `create_from_shipment_handler(params, context=None)`：
+    `shipment_id = params.get('shipment_id') or params.get('source_doc_id')`；
+    白名单透传 `invoice_date/posting_date/document_type_id/payment_term_id/incoterm_code/remark/lines`；
+    `CustomerInvoiceError` → `_fail(str(exc), exc.rule or 'INVOICE_INVALID')`
+- `meta/tests/test_customer_invoice_actions.py`（3 用例，见 spec §13.6）
+
+**修改**
+- `meta/services/bo_action_registrations.py`：注册
+  `customer_invoice.create_from_shipment`，
+  `permission_required='customer_invoice:customer_invoice_create'`，
+  `object_type='customer_invoice'`，`category='business'`，`requires_auth=True`，`idempotent=False`
+
+**验收**
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_actions.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_bo_action_contract.py --port 3012
+```
+
+## [x] T10 发货单详情页按钮 + 权限门
+
+**修改**
+- `meta/schemas/shipment.yaml`：`ui_view_config.detail.actions` 追加
+  `create_invoice`（`permission: customer_invoice:customer_invoice_create`，
+  `action: customer_invoice.create_from_shipment`）
+- `src/components/common/DetailPage/DetailPage.vue`：
+  - `computedActions` 分离业务动作（含 `action`）/ 声明式动作；业务动作按
+    `authStore.hasPermission(a.permission)` 过滤；全为业务动作时以默认按钮集为底追加
+  - 新增 `runBusinessAction(action)`：确认 → `useBoAction().call(action.action,
+    { source_doc_id: props.id, ...(action.params || {}) })` → 成功提示 + `handleRefresh()`
+  - `handleObjectPageAction` 的 `default:` 分支派发 `action.action`
+
+**验收**
+```powershell
+npm run build   # 在 D:\filework\s8-billing-worktree 执行
+```
+
+## T11 回归 + 提交
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+```
+
+- `git status` 仅含 T9-T10 文件；`git add` 逐文件 + commit：
+  `feat(billing): 发货单详情页生成销售发票（BO action + 权限门）`
+- 汇报：action 契约、按钮派发口径、测试结果。
