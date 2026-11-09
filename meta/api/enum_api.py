@@ -36,8 +36,9 @@ def init_enum_services(data_source=None, db_path=None):
             db_path = getattr(data_source, '_db_path', None)
         if db_path:
             try:
-                from meta.scripts.migrate_enums import migrate_enums
-                result = migrate_enums(db_path)
+                # [TEST-EFF P1-2] 声明哈希守卫：声明未变且枚举齐全时跳过整轮迁移（约 1.1s/进程）
+                from meta.scripts.migrate_enums import guarded_migrate_enums
+                result = guarded_migrate_enums(db_path)
                 logger.info(f"枚举迁移完成: 类型={result.get('types_created')}, 值={result.get('values_created')}")
             except Exception as e:
                 logger.warning(f"枚举迁移失败（可能需要手动运行 migrate_enums.py）: {e}")
