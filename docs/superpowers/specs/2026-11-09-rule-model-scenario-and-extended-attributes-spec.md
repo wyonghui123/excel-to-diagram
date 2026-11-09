@@ -1,7 +1,7 @@
 # Spec: 规则模型场景化与扩展属性接入（Sourcing / Extended Attributes）
 
 > 本文是 [2026-11-07-rule-convergence-spec.md](./2026-11-07-rule-convergence-spec.md) §12（语义模型）与 §13（元数据驱动与单一事实源）的**细化补充**，不修改、不替代原文。
-> 范围：①Sourcing 作为规则场景接入；②扩展属性（物料/组织/客商等）接入规则模型；③场景因子轴声明与 trace 输入快照契约；④分级路线图与验收标准。
+> 范围：①Sourcing 作为规则场景接入；②扩展属性（物料/组织/客商等）接入规则模型；③场景因子轴声明与 trace 输入快照契约；④分级路线图与验收标准；⑤单据流多 BO 节点与编排层的对齐结论（仅研究结论，不实施）。
 
 ## 1. 背景与目标
 
@@ -33,7 +33,7 @@
 | 业务需求 | 是 | §1.2：统一规则事实图、降低双轨维护成本 |
 | 涉众需求 | 是 | §1.3：配置/审计/寻源/前端四类角色 |
 | 解决方案需求 | 是 | 场景注册表 + AttributeProvider + trace inputs |
-| 功能需求 | 是 | §3 FR-001 ~ FR-012 |
+| 功能需求 | 是 | §3 FR-001 ~ FR-013 |
 | 非功能需求 | 是 | §4 NFR-001 ~ NFR-005 |
 | 外部接口需求 | 是 | §5 IF-001 ~ IF-005 |
 | 迁移需求 | 是 | §6 TR-001 ~ TR-003 |
@@ -159,6 +159,18 @@
 - **Priority**: Should
 - **Source**: §13.2 生命周期单一归属；FR-002
 
+### FR-013: 单据节点组只读派生
+
+- **Description**: 系统 MUST 从 BO YAML `child_sections` + 现有 `doc_flow_rule` 派生单据节点组，并在规则目录与 `doc_flow` trace 中以只读增量字段暴露；MUST NOT 新增规则表字段、`RuleType`、API 路由或改变下推/边写入。
+- **Acceptance Criteria**:
+  - `sales_order` 组含 `sales_order/header`、`sales_order_line/line`、`sales_order_schedule/schedule`，父键均为 `order_id`。
+  - `shipment` 组含 `shipment/header`、`shipment_line/line`，父键取 `delivery_id`（`hierarchy.parent_field` 优先于字段名推断）。
+  - `sales_order_schedule → shipment_line` 归入 SO 组 `outbound` 与 shipment 组 `inbound`，`target_group=shipment`。
+  - 父键无法解析时组标 `degraded=true` 并给原因，接口不报错。
+  - 目录 `detail.node_group` 与 trace `detail.node_group` 为增量字段；`decision`、`reason`、`detail.rules` 与现有测试一致。
+- **Priority**: Should
+- **Source**: §9.3.9 / §9.3.10 / TBD-006
+
 ## 4. 非功能需求
 
 ### NFR-001: 向后兼容
@@ -188,7 +200,7 @@
 ### NFR-005: 可测试性
 
 - **Description**: 新增能力 MUST 提供单元 + 契约测试，统一使用 `python d:\filework\test.py --root d:\filework\doc-flow-worktree --file ...` 执行。
-- **Measurement**: 新增测试文件至少覆盖 FR-001/002/003/005/006/007/008/010。
+- **Measurement**: 新增测试文件至少覆盖 FR-001/002/003/005/006/007/008/010/013。
 - **Priority**: Must
 
 ## 5. 外部接口需求
@@ -296,11 +308,14 @@
 | FR-010 | 禁止属性作因子 | Must | 防止索引/审计键被污染 |
 | FR-011 | 缓存失效 | Should | 正确性 + 性能平衡 |
 | FR-012 | Sourcing 发布策略 | Should | 避免第二套发布流 |
+| FR-013 | 单据节点组只读派生 | Should | 让头/行/计划行在目录与 trace 可见，不改写入 |
 
 - 里程碑：
   - M1（P0，契约先行）：FR-001/002（仅登记 NOT_INSTRUMENTED）/003/004/010，零行为变更。
   - M2（P1，接入）：FR-005/006/007/008/011，配套契约与单测。
   - M3（P2，治理）：FR-009/012，promotion 落表与影响面分析。
+  - M4（只读增量）：FR-013，模块 + 目录/trace 增量字段 + 契约测试，不改表、不改枚举、不改写入。
+- 范围说明：M1-M3 不含单据流多节点与编排层实现；M4 仅实现 TBD-006 的只读派生，TBD-007（头级/计划行级边）与 TBD-008（编排层）不在范围。
 
 ## 9. 变更 / 设计方案（RFC）
 
@@ -432,6 +447,99 @@
 - **残留 TBD**：拆量/配额能力（TBD-005）——Fusion 的 allocation % 与 SAP 的配额比率都属"多源分摊"，与 `allocation_pct`（计划提示）语义不同，需单独立项，不在本轮范围。
 
 
+#### 9.3.9 单据流多 BO 节点与编排层（2026-11-09 补充）
+
+**问题界定**：`doc_flow_rule` 的粒度是「单源 BO → 单目标 BO」的原子边，但业务上的"一次下推"通常生成一组 BO 节点。以 SO 为例，头/行/计划行是三个独立 BO：`sales_order`（头）、`sales_order_line`（行）、`sales_order_schedule`（计划行），由 YAML `child_sections` 挂接；下游交货同样是 `shipment`（头）+ `shipment_line`（行）。当前存量规则全部登记为行级 BO 对，规则只描述"哪条行生成哪条行"，头节点由服务自行创建，规则模型不感知。
+
+| 业务动作 | 实际生成的节点集合 | 现有规则边 |
+|---|---|---|
+| SO → 交货 | `shipment` 头 + `shipment_line` 行 | `sales_order_schedule → shipment_line` |
+| 调拨单 → 调拨发货 | `transfer_shipment` 头 + `transfer_shipment_line` 行 | `transfer_order_line → transfer_shipment_line` |
+| 调拨单 → 收货 | `receipt` 头 + `receipt_line` 行 | `transfer_order_line → receipt_line` |
+| 采购申请 → 采购订单 | `purchase_order` 头 + `purchase_order_line` 行 + `demand_allocation` 行 | `requisition_line → purchase_order_line` |
+
+引擎侧只有两种形态：平铺行级边（`target_bo` 即行 BO）与两级模式（`target_line_bo + head_fk_field`，边写 `target_bo=头 BO / target_item=行 ID`）。两级模式仍以单个源 BO 为输入，`split_key` 只从源行读取字段，头字段只能来自分单键分组与运行时 `head_overrides`，没有持久化的头级字段映射；两种模式的边形态不一致，消费方需按 `target_line_bo` 分支处理。
+
+**对标结论**：
+
+| 维度 | SAP SD | Oracle Fusion OM | 本平台现状 |
+|---|---|---|---|
+| 表达粒度 | 单据类型对（`VTAA/VTLA/VTFA/VTFL/VTAF/VTFF`）+ Header / Item / Schedule 三级配置 | 销售订单头行 + 履行行 + 每条订单行一个编排流程实例 | 行级 BO 对原子边 |
+| 复制内容 | copying requirements + data transfer routines（VOFM）+ switches | assignment rules → process definition → task/service | `field_map / copied_fields / check_hook / map_hook / create_hook` |
+| 单据流记录 | `VBFA` 单独记录 item 级前驱后继与数量（`VBELV/POSNV → VBELN/POSNN`、`RFMNG`） | `DOO_DOCUMENT_REFERENCES` 记录 doc / line / subline 多粒度引用 | `doc_flow_edges` + `consumed_qty`，只到行级 |
+| 拆分/合并 | delivery split（ship-to / shipping point / route / date） | fulfillment line split（`SPLIT_FROM_FLINE_ID`、split priority、shipment set） | `split_key` 建头，无运行时血缘 |
+| 变更处理 | 单据流更新 + completion rule（部分引用/已完成） | processing constraints → `Change Pending` → 补偿（Undo/Redo/Update/Cancel/None） | 无编排层，红冲另立 |
+| 规则与流程关系 | copy control 只管创建时复制，单据流由 `VBFA` 独立记录 | 规则（assignment）与流程（orchestration）分离 | 规则与下推服务耦合 |
+
+**结论**：
+
+1. 多 BO 不是"规则对象粒度"问题，而是三层职责问题。`doc_flow_rule` SHOULD 保持"单源 BO → 单目标 BO"的原子边，不扩展为 `sources[] / targets[]`；节点组合、执行顺序、流程状态不属于规则表。此原则与 §9.3.8 一致：规则保持原子，扩展能力由独立层承载。
+2. L1 单据节点层（node group）：声明"一次下推生成哪些节点、各节点的头/行/计划行角色与父子外键"。优先只读派生：由 BO YAML `child_sections` + 现有 `doc_flow_rule` 推导，不新增表、不改枚举；目录与 trace 以节点组为展示单位。派生结果需闭合校验（每个节点组内至少一条边、外键可解析）。
+3. L2 边规则层：保留行级边；头级字段映射与计划行级边在出现第二个真实需求时再补。头级映射优先复用 `head_fk_field` 与运行时 `head_overrides`，不足时再评估持久化 `head_field_map`；不新增 `RuleType`。
+4. L3 编排层（远期，TBD-008）：Fusion 的编排单元是履行行而非单据头，包含流程模板、任务/服务、等待与提前期、错误处理、变更补偿。本平台当前无跨系统履约与补偿需求，不复制该模型；若立项，作为独立运行时与 `doc_flow` 并列，不塞进规则表。
+5. 可观测性：`rule_trace_service` 的 doc_flow 场景目前只按 `source_bo == object_type` 匹配，SO 头 trace 看不到子 BO 的声明；`rule_catalog_service` 的 doc_flow 条目也只有平铺规则。建议在只读层补 `nodes[]`（节点组）与 `edges[]`，trace 信封形状不变。
+
+**明确不做**：
+
+- 不把 `doc_flow_rule` 改成多对象规则；
+- 不引入 BPMN / 通用工作流引擎表达单据流；
+- 不在本轮实现编排层（assignment rules、process instance、task status、compensation）。
+
+**代码依据**：`doc_flow_rule_store.py`（列契约）、`doc_flow_batch_engine.py`（两级模式与 `split_key` 读取源行）、`doc_flow_derive_engine.py`（两级边形态）、`shipment_service.py` / `transfer_shipment_service.py` / `receipt_service.py` / `requisition_po_conversion.py`（头 + 行 + 逐行 attach）、`rule_trace_service.py` / `rule_catalog_service.py`（doc_flow 只按源 BO 平铺）。
+
+#### 9.3.10 单据节点组只读派生（M4 实现设计）
+
+**目标**：让目录与 trace 能回答"这张单据由哪些节点组成、它的上下游边属于哪些单据"，不改规则表、不新增 `RuleType`、不改变下推与边写入。
+
+**单一事实约束**：本方案不新增事实表。父子关系只来自 YAML 元数据（`child_sections` / `hierarchy` / `ui.relation`），边只来自 `doc_flow_rule`；节点组是二者的只读投影（join），不落库、不缓存、不参与写入，也不引入第二份 BO 清单。
+
+**新增模块**：`meta/core/doc_flow_node_groups.py`（纯读、无副作用）。
+
+**输入**：
+- `registry.get_all()` 的 `MetaObject`：`ui_view_config.child_sections`、`hierarchy.parent_field`、字段 `ui.relation`。
+- `rule_provider.list_doc_flow_rules(data_source)` 的规则列表。
+
+**派生算法**（确定性，按顺序执行）：
+1. 候选头 BO：`child_sections` 非空，且头或其子 BO 出现在任一 `doc_flow_rule` 的 `source_bo/target_bo` 中。
+2. 节点角色：优先读 `child_sections[].role` 显式声明；未声明时头 = `header`，子 BO 以 `_schedule` 结尾 = `schedule`，其余 = `line`（命名回落只作兼容，不写回元数据）。
+3. 子节点父键：优先 `child.hierarchy.parent_field`；否则取 `child.fields` 中 `ui.relation == header_bo` 的字段；否则取子表中实际存在的 `<header_bo>_id` 字段；全部失败则节点组 `degraded=true`，原因 `parent_fk_unresolved`。
+4. 组归属：若子 BO 自身也是候选头（如 `project → sales_order`），不放入 `nodes`，放入 `subflows`，避免同一 BO 同时以"行"和"头"身份重复出现；一个 BO 只能出现在一个 `nodes` 中，冲突时记 `ambiguous`。
+5. 边归组：`source_bo` 属于组内节点 → `outbound`；`target_bo` 属于组内节点 → `inbound`；对端不在任何组时保留 BO 名、`target_group`/`source_group` 为空。边只取 `status='active'`。
+6. 已知边界：`demand_allocation` 等无 `child_sections` 的多态表不进入节点组，单列 `unmodeled_bo`；需要时由 TBD-007 补声明。
+
+**数据结构**（键顺序稳定，便于契约测试）：
+
+```json
+{
+  "group_id": "sales_order",
+  "header_bo": "sales_order",
+  "nodes": [
+    {"bo": "sales_order", "role": "header", "parent_fk": ""},
+    {"bo": "sales_order_line", "role": "line", "parent_fk": "order_id"},
+    {"bo": "sales_order_schedule", "role": "schedule", "parent_fk": "order_id"}
+  ],
+  "subflows": [],
+  "outbound": [
+    {"rule_id": "so_schedule_to_shipment_line", "source_bo": "sales_order_schedule",
+     "target_bo": "shipment_line", "target_group": "shipment"}
+  ],
+  "inbound": [],
+  "degraded": false,
+  "reasons": [],
+  "unmodeled_bo": []
+}
+```
+
+**集成点**：
+- `rule_catalog_service._doc_flow_descriptors`：每次调用只计算一次节点组，附加到每条 doc_flow 描述符的 `detail.node_group`；现有 `rule_key/factors/detail` 键不变。
+- `rule_trace_service._doc_flow`：按 `object_type` 找到所属组（头或子节点），在 `detail.node_group` 附加 `group_id / node_role / nodes / outbound / inbound / degraded`；`decision`、`reason`、`detail.rules` 保持原逻辑，旧断言不受影响。
+- 不新增 API 路由；目录外层不加 `groups` 汇总，避免前端契约变更。
+- P0 只提供 API 增量字段；界面展示必须在 `rule_center_view.yaml` 声明 section/widget，前端不得写死节点组（`WIDGETS` 仍为封闭枚举，新增图形化 widget 属独立变更）。
+
+**错误与性能**：
+- 单个 BO 派生失败只降级该组，写日志并置 `degraded`，不向 API 抛 500。
+- P0 不引入跨请求缓存（`child_sections` 与规则规模小）；若 trace 出现热点，再按规则 `updated_at` 做进程级缓存。
+
 ### 9.4 备选方案
 
 | 方案 | 优点 | 缺点 | 结论 |
@@ -442,6 +550,9 @@
 | D. 扩展属性直接 JOIN 进业务行 | 实现快 | 产生第二事实与陈旧副本，破坏 SSOT | 拒绝 |
 | E. 只用 promotion，不做 Provider | 改动最小 | 未提升的属性无法进规则，且 promotion 尚未实现 | 作为兜底，不作为唯一路径 |
 | F. 独立 AttributeProvider + attrs 命名空间（本方案） | 单入口、可快照、可失效 | 需处理缓存与跨对象 N+1 | 选中 |
+| G. 把 `doc_flow_rule` 扩展为多对象规则（`sources[]/targets[]`） | 一条配置表达整条链 | 规则表被迫承担节点顺序、条件与流程状态，版本与闭包难校验 | 拒绝（见 §9.3.9） |
+| H. 原子边 + 节点组只读派生（本方案） | 改动小、可闭合、目录/trace 同源 | 节点组是派生视图，需闭合校验 | 选中（只读层） |
+| I. 引入通用编排引擎（Fusion 式 process/task/compensation） | 表达力最强 | 当前无跨系统履约与补偿需求，成本与语义溢出 | 暂不立项（TBD-008） |
 
 ### 9.5 实施与迁移计划
 
@@ -449,20 +560,26 @@
   1. P0：新增 `rule_scenarios.py`；登记 sourcing（NOT_INSTRUMENTED）；全局因子轴改并集投影；view-config 改为派生；契约测试。
   2. P1：sourcing catalog adapter → trace adapter；AttributeProvider；`attrs` 表达式；inputs 采集与响应；缓存失效。
   3. P2：`attribute_promotion` 落表与同步；影响面分析（定义变更 → 受影响规则）；变量清单切换收尾。
+  4. M4（只读增量）：`doc_flow_node_groups.py` → 目录 `detail.node_group` → trace `detail.node_group` → 契约/回归测试；不改表、不改枚举、不改写入。
 - **风险与缓解**：
   - 视图元数据派生导致快照漂移 → 契约测试逐字比对；失败保留上一版快照并告警。
   - 跨对象属性 N+1 → Provider 批量化 + 请求级 memo；基准脚本纳入验收。
   - 旧 trace 无 inputs → 字段可选；回放器按存在性降级。
   - sourcing explain 结构变化 → adapter 隔离；契约测试锁定三段 stage。
   - 属性类型变更导致历史快照误读 → 快照带 `definition_version`。
+  - 节点组把非单据 BO（如 `project → sales_order`）误判为行 → 候选头 + `subflows` 规则；契约测试锁定 `sales_order` 只以头身份出现。
+  - 父键推断错误（`shipment_line.delivery_id`）→ 优先 `hierarchy.parent_field`，字段名推断只作兜底；组级降级不阻塞接口。
 - **测试策略**：
   - 单元：`test_rule_scenarios_registry.py`（闭合校验/并集）、`test_attribute_provider.py`（missing/inactive/类型/租户/失效）、`test_rule_trace_inputs_snapshot.py`（采集/回放）。
   - 集成：`test_rule_trace_sourcing.py`（命中/未命中/无候选）、`test_rule_center_view_contract.py`（sources/scenarios 派生一致）。
+  - 节点组：`test_doc_flow_node_groups.py`（SO/shipment 组、父键优先级、边归组、降级、`subflows`）。
+  - 集成：`test_rule_catalog_doc_flow_nodes.py`、`test_rule_trace_doc_flow_nodes.py`（增量字段 + 旧字段不变）。
   - 回归：`test_doc_flow_reconcile.py`、`test_doc_flow_transfer_doc_rules.py`、`test_demand_trace_graph.py` 保持全绿。
 - **回滚方案**：
   - P0：注册表为纯新增，回滚即移除 sourcing 条目，行为回到 6 场景。
   - P1：`instrumented=false` 关闭 sourcing 场景；`attrs` 命名空间可通过开关关闭（表达式解析不到即按 missing 处理）。
   - P2：promotion 表与同步服务独立，停用不影响现有规则。
+  - M4：纯读附加字段，回滚即移除 `detail.node_group` 注入，目录/trace 恢复原响应；无数据迁移。
 
 ## 10. TBD 列表
 
@@ -473,3 +590,6 @@
 | TBD-003 | `attribute_promotion` 同步方式 | **已确认**：一次性 cutover + 回填期可选 write-through，不做长期双写（见 §9.3.8） | 关闭，P2 按状态机实现 |
 | TBD-004 | sourcing `explain` 稳定性 | **已确认**：冻结 `explain_version=1` + 固定阶段与原因码枚举 | 关闭，随 P1 adapter 落契约测试 |
 | TBD-005 | 多源分摊 / 配额能力 | 未决：Fusion allocation % 与 SAP 配额比率语义，不同于 `allocation_pct` 计划提示 | 单独立项，本轮不实现 |
+| TBD-006 | 单据节点组（node group）的声明归属 | **M4 已定**：只读派生（§9.3.10）；长期归属（YAML 显式声明 / 独立元数据表）仍未决 | 先落 M4；出现第二个消费方或持久化需求时再定归属 |
+| TBD-007 | 头级 / 计划行级边规则表达 | 未决：复用 `head_fk_field` + `head_overrides`，还是新增持久化 `head_field_map` | 出现第二个头级字段需求时评估，不新增 `RuleType` |
+| TBD-008 | 编排层（orchestration）是否立项 | 未决：当前无跨系统履约/补偿需求，Fusion orchestration 仅作参考 | 单独立项，本轮不实现 |

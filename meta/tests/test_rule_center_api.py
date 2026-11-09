@@ -149,15 +149,23 @@ def test_doc_flow_descriptors_come_from_rule_table(tmp_path, monkeypatch):
     item = result['items'][0]
     assert item['rule_key'] == 'doc_flow:sales_order_to_shipment'
     assert item['factors']['pool'] == 'unshipped_qty'
-    assert item['detail'] == {
-        'field_map': {'quantity': 'quantity'},
-        'split_key': ['order_no'],
-        'pool': 'unshipped_qty',
-        'source_qty_field': 'quantity',
-        'target_line_bo': 'shipment_line',
-        'head_fk_field': 'shipment_id',
-        'display_fields': ['order_no', 'item_name'],
-    }
+
+    detail = item['detail']
+    assert detail['field_map'] == {'quantity': 'quantity'}
+    assert detail['split_key'] == ['order_no']
+    assert detail['pool'] == 'unshipped_qty'
+    assert detail['source_qty_field'] == 'quantity'
+    assert detail['target_line_bo'] == 'shipment_line'
+    assert detail['head_fk_field'] == 'shipment_id'
+    assert detail['display_fields'] == ['order_no', 'item_name']
+
+    # FR-013：节点组为只读增量字段，既有 detail 键保持不变。
+    node_group = detail['node_group']
+    assert node_group['group_id'] == 'sales_order'
+    assert node_group['node_role'] == 'header'
+    assert [node['bo'] for node in node_group['nodes']] == [
+        'sales_order', 'sales_order_line', 'sales_order_schedule']
+    assert node_group['degraded'] is False
 
 
 def test_unknown_rule_key_returns_none(service):

@@ -722,27 +722,35 @@ class RuleTraceService:
 
     def _doc_flow(self, object_type: str, data_source: Any,
                   started: float) -> Dict[str, Any]:
+        from meta.core.doc_flow_node_groups import build_node_groups, node_group_detail
         from meta.core.rule_provider import list_doc_flow_rules
 
+        all_rules = list_doc_flow_rules(data_source)
         rules = [
-            rule for rule in list_doc_flow_rules(data_source)
+            rule for rule in all_rules
             if rule.get('source_bo') == object_type and rule.get('status') == 'active'
         ]
+        detail: Dict[str, Any] = {
+            'rules': [
+                {
+                    'rule_id': rule.get('rule_id'),
+                    'target_bo': rule.get('target_bo'),
+                    'pool': rule.get('pool'),
+                    'status': rule.get('status'),
+                }
+                for rule in rules
+            ],
+        }
+        # FR-013：头/行/计划行都能看到所属节点组；decision/reason 保持原口径。
+        node_group = node_group_detail(build_node_groups(all_rules), object_type)
+        if node_group:
+            detail['node_group'] = node_group
+
         return _envelope(
             'doc_flow', 'declared' if rules else 'not_declared', source='db',
             reason='doc_flow_declared' if rules else 'no_doc_flow_rule',
             factors={'source_bo': object_type},
-            detail={
-                'rules': [
-                    {
-                        'rule_id': rule.get('rule_id'),
-                        'target_bo': rule.get('target_bo'),
-                        'pool': rule.get('pool'),
-                        'status': rule.get('status'),
-                    }
-                    for rule in rules
-                ],
-            },
+            detail=detail,
             elapsed_ms=(time.perf_counter() - started) * 1000,
         )
 

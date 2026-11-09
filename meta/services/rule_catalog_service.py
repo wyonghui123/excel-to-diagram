@@ -255,11 +255,30 @@ def _line_type_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any
 
 
 def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]:
+    from meta.core.doc_flow_node_groups import build_node_groups, node_group_detail
     from meta.core.rule_provider import list_doc_flow_rules
 
+    rules = list_doc_flow_rules(_meta_db())
+    # FR-013：节点组是 YAML 元数据 + doc_flow_rule 的只读投影，不落库。
+    groups = build_node_groups(rules)
+
     items: List[Dict[str, Any]] = []
-    for rule in list_doc_flow_rules(_meta_db()):
+    for rule in rules:
         rule_id = str(rule.get('rule_id') or '')
+        detail = {
+            'field_map': rule.get('field_map') or {},
+            'split_key': rule.get('split_key') or [],
+            'pool': rule.get('pool'),
+            'source_qty_field': rule.get('source_qty_field'),
+            'target_line_bo': rule.get('target_line_bo') or '',
+            'head_fk_field': rule.get('head_fk_field') or '',
+            'display_fields': rule.get('display_fields') or [],
+        }
+        node_group = node_group_detail(
+            groups, str(rule.get('source_bo') or ''))
+        if node_group:
+            detail['node_group'] = node_group
+
         items.append(_descriptor(
             'doc_flow',
             doc_flow_key(rule_id),
@@ -274,15 +293,7 @@ def _doc_flow_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]
             configurable=False,
             status=str(rule.get('status') or 'active'),
             updated_at=str(rule.get('updated_at') or ''),
-            detail={
-                'field_map': rule.get('field_map') or {},
-                'split_key': rule.get('split_key') or [],
-                'pool': rule.get('pool'),
-                'source_qty_field': rule.get('source_qty_field'),
-                'target_line_bo': rule.get('target_line_bo') or '',
-                'head_fk_field': rule.get('head_fk_field') or '',
-                'display_fields': rule.get('display_fields') or [],
-            },
+            detail=detail,
         ))
     return items
 
