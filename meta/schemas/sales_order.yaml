@@ -1409,6 +1409,51 @@ fields:
       meaning: 派生确认时间，非人工维护
       audit_field: true
 
+  # S8 Wave B：订单级开票状态（delivery 发货开票 + plan 计划开票联合派生）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §5.6
+  - id: billing_status
+    name: 开票状态
+    type: string
+    db_column: billing_status
+    required: true
+    default: none
+    max_length: 16
+    description: 订单级开票进度（delivery 与 plan 联合派生），只读
+    enum_values:
+      - value: none
+        label: 未开票
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分开票
+        color: warning
+        category: active
+      - value: full
+        label: 已开满
+        color: success
+        category: active
+    semantics:
+      meaning: 订单级开票进度（none/partial/full）
+      filterable: true
+      filter_type: enum
+      filter_label: 开票状态
+      filter_scope: local
+      derived: true
+      readonly: true
+    ui:
+      readonly: true
+
+  - id: billing_derived_at
+    name: 开票派生时间
+    type: datetime
+    db_column: billing_derived_at
+    nullable: true
+    description: 最近一次开票状态派生确认时间（UTC），只读，不可见
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+
   # M2 文档版本（FR-003）：内容变更计数，平台写入，界面不可编辑
   - id: revision_no
     name: 版本号

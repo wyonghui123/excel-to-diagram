@@ -147,7 +147,7 @@ fields:
     db_column: source_doc_type
     required: true
     max_length: 32
-    description: 来源单据类型（Wave A：shipment / sales_order / manual）
+    description: 来源单据类型（Wave A：shipment / sales_order / manual；Wave B 增 billing_schedule）
     enum_values:
       - value: shipment
         label: 发货单
@@ -161,6 +161,10 @@ fields:
       - value: manual
         label: 手工
         color: info
+        category: active
+      - value: billing_schedule
+        label: 开票计划期次
+        color: warning
         category: active
     semantics:
       meaning: 发票行来源类型
@@ -486,7 +490,7 @@ fields:
         gt: 0
         lte: 100
         decimal_places: 4
-    description: 按比例开票时的比例（Wave A 预留，不参与发货开票）
+    description: 按期次开票时的本期比例（Wave B：相对 billing_base_amount；未传则按剩余金额收尾）
     semantics:
       meaning: 开票比例
     ui:
