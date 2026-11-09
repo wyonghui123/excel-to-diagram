@@ -2988,3 +2988,373 @@ overdue_total             -- 逾期未结（按 term line 到期日 + 宽限）
 10. Guru99：Residual Payment vs Partial Payment — https://www.guru99.com/how-to-post-incoming-partial-payments-by-residual-method.html
 11. `F.13` / `SAPF124` / `OB74` 自动清账规则 — https://bestsapcbi.com/sap-cross-company-code-clearing/
 12. SAP TCode `FLB2`：Import Lockbox File — https://www.sap-tcodes.org/tcode/flb2.html
+
+---
+
+## 27. 收付款对象模型总纲（收敛版，2026-11-09）
+
+> 定位：§20–§26 是**研究过程**（含已作废的中间结论），本节是**收敛结果**。评审只需读本节 + §13 决策记录。
+> 状态：**研究草案，待评审**。以下「已定」指用户拍板，「建议」指待拍板。
+> 与旧文冲突时以本节为准；已知冲突见 §27.9。
+
+### 27.1 全局对象地图
+
+```
+【计划层】
+sales_order
+ └─ sales_order_line
+     ├─ billing_relevance          delivery | plan | none（D10）
+     ├─ sales_order_schedules      kind = delivery | billing
+     └─ payment_schedule           与订单 1:1（Wave B，D3-a）
+          └─ payment_schedule_line
+               group_no / group_base_amount / group_status
+               line_type / planned_amount / settled_amount / control_stage
+
+【事实层】—— 只写一次，过账后只读
+shipment ─ shipment_line                    出库事实
+customer_invoice ─ customer_invoice_line    开票事实
+payment_receipt                             收款事实（整单，无期间外键）
+
+【关系层】—— 表达"谁来自谁""谁抵了谁"
+payment_allocation                          核销关系（N:M，四类 target）
+doc_flow_edges                              单据流转（池 billing）
+
+【视图层】—— 不落表
+order_settlement_summary                    订单/组级汇总
+```
+
+**分层铁律**：计划层可改、事实层过账后不可改、关系层只能新增不能修改、视图层永不落表。
+
+### 27.2 对象清单与职责边界
+
+| # | 对象 | 层 | 职责一句话 | 生命周期 | 唯一写入口 | 可物理删 |
+|---|---|---|---|---|---|---|
+| 1 | `sales_order_line` | 计划 | 承载合同行的量、价、税与开票方式 | 已有 | SO 服务 | 否 |
+| 2 | `sales_order_schedules` | 计划 | 承载发货计划 / 开票计划（`kind`） | 已有 | SO 服务 | draft 可 |
+| 3 | `payment_schedule` | 计划 | 订单级收付款计划头，与订单 1:1 | 新建（Wave B） | 计划服务 | 否（restrict） |
+| 4 | `payment_schedule_line` | 计划 | 一个到期单元（期次），含组归属 | 新建 | 计划服务 | 否 |
+| 5 | `shipment_line` | 事实 | 出库数量事实 | 已有 | 出库服务 | 否（红冲代替） |
+| 6 | `customer_invoice` | 事实 | 开票单据头 | 新建 | `CustomerInvoiceService` | draft 可 |
+| 7 | `customer_invoice_line` | 事实 | 开票行（含价差快照 D13） | 新建 | 同上 | 随头 |
+| 8 | `payment_receipt` | 事实 | 客户付款到账事实（整单） | 新建 | `PaymentReceiptService` | 否 |
+| 9 | `payment_allocation` | 关系 | 把一笔钱对到计划/发票/订单/客户账户 | 新建 | `AllocationService` | 否（只能反核销） |
+
+**边界判断三问**（新增对象前必答）：
+1. 它有没有独立的业务编号与业务日期？→ 决定是不是"单据"
+2. 它过账后是否必须不可改？→ 决定是不是"事实层"
+3. 它能否被多次引用、且引用方与被引用方都可独立存在？→ 决定是不是"关系层"
+
+### 27.3 关系模型
+
+#### 27.3.1 三类关系
+
+| 类型 | 定义 | 实例 | 基数 | 写入规则 |
+|---|---|---|---|---|
+| **归属** | 子对象不能脱离父对象存在 | order → order_line；order → payment_schedule；schedule → line；invoice → line；receipt → allocation | 1:N / 1:1 | 父删除时 restrict；子随父级联仅限 draft |
+| **追溯** | 事实之间的来源快照，只读 | invoice_line → shipment_line；invoice_line → schedule_line；allocation → target | N:1 | 只在创建时写一次，此后只读 |
+| **核销** | 双向的多对多抵消关系 | receipt ↔ schedule_line；receipt ↔ invoice；receipt ↔ order/group | N:M | 只能新增；撤销靠反向记录 |
+
+#### 27.3.2 `payment_allocation` 多态 target 设计
+
+三种写法对比：
+
+| 方案 | 结构 | 优点 | 缺点 | 结论 |
+|---|---|---|---|---|
+| 甲 | 每类 target 一列外键（`schedule_line_id` / `invoice_id` / `order_id`），用 `CHECK` 保证互斥 | 强约束、可建外键 | 加一类 target 就要改表 | 备选 |
+| **乙** | `target_bo` + `target_id` + `target_line_id` | 扩展零成本 | 无法建数据库外键，靠服务层保证 | **采用** |
+| 丙 | 每种 target 一张中间表 | 约束最强 | 四张表、查询要 UNION | 否决（过度设计） |
+
+采用乙的理由：Wave A 只有 4 类 target，但 Wave C 可能加"服务确认单"，甲会触发表结构变更。
+
+```yaml
+payment_allocation:
+  target_bo: enum(order, group, customer_invoice, customer_account)
+  target_id: integer          # 头 id
+  target_line_id: integer     # 行 id（发票行为 invoice_line，计划行为 schedule_line）
+```
+
+约束：`target_bo` 与 `target_line_id` 的可用组合由服务层白名单校验（R1-3）。
+
+#### 27.3.3 基数总表
+
+| 从 | 到 | 基数 | 说明 |
+|---|---|---|---|
+| sales_order | sales_order_line | 1:N | |
+| sales_order | payment_schedule | **1:1** | §24.8 方案甲 |
+| payment_schedule | payment_schedule_line | 1:N | 按 `group_no` 分组 |
+| sales_order_line | payment_schedule_line | 1:N | 一行可拆多批 ∏ 多期 |
+| shipment | shipment_line | 1:N | |
+| customer_invoice | customer_invoice_line | 1:N | |
+| payment_receipt | payment_allocation | 1:N | 一笔款可多次核销 |
+| payment_schedule_line | payment_allocation | 1:N | 一期可被多笔款核销 |
+| customer_invoice | payment_allocation | 1:N | 一张票可多次收款 |
+
+### 27.4 规则模型
+
+规则分四类，编号前缀区分：`R1` 结构、`V` 不变量、`ST` 状态、`B` 业务。
+
+#### 27.4.1 R1 结构性规则（建表/建对象时校验）
+
+| 编号 | 规则 | 违反后果 |
+|---|---|---|
+| R1-1 | `payment_receipt` **不得**带 `schedule_id` / `invoice_id` / `order_id` 外键（D14） | 设计评审否决 |
+| R1-2 | `customer_invoice_line` 的来源互斥：`shipment_line_id` 与 `schedule_id` 只能有一个非空（R-INV-3） | 落库拒绝 |
+| R1-3 | `payment_allocation.target_bo` 只能是 `order` / `group` / `customer_invoice` / `customer_account`；`target_line_id` 仅前两者与 `customer_invoice` 允许非空 | 落库拒绝 |
+| R1-4 | 所有累计字段（`settled_amount` / `receipt_settled_amount` / `prepaid_offset_amount` / `applied_amount` / `reserved_amount` / `unapplied_amount`）**只读**，只能由服务层通过 `payment_allocation` 重算写入 | 直接 UPDATE 视为缺陷 |
+| R1-5 | 事实层对象过账后不可 UPDATE 金额字段，只能整单红冲或反向记录 | 落库拒绝 |
+
+#### 27.4.2 V 不变量（提交时校验）
+
+| 编号 | 内容 | 触发时点 | 新增/沿用 |
+|---|---|---|---|
+| **V1** | `applied_amount + reserved_amount + unapplied_amount = amount` | 每次核销/反核销后 | 沿用 |
+| **V1b** | `reserved` 只能指向 `order_id` / `group_no`，**不得指向发票** | 建 allocation 时 | 沿用 |
+| **V2** | 单计划行 Σ `active` 核销 ≤ `planned_amount` | 核销提交时 | 沿用 |
+| **V3** | `receipt_settled_amount + prepaid_offset_amount ≤ gross_amount` | 发票核销时 | 沿用 |
+| **V4** | 预收抵扣限同一 `order_id` / `group_no`，跨单需显式授权标记 | 核销时 | 沿用 |
+| **V5** | 反核销 = 新增 `reversed` 反向行 + 原行置 `reversed`；反向行金额 **≤** 原行金额 | 反核销时 | 沿用（已放宽） |
+| **V6** | 结算口径（settled）与核销口径（applied）不得混算 | 报表/视图 | 沿用 |
+| **V7** | `allocation.amount ≤ min(资金侧可用, 目标侧可核销余额)` | 核销提交时 | **新增** |
+| **V8** | 同一 allocation 只能有一条有效反向记录（唯一索引） | 反核销时 | **新增** |
+| **V9** | allocation 落库与余额更新必须同事务，且余额更新影响行数 = 1 | 核销提交时 | **新增** |
+
+**V7 展开**：
+
+```
+资金侧可用 = receipt.amount
+           − Σ allocation(status=active, type∈{receipt_to_invoice, prepay_offset_invoice})
+           − Σ allocation(status=active, type=prepay_to_schedule)
+
+目标侧可用（按 target_bo 三选一）：
+  schedule_line : planned_amount − Σ active 核销到该行
+  invoice       : gross_amount − receipt_settled_amount − prepaid_offset_amount
+  order/group   : contract_limit_amount × (1 + over_tolerance_percent/100)
+                  − Σ active 已核销 − Σ active 已预占
+```
+
+**V8 展开**：`reversal_of_allocation_id` 建唯一索引（`WHERE status = 'active'`），保证一笔核销只能被反冲一次；多次反冲必须走"反冲的反冲"（新增正向记录）。
+
+**V9 的意义**：这是把 SAP 的 `EFBKPF` 锁 + `F1805` 更新终止翻译成 SQLite 的最小等价物。见 §27.6。
+
+#### 27.4.3 ST 状态规则
+
+**`payment_receipt`**：
+
+| 状态 | 允许动作 | 允许改金额 | 允许核销 |
+|---|---|---|---|
+| `draft` | 编辑 / 提交 / 删除 | 是 | 否 |
+| `posted` | 核销 / 反核销 / 红冲 | 否 | 是 |
+| `reversed` | 只读 | 否 | 否 |
+
+**`payment_schedule_line.group_status`**：
+
+| 状态 | 允许新核销类型 | 说明 |
+|---|---|---|
+| `planned` | 只允许 `prepay_to_schedule`（reserved） | 组基数未定，`applied` 会破坏 I2 |
+| `activated` | `prepay_to_schedule` + `receipt_to_invoice` | 受 V2 封顶 |
+| `closed` | 拒绝 | 已结清 |
+| `cancelled` | 拒绝，已核销金额必须转挂或退款 | 不物理删除 |
+
+**`customer_invoice`**：沿用 §6.1（draft → submitted → posted → reversed / cancelled），`posted` 后只读。
+
+#### 27.4.4 B 业务规则
+
+| 编号 | 规则 | 默认值 | 可配 | 依据 |
+|---|---|---|---|---|
+| B1 | 核销不得超计划期次 | 硬拦 | 容差三字段 | §24 |
+| B2 | 核销不得超发票应收 | 硬拦 | 容差三字段 | V3 |
+| B3 | 预收抵扣限同订单/组 | 硬拦 | 跨单需授权标记 | V4 |
+| B4 | 超容差默认动作 | `block` | `block` / `warn` / `approve_once` | 金蝶硬拦 + SAP 消息分级 |
+| B5 | 重复付款硬唯一键 | 三键唯一 | 不可关 | 见 §27.6.3 |
+| B6 | 疑似重复分级 | 预警 | 预警 / 落地确认 / 禁止 | §25 三道防线 |
+| B7 | 已过账不可改 | 硬拦 | 不可关 | R1-5 |
+| B8 | 组关闭后拒绝新核销 | 硬拦 | 不可关 | ST 矩阵 |
+| B9 | 同一订单同币种 | 硬拦（Wave A） | Wave C 放开 | §4 |
+
+**容差三字段**（落在 `payment_schedule` 头与 `customer_invoice` 头）：
+
+```
+over_tolerance_percent   number(9,4)   默认 0
+over_tolerance_amount    number(18,4)  默认 0
+over_tolerance_action    enum          block | warn | approve_once
+```
+
+判定：`实际值 ≤ 上限 × (1 + percent/100) + amount` 才放行；超出按 `action` 处理。
+
+### 27.5 业务逻辑（五条主时序）
+
+#### S1 订单确认 → 计划生成（Wave B）
+
+```
+触发：sales_order.status → confirmed
+前置：payment_term_id 非空；订单行金额已算定
+动作：
+  ① 建 payment_schedule（1:1），gross_amount = Σ 行含税额
+  ② 按 payment_term_line 展开 payment_schedule_line
+     - 每行落 planned_amount = gross × ratio
+     - group_no 由订单行拆批决定（静态，不随发货新增组）
+     - line_type: normal / prepayment / retention
+  ③ group_status = planned
+事件：PaymentScheduleCreated
+异常：Σ planned ≠ gross → 断言失败，整单回滚
+```
+
+#### S2 发货过账 → 组激活
+
+```
+触发：shipment.status → posted
+前置：shipment_line 数量 ≤ 订单行未发量 ×(1 + 过量容差)
+动作：
+  ① 回写 sales_order_line 已发量
+  ② 对应 group_no 的 group_status: planned → activated
+  ③ 重算 group_base_amount（该组实际发货基数）
+事件：ScheduleGroupActivated
+异常：组已 cancelled → 拒绝发货
+```
+
+#### S3 开票过账 → 应收发生
+
+```
+触发：customer_invoice.status → posted
+前置：来源行合法（R1-2）；数量 ≤ 可开票量；价格在容差内（D13 受控改价）
+动作：
+  ① 写 customer_invoice + line（金额快照）
+  ② 回写 sales_order_line 已开票量
+  ③ 回写 sales_order_schedules(kind=billing) 状态
+  ④ 生成 L2 会计事件（D6 待定）
+事件：InvoicePosted
+异常：超容差 → 按 B4 动作处理
+```
+
+#### S4 收款登记 → 核销
+
+```
+触发：payment_receipt.status → posted，且提交核销清单
+前置校验（顺序不可换）：
+  ① 幂等键校验（B5）→ 重复直接返回原单
+  ② V7 资金侧可用 ≥ 本次核销合计
+  ③ 逐目标校验 V2 / V3 / V7 目标侧可用
+  ④ 组状态校验（ST 矩阵）
+  ⑤ V4 预收抵扣归属校验
+动作（同一事务）：
+  ① INSERT payment_receipt
+  ② INSERT payment_allocation × N
+  ③ UPDATE 各目标余额缓存（V9：影响行数断言 = 1）
+  ④ 更新计划行 settled_amount / 发票双列
+  ⑤ 若全部结清 → 组状态 → closed
+事件：ReceiptPosted、AllocationCreated
+异常：任一步失败 → 全回滚，返回具体不变量编号
+```
+
+#### S5 预收抵扣 / 反核销
+
+```
+S5a 预收抵扣：
+  触发：invoice.posted 且存在同订单 reserved
+  动作：
+    ① INSERT allocation(type=prepay_offset_invoice)
+    ② 原 prepay_to_schedule 行：reserved 部分转 applied
+    ③ 发票 prepaid_offset_amount += 金额
+  约束：V4（同订单/组）+ V3（不超发票）
+
+S5b 反核销：
+  触发：手工反核销 / 收款红冲
+  动作：
+    ① 校验 V8（该行未被反冲过）
+    ② INSERT allocation(status=reversed, reversal_of_allocation_id=原行, amount ≤ 原行)
+    ③ 原行 status → reversed
+    ④ 回退目标余额缓存
+  约束：反向行金额 ≤ 原行金额（V5）；不允许修改原行金额
+```
+
+### 27.6 并发与幂等（SAP 教训的直接翻译）
+
+#### 27.6.1 对照
+
+| 机制 | SAP | 我方 | 为什么不同 |
+|---|---|---|---|
+| 加锁 | `EFBKPF`（表 `BKPF`，键 `BUKRS`+`BELNR`+`GJAHR`，mode E） | `BEGIN IMMEDIATE`（库级写锁） | SQLite 无行锁，库级锁更简单且足够（单机） |
+| 冲突检测 | 更新任务内校验 → **`F1 805`（F1805）** 更新终止 + 回滚 | `rowcount` 断言 = 1，否则抛异常回滚 | SQLite 条件更新影响 0 行不报错，必须显式断言 |
+| 已清标记 | `AUGDT` / `AUGBL` | `allocation.status = 'reversed'` | 我方用关系表状态，不迁表 |
+| 余额来源 | `BSIK` 按 `SHKZG` 借贷汇总 | `Σ allocation(status=active)` | **同样不能读单行缓存** |
+| 两阶段 | F110 proposal → run（有间隙，间隙内被清触发 F1805） | **不引入两阶段** | 我方单阶段提交，避免间隙 |
+
+#### 27.6.2 关键认知（来自 SAP 复核）
+
+> **部分收款不会改小原单金额。** SAP 的 partial payment 让原发票保持全额未清，付款另生成一笔未清项，两者靠 `REBZG` 关联。所以「查余额」永远不能读单行金额，必须按方向汇总。
+> 我方对应：`settled_amount` / `receipt_settled_amount` 是**缓存**，真源永远是 `payment_allocation`；任何对账都必须能从核销行重算并比对缓存。
+
+#### 27.6.3 幂等三键
+
+| 键 | 作用域 | 用途 |
+|---|---|---|
+| `(bank_account_id, reference_no)` | 收款单 | 防同一笔银行流水重复导入 |
+| `(source_batch_id, source_line_no)` | 收款单（导入批次） | 防批次重跑 |
+| `idempotency_key` | 核销提交 | 防前端重复点击 / 网络重试 |
+
+三个键都必须建**唯一索引**，冲突时返回原单而非报错（幂等语义）。
+
+### 27.7 三层闸门与三余额模型
+
+| 层 | 闸门 | 比较对象 | 我方落点 |
+|---|---|---|---|
+| L0 | 合同/协议累计额 | 累计应付+付款申请 vs 合同价税合计 | `sales_order.contract_limit_amount` + B4 |
+| L1 | 订单行金额（含容差） | 开票/发货额 vs 订单行额 ×(1+容差) | S3 前置校验 + 容差三字段 |
+| L2 | 已确认应收/应付 | 核销额 vs 发票 gross | V3 |
+| L3 | 发票/期次 | 单票单期不超收 | V2 / V3 |
+
+三余额（与 V7 对应，建议物化到 `order_settlement_summary` 供高频查询）：
+
+```
+① committed_available = order_total ×(1 + over_tolerance%) − 已下单/已开票额
+② settle_available    = Σ posted 发票 gross − Σ active 现金核销
+③ reserve_available   = 订单预收上限 − Σ active reserved
+```
+
+**并发写法**（V9 的具体实现）：
+
+```sql
+UPDATE payment_schedule_line
+   SET settled_amount = settled_amount + :amt
+ WHERE id = :line_id
+   AND settled_amount + :amt <= planned_amount
+   AND group_status = 'activated';
+-- 断言 rowcount = 1，否则抛 InvariantViolation('V2')
+```
+
+> 不采用「先 SELECT 再判断再 UPDATE」，因为那会产生竞态。条件写进 `WHERE` 是唯一可靠做法。
+
+### 27.8 实施波次影响
+
+| 波次 | 对象 | 规则 | 说明 |
+|---|---|---|---|
+| **Wave A** | `customer_invoice` + line；`payment_receipt`（仅登记，不做计划核销）；`payment_allocation`（仅 `receipt_to_invoice` / `on_account`） | R1、V1、V3、V5、V7、V8、V9；B2、B5、B7 | 不建 `payment_schedule`（D3-a），收款只能核到发票 |
+| **Wave B** | `payment_schedule` + line；`prepay_to_schedule` / `prepay_offset_invoice` | 加 V2、V4；B1、B3、B8 | 引入计划层与预收抵扣 |
+| **Wave C** | 自动核销（对齐 SAP `F.13` + `TF123`）、贷项凭证、跨订单抵扣 | 加 B6、B9 放开 | 自动匹配规则参考「科目维度 + 最多 5 个用户准则字段」的结构 |
+
+### 27.9 已知冲突与订正
+
+| # | 冲突 | 处理 |
+|---|---|---|
+| 1 | §25.12 第 3 条「反核销 Wave A 整额」与 §25.6 V5「允许部分反核销」矛盾 | **以 V5 为准**，Wave A 即允许部分反核销；§25.12 该条作废 |
+| 2 | §24.9「动态批次组是差异化」 | 已由 D12 推翻，见 §24.9 注 |
+| 3 | §5「开票不改价」 | 已由 D13 推翻，改为受控改价 |
+| 4 | §25.11 中 SAP 条目原标 A 级 | 本轮复核后降为 **B**（SAP Help 正文未取回），见 §26.9 |
+| 5 | §25.9 视图口径未区分现金与预收 | 已由 D16 + V6 分离，视图需输出两列 |
+
+### 27.10 本节结论（三句话）
+
+1. **对象只有九个，层只有四层**（计划 / 事实 / 关系 / 视图），新增对象前必须过「边界判断三问」。
+2. **规则只有四类，硬不变量只有九条**（V1–V9），其余都是可配业务规则；实现时先落 V 系列，再落 B 系列。
+3. **并发只有一招**：余额条件写进 `WHERE` + 影响行数断言 + 失败回滚。这是 SAP「加锁 + 更新终止」在 SQLite 下的最小等价物，不需要更复杂。
+
+### 27.11 待拍板（收敛）
+
+| # | 问题 | 所在节 | 建议 | 阻塞什么 |
+|---|---|---|---|---|
+| 1 | D14 / D15 / D16 由「建议」转「已定」 | §13 | 采纳 | 收款单字段定稿 |
+| 2 | §24.8 三项（尾款并入期 2 / 方案甲 / D3-a） | §24.8 | 采纳 | 计划表结构 |
+| 3 | D6（L2 会计事件） | §13 | 一期只出事件、不建台账 | S3 的④ |
+| 4 | D11（一期分次开票） | §13 | 允许 | 开票回写逻辑 |
+| 5 | 超容差默认动作 | B4 | `block` | 校验行为 |
+| 6 | 订单级余额用物化表还是视图 | §25.9 / §27.7 | **视图 + 缓存列**，不建独立物化表 | 性能方案 |
