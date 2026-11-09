@@ -4058,3 +4058,170 @@ service_confirmation (Wave C) ────────────────�
 1. **billing doc 不是一张表，而是三张表**：`customer_invoice`（开了什么）+ `customer_invoice_schedule`（何时该收）+ `payment_allocation`（哪笔钱抵了哪期）。三张表各自有唯一写入口，不能互相代存。
 2. **关系只有三类**：上游快照（N:1，只写一次）、下游归属（1:N，红冲置 cancelled）、核销关系（N:M，只增不改）。**不建**「行 × 期」的中间层。
 3. **金额链只有一条**：行 → 头 → 期 → 核销，每一步都有断言；任何一步失败都回滚到 `submitted`，不允许「先过账再修数」。
+
+---
+
+## 31. TBD 决策建议：Fusion / SAP / NetSuite / D365 证据与推荐值（2026-11-09）
+
+> 目的：§27–§30 留下了 D17–D26 等一批待拍板项。本节按「先用证据定原则，再逐项给推荐值」的方式收敛，每条都标**证据强度**与**与现稿的关系**（一致 / 该严于 / 可放宽 / 需改口）。
+> 取证范围：Oracle Fusion 26D（Financials / OM / Procurement）、SAP（FI-AR / SD / MM）、NetSuite、Dynamics 365 Finance。
+> 结论先行：**11 项可直接定稿；3 项需要改口（D19、R-INV-22、超容差策略）；2 项仍建议延后（D20 合同对象、D6 会计事件）。**
+
+### 31.1 六条跨产品原则（先定原则，再定参数）
+
+| # | 原则 | 四家证据 | 对我方的含义 |
+|---|---|---|---|
+| P1 | **事实表只存「发生过的」，余额一律派生** | Fusion 应收事实是 `AR_PAYMENT_SCHEDULES_ALL`，`amount_due_remaining` 是缓存但可重算；SAP 未清项是行项目状态；NetSuite/D365 同 | 发票 + 期次是事实，`v_receivable` 是视图；不建 AR 台账表 |
+| P2 | **核销的最小单位是「应收期次」，不是发票头** | Fusion `APPLIED_PAYMENT_SCHEDULE_ID`；SAP OBB9 一期一条未清项；NS/D365 均有 installment/payment schedule | 已由 D21 落地；`target_bo` 不再指向发票头 |
+| P3 | **单据入口软、资金出口硬** | Fusion 超容差挂 Matching Hold（可入账、禁付款、可人工释放）；SAP 超容差只打付款冻结 `ZLSPR`，F110 只按未清金额付 | 开票超订单 → 打「结算冻结」而不是拒单；核销超期次 → 硬拒 |
+| P4 | **撤销前必须先反核销** | Fusion：先 unapply 再 Credit Memo；SAP：`F5 308` 已清项不可冲销，必须 `FBRA` 重置清账；NS/D365：先撤销结算再作废 | D24 成立；错误码统一 `ALLOCATION_EXISTS_REVERSE_FIRST` |
+| P5 | **折扣与现金折扣分开建模** | Fusion AR 行单价可为负、折扣行由 OM 定价传入；SAP 折扣是定价条件、Skonto 是付款条件；NS 用 Discount Item 负行；D365 用行折扣字段 + 现金折扣 | 负行只允许 `line_type='DISCOUNT'`；现金折扣归 `payment_term`，不进金额链 |
+| P6 | **AR / AP 对象分离，只共享核销模式与支付主数据** | Fusion：Receipt/Application 与 Invoice/Payment 分离，只共用 Payments 引擎与 payment method；SAP 只共用 `BKPF`（`KOART` D/K）；NS/D365 完全分离 | **D19 改口**：不建收付款统一对象 |
+
+### 31.2 逐项证据
+
+| TBD | 问题 | Fusion | SAP | NetSuite / D365 | 推荐 | 关系 |
+|---|---|---|---|---|---|---|
+| **D17→D23** | 核销进度缓存放哪 | 直接存 `amount_applied` / `amount_due_remaining` 在期次表（A） | 不存缓存，靠清账回填 `AUGDT`（B） | 期次上有已付/未付金额（A） | 缓存只放期次，发票头不放 | 一致 |
+| **D18** | 应收是否落表 | 期次表就是应收载体（A） | 未清项是行项目状态（B） | `CustTransOpen` 是未结子表（A/B） | 期次表 + `v_receivable` 视图，不建 AR 台账 | 一致 |
+| **D19** | 收付款是否统一对象 | 记录分离，只共用支付引擎/支付方式（A） | 仅共用 `BKPF`，`KOART` D/K（B） | 完全分离（A） | **不统一**；AP 另建 `vendor_payment`，共享核销模式 | **改口** |
+| **D20** | 合同额上限 | BPA 可配置「超限阻止 PO 释放」（A），默认值未写明（C） | `ZWERT` + `06 042` 默认 W，OMCQ 改 E 才硬拦（B）；Note 2038808 证明单行校验会漏合计（B） | NS 无金额硬校验；D365 项目合同有 Funding limit 硬拦（A/B） | Wave A 用订单总额 ×(1+容差)；建合同后做「行 + 累计」双检，默认警告、可配硬拦 | 延后 |
+| **D21** | 是否建应收期次 | `AR_PAYMENT_SCHEDULES_ALL`（A） | OBB9 一期一条未清项（B） | 两家都有 installment（A） | 采纳，Wave A 必建 | 一致 |
+| **D22** | 计划行是否作核销目标 | 无订单级收付款计划（A） | 只有开票计划 `FPLA/FPLT`（B） | 无订单级收款计划（B） | 计划行退出核销目标，预收只挂 order/group | 一致 |
+| **D23** | 缓存放期次还是发票头 | 期次（A） | 行项目（B） | 期次（A） | 期次 | 一致 |
+| **D24** | 已核销发票能否红冲 | 先 unapply，再按未核销额开 Credit Memo；CM 审批可自动 unapply→重核销（A） | `F5 308` 拒绝；先 `FBRA` 重置清账，再 `FB08`（B） | 已结算禁止冲销，先 undo settlement（A） | 先反核销再红冲；红字单不生成期次 | 一致 |
+| **D25** | 期次尾差归谁 | 只要求合计 = 录入金额，未明说归末期（A/C） | **明文：尾差计入最后一期**（A/B） | 未规定，需手工调末期（C） | 末期吸收尾差 | 一致，SAP 补强 |
+| **D26** | 折扣能否用负行 | AR 行单价允许负数，折扣行由 OM 传入（A） | 折扣是定价条件，Skonto 是付款条件，不用负行（B） | NS 用 Discount Item 负行；D365 用行折扣字段（A） | 允许，但仅限 `line_type='DISCOUNT'`，且 `qty ≥ 0`、`gross ≥ 0` | 限定后一致 |
+| **D11** | 一期能否分次开票 | 允许部分发货、多次开票（A） | 开票计划可多次部分开票（B） | 两家均允许（A） | 采纳；数量封顶用已履约量 | 一致 |
+| **D15** | 预收是否可挂订单 | OM 支持订单预收（advance payment），履约后 AR 自动核销（A） | 特殊总账 A（实际预付），F 仅为请求（B） | NS 多收转 Customer Deposit；D365 留 unapplied（A） | 预收挂 order/group，是客户贷方事实 | 一致 |
+
+### 31.3 三项需要改口
+
+#### 31.3.1 D19 改口：不统一收付款对象
+
+**之前建议**（§29.5）：把 `payment_receipt` 扩成收付款通用对象，加 `direction` + `party_account_id`。
+**现在建议**：**否决**。理由：
+
+1. 四家里没有一家把 AR 收款与 AP 付款做成同一业务对象：Fusion 只共用支付引擎与 payment method（A），SAP 只共用会计凭证 `BKPF`（B），NetSuite / D365 完全分离（A）。
+2. 统一对象会把两套完全不同的规则塞进一张表：AR 核销目标是发票期次，AP 核销目标是账单/付款申请；AR 有预收/客户贷方，AP 有付款程序/银行执行；字段交集很小。
+3. 真正的复用点在**核销模式**（`payment_allocation` 的 target 多态 + 反向行）和**支付方式主数据**，不在支付记录本身。
+
+**修订后的做法**：
+
+- `payment_receipt` 保持 AR 专用，不加 `direction`；
+- Wave C 新增 `vendor_payment`，字段与 `payment_receipt` 对称，但独立表、独立状态机；
+- `payment_allocation` 保持单一表，target 增加 `vendor_bill` 分支（Wave C），用 `target_bo` 区分；不建跨侧万能 payment 表。
+
+#### 31.3.2 R-INV-22 放宽：期次允许受控变更
+
+**现稿**：期次 `posted` 后禁止改 `amount` / `due_date` / `schedule_no`。
+**证据**：Fusion 允许过账后改到期日、改未付部分金额、甚至增删期次；限制是「不得低于已核销额、不得删已付款/已贷记/已调整/争议中的期次、首期不可删、合计必须等于交易金额、需专门权限」（A）。SAP 未清时可用 `FB02` 改付款条件/到期日，但改 `ZTERM` 不会重算分期金额，结构变更必须冲销重开（B/C）。
+
+**建议改为三层**：
+
+| 变更 | 允许条件 | 控制 |
+|---|---|---|
+| 改 `due_date` | 任何未结清期次 | 专门动作 `reschedule` + 权限 `invoice.reschedule` + 原因 + 审计；不得早于 `invoice_date` |
+| 改 `amount` | 该期 `amount_applied = 0`，且调整后 `Σ amount = gross` | 服务层重算；已核销的期次只允许改到期日 |
+| 增删期次 | Wave A **禁止**；Wave B 再评估 | 结构变更走「反核销 → 红冲 → 重开」，与 SAP 一致 |
+
+**修订后的 R-INV-22**：`posted` 后禁止改 `schedule_no`；`due_date` 可经 `reschedule` 受控变更；`amount` 仅在未核销时可调且合计不变；期数结构变更必须冲销重开。
+
+#### 31.3.3 超容差策略改口：软挂起 + 硬封顶
+
+**之前建议**：超容差默认 `block`（拒单）。
+**现在建议**：拆成两个环节，不要一刀切。
+
+| 环节 | 建议 | 依据 |
+|---|---|---|
+| 开票（超订单量/额/价格容差） | **不拒单**；过账后打「结算冻结」`settlement_block_code`，状态仍是 `posted`，冻结期间禁止核销，人工释放 | Fusion Matching Hold 可入账、禁付款、可释放（A）；SAP 只打 `ZLSPR` 付款冻结（A/B） |
+| 核销（超期次金额） | **硬拒** | Fusion 关闭 overapplication 后硬拦（A）；SAP 未清项金额是硬上限（B） |
+| 付款（超未清） | **硬拒** | SAP F110 只按未清金额付款（B）；Fusion 付款受 hold 阻断（A） |
+
+**实现要点**：`settlement_block_code` 是发票头上的**字段**，不是新状态——这与 SAP 的 `ZLSPR` 同构，不引入 `on_hold` 状态机分支。释放动作写审计，不改变金额。
+
+> 这条同时修正了本 spec 早前「超容差默认 block」的口径：**入口软、出口硬**才是四家的共同做法。
+
+### 31.4 决策建议总表
+
+| # | TBD | 建议值 | 证据强度 | 与现稿关系 | 状态 |
+|---|---|---|---|---|---|
+| D17 | 缓存列 | 已被 D23 取代 | 高 | 取代 | 关闭 |
+| D18 | 应收视图 | 期次表 + `v_receivable` 视图，不建台账 | 高 | 一致 | 可定稿 |
+| D19 | 收付款统一 | **不统一对象**；AP 另建 `vendor_payment` | 高 | **改口** | 待拍板 |
+| D20 | 合同额上限 | Wave A 用订单总额；合同对象后置，做行+累计双检 | 中 | 延后 | 待拍板 |
+| D21 | 应收期次 | 采纳，Wave A 必建 | 高 | 一致 | 可定稿 |
+| D22 | 计划行退出核销 | 采纳 | 高 | 一致 | 可定稿 |
+| D23 | 缓存放期次 | 采纳 | 高 | 一致 | 可定稿 |
+| D24 | 红冲前置 | 采纳；补红字单不生成期次 | 高 | 一致 | 可定稿 |
+| D25 | 尾差归末期 | 采纳（SAP 明文） | 高 | 一致 | 可定稿 |
+| D26 | 折扣负行 | 允许但限定 `DISCOUNT` 行 + `qty ≥ 0` + `gross ≥ 0` | 中高 | 限定 | 可定稿 |
+| D11 | 一期分次开票 | 采纳，数量按已履约量封顶 | 高 | 一致 | 可定稿 |
+| D15 | 预收挂订单 | 采纳，预收是客户贷方事实 | 高 | 一致 | 可定稿 |
+| D27 | R-INV-22 放宽 | 到期日受控可改；金额未核销可调；结构变更冲销重开 | 高 | **改口** | 待拍板 |
+| D28 | 超容差策略 | 开票软冻结 + 核销/付款硬封顶 | 高 | **改口** | 待拍板 |
+| D6 | L2 会计事件 | Wave A 只留 hook，不建 GL（g15 边界） | — | 延后 | 待拍板 |
+
+### 31.5 需要回写正文的修改清单（拍板后执行）
+
+| # | 位置 | 修改 |
+|---|---|---|
+| 1 | §30.5.4 R-INV-22 | 按 §31.3.2 改写为三层变更规则 |
+| 2 | §30.8 状态矩阵 | 增加 `settlement_block_code` 列：冻结期间「可否新增核销 = 否」 |
+| 3 | §29.5 D19 行 | 删除「字段预留」表述，改为「对象分离」 |
+| 4 | §27.4 B4 | 容差动作从 `block` 改为「开票冻结 / 核销硬拒」两段式 |
+| 5 | §25.3 `payment_receipt` | 不新增 `direction` / `party_account_id` |
+| 6 | §12 / §30.11 | Wave C 增加 `vendor_payment` 任务（对称设计，不共享表） |
+
+### 31.6 结论（三句话）
+
+1. **四家在「期次即核销单位、先反核销再撤销、入口软出口硬」上高度一致**，这三条可以直接定稿，不需要再讨论。
+2. **唯一需要推翻自己的是 D19**：收付款不该统一对象，只该统一核销模式和支付主数据；统一表会让 AR/AP 两套规则互相污染。
+3. **期次不可变要放宽**：Fusion 明确支持过账后调期次，SAP 支持调到到期日；我方应改为「到期日受控可改、金额未核销可调、结构变更冲销重开」，比现在的全冻结更实用，也仍然可审计。
+
+### 31.7 Sources
+
+**Oracle Fusion（docs.oracle.com，26D）**
+
+1. 已付款发票如何贷记（先 unapply，再 Credit Memo）— https://docs.oracle.com/en/cloud/saas/financials/26d/faofc/how-can-i-credit-a-transaction-that-was-already-paid.html
+2. Credit Memo 审批中自动 unapply / 重核销 — https://docs.oracle.com/en/cloud/saas/financials/26d/faofc/unapply-receipts-during-credit-memo-request-approval.html
+3. 更新期次的限制（可改到期日/未付金额/增删） — https://docs.oracle.com/en/cloud/saas/financials/26d/faofc/guidelines-for-updating-installments-on-transactions.html
+4. 分期付款条件与到期金额 — https://docs.oracle.com/en/cloud/saas/financials/26d/fairp/split-payment-terms-and-amounts-due.html
+5. 发票行录入（单价可为负） — https://docs.oracle.com/en/cloud/saas/financials/26d/faofc/guidelines-for-entering-invoice-lines.html
+6. 订单折扣/运费传入 AR — https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26d/faiom/include-price-discounts-and-shipping-charges-in-your-payloads.html
+7. Payment Methods 的 Usage Rules（AR/AP 共用主数据） — https://docs.oracle.com/en/cloud/saas/financials/26d/faipp/payment-methods.html
+8. 阻止 PO 释放超 BPA 行限额 — https://docs.oracle.com/en/cloud/saas/procurement/26d/oaprc/how-you-prevent-purchase-order-releases-if-agreement-lines-would-be-over-released.html
+9. Invoice Tolerances — https://docs.oracle.com/en/cloud/saas/financials/26d/fappp/invoice-tolerances.html
+10. Types of Holds（Matching Hold 可释放、Accounting Allowed） — https://docs.oracle.com/en/cloud/saas/financials/26d/fappp/types-of-holds.html
+11. 收款与 on-account 核销指南 — https://docs.oracle.com/en/cloud/saas/financials/26d/faofc/guidelines-for-applying-receipts-and-on-account-credit-memos.html
+12. 销售订单预收（advance payment） — https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26d/faiom/get-advance-payments-for-sales-orders.html
+13. 部分发货拆行 — https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26d/faiom/update-attributes-on-split-order-lines-for-partial-shipments.html
+
+**SAP**
+
+14. 消息 F5 308（已清项不可冲销） — https://www.sapdatasheet.org/abap/msag/f5-308.html
+15. FBRA / FB08 冲销类型 — https://www.sapexpert.co.uk/types-of-document-reversals-in-sap/
+16. FB02 修改已过账付款条件 — https://sap96.com/2023/10/15/how-to-change-payment-term-in-invoice-document-posted-in-sap/
+17. 分期付款条件（尾差计入最后一期） — https://consolut.com/supportportal/sap-online-help/ansicht-dokumentation/?article=YP-RELNSD_BIL_30RATEN
+18. SD 定价条件类型 — https://www.bestonlinecareer.com/blog/sap-sd-pricing-procedure-configuration-step-by-step
+19. 付款条件与现金折扣（OME2） — https://www.learntosap.com/mmtutorialtermsofpaymentome2.html
+20. `BKPF`/`BSEG` 与 `KOART` — https://www.learntosap.com/SAP-BKPF-vs-BSEG-Real-Scenarios.html
+21. 消息 06 042（合同目标价值超额） — https://www.stechno.net/repository/sap-messages.html?id=06042
+22. OMCQ 改消息类别 E — https://www.gotothings.com/sapmm013.htm
+23. Note 2038808（PR 合计超额漏检） — https://kupdf.net/download/2038808e20170515pdf_5af342e8e2b6f55d409251e3_pdf
+24. OMR6 容差与付款冻结 — https://www.learntosap.com/mmtutorialtolalimitconfig.html
+25. F110 只选未清项 — https://www.guru99.com/all-about-automatic-payment-run.html
+26. 特殊总账 A/F 与 F-39/F-54 — https://www.gauravconsulting.com/post/down-payment-in-sap-s-4-hana
+27. VTFL 开票数量控制 — https://thesdvault.com/sap-sd-copy-control
+
+**NetSuite / Dynamics 365**
+
+28. NetSuite Customer Payments — https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_N1288824.html
+29. NetSuite 作废/删除限制 — https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_N563543.html
+30. NetSuite 期次（Installment） — https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1540928779.html
+31. NetSuite Discount Item — https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_160312998983.html
+32. D365 客户交易 — https://learn.microsoft.com/en-us/dynamics365/finance/accounts-receivable/customer-transactions-list-page
+33. D365 已结算交易不可冲销 — https://learn.microsoft.com/en-us/troubleshoot/dynamics-365/finance/general-ledger/cant-reverse-transactions
+34. D365 付款排程 — https://learn.microsoft.com/en-us/training/modules/configure-accounts-receivable-dyn365-finance/2-payment-schedule
+35. D365 现金折扣 — https://learn.microsoft.com/en-us/dynamics365/finance/cash-bank-management/cash-discounts
+36. D365 项目资金限额（硬拦） — https://learn.microsoft.com/en-us/dynamics365/project-operations/prod-pma/project-funding-limits
