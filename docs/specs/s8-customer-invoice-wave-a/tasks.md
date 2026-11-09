@@ -1,0 +1,175 @@
+# S8 Wave A 任务清单（customer_invoice）
+
+> 关联规格：`spec.md`（同目录）
+> 执行顺序：T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8
+> 约束：只在 `D:\filework\s8-billing-worktree` 改动；禁止在主工作树 commit；禁止 pytest；
+> 所有测试走 `python d:\filework\test.py --root D:\filework\s8-billing-worktree --file <path> --port 3012`。
+
+---
+
+## [x] T1 schema 三件套
+
+**文件**
+- 新增 `meta/schemas/customer_invoice.yaml`
+- 新增 `meta/schemas/customer_invoice_line.yaml`
+- 新增 `meta/schemas/customer_invoice_schedule.yaml`
+
+**内容**：按 `spec.md` §3 字段/状态机/索引/约束；结构镜像
+`shipment.yaml`、`shipment_line.yaml`、`sales_order_schedule.yaml` 的
+`aspects` / `ui_view_config` / `relations` / `semantics` 写法。
+
+**验收**
+- YAML 可被 `meta.core.models.registry` 加载，无重复字段、无未知 aspect。
+- `numbering` 声明被 `DocumentNumberService._read_numbering('customer_invoice')` 读到。
+- 状态枚举与 §3.1 一致（5 态）。
+
+---
+
+## [x] T2 迁移 v231
+
+**文件**
+- 新增 `meta/migrations/v231__customer_invoice.py`
+
+**内容**：按 `spec.md` §4 九步；镜像 `v177__purchase_order_object.py` 的
+`upgrade` / `verify` / `_table_exists` / `_column_exists` / 类型与序列插入 / 权限 grant 写法。
+
+**验收**
+- `upgrade` 幂等（连续执行两次不报错、不重复种子）。
+- `verify()` 直接查 DB 校验 §4 全部检查项，失败返回/抛出而非仅打印。
+- 回填后 `billing_relevance` 仅 `delivery` / `plan`。
+
+---
+
+## [x] T3 服务骨架与建单
+
+**文件**
+- 新增 `meta/services/customer_invoice_service.py`
+
+**内容**
+- 常量、`CustomerInvoiceError`、数值/时间/事务工具。
+- `prepare_header` / `create_from_shipment` / `create_manual` / `recalc`。
+- 写头/写行/载入订单、发货、计划行、订单行的 `_load_*` / `_write_*`。
+
+**验收**
+- 手工建单与发货建单都能返回 `{id, invoice_no, status:'draft', line_ids}`。
+- `plan` / `none` 来源分别抛 `INVOICE_RELEVANCE_NOT_SUPPORTED` / `INVOICE_SOURCE_MISMATCH`。
+- 超量抛 `INVOICE_QTY_EXCEEDED`；金额按 ROUND_HALF_UP 4 位。
+
+---
+
+## [x] T4 服务状态流转与过账
+
+**文件**
+- 修改 `meta/services/customer_invoice_service.py`
+
+**内容**
+- `submit` / `cancel` / `post`（§5.4 八步）/ `recompute_order_billing`。
+- `_generate_schedules`（尾差归最后一期；`resolve_base_date` + `compute_due_date`）。
+- billed 条件更新与 doc_flow attach；`_emit_accounting_event_hook` 空实现。
+
+**验收**
+- 过账失败时事务回滚：头仍 `submitted`、billed 不变、无期次、无边。
+- 过账成功：Σ期次=gross；`billed_qty` / `billed_amount` / `billing_status` 正确。
+- doc_flow 规则缺失时过账仍成功（仅告警）。
+
+---
+
+## [x] T5 红冲
+
+**文件**
+- 修改 `meta/services/customer_invoice_service.py`
+
+**内容**
+- `reverse`：红字头/行（负数量负金额、`reversal_of_invoice_id`、`original_invoice_line_id`）、
+  原期次 cancelled、billed 反向回写、原单 reversed、`INVOICE_ALLOCATION_EXISTS` 检查。
+- `INVOICE_REVERSE_EXISTS` 防重复红冲。
+
+**验收**
+- 红字单无期次、金额为负、`posting_date >= 原 posting_date`。
+- 红冲后 `shipment_line.billed_qty` 与 `order_line.billed_*` 回到红冲前。
+- 已红冲原单不可再次红冲。
+
+---
+
+## [x] T6 守卫拦截器
+
+**文件**
+- 新增 `meta/core/interceptors/customer_invoice_guard_interceptor.py`
+- 修改 `meta/server.py`（import + 注册）
+- 修改 `meta/core/app_builder.py`（import + 注册）
+
+**内容**：按 `spec.md` §6 表格实现 header / line / schedule 三类写保护；
+状态迁移委托服务；`priority=51`。
+
+**验收**
+- `posted`/`reversed`/`cancelled` 头不可改、不可删。
+- `submitted` 头冻结源字段；`draft` 可改。
+- 行 XOR / relevance / 可用量 / 金额重算生效。
+- schedule 任意写一律拒绝。
+- 拦截器在两条注册路径都生效（单测直接实例化 + 注册函数各验一次）。
+
+---
+
+## [x] T7 一致性检查工具
+
+**文件**
+- 新增 `meta/tools/check_billing_relevance_consistency.py`
+
+**内容**：执行 §20.4 两条 SQL；打印违规明细；返回退出码（0=无违规，1=有违规）。
+
+**验收**
+- 手工造 1 条违规数据后退出码 1；修复后 0。
+- 不修改任何数据（只读查询）。
+
+---
+
+## [x] T8 测试与回归
+
+**文件**
+- 新增 `meta/tests/test_customer_invoice_service.py`（>=14 用例）
+- 新增 `meta/tests/test_customer_invoice_schedule.py`（>=6 用例）
+- 新增 `meta/tests/test_customer_invoice_guard.py`（>=8 用例）
+- 新增 `meta/tests/test_migration_v231.py`（>=4 用例）
+
+**内容**：按 `spec.md` §8 矩阵；夹具使用 in-memory sqlite + `_MemDS`，
+表结构与种子直接复用 v231 的 DDL 常量（避免两处漂移）。
+
+**验收**
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+```
+全部通过；再跑回归：
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_shipment_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_payment_term_schedule.py --port 3012
+```
+
+---
+
+## 收尾（批准后执行）
+
+1. 复核 `git status`：只含 T1-T8 列出的文件。
+2. 在 s8 worktree `git add`（逐文件）+ `git commit`，message：
+   `feat(billing): customer invoice wave A (schema, v231, service, guard, tests)`。
+3. 汇报：实现范围、回避的 TBD、测试结果、待拍板项（D19/D27/D28）。
+
+---
+
+## 依赖关系
+
+```
+T1 ─┬─> T2 ─┬─> T3 ─> T4 ─> T5
+    │       └─> T8（migration 用例）
+    └─> T6（需要 T3/T4 的 prepare/validate 方法）
+T7 独立（只依赖 T2 的列）
+```
+
+## 完成定义（DoD）
+
+- [x] T1-T8 全部完成，测试通过数 >= 32。
+- [x] `verify()` 自检通过；`check_billing_relevance_consistency.py` 在干净数据上退出码 0。
+- [x] 无 TBD 相关表/字段被引入（无 accounting_event、无 settlement_block_code、无 AR 收款核销）。
+- [x] 仅 s8 worktree 有一个新 commit，主工作树与 s7-worktree 未改动。

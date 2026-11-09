@@ -1,0 +1,483 @@
+# S8 Wave A 销售发票（customer_invoice）实施规格
+
+> 状态：**待批准（批准前不写代码）**
+> 日期：2026-11-09
+> 工作树：`D:\filework\s8-billing-worktree`（分支 `agent/s8-billing`，基线 `e35fe99d`，端口 3012）
+> 上游设计：`D:\filework\s7-worktree\docs\specs\spec-sales-order-billing-object-model-2026-11-07.md` §4-§11 / §20 / §30 / §31
+> 口径：只做 Wave A（发货开票 + 手工开票），`plan` 分支 fail-closed 拒绝；不含贷项/部分冲销/合并开票/跨币种/AR 台账/UI 页面。
+
+---
+
+## 1. 目标与验收口径
+
+### 1.1 目标
+
+把「开票计划（半成品）」接到一张独立事实单据上，补齐销售链路：
+
+```
+shipment_line --(delivery)--> customer_invoice_line --> customer_invoice(post)
+                                                         ├─ customer_invoice_schedule（期次）
+                                                         ├─ doc_flow 边（pool=billing）
+                                                         └─ 回写 shipment_line.billed_qty / order_line.billed_* / billing_status
+```
+
+### 1.2 验收（全部满足才算完成）
+
+- [ ] 三张新表 + 五个派生列由 v231 迁移幂等创建，`verify()` 自检通过。
+- [ ] 从已发运/已签收的发货单可生成草稿发票；重复开票、超量开票被拒。
+- [ ] `post` 原子完成：状态→posted、期次生成（Σ金额=gross）、billed 回写、doc_flow 边写入、billing_status 派生。
+- [ ] `reverse` 生成红字发票（负数量/负金额、无期次），回滚 billed、取消原期次、原单→reversed。
+- [ ] `plan`/`none` 开票来源一律 fail-closed，错误码可定位。
+- [ ] 新增测试：service >= 14、schedule >= 6、guard >= 8、migration >= 4，全部通过。
+- [ ] 回归：shipment / sales order / payment term 既有测试无失败。
+
+### 1.3 非目标（本波明确不做）
+
+- 计划行开票（Wave B）、服务确认开票（Wave C）、里程碑事件。
+- 贷项凭证行级部分冲销、借项通知单业务、合并跨单开票、跨币种。
+- AR 收款/核销/账龄/预付（`amount_applied` 仅保留 0 默认列）。
+- 期次受控变更（D27：严格只读，不做重排期）、超容差冻结（D28：不建 `settlement_block_code`）。
+- 前端页面与菜单手工配置（菜单由 `menu_auto_generator` 从 schema 自动生成）。
+
+---
+
+## 2. 已定口径与 TBD 回避
+
+| TBD | 本波处理 | 落地方式 |
+|---|---|---|
+| D3 `billing_percent` 口径 | 不触碰 | 不改 `sales_order_schedules.billing_percent` 语义；计划分支不参与开票 |
+| D6 L2 会计事件 | 只留 hook | `_emit_accounting_event_hook()` 空实现，不建表、不发消息 |
+| D11 一期分次 | 不做 | 期次只在过账时按付款条件一次性生成；无计划分期开票 |
+| D14/D15/D19 收款/核销/预付 | 不做 | 不建收款/核销对象；红冲前查询 `payment_allocations`，表不存在按 0 处理 |
+| D20 合同对象 | 不做 | 无合同外键、无合同金额校验 |
+| D27 期次受控变更 | 采用严格版 R-INV-22 | `customer_invoice_schedule` 任何写操作拒绝；红冲仅把原期次置 cancelled |
+| D28 容差冻结 | 不做 | 不建 `settlement_block_code`；超订单金额不阻断（留给 AR 侧决策） |
+
+**来源互斥（R-INV-3）**：Wave A 只允许 `shipment` / `sales_order` / `manual` 三种 `source_doc_type`；`billing_schedule` 与 `service_confirmation` 一律返回 `INVOICE_RELEVANCE_NOT_SUPPORTED`。
+
+---
+
+## 3. 数据模型
+
+> 三个 YAML 的结构（`aspects` / `ui_view_config` / `relations` / `indexes` / `semantics`）镜像
+> `meta/schemas/shipment.yaml`、`shipment_line.yaml`、`sales_order_schedule.yaml`；下面只列本对象的决策内容。
+
+### 3.1 `meta/schemas/customer_invoice.yaml`
+
+- `id: customer_invoice`，`table_name: customer_invoices`，`display_name_field: invoice_no`
+- `aspects: [audit_aspect, document_type_aspect]`
+- `numbering: {no_field: invoice_no, date_field: invoice_date, type_table: type_definitions}`
+- `org_scope: {mode: direct, field: org_id, function: finance, write_check: true}`
+- `deletion_policy: {mode: restrict, cascade_delete: [customer_invoice_lines]}`
+- `audit: {enabled: true, create: all, update: changed_only, delete: business_only}`
+- 不声明 `revision_policy`
+
+字段（与 §4 + §30.3 对齐）：
+
+| 字段 | 类型 | 必填 | 备注 |
+|---|---|---|---|
+| id | integer | 是 | PK |
+| invoice_no | string(30) | 是 | 唯一、取号后不可改 |
+| document_type_id | integer | 是 | `scope_bo=customer_invoice` + `level=header` |
+| invoice_date | date | 是 | 编号日期段基准 |
+| posting_date | date | 否 | 过账时为空则取 invoice_date |
+| status | enum | 是 | draft / submitted / posted / cancelled / reversed |
+| customer_account_id | integer | 是 | 售达方 |
+| bill_to_account_id | integer | 否 | 空=售达方 |
+| payer_account_id | integer | 否 | 空=售达方 |
+| bill_to_address_text | string(512) | 否 | 地址快照 |
+| tax_registration_no | string(64) | 否 | 购方税号快照 |
+| currency_id | integer | 是 | 必须等于订单币种（R-INV-18） |
+| exchange_rate | number(18,8) | 否 | 快照 |
+| exchange_rate_type | string(20) | 否 | 快照 |
+| exchange_rate_date | date | 否 | 快照 |
+| payment_term_id | integer | 否 | 过账时为空按即期（1 期 100%） |
+| incoterm_code | string(16) | 否 | 快照 |
+| net_amount / tax_amount / gross_amount | number(18,4) | 是 | 服务层汇总，默认 0 |
+| org_id | integer | 是 | 财务归属 |
+| sales_org_id | integer | 否 | 数据范围 |
+| project_id | integer | 否 | 单项目时填 |
+| reversal_of_invoice_id | integer | 否 | 红字单指向原单 |
+| reversal_reason | string(256) | 否 | 红冲原因 |
+| remark | text | 否 | 备注 |
+| created_at / updated_at | datetime | 是 | audit_aspect |
+
+状态机（rules）：
+
+```
+draft --submit--> submitted --post--> posted --reverse--> reversed
+  └--cancel--┘        └--cancel--┘
+```
+
+- `state_field_policies.readonly`（UI 元数据，守卫做强校验）：
+  - `submitted`: invoice_no / document_type_id / customer_account_id / bill_to_account_id / payer_account_id / currency_id / exchange_rate / exchange_rate_type / exchange_rate_date / org_id / sales_org_id
+  - `posted` / `reversed` / `cancelled`: 全部业务字段只读
+
+### 3.2 `meta/schemas/customer_invoice_line.yaml`
+
+- `id: customer_invoice_line`，`table_name: customer_invoice_lines`
+- `parent_object: customer_invoice`，`hierarchy: {parent_field: invoice_id, parent_object: customer_invoice}`
+- `aspects: [audit_aspect]`；`deletion_policy: {mode: cascade}`（随头级联，头删除由守卫限制为 draft）
+- 唯一键：`(invoice_id, line_no)`；索引：`(shipment_line_id)`、`(schedule_id)`、`(order_line_id)`
+
+字段（§5 + §30.4）：
+
+| 字段 | 类型 | 必填 | 备注 |
+|---|---|---|---|
+| id / invoice_id / line_no | integer | 是 | 行号在头内唯一 |
+| line_type_id | integer | 是 | `scope_bo=customer_invoice` + `level=line` |
+| source_doc_type | enum | 是 | shipment / sales_order / manual（其余拒绝） |
+| source_doc_id | integer | 否 | 来源头 id |
+| source_line_id | integer | 否 | 来源行 id |
+| shipment_line_id / schedule_id / order_line_id | integer | 否 | 语义快照键，只读 |
+| item_id | integer | 否 | 服务行可空 |
+| description | string(512) | 是 | 快照 |
+| uom_id | integer | 是 | 快照 |
+| qty | number(18,4) | 是 | 非红字 > 0 |
+| billing_basis | enum | 是 | quantity / percent / amount（Wave A 仅 quantity、amount） |
+| unit_price | number(18,6) | 是 | 快照/反算 |
+| net_amount / tax_amount / gross_amount | number(18,4) | 是 | 服务层计算 |
+| tax_code_id | integer | 是 | 快照 |
+| tax_rate_percent | number(9,4) | 是 | 快照 |
+| project_id / project_task_id | integer | 否 | 透传 |
+| billing_percent | number(9,4) | 否 | 按比例行使用（Wave A 仅预留） |
+| billing_base_amount | number(18,4) | 否 | 按金额行依据（Wave A 预留） |
+| price_source | enum | 是 | order / manual |
+| order_unit_price | number(18,6) | 否 | 改价前订单单价快照 |
+| price_change_reason | string(256) | 否 | 改价原因 |
+| price_change_approved_by | string(64) | 否 | 改价审批人 |
+| original_invoice_line_id | integer | 否 | 红字行指向原发票行 |
+
+约束（迁移 DDL 内 CHECK，schema 无声明机制）：
+
+```sql
+CHECK (
+  (shipment_line_id IS NOT NULL AND schedule_id IS NULL AND order_line_id IS NULL)
+  OR (shipment_line_id IS NULL AND schedule_id IS NOT NULL AND order_line_id IS NULL)
+  OR (shipment_line_id IS NULL AND schedule_id IS NULL AND order_line_id IS NOT NULL)
+  OR (shipment_line_id IS NULL AND schedule_id IS NULL AND order_line_id IS NULL)
+)
+CHECK (billing_basis IN ('quantity','percent','amount'))
+CHECK (source_doc_type IN ('shipment','sales_order','manual','billing_schedule','service_confirmation'))
+```
+
+### 3.3 `meta/schemas/customer_invoice_schedule.yaml`
+
+- `id: customer_invoice_schedule`，`table_name: customer_invoice_schedules`
+- `parent_object: customer_invoice`，`hierarchy: {parent_field: invoice_id, parent_object: customer_invoice}`
+- `aspects: [audit_aspect]`；`deletion_policy: {mode: restrict}`
+- 唯一键：`(invoice_id, schedule_no)`；索引：`(status, due_date)`、`(invoice_id)`
+- 无 rules / 无状态机（`status` 为服务层派生字段）
+
+| 字段 | 类型 | 必填 | 备注 |
+|---|---|---|---|
+| id / invoice_id / schedule_no | integer | 是 | 期次序号 1..N |
+| payment_term_line_id | integer | 否 | 回指付款条件行 |
+| ratio_percent | number(9,4) | 是 | 比例快照 |
+| due_date | date | 是 | 到期日 |
+| amount | number(18,4) | 是 | Σ=gross，尾差归最后一期 |
+| amount_applied | number(18,4) | 是 | 默认 0；AR 未建，本波不写 |
+| status | enum | 是 | open / partial / closed / cancelled，默认 open |
+| created_at / updated_at | datetime | 是 | audit_aspect |
+
+### 3.4 派生列（ALTER）
+
+| 表 | 列 | 类型 | 默认 | 说明 |
+|---|---|---|---|---|
+| sales_order_lines | billing_relevance | varchar(16) NOT NULL | 'delivery' | delivery / plan |
+| sales_order_lines | billed_qty | decimal(18,4) NOT NULL | 0 | 发票净数量累计 |
+| sales_order_lines | billed_amount | decimal(18,4) NOT NULL | 0 | 发票净额累计 |
+| sales_order_schedules | billed_amount | decimal(18,4) NOT NULL | 0 | Wave B 用，本波恒 0 |
+| sales_order_schedules | billing_status | varchar(16) NOT NULL | 'none' | none / partial / full / cancelled |
+| shipment_lines | billed_qty | decimal(18,4) NOT NULL | 0 | 已开票数量 |
+| sales_orders | billing_status | varchar(16) NOT NULL | 'none' | none / partial / full |
+| sales_orders | billing_derived_at | datetime NULL | NULL | 派生时间 |
+
+---
+
+## 4. 迁移 `meta/migrations/v231__customer_invoice.py`
+
+> 编号说明：本 worktree 当前最大 v230，故用 v231。`doc-flow-worktree` 有未合并的 v231/v232，
+> 合并时按实际顺序重排（迁移内容不变）。结构镜像 `v177__purchase_order_object.py`（建表/类型/序列/权限/verify）。
+
+执行顺序：
+
+1. **建表**（`CREATE TABLE IF NOT EXISTS`）：`customer_invoices`、`customer_invoice_lines`、`customer_invoice_schedules`，含 §3.2 的 CHECK 与全部列。
+2. **建索引**：唯一键 + 查询索引（见 §3.1-3.3）。
+3. **ALTER 加列**（先查 `PRAGMA table_info` 再用）：§3.4 全部 8 列。
+4. **类型种子**（`type_definitions`，先查 code 后插）：
+   - 头：`SINV`（标准销售发票，standard）、`SCR`（红字销售发票，credit_memo）、`SDN`（销售借项通知单，debit_memo），`scope_bo=customer_invoice`、`level=header`。
+   - 行：`INV_ITEM`（物料行）、`INV_SERVICE`（服务行）、`INV_DISCOUNT`（折扣行），`scope_bo=customer_invoice`、`level=line`、`line_category` 分别 material/service/discount、`delivery_relevant` 1/0/0。
+   - **纠偏**：上游 §9 写的行类型 code `ITEM/SERVICE/DISCOUNT` 与全局唯一约束冲突（`type_definitions.code` UNIQUE），统一加 `INV_` 前缀。
+5. **编号序列种子**（`number_sequences`）：`SINV` / `SCR` / `SDN`，pattern 均为 `{CODE}-{DATE:yyyymm}-{SEQ:5}`，`date_field=invoice_date`，`start_value=1`，`on_exhaust='error'`；回填 `type_definitions.number_sequence_id`。
+6. **回填 `billing_relevance`**：
+   ```sql
+   UPDATE sales_order_lines SET billing_relevance =
+     CASE WHEN billing_method = 'milestone'
+            AND EXISTS (SELECT 1 FROM sales_order_schedules s
+                        WHERE s.order_line_id = sales_order_lines.id
+                          AND s.schedule_kind = 'billing')
+          THEN 'plan' ELSE 'delivery' END;
+   ```
+7. **doc_flow 规则种子**（`doc_flow_rule`，先查后插）：`shipment_to_customer_invoice`，`source_bo=shipment_line`、`target_bo=customer_invoice_line`、`source_qty_field=qty`、`pool=billing`。
+8. **权限种子**（`permissions`，双段式，grant 到 admin/default）：
+   `customer_invoice:customer_invoice_view` / `_create` / `_post` / `_reverse` / `_cancel`。
+9. **不写** `settlement_block_code`（D28）、不建会计事件表（D6）。
+
+`verify()` 检查项：
+
+- 三表存在；8 个派生列存在；唯一索引存在。
+- `SINV/SCR/SDN/INV_ITEM/INV_SERVICE/INV_DISCOUNT` 存在且 `scope_bo=customer_invoice`；三个序列已绑定。
+- `doc_flow_rule` 有 `shipment_to_customer_invoice`。
+- `billing_relevance` 只含 delivery/plan；`plan` 行至少有一条 billing 计划行；非法值计数为 0。
+- 所有 `billed_qty` / `billed_amount` 初始为 0，`billing_status='none'` 之外的值计数为 0。
+- 权限 5 条存在且已授权 admin/default。
+- **直接查 DB 验证**（不信 `print`），失败抛错并返回 `ok=False`。
+
+---
+
+## 5. 服务 `meta/services/customer_invoice_service.py`
+
+### 5.1 骨架（镜像 shipment_service）
+
+- 常量：表名、状态、来源类型、规则码。
+- `CustomerInvoiceError(ValueError)` 携带 `field_name` / `rule`。
+- `_now()` / `_to_decimal()` / `_round(value, places)` / `_blank()` / `_atomic(ds)`。
+- 构造：`def __init__(self, data_source, platform_data_source=None)`。
+- 覆写点：`_load_*` / `_write_*` 便于测试注入。
+- 事务：`post` / `reverse` / `submit` / `cancel` 用 `_atomic(self.ds)`；取号在事务外。
+
+### 5.2 方法清单
+
+| 方法 | 签名 | 行为 |
+|---|---|---|
+| create_from_shipment | `(payload) -> dict` | 校验发货状态→逐行算可用量→建头+行→回算汇总→返回 id/invoice_no/status |
+| create_manual | `(payload) -> dict` | 手工建单（order_line 或 manual 行），同样走行校验 |
+| recalc | `(invoice_id) -> dict` | 重算行净/税/毛与头汇总；仅 draft/submitted |
+| submit | `(invoice_id) -> dict` | draft→submitted；校验至少 1 行、来源可用 |
+| post | `(invoice_id) -> dict` | submitted→posted；原子完成 §5.4 八步 |
+| cancel | `(invoice_id) -> dict` | draft/submitted→cancelled |
+| reverse | `(invoice_id, reason) -> dict` | posted→reversed + 生成红字发票；§5.5 |
+| prepare_header | `(payload, *, for_reversal=False) -> dict` | 守卫用：补默认值、取号、状态= draft |
+| validate_line_write | `(payload, existing=None, invoice=None) -> dict` | 守卫用：XOR/来源/可用量/金额重算 |
+| recompute_order_billing | `(order_id) -> dict` | 重算订单与订单行 billing_status |
+
+### 5.3 建单规则
+
+`create_from_shipment`：
+
+1. 载入 `shipments`：状态必须是 `shipped` / `delivered`；`reversed` / `cancelled` / 之前状态 → `INVOICE_SHIPMENT_STATE_INVALID`。
+2. 行缺省 = 该发货单未取消行中 `qty - billed_qty > 0` 的行。
+3. 每行：
+   - `shipment_line.schedule_id → sales_order_schedule(order_line_id) → sales_order_line`。
+   - `billing_relevance` 必须为 `delivery`：
+     - `plan` → `INVOICE_RELEVANCE_NOT_SUPPORTED`
+     - 其他/空 → `INVOICE_SOURCE_MISMATCH`
+   - 可用量 = `shipment_line.qty - COALESCE(billed_qty,0)`；请求量（缺省=可用量）必须 `> 0` 且 `<= 可用量`，否则 `INVOICE_QTY_EXCEEDED`。
+   - 金额：`net = ROUND(qty × order_line.unit_price, 4)`；`tax = ROUND(net × tax_rate/100, 4)`；`gross = net + tax`；`unit_price = order_line.unit_price`；`price_source='order'`。
+   - 行类型默认 `INV_ITEM`；`description = order_line.description or ('物料#%s' % item_id)`；`uom_id` 取订单行。
+4. 头快照：`customer_account_id` / `bill_to_account_id` / `payer_account_id` / `bill_to_address_text` / `currency_id` / `exchange_rate*` / `payment_term_id` / `incoterm_code` / `org_id` / `sales_org_id` / `project_id` 全部取自订单。
+5. 取号：`DocumentNumberService(self.ds).allocate_for('customer_invoice', payload, required=True)`（事务外）。
+6. 事务内写头（status=draft）→ 写行（line_no=1..N）→ `recalc`。
+7. 不写 doc_flow、不回写 billed、不生成期次。
+
+`create_manual`：
+
+- 头必填：`customer_account_id`、`currency_id`、`invoice_date`、`org_id`。
+- 行来源三选一：
+  - `shipment_line_id` → 按 delivery 规则（同上）。
+  - `order_line_id` → 校验 `billing_relevance='delivery'`；可用量 = `order_line.qty - billed_qty`；单价取订单行。
+  - 全空 → `source_doc_type='manual'`、`billing_basis=amount`、`qty=1`、`unit_price=payload.net_amount`、`tax_rate_percent` 必填、`price_source='manual'`。
+- `schedule_id` / `source_doc_type='billing_schedule'` → `INVOICE_RELEVANCE_NOT_SUPPORTED`（Wave B）。
+
+### 5.4 `post` 原子步骤
+
+1. 载入头，状态必须 `submitted`，否则 `INVOICE_STATE_INVALID`。
+2. 明细校验：至少 1 行；逐行 R-INV-3；来源未红冲（发货单非 reversed）；R-INV-4 可用量；R-INV-9 编号唯一。
+3. 汇总校验：`header.net/tax/gross == Σ line`（差额 > 0.0001 → `INVOICE_AMOUNT_MISMATCH`，R-INV-7）。
+4. 生成期次（R-INV-21/24/26）：
+   - 无 `payment_term_id` 或付款条件无行 → 1 期：ratio 100、due=invoice_date、amount=gross。
+   - 有付款条件：读 `payment_terms(basis_date_rule, cutoff_day)` + `payment_term_lines(seq, percentage, offset_months, fixed_day_of_month, offset_days)`；
+     - `base = payment_term_schedule_service.resolve_base_date(term, invoice_date)`
+     - `due_i = compute_due_date(base, term_line)`
+     - 前 N-1 期 `amount_i = ROUND(gross × ratio_i / 100, 4)`；最后一期 `= gross - Σ`（尾差归最后一期，R-INV-26）。
+     - 逐期顺延合并：`amount <= 0` 的期次并入下一期；若最后仍有剩余则并入上一期。
+     - 任一期 `due_date < invoice_date` → `INVOICE_TERM_INVALID`。
+     - 断言 `Σ amount == gross`，否则抛 `INVOICE_AMOUNT_MISMATCH`。
+   - 红字单（`reversal_of_invoice_id` 非空）跳过此步（R-INV-24）。
+5. 回写 billed（R-INV-16，缺一即回滚整单）：
+   ```sql
+   UPDATE shipment_lines
+      SET billed_qty = ROUND(COALESCE(billed_qty,0) + ?, 4)
+    WHERE id = ?
+      AND ROUND(COALESCE(billed_qty,0) + ?, 4) <= ROUND(qty, 4);
+   -- rowcount != 1 -> INVOICE_QTY_EXCEEDED
+   UPDATE sales_order_lines
+      SET billed_qty = ROUND(COALESCE(billed_qty,0) + ?, 4),
+          billed_amount = ROUND(COALESCE(billed_amount,0) + ?, 4)
+    WHERE id = ?
+      AND ROUND(COALESCE(billed_qty,0) + ?, 4) <= ROUND(qty, 4);
+   -- rowcount != 1 -> INVOICE_QTY_EXCEEDED
+   ```
+6. 写 doc_flow 边：按发货单分组，逐 `shipment_line_id → invoice_line_id` 调
+   `meta.core.doc_flow_attach.attach_edge(ds, platform_ds, 'shipment_to_customer_invoice', shipment_line_id, invoice_line_id, qty, target_item=str(invoice_line_id), unit=str(uom_id), derived_by='customer_invoice_service')`；失败只告警不阻断（与 shipment 一致）。
+7. 状态更新：`posting_date = payload or invoice_date`；`status='posted'`；`updated_at`。
+8. 事务提交后：`recompute_order_billing(order_id)` 重算受影响订单；`_emit_accounting_event_hook(invoice)` 空实现（D6）。
+
+### 5.5 `reverse` 规则
+
+1. 仅 `posted` 可红冲；`reversal_reason` 必填；同一原单已有红字单 → `INVOICE_REVERSE_EXISTS`。
+2. R-INV-23：查 `payment_allocations`（表不存在视为 0）；若有 `status='active'` 且 `amount > 0` 的核销 → `INVOICE_ALLOCATION_EXISTS`。
+3. 事务内：
+   - 建红字头：复制原头，`reversal_of_invoice_id=原 id`，`document_type_id` 取 `SCR`，`invoice_date=today`，`posting_date=max(today, 原 posting_date)`（R-INV-14），金额取负，`status=draft`。
+   - 建红字行：复制原行，`qty/net/tax/gross` 取负，`billing_basis='quantity'`，`original_invoice_line_id=原行 id`，保留来源键。
+   - 红字单直接置 `submitted` → 走 §5.4 第 4 步跳过期次、第 5 步反向回写：
+     ```sql
+     UPDATE shipment_lines SET billed_qty = ROUND(COALESCE(billed_qty,0) - ?, 4)
+      WHERE id = ? AND ROUND(COALESCE(billed_qty,0) - ?, 4) >= 0;
+     ```
+   - 原期次全部置 `status='cancelled'`，`amount_applied` 不变。
+   - 原单 `status='reversed'`；红字单 `status='posted'`。
+4. 事务后 `recompute_order_billing`。
+
+### 5.6 派生 `billing_status`
+
+- 订单行：`billed_qty >= qty` → `full`；`> 0` → `partial`；否则 `none`。
+- 订单：所有行 `full` → `full`；任一行 `> 0` → `partial`；否则 `none`；同时更新 `billing_derived_at`。
+- 计划行派生（Wave B）本波不写，保持 `none`。
+
+### 5.7 错误码
+
+`INVOICE_SHIPMENT_STATE_INVALID` / `INVOICE_RELEVANCE_NOT_SUPPORTED` / `INVOICE_SOURCE_MISMATCH` / `INVOICE_QTY_EXCEEDED` / `INVOICE_LINE_XOR` / `INVOICE_AMOUNT_MISMATCH` / `INVOICE_STATE_INVALID` / `INVOICE_POSTED_READONLY` / `INVOICE_DELETE_FORBIDDEN` / `INVOICE_SCHEDULE_IMMUTABLE` / `INVOICE_ALLOCATION_EXISTS` / `INVOICE_REVERSE_EXISTS` / `INVOICE_TERM_INVALID` / `INVOICE_POSTING_DATE_INVALID` / `INVOICE_NUMBER_UNAVAILABLE`。
+
+---
+
+## 6. 守卫 `meta/core/interceptors/customer_invoice_guard_interceptor.py`
+
+优先级 `51`（与 shipment 同批，对象不同互不冲突）；`should_execute` 覆盖
+`customer_invoice` / `customer_invoice_line` / `customer_invoice_schedule` 的 create/update/delete。
+
+| 对象 | 动作 | 行为 |
+|---|---|---|
+| header | create | `prepare_header` 补默认类型（SINV）、取号、status=draft、金额 0；任何非 draft 的显式状态拒绝 |
+| header | update | 当前 `posted`/`reversed`/`cancelled` → 除状态迁移外全字段拒绝（`INVOICE_POSTED_READONLY`）；`submitted` 冻结 §3.1 readonly 列表；状态迁移委托：submitted→`submit`，posted→`post`，cancelled→`cancel`，reversed→`reverse` |
+| header | delete | 仅 draft 可删，否则 `INVOICE_DELETE_FORBIDDEN` |
+| line | create/update | 调 `validate_line_write`：XOR、来源类型、relevance、可用量（排除本行）、金额重算；父单非 draft → 拒绝 |
+| line | delete | 父单仅 draft 可删行 |
+| schedule | create/update/delete | 一律 `INVOICE_SCHEDULE_IMMUTABLE`（R-INV-22） |
+
+注册（两处都要）：
+
+- `meta/server.py`：import + `register_interceptor(CustomerInvoiceGuardInterceptor())`
+- `meta/core/app_builder.py`：import + 注册到链
+
+---
+
+## 7. 工具与文档
+
+- `meta/tools/check_billing_relevance_consistency.py`：
+  执行 §20.4 两条 SQL（plan 行无 billing 计划、delivery 行无 delivery 计划），打印违规行，返回退出码 0/1。
+- 不改上游 spec（`s7-worktree` 只读）。
+- 不新增前端页面。
+
+---
+
+## 8. 测试矩阵
+
+### 8.1 `meta/tests/test_customer_invoice_service.py`（>=14）
+
+夹具：in-memory sqlite + `_MemDS(query/execute)`；建表和种子镜像 v231；预置客户、币种、税码、订单（delivery 行）、发货单（staged→shipped）。
+
+1. `create_from_shipment` happy：头/行快照、行号、金额、币种、客户。
+2. 拒绝 draft/staged 发货单。
+3. 拒绝 reversed 发货单。
+4. `plan` relevance → `INVOICE_RELEVANCE_NOT_SUPPORTED`。
+5. `none`/缺 relevance → `INVOICE_SOURCE_MISMATCH`。
+6. 超可开数量 → `INVOICE_QTY_EXCEEDED`。
+7. 部分开票：第一次 40/100 过账后可用 60；第二次 60 成功。
+8. 第二次 61 失败且 billed 不变。
+9. 无付款条件 → 1 期，due=invoice_date，amount=gross。
+10. 有付款条件 30/60/10，gross=1000.01 → 300.00 / 600.01 / 100.00（尾差）。
+11. post 回写 shipment_line.billed_qty、order_line.billed_qty/billed_amount、订单 billing_status=partial。
+12. 重复 post → `INVOICE_STATE_INVALID`。
+13. cancel：draft/submitted 可；posted 拒绝。
+14. reverse：红字单 posted、金额为负、无期次、原单 reversed、原期次 cancelled、billed 归零、订单 billing_status 回到 none。
+15. reverse 时存在 active 核销 → `INVOICE_ALLOCATION_EXISTS`。
+16. 头汇总与行不一致 → `INVOICE_AMOUNT_MISMATCH` 且事务回滚（status 仍 submitted）。
+
+### 8.2 `meta/tests/test_customer_invoice_schedule.py`（>=6）
+
+1. 无付款条件：1 期 100%。
+2. 30/60/10：到期日按 offset_days。
+3. 尾差：gross=0.01 → 三期合并为有效正额且 Σ=gross。
+4. 比例合计 90：最后一期吸收差额（amount > 比例金额）。
+5. 比例合计 110：最后一期为负 → 并入上一期，Σ=gross。
+6. 到期日早于 invoice_date → `INVOICE_TERM_INVALID`。
+7. 红字单不生成期次。
+（>=6 即通过，允许合并用例。）
+
+### 8.3 `meta/tests/test_customer_invoice_guard.py`（>=8）
+
+1. posted 头更新业务字段被拒。
+2. posted 头删除被拒。
+3. submitted 头改 invoice_no 被拒。
+4. 状态迁移到 posted 委托 service.post。
+5. 行 XOR（同时带 shipment_line_id + order_line_id）被拒。
+6. 行 relevance=plan 被拒。
+7. 行金额被服务重算（篡改 unit_price 不生效/被覆盖）。
+8. schedule 任意写被拒。
+9. draft 头可删除，级联删行。
+10. 手工行缺 tax_rate → 拒绝。
+
+### 8.4 `meta/tests/test_migration_v231.py`（>=4）
+
+1. 三表 + 索引创建成功。
+2. 8 个派生列存在且默认值正确。
+3. 类型/序列/规则/权限种子存在并已绑定。
+4. 回填：milestone + billing 计划 → plan；其余 → delivery；verify 通过。
+5. 幂等：`upgrade` 二次执行不报错、无重复种子。
+
+### 8.5 回归
+
+- `meta/tests/test_shipment_service.py`
+- `meta/tests/test_sales_order_service.py`（或实际文件名）
+- `meta/tests/test_payment_term_schedule.py`
+- `meta/tests/test_payment_term_guard.py`
+
+---
+
+## 9. 验证命令与通过标准
+
+```powershell
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_service.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_schedule.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_customer_invoice_guard.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_migration_v231.py --port 3012
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --file meta/tests/test_shipment_service.py --port 3012
+```
+
+通过标准：上述命令全部 `passed`；禁止 `pytest`；失败用 `--single` 定位后重跑。
+全部通过后在 **s8 worktree** `git add` + `git commit`（不碰主工作树、不碰 s7-worktree）。
+
+---
+
+## 10. 风险与回滚
+
+| 风险 | 处理 |
+|---|---|
+| v231 与 doc-flow-worktree 的 v231/v232 合并冲突 | 合并时按主树实际顺序重排文件名与 `MIGRATION_NAME`，内容不变；本波不改他人迁移 |
+| 期次比例合计非 100 | 尾差归最后一期，不报错；到期日异常才报 `INVOICE_TERM_INVALID` |
+| 回写 billed 并发超量 | 条件 UPDATE + rowcount 校验，失败整单回滚（R-INV-16） |
+| doc_flow 表/规则缺失 | attach 失败仅告警，不阻断过账（与 shipment 一致） |
+| AR 核销表不存在 | 视为 0 条核销，允许红冲（D14/D19 未定稿的隔离） |
+| 回滚方式 | 本波仅新增表/列/服务/测试，不改既有表结构；回滚 = 撤销 commit + 不执行 v231 |
+
+---
+
+## 11. 需批准项（Approval Checklist）
+
+- [ ] 范围：仅后端 Wave A（对象/schema/迁移/服务/守卫/测试），不做 UI 页面。
+- [ ] 迁移号用 **v231**（已知与 doc-flow-worktree 未合并编号冲突，合并期重排）。
+- [ ] 行类型 code 用 `INV_ITEM` / `INV_SERVICE` / `INV_DISCOUNT`（修正上游 §9 的全局唯一冲突）。
+- [ ] 计划开票 fail-closed（`plan` 一律拒绝），严格期次只读（D27），不建 `settlement_block_code`（D28）。
+- [ ] 允许开始编码（S8-A1..A9）。

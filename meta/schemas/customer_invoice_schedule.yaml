@@ -1,0 +1,305 @@
+# 销售发票应收期次 (Customer Invoice Schedule) — S8 Wave A
+# 依据: docs/specs/s8-customer-invoice-wave-a/spec.md §3.3
+#       docs/specs/spec-sales-order-billing-object-model-2026-11-07.md §30.5
+#
+# 定位: 发票过账时按付款条件展开的应收期次（金额 Mall）。不是收款项，
+#       本波只出「应收发生额」，收款/核销由 AR 侧后续实现。
+#
+# 服务层不变量:
+#   R-INV-21 Σ amount = 发票 gross（尾差归最后一期）
+#   R-INV-22 posted 后任何期次不可改（严格只读，不做重排期）
+#   R-INV-24 红字发票不生成期次
+#   R-INV-25 头不设已收金额列，amount_applied 默认 0 且本波不写
+
+id: customer_invoice_schedule
+name: 应收期次
+table_name: customer_invoice_schedules
+description: 销售发票应收期次（过账时按付款条件生成，只读）
+display_name_field: id
+parent_object: customer_invoice
+
+hierarchy:
+  parent_field: invoice_id
+
+semantics:
+  meaning: 销售发票应收期次
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 应收期次
+    - 收款计划
+    - Invoice Schedule
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+org_scope:
+  mode: chain
+  via: invoice_id
+  host: customer_invoice
+  function: accounting
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: invoice_id
+    name: 销售发票
+    type: integer
+    db_column: invoice_id
+    required: true
+    description: 所属销售发票（父字段）
+    semantics:
+      meaning: 所属销售发票
+      display:
+        type: association
+        target_type: customer_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: customer_invoice
+      hidden_in_form: true
+
+  - id: schedule_no
+    name: 期次序号
+    type: integer
+    db_column: schedule_no
+    required: true
+    description: 期次序号（从 1 递增）
+    semantics:
+      meaning: 期次序号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 期次
+      filter_scope: local
+    ui:
+      widget: number
+      editable: false
+
+  - id: payment_term_line_id
+    name: 付款条件行
+    type: integer
+    db_column: payment_term_line_id
+    nullable: true
+    description: 来源付款条件行（即期为空）
+    semantics:
+      meaning: 来源付款条件行
+      display:
+        type: association
+        target_type: payment_term_line
+        display_field: seq
+    ui:
+      widget: select
+      relation: payment_term_line
+      multiple: false
+      hidden_in_form: true
+
+  - id: ratio_percent
+    name: 比例(%)
+    type: number
+    db_column: ratio_percent
+    required: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 期次比例快照
+    semantics:
+      meaning: 期次比例
+    ui:
+      widget: number
+      editable: false
+
+  - id: due_date
+    name: 到期日
+    type: date
+    db_column: due_date
+    required: true
+    description: 应收到期日
+    semantics:
+      meaning: 应收到期日
+      filterable: true
+      filter_type: date
+      filter_label: 到期日
+      filter_scope: local
+    ui:
+      widget: date
+      editable: false
+
+  - id: amount
+    name: 期次金额
+    type: number
+    db_column: amount
+    required: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 期次应收金额（Σ = 发票价税合计）
+    semantics:
+      meaning: 期次应收金额
+    ui:
+      widget: number
+      editable: false
+
+  - id: amount_applied
+    name: 已核销金额
+    type: number
+    db_column: amount_applied
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 已核销金额（AR 侧写入；本波只读，恒 0）
+    semantics:
+      meaning: 已核销金额
+    ui:
+      widget: number
+      editable: false
+
+  - id: status
+    name: 期次状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    description: 期次状态（open / partial / closed / cancelled）
+    enum_values:
+      - value: open
+        label: 未收款
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分收款
+        color: warning
+        category: active
+      - value: closed
+        label: 已收清
+        color: success
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 期次状态
+      filterable: true
+      filter_type: enum
+      filter_label: 期次状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [invoice_id, schedule_no]
+    unique: true
+    name: uq_customer_invoice_schedule_no
+  - fields: [invoice_id]
+    name: idx_customer_invoice_schedule_invoice
+  - fields: [status, due_date]
+    name: idx_customer_invoice_schedule_status_due
+
+relations:
+  - id: customer_invoice_schedule_to_invoice
+    name: 所属发票
+    type: reference
+    target: customer_invoice
+    source_field: invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 所属销售发票引用
+  - id: customer_invoice_schedule_to_term_line
+    name: 付款条件行
+    type: reference
+    target: payment_term_line
+    source_field: payment_term_line_id
+    target_field: id
+    cardinality: N:1
+    description: 来源付款条件行引用（可空）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 应收期次
+    columns:
+      - field: schedule_no
+        width: 80
+      - field: ratio_percent
+        width: 110
+      - field: due_date
+        width: 130
+        sortable: true
+      - field: amount
+        width: 130
+      - field: amount_applied
+        width: 130
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: false
+    defaultSort:
+      field: schedule_no
+      order: asc
+  form:
+    title: 应收期次
+    layout: vertical
+    sections:
+      - title: 期次
+        columns:
+          - fields: [schedule_no, ratio_percent]
+          - fields: [due_date, amount]
+          - fields: [amount_applied, status]
