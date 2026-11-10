@@ -237,6 +237,31 @@ class TestOrderWrite:
                 {'document_type_id': 101, 'sales_org_id': 318}, is_create=True)
         assert e.value.rule == 'document_type_scope'
 
+    # D46：关闭前置 —— 只阻断 partial
+    def _close_order(self, billing_status):
+        ds = _ds()
+        ds.orders = {12: dict(ORDERS[12], billing_status=billing_status)}
+        return SalesOrderGuardService(ds).validate_order_write(
+            {'id': 12, 'status': 'closed'}, old_data=dict(ORDERS[12]),
+            is_create=False)
+
+    def test_guard_close_blocked_when_billing_partial(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            self._close_order('partial')
+        assert e.value.rule == 'ORDER_BILLING_INCOMPLETE'
+        assert e.value.field_name == 'billing_status'
+
+    def test_guard_close_allowed_when_billing_full(self):
+        self._close_order('full')
+
+    def test_guard_close_allowed_when_billing_none(self, monkeypatch):
+        messages = []
+        monkeypatch.setattr(
+            'meta.services.sales_order_guard_service.logger.info',
+            lambda msg, *args: messages.append(msg % args if args else msg))
+        self._close_order('none')
+        assert any('尚未开票' in m for m in messages)
+
     def test_sales_org_requires_sales_function(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds()).validate_order_write(

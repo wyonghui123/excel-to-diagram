@@ -365,6 +365,17 @@ class SalesOrderGuardService:
                     f'订单尚未履约完成（当前 {current}），不能关闭',
                     field_name='fulfillment_status',
                     rule='ORDER_NOT_FULFILLED')
+            # D46：开票进行中（partial）阻断关闭；none / full 放行
+            billing_status = self._load_billing_status(data.get('id'))
+            if billing_status == 'partial':
+                raise SalesOrderGuardError(
+                    '订单仍有未开票金额（billing_status=partial），不能关闭',
+                    field_name='billing_status', rule='ORDER_BILLING_INCOMPLETE')
+            if billing_status == 'none':
+                logger.info(
+                    '[sales_order_guard] 关闭订单 %s 时尚未开票'
+                    '（billing_status=none），按 D46 放行并记审计',
+                    data.get('id'))
 
         # R8：非草稿后禁止改 order_no / document_type_id / currency_id
         if old_status and old_status != DRAFT:
@@ -1221,6 +1232,25 @@ class SalesOrderGuardService:
         if not rows:
             return None
         return rows[0].get('fulfillment_status')
+
+    def _load_billing_status(self, order_id: Any) -> Optional[str]:
+        """读订单派生开票状态（D46 Close 前置）。
+
+        读不到 / 查询失败返回 None，由调用方按 fail-open 放行。
+        """
+        if _is_blank(order_id):
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT billing_status FROM sales_orders WHERE id = ?',
+                [order_id])
+        except Exception as e:  # 查询失败 → fail-open
+            logger.warning(
+                f'[sales_order_guard] 读取订单 {order_id} 开票状态失败: {e}')
+            return None
+        if not rows:
+            return None
+        return rows[0].get('billing_status')
 
     def _header_discount_lines(self, order_id: Any):
         """读订单行的净额与两调整列；查询失败返回 None（fail-open）。"""
