@@ -1635,12 +1635,19 @@ class SalesOrderGuardService:
 
     def validate_schedule_write(self, data: Dict[str, Any],
                                 old_data: Optional[Dict[str, Any]] = None,
-                                is_create: bool = True) -> None:
+                                is_create: bool = True,
+                                *,
+                                system_generated: bool = False) -> None:
         """计划行创建 / 更新前校验。
 
         `data` 是「写入后的有效行」（更新场景 = 旧行 ∪ 本次参数）。
         读侧异常一律 fail-open：取不到订单 / 订单行时不做判定，
         缺失引用交给外键与必填校验兜底。
+
+        `system_generated=True` 仅由 BillingPlanService 在订单确认后自动生成
+        billing 期次（Wave C T37/T38）时传入：R-SCH-5 的「非草稿禁止新增」
+        对系统生成放行，人工路径保持原样；billing 自身的比例 / 独占字段校验
+        （R-SCH-11/12/13）仍然生效。
         """
         old = old_data or {}
         kind = data.get('schedule_kind')
@@ -1690,7 +1697,8 @@ class SalesOrderGuardService:
             if not _is_blank(parent_order_id) else {}
         parent_status = (order or {}).get('status')
         if parent_status and parent_status != DRAFT:
-            if is_create:
+            if is_create and not (system_generated
+                                  and str(kind) == 'billing'):
                 raise SalesOrderGuardError(
                     f'订单处于 {parent_status} 状态，不允许新增计划行',
                     field_name='status', rule='SCHEDULE_LOCKED')
@@ -1704,7 +1712,7 @@ class SalesOrderGuardService:
                 frozen = [f for f in data if f not in editable]
             changed = [f for f in frozen
                        if str(data.get(f)) != str(old.get(f))]
-            if changed:
+            if not is_create and changed:
                 raise SalesOrderGuardError(
                     f'订单处于 {parent_status} 状态，计划行只允许修改 '
                     f'{"/".join(editable)}',
