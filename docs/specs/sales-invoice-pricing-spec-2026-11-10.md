@@ -17,6 +17,7 @@
 | D-05 | **不新建 `rounding_profile` 实体**：精度=`currencies.decimal_places`，方向=`rounding_mode` 字典，税方向=`tax_codes.rounding`；现金舍入（MAU）/税舍入层级按 TBD-8/TBD-9 触发式评估 | 用户 2026-11-10 评审（见 §11.2） |
 | D-06 | **发票税额舍入方向与订单同口径**：重算税读 `tax_codes.rounding`，不再固定 half-up | 用户 2026-11-10（对应 G10） |
 | D-07 | **付款期次金额走币种精度**：过账生成的 `customer_invoice_schedules.amount` 按 `currency.decimal_places` 舍入，尾差归末期 | 用户 2026-11-10（对应 G8） |
+| D-08 | **服务开票载体**：服务「已交付」事实**不以收货单承载**，按 `items.billing_method_default` 三分——`fixed_price`=开票计划期次（已实现）、`milestone`=补计划行固定金额、`time_and_material`=补服务确认开票 action；**更正**：`R-RC-14 / D-RC-13` 属采购侧 PO 服务验收，不得引用到销售侧；`work_order` 是服务执行单据，非确认载体 | 用户 2026-11-10 评审（见 §11.3） |
 
 ---
 
@@ -611,17 +612,20 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 | TBD-8 | 发票税/净额舍入**层级**：行级（逐行算完再求和）还是单据级（汇总后一次舍入）？ | FR-003 规则 1 | **本期固定行级**（与订单/引擎同口径，零回归）；单据级需新增「层级」配置位，属 TBD-9 的 profile 触发条件之一。触发信号：出现「按行舍入与按单舍入导致总税额差 ≥ 1 个最小单位、且客户合同要求按单据级」的实际单据 | 本期不做（行级） |
 | TBD-9 | `rounding_profile`（舍入档）何时建？最小 schema 是什么？ | FR-003 / §7.4.2 | **P2 触发式**：只有当「方向 + 精度 + 单位（MAU）+ 层级」四要素出现**同币种/同税制内多套并存**且无法用现有字典表达时才建；最小 schema 见 §11.2.5（含旧字段迁移要求，禁止双真源） | 已裁决（§11.2） |
 | TBD-10 | 是否支持 `Extended Precision`（扩展精度）与 `Minimum Accountable Unit`（MAU，现金舍入单位）？ | FR-003 规则 7 | **本期不做**。当前无计算引擎消费者（发票/订单均按 `decimal_places` 一次性舍入，无「记账精度 vs 现金支付精度」双精度场景）。触发信号：出现「发票/台账 2 位、实际收付按 0.05 进位」的币种法规要求（如 CHF/CAD 现金舍入）时，按 TBD-9 同批评估 | 本期不做 |
+| TBD-11 | 服务确认开票的接口契约与实施顺序（`create_from_service_confirmation` / 计划行固定金额）？ | §11.3（本 Spec 未覆盖的新增链路） | **本期不实施**。建议顺序 C（里程碑固定金额）→ A（服务确认 action）→ B（保持开票计划期次）；触发信号：出现需按 T&M 或里程碑计费的销售服务合同，且客户不接受把服务收入塞进 `billing` 期次 | 待排期 |
 
 ---
 
-## 11. 附：服务层 billing 覆盖审查与舍入档裁决
+## 11. 附：服务层 billing 覆盖审查、舍入档与载体裁决
 
-> 本节记录 2026-11-10 两轮分析结论，是 D-05/D-06/D-07 与 G8-G11 的推导依据。
-> 目的是让后续维护者不必重新研究 Fusion/SAP，就能理解「为什么只加消费者、不建新表」。
+> 本节记录 2026-11-10 三轮分析结论，是 D-05/D-06/D-07/D-08 与 G8-G11 的推导依据。
+> 目的是让后续维护者不必重新研究 Fusion/SAP，就能理解「为什么只加消费者、不建新表」，
+> 以及「服务为什么不用收货单作为开票载体」。
 
 ### 11.1 服务层 billing 覆盖审查（代码已核实）
 
-**结论：主链路已覆盖，缺口集中在「金额精度/方向/分摊明细」三处，不涉及链路结构。**
+**结论：已实现链路已覆盖，缺口集中在「金额精度/方向/分摊明细」三处，不涉及链路结构；
+服务类销售（T&M / 里程碑）尚无建单链路，见 §11.3。**
 
 | 链路环节 | 服务 / 函数 | 是否覆盖 Spec 约束 | 结论 |
 |---|---|---|---|
@@ -715,7 +719,74 @@ fields:
 
 **迁移前置条件（强制）**：`allocation_rule` / `allocation_result` / `rate_type` / `pricing_period` / `tax_code` 五处 `rounding` 字段必须**同批**改为 `rounding_profile_id` 引用或删除，且 `round_amount` 增加 profile 参数；否则视为驳回（第二真源）。
 
+### 11.3 服务开票载体：Fusion 对标与 R-RC-14 定位更正
+
+#### 11.3.0 更正声明（重要）
+
+2026-11-10 早前分析曾引用 `spec-receipt-object-model-2026-11-01.md` 的 **R-RC-14**「服务计划行（`schedule_kind='service'`）按 `qty_received` 视为验收量；不额外建验收单」作为**销售侧**服务确认的依据，并据此提出「复用收货单」方案。**该引用错误，现予撤回**：
+
+- R-RC-14 / D-RC-13 的宿主是 `purchase_order_schedule.yaml`，其 `schedule_kind` 只有 `delivery / service` 两种，且采购侧开票计划不由该对象承载；
+- 对应 `PO_SERVICE` 单据类型：`qty_received` 即**买方**的服务验收量，后续用于采购发票按验收量开票；
+- `receipts` 的 `source_doc_type` 枚举（`purchase_order / transfer_order / work_order / sales_return / intercompany`）与 action `create-vendor-return` 均表明其语义是**采购收货 + 库存/退货**，存在卖方不可用的库存与退货耦合，也无销售侧头。
+
+**结论：收货单不能作为销售侧服务确认载体**（见 §11.3.4 方案 D——拒绝）。
+
+#### 11.3.1 术语：四个「Receipt」不可混用
+
+| 名称 | 所属域 | 语义 | 本项目对应 |
+|---|---|---|---|
+| Receiving Receipt（RCV） | 采购/库存（买方） | 货物到货或服务被接收，驱动入库与应付 | `receipts`（`source_doc_type=purchase_order/transfer_order/...`） |
+| AR Receipt | 应收（卖方资金侧） | 客户付款的收款单，与开票无关 | 未建（属财务模块边界，见 `spec-project-g15-finance-boundary-2026-11-04.md`） |
+| RMA / Return Receipt | 退货 | 客户退货的接收 | `receipts.source_doc_type='sales_return'` |
+| Inventory / Completion Receipt | 生产/库存 | 工单完工入库 | `receipts.source_doc_type='work_order'`（契约占位） |
+
+即：同一个英文词在 Fusion 里覆盖四个不同对象，**「服务被确认」只在 RCV（买方）语境下是收货单事件，在销售侧不是**。
+
+#### 11.3.2 Fusion 销售侧服务的三条开票路径
+
+| 服务形态 | Fusion 机制 | 开票触发事实 | 是否经过发货/收货 |
+|---|---|---|---|
+| 一次性固定价交付 | OM **Bill Only** 行流 | 订单行「履约完成 → 直接进发票接口」，明确不调度、不发货 | 否 |
+| 工时/材料（T&M） | **Project Billing**（可计费支出项 Expenditure Item） | 可计费工时/支出项累计 → 生成发票 | 否 |
+| 重复计费（维保/订阅） | **Service Contracts**（计费计划 Billing Schedule） | 计费期次到期 | 否 |
+
+**关键事实**：Fusion 在**销售侧没有名为「service confirmation」的单据对象**；「服务已交付」事实由上述三条路径之一承载，且**三条均不经过收货单，也不经过发货单**。
+
+#### 11.3.3 本项目映射与缺口（按 `items.billing_method_default` 三分）
+
+| 计费方式 | Fusion 对标 | 本项目现状 | 缺口 |
+|---|---|---|---|
+| `fixed_price`（固定价） | Bill Only / Service Contracts | `sales_order_schedules(schedule_kind='billing')` → `create_from_schedule`（Wave B 已实现，精度/分摊见 §11.1） | ✅ 无 |
+| `milestone`（里程碑） | Service Contracts 里程碑计费 | `work_orders` `resolve` 只结算 SLA 里程碑并回写服务计划行 `completed`；服务计划行无固定金额字段 | ❌ **缺口②**：里程碑金额无承载（建议对 `sales_order_schedule` 增补 `fixed_amount`，或在 `billing` 期次上按金额而非比例开票） |
+| `time_and_material`（工时材料） | Project Billing | `time_entries.billable` 字段存在但**无开票消费者**；`service_confirmation` 来源在服务层 fail-closed | ❌ **缺口①**：无 `create_from_service_confirmation` 动作（主缺口） |
+| 实物（goods） | Shipping → Invoice | `shipments` → `create_from_shipment` | ✅ 无 |
+
+#### 11.3.4 载体裁决
+
+| 方案 | 内容 | 判定 |
+|---|---|---|
+| **A** 服务确认开票 action | 新增 `create_from_service_confirmation`，事实源 = 已 `completed` 的服务计划行 + 可计费工时 / 里程碑结算；发票 `source_doc_type=service_confirmation`。**不新建单据表**（`service_confirmation` 在 `spec-doc-flow-single-fact-model-2026-11-05.md` §5.8/§5.9 已预留规则位与 pool，本期只补生产端 action） | ✅ 推荐，补 T&M 主缺口 |
+| **B** 开票计划期次 | 服务收入也走 `schedule_kind='billing'` 期次 | ✅ 已实现，覆盖 `fixed_price`；不足以表达 T&M |
+| **C** 里程碑固定金额 | 服务计划行补 `fixed_amount`，里程碑结算后即可开票 | ✅ 改动最小，优先实施 |
+| **D** 复用采购收货单（R-RC-14 / PO_SERVICE） | 用 `receipts` 承载销售侧服务确认 | ❌ **拒绝**：买方语义 + 库存/退货耦合 + 无卖方头（见 §11.3.0） |
+
+**实施顺序（写入 TBD-11）**：C（改动最小）→ A（补 T&M 主缺口）→ B（保持现状）。
+
+#### 11.3.5 Work Order 的角色（澄清，不作载体）
+
+- `work_order` 是**服务执行单据**：`work_order.yaml` 的 `schedule_id` 对服务工单必填且要求 `schedule_kind='service'`；`work_order_service` 的 `resolve` 只做「SLA 里程碑结算 + 回写服务计划行 `completed`」，**无完工入库、无验收、无开票语义**。
+- 生产工单才有完工入库，`receipts.source_doc_type='work_order'` 是生产工单完工入库的**契约占位**，与服务开票无关。
+- 因此 Work Order 是「服务已交付」事实的**产生者之一**（T&M 工时来源、里程碑结算来源），而不是开票载体。
+
 **Sources**
-- Oracle Fusion：`research-fusion-billing-deep-dive-2026-11-09.md` §币种精度/税制舍入/价目表 Round To
-- SAP：条件类型舍入规则、T001R（公司代码×币种舍入单位）、`DIFF` 条件类型、Rounding Profile（数量语义）
-- 项目内：`meta/core/rounding.py`（方向静态镜像 + 测试锁定）、`meta/schemas/currency.yaml#decimal_places`（精度注释）、`meta/services/sales_order_amount_service.py#L60-L80`（税方向参照实现）
+
+- **舍入（§11.2）**
+  - Oracle Fusion：`research-fusion-billing-deep-dive-2026-11-09.md` §币种精度/税制舍入/价目表 Round To
+  - SAP：条件类型舍入规则、T001R（公司代码×币种舍入单位）、`DIFF` 条件类型、Rounding Profile（数量语义）
+  - 项目内：`meta/core/rounding.py`（方向静态镜像 + 测试锁定）、`meta/schemas/currency.yaml#decimal_places`（精度注释）、`meta/services/sales_order_amount_service.py#L60-L80`（税方向参照实现）
+- **载体（§11.3）**
+  - Oracle Fusion Receiving（RCV）对货物与服务的统一接收；P2P 流程挖掘模板把「服务已交付确认」建模为 *receipt against a Service line*（即买方事件）
+  - Oracle Fusion AR：AR Receipt = 客户付款（`apps2fusion` 等实施资料，与开票/收货无关）
+  - Oracle Fusion OM：**Bill Only** 行流——「scheduling and shipping are not necessary… fulfills the order line, then proceeds with invoice interface」
+  - Oracle Fusion **Project Billing**：可计费支出项（Expenditure Item）作为 T&M 开票事实；**Service Contracts**：计费计划作为重复计费事实
+  - 项目内：`meta/schemas/receipt.yaml#source_doc_type`（采购/库存语义）、`docs/specs/spec-receipt-object-model-2026-11-01.md` L232/L337（R-RC-14、PO_SERVICE 属采购侧）、`meta/schemas/purchase_order_schedule.yaml#schedule_kind`（仅 delivery/service）、`meta/schemas/sales_order_schedule.yaml#schedule_kind`（delivery/billing/service）、`meta/schemas/work_order.yaml#schedule_id`、`meta/services/work_order_service.py`（resolve = SLA 结算 + 计划行 completed）、`meta/schemas/items.yaml#billing_method_default`、`meta/schemas/time_entry.yaml#billable`
