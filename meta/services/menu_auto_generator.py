@@ -17,8 +17,10 @@
 - 支持 SAP PFCG 风格的菜单-权限联动
 """
 
+import hashlib
 import json
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -27,6 +29,17 @@ from meta.core.models import MetaObject, registry
 logger = logging.getLogger(__name__)
 
 _MENU_LAST_MTIME = None
+
+# [TEST-EFF P1-3] persist_to_db 声明哈希守卫
+# _schema_mtime_changed() 只是进程内 mtime 缓存：每个新进程 _MENU_LAST_MTIME 为
+# None ⇒ 必然返回 True ⇒ 整轮 persist（约 200 条 INSERT OR IGNORE 逐条提交，
+# 实测约 1.1-1.2s/进程）。改为「声明哈希 + 菜单齐全」守卫，记录落在同库的
+# menu_sync_guard（与 init_menu_permissions 的菜单声明守卫共用表、不同 key）。
+# 维护约定：持久化字段/语义变化时 _PERSIST_DECLARATION_VERSION +1。
+# v2: _derive_bo_bindings 去重改为保序（消除 set 迭代顺序的跨进程抖动）。
+_PERSIST_DECLARATION_VERSION = 2
+_PERSIST_GUARD_KEY = 'menu_auto_generator'
+_GUARD_TABLE = 'menu_sync_guard'
 
 
 def _schema_mtime_changed() -> bool:
@@ -71,6 +84,71 @@ def _mark_menu_synced():
             _MENU_LAST_MTIME = max_mtime
     except Exception:
         pass
+
+
+def _persist_declaration_hash(menus: List[Dict]) -> str:
+    """计算「自动菜单持久化声明」的 sha256。
+
+    覆盖生成结果本身（按 menu_code 排序的完整 menu dict），而非版本号：
+    生成逻辑/元数据不变 ⇒ 哈希不变；任一菜单字段变化 ⇒ 哈希变化。
+    """
+    hasher = hashlib.sha256()
+    hasher.update(f"menu-auto-persist-v{_PERSIST_DECLARATION_VERSION}\n".encode('utf-8'))
+    for menu in sorted(menus, key=lambda m: m.get('menu_code', '')):
+        hasher.update(
+            json.dumps(menu, sort_keys=True, ensure_ascii=False).encode('utf-8') + b"\n")
+    return hasher.hexdigest()
+
+
+def _row_field(row, index: int, key: str):
+    """兼容 tuple / sqlite3.Row / dict 三种行形式。"""
+    return row[index] if isinstance(row, (tuple, list)) else row[key]
+
+
+def _ensure_guard_table(data_source) -> None:
+    data_source.execute(
+        f"CREATE TABLE IF NOT EXISTS {_GUARD_TABLE} ("
+        "guard_key TEXT PRIMARY KEY,"
+        "guard_value TEXT NOT NULL,"
+        "updated_at TEXT)")
+
+
+def _guard_hit(data_source, declaration_hash: str, menu_codes: List[str]) -> bool:
+    """命中前提 = 哈希一致 且 生成的每个 menu_code 都已在 menus 表中。"""
+    try:
+        _ensure_guard_table(data_source)
+        cursor = data_source.execute(
+            f"SELECT guard_value FROM {_GUARD_TABLE} WHERE guard_key = ?",
+            [_PERSIST_GUARD_KEY])
+        row = cursor.fetchone() if cursor is not None else None
+        stored = _row_field(row, 0, 'guard_value') if row is not None else ''
+        if not stored or stored != declaration_hash:
+            return False
+
+        cursor = data_source.execute("SELECT menu_code FROM menus")
+        actual = {
+            _row_field(r, 0, 'menu_code')
+            for r in (cursor.fetchall() if cursor is not None else [])
+        }
+        missing = set(menu_codes) - actual
+        if missing:
+            logger.info(
+                "[MenuAutoGuard] 声明未变但缺失菜单 %d 个，回落全量持久化: %s",
+                len(missing), sorted(missing)[:5])
+            return False
+        return True
+    except Exception as e:
+        logger.warning("[MenuAutoGuard] 守卫检查失败，回落全量持久化: %s", e)
+        return False
+
+
+def _write_guard(data_source, declaration_hash: str) -> None:
+    _ensure_guard_table(data_source)
+    data_source.execute(
+        f"INSERT OR REPLACE INTO {_GUARD_TABLE} (guard_key, guard_value, updated_at) "
+        "VALUES (?, ?, ?)",
+        [_PERSIST_GUARD_KEY, declaration_hash,
+         datetime.now().isoformat(timespec='seconds')])
 
 
 class MenuAutoGenerator:
@@ -218,8 +296,10 @@ class MenuAutoGenerator:
                     include_actions.append('grant')
                     include_actions.append('revoke')
         
-        # 3. 去重
-        include_actions = list(set(include_actions))
+        # 3. 去重（保序：set 迭代顺序受 PYTHONHASHSEED 随机化影响，
+        #    会导致生成的 bo_bindings/required_permissions 跨进程顺序不同，
+        #    进而使 [TEST-EFF P1-3] 声明哈希不稳定、守卫永远 miss）
+        include_actions = list(dict.fromkeys(include_actions))
         
         return [{
             'bo_id': meta_obj.id,
@@ -310,8 +390,22 @@ class MenuAutoGenerator:
             logger.debug("[MenuAutoGenerator] No YAML changes detected, skipping persist_to_db")
             return 0
 
+        # 仅「默认自动生成」路径启用声明守卫；force / 显式 menus（应用包场景）
+        # 保持原全量语义，避免与启动路径的声明哈希互相污染。
+        auto_path = menus is None and not force
         if menus is None:
             menus = self.generate_all()
+
+        declaration_hash = None
+        if auto_path:
+            declaration_hash = _persist_declaration_hash(menus)
+            menu_codes = [m.get('menu_code') for m in menus if m.get('menu_code')]
+            if _guard_hit(data_source, declaration_hash, menu_codes):
+                logger.info(
+                    "[MenuAutoGuard] 声明未变且菜单齐全，跳过 persist_to_db（%d 菜单）",
+                    len(menu_codes))
+                _mark_menu_synced()
+                return 0
 
         count = 0
         for menu in menus:
@@ -348,6 +442,11 @@ class MenuAutoGenerator:
                 logger.warning(f"MenuAutoGenerator persist failed for {menu.get('menu_code')}: {e}")
 
         logger.info(f"MenuAutoGenerator persisted {count} menus to DB")
+        if declaration_hash:
+            try:
+                _write_guard(data_source, declaration_hash)
+            except Exception as e:
+                logger.warning("[MenuAutoGuard] 守卫写入失败（下次将重跑全量）: %s", e)
         _mark_menu_synced()
         return count
 
