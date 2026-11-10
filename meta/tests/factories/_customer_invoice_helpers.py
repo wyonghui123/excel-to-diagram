@@ -90,6 +90,14 @@ CREATE TABLE IF NOT EXISTS currencies (
     decimal_places INTEGER DEFAULT 2
 );
 
+CREATE TABLE IF NOT EXISTS tax_codes (
+    id INTEGER PRIMARY KEY,
+    code VARCHAR(32),
+    name VARCHAR(128),
+    rounding VARCHAR(16) DEFAULT 'round',
+    status VARCHAR(20) DEFAULT 'active'
+);
+
 CREATE TABLE IF NOT EXISTS sales_orders (
     id INTEGER PRIMARY KEY,
     order_no VARCHAR(30),
@@ -478,6 +486,13 @@ def add_currency(conn, currency_id, code, decimal_places):
     conn.execute(
         'INSERT INTO currencies (id, code, decimal_places) VALUES (?, ?, ?)',
         [currency_id, code, decimal_places])
+
+
+def add_tax_code(conn, tax_code_id, code='TAX', rounding='round'):
+    """新增税码（舍入方向唯一真源 tax_codes.rounding → rounding_mode 字典）。"""
+    conn.execute(
+        'INSERT INTO tax_codes (id, code, rounding) VALUES (?, ?, ?)',
+        [tax_code_id, code, rounding])
 
 
 def set_order_line_billed(conn, line_id, qty, amount=0):

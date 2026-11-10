@@ -14,6 +14,9 @@
 | D-02 | **Q2 费用行归属**：双层模型——计算层用条件（`rate_class=freight/discount_surcharge` + 分摊基数），落库层生成 `freight/misc` 发票行并带来源条件引用 | 用户认可（2026-11-10） |
 | D-03 | **Q7 范围**：Spec 一次写全，实施分 P0/P1；P0=净额基数+分摊明细+精度/舍入差+价格溯源，P1=费用行类型+条件快照+改价原因码+策略层 | 用户认可（2026-11-10） |
 | D-04 | **追加约束**：方案必须符合「元数据模型驱动 + 单一事实源（YAML 唯一真源）」规范，先审视再落 Spec | 用户 2026-11-10 指令 |
+| D-05 | **不新建 `rounding_profile` 实体**：精度=`currencies.decimal_places`，方向=`rounding_mode` 字典，税方向=`tax_codes.rounding`；现金舍入（MAU）/税舍入层级按 TBD-8/TBD-9 触发式评估 | 用户 2026-11-10 评审（见 §11.2） |
+| D-06 | **发票税额舍入方向与订单同口径**：重算税读 `tax_codes.rounding`，不再固定 half-up | 用户 2026-11-10（对应 G10） |
+| D-07 | **付款期次金额走币种精度**：过账生成的 `customer_invoice_schedules.amount` 按 `currency.decimal_places` 舍入，尾差归末期 | 用户 2026-11-10（对应 G8） |
 
 ---
 
@@ -30,6 +33,10 @@
 | G5 | 改价控制弱：仅有自由文本 `price_change_reason` + 自由文本审批人 | `customer_invoice_line.yaml` | P1 无原因码字典、无阈值、无审批流 |
 | G6 | 策略层缺失：`pricing_determination` 仅 `sales_order` scope；`reprice_trigger=on_invoice` 空转 | `pricing_determination.yaml`、`calc_result.yaml` | P1 无法按客户/单据类型差异化取价 |
 | G7 | 已具备未打通：`PricingService.price_line` 已支持泛化宿主；`calc_result` 已支持 freeze/reprice/qty_basis | `meta/services/pricing_service.py`、`calc_result.yaml` | 机会：复用而非新建 |
+| G8 | 付款期次金额固定 4 位：`_allocate_amounts` 与期次落库未按币种精度 | `customer_invoice_service.py` `_allocate_amounts`（≈L1588-1599）、期次写入（≈L1558） | **P0 期次金额出现多余小数**（JPY 等 0 位币种），且 Σ期次 ≠ gross |
+| G9 | 计划期次行只写净额：`_build_line_from_schedule` 未写行分摊明细 | 同上（≈L3074-3105） | 净额正确但行分摊恒为 0，Σ行 ≠ 头（FR-002 可追溯性） |
+| G10 | 中间金额固定 4 位二次舍入：红冲 / on-account 贷项 / 计划行先 `_round(...,4)` 再由 `_finalize_line` 按币种舍入 | 同上（≈L2369-2398 / L2468-2476 / L3045-3068） | 边界值偏 1 个最小单位（如 `1.004999` → 1.01，直接舍入应为 1.00） |
+| G11 | 税额方向未消费：`_finalize_line` 固定 half-up，不读 `tax_codes.rounding` | 同上（`_finalize_line` ≈L2217） | 默认模式 G 重算税时与订单侧差 0.01，差异无法解释 |
 
 ### 1.2 目标
 
@@ -94,6 +101,7 @@
 2. 发票头新增 `header_discount_amount / header_surcharge_amount`，其值 = Σ 行同名字段（唯一聚合入口）。
 3. 行净额恒等式：`net_amount = qty × unit_price + header_surcharge_amount − header_discount_amount`（仅作为校验式，不作为写入路径）。
 4. 分摊由引擎产出并写入 `calc_result`（`level=line`，`result_semantic=price`），发票只复制结果，不自行分摊。
+5. **计划期次行必须携带分摊明细**：`source_doc_type=billing_schedule` 时，行 `header_discount_amount / header_surcharge_amount` 按 `billing_percent × order_line 同名字段` 拆分（复用 `_order_line_basis` 的比例口径），尾差归最后一期；不得只写净额而把明细留空。
 
 **元数据落点**
 - `customer_invoice_line.yaml` + `customer_invoice.yaml` 字段声明；`ui_view_config.detail` 增加分组「抬头调整分摊」。
@@ -102,19 +110,28 @@
 **验收**
 - 抬头附加费 30 按重量分摊（权重 1:2）→ 行金额 10 / 20，Σ=30。
 - 手工删除分摊明细被拒（字段只读或受动作守卫）。
+- 计划开票：订单行净额 900、折扣 100、附加费 0，两期 50%/50% → 两期发票行净额各 450、折扣各 50；Σ行折扣 100 = 头折扣。
 
 ### FR-003 精度与舍入差额（P0）
 
 **规则**
-1. 所有金额舍入统一走 `meta/core/rounding.py::round_amount(value, decimals)`，精度读 `currencies.decimal_places`（服务层查询后传入，core 层不访问数据库）。
-2. 发票头新增 `rounding_diff`（单据币种，可为负），恒等式：`gross_amount = net_amount + tax_amount + rounding_diff`。
-3. 行 YAML 删除固定 `decimal_places: 4` 的数值约束，改由服务层按币种判定；若平台支持声明式精度，使用 `precision_source: currency.decimal_places`（否则以文档+守卫保证）。
-4. `currency.yaml` 注释已同步更新：声明 `decimal_places` 是金额舍入精度的唯一真源，消费者为 `meta/core/rounding.py::round_amount`（与销售订单金额服务同口径）。
+1. **舍入三要素**（各有唯一真源，互不替代）：
+   - **精度**：`currencies.decimal_places`（服务层查询后传入，core 层不访问数据库）；
+   - **方向**：平台字典 `rounding_mode`（`none / round / ceil / floor`，`round` = half-up）；金额默认 `round`，税额按 `tax_codes.rounding`；
+   - **层级**：默认**行级**（逐行算净额/税额后求和）；单据级舍入未启用，配置能力见 TBD-8。
+2. 所有金额舍入统一走 `round_amount(value, decimals, mode='round')`；禁止服务内写 `round(x, 4)` 或直接 `quantize` 金额。
+3. `round_amount` 只在**落库边界**调用一次；中间计算（拆分 / 换算 / 比例）保留全精度 `Decimal`，禁止先舍到固定 4 位再按币种舍入（双舍入会偏 1 个最小单位）。
+4. 发票头 `rounding_diff`（单据币种，可为负），恒等式：`gross_amount = net_amount + tax_amount + rounding_diff`。
+5. **付款期次金额**（`customer_invoice_schedules.amount`）同样按币种精度舍入；尾差归最后一期，保证 `Σ期次金额 == gross_amount`。
+6. 行 YAML 删除固定 `decimal_places: 4` 的数值约束，改由服务层按币种判定；若平台支持声明式精度，使用 `precision_source: currency.decimal_places`（否则以文档+守卫保证）。
+7. `currency.yaml` 注释已同步更新：`decimal_places` 是金额舍入精度的唯一真源，消费者为 `meta/core/rounding.py::round_amount`（与销售订单金额服务同口径）；`Extended Precision / Minimum Accountable Unit` 维持不做（触发条件见 TBD-10）。
 
 **验收**
-- 币种 JPY（0 位）：净额 100.4 → 100；`rounding_diff = -0.4`。
-- 币种 USD（2 位）：净额 100.456 → 100.46；差额进 `rounding_diff`。
-- 全库 grep 无业务服务内 `round(..., 4)` 金额硬编码。
+- 币种 JPY（0 位）：净额 100.4 → 100；行级残差 -0.4 低于最小单位，按币种精度落库后 `rounding_diff = 0`。
+- 币种 USD（2 位）：净额 100.456 → 100.46；行级残差 -0.004 归 0，仅分摊尾差（≥ 最小单位）才进 `rounding_diff`。
+- 税码 `rounding=ceil`、净额 100.10、税率 13% → 税额 13.02（half-up 为 13.01）；发票与订单侧一致。
+- 付款期次：JPY 发票 gross 100001、3 期 40/30/30 → 40000 / 30000 / 30001，Σ=100001；除不尽时尾差归末期。
+- 全库 grep 无业务服务内 `round(..., 4)` / `_round_float(..., 4)` 金额硬编码。
 
 ### FR-004 价格溯源快照（P0）
 
@@ -332,6 +349,8 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 | 10 | 权限 | 迁移种子 `customer_invoice:customer_invoice_override_price` 等 | 无 | ✅ 双段式命名，复用 v243 helpers |
 | 11 | 前端展示 | `ui_view_config.list/form/detail` + `filter` | 无新列配置 | ✅ 只改 YAML，不改前端硬编码 |
 | 12 | 定价策略层 | `pricing_determination` scope 扩展 | 仅 `sales_order` | ⚠️ 平台级改动，P2 另立 spec，避免本期膨胀 |
+| 13 | 舍入三要素 | 精度=`currency.yaml::decimal_places`；方向=字典 `rounding_mode`（`rounding.py` 静态镜像，测试锁定）；税方向=`tax_code.yaml::rounding` | 三者均已存在；发票仅消费精度 | ⚠️ 补税方向消费者（D-06），层级默认行级（TBD-8），**不新建 `rounding_profile` 实体**（§11.2） |
+| 14 | 舍入档（rounding profile） | 不建表；触发条件与最小 schema 记入 TBD-9 | `currency.yaml` 已裁定 MAU / Extended Precision 不做 | ✅ 裁决：P2 触发式，避免无消费者字段（重演 `decimal_places` 教训） |
 
 #### 7.4.3 语义重叠裁决（冲突点）
 
@@ -476,10 +495,14 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 #### 9.3.3 服务改造
 
 1. **`meta/core/rounding.py`（复用扩展，P0）**
-   已有 `normalize_decimals` / `round_by_mode`；本次新增 `round_amount(value, decimals=DEFAULT_AMOUNT_DECIMALS, mode='round') -> Decimal`：精度由调用方按 `currencies.decimal_places` 查询后传入，统一 half-up；作为销售发票金额舍入唯一入口（不新建重复模块）。
+   已有 `normalize_decimals` / `round_by_mode`；本次新增 `round_amount(value, decimals=DEFAULT_AMOUNT_DECIMALS, mode='round') -> Decimal`：精度由调用方按 `currencies.decimal_places` 查询后传入，方向默认 half-up（`mode` 可传 `none/round/ceil/floor`）；作为销售发票金额舍入唯一入口（不新建重复模块）。
 2. **`meta/services/customer_invoice_service.py`**
    - `_build_line_from_order_line`：`net_amount = order_line.net_amount`；`unit_price` 仅展示；写 `header_*` 分摊（来自 `calc_result`）；写 `calc_result_id / source_rate_record_id / price_trace`。
-   - `_finalize_line`：删除 `round(..., 4)`，改 `round_amount(...)`；累计 `rounding_diff` 到发票头。
+   - `_finalize_line`：删除 `round(..., 4)`，改 `round_amount(net, decimals)`；税额按 `tax_codes.rounding` 经 `round_amount(..., mode)` 计算（与订单侧同口径）；累计 `rounding_diff` 到发票头。
+   - `_allocate_amounts` / 期次落库：`_round(..., 4)`、`_round_float(..., 4)` 改 `round_amount(..., decimals)`，尾差归末期。
+   - `_build_line_from_schedule`：补写行 `header_discount_amount / header_surcharge_amount`（按 `billing_percent` 拆分订单行分摊明细，尾差归末期）。
+   - `create_from_schedule` 期次累计校验：按行 `net_amount` 累计（原按 `unit_price`，携带分摊明细后单价 ≠ 净额，会误判超额）。
+   - 红冲 / on-account 贷项行：中间金额不再固定 4 位，保留全精度后再由 `_finalize_line` 一次舍入。
    - 保存前置校验：净额恒等式 + 容差（FR-001.4）。
    - 取价入口：草稿态调用 `InvoicePricingAdapter`（内部复用 `PricingService.price_line`）。
 3. **`meta/services/invoice_pricing_adapter.py`（新增，P0）**
@@ -527,11 +550,11 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 
 ### 9.5 实施顺序
 
-1. `rounding.py` 扩展 `round_amount` + 单元测试（P0 前置，复用既有模块）。
+1. `rounding.py` 扩展 `round_amount(value, decimals, mode='round')` + 单元测试（P0 前置，复用既有模块）。
 2. v244 迁移 + 迁移幂等/回滚测试。
 3. schema 字段 + 枚举/控制参数 + `lint_tests` / 声明守卫。
-4. 发票服务改造 + 适配层 + 恒等式校验。
-5. P0 回归（订单→开票金额、精度、溯源）。
+4. 发票服务改造（来源净额 + 溯源 + 税方向 + 期次精度 + 计划分摊明细 + 中间精度）+ 适配层 + 恒等式校验。
+5. P0 回归（订单→开票金额、精度、溯源、税码 `ceil` 用例、JPY 期次）。
 6. P1：v245 费用行 + 改价控制 + 对账断言。
 
 ### 9.6 风险与缓解
@@ -546,8 +569,8 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 
 ### 9.7 测试策略
 
-- 单元：`round_amount`（0/2/3 位币种）、分摊守恒、模式 A/B/C/D/G 行为矩阵。
-- 集成：订单→开票净额一致（含抬头折扣/附加费）、`price_source` 与 `calc_result_id` 约束、过账后禁止重定价。
+- 单元：`round_amount`（0/2/3 位币种 × `none/round/ceil/floor`）、分摊守恒、模式 A/B/C/D/G 行为矩阵、双舍入边界（`1.004999`）。
+- 集成：订单→开票净额一致（含抬头折扣/附加费）、`price_source` 与 `calc_result_id` 约束、过账后禁止重定价、付款期次精度与尾差、计划行分摊明细守恒。
 - 迁移：重复执行 `[SKIP]`、回滚后列/种子消失、业务数据保留。
 - 元数据：YAML 字段有消费方、枚举两处一致、`python scripts/lint_tests.py` 通过。
 - 运行入口：`python d:\filework\test.py --single <path>`（禁 pytest 直跑）。
@@ -568,6 +591,9 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 - [ ] 迁移幂等（连跑两次无报错、第二次全 `[SKIP]`）且回滚可验证。
 - [ ] 权限双段式 + 菜单按值合并。
 - [ ] `price_trace` 只写不解析。
+- [ ] 发票税额消费 `tax_codes.rounding`，与订单侧同口径（`ceil/floor` 用例可执行）。
+- [ ] 付款期次金额、红冲/贷项/计划行中间金额均无固定 4 位硬编码（grep 可验证）。
+- [ ] 不新增 `rounding_profile` 实体；若触发 TBD-9，旧字段必须同批迁移为引用。
 
 ---
 
@@ -577,8 +603,119 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 |---|---|---|---|---|
 | TBD-1 | 费用行是否允许「无来源手工新增」？ | FR-006 | 默认禁止；确需时加 `manual` 来源并强制原因码 | 待业务确认 |
 | TBD-2 | 改价超阈值审批由谁承载？ | FR-008 | 本期只做权限+留痕；审批流复用平台审批（另立 spec） | 待确认 |
-| TBD-3 | 舍入算法是否需元数据化（half-up / banker's）？ | FR-003 | 先固定 half-up，`currency` 增 `rounding_mode` 列列为 P2 | 待确认 |
+| TBD-3 | 舍入算法是否需元数据化（half-up / banker's）？ | FR-003 | **已裁决（D-05 / §11.2）**：不建 profile；方向用 `rounding_mode` 字典，精度用币种，税方向用税码；仅新增算法（half-even 等）才扩字典值 | 已裁决 |
 | TBD-4 | `hit_policy=best` 的判定准则与「条件排斥组」模型？ | FR-009/P2 | 建议加 `best_criterion(lowest/highest)` + 排斥组；本期不实施 | 待确认 |
 | TBD-5 | 策略层（Pricing Profile/Segment）宿主 BO？ | FR-009 | 扩展 `pricing_determination` scope 还是新增 `pricing_profile`，P2 决策 | 待确认 |
 | TBD-6 | 抬头分摊金额用单据币种还是订单币种？ | FR-002 | 建议单据币种 + 汇率快照，差额进 `rounding_diff` | 待确认 |
 | TBD-7 | 净额容差按绝对值还是百分比？ | FR-001 | 建议两者并存（`invoice_amount_tolerance` + `price_override_tolerance_pct`） | 待确认 |
+| TBD-8 | 发票税/净额舍入**层级**：行级（逐行算完再求和）还是单据级（汇总后一次舍入）？ | FR-003 规则 1 | **本期固定行级**（与订单/引擎同口径，零回归）；单据级需新增「层级」配置位，属 TBD-9 的 profile 触发条件之一。触发信号：出现「按行舍入与按单舍入导致总税额差 ≥ 1 个最小单位、且客户合同要求按单据级」的实际单据 | 本期不做（行级） |
+| TBD-9 | `rounding_profile`（舍入档）何时建？最小 schema 是什么？ | FR-003 / §7.4.2 | **P2 触发式**：只有当「方向 + 精度 + 单位（MAU）+ 层级」四要素出现**同币种/同税制内多套并存**且无法用现有字典表达时才建；最小 schema 见 §11.2.5（含旧字段迁移要求，禁止双真源） | 已裁决（§11.2） |
+| TBD-10 | 是否支持 `Extended Precision`（扩展精度）与 `Minimum Accountable Unit`（MAU，现金舍入单位）？ | FR-003 规则 7 | **本期不做**。当前无计算引擎消费者（发票/订单均按 `decimal_places` 一次性舍入，无「记账精度 vs 现金支付精度」双精度场景）。触发信号：出现「发票/台账 2 位、实际收付按 0.05 进位」的币种法规要求（如 CHF/CAD 现金舍入）时，按 TBD-9 同批评估 | 本期不做 |
+
+---
+
+## 11. 附：服务层 billing 覆盖审查与舍入档裁决
+
+> 本节记录 2026-11-10 两轮分析结论，是 D-05/D-06/D-07 与 G8-G11 的推导依据。
+> 目的是让后续维护者不必重新研究 Fusion/SAP，就能理解「为什么只加消费者、不建新表」。
+
+### 11.1 服务层 billing 覆盖审查（代码已核实）
+
+**结论：主链路已覆盖，缺口集中在「金额精度/方向/分摊明细」三处，不涉及链路结构。**
+
+| 链路环节 | 服务 / 函数 | 是否覆盖 Spec 约束 | 结论 |
+|---|---|---|---|
+| 建单入口（手工 / 由订单 / 由计划 / 红冲 / 贷项） | `prepare_header` → `_finalize_line` → `_recalc_impl` | 五条建单路径**全部**经过统一收口 | ✅ 结构无需改 |
+| 来源净额取值 | `_build_line_from_order_line` / `_build_line_from_schedule` | 订单路径已按 `net_amount`（P0-1~P0-4 已实施） | ✅ |
+| 计划期次行分摊明细 | `_build_line_from_schedule`（≈L3074-3105） | 只写净额，未写 `header_discount_amount / header_surcharge_amount` | ❌ **G9** |
+| 行最终金额舍入 | `_finalize_line`（≈L2217） | 净额按币种精度 ✅；税额固定 half-up（未读 `tax_codes.rounding`） | ⚠️ **G11**（D-06） |
+| 付款期次金额 | `_allocate_amounts`（≈L1588-1599）+ 期次写入（≈L1558） | 固定 `_round(..., 4)` / `_round_float(..., 4)` | ❌ **G8**（P0，D-07） |
+| 红冲 / on-account 贷项 / 计划行中间金额 | ≈L2369-2398 / L2468-2476 / L3045-3068 | 先固定 4 位，再由 `_finalize_line` 按币种二次舍入 | ❌ **G10**（双舍入） |
+| 重算（改价 / 数量变更） | `_recalc_impl` | 不覆盖来源溯源字段（P0-4 已实施） | ✅ |
+| 定价模式解析 | `invoice_pricing_adapter.py`（P0-5 已实施） | 类型级控制参数 + 单据快照两层 | ✅ |
+| 费用行 | `billing_plan_service` / `billing_plan_actions` / `customer_invoice_actions` / `payment_term_schedule_service` | 均无金额逻辑：`billing_plan` 只写 `billing_percent`（`PERCENT_PLACES=4`）与 `billed_amount=0` | ✅ 与 FR-006/007 不冲突 |
+| 税率与税方向 | `sales_order_amount_service`（参照实现，≈L60-80） | 读 `tax_codes.rounding`（`is_valid_rounding_mode` / `resolve_rounding_mode`） | ✅ 订单侧已达标，发票侧需对齐 |
+
+**排版说明**：`billing` 域不存在「另一套金额引擎」，所有金额都收敛在 `customer_invoice_service` 的 `_finalize_line`；因此修复点只有 4 个，且均为**局部替换**（不改调用链、不改表结构）。
+
+### 11.2 舍入档（rounding profile）裁决
+
+#### 11.2.1 对标事实
+
+**Oracle Fusion**：舍入不是单一字段，而是四元组：
+
+| 要素 | Fusion 载体 | 作用域 |
+|---|---|---|
+| 精度（Precision） | `FND_CURRENCIES.PRECISION` | 币种 |
+| 扩展精度（Extended Precision） | 币种扩展属性 | 币种（计算/展示分离） |
+| 最小可记账单位（MAU） | 币种/币种组合 | 币种（现金舍入） |
+| 方向 | 税制 `Rounding Rule`（Nearest / Up / Down）+ `Rounding Factor` | 税制、价目表 `Round To` |
+
+即 Fusion 的「profile」本质是**按作用域拆开的三张配置表**，不是一张统一档位表。
+
+**SAP**：金额侧只有两件——条件类型 `Rounding rule`（Standard / Always up / Always down）+ 公司代码×币种舍入单位（T001R）；`Rounding Profile`（阈值 + 舍入值阶梯）在 SAP 中**仅用于数量语义**（如按包装单位取整），不用于金额。SAP 的金额尾差走 `DIFF` 条件类型单独成行。
+
+#### 11.2.2 本项目现状映射
+
+| 要素 | 本项目唯一真源 | 消费者 |
+|---|---|---|
+| 精度 | `currencies.decimal_places` | `round_amount(value, decimals)` → 订单金额服务 / 发票服务 |
+| 方向 | 平台字典 `rounding_mode`（`none/round/ceil/floor`），`meta/core/rounding.py` 为静态镜像（测试锁定一致） | 分摊 `/` 定价取整 `/` 金额服务 |
+| 税方向 | `tax_codes.rounding`（引用 `rounding_mode` 字典） | `sales_order_amount_service`（发票待补，D-06） |
+| 层级 | 无配置位，代码固定行级 | — （TBD-8） |
+| MAU / 扩展精度 | 无字段，`currency.yaml` 已注明「本期不做」 | — （TBD-10） |
+| 尾差 | 发票头 `rounding_diff` | 发票（FR-003 规则 4） |
+
+**关键事实**：全库 `rounding` 字段共 5 处业务对象（`allocation_rule` / `allocation_result` / `rate_type` / `pricing_period` / `tax_code`），语义均为「方向」；没有任何表存「档位/阶梯」。
+
+#### 11.2.3 单一事实源五判据评估
+
+| 判据 | 新建 `rounding_profile` 表的后果 |
+|---|---|
+| ① 唯一写入口 | ❌ profile 会同时持有方向/精度，与 `rounding_mode` + `decimal_places` 形成**三真源**；除非同批删除旧字段（破坏 5 处 BO 引用） |
+| ② 稳定身份 | ⚠️ profile 是「组合命名」，同一 (方向, 精度) 可被多条 profile 重复表达 → 命名即歧义 |
+| ③ 不可变 | ⚠️ 合同口径变更时 profile 必改，历史单据若只存 profile_id 则金额不可回放；须额外快照四要素 |
+| ④ 不重复计算 | ❌ 发票仍需逐次读 profile → 解析出四要素，等于多一跳，无收益 |
+| ⑤ 边界原子 | ✅ 若做成「币种级覆盖表」（profile 挂在币种上）可原子替换；但当前币种精度已够用，替换无业务驱动力 |
+
+**结论**：现在建 profile = 用一个聚合名把三个已有真源复制一份（第二真源），重演 `decimal_places` 曾「有字段无消费者」的教训（见 `currency.yaml` 注释与 SPEC-1 修正）。
+
+#### 11.2.4 方案裁决
+
+| 方案 | 内容 | 判定 |
+|---|---|---|
+| **α（采纳）** | 不建实体：精度=币种、方向=字典、税方向=税码；本期只补**已有元数据的消费者**（G8-G11） | ✅ 本期执行 |
+| β（触发式） | 出现「同币种多档位/层级」硬需求时，建 `rounding_profile`（见 §11.2.5），并**同批**把 5 处 BO 的 `rounding` 与币种精度改为引用 profile | ⏸ 挂 TBD-9 |
+| γ（拒绝） | 现在就建 profile 但保留旧字段 | ❌ 违反单一事实源判据 ① |
+
+#### 11.2.5 TBD-9 触发条件与最小 schema（备查，不做）
+
+**触发条件（全部满足）**：
+1. 同一币种（或同一税制）内，确实存在 ≥2 套「方向 + 精度」组合需要按单据类型/客户/日期切换；
+2. 现有字典 + 币种字段无法表达（例如需要「精度 2、现金单位 0.05」这类 MAU 语义）；
+3. 业务能给出配置归属（挂币种 / 挂税制 / 挂价目表），而非「全局唯一」。
+
+**最小 schema（若触发）**：
+
+```yaml
+id: rounding_profile
+table_name: rounding_profiles
+fields:
+  - id: code            # 唯一业务键，禁止用中文名做键
+  - id: currency_id     # 作用域一：币种（可空，空=通配）
+  - id: tax_code_id     # 作用域二：税制（可空）
+  - id: price_list_id   # 作用域三：价目表（可空）
+  - id: decimals_source # enum: currency | profile（显式声明覆盖关系，禁止隐式）
+  - id: decimals        # decimals_source=profile 时必填
+  - id: rounding_mode   # 引用字典 rounding_mode
+  - id: increment_unit  # MAU / Rounding Factor；空=不启用
+  - id: level           # enum: line | document（TBD-8）
+  - id: status
+```
+
+**迁移前置条件（强制）**：`allocation_rule` / `allocation_result` / `rate_type` / `pricing_period` / `tax_code` 五处 `rounding` 字段必须**同批**改为 `rounding_profile_id` 引用或删除，且 `round_amount` 增加 profile 参数；否则视为驳回（第二真源）。
+
+**Sources**
+- Oracle Fusion：`research-fusion-billing-deep-dive-2026-11-09.md` §币种精度/税制舍入/价目表 Round To
+- SAP：条件类型舍入规则、T001R（公司代码×币种舍入单位）、`DIFF` 条件类型、Rounding Profile（数量语义）
+- 项目内：`meta/core/rounding.py`（方向静态镜像 + 测试锁定）、`meta/schemas/currency.yaml#decimal_places`（精度注释）、`meta/services/sales_order_amount_service.py#L60-L80`（税方向参照实现）

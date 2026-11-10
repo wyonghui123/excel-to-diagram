@@ -10,8 +10,9 @@
     计划开票（schedule_id / billing_schedule）与 service_confirmation 一律 fail-closed。
   · 订单行 billing_relevance 必须是 delivery；plan 返回
     INVOICE_RELEVANCE_NOT_SUPPORTED，其余返回 INVOICE_SOURCE_MISMATCH。
-  · 金额由服务层计算并落快照：net = ROUND(qty × unit_price, 4)，
-    tax = ROUND(net × rate / 100, 4)，gross = net + tax。
+  · 金额由服务层计算并落快照：净额 / 税额 / 价税合计统一按**币种精度**
+    （currencies.decimal_places）在落库边界舍入一次；税方向取
+    tax_codes.rounding（缺省 half-up），中间金额保留全精度（禁固定 4 位）。
   · 过账是唯一副作用入口：生成期次（尾差归最后一期，Σ=gross）、
     条件回写 billed_qty/billed_amount、写 doc_flow 边、派生 billing_status。
   · 红冲生成红字发票（负数量/负金额、无期次），回滚 billed、取消原期次。
@@ -27,7 +28,11 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
-from meta.core.rounding import normalize_decimals, round_amount
+from meta.core.rounding import (
+    is_valid_rounding_mode,
+    normalize_decimals,
+    round_amount,
+)
 from meta.services.invoice_pricing_adapter import (
     resolve_billing_pricing_mode,
     validate_pricing_mode,
@@ -135,6 +140,10 @@ EPSILON = Decimal('0.0001')
 #: 金额舍入精度回退值（币种缺失/查询失败时）。唯一真源仍是
 #: currencies.decimal_places，经 meta.core.rounding.round_amount 消费。
 DEFAULT_DECIMALS = 2
+
+#: 金额中间计算保留位数：仅用于过渡精度（避免二次舍入偏 1 个最小单位），
+#: 不是业务精度；落库边界仍按币种精度舍入一次（spec FR-003 规则 3）。
+TRANSIT_AMOUNT_PLACES = 10
 
 #: 比例合计容差（单位：%，2 位小数）。仅用于比例合计/尾差判断，
 #: 不得用于金额比较；金额比较请使用 EPSILON。
@@ -476,7 +485,7 @@ class CustomerInvoiceService:
             key = str(schedule.get('id'))
             period_sources.setdefault(key, (schedule, order_line))
             period_totals[key] = period_totals.get(key, Decimal('0')) + \
-                _to_decimal(line.get('unit_price'))
+                _to_decimal(line.get('net_amount'))
             normalized.append(line)
 
         for key, total in period_totals.items():
@@ -1539,7 +1548,8 @@ class CustomerInvoiceService:
                     field_name='payment_term_id',
                     rule='INVOICE_TERM_INVALID')
 
-        amounts = self._allocate_amounts(gross, periods)
+        decimals = self._currency_decimals(header.get('currency_id'))
+        amounts = self._allocate_amounts(gross, periods, decimals)
         total = sum((item['amount'] for item in amounts), Decimal('0'))
         if abs(total - gross) > EPSILON:
             raise CustomerInvoiceError(
@@ -1555,7 +1565,8 @@ class CustomerInvoiceService:
                 'payment_term_line_id': item['payment_term_line_id'],
                 'ratio_percent': _round_float(item['ratio'], 4),
                 'due_date': item['due_date'],
-                'amount': _round_float(item['amount'], 4),
+                # 期次金额按币种精度落库（spec D-07），非固定 4 位
+                'amount': float(round_amount(item['amount'], decimals)),
                 'amount_applied': 0,
                 'status': 'open',
                 'created_at': now,
@@ -1586,16 +1597,20 @@ class CustomerInvoiceService:
         return periods
 
     def _allocate_amounts(self, gross: Decimal,
-                          periods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """前 N-1 期按比例四舍五入，最后一期吸收尾差；非正期次顺延合并。"""
+                          periods: List[Dict[str, Any]],
+                          decimals: int = DEFAULT_DECIMALS
+                          ) -> List[Dict[str, Any]]:
+        """前 N-1 期按比例舍入到**币种精度**，最后一期吸收尾差；非正期次顺延合并。"""
+        decimals = normalize_decimals(decimals)
         raw = []
         allocated = Decimal('0')
         for index, period in enumerate(periods):
             if index < len(periods) - 1:
-                amount = _round(gross * period['ratio'] / Decimal('100'), 4)
+                amount = round_amount(
+                    gross * period['ratio'] / Decimal('100'), decimals)
                 allocated += amount
             else:
-                amount = _round(gross - allocated, 4)
+                amount = round_amount(gross - allocated, decimals)
             raw.append(dict(period, amount=amount))
 
         merged = []
@@ -2170,6 +2185,33 @@ class CustomerInvoiceService:
             return DEFAULT_DECIMALS
         return normalize_decimals(rows[0].get('decimal_places'))
 
+    def _tax_rounding_mode(self, tax_code_id: Any) -> str:
+        """税码舍入方向（唯一真源 tax_codes.rounding → 字典 rounding_mode）。
+
+        与订单金额服务同口径（spec D-06）：缺失 / 非法配置回落 'round'
+        （half-up），不阻断开票。同一服务实例内按 tax_code 缓存，避免逐行查库。
+        """
+        if _blank(tax_code_id):
+            return 'round'
+        cache = self.__dict__.setdefault('_tax_rounding_cache', {})
+        key = str(tax_code_id)
+        if key in cache:
+            return cache[key]
+        mode = 'round'
+        try:
+            rows = self.ds.query(
+                'SELECT rounding FROM tax_codes WHERE id = ?', [tax_code_id])
+        except Exception as exc:  # 表缺失/连接异常不得阻断开票
+            logger.warning('[customer_invoice] 读取税码舍入方向失败 tax_code=%s: %s',
+                           tax_code_id, exc)
+            rows = []
+        if rows:
+            raw = rows[0].get('rounding')
+            if is_valid_rounding_mode(raw):
+                mode = str(raw).strip().lower()
+        cache[key] = mode
+        return mode
+
     @staticmethod
     def _source_net(line: Dict[str, Any]) -> Optional[Decimal]:
         """来源净额快照：订单 / 价目表取价行以已落净额为准。
@@ -2214,7 +2256,9 @@ class CustomerInvoiceService:
         net = round_amount(net, decimals)
         if validate:
             line = self._apply_line_type_rules(line, net)
-        tax = round_amount(net * rate / Decimal('100'), decimals)
+        tax = round_amount(
+            net * rate / Decimal('100'), decimals,
+            self._tax_rounding_mode(line.get('tax_code_id')))
         line['qty'] = qty
         line['unit_price'] = unit_price
         line['net_amount'] = net
@@ -2243,13 +2287,14 @@ class CustomerInvoiceService:
         # 过渡精度 10 位，落库前由 _finalize_line 按币种精度归一
         return {
             'net_amount': _round(
-                _to_decimal(order_line.get('net_amount')) * ratio, 10),
+                _to_decimal(order_line.get('net_amount')) * ratio,
+                TRANSIT_AMOUNT_PLACES),
             'header_discount_amount': _round(
                 _to_decimal(order_line.get('header_discount_amount')) * ratio,
-                10),
+                TRANSIT_AMOUNT_PLACES),
             'header_surcharge_amount': _round(
                 _to_decimal(order_line.get('header_surcharge_amount')) * ratio,
-                10),
+                TRANSIT_AMOUNT_PLACES),
         }
 
     def _normalize_credit_requests(self,
@@ -2367,23 +2412,25 @@ class CustomerInvoiceService:
         else:
             if qty is not None:
                 credit_qty = _round(qty, 4)
-                credit_net = _round(credit_qty * abs(unit_price), 4)
+                credit_net = _round(
+                    credit_qty * abs(unit_price), TRANSIT_AMOUNT_PLACES)
                 if abs(orig_net) > EPSILON and abs(orig_qty) > EPSILON:
                     # 原行净额已含抬头折扣/附加费分摊，按数量比例冲销更贴近来源事实
                     credit_net = _round(
-                        abs(orig_net) * credit_qty / abs(orig_qty), 4)
+                        abs(orig_net) * credit_qty / abs(orig_qty),
+                        TRANSIT_AMOUNT_PLACES)
             else:
-                credit_net = _round(amount, 4)
+                credit_net = _round(amount, TRANSIT_AMOUNT_PLACES)
                 ratio = (credit_net / abs(orig_net)
                          if abs(orig_net) > EPSILON else Decimal('0'))
                 credit_qty = (_round(abs(orig_qty) * ratio, 4)
                               if abs(orig_qty) > EPSILON else Decimal('0'))
             ratio = (credit_net / abs(orig_net)
                      if abs(orig_net) > EPSILON else Decimal('0'))
-            # R-INV-24：税额按原行 tax/net 比例换算，尾差 4 位
-            credit_tax = _round(abs(orig_tax) * ratio, 4)
-            credit_diff = _round(abs(orig_diff) * ratio, 4)
-            credit_gross = _round(credit_net + credit_tax, 4)
+            # R-INV-24：税额按原行 tax/net 比例换算（过渡精度，落库前按币种精度归一）
+            credit_tax = _round(abs(orig_tax) * ratio, TRANSIT_AMOUNT_PLACES)
+            credit_diff = _round(abs(orig_diff) * ratio, TRANSIT_AMOUNT_PLACES)
+            credit_gross = _round(credit_net + credit_tax, TRANSIT_AMOUNT_PLACES)
             # 单价保持原行基准价（净额快照已按比例拆分），
             # 使 qty × unit_price + 分摊 = 贷项净额 的恒等式继续成立
             if not _blank(percent) and abs(orig_net) > EPSILON:
@@ -2394,9 +2441,11 @@ class CustomerInvoiceService:
         # 抬头分摊按冲销比例同步冲回（全额 = 1），保证红字行净额构成可追溯
         alloc_ratio = Decimal('1') if full else ratio
         line_discount = _round(
-            _to_decimal(line.get('header_discount_amount')) * alloc_ratio, 10)
+            _to_decimal(line.get('header_discount_amount')) * alloc_ratio,
+            TRANSIT_AMOUNT_PLACES)
         line_surcharge = _round(
-            _to_decimal(line.get('header_surcharge_amount')) * alloc_ratio, 10)
+            _to_decimal(line.get('header_surcharge_amount')) * alloc_ratio,
+            TRANSIT_AMOUNT_PLACES)
 
         row = {
             'line_no': line_no,
@@ -2465,7 +2514,8 @@ class CustomerInvoiceService:
             net = _to_decimal(item.get('net_amount'), 'net_amount')
             unit_price = net / qty if qty else Decimal('0')
         unit_price = _to_decimal(unit_price, 'unit_price')
-        net = _round(qty * unit_price, 4)
+        # 中间金额保留过渡精度，落库边界由 _finalize_line 按币种精度舍入
+        net = _round(qty * unit_price, TRANSIT_AMOUNT_PLACES)
         if net >= -EPSILON:
             raise CustomerInvoiceError(
                 'on-account 贷项行金额必须为负', field_name='net_amount',
@@ -2473,7 +2523,7 @@ class CustomerInvoiceService:
 
         rate = _to_decimal(item.get('tax_rate_percent') or 0,
                            'tax_rate_percent')
-        tax = _round(net * rate / Decimal('100'), 4)
+        tax = _round(net * rate / Decimal('100'), TRANSIT_AMOUNT_PLACES)
         type_id, _ = self._resolve_line_type(item.get('line_type_id'))
         return {
             'line_no': line_no,
@@ -2494,7 +2544,7 @@ class CustomerInvoiceService:
             'tax_code_id': item.get('tax_code_id'),
             'tax_rate_percent': rate,
             'tax_amount': tax,
-            'gross_amount': _round(net + tax, 4),
+            'gross_amount': _round(net + tax, TRANSIT_AMOUNT_PLACES),
             'project_id': item.get('project_id'),
             'project_task_id': None,
             'billing_percent': None,
@@ -2674,6 +2724,7 @@ class CustomerInvoiceService:
         lines = self._load_invoice_lines(invoice_id)
         net = tax = gross = Decimal('0')
         rounding_diff = Decimal('0')
+        discount = surcharge = Decimal('0')
         for line in lines:
             # 重算仅做算术归一；行类型/负数校验在写入时已执行
             # （on-account 贷项行天然为负且无来源键）
@@ -2682,6 +2733,9 @@ class CustomerInvoiceService:
             net += finalized['net_amount']
             tax += finalized['tax_amount']
             gross += finalized['gross_amount']
+            # 抬头分摊汇总（spec FR-002 规则 2：头 = Σ 行，唯一聚合入口）
+            discount += _to_decimal(finalized.get('header_discount_amount'))
+            surcharge += _to_decimal(finalized.get('header_surcharge_amount'))
             # 抬头舍入差 = Σ(算术重建净额 - 净额快照)，为分摊/比例拆分留痕
             rounding_diff += (self._rebuild_net(line)
                               - finalized['net_amount'])
@@ -2693,12 +2747,16 @@ class CustomerInvoiceService:
         net = round_amount(net, decimals)
         tax = round_amount(tax, decimals)
         gross = round_amount(gross, decimals)
-        rounding_diff = _round(rounding_diff, 4)
+        rounding_diff = round_amount(rounding_diff, decimals)
+        discount = round_amount(discount, decimals)
+        surcharge = round_amount(surcharge, decimals)
         self.ds.execute(
             'UPDATE %s SET net_amount = ?, tax_amount = ?, gross_amount = ?, '
-            'rounding_diff = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+            'rounding_diff = ?, header_discount_amount = ?, '
+            'header_surcharge_amount = ?, updated_at = ? WHERE id = ?'
+            % HEADER_TABLE,
             [float(net), float(tax), float(gross), float(rounding_diff),
-             _now(), invoice_id])
+             float(discount), float(surcharge), _now(), invoice_id])
         return {'net_amount': float(net), 'tax_amount': float(tax),
                 'gross_amount': float(gross)}
 
@@ -3042,7 +3100,8 @@ class CustomerInvoiceService:
         base = _to_decimal(order_line.get('net_amount'))
         period_amount = self._schedule_period_amount(schedule, order_line)
         billed = _to_decimal(schedule.get('billed_amount'))
-        remaining = _round(period_amount - billed, 4)
+        # 计划域金额（期金额 / 已开票）已是 4 位口径，这里只作差，不再二次量化
+        remaining = period_amount - billed
         if remaining <= EPSILON:
             raise CustomerInvoiceError(
                 '开票计划期次已开满（期金额 %s）' % period_amount,
@@ -3065,12 +3124,21 @@ class CustomerInvoiceService:
                         percent, _round(remaining_percent, 4)),
                     field_name='billing_percent',
                     rule='INVOICE_PLAN_PERCENT_INVALID')
-            net = _round(base * percent / Decimal('100'), 4)
+            # 中间金额保留全精度，落库边界由 _finalize_line 按币种精度舍入一次
+            net = base * percent / Decimal('100')
             if abs(net - remaining) <= PERCENT_TAIL_TOLERANCE:
                 net = remaining
 
         line_percent = (_round(net * Decimal('100') / base, 4)
                         if base > 0 else Decimal('0'))
+        # spec FR-002 规则 5：期次行同步拆分订单行抬头折扣/附加费（Σ行 = 头）
+        ratio = (net / base) if base > 0 else Decimal('0')
+        line_discount = _round(
+            _to_decimal(order_line.get('header_discount_amount')) * ratio,
+            TRANSIT_AMOUNT_PLACES)
+        line_surcharge = _round(
+            _to_decimal(order_line.get('header_surcharge_amount')) * ratio,
+            TRANSIT_AMOUNT_PLACES)
         return {
             'line_no': None,
             'line_type_id': self._default_type_id(DEFAULT_LINE_TYPE_CODE, 'line'),
@@ -3086,8 +3154,11 @@ class CustomerInvoiceService:
             'uom_id': order_line.get('uom_id'),
             'qty': Decimal('1'),
             'billing_basis': BILLING_BASIS_PERCENT,
-            'unit_price': net,
-            'net_amount': Decimal('0'),
+            # 单价 = 净额 − 折扣 − 附加费，保证 1×unit_price + 分摊 = 净额 恒等
+            'unit_price': net - line_discount - line_surcharge,
+            'net_amount': net,
+            'header_discount_amount': line_discount,
+            'header_surcharge_amount': line_surcharge,
             'tax_code_id': order_line.get('tax_code_id'),
             'tax_rate_percent': order_line.get('tax_rate_percent'),
             'tax_amount': Decimal('0'),
