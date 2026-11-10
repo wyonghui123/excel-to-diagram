@@ -202,6 +202,30 @@ Dynamics 365 Workflow 架构
     └── D365 → SharePoint / Teams / Outlook / Excel
 ```
 
+### 2.7 Oracle Fusion 架构
+
+> **关键事实**：Fusion 没有名为 "Message Center" 的统一域。它是 **4 套独立机制 + 1 个聚合面板**，统一发生在**呈现层**，不发生在存储层。
+
+| 层 | 组件 | 本质 | 状态机 | 通知产生方式 | 去重方式 |
+|---|---|---|---|---|---|
+| **任务** | BPM Worklist / Approval Worklist / Human Task | 待办（含 FYI 非可操作任务） | Assigned → Claimed / In Progress → Completed / Withdrawn / Expired / Errored / Alerted / Information Requested | 任务生命周期事件：分配、到期提醒、升级、过期、状态变更 | 任务状态机天然抑制；同一任务不重复派发 |
+| **预警** | Alert Composer（HCM 为主）+ 各模块 Alerts | 规则命中的实例 | 生成 → 状态变更 → 关闭 / 过期 | 规则/事件触发 → **按收件人逐人渲染**模板 | 同一 Alert 不重复生成；到期/状态类通知次日批量 |
+| **投递** | Notification Service | 通道抽象：Email / User(in-app) / SMS / IM | 无业务状态，仅投递结果 | 由任务/预警调用 | 26A 起支持 **stacking & grouping** |
+| **广播** | Announcements（Service Administrator） | 系统公告，非业务事件 | 生效 / 失效 | 管理员录入 | 不参与业务去重 |
+| **呈现** | Bell / Notification Center | 只读聚合视图 | 未读 / 已读（per-user UI 态） | — | 点击打开对象并标记已读，**不改任务状态** |
+
+**三个机制细节**：
+
+1. **通知是任务的投影**：`notification` 不是实体，是 Human Task 的派生——任务被分配发通知，`Deadlines` 到期发提醒，超时发升级。**FYI 也被建成"非可操作任务"**，占 Worklist 位置、可转交、可留痕。
+2. **Alert Composer 是"元数据 + 实例"两段式**：Alert Type（触发条件、收件人解析、多语言模板、渠道）是配置；Alert 实例运行时生成。Fusion 的 Alert 只负责"提醒"，是否阻断由触发它的业务校验/工作流决定——与 SAP `A/E/I/S/W` 的结论一致。
+3. **Deadlines 三件套**：`reminder`（到期前）、`escalate after`（超时升级，支持工作日历/表达式）、`expire`（过期关闭），配置在 **BPM Worklist → Administration → Task Settings → Deadlines**，不是代码。
+
+**三条结论**：
+
+- Fusion 不对消息建总表；Bell 是读模型。
+- 任务/预警/公告各自有独立生命周期，**不共享实体**。
+- 模板、收件人解析、通知偏好全部在 setup 层（元数据），运行时只产生实例与投递记录。
+
 ---
 
 ## 3. 统一架构模型
@@ -516,6 +540,20 @@ Phase 3 (P2): 工作流
 关键: Phase 1→2→3 不需要迁移 task 数据！
       task 表从第一天就预留 process_context, parent_task_id, decision 字段
 ```
+
+### 4.7 Fusion 对照：FYI 的"通知 → 任务"升级路径
+
+Fusion 把 FYI 建成非可操作任务，代价是每条通知都占 Worklist 存储与状态机；收益是"可转交、可确认、可留痕"。本项目用订阅生成虚拟通知，更轻，但不应丢掉升级能力。
+
+**决策**：默认虚拟通知；仅当满足以下任一条件时，升级为 `tasks(type=info_ack)`：
+
+| 触发条件 | 示例 |
+|---|---|
+| 需要他人确认收到/知晓 | 合规通知、价格变更告知 |
+| 需要转交或代理 | 通知对象休假，需转交他人跟进 |
+| 需要留痕"已处理" | 客诉提醒、异常告知需闭环 |
+
+升级动作写 `tasks` 一行（`source_event_id` 指向原事件），**原通知仍由订阅推导，不复制一份**。
 
 ---
 
@@ -996,6 +1034,36 @@ POST   /api/v2/discussions/:thread_id/follow # 关注 → change_subscription
 **理由**:
 - 防止任务卡住
 - 利用现有 TaskScheduler（已有 Cron 调度能力）
+
+### 9.5 不建消息总表（Bell 是读模型）
+
+**决策**: 不新增 "message / notification_center" 运行时表；Bell 是 `task + change_event + change_subscription` 的聚合读模型
+
+**理由**:
+- Fusion 验证：Bell / Notification Center 只是聚合面板，底层仍是 Worklist 任务、Alert 实例、Announcements
+- 建总表会产生"事件事实 + 消息副本"双写，违反单一事实
+- 未读只需 `change_subscription.last_read_at`，无需 per-message 状态行
+
+**拒绝**: Fusion 的 `NOTIFICATION_EVENT` / `USER_ALERTS` 式 per-recipient 落库
+
+### 9.6 不建 Alert 实例表
+
+**决策**: 业务预警 = `alert_rule`（YAML）命中 → 写 `change_event(severity)` + 订阅派生通知；不建 `alert` 表与 Open/Closed 状态机
+
+**理由**:
+- Fusion 的 Alert 实例状态机服务于 ITOM 式运维对象（Open/Closed/Flapping），本项目的业务预警不需要独立生命周期
+- 预警的"未处理/已确认/已关闭"可由 `change_event` + `audit_log` 表达
+- 新增 alert 表会破坏 2 实体收敛（task、discussion）
+
+**边界**: `alert_rule` 只声明判定与分级；"要不要转任务"走 §4.7 的升级路径，不在规则里硬编码
+
+### 9.7 Announcement 独立 scope
+
+**决策**: 系统公告（运维/版本/维护）如要实现，独立 scope，不复用 `change_event` 订阅链
+
+**理由**:
+- Fusion 在 UI 合、在模型分；公告不属于业务事件，无对象上下文
+- 混入订阅链会污染偏好匹配与去重
 
 ---
 

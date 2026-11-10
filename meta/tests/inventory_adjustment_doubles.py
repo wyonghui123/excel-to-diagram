@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any, Dict, Optional
 
 from meta.migrations import v203__inventory_adjustment as v203
+from meta.migrations import v231__rule_hold as v231
 from meta.tests import inventory_test_doubles as inv
 
 DEFAULT_DATE = '2026-11-03'
@@ -24,6 +25,9 @@ def install_adjustment(conn: sqlite3.Connection) -> sqlite3.Connection:
     v203._do_types(conn)
     v203._do_number_sequences(conn)
     v203._do_params(conn)
+    # 盘点 submit/approve 依赖规则挂起表 holds（spec-rule-model §10.4）
+    v231._do_tables(conn)
+    v231._do_indexes(conn)
     conn.commit()
     return conn
 

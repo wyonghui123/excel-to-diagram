@@ -9,6 +9,11 @@
   编号    NUMBERING_FIELD_MISSING
   单据流  DOC_FLOW_SOURCE_UNKNOWN / DOC_FLOW_TARGET_UNKNOWN /
           DOC_FLOW_QTY_FIELD_MISSING / DOC_FLOW_DUPLICATE
+  动作    RULE_ACTION_INVALID
+  命中    RULE_HIT_POLICY_INVALID / RULE_OVERLAP
+  聚合    RULE_COMBINE_MODE_INVALID / RULE_KEY_INVALID
+  约束    RULE_HOLD_RELEASE_MISSING
+  度量    METRIC_DEFINITION_INVALID
 
 本模块只读声明与三元组，不查库、不写库；运行时不在请求链路内执行。
 """
@@ -19,7 +24,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 from meta.core.models import registry
-from meta.core.models_enums import RuleType
+from meta.core.models_enums import RuleType, ValidationSeverity
+from meta.core.rule_action_matrix import HOLD, validate_action
+from meta.core.rule_combine_mode import validate_combine_mode
+from meta.core.rule_constraint_evaluator import KEY_SEVERITIES
+from meta.core.rule_hit_policy import normalize_hit_policy, validate_hit_policy
+from meta.core.rule_keys import bo_yaml_key
 
 
 @dataclass(frozen=True)
@@ -240,15 +250,183 @@ def validate_doc_flow_rules(
     return errors
 
 
+def validate_rule_actions(
+        objects: Optional[Iterable[Any]] = None) -> List[DeclarationError]:
+    """处置动作校验：``rule_type × action`` 必须命中封闭矩阵（M1 / R-A1）。
+
+    未声明 ``disposition`` 的规则视为「无处置动作」，不报错；
+    声明了就必须是词表内动作且被该 ``rule_type`` 允许。
+    """
+    errors: List[DeclarationError] = []
+    for meta_object in _objects(objects):
+        object_id = str(getattr(meta_object, 'id', '') or '')
+        for rule in (getattr(meta_object, 'rules', None) or []):
+            reason = validate_action(
+                getattr(rule, 'rule_type', None),
+                getattr(rule, 'disposition', ''))
+            if reason:
+                rule_key = bo_yaml_key(object_id, getattr(rule, 'id', ''))
+                errors.append(DeclarationError(
+                    'RULE_ACTION_INVALID', object_id,
+                    '%s：%s' % (rule_key, reason)))
+    return errors
+
+
+def _condition_signature(rule: Any) -> tuple:
+    rule_type = getattr(rule, 'rule_type', None)
+    return (
+        str(getattr(rule_type, 'value', rule_type) or ''),
+        ' '.join(str(getattr(rule, 'condition', '') or '').split()),
+    )
+
+
+def validate_hit_policies(
+        objects: Optional[Iterable[Any]] = None) -> List[DeclarationError]:
+    """命中策略校验（M5 / FR-006）。
+
+    1. 显式声明的 ``hit_policy`` 必须落在封闭词表 ``first / all / unique`` 内；
+       未声明视为默认 ``first``，不报错。
+    2. ``unique`` 只做建模期静态重叠检查：同一对象、同一 ``rule_type`` 下
+       条件文本相同的多条 ``unique`` 规则即视为「规则重叠」。
+    """
+    errors: List[DeclarationError] = []
+    for meta_object in _objects(objects):
+        object_id = str(getattr(meta_object, 'id', '') or '')
+        seen: Dict[tuple, str] = {}
+        for rule in (getattr(meta_object, 'rules', None) or []):
+            declared = getattr(rule, 'hit_policy', '')
+            reason = validate_hit_policy(declared)
+            rule_key = bo_yaml_key(object_id, getattr(rule, 'id', ''))
+            if reason:
+                errors.append(DeclarationError(
+                    'RULE_HIT_POLICY_INVALID', object_id,
+                    '%s：%s' % (rule_key, reason)))
+                continue
+            if normalize_hit_policy(declared) != 'unique':
+                continue
+            signature = _condition_signature(rule)
+            previous = seen.get(signature)
+            if previous is not None:
+                errors.append(DeclarationError(
+                    'RULE_OVERLAP', object_id,
+                    '%s 与 %s 条件重叠（hit_policy=unique）'
+                    % (rule_key, previous)))
+            else:
+                seen[signature] = rule_key
+    return errors
+
+
+def validate_combine_modes(
+        objects: Optional[Iterable[Any]] = None) -> List[DeclarationError]:
+    """判定聚合方式校验（M6b）。
+
+    显式声明的 ``combine_mode`` 必须落在封闭词表 ``any / all`` 内；
+    未声明视为默认 ``all``，不报错。
+    """
+    errors: List[DeclarationError] = []
+    for meta_object in _objects(objects):
+        object_id = str(getattr(meta_object, 'id', '') or '')
+        for rule in (getattr(meta_object, 'rules', None) or []):
+            reason = validate_combine_mode(getattr(rule, 'combine_mode', ''))
+            if reason:
+                rule_key = bo_yaml_key(object_id, getattr(rule, 'id', ''))
+                errors.append(DeclarationError(
+                    'RULE_COMBINE_MODE_INVALID', object_id,
+                    '%s：%s' % (rule_key, reason)))
+    return errors
+
+
+def validate_constraint_keys(
+        objects: Optional[Iterable[Any]] = None) -> List[DeclarationError]:
+    """约束多 key 声明校验（M6b）。
+
+    1. 每个 key 必须同时声明 ``parameter`` 与 ``metric``；
+    2. key 级 ``severity`` 必须落在 ``error / warning / info`` 内；
+    3. key 级 ``disposition`` 必须被 ``constraint × action`` 矩阵允许；
+    4. 生效动作为 ``hold`` 时规则必须声明 ``release_action``（可存不可过）。
+    """
+    errors: List[DeclarationError] = []
+    for meta_object in _objects(objects):
+        object_id = str(getattr(meta_object, 'id', '') or '')
+        for rule in (getattr(meta_object, 'rules', None) or []):
+            if getattr(rule, 'rule_type', None) != RuleType.CONSTRAINT:
+                continue
+            rule_key = bo_yaml_key(object_id, getattr(rule, 'id', ''))
+            release_action = str(getattr(rule, 'release_action', '') or '').strip()
+            rule_disposition = str(
+                getattr(rule, 'disposition', '') or '').strip().lower()
+            if rule_disposition == HOLD and not release_action:
+                errors.append(DeclarationError(
+                    'RULE_HOLD_RELEASE_MISSING', object_id,
+                    '%s：hold 必须声明释放动作 release_action' % rule_key))
+            for index, key in enumerate(getattr(rule, 'keys', None) or [], 1):
+                prefix = '%s key#%d' % (rule_key, index)
+                if not isinstance(key, dict) or not key.get('parameter') \
+                        or not key.get('metric'):
+                    errors.append(DeclarationError(
+                        'RULE_KEY_INVALID', object_id,
+                        '%s：key 必须是含 parameter 与 metric 的映射' % prefix))
+                    continue
+                severity = str(key.get('severity') or
+                               ValidationSeverity.ERROR.value).strip().lower()
+                if severity not in KEY_SEVERITIES:
+                    errors.append(DeclarationError(
+                        'RULE_KEY_INVALID', object_id,
+                        '%s：severity %r 不在 %s 内'
+                        % (prefix, severity, list(KEY_SEVERITIES))))
+                disposition = str(key.get('disposition') or
+                                  rule_disposition or '').strip().lower()
+                if key.get('disposition'):
+                    reason = validate_action(RuleType.CONSTRAINT, disposition)
+                    if reason:
+                        errors.append(DeclarationError(
+                            'RULE_ACTION_INVALID', object_id,
+                            '%s：%s' % (prefix, reason)))
+                if disposition == HOLD and not release_action:
+                    errors.append(DeclarationError(
+                        'RULE_HOLD_RELEASE_MISSING', object_id,
+                        '%s：hold 必须声明释放动作 release_action' % prefix))
+    return errors
+
+
+def validate_metric_definitions(
+        metric_registry: Any = None,
+        known_fields: Optional[Dict[str, Iterable[str]]] = None
+) -> List[DeclarationError]:
+    """派生度量定义校验（M3 / FR-003 / NFR-003）。
+
+    结构化错误（空 code / 空 formula / precision 越界 / 重复定义）在
+    ``MetricDefinition`` 构造与 ``register()`` 时即抛出；这里汇总整表问题：
+    公式引用未声明输入、输入既非度量也非对象字段（仅在传入 known_fields 时查）、
+    度量循环依赖。
+    """
+    from meta.core.rule_metrics import DEFAULT_METRIC_REGISTRY
+
+    target = metric_registry if metric_registry is not None else DEFAULT_METRIC_REGISTRY
+    return [DeclarationError('METRIC_DEFINITION_INVALID', '', message)
+            for message in target.validate(known_fields=known_fields)]
+
+
 def validate_all(
         objects: Optional[Iterable[Any]] = None,
         doc_flow_rules: Optional[Iterable[Dict[str, Any]]] = None
 ) -> List[DeclarationError]:
-    """聚合四域校验。"""
+    """聚合七域校验。"""
     target = list(objects) if objects is not None else None
     errors = validate_state_machines(target)
     errors.extend(validate_approval(target))
     errors.extend(validate_numbering(target))
+    errors.extend(validate_rule_actions(target))
+    errors.extend(validate_hit_policies(target))
+    errors.extend(validate_combine_modes(target))
+    errors.extend(validate_constraint_keys(target))
+    # [Rule Model M6a-3 2026-11-10] 传入对象字段表：度量的 inputs 必须
+    # 是「已声明度量」或「该对象字段」，加载期即可拦下拼写错误。
+    known_fields = {
+        str(getattr(obj, 'id', '') or ''): _field_names(obj)
+        for obj in (target if target is not None else _objects())
+    }
+    errors.extend(validate_metric_definitions(known_fields=known_fields))
     if doc_flow_rules is not None:
         errors.extend(validate_doc_flow_rules(doc_flow_rules, target))
     return errors

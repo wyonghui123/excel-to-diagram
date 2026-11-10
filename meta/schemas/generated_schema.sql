@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-06 07:37:56.097694
+-- 生成时间: 2026-11-10 18:03:22.263308
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -138,27 +138,6 @@ CREATE TABLE IF NOT EXISTS attribute_scopes (
     description TEXT,
     created_at DATETIME,
     FOREIGN KEY (attribute_id) REFERENCES attribute_definitions(id)
-)
-
--- 属性提升: 字典层属性提升为业务表物理列（一次性切换 cutover，spec 2026-11-09 TBD-003）
-CREATE TABLE IF NOT EXISTS attribute_promotion (
-    created_by VARCHAR(200),
-    updated_by VARCHAR(200),
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_type VARCHAR(200) NOT NULL,
-    attribute_code VARCHAR(200) NOT NULL,
-    target_table VARCHAR(200) NOT NULL,
-    target_column VARCHAR(200) NOT NULL,
-    data_type VARCHAR(200) NOT NULL DEFAULT 'string',
-    sync_mode VARCHAR(200) NOT NULL DEFAULT 'cutover',
-    status VARCHAR(200) NOT NULL DEFAULT 'pending',
-    backfilled_count INTEGER NOT NULL DEFAULT 0,
-    mismatch_count INTEGER NOT NULL DEFAULT 0,
-    last_checked_at DATETIME,
-    activated_at DATETIME,
-    created_at DATETIME,
-    updated_at DATETIME,
-    UNIQUE (object_type, attribute_code)
 )
 
 -- 审计日志: 审计日志记录所有业务对象的变更历史，包括创建、更新、删除操作
@@ -615,6 +594,8 @@ CREATE TABLE IF NOT EXISTS control_parameter_defs (
     value_type VARCHAR(200) NOT NULL DEFAULT 'string',
     enum_type_id INTEGER,
     target_bo VARCHAR(200),
+    tolerance_direction VARCHAR(200),
+    tolerance_basis VARCHAR(200),
     default_value TEXT,
     description TEXT,
     status VARCHAR(200) NOT NULL DEFAULT 'active',
@@ -802,7 +783,8 @@ CREATE VIEW IF NOT EXISTS v_demand_trace_graph AS SELECT
   COALESCE(e.target_item, '') AS target_line_id,
   e.quantity AS qty,
   CASE
-    WHEN e.rule_id = 'shipment_line_to_return_in_txn'
+    WHEN e.rule_id IN ('shipment_line_to_return_in_txn',
+                       'receipt_line_to_return_out_txn')
       THEN CASE WHEN e.quantity_sign = 'red' THEN e.quantity ELSE -e.quantity END
     ELSE CASE WHEN e.quantity_sign = 'red' THEN -e.quantity ELSE e.quantity END
   END AS signed_qty,
@@ -2366,6 +2348,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     fulfillment_status VARCHAR(200),
     fulfillment_derived_at DATETIME,
     description TEXT,
+    origin_purchase_order_id INTEGER,
+    origin_receipt_id INTEGER,
+    return_reason TEXT,
     revision_no INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME,
     updated_at DATETIME,
@@ -2457,6 +2442,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_schedules (
     status VARCHAR(200) NOT NULL DEFAULT 'planned',
     received_qty REAL,
     rejected_qty REAL DEFAULT 0,
+    returned_qty REAL DEFAULT 0,
     completion_source VARCHAR(200),
     completion_prev_status VARCHAR(200),
     created_at DATETIME,
@@ -2558,6 +2544,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     received_by VARCHAR(200),
     status VARCHAR(200) NOT NULL DEFAULT 'draft',
     reversal_of_receipt_id INTEGER,
+    return_to VARCHAR(200) DEFAULT 'supplier',
     reversed_at DATETIME,
     remark VARCHAR(200),
     created_at DATETIME,
@@ -2875,6 +2862,20 @@ CREATE TABLE IF NOT EXISTS resource_territory_assignments (
     FOREIGN KEY (resource_id) REFERENCES resources(id),
     FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id),
     FOREIGN KEY (territory_id) REFERENCES territories(id)
+)
+
+-- 规则挂起: 规则命中后的挂起明细；部分唯一索引保证同一对象同一规则只有一条 active 行
+CREATE TABLE IF NOT EXISTS holds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_type VARCHAR(200) NOT NULL,
+    record_id INTEGER NOT NULL,
+    rule_key VARCHAR(200) NOT NULL,
+    code VARCHAR(200),
+    reason VARCHAR(200),
+    applied_by VARCHAR(200),
+    applied_at DATETIME NOT NULL,
+    released_by VARCHAR(200),
+    released_at DATETIME
 )
 
 -- 销售员: 销售员字典——编码、姓名及可选的人员 / 账号绑定
@@ -3906,6 +3907,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     workflow_version INTEGER NOT NULL,
     name VARCHAR(200),
     trigger_kind VARCHAR(200),
+    idempotency_key VARCHAR(200),
     definition_snapshot TEXT,
     variables TEXT,
     inputs TEXT,
@@ -4972,6 +4974,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_territory_assignment ON resource_t
 CREATE INDEX IF NOT EXISTS idx_resource_territory_assignment_group ON resource_territory_assignments(resource_group_id)
 CREATE INDEX IF NOT EXISTS idx_resource_territory_assignment_territory ON resource_territory_assignments(territory_id)
 
+-- Indexes for 规则挂起
+CREATE INDEX IF NOT EXISTS idx_holds_active ON holds(object_type, record_id) WHERE released_at IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS uq_holds_active ON holds(object_type, record_id, rule_key) WHERE released_at IS NULL
+
 -- Indexes for 销售员
 CREATE INDEX IF NOT EXISTS idx_salespersons_party_id ON salespersons(party_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_salesperson_code ON salespersons(code)
@@ -5262,6 +5268,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_key_version ON workflows(workflow_
 CREATE INDEX IF NOT EXISTS idx_workflow_key ON workflows(workflow_key)
 
 -- Indexes for 工作流运行实例
+CREATE UNIQUE INDEX IF NOT EXISTS uq_run_idempotency ON workflow_runs(idempotency_key)
 CREATE INDEX IF NOT EXISTS idx_run_workflow ON workflow_runs(workflow_id)
 CREATE INDEX IF NOT EXISTS idx_run_key ON workflow_runs(workflow_key)
 

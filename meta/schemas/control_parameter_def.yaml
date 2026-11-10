@@ -120,6 +120,9 @@ fields:
       - value: inventory
         label: 库存
         color: warning
+      - value: tolerance
+        label: 容差
+        color: danger
       - value: platform
         label: 平台
         color: info
@@ -213,6 +216,49 @@ fields:
       hint: 取值存目标对象主键；写入时校验存在性
     ui:
       widget: input
+
+  # 容差语义（domain=tolerance 时填写）：把「方向 × 基准」结构化，
+  # 避免 code 前缀 / description 文本成为第二套事实源
+  - id: tolerance_direction
+    name: 容差方向
+    type: string
+    db_column: tolerance_direction
+    nullable: true
+    max_length: 20
+    description: 容差约束方向：over 仅上限（超收/超发）、under 仅下限（欠交）、both 双向
+    enum_values:
+      - value: over
+        label: 上限（超）
+        color: warning
+      - value: under
+        label: 下限（欠）
+        color: warning
+      - value: both
+        label: 双向
+        color: info
+    semantics:
+      meaning: 容差限值约束的方向（仅 domain=tolerance 时填写）
+    ui:
+      widget: select
+
+  - id: tolerance_basis
+    name: 容差基准
+    type: string
+    db_column: tolerance_basis
+    nullable: true
+    max_length: 20
+    description: 容差限值的计量基准：percent 按数量百分比、absolute 按绝对数量
+    enum_values:
+      - value: percent
+        label: 百分比
+        color: primary
+      - value: absolute
+        label: 绝对量
+        color: info
+    semantics:
+      meaning: 容差限值的计量基准（仅 domain=tolerance 时填写）
+    ui:
+      widget: select
 
   - id: default_value
     name: 默认值
@@ -372,6 +418,7 @@ ui_view_config:
           - fields: [code, name]
           - fields: [domain, value_type]
           - fields: [enum_type_id, target_bo]
+          - fields: [tolerance_direction, tolerance_basis]
       - title: 值与说明
         columns:
           - fields: [default_value]
@@ -394,6 +441,8 @@ ui_view_config:
           - value_type
           - enum_type_id
           - target_bo
+          - tolerance_direction
+          - tolerance_basis
           - default_value
           - description
           - status

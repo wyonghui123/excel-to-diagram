@@ -18,9 +18,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.doc_flow_batch_engine import derive_batch
 from meta.core.doc_flow_derive_engine import _consumed_in_pool, _num
-from meta.core.doc_flow_rule_store import get_rule, list_rules
 from meta.core.doc_flow_schema import DOC_FLOW_CONSUMED_VIEW
 from meta.core.models import registry
+from meta.core.rule_provider import get_doc_flow_rule, list_doc_flow_rules
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class DocFlowService:
     # ------------------------------------------------------------------ 规则
     def list_rules(self, source_bo: Optional[str] = None,
                    target_bo: Optional[str] = None) -> Dict[str, Any]:
-        rules = list_rules(self.platform_ds, status="active")
+        rules = list_doc_flow_rules(self.platform_ds, status="active")
         if source_bo:
             rules = [r for r in rules if r.get("source_bo") == source_bo]
         if target_bo:
@@ -108,7 +108,7 @@ class DocFlowService:
 
     def _require_rule(self, rule_id: Optional[str]) -> Dict[str, Any]:
         rid = (rule_id or "").strip()
-        rule = get_rule(self.platform_ds, rid) if rid else None
+        rule = get_doc_flow_rule(self.platform_ds, rid) if rid else None
         if not rule:
             raise DocFlowServiceError(
                 "DOC_FLOW_RULE_NOT_FOUND",

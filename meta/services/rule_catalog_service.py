@@ -110,6 +110,10 @@ def _descriptor(
     status: str = 'active',
     updated_at: str = '',
     priority: Optional[int] = None,
+    version: str = '',
+    effective_from: str = '',
+    severity: str = '',
+    enabled: Optional[bool] = None,
     source_tags: Optional[Iterable[str]] = None,
     detail: Optional[Dict[str, Any]] = None,
     layer: str = 'L2',
@@ -129,6 +133,12 @@ def _descriptor(
         'status': status or 'active',
         'updated_at': updated_at or '',
         'priority': priority,
+        # FR-007：治理字段（时效档）——validation 页签需要 version / effective_from
+        'version': version or '',
+        'effective_from': effective_from or '',
+        # FR-007：validation 页签需要 severity / enabled（来源未提供时如实留空）
+        'severity': severity or '',
+        'enabled': enabled,
         'detail': detail or {},
     }
     if links:
@@ -151,6 +161,7 @@ def _bo_yaml_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]
             rule_id = str(getattr(rule, 'id', '') or f'rule_{index}')
             rule_type = str(_enum(getattr(rule, 'rule_type', '')))
             tags = ['validation'] if rule_type in _VALIDATION_TYPES else []
+            custom = getattr(rule, 'custom', None) or {}
             items.append(_descriptor(
                 'bo_yaml',
                 bo_yaml_key(bo_id, rule_id),
@@ -160,6 +171,14 @@ def _bo_yaml_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]
                 configurable=False,
                 status='active' if getattr(rule, 'enabled', True) else 'inactive',
                 priority=getattr(rule, 'priority', None),
+                # FR-007：规则未声明版本/生效期时留空，不臆造默认值
+                version=str(getattr(rule, 'version', '')
+                            or custom.get('version', '') or ''),
+                effective_from=str(getattr(rule, 'effective_from', '')
+                                   or custom.get('effective_from', '') or ''),
+                # FR-007：validation 页签列 severity / enabled
+                severity=str(_enum(getattr(rule, 'severity', '')) or ''),
+                enabled=bool(getattr(rule, 'enabled', True)),
                 source_tags=tags,
                 layer='L1',
                 detail={
@@ -193,17 +212,22 @@ def _control_parameter_descriptors(*, include_draft: bool = False) -> List[Dict[
         if not include_draft and status != 'active':
             continue
         rows = grouped.get(definition.get('id'), [])
+        factors = {
+            'domain': definition.get('domain') or '',
+            'value_type': definition.get('value_type') or '',
+            'default_value': definition.get('default_value'),
+            'value_count': len(rows),
+        }
+        # 容差语义列（M6a-1）：只有配置了方向/基准的参数才透出，避免污染其它域
+        for name in ('tolerance_direction', 'tolerance_basis'):
+            if definition.get(name):
+                factors[name] = definition.get(name)
         items.append(_descriptor(
             'control_parameter',
             control_parameter_key(code),
             str(definition.get('name') or code),
             rule_type='control_parameter',
-            factors={
-                'domain': definition.get('domain') or '',
-                'value_type': definition.get('value_type') or '',
-                'default_value': definition.get('default_value'),
-                'value_count': len(rows),
-            },
+            factors=factors,
             configurable=True,
             publishable=True,
             status=status,

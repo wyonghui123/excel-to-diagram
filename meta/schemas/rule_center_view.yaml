@@ -61,6 +61,9 @@ column_labels:
   step_count: 审批层级
   severity: 严重度
   enabled: 启用
+  priority: 优先级
+  version: 版本
+  effective_from: 生效日期
   check_key: 检查项
   label: 检查项名称
   finding_count: 问题数
@@ -141,7 +144,7 @@ tabs:
   - id: validation
     label: 校验与默认值
     sources: [validation]
-    columns: [rule_key, name, rule_type, scope_bo, severity, enabled]
+    columns: [rule_key, name, rule_type, scope_bo, severity, enabled, version, effective_from, priority]
     filters: [scope_bo, rule_type, severity, enabled, keyword]
     actions: [detail, view_source, copy_key]
 

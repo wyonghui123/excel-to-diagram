@@ -1952,6 +1952,10 @@ def parse_constraint(data: Dict[str, Any]) -> MetaConstraint:
         description=data.get("description", ""),
         constraint_type=data.get("constraint_type", "check"),
         deferrable=data.get("deferrable", False),
+        # [规则模型 M6b 2026-11-10] 多 key 判定 + hold 释放动作
+        combine_mode=str(data.get("combine_mode") or "").lower(),
+        keys=list(data.get("keys") or []),
+        release_action=str(data.get("release_action") or ""),
         semantics=parse_semantics(data.get("semantics", {})),
     )
 
@@ -2132,6 +2136,18 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
         )
     # [G1 修复 2026-10-03] 显式依赖统一在此注入，避免逐个 parse_* 重复。
     rule.depends_on = list(data.get("depends_on", []) or [])
+    # [规则模型 M1 2026-11-10] 处置动作统一注入（组合合法性由
+    # rule_declaration_validator.validate_rule_actions 在加载期校验）。
+    rule.disposition = str(data.get("disposition") or "").lower()
+    # [规则模型 M5 2026-11-10] 命中策略显式声明（合法性由
+    # rule_declaration_validator.validate_hit_policies 在加载期校验）。
+    rule.hit_policy = str(data.get("hit_policy") or "").lower()
+    # [规则模型 M6b 2026-11-10] 判定聚合方式（any / all，默认 all）；
+    # 合法性由 rule_declaration_validator.validate_combine_modes 在加载期校验。
+    rule.combine_mode = str(data.get("combine_mode") or "").lower()
+    # [规则模型 M5 2026-11-10] 治理字段（FR-007），规则中心 validation 页签展示
+    rule.version = str(data.get("version") or "")
+    rule.effective_from = str(data.get("effective_from") or "")
     if unknown_type:
         # [SSOT 2026-10-29] 保留 YAML 原文，便于日志/排障追溯（rule_type 已降级为 VALIDATION）
         rule.custom["raw_rule_type"] = rule_type_str
@@ -2651,6 +2667,47 @@ def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None
                             obj.id, state, kind, fid, where))
 
 
+def _parse_metric_definitions(object_type: str, raw: Any) -> List[Any]:
+    """解析 ``metrics:`` 段为 ``MetricDefinition`` 列表（M6a-3）。
+
+    结构与 ``rule_metrics.MetricDefinition`` 同口径，非法声明在加载期即报错：
+      · 段必须是列表，每项是映射；
+      · code / formula 必填，同一对象内 code 唯一；
+      · object_type 缺省取所在 BO 的 id，显式 ``'*'`` 表示跨对象共享定义。
+
+    注意：这是 L0 派生度量（单行公式、单据内求值、不落库），
+    与 ``analytical_model`` 的 fact / measures / aggregates 报表语义无关。
+    """
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(
+            "[M6a-3] {0}: metrics 必须是列表".format(object_type))
+
+    from meta.core.rule_metrics import MetricDefinition
+
+    definitions: List[Any] = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "[M6a-3] {0}: metrics 每项必须是映射".format(object_type))
+        code = str(item.get("code") or "").strip()
+        if code in seen:
+            raise ValueError(
+                "[M6a-3] {0}: 度量 {1} 重复定义".format(object_type, code))
+        seen.add(code)
+        definitions.append(MetricDefinition(
+            code=code,
+            formula=item.get("formula"),
+            inputs=tuple(item.get("inputs") or ()),
+            unit=item.get("unit", ""),
+            precision=item.get("precision", 2),
+            object_type=str(item.get("object_type") or object_type),
+        ))
+    return definitions
+
+
 def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject:
     fields = [parse_field(f, included_from=f.get("included_from", "")) for f in data.get("fields", [])]
     relations = [parse_relation(r) for r in data.get("relations", [])]
@@ -2720,6 +2777,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         import_export=parse_import_export_config(data.get("import_export", {})),
         audit=parse_audit_config(data.get("audit", {})),
         analytical_model=data.get("analytical_model", {}),
+        # [Rule Model M6a-3 2026-11-10] 派生度量声明（metrics: 段）
+        metrics=_parse_metric_definitions(data.get("id", ""), data.get("metrics")),
         key_template=parse_key_template(data),
         ui_view_config=ui_view_config,
         ui_view_configs=ui_view_configs,
@@ -3131,6 +3190,26 @@ def register_from_yaml(file_path: str, shared_props: Dict[str, List[Dict[str, An
     return False
 
 
+def register_metric_definitions(objects: List[MetaObject]) -> int:
+    """把对象 ``metrics:`` 声明灌入 ``DEFAULT_METRIC_REGISTRY``（M6a-3）。
+
+    按 object_type 整体替换，因此目录重复加载 / reload 幂等；
+    返回本次灌入的度量条数。
+    """
+    groups: Dict[str, List[Any]] = {}
+    for obj in objects:
+        for definition in (getattr(obj, "metrics", None) or []):
+            groups.setdefault(definition.object_type, []).append(definition)
+    if not groups:
+        return 0
+
+    from meta.core.rule_metrics import DEFAULT_METRIC_REGISTRY
+
+    for object_type, definitions in groups.items():
+        DEFAULT_METRIC_REGISTRY.replace_scope(object_type, definitions)
+    return sum(len(items) for items in groups.values())
+
+
 def register_from_directory(dir_path: str, target: Dict = None) -> int:
     """
     从目录加载并注册所有 YAML 元模型
@@ -3174,7 +3253,10 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
             count += 1
         _dir_registry_cache[canonical_dir] = count
         _dir_registry_ids[canonical_dir] = {obj.id for obj in objects}
-    
+
+    # [Rule Model M6a-3 2026-11-10] metrics: 段 → DEFAULT_METRIC_REGISTRY
+    register_metric_definitions(objects)
+
     return count
 
 
