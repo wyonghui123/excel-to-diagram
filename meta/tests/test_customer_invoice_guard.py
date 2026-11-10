@@ -5,6 +5,7 @@
 夹具: meta/tests/factories/_customer_invoice_helpers.py
 """
 import types
+from decimal import Decimal
 
 import pytest
 
@@ -14,7 +15,12 @@ from meta.core.exceptions import ValidationFailedError
 from meta.core.interceptors.customer_invoice_guard_interceptor import (
     CustomerInvoiceGuardInterceptor,
 )
-from meta.services.customer_invoice_service import CustomerInvoiceService
+from meta.services.customer_invoice_service import (
+    EPSILON,
+    PERCENT_TAIL_TOLERANCE,
+    CustomerInvoiceError,
+    CustomerInvoiceService,
+)
 from meta.tests.factories._customer_invoice_helpers import (
     BILLING_SCHEDULE_ID,
     CURRENCY_ID,
@@ -23,11 +29,15 @@ from meta.tests.factories._customer_invoice_helpers import (
     INVOICE_DATE,
     ORDER_LINE_DELIVERY,
     ORG_ID,
+    RETURN_ORDER_LINE_ID,
+    RETURN_SHIPMENT_ID,
+    RETURN_SHIP_LINE_ID,
     build_conn,
     get_header,
     get_lines,
     make_billing_schedule,
     make_ds,
+    make_return_shipment,
     set_schedule_billed,
     set_shipment_line_billed,
 )
@@ -458,3 +468,101 @@ def test_line_update_plan_percent_recalculates_amount():
     assert params['billing_percent'] == 50.0
     assert params['net_amount'] == 500.0
     assert params['tax_amount'] == 65.0
+
+
+# ---------------------------------------------------------------- Wave C 守卫（T41）
+
+def _expect_ci(error, rule):
+    assert isinstance(error.value, CustomerInvoiceError)
+    assert error.value.rule == rule
+    return error.value
+
+
+def _on_account_credit(conn):
+    return _service(conn).create_credit_on_account(dict(
+        BASE_HEADER,
+        lines=[{'description': '年度返利', 'uom_id': 21, 'tax_code_id': 31,
+                'qty': 1, 'unit_price': -100, 'tax_rate_percent': 6}]))
+
+
+def test_guard_return_shipment_not_billable():
+    """R-INV-19：退货发货单禁止正向开票。"""
+    conn = build_conn()
+    make_return_shipment(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _service(conn).create_from_shipment(
+            dict(BASE_HEADER, shipment_id=RETURN_SHIPMENT_ID))
+    _expect_ci(error, 'INVOICE_RETURN_SHIPMENT_NOT_BILLABLE')
+
+
+def test_guard_credit_line_keys_locked():
+    """R-INV-21：贷项行来源键生成后不可改。"""
+    conn = build_conn()
+    service = _service(conn)
+    credit = _on_account_credit(conn)
+    line = get_lines(conn, credit['id'])[0]
+    header = get_header(conn, credit['id'])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.validate_line_write(
+            {'id': line['id'], 'shipment_line_id': 81},
+            existing=line, invoice=header)
+    _expect_ci(error, 'INVOICE_CREDIT_LINE_LOCKED')
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.validate_line_write(
+            {'id': line['id'], 'source_line_id': 91},
+            existing=line, invoice=header)
+    _expect_ci(error, 'INVOICE_CREDIT_LINE_LOCKED')
+
+
+def test_guard_on_account_no_line_keys():
+    """R-INV-21：贷项建行必须无来源行键（on-account）。"""
+    conn = build_conn()
+    service = _service(conn)
+    credit = _on_account_credit(conn)
+    header = get_header(conn, credit['id'])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.validate_line_write(
+            {'description': '带来源键', 'uom_id': 21, 'tax_code_id': 31,
+             'qty': 1, 'unit_price': -10, 'shipment_line_id': 81},
+            invoice=header)
+    _expect_ci(error, 'INVOICE_CREDIT_LINE_LOCKED')
+
+
+def test_guard_return_qty_not_exceed_billed():
+    """R-RET-10：退货数量不得超过原行已开票数量。"""
+    conn = build_conn()
+    _posted_invoice(conn, qty=15)
+    make_return_shipment(conn, lines=[(RETURN_SHIP_LINE_ID,
+                                       RETURN_ORDER_LINE_ID, 20.0)])
+    service = _service(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': RETURN_SHIPMENT_ID})
+    _expect_ci(error, 'INVOICE_CREDIT_EXCEEDED')
+
+
+def test_guard_credit_amount_within_limit():
+    """R-INV-20：贷项金额不得超过原行剩余可贷额度。"""
+    conn = build_conn()
+    service = _service(conn)
+    original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_invoice({
+            'source_invoice_id': original['id'],
+            'lines': [{'invoice_line_id': line_id, 'amount': 500}]})
+    _expect_ci(error, 'INVOICE_CREDIT_EXCEEDED')
+
+
+def test_guard_tolerances_not_interchangeable():
+    """EPSILON（元，4 位）与 PERCENT_TAIL_TOLERANCE（%，2 位）口径分离。"""
+    assert EPSILON == Decimal('0.0001')
+    assert PERCENT_TAIL_TOLERANCE == Decimal('0.01')
+    assert EPSILON.as_tuple().exponent == -4
+    assert PERCENT_TAIL_TOLERANCE.as_tuple().exponent == -2

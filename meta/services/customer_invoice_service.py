@@ -119,11 +119,22 @@ PLAN_LINE_LOCKED_FIELDS = (
 #: 贷项 / 红字行引用原发票行的反向事实边规则（B7）
 CREDIT_DOC_FLOW_RULE_ID = 'customer_invoice_to_credit_memo'
 
+#: 贷项行身份字段：生成即锁定，更新不得改键（on-account 行要求全空，R-INV-21）
+CREDIT_LINE_LOCKED_FIELDS = (
+    'original_invoice_line_id', 'source_doc_type', 'source_line_id',
+    'shipment_line_id', 'schedule_id', 'order_line_id',
+)
+
 #: Wave C：退货发货行 → 贷项行（v242 播种）
 RETURN_DOC_FLOW_RULE_ID = 'return_shipment_line_to_credit_memo'
 
-#: 数值容差（4 位小数金额）
+#: 金额相等判断容差（单位：元，4 位小数）。仅用于金额比较，
+#: 不得用于比例比较；比例比较请使用 PERCENT_TAIL_TOLERANCE。
 EPSILON = Decimal('0.0001')
+
+#: 比例合计容差（单位：%，2 位小数）。仅用于比例合计/尾差判断，
+#: 不得用于金额比较；金额比较请使用 EPSILON。
+PERCENT_TAIL_TOLERANCE = Decimal('0.01')
 
 #: 可编辑状态
 EDITABLE_STATUSES = (STATUS_DRAFT,)
@@ -767,6 +778,10 @@ class CustomerInvoiceService:
         row = dict(existing or {})
         row.update({k: v for k, v in dict(payload or {}).items() if k != 'id'})
 
+        # R-INV-21：贷项行身份字段生成即锁定；草稿期同样不得改键
+        if self._is_red(invoice or {}):
+            self._assert_credit_line_locked(existing, row, payload or {})
+
         shipment_line_id = row.get('shipment_line_id')
         schedule_id = row.get('schedule_id')
         order_line_id = row.get('order_line_id')
@@ -871,6 +886,37 @@ class CustomerInvoiceService:
                 field_name='source_doc_type',
                 rule='INVOICE_SOURCE_MISMATCH')
         return self._finalize_line(self._build_manual_line(row))
+
+    def _assert_credit_line_locked(self, existing: Optional[Dict[str, Any]],
+                                   row: Dict[str, Any],
+                                   payload: Dict[str, Any]) -> None:
+        """R-INV-21：贷项行身份字段锁定（新建必须无行键，更新不得改键）。"""
+        if existing is None:
+            for field in CREDIT_LINE_LOCKED_FIELDS:
+                value = row.get(field)
+                if field == 'source_doc_type':
+                    if _blank(value) or str(value).strip() == SOURCE_MANUAL:
+                        continue
+                elif _blank(value):
+                    continue
+                raise CustomerInvoiceError(
+                    '贷项行必须为 on-account 行，不得携带来源行键（%s）' % field,
+                    field_name=field, rule='INVOICE_CREDIT_LINE_LOCKED')
+            return
+
+        for field in CREDIT_LINE_LOCKED_FIELDS:
+            if field not in payload:
+                continue
+            old = existing.get(field)
+            new = payload.get(field)
+            if _blank(old) and _blank(new):
+                continue
+            same = (not _blank(old) and not _blank(new)
+                    and str(old).strip() == str(new).strip())
+            if not same:
+                raise CustomerInvoiceError(
+                    '贷项行的来源字段生成后不可修改（%s）' % field,
+                    field_name=field, rule='INVOICE_CREDIT_LINE_LOCKED')
 
     def _assert_plan_identity_locked(self, existing: Dict[str, Any],
                                      row: Dict[str, Any]) -> None:

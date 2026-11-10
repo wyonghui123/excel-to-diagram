@@ -262,6 +262,26 @@ _BILLING_AMOUNT_TOLERANCE = 1e-9
 # R-INV-18：订单行开票相关性枚举
 BILLING_RELEVANCES = ('delivery', 'plan')
 
+# D40：行级开票计划字段（v242）——订单草稿且该行无生效期次时才可改
+BILLING_PLAN_FIELDS = (
+    'billing_period_count', 'billing_interval_months', 'billing_anchor_date',
+    'billing_lead_days', 'billing_proration',
+)
+# 数值型计划字段（比较时按数值归一，避免 '12' vs 12 误判为变更）
+_BILLING_PLAN_NUMERIC_FIELDS = (
+    'billing_period_count', 'billing_interval_months', 'billing_lead_days',
+)
+
+
+def _same_plan_value(field: str, new: Any, old: Any) -> bool:
+    """行级计划字段「值相同」判断（数值归一，其余按文本比较）。"""
+    if _is_blank(new) and _is_blank(old):
+        return True
+    if field in _BILLING_PLAN_NUMERIC_FIELDS:
+        return _num(new) == _num(old)
+    return str(new if not _is_blank(new) else '').strip() == \
+        str(old if not _is_blank(old) else '').strip()
+
 
 class SalesOrderGuardError(ValueError):
     """销售订单守卫拒绝写入。`field_name` / `rule` 供前端定位字段与规则。"""
@@ -835,6 +855,9 @@ class SalesOrderGuardService:
 
         # R-INV-18：billing_relevance 受控（Wave B）
         self._validate_billing_relevance(data, old_data, is_create, order)
+
+        # D40：行级开票计划字段锁（草稿且无生效期次可改）
+        self._validate_billing_plan_fields(data, old_data, is_create, order)
 
     # ---------------- 行项目任务（G15 P2-1） ----------------
 
@@ -1564,6 +1587,31 @@ class SalesOrderGuardService:
             raise SalesOrderGuardError(
                 '该订单行的开票计划已产生开票金额，不能改回按发货开票',
                 field_name='billing_relevance', rule='BILLING_PLAN_IN_USE')
+
+    def _validate_billing_plan_fields(self, data: Dict[str, Any],
+                                      old_data: Optional[Dict[str, Any]],
+                                      is_create: bool,
+                                      order: Dict[str, Any]) -> None:
+        """D40：行级开票计划字段锁（订单 draft 且无生效期次可改）。
+
+        期次一旦生成（非 cancelled），再改计划参数会让已生成期次与
+        行参数不一致，因此 5 个字段整体冻结，返回 ORDER_BILLING_PLAN_LOCKED。
+        """
+        changed = [field for field in BILLING_PLAN_FIELDS
+                   if field in data and not _same_plan_value(
+                       field, data.get(field), (old_data or {}).get(field))]
+        if not changed:
+            return
+        parent_status = (order or {}).get('status')
+        if parent_status and parent_status != DRAFT:
+            raise SalesOrderGuardError(
+                f'订单处于 {parent_status} 状态，行级开票计划字段已冻结',
+                field_name=changed[0], rule='ORDER_BILLING_PLAN_LOCKED')
+        line_id = (old_data or {}).get('id')
+        if not _is_blank(line_id) and self._has_billing_schedule(line_id):
+            raise SalesOrderGuardError(
+                '该订单行已存在开票期次，行级开票计划字段已冻结',
+                field_name=changed[0], rule='ORDER_BILLING_PLAN_LOCKED')
 
     def _require_plan_prerequisites(self, data: Dict[str, Any],
                                     old: Dict[str, Any]) -> None:

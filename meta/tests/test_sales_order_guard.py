@@ -640,6 +640,24 @@ class TestBillingRelevance:
         SalesOrderGuardService(_ds(billing_schedules={'100'})) \
             .validate_line_write(data, old_data=dict(PLAN_LINE), is_create=False)
 
+    def test_guard_plan_fields_locked_after_schedule(self):
+        """D40：期次生成后行级计划字段冻结。"""
+        data = {**PLAN_LINE, 'billing_period_count': 12}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds(billing_schedules={'100'})) \
+                .validate_line_write(
+                    data, old_data={**PLAN_LINE, 'billing_period_count': 6},
+                    is_create=False)
+        assert e.value.rule == 'ORDER_BILLING_PLAN_LOCKED'
+        assert e.value.field_name == 'billing_period_count'
+
+    def test_plan_fields_editable_before_schedule(self):
+        """D40：草稿且无期次时计划字段可改。"""
+        data = {**PLAN_LINE, 'billing_period_count': 12}
+        SalesOrderGuardService(_ds()).validate_line_write(
+            data, old_data={**PLAN_LINE, 'billing_period_count': 6},
+            is_create=False)
+
     def test_relevance_frozen_after_submit(self):
         with pytest.raises(SalesOrderGuardError) as e:
             SalesOrderGuardService(_ds())._validate_billing_relevance(
