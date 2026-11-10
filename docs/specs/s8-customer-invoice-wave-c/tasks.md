@@ -8,7 +8,7 @@
 
 ---
 
-## [ ] T35 迁移 v242（5 列 + 权限 + doc_flow 规则 + 索引）
+## [x] T35 迁移 v242（5 列 + 权限 + doc_flow 规则 + 索引）
 
 **文件**
 - 新增 `meta/migrations/v242__customer_invoice_wave_c.py`
@@ -35,7 +35,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T36 单据动作：submit / post / reverse
+## [x] T36 单据动作：submit / post / reverse
 
 **文件**
 - 修改 `meta/services/customer_invoice_actions.py`
@@ -58,7 +58,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T37 计划生成服务
+## [x] T37 计划生成服务
 
 **文件**
 - 新增 `meta/services/billing_plan_service.py`
@@ -79,12 +79,12 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T38 订单确认触发 + 手工补跑 action
+## [x] T38 订单确认触发 + 手工补跑 action
 
 **文件**
 - 修改 `meta/core/interceptors/sales_order_guard_interceptor.py`（after-write 钩子）
 - 修改 `meta/services/bo_action_registrations.py`
-- 新增 `meta/tests/test_order_billing_plan_trigger.py`
+- 新增 `meta/tests/test_billing_plan_trigger.py`
 
 **内容**
 - 订单 status → `confirmed` 后调用 `BillingPlanService.generate_for_order`，同事务；失败回滚确认。
@@ -100,7 +100,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T39 退货 → 贷项
+## [x] T39 退货 → 贷项
 
 **文件**
 - 修改 `meta/services/customer_invoice_service.py`
@@ -126,7 +126,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T40 部分贷项 / 多次贷项 / on-account
+## [x] T40 部分贷项 / 多次贷项 / on-account
 
 **文件**
 - 修改 `meta/services/customer_invoice_service.py`
@@ -153,7 +153,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T41 守卫规则
+## [x] T41 守卫规则
 
 **文件**
 - 修改 `meta/services/customer_invoice_service.py`（行级 plan/贷项身份锁定）
@@ -178,7 +178,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T42 订单关闭校验 billing_status
+## [x] T42 订单关闭校验 billing_status
 
 **文件**
 - 修改 `meta/services/sales_order_guard_service.py`
@@ -196,7 +196,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T43 YAML / 前端入口
+## [x] T43 YAML / 前端入口
 
 **文件**
 - 修改 `meta/schemas/sales_order_line.yaml`
@@ -223,14 +223,14 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T44 测试补齐
+## [x] T44 测试补齐
 
 **文件**
 - 修改 `meta/tests/test_customer_invoice_service.py`
 - 修改 `meta/tests/test_customer_invoice_actions.py`
 - 修改 `meta/tests/test_customer_invoice_guard.py`
 - 新增 `meta/tests/test_billing_plan_service.py`
-- 新增 `meta/tests/test_order_billing_plan_trigger.py`
+- 新增 `meta/tests/test_billing_plan_trigger.py`
 - 新增 `meta/tests/test_migration_v242.py`
 
 **内容**
@@ -245,7 +245,7 @@ python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --
 
 ---
 
-## [ ] T45 回归 + 文档勾选 + 分组提交
+## [x] T45 回归 + 文档勾选 + 分组提交
 
 **内容**
 1. 跑 spec §11 全量命令；额外跑 `test_sales_order_service.py`、`test_doc_flow.py`。
@@ -273,13 +273,13 @@ T45 收尾
 
 ## 完成定义（DoD）
 
-- [ ] T35-T45 全部完成，新增测试 ≥ 52 全部通过。
-- [ ] D40-D47 已确认；D43 按「保留贷项回退进度」落地并在 spec 声明差异。
-- [ ] 无新表；仅 `sales_order_lines` 5 列 + 1 权限 + 1 doc_flow 规则 + 2 索引。
-- [ ] 三个单据动作可经 business action 调用，且与状态按钮语义一致。
-- [ ] 退货发货单无法正向开票；退货贷项可追溯、可部分、可跨票拆分。
-- [ ] 贷项支持部分数量/金额/多次/on-account；累计不超原行。
-- [ ] AR / 收入确认 / GL / 税 / Debit Memo / 发票号时机 均未越界实现（仅留契约）。
+- [x] T35-T45 全部完成，新增测试 ≥ 52 全部通过。
+- [x] D40-D47 已确认；D43 按「保留贷项回退进度」落地并在 spec 声明差异。
+- [x] 无新表；仅 `sales_order_lines` 5 列 + 1 权限 + 1 doc_flow 规则 + 2 索引。
+- [x] 三个单据动作可经 business action 调用，且与状态按钮语义一致。
+- [x] 退货发货单无法正向开票；退货贷项可追溯、可部分、可跨票拆分。
+- [x] 贷项支持部分数量/金额/多次/on-account；累计不超原行。
+- [x] AR / 收入确认 / GL / 税 / Debit Memo / 发票号时机 均未越界实现（仅留契约）。
 
 ---
 

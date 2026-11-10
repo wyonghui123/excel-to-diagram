@@ -51,17 +51,17 @@
 
 ### 1.2 验收（全部满足才算完成）
 
-- [ ] `customer_invoice.submit / post / reverse` 三个 business action 注册、鉴权、可重复调用（幂等语义见 §6.1）。
-- [ ] action 调用与状态按钮语义一致：同样的校验、同样的错误码、同样的派生回写；绕过守卫的路径不存在。
-- [ ] 订单确认后自动生成 billing 期次；比例合计 = 100（容差 0.01%）；期金额按 4 位四舍五入，尾差归最后一期；重复确认不重复生成。
-- [ ] `fixed_price` → 1 期 100%；`time_and_material` → 按期数均分；`milestone` → 不自动生成（必须手工带 `milestone_code`）。
-- [ ] `billing_proration='daily'` 且行有 `service_start_date/service_end_date` 时按天分摊；无服务期时退化为均分。
-- [ ] 退货发货单无法通过任何正向开票入口生成发票（`create_from_shipment` 拦截）。
-- [ ] `create_credit_from_return_shipment` 能按退货行数量追溯到已过账发票行，生成负数贷项；找不到原票行时拒绝；跨多张原票按 FIFO 拆分。
-- [ ] 同一发票行可多次贷项，但累计数量与金额不得超过原行（4 位精度）。
-- [ ] `create_credit_on_account` 生成 on-account 贷项，行无 `original_invoice_line_id`、金额为负、无开票进度回退副作用（无 shipment/schedule/order 行键）。
-- [ ] 订单关闭在 `billing_status='partial'` 时被拒绝。
-- [ ] 全量回归通过；主工作树与 s7-worktree 未改动。
+- [x] `customer_invoice.submit / post / reverse` 三个 business action 注册、鉴权、可重复调用（幂等语义见 §6.1）。
+- [x] action 调用与状态按钮语义一致：同样的校验、同样的错误码、同样的派生回写；绕过守卫的路径不存在。
+- [x] 订单确认后自动生成 billing 期次；比例合计 = 100（容差 0.01%）；期金额按 4 位四舍五入，尾差归最后一期；重复确认不重复生成。
+- [x] `fixed_price` → 1 期 100%；`time_and_material` → 按期数均分；`milestone` → 不自动生成（必须手工带 `milestone_code`）。
+- [x] `billing_proration='daily'` 且行有 `service_start_date/service_end_date` 时按天分摊；无服务期时退化为均分。
+- [x] 退货发货单无法通过任何正向开票入口生成发票（`create_from_shipment` 拦截）。
+- [x] `create_credit_from_return_shipment` 能按退货行数量追溯到已过账发票行，生成负数贷项；找不到原票行时拒绝；跨多张原票按 FIFO 拆分。
+- [x] 同一发票行可多次贷项，但累计数量与金额不得超过原行（4 位精度）。
+- [x] `create_credit_on_account` 生成 on-account 贷项，行无 `original_invoice_line_id`、金额为负、无开票进度回退副作用（无 shipment/schedule/order 行键）。
+- [x] 订单关闭在 `billing_status='partial'` 时被拒绝。
+- [x] 全量回归通过；主工作树与 s7-worktree 未改动。
 
 ### 1.3 非目标（P2/P3，本波明确不做）
 
@@ -461,7 +461,7 @@ upgrade 幂等 / verify 通过 / verify 捕获非法 `billing_proration` / rollb
 ## 11. 回归命令（唯一入口）
 
 ```powershell
-python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --file meta/tests/test_customer_invoice_service.py,meta/tests/test_customer_invoice_actions.py,meta/tests/test_customer_invoice_guard.py,meta/tests/test_billing_plan_service.py,meta/tests/test_migration_v242.py,meta/tests/test_sales_order_guard.py,meta/tests/test_sales_order_schedule_guard.py,meta/tests/test_shipment_service.py,meta/tests/test_payment_term_schedule.py,meta/tests/test_doc_flow.py,meta/tests/test_bo_action_registry.py
+python d:\filework\test.py --root D:\filework\s8-billing-worktree --port 3012 --file meta/tests/test_customer_invoice_service.py,meta/tests/test_customer_invoice_actions.py,meta/tests/test_customer_invoice_guard.py,meta/tests/test_billing_plan_service.py,meta/tests/test_billing_plan_trigger.py,meta/tests/test_migration_v242.py,meta/tests/test_sales_order_guard.py,meta/tests/test_sales_order_schedule_guard.py,meta/tests/test_shipment_service.py,meta/tests/test_payment_term_schedule.py,meta/tests/test_doc_flow.py,meta/tests/test_sales_order_fulfillment_status.py,meta/tests/test_bo_action_contract.py
 ```
 
 前端：`npm run build`（仅 YAML 变更时跑，确保 schema 校验通过）。
