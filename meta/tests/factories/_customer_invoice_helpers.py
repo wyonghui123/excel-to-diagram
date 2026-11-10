@@ -732,3 +732,70 @@ def set_doc_flow_rule_status(path, rule_id, status):
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------- v242 迁移辅助
+
+_BILLING_PLAN_FIELDS = {
+    'billing_period_count', 'billing_interval_months', 'billing_anchor_date',
+    'billing_lead_days', 'billing_proration',
+}
+
+
+def seed_permission_sets(conn, codes=('admin', 'default')):
+    for code in codes:
+        conn.execute(
+            'INSERT OR IGNORE INTO permission_sets (code, is_active) '
+            'VALUES (?, 1)', [code])
+    conn.commit()
+
+
+def permission_exists(path, code):
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute(
+            'SELECT 1 FROM permissions WHERE code = ?', [code]).fetchone() \
+            is not None
+    finally:
+        conn.close()
+
+
+def permission_grant_set_codes(path, code):
+    conn = sqlite3.connect(str(path))
+    try:
+        rows = conn.execute(
+            'SELECT s.code FROM permission_set_permissions g '
+            'JOIN permission_sets s ON s.id = g.permission_set_id '
+            'WHERE g.permission_code = ?', [code]).fetchall()
+        return {row[0] for row in rows}
+    finally:
+        conn.close()
+
+
+def index_names(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        return {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'")}
+    finally:
+        conn.close()
+
+
+def set_billing_plan_fields(path, line_id, **values):
+    """按白名单更新 sales_order_lines 的 5 个计划字段（测试专用）。"""
+    keys = [key for key in values if key in _BILLING_PLAN_FIELDS]
+    unknown = set(values) - _BILLING_PLAN_FIELDS
+    if unknown:
+        raise ValueError('unsupported billing fields: %s' % sorted(unknown))
+    if not keys:
+        return
+    assignments = ', '.join('%s = ?' % key for key in keys)
+    params = [values[key] for key in keys] + [line_id]
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            'UPDATE sales_order_lines SET %s WHERE id = ?' % assignments,
+            params)
+        conn.commit()
+    finally:
+        conn.close()
