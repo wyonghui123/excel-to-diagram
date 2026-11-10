@@ -23,8 +23,14 @@ from datetime import datetime
 
 import pytest
 
-# 在任何测试导入之前设置环境变量，确保 rate_limiter 被禁用
-os.environ['DISABLE_RATE_LIMIT'] = 'true'
+# 测试态环境开关的唯一声明源见 meta/tests/shared/env_flags.py。
+# 这里只做导入期注入（必须在 shared.* / 业务模块被导入之前生效）。
+try:
+    from meta.tests.shared.env_flags import apply_early_flags, apply_test_flags
+except ImportError:  # 相对导入回退（从 meta/tests 目录内运行时）
+    from .shared.env_flags import apply_early_flags, apply_test_flags
+
+apply_early_flags()
 
 # [NEW 2026-10-29] 排除脚本型伪测试:
 # test_export_e2e.py 模块顶层即连 http://localhost:3011 做 dev-login, 服务未起时
@@ -565,23 +571,17 @@ def pytest_configure(config):
         if _total_from_env and int(_total_from_env) > 0:
             _update_progress(total=int(_total_from_env))
 
-    os.environ['TESTING'] = 'true'
-    os.environ['DISABLE_ASYNC_AUDIT_WRITER'] = 'true'
-    os.environ['DISABLE_TASK_SCHEDULER'] = 'true'
-    os.environ['DISABLE_WRITE_QUEUE'] = 'true'
-    # [TEST-EFF P0-1] 关闭 create_app() 内的 3 个进程内 cron 调度器
-    # （maintenance / platform / workflow）。它们在测试进程里以 60s 轮询
-    # 反复读写 SQLite（db_vacuum / integrity_check / platform_tick 等），
-    # 与用例事务争锁并累计后台线程。需验证调度器行为的用例显式设
-    # TEST_ALLOW_CRON=1 后再自建实例。
-    if os.environ.get('TEST_ALLOW_CRON') != '1':
-        os.environ['CRON_JOBS_ENABLED'] = '0'
-
-    # [TEST-EFF P1-5] 跳过 create_app() 的整库 quick_check 预检
-    # （165MB 库实测 1.35-1.56s/进程；测试库由 SQLite backup 快照产生，
-    # 真损坏会在首次 SQL 操作时暴露）。需要验证预检链路的用例显式
-    # os.environ.pop('SKIP_DB_PREFLIGHT') 后再断言。
-    os.environ.setdefault('SKIP_DB_PREFLIGHT', '1')
+    # 测试态开关统一由 shared/env_flags.py 声明并注入（单一声明源）：
+    # TESTING / DISABLE_ASYNC_AUDIT_WRITER / DISABLE_TASK_SCHEDULER /
+    # DISABLE_WRITE_QUEUE / CRON_JOBS_ENABLED（TEST_ALLOW_CRON=1 可反制）/
+    # SKIP_DB_PREFLIGHT（setdefault）。新增开关请改注册表，勿在此散落赋值。
+    #
+    # [TEST-EFF P0-1] CRON_JOBS_ENABLED=0 关闭 create_app() 内的 3 个 cron
+    # 调度器（maintenance / platform / workflow），它们在测试进程里以 60s
+    # 轮询反复读写 SQLite，与用例事务争锁并累计后台线程。
+    # [TEST-EFF P1-5] SKIP_DB_PREFLIGHT 跳过整库 quick_check 预检
+    # （165MB 库实测 1.35-1.56s/进程；测试库由 SQLite backup 快照产生）。
+    apply_test_flags()
 
     _setup_strict_mode()
 
