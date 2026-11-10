@@ -861,6 +861,43 @@ def test_is_red_detects_on_account():
                            'reversal_of_invoice_id': 9}) is True
 
 
+def test_credit_amount_epsilon_boundary():
+    """C5：金额容差 EPSILON=0.0001 元；超出 0.0002 拒绝，恰好 0.0001 放行。"""
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _credit(service, original['id'],
+                lines=[{'invoice_line_id': line_id, 'amount': '400.0002'}])
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')
+
+    credit = _credit(service, original['id'],
+                     lines=[{'invoice_line_id': line_id, 'amount': '400.0001'}])
+    assert Decimal(str(get_lines(conn, credit['id'])[0]['net_amount'])) \
+        == Decimal('-400.0001')
+
+
+def test_plan_percent_tail_tolerance_boundary():
+    """C5：比例尾差 PERCENT_TAIL_TOLERANCE=0.01（%）；0.001 元尾差吸收为期金额。"""
+    conn = build_conn()
+    service = _service(conn)
+    first = _from_schedule(
+        conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                      'billing_percent': 30}])
+    service.submit(first['id'])
+    service.post(first['id'], posting_date=INVOICE_DATE)
+
+    second = _from_schedule(
+        conn, lines=[{'schedule_id': BILLING_SCHEDULE_ID,
+                      'billing_percent': '69.9999'}])
+
+    line = get_lines(conn, second['id'])[0]
+    # 1000 × 69.9999% = 699.999，与剩余 700 差 0.001 ≤ 0.01 → 吸收为整期
+    assert Decimal(str(line['net_amount'])) == Decimal('700')
+    assert Decimal(str(line['billing_percent'])) == Decimal('70')
+
+
 # ---------------------------------------------------------------- doc_flow 反向边（B7）
 
 def _capture_attach_edges(monkeypatch):
