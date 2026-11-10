@@ -728,6 +728,42 @@ class InventoryCountService:
         return line
 
     # ------------------------------------------------------------------
+    # 挂起查询 / 删除级联
+    # ------------------------------------------------------------------
+    def list_holds(self, count_id: Any) -> List[Dict[str, Any]]:
+        """本单各行 active holds（仅含有挂起的行，按 line_no 排序）。
+
+        供查询接口 / 前端挂起提示使用；状态始终由 holds 派生，不读冗余列。
+        """
+        result: List[Dict[str, Any]] = []
+        for line in self._load_lines(count_id):
+            holds = self.holds.active_holds(CNT_LINE_OBJECT, line['id'])
+            if holds:
+                result.append({'line_id': line['id'],
+                               'line_no': line.get('line_no'),
+                               'holds': holds})
+        return result
+
+    def release_holds_for_count(self, count_id: Any,
+                                user_info: Optional[Dict[str, Any]] = None
+                                ) -> int:
+        """删除抬头前释放本单全部行的 active holds（不删行）。
+
+        与删除同事务执行：删除失败回滚时释放动作一并回滚，不会误放行。
+        """
+        released_by = _user_name(user_info)
+        return sum(1 for line in self._load_lines(count_id)
+                   if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                         released_by=released_by))
+
+    def release_holds_for_line(self, line_id: Any,
+                               user_info: Optional[Dict[str, Any]] = None
+                               ) -> int:
+        """删除行前释放该行的 active holds（不删行，与删除同事务）。"""
+        return self.holds.release(CNT_LINE_OBJECT, line_id,
+                                  released_by=_user_name(user_info))
+
+    # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
     def _load_header(self, count_id: Any) -> Dict[str, Any]:

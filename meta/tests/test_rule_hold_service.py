@@ -245,3 +245,76 @@ def test_post_blocked_while_active_hold():
     # 释放后不再因 hold 被拦截
     service.holds.release(CNT_LINE_OBJECT, line['id'])
     assert service.holds.is_held(CNT_LINE_OBJECT, line['id']) is False
+
+
+# ---------------- 查询 / 删除级联 ----------------
+
+def test_list_holds_returns_active_holds_with_line_no():
+    conn = adj.build_adjustment_db()
+    adj.post_balance(conn, 10)
+    count_id, _data, service = _create_count(conn, tolerance_qty_abs=0.5)
+    service.start(count_id)
+    line = _lines(conn, count_id)[0]
+    _set_counted(conn, line['id'], 12, reason='盘亏')
+    service.submit(count_id, {'username': 'submitter'})
+
+    items = service.list_holds(count_id)
+    assert len(items) == 1
+    assert items[0]['line_id'] == line['id']
+    assert items[0]['line_no'] == 1
+    assert items[0]['holds'][0]['rule_key'] == TOLERANCE_RULE_ID
+    assert items[0]['holds'][0]['reason'] == '盘亏'
+
+    service.approve(count_id, {'username': 'approver'})
+    assert service.list_holds(count_id) == []
+
+
+def test_line_delete_via_interceptor_releases_active_holds():
+    from types import SimpleNamespace
+
+    from meta.core.interceptors.inventory_count_guard_interceptor import (
+        InventoryCountGuardInterceptor,
+    )
+
+    conn = adj.build_adjustment_db()
+    adj.post_balance(conn, 10)
+    count_id, _data, service = _create_count(conn)
+    service.start(count_id)
+    values = service.prepare_line_create(
+        count_id, {'item_id': inv.ITEM_ID, 'counted_qty': 1})
+    line_id = adj.insert_row(conn, 'inventory_count_lines', values)
+    assert service.holds.apply(CNT_LINE_OBJECT, line_id, 'R-INV-OTHER',
+                               code='OTHER', applied_by='u1') is True
+
+    context = SimpleNamespace(
+        meta_object=SimpleNamespace(id='inventory_count_line'),
+        action='crud_delete', params={'id': line_id}, object_id=line_id,
+        data_source=_ds(conn), old_data={'count_id': count_id},
+        user_info={'username': 'deleter'})
+    InventoryCountGuardInterceptor().before_action(context)
+
+    assert service.holds.is_held(CNT_LINE_OBJECT, line_id) is False
+    row = _holds(conn)[0]
+    assert row['released_by'] == 'deleter'
+    assert row['released_at'] is not None
+
+
+def test_release_holds_for_count_releases_every_line():
+    conn = adj.build_adjustment_db()
+    adj.post_balance(conn, 10)
+    count_id, _data, service = _create_count(conn, tolerance_qty_abs=0.5)
+    service.start(count_id)
+    extra = service.prepare_line_create(
+        count_id, {'item_id': inv.ITEM_ID, 'counted_qty': 0.5})
+    extra_id = adj.insert_row(conn, 'inventory_count_lines', extra)
+    line = [row for row in _lines(conn, count_id)
+            if row['source_balance_id']][0]
+    _set_counted(conn, line['id'], 12, reason='盘亏')
+    service.submit(count_id, {'username': 'submitter'})
+    assert service.holds.apply(CNT_LINE_OBJECT, extra_id, 'R-INV-OTHER',
+                               applied_by='u1') is True
+
+    assert service.release_holds_for_count(
+        count_id, {'username': 'deleter'}) == 2
+    assert service.list_holds(count_id) == []
+    assert all(row['released_at'] is not None for row in _holds(conn))

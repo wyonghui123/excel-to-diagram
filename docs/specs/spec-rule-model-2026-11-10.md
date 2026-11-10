@@ -661,16 +661,18 @@ GroupNode { connector: and|or|not, children[] }
 | 挂起表 | `meta/schemas/rule_hold.yaml` + `meta/migrations/v231__rule_hold.py` | `holds`（TBD-6 字段）+ `idx_holds_active` / `uq_holds_active` 两个部分索引（`WHERE released_at IS NULL`）；`skip_generic_api` / `skip_auto_menu`，不做通用 CRUD 与菜单 |
 | 挂起服务 | `meta/services/rule_hold_service.py` | `apply()` 幂等（部分唯一索引兜底）/ `release()` 置 `released_by/released_at` 不删行 / `is_held()`、`active_holds()`；active 谓词只在 `_active_where()` 出现，禁止手写 holds SQL |
 | 盘点接线 | `meta/services/inventory_count_service.py` | `submit()` 超容差行 apply hold、容差内行 release；`approve()` / `cancel()` 释放本单**全部** active holds（不限 `rule_key`，历史行保留）；`post()` 存在任一 active hold 时抛 `INV_COUNT_HELD`（可存不可过） |
+| 挂起查询 | `meta/services/inventory_count_service.py` | `list_holds(count_id)` 返回本单各行 active holds（`line_id` / `line_no` / `holds[]`，按行号排序），供查询接口与前端提示消费 |
+| 删除级联 | `meta/services/inventory_count_service.py` + `meta/core/interceptors/inventory_count_guard_interceptor.py` | 删除抬头 / 行前在 `crud_delete` 守卫内释放对应 active holds（与删除同事务，删除失败回滚不误放行；不删 holds 行） |
 | 审计留痕 | `meta/services/inventory_count_service.py` + `audit_interceptor.py` | submit / approve / cancel 的挂起与释放写 `audit_logs`（`CNT_LINE_OBJECT`，old/new 含 `hold` / `rule_key` / `code` / `reason` / `released_by`）；审计在业务事务提交后写，失败只告警不影响业务；测试替身无 `audit_logs` 表时经 `_audit_available()` 探测跳过 |
-| 单测 | `meta/tests/test_rule_hold_service.py` | 幂等 / 部分唯一索引防重 / 释放保留行可再挂起 / `EXPLAIN QUERY PLAN` 命中部分索引 / 盘点 submit-approve-cancel 全链路 / approve 释放全部规则 / active hold 阻断 post |
+| 单测 | `meta/tests/test_rule_hold_service.py` | 幂等 / 部分唯一索引防重 / 释放保留行可再挂起 / `EXPLAIN QUERY PLAN` 命中部分索引 / 盘点 submit-approve-cancel 全链路 / approve 释放全部规则 / active hold 阻断 post / `list_holds` 查询 / 删除级联释放 |
 
 **key 形状（SSOT）**：`{parameter, metric, severity?, disposition?}`；方向 `over / under / both` 与基准 `percent / absolute` 只从 `control_parameter_defs`（`tolerance_direction` / `tolerance_basis`）读取，规则内不重复书写比较符。
 
 **明确延后（不在 M6b 内）**：
 
 1. `release_action` 执行语义：只做声明必填校验，尚未有通用执行器消费（盘点首版由 `approve()` 直接释放本单全部 active holds，与规则声明的 `inventory_count.approve` 对齐）。
-2. holds 的对外查询 API / 前端挂起提示 / 人工释放入口：当前只有服务层 `active_holds()`，无 HTTP 出口与 UI 呈现。
-3. 单据删除 / 作废不级联清理 holds：存在产生孤儿 active 行的风险（当前仅 `cancel()` 主动释放）。
+2. holds 的对外查询 API / 前端挂起提示 / 人工释放入口：服务层 `list_holds()` 已就绪，仍缺 HTTP 出口与 UI 呈现（人工释放可先走 `approve` / `cancel`）。
+3. ~~单据删除 / 作废不级联清理 holds~~ **已实现**：`crud_delete` 守卫内释放对应 active holds（与删除同事务）。
 4. `holds.release_reason` 列（TBD-12 提到的释放理由）：首版释放只记 `released_by` / `released_at`，释放理由暂由调用方写入审计 `new_data.reason`（`inventory_count.approve` / `inventory_count.cancel`），不落独立列。
 
 **服务接线（2026-11-10）**：`inventory_count_service.submit()` 的超容差判定改由 BO 规则执行 ——
