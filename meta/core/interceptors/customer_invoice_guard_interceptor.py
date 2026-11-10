@@ -90,6 +90,13 @@ def _blank(value: Any) -> bool:
     return value is None or value == ''
 
 
+def _month_of(value: Any) -> str:
+    """日期 → YYYY-MM（号码月份段口径）；兼容 date/datetime/字符串。"""
+    if hasattr(value, 'strftime'):
+        return value.strftime('%Y-%m')
+    return str(value or '')[:7]
+
+
 def _to_param(value: Any) -> Any:
     """服务归一化值 → 持久化入参：Decimal/date 转 SQLite 友好类型。"""
     if isinstance(value, Decimal):
@@ -202,6 +209,9 @@ class CustomerInvoiceGuardInterceptor(Interceptor):
                 field_name='status', rule='INVOICE_POSTED_READONLY')
         if current == STATUS_SUBMITTED:
             self._assert_not_frozen(params, old_data)
+        # 号码在建单时已按 invoice_date / document_type 分配，改这两个字段
+        # 会让号段与单据实际周期/类型不一致（断号或错号），只允许同月改日期
+        self._assert_number_consistency(params, old_data)
 
         if _blank(target) or target == current:
             return
@@ -250,6 +260,27 @@ class CustomerInvoiceGuardInterceptor(Interceptor):
             raise CustomerInvoiceError(
                 '已过账发票只读，仅允许红冲', field_name='status',
                 rule='INVOICE_POSTED_READONLY')
+
+    @staticmethod
+    def _assert_number_consistency(params: Dict[str, Any],
+                                   old_data: Dict[str, Any]) -> None:
+        """已取号的发票：单据类型锁定；日期只允许同月调整（号码月份段）。"""
+        if _blank(old_data.get('invoice_no')):
+            return
+        if 'document_type_id' in params and not _same_value(
+                params.get('document_type_id'),
+                old_data.get('document_type_id')):
+            raise CustomerInvoiceError(
+                '发票已取号，单据类型不可修改（号码类型段已固定）',
+                field_name='document_type_id',
+                rule='INVOICE_NUMBER_TYPE_LOCKED')
+        if not _blank(params.get('invoice_date')) and \
+                _month_of(params.get('invoice_date')) != \
+                _month_of(old_data.get('invoice_date')):
+            raise CustomerInvoiceError(
+                '发票已取号，日期不可跨月修改（号码月份段已固定）',
+                field_name='invoice_date',
+                rule='INVOICE_NUMBER_PERIOD_MISMATCH')
 
     @staticmethod
     def _assert_not_frozen(params: Dict[str, Any],

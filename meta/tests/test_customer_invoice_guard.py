@@ -40,6 +40,7 @@ from meta.tests.factories._customer_invoice_helpers import (
     make_return_shipment,
     set_schedule_billed,
     set_shipment_line_billed,
+    type_id,
 )
 
 BASE_HEADER = {
@@ -190,6 +191,60 @@ def test_document_category_is_immutable():
     _INTERCEPTOR.before_action(_ctx(
         conn, 'customer_invoice', 'crud_update', params, old_data=old_data))
     assert params['remark'] == '同值可提交'
+
+
+def test_number_locks_document_type_change():
+    conn = build_conn()
+    created = _draft_invoice(conn)
+    old_data = get_header(conn, created['id'])
+    assert old_data['invoice_no'] == 'SINV-202611-00001'
+    debit_memo_type_id = type_id(conn, 'SDN')
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(_ctx(
+            conn, 'customer_invoice', 'crud_update',
+            {'id': created['id'], 'document_type_id': debit_memo_type_id},
+            old_data=old_data))
+    _expect(error, 'INVOICE_NUMBER_TYPE_LOCKED')
+
+    params = {'id': created['id'],
+              'document_type_id': old_data['document_type_id']}
+    _INTERCEPTOR.before_action(_ctx(
+        conn, 'customer_invoice', 'crud_update', params, old_data=old_data))
+    assert params['document_type_id'] == old_data['document_type_id']
+
+
+def test_number_rejects_cross_month_invoice_date_change():
+    conn = build_conn()
+    draft = _draft_invoice(conn)
+    draft_row = get_header(conn, draft['id'])
+
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(_ctx(
+            conn, 'customer_invoice', 'crud_update',
+            {'id': draft['id'], 'invoice_date': '2026-12-01'},
+            old_data=draft_row))
+    _expect(error, 'INVOICE_NUMBER_PERIOD_MISMATCH')
+
+    submitted = _submitted_invoice(conn)
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(_ctx(
+            conn, 'customer_invoice', 'crud_update',
+            {'id': submitted['id'], 'invoice_date': '2026-12-01'},
+            old_data=get_header(conn, submitted['id'])))
+    _expect(error, 'INVOICE_NUMBER_PERIOD_MISMATCH')
+
+
+def test_number_allows_same_month_invoice_date_change():
+    conn = build_conn()
+    draft = _draft_invoice(conn)
+    params = {'id': draft['id'], 'invoice_date': '2026-11-20'}
+
+    _INTERCEPTOR.before_action(_ctx(
+        conn, 'customer_invoice', 'crud_update', params,
+        old_data=get_header(conn, draft['id'])))
+
+    assert params['invoice_date'] == '2026-11-20'
 
 
 def test_submitted_to_posted_delegates_and_exposes_posting_date():
