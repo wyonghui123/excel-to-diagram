@@ -37,6 +37,9 @@ from meta.core.cron_parser import CronParser
 from meta.core.job_executor_registry import (
     DEFAULT_TIMEOUT_SECONDS, ExecutorRegistry, JobContext,
 )
+from meta.core.job_params import (
+    job_params_schema, merge_job_params, sanitize_params,
+)
 from meta.core.job_run_store import (
     DEFAULT_LEASE_SECONDS, JobRunStore, current_worker_id, utc_epoch,
 )
@@ -120,7 +123,8 @@ class JobDispatcher:
         existing = self.store.find_run_by_key(run_key)
         run_id = self.store.create_run(
             job['code'], trigger_id=int(trigger['id']),
-            params=self._trigger_params(trigger), scheduled_for=scheduled_for,
+            params=merge_job_params(job, self._trigger_params(trigger)),
+            scheduled_for=scheduled_for,
             run_key=run_key, now=now)
         if run_id is None:
             summary['errors'] += 1
@@ -156,6 +160,16 @@ class JobDispatcher:
                     summary['skipped'] += 1
                 continue
 
+            params, error = sanitize_params(run.get('params'),
+                                            job_params_schema(job))
+            if error:
+                summary['errors'] += 1
+                self.store.mark_dead(run_id, error='params 校验失败: %s' % error,
+                                     now=now)
+                logger.warning('[dispatcher] run=%s 参数被拒: %s',
+                               run_id, error)
+                continue
+
             worker_id = '%s#%d' % (current_worker_id(), run_id)
             lease = self._lease_seconds(job)
             if not self.store.claim(run_id, worker_id, lease_seconds=lease,
@@ -168,17 +182,19 @@ class JobDispatcher:
 
             summary['claimed'] += 1
             if self._pool is not None:
-                self._pool.submit(self._execute_run, run, job, worker_id)
+                self._pool.submit(self._execute_run, run, job, worker_id,
+                                  params)
             else:
-                self._execute_run(run, job, worker_id)
+                self._execute_run(run, job, worker_id, params)
 
-    def _execute_run(self, run, job, worker_id) -> None:
+    def _execute_run(self, run, job, worker_id, params=None) -> None:
         """跑一次尝试并写回账本；executor 抛错/超时均落 `failed` 分支。"""
         run_id = int(run['id'])
         timeout = float(job.get('timeout_seconds') or DEFAULT_TIMEOUT_SECONDS)
         ctx = JobContext(
             run_id=run_id, job_code=job['code'],
-            params=run.get('params') or {}, attempt=int(run.get('attempt') or 1),
+            params=params if params is not None else (run.get('params') or {}),
+            attempt=int(run.get('attempt') or 1),
             deadline_monotonic=time.monotonic() + timeout,
             cancel_event=threading.Event(),
         )
@@ -231,7 +247,7 @@ class JobDispatcher:
             return None
         return nxt.timestamp() if nxt else None
 
-    # ── 常驻循环（P1 不接入 server.py）───────────────────────────────────
+    # ── 常驻循环（server.py 由 JOB_DISPATCH_ENABLED 控制接入）────────────
 
     def start(self) -> bool:
         if not self.enabled or self._thread is not None:

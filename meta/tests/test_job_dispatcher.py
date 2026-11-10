@@ -185,6 +185,25 @@ def test_params_override_is_snapshotted_into_run(conn):
     assert json.loads(run['params']) == {'batch_size': 10}
 
 
+def test_invalid_params_mark_run_dead(conn):
+    """下发前参数校验失败 → run 直接 dead，且不调用 executor（spec §7.2）。"""
+    _enable(conn, 'db_checkpoint', params_override=json.dumps({'handler': 'x'}))
+    dispatcher = _dispatcher(_store(conn), dry_run=False)
+    called = []
+    dispatcher.registry.register(
+        'db_checkpoint', lambda ctx: called.append(ctx) or {'ok': True})
+
+    summary = dispatcher.tick(T0)
+
+    assert summary['recorded'] == 1
+    assert summary['errors'] == 1
+    assert summary['claimed'] == 0
+    run = _runs(conn)[0]
+    assert run['status'] == 'dead'
+    assert '校验失败' in (run['error'] or '')
+    assert called == []
+
+
 def test_stale_trigger_row_cannot_advance(conn):
     _enable(conn, 'db_checkpoint')
     store = _store(conn)

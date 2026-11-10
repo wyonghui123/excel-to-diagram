@@ -95,6 +95,10 @@ class JobRunStore:
         return self._one(
             'SELECT * FROM %s WHERE id=?' % JOB_TABLE, [int(job_id)])
 
+    def job_by_code(self, job_code: str):
+        """按 code 取作业定义（手动 run-now 用）。"""
+        return self._job(job_code)
+
     @staticmethod
     def _decode(row):
         if not row:
@@ -304,6 +308,20 @@ class JobRunStore:
         row = self._one(
             'SELECT status FROM %s WHERE id=?' % RUN_TABLE, [int(run_id)])
         return bool(row and row['status'] == 'skipped')
+
+    def mark_dead(self, run_id: int, error=None, now=None) -> bool:
+        """`pending` → `dead`（下发前校验失败，不再重试）。"""
+        now = self._now(now)
+        self.ds.execute(
+            'UPDATE %s SET status=?, finished_at=?, error=?, '
+            "next_retry_at=NULL, lease_until=NULL, worker_id=NULL, "
+            "updated_at=datetime('now') "
+            "WHERE id=? AND status='pending'" % RUN_TABLE,
+            ['dead', now, error, int(run_id)])
+        self._commit()
+        row = self._one(
+            'SELECT status FROM %s WHERE id=?' % RUN_TABLE, [int(run_id)])
+        return bool(row and row['status'] == 'dead')
 
     def promote_retries(self, now=None, limit=20) -> list:
         """`retrying` 到期 → `pending`，返回本次放行的 run id（幂等）。"""

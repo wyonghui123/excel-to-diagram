@@ -170,6 +170,7 @@ from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.scheduler_api import (
     scheduler_bp, set_inprocess_schedulers,
 )
+from meta.api.job_admin_api import job_admin_bp, set_job_store
 from meta.api.workflow_api import workflow_bp, set_workflow_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
@@ -891,6 +892,28 @@ def create_app(db_path=None):
 
     atexit.register(task_scheduler.stop)
 
+    # [P3 2026-11-10] 后台作业 dispatcher 通电（spec §6.6 / §10.1 第 1-3 项）。
+    #   顺序固定：先 build registry 再打开开关；JOB_DISPATCH_ENABLED 默认 0，
+    #   handler 白名单与参数校验在 dispatcher 内生效（§7.2）。
+    from meta.core.job_run_store import JobRunStore
+    from meta.handlers.job_handlers import build_default_job_registry
+    job_store = JobRunStore(data_source)
+    set_job_store(job_store)
+    if os.environ.get('JOB_DISPATCH_ENABLED', '0').strip().lower() in (
+            '1', 'true', 'yes'):
+        from meta.core.job_dispatcher import JobDispatcher
+        _job_dispatcher = JobDispatcher(
+            job_store,
+            registry=build_default_job_registry(data_source),
+            enabled=True)
+        _job_dispatcher.start()
+        atexit.register(_job_dispatcher.stop)
+        logging.getLogger(__name__).info(
+            '[P3] job dispatcher started (JOB_DISPATCH_ENABLED=1)')
+    else:
+        logging.getLogger(__name__).info(
+            '[P3] job dispatcher disabled (JOB_DISPATCH_ENABLED=0)')
+
     app = Flask(__name__)
     # P2 修复：Flask session 需要 secret_key（dev-login 写 session 用）
     app.secret_key = os.environ.get(
@@ -1141,6 +1164,7 @@ def create_app(db_path=None):
     #   运维作业是平台基础设施（DB 维护 / 审计归档 / 导入队列 + platform_tick），
     #   与 tasks 模块开关无关 —— 故不放进上面被门控的 task_api_bp。
     app.register_blueprint(scheduler_bp)
+    app.register_blueprint(job_admin_bp)
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)
