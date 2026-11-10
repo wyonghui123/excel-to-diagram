@@ -165,7 +165,8 @@ def create_credit_from_invoice_handler(params: Dict[str, Any],
         return _fail('缺少 source_invoice_id（原发票 id）', 'INVALID_ARGUMENT')
 
     payload = {key: params.get(key)
-               for key in ('invoice_date', 'remark', 'reason', 'line_ids')
+               for key in ('invoice_date', 'remark', 'reason', 'line_ids',
+                           'lines')
                if not _blank(params.get(key))}
     payload['source_invoice_id'] = source_id
     payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
@@ -177,6 +178,34 @@ def create_credit_from_invoice_handler(params: Dict[str, Any],
 
     logger.info('[customer_invoice_action] create_credit source=%s credit=%s',
                 source_id, data.get('invoice_no'))
+    return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
+
+
+def create_credit_on_account_handler(params: Dict[str, Any],
+                                     context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.create_credit_on_account`（Wave C C4）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    lines = list(params.get('lines') or [])
+    if not lines:
+        return _fail('缺少 lines（on-account 贷项行）', 'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key) for key in (
+        'invoice_date', 'remark', 'reason', 'lines', 'customer_id',
+        'customer_account_id', 'currency_id', 'exchange_rate', 'org_id',
+        'sales_org_id', 'payment_term_id', 'bill_to_account_id',
+        'payer_account_id') if not _blank(params.get(key))}
+    payload['lines'] = lines
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+
+    try:
+        data = _service().create_credit_on_account(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] on-account credit=%s',
+                data.get('invoice_no'))
     return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
 
 

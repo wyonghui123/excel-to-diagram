@@ -472,10 +472,14 @@ class CustomerInvoiceService:
                 'amounts': totals}
 
     def create_credit_from_invoice(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """B5：按已过账原发票生成独立贷项草稿（引用原单，不回写进度）。
+        """B5 / C4：按已过账原发票生成独立贷项草稿（支持部分数量 / 金额、多次贷项）。
 
         与 `reverse` 的区别：只生成贷项草稿，不改原单状态、不生成期次、
         不回写 billed；后续 submit/post 走正常状态机（过账时按负方向扣减）。
+
+        `lines` 元素形如 `{invoice_line_id, qty}` 或 `{invoice_line_id, amount}`；
+        二者同给 → `INVOICE_CREDIT_AMOUNT_INVALID`，都缺 → 取该行剩余可贷额度。
+        行级累计额度只统计已过账贷项（R-INV-20）。
         """
         payload = dict(payload or {})
         source_id = payload.get('source_invoice_id') or payload.get('invoice_id')
@@ -488,10 +492,6 @@ class CustomerInvoiceService:
             raise CustomerInvoiceError(
                 '仅已过账发票可创建贷项', field_name='source_invoice_id',
                 rule='INVOICE_STATE_INVALID')
-        if self._find_red_invoice(source['id']):
-            raise CustomerInvoiceError(
-                '该发票已存在贷项 / 红字单', field_name='source_invoice_id',
-                rule='INVOICE_CREDIT_EXISTS')
         self._assert_no_active_allocation(source['id'])
 
         credit_date = _date_text(payload.get('invoice_date') or _today())
@@ -508,18 +508,15 @@ class CustomerInvoiceService:
             raise CustomerInvoiceError(
                 '原发票没有行，无法创建贷项', field_name='lines',
                 rule='INVOICE_SOURCE_INVALID')
-        selected = payload.get('line_ids')
-        if selected:
-            wanted = set(str(item) for item in selected)
-            lines = [line for line in lines if str(line['id']) in wanted]
-            if len(lines) != len(wanted):
-                raise CustomerInvoiceError(
-                    '贷项行不属于原发票', field_name='line_ids',
-                    rule='INVOICE_SOURCE_MISMATCH')
-            if not lines:
-                raise CustomerInvoiceError(
-                    '贷项至少需要一行', field_name='line_ids',
-                    rule='INVOICE_SOURCE_INVALID')
+        requests = self._normalize_credit_requests(payload, lines)
+        credited = self._credited_totals_by_line(
+            [line['id'] for line, _, _ in requests])
+        credit_lines = []
+        for index, (line, qty, amount) in enumerate(requests, start=1):
+            qty, amount = self._assert_credit_quota(
+                line, qty, amount, credited)
+            credit_lines.append(self._negate_line(
+                line, index, qty=qty, amount=amount))
 
         credit_type_id = self._default_type_id(RED_INVOICE_TYPE_CODE, 'header')
         credit_no = self._allocate_number(credit_date, credit_type_id)
@@ -541,8 +538,6 @@ class CustomerInvoiceService:
 
         with _atomic(self.ds):
             credit_id = self._insert_header(header)
-            credit_lines = [self._negate_line(line, index + 1)
-                            for index, line in enumerate(lines)]
             line_ids = self._insert_lines(credit_id, credit_lines)
             totals = self._recalc_impl(credit_id)
         logger.info('[customer_invoice] credit from invoice=%s -> id=%s no=%s',
@@ -672,6 +667,47 @@ class CustomerInvoiceService:
                 'return_shipment_id': shipment['id'],
                 'source_invoice_id': source_header['id'],
                 'line_ids': line_ids, 'amounts': totals}
+
+    def create_credit_on_account(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """C4：on-account 贷项草稿（不引用任何来源单据，spec §6.4.2）。
+
+        头 `reversal_of_invoice_id` 为空、`document_category='credit_memo'`；
+        行 `source_doc_type='manual'`、行键全空、`net_amount < 0`（R-INV-21）。
+        """
+        payload = dict(payload or {})
+        raw_lines = list(payload.get('lines') or [])
+        if not raw_lines:
+            raise CustomerInvoiceError(
+                'on-account 贷项至少需要一行', field_name='lines',
+                rule='INVOICE_SOURCE_INVALID')
+
+        header_payload = dict(payload)
+        header_payload['customer_account_id'] = (
+            payload.get('customer_account_id') or payload.get('customer_id'))
+        header_payload['document_type_id'] = self._default_type_id(
+            RED_INVOICE_TYPE_CODE, 'header')
+        header_payload['reversal_of_invoice_id'] = None
+        header_payload['reversal_reason'] = (
+            payload.get('reason') or 'on-account 贷项')
+        header = self.prepare_header(header_payload)
+        if header.get('document_category') != DOCUMENT_CATEGORY_CREDIT_MEMO:
+            raise CustomerInvoiceError(
+                'on-account 贷项的单据类型必须是贷项通知单',
+                field_name='document_type_id',
+                rule='INVOICE_SOURCE_INVALID')
+
+        credit_lines = [self._build_on_account_line(item, index)
+                        for index, item in enumerate(raw_lines, start=1)]
+
+        with _atomic(self.ds):
+            credit_id = self._insert_header(header)
+            line_ids = self._insert_lines(credit_id, credit_lines)
+            totals = self._recalc_impl(credit_id)
+        logger.info('[customer_invoice] on-account credit -> id=%s no=%s',
+                    credit_id, header.get('invoice_no'))
+        return {'id': credit_id, 'invoice_no': header.get('invoice_no'),
+                'status': STATUS_DRAFT, 'line_ids': line_ids,
+                'amounts': totals}
 
     def prepare_header(self, payload: Dict[str, Any],
                        *, for_reversal: bool = False) -> Dict[str, Any]:
@@ -1740,12 +1776,14 @@ class CustomerInvoiceService:
                 rule='INVOICE_LINE_ITEM_REQUIRED')
         return line
 
-    def _finalize_line(self, line: Dict[str, Any]) -> Dict[str, Any]:
+    def _finalize_line(self, line: Dict[str, Any],
+                       validate: bool = True) -> Dict[str, Any]:
         qty = _to_decimal(line.get('qty'))
         unit_price = _to_decimal(line.get('unit_price'))
         rate = _to_decimal(line.get('tax_rate_percent'))
         net = _round(qty * unit_price, 4)
-        line = self._apply_line_type_rules(line, net)
+        if validate:
+            line = self._apply_line_type_rules(line, net)
         tax = _round(net * rate / Decimal('100'), 4)
         line['qty'] = qty
         line['unit_price'] = _to_decimal(unit_price)
@@ -1760,7 +1798,143 @@ class CustomerInvoiceService:
                 (unit_price - _to_decimal(base_price)) * qty, 4)
         return line
 
-    def _negate_line(self, line: Dict[str, Any], line_no: int) -> Dict[str, Any]:
+    def _normalize_credit_requests(self,
+                                   payload: Dict[str, Any],
+                                   lines: List[Dict[str, Any]]
+                                   ) -> List[tuple]:
+        """归一贷项行请求：`lines` / `line_ids` / 缺省全量 → (行, qty, amount)。"""
+        by_id = {int(line['id']): line for line in lines}
+        raw = payload.get('lines')
+        if raw:
+            requests = list(raw)
+        elif payload.get('line_ids'):
+            requests = [{'invoice_line_id': item}
+                        for item in payload['line_ids']]
+        else:
+            requests = [{'invoice_line_id': line['id']} for line in lines]
+        if not requests:
+            raise CustomerInvoiceError(
+                '贷项至少需要一行', field_name='lines',
+                rule='INVOICE_SOURCE_INVALID')
+
+        normalized = []
+        for item in requests:
+            item = dict(item or {})
+            line_id = item.get('invoice_line_id')
+            if _blank(line_id):
+                line_id = item.get('line_id')
+            line = by_id.get(int(line_id or 0))
+            if line is None:
+                raise CustomerInvoiceError(
+                    '贷项行不属于原发票', field_name='invoice_line_id',
+                    rule='INVOICE_SOURCE_MISMATCH')
+            qty = item.get('qty')
+            amount = item.get('amount')
+            if not _blank(qty) and not _blank(amount):
+                raise CustomerInvoiceError(
+                    '贷项行数量与金额只能二选一', field_name='qty',
+                    rule='INVOICE_CREDIT_AMOUNT_INVALID')
+            normalized.append((
+                line,
+                None if _blank(qty) else _to_decimal(qty, 'qty'),
+                None if _blank(amount) else _to_decimal(amount, 'amount')))
+        return normalized
+
+    def _assert_credit_quota(self, line: Dict[str, Any], qty: Any,
+                             amount: Any,
+                             credited: Dict[str, Dict[str, Decimal]]
+                             ) -> tuple:
+        """行级累计可贷额度校验（R-INV-20）；返回最终 (qty, amount)。"""
+        used = credited.get(str(line['id'])) or {}
+        remaining_qty = _round(
+            abs(_to_decimal(line.get('qty')))
+            - _to_decimal(used.get('qty', Decimal('0'))), 4)
+        remaining_amount = _round(
+            abs(_to_decimal(line.get('net_amount')))
+            - _to_decimal(used.get('net', Decimal('0'))), 4)
+
+        if qty is None and amount is None:
+            if remaining_qty > EPSILON:
+                return remaining_qty, None
+            if remaining_amount > EPSILON:
+                return None, remaining_amount
+            raise CustomerInvoiceError(
+                '原发票行可贷额度已用尽（数量 %s / 金额 %s）'
+                % (remaining_qty, remaining_amount),
+                field_name='invoice_line_id',
+                rule='INVOICE_CREDIT_EXCEEDED')
+
+        if qty is not None:
+            if qty <= 0:
+                raise CustomerInvoiceError(
+                    '贷项数量必须大于 0', field_name='qty',
+                    rule='INVOICE_CREDIT_AMOUNT_INVALID')
+            if qty > remaining_qty + EPSILON:
+                raise CustomerInvoiceError(
+                    '贷项数量超过原行可贷额度（剩余 %s / 本次 %s）'
+                    % (remaining_qty, qty), field_name='qty',
+                    rule='INVOICE_CREDIT_EXCEEDED')
+            return qty, None
+
+        if amount <= 0:
+            raise CustomerInvoiceError(
+                '贷项金额必须大于 0', field_name='amount',
+                rule='INVOICE_CREDIT_AMOUNT_INVALID')
+        if amount > remaining_amount + EPSILON:
+            raise CustomerInvoiceError(
+                '贷项金额超过原行可贷额度（剩余 %s / 本次 %s）'
+                % (remaining_amount, amount), field_name='amount',
+                rule='INVOICE_CREDIT_EXCEEDED')
+        return None, amount
+
+    def _negate_line(self, line: Dict[str, Any], line_no: int,
+                     *, qty: Any = None, amount: Any = None
+                     ) -> Dict[str, Any]:
+        """原发票行 → 负数贷项行；支持按数量 / 金额部分冲销（R-INV-24）。"""
+        orig_qty = _to_decimal(line.get('qty'))
+        orig_net = _to_decimal(line.get('net_amount'))
+        orig_tax = _to_decimal(line.get('tax_amount'))
+        orig_diff = _to_decimal(line.get('price_diff_amount'))
+        unit_price = _to_decimal(line.get('unit_price'))
+        percent = line.get('billing_percent')
+        base_amount = line.get('billing_base_amount')
+        full = qty is None and amount is None
+
+        if full:
+            credit_qty = abs(orig_qty)
+            credit_net = abs(orig_net)
+            credit_tax = abs(orig_tax)
+            credit_diff = abs(orig_diff)
+            credit_gross = abs(_to_decimal(line.get('gross_amount')))
+        else:
+            if qty is not None:
+                credit_qty = _round(qty, 4)
+                credit_net = _round(credit_qty * abs(unit_price), 4)
+                if (abs(credit_net) <= EPSILON and abs(orig_net) > EPSILON
+                        and abs(orig_qty) > EPSILON):
+                    # 原行净额含折扣/价差时不按单价重算，退回比例口径
+                    credit_net = _round(
+                        abs(orig_net) * credit_qty / abs(orig_qty), 4)
+            else:
+                credit_net = _round(amount, 4)
+                ratio = (credit_net / abs(orig_net)
+                         if abs(orig_net) > EPSILON else Decimal('0'))
+                credit_qty = (_round(abs(orig_qty) * ratio, 4)
+                              if abs(orig_qty) > EPSILON else Decimal('0'))
+            ratio = (credit_net / abs(orig_net)
+                     if abs(orig_net) > EPSILON else Decimal('0'))
+            # R-INV-24：税额按原行 tax/net 比例换算，尾差 4 位
+            credit_tax = _round(abs(orig_tax) * ratio, 4)
+            credit_diff = _round(abs(orig_diff) * ratio, 4)
+            credit_gross = _round(credit_net + credit_tax, 4)
+            if credit_qty > EPSILON:
+                # 保证 recalc 的 qty × unit_price 复算结果与贷项净额一致
+                unit_price = _round(credit_net / credit_qty, 10)
+            if not _blank(percent) and abs(orig_net) > EPSILON:
+                percent = _round(abs(_to_decimal(percent)) * ratio, 4)
+            if not _blank(base_amount) and abs(orig_net) > EPSILON:
+                base_amount = _round(abs(_to_decimal(base_amount)) * ratio, 4)
+
         row = {
             'line_no': line_no,
             'line_type_id': line.get('line_type_id'),
@@ -1773,26 +1947,96 @@ class CustomerInvoiceService:
             'item_id': line.get('item_id'),
             'description': line.get('description'),
             'uom_id': line.get('uom_id'),
-            'qty': -_to_decimal(line.get('qty')),
+            'qty': -credit_qty,
             'billing_basis': line.get('billing_basis') or 'quantity',
-            'unit_price': _to_decimal(line.get('unit_price')),
-            'net_amount': -_to_decimal(line.get('net_amount')),
+            'unit_price': unit_price,
+            'net_amount': -credit_net,
             'tax_code_id': line.get('tax_code_id'),
             'tax_rate_percent': _to_decimal(line.get('tax_rate_percent')),
-            'tax_amount': -_to_decimal(line.get('tax_amount')),
-            'gross_amount': -_to_decimal(line.get('gross_amount')),
+            'tax_amount': -credit_tax,
+            'gross_amount': -credit_gross,
             'project_id': line.get('project_id'),
             'project_task_id': line.get('project_task_id'),
-            'billing_percent': line.get('billing_percent'),
-            'billing_base_amount': line.get('billing_base_amount'),
+            'billing_percent': percent,
+            'billing_base_amount': base_amount,
             'price_source': line.get('price_source') or 'order',
             'order_unit_price': line.get('order_unit_price'),
             'price_change_reason': line.get('price_change_reason'),
             'price_change_approved_by': line.get('price_change_approved_by'),
-            'price_diff_amount': -_to_decimal(line.get('price_diff_amount')),
+            'price_diff_amount': -credit_diff,
             'original_invoice_line_id': line.get('id'),
         }
         return row
+
+    def _build_on_account_line(self, item: Dict[str, Any],
+                               line_no: int) -> Dict[str, Any]:
+        """on-account 贷项行：行键全空、负数净额（R-INV-21）。"""
+        item = dict(item or {})
+        for key in ('original_invoice_line_id', 'shipment_line_id',
+                    'schedule_id', 'order_line_id', 'source_line_id',
+                    'source_doc_id'):
+            if not _blank(item.get(key)):
+                raise CustomerInvoiceError(
+                    'on-account 贷项行不得引用来源单据（%s）' % key,
+                    field_name=key, rule='INVOICE_ON_ACCOUNT_LINE_INVALID')
+
+        qty = _to_decimal(item.get('qty') or 1, 'qty')
+        uom_id = item.get('uom_id')
+        if _blank(uom_id):
+            raise CustomerInvoiceError(
+                'on-account 贷项行必须填写计量单位', field_name='uom_id',
+                rule='INVOICE_ON_ACCOUNT_LINE_INVALID')
+        tax_code_id = item.get('tax_code_id')
+        if _blank(tax_code_id):
+            raise CustomerInvoiceError(
+                'on-account 贷项行必须填写税码', field_name='tax_code_id',
+                rule='INVOICE_ON_ACCOUNT_LINE_INVALID')
+        unit_price = item.get('unit_price')
+        if _blank(unit_price):
+            net = _to_decimal(item.get('net_amount'), 'net_amount')
+            unit_price = net / qty if qty else Decimal('0')
+        unit_price = _to_decimal(unit_price, 'unit_price')
+        net = _round(qty * unit_price, 4)
+        if net >= -EPSILON:
+            raise CustomerInvoiceError(
+                'on-account 贷项行金额必须为负', field_name='net_amount',
+                rule='INVOICE_ON_ACCOUNT_LINE_INVALID')
+
+        rate = _to_decimal(item.get('tax_rate_percent') or 0,
+                           'tax_rate_percent')
+        tax = _round(net * rate / Decimal('100'), 4)
+        type_id, _ = self._resolve_line_type(item.get('line_type_id'))
+        return {
+            'line_no': line_no,
+            'line_type_id': type_id,
+            'source_doc_type': SOURCE_MANUAL,
+            'source_doc_id': None,
+            'source_line_id': None,
+            'shipment_line_id': None,
+            'schedule_id': None,
+            'order_line_id': None,
+            'item_id': item.get('item_id'),
+            'description': (item.get('description') or 'On-account 贷项'),
+            'uom_id': uom_id,
+            'qty': qty,
+            'billing_basis': 'amount',
+            'unit_price': unit_price,
+            'net_amount': net,
+            'tax_code_id': item.get('tax_code_id'),
+            'tax_rate_percent': rate,
+            'tax_amount': tax,
+            'gross_amount': _round(net + tax, 4),
+            'project_id': item.get('project_id'),
+            'project_task_id': None,
+            'billing_percent': None,
+            'billing_base_amount': None,
+            'price_source': 'manual',
+            'order_unit_price': None,
+            'price_change_reason': item.get('price_change_reason'),
+            'price_change_approved_by': None,
+            'price_diff_amount': Decimal('0'),
+            'original_invoice_line_id': None,
+        }
 
     # ================================================================ 持久化
 
@@ -1838,7 +2082,9 @@ class CustomerInvoiceService:
         lines = self._load_invoice_lines(invoice_id)
         net = tax = gross = Decimal('0')
         for line in lines:
-            finalized = self._finalize_line(line)
+            # 重算仅做算术归一；行类型/负数校验在写入时已执行
+            # （on-account 贷项行天然为负且无来源键）
+            finalized = self._finalize_line(line, validate=False)
             net += finalized['net_amount']
             tax += finalized['tax_amount']
             gross += finalized['gross_amount']
@@ -2044,19 +2290,28 @@ class CustomerInvoiceService:
                 'source_invoice_id': candidates[0]['invoice_id']}
 
     def _credited_qty_by_line(self, line_ids: List[Any]) -> Dict[str, Decimal]:
+        return {key: item['qty']
+                for key, item in self._credited_totals_by_line(line_ids).items()}
+
+    def _credited_totals_by_line(self, line_ids: List[Any]
+                                 ) -> Dict[str, Dict[str, Decimal]]:
+        """已过账贷项按原票行累计的数量 / 净额（只统计 posted）。"""
         ids = [item for item in line_ids if not _blank(item)]
         if not ids:
             return {}
         placeholders = ','.join('?' for _ in ids)
         rows = self.ds.query(
             'SELECT l.original_invoice_line_id AS original_line_id, '
-            'COALESCE(SUM(ABS(l.qty)), 0) AS qty FROM %s l '
+            'COALESCE(SUM(ABS(l.qty)), 0) AS qty, '
+            'COALESCE(SUM(ABS(l.net_amount)), 0) AS net FROM %s l '
             'JOIN %s h ON h.id = l.invoice_id '
             'WHERE h.status = ? AND l.original_invoice_line_id IN (%s) '
             'GROUP BY l.original_invoice_line_id'
             % (LINE_TABLE, HEADER_TABLE, placeholders),
             [STATUS_POSTED] + ids)
-        return {str(row['original_line_id']): _to_decimal(row['qty'])
+        return {str(row['original_line_id']):
+                {'qty': _to_decimal(row['qty']),
+                 'net': _to_decimal(row['net'])}
                 for row in rows}
 
     def _build_return_credit_line(self, return_line: Dict[str, Any],
@@ -2359,7 +2614,9 @@ class CustomerInvoiceService:
 
     @staticmethod
     def _is_red(header: Dict[str, Any]) -> bool:
-        return not _blank(header.get('reversal_of_invoice_id'))
+        """红字口径：贷项通知单或引用原单的冲销单（含 on-account 贷项）。"""
+        return (header.get('document_category') == DOCUMENT_CATEGORY_CREDIT_MEMO
+                or not _blank(header.get('reversal_of_invoice_id')))
 
     def _table_exists(self, table: str) -> bool:
         try:

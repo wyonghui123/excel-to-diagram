@@ -642,12 +642,15 @@ def test_create_credit_requires_posted_source():
 def test_create_credit_rejects_second_credit():
     conn = build_conn()
     service, original = _posted_invoice(conn)
-    service.create_credit_from_invoice({'source_invoice_id': original['id']})
+    first = service.create_credit_from_invoice(
+        {'source_invoice_id': original['id']})
+    service.submit(first['id'])
+    service.post(first['id'])
 
     with pytest.raises(CustomerInvoiceError) as error:
         service.create_credit_from_invoice(
             {'source_invoice_id': original['id']})
-    _expect(error, 'INVOICE_CREDIT_EXISTS')
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')
 
 
 def test_create_credit_date_before_posting_rejected():
@@ -692,6 +695,170 @@ def test_credit_post_rolls_back_billed_progress():
     assert conn.execute(
         'SELECT billed_qty FROM sales_order_lines WHERE id = ?',
         [ORDER_LINE_DELIVERY]).fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------- C4 部分贷项 / on-account
+
+def _credit(service, invoice_id, **overrides):
+    payload = {'source_invoice_id': invoice_id}
+    payload.update(overrides)
+    return service.create_credit_from_invoice(payload)
+
+
+def test_credit_partial_qty():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    credit = _credit(service, original['id'],
+                     lines=[{'invoice_line_id': line_id, 'qty': 15}])
+
+    line = get_lines(conn, credit['id'])[0]
+    assert Decimal(str(line['qty'])) == Decimal('-15')
+    assert Decimal(str(line['net_amount'])) == Decimal('-150')
+    assert Decimal(str(line['tax_amount'])) == Decimal('-19.5')
+    assert Decimal(str(line['gross_amount'])) == Decimal('-169.5')
+    assert Decimal(str(get_header(conn, credit['id'])['gross_amount'])) \
+        == Decimal('-169.5')
+
+
+def test_credit_partial_amount():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    credit = _credit(service, original['id'],
+                     lines=[{'invoice_line_id': line_id, 'amount': 120}])
+
+    line = get_lines(conn, credit['id'])[0]
+    assert Decimal(str(line['qty'])) == Decimal('-12')
+    assert Decimal(str(line['net_amount'])) == Decimal('-120')
+    assert Decimal(str(line['tax_amount'])) == Decimal('-15.6')
+    assert Decimal(str(line['unit_price'])) == Decimal('10')
+
+
+def test_credit_twice_within_limit():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+    first = _credit(service, original['id'],
+                    lines=[{'invoice_line_id': line_id, 'qty': 10}])
+    service.submit(first['id'])
+    service.post(first['id'])
+
+    second = _credit(service, original['id'],
+                     lines=[{'invoice_line_id': line_id, 'qty': 20}])
+
+    line = get_lines(conn, second['id'])[0]
+    assert Decimal(str(line['qty'])) == Decimal('-20')
+    assert Decimal(str(line['net_amount'])) == Decimal('-200')
+    # 已过账贷项累计 10，原行剩余 30
+    assert Decimal(str(shipment_billed(conn))) == Decimal('30')
+
+
+def test_credit_exceeds_limit_rejected():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+    first = _credit(service, original['id'],
+                    lines=[{'invoice_line_id': line_id, 'qty': 30}])
+    service.submit(first['id'])
+    service.post(first['id'])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _credit(service, original['id'],
+                lines=[{'invoice_line_id': line_id, 'qty': 11}])
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')
+
+
+def test_credit_qty_and_amount_both_rejected():
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _credit(service, original['id'],
+                lines=[{'invoice_line_id': line_id, 'qty': 1,
+                        'amount': 10}])
+    _expect(error, 'INVOICE_CREDIT_AMOUNT_INVALID')
+
+
+def test_credit_plan_line_percent_conversion():
+    conn = build_conn()
+    service, original = _posted_plan_invoice(conn)
+    line_id = get_lines(conn, original['id'])[0]['id']
+
+    credit = _credit(service, original['id'],
+                     lines=[{'invoice_line_id': line_id, 'amount': 300}])
+
+    line = get_lines(conn, credit['id'])[0]
+    assert Decimal(str(line['qty'])) == Decimal('-0.3')
+    assert Decimal(str(line['net_amount'])) == Decimal('-300')
+    # R-INV-24：100% × 300 / 1000 = 30%
+    assert Decimal(str(line['billing_percent'])) == Decimal('30')
+    assert Decimal(str(line['billing_base_amount'])) == Decimal('300')
+
+
+def test_credit_on_account_ok():
+    conn = build_conn()
+    service = _service(conn)
+
+    credit = service.create_credit_on_account(dict(
+        BASE_HEADER, reason='年度折让',
+        lines=[{'description': '年度返利', 'uom_id': 21, 'tax_code_id': 31,
+                'qty': 1, 'unit_price': -100, 'tax_rate_percent': 6}]))
+
+    header = get_header(conn, credit['id'])
+    assert header['document_category'] == 'credit_memo'
+    assert header['reversal_of_invoice_id'] is None
+    assert header['reversal_reason'] == '年度折让'
+    assert Decimal(str(header['gross_amount'])) == Decimal('-106')
+
+    line = get_lines(conn, credit['id'])[0]
+    assert line['source_doc_type'] == 'manual'
+    for key in ('shipment_line_id', 'schedule_id', 'order_line_id',
+                'original_invoice_line_id', 'source_line_id',
+                'source_doc_id'):
+        assert line[key] is None
+    assert Decimal(str(line['net_amount'])) == Decimal('-100')
+    assert Decimal(str(line['tax_amount'])) == Decimal('-6')
+    assert Decimal(str(line['gross_amount'])) == Decimal('-106')
+
+
+def test_credit_on_account_positive_rejected():
+    conn = build_conn()
+    service = _service(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_on_account(dict(
+            BASE_HEADER,
+            lines=[{'description': '错误方向', 'uom_id': 21, 'tax_code_id': 31,
+                    'qty': 1, 'unit_price': 100}]))
+    _expect(error, 'INVOICE_ON_ACCOUNT_LINE_INVALID')
+
+
+def test_credit_on_account_missing_customer_rejected():
+    conn = build_conn()
+    service = _service(conn)
+    payload = dict(BASE_HEADER)
+    payload.pop('customer_account_id')
+    payload['lines'] = [{'description': '返利', 'uom_id': 21, 'tax_code_id': 31,
+                         'qty': 1, 'unit_price': -10}]
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_on_account(payload)
+    _expect(error, 'INVOICE_SOURCE_INVALID')
+
+
+def test_is_red_detects_on_account():
+    service = _service(build_conn())
+
+    assert service._is_red({'document_category': 'credit_memo',
+                           'reversal_of_invoice_id': None}) is True
+    assert service._is_red({'document_category': 'invoice',
+                           'reversal_of_invoice_id': None}) is False
+    assert service._is_red({'document_category': 'invoice',
+                           'reversal_of_invoice_id': 9}) is True
 
 
 # ---------------------------------------------------------------- doc_flow 反向边（B7）

@@ -150,6 +150,64 @@ def test_credit_action_is_registered_with_permission():
     assert meta.idempotent is False
 
 
+# ---------------------------------------------------------------- C4 on-account 贷项
+
+ON_ACCOUNT_ACTION_ID = 'customer_invoice.create_credit_on_account'
+
+ON_ACCOUNT_HEADER = {
+    'invoice_date': INVOICE_DATE,
+    'customer_account_id': 900,
+    'currency_id': 1,
+    'org_id': 10,
+}
+
+
+def test_create_credit_on_account_handler_creates_draft(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.create_credit_on_account_handler(dict(
+        ON_ACCOUNT_HEADER, reason='年度折让',
+        lines=[{'description': '年度返利', 'uom_id': 21, 'tax_code_id': 31,
+                'qty': 1, 'unit_price': -100, 'tax_rate_percent': 6}]))
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'draft'
+    assert result['data']['invoice_no'].startswith('SCR-')
+    header = get_header(conn, result['data']['id'])
+    assert header['document_category'] == 'credit_memo'
+    assert header['reversal_of_invoice_id'] is None
+    line = get_lines(conn, result['data']['id'])[0]
+    assert line['source_doc_type'] == 'manual'
+    assert result['data']['amounts']['gross_amount'] == -106.0
+
+
+def test_create_credit_on_account_handler_requires_lines(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+
+    result = customer_invoice_actions.create_credit_on_account_handler(
+        dict(ON_ACCOUNT_HEADER, lines=[]))
+
+    assert result['success'] is False
+    assert result['code'] == 'INVALID_ARGUMENT'
+    assert _invoice_count(conn) == 0
+
+
+def test_on_account_action_is_registered_with_permission():
+    registry = BoActionRegistry()
+    register_all_bo_actions(registry)
+
+    meta = registry.get(ON_ACCOUNT_ACTION_ID)
+    assert meta is not None
+    assert meta.object_type == 'customer_invoice'
+    assert meta.category == 'business'
+    assert meta.permission_required == (
+        'customer_invoice:customer_invoice_credit_memo')
+    assert meta.requires_auth is True
+    assert meta.idempotent is False
+
+
 # ---------------------------------------------------------------- Wave B 计划期次
 
 PLAN_ACTION_ID = 'customer_invoice.create_from_schedule'

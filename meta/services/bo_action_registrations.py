@@ -130,6 +130,8 @@ def register_all_bo_actions(registry=None):
         create_credit_from_invoice_handler as customer_invoice_credit_handler,
         create_credit_from_return_shipment_handler as
         customer_invoice_return_credit_handler,
+        create_credit_on_account_handler as
+        customer_invoice_on_account_handler,
         list_due_schedules_handler as customer_invoice_due_list_handler,
         submit_handler as customer_invoice_submit_handler,
         post_handler as customer_invoice_post_handler,
@@ -1526,7 +1528,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'customer_invoice.create_credit_from_invoice',
         customer_invoice_credit_handler,
-        description='按已过账发票生成独立贷项草稿（引用原单，可按行选择）',
+        description='按已过账发票生成独立贷项草稿（引用原单，可按行/数量/金额部分冲销）',
         object_type='customer_invoice',
         category='business',
         permission_required='customer_invoice:customer_invoice_credit_memo',
@@ -1539,7 +1541,34 @@ def register_all_bo_actions(registry=None):
                 'reason': {'type': 'string'},
                 'remark': {'type': 'string'},
                 'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
             },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave C C4: on-account 贷项（spec-s8-customer-invoice-wave-c §6.4.2）
+    registry.register(
+        'customer_invoice.create_credit_on_account',
+        customer_invoice_on_account_handler,
+        description='生成不引用来源单据的 on-account 贷项草稿（负数行）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
         },
         output_schema=_customer_invoice_output_schema,
         requires_auth=True,
