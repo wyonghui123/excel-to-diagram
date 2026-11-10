@@ -124,6 +124,9 @@ def register_all_bo_actions(registry=None):
         create_from_schedule_handler as customer_invoice_from_schedule_handler,
         create_credit_from_invoice_handler as customer_invoice_credit_handler,
         list_due_schedules_handler as customer_invoice_due_list_handler,
+        submit_handler as customer_invoice_submit_handler,
+        post_handler as customer_invoice_post_handler,
+        reverse_handler as customer_invoice_reverse_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -1499,6 +1502,64 @@ def register_all_bo_actions(registry=None):
         output_schema=_customer_invoice_output_schema,
         requires_auth=True,
         idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.submit',
+        customer_invoice_submit_handler,
+        description='提交销售发票（draft → submitted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_submit',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.post',
+        customer_invoice_post_handler,
+        description='过账销售发票（submitted → posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'posting_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.reverse',
+        customer_invoice_reverse_handler,
+        description='红冲已过账销售发票（posted → 红字 posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_reverse',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'reversal_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
     )
 
     # ==================== 单据流 derive / reverse（§9.3.13 S1/S3） ====================

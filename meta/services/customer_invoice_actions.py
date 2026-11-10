@@ -178,3 +178,114 @@ def create_credit_from_invoice_handler(params: Dict[str, Any],
     logger.info('[customer_invoice_action] create_credit source=%s credit=%s',
                 source_id, data.get('invoice_no'))
     return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
+
+
+# --------------------------------------------------------- 单据动作（Wave C）
+
+def _invoice_id(params: Dict[str, Any]) -> Any:
+    for key in ('invoice_id', 'source_doc_id', 'source_id'):
+        value = params.get(key)
+        if not _blank(value):
+            return value
+    return None
+
+
+def _summary(header: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
+    data = {
+        'id': int(header['id']),
+        'invoice_no': header.get('invoice_no'),
+        'status': header.get('status'),
+    }
+    data.update(extra)
+    return data
+
+
+def submit_handler(params: Dict[str, Any],
+                   context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.submit`：draft → submitted（幂等）。"""
+    _set_user_context()
+    params = dict(params or {})
+    invoice_id = _invoice_id(params)
+    if invoice_id is None:
+        return _fail('缺少 invoice_id（发票 id）', 'INVALID_ARGUMENT')
+
+    service = _service()
+    try:
+        header = service.load(invoice_id)['header']
+        if header['status'] in ('submitted', 'posted'):
+            return _ok(_summary(header), '发票已提交（当前状态 %s）'
+                       % header['status'])
+        data = service.submit(invoice_id)
+        header = service.load(invoice_id)['header']
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] submit id=%s status=%s',
+                invoice_id, data.get('status'))
+    return _ok(_summary(header), '发票 %s 已提交'
+               % header.get('invoice_no', ''))
+
+
+def post_handler(params: Dict[str, Any],
+                 context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.post`：submitted → posted（幂等）。"""
+    _set_user_context()
+    params = dict(params or {})
+    invoice_id = _invoice_id(params)
+    if invoice_id is None:
+        return _fail('缺少 invoice_id（发票 id）', 'INVALID_ARGUMENT')
+
+    service = _service()
+    try:
+        header = service.load(invoice_id)['header']
+        if header['status'] == 'posted':
+            return _ok(_summary(header), '发票已过账')
+        data = service.post(invoice_id, posting_date=params.get('posting_date'))
+        header = service.load(invoice_id)['header']
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] post id=%s posting_date=%s',
+                invoice_id, data.get('posting_date'))
+    return _ok(_summary(header, posting_date=data.get('posting_date')),
+               '发票 %s 已过账' % header.get('invoice_no', ''))
+
+
+def reverse_handler(params: Dict[str, Any],
+                    context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.reverse`：posted → 红字 posted（幂等）。"""
+    _set_user_context()
+    params = dict(params or {})
+    invoice_id = _invoice_id(params)
+    if invoice_id is None:
+        return _fail('缺少 invoice_id（发票 id）', 'INVALID_ARGUMENT')
+    reason = params.get('reason') or params.get('reversal_reason')
+    if _blank(reason):
+        return _fail('红冲原因必填', 'INVOICE_REVERSE_INVALID')
+
+    service = _service()
+    try:
+        header = service.load(invoice_id)['header']
+        existing = service.find_reversal(invoice_id)
+        if existing:
+            return _ok(_summary(
+                header, original_invoice_id=int(header['id']),
+                red_invoice_id=existing['id'],
+                red_invoice_no=existing.get('invoice_no')),
+                '该发票已红冲（红字发票 %s）' % existing.get('invoice_no', ''))
+        data = service.reverse(
+            invoice_id, reason,
+            invoice_date=params.get('reversal_date')
+            or params.get('invoice_date'))
+        header = service.load(invoice_id)['header']
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] reverse id=%s red=%s',
+                invoice_id, data.get('red_invoice_id'))
+    return _ok(_summary(
+        header, original_invoice_id=int(header['id']),
+        red_invoice_id=data.get('red_invoice_id'),
+        red_invoice_no=data.get('red_invoice_no')),
+        '发票 %s 已红冲，红字发票 %s'
+        % (header.get('invoice_no', ''), data.get('red_invoice_no', '')))

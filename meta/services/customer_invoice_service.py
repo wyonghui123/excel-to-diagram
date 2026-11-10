@@ -775,6 +775,15 @@ class CustomerInvoiceService:
 
     # ================================================================ 状态流转
 
+    def load(self, invoice_id: Any) -> Dict[str, Any]:
+        """只读加载（action 层幂等预检用，不写库）。"""
+        header = self._require_header(invoice_id)
+        return {'header': header, 'lines': self._load_invoice_lines(invoice_id)}
+
+    def find_reversal(self, invoice_id: Any) -> Optional[Dict[str, Any]]:
+        """返回原票的红字发票头（id/invoice_no/status），无则 None。"""
+        return self._find_red_invoice(invoice_id)
+
     def submit(self, invoice_id: Any) -> Dict[str, Any]:
         with _atomic(self.ds):
             header = self._require_header(invoice_id)

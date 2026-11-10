@@ -234,3 +234,182 @@ def test_plan_actions_registered_with_permission():
         'customer_invoice:customer_invoice_view')
     assert due_meta.requires_auth is True
     assert due_meta.idempotent is True
+
+
+# ---------------------------------------------------------------- Wave C 单据动作
+
+SUBMIT_ACTION_ID = 'customer_invoice.submit'
+POST_ACTION_ID = 'customer_invoice.post'
+REVERSE_ACTION_ID = 'customer_invoice.reverse'
+
+
+def _draft_invoice(conn):
+    service = CustomerInvoiceService(make_ds(conn))
+    created = service.create_from_shipment(
+        {'shipment_id': SHIPMENT_ID, 'invoice_date': '2026-11-09'})
+    return created['id']
+
+
+def _submitted_invoice(conn):
+    invoice_id = _draft_invoice(conn)
+    CustomerInvoiceService(make_ds(conn)).submit(invoice_id)
+    return invoice_id
+
+
+def _posted_invoice_vc(conn):
+    invoice_id = _submitted_invoice(conn)
+    CustomerInvoiceService(make_ds(conn)).post(invoice_id)
+    return invoice_id
+
+
+def _red_count(conn, invoice_id):
+    return fetch_one(
+        conn,
+        'SELECT COUNT(*) AS n FROM customer_invoices '
+        'WHERE reversal_of_invoice_id = ?', [invoice_id])['n']
+
+
+def test_action_submit_ok(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _draft_invoice(conn)
+
+    result = customer_invoice_actions.submit_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'submitted'
+    assert result['data']['invoice_no'].startswith('SINV-')
+    assert get_header(conn, invoice_id)['status'] == 'submitted'
+
+
+def test_action_submit_idempotent(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _submitted_invoice(conn)
+
+    first = customer_invoice_actions.submit_handler(
+        {'source_doc_id': invoice_id})
+    second = customer_invoice_actions.submit_handler(
+        {'source_doc_id': invoice_id})
+
+    assert first['success'] is True
+    assert second['success'] is True
+    assert first['data']['status'] == second['data']['status'] == 'submitted'
+    assert '已提交' in second['message']
+    assert get_header(conn, invoice_id)['status'] == 'submitted'
+
+
+def test_action_submit_invalid_state(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _draft_invoice(conn)
+    CustomerInvoiceService(make_ds(conn)).cancel(invoice_id)
+
+    result = customer_invoice_actions.submit_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVOICE_STATE_INVALID'
+    assert get_header(conn, invoice_id)['status'] == 'cancelled'
+
+
+def test_action_post_ok(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _submitted_invoice(conn)
+
+    result = customer_invoice_actions.post_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'posted'
+    assert result['data']['posting_date']
+    assert get_header(conn, invoice_id)['status'] == 'posted'
+
+
+def test_action_post_idempotent(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _posted_invoice_vc(conn)
+
+    result = customer_invoice_actions.post_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'posted'
+    assert '已过账' in result['message']
+
+
+def test_action_post_from_draft_rejected(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _draft_invoice(conn)
+
+    result = customer_invoice_actions.post_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVOICE_STATE_INVALID'
+    assert get_header(conn, invoice_id)['status'] == 'draft'
+
+
+def test_action_reverse_ok(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _posted_invoice_vc(conn)
+
+    result = customer_invoice_actions.reverse_handler({
+        'invoice_id': invoice_id,
+        'reason': '客户退货',
+        'reversal_date': '2026-11-10',
+    })
+
+    assert result['success'] is True
+    assert result['data']['status'] == 'reversed'
+    assert result['data']['original_invoice_id'] == invoice_id
+    assert result['data']['red_invoice_no'].startswith('SCR-')
+    assert _red_count(conn, invoice_id) == 1
+
+
+def test_action_reverse_idempotent(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _posted_invoice_vc(conn)
+
+    first = customer_invoice_actions.reverse_handler(
+        {'invoice_id': invoice_id, 'reason': '客户退货'})
+    second = customer_invoice_actions.reverse_handler(
+        {'invoice_id': invoice_id, 'reason': '客户退货'})
+
+    assert first['success'] is True
+    assert second['success'] is True
+    assert first['data']['red_invoice_id'] == second['data']['red_invoice_id']
+    assert '已红冲' in second['message']
+    assert _red_count(conn, invoice_id) == 1
+
+
+def test_action_reverse_requires_reason(monkeypatch):
+    conn = build_conn()
+    _bind_service(monkeypatch, conn)
+    invoice_id = _posted_invoice_vc(conn)
+
+    result = customer_invoice_actions.reverse_handler({'invoice_id': invoice_id})
+
+    assert result['success'] is False
+    assert result['code'] == 'INVOICE_REVERSE_INVALID'
+    assert _red_count(conn, invoice_id) == 0
+
+
+def test_action_register_submit_post_reverse():
+    registry = BoActionRegistry()
+    register_all_bo_actions(registry)
+
+    expectations = (
+        (SUBMIT_ACTION_ID, 'customer_invoice:customer_invoice_submit'),
+        (POST_ACTION_ID, 'customer_invoice:customer_invoice_post'),
+        (REVERSE_ACTION_ID, 'customer_invoice:customer_invoice_reverse'),
+    )
+    for action_id, permission in expectations:
+        meta = registry.get(action_id)
+        assert meta is not None, action_id
+        assert meta.object_type == 'customer_invoice'
+        assert meta.category == 'business'
+        assert meta.permission_required == permission
+        assert meta.requires_auth is True
+        assert meta.idempotent is True
