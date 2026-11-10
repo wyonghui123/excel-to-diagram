@@ -207,6 +207,7 @@ import DocFlowTracePanel from '@/components/business/DocFlow/DocFlowTracePanel.v
 import { listRules } from '@/services/docFlowService'
 import { useAuthStore } from '@/stores/authStore'
 import { useBoAction } from '@/composables/useBoAction'
+import { evaluateCondition } from '@/utils/safeExpression'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -658,6 +659,9 @@ const computedActions = computed(() => {
   const businessActions = yamlActions
     .filter(a => a && typeof a === 'object' && a.action)
     .filter(a => !a.permission || authStore.hasPermission(a.permission))
+    // [S8 Wave C T43] visible_when：按当前单据数据决定业务动作是否出现
+    //   （如订单未完全开票才显示「生成开票计划」、退货交货单不显示「生成销售发票」）
+    .filter(a => !a.visible_when || evaluateCondition(a.visible_when, data.value, 'record'))
     .map(a => ({
       id: a.id || a.action,
       key: a.id || a.action,

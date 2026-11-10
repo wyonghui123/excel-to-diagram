@@ -95,6 +95,30 @@ fields:
       meaning: 自增主键
       primary_key: true
 
+  # [S8 Wave C T43] 单据类别派生字段：来自单据类型（standard / return）。
+  # 仅用于前端动作可见性判断（退货交货单不允许生成销售发票，R-INV-19），不落库。
+  - id: document_category
+    name: 单据类别
+    type: string
+    storage: virtual
+    description: 单据类别（由单据类型派生：standard / return）
+    ui:
+      visible: false
+      editable: false
+    semantics:
+      meaning: 区分标准交货单 / 退货交货单
+      derived_from: document_type_id
+      readonly_always: true
+    redundancy:
+      type: virtual
+      source_field: document_type_id
+      derived_from: type_definitions.document_category
+      join_path:
+        - table: type_definitions
+          from: document_type_id
+          to: id
+          select: document_category
+
   # 编号由 shipment_service._next_delivery_no() 生成后回填；
   # 界面只读，用户不手工录入（W0-R1 同口径：生成后不可修改）。
   - id: delivery_no
@@ -839,6 +863,8 @@ ui_view_config:
         variant: secondary
         permission: customer_invoice:customer_invoice_create
         action: customer_invoice.create_from_shipment
+        # [S8 Wave C T43] 退货交货单不显示「生成销售发票」（后端 R-INV-19 同样拒绝）
+        visible_when: "document_category != 'return'"
     facets:
       - title: 基本信息
         id: shipment_basic

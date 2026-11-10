@@ -1057,6 +1057,100 @@ fields:
     ui:
       widget: select
 
+  # S8 Wave C：计划开票参数（仅 billing_relevance=plan 生效；里程碑按固定价，下列字段不参与计算）
+  # 依据 docs/specs/s8-customer-invoice-wave-c/spec.md §4.1（D40/D41）
+  - id: billing_period_count
+    name: 开票期数
+    type: integer
+    db_column: billing_period_count
+    nullable: true
+    description: 计划开票期数（1-120），均分时按此期数拆分、尾差归末期
+    constraints:
+      - type: numeric_range
+        min: 1
+        max: 120
+    semantics:
+      meaning: 计划开票期数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan' and billing_method != 'milestone'"
+      hint: 例：12 表示分 12 期开票；里程碑行按固定价，不使用本字段
+
+  - id: billing_interval_months
+    name: 开票间隔（月）
+    type: integer
+    db_column: billing_interval_months
+    nullable: true
+    default: 1
+    description: 相邻期次间隔月数（默认 1 个月）
+    constraints:
+      - type: numeric_range
+        min: 1
+        max: 120
+    semantics:
+      meaning: 相邻开票期次的间隔月数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan' and billing_method != 'milestone'"
+
+  - id: billing_anchor_date
+    name: 开票锚点日期
+    type: date
+    db_column: billing_anchor_date
+    nullable: true
+    description: 首期开票基准日期（空 = 订单确认日/计划起始日）
+    semantics:
+      meaning: 首期开票锚点日期
+      filterable: true
+      filter_type: date
+      filter_label: 开票锚点
+      filter_scope: local
+    ui:
+      widget: date
+      visible_when: "billing_relevance == 'plan'"
+
+  - id: billing_lead_days
+    name: 提前开票天数
+    type: integer
+    db_column: billing_lead_days
+    nullable: true
+    default: 0
+    description: 期次提前生成/开票的天数（默认 0，不提前）
+    constraints:
+      - type: numeric_range
+        min: 0
+        max: 365
+    semantics:
+      meaning: 开票期次相对服务期起点的提前天数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan'"
+
+  - id: billing_proration
+    name: 首末期分摊
+    type: string
+    db_column: billing_proration
+    nullable: true
+    default: none
+    max_length: 8
+    description: 首末期是否按服务天数分摊（none 按整期 / daily 按日）
+    enum_values:
+      - value: none
+        label: 不分摊（整期计费）
+        color: info
+        category: active
+        is_initial: true
+      - value: daily
+        label: 按日分摊
+        color: primary
+        category: active
+    semantics:
+      meaning: 首末期按服务天数分摊方式
+    ui:
+      widget: select
+      visible_when: "billing_relevance == 'plan'"
+      hint: 选择按日分摊时，请确保行上填写服务期起止日期（缺失时按整期计费）
+
   - id: billed_qty
     name: 已开票数量
     type: number

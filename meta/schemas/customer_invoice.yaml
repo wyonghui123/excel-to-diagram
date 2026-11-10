@@ -776,7 +776,7 @@ rules:
       label: 过账
       icon: check_circle
       highlight: true
-      confirm_message: "过账将生成应收期次并回写开票进度，且不可撤销（只能红冲），确定过账吗？"
+      confirm_message: "过账将按付款条件生成应收期次、回写订单/发货行开票进度，且不可撤销（只能红冲），确定过账吗？"
 
   - id: cancel_customer_invoice
     name: 取消发票
@@ -800,7 +800,7 @@ rules:
     ui_hints:
       label: 红冲
       icon: undo
-      confirm_message: "红冲将生成红字发票并回退开票进度，仅用于已过账发票；确定红冲吗？"
+      confirm_message: "红冲将生成一张红字发票（贷项）并回退开票进度，原发票不可再修改、不可再次红冲；确定红冲吗？"
       input_fields:
         - field: reversal_reason
           label: 红冲原因
@@ -948,6 +948,13 @@ ui_view_config:
         variant: secondary
         permission: customer_invoice:customer_invoice_credit_memo
         action: customer_invoice.create_credit_from_invoice
+      # [S8 Wave C C4] 无原票贷项（on-account）：不引用任何来源行，行由用户手工填写
+      - id: create_credit_on_account
+        label: 创建无票贷项
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_credit_memo
+        action: customer_invoice.create_credit_on_account
       - id: print
         label: 打印
         icon: print

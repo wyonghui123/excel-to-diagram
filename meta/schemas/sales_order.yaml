@@ -1787,6 +1787,16 @@ ui_view_config:
   #   ⇒ 跨单据数据泄漏。故用 customFetcher=target_change_requests 按 target 精确取数。
   #   只读：审批处理仍走任务收件箱（/api/v1/tasks/{id}/decision），不在详情页重复造审批 UI。
   detail:
+    # [S8 Wave C T43] 手工补跑开票计划（确认时自动生成；历史单据或生成失败后可在此重试）
+    #   幂等：已开票金额不会被重算；未完全开票时才显示。
+    actions:
+      - id: generate_billing_plan
+        label: 生成开票计划
+        icon: calendar
+        variant: secondary
+        permission: sales_order:sales_order_update
+        action: sales_order.generate_billing_plan
+        visible_when: "billing_status != 'full'"
     facets:
       - title: 变更申请
         id: change_request_section
