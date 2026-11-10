@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from meta.core.rule_constraint_evaluator import evaluate_constraint_rule
 from meta.core.rule_metrics import MetricSession
+from meta.services.audit_interceptor import AuditInterceptor
 from meta.services.control_parameter_service import ControlParameterResolver
 from meta.services.inventory_adjustment_service import (
     ADJ_LINE_TABLE, ADJ_TABLE, TYPE_COUNT_DIFFERENCE,
@@ -78,6 +79,7 @@ INV_COUNT_REASON_REQUIRED = 'INV_COUNT_REASON_REQUIRED'
 INV_COUNT_NO_DIFF = 'INV_COUNT_NO_DIFF'
 INV_COUNT_LINE_INVALID = 'INV_COUNT_LINE_INVALID'
 INV_COUNT_LINE_LOCKED = 'INV_COUNT_LINE_LOCKED'
+INV_COUNT_HELD = 'INV_COUNT_HELD'
 INV_DOC_POSTED_LOCKED = 'INV_DOC_POSTED_LOCKED'
 
 _CNT_SEQ_PATTERN = 'CNT-{DATE:yyyymm}-{SEQ:6}'
@@ -162,6 +164,30 @@ class InventoryCountService:
                                                           guard=self.guard)
         self.params = ControlParameterResolver(data_source)
         self.holds = RuleHoldService(data_source)
+        # 审计基建可选：测试替身无 audit_logs 表时跳过（不污染全局异步写入器）
+        self._audit_ready = self._audit_available()
+        self.audit = AuditInterceptor(data_source) if self._audit_ready else None
+
+    def _audit_available(self) -> bool:
+        try:
+            return bool(self.ds.query(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='audit_logs' LIMIT 1"))
+        except Exception:
+            return False
+
+    def _audit_hold(self, line_id: Any, old_data: Dict[str, Any],
+                    new_data: Dict[str, Any],
+                    user_info: Optional[Dict[str, Any]]) -> None:
+        """挂起/释放留痕（FR-007）；审计失败不影响业务动作。"""
+        if not self._audit_ready:
+            return
+        try:
+            self.audit.log_update(CNT_LINE_OBJECT, int(line_id), old_data,
+                                  new_data, user_name=_user_name(user_info))
+        except Exception:
+            logger.warning('[inventory-count] hold audit failed line=%s',
+                           line_id, exc_info=True)
 
     # ------------------------------------------------------------------
     # 创建归一（守卫拦截器调用）
@@ -358,21 +384,38 @@ class InventoryCountService:
                     % CNT_LINE_TABLE,
                     [variances[line['id']], now, line['id']])
             # 可存不可过：超容差行挂起（holds 唯一事实源），其余行释放旧挂起
+            applied: List[Any] = []
+            released: List[Any] = []
             for line in lines:
                 if line['id'] in held:
-                    self.holds.apply(
-                        CNT_LINE_OBJECT, line['id'], TOLERANCE_RULE_ID,
-                        code=HOLD_CODE_OVER_TOLERANCE,
-                        reason=str(line.get('variance_reason') or '').strip(),
-                        applied_by=operator)
+                    if self.holds.apply(
+                            CNT_LINE_OBJECT, line['id'], TOLERANCE_RULE_ID,
+                            code=HOLD_CODE_OVER_TOLERANCE,
+                            reason=str(line.get('variance_reason') or '').strip(),
+                            applied_by=operator):
+                        applied.append(line['id'])
                 else:
-                    self.holds.release(
-                        CNT_LINE_OBJECT, line['id'],
-                        rule_key=TOLERANCE_RULE_ID, released_by=operator)
+                    if self.holds.release(
+                            CNT_LINE_OBJECT, line['id'],
+                            rule_key=TOLERANCE_RULE_ID, released_by=operator):
+                        released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, approved_by = ?, approved_at = ?, '
                 'updated_at = ? WHERE id = ?' % CNT_TABLE,
                 [target, approved_by, approved_at, now, header['id']])
+
+        reasons = {line['id']: str(line.get('variance_reason') or '').strip()
+                   for line in lines}
+        for line_id in applied:
+            self._audit_hold(line_id, {'hold': False},
+                             {'hold': True, 'rule_key': TOLERANCE_RULE_ID,
+                              'code': HOLD_CODE_OVER_TOLERANCE,
+                              'reason': reasons.get(line_id),
+                              'applied_by': operator}, user_info)
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True, 'rule_key': TOLERANCE_RULE_ID},
+                             {'hold': False, 'released_by': operator},
+                             user_info)
 
         logger.info('[inventory-count] submit id=%s no=%s -> %s over=%s',
                     header['id'], header.get('count_no'), target, len(over))
@@ -390,17 +433,23 @@ class InventoryCountService:
                 {'count_id': count_id, 'status': header['status']})
         now = _now()
         operator = _user_name(user_info)
+        released: List[Any] = []
         with self.ds.transaction():
-            # 超容差行在此刻释放（规则声明 release_action=inventory_count.approve；
-            # 首版由本动作直接释放，通用 release_action 执行器仍延后）
+            # 审批放行：释放本单全部 active holds（不限 rule_key），保证其他规则
+            # 挂起不会在审批后永久悬挂；规则声明 release_action=inventory_count.approve，
+            # 首版由本动作直接释放，通用 release_action 执行器仍延后
             for line in self._load_lines(count_id):
-                self.holds.release(
-                    CNT_LINE_OBJECT, line['id'],
-                    rule_key=TOLERANCE_RULE_ID, released_by=operator)
+                if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                      released_by=operator):
+                    released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, approved_by = ?, approved_at = ?, '
                 'updated_at = ? WHERE id = ?' % CNT_TABLE,
                 [STATUS_APPROVED, operator, now, now, header['id']])
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True},
+                             {'hold': False, 'released_by': operator,
+                              'reason': 'inventory_count.approve'}, user_info)
         logger.info('[inventory-count] approve id=%s no=%s',
                     header['id'], header.get('count_no'))
         return {'count_id': header['id'], 'count_no': header.get('count_no'),
@@ -426,6 +475,13 @@ class InventoryCountService:
             raise InventoryError(
                 INV_COUNT_INCOMPLETE, '存在未录入实盘数量的盘点行',
                 {'count_id': count_id, 'lines': missing})
+        # 可存不可过：存在 active holds（任何规则）时禁止过账
+        held = [int(line['line_no']) for line in lines
+                if self.holds.is_held(CNT_LINE_OBJECT, line['id'])]
+        if held:
+            raise InventoryError(
+                INV_COUNT_HELD, '存在挂起盘点行（超容差未放行），不能过账',
+                {'count_id': count_id, 'lines': held})
 
         diffs = []
         for line in lines:
@@ -542,22 +598,27 @@ class InventoryCountService:
                 INV_COUNT_STATE_INVALID,
                 '当前状态不可取消: %s' % header['status'],
                 {'count_id': count_id, 'status': header['status']})
+        cancelled_by = _user_name(user_info)
+        released: List[Any] = []
         with self.ds.transaction():
             if self._serial_ready():
                 self.ds.execute(
                     'DELETE FROM document_serial_links '
                     "WHERE doc_type = 'inventory_count' AND doc_id = ?",
                     [header['id']])
-            # 取消后挂起失去意义：释放 active holds（不删行，保留历史）
+            # 取消后挂起失去意义：释放本单全部 active holds（不删行，保留历史）
             for line in self._load_lines(count_id):
-                self.holds.release(
-                    CNT_LINE_OBJECT, line['id'],
-                    rule_key=TOLERANCE_RULE_ID,
-                    released_by=_user_name(user_info))
+                if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                      released_by=cancelled_by):
+                    released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
                 % CNT_TABLE,
                 [STATUS_CANCELLED, _now(), header['id']])
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True},
+                             {'hold': False, 'released_by': cancelled_by,
+                              'reason': 'inventory_count.cancel'}, user_info)
         logger.info('[inventory-count] cancel id=%s no=%s',
                     header['id'], header.get('count_no'))
         return {'count_id': header['id'], 'count_no': header.get('count_no'),

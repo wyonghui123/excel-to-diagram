@@ -2,7 +2,7 @@
 
 > **版本**: v1.2（`hold` 存储方案二次评估后修订）
 > **日期**: 2026-11-10
-> **状态**: 设计中（M1 词表/矩阵/加载期校验、M2 统一谓词求值器 + explain、M3 派生度量注册表、M4 typed 判定结果、M5 命中策略 + 治理字段已实现）
+> **状态**: 设计中（M1 词表/矩阵/加载期校验、M2 统一谓词求值器 + explain、M3 派生度量注册表、M4 typed 判定结果、M5 命中策略 + 治理字段、M6a 容差规则接线、M6b `holds` 表 + 释放路径 + 盘点 post 拦截 / 全规则释放 / 审计留痕已实现；见 §11.2.2）
 > **v1.2 变更**: 撤回「单据 `hold_state` 汇总字段」，`holds` 为唯一事实源，单据侧不落冗余状态（§10.4、TBD-6、TBD-11）
 > **v1.1 变更**: `hit_policy` 由 `priority_first` 修正为 `first`（§10 TBD-9）；`hold` / `warn_ack` 落点确定（§10 TBD-6/7）；治理字段分两档（§10 TBD-8）
 > **作者**: AI Agent
@@ -526,7 +526,7 @@ GroupNode { connector: and|or|not, children[] }
 | ID | 内容 | 建议 |
 |---|---|---|
 | TBD-10 | `holds` 是否区分「可手工释放 / 仅系统释放」 | Oracle 明确区分（部分 hold code 不允许手工释放）。首版只做 `code + reason + applied_by + applied_at + released_by + released_at`，不做释放权限分级 |
-| TBD-12 | `warn_ack` 是否要求「确认人 + 确认理由」 | 建议首版只要求确认人；理由字段留给 `hold` 的 release reason |
+| TBD-12 | `warn_ack` 是否要求「确认人 + 确认理由」 | 建议首版只要求确认人；理由字段留给 `hold` 的 release reason。**现状（2026-11-10）**：`holds` 无独立 `release_reason` 列，释放理由暂写审计 `new_data.reason`，已列入 §11.2.2 延后项 |
 
 > TBD-11（`hold_state` 物理列 vs 视图派生）已于 v1.2 决议：**不做物理列**，见 §10.4。
 
@@ -660,14 +660,18 @@ GroupNode { connector: and|or|not, children[] }
 | 服务接线 | `meta/schemas/inventory_count_line.yaml` + `meta/services/inventory_count_service.py` | `rules: inventory_count_line_tolerance` 成为容差唯一事实源；`submit()` 调 `evaluate_constraint_rule()`，规则缺失 `RuntimeError`（不代码兜底） |
 | 挂起表 | `meta/schemas/rule_hold.yaml` + `meta/migrations/v231__rule_hold.py` | `holds`（TBD-6 字段）+ `idx_holds_active` / `uq_holds_active` 两个部分索引（`WHERE released_at IS NULL`）；`skip_generic_api` / `skip_auto_menu`，不做通用 CRUD 与菜单 |
 | 挂起服务 | `meta/services/rule_hold_service.py` | `apply()` 幂等（部分唯一索引兜底）/ `release()` 置 `released_by/released_at` 不删行 / `is_held()`、`active_holds()`；active 谓词只在 `_active_where()` 出现，禁止手写 holds SQL |
-| 盘点接线 | `meta/services/inventory_count_service.py` | `submit()` 超容差行 apply hold、容差内行 release；`approve()` / `cancel()` 释放本单 active holds（历史行保留） |
-| 单测 | `meta/tests/test_rule_hold_service.py` | 幂等 / 部分唯一索引防重 / 释放保留行可再挂起 / `EXPLAIN QUERY PLAN` 命中部分索引 / 盘点 submit-approve-cancel 全链路 |
+| 盘点接线 | `meta/services/inventory_count_service.py` | `submit()` 超容差行 apply hold、容差内行 release；`approve()` / `cancel()` 释放本单**全部** active holds（不限 `rule_key`，历史行保留）；`post()` 存在任一 active hold 时抛 `INV_COUNT_HELD`（可存不可过） |
+| 审计留痕 | `meta/services/inventory_count_service.py` + `audit_interceptor.py` | submit / approve / cancel 的挂起与释放写 `audit_logs`（`CNT_LINE_OBJECT`，old/new 含 `hold` / `rule_key` / `code` / `reason` / `released_by`）；审计在业务事务提交后写，失败只告警不影响业务；测试替身无 `audit_logs` 表时经 `_audit_available()` 探测跳过 |
+| 单测 | `meta/tests/test_rule_hold_service.py` | 幂等 / 部分唯一索引防重 / 释放保留行可再挂起 / `EXPLAIN QUERY PLAN` 命中部分索引 / 盘点 submit-approve-cancel 全链路 / approve 释放全部规则 / active hold 阻断 post |
 
 **key 形状（SSOT）**：`{parameter, metric, severity?, disposition?}`；方向 `over / under / both` 与基准 `percent / absolute` 只从 `control_parameter_defs`（`tolerance_direction` / `tolerance_basis`）读取，规则内不重复书写比较符。
 
 **明确延后（不在 M6b 内）**：
 
-1. `release_action` 执行语义：只做声明必填校验，尚未有通用执行器消费（盘点首版由 `approve()` 直接释放，与规则声明的 `inventory_count.approve` 对齐）。
+1. `release_action` 执行语义：只做声明必填校验，尚未有通用执行器消费（盘点首版由 `approve()` 直接释放本单全部 active holds，与规则声明的 `inventory_count.approve` 对齐）。
+2. holds 的对外查询 API / 前端挂起提示 / 人工释放入口：当前只有服务层 `active_holds()`，无 HTTP 出口与 UI 呈现。
+3. 单据删除 / 作废不级联清理 holds：存在产生孤儿 active 行的风险（当前仅 `cancel()` 主动释放）。
+4. `holds.release_reason` 列（TBD-12 提到的释放理由）：首版释放只记 `released_by` / `released_at`，释放理由暂由调用方写入审计 `new_data.reason`（`inventory_count.approve` / `inventory_count.cancel`），不落独立列。
 
 **服务接线（2026-11-10）**：`inventory_count_service.submit()` 的超容差判定改由 BO 规则执行 ——
 `inventory_count_line.yaml` 的 `inventory_count_line_tolerance`（`combine_mode=all`，两 key：

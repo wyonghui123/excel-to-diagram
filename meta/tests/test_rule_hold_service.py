@@ -21,8 +21,9 @@ pytestmark = pytest.mark.unit
 
 from meta.migrations import v231__rule_hold as v231
 from meta.services.inventory_count_service import (
-    CNT_LINE_OBJECT, TOLERANCE_RULE_ID,
+    CNT_LINE_OBJECT, INV_COUNT_HELD, TOLERANCE_RULE_ID,
 )
+from meta.services.inventory_guard_service import InventoryError
 from meta.services.rule_hold_service import RuleHoldService
 from meta.tests import inventory_adjustment_doubles as adj
 from meta.tests import inventory_test_doubles as inv
@@ -198,3 +199,49 @@ def test_cancel_releases_active_hold_without_deleting_rows():
     assert holds[0]['released_by'] == 'canceller'
     assert holds[0]['released_at'] is not None
     assert v231.TABLE == 'holds'
+
+
+def test_approve_releases_all_active_rules_not_only_tolerance():
+    """审批放行必须清空本单所有规则的 active holds，不能只放 tolerance 规则。"""
+    conn = adj.build_adjustment_db()
+    adj.post_balance(conn, 10)
+    count_id, _data, service = _create_count(conn, tolerance_qty_abs=0.5)
+    service.start(count_id)
+    line = _lines(conn, count_id)[0]
+    _set_counted(conn, line['id'], 12, reason='盘亏')
+    service.submit(count_id, {'username': 'submitter'})
+
+    # 其他规则（非容差）也挂起同一行
+    assert service.holds.apply(CNT_LINE_OBJECT, line['id'], 'R-INV-OTHER',
+                               code='OTHER', applied_by='submitter') is True
+    assert len([h for h in _holds(conn) if h['released_at'] is None]) == 2
+
+    service.approve(count_id, {'username': 'approver'})
+    holds = _holds(conn)
+    assert len(holds) == 2
+    assert all(h['released_at'] is not None for h in holds)
+    assert all(h['released_by'] == 'approver' for h in holds)
+
+
+def test_post_blocked_while_active_hold():
+    """可存不可过：存在 active hold 时过账被拒绝。"""
+    conn = adj.build_adjustment_db()
+    adj.post_balance(conn, 10)
+    count_id, _data, service = _create_count(conn, tolerance_qty_abs=0.5)
+    service.start(count_id)
+    line = _lines(conn, count_id)[0]
+    _set_counted(conn, line['id'], 12, reason='盘亏')
+    service.submit(count_id, {'username': 'submitter'})
+    service.approve(count_id, {'username': 'approver'})
+
+    # 审批后才由其他规则（如质量挂起）产生的 hold
+    assert service.holds.apply(CNT_LINE_OBJECT, line['id'], 'R-INV-QUALITY',
+                               code='QUALITY_HOLD', applied_by='inspector') is True
+    with pytest.raises(InventoryError) as exc:
+        service.post(count_id, {'username': 'poster'})
+    assert exc.value.code == INV_COUNT_HELD
+    assert exc.value.details['lines'] == [1]
+
+    # 释放后不再因 hold 被拦截
+    service.holds.release(CNT_LINE_OBJECT, line['id'])
+    assert service.holds.is_held(CNT_LINE_OBJECT, line['id']) is False
