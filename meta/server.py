@@ -200,6 +200,15 @@ setup_trace_log_filter()
 
 
 def _preflight_db_check(db_path):
+    # [TEST-EFF P1-5] 测试态跳过整库 quick_check
+    # 165MB 库 PRAGMA quick_check 实测 1.35-1.56s，且 `create_app()` 每个测试
+    # 进程都要执行一次（--file/--single 的 802 个文件进程累计约 19 分钟）。
+    # 测试库主要由 test.py 的 SQLite backup 快照产生（backup 本身逐页读取，
+    # 损坏会在快照阶段报错），真损坏也会在首次 SQL 操作时以 DatabaseError
+    # 暴露，不需要预检兜底。仅在测试入口显式设 SKIP_DB_PREFLIGHT=1 才生效，
+    # 生产启动路径行为不变。
+    if os.environ.get('SKIP_DB_PREFLIGHT', '') in ('1', 'true', 'True'):
+        return
     file_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
     if file_size < 1024:
         return

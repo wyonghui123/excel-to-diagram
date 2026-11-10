@@ -577,6 +577,12 @@ def pytest_configure(config):
     if os.environ.get('TEST_ALLOW_CRON') != '1':
         os.environ['CRON_JOBS_ENABLED'] = '0'
 
+    # [TEST-EFF P1-5] 跳过 create_app() 的整库 quick_check 预检
+    # （165MB 库实测 1.35-1.56s/进程；测试库由 SQLite backup 快照产生，
+    # 真损坏会在首次 SQL 操作时暴露）。需要验证预检链路的用例显式
+    # os.environ.pop('SKIP_DB_PREFLIGHT') 后再断言。
+    os.environ.setdefault('SKIP_DB_PREFLIGHT', '1')
+
     _setup_strict_mode()
 
     _apply_mock_safe_patch()
