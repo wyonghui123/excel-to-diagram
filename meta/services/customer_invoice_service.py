@@ -6,10 +6,12 @@
   docs/specs/spec-sales-order-billing-object-model-2026-11-07.md §4-§11 / §30 / §31
 
 口径:
-  · Wave A 只允许三种行来源：shipment（发货行）/ sales_order（订单行）/ manual；
-    计划开票（schedule_id / billing_schedule）与 service_confirmation 一律 fail-closed。
-  · 订单行 billing_relevance 必须是 delivery；plan 返回
-    INVOICE_RELEVANCE_NOT_SUPPORTED，其余返回 INVOICE_SOURCE_MISMATCH。
+  · 行来源：shipment（发货行）/ sales_order（订单行）/ manual / billing_schedule
+    （开票计划期次）/ service_confirmation（已兑现服务期次）；手工新增行仍按
+    行来源策略（customer_invoice.yaml `line_source_policy`）校验。
+  · 订单行 billing_relevance 必须是 delivery（发货/订单量路径）或 plan
+    （期次路径）；不匹配返回 INVOICE_SOURCE_MISMATCH /
+    INVOICE_RELEVANCE_NOT_PLAN。
   · 金额由服务层计算并落快照：净额 / 税额 / 价税合计统一按**币种精度**
     （currencies.decimal_places）在落库边界舍入一次；税方向取
     tax_codes.rounding（缺省 half-up），中间金额保留全精度（禁固定 4 位）。
@@ -108,9 +110,15 @@ DOC_FLOW_RULE_ID = 'shipment_to_customer_invoice'
 #: Wave B：开票计划期次 → 发票行的正向事实边规则（v241 播种）
 PLAN_DOC_FLOW_RULE_ID = 'billing_schedule_to_customer_invoice'
 
+#: TBD-11 A：已兑现服务期次 → 发票行的正向事实边规则（v248 播种）
+SERVICE_DOC_FLOW_RULE_ID = 'service_confirmation_to_invoice_line'
+
 #: Wave B：计划期次开票口径
 SCHEDULE_BILLING_KIND = 'billing'
 SCHEDULE_BILLABLE_STATUSES = ('planned', 'confirmed')
+#: TBD-11 A：服务期次只有「已兑现」才可确认开票
+SCHEDULE_SERVICE_KIND = 'service'
+SERVICE_CONFIRMABLE_STATUSES = ('completed',)
 ORDER_BILLABLE_STATUSES = ('confirmed', 'closed')
 #: 按比例开票时吸收尾差的阈值（计算金额与期次剩余金额之差）
 PERCENT_TAIL_TOLERANCE = Decimal('0.01')
@@ -226,10 +234,12 @@ LINE_SOURCE_ORDER = 'order_line'
 LINE_SOURCE_ORDER_READONLY = 'order_line_readonly'
 LINE_SOURCE_PLAN = 'plan'
 LINE_SOURCE_MANUAL = 'manual'
+#: TBD-11 A：服务确认行（期次 schedule_kind = service）
+LINE_SOURCE_SERVICE = 'service_confirmation'
 
 
 def _line_source_kind(line: Dict[str, Any], role: str) -> str:
-    """识别行来源种类（优先级：退货 > 原票行 > 发货行 > 计划期次 > 订单行 > 手工）。"""
+    """识别行来源种类（优先级：退货 > 原票行 > 发货行 > 服务确认 > 计划期次 > 订单行 > 手工）。"""
     source_type = str(line.get('source_doc_type') or '')
     if source_type == SOURCE_RETURN_SHIPMENT:
         return LINE_SOURCE_RETURN
@@ -237,6 +247,8 @@ def _line_source_kind(line: Dict[str, Any], role: str) -> str:
         return LINE_SOURCE_INVOICE
     if not _blank(line.get('shipment_line_id')):
         return LINE_SOURCE_SHIPMENT
+    if source_type == SOURCE_SERVICE:
+        return LINE_SOURCE_SERVICE
     if not _blank(line.get('schedule_id')) or source_type == SOURCE_PLAN:
         return LINE_SOURCE_PLAN
     if not _blank(line.get('order_line_id')) or source_type == SOURCE_ORDER:
@@ -304,9 +316,11 @@ def expected_lineage_edges(line: Dict[str, Any]) -> List[Dict[str, Any]]:
         return edges
     schedule_id = line.get('schedule_id')
     if not _blank(schedule_id):
+        is_service = str(line.get('source_doc_type') or '') == SOURCE_SERVICE
         return [{
             'field': 'schedule_id',
-            'rule_id': PLAN_DOC_FLOW_RULE_ID,
+            'rule_id': (SERVICE_DOC_FLOW_RULE_ID if is_service
+                        else PLAN_DOC_FLOW_RULE_ID),
             'source_bo': 'sales_order_schedule',
             'source_id': str(schedule_id),
         }]
@@ -529,19 +543,110 @@ class CustomerInvoiceService:
                 'status': header['status'], 'order_id': order.get('id'),
                 'line_ids': line_ids, 'amounts': totals}
 
+    def create_from_service_confirmation(self, payload: Dict[str, Any]
+                                         ) -> Dict[str, Any]:
+        """从已兑现服务期次生成草稿发票（服务确认 → 发票）。
+
+        事实源：`sales_order_schedules` 中 schedule_kind='service' 且
+        status='completed' 的期次；确认量取 promised_qty（可用
+        `lines[].qty` 覆盖为本次分期确认量），单价取所属订单行 unit_price，
+        行净额 = 确认量 × 单价；可开票上限 = 期次金额 − 已开票金额。
+        """
+        payload = dict(payload or {})
+        raw_lines = list(payload.get('lines') or [])
+        schedule_ids = payload.get('schedule_ids') or []
+        if not isinstance(schedule_ids, (list, tuple, set)):
+            schedule_ids = [schedule_ids]
+        if not schedule_ids and not _blank(payload.get('source_doc_id')):
+            schedule_ids = [payload.get('source_doc_id')]
+
+        sources = []
+        if raw_lines:
+            for item in raw_lines:
+                item = dict(item or {})
+                schedule_id = (item.get('schedule_id')
+                               or item.get('source_line_id')
+                               or item.get('source_doc_id'))
+                sources.append((schedule_id, item.get('qty')))
+        else:
+            sources.extend((schedule_id, None) for schedule_id in schedule_ids)
+
+        normalized = []
+        order_ids = set()
+        # 同一期次可拆多行：按 schedule_id 累计，建单阶段就拦住超额草稿
+        period_totals: Dict[str, Decimal] = {}
+        period_sources: Dict[str, Any] = {}
+        for schedule_id, qty in sources:
+            schedule = self._require_service_schedule(schedule_id)
+            order_line = self._require_order_line(schedule.get('line_id'))
+            order_ids.add(schedule.get('order_id'))
+            self._assert_relevance(order_line, expected='plan')
+            line = self._build_line_from_service_schedule(
+                schedule, order_line, qty)
+            key = str(schedule.get('id'))
+            period_sources.setdefault(key, (schedule, order_line))
+            period_totals[key] = period_totals.get(key, Decimal('0')) + \
+                _to_decimal(line.get('net_amount'))
+            normalized.append(line)
+
+        for key, total in period_totals.items():
+            schedule, order_line = period_sources[key]
+            period_amount = self._service_schedule_amount(schedule, order_line)
+            remaining = _round(period_amount - _to_decimal(
+                schedule.get('billed_amount')), 4)
+            if total > remaining + EPSILON:
+                raise CustomerInvoiceError(
+                    '同一服务期次累计开票金额 %s 超过剩余金额 %s' % (
+                        _round(total, 4), remaining),
+                    field_name='schedule_id', rule='INVOICE_SERVICE_EXCEEDED')
+
+        if not normalized:
+            raise CustomerInvoiceError(
+                '没有可开票的服务确认期次', field_name='schedule_ids',
+                rule='INVOICE_SOURCE_INVALID')
+        if len(order_ids) != 1:
+            raise CustomerInvoiceError(
+                '一张发票只能来自同一销售订单的服务确认期次',
+                field_name='schedule_ids',
+                rule='INVOICE_SERVICE_ORDER_MISMATCH')
+
+        order = self._require_billable_order(next(iter(order_ids)))
+        header_payload = dict(payload)
+        for key in ('lines', 'schedule_ids', 'source_doc_id'):
+            header_payload.pop(key, None)
+        header_payload.update(self._header_snapshot_from_order(order))
+        header_payload['document_type_id'] = (
+            payload.get('document_type_id')
+            or self._default_type_id(DEFAULT_INVOICE_TYPE_CODE, 'header'))
+        header = self.prepare_header(header_payload)
+
+        with _atomic(self.ds):
+            invoice_id = self._insert_header(header)
+            line_ids = self._insert_lines(invoice_id, normalized)
+            totals = self._recalc_impl(invoice_id)
+        logger.info('[customer_invoice] create_from_service_confirmation '
+                    'id=%s no=%s order=%s lines=%s', invoice_id,
+                    header['invoice_no'], order.get('id'), len(line_ids))
+        return {'id': invoice_id, 'invoice_no': header['invoice_no'],
+                'status': header['status'], 'order_id': order.get('id'),
+                'line_ids': line_ids, 'amounts': totals}
+
     # ------------------------------------------------------------ 到期清单
 
     _DUE_SCHEDULE_SELECT = (
         "SELECT o.order_no, ol.line_no, s.id AS schedule_id, "
         "       s.schedule_no, s.promised_date, s.order_id, "
         "       s.line_id, s.promised_qty, "
-        "       COALESCE(s.billing_percent, 0) AS billing_percent, "
+        "       s.billing_percent AS billing_percent, "
+        "       s.billing_fixed_amount AS billing_fixed_amount, "
         "       COALESCE(ol.net_amount, 0) AS net_amount, "
-        "       ROUND(COALESCE(s.billing_percent, 0) / 100.0 "
-        "             * COALESCE(ol.net_amount, 0), 4) AS period_amount, "
+        "       ROUND(COALESCE(s.billing_fixed_amount, "
+        "                   COALESCE(s.billing_percent, 0) / 100.0 "
+        "                   * COALESCE(ol.net_amount, 0)), 4) AS period_amount, "
         "       COALESCE(s.billed_amount, 0) AS billed_amount, "
-        "       ROUND(COALESCE(s.billing_percent, 0) / 100.0 "
-        "             * COALESCE(ol.net_amount, 0) "
+        "       ROUND(COALESCE(s.billing_fixed_amount, "
+        "                   COALESCE(s.billing_percent, 0) / 100.0 "
+        "                   * COALESCE(ol.net_amount, 0)) "
         "             - COALESCE(s.billed_amount, 0), 4) AS remaining_amount, "
         "       COALESCE(s.billing_status, 'none') AS billing_status, "
         "       s.status AS schedule_status, o.status AS order_status "
@@ -1736,13 +1841,14 @@ class CustomerInvoiceService:
         return {'order_id': int(order_id), 'billing_status': order_status}
 
     def _plan_line_billing_status(self, order_line_id: Any) -> str:
-        """plan 行状态由其 billing 期次聚合：全部 full 才 full，否则按已开票金额。"""
+        """plan 行状态由 billing / service 期次聚合：全部 full 才 full。"""
         rows = self.ds.query(
             "SELECT COALESCE(billed_amount, 0) AS billed_amount, "
             "COALESCE(billing_status, 'none') AS billing_status "
-            'FROM %s WHERE line_id = ? AND schedule_kind = ? '
+            'FROM %s WHERE line_id = ? AND schedule_kind IN (?, ?) '
             "AND COALESCE(status, '') != 'cancelled'"
-            % ORDER_SCHEDULE_TABLE, [order_line_id, SCHEDULE_BILLING_KIND])
+            % ORDER_SCHEDULE_TABLE,
+            [order_line_id, SCHEDULE_BILLING_KIND, SCHEDULE_SERVICE_KIND])
         if not rows:
             return 'none'
         if all((row.get('billing_status') or 'none') == 'full' for row in rows):
@@ -1798,9 +1904,13 @@ class CustomerInvoiceService:
                 continue
             schedule_id = line.get('schedule_id')
             if not _blank(schedule_id):
-                # Wave B：期次 → 发票行（按比例口径，数量恒为 1）
+                # Wave B / TBD-11 A：期次 → 发票行（billing 按比例、service 按确认量）
+                is_service = (str(line.get('source_doc_type') or '')
+                              == SOURCE_SERVICE)
                 attach_edge(
-                    self.ds, self.platform_ds, PLAN_DOC_FLOW_RULE_ID,
+                    self.ds, self.platform_ds,
+                    SERVICE_DOC_FLOW_RULE_ID if is_service
+                    else PLAN_DOC_FLOW_RULE_ID,
                     schedule_id, line['id'],
                     float(_to_decimal(line.get('qty'))),
                     target_item=str(line['id']),
@@ -1867,18 +1977,31 @@ class CustomerInvoiceService:
                 needs[key] = needs.get(key, Decimal('0')) + qty
 
         for schedule_id, net in plan_needs.items():
-            schedule = self._require_billing_schedule(schedule_id)
+            loaded = self._load_source_schedule(schedule_id)
+            is_service = ((loaded or {}).get('schedule_kind')
+                          == SCHEDULE_SERVICE_KIND)
+            if is_service:
+                schedule = self._require_service_schedule(schedule_id)
+            else:
+                schedule = self._require_billing_schedule(schedule_id)
             order_line = self._require_order_line(schedule.get('line_id'))
             self._assert_relevance(order_line, expected='plan')
             self._require_billable_order(schedule.get('order_id'))
-            period_amount = self._schedule_period_amount(schedule, order_line)
+            if is_service:
+                period_amount = self._service_schedule_amount(schedule, order_line)
+                tolerance = EPSILON
+                exceeded_rule = 'INVOICE_SERVICE_EXCEEDED'
+            else:
+                period_amount = self._schedule_period_amount(schedule, order_line)
+                tolerance = PERCENT_TAIL_TOLERANCE
+                exceeded_rule = 'INVOICE_PLAN_EXCEEDED'
             remaining = _round(
                 period_amount - _to_decimal(schedule.get('billed_amount')), 4)
-            if net > remaining + PERCENT_TAIL_TOLERANCE:
+            if net > remaining + tolerance:
                 raise CustomerInvoiceError(
                     '开票计划期次 %s 可开票金额不足（申请 %s，可用 %s）'
                     % (schedule_id, net, remaining),
-                    field_name='schedule_id', rule='INVOICE_PLAN_EXCEEDED')
+                    field_name='schedule_id', rule=exceeded_rule)
 
         for (source, source_id), qty in needs.items():
             if source == 'shipment':
@@ -3088,10 +3211,110 @@ class CustomerInvoiceService:
     @staticmethod
     def _schedule_period_amount(schedule: Dict[str, Any],
                                 order_line: Dict[str, Any]) -> Decimal:
-        """期次金额 = ROUND(开票比例 / 100 × 订单行净额, 4)。"""
+        """期次金额：固定金额优先，否则 ROUND(开票比例 / 100 × 订单行净额, 4)。"""
+        fixed = schedule.get('billing_fixed_amount')
+        if not _blank(fixed):
+            return _round(_to_decimal(fixed), 4)
         base = _to_decimal(order_line.get('net_amount'))
         percent = _to_decimal(schedule.get('billing_percent'))
         return _round(base * percent / Decimal('100'), 4)
+
+    def _require_service_schedule(self, schedule_id: Any) -> Dict[str, Any]:
+        """服务期次校验：kind 必须是 service，且只有已兑现（completed）可开票。"""
+        schedule = self._load_source_schedule(schedule_id)
+        if not schedule:
+            raise CustomerInvoiceError(
+                '服务计划期次不存在（id=%s）' % schedule_id,
+                field_name='schedule_id', rule='INVOICE_SOURCE_INVALID')
+        if schedule.get('schedule_kind') != SCHEDULE_SERVICE_KIND:
+            raise CustomerInvoiceError(
+                '计划行不是服务计划（kind=%s）' % schedule.get('schedule_kind'),
+                field_name='schedule_id', rule='INVOICE_SERVICE_STATE_INVALID')
+        if schedule.get('status') not in SERVICE_CONFIRMABLE_STATUSES:
+            raise CustomerInvoiceError(
+                '服务计划期次状态 %s 未确认（需 completed）'
+                % schedule.get('status'),
+                field_name='schedule_id', rule='INVOICE_SERVICE_STATE_INVALID')
+        return schedule
+
+    @staticmethod
+    def _service_schedule_amount(schedule: Dict[str, Any],
+                                 order_line: Dict[str, Any]) -> Decimal:
+        """服务期次金额 = ROUND(承诺量 × 订单行单价, 4)（服务按数量确认口径）。"""
+        qty = _to_decimal(schedule.get('promised_qty'))
+        unit_price = _to_decimal(order_line.get('unit_price'))
+        return _round(qty * unit_price, 4)
+
+    def _build_line_from_service_schedule(self, schedule: Dict[str, Any],
+                                          order_line: Dict[str, Any],
+                                          qty_override: Any = None
+                                          ) -> Dict[str, Any]:
+        """服务确认行快照：确认量 × 订单行单价；上限为期次剩余金额。"""
+        unit_price = _to_decimal(order_line.get('unit_price'))
+        period_amount = self._service_schedule_amount(schedule, order_line)
+        billed = _to_decimal(schedule.get('billed_amount'))
+        remaining = _round(period_amount - billed, 4)
+        if remaining <= EPSILON:
+            raise CustomerInvoiceError(
+                '服务计划期次已开满（期金额 %s）' % period_amount,
+                field_name='schedule_id', rule='INVOICE_SERVICE_EXCEEDED')
+        if unit_price <= EPSILON:
+            raise CustomerInvoiceError(
+                '订单行单价为 0，无法按服务确认开票',
+                field_name='unit_price', rule='INVOICE_SERVICE_QTY_INVALID')
+
+        if _blank(qty_override):
+            # 缺省确认量 = 期次承诺量，但不能超过剩余金额折算量
+            qty = min(_to_decimal(schedule.get('promised_qty')),
+                      _round(remaining / unit_price, 4))
+        else:
+            qty = _to_decimal(qty_override, 'qty')
+        if qty <= 0:
+            raise CustomerInvoiceError(
+                '服务确认数量必须大于 0',
+                field_name='qty', rule='INVOICE_SERVICE_QTY_INVALID')
+
+        net = _round(qty * unit_price, 4)
+        if net > remaining + EPSILON:
+            raise CustomerInvoiceError(
+                '服务确认金额 %s 超过期次剩余金额 %s' % (net, remaining),
+                field_name='qty', rule='INVOICE_SERVICE_EXCEEDED')
+
+        # 服务确认不重复分摊抬头折扣/附加费（订单行单价即含分摊后口径）
+        return {
+            'line_no': None,
+            'line_type_id': self._default_type_id(DEFAULT_LINE_TYPE_CODE, 'line'),
+            'source_doc_type': SOURCE_SERVICE,
+            'source_doc_id': schedule.get('order_id'),
+            'source_line_id': schedule.get('id'),
+            'shipment_line_id': None,
+            'schedule_id': schedule.get('id'),
+            'order_line_id': None,
+            'item_id': order_line.get('item_id'),
+            'description': (order_line.get('description')
+                            or '物料#%s' % order_line.get('item_id')),
+            'uom_id': order_line.get('uom_id'),
+            'qty': qty,
+            'billing_basis': 'quantity',
+            'unit_price': unit_price,
+            'net_amount': net,
+            'header_discount_amount': Decimal('0'),
+            'header_surcharge_amount': Decimal('0'),
+            'tax_code_id': order_line.get('tax_code_id'),
+            'tax_rate_percent': order_line.get('tax_rate_percent'),
+            'tax_amount': Decimal('0'),
+            'gross_amount': Decimal('0'),
+            'project_id': order_line.get('project_id'),
+            'project_task_id': order_line.get('project_task_id'),
+            'billing_percent': None,
+            'billing_base_amount': period_amount,
+            'price_source': 'order',
+            # 服务确认不做改价，参考价留空 → price_diff_amount 恒 0
+            'order_unit_price': None,
+            'price_change_reason': None,
+            'price_change_approved_by': None,
+            'original_invoice_line_id': None,
+        }
 
     def _build_line_from_schedule(self, schedule: Dict[str, Any],
                                   order_line: Dict[str, Any],
@@ -3177,10 +3400,22 @@ class CustomerInvoiceService:
 
     def _apply_schedule_billed(self, schedule_id: Any, delta: Decimal,
                                sign: int) -> None:
-        """条件回写期次已开票金额并重算 billing_status（影响行数必须为 1）。"""
-        schedule = self._require_billing_schedule(schedule_id)
-        order_line = self._require_order_line(schedule.get('line_id'))
-        period_amount = self._schedule_period_amount(schedule, order_line)
+        """条件回写期次已开票金额并重算 billing_status（影响行数必须为 1）。
+
+        期次金额按 kind 分派：billing → 比例/固定金额；service → 承诺量 × 单价。
+        """
+        loaded = self._load_source_schedule(schedule_id)
+        is_service = (loaded or {}).get('schedule_kind') == SCHEDULE_SERVICE_KIND
+        if is_service:
+            schedule = self._require_service_schedule(schedule_id)
+            order_line = self._require_order_line(schedule.get('line_id'))
+            period_amount = self._service_schedule_amount(schedule, order_line)
+            exceeded_rule = 'INVOICE_SERVICE_EXCEEDED'
+        else:
+            schedule = self._require_billing_schedule(schedule_id)
+            order_line = self._require_order_line(schedule.get('line_id'))
+            period_amount = self._schedule_period_amount(schedule, order_line)
+            exceeded_rule = 'INVOICE_PLAN_EXCEEDED'
         value = self._db_value(_round(abs(delta), 4))
         period = self._db_value(period_amount)
         if sign > 0:
@@ -3192,7 +3427,7 @@ class CustomerInvoiceService:
                 raise CustomerInvoiceError(
                     '开票计划期次回写失败：累计开票金额将超过期金额 %s'
                     % period_amount,
-                    field_name='schedule_id', rule='INVOICE_PLAN_EXCEEDED')
+                    field_name='schedule_id', rule=exceeded_rule)
         else:
             cursor = self.ds.execute(
                 'UPDATE %s SET billed_amount = ROUND(COALESCE(billed_amount, 0) - ?, 4) '
@@ -3201,7 +3436,7 @@ class CustomerInvoiceService:
             if int(getattr(cursor, 'rowcount', 0) or 0) != 1:
                 raise CustomerInvoiceError(
                     '开票计划期次红冲回滚失败（id=%s）' % schedule_id,
-                    field_name='schedule_id', rule='INVOICE_PLAN_EXCEEDED')
+                    field_name='schedule_id', rule=exceeded_rule)
 
         rows = self.ds.query(
             'SELECT billed_amount FROM %s WHERE id = ?'

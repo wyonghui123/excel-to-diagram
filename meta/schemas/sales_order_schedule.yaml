@@ -315,6 +315,7 @@ fields:
     description: |
       仅 schedule_kind = billing 使用。该期开票金额占所属行**分摊后净额**的比例。
       不落金额，金额 = billing_percent / 100 × 行净额（派生展示）。
+      与 billing_fixed_amount 二选一（R-SCH-11）：固定金额期次本字段必须为空。
     constraints:
       - type: numeric_range
         gt: 0
@@ -326,21 +327,43 @@ fields:
     ui:
       widget: number
 
+  # TBD-11 C：里程碑/固定金额期次（与 billing_percent 互斥；落库，唯一真源）
+  - id: billing_fixed_amount
+    name: 开票固定金额
+    type: number
+    db_column: billing_fixed_amount
+    required: false
+    nullable: true
+    description: |
+      仅 schedule_kind = billing 使用。该期开票的**绝对金额**（单据币种）。
+      与 billing_percent 二选一：两者同时填写或同时为空均被守卫拒绝（R-SCH-11）。
+      固定金额期次不随行净额变动缩放；开票服务按该金额扣减已开票金额。
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 4
+    semantics:
+      meaning: 开票期次固定金额（0 < amount）
+      filterable: false
+    ui:
+      widget: number
+
   - id: billing_amount
     name: 开票金额(派生)
     type: number
     db_column: null
     computed: true
     description: |
-      只读派生展示：仅 schedule_kind = billing 时输出
-      billing_percent / 100 × 所属订单行分摊后净额（sales_order_line.net_amount）。
-      不落库；billing_percent 为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
+      只读派生展示：仅 schedule_kind = billing 时输出。
+      **固定金额优先**（billing_fixed_amount）；否则 billing_percent / 100 ×
+      所属订单行分摊后净额（sales_order_line.net_amount）。
+      不落库；比例与固定金额均为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
     semantics:
       meaning: 开票计划派生金额
       virtual: true
     computation:
       type: formula
-      formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
+      formula: "ROUND(billing_fixed_amount, 2) if billing_fixed_amount is not None else (None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2))"
     ui:
       widget: number
       editable: false
@@ -599,12 +622,14 @@ ui_view_config:
         width: 110
       - field: billing_percent
         width: 120
+      - field: billing_fixed_amount
+        width: 130
       - field: billing_amount
         width: 130
         computed: true
         computation:
           type: formula
-          formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
+          formula: "ROUND(billing_fixed_amount, 2) if billing_fixed_amount is not None else (None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2))"
       - field: milestone_code
         width: 140
       - field: status
@@ -627,7 +652,8 @@ ui_view_config:
           - fields: [schedule_no, status]
       - title: 计划
         columns:
-          - fields: [promised_date, promised_qty, billing_percent]
+          - fields: [promised_date, promised_qty]
+          - fields: [billing_percent, billing_fixed_amount]
       - title: 发货与标识
         columns:
           - fields: [plant_location_id]
@@ -645,3 +671,11 @@ ui_view_config:
         permission: customer_invoice:customer_invoice_create
         action: customer_invoice.create_from_schedule
         visible_when: "schedule_kind == 'billing' and status in ['planned', 'confirmed']"
+      # TBD-11 A：服务计划期次「按确认开票」，派发 service_confirmation 动作
+      - id: create_service_invoice
+        label: 按服务确认开票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_create
+        action: customer_invoice.create_from_service_confirmation
+        visible_when: "schedule_kind == 'service' and status == 'completed'"

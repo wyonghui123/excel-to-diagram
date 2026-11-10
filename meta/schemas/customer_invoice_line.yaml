@@ -147,7 +147,7 @@ fields:
     db_column: source_doc_type
     required: true
     max_length: 32
-    description: 来源单据类型（Wave A：shipment / sales_order / manual；Wave B 增 billing_schedule）
+    description: 来源单据类型（发货单 / 销售订单 / 手工 / 开票期次 / 服务确认 / 退货发货）
     enum_values:
       - value: shipment
         label: 发货单
@@ -165,6 +165,14 @@ fields:
       - value: billing_schedule
         label: 开票计划期次
         color: warning
+        category: active
+      - value: service_confirmation
+        label: 服务确认
+        color: warning
+        category: active
+      - value: return_shipment
+        label: 退货发货
+        color: danger
         category: active
     semantics:
       meaning: 发票行来源类型

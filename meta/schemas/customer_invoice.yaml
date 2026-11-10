@@ -991,7 +991,7 @@ doc_effect:
 # [S8 Wave D FR-8] 行来源策略：document_role → 允许的行来源种类
 # 内核在插入行时按头表角色校验；声明了策略但角色缺失 → 默认拒绝（fail-closed）
 line_source_policy:
-  invoice: [shipment_line, order_line, plan, manual]
+  invoice: [shipment_line, order_line, plan, service_confirmation, manual]
   credit_memo: [invoice_line, return_line, manual]
   debit_memo: [manual, order_line_readonly]
 

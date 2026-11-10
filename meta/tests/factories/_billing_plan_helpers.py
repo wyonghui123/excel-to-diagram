@@ -61,6 +61,7 @@ CREATE TABLE sales_order_schedules (
     promised_date TEXT,
     promised_qty REAL,
     billing_percent REAL,
+    billing_fixed_amount REAL,
     billed_amount REAL DEFAULT 0,
     billing_status TEXT,
     milestone_code TEXT,

@@ -127,6 +127,8 @@ def register_all_bo_actions(registry=None):
     from meta.services.customer_invoice_actions import (
         create_from_shipment_handler as customer_invoice_from_shipment_handler,
         create_from_schedule_handler as customer_invoice_from_schedule_handler,
+        create_from_service_confirmation_handler as
+        customer_invoice_from_service_handler,
         create_credit_from_invoice_handler as customer_invoice_credit_handler,
         create_credit_from_return_shipment_handler as
         customer_invoice_return_credit_handler,
@@ -1475,6 +1477,32 @@ def register_all_bo_actions(registry=None):
         'customer_invoice.create_from_schedule',
         customer_invoice_from_schedule_handler,
         description='按开票计划期次生成草稿销售发票（支持一期分次 / 多期合并）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'schedule_ids': {'type': 'array',
+                                 'items': {'type': 'integer'}},
+                'source_doc_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.create_from_service_confirmation',
+        customer_invoice_from_service_handler,
+        description='按已兑现服务计划期次生成草稿销售发票（服务确认）',
         object_type='customer_invoice',
         category='business',
         permission_required='customer_invoice:customer_invoice_create',

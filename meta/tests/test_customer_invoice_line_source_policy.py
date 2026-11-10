@@ -28,7 +28,8 @@ from meta.tests.factories._customer_invoice_helpers import (
 )
 
 POLICY = {
-    'invoice': ['shipment_line', 'order_line', 'plan', 'manual'],
+    'invoice': ['shipment_line', 'order_line', 'plan',
+                'service_confirmation', 'manual'],
     'credit_memo': ['invoice_line', 'return_line', 'manual'],
     'debit_memo': ['manual', 'order_line_readonly'],
 }
@@ -78,12 +79,14 @@ def test_line_source_kind_priority():
     return_line = {'source_doc_type': 'return_shipment',
                    'original_invoice_line_id': 5}
     plan_line = {'schedule_id': 7}
+    service_line = {'source_doc_type': 'service_confirmation', 'schedule_id': 8}
     order_line = {'order_line_id': ORDER_LINE_DELIVERY}
 
     assert _line_source_kind(return_line, 'credit_memo') == 'return_line'
     assert _line_source_kind(policy_line, 'credit_memo') == 'invoice_line'
     assert _line_source_kind({'shipment_line_id': 81}, 'invoice') == \
         'shipment_line'
+    assert _line_source_kind(service_line, 'invoice') == 'service_confirmation'
     assert _line_source_kind(plan_line, 'invoice') == 'plan'
     assert _line_source_kind(order_line, 'invoice') == 'order_line'
     assert _line_source_kind(order_line, 'debit_memo') == \
@@ -98,6 +101,7 @@ def test_invoice_accepts_all_declared_sources():
         {'shipment_line_id': 81},
         {'order_line_id': ORDER_LINE_DELIVERY},
         {'schedule_id': 7},
+        {'source_doc_type': 'service_confirmation', 'schedule_id': 8},
         {'source_doc_type': 'manual'},
     ]
 

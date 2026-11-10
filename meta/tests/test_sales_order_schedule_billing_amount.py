@@ -74,7 +74,7 @@ def _evaluate(formula: str, record: dict, line_row: dict):
 
 
 # net_amount = 850.00 即「基额 1000 − 抬头折扣 150」，已是折后行净额
-BASE_RECORD = {'id': 1, 'line_id': 7}
+BASE_RECORD = {'id': 1, 'line_id': 7, 'billing_fixed_amount': None}
 LINE_ROW = {'id': 7, 'net_amount': 850.0}
 
 
@@ -109,3 +109,16 @@ class TestBillingAmountFormula:
         value = _evaluate(formula, {**BASE_RECORD, 'billing_percent': 100},
                           {'id': 7, 'net_amount': None})
         assert value == pytest.approx(0.0)
+
+    def test_fixed_amount_takes_precedence_over_percent(self, schema):
+        """TBD-11 C：固定金额优先，比例仅作兼容（正常由守卫保证互斥）。"""
+        formula = _field_formula(schema)
+        value = _evaluate(formula, {**BASE_RECORD, 'billing_percent': 30,
+                                    'billing_fixed_amount': 600}, LINE_ROW)
+        assert value == pytest.approx(600.0)
+
+    def test_fixed_amount_alone_yields_amount(self, schema):
+        formula = _field_formula(schema)
+        value = _evaluate(formula, {**BASE_RECORD, 'billing_percent': None,
+                                    'billing_fixed_amount': 1234.5678}, LINE_ROW)
+        assert value == pytest.approx(1234.57)

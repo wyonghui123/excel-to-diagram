@@ -6,8 +6,9 @@
 语义:
   · 列出 `sales_order_schedules` 中 kind=billing、状态可开票、尚未开满、
     承诺日期已到（含当天）、且订单状态可开票的期次；
-  · 期金额与剩余金额按 `ROUND(billing_percent / 100 * order_line.net_amount, 4)`
-    计算，与服务层口径一致；
+  · 期金额与剩余金额**固定金额优先**：`billing_fixed_amount`，否则
+    `ROUND(billing_percent / 100 * order_line.net_amount, 4)`；
+    口径与 `customer_invoice_service._DUE_SCHEDULE_SELECT` 保持一致；
   · `--as-of` 默认今天，可指定任意日期做回溯/预警。
 
 用法（repo 根目录）::
@@ -33,18 +34,23 @@ SELECT o.order_no,
        s.schedule_no,
        s.promised_date,
        s.billing_percent,
+       s.billing_fixed_amount,
        ol.net_amount,
-       ROUND(s.billing_percent / 100.0 * ol.net_amount, 4) AS period_amount,
-       s.billed_amount,
-       ROUND(s.billing_percent / 100.0 * ol.net_amount, 4) - s.billed_amount
-           AS remaining,
-       s.billing_status
+       ROUND(COALESCE(s.billing_fixed_amount,
+                      COALESCE(s.billing_percent, 0) / 100.0
+                      * COALESCE(ol.net_amount, 0)), 4) AS period_amount,
+       COALESCE(s.billed_amount, 0) AS billed_amount,
+       ROUND(COALESCE(s.billing_fixed_amount,
+                      COALESCE(s.billing_percent, 0) / 100.0
+                      * COALESCE(ol.net_amount, 0))
+             - COALESCE(s.billed_amount, 0), 4) AS remaining,
+       COALESCE(s.billing_status, 'none') AS billing_status
   FROM sales_order_schedules s
   JOIN sales_order_lines ol ON ol.id = s.line_id
   JOIN sales_orders o       ON o.id = ol.order_id
  WHERE s.schedule_kind = 'billing'
    AND s.status IN ('planned', 'confirmed')
-   AND s.billing_status <> 'full'
+   AND COALESCE(s.billing_status, 'none') <> 'full'
    AND ol.billing_relevance = 'plan'
    AND s.promised_date IS NOT NULL
    AND s.promised_date <= ?

@@ -15,12 +15,13 @@ from contextlib import contextmanager
 from meta.migrations.v236__customer_invoice import (
     HEADER_DDL, LINE_DDL, SCHEDULE_DDL)
 
-# v242 重建表后 CHECK 才允许 return_shipment；服务层测试直接按新口径建表，
-# 迁移测试传 with_return_source=False 以覆盖 v236 旧约束下的重建分支。
+# v242 重建表后 CHECK 才允许 return_shipment；v248 再放行 service_confirmation
+# 携带 schedule_id。服务层测试直接按新口径建表；迁移测试传
+# with_return_source=False 以覆盖 v236 旧约束下的重建分支。
 LINE_DDL_WITH_RETURN = LINE_DDL.replace(
     "'service_confirmation'", "'service_confirmation', 'return_shipment'").replace(
     "'shipment', 'billing_schedule')",
-    "'shipment', 'billing_schedule', 'return_shipment')")
+    "'shipment', 'billing_schedule', 'return_shipment', 'service_confirmation')")
 
 INVOICE_DATE = '2026-11-09'
 CUSTOMER_ID = 900
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS sales_order_schedules (
     promised_date DATE,
     promised_qty NUMERIC(18,4),
     billing_percent NUMERIC(9,4),
+    billing_fixed_amount NUMERIC(18,4),
     billed_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
     billing_status VARCHAR(16) NOT NULL DEFAULT 'none'
 );
@@ -551,18 +553,21 @@ def make_order_line(conn, line_id, *, order_id=ORDER_ID, qty=10,
 
 def make_billing_schedule(conn, schedule_id, *, order_id=ORDER_ID,
                           line_id=ORDER_LINE_PLAN, percent=None,
+                          fixed_amount=None,
                           status='planned', promised_date='2026-11-15',
                           schedule_no=None, billed_amount=0,
-                          billing_status='none'):
+                          billing_status='none', kind='billing',
+                          promised_qty=None):
     conn.execute(
         'INSERT INTO sales_order_schedules '
         '(id, order_id, line_id, schedule_no, schedule_kind, status, '
-        ' promised_date, promised_qty, billing_percent, billed_amount, '
-        ' billing_status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)',
+        ' promised_date, promised_qty, billing_percent, billing_fixed_amount, '
+        ' billed_amount, billing_status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [schedule_id, order_id, line_id,
-         schedule_no or 'BS-%03d' % schedule_id, 'billing', status,
-         promised_date, percent, billed_amount, billing_status])
+         schedule_no or 'BS-%03d' % schedule_id, kind, status,
+         promised_date, promised_qty, percent, fixed_amount,
+         billed_amount, billing_status])
 
 
 def make_return_shipment(conn, *, shipment_id=RETURN_SHIPMENT_ID,

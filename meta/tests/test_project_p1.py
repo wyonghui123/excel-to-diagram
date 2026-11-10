@@ -538,8 +538,10 @@ class TestProjectOverview:
         schedules = data['sales_order_schedules']
         assert schedules['total'] == 1
         assert schedules['items'][0]['id'] == 31
-        # billing_amount 是 computed 字段（不落库）：接口只透传 billing_percent
+        # billing_amount 是 computed 字段（不落库）：接口只透传 billing_percent /
+        # billing_fixed_amount（二选一），金额由调用方派生
         assert schedules['items'][0]['billing_percent'] == pytest.approx(100)
+        assert schedules['items'][0]['billing_fixed_amount'] is None
         assert 'billing_amount' not in schedules['items'][0]
 
     def test_unmounted_documents_excluded(self, overview):

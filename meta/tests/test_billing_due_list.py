@@ -56,6 +56,24 @@ def test_due_rows_include_amounts_and_exit_code(tmp_path):
     conn.close()
 
 
+def test_due_rows_prefer_fixed_amount(tmp_path):
+    """TBD-11 C：固定金额期次的期金额不按比例折算（与服务层口径一致）。"""
+    path, conn = _db_file(tmp_path)
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID,
+                        billing_percent=None, billing_fixed_amount=600)
+    conn.commit()
+
+    rows = query_due(str(path), AS_OF_DUE)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert float(row['period_amount']) == 600.0
+    assert float(row['remaining']) == 600.0
+    assert float(row['billing_fixed_amount']) == 600.0
+    assert row['billing_percent'] is None
+    conn.close()
+
+
 def test_excludes_full_cancelled_and_non_billable(tmp_path):
     path, conn = _db_file(tmp_path)
 

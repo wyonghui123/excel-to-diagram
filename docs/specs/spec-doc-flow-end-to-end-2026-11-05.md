@@ -290,9 +290,9 @@ attach 模式：`target_data={'id': txn_id, 'item': line_id, 'amount': 0, 'unit'
 - 前置：先落地服务行识别与服务确认单据（见 P2 断点 3），不在本规格实现。
 - 规则位：`sales_order_line_to_service_confirmation`，`pool=service_delivery`。
 
-### 5.9 服务确认 → 开票（预留）
+### 5.9 服务确认 → 开票（已实现，v248）
 
-- 规则位：`service_confirmation_to_invoice_line`，`pool=billing`；依赖开票对象先落地。
+- 规则位：`service_confirmation_to_invoice_line`，`pool=billing`；由 `v248__service_confirmation_invoice` 播种，生产端 action 为 `customer_invoice.create_from_service_confirmation`（`source_bo=sales_order_schedule`，`source_qty_field=promised_qty`）。
 
 ### 5.10 统一追溯读面（view 元模型，阶段 4 方案）
 

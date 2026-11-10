@@ -134,6 +134,43 @@ def create_from_schedule_handler(params: Dict[str, Any],
     return _ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))
 
 
+def create_from_service_confirmation_handler(params: Dict[str, Any],
+                                             context: Any = None
+                                             ) -> Dict[str, Any]:
+    """`customer_invoice.create_from_service_confirmation` 的处理器（TBD-11 A）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    schedule_ids = params.get('schedule_ids') or []
+    if not isinstance(schedule_ids, (list, tuple, set)):
+        schedule_ids = [schedule_ids]
+    lines = params.get('lines') or []
+    source_doc_id = params.get('source_doc_id')
+    if not schedule_ids and not lines and _blank(source_doc_id):
+        return _fail('缺少 schedule_ids / lines / source_doc_id',
+                     'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key) for key in HEADER_KEYS
+               if not _blank(params.get(key))}
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+    if schedule_ids:
+        payload['schedule_ids'] = schedule_ids
+    if isinstance(lines, list) and lines:
+        payload['lines'] = lines
+    if not _blank(source_doc_id):
+        payload['source_doc_id'] = source_doc_id
+
+    try:
+        data = _service().create_from_service_confirmation(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] create_from_service_confirmation '
+                'schedules=%s invoice=%s', schedule_ids or source_doc_id,
+                data.get('invoice_no'))
+    return _ok(data, '已生成销售发票 %s（草稿）' % data.get('invoice_no', ''))
+
+
 def list_due_schedules_handler(params: Dict[str, Any],
                                context: Any = None) -> Dict[str, Any]:
     """`customer_invoice.list_due_schedules` 处理器（只读）。"""

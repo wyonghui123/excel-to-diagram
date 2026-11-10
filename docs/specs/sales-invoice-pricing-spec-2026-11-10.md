@@ -612,7 +612,7 @@ M1（P0 金额与溯源）→ M2（P1 费用行）→ M3（P2 策略层/审批�
 | TBD-8 | 发票税/净额舍入**层级**：行级（逐行算完再求和）还是单据级（汇总后一次舍入）？ | FR-003 规则 1 | **本期固定行级**（与订单/引擎同口径，零回归）；单据级需新增「层级」配置位，属 TBD-9 的 profile 触发条件之一。触发信号：出现「按行舍入与按单舍入导致总税额差 ≥ 1 个最小单位、且客户合同要求按单据级」的实际单据 | 本期不做（行级） |
 | TBD-9 | `rounding_profile`（舍入档）何时建？最小 schema 是什么？ | FR-003 / §7.4.2 | **P2 触发式**：只有当「方向 + 精度 + 单位（MAU）+ 层级」四要素出现**同币种/同税制内多套并存**且无法用现有字典表达时才建；最小 schema 见 §11.2.5（含旧字段迁移要求，禁止双真源） | 已裁决（§11.2） |
 | TBD-10 | 是否支持 `Extended Precision`（扩展精度）与 `Minimum Accountable Unit`（MAU，现金舍入单位）？ | FR-003 规则 7 | **本期不做**。当前无计算引擎消费者（发票/订单均按 `decimal_places` 一次性舍入，无「记账精度 vs 现金支付精度」双精度场景）。触发信号：出现「发票/台账 2 位、实际收付按 0.05 进位」的币种法规要求（如 CHF/CAD 现金舍入）时，按 TBD-9 同批评估 | 本期不做 |
-| TBD-11 | 服务确认开票的接口契约与实施顺序（`create_from_service_confirmation` / 计划行固定金额）？ | §11.3（本 Spec 未覆盖的新增链路） | **本期不实施**。建议顺序 C（里程碑固定金额）→ A（服务确认 action）→ B（保持开票计划期次）；触发信号：出现需按 T&M 或里程碑计费的销售服务合同，且客户不接受把服务收入塞进 `billing` 期次 | 待排期 |
+| TBD-11 | 服务确认开票的接口契约与实施顺序（`create_from_service_confirmation` / 计划行固定金额）？ | §11.3（本 Spec 未覆盖的新增链路） | **已实施（A+C）**：缺口 C 里程碑固定金额 `sales_order_schedules.billing_fixed_amount`（v247，与 `billing_percent` 二选一，派生 `billing_amount` 固定金额优先）；缺口 A 服务确认开票 `customer_invoice.create_from_service_confirmation`（v248：仅 `schedule_kind='service'` 且 `status='completed'` 的期次可开票，行来源 `service_confirmation`、金额=承诺量×订单单价、doc_flow 规则 `service_confirmation_to_invoice_line`、来源互斥 CHECK 重建放行）；剩余 B（保持开票计划期次现状） | 已实施（B 保持现状） |
 
 ---
 
@@ -757,20 +757,20 @@ fields:
 | 计费方式 | Fusion 对标 | 本项目现状 | 缺口 |
 |---|---|---|---|
 | `fixed_price`（固定价） | Bill Only / Service Contracts | `sales_order_schedules(schedule_kind='billing')` → `create_from_schedule`（Wave B 已实现，精度/分摊见 §11.1） | ✅ 无 |
-| `milestone`（里程碑） | Service Contracts 里程碑计费 | `work_orders` `resolve` 只结算 SLA 里程碑并回写服务计划行 `completed`；服务计划行无固定金额字段 | ❌ **缺口②**：里程碑金额无承载（建议对 `sales_order_schedule` 增补 `fixed_amount`，或在 `billing` 期次上按金额而非比例开票） |
-| `time_and_material`（工时材料） | Project Billing | `time_entries.billable` 字段存在但**无开票消费者**；`service_confirmation` 来源在服务层 fail-closed | ❌ **缺口①**：无 `create_from_service_confirmation` 动作（主缺口） |
+| `milestone`（里程碑） | Service Contracts 里程碑计费 | `work_orders` `resolve` 只结算 SLA 里程碑并回写服务计划行 `completed`；计划行新增 `billing_fixed_amount`（v247，与 `billing_percent` 二选一，`billing_amount` 固定金额优先），发票 `create_from_schedule` 按固定金额取期次金额 | ✅ 已实施（缺口②闭环） |
+| `time_and_material`（工时材料） | Project Billing | `create_from_service_confirmation`（v248）：仅 `schedule_kind='service'` 且 `status='completed'` 的服务期次可开票；行来源 `service_confirmation` 携带 `schedule_id`，金额 = 确认量 × 订单单价，默认确认量 `min(promised_qty, 剩余可开票量)`，同期次跨行累计超额拦截；过账回写期次 `billed_amount` 与派生 `billing_status` | ✅ 已实施（缺口①闭环） |
 | 实物（goods） | Shipping → Invoice | `shipments` → `create_from_shipment` | ✅ 无 |
 
 #### 11.3.4 载体裁决
 
 | 方案 | 内容 | 判定 |
 |---|---|---|
-| **A** 服务确认开票 action | 新增 `create_from_service_confirmation`，事实源 = 已 `completed` 的服务计划行 + 可计费工时 / 里程碑结算；发票 `source_doc_type=service_confirmation`。**不新建单据表**（`service_confirmation` 在 `spec-doc-flow-single-fact-model-2026-11-05.md` §5.8/§5.9 已预留规则位与 pool，本期只补生产端 action） | ✅ 推荐，补 T&M 主缺口 |
+| **A** 服务确认开票 action | 新增 `create_from_service_confirmation`，事实源 = 已 `completed` 的服务计划行 + 可计费工时 / 里程碑结算；发票 `source_doc_type=service_confirmation`。**不新建单据表**（`service_confirmation` 在 `spec-doc-flow-single-fact-model-2026-11-05.md` §5.8/§5.9 已预留规则位与 pool，本期只补生产端 action） | ✅ **已实施（v248）** |
 | **B** 开票计划期次 | 服务收入也走 `schedule_kind='billing'` 期次 | ✅ 已实现，覆盖 `fixed_price`；不足以表达 T&M |
-| **C** 里程碑固定金额 | 服务计划行补 `fixed_amount`，里程碑结算后即可开票 | ✅ 改动最小，优先实施 |
+| **C** 里程碑固定金额 | 服务计划行补 `billing_fixed_amount`（v247），里程碑结算后即可开票；与 `billing_percent` 二选一，守卫 R-SCH-11/13/15/17 已适配 | ✅ 已实施（v247） |
 | **D** 复用采购收货单（R-RC-14 / PO_SERVICE） | 用 `receipts` 承载销售侧服务确认 | ❌ **拒绝**：买方语义 + 库存/退货耦合 + 无卖方头（见 §11.3.0） |
 
-**实施顺序（写入 TBD-11）**：C（改动最小）→ A（补 T&M 主缺口）→ B（保持现状）。
+**实施顺序（写入 TBD-11）**：C（改动最小，**✅ 已完成 v247**）→ A（**✅ 已完成 v248**）→ B（保持现状）。
 
 #### 11.3.5 Work Order 的角色（澄清，不作载体）
 

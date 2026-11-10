@@ -995,6 +995,47 @@ def test_create_from_schedule_defaults_to_full_period():
     assert Decimal(str(line['net_amount'])) == Decimal('1000')
 
 
+def test_create_from_schedule_uses_fixed_amount_period():
+    """TBD-11 C：里程碑固定金额期次按绝对值开票，不再按比例缩放。"""
+    conn = build_conn()
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID,
+                        billing_percent=None, billing_fixed_amount=600)
+
+    result = _from_schedule(conn)
+
+    assert result['amounts']['net_amount'] == 600.0
+    line = get_lines(conn, result['id'])[0]
+    assert Decimal(str(line['net_amount'])) == Decimal('600')
+    assert Decimal(str(line['billing_base_amount'])) == Decimal('1000')
+    # 行级比例仅作派生展示：600 / 1000 = 60%
+    assert Decimal(str(line['billing_percent'])) == Decimal('60')
+
+
+def test_plan_post_fixed_amount_marks_schedule_full():
+    conn = build_conn()
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID,
+                        billing_percent=None, billing_fixed_amount=600)
+
+    _posted_plan_invoice(conn)
+
+    schedule = _schedule_row(conn)
+    assert Decimal(str(schedule['billed_amount'])) == Decimal('600')
+    assert schedule['billing_status'] == 'full'
+
+
+def test_list_due_schedules_uses_fixed_amount():
+    conn = build_conn()
+    set_schedule_fields(conn, BILLING_SCHEDULE_ID,
+                        billing_percent=None, billing_fixed_amount=600)
+
+    result = _service(conn).list_due_schedules(as_of='2026-11-20')
+
+    assert [row['schedule_id'] for row in result['items']] == [
+        BILLING_SCHEDULE_ID]
+    assert result['items'][0]['period_amount'] == 600.0
+    assert result['items'][0]['remaining_amount'] == 600.0
+
+
 def test_create_from_schedule_keeps_price_diff_zero():
     conn = build_conn()
     result = _from_schedule(conn)
