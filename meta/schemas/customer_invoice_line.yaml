@@ -1,0 +1,724 @@
+# 销售发票行 (Customer Invoice Line) — S8 Wave A
+# 依据: docs/specs/s8-customer-invoice-wave-a/spec.md §3.2
+#       docs/specs/spec-sales-order-billing-object-model-2026-11-07.md §5 / §30.4
+#
+# 定位: 发票行，来源三选一（发货行 / 订单行 / 手工），由服务与守卫强制互斥。
+#       金额一律由服务层按数量与快照单价重算，前端只读。
+#
+# 服务层不变量:
+#   R-INV-3  来源互斥；Wave A 仅 shipment / sales_order / manual
+#   R-INV-4  开票量 <= 来源可开票量
+#   R-INV-5  quantity 行必须有来源；amount 行仅手工
+#   R-INV-8  非红字行数量/金额非负（DISCOUNT 行允许负数）
+
+id: customer_invoice_line
+name: 销售发票行
+table_name: customer_invoice_lines
+description: 销售发票行（来源：发货行 / 订单行 / 手工）
+display_name_field: id
+parent_object: customer_invoice
+
+hierarchy:
+  parent_field: invoice_id
+
+semantics:
+  meaning: 销售发票行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 发票行
+    - Invoice Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+org_scope:
+  mode: chain
+  via: invoice_id
+  host: customer_invoice
+  function: accounting
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: invoice_id
+    name: 销售发票
+    type: integer
+    db_column: invoice_id
+    required: true
+    description: 所属销售发票（父字段）
+    semantics:
+      meaning: 所属销售发票
+      display:
+        type: association
+        target_type: customer_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: customer_invoice
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 发票内行号（从 1 递增）
+    semantics:
+      meaning: 行号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: line_type_id
+    name: 行类型
+    type: integer
+    db_column: line_type_id
+    required: true
+    description: 行类型（type_definitions，scope_bo=customer_invoice + level=line）
+    semantics:
+      meaning: 发票行类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: customer_invoice
+          level: line
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: source_doc_type
+    name: 来源类型
+    type: string
+    db_column: source_doc_type
+    required: true
+    max_length: 32
+    description: 来源单据类型（Wave A：shipment / sales_order / manual；Wave B 增 billing_schedule）
+    enum_values:
+      - value: shipment
+        label: 发货单
+        color: primary
+        category: active
+        is_initial: true
+      - value: sales_order
+        label: 销售订单
+        color: info
+        category: active
+      - value: manual
+        label: 手工
+        color: info
+        category: active
+      - value: billing_schedule
+        label: 开票计划期次
+        color: warning
+        category: active
+    semantics:
+      meaning: 发票行来源类型
+      filterable: true
+      filter_type: enum
+      filter_label: 来源类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: source_doc_id
+    name: 来源单据
+    type: integer
+    db_column: source_doc_id
+    nullable: true
+    description: 来源单据头 id（只读副本）
+    semantics:
+      meaning: 来源单据头
+      data_category: code
+
+  - id: source_line_id
+    name: 来源行
+    type: integer
+    db_column: source_line_id
+    nullable: true
+    description: 来源单据行 id（只读副本）
+    semantics:
+      meaning: 来源单据行
+      data_category: code
+
+  - id: shipment_line_id
+    name: 发货行
+    type: integer
+    db_column: shipment_line_id
+    nullable: true
+    description: 发货行引用（与 schedule_id / order_line_id 互斥）
+    semantics:
+      meaning: 来源发货行
+      display:
+        type: association
+        target_type: shipment_line
+        display_field: id
+      filterable: true
+      filter_type: relation
+      filter_label: 发货行
+      filter_scope: local
+    ui:
+      widget: select
+      relation: shipment_line
+      multiple: false
+      hidden_in_form: true
+
+  - id: schedule_id
+    name: 开票计划行
+    type: integer
+    db_column: schedule_id
+    nullable: true
+    description: 开票计划行引用（Wave B 启用；Wave A 传入即拒绝）
+    semantics:
+      meaning: 来源开票计划行
+      display:
+        type: association
+        target_type: sales_order_schedule
+        display_field: schedule_no
+    ui:
+      widget: select
+      relation: sales_order_schedule
+      multiple: false
+      hidden_in_form: true
+
+  - id: order_line_id
+    name: 订单行
+    type: integer
+    db_column: order_line_id
+    nullable: true
+    description: 订单行引用（手工挑量或发货行反查）
+    semantics:
+      meaning: 来源订单行
+      display:
+        type: association
+        target_type: sales_order_line
+        display_field: line_no
+      filterable: true
+      filter_type: relation
+      filter_label: 订单行
+      filter_scope: local
+    ui:
+      widget: select
+      relation: sales_order_line
+      multiple: false
+      hidden_in_form: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 物料/服务（服务行可空；空时 description 必填）
+    semantics:
+      meaning: 物料/服务
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    required: true
+    max_length: 512
+    description: 开票描述（创建时快照）
+    semantics:
+      meaning: 开票描述
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: uom_id
+    name: 计量单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 计量单位（纯金额行取「项」类单位）
+    semantics:
+      meaning: 计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  - id: qty
+    name: 开票数量
+    type: number
+    db_column: qty
+    required: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 开票数量（非红字 quantity 行 > 0；纯金额行填 1）
+    semantics:
+      meaning: 开票数量
+    ui:
+      widget: number
+
+  - id: billing_basis
+    name: 开票依据
+    type: string
+    db_column: billing_basis
+    required: true
+    max_length: 16
+    default: quantity
+    description: 开票依据（quantity 按量 / percent 按比例 / amount 按金额）
+    enum_values:
+      - value: quantity
+        label: 按数量
+        color: primary
+        category: active
+        is_initial: true
+      - value: percent
+        label: 按比例
+        color: info
+        category: active
+      - value: amount
+        label: 按金额
+        color: info
+        category: active
+    semantics:
+      meaning: 开票依据
+      filterable: true
+      filter_type: enum
+      filter_label: 开票依据
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: unit_price
+    name: 单价
+    type: number
+    db_column: unit_price
+    required: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 6
+    description: 单价快照（amount 行由服务层反算）
+    semantics:
+      meaning: 开票单价
+    ui:
+      widget: number
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 不含税金额（= ROUND(qty × unit_price)）
+    semantics:
+      meaning: 行净额
+    ui:
+      widget: number
+      editable: false
+
+  - id: tax_code_id
+    name: 税码
+    type: integer
+    db_column: tax_code_id
+    required: true
+    description: 税码快照（来源行）
+    semantics:
+      meaning: 税码
+      display:
+        type: association
+        target_type: tax_code
+        display_field: name
+    ui:
+      widget: select
+      relation: tax_code
+      multiple: false
+
+  - id: tax_rate_percent
+    name: 税率(%)
+    type: number
+    db_column: tax_rate_percent
+    required: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 税率快照
+    semantics:
+      meaning: 税率
+    ui:
+      widget: number
+
+  - id: tax_amount
+    name: 税额
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 税额（= ROUND(net × rate / 100)）
+    semantics:
+      meaning: 行税额
+    ui:
+      widget: number
+      editable: false
+
+  - id: gross_amount
+    name: 价税合计
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 价税合计（= net + tax）
+    semantics:
+      meaning: 行价税合计
+    ui:
+      widget: number
+      editable: false
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 项目（来源行透传，会计事件维度）
+    semantics:
+      meaning: 项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 项目任务（来源行透传）
+    semantics:
+      meaning: 项目任务
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+      clearable: true
+
+  - id: billing_percent
+    name: 开票比例(%)
+    type: number
+    db_column: billing_percent
+    nullable: true
+    constraints:
+      - type: numeric_range
+        gt: 0
+        lte: 100
+        decimal_places: 4
+    description: 按期次开票时的本期比例（Wave B：相对 billing_base_amount；未传则按剩余金额收尾）
+    semantics:
+      meaning: 开票比例
+    ui:
+      widget: number
+
+  - id: billing_base_amount
+    name: 开票基数
+    type: number
+    db_column: billing_base_amount
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 按金额开票时的基数（Wave A 预留）
+    semantics:
+      meaning: 开票基数
+    ui:
+      widget: number
+
+  - id: price_source
+    name: 价格来源
+    type: string
+    db_column: price_source
+    required: true
+    max_length: 16
+    default: order
+    description: 价格来源（order 取订单行 / manual 手工录入）
+    enum_values:
+      - value: order
+        label: 订单价格
+        color: primary
+        category: active
+        is_initial: true
+      - value: manual
+        label: 手工价格
+        color: warning
+        category: active
+    semantics:
+      meaning: 价格来源
+    ui:
+      widget: select
+
+  - id: order_unit_price
+    name: 订单单价
+    type: number
+    db_column: order_unit_price
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 6
+    description: 改价前订单单价快照
+    semantics:
+      meaning: 订单单价快照
+    ui:
+      widget: number
+      editable: false
+
+  - id: price_change_reason
+    name: 改价原因
+    type: string
+    db_column: price_change_reason
+    nullable: true
+    max_length: 256
+    description: 改价原因
+    semantics:
+      meaning: 改价原因
+      data_category: text
+
+  - id: price_change_approved_by
+    name: 改价审批人
+    type: string
+    db_column: price_change_approved_by
+    nullable: true
+    max_length: 64
+    description: 改价审批人
+    semantics:
+      meaning: 改价审批人
+      data_category: text
+
+  - id: price_diff_amount
+    name: 改价差额
+    type: number
+    db_column: price_diff_amount
+    nullable: false
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: (本行单价 - 订单单价) × 数量，服务层派生
+    semantics:
+      meaning: 改价差额（订单价为基准）
+      data_category: amount
+      derived: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: original_invoice_line_id
+    name: 原发票行
+    type: integer
+    db_column: original_invoice_line_id
+    nullable: true
+    description: 红字行指向的原发票行
+    semantics:
+      meaning: 红冲原发票行
+      display:
+        type: association
+        target_type: customer_invoice_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: customer_invoice_line
+      multiple: false
+      hidden_in_form: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [invoice_id, line_no]
+    unique: true
+    name: uq_customer_invoice_line_no
+  - fields: [shipment_line_id]
+    name: idx_customer_invoice_line_shipment
+  - fields: [schedule_id]
+    name: idx_customer_invoice_line_schedule
+  - fields: [order_line_id]
+    name: idx_customer_invoice_line_order
+
+relations:
+  - id: customer_invoice_line_to_invoice
+    name: 所属发票
+    type: reference
+    target: customer_invoice
+    source_field: invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 所属销售发票引用
+  - id: customer_invoice_line_to_shipment_line
+    name: 发货行
+    type: reference
+    target: shipment_line
+    source_field: shipment_line_id
+    target_field: id
+    cardinality: N:1
+    description: 来源发货行引用（可空）
+  - id: customer_invoice_line_to_schedule
+    name: 开票计划行
+    type: reference
+    target: sales_order_schedule
+    source_field: schedule_id
+    target_field: id
+    cardinality: N:1
+    description: 来源开票计划行引用（Wave B，可空）
+  - id: customer_invoice_line_to_order_line
+    name: 订单行
+    type: reference
+    target: sales_order_line
+    source_field: order_line_id
+    target_field: id
+    cardinality: N:1
+    description: 来源订单行引用（可空）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 发票行
+    columns:
+      - field: line_no
+        width: 70
+      - field: line_type_id
+        width: 110
+      - field: source_doc_type
+        width: 100
+      - field: item_id
+        width: 140
+      - field: description
+        width: 220
+      - field: qty
+        width: 100
+      - field: uom_id
+        width: 90
+      - field: unit_price
+        width: 110
+      - field: net_amount
+        width: 110
+      - field: tax_amount
+        width: 100
+      - field: gross_amount
+        width: 120
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 发票行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, line_type_id]
+          - fields: [source_doc_type, item_id]
+          - fields: [description]
+      - title: 数量与金额
+        columns:
+          - fields: [qty, uom_id]
+          - fields: [unit_price, billing_basis]
+          - fields: [net_amount, tax_code_id]
+          - fields: [tax_rate_percent, tax_amount]
+          - fields: [gross_amount]
+      - title: 项目
+        columns:
+          - fields: [project_id, project_task_id]

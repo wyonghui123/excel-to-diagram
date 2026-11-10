@@ -280,7 +280,7 @@ fields:
     type: date
     db_column: promised_date
     required: true
-    description: 承诺日期（交货日 / 收款日 / 服务日，语义由 kind 限定）
+    description: 承诺日期（交货日 / 开票日 / 服务日，语义由 kind 限定）
     semantics:
       meaning: 对客户的承诺日期
       filterable: true
@@ -307,13 +307,13 @@ fields:
       widget: number
 
   - id: billing_percent
-    name: 收款比例(%)
+    name: 开票比例(%)
     type: number
     db_column: billing_percent
     required: false
     nullable: true
     description: |
-      仅 schedule_kind = billing 使用。该期应收金额占所属行**分摊后净额**的比例。
+      仅 schedule_kind = billing 使用。该期开票金额占所属行**分摊后净额**的比例。
       不落金额，金额 = billing_percent / 100 × 行净额（派生展示）。
     constraints:
       - type: numeric_range
@@ -321,13 +321,13 @@ fields:
         lte: 100
         decimal_places: 2
     semantics:
-      meaning: 收款计划比例（0 < p ≤ 100）
+      meaning: 开票计划比例（0 < p ≤ 100）
       filterable: false
     ui:
       widget: number
 
   - id: billing_amount
-    name: 收款金额(派生)
+    name: 开票金额(派生)
     type: number
     db_column: null
     computed: true
@@ -336,7 +336,7 @@ fields:
       billing_percent / 100 × 所属订单行分摊后净额（sales_order_line.net_amount）。
       不落库；billing_percent 为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
     semantics:
-      meaning: 收款计划派生金额
+      meaning: 开票计划派生金额
       virtual: true
     computation:
       type: formula
@@ -344,6 +344,63 @@ fields:
     ui:
       widget: number
       editable: false
+
+  # S8 Wave B：期次已开票金额（plan 分支唯一累计真源）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §5.4
+  - id: billed_amount
+    name: 已开票金额
+    type: number
+    db_column: billed_amount
+    required: true
+    default: 0
+    description: 该期次已过账发票累计净额，过账/红冲由服务层派生，只读
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 期次已开票累计金额（plan 分支唯一真源）
+      derived: true
+      readonly: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: billing_status
+    name: 开票状态
+    type: string
+    db_column: billing_status
+    required: true
+    default: none
+    max_length: 16
+    description: 期次开票进度，由 billed_amount 与期金额对比派生，只读
+    enum_values:
+      - value: none
+        label: 未开票
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分开票
+        color: warning
+        category: active
+      - value: full
+        label: 已开满
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 期次开票进度（none/partial/full/cancelled）
+      filterable: true
+      filter_type: enum
+      filter_label: 开票状态
+      filter_scope: local
+      derived: true
+      readonly: true
+    ui:
+      widget: select
 
   - id: milestone_code
     name: 里程碑码
@@ -575,3 +632,16 @@ ui_view_config:
         columns:
           - fields: [plant_location_id]
           - fields: [milestone_code, service_visit_no]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    # 业务 Action：开票计划期次详情页「按期次开票」，
+    # 派发 customer_invoice.create_from_schedule（Wave B spec §7）
+    actions:
+      - id: create_invoice
+        label: 按期次开票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_create
+        action: customer_invoice.create_from_schedule
+        visible_when: "schedule_kind == 'billing' and status in ['planned', 'confirmed']"

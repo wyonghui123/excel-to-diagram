@@ -2597,6 +2597,7 @@ def get_state_transitions(object_type, obj_id):
             'confirmMessage': ui_hints.confirm_message if ui_hints else '',
             'highlight': ui_hints.highlight if ui_hints else False,
             'hidden': ui_hints.hidden if ui_hints else False,
+            'inputFields': list(getattr(ui_hints, 'input_fields', None) or []),
         }
 
         if rule.condition:
@@ -2651,6 +2652,7 @@ def get_state_transitions_by_string_id(object_type, obj_id):
             'confirmMessage': ui_hints.confirm_message if ui_hints else '',
             'highlight': ui_hints.highlight if ui_hints else False,
             'hidden': ui_hints.hidden if ui_hints else False,
+            'inputFields': list(getattr(ui_hints, 'input_fields', None) or []),
         }
 
         if rule.condition:

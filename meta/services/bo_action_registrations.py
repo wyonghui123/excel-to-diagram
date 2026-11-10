@@ -84,6 +84,11 @@ def register_all_bo_actions(registry=None):
         sales_order_recalc_header_discount_handler,
     )
 
+    # Wave C T38: 开票计划补跑（订单确认已自动生成，此 Action 供历史单补建）
+    from meta.services.billing_plan_actions import (
+        generate_billing_plan_handler,
+    )
+
     # M3 变更申请: 审批决策 + 生效（docs/superpowers/specs/2026-10-29-m3-change-request §5.3/§6.3）
     from meta.services.change_request_decision import (
         change_request_approve_handler,
@@ -116,6 +121,22 @@ def register_all_bo_actions(registry=None):
         post_handler as receipt_post_handler,
         reverse_handler as receipt_reverse_handler,
         cancel_handler as receipt_cancel_handler,
+    )
+
+    # S8 Wave A: 销售发票由发货单生成（spec-s8-customer-invoice-wave-a §13）
+    from meta.services.customer_invoice_actions import (
+        create_from_shipment_handler as customer_invoice_from_shipment_handler,
+        create_from_schedule_handler as customer_invoice_from_schedule_handler,
+        create_credit_from_invoice_handler as customer_invoice_credit_handler,
+        create_credit_from_return_shipment_handler as
+        customer_invoice_return_credit_handler,
+        create_credit_on_account_handler as
+        customer_invoice_on_account_handler,
+        create_debit_memo_handler as customer_invoice_debit_memo_handler,
+        list_due_schedules_handler as customer_invoice_due_list_handler,
+        submit_handler as customer_invoice_submit_handler,
+        post_handler as customer_invoice_post_handler,
+        reverse_handler as customer_invoice_reverse_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -626,6 +647,41 @@ def register_all_bo_actions(registry=None):
                 'data': {'type': 'object'},
                 'message': {'type': 'string'},
             }
+        },
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 22b: 开票计划补跑 (sales_order) ====================
+    registry.register(
+        'sales_order.generate_billing_plan',
+        generate_billing_plan_handler,
+        description='为已确认订单补生成 billing 开票计划期次（幂等，不重算已开票金额）',
+        object_type='sales_order',
+        category='business',
+        permission_required='sales_order:sales_order_update',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'order_id': {'type': 'integer'},
+                'triggered_by': {'type': 'string'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'data': {
+                    'type': 'object',
+                    'properties': {
+                        'order_id': {'type': 'integer'},
+                        'created': {'type': 'array',
+                                    'items': {'type': 'integer'}},
+                        'skipped': {'type': 'boolean'},
+                    },
+                },
+                'message': {'type': 'string'},
+            },
         },
         requires_auth=True,
         idempotent=True,
@@ -1374,6 +1430,262 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_project_structure_baseline_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 39: 销售发票（S8 Wave A / B2） ====================
+    _customer_invoice_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'shipment_id': {'type': 'integer'},
+            'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            'amounts': {'type': 'object'},
+        },
+    }
+    registry.register(
+        'customer_invoice.create_from_shipment',
+        customer_invoice_from_shipment_handler,
+        description='由已发运/已签收发货单生成草稿销售发票（可按行部分开票）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.create_from_schedule',
+        customer_invoice_from_schedule_handler,
+        description='按开票计划期次生成草稿销售发票（支持一期分次 / 多期合并）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'schedule_ids': {'type': 'array',
+                                 'items': {'type': 'integer'}},
+                'source_doc_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.list_due_schedules',
+        customer_invoice_due_list_handler,
+        description='查询到期开票计划期次（只读，不产生写操作）',
+        object_type='customer_invoice',
+        category='query',
+        permission_required='customer_invoice:customer_invoice_view',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'as_of': {'type': 'string'},
+                'order_id': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'items': {'type': 'array', 'items': {'type': 'object'}},
+                'total': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+                'as_of': {'type': 'string'},
+            },
+        },
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.create_credit_from_invoice',
+        customer_invoice_credit_handler,
+        description='按已过账发票生成独立贷项草稿（引用原单，可按行/数量/金额部分冲销）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'source_invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave C C4: on-account 贷项（spec-s8-customer-invoice-wave-c §6.4.2）
+    registry.register(
+        'customer_invoice.create_credit_on_account',
+        customer_invoice_on_account_handler,
+        description='生成不引用来源单据的 on-account 贷项草稿（负数行）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave D D2: 手工借项通知单（spec-s8-customer-invoice-wave-d §6.2）
+    registry.register(
+        'customer_invoice.create_debit_memo',
+        customer_invoice_debit_memo_handler,
+        description='生成手工借项通知单草稿（正数行，订单行只读引用）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_debit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'source_invoice_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave C C3: 退货发货单 → 贷项通知单（spec-s8-customer-invoice-wave-c §6.3）
+    registry.register(
+        'customer_invoice.create_credit_from_return_shipment',
+        customer_invoice_return_credit_handler,
+        description='退货发货单追溯原发票行生成贷项草稿（FIFO 分配，负数行）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'return_shipment_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'return_line_ids': {'type': 'array',
+                                     'items': {'type': 'integer'}},
+                'source_invoice_id': {'type': 'integer'},
+                'invoice_line_ids': {'type': 'array',
+                                     'items': {'type': 'integer'}},
+                'auto_allocate': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.submit',
+        customer_invoice_submit_handler,
+        description='提交销售发票（draft → submitted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_submit',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.post',
+        customer_invoice_post_handler,
+        description='过账销售发票（submitted → posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'posting_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.reverse',
+        customer_invoice_reverse_handler,
+        description='红冲已过账销售发票（posted → 红字 posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_reverse',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'reversal_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
         requires_auth=True,
         idempotent=True,
     )

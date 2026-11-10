@@ -311,6 +311,9 @@ class StateTransitionUIHints:
     icon: str = ""
     confirm_message: str = ""
     highlight: bool = False
+    #: 迁移前需要用户补录的字段（如红冲原因）；每项为
+    #: {field, label, type, required, placeholder}
+    input_fields: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -1162,6 +1165,10 @@ class MetaObject:
     # [Rule Convergence M2 2026-11-07] 审批对象注册声明（table / amount_fields）；
     # 空 = 该对象不参与审批注册（新增对象只改 YAML）
     approval: Dict[str, Any] = field(default_factory=dict)
+
+    # [S8 Wave D FR-8 2026-11-10] 行来源策略：document_role → 允许的行来源种类；
+    # 空 = 不校验（向后兼容）；内核按角色 fail-closed 读取
+    line_source_policy: Dict[str, List[str]] = field(default_factory=dict)
 
     # ── 新增：级联选择配置 ──
     cascade_select: Optional[List[Dict[str, Any]]] = None

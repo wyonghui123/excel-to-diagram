@@ -54,6 +54,8 @@ _PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'document_t
 _PRICE_LINE_FIELDS = ('item_id', 'qty', 'uom_id')
 # FR-014：抬头取消 → 订单行 / delivery 计划行级联
 _ORDER_STATUS_CANCELLED = 'cancelled'
+# Wave C T38：抬头确认 → 自动生成 billing 开票计划期次
+_ORDER_STATUS_CONFIRMED = 'confirmed'
 
 
 class SalesOrderGuardInterceptor(Interceptor):
@@ -160,6 +162,7 @@ class SalesOrderGuardInterceptor(Interceptor):
         if object_id == ORDER_OBJECT:
             self._after_order_write(context)
             self._after_order_cancel(context)
+            self._after_order_confirm(context)
             return
         if object_id != LINE_OBJECT:
             return
@@ -251,6 +254,34 @@ class SalesOrderGuardInterceptor(Interceptor):
         if result and context.result and context.result.data is not None:
             context.result.data['fulfillment_status'] = \
                 result.get('fulfillment_status')
+
+    def _after_order_confirm(self, context: 'ActionContext') -> None:
+        """Wave C T38：draft → confirmed 同事务生成 billing 开票计划期次。
+
+        生成失败抛 ValidationFailedError，整个确认动作回滚（spec §6.2）。
+        """
+        if context.action != 'crud_update':
+            return
+        params = dict(context.params or {})
+        if str(params.get('status') or '') != _ORDER_STATUS_CONFIRMED:
+            return
+        old_status = (context.old_data or {}).get('status')
+        if str(old_status or '') == _ORDER_STATUS_CONFIRMED:
+            return
+
+        from meta.services.billing_plan_service import (
+            BillingPlanError,
+            BillingPlanService,
+        )
+        try:
+            created = BillingPlanService(
+                context.data_source).generate_for_order(
+                    context.object_id, triggered_by='confirm')
+        except BillingPlanError as e:
+            self._raise_validation(e)
+            return
+        if created and context.result and context.result.data is not None:
+            context.result.data['billing_plan_created'] = created
 
     @staticmethod
     def _schedule_scope(context: 'ActionContext') -> tuple:

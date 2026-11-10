@@ -1212,6 +1212,27 @@ def parse_addability(data: Dict[str, Any]) -> Optional[AddabilityConfig]:
     return None
 
 
+def parse_line_source_policy(object_id: str,
+                             raw: Any) -> Dict[str, List[str]]:
+    """[S8 Wave D FR-8] 解析行来源策略：document_role → 允许来源种类列表。
+
+    空 = 未声明（内核不校验）；结构非法直接拒绝加载，避免静默失效。
+    """
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "[FR-8] {0}: line_source_policy 必须是映射".format(object_id))
+    policy: Dict[str, List[str]] = {}
+    for role, kinds in raw.items():
+        if not isinstance(kinds, (list, tuple)):
+            raise ValueError(
+                "[FR-8] {0}: line_source_policy[{1!r}] 必须是列表".format(
+                    object_id, role))
+        policy[str(role)] = [str(item) for item in kinds if str(item)]
+    return policy
+
+
 def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
     """解析删除策略配置"""
     if not data or "deletion_policy" not in data:
@@ -2007,6 +2028,7 @@ def parse_state_transition_ui_hints(data: Dict[str, Any]) -> Optional["StateTran
         icon=uh.get("icon", ""),
         confirm_message=uh.get("confirm_message", ""),
         highlight=uh.get("highlight", False),
+        input_fields=uh.get("input_fields", []) or [],
     )
 
 
@@ -2796,6 +2818,9 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         numbering=data.get("numbering") or {},
         # [Rule Convergence M2 2026-11-07] 审批对象注册声明
         approval=data.get("approval") or {},
+        # [S8 Wave D FR-8 2026-11-10] 行来源策略（document_role → 允许来源种类）
+        line_source_policy=parse_line_source_policy(
+            data.get("id") or "", data.get("line_source_policy")),
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)

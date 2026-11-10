@@ -581,6 +581,12 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
     bo_framework.register_interceptor(ShipmentGuardInterceptor())
+    # [BILLING S8-A 2026-11-09] 销售发票守卫（P51）：抬头创建取号、submit/post/
+    #   cancel/reverse 迁移委托 customer_invoice_service（期次 / billed 回写 /
+    #   doc_flow / billing_status 派生）、行来源与金额校验、期次严格只读（R-INV-22）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.customer_invoice_guard_interceptor import CustomerInvoiceGuardInterceptor
+    bo_framework.register_interceptor(CustomerInvoiceGuardInterceptor())
     # [RECEIPT 2026-11-01] 收货单守卫（P52）：抬头创建归一化与取号、状态迁移委托
     #   receipt_service（计划行 received_qty / rejected_qty 回写、分配拆分、履约派生）、
     #   行冗余列校验回填、posted 后冻结（R-RC-0~R-RC-18）。

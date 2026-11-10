@@ -1,0 +1,1087 @@
+# 销售发票头 (Customer Invoice) — S8 Wave A
+# 依据: docs/specs/s8-customer-invoice-wave-a/spec.md §3.1
+#       docs/specs/spec-sales-order-billing-object-model-2026-11-07.md §4 / §30.3
+#
+# 定位: 独立事实单据（不复用 sales_order_schedules）。Wave A 只支持
+#       发货开票（shipment）与手工开票（sales_order / manual）；
+#       计划开票（plan）fail-closed，留 Wave B。
+#
+# 服务层不变量（YAML 表达不了的，由 customer_invoice_service 强制）:
+#   R-INV-3  行来源互斥：shipment_line_id / schedule_id / order_line_id 三选一（或全空=manual）
+#   R-INV-4  已开票量 <= 来源数量（发货行 qty / 订单行 qty）
+#   R-INV-7  头金额 = Σ 行金额
+#   R-INV-9  invoice_no 唯一且取号后不可改
+#   R-INV-11 过账时来源必须已发运 / 已签收
+#   R-INV-18 币种必须等于来源订单币种
+#   R-INV-22 posted 后单据只读，期次不可改
+#   R-INV-23 存在有效核销时禁止红冲（AR 表缺失按 0 处理）
+#   R-INV-24 红字单据不生成期次
+
+id: customer_invoice
+name: 销售发票
+table_name: customer_invoices
+description: 销售发票头（行见 customer_invoice_line，期次见 customer_invoice_schedule）
+display_name_field: invoice_no
+aspects: [audit_aspect, document_type_aspect]
+
+semantics:
+  meaning: 销售发票
+  category: business_document
+  business_key: [invoice_no]
+  aliases:
+    - 销售发票
+    - 客户发票
+    - Customer Invoice
+    - Sales Invoice
+
+deletion_policy:
+  # 事实单据：仅 draft 可删（守卫强制），删除时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - customer_invoice_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: direct
+  field: org_id
+  function: accounting
+  write_check: true
+
+numbering:
+  no_field: invoice_no
+  date_field: invoice_date
+  type_table: type_definitions
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: invoice_no
+    name: 发票编号
+    type: string
+    db_column: invoice_no
+    required: true
+    max_length: 30
+    description: 销售发票编号（按单据类型绑定的编号序列取号，生成后不可修改）
+    semantics:
+      meaning: 销售发票业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: document_type_id
+    name: 单据类型
+    type: integer
+    db_column: document_type_id
+    required: true
+    description: 单据类型（type_definitions，scope_bo=customer_invoice + level=header）
+    semantics:
+      meaning: 销售发票单据类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 单据类型
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: customer_invoice
+          level: header
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: document_category
+    name: 单据类别
+    type: string
+    db_column: document_category
+    required: true
+    max_length: 20
+    default: invoice
+    description: 单据类别（由单据类型派生，生成后不可修改）
+    enum_values:
+      - value: invoice
+        label: 标准发票
+        color: primary
+        category: active
+        is_initial: true
+      - value: credit_memo
+        label: 贷项凭证
+        color: warning
+        category: active
+      - value: debit_memo
+        label: 借项通知单
+        color: info
+        category: active
+      - value: cancellation
+        label: 取消单据
+        color: info
+        category: inactive
+    semantics:
+      meaning: 区分标准发票 / 贷项凭证 / 借项通知单 / 取消单据
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 单据类别
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: direction
+    name: 单据方向
+    type: integer
+    db_column: direction
+    required: true
+    default: 1
+    description: 单据方向（1 正向 / -1 逆向，由单据类型派生，生成后不可修改）
+    semantics:
+      meaning: 单据方向，驱动行金额符号与红字口径
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 单据方向
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: invoice_date
+    name: 发票日期
+    type: date
+    db_column: invoice_date
+    required: true
+    description: 发票日期（编号日期段基准）
+    semantics:
+      meaning: 发票业务日期
+      filterable: true
+      filter_type: date
+      filter_label: 发票日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: posting_date
+    name: 过账日期
+    type: date
+    db_column: posting_date
+    nullable: true
+    description: 会计日期（过账时为空则取发票日期）
+    semantics:
+      meaning: 会计过账日期
+      filterable: true
+      filter_type: date
+      filter_label: 过账日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 销售发票状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: primary
+        category: active
+      - value: posted
+        label: 已过账
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+      - value: reversed
+        label: 已红冲
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 销售发票状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: customer_account_id
+    name: 售达方
+    type: integer
+    db_column: customer_account_id
+    required: true
+    description: 售达方往来单位（创建时快照自订单）
+    semantics:
+      meaning: 售达方
+      display:
+        type: association
+        target_type: party
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 售达方
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{name}"
+    ui:
+      widget: value_help
+      relation: party
+      multiple: false
+
+  - id: bill_to_account_id
+    name: 收票方
+    type: integer
+    db_column: bill_to_account_id
+    nullable: true
+    description: 收票方往来单位；空 = 同售达方
+    semantics:
+      meaning: 收票方
+      display:
+        type: association
+        target_type: party
+        display_field: name
+        placeholder: "同售达方"
+    ui:
+      widget: value_help
+      relation: party
+      multiple: false
+      clearable: true
+
+  - id: payer_account_id
+    name: 付款方
+    type: integer
+    db_column: payer_account_id
+    nullable: true
+    description: 付款方往来单位；空 = 同售达方
+    semantics:
+      meaning: 付款方
+      display:
+        type: association
+        target_type: party
+        display_field: name
+        placeholder: "同售达方"
+    ui:
+      widget: value_help
+      relation: party
+      multiple: false
+      clearable: true
+
+  - id: bill_to_address_text
+    name: 开票地址快照
+    type: string
+    db_column: bill_to_address_text
+    nullable: true
+    max_length: 512
+    description: 开票地址文本快照（创建时固化，不随主数据变更）
+    semantics:
+      meaning: 开票地址快照
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: tax_registration_no
+    name: 购方税号
+    type: string
+    db_column: tax_registration_no
+    nullable: true
+    max_length: 64
+    description: 购方税号快照
+    semantics:
+      meaning: 购方税号快照
+      data_category: code
+
+  - id: currency_id
+    name: 币种
+    type: integer
+    db_column: currency_id
+    required: true
+    description: 币种（必须等于来源订单币种，R-INV-18）
+    semantics:
+      meaning: 结算币种
+      display:
+        type: association
+        target_type: currency
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 币种
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+
+  - id: exchange_rate
+    name: 汇率
+    type: number
+    db_column: exchange_rate
+    nullable: true
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 8
+    description: 本币折算汇率快照
+    semantics:
+      meaning: 汇率快照
+    ui:
+      widget: number
+
+  - id: exchange_rate_type
+    name: 汇率类型
+    type: string
+    db_column: exchange_rate_type
+    nullable: true
+    max_length: 20
+    description: 汇率类型快照
+    semantics:
+      meaning: 汇率类型
+      data_category: code
+
+  - id: exchange_rate_date
+    name: 汇率日期
+    type: date
+    db_column: exchange_rate_date
+    nullable: true
+    description: 汇率日期快照
+    semantics:
+      meaning: 汇率日期
+    ui:
+      widget: date
+
+  - id: payment_term_id
+    name: 付款条件
+    type: integer
+    db_column: payment_term_id
+    nullable: true
+    description: 付款条件快照；空 = 即期（过账时生成 1 期 100%）
+    semantics:
+      meaning: 付款条件
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
+  - id: incoterm_code
+    name: 贸易术语
+    type: string
+    db_column: incoterm_code
+    nullable: true
+    max_length: 16
+    description: 贸易术语快照
+    semantics:
+      meaning: 贸易术语
+      data_category: code
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 不含税金额（服务层汇总，前端只读）
+    semantics:
+      meaning: 发票净额
+    ui:
+      widget: number
+      editable: false
+
+  - id: tax_amount
+    name: 税额
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 税额（服务层汇总，前端只读）
+    semantics:
+      meaning: 发票税额
+    ui:
+      widget: number
+      editable: false
+
+  - id: gross_amount
+    name: 价税合计
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 价税合计（服务层汇总，前端只读）
+    semantics:
+      meaning: 发票价税合计
+    ui:
+      widget: number
+      editable: false
+
+  - id: org_id
+    name: 财务组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 财务归属组织
+    semantics:
+      meaning: 财务归属组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 财务组织
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: sales_org_id
+    name: 销售组织
+    type: integer
+    db_column: sales_org_id
+    nullable: true
+    description: 销售组织（数据范围用，不参与取价）
+    semantics:
+      meaning: 销售组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（单项目时填；多项目以行级为准）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+      filterable: true
+      filter_type: relation
+      filter_label: 所属项目
+      filter_scope: local
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
+  - id: reversal_of_invoice_id
+    name: 原发票
+    type: integer
+    db_column: reversal_of_invoice_id
+    nullable: true
+    description: 红字发票指向的原发票
+    semantics:
+      meaning: 红冲原发票
+      display:
+        type: association
+        target_type: customer_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: customer_invoice
+      multiple: false
+      hidden_in_form: true
+
+  - id: reversal_reason
+    name: 红冲原因
+    type: string
+    db_column: reversal_reason
+    nullable: true
+    max_length: 256
+    description: 红冲 / 作废原因（posted 后红冲必填）
+    semantics:
+      meaning: 红冲原因
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 500
+    description: 备注
+    semantics:
+      meaning: 销售发票备注
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+state_field_policies:
+  draft:
+    readonly:
+      - direction
+  submitted:
+    readonly:
+      - invoice_no
+      - document_type_id
+      - document_category
+      - direction
+      - customer_account_id
+      - bill_to_account_id
+      - payer_account_id
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - org_id
+      - sales_org_id
+  posted:
+    readonly:
+      - invoice_no
+      - document_type_id
+      - document_category
+      - direction
+      - invoice_date
+      - posting_date
+      - customer_account_id
+      - bill_to_account_id
+      - payer_account_id
+      - bill_to_address_text
+      - tax_registration_no
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - payment_term_id
+      - incoterm_code
+      - net_amount
+      - tax_amount
+      - gross_amount
+      - org_id
+      - sales_org_id
+      - project_id
+  reversed:
+    readonly:
+      - invoice_no
+      - document_type_id
+      - document_category
+      - direction
+      - invoice_date
+      - posting_date
+      - customer_account_id
+      - bill_to_account_id
+      - payer_account_id
+      - bill_to_address_text
+      - tax_registration_no
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - payment_term_id
+      - incoterm_code
+      - net_amount
+      - tax_amount
+      - gross_amount
+      - org_id
+      - sales_org_id
+      - project_id
+      - reversal_of_invoice_id
+      - reversal_reason
+  cancelled:
+    readonly:
+      - invoice_no
+      - document_type_id
+      - document_category
+      - direction
+      - invoice_date
+      - posting_date
+      - customer_account_id
+      - bill_to_account_id
+      - payer_account_id
+      - bill_to_address_text
+      - tax_registration_no
+      - currency_id
+      - exchange_rate
+      - exchange_rate_type
+      - exchange_rate_date
+      - payment_term_id
+      - incoterm_code
+      - net_amount
+      - tax_amount
+      - gross_amount
+      - org_id
+      - sales_org_id
+      - project_id
+
+# 状态机：提交 / 过账 / 取消 / 红冲均由 customer_invoice_guard_interceptor
+# 委托 customer_invoice_service 执行（跨表副作用唯一写入口）。
+rules:
+  - id: submit_customer_invoice
+    name: 提交发票
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后发票内容将锁定，确定提交吗？"
+
+  - id: post_customer_invoice
+    name: 过账
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: posted
+    triggers: [before_update]
+    ui_hints:
+      label: 过账
+      icon: check_circle
+      highlight: true
+      confirm_message: "过账将按付款条件生成应收期次、回写订单/发货行开票进度，且不可撤销（只能红冲），确定过账吗？"
+
+  - id: cancel_customer_invoice
+    name: 取消发票
+    type: state_transition
+    state_field: status
+    from_states: [draft, submitted]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后发票作废，确定取消吗？"
+
+  - id: reverse_customer_invoice
+    name: 红冲发票
+    type: state_transition
+    state_field: status
+    from_states: [posted]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 红冲
+      icon: undo
+      confirm_message: "红冲将生成一张红字发票（贷项）并回退开票进度，原发票不可再修改、不可再次红冲；确定红冲吗？"
+      input_fields:
+        - field: reversal_reason
+          label: 红冲原因
+          type: textarea
+          required: true
+          placeholder: 请填写红冲原因
+
+# 逆向声明（平台统一逆向引擎）：红冲 = 建红字发票 + 回滚开票进度 +
+# 取消原期次 + 写反向事实边 + 重算订单开票状态，由 reversal_orchestrator
+# 按固定 7 步执行（自持事务，调用方只预取号）。
+doc_effect:
+  posting:
+    event_key: "customer_invoice:{id}:post"
+    direction_field: direction
+  faces:
+    - id: billed_release
+      primitive: invoice_billed_release
+      args:
+        doc_id: "{reversal.doc.id}"
+    - id: schedule_cancel
+      primitive: invoice_schedule_cancel
+      args:
+        doc_id: "{id}"
+    - id: doc_flow
+      primitive: invoice_doc_flow_red_edge
+      args:
+        doc_id: "{reversal.doc.id}"
+  projections:
+    - id: billing_status
+      primitive: recompute_customer_billing_status
+      args:
+        doc_id: "{reversal.doc.id}"
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: customer_invoice_red_letter
+    write_audit_fields:
+      updated_at: "{now}"
+
+# [S8 Wave D FR-8] 行来源策略：document_role → 允许的行来源种类
+# 内核在插入行时按头表角色校验；声明了策略但角色缺失 → 默认拒绝（fail-closed）
+line_source_policy:
+  invoice: [shipment_line, order_line, plan, manual]
+  credit_memo: [invoice_line, return_line, manual]
+  debit_memo: [manual, order_line_readonly]
+
+indexes:
+  - fields: [invoice_no]
+    unique: true
+    name: uq_customer_invoice_no
+  - fields: [status, invoice_date]
+    name: idx_customer_invoice_status_date
+  - fields: [customer_account_id, status]
+    name: idx_customer_invoice_customer_status
+  - fields: [document_type_id]
+    name: idx_customer_invoice_document_type
+  - fields: [reversal_of_invoice_id]
+    name: idx_customer_invoice_reversal_of
+  - fields: [project_id]
+    name: idx_customer_invoice_project
+
+relations:
+  - id: customer_invoice_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用
+  - id: customer_invoice_to_customer
+    name: 售达方
+    type: reference
+    target: party
+    source_field: customer_account_id
+    target_field: id
+    cardinality: N:1
+    description: 售达方往来单位引用
+  - id: customer_invoice_to_currency
+    name: 币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 币种引用
+  - id: customer_invoice_to_org
+    name: 财务组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 财务归属组织引用
+  - id: customer_invoice_to_reversal
+    name: 红冲原单
+    type: reference
+    target: customer_invoice
+    source_field: reversal_of_invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 红字发票指向原发票（可空）
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 销售发票
+    columns:
+      - field: invoice_no
+        width: 170
+        sortable: true
+      - field: invoice_date
+        width: 130
+        sortable: true
+      - field: customer_account_id
+        width: 180
+        filterable: true
+        filter_type: select
+      - field: currency_id
+        width: 110
+      - field: net_amount
+        width: 120
+      - field: tax_amount
+        width: 110
+      - field: gross_amount
+        width: 130
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: reversal_of_invoice_id
+        width: 150
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: invoice_no
+      order: desc
+    actions:
+      - id: create
+        label: 新建销售发票
+        icon: plus
+        type: primary
+        permission: customer_invoice:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 销售发票信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [invoice_no, document_type_id]
+          - fields: [invoice_date, posting_date]
+          - fields: [status, customer_account_id]
+      - title: 收票与付款
+        columns:
+          - fields: [bill_to_account_id, payer_account_id]
+          - fields: [payment_term_id, incoterm_code]
+          - fields: [bill_to_address_text]
+          - fields: [tax_registration_no]
+      - title: 金额
+        columns:
+          - fields: [currency_id, exchange_rate]
+          - fields: [net_amount, tax_amount]
+          - fields: [gross_amount]
+      - title: 组织与项目
+        columns:
+          - fields: [org_id, sales_org_id]
+          - fields: [project_id]
+      - title: 备注
+        columns:
+          - fields: [remark]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    # 业务 Action（B5/B6）：按已过账原发票生成独立贷项草稿；打印详情页
+    actions:
+      - id: create_credit
+        label: 创建贷项
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_credit_memo
+        action: customer_invoice.create_credit_from_invoice
+      # [S8 Wave C C4] 无原票贷项（on-account）：不引用任何来源行，行由用户手工填写
+      - id: create_credit_on_account
+        label: 创建无票贷项
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_credit_memo
+        action: customer_invoice.create_credit_on_account
+      # [S8 Wave D D2] 手工借项通知单：正数金额，订单行只读引用（不消耗开票额度）
+      - id: create_debit_memo
+        label: 创建借项通知单
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_debit_memo
+        action: customer_invoice.create_debit_memo
+      - id: print
+        label: 打印
+        icon: print
+        variant: secondary
+        permission: customer_invoice:customer_invoice_print
+    facets:
+      - title: 基本信息
+        id: customer_invoice_basic
+        type: fieldGroup
+        fields:
+          - invoice_no
+          - document_type_id
+          - invoice_date
+          - posting_date
+          - status
+          - customer_account_id
+          - bill_to_account_id
+          - payer_account_id
+      - title: 金额与付款
+        id: customer_invoice_amount
+        type: fieldGroup
+        fields:
+          - currency_id
+          - exchange_rate
+          - net_amount
+          - tax_amount
+          - gross_amount
+          - payment_term_id
+          - incoterm_code
+      - title: 系统信息
+        id: customer_invoice_system
+        type: fieldGroup
+        fields:
+          - org_id
+          - sales_org_id
+          - project_id
+          - reversal_of_invoice_id
+          - reversal_reason
+          - remark
+          - created_at
+          - updated_at
+  child_sections:
+    - child_object: customer_invoice_line
+      title: 发票行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+    - child_object: customer_invoice_schedule
+      title: 应收期次
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false

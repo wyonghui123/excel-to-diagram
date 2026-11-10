@@ -198,6 +198,70 @@ def test_billing_qty_not_allowed(monkeypatch):
     assert _rule(exc) == 'BILLING_QTY_NOT_ALLOWED'
 
 
+# ── R-SCH-17：已开票期次只读 ──────────────────────────────────────────────
+
+BILLING_SCHEDULE = {
+    'id': 202, 'order_id': 10, 'line_id': 100, 'schedule_no': 10,
+    'schedule_kind': 'billing', 'promised_date': '2026-11-15',
+    'promised_qty': None, 'plant_location_id': None,
+    'milestone_code': None, 'service_visit_no': None,
+    'status': 'confirmed', 'billing_percent': 30, 'billed_amount': 300,
+}
+
+
+def _billing_ds(**over):
+    schedules = dict(SCHEDULES)
+    schedule = dict(BILLING_SCHEDULE)
+    schedule.update(over)
+    schedules[schedule['id']] = schedule
+    return _FakeDS(orders=ORDERS, lines=LINES, schedules=schedules)
+
+
+def _billing_update(**over):
+    return _update(dict(BILLING_SCHEDULE), **over)
+
+
+def test_billed_period_percent_frozen():
+    with pytest.raises(SalesOrderGuardError) as exc:
+        SalesOrderGuardService(_billing_ds()).validate_schedule_write(
+            _billing_update(billing_percent=40),
+            old_data=dict(BILLING_SCHEDULE), is_create=False)
+    assert _rule(exc) == 'BILLING_SCHEDULE_IN_USE'
+    assert exc.value.field_name == 'billing_percent'
+
+
+def test_billed_period_date_frozen():
+    with pytest.raises(SalesOrderGuardError) as exc:
+        SalesOrderGuardService(_billing_ds()).validate_schedule_write(
+            _billing_update(promised_date='2026-12-01'),
+            old_data=dict(BILLING_SCHEDULE), is_create=False)
+    assert _rule(exc) == 'BILLING_SCHEDULE_IN_USE'
+    assert exc.value.field_name == 'promised_date'
+
+
+def test_billed_period_cannot_cancel():
+    with pytest.raises(SalesOrderGuardError) as exc:
+        SalesOrderGuardService(_billing_ds()).validate_schedule_write(
+            _billing_update(status='cancelled'),
+            old_data=dict(BILLING_SCHEDULE), is_create=False)
+    assert _rule(exc) == 'BILLING_SCHEDULE_IN_USE'
+    assert exc.value.field_name == 'status'
+
+
+def test_unbilled_period_percent_editable():
+    SalesOrderGuardService(_billing_ds(billed_amount=0, status='planned')) \
+        .validate_schedule_write(
+            _billing_update(billing_percent=40, status='planned'),
+            old_data=dict(BILLING_SCHEDULE, billed_amount=0,
+                          status='planned'), is_create=False)
+
+
+def test_billed_period_create_still_allowed():
+    SalesOrderGuardService(_billing_ds()).validate_schedule_write(
+        _create(schedule_kind='billing', promised_qty=None,
+                plant_location_id=None, billing_percent=50))
+
+
 def test_delivery_qty_invalid():
     """R-SCH-3：delivery 承诺量必填且 > 0。"""
     with pytest.raises(SalesOrderGuardError) as exc:

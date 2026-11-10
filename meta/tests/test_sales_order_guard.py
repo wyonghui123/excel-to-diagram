@@ -30,7 +30,9 @@ class _FakeDS:
 
     def __init__(self, types=None, orders=None, lines=None,
                  org_functions=None, refs=None, items=None,
-                 addresses=None, divisions=None, raise_on_query=False):
+                 addresses=None, divisions=None, raise_on_query=False,
+                 invoice_ref_lines=None, billing_schedules=None,
+                 billing_billed=None):
         self.types = types or {}
         self.orders = orders or {}
         self.lines = lines or {}
@@ -40,6 +42,10 @@ class _FakeDS:
         self.addresses = addresses or {}
         self.divisions = divisions or {}
         self.raise_on_query = raise_on_query
+        # R-INV-18：被发票引用的订单行 / 已有 billing 期次 / 期次已开票金额
+        self.invoice_ref_lines = invoice_ref_lines or set()
+        self.billing_schedules = billing_schedules or set()
+        self.billing_billed = billing_billed or {}
         # B7：直连 UPDATE 记录（freeze_line_address_text 用）
         self.executed = []
         self.rowcount = 1
@@ -112,6 +118,15 @@ class _FakeDS:
             return [row] if row else []
         if 'FROM org_functions' in sql:
             return [{'ok': 1}] if (p[0], p[1]) in self.org_functions else []
+        # R-INV-18b：订单行发票引用（order_line_id 或 schedule 所属行）
+        if 'FROM customer_invoice_lines cil' in sql:
+            return [{'hit': 1}] if str(p[0]) in self.invoice_ref_lines else []
+        # R-INV-18d：期次累计开票金额
+        if 'SUM(billed_amount)' in sql:
+            return [{'billed': self.billing_billed.get(str(p[0]), 0.0)}]
+        # R-INV-18c：是否已有 billing 期次
+        if 'FROM sales_order_schedules' in sql:
+            return [{'ok': 1}] if str(p[0]) in self.billing_schedules else []
         if 'COUNT(*) AS cnt' in sql:
             table = sql.split('FROM ', 1)[1].split(' WHERE', 1)[0].strip()
             return [{'cnt': self.refs.get(table, {}).get(p[0], 0)}]
@@ -221,6 +236,31 @@ class TestOrderWrite:
             SalesOrderGuardService(_ds()).validate_order_write(
                 {'document_type_id': 101, 'sales_org_id': 318}, is_create=True)
         assert e.value.rule == 'document_type_scope'
+
+    # D46：关闭前置 —— 只阻断 partial
+    def _close_order(self, billing_status):
+        ds = _ds()
+        ds.orders = {12: dict(ORDERS[12], billing_status=billing_status)}
+        return SalesOrderGuardService(ds).validate_order_write(
+            {'id': 12, 'status': 'closed'}, old_data=dict(ORDERS[12]),
+            is_create=False)
+
+    def test_guard_close_blocked_when_billing_partial(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            self._close_order('partial')
+        assert e.value.rule == 'ORDER_BILLING_INCOMPLETE'
+        assert e.value.field_name == 'billing_status'
+
+    def test_guard_close_allowed_when_billing_full(self):
+        self._close_order('full')
+
+    def test_guard_close_allowed_when_billing_none(self, monkeypatch):
+        messages = []
+        monkeypatch.setattr(
+            'meta.services.sales_order_guard_service.logger.info',
+            lambda msg, *args: messages.append(msg % args if args else msg))
+        self._close_order('none')
+        assert any('尚未开票' in m for m in messages)
 
     def test_sales_org_requires_sales_function(self):
         with pytest.raises(SalesOrderGuardError) as e:
@@ -587,6 +627,98 @@ class TestServiceLine:
     def test_defaults_empty_for_goods(self):
         assert SalesOrderGuardService(_ds()).service_line_defaults(
             {'item_id': 2}) == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R-INV-18：billing_relevance 受控字段（Wave B）
+# ─────────────────────────────────────────────────────────────────────────────
+
+PLAN_LINE = {**SERVICE_LINE, 'id': 100,
+             'billing_relevance': 'delivery', 'billing_method': 'milestone'}
+
+
+class TestBillingRelevance:
+
+    def test_create_plan_requires_milestone_method(self):
+        data = {**PLAN_LINE, 'id': None, 'billing_relevance': 'plan',
+                'billing_method': 'fixed_price'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                data, is_create=True)
+        assert e.value.rule == 'BILLING_PLAN_REQUIRED'
+        assert e.value.field_name == 'billing_method'
+
+    def test_create_plan_ok_without_schedule(self):
+        data = {**PLAN_LINE, 'id': None, 'billing_relevance': 'plan'}
+        SalesOrderGuardService(_ds()).validate_line_write(data, is_create=True)
+
+    def test_update_plan_requires_existing_schedule(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'plan'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                data, old_data=dict(PLAN_LINE), is_create=False)
+        assert e.value.rule == 'BILLING_PLAN_REQUIRED'
+        assert e.value.field_name == 'billing_relevance'
+
+    def test_update_plan_ok_with_schedule(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'plan'}
+        SalesOrderGuardService(_ds(billing_schedules={'100'})) \
+            .validate_line_write(data, old_data=dict(PLAN_LINE), is_create=False)
+
+    def test_guard_plan_fields_locked_after_schedule(self):
+        """D40：期次生成后行级计划字段冻结。"""
+        data = {**PLAN_LINE, 'billing_period_count': 12}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds(billing_schedules={'100'})) \
+                .validate_line_write(
+                    data, old_data={**PLAN_LINE, 'billing_period_count': 6},
+                    is_create=False)
+        assert e.value.rule == 'ORDER_BILLING_PLAN_LOCKED'
+        assert e.value.field_name == 'billing_period_count'
+
+    def test_plan_fields_editable_before_schedule(self):
+        """D40：草稿且无期次时计划字段可改。"""
+        data = {**PLAN_LINE, 'billing_period_count': 12}
+        SalesOrderGuardService(_ds()).validate_line_write(
+            data, old_data={**PLAN_LINE, 'billing_period_count': 6},
+            is_create=False)
+
+    def test_relevance_frozen_after_submit(self):
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds())._validate_billing_relevance(
+                {'billing_relevance': 'plan'},
+                {'id': 200, 'billing_relevance': 'delivery'},
+                False, {'status': 'confirmed'})
+        assert e.value.rule == 'BILLING_RELEVANCE_LOCKED'
+
+    def test_relevance_frozen_when_invoiced(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'plan'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds(invoice_ref_lines={'100'})) \
+                .validate_line_write(data, old_data=dict(PLAN_LINE),
+                                     is_create=False)
+        assert e.value.rule == 'BILLING_RELEVANCE_LOCKED'
+
+    def test_invalid_relevance_rejected(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'sometimes'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds()).validate_line_write(
+                data, old_data=dict(PLAN_LINE), is_create=False)
+        assert e.value.rule == 'BILLING_RELEVANCE_LOCKED'
+
+    def test_plan_to_delivery_blocked_when_billed(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'delivery'}
+        old = {**PLAN_LINE, 'billing_relevance': 'plan'}
+        with pytest.raises(SalesOrderGuardError) as e:
+            SalesOrderGuardService(_ds(billing_billed={'100': 300})) \
+                .validate_line_write(data, old_data=old, is_create=False)
+        assert e.value.rule == 'BILLING_PLAN_IN_USE'
+
+    def test_plan_to_delivery_ok_when_unbilled(self):
+        data = {**PLAN_LINE, 'billing_relevance': 'delivery'}
+        old = {**PLAN_LINE, 'billing_relevance': 'plan'}
+        SalesOrderGuardService(_ds(billing_billed={'100': 0})) \
+            .validate_line_write(data, old_data=old, is_create=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
