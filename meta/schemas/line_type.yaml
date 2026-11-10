@@ -122,6 +122,12 @@ fields:
       - value: text
         label: 文本行
         color: info
+      - value: freight
+        label: 运费行
+        color: warning
+      - value: misc
+        label: 杂费行
+        color: default
     semantics:
       meaning: 行类型的性质分类
       filterable: true

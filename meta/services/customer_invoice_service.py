@@ -27,6 +27,12 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
+from meta.core.rounding import normalize_decimals, round_amount
+from meta.services.invoice_pricing_adapter import (
+    resolve_billing_pricing_mode,
+    validate_pricing_mode,
+)
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'customer_invoices'
@@ -126,6 +132,10 @@ RETURN_DOC_FLOW_RULE_ID = 'return_shipment_line_to_credit_memo'
 #: 不得用于比例比较；比例比较请使用 PERCENT_TAIL_TOLERANCE。
 EPSILON = Decimal('0.0001')
 
+#: 金额舍入精度回退值（币种缺失/查询失败时）。唯一真源仍是
+#: currencies.decimal_places，经 meta.core.rounding.round_amount 消费。
+DEFAULT_DECIMALS = 2
+
 #: 比例合计容差（单位：%，2 位小数）。仅用于比例合计/尾差判断，
 #: 不得用于金额比较；金额比较请使用 EPSILON。
 PERCENT_TAIL_TOLERANCE = Decimal('0.01')
@@ -143,6 +153,8 @@ HEADER_FIELDS = (
     'exchange_rate', 'exchange_rate_type', 'exchange_rate_date',
     'payment_term_id', 'incoterm_code', 'net_amount', 'tax_amount',
     'gross_amount', 'org_id', 'sales_org_id', 'project_id',
+    'billing_pricing_mode', 'pricing_date', 'rounding_diff',
+    'header_discount_amount', 'header_surcharge_amount',
     'reversal_of_invoice_id', 'reversal_reason', 'remark',
     'created_at', 'updated_at',
 )
@@ -938,8 +950,21 @@ class CustomerInvoiceService:
             row['invoice_no'] = self._allocate_number(
                 row['invoice_date'], row['document_type_id'])
 
-        for field in ('net_amount', 'tax_amount', 'gross_amount'):
+        for field in ('net_amount', 'tax_amount', 'gross_amount',
+                      'rounding_diff', 'header_discount_amount',
+                      'header_surcharge_amount'):
             row[field] = 0
+        # 定价模式：调用方显式指定（红冲沿用原票快照）优先；未指定时按
+        # 「组织 + 发票类型」解析控制参数（类型级 / 组织级，spec FR-005）。
+        # 解析与校验统一走 invoice_pricing_adapter，服务内不写模式字面量分支。
+        row['billing_pricing_mode'] = validate_pricing_mode(
+            row.get('billing_pricing_mode')
+            or resolve_billing_pricing_mode(
+                self.ds,
+                document_type_id=row.get('document_type_id'),
+                org_id=row.get('org_id')))
+        if _blank(row.get('pricing_date')):
+            row['pricing_date'] = row.get('invoice_date')
         for field in ('bill_to_account_id', 'payer_account_id',
                       'bill_to_address_text', 'tax_registration_no',
                       'exchange_rate', 'exchange_rate_type',
@@ -962,6 +987,8 @@ class CustomerInvoiceService:
         """
         row = dict(existing or {})
         row.update({k: v for k, v in dict(payload or {}).items() if k != 'id'})
+        # 金额口径统一按抬头币种精度（currencies.decimal_places）舍入
+        decimals = self._currency_decimals((invoice or {}).get('currency_id'))
 
         # R-INV-21：贷项行身份字段生成即锁定；草稿期同样不得改键
         if self._is_red(invoice or {}):
@@ -1012,11 +1039,11 @@ class CustomerInvoiceService:
                     not _blank(existing.get('schedule_id')):
                 line = dict(existing)
                 line['line_no'] = row.get('line_no') or existing.get('line_no')
-                return self._finalize_line(line)
+                return self._finalize_line(line, decimals=decimals)
             line = self._build_line_from_schedule(
                 schedule, order_line, row.get('billing_percent'))
             line['line_no'] = row.get('line_no')
-            return self._finalize_line(line)
+            return self._finalize_line(line, decimals=decimals)
 
         extra_billed = Decimal('0')
         if existing is not None:
@@ -1033,7 +1060,7 @@ class CustomerInvoiceService:
             line['line_no'] = row.get('line_no')
             line = self._apply_price_override(
                 line, payload or {}, existing)
-            return self._finalize_line(line)
+            return self._finalize_line(line, decimals=decimals)
         if not _blank(order_line_id):
             order_line = self._require_order_line(order_line_id)
             self._assert_relevance(order_line)
@@ -1061,7 +1088,7 @@ class CustomerInvoiceService:
             line['line_no'] = row.get('line_no')
             line = self._apply_price_override(
                 line, payload or {}, existing)
-            return self._finalize_line(line)
+            return self._finalize_line(line, decimals=decimals)
 
         # 手工金额行
         source_doc_type = row.get('source_doc_type') or SOURCE_MANUAL
@@ -1070,7 +1097,8 @@ class CustomerInvoiceService:
                 '不支持的来源类型 %s' % source_doc_type,
                 field_name='source_doc_type',
                 rule='INVOICE_SOURCE_MISMATCH')
-        return self._finalize_line(self._build_manual_line(row))
+        return self._finalize_line(self._build_manual_line(row),
+                                   decimals=decimals)
 
     def _assert_credit_line_locked(self, existing: Optional[Dict[str, Any]],
                                    row: Dict[str, Any],
@@ -1154,14 +1182,19 @@ class CustomerInvoiceService:
                 approved = (existing or {}).get('price_change_approved_by')
 
         changed = abs(price - order_price) > EPSILON
-        if changed and _blank(reason):
+        reason_code = payload.get('price_override_reason_code')
+        if _blank(reason_code):
+            reason_code = (existing or {}).get('price_override_reason_code')
+        if changed and _blank(reason) and _blank(reason_code):
             raise CustomerInvoiceError(
-                '改价必须填写改价原因', field_name='price_change_reason',
+                '改价必须填写改价原因（原因代码或原因说明）',
+                field_name='price_change_reason',
                 rule='INVOICE_PRICE_REASON_REQUIRED')
         line['unit_price'] = price
         line['price_source'] = 'manual' if changed else 'order'
         line['price_change_reason'] = reason if changed else None
         line['price_change_approved_by'] = approved if changed else None
+        line['price_override_reason_code'] = reason_code if changed else None
         return line
 
     def recalc(self, invoice_id: Any) -> Dict[str, Any]:
@@ -1919,6 +1952,8 @@ class CustomerInvoiceService:
                 field_name='qty', rule='INVOICE_QTY_EXCEEDED')
 
         unit_price = self._pick(order_line, 'unit_price', default=0)
+        # 金额基数取订单行净额快照（含抬头分摊），按本次发货数量比例拆分
+        basis = self._order_line_basis(order_line, qty_decimal)
         line = {
             'line_no': None,
             'line_type_id': self._default_type_id(DEFAULT_LINE_TYPE_CODE, 'line'),
@@ -1936,7 +1971,9 @@ class CustomerInvoiceService:
             'qty': qty_decimal,
             'billing_basis': 'quantity',
             'unit_price': _to_decimal(unit_price, 'unit_price'),
-            'net_amount': Decimal('0'),
+            'net_amount': basis['net_amount'],
+            'header_discount_amount': basis['header_discount_amount'],
+            'header_surcharge_amount': basis['header_surcharge_amount'],
             'tax_code_id': order_line.get('tax_code_id'),
             'tax_rate_percent': _to_decimal(
                 order_line.get('tax_rate_percent'), 'tax_rate_percent'),
@@ -1957,6 +1994,8 @@ class CustomerInvoiceService:
     def _build_line_from_order_line(self, order_line: Dict[str, Any],
                                     qty: Any) -> Dict[str, Any]:
         unit_price = self._pick(order_line, 'unit_price', default=0)
+        # 金额基数取订单行净额快照（含抬头分摊），部分开票按数量比例拆分
+        basis = self._order_line_basis(order_line, qty)
         return {
             'line_no': None,
             'line_type_id': self._default_type_id(DEFAULT_LINE_TYPE_CODE, 'line'),
@@ -1974,7 +2013,9 @@ class CustomerInvoiceService:
             'qty': _to_decimal(qty),
             'billing_basis': 'quantity',
             'unit_price': _to_decimal(unit_price, 'unit_price'),
-            'net_amount': Decimal('0'),
+            'net_amount': basis['net_amount'],
+            'header_discount_amount': basis['header_discount_amount'],
+            'header_surcharge_amount': basis['header_surcharge_amount'],
             'tax_code_id': order_line.get('tax_code_id'),
             'tax_rate_percent': _to_decimal(
                 order_line.get('tax_rate_percent'), 'tax_rate_percent'),
@@ -2113,27 +2154,103 @@ class CustomerInvoiceService:
                 rule='INVOICE_LINE_ITEM_REQUIRED')
         return line
 
-    def _finalize_line(self, line: Dict[str, Any],
-                       validate: bool = True) -> Dict[str, Any]:
+    def _currency_decimals(self, currency_id: Any) -> int:
+        """读币种精度（唯一真源 currencies.decimal_places），异常回退 2 位。"""
+        if _blank(currency_id):
+            return DEFAULT_DECIMALS
+        try:
+            rows = self.ds.query(
+                'SELECT decimal_places FROM currencies WHERE id = ?',
+                [currency_id])
+        except Exception as exc:  # 表缺失/连接异常不得阻断开票
+            logger.warning('[customer_invoice] 读取币种精度失败 currency=%s: %s',
+                           currency_id, exc)
+            return DEFAULT_DECIMALS
+        if not rows:
+            return DEFAULT_DECIMALS
+        return normalize_decimals(rows[0].get('decimal_places'))
+
+    @staticmethod
+    def _source_net(line: Dict[str, Any]) -> Optional[Decimal]:
+        """来源净额快照：订单 / 价目表取价行以已落净额为准。
+
+        判定口径 = price_source ∈ {order, pricing} + 净额快照非零 + 非按金额开票。
+        改价行（price_source=manual）与手工行必须由 qty × unit_price 重建，
+        否则覆盖后的单价会被来源净额快照掩盖。
+        """
+        if str(line.get('price_source') or '') not in ('order', 'pricing'):
+            return None
+        if str(line.get('billing_basis') or '') == 'amount':
+            return None
+        snapshot = _to_decimal(line.get('net_amount'))
+        if abs(snapshot) <= EPSILON:
+            return None
+        return snapshot
+
+    @staticmethod
+    def _rebuild_net(line: Dict[str, Any]) -> Decimal:
+        """按行算术重建净额（qty × unit_price + 抬头分摊），用于舍入差对账。"""
+        qty = _to_decimal(line.get('qty'))
+        unit_price = _to_decimal(line.get('unit_price'))
+        return (qty * unit_price
+                + _to_decimal(line.get('header_discount_amount'))
+                + _to_decimal(line.get('header_surcharge_amount')))
+
+    def _finalize_line(self, line: Dict[str, Any], validate: bool = True,
+                       decimals: Optional[int] = None) -> Dict[str, Any]:
+        """行金额定稿：来源净额优先，统一按币种精度舍入。
+
+        来源净额优先的原因：订单行 net_amount 已含抬头折扣/附加费分摊，
+        用 qty × unit_price 重建会把分摊额与部分开票比例抹平（P0 金额错误）。
+        """
+        decimals = normalize_decimals(
+            DEFAULT_DECIMALS if decimals is None else decimals)
         qty = _to_decimal(line.get('qty'))
         unit_price = _to_decimal(line.get('unit_price'))
         rate = _to_decimal(line.get('tax_rate_percent'))
-        net = _round(qty * unit_price, 4)
+        net = self._source_net(line)
+        if net is None:
+            net = self._rebuild_net(line)
+        net = round_amount(net, decimals)
         if validate:
             line = self._apply_line_type_rules(line, net)
-        tax = _round(net * rate / Decimal('100'), 4)
+        tax = round_amount(net * rate / Decimal('100'), decimals)
         line['qty'] = qty
-        line['unit_price'] = _to_decimal(unit_price)
+        line['unit_price'] = unit_price
         line['net_amount'] = net
         line['tax_amount'] = tax
-        line['gross_amount'] = _round(net + tax, 4)
+        line['gross_amount'] = round_amount(net + tax, decimals)
         base_price = line.get('order_unit_price')
         if base_price is None:
             line['price_diff_amount'] = Decimal('0')
         else:
-            line['price_diff_amount'] = _round(
-                (unit_price - _to_decimal(base_price)) * qty, 4)
+            line['price_diff_amount'] = round_amount(
+                (unit_price - _to_decimal(base_price)) * qty, decimals)
         return line
+
+    def _order_line_basis(self, order_line: Dict[str, Any],
+                          qty: Any) -> Dict[str, Decimal]:
+        """订单行 → 本次开票行的净额基数（按数量比例拆抬头分摊）。
+
+        全额开票直接取订单行快照；部分开票按 `本次数量 / 订单数量` 比例拆分，
+        保证多张发票的分摊额合计不重复也不遗漏。
+        """
+        qty_decimal = _to_decimal(qty)
+        order_qty = _to_decimal(order_line.get('qty'))
+        ratio = Decimal('1')
+        if order_qty > EPSILON and qty_decimal < order_qty - EPSILON:
+            ratio = qty_decimal / order_qty
+        # 过渡精度 10 位，落库前由 _finalize_line 按币种精度归一
+        return {
+            'net_amount': _round(
+                _to_decimal(order_line.get('net_amount')) * ratio, 10),
+            'header_discount_amount': _round(
+                _to_decimal(order_line.get('header_discount_amount')) * ratio,
+                10),
+            'header_surcharge_amount': _round(
+                _to_decimal(order_line.get('header_surcharge_amount')) * ratio,
+                10),
+        }
 
     def _normalize_credit_requests(self,
                                    payload: Dict[str, Any],
@@ -2251,9 +2368,8 @@ class CustomerInvoiceService:
             if qty is not None:
                 credit_qty = _round(qty, 4)
                 credit_net = _round(credit_qty * abs(unit_price), 4)
-                if (abs(credit_net) <= EPSILON and abs(orig_net) > EPSILON
-                        and abs(orig_qty) > EPSILON):
-                    # 原行净额含折扣/价差时不按单价重算，退回比例口径
+                if abs(orig_net) > EPSILON and abs(orig_qty) > EPSILON:
+                    # 原行净额已含抬头折扣/附加费分摊，按数量比例冲销更贴近来源事实
                     credit_net = _round(
                         abs(orig_net) * credit_qty / abs(orig_qty), 4)
             else:
@@ -2268,13 +2384,19 @@ class CustomerInvoiceService:
             credit_tax = _round(abs(orig_tax) * ratio, 4)
             credit_diff = _round(abs(orig_diff) * ratio, 4)
             credit_gross = _round(credit_net + credit_tax, 4)
-            if credit_qty > EPSILON:
-                # 保证 recalc 的 qty × unit_price 复算结果与贷项净额一致
-                unit_price = _round(credit_net / credit_qty, 10)
+            # 单价保持原行基准价（净额快照已按比例拆分），
+            # 使 qty × unit_price + 分摊 = 贷项净额 的恒等式继续成立
             if not _blank(percent) and abs(orig_net) > EPSILON:
                 percent = _round(abs(_to_decimal(percent)) * ratio, 4)
             if not _blank(base_amount) and abs(orig_net) > EPSILON:
                 base_amount = _round(abs(_to_decimal(base_amount)) * ratio, 4)
+
+        # 抬头分摊按冲销比例同步冲回（全额 = 1），保证红字行净额构成可追溯
+        alloc_ratio = Decimal('1') if full else ratio
+        line_discount = _round(
+            _to_decimal(line.get('header_discount_amount')) * alloc_ratio, 10)
+        line_surcharge = _round(
+            _to_decimal(line.get('header_surcharge_amount')) * alloc_ratio, 10)
 
         row = {
             'line_no': line_no,
@@ -2305,6 +2427,12 @@ class CustomerInvoiceService:
             'price_change_reason': line.get('price_change_reason'),
             'price_change_approved_by': line.get('price_change_approved_by'),
             'price_diff_amount': sign * credit_diff,
+            'header_discount_amount': sign * line_discount,
+            'header_surcharge_amount': sign * line_surcharge,
+            'calc_result_id': line.get('calc_result_id'),
+            'source_rate_record_id': line.get('source_rate_record_id'),
+            'price_trace': line.get('price_trace'),
+            'price_override_reason_code': line.get('price_override_reason_code'),
             'original_invoice_line_id': line.get('id'),
         }
         return row
@@ -2460,7 +2588,9 @@ class CustomerInvoiceService:
             'price_diff_amount': Decimal('0'),
             'original_invoice_line_id': None,
         }
-        line = self._finalize_line(line, validate=True)
+        line = self._finalize_line(
+            line, validate=True,
+            decimals=self._currency_decimals(header.get('currency_id')))
         if _to_decimal(line['net_amount']) <= 0:
             raise CustomerInvoiceError(
                 '借项行金额必须为正', field_name='net_amount',
@@ -2539,25 +2669,36 @@ class CustomerInvoiceService:
         return int(getattr(cursor, 'lastrowid', 0) or 0)
 
     def _recalc_impl(self, invoice_id: Any) -> Dict[str, float]:
+        header = self._require_header(invoice_id)
+        decimals = self._currency_decimals(header.get('currency_id'))
         lines = self._load_invoice_lines(invoice_id)
         net = tax = gross = Decimal('0')
+        rounding_diff = Decimal('0')
         for line in lines:
             # 重算仅做算术归一；行类型/负数校验在写入时已执行
             # （on-account 贷项行天然为负且无来源键）
-            finalized = self._finalize_line(line, validate=False)
+            finalized = self._finalize_line(line, validate=False,
+                                            decimals=decimals)
             net += finalized['net_amount']
             tax += finalized['tax_amount']
             gross += finalized['gross_amount']
+            # 抬头舍入差 = Σ(算术重建净额 - 净额快照)，为分摊/比例拆分留痕
+            rounding_diff += (self._rebuild_net(line)
+                              - finalized['net_amount'])
             self.ds.execute(
                 'UPDATE %s SET net_amount = ?, tax_amount = ?, gross_amount = ?, '
                 'updated_at = ? WHERE id = ?' % LINE_TABLE,
                 [float(finalized['net_amount']), float(finalized['tax_amount']),
                  float(finalized['gross_amount']), _now(), line['id']])
-        net, tax, gross = _round(net), _round(tax), _round(gross)
+        net = round_amount(net, decimals)
+        tax = round_amount(tax, decimals)
+        gross = round_amount(gross, decimals)
+        rounding_diff = _round(rounding_diff, 4)
         self.ds.execute(
             'UPDATE %s SET net_amount = ?, tax_amount = ?, gross_amount = ?, '
-            'updated_at = ? WHERE id = ?' % HEADER_TABLE,
-            [float(net), float(tax), float(gross), _now(), invoice_id])
+            'rounding_diff = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+            [float(net), float(tax), float(gross), float(rounding_diff),
+             _now(), invoice_id])
         return {'net_amount': float(net), 'tax_amount': float(tax),
                 'gross_amount': float(gross)}
 

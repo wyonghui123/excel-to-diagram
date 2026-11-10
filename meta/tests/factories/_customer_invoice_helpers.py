@@ -84,6 +84,12 @@ CREATE TABLE IF NOT EXISTS number_sequences (
     created_at DATETIME
 );
 
+CREATE TABLE IF NOT EXISTS currencies (
+    id INTEGER PRIMARY KEY,
+    code VARCHAR(3),
+    decimal_places INTEGER DEFAULT 2
+);
+
 CREATE TABLE IF NOT EXISTS sales_orders (
     id INTEGER PRIMARY KEY,
     order_no VARCHAR(30),
@@ -125,7 +131,9 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
     billing_relevance VARCHAR(16) NOT NULL DEFAULT 'delivery',
     billed_qty NUMERIC(18,4) NOT NULL DEFAULT 0,
     billed_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
-    net_amount NUMERIC(18,4) NOT NULL DEFAULT 0
+    net_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
+    header_discount_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
+    header_surcharge_amount NUMERIC(18,4) NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sales_order_schedules (
@@ -295,6 +303,15 @@ def build_file(path, **kwargs) -> sqlite3.Connection:
     return conn
 
 
+def _add_columns(conn, table, columns) -> None:
+    """按 (列名, DDL 片段) 补列；已存在则跳过（对齐迁移的幂等口径）。"""
+    existing = {row[1] for row in conn.execute(
+        'PRAGMA table_info("%s")' % table)}
+    for name, ddl in columns:
+        if name not in existing:
+            conn.execute('ALTER TABLE %s ADD COLUMN %s %s' % (table, name, ddl))
+
+
 def _init(conn, *, shipment_qty: float = 40.0,
           with_shipment: bool = True,
           with_payment_term: bool = True,
@@ -308,6 +325,13 @@ def _init(conn, *, shipment_qty: float = 40.0,
     conn.execute(
         'ALTER TABLE customer_invoices ADD COLUMN direction INTEGER '
         'NOT NULL DEFAULT 1')
+    # v244：价格与金额溯源列（真实库由迁移添加，夹具在此补列）
+    from meta.migrations import v244__customer_invoice_pricing_trace as v244
+    _add_columns(conn, 'customer_invoices', v244.NEW_HEADER_COLUMNS)
+    _add_columns(conn, 'customer_invoice_lines', v244.NEW_LINE_COLUMNS)
+    conn.execute(
+        'INSERT INTO currencies (id, code, decimal_places) VALUES (?, ?, ?)',
+        [CURRENCY_ID, 'CNY', 2])
     _seed_types(conn)
     _seed_sequences(conn)
     _seed_order(conn)
@@ -437,6 +461,23 @@ def set_header_amounts(conn, invoice_id, *, net=None, tax=None, gross=None):
         'tax_amount = COALESCE(?, tax_amount), '
         'gross_amount = COALESCE(?, gross_amount) WHERE id = ?',
         [net, tax, gross, invoice_id])
+
+
+def set_order_line_amounts(conn, line_id=ORDER_LINE_DELIVERY, *, net=None,
+                           discount=None, surcharge=None):
+    """覆盖订单行金额快照（模拟已含抬头折扣/附加费分摊的订单行）。"""
+    conn.execute(
+        'UPDATE sales_order_lines SET net_amount = COALESCE(?, net_amount), '
+        'header_discount_amount = COALESCE(?, header_discount_amount), '
+        'header_surcharge_amount = COALESCE(?, header_surcharge_amount) '
+        'WHERE id = ?', [net, discount, surcharge, line_id])
+
+
+def add_currency(conn, currency_id, code, decimal_places):
+    """新增币种（精度唯一真源 currencies.decimal_places，0~8 位）。"""
+    conn.execute(
+        'INSERT INTO currencies (id, code, decimal_places) VALUES (?, ?, ?)',
+        [currency_id, code, decimal_places])
 
 
 def set_order_line_billed(conn, line_id, qty, amount=0):

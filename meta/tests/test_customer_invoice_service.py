@@ -877,8 +877,9 @@ def test_credit_amount_epsilon_boundary():
 
     credit = _credit(service, original['id'],
                      lines=[{'invoice_line_id': line_id, 'amount': '400.0001'}])
+    # 净额按币种精度落库（CNY = 2 位）；容差判定仍以请求金额为界
     assert Decimal(str(get_lines(conn, credit['id'])[0]['net_amount'])) \
-        == Decimal('-400.0001')
+        == Decimal('-400.00')
 
 
 def test_plan_percent_tail_tolerance_boundary():

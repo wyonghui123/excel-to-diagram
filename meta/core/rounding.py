@@ -13,7 +13,8 @@
   避免每处各写一份 if/elif 导致口径漂移。
 
 【精度 vs 方向】
-  - 精度（保留几位小数）：唯一真源 = `currency.decimal_places`，**不在本模块**。
+  - 精度（保留几位小数）：唯一真源 = `currency.decimal_places`，查询在服务层，
+    本模块 `normalize_decimals` 只做规整；金额舍入统一走 `round_amount(value, decimals)`。
   - 方向（怎么舍）：唯一真源 = 平台字典 `rounding_mode`（4 值），本模块是它的
     代码侧映射。
 
@@ -29,6 +30,11 @@ from decimal import (
     ROUND_FLOOR,
     ROUND_HALF_UP,
 )
+
+#: 金额默认小位数（币种未配置 / 查询失败时的回落值）
+DEFAULT_AMOUNT_DECIMALS = 2
+#: 金额小位数上限（防御异常配置；与 currencies.decimal_places 的合理域一致）
+MAX_AMOUNT_DECIMALS = 8
 
 #: 舍入方式取值域（与平台字典 rounding_mode 一致）
 ROUNDING_MODES = frozenset({'none', 'round', 'ceil', 'floor'})
@@ -90,3 +96,36 @@ def round_by_mode(value, decimals: int, mode) -> Decimal:
             dec = Decimal('0')
     q = Decimal(1).scaleb(-int(decimals))
     return dec.quantize(q, rounding=resolve_rounding_mode(mode))
+
+
+def normalize_decimals(value, default=DEFAULT_AMOUNT_DECIMALS) -> int:
+    """把 `currencies.decimal_places` 的原始值规整为 0~8 的整数。
+
+    非法值（None / '' / 非数字 / 越界）回落 `default`，不抛错 —— 与
+    `resolve_rounding_mode` 的容错口径一致（调用方负责记 WARNING）。
+    """
+    if value in (None, ''):
+        return int(default)
+    try:
+        decimals = int(Decimal(str(value)))
+    except (InvalidOperation, TypeError, ValueError):
+        return int(default)
+    if decimals < 0:
+        return 0
+    if decimals > MAX_AMOUNT_DECIMALS:
+        return MAX_AMOUNT_DECIMALS
+    return decimals
+
+
+def round_amount(value, decimals=DEFAULT_AMOUNT_DECIMALS,
+                 mode='round') -> Decimal:
+    """金额舍入统一入口。
+
+    精度（位数）唯一真源 = `currencies.decimal_places`（由调用方查库后传入，
+    本函数不访问数据库）；方向唯一真源 = 平台字典 `rounding_mode`。
+
+    与 `round_by_mode` 的差别只有两点：
+      1. `decimals` 走 `normalize_decimals` 规整（防脏配置）；
+      2. 数值解析失败时按 0 处理（与金额服务的既有容错口径一致）。
+    """
+    return round_by_mode(value, normalize_decimals(decimals), mode)

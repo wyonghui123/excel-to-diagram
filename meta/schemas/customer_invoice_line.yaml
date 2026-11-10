@@ -374,7 +374,7 @@ fields:
     constraints:
       - type: numeric_range
         decimal_places: 4
-    description: 不含税金额（= ROUND(qty × unit_price)）
+    description: 不含税金额。净额基数口径按 billing_pricing_mode 取来源行净额（含抬头折扣/附加费分摊）或 qty × unit_price 重建，再按单据币种 decimal_places 舍入
     semantics:
       meaning: 行净额
     ui:
@@ -517,13 +517,17 @@ fields:
     required: true
     max_length: 16
     default: order
-    description: 价格来源（order 取订单行 / manual 手工录入）
+    description: 价格来源（order 取订单行 / pricing 取价目表定价结果 / manual 手工录入）
     enum_values:
       - value: order
         label: 订单价格
         color: primary
         category: active
         is_initial: true
+      - value: pricing
+        label: 价目表价格
+        color: success
+        category: active
       - value: manual
         label: 手工价格
         color: warning
@@ -587,6 +591,130 @@ fields:
     ui:
       widget: number
       editable: false
+
+  - id: header_discount_amount
+    name: 抬头折扣分摊
+    type: number
+    db_column: header_discount_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 订单抬头折扣分摊到本行的金额（正数）。净额 = qty × unit_price - 本值 + header_surcharge_amount
+    semantics:
+      meaning: 抬头折扣分摊额
+      data_category: amount
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_surcharge_amount
+    name: 抬头附加费分摊
+    type: number
+    db_column: header_surcharge_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 订单抬头附加费分摊到本行的金额（正数）
+    semantics:
+      meaning: 抬头附加费分摊额
+      data_category: amount
+    ui:
+      widget: number
+      editable: false
+
+  - id: calc_result_id
+    name: 定价结果
+    type: integer
+    db_column: calc_result_id
+    nullable: true
+    description: 价目表定价结果快照（calc_result，仅 price_source=pricing 时有值）
+    semantics:
+      meaning: 定价结果溯源
+      display:
+        type: association
+        target_type: calc_result
+        display_field: code
+    ui:
+      widget: number
+      editable: false
+
+  - id: source_rate_record_id
+    name: 来源价格记录
+    type: integer
+    db_column: source_rate_record_id
+    nullable: true
+    description: 命中的价目表条件行（rate_record）快照
+    semantics:
+      meaning: 价格记录溯源
+      display:
+        type: association
+        target_type: rate_record
+        display_field: code
+    ui:
+      widget: number
+      editable: false
+
+  - id: price_trace
+    name: 定价轨迹
+    type: text
+    db_column: price_trace
+    nullable: true
+    description: 定价解析轨迹 JSON（定价过程 / 命中条件 / 基准价 / 取值），只写不改
+    semantics:
+      meaning: 定价轨迹
+      data_category: text
+    ui:
+      widget: textarea
+      editable: false
+
+  - id: price_override_reason_code
+    name: 改价原因码
+    type: string
+    db_column: price_override_reason_code
+    nullable: true
+    max_length: 64
+    description: 价格覆盖的结构化原因码（替代自由文本 price_change_reason）
+    enum_values:
+      - value: promotion
+        label: 促销
+        color: success
+        category: active
+      - value: contract
+        label: 合同价
+        color: primary
+        category: active
+      - value: compensation
+        label: 补偿
+        color: warning
+        category: active
+      - value: freight_adjust
+        label: 运费调整
+        color: info
+        category: active
+      - value: other
+        label: 其他
+        color: default
+        category: active
+    value_help:
+      source:
+        type: enum
+        enum_type_id: price_override_reason
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 改价原因码
+      data_category: code
+    ui:
+      widget: select
 
   - id: original_invoice_line_id
     name: 原发票行

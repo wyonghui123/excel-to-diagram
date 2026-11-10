@@ -497,7 +497,7 @@ fields:
     constraints:
       - type: numeric_range
         decimal_places: 4
-    description: 不含税金额（服务层汇总，前端只读）
+    description: 不含税金额（服务层汇总，前端只读；= Σ 行净额 - 行舍入差合计）
     semantics:
       meaning: 发票净额
     ui:
@@ -532,6 +532,126 @@ fields:
     description: 价税合计（服务层汇总，前端只读）
     semantics:
       meaning: 发票价税合计
+    ui:
+      widget: number
+      editable: false
+
+  - id: billing_pricing_mode
+    name: 开票定价模式
+    type: string
+    db_column: billing_pricing_mode
+    required: true
+    max_length: 48
+    default: copy_frozen_redetermine_tax
+    description: 定价模式（生成时按类型/组织解析并快照；存量单据为 legacy，不重算）
+    enum_values:
+      - value: copy_frozen
+        label: 复制冻结价
+        color: primary
+        category: active
+      - value: copy_scale_update
+        label: 复制并按阶梯更新
+        color: info
+        category: active
+      - value: copy_reprice_all
+        label: 全部重新取价
+        color: warning
+        category: active
+      - value: copy_manual_reprice_rest
+        label: 手工价冻结其余重算
+        color: info
+        category: active
+      - value: copy_frozen_redetermine_tax
+        label: 冻结价 + 重算税
+        color: success
+        category: active
+        is_initial: true
+      - value: legacy
+        label: 历史口径
+        color: default
+        category: active
+    value_help:
+      source:
+        type: enum
+        enum_type_id: billing_pricing_mode
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 开票定价模式
+      data_category: code
+    ui:
+      widget: select
+      editable: false
+
+  - id: pricing_date
+    name: 定价日期
+    type: date
+    db_column: pricing_date
+    nullable: true
+    description: 定价基准日期（生成时快照；重新取价时以本日期为准）
+    semantics:
+      meaning: 定价基准日期
+      filterable: true
+      filter_type: date
+      filter_label: 定价日期
+      filter_scope: local
+    ui:
+      widget: date
+      editable: false
+
+  - id: rounding_diff
+    name: 舍入差
+    type: number
+    db_column: rounding_diff
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 金额按币种精度舍入产生的差额累计（净额恒等式校验用）
+    semantics:
+      meaning: 舍入差额
+      data_category: amount
+      derived: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_discount_amount
+    name: 抬头折扣
+    type: number
+    db_column: header_discount_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 订单抬头折扣合计（发票快照，用于分摊校验）
+    semantics:
+      meaning: 抬头折扣合计
+      data_category: amount
+    ui:
+      widget: number
+      editable: false
+
+  - id: header_surcharge_amount
+    name: 抬头附加费
+    type: number
+    db_column: header_surcharge_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 订单抬头附加费合计（发票快照，用于分摊校验）
+    semantics:
+      meaning: 抬头附加费合计
+      data_category: amount
     ui:
       widget: number
       editable: false
